@@ -6,7 +6,7 @@ Forever STUwave began as an addon developed alongside other projects. This repos
 
 The standalone import is based on source commit `415f11d`. Its 60 root Lua modules were checked against that source with debug bytecode comparison. The import includes the `.toc`, `Bindings.xml`, runtime assets, generators, mockup sources and required references, tools, all 36 Lua harnesses, Python tests, fixtures and support modules, and independent `pyproject.toml` / `uv.lock` setup.
 
-The original export manifest was removed because this repository no longer has a generated runtime surface. `tools/export_addon.py` remains historical tooling; do not use it to refresh the canonical source. The prior repository's addon copy is being retired separately; unrelated projects are outside this migration.
+The original export manifest was removed because this repository no longer has a generated runtime surface. `tools/export_addon.py` remains historical tooling; do not use it to refresh the canonical source. The prior repository's addon copy has been retired in local commit `8c03ef5`, with its history and original files preserved in a verified local archive; unrelated projects remain untouched.
 
 Excluded historical captures and private notes remain in the original Git history or local archive. They are not public source or current release evidence. The README's existing October 3, 2026 screenshots and designed masthead remain unchanged.
 
