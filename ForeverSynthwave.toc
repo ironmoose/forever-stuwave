@@ -1,0 +1,68 @@
+## Interface: 16001
+## Title: Forever STUwave
+## Notes: Alpha neon UI for the Forever client, with synthwave frames, bars, chat, and HUD styling.
+## Version: 0.1.0
+## Author: parker
+## SavedVariables: ForeverSynthwaveDB, ForeverSynthwaveErrorLog
+
+
+
+ErrorLog.lua
+
+
+ForeverSynthwave.lua
+Theme.lua
+Layout.lua
+FrameHelpers.lua
+ChevronCastBar.lua
+PanelSkins.lua
+Tracker.lua
+ChatCore.lua
+ChatTabs.lua
+ChatEditBox.lua
+ChatTermBar.lua
+ChatWindowState.lua
+ChatFrameSkin.lua
+ChatSlashCommands.lua
+ChatFormat.lua
+UnitFrames.lua
+TargetAuras.lua
+PartyFrames.lua
+CastBars.lua
+Buffs.lua
+Professions.lua
+ActionBars.lua
+Console.lua
+StanceBar.lua
+PetFrame.lua
+PetDock.lua
+PetActionBar.lua
+PetCastBar.lua
+Minimap.lua
+Panels.lua
+Tooltip.lua
+Popups.lua
+Menus.lua
+Bags.lua
+Loot.lua
+DataBar.lua
+XPBar.lua
+Deck.lua
+MicroBars.lua
+BagBar.lua
+HudText.lua
+IssueReporter.lua
+AuctionHouse.lua
+Diagnostics.lua
+HudSpells.lua
+HudProfiles.lua
+HudLogic.lua
+Gunsight.lua
+GunsightDots.lua
+GunsightFrame.lua
+GunsightBoxes.lua
+GunsightTape.lua
+ConsoleKeys.lua
+CombatHud.lua
+FSProbe.lua
+BugReport.lua

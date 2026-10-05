@@ -1,0 +1,7 @@
+* text=auto eol=lf
+*.lua -text
+*.toc -text
+fonts/*.txt -text
+*.tga binary
+*.ttf binary
+*.png binary
