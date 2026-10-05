@@ -376,7 +376,7 @@ def build_slice_erase(c=6):
 
 
 def main():
-    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media"))
+    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures"))
 
     def out(name, pixels, size):
         _write(os.path.join(here, f"{name}.tga"), pixels, size)

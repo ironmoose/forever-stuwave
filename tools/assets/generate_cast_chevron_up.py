@@ -240,7 +240,7 @@ def write_tga(path, grid):
 
 
 def main():
-    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media"))
+    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures"))
     write_tga(os.path.join(here, "cast_chevron_up_fill.tga"), build_fill())
     write_tga(os.path.join(here, "cast_chevron_up_outline.tga"), build_outline())
     write_tga(os.path.join(here, "cast_chevron_up_glow.tga"), build_glow())

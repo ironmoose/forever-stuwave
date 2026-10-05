@@ -49,9 +49,9 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent / "addon" / "ForeverSynthwave"
-BOXES = Path(os.environ.get("GUNSIGHTBOXES_LUA") or ADDON / "GunsightBoxes.lua")
-TOC = ADDON / "ForeverSynthwave.toc"
+ADDON = HERE.parent / "forever-stuwave"
+BOXES = Path(os.environ.get("GUNSIGHTBOXES_LUA") or ADDON / "Modules/CombatHud/GunsightBoxes.lua")
+TOC = ADDON / "forever-stuwave.toc"
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
 
 
@@ -95,7 +95,7 @@ def mockup_boxes() -> dict:
     tb_low, tb_hp = _m(r"var TB_LOW=(\.\d+),TB_HP='(#[0-9a-fA-F]{6})';", src, "TB_LOW and TB_HP").groups()
     tb_mana, tb_rage, tb_focus = _m(r"var TB_PC=\{mana:'(#[0-9a-fA-F]{6})',rage:'(#[0-9a-fA-F]{6})',energy:K\.gold,focus:'(#[0-9a-fA-F]{6})'\};",
                                     src, "TB_PC").groups()
-    party = (ADDON / "PartyFrames.lua").read_text(encoding="utf-8")
+    party = (ADDON / "Modules/UnitFrames/PartyFrames.lua").read_text(encoding="utf-8")
     low_eps = _m(r"LOW_HP_EPSILON\s*=\s*([\d.]+)", party, "PartyFrames LOW_HP_EPSILON").group(1)
     l2_x, l2_y = _m(r"text\(l2,b\.x\+(\d+),b\.y\+(\d+),f2,o\.c2\|\|col,a,'left'\)", src, "line 2 seat").groups()
     head_size = _m(r"text\(s,x,y,(\d+),col,a,align\|\|'left'\);", src, "header size").group(1)
@@ -629,14 +629,14 @@ function T.a_failed_box_build_falls_back_to_the_text_sinks_and_the_tape_keeps_wo
     local W = world({ beforeLoad = function()
         local build = FS.Theme.AddCut2Texture
         FS.Theme.AddCut2Texture = function(frame, ...)
-            if frame._parent and frame._parent._name == "ForeverSynthwaveGunsightBox_you" then error("box build failed") end
+            if frame._parent and frame._parent._name == "ForeverSTUwaveGunsightBox_you" then error("box build failed") end
             return build(frame, ...)
         end
     end })
     W.clean()
     eq(W.you.box, nil, "no box on the left"); ok(W.tgt.box, "the right box is independent")
     ok(degraded("gunsighttape_box_you"), "logged once")
-    local broken = find(function(o) return o._name == "ForeverSynthwaveGunsightBox_you" end)
+    local broken = find(function(o) return o._name == "ForeverSTUwaveGunsightBox_you" end)
     ok(broken, "the half built frame exists"); eq(broken._shown, false, "and is hidden")
     W.cast("player", "Shadow Bolt", "C1", 100, 2.5)
     W.fire(W.you.S, "UNIT_SPELLCAST_START")
@@ -676,7 +676,7 @@ local function targetListeners()
     local n = 0
     for _, o in ipairs(__all) do
         if o._events and o._events.PLAYER_TARGET_CHANGED and o._scripts and o._scripts.OnEvent
-            and o._parent and o._parent._name == "ForeverSynthwaveGunsightBox_tgt" then n = n + 1 end
+            and o._parent and o._parent._name == "ForeverSTUwaveGunsightBox_tgt" then n = n + 1 end
     end
     return n
 end
@@ -688,7 +688,7 @@ function T.a_build_that_fails_late_leaves_no_live_name_listener()
         if debug.getinfo(fn, "S").short_src:find("GunsightBoxes", 1, true) then error("late build step failed") end
         return on(fn)
     end
-    __fireEvent("ADDON_LOADED", "ForeverSynthwave")
+    __fireEvent("ADDON_LOADED", "forever-stuwave")
     __fireEvent("PLAYER_LOGIN")
     W.you, W.tgt = FS.GunsightTape.you, FS.GunsightTape.tgt
     W.clean()
@@ -705,14 +705,14 @@ function T.a_failing_listener_step_unregisters_what_it_registered()
         local Region = getmetatable(UIParent)
         local setScript = Region.SetScript
         function Region:SetScript(k, fn)
-            if k == "OnEvent" and self._parent and self._parent._name == "ForeverSynthwaveGunsightBox_tgt" then error("SetScript failed") end
+            if k == "OnEvent" and self._parent and self._parent._name == "ForeverSTUwaveGunsightBox_tgt" then error("SetScript failed") end
             return setScript(self, k, fn)
         end
     end })
     W.clean()
     eq(W.tgt.box, nil, "the box did not build")
     for _, o in ipairs(__all) do
-        if o._parent and o._parent._name == "ForeverSynthwaveGunsightBox_tgt" and o._events then
+        if o._parent and o._parent._name == "ForeverSTUwaveGunsightBox_tgt" and o._events then
             eq(next(o._events), nil, "nothing stays registered on the half built listener")
             eq(next(o._unitEvents or {}), nil, "no unit event either")
         end
@@ -741,7 +741,7 @@ function T.a_tape_that_fails_after_its_box_built_retires_the_box()
         if armed then armed = false; error("kick label failed") end
         return createFont(self, ...)
     end
-    __fireEvent("ADDON_LOADED", "ForeverSynthwave")
+    __fireEvent("ADDON_LOADED", "forever-stuwave")
     __fireEvent("PLAYER_LOGIN")
     Region.CreateFontString = createFont
     W.clean()
@@ -778,7 +778,7 @@ function T.a_tape_that_fails_after_its_box_built_retires_the_box()
     eq(targetListeners(), 0, "no PLAYER_TARGET_CHANGED listener survives")
     for _, o in ipairs(__all) do
         local pn = o._parent and o._parent._name
-        if o._events and (pn == "ForeverSynthwaveGunsightBox_tgt" or pn == "ForeverSynthwaveGunsightBox_you") then
+        if o._events and (pn == "ForeverSTUwaveGunsightBox_tgt" or pn == "ForeverSTUwaveGunsightBox_you") then
             eq(next(o._events), nil, "no event stays registered (" .. pn .. ")")
             eq(next(o._unitEvents or {}), nil, "no unit event either")
         end
@@ -835,7 +835,7 @@ function T.a_failed_tape_build_survives_the_boxes_module_vanishing()
         if armed then armed = false; FS.GunsightBoxes = nil; error("kick label failed") end
         return createFont(self, ...)
     end
-    __fireEvent("ADDON_LOADED", "ForeverSynthwave")
+    __fireEvent("ADDON_LOADED", "forever-stuwave")
     __fireEvent("PLAYER_LOGIN")
     Region.CreateFontString = createFont
     FS.GunsightBoxes = gb
@@ -1131,7 +1131,7 @@ function T.the_bar_tables_carry_the_boxs_hook_and_a_failed_box_leaves_none()
     local W2 = world({ beforeLoad = function()
         local build = FS.Theme.AddCut2Texture
         FS.Theme.AddCut2Texture = function(frame, ...)
-            if frame._parent and frame._parent._name == "ForeverSynthwaveGunsightBox_you" then error("box build failed") end
+            if frame._parent and frame._parent._name == "ForeverSTUwaveGunsightBox_you" then error("box build failed") end
             return build(frame, ...)
         end
     end })
@@ -1230,12 +1230,12 @@ function T.a_late_build_failure_registers_no_rescale_callback()
         local Region = getmetatable(UIParent)
         local setScript = Region.SetScript
         function Region:SetScript(k, fn)
-            if k == "OnEvent" and self._parent and self._parent._name == "ForeverSynthwaveGunsightBox_tgt" then error("SetScript failed") end
+            if k == "OnEvent" and self._parent and self._parent._name == "ForeverSTUwaveGunsightBox_tgt" then error("SetScript failed") end
             return setScript(self, k, fn)
         end
     end })
     local reg = countRescaleRegistrations()
-    __fireEvent("ADDON_LOADED", "ForeverSynthwave")
+    __fireEvent("ADDON_LOADED", "forever-stuwave")
     __fireEvent("PLAYER_LOGIN")
     W.you, W.tgt = FS.GunsightTape.you, FS.GunsightTape.tgt
     W.clean()
@@ -1569,7 +1569,7 @@ function T.a_failing_bar_listener_unregisters_and_a_retired_box_ignores_bar_even
         local Region = getmetatable(UIParent)
         local setScript, n = Region.SetScript, 0
         function Region:SetScript(k, fn)
-            if k == "OnEvent" and self._parent and self._parent._name == "ForeverSynthwaveGunsightBox_tgt" then
+            if k == "OnEvent" and self._parent and self._parent._name == "ForeverSTUwaveGunsightBox_tgt" then
                 n = n + 1
                 if n == 2 then error("bar listener SetScript failed") end
             end
@@ -1578,7 +1578,7 @@ function T.a_failing_bar_listener_unregisters_and_a_retired_box_ignores_bar_even
     end })
     eq(W.tgt.box, nil, "the box did not build")
     for _, o in ipairs(__all) do
-        if o._parent and o._parent._name == "ForeverSynthwaveGunsightBox_tgt" and o._events then
+        if o._parent and o._parent._name == "ForeverSTUwaveGunsightBox_tgt" and o._events then
             eq(next(o._events), nil, "nothing stays registered on either listener")
             eq(next(o._unitEvents or {}), nil, "no unit event either")
         end
@@ -1610,10 +1610,10 @@ __checks = T
 def static_checks() -> list[tuple[str, str | None]]:
     out: list[tuple[str, str | None]] = []
     raw = TOC.read_bytes()
-    out.append(("toc_stays_crlf", None if raw.count(b"\r\n") == raw.count(b"\n") else "ForeverSynthwave.toc must stay CRLF"))
+    out.append(("toc_stays_crlf", None if raw.count(b"\r\n") == raw.count(b"\n") else "forever-stuwave.toc must stay CRLF"))
     toc = [ln.strip() for ln in TOC.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")]
     try:
-        g, b, t, c = (toc.index(n) for n in ("Gunsight.lua", "GunsightBoxes.lua", "GunsightTape.lua", "CombatHud.lua"))
+        g, b, t, c = (toc.index(n) for n in ("Modules/CombatHud/Gunsight.lua", "Modules/CombatHud/GunsightBoxes.lua", "Modules/CombatHud/GunsightTape.lua", "Modules/CombatHud/CombatHud.lua"))
         out.append(("toc_order", None if g < b < t < c else
                     f"GunsightBoxes.lua must load after Gunsight.lua and before GunsightTape.lua and CombatHud.lua (positions {g}, {b}, {t}, {c})"))
     except ValueError as e:
@@ -1633,7 +1633,7 @@ def run_case(name: str, mu: dict, mb: dict) -> str | None:
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.execute(CHEV.MOCK)
     lua.execute(CB.MOCK)
-    theme_src = (ADDON / "Theme.lua").read_text(encoding="utf-8")
+    theme_src = (ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
     consts = [CHEV._extract_theme_constant(theme_src, n) for n in
               TH.THEME_CONSTANTS + ("COLOR_CARET_HEALTH", "COLOR_HEAL", "COLOR_GOLD", "FLAT_TEXTURE")]
     lua.eval("__load_theme_constants")(lua.table_from(consts))
@@ -1641,7 +1641,7 @@ def run_case(name: str, mu: dict, mb: dict) -> str | None:
     lua.execute(TH.MOCK)
     lua.execute(TH.GS.theme_has_target_lua())   # the real shared rule (FS.HasTarget), Theme being stubbed here
     lua.execute(EXTRA_MOCK)
-    lua.eval("__loadChevron")("ChevronCastBar.lua", (ADDON / "ChevronCastBar.lua").read_text(encoding="utf-8"))
+    lua.eval("__loadChevron")("Core/ChevronCastBar.lua", (ADDON / "Core/ChevronCastBar.lua").read_text(encoding="utf-8"))
     g = lua.globals()
     g.__castSrc = TH.CASTBARS.read_text(encoding="utf-8")
     g.__layoutSrc = TH.LAYOUT.read_text(encoding="utf-8")
@@ -1662,10 +1662,10 @@ def checks_source() -> str:
     """The tape harness's helpers and world() (everything before its first check), with the boxes loaded
     ahead of the tape, then this file's checks."""
     prefix = TH.CHECKS.split("-- ---- constants", 1)[0]
-    needle = '__load("GunsightTape.lua", __tapeSrc)'
+    needle = '__load("Modules/CombatHud/GunsightTape.lua", __tapeSrc)'
     if needle not in prefix:
         sys.exit("gunsighttape-harness.py changed shape: its world() no longer loads GunsightTape.lua the way this harness patches")
-    patched = prefix.replace(needle, '__load("GunsightBoxes.lua", __boxSrc)\n    ' + needle)
+    patched = prefix.replace(needle, '__load("Modules/CombatHud/GunsightBoxes.lua", __boxSrc)\n    ' + needle)
     return patched + CHECKS_BODY
 
 

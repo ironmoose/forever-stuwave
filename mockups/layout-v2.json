@@ -1,5 +1,5 @@
 {
-  "tool": "forever-synthwave-layout",
+  "tool": "forever-stuwave-layout",
   "resolution": "2560x1440",
   "aspect": "16:9",
   "note": "x/y = top-left in game px; wow = offset from UIParent CENTER at the element's own center.",

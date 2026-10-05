@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates the two 128x128 textures of the Seal Chamber's lens (the Paladin module in the DoT slot).
 
-Files written (in addon/ForeverSynthwave/media):
+Files written (in forever-stuwave/Media/Textures):
 
     seal_lens.tga   the static lens: an outer ring, 36 inward ticks and an inner ring
     seal_arcs.tga   the three bright arcs that turn round the outer ring, at their start angles
@@ -141,7 +141,7 @@ OUTPUTS = {
 
 
 if __name__ == "__main__":
-    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media"))
+    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures"))
     for name, alpha_at in OUTPUTS.items():
         path = os.path.join(here, name + ".tga")
         write_tga(path, build(alpha_at))

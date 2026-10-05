@@ -33,8 +33,8 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
-LAYOUT_FILE = Path(os.environ.get("LAYOUT_LUA", ADDON / "Layout.lua"))   # a mutant copy for mutation checks
+ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
+LAYOUT_FILE = Path(os.environ.get("LAYOUT_LUA", ADDON / "Core/Layout.lua"))   # a mutant copy for mutation checks
 
 MOCK = r"""
 __combat = false
@@ -88,7 +88,7 @@ function geterrorhandler() return function() end end
 LOAD = r"""
 function(src, fs)
     local chunk = assert(load(src, "@Layout.lua"))
-    chunk("ForeverSynthwave", fs)
+    chunk("forever-stuwave", fs)
 end
 """
 

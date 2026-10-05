@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drive ForeverSynthwave development against the user's own WoW client.
+"""Drive ForeverSTUwave development against the user's own WoW client.
 
 Windows retains the legacy two-reload SavedVariables loop; Linux discovers the
 Gamescope DISPLAY from WowB.exe, sends at most one slash command per nested run,
@@ -34,7 +34,7 @@ if sys.platform == "win32":
     WOW_ROOT = Path(r"C:\Program Files (x86)\World of Warcraft")
 else:
     # Native-Linux-under-Wine install (Battle.net via ~/Games), distinct from
-    # the /mnt/windows dual-boot NTFS path deploy-forever-synthwave.sh
+    # the /mnt/windows dual-boot NTFS path deploy-forever-stuwave.sh
     # defaults to -- see deploy() below.
     WOW_ROOT = (
         Path.home() / "Games" / "battlenet" / "drive_c"
@@ -45,7 +45,7 @@ WTF_ACCOUNTS = WOW_ROOT / FLAVOR / "WTF" / "Account"
 
 
 def find_saved_vars() -> Path | None:
-    """Locate the live ForeverSynthwave.lua, newest write wins.
+    """Locate the live forever-stuwave.lua, newest write wins.
 
     This was hardcoded to the PER-CHARACTER path
     (Account/<id>/<realm>/<char>/SavedVariables/). The addon then moved to an
@@ -64,8 +64,8 @@ def find_saved_vars() -> Path | None:
     """
     if not WTF_ACCOUNTS.is_dir():
         return None
-    found = list(WTF_ACCOUNTS.glob("*/SavedVariables/ForeverSynthwave.lua"))
-    found += list(WTF_ACCOUNTS.glob("*/*/*/SavedVariables/ForeverSynthwave.lua"))
+    found = list(WTF_ACCOUNTS.glob("*/SavedVariables/forever-stuwave.lua"))
+    found += list(WTF_ACCOUNTS.glob("*/*/*/SavedVariables/forever-stuwave.lua"))
     if not found:
         return None
     return max(found, key=lambda p: p.stat().st_mtime)
@@ -86,8 +86,8 @@ def saved_vars() -> Path | None:
     return SAVED_VARS
 
 
-DEPLOY_SCRIPT = Path(__file__).resolve().parent / "deploy-forever-synthwave.ps1"
-DEPLOY_SCRIPT_SH = Path(__file__).resolve().parent / "deploy-forever-synthwave.sh"
+DEPLOY_SCRIPT = Path(__file__).resolve().parent / "deploy-forever-stuwave.ps1"
+DEPLOY_SCRIPT_SH = Path(__file__).resolve().parent / "deploy-forever-stuwave.sh"
 
 if sys.platform == "win32":
     user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -841,7 +841,7 @@ def deploy() -> None:
             sys.exit(f"deploy failed ({result.returncode})")
         return
 
-    # deploy-forever-synthwave.sh's own baked-in WOW_ROOT default targets a
+    # deploy-forever-stuwave.sh's own baked-in WOW_ROOT default targets a
     # DIFFERENT workflow (the /mnt/windows NTFS-mounted native-Windows beta
     # client, for a dual-boot Wine-freeze workaround). This is the
     # native-Linux-under-Wine install, so WOW_ROOT/WOW_FLAVOR are always
@@ -888,13 +888,13 @@ def read_log() -> None:
     # drop from that line (it has been), and the symptom is indistinguishable
     # from a clean run -- "no errors" and "errors not being saved" both print
     # nothing. Say which one this is.
-    if "ForeverSynthwaveErrorLog" not in text:
-        print("\n  WARNING: ForeverSynthwaveErrorLog is absent from the file.")
-        print("  Check '## SavedVariables' in ForeverSynthwave.toc -- an")
+    if "ForeverSTUwaveErrorLog" not in text:
+        print("\n  WARNING: ForeverSTUwaveErrorLog is absent from the file.")
+        print("  Check '## SavedVariables' in forever-stuwave.toc -- an")
         print("  undeclared global is never written, so this reads as 'no")
         print("  errors' forever.")
 
-    probe = re.search(r"ForeverSynthwaveProbe = \{(.*?)\n\}", text, re.S)
+    probe = re.search(r"ForeverSTUwaveProbe = \{(.*?)\n\}", text, re.S)
     if probe:
         print("\n=== PROBE ===")
         for line in probe.group(1).splitlines():
@@ -902,14 +902,14 @@ def read_log() -> None:
             if line:
                 print("  " + line)
 
-    # ForeverSynthwaveDB carries whatever the in-addon probes last wrote
+    # ForeverSTUwaveDB carries whatever the in-addon probes last wrote
     # (/fsfont, /fschat levels). Those probes live in the addon rather than in
     # a long --run line because the chat box truncates at 255 characters, and
     # they write here rather than only printing because a chat line is legible
     # to whoever is sitting at the client and to nobody else.
-    db = re.search(r"ForeverSynthwaveDB = \{(.*?)\n\}", text, re.S)
+    db = re.search(r"ForeverSTUwaveDB = \{(.*?)\n\}", text, re.S)
     if db and db.group(1).strip():
-        print("\n=== ForeverSynthwaveDB ===")
+        print("\n=== ForeverSTUwaveDB ===")
         for line in db.group(1).splitlines():
             if line.strip():
                 print("  " + line.rstrip())

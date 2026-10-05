@@ -6,7 +6,7 @@ GLY table (one SVG fragment per glyph, 16 x 16 viewBox) and DECK_DEFS (which key
 uses which glyph). The glyph SVG is rasterised as written: the path strings below
 are copied from GLY and parsed here, so the two cannot drift by hand-tracing.
 
-Files written (in addon/ForeverSynthwave/media), and the key that wears each one:
+Files written (in forever-stuwave/Media/Textures), and the key that wears each one:
 
     glyph_hud_chev.tga      your    Your Cast       two stacked up-chevrons
     glyph_hud_play.tga      next    Next Cast       play triangle with a bar
@@ -250,7 +250,7 @@ def write_tga(path, pixels):
 
 
 if __name__ == "__main__":
-    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media"))
+    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures"))
     for name, spec in GLYPHS.items():
         path = os.path.join(here, f"glyph_hud_{name}.tga")
         write_tga(path, build(spec))

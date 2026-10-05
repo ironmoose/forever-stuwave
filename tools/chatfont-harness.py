@@ -6,7 +6,7 @@ so each window wore Blizzard's per-window size (the stock default is
 CHAT_FRAME_DEFAULT_FONT_SIZE = 18, and an unset chat-cache size of 0 means "use 18").
 These checks pin the addon's own default:
 
-  * every skinned message frame gets ForeverSynthwaveDB.chatFontSize (14 when nil or
+  * every skinned message frame gets ForeverSTUwaveDB.chatFontSize (14 when nil or
     invalid) through Blizzard's own FCF_SetChatWindowFontSize, so the chat-cache
     (SetChatWindowSize) agrees with what is shown, keeping the frame's face and flags;
   * the saved variables do not exist when the files load, so PLAYER_LOGIN re-applies, and
@@ -36,7 +36,7 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
+ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
 
 MOCK = r"""
 __combat = false
@@ -98,7 +98,7 @@ C_Timer = { After = function(_, fn) __timers[#__timers + 1] = fn end }
 
 SlashCmdList = {}
 -- No saved variables while the files load, as on the client.
-ForeverSynthwaveDB = nil
+ForeverSTUwaveDB = nil
 
 -- Blizzard's chat-cache: GetChatWindowInfo / SetChatWindowSize, size 0 = never set.
 __cache = {}
@@ -154,7 +154,7 @@ end
 LOAD = r"""
 function(file, src, fs)
     local chunk = assert(load(src, "@" .. file))
-    chunk("ForeverSynthwave", fs)
+    chunk("forever-stuwave", fs)
 end
 """
 
@@ -170,7 +170,7 @@ Chat.DockedChatFrames = function() return {} end
 Chat.AnchorBackdrop = function() end
 -- Production's first act (ChatWindowState.lua) is a placeholder table; the client replaces it
 -- with the saved one after the files have run.
-Chat.HookPrimaryChatReseat = function() ForeverSynthwaveDB = ForeverSynthwaveDB or {} end
+Chat.HookPrimaryChatReseat = function() ForeverSTUwaveDB = ForeverSTUwaveDB or {} end
 FS = { Chat = Chat, Theme = {} }
 """
 
@@ -181,7 +181,7 @@ local function eq(a, b, msg)
 end
 local function sizeOf(f) return select(2, f:GetFont()) end
 local function login()
-    ForeverSynthwaveDB = ForeverSynthwaveDB or {}
+    ForeverSTUwaveDB = ForeverSTUwaveDB or {}
     __fire("PLAYER_LOGIN")
 end
 local function lastPrint() return __printed[#__printed] or "" end
@@ -198,7 +198,7 @@ end
 
 function T.nothing_written_at_load()
     -- the files ran at load over a placeholder table: a write now could be the wrong size
-    eq(type(ForeverSynthwaveDB), "table", "placeholder like production")
+    eq(type(ForeverSTUwaveDB), "table", "placeholder like production")
     for i = 1, 3 do eq(sizeOf(_G["ChatFrame" .. i]), 12, "ChatFrame" .. i) end
     eq(__cacheWrites, 0, "chat-cache written at load")
     eq(__fcfCalls, 0, "Blizzard's setter called at load")
@@ -209,7 +209,7 @@ end
 function T.apply_reports_whether_it_wrote()
     login()
     eq(FS.Chat.ApplyFontSize(ChatFrame1), false, "already at size")
-    ForeverSynthwaveDB.chatFontSize = 16
+    ForeverSTUwaveDB.chatFontSize = 16
     eq(FS.Chat.ApplyFontSize(ChatFrame1), true, "changed")
     eq(FS.Chat.ApplyFontSize(ChatFrame1), false, "repeat")
 end
@@ -234,7 +234,7 @@ function T.saved_size_overrides_a_menu_choice()
     FCF_SetChatWindowFontSize(nil, ChatFrame1, 16)
     __fire("UPDATE_CHAT_WINDOWS")
     eq(sizeOf(ChatFrame1), 20, "the saved size enforces on every window")
-    ForeverSynthwaveDB.chatFontSize = 14
+    ForeverSTUwaveDB.chatFontSize = 14
     FCF_SetChatWindowFontSize(nil, ChatFrame2, 16)
     __fire("UPDATE_CHAT_WINDOWS")
     eq(sizeOf(ChatFrame2), 14, "a saved 14 enforces too")
@@ -249,14 +249,14 @@ function T.face_and_flags_kept()
 end
 
 function T.saved_size_honoured_at_login()
-    ForeverSynthwaveDB = { chatFontSize = 18 }   -- the client replaces the table after the files load
+    ForeverSTUwaveDB = { chatFontSize = 18 }   -- the client replaces the table after the files load
     login()
     eq(sizeOf(ChatFrame1), 18); eq(sizeOf(ChatFrame3), 18); eq(__cache[2], 18)
 end
 
 function T.invalid_saved_size_falls_back_to_14()
     for _, bad in ipairs({ "big", 9, 25, 14.5, -3, 0, true }) do
-        ForeverSynthwaveDB = { chatFontSize = bad }
+        ForeverSTUwaveDB = { chatFontSize = bad }
         login()
         eq(sizeOf(ChatFrame1), 14, "saved " .. tostring(bad))
     end
@@ -280,12 +280,12 @@ end
 function T.slash_size_saves_and_applies()
     login()
     slash("size 20")
-    eq(ForeverSynthwaveDB.chatFontSize, 20, "saved")
+    eq(ForeverSTUwaveDB.chatFontSize, 20, "saved")
     for i = 1, 3 do eq(sizeOf(_G["ChatFrame" .. i]), 20); eq(__cache[i], 20) end
     local face, _, flags = ChatFrame1:GetFont()
     eq(face, FACE); eq(flags, FLAGS)
     slash("SIZE   12")
-    eq(ForeverSynthwaveDB.chatFontSize, 12); eq(sizeOf(ChatFrame2), 12)
+    eq(ForeverSTUwaveDB.chatFontSize, 12); eq(sizeOf(ChatFrame2), 12)
     -- and the next login keeps it
     __blizzardReset(3); __fire("UPDATE_CHAT_WINDOWS")
     eq(sizeOf(ChatFrame1), 12, "survives a Blizzard reset")
@@ -299,7 +299,7 @@ function T.slash_size_prints_current()
     __printed = {}
     slash("size")
     assert(lastPrint():find("18", 1, true), "prints saved: " .. lastPrint())
-    eq(ForeverSynthwaveDB.chatFontSize, 18, "printing does not change it")
+    eq(ForeverSTUwaveDB.chatFontSize, 18, "printing does not change it")
 end
 
 function T.slash_size_rejects_bad_input()
@@ -307,7 +307,7 @@ function T.slash_size_rejects_bad_input()
     for _, bad in ipairs({ "size 9", "size 25", "size abc", "size 14.5", "size -5", "size 0", "size 1e1" }) do
         __printed = {}
         slash(bad)
-        eq(ForeverSynthwaveDB.chatFontSize, nil, bad .. " saved something")
+        eq(ForeverSTUwaveDB.chatFontSize, nil, bad .. " saved something")
         eq(sizeOf(ChatFrame1), 14, bad .. " changed the font")
         assert(lastPrint():find("10", 1, true) and lastPrint():find("24", 1, true),
             bad .. " gave no range message: " .. lastPrint())
@@ -372,7 +372,7 @@ function T.throwing_api_is_contained()
     login()                            -- must not throw out of the event handler
     eq(sizeOf(ChatFrame1), 14, "frame still sized")
     slash("size 20")                   -- nor out of the slash handler
-    eq(ForeverSynthwaveDB.chatFontSize, 20, "still saved")
+    eq(ForeverSTUwaveDB.chatFontSize, 20, "still saved")
     for i = 1, 3 do eq(sizeOf(_G["ChatFrame" .. i]), 20, "ChatFrame" .. i) end
 end
 
@@ -399,7 +399,7 @@ function FCF_OpenTemporaryWindow() end
 function FCF_OpenNewWindow() end
 """
 
-FILES = ("ChatFrameSkin.lua", "ChatSlashCommands.lua")
+FILES = ("Modules/Chat/ChatFrameSkin.lua", "Modules/Chat/ChatSlashCommands.lua")
 
 
 # Worlds where a Blizzard API is missing from the start, as the files see it at load.
@@ -433,7 +433,7 @@ def check_late_window() -> bool:
     lua = boot(late=True)
     lua.execute(
         r"""
-        ForeverSynthwaveDB = {}
+        ForeverSTUwaveDB = {}
         __fire("PLAYER_LOGIN")
         local late = __newChat(4, 12)
         __late = late
@@ -450,7 +450,7 @@ def check_late_window() -> bool:
         assert(select(2, second:GetFont()) == 14, "tear-off window size")
 
         -- a saved size is honoured by a late window too, and re-showing it writes nothing
-        ForeverSynthwaveDB.chatFontSize = 18
+        ForeverSTUwaveDB.chatFontSize = 18
         local third = __newChat(6, 12)
         __late = third
         FCF_OpenTemporaryWindow()

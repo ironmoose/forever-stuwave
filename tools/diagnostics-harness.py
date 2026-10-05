@@ -39,11 +39,11 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
-DIAG_SRC = (ADDON / "Diagnostics.lua").read_text(encoding="utf-8")
-HUD_SPELLS_SRC = (ADDON / "HudSpells.lua").read_text(encoding="utf-8")
-HUD_PROFILES_SRC = (ADDON / "HudProfiles.lua").read_text(encoding="utf-8")
-PANELSKINS_SRC = (ADDON / "PanelSkins.lua").read_text(encoding="utf-8")
+ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
+DIAG_SRC = (ADDON / "Modules/Diagnostics/Diagnostics.lua").read_text(encoding="utf-8")
+HUD_SPELLS_SRC = (ADDON / "Modules/CombatHud/HudSpells.lua").read_text(encoding="utf-8")
+HUD_PROFILES_SRC = (ADDON / "Modules/CombatHud/HudProfiles.lua").read_text(encoding="utf-8")
+PANELSKINS_SRC = (ADDON / "Core/PanelSkins.lua").read_text(encoding="utf-8")
 
 MOCK = r"""
 realType = type
@@ -165,7 +165,7 @@ function LoadDiag()
         return hasIsSecretValue and issecretvalue(v)
     end
     local chunk = assert(loadstring(DIAG_SRC, "@Diagnostics.lua"))
-    chunk("ForeverSynthwave", FS)
+    chunk("forever-stuwave", FS)
     return FS
 end
 function On() SlashCmdList.FSMO("") end
@@ -211,7 +211,7 @@ function ClassWorld(over)
     __auraCalls = 0
     THROW = {}
     __printed = {}
-    ForeverSynthwaveDB = {}
+    ForeverSTUwaveDB = {}
     UnitClass = guard("UnitClass", function() return CW.class, CW.token, 2 end)
     UnitLevel = guard("UnitLevel", function() return CW.level end)
     InCombatLockdown = guard("InCombatLockdown", function() return CW.combat end)
@@ -283,9 +283,9 @@ end
 
 function LoadHud(FS)
     local a = assert(loadstring(HUD_SPELLS_SRC, "@HudSpells.lua"))
-    a("ForeverSynthwave", FS)
+    a("forever-stuwave", FS)
     local b = assert(loadstring(HUD_PROFILES_SRC, "@HudProfiles.lua"))
-    b("ForeverSynthwave", FS)
+    b("forever-stuwave", FS)
 end
 
 -- Runs the recon and returns FS, the data and the printed lines (colour codes removed).
@@ -357,10 +357,10 @@ case("toggle_prints_state_lines", """
     On()
     local l = Lines()
     assert(#l == 1, #l)
-    assert(l[1] == "synthwave://mouseover  on  enableMouseoverCast=1  MOUSEOVERCAST=NONE  (auto-off 120s)", l[1])
+    assert(l[1] == "stuwave://mouseover  on  enableMouseoverCast=1  MOUSEOVERCAST=NONE  (auto-off 120s)", l[1])
     On()
     l = Lines()
-    assert(l[2] == "synthwave://mouseover  off", l[2])
+    assert(l[2] == "stuwave://mouseover  off", l[2])
 """)
 
 case("event_prints_one_compact_line", """
@@ -369,7 +369,7 @@ case("event_prints_one_compact_line", """
     Hover()
     local l = Lines()
     assert(#l == 2, #l)
-    assert(l[2] == "synthwave://mouseover  exists=true name=Thrall friend=true frame=PlayerFrame", l[2])
+    assert(l[2] == "stuwave://mouseover  exists=true name=Thrall friend=true frame=PlayerFrame", l[2])
 """)
 
 case("no_event_while_off", """
@@ -386,7 +386,7 @@ case("anon_frame_and_no_unit", """
     M.exists, M.name, M.friend, M.frame = false, nil, nil, false
     On(); Hover()
     local l = Lines()
-    assert(l[2] == "synthwave://mouseover  exists=false name=nil friend=nil frame=anon", l[2])
+    assert(l[2] == "stuwave://mouseover  exists=false name=nil friend=nil frame=anon", l[2])
 """)
 
 case("no_frame_under_mouse", """
@@ -409,21 +409,21 @@ case("secret_name_prints_secret_without_compare", """
     M.name = SS
     On(); Hover()
     local l = Lines()
-    assert(l[2] == "synthwave://mouseover  exists=true name=secret friend=true frame=PlayerFrame", l[2])
+    assert(l[2] == "stuwave://mouseover  exists=true name=secret friend=true frame=PlayerFrame", l[2])
 """)
 
 case("secret_exists_and_friend_print_secret", """
     LoadDiag()
     M.exists, M.friend = SB, SB
     On(); Hover()
-    assert(Lines()[2] == "synthwave://mouseover  exists=secret name=Thrall friend=secret frame=PlayerFrame", Lines()[2])
+    assert(Lines()[2] == "stuwave://mouseover  exists=secret name=Thrall friend=secret frame=PlayerFrame", Lines()[2])
 """)
 
 case("secret_cvar_and_click_print_secret", """
     LoadDiag()
     M.cvar, M.click = SS, SS
     On()
-    assert(Lines()[1] == "synthwave://mouseover  on  enableMouseoverCast=secret  MOUSEOVERCAST=secret  (auto-off 120s)", Lines()[1])
+    assert(Lines()[1] == "stuwave://mouseover  on  enableMouseoverCast=secret  MOUSEOVERCAST=secret  (auto-off 120s)", Lines()[1])
 """)
 
 case("secret_guid_is_not_compared", """
@@ -491,7 +491,7 @@ case("auto_off_after_120s", """
     Advance(1)
     assert(not Watching(), "off at 120s")
     local l = Lines()
-    assert(l[#l] == "synthwave://mouseover  off  (120s timeout)", l[#l])
+    assert(l[#l] == "stuwave://mouseover  off  (120s timeout)", l[#l])
     local n = #l
     Hover()
     assert(#Lines() == n, "no output after auto-off")
@@ -537,8 +537,8 @@ case("everything_throwing_at_once", """
     On(); Hover(); Hover()
     local l = Lines()
     assert(#l == 2, table.concat(l, "|"))
-    assert(l[1] == "synthwave://mouseover  on  enableMouseoverCast=error  MOUSEOVERCAST=error  (auto-off 120s)", l[1])
-    assert(l[2] == "synthwave://mouseover  exists=error name=error friend=error frame=error", l[2])
+    assert(l[1] == "stuwave://mouseover  on  enableMouseoverCast=error  MOUSEOVERCAST=error  (auto-off 120s)", l[1])
+    assert(l[2] == "stuwave://mouseover  exists=error name=error friend=error frame=error", l[2])
     On()
     assert(not Watching())
 """)
@@ -550,8 +550,8 @@ case("absent_apis_do_not_error", """
     local ok, err = pcall(function() On(); Hover() end)
     assert(ok, tostring(err))
     local l = Lines()
-    assert(l[1] == "synthwave://mouseover  on  enableMouseoverCast=n/a  MOUSEOVERCAST=n/a  (auto-off 120s)", l[1])
-    assert(l[2] == "synthwave://mouseover  exists=n/a name=n/a friend=n/a frame=n/a", l[2])
+    assert(l[1] == "stuwave://mouseover  on  enableMouseoverCast=n/a  MOUSEOVERCAST=n/a  (auto-off 120s)", l[1])
+    assert(l[2] == "stuwave://mouseover  exists=n/a name=n/a friend=n/a frame=n/a", l[2])
 """)
 
 # FS.IsSecret is false when the client has no issecretvalue (Theme.lua), so every read is plain data.
@@ -561,7 +561,7 @@ case("absent_issecretvalue_reads_plain_data", """
     local ok, err = pcall(function() On(); Hover() end)
     assert(ok, tostring(err))
     local l = Lines()
-    assert(l[2] == "synthwave://mouseover  exists=true name=Thrall friend=true frame=PlayerFrame", l[2])
+    assert(l[2] == "stuwave://mouseover  exists=true name=Thrall friend=true frame=PlayerFrame", l[2])
 """)
 
 case("no_timer_available", """
@@ -569,7 +569,7 @@ case("no_timer_available", """
     C_Timer = nil
     On()
     local l = Lines()
-    assert(l[1] == "synthwave://mouseover  on  enableMouseoverCast=1  MOUSEOVERCAST=NONE  (no auto-off timer)", l[1])
+    assert(l[1] == "stuwave://mouseover  on  enableMouseoverCast=1  MOUSEOVERCAST=NONE  (no auto-off timer)", l[1])
     Hover()
     assert(#Lines() == 2)
     On()
@@ -582,7 +582,7 @@ case("secret_frame_name_prints_secret", """
     On(); Hover(); Hover()
     local l = Lines()
     assert(#l == 2, #l)
-    assert(l[2] == "synthwave://mouseover  exists=true name=Thrall friend=true frame=secret", l[2])
+    assert(l[2] == "stuwave://mouseover  exists=true name=Thrall friend=true frame=secret", l[2])
 """)
 
 
@@ -592,7 +592,7 @@ case("secret_frame_name_prints_secret", """
 
 case("class_paladin_chat_shape", """
     local _, data, l = RunClass()
-    local P = "synthwave://class  "
+    local P = "stuwave://class  "
     local want = {
         P .. "class=PALADIN level=12 spec=n/a combat=false",
         P .. "talents  GetTalentTabInfo=ok C_SpecializationInfo=unavailable GetSpecialization=unavailable  Holy=0 Protection=0 Retribution=5",
@@ -652,14 +652,14 @@ case("class_data_is_stored_stamped_and_marked_for_the_bug_report", """
     ClassWorld()
     FS.Diagnostics.RunClassRecon()
     local d = FS.Diagnostics.GetClassRecon()
-    assert(ForeverSynthwaveDB.recon.class == d, "stored where the other recon probes store")
+    assert(ForeverSTUwaveDB.recon.class == d, "stored where the other recon probes store")
     assert(d.taken == "2026-10-03 10:00:00" and d.reported == nil)
     FS.Diagnostics.MarkClassReconReported()
-    assert(d.reported == true and ForeverSynthwaveDB.recon.class.reported == true)
+    assert(d.reported == true and ForeverSTUwaveDB.recon.class.reported == true)
     ClassWorld({ level = 13, date = "2026-10-03 11:30:00" })
     FS.Diagnostics.RunClassRecon()
     local d2 = FS.Diagnostics.GetClassRecon()
-    assert(d2 ~= d and d2.level == 13 and ForeverSynthwaveDB.recon.class == d2, "a rerun replaces, never accumulates")
+    assert(d2 ~= d and d2.level == 13 and ForeverSTUwaveDB.recon.class == d2, "a rerun replaces, never accumulates")
     assert(d2.reported == nil and d2.taken == "2026-10-03 11:30:00", "a rerun is fresh and unreported")
     -- the stamp is plain: a missing or throwing date is "unavailable", not an error
     for _, how in ipairs({ "missing", "throw" }) do
@@ -669,10 +669,10 @@ case("class_data_is_stored_stamped_and_marked_for_the_bug_report", """
         assert(FS.Diagnostics.GetClassRecon().taken == "unavailable", how)
     end
     -- a run kept only in SavedVariables (a new session) can still be marked
-    ForeverSynthwaveDB = { recon = { class = { taken = "x" } } }
+    ForeverSTUwaveDB = { recon = { class = { taken = "x" } } }
     local fresh = LoadDiag()
     fresh.Diagnostics.MarkClassReconReported()
-    assert(ForeverSynthwaveDB.recon.class.reported == true)
+    assert(ForeverSTUwaveDB.recon.class.reported == true)
 """)
 
 case("class_warlock_runs_with_its_own_table_and_the_real_hud_keys", """
@@ -1376,7 +1376,7 @@ case("class_secrecy_api_falls_back_to_c_secrets_then_gives_up", """
     assert(d.spellApi.secrecy == "unavailable" and Spell(d, "Holy Light").secrecy == nil)
     assert(Has(Join(Lines()), "secrecy=unavailable"))
     for _, ln in ipairs(Lines()) do
-        if ln:find("^synthwave://class  seals") then assert(not Has(ln, " s="), "no s= field without the API: " .. ln) end
+        if ln:find("^stuwave://class  seals") then assert(not Has(ln, " s="), "no s= field without the API: " .. ln) end
     end
 """)
 
@@ -1401,7 +1401,7 @@ case("class_slash_is_routed_by_the_real_panelskins_dispatcher", """
     local called = 0
     FS.Diagnostics = { RunClassRecon = function() called = called + 1 end }
     local chunk = assert(loadstring(PANELSKINS_SRC, "@PanelSkins.lua"))
-    chunk("ForeverSynthwave", FS)
+    chunk("forever-stuwave", FS)
     assert(SLASH_FSRECON1 == "/fsrecon" and SlashCmdList.FSRECON)
     SlashCmdList.FSRECON("class")
     assert(called == 1, "plain class runs the recon")

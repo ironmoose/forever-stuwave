@@ -51,13 +51,13 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent / "addon" / "ForeverSynthwave"
+ADDON = HERE.parent / "forever-stuwave"
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
-TOC = Path(os.environ.get("TOC_FILE", ADDON / "ForeverSynthwave.toc"))
+TOC = Path(os.environ.get("TOC_FILE", ADDON / "forever-stuwave.toc"))
 BINDINGS = Path(os.environ.get("BINDINGS_XML", ADDON / "Bindings.xml"))
-SEALBAR = Path(os.environ.get("SEALBAR_LUA", ADDON / "SealBar.lua"))
-STANCEBAR = Path(os.environ.get("STANCEBAR_LUA", ADDON / "StanceBar.lua"))
-CONSOLE = Path(os.environ.get("CONSOLE_LUA", ADDON / "Console.lua"))
+SEALBAR = Path(os.environ.get("SEALBAR_LUA", ADDON / "Modules/ActionBars/SealBar.lua"))
+STANCEBAR = Path(os.environ.get("STANCEBAR_LUA", ADDON / "Modules/ActionBars/StanceBar.lua"))
+CONSOLE = Path(os.environ.get("CONSOLE_LUA", ADDON / "Modules/ActionBars/Console.lua"))
 
 
 def _load(name: str, filename: str):
@@ -323,16 +323,16 @@ def boot(scale: float = 1.0, *, klass: str = "PALADIN", known=None, combat: bool
     if not spellbook:
         lua.execute("IsPlayerSpell = nil")      # no spellbook API at all: a name that resolves is known
     load = lua.eval("__load")
-    theme_src = (ADDON / "Theme.lua").read_text(encoding="utf-8")
+    theme_src = (ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
     defs = lua.table_from({n: abh._extract_theme_function(theme_src, n) for n in abh.THEME_FUNCTIONS})
     local_defs = [abh._extract_theme_local_function(theme_src, n) for n in abh.THEME_LOCAL_FUNCTIONS]
     lua.eval("__load_theme_functions")(defs, lua.table_from(list(abh.THEME_FUNCTIONS)), lua.table_from(local_defs))
     consts = [abh._extract_theme_constant(theme_src, n) for n in abh.THEME_CONSTANTS]
     lua.eval("__load_theme_constants")(lua.table_from(consts))
-    files = [ADDON / "FrameHelpers.lua", ADDON / "ActionBars.lua"]
+    files = [ADDON / "Core/FrameHelpers.lua", ADDON / "Modules/ActionBars/ActionBars.lua"]
     if console:
         files.append(CONSOLE)
-    files += [STANCEBAR, ADDON / "PetActionBar.lua"]
+    files += [STANCEBAR, ADDON / "Modules/Pet/PetActionBar.lua"]
     for path in files:
         load(path.name, path.read_text(encoding="utf-8"))
     if extra_lua:
@@ -1245,14 +1245,14 @@ def check_bindings_xml_declares_the_seven_seal_commands_only():
     want = [f"CLICK FSSealButton{i}:LeftButton" for i in range(1, 8)]
     assert names == want, f"binding names {names} (seals only: an aura key is Blizzard's SHAPESHIFTBUTTONi)"
     headers = [b.get("header") for b in items]
-    assert headers[0] == "FOREVERSYNTHWAVE" and all(h is None for h in headers[1:]), f"headers {headers}"
+    assert headers[0] == "FOREVERSTUWAVE" and all(h is None for h in headers[1:]), f"headers {headers}"
     assert all(b.get("category") == "ADDONS" for b in items), "category is not ADDONS on every binding"
 
 
 def check_binding_globals_exist_for_every_class_for_the_seals_only():
     for klass in ("PALADIN", "WARRIOR"):
         lua = boot(klass=klass)
-        assert g(lua).BINDING_HEADER_FOREVERSYNTHWAVE, f"{klass}: no BINDING_HEADER_FOREVERSYNTHWAVE"
+        assert g(lua).BINDING_HEADER_FOREVERSTUWAVE, f"{klass}: no BINDING_HEADER_FOREVERSTUWAVE"
         for i in range(1, 8):
             text = g(lua)[f"BINDING_NAME_CLICK FSSealButton{i}:LeftButton"]
             assert text == expected_seals()[i - 1], f"{klass}: binding name for FSSealButton{i} is {text!r}"
@@ -1431,9 +1431,9 @@ def check_toc_lists_sealbar_after_stancebar_and_the_console_files():
     raw = TOC.read_bytes()
     assert b"\r\n" in raw and raw.count(b"\n") == raw.count(b"\r\n"), "the .toc lost its CRLF endings"
     lines = [ln.strip() for ln in raw.decode("utf-8").splitlines()]
-    assert lines.count("SealBar.lua") == 1, "SealBar.lua must be listed exactly once"
-    at = lines.index("SealBar.lua")
-    for dep in ("StanceBar.lua", "Console.lua", "ConsoleKeys.lua", "FrameHelpers.lua", "ActionBars.lua"):
+    assert lines.count("Modules/ActionBars/SealBar.lua") == 1, "SealBar.lua must be listed exactly once"
+    at = lines.index("Modules/ActionBars/SealBar.lua")
+    for dep in ("Modules/ActionBars/StanceBar.lua", "Modules/ActionBars/Console.lua", "Modules/ActionBars/ConsoleKeys.lua", "Core/FrameHelpers.lua", "Modules/ActionBars/ActionBars.lua"):
         assert lines.index(dep) < at, f"SealBar.lua loads before {dep}"
 
 

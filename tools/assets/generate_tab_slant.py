@@ -195,7 +195,7 @@ def _mid_light(px, py):
 
 
 if __name__ == "__main__":
-    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media"))
+    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures"))
     _write(os.path.join(here, "tab_slant.tga"), build(_solid))
     _write(os.path.join(here, "tab_slant_glow.tga"), build(_edge_light))
     _write(os.path.join(here, "tab_mid_glow.tga"), build(_mid_light))

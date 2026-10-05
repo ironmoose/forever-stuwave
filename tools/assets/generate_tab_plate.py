@@ -115,6 +115,6 @@ def build_edge():
 
 
 if __name__ == "__main__":
-    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media"))
+    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures"))
     _write(os.path.join(here, "tab_plate.tga"), build_plate())
     _write(os.path.join(here, "tab_edge.tga"), build_edge())

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generates pet_cast_triangle.tga: a single equilateral triangle, apex up,
-for the pet cast bar's zigzag reveal strip (Phase 6, addons/ForeverSynthwave/
+for the pet cast bar's zigzag reveal strip (Phase 6, addons/ForeverSTUwave/
 PetCastBar.lua).
 
 Same supersampled-coverage antialiasing technique as
@@ -137,7 +137,7 @@ def build():
 
 
 def main():
-    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media"))
+    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures"))
     path = os.path.join(here, "pet_cast_triangle.tga")
     header = struct.pack("<BBBHHBHHHHBB", 0, 0, 2, 0, 0, 0, 0, 0, CANVAS_WIDTH, HEIGHT, 32, 0x28)
     with open(path, "wb") as fh:

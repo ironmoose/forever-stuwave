@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Headless check of MicroBars.lua (the twelve micro keys) and the deck slot it seats into.
 
-Runs the real addons/ForeverSynthwave/Deck.lua and MicroBars.lua under lupa against a small STRICT
+Runs the real addons/forever-stuwave/Deck.lua and MicroBars.lua under lupa against a small STRICT
 mock WoW API (a widget method the mock does not define is a nil call, which the code under test
 turns into a degrade log, which every case asserts is empty). The mock models just enough of
 Blizzard's micro button to catch the bugs Parker saw in game: textures created by SetNormalAtlas
@@ -53,14 +53,14 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent / "addon" / "ForeverSynthwave"
-MICRO_LUA = Path(os.environ.get("MICROBARS_LUA") or ADDON / "MicroBars.lua")
-DECK_LUA = Path(os.environ.get("DECK_LUA") or ADDON / "Deck.lua")
-LAYOUT_LUA = ADDON / "Layout.lua"
-THEME_LUA = ADDON / "Theme.lua"
-DATABAR_LUA = ADDON / "DataBar.lua"
+ADDON = HERE.parent / "forever-stuwave"
+MICRO_LUA = Path(os.environ.get("MICROBARS_LUA") or ADDON / "Modules/ActionBars/MicroBars.lua")
+DECK_LUA = Path(os.environ.get("DECK_LUA") or ADDON / "Modules/ActionBars/Deck.lua")
+LAYOUT_LUA = ADDON / "Core/Layout.lua"
+THEME_LUA = ADDON / "Core/Theme.lua"
+DATABAR_LUA = ADDON / "Modules/DataBars/DataBar.lua"
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "control-deck-v1-2026-10-01.html"
-CELL_SLANT = ADDON / "media" / "cell_slant.tga"
+CELL_SLANT = ADDON / "Media" / "Textures" / "cell_slant.tga"
 EPS = 0.01
 
 
@@ -249,7 +249,7 @@ function InCombatLockdown() return IN_COMBAT end
 function GetTime() return NOW end
 
 UIParent = newObj("Frame", nil, "UIParent")
-newObj("Frame", UIParent, "ForeverSynthwaveXPBar")
+newObj("Frame", UIParent, "ForeverSTUwaveXPBar")
 GameTooltip = newObj("Frame", nil, "GameTooltip")
 
 RECON = {}
@@ -325,8 +325,8 @@ function h_setup(n, hiddenCsv, deckW)
         if STORE == "window" then forbid(frame) else forbid(BUTTONS[STORE_IDX]) end
     end
     for idx in (hiddenCsv or ""):gmatch("%d+") do BUTTONS[tonumber(idx)]:Hide() end
-    if not NODECK then assert(loadstring(DECK_SRC, "@Deck.lua"))("ForeverSynthwave", FS) end
-    assert(loadstring(MICRO_SRC, "@MicroBars.lua"))("ForeverSynthwave", FS)
+    if not NODECK then assert(loadstring(DECK_SRC, "@Deck.lua"))("forever-stuwave", FS) end
+    assert(loadstring(MICRO_SRC, "@MicroBars.lua"))("forever-stuwave", FS)
 end
 function h_fire(event)
     for _, f in ipairs(ALL) do
@@ -365,7 +365,7 @@ function h_reconNames()
     for i, e in ipairs(RECON.MicroMenu or {}) do out[i] = e.name end
     return table.concat(out, ",")
 end
-function h_slotW() return (FS.Deck and FS.Deck.microSlot or _G.ForeverSynthwaveMicroBar):GetWidth() end
+function h_slotW() return (FS.Deck and FS.Deck.microSlot or _G.ForeverSTUwaveMicroBar):GetWidth() end
 function h_chassisW() return FS.Deck.frame:GetWidth() end
 
 -- Is `o` a descendant of one of the micro buttons?
@@ -512,7 +512,7 @@ function h_setMicro(w) return FS.Deck.SetMicroWidth(w) end
 function h_hide(i) BUTTONS[i]:Hide() end
 function h_show(i) BUTTONS[i]:Show() end
 function h_standaloneFrame()
-    local f = _G.ForeverSynthwaveMicroBar
+    local f = _G.ForeverSTUwaveMicroBar
     return { exists = f ~= nil, w = f and f.w or -1, deck = FS.Deck ~= nil }
 end
 """
@@ -907,7 +907,7 @@ def check_standalone() -> None:
 
 def check_removed_art() -> None:
     """The trapezoid's textures are gone, and no addon source or .toc still points at them."""
-    media = ADDON / "media"
+    media = ADDON / "Media" / "Textures"
     gone = [f for f in ("deck_shoulder.tga", "deck_grid.tga", "deck_sun.tga", "generate_deck_shoulder.py") if (media / f).exists()]
     check("removed.shoulder_grid_sun_files_are_gone", not gone, f"{gone}")
     removed = ("deck_shoulder", "deck_grid", "deck_sun", "deck_glint")

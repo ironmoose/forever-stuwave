@@ -1,6 +1,6 @@
 # Development
 
-This standalone repository is the canonical Forever STUwave source. Runtime files live in `addon/ForeverSynthwave/`. `tools/` contains development utilities, Lua harnesses, Python tests, support modules and fixtures; `tools/assets/` contains texture generators and the font builder. `mockups/` contains browser design sources and their required reference assets. Mockups are design studies, not demonstrations of shipped behavior.
+This standalone repository is the canonical Forever STUwave source. Runtime files live in `forever-stuwave/`. `tools/` contains development utilities, Lua harnesses, Python tests, support modules and fixtures; `tools/assets/` contains texture generators and the font builder. `mockups/` contains browser design sources and their required reference assets. Mockups are design studies, not demonstrations of shipped behavior.
 
 ## Setup and checks
 
@@ -11,7 +11,7 @@ uv sync
 uv run python tools/check.py
 ```
 
-The complete check runs the Lua 5.1 parse gate, lint with HIGH findings blocking, every `tools/*-harness.py`, and pytest. Mocked checks cannot establish actual client behavior. At the standalone migration checkpoint, 60 runtime Lua files parsed, HIGH lint passed, all 36 harnesses passed, and 288 Python tests passed (one Pillow deprecation warning).
+The complete check runs the Lua 5.1 parse gate, lint with HIGH findings blocking, every `tools/*-harness.py`, and pytest. Mocked checks cannot establish actual client behavior.
 
 For focused work:
 
@@ -24,7 +24,7 @@ uv run python -m pytest -q
 
 Lint can optionally use a client globals dump through `FS_GLOBALS_DUMP`; keep the dump outside the repository. Missing optional global evidence must not be presented as a verified client API inventory.
 
-Run generators with `uv run python tools/assets/<script>.py`; textures go to `addon/ForeverSynthwave/media/`. Set `FS_ASSET_OUTPUT_DIR` to generate into a scratch directory. Read each generator's inputs and outputs before running it, and inspect generated diffs. `tools/assets/make_display_font.py` produces the renamed FS Display font; preserve its OFL notice. Browser mockups can be opened locally; their references remain design assets.
+Run generators with `uv run python tools/assets/<script>.py`; textures go to `forever-stuwave/Media/Textures/`. Set `FS_ASSET_OUTPUT_DIR` to generate into a scratch directory. Read each generator's inputs and outputs before running it, and inspect generated diffs. `tools/assets/make_display_font.py` produces the renamed FS Display font; preserve its OFL notice. Browser mockups can be opened locally; their references remain design assets.
 
 ## Changes and release artifacts
 
@@ -33,10 +33,10 @@ Work on `main`, review the diff, run appropriate checks, and commit the reviewed
 To create a runtime ZIP from **committed HEAD**:
 
 ```sh
-uv run bash tools/package-forever-synthwave.sh
+uv run bash tools/package-forever-stuwave.sh
 ```
 
-The script uses `python3` by default inside uv's environment (`PYTHON` can override it), and requires Git, zip, unzip and tar. It stages runtime files, validates the staged `.toc`, runs parse and HIGH lint gates, and produces `dist/ForeverSTUwave-<version>-<commit>-<date>.zip`. Its top folder remains `ForeverSynthwave`. Uncommitted edits, tooling, mockups and generators do not enter the ZIP. Send [TESTING.md](TESTING.md) separately.
+The script uses `python3` by default inside uv's environment (`PYTHON` can override it), and requires Git, zip, unzip and tar. It stages runtime files, validates the staged `.toc`, runs parse and HIGH lint gates, and produces `dist/ForeverSTUwave-<version>-<commit>-<date>.zip`. Its top folder is `forever-stuwave`. Uncommitted edits, tooling, mockups and generators do not enter the ZIP. Send [TESTING.md](TESTING.md) separately.
 
 ## Deploying a development build
 
@@ -45,16 +45,16 @@ Close the game before replacing files. The deploy scripts stage runtime files on
 On Linux, specify your installation root explicitly if it differs from the script's default:
 
 ```sh
-WOW_ROOT="/path/to/World of Warcraft" uv run bash tools/deploy-forever-synthwave.sh
+WOW_ROOT="/path/to/World of Warcraft" uv run bash tools/deploy-forever-stuwave.sh
 ```
 
 On Windows, after `uv sync`:
 
 ```powershell
-.\tools\deploy-forever-synthwave.ps1 -WowRoot "C:\Program Files (x86)\World of Warcraft"
+.\tools\deploy-forever-stuwave.ps1 -WowRoot "C:\Program Files (x86)\World of Warcraft"
 ```
 
-Testers using a trusted published checkout can omit Python setup: add `-SkipParseGate` to the Windows command, or `FS_SKIP_GATES=1` before the Linux command. On Windows, use `powershell -ExecutionPolicy Bypass -File .\tools\deploy-forever-synthwave.ps1 -SkipParseGate` if script execution is restricted. After `git pull --ff-only`, run the same deployment command again.
+Testers using a trusted published checkout can omit Python setup: add `-SkipParseGate` to the Windows command, or `FS_SKIP_GATES=1` before the Linux command. On Windows, use `powershell -ExecutionPolicy Bypass -File .\tools\deploy-forever-stuwave.ps1 -SkipParseGate` if script execution is restricted. After `git pull --ff-only`, run the same deployment command again.
 
 Both default to `_classic_beta_`; override the flavor only for a client you intend to test. Fully restart for added files, bindings, or textures. Deploying is a separate action from running headless checks.
 
@@ -80,9 +80,9 @@ Registration does not grant screen-sharing consent. Approve any portal prompt yo
 
 ## Runtime compatibility and client constraints
 
-Keep the installed folder and manifest `ForeverSynthwave/ForeverSynthwave.toc`, hardcoded media paths, global frame names, and account-wide `ForeverSynthwaveDB` and `ForeverSynthwaveErrorLog` unchanged. Account-wide settings avoid a known Forever beta per-character restore problem.
+Keep the installed folder and manifest `forever-stuwave/forever-stuwave.toc`, hardcoded media paths, global frame names, and account-wide `ForeverSTUwaveDB` and `ForeverSTUwaveErrorLog` unchanged. Account-wide settings avoid a known Forever beta per-character restore problem.
 
-Modules share the addon namespace through `local _, FS = ...`. `ErrorLog.lua` loads first. `ForeverSynthwave.lua` precedes `Theme.lua`, so theme reads happen at runtime. Preserve dependency order when adding `.toc` entries. `Theme.lua` owns palette, fonts, textures and chrome; `Layout.lua` owns geometry.
+Modules share the addon namespace through `local _, FS = ...`. `ErrorLog.lua` loads first. `Modules/Nameplates/Nameplates.lua` precedes `Theme.lua`, so theme reads happen at runtime. Preserve dependency order when adding `.toc` entries. `Theme.lua` owns palette, fonts, textures and chrome; `Layout.lua` owns geometry.
 
 Feature-detect APIs and use secret guards before reading or transforming values. Protected frame and binding changes must follow existing combat deferral patterns. A shared `FS.PlayerClass` override remains future work; do not assume it exists.
 

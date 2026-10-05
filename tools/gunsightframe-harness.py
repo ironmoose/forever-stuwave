@@ -52,12 +52,12 @@ gh = importlib.util.module_from_spec(_spec)
 sys.modules["gunsight_harness"] = gh
 _spec.loader.exec_module(gh)
 
-ADDON = HERE.parent / "addon" / "ForeverSynthwave"
-FRAME_LUA = Path(os.environ.get("GUNSIGHTFRAME_LUA") or ADDON / "GunsightFrame.lua")
-GUNSIGHT = ADDON / "Gunsight.lua"
-PROFILES = ADDON / "HudProfiles.lua"
-THEME = ADDON / "Theme.lua"
-TOC = ADDON / "ForeverSynthwave.toc"
+ADDON = HERE.parent / "forever-stuwave"
+FRAME_LUA = Path(os.environ.get("GUNSIGHTFRAME_LUA") or ADDON / "Modules/CombatHud/GunsightFrame.lua")
+GUNSIGHT = ADDON / "Modules/CombatHud/Gunsight.lua"
+PROFILES = ADDON / "Modules/CombatHud/HudProfiles.lua"
+THEME = ADDON / "Core/Theme.lua"
+TOC = ADDON / "forever-stuwave.toc"
 MOCKUP = gh.MOCKUP
 
 
@@ -269,7 +269,7 @@ PRELUDE = r"""
 local function boot(opts)
     opts = opts or {}
     SetScreen(opts.height or 1440)
-    ForeverSynthwaveDB = opts.db or {}
+    ForeverSTUwaveDB = opts.db or {}
     HUD_SUBS = {}
     if opts.pixel then
         PixelUtil = { GetPixelToUIUnitFactor = function() return 768 / opts.pixel end }
@@ -281,17 +281,17 @@ local function boot(opts)
     if opts.themeHook and FS.Theme then opts.themeHook(FS.Theme) end
     FS.IsSecret = function(v) return v == SECRET end
     assert(loadstring(HAS_TARGET_SRC, "@Theme.lua"))()      -- the real FS.HasTarget / FS.TargetTakesDots out of Theme.lua
-    loadAddonFile(LAYOUT_SRC, "Layout.lua")
-    loadAddonFile(GUNSIGHT_SRC, "Gunsight.lua")
-    loadAddonFile(PROFILES_SRC, "HudProfiles.lua")
+    loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
+    loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
+    loadAddonFile(PROFILES_SRC, "Modules/CombatHud/HudProfiles.lua")
     if not opts.noHud then
         FS.Hud = MakeHud(opts.profile)
         if opts.state then FS.Hud.state = opts.state(FS.Hud.profile) end
     else
         FS.Hud = nil
     end
-    loadAddonFile(FRAME_SRC, "GunsightFrame.lua")
-    fire("ADDON_LOADED", "ForeverSynthwave")
+    loadAddonFile(FRAME_SRC, "Modules/CombatHud/GunsightFrame.lua")
+    fire("ADDON_LOADED", "forever-stuwave")
     fire("PLAYER_LOGIN")
     return FS.GunsightFrame, FS.Gunsight
 end
@@ -1169,7 +1169,7 @@ for _, h in ipairs({ 480, 1080, 1440, 2160 }) do
         check(cut, "the ring texture names its cut at height " .. h .. ": " .. tostring(ring.tex))
         check(icon.plate, "the icon plate exists at height " .. h)
         check(icon.plate.slice == cut, "plate slice margin " .. tostring(icon.plate.slice) .. " must equal the ring cut " .. cut .. " at height " .. h)
-        local want = cut == 6 and "cut2_fill" or ("Interface\\AddOns\\ForeverSynthwave\\media\\slice_cut2_fill_c" .. cut .. ".tga")
+        local want = cut == 6 and "cut2_fill" or ("Interface\\AddOns\\forever-stuwave\\Media\\Textures\\slice_cut2_fill_c" .. cut .. ".tga")
         check(icon.plate.tex == want, "plate texture " .. tostring(icon.plate.tex) .. " must be " .. want .. " at height " .. h)
         seen[cut] = true
     end
@@ -1205,7 +1205,7 @@ check(OnUpdates() == 0, "an unchanged state must not start an OnUpdate")
 
 case("a_disabled_gunsight_builds_nothing")(r"""
 local GF = boot({ profile = "WARLOCK", db = { gunsight = { enabled = false } } })
-check(FramesNamed("ForeverSynthwaveGunsightFrame") == 0, "disabled: no frames may be built")
+check(FramesNamed("ForeverSTUwaveGunsightFrame") == 0, "disabled: no frames may be built")
 check(#HUD_SUBS == 0, "disabled: no FS.Hud subscription")
 """)
 
@@ -1271,7 +1271,7 @@ def static_checks() -> list[tuple[str, str | None]]:
     out.append(("toc_is_crlf", None if not bare else f"bare LF at toc lines {bare[:5]}"))
     entries = [ln.strip() for ln in raw.decode("utf-8").splitlines() if ln.strip() and not ln.startswith("#")]
     try:
-        g, f = entries.index("Gunsight.lua"), entries.index("GunsightFrame.lua")
+        g, f = entries.index("Modules/CombatHud/Gunsight.lua"), entries.index("Modules/CombatHud/GunsightFrame.lua")
         # GunsightFrame needs FS.Gunsight at load (Gunsight.lua first); FS.Hud is read at Build time,
         # after OnReady, so CombatHud.lua may sit on either side. GunsightDots may sit between.
         out.append(("toc_order", None if g < f else f"Gunsight.lua must load before GunsightFrame.lua (positions {g}, {f})"))
@@ -1285,7 +1285,7 @@ def static_checks() -> list[tuple[str, str | None]]:
             r"^function Theme\.AddCut2Texture\(", r"^function Theme\.ApplyNineSlice\("]
     missing = [p for p in need if not re.search(p, theme, re.M)]
     out.append(("theme_contract", None if not missing else f"Theme.lua no longer defines: {missing}"))
-    glow = (ADDON / "media" / "glow_edge.tga").exists()
+    glow = (ADDON / "Media" / "Textures" / "glow_edge.tga").exists()
     out.append(("glow_edge_texture_exists", None if glow else "media/glow_edge.tga is missing"))
     return out
 

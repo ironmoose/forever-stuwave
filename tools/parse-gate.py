@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lua 5.1 parse gate for the ForeverSynthwave addon -- the Windows equivalent
+"""Lua 5.1 parse gate for the ForeverSTUwave addon -- the Windows equivalent
 of Fedora's `luajit -bl` check.
 
 WoW runs Lua 5.1. A syntax error in one .lua file makes the client skip that
@@ -35,7 +35,7 @@ except ImportError:
         "  UV_LINK_MODE=copy uv pip install --python tools/.venv-lua/Scripts/python.exe lupa"
     )
 
-ADDON_DIR = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
+ADDON_DIR = Path(__file__).resolve().parent.parent / "forever-stuwave"
 
 # Lua allows 200 local variables per function, and a file is one function: at 200 the file
 # stops compiling ("too many local variables"; luac 5.4 refuses it, LuaJIT has zero headroom
@@ -64,12 +64,12 @@ def count_file_scope_locals(source: str) -> int:
 def lua_files(argv: list[str]) -> list[Path]:
     if argv:
         return [Path(a).resolve() for a in argv]
-    return sorted(ADDON_DIR.glob("*.lua"))
+    return sorted(ADDON_DIR.rglob("*.lua"))
 
 
 def toc_order(addon_dir: Path) -> list[str]:
     """File list the .toc actually loads, so a file left out is visible."""
-    toc = addon_dir / "ForeverSynthwave.toc"
+    toc = addon_dir / "forever-stuwave.toc"
     if not toc.exists():
         return []
     names = []
@@ -95,7 +95,14 @@ def display_name(path: Path, addon_dir: Path) -> str:
 
 
 def main() -> int:
-    paths = lua_files(sys.argv[1:])
+    global ADDON_DIR
+    argv = sys.argv[1:]
+    if argv[:1] == ["--addon-dir"]:
+        if len(argv) < 2:
+            sys.exit("--addon-dir requires the staged addon directory")
+        ADDON_DIR = Path(argv[1]).resolve()
+        argv = argv[2:]
+    paths = lua_files(argv)
     if not paths:
         print(f"no .lua files found under {ADDON_DIR}")
         return 1
@@ -126,19 +133,20 @@ def main() -> int:
             else:
                 print(f"ok    {display_name(path, ADDON_DIR)} ({locals_used} file-scope locals)")
 
-    # A file that parses but was never added to the .toc is a silent no-op.
-    if not sys.argv[1:]:
+    if not argv:
         listed = toc_order(ADDON_DIR)
-        listed_roots = {n for n in listed if "/" not in n}
-        on_disk = {p.name for p in paths}
-        for name in sorted(on_disk - listed_roots):
-            print(f"WARN  {name} parses but is NOT listed in ForeverSynthwave.toc")
-        # Resolve every listed entry against the addon dir, so subdirectory
-        # entries (the vendored libs) are checked for real rather than assumed
-        # missing just because the top-level glob did not pick them up.
+        listed_lua = [name for name in listed if name.endswith(".lua")]
+        on_disk = {path.relative_to(ADDON_DIR).as_posix() for path in paths}
+        for name in sorted(on_disk - set(listed_lua)):
+            print(f"FAIL  {name} is not listed in forever-stuwave.toc")
+            failures += 1
         for name in listed:
-            if not (ADDON_DIR / name).exists():
-                print(f"WARN  ForeverSynthwave.toc lists {name}, which does not exist")
+            if not (ADDON_DIR / name).is_file():
+                print(f"FAIL  forever-stuwave.toc lists missing file {name}")
+                failures += 1
+        if len(listed_lua) != len(set(listed_lua)):
+            print("FAIL  forever-stuwave.toc has duplicate Lua entries")
+            failures += 1
 
     print(f"\n{len(paths) - failures}/{len(paths)} files parse as Lua 5.1")
     return failures

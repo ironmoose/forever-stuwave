@@ -2,7 +2,7 @@
 
 fsdev.py is a standalone script under addons/, which has no package
 __init__.py, so it is loaded by file path via importlib -- same pattern as
-addons/ForeverSynthwave/media/test_tga_generators.py. Only the PURE,
+addons/forever-stuwave/media/test_tga_generators.py. Only the PURE,
 platform-independent pieces are exercised here: the Linux char -> key
 decomposition table, and the find_saved_vars()/saved_vars() path resolution.
 Linux window lookup and focus are tested with a fake process tree and stubbed
@@ -325,9 +325,9 @@ def test_find_saved_vars_finds_account_wide_layout(
     fsdev: types.ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(fsdev, "WTF_ACCOUNTS", tmp_path)
-    target = tmp_path / "12345" / "SavedVariables" / "ForeverSynthwave.lua"
+    target = tmp_path / "12345" / "SavedVariables" / "forever-stuwave.lua"
     target.parent.mkdir(parents=True)
-    target.write_text("ForeverSynthwaveDB = {}\n", encoding="utf-8")
+    target.write_text("ForeverSTUwaveDB = {}\n", encoding="utf-8")
 
     found = fsdev.find_saved_vars()
 
@@ -339,10 +339,10 @@ def test_find_saved_vars_finds_per_character_layout(
 ) -> None:
     monkeypatch.setattr(fsdev, "WTF_ACCOUNTS", tmp_path)
     target = (
-        tmp_path / "12345" / "Realm" / "CharName" / "SavedVariables" / "ForeverSynthwave.lua"
+        tmp_path / "12345" / "Realm" / "CharName" / "SavedVariables" / "forever-stuwave.lua"
     )
     target.parent.mkdir(parents=True)
-    target.write_text("ForeverSynthwaveDB = {}\n", encoding="utf-8")
+    target.write_text("ForeverSTUwaveDB = {}\n", encoding="utf-8")
 
     found = fsdev.find_saved_vars()
 
@@ -353,8 +353,8 @@ def test_find_saved_vars_prefers_newest_mtime_across_layouts(
     fsdev: types.ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(fsdev, "WTF_ACCOUNTS", tmp_path)
-    old = tmp_path / "12345" / "Realm" / "CharName" / "SavedVariables" / "ForeverSynthwave.lua"
-    new = tmp_path / "12345" / "SavedVariables" / "ForeverSynthwave.lua"
+    old = tmp_path / "12345" / "Realm" / "CharName" / "SavedVariables" / "forever-stuwave.lua"
+    new = tmp_path / "12345" / "SavedVariables" / "forever-stuwave.lua"
     old.parent.mkdir(parents=True)
     new.parent.mkdir(parents=True)
     old.write_text("old", encoding="utf-8")
@@ -369,9 +369,9 @@ def test_find_saved_vars_prefers_newest_mtime_across_layouts(
 def test_saved_vars_reresolves_when_none_at_import(
     fsdev: types.ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    target = tmp_path / "12345" / "SavedVariables" / "ForeverSynthwave.lua"
+    target = tmp_path / "12345" / "SavedVariables" / "forever-stuwave.lua"
     target.parent.mkdir(parents=True)
-    target.write_text("ForeverSynthwaveDB = {}\n", encoding="utf-8")
+    target.write_text("ForeverSTUwaveDB = {}\n", encoding="utf-8")
     monkeypatch.setattr(fsdev, "WTF_ACCOUNTS", tmp_path)
     monkeypatch.setattr(fsdev, "SAVED_VARS", None)
 

@@ -49,9 +49,9 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent / "addon" / "ForeverSynthwave"
-CLASSSHOULDER = Path(os.environ.get("CLASSSHOULDER_LUA", ADDON / "ClassShoulder.lua"))
-PETDOCK = Path(os.environ.get("PETDOCK_LUA", ADDON / "PetDock.lua"))
+ADDON = HERE.parent / "forever-stuwave"
+CLASSSHOULDER = Path(os.environ.get("CLASSSHOULDER_LUA", ADDON / "Modules/ActionBars/ClassShoulder.lua"))
+PETDOCK = Path(os.environ.get("PETDOCK_LUA", ADDON / "Modules/Pet/PetDock.lua"))
 
 
 def _load(name: str, filename: str):
@@ -161,7 +161,7 @@ do
     end
 end
 local t = FS.Theme
-local M = "Interface\\AddOns\\ForeverSynthwave\\media\\"
+local M = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
 t.FLAT_TEXTURE = "Interface\\Buttons\\WHITE8x8"
 t.GLOW_EDGE_TEXTURE = M .. "glow_edge.tga"
 t.GLOW_CORNER_TEXTURE = M .. "glow_corner.tga"
@@ -349,12 +349,12 @@ def check_toc_lists_classshoulder_between_petdock_and_sealbar():
     raw = TOC.read_bytes()
     assert b"\r\n" in raw and raw.count(b"\n") == raw.count(b"\r\n"), "the .toc lost its CRLF endings"
     lines = [ln.strip() for ln in raw.decode("utf-8").splitlines()]
-    assert lines.count("ClassShoulder.lua") == 1, "ClassShoulder.lua must be listed exactly once"
-    at = lines.index("ClassShoulder.lua")
-    for dep in ("Theme.lua", "Layout.lua", "ActionBars.lua", "Console.lua", "StanceBar.lua", "PetFrame.lua",
-                "PetDock.lua", "ConsoleKeys.lua"):
+    assert lines.count("Modules/ActionBars/ClassShoulder.lua") == 1, "ClassShoulder.lua must be listed exactly once"
+    at = lines.index("Modules/ActionBars/ClassShoulder.lua")
+    for dep in ("Core/Theme.lua", "Core/Layout.lua", "Modules/ActionBars/ActionBars.lua", "Modules/ActionBars/Console.lua", "Modules/ActionBars/StanceBar.lua", "Modules/Pet/PetFrame.lua",
+                "Modules/Pet/PetDock.lua", "Modules/ActionBars/ConsoleKeys.lua"):
         assert lines.index(dep) < at, f"ClassShoulder.lua loads before {dep}"
-    assert at < lines.index("SealBar.lua"), "ClassShoulder.lua must load before SealBar.lua"
+    assert at < lines.index("Modules/ActionBars/SealBar.lua"), "ClassShoulder.lua must load before SealBar.lua"
 
 
 def check_a_paladin_with_the_console_drawn_builds_one_shoulder():
@@ -748,7 +748,7 @@ def check_the_look_is_the_chassis_look_not_the_pet_recipe():
 # ---------------------------------------------------------------------------------------------
 
 pd = _load("petdock_harness", "petdock-harness.py")
-MEDIA = ADDON / "media"
+MEDIA = ADDON / "Media" / "Textures"
 GP = 11            # texels between the glow canvas edge and the outline polygon (Console.lua GP)
 FLARE = 10.0       # the foot's flare, drawPet's f
 CUT = 6.0          # the shoulder's top left cut, LS_C

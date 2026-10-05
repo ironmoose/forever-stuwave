@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Headless check of Bags.lua: our slot plate only (no Blizzard slot art) and the data bar money line.
 
-Runs the real addons/ForeverSynthwave/Bags.lua under lupa against a small mock WoW API. The mock models
+Runs the real addons/forever-stuwave/Bags.lua under lupa against a small mock WoW API. The mock models
 the Blizzard structures the file touches, the way the 12.1 FrameXML builds them (corroborating only; the
 target client is 16001):
 
@@ -55,9 +55,9 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent / "addon" / "ForeverSynthwave"
-BAGS_LUA = Path(os.environ.get("BAGS_LUA") or ADDON / "Bags.lua")   # BAGS_LUA: a mutated scratch copy
-DATABAR_LUA = ADDON / "DataBar.lua"
+ADDON = HERE.parent / "forever-stuwave"
+BAGS_LUA = Path(os.environ.get("BAGS_LUA") or ADDON / "Modules/Bags/Bags.lua")   # BAGS_LUA: a mutated scratch copy
+DATABAR_LUA = ADDON / "Modules/DataBars/DataBar.lua"
 
 
 # ---------------------------------------------------------------------------------------
@@ -406,7 +406,7 @@ _G.UIParent = UIParent
 
 function __load(src)
     local chunk = assert(loadstring(src, "@Bags.lua"))
-    chunk("ForeverSynthwave", FS)
+    chunk("forever-stuwave", FS)
 end
 
 -- inspection helpers -----------------------------------------------------------------------------

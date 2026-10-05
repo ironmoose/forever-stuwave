@@ -47,12 +47,12 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent / "addon" / "ForeverSynthwave"
-DOTS = Path(os.environ.get("GUNSIGHTDOTS_LUA") or ADDON / "GunsightDots.lua")
-GUNSIGHT = ADDON / "Gunsight.lua"
-LAYOUT = ADDON / "Layout.lua"
-PROFILES = ADDON / "HudProfiles.lua"
-TOC = ADDON / "ForeverSynthwave.toc"
+ADDON = HERE.parent / "forever-stuwave"
+DOTS = Path(os.environ.get("GUNSIGHTDOTS_LUA") or ADDON / "Modules/CombatHud/GunsightDots.lua")
+GUNSIGHT = ADDON / "Modules/CombatHud/Gunsight.lua"
+LAYOUT = ADDON / "Core/Layout.lua"
+PROFILES = ADDON / "Modules/CombatHud/HudProfiles.lua"
+TOC = ADDON / "forever-stuwave.toc"
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
 
 
@@ -421,7 +421,7 @@ function FS.LogDegradeOnce(key, msg) DEGRADED[key] = msg end
 function loadAddonFile(src, name)
     local fn, err = loadstring(src, "@" .. name)
     if not fn then error(err) end
-    return fn("ForeverSynthwave", FS)
+    return fn("forever-stuwave", FS)
 end
 
 SKIN_CALLS = {}
@@ -437,8 +437,8 @@ function stubTheme_()
         COLOR_AMBER = { 1, 0.7137, 0.2824, 1 },
         COLOR_STEEL = { 0.5529, 0.5765, 0.6510, 1 },
         FONT_MONO = "mono.ttf",
-        SLICE_CUT2_FILL_TEXTURE = "Interface\\AddOns\\ForeverSynthwave\\media\\slice_cut2_fill.tga",
-        SLICE_CUT2_BUTTON_TEXTURE = "Interface\\AddOns\\ForeverSynthwave\\media\\slice_cut2_button.tga",
+        SLICE_CUT2_FILL_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\slice_cut2_fill.tga",
+        SLICE_CUT2_BUTTON_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\slice_cut2_button.tga",
     }
     function Theme.ApplyMono(fs, size, color) fs.monoSize = size; fs.monoColor = color; fs.hasFont = true end  -- the real one calls SetFont
     function Theme.ApplyNineSlice(tex, margin) tex.margin = margin; return true end
@@ -549,22 +549,22 @@ local function boot(opts)
     IN_COMBAT = opts.combat ~= false
     AFFECTING = opts.affecting          -- nil follows IN_COMBAT; a case sets it to model a reload mid-combat
     SetScreen(opts.height or 1440)
-    ForeverSynthwaveDB = opts.db
+    ForeverSTUwaveDB = opts.db
     -- Theme.lua's FS.IsSecret (a test may swap SECRET_FN) and the real FS.HasTarget / FS.TargetTakesDots out of it
     FS.IsSecret = function(v) return SECRET_FN(v) end
     assert(loadstring(HAS_TARGET_SRC, "@Theme.lua"))()
     stubTheme_()
     stubHud_()
-    loadAddonFile(LAYOUT_SRC, "Layout.lua")
-    loadAddonFile(GUNSIGHT_SRC, "Gunsight.lua")
-    loadAddonFile(PROFILES_SRC, "HudProfiles.lua")
+    loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
+    loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
+    loadAddonFile(PROFILES_SRC, "Modules/CombatHud/HudProfiles.lua")
     PROFILE = opts.profile or FS.HudProfiles[opts.class or "WARLOCK"]
     UnitClass = function() return "Class", opts.class or "WARLOCK" end
     if opts.state then STATE = opts.state end
     if opts.refusePiece then FS.Gunsight.RegisterPiece = function() return false end end   -- the registry refuses the "dot" piece
-    loadAddonFile(DOTS_SRC, "GunsightDots.lua")
+    loadAddonFile(DOTS_SRC, "Modules/CombatHud/GunsightDots.lua")
     if not opts.noEvents then
-        fire("ADDON_LOADED", "ForeverSynthwave")
+        fire("ADDON_LOADED", "forever-stuwave")
         fire("PLAYER_LOGIN")
     end
     return FS.GunsightDots
@@ -1314,10 +1314,9 @@ check(next(DEGRADED) == nil, "a degrade was logged: " .. tostring(next(DEGRADED)
 # The DoT area is a CLASS slot (mockup drawDots for Warlock and Priest, drawSealChamber for the Paladin,
 # both behind deck key 6). The Paladin's chamber is another file's; here the Paladin draws nothing.
 case("warlock_and_priest_render_is_byte_identical_to_the_approved_look")(r"""
--- Hashes of the whole drawn tree, taken from the build before the class slot rule existed (the approved,
--- locked look). Any change to what a Warlock or Priest draws, or to the order it is built in, fails here.
-local GOLD = { WL_IDLE = 1467687206, WL_LIVE = 1936281216, WL_TICK = 617550597, PR_LIVE = 1550718475,
-    RG = 1467687206, WL_ABSENT_OOC = 218971720 }
+-- Fingerprints include frame names and texture paths as well as geometry and drawn state.
+local GOLD = { WL_IDLE = 1183434497, WL_LIVE = 565967534, WL_TICK = 599751858, PR_LIVE = 1901135936,
+    RG = 1183434497, WL_ABSENT_OOC = 1410475816 }
 local got = {}
 local D = boot({ db = {} })
 got.WL_IDLE = renderHash(D)
@@ -1356,7 +1355,7 @@ check(next(FS.HudProfiles.PALADIN.dots) == nil and type(FS.HudProfiles.PALADIN.s
       "setup: the paladin profile has a seals table and no dots")
 -- the piece is still there: the console key's toggle, Gunsight.SetPiece and the chamber's future parent
 check(D.frame and D.frame:GetParent() == FS.Gunsight.root, "the piece frame is built under the gunsight root")
-check(D.frame.name == "ForeverSynthwaveGunsightDots" and _G.ForeverSynthwaveGunsightDots == D.frame, "and keeps its global name")
+check(D.frame.name == "ForeverSTUwaveGunsightDots" and _G.ForeverSTUwaveGunsightDots == D.frame, "and keeps its global name")
 check(FS.Gunsight.IsPieceOn("dot") and D.frame:IsShown(), "piece key dot is registered and on")
 -- nothing drawn: no axis, no ticks, no labels, no band, no guides, no header, no refresh letters, no chips
 check(next(D.parts) == nil, "no scale parts, got " .. tostring(next(D.parts)))
@@ -1449,10 +1448,10 @@ case("no_hud_leaves_the_piece_inert")(r"""
 resetWorld()
 SetScreen(1440)
 stubTheme_()
-loadAddonFile(LAYOUT_SRC, "Layout.lua"); loadAddonFile(GUNSIGHT_SRC, "Gunsight.lua")
+loadAddonFile(LAYOUT_SRC, "Core/Layout.lua"); loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
 FS.Hud = nil
-loadAddonFile(DOTS_SRC, "GunsightDots.lua")
-fire("ADDON_LOADED", "ForeverSynthwave"); fire("PLAYER_LOGIN")
+loadAddonFile(DOTS_SRC, "Modules/CombatHud/GunsightDots.lua")
+fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
 check(onUpdateFrames() == 0, "no OnUpdate without a Hud")
 """)
 
@@ -1720,26 +1719,26 @@ case("the_class_slot_comes_from_the_shared_helper")(r"""
 boot({ db = {}, noEvents = true })
 local asked = 0
 FS.HudProfiles.ClassSlot = function(p) asked = asked + 1; return "seals" end
-fire("ADDON_LOADED", "ForeverSynthwave"); fire("PLAYER_LOGIN")
+fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
 local D = FS.GunsightDots
 check(asked >= 1, "the build asked the shared helper")
 check(next(D.parts) == nil and #D.chips == 0, "a Warlock profile with the helper answering seals draws no scale")
 boot({ db = {}, class = "PALADIN", noEvents = true })
 FS.HudProfiles.ClassSlot = function() return "dots" end
-fire("ADDON_LOADED", "ForeverSynthwave"); fire("PLAYER_LOGIN")
+fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
 D = FS.GunsightDots
 check(D.parts.axis and #D.chips == D.D.MAX_LANES, "a Paladin profile with the helper answering dots draws the scale")
 -- the helper missing (a load order bug) keeps the old path and says so, instead of throwing
 boot({ db = {}, noEvents = true })
 FS.HudProfiles.ClassSlot = nil
-fire("ADDON_LOADED", "ForeverSynthwave"); fire("PLAYER_LOGIN")
+fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
 D = FS.GunsightDots
 check(D.parts.axis and #D.chips == D.D.MAX_LANES, "no helper: the scale is built as before")
 check(DEGRADED.gunsightdots_noclassslot ~= nil, "and the missing helper is logged")
 -- a throwing helper is contained the same way
 boot({ db = {}, noEvents = true })
 FS.HudProfiles.ClassSlot = function() error("boom") end
-fire("ADDON_LOADED", "ForeverSynthwave"); fire("PLAYER_LOGIN")
+fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
 D = FS.GunsightDots
 check(D.parts.axis, "a throwing helper keeps the scale")
 check(DEGRADED.gunsightdots_classslot ~= nil, "and is logged")
@@ -1749,27 +1748,27 @@ check(DEGRADED.gunsightdots_classslot ~= nil, "and is logged")
 case("an_unreadable_profile_at_build_is_logged")(r"""
 boot({ db = {}, noEvents = true })
 FS.Hud = nil
-fire("ADDON_LOADED", "ForeverSynthwave"); fire("PLAYER_LOGIN")
+fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
 check(DEGRADED.gunsightdots_noprofile ~= nil, "FS.Hud missing at build is logged")
 boot({ db = {}, noEvents = true })
 FS.Hud.GetProfile = nil
-fire("ADDON_LOADED", "ForeverSynthwave"); fire("PLAYER_LOGIN")
+fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
 check(DEGRADED.gunsightdots_noprofile ~= nil, "GetProfile missing at build is logged")
 boot({ db = {}, noEvents = true })
 FS.Hud.GetProfile = function() error("boom") end
-fire("ADDON_LOADED", "ForeverSynthwave"); fire("PLAYER_LOGIN")
+fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
 check(DEGRADED.gunsightdots_noprofile ~= nil, "a throwing GetProfile at build is logged")
 -- a class that HAS a shipped profile but GetProfile has none yet: the build would latch the dots path
 boot({ db = {}, class = "PALADIN", noEvents = true })
 PROFILE = nil
-fire("ADDON_LOADED", "ForeverSynthwave"); fire("PLAYER_LOGIN")
+fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
 check(DEGRADED.gunsightdots_noprofile ~= nil, "no profile yet for a class that has one is logged")
 -- a class with no HUD profile at all is normal: silent
 boot({ db = {}, class = "ROGUE", noEvents = true })
-fire("ADDON_LOADED", "ForeverSynthwave"); fire("PLAYER_LOGIN")
+fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
 check(next(DEGRADED) == nil, "a rogue is silent, got " .. tostring(next(DEGRADED)))
 boot({ db = {}, class = "WARLOCK", noEvents = true })
-fire("ADDON_LOADED", "ForeverSynthwave"); fire("PLAYER_LOGIN")
+fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
 check(next(DEGRADED) == nil, "a warlock is silent, got " .. tostring(next(DEGRADED)))
 """)
 
@@ -1878,18 +1877,18 @@ def static_checks() -> list[tuple[str, str | None]]:
     out: list[tuple[str, str | None]] = []
     toc = [ln.strip() for ln in TOC.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")]
     try:
-        g, d = toc.index("Gunsight.lua"), toc.index("GunsightDots.lua")
+        g, d = toc.index("Modules/CombatHud/Gunsight.lua"), toc.index("Modules/CombatHud/GunsightDots.lua")
         out.append(("toc_order", None if d > g else
                     f"GunsightDots.lua must load after Gunsight.lua (positions {g}, {d})"))
-        hp = toc.index("HudProfiles.lua")
+        hp = toc.index("Modules/CombatHud/HudProfiles.lua")
         out.append(("toc_after_hud_profiles", None if d > hp else
                     "GunsightDots.lua must load after HudProfiles.lua (it calls FS.HudProfiles.ClassSlot)"))
-        fh = toc.index("FrameHelpers.lua")
+        fh = toc.index("Core/FrameHelpers.lua")
         out.append(("toc_after_frame_helpers", None if d > fh else "GunsightDots.lua must load after FrameHelpers.lua"))
     except ValueError as e:
         out.append(("toc_order", f"{e}"))
     raw = TOC.read_bytes()
-    out.append(("toc_stays_crlf", None if raw.count(b"\r\n") == raw.count(b"\n") else "ForeverSynthwave.toc must stay CRLF"))
+    out.append(("toc_stays_crlf", None if raw.count(b"\r\n") == raw.count(b"\n") else "forever-stuwave.toc must stay CRLF"))
     return out
 
 

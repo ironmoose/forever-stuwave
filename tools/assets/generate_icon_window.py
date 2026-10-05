@@ -113,6 +113,6 @@ def _write(path, pixels):
 
 
 if __name__ == "__main__":
-    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media"))
+    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures"))
     _write(os.path.join(here, "icon_minimize.tga"), build(_inside_minimize))
     _write(os.path.join(here, "icon_maximize.tga"), build(_inside_maximize))

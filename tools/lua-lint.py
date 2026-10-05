@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static checks for the ForeverSynthwave addon, aimed at the bug classes that
+"""Static checks for the ForeverSTUwave addon, aimed at the bug classes that
 have actually cost this project time. Complements `parse-gate.py`: that one
 answers "does it parse", this one answers "does it parse and still mean what
 you think".
@@ -76,7 +76,7 @@ except ImportError:
         "Then run this with tools/.venv-lua/Scripts/python.exe"
     )
 
-ADDON_DIR = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
+ADDON_DIR = Path(__file__).resolve().parent.parent / "forever-stuwave"
 # Dump of every global on the live 16001 client, used by check 2. Resolution
 # order: $FS_GLOBALS_DUMP (explicit override; if set it is the only candidate),
 # then the first existing path below (Fedora reference copy, then Windows).
@@ -97,16 +97,16 @@ KEYWORDS = {
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 # Globals the addon legitimately creates or that exist only at runtime.
-ADDON_OWNED = {"ForeverSynthwave", "ForeverSynthwaveDB", "FS", "AAAFSRecon"}
+ADDON_OWNED = {"ForeverSTUwave", "ForeverSTUwaveDB", "FS", "AAAFSRecon"}
 
 # Global WRITES that are intentional, not a missing `local`:
 #   SLASH_*        WoW's slash-command API only reads these from _G
 #   BINDING_*      likewise for key bindings
 #   GetMinimapShape  a community contract other addons call on us
-#   ForeverSynthwave*  our own diagnostic tables, deliberately global so they
+#   ForeverSTUwave*  our own diagnostic tables, deliberately global so they
 #                      can be read with /dump in game
 INTENTIONAL_GLOBAL_WRITE = re.compile(
-    r"^(SLASH_[A-Z0-9_]+|BINDING_[A-Z0-9_]+|ForeverSynthwave\w*|GetMinimapShape)$"
+    r"^(SLASH_[A-Z0-9_]+|BINDING_[A-Z0-9_]+|ForeverSTUwave\w*|GetMinimapShape)$"
 )
 
 _LUA_EXTRACT = r"""
@@ -392,7 +392,7 @@ def main() -> int:
     if "--self-test" in argv:
         return self_test(lg)
 
-    files = [Path(a).resolve() for a in argv] or sorted(ADDON_DIR.glob("*.lua"))
+    files = [Path(a).resolve() for a in argv] or sorted(ADDON_DIR.rglob("*.lua"))
     if not files:
         print(f"no .lua files under {ADDON_DIR}")
         return 1

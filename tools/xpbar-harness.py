@@ -38,8 +38,8 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
-XPBAR = Path(os.environ.get("XPBAR_LUA", ADDON / "XPBar.lua"))   # XPBAR_LUA: a mutated scratch copy
+ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
+XPBAR = Path(os.environ.get("XPBAR_LUA", ADDON / "Modules/DataBars/XPBar.lua"))   # XPBAR_LUA: a mutated scratch copy
 SCREEN_W = 2560.0
 
 # A mock only has to be as deep as the code under test actually reaches. Every
@@ -190,7 +190,7 @@ return {
 # Checks run after every switch. Each returns a problem string or nil.
 CHECKS = r"""
 function(screenW)
-    local bar = _G.ForeverSynthwaveXPBar
+    local bar = _G.ForeverSTUwaveXPBar
     if not bar then return "no bar frame was built" end
     if not bar.regions or #bar.regions == 0 then return "bar has no regions" end
 
@@ -295,7 +295,7 @@ end
 CELL_COLOURS = """
 function()
     local out = {}
-    for i, c in ipairs(_G.ForeverSynthwaveXPBar.cells) do
+    for i, c in ipairs(_G.ForeverSTUwaveXPBar.cells) do
         local a, b = c.color or {}, c.color2 or {}
         out[#out + 1] = string.format("%d:%.4f,%.4f,%.4f,%.4f/%.4f,%.4f,%.4f,%.4f", i,
             a[1] or -1, a[2] or -1, a[3] or -1, a[4] or -1, b[1] or -1, b[2] or -1, b[3] or -1, b[4] or -1)
@@ -308,7 +308,7 @@ end
 RIGHT_EDGE = """
 function()
     local right = 0
-    for _, c in ipairs(_G.ForeverSynthwaveXPBar.cells) do
+    for _, c in ipairs(_G.ForeverSTUwaveXPBar.cells) do
         if c.shown and c.anchorX + c.w > right then right = c.anchorX + c.w end
     end
     return right
@@ -316,13 +316,13 @@ end
 """
 ALL_HAVE_SPECULAR = """
 function()
-    for _, c in ipairs(_G.ForeverSynthwaveXPBar.cells) do if not c.spec then return false end end
+    for _, c in ipairs(_G.ForeverSTUwaveXPBar.cells) do if not c.spec then return false end end
     return true
 end
 """
 ANY_HAS_SPECULAR = """
 function()
-    for _, c in ipairs(_G.ForeverSynthwaveXPBar.cells) do if c.spec then return true end end
+    for _, c in ipairs(_G.ForeverSTUwaveXPBar.cells) do if c.spec then return true end end
     return false
 end
 """
@@ -346,11 +346,11 @@ def combat_session(in_combat: bool = False, saved_variant: int | None = None):
     if in_combat:
         rt.execute("__combat = true")
     if saved_variant is not None:
-        rt.execute(f"ForeverSynthwaveDB = {{ xpVariant = {saved_variant} }}")
+        rt.execute(f"ForeverSTUwaveDB = {{ xpVariant = {saved_variant} }}")
     err = rt.eval(LOGIN)(370, 1000, 0)
     combat_check("combat.login_runs_clean", not err, str(err))
     g = rt.globals()
-    bar = g.ForeverSynthwaveXPBar
+    bar = g.ForeverSTUwaveXPBar
     bar.restricted = True            # the deck's chassis is anchored to it, and the chassis hosts secure buttons
     return rt, fs, g, bar, rt.eval(FIRE)
 
@@ -383,7 +383,7 @@ def combat_checks() -> None:
     err = rt.eval(SWITCH)(3, 500, 1000, 0)
     combat_check("combat.variant_switch_runs_clean", not err, str(err))
     combat_check("combat.variant_switch_does_not_resize_the_bar", bar.w == start_w and bar.h == start_h, f"{bar.w}x{bar.h}")
-    combat_check("combat.variant_choice_is_saved_at_once", g.ForeverSynthwaveDB.xpVariant == 3)
+    combat_check("combat.variant_choice_is_saved_at_once", g.ForeverSTUwaveDB.xpVariant == 3)
     combat_check("combat.variant_extras_wait_for_regen", not rt.eval(ANY_HAS_SPECULAR)())
     combat_check("combat.nothing_blocked_by_rescale_or_variant_switch", len(g.__blocked) == 0, str(list(g.__blocked.values())))
 
@@ -504,7 +504,7 @@ def applied_variant_checks() -> None:
 
 
 def saved_variant_login_checks() -> None:
-    """A variant saved in ForeverSynthwaveDB is restored at PLAYER_LOGIN, before the first Build: the bar is laid out at
+    """A variant saved in ForeverSTUwaveDB is restored at PLAYER_LOGIN, before the first Build: the bar is laid out at
     that variant's height at once, and /fsxp lists it as the current one."""
     print("\nlogin: a saved variant is restored")
     session = combat_session(saved_variant=3)

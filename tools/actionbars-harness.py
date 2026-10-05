@@ -36,7 +36,7 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
+ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
 
 MOCK = r"""
 __frames = {}
@@ -430,7 +430,7 @@ FS.PetFrame = { barSlot = new("Frame", "FSPetBarSlot", UIParent) }
 
 function __load(path, src)
     local fn = assert(loadstring(src, "@" .. path))
-    return fn("ForeverSynthwave", FS)
+    return fn("forever-stuwave", FS)
 end
 
 -- Compiles the named top-level `function Theme.<name>` definitions out of the real
@@ -582,14 +582,14 @@ def boot(prelude: str = "", extra: tuple = ()) -> "LuaRuntime":
     lua.execute(prelude)
     lua.execute("__install_qk()")
     load = lua.eval("__load")
-    theme_src = (ADDON / "Theme.lua").read_text(encoding="utf-8")
+    theme_src = (ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
     defs = lua.table_from({n: _extract_theme_function(theme_src, n) for n in THEME_FUNCTIONS})
     local_defs = [_extract_theme_local_function(theme_src, n) for n in THEME_LOCAL_FUNCTIONS]
     lua.eval("__load_theme_functions")(
         defs, lua.table_from(list(THEME_FUNCTIONS)), lua.table_from(local_defs))
     consts = [_extract_theme_constant(theme_src, n) for n in THEME_CONSTANTS]
     lua.eval("__load_theme_constants")(lua.table_from(consts))
-    for name in ("FrameHelpers.lua", "ActionBars.lua", "StanceBar.lua", "PetActionBar.lua", *extra):
+    for name in ("Core/FrameHelpers.lua", "Modules/ActionBars/ActionBars.lua", "Modules/ActionBars/StanceBar.lua", "Modules/Pet/PetActionBar.lua", *extra):
         load(name, (ADDON / name).read_text(encoding="utf-8"))
     lua.execute("__login()")
     return lua
@@ -1732,7 +1732,7 @@ end
 
 function T.mouseover_hint_prints_once_when_the_cvar_is_off()
     eq(printed(MOUSEOVER_HINT), 1, "printed at first login")
-    eq(ForeverSynthwaveDB.mouseoverHintSeen, true, "flag stored")
+    eq(ForeverSTUwaveDB.mouseoverHintSeen, true, "flag stored")
 end
 
 function T.mouseover_hint_stays_quiet_once_seen()
@@ -2253,7 +2253,7 @@ function T.pet_ring_a_repeat_update_mid_animation_does_not_restart()
 end
 
 function T.pet_ring_reduced_motion_snaps()
-    ForeverSynthwaveDB = { reducedMotion = true }
+    ForeverSTUwaveDB = { reducedMotion = true }
     setPet(1, "Firebolt", true, false); refreshPet()
     setPet(1, "Firebolt", true, true); refreshPet()
     eq(#onUpdateFrames(), 0, "no ignite under reduced motion")
@@ -2589,7 +2589,7 @@ VARIANTS = {
     "stance_missing_spell_id_is_reported_once_if_it_stays_missing": STANCE_NO_SPELL,
     "stance_rescale_in_combat_touches_no_protected_frame_and_resizes_after": STANCE_RESCALE,
     "mouseover_attributes_are_never_written_in_combat": "__combat = true",
-    "mouseover_hint_stays_quiet_once_seen": "ForeverSynthwaveDB = { mouseoverHintSeen = true }",
+    "mouseover_hint_stays_quiet_once_seen": "ForeverSTUwaveDB = { mouseoverHintSeen = true }",
     "mouseover_hint_stays_quiet_when_the_cvar_is_on": '__cvars.enableMouseoverCast = "1"',
     "action_swipe_stays_square_without_mask_support": "__Region.AddMaskTexture = nil",
     # The mock's default AddMaskTexture already records and does not clip, i.e. the
@@ -2677,7 +2677,7 @@ for _, pair in ipairs(all) do spy(pair[1], pair[2]) end
 """
 # Variants of the above: name -> Lua run after the prelude, before the addon loads.
 BLIZZ_VARIANTS = {
-    "blizz_saved_stash_is_still_honoured": 'ForeverSynthwaveDB = { barHideStrategy = "stash" }',
+    "blizz_saved_stash_is_still_honoured": 'ForeverSTUwaveDB = { barHideStrategy = "stash" }',
     "blizz_login_in_combat_leaves_blizzard_bars_alone": "__combat = true",
 }
 BLIZZ_PREFIX = "blizz_"
@@ -2742,7 +2742,7 @@ def main() -> int:
         if name.startswith(BLIZZ_PREFIX):
             lua = boot(BLIZZ_PRELUDE + BLIZZ_VARIANTS.get(name, ""))
         elif name.startswith(PET_RING_PREFIXES):
-            lua = boot(PET_RING_PRELUDE + PET_VARIANTS.get(name, ""), ("ChevronCastBar.lua",))
+            lua = boot(PET_RING_PRELUDE + PET_VARIANTS.get(name, ""), ("Core/ChevronCastBar.lua",))
         else:
             lua = boot(VARIANTS.get(name, ""))
         lua.execute(CHECKS)

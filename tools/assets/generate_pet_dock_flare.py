@@ -106,7 +106,7 @@ def write_tga(path, grid):
 
 
 def main():
-    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media"))
+    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures"))
     write_tga(os.path.join(here, "pet_dock_flare_line.tga"), bake(LINE_W, LINE_H, LINE_K, line_value))
     write_tga(os.path.join(here, "pet_dock_flare_glow.tga"), bake(GLOW_W, GLOW_H, GLOW_K, glow_value))
 

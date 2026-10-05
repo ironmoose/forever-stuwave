@@ -1,7 +1,7 @@
 * text=auto eol=lf
 *.lua -text
 *.toc -text
-addon/ForeverSynthwave/fonts/*.txt -text
+forever-stuwave/Media/Fonts/*.txt -text
 *.tga binary
 *.ttf binary
 *.png binary

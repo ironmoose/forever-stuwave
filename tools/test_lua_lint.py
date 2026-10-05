@@ -86,6 +86,23 @@ def test_fail_on_high_ignores_non_high_findings(lint, monkeypatch, capsys) -> No
     assert "1 low" in out
 
 
+def test_global_write_check_allows_addon_saved_variables_but_reports_accidental_globals(
+    lint, monkeypatch, capsys, tmp_path,
+) -> None:
+    source = tmp_path / "saved_globals.lua"
+    source.write_text(
+        "ForeverSTUwaveDB = {}\nForeverSTUwaveErrorLog = {}\naccidentalGlobal = {}\n",
+        encoding="utf-8",
+    )
+    code, out = _run(lint, monkeypatch, capsys, "--only=3", str(source))
+
+    assert code == 1, out
+    assert "1 low" in out
+    assert "`accidentalGlobal`" in out
+    assert "`ForeverSTUwaveDB`" not in out
+    assert "`ForeverSTUwaveErrorLog`" not in out
+
+
 def test_fail_on_high_still_fails_on_high(lint, monkeypatch, capsys) -> None:
     bad = str(FIXTURES / "bad_function_above_local_function.lua")
     code, _ = _run(lint, monkeypatch, capsys, "--only=1", "--fail-on", "high", bad)

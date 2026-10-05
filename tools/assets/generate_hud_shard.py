@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates the line art soul shard textures of the Gunsight combat HUD.
 
-Reference: addons/ForeverSynthwave/mockups/gunsight-hud-v2-2026-10-02/gunsight-hud-v2-2026-10-02.html,
+Reference: addons/ForeverSTUwave/mockups/gunsight-hud-v2-2026-10-02/gunsight-hud-v2-2026-10-02.html,
 SH_GLYPH and drawShards(). The brief was a line art version of the actual soulshard icon:
 an elongated faceted crystal leaning right with a sharp point at the bottom. CombatHud.lua stacks
 four textures per held shard and tints each one, nothing is baked in colour (white RGB, shape in
@@ -224,7 +224,7 @@ def write_tga(path, grid):
 
 
 def main():
-    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media"))
+    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures"))
     for name, build in BUILDERS.items():
         write_tga(os.path.join(here, name + ".tga"), build())
 

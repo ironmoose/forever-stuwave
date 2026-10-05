@@ -37,8 +37,8 @@ except ImportError:
 
 HERE = Path(__file__).resolve().parent
 # HUD_HARNESS_ADDON_DIR points the harness at a scratch copy, for mutation checks.
-ADDON = Path(os.environ.get("HUD_HARNESS_ADDON_DIR") or HERE.parent / "addon" / "ForeverSynthwave")
-FILES = ["HudSpells.lua", "HudProfiles.lua", "HudLogic.lua"]
+ADDON = Path(os.environ.get("HUD_HARNESS_ADDON_DIR") or HERE.parent / "forever-stuwave")
+FILES = ["Modules/CombatHud/HudSpells.lua", "Modules/CombatHud/HudProfiles.lua", "Modules/CombatHud/HudLogic.lua"]
 
 MOCK = r"""
 __realType = type
@@ -1538,7 +1538,12 @@ for i, k in ipairs(want) do
     check(D[k] and D[k].seal == true and D[k].self == true and D[k].apply == 30, "seal " .. k .. " is a self, seal, 30 s dictionary entry")
 end
 check(D.sor.ids and D.sor.ids[1] == 21084 and #D.sor.ids == 1 and D.sotc.ids and D.sotc.ids[1] == 21082 and #D.sotc.ids == 1, "SoR and SotC carry their verified ids")
-for _, k in ipairs({ "sofu", "soc", "sol", "sow", "soj" }) do check(D[k].ids == nil, "seal " .. k .. " is name-only (ids unverified)") end
+for k, id in pairs({ sofu = 20163, soc = 20375, sol = 20165, soj = 20164 }) do
+    check(D[k].ids and D[k].ids[1] == id, "seal " .. k .. " uses its published Forever spell ID")
+end
+check(D.sow.ids == nil, "Wisdom is above the level-30 beta cap and stays name-only")
+check(#D.hs.ids == 4 and D.hs.ids[1] == 680 and D.hs.ids[2] == 1866 and D.hs.ids[3] == 678 and D.hs.ids[4] == 679,
+    "Holy Strike fallback ranks cover levels 6 through 28")
 check(D.sor.names[1] == "Seal of Righteousness" and D.sotc.names[1] == "Seal of the Crusader" and D.sofu.names[1] == "Seal of Fury"
     and D.soc.names[1] == "Seal of Command" and D.sol.names[1] == "Seal of Light" and D.sow.names[1] == "Seal of Wisdom"
     and D.soj.names[1] == "Seal of Justice", "seal names")
@@ -1566,9 +1571,9 @@ check(s.key == "sotc" and s.expiresAt == 1040 and s.castAt == 1010, "a second se
 -- own casts report the rank id: SoR rank 1 is not in the dictionary and still maps back by name
 at(12); cast("Seal of Righteousness", 20154)
 check(S().seal.key == "sor" and S().seal.id == 20154 and S().seal.expiresAt == 1042, "a rank id maps by name")
--- a name-only seal (no dictionary id) is matched by its name
+-- a seal with a published fallback ID is still matched by its name
 at(14); cast("Seal of Command")
-check(S().seal.key == "soc" and S().seal.expiresAt == 1044, "a name-only seal, got " .. tostring(S().seal.key))
+check(S().seal.key == "soc" and S().seal.expiresAt == 1044, "a seal resolves by name, got " .. tostring(S().seal.key))
 -- the returned table is a copy: a consumer cannot edit the ledger
 S().seal.expiresAt = 0
 check(S().seal.expiresAt == 1044, "state.seal is a copy of the ledger")
@@ -2055,7 +2060,7 @@ local want = { "sor", "sotc", "sofu", "soc", "sol", "sow", "soj" }
 check(#seals == 7, "all seven known, got " .. #seals)
 for i, k in ipairs(want) do check(seals[i].key == k, "order " .. i .. ", got " .. tostring(seals[i].key)) end
 check(seals[1].name == "Seal of Righteousness" and seals[1].id == 21084, "name and id of SoR")
-check(seals[3].name == "Seal of Fury" and seals[3].id == NAME_ID["Seal of Fury"], "a name-only seal resolves through the client")
+check(seals[3].name == "Seal of Fury" and seals[3].id == NAME_ID["Seal of Fury"], "a seal name resolves through the client before its fallback ID")
 forget("Seal of the Crusader"); forget("Seal of Light")
 seals = FS.Hud.GetSeals()
 for _, e in ipairs(seals) do check(type(e.key) == "string" and type(e.name) == "string" and type(e.id) == "number", "plain data") end
@@ -2206,14 +2211,14 @@ def run_case(name: str, cls: str, body: str) -> str | None:
     lua.execute(MOCK)
     lua.execute(f'resetWorld("{cls}"); FS = {{}}')
     lua.execute("FS.LogDegradeOnce = function(k, m) __errors[#__errors + 1] = k .. ': ' .. tostring(m) end")
-    loader = lua.eval("function(src, name) local fn = assert(loadstring(src, '@' .. name)); return fn('ForeverSynthwave', FS) end")
+    loader = lua.eval("function(src, name) local fn = assert(loadstring(src, '@' .. name)); return fn('forever-stuwave', FS) end")
     for fname in FILES:
         path = ADDON / fname
         if not path.exists():
             return f"{fname} is missing"
         try:
             loader(path.read_text(encoding="utf-8"), fname)
-            if fname == "HudProfiles.lua":
+            if fname == "Modules/CombatHud/HudProfiles.lua":
                 lua.execute(TEST_PROFILES)
         except LuaError as err:
             return f"{fname} failed to load: {err}"

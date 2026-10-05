@@ -249,7 +249,7 @@ def build_mask(corners=CUT2_CORNERS):
 
 
 def main():
-    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media"))
+    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures"))
     _write(os.path.join(here, "slice_cut_outline.tga"), build_outline())
     _write(os.path.join(here, "slice_cut_fill.tga"), build_fill())
 

@@ -44,7 +44,7 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
+ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
 
 MOCK = r"""
 __now = 0
@@ -252,7 +252,7 @@ function __load_theme_constants(lines)
 end
 function __load(path, src)
     local fn = assert(loadstring(src, "@" .. path))
-    return fn("ForeverSynthwave", FS)
+    return fn("forever-stuwave", FS)
 end
 """
 
@@ -274,15 +274,15 @@ def _extract_theme_constant(source: str, name: str) -> str:
 def boot() -> "LuaRuntime":
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.execute(MOCK)
-    theme_src = (ADDON / "Theme.lua").read_text(encoding="utf-8")
+    theme_src = (ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
     consts = [_extract_theme_constant(theme_src, n) for n in THEME_CONSTANTS]
     lua.eval("__load_theme_constants")(lua.table_from(consts))
-    path = ADDON / "ChevronCastBar.lua"
+    path = ADDON / "Core/ChevronCastBar.lua"
     if not path.exists():
         raise FileNotFoundError(path)
     src = path.read_text(encoding="utf-8")
     lua.eval("function(s) __src = s end")(src)
-    lua.eval("__load")("ChevronCastBar.lua", src)
+    lua.eval("__load")("Core/ChevronCastBar.lua", src)
     return lua
 
 
@@ -1851,7 +1851,7 @@ function T.rng_self_check_is_quiet_when_bit_agrees_and_loud_when_it_does_not()
     for k, v in pairs(realBit) do fake[k] = v end
     fake.rshift = function(a, n) return realBit.rshift(a, n + 1) end
     bit = fake
-    local okLoad, err = pcall(__load, "ChevronCastBar.lua", __src)
+    local okLoad, err = pcall(__load, "Core/ChevronCastBar.lua", __src)
     bit = realBit
     ok(okLoad, "load threw on a divergent bit library: " .. tostring(err))
     eq(#__degrades, 1, "one degrade logged"); eq(__degrades[1], "chevron_rng_mismatch")
@@ -2328,7 +2328,7 @@ def check_up_art(lua) -> list[str]:
         if name != f"cast_chevron_up_{key}.tga":
             problems.append(f"{key}: unexpected file name {name}")
             continue
-        file = ADDON / "media" / name
+        file = ADDON / "Media" / "Textures" / name
         if not file.exists():
             problems.append(f"{key}: {file} does not exist")
             continue

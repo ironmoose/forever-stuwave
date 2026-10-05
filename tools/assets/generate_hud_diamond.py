@@ -41,7 +41,7 @@ def main():
     for y in range(SIZE):
         for x in range(SIZE):
             rows += bytes((255, 255, 255, int(round(_coverage(x, y) * 255))))
-    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media"))
+    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures"))
     path = os.path.join(here, "hud_diamond.tga")
     header = struct.pack("<BBBHHBHHHHBB", 0, 0, 2, 0, 0, 0, 0, 0, SIZE, SIZE, 32, 0x28)
     with open(path, "wb") as fh:

@@ -45,10 +45,10 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent / "addon" / "ForeverSynthwave"
+ADDON = HERE.parent / "forever-stuwave"
 # BUFFS_LUA / THEME_LUA point the run at a mutant copy (the other harnesses do the same).
-SOURCE = Path(os.environ.get("BUFFS_LUA", ADDON / "Buffs.lua"))
-THEME = Path(os.environ.get("THEME_LUA", ADDON / "Theme.lua"))
+SOURCE = Path(os.environ.get("BUFFS_LUA", ADDON / "Modules/Auras/Buffs.lua"))
+THEME = Path(os.environ.get("THEME_LUA", ADDON / "Core/Theme.lua"))
 
 
 def theme_readiness_lua() -> str:
@@ -316,7 +316,7 @@ function boot()
     loadstring(__DISPEL_SRC, "@Theme.lua(DISPEL_COLORS)")()
     loadstring(__READABLE_SRC, "@Theme.lua(readiness)")()
     local fn = assert(loadstring(__SRC, "@Buffs.lua"))
-    fn("ForeverSynthwave", FS)
+    fn("forever-stuwave", FS)
 end
 
 -- Test helpers ------------------------------------------------------------------------

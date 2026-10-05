@@ -61,10 +61,10 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent / "addon" / "ForeverSynthwave"
-MEDIA = ADDON / "media"
-SEALS = Path(os.environ.get("GUNSIGHTSEALS_LUA") or ADDON / "GunsightSeals.lua")
-TOC = ADDON / "ForeverSynthwave.toc"
+ADDON = HERE.parent / "forever-stuwave"
+MEDIA = ADDON / "Media" / "Textures"
+SEALS = Path(os.environ.get("GUNSIGHTSEALS_LUA") or ADDON / "Modules/CombatHud/GunsightSeals.lua")
+TOC = ADDON / "forever-stuwave.toc"
 
 
 def _load(name: str, file: str):
@@ -110,7 +110,7 @@ def font_metrics() -> dict:
     Theme.FONT_MONO names): the monospace advance as a fraction of the size, and how far the middle of a line box sits above
     its baseline when the engine builds the box from the hhea ascender and descender ((ascender + descender) / 2, descender
     negative). Not measured in game."""
-    d = (MEDIA.parent / "fonts" / "MononokiNerdFontMono-Bold.ttf").read_bytes()
+    d = (ADDON / "Media" / "Fonts" / "MononokiNerdFontMono-Bold.ttf").read_bytes()
     tables = {}
     for i in range(struct.unpack(">H", d[4:6])[0]):
         tag, _, off, _ = struct.unpack(">4sIII", d[12 + 16 * i:28 + 16 * i])
@@ -421,11 +421,11 @@ SECRET_FN = function(v) return rawequal(v, SECRET) end
 function stubTheme2_()
     stubTheme_()
     local Theme = FS.Theme
-    Theme.SLICE_GLOW_TEXTURE = "Interface\\AddOns\\ForeverSynthwave\\media\\slice_cut2_glow.tga"
+    Theme.SLICE_GLOW_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\slice_cut2_glow.tga"
     Theme.SLICE_GLOW_PAD = 4
     Theme.SLICE_GLOW_MARGIN = 10
     Theme.SLICE_CUT_MARGIN = 6
-    Theme.SLICE_CUT2_OUTLINE_TEXTURE = "Interface\\AddOns\\ForeverSynthwave\\media\\slice_cut2_outline.tga"
+    Theme.SLICE_CUT2_OUTLINE_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\slice_cut2_outline.tga"
     -- the real Theme.AddSliceTexture / AddCut2Texture: two anchors, inset, margin
     function Theme.AddSliceTexture(frame, path, color, layer, sublevel, inset)
         local t = frame:CreateTexture(nil, layer or "BACKGROUND", nil, sublevel)
@@ -464,27 +464,27 @@ local function boot(opts)
     IN_COMBAT, AFFECTING = false, nil
     SECRET_FN = function(v) return rawequal(v, SECRET) end
     SetScreen(opts.height or 1440)
-    ForeverSynthwaveDB = opts.db or {}
+    ForeverSTUwaveDB = opts.db or {}
     FS.IsSecret = function(v) return SECRET_FN(v) end
     UnitGUID = function() return "Creature-0-0-0-0-1-0000000001" end
     assert(loadstring(HAS_TARGET_SRC, "@Theme.lua"))()
     stubTheme2_()
     if not opts.noHud then stubHud_() end
-    loadAddonFile(LAYOUT_SRC, "Layout.lua")
-    loadAddonFile(GUNSIGHT_SRC, "Gunsight.lua")
-    loadAddonFile(PROFILES_SRC, "HudProfiles.lua")
-    loadAddonFile(HUDSPELLS_SRC, "HudSpells.lua")
+    loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
+    loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
+    loadAddonFile(PROFILES_SRC, "Modules/CombatHud/HudProfiles.lua")
+    loadAddonFile(HUDSPELLS_SRC, "Modules/CombatHud/HudSpells.lua")
     local cls = opts.class or "PALADIN"
     PROFILE = FS.HudProfiles[cls]
     if opts.mkProfile then PROFILE = opts.mkProfile(FS.HudProfiles) end
     UnitClass = function() return "Class", cls end
     STATE = opts.state
     if opts.themeFix then opts.themeFix() end
-    if not opts.noDots then loadAddonFile(DOTS_SRC, "GunsightDots.lua") end
+    if not opts.noDots then loadAddonFile(DOTS_SRC, "Modules/CombatHud/GunsightDots.lua") end
     if opts.beforeSeals then opts.beforeSeals() end
-    if not opts.noSeals then loadAddonFile(SEALS_SRC, "GunsightSeals.lua") end
+    if not opts.noSeals then loadAddonFile(SEALS_SRC, "Modules/CombatHud/GunsightSeals.lua") end
     if not opts.noEvents then
-        fire("ADDON_LOADED", "ForeverSynthwave")
+        fire("ADDON_LOADED", "forever-stuwave")
         fire("PLAYER_LOGIN")
     end
     return FS.GunsightSeals, FS.GunsightDots
@@ -846,7 +846,7 @@ check(S5.frame == nil, "no FS.Hud: nothing built")
 case("the_paladin_chamber_hangs_off_the_dot_piece_frame")(r"""
 local Seals, Dots = boot({})
 local ch = Seals.frame
-check(ch and ch.name == "ForeverSynthwaveGunsightSeals", "the chamber frame is missing or misnamed")
+check(ch and ch.name == "ForeverSTUwaveGunsightSeals", "the chamber frame is missing or misnamed")
 check(ch:GetParent() == Dots.frame, "the chamber is a child of the dot piece frame (so the dot key toggles it)")
 check(Dots.frame:GetParent() == FS.Gunsight.root, "the piece frame is the gunsight root's child")
 check(ch:GetParent() ~= Dots.gate and ch:GetParent() ~= Dots.content, "not hung off the target gate or the scale content")
@@ -2099,7 +2099,7 @@ end
 
 case("reduced_motion_holds_the_neon_steady")(r"""
 NOW = 5000
--- ForeverSynthwaveDB.reducedMotion == true: sealNeon is .8 while expiring and 1 otherwise, never struck, never dropping out
+-- ForeverSTUwaveDB.reducedMotion == true: sealNeon is .8 while expiring and 1 otherwise, never struck, never dropping out
 local S1 = boot({ db = { reducedMotion = true }, state = sealAt("sor", 20, 0.1) })
 checkNeon(S1, 1, "a fresh cast is not struck")
 for i = 1, 6 do tick(.1); checkNeon(S1, 1, "no strike flicker, step " .. i) end
@@ -2125,11 +2125,11 @@ for _, v in ipairs({ "yes", 1, "true", false }) do
     local e0 = tint(N.parts.edge)[4]; tick(.35)
     check(math.abs(tint(N.parts.edge)[4] - e0) > 0.01, "reducedMotion = " .. tostring(v) .. ": the NO SEAL edge still pulses")
 end
--- the flag is read through ForeverSynthwaveDB at the push; a missing table is just off
+-- the flag is read through ForeverSTUwaveDB at the push; a missing table is just off
 local S5 = boot({ state = sealAt("sor", 20, 10) })
-ForeverSynthwaveDB = nil
+ForeverSTUwaveDB = nil
 local ok, err = pcall(push, sealAt("sor", 20, 0.1))
-check(ok, "no ForeverSynthwaveDB threw: " .. tostring(err))
+check(ok, "no ForeverSTUwaveDB threw: " .. tostring(err))
 checkNeon(S5, S5.Neon(0.1, false, 20, NOW), "no table: the animated look")
 check(next(DEGRADED) == nil, "no degrade: " .. tostring(next(DEGRADED)))
 """)
@@ -2216,20 +2216,20 @@ local Seals = boot({ state = noneState(true) })
 local P = Seals.parts
 check(onUpdateFrames() == 1, "pulsing")
 tick(.35); near3(P.noSeal.textColor[4], 0.5 + 0.5 * pulseAt(NOW), "the pulse runs")
-ForeverSynthwaveDB.reducedMotion = true
+ForeverSTUwaveDB.reducedMotion = true
 push(noneState(true))
 check(onUpdateFrames() == 0, "the flag on: the ticker stops at the next push")
 near3(tint(P.edge)[4], S.NO_EDGE_A0 + S.NO_EDGE_A1, "and the edge is held at u = 1"); near3(P.noSeal.textColor[4], 1, "and the label")
-ForeverSynthwaveDB.reducedMotion = false
+ForeverSTUwaveDB.reducedMotion = false
 push(noneState(true))
 check(onUpdateFrames() == 1, "the flag off again: the pulse resumes")
 tick(.35); near3(P.noSeal.textColor[4], 0.5 + 0.5 * pulseAt(NOW), "pulsing again")
 -- an expiring seal: dropouts, then the dim level, then dropouts
 local S2 = boot({ state = sealAt("sor", 4, 10) })
 local st = sealAt("sor", 4, 10)
-ForeverSynthwaveDB.reducedMotion = true
+ForeverSTUwaveDB.reducedMotion = true
 push(st); checkNeon(S2, S.REDUCED_EXPIRING, "reduced")
-ForeverSynthwaveDB.reducedMotion = false
+ForeverSTUwaveDB.reducedMotion = false
 push(st); checkNeon(S2, S2.Neon(NOW - st.seal.castAt, true, st.seal.expiresAt - NOW, NOW), "animated again")
 """)
 
@@ -2945,7 +2945,7 @@ local function failing(name)
         local orig = FS.FrameHelpers[name] and FS.FrameHelpers or FS.Theme
         local fn = orig[name]
         orig[name] = function(button, ...)
-            if button.parent and button.parent.name == "ForeverSynthwaveGunsightSeals" then error("boom " .. name) end
+            if button.parent and button.parent.name == "ForeverSTUwaveGunsightSeals" then error("boom " .. name) end
             return fn(button, ...)
         end
     end
@@ -3364,7 +3364,7 @@ do
     local mt2 = getmetatable(UIParent)
     local origRE = mt2.RegisterEvent
     mt2.RegisterEvent = function(self, e)
-        if self.parent and self.parent.name == "ForeverSynthwaveGunsightSeals" then error("boom") end
+        if self.parent and self.parent.name == "ForeverSTUwaveGunsightSeals" then error("boom") end
         return origRE(self, e)
     end
     local ok, err = pcall(function()
@@ -3585,10 +3585,10 @@ local function noSealJudged(inCombat) local s2 = judgedState("sotc", 30); s2.sea
 push(noSealJudged(false)); laneIs(P, 30, "red", "NO SEAL out of combat")
 push(noSealJudged(true)); laneIs(P, 30, "red", "NO SEAL in combat (a repaint, same colour)")
 push(noSealJudged(false)); laneIs(P, 30, "red", "and out again")
-ForeverSynthwaveDB.reducedMotion = true; push(noSealJudged(false)); laneIs(P, 30, "red", "reduced motion flag flipped (a repaint, same colour)")
-ForeverSynthwaveDB.reducedMotion = nil; push(judgedState("sotc", 30)); laneIs(P, 30, "sotc", "back to the Crusader seal")
-ForeverSynthwaveDB.reducedMotion = true; push(judgedState("sotc", 30)); laneIs(P, 30, "sotc", "a seal repainted by the reduced motion flag keeps the empty label away")
-ForeverSynthwaveDB.reducedMotion = nil; push(judgedState("sotc", 30))
+ForeverSTUwaveDB.reducedMotion = true; push(noSealJudged(false)); laneIs(P, 30, "red", "reduced motion flag flipped (a repaint, same colour)")
+ForeverSTUwaveDB.reducedMotion = nil; push(judgedState("sotc", 30)); laneIs(P, 30, "sotc", "back to the Crusader seal")
+ForeverSTUwaveDB.reducedMotion = true; push(judgedState("sotc", 30)); laneIs(P, 30, "sotc", "a seal repainted by the reduced motion flag keeps the empty label away")
+ForeverSTUwaveDB.reducedMotion = nil; push(judgedState("sotc", 30))
 -- the seal running out flips the chamber by itself; the lane keeps its bar and time and follows the chamber's colour
 local st = judgedState("sotc", 30); st.seal.expiresAt = NOW + 2; push(st)
 tick(2.5); check(Seals.Mode() == "none", "the seal ran out")
@@ -3685,21 +3685,21 @@ def static_checks() -> list[tuple[str, str | None]]:
     out: list[tuple[str, str | None]] = []
     toc = [ln.strip() for ln in TOC.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")]
     try:
-        s = toc.index("GunsightSeals.lua")
-        d = toc.index("GunsightDots.lua")
-        g = toc.index("Gunsight.lua")
-        hp = toc.index("HudProfiles.lua")
-        th = toc.index("Theme.lua")
+        s = toc.index("Modules/CombatHud/GunsightSeals.lua")
+        d = toc.index("Modules/CombatHud/GunsightDots.lua")
+        g = toc.index("Modules/CombatHud/Gunsight.lua")
+        hp = toc.index("Modules/CombatHud/HudProfiles.lua")
+        th = toc.index("Core/Theme.lua")
         out.append(("toc_order", None if s > d > g else
                     f"GunsightSeals.lua must load after GunsightDots.lua and Gunsight.lua (positions {s}, {d}, {g})"))
         out.append(("toc_after_hud_profiles_and_theme", None if s > hp and s > th else
                     "GunsightSeals.lua must load after HudProfiles.lua and Theme.lua"))
-        out.append(("toc_lists_the_file_once", None if toc.count("GunsightSeals.lua") == 1 else
+        out.append(("toc_lists_the_file_once", None if toc.count("Modules/CombatHud/GunsightSeals.lua") == 1 else
                     "GunsightSeals.lua must appear in the .toc exactly once"))
     except ValueError as e:
         out.append(("toc_order", f"{e}"))
     raw = TOC.read_bytes()
-    out.append(("toc_stays_crlf", None if raw.count(b"\r\n") == raw.count(b"\n") else "ForeverSynthwave.toc must stay CRLF"))
+    out.append(("toc_stays_crlf", None if raw.count(b"\r\n") == raw.count(b"\n") else "forever-stuwave.toc must stay CRLF"))
     if SEALS.exists():
         text = SEALS.read_text(encoding="utf-8")
         code = "\n".join(ln.split("--", 1)[0] for ln in text.splitlines())
@@ -3713,7 +3713,7 @@ def static_checks() -> list[tuple[str, str | None]]:
         i_flag, i_cmp = code.find("IsSecret(flag)"), code.find("flag == true")
         out.append(("source_guards_the_combat_flag_before_comparing", None if 0 <= i_flag < i_cmp else
                     "GunsightSeals.lua must pass the combat flag through FS.IsSecret before it compares it"))
-        dots_src = (ADDON / "GunsightDots.lua").read_text(encoding="utf-8")
+        dots_src = (ADDON / "Modules/CombatHud/GunsightDots.lua").read_text(encoding="utf-8")
         mine = re.search(r"(?m)^local LINE = G\.LINE or ([\d.]+)", text)
         theirs = re.search(r"(?m)^local LINE = G\.LINE or ([\d.]+)", dots_src)
         why = text[text.find("-- Hairline weight"):text.find("local LINE")] if "local LINE" in text else ""
@@ -3726,7 +3726,7 @@ def static_checks() -> list[tuple[str, str | None]]:
         out.append(("source_guards_the_key_before_indexing", None if 0 <= i_guard < i_use else
                     "GunsightSeals.lua must pass the seal key through FS.IsSecret before it indexes KEY_ID with it"))
         out.append(("secret_guards_come_before_the_first_use_of_each_value", secret_guard_order(code)))
-        dots = (ADDON / "GunsightDots.lua").read_text(encoding="utf-8")
+        dots = (ADDON / "Modules/CombatHud/GunsightDots.lua").read_text(encoding="utf-8")
         out.append(("header_seat_is_the_dot_scales", None if '"BOTTOMLEFT", DOT_AX, D.HDR_Y + 2.5)' in dots
                     and 'C.HDR_Y + 2.5)' in text else
                     "the header seat (BOTTOMLEFT, 2.5 below the baseline) must match GunsightDots.lua's"))
@@ -3745,8 +3745,8 @@ def run_case(name: str, body: str, mu: dict) -> str | None:
     lua.globals().LAYOUT_SRC = DOTS_H.LAYOUT.read_text(encoding="utf-8")
     lua.globals().GUNSIGHT_SRC = DOTS_H.GUNSIGHT.read_text(encoding="utf-8")
     lua.globals().PROFILES_SRC = DOTS_H.PROFILES.read_text(encoding="utf-8")
-    lua.globals().DOTS_SRC = (ADDON / "GunsightDots.lua").read_text(encoding="utf-8")
-    lua.globals().HUDSPELLS_SRC = (ADDON / "HudSpells.lua").read_text(encoding="utf-8")
+    lua.globals().DOTS_SRC = (ADDON / "Modules/CombatHud/GunsightDots.lua").read_text(encoding="utf-8")
+    lua.globals().HUDSPELLS_SRC = (ADDON / "Modules/CombatHud/HudSpells.lua").read_text(encoding="utf-8")
     lua.globals().SEALS_SRC = SEALS.read_text(encoding="utf-8")
     lua.globals().HAS_TARGET_SRC = DOTS_H._load_gunsight_harness().theme_target_rule_lua()
     lua.execute("MU = " + lua_value(mu))

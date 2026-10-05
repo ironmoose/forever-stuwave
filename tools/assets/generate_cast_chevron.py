@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates the cast bar chevron textures (solid neon chevrons, pointing RIGHT).
 
-Reference: addons/ForeverSynthwave/mockups/castbar-v2-chevrons-locked-2026-10-01.html,
+Reference: addons/ForeverSTUwave/mockups/castbar-v2-chevrons-locked-2026-10-01.html,
 card H ("Solid chevrons"), function segsChev() and the "outline" caret in
 placeShapedCaret(). Parker locked that look; the shared cast bar Lua engine
 draws these textures (mirrored with SetTexCoord for channels, tinted with
@@ -234,7 +234,7 @@ def write_tga(path, grid):
 
 
 def main():
-    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media"))
+    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures"))
     write_tga(os.path.join(here, "cast_chevron_fill.tga"), build_fill())
     write_tga(os.path.join(here, "cast_chevron_outline.tga"), build_outline())
     write_tga(os.path.join(here, "cast_chevron_glow.tga"), build_glow())

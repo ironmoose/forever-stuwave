@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Center Console v2</title>
 <style>
-/* The addon's own bundled faces (ForeverSynthwave/fonts). Falls back to the stacks below. */
-@font-face { font-family: "FS Display"; src: url("../addon/ForeverSynthwave/fonts/FSDisplay-Bold.ttf"); font-weight: 700; }
-@font-face { font-family: "FS Mono"; src: url("../addon/ForeverSynthwave/fonts/MononokiNerdFontMono-Bold.ttf"); font-weight: 700; }
-@font-face { font-family: "Share Tech Mono"; src: url("../addon/ForeverSynthwave/fonts/ShareTechMono-Regular.ttf"); }
+/* The addon's own bundled faces (ForeverSTUwave/fonts). Falls back to the stacks below. */
+@font-face { font-family: "FS Display"; src: url("../forever-stuwave/Media/Fonts/FSDisplay-Bold.ttf"); font-weight: 700; }
+@font-face { font-family: "FS Mono"; src: url("../forever-stuwave/Media/Fonts/MononokiNerdFontMono-Bold.ttf"); font-weight: 700; }
+@font-face { font-family: "Share Tech Mono"; src: url("../forever-stuwave/Media/Fonts/ShareTechMono-Regular.ttf"); }
 
 :root {
   color-scheme: dark;
@@ -112,7 +112,7 @@ h2 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 1
 <body>
 <div class="wrap">
   <header class="top">
-    <p class="kicker">Forever Synthwave / Combat HUD / Center console v2</p>
+    <p class="kicker">Forever STUwave / Combat HUD / Center console v2</p>
     <h1>Center console <span>around</span> the character</h1>
     <p class="lede"><b>New hard constraint (Parker):</b> "I can't have it cover my character. I have to look out for fire on the ground and stuff." Every panel here is a <b>full 2560 x 1440 screen drawn at 0.5 scale</b> (1280 x 720), with the character at the position measured from his in-game screenshots: horizontally centred, head at 0.485 and feet at 0.63 of screen height, 210 px tall at his normal zoom. The dashed <b>clear zone</b> ellipse is the keep-out region: it reaches from just above the head to well below the feet, and wide enough for a ground ring. <b>Nothing of the console enters it</b>; each panel is checked by script and the result is printed under it. Same rails, plates, tiles, party panel and node as v1, now as two side stacks outside the zone: the left stack (next cast tile, rotation row, player cast bar) with the left rail running into the party panel, the right stack (target cast bar, DoT tiles stepping down and outward). Nothing above the head, nothing in the bottom centre. Soul shards are on hold and not drawn.</p>
   </header>

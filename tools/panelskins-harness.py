@@ -35,9 +35,9 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
-PANELSKINS_SRC = (ADDON / "PanelSkins.lua").read_text(encoding="utf-8")
-THEME_SRC = (ADDON / "Theme.lua").read_text(encoding="utf-8")
+ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
+PANELSKINS_SRC = (ADDON / "Core/PanelSkins.lua").read_text(encoding="utf-8")
+THEME_SRC = (ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
 
 
 def theme_dark_text_lua() -> str:
@@ -99,7 +99,7 @@ function LoadPanelSkins()
     }
     assert(loadstring(THEME_DARK_TEXT_SRC .. "\nTHEME.IsDarkText = IsDarkText", "@Theme.lua(gate)"))()
     local chunk = assert(loadstring(PANELSKINS_SRC, "@PanelSkins.lua"))
-    chunk("ForeverSynthwave", FS)
+    chunk("forever-stuwave", FS)
     return FS
 end
 

@@ -26,10 +26,10 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
-THEME_SRC = Path(os.environ.get("THEME_LUA") or ADDON / "Theme.lua").read_text(encoding="utf-8")
-FRAMEHELPERS_SRC = (ADDON / "FrameHelpers.lua").read_text(encoding="utf-8")
-PETDOCK_SRC = (ADDON / "PetDock.lua").read_text(encoding="utf-8")  # the pet panel fill moved here in ac8662e
+ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
+THEME_SRC = Path(os.environ.get("THEME_LUA") or ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
+FRAMEHELPERS_SRC = (ADDON / "Core/FrameHelpers.lua").read_text(encoding="utf-8")
+PETDOCK_SRC = (ADDON / "Modules/Pet/PetDock.lua").read_text(encoding="utf-8")  # the pet panel fill moved here in ac8662e
 MOCKUP_HTML = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
 # The SLICE_* constants and the SkinButton default read the flag when Theme.lua LOADS, so the
 # "round" cases load a copy of the real file with only the flag line changed.
@@ -49,7 +49,7 @@ def mockup_scrim() -> tuple[float, float, float, float]:
 
 
 MOCK = r"""
-local mediaPrefix = "Interface\\AddOns\\ForeverSynthwave\\media\\"
+local mediaPrefix = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
 
 local Region = {}
 Region.__index = Region
@@ -122,12 +122,12 @@ function NewFrame() return CreateFrame("Frame") end
 
 FS = { LogDegradeOnce = function() end }
 Enum = { UITextureSliceMode = { Stretched = 1 } }
-assert(loadstring(THEME_SRC, "@Theme.lua"))("ForeverSynthwave", FS)
+assert(loadstring(THEME_SRC, "@Theme.lua"))("forever-stuwave", FS)
 Theme = FS.Theme
 
 -- FrameHelpers.lua on the same FS, loaded only by the cases that need it.
 function LoadFrameHelpers()
-    assert(loadstring(FRAMEHELPERS_SRC, "@FrameHelpers.lua"))("ForeverSynthwave", FS)
+    assert(loadstring(FRAMEHELPERS_SRC, "@FrameHelpers.lua"))("forever-stuwave", FS)
     return FS.FrameHelpers
 end
 
@@ -1140,7 +1140,7 @@ case("has_target_asks_issecret_about_the_unitexists_value_before_using_it", """
         return rawequal(v, SECRET) or (secretFalse and rawequal(v, false))
     end
     local FS2 = { LogDegradeOnce = function() end }
-    assert(loadstring(THEME_SRC, "@Theme.lua"))("ForeverSynthwave", FS2)
+    assert(loadstring(THEME_SRC, "@Theme.lua"))("forever-stuwave", FS2)
     local answer
     UnitExists = function(unit)
         assert(unit == "target", "asked about " .. tostring(unit))
@@ -1178,7 +1178,7 @@ case("target_takes_dots_is_the_shared_live_hostile_target_rule", """
         return rawequal(v, SECRET) or (secretFalse and (rawequal(v, false) or rawequal(v, true)))
     end
     local FS2 = { LogDegradeOnce = function() end }
-    assert(loadstring(THEME_SRC, "@Theme.lua"))("ForeverSynthwave", FS2)
+    assert(loadstring(THEME_SRC, "@Theme.lua"))("forever-stuwave", FS2)
     assert(type(FS2.TargetTakesDots) == "function", "FS.TargetTakesDots is missing")
     local exists, dead, ghost, attack = true, false, false, true
     UnitExists = function(u) assert(u == "target"); return exists end
@@ -1227,8 +1227,8 @@ case("target_takes_dots_is_the_shared_live_hostile_target_rule", """
 
 
 def assert_media_file(path) -> None:
-    """Resolve an Interface\\AddOns\\ForeverSynthwave\\ path the way the client does (.tga) to the repo dir."""
-    prefix = "Interface\\AddOns\\ForeverSynthwave\\"
+    """Resolve an Interface\\AddOns\\forever-stuwave\\ path the way the client does (.tga) to the repo dir."""
+    prefix = "Interface\\AddOns\\forever-stuwave\\"
     assert path.startswith(prefix), f"unexpected prefix: {path}"
     assert path.endswith(".tga"), f"not a .tga: {path}"
     target = ADDON.joinpath(*path[len(prefix):].split("\\"))

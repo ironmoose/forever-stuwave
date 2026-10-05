@@ -1,0 +1,67 @@
+## Interface: 16001
+## Title: Forever STUwave
+## Notes: Custom UI for WoW Forever.
+## Version: 0.1.0
+## Author: parker
+## SavedVariables: ForeverSTUwaveDB, ForeverSTUwaveErrorLog
+
+Core/ErrorLog.lua
+Modules/Nameplates/Nameplates.lua
+Core/Theme.lua
+Core/Layout.lua
+Core/FrameHelpers.lua
+Core/ChevronCastBar.lua
+Core/PanelSkins.lua
+Modules/Tracker/Tracker.lua
+Modules/Chat/ChatCore.lua
+Modules/Chat/ChatTabs.lua
+Modules/Chat/ChatEditBox.lua
+Modules/Chat/ChatTermBar.lua
+Modules/Chat/ChatWindowState.lua
+Modules/Chat/ChatFrameSkin.lua
+Modules/Chat/ChatSlashCommands.lua
+Modules/Chat/ChatFormat.lua
+Modules/UnitFrames/UnitFrames.lua
+Modules/Auras/TargetAuras.lua
+Modules/UnitFrames/PartyFrames.lua
+Modules/CastBars/CastBars.lua
+Modules/Auras/Buffs.lua
+Modules/Skins/Professions.lua
+Modules/ActionBars/ActionBars.lua
+Modules/ActionBars/Console.lua
+Modules/ActionBars/StanceBar.lua
+Modules/Pet/PetFrame.lua
+Modules/Pet/PetDock.lua
+Modules/Pet/PetActionBar.lua
+Modules/Pet/PetCastBar.lua
+Modules/Minimap/Minimap.lua
+Modules/Skins/Panels.lua
+Modules/Skins/Tooltip.lua
+Modules/Skins/Popups.lua
+Modules/Skins/Menus.lua
+Modules/Bags/Bags.lua
+Modules/Skins/Loot.lua
+Modules/DataBars/DataBar.lua
+Modules/DataBars/XPBar.lua
+Modules/ActionBars/Deck.lua
+Modules/ActionBars/MicroBars.lua
+Modules/Bags/BagBar.lua
+Modules/Skins/HudText.lua
+Modules/Skins/IssueReporter.lua
+Modules/Skins/AuctionHouse.lua
+Modules/Diagnostics/Diagnostics.lua
+Modules/CombatHud/HudSpells.lua
+Modules/CombatHud/HudProfiles.lua
+Modules/CombatHud/HudLogic.lua
+Modules/CombatHud/Gunsight.lua
+Modules/CombatHud/GunsightDots.lua
+Modules/CombatHud/GunsightSeals.lua
+Modules/CombatHud/GunsightFrame.lua
+Modules/CombatHud/GunsightBoxes.lua
+Modules/CombatHud/GunsightTape.lua
+Modules/ActionBars/ConsoleKeys.lua
+Modules/ActionBars/ClassShoulder.lua
+Modules/ActionBars/SealBar.lua
+Modules/CombatHud/CombatHud.lua
+Modules/Diagnostics/FSProbe.lua
+Modules/Diagnostics/BugReport.lua

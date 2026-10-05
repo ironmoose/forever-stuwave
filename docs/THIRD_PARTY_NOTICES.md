@@ -4,9 +4,9 @@
 
 The bundled font binaries are distributed under SIL Open Font License 1.1. See [bundled fonts](FONTS.md) for the source, reserved names, modifications, and license file for each font.
 
-- **Orbitron / FS Display:** Copyright 2018 The Orbitron Project Authors. FS Display is a renamed static weight instance derived from Orbitron. [License](../addon/ForeverSynthwave/fonts/OFL-Orbitron.txt).
-- **Mononoki Nerd Font Mono:** Mononoki copyright 2022 Matthias Tellen; the bundled file is the Nerd Fonts project's patched build. [License](../addon/ForeverSynthwave/fonts/OFL-Mononoki.txt).
-- **Share Tech Mono:** Copyright 2012 Carrois Type Design, Ralph du Carrois. [License](../addon/ForeverSynthwave/fonts/OFL-ShareTechMono.txt).
+- **Orbitron / FS Display:** Copyright 2018 The Orbitron Project Authors. FS Display is a renamed static weight instance derived from Orbitron. [License](../forever-stuwave/Media/Fonts/OFL-Orbitron.txt).
+- **Mononoki Nerd Font Mono:** Mononoki copyright 2022 Matthias Tellen; the bundled file is the Nerd Fonts project's patched build. [License](../forever-stuwave/Media/Fonts/OFL-Mononoki.txt).
+- **Share Tech Mono:** Copyright 2012 Carrois Type Design, Ralph du Carrois. [License](../forever-stuwave/Media/Fonts/OFL-ShareTechMono.txt).
 
 The README's vector masthead contains outlines derived from FS Display and Share Tech Mono.
 

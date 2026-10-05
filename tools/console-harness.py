@@ -45,11 +45,11 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent / "addon" / "ForeverSynthwave"
+ADDON = HERE.parent / "forever-stuwave"
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
-TOC = ADDON / "ForeverSynthwave.toc"
-CONSOLE = ADDON / "Console.lua"
-LAYOUT = ADDON / "Layout.lua"
+TOC = ADDON / "forever-stuwave.toc"
+CONSOLE = ADDON / "Modules/ActionBars/Console.lua"
+LAYOUT = ADDON / "Core/Layout.lua"
 
 _spec = importlib.util.spec_from_file_location("actionbars_harness", HERE / "actionbars-harness.py")
 abh = importlib.util.module_from_spec(_spec)
@@ -117,8 +117,8 @@ def chat_edge_implied_by_the_code(scale: float) -> float:
     floor: the check asserts CHAT_CHROME_RIGHT is never left of this value, leaving about
     19px unexplained, so it only fires if the chat outset grows significantly. The real guard
     is re-measuring from a live screenshot when the chat chrome changes."""
-    pad_x = int(_m(r"(?m)^local PAD_X = (\d+)", (ADDON / "ChatCore.lua").read_text(encoding="utf-8"), "ChatCore PAD_X").group(1))
-    glow = int(_m(r"(?m)^Theme\.SLICE_GLOW_PAD = (\d+)", (ADDON / "Theme.lua").read_text(encoding="utf-8"), "SLICE_GLOW_PAD").group(1))
+    pad_x = int(_m(r"(?m)^local PAD_X = (\d+)", (ADDON / "Modules/Chat/ChatCore.lua").read_text(encoding="utf-8"), "ChatCore PAD_X").group(1))
+    glow = int(_m(r"(?m)^Theme\.SLICE_GLOW_PAD = (\d+)", (ADDON / "Core/Theme.lua").read_text(encoding="utf-8"), "SLICE_GLOW_PAD").group(1))
     lay = re.search(r"^\s+chat\s+= \{[^}]*x = (-?\d+),\s+y = -?\d+,\s+w = (\d+)", LAYOUT.read_text(encoding="utf-8"), re.M)
     if not lay:
         sys.exit("Layout.lua: chat entry not found")
@@ -972,7 +972,7 @@ function T.console_off_brings_the_pill_chrome_and_the_old_gap_back()
     near(gapOn, FS.ActionBars.SPINE_DESIGN * S(), "gap = CN_SPINE design px while on")
     near(FS.ActionBars.SPINE_DESIGN, M.SPINE, "CN_SPINE matches the mockup")
     SlashCmdList.FSCONSOLE("off")
-    eq(ForeverSynthwaveDB.consoleEnabled, false, "saved")
+    eq(ForeverSTUwaveDB.consoleEnabled, false, "saved")
     eq(C().IsActive(), false)
     eq(C().root:IsShown(), false, "Console hidden")
     for i = 1, 6 do eq(chromeOf(i):IsShown(), true, "pill chrome back on bar " .. i) end
@@ -980,7 +980,7 @@ function T.console_off_brings_the_pill_chrome_and_the_old_gap_back()
     local stack = rect(FSActionBarStack)
     near((rect(h1).l + rect(h2).r) / 2, stack.l + stack.w / 2, "pills still centred in the stack")
     SlashCmdList.FSCONSOLE("on")
-    eq(ForeverSynthwaveDB.consoleEnabled, true, "saved on")
+    eq(ForeverSTUwaveDB.consoleEnabled, true, "saved on")
     eq(C().root:IsShown(), true, "Console back")
     for i = 1, 6 do eq(chromeOf(i):IsShown(), false, "pill chrome hidden again") end
     near(rect(h2).l - rect(h1).r, FS.ActionBars.SPINE_DESIGN * S(), "wide gap back")
@@ -1089,7 +1089,7 @@ function T.a_failed_build_falls_back_to_pill_chrome_without_reentering_or_unsavi
     eq(__geoMax, 1, "the fallback never re-entered the geometry callback")
     for i = 1, 6 do eq(_G["FSActionBar" .. i].fsChrome:IsShown(), true, "pill chrome back on bar " .. i) end
     near(rect(_G.FSActionBar2).l - rect(_G.FSActionBar1).r, 6, "the pill gap, not the wide spine")
-    eq(ForeverSynthwaveDB.consoleEnabled, true, "the saved choice is untouched")
+    eq(ForeverSTUwaveDB.consoleEnabled, true, "the saved choice is untouched")
     eq(C().IsActive(), true, "the player's choice still reads on")
     eq(C().root and C().root:IsShown(), false, "the half built chassis stays hidden")
     -- switching off and on again lands on the same fallback instead of chrome-less pills
@@ -1099,7 +1099,7 @@ function T.a_failed_build_falls_back_to_pill_chrome_without_reentering_or_unsavi
     truthy(__say and __say:find("failed to draw", 1, true), "the player is told it failed to draw: " .. tostring(__say))
     __flush()
     for i = 1, 6 do eq(_G["FSActionBar" .. i].fsChrome:IsShown(), true, "chrome after off/on, bar " .. i) end
-    eq(ForeverSynthwaveDB.consoleEnabled, true, "still saved on")
+    eq(ForeverSTUwaveDB.consoleEnabled, true, "still saved on")
     eq(__geoMax, 1, "still never nested")
     eq(__consoleFrames, 1, "and still no rebuild")
 end
@@ -1126,7 +1126,7 @@ function T.a_failed_build_fallback_waits_for_combat_to_end()
     __flush()
     eq(__blocked, 0, "regen work is not blocked")
     for i = 1, 6 do eq(_G["FSActionBar" .. i].fsChrome:IsShown(), true, "chrome on bar " .. i .. " after regen") end
-    eq(ForeverSynthwaveDB.consoleEnabled, true, "saved choice untouched")
+    eq(ForeverSTUwaveDB.consoleEnabled, true, "saved choice untouched")
     eq(__geoMax, 1, "never nested")
 end
 
@@ -1144,7 +1144,7 @@ function T.a_failed_seat_falls_back_to_pill_chrome_like_a_failed_build()
     __flush()
     eq(__geoMax, 1, "the fallback never re-entered the geometry callback")
     for i = 1, 6 do eq(_G["FSActionBar" .. i].fsChrome:IsShown(), true, "pill chrome back on bar " .. i) end
-    eq(ForeverSynthwaveDB.consoleEnabled, true, "the saved choice is untouched")
+    eq(ForeverSTUwaveDB.consoleEnabled, true, "the saved choice is untouched")
     eq(C().IsActive(), true, "the player's choice still reads on")
     eq(__degradeCount, 1, "still one chat line")
     SlashCmdList.FSCONSOLE("off")
@@ -1163,7 +1163,7 @@ function T.a_failed_seat_recovers_when_the_next_seat_works()
     __flush()
     eq(C().root:IsShown(), true, "the chassis is up")
     for i = 1, 6 do eq(_G["FSActionBar" .. i].fsChrome:IsShown(), false, "pill chrome off again, bar " .. i) end
-    eq(ForeverSynthwaveDB.consoleEnabled, true, "saved choice untouched")
+    eq(ForeverSTUwaveDB.consoleEnabled, true, "saved choice untouched")
     eq(__geoMax, 1, "never nested")
 end
 
@@ -1185,7 +1185,7 @@ function T.a_failed_seat_falls_back_only_when_no_chassis_is_drawn()
     __flush()
     eq(C().root:IsShown(), false, "nothing drawn after off then a failing on")
     for i = 1, 6 do eq(_G["FSActionBar" .. i].fsChrome:IsShown(), true, "fallback, bar " .. i) end
-    eq(ForeverSynthwaveDB.consoleEnabled, true, "saved choice untouched")
+    eq(ForeverSTUwaveDB.consoleEnabled, true, "saved choice untouched")
     eq(__geoMax, 1, "never nested")
 end
 
@@ -1287,7 +1287,7 @@ function T.nothing_protected_is_re_seated_shown_or_hidden_in_combat()
     eq(btn(1, 1)._w, before.w, "buttons did not resize")
     eq(C().root._w, before.root, "Console did not re-seat")
     for i = 1, 6 do eq(chromeOf(i):IsShown(), false, "chrome untouched in combat") end
-    eq(ForeverSynthwaveDB.consoleEnabled, false, "the choice itself is saved at once")
+    eq(ForeverSTUwaveDB.consoleEnabled, false, "the choice itself is saved at once")
     truthy(__say and __say:find("combat"), "the player is told it waits for combat")
     -- regen: both the rescale and the off switch land
     __combat = false
@@ -1375,7 +1375,7 @@ FALLBACK_TIMERS_AND_DEPTH = """
 """
 
 FAILED_BUILD_FALLBACK = """
-    ForeverSynthwaveDB = { consoleEnabled = true }
+    ForeverSTUwaveDB = { consoleEnabled = true }
     local realCreateFrame = CreateFrame
     __consoleFrames = 0
     CreateFrame = function(kind, name, ...)
@@ -1387,7 +1387,7 @@ FAILED_BUILD_FALLBACK = """
 
 # Build works but Seat throws while __seatBroken (the root's SetPoint is what Seat calls first).
 FAILED_SEAT_FALLBACK = """
-    ForeverSynthwaveDB = { consoleEnabled = true }
+    ForeverSTUwaveDB = { consoleEnabled = true }
     __seatBroken = true
     local realCreateFrame = CreateFrame
     CreateFrame = function(kind, name, ...)
@@ -1405,10 +1405,10 @@ FAILED_SEAT_FALLBACK = """
 # Checks that need a different start: name -> Lua run before the addon loads. They run ONLY on
 # that start; every other check runs on the default one (Console on, nothing saved).
 VARIANTS = {
-    "console_starts_off_when_saved_off": "ForeverSynthwaveDB = { consoleEnabled = false }",
-    "is_drawn_is_false_before_the_first_seat_and_a_stored_gap_lands_on_the_first_draw": "ForeverSynthwaveDB = { consoleEnabled = false }",
-    "gap_patch_alpha_set_before_the_chassis_exists_lands_on_the_first_draw": "ForeverSynthwaveDB = { consoleEnabled = false }",
-    "console_off_restores_the_pill_layout_exactly": "ForeverSynthwaveDB = { consoleEnabled = false }",
+    "console_starts_off_when_saved_off": "ForeverSTUwaveDB = { consoleEnabled = false }",
+    "is_drawn_is_false_before_the_first_seat_and_a_stored_gap_lands_on_the_first_draw": "ForeverSTUwaveDB = { consoleEnabled = false }",
+    "gap_patch_alpha_set_before_the_chassis_exists_lands_on_the_first_draw": "ForeverSTUwaveDB = { consoleEnabled = false }",
+    "console_off_restores_the_pill_layout_exactly": "ForeverSTUwaveDB = { consoleEnabled = false }",
     "a_failed_build_falls_back_to_pill_chrome_without_reentering_or_unsaving": FAILED_BUILD_FALLBACK,
     "a_failed_build_fallback_waits_for_combat_to_end": FAILED_BUILD_FALLBACK,
     "a_missing_timer_logs_the_skipped_fallback_once": """
@@ -1439,7 +1439,7 @@ def static_checks(mu: dict) -> list[tuple[str, str | None]]:
     toc = [ln.strip() for ln in TOC.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")]
     try:
         out.append(("toc_places_console_right_after_actionbars",
-                    None if toc.index("Console.lua") == toc.index("ActionBars.lua") + 1
+                    None if toc.index("Modules/ActionBars/Console.lua") == toc.index("Modules/ActionBars/ActionBars.lua") + 1
                     else "Console.lua must load right after ActionBars.lua"))
     except ValueError as e:
         out.append(("toc_places_console_right_after_actionbars", f"{e}"))
@@ -1447,7 +1447,7 @@ def static_checks(mu: dict) -> list[tuple[str, str | None]]:
     out.append(("toc_keeps_crlf", None if raw.count(b"\r\n") == raw.count(b"\n") else "toc has bare LF lines"))
     missing = [n for n in ("console_fill_c14.tga", "console_outline_c14.tga", "console_glow_c14.tga",
                            "console_tab_foot.tga", "tab_slant.tga", "glow_round.tga")
-               if not (ADDON / "media" / n).exists()]
+               if not (ADDON / "Media" / "Textures" / n).exists()]
     out.append(("console_media_exists", None if not missing else f"missing {missing}"))
     out.append(("console_lua_exists", None if CONSOLE.exists() else "Console.lua does not exist"))
     lay = layout_constants()
@@ -1468,7 +1468,7 @@ def outer_extent(scale: float) -> dict:
     """The Console's outer edge, halo included, at `scale` (design px, x centre-relative, y up):
     left, right, top, bottom, tabLeft, tabTop. petframe-harness.py seats the pet panel from it."""
     mu = mockup_constants()
-    lua = abh.boot(make_prelude(scale, ""), extra=("Console.lua",))
+    lua = abh.boot(make_prelude(scale, ""), extra=("Modules/ActionBars/Console.lua",))
     lua.globals().__M = lua.table_from(mu)
     lua.execute(CHECKS)
     e = lua.eval("__outer_extent")()
@@ -1479,7 +1479,7 @@ def run_check(name: str, scale: float, mu: dict) -> str | None:
     db = VARIANTS.get(name, "")
     prelude = make_prelude(scale, db)
     # boot() runs the prelude BEFORE the addon files and __login() last
-    lua = abh.boot(prelude, extra=("Console.lua",))
+    lua = abh.boot(prelude, extra=("Modules/ActionBars/Console.lua",))
     lua.globals().__M = lua.table_from(mu)
     lua.execute(CHECKS)
     try:
@@ -1512,7 +1512,7 @@ def main() -> int:
         return 1
 
     # the check names are read from a scratch boot, so a missing module fails per check
-    probe = abh.boot(make_prelude(SCALES[0], ""), extra=("Console.lua",))
+    probe = abh.boot(make_prelude(SCALES[0], ""), extra=("Modules/ActionBars/Console.lua",))
     probe.globals().__M = probe.table_from(mu)
     probe.execute(CHECKS)
     names = sorted(k for k in probe.eval("__checks").keys())

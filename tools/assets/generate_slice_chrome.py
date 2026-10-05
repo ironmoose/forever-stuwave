@@ -191,7 +191,7 @@ def gradient(y):
 
 
 def main():
-    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media"))
+    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures"))
     _write(os.path.join(here, "slice_fill.tga"), build_fill())
     _write(os.path.join(here, "slice_button.tga"), build_fill(gradient))
     _write(os.path.join(here, "slice_border.tga"), build_border())

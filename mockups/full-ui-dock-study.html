@@ -1,4 +1,4 @@
-<title>Forever Synthwave HUD Dock Study</title>
+<title>Forever STUwave HUD Dock Study</title>
 <style>
   :root{
     --bg:#0d0620; --panel:#160c2b; --panel2:#1d1138; --surface:#271849;
@@ -273,7 +273,7 @@
 </style>
 
 <div class="topbar">
-  <div class="brand"><span class="logo">Forever Synthwave</span><span class="sub">HUD Dock Study</span></div>
+  <div class="brand"><span class="logo">Forever STUwave</span><span class="sub">HUD Dock Study</span></div>
   <span class="res">canvas <b id="resLabel">2560&times;1440</b></span>
   <div class="spacer"></div>
   <div class="seg" role="group" aria-label="Micro button style">
@@ -525,7 +525,7 @@ function comp(e,s){
     const tc=C[e.borderColor]||C.cyan;
     const tabs=e.showTabs?`<div class="termtabs"><span class="active">General</span><span>Combat</span><span>Loot</span></div>`:"";
     const scan=(e.scan??true)?`<div class="scan"></div>`:"";
-    return `<div class="cmp term" style="--termc:${tc}"><div class="termbar"><span class="dotr"></span><span class="dotg"></span>synthwave://general</div>${tabs}<div class="termbody"><div class="tl"><span class="am">System:</span> Entered Nagrand.</div><div class="tl"><span class="pk">[Guild]</span> <span class="cy">Vex:</span> inv for heroic?</div><div class="tl"><span class="cy">Kaine:</span> one sec, repairing</div><div class="tl"><span class="gn">[Party]</span> <span class="cy">Nyx:</span> pulling in 5</div><div class="tl"><span class="cy">You:</span> hots rolling</div><div class="tl"><span class="am">System:</span> Greater Heal is ready.</div><div class="tl"><span class="pk">[Guild]</span> <span class="cy">Vex:</span> ty ty</div><div class="tl prompt">&gt; <span class="cursor"></span></div></div>${scan}</div>`;
+    return `<div class="cmp term" style="--termc:${tc}"><div class="termbar"><span class="dotr"></span><span class="dotg"></span>stuwave://general</div>${tabs}<div class="termbody"><div class="tl"><span class="am">System:</span> Entered Nagrand.</div><div class="tl"><span class="pk">[Guild]</span> <span class="cy">Vex:</span> inv for heroic?</div><div class="tl"><span class="cy">Kaine:</span> one sec, repairing</div><div class="tl"><span class="gn">[Party]</span> <span class="cy">Nyx:</span> pulling in 5</div><div class="tl"><span class="cy">You:</span> hots rolling</div><div class="tl"><span class="am">System:</span> Greater Heal is ready.</div><div class="tl"><span class="pk">[Guild]</span> <span class="cy">Vex:</span> ty ty</div><div class="tl prompt">&gt; <span class="cursor"></span></div></div>${scan}</div>`;
   }
   if(e.role==="tracker"){
     const tk=C[e.accent]||C.cyan;
@@ -661,7 +661,7 @@ try{const bg=sessionStorage.getItem("fs-bg"); if(bg)screen.style.backgroundImage
 document.getElementById("resetBtn").addEventListener("click",()=>{ if(!confirm("Reset all sections to the default layout?"))return; state=mergeState(null); selId=null; save(); render(); renderDock(); toast("Layout reset"); });
 
 const modal=document.getElementById("modal"), modalText=document.getElementById("modalText");
-function exportObj(){return {tool:"forever-synthwave-layout", resolution:`${aspect==="16:9"?2560:aspect==="21:9"?3440:5120}x1440`, aspect,
+function exportObj(){return {tool:"forever-stuwave-layout", resolution:`${aspect==="16:9"?2560:aspect==="21:9"?3440:5120}x1440`, aspect,
   note:"x/y = top-left in game px; wow = offset from UIParent CENTER at the element's own center.",
   sections:state.map(e=>{const a=anchor(e); const o={id:e.id,label:e.label,visible:e.visible,x:Math.round(e.x/100*GAME_W),y:Math.round(e.y/100*GAME_H),w:e.w,h:e.h,opacity:e.opacity,accent:e.accent,wow:{point:"CENTER",relativePoint:"CENTER",x:a.x,y:a.y}}; if(e.cols)o.cols=e.cols; if(e.rows)o.rows=e.rows;
     ["cornerRadius","borderWidth","glow","scan","showZone","showCoords","showClock","showButtons","showWaypoint","showNorth","borderColor","showTabs","showCount"].forEach(k=>{ if(e[k]!==undefined)o[k]=e[k]; }); return o;})};}

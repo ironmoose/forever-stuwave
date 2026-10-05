@@ -1,6 +1,6 @@
 # Forever STUwave: alpha testing
 
-Use the [README installation and update instructions](../README.md). Close the game before deploying an update, and fully restart for newly added files, bindings or textures. The visible addon name is **Forever STUwave**; its installed folder and `.toc` must remain `ForeverSynthwave`.
+Use the [README installation and update instructions](../README.md). Close the game before deploying an update, and fully restart for newly added files, bindings or textures. The visible addon name is **Forever STUwave**; its folder is `forever-stuwave` and manifest is `forever-stuwave.toc`.
 
 Judgement behavior and its HUD lane, Quick Keybind, and the current key label visuals have been checked in game. Seal/aura clicks, chamber expiry and no-seal states, the shoulder seam, and minimap placement on a new character's first login still need checks. Advanced Paladin level 10/20 rotation rules remain incomplete. The checklist below also helps catch regressions in checked features.
 
@@ -35,30 +35,7 @@ The minimap may sit in the wrong place on a character's very first login only.
 
 The log is account wide: if another character already logged in with this build, send the /fsbug before your next login or /reload, or this login's log is lost.
 
-## Class recon (Paladin testers: once at level 1, then again around level 10)
-
-The recon writes down what your Paladin has right now, so set it up first. If you have them, have
-these active before you start: a seal, an aura, and a blessing (on yourself or on a party member).
-
-Do these in order:
-
-1. Target a training dummy, or a mob you can leave behind, and attack it.
-2. If you have Judgement, use it on the target. At level 1 you will not have it yet, so skip this step.
-3. Keep the target selected. Stop attacking and let combat end: kill it or walk away.
-4. Check that your seal is still active. Judgement does not use it up on Forever, so only cast one
-   again if it has run out.
-5. Right away, before the Judgement debuff on the target runs out, type `/fsrecon class`.
-6. Check chat. It worked when you see lines starting with `synthwave://class` and none of them say
-   "skipped" or "no target". If one does, wait a few seconds out of combat, keep your target selected,
-   and run `/fsrecon class` again.
-7. Then run `/fsbug`.
-
-Send the `/fsbug` .txt with your report; it holds the recon. Only the first `/fsbug` after a recon carries it, so
-run `/fsbug` right after. If the `/fsbug` window did not open, just run `/fsbug` again: the recon is kept
-until a report has been shown to you.
-
-Do not run `/fsbug clear` until you have sent the report. Clearing deletes the stored report, and the
-recon will not ride along in a later one.
+Optional developer diagnostics: `/fsprobe` records what this client exposes in and out of combat.
 
 ## Paladin: seals, auras, Seal Chamber, chat font
 
@@ -138,7 +115,7 @@ Use a Paladin that has learned at least one seal. Step 6 works on any class.
 Every report is also saved in the SavedVariables file. It is written on
 `/reload` or logout. Send that file instead:
 
-    World of Warcraft\_classic_beta_\WTF\Account\<ACCOUNT>\SavedVariables\ForeverSynthwave.lua
+    World of Warcraft\_classic_beta_\WTF\Account\<ACCOUNT>\SavedVariables\forever-stuwave.lua
 
 `<ACCOUNT>` is your account folder name.
 
@@ -155,7 +132,7 @@ You do not need `/console scriptErrors 1` for any of this.
 
 If chat says "error log full, /fserr clear", new errors are counted but not stored, so run /fsbug, send it, then /fserr clear.
 
-That only covers Lua errors. Blizzard's own "ForeverSynthwave has been blocked
+That only covers Lua errors. Blizzard's own "forever-stuwave has been blocked
 from an action only available to the Blizzard UI" popup can still appear, and
 the same chat line prints when it does. Run `/fsbug` for that too.
 

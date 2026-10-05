@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Headless check of DataBar.lua's DEBUG segment (the ForeverDebugBridge lattice drawn inside the bar).
 
-Runs the real addons/ForeverSynthwave/DataBar.lua under lupa against a small mock WoW API (a
+Runs the real addons/forever-stuwave/DataBar.lua under lupa against a small mock WoW API (a
 layout harness: widgets record size, anchors, shown state and HookScript lists; every other
 widget method is a no-op). It pins the behaviour the bar promises:
 
@@ -31,8 +31,8 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
-DATABAR = Path(os.environ.get("DATABAR_LUA", ADDON / "DataBar.lua"))   # DATABAR_LUA: a mutated scratch copy
+ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
+DATABAR = Path(os.environ.get("DATABAR_LUA", ADDON / "Modules/DataBars/DataBar.lua"))   # DATABAR_LUA: a mutated scratch copy
 SCREEN_W, PHYS_H = 2560, 1440
 LABEL_W = 32.5          # the mock's GetStringWidth for "DEBUG"
 PAD_X, LABEL_GAP, LINK_END_PAD_PX, RECESS_PAD_PX = 8, 6, 4, 4
@@ -131,7 +131,7 @@ __FS = FS
 
 function __load(src)
     local chunk = assert(loadstring(src, "@DataBar.lua"))
-    chunk("ForeverSynthwave", FS)
+    chunk("forever-stuwave", FS)
 end
 function __event(e)
     for _, f in ipairs(__frames) do
@@ -142,7 +142,7 @@ end
 function __children()
     local out = {}
     for _, f in ipairs(__frames) do
-        if f.parent == _G.ForeverSynthwaveDataBar and f.kind ~= "texture" and f.kind ~= "fontstring" and f.pt then
+        if f.parent == _G.ForeverSTUwaveDataBar and f.kind ~= "texture" and f.kind ~= "fontstring" and f.pt then
             out[#out + 1] = { name = f.name, x = f.pt.x, w = f.w, shown = f.shown }
         end
     end
@@ -150,7 +150,7 @@ function __children()
 end
 -- The DEBUG slot's own parts: its label, its recess, and where each is anchored.
 function __linkParts()
-    local link = _G.ForeverSynthwaveDataBarLink
+    local link = _G.ForeverSTUwaveDataBarLink
     local label, recess
     for _, f in ipairs(__frames) do
         if f.parent == link and f.kind == "fontstring" and f.text == "DEBUG" then label = f end
@@ -200,13 +200,13 @@ class Bar:
         """Bar children left to right as {key, x, w}; key is 'link' or the segment's SEGMENT_DEFS order."""
         kids = [dict(x=c["x"], w=c["w"], name=c["name"], shown=c["shown"])
                 for c in self.rt.eval("__children()").values()]
-        segs = [k for k in kids if k["name"] != "ForeverSynthwaveDataBarLink"]
+        segs = [k for k in kids if k["name"] != "ForeverSTUwaveDataBarLink"]
         for key, k in zip(("fps", "bags", "time", "gold"), segs):
             k["key"] = key
         for k in kids:
-            if k["name"] == "ForeverSynthwaveDataBarLink":
+            if k["name"] == "ForeverSTUwaveDataBarLink":
                 k["key"] = "link"
-        return sorted((k for k in kids if k["name"] != "ForeverSynthwaveDataBarLink" or k["shown"]),
+        return sorted((k for k in kids if k["name"] != "ForeverSTUwaveDataBarLink" or k["shown"]),
                       key=lambda k: k["x"])
 
     def theme_calls(self) -> list[dict]:
@@ -248,8 +248,8 @@ def test_equal_without_bridge() -> None:
     check(all(k["x"] == i * seg_w for i, k in enumerate(lay)),
           "no bridge: segment i sits at exactly (i - 1) * segWidth (no tolerance, the original formula)",
           str([(k["key"], k["x"]) for k in lay]))
-    check(b.rt.eval("ForeverSynthwaveDataBar.linkSlot == ForeverSynthwaveDataBarLink")
-          and not b.rt.eval("ForeverSynthwaveDataBarLink:IsShown()"), "DEBUG slot is built but hidden, exported as linkSlot")
+    check(b.rt.eval("ForeverSTUwaveDataBar.linkSlot == ForeverSTUwaveDataBarLink")
+          and not b.rt.eval("ForeverSTUwaveDataBarLink:IsShown()"), "DEBUG slot is built but hidden, exported as linkSlot")
 
     b.run("__makeBridge(false)")
     b.rt.execute('__event("PLAYER_ENTERING_WORLD")')
@@ -383,10 +383,10 @@ def test_combat() -> None:
     b = Bar()
     b.run("__makeBridge(true, { w = 228, h = 18 })")
     b.login()
-    b.run("ForeverSynthwaveDataBar.restricted = true")     # the XP bar -> deck chassis -> secure bag buttons chain
+    b.run("ForeverSTUwaveDataBar.restricted = true")     # the XP bar -> deck chassis -> secure bag buttons chain
     before = b.layout()
     check(keys(before) == ["fps", "bags", "link", "time", "gold"], "combat: set up with DEBUG shown", str(keys(before)))
-    width = b.rt.eval("ForeverSynthwaveDataBar.w")
+    width = b.rt.eval("ForeverSTUwaveDataBar.w")
 
     b.run("__combat = true")
     b.run("UIParent.w = 1920; __setUiScale(0.64); for _, fn in ipairs(__rescale) do fn() end")
@@ -394,7 +394,7 @@ def test_combat() -> None:
     b.rt.execute('__event("PLAYER_ENTERING_WORLD")')   # a zone change in combat: Rescale again
     check(b.rt.eval("#__blocked") == 0, "combat: a rescale, a /fdebug hide and a zone change block nothing",
           str(list(b.rt.eval("__blocked").values())))
-    check(b.rt.eval("ForeverSynthwaveDataBar.w") == width, "combat: the bar keeps its width", str(b.rt.eval("ForeverSynthwaveDataBar.w")))
+    check(b.rt.eval("ForeverSTUwaveDataBar.w") == width, "combat: the bar keeps its width", str(b.rt.eval("ForeverSTUwaveDataBar.w")))
     after = b.layout()
     check([(k["key"], k["x"], k["w"]) for k in after] == [(k["key"], k["x"], k["w"]) for k in before],
           "combat: the segments (and DEBUG) keep their seats and widths", str([(k["key"], k["x"]) for k in after]))
@@ -402,21 +402,21 @@ def test_combat() -> None:
     b.run("__combat = false")
     b.rt.execute('__event("PLAYER_REGEN_ENABLED")')
     check(b.rt.eval("#__blocked") == 0, "regen: replaying blocks nothing", str(list(b.rt.eval("__blocked").values())))
-    check(b.rt.eval("ForeverSynthwaveDataBar.w") == 1920, "regen: the bar takes the screen width current now",
-          str(b.rt.eval("ForeverSynthwaveDataBar.w")))
+    check(b.rt.eval("ForeverSTUwaveDataBar.w") == 1920, "regen: the bar takes the screen width current now",
+          str(b.rt.eval("ForeverSTUwaveDataBar.w")))
     lay = b.layout()
     check(keys(lay) == ["fps", "bags", "time", "gold"], "regen: the bridge hidden in combat takes DEBUG away", str(keys(lay)))
     check(all(abs(k["w"] - 1920 / 4) < 1e-6 for k in lay) and abs(lay[-1]["x"] + lay[-1]["w"] - 1920) < 1e-6,
           "regen: the segments share the new width equally", str([(k["key"], round(k["w"], 2)) for k in lay]))
 
     # With nothing pending, a regen leaves the bar alone (no resize per combat end).
-    b.run("ForeverSynthwaveDataBar.w = 1234")
+    b.run("ForeverSTUwaveDataBar.w = 1234")
     b.rt.execute('__event("PLAYER_REGEN_ENABLED")')
-    check(b.rt.eval("ForeverSynthwaveDataBar.w") == 1234, "regen with nothing pending does not re-run the layout")
+    check(b.rt.eval("ForeverSTUwaveDataBar.w") == 1234, "regen with nothing pending does not re-run the layout")
 
     # Out of combat a rescale is still immediate.
     b.run("UIParent.w = 1600; for _, fn in ipairs(__rescale) do fn() end")
-    check(b.rt.eval("ForeverSynthwaveDataBar.w") == 1600, "out of combat a rescale still applies at once")
+    check(b.rt.eval("ForeverSTUwaveDataBar.w") == 1600, "out of combat a rescale still applies at once")
 
 
 def main() -> int:

@@ -13,8 +13,8 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
-PARTY_SRC = (ADDON / "PartyFrames.lua").read_text(encoding="utf-8")
+ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
+PARTY_SRC = (ADDON / "Modules/UnitFrames/PartyFrames.lua").read_text(encoding="utf-8")
 
 MOCK = r"""
 __frames, __messages = {}, {}
@@ -468,7 +468,7 @@ BLIZZARD_PARTY_MODES = {
     "decoy": "PartyMemberFrame1=__blizzFrame('Button','PartyMemberFrame1',UIParent)",
 }
 
-THEME_SRC = (ADDON / "Theme.lua").read_text(encoding="utf-8")
+THEME_SRC = (ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
 
 
 def _theme_color(name: str) -> tuple[float, float, float, float]:
@@ -552,7 +552,7 @@ def _runtime(
     if not c_unitauras:
         rt.execute("C_UnitAuras=nil")  # FrameHelpers.ReadAuraSlot then takes the UnitAura path
     load = rt.eval(LOAD)
-    for filename in ("Layout.lua", "FrameHelpers.lua", "PartyFrames.lua"):
+    for filename in ("Core/Layout.lua", "Core/FrameHelpers.lua", "Modules/UnitFrames/PartyFrames.lua"):
         load((ADDON / filename).read_text(encoding="utf-8"), f"@{filename}", rt.globals().FS)
     if quiet:
         _assert_quiet(rt)
@@ -1190,7 +1190,7 @@ def _check_shared_pill_bar(chrome: str = "cut") -> None:
         "end"
     )
     rt.eval(LOAD)(
-        (ADDON / "FrameHelpers.lua").read_text(encoding="utf-8"),
+        (ADDON / "Core/FrameHelpers.lua").read_text(encoding="utf-8"),
         "@FrameHelpers.lua",
         rt.globals().FS,
     )
@@ -1291,7 +1291,7 @@ def _check_level_chip(chrome: str) -> None:
     rt.execute(MOCK)
     rt.execute(f"FS.Theme.CHROME_CORNERS='{chrome}'")
     rt.eval(LOAD)(
-        (ADDON / "FrameHelpers.lua").read_text(encoding="utf-8"),
+        (ADDON / "Core/FrameHelpers.lua").read_text(encoding="utf-8"),
         "@FrameHelpers.lua",
         rt.globals().FS,
     )
@@ -2356,11 +2356,11 @@ def _check_buff_toggle_and_default_off() -> None:
     assert _tiles(row) == [], "Shadow Protection is OFF by default: no tile for it"
     rt.execute("__messages={}")
     g.SlashCmdList.FSPARTY("buff shadowprot on")
-    assert g.ForeverSynthwaveDB.partyBuffs.shadowprot is True, "toggle on must persist true"
+    assert g.ForeverSTUwaveDB.partyBuffs.shadowprot is True, "toggle on must persist true"
     assert _tiles(row) == [1], f"toggling on repaints the rows: {_tiles(row)}"
     assert row.alertIcons[1].missingText == f"Missing: {SHADOW}"
     g.SlashCmdList.FSPARTY("buff shadowprot off")
-    assert g.ForeverSynthwaveDB.partyBuffs.shadowprot is False
+    assert g.ForeverSTUwaveDB.partyBuffs.shadowprot is False
     assert _tiles(row) == [], "toggling off hides it again"
     g.SlashCmdList.FSPARTY("buff fortitude off")
     _set_buffs(rt, "party1", "{}")
@@ -2373,7 +2373,7 @@ def _check_buff_toggle_and_default_off() -> None:
     assert msgs and "nonsense" in msgs[0], f"unknown key must be reported: {msgs}"
     # A saved override beats the default in a fresh session.
     rt2 = _runtime(before_load=(
-        "ForeverSynthwaveDB={partyBuffs={fortitude=false,shadowprot=true}} "
+        "ForeverSTUwaveDB={partyBuffs={fortitude=false,shadowprot=true}} "
         f"__spellIds={{['{FORT}']=1001,['{SHADOW}']=1003}} __knownIds={{[1001]=true,[1003]=true}}"))
     row2 = _party1(rt2)
     _fire(row2, "UNIT_AURA")

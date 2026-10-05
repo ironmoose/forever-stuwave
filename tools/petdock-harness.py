@@ -49,11 +49,11 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent / "addon" / "ForeverSynthwave"
-MEDIA = ADDON / "media"
+ADDON = HERE.parent / "forever-stuwave"
+MEDIA = ADDON / "Media" / "Textures"
 # PETDOCK_LUA points the harness at a mutant copy of PetDock.lua (a check must fail on a broken one).
-PETDOCK = Path(os.environ.get("PETDOCK_LUA", ADDON / "PetDock.lua"))
-TOC = ADDON / "ForeverSynthwave.toc"
+PETDOCK = Path(os.environ.get("PETDOCK_LUA", ADDON / "Modules/Pet/PetDock.lua"))
+TOC = ADDON / "forever-stuwave.toc"
 
 
 def _load(name: str, filename: str):
@@ -152,7 +152,7 @@ do
     end
 end
 local t = FS.Theme
-local M = "Interface\\AddOns\\ForeverSynthwave\\media\\"
+local M = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
 t.FLAT_TEXTURE = "Interface\\Buttons\\WHITE8x8"
 t.GLOW_EDGE_TEXTURE = M .. "glow_edge.tga"
 t.GLOW_CORNER_TEXTURE = M .. "glow_corner.tga"
@@ -273,7 +273,7 @@ function __dump_dock()
 end
 """
 
-LUA_FILES = ("Layout.lua", "FrameHelpers.lua", "PetFrame.lua", "PetDock.lua")
+LUA_FILES = ("Core/Layout.lua", "Core/FrameHelpers.lua", "Modules/Pet/PetFrame.lua", "Modules/Pet/PetDock.lua")
 
 
 def runtime(scale: float = 1.0, setup: str = "", allow_messages: bool = False, files=LUA_FILES,
@@ -290,9 +290,9 @@ def runtime(scale: float = 1.0, setup: str = "", allow_messages: bool = False, f
     load = rt.eval(PF.LOAD)
     fs = rt.globals().FS
     for filename in files:
-        if filename == "PetFrame.lua":
+        if filename == "Modules/Pet/PetFrame.lua":
             path = PF.PETFRAME
-        elif filename == "PetDock.lua":
+        elif filename == "Modules/Pet/PetDock.lua":
             path = PETDOCK
         else:
             path = ADDON / filename
@@ -528,9 +528,9 @@ def check_the_toc_lists_petdock_right_after_petframe_and_keeps_crlf() -> None:
     lines = raw.split(b"\r\n")
     assert b"\n" not in b"".join(lines), "the .toc lost a CRLF (a bare LF line ending)"
     names = [ln.decode().strip() for ln in lines]
-    assert "PetFrame.lua" in names and "PetDock.lua" in names, "PetDock.lua is not in the .toc"
-    assert names.index("PetDock.lua") == names.index("PetFrame.lua") + 1, "PetDock.lua must follow PetFrame.lua"
-    assert names.count("PetDock.lua") == 1
+    assert "Modules/Pet/PetFrame.lua" in names and "Modules/Pet/PetDock.lua" in names, "PetDock.lua is not in the .toc"
+    assert names.index("Modules/Pet/PetDock.lua") == names.index("Modules/Pet/PetFrame.lua") + 1, "PetDock.lua must follow PetFrame.lua"
+    assert names.count("Modules/Pet/PetDock.lua") == 1
 
 
 def check_petframe_no_longer_builds_the_chrome_itself() -> None:
@@ -971,7 +971,7 @@ def check_a_petdock_that_never_attaches_leaves_the_fallback_edge() -> None:
     """If FS.PetDock is present but nothing ever hands the low-HP layer an edge, PetFrame builds its
     default ring after all, below the slots, and the red layer still works."""
     stub = "FS.PetDock = { Build = function() end, AttachLowHealth = function() end }"
-    rt = runtime(1.0, setup=stub, files=("Layout.lua", "FrameHelpers.lua", "PetFrame.lua"))
+    rt = runtime(1.0, setup=stub, files=("Core/Layout.lua", "Core/FrameHelpers.lua", "Modules/Pet/PetFrame.lua"))
     pf = rt.globals().FS.PetFrame
     assert pf.lowEdge is not None and rt.eval("FS.PetFrame.lowEdgePulse.fsSkin ~= nil"), "no fallback edge was built"
     rt.execute("__set_hp(0.2); __fire('UNIT_HEALTH','pet')")
@@ -1036,7 +1036,7 @@ def check_a_dock_mode_remembered_before_a_failed_dock_build_falls_back_to_float(
     load = rt.eval(PF.LOAD)
     fs = rt.globals().FS
     for filename in LUA_FILES:
-        path = PF.PETFRAME if filename == "PetFrame.lua" else PETDOCK if filename == "PetDock.lua" else ADDON / filename
+        path = PF.PETFRAME if filename == "Modules/Pet/PetFrame.lua" else PETDOCK if filename == "Modules/Pet/PetDock.lua" else ADDON / filename
         load(path.read_text(encoding="utf-8"), f"@{filename}", fs)
     assert rt.globals().FS.PetDock.SetMode("dock") is True, "SetMode before the build is remembered"
     rt.execute("__fire_login()")
@@ -1056,7 +1056,7 @@ def check_a_mode_set_before_the_low_layer_exists_is_picked_up_after() -> None:
     load = rt.eval(PF.LOAD)
     fs = rt.globals().FS
     for filename in LUA_FILES:
-        path = PF.PETFRAME if filename == "PetFrame.lua" else PETDOCK if filename == "PetDock.lua" else ADDON / filename
+        path = PF.PETFRAME if filename == "Modules/Pet/PetFrame.lua" else PETDOCK if filename == "Modules/Pet/PetDock.lua" else ADDON / filename
         load(path.read_text(encoding="utf-8"), f"@{filename}", fs)
     assert rt.globals().FS.PetDock.SetMode("dock") is True, "SetMode before the pet frame is built"
     rt.execute("__fire_login()")
@@ -1295,7 +1295,7 @@ def check_no_console_or_an_undrawn_one_leaves_the_float_panel() -> None:
 
 def check_the_console_toggling_docks_and_undocks_live() -> None:
     s = 1.0
-    rt = dock_runtime(False, s, "ForeverSynthwaveDB = { petFrame = { pos = { point = 'TOP', relativePoint = 'TOP', x = 50, y = -80 } } }")
+    rt = dock_runtime(False, s, "ForeverSTUwaveDB = { petFrame = { pos = { point = 'TOP', relativePoint = 'TOP', x = 50, y = -80 } } }")
     pf, pd = rt.globals().FS.PetFrame, rt.globals().FS.PetDock
     assert_anchor(rt, "TOP", "UIParent", "TOP", 50, -80, "a saved drag position wins while floating")
     rt.execute("__set_console(true)")
@@ -1306,7 +1306,7 @@ def check_the_console_toggling_docks_and_undocks_live() -> None:
     assert pd.GetMode() == "float" and pf.IsDocked() is False and pf.dragHandle.mouse is True
     assert _gap(rt) is None, "the Console's dock gap closes when the panel leaves"
     assert rt.eval("FS.Layout._applied[FS.PetFrame.container] ~= nil")
-    rt.execute("ForeverSynthwaveDB.petFrame.pos = nil; __set_console(true); __set_console(false)")
+    rt.execute("ForeverSTUwaveDB.petFrame.pos = nil; __set_console(true); __set_console(false)")
     assert_floating(rt, s, "with no saved position it floats at the layout seat")
     assert not PF._messages(rt), PF._messages(rt)
 
@@ -1434,11 +1434,11 @@ def check_a_docked_panel_follows_the_ui_scale() -> None:
 
 
 def check_fspet_reset_and_unlock_leave_a_docked_panel_docked() -> None:
-    rt = dock_runtime(True, 1.0, "ForeverSynthwaveDB = { petFrame = { locked = true, pos = { point = 'TOP', relativePoint = 'TOP', x = 5, y = -5 } } }")
+    rt = dock_runtime(True, 1.0, "ForeverSTUwaveDB = { petFrame = { locked = true, pos = { point = 'TOP', relativePoint = 'TOP', x = 5, y = -5 } } }")
     pf = rt.globals().FS.PetFrame
     rt.execute("SlashCmdList.FSPET('reset')")
     assert_docked(rt, 1.0, "reset must not yank a docked panel to the float seat")
-    assert rt.eval("ForeverSynthwaveDB.petFrame.pos") is None, "the saved float position is still cleared"
+    assert rt.eval("ForeverSTUwaveDB.petFrame.pos") is None, "the saved float position is still cleared"
     rt.execute("SlashCmdList.FSPET('unlock')")
     assert pf.dragHandle.mouse is False, "unlocking cannot enable drag while docked"
     rt.execute("__set_console(false)")
@@ -1564,7 +1564,7 @@ def check_the_dock_gap_fits_the_real_console_top_line() -> None:
     c = runtime(1.0).globals().FS.PetDock.C
     x0, x1 = (float(v) for v in expected_gap(c).split(","))
     for s in console.SCALES:
-        lua = console.abh.boot(console.make_prelude(s, ""), extra=("Console.lua",))
+        lua = console.abh.boot(console.make_prelude(s, ""), extra=("Modules/ActionBars/Console.lua",))
         assert lua.eval("FS.Console.SetDockGap")(x0, x1) is True
         layout = lua.eval("FS.Console.layout")
         assert layout["gap"] is not None, "the dock gap was clamped away on the real Console"
@@ -1647,7 +1647,7 @@ def lit_line_pixels_stay_lit(dock: "Dock", d: dict, dock_x: float, line_gap) -> 
 def console_halo_pieces(gap_args) -> dict:
     """The REAL Console's top halo pieces for a gap request: {name: (x0, x1)} of haloTop, haloTop2, gapHalo."""
     console = _load("console_harness", "console-harness.py")
-    lua = console.abh.boot(console.make_prelude(1.0, ""), extra=("Console.lua",))
+    lua = console.abh.boot(console.make_prelude(1.0, ""), extra=("Modules/ActionBars/Console.lua",))
     assert lua.eval("FS.Console.SetDockGap")(*gap_args) is True
     out = {}
     for name in ("haloTop", "haloTop2", "gapHalo"):
@@ -1695,7 +1695,7 @@ def junction_cases(console, gap: str):
     (the stack's own position is not known). `edge(x)` is the physical column of a console-local design x."""
     x0, x1 = (float(v) for v in gap.split(","))
     for scale in (1.0, 1 / 1.2, 0.64):
-        lua = console.abh.boot(console.make_prelude(scale, ""), extra=("Console.lua",))
+        lua = console.abh.boot(console.make_prelude(scale, ""), extra=("Modules/ActionBars/Console.lua",))
         assert lua.eval("FS.Console.SetDockGap")(x0, x1) is True
         layout = lua.eval("FS.Console.layout")
         assert layout["gap"] is not None, "the real Console clamped the gap away"
@@ -1931,7 +1931,7 @@ def check_new_shoulder_gap_fits_the_real_console_top_line() -> None:
     got = [float(v) for v in rt.eval(f"{{__sh:GapSpan({PALADIN_DOCK_X})}}").values()]
     x0, x1, hx0, hx1 = got
     for scale in console.SCALES:
-        lua = console.abh.boot(console.make_prelude(scale, ""), extra=("Console.lua",))
+        lua = console.abh.boot(console.make_prelude(scale, ""), extra=("Modules/ActionBars/Console.lua",))
         assert lua.eval("FS.Console.SetDockGap")(x0, x1, hx0, hx1) is True
         layout = lua.eval("FS.Console.layout")
         assert layout["gap"] is not None, "the Paladin block's gap was clamped away on the real Console"
@@ -2411,16 +2411,13 @@ def check_new_shoulder_seat_details_error_message_and_span_at_another_width() ->
 # Checks: the docked chrome is byte identical to the pre-NewShoulder build (golden hashes)
 # ---------------------------------------------------------------------------------------------
 
-# sha256 of __dump_dock() in five states (plus "reset" == "docked"), taken from PetDock.lua as committed at HEAD 7927f72 BEFORE the
-# chrome became PetDock.NewShoulder. The dump is the whole docked tree in creation order (see SETUP),
-# so any change to a texture, an anchor, a level, a vertex colour, the draw order or the animation
-# groups changes a hash. PETDOCK_DUMP_DIR=<dir> writes the dumps next to a failure to diff them.
+# Exact render fingerprints include runtime frame names and texture paths.
 GOLDEN_DOCK = {
-    "docked": "d5e0f61581ae6d70e5ccc5a6021a878dfb999b059afbe55dd1945d3def7d4d76",
-    "retinted": "93ad58365e2cd129d60cdf99fd1b7c64ed7c8ac4b97265c122f2bb427a754f09",
-    "low_hp": "f678503dcd39fefac83c2b8738f89e8a0d9e53e21b5fa699928dcbb154371d39",
-    "scale_0.64": "714267d49fec033b0902a4d7d04437c53d9545d5f7e08048fe703cc0e71889a1",
-    "floating": "fe1be1148036960199e6d0cfa9447aacdc37a2232c8051c69f0d9334859e003d",
+    "docked": "279e67e16696d1892c0343956320bdd0a6899d90b8e7dba67e36cb6e2ea8f74d",
+    "retinted": "09d2ae963afb86dac4048f82d979f7b4ffa665ff2b4ce3a14596dda43ae9afd3",
+    "low_hp": "2f16eb31a0dd39f8f7e25fab6e96cb693201dbc115c3820ac85bad437a9c5ae0",
+    "scale_0.64": "394b6041675d2be762dd8a130720a7dc63c421f3f0b7450434568096dcf89cb9",
+    "floating": "007a6b2e34713fbb84d4ff42eaa910fdba5454a0bffe5e2ddf4dda90101fad59",
 }
 
 

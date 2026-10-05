@@ -95,7 +95,7 @@ OUTPUTS = {
 
 
 if __name__ == "__main__":
-    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media"))
+    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures"))
     for name, alpha_at in OUTPUTS.items():
         path = os.path.join(here, name + ".tga")
         write_tga(path, build(alpha_at))

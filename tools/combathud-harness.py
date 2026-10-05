@@ -67,15 +67,15 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent / "addon" / "ForeverSynthwave"
-COMBATHUD = Path(os.environ.get("COMBATHUD_LUA") or ADDON / "CombatHud.lua")
+ADDON = HERE.parent / "forever-stuwave"
+COMBATHUD = Path(os.environ.get("COMBATHUD_LUA") or ADDON / "Modules/CombatHud/CombatHud.lua")
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "combat-hud-stack-a-2026-10-02.html"
 OFFSTATE_MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "off-state-and-bridge-2026-10-02.html"
 GUNSIGHT_MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
 SHARD_GENERATOR = HERE / "assets" / "generate_hud_shard.py"
-CASTBARS = ADDON / "CastBars.lua"
-THEME = ADDON / "Theme.lua"
-TOC = ADDON / "ForeverSynthwave.toc"
+CASTBARS = ADDON / "Modules/CastBars/CastBars.lua"
+THEME = ADDON / "Core/Theme.lua"
+TOC = ADDON / "forever-stuwave.toc"
 
 THEME_CONSTANTS = (
     "COLOR_TEXT_WHITE", "COLOR_BG", "COLOR_BORDER", "COLOR_BAR_TRACK", "COLOR_BAR_BORDER",
@@ -687,7 +687,7 @@ function __loadThemeConstants(lines)
 end
 function __load(path, src)
     local fn = assert(loadstring(src, "@" .. path))
-    return fn("ForeverSynthwave", FS)
+    return fn("forever-stuwave", FS)
 end
 
 -- Spell info for every dictionary name; ids are the dictionary's first id, else 900000+n.
@@ -821,7 +821,7 @@ LUA_FILE_SHIM = r"""
 function __loadCombatHud(src)
     local fn, err = loadstring(src, "@CombatHud.lua")
     if not fn then error("CombatHud.lua failed to compile: " .. tostring(err), 0) end
-    return fn("ForeverSynthwave", FS)
+    return fn("forever-stuwave", FS)
 end
 """
 
@@ -836,14 +836,14 @@ def build_runtime(cls: str, gunsight: bool = False):
     consts += [_extract_theme_function(theme_src, n) for n in THEME_FUNCTIONS]
     lua.eval("__loadThemeConstants")(lua.table_from(consts))
     loader = lua.eval("__load")
-    for fname in ("HudSpells.lua", "HudProfiles.lua"):
+    for fname in ("Modules/CombatHud/HudSpells.lua", "Modules/CombatHud/HudProfiles.lua"):
         loader(fname, (ADDON / fname).read_text(encoding="utf-8"))
     lua.execute("__setupSpells(); __setupHud()")
     lua.execute(f"MU = {lua_table(mockup_units())}; CB = {lua_table(castbars_units())}; CUT_FRACTION = {tile_cut_fraction()!r}")
     if gunsight:
         # the real Layout.lua and Gunsight.lua replace the disabled stub; GU is the Gunsight mockup's numbers
         lua.execute("FS.Gunsight = nil; __gsCalls = nil; setScreen(1440)")
-        for fname in ("Layout.lua", "Gunsight.lua"):
+        for fname in ("Core/Layout.lua", "Modules/CombatHud/Gunsight.lua"):
             loader(fname, (ADDON / fname).read_text(encoding="utf-8"))
         lua.execute(f"GU = {lua_value(gunsight_units())}")
     return lua
@@ -2433,15 +2433,15 @@ standard(); __state = mkState({ row = lockRow() }); login()
 check(SLASH_FSHUD1 == "/fshud" and type(SlashCmdList.FSHUD) == "function", "/fshud is registered")
 SlashCmdList.FSHUD("off")
 check(not FS.CombatHud.IsEnabled(), "off")
-check(ForeverSynthwaveDB.combatHud.enabled.WARLOCK == false, "saved for the class in the account-wide table")
+check(ForeverSTUwaveDB.combatHud.enabled.WARLOCK == false, "saved for the class in the account-wide table")
 check(#FS.Hud.subs == 0, "unsubscribed")
 SlashCmdList.FSHUD("  ON ")
 check(FS.CombatHud.IsEnabled(), "on (case and spaces ignored)")
-check(ForeverSynthwaveDB.combatHud.enabled.WARLOCK == true, "saved")
+check(ForeverSTUwaveDB.combatHud.enabled.WARLOCK == true, "saved")
 SlashCmdList.FSHUD("idle off")
-check(FS.CombatHud.idleCastBars == false and ForeverSynthwaveDB.combatHud.idleCastBars == false, "idle off persisted")
+check(FS.CombatHud.idleCastBars == false and ForeverSTUwaveDB.combatHud.idleCastBars == false, "idle off persisted")
 SlashCmdList.FSHUD("idle on")
-check(FS.CombatHud.idleCastBars == true and ForeverSynthwaveDB.combatHud.idleCastBars == true, "idle on persisted")
+check(FS.CombatHud.idleCastBars == true and ForeverSTUwaveDB.combatHud.idleCastBars == true, "idle on persisted")
 local n = #__printed
 SlashCmdList.FSHUD("bogus")
 check(#__printed > n and printed("/fshud"), "bad input prints the usage")
@@ -2452,7 +2452,7 @@ check(printed("combat HUD"), "no argument prints the state")
 
 case("saved_settings_are_honoured_at_login")(r"""
 standard()
-ForeverSynthwaveDB = { combatHud = { enabled = { WARLOCK = false }, idleCastBars = false } }
+ForeverSTUwaveDB = { combatHud = { enabled = { WARLOCK = false }, idleCastBars = false } }
 __state = mkState({ row = lockRow() })
 login()
 check(not FS.CombatHud.IsEnabled(), "a saved off wins over the class default")
@@ -2463,7 +2463,7 @@ check(FS.CombatHud.IsEnabled() and #__idle.visible == 0, "enabled, idle option s
 
 case("a_saved_on_for_another_class_does_not_leak")(r"""
 standard()
-ForeverSynthwaveDB = { combatHud = { enabled = { PRIEST = false } } }
+ForeverSTUwaveDB = { combatHud = { enabled = { PRIEST = false } } }
 __state = mkState({ row = lockRow() })
 login()
 check(FS.CombatHud.IsEnabled(), "the priest's off does not turn the warlock's HUD off")
@@ -2603,7 +2603,7 @@ function gsBoot(o)
     o = o or {}
     setScreen(o.h or 1440)
     learnAll()
-    ForeverSynthwaveDB = o.db or {}
+    ForeverSTUwaveDB = o.db or {}
     if o.traps ~= false then
         local function trap(what)
             return setmetatable({}, { __index = function(_, k) error("CastBars touched in the Gunsight view: " .. what .. "." .. tostring(k)) end })
@@ -2611,7 +2611,7 @@ function gsBoot(o)
         FS.targetCastBar, FS.playerCastBar, FS.CastBars = trap("targetCastBar"), trap("playerCastBar"), trap("CastBars")
     end
     __state = o.state
-    fire("ADDON_LOADED", "ForeverSynthwave")
+    fire("ADDON_LOADED", "forever-stuwave")
     seen = {}
     local gs = FS.Gunsight
     local orig = gs.RegisterPiece
@@ -3249,14 +3249,14 @@ def file_check(name: str):
 def _toc():
     raw = TOC.read_bytes()
     if raw.count(b"\r\n") != raw.count(b"\n"):
-        return "ForeverSynthwave.toc lost its CRLF line endings"
+        return "forever-stuwave.toc lost its CRLF line endings"
     lines = raw.decode("utf-8").split("\r\n")
     names = [ln.strip() for ln in lines if ln.strip() and not ln.startswith("#")]
-    if "CombatHud.lua" not in names:
+    if "Modules/CombatHud/CombatHud.lua" not in names:
         return "CombatHud.lua is not in the .toc"
-    pos = names.index("CombatHud.lua")
-    for dep in ("Theme.lua", "Layout.lua", "FrameHelpers.lua", "CastBars.lua", "HudSpells.lua", "HudProfiles.lua",
-                "HudLogic.lua", "Gunsight.lua"):
+    pos = names.index("Modules/CombatHud/CombatHud.lua")
+    for dep in ("Core/Theme.lua", "Core/Layout.lua", "Core/FrameHelpers.lua", "Modules/CastBars/CastBars.lua", "Modules/CombatHud/HudSpells.lua", "Modules/CombatHud/HudProfiles.lua",
+                "Modules/CombatHud/HudLogic.lua", "Modules/CombatHud/Gunsight.lua"):
         if dep not in names or names.index(dep) > pos:
             return f"CombatHud.lua must load after {dep}"
     return None
@@ -3275,7 +3275,7 @@ def _dashes():
 
 @file_check("diamond_texture_exists")
 def _diamond():
-    if not (ADDON / "media" / "hud_diamond.tga").exists():
+    if not (ADDON / "Media" / "Textures" / "hud_diamond.tga").exists():
         return "media/hud_diamond.tga is missing"
     return None
 
@@ -3295,7 +3295,7 @@ def _shard_textures():
     if not sh or (gen.SH_W, gen.SH_H) != (float(sh.group(2)), float(sh.group(3))):
         return "generate_hud_shard.py SH_W / SH_H differ from the mockup's shard box"
     for name, (w, h, uw, uh) in gen.FILES.items():
-        path = ADDON / "media" / (name + ".tga")
+        path = ADDON / "Media" / "Textures" / (name + ".tga")
         if not path.exists():
             return f"media/{name}.tga is missing"
         data = path.read_bytes()
@@ -3328,7 +3328,7 @@ def _shard_textures():
 @file_check("hud_tile_texture_is_the_mockups_135_degree_gradient_with_a_generator")
 def _tile():
     gen = HERE / "assets" / "generate_hud_tile.py"
-    tga = ADDON / "media" / "hud_tile_cut2.tga"
+    tga = ADDON / "Media" / "Textures" / "hud_tile_cut2.tga"
     if not gen.exists():
         return "media/generate_hud_tile.py is missing"
     if not tga.exists():
@@ -3368,7 +3368,7 @@ def _tile():
     if px(far, far)[3] != 255 or px(w - 1 - far, h - 1 - far)[3] != 255 or px(w // 2, h // 2)[3] != 255:
         return "the tile must be opaque past the chamfer"
     # the gradient is the same as hud_tile.tga's RGB, byte for byte, even under the cut
-    plain = (ADDON / "media" / "hud_tile.tga")
+    plain = (ADDON / "Media" / "Textures" / "hud_tile.tga")
     if plain.exists():
         praw = plain.read_bytes()
         if praw[18:] and len(praw) == len(raw):
@@ -3424,7 +3424,7 @@ def _bindings():
         page = re.search(r"MULTIBAR_5_ACTIONBAR_PAGE or (\d+)", text)
         return (int(page.group(1)) - 1) * 12 + 1 if page else None
 
-    ab = (ADDON / "ActionBars.lua").read_text(encoding="utf-8")
+    ab = (ADDON / "Modules/ActionBars/ActionBars.lua").read_text(encoding="utf-8")
     pairs = re.findall(r"firstAction = (\w+),[^}]*binding = \"([A-Z0-9]+)\"", ab)
     want = {first_slot(ab, first, "MULTIBAR5_FIRST_ACTION"): prefix for first, prefix in pairs}
     want[1] = "ACTIONBUTTON"

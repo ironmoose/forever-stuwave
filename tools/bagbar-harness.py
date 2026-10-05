@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Headless check of BagBar.lua: the bag slots are SECURE buttons that delegate the click to Blizzard's stock bag buttons.
 
-Runs the real addons/ForeverSynthwave/Deck.lua and BagBar.lua under lupa against a small STRICT mock WoW API (a method
+Runs the real addons/forever-stuwave/Deck.lua and BagBar.lua under lupa against a small STRICT mock WoW API (a method
 the mock does not define is a nil call). The mock models the two things the live bug turned on:
 
   * taint: ToggleBackpack / ToggleBag / ToggleAllBags / OpenBag / CloseBag are recording stubs. The mock's stock bag
@@ -10,8 +10,8 @@ the mock does not define is a nil call). The mock models the two things the live
     stock item buttons later read the state our call tainted;
   * protection: a button made from SecureActionButtonTemplate is protected, and so is every ancestor of it. A frame a
     protected frame depends on (an anchor target) is RESTRICTED too, and that edge is transitive through the anchors:
-    here the chassis (an ancestor of the buttons) is anchored to ForeverSynthwaveXPBar, which is anchored to
-    ForeverSynthwaveDataBar, so all three are restricted. In combat a Show/Hide/SetPoint/SetSize/SetParent on any
+    here the chassis (an ancestor of the buttons) is anchored to ForeverSTUwaveXPBar, which is anchored to
+    ForeverSTUwaveDataBar, so all three are restricted. In combat a Show/Hide/SetPoint/SetSize/SetParent on any
     restricted frame, or a SetAttribute on a button, is recorded in BLOCKED and does nothing (the client prints
     ADDON_ACTION_BLOCKED). The XP bar and data bar are stubs here; XPBar.lua and DataBar.lua are too heavy to load into
     this mock, so their own combat behaviour (no SetSize/Show/Hide while restricted, replayed at regen) is pinned in
@@ -58,9 +58,9 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent / "addon" / "ForeverSynthwave"
-BAGBAR_LUA = Path(os.environ.get("BAGBAR_LUA") or ADDON / "BagBar.lua")   # BAGBAR_LUA: a mutated scratch copy
-DECK_LUA = Path(os.environ.get("DECK_LUA") or ADDON / "Deck.lua")
+ADDON = HERE.parent / "forever-stuwave"
+BAGBAR_LUA = Path(os.environ.get("BAGBAR_LUA") or ADDON / "Modules/Bags/BagBar.lua")   # BAGBAR_LUA: a mutated scratch copy
+DECK_LUA = Path(os.environ.get("DECK_LUA") or ADDON / "Modules/ActionBars/Deck.lua")
 EPS = 0.01
 
 STOCK = {
@@ -279,9 +279,9 @@ function h_addStock(name)
 end
 -- The XP bar is built at PLAYER_LOGIN in the game, anchored flush on the data bar (XPBar.lua Build). Stubs, see the header.
 function h_makeXP()
-    FS.dataBar = newObj("Frame", UIParent, "ForeverSynthwaveDataBar")
+    FS.dataBar = newObj("Frame", UIParent, "ForeverSTUwaveDataBar")
     FS.dataBar:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 0)
-    local xp = newObj("Frame", UIParent, "ForeverSynthwaveXPBar")
+    local xp = newObj("Frame", UIParent, "ForeverSTUwaveXPBar")
     xp:SetPoint("BOTTOM", FS.dataBar, "TOP", 0, 0)
 end
 function h_setup(missing, lateXP)
@@ -289,10 +289,10 @@ function h_setup(missing, lateXP)
         if name ~= missing then h_addStock(name) end
     end
     if not lateXP then h_makeXP() end
-    assert(loadstring(DECK_SRC, "@Deck.lua"))("ForeverSynthwave", FS)
+    assert(loadstring(DECK_SRC, "@Deck.lua"))("forever-stuwave", FS)
 end
 function h_load()
-    assert(loadstring(BAGBAR_SRC, "@BagBar.lua"))("ForeverSynthwave", FS)
+    assert(loadstring(BAGBAR_SRC, "@BagBar.lua"))("forever-stuwave", FS)
 end
 function h_fire(event)
     for _, f in ipairs(ALL) do
@@ -307,7 +307,7 @@ function h_puts() return table.concat(PUTS, ",") end
 function h_reset() BLOCKED, TOGGLES, PUTS, STOCKCLICKS = {}, {}, {}, {}; BLOCKED_N = 0 end
 function h_stockClicks(name) return STOCKCLICKS[name] or 0, STOCKCLICKS[name .. "#button"] end
 
-local function slot(key) return _G["ForeverSynthwaveBagSlot_" .. key] end
+local function slot(key) return _G["ForeverSTUwaveBagSlot_" .. key] end
 -- The template's click handler as it treats a KEY press or an addon :Click() (not an engine mouse press, which 12.1 forces
 -- to mouse UP whatever useOnKeyDown says): with useOnKeyDown nil and the CVar on, the action fires on key DOWN, so the up
 -- event does nothing; the click type calls delegate:Click(button). Kept as the conservative model: the attribute must be set.
@@ -600,15 +600,15 @@ def check_chain() -> None:
     """The restriction chain the deck puts on the bars below it: slot buttons -> bar, bagSlot, chassis -> XP bar -> data bar."""
     w = World()
     d = py(w.call("h_deck"))
-    check("chain.the_chassis_is_anchored_to_the_xp_bar", d["anchorRel"] == "ForeverSynthwaveXPBar" and d["npts"] == 1, f"{d}")
-    for name in ("ForeverSynthwaveDeck", "ForeverSynthwaveXPBar", "ForeverSynthwaveDataBar"):
+    check("chain.the_chassis_is_anchored_to_the_xp_bar", d["anchorRel"] == "ForeverSTUwaveXPBar" and d["npts"] == 1, f"{d}")
+    for name in ("ForeverSTUwaveDeck", "ForeverSTUwaveXPBar", "ForeverSTUwaveDataBar"):
         check(f"chain.{name}_is_restricted", w.call("h_restricted", name) is True)
     check("chain.an_unrelated_stock_button_is_not_restricted", w.call("h_restricted", "CharacterBag0Slot") is False)
     # Out of combat every op on the restricted frames is legal; in combat each is blocked.
-    w.call("h_poke", "ForeverSynthwaveXPBar")
+    w.call("h_poke", "ForeverSTUwaveXPBar")
     check("chain.out_of_combat_the_xp_bar_can_be_resized_shown_hidden_and_moved", w.blocked() == "", w.blocked())
     w.combat(True)
-    for name in ("ForeverSynthwaveXPBar", "ForeverSynthwaveDataBar"):
+    for name in ("ForeverSTUwaveXPBar", "ForeverSTUwaveDataBar"):
         w.call("h_reset")
         w.call("h_poke", name)
         got = sorted(w.blocked().split(","))
@@ -624,13 +624,13 @@ def check_login_in_combat() -> None:
     check("login_in_combat.the_chassis_is_still_parked_not_seated_on_the_xp_bar", d["anchorRel"] == "UIParent", f"{d}")
     w.regen()
     d = py(w.call("h_deck"))
-    check("login_in_combat.regen_seats_the_chassis_on_the_xp_bar", d["anchorRel"] == "ForeverSynthwaveXPBar" and d["npts"] == 1, f"{d}")
+    check("login_in_combat.regen_seats_the_chassis_on_the_xp_bar", d["anchorRel"] == "ForeverSTUwaveXPBar" and d["npts"] == 1, f"{d}")
     check("login_in_combat.regen_blocks_nothing", w.blocked() == "", w.blocked())
     check("login_in_combat.no_degrade_log", w.logs() == "", w.logs())
     # The ordinary login (out of combat) seats at once.
     w = World(late_xp=True)
     d = py(w.call("h_deck"))
-    check("login.out_of_combat_the_chassis_is_seated_on_the_xp_bar_at_login", d["anchorRel"] == "ForeverSynthwaveXPBar" and d["npts"] == 1, f"{d}")
+    check("login.out_of_combat_the_chassis_is_seated_on_the_xp_bar_at_login", d["anchorRel"] == "ForeverSTUwaveXPBar" and d["npts"] == 1, f"{d}")
 
 
 def check_entering_world_in_combat() -> None:
@@ -666,7 +666,7 @@ def check_login_retry_in_combat() -> None:
     check("login_retry.in_combat_the_chassis_stays_parked", d["anchorRel"] == "UIParent" and d["npts"] == 1, f"{d}")
     w.regen()
     d = py(w.call("h_deck"))
-    check("login_retry.regen_replays_the_seat_on_the_xp_bar", d["anchorRel"] == "ForeverSynthwaveXPBar" and d["npts"] == 1, f"{d}")
+    check("login_retry.regen_replays_the_seat_on_the_xp_bar", d["anchorRel"] == "ForeverSTUwaveXPBar" and d["npts"] == 1, f"{d}")
     check("login_retry.regen_blocks_nothing", w.blocked() == "", w.blocked())
     check("login_retry.no_degrade_log", w.logs() == "", w.logs())
     # Out of combat the same retry seats at once.
@@ -674,7 +674,7 @@ def check_login_retry_in_combat() -> None:
     w.call("h_makeXP")
     w.call("h_flushTimers")
     d = py(w.call("h_deck"))
-    check("login_retry.out_of_combat_the_retry_seats_the_chassis", d["anchorRel"] == "ForeverSynthwaveXPBar" and d["npts"] == 1, f"{d}")
+    check("login_retry.out_of_combat_the_retry_seats_the_chassis", d["anchorRel"] == "ForeverSTUwaveXPBar" and d["npts"] == 1, f"{d}")
     # If the XP bar never appears, the degrade logs exactly once under the key deck_anchor. The login fires a second
     # time and the timers flush again, so the degrade is reached twice and only Deck.lua's per-key latch holds it to one.
     w = World(xp_after_login=True, timers=True)

@@ -21,7 +21,7 @@ import pytest
 
 GENERATOR_DIR = Path(__file__).resolve().parent
 REPO = GENERATOR_DIR.parent.parent
-MEDIA_DIR = REPO / "addon" / "ForeverSynthwave" / "media"
+MEDIA_DIR = REPO / "forever-stuwave" / "Media" / "Textures"
 GENERATOR_PATHS = sorted(GENERATOR_DIR.glob("generate_*.py"))
 
 TGA_HEADER_SIZE = 18
@@ -1458,7 +1458,7 @@ def test_shoulder_glow_cut_corner_is_a_45_degree_cut_of_6(shoulder_glow_outputs:
 
 def test_shoulder_glow_pieces_agree_with_petdock_lua() -> None:
     """PetDock.C.SHOULDER_GLOW carries the same rects, the canvas and the pad as this file."""
-    text = (MEDIA_DIR.parent / "PetDock.lua").read_text(encoding="utf-8")
+    text = (REPO / "forever-stuwave" / "Modules/Pet/PetDock.lua").read_text(encoding="utf-8")
     block = re.search(r"SHOULDER_GLOW = \{(.*?)\n    \},", text, re.S)
     assert block, "PetDock.C.SHOULDER_GLOW is gone"
     body = block.group(1)

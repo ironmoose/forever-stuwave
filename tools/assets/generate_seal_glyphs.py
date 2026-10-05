@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates the seven 64x64 Paladin seal sigils for the Seal Chamber lens.
 
-Files written (in addon/ForeverSynthwave/media):
+Files written (in forever-stuwave/Media/Textures):
 
     seal_glyph_righteousness.tga   scales
     seal_glyph_crusader.tga        crossed swords
@@ -249,7 +249,7 @@ def write_tga(path, pixels):
 
 
 if __name__ == "__main__":
-    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media"))
+    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures"))
     for name, make in GLYPHS.items():
         path = os.path.join(here, name + ".tga")
         write_tga(path, build(make))

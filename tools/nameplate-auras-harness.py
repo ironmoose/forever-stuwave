@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Runs the real ForeverSynthwave.lua (nameplates) headless against a mock WoW API.
+"""Runs the real Modules/Nameplates/Nameplates.lua (nameplates) headless against a mock WoW API.
 
 Pins the nameplate debuff row: one AuraContainer per plate (the Plater design), so the
 engine reads and draws the auras and no aura data ever enters addon Lua. The old path
@@ -32,7 +32,7 @@ is what these checks replaced.
   * no aura read API is ever called on the container path (the mocks throw).
 
 The mock is NOT the real client. Theme and FrameHelpers are permissive stubs here, the real
-ForeverSynthwave.lua is loaded unchanged.
+Modules/Nameplates/Nameplates.lua is loaded unchanged.
 
     python3 tools/nameplate-auras-harness.py
 
@@ -50,7 +50,7 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-SOURCE = HERE.parent / "addon" / "ForeverSynthwave" / "ForeverSynthwave.lua"
+SOURCE = HERE.parent / "forever-stuwave" / "Modules/Nameplates/Nameplates.lua"
 
 MOCK = r"""
 __realType = type
@@ -320,22 +320,22 @@ C_NamePlate = { GetNamePlateForUnit = function(unit)
     return __plates[unit]
 end }
 
--- .toc order: ForeverSynthwave.lua loads BEFORE Theme.lua, FrameHelpers.lua and the rest, so
+-- .toc order: Modules/Nameplates/Nameplates.lua loads BEFORE Theme.lua, FrameHelpers.lua and the rest, so
 -- none of what they put on FS exists while this file's top level runs. The file is loaded with
 -- those fields absent and they are installed after it, as the later files would.
 local LOADED_LATER = { "Theme", "FrameHelpers", "AurasReadable", "OnAurasReadable", "IsSecret", "LogDegradeOnce" }
 function boot()
-    local fn = assert(loadstring(__SRC, "@ForeverSynthwave.lua"))
+    local fn = assert(loadstring(__SRC, "@Modules/Nameplates/Nameplates.lua"))
     local later = {}
     for _, k in ipairs(LOADED_LATER) do later[k] = FS[k]; FS[k] = nil end
-    local ok, err = pcall(fn, "ForeverSynthwave", FS)
+    local ok, err = pcall(fn, "forever-stuwave", FS)
     FS.Theme = later.Theme
     FS.FrameHelpers = later.FrameHelpers
     FS.AurasReadable = later.AurasReadable
     FS.IsSecret = later.IsSecret
     FS.LogDegradeOnce = later.LogDegradeOnce
     FS.OnAurasReadable = function(f) __readableCallbacks[#__readableCallbacks + 1] = f end
-    if not ok then error("loading ForeverSynthwave.lua before Theme.lua threw: " .. tostring(err), 0) end
+    if not ok then error("loading Modules/Nameplates/Nameplates.lua before Theme.lua threw: " .. tostring(err), 0) end
 end
 
 -- Test helpers ------------------------------------------------------------------------

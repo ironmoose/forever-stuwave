@@ -247,7 +247,7 @@ def write_tga(path, bgra):
 
 
 def main():
-    path = os.path.join(os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media")), "grid.tga")
+    path = os.path.join(os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures")), "grid.tga")
     write_tga(path, build_rgba())
     print(f"wrote {path} ({OUT_W}x{OUT_H}, {os.path.getsize(path)} bytes)")
 

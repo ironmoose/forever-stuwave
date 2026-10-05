@@ -74,6 +74,6 @@ def write_tga(path):
 
 
 if __name__ == "__main__":
-    out_path = os.path.join(os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media")), "scanline_rgb.tga")
+    out_path = os.path.join(os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures")), "scanline_rgb.tga")
     write_tga(out_path)
     print(f"wrote {out_path}")

@@ -19,7 +19,7 @@ EditModeManagerFrame.editModeSystemAnchorDirty). These checks pin that:
     or reload (not a zone change) also re-seat, without recursing;
   * a maximised or minimised chat goes back through ApplyWindowState;
   * a protected chat frame is left alone in combat and seated when combat ends;
-  * every seat and every foreign move is logged in ForeverSynthwaveDB.chatSeatLog (capped
+  * every seat and every foreign move is logged in ForeverSTUwaveDB.chatSeatLog (capped
     at 20, the first 10 pinned), our own seat is never logged as foreign, and the
     seating flag is reset when a seat throws.
 
@@ -42,7 +42,7 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
+ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
 
 MOCK = r"""
 __combat = false
@@ -121,13 +121,13 @@ end
 UIParent = CreateFrame()
 UIParent:SetHeight(1440)
 
-ForeverSynthwaveDB = {}
+ForeverSTUwaveDB = {}
 """
 
 LOAD = r"""
 function(file, src, fs)
     local chunk = assert(load(src, "@" .. file))
-    chunk("ForeverSynthwave", fs)
+    chunk("forever-stuwave", fs)
 end
 """
 
@@ -257,7 +257,7 @@ local function seatedAtLayout(f)
 end
 
 local function noForeignSetPoint()
-    for _, e in ipairs(ForeverSynthwaveDB.chatSeatLog) do
+    for _, e in ipairs(ForeverSTUwaveDB.chatSeatLog) do
         if e.ev == "SetPoint" then return false end
     end
     return true
@@ -265,7 +265,7 @@ end
 
 local function evs()
     local set = {}
-    for _, e in ipairs(ForeverSynthwaveDB.chatSeatLog) do set[e.ev] = true end
+    for _, e in ipairs(ForeverSTUwaveDB.chatSeatLog) do set[e.ev] = true end
     return set
 end
 
@@ -322,7 +322,7 @@ function T.without_the_base_methods_it_falls_back_to_plain_calls()
     local f = setup({ noBase = true })
     EditModeManagerFrame:UpdateLayoutInfo()
     eq(seatedAtLayout(f), true)
-    for _, e in ipairs(ForeverSynthwaveDB.chatSeatLog) do
+    for _, e in ipairs(ForeverSTUwaveDB.chatSeatLog) do
         eq(e.ev == "SetPoint" and e.pt == "CENTER", false, "our CENTER seat is not logged as a foreign move")
     end
 end
@@ -399,7 +399,7 @@ end
 
 function T.every_seat_and_foreign_move_is_logged()
     local f = setup()
-    local log = ForeverSynthwaveDB.chatSeatLog
+    local log = ForeverSTUwaveDB.chatSeatLog
     eq(log[#log].ev, "seat", "our own seat is recorded")
     EditModeManagerFrame:UpdateLayoutInfo()
     local e = evs()
@@ -417,7 +417,7 @@ end
 function T.the_log_is_capped_and_pins_the_first_ten()
     local f = setup()
     for i = 1, 15 do f:ClearAllPoints(); f:SetPoint("TOPLEFT", UIParent, "TOPLEFT", i, i) end
-    local log = ForeverSynthwaveDB.chatSeatLog
+    local log = ForeverSTUwaveDB.chatSeatLog
     local firstTen = {}
     for i = 1, 10 do firstTen[i] = tostring(log[i].ev) .. ":" .. tostring(log[i].x) end
     for i = 16, 115 do f:ClearAllPoints(); f:SetPoint("TOPLEFT", UIParent, "TOPLEFT", i, i) end
@@ -464,9 +464,9 @@ function T.a_throwing_layout_apply_resets_its_flag()
 end
 
 function T.the_previous_sessions_log_is_kept_for_the_bug_report()
-    ForeverSynthwaveDB.chatSeatLog = { { ev = "old" } }
+    ForeverSTUwaveDB.chatSeatLog = { { ev = "old" } }
     setup()
-    eq(ForeverSynthwaveDB.chatSeatLogPrev[1].ev, "old")
+    eq(ForeverSTUwaveDB.chatSeatLogPrev[1].ev, "old")
 end
 
 function T.minimap_cluster_is_reseated_after_update_layout_info_and_rescale_callbacks_run()
@@ -500,7 +500,7 @@ function T.the_layouts_updated_event_reseats_the_cluster_when_the_posthook_is_mi
     -- post-hook, so its own event watcher is the only path.
     EditModeManagerFrame = nil
     local FS2 = { Chat = FS.Chat }
-    __load("Layout.lua", __layoutSrc, FS2)
+    __load("Core/Layout.lua", __layoutSrc, FS2)
     local c = CreateFrame()
     c.ClearAllPointsBase, c.SetPointBase = __Frame.ClearAllPoints, __Frame.SetPoint
     FS2.Layout.Apply(c, "minimap")
@@ -551,7 +551,7 @@ end
 function T.layout_hooks_edit_mode_when_blizzard_edit_mode_loads_late()
     local FS2 = { Chat = FS.Chat }
     EditModeManagerFrame = nil
-    __load("Layout.lua", __layoutSrc, FS2)
+    __load("Core/Layout.lua", __layoutSrc, FS2)
     local emm = { calls = 0 }
     function emm:UpdateLayoutInfo() self.calls = self.calls + 1 end
     EditModeManagerFrame = emm
@@ -753,7 +753,7 @@ function T.a_throw_that_escapes_the_whole_reseat_still_does_not_unwind_blizzards
     function emm:UpdateLayoutInfo() end
     EditModeManagerFrame = emm
     local FS2 = { Chat = FS.Chat }
-    __load("Layout.lua", __layoutSrc, FS2)
+    __load("Core/Layout.lua", __layoutSrc, FS2)
     FS2.Layout._applied = 42
     local after = false
     local ok = pcall(function()
@@ -851,7 +851,7 @@ NIL_COMPARE = re.compile(
     rf"\b{ERRISH}\s*[=~]=\s*nil\b|\bnil\s*[=~]=\s*{ERRISH}\b"
 )
 LONG_OPEN = re.compile(r"\[(=*)\[")
-PINNED_FILES = ("Layout.lua", "ChatWindowState.lua")
+PINNED_FILES = ("Core/Layout.lua", "Modules/Chat/ChatWindowState.lua")
 
 
 def strip_lua(text: str) -> str:
@@ -953,10 +953,10 @@ def boot() -> "LuaRuntime":
         "termPanel = { SetFrameStrata = function() end, SetFrameLevel = function() end } } }"
     )
     load = lua.eval(LOAD)
-    for name in ("Layout.lua", "ChatWindowState.lua"):
+    for name in ("Core/Layout.lua", "Modules/Chat/ChatWindowState.lua"):
         load(name, (ADDON / name).read_text(encoding="utf-8"), lua.eval("FS"))
     lua.execute("__load = " + LOAD)
-    lua.execute("__layoutSrc = " + repr_lua((ADDON / "Layout.lua").read_text(encoding="utf-8")))
+    lua.execute("__layoutSrc = " + repr_lua((ADDON / "Core/Layout.lua").read_text(encoding="utf-8")))
     lua.execute("__fire('PLAYER_LOGIN')")
     lua.execute(CHECKS)
     return lua

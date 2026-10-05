@@ -24,7 +24,7 @@ and checks (under Theme.CHROME_CORNERS "cut", and "round" for the A/B path):
     frames are NOT collected;
   * the lib's reposition (Refresh / Show / SetButtonRadius) does not move a collected button back,
     and drag-to-move is switched off;
-  * the toggle shows and hides the drawer, persists the state in ForeverSynthwaveDB, shows the
+  * the toggle shows and hides the drawer, persists the state in ForeverSTUwaveDB, shows the
     count badge and the "Addon buttons (N)" tooltip, and is hidden with zero buttons;
   * tiles wrap to more rows and the drawer grows; combat defers collection to PLAYER_REGEN_ENABLED.
 
@@ -42,15 +42,15 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
-THEME_SRC = (ADDON / "Theme.lua").read_text(encoding="utf-8")
+ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
+THEME_SRC = (ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
 # MINIMAP_LUA / LAYOUT_LUA point the harness at a mutant copy (mutation checks).
-LAYOUT_SRC = Path(os.environ.get("LAYOUT_LUA", ADDON / "Layout.lua")).read_text(encoding="utf-8")
-MINIMAP_SRC = Path(os.environ.get("MINIMAP_LUA", ADDON / "Minimap.lua")).read_text(encoding="utf-8")
+LAYOUT_SRC = Path(os.environ.get("LAYOUT_LUA", ADDON / "Core/Layout.lua")).read_text(encoding="utf-8")
+MINIMAP_SRC = Path(os.environ.get("MINIMAP_LUA", ADDON / "Modules/Minimap/Minimap.lua")).read_text(encoding="utf-8")
 
 MOCK = r"""
 local THEME_SRC, MINIMAP_SRC, MODE, UI_HEIGHT, LAYOUT_SRC, SETUP, PRE_DB = ...
-local mediaPrefix = "Interface\\AddOns\\ForeverSynthwave\\media\\"
+local mediaPrefix = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
 local Region = {}
 Region.__index = function(t, k)
     if Region[k] then return Region[k] end
@@ -190,7 +190,7 @@ function GameTooltip:Show() self.shown = true end
 function GameTooltip:Hide() self.shown = false end
 
 FS = { LogDegradeOnce = function() end }
-assert(loadstring(THEME_SRC, "@Theme.lua"))("ForeverSynthwave", FS)
+assert(loadstring(THEME_SRC, "@Theme.lua"))("forever-stuwave", FS)
 local Theme = FS.Theme
 Theme.CHROME_CORNERS = MODE
 Theme.FONT_MONO = Theme.FONT_MONO or "mono"
@@ -209,13 +209,13 @@ wrap("AddGradientBorder", "border")
 wrap("AddRoundedFill", "fill")
 wrap("SkinButton", "skin")
 
-if PRE_DB then ForeverSynthwaveDB = PRE_DB end
+if PRE_DB then ForeverSTUwaveDB = PRE_DB end
 if SETUP then assert(loadstring(SETUP, "@setup"))() end
 
 -- With a UIParent height, seat the real FS.Layout so Minimap.lua derives its metrics from
 -- the scaled map size exactly as in game (scale = UI_HEIGHT / 1440).
-if UI_HEIGHT then assert(loadstring(LAYOUT_SRC, "@Layout.lua"))("ForeverSynthwave", FS) end
-assert(loadstring(MINIMAP_SRC, "@Minimap.lua"))("ForeverSynthwave", FS)
+if UI_HEIGHT then assert(loadstring(LAYOUT_SRC, "@Layout.lua"))("forever-stuwave", FS) end
+assert(loadstring(MINIMAP_SRC, "@Minimap.lua"))("forever-stuwave", FS)
 -- the loader frame is the last frame created at file scope
 __loader = __last
 __Theme = Theme
@@ -569,10 +569,10 @@ def tray_checks() -> None:
     check("[tray] drawer starts closed", tray.shown is False)
     lua.execute("__click(Minimap.fsTrayToggle)")
     check("[tray] toggle click opens the drawer and persists open", tray.shown is True
-          and g.ForeverSynthwaveDB.minimapTrayOpen is True)
+          and g.ForeverSTUwaveDB.minimapTrayOpen is True)
     lua.execute("__click(Minimap.fsTrayToggle)")
     check("[tray] second click closes the drawer and persists closed", tray.shown is False
-          and g.ForeverSynthwaveDB.minimapTrayOpen is False)
+          and g.ForeverSTUwaveDB.minimapTrayOpen is False)
 
     # ---- B: saved open state is restored at login
     lua = run("cut", None, TRAY_FULL, {"minimapTrayOpen": True})
@@ -654,13 +654,13 @@ def tray_failure_checks() -> None:
     lua = run("cut", None, LIB_SETUP + LOGGING + r"""
     local orig = FS.Theme.SkinButton
     FS.Theme.SkinButton = function(frame, ...)
-        if frame.name == "ForeverSynthwaveMinimapTrayToggle" then error("toggleboom") end
+        if frame.name == "ForeverSTUwaveMinimapTrayToggle" then error("toggleboom") end
         return orig(frame, ...)
     end
     """, None)
     g = lua.globals()
     logs = [str(g.__logs[i]) for i in range(1, len(g.__logs) + 1)]
-    toggle = g.ForeverSynthwaveMinimapTrayToggle
+    toggle = g.ForeverSTUwaveMinimapTrayToggle
     check("[tray] a toggle build failure is logged", len(logs) == 1 and "toggleboom" in logs[0])
     check("[tray] a toggle build failure leaves Minimap.fsTray / fsTrayToggle unset",
           g.Minimap.fsTray is None and g.Minimap.fsTrayToggle is None)
@@ -677,7 +677,7 @@ def tray_failure_checks() -> None:
     lua.execute("__lib.objects.Prot.protected = true; __combat = true")
     lua.execute("__click(Minimap.fsTrayToggle)")
     check("[tray] combat + protected button: the open click is deferred (drawer untouched)",
-          tray.shown is False and g.ForeverSynthwaveDB.minimapTrayOpen is True)
+          tray.shown is False and g.ForeverSTUwaveDB.minimapTrayOpen is True)
     lua.execute("__combat = false; FireEvent('PLAYER_REGEN_ENABLED')")
     check("[tray] PLAYER_REGEN_ENABLED applies the deferred open", tray.shown is True)
     lua.execute("__combat = true; __click(Minimap.fsTrayToggle)")
@@ -735,7 +735,7 @@ READOUT_TEXT_PAD = 8
 DOT_OFFSET = 2
 DOT_FRACTION = 0.34
 DOT_GLOW_REACH = 3
-GLOW_ROUND = "Interface\\AddOns\\ForeverSynthwave\\media\\glow_round.tga"
+GLOW_ROUND = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\glow_round.tga"
 LAYER_RANK = {"BACKGROUND": 0, "BORDER": 1, "ARTWORK": 2, "OVERLAY": 3, "HIGHLIGHT": 4}
 
 
@@ -877,7 +877,7 @@ def coords_checks() -> None:
 LAYOUT_W, LAYOUT_H = 256, 270   # what a Layout pass leaves the cluster at (children's extents)
 
 GEO_SETUP = r"""
-ForeverSynthwaveDB = {}
+ForeverSTUwaveDB = {}
 local now = 100
 function GetTime() now = now + 0.25; return now end
 local R = getmetatable(UIParent)
@@ -1155,7 +1155,7 @@ def trigger_checks() -> None:
     lua, g = seated()
     lua.execute('FireEvent("PLAYER_ENTERING_WORLD", false, false)')
     lua.execute("__frames(3, false)")
-    seen = lua.eval('(function() for _, e in ipairs(ForeverSynthwaveDB.minimapSeatLog) do '
+    seen = lua.eval('(function() for _, e in ipairs(ForeverSTUwaveDB.minimapSeatLog) do '
                     'if e.ev == "PLAYER_ENTERING_WORLD" or e.ev == "reseat" then return true end end return false end)()')
     check("[trigger] a zone-change PLAYER_ENTERING_WORLD does not re-seat", not seen)
 
@@ -1271,41 +1271,41 @@ def review_checks() -> None:
           scale_space and ok)
 
     # --- the log: this session starts with the PLAYER_LOGIN rescale pass, the previous one is untouched
-    lua = geo_world('ForeverSynthwaveDB.minimapSeatLog = { { ev = "old1" }, { ev = "old2" } }')
+    lua = geo_world('ForeverSTUwaveDB.minimapSeatLog = { { ev = "old1" }, { ev = "old2" } }')
     lua.execute('FireEvent("PLAYER_LOGIN")'); lua.execute("__frames(3, false)")
-    prev = lua.eval('(function() local t = {} for _, e in ipairs(ForeverSynthwaveDB.minimapSeatLogPrev or {}) do '
+    prev = lua.eval('(function() local t = {} for _, e in ipairs(ForeverSTUwaveDB.minimapSeatLogPrev or {}) do '
                     't[#t + 1] = e.ev end return table.concat(t, ",") end)()')
     check(f"[seat log] the PLAYER_LOGIN rescale pass lands in this session's log, the previous log stays "
           f"exactly as it was ({prev})", prev == "old1,old2"
-          and lua.eval("ForeverSynthwaveDB.minimapSeatLog[1].ev") == "rescale:PLAYER_LOGIN")
+          and lua.eval("ForeverSTUwaveDB.minimapSeatLog[1].ev") == "rescale:PLAYER_LOGIN")
 
     # --- minimapSeatLogFirst: filled only when no log existed, never rotated or overwritten
     lua = geo_world()
     lua.execute('FireEvent("PLAYER_LOGIN")'); lua.execute("__frames(3, false)")
     lua.execute("EditModeManagerFrame:UpdateLayoutInfo(); __frames(3, false)")
     check("[first slot] the first session ever logged fills minimapSeatLogFirst (it holds the login sequence)",
-          lua.eval('(function() local f = ForeverSynthwaveDB.minimapSeatLogFirst; if not f then return false end '
+          lua.eval('(function() local f = ForeverSTUwaveDB.minimapSeatLogFirst; if not f then return false end '
                    'for _, e in ipairs(f) do if e.ev == "UpdateLayoutInfo" then return true end end return false end)()'))
-    lua = geo_world('ForeverSynthwaveDB.minimapSeatLogFirst = { { ev = "first1" } }; '
-                    'ForeverSynthwaveDB.minimapSeatLog = { { ev = "second" } }')
+    lua = geo_world('ForeverSTUwaveDB.minimapSeatLogFirst = { { ev = "first1" } }; '
+                    'ForeverSTUwaveDB.minimapSeatLog = { { ev = "second" } }')
     lua.execute('FireEvent("PLAYER_LOGIN")'); lua.execute("__frames(3, false)")
     lua.execute("for i = 1, 40 do UIParent.h = 1200 + i; FireEvent('EDIT_MODE_LAYOUTS_UPDATED'); __frames(2, false) end")
     check("[first slot] later sessions leave it alone however much they log, and the previous session rotates as before",
-          lua.eval("#(ForeverSynthwaveDB.minimapSeatLogFirst or {})") == 1
-          and lua.eval("(ForeverSynthwaveDB.minimapSeatLogFirst[1] or {}).ev") == "first1"
-          and lua.eval("((ForeverSynthwaveDB.minimapSeatLogPrev or {})[1] or {}).ev") == "second")
-    lua = geo_world('ForeverSynthwaveDB.minimapSeatLog = { { ev = "old" } }')
+          lua.eval("#(ForeverSTUwaveDB.minimapSeatLogFirst or {})") == 1
+          and lua.eval("(ForeverSTUwaveDB.minimapSeatLogFirst[1] or {}).ev") == "first1"
+          and lua.eval("((ForeverSTUwaveDB.minimapSeatLogPrev or {})[1] or {}).ev") == "second")
+    lua = geo_world('ForeverSTUwaveDB.minimapSeatLog = { { ev = "old" } }')
     lua.execute('FireEvent("PLAYER_LOGIN")'); lua.execute("__frames(3, false)")
     check("[first slot] a session that finds a log from before does not fill it",
-          lua.eval("ForeverSynthwaveDB.minimapSeatLogFirst") is None)
+          lua.eval("ForeverSTUwaveDB.minimapSeatLogFirst") is None)
 
     # --- hooks: a missing method is skipped, the log says which exist, the retry installs it later
     lua, g = seated("__asa = MinimapCluster.ApplySystemAnchor; MinimapCluster.ApplySystemAnchor = nil")
-    hk = lua.eval('(function() for _, e in ipairs(ForeverSynthwaveDB.minimapSeatLog) do '
+    hk = lua.eval('(function() for _, e in ipairs(ForeverSTUwaveDB.minimapSeatLog) do '
                   'if e.ev == "hooks" then return e.hk end end end)()')
     check(f"[hooks] a client without ApplySystemAnchor installs the others and logs which ({hk})", hk == "SHU")
     lua.execute("MinimapCluster.ApplySystemAnchor = __asa; FireEvent('ADDON_LOADED', 'Blizzard_EditMode')")
-    hk2 = lua.eval('(function() local last; for _, e in ipairs(ForeverSynthwaveDB.minimapSeatLog) do '
+    hk2 = lua.eval('(function() local last; for _, e in ipairs(ForeverSTUwaveDB.minimapSeatLog) do '
                    'if e.ev == "hooks" then last = e.hk end end return last end)()')
     lua.execute("MinimapCluster:ApplySystemAnchor()")
     wrong = not on_target(g, True)[0]
@@ -1314,7 +1314,7 @@ def review_checks() -> None:
     check(f"[hooks] a method that appears when Blizzard_EditMode loads is hooked then ({hk2}); "
           f"the Reset path is re-seated ({msg})", hk2 == "SHAU" and wrong and ok)
     lua, g = seated()
-    hk = lua.eval('(function() for _, e in ipairs(ForeverSynthwaveDB.minimapSeatLog) do '
+    hk = lua.eval('(function() for _, e in ipairs(ForeverSTUwaveDB.minimapSeatLog) do '
                   'if e.ev == "hooks" then return e.hk end end end)()')
     check(f"[hooks] a full client logs all four hooks installed ({hk})", hk == "SHAU")
 
@@ -1408,14 +1408,14 @@ def mutation_gap_checks() -> None:
     lua = geo_world("__asa = MinimapCluster.ApplySystemAnchor; MinimapCluster.ApplySystemAnchor = nil")
     lua.execute('FireEvent("PLAYER_LOGIN")')
     lua.execute("MinimapCluster.ApplySystemAnchor = __asa; FireEvent('ADDON_LOADED', 'Blizzard_EditMode')")
-    hks = lua.eval('(function() local t = {} for _, e in ipairs(ForeverSynthwaveDB.minimapSeatLog) do '
+    hks = lua.eval('(function() local t = {} for _, e in ipairs(ForeverSTUwaveDB.minimapSeatLog) do '
                    'if e.ev == "hooks" then t[#t + 1] = e.hk end end return table.concat(t, ",") end)()')
     check(f"[seat log] a late hook install right after the first is its own entry ({hks})", hks == "SHU,SHAU")
 
     # The log's map readings are in the same space as its targets (UIParent units) at Size 120.
     lua, g = seated("__editScale = 1.2")
     lua.execute("EditModeManagerFrame:UpdateLayoutInfo(); __frames(4, false)")
-    d = lua.eval('(function() local last; for _, e in ipairs(ForeverSynthwaveDB.minimapSeatLog) do '
+    d = lua.eval('(function() local last; for _, e in ipairs(ForeverSTUwaveDB.minimapSeatLog) do '
                  'if e.ev == "compensate" then last = e end end '
                  'return { mt = last.mt, tt = last.tt, ml = last.ml, tl = last.tl } end)()')
     ok = (None not in (d["mt"], d["tt"], d["ml"], d["tl"])
@@ -1425,14 +1425,14 @@ def mutation_gap_checks() -> None:
 
 
 def seat_log_checks() -> None:
-    """ForeverSynthwaveDB.minimapSeatLog: what /fsbug shows when the minimap is seated wrong."""
+    """ForeverSTUwaveDB.minimapSeatLog: what /fsbug shows when the minimap is seated wrong."""
     lua = geo_world()
     lua.execute('FireEvent("PLAYER_LOGIN")')
     lua.execute("__frames(3, false)")
     lua.execute("EditModeManagerFrame:UpdateLayoutInfo(); __frames(3, false)")
     lua.execute("""
         local evs, fields = {}, true
-        for i, e in ipairs(ForeverSynthwaveDB.minimapSeatLog) do
+        for i, e in ipairs(ForeverSTUwaveDB.minimapSeatLog) do
             evs[#evs + 1] = e.ev
             for _, k in ipairs({ "ev", "t", "pt", "x", "y", "mt", "ml", "tt", "tl", "sc", "clamp" }) do
                 if e[k] == nil then fields = false end
@@ -1450,12 +1450,12 @@ def seat_log_checks() -> None:
           and "rescale:UpdateLayoutInfo" in evs)
     lua.execute('FireEvent("EDIT_MODE_LAYOUTS_UPDATED"); __frames(2, false)')
     check("[seat log] the server's EDIT_MODE_LAYOUTS_UPDATED is logged, so its order against our seat can be read",
-          bool(lua.eval('(function() for _, e in ipairs(ForeverSynthwaveDB.minimapSeatLog) do '
+          bool(lua.eval('(function() for _, e in ipairs(ForeverSTUwaveDB.minimapSeatLog) do '
                         'if e.ev == "EDIT_MODE_LAYOUTS_UPDATED" then return true end end return false end)()')))
     check("[seat log] every entry carries event, time, cluster point and offsets, map top and left, "
           "layout target, scale and clamp, as plain numbers, strings or booleans", bool(lua.eval("__seatFields")))
     check("[seat log] the cluster's clamp is logged as off after the compensation",
-          bool(lua.eval("ForeverSynthwaveDB.minimapSeatLog[#ForeverSynthwaveDB.minimapSeatLog].clamp == false")))
+          bool(lua.eval("ForeverSTUwaveDB.minimapSeatLog[#ForeverSTUwaveDB.minimapSeatLog].clamp == false")))
 
     # --- 20 entries, the first 10 pinned, a repeat counts up instead of taking a slot
     lua.execute("""
@@ -1464,41 +1464,41 @@ def seat_log_checks() -> None:
             FireEvent("EDIT_MODE_LAYOUTS_UPDATED"); __frames(2, false)
         end
         __first10 = {}
-        for i = 1, 10 do __first10[i] = ForeverSynthwaveDB.minimapSeatLog[i].ev .. ":" .. ForeverSynthwaveDB.minimapSeatLog[i].t end
-        local n0 = #ForeverSynthwaveDB.minimapSeatLog
+        for i = 1, 10 do __first10[i] = ForeverSTUwaveDB.minimapSeatLog[i].ev .. ":" .. ForeverSTUwaveDB.minimapSeatLog[i].t end
+        local n0 = #ForeverSTUwaveDB.minimapSeatLog
         for i = 1, 60 do
             UIParent.h = 1200 + i                       -- a different state every time
             UIParent.w = UIParent.h * 16 / 9
             FireEvent("EDIT_MODE_LAYOUTS_UPDATED")
             __frames(2, false)
         end
-        __logN = #ForeverSynthwaveDB.minimapSeatLog
+        __logN = #ForeverSTUwaveDB.minimapSeatLog
         __pinned = true
         for i = 1, 10 do
-            local e = ForeverSynthwaveDB.minimapSeatLog[i]
+            local e = ForeverSTUwaveDB.minimapSeatLog[i]
             if e.ev .. ":" .. e.t ~= __first10[i] then __pinned = false end
         end
     """)
     check(f"[seat log] capped at 20 entries ({lua.eval('__logN')})", lua.eval("__logN") == 20)
     check("[seat log] the first 10 entries (the login sequence) stay pinned", bool(lua.eval("__pinned")))
     lua.execute("""
-        local before = #ForeverSynthwaveDB.minimapSeatLog
+        local before = #ForeverSTUwaveDB.minimapSeatLog
         for _ = 1, 5 do FS.Layout.rescaleWhy = "repeat"; for _, fn in ipairs(FS.Layout._rescaleCallbacks) do pcall(fn) end end
         FS.Layout.rescaleWhy = nil
-        local last = ForeverSynthwaveDB.minimapSeatLog[#ForeverSynthwaveDB.minimapSeatLog]
-        __repeatN, __repeatGrew = last.n, #ForeverSynthwaveDB.minimapSeatLog > before + 1
+        local last = ForeverSTUwaveDB.minimapSeatLog[#ForeverSTUwaveDB.minimapSeatLog]
+        __repeatN, __repeatGrew = last.n, #ForeverSTUwaveDB.minimapSeatLog > before + 1
     """)
     check(f"[seat log] the same state repeated counts up (n={lua.eval('__repeatN')}) instead of taking slots",
           lua.eval("__repeatN") == 5 and not lua.eval("__repeatGrew"))
 
     # --- the previous session is kept, the new one starts empty
-    lua = geo_world('ForeverSynthwaveDB.minimapSeatLog = { { ev = "old session" } }')
+    lua = geo_world('ForeverSTUwaveDB.minimapSeatLog = { { ev = "old session" } }')
     lua.execute('FireEvent("PLAYER_LOGIN")')
     lua.execute("__frames(3, false)")
     check("[seat log] the previous session's log is kept as minimapSeatLogPrev",
-          lua.eval("((ForeverSynthwaveDB.minimapSeatLogPrev or {})[1] or {}).ev") == "old session")
+          lua.eval("((ForeverSTUwaveDB.minimapSeatLogPrev or {})[1] or {}).ev") == "old session")
     check("[seat log] and this session starts a fresh log",
-          lua.eval("ForeverSynthwaveDB.minimapSeatLog[1].ev") == "rescale:PLAYER_LOGIN")
+          lua.eval("ForeverSTUwaveDB.minimapSeatLog[1].ev") == "rescale:PLAYER_LOGIN")
 
     # --- a secret reading never lands in the log or breaks the seat
     lua = geo_world("""
@@ -1512,12 +1512,12 @@ def seat_log_checks() -> None:
     lua.execute("__frames(3, false)")
     lua.execute("""
         __secretLeaked = false
-        for _, e in ipairs(ForeverSynthwaveDB.minimapSeatLog) do
+        for _, e in ipairs(ForeverSTUwaveDB.minimapSeatLog) do
             for _, v in pairs(e) do if v == __secret then __secretLeaked = true end end
         end
     """)
     check("[seat log] a secret map reading is dropped, never stored, and does not throw",
-          not lua.eval("__secretLeaked") and lua.eval("#ForeverSynthwaveDB.minimapSeatLog") > 0)
+          not lua.eval("__secretLeaked") and lua.eval("#ForeverSTUwaveDB.minimapSeatLog") > 0)
 
 
 def main() -> int:

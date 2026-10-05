@@ -48,9 +48,9 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent / "addon" / "ForeverSynthwave"
+ADDON = HERE.parent / "forever-stuwave"
 # PETFRAME_LUA points the harness at a mutant copy of PetFrame.lua (a check must fail on a broken one).
-PETFRAME = Path(os.environ.get("PETFRAME_LUA", ADDON / "PetFrame.lua"))
+PETFRAME = Path(os.environ.get("PETFRAME_LUA", ADDON / "Modules/Pet/PetFrame.lua"))
 # The panel and status block come from the approved Gunsight mockup (option C, the console dock).
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
 
@@ -423,8 +423,8 @@ def runtime(scale: float = 1.0, setup: str = "", allow_messages: bool = False) -
     rt.execute(f"UIParent:SetHeight({1440 * scale})")
     load = rt.eval(LOAD)
     fs = rt.globals().FS
-    for filename in ("Layout.lua", "FrameHelpers.lua", "PetFrame.lua"):
-        path = PETFRAME if filename == "PetFrame.lua" else ADDON / filename
+    for filename in ("Core/Layout.lua", "Core/FrameHelpers.lua", "Modules/Pet/PetFrame.lua"):
+        path = PETFRAME if filename == "Modules/Pet/PetFrame.lua" else ADDON / filename
         load(path.read_text(encoding="utf-8"), f"@{filename}", fs)
     rt.execute("__fire_login()")
     messages = list(rt.globals().__messages.values())
@@ -808,7 +808,7 @@ def _messages(rt: LuaRuntime) -> list:
 
 
 def _party_low_constants() -> tuple[float, float]:
-    src = (ADDON / "PartyFrames.lua").read_text(encoding="utf-8")
+    src = (ADDON / "Modules/UnitFrames/PartyFrames.lua").read_text(encoding="utf-8")
     frac = re.search(r"^local LOW_HP_FRACTION = ([\d.]+)", src, re.M)
     eps = re.search(r"^local LOW_HP_EPSILON\s*= ([\d.]+)", src, re.M)
     assert frac and eps, "PartyFrames.lua no longer defines LOW_HP_FRACTION / LOW_HP_EPSILON; update this harness"
@@ -902,7 +902,7 @@ def check_the_low_look_is_the_mockups_red_name_rail_and_edge() -> None:
     hexred = re.search(r"--red:#([0-9a-f]{6});", src)
     assert hexred and "var nc=st.low?K.red:K.white" in src and "var hc=st.low?K.red:K.pink" in src, \
         "the mockup's low name / rail rule changed; update this harness"
-    token = re.search(r"^Theme\.COLOR_RED\s*=\s*\{\s*([\d.]+),\s*([\d.]+),\s*([\d.]+),", (ADDON / "Theme.lua").read_text(encoding="utf-8"), re.M)
+    token = re.search(r"^Theme\.COLOR_RED\s*=\s*\{\s*([\d.]+),\s*([\d.]+),\s*([\d.]+),", (ADDON / "Core/Theme.lua").read_text(encoding="utf-8"), re.M)
     assert token, "Theme.COLOR_RED not found"
     want = [int(hexred.group(1)[i:i + 2], 16) / 255 for i in (0, 2, 4)]
     for got, w in zip(token.groups(), want, strict=True):

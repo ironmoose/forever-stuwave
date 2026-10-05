@@ -41,9 +41,9 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
-BR_SRC = (ADDON / "BugReport.lua").read_text(encoding="utf-8") if (ADDON / "BugReport.lua").exists() else ""
-EL_SRC = (ADDON / "ErrorLog.lua").read_text(encoding="utf-8")
+ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
+BR_SRC = (ADDON / "Modules/Diagnostics/BugReport.lua").read_text(encoding="utf-8") if (ADDON / "Modules/Diagnostics/BugReport.lua").exists() else ""
+EL_SRC = (ADDON / "Core/ErrorLog.lua").read_text(encoding="utf-8")
 
 MOCK = r"""
 realType = type
@@ -83,7 +83,7 @@ W = {
     issecretThrows = false,
     frameThrows = false,
     addons = {
-        { "ForeverSynthwave", true }, { "Details", true }, { "DBM-Core", true }, { "Unloaded", false },
+        { "forever-stuwave", true }, { "Details", true }, { "DBM-Core", true }, { "Unloaded", false },
     },
 }
 __apiCalls = 0
@@ -302,7 +302,7 @@ function NewFS(opts)
         FS.Theme = {
             COLOR_BG = { 0.1, 0.06, 0.14, 0.8 }, COLOR_BORDER = { 0.66, 0.33, 0.97, 1 },
             COLOR_POWER = { 0.13, 0.88, 1, 1 }, COLOR_MUTED = { 0.6, 0.57, 0.77, 1 },
-            FONT_MONO = "Interface\\AddOns\\ForeverSynthwave\\fonts\\Mono.ttf",
+            FONT_MONO = "Interface\\AddOns\\forever-stuwave\\Media\\Fonts\\Mono.ttf",
             SkinPanel = function(f, o) f._skinned = o end,
             SkinButton = function(b, o) b._skinnedButton = true end,
             ApplyMono = function(fs, size, color) fs._mono = size end,
@@ -317,19 +317,19 @@ function LoadBR(opts)
     local FS = opts.FS or NewFS(opts)
     if opts.apis ~= false then InstallApis(opts.mode or "plain") end
     local chunk = assert(loadstring(BR_SRC, "=BugReport.lua"))
-    chunk("ForeverSynthwave", FS)
+    chunk("forever-stuwave", FS)
     return FS, FS.BugReport
 end
 
 function LoadEL(FS)
     FS = FS or NewFS()
-    ForeverSynthwaveErrorLog = {}
+    ForeverSTUwaveErrorLog = {}
     local chunk = assert(loadstring(EL_SRC, "=ErrorLog.lua"))
-    chunk("ForeverSynthwave", FS)
+    chunk("forever-stuwave", FS)
     return FS
 end
 
-OURS = "Interface\\AddOns\\ForeverSynthwave\\UnitFrames.lua:120: attempt to index nil"
+OURS = "Interface\\AddOns\\forever-stuwave\\UnitFrames.lua:120: attempt to index nil"
 FOREIGN = "Interface\\AddOns\\Details\\core.lua:33: attempt to call nil"
 EXPECT_LINE = "Forever STUwave: error was thrown and logged (/fsbug to report)"
 
@@ -607,18 +607,18 @@ case("enc_pretty_indents_two_spaces", """
 
 case("build_with_every_api_secret_holds_no_sentinel", """
     local FS, BR = LoadBR({ mode = "secret" })
-    ForeverSynthwaveDB = { petFrame = { x = SN }, label = SS }
-    ForeverSynthwaveErrorLog = { { message = SS, stack = SS, count = SN, combat = SB, ours = true } }
-    CreateFrame("Frame", "ForeverSynthwavePlayerFrame", UIParent)
-    ForeverSynthwavePlayerFrame.GetWidth = function() return SN end
-    ForeverSynthwavePlayerFrame.IsShown = function() return SB end
+    ForeverSTUwaveDB = { petFrame = { x = SN }, label = SS }
+    ForeverSTUwaveErrorLog = { { message = SS, stack = SS, count = SN, combat = SB, ours = true } }
+    CreateFrame("Frame", "ForeverSTUwavePlayerFrame", UIParent)
+    ForeverSTUwavePlayerFrame.GetWidth = function() return SN end
+    ForeverSTUwavePlayerFrame.IsShown = function() return SB end
     local report = BR.Build("note")
     assert(not ContainsSentinel(report), "a sentinel leaked into the report")
     assert(report.client.build == "secret", tostring(report.client.build))
     assert(report.player.level == "secret" and report.player.classToken == "secret")
     assert(report.player.inCombat == "secret" and report.player.hasPet == "secret")
-    assert(report.frames.ForeverSynthwavePlayerFrame.w == "secret")
-    assert(report.frames.ForeverSynthwavePlayerFrame.shown == "secret")
+    assert(report.frames.ForeverSTUwavePlayerFrame.w == "secret")
+    assert(report.frames.ForeverSTUwavePlayerFrame.shown == "secret")
     assert(report.settings.petFrame.x == "secret" and report.settings.label == "secret")
     assert(report.errors[1].message == "secret" and report.errors[1].count == "secret")
     BR.Encode(report)   -- and it still serialises
@@ -654,7 +654,7 @@ case("build_survives_every_api_missing", """
     local FS, BR = LoadBR({ mode = "absent", noTheme = true })
     local report = BR.Build("n")
     assert(report.player.level == "unavailable", tostring(report.player.level))
-    assert(report.addon.name == "ForeverSynthwave")
+    assert(report.addon.name == "forever-stuwave")
     assert(report.note == "n")
     BR.Encode(report)
 """)
@@ -662,7 +662,7 @@ case("build_survives_every_api_missing", """
 case("build_one_throwing_section_does_not_abort_the_report", """
     local FS, BR = LoadBR()
     -- A frame global whose members raise: the frames section throws, nothing else may.
-    ForeverSynthwavePlayerFrame = setmetatable({}, { __index = function() error("frame boom") end })
+    ForeverSTUwavePlayerFrame = setmetatable({}, { __index = function() error("frame boom") end })
     local r = BR.Build("n")
     assert(r.frames == "error", tostring(r.frames))
     assert(r.player.level == 70 and r.note == "n" and r.group.size == 0, "other sections survive")
@@ -704,7 +704,7 @@ case("sanitize_turns_nan_and_inf_into_text", """
 
 case("errors_section_scrubs_secret_fields_by_itself", """
     local _, BR = LoadBR()
-    ForeverSynthwaveErrorLog = {
+    ForeverSTUwaveErrorLog = {
         { message = SS, stack = SS, count = SN, combat = SB, firstSeen = SS, lastSeen = SS, ours = true },
     }
     -- BR.Errors is called directly, so the final pass of Build cannot be what cleans it.
@@ -737,9 +737,9 @@ case("build_ui_frame_is_only_set_once_the_frame_fully_built", """
 
 case("report_has_every_requested_field", """
     local FS, BR = LoadBR()
-    ForeverSynthwaveDB = { petFrame = { x = 5 } }
+    ForeverSTUwaveDB = { petFrame = { x = 5 } }
     local r = BR.Build("my note")
-    assert(r.addon.version == "0.1.0" and r.addon.name == "ForeverSynthwave")
+    assert(r.addon.version == "0.1.0" and r.addon.name == "forever-stuwave")
     assert(r.client.version == "1.16.1" and r.client.build == "61234" and r.client.toc == 16001)
     assert(r.time.date:match("^%d%d%d%d%-%d%d%-%d%d %d%d:%d%d:%d%d$"), r.time.date)
     assert(realType(r.time.epoch) == "number")
@@ -786,7 +786,7 @@ case("report_class_recon_is_full_once_then_a_stub_until_the_next_run", """
     -- a report counts as sent only once /fsbug has shown it, so these go through the command
     local function Slash(note)
         SlashCmdList.FSBUG(note)
-        local list = ForeverSynthwaveDB.bugreports
+        local list = ForeverSTUwaveDB.bugreports
         return list[#list].classRecon
     end
     NewRun("2026-10-03 10:00:00")
@@ -816,7 +816,7 @@ case("report_class_recon_is_not_consumed_when_the_command_fails_before_the_teste
         MarkClassReconReported = function() marks = marks + 1; run.reported = true end,
     }
     local function Last()
-        local list = ForeverSynthwaveDB.bugreports
+        local list = ForeverSTUwaveDB.bugreports
         return list[#list].classRecon
     end
     local store, show, fmt = BR.Store, BR.ShowFrame, string.format
@@ -936,9 +936,9 @@ case("report_class_recon_worst_case_payload_fits_the_report_without_truncation",
     FS.Diagnostics = { GetClassRecon = function() return recon end }
     -- the other sections at their own caps too (ten errors at the message and stack caps, 80 addon names
     -- at the name cap), so the whole report is what has to fit the final pass, not the recon alone
-    ForeverSynthwaveErrorLog = {}
+    ForeverSTUwaveErrorLog = {}
     for i = 1, 10 do
-        ForeverSynthwaveErrorLog[i] = { message = (long("err", i) .. string.rep("m", 300)):sub(1, BR.LIMITS.errMsg),
+        ForeverSTUwaveErrorLog[i] = { message = (long("err", i) .. string.rep("m", 300)):sub(1, BR.LIMITS.errMsg),
             stack = string.rep("s", BR.LIMITS.errStack), count = i, combat = false, ours = true, firstSeen = "t", lastSeen = "u" }
     end
     W.addons = {}
@@ -1024,16 +1024,16 @@ case("report_instance_fields", """
 
 case("report_frames_shown_hidden_size_absent", """
     local FS, BR = LoadBR()
-    local a = CreateFrame("Frame", "ForeverSynthwavePlayerFrame", UIParent)
+    local a = CreateFrame("Frame", "ForeverSTUwavePlayerFrame", UIParent)
     a:SetSize(320.04, 92); a:Show()
-    local b = CreateFrame("Frame", "ForeverSynthwaveXPBar", UIParent)
+    local b = CreateFrame("Frame", "ForeverSTUwaveXPBar", UIParent)
     b:SetSize(100, 8); b:Hide()
     local r = BR.Build()
-    local p = r.frames.ForeverSynthwavePlayerFrame
+    local p = r.frames.ForeverSTUwavePlayerFrame
     assert(p.shown == true and p.w == 320 and p.h == 92, "size is rounded: " .. tostring(p.w))
-    local x = r.frames.ForeverSynthwaveXPBar
+    local x = r.frames.ForeverSTUwaveXPBar
     assert(x.shown == false and x.w == 100 and x.h == 8)
-    assert(r.frames.ForeverSynthwaveDeck == "absent")
+    assert(r.frames.ForeverSTUwaveDeck == "absent")
     assert(#BR.FRAME_NAMES == 28, "the reported frame list changed: " .. #BR.FRAME_NAMES)
     local reported = 0
     for _ in pairs(r.frames) do reported = reported + 1 end
@@ -1046,7 +1046,7 @@ case("report_addons_lists_only_loaded_ones", """
     local r = BR.Build()
     local seen = {}
     for _, name in ipairs(r.addons) do seen[name] = true end
-    assert(seen.Details and seen["DBM-Core"] and seen.ForeverSynthwave and not seen.Unloaded)
+    assert(seen.Details and seen["DBM-Core"] and seen["forever-stuwave"] and not seen.Unloaded)
     assert(r.addonCount == 3)
 """)
 
@@ -1061,7 +1061,7 @@ case("report_addon_list_is_capped", """
 
 case("report_settings_exclude_bulky_logs_and_reports", """
     local FS, BR = LoadBR()
-    ForeverSynthwaveDB = {
+    ForeverSTUwaveDB = {
         petFrame = { x = 1 }, recon = { big = { 1, 2, 3 } }, reconSkins = {}, reconPos = {},
         fsprobe = { a = 1 }, fontProbe = {}, bugreports = { { id = 1 } }, bugreportSeq = 4,
         degradeLog = { k = { msg = "m" } },
@@ -1077,17 +1077,17 @@ case("report_carries_the_chat_seat_log_in_its_own_section", """
     local FS, BR = LoadBR()
     local log, prev = {}, { { ev = "old", t = 1, pt = "TOPLEFT", x = 0, y = 0 } }
     for i = 1, 20 do log[i] = { ev = "SetPoint", t = i, pt = "CENTER", x = i, y = -i, ui = 1200 } end
-    ForeverSynthwaveDB = { petFrame = { x = 1 }, chatSeatLog = log, chatSeatLogPrev = prev }
+    ForeverSTUwaveDB = { petFrame = { x = 1 }, chatSeatLog = log, chatSeatLogPrev = prev }
     local r = BR.Build()
     assert(r.settings.chatSeatLog == nil and r.settings.chatSeatLogPrev == nil,
         "the logs must not ride in the generic settings copy")
     assert(r.settings.petFrame.x == 1)
     assert(#r.chatSeat.log == 20 and r.chatSeat.log[20].x == 20 and r.chatSeat.log[1].ev == "SetPoint")
     assert(#r.chatSeat.prev == 1 and r.chatSeat.prev[1].ev == "old")
-    ForeverSynthwaveDB = {}
+    ForeverSTUwaveDB = {}
     local empty = BR.Build().chatSeat
     assert(type(empty) == "table" and empty.log == nil and empty.prev == nil, "no log yet")
-    ForeverSynthwaveDB = nil
+    ForeverSTUwaveDB = nil
     assert(BR.Build().chatSeat == "unavailable", "no DB")
 """)
 
@@ -1102,7 +1102,7 @@ case("report_carries_the_minimap_seat_log_in_its_own_section", """
         return log
     end
     local log, prev, first = make(20, "compensate"), { { ev = "old", t = 1, pt = "TOP", x = 0, y = 0 } }, make(3, "first")
-    ForeverSynthwaveDB = { petFrame = { x = 1 }, minimapSeatLog = log, minimapSeatLogPrev = prev, minimapSeatLogFirst = first }
+    ForeverSTUwaveDB = { petFrame = { x = 1 }, minimapSeatLog = log, minimapSeatLogPrev = prev, minimapSeatLogFirst = first }
     local r = BR.Build()
     assert(r.settings.minimapSeatLog == nil and r.settings.minimapSeatLogPrev == nil and r.settings.minimapSeatLogFirst == nil,
         "the logs must not ride in the generic settings copy")
@@ -1118,7 +1118,7 @@ case("report_carries_the_minimap_seat_log_in_its_own_section", """
     local worst = function() return make(20, "rescale:EDIT_MODE_LAYOUTS_UPDATED") end
     local w1, w2, w3 = worst(), worst(), worst()
     for _, w in ipairs({ w1, w2, w3 }) do for _, e in ipairs(w) do e.pt = "BOTTOMRIGHT" end end
-    ForeverSynthwaveDB = { minimapSeatLog = w1, minimapSeatLogPrev = w2, minimapSeatLogFirst = w3 }
+    ForeverSTUwaveDB = { minimapSeatLog = w1, minimapSeatLogPrev = w2, minimapSeatLogFirst = w3 }
     local m = BR.Build().minimapSeat
     assert(#m.log == 20 and #m.prev == 20 and #m.first == 20, "no log is cut in the worst case")
     assert(m.prev[20].ev == "rescale:EDIT_MODE_LAYOUTS_UPDATED" and m.first[20].pt == "BOTTOMRIGHT" and m._truncated == nil)
@@ -1126,14 +1126,14 @@ case("report_carries_the_minimap_seat_log_in_its_own_section", """
 
     local huge = {}
     for i = 1, 300 do huge[i] = { ev = string.rep("e", 200), pt = "TOP", x = i, y = i } end
-    ForeverSynthwaveDB = { minimapSeatLog = huge, minimapSeatLogPrev = huge, minimapSeatLogFirst = huge }
+    ForeverSTUwaveDB = { minimapSeatLog = huge, minimapSeatLogPrev = huge, minimapSeatLogFirst = huge }
     local big = BR.Build().minimapSeat
     assert(#big.log <= 26 and #big.prev <= 26 and #big.first <= 26, "an oversized log is cut to the item cap, got " .. #big.log)
     assert(#BR.Encode(big) < 12000, "and stays small, got " .. #BR.Encode(big))
-    ForeverSynthwaveDB = {}
+    ForeverSTUwaveDB = {}
     local empty = BR.Build().minimapSeat
     assert(type(empty) == "table" and empty.log == nil and empty.prev == nil and empty.first == nil, "no log yet")
-    ForeverSynthwaveDB = nil
+    ForeverSTUwaveDB = nil
     assert(BR.Build().minimapSeat == "unavailable", "no DB")
 """)
 
@@ -1143,12 +1143,12 @@ case("report_settings_are_size_capped", """
     for i = 1, 400 do
         big["k" .. i] = { string.rep("x", 5000), { deep = { deeper = { deepest = { 1, 2, 3 } } } } }
     end
-    ForeverSynthwaveDB = { huge = big, longString = string.rep("y", 100000) }
+    ForeverSTUwaveDB = { huge = big, longString = string.rep("y", 100000) }
     local r = BR.Build()
     local s = BR.Encode(r)
     assert(#s < 80000, "settings must be bounded, got " .. #s)
     assert(r.settings._truncated ~= nil or r.settings.huge ~= nil, "the byte budget must have cut something")
-    ForeverSynthwaveDB = { longString = string.rep("y", 100000) }
+    ForeverSTUwaveDB = { longString = string.rep("y", 100000) }
     assert(Has(BR.Build().settings.longString, "chars)"))
 """)
 
@@ -1162,14 +1162,14 @@ case("report_note_is_capped_and_defaults_empty", """
 
 case("report_includes_last_ten_ours_with_caps", """
     local FS, BR = LoadBR()
-    ForeverSynthwaveErrorLog = {}
+    ForeverSTUwaveErrorLog = {}
     for i = 1, 15 do
-        ForeverSynthwaveErrorLog[#ForeverSynthwaveErrorLog + 1] = {
+        ForeverSTUwaveErrorLog[#ForeverSTUwaveErrorLog + 1] = {
             message = "err" .. i .. string.rep("m", 2000), stack = string.rep("s", 9000),
             count = i, combat = (i % 2 == 0), ours = true, firstSeen = "t", lastSeen = "u",
         }
     end
-    ForeverSynthwaveErrorLog[#ForeverSynthwaveErrorLog + 1] = { message = "other", count = 1, ours = false }
+    ForeverSTUwaveErrorLog[#ForeverSTUwaveErrorLog + 1] = { message = "other", count = 1, ours = false }
     local r = BR.Build()
     assert(#r.errors == 10, #r.errors)
     assert(r.errors[10].count == 15 and r.errors[1].count == 6, "the LAST ten, oldest first")
@@ -1180,7 +1180,7 @@ case("report_includes_last_ten_ours_with_caps", """
 
 case("report_with_no_error_log_global", """
     local FS, BR = LoadBR()
-    ForeverSynthwaveErrorLog = nil
+    ForeverSTUwaveErrorLog = nil
     local r = BR.Build()
     assert(#r.errors == 0 and r.errorCount == 0)
 """)
@@ -1191,9 +1191,9 @@ case("report_with_no_error_log_global", """
 
 case("store_keeps_the_last_twenty", """
     local FS, BR = LoadBR()
-    ForeverSynthwaveDB = nil
+    ForeverSTUwaveDB = nil
     for i = 1, 25 do BR.Capture("n" .. i) end
-    local list = ForeverSynthwaveDB.bugreports
+    local list = ForeverSTUwaveDB.bugreports
     assert(#list == 20, #list)
     assert(list[1].note == "n6" and list[20].note == "n25", list[1].note)
     assert(list[20].id == 25 and list[1].id == 6)
@@ -1201,33 +1201,33 @@ case("store_keeps_the_last_twenty", """
 
 case("store_survives_a_corrupt_slot", """
     local FS, BR = LoadBR()
-    ForeverSynthwaveDB = { bugreports = "junk" }
+    ForeverSTUwaveDB = { bugreports = "junk" }
     BR.Capture("a")
-    assert(realType(ForeverSynthwaveDB.bugreports) == "table" and #ForeverSynthwaveDB.bugreports == 1)
+    assert(realType(ForeverSTUwaveDB.bugreports) == "table" and #ForeverSTUwaveDB.bugreports == 1)
 """)
 
 case("stored_reports_do_not_nest_earlier_reports", """
     local FS, BR = LoadBR()
     local first
     for i = 1, 5 do first = BR.Capture("x") end
-    local last = ForeverSynthwaveDB.bugreports[5]
+    local last = ForeverSTUwaveDB.bugreports[5]
     assert(last.settings.bugreports == nil)
-    local one = #BR.Encode(ForeverSynthwaveDB.bugreports[1])
-    local five = #BR.Encode(ForeverSynthwaveDB.bugreports[5])
+    local one = #BR.Encode(ForeverSTUwaveDB.bugreports[1])
+    local five = #BR.Encode(ForeverSTUwaveDB.bugreports[5])
     assert(five < one * 1.5 + 200, "report size must not grow with the stored count")
 """)
 
 case("stored_reports_hold_only_plain_values", """
     local FS, BR = LoadBR({ mode = "secret" })
     BR.Capture("x")
-    assert(not ContainsSentinel(ForeverSynthwaveDB.bugreports))
+    assert(not ContainsSentinel(ForeverSTUwaveDB.bugreports))
     local function plain(v, seen)
         local t = realType(v)
         if t == "number" then assert(v == v and v ~= math.huge and v ~= -math.huge, "non-finite number stored") end
         assert(t == "string" or t == "number" or t == "boolean" or t == "table", t)
         if t == "table" then for k, x in pairs(v) do plain(k); plain(x) end end
     end
-    plain(ForeverSynthwaveDB.bugreports)
+    plain(ForeverSTUwaveDB.bugreports)
 """)
 
 case("worst_case_twenty_reports_stay_bounded", """
@@ -1236,13 +1236,13 @@ case("worst_case_twenty_reports_stay_bounded", """
     for i = 1, 400 do W.addons[i] = { "A" .. string.rep("n", 80) .. i, true } end
     local big = {}
     for i = 1, 300 do big["k" .. i] = { string.rep("x", 4000), { 1, 2, { 3, { 4, { 5 } } } } } end
-    ForeverSynthwaveDB = { huge = big, [string.rep("K", 90000)] = 1 }
-    ForeverSynthwaveErrorLog = {}
+    ForeverSTUwaveDB = { huge = big, [string.rep("K", 90000)] = 1 }
+    ForeverSTUwaveErrorLog = {}
     for i = 1, 80 do
-        ForeverSynthwaveErrorLog[i] = { message = string.rep("m", 3000), stack = string.rep("s", 9000), count = 9, ours = true }
+        ForeverSTUwaveErrorLog[i] = { message = string.rep("m", 3000), stack = string.rep("s", 9000), count = 9, ours = true }
     end
     for i = 1, 25 do BR.Capture(string.rep("n", 9000)) end
-    local list = ForeverSynthwaveDB.bugreports
+    local list = ForeverSTUwaveDB.bugreports
     assert(#list == 20)
     -- EncodeReports is what /fsbug all shows and what SavedVariables holds, with no second capping.
     local all = BR.EncodeReports(list)
@@ -1263,10 +1263,10 @@ case("worst_case_twenty_reports_stay_bounded", """
 
 case("clear_wipes_reports_only", """
     local FS, BR = LoadBR()
-    ForeverSynthwaveDB = { petFrame = { x = 1 } }
+    ForeverSTUwaveDB = { petFrame = { x = 1 } }
     BR.Capture("a"); BR.Capture("b")
     assert(BR.Clear() == 2)
-    assert(#ForeverSynthwaveDB.bugreports == 0 and ForeverSynthwaveDB.petFrame.x == 1)
+    assert(#ForeverSTUwaveDB.bugreports == 0 and ForeverSTUwaveDB.petFrame.x == 1)
     assert(BR.Clear() == 0)
 """)
 
@@ -1299,14 +1299,14 @@ case("slash_parsing", """
 case("run_capture_stores_opens_the_box_and_prints_the_paths", """
     local FS, BR = LoadBR()
     SlashCmdList.FSBUG("bars gone")
-    assert(#ForeverSynthwaveDB.bugreports == 1 and ForeverSynthwaveDB.bugreports[1].note == "bars gone")
-    local f = ForeverSynthwaveBugReport
+    assert(#ForeverSTUwaveDB.bugreports == 1 and ForeverSTUwaveDB.bugreports[1].note == "bars gone")
+    local f = ForeverSTUwaveBugReport
     assert(f and f:IsShown(), "the copy box must be open")
     local json = BR.GetEditBox():GetText()
     assert(Has(json, '"note": "bars gone"'), json:sub(1, 200))
     local text = table.concat(Lines(), "\\n")
-    assert(Has(text, "WTF/Account/<ACCOUNT>/SavedVariables/ForeverSynthwave.lua"), text)
-    assert(Has(text, "World of Warcraft\\\\_classic_beta_\\\\WTF\\\\Account\\\\<ACCOUNT>\\\\SavedVariables\\\\ForeverSynthwave.lua"), text)
+    assert(Has(text, "WTF/Account/<ACCOUNT>/SavedVariables/forever-stuwave.lua"), text)
+    assert(Has(text, "World of Warcraft\\\\_classic_beta_\\\\WTF\\\\Account\\\\<ACCOUNT>\\\\SavedVariables\\\\forever-stuwave.lua"), text)
     assert(Has(text, "/reload or logout"), text)
 """)
 
@@ -1316,7 +1316,7 @@ case("run_all_shows_one_json_array", """
     SlashCmdList.FSBUG("all")
     local json = BR.GetEditBox():GetText()
     assert(json:sub(1, 1) == "[" and Has(json, '"note": "one"') and Has(json, '"note": "three"'))
-    assert(#ForeverSynthwaveDB.bugreports == 3, "all must not store a new report")
+    assert(#ForeverSTUwaveDB.bugreports == 3, "all must not store a new report")
 """)
 
 case("run_all_with_nothing_stored_says_so", """
@@ -1324,14 +1324,14 @@ case("run_all_with_nothing_stored_says_so", """
     SlashCmdList.FSBUG("all")
     local text = table.concat(Lines(), "\\n")
     assert(Has(text, "no bug reports"), text)
-    assert(ForeverSynthwaveBugReport == nil or not ForeverSynthwaveBugReport:IsShown())
+    assert(ForeverSTUwaveBugReport == nil or not ForeverSTUwaveBugReport:IsShown())
 """)
 
 case("run_clear", """
     local FS, BR = LoadBR()
     BR.Capture("a"); BR.Capture("b")
     SlashCmdList.FSBUG("clear")
-    assert(#ForeverSynthwaveDB.bugreports == 0)
+    assert(#ForeverSTUwaveDB.bugreports == 0)
     assert(Has(table.concat(Lines(), "\\n"), "cleared 2"))
 """)
 
@@ -1345,25 +1345,25 @@ case("run_all_and_clear_leave_the_class_recon_unmarked", """
         MarkClassReconReported = function() marks = marks + 1; run.reported = true end,
     }
     BR.Capture("stored")
-    assert(ForeverSynthwaveDB.bugreports[1].classRecon.token == "PALADIN", "the stored report carries the full recon")
+    assert(ForeverSTUwaveDB.bugreports[1].classRecon.token == "PALADIN", "the stored report carries the full recon")
     SlashCmdList.FSBUG("all")
     assert(BR.GetEditBox():GetText():find("Holy Light", 1, true), "all shows the stored report")
     assert(marks == 0 and run.reported == nil, "/fsbug all consumed the run")
     SlashCmdList.FSBUG("clear")
-    assert(#ForeverSynthwaveDB.bugreports == 0)
+    assert(#ForeverSTUwaveDB.bugreports == 0)
     assert(marks == 0 and run.reported == nil, "/fsbug clear consumed the run")
     -- and the next /fsbug still carries it in full, then consumes it
     SlashCmdList.FSBUG("after")
-    local list = ForeverSynthwaveDB.bugreports
+    local list = ForeverSTUwaveDB.bugreports
     assert(list[#list].classRecon.token == "PALADIN" and marks == 1 and run.reported == true)
 """)
 
 case("run_never_throws_when_everything_fails", """
     local FS, BR = LoadBR({ mode = "throw" })
     W.frameThrows = true
-    ForeverSynthwaveErrorLog = { { message = "x", ours = true } }
+    ForeverSTUwaveErrorLog = { { message = "x", ours = true } }
     SlashCmdList.FSBUG("note")
-    assert(#ForeverSynthwaveDB.bugreports == 1, "the report is still stored")
+    assert(#ForeverSTUwaveDB.bugreports == 1, "the report is still stored")
     assert(Has(table.concat(Lines(), "\\n"), "SavedVariables"), "and the tester is still told where it is")
 """)
 
@@ -1371,7 +1371,7 @@ case("run_opens_in_combat_with_nothing_secure", """
     local FS, BR = LoadBR()
     W.combat = true
     SlashCmdList.FSBUG("pull bug")
-    local f = ForeverSynthwaveBugReport
+    local f = ForeverSTUwaveBugReport
     assert(f:IsShown())
     for _, fr in ipairs(__all) do
         assert(fr._tmpl == nil or not tostring(fr._tmpl):find("Secure") and not tostring(fr._tmpl):find("Protected"),
@@ -1396,7 +1396,7 @@ case("frame_builds_once_and_is_reused", """
     local f2 = BR.ShowFrame("two")
     assert(f1 == f2 and #__all == count, "second call must reuse the frame")
     assert(BR.GetEditBox():GetText() == "two")
-    assert(ForeverSynthwaveBugReport == f1)
+    assert(ForeverSTUwaveBugReport == f1)
 """)
 
 case("frame_is_movable_clamped_dialog_strata_and_closes_on_escape_key", """
@@ -1405,11 +1405,11 @@ case("frame_is_movable_clamped_dialog_strata_and_closes_on_escape_key", """
     assert(f._movable == true and f._clamped == true and f._strata == "DIALOG")
     assert(realType(f._scripts.OnDragStart) == "function" and realType(f._scripts.OnDragStop) == "function")
     local n = 0
-    for _, name in ipairs(UISpecialFrames) do if name == "ForeverSynthwaveBugReport" then n = n + 1 end end
+    for _, name in ipairs(UISpecialFrames) do if name == "ForeverSTUwaveBugReport" then n = n + 1 end end
     assert(n == 1, "registered with the Escape stack exactly once")
     BR.ShowFrame("again")
     n = 0
-    for _, name in ipairs(UISpecialFrames) do if name == "ForeverSynthwaveBugReport" then n = n + 1 end end
+    for _, name in ipairs(UISpecialFrames) do if name == "ForeverSTUwaveBugReport" then n = n + 1 end end
     assert(n == 1)
 """)
 
@@ -1451,7 +1451,7 @@ case("a_build_that_throws_partway_leaves_no_visible_orphan_frame", """
     end
     assert(not pcall(BR.ShowFrame, "x"), "the build throws")
     CreateFrame = realCreate
-    local orphan = _G.ForeverSynthwaveBugReport
+    local orphan = _G.ForeverSTUwaveBugReport
     assert(orphan, "the half built frame exists")
     assert(orphan:IsShown() == false, "and is hidden, not left on screen")
 """)
@@ -1523,10 +1523,10 @@ case("chat_lines_have_no_em_dash_and_use_the_addon_name", """
 case("report_json_roundtrips_through_a_real_parser", """
     local FS, BR = LoadBR()
     W.group = { "PRIEST" }
-    ForeverSynthwaveDB = { petFrame = { x = 5, bad = 0 / 0 }, label = "caf\\195\\169\\n\\"q\\"" }
-    ForeverSynthwaveErrorLog = { { message = "boom\\nline2", stack = "a\\tb", count = 3, ours = true, combat = true } }
+    ForeverSTUwaveDB = { petFrame = { x = 5, bad = 0 / 0 }, label = "caf\\195\\169\\n\\"q\\"" }
+    ForeverSTUwaveErrorLog = { { message = "boom\\nline2", stack = "a\\tb", count = 3, ours = true, combat = true } }
     BR.Capture("rt")
-    return BR.EncodeReports(ForeverSynthwaveDB.bugreports)
+    return BR.EncodeReports(ForeverSTUwaveDB.bugreports)
 """, lambda text: (
     lambda v: (
         v[0]["note"] == "rt"
@@ -1546,7 +1546,7 @@ case("err_ours_is_logged_suppressed_and_announced_once", """
     local FS = LoadEL()
     __handler(OURS)
     assert(#__prevCalls == 0, "our error must not reach the previous handler (no popup)")
-    local log = ForeverSynthwaveErrorLog
+    local log = ForeverSTUwaveErrorLog
     assert(#log == 1)
     local e = log[1]
     assert(e.message == OURS and e.count == 1 and e.ours == true)
@@ -1562,7 +1562,7 @@ case("err_combat_flag_is_recorded", """
     W.combat = true
     InstallApis("plain")
     __handler(OURS)
-    assert(ForeverSynthwaveErrorLog[1].combat == true)
+    assert(ForeverSTUwaveErrorLog[1].combat == true)
 """)
 
 case("err_foreign_passes_through_untouched", """
@@ -1570,11 +1570,11 @@ case("err_foreign_passes_through_untouched", """
     __handler(FOREIGN)
     assert(#__prevCalls == 1 and __prevCalls[1] == FOREIGN, "previous handler gets the original error")
     assert(#__printed == 0, "no chat line for somebody else's error")
-    assert(ForeverSynthwaveErrorLog[1].ours == false)
+    assert(ForeverSTUwaveErrorLog[1].ours == false)
 """)
 
 FOO = "Interface\\\\AddOns\\\\Blizzard_Foo\\\\Foo.lua"
-MENUS = "Interface\\\\AddOns\\\\ForeverSynthwave\\\\Menus.lua"
+MENUS = "Interface\\\\AddOns\\\\forever-stuwave\\\\Menus.lua"
 DET = "Interface\\\\AddOns\\\\Details\\\\core.lua"
 
 case("err_blizzard_message_with_our_frame_among_the_innermost_six_is_attributed", f"""
@@ -1583,11 +1583,11 @@ case("err_blizzard_message_with_our_frame_among_the_innermost_six_is_attributed"
     __stack = "{FOO}:10: in function `Bar'\\n{MENUS}:50: in function <...>\\n"
     __handler("{FOO}:10: taint")
     assert(#__prevCalls == 0 and #__printed == 1)
-    assert(ForeverSynthwaveErrorLog[1].ours == true)
+    assert(ForeverSTUwaveErrorLog[1].ours == true)
     -- [C] frames do not use up one of the six: Foo, [C], Foo, ours is still the third real frame.
     __stack = "{FOO}:11: in function `Bar'\\n[C]: in function `securecall'\\n{FOO}:20: in function `Baz'\\n{MENUS}:51: in function <...>\\n"
     __handler("{FOO}:11: taint")
-    assert(#__prevCalls == 0 and ForeverSynthwaveErrorLog[2].ours == true)
+    assert(#__prevCalls == 0 and ForeverSTUwaveErrorLog[2].ours == true)
 """)
 
 case("err_our_frame_at_position_four_to_six_under_a_blizzard_helper_is_ours", f"""
@@ -1599,7 +1599,7 @@ case("err_our_frame_at_position_four_to_six_under_a_blizzard_helper_is_ours", f"
         __stack = table.concat(frames, "\\n") .. "\\n"
         __handler("{FOO}:" .. (100 + depth) .. ": helper threw")
         assert(#__prevCalls == 0, "our frame at position " .. depth .. " must be ours")
-        assert(ForeverSynthwaveErrorLog[#ForeverSynthwaveErrorLog].ours == true)
+        assert(ForeverSTUwaveErrorLog[#ForeverSTUwaveErrorLog].ours == true)
     end
     -- Position seven is too deep.
     local frames = {{}}
@@ -1617,10 +1617,10 @@ case("err_a_message_naming_another_addon_is_foreign_even_with_our_frame_in_the_s
     __stack = "{DET}:5: in function `hook'\\n{FOO}:1: in function `A'\\n{MENUS}:50: in function <...>\\n"
     __handler("{DET}:5: attempt to index nil")
     assert(#__prevCalls == 1 and #__printed == 0, "foreign error must reach the previous handler")
-    assert(ForeverSynthwaveErrorLog[1].ours == false)
+    assert(ForeverSTUwaveErrorLog[1].ours == false)
     -- Same with a backslash-free path and with a taint report that names another addon.
     __handler("Interface/AddOns/Details/core.lua:6: attempt to call nil")
-    assert(#__prevCalls == 2 and ForeverSynthwaveErrorLog[2].ours == false)
+    assert(#__prevCalls == 2 and ForeverSTUwaveErrorLog[2].ours == false)
     __handler("attempt to compare a secret number value (tainted by 'Details') x")
     assert(#__prevCalls == 3 and #__printed == 0)
     -- A Blizzard folder in the message is not another addon.
@@ -1634,16 +1634,16 @@ case("err_our_frame_deep_in_a_foreign_stack_passes_through", f"""
     __stack = "{FOO}:5: in function `hook'\\n{FOO}:1: in function `A'\\n{FOO}:2: in function `B'\\n{FOO}:3: in function `C'\\n{FOO}:4: in function `D'\\n{FOO}:6: in function `E'\\n{MENUS}:50: in function <...>\\n"
     __handler("{FOO}:5: attempt to index nil")
     assert(#__prevCalls == 1 and #__printed == 0, "foreign error must reach the previous handler")
-    assert(ForeverSynthwaveErrorLog[1].ours == false)
+    assert(ForeverSTUwaveErrorLog[1].ours == false)
     -- [C] frames do not count, but six real frames before ours is still too deep.
     __stack = "{FOO}:6: in function `hook'\\n[C]: in function `pcall'\\n{FOO}:1: in function `A'\\n{FOO}:2: in function `B'\\n{FOO}:3: in function `C'\\n{FOO}:4: in function `D'\\n{FOO}:8: in function `E'\\n{MENUS}:50: in function <...>\\n"
     __handler("{FOO}:6: attempt to call nil")
-    assert(#__prevCalls == 2 and #__printed == 0 and ForeverSynthwaveErrorLog[2].ours == false)
+    assert(#__prevCalls == 2 and #__printed == 0 and ForeverSTUwaveErrorLog[2].ours == false)
 """)
 
 case("err_our_own_handler_frames_do_not_count_as_ours", """
     local FS = LoadEL()
-    __stack = "Interface\\\\AddOns\\\\ForeverSynthwave\\\\ErrorLog.lua:80: in function <...>\\n[C]: in function `pcall'\\nInterface\\\\AddOns\\\\Details\\\\x.lua:1: in main chunk\\n"
+    __stack = "Interface\\\\AddOns\\\\forever-stuwave\\\\ErrorLog.lua:80: in function <...>\\n[C]: in function `pcall'\\nInterface\\\\AddOns\\\\Details\\\\x.lua:1: in main chunk\\n"
     __handler(FOREIGN)
     assert(#__prevCalls == 1 and #__printed == 0)
 """)
@@ -1652,7 +1652,7 @@ case("err_throttle_one_line_per_ten_seconds_with_a_count", """
     local FS = LoadEL()
     for i = 1, 50 do __handler(OURS) end
     assert(#__printed == 1, #__printed)
-    assert(ForeverSynthwaveErrorLog[1].count == 50 and #ForeverSynthwaveErrorLog == 1)
+    assert(ForeverSTUwaveErrorLog[1].count == 50 and #ForeverSTUwaveErrorLog == 1)
     __now = __now + 5
     __handler(OURS)
     assert(#__printed == 1, "still inside the window")
@@ -1668,23 +1668,23 @@ case("err_throttle_one_line_per_ten_seconds_with_a_count", """
 
 case("err_throttle_covers_distinct_messages", """
     local FS = LoadEL()
-    for i = 1, 5 do __handler("Interface\\\\AddOns\\\\ForeverSynthwave\\\\A.lua:" .. i .. ": e" .. i) end
-    assert(#__printed == 1 and #ForeverSynthwaveErrorLog == 5)
+    for i = 1, 5 do __handler("Interface\\\\AddOns\\\\forever-stuwave\\\\A.lua:" .. i .. ": e" .. i) end
+    assert(#__printed == 1 and #ForeverSTUwaveErrorLog == 5)
 """)
 
 case("err_dedupe_by_message_and_first_stack_line", """
     local FS = LoadEL()
     -- A positioned message already pins the site: same text, one entry.
     __handler(OURS); __handler(OURS)
-    assert(#ForeverSynthwaveErrorLog == 1 and ForeverSynthwaveErrorLog[1].count == 2)
+    assert(#ForeverSTUwaveErrorLog == 1 and ForeverSTUwaveErrorLog[1].count == 2)
     -- A message with no file:line is split by the first stack line.
-    __stack = "Interface\\\\AddOns\\\\ForeverSynthwave\\\\A.lua:1: in function a\\n"
+    __stack = "Interface\\\\AddOns\\\\forever-stuwave\\\\A.lua:1: in function a\\n"
     __handler("boom")
-    __stack = "Interface\\\\AddOns\\\\ForeverSynthwave\\\\B.lua:2: in function b\\n"
+    __stack = "Interface\\\\AddOns\\\\forever-stuwave\\\\B.lua:2: in function b\\n"
     __handler("boom")
     __handler("boom")
-    assert(#ForeverSynthwaveErrorLog == 3, #ForeverSynthwaveErrorLog)
-    assert(ForeverSynthwaveErrorLog[3].count == 2)
+    assert(#ForeverSTUwaveErrorLog == 3, #ForeverSTUwaveErrorLog)
+    assert(ForeverSTUwaveErrorLog[3].count == 2)
 """)
 
 case("err_repeats_do_not_rebuild_the_stack", """
@@ -1701,9 +1701,9 @@ case("err_repeats_do_not_rebuild_the_stack", """
 
 case("err_passthrough_setting_forwards_our_errors_too", """
     local FS = LoadEL()
-    ForeverSynthwaveDB = { errorPassthrough = true }
+    ForeverSTUwaveDB = { errorPassthrough = true }
     __handler(OURS)
-    assert(#__prevCalls == 1 and #ForeverSynthwaveErrorLog == 1 and #__printed == 1)
+    assert(#__prevCalls == 1 and #ForeverSTUwaveErrorLog == 1 and #__printed == 1)
 """)
 
 case("err_a_failing_logger_never_throws_and_foreign_still_passes", """
@@ -1713,7 +1713,7 @@ case("err_a_failing_logger_never_throws_and_foreign_still_passes", """
     local ok = pcall(__handler, OURS)
     assert(ok, "the handler must not throw")
     assert(#__prevCalls == 0, "recording worked, so ours is still suppressed")
-    assert(ForeverSynthwaveErrorLog[1].message == OURS)
+    assert(ForeverSTUwaveErrorLog[1].message == OURS)
     ok = pcall(__handler, FOREIGN)
     assert(ok and __prevCalls[1] == FOREIGN)
 """)
@@ -1737,7 +1737,7 @@ case("err_secret_error_value_passes_through_and_is_never_read", """
     local ok = pcall(__handler, SS)
     assert(ok, "a secret error value must not raise")
     assert(#__prevCalls == 1 and __prevCalls[1] == SS)
-    assert(#__printed == 0 and #ForeverSynthwaveErrorLog == 0)
+    assert(#__printed == 0 and #ForeverSTUwaveErrorLog == 0)
 """)
 
 case("err_non_string_error_is_tolerated", """
@@ -1775,7 +1775,7 @@ case("err_a_replaced_handler_is_rewrapped_at_login_and_chained", """
     assert(#bugCalls == 1 and bugCalls[1] == FOREIGN, "the other addon still sees foreign errors")
     __handler(OURS)
     assert(#bugCalls == 1, "ours is swallowed, not forwarded")
-    assert(#ForeverSynthwaveErrorLog == 2)
+    assert(#ForeverSTUwaveErrorLog == 2)
     -- The timed re-check does not stack a second wrapper when nothing changed.
     local current = __handler
     RunTimers()
@@ -1784,69 +1784,69 @@ case("err_a_replaced_handler_is_rewrapped_at_login_and_chained", """
 
 case("err_blocked_action_event_for_our_addon_is_logged_and_announced", """
     local FS = LoadEL()
-    Fire("ADDON_ACTION_FORBIDDEN", "ForeverSynthwave", "SetPoint()")
-    local e = ForeverSynthwaveErrorLog[1]
+    Fire("ADDON_ACTION_FORBIDDEN", "forever-stuwave", "SetPoint()")
+    local e = ForeverSTUwaveErrorLog[1]
     assert(e and e.message == "ADDON_ACTION_FORBIDDEN: SetPoint()" and e.ours == true)
     assert(#__printed == 1 and Lines()[1] == EXPECT_LINE)
-    Fire("ADDON_ACTION_BLOCKED", "ForeverSynthwave", "SetAttribute()")
-    assert(#ForeverSynthwaveErrorLog == 2 and #__printed == 1, "shares the error throttle")
+    Fire("ADDON_ACTION_BLOCKED", "forever-stuwave", "SetAttribute()")
+    assert(#ForeverSTUwaveErrorLog == 2 and #__printed == 1, "shares the error throttle")
 """)
 
 case("err_blocked_action_event_for_another_addon_is_ignored", """
     local FS = LoadEL()
     Fire("ADDON_ACTION_FORBIDDEN", "Details", "SetPoint()")
-    assert(#ForeverSynthwaveErrorLog == 0 and #__printed == 0)
+    assert(#ForeverSTUwaveErrorLog == 0 and #__printed == 0)
 """)
 
 case("err_blocked_action_event_with_secret_args_is_safe", """
     local FS = LoadEL()
     assert(pcall(Fire, "ADDON_ACTION_FORBIDDEN", SS, SS))
-    assert(#ForeverSynthwaveErrorLog == 0)
+    assert(#ForeverSTUwaveErrorLog == 0)
 """)
 
 case("err_foreign_log_is_capped_so_it_cannot_bury_ours", """
     local FS = LoadEL()
     for i = 1, 200 do __handler("Interface\\\\AddOns\\\\Other\\\\o.lua:" .. i .. ": e") end
-    local foreign = #ForeverSynthwaveErrorLog
+    local foreign = #ForeverSTUwaveErrorLog
     assert(foreign <= 30, foreign)
     __handler(OURS)
-    assert(ForeverSynthwaveErrorLog[#ForeverSynthwaveErrorLog].message == OURS)
+    assert(ForeverSTUwaveErrorLog[#ForeverSTUwaveErrorLog].message == OURS)
 """)
 
 case("err_log_cap_is_eighty", """
     local FS = LoadEL()
-    for i = 1, 200 do __handler("Interface\\\\AddOns\\\\ForeverSynthwave\\\\f.lua:" .. i .. ": e") end
-    assert(#ForeverSynthwaveErrorLog == 80, #ForeverSynthwaveErrorLog)
+    for i = 1, 200 do __handler("Interface\\\\AddOns\\\\forever-stuwave\\\\f.lua:" .. i .. ": e") end
+    assert(#ForeverSTUwaveErrorLog == 80, #ForeverSTUwaveErrorLog)
 """)
 
 case("err_load_time_errors_survive_the_saved_variable_restore", """
     local FS = LoadEL()
     __handler(OURS)                                  -- thrown while our files load
     -- The client now injects last session's saved table over the global.
-    ForeverSynthwaveErrorLog = { { message = "stale from last session", count = 9 } }
-    Fire("ADDON_LOADED", "ForeverSynthwave")
-    local log = ForeverSynthwaveErrorLog
+    ForeverSTUwaveErrorLog = { { message = "stale from last session", count = 9 } }
+    Fire("ADDON_LOADED", "forever-stuwave")
+    local log = ForeverSTUwaveErrorLog
     assert(#log == 1 and log[1].message == OURS, "stale gone, load-time error kept: " .. tostring(log[1] and log[1].message))
     -- A repeat after the restore still dedupes into the kept entry.
     __handler(OURS)
-    assert(#ForeverSynthwaveErrorLog == 1 and ForeverSynthwaveErrorLog[1].count == 2)
+    assert(#ForeverSTUwaveErrorLog == 1 and ForeverSTUwaveErrorLog[1].count == 2)
 """)
 
 case("err_other_addons_loading_does_not_wipe_the_log", """
     local FS = LoadEL()
-    Fire("ADDON_LOADED", "ForeverSynthwave")
+    Fire("ADDON_LOADED", "forever-stuwave")
     __handler(OURS)
     Fire("ADDON_LOADED", "Details")
-    assert(#ForeverSynthwaveErrorLog == 1)
+    assert(#ForeverSTUwaveErrorLog == 1)
 """)
 
 case("fserr_clear_still_works", """
     local FS = LoadEL()
     __handler(OURS)
     SlashCmdList.FSERR("clear")
-    assert(#ForeverSynthwaveErrorLog == 0)
+    assert(#ForeverSTUwaveErrorLog == 0)
     __handler(OURS)
-    assert(#ForeverSynthwaveErrorLog == 1 and ForeverSynthwaveErrorLog[1].count == 1)
+    assert(#ForeverSTUwaveErrorLog == 1 and ForeverSTUwaveErrorLog[1].count == 1)
 """)
 
 case("bug_report_carries_the_captured_errors", """
@@ -1878,7 +1878,7 @@ case("err_foreign_error_still_reaches_blizzards_handler_after_the_rewrap", """
         "Blizzard's handler must still get a foreign error: " .. #__prevCalls)
     top(OURS)
     assert(#__prevCalls == 1 and #seen == 1, "ours is still logged and suppressed")
-    assert(#ForeverSynthwaveErrorLog == 2 and ForeverSynthwaveErrorLog[2].ours == true)
+    assert(#ForeverSTUwaveErrorLog == 2 and ForeverSTUwaveErrorLog[2].ours == true)
     -- And after the timed re-check too.
     RunTimers()
     top("Interface\\\\AddOns\\\\Details\\\\core.lua:99: later")
@@ -1890,33 +1890,33 @@ case("err_the_passthrough_setting_reaches_blizzards_handler_after_the_rewrap", "
     local ours = __handler
     __handler = function(err) ours(err) end
     Fire("PLAYER_LOGIN")
-    ForeverSynthwaveDB = { errorPassthrough = true }
+    ForeverSTUwaveDB = { errorPassthrough = true }
     __handler(OURS)
     assert(#__prevCalls == 1 and __prevCalls[1] == OURS, #__prevCalls)
 """)
 
 case("err_full_log_still_passes_foreign_messages_through_without_a_stack_when_they_name_their_addon", """
     local FS = LoadEL()
-    for i = 1, 80 do __handler("Interface\\\\AddOns\\\\ForeverSynthwave\\\\f.lua:" .. i .. ": e") end
-    assert(#ForeverSynthwaveErrorLog == 80)
+    for i = 1, 80 do __handler("Interface\\\\AddOns\\\\forever-stuwave\\\\f.lua:" .. i .. ": e") end
+    assert(#ForeverSTUwaveErrorLog == 80)
     local before = __dsCalls
     for i = 1, 50 do __handler("Interface\\\\AddOns\\\\Other\\\\o.lua:" .. i .. ": e") end
     assert(__dsCalls == before, "a message naming another addon needs no debugstack: " .. (__dsCalls - before))
     assert(#__prevCalls == 50, "they all still reach the previous handler: " .. #__prevCalls)
-    assert(#ForeverSynthwaveErrorLog == 80)
+    assert(#ForeverSTUwaveErrorLog == 80)
 """)
 
 case("err_full_log_suppresses_our_error_seen_only_in_its_stack_counts_it_and_says_so_once", """
     local FS = LoadEL()
-    for i = 1, 80 do __handler("Interface\\\\AddOns\\\\ForeverSynthwave\\\\f.lua:" .. i .. ": e") end
-    assert(#ForeverSynthwaveErrorLog == 80)
+    for i = 1, 80 do __handler("Interface\\\\AddOns\\\\forever-stuwave\\\\f.lua:" .. i .. ": e") end
+    assert(#ForeverSTUwaveErrorLog == 80)
     local printedBefore = #__printed
     local callsBefore = #__prevCalls
     __now = __now + 30
-    __stack = "Interface\\\\AddOns\\\\Blizzard_Foo\\\\Foo.lua:10: in function `Bar'\\nInterface\\\\AddOns\\\\ForeverSynthwave\\\\Menus.lua:50: in function <...>\\n"
+    __stack = "Interface\\\\AddOns\\\\Blizzard_Foo\\\\Foo.lua:10: in function `Bar'\\nInterface\\\\AddOns\\\\forever-stuwave\\\\Menus.lua:50: in function <...>\\n"
     for i = 1, 5 do __handler("Interface\\\\AddOns\\\\Blizzard_Foo\\\\Foo.lua:" .. (200 + i) .. ": taint") end
     assert(#__prevCalls == callsBefore, "ours never reaches the popup path while the log is full")
-    assert(#ForeverSynthwaveErrorLog == 80)
+    assert(#ForeverSTUwaveErrorLog == 80)
     assert(FS.ErrorLogDropped == 5, tostring(FS.ErrorLogDropped))
     local lines = Lines()
     assert(#lines == printedBefore + 1, "one throttled chat line: " .. (#lines - printedBefore))
@@ -1929,14 +1929,14 @@ case("err_own_name_must_be_anchored_a_lookalike_folder_or_a_mentioned_global_is_
     local FS = LoadEL()
     -- Another addon whose folder merely starts with our name, with our frame nowhere in the stack.
     __stack = "{DET}:1: in function `hook'\\n"
-    __handler("Interface\\\\AddOns\\\\ForeverSynthwaveX\\\\a.lua:1: boom")
-    assert(#__prevCalls == 1 and ForeverSynthwaveErrorLog[1].ours == false, "lookalike folder is foreign")
+    __handler("Interface\\\\AddOns\\\\ForeverSTUwaveX\\\\a.lua:1: boom")
+    assert(#__prevCalls == 1 and ForeverSTUwaveErrorLog[1].ours == false, "lookalike folder is foreign")
     -- A foreign message that only mentions our SavedVariable global.
-    __handler("{DET}:2: attempt to index global 'ForeverSynthwaveDB' (a nil value)")
-    assert(#__prevCalls == 2 and ForeverSynthwaveErrorLog[2].ours == false, "bare ForeverSynthwaveDB is not ours")
+    __handler("{DET}:2: attempt to index global 'ForeverSTUwaveDB' (a nil value)")
+    assert(#__prevCalls == 2 and ForeverSTUwaveErrorLog[2].ours == false, "bare ForeverSTUwaveDB is not ours")
     -- Same with no path at all.
-    __handler("attempt to index global 'ForeverSynthwaveDB' (a nil value)")
-    assert(#__prevCalls == 3 and ForeverSynthwaveErrorLog[3].ours == false, "bare mention, foreign stack")
+    __handler("attempt to index global 'ForeverSTUwaveDB' (a nil value)")
+    assert(#__prevCalls == 3 and ForeverSTUwaveErrorLog[3].ours == false, "bare mention, foreign stack")
     assert(#__printed == 0)
 """)
 
@@ -1944,63 +1944,63 @@ case("err_a_lookalike_addon_frame_in_the_stack_is_foreign", f"""
     local FS = LoadEL()
     -- A Blizzard-named message (so the stack decides) whose innermost frame is in a folder that only
     -- starts with our name: not ours.
-    local LOOK = "Interface\\\\AddOns\\\\ForeverSynthwaveX\\\\a.lua"
+    local LOOK = "Interface\\\\AddOns\\\\ForeverSTUwaveX\\\\a.lua"
     __stack = LOOK .. ":1: in function `hook'\\n{FOO}:2: in function `A'\\n"
     __handler("{FOO}:5: attempt to index nil")
     assert(#__prevCalls == 1 and #__printed == 0, "lookalike frame must reach the previous handler")
-    assert(ForeverSynthwaveErrorLog[1].ours == false, "lookalike frame is foreign")
+    assert(ForeverSTUwaveErrorLog[1].ours == false, "lookalike frame is foreign")
     -- Same with forward slashes and unusual case.
-    __stack = "interface/addons/foreversynthwavex/b.lua:1: in function `hook'\\n"
+    __stack = "interface/addons/forever-stuwavex/b.lua:1: in function `hook'\\n"
     __handler("{FOO}:6: attempt to index nil")
-    assert(#__prevCalls == 2 and ForeverSynthwaveErrorLog[2].ours == false, "lookalike frame, slashes and case")
+    assert(#__prevCalls == 2 and ForeverSTUwaveErrorLog[2].ours == false, "lookalike frame, slashes and case")
     -- A real frame of ours behind the lookalike still counts.
     __stack = LOOK .. ":1: in function `hook'\\n{MENUS}:50: in function <...>\\n"
     __handler("{FOO}:7: attempt to index nil")
-    assert(#__prevCalls == 2 and ForeverSynthwaveErrorLog[3].ours == true, "our real frame still counts")
+    assert(#__prevCalls == 2 and ForeverSTUwaveErrorLog[3].ours == true, "our real frame still counts")
 """)
 
 case("err_own_name_anchored_forms_are_ours_without_reading_the_stack", f"""
     local FS = LoadEL()
     __stack = "{DET}:1: in function `hook'\\n"       -- a foreign stack must not matter
-    __handler("Interface\\\\AddOns\\\\ForeverSynthwave\\\\Foo.lua:5: boom")
-    __handler("Interface/AddOns/ForeverSynthwave/Bar.lua:6: boom")
-    __handler("attempt to compare a secret number value (tainted by 'ForeverSynthwave') x")
-    __handler("blocked: AddOn 'ForeverSynthwave' tried a protected call")
-    __handler("ForeverSynthwave/Baz.lua:7: boom")
-    __handler("ForeverSynthwave\\\\Qux.lua:8: boom")
+    __handler("Interface\\\\AddOns\\\\forever-stuwave\\\\Foo.lua:5: boom")
+    __handler("Interface/AddOns/forever-stuwave/Bar.lua:6: boom")
+    __handler("attempt to compare a secret number value (tainted by 'forever-stuwave') x")
+    __handler("blocked: AddOn 'forever-stuwave' tried a protected call")
+    __handler("forever-stuwave/Baz.lua:7: boom")
+    __handler("forever-stuwave\\\\Qux.lua:8: boom")
     assert(#__prevCalls == 0, "all six are ours and suppressed: " .. #__prevCalls)
-    assert(#ForeverSynthwaveErrorLog == 6)
-    for i = 1, 6 do assert(ForeverSynthwaveErrorLog[i].ours == true, i) end
+    assert(#ForeverSTUwaveErrorLog == 6)
+    for i = 1, 6 do assert(ForeverSTUwaveErrorLog[i].ours == true, i) end
 """)
 
 case("err_a_client_truncated_path_or_a_bracketed_chunk_is_ours", f"""
     local FS = LoadEL()
     -- The client cuts a long chunk path to `...` plus its last ~52 characters, so `AddOns/` can be lost.
     __stack = "{DET}:1: in function `hook'\\n"       -- a foreign stack must not matter for a message
-    __handler("...ddOns/ForeverSynthwave/LongName.lua:12: boom")
-    __handler("...ddOns\\\\ForeverSynthwave\\\\LongName.lua:13: boom")
-    __handler("...DDONS/FOREVERSYNTHWAVE/LongName.lua:14: boom")
+    __handler("...ddOns/forever-stuwave/LongName.lua:12: boom")
+    __handler("...ddOns\\\\forever-stuwave\\\\LongName.lua:13: boom")
+    __handler("...DDONS/FOREVER-STUWAVE/LongName.lua:14: boom")
     -- A string chunk named after our file: the folder follows a quote, not a path separator.
-    __handler('[string "ForeverSynthwave/X.lua"]:15: boom')
+    __handler('[string "forever-stuwave/X.lua"]:15: boom')
     assert(#__prevCalls == 0, "all four are ours and suppressed: " .. #__prevCalls)
-    assert(#ForeverSynthwaveErrorLog == 4)
-    for i = 1, 4 do assert(ForeverSynthwaveErrorLog[i].ours == true, i) end
+    assert(#ForeverSTUwaveErrorLog == 4)
+    for i = 1, 4 do assert(ForeverSTUwaveErrorLog[i].ours == true, i) end
     -- The same forms as stack frames behind a Blizzard-named message.
-    local n = #ForeverSynthwaveErrorLog
-    __stack = "{FOO}:1: in function `A'\\n...ddOns/ForeverSynthwave/LongName.lua:12: in function <...>\\n"
+    local n = #ForeverSTUwaveErrorLog
+    __stack = "{FOO}:1: in function `A'\\n...ddOns/forever-stuwave/LongName.lua:12: in function <...>\\n"
     __handler("{FOO}:20: attempt to index nil")
-    __stack = '{FOO}:1: in function `A\\'\\n[string "ForeverSynthwave/X.lua"]:5: in function <...>\\n'
+    __stack = '{FOO}:1: in function `A\\'\\n[string "forever-stuwave/X.lua"]:5: in function <...>\\n'
     __handler("{FOO}:21: attempt to index nil")
     assert(#__prevCalls == 0, "both frames are ours: " .. #__prevCalls)
-    assert(ForeverSynthwaveErrorLog[n + 1].ours == true and ForeverSynthwaveErrorLog[n + 2].ours == true)
+    assert(ForeverSTUwaveErrorLog[n + 1].ours == true and ForeverSTUwaveErrorLog[n + 2].ours == true)
     -- A lookalike folder stays foreign in the truncated and bracketed forms, message and frame.
     __stack = "{DET}:1: in function `hook'\\n"
-    __handler("...ddOns/ForeverSynthwaveX/LongName.lua:12: boom")
-    __handler('[string "ForeverSynthwaveX/X.lua"]:5: boom')
+    __handler("...ddOns/ForeverSTUwaveX/LongName.lua:12: boom")
+    __handler('[string "ForeverSTUwaveX/X.lua"]:5: boom')
     assert(#__prevCalls == 2, "lookalike messages are foreign: " .. #__prevCalls)
-    __stack = "...ddOns/ForeverSynthwaveX/LongName.lua:12: in function `hook'\\n"
+    __stack = "...ddOns/ForeverSTUwaveX/LongName.lua:12: in function `hook'\\n"
     __handler("{FOO}:30: attempt to index nil")
-    assert(#__prevCalls == 3 and ForeverSynthwaveErrorLog[#ForeverSynthwaveErrorLog].ours == false, "lookalike frame")
+    assert(#__prevCalls == 3 and ForeverSTUwaveErrorLog[#ForeverSTUwaveErrorLog].ours == false, "lookalike frame")
 """)
 
 case("err_folder_and_taint_patterns_match_case_insensitively", f"""
@@ -2017,27 +2017,27 @@ case("err_folder_and_taint_patterns_match_case_insensitively", f"""
     assert(#__prevCalls == 3, "Blizzard folder, any case, falls through to the stack")
     -- Our own folder and taint name in any case are ours with no stack.
     __stack = "{DET}:1: in function `hook'\\n"
-    __handler("INTERFACE\\\\ADDONS\\\\FOREVERSYNTHWAVE\\\\x.lua:8: boom")
-    __handler("attempt to compare (tainted by 'FOREVERSYNTHWAVE') z")
-    assert(#__prevCalls == 3 and ForeverSynthwaveErrorLog[#ForeverSynthwaveErrorLog].ours == true)
+    __handler("INTERFACE\\\\ADDONS\\\\FOREVER-STUWAVE\\\\x.lua:8: boom")
+    __handler("attempt to compare (tainted by 'FOREVER-STUWAVE') z")
+    assert(#__prevCalls == 3 and ForeverSTUwaveErrorLog[#ForeverSTUwaveErrorLog].ours == true)
 """)
 
 case("err_full_log_line_has_its_own_throttle_and_does_not_inflate_the_standard_count", """
     local FS = LoadEL()
-    for i = 1, 80 do __handler("Interface\\\\AddOns\\\\ForeverSynthwave\\\\f.lua:" .. i .. ": e") end
+    for i = 1, 80 do __handler("Interface\\\\AddOns\\\\forever-stuwave\\\\f.lua:" .. i .. ": e") end
     __now = __now + 30
-    __handler("Interface\\\\AddOns\\\\ForeverSynthwave\\\\f.lua:1: e")      -- flush the standard line
+    __handler("Interface\\\\AddOns\\\\forever-stuwave\\\\f.lua:1: e")      -- flush the standard line
     assert(Lines()[#Lines()] == EXPECT_LINE .. " (x80)", Lines()[#Lines()])
     local FULL = "Forever STUwave: error log full, /fserr clear"
     __now = __now + 1                                                   -- still inside the standard window
-    __stack = "Interface\\\\AddOns\\\\Blizzard_Foo\\\\Foo.lua:10: in function `Bar'\\nInterface\\\\AddOns\\\\ForeverSynthwave\\\\Menus.lua:50: in function <...>\\n"
+    __stack = "Interface\\\\AddOns\\\\Blizzard_Foo\\\\Foo.lua:10: in function `Bar'\\nInterface\\\\AddOns\\\\forever-stuwave\\\\Menus.lua:50: in function <...>\\n"
     __handler("Interface\\\\AddOns\\\\Blizzard_Foo\\\\Foo.lua:201: taint")
     assert(Lines()[#Lines()] == FULL, "a standard line must not silence the full line: " .. tostring(Lines()[#Lines()]))
     local n = #Lines()
     for i = 2, 5 do __handler("Interface\\\\AddOns\\\\Blizzard_Foo\\\\Foo.lua:" .. (200 + i) .. ": taint") end
     assert(#Lines() == n, "the full line has its own 10s throttle")
     __now = __now + 11
-    __handler("Interface\\\\AddOns\\\\ForeverSynthwave\\\\f.lua:2: e")      -- one repeat of a stored error
+    __handler("Interface\\\\AddOns\\\\forever-stuwave\\\\f.lua:2: e")      -- one repeat of a stored error
     assert(Lines()[#Lines()] == EXPECT_LINE, "dropped errors must not leak into the (xN): " .. tostring(Lines()[#Lines()]))
     __now = __now + 11
     __handler("Interface\\\\AddOns\\\\Blizzard_Foo\\\\Foo.lua:300: taint")
@@ -2046,8 +2046,8 @@ case("err_full_log_line_has_its_own_throttle_and_does_not_inflate_the_standard_c
 
 case("err_a_bare_message_ours_in_the_stack_is_suppressed_when_the_log_is_full", """
     local FS = LoadEL()
-    for i = 1, 80 do __handler("Interface\\\\AddOns\\\\ForeverSynthwave\\\\f.lua:" .. i .. ": e") end
-    __stack = "Interface\\\\AddOns\\\\ForeverSynthwave\\\\A.lua:1: in function a\\n"
+    for i = 1, 80 do __handler("Interface\\\\AddOns\\\\forever-stuwave\\\\f.lua:" .. i .. ": e") end
+    __stack = "Interface\\\\AddOns\\\\forever-stuwave\\\\A.lua:1: in function a\\n"
     __handler("boom")
     assert(#__prevCalls == 0 and FS.ErrorLogDropped == 1)
 """)
@@ -2057,9 +2057,9 @@ case("err_a_positioned_blizzard_message_is_attributed_by_the_stack_each_time_not
     local MSG = "Interface\\\\AddOns\\\\Blizzard_Foo\\\\Foo.lua:10: taint"
     __stack = "Interface\\\\AddOns\\\\Blizzard_Foo\\\\Foo.lua:10: in function `Bar'\\n"
     __handler(MSG)
-    assert(#__prevCalls == 1 and ForeverSynthwaveErrorLog[1].ours == false)
+    assert(#__prevCalls == 1 and ForeverSTUwaveErrorLog[1].ours == false)
     -- The same text thrown again, now from our code: the stack decides, no cached false.
-    __stack = "Interface\\\\AddOns\\\\Blizzard_Foo\\\\Foo.lua:10: in function `Bar'\\nInterface\\\\AddOns\\\\ForeverSynthwave\\\\Menus.lua:50: in function <...>\\n"
+    __stack = "Interface\\\\AddOns\\\\Blizzard_Foo\\\\Foo.lua:10: in function `Bar'\\nInterface\\\\AddOns\\\\forever-stuwave\\\\Menus.lua:50: in function <...>\\n"
     __handler(MSG)
     assert(#__prevCalls == 1, "second throw is ours, so suppressed")
     -- Record dedupes it into the first entry; the verdict itself must have been ours.
@@ -2073,7 +2073,7 @@ case("err_a_nil_stack_never_caches_a_verdict", """
     __handler(MSG)
     assert(#__prevCalls == 1)
     W.dsThrows = false
-    __stack = "Interface\\\\AddOns\\\\Blizzard_Foo\\\\Foo.lua:10: in function `Bar'\\nInterface\\\\AddOns\\\\ForeverSynthwave\\\\Menus.lua:50: in function <...>\\n"
+    __stack = "Interface\\\\AddOns\\\\Blizzard_Foo\\\\Foo.lua:10: in function `Bar'\\nInterface\\\\AddOns\\\\forever-stuwave\\\\Menus.lua:50: in function <...>\\n"
     __handler(MSG)
     assert(#__prevCalls == 1 and #__printed == 1, "decided by the stack the second time")
 """)
@@ -2093,12 +2093,12 @@ case("err_a_bare_message_verdict_is_not_cached", """
     local FS = LoadEL()
     __stack = "Interface\\\\AddOns\\\\Blizzard_Foo\\\\Foo.lua:10: in function `Bar'\\n"
     __handler("boom")
-    assert(#__prevCalls == 1 and ForeverSynthwaveErrorLog[1].ours == false)
+    assert(#__prevCalls == 1 and ForeverSTUwaveErrorLog[1].ours == false)
     -- The same text with no file:line, thrown from our code this time: the stack decides, not a cache.
-    __stack = "Interface\\\\AddOns\\\\ForeverSynthwave\\\\A.lua:1: in function a\\n"
+    __stack = "Interface\\\\AddOns\\\\forever-stuwave\\\\A.lua:1: in function a\\n"
     __handler("boom")
     assert(#__prevCalls == 1, "now ours, so suppressed")
-    assert(#ForeverSynthwaveErrorLog == 2 and ForeverSynthwaveErrorLog[2].ours == true)
+    assert(#ForeverSTUwaveErrorLog == 2 and ForeverSTUwaveErrorLog[2].ours == true)
 """)
 
 case("err_a_secret_stack_is_never_read", """
@@ -2106,9 +2106,9 @@ case("err_a_secret_stack_is_never_read", """
     __stack = SS
     assert(pcall(__handler, OURS))
     assert(#__prevCalls == 0, "ours is still logged and suppressed when the stack is secret")
-    assert(#ForeverSynthwaveErrorLog == 1 and ForeverSynthwaveErrorLog[1].stack == "(stack unavailable)")
+    assert(#ForeverSTUwaveErrorLog == 1 and ForeverSTUwaveErrorLog[1].stack == "(stack unavailable)")
     assert(pcall(__handler, FOREIGN))
-    assert(#__prevCalls == 1 and #ForeverSynthwaveErrorLog == 2 and ForeverSynthwaveErrorLog[2].ours == false)
+    assert(#__prevCalls == 1 and #ForeverSTUwaveErrorLog == 2 and ForeverSTUwaveErrorLog[2].ours == false)
 """)
 
 case("err_a_noisy_neighbour_allocates_nothing_per_throw", """
@@ -2136,7 +2136,7 @@ case("err_a_throwing_classifier_cannot_wedge_the_wrapper", """
     assert(ok, "the wrapper must not throw into the client")
     assert(#__prevCalls == 1 and __prevCalls[1] == FOREIGN, "the error still reaches the previous handler")
     __handler(OURS)                                       -- and busy was released, so this is handled
-    assert(#ForeverSynthwaveErrorLog == 1 and #__prevCalls == 1)
+    assert(#ForeverSTUwaveErrorLog == 1 and #__prevCalls == 1)
 """)
 
 

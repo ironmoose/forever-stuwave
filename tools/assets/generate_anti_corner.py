@@ -69,6 +69,6 @@ def write_tga(path, alpha_grid):
 
 
 if __name__ == "__main__":
-    out_path = os.path.join(os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media")), "anti_corner.tga")
+    out_path = os.path.join(os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures")), "anti_corner.tga")
     write_tga(out_path, build_alpha_grid())
     print(f"wrote {out_path}")

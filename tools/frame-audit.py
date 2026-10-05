@@ -31,7 +31,7 @@ import sys
 import os
 from pathlib import Path
 
-ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
+ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
 GLOBALS_DUMP = Path(os.environ.get("FS_GLOBALS_DUMP", ADDON / "reference" / "globals.txt"))
 
 # Only strings the addon actually uses as a global frame lookup.
@@ -96,7 +96,7 @@ def main() -> int:
         only = argv[argv.index("--module") + 1]
 
     client = load_client_globals()
-    files = [ADDON / only] if only else sorted(ADDON.glob("*.lua"))
+    files = [ADDON / only] if only else sorted(ADDON.rglob("*.lua"))
 
     rows = []
     for path in files:

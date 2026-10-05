@@ -12,11 +12,13 @@ Close WoW. Clone the repo outside your game folder:
 git clone https://github.com/ironmoose/forever-stuwave.git
 ```
 
-Copy `addon/ForeverSynthwave` into `_classic_beta_/Interface/AddOns/`, then start WoW and enable **Forever STUwave**. Keep the installed folder named `ForeverSynthwave`.
+Copy the inner `forever-stuwave/` folder into `_classic_beta_/Interface/AddOns/`, then start WoW and enable **Forever STUwave**. Keep the installed folder named `forever-stuwave`.
+
+For an existing install, use the [deployment script](docs/DEVELOPMENT.md#deploying-a-development-build) to migrate settings and retire the old copy.
 
 ### Update
 
-Close WoW, run `git pull --ff-only` in your checkout, and replace the installed addon with `addon/ForeverSynthwave`. Fully restart WoW. [Deployment scripts](docs/DEVELOPMENT.md#deploying-a-development-build) can handle the copy for you.
+Close WoW, run `git pull --ff-only` in your checkout, and replace the installed addon with the inner `forever-stuwave/` folder. Fully restart WoW. [Deployment scripts](docs/DEVELOPMENT.md#deploying-a-development-build) can handle the copy for you.
 
 ### Help shape it
 

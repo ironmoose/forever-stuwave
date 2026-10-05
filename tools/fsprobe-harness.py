@@ -35,7 +35,7 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-SOURCE = HERE.parent / "addon" / "ForeverSynthwave" / "FSProbe.lua"
+SOURCE = HERE.parent / "forever-stuwave" / "Modules/Diagnostics/FSProbe.lua"
 
 MOCK = r"""
 __realType = type
@@ -379,7 +379,7 @@ function complete()
     advance(4)
     casts(10)
     advance(30)
-    check(ForeverSynthwaveDB.fsprobe.meta.status == "done", "run did not finish")
+    check(ForeverSTUwaveDB.fsprobe.meta.status == "done", "run did not finish")
     __combat = false
 end
 function KNOWN_ONLY(id)
@@ -613,7 +613,7 @@ case("nothing_runs_before_the_command")(r"""
 check(__apiCalls == 0, "an API was called at load: " .. __apiCalls)
 check(#__frames == 0, "a frame was created at load")
 check(#__timers == 0, "a timer was scheduled at load")
-check(ForeverSynthwaveDB == nil, "SavedVariables touched at load")
+check(ForeverSTUwaveDB == nil, "SavedVariables touched at load")
 check(SLASH_FSPROBE1 == "/fsprobe", "slash command not registered")
 check(type(SlashCmdList.FSPROBE) == "function", "slash handler missing")
 -- help and a bad argument must not arm anything either
@@ -625,7 +625,7 @@ check(said("/fsprobe reset"), "usage text missing")
 
 case("full_run_in_plain_mode")(r"""
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 check(db and db.ooc, "ooc snapshot missing")
 check(said("snapshot saved (ooc)"), "arm line missing")
 local f = evframe()
@@ -741,7 +741,7 @@ scan(db)
 
 -- reset clears results and disarms
 runCmd("reset")
-check(ForeverSynthwaveDB.fsprobe == nil, "reset left results")
+check(ForeverSTUwaveDB.fsprobe == nil, "reset left results")
 check(nevents(f) == 0, "reset left events")
 """)
 
@@ -751,14 +751,14 @@ __combat = true
 fire("PLAYER_REGEN_DISABLED")
 runCmd("reset")
 advance(60)
-check(ForeverSynthwaveDB.fsprobe == nil, "a stale timer wrote after reset")
+check(ForeverSTUwaveDB.fsprobe == nil, "a stale timer wrote after reset")
 check(nevents(evframe()) == 0, "events registered after reset")
 """)
 
 case("every_api_throws", "throw")(r"""
 __issecretThrows = true
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 check(db.ooc, "ooc snapshot missing")
 check(type(db.ooc.env.inCombatLockdown.err) == "string", "error not stored as a string")
 check(db.ooc.env.canTestSecret == false, "canTestSecret should be false")
@@ -779,7 +779,7 @@ scan(db)
 case("every_api_throws_but_issecretvalue_works", "throw")(r"""
 __issecretThrows = false
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 local err = db.ooc.env.inCombatLockdown.err
 check(type(err) == "string" and string.find(err, "boom: InCombatLockdown", 1, true), "error text lost: " .. tostring(err))
 __combat = true
@@ -793,7 +793,7 @@ scan(db)
 case("even_createframe_throws", "throw")(r"""
 __frameThrows = true
 runCmd("")
-check(ForeverSynthwaveDB.fsprobe.ooc, "ooc snapshot should still be saved")
+check(ForeverSTUwaveDB.fsprobe.ooc, "ooc snapshot should still be saved")
 check(said("nothing armed"), "should say nothing is armed")
 runCmd("")  -- not armed, so this is a fresh attempt, still no throw
 runCmd("reset")
@@ -801,7 +801,7 @@ runCmd("reset")
 
 case("secret_values_are_never_stored", "secret")(r"""
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 __combat = true
 fire("PLAYER_REGEN_DISABLED")
 advance(4)
@@ -831,7 +831,7 @@ check(db.ooc.env.unitClass.r1.isSecret == true and db.ooc.env.unitClass.r1.value
 case("template_absent_is_recorded_and_skipped")(r"""
 __template = false
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 check(db.auracontainer.status == "absent: CustomAuraContainerTemplate", "status " .. tostring(db.auracontainer.status))
 for _, f in ipairs(__frames) do check(f._kind ~= "AuraContainer", "AuraContainer created without the template") end
 __combat = true
@@ -845,7 +845,7 @@ check(nevents(evframe()) == 0, "events left registered")
 case("container_creation_failure_is_recorded")(r"""
 __acCreateThrows = true
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 check(db.auracontainer.status == "create failed", "status " .. tostring(db.auracontainer.status))
 check(type(db.auracontainer.steps.createFrame) == "string" and db.auracontainer.steps.createFrame ~= "ok", "create error missing")
 __combat = true
@@ -861,9 +861,9 @@ runCmd("")
 local f = evframe()
 check(f._events.UNIT_SPELLCAST_SUCCEEDED == true, "fallback RegisterEvent not used")
 fire("UNIT_SPELLCAST_SUCCEEDED", "party1", "c", 5)
-check(ForeverSynthwaveDB.fsprobe.casts == nil, "a foreign unit was recorded")
+check(ForeverSTUwaveDB.fsprobe.casts == nil, "a foreign unit was recorded")
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "c", 5)
-check(#ForeverSynthwaveDB.fsprobe.casts == 1, "player cast not recorded")
+check(#ForeverSTUwaveDB.fsprobe.casts == 1, "player cast not recorded")
 """)
 
 
@@ -909,7 +909,7 @@ check(b1._calls.SetMouseMotionEnabled == 1 and b1._calls.SetMouseClickEnabled ==
 local b2 = variant(nil, "SetMouseClickEnabled")
 check(b2._calls.SetIcon == 1 and b2._calls.SetDurationCooldown == 1 and b2._calls.SetDurationText == 1, "init stopped at a throwing SetMouseClickEnabled")
 check(b2._calls.SetMouseMotionEnabled == 1 and b2._calls.SetHideTooltipInCombat == 1, "a throwing call stopped the next one")
-local rec = ForeverSynthwaveDB.fsprobe.auracontainer
+local rec = ForeverSTUwaveDB.fsprobe.auracontainer
 check(rec.initError == nil and rec.initCalls == 2, "the swallowed failures leaked into initError: " .. tostring(rec.initError))
 """)
 
@@ -920,7 +920,7 @@ fire("PLAYER_REGEN_DISABLED")
 check(pendingTimers() == 1, "4s timer not scheduled")
 __lockThrows = true
 advance(4)
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 check(db.combat, "combat snapshot skipped because InCombatLockdown threw (must fail closed)")
 check((db.combat.combatSkips or 0) == 0, "a failed lockdown check was counted as a skip")
 check(type(db.combat.env.inCombatLockdown.err) == "string", "the lockdown error was not recorded in the snapshot")
@@ -931,38 +931,38 @@ case("arming_in_combat_is_refused")(r"""
 __combat = true
 runCmd("")
 check(said("leave combat first"), "no refusal line")
-check(ForeverSynthwaveDB == nil, "an ooc snapshot was taken in combat")
+check(ForeverSTUwaveDB == nil, "an ooc snapshot was taken in combat")
 check(evframe() == nil and #__timers == 0, "armed in combat")
 __combat = false
 runCmd("")
-check(ForeverSynthwaveDB.fsprobe.ooc, "could not arm once out of combat")
+check(ForeverSTUwaveDB.fsprobe.ooc, "could not arm once out of combat")
 """)
 
 case("rerun_after_done_keeps_results")(r"""
 complete()
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 runCmd("")
 check(said("results exist, /reload to save or /fsprobe reset first"), "no results-exist line")
-check(ForeverSynthwaveDB.fsprobe == db and db.combat and #db.casts == 10, "results were wiped")
+check(ForeverSTUwaveDB.fsprobe == db and db.combat and #db.casts == 10, "results were wiped")
 check(nevents(evframe()) == 0, "re-armed over finished results")
 """)
 
 case("saved_results_from_an_earlier_session_are_kept")(r"""
-ForeverSynthwaveDB = { fsprobe = { combat = { marker = true } } }
+ForeverSTUwaveDB = { fsprobe = { combat = { marker = true } } }
 runCmd("")
 check(said("results exist, /reload to save or /fsprobe reset first"), "no results-exist line")
-check(ForeverSynthwaveDB.fsprobe.combat.marker == true, "saved combat results were wiped")
+check(ForeverSTUwaveDB.fsprobe.combat.marker == true, "saved combat results were wiped")
 check(evframe() == nil, "armed over saved results")
 runCmd("reset")
 runCmd("")
-check(ForeverSynthwaveDB.fsprobe.ooc, "could not re-arm after reset")
+check(ForeverSTUwaveDB.fsprobe.ooc, "could not re-arm after reset")
 """)
 
 case("saved_channel_results_alone_are_kept")(r"""
-ForeverSynthwaveDB = { fsprobe = { channel = { { event = "marker" } } } }
+ForeverSTUwaveDB = { fsprobe = { channel = { { event = "marker" } } } }
 runCmd("")
 check(said("results exist, /reload to save or /fsprobe reset first"), "a saved channel table was not counted as results")
-check(ForeverSynthwaveDB.fsprobe.channel[1].event == "marker", "saved channel results were wiped")
+check(ForeverSTUwaveDB.fsprobe.channel[1].event == "marker", "saved channel results were wiped")
 check(evframe() == nil, "armed over saved channel results")
 """)
 
@@ -988,7 +988,7 @@ case("rearm_reuses_container_and_label")(r"""
 runCmd("")
 runCmd("reset")
 runCmd("")
-check(ForeverSynthwaveDB.fsprobe.auracontainer.steps.createFrame == "reused", "container not reused")
+check(ForeverSTUwaveDB.fsprobe.auracontainer.steps.createFrame == "reused", "container not reused")
 local containers, labels = 0, 0
 for _, fr in ipairs(__frames) do
     if fr._kind == "AuraContainer" then containers = containers + 1 end
@@ -998,7 +998,7 @@ check(containers == 1, "containers built: " .. containers)
 local ac
 for _, fr in ipairs(__frames) do if fr._kind == "AuraContainer" then ac = fr end end
 check(ac._calls.AddAuraGroup == 1, "AddAuraGroup called " .. tostring(ac._calls.AddAuraGroup) .. " times across reset + re-arm")
-check(ForeverSynthwaveDB.fsprobe.auracontainer.steps.addAuraGroup == "reused", "re-arm did not record the group as reused")
+check(ForeverSTUwaveDB.fsprobe.auracontainer.steps.addAuraGroup == "reused", "re-arm did not record the group as reused")
 check(labels == 1, "labels built: " .. labels)
 check(nevents(evframe()) == 9, "re-arm did not re-register (REGEN, SUCCEEDED, START, 3 cast ends, 3 channel)")
 """)
@@ -1026,15 +1026,15 @@ local saved = __ACM.UpdateAllAuras
 __ACM.UpdateAllAuras = nil
 fire("PLAYER_TARGET_CHANGED")
 check(ac._calls.SetUnit == 3 and ac._calls.UpdateAllAuras == 1, "retarget without UpdateAllAuras misbehaved")
-check(ForeverSynthwaveDB.fsprobe.meta.lastError == nil and ForeverSynthwaveDB.fsprobe.auracontainer.retargetErrors == nil, "missing UpdateAllAuras was recorded as an error")
+check(ForeverSTUwaveDB.fsprobe.meta.lastError == nil and ForeverSTUwaveDB.fsprobe.auracontainer.retargetErrors == nil, "missing UpdateAllAuras was recorded as an error")
 __ACM.UpdateAllAuras = saved
 -- a present UpdateAllAuras that throws must not escape the handler, but is counted
 __ACM.UpdateAllAuras = function() error("boom") end
 fire("PLAYER_TARGET_CHANGED")
 check(ac._calls.SetUnit == 4, "retarget handler did not complete when UpdateAllAuras threw")
-check(ForeverSynthwaveDB.fsprobe.meta.lastError == nil, "a throwing UpdateAllAuras leaked into lastError")
-check(ForeverSynthwaveDB.fsprobe.auracontainer.retargets == 3, "retarget not recorded when UpdateAllAuras threw")
-check(ForeverSynthwaveDB.fsprobe.auracontainer.retargetErrors == 1, "a throwing UpdateAllAuras was not counted in retargetErrors")
+check(ForeverSTUwaveDB.fsprobe.meta.lastError == nil, "a throwing UpdateAllAuras leaked into lastError")
+check(ForeverSTUwaveDB.fsprobe.auracontainer.retargets == 3, "retarget not recorded when UpdateAllAuras threw")
+check(ForeverSTUwaveDB.fsprobe.auracontainer.retargetErrors == 1, "a throwing UpdateAllAuras was not counted in retargetErrors")
 __ACM.UpdateAllAuras = saved
 advance(30)
 check(f._events.PLAYER_TARGET_CHANGED == nil, "target event left registered after the row ended")
@@ -1065,7 +1065,7 @@ local function checkWl(wl, label)
     end
 end
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 checkWl(db.ooc.whitelist, "ooc")
 __combat = true
 fire("PLAYER_REGEN_DISABLED")
@@ -1076,7 +1076,7 @@ runCmd("reset")
 __combat = false
 C_Secrets.GetSpellCastSecrecy = nil
 runCmd("")
-local wl = ForeverSynthwaveDB.fsprobe.ooc.whitelist
+local wl = ForeverSTUwaveDB.fsprobe.ooc.whitelist
 check(wl.s21562.cast.exists == false and wl.s21562.aura.r1.value == 0, "absent cast secrecy not recorded as absent")
 """
 )
@@ -1087,7 +1087,7 @@ local IDS = """
     + WL_IDS
     + r"""
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 __combat = true
 fire("PLAYER_REGEN_DISABLED")
 advance(4)
@@ -1114,7 +1114,7 @@ fire("UNIT_AURA", "player", info)
 __combat = false
 fire("UNIT_AURA", "target", { isFullUpdate = true })
 fire("UNIT_AURA", "party1", info)
-local a = ForeverSynthwaveDB.fsprobe.unitAura
+local a = ForeverSTUwaveDB.fsprobe.unitAura
 check(a and #a == 2, "foreign unit recorded or events missing: " .. tostring(a and #a))
 local r1 = a[1]
 check(r1.event == "UNIT_AURA" and r1.unit.value == "player" and r1.unit.isSecret == false, "unit arg")
@@ -1140,7 +1140,7 @@ advance(4)
 casts(10)
 advance(30)
 check(nevents(x) == 0, "extra frame events left registered after done")
-scan(ForeverSynthwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fsprobe)
 """
 )
 
@@ -1149,7 +1149,7 @@ case("a2_ooc_events_cannot_spend_the_combat_budget")(
 runCmd("")
 local x = xframe()
 for i = 1, 40 do fire("UNIT_AURA", "player", { isFullUpdate = false }) end
-local a = ForeverSynthwaveDB.fsprobe.unitAura
+local a = ForeverSTUwaveDB.fsprobe.unitAura
 check(#a == 5, "ooc events recorded: " .. #a)
 __combat = true
 fire("UNIT_AURA", "target", { isFullUpdate = false })
@@ -1162,7 +1162,7 @@ check(#a == 15, "total cap: " .. #a)
 case("a2_table_secret_by_issecrettable_only_is_never_indexed")(
     r"""
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 -- issecretvalue says plain, issecrettable says secret: indexing it would raise SECRET_OP.
 check(issecretvalue(STT) == false and issecrettable(STT) == true, "mock sentinel is wrong")
 fire("UNIT_AURA", "player", STT)
@@ -1177,7 +1177,7 @@ scan(db)
 case("a2_secret_payload_table_is_never_indexed", "secret")(
     r"""
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 -- Every operation on ST raises SECRET_OP, and a swallowed one would leave that text in the saved errors.
 fire("UNIT_AURA", SS, ST)
 fire("UNIT_AURA", "player", ST)
@@ -1205,7 +1205,7 @@ local x = xframe()
 local SHOW, HIDE = "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW", "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE"
 check(x._events[SHOW] == true and x._events[HIDE] == true, "glow events not registered")
 for i = 1, 25 do fire(i % 2 == 1 and SHOW or HIDE, 17941) end
-local pg = ForeverSynthwaveDB.fsprobe.procGlow
+local pg = ForeverSTUwaveDB.fsprobe.procGlow
 check(#pg == 20, "event cap: " .. #pg)
 check(pg[1].event == SHOW and pg[2].event == HIDE, "event names")
 check(pg[1].spellID.value == 17941 and pg[1].spellID.isSecret == false, "plain spellID kept")
@@ -1215,7 +1215,7 @@ check(x._events[SHOW] == nil and x._events[HIDE] == nil, "glow events left regis
 __combat = true
 fire("PLAYER_REGEN_DISABLED")
 advance(4)
-local o = ForeverSynthwaveDB.fsprobe.combat.spellOverlay
+local o = ForeverSTUwaveDB.fsprobe.combat.spellOverlay
 check(o.shadowTranceOverlayed.r1.type == "boolean" and o.shadowTranceOverlayed.r1.value == false, "17941 overlay not in the combat snapshot")
 check(o.shadowBoltOverlayed.r1.type == "boolean", "686 overlay missing")
 """
@@ -1225,9 +1225,9 @@ case("p1_secret_glow_spellid_is_not_stored", "secret")(
     r"""
 runCmd("")
 fire("SPELL_ACTIVATION_OVERLAY_GLOW_SHOW", SN)
-local pg = ForeverSynthwaveDB.fsprobe.procGlow
+local pg = ForeverSTUwaveDB.fsprobe.procGlow
 check(#pg == 1 and pg[1].spellID.isSecret == true and pg[1].spellID.type == "number" and pg[1].spellID.value == nil, "secret spellID stored")
-scan(ForeverSynthwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fsprobe)
 """
 )
 
@@ -1240,7 +1240,7 @@ runCmd("")
 __combat = true
 fire("PLAYER_REGEN_DISABLED")
 advance(4)
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 for _, id in ipairs({ 61304, 686, 585 }) do
     local e = db.combat.gcd["s" .. id]
     check(e and e.cooldown.fields.isActive.type == "boolean" and e.cooldown.fields.startTime.isSecret == false, "gcd fields " .. id)
@@ -1272,7 +1272,7 @@ __combat = false
 KNOWN_ONLY(686)
 runCmd("")
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-3", 686)
-local g3 = ForeverSynthwaveDB.fsprobe.casts[1].gcd
+local g3 = ForeverSTUwaveDB.fsprobe.casts[1].gcd
 check(g3.spellId == nil and g3.skipped ~= nil and g3.control and g3.control.isActive.value == true,
     "the cast spell was probed, or the control read was lost")
 """
@@ -1285,11 +1285,11 @@ IsPlayerSpell = function() return true end
 C_SpellBook.IsSpellKnown = IsPlayerSpell
 runCmd("")
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 172)
-check(ForeverSynthwaveDB.fsprobe.casts[1].gcd.spellId == 585, "first candidate: " .. tostring(ForeverSynthwaveDB.fsprobe.casts[1].gcd.spellId))
+check(ForeverSTUwaveDB.fsprobe.casts[1].gcd.spellId == 585, "first candidate: " .. tostring(ForeverSTUwaveDB.fsprobe.casts[1].gcd.spellId))
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-2", 585)
-check(ForeverSynthwaveDB.fsprobe.casts[2].gcd.spellId == 686, "after a Smite: " .. tostring(ForeverSynthwaveDB.fsprobe.casts[2].gcd.spellId))
+check(ForeverSTUwaveDB.fsprobe.casts[2].gcd.spellId == 686, "after a Smite: " .. tostring(ForeverSTUwaveDB.fsprobe.casts[2].gcd.spellId))
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-3", 8092)
-local id = ForeverSynthwaveDB.fsprobe.casts[3].gcd.spellId
+local id = ForeverSTUwaveDB.fsprobe.casts[3].gcd.spellId
 check(id == 585, "Mind Blast cast probed " .. tostring(id))
 """
 )
@@ -1297,7 +1297,7 @@ check(id == 585, "Mind Blast cast probed " .. tostring(id))
 case("gcd_is_also_sampled_when_a_cast_starts")(
     r"""
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 fire("UNIT_SPELLCAST_START", "party1", "Cast-x", 686)
 check(db.gcdStart == nil, "a foreign unit START was recorded")
 fire("UNIT_SPELLCAST_START", "player", "Cast-1", 686)
@@ -1318,7 +1318,7 @@ case("gcd_cast_time_falls_back_to_start_to_succeeded_elapsed")(
 -- spell info castTime is secret, so the elapsed time between START and SUCCEEDED stands in
 C_Spell.GetSpellInfo = function(a) return { name = "Shadow Bolt", spellID = 686, castTime = SN } end
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 fire("UNIT_SPELLCAST_START", "player", "Cast-1", 686)
 advance(2.5)
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 686)
@@ -1339,7 +1339,7 @@ scan(db)
 case("aura_nested_count_is_not_taken_from_a_table_issecrettable_calls_secret")(
     r"""
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 -- the info table is plain; its nested fields are tables issecretvalue clears but issecrettable
 -- does not (Lua 5.1 ignores __len on a table, so # would silently report 0 instead of raising)
 fire("UNIT_AURA", "player", { isFullUpdate = false, addedAuras = STT, updatedAuraInstanceIDs = STT, removedAuraInstanceIDs = STT })
@@ -1360,7 +1360,7 @@ case("stale_start_does_not_produce_a_bogus_elapsed_cast_time")(
     r"""
 C_Spell.GetSpellInfo = function(a) return { name = "Shadow Bolt", spellID = 686, castTime = SN } end
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 local f = evframe()
 for _, e in ipairs({ "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED" }) do
     check(f._events[e] == "unit:player", e .. " not registered as a player unit event")
@@ -1394,7 +1394,7 @@ scan(db)
 case("note_table_fails_closed_when_issecrettable_throws")(
     r"""
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 __issecrettableThrows = true
 -- the aura info table is plain to issecretvalue, but the secrecy check blew up: count it as secret
 fire("UNIT_AURA", "player", { isFullUpdate = false })
@@ -1415,7 +1415,7 @@ case("note_table_treats_a_missing_issecrettable_as_plain")(
     r"""
 issecrettable = nil
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 fire("UNIT_AURA", "player", { isFullUpdate = false, addedAuras = { {} } })
 local r = db.unitAura[1]
 check(r.info.issecrettable == nil, "issecrettable recorded without the API")
@@ -1430,7 +1430,7 @@ case("gcd_known_list_is_retried_after_an_empty_result")(
 IsPlayerSpell = function() return false end
 C_SpellBook.IsSpellKnown = IsPlayerSpell
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 686)
 check(db.casts[1].gcd.skipped == "no known spell", "nothing was known yet")
 -- the spellbook loads later: the empty list must not have been cached
@@ -1448,7 +1448,7 @@ local oldName, oldInfo = C_Spell.GetSpellName, C_Spell.GetSpellInfo
 C_Spell.GetSpellName = function(id) if id == 585 then return nil end return oldName(id) end
 C_Spell.GetSpellInfo = function(id) if id == 585 then return nil end return oldInfo(id) end
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 585)
 check(db.casts[1].gcd.spellId == 686, "probed the cast spell itself: " .. tostring(db.casts[1].gcd.spellId))
 scan(db)
@@ -1459,7 +1459,7 @@ case("gcd_probe_with_a_secret_cooldown_table_stores_nothing", "plain")(
     r"""
 C_Spell.GetSpellCooldown = function() return ST end
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 686)
 local g = db.casts[1].gcd
 check(g.spellId == 585 and g.call.r1.isSecret == true, "probe call not recorded as secret")
@@ -1476,7 +1476,7 @@ case("gcd_cooldown_table_secret_by_issecrettable_only_is_not_indexed")(
     r"""
 C_Spell.GetSpellCooldown = function() return STT end
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 686)
 local g = db.casts[1].gcd
 check(g.isActive == nil and g.control.isActive == nil, "indexed a table issecrettable calls secret")
@@ -1487,14 +1487,14 @@ scan(db)
 case("gcd_isactive_unknown_or_secret_is_not_stored", "secret")(
     r"""
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 686)
 check(db.casts[1].gcd.skipped == "no known spell", "unknown spells should skip the probe")
 check(db.casts[1].gcd.control and db.casts[1].gcd.control.isActive.isSecret == true, "control read should still be taken")
 runCmd("reset")
 IsPlayerSpell = function() return true end
 runCmd("")
-db = ForeverSynthwaveDB.fsprobe
+db = ForeverSTUwaveDB.fsprobe
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 686)
 local g = db.casts[1].gcd
 check(g.spellId == 585, "first candidate should win: " .. tostring(g.spellId))
@@ -1510,7 +1510,7 @@ scan(db)
 case("pet_exists_is_recorded_with_its_secrecy")(
     r"""
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 check(db.ooc.pet.unitExists.r1.value == true and db.ooc.pet.unitExists.r1.isSecret == false, "pet exists")
 __combat = true
 fire("PLAYER_REGEN_DISABLED")
@@ -1520,7 +1520,7 @@ runCmd("reset")
 __combat = false
 UnitExists = function() return SB end
 runCmd("")
-local r = ForeverSynthwaveDB.fsprobe.ooc.pet.unitExists.r1
+local r = ForeverSTUwaveDB.fsprobe.ooc.pet.unitExists.r1
 check(r.isSecret == true and r.type == "boolean" and r.value == nil, "secret pet existence stored")
 """
 )
@@ -1528,7 +1528,7 @@ check(r.isSecret == true and r.type == "boolean" and r.value == nil, "secret pet
 case("shoot_events_go_to_their_own_capped_list")(
     r"""
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 for i = 1, 3 do fire("UNIT_SPELLCAST_SUCCEEDED", "player", "s" .. i, 5019) end
 fire("UNIT_SPELLCAST_CHANNEL_START", "player", "c1", 5019)
 fire("UNIT_SPELLCAST_CHANNEL_UPDATE", "player", "c1", 5019)
@@ -1548,7 +1548,7 @@ check(#db.casts == 10 and said("cast recorder saved"), "casts should still reach
 case("channel_start_update_stop_record_secrecy_and_time")(
     r"""
 runCmd("")
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 fire("UNIT_SPELLCAST_CHANNEL_START", "player", "c", 15407)
 fire("UNIT_SPELLCAST_CHANNEL_UPDATE", "player", "c", 15407)
 fire("UNIT_SPELLCAST_CHANNEL_STOP", "player", "c", 15407)
@@ -1573,7 +1573,7 @@ local function flood()
 end
 runCmd("")
 flood()
-local db = ForeverSynthwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fsprobe
 check(#db.unitAura == 5 and #db.procGlow == 20 and #db.shoot == 12, "first run caps: " .. #db.unitAura .. "/" .. #db.procGlow .. "/" .. #db.shoot)
 __combat = true
 for i = 1, 20 do fire("UNIT_AURA", "player", { isFullUpdate = false }) end
@@ -1584,7 +1584,7 @@ runCmd("")
 local x = xframe()
 check(x._events.UNIT_AURA == "unit:player,target" and x._events[SHOW] == true, "extra events not re-registered")
 flood()
-db = ForeverSynthwaveDB.fsprobe
+db = ForeverSTUwaveDB.fsprobe
 check(#db.unitAura == 5, "aura counter not reset: " .. #db.unitAura)
 check(#db.procGlow == 20, "proc counter not reset: " .. #db.procGlow)
 check(#db.shoot == 12, "shoot counter not reset: " .. #db.shoot)
@@ -1600,13 +1600,13 @@ case("register_errors_are_all_kept", "plain")(
 __unitEventThrows = true
 __registerThrows = true
 runCmd("")
-local e = ForeverSynthwaveDB.fsprobe.meta.registerError
+local e = ForeverSTUwaveDB.fsprobe.meta.registerError
 check(type(e) == "string", "no registerError recorded")
 -- first and last failing registrations are both in the text, not just the last one
 check(string.find(e, "UNIT_SPELLCAST_SUCCEEDED", 1, true), "first register error overwritten: " .. e)
 check(string.find(e, "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE", 1, true), "last register error missing: " .. e)
 check(#e < 1200, "registerError grew without a cap: " .. #e)
-check(ForeverSynthwaveDB.fsprobe.meta.lastError == nil, "arming threw: " .. tostring(ForeverSynthwaveDB.fsprobe.meta.lastError))
+check(ForeverSTUwaveDB.fsprobe.meta.lastError == nil, "arming threw: " .. tostring(ForeverSTUwaveDB.fsprobe.meta.lastError))
 """
 )
 
@@ -1614,7 +1614,7 @@ check(ForeverSynthwaveDB.fsprobe.meta.lastError == nil, "arming threw: " .. tost
 case("gunsight_plain_run_stores_every_probe_with_plain_values")(
     r"""
 runCmd("gunsight")
-local gs = ForeverSynthwaveDB.fsprobe.gunsight
+local gs = ForeverSTUwaveDB.fsprobe.gunsight
 for _, k in ipairs({ "meta", "texcoord8", "vertexColorFromBoolean", "verticalBarTimer", "line", "auraApi",
                      "auraContainer", "alphaFromBoolean" }) do
     check(type(gs[k]) == "table", "missing probe " .. k)
@@ -1624,7 +1624,7 @@ check(gs.meta.probeError == nil and gs.auraContainer.probeError == nil, "a probe
 check(type(gs.auraContainer.summary) == "string" and said("gunsight auraContainer:"), "no one-line summary")
 check(gs.auraContainer.frameType == "ok" and gs.auraContainer.templateAccepted == true, "container not built")
 check(gs.auraContainer.addAuraGroup == "ok" and gs.auraContainer.setUnit == "ok", "group or unit refused")
-scan(ForeverSynthwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fsprobe)
 noOnUpdate()
 """
 )
@@ -1644,7 +1644,7 @@ end
 check(__created == created, "re-running created " .. (__created - created) .. " new frames or textures")
 check(#__frames == frames, "re-running created " .. (#__frames - frames) .. " new CreateFrame frames")
 check(FSProbeGsAuraContainer._calls.AddAuraGroup == 1, "the group was added again on a re-run")
-check(ForeverSynthwaveDB.fsprobe.gunsight.auraContainer.addAuraGroup == "reused", "re-run did not reuse the group")
+check(ForeverSTUwaveDB.fsprobe.gunsight.auraContainer.addAuraGroup == "reused", "re-run did not reuse the group")
 allHidden()
 """
 )
@@ -1653,7 +1653,7 @@ case("gunsight_hides_the_bar_when_there_is_no_create_duration")(
     r"""
 runCmd("gunsight")
 allHidden()
-check(ForeverSynthwaveDB.fsprobe.gunsight.verticalBarTimer.manual.skipped ~= nil, "no skip recorded")
+check(ForeverSTUwaveDB.fsprobe.gunsight.verticalBarTimer.manual.skipped ~= nil, "no skip recorded")
 """
 )
 
@@ -1662,7 +1662,7 @@ case("gunsight_hides_the_bar_when_create_duration_throws")(
 C_DurationUtil = { CreateDuration = function() error("boom: CreateDuration") end }
 runCmd("gunsight")
 allHidden()
-check(string.find(ForeverSynthwaveDB.fsprobe.gunsight.verticalBarTimer.manual.skipped, "threw", 1, true), "throw not recorded")
+check(string.find(ForeverSTUwaveDB.fsprobe.gunsight.verticalBarTimer.manual.skipped, "threw", 1, true), "throw not recorded")
 """
 )
 
@@ -1673,7 +1673,7 @@ runCmd("gunsight")
 runCmd("gunsight")   -- before the first run's 0.5s sample: its timer is now stale
 advance(1)
 allHidden()
-local m = ForeverSynthwaveDB.fsprobe.gunsight.verticalBarTimer.manual
+local m = ForeverSTUwaveDB.fsprobe.gunsight.verticalBarTimer.manual
 check(m.valueAt05 ~= nil, "the live run was not sampled (a stale timer hid or consumed its bar)")
 """
 )
@@ -1686,7 +1686,7 @@ check(evframe()._events.UNIT_SPELLCAST_START == "unit:player", "cast not armed")
 fire("UNIT_SPELLCAST_START", "player", "Cast-1", 686)
 advance(1)
 allHidden()
-check(ForeverSynthwaveDB.fsprobe.gunsight.verticalBarTimer.cast.setTimerDuration == "ok", "cast duration not fed to the bar")
+check(ForeverSTUwaveDB.fsprobe.gunsight.verticalBarTimer.cast.setTimerDuration == "ok", "cast duration not fed to the bar")
 """
 )
 
@@ -1699,12 +1699,12 @@ C_UnitAuras.GetAuraDuration = function(_, id)
     return { kind = "duration" }
 end
 runCmd("gunsight")
-local ids = ForeverSynthwaveDB.fsprobe.gunsight.auraApi.ooc.ids
+local ids = ForeverSTUwaveDB.fsprobe.gunsight.auraApi.ooc.ids
 check(ids.firstIdSecret == true and ids.firstIdType == "number" and ids.firstId == "secret",
     "first id: " .. tostring(ids.firstIdSecret) .. " " .. tostring(ids.firstIdType) .. " " .. tostring(ids.firstId))
 check(gotSecretId, "the secret id was not passed on to GetAuraDuration")
-check(ForeverSynthwaveDB.fsprobe.gunsight.auraApi.ooc.durationOk == true, "duration read skipped for a secret id")
-scan(ForeverSynthwaveDB.fsprobe)
+check(ForeverSTUwaveDB.fsprobe.gunsight.auraApi.ooc.durationOk == true, "duration read skipped for a secret id")
+scan(ForeverSTUwaveDB.fsprobe)
 """
 )
 
@@ -1714,7 +1714,7 @@ UnitExists = function() return false end
 runCmd("gunsight")
 pull(2)
 for _ = 1, 10 do advance(2) end
-local c = ForeverSynthwaveDB.fsprobe.gunsight.auraApi.combat
+local c = ForeverSTUwaveDB.fsprobe.gunsight.auraApi.combat
 check(c and c.targetExists == false, "targetExists: " .. tostring(c and c.targetExists))
 check(c.gaveUp == true, "did not give up after the attempts")
 """
@@ -1725,7 +1725,7 @@ case("gunsight_aura_container_engine_window_records_types_forwards_and_hides")(
 gsMockContainer(3)
 local SECRET_DURATION = ST
 runCmd("gunsight")
-local rec = ForeverSynthwaveDB.fsprobe.gunsight.auraContainer
+local rec = ForeverSTUwaveDB.fsprobe.gunsight.auraContainer
 check(rec.initCalls == 3, "init callbacks: " .. tostring(rec.initCalls))
 for _, step in ipairs({ "icon", "cooldown", "cooldownHook", "durationText", "applicationCount", "durationBar", "barHook" }) do
     check(rec.initSteps[step] == "ok", "init step " .. step .. ": " .. tostring(rec.initSteps[step]))
@@ -1737,7 +1737,7 @@ local cooldowns, bars = engineCalls(SECRET_DURATION)
 check(cooldowns == 3 and bars == 3, "mock engine calls: " .. cooldowns .. " " .. bars)
 advance(0.5)
 advance(0.5)
-local c = ForeverSynthwaveDB.fsprobe.gunsight.auraContainer.combat
+local c = ForeverSTUwaveDB.fsprobe.gunsight.auraContainer.combat
 check(c.sampleError == nil and c.heightError == nil, "sample failed: " .. tostring(c.sampleError or c.heightError))
 check(c.buttons.shown == 3 and c.buttons.children == 3 and c.allocated == 3, "button counts")
 check(c.cooldownHook.calls == 3 and c.cooldownHook.args == "table:secret,boolean:plain", "cooldown hook: " .. tostring(c.cooldownHook.args))
@@ -1749,7 +1749,7 @@ check(c.fed.hook.height == 7 and c.fed.get.height == 7, "forwarded bar heights")
 check(container._shown == false, "container left shown")
 allHidden()
 check(said("gunsight auraContainer: combat: 3 of 3 children shown"), "combat summary line missing")
-scan(ForeverSynthwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fsprobe)
 """
 )
 
@@ -1764,13 +1764,13 @@ engineCalls(ST)
 for _, b in ipairs(buttons) do b.GetAuraDuration = function() return ST end end
 advance(0.5)
 advance(0.5)
-local c = ForeverSynthwaveDB.fsprobe.gunsight.auraContainer.combat
+local c = ForeverSTUwaveDB.fsprobe.gunsight.auraContainer.combat
 check(c.sampleError == nil and c.heightError == nil, "sample failed: " .. tostring(c.sampleError or c.heightError))
 check(c.buttons.shown == 2 and c.buttons.unknown == 1, "a secret IsShown must count as unknown")
 check(c.buttonDuration.secret == true and c.buttonDuration.type == "table", "secret duration not described")
 check(c.engineBars.secret == 3 and c.engineBars.maxHeight == nil, "secret heights must not be stored")
 check(c.fed.hook.height == "secret" and c.fed.get.height == "secret", "fed heights: " .. tostring(c.fed.hook.height))
-scan(ForeverSynthwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fsprobe)
 """
 )
 
@@ -1804,9 +1804,9 @@ case("gunsight_container_refusals_are_recorded")(
     r"""
 __acCreateThrows = true
 runCmd("gunsight")
-local rec = ForeverSynthwaveDB.fsprobe.gunsight.auraContainer
+local rec = ForeverSTUwaveDB.fsprobe.gunsight.auraContainer
 check(string.find(rec.status, "frame type refused", 1, true), "create refusal: " .. tostring(rec.status))
-check(ForeverSynthwaveDB.fsprobe.gunsight.alphaFromBoolean.texture ~= nil, "later probes did not run")
+check(ForeverSTUwaveDB.fsprobe.gunsight.alphaFromBoolean.texture ~= nil, "later probes did not run")
 """
 )
 
@@ -1814,7 +1814,7 @@ case("gunsight_missing_template_is_recorded")(
     r"""
 __template = false
 runCmd("gunsight")
-check(string.find(ForeverSynthwaveDB.fsprobe.gunsight.auraContainer.status, "template absent", 1, true), "template status")
+check(string.find(ForeverSTUwaveDB.fsprobe.gunsight.auraContainer.status, "template absent", 1, true), "template status")
 pull(2)
 advance(1)
 allHidden()
@@ -1828,7 +1828,7 @@ runCmd("gunsight")
 pull(2)
 advance(2)
 advance(1)
-scan(ForeverSynthwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fsprobe)
 allHidden()
 """
 )
@@ -1837,7 +1837,7 @@ case("gunsight_survives_a_failing_create_frame", "throw")(
     r"""
 __frameThrows = true
 runCmd("gunsight")
-check(ForeverSynthwaveDB.fsprobe.gunsight.meta.hostError ~= nil, "host failure not recorded")
+check(ForeverSTUwaveDB.fsprobe.gunsight.meta.hostError ~= nil, "host failure not recorded")
 """
 )
 
@@ -1853,7 +1853,7 @@ check(player._shown == true and player._args.SetEnabled[1] == true, "container n
 check(player._slotOpts.candidateFilters.includeSpellIDs[139] == true, "Renew rank 1 missing from includeSpellIDs")
 check(player._slotOpts.candidateFilters.includeSpellIDs[9999] == true, "runtime rank missing from includeSpellIDs")
 check(player._groupOpts.candidateFilters.maxDuration == 60, "group maxDuration")
-local rec = ForeverSynthwaveDB.fsprobe.hot
+local rec = ForeverSTUwaveDB.fsprobe.hot
 check(rec.meta.idsUnverified == nil and rec.meta.runtimeRank == 9999, "id bookkeeping")
 check(type(rec.meta.idsSource) == "string" and string.find(rec.meta.idsSource, "ElvUI", 1, true), "ids source must cite ElvUI: " .. tostring(rec.meta.idsSource))
 local row = rec.tokens.player
@@ -1891,7 +1891,7 @@ check(player._shown == false and party1._shown == false, "hot off left a contain
 check(player._args.SetEnabled[1] == false, "hot off did not disable")
 allHidden()
 noOnUpdate()
-scan(ForeverSynthwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fsprobe)
 """
 )
 
@@ -1902,7 +1902,7 @@ __combat = true
 runCmd("hot")
 check(said("leave combat first"), "no refusal line")
 check(FSProbeHot_player == nil and #__frames == 0, "a frame was built in combat")
-check(ForeverSynthwaveDB == nil or ForeverSynthwaveDB.fsprobe == nil, "a result was written in combat")
+check(ForeverSTUwaveDB == nil or ForeverSTUwaveDB.fsprobe == nil, "a result was written in combat")
 check(pendingTimers() == 0, "a timer was scheduled in combat")
 """
 )
@@ -1925,7 +1925,7 @@ runCmd("hot off")
 check(player._shown == false and player._args.SetEnabled[1] == false, "second off did not finish the teardown")
 -- a re-run reuses the container instead of adding the groups twice
 runCmd("hot")
-check(ForeverSynthwaveDB.fsprobe.hot.tokens.player.steps.addAuraSlot == "reused", "re-run did not reuse the container")
+check(ForeverSTUwaveDB.fsprobe.hot.tokens.player.steps.addAuraSlot == "reused", "re-run did not reuse the container")
 check(player._shown == true and player._args.SetAlpha[1] == 1, "re-run did not bring the strip back")
 runCmd("reset")
 check(player._shown == false, "reset left the strip up")
@@ -1941,12 +1941,12 @@ local player = FSProbeHot_player
 player._groupBtns[1].IsShown = function() return SB end
 player._groupBtns[2]._shown = true
 advance(1)
-local row = ForeverSynthwaveDB.fsprobe.hot.tokens.player
+local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
 check(row.sampleErrors == nil, "sample failed: " .. tostring(row.firstSampleError))
 check(string.find(row.samples[2], "unk=1", 1, true), "a secret IsShown must count as unknown: " .. tostring(row.samples[2]))
 check(row.stats.ooc.unknown == 1 and row.stats.combat.unknown == 0, "unknown must be counted per bucket")
 check(row.stats.ooc.withShown == 0 and row.stats.transitions == 0, "an unknown sample must not feed withShown or transitions")
-scan(ForeverSynthwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fsprobe)
 """
 )
 
@@ -1958,7 +1958,7 @@ case("hot_secret_buttons_in_combat_are_unknown_not_lost", "secret")(
 hotMock(1)
 runCmd("hot")
 local player = FSProbeHot_player
-local row = ForeverSynthwaveDB.fsprobe.hot.tokens.player
+local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
 player._slotBtn._shown = true
 advance(1)
 check(row.stats.ooc.withShown == 1 and row.stats.transitions == 1, "setup: out of combat shown sample")
@@ -1981,9 +1981,9 @@ check(row.stats.combat.withShown == 1 and row.stats.combat.unknown == 2, "known 
 -- the summary line carries the unknown and slot secret counts
 __combat = false
 runCmd("hot off")
-local summary = ForeverSynthwaveDB.fsprobe.hot.summary
+local summary = ForeverSTUwaveDB.fsprobe.hot.summary
 check(summary and string.find(summary, "unk 2", 1, true) and string.find(summary, "slotsecret 2", 1, true), "summary: " .. tostring(summary))
-scan(ForeverSynthwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fsprobe)
 """
 )
 
@@ -1993,7 +1993,7 @@ case("hot_a_button_hidden_out_of_combat_is_a_transition_not_a_loss")(
 hotMock(1)
 runCmd("hot")
 local player = FSProbeHot_player
-local row = ForeverSynthwaveDB.fsprobe.hot.tokens.player
+local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
 player._slotBtn._shown = true
 advance(1)
 player._slotBtn._shown = false
@@ -2015,7 +2015,7 @@ case("hot_records_a_refused_create_frame")(
 hotMock(1)
 __acCreateThrows = true
 runCmd("hot")
-local row = ForeverSynthwaveDB.fsprobe.hot.tokens.player
+local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
 check(row.status == "create failed" and string.find(row.steps.createFrame, "boom", 1, true), "refusal not recorded")
 check(said("no container built"), "no summary")
 check(pendingTimers() == 0, "sampler started without a container")
@@ -2027,7 +2027,7 @@ case("hot_result_survives_a_main_run_rearm")(
 hotMock(1)
 runCmd("hot")
 runCmd("")
-check(ForeverSynthwaveDB.fsprobe.hot ~= nil and ForeverSynthwaveDB.fsprobe.ooc ~= nil, "re-arm wiped the hot result")
+check(ForeverSTUwaveDB.fsprobe.hot ~= nil and ForeverSTUwaveDB.fsprobe.ooc ~= nil, "re-arm wiped the hot result")
 """
 )
 
@@ -2044,7 +2044,7 @@ local btn = player._barBtn
 check(btn, "no renewbar slot was added")
 check(player._barOpts.candidateFilters.includeSpellIDs[139] == true and player._barOpts.candidateFilters.includeSpellIDs[9999] == true,
     "bar slot must use the same Renew id set")
-local row = ForeverSynthwaveDB.fsprobe.hot.tokens.player
+local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
 check(row.steps.addBarSlot == "ok", "addBarSlot: " .. tostring(row.steps.addBarSlot))
 check(row.initCalls.bar == 1, "bar init count")
 local bs = row.barSteps
@@ -2108,7 +2108,7 @@ check(lv and #lv == 1 and lv[1] == 4, "bar button frame level raise: " .. tostri
 check(btn._args.SetMouseClickEnabled and btn._args.SetMouseClickEnabled[1] == false, "HP.Preamble did not run for the bar button")
 -- nothing was read
 check(__auraRead == false, "an aura, duration, bar value or text was read")
-scan(ForeverSynthwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fsprobe)
 """
 )
 
@@ -2117,7 +2117,7 @@ case("hot_missing_bar_api_is_recorded_as_absent_and_nothing_throws")(
 hotMock(1)
 __missing = { SetDurationBar = true, AddPandemicRegion = true }
 runCmd("hot")
-local row = ForeverSynthwaveDB.fsprobe.hot.tokens.player
+local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
 local bs = row.barSteps
 check(bs.api.SetDurationBar == "nil" and bs.api.AddPandemicRegion == "nil" and bs.api.SetDurationText == "function", "types recorded")
 check(bs.setDurationBar == "absent" and bs.addPandemicRegion == "absent", "missing methods must read absent: " .. tostring(bs.setDurationBar))
@@ -2125,7 +2125,7 @@ check(bs.bar == "ok" and bs.text == "ok" and bs.textMode == "custom" and bs.pand
 check(row.status == "built" and pendingTimers() == 1, "the probe must still build and sample")
 advance(1)
 check(row.sampleErrors == nil, "sample failed: " .. tostring(row.firstSampleError))
-scan(ForeverSynthwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fsprobe)
 """
 )
 
@@ -2135,7 +2135,7 @@ hotMock(1)
 __missing = { SetDurationBar = true, SetDurationText = true, AddPandemicRegion = true }
 Enum, C_StringUtil, C_CurveUtil, CreateColor = nil, nil, nil, nil
 runCmd("hot")
-local row = ForeverSynthwaveDB.fsprobe.hot.tokens.player
+local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
 local bs = row.barSteps
 check(row.built == true and bs, "the container must still build with a bar record")
 check(bs.api.SetDurationBar == "nil" and bs.api["Enum.StatusBarTimerDirection"] == "nil", "enum absence")
@@ -2145,7 +2145,7 @@ check(bs.setDurationBar == "absent" and bs.textDefault == "absent" and bs.textMo
 check(string.find(bs.textCustom, "absent", 1, true), "custom text error must name what is absent: " .. tostring(bs.textCustom))
 advance(1)
 check(row.sampleErrors == nil, "sample failed: " .. tostring(row.firstSampleError))
-scan(ForeverSynthwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fsprobe)
 """
 )
 
@@ -2155,11 +2155,11 @@ hotMock(1)
 __FrameM.SetDurationBar = function() error("refused: SetDurationBar") end
 __FrameM.SetReverseFill = function() error("refused: SetReverseFill") end
 runCmd("hot")
-local bs = ForeverSynthwaveDB.fsprobe.hot.tokens.player.barSteps
+local bs = ForeverSTUwaveDB.fsprobe.hot.tokens.player.barSteps
 check(string.find(bs.setDurationBar, "refused: SetDurationBar", 1, true), "error text recorded: " .. tostring(bs.setDurationBar))
 check(string.find(bs.barReverse, "refused: SetReverseFill", 1, true), "reverse fill error recorded: " .. tostring(bs.barReverse))
 check(bs.barTrack == "ok" and bs.text == "ok" and bs.textMode == "custom" and bs.addPandemicRegion == "ok", "later steps still ran")
-scan(ForeverSynthwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fsprobe)
 """
 )
 
@@ -2172,14 +2172,14 @@ __FrameM.SetDurationText = function(self, fs, opts)
     if next(opts) ~= nil then error("bad textFormat") end
 end
 runCmd("hot")
-local row = ForeverSynthwaveDB.fsprobe.hot.tokens.player
+local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
 local bs = row.barSteps
 check(string.find(bs.textCustom, "bad textFormat", 1, true), "custom failure not recorded: " .. tostring(bs.textCustom))
 check(bs.textDefault == "ok" and bs.textMode == "default", "default retry not recorded: " .. tostring(bs.textMode))
 local btn = FSProbeHot_player._barBtn
 check(btn._calls.SetDurationText == 2 and next(btn._args.SetDurationText[2]) == nil, "the retry must pass default options")
 check(bs.addPandemicRegion == "ok", "the next step must still run")
-scan(ForeverSynthwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fsprobe)
 """
 )
 
@@ -2188,7 +2188,7 @@ case("hot_a_throwing_formatter_factory_also_falls_back")(
 hotMock(1)
 C_StringUtil.CreateNumericRuleFormatter = function() error("boom: factory") end
 runCmd("hot")
-local bs = ForeverSynthwaveDB.fsprobe.hot.tokens.player.barSteps
+local bs = ForeverSTUwaveDB.fsprobe.hot.tokens.player.barSteps
 check(string.find(bs.textCustom, "boom: factory", 1, true), "factory error not recorded: " .. tostring(bs.textCustom))
 check(bs.textMode == "default" and bs.textDefault == "ok", "must fall back to default opts")
 """
@@ -2199,13 +2199,13 @@ case("hot_a_refused_bar_slot_does_not_stop_the_group")(
 hotMock(2)
 __slotThrows = { renewbar = "boom: AddAuraSlot renewbar" }
 runCmd("hot")
-local row = ForeverSynthwaveDB.fsprobe.hot.tokens.player
+local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
 check(string.find(row.steps.addBarSlot, "boom: AddAuraSlot renewbar", 1, true), "bar slot refusal not recorded: " .. tostring(row.steps.addBarSlot))
 check(row.steps.addAuraSlot == "ok" and row.steps.addAuraGroup == "ok" and row.built == true, "slot and group must still build")
 advance(1)
 check(row.sampleErrors == nil, "sample failed: " .. tostring(row.firstSampleError))
 check(string.find(row.samples[2], "bar=none", 1, true), "no bar slot samples as none: " .. tostring(row.samples[2]))
-scan(ForeverSynthwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fsprobe)
 """
 )
 
@@ -2214,7 +2214,7 @@ case("hot_pandemic_and_bar_visibility_are_counted_and_secrets_are_unknown", "sec
 hotMock(1)
 runCmd("hot")
 local player = FSProbeHot_player
-local row = ForeverSynthwaveDB.fsprobe.hot.tokens.player
+local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
 local btn = player._barBtn
 local pan = btn._args.AddPandemicRegion[1]
 check(string.find(row.samples[1], "bar=false", 1, true) and string.find(row.samples[1], "pan=false", 1, true), "first sample: " .. tostring(row.samples[1]))
@@ -2240,11 +2240,11 @@ check(row.stats.combat.panShown == 1 and row.stats.combat.barShown == 1, "readab
 check(row.sampleErrors == nil, "sample failed: " .. tostring(row.firstSampleError))
 __combat = false
 runCmd("hot off")
-local summary = ForeverSynthwaveDB.fsprobe.hot.summary
+local summary = ForeverSTUwaveDB.fsprobe.hot.summary
 check(string.find(summary, "barshown 3 barunk 2", 1, true), "bar summary: " .. tostring(summary))
 check(string.find(summary, "pandemic 3 pandemicunk 2", 1, true), "pandemic summary: " .. tostring(summary))
 check(__auraRead == false, "an aura, duration, bar value or text was read")
-scan(ForeverSynthwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fsprobe)
 """
 )
 
@@ -2255,10 +2255,10 @@ runCmd("hot")
 check(said("drain") and said("whole seconds") and said("amber") and said("pandemic"), "start line must say what to judge by eye")
 runCmd("hot off")
 runCmd("hot")
-local row = ForeverSynthwaveDB.fsprobe.hot.tokens.player
+local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
 check(row.steps.addBarSlot == "reused", "re-run must reuse the bar slot: " .. tostring(row.steps.addBarSlot))
 check(row.barSteps and row.barSteps.bar == "ok" and row.barSteps.api, "re-run lost the bar record")
-scan(ForeverSynthwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fsprobe)
 """
 )
 
@@ -2268,7 +2268,7 @@ def run_case(name: str, mode: str, body: str, source: str) -> str | None:
     lua.execute(MOCK)
     lua.execute(f'__mode = "{mode}"')
     try:
-        lua.eval("function(src) local fn = assert(loadstring(src, '@FSProbe.lua')); return fn('ForeverSynthwave', {}) end")(source)
+        lua.eval("function(src) local fn = assert(loadstring(src, '@FSProbe.lua')); return fn('forever-stuwave', {}) end")(source)
     except LuaError as err:
         return f"FSProbe.lua failed to load: {err}"
     try:

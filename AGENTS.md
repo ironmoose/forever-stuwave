@@ -4,9 +4,9 @@ This is the canonical Forever STUwave source repository. Read [docs/DEVELOPMENT.
 
 - Work directly on `main`. Use a branch from `main` only when another agent is editing this repository concurrently; coordinate ownership first. Do not push, publish, or merge without a user request.
 - Run `uv sync`, then `uv run python tools/check.py` for the complete parse/lint, Lua harness, and Python test suite. Run appropriate focused checks while editing. Keep client observations distinct from mocked checks.
-- Runtime source lives in `addon/ForeverSynthwave/`; generators live in `tools/assets/`, and documentation lives in `docs/`.
-- Preserve `ForeverSynthwave` as the installed folder, `.toc` filename, internal addon identity, global frame prefix, and SavedVariables prefix. Texture paths rely on the folder name.
-- Share addon state through `local _, FS = ...`. Preserve `.toc` order: `ErrorLog.lua` loads first; `ForeverSynthwave.lua` loads before `Theme.lua` and reads theme exports at runtime.
+- Runtime source lives in `forever-stuwave/`; generators live in `tools/assets/`, and documentation lives in `docs/`.
+- Preserve `forever-stuwave` as the installed folder and addon identity, `forever-stuwave.toc` as the manifest, and `ForeverSTUwave` as the global/frame/SavedVariables prefix. Texture paths rely on the folder name.
+- Share addon state through `local _, FS = ...`. Preserve `.toc` order: `ErrorLog.lua` loads first; `Modules/Nameplates/Nameplates.lua` loads before `Theme.lua` and reads theme exports at runtime.
 - Use `Theme.lua` for shared visual tokens and chrome helpers, and `Layout.lua` for geometry. Consume existing definitions instead of duplicating them.
 - Guard secret values before arithmetic, comparison, indexing, formatting, concatenation, or conversion. Feature-detect APIs and retain unavailable data as unavailable.
 - Defer protected frame and binding changes during combat. Reuse established secure button and combat deferral patterns.

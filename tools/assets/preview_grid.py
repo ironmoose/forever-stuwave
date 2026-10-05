@@ -3,7 +3,7 @@ import numpy as np
 w, h = 2048, 146
 from pathlib import Path
 
-d = (Path(__file__).resolve().parents[2] / 'addon' / 'ForeverSynthwave' / 'media' / 'grid.tga').read_bytes()
+d = (Path(__file__).resolve().parents[2] / 'forever-stuwave' / 'Media' / 'Textures' / 'grid.tga').read_bytes()
 a = np.frombuffer(d[18:], dtype=np.uint8).reshape(h, w, 4)
 rgb = a[:, :, [2, 1, 0]].astype(np.float32)
 al = a[:, :, 3:4].astype(np.float32) / 255.0

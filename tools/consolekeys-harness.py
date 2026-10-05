@@ -50,10 +50,10 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent / "addon" / "ForeverSynthwave"
-KEYS_LUA = Path(os.environ.get("CONSOLEKEYS_LUA") or ADDON / "ConsoleKeys.lua")
-TOC = ADDON / "ForeverSynthwave.toc"
-THEME = ADDON / "Theme.lua"
+ADDON = HERE.parent / "forever-stuwave"
+KEYS_LUA = Path(os.environ.get("CONSOLEKEYS_LUA") or ADDON / "Modules/ActionBars/ConsoleKeys.lua")
+TOC = ADDON / "forever-stuwave.toc"
+THEME = ADDON / "Core/Theme.lua"
 
 
 def _load(name: str, path: Path):
@@ -69,11 +69,11 @@ abh = _load("actionbars_harness", HERE / "actionbars-harness.py")
 ch = _load("console_harness", HERE / "console-harness.py")
 
 SRC_FILES = {
-    "LAYOUT_SRC": ADDON / "Layout.lua",
-    "GUNSIGHT_SRC": ADDON / "Gunsight.lua",
-    "CHEVRON_SRC": ADDON / "ChevronCastBar.lua",
-    "CONSOLE_SRC": ADDON / "Console.lua",
-    "PROFILES_SRC": ADDON / "HudProfiles.lua",
+    "LAYOUT_SRC": ADDON / "Core/Layout.lua",
+    "GUNSIGHT_SRC": ADDON / "Modules/CombatHud/Gunsight.lua",
+    "CHEVRON_SRC": ADDON / "Core/ChevronCastBar.lua",
+    "CONSOLE_SRC": ADDON / "Modules/ActionBars/Console.lua",
+    "PROFILES_SRC": ADDON / "Modules/CombatHud/HudProfiles.lua",
     "KEYS_SRC": KEYS_LUA,
 }
 
@@ -265,29 +265,29 @@ PRELUDE = r"""
 local function boot(opts)
     opts = opts or {}
     SetScreen(opts.height or 1440)
-    ForeverSynthwaveDB = opts.db or {}
+    ForeverSTUwaveDB = opts.db or {}
     NOW = 100
     IN_COMBAT = false
     MakeTheme()
-    loadAddonFile(LAYOUT_SRC, "Layout.lua")
-    loadAddonFile(GUNSIGHT_SRC, "Gunsight.lua")
-    if not opts.noFx then loadAddonFile(CHEVRON_SRC, "ChevronCastBar.lua") end
+    loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
+    loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
+    if not opts.noFx then loadAddonFile(CHEVRON_SRC, "Core/ChevronCastBar.lua") end
     FS.ActionBars = AB
     if opts.consoleOff then AB.consoleOn = false end
-    loadAddonFile(CONSOLE_SRC, "Console.lua")
+    loadAddonFile(CONSOLE_SRC, "Modules/ActionBars/Console.lua")
     -- FS.Hud stand-in: HudLogic's GetProfile over the REAL HudProfiles.lua data. HUD_PROFILE is the
     -- profile "the class resolved to" and a test may change it later (a late arrival).
-    loadAddonFile(PROFILES_SRC, "HudProfiles.lua")
+    loadAddonFile(PROFILES_SRC, "Modules/CombatHud/HudProfiles.lua")
     local want = opts.profile
     if want == nil then want = "WARLOCK" end
     HUD_PROFILE = type(want) == "string" and FS.HudProfiles[want] or (type(want) == "table" and want or nil)
     FS.Hud = { GetProfile = function() return HUD_PROFILE end }
     if opts.party then
-        FS.partyContainer = CreateFrame("Frame", "ForeverSynthwavePartyContainer", UIParent)
+        FS.partyContainer = CreateFrame("Frame", "ForeverSTUwavePartyContainer", UIParent)
         FS.partyContainer.protected = opts.partyProtected
     end
-    loadAddonFile(KEYS_SRC, "ConsoleKeys.lua")
-    fire("ADDON_LOADED", "ForeverSynthwave")
+    loadAddonFile(KEYS_SRC, "Modules/ActionBars/ConsoleKeys.lua")
+    fire("ADDON_LOADED", "forever-stuwave")
     if opts.geometryFirst ~= false then FS.ActionBars.Publish() end
     fire("PLAYER_LOGIN")
     if opts.geometryFirst == false then FS.ActionBars.Publish() end
@@ -413,7 +413,7 @@ for _, piece in ipairs(G.PIECES) do
     for _, other in ipairs(G.PIECES) do
         if other ~= piece then check(G.IsPieceOn(other), "clicking " .. piece .. " also changed " .. other) end
     end
-    check(ForeverSynthwaveDB.gunsight.pieces[piece] == false, piece .. " off was not saved")
+    check(ForeverSTUwaveDB.gunsight.pieces[piece] == false, piece .. " off was not saved")
     click(k)
     check(G.IsPieceOn(piece), "clicking " .. piece .. " again did not turn it on")
 end
@@ -805,7 +805,7 @@ check(not G.IsPieceOn("party"), "party state toggles without a container")
 
 case("party_container_that_appears_later_is_registered")(r"""
 local CK, G = boot({})
-FS.partyContainer = CreateFrame("Frame", "ForeverSynthwavePartyContainer", UIParent)
+FS.partyContainer = CreateFrame("Frame", "ForeverSTUwavePartyContainer", UIParent)
 fire("PLAYER_REGEN_ENABLED")
 click(keyOf(CK, "party"))
 finishAnims()
@@ -873,7 +873,7 @@ fire("PLAYER_REGEN_ENABLED")
 check(#timers == 1, "a nil container at regen schedules one retry, got " .. #timers)
 fire("PLAYER_REGEN_ENABLED")
 check(#timers == 1, "a second regen must not stack another retry, got " .. #timers)
-FS.partyContainer = CreateFrame("Frame", "ForeverSynthwavePartyContainer", UIParent)
+FS.partyContainer = CreateFrame("Frame", "ForeverSTUwavePartyContainer", UIParent)
 for _, fn in ipairs(timers) do fn() end
 click(keyOf(CK, "party"))
 finishAnims()
@@ -884,7 +884,7 @@ case("party_registers_lazily_on_the_first_click_when_the_retry_missed")(r"""
 C_Timer = nil
 local CK, G = boot({})
 fire("PLAYER_REGEN_ENABLED")   -- container still nil, and no C_Timer to retry with: must not throw
-FS.partyContainer = CreateFrame("Frame", "ForeverSynthwavePartyContainer", UIParent)
+FS.partyContainer = CreateFrame("Frame", "ForeverSTUwavePartyContainer", UIParent)
 click(keyOf(CK, "party"))
 finishAnims()
 check(not G.IsPieceOn("party"), "party state flipped")
@@ -1102,7 +1102,7 @@ end
 check(not G.IsPieceOn("shard") and G.IsPieceOn("prc"), "piece state is as saved")
 CK.Refresh(); FS.ActionBars.Publish(); fire("PLAYER_REGEN_ENABLED"); fire("PLAYER_ENTERING_WORLD")
 eq(calls, 0, "ConsoleKeys never calls Gunsight.SetPiece for visibility")
-check(ForeverSynthwaveDB.gunsight.pieces.prc ~= false, "prc was not saved off by hiding its key")
+check(ForeverSTUwaveDB.gunsight.pieces.prc ~= false, "prc was not saved off by hiding its key")
 -- the piece still follows /fsgun while its key is hidden, and the key is right when it comes back
 SlashCmdList["FSGUN"]("piece shard on")
 check(keyOf(CK, "shard").phase == "on", "a hidden key still tracks its piece")
@@ -1179,16 +1179,16 @@ def static_checks(mu: dict) -> list[tuple[str, str | None]]:
     out: list[tuple[str, str | None]] = []
     toc = [ln.strip() for ln in TOC.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")]
     try:
-        i = toc.index("ConsoleKeys.lua")
-        need = ("Layout.lua", "Theme.lua", "ChevronCastBar.lua", "ActionBars.lua", "Console.lua", "Gunsight.lua")
+        i = toc.index("Modules/ActionBars/ConsoleKeys.lua")
+        need = ("Core/Layout.lua", "Core/Theme.lua", "Core/ChevronCastBar.lua", "Modules/ActionBars/ActionBars.lua", "Modules/ActionBars/Console.lua", "Modules/CombatHud/Gunsight.lua")
         late = [n for n in need if toc.index(n) > i]
         out.append(("toc_places_consolekeys_after_what_it_uses",
                     None if not late else f"ConsoleKeys.lua must come after {late}"))
         out.append(("toc_places_hud_profiles_before_consolekeys",
-                    None if toc.index("HudProfiles.lua") < i else "ConsoleKeys.lua must come after HudProfiles.lua (ClassSlot)"))
+                    None if toc.index("Modules/CombatHud/HudProfiles.lua") < i else "ConsoleKeys.lua must come after HudProfiles.lua (ClassSlot)"))
         out.append(("toc_keeps_gunsight_first_among_gunsight_files",
-                    None if all(toc.index("Gunsight.lua") < n for n, ln in enumerate(toc)
-                                if ln.startswith("Gunsight") and ln != "Gunsight.lua")
+                    None if all(toc.index("Modules/CombatHud/Gunsight.lua") < n for n, ln in enumerate(toc)
+                                if ln.startswith("Gunsight") and ln != "Modules/CombatHud/Gunsight.lua")
                     else "Gunsight.lua is no longer first among the Gunsight files"))
     except ValueError as e:
         out.append(("toc_places_consolekeys_after_what_it_uses", f"{e}"))
@@ -1196,11 +1196,11 @@ def static_checks(mu: dict) -> list[tuple[str, str | None]]:
     out.append(("toc_keeps_crlf", None if raw.count(b"\r\n") == raw.count(b"\n") else "toc has bare LF lines"))
     media = [f"hud_key_ring_{n:02d}.tga" for n in range(16)] + [
         f"glyph_hud_{g}.tga" for g in ("chev", "play", "diamond", "shield", "cross", "clock", "bolt", "group")]
-    missing = [m for m in media if not (ADDON / "media" / m).exists()]
+    missing = [m for m in media if not (ADDON / "Media" / "Textures" / m).exists()]
     out.append(("media_exists", None if not missing else f"missing {missing}"))
     glyphs = {d["g"] for d in mu["defs"]}
     out.append(("every_mockup_glyph_has_a_file",
-                None if all((ADDON / "media" / f"glyph_hud_{g}.tga").exists() for g in glyphs) else "a glyph file is missing"))
+                None if all((ADDON / "Media" / "Textures" / f"glyph_hud_{g}.tga").exists() for g in glyphs) else "a glyph file is missing"))
     return out
 
 

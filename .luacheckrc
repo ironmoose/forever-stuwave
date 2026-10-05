@@ -4,7 +4,7 @@ exclude_files = {
     "libs",
 }
 
--- CastBars.lua/PartyFrames.lua/ForeverSynthwave.lua deliberately keep their
+-- CastBars.lua/PartyFrames.lua/ForeverSTUwave.lua deliberately keep their
 -- four per-edge border texture setup lines as single-statement one-liners
 -- (mirrors Theme.lua's AddBarChrome idiom) rather than exploding each into a
 -- multi-line block.
@@ -231,7 +231,7 @@ read_globals = {
 -- own globals: the two declared SavedVariables, the addon's bindable slash
 -- commands (SLASH_* has no wildcard form in luacheck), a Blizzard API
 -- override, and a handful of deliberate /dump-only debug globals (not
--- SavedVariables -- see ForeverSynthwave.toc's SavedVariables comment for why
+-- SavedVariables -- see forever-stuwave.toc's SavedVariables comment for why
 -- the per-character diagnostic dumps stay out of that list).
 globals = {
     "Blizzard_PTRIssueReporter_Saved",
@@ -240,17 +240,17 @@ globals = {
     "MinimapZoneText",
     "ObjectiveTrackerFrame",
     "SlashCmdList",
-    "ForeverSynthwaveDB",
-    "ForeverSynthwaveErrorLog",
-    "ForeverSynthwaveProbe",
-    "ForeverSynthwaveMemDiag",
-    "ForeverSynthwaveScaleDiag",
-    "ForeverSynthwaveShownFrames",
-    "ForeverSynthwaveIssueReporterPos",
-    "ForeverSynthwaveIssueReporterDiag",
-    "ForeverSynthwaveTermChrome",
-    "ForeverSynthwavePaintOverlay",
-    "ForeverSynthwave_CycleChatTab",
+    "ForeverSTUwaveDB",
+    "ForeverSTUwaveErrorLog",
+    "ForeverSTUwaveProbe",
+    "ForeverSTUwaveMemDiag",
+    "ForeverSTUwaveScaleDiag",
+    "ForeverSTUwaveShownFrames",
+    "ForeverSTUwaveIssueReporterPos",
+    "ForeverSTUwaveIssueReporterDiag",
+    "ForeverSTUwaveTermChrome",
+    "ForeverSTUwavePaintOverlay",
+    "ForeverSTUwave_CycleChatTab",
     "GetMinimapShape",
     "SLASH_FSFONT1",
     "SLASH_FSERR1",

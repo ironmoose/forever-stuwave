@@ -50,8 +50,8 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent / "addon" / "ForeverSynthwave"
-CASTBARS = Path(os.environ.get("CASTBARS_LUA", ADDON / "CastBars.lua"))
+ADDON = HERE.parent / "forever-stuwave"
+CASTBARS = Path(os.environ.get("CASTBARS_LUA", ADDON / "Modules/CastBars/CastBars.lua"))
 
 
 def _load_chevron_harness():
@@ -307,7 +307,7 @@ end
 """
 
 
-WEDGE_TGA = ADDON / "media" / "tab_slant.tga"
+WEDGE_TGA = ADDON / "Media" / "Textures" / "tab_slant.tga"
 
 
 def read_wedge_alpha() -> list[int]:
@@ -335,12 +335,12 @@ def boot() -> "LuaRuntime":
     lua.eval("function(t) __wedge = t end")(lua.table_from(read_wedge_alpha()))
     lua.execute(CHEV.MOCK)
     lua.execute(MOCK)
-    theme_src = (ADDON / "Theme.lua").read_text(encoding="utf-8")
+    theme_src = (ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
     consts = [CHEV._extract_theme_constant(theme_src, n) for n in THEME_CONSTANTS]
     lua.eval("__load_theme_constants")(lua.table_from(consts))
     lua.execute(WIRE)
-    chevron = (ADDON / "ChevronCastBar.lua").read_text(encoding="utf-8")
-    lua.eval("__loadChevron")("ChevronCastBar.lua", chevron)
+    chevron = (ADDON / "Core/ChevronCastBar.lua").read_text(encoding="utf-8")
+    lua.eval("__loadChevron")("Core/ChevronCastBar.lua", chevron)
     lua.eval("function(s) __castSrc = s end")(CASTBARS.read_text(encoding="utf-8"))
     return lua
 
@@ -401,7 +401,7 @@ local function world(opts)
     PlayerCastingBarFrame, TargetFrameSpellBar = CreateFrame("Frame"), CreateFrame("Frame")
     local W = { bridge = opts.bridge and mkBridge(opts.bridge[1], opts.bridge[2], opts.bridge[3], opts.bridge[4]) }
     if opts.beforeLoad then opts.beforeLoad() end
-    __load("CastBars.lua", __castSrc)
+    __load("Modules/CastBars/CastBars.lua", __castSrc)
     W.P, W.G = FS.playerCastBar, FS.targetCastBar      -- G = target
     ok(W.P and W.G, "the bars are exported")
     W.eventsFor = function(unit)
@@ -970,7 +970,7 @@ function T.a_failed_build_leaves_blizzards_bars_alone()
     __now = 100
     PlayerCastingBarFrame, TargetFrameSpellBar = CreateFrame("Frame"), CreateFrame("Frame")
     __failOutlineAt = 2                                -- the target bar's build throws
-    local loaded = pcall(__load, "CastBars.lua", __castSrc)
+    local loaded = pcall(__load, "Modules/CastBars/CastBars.lua", __castSrc)
     eq(loaded, false, "the build error surfaces")
     eq(#__dimmed, 0, "Blizzard's bars are still up")
 end

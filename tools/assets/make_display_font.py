@@ -39,7 +39,7 @@ from pathlib import Path
 from fontTools.ttLib import TTFont
 from fontTools.varLib import instancer
 
-HERE = Path(__file__).resolve().parents[2] / "addon" / "ForeverSynthwave" / "fonts"
+HERE = Path(__file__).resolve().parents[2] / "forever-stuwave" / "Media" / "Fonts"
 SOURCE = HERE / "Orbitron-VF.ttf"
 TARGET = HERE / "FSDisplay-Bold.ttf"
 
@@ -49,7 +49,7 @@ SUBFAMILY = "Bold"
 FULL_NAME = f"{FAMILY} {SUBFAMILY}"
 POSTSCRIPT_NAME = "FSDisplay-Bold"
 DESCRIPTION = (
-    "Forever Synthwave display face. A static instance (wght=700) of Orbitron "
+    "Forever STUwave display face. A static instance (wght=700) of Orbitron "
     "by The League of Moveable Type, as distributed by Google Fonts. Renamed "
     'per OFL 1.1 clause 3; "Orbitron" is a Reserved Font Name.'
 )
@@ -74,7 +74,7 @@ def build() -> Path:
     for name_id, value in (
         (1, FAMILY),
         (2, SUBFAMILY),
-        (3, f"{POSTSCRIPT_NAME}: Forever Synthwave"),
+        (3, f"{POSTSCRIPT_NAME}: Forever STUwave"),
         (4, FULL_NAME),
         (6, POSTSCRIPT_NAME),
         (10, DESCRIPTION),

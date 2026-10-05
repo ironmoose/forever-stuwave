@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates the control deck's chrome textures (divider, LED, key outline).
 
-Files written (in addon/ForeverSynthwave/media):
+Files written (in forever-stuwave/Media/Textures):
 
     deck_divider.tga           32x32   neon double slash "//"
     deck_led.tga               32x8    soft rounded LED underline bar
@@ -150,7 +150,7 @@ def build_key_outline():
 
 
 def main():
-    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "addon", "ForeverSynthwave", "media"))
+    here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures"))
     out = lambda name: os.path.join(here, name + ".tga")
     write_tga(out("deck_divider"), DIV_SIZE, DIV_SIZE, build_divider())
     write_tga(out("deck_led"), LED_W, LED_H, build_led())

@@ -49,12 +49,12 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent / "addon" / "ForeverSynthwave"
-TAPE = Path(os.environ.get("GUNSIGHTTAPE_LUA") or ADDON / "GunsightTape.lua")
-CASTBARS = Path(os.environ.get("GUNSIGHTTAPE_CASTBARS_LUA") or ADDON / "CastBars.lua")
-GUNSIGHT = ADDON / "Gunsight.lua"
-LAYOUT = ADDON / "Layout.lua"
-TOC = ADDON / "ForeverSynthwave.toc"
+ADDON = HERE.parent / "forever-stuwave"
+TAPE = Path(os.environ.get("GUNSIGHTTAPE_LUA") or ADDON / "Modules/CombatHud/GunsightTape.lua")
+CASTBARS = Path(os.environ.get("GUNSIGHTTAPE_CASTBARS_LUA") or ADDON / "Modules/CastBars/CastBars.lua")
+GUNSIGHT = ADDON / "Modules/CombatHud/Gunsight.lua"
+LAYOUT = ADDON / "Core/Layout.lua"
+TOC = ADDON / "forever-stuwave.toc"
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
 
 
@@ -217,17 +217,17 @@ local function world(opts)
     __physH = opts.physH or 768
     UIParent._h = opts.height or 1440
     UIParent._w = UIParent._h * 16 / 9
-    ForeverSynthwaveDB = opts.db
+    ForeverSTUwaveDB = opts.db
     PlayerCastingBarFrame, TargetFrameSpellBar = CreateFrame("Frame"), CreateFrame("Frame")
     if opts.beforeLoad then opts.beforeLoad() end
-    __load("Layout.lua", __layoutSrc)
-    __load("CastBars.lua", __castSrc)
+    __load("Core/Layout.lua", __layoutSrc)
+    __load("Modules/CastBars/CastBars.lua", __castSrc)
     if opts.stripView then FS.CastBars.SetView = nil end
-    __load("Gunsight.lua", __gunsightSrc)
-    __load("GunsightTape.lua", __tapeSrc)
+    __load("Modules/CombatHud/Gunsight.lua", __gunsightSrc)
+    __load("Modules/CombatHud/GunsightTape.lua", __tapeSrc)
     local W = { Tape = FS.GunsightTape, Gun = FS.Gunsight }
     if not opts.noLogin then
-        __fireEvent("ADDON_LOADED", "ForeverSynthwave")
+        __fireEvent("ADDON_LOADED", "forever-stuwave")
         __fireEvent("PLAYER_LOGIN")
     end
     W.you, W.tgt = FS.GunsightTape and FS.GunsightTape.you, FS.GunsightTape and FS.GunsightTape.tgt
@@ -949,13 +949,13 @@ function T.a_failed_build_takes_the_target_layer_listener_down()
     local setScript, listener = Region.SetScript, nil
     function Region:SetScript(k, fn)
         if k == "OnEvent" and self._events and self._events.PLAYER_TARGET_CHANGED
-            and self._parent and self._parent._name == "ForeverSynthwaveGunsightTape_tgt" then
+            and self._parent and self._parent._name == "ForeverSTUwaveGunsightTape_tgt" then
             listener = self
             error("SetScript failed")                        -- the step right after the two registrations
         end
         return setScript(self, k, fn)
     end
-    __fireEvent("ADDON_LOADED", "ForeverSynthwave")
+    __fireEvent("ADDON_LOADED", "forever-stuwave")
     __fireEvent("PLAYER_LOGIN")
     Region.SetScript = setScript
     W.clean()
@@ -1437,7 +1437,7 @@ function T.the_gunsight_off_builds_nothing_and_leaves_stack_a_untouched()
     W.clean()
     eq(W.Gun.IsEnabled(), false)
     eq(W.you, nil, "no player tape"); eq(W.tgt, nil, "no target tape")
-    eq(find(function(o) return o._name == "ForeverSynthwaveGunsightTape_you" end), nil)
+    eq(find(function(o) return o._name == "ForeverSTUwaveGunsightTape_you" end), nil)
     -- Stack A: events still wired, and a cast still draws on its bar
     ok(W.P.events._scripts.OnEvent ~= nil and W.G.events._scripts.OnEvent ~= nil, "Stack A events intact")
     W.cast("player", "Shadow Bolt", "C1", 100, 2.5)
@@ -1480,7 +1480,7 @@ function T.a_cast_in_progress_when_the_view_takes_over_is_picked_up()
     local W = world({ noLogin = true })
     W.cast("player", "Shadow Bolt", "C1", 100, 2.5)
     __now = 101
-    __fireEvent("ADDON_LOADED", "ForeverSynthwave")
+    __fireEvent("ADDON_LOADED", "forever-stuwave")
     __fireEvent("PLAYER_LOGIN")
     W.you, W.tgt = FS.GunsightTape.you, FS.GunsightTape.tgt
     eq(W.you.S.mode, "run", "the live cast is read when the seam is wired")
@@ -1495,7 +1495,7 @@ function T.a_cast_live_at_build_is_still_running_after_the_build()
     W.cast("player", "Shadow Bolt", "C1", 100, 2.5)
     W.cast("target", "Fear", "C2", 100, 1.5)
     __now = 101
-    __fireEvent("ADDON_LOADED", "ForeverSynthwave")
+    __fireEvent("ADDON_LOADED", "forever-stuwave")
     __fireEvent("PLAYER_LOGIN")
     W.you, W.tgt = FS.GunsightTape.you, FS.GunsightTape.tgt
     eq(W.you.S.mode, "run"); eq(W.you.run:GetPhase(), "cast", "the player's run is still casting")
@@ -1547,13 +1547,13 @@ __checks = T
 def static_checks() -> list[tuple[str, str | None]]:
     out: list[tuple[str, str | None]] = []
     raw = TOC.read_bytes()
-    out.append(("toc_stays_crlf", None if raw.count(b"\r\n") == raw.count(b"\n") else "ForeverSynthwave.toc must stay CRLF"))
+    out.append(("toc_stays_crlf", None if raw.count(b"\r\n") == raw.count(b"\n") else "forever-stuwave.toc must stay CRLF"))
     toc = [ln.strip() for ln in TOC.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")]
     try:
-        g, f, t, c = (toc.index(n) for n in ("Gunsight.lua", "GunsightFrame.lua", "GunsightTape.lua", "CombatHud.lua"))
+        g, f, t, c = (toc.index(n) for n in ("Modules/CombatHud/Gunsight.lua", "Modules/CombatHud/GunsightFrame.lua", "Modules/CombatHud/GunsightTape.lua", "Modules/CombatHud/CombatHud.lua"))
         out.append(("toc_order", None if g < f < t < c else
                     f"GunsightTape.lua must load after GunsightFrame.lua and before CombatHud.lua (positions {g}, {f}, {t}, {c})"))
-        cb = toc.index("CastBars.lua")
+        cb = toc.index("Modules/CastBars/CastBars.lua")
         out.append(("toc_after_castbars", None if cb < t else "GunsightTape.lua must load after CastBars.lua (it registers a view on it)"))
     except ValueError as e:
         out.append(("toc_order", f"{e}"))
@@ -1565,7 +1565,7 @@ def static_checks() -> list[tuple[str, str | None]]:
                 f"GunsightTape.lua must leave cast data to CastBars.lua, it mentions {reads}"))
     out.append(("tape_has_no_unconditional_onupdate", None if 'SetScript("OnUpdate"' not in src else
                 "GunsightTape.lua installs an OnUpdate; the readout ticker in CastBars.lua is the only one"))
-    boxes = ADDON / "GunsightBoxes.lua"
+    boxes = ADDON / "Modules/CombatHud/GunsightBoxes.lua"
     m = re.search(r"\bTGT_GROW\s*=\s*(\d+)", boxes.read_text(encoding="utf-8")) if boxes.exists() else None
     want = int(re.search(r"if\(TBS==='b'\)return \{x:BOXR\.x,y:BOXR\.y-(\d+),", MOCKUP.read_text(encoding="utf-8")).group(1))
     out.append(("kick_rise_is_the_real_boxes_tgt_grow", None if m and int(m.group(1)) == want else
@@ -1577,13 +1577,13 @@ def run_case(name: str, mu: dict) -> str | None:
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.execute(CHEV.MOCK)
     lua.execute(CB.MOCK)
-    theme_src = (ADDON / "Theme.lua").read_text(encoding="utf-8")
+    theme_src = (ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
     consts = [CHEV._extract_theme_constant(theme_src, n) for n in THEME_CONSTANTS]
     lua.eval("__load_theme_constants")(lua.table_from(consts))
     lua.execute(CB.WIRE)
     lua.execute(MOCK)
     lua.execute(GS.theme_has_target_lua())      # the real shared rule (FS.HasTarget), Theme being stubbed here
-    lua.eval("__loadChevron")("ChevronCastBar.lua", (ADDON / "ChevronCastBar.lua").read_text(encoding="utf-8"))
+    lua.eval("__loadChevron")("Core/ChevronCastBar.lua", (ADDON / "Core/ChevronCastBar.lua").read_text(encoding="utf-8"))
     g = lua.globals()
     g.__castSrc = CASTBARS.read_text(encoding="utf-8")
     g.__layoutSrc = LAYOUT.read_text(encoding="utf-8")

@@ -68,7 +68,7 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent / "addon" / "ForeverSynthwave"
+ADDON = HERE.parent / "forever-stuwave"
 
 
 def _load_chevron_harness():
@@ -84,7 +84,7 @@ CHEV = _load_chevron_harness()
 
 
 MOCKUP_HTML = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
-MONONOKI = ADDON / "fonts" / "MononokiNerdFontMono-Bold.ttf"
+MONONOKI = ADDON / "Media" / "Fonts" / "MononokiNerdFontMono-Bold.ttf"
 # Mononoki Bold's advance as a fraction of the em (561.5 / 1000, read from the TTF with PIL). The
 # mockup's canvas measureText and this mock's GetStringWidth both use it, so the derived chevron
 # count can be compared with the mockup's own.
@@ -410,19 +410,19 @@ def boot() -> "LuaRuntime":
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.execute(CHEV.MOCK)
     lua.execute(MOCK)
-    theme_src = (ADDON / "Theme.lua").read_text(encoding="utf-8")
+    theme_src = (ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
     consts = [CHEV._extract_theme_constant(theme_src, n) for n in THEME_CONSTANTS]
     lua.eval("__load_theme_constants")(lua.table_from(consts))
     lua.execute(WIRE)
     lua.globals()["__mock"] = lua.table_from({k: float(v) for k, v in MOCKUP.items() if isinstance(v, float)})
-    chevron = (ADDON / "ChevronCastBar.lua").read_text(encoding="utf-8")
-    lua.eval("__loadChevron")("ChevronCastBar.lua", chevron)
+    chevron = (ADDON / "Core/ChevronCastBar.lua").read_text(encoding="utf-8")
+    lua.eval("__loadChevron")("Core/ChevronCastBar.lua", chevron)
     # PETCASTBAR_LUA points the harness at another copy of PetCastBar.lua (mutation runs).
     override = os.environ.get("PETCASTBAR_LUA")
     if override and not _announced:
         _announced.append(True)
         print(f"harness: PETCASTBAR_LUA={override}", file=sys.stderr)
-    pet = Path(override or ADDON / "PetCastBar.lua")
+    pet = Path(override or ADDON / "Modules/Pet/PetCastBar.lua")
     pet_src = pet.read_text(encoding="utf-8")
     lua.globals()["__pet_source"] = pet_src
     width = re.search(r"^local NAME_MAX_W = (\d+(?:\.\d+)?)\s*$", pet_src, re.M)
@@ -434,7 +434,7 @@ def boot() -> "LuaRuntime":
     lua.globals()["__mock"]["TIMERSMALL"] = float(small.group(1)) if small else 7.5
     from_s = re.search(r"^local TIMER_SMALL_FIRST_FROM = (\d+(?:\.\d+)?)\s*$", pet_src, re.M)
     lua.globals()["__mock"]["TIMERSMALLFROM"] = float(from_s.group(1)) if from_s else 10.0
-    lua.eval("__load")("PetCastBar.lua", pet_src)
+    lua.eval("__load")("Modules/Pet/PetCastBar.lua", pet_src)
     return lua
 
 

@@ -14,7 +14,7 @@ locked design). The checks pin:
     UIParent height of that moment, and again on the Layout rescale hook; every anchor frame's
     resolved rect is compared with the mockup's own arithmetic (from the canvas centre, not
     through the root) at scale 1.0 and at 1200/1440;
-  * the piece registry: default all on, SetPiece persists to ForeverSynthwaveDB.gunsight, a
+  * the piece registry: default all on, SetPiece persists to ForeverSTUwaveDB.gunsight, a
     non-instant change fades through an AnimationGroup (never OnUpdate) from the frame's current
     alpha, a frame under a hidden ancestor snaps instead of fading, a piece registered after
     state was saved gets that state, a protected frame in combat gets alpha changes only (no
@@ -45,11 +45,11 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent / "addon" / "ForeverSynthwave"
-GUNSIGHT = Path(os.environ.get("GUNSIGHT_LUA") or ADDON / "Gunsight.lua")
-LAYOUT = ADDON / "Layout.lua"
-THEME = Path(os.environ.get("THEME_LUA") or ADDON / "Theme.lua")
-TOC = ADDON / "ForeverSynthwave.toc"
+ADDON = HERE.parent / "forever-stuwave"
+GUNSIGHT = Path(os.environ.get("GUNSIGHT_LUA") or ADDON / "Modules/CombatHud/Gunsight.lua")
+LAYOUT = ADDON / "Core/Layout.lua"
+THEME = Path(os.environ.get("THEME_LUA") or ADDON / "Core/Theme.lua")
+TOC = ADDON / "forever-stuwave.toc"
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
 
 
@@ -425,7 +425,7 @@ function FS.LogDegradeOnce(key, msg) DEGRADED[key] = msg end
 function loadAddonFile(src, name)
     local fn, err = loadstring(src, "@" .. name)
     if not fn then error(err) end
-    return fn("ForeverSynthwave", FS)
+    return fn("forever-stuwave", FS)
 end
 """
 
@@ -449,12 +449,12 @@ PRELUDE = r"""
 local function boot(opts)
     opts = opts or {}
     SetScreen(opts.fileLoadHeight or opts.height or 1440)
-    ForeverSynthwaveDB = opts.db
-    loadAddonFile(LAYOUT_SRC, "Layout.lua")
-    loadAddonFile(GUNSIGHT_SRC, "Gunsight.lua")
+    ForeverSTUwaveDB = opts.db
+    loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
+    loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
     if opts.height then SetScreen(opts.height) end
     if not opts.noEvents then
-        if ForeverSynthwaveDB ~= nil or opts.fireAddonLoaded then fire("ADDON_LOADED", "ForeverSynthwave") end
+        if ForeverSTUwaveDB ~= nil or opts.fireAddonLoaded then fire("ADDON_LOADED", "forever-stuwave") end
         fire("PLAYER_LOGIN")
     end
     return FS.Gunsight
@@ -614,7 +614,7 @@ near(select(4, Gs.root:GetPoint(1)), -6.4 + 10, "root x with the nudge")
 near(select(5, Gs.root:GetPoint(1)), -86.4 - 5, "root y with the nudge (Y up)")
 local l1, b1 = rect(Gs.anchors.boxL)
 near(l1 - l0, 10, "anchors follow the nudge in x"); near(b1 - b0, -5, "anchors follow the nudge in y")
-check(ForeverSynthwaveDB.gunsight.seat.dx == 10 and ForeverSynthwaveDB.gunsight.seat.dy == -5, "nudge not saved")
+check(ForeverSTUwaveDB.gunsight.seat.dx == 10 and ForeverSTUwaveDB.gunsight.seat.dy == -5, "nudge not saved")
 -- a saved nudge scales with the screen: design px, not UI units
 SetScreen(1200)
 fire("UI_SCALE_CHANGED")
@@ -629,8 +629,8 @@ near(select(5, Gs.root:GetPoint(1)), -86.4 + 8, "root y with the saved nudge")
 
 case("db_defaults_and_repair")(r"""
 local Gs = boot({ height = 1440, db = {} })
-local g = ForeverSynthwaveDB.gunsight
-check(type(g) == "table", "ForeverSynthwaveDB.gunsight not created")
+local g = ForeverSTUwaveDB.gunsight
+check(type(g) == "table", "ForeverSTUwaveDB.gunsight not created")
 check(g.enabled == true, "enabled defaults to true")
 check(g.seat and g.seat.dx == 0 and g.seat.dy == 0, "seat defaults to 0,0")
 for _, k in ipairs({ "you", "next", "shard", "buff", "tgt", "dot", "prc", "party" }) do
@@ -642,7 +642,7 @@ check(Gs.IsEnabled() == true, "IsEnabled default")
 
 case("db_garbage_is_repaired_and_saved_values_kept")(r"""
 local Gs = boot({ height = 1440, db = { gunsight = { enabled = false, pieces = { buff = false, you = "yes", bogus = true, frame = false }, seat = { dx = "x" } } } })
-local g = ForeverSynthwaveDB.gunsight
+local g = ForeverSTUwaveDB.gunsight
 check(g.enabled == false and Gs.IsEnabled() == false, "enabled=false must survive")
 check(g.pieces.buff == false and Gs.IsPieceOn("buff") == false, "a saved off piece stays off")
 check(g.pieces.you == true, "a non boolean piece value falls back to on")
@@ -673,11 +673,11 @@ log = {}
 Gs.SetPiece("buff", false, true)
 check(not f:IsShown(), "instant off hides at once")
 check(Gs.IsPieceOn("buff") == false, "IsPieceOn after off")
-check(ForeverSynthwaveDB.gunsight.pieces.buff == false, "off is not persisted")
+check(ForeverSTUwaveDB.gunsight.pieces.buff == false, "off is not persisted")
 check(table.concat(log, ",") == "hide", "hooks after off: " .. table.concat(log, ","))
 Gs.SetPiece("buff", true, true)
 check(f:IsShown() and f:GetAlpha() == 1, "instant on shows at full alpha")
-check(ForeverSynthwaveDB.gunsight.pieces.buff == true, "on is not persisted")
+check(ForeverSTUwaveDB.gunsight.pieces.buff == true, "on is not persisted")
 check(table.concat(log, ",") == "hide,show", "hooks after on: " .. table.concat(log, ","))
 -- same state again is a no-op for the hooks
 Gs.SetPiece("buff", true, true)
@@ -791,12 +791,12 @@ check(not f:IsShown(), "ended off")
 case("set_seat_before_init_is_kept")(r"""
 local Gs = boot({ noEvents = true, height = 1440 })
 check(Gs.SetSeat(10, -5) ~= false, "SetSeat refused before init")
-ForeverSynthwaveDB = { gunsight = { seat = { dx = 1, dy = 2 } } }
-fire("ADDON_LOADED", "ForeverSynthwave")
+ForeverSTUwaveDB = { gunsight = { seat = { dx = 1, dy = 2 } } }
+fire("ADDON_LOADED", "forever-stuwave")
 fire("PLAYER_LOGIN")
 near(select(4, Gs.root:GetPoint(1)), -6.4 + 10, "root x uses the pre init seat, not the saved one")
 near(select(5, Gs.root:GetPoint(1)), -86.4 - 5, "root y uses the pre init seat")
-check(ForeverSynthwaveDB.gunsight.seat.dx == 10 and ForeverSynthwaveDB.gunsight.seat.dy == -5, "pre init seat not persisted")
+check(ForeverSTUwaveDB.gunsight.seat.dx == 10 and ForeverSTUwaveDB.gunsight.seat.dy == -5, "pre init seat not persisted")
 """)
 
 case("on_piece_changed_callbacks_fire")(r"""
@@ -834,14 +834,14 @@ for _, grp in ipairs(f.groups or {}) do check(not grp.playing, "registration mus
 case("early_registration_waits_for_the_saved_state")(r"""
 -- Files that load before ADDON_LOADED register before SavedVariables exist: the state lands at init.
 SetScreen(1440)
-loadAddonFile(LAYOUT_SRC, "Layout.lua")
-loadAddonFile(GUNSIGHT_SRC, "Gunsight.lua")
+loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
+loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
 local Gs = FS.Gunsight
 local f = CreateFrame("Frame", nil, Gs.root)
 local hid = 0
 Gs.RegisterPiece("next", { frame = f, onHide = function() hid = hid + 1 end })
-ForeverSynthwaveDB = { gunsight = { pieces = { next = false } } }   -- the client loads SavedVariables now
-fire("ADDON_LOADED", "ForeverSynthwave")
+ForeverSTUwaveDB = { gunsight = { pieces = { next = false } } }   -- the client loads SavedVariables now
+fire("ADDON_LOADED", "forever-stuwave")
 check(not f:IsShown() and hid == 1, "the saved off state is applied once SavedVariables exist")
 fire("PLAYER_LOGIN")
 check(hid == 1, "login must not rerun the hook")
@@ -850,9 +850,9 @@ check(Gs.IsPieceOn("next") == false, "state")
 
 case("other_addons_loading_do_not_init")(r"""
 local Gs = boot({ noEvents = true, height = 1440 })
-ForeverSynthwaveDB = nil
+ForeverSTUwaveDB = nil
 fire("ADDON_LOADED", "SomeOtherAddon")
-check(ForeverSynthwaveDB == nil, "another addon's ADDON_LOADED must not touch the DB")
+check(ForeverSTUwaveDB == nil, "another addon's ADDON_LOADED must not touch the DB")
 """)
 
 case("protected_frame_uses_alpha_in_combat_and_reconciles")(r"""
@@ -944,24 +944,24 @@ for _, k in ipairs({ "you", "next", "shard", "buff", "tgt", "dot", "prc", "party
 end
 PRINTED = {}
 slash("off")
-check(ForeverSynthwaveDB.gunsight.enabled == false, "off did not save")
+check(ForeverSTUwaveDB.gunsight.enabled == false, "off did not save")
 check(table.concat(PRINTED, "\n"):lower():find("reload", 1, true), "off must say a reload is needed")
 PRINTED = {}
 slash("on")
-check(ForeverSynthwaveDB.gunsight.enabled == true, "on did not save")
+check(ForeverSTUwaveDB.gunsight.enabled == true, "on did not save")
 check(table.concat(PRINTED, "\n"):lower():find("reload", 1, true), "on must say a reload is needed")
 slash("seat 12 -7")
-check(ForeverSynthwaveDB.gunsight.seat.dx == 12 and ForeverSynthwaveDB.gunsight.seat.dy == -7, "seat not saved")
+check(ForeverSTUwaveDB.gunsight.seat.dx == 12 and ForeverSTUwaveDB.gunsight.seat.dy == -7, "seat not saved")
 near(select(4, Gs.root:GetPoint(1)), -6.4 + 12, "seat re-seats live")
 PRINTED = {}
 slash("seat nope")
-check(ForeverSynthwaveDB.gunsight.seat.dx == 12, "a bad seat must not change the saved nudge")
+check(ForeverSTUwaveDB.gunsight.seat.dx == 12, "a bad seat must not change the saved nudge")
 check(#PRINTED > 0, "a bad seat prints usage")
 local f = CreateFrame("Frame", nil, Gs.root)
 Gs.RegisterPiece("shard", { frame = f })
 slash("piece shard off")
 check(Gs.IsPieceOn("shard") == false, "piece off via slash")
-check(ForeverSynthwaveDB.gunsight.pieces.shard == false, "piece off via slash not saved")
+check(ForeverSTUwaveDB.gunsight.pieces.shard == false, "piece off via slash not saved")
 slash("piece shard on")
 check(Gs.IsPieceOn("shard") == true, "piece on via slash")
 PRINTED = {}
@@ -987,7 +987,7 @@ slash("debug")
 for name, a in pairs(Gs.anchors) do check(visibleEdges(a) >= 4, "anchor " .. name .. " has no outline after debug on") end
 slash("debug")
 for name, a in pairs(Gs.anchors) do check(visibleEdges(a) == 0, "anchor " .. name .. " keeps its outline after debug off") end
-check(not ForeverSynthwaveDB.gunsight.debug, "debug is a session toggle and must not be saved")
+check(not ForeverSTUwaveDB.gunsight.debug, "debug is a session toggle and must not be saved")
 """)
 
 case("debug_outlines_survive_a_rescale")(r"""
@@ -1004,8 +1004,8 @@ local Gs = boot({ noEvents = true, height = 1440 })
 local ran = 0
 Gs.OnReady(function() ran = ran + 1 end)
 check(ran == 0, "OnReady must wait for init")
-ForeverSynthwaveDB = {}
-fire("ADDON_LOADED", "ForeverSynthwave")
+ForeverSTUwaveDB = {}
+fire("ADDON_LOADED", "forever-stuwave")
 fire("PLAYER_LOGIN")
 check(ran == 1, "OnReady must run exactly once, ran " .. ran)
 Gs.OnReady(function() ran = ran + 10 end)
@@ -1030,8 +1030,8 @@ def static_checks(mu: dict) -> list[tuple[str, str | None]]:
 
     toc = [ln.strip() for ln in TOC.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")]
     try:
-        i, h, c = toc.index("Gunsight.lua"), toc.index("HudLogic.lua"), toc.index("CombatHud.lua")
-        later = [n for n, ln in enumerate(toc) if ln.startswith("Gunsight") and ln != "Gunsight.lua" and ln.endswith(".lua")]
+        i, h, c = toc.index("Modules/CombatHud/Gunsight.lua"), toc.index("Modules/CombatHud/HudLogic.lua"), toc.index("Modules/CombatHud/CombatHud.lua")
+        later = [n for n, ln in enumerate(toc) if ln.startswith("Gunsight") and ln != "Modules/CombatHud/Gunsight.lua" and ln.endswith(".lua")]
         bad = [toc[n] for n in later if n < i]
         out.append(("toc_order", None if h < i < c and not bad else
                     f"Gunsight.lua must come after HudLogic.lua, before CombatHud.lua and before any Gunsight*.lua file "
