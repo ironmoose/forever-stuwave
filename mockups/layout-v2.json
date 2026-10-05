@@ -1,0 +1,413 @@
+{
+  "tool": "forever-synthwave-layout",
+  "resolution": "2560x1440",
+  "aspect": "16:9",
+  "note": "x/y = top-left in game px; wow = offset from UIParent CENTER at the element's own center.",
+  "sections": [
+    {
+      "id": "grid",
+      "label": "Perspective Grid",
+      "visible": true,
+      "x": 2,
+      "y": 1254,
+      "w": 2560,
+      "h": 183,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": 2,
+        "y": -625
+      }
+    },
+    {
+      "id": "player",
+      "label": "Player",
+      "visible": true,
+      "x": 31,
+      "y": 31,
+      "w": 320,
+      "h": 92,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": -1089,
+        "y": 643
+      }
+    },
+    {
+      "id": "target",
+      "label": "Target",
+      "visible": true,
+      "x": 414,
+      "y": 34,
+      "w": 320,
+      "h": 92,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": -706,
+        "y": 640
+      }
+    },
+    {
+      "id": "tot",
+      "label": "ToT",
+      "visible": true,
+      "x": 754,
+      "y": 70,
+      "w": 150,
+      "h": 54,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": -451,
+        "y": 623
+      }
+    },
+    {
+      "id": "focus",
+      "label": "Focus",
+      "visible": true,
+      "x": 462,
+      "y": 829,
+      "w": 190,
+      "h": 66,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": -723,
+        "y": -142
+      }
+    },
+    {
+      "id": "pet",
+      "label": "Pet",
+      "visible": true,
+      "x": 742,
+      "y": 1050,
+      "w": 180,
+      "h": 62,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": -448,
+        "y": -361
+      }
+    },
+    {
+      "id": "party",
+      "label": "Party",
+      "visible": true,
+      "x": 775,
+      "y": 648,
+      "w": 210,
+      "h": 294,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": -400,
+        "y": -75
+      },
+      "rows": 5
+    },
+    {
+      "id": "raid",
+      "label": "Raid",
+      "visible": true,
+      "x": 24,
+      "y": 600,
+      "w": 360,
+      "h": 190,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": -1076,
+        "y": 25
+      },
+      "cols": 5
+    },
+    {
+      "id": "boss",
+      "label": "Boss",
+      "visible": true,
+      "x": 1903,
+      "y": 463,
+      "w": 210,
+      "h": 210,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": 728,
+        "y": 152
+      }
+    },
+    {
+      "id": "pcast",
+      "label": "Player Cast Bar",
+      "visible": true,
+      "x": 1110,
+      "y": 1005,
+      "w": 340,
+      "h": 30,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": 0,
+        "y": -300
+      }
+    },
+    {
+      "id": "tcast",
+      "label": "Target Cast Bar",
+      "visible": true,
+      "x": 1145,
+      "y": 1041,
+      "w": 270,
+      "h": 26,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": 0,
+        "y": -334
+      }
+    },
+    {
+      "id": "action",
+      "label": "Action Bars",
+      "visible": true,
+      "x": 729,
+      "y": 1171,
+      "w": 1089,
+      "h": 178,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": -7,
+        "y": -540
+      }
+    },
+    {
+      "id": "multibar",
+      "label": "Multi-Bar",
+      "visible": true,
+      "x": 2508,
+      "y": 463,
+      "w": 50,
+      "h": 320,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": 1253,
+        "y": 97
+      }
+    },
+    {
+      "id": "stance",
+      "label": "Stance Bar",
+      "visible": true,
+      "x": 1120,
+      "y": 1128,
+      "w": 320,
+      "h": 38,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": 0,
+        "y": -427
+      }
+    },
+    {
+      "id": "petbar",
+      "label": "Pet Bar",
+      "visible": true,
+      "x": 740,
+      "y": 1129,
+      "w": 320,
+      "h": 38,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": -380,
+        "y": -428
+      }
+    },
+    {
+      "id": "micro",
+      "label": "Micro Menu",
+      "visible": true,
+      "x": 1894,
+      "y": 1368,
+      "w": 320,
+      "h": 32,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": 774,
+        "y": -664
+      }
+    },
+    {
+      "id": "bagbar",
+      "label": "Bag Bar",
+      "visible": true,
+      "x": 2238,
+      "y": 1354,
+      "w": 230,
+      "h": 36,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": 1073,
+        "y": -652
+      }
+    },
+    {
+      "id": "xpbar",
+      "label": "XP / Rep Bar",
+      "visible": true,
+      "x": 780,
+      "y": 1395,
+      "w": 1000,
+      "h": 16,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": 0,
+        "y": -683
+      }
+    },
+    {
+      "id": "buffs",
+      "label": "Buffs",
+      "visible": true,
+      "x": 1872,
+      "y": 46,
+      "w": 420,
+      "h": 80,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": 802,
+        "y": 634
+      },
+      "cols": 10
+    },
+    {
+      "id": "debuffs",
+      "label": "Debuffs",
+      "visible": true,
+      "x": 1952,
+      "y": 208,
+      "w": 340,
+      "h": 56,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": 842,
+        "y": 484
+      },
+      "cols": 8
+    },
+    {
+      "id": "minimap",
+      "label": "Minimap",
+      "visible": true,
+      "x": 2304,
+      "y": 43,
+      "w": 210,
+      "h": 210,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": 1129,
+        "y": 572
+      },
+      "shape": "round"
+    },
+    {
+      "id": "minimaptray",
+      "label": "Minimap Tray",
+      "visible": true,
+      "x": 2304,
+      "y": 252,
+      "w": 210,
+      "h": 30,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": 1129,
+        "y": 453
+      }
+    },
+    {
+      "id": "databar",
+      "label": "Data Bar",
+      "visible": true,
+      "x": 0,
+      "y": 1420,
+      "w": 2560,
+      "h": 20,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": 0,
+        "y": -710
+      }
+    },
+    {
+      "id": "chat",
+      "label": "Chat",
+      "visible": true,
+      "x": 18,
+      "y": 1027,
+      "w": 677,
+      "h": 373,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": -923,
+        "y": -493
+      }
+    },
+    {
+      "id": "tracker",
+      "label": "Quest Tracker",
+      "visible": true,
+      "x": 2133,
+      "y": 349,
+      "w": 270,
+      "h": 320,
+      "opacity": 100,
+      "wow": {
+        "point": "CENTER",
+        "relativePoint": "CENTER",
+        "x": 988,
+        "y": 211
+      }
+    }
+  ]
+}

@@ -1,0 +1,637 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Off State, Bridge and Shards</title>
+<style>
+/* The addon's own bundled faces (ForeverSynthwave/fonts), so the data bar text matches the game. Falls back to the stacks below. */
+@font-face { font-family: "FS Display"; src: url("../fonts/FSDisplay-Bold.ttf"); font-weight: 700; }
+@font-face { font-family: "FS Mono"; src: url("../fonts/MononokiNerdFontMono-Bold.ttf"); font-weight: 700; }
+
+:root {
+  color-scheme: dark;
+
+  /* Addon palette, copied from combat-hud-stack-a-2026-10-02.html */
+  --bg: #1a1025;
+  --track: #0a0416;
+  --line: #3a2168;
+  --violet: #a855f7;
+  --pink: #ff2e97;
+  --cyan: #22e0ff;
+  --green: #39ff14;
+  --parchment: #bfe9d6;
+  --surface: #2d1b4e;
+  --text: #e2e8f0;
+
+  /* Page only, not from the addon */
+  --page: #0e0719;
+  --muted: #9a8fbd;
+  --warm: #ff3d1f;
+  --core: #eafcff;
+  --stage-grid: rgba(168, 85, 247, 0.07);
+  --scan: rgba(0, 0, 0, 0.22);
+  --glow: rgba(168, 85, 247, 0.35);
+
+  --font-display: "Orbitron", "Eurostile", "Bank Gothic", "Arial Narrow", sans-serif;
+  --font-body: "Rajdhani", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Share Tech Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  /* The addon's own mono face. Falls back to the mockup's mono when it is not installed. */
+  --font-label: "FS Mono", "Mononoki","Mononoki Nerd Font", "Mononoki Nerd Font Mono", "Share Tech Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  --gutter: 16px;
+  --gold: #ffd23f;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.4;
+  font-weight: 500;
+  overflow-x: hidden;
+}
+.wrap { max-width: 1480px; margin-inline: auto; padding-inline: var(--gutter); padding-block: 0 56px; }
+
+/* Header */
+.top { padding-block: 28px 10px; }
+.kicker { margin: 0 0 6px; font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--cyan); }
+h1 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: clamp(1.35rem, 6vw, 2.1rem); letter-spacing: 0.04em; text-transform: uppercase; line-height: 1.1; color: var(--text); }
+h1 span { color: var(--pink); }
+.lede { margin: 0 0 8px; max-width: 96ch; color: var(--parchment); font-size: 1.05rem; }
+.lede b { color: var(--cyan); font-weight: 600; }
+
+h3.row {
+  margin: 30px 0 4px;
+  font-family: var(--font-display); font-weight: 700; font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--cyan);
+}
+.note { margin: 0 0 10px; font-size: 15px; color: var(--muted); max-width: 110ch; }
+
+.rowgrid { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+
+/* Cards, same chamfered chrome as the combat HUD page */
+.card {
+  background: linear-gradient(135deg, var(--violet), var(--line) 45%, var(--line));
+  padding: 1px;
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+}
+.card-in {
+  background: var(--bg);
+  padding: 14px;
+  height: 100%;
+  clip-path: polygon(0 0, calc(100% - 15px) 0, 100% 15px, 100% 100%, 15px 100%, 0 calc(100% - 15px));
+  display: flex; flex-direction: column; gap: 10px;
+}
+.card-head { display: flex; align-items: center; gap: 12px; }
+.letter {
+  flex: none; min-width: 36px; height: 36px; padding: 0 4px; display: grid; place-items: center;
+  background: var(--pink); color: var(--track);
+  font-family: var(--font-display); font-weight: 700; font-size: 16px;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+h2 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.25; flex: 1; min-width: 0; }
+.badge { flex: none; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--pink); border: 1px solid var(--pink); padding: 2px 6px; }
+.vcap { margin: 0; font-family: var(--font-mono); font-size: 13px; color: var(--cyan); }
+.desc { margin: 0; font-size: 15px; color: var(--parchment); }
+
+/* The game backdrop: warm desert, darker toward the bottom like the screenshot */
+.screen {
+  position: relative;
+  padding: 18px 14px 16px;
+  border: 1px solid var(--line);
+  background:
+    radial-gradient(120% 50% at 50% 100%, rgba(40, 18, 10, 0.55), transparent 70%),
+    radial-gradient(90% 30% at 20% 55%, rgba(255, 214, 150, 0.35), transparent 70%),
+    linear-gradient(180deg, #e7ab68 0%, #d28d52 34%, #a65f33 62%, #6f3c22 100%);
+}
+.insetlab {
+  margin: 14px 0 8px; padding-top: 6px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.55);
+  font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+  text-shadow: 0 1px 2px #000, 0 0 3px #000;
+}
+
+/* Stack A at 1:1. One UI unit is one CSS px. */
+.stk { width: 268px; margin-inline: auto; display: flex; flex-direction: column; align-items: center; }
+.stk > svg, .sp37 { display: block; flex: none; }
+.sp37 { width: 268px; height: 37px; }
+.gapbox { position: relative; width: 268px; flex: none; display: flex; align-items: center; justify-content: center; }
+.gapbox svg { display: block; flex: none; overflow: visible; }
+svg.cb { overflow: visible; }
+svg.cb.glow { filter: drop-shadow(0 0 5px var(--glow)); }
+.cbt { font-family: var(--font-mono); }
+.lbl { font-family: var(--font-label); }
+
+.hud-spells { display: flex; justify-content: center; gap: 6px; height: 36px; margin-bottom: 10px; }
+.hud-spells.ooc { opacity: 0.55; }
+.hud-ic { position: relative; flex: none; width: 36px; height: 36px; }
+.hud-ic .tile {
+  position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.02em; color: var(--text);
+  background: linear-gradient(135deg, var(--surface), var(--bg)); border: 1px solid var(--violet);
+}
+.hud-shards { display: flex; justify-content: flex-end; align-items: center; width: 100%; gap: 3px; height: 12px; margin-top: 6px; }
+.hud-shards .shard { flex: none; width: 10px; height: 12px; background: var(--violet); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+
+/* Row 4 */
+.shtable { display: grid; grid-template-columns: 190px repeat(3, 316px); gap: 14px 14px; align-items: start; }
+.shhead { font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; padding-bottom: 2px; }
+.shname { font-family: var(--font-display); font-weight: 700; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text); }
+.shname b { color: var(--pink); }
+.shname p { margin: 6px 0 0; font-family: var(--font-body); text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 14px; color: var(--parchment); }
+.shcell { padding: 16px 24px 14px; border: 1px solid var(--line); background: radial-gradient(120% 60% at 50% 100%, rgba(30,12,8,0.6), transparent 70%), linear-gradient(180deg, #a96a3c 0%, #7a4426 55%, #4f2819 100%); }
+.shcell .stk { align-items: flex-end; }
+.shrow { width: 268px; display: flex; justify-content: flex-end; margin-top: 6px; min-height: 12px; }
+.shrow svg { display: block; overflow: visible; }
+
+/* Wide treatment panel */
+.tri { display: grid; grid-template-columns: 268px 268px 284px; column-gap: 40px; align-items: end; }
+.tri .col { position: relative; }
+.annot { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; color: #fff; text-shadow: 0 1px 2px #000, 0 0 3px #000; margin: 0 0 6px; text-transform: uppercase; }
+.leader { position: absolute; border-top: 1px dashed rgba(255, 255, 255, 0.7); height: 0; }
+
+/* Data bar, drawn from DataBar.lua: 20 px tall, flat #1a1025 @ 80 percent, 1 px cyan rails (80 percent) on the top and bottom row,
+   equal slots, 1 px cyan (50 percent) divider on each slot's left edge, Orbitron 9 cyan label, Mononoki 11 white value. */
+.pair { display: flex; justify-content: center; align-items: flex-end; gap: 70px; }
+.ctx { position: relative; overflow: hidden; margin-top: 4px; }
+.ctx .scaled { transform-origin: 0 0; transform: scale(0.5); width: 2560px; }
+.ctxmark { position: absolute; top: 0; bottom: 0; border: 1px dashed #fff; pointer-events: none; }
+.crop { overflow: hidden; position: relative; height: 20px; }
+.crop > .shift { position: absolute; top: 0; }
+.db { position: relative; display: flex; width: 2560px; height: 20px; background: rgba(26, 16, 37, 0.8); font-family: var(--font-label); }
+.db::before, .db::after { content: ""; position: absolute; left: 0; right: 0; height: 1px; background: rgba(34, 224, 255, 0.8); }
+.db::before { top: 0; }
+.db::after { bottom: 0; }
+.dseg { position: relative; flex: none; height: 20px; display: flex; align-items: center; padding-left: 8px; white-space: nowrap; }
+.dseg.div::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1px; background: rgba(34, 224, 255, 0.5); }
+.dl { font-family: "FS Display", var(--font-display); font-weight: 700; font-size: 9px; color: var(--cyan); margin-right: 6px; letter-spacing: 0; }
+.dv { font-family: var(--font-label); font-weight: 700; font-size: 11px; color: #fff; }
+.dm { flex: none; width: 64px; height: 9px; border-radius: 5px; background: rgba(6, 3, 18, 0.9); border: 1px solid rgba(34, 224, 255, 0.4); padding: 1px; margin-right: 6px; }
+.dm u { display: block; height: 5px; border-radius: 3px; background: linear-gradient(90deg, #22ff76, #22e0ff); }
+.coin { flex: none; width: 9px; height: 9px; border-radius: 50%; margin-right: 2px; }
+.dslot { position: absolute; top: 1px; height: 18px; background: #05020c; }
+.dcells { position: absolute; top: 1px; }
+.dcells svg { display: block; }
+.bigcap { margin: 10px 0 2px; font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.06em; color: var(--cyan); text-transform: uppercase; }
+.zoomrow { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+.zoomrow .z3 { zoom: 3; }
+.thumb { zoom: 0.55; }
+.rejected { opacity: 0.95; }
+ul.probs { margin: 0; padding-left: 20px; font-size: 15px; color: var(--parchment); }
+ul.probs li { margin: 0 0 6px; }
+ul.probs b { color: var(--pink); font-weight: 600; }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&amp;family=Rajdhani:wght@500;600&amp;family=Share+Tech+Mono&amp;display=swap">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <p class="kicker">Forever Synthwave / Combat HUD / Stack A</p>
+    <h1>Off state, bridge <span>and</span> shards</h1>
+    <p class="lede">Every panel is a full Stack A at 1:1 (one UI unit is one pixel): spell row, target cast bar, player cast bar, spell tab, shards, with the bars at a tighter 18 unit gap now that the bridge has left the stack. Chevrons, frame, tab and colours are drawn with the same numbers as the locked HUD mockup. The pixel bridge cells keep their exact 8 px cell and 10 px pitch and exact colours; only what surrounds them is new.</p>
+  </header>
+
+  <h3 class="row">Row 1. Current</h3>
+  <p class="note">The out of combat state as it renders now.</p>
+  <div class="rowgrid" id="row1"></div>
+
+  <h3 class="row">Row 2. Off state variants</h3>
+  <p class="note">Out of combat, no cast, no target. The bridge has left the cast stack (Parker chose bridge treatment 3, below), so the two bars sit at a normal tighter gap of 18 units with no cells between them. Each panel has an inset below: the same variant in combat with a target but no cast, so the transition can be judged.</p>
+  <div class="rowgrid" id="row2"></div>
+
+  <h3 class="row">Row 3. Bridge treatments</h3>
+  <p class="note">Treatment 3 is the chosen one: the bridge lives in the data bar as a LINK segment, on only when the bot is in use and absent for everyone else. Treatments 1 and 2 stay as small thumbnails of the plated options that were dropped. Cell colours here are a live sample: a few green active dots, the rest grey.</p>
+  <div class="rowgrid" id="row3"></div>
+
+  <h3 class="row">Row 4. Soul shards</h3>
+  <p class="note">Each variant in three states: 5 of 5, 3 of 5 and 0 of 5. Same seat as now: right aligned under the player bar and its tab, 6 units below the tab.</p>
+  <div class="shtable" id="row4"></div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var C = {
+    violet: "#a855f7", pink: "#ff2e97", cyan: "#22e0ff", green: "#39ff14", track: "#0a0416", line: "#3a2168",
+    surface: "#2d1b4e", text: "#e2e8f0", parchment: "#bfe9d6", muted: "#9a8fbd", core: "#eafcff", bg: "#1a1025"
+  };
+
+  /* ---------- helpers ---------- */
+  var uidN = 0;
+  function uid() { return "u" + (++uidN); }
+  function hx(h) { h = h.replace("#", ""); return [parseInt(h.substr(0, 2), 16), parseInt(h.substr(2, 2), 16), parseInt(h.substr(4, 2), 16)]; }
+  function hex2(n) { n = Math.max(0, Math.min(255, Math.round(n))); return (n < 16 ? "0" : "") + n.toString(16); }
+  function mix(a, b, t) {
+    var x = hx(a), y = hx(b);
+    return "#" + [0, 1, 2].map(function (i) { return hex2(x[i] + (y[i] - x[i]) * t); }).join("");
+  }
+  function rgba(h, a) { var x = hx(h); return "rgba(" + x[0] + "," + x[1] + "," + x[2] + "," + a + ")"; }
+  function pts(a) { return a.map(function (p) { return (Math.round(p[0] * 100) / 100) + "," + (Math.round(p[1] * 100) / 100); }).join(" "); }
+
+  /* Same polygon inset as the mockup, so a 1px outline sits inside its shape */
+  function insetPoly(P, d) {
+    var n = P.length, area = 0, i;
+    for (i = 0; i < n; i++) { var a = P[i], b = P[(i + 1) % n]; area += a[0] * b[1] - b[0] * a[1]; }
+    var s = area > 0 ? 1 : -1;
+    var lines = P.map(function (p, idx) {
+      var q = P[(idx + 1) % n], dx = q[0] - p[0], dy = q[1] - p[1], len = Math.sqrt(dx * dx + dy * dy);
+      return { x: p[0] + s * (-dy) / len * d, y: p[1] + s * dx / len * d, dx: dx, dy: dy };
+    });
+    return P.map(function (p, idx) {
+      var l1 = lines[(idx + n - 1) % n], l2 = lines[idx], cr = l1.dx * l2.dy - l1.dy * l2.dx;
+      if (Math.abs(cr) < 1e-6) { return p; }
+      var t = ((l2.x - l1.x) * l2.dy - (l2.y - l1.y) * l2.dx) / cr;
+      return [l1.x + t * l1.dx, l1.y + t * l1.dy];
+    });
+  }
+
+  var mctx = document.createElement("canvas").getContext("2d");
+  function measure(text, size) {
+    mctx.font = size + "px " + getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim();
+    return mctx.measureText(text).width;
+  }
+
+  /* ---------- the cast bar, Stack A numbers (CastBars.lua: 268 wide, 22 high, 14 chevrons) ---------- */
+  var W = 268, H = 22, CH = 5, TABH = 15, RUNX = 27, RUNY = 2, RUNH = 18, CHD = 9, PITCH = 12, NCHEV = 14;
+
+  function chevPts(i) {
+    var x0 = RUNX + i * PITCH, ah = RUNH / 2;
+    return [[0, 0], [CHD, 0], [CHD + ah, RUNH / 2], [CHD, RUNH], [0, RUNH], [ah, RUNH / 2]].map(function (p) { return [x0 + p[0], RUNY + p[1]]; });
+  }
+  function framePts() {
+    return pts([[CH + 0.5, 0.5], [W - CH - 0.5, 0.5], [W - 0.5, CH + 0.5], [W - 0.5, H - CH - 0.5], [W - CH - 0.5, H - 0.5], [CH + 0.5, H - 0.5], [0.5, H - CH - 0.5], [0.5, CH + 0.5]]);
+  }
+
+  /* The spell tab, a trapezoid hanging under the left end. yTop = where it meets the frame (or the rail). */
+  function tabSvg(text, yTop, a) {
+    var tabW = Math.ceil(measure(text, 12)) + 12, sl = 5, tx0 = CH + 1, yB = yTop + TABH;
+    return '<polygon points="' + pts([[tx0, yTop], [tx0 + 2 * sl + tabW, yTop], [tx0 + sl + tabW, yB], [tx0 + sl, yB]]) + '" fill="' + rgba(C.track, a.fill) + '"/>' +
+      '<polyline points="' + pts([[tx0, yTop - 0.5], [tx0 + sl, yB - 0.5], [tx0 + sl + tabW, yB - 0.5], [tx0 + 2 * sl + tabW, yTop - 0.5]]) + '" fill="none" stroke="' + rgba(C.violet, a.stroke) + '" stroke-width="1" stroke-linejoin="miter"/>' +
+      '<text class="cbt" x="' + (tx0 + sl + 6) + '" y="' + Math.round(yTop + TABH / 2 + 12 * 0.33) + '" font-size="12" fill="' + rgba(C.cyan, a.text) + '">' + text + '</text>';
+  }
+
+  /* looks: current, ghost, ghostc, dimfill, rail-off, rail-on */
+  function barSvg(o) {
+    var role = o.role, look = o.look, id = uid(), g = "", op = 1, i, defs = "";
+    var vb = role === "target" ? "0 -15 268 37" : "0 0 268 37";
+    var glow = (look === "ghostc" || look === "dimfill" || look === "rail-on");
+    if (look === "current") { op = 0.55; }
+    if (look === "rail-off") { op = 0.6; }
+
+    if (look.indexOf("rail") === 0) {
+      /* A thin neon rail at the bar's width, centred in the same 22 high box so nothing else moves */
+      var y0 = 9.5, y1 = 12.5, ym = 11;
+      defs = '<linearGradient id="' + id + 'g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="' + C.violet + '"/><stop offset="0.55" stop-color="' + mix(C.violet, C.cyan, 0.5) + '"/><stop offset="1" stop-color="' + C.cyan + '"/></linearGradient>' +
+        '<filter id="' + id + 'b" x="-5%" y="-300%" width="110%" height="700%"><feGaussianBlur stdDeviation="2"/></filter>';
+      var rp = pts([[3, y0], [W - 3, y0], [W, ym], [W - 3, y1], [3, y1], [0, ym]]);
+      g += '<polygon points="' + rp + '" fill="url(#' + id + 'g)" opacity="0.6" filter="url(#' + id + 'b)"/>';
+      g += '<polygon points="' + rp + '" fill="url(#' + id + 'g)"/>';
+      g += '<rect x="0" y="' + (ym - 3.5) + '" width="1" height="7" fill="' + C.violet + '"/><rect x="' + (W - 1) + '" y="' + (ym - 3.5) + '" width="1" height="7" fill="' + C.cyan + '"/>';
+      if (role === "player" && o.tab) { g += tabSvg(o.tab, y1, { fill: 0.95, stroke: 1, text: 1 }); }
+    } else {
+      var ghost = (look === "ghost");
+      g += '<polygon points="' + framePts() + '" fill="' + rgba(C.track, ghost ? 0.4 : 0.92) + '" stroke="' + rgba(C.violet, ghost ? 0.4 : 1) + '" stroke-width="1" stroke-linejoin="miter"/>';
+      if (look === "current") {
+        /* The empty hollow icon square, as in the screenshot */
+        g += '<rect x="' + (CH + 0.5) + '" y="2.5" width="17" height="17" fill="none" stroke="' + C.line + '" stroke-width="1" shape-rendering="crispEdges"/>';
+      }
+      for (i = 0; i < NCHEV; i++) {
+        var P = chevPts(i);
+        if (look === "current" || look === "dimfill") {
+          g += '<polygon points="' + pts(P) + '" fill="' + rgba(C.cyan, 0.2) + '"/>';
+        } else {
+          g += '<polygon points="' + pts(insetPoly(P, 0.5)) + '" fill="none" stroke="' + rgba(C.cyan, ghost ? 0.26 : 0.5) + '" stroke-width="1" stroke-linejoin="miter"/>';
+        }
+      }
+      if (role === "player" && o.tab) {
+        g += tabSvg(o.tab, H, ghost ? { fill: 0.5, stroke: 0.4, text: 0.5 } : { fill: 0.95, stroke: 1, text: 1 });
+      }
+    }
+    return '<svg class="cb' + (glow ? " glow" : "") + '" viewBox="' + vb + '" width="268" height="37" aria-hidden="true"><defs>' + defs + '</defs><g opacity="' + op + '">' + g + '</g></svg>';
+  }
+
+  /* ---------- the pixel bridge: 23 x 2 cells, 8 px, pitch 10 (ForeverBridge/Layout.lua) ---------- */
+  var GREY = [38, 38, 38];
+  function cellColor(col, row, live) {
+    var c;
+    if (row === 0) {
+      if (col === 0) { return [255, 0, 255]; }
+      if (col === 1) { return [170, 40, 255]; }
+      if (col === 2) { return [90, 0, 170]; }
+      if (col === 12 || col === 14) { return [0, 0, 0]; }
+      if (col === 13) { return [255, 255, 0]; }
+      if (col === 15 || col === 16) { return [8, 8, 165]; }   /* stale mask cells, empty mask */
+      return GREY;
+    }
+    if (col === 20) { return [0, 80, 100]; }
+    if (col === 21) { return [0, 190, 200]; }
+    if (col === 22) { return [0, 255, 255]; }
+    if (col === 16 || col === 19) { return [128, 176, 128]; }
+    if (col === 17) { return [180, 140, 0]; }
+    if (col === 18) { return [0, 0, 0]; }
+    if (live && (col === 1 || col === 5 || col === 7 || col === 14)) { return [0, 204, 0]; }
+    c = GREY;
+    return c;
+  }
+  function cellsSvg(ox, oy, live) {
+    var s = "", r, c, k;
+    for (r = 0; r < 2; r++) {
+      for (c = 0; c < 23; c++) {
+        k = cellColor(c, r, live);
+        s += '<rect x="' + (ox + c * 10) + '" y="' + (oy + r * 10) + '" width="8" height="8" fill="rgb(' + k.join(",") + ')"/>';
+      }
+    }
+    return s;
+  }
+  function rawBridge(live) {
+    return '<svg width="228" height="18" viewBox="0 0 228 18" shape-rendering="crispEdges" aria-hidden="true">' + cellsSvg(0, 0, live) + '</svg>';
+  }
+
+  /* The plate: dark recessed panel in our chrome. 284 x 32. Cells sit 28 from the left edge, 7 from the top. */
+  var PW = 284, PH = 32, PC = 4;
+  function plateBridge(label) {
+    var id = uid(), cx = (PW - 228) / 2, cy = 7, s = "";
+    var edge = pts([[PC + 0.5, 0.5], [PW - PC - 0.5, 0.5], [PW - 0.5, PC + 0.5], [PW - 0.5, PH - PC - 0.5], [PW - PC - 0.5, PH - 0.5], [PC + 0.5, PH - 0.5], [0.5, PH - PC - 0.5], [0.5, PC + 0.5]]);
+    s += '<svg width="' + PW + '" height="' + PH + '" viewBox="0 0 ' + PW + ' ' + PH + '" class="cb glow" aria-hidden="true"><defs>' +
+      '<linearGradient id="' + id + 'e" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="' + C.violet + '"/><stop offset="0.6" stop-color="' + C.violet + '"/><stop offset="1" stop-color="' + C.cyan + '"/></linearGradient>' +
+      '<pattern id="' + id + 's" width="4" height="3" patternUnits="userSpaceOnUse"><rect y="2" width="4" height="1" fill="rgba(0,0,0,0.22)"/></pattern>' +
+      '<pattern id="' + id + 'd" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="12" height="1" fill="rgba(168,85,247,0.07)"/><rect width="1" height="12" fill="rgba(168,85,247,0.07)"/></pattern>' +
+      '</defs>';
+    s += '<polygon points="' + edge + '" fill="' + rgba(C.track, 0.96) + '"/>';
+    s += '<polygon points="' + edge + '" fill="url(#' + id + 'd)"/><polygon points="' + edge + '" fill="url(#' + id + 's)"/>';
+    s += '<polygon points="' + edge + '" fill="none" stroke="url(#' + id + 'e)" stroke-width="1" stroke-linejoin="miter"/>';
+    /* recessed bezel around the cell field, 4 px clear on every side of the cells */
+    s += '<rect x="' + (cx - 4.5) + '" y="' + (cy - 3.5) + '" width="' + (228 + 9) + '" height="' + (18 + 7) + '" fill="#05020c" stroke="' + C.line + '" stroke-width="1" shape-rendering="crispEdges"/>';
+    s += '<g shape-rendering="crispEdges">';
+    var r, c;
+    for (r = 0; r < 2; r++) { for (c = 0; c < 23; c++) { s += '<rect x="' + (cx - 1 + c * 10) + '" y="' + (cy - 1 + r * 10) + '" width="10" height="10" fill="#020108"/>'; } }
+    s += cellsSvg(cx, cy, true) + '</g>';
+    s += '<text class="lbl" x="7" y="' + (PH / 2 + 3) + '" font-size="9" letter-spacing="0.8" fill="' + mix(C.violet, C.core, 0.35) + '">' + label + '</text>';
+    /* three tiny nested chevrons on the right, the bars' own motif */
+    var k;
+    for (k = 0; k < 3; k++) {
+      var x0 = PW - 25 + k * 6, h = 8, y0 = PH / 2 - h / 2;
+      s += '<polygon points="' + pts([[x0, y0], [x0 + 3, y0], [x0 + 3 + h / 2, y0 + h / 2], [x0 + 3, y0 + h], [x0, y0 + h], [x0 + h / 2, y0 + h / 2]]) + '" fill="' + rgba(C.cyan, 0.3 + k * 0.2) + '"/>';
+    }
+    return s + '</svg>';
+  }
+
+  /* ---------- stack builder ---------- */
+  var TILES = ["COR", "BoA", "IMM", "SB"];
+  function spellsHtml(ooc) {
+    return '<div class="hud-spells' + (ooc ? " ooc" : "") + '">' + TILES.map(function (t) { return '<div class="hud-ic"><div class="tile">' + t + '</div></div>'; }).join("") + '</div>';
+  }
+  function flatShards(n) {
+    var s = "", i;
+    for (i = 0; i < n; i++) { s += '<span class="shard"></span>'; }
+    return '<div class="hud-shards">' + s + '</div>';
+  }
+  /* o: spells (bool), tgt look or null, plr look or null, gap, bridge html, shards html */
+  function stack(o) {
+    var h = '<div class="stk">';
+    if (o.spells) { h += spellsHtml(true); }
+    h += o.tgt ? barSvg({ role: "target", look: o.tgt }) : '<div class="sp37"></div>';
+    h += '<div class="gapbox" style="height:' + o.gap + 'px">' + (o.bridge || "") + '</div>';
+    h += o.plr ? barSvg({ role: "player", look: o.plr, tab: "SHOOT" }) : '<div class="sp37"></div>';
+    if (o.shards) { h += o.shards; }
+    return h + '</div>';
+  }
+
+  function card(letter, title, line, inner, extraStyle) {
+    return '<article class="card" style="' + (extraStyle || "") + '"><div class="card-in"><div class="card-head"><span class="letter">' + letter + '</span><h2>' + title + '</h2></div>' +
+      '<p class="vcap">' + line + '</p>' + inner + '</div></article>';
+  }
+
+  /* ---------- Row 1 ---------- */
+  function row1() {
+    var cur = '<div class="screen">' + stack({ spells: true, tgt: "current", plr: "current", gap: 64, bridge: rawBridge(false), shards: flatShards(5) }) + '</div>';
+    var notes = '<ul class="probs">' +
+      '<li><b>1.</b> The idle bars read as a cast frozen mid way. The cause is geometry, not a fill: the 14 dim chevrons fill only the run (x 27 to 189), and the timer column on the right (x 205 to 261) is empty, so about 28 percent of the bar looks unfilled.</li>' +
+      '<li><b>2.</b> An empty hollow icon square sits at each bar\'s left end.</li>' +
+      '<li><b>3.</b> The target bar is up with no target.</li>' +
+      '<li><b>4.</b> The bridge cells sit raw in the gap between the bars. Their colours are the bot\'s data, so they cannot change; the chrome around them can.</li>' +
+      '</ul>';
+    document.getElementById("row1").innerHTML = card("0", "Current", "Reference, from the live screenshot", cur, "width:348px") +
+      '<article class="card" style="width:420px"><div class="card-in"><div class="card-head"><span class="letter">!</span><h2>What Parker sees</h2></div>' + notes + '</div></article>';
+  }
+
+  /* ---------- Row 2 ---------- */
+  var GAP = 18;   /* the normal tighter gap once the bridge has left the stack */
+  function offCard(letter, title, line, offOpts, combatOpts) {
+    var inner = '<div class="screen">' + stack(offOpts) + '<div class="insetlab">Inset: in combat, target up, no cast</div>' + stack(combatOpts) + '</div>';
+    return card(letter, title, line, inner, "width:348px");
+  }
+  function row2() {
+    var sh = flatShards(5);
+    var A = offCard("A", "Ghost track", "Faint outline chevrons, no icon square, no target bar. Gap " + GAP,
+      { spells: true, tgt: null, plr: "ghost", gap: GAP, shards: sh },
+      { spells: false, tgt: "ghostc", plr: "ghostc", gap: GAP });
+    var B = offCard("B", "Collapsed rail", "A 3 px neon rail at bar width, SHOOT tab hangs from it. Gap " + GAP,
+      { spells: true, tgt: null, plr: "rail-off", gap: GAP, shards: sh },
+      { spells: false, tgt: "rail-on", plr: "rail-on", gap: GAP });
+    var Cc = offCard("C", "Gone", "Both bars hidden out of combat, they fade in on cast or combat. Gap " + GAP,
+      { spells: true, tgt: null, plr: null, gap: GAP, shards: sh },
+      { spells: false, tgt: "dimfill", plr: "dimfill", gap: GAP });
+    document.getElementById("row2").innerHTML = A + B + Cc;
+  }
+
+  /* ---------- Row 3: the data bar ---------- */
+  var SCREEN_W = 2560, LINK_W = 280;
+  var COIN = { g: "#ffb648", s: "#c7edff", c: "#ff6b8c" };
+  function segHtml(d, w, first) {
+    var h = '<div class="dseg' + (first ? "" : " div") + '" style="width:' + w + 'px"><b class="dl">' + d.l + '</b>';
+    if (d.link) {
+      /* The LINK slot: a dark recessed field 4 px wider than the cells on each side, cells flush between the two rails (rows y1 to y18) */
+      h = '<div class="dseg div" style="width:' + w + 'px"><b class="dl">' + d.l + '</b>' +
+        '<div class="dslot" style="left:40px;width:236px"></div>' +
+        '<div class="dcells" style="left:44px">' + rawBridge(true) + '</div>';
+    } else if (d.meter != null) {
+      h += '<i class="dm"><u style="width:' + (d.meter / 100 * 100) + '%"></u></i><span class="dv">' + d.v + '</span>';
+    } else if (d.coins) {
+      h += '<i class="coin" style="background:radial-gradient(circle,' + COIN.g + ' 30%,transparent 72%)"></i><span class="dv" style="color:' + COIN.g + ';margin-right:7px">1,284</span>' +
+        '<i class="coin" style="background:radial-gradient(circle,' + COIN.s + ' 30%,transparent 72%)"></i><span class="dv" style="color:' + COIN.s + ';margin-right:7px">42</span>' +
+        '<i class="coin" style="background:radial-gradient(circle,' + COIN.c + ' 30%,transparent 72%)"></i><span class="dv" style="color:' + COIN.c + '">17</span>';
+    } else {
+      h += '<span class="dv">' + d.v + '</span>';
+    }
+    return h + '</div>';
+  }
+  /* Slot order is DataBar.lua's SEGMENT_DEFS. LINK sits between BAGS and TIME, the 8th of 10 slots, so it is right of centre. */
+  var DEFS = [
+    { l: "FPS", v: "60" }, { l: "FS MEM", meter: 38, v: "2.4M" }, { l: "FS CPU", v: "--" }, { l: "MS", v: "42" },
+    { l: "REST", meter: 32, v: "32%" }, { l: "DUR", meter: 94, v: "94%" }, { l: "BAGS", meter: 62, v: "62%" },
+    { l: "LINK", link: true }, { l: "TIME", v: "9:47 PM" }, { l: "GOLD", coins: true }
+  ];
+  /* Returns { html, lefts } where lefts[label] is the slot's left edge in bar pixels */
+  function dataBar(on) {
+    var defs = DEFS.filter(function (d) { return on || !d.link; });
+    var other = on ? (SCREEN_W - LINK_W) / (defs.length - 1) : SCREEN_W / defs.length;
+    var x = 0, lefts = {}, widths = {}, h = '<div class="db">';
+    defs.forEach(function (d, i) {
+      var w = d.link ? LINK_W : other;
+      lefts[d.l] = x; widths[d.l] = w;
+      h += segHtml(d, w, i === 0);
+      x += w;
+    });
+    return { html: h + '</div>', lefts: lefts, widths: widths };
+  }
+  function ctxHtml(db, from, to) {
+    /* Whole bar at 50 percent, with a dashed box on the part shown 1:1 below */
+    var x0 = db.lefts[from], x1 = db.lefts[to] + db.widths[to];
+    return '<div class="screen" style="padding:10px 0 0"><div class="ctx" style="width:' + (SCREEN_W / 2) + 'px;height:10px;margin-inline:auto"><div class="scaled">' + db.html + '</div>' +
+      '<div class="ctxmark" style="left:' + (x0 / 2) + 'px;width:' + ((x1 - x0) / 2) + 'px"></div></div></div>';
+  }
+  function cropHtml(db, from, to) {
+    var x0 = db.lefts[from], x1 = db.lefts[to] + db.widths[to];
+    return '<div class="crop" style="width:' + Math.round(x1 - x0) + 'px"><div class="shift" style="left:' + (-x0) + 'px">' + db.html + '</div></div>';
+  }
+
+  function row3() {
+    var sh = flatShards(5);
+    var on = dataBar(true), off = dataBar(false);
+
+    var top = '<div class="screen"><div class="pair">' +
+      '<div><p class="annot">Off state, gap ' + GAP + '</p>' + stack({ spells: true, tgt: null, plr: "ghost", gap: GAP, shards: sh }) + '</div>' +
+      '<div><p class="annot">In combat, target up, no cast, gap ' + GAP + '</p>' + stack({ spells: false, tgt: "ghostc", plr: "ghostc", gap: GAP }) + '</div>' +
+      '</div></div>';
+
+    var a = '<p class="bigcap">3a ON. LINK segment, 8th of 10 slots (right of centre, between BAGS and TIME)</p>' +
+      ctxHtml(on, "BAGS", "TIME") +
+      '<div class="screen" style="padding:10px 14px"><div class="zoomrow">' +
+      '<div><p class="annot">1:1, BAGS, LINK, TIME</p>' + cropHtml(on, "BAGS", "TIME") + '</div>' +
+      '<div><p class="annot">3x, left end of LINK (divider, label, first cells)</p><div class="z3"><div class="crop" style="width:150px"><div class="shift" style="left:' + (-(on.lefts.LINK - 14)) + 'px">' + on.html + '</div></div></div></div>' +
+      '</div></div>' +
+      '<p class="desc">LINK is a fixed ' + LINK_W + ' px slot (8 padding, label, then the 228 px cell field with a 4 px dark recess either side), so the other nine slots share the remaining ' + (SCREEN_W - LINK_W) + ' px equally, about ' + Math.round(on.widths.FPS * 10) / 10 + ' px each at 2560. The bar\'s own 1 px divider closes each side. The cells run y 1 to y 18 of the 20 px bar, exactly between the two cyan rails: flush, with no spare pixel above or below.</p>';
+
+    var b = '<p class="bigcap">3b OFF. The default for everyone else: no LINK slot, nine equal slots</p>' +
+      ctxHtml(off, "BAGS", "GOLD") +
+      '<div class="screen" style="padding:10px 14px"><div class="zoomrow"><div><p class="annot">1:1, BAGS, TIME, GOLD</p>' + cropHtml(off, "BAGS", "GOLD") + '</div></div></div>' +
+      '<p class="desc">Slots close up to ' + Math.round(off.widths.FPS * 10) / 10 + ' px each, exactly as DataBar.lua lays them out today. Nothing marks that a bridge exists.</p>';
+
+    var chk = '<p class="desc" style="color:var(--gold)">Check: the bar is the bottom 20 px of the screen, so cell row 0 centres about 705 px below screen centre at 1440 tall, which is 49 percent of the height. The bridge note in Layout.lua says to keep row 0 within about 45 percent (648 px at 1440), so the bot\'s beacon search limit must be relaxed for this seat.</p>';
+
+    var T3 = '<article class="card" style="width:1380px"><div class="card-in"><div class="card-head"><span class="letter">3</span><h2>Data bar segment</h2><span class="badge pick">Chosen</span></div>' +
+      '<p class="vcap">Bridge cells in the data bar as a LINK slot, absent by default. Cast stack gap ' + GAP + '</p>' + top + a + b + chk + '</div></article>';
+
+    /* Thumbnails of the dropped plated options, at 55 percent */
+    var th1 = '<div class="screen thumb">' + stack({ spells: true, tgt: null, plr: "ghost", gap: 64, bridge: plateBridge("BUS"), shards: sh }) + '</div>';
+    var T1 = '<article class="card rejected" style="width:240px"><div class="card-in"><div class="card-head"><span class="letter">1</span><h2>Plated in place</h2><span class="badge">Dropped</span></div>' +
+      '<p class="vcap">Plate in a 64 gap</p>' + th1 + '</div></article>';
+    var th2 = '<div class="screen thumb"><div style="display:flex;gap:40px;align-items:flex-end">' + stack({ spells: true, tgt: null, plr: "ghost", gap: GAP, shards: sh }) + '<div style="padding-bottom:20px">' + plateBridge("LINK") + '</div></div></div>';
+    var T2 = '<article class="card rejected" style="width:480px"><div class="card-in"><div class="card-head"><span class="letter">2</span><h2>Moved and plated</h2><span class="badge">Dropped</span></div>' +
+      '<p class="vcap">Plate beside the stack, gap ' + GAP + '</p>' + th2 + '</div></article>';
+    document.getElementById("row3").innerHTML = T3 + '<div class="rowgrid" style="align-items:flex-start;width:100%">' + T1 + T2 + '</div>';
+  }
+
+  /* ---------- Row 4: shard variants ---------- */
+  function gemsSvg(n) {
+    var w = 13, h = 16, g = 4, id = uid(), s, i;
+    s = '<svg width="' + (5 * (w + g) - g) + '" height="' + h + '" viewBox="0 0 ' + (5 * (w + g) - g) + ' ' + h + '" aria-hidden="true"><defs><filter id="' + id + '" x="-90%" y="-90%" width="280%" height="280%"><feGaussianBlur stdDeviation="2.6"/></filter></defs>';
+    var edge = mix(C.violet, C.core, 0.62);
+    for (i = 0; i < 5; i++) {
+      var x = i * (w + g), T = [x + w / 2, 0], R = [x + w, h / 2], B = [x + w / 2, h], L = [x, h / 2], M = [x + w / 2, h / 2];
+      var D = [T, R, B, L];
+      if (i < n) {
+        s += '<polygon points="' + pts(D) + '" fill="' + mix(C.violet, C.pink, 0.5) + '" opacity="0.85" filter="url(#' + id + ')"/>';
+        s += '<polygon points="' + pts([T, L, M]) + '" fill="' + mix(C.violet, C.core, 0.58) + '"/>';
+        s += '<polygon points="' + pts([T, R, M]) + '" fill="' + mix(C.violet, C.core, 0.22) + '"/>';
+        s += '<polygon points="' + pts([L, B, M]) + '" fill="' + mix(mix(C.violet, C.pink, 0.3), C.track, 0.3) + '"/>';
+        s += '<polygon points="' + pts([R, B, M]) + '" fill="' + mix(mix(C.violet, C.pink, 0.3), C.track, 0.55) + '"/>';
+        s += '<polygon points="' + pts(insetPoly(D, 0.5)) + '" fill="none" stroke="' + edge + '" stroke-width="1" stroke-linejoin="miter"/>';
+      } else {
+        s += '<polygon points="' + pts(insetPoly(D, 0.5)) + '" fill="' + rgba(C.track, 0.55) + '" stroke="' + rgba(C.violet, 0.5) + '" stroke-width="1" stroke-linejoin="miter"/>';
+      }
+    }
+    return s + '</svg>';
+  }
+
+  function crystalsSvg(n) {
+    var w = 9, h = 19, g = 4, id = uid(), tot = 5 * (w + g) - g, s, i;
+    var full = (n === 5);
+    s = '<svg width="' + tot + '" height="' + h + '" viewBox="0 0 ' + tot + ' ' + h + '" aria-hidden="true"><defs>' +
+      '<linearGradient id="' + id + 'g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + C.pink + '"/><stop offset="0.5" stop-color="' + mix(C.pink, C.violet, 0.55) + '"/><stop offset="1" stop-color="' + C.violet + '"/></linearGradient>' +
+      '<filter id="' + id + 'b" x="-120%" y="-60%" width="340%" height="220%"><feGaussianBlur stdDeviation="' + (full ? 3 : 2.2) + '"/></filter></defs>';
+    for (i = 0; i < 5; i++) {
+      var x = i * (w + g);
+      var P = [[x + w / 2, 0], [x + w, 4.5], [x + w, h - 4], [x + w / 2, h], [x, h - 4], [x, 4.5]];
+      if (i < n) {
+        s += '<polygon points="' + pts(P) + '" fill="' + C.pink + '" opacity="' + (full ? 0.75 : 0.5) + '" filter="url(#' + id + 'b)"/>';
+        s += '<polygon points="' + pts(P) + '" fill="url(#' + id + 'g)"/>';
+        s += '<polygon points="' + pts([P[0], P[5], P[4], P[3]]) + '" fill="rgba(10,4,22,0.22)"/>';
+        s += '<polygon points="' + pts(insetPoly(P, 0.5)) + '" fill="none" stroke="' + rgba(mix(C.pink, C.core, 0.35), 0.55) + '" stroke-width="1" stroke-linejoin="miter"/>';
+        s += '<rect x="' + (x + w / 2 - 0.5) + '" y="3" width="1" height="' + (h - 8) + '" fill="' + mix(C.pink, C.core, 0.78) + '" shape-rendering="crispEdges"/>';
+      } else {
+        s += '<polygon points="' + pts(insetPoly(P, 0.5)) + '" fill="' + rgba(C.track, 0.9) + '" stroke="' + rgba(C.violet, 0.4) + '" stroke-width="1" stroke-linejoin="miter"/>';
+        s += '<rect x="' + (x + w / 2 - 0.5) + '" y="5" width="1" height="' + (h - 11) + '" fill="' + rgba(C.violet, 0.18) + '" shape-rendering="crispEdges"/>';
+      }
+    }
+    return s + '</svg>';
+  }
+
+  function railSvg(n) {
+    var Wp = 104, Hp = 22, c = 3, pitch = 15, r = 4.5, x0 = 12, ym = 11, id = uid(), s, i;
+    var edge = pts([[c + 0.5, 0.5], [Wp - c - 0.5, 0.5], [Wp - 0.5, c + 0.5], [Wp - 0.5, Hp - c - 0.5], [Wp - c - 0.5, Hp - 0.5], [c + 0.5, Hp - 0.5], [0.5, Hp - c - 0.5], [0.5, c + 0.5]]);
+    var lastX = x0 + (n - 1) * pitch, railEnd = x0 + 4 * pitch + 6;
+    s = '<svg width="' + Wp + '" height="' + Hp + '" viewBox="0 0 ' + Wp + ' ' + Hp + '" class="cb glow" aria-hidden="true"><defs>' +
+      '<linearGradient id="' + id + 'g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="' + C.violet + '"/><stop offset="1" stop-color="' + C.pink + '"/></linearGradient>' +
+      '<filter id="' + id + 'b" x="-60%" y="-120%" width="220%" height="340%"><feGaussianBlur stdDeviation="2"/></filter></defs>';
+    s += '<polygon points="' + edge + '" fill="' + rgba(C.track, 0.92) + '" stroke="' + C.violet + '" stroke-width="1" stroke-linejoin="miter"/>';
+    /* the thin rail: dim along its whole length, lit up to the last filled socket */
+    s += '<rect x="6" y="' + (ym - 1) + '" width="' + (railEnd - 6) + '" height="2" fill="' + rgba(C.violet, 0.3) + '"/>';
+    if (n > 0) {
+      var litW = lastX - 6 + 2;
+      s += '<rect x="6" y="' + (ym - 1) + '" width="' + litW + '" height="2" fill="' + C.violet + '" opacity="0.8" filter="url(#' + id + 'b)"/>';
+      s += '<rect x="6" y="' + (ym - 1) + '" width="' + litW + '" height="2" fill="url(#' + id + 'g)"/>';
+    }
+    for (i = 0; i < 5; i++) {
+      var cx = x0 + i * pitch;
+      if (i < n) {
+        s += '<circle cx="' + cx + '" cy="' + ym + '" r="' + (r + 1) + '" fill="' + C.pink + '" opacity="0.7" filter="url(#' + id + 'b)"/>';
+        s += '<circle cx="' + cx + '" cy="' + ym + '" r="' + (r - 0.5) + '" fill="' + C.violet + '" stroke="' + mix(C.violet, C.core, 0.55) + '" stroke-width="1"/>';
+        s += '<circle cx="' + cx + '" cy="' + ym + '" r="1.8" fill="' + mix(C.pink, C.core, 0.65) + '"/>';
+      } else {
+        s += '<circle cx="' + cx + '" cy="' + ym + '" r="' + (r - 0.5) + '" fill="' + C.track + '" stroke="' + rgba(C.violet, 0.55) + '" stroke-width="1"/>';
+        s += '<circle cx="' + cx + '" cy="' + ym + '" r="1.2" fill="' + rgba(C.violet, 0.2) + '"/>';
+      }
+    }
+    s += '<rect x="' + (Wp - 21) + '" y="4" width="1" height="' + (Hp - 8) + '" fill="' + C.line + '" shape-rendering="crispEdges"/>';
+    s += '<text class="lbl" x="' + (Wp - 11) + '" y="' + (ym + 4) + '" text-anchor="middle" font-size="11" fill="' + (n ? C.cyan : C.muted) + '">' + n + '</text>';
+    return s + '</svg>';
+  }
+
+  function shardCell(plrBar, shardsHtml) {
+    return '<div class="screen shcell"><div class="stk">' + plrBar + '<div class="shrow">' + shardsHtml + '</div></div></div>';
+  }
+  function row4() {
+    var bar = barSvg({ role: "player", look: "ghostc", tab: "SHOOT" });
+    var variants = [
+      { name: "<b>0</b> Current", desc: "Flat violet diamonds, 10 x 12. Only the owned ones are drawn, no sockets.", f: function (n) { return flatShards(n).replace('class="hud-shards"', 'class="hud-shards" style="margin:0"'); } },
+      { name: "<b>S1</b> Lit gems", desc: "Faceted gems with a light top and darker lower facets and a bright edge. Owned ones glow, empty ones are a dim outline socket.", f: gemsSvg },
+      { name: "<b>S2</b> Fel crystals", desc: "Tall narrow crystals, magenta to violet, with a hot core line. Empty ones are dark sockets. A full set blooms a little more.", f: crystalsSvg },
+      { name: "<b>S3</b> Socketed rail", desc: "Five sockets on a thin neon rail inside a chrome plate, with a count at the end.", f: railSvg }
+    ];
+    var h = '<div></div><div class="shhead">5 of 5</div><div class="shhead">3 of 5</div><div class="shhead">0 of 5</div>';
+    variants.forEach(function (v) {
+      h += '<div class="shname">' + v.name + '<p>' + v.desc + '</p></div>';
+      [5, 3, 0].forEach(function (n) { h += shardCell(bar, v.f(n)); });
+    });
+    document.getElementById("row4").innerHTML = h;
+  }
+
+  function build() {
+    row1(); row2(); row3(); row4();
+    document.documentElement.setAttribute("data-h", String(document.documentElement.scrollHeight));
+    document.documentElement.setAttribute("data-rows", Array.prototype.map.call(document.querySelectorAll("h3.row"), function (n) { return Math.round(n.getBoundingClientRect().top + window.scrollY); }).join(","));
+    document.documentElement.setAttribute("data-built", "1");
+  }
+  var started = false;
+  function go() { if (started) { return; } started = true; build(); }
+  if (document.fonts && document.fonts.ready) { document.fonts.ready.then(go); setTimeout(go, 1500); } else { go(); }
+})();
+</script>
+</body>
+</html>

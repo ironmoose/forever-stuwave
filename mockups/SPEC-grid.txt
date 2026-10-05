@@ -1,0 +1,20 @@
+.gridlines{position:absolute; left:-60%; right:-60%; top:35%; bottom:-60%; z-index:2;
+    background-image:repeating-linear-gradient(90deg, rgba(34,224,255,.95) 0 2px, transparent 2px 46px), repeating-linear-gradient(0deg, rgba(255,46,151,.9) 0 2px, transparent 2px 40px);
+    transform:rotateX(76deg); transform-origin:top center; filter:drop-shadow(0 0 3px rgba(34,224,255,.6))}
+  .abstack{position:relative; z-index:2; flex:1; display:flex; flex-direction:column; gap:5px; padding:5px}
+  .abrow{display:flex; gap:6px; flex:1}
+  .abbar{position:relative; flex:1; min-width:0; display:flex; align-items:center; justify-content:center; gap:3px; padding:3px; border-radius:5px; background:rgba(10,5,22,.32); border:1px solid rgba(168,85,247,.3)}
+  .abbar .sqbtn{flex:none; aspect-ratio:1}
+  .abbar.main{border-color:var(--pink); box-shadow:0 0 8px -2px var(--pink); background:rgba(255,46,151,.08)}
+  .mtag{position:absolute; top:-2px; left:3px; z-index:3; font-family:"Share Tech Mono",monospace; font-size:6.5px; letter-spacing:.05em; color:var(--pink); background:rgba(10,5,22,.85); padding:0 2px; border-radius:2px}
+  /* xp bar */
+  .xp{justify-content:center}
+  .xptrack{flex:1; margin:1px 2px; border-radius:3px; background:rgba(6,3,18,.9); border:1px solid var(--line2); overflow:hidden}
+  .xpfill{height:100%; width:68%; background:linear-gradient(90deg,#7c3aed,#a855f7); box-shadow:0 0 8px -1
+
+===== keyframes =====
+@keyframes wppulse {0%,100%{opacity:1; text-shadow:0 0 3px #fff, 0 0 8px var(--pink), 0 0 15px var(--cyan)} 50%{opacity:.72; text-shadow:0 0 5px #fff, 0 0 13px var(--cyan), 0 0 22px var(--pink)}}
+
+@keyframes traydrop {0%{transform:translateY(-108%)} 11%,74%{transform:translateY(0)} 88%,100%{transform:translateY(-108%)}}
+
+@keyframes blink {50%{opacity:0}}

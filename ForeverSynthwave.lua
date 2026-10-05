@@ -581,33 +581,39 @@ local function CreateAuraIcon(parent)
     return button
 end
 
--- Opaque track-colored erase quads round a StatusBar fill's corners (MaskTexture
--- does not clip on this client). The host sits at bar + BAR_CORNER_MASK_LEVEL
--- so it clears the caret host (bar+2) and clips its children, which keeps the
--- quads from spilling past the bar's left edge. Parented to the bar so the
+-- Cuts the fill's TOP-LEFT and BOTTOM-RIGHT corners with opaque track colour (MaskTexture
+-- does not clip on this client). The mask host sits at bar + BAR_CORNER_MASK_LEVEL so it clears
+-- the caret host (bar+2) and clips its children to the bar rect. Parented to the bar so the
 -- mask follows the bar's Show/Hide.
 --
--- Cut corners ("cut"): the plate chrome is cut TOP-LEFT and BOTTOM-RIGHT at
--- SLICE_MARGIN (6), and the fill sits BAR_FILL_INSET inside it. The anti_cut
--- piece of the SAME chamfer already bakes its leg as c - 0.586 for that 1px
--- inset, so its diagonal lands parallel, 1px inside the plate's cut: the fill
--- chamfer is the chrome's (6), NOT chrome minus inset (that would leave fill
--- showing past the plate cut). It is not capped by the bar's height: the 5px
--- power strip still needs the 6 leg, and its quad overhangs the bar by one
--- row at ~8% coverage. `bottomOnly` (the power strip) hides the TOP-LEFT erase
--- quad: the strip hangs flush under the health bar, so its TOP-LEFT is never a
--- plate corner.
+-- Cut corners ("cut"), the main path: the plate stroke is a NINE-SLICE over the plate root,
+-- drawn at the engine's own texel-to-pixel ratio (measured about 0.78 px per texel, NOT one
+-- texel per plate unit). Every wedge is therefore a nine-slice of the same margin over the
+-- same ROOT rect (Theme.AddCutFillErase), hosted on this bar's clipping mask: the engine scales
+-- wedge and stroke together, so the cut line stays against the stroke's inner diagonal at any
+-- plate scale, and the bar rect trims what falls outside it. The root's TOP-LEFT corner is the
+-- health bar's, and the root's BOTTOM-RIGHT is whichever bar is lowest (the power strip when the
+-- plate grows one, else the health bar). That is all both bars need for the plate corners, so
+-- `bottomOnly` (the power strip) adds nothing of its own.
 --
--- The cut is a FIXED shape: only the two static quads at the BAR's corners are
--- drawn, and the fill is clipped by them, so its right end is square at every
--- level and takes the chamfer only when it reaches the end of the bar. There is
--- deliberately NO leading-edge quad under "cut" (Parker, playtest 2026-10-04:
--- "when the HP is dropping it has the line and the corner"): a quad riding the
--- fill's right edge (Theme.AddLeadingEdgeCorners) is right for a rounded pill
--- end, but here it carved a travelling bottom-right notch into the fill and
--- into the caret line at every mid-bar level, and at full HP it drew a second,
--- doubly opaque copy of the static BOTTOM-RIGHT quad. Round keeps it.
-local function AddRoundedFillMask(bar, fillHeight, bottomOnly)
+-- The health bar also keeps its own bottom-right chamfer MID-PLATE while the strip grows the
+-- plate below it (the approved look): a gated wedge (Theme.AddGatedCutCorner) fed the power
+-- strip's own growth value, so it is open exactly while the plate is grown and closed when the
+-- health bar's bottom-right is the plate corner (the root erase owns it; a unit-sized wedge
+-- there is the dark triangle again). The quads below are the FALLBACK, used when the client
+-- cannot slice a texture or the gate cannot be built; their legs are c - 0.586 units for the
+-- 1px inset and are right at one plate scale only.
+--
+-- The cut is a FIXED shape: only the static wedges at the BAR's corners are drawn, and the
+-- fill is clipped by them, so its right end is square at every level and takes the chamfer only
+-- when it reaches the end of the bar. There is deliberately NO leading-edge quad under "cut"
+-- (Parker, playtest 2026-10-04: "when the HP is dropping it has the line and the corner"): a
+-- quad riding the fill's right edge (Theme.AddLeadingEdgeCorners) is right for a rounded pill
+-- end, but here it carved a travelling bottom-right notch into the fill and into the caret line
+-- at every mid-bar level, and at full HP it drew a second, doubly opaque copy of the static
+-- BOTTOM-RIGHT quad. Round keeps it.
+local gatedWedgeWarned = false  -- FS.LogDegradeOnce does not dedupe by key
+local function AddRoundedFillMask(root, bar, fillHeight, bottomOnly)
     local theme = FS.Theme
     local cut = theme.CHROME_CORNERS == "cut"
     local radius
@@ -624,10 +630,39 @@ local function AddRoundedFillMask(bar, fillHeight, bottomOnly)
     if cornerMask.SetClipsChildren then
         cornerMask:SetClipsChildren(true)
     end
+    if cut and theme.AddCutFillErase and theme.AddGatedCutCorner then
+        local erase = theme.AddCutFillErase(cornerMask, root, theme.COLOR_BAR_TRACK)
+        if erase then
+            local midWedge
+            if not bottomOnly then
+                local okGate, gate = pcall(theme.AddGatedCutCorner, cornerMask, bar, theme.COLOR_BAR_TRACK, radius)
+                if okGate then
+                    midWedge = gate or nil
+                elseif not gatedWedgeWarned then
+                    gatedWedgeWarned = true
+                    FS.LogDegradeOnce("plate_gated_wedge",
+                        "|cffff4488Forever STUwave|r: nameplate mid-plate wedge failed to build, nameplates use the corner quads")
+                end
+            end
+            if bottomOnly or midWedge then
+                bar.fsFillErase = erase
+                bar.fsFillCorners = nil
+                bar.fsFillBottomOnly = bottomOnly
+                root.fsMidWedge = midWedge or root.fsMidWedge
+                return cornerMask
+            end
+            -- The root erase without the mid-plate wedge, or the wedge without the erase, is worse
+            -- than neither (a lone root erase under unit-sized quads is the overshoot again): drop
+            -- the half that got built and take the quads.
+            erase.texture:Hide()
+            erase.frame:Hide()
+        end
+    end
     local fillCorners = theme.AddFillCorners(cornerMask, bar, theme.COLOR_BAR_TRACK, radius)
     if not cut then
         theme.AddLeadingEdgeCorners(cornerMask, bar, theme.COLOR_BAR_TRACK, radius)
     end
+    bar.fsFillErase = nil
     bar.fsFillCorners = fillCorners
     bar.fsFillBottomOnly = bottomOnly
     if cut and bottomOnly and type(fillCorners) == "table" and type(fillCorners.quads) == "table" then
@@ -638,18 +673,10 @@ local function AddRoundedFillMask(bar, fillHeight, bottomOnly)
     return cornerMask
 end
 
--- The plate stroke is a nine-slice, drawn at SLICE_MARGIN texels with ONE texel per
--- physical SCREEN pixel, while the erase wedges are quads sized in the plate's own
--- units. At a plate scale above one pixel per unit the wedge therefore outgrows the
--- stroke's chamfer and leaves a dark wedge between border and fill at the cut corners
--- (playtest 2026-10-04, full HP: stroke chamfer 5 px, fill cut 7.5 px at 1.44 px per
--- unit: "a missing corner of the bar"). Size the wedge to the stroke's chamfer in
--- units instead: SLICE_MARGIN pixels, snapped to the baked set. Pixel size in the
--- frame's units is PixelUtil's factor over the frame's effective scale (ChevronCastBar's
--- rule); a missing API or an odd answer keeps the unscaled SLICE_MARGIN, the old look.
--- UNVERIFIED in game: the one-texel-per-pixel reading comes from one screenshot.
--- Returns the pixel size in the plate's units (factor / effective scale), or nil when
--- either answer is missing, secret or not a positive number.
+-- The plate's pixel size in its own units: PixelUtil's factor over the frame's effective scale
+-- (ChevronCastBar's rule). Used only by /fsplate now, to read back the stroke's size on screen.
+-- Returns the pixel size in the plate's units (factor / effective scale), or nil when either
+-- answer is missing, secret or not a positive number.
 local function PlatePixelSize(root)
     local factor = PixelUtil and PixelUtil.GetPixelToUIUnitFactor and PixelUtil.GetPixelToUIUnitFactor()
     local okScale, eff = pcall(root.GetEffectiveScale, root)
@@ -660,72 +687,33 @@ local function PlatePixelSize(root)
     return nil
 end
 
-local function PlateFillCut(root)
-    local theme = FS.Theme
-    local pixel = PlatePixelSize(root)
-    if pixel then
-        return theme.SnapCut(theme.SLICE_MARGIN * pixel)
-    end
-    return theme.SnapCut(theme.SLICE_MARGIN)
+-- The sizer (root.fsSizer, see CreatePlateFrame) decides whether the plate grows a power
+-- strip, and the health bar's mid-plate wedge (root.fsMidWedge, AddRoundedFillMask) must be
+-- open exactly while it does. Both therefore take the SAME value, so the engine decides for
+-- both and Lua never reads the (secret) power max. ResetPlateGrowth closes both with a plain 0.
+-- SetPlateGrowth hands over the raw max (or 1, the "reserve the strip" fallback) and answers
+-- whether the sizer accepted it; each setter is pcall'd, a secret may be refused by either.
+-- Without SetReverseFill (root.fsSizerAnchor is the sizer frame itself, see CreatePlateFrame) the
+-- plate is ALWAYS grown, so the health bar's bottom-right is always mid-plate and the wedge is
+-- pinned open at 1 on both paths instead of mirroring the sizer.
+local function MidWedgeValue(root, value)
+    if root.fsSizerAnchor == root.fsSizer then return 1 end
+    return value
+end
+local function ResetPlateGrowth(root)
+    root.fsSizer:SetValue(0)
+    if root.fsMidWedge then root.fsMidWedge:SetValue(MidWedgeValue(root, 0)) end
+end
+local function SetPlateGrowth(root, value)
+    local ok = pcall(root.fsSizer.SetValue, root.fsSizer, value)
+    local wedge = root.fsMidWedge
+    if wedge then pcall(wedge.SetValue, wedge, MidWedgeValue(root, value)) end
+    return ok
 end
 
--- Re-fits both fills' static erase quads when the plate's pixel scale changed (target
--- selection scales a plate). Cut chrome only; the power strip keeps its TOP-LEFT quad hidden.
-local function FitPlateFillCuts(root)
-    if FS.Theme.CHROME_CORNERS ~= "cut" then return end
-    local c = PlateFillCut(root)
-    if c == root.fsFillCut then return end
-    for _, bar in ipairs({ root.healthBar, root.powerBar }) do
-        local handle = bar.fsFillCorners
-        if type(handle) == "table" and handle.SetRadius then
-            handle.SetRadius(c)
-            if bar.fsFillBottomOnly and c > 0 then
-                for _, quad in ipairs(handle.quads) do
-                    if quad.fsCutCorner == "TOPLEFT" then quad:Hide() end
-                end
-            end
-        end
-    end
-    -- Recorded only after the whole loop ran: a throw above leaves the old value, so the
-    -- next UpdateGlowState retries instead of treating a half-applied fit as done.
-    root.fsFillCut = c
-end
-
--- Every live plate. The plate's pixel size changes without any unit event: a UI scale or
--- display change, and the engine's own plate-scale CVars (selected, global, min, max, larger)
--- applied to a plate AFTER our target-changed handler ran, hence the deferred second pass.
-local PLATE_SCALE_CVARS = {
-    nameplateselectedscale = true, nameplateglobalscale = true, nameplateminscale = true,
-    nameplatemaxscale = true, nameplatelargerscale = true, nameplatescale = true,
-}
-local function RefitAllPlates()
-    for _, root in pairs(FS.framesByUnit) do
-        FitPlateFillCuts(root)
-    end
-end
--- One-frame-later refit for the engine applying plate scale after our handler. Coalesced:
--- a pending timer already covers every live plate, so triggers during that frame add none.
-local refitPending = false
-local function RefitAllPlatesDeferred()
-    if refitPending then return end
-    if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
-        C_Timer.After(0, function()
-            refitPending = false
-            RefitAllPlates()
-        end)
-        -- After the call: a throwing After must not leave the flag stuck. The callback runs a
-        -- frame later, so it cannot clear the flag before this line sets it.
-        refitPending = true
-    end
-end
-local function RefitAllPlatesSoon()
-    RefitAllPlates()
-    RefitAllPlatesDeferred()
-end
-
--- The erase quads sit ABOVE the plate's border (they are children of the
--- bars), and the 1px-inset fill rect overlaps the diagonal stroke, so the track
--- colour would paint a dark gap over it. Re-host the SAME border texture
+-- The erase (the root-sized nine-slice wedges, or the fallback quads) sits ABOVE the plate's
+-- border (it is a child of the bars), and the 1px-inset fill rect overlaps the diagonal stroke,
+-- so the track colour would paint a dark gap over it. Re-host the SAME border texture
 -- (root.fsBorder, so the retint in UpdateGlowState still reaches it) on a
 -- frame above both masks. Region:SetParent keeps the root anchors. Pcall'd
 -- like every engine call here; a refusal just leaves the stroke where it was.
@@ -742,7 +730,7 @@ local function RaisePlateStroke(root)
     if not pcall(root.fsBorder.SetParent, root.fsBorder, strokeHost) and not strokeRaiseWarned then
         strokeRaiseWarned = true
         FS.LogDegradeOnce("nameplate_stroke_reparent",
-            "|cffff4488ForeverSynthwave|r: nameplate stroke re-host refused, the plate border may sit under the corner masks")
+            "|cffff4488Forever STUwave|r: nameplate stroke re-host refused, the plate border may sit under the corner masks")
     end
 end
 
@@ -852,7 +840,7 @@ local function CreatePlateFrame()
         if not sizerNoReverseWarned then
             sizerNoReverseWarned = true
             FS.LogDegradeOnce("plate_sizer_noreverse",
-                "|cffff4488ForeverSynthwave|r: StatusBar:SetReverseFill unavailable, nameplates always reserve the power strip")
+                "|cffff4488Forever STUwave|r: StatusBar:SetReverseFill unavailable, nameplates always reserve the power strip")
         end
     end
 
@@ -881,7 +869,7 @@ local function CreatePlateFrame()
     -- Rounds the fill at both ends at every fill level: static erase quads for
     -- the left corners plus engine-anchored ones that follow the fill's right
     -- edge. The radius is capped concentric with the chrome inside the helper.
-    AddRoundedFillMask(healthBar, fillHeight)
+    AddRoundedFillMask(root, healthBar, fillHeight)
 
     -- Power strip: hidden until UpdatePower resolves the unit's power type.
     -- Full health-bar width, directly below it inside the plate chrome.
@@ -904,7 +892,7 @@ local function CreatePlateFrame()
 
     powerBar.caret = FS.FrameHelpers.CreateCaret(powerBar, FS.Theme.COLOR_CARET_POWER)
 
-    AddRoundedFillMask(powerBar, POWER_BAR_HEIGHT, true)
+    AddRoundedFillMask(root, powerBar, POWER_BAR_HEIGHT, true)
     RaisePlateStroke(root)
 
     local nameText = root:CreateFontString(nil, "OVERLAY")
@@ -1059,7 +1047,7 @@ local function WarnAuraContainer(err)
     if auraContainerWarned then return end
     auraContainerWarned = true
     FS.LogDegradeOnce("plate_aura_container",
-        "|cffff4488ForeverSynthwave|r: nameplate aura container unavailable, some plates have no debuff row ("
+        "|cffff4488Forever STUwave|r: nameplate aura container unavailable, some plates have no debuff row ("
         .. tostring(err) .. ")")
 end
 
@@ -1071,7 +1059,7 @@ local function GiveUpAuraContainers(err)
     if not auraGiveUpWarned then
         auraGiveUpWarned = true
         FS.LogDegradeOnce("plate_aura_container_giveup",
-            "|cffff4488ForeverSynthwave|r: nameplate aura container failed " .. AURA_BUILD_FAIL_LIMIT
+            "|cffff4488Forever STUwave|r: nameplate aura container failed " .. AURA_BUILD_FAIL_LIMIT
             .. " times, using the fallback debuff row (out of combat only) (" .. tostring(err) .. ")")
     end
     if EngageAuraFallback then EngageAuraFallback() end
@@ -1373,8 +1361,6 @@ local function AcquireFrame()
     -- Reset the fill-color cache so the next UpdateFillColor call re-applies
     -- rather than skipping on a stale match left by the plate's PREVIOUS unit.
     frame.fillColor = nil
-    -- (No fsFillCut reset: it mirrors the persistent wedge quads, so a pooled plate
-    -- landing on another pixel scale is re-fitted by UpdateGlowState's own compare.)
     -- Same reset for the power strip's fill-color cache: without this, a
     -- reacquired pooled plate could keep the PREVIOUS occupant's power color
     -- (e.g. rogue energy yellow -> warlock mana cyan keeps yellow) until a
@@ -1387,8 +1373,9 @@ local function AcquireFrame()
     -- call.
     frame.powerType = nil
     -- Sizer back to empty so a reused plate doesn't inherit the previous
-    -- unit's height; UpdatePower sets it for the new unit.
-    frame.fsSizer:SetValue(0)
+    -- unit's height (and its mid-plate wedge closes with it); UpdatePower sets
+    -- it for the new unit.
+    ResetPlateGrowth(frame)
     return frame
 end
 
@@ -1406,7 +1393,7 @@ local function ReleaseFrame(unit)
     -- occupant's power reading before UpdatePower resolves the new unit.
     frame.powerBar:Hide()
     frame.powerBar:SetAlpha(1)
-    frame.fsSizer:SetValue(0)
+    ResetPlateGrowth(frame)
     -- Reset target emphasis so a pooled plate doesn't carry the
     -- previous occupant's dim/highlight until its own UpdateGlowState runs.
     frame:SetAlpha(1)
@@ -1526,20 +1513,20 @@ local function UpdatePower(unit)
         -- refuses reserves the strip (old always-grow behavior) and logs once
         -- per session.
         if not FS.IsSecret(maxPower) and maxPower == nil then
-            root.fsSizer:SetValue(0)
-        elseif not pcall(root.fsSizer.SetValue, root.fsSizer, maxPower) then
-            root.fsSizer:SetValue(1)
+            ResetPlateGrowth(root)
+        elseif not SetPlateGrowth(root, maxPower) then
+            SetPlateGrowth(root, 1)
             if not sizerSetValueWarned then
                 sizerSetValueWarned = true
                 FS.LogDegradeOnce("plate_sizer_setvalue",
-                    "|cffff4488ForeverSynthwave|r: nameplate sizer refused the power max, always reserving the power strip")
+                    "|cffff4488Forever STUwave|r: nameplate sizer refused the power max, always reserving the power strip")
             end
         end
         FS.FrameHelpers.UpdatePowerHostEmpty(root.powerBar, unit)
         FS.FrameHelpers.UpdateCaretFull(root.powerBar.caret, unit, "power")
     else
         root.powerBar:Hide()
-        root.fsSizer:SetValue(0)
+        ResetPlateGrowth(root)
     end
 end
 
@@ -1644,7 +1631,6 @@ end
 local function UpdateGlowState(unit)
     local root = FS.framesByUnit[unit]
     if not root then return end
-    FitPlateFillCuts(root)
 
     -- UnitCanAttack's secrecy on a nameplate unit token is UNVERIFIED on this
     -- client, so its result is FS.IsSecret-guarded before the truth-test, same
@@ -2058,9 +2044,6 @@ local function OnNamePlateAdded(unit)
     UpdateAuraIcons(unit)
     -- Seed the cast bar in case the plate appeared mid-cast.
     RefreshPlateCast(unit)
-    -- A plate for the already-targeted unit can get its selected scale from the engine after
-    -- this event: fit once more a frame later (the immediate fit ran in UpdateGlowState).
-    RefitAllPlatesDeferred()
 end
 
 local function OnNamePlateRemoved(unit)
@@ -2092,9 +2075,6 @@ for _, event in ipairs({
     "QUEST_LOG_UPDATE",
     "QUEST_WATCH_UPDATE",
     "CVAR_UPDATE",
-    -- The plate's pixel size (fill cut wedges, FitPlateFillCuts) follows these.
-    "UI_SCALE_CHANGED",
-    "DISPLAY_SIZE_CHANGED",
     -- Aura container pool prefill (TopUpAuraPool).
     "PLAYER_ENTERING_WORLD",
     "UNIT_THREAT_LIST_UPDATE",
@@ -2162,13 +2142,6 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
         for otherUnit in pairs(FS.framesByUnit) do
             UpdateGlowState(otherUnit)
         end
-        -- The engine may apply the selected-plate scale after this handler: fit once more.
-        RefitAllPlatesDeferred()
-        return
-    end
-
-    if event == "UI_SCALE_CHANGED" or event == "DISPLAY_SIZE_CHANGED" then
-        RefitAllPlatesSoon()
         return
     end
 
@@ -2298,16 +2271,14 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
             for otherUnit in pairs(FS.framesByUnit) do
                 UpdateGlowState(otherUnit)
             end
-        elseif cvarName and PLATE_SCALE_CVARS[cvarName] then
-            RefitAllPlatesSoon()
         end
     end
 end)
 
--- /fsplate: reads back the numbers behind FitPlateFillCuts for the target plate and one
--- non-target plate, so the one-texel-per-physical-pixel reading of the plate stroke can be
--- confirmed in game: if the border's chamfer on screen is about SLICE_MARGIN pixels, the
--- assumption holds. Read-only; every value is a plain number or "n/a".
+-- /fsplate: reads back the plate's pixel scale for the target plate and one non-target plate,
+-- plus which fill erase each bar uses (nineslice = Theme.AddCutFillErase, quads = the unit-sized
+-- fallback), so the corner fix can be checked against a screenshot. Read-only; every value is a
+-- plain number or "n/a".
 SLASH_FSPLATE1 = "/fsplate"
 SlashCmdList["FSPLATE"] = function()
     local theme = FS.Theme
@@ -2317,9 +2288,14 @@ SlashCmdList["FSPLATE"] = function()
     end
     local function line(label, root)
         local pixel, factor, eff = PlatePixelSize(root)
-        print(string.format("synthwave://plate %s effScale=%s pxFactor=%s unitsPerPixel=%s strokeChamferUnits=%s wedge=%s",
+        -- unitPx is screen pixels per plate unit; deltaAt1pxTexel is the bar inset (1 unit) in slice
+        -- texels IF one texel were one pixel. The real texel size is not readable from Lua (measure it
+        -- off a screenshot); the root-anchored erase does not depend on it, this is for the record.
+        print(string.format("synthwave://plate %s effScale=%s pxFactor=%s unitsPerPixel=%s strokeChamferUnits=%s unitPx=%s deltaAt1pxTexel=%s erase=%s",
             label, num(eff), num(factor), num(pixel),
-            pixel and num(theme.SLICE_MARGIN * pixel) or "n/a", tostring(root.fsFillCut or "unfitted")))
+            pixel and num(theme.SLICE_MARGIN * pixel) or "n/a",
+            pixel and num(1 / pixel) or "n/a", pixel and num(theme.BAR_FILL_INSET / pixel) or "n/a",
+            root.healthBar and root.healthBar.fsFillErase and "nineslice" or "quads"))
     end
     local physical = "n/a"
     if type(GetPhysicalScreenSize) == "function" then

@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Center Console</title>
+<style>
+/* The addon's own bundled faces (ForeverSynthwave/fonts). Falls back to the stacks below. */
+@font-face { font-family: "FS Display"; src: url("../fonts/FSDisplay-Bold.ttf"); font-weight: 700; }
+@font-face { font-family: "FS Mono"; src: url("../fonts/MononokiNerdFontMono-Bold.ttf"); font-weight: 700; }
+@font-face { font-family: "Share Tech Mono"; src: url("../fonts/ShareTechMono-Regular.ttf"); }
+
+:root {
+  color-scheme: dark;
+
+  /* Addon palette, copied from combat-hud-stack-a-2026-10-02.html */
+  --bg: #1a1025;
+  --track: #0a0416;
+  --line: #3a2168;
+  --violet: #a855f7;
+  --pink: #ff2e97;
+  --cyan: #22e0ff;
+  --green: #39ff14;
+  --parchment: #bfe9d6;
+  --surface: #2d1b4e;
+  --text: #e2e8f0;
+
+  /* Page only, not from the addon */
+  --page: #0e0719;
+  --muted: #9a8fbd;
+  --warm: #ff3d1f;
+  --core: #eafcff;
+  --glow: rgba(168, 85, 247, 0.35);
+  --gold: #ffd23f;
+
+  --font-display: "Orbitron", "Eurostile", "Bank Gothic", "Arial Narrow", sans-serif;
+  --font-body: "Rajdhani", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Share Tech Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --font-label: "FS Mono", "Mononoki", "Mononoki Nerd Font", "Share Tech Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  --gutter: 16px;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--page); color: var(--text); font-family: var(--font-body); font-size: 17px; line-height: 1.4; font-weight: 500; }
+.wrap { max-width: 1560px; margin-inline: auto; padding-inline: var(--gutter); padding-block: 0 56px; }
+
+.top { padding-block: 28px 10px; }
+.kicker { margin: 0 0 6px; font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--cyan); }
+h1 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: clamp(1.35rem, 6vw, 2.1rem); letter-spacing: 0.04em; text-transform: uppercase; line-height: 1.1; color: var(--text); }
+h1 span { color: var(--pink); }
+.lede { margin: 0 0 8px; max-width: 110ch; color: var(--parchment); font-size: 1.05rem; }
+.lede b { color: var(--cyan); font-weight: 600; }
+
+/* Cards, same chamfered chrome as the combat HUD page */
+.card { background: linear-gradient(135deg, var(--violet), var(--line) 45%, var(--line)); padding: 1px; margin-top: 26px; width: fit-content; max-width: 100%;
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px)); }
+.card-in { background: var(--bg); padding: 14px; display: flex; flex-direction: column; gap: 10px;
+  clip-path: polygon(0 0, calc(100% - 15px) 0, 100% 15px, 100% 100%, 15px 100%, 0 calc(100% - 15px)); }
+.card-head { display: flex; align-items: center; gap: 12px; }
+.letter { flex: none; min-width: 36px; height: 36px; padding: 0 4px; display: grid; place-items: center; background: var(--pink); color: var(--track);
+  font-family: var(--font-display); font-weight: 700; font-size: 16px;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px)); }
+h2 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.25; flex: 1; min-width: 0; }
+.badge { flex: none; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--pink); border: 1px solid var(--pink); padding: 2px 6px; }
+.vcap { margin: 0; font-family: var(--font-mono); font-size: 13px; color: var(--cyan); max-width: 150ch; }
+.desc { margin: 0; font-size: 15px; color: var(--parchment); max-width: 150ch; }
+.math { margin: 0; font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); max-width: 190ch; line-height: 1.55; }
+.math b { color: var(--gold); font-weight: 400; }
+ul.pts { margin: 0; padding-left: 20px; font-size: 15px; color: var(--parchment); max-width: 150ch; }
+ul.pts li { margin: 0 0 4px; }
+ul.pts b { color: var(--pink); font-weight: 600; }
+.scroll { overflow-x: auto; max-width: 100%; }
+
+/* A stage is 1480 x 720 CSS px, one UI unit is one pixel. */
+.stage { position: relative; width: 1480px; flex: none; overflow: hidden; border: 1px solid var(--line); background: #1b1030; }
+.stage > svg { position: absolute; left: 0; top: 0; display: block; }
+.stage .cbt { font-family: var(--font-mono); }
+.stage .lbl { font-family: var(--font-label); }
+
+/* Tiles, same drawing as the combat HUD */
+.t { position: absolute; display: grid; place-items: center; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.02em; color: var(--text);
+  background: linear-gradient(135deg, var(--surface), var(--bg)); border: 1px solid var(--violet); }
+.t.dim { filter: grayscale(1); opacity: 0.45; }
+.t.empty { background: transparent; border: 1px dashed rgba(168, 85, 247, 0.55); }
+.t .secs { position: absolute; right: 2px; bottom: 1px; font-size: 11px; line-height: 1; color: #fff;
+  text-shadow: 1px 0 #000, -1px 0 #000, 0 1px #000, 0 -1px #000, 0 0 3px #000; }
+.t .ring { position: absolute; inset: -2px; border: 2px solid var(--cyan); box-shadow: 0 0 8px var(--cyan); pointer-events: none; }
+.t .ring.gold { border-color: var(--gold); box-shadow: 0 0 9px var(--gold), 0 0 26px 6px rgba(255, 210, 63, 0.38); }
+.t .ring.pink { border-color: var(--pink); box-shadow: 0 0 9px var(--pink); }
+.t.next { border: 2px solid var(--cyan); box-shadow: 0 0 10px var(--cyan); }
+.t.next .abbr { font-size: 16px; }
+.t .key { position: absolute; top: 2px; right: 4px; font-size: 12px; line-height: 1; color: var(--cyan); }
+.t.gold .key { color: var(--gold); }
+.nlbl { position: absolute; text-align: center; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.14em; color: #c9bdea; text-shadow: 0 1px 2px #000, 0 0 3px #000; white-space: nowrap; }
+.chip { position: absolute; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--gold); white-space: nowrap; height: 15px; line-height: 13px; padding: 0 6px;
+  background: rgba(10, 4, 22, 0.88); border: 1px solid var(--gold); box-shadow: 0 0 8px rgba(255, 210, 63, 0.45);
+  clip-path: polygon(0 0, calc(100% - 4px) 0, 100% 4px, 100% 100%, 4px 100%, 0 calc(100% - 4px)); }
+.tiny { position: absolute; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.1em; white-space: nowrap; text-shadow: 0 1px 2px #000, 0 0 3px #000; }
+
+/* Party panel rows: laser rails for HP and mana */
+.prow { position: absolute; }
+.prow .cls { position: absolute; left: 0; top: 1px; width: 12px; height: 12px; clip-path: polygon(0 0, calc(100% - 3px) 0, 100% 3px, 100% 100%, 3px 100%, 0 calc(100% - 3px)); }
+.prow b { position: absolute; left: 18px; top: 0; font-family: var(--font-mono); font-weight: 400; font-size: 12px; line-height: 14px; color: var(--text); }
+.prow .pc { position: absolute; right: 0; top: 0; font-family: var(--font-mono); font-size: 11px; line-height: 14px; color: var(--muted); }
+.prow .hp, .prow .mp { position: absolute; left: 0; right: 0; background: rgba(10, 4, 22, 0.95); border-top: 1px solid rgba(168, 85, 247, 0.18); border-bottom: 1px solid rgba(168, 85, 247, 0.18); }
+.prow .hp { top: 17px; height: 7px; }
+.prow .mp { top: 27px; height: 5px; }
+.prow u { position: absolute; left: 0; top: 0; bottom: 0; display: block; box-shadow: 0 0 6px 1px currentColor; }
+.pfoot { position: absolute; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; color: var(--muted); white-space: nowrap; }
+
+.cropbox { position: relative; overflow: hidden; border: 1px solid var(--line); flex: none; background: #1b1030; }
+.cropbox > .inner { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.croprow { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
+.croplab { margin: 0 0 4px; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--cyan); }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&amp;family=Rajdhani:wght@500;600&amp;display=swap">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <p class="kicker">Forever Synthwave / Combat HUD / Center console</p>
+    <h1>Center console <span>on</span> the character</h1>
+    <p class="lede">Parker's sketch, drawn on a desert dusk backdrop. The character stands in the middle. A cast bar plate sits at chest height on each side, a rail runs under each plate and angles <b>down and outward</b>. The left rail runs into the chamfered corner of the party panel, so plate, rail and panel read as one shape. The right rail carries the DoT tiles. The rotation row sits above the head. The rails are shape lines, not buttons. Panels 1 to 4 are the sketch layout at 1:1 (one UI unit is one pixel, 1480 x 720 crops of a 2560 x 1440 screen). Panel 5 is a suggested variant for comparison.</p>
+  </header>
+  <div id="panels"></div>
+  <div id="details"></div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var C = {
+    violet: "#a855f7", pink: "#ff2e97", cyan: "#22e0ff", green: "#39ff14", track: "#0a0416", line: "#3a2168",
+    surface: "#2d1b4e", text: "#e2e8f0", parchment: "#bfe9d6", muted: "#9a8fbd", core: "#eafcff", bg: "#1a1025", gold: "#ffd23f"
+  };
+
+  /* ---------- helpers ---------- */
+  var uidN = 0;
+  function uid() { return "c" + (++uidN); }
+  function hx(h) { h = h.replace("#", ""); return [parseInt(h.substr(0, 2), 16), parseInt(h.substr(2, 2), 16), parseInt(h.substr(4, 2), 16)]; }
+  function hex2(n) { n = Math.max(0, Math.min(255, Math.round(n))); return (n < 16 ? "0" : "") + n.toString(16); }
+  function mix(a, b, t) { var x = hx(a), y = hx(b); return "#" + [0, 1, 2].map(function (i) { return hex2(x[i] + (y[i] - x[i]) * t); }).join(""); }
+  function rgba(h, a) { var x = hx(h); return "rgba(" + x[0] + "," + x[1] + "," + x[2] + "," + a + ")"; }
+  function r2(n) { return Math.round(n * 100) / 100; }
+  function pts(a) { return a.map(function (p) { return r2(p[0]) + "," + r2(p[1]); }).join(" "); }
+  function insetPoly(P, d) {
+    var n = P.length, area = 0, i;
+    for (i = 0; i < n; i++) { var a = P[i], b = P[(i + 1) % n]; area += a[0] * b[1] - b[0] * a[1]; }
+    var s = area > 0 ? 1 : -1;
+    var lines = P.map(function (p, idx) {
+      var q = P[(idx + 1) % n], dx = q[0] - p[0], dy = q[1] - p[1], len = Math.sqrt(dx * dx + dy * dy);
+      return { x: p[0] + s * (-dy) / len * d, y: p[1] + s * dx / len * d, dx: dx, dy: dy };
+    });
+    return P.map(function (p, idx) {
+      var l1 = lines[(idx + n - 1) % n], l2 = lines[idx], cr = l1.dx * l2.dy - l1.dy * l2.dx;
+      if (Math.abs(cr) < 1e-6) { return p; }
+      var t = ((l2.x - l1.x) * l2.dy - (l2.y - l1.y) * l2.dx) / cr;
+      return [l1.x + t * l1.dx, l1.y + t * l1.dy];
+    });
+  }
+  var mctx = document.createElement("canvas").getContext("2d");
+  function measure(text, size) { mctx.font = size + "px 'Share Tech Mono', ui-monospace, monospace"; return mctx.measureText(text).width; }
+
+  /* ---------- stage constants ---------- */
+  var W = 1480, CX = 740;
+  var PW = 268, BH = 22, CHM = 5;           /* cast bar: 268 x 22, chamfer 5 (Stack A) */
+  var TABH = 15, SL = 5;
+  var DOCK_X = 210;                          /* party panel right edge, docked at the far left of the crop */
+  var PANEL_X = 10, PANEL_H = 270;
+  var TH33 = 33 * Math.PI / 180;
+
+  /* ---------- the cast bar, Stack A numbers, drawn at (x, y) ---------- */
+  function framePts() {
+    return pts([[CHM + 0.5, 0.5], [PW - CHM - 0.5, 0.5], [PW - 0.5, CHM + 0.5], [PW - 0.5, BH - CHM - 0.5], [PW - CHM - 0.5, BH - 0.5], [CHM + 0.5, BH - 0.5], [0.5, BH - CHM - 0.5], [0.5, CHM + 0.5]]);
+  }
+  function chevPts(i) {
+    var x0 = 27 + i * 12, ah = 9;
+    return [[0, 0], [9, 0], [9 + ah, ah], [9, 18], [0, 18], [ah, ah]].map(function (p) { return [x0 + p[0], 2 + p[1]]; });
+  }
+  /* o: frac (0..1) lit, ghost, timer [elapsed, total] */
+  function bar(x, y, o) {
+    var id = uid(), g = "", i, N = 14, lit = Math.round((o.frac || 0) * N), ghost = !!o.ghost;
+    var lg = "";
+    g += '<polygon points="' + framePts() + '" fill="none" stroke="' + C.violet + '" stroke-width="3" opacity="' + (ghost ? 0 : 0.35) + '" filter="url(#' + id + 'b)"/>';
+    g += '<polygon points="' + framePts() + '" fill="' + rgba(C.track, ghost ? 0.4 : 0.93) + '" stroke="' + rgba(C.violet, ghost ? 0.4 : 1) + '" stroke-width="1" stroke-linejoin="miter"/>';
+    if (!ghost) {
+      g += '<rect x="6.5" y="2.5" width="17" height="17" fill="' + C.track + '" stroke="' + C.line + '" shape-rendering="crispEdges"/>';
+      g += '<polygon points="' + pts([[15, 6.5], [19.5, 11], [15, 15.5], [10.5, 11]]) + '" fill="' + C.pink + '"/>';
+    }
+    for (i = 0; i < N; i++) {
+      var P = chevPts(i);
+      if (ghost) {
+        g += '<polygon points="' + pts(insetPoly(P, 0.5)) + '" fill="none" stroke="' + rgba(C.cyan, 0.26) + '" stroke-width="1" stroke-linejoin="miter"/>';
+      } else if (i < lit) {
+        lg += '<polygon points="' + pts(P) + '" fill="' + C.cyan + '"/>';
+      } else {
+        g += '<polygon points="' + pts(P) + '" fill="' + rgba(C.cyan, 0.2) + '"/>';
+      }
+    }
+    if (lg) {
+      g += '<g opacity="0.55" filter="url(#' + id + 'b)">' + lg + '</g>' + lg;
+      /* the hollow leading caret, one chevron past the lit run */
+      if (lit < N) { g += '<polygon points="' + pts(insetPoly(chevPts(lit), 0.5)) + '" fill="none" stroke="' + C.core + '" stroke-width="1" stroke-linejoin="miter"/>'; }
+    }
+    if (o.timer) {
+      g += '<text class="cbt" x="' + (PW - CHM - 4) + '" y="15" font-size="11" text-anchor="end"><tspan fill="' + C.text + '">' + o.timer[0] + '</tspan><tspan fill="' + C.muted + '"> / ' + o.timer[1] + '</tspan></text>';
+    }
+    return '<g transform="translate(' + r2(x) + ',' + r2(y) + ')"><defs><filter id="' + id + 'b" x="-5%" y="-60%" width="110%" height="220%"><feGaussianBlur stdDeviation="2.4"/></filter></defs>' + g + '</g>';
+  }
+  /* Spell name tab, a trapezoid. dir "down" hangs under a line at yLine, "up" rises above it. xLeft is the tab's left edge. Returns { svg, w }. */
+  function tab(xLeft, yLine, text, dir, ghost) {
+    var tabW = Math.ceil(measure(text, 12)) + 12 + text.length * 0.5, tw = tabW + 2 * SL;
+    var yB = dir === "down" ? yLine + TABH : yLine - TABH;
+    var fill = ghost ? 0.5 : 0.95, stroke = ghost ? 0.4 : 1, tcol = ghost ? 0.5 : 1;
+    var poly = [[xLeft, yLine], [xLeft + tw, yLine], [xLeft + SL + tabW, yB], [xLeft + SL, yB]];
+    var edge = dir === "down"
+      ? [[xLeft, yLine - 0.5], [xLeft + SL, yB - 0.5], [xLeft + SL + tabW, yB - 0.5], [xLeft + tw, yLine - 0.5]]
+      : [[xLeft, yLine + 0.5], [xLeft + SL, yB + 0.5], [xLeft + SL + tabW, yB + 0.5], [xLeft + tw, yLine + 0.5]];
+    var ty = Math.round((yLine + yB) / 2 + 12 * 0.33);
+    var s = '<polygon points="' + pts(poly) + '" fill="' + rgba(C.track, fill) + '"/>' +
+      '<polyline points="' + pts(edge) + '" fill="none" stroke="' + rgba(C.violet, stroke) + '" stroke-width="1" stroke-linejoin="miter"/>' +
+      '<text class="cbt" x="' + r2(xLeft + SL + 6) + '" y="' + ty + '" font-size="12" letter-spacing="0.5" fill="' + rgba(C.cyan, tcol) + '">' + text + '</text>';
+    return { svg: s, w: tw };
+  }
+
+  /* ---------- rails: neon lines with bloom ---------- */
+  function railDefs(id, x1, x2, op0, op1) {
+    return '<linearGradient id="' + id + 'g" gradientUnits="userSpaceOnUse" x1="' + r2(x1) + '" y1="0" x2="' + r2(x2) + '" y2="0">' +
+      '<stop offset="0" stop-color="' + C.cyan + '" stop-opacity="' + op0 + '"/><stop offset="0.55" stop-color="' + mix(C.cyan, C.violet, 0.55) + '" stop-opacity="' + (op0 + op1) / 2 + '"/><stop offset="1" stop-color="' + C.violet + '" stop-opacity="' + op1 + '"/></linearGradient>';
+  }
+  function rail(d, id, w, a) {
+    a = a == null ? 1 : a;
+    return '<path d="' + d + '" fill="none" stroke="url(#' + id + 'g)" stroke-width="' + (w * 3.2) + '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (0.55 * a) + '" filter="url(#' + id + 'bl)"/>' +
+      '<path d="' + d + '" fill="none" stroke="url(#' + id + 'g)" stroke-width="' + w + '" stroke-linecap="round" stroke-linejoin="round" opacity="' + a + '"/>';
+  }
+  function node(x, y, a) {
+    a = a == null ? 1 : a;
+    return '<g opacity="' + a + '"><circle cx="' + r2(x) + '" cy="' + r2(y) + '" r="7" fill="' + C.cyan + '" opacity="0.28" filter="url(#glowN)"/>' +
+      '<circle cx="' + r2(x) + '" cy="' + r2(y) + '" r="3.2" fill="' + C.core + '" stroke="' + C.violet + '" stroke-width="1.3"/></g>';
+  }
+  var COMMON_DEFS = '<filter id="glowN" x="-200%" y="-200%" width="500%" height="500%"><feGaussianBlur stdDeviation="2.5"/></filter>' +
+    '<filter id="softB" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3"/></filter>';
+
+  /* ---------- backdrop: dark desert dusk ---------- */
+  function backdrop(horizon, H) {
+    var id = uid(), s = '';
+    s += '<defs><linearGradient id="' + id + 's" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#150c2c"/><stop offset="0.45" stop-color="#3a1a4c"/><stop offset="0.8" stop-color="#8a3a4a"/><stop offset="1" stop-color="#d0703a"/></linearGradient>' +
+      '<linearGradient id="' + id + 'd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4a2430"/><stop offset="1" stop-color="#1a0d1a"/></linearGradient>' +
+      '<linearGradient id="' + id + 'f" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a1e2a"/><stop offset="1" stop-color="#150a16"/></linearGradient>' +
+      '<radialGradient id="' + id + 'u" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#ffb069" stop-opacity="0.85"/><stop offset="1" stop-color="#ffb069" stop-opacity="0"/></radialGradient></defs>';
+    s += '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="url(#' + id + 's)"/>';
+    s += '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="url(#' + id + 'f)" opacity="0"/>';
+    /* stars */
+    var i, seed = 7, rnd = function () { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    for (i = 0; i < 70; i++) { s += '<circle cx="' + r2(rnd() * W) + '" cy="' + r2(rnd() * horizon * 0.55) + '" r="' + r2(0.4 + rnd() * 0.8) + '" fill="#e8dcff" opacity="' + r2(0.2 + rnd() * 0.5) + '"/>'; }
+    /* low sun glow on the horizon, right of centre */
+    s += '<ellipse cx="' + (CX + 430) + '" cy="' + horizon + '" rx="260" ry="90" fill="url(#' + id + 'u)"/>';
+    /* far dunes */
+    s += '<path d="M0 ' + horizon + ' L0 ' + (horizon - 26) + ' Q160 ' + (horizon - 58) + ' 330 ' + (horizon - 24) + ' T640 ' + (horizon - 30) + ' T980 ' + (horizon - 52) + ' T1260 ' + (horizon - 22) + ' T' + W + ' ' + (horizon - 38) + ' L' + W + ' ' + horizon + ' Z" fill="#552a3c"/>';
+    s += '<path d="M0 ' + horizon + ' L0 ' + (horizon - 8) + ' Q220 ' + (horizon - 30) + ' 460 ' + (horizon - 8) + ' T900 ' + (horizon - 14) + ' T1300 ' + (horizon - 6) + ' T' + W + ' ' + (horizon - 14) + ' L' + W + ' ' + horizon + ' Z" fill="#3b1d2f"/>';
+    /* ground */
+    s += '<rect x="0" y="' + horizon + '" width="' + W + '" height="' + (H - horizon) + '" fill="url(#' + id + 'd)"/>';
+    s += '<path d="M0 ' + (horizon + 90) + ' Q300 ' + (horizon + 60) + ' 640 ' + (horizon + 96) + ' T1300 ' + (horizon + 70) + ' T' + W + ' ' + (horizon + 84) + ' L' + W + ' ' + H + ' L0 ' + H + ' Z" fill="#2a1424" opacity="0.7"/>';
+    /* a few rocks */
+    s += '<polygon points="' + pts([[1120, horizon + 110], [1150, horizon + 84], [1196, horizon + 96], [1214, horizon + 112]]) + '" fill="#1c0f1c"/>';
+    s += '<polygon points="' + pts([[300, horizon + 150], [330, horizon + 130], [372, horizon + 142], [386, horizon + 152]]) + '" fill="#1c0f1c"/>';
+    /* a dusk tint over everything so the UI reads */
+    s += '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="#0a0418" opacity="0.18"/>';
+    return s;
+  }
+
+  /* ---------- the character: a robed caster, Hc tall, centre at (CX, cy) ---------- */
+  function character(Hc, cy) {
+    var R = [[0, -0.490], [0.040, -0.482], [0.066, -0.455], [0.074, -0.415], [0.066, -0.380], [0.082, -0.352], [0.150, -0.322], [0.182, -0.285], [0.188, -0.200], [0.200, -0.120], [0.218, -0.030], [0.200, -0.012], [0.172, -0.020], [0.178, 0.060], [0.215, 0.250], [0.250, 0.495]];
+    var P = [], i;
+    for (i = 0; i < R.length; i++) { P.push([R[i][0], R[i][1]]); }
+    for (i = R.length - 1; i >= 1; i--) { P.push([-R[i][0], R[i][1]]); }
+    var id = uid();
+    var s = '<defs><linearGradient id="' + id + 'c" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#241238"/><stop offset="1" stop-color="#0c0614"/></linearGradient></defs>';
+    s += '<ellipse cx="' + CX + '" cy="' + r2(cy + 0.5 * Hc) + '" rx="' + r2(0.30 * Hc) + '" ry="' + r2(0.03 * Hc) + '" fill="#000" opacity="0.4"/>';
+    s += '<g transform="translate(' + CX + ',' + r2(cy) + ') scale(' + Hc + ')">';
+    s += '<polygon points="' + pts(P) + '" fill="url(#' + id + 'c)" stroke="' + rgba(C.violet, 0.75) + '" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>';
+    /* hood opening, belt and a centre fold */
+    s += '<ellipse cx="0" cy="-0.405" rx="0.042" ry="0.052" fill="#05020c"/>';
+    s += '<polyline points="-0.03,-0.352 0,-0.33 0.03,-0.352" fill="none" stroke="' + rgba(C.violet, 0.5) + '" stroke-width="1" vector-effect="non-scaling-stroke"/>';
+    s += '<line x1="-0.14" y1="-0.02" x2="0.14" y2="-0.02" stroke="' + rgba(C.pink, 0.45) + '" stroke-width="1.5" vector-effect="non-scaling-stroke"/>';
+    s += '<line x1="0" y1="-0.32" x2="0" y2="0.49" stroke="' + rgba(C.violet, 0.25) + '" stroke-width="1" vector-effect="non-scaling-stroke"/>';
+    s += '</g>';
+    return s;
+  }
+
+  /* ---------- tiles ---------- */
+  function tile(cx, cy, size, o) {
+    o = o || {};
+    var cls = "t" + (o.dim ? " dim" : "") + (o.empty ? " empty" : "") + (o.next ? " next" : "") + (o.gold ? " gold" : "");
+    var st = 'left:' + r2(cx - size / 2) + 'px;top:' + r2(cy - size / 2) + 'px;width:' + size + 'px;height:' + size + 'px;' + (o.op != null ? 'opacity:' + o.op + ';' : '');
+    var h = '<div class="' + cls + '" style="' + st + '">';
+    if (!o.empty) { h += '<span class="abbr">' + o.label + '</span>'; }
+    if (o.key) { h += '<span class="key">' + o.key + '</span>'; }
+    if (o.secs != null) { h += '<span class="secs">' + o.secs + '</span>'; }
+    if (o.ring) { h += '<span class="ring ' + o.ring + '"></span>'; }
+    return h + '</div>';
+  }
+  function nlabel(cx, y, w, text, color) {
+    return '<div class="nlbl" style="left:' + r2(cx - w / 2) + 'px;top:' + r2(y) + 'px;width:' + w + 'px;' + (color ? 'color:' + color : '') + '">' + text + '</div>';
+  }
+
+  /* ---------- the party panel, chamfered bottom right ---------- */
+  var PARTY = [
+    { n: "Parker", c: "#8788ee", hp: 0.92, mp: 0.78 },
+    { n: "Aeryn", c: "#ffffff", hp: 0.64, mp: 0.55 },
+    { n: "Dolgrim", c: "#c79c6e", hp: 1.0, mp: 0.0 },
+    { n: "Sethis", c: "#ff7d0a", hp: 0.38, mp: 0.9 },
+    { n: "Mirel", c: "#0070de", hp: 0.81, mp: 0.66 }
+  ];
+  /* Joint J = (DOCK_X, Jy). The chamfer runs from J down and left by (cdx, cdy), on the same slope as the rail (collinear). */
+  function partyPanel(Jy, cdx, cdy, open, id, a) {
+    a = a == null ? 1 : a;
+    var bottom = Jy + cdy, top = bottom - PANEL_H, s = '', h = '', i;
+    var poly = [[PANEL_X, top], [DOCK_X, top], [DOCK_X, Jy], [DOCK_X - cdx, bottom], [PANEL_X, bottom]];
+    if (open) {
+      s += '<defs><linearGradient id="' + id + 'pf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(26,16,37,0.95)"/><stop offset="1" stop-color="rgba(11,5,20,0.95)"/></linearGradient></defs>';
+      s += '<polygon points="' + pts(poly) + '" fill="none" stroke="' + C.violet + '" stroke-width="5" opacity="0.28" filter="url(#softB)"/>';
+      s += '<polygon points="' + pts(poly) + '" fill="url(#' + id + 'pf)" stroke="' + C.violet + '" stroke-width="1" stroke-linejoin="miter"/>';
+      /* the chamfer edge lit with the rail gradient so the rail flows into the panel */
+      s += '<path d="M' + pts([[DOCK_X, Jy]]) + ' L' + pts([[DOCK_X - cdx, bottom]]) + '" stroke="url(#' + id + 'g)" stroke-width="2" fill="none" stroke-linecap="round"/>';
+      var rw = DOCK_X - 18 - (PANEL_X + 8);
+      for (i = 0; i < 5; i++) {
+        var p = PARTY[i], y0 = top + 8 + i * 42;
+        h += '<div class="prow" style="left:' + (PANEL_X + 8) + 'px;top:' + y0 + 'px;width:' + rw + 'px;height:34px">' +
+          '<i class="cls" style="background:' + p.c + '"></i><b>' + p.n + '</b><span class="pc">' + Math.round(p.hp * 100) + '</span>' +
+          '<div class="hp"><u style="width:' + (p.hp * 100) + '%;color:' + p.c + ';background:linear-gradient(90deg,' + rgba(p.c, 0.35) + ',' + p.c + ')"></u></div>' +
+          '<div class="mp"><u style="width:' + (p.mp * 100) + '%;color:' + C.cyan + ';background:linear-gradient(90deg,' + rgba(C.cyan, 0.35) + ',' + C.cyan + ')"></u></div></div>';
+      }
+      h += '<div class="pfoot" style="left:' + (PANEL_X + 8) + 'px;top:' + (bottom - 20) + 'px">PARTY 5/5</div>';
+    }
+    return { svg: s, html: h, top: top, bottom: bottom };
+  }
+  /* The collapsed stub: a slim parallelogram continuing the rail past J, with five pips */
+  function partyStub(Jx, Jy, th, len) {
+    var dx = -Math.cos(th), dy = Math.sin(th), nx = Math.sin(th), ny = Math.cos(th), hw = 8, s = '', i;
+    var A = [Jx + nx * hw, Jy + ny * hw], B = [A[0] + dx * len, A[1] + dy * len], Cc = [Jx - nx * hw + dx * len, Jy - ny * hw + dy * len], D = [Jx - nx * hw, Jy - ny * hw];
+    var poly = [A, B, Cc, D];
+    s += '<polygon points="' + pts(poly) + '" fill="none" stroke="' + C.violet + '" stroke-width="4" opacity="0.28" filter="url(#softB)"/>';
+    s += '<polygon points="' + pts(poly) + '" fill="' + rgba(C.track, 0.94) + '" stroke="' + C.violet + '" stroke-width="1" stroke-linejoin="miter"/>';
+    for (i = 0; i < 5; i++) {
+      var t = 24 + i * ((len - 34) / 4), px = Jx + dx * t, py = Jy + dy * t, p = PARTY[i];
+      s += '<circle cx="' + r2(px) + '" cy="' + r2(py) + '" r="4.2" fill="' + p.c + '" opacity="' + r2(0.35 + 0.65 * p.hp) + '"/>';
+    }
+    return s;
+  }
+  /* The rail-end node: a small chamfered tab with a chevron, at J */
+  function railNode(Jx, Jy, th, open) {
+    var a = open ? (180 - th * 180 / Math.PI) : (-th * 180 / Math.PI);
+    var poly = [[-11, -11], [11, -11], [15, -7], [15, 7], [11, 11], [-11, 11], [-15, 7], [-15, -7]];
+    var s = '<g transform="translate(' + r2(Jx) + ',' + r2(Jy) + ')">';
+    s += '<polygon points="' + pts(poly) + '" fill="' + C.cyan + '" opacity="0.3" filter="url(#glowN)"/>';
+    s += '<polygon points="' + pts(poly) + '" fill="' + C.track + '" stroke="' + C.cyan + '" stroke-width="1.4" stroke-linejoin="miter"/>';
+    s += '<g transform="rotate(' + r2(a) + ')"><polyline points="-5,-5 1,0 -5,5" fill="none" stroke="' + C.core + '" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<polyline points="1,-5 7,0 1,5" fill="none" stroke="' + C.cyan + '" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></g>';
+    return s + '</g>';
+  }
+
+  /* ---------- panels 1 to 4: the sketch layout ---------- */
+  var ROTATION = { COR: "COR", BOA: "BoA", IMM: "IMM", SL: "SL", SB: "SB" };
+
+  function buildSketch(o) {
+    var Hc = o.Hc, off = o.state === "off", open = o.partyOpen;
+    var H = 720, cy = 410, cs = Math.cos(TH33), sn = Math.sin(TH33), tn = Math.tan(TH33);
+    var inner = 24 + 0.22 * Hc, plateY = cy - 0.20 * Hc, ry = plateY + BH / 2 + 4;
+    var Lx0 = CX - inner - PW, Lx1 = CX - inner, Rx0 = CX + inner, Rx1 = CX + inner + PW;
+    var headTop = cy - 0.5 * Hc;
+    var Jy = ry + (Lx0 - DOCK_X) * tn, cdx = 83, cdy = cdx * tn;
+    var id = uid(), svg = '', html = '';
+    var railA = off ? 0.45 : 1;
+
+    svg += '<defs>' + COMMON_DEFS + railDefs(id + "L", Lx1, DOCK_X, 1, 1) + railDefs(id + "R", Rx0, Rx1 + 250 * cs, 1, 1) + railDefs(id, Lx1, DOCK_X - cdx, 1, 1) +
+      '<filter id="' + id + 'Lbl"><feGaussianBlur stdDeviation="2.6"/></filter><filter id="' + id + 'Rbl"><feGaussianBlur stdDeviation="2.6"/></filter><filter id="' + id + 'bl"><feGaussianBlur stdDeviation="2.6"/></filter></defs>';
+    svg += backdrop(360, H);
+    svg += character(Hc, cy);
+
+    /* LEFT rail: underline under the plate, then the diagonal into the chamfer */
+    var dL = 'M' + r2(Lx1) + ' ' + r2(ry) + ' L' + r2(Lx0) + ' ' + r2(ry) + ' L' + r2(DOCK_X) + ' ' + r2(Jy);
+    svg += rail(dL, id + "L", 2.4, railA);
+    /* RIGHT rail */
+    var endR = [Rx1 + 250 * cs, ry + 250 * sn];
+    var dR = 'M' + r2(Rx0) + ' ' + r2(ry) + ' L' + r2(Rx1) + ' ' + r2(ry) + ' L' + r2(endR[0]) + ' ' + r2(endR[1]);
+    svg += rail(dR, id + "R", 2.4, railA);
+
+    /* Party panel (or the stub), then its chamfer in the rail gradient */
+    var pp = partyPanel(Jy, cdx, cdy, open, id, 1);
+    if (open) {
+      svg += pp.svg;
+    } else {
+      svg += '<path d="M' + r2(DOCK_X) + ' ' + r2(Jy) + ' L' + r2(DOCK_X - cdx) + ' ' + r2(Jy + cdy) + '" stroke="url(#' + id + 'g)" stroke-width="2" fill="none" opacity="' + railA + '"/>';
+      svg += partyStub(DOCK_X, Jy, TH33, 96);
+    }
+    html += pp.html;
+
+    /* Cast bars and tabs */
+    var lbar, rbar, ltab, rtab;
+    if (off) {
+      svg += bar(Lx0, plateY - BH / 2, { ghost: true });
+      ltab = tab(Lx0 + CHM + 1, ry, "SHOOT", "down", true);
+      svg += ltab.svg;
+    } else {
+      svg += bar(Lx0, plateY - BH / 2, { frac: 0.57, timer: ["1.7", "3.0"] });
+      ltab = tab(Lx0 + CHM + 1, ry, "SHADOW BOLT", "down", false);
+      svg += ltab.svg;
+      svg += bar(Rx0, plateY - BH / 2, { frac: 0.44, timer: ["1.1", "2.5"] });
+      rtab = tab(Rx1 - CHM - 1 - (Math.ceil(measure("FROSTBOLT", 12)) + 12 + 9 * 0.5 + 2 * SL), plateY - BH / 2, "FROSTBOLT", "up", false);
+      svg += rtab.svg;
+    }
+
+    /* Nodes on the rails */
+    svg += node(Lx1, ry, railA) + node(Lx0, ry, railA) + node(Rx0, ry, railA) + node(Rx1, ry, railA);
+
+    /* DoT tiles stepping down and outward along the right rail */
+    var dots = [["IMM", 7], ["COR", 11], ["BoA", 19], ["SL", 22]], k;
+    for (k = 0; k < 4; k++) {
+      var s0 = 46 + k * 54, px = Rx1 + s0 * cs, py = ry + s0 * sn;
+      if (!off) {
+        html += tile(px, py, 36, { label: dots[k][0], secs: dots[k][1] });
+        svg += node(Rx1 + (s0 + 27) * cs, ry + (s0 + 27) * sn, 0.7);
+      } else {
+        html += '<div class="t empty" style="left:' + r2(px - 18) + 'px;top:' + r2(py - 18) + 'px;width:36px;height:36px;opacity:0.4"></div>';
+      }
+    }
+    svg += '<circle cx="' + r2(endR[0]) + '" cy="' + r2(endR[1]) + '" r="3" fill="' + C.violet + '" opacity="' + railA + '"/>';
+
+    /* Rotation row above the head */
+    if (!off) {
+      var rowY = headTop - 24 - 28;
+      html += tile(CX, rowY, 56, { label: "IMM", key: "3", next: true });
+      html += nlabel(CX, rowY + 28 + 4, 56, "NEXT");
+      html += tile(CX - 98, rowY, 36, { label: "COR" }) + tile(CX - 54, rowY, 36, { label: "BoA" });
+      html += tile(CX + 54, rowY, 36, { label: "SL" }) + tile(CX + 98, rowY, 36, { label: "SB", ring: "gold" });
+      html += '<div class="chip" style="left:' + (CX + 98 - 52) + 'px;top:' + (rowY - 18 - 6 - 17) + 'px;width:104px;text-align:center">SHADOW TRANCE</div>';
+    } else {
+      var oy = headTop - 24 - 18, names = ["COR", "BoA", "IMM", "SL", "SB"], q;
+      for (q = 0; q < 5; q++) { html += tile(CX + (q - 2) * 44, oy, 36, { label: names[q], op: 0.55 }); }
+    }
+
+    if (open || true) { svg += railNode(DOCK_X, Jy, TH33, open); }
+
+    var info = {
+      Hc: Hc, inner: inner, plateY: plateY, ry: ry, Jy: Jy, plateOuterX: Lx0, railLen: (Lx0 - DOCK_X) / cs, headTop: headTop, rowY: headTop - 52,
+      J: { x: DOCK_X, y: Jy }, panelTop: pp.top, panelBottom: pp.bottom
+    };
+    return { html: '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">' + svg + '</svg>' + html, H: H, info: info };
+  }
+
+  /* ---------- panel 5: the suggested variant, horizon grid and hub ---------- */
+  function buildSuggested() {
+    var Hc = 360, H = 700, cs, sn, th = Math.atan(0.36), tn = 0.36;
+    cs = Math.cos(th); sn = Math.sin(th);
+    var headTop = 64, F = headTop + Hc, cy = headTop + Hc / 2;      /* feet, which is also the vanishing point V */
+    var Vx = CX, Vy = F;
+    var hubY = F + 62, id = uid(), svg = '', html = '';
+    var Jy = Vy + (CX - DOCK_X) * tn, cdx = 94, cdy = cdx * tn;
+    svg += '<defs>' + COMMON_DEFS + '<filter id="' + id + 'bl"><feGaussianBlur stdDeviation="2.6"/></filter></defs>';
+    svg += backdrop(F + 2, H);
+
+    /* horizon grid: faint horizontal lines between the two floor lines, wider apart toward the viewer */
+    var gd = [36, 80, 140, 215], gi;
+    for (gi = 0; gi < gd.length; gi++) {
+      var gx = gd[gi] / tn, gy = Vy + gd[gi];
+      svg += '<line x1="' + r2(Math.max(PANEL_X, Vx - gx)) + '" y1="' + r2(gy) + '" x2="' + r2(Math.min(W - 4, Vx + gx)) + '" y2="' + r2(gy) + '" stroke="' + C.violet + '" stroke-width="1" opacity="0.32"/>';
+    }
+    /* a faint horizon line through the feet */
+    svg += '<line x1="0" y1="' + Vy + '" x2="' + W + '" y2="' + Vy + '" stroke="' + C.pink + '" stroke-width="1" opacity="0.18"/>';
+
+    svg += character(Hc, cy);
+
+    /* floor lines from V. Left: to the party panel joint. Right: down to the stage edge, the bright part is the river. */
+    svg += '<defs>' + railDefs(id + "L", Vx, DOCK_X, 0.2, 1) + railDefs(id + "R", Vx, Vx + 600, 0.2, 1) + railDefs(id, Vx, DOCK_X - cdx, 0.2, 1) + '</defs>';
+    svg += rail('M' + Vx + ' ' + Vy + ' L' + r2(DOCK_X) + ' ' + r2(Jy), id + "L", 2.4, 1);
+
+    /* TIME RIVER: s measured along the right floor line from V. T0 = where the river starts, beside the hub. */
+    var T0 = 100, kt = 8.4, pand = 6;                          /* px per second, pandemic window in seconds */
+    var Pt = function (s) { return [Vx + s * cs, Vy + s * sn]; };
+    var edgeEnd = (W - 6 - Vx) / cs;
+    svg += rail('M' + Vx + ' ' + Vy + ' L' + r2(Pt(edgeEnd)[0]) + ' ' + r2(Pt(edgeEnd)[1]), id + "R", 2.4, 1);
+    /* pandemic segment, hot pink, right next to the hub */
+    var p0 = Pt(T0), p1 = Pt(T0 + kt * pand);
+    svg += '<line x1="' + r2(p0[0]) + '" y1="' + r2(p0[1]) + '" x2="' + r2(p1[0]) + '" y2="' + r2(p1[1]) + '" stroke="' + C.pink + '" stroke-width="9" stroke-linecap="round" opacity="0.4" filter="url(#glowN)"/>';
+    svg += '<line x1="' + r2(p0[0]) + '" y1="' + r2(p0[1]) + '" x2="' + r2(p1[0]) + '" y2="' + r2(p1[1]) + '" stroke="' + C.pink + '" stroke-width="3.2" stroke-linecap="round"/>';
+    /* time ticks every 5 s */
+    var tk;
+    for (tk = 0; tk <= pand; tk += pand) {
+      var q = Pt(T0 + kt * tk), nx = -sn, ny = cs;
+      svg += '<line x1="' + r2(q[0] - nx * 4) + '" y1="' + r2(q[1] - ny * 4) + '" x2="' + r2(q[0] + nx * 4) + '" y2="' + r2(q[1] + ny * 4) + '" stroke="' + (tk <= pand ? C.pink : C.core) + '" stroke-width="1" opacity="0.65"/>';
+    }
+    svg += node(p0[0], p0[1], 1);
+
+    /* party panel docked at the outer end of the left line */
+    var pp = partyPanel(Jy, cdx, cdy, true, id, 1);
+    svg += pp.svg + railNode(DOCK_X, Jy, th, true);
+    html += pp.html;
+
+    /* target cast bar centred above the head */
+    svg += bar(CX - PW / 2, 29, { frac: 0.44, timer: ["1.1", "2.5"] });
+    var tt = tab(CX + PW / 2 - CHM - 1 - (Math.ceil(measure("FROSTBOLT", 12)) + 12 + 9 * 0.5 + 2 * SL), 29, "FROSTBOLT", "up", false);
+    svg += tt.svg;
+
+    /* player cast bar centred under the hub */
+    var by = F + 110;
+    svg += bar(CX - PW / 2, by, { frac: 0.57, timer: ["1.7", "3.0"] });
+    svg += tab(CX - PW / 2 + CHM + 1, by + BH, "SHADOW BOLT", "down", false).svg;
+
+    /* hub tile at the vanishing point area: the proc'd spell has jumped forward into it */
+    html += tile(CX, hubY, 56, { label: "SB", key: "5", next: true, gold: true, ring: "gold" });
+    html += nlabel(CX, hubY + 28 + 4, 56, "NEXT");
+    html += '<div class="chip" style="left:' + (CX - 36 - 104 - 6) + 'px;top:' + (hubY - 8) + 'px;width:104px;text-align:center">SHADOW TRANCE</div>';
+
+    /* rotation row, small and behind the hub in depth: five slots, the proc'd one has jumped forward and left an empty socket */
+    var rowY = F + 3 + 14.5, rn = [["COR", 0], ["BoA", 0], ["IMM", 0], ["SL", 0], ["SB", 1]], ri;
+    for (ri = 0; ri < 5; ri++) {
+      var rx = CX + (ri - 2) * 34;
+      html += rn[ri][1] ? '<div class="t empty" style="left:' + r2(rx - 14.5) + 'px;top:' + r2(rowY - 14.5) + 'px;width:29px;height:29px;opacity:0.7"></div>'
+        : tile(rx, rowY, 29, { label: rn[ri][0], op: 0.8 });
+    }
+
+    /* DoT markers ON the river, distance proportional to time remaining */
+    var dots = [["IMM", 5], ["COR", 11], ["BoA", 17], ["SL", 24]], di;
+    for (di = 0; di < dots.length; di++) {
+      var pm = Pt(T0 + kt * dots[di][1]), inP = dots[di][1] <= pand;
+      html += tile(pm[0], pm[1], 34, { label: dots[di][0], secs: dots[di][1], ring: inP ? "pink" : null });
+    }
+    html += '<div class="tiny" style="left:' + (CX + 36) + 'px;top:' + (hubY - 4) + 'px;color:' + C.pink + '">REFRESH ZONE</div>';
+    html += '<div class="tiny" style="left:' + r2(Pt(T0 + kt * 24)[0] + 22) + 'px;top:' + r2(Pt(T0 + kt * 24)[1] + 2) + 'px;color:' + C.parchment + '">FRESH</div>';
+
+    return {
+      html: '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">' + svg + '</svg>' + html, H: H,
+      info: { J: { x: DOCK_X, y: Jy }, Jy: Jy, F: F, panelTop: pp.top, panelBottom: pp.bottom }
+    };
+  }
+
+  /* ---------- page ---------- */
+  function stageHtml(b) { return '<div class="stage" style="height:' + b.H + 'px">' + b.html + '</div>'; }
+  function card(letter, title, badge, vcap, body) {
+    return '<article class="card"><div class="card-in"><div class="card-head"><span class="letter">' + letter + '</span><h2>' + title + '</h2>' + (badge ? '<span class="badge">' + badge + '</span>' : '') + '</div>' +
+      '<p class="vcap">' + vcap + '</p>' + body + '</div></article>';
+  }
+  function mathLine(i) {
+    var cs = Math.cos(TH33), tn = Math.tan(TH33);
+    return 'Spread rule, Hc = ' + i.Hc + ' px (character height): <b>plate offset from centre = 24 + 0.22 x Hc = ' + Math.round(i.inner) + '</b>; ' +
+      '<b>plate height above centre = 0.20 x Hc = ' + Math.round(0.2 * i.Hc) + '</b>; <b>rotation row baseline = headTop - 24</b>, headTop = cy - 0.5 x Hc = ' + Math.round(i.headTop) + '; ' +
+      'rail diagonal fixed at 33 deg; party docked at x = ' + DOCK_X + ' (fixed), panel y follows the rail: <b>joint y = railY + (plateOuterX - ' + DOCK_X + ') x tan 33 = ' + Math.round(i.Jy) + '</b>, ' +
+      'so rail length = ' + Math.round(i.plateOuterX - DOCK_X) + ' / cos 33 = <b>' + Math.round(i.railLen) + ' px</b>.';
+  }
+
+  var built = {};
+  function render() {
+    var p1 = buildSketch({ Hc: 360, state: "combat", partyOpen: true });
+    var p2 = buildSketch({ Hc: 576, state: "combat", partyOpen: true });
+    var p3 = buildSketch({ Hc: 216, state: "combat", partyOpen: true });
+    var p4 = buildSketch({ Hc: 360, state: "off", partyOpen: false });
+    var p5 = buildSuggested();
+    built = { p1: p1, p2: p2, p3: p3, p4: p4, p5: p5 };
+    var out = '';
+    out += card("1", "Mid zoom, in combat", "1:1", 'Character 360 px tall. Target up, both bars casting, four DoTs ticking, a proc lit, party panel open.',
+      '<div class="scroll">' + stageHtml(p1) + '</div><p class="desc">Left plate: player cast bar, SHADOW BOLT tab hanging from the rail. Right plate: target cast bar. Right rail: DoT tiles with seconds, soonest to expire nearest the plate, so the rail reads as a timeline. Above the head: rotation row with the NEXT tile (IMM, cyan ring, keybind top right) on the centre line, and a gold ring, glow and callout on SB, the tile the Shadow Trance proc affects. Left rail: runs into the chamfer of the party panel; the node at the joint is the show and hide button.</p><p class="math">' + mathLine(p1.info) + '</p>');
+    out += card("2", "Close zoom", "character 1.6x", 'Character 576 px tall. Plates and rails spread outward and up with the character; the panel stays docked at the left and the rail shortens to reach it.',
+      '<div class="scroll">' + stageHtml(p2) + '</div><p class="math">' + mathLine(p2.info) + '</p>');
+    out += card("3", "Far zoom", "character 0.6x", 'Character 216 px tall. Everything contracts toward the character; the rail lengthens to reach the docked panel.',
+      '<div class="scroll">' + stageHtml(p3) + '</div><p class="math">' + mathLine(p3.info) + '</p>');
+    out += card("4", "Out of combat, no target", "ghost track A", 'Ghost chevrons on the player plate, SHOOT tab ghosted, no target plate, DoT rail empty (dashed slots), rotation row at 0.55, party collapsed into a slim stub on the rail.',
+      '<div class="scroll">' + stageHtml(p4) + '</div><p class="desc">Same skeleton as the combat panels, just quieter: the rails stay as the console\'s shape, dimmed to 0.45. The rail-end node stays at the joint and now carries the expand chevron.</p>');
+    out += card("5", "Suggested variant (Claude)", "compare", 'Mid zoom, in combat, same contents as panel 1, rebuilt as a horizon grid with one hub column.',
+      '<div class="scroll">' + stageHtml(p5) + '</div><ul class="pts">' +
+      '<li><b>1 Horizon grid.</b> Both rails are floor lines of a synthwave grid, converging at the character\'s feet, with four faint cross lines that spread apart toward the viewer.</li>' +
+      '<li><b>2 Hub.</b> NEXT tile just under the feet at the vanishing point, player cast bar centred under it, target cast bar centred above the head: one column, eye moves up and down.</li>' +
+      '<li><b>3 Time river.</b> DoT markers sit on the right floor line at a distance proportional to time left: far out is fresh, near the hub is expiring. A hot pink segment beside the hub is the pandemic window; a marker inside it means refresh now.</li>' +
+      '<li><b>4 Rotation row.</b> Small, just above the hub tile, 0.8 alpha. A proc lifts the affected tile into the hub with the gold ring and leaves an empty socket in the row.</li>' +
+      '<li><b>5 Left floor line.</b> Docks the party panel at its outer end, show and hide node where line meets panel.</li></ul>' +
+      '<p class="math">Spread rule, Hc = 360 px: <b>feet = V = headTop + Hc</b> (headTop = 64 here); <b>hub tile centre = V + 62</b>; <b>player bar top = V + 110</b>; <b>target bar bottom = headTop - 13</b>; floor lines fixed at atan(0.36) = 19.8 deg; cross line spacing d = 36, 80, 140, 215 below V; time river: <b>x along line = 100 + 8.4 px x seconds left</b>, pandemic window 6 s; party docked at x = ' + DOCK_X + ', <b>joint y = V + (cx - ' + DOCK_X + ') x 0.36 = ' + Math.round(p5.info.Jy) + '</b>.</p>');
+    document.getElementById("panels").innerHTML = out;
+
+    /* Rail-end node detail, 2.2x crops of the joint in panels 1 and 4 */
+    var det = '<div class="croprow">' +
+      crop(p1, "Panel open (panel 1)", 2.2, 4) + crop(p4, "Panel collapsed into a slim stub (panel 4)", 2.2, 4) + crop(p5, "Panel 5 joint", 2.2, 4) + '</div>';
+    document.getElementById("details").innerHTML = card("N", "Rail-end node, both states", "2.2x crop", 'The small tab at the joint where the rail meets the panel chamfer: collapse chevron when open, expand chevron when collapsed.', det);
+
+    /* publish geometry for the screenshot script */
+    var rects = [], els = document.querySelectorAll(".stage"), i;
+    for (i = 0; i < els.length; i++) { var rc = els[i].getBoundingClientRect(); rects.push([Math.round(rc.left + scrollX), Math.round(rc.top + scrollY), Math.round(rc.width), Math.round(rc.height)]); }
+    var cb = document.querySelectorAll(".cropbox");
+    for (i = 0; i < cb.length; i++) { var rb = cb[i].getBoundingClientRect(); rects.push([Math.round(rb.left + scrollX), Math.round(rb.top + scrollY), Math.round(rb.width), Math.round(rb.height)]); }
+    document.body.setAttribute("data-rects", JSON.stringify(rects));
+  }
+  function crop(b, label, k, unused) {
+    var w = 330, h = 300, J = b.info.J;
+    var left = -(J.x * k - w * 0.62), top = -(J.y * k - h * 0.5);
+    return '<div><p class="croplab">' + label + '</p><div class="cropbox" style="width:' + w + 'px;height:' + h + 'px"><div class="inner" style="width:' + W + 'px;height:' + b.H + 'px;transform:translate(' + left + 'px,' + top + 'px) scale(' + k + ')">' + b.html + '</div></div></div>';
+  }
+
+  var go = function () { try { render(); } catch (e) { document.body.insertAdjacentHTML("afterbegin", '<pre style="color:#f55">' + e.stack + '</pre>'); } };
+  if (document.fonts && document.fonts.load) {
+    Promise.all([document.fonts.load("12px 'Share Tech Mono'"), document.fonts.load("11px 'FS Mono'")]).then(function () { return document.fonts.ready; }).then(go, go);
+  } else { go(); }
+})();
+</script>
+</body>
+</html>

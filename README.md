@@ -26,45 +26,42 @@ Built for my own Stu characters. Then guildmates watching the stream wanted the 
 
 ### The alpha right now
 
-Targets the **WoW Forever beta client, interface 16001**. The layout is currently built around **16:9**. This is an early personal UI with an initial Paladin tester, so expect rough edges.
+Targets the **WoW Forever beta client, interface 16001**. The layout is currently built around **16:9**. This is an early personal UI; expect rough edges.
 
 | Area | Where it stands |
 | --- | --- |
-| UI | Custom unit frames, nameplates, terminal chat, action deck, pet controls, and panel styling. The screenshots show the real alpha. |
-| Combat HUD | Class profiles exist for **Priest and Warlock**. A Paladin seal, aura, and Judgement HUD is still to come. |
-| Paladin | Paladin support is in progress. Dispel cues and class diagnostics are implemented; the first live alpha test is next. |
+| UI | Custom unit frames, nameplates, terminal chat, action deck, pet controls, and panel styling. The dated screenshots above show the real alpha. |
+| Combat HUD | Priest and Warlock profiles, plus Paladin seal/aura controls and the Seal Chamber with a Judgement lane. Advanced Paladin rotation rules at levels 10 and 20 remain incomplete. |
+| Paladin testing | Judgement behavior, its HUD lane, Quick Keybind, and compact key labels have been checked in game. Seal/aura clicks, chamber expiry and no-seal states, and the shoulder seam still need checks. |
 | Mouseover casting | `/fsmouseover` is available; casting through the party rows still needs verification in game. |
-| Diagnostics | `/fsbug` packages settings and recent errors; `/fsrecon class` captures class evidence for the next pass. |
+| Diagnostics | `/fsbug` packages settings and recent errors; `/fsrecon class` captures class evidence. Minimap placement on a new character's first login still needs verification. |
 
 ### Install
 
-**Close the game first.** A new addon or new files require a full client restart.
-
-The public repository is being prepared. Until it is published, use the alpha ZIP supplied by the maintainer. No public release download is available yet.
-
-Once the repository is published, open a terminal in your game's `Interface/AddOns` folder:
+**Close the game first.** Open a terminal in your game's `Interface/AddOns` folder and run:
 
 ```sh
 git clone https://github.com/ironmoose/forever-stuwave.git ForeverSynthwave
 ```
 
-The project is called **Forever STUwave**, but its installed folder must be **`ForeverSynthwave`**. The addon still uses that internal name for its files, textures, and saved settings.
-
-The result must look like this:
+The project displays as **Forever STUwave**, but its installed folder must stay **`ForeverSynthwave`**. Texture paths, the `.toc` filename, and saved settings keep that internal identity for compatibility.
 
 ```text
 Interface/
 └── AddOns/
     └── ForeverSynthwave/
         ├── ForeverSynthwave.toc
+        ├── Bindings.xml
         ├── Theme.lua
         ├── fonts/
         └── media/
 ```
 
-For a supplied tester ZIP, find the inner `ForeverSynthwave` folder and copy it into `Interface/AddOns`. For GitHub's **Code → Download ZIP**, extract the wrapper folder, rename the folder containing `ForeverSynthwave.toc` to `ForeverSynthwave`, and put it there. There must be no extra folder between `ForeverSynthwave` and its `.toc` file.
+If you previously installed a tester ZIP, move its `ForeverSynthwave` folder **outside `AddOns`** before cloning. Keep your `WTF` folder: your saved settings live there and survive replacing the addon.
 
-Start the game and enable **Forever STUwave** in the character selection AddOns menu.
+For a supplied runtime ZIP, copy its inner `ForeverSynthwave` folder into `Interface/AddOns`. For GitHub's **Code → Download ZIP**, rename the extracted folder containing `ForeverSynthwave.toc` to `ForeverSynthwave`. There must be no extra folder between it and the `.toc` file.
+
+Start the game and enable **Forever STUwave** in the character selection AddOns menu. Git installs include development files; WoW loads the files listed in the `.toc`, while the tester ZIP contains only runtime files.
 
 ### Update
 
@@ -74,14 +71,18 @@ Close the game, then run this from `Interface/AddOns`:
 git -C ForeverSynthwave pull --ff-only
 ```
 
-If you installed a ZIP, replace the installed addon folder with the new supplied `ForeverSynthwave` folder. Keep your saved settings in `WTF`; they live outside the addon folder. Restart the client after updating.
+If Git reports local edits or cannot fast-forward, keep those edits and resolve the reported issue before updating. Do not reset the checkout to discard them.
+
+For a ZIP install, move the old addon folder outside `AddOns` and install the new folder. Keep your saved settings in `WTF`. Fully restart the client after updating: `/reload` cannot load newly added addon files.
 
 ### Help shape it
 
-When something breaks, run `/fsbug` with a short note and follow the [testing guide](TESTING.md). For the first Paladin pass, that guide also walks through `/fsrecon class` at level 1 and again around level 10.
+When something breaks, run `/fsbug` with a short note and follow the [testing guide](TESTING.md). Paladin testers can also capture `/fsrecon class` evidence at level 1 and around level 10.
 
-Reports include class, level, zone, addon list, settings, and errors. **Inspect a report before posting it publicly.** Share the focused report first; the entire SavedVariables file contains more data. Public issue reporting will be available at [the repository's issue tracker](https://github.com/ironmoose/forever-stuwave/issues/new) once the repository is published.
+Reports include class, level, zone, addon list, settings, and errors. **Inspect a report before posting it publicly.** Share the focused report first; the entire SavedVariables file contains more data. Report problems through [GitHub issues](https://github.com/ironmoose/forever-stuwave/issues/new) or send the report directly to the maintainer.
 
----
+### Development and license
 
-This checkout is a curated runtime snapshot. Development stays in the private canonical source during the alpha; see [how updates reach this repo](docs/DEVELOPMENT.md). The project's code license is pending. Bundled fonts have their own licenses, listed in [third party notices](THIRD_PARTY_NOTICES.md).
+This repository is the canonical source, including Lua, development tools, harnesses, asset generators, and browser mockups. Start with [the development guide](docs/DEVELOPMENT.md). Mockups are design references; they do not establish live behavior.
+
+Project code and original project assets use the [MIT License](LICENSE). Bundled fonts retain their OFL licenses, and Blizzard game imagery remains separate; see [third party notices](THIRD_PARTY_NOTICES.md). Fresh gameplay media can follow the initial alpha; the existing screenshots retain their original dates and class context.

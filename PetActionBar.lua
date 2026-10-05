@@ -110,7 +110,7 @@ local function UpdateCooldown(button)
     if not warnedNoCooldownApi then
         warnedNoCooldownApi = true
         FS.LogDegradeOnce("petactionbar_nocooldownapi",
-            "|cffff4488ForeverSynthwave|r: no pet action cooldown API available, " ..
+            "|cffff4488Forever STUwave|r: no pet action cooldown API available, " ..
             "pet bar cooldown display disabled")
     end
     cooldown:Hide()
@@ -361,7 +361,7 @@ local function UpdateAutoCast(button, name, autoCastAllowed, autoCastEnabled)
         if not warnedNoAutoCast then
             warnedNoAutoCast = true
             FS.LogDegradeOnce("petactionbar_autocastsecret",
-                "|cffff4488ForeverSynthwave|r: autocast fields returned a secret value, " ..
+                "|cffff4488Forever STUwave|r: autocast fields returned a secret value, " ..
                 "pet bar autocast ring keeps its last look for this button")
         end
         -- The slot was not read: forget its action so the next plain read snaps, never animates.
@@ -477,9 +477,8 @@ local HAS_PET_ACTION_INFO = type(GetPetActionInfo) == "function"
 local warnedNoActionInfoApi = false
 
 -- Keybind text, top-right of the button. Mirrors ActionBars.lua's own
--- UpdateHotkey: GetBindingKey resolves the player's actual binding, and
--- GetBindingText's abbreviate flag handles gamepad/mouse tokens without a
--- hand-rolled gsub chain. "BONUSACTIONBUTTON"..i is the binding action name
+-- UpdateHotkey: GetBindingKey resolves the player's actual binding, and the
+-- shared formatter shortens mouse labels. "BONUSACTIONBUTTON"..i is the binding action name
 -- for pet-bar slot i, matching the historical Blizzard pet-bar binding names.
 -- Neither of these returns a secret value; bindings are player config, not
 -- combat state.
@@ -488,7 +487,7 @@ local function UpdateHotkey(button)
     if not hotkey then return end
 
     local key = GetBindingKey("BONUSACTIONBUTTON" .. button.index)
-    local text = key and GetBindingText(key, 1) or ""
+    local text = FS.FrameHelpers.FormatBindingText(key)
 
     if text == "" then
         hotkey:SetText("")
@@ -530,7 +529,7 @@ local function UpdateButton(button)
         if not warnedNoActionInfoApi then
             warnedNoActionInfoApi = true
             FS.LogDegradeOnce("petactionbar_noactioninfoapi",
-                "|cffff4488ForeverSynthwave|r: GetPetActionInfo unavailable, " ..
+                "|cffff4488Forever STUwave|r: GetPetActionInfo unavailable, " ..
                 "pet bar button info disabled")
         end
         return
@@ -614,7 +613,7 @@ local function ShowPetActionTooltip(self)
         if not warnedNoTooltipApi then
             warnedNoTooltipApi = true
             FS.LogDegradeOnce("petactionbar_notooltipapi",
-                "|cffff4488ForeverSynthwave|r: GameTooltip:SetPetAction unavailable, " ..
+                "|cffff4488Forever STUwave|r: GameTooltip:SetPetAction unavailable, " ..
                 "pet bar tooltips disabled")
         end
         return
@@ -942,7 +941,7 @@ local function EnsureButtons()
         if not warnedNoBarSlot then
             warnedNoBarSlot = true
             FS.LogDegradeOnce("petactionbar_nobarslot",
-                "|cffff4488ForeverSynthwave|r: FS.PetFrame.barSlot not ready yet, " ..
+                "|cffff4488Forever STUwave|r: FS.PetFrame.barSlot not ready yet, " ..
                 "pet action bar build deferred")
         end
         return false
@@ -1003,7 +1002,7 @@ local function RegisterEvents()
     end
     FS.FrameHelpers.SafeRegisterUnitEvent(events, "UNIT_FLAGS", "pet", function(ev, err)
         FS.LogDegradeOnce("petactionbar_unitflags",
-            "|cffff4488ForeverSynthwave|r: failed to register " .. ev
+            "|cffff4488Forever STUwave|r: failed to register " .. ev
                 .. " for pet action bar (" .. tostring(err) .. ")")
     end)
     events:SetScript("OnEvent", OnEvent)
@@ -1032,7 +1031,7 @@ end
 local function Init()
     local ok, err = pcall(Apply)
     if not ok then
-        print("|cff22e0ffForeverSynthwave|r: pet action bar failed to build ("
+        print("|cff22e0ffForever STUwave|r: pet action bar failed to build ("
             .. tostring(err) .. "); pet action bar not created.")
     end
 end

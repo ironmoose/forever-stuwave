@@ -45,13 +45,13 @@ FS.Console = Console
 if not (FS.ActionBars and FS.ActionBars.OnGeometry and FS.ActionBars.SetConsoleActive) then
     if FS.LogDegradeOnce then
         FS.LogDegradeOnce("console_noactionbars",
-            "|cffff4488ForeverSynthwave|r: Console.lua loaded without ActionBars.lua, no Console")
+            "|cffff4488Forever STUwave|r: Console.lua loaded without ActionBars.lua, no Console")
     end
     return
 end
 
 local Theme = FS.Theme or {}
-local PREFIX = "|cff22e0ffForeverSynthwave|r: "
+local PREFIX = "|cff22e0ffForever STUwave|r: "
 
 -------------------------------------------------------------------------------
 -- Constants (design px; the mockup's CN_*, DK and TAB_DW)
@@ -113,6 +113,13 @@ Console.KEY = KEY
 local TEXN = 64
 local GP = 11                  -- glow: texels between the canvas edge and the outline
 local GM = 25                  -- glow nine-slice margin = GP + CUT
+-- The baked halo's own description (texels; one texel is one design px): the file, its side, the texels
+-- between its edge and the outline, the nine-slice margin and the straight middle band that does not vary
+-- along an edge. Exported so a shoulder standing on the chassis (ClassShoulder.lua through PetDock.NewShoulder)
+-- draws its halo with THIS texture and these strips, which makes it the Console's own halo profile by
+-- construction instead of an approximation of it.
+local GLOW = { texture = TEX.glow, size = TEXN, pad = GP, margin = GM, mid0 = 28, mid1 = 36 }
+Console.GLOW = GLOW
 -- How far the drawn Console (halo included) reaches past the button field to the left and
 -- right, in design px. ActionBars.lua narrows the stack with it so the halo stays inside the
 -- action footprint and clear of the chat terminal (it cannot read the paddings above any
@@ -134,6 +141,10 @@ local MR, MG, MB = Tok(Theme.COLOR_MUTED, 0.616, 0.576, 0.769)    -- #9d93c4 mut
 local FILL_TOP = { 45 / 255, 27 / 255, 78 / 255, 0.80 }
 local FILL_BOT = { 11 / 255, 6 / 255, 20 / 255, 0.88 }
 local OUTLINE_ALPHA = 0.72
+-- Exported so a class shoulder drawn as part of the chassis (ClassShoulder.lua) wears the SAME tint and
+-- stroke alpha instead of a copy: the fill's top stop is all a shoulder above the chassis ever shows.
+Console.FILL_TOP = FILL_TOP
+Console.OUTLINE_ALPHA = OUTLINE_ALPHA
 
 -------------------------------------------------------------------------------
 -- Layout: pure geometry
@@ -144,9 +155,12 @@ local keyCount = KEY.COUNT
 function Console.TabWidth(n) return TabBox(ClampCount(n)) end
 function Console.GetKeyCount() return keyCount end
 
--- The pet dock gap (see SetDockGap): { x0, x1 } in design px from the chassis left, as the caller
--- gave it, or nil. Compute clamps it to the drawable span of the top line.
+-- The pet dock gap (see SetDockGap): { x0, x1, hx0, hx1 } in design px from the chassis left, as the
+-- caller gave it (the halo pair defaults to the line pair), or nil. Compute clamps both to the
+-- drawable span of the top line.
 local dockGap
+-- The gap patch (see SetGapPatchAlpha): the alpha its line and halo carry, 0 = the gap shows open.
+local patchAlpha = 0
 
 -- `g` is FS.ActionBars.geometry (UI units, stack-local, y down), `s` the design to
 -- UI scale and `n` the key count (default: the current one). Returns the Console in DESIGN px relative to the chassis top-left (y down;
@@ -176,6 +190,8 @@ function Console.Compute(g, s, n)
     if dockGap then
         local x0, x1 = math.max(dockGap[1], L.cut), math.min(dockGap[2], L.tx)
         if x1 > x0 then L.gap = { x0 = x0, x1 = x1 } end
+        local h0, h1 = math.max(dockGap[3], L.cut), math.min(dockGap[4], L.tx)
+        if h1 > h0 then L.haloGap = { x0 = h0, x1 = h1 } end
     end
     return L
 end
@@ -306,7 +322,7 @@ local function Build(g)
     Console.tab = tab
 
     -- halo, outside the outline only (BACKGROUND -8)
-    for _, k in ipairs({ "haloTL", "haloTop", "haloTop2", "haloTabTop", "haloTR", "haloRight", "haloBR", "haloBottom", "haloBL", "haloLeft" }) do
+    for _, k in ipairs({ "haloTL", "haloTop", "haloTop2", "gapHalo", "haloTabTop", "haloTR", "haloRight", "haloBR", "haloBottom", "haloBL", "haloLeft" }) do
         parts[k] = Textured("BACKGROUND", -8, TEX.glow, VR, VG, VB, 1)
     end
 
@@ -320,7 +336,7 @@ local function Build(g)
     parts.tabFill = Solid("BACKGROUND", -7, FILL_TOP[1], FILL_TOP[2], FILL_TOP[3], FILL_TOP[4])
 
     -- outline (BORDER): plain texel lines, two corner blocks, the foot rail
-    for _, k in ipairs({ "lineTop", "lineTop2", "lineLeft", "lineBottom", "lineRight", "lineTabTop" }) do
+    for _, k in ipairs({ "lineTop", "lineTop2", "gapLine", "lineLeft", "lineBottom", "lineRight", "lineTabTop" }) do
         parts[k] = Solid("BORDER", 0, VR, VG, VB, OUTLINE_ALPHA)
     end
     parts.cornerTL = Textured("BORDER", 0, TEX.outline, VR, VG, VB, OUTLINE_ALPHA)
@@ -374,11 +390,18 @@ local function PlaceRun(tex, x, y, w, h)
     end
 end
 
+-- Alpha only: legal in combat, where Show, Hide and SetPoint on the anchored chassis are not.
+local function ApplyPatchAlpha()
+    if not built then return end
+    parts.gapLine:SetAlpha(patchAlpha)
+    parts.gapHalo:SetAlpha(patchAlpha)
+end
+
 local function SeatHalo(L)
     local W, H, cut, tx, th = L.w, L.h, L.cut, L.tx, L.th
-    local gap = L.gap
+    local gap = L.haloGap
     local footEnd = tx - FOOT_PAD + FOOT_W
-    local mid0, mid1 = 28 / TEXN, 36 / TEXN       -- the straight middle: does not vary along the edge
+    local mid0, mid1 = GLOW.mid0 / TEXN, GLOW.mid1 / TEXN   -- the straight middle: does not vary along the edge
     local edge0 = (TEXN - GP) / TEXN              -- the texel the outline sits on, right and bottom
     local block1 = 1 - GM / TEXN                  -- start of the far corner block
     -- corner blocks (halo around the cut corners and the square ones)
@@ -388,11 +411,15 @@ local function SeatHalo(L)
     Place(parts.haloBL, -GP, H - cut, GM, GM);             Uv(parts.haloBL, 0, GM / TEXN, block1, 1)
     -- straight runs: left, the chassis top up to the foot, the tab top from the foot stub on, right, bottom
     Place(parts.haloLeft, -GP, cut, GP, H - 2 * cut);      Uv(parts.haloLeft, 0, GP / TEXN, mid0, mid1)
-    -- (the pet dock gap splits the top run in two: [cut, x0] and [x1, tx], the line's own split)
+    -- (the pet dock gap splits the top run in two: [cut, hx0] and [hx1, tx], the halo's own pair, which
+    -- is the line's pair unless SetDockGap was given another)
     PlaceRun(parts.haloTop, cut, -GP, (gap and gap.x0 or tx) - cut, GP)
     Uv(parts.haloTop, mid0, mid1, 0, GP / TEXN)
     PlaceRun(parts.haloTop2, gap and gap.x1 or tx, -GP, gap and tx - gap.x1 or 0, GP)
     Uv(parts.haloTop2, mid0, mid1, 0, GP / TEXN)
+    -- (and the gap patch, the top halo's own strip over the gap, carries it whole when its alpha is 1)
+    PlaceRun(parts.gapHalo, gap and gap.x0 or 0, -GP, gap and gap.x1 - gap.x0 or 0, GP)
+    Uv(parts.gapHalo, mid0, mid1, 0, GP / TEXN)
     Place(parts.haloTabTop, footEnd, -th - GP, (W - cut) - footEnd, GP)
     Uv(parts.haloTabTop, mid0, mid1, 0, GP / TEXN)
     Place(parts.haloRight, W, -th + cut, GP, (H - cut) - (-th + cut))
@@ -429,6 +456,7 @@ local function SeatOutline(L)
     Place(parts.cornerTL, 0, 0, cut, cut);                 Uv(parts.cornerTL, 0, c, 0, c)
     PlaceRun(parts.lineTop, cut, 0, (gap and gap.x0 or tx) - cut, LINE)
     PlaceRun(parts.lineTop2, gap and gap.x1 or tx, 0, gap and tx - gap.x1 or 0, LINE)
+    PlaceRun(parts.gapLine, gap and gap.x0 or 0, 0, gap and gap.x1 - gap.x0 or 0, LINE)
     Place(parts.lineLeft, 0, cut, LINE, H - cut - LINE)
     Place(parts.lineBottom, 0, H - LINE, W - cut, LINE)
     Place(parts.cornerBR, W - cut, H - cut, cut, cut);     Uv(parts.cornerBR, 1 - c, 1, 1 - c, 1)
@@ -507,6 +535,7 @@ local function Seat(g)
     SeatFill(L)
     SeatOutline(L)
     SeatInside(L)
+    ApplyPatchAlpha()
 
     -- the tab: a UI unit frame over the shoulder, the key lane's parent
     local tab = Console.tab
@@ -614,20 +643,29 @@ end
 
 -- Opens the top outline and its halo between `x0` and `x1` (design px from the chassis left) where
 -- the pet panel docks, the way the key tab omits the line under itself: the top line and the top
--- halo each split into [TL cut, x0] and [x1, foot], and the chassis fill stays whole. The gap is
--- clamped to that span; one that is empty once clamped, or lies outside it, draws no gap. nil, nil
--- (or anything that is not two numbers) clears it. The gap is kept and re-seated with the chassis
--- (a key count change, a rescale, the next draw), and applied at once when the chassis is drawn.
+-- halo each split into [TL cut, x0] and [x1, foot], and the chassis fill stays whole. An optional
+-- second pair `hx0, hx1` gives the HALO its own span (the pet dock lets the line run under its sides
+-- but keeps the Console's glow off its own side glow); omitted or not two numbers, the halo uses
+-- x0, x1. The GAP IS COVERED by the gap patch (parts.gapLine over x0..x1, parts.gapHalo over
+-- hx0..hx1, see SetGapPatchAlpha): shown at alpha 1 it makes the outline unbroken, at alpha 0 the gap
+-- is open. Each span is clamped to the cut-to-foot run; one that is empty once clamped, or lies
+-- outside it, draws no gap (and no patch). nil, nil (or anything that is not two numbers) clears
+-- it. The gap is kept and re-seated with the chassis (a key count change, a rescale, the next
+-- draw), and applied at once when the chassis is drawn.
 -- Same rule as SetKeyCount: the chassis is anchored to the protected action stack, so this is
 -- refused in combat (returns false, nothing changes and nothing is recorded); the caller asks
 -- again at PLAYER_REGEN_ENABLED. Returns true when the gap is in force.
-function Console.SetDockGap(x0, x1)
+function Console.SetDockGap(x0, x1, hx0, hx1)
     if InCombatLockdown() then return false end
     local gap
     if type(x0) == "number" and type(x1) == "number" and x0 == x0 and x1 == x1 then
-        gap = { x0, x1 }
+        if not (type(hx0) == "number" and type(hx1) == "number" and hx0 == hx0 and hx1 == hx1) then
+            hx0, hx1 = x0, x1
+        end
+        gap = { x0, x1, hx0, hx1 }
     end
-    if (gap == nil and dockGap == nil) or (gap and dockGap and gap[1] == dockGap[1] and gap[2] == dockGap[2]) then
+    if (gap == nil and dockGap == nil) or (gap and dockGap and gap[1] == dockGap[1] and gap[2] == dockGap[2]
+        and gap[3] == dockGap[3] and gap[4] == dockGap[4]) then
         return true
     end
     dockGap = gap
@@ -636,6 +674,24 @@ function Console.SetDockGap(x0, x1)
         if not ok then Degrade("seat_gap", err) end
     end
     return true
+end
+
+-- The gap patch: a 1 texel line and a halo strip over exactly the dock gap, built with the top line's
+-- and top halo's own recipe (colour, alpha, layer, glow strip), so at alpha 1 the top outline reads
+-- as unbroken and at alpha 0 the gap is open. It is seated with the gap (a key count change, a
+-- rescale, the next draw) and hidden with it, and ONLY its alpha is driven from outside: SetAlpha is
+-- legal in combat, which is the point (the pet dock closes the hole the moment the pet panel goes,
+-- while SetDockGap itself waits for regen). 0 to 1, clamped; remembered across reseats and before
+-- the chassis exists. A non-number is refused with false and changes nothing.
+function Console.SetGapPatchAlpha(a)
+    if type(a) ~= "number" or a ~= a then return false end
+    patchAlpha = math.max(0, math.min(1, a))
+    ApplyPatchAlpha()
+    return true
+end
+
+function Console.GetGapPatchAlpha()
+    return patchAlpha
 end
 
 -- True while the chassis is seated and shown (and has not been hidden since): the pet panel docks

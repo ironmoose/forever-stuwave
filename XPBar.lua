@@ -1116,7 +1116,7 @@ local function SetVariant(index, announce)
 
     if announce then
         local v = VARIANTS[index]
-        print(("|cff22e0ffForeverSynthwave|r: XP pips -> |cffff2e97%d %s|r  (%s)%s")
+        print(("|cff22e0ffForever STUwave|r: XP pips -> |cffff2e97%d %s|r  (%s)%s")
             :format(index, v.label, v.note, inCombat and " -- applies after combat" or ""))
     end
     return true
@@ -1129,7 +1129,7 @@ SlashCmdList["FSXP"] = function(msg)
         -- Thirteen looks is too many to dump with full descriptions every time,
         -- so the list is labels only and the ACTIVE one gets its note. /fsxp n
         -- prints that variant's note when you land on it anyway.
-        print("|cff22e0ffForeverSynthwave|r: /fsxp <1-" .. #VARIANTS
+        print("|cff22e0ffForever STUwave|r: /fsxp <1-" .. #VARIANTS
             .. "> switches the XP bar look live.")
         local line = {}
         for i, v in ipairs(VARIANTS) do

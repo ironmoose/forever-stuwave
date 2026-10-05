@@ -90,7 +90,7 @@
 -- and the two coexist: nothing here touches those frames.
 --
 -- Slash: /fshud [on|off|idle on|idle off]. Settings live in ForeverSynthwaveDB.combatHud
--- (account-wide; enabled is per class token). Default on for PRIEST and WARLOCK.
+-- (account-wide; enabled is per class token). Default on for PRIEST, WARLOCK and PALADIN.
 --
 -- UNVERIFIED in game: the AuraContainer slot rendering over our tiles, the occlusion layering,
 -- the glow, the placement against the mockup, and whether includeSpellIDs covers every rank id
@@ -189,7 +189,7 @@ local function LogOnce(key, msg)
     if logged[key] then return end
     logged[key] = true
     if FS.LogDegradeOnce then
-        pcall(FS.LogDegradeOnce, "combathud_" .. key, "|cffff4488ForeverSynthwave|r: combat HUD: " .. tostring(msg))
+        pcall(FS.LogDegradeOnce, "combathud_" .. key, "|cffff4488Forever STUwave|r: combat HUD: " .. tostring(msg))
     end
 end
 
@@ -2163,7 +2163,7 @@ end
 -- Settings, events and the slash command
 -------------------------------------------------------------------------------
 
-local DEFAULT_ON = { PRIEST = true, WARLOCK = true }
+local DEFAULT_ON = { PRIEST = true, WARLOCK = true, PALADIN = true }
 
 local function Saved()
     local db = type(ForeverSynthwaveDB) == "table" and ForeverSynthwaveDB.combatHud or nil
@@ -2219,7 +2219,7 @@ local function SetEnabled(on)
     return true
 end
 
-local PREFIX = "|cff22e0ffForeverSynthwave|r: "
+local PREFIX = "|cff22e0ffForever STUwave|r: "
 
 local function PrintStatus()
     print(PREFIX .. "combat HUD is " .. (enabled and "ON" or "OFF")

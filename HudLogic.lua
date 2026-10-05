@@ -10,8 +10,19 @@
 --                            buffsMissing = { { key, icon }, ... },
 --                            procs = { { key, glow, active }, ... },
 --                            shards = n | nil,
---                            channel = { key, done, ticks, cut } | nil }
+--                            channel = { key, done, ticks, cut } | nil,
+--                            seal = nil | false | { key, id, expiresAt, duration, castAt },
+--                            judgeAt = number | nil,
+--                            judged = nil | false | { key, appliedAt, expiresAt, duration } }
 --                          Every status field is nil when it is UNKNOWN (never a guess).
+--                          `seal` (profiles with a `seals` table, i.e. the Paladin) is the active
+--                          seal: nil = unknown, false = no seal, else the seal and its absolute
+--                          GetTime times; see SEALS below.
+--                          `judgeAt` (same profiles) is the GetTime of our last own Judgement cast, nil
+--                          before one (it survives death and a loading screen, like a cooldown).
+--                          `judged` is the Judgement debuff on the CURRENT target: nil = unknown (also
+--                          after a reset, until a Judgement is seen), false = none, else the seal it was
+--                          cast under and its absolute times; see JUDGEMENT below.
 --                          `targetEpoch` is a plain integer bumped on every PLAYER_TARGET_CHANGED:
 --                          a consumer compares it between pushes to tell a target switch from a
 --                          change on the same target (never the GUID, which stays file-local). It
@@ -32,10 +43,16 @@
 --   FS.Hud.Tick()       one throttled pass (the hidden OnUpdate frame calls it).
 --   FS.Hud.Eval(cond) / FS.Hud.Primitives     the rule primitives (the harness uses them).
 --   FS.Hud.GetProfile() the active profile table, or nil.
+--   FS.Hud.GetSeals()   the profile's seals the player knows, in profile order, as plain
+--                          { key, name, id } entries ({} for a class without seals).
+--   FS.Hud.GetJudgement()  { judgeAt, remaining, key }: the last own Judgement cast time, and the
+--                          seconds left and seal key of the current target's Judgement debuff.
+--                          remaining is nil when unknown (secret target, no target), 0 with key nil
+--                          when the target carries none. All plain numbers from our own cast times.
 --
 -- PRIMITIVES (dotMissing dotRemaining cooldownReady procActive buffMissing resourceBelow
 -- shardsAtLeast playerHealthAbove targetHealthBelow wandEquipped freshTarget engagedFor
--- inCombat notEnoughMana inRange known, and the wrappers `not` and `orUnknown` around any of
+-- inCombat notEnoughMana inRange known sealMissing, and the wrappers `not` and `orUnknown` around any of
 -- them) return true, false or nil. nil means "cannot be read right now" (secret value,
 -- missing API, no target) and a rotation rule with any nil primitive is SKIPPED, never
 -- guessed. `not` keeps nil as nil; `orUnknown` is the one explicit way to say that an
@@ -84,12 +101,53 @@
 --      the addon loaded reads ready for up to one GCD after another cast. Our cast times
 --      survive a loading screen (GetTime is monotonic), so only a /reload loses them.
 --
+-- SEALS (Paladin, a profile with `seals`). The active seal is a LEDGER of our own casts, because
+-- aura reads are blocked in combat: UNIT_SPELLCAST_SUCCEEDED for the player carries a plain spell id
+-- (the dictionary marks a seal `self` AND `seal`; the seal is recorded BEFORE the self-spell early
+-- return, and a seal is never a cast on the target). A new seal replaces the old one and lasts
+-- `profile.seals.duration` (30 s) from the cast. A seal past its expiry reads false, computed on
+-- read from our own plain numbers. Out of combat, when auras are readable, a reconcile scans the
+-- player's HELPFUL auras (the cached PlayerAuras scan, dirtied by UNIT_AURA("player"),
+-- PLAYER_ENTERING_WORLD and PLAYER_REGEN_ENABLED) and takes the seal aura's own expiry and duration
+-- when plain; a readable scan with no seal aura is false; an UNREADABLE scan (zero values, combat,
+-- secret) changes nothing, but ZERO values at index 1 of the seal's own scan read as an EMPTY list (a
+-- buffless paladin is false, not unknown). A seal we cast under 1 s ago survives a readable scan that
+-- does not list it (aura lag, an unknown name), and an aura of the same seal whose expiry is within 1 s
+-- of the ledger's keeps the cast entry (castAt and the cast's rank id), so a cast pushes once; a
+-- disagreeing aura replaces it and the id becomes the aura's. A seal aura whose timing is secret is
+-- present but unknowable: the ledger entry of the same seal is kept, otherwise the state is unknown.
+-- PLAYER_DEAD sets false; the next UNIT_AURA or PLAYER_REGEN_ENABLED rescans. PLAYER_ENTERING_WORLD
+-- and a /reload leave it unknown (nil) until the reconcile reads it.
+-- `sealMissing(sec)` is true with no seal or at most `sec` left, false with more left, nil when
+-- unknown (a rotation rule on it is then skipped, never guessed). VERIFIED in game for Seal of
+-- Righteousness (live recon, level 7): the aura id equals the cast id 21084 and sourceUnit is "player".
+-- UNVERIFIED: the other seal names and ids.
+--
+-- JUDGEMENT (a dictionary spell with `judgement`). Judgement is a cast on the target, so it runs the
+-- normal own-cast path; it does NOT consume the seal (the seal ledger is untouched). Every own cast
+-- stamps `judgeAt` (even with no target); like lastCastOf it survives death and a loading screen, since
+-- a spell cooldown does. When the
+-- active seal is a plain ledger entry whose key has a `profile.seals.judge` length (sotc, sol, sow,
+-- soj; Righteousness has none), the landed debuff goes into the per-target ledger under the key
+-- "judged": { expires, duration, key = the seal at cast time, appliedAt }, written through the same
+-- SetEntryAt as a DoT (so it lands on the target the cast was sent at, and a retarget cannot move it).
+-- An unknown, absent or expired seal records judgeAt only. Like a DoT it is an ESTIMATE (a resisted
+-- Judgement reads as up), survives the player's death, and is dropped with the ledger on
+-- PLAYER_ENTERING_WORLD. After that reset `judged` is UNKNOWN (nil) until a Judgement cast is seen: the
+-- aura reconcile never writes it, so a mob may still carry ours; "none" (false) needs a cast seen since.
+-- The debuff itself is never read from an aura. The only aura read is the seal's own guarded
+-- out-of-combat reconcile, which Seal.OnJudge triggers through Seal.Read when the seal is dirty.
+--
 -- PROCS have two sources, tried in order: the spell-activation overlay glow (the
 -- SPELL_ACTIVATION_OVERLAY_GLOW_SHOW/HIDE events with a plain spell id, then
 -- C_SpellActivationOverlay.IsSpellOverlayed), then the out-of-combat aura read. A profile
 -- proc names the spell that glows in `overlaySpell`. The overlay data is UNVERIFIED until
 -- the in-game probe; a plain false from the overlay API is trusted in combat, but out of
 -- combat a plain aura read overrides it.
+-- A proc with `ready = key` is a cooldown tracker instead (Paladin Holy Strike / Judgement): it
+-- reads CooldownState, so the heuristic above keeps it lit through the global cooldown. UNVERIFIED
+-- in game: isActive during the GCD on 1.60.1, and Hammer of the Righteous sharing Holy Strike's
+-- cooldown (not in the ledger, so casting it does not darken the rung).
 
 local _, FS = ...
 
@@ -270,7 +328,7 @@ end
 
 -- Aura scans (out of combat only) ------------------------------------------------------
 
--- A list of { name, id, expires, duration } for plain auras, or nil when auras cannot be
+-- A list of { name, id, expires, duration, source } for plain auras, or nil when auras cannot be
 -- read. A scan whose first index returns ZERO values is unreadable (nil), not an empty list:
 -- an empty list would read every buff and DoT as missing.
 --
@@ -281,7 +339,11 @@ end
 -- Fire reminders on an unbuffed player (exactly when they matter) and skip the DoT
 -- reconcile on a clean target. The probe: out of combat, strip the buffs or target a mob
 -- with no debuffs of ours, then count the values returned at index 1.
-local function ScanAuras(unit, filter)
+-- The SEAL reconcile alone passes `zeroIsEmpty`: Parker's live /fsrecon class run (out of combat,
+-- level 7) showed the player HELPFUL read works, and a buffless paladin must read "no seal" so the
+-- seal rule can fire, so there zero values at index 1 are an EMPTY list. Every other caller keeps
+-- the unreadable reading above.
+local function ScanAuras(unit, filter, zeroIsEmpty)
     if not AurasReadable() then return nil end
     local fn = C_UnitAuras and C_UnitAuras.GetAuraDataByIndex
     if not fn then return nil end
@@ -289,7 +351,10 @@ local function ScanAuras(unit, filter)
     for i = 1, MAX_AURAS do
         local ok, n, a = pack(pcall(fn, unit, i, filter))
         if not ok or not Plain(a) then return nil end
-        if i == 1 and n == 0 then return nil end
+        if i == 1 and n == 0 then
+            if zeroIsEmpty then return out end
+            return nil
+        end
         if a == nil then break end
         if type(a) == "table" then
             out[#out + 1] = {
@@ -297,6 +362,7 @@ local function ScanAuras(unit, filter)
                 id = PlainOf(a.spellId, "number"),
                 expires = PlainOf(a.expirationTime, "number"),
                 duration = PlainOf(a.duration, "number"),
+                source = PlainOf(a.sourceUnit, "string"),
             }
         end
     end
@@ -319,6 +385,102 @@ local function PlayerAuras()
         playerAuras, playerDirty = list, false
     end
     return playerAuras
+end
+
+-- The active seal (Paladin). ledger: nil unknown, false no seal, else { key, id, expiresAt,
+-- duration, castAt } with absolute GetTime values. `dirty` asks the next read to reconcile it
+-- against the player's auras (out of combat only). One table, to stay under the local limit.
+local Seal = { ledger = nil, dirty = true, judgeAt = nil, judgeSeen = false }
+
+-- Our own cast of a seal landed: it replaces whatever was up. A cast is fresher than any pending
+-- reconcile, so it also clears `dirty` (the UNIT_AURA the cast causes sets it again).
+function Seal.OnCast(key, spellID)
+    local seals = profile and profile.seals
+    local now = Now()
+    if not (seals and now) then return end
+    local seconds = seals.duration or (Spells[key] and Spells[key].apply)
+    if not seconds then return end
+    Seal.ledger = {
+        key = key, id = PlainOf(spellID, "number"), expiresAt = now + seconds,
+        duration = seconds, castAt = now,
+    }
+    Seal.dirty = false
+end
+
+-- Our own Judgement cast landed at `now`: stamp it. Returns { key, seconds } for the debuff it puts on
+-- the target when the active seal is known and has a Judgement length, else nil. The seal is only read.
+function Seal.OnJudge(now)
+    local seals = profile and profile.seals
+    if not (seals and now) then return nil end
+    Seal.judgeAt, Seal.judgeSeen = now, true
+    local s = Seal.Read()
+    local seconds = type(s) == "table" and seals.judge and seals.judge[s.key]
+    if seconds then return { key = s.key, seconds = seconds } end
+end
+
+-- A seal we cast less than this many seconds ago survives a readable scan that does not list it
+-- (the aura can lag the cast event, and a seal name we do not know never matches).
+local SEAL_LAG = 1.0
+-- A listed seal whose expiry is within this many seconds of the ledger's is the same cast.
+local SEAL_AGREE = 1.0
+
+-- Replace the ledger from a readable aura list. Nothing here compares a secret: AuraKey and the
+-- scan entries carry plain values only.
+function Seal.Reconcile(list)
+    local seals = profile.seals
+    local found
+    for _, a in ipairs(list) do
+        local key = AuraKey(a)
+        if key and Spells[key].seal and (a.source == nil or a.source == "player") then
+            found = { key = key, a = a }
+            break
+        end
+    end
+    local old = Seal.ledger
+    if not found then
+        local now = Now()
+        if type(old) == "table" and now and now - old.castAt < SEAL_LAG then return end
+        Seal.ledger = false
+        return
+    end
+    local a = found.a
+    if a.expires and a.expires > 0 then
+        if type(old) == "table" and old.key == found.key and math.abs(old.expiresAt - a.expires) <= SEAL_AGREE then
+            -- the aura of the cast we already hold: keep the entry (castAt and the cast's rank id),
+            -- so the Signature does not move twice per cast. A disagreeing aura replaces it, and
+            -- then the id becomes the aura's spell id.
+            return
+        end
+        local duration = (a.duration and a.duration > 0) and a.duration
+            or seals.duration or Spells[found.key].apply
+        Seal.ledger = {
+            key = found.key, id = a.id, expiresAt = a.expires, duration = duration,
+            castAt = a.expires - duration,
+        }
+    elseif not (type(Seal.ledger) == "table" and Seal.ledger.key == found.key) then
+        -- the seal is up but its timing is unreadable: keep our own cast's entry for the same
+        -- seal, otherwise it is unknown
+        Seal.ledger = nil
+    end
+end
+
+-- nil unknown, false no seal, else the ledger entry (still unexpired).
+function Seal.Read()
+    if not (profile and profile.seals) then return nil end
+    if Seal.dirty and AurasReadable() then
+        -- its own scan (not the cached PlayerAuras): zero values mean an empty list here only
+        local list = ScanAuras("player", "HELPFUL", true)
+        if list then
+            Seal.Reconcile(list)
+            Seal.dirty = false
+        end
+    end
+    local s = Seal.ledger
+    if s then
+        local now = Now()
+        if now and now >= s.expiresAt then return false end
+    end
+    return s
 end
 
 -- The own-cast ledger -------------------------------------------------------------------
@@ -447,6 +609,22 @@ local function OnOwnCast(key, spellID, ctx)
         local now = Now()
         if now then SetEntryAt(ctx, key, { expires = now + seconds, duration = seconds }) end
     end
+end
+
+-- Record the Judgement debuff `j` (from Seal.OnJudge) on the target `ctx` describes.
+function Seal.RecordJudged(ctx, j, now)
+    SetEntryAt(ctx, "judged", { expires = now + j.seconds, duration = j.seconds, key = j.key, appliedAt = now })
+end
+
+-- The Judgement debuff on the current target, like ReadEntry, except that "none" (false) needs a
+-- Judgement cast seen since the ledger was last reset: nothing else writes the "judged" key (the aura
+-- reconcile only knows the DoTs), so before that the target may still carry one from before the reset.
+-- `judgeSeen` is global, not per target, on purpose: tracking it per target is not worth it, and the
+-- worst case is a "none" on a mob that still carries an old Judgement, which only prompts an early re-judge.
+function Seal.ReadJudged()
+    local e = ReadEntry("judged")
+    if e == false and not Seal.judgeSeen then return nil end
+    return e
 end
 
 -- The target a cast landed on. A cast whose SENT or START we saw lands on the target of that
@@ -640,9 +818,35 @@ local function AuraProcState(spec)
     return r ~= nil
 end
 
+-- Deliberately NOT FS.TargetTakesDots (Theme.lua), which asks the same three questions for the DoT scale and the
+-- horizon segment. Both treat an enemy ghost as dead (UnitIsDeadOrGhost), but they still differ, so delegating
+-- would change this rule: (1) Plain() above reads unknown as attackable through its own pcall'd issecretvalue (a
+-- client without it reads every answer as unknown, so the target counts as attackable); FS.IsSecret reads a
+-- missing issecretvalue as "never secret". (2) A plain 0 from a predicate is truthy here and false in the shared
+-- rule's legacy number reading. hud-harness.py runs this file with a bare FS (no Theme), so it also could not
+-- reach the shared rule.
+local function HasAttackableTarget()
+    local ok, e = pcall(UnitExists, "target")
+    if ok and Plain(e) and not e then return false end
+    local ok2, c = pcall(UnitCanAttack, "player", "target")
+    if ok2 and Plain(c) and not c then return false end
+    local ok3, d = pcall(UnitIsDeadOrGhost, "target")
+    if ok3 and Plain(d) and d == true then return false end
+    return true
+end
+
 local function ProcActive(key)
     local spec = profile and profile.procs and profile.procs[key]
     if not spec then return nil end
+    -- A cooldown tracker: ready (true), on cooldown or unknown spell (false), unreadable (nil).
+    if spec.ready then
+        local ready = CooldownState(spec.ready)
+        -- needsTarget (Judgement): only a hostile target can take the cast, so no, friendly or dead target
+        -- hides the rung. A ready of false or nil (unreadable) passes through; an unreadable target reads
+        -- as attackable (HasAttackableTarget), so the rung is never hidden on a guess.
+        if spec.needsTarget and ready == true and not HasAttackableTarget() then return false end
+        return ready
+    end
     local glow = OverlayState(spec)
     if glow == true then return true end
     local aura = AuraProcState(spec)
@@ -827,6 +1031,15 @@ Prims.inRange = function(key)
     if not ok then return nil end
     return PlainOf(v, "boolean")
 end
+Prims.sealMissing = function(sec)
+    if not PlainOf(sec, "number") then return nil end
+    local s = Seal.Read()
+    if s == nil then return nil end
+    if s == false then return true end
+    local now = Now()
+    if not now then return nil end
+    return s.expiresAt - now <= sec
+end
 Prims.known = function(key)
     local r = ResolveSpell(key)
     return r and r.known
@@ -917,23 +1130,6 @@ local function ChannelView()
 end
 
 -- State -------------------------------------------------------------------------------------
-
--- Deliberately NOT FS.TargetTakesDots (Theme.lua), which asks the same three questions for the DoT scale and the
--- horizon segment. Both treat an enemy ghost as dead (UnitIsDeadOrGhost), but they still differ, so delegating
--- would change this rule: (1) Plain() above reads unknown as attackable through its own pcall'd issecretvalue (a
--- client without it reads every answer as unknown, so the target counts as attackable); FS.IsSecret reads a
--- missing issecretvalue as "never secret". (2) A plain 0 from a predicate is truthy here and false in the shared
--- rule's legacy number reading. hud-harness.py runs this file with a bare FS (no Theme), so it also could not
--- reach the shared rule.
-local function HasAttackableTarget()
-    local ok, e = pcall(UnitExists, "target")
-    if ok and Plain(e) and not e then return false end
-    local ok2, c = pcall(UnitCanAttack, "player", "target")
-    if ok2 and Plain(c) and not c then return false end
-    local ok3, d = pcall(UnitIsDeadOrGhost, "target")
-    if ok3 and Plain(d) and d == true then return false end
-    return true
-end
 
 -- The rotation in evaluation order. Rules tagged filler = "wand" or "spell" are pulled out
 -- and re-inserted together at the first filler rule's place: wand rules first by default. With
@@ -1071,17 +1267,67 @@ function Hud.GetState()
     for key in pairs(profile.procs or {}) do procKeys[#procKeys + 1] = key end
     table.sort(procKeys)
     for _, key in ipairs(procKeys) do
-        state.procs[#state.procs + 1] = {
-            key = key, glow = profile.procs[key].glow, active = ProcActive(key),
-        }
+        local spec = profile.procs[key]
+        local r = spec.ready and ResolveSpell(spec.ready)
+        -- a cooldown tracker for a spell the player does not know has no rung yet
+        if not spec.ready or (r and r.known == true) then
+            state.procs[#state.procs + 1] = {
+                key = key, glow = spec.glow, active = ProcActive(key), icon = r and r.icon or nil,
+            }
+        end
     end
 
     if profile.resource and profile.resource.shards then state.shards = ItemCount() end
     state.channel = ChannelView()
+    if profile.seals then
+        local s = Seal.Read()
+        if s then
+            state.seal = {
+                key = s.key, id = s.id, expiresAt = s.expiresAt, duration = s.duration,
+                castAt = s.castAt,
+            }
+        else
+            state.seal = s    -- false (no seal) or nil (unknown)
+        end
+        state.judgeAt = Seal.judgeAt
+        local e = Seal.ReadJudged()
+        if e then
+            state.judged = { key = e.key, appliedAt = e.appliedAt, expiresAt = e.expires, duration = e.duration }
+        else
+            state.judged = e    -- false (none) or nil (unknown)
+        end
+    end
     return state
 end
 
 function Hud.GetProfile() return profile end
+
+-- The profile's seals the player knows, in profile order: plain { key, name, id } entries.
+function Hud.GetSeals()
+    local out = {}
+    local order = profile and profile.seals and profile.seals.order
+    for _, key in ipairs(order or {}) do
+        local r = ResolveSpell(key)
+        if r and r.known == true then
+            out[#out + 1] = { key = key, name = r.name or Spells[key].names[1], id = r.id }
+        end
+    end
+    return out
+end
+
+-- Judgement for a Paladin: the last own cast time, and the current target's debuff left and seal key.
+function Hud.GetJudgement()
+    local out = { judgeAt = Seal.judgeAt }
+    if not (profile and profile.seals) then return out end
+    local e = Seal.ReadJudged()
+    local now = Now()
+    if e and now then
+        out.remaining, out.key = math.max(0, e.expires - now), e.key
+    elseif e == false then
+        out.remaining = 0
+    end
+    return out
+end
 
 -- Change notification ---------------------------------------------------------------------
 
@@ -1103,6 +1349,18 @@ local function Signature(state)
     parts[#parts + 1] = "s" .. tostring(state.shards)
     local c = state.channel
     parts[#parts + 1] = c and ("c" .. c.key .. c.done .. tostring(c.cut)) or "c-"
+    -- the seal by key and cast time only: a running timer must not push every second
+    local sl = state.seal
+    if sl == nil then
+        parts[#parts + 1] = "kunk"
+    elseif sl == false then
+        parts[#parts + 1] = "knone"
+    else
+        parts[#parts + 1] = "k" .. sl.key .. tostring(sl.castAt)
+    end
+    -- Judgement by cast time and the target's debuff by seal and application time (no running timer)
+    local jd = state.judged
+    parts[#parts + 1] = "j" .. tostring(state.judgeAt) .. (type(jd) == "table" and (jd.key .. tostring(jd.appliedAt)) or tostring(jd))
     return table.concat(parts, "|")
 end
 
@@ -1179,6 +1437,10 @@ function handlers.UNIT_SPELLCAST_SUCCEEDED(unit, castGUID, spellID)
     if now and not (key and Spells[key].offGcd) then lastCastAt = now end
     if not key then return end
     lastCastOf[key] = now
+    -- a seal is a self cast too, but it is also the active seal: record it before the early return
+    if Spells[key].seal then Seal.OnCast(key, spellID) end
+    -- Judgement: stamp it now (even with no target); the debuff is recorded once the target is known
+    local judged = Spells[key].judgement and Seal.OnJudge(now) or nil
     -- a cast on the player (a buff, Life Tap, Vampiric Embrace) is not a cast on the target,
     -- and neither is the wand: a first shot must not end the fresh-target opener or start
     -- the fight clock
@@ -1187,6 +1449,7 @@ function handlers.UNIT_SPELLCAST_SUCCEEDED(unit, castGUID, spellID)
     if not ctx then return end
     MarkEngaged(ctx)
     OnOwnCast(key, spellID, ctx)
+    if judged then Seal.RecordJudged(ctx, judged, now) end
 end
 
 function handlers.UNIT_SPELLCAST_CHANNEL_START(unit, _, spellID)
@@ -1232,7 +1495,15 @@ end
 function handlers.UNIT_AURA(unit)
     if not Plain(unit) then return end
     if unit == "target" then dirty = true end
-    if unit == "player" then playerDirty = true end
+    if unit == "player" then playerDirty = true; Seal.dirty = true end
+end
+
+-- Death strips the seal. The aura list may still show it for a moment, so no reconcile runs until
+-- the next UNIT_AURA or PLAYER_REGEN_ENABLED (leaving combat after a death rescans, and a seal
+-- still listed then is read back).
+function handlers.PLAYER_DEAD()
+    Seal.ledger = false
+    Seal.dirty = false
 end
 
 function handlers.PLAYER_REGEN_ENABLED()
@@ -1240,6 +1511,7 @@ function handlers.PLAYER_REGEN_ENABLED()
     cur.engaged = nil
     dirty = true
     playerDirty = true
+    Seal.dirty = true
     TryReconcile()
 end
 
@@ -1258,13 +1530,16 @@ function handlers.PLAYER_ENTERING_WORLD()
     OnTargetChanged()
     dirty = true
     playerDirty = true
+    -- a loading screen strips no aura: unknown until the reconcile reads it again
+    Seal.ledger, Seal.dirty = nil, true
+    Seal.judgeSeen = false
     TryReconcile()
 end
 
 local PLAIN_EVENTS = {
     "PLAYER_TARGET_CHANGED", "PLAYER_REGEN_ENABLED", "PLAYER_ENTERING_WORLD", "SPELLS_CHANGED",
     "PLAYER_LEVEL_UP", "LEARNED_SPELL_IN_TAB", "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW",
-    "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE",
+    "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE", "PLAYER_DEAD",
 }
 local PLAYER_EVENTS = {
     "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_SUCCEEDED",
@@ -1305,6 +1580,7 @@ local function Setup()
     OnTargetChanged()
     dirty = true
     playerDirty = true
+    Seal.ledger, Seal.dirty = nil, true
 end
 
 eventFrame:SetScript("OnEvent", function(_, event, ...)

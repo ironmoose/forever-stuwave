@@ -1,14 +1,14 @@
--- Forever Synthwave: Player and Target Cast Bars
+-- Forever Synthwave: Cast Bars (cast bar v2 step 3b)
 --
--- PLAYER and TARGET cast bars use the shared chevron engine (ChevronCastBar.lua):
--- two chamfered bars of the same width, target above player, 18 units apart on a
--- fixed seat (see STACK PLACEMENT). The ForeverBridge pixel bridge lives in the
--- data bar, so nothing here reads it. PlayerCastingBarFrame is the player cast
--- bar on this client (CastingBarFrame is nil); TargetFrameSpellBar is the target
--- bar. Both Blizzard bars are dimmed with DimBlizzardFrame. Both custom bars are
--- plain non-secure frames, so no combat defer is needed.
---
---
+-- PLAYER and TARGET cast bars on the shared chevron engine (ChevronCastBar.lua), laid out
+-- as the user's locked "Stack A" (mockups/castbar-v2-compare.html, the "Full combat HUD" card
+-- and the player card, variant H): two chamfered bars of the SAME width, the target bar on
+-- top and the player bar below, 18 units apart on a FIXED seat (see STACK PLACEMENT; the
+-- optional ForeverDebugBridge dev strip used to sit in that gap and now lives in the data bar, decision
+-- doc design record, so nothing here reads it). PlayerCastingBarFrame is the
+-- correct player cast bar on this client (CastingBarFrame is nil); TargetFrameSpellBar is
+-- the target one. Both Blizzard bars are dimmed, not hidden (DimBlizzardFrame); both of ours
+-- are plain non-secure frames, so no combat defer is needed.
 --
 -- A BAR (BuildBar): one frame `S.frame`, shown only while a cast, a channel or a verdict
 -- animation is on screen (22 high), unless the HUD turns the idle row on (IDLE ROW API below):
@@ -47,7 +47,7 @@
 -- mockups/off-state-and-bridge-2026-10-02.html) between the two frames:
 --     target frame CENTER = (SEAT_X, SEAT_Y + GAP / 2 + FRAME_H / 2)
 --     player frame CENTER = (SEAT_X, SEAT_Y - GAP / 2 - FRAME_H / 2)
--- Nothing here reads `_G.ForeverBridgeFrame`: the pixel bridge moved into the data bar, and a
+-- Nothing here reads `_G.ForeverDebugBridgeFrame`: the dev strip moved into the data bar, and a
 -- stack that centred on it would follow it to the bottom of the screen. Each frame's offsets are
 -- snapped so its left and bottom edges sit on whole physical pixels (SnapOffset, one pixel = the
 -- engine's run.px): the engine nudges its run's origin onto a pixel from the frame's GetLeft,

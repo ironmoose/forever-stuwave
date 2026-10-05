@@ -390,11 +390,11 @@ HAS.INCOMING_HEALS = type(UnitGetIncomingHeals) == "function"
 HAS.TOTAL_ABSORBS = type(UnitGetTotalAbsorbs) == "function"
 if not HAS.INCOMING_HEALS then
     FS.LogDegradeOnce("partyframes_noincomingheals",
-        "|cffff4488ForeverSynthwave|r: UnitGetIncomingHeals unavailable, party heal overlay disabled")
+        "|cffff4488Forever STUwave|r: UnitGetIncomingHeals unavailable, party heal overlay disabled")
 end
 if not HAS.TOTAL_ABSORBS then
     FS.LogDegradeOnce("partyframes_noabsorbapi",
-        "|cffff4488ForeverSynthwave|r: UnitGetTotalAbsorbs unavailable, party absorb overlay disabled")
+        "|cffff4488Forever STUwave|r: UnitGetTotalAbsorbs unavailable, party absorb overlay disabled")
 end
 
 -------------------------------------------------------------------------------
@@ -416,8 +416,8 @@ local RANGE_TICK_INTERVAL   = 0.2
 -- instead of once per scan. Shared factory (FrameHelpers.lua); the two
 -- describe functions preserve this file's own wording for each idiom.
 local TryStep, ReportOnce = FS.FrameHelpers.NewStepRunner(
-    function(label) return "|cffff4488ForeverSynthwave|r partyframe step '" .. label .. "'" end,
-    function(label) return "|cffff4488ForeverSynthwave|r partyframe " .. label end
+    function(label) return "|cffff4488Forever STUwave|r partyframe step '" .. label .. "'" end,
+    function(label) return "|cffff4488Forever STUwave|r partyframe " .. label end
 )
 
 -- Scale in the engine so secret health fractions never enter Lua arithmetic.
@@ -1001,7 +1001,13 @@ local function BuildPetSlot(unit, frameName, parent, placeholderParent)
     local box = CreateFrame("Frame", nil, visual)
     box:SetPoint("TOPLEFT", visual, "TOPLEFT", 0, -BOX_TOP)
     box:SetPoint("BOTTOMRIGHT", visual, "BOTTOMRIGHT", 0, 0)
-    AddRoundedFill(box, PET_FILL, PET_CHAMFER)
+    -- Cut: the box fill is ONE nine-slice of the same rect and margin as the edge ring below, so
+    -- fill, ring and the corner erase scale together (AddRoundedFill's unit-sized cut triangles only
+    -- sit under the ring at one texel-to-pixel ratio, and this panel is scaled by Layout.Scale()).
+    -- Round, or no slicing: the flat rects and triangles.
+    if not (FS.Theme.AddCutSliceFill and FS.Theme.AddCutSliceFill(box, PET_FILL, PET_CHAMFER)) then
+        AddRoundedFill(box, PET_FILL, PET_CHAMFER)
+    end
     f.box = box
 
     -- The pink fill sits inside the box, above its fill.
@@ -1021,10 +1027,29 @@ local function BuildPetSlot(unit, frameName, parent, placeholderParent)
         petCornerHost = corners
         corners:SetAllPoints(health)
         corners:SetFrameLevel(health:GetFrameLevel() + FS.Theme.BAR_CORNER_MASK_LEVEL)
-        -- Cut: the SAME chamfer as the box's edge (the baked erase triangle already allows for
-        -- the 1px fill inset). Round: concentric radius.
-        local maskRadius = FS.Theme.CHROME_CORNERS == "cut" and PET_CHAMFER or (PET_CHAMFER - PET_FILL_INSET)
-        FS.Theme.AddCornerMask(corners, health, COLOR_BAR_TRACK, maskRadius)
+        -- Cut: the edge below is SkinButton at PET_CHAMFER, a NINE-SLICED ring, drawn at the
+        -- engine's own texel-to-pixel ratio (about 0.75 to 0.8 px per texel), while the unit-sized
+        -- AddCornerMask quads are sized in UI units, so the two only agreed at one ratio and the
+        -- opaque wedge overshot the ring's inner edge (a dark triangle, live 2026-10-04, "update
+        -- the corners of the fill"). So the erase is a nine-slice too: AddCutFillErase over the BOX
+        -- rect (the rect the ring is sliced over) at the ring's own chamfer, trimmed to the fill
+        -- rect by this host's clip, so wedge and ring scale together. Its colour is the box fill's
+        -- own rgb at full alpha: PET_FILL is translucent (a scrim over the world) and an opaque
+        -- erase cannot match it over every backdrop, but PET_FILL's rgb is the closest single
+        -- colour (COLOR_BAR_TRACK, the old erase colour, is the box fill over pure black and reads
+        -- darker than the box over any lit terrain). No clip support or no slicing: the quads below.
+        -- Round: concentric radius.
+        local erase
+        if FS.Theme.CHROME_CORNERS == "cut" and type(FS.Theme.AddCutFillErase) == "function"
+            and corners.SetClipsChildren then
+            erase = FS.Theme.AddCutFillErase(corners, box, { PET_FILL[1], PET_FILL[2], PET_FILL[3], 1 }, PET_CHAMFER)
+            if erase then corners:SetClipsChildren(true) end
+        end
+        if not erase then
+            -- The baked erase triangle already allows for the 1px fill inset.
+            local maskRadius = FS.Theme.CHROME_CORNERS == "cut" and PET_CHAMFER or (PET_CHAMFER - PET_FILL_INSET)
+            FS.Theme.AddCornerMask(corners, health, COLOR_BAR_TRACK, maskRadius)
+        end
     end
     f.health = health
 
@@ -1580,7 +1605,7 @@ do
             if not warnedLowHealth then
                 warnedLowHealth = true
                 FS.LogDegradeOnce("partyframes_lowhp_curve",
-                    "|cffff4488ForeverSynthwave|r: party low-HP curve refused, falling back to a plain compare")
+                    "|cffff4488Forever STUwave|r: party low-HP curve refused, falling back to a plain compare")
             end
         end
         local cur, max = UnitHealth(unit), UnitHealthMax(unit)
@@ -2450,7 +2475,7 @@ SlashCmdList["FSPARTY"] = function(msg)
         return
     end
 
-    print(("|cff22e0ffForeverSynthwave|r party: class %s dispels %s"):format(
+    print(("|cff22e0ffForever STUwave|r party: class %s dispels %s"):format(
         tostring(PlayerClass()),
         DISPELS.Describe(DISPELS.Set())))
 

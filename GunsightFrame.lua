@@ -132,7 +132,7 @@ GunsightFrame.horizon, GunsightFrame.rungs = horizon, rungs
 
 local function LogOnce(key, msg)
     if FS.LogDegradeOnce then
-        pcall(FS.LogDegradeOnce, "gunsightframe_" .. key, "|cffff4488ForeverSynthwave|r: gunsight frame: " .. tostring(msg))
+        pcall(FS.LogDegradeOnce, "gunsightframe_" .. key, "|cffff4488Forever STUwave|r: gunsight frame: " .. tostring(msg))
     end
 end
 
@@ -582,10 +582,17 @@ local function LayoutRung(rung, T, Tl)
     PaintRung(rung)
 end
 
--- The proc's spell texture, or nil. A missing function, a throw, a secret or a non texture all
--- read as "no icon" and the two letter fallback shows.
-local function ResolveIcon(spec)
-    if type(spec.aura) ~= "number" then return nil end
+-- The proc's spell texture, or nil. An aura proc reads its aura's texture; a `ready` proc (a
+-- cooldown tracker, no aura) takes the spell icon HudLogic puts on the state entry. A missing
+-- function, a throw, a secret or a non texture all read as "no icon" and the two letter
+-- fallback shows.
+local function ResolveIcon(spec, stateIcon)
+    if type(spec.aura) ~= "number" then
+        if spec.ready and not IsSecret(stateIcon) and (type(stateIcon) == "number" or type(stateIcon) == "string") then
+            return stateIcon
+        end
+        return nil
+    end
     local fn = (C_Spell and C_Spell.GetSpellTexture) or _G.GetSpellTexture
     if type(fn) ~= "function" then return nil end
     local ok, tex = pcall(fn, spec.aura)
@@ -594,9 +601,9 @@ local function ResolveIcon(spec)
     return nil
 end
 
-local function SeatIconTexture(rung, spec)
+local function SeatIconTexture(rung, spec, stateIcon)
     local icon = rung.icon
-    local tex = ResolveIcon(spec)
+    local tex = ResolveIcon(spec, stateIcon)
     icon.fallback:SetText(string.sub(rung.labelText or "", 1, 2))
     if tex then
         icon.tex:SetTexture(tex)
@@ -609,7 +616,7 @@ local function SeatIconTexture(rung, spec)
     rung.hasTexture = tex ~= nil
 end
 
-local function BindRung(rung, key, spec)
+local function BindRung(rung, key, spec, stateIcon)
     if rung.key ~= key then
         rung.key = key
         rung.labelText = type(spec.label) == "string" and spec.label or string.upper(tostring(key))
@@ -617,7 +624,7 @@ local function BindRung(rung, key, spec)
         rung.hasTexture = nil
         rung.laidOut = false
     end
-    if not rung.hasTexture then SeatIconTexture(rung, spec) end
+    if not rung.hasTexture then SeatIconTexture(rung, spec, stateIcon) end
     if not rung.laidOut then
         rung.laidOut = true
         LayoutRung(rung, rung.T or ui(1), rung.Tl or ui(C.LIT_K))
@@ -647,7 +654,7 @@ local function ApplyState(state)
                 local rung = type(spec) == "table" and rungs[spec.side] or nil
                 if rung and not bound[rung] then
                     bound[rung] = true
-                    BindRung(rung, p.key, spec)
+                    BindRung(rung, p.key, spec, p.icon)
                     active[rung] = not IsSecret(p.active) and p.active == true
                 end
             end

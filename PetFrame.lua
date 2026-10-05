@@ -301,7 +301,7 @@ local function SetLocked(value)
     ForeverSynthwaveDB.petFrame = ForeverSynthwaveDB.petFrame or {}
     ForeverSynthwaveDB.petFrame.locked = locked
     ApplyLockState()
-    print(("|cff22e0ffForeverSynthwave|r: pet frame %s."):format(locked and "locked" or "unlocked"))
+    print(("|cff22e0ffForever STUwave|r: pet frame %s."):format(locked and "locked" or "unlocked"))
 end
 
 function FS.PetFrame.IsLocked()
@@ -370,9 +370,9 @@ local function ResetPosition()
     ForeverSynthwaveDB.petFrame.pos = nil
     ApplyDefaultPosition()
     if pendingReset then
-        print("|cff22e0ffForeverSynthwave|r: pet frame position reset queued; applies once combat ends.")
+        print("|cff22e0ffForever STUwave|r: pet frame position reset queued; applies once combat ends.")
     else
-        print("|cff22e0ffForeverSynthwave|r: pet frame position reset.")
+        print("|cff22e0ffForever STUwave|r: pet frame position reset.")
     end
 end
 
@@ -389,7 +389,7 @@ SlashCmdList["FSPET"] = function(msg)
     elseif msg == "reset" then
         ResetPosition()
     else
-        print("|cff22e0ffForeverSynthwave|r: /fspet lock | unlock | reset   (currently "
+        print("|cff22e0ffForever STUwave|r: /fspet lock | unlock | reset   (currently "
             .. "|cffff2e97" .. (locked and "locked" or "unlocked") .. "|r)")
     end
 end
@@ -496,6 +496,9 @@ local function Apply()
         -- (EnableMouse(true), see ApplyLockState) covers the rect, and the secure pet buttons are
         -- mouse-enabled at any alpha.
         container:SetAlpha(show and 1 or 0)
+        -- PetDock's gap patch in the Console's top line follows the panel by ALPHA, which is legal
+        -- here, so a pet dying (or summoned) in combat closes (or reopens) the hole at once.
+        if FS.PetDock and FS.PetDock.SetPetShown then FS.PetDock.SetPetShown(show) end
         return
     end
 
@@ -505,8 +508,8 @@ local function Apply()
     else
         container:Hide()
     end
-    -- PetDock opens the Console's top line under the panel only while the panel is there (a class with
-    -- no pet must not leave a hole in it). Out of combat only, like the line itself.
+    -- PetDock keeps the Console's top line whole while the panel is not there (a gap patch whose alpha
+    -- tracks this answer; the combat branch above reports it too) and re-docks out of combat.
     if FS.PetDock and FS.PetDock.SetPetShown then FS.PetDock.SetPetShown(show) end
 end
 
@@ -628,7 +631,7 @@ local function WriteValueText(bar, cur, max)
     powerBar.text:SetText("")
     if redHealthBar then redHealthBar.text:SetText("") end
     FS.LogDegradeOnce("petframe_value_text",
-        "|cffff4488ForeverSynthwave|r: pet HP/mana numbers disabled, SetFormattedText rejected the value.")
+        "|cffff4488Forever STUwave|r: pet HP/mana numbers disabled, SetFormattedText rejected the value.")
 end
 
 -------------------------------------------------------------------------------
@@ -742,7 +745,7 @@ do
         if lowBroken and not warnedLow then
             warnedLow = true
             FS.LogDegradeOnce("petframe_lowhp_curve",
-                "|cffff4488ForeverSynthwave|r: pet low-HP curve refused, falling back to a plain compare")
+                "|cffff4488Forever STUwave|r: pet low-HP curve refused, falling back to a plain compare")
         end
 
         local cur, max = UnitHealth("pet"), UnitHealthMax("pet")
@@ -1023,7 +1026,7 @@ local function RegisterEvents()
     end
     FS.FrameHelpers.SafeRegisterUnitEvent(events, "UNIT_FLAGS", "pet", function(ev, err)
         FS.LogDegradeOnce("petframe_unitflags",
-            "|cffff4488ForeverSynthwave|r: failed to register " .. ev
+            "|cffff4488Forever STUwave|r: failed to register " .. ev
                 .. " for pet frame visibility (" .. tostring(err) .. ")")
     end)
 
@@ -1041,7 +1044,7 @@ local function RegisterEvents()
     }) do
         FS.FrameHelpers.SafeRegisterUnitEvent(events, event, "pet", function(ev, err)
             FS.LogDegradeOnce("petframe_status_" .. ev,
-                "|cffff4488ForeverSynthwave|r: failed to register " .. ev
+                "|cffff4488Forever STUwave|r: failed to register " .. ev
                     .. " for pet status readout (" .. tostring(err) .. ")")
         end)
     end
@@ -1147,7 +1150,7 @@ end
 local function Init()
     local ok, err = pcall(Build)
     if not ok then
-        print("|cff22e0ffForeverSynthwave|r: pet frame failed to build ("
+        print("|cff22e0ffForever STUwave|r: pet frame failed to build ("
             .. tostring(err) .. "); pet UI container not created.")
     end
 end

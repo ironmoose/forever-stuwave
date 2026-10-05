@@ -20,6 +20,99 @@ local COLOR_POWER = FS.Theme.COLOR_POWER -- cyan accent; the mock's "neon border
 local TEXT_BLEED = 3
 
 -------------------------------------------------------------------------------
+-- Message font size
+-------------------------------------------------------------------------------
+
+-- Parker: "lets also default the chat to 14pt". Blizzard's own default is
+-- CHAT_FRAME_DEFAULT_FONT_SIZE (18), and a chat-cache size of 0 means "use
+-- that", so left alone each window wore 18. ForeverSynthwaveDB.chatFontSize
+-- (account-wide: per-character saved variables are discarded on this beta
+-- client) overrides it; /fschat size N sets it.
+Chat.DEFAULT_FONT_SIZE = 14
+Chat.MIN_FONT_SIZE = 10
+Chat.MAX_FONT_SIZE = 24
+
+-- The saved size, or nil when there is none. Validated rather than trusted
+-- (saved variables can hold anything); a bad value reads as no value.
+function Chat.SavedFontSize()
+    local saved = type(ForeverSynthwaveDB) == "table" and ForeverSynthwaveDB.chatFontSize
+    if type(saved) == "number" and saved >= Chat.MIN_FONT_SIZE
+        and saved <= Chat.MAX_FONT_SIZE and saved == math.floor(saved) then
+        return saved
+    end
+end
+
+-- The wanted size: the saved one, else the default.
+function Chat.FontSize()
+    return Chat.SavedFontSize() or Chat.DEFAULT_FONT_SIZE
+end
+
+-- Blizzard's stock size, and what a chat-cache size of 0 (never set) means.
+local STOCK_FONT_SIZE = 18
+-- Built-in windows are ChatFrame1..10 and own a chat-cache slot; a temporary
+-- window (whisper, tear-off) has id 11+ and none.
+local MAX_CACHED_WINDOW_ID = 10
+
+-- Puts one chat MESSAGE frame at the wanted size, keeping the face and flags it
+-- already has. Only the message frame: the edit box and the tab strip have their
+-- own fonts and are not touched. Goes through Blizzard's own
+-- FCF_SetChatWindowFontSize, which also writes the chat-cache
+-- (SetChatWindowSize) so Blizzard's font menu and the next
+-- UPDATE_CHAT_WINDOWS agree with what is shown; without it the same two writes
+-- are made by hand. Writes nothing when the frame AND the cache already match,
+-- which is also what ends any event loop. Returns true when it wrote.
+--
+-- With no SAVED size, the default only goes onto a window that has never been
+-- sized: its chat-cache size is 0 (unset) or the stock 18 (what
+-- FCF_ResetChatWindow leaves). Any other cached size is a choice made in
+-- Blizzard's font menu, which fires no event of its own, so the next
+-- UPDATE_CHAT_WINDOWS would otherwise revert it on every login. A saved size
+-- (`/fschat size N`) is explicit and is enforced on every window. Where the
+-- cache cannot be read (a temporary window, or no API) the frame's own size
+-- is judged instead. The first apply is PLAYER_LOGIN. The table guard below
+-- only protects against a future caller that runs before the saved variables
+-- exist (a write then could be the wrong size); no current caller does.
+function Chat.ApplyFontSize(frame)
+    if type(ForeverSynthwaveDB) ~= "table" then return false end
+    if not frame or not frame.GetFont or not frame.SetFont then return false end
+    local want = Chat.FontSize()
+    local face, size, flags = frame:GetFont()
+    if not face or not size then return false end
+
+    local id = frame.GetID and frame:GetID()
+    local cacheable = id and id >= 1 and id <= MAX_CACHED_WINDOW_ID
+    local cached
+    if cacheable and type(GetChatWindowInfo) == "function" then
+        local ok, _, cacheSize = pcall(GetChatWindowInfo, id)
+        if ok then cached = cacheSize end
+    end
+
+    if not Chat.SavedFontSize() then
+        local current = cached or math.floor(size + 0.5)
+        if current ~= 0 and current ~= STOCK_FONT_SIZE then return false end
+    end
+    if math.abs(size - want) < 0.01 and (cached == nil or cached == want) then
+        return false
+    end
+
+    if type(FCF_SetChatWindowFontSize) == "function"
+        and pcall(FCF_SetChatWindowFontSize, nil, frame, want) then
+        return true
+    end
+    pcall(frame.SetFont, frame, face, want, flags)
+    if cacheable and type(SetChatWindowSize) == "function" then
+        pcall(SetChatWindowSize, id, want)
+    end
+    return true
+end
+
+function Chat.ApplyAllFontSizes()
+    for _, frame in ipairs(Chat.skinnedChatFrames or {}) do
+        Chat.ApplyFontSize(frame)
+    end
+end
+
+-------------------------------------------------------------------------------
 -- Frame backdrop
 -------------------------------------------------------------------------------
 
@@ -137,9 +230,11 @@ function Chat.SkinChatFrame(frame, index)
 
     Chat.AddChatScanline(backdrop)
 
-    -- Message body stays on Blizzard's default readable font per the CLAUDE.md
-    -- convention; SetFont(Mononoki) also fails on this frame's message
+    -- Message body stays on Blizzard's default readable font FACE per the
+    -- CLAUDE.md convention; SetFont(Mononoki) also fails on this frame's message
     -- fontstrings on this client, so forcing it would just hit the fallback.
+    -- Only the SIZE is ours (Chat.ApplyFontSize, applied from PLAYER_LOGIN and
+    -- the late-window path in ChatSlashCommands.lua, not while skinning).
 
     local editBox = _G["ChatFrame" .. index .. "EditBox"]
     Chat.HideBlizzardEditBoxArt(index)

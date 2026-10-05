@@ -458,7 +458,7 @@ local function BuildUnitFrame(unitToken, frameName, mirrored)
     elseif not warnedNoTotalAbsorbs then
         warnedNoTotalAbsorbs = true
         FS.LogDegradeOnce("unitframes_noabsorbapi",
-            "|cffff4488ForeverSynthwave|r: UnitGetTotalAbsorbs unavailable, absorb overlay disabled")
+            "|cffff4488Forever STUwave|r: UnitGetTotalAbsorbs unavailable, absorb overlay disabled")
     end
     health.caret = CreateCaret(health, COLOR_CARET_HEALTH)
     f.health = health
@@ -825,7 +825,7 @@ end
 -- its own message wording. Declared here (ahead of UpdateAll's own use)
 -- because UpdateWatchedUnitName's retry below also needs it in scope.
 local TryStep = FS.FrameHelpers.NewStepRunner(function(label)
-    return "|cffff4488ForeverSynthwave|r step '" .. label .. "'"
+    return "|cffff4488Forever STUwave|r step '" .. label .. "'"
 end)
 
 -- Resolves a watched unit's name color: class color for players, else reaction color.

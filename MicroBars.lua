@@ -158,7 +158,7 @@ local function Degrade(tag, msg)
     if warned[tag] then return end
     warned[tag] = true
     if FS.LogDegradeOnce then
-        FS.LogDegradeOnce("microbars-" .. tag, "|cffff4488ForeverSynthwave|r: " .. msg)
+        FS.LogDegradeOnce("microbars-" .. tag, "|cffff4488Forever STUwave|r: " .. msg)
     end
 end
 

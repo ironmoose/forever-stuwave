@@ -38,7 +38,9 @@
 --             fills up (StatusBar has no reverse fill on this client), the reveal edge is smooth, not a
 --             chevron at a time.
 --   cast tag  the target only: the KICK tag (pink) and the padlock (steel), seated off the boxR anchor
---             as the mockup does (kx = BOXR.x + BOXR.w - 40, ky = BOXR.y - 8), shown only with a live cast
+--             as the mockup does (kx = BOXR.x + BOXR.w - 40, ky = BOXR.y - 8, then up by the built target
+--             box's own `grow` (GunsightBoxes' C.TGT_GROW; 0 when the box fell back to sinks)), shown only
+--             with a live cast
 --
 -- TARGET LAYER. With no target the whole target tape hides (plate, edges, ticks, chevrons, strips, reveals,
 -- KICK and padlock; its info box applies the same rule itself, see GunsightBoxes.lua). That is a SEPARATE
@@ -145,7 +147,7 @@ local function LogOnce(key, msg)
     if logged[key] then return end
     logged[key] = true
     if FS.LogDegradeOnce then
-        pcall(FS.LogDegradeOnce, "gunsighttape_" .. key, "|cffff4488ForeverSynthwave|r: gunsight tape: " .. tostring(msg))
+        pcall(FS.LogDegradeOnce, "gunsighttape_" .. key, "|cffff4488Forever STUwave|r: gunsight tape: " .. tostring(msg))
     end
 end
 
@@ -418,10 +420,21 @@ local function BuildKick(parent)
     return kick
 end
 
-local function LayoutKick(kick, anchor, lock)
+-- How far the target's info box now grows above its anchor (mockup option B: `ky += BR.y - BOXR.y`, the tag
+-- rides the grown box's top right corner). It is the built box's own `grow`: a box that failed to build
+-- (the hidden-sink fallback) has none, and the tag then stays at the anchor.
+local function BoxGrow(t)
+    local box = t.box
+    local grow = type(box) == "table" and box.grow
+    if type(grow) == "number" then return grow end
+    return 0
+end
+
+local function LayoutKick(t, anchor)
+    local kick, lock = t.kick, t.padlock
     local k = ui(1)
     kick:ClearAllPoints()
-    kick:SetPoint("TOPLEFT", anchor, "TOPRIGHT", -C.KICK_DX * k, C.KICK_DY * k)
+    kick:SetPoint("TOPLEFT", anchor, "TOPRIGHT", -C.KICK_DX * k, (C.KICK_DY + BoxGrow(t)) * k)
     kick:SetSize(C.KICK_W * k, C.KICK_H * k)
     local size = math.max(KICK_FONT_MIN, math.floor(ui(C.KICK_TEXT_SIZE) + 0.5))
     FS.Theme.ApplyMono(kick.label, size, colors.pink)
@@ -529,7 +542,7 @@ local function LayoutTape(t)
     local px = LayoutRun(t)
     LayoutTicks(t, px)
     if t.kick and t.padlock then
-        LayoutKick(t.kick, Gunsight.anchors.boxR, t.padlock)
+        LayoutKick(t, Gunsight.anchors.boxR)
         LayoutPadlock(t.padlock, px)
     end
     if t.reveals then

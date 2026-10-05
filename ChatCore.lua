@@ -175,12 +175,12 @@ Chat.maximiseButton = nil   -- term bar lamp (ChatTermBar.BuildTermBar)
 Chat.pendingSelectedTab = ForeverSynthwaveDB and ForeverSynthwaveDB.chatSelectedTab
 
 -- Interim default: force the comms tab active at login when chatSelectedTab
--- is unset. The Forever beta client does not restore per-character
--- SavedVariables across /reload, so this default accompanies ChatTabs.lua's
--- comms-first pill ordering. Once persistence works, a saved tab selection
--- should take precedence over the default.
---
---
+-- is unset, so a persisted user choice still wins once the client's
+-- SavedVariables bug is fixed. The Forever beta client never restores
+-- per-character SavedVariables across a /reload (design notes), so this
+-- default always fires today -- Parker's interim call, companion to
+-- ChatTabs.lua's comms-first pill hardcode (design notes tracks the real
+-- persisted-order/selection feature this stands in for).
 -- Consumed and cleared by Chat.ApplyDockState's own one-shot block, same
 -- discipline as Chat.pendingSelectedTab above.
 Chat.pendingDefaultComms = not (ForeverSynthwaveDB and ForeverSynthwaveDB.chatSelectedTab)

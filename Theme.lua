@@ -118,10 +118,12 @@ local CUT_PIECE_CANVAS = 16
 
 Theme.FILL_CUT_TEXTURES = {}
 Theme.ANTI_CUT_TEXTURES = {}
+Theme.ANTI_CUT_BR_TEXTURES = {}  -- anti_cut flipped into the BOTTOM-RIGHT of the canvas (StatusBar fills)
 Theme.BORDER_CUT_TEXTURES = {}  -- [c][thickness]; thickness 2 is baked for c = 6 only
 for _, c in ipairs(Theme.CUT_SIZES) do
     Theme.FILL_CUT_TEXTURES[c] = CUT_MEDIA .. "fill_cut_c" .. c .. ".tga"
     Theme.ANTI_CUT_TEXTURES[c] = CUT_MEDIA .. "anti_cut_c" .. c .. ".tga"
+    Theme.ANTI_CUT_BR_TEXTURES[c] = CUT_MEDIA .. "anti_cut_br_c" .. c .. ".tga"
     Theme.BORDER_CUT_TEXTURES[c] = { [1] = CUT_MEDIA .. "border_cut_c" .. c .. "_t1.tga" }
 end
 Theme.BORDER_CUT_TEXTURES[6][2] = CUT_MEDIA .. "border_cut_c6_t2.tga"
@@ -363,7 +365,7 @@ function Theme.ApplyNineSlice(texture, margin)
     if not (texture and texture.SetTextureSliceMargins) then
         if not warnedNoSliceMargins then
             warnedNoSliceMargins = true
-            local msg = "|cffff4488ForeverSynthwave|r: SetTextureSliceMargins unavailable, degrading " ..
+            local msg = "|cffff4488Forever STUwave|r: SetTextureSliceMargins unavailable, degrading " ..
                 "nine-slice chrome to a stretched rounded rect"
             FS.LogDegradeOnce("nilslicemargins", msg)
         end
@@ -685,7 +687,7 @@ function Theme.ApplyFontGeneric(fontString, path, size, color, flags)
         -- full in-game verification cycle by making a failure look like it worked.
         if not warnedFontPaths[path] then
             warnedFontPaths[path] = true
-            local msg = "|cffff4488ForeverSynthwave|r: SetFont failed for " .. tostring(path) .. ", using fallback"
+            local msg = "|cffff4488Forever STUwave|r: SetFont failed for " .. tostring(path) .. ", using fallback"
             if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
                 DEFAULT_CHAT_FRAME:AddMessage(msg)
             else
@@ -966,6 +968,34 @@ function Theme.AddRoundedFill(panel, color, rad)
     end
 end
 
+-- The AddRoundedFill cut fill as ONE nine-slice (slice_cut2_fill_c{c}, margin c) over `panel`,
+-- for a fill that sits under a NINE-SLICED stroke on the same rect (the party pet box under its
+-- c4 SkinButton ring). AddRoundedFill's fill_cut triangles are sized in UI units, the stroke is
+-- drawn at the engine's own texel-to-pixel ratio, so their cut lines only meet at one ratio;
+-- sliced from the same rect at the same margin the fill, the ring and AddCutFillErase scale
+-- together. At one texel per unit the pixels are AddRoundedFill's: the file's two corner cells are
+-- the fill_cut piece, everything else opaque, and the colour, alpha, layer and sublevel are the
+-- same. Returns the texture, or nil under "round", for a radius of 0 or when the client cannot
+-- slice a texture (the stretched file would draw as one blob; the unsliced texture is hidden), so
+-- the caller keeps AddRoundedFill.
+function Theme.AddCutSliceFill(panel, color, radius)
+    if Theme.CHROME_CORNERS ~= "cut" or not radius or radius <= 0 then return nil end
+    local c = Theme.SnapCut(radius)
+    local file = c == 6 and Theme.SLICE_CUT2_FILL_TEXTURE
+        or CUT_MEDIA .. "slice_cut2_fill_c" .. c .. ".tga"
+    local t = panel:CreateTexture(nil, "BACKGROUND")
+    t:SetDrawLayer("BACKGROUND", FILL_SUBLEVEL)
+    t:SetTexture(file)
+    if not Theme.ApplyNineSlice(t, c) then
+        t:SetShown(false)
+        return nil
+    end
+    t:SetVertexColor(color[1], color[2], color[3], color[4] or 1)
+    t:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, 0)
+    t:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0, 0)
+    return t
+end
+
 -- Overpaints a StatusBar fill's square corners with `color` (normally
 -- Theme.COLOR_BAR_TRACK, the color already behind the fill) so the fill
 -- reads as rounded without clipping it: Theme.ANTI_CORNER_TEXTURE is opaque
@@ -1045,6 +1075,97 @@ end
 function Theme.AddFillCorners(host, anchorFrame, eraseColor, radius)
     local quads = Theme.AddCornerMask(host, anchorFrame, { eraseColor[1], eraseColor[2], eraseColor[3], 1 }, radius)
     return CornerQuadHandle(quads)
+end
+
+-- Cut-corner erase for a fill drawn inside a NINE-SLICED plate stroke (the nameplate).
+-- AddFillCorners' anti_cut quads are sized in the host frame's units, but the plate's
+-- stroke is a nine-slice, whose corner is drawn at the engine's own texel-to-pixel ratio:
+-- the two only agree at one scale, and elsewhere the opaque wedge overshoots the stroke's
+-- diagonal and leaves a dark triangle between stroke and fill (live 2026-10-04). Here the
+-- wedge is a nine-slice too (slice_cut2_erase_c6, same margin as slice_cut2_border_c6) laid
+-- over the same rect as the stroke, `plateFrame` (the plate root), so the engine draws the
+-- wedge's corner cells at exactly the stroke's scale: the cut line sits the same fraction of
+-- a stroke width from the stroke's diagonal at any plate scale, whatever the bar inset (a bar-
+-- rect version was only right for a bar inset of 1.0 to 1.9 slice texels and failed again
+-- at stacked plate-scale CVars). The texture sits on a child frame of `host`, the bar's
+-- SetClipsChildren mask, so the bar rect clips it: it is built for the plate corners but
+-- only the part inside the bar is drawn. Both cut corners are in the file; the power strip
+-- shows only the plate's BOTTOM-RIGHT because its rect does not contain the top-left, and a
+-- health bar loses the BOTTOM-RIGHT one when the power strip grows the plate below it. The
+-- file is baked with its cut line at the stroke's inner edge (chamfer + sqrt 2 texels from the
+-- corner) less 0.16 texel (generate_cut_pieces.py, erase_hypotenuse(c)). `eraseColor` is the
+-- caller's choice of opaque colour (alpha forced to 1): the track colour for the nameplate, the box
+-- fill's rgb for the party pet column.
+-- Returns { texture, frame } under Theme.CHROME_CORNERS == "cut", or nil under "round" or
+-- when the client cannot slice a texture (the stretched file would draw huge wedges): the
+-- caller then falls back to AddFillCorners. A frame and a texture cannot be destroyed, so the
+-- first failed attempt hides them; the failure is latched (ApplyNineSlice's own flag, also set
+-- by the stroke built just before) so no later bar builds anything.
+Theme.SLICE_CUT2_ERASE_TEXTURE = "Interface\\AddOns\\ForeverSynthwave\\media\\slice_cut2_erase_c6.tga"
+-- Baked erase file per chamfer (the nine-slice margin is the chamfer, as for the ring/stroke
+-- it pairs with: c6 the plate border, c4 the Cut2ButtonSet(4) outline). The c6 entry is the
+-- constant above.
+Theme.SLICE_CUT2_ERASE_TEXTURES = {
+    [4] = "Interface\\AddOns\\ForeverSynthwave\\media\\slice_cut2_erase_c4.tga",
+    [6] = Theme.SLICE_CUT2_ERASE_TEXTURE,
+}
+-- `chamfer` (optional, default Theme.SLICE_MARGIN, the plate border's own 6) picks the
+-- file and the slice margin of the stroke being matched: pass the chamfer of the nine-sliced
+-- ring the fill sits inside (the party pet column's SkinButton ring is c4). A chamfer with no
+-- baked file returns nil without building anything, so the caller takes its fallback.
+function Theme.AddCutFillErase(host, plateFrame, eraseColor, chamfer)
+    if Theme.CHROME_CORNERS ~= "cut" or warnedNoSliceMargins then return nil end
+    local margin = chamfer or Theme.SLICE_MARGIN
+    local file = Theme.SLICE_CUT2_ERASE_TEXTURES[margin]
+    if not file then return nil end
+    local clip = CreateFrame("Frame", nil, host)
+    clip:SetAllPoints(host)
+    clip:SetFrameLevel(host:GetFrameLevel())
+    local texture = clip:CreateTexture(nil, "BACKGROUND")
+    texture:SetTexture(file)
+    if not Theme.ApplyNineSlice(texture, margin) then
+        texture:SetShown(false)
+        clip:SetShown(false)
+        return nil
+    end
+    texture:SetVertexColor(eraseColor[1], eraseColor[2], eraseColor[3], 1)
+    texture:SetPoint("TOPLEFT", plateFrame, "TOPLEFT", 0, 0)
+    texture:SetPoint("BOTTOMRIGHT", plateFrame, "BOTTOMRIGHT", 0, 0)
+    return { texture = texture, frame = clip }
+end
+
+-- A BOTTOM-RIGHT cut-corner erase that the CALLER can open and close with no secret read:
+-- a StatusBar (16 x 16 units at the anchor's BOTTOM-RIGHT corner, the anti_cut canvas at one
+-- unit per texel) whose fill IS anti_cut_br_c{c}. Its value gates the wedge: at 0 the fill is
+-- sub-pixel wide and draws nothing, at 1 or above the whole canvas shows. The nameplate feeds
+-- it the power strip's own SetValue (the sizer's, a secret max clamped by the setter), so the
+-- health bar's mid-plate chamfer exists exactly while the plate grows a power strip below it
+-- (a mana-type unit with no pool shows the strip but does not grow the plate, so a plain
+-- power-type test cannot decide it). No texcoord is set: the engine owns a fill's texcoords,
+-- which is why the BOTTOM-RIGHT triangle is baked into the file. `c` is snapped to the baked
+-- set; returns the StatusBar, or nil under round. The sizer range (-0.001, 1) keeps an empty
+-- fill a sub-pixel nonzero so the region always has a rect.
+function Theme.AddGatedCutCorner(host, anchorFrame, eraseColor, c)
+    if Theme.CHROME_CORNERS ~= "cut" then return nil end
+    c = Theme.SnapCut(c)
+    if c == 0 then c = Theme.CUT_SIZES[1] end
+    local bar = CreateFrame("StatusBar", nil, host)
+    -- A throw partway through would leave a half-built child under the mask, drawing whatever
+    -- the engine paints for it; hide it and rethrow so the caller's fallback runs.
+    local ok, err = pcall(function()
+        bar:SetFrameLevel(host:GetFrameLevel())
+        bar:SetSize(CUT_PIECE_CANVAS, CUT_PIECE_CANVAS)
+        bar:SetPoint("BOTTOMRIGHT", anchorFrame, "BOTTOMRIGHT", 0, 0)
+        bar:SetStatusBarTexture(Theme.ANTI_CUT_BR_TEXTURES[c])
+        bar:GetStatusBarTexture():SetVertexColor(eraseColor[1], eraseColor[2], eraseColor[3], 1)
+        bar:SetMinMaxValues(-0.001, 1)
+        bar:SetValue(0)
+    end)
+    if not ok then
+        pcall(bar.SetShown, bar, false)
+        error(err, 0)
+    end
+    return bar
 end
 
 -- Rounds the moving right end of a StatusBar fill with two opaque erase quads

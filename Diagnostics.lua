@@ -220,7 +220,7 @@ local function SaveProbe(reason)
     ForeverSynthwaveDB.recon.probe = probeRun
     probeRun = nil
     if probeFrame then probeFrame:UnregisterEvent("UNIT_AURA") end
-    print("|cff22e0ffForeverSynthwave|r: /fsrecon probe -- saved; /fsreload to flush")
+    print("|cff22e0ffForever STUwave|r: /fsrecon probe -- saved; /fsreload to flush")
 end
 
 local function CaptureProbeUpdate(updateInfo)
@@ -297,12 +297,12 @@ function Diagnostics.ArmAuraProbe()
         end)
     end
     probeFrame:RegisterEvent("UNIT_AURA")
-    print("|cff22e0ffForeverSynthwave|r: /fsrecon probe -- armed for eight target aura updates in combat")
+    print("|cff22e0ffForever STUwave|r: /fsrecon probe -- armed for eight target aura updates in combat")
 end
 
 function Diagnostics.StopAuraProbe()
     if probeRun then SaveProbe("manual")
-    else print("|cff22e0ffForeverSynthwave|r: /fsrecon probe -- no active run") end
+    else print("|cff22e0ffForever STUwave|r: /fsrecon probe -- no active run") end
 end
 
 local HAS_CANACCESSVALUE = type(canaccessvalue) == "function"
@@ -562,7 +562,7 @@ local function DoThreatProbeRun()
     local run = RunThreatProbeInner()
     StoreThreatRun(run)
 
-    print(("|cff22e0ffForeverSynthwave|r: /fsrecon threat -- %d run(s) stored, %d secret return(s) this run, %s")
+    print(("|cff22e0ffForever STUwave|r: /fsrecon threat -- %d run(s) stored, %d secret return(s) this run, %s")
         :format(#ForeverSynthwaveDB.recon.threat, CountSecretReturns(run),
             run.inCombat and "IN COMBAT" or "out of combat"))
 end
@@ -574,7 +574,7 @@ function Diagnostics.RunThreatProbe()
     local ok, err = pcall(DoThreatProbeRun)
     if not ok then
         FS.LogDegradeOnce("fsrecon_threat_probe_error",
-            ("|cffff4488ForeverSynthwave|r: /fsrecon threat -- probe failed: %s"):format(tostring(err)))
+            ("|cffff4488Forever STUwave|r: /fsrecon threat -- probe failed: %s"):format(tostring(err)))
     end
 end
 
@@ -582,7 +582,7 @@ function Diagnostics.ClearThreatRuns()
     ForeverSynthwaveDB = ForeverSynthwaveDB or {}
     ForeverSynthwaveDB.recon = ForeverSynthwaveDB.recon or {}
     ForeverSynthwaveDB.recon.threat = {}
-    print("|cff22e0ffForeverSynthwave|r: /fsrecon threat -- stored runs cleared.")
+    print("|cff22e0ffForever STUwave|r: /fsrecon threat -- stored runs cleared.")
 end
 
 local threatAutoFrame
@@ -604,7 +604,7 @@ local function OnThreatAutoCombatStart()
         C_Timer.After(2, Diagnostics.RunThreatProbe)
     else
         FS.LogDegradeOnce("fsrecon_threat_noctimer",
-            "|cffff4488ForeverSynthwave|r: /fsrecon threat auto -- C_Timer unavailable, capturing immediately "
+            "|cffff4488Forever STUwave|r: /fsrecon threat auto -- C_Timer unavailable, capturing immediately "
                 .. "instead of the usual 2s in-combat delay.")
         Diagnostics.RunThreatProbe()
     end
@@ -627,7 +627,7 @@ function Diagnostics.ArmThreatAuto(n)
     end
     threatAutoFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 
-    print(("|cff22e0ffForeverSynthwave|r: /fsrecon threat auto -- armed for the next %d combat(s)."):format(n))
+    print(("|cff22e0ffForever STUwave|r: /fsrecon threat auto -- armed for the next %d combat(s)."):format(n))
 end
 
 -------------------------------------------------------------------------------
@@ -825,7 +825,7 @@ local function DoPetProbeRun()
     local run = RunPetProbeInner()
     StorePetRun(run)
 
-    print(("|cff22e0ffForeverSynthwave|r: /fsrecon pet -- %d run(s) stored, %d secret return(s) this run, %s")
+    print(("|cff22e0ffForever STUwave|r: /fsrecon pet -- %d run(s) stored, %d secret return(s) this run, %s")
         :format(#ForeverSynthwaveDB.recon.pet, CountPetSecretFlags(run),
             run.inCombat and "IN COMBAT" or "out of combat"))
 end
@@ -837,7 +837,7 @@ function Diagnostics.RunPetProbe()
     local ok, err = pcall(DoPetProbeRun)
     if not ok then
         FS.LogDegradeOnce("fsrecon_pet_probe_error",
-            ("|cffff4488ForeverSynthwave|r: /fsrecon pet -- probe failed: %s"):format(tostring(err)))
+            ("|cffff4488Forever STUwave|r: /fsrecon pet -- probe failed: %s"):format(tostring(err)))
     end
 end
 
@@ -845,7 +845,7 @@ function Diagnostics.ClearPetRuns()
     ForeverSynthwaveDB = ForeverSynthwaveDB or {}
     ForeverSynthwaveDB.recon = ForeverSynthwaveDB.recon or {}
     ForeverSynthwaveDB.recon.pet = {}
-    print("|cff22e0ffForeverSynthwave|r: /fsrecon pet -- stored runs cleared.")
+    print("|cff22e0ffForever STUwave|r: /fsrecon pet -- stored runs cleared.")
 end
 
 local petAutoFrame
@@ -868,7 +868,7 @@ local function OnPetAutoCombatStart()
         C_Timer.After(2, Diagnostics.RunPetProbe)
     else
         FS.LogDegradeOnce("fsrecon_pet_noctimer",
-            "|cffff4488ForeverSynthwave|r: /fsrecon pet auto -- C_Timer unavailable, capturing immediately "
+            "|cffff4488Forever STUwave|r: /fsrecon pet auto -- C_Timer unavailable, capturing immediately "
                 .. "instead of the usual 2s in-combat delay.")
         Diagnostics.RunPetProbe()
     end
@@ -891,7 +891,7 @@ function Diagnostics.ArmPetAuto(n)
     end
     petAutoFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 
-    print(("|cff22e0ffForeverSynthwave|r: /fsrecon pet auto -- armed for the next %d combat(s)."):format(n))
+    print(("|cff22e0ffForever STUwave|r: /fsrecon pet auto -- armed for the next %d combat(s)."):format(n))
 end
 
 -- Shared by /fsrecon surname and /fsrecon minimap below: wraps a single
@@ -972,10 +972,10 @@ function Diagnostics.RunSurnameProbe()
     local ok, err = pcall(DoSurnameProbeRun)
     if not ok then
         FS.LogDegradeOnce("fsrecon_surname_probe_error",
-            ("|cffff4488ForeverSynthwave|r: /fsrecon surname -- probe failed: %s"):format(tostring(err)))
+            ("|cffff4488Forever STUwave|r: /fsrecon surname -- probe failed: %s"):format(tostring(err)))
         return
     end
-    print("|cff22e0ffForeverSynthwave|r: /fsrecon surname -- captured, /fsreload to flush")
+    print("|cff22e0ffForever STUwave|r: /fsrecon surname -- captured, /fsreload to flush")
 end
 
 -- /fsrecon minimap -- one-shot probe over Minimap/MinimapCluster geometry
@@ -1083,10 +1083,10 @@ function Diagnostics.RunMinimapProbe()
     local ok, err = pcall(DoMinimapProbeRun)
     if not ok then
         FS.LogDegradeOnce("fsrecon_minimap_probe_error",
-            ("|cffff4488ForeverSynthwave|r: /fsrecon minimap -- probe failed: %s"):format(tostring(err)))
+            ("|cffff4488Forever STUwave|r: /fsrecon minimap -- probe failed: %s"):format(tostring(err)))
         return
     end
-    print("|cff22e0ffForeverSynthwave|r: /fsrecon minimap -- captured, /fsreload to flush")
+    print("|cff22e0ffForever STUwave|r: /fsrecon minimap -- captured, /fsreload to flush")
 end
 
 -------------------------------------------------------------------------------
@@ -1380,13 +1380,13 @@ end
 function Diagnostics.RunMinimapBounds(mode)
     ClearMinimapBoundsMarks()
     if mode == "clear" or mode == "paintoff" then
-        print("|cff22e0ffForeverSynthwave|r: minimap bounds outlines cleared; capture retained")
+        print("|cff22e0ffForever STUwave|r: minimap bounds outlines cleared; capture retained")
         return
     end
     if mode ~= "paint" and mode ~= "spill" then return end
     local ok, run, err = pcall(CaptureMinimapBounds, mode)
     if not ok or not run then
-        print("|cffff4488ForeverSynthwave|r: minimap bounds capture unavailable: " .. (ok and err or "capture refused"))
+        print("|cffff4488Forever STUwave|r: minimap bounds capture unavailable: " .. (ok and err or "capture refused"))
         return
     end
     ForeverSynthwaveDB = ForeverSynthwaveDB or {}
@@ -1394,10 +1394,10 @@ function Diagnostics.RunMinimapBounds(mode)
     ForeverSynthwaveDB.recon.minimapBounds = run
     local painted = pcall(PaintMinimapBounds, run, mode)
     if not painted then ClearMinimapBoundsMarks(); run.paintError = "overlay unavailable" end
-    print(("|cff22e0ffForeverSynthwave|r: minimap bounds -- %d nodes, %d outside map, %d skips; " ..
+    print(("|cff22e0ffForever STUwave|r: minimap bounds -- %d nodes, %d outside map, %d skips; " ..
         "grey hidden, amber unknown alpha, red visible spill (custom furniture identified in capture)")
         :format(run.visited, run.spills, #run.skips))
-    print("|cff22e0ffForeverSynthwave|r: stored recon.minimapBounds; /fsreload to flush, minimap clear removes outlines")
+    print("|cff22e0ffForever STUwave|r: stored recon.minimapBounds; /fsreload to flush, minimap clear removes outlines")
 end
 
 -------------------------------------------------------------------------------
@@ -1771,11 +1771,11 @@ local function DoPlateAurasRun(reason)
     local ok, run = pcall(CapturePlateAuras, reason)
     if not ok then
         FS.LogDegradeOnce("fsrecon_plateauras_probe_error",
-            ("|cffff4488ForeverSynthwave|r: /fsrecon plateauras -- probe failed: %s"):format(tostring(run)))
+            ("|cffff4488Forever STUwave|r: /fsrecon plateauras -- probe failed: %s"):format(tostring(run)))
         return
     end
     local s = run.summary
-    print(("|cff22e0ffForeverSynthwave|r: /fsrecon plateauras -- %s, %d plate(s), aura textures shown %d / with texture %d / visible %d, %s; saved to recon.plateauras, /fsreload to flush")
+    print(("|cff22e0ffForever STUwave|r: /fsrecon plateauras -- %s, %d plate(s), aura textures shown %d / with texture %d / visible %d, %s; saved to recon.plateauras, /fsreload to flush")
         :format(run.mode, #run.plates, s.auraTexturesShown, s.auraTexturesWithTexture, s.auraTexturesVisible,
             tostring(run.context.inCombatLockdown) == "true" and "IN COMBAT" or "out of combat"))
 end
@@ -1821,9 +1821,9 @@ function Diagnostics.DisarmPlateAuras()
     local wasActive = plateAurasActive
     DisarmPlateAuras()
     if wasActive then
-        print("|cff22e0ffForeverSynthwave|r: /fsrecon plateauras off -- disarmed; any pending capture is cancelled")
+        print("|cff22e0ffForever STUwave|r: /fsrecon plateauras off -- disarmed; any pending capture is cancelled")
     else
-        print("|cff22e0ffForeverSynthwave|r: /fsrecon plateauras off -- nothing armed")
+        print("|cff22e0ffForever STUwave|r: /fsrecon plateauras off -- nothing armed")
     end
 end
 
@@ -1837,11 +1837,11 @@ function Diagnostics.ArmPlateAuras()
     end
     local ok, err = pcall(plateAurasArmFrame.RegisterUnitEvent, plateAurasArmFrame, "UNIT_AURA", "target")
     if not ok then
-        print(("|cffff4488ForeverSynthwave|r: /fsrecon plateauras arm -- could not register UNIT_AURA: %s"):format(tostring(err)))
+        print(("|cffff4488Forever STUwave|r: /fsrecon plateauras arm -- could not register UNIT_AURA: %s"):format(tostring(err)))
         return
     end
     plateAurasActive = true
-    print("|cff22e0ffForeverSynthwave|r: /fsrecon plateauras arm -- armed; will capture once, 1.5s after the first target aura change in combat")
+    print("|cff22e0ffForever STUwave|r: /fsrecon plateauras arm -- armed; will capture once, 1.5s after the first target aura change in combat")
 end
 
 -- /fsrecon all -- runs every one-shot recon probe in a single command.
@@ -1855,16 +1855,16 @@ function Diagnostics.RunAllRecon()
     local surnameOk, surnameErr = pcall(DoSurnameProbeRun)
     if not surnameOk then
         FS.LogDegradeOnce("fsrecon_surname_probe_error",
-            ("|cffff4488ForeverSynthwave|r: /fsrecon surname -- probe failed: %s"):format(tostring(surnameErr)))
+            ("|cffff4488Forever STUwave|r: /fsrecon surname -- probe failed: %s"):format(tostring(surnameErr)))
     end
 
     local minimapOk, minimapErr = pcall(DoMinimapProbeRun)
     if not minimapOk then
         FS.LogDegradeOnce("fsrecon_minimap_probe_error",
-            ("|cffff4488ForeverSynthwave|r: /fsrecon minimap -- probe failed: %s"):format(tostring(minimapErr)))
+            ("|cffff4488Forever STUwave|r: /fsrecon minimap -- probe failed: %s"):format(tostring(minimapErr)))
     end
 
-    print(("|cff22e0ffForeverSynthwave|r: /fsrecon all -- surname %s, minimap %s, /fsreload to flush")
+    print(("|cff22e0ffForever STUwave|r: /fsrecon all -- surname %s, minimap %s, /fsreload to flush")
         :format(surnameOk and "captured" or "FAILED", minimapOk and "captured" or "FAILED"))
 end
 
@@ -1974,11 +1974,11 @@ function Diagnostics.RunMicroBagsProbe(silent)
     local ok, report = pcall(CaptureMicroBags)
     if not ok then
         FS.LogDegradeOnce("fsrecon_microbags_probe_error",
-            ("|cffff4488ForeverSynthwave|r: /fsrecon microbags -- capture failed: %s"):format(ProbeError(report)))
+            ("|cffff4488Forever STUwave|r: /fsrecon microbags -- capture failed: %s"):format(ProbeError(report)))
         return
     end
     if not silent then
-        print(("|cff22e0ffForeverSynthwave|r: /fsrecon microbags -- %d micro, %d bags; saved to recon.microBags, /fsreload to flush")
+        print(("|cff22e0ffForever STUwave|r: /fsrecon microbags -- %d micro, %d bags; saved to recon.microBags, /fsreload to flush")
             :format(#report.micro, #report.bags))
     end
 end
@@ -2906,7 +2906,7 @@ do
         local ok, data = pcall(CR.Capture)
         if not ok then
             FS.LogDegradeOnce("fsrecon_class_probe_error",
-                "|cffff4488ForeverSynthwave|r: /fsrecon class -- capture failed")
+                "|cffff4488Forever STUwave|r: /fsrecon class -- capture failed")
             return
         end
         CR.last = data

@@ -163,7 +163,7 @@ local function Degrade(key, detail)
     degraded[key] = true
     if FS.LogDegradeOnce then
         FS.LogDegradeOnce("deck_" .. key,
-            "|cffff4488ForeverSynthwave|r: control deck " .. key .. " unavailable (" .. tostring(detail) .. ")")
+            "|cffff4488Forever STUwave|r: control deck " .. key .. " unavailable (" .. tostring(detail) .. ")")
     end
 end
 

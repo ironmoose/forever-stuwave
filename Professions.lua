@@ -104,7 +104,7 @@ local function ValidateProfessionsAPI()
         if not loggedInitFailureProfessions then
             loggedInitFailureProfessions = true
             FS.LogDegradeOnce("professions_init",
-                "|cffff4488ForeverSynthwave|r: GetProfessions threw on first call, professions panel disabled")
+                "|cffff4488Forever STUwave|r: GetProfessions threw on first call, professions panel disabled")
         end
         return false
     end
@@ -115,7 +115,7 @@ local function ValidateProfessionsAPI()
             if not loggedInitFailureProfessionInfo then
                 loggedInitFailureProfessionInfo = true
                 FS.LogDegradeOnce("professions_init",
-                    "|cffff4488ForeverSynthwave|r: GetProfessionInfo threw on first call, professions panel disabled")
+                    "|cffff4488Forever STUwave|r: GetProfessionInfo threw on first call, professions panel disabled")
             end
             return false
         end
@@ -274,7 +274,7 @@ local function RefreshRows()
         if not loggedRefreshFailure then
             loggedRefreshFailure = true
             FS.LogDegradeOnce("professions_refresh",
-                "|cffff4488ForeverSynthwave|r: GetProfessions threw on refresh, professions panel disabled")
+                "|cffff4488Forever STUwave|r: GetProfessions threw on refresh, professions panel disabled")
         end
         for i = 1, MAX_PROFESSIONS do rows[i]:Hide() end
         return
@@ -306,7 +306,7 @@ local function RefreshRows()
                 -- hitting the same slot again, doesn't spam the saved log.
                 loggedSlotFailure = true
                 FS.LogDegradeOnce("professions_slot",
-                    "|cffff4488ForeverSynthwave|r: GetProfessionInfo threw for slot " .. tostring(slotIndex))
+                    "|cffff4488Forever STUwave|r: GetProfessionInfo threw for slot " .. tostring(slotIndex))
             end
         end
     end
@@ -337,7 +337,7 @@ SlashCmdList["FSPROF"] = function()
         p:Show()
     end
 
-    print(("|cff22e0ffForeverSynthwave|r: professions panel %s"):format(wasShown and "hidden" or "shown"))
+    print(("|cff22e0ffForever STUwave|r: professions panel %s"):format(wasShown and "hidden" or "shown"))
 end
 
 -------------------------------------------------------------------------------

@@ -51,7 +51,7 @@ local function StyleFontOnly(obj)
 end
 
 -------------------------------------------------------------------------------
--- Zone / subzone / PvP status text
+-- Zone / subzone / PvP status text (design notes)
 -------------------------------------------------------------------------------
 
 local ZONE_TEXT_NAMES = { "ZoneTextString", "SubZoneTextString", "PVPInfoTextString" }
@@ -63,7 +63,7 @@ local function StyleZoneText()
 end
 
 -------------------------------------------------------------------------------
--- Errors / raid warning / boss banner
+-- Errors / raid warning / boss banner (design notes)
 -------------------------------------------------------------------------------
 
 -- UIErrorsFrame is confirmed present on this client; RaidWarningFrame and its
@@ -94,7 +94,7 @@ local function StyleBossBanner()
 end
 
 -------------------------------------------------------------------------------
--- Combat text
+-- Combat text (design notes)
 -------------------------------------------------------------------------------
 
 -- Floating combat text (hit/miss/crit/heal numbers) on this client is driven

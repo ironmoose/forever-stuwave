@@ -1,52 +1,91 @@
-# Development and the runtime mirror
+# Development
 
-Forever STUwave is the public presentation of the `ForeverSynthwave` addon. During the alpha, this repository contains a curated runtime snapshot. The canonical source, development tools, harnesses, and work in progress remain in a private monorepo.
+This standalone repository is the canonical Forever STUwave source. Lua runtime files live at the root. `tools/` contains development utilities, Lua harnesses, Python tests, support modules and fixtures; `media/` and `fonts/` include asset generators. `mockups/` contains browser design sources and their required reference assets. Mockups are design studies, not demonstrations of shipped behavior.
 
-Report bugs with the [testing guide](../TESTING.md). Gameplay patches begin in canonical source; edits to runtime Lua in this mirror would be replaced by the next export.
+## Setup and checks
 
-## Maintainer update flow
+Install Git, Python 3.11 or later, and [uv](https://docs.astral.sh/uv/). From the repository root:
 
-1. Implement in canonical source. Run its parse and lint gates, relevant headless harnesses, and any required client verification. Clearly distinguish harness results from observations in game.
-2. Review and commit the intended canonical changes. The existing `addons/package-forever-synthwave.sh` packages **committed HEAD**, not uncommitted work. Run it with its normal gates enabled and keep the ZIP it produces.
-3. From this mirror's checkout, export that existing ZIP into the local checkout:
+```sh
+uv sync
+uv run python tools/check.py
+```
 
-   ```sh
-   python3 tools/export_addon.py \
-     --archive /path/to/ForeverSynthwave-reviewed.zip \
-     --destination /path/to/forever-stuwave
-   ```
+The complete check runs the Lua 5.1 parse gate, lint with HIGH findings blocking, every `tools/*-harness.py`, and pytest. Mocked checks cannot establish actual client behavior. At the standalone migration checkpoint, 60 root Lua files parsed, HIGH lint passed, all 36 harnesses passed, and 288 Python tests passed (one Pillow deprecation warning).
 
-4. Inspect `git diff` and `git status`, including the `.stuwave-export.json` manifest, `.toc` branding, changed runtime files, and any removals. Review the archive's canonical revision as well as its version. Separately compare compiled bytecode between the curated Lua and its packaged source as part of release review.
-5. Commit the reviewed mirror update separately. Publication or pushing is a separate action requested by the maintainer.
+For focused work:
 
-The exporter manages runtime assets, public `.toc` branding, and public source comment cleanup using `.stuwave-export.json`. Comment cleanup removes private design records with a lexer that protects string literals and keeps line endings and line counts. Public docs, screenshots, and tooling belong to this repository and remain outside that managed runtime surface. Export is an explicit step; it is not a background sync or an automatic push after every canonical change.
+```sh
+uv run python tools/parse-gate.py
+uv run python tools/lua-lint.py --fail-on high
+uv run python tools/sealbar-harness.py
+uv run python -m pytest -q
+```
 
-## Runtime identities and load order
+Lint can optionally use a client globals dump through `FS_GLOBALS_DUMP`; keep the dump outside the repository. Missing optional global evidence must not be presented as a verified client API inventory.
 
-The installed folder and manifest remain `ForeverSynthwave/ForeverSynthwave.toc`. Hardcoded texture paths use `Interface\\AddOns\\ForeverSynthwave\\...`; changing the folder name breaks those paths. Keep the internal addon identity, global frame names, and the account SavedVariables `ForeverSynthwaveDB` and `ForeverSynthwaveErrorLog` intact.
+Generators can be run with `uv run python` and their script path. Read each generator's inputs and outputs before running it, and inspect generated diffs. `fonts/make_display_font.py` produces the renamed FS Display font; preserve its OFL notice. Browser mockups can be opened locally; their references remain design assets.
 
-Modules that share addon state capture the addon table with `local _, FS = ...` or `local addonName, FS = ...`. Cross module state belongs on that table, owned by its defining module and read at the appropriate runtime point. A local variable in one file is not shared with another.
+## Changes and release artifacts
 
-`ErrorLog.lua` loads first. `ForeverSynthwave.lua` loads before `Theme.lua`, so its theme access occurs inside runtime handlers rather than at file scope. Later modules rely on `.toc` order for their helpers; preserve dependencies when adding or moving entries.
+Work on `main`, review the diff, run appropriate checks, and commit the reviewed changes. Use a branch from `main` only when concurrent repository work requires one. Push reviewed commits to the canonical GitHub repository when publication is authorized. Testers update with `git pull --ff-only`; no mirror export step is needed.
 
-`Theme.lua` owns shared palette, font, texture, and chrome tokens. `Layout.lua` owns geometry and rescale behavior. Consume their definitions instead of introducing competing copies in components.
+To create a runtime ZIP from **committed HEAD**:
 
-## Forever client constraints
+```sh
+uv run bash tools/package-forever-synthwave.sh
+```
 
-Feature detect APIs and check values with the existing secret guards before arithmetic, comparison, indexing, concatenation, formatting, or conversion. Do not infer health, power, or aura state from an unreadable value. Use existing failure and diagnostic paths.
+The script uses `python3` by default inside uv's environment (`PYTHON` can override it), and requires Git, zip, unzip and tar. It stages runtime files, validates the staged `.toc`, runs parse and HIGH lint gates, and produces `dist/ForeverSTUwave-<version>-<commit>-<date>.zip`. Its top folder remains `ForeverSynthwave`. Uncommitted edits, tooling, mockups and generators do not enter the ZIP. Send [TESTING.md](../TESTING.md) separately.
 
-Protected frames and attributes have combat restrictions. Reuse the established deferral and secure button patterns rather than changing protected geometry or bindings in combat. Headless checks establish behavior against their mocks; mark live behavior as unverified until observed on the client.
+## Deploying a development build
 
-Settings are account wide. Do not move them to per character SavedVariables without verifying the Forever beta client's restore behavior.
+Close the game before replacing files. The deploy scripts stage runtime files only and guard against overwriting a source or Git checkout. A clone installed in `Interface/AddOns` should be updated with Git instead.
 
-## Current class boundary
+On Linux, specify your installation root explicitly if it differs from the script's default:
 
-`HudProfiles.lua` defines Priest and Warlock profiles. Paladin has recon candidates in `Diagnostics.lua`, first login harness coverage in canonical source, and spell gated party dispel capability in `PartyFrames.lua`. Its seal, aura, and Judgement HUD is not implemented.
+```sh
+WOW_ROOT="/path/to/World of Warcraft" uv run bash tools/deploy-forever-synthwave.sh
+```
 
-PartyFrames currently has a local `PlayerClass()` wrapper around `UnitClass`. A shared `FS.PlayerClass` override remains future work; do not assume that API exists. `/fsmouseover` controls a client setting, and party row casting still requires live verification.
+On Windows, after `uv sync`:
 
-## Public assets
+```powershell
+.\tools\deploy-forever-synthwave.ps1 -WowRoot "C:\Program Files (x86)\World of Warcraft"
+```
 
-Use real, dated gameplay screenshots with accurate captions. Keep browser mockups out of claims about the shipped UI. Inspect diagnostic reports before publishing; do not copy whole SavedVariables files into this repository.
+Both default to `_classic_beta_`; override the flavor only for a client you intend to test. Fully restart for added files, bindings, or textures. Deploying is a separate action from running headless checks.
 
-Bundled fonts keep their OFL files and provenance in [fonts/README.md](../fonts/README.md). The project's code license is pending; third party font licenses remain separate.
+## Optional live client tools
+
+For the optional `fsdev` tools:
+
+```sh
+uv sync --extra fsdev
+uv run --extra fsdev python tools/fsdev.py --help
+```
+
+Linux capture needs system GStreamer with PipeWire support, a working desktop ScreenCast portal, and `xdotool` for the applicable Gamescope input path; uv does not install these system components. Consult the tool's options before using it. `--shot-only` captures without sending client input. Input, focus changes and capture should be supervised and explicitly authorized.
+
+An optional desktop identity allows the portal to recognize Forever STUwave. Install it manually if wanted:
+
+```sh
+mkdir -p ~/.local/share/applications
+cp tools/fsdev_support/forever-stuwave.desktop ~/.local/share/applications/
+```
+
+Registration does not grant screen-sharing consent. Approve any portal prompt yourself. Keep captured account details, chats, and SavedVariables out of public commits.
+
+## Runtime compatibility and client constraints
+
+Keep the installed folder and manifest `ForeverSynthwave/ForeverSynthwave.toc`, hardcoded media paths, global frame names, and account-wide `ForeverSynthwaveDB` and `ForeverSynthwaveErrorLog` unchanged. Account-wide settings avoid a known Forever beta per-character restore problem.
+
+Modules share the addon namespace through `local _, FS = ...`. `ErrorLog.lua` loads first. `ForeverSynthwave.lua` precedes `Theme.lua`, so theme reads happen at runtime. Preserve dependency order when adding `.toc` entries. `Theme.lua` owns palette, fonts, textures and chrome; `Layout.lua` owns geometry.
+
+Feature-detect APIs and use secret guards before reading or transforming values. Protected frame and binding changes must follow existing combat deferral patterns. A shared `FS.PlayerClass` override remains future work; do not assume it exists.
+
+## Current alpha boundary
+
+Priest and Warlock HUD profiles ship alongside Paladin seal/aura controls, the Seal Chamber and Judgement lane. Judgement does not consume the seal on Forever. Judgement and its lane, Quick Keybind, and label visuals have live signoff; seal/aura clicks, expiry/no-seal states, shoulder seam and minimap first login still need checks. Advanced Paladin level 10/20 rotation rules are incomplete. Party row mouseover casting also needs live verification. See [TESTING.md](../TESTING.md).
+
+Project code is MIT; preserve [third party notices](../THIRD_PARTY_NOTICES.md) and font OFL files. See [migration notes](MIGRATION.md) for provenance.

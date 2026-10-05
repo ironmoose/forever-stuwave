@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Center Console v2</title>
+<style>
+/* The addon's own bundled faces (ForeverSynthwave/fonts). Falls back to the stacks below. */
+@font-face { font-family: "FS Display"; src: url("../fonts/FSDisplay-Bold.ttf"); font-weight: 700; }
+@font-face { font-family: "FS Mono"; src: url("../fonts/MononokiNerdFontMono-Bold.ttf"); font-weight: 700; }
+@font-face { font-family: "Share Tech Mono"; src: url("../fonts/ShareTechMono-Regular.ttf"); }
+
+:root {
+  color-scheme: dark;
+
+  /* Addon palette, same tokens as center-console-2026-10-02.html (v1) */
+  --bg: #1a1025;
+  --track: #0a0416;
+  --line: #3a2168;
+  --violet: #a855f7;
+  --pink: #ff2e97;
+  --cyan: #22e0ff;
+  --green: #39ff14;
+  --parchment: #bfe9d6;
+  --surface: #2d1b4e;
+  --text: #e2e8f0;
+
+  /* Page only, not from the addon */
+  --page: #0e0719;
+  --muted: #9a8fbd;
+  --warm: #ff3d1f;
+  --core: #eafcff;
+  --gold: #ffd23f;
+
+  --font-display: "Orbitron", "Eurostile", "Bank Gothic", "Arial Narrow", sans-serif;
+  --font-body: "Rajdhani", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Share Tech Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --font-label: "FS Mono", "Mononoki", "Mononoki Nerd Font", "Share Tech Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  --gutter: 16px;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--page); color: var(--text); font-family: var(--font-body); font-size: 17px; line-height: 1.4; font-weight: 500; }
+.wrap { max-width: 1560px; margin-inline: auto; padding-inline: var(--gutter); padding-block: 0 56px; }
+
+.top { padding-block: 28px 10px; }
+.kicker { margin: 0 0 6px; font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--cyan); }
+h1 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: clamp(1.35rem, 6vw, 2.1rem); letter-spacing: 0.04em; text-transform: uppercase; line-height: 1.1; color: var(--text); }
+h1 span { color: var(--pink); }
+.lede { margin: 0 0 8px; max-width: 120ch; color: var(--parchment); font-size: 1.05rem; }
+.lede b { color: var(--cyan); font-weight: 600; }
+
+.card { background: linear-gradient(135deg, var(--violet), var(--line) 45%, var(--line)); padding: 1px; margin-top: 26px; width: fit-content; max-width: 100%;
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px)); }
+.card-in { background: var(--bg); padding: 14px; display: flex; flex-direction: column; gap: 10px;
+  clip-path: polygon(0 0, calc(100% - 15px) 0, 100% 15px, 100% 100%, 15px 100%, 0 calc(100% - 15px)); }
+.card-head { display: flex; align-items: center; gap: 12px; }
+.letter { flex: none; min-width: 36px; height: 36px; padding: 0 6px; display: grid; place-items: center; background: var(--pink); color: var(--track);
+  font-family: var(--font-display); font-weight: 700; font-size: 16px;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px)); }
+h2 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.25; flex: 1; min-width: 0; }
+.badge { flex: none; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--pink); border: 1px solid var(--pink); padding: 2px 6px; }
+.vcap { margin: 0; font-family: var(--font-mono); font-size: 13px; color: var(--cyan); max-width: 160ch; }
+.desc { margin: 0; font-size: 15px; color: var(--parchment); max-width: 160ch; }
+.math { margin: 0; font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); max-width: 190ch; line-height: 1.55; }
+.math b { color: var(--gold); font-weight: 400; }
+.chk { margin: 0; font-family: var(--font-mono); font-size: 12.5px; color: var(--green); }
+.chk.bad { color: var(--warm); }
+
+/* A stage is a full 2560 x 1440 screen drawn at 0.5 scale: a 1280 x 720 box around a half-scaled world. One UI unit is one screen pixel inside the world. */
+.stage { position: relative; box-sizing: content-box; width: 1280px; height: 720px; flex: none; overflow: hidden; border: 1px solid var(--line); background: #1b1030; }
+.world { position: absolute; left: 0; top: 0; width: 2560px; height: 1440px; transform: scale(0.5); transform-origin: 0 0; }
+.world > svg { position: absolute; left: 0; top: 0; display: block; }
+.world .cbt { font-family: var(--font-mono); }
+.world .refimg { position: absolute; left: 0; top: 0; width: 2560px; height: 1440px; display: block; }
+.world .refdark { position: absolute; left: 0; top: 0; width: 2560px; height: 1440px; background: rgba(10, 4, 22, 0.42); }
+.world text.a { font-family: var(--font-mono); font-size: 20px; fill: #eafcff; stroke: #000; stroke-width: 4px; paint-order: stroke; stroke-linejoin: round; opacity: 0.9; }
+.world text.a.big { font-size: 24px; letter-spacing: 0.14em; }
+
+/* Tiles, same drawing as the combat HUD and v1 */
+.t { position: absolute; display: grid; place-items: center; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.02em; color: var(--text);
+  background: linear-gradient(135deg, var(--surface), var(--bg)); border: 1px solid var(--violet); }
+.t.empty { background: transparent; border: 1px dashed rgba(168, 85, 247, 0.55); }
+.t .secs { position: absolute; right: 2px; bottom: 1px; font-size: 11px; line-height: 1; color: #fff;
+  text-shadow: 1px 0 #000, -1px 0 #000, 0 1px #000, 0 -1px #000, 0 0 3px #000; }
+.t .ring { position: absolute; inset: -2px; border: 2px solid var(--cyan); box-shadow: 0 0 8px var(--cyan); pointer-events: none; }
+.t .ring.gold { border-color: var(--gold); box-shadow: 0 0 9px var(--gold), 0 0 26px 6px rgba(255, 210, 63, 0.38); }
+.t.next { border: 2px solid var(--cyan); box-shadow: 0 0 10px var(--cyan); }
+.t.next .abbr { font-size: 16px; }
+.t .key { position: absolute; top: 2px; right: 4px; font-size: 12px; line-height: 1; color: var(--cyan); }
+.t.gold .key { color: var(--gold); }
+.nlbl { position: absolute; text-align: center; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.14em; color: #c9bdea; text-shadow: 0 1px 2px #000, 0 0 3px #000; white-space: nowrap; }
+.chip { position: absolute; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--gold); white-space: nowrap; height: 15px; line-height: 13px; padding: 0 6px;
+  background: rgba(10, 4, 22, 0.88); border: 1px solid var(--gold); box-shadow: 0 0 8px rgba(255, 210, 63, 0.45);
+  clip-path: polygon(0 0, calc(100% - 4px) 0, 100% 4px, 100% 100%, 4px 100%, 0 calc(100% - 4px)); }
+
+/* Party panel rows: laser rails for HP and mana */
+.prow { position: absolute; }
+.prow .cls { position: absolute; left: 0; top: 1px; width: 12px; height: 12px; clip-path: polygon(0 0, calc(100% - 3px) 0, 100% 3px, 100% 100%, 3px 100%, 0 calc(100% - 3px)); }
+.prow b { position: absolute; left: 18px; top: 0; font-family: var(--font-mono); font-weight: 400; font-size: 12px; line-height: 14px; color: var(--text); }
+.prow .pc { position: absolute; right: 0; top: 0; font-family: var(--font-mono); font-size: 11px; line-height: 14px; color: var(--muted); }
+.prow .hp, .prow .mp { position: absolute; left: 0; right: 0; background: rgba(10, 4, 22, 0.95); border-top: 1px solid rgba(168, 85, 247, 0.18); border-bottom: 1px solid rgba(168, 85, 247, 0.18); }
+.prow .hp { top: 17px; height: 7px; }
+.prow .mp { top: 27px; height: 5px; }
+.prow u { position: absolute; left: 0; top: 0; bottom: 0; display: block; box-shadow: 0 0 6px 1px currentColor; }
+.pfoot { position: absolute; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; color: var(--muted); white-space: nowrap; }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&amp;family=Rajdhani:wght@500;600&amp;display=swap">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <p class="kicker">Forever Synthwave / Combat HUD / Center console v2</p>
+    <h1>Center console <span>around</span> the character</h1>
+    <p class="lede"><b>New hard constraint (Parker):</b> "I can't have it cover my character. I have to look out for fire on the ground and stuff." Every panel here is a <b>full 2560 x 1440 screen drawn at 0.5 scale</b> (1280 x 720), with the character at the position measured from his in-game screenshots: horizontally centred, head at 0.485 and feet at 0.63 of screen height, 210 px tall at his normal zoom. The dashed <b>clear zone</b> ellipse is the keep-out region: it reaches from just above the head to well below the feet, and wide enough for a ground ring. <b>Nothing of the console enters it</b>; each panel is checked by script and the result is printed under it. Same rails, plates, tiles, party panel and node as v1, now as two side stacks outside the zone: the left stack (next cast tile, rotation row, player cast bar) with the left rail running into the party panel, the right stack (target cast bar, DoT tiles stepping down and outward). Nothing above the head, nothing in the bottom centre. Soul shards are on hold and not drawn.</p>
+  </header>
+  <div id="panels"></div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var C = {
+    violet: "#a855f7", pink: "#ff2e97", cyan: "#22e0ff", green: "#39ff14", track: "#0a0416", line: "#3a2168",
+    surface: "#2d1b4e", text: "#e2e8f0", parchment: "#bfe9d6", muted: "#9a8fbd", core: "#eafcff", bg: "#1a1025", gold: "#ffd23f"
+  };
+
+  /* ---------- helpers (same as v1) ---------- */
+  var uidN = 0;
+  function uid() { return "c" + (++uidN); }
+  function hx(h) { h = h.replace("#", ""); return [parseInt(h.substr(0, 2), 16), parseInt(h.substr(2, 2), 16), parseInt(h.substr(4, 2), 16)]; }
+  function hex2(n) { n = Math.max(0, Math.min(255, Math.round(n))); return (n < 16 ? "0" : "") + n.toString(16); }
+  function mix(a, b, t) { var x = hx(a), y = hx(b); return "#" + [0, 1, 2].map(function (i) { return hex2(x[i] + (y[i] - x[i]) * t); }).join(""); }
+  function rgba(h, a) { var x = hx(h); return "rgba(" + x[0] + "," + x[1] + "," + x[2] + "," + a + ")"; }
+  function r2(n) { return Math.round(n * 100) / 100; }
+  function pts(a) { return a.map(function (p) { return r2(p[0]) + "," + r2(p[1]); }).join(" "); }
+  function insetPoly(P, d) {
+    var n = P.length, area = 0, i;
+    for (i = 0; i < n; i++) { var a = P[i], b = P[(i + 1) % n]; area += a[0] * b[1] - b[0] * a[1]; }
+    var s = area > 0 ? 1 : -1;
+    var lines = P.map(function (p, idx) {
+      var q = P[(idx + 1) % n], dx = q[0] - p[0], dy = q[1] - p[1], len = Math.sqrt(dx * dx + dy * dy);
+      return { x: p[0] + s * (-dy) / len * d, y: p[1] + s * dx / len * d, dx: dx, dy: dy };
+    });
+    return P.map(function (p, idx) {
+      var l1 = lines[(idx + n - 1) % n], l2 = lines[idx], cr = l1.dx * l2.dy - l1.dy * l2.dx;
+      if (Math.abs(cr) < 1e-6) { return p; }
+      var t = ((l2.x - l1.x) * l2.dy - (l2.y - l1.y) * l2.dx) / cr;
+      return [l1.x + t * l1.dx, l1.y + t * l1.dy];
+    });
+  }
+  var mctx = document.createElement("canvas").getContext("2d");
+  function measure(text, size) { mctx.font = size + "px 'Share Tech Mono', ui-monospace, monospace"; return mctx.measureText(text).width; }
+
+  /* ---------- screen and rule constants (full resolution units, 2560 x 1440) ---------- */
+  var SW = 2560, SH = 1440, CX = 1280;
+  var HEAD_F = 0.485, FEET_F = 0.63;                 /* measured at 2560 x 1440, normal zoom */
+  var HC_NORMAL = 210;
+  var CY = Math.round(((HEAD_F + FEET_F) / 2) * SH); /* character centre y: 803, assumed fixed under zoom (zoom scales about the centre) */
+  var K = { ring: 1.6, topPad: 0.12, botPad: 0.9, margin: 24, minInner: 330, maxInner: 620 };
+  var BAR_DY = 22;                                   /* cast bar centre, below the character centre */
+  var ROW_DY = -25;                                  /* next tile and rotation row centre, above the character centre */
+
+  var PW = 268, BH = 22, CHM = 5;                    /* cast bar: 268 x 22, chamfer 5 (Stack A) */
+  var TABH = 15, SL = 5;
+  var DOCK_X = 400, PANEL_X = 40, PANEL_H = 270;     /* party panel at the real left edge, x 40 to 400 */
+  var TH33 = 33 * Math.PI / 180;
+
+  /* The keep-out ellipse for a character Hc px tall, centred on x = CX. */
+  function zone(Hc) {
+    var top = CY - (0.5 + K.topPad) * Hc, bot = CY + (0.5 + K.botPad) * Hc;
+    return { top: top, bot: bot, ey: (top + bot) / 2, a: K.ring * Hc, b: (bot - top) / 2 };
+  }
+
+  /* ---------- the cast bar, Stack A numbers, drawn at (x, y) (v1) ---------- */
+  function framePts() {
+    return pts([[CHM + 0.5, 0.5], [PW - CHM - 0.5, 0.5], [PW - 0.5, CHM + 0.5], [PW - 0.5, BH - CHM - 0.5], [PW - CHM - 0.5, BH - 0.5], [CHM + 0.5, BH - 0.5], [0.5, BH - CHM - 0.5], [0.5, CHM + 0.5]]);
+  }
+  function chevPts(i) {
+    var x0 = 27 + i * 12, ah = 9;
+    return [[0, 0], [9, 0], [9 + ah, ah], [9, 18], [0, 18], [ah, ah]].map(function (p) { return [x0 + p[0], 2 + p[1]]; });
+  }
+  function bar(x, y, o) {
+    var id = uid(), g = "", i, N = 14, lit = Math.round((o.frac || 0) * N), ghost = !!o.ghost;
+    var lg = "";
+    g += '<polygon points="' + framePts() + '" fill="none" stroke="' + C.violet + '" stroke-width="3" opacity="' + (ghost ? 0 : 0.35) + '" filter="url(#' + id + 'b)"/>';
+    g += '<polygon points="' + framePts() + '" fill="' + rgba(C.track, ghost ? 0.4 : 0.93) + '" stroke="' + rgba(C.violet, ghost ? 0.4 : 1) + '" stroke-width="1" stroke-linejoin="miter"/>';
+    if (!ghost) {
+      g += '<rect x="6.5" y="2.5" width="17" height="17" fill="' + C.track + '" stroke="' + C.line + '" shape-rendering="crispEdges"/>';
+      g += '<polygon points="' + pts([[15, 6.5], [19.5, 11], [15, 15.5], [10.5, 11]]) + '" fill="' + C.pink + '"/>';
+    }
+    for (i = 0; i < N; i++) {
+      var P = chevPts(i);
+      if (ghost) {
+        g += '<polygon points="' + pts(insetPoly(P, 0.5)) + '" fill="none" stroke="' + rgba(C.cyan, 0.26) + '" stroke-width="1" stroke-linejoin="miter"/>';
+      } else if (i < lit) {
+        lg += '<polygon points="' + pts(P) + '" fill="' + C.cyan + '"/>';
+      } else {
+        g += '<polygon points="' + pts(P) + '" fill="' + rgba(C.cyan, 0.2) + '"/>';
+      }
+    }
+    if (lg) {
+      g += '<g opacity="0.55" filter="url(#' + id + 'b)">' + lg + '</g>' + lg;
+      if (lit < N) { g += '<polygon points="' + pts(insetPoly(chevPts(lit), 0.5)) + '" fill="none" stroke="' + C.core + '" stroke-width="1" stroke-linejoin="miter"/>'; }
+    }
+    if (o.timer) {
+      g += '<text class="cbt" x="' + (PW - CHM - 4) + '" y="15" font-size="11" text-anchor="end"><tspan fill="' + C.text + '">' + o.timer[0] + '</tspan><tspan fill="' + C.muted + '"> / ' + o.timer[1] + '</tspan></text>';
+    }
+    return '<g transform="translate(' + r2(x) + ',' + r2(y) + ')"><defs><filter id="' + id + 'b" x="-5%" y="-60%" width="110%" height="220%"><feGaussianBlur stdDeviation="2.4"/></filter></defs>' + g + '</g>';
+  }
+  /* Spell name tab, a trapezoid. dir "down" hangs under a line at yLine, "up" rises above it. */
+  function tab(xLeft, yLine, text, dir, ghost) {
+    var tabW = Math.ceil(measure(text, 12)) + 12 + text.length * 0.5, tw = tabW + 2 * SL;
+    var yB = dir === "down" ? yLine + TABH : yLine - TABH;
+    var fill = ghost ? 0.5 : 0.95, stroke = ghost ? 0.4 : 1, tcol = ghost ? 0.5 : 1;
+    var poly = [[xLeft, yLine], [xLeft + tw, yLine], [xLeft + SL + tabW, yB], [xLeft + SL, yB]];
+    var edge = dir === "down"
+      ? [[xLeft, yLine - 0.5], [xLeft + SL, yB - 0.5], [xLeft + SL + tabW, yB - 0.5], [xLeft + tw, yLine - 0.5]]
+      : [[xLeft, yLine + 0.5], [xLeft + SL, yB + 0.5], [xLeft + SL + tabW, yB + 0.5], [xLeft + tw, yLine + 0.5]];
+    var ty = Math.round((yLine + yB) / 2 + 12 * 0.33);
+    var s = '<polygon points="' + pts(poly) + '" fill="' + rgba(C.track, fill) + '"/>' +
+      '<polyline points="' + pts(edge) + '" fill="none" stroke="' + rgba(C.violet, stroke) + '" stroke-width="1" stroke-linejoin="miter"/>' +
+      '<text class="cbt" x="' + r2(xLeft + SL + 6) + '" y="' + ty + '" font-size="12" letter-spacing="0.5" fill="' + rgba(C.cyan, tcol) + '">' + text + '</text>';
+    return { svg: s, w: tw };
+  }
+
+  /* ---------- rails: neon lines with bloom (v1) ---------- */
+  function railDefs(id, x1, x2, op0, op1) {
+    return '<linearGradient id="' + id + 'g" gradientUnits="userSpaceOnUse" x1="' + r2(x1) + '" y1="0" x2="' + r2(x2) + '" y2="0">' +
+      '<stop offset="0" stop-color="' + C.cyan + '" stop-opacity="' + op0 + '"/><stop offset="0.55" stop-color="' + mix(C.cyan, C.violet, 0.55) + '" stop-opacity="' + (op0 + op1) / 2 + '"/><stop offset="1" stop-color="' + C.violet + '" stop-opacity="' + op1 + '"/></linearGradient>';
+  }
+  function rail(d, id, w, a) {
+    a = a == null ? 1 : a;
+    return '<path d="' + d + '" fill="none" stroke="url(#' + id + 'g)" stroke-width="' + (w * 3.2) + '" stroke-linecap="round" stroke-linejoin="round" opacity="' + (0.55 * a) + '" filter="url(#' + id + 'bl)"/>' +
+      '<path d="' + d + '" fill="none" stroke="url(#' + id + 'g)" stroke-width="' + w + '" stroke-linecap="round" stroke-linejoin="round" opacity="' + a + '"/>';
+  }
+  function node(x, y, a) {
+    a = a == null ? 1 : a;
+    return '<g opacity="' + a + '"><circle cx="' + r2(x) + '" cy="' + r2(y) + '" r="7" fill="' + C.cyan + '" opacity="0.28" filter="url(#glowN)"/>' +
+      '<circle cx="' + r2(x) + '" cy="' + r2(y) + '" r="3.2" fill="' + C.core + '" stroke="' + C.violet + '" stroke-width="1.3"/></g>';
+  }
+  var COMMON_DEFS = '<filter id="glowN" x="-200%" y="-200%" width="500%" height="500%"><feGaussianBlur stdDeviation="2.5"/></filter>' +
+    '<filter id="softB" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3"/></filter>';
+
+  /* ---------- backdrop: dark desert dusk, drawn in a 1480 x 720 box and stretched to the screen ---------- */
+  function backdrop(horizon, H) {
+    var BW = 1480, BCX = 740;
+    var id = uid(), s = '';
+    s += '<defs><linearGradient id="' + id + 's" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#150c2c"/><stop offset="0.45" stop-color="#3a1a4c"/><stop offset="0.8" stop-color="#8a3a4a"/><stop offset="1" stop-color="#d0703a"/></linearGradient>' +
+      '<linearGradient id="' + id + 'd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4a2430"/><stop offset="1" stop-color="#1a0d1a"/></linearGradient>' +
+      '<radialGradient id="' + id + 'u" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#ffb069" stop-opacity="0.85"/><stop offset="1" stop-color="#ffb069" stop-opacity="0"/></radialGradient></defs>';
+    s += '<rect x="0" y="0" width="' + BW + '" height="' + H + '" fill="url(#' + id + 's)"/>';
+    var i, seed = 7, rnd = function () { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    for (i = 0; i < 70; i++) { s += '<circle cx="' + r2(rnd() * BW) + '" cy="' + r2(rnd() * horizon * 0.55) + '" r="' + r2(0.4 + rnd() * 0.8) + '" fill="#e8dcff" opacity="' + r2(0.2 + rnd() * 0.5) + '"/>'; }
+    s += '<ellipse cx="' + (BCX + 430) + '" cy="' + horizon + '" rx="260" ry="90" fill="url(#' + id + 'u)"/>';
+    s += '<path d="M0 ' + horizon + ' L0 ' + (horizon - 26) + ' Q160 ' + (horizon - 58) + ' 330 ' + (horizon - 24) + ' T640 ' + (horizon - 30) + ' T980 ' + (horizon - 52) + ' T1260 ' + (horizon - 22) + ' T' + BW + ' ' + (horizon - 38) + ' L' + BW + ' ' + horizon + ' Z" fill="#552a3c"/>';
+    s += '<path d="M0 ' + horizon + ' L0 ' + (horizon - 8) + ' Q220 ' + (horizon - 30) + ' 460 ' + (horizon - 8) + ' T900 ' + (horizon - 14) + ' T1300 ' + (horizon - 6) + ' T' + BW + ' ' + (horizon - 14) + ' L' + BW + ' ' + horizon + ' Z" fill="#3b1d2f"/>';
+    s += '<rect x="0" y="' + horizon + '" width="' + BW + '" height="' + (H - horizon) + '" fill="url(#' + id + 'd)"/>';
+    s += '<path d="M0 ' + (horizon + 90) + ' Q300 ' + (horizon + 60) + ' 640 ' + (horizon + 96) + ' T1300 ' + (horizon + 70) + ' T' + BW + ' ' + (horizon + 84) + ' L' + BW + ' ' + H + ' L0 ' + H + ' Z" fill="#2a1424" opacity="0.7"/>';
+    s += '<polygon points="' + pts([[1120, horizon + 110], [1150, horizon + 84], [1196, horizon + 96], [1214, horizon + 112]]) + '" fill="#1c0f1c"/>';
+    s += '<polygon points="' + pts([[300, horizon + 150], [330, horizon + 130], [372, horizon + 142], [386, horizon + 152]]) + '" fill="#1c0f1c"/>';
+    s += '<rect x="0" y="0" width="' + BW + '" height="' + H + '" fill="#0a0418" opacity="0.18"/>';
+    return '<g transform="scale(' + r2(SW / BW) + ',' + r2(SH / H) + ')">' + s + '</g>';
+  }
+
+  /* ---------- the character: a robed caster, Hc tall, centre at (CX, cy) (v1) ---------- */
+  function character(Hc, cy) {
+    var R = [[0, -0.490], [0.040, -0.482], [0.066, -0.455], [0.074, -0.415], [0.066, -0.380], [0.082, -0.352], [0.150, -0.322], [0.182, -0.285], [0.188, -0.200], [0.200, -0.120], [0.218, -0.030], [0.200, -0.012], [0.172, -0.020], [0.178, 0.060], [0.215, 0.250], [0.250, 0.495]];
+    var P = [], i;
+    for (i = 0; i < R.length; i++) { P.push([R[i][0], R[i][1]]); }
+    for (i = R.length - 1; i >= 1; i--) { P.push([-R[i][0], R[i][1]]); }
+    var id = uid();
+    var s = '<defs><linearGradient id="' + id + 'c" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#241238"/><stop offset="1" stop-color="#0c0614"/></linearGradient></defs>';
+    s += '<ellipse cx="' + CX + '" cy="' + r2(cy + 0.5 * Hc) + '" rx="' + r2(0.30 * Hc) + '" ry="' + r2(0.03 * Hc) + '" fill="#000" opacity="0.4"/>';
+    s += '<g transform="translate(' + CX + ',' + r2(cy) + ') scale(' + Hc + ')">';
+    s += '<polygon points="' + pts(P) + '" fill="url(#' + id + 'c)" stroke="' + rgba(C.violet, 0.75) + '" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>';
+    s += '<ellipse cx="0" cy="-0.405" rx="0.042" ry="0.052" fill="#05020c"/>';
+    s += '<polyline points="-0.03,-0.352 0,-0.33 0.03,-0.352" fill="none" stroke="' + rgba(C.violet, 0.5) + '" stroke-width="1" vector-effect="non-scaling-stroke"/>';
+    s += '<line x1="-0.14" y1="-0.02" x2="0.14" y2="-0.02" stroke="' + rgba(C.pink, 0.45) + '" stroke-width="1.5" vector-effect="non-scaling-stroke"/>';
+    s += '<line x1="0" y1="-0.32" x2="0" y2="0.49" stroke="' + rgba(C.violet, 0.25) + '" stroke-width="1" vector-effect="non-scaling-stroke"/>';
+    s += '</g>';
+    return s;
+  }
+
+  /* ---------- tiles (data-ui marks everything the keep-out check must test) ---------- */
+  function tile(cx, cy, size, o) {
+    o = o || {};
+    var cls = "t" + (o.empty ? " empty" : "") + (o.next ? " next" : "") + (o.gold ? " gold" : "");
+    var st = 'left:' + r2(cx - size / 2) + 'px;top:' + r2(cy - size / 2) + 'px;width:' + size + 'px;height:' + size + 'px;' + (o.op != null ? 'opacity:' + o.op + ';' : '');
+    var h = '<div data-ui="1" class="' + cls + '" style="' + st + '">';
+    if (!o.empty) { h += '<span class="abbr">' + o.label + '</span>'; }
+    if (o.key) { h += '<span class="key">' + o.key + '</span>'; }
+    if (o.secs != null) { h += '<span class="secs">' + o.secs + '</span>'; }
+    if (o.ring) { h += '<span class="ring ' + o.ring + '"></span>'; }
+    return h + '</div>';
+  }
+  function nlabel(cx, y, w, text, color) {
+    return '<div data-ui="1" class="nlbl" style="left:' + r2(cx - w / 2) + 'px;top:' + r2(y) + 'px;width:' + w + 'px;' + (color ? 'color:' + color : '') + '">' + text + '</div>';
+  }
+
+  /* ---------- the party panel, chamfered bottom right (v1, re-seated to the real left edge) ---------- */
+  var PARTY = [
+    { n: "Parker", c: "#8788ee", hp: 0.92, mp: 0.78 },
+    { n: "Aeryn", c: "#ffffff", hp: 0.64, mp: 0.55 },
+    { n: "Dolgrim", c: "#c79c6e", hp: 1.0, mp: 0.0 },
+    { n: "Sethis", c: "#ff7d0a", hp: 0.38, mp: 0.9 },
+    { n: "Mirel", c: "#0070de", hp: 0.81, mp: 0.66 }
+  ];
+  function partyPanel(Jy, cdx, cdy, open, id) {
+    var bottom = Jy + cdy, top = bottom - PANEL_H, s = '', h = '', i;
+    var poly = [[PANEL_X, top], [DOCK_X, top], [DOCK_X, Jy], [DOCK_X - cdx, bottom], [PANEL_X, bottom]];
+    if (open) {
+      s += '<defs><linearGradient id="' + id + 'pf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(26,16,37,0.95)"/><stop offset="1" stop-color="rgba(11,5,20,0.95)"/></linearGradient></defs>';
+      s += '<polygon points="' + pts(poly) + '" fill="none" stroke="' + C.violet + '" stroke-width="5" opacity="0.28" filter="url(#softB)"/>';
+      s += '<polygon points="' + pts(poly) + '" fill="url(#' + id + 'pf)" stroke="' + C.violet + '" stroke-width="1" stroke-linejoin="miter"/>';
+      s += '<path d="M' + pts([[DOCK_X, Jy]]) + ' L' + pts([[DOCK_X - cdx, bottom]]) + '" stroke="url(#' + id + 'g)" stroke-width="2" fill="none" stroke-linecap="round"/>';
+      var rw = DOCK_X - 18 - (PANEL_X + 8);
+      for (i = 0; i < 5; i++) {
+        var p = PARTY[i], y0 = top + 8 + i * 42;
+        h += '<div data-ui="1" class="prow" style="left:' + (PANEL_X + 8) + 'px;top:' + y0 + 'px;width:' + rw + 'px;height:34px">' +
+          '<i class="cls" style="background:' + p.c + '"></i><b>' + p.n + '</b><span class="pc">' + Math.round(p.hp * 100) + '</span>' +
+          '<div class="hp"><u style="width:' + (p.hp * 100) + '%;color:' + p.c + ';background:linear-gradient(90deg,' + rgba(p.c, 0.35) + ',' + p.c + ')"></u></div>' +
+          '<div class="mp"><u style="width:' + (p.mp * 100) + '%;color:' + C.cyan + ';background:linear-gradient(90deg,' + rgba(C.cyan, 0.35) + ',' + C.cyan + ')"></u></div></div>';
+      }
+      h += '<div data-ui="1" class="pfoot" style="left:' + (PANEL_X + 8) + 'px;top:' + (bottom - 20) + 'px">PARTY 5/5</div>';
+    }
+    return { svg: s, html: h, top: top, bottom: bottom };
+  }
+  function partyStub(Jx, Jy, th, len) {
+    var dx = -Math.cos(th), dy = Math.sin(th), nx = Math.sin(th), ny = Math.cos(th), hw = 8, s = '', i;
+    var A = [Jx + nx * hw, Jy + ny * hw], B = [A[0] + dx * len, A[1] + dy * len], Cc = [Jx - nx * hw + dx * len, Jy - ny * hw + dy * len], D = [Jx - nx * hw, Jy - ny * hw];
+    var poly = [A, B, Cc, D];
+    s += '<polygon points="' + pts(poly) + '" fill="none" stroke="' + C.violet + '" stroke-width="4" opacity="0.28" filter="url(#softB)"/>';
+    s += '<polygon points="' + pts(poly) + '" fill="' + rgba(C.track, 0.94) + '" stroke="' + C.violet + '" stroke-width="1" stroke-linejoin="miter"/>';
+    for (i = 0; i < 5; i++) {
+      var t = 24 + i * ((len - 34) / 4), px = Jx + dx * t, py = Jy + dy * t, p = PARTY[i];
+      s += '<circle cx="' + r2(px) + '" cy="' + r2(py) + '" r="4.2" fill="' + p.c + '" opacity="' + r2(0.35 + 0.65 * p.hp) + '"/>';
+    }
+    return s;
+  }
+  function railNode(Jx, Jy, th, open) {
+    var a = open ? (180 - th * 180 / Math.PI) : (-th * 180 / Math.PI);
+    var poly = [[-11, -11], [11, -11], [15, -7], [15, 7], [11, 11], [-11, 11], [-15, 7], [-15, -7]];
+    var s = '<g transform="translate(' + r2(Jx) + ',' + r2(Jy) + ')">';
+    s += '<polygon points="' + pts(poly) + '" fill="' + C.cyan + '" opacity="0.3" filter="url(#glowN)"/>';
+    s += '<polygon points="' + pts(poly) + '" fill="' + C.track + '" stroke="' + C.cyan + '" stroke-width="1.4" stroke-linejoin="miter"/>';
+    s += '<g transform="rotate(' + r2(a) + ')"><polyline points="-5,-5 1,0 -5,5" fill="none" stroke="' + C.core + '" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<polyline points="1,-5 7,0 1,5" fill="none" stroke="' + C.cyan + '" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></g>';
+    return s + '</g>';
+  }
+
+  /* ---------- annotation layer (not part of the UI, never checked) ---------- */
+  function annotations(o) {
+    var z = o.z, s = '', cy = CY;
+    /* the keep-out ellipse */
+    s += '<ellipse cx="' + CX + '" cy="' + r2(z.ey) + '" rx="' + r2(z.a) + '" ry="' + r2(z.b) + '" fill="rgba(255,120,60,0.07)"/>';
+    s += '<ellipse cx="' + CX + '" cy="' + r2(z.ey) + '" rx="' + r2(z.a) + '" ry="' + r2(z.b) + '" fill="none" stroke="#000" stroke-opacity="0.45" stroke-width="6"/>';
+    s += '<ellipse cx="' + CX + '" cy="' + r2(z.ey) + '" rx="' + r2(z.a) + '" ry="' + r2(z.b) + '" fill="none" stroke="#ffb27a" stroke-opacity="0.95" stroke-width="3" stroke-dasharray="16 11"/>';
+    s += '<text class="a big" x="' + CX + '" y="' + r2(z.bot - 24) + '" text-anchor="middle">CLEAR ZONE</text>';
+    /* inner-edge hairlines */
+    var yA = cy - 92, yB = cy + 70;
+    [[CX - o.inner, "end", -8], [CX + o.inner, "start", 8]].forEach(function (e) {
+      s += '<line x1="' + r2(e[0]) + '" y1="' + yA + '" x2="' + r2(e[0]) + '" y2="' + yB + '" stroke="' + C.cyan + '" stroke-opacity="0.8" stroke-width="2" stroke-dasharray="6 6"/>';
+      s += '<text class="a" x="' + r2(e[0] + e[2]) + '" y="' + (yA + 8) + '" text-anchor="' + e[1] + '">inner edge x = ' + Math.round(e[0]) + '</text>';
+    });
+    if (o.clamped) {
+      [CX - o.need, CX + o.need].forEach(function (x) {
+        s += '<line x1="' + r2(x) + '" y1="' + (cy - 60) + '" x2="' + r2(x) + '" y2="' + (cy + 70) + '" stroke="#ffb27a" stroke-opacity="0.85" stroke-width="2" stroke-dasharray="2 5"/>';
+      });
+      s += '<text class="a" x="' + CX + '" y="' + (cy - 118) + '" text-anchor="middle">CLAMPED: a + margin = ' + Math.round(o.need) + ' is inside minInner ' + K.minInner + '</text>';
+    }
+    /* head, centre, feet ticks at the right screen edge */
+    [[CY - 0.5 * o.Hc, "head"], [CY, "chest y = centre"], [CY + 0.5 * o.Hc, "feet"]].forEach(function (t) {
+      s += '<line x1="2380" y1="' + r2(t[0]) + '" x2="2540" y2="' + r2(t[0]) + '" stroke="#eafcff" stroke-opacity="0.55" stroke-width="2" stroke-dasharray="3 5"/>';
+      s += '<text class="a" x="2540" y="' + r2(t[0] - 7) + '" text-anchor="end">' + t[1] + ' y = ' + Math.round(t[0]) + '</text>';
+    });
+    s += '<text class="a" x="' + (SW - 20) + '" y="' + (SH - 20) + '" text-anchor="end">Hc ' + o.Hc + ' px</text>';
+    return s;
+  }
+
+  /* ---------- one console panel ---------- */
+  function buildConsole(o) {
+    var Hc = o.Hc, off = o.state === "off", open = o.partyOpen, ref = !!o.ref;
+    var cs = Math.cos(TH33), sn = Math.sin(TH33), tn = Math.tan(TH33);
+    var z = zone(Hc);
+    var need = z.a + K.margin, inner = Math.max(K.minInner, Math.min(K.maxInner, need));
+    var clamped = inner !== need;
+    var plateY = CY + BAR_DY, ry = plateY + BH / 2 + 4, rowY = CY + ROW_DY;
+    var Lx1 = CX - inner, Lx0 = Lx1 - PW, Rx0 = CX + inner, Rx1 = Rx0 + PW;
+    var Jy = ry + (Lx0 - DOCK_X) * tn, cdx = 83, cdy = cdx * tn;
+    var id = uid(), svg = '', ui = '', html = '';
+    var railA = off ? 0.45 : 1;
+
+    svg += '<defs>' + COMMON_DEFS + railDefs(id + "L", Lx1, DOCK_X, 1, 1) + railDefs(id + "R", Rx0, Rx1 + 250 * cs, 1, 1) + railDefs(id, Lx1, DOCK_X - cdx, 1, 1) +
+      '<filter id="' + id + 'Lbl"><feGaussianBlur stdDeviation="2.6"/></filter><filter id="' + id + 'Rbl"><feGaussianBlur stdDeviation="2.6"/></filter><filter id="' + id + 'bl"><feGaussianBlur stdDeviation="2.6"/></filter></defs>';
+    if (!ref) {
+      svg += backdrop(300, 720);
+      svg += character(Hc, CY);
+    }
+    svg += annotations({ z: z, inner: inner, need: need, clamped: clamped, Hc: Hc });
+
+    /* LEFT rail: underline under the stack, then the diagonal into the party chamfer */
+    ui += rail('M' + r2(Lx1) + ' ' + r2(ry) + ' L' + r2(Lx0) + ' ' + r2(ry) + ' L' + r2(DOCK_X) + ' ' + r2(Jy), id + "L", 2.4, railA);
+    /* RIGHT rail: underline under the target bar, then down and outward */
+    var endR = [Rx1 + 250 * cs, ry + 250 * sn];
+    ui += rail('M' + r2(Rx0) + ' ' + r2(ry) + ' L' + r2(Rx1) + ' ' + r2(ry) + ' L' + r2(endR[0]) + ' ' + r2(endR[1]), id + "R", 2.4, railA);
+
+    /* Party panel (or the stub), then its chamfer in the rail gradient */
+    var pp = partyPanel(Jy, cdx, cdy, open, id);
+    if (open) {
+      ui += pp.svg;
+    } else {
+      ui += '<path d="M' + r2(DOCK_X) + ' ' + r2(Jy) + ' L' + r2(DOCK_X - cdx) + ' ' + r2(Jy + cdy) + '" stroke="url(#' + id + 'g)" stroke-width="2" fill="none" opacity="' + railA + '"/>';
+      ui += partyStub(DOCK_X, Jy, TH33, 96);
+    }
+    html += pp.html;
+
+    /* Cast bars and tabs */
+    var ltab, rtab;
+    if (off) {
+      ui += bar(Lx0, plateY - BH / 2, { ghost: true });
+      ltab = tab(Lx0 + CHM + 1, ry, "SHOOT", "down", true);
+      ui += ltab.svg;
+    } else {
+      ui += bar(Lx0, plateY - BH / 2, { frac: 0.57, timer: ["1.7", "3.0"] });
+      ltab = tab(Lx0 + CHM + 1, ry, "SHADOW BOLT", "down", false);
+      ui += ltab.svg;
+      ui += bar(Rx0, plateY - BH / 2, { frac: 0.44, timer: ["1.1", "2.5"] });
+      rtab = tab(Rx1 - CHM - 1 - (Math.ceil(measure("FROSTBOLT", 12)) + 12 + 9 * 0.5 + 2 * SL), plateY - BH / 2, "FROSTBOLT", "up", false);
+      ui += rtab.svg;
+    }
+
+    /* Nodes on the rails */
+    ui += node(Lx1, ry, railA) + node(Lx0, ry, railA) + node(Rx0, ry, railA) + node(Rx1, ry, railA);
+
+    /* DoT tiles stepping down and outward along the right rail */
+    var dots = [["IMM", 7], ["COR", 11], ["BoA", 19], ["SL", 22]], k;
+    for (k = 0; k < 4; k++) {
+      var s0 = 46 + k * 54, px = Rx1 + s0 * cs, py = ry + s0 * sn;
+      if (!off) {
+        html += tile(px, py, 36, { label: dots[k][0], secs: dots[k][1] });
+        ui += node(Rx1 + (s0 + 27) * cs, ry + (s0 + 27) * sn, 0.7);
+      } else {
+        html += '<div data-ui="1" class="t empty" style="left:' + r2(px - 18) + 'px;top:' + r2(py - 18) + 'px;width:36px;height:36px;opacity:0.4"></div>';
+      }
+    }
+    ui += '<circle cx="' + r2(endR[0]) + '" cy="' + r2(endR[1]) + '" r="3" fill="' + C.violet + '" opacity="' + railA + '"/>';
+
+    /* LEFT stack at chest height: next tile closest to the zone, rotation row of small tiles running outward from it */
+    var rowNames = ["COR", "BoA", "IMM", "SL", "SB"], q;
+    if (!off) {
+      html += tile(Lx1 - 28, rowY, 56, { label: "SB", key: "5", next: true, gold: true, ring: "gold" });
+      html += nlabel(Lx1 - 28, rowY + 28 - 14, 56, "NEXT");
+      for (q = 0; q < 5; q++) {
+        html += tile(Lx1 - 82 - q * 42, rowY, 36, { label: rowNames[q], ring: q === 4 ? "gold" : null });
+      }
+      html += '<div data-ui="1" class="chip" style="left:' + r2(Lx1 - 82 - 4 * 42 - 52) + 'px;top:' + (rowY - 18 - 6 - 17) + 'px;width:104px;text-align:center">SHADOW TRANCE</div>';
+    } else {
+      html += tile(Lx1 - 28, rowY, 56, { empty: true, op: 0.4 });
+      for (q = 0; q < 5; q++) {
+        html += tile(Lx1 - 82 - q * 42, rowY, 36, { label: rowNames[q], op: 0.55 });
+      }
+    }
+
+    ui += railNode(DOCK_X, Jy, TH33, open);
+
+    svg += '<g data-ui="1">' + ui + '</g>';
+    var world = '';
+    if (ref) { world += '<img class="refimg" src="center-console-ref-normal-zoom-2026-10-02.png" alt="">' + '<div class="refdark"></div>'; }
+    world += '<svg width="' + SW + '" height="' + SH + '" viewBox="0 0 ' + SW + ' ' + SH + '">' + svg + '</svg>' + html;
+    return { world: world, ell: [CX, z.ey, z.a, z.b], info: { Hc: Hc, z: z, need: need, inner: inner, clamped: clamped, Lx0: Lx0, Jy: Jy, ry: ry, rowY: rowY, plateY: plateY } };
+  }
+
+  /* ---------- page ---------- */
+  function stageHtml(b) { return '<div class="stage" data-ell="' + b.ell.map(r2).join(',') + '"><div class="world">' + b.world + '</div></div>'; }
+  function card(letter, title, badge, vcap, body) {
+    return '<article class="card"><div class="card-in"><div class="card-head"><span class="letter">' + letter + '</span><h2>' + title + '</h2>' + (badge ? '<span class="badge">' + badge + '</span>' : '') + '</div>' +
+      '<p class="vcap">' + vcap + '</p>' + body + '</div></article>';
+  }
+  function ruleLine(i) {
+    var z = i.z, tn = Math.tan(TH33);
+    return 'Rule, Hc = ' + i.Hc + ' px (character height): <b>ellipse half-width a = ' + K.ring + ' x Hc = ' + Math.round(z.a) + '</b>, y from head - ' + K.topPad + ' x Hc = ' + Math.round(z.top) + ' to feet + ' + K.botPad + ' x Hc = ' + Math.round(z.bot) + '. ' +
+      '<b>stack inner edge x = centre +/- clamp(a + margin ' + K.margin + ' = ' + Math.round(i.need) + ', minInner ' + K.minInner + ', maxInner ' + K.maxInner + ') = +/- ' + Math.round(i.inner) + '</b>' + (i.clamped ? ' (CLAMPED at minInner)' : '') +
+      ', so left inner x = ' + Math.round(CX - i.inner) + ', right inner x = ' + Math.round(CX + i.inner) + '. ' +
+      '<b>chest y = character centre = ' + CY + '</b>: cast bars centred at centre + ' + BAR_DY + ', next tile and rotation row centred at centre - ' + (-ROW_DY) + '. ' +
+      'Left rail runs from its inner edge under the bar to x = ' + Math.round(i.Lx0) + ', then 33 deg down to the party joint at x = ' + DOCK_X + ': <b>joint y = rail y + (' + Math.round(i.Lx0) + ' - ' + DOCK_X + ') x tan 33 = ' + Math.round(i.Jy) + '</b>.';
+  }
+  var BULLETS_COMBAT =
+    '<li><b>Left stack.</b> NEXT tile (56) closest to the zone, then the rotation row of five small tiles running outward from it, then the player cast bar underneath, all right-aligned to the inner edge. The proc glow is the gold ring on SB; the proc\'d spell is also the next cast, so the NEXT tile is gold too.</li>' +
+    '<li><b>Left rail.</b> Starts at the stack\'s inner edge, runs under the cast bar, then 33 degrees down and outward into the chamfered corner of the party panel at the real left edge (x 40 to 400). The node at the joint is the show and hide button.</li>' +
+    '<li><b>Right stack.</b> Target cast bar mirrored at the same height, the right rail under it, DoT tiles with timers stepping down and outward along the rail.</li>';
+
+  function render() {
+    var p1 = buildConsole({ Hc: 210, state: "combat", partyOpen: true });
+    var p1r = buildConsole({ Hc: 210, state: "combat", partyOpen: true, ref: true });
+    var p2 = buildConsole({ Hc: 340, state: "combat", partyOpen: true });
+    var p3 = buildConsole({ Hc: 120, state: "combat", partyOpen: true });
+    var p4 = buildConsole({ Hc: 210, state: "off", partyOpen: false });
+    var out = '';
+    out += card("1", "Normal zoom, in combat", "Hc 210", 'Character 210 px tall, head at 0.485 and feet at 0.63 of screen height, as measured. Target up, both bars casting, four DoTs ticking, a proc lit, party panel open.',
+      stageHtml(p1) + '<p class="chk" data-chk="1"></p><ul style="margin:0;padding-left:20px;font-size:15px;color:var(--parchment)">' + BULLETS_COMBAT + '</ul><p class="math">' + ruleLine(p1.info) + '</p>');
+    out += card("1R", "Panel 1 over the real scene", "Hc 210", 'The same panel 1 drawn over the in-game screenshot (darkened). The real character should sit inside the dashed ellipse, centred on x = 1280, head and feet at the tick marks.',
+      stageHtml(p1r) + '<p class="chk" data-chk="1"></p><p class="desc">Screenshot is 2000 x 1125, scaled to the 2560 x 1440 world. The synthetic silhouette and backdrop are omitted so the real character shows. Fire on the ground around the feet is the region the ellipse protects; the targets and nameplates ahead are above the head and stay uncovered.</p><p class="math">' + ruleLine(p1r.info) + '</p>');
+    out += card("2", "Zoomed in", "Hc 340", 'Character about 340 px tall (1.6x). The ellipse grows and both stacks slide OUTWARD to stay clear; the rail shortens to a stub into the party panel.',
+      stageHtml(p2) + '<p class="chk" data-chk="1"></p><p class="desc">Both stacks keep the same margin from the ellipse, so they move out with it. The left rail has little diagonal left, which is the cost of a bigger zone; the party panel stays docked at the left edge.</p><p class="math">' + ruleLine(p2.info) + '</p>');
+    out += card("3", "Zoomed out", "Hc 120", 'Character about 120 px tall (0.57x). The ellipse shrinks and the stacks slide inward, but stop at minInner so they never crowd the character.',
+      stageHtml(p3) + '<p class="chk" data-chk="1"></p><p class="desc">The dotted orange hairlines show where the rule alone would put the stacks (ellipse + margin); the cyan dashed lines show where they stop (minInner). The left rail lengthens to reach the docked party panel.</p><p class="math">' + ruleLine(p3.info) + '</p>');
+    out += card("4", "Out of combat, no target", "ghost track A", 'Normal zoom. Ghost cast bar and SHOOT tab, NEXT slot empty (dashed), rotation row at 0.55, no target bar, DoT slots empty, party collapsed into the rail stub.',
+      stageHtml(p4) + '<p class="chk" data-chk="1"></p><p class="desc">Same skeleton and same positions as panel 1, only quieter: nothing moves between states, so the zone stays clear in both. The node at the joint carries the expand chevron.</p><p class="math">' + ruleLine(p4.info) + '</p>');
+    document.getElementById("panels").innerHTML = out;
+    runChecks();
+  }
+
+  /* ---------- keep-out check: sample the outline of every UI element and test it against the ellipse ---------- */
+  function runChecks() {
+    var stages = document.querySelectorAll(".stage"), chks = document.querySelectorAll("[data-chk]"), results = [], si;
+    for (si = 0; si < stages.length; si++) {
+      var stage = stages[si], world = stage.querySelector(".world"), wr = world.getBoundingClientRect(), sc = wr.width / SW;
+      var e = stage.getAttribute("data-ell").split(",").map(Number), pts_ = [], nEl = 0;
+      var addPage = function (px, py) { pts_.push([(px - wr.left) / sc, (py - wr.top) / sc]); };
+      var addCTM = function (el, x, y) { var m = el.getScreenCTM(); addPage(m.a * x + m.c * y + m.e, m.b * x + m.d * y + m.f); };
+      var addRect = function (r, infl) {
+        var x0 = r.left - infl * sc, y0 = r.top - infl * sc, x1 = r.right + infl * sc, y1 = r.bottom + infl * sc, t, N = 8;
+        for (t = 0; t <= N; t++) {
+          var u = t / N;
+          addPage(x0 + (x1 - x0) * u, y0); addPage(x0 + (x1 - x0) * u, y1); addPage(x0, y0 + (y1 - y0) * u); addPage(x1, y0 + (y1 - y0) * u);
+        }
+      };
+      var items = world.querySelectorAll("[data-ui]");
+      Array.prototype.forEach.call(items, function (it) {
+        if (it instanceof SVGElement) {
+          Array.prototype.forEach.call(it.querySelectorAll("path,polygon,polyline,circle,rect,ellipse,line,text"), function (el) {
+            if (el.closest("defs")) { return; }
+            nEl++;
+            var tag = el.tagName.toLowerCase(), i, j;
+            if (tag === "path") {
+              var L = el.getTotalLength(), n = Math.max(24, Math.ceil(L / 10));
+              for (i = 0; i <= n; i++) { var p = el.getPointAtLength(L * i / n); addCTM(el, p.x, p.y); }
+            } else if (tag === "polygon" || tag === "polyline") {
+              var P = el.points, m = P.numberOfItems;
+              for (i = 0; i < m; i++) {
+                var a = P.getItem(i), b = P.getItem((i + 1) % m);
+                for (j = 0; j < 4; j++) { addCTM(el, a.x + (b.x - a.x) * j / 4, a.y + (b.y - a.y) * j / 4); }
+              }
+            } else if (tag === "circle") {
+              var cx = el.cx.baseVal.value, cy = el.cy.baseVal.value, r = el.r.baseVal.value + 2;
+              for (i = 0; i < 12; i++) { addCTM(el, cx + r * Math.cos(i * Math.PI / 6), cy + r * Math.sin(i * Math.PI / 6)); }
+            } else if (tag === "rect") {
+              var rx = el.x.baseVal.value, ry = el.y.baseVal.value, rw = el.width.baseVal.value, rh = el.height.baseVal.value;
+              [[0, 0], [1, 0], [1, 1], [0, 1], [0.5, 0], [1, 0.5], [0.5, 1], [0, 0.5]].forEach(function (c) { addCTM(el, rx + rw * c[0], ry + rh * c[1]); });
+            } else if (tag === "line") {
+              addCTM(el, el.x1.baseVal.value, el.y1.baseVal.value); addCTM(el, el.x2.baseVal.value, el.y2.baseVal.value);
+            } else {
+              addRect(el.getBoundingClientRect(), 0);
+            }
+          });
+        } else {
+          nEl++;
+          addRect(it.getBoundingClientRect(), 8); /* 8 units of allowance for the ring and glow bleed */
+        }
+      });
+      var minD = 1e9, worst = null, bad = 0;
+      pts_.forEach(function (p) {
+        var dx = p[0] - e[0], dy = p[1] - e[1], f = (dx * dx) / (e[2] * e[2]) + (dy * dy) / (e[3] * e[3]);
+        var gx = 2 * dx / (e[2] * e[2]), gy = 2 * dy / (e[3] * e[3]), g = Math.sqrt(gx * gx + gy * gy) || 1e-9;
+        var d = (f - 1) / g; /* first-order distance to the ellipse in px: negative means inside */
+        if (f < 1) { bad++; }
+        if (d < minD) { minD = d; worst = p; }
+      });
+      var txt = 'Keep-out check: ' + nEl + ' elements, ' + pts_.length + ' outline samples tested against the ellipse. ' +
+        (bad === 0 ? 'ALL OUTSIDE. Tightest clearance ' + Math.round(minD) + ' px (at x ' + Math.round(worst[0]) + ', y ' + Math.round(worst[1]) + ').' : 'FAIL: ' + bad + ' samples inside the zone, worst at x ' + Math.round(worst[0]) + ', y ' + Math.round(worst[1]) + '.');
+      chks[si].textContent = txt;
+      if (bad) { chks[si].className = "chk bad"; }
+      results.push({ stage: si, elements: nEl, samples: pts_.length, bad: bad, minClearancePx: Math.round(minD * 10) / 10, worst: worst ? [Math.round(worst[0]), Math.round(worst[1])] : null });
+    }
+    document.body.setAttribute("data-check", JSON.stringify(results));
+    var rects = [];
+    Array.prototype.forEach.call(stages, function (st) { var rc = st.getBoundingClientRect(); rects.push([Math.round(rc.left + scrollX), Math.round(rc.top + scrollY), Math.round(rc.width), Math.round(rc.height)]); });
+    document.body.setAttribute("data-rects", JSON.stringify(rects));
+    document.body.setAttribute("data-height", String(document.documentElement.scrollHeight));
+  }
+
+  var go = function () {
+    try {
+      render();
+      var img = document.querySelector(".refimg");
+      if (img && !img.complete) { img.addEventListener("load", function () { document.body.setAttribute("data-ready", "1"); }); } else { document.body.setAttribute("data-ready", "1"); }
+    } catch (err) { document.body.insertAdjacentHTML("afterbegin", '<pre style="color:#f55">' + err.stack + '</pre>'); document.body.setAttribute("data-ready", "err"); }
+  };
+  if (document.fonts && document.fonts.load) {
+    Promise.all([document.fonts.load("12px 'Share Tech Mono'"), document.fonts.load("11px 'FS Mono'")]).then(function () { return document.fonts.ready; }).then(go, go);
+  } else { go(); }
+})();
+</script>
+</body>
+</html>

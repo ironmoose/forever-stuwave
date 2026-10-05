@@ -402,7 +402,7 @@ local function InitModernMenus()
         if not chromeOk and not loggedMenuChromeFailure then
             loggedMenuChromeFailure = true
             FS.LogDegradeOnce("menu_chrome_failure",
-                "|cffff4488ForeverSynthwave|r: menu chrome build failed (" .. tostring(chromeErr) ..
+                "|cffff4488Forever STUwave|r: menu chrome build failed (" .. tostring(chromeErr) ..
                 "), degrading to unstyled Blizzard chrome for this session")
         end
 
@@ -410,7 +410,7 @@ local function InitModernMenus()
         if not textOk and not loggedMenuTextFailure then
             loggedMenuTextFailure = true
             FS.LogDegradeOnce("menu_text_failure",
-                "|cffff4488ForeverSynthwave|r: menu item text styling failed (" .. tostring(textErr) ..
+                "|cffff4488Forever STUwave|r: menu item text styling failed (" .. tostring(textErr) ..
                 "), degrading to unstyled Blizzard item text for this session")
         end
     end
@@ -474,7 +474,7 @@ local function LogUnitTitleFailure(err)
     if loggedUnitTitleFailure then return end
     loggedUnitTitleFailure = true
     FS.LogDegradeOnce("menus-unit-title",
-        "|cffff4488ForeverSynthwave|r: unit menu full-name title failed (" ..
+        "|cffff4488Forever STUwave|r: unit menu full-name title failed (" ..
         tostring(err) .. "), leaving Blizzard's title for that open")
 end
 

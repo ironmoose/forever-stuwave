@@ -230,10 +230,37 @@ function FS.Layout.Apply(frame, id, parent)
     -- otherwise. `applying` tells the chat seat log this move is ours.
     local clear = frame.ClearAllPointsBase or frame.ClearAllPoints
     local set = frame.SetPointBase or frame.SetPoint
+
+    -- A component whose frame is measured to sit off its asked seat (the minimap
+    -- cluster: its header strip hangs the map below the frame) can offer
+    -- FS.Layout.SeatAdjust[id], answering the anchor that puts the visible part on
+    -- the seat. Writing that here, instead of the raw seat and a fix a frame later,
+    -- keeps the frame from being shown at the raw seat for one rendered frame. A nil,
+    -- malformed or throwing answer (or a frame seated on another parent) is the raw seat.
+    local point, relPoint, x, y = L.point, L.relPoint, L.x * scale, L.y * scale
+    if not parent then
+        -- The lookup, the call and the whole shape check are one pcall: a registrant's
+        -- number may be a secret, and arithmetic on one throws. Finite means
+        -- x - x == 0 (false for NaN and for either infinity).
+        local okA, aPoint, aRel, aX, aY = pcall(function()
+            local adjust = FS.Layout.SeatAdjust and FS.Layout.SeatAdjust[id]
+            if not adjust then return end
+            local p, rp, ax, ay = adjust()
+            if type(p) == "string" and type(rp) == "string"
+                and type(ax) == "number" and type(ay) == "number"
+                and ax - ax == 0 and ay - ay == 0 then
+                return p, rp, ax, ay
+            end
+        end)
+        if okA and aPoint then
+            point, relPoint, x, y = aPoint, aRel, aX, aY
+        end
+    end
+
     FS.Layout.applying = true
     local ok, err = FS.Layout.CallTraced(function()
         clear(frame)
-        set(frame, L.point, parent or UIParent, L.relPoint, L.x * scale, L.y * scale)
+        set(frame, point, parent or UIParent, relPoint, x, y)
         if L.w and L.h and frame.SetSize then
             frame:SetSize(L.w * scale, L.h * scale)
         end
@@ -284,10 +311,14 @@ end
 
 local deferredRescale = false
 
-local function RunRescaleCallbacks()
+-- `why` only labels the pass for callbacks that log it (the minimap seat log reads
+-- FS.Layout.rescaleWhy); it is cleared again when the callbacks are done.
+local function RunRescaleCallbacks(why)
+    FS.Layout.rescaleWhy = why
     for _, fn in ipairs(FS.Layout._rescaleCallbacks) do
         pcall(fn)
     end
+    FS.Layout.rescaleWhy = nil
 end
 
 local layoutWatcher = CreateFrame("Frame")
@@ -312,7 +343,7 @@ layoutWatcher:SetScript("OnEvent", function(_, event)
     -- and again once the held frames are seated, so a component that sizes children
     -- from the layout sees their final position; each callback guards its own combat
     -- work (the action bars and the stance bar both defer to PLAYER_REGEN_ENABLED).
-    RunRescaleCallbacks()
+    RunRescaleCallbacks(event)
 end)
 
 -------------------------------------------------------------------------------
@@ -352,7 +383,7 @@ function FS.Layout.ForwardError(err)
     end)
 end
 
-local function ReseatEditModeFrames()
+local function ReseatEditModeFrames(why)
     -- `failed` is a plain flag: the error itself may be secret and is never compared.
     local any, failed, firstErr = false, false, nil
     for frame, info in pairs(FS.Layout._applied) do
@@ -375,7 +406,7 @@ local function ReseatEditModeFrames()
     end
     -- Components that size children from the frame (the minimap's inset
     -- compensation) rebuild after the move, as after a rescale.
-    if any then RunRescaleCallbacks() end
+    if any then RunRescaleCallbacks(why) end
     return failed, firstErr
 end
 
@@ -397,7 +428,7 @@ local hookRanSinceEvent = false
 local function ReseatFromHook()
     hookRanSinceEvent = true
     -- (true, failed, firstErr) normally, (false, thrown error) if it escaped.
-    local ok, failed, err = FS.Layout.CallTraced(ReseatEditModeFrames)
+    local ok, failed, err = FS.Layout.CallTraced(function() return ReseatEditModeFrames("UpdateLayoutInfo") end)
     if not ok then failed, err = true, failed end
     if failed then FS.Layout.ForwardError(err) end
 end
@@ -429,7 +460,7 @@ editModeWatcher:SetScript("OnEvent", function(self, event, addon)
         hookRanSinceEvent = false
     else
         -- Event site: nothing of Blizzard's follows our handler, so rethrow.
-        local failed, err = ReseatEditModeFrames()
+        local failed, err = ReseatEditModeFrames("EDIT_MODE_LAYOUTS_UPDATED")
         if failed then error(err, 0) end
     end
 end)

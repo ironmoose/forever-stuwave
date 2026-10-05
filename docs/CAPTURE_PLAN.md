@@ -1,23 +1,17 @@
 # Fresh gameplay showcase
 
-The current README preview is close. Wait for the agreed stopping point in Claude's active work before capturing fresh material; get the owner's permission before using the game client. This handoff does not authorize client input or capture now.
+The README uses authentic October 3, 2026 Warlock, pet and party screenshots. Keep their dates and class context. Fresh material can follow initial alpha publication.
 
-## Source material to supply
+## Capture checklist
 
-- [ ] **Full UI screenshot:** game content only, at native resolution, from the current known good build. Record the canonical commit, capture date, class, and resolution.
-- [ ] **Full UI gameplay:** a short recording showing the UI during ordinary play, with enough surrounding game context to understand it.
-- [ ] **Gunsight:** a short close view showing cast chevron progression and target indicators as they actually behave in game.
-- [ ] **Pet and action components:** a short recording of working component motion, such as the pet cast row or action feedback.
-- [ ] **Working class feature:** a short recording of a class-specific feature that is implemented and working in the captured build. Name the class and feature; omit this capture if there is nothing suitable yet.
+- [ ] Full UI screenshot from the current build, game content only, at native resolution. Record the commit, date, class and resolution.
+- [ ] Short ordinary gameplay recording showing the UI with surrounding game context.
+- [ ] Gunsight close view showing cast chevrons and target indicators as they actually behave.
+- [ ] Pet and action components showing working motion or feedback.
+- [ ] Paladin seals, auras, Seal Chamber or Judgement lane showing an implemented feature. Record which checks the capture establishes.
 
-Aim for clean **5–10 second loops** with steady framing and a natural start/end. Native-resolution recordings are preferred so clips can be framed later without losing detail. Supply the original recordings rather than precompressed GIFs when possible.
+Aim for 5–10 second loops with steady framing and a natural start/end. Keep native-resolution originals so later framing retains detail. Capture only during an authorized client session. Keep desktop windows, account details and private chat outside public material; inspect each asset before publishing.
 
-Keep desktop windows and account details outside the capture. Omit chat and other private content from clips where practical. Inspect the supplied material before public use.
+## Presentation
 
-## Planned presentation
-
-The README can embed a small set of looping GIFs, led by the Gunsight and followed by the strongest working UI components. A longer, higher quality video may be linked separately. These assets still need to be captured and supplied.
-
-Use captions naming the actual feature, class, capture date, and build. Describe what the clip demonstrates without implying broader verification. Browser mockups are not evidence of shipped behavior.
-
-Clip selection, trimming, and GIF export will happen later from the supplied recordings. Preserve the original material; do not animate existing screenshots or fabricate game behavior.
+Choose a small set of clips with captions naming the feature, class, date and build. A longer video can be linked separately. Preserve original recordings when trimming or exporting GIFs. Existing browser mockups are design references; do not animate screenshots or present mockups as live gameplay. Each clip demonstrates only the behavior visible in that build.

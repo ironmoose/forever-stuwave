@@ -1,0 +1,455 @@
+<title>Nameplate Designer</title>
+<style>
+  :root{
+    --bg:#0d0620; --panel:#160c2b; --panel2:#1d1138; --surface:#271849;
+    --line:#3a2668; --line2:#4c327f;
+    --violet:#a855f7; --cyan:#22e0ff; --pink:#ff2e97; --green:#39ff14; --amber:#ffb648;
+    --text:#ece7fb; --muted:#9a8cc8; --dim:#6f619c;
+    --disp:"Orbitron",sans-serif;
+    --body:"Rajdhani","Segoe UI",system-ui,sans-serif;
+    --mono:"Share Tech Mono","Consolas",monospace;
+    color-scheme:dark;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;
+    background:
+      radial-gradient(1200px 600px at 78% -8%, #1b0f36 0, transparent 60%),
+      radial-gradient(900px 500px at 12% 108%, #180c30 0, transparent 55%),
+      var(--bg);
+    color:var(--text); font-family:var(--body); overflow:hidden}
+  a{color:var(--cyan)}
+  .app{display:flex; flex-direction:column; height:100%}
+  header{display:flex; align-items:center; gap:14px; padding:11px 16px;
+    padding-top:calc(11px + env(safe-area-inset-top,0px));
+    background:linear-gradient(180deg,#160c2b,#120825); border-bottom:1px solid var(--line); flex:none; flex-wrap:wrap}
+  .logo{font-family:var(--disp); font-weight:800; font-size:15px; letter-spacing:.14em; text-transform:uppercase;
+    background:linear-gradient(90deg,var(--violet),var(--pink) 55%,var(--cyan)); -webkit-background-clip:text; background-clip:text; color:transparent; white-space:nowrap}
+  .sub{font-size:12px; color:var(--dim); letter-spacing:.2em; text-transform:uppercase}
+  .spacer{flex:1}
+  .readout{font-family:var(--mono); font-size:12px; color:var(--muted); white-space:nowrap}
+  .readout b{color:var(--cyan)}
+  .btn{font-family:var(--body); font-weight:600; font-size:13px; letter-spacing:.03em; background:var(--panel2); color:var(--text);
+    border:1px solid var(--line2); padding:8px 14px; border-radius:8px; cursor:pointer; white-space:nowrap}
+  .btn:hover{border-color:var(--violet)}
+  .btn.primary{background:linear-gradient(90deg,var(--violet),var(--pink)); border-color:transparent; color:#fff; font-weight:700}
+  .btn:focus-visible{outline:2px solid var(--cyan); outline-offset:2px}
+
+  .main{flex:1; display:flex; min-height:0}
+  @media (max-width:820px){ .main{flex-direction:column} }
+  .stage{flex:1; min-width:0; min-height:0; display:flex; align-items:center; justify-content:center; padding:20px; position:relative}
+  .screen{position:relative; aspect-ratio:16/9; width:100%; max-height:100%;
+    background:linear-gradient(180deg,#0a0518 0,#0f0724 62%,#160c2b 100%);
+    border:1px solid var(--line2); border-radius:6px; overflow:hidden;
+    box-shadow:0 20px 60px -20px #000, inset 0 0 80px -30px rgba(168,85,247,.25)}
+  .grid{position:absolute; inset:0; pointer-events:none;
+    background-image:
+      linear-gradient(rgba(120,90,200,.10) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(120,90,200,.10) 1px, transparent 1px);
+    background-size:6.25% 11.11%; opacity:.5}
+  .horizon{position:absolute; left:0; right:0; bottom:24%; height:1px; background:linear-gradient(90deg,transparent,rgba(34,224,255,.5),transparent)}
+  .plates{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:34px}
+  .plates.big{transform:scale(1.6)}
+
+  /* ---- one nameplate ---- */
+  .unit{display:flex; flex-direction:column; align-items:center}
+  .plate{position:relative; display:flex; flex-direction:column; align-items:stretch; width:224px}
+  .cap{margin-top:9px; font-family:var(--mono); font-size:10px; letter-spacing:.16em; text-transform:uppercase; color:var(--dim)}
+
+  .namerow{position:relative; display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:2px}
+  .nmleft{display:flex; align-items:baseline; gap:5px; min-width:0}
+  .rmark{position:absolute; left:50%; transform:translateX(-50%); top:-15px; width:13px; height:13px; border-radius:3px;
+    background:radial-gradient(circle at 50% 38%, #fff, var(--cyan) 55%, rgba(34,224,255,.18) 76%); box-shadow:0 0 8px var(--cyan); display:none}
+  .rmark.on{display:block}
+  .qmark{display:none; align-items:center; justify-content:center;
+    font-family:var(--disp); font-weight:800; line-height:1; text-shadow:0 1px 2px #000}
+  .qmark.on{display:inline-flex}
+  .qmark.left{order:-1}
+  .qmark.right{order:9}
+  .nm{font-family:var(--disp); font-weight:700; font-size:13px; white-space:nowrap; text-shadow:0 1px 2px #000, 0 0 6px rgba(0,0,0,.85); letter-spacing:.02em}
+  .lv{font-family:var(--disp); font-weight:700; font-size:12px; color:var(--amber); text-shadow:0 1px 2px #000}
+
+  .hpwrap{position:relative}
+  .hp{position:relative; width:100%; height:16px; border-radius:4px; overflow:hidden;
+    background:rgba(8,4,20,.85); border:1px solid var(--line2); box-shadow:0 0 8px -3px #000}
+  .hp .fill{position:absolute; left:0; top:0; bottom:0; width:72%;
+    background:linear-gradient(90deg, var(--rc), color-mix(in srgb, var(--rc) 60%, #000)); box-shadow:0 0 9px -2px var(--rc)}
+  .hp .htxt{position:absolute; right:5px; top:50%; transform:translateY(-50%); z-index:3;
+    font-family:var(--mono); font-size:10px; color:#fff; text-shadow:0 1px 2px #000, 0 0 4px #000}
+  .hp .deadtxt{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:4; display:none;
+    font-family:var(--disp); font-weight:700; font-size:11px; letter-spacing:.12em; color:#d9c9ff; text-shadow:0 1px 2px #000}
+  /* aura dots sitting on top edge of the health bar */
+  .adots{display:flex; gap:3px; align-items:center; flex:none; z-index:5; pointer-events:none}
+  .adot{border-radius:3px; position:relative; overflow:hidden; display:flex; align-items:center; justify-content:center;
+    background:linear-gradient(180deg,#2a1a4a,#160c2b); border:1.5px solid var(--line2); box-shadow:0 0 5px -2px var(--violet), 0 1px 2px #000}
+  .adot.mine{border-color:var(--pink); box-shadow:0 0 6px -1px var(--pink), 0 1px 2px #000}
+  .adot .ag{line-height:1}
+  .adot .an{position:absolute; right:0; bottom:-2px; font-family:var(--mono); font-weight:700; color:#fff; text-shadow:0 1px 2px #000, 0 0 3px #000; line-height:1}
+
+  /* thin power strip */
+  .power{position:relative; width:100%; height:5px; margin-top:2px; border-radius:3px; overflow:hidden;
+    background:rgba(8,4,20,.85); border:1px solid var(--line2)}
+  .power .pfill{position:absolute; left:0; top:0; bottom:0; width:60%; background:var(--pc); box-shadow:0 0 7px -2px var(--pc)}
+
+  /* cast bar */
+  .cast{position:relative; width:100%; height:13px; margin-top:3px; border-radius:4px; overflow:hidden; display:none;
+    background:rgba(8,4,20,.85); border:1px solid var(--line2)}
+  .cast.on{display:block}
+  .cast .cfill{position:absolute; left:0; top:0; bottom:0; width:46%; background:linear-gradient(90deg,#7c3aed,var(--cyan))}
+  .cast.shield .cfill{background:linear-gradient(90deg,#5a5f6e,#9fa6b8)}
+  .cast .ctxt{position:absolute; left:5px; top:50%; transform:translateY(-50%); z-index:3; font-family:var(--disp); font-weight:700; font-size:10px; color:#fff; text-shadow:0 1px 2px #000; white-space:nowrap}
+  .cast .caret{position:absolute; top:-1px; bottom:-1px; width:2px; left:46%; background:var(--cyan); box-shadow:0 0 6px var(--cyan); z-index:4; animation:caret 1s ease-in-out infinite}
+  .cast.shield .caret{background:#cfd6e6; box-shadow:0 0 6px #cfd6e6}
+  @keyframes caret{0%,100%{opacity:.5}50%{opacity:1}}
+  .cast .shieldicon{position:absolute; left:-15px; top:50%; transform:translateY(-50%); font-size:11px; display:none}
+  .cast.shield .shieldicon{display:block}
+
+  /* selection ring (your target) - separate axis from engagement */
+  .plate::before{content:""; position:absolute; inset:-4px; border-radius:8px; pointer-events:none; border:1.5px solid transparent; transition:.15s; z-index:-1}
+  .plate.target::before{border-color:var(--cyan); box-shadow:0 0 16px -2px var(--cyan)}
+  .plate.dim{opacity:.6}
+  .plate.dead .hp{filter:grayscale(1) brightness(.6)}
+  .plate.dead .hp .fill{width:100%!important}
+  .plate.dead .hp .htxt{display:none}
+  .plate.dead .deadtxt.on{display:block}
+
+  /* dock / controls */
+  .dock{width:322px; flex:none; background:linear-gradient(180deg,var(--panel),#120826);
+    border-left:1px solid var(--line); display:flex; flex-direction:column; min-height:0}
+  @media (max-width:820px){ .dock{width:auto; border-left:none; border-top:1px solid var(--line); max-height:48%} }
+  .scroll{overflow:auto; padding:14px 16px; flex:1; min-height:0}
+  .grp{margin-bottom:18px}
+  .grp h3{font-family:var(--disp); font-weight:700; font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--cyan); margin:0 0 10px; padding-bottom:6px; border-bottom:1px solid var(--line)}
+  .ctl{display:flex; align-items:center; gap:9px; margin-bottom:9px}
+  .ctl label{flex:1; font-size:13px; color:var(--muted)}
+  .ctl .val{font-family:var(--mono); font-size:12px; color:var(--cyan); min-width:38px; text-align:right}
+  input[type=range]{flex:1.4; accent-color:var(--violet); min-width:0}
+  input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--line2); border-radius:5px; background:transparent; cursor:pointer; flex:none}
+  select{flex:1.4; background:rgba(10,5,22,.6); border:1px solid var(--line2); color:var(--text); font-family:var(--body); font-size:13px; border-radius:5px; padding:5px 6px}
+  input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--cyan); outline-offset:1px}
+  .seg{display:flex; border:1px solid var(--line2); border-radius:7px; overflow:hidden; flex:1.4}
+  .seg.wide{flex:1}
+  .seg button{flex:1; font-family:var(--mono); font-size:11px; background:transparent; color:var(--muted); border:0; padding:6px 4px; cursor:pointer}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button[aria-pressed=true]{background:var(--surface); color:var(--cyan)}
+  .tgl{appearance:none; width:38px; height:20px; border-radius:11px; background:var(--surface); border:1px solid var(--line2); position:relative; cursor:pointer; flex:none}
+  .tgl::after{content:""; position:absolute; top:1px; left:1px; width:16px; height:16px; border-radius:50%; background:var(--dim); transition:.12s}
+  .tgl:checked{background:rgba(57,255,20,.24); border-color:var(--green)}
+  .tgl:checked::after{left:19px; background:var(--green)}
+  .note{font-size:11px; color:var(--dim); margin:-3px 0 9px; line-height:1.4}
+  .note b{color:var(--muted); font-weight:600}
+  .swatch{display:flex; align-items:center; gap:7px}
+  .swatch .dotpv{width:12px; height:12px; border-radius:50%; box-shadow:0 0 6px -1px currentColor}
+
+  .export{border-top:1px solid var(--line); padding:12px 16px 14px; padding-bottom:calc(14px + env(safe-area-inset-bottom,0px)); flex:none; background:rgba(9,4,20,.6)}
+  .export .row{display:flex; align-items:center; gap:8px; margin-bottom:8px}
+  .export h3{font-family:var(--disp); font-weight:700; font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--cyan); margin:0; flex:1}
+  pre.json{margin:0; max-height:150px; overflow:auto; font-family:var(--mono); font-size:11px; line-height:1.5;
+    color:#bfe9d6; background:#07031a; border:1px solid rgba(34,224,255,.3); border-radius:6px; padding:9px 11px; white-space:pre; user-select:text}
+  .hint{font-size:11px; color:var(--dim); margin-top:7px; line-height:1.4}
+  .toast{position:fixed; left:50%; bottom:22px; transform:translateX(-50%) translateY(20px); opacity:0; transition:.18s;
+    background:var(--panel2); border:1px solid var(--green); color:var(--green); font-family:var(--mono); font-size:12px; padding:8px 14px; border-radius:8px; pointer-events:none; z-index:50}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+</style>
+
+<div class="app">
+  <header>
+    <span class="logo">Forever Synthwave</span>
+    <span class="sub">Nameplate Designer</span>
+    <span class="spacer"></span>
+    <div class="seg" id="viewSeg" style="flex:0 0 auto" role="group" aria-label="Preview scale">
+      <button data-view="fit" type="button" aria-pressed="true">Fit</button>
+      <button data-view="big" type="button" aria-pressed="false">1.6&times;</button>
+    </div>
+    <span class="readout" id="readout"></span>
+    <button class="btn" id="resetBtn" type="button">Reset</button>
+    <button class="btn primary" id="copyBtn" type="button">Copy spec</button>
+  </header>
+
+  <div class="main">
+    <div class="stage">
+      <div class="screen" id="screen">
+        <div class="grid"></div>
+        <div class="horizon"></div>
+        <div class="plates" id="plates"></div>
+      </div>
+    </div>
+
+    <div class="dock">
+      <div class="scroll">
+
+        <div class="grp">
+          <h3>Preview state (all 3 plates)</h3>
+          <div class="ctl"><label>Engagement (mob name color)</label></div>
+          <div class="ctl"><div class="seg wide" id="engageSeg" role="group" aria-label="Engagement">
+              <button data-engage="passive" type="button">Passive</button>
+              <button data-engage="neutral" type="button">Neutral</button>
+              <button data-engage="aggro" type="button">Aggro</button>
+            </div></div>
+          <div class="note">This is the threat/engagement cue you asked for: the mob's NAME color reflects passive / neutral / aggro. Enemy players keep class color. The cyan ring is a separate axis (your current target).</div>
+          <div class="ctl"><label for="tgt">Middle plate is my target</label><input class="tgl" type="checkbox" id="tgt" checked></div>
+          <div class="ctl"><label for="casting">Casting</label><input class="tgl" type="checkbox" id="casting"></div>
+          <div class="ctl"><label for="interrupt">Cast interrupt-shielded</label><input class="tgl" type="checkbox" id="interrupt"></div>
+          <div class="ctl"><label for="isquest">Mob is a quest unit</label><input class="tgl" type="checkbox" id="isquest"></div>
+          <div class="ctl"><label for="isdead">Dead</label><input class="tgl" type="checkbox" id="isdead"></div>
+          <div class="ctl"><label for="hpval">Health</label><input type="range" id="hpval" min="0" max="100" value="72"><span class="val" id="hpvalV">72%</span></div>
+          <div class="ctl"><label for="powval">Power</label><input type="range" id="powval" min="0" max="100" value="60"><span class="val" id="powvalV">60%</span></div>
+        </div>
+
+        <div class="grp">
+          <h3>Bars</h3>
+          <div class="ctl"><label for="pw">Bar width</label><input type="range" id="pw" min="140" max="260" value="224"><span class="val" id="pwV">224</span></div>
+          <div class="ctl"><label for="ph">Health height</label><input type="range" id="ph" min="10" max="24" value="16"><span class="val" id="phV">16</span></div>
+          <div class="ctl"><label for="powh">Power strip height</label><input type="range" id="powh" min="2" max="10" value="5"><span class="val" id="powhV">5</span></div>
+          <div class="ctl"><label for="showpow">Show power strip</label><input class="tgl" type="checkbox" id="showpow" checked></div>
+          <div class="ctl"><label for="showhp">Show health %</label><input class="tgl" type="checkbox" id="showhp" checked></div>
+          <div class="ctl"><label for="showlv">Show level (mobs)</label><input class="tgl" type="checkbox" id="showlv" checked></div>
+        </div>
+
+        <div class="grp">
+          <h3>Aura dots (on top of bar)</h3>
+          <div class="ctl"><label for="auraEn">Enable</label><input class="tgl" type="checkbox" id="auraEn" checked></div>
+          <div class="ctl"><label>Scope</label>
+            <div class="seg" id="auraScope" role="group" aria-label="Aura scope">
+              <button data-scope="mine" type="button">My dots</button>
+              <button data-scope="all" type="button">All debuffs</button>
+            </div></div>
+          <div class="note">My dots = only auras you cast (pink). All debuffs = every harmful aura (violet), your own still tinted pink.</div>
+          <div class="ctl"><label for="auraMax">Max dots</label><input type="range" id="auraMax" min="1" max="8" value="5"><span class="val" id="auraMaxV">5</span></div>
+          <div class="ctl"><label for="dotSz">Icon size</label><input type="range" id="dotSz" min="10" max="24" value="14"><span class="val" id="dotSzV">14</span></div>
+          <div class="note">Dots sit at the right end of the name row (name is left-aligned).</div>
+          <div class="ctl"><label for="showCount">Show stack count</label><input class="tgl" type="checkbox" id="showCount" checked></div>
+          <div class="ctl"><label for="rmSize">Raid marker size</label><input type="range" id="rmSize" min="12" max="36" value="25"><span class="val" id="rmSizeV">25</span></div>
+        </div>
+
+        <div class="grp">
+          <h3>Engagement name colors</h3>
+          <div class="ctl"><label><span class="swatch"><span class="dotpv" id="pvPassive"></span>Passive</span></label><input type="color" id="cPassive" value="#cfc4ef"></div>
+          <div class="ctl"><label><span class="swatch"><span class="dotpv" id="pvNeutral"></span>Neutral</span></label><input type="color" id="cNeutral" value="#ffb648"></div>
+          <div class="ctl"><label><span class="swatch"><span class="dotpv" id="pvAggro"></span>Aggro</span></label><input type="color" id="cAggro" value="#ff2e97"></div>
+        </div>
+
+        <div class="grp">
+          <h3>Quest indicator (mobs)</h3>
+          <div class="ctl"><label for="questEn">Enable</label><input class="tgl" type="checkbox" id="questEn" checked></div>
+          <div class="ctl"><label>Marker</label>
+            <div class="seg" id="questMk" role="group" aria-label="Quest marker">
+              <button data-mk="bang" type="button">!</button>
+              <button data-mk="q" type="button">?</button>
+            </div></div>
+          <div class="ctl"><label>Side</label>
+            <div class="seg" id="questSide" role="group" aria-label="Quest side">
+              <button data-side="left" type="button">Left</button>
+              <button data-side="right" type="button">Right</button>
+            </div></div>
+          <div class="ctl"><label for="qColor">Color</label><input type="color" id="qColor" value="#ffb648"></div>
+          <div class="ctl"><label for="qSize">Size</label><input type="range" id="qSize" min="12" max="34" value="22"><span class="val" id="qSizeV">22</span></div>
+        </div>
+
+        <div class="grp">
+          <h3>Extras (scope confirms)</h3>
+          <div class="ctl"><label for="deadEn">"Dead" label on dead plates</label><input class="tgl" type="checkbox" id="deadEn"></div>
+          <div class="note">Audit says low value (no HP number to swap). Toggle Dead above to preview.</div>
+          <div class="ctl"><label for="scanEn">Scanlines on plates</label><input class="tgl" type="checkbox" id="scanEn"></div>
+          <div class="note">Recommended <b>OFF</b>: plates move every frame; scanline is for read surfaces.</div>
+        </div>
+
+      </div>
+
+      <div class="export">
+        <div class="row"><h3>Export spec</h3><button class="btn" id="copyBtn2" type="button">Copy</button></div>
+        <pre class="json" id="json" tabindex="0"></pre>
+        <div class="hint">Tune it, hit <b>Copy spec</b>, paste it back and I'll build to match. Engagement / target / casting / health toggles are preview-only, not exported.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const POWERCOLOR={mana:"#22e0ff", energy:"#ffe14d", rage:"#ff4d4d"};
+const AURA_GLYPH=["\u{1F525}","❄️","☠️","\u{1FA78}","⚡","\u{1F9EA}","\u{1F32A}️","\u{1F576}️"];
+// three unit archetypes to render together
+const UNITS=[
+  {key:"mob",     cap:"Mob",             name:"Ravaged Wolf", lv:"32", power:"mana",   nameRule:"engage", classColor:null,       isMob:true },
+  {key:"pmelee",  cap:"Player · Melee",  name:"Xantheros",    lv:"",   power:"energy", nameRule:"class",  classColor:"#fff569",  isMob:false},
+  {key:"pcaster", cap:"Player · Caster", name:"Nightweave",   lv:"",   power:"mana",   nameRule:"class",  classColor:"#3fc7eb",  isMob:false},
+];
+
+const D={
+  engage:"neutral", tgt:true, casting:false, interrupt:false, isquest:false, isdead:false, hpval:72, powval:60,
+  pw:224, ph:16, powh:5, showpow:true, showhp:true, showlv:true,
+  auraEn:true, auraScope:"mine", auraMax:5, dotSz:14, dotPos:"left", dotVert:"over", showCount:true,
+  cPassive:"#cfc4ef", cNeutral:"#ffb648", cAggro:"#ff2e97",
+  rmSize:25,
+  questEn:true, questMk:"bang", questSide:"left", qColor:"#ffb648", qSize:22,
+  deadEn:false, scanEn:false, view:"fit"
+};
+let S=Object.assign({},D);
+
+function engageColor(){ return S.engage==="passive"?S.cPassive : S.engage==="aggro"?S.cAggro : S.cNeutral; }
+function pressSeg(sel,attr,val){ document.querySelectorAll(sel+" button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset[attr]===val))); }
+
+function plateHTML(u){
+  return `<div class="plate" data-key="${u.key}">
+    <div class="namerow">
+      <div class="rmark rm"></div>
+      <div class="nmleft">
+        <span class="qmark qm">!</span>
+        <span class="nm">${u.name}</span>
+        <span class="lv">${u.lv||""}</span>
+      </div>
+      <div class="adots ad"></div>
+    </div>
+    <div class="hpwrap">
+      <div class="hp">
+        <div class="fill"></div>
+        <span class="htxt">72%</span>
+        <span class="deadtxt">DEAD</span>
+      </div>
+    </div>
+    <div class="power pw"><div class="pfill"></div></div>
+    <div class="cast ca"><span class="shieldicon">\u{1F6E1}️</span><div class="cfill"></div><div class="caret"></div><span class="ctxt">${u.isMob?"Rabies":"Frostbolt"}</span></div>
+    <div class="cap">${u.cap}</div>
+  </div>`;
+}
+
+function buildScene(){
+  $("plates").innerHTML = UNITS.map(u=>`<div class="unit">${plateHTML(u)}</div>`).join("");
+}
+
+function renderPlate(u){
+  const p=document.querySelector(`.plate[data-key="${u.key}"]`);
+  if(!p) return;
+  p.style.width=S.pw+"px";
+  // name color
+  const nm=p.querySelector(".nm");
+  nm.style.color = u.nameRule==="engage" ? engageColor() : u.classColor;
+  // level
+  const lv=p.querySelector(".lv");
+  lv.style.display=(S.showlv && u.lv) ? "" : "none";
+  // health fill uses reaction-ish base: mob engaged->hostile pink, players->class-ish; keep bar color = red family for enemies
+  const hp=p.querySelector(".hp"); hp.style.height=S.ph+"px";
+  p.style.setProperty("--rc", u.isMob ? engageColor() : (u.classColor||"#ff2e97"));
+  const fill=p.querySelector(".fill"); fill.style.width=S.hpval+"%";
+  const htxt=p.querySelector(".htxt"); htxt.textContent=S.hpval+"%"; htxt.style.display=(S.showhp&&!S.isdead)?"":"none";
+  // power strip
+  const pw=p.querySelector(".power"); pw.style.display=S.showpow?"":"none"; pw.style.height=S.powh+"px";
+  pw.style.setProperty("--pc", POWERCOLOR[u.power]);
+  p.querySelector(".pfill").style.width=S.powval+"%";
+  // aura dots
+  const ad=p.querySelector(".adots"); ad.className="adots ad";
+  ad.innerHTML="";
+  if(S.auraEn && u.isMob){ // dots demoed on the mob (where you apply dots)
+    const n=Math.min(S.auraMax, S.auraScope==="mine"?3:S.auraMax);
+    for(let i=0;i<n;i++){
+      const mine = S.auraScope==="mine" || i<2;
+      const d=document.createElement("div"); d.className="adot"+(mine?" mine":"");
+      d.style.width=d.style.height=S.dotSz+"px";
+      const g=document.createElement("span"); g.className="ag"; g.style.fontSize=Math.round(S.dotSz*0.72)+"px";
+      g.textContent=AURA_GLYPH[i%AURA_GLYPH.length]; d.appendChild(g);
+      if(S.showCount){ const c=document.createElement("span"); c.className="an"; c.style.fontSize=Math.max(7,Math.round(S.dotSz*0.44))+"px"; c.textContent=(i+2); d.appendChild(c); }
+      ad.appendChild(d);
+    }
+  }
+  // quest (mob only)
+  const qm=p.querySelector(".qmark"); const showQ=S.questEn && S.isquest && u.isMob;
+  qm.className="qmark qm "+S.questSide+(showQ?" on":""); qm.textContent=S.questMk==="bang"?"!":"?";
+  qm.style.color=S.qColor; qm.style.fontSize=S.qSize+"px"; qm.style.textShadow=`0 0 7px ${S.qColor}, 0 1px 2px #000`;
+  // raid marker on the mob
+  const rm=p.querySelector(".rmark"); rm.classList.toggle("on", u.isMob && !S.isdead);
+  rm.style.width=rm.style.height=S.rmSize+"px"; rm.style.top=(-(S.rmSize+3))+"px";
+  // target ring on middle plate (pmelee is middle? order mob,pmelee,pcaster -> middle=pmelee). Use tgt on the caster to show a caster target. We'll ring the mob for clarity.
+  p.classList.toggle("target", S.tgt && u.key==="mob");
+  p.classList.toggle("dim", !(S.tgt && u.key==="mob") && S.tgt);
+  // cast
+  const ca=p.querySelector(".cast"); ca.classList.toggle("on", S.casting && !S.isdead && u.key!=="pmelee"); ca.classList.toggle("shield", S.interrupt);
+  // dead
+  p.classList.toggle("dead", S.isdead);
+  p.querySelector(".deadtxt").classList.toggle("on", S.deadEn);
+}
+
+function render(){
+  $("plates").classList.toggle("big", S.view==="big");
+  UNITS.forEach(renderPlate);
+  // swatch previews
+  $("pvPassive").style.color=S.cPassive; $("pvPassive").style.background=S.cPassive;
+  $("pvNeutral").style.color=S.cNeutral; $("pvNeutral").style.background=S.cNeutral;
+  $("pvAggro").style.color=S.cAggro; $("pvAggro").style.background=S.cAggro;
+  syncControls(); updateJSON(); updateReadout();
+  try{ localStorage.setItem("fsNameplateDesigner", JSON.stringify(S)); }catch(e){}
+}
+
+function updateReadout(){
+  const f=[]; if(S.auraEn)f.push("dots:"+S.auraScope); if(S.questEn)f.push("quest");
+  $("readout").innerHTML=`hp <b>${S.pw}×${S.ph}</b> · pwr <b>${S.powh}</b> · <b>${f.join(" ")||"base"}</b>`;
+}
+
+function updateJSON(){
+  const spec={
+    tool:"forever-synthwave-nameplate",
+    plateTypes:["mob","player-melee","player-caster"],
+    bars:{ width:S.pw, healthHeight:S.ph, powerStrip:{ show:S.showpow, height:S.powh,
+             colors:{mana:POWERCOLOR.mana, energy:POWERCOLOR.energy, rage:POWERCOLOR.rage} },
+           showHealthPct:S.showhp, showLevelMobs:S.showlv },
+    nameColor:{ rule:"mob=engagement, player=classColor",
+                engagement:{ passive:S.cPassive, neutral:S.cNeutral, aggro:S.cAggro } },
+    auraDots:{ enabled:S.auraEn, scope:S.auraScope, maxDots:S.auraMax, iconSize:S.dotSz,
+               placement:"name-row-right", showStackCount:S.showCount,
+               ownCastColor:"#ff2e97", otherColor:"#a855f7" },
+    nameAlign:"left",
+    quest:{ enabled:S.questEn, marker:S.questMk, side:S.questSide, color:S.qColor, size:S.qSize },
+    raidMarker:{ size:S.rmSize, position:"centered above name" },
+    selectionRing:{ color:"#22e0ff", note:"your current target; separate from engagement" },
+    extras:{ deadLabel:S.deadEn, scanlines:S.scanEn }
+  };
+  $("json").textContent=JSON.stringify(spec,null,2);
+}
+
+function syncControls(){
+  pressSeg("#viewSeg","view",S.view);
+  pressSeg("#engageSeg","engage",S.engage);
+  pressSeg("#auraScope","scope",S.auraScope);
+  pressSeg("#questMk","mk",S.questMk);
+  pressSeg("#questSide","side",S.questSide);
+  $("hpvalV").textContent=S.hpval+"%"; $("powvalV").textContent=S.powval+"%";
+  $("pwV").textContent=S.pw; $("phV").textContent=S.ph; $("powhV").textContent=S.powh;
+  $("auraMaxV").textContent=S.auraMax; $("dotSzV").textContent=S.dotSz; $("qSizeV").textContent=S.qSize; $("rmSizeV").textContent=S.rmSize;
+}
+
+function bindRange(id,key){ $(id).addEventListener("input",e=>{ S[key]=+e.target.value; render(); }); }
+function bindTgl(id,key){ $(id).addEventListener("change",e=>{ S[key]=e.target.checked; render(); }); }
+function bindColor(id,key){ $(id).addEventListener("input",e=>{ S[key]=e.target.value; render(); }); }
+function segClick(sel,attr,key){ document.querySelector(sel).addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b)return; S[key]=b.dataset[attr]; render(); }); }
+
+bindRange("hpval","hpval"); bindRange("powval","powval");
+bindRange("pw","pw"); bindRange("ph","ph"); bindRange("powh","powh");
+bindRange("auraMax","auraMax"); bindRange("dotSz","dotSz"); bindRange("qSize","qSize"); bindRange("rmSize","rmSize");
+bindTgl("tgt","tgt"); bindTgl("casting","casting"); bindTgl("interrupt","interrupt");
+bindTgl("isquest","isquest"); bindTgl("isdead","isdead");
+bindTgl("showpow","showpow"); bindTgl("showhp","showhp"); bindTgl("showlv","showlv");
+bindTgl("auraEn","auraEn"); bindTgl("showCount","showCount");
+bindTgl("questEn","questEn");
+bindTgl("deadEn","deadEn"); bindTgl("scanEn","scanEn");
+bindColor("cPassive","cPassive"); bindColor("cNeutral","cNeutral"); bindColor("cAggro","cAggro");
+bindColor("qColor","qColor");
+segClick("#viewSeg","view","view");
+segClick("#engageSeg","engage","engage");
+segClick("#auraScope","scope","auraScope");
+segClick("#questMk","mk","questMk");
+segClick("#questSide","side","questSide");
+
+$("resetBtn").addEventListener("click",()=>{ S=Object.assign({},D); render(); toast("Reset to defaults"); });
+
+function toast(m){ const t=$("toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),1400); }
+function selectJSON(){ const r=document.createRange(); r.selectNodeContents($("json")); const s=window.getSelection(); s.removeAllRanges(); s.addRange(r); toast("Selected — press Ctrl/Cmd+C"); }
+function copySpec(){ const txt=$("json").textContent; if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(()=>toast("Spec copied")).catch(selectJSON);} else selectJSON(); }
+$("copyBtn").addEventListener("click",copySpec); $("copyBtn2").addEventListener("click",copySpec);
+
+try{ const saved=JSON.parse(localStorage.getItem("fsNameplateDesigner")||"null"); if(saved&&typeof saved==="object") S=Object.assign({},D,saved); }catch(e){}
+buildScene();
+render();
+</script>

@@ -1186,7 +1186,7 @@ end
 local function Init()
     local ok, err = pcall(Build)
     if not ok then
-        print("|cff22e0ffForeverSynthwave|r: pet cast bar failed to build ("
+        print("|cff22e0ffForever STUwave|r: pet cast bar failed to build ("
             .. tostring(err) .. "); pet cast bar not created.")
     end
 end

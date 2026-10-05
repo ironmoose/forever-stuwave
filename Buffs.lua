@@ -490,7 +490,7 @@ local function TryAddNativeEnchants(auras)
     if not state.enchantWarned then
         state.enchantWarned = true
         FS.LogDegradeOnce("buffs_native_enchants",
-            "|cffff4488ForeverSynthwave|r: weapon enchant icons are not engine drawn ("
+            "|cffff4488Forever STUwave|r: weapon enchant icons are not engine drawn ("
             .. tostring(err) .. ")")
     end
 end
@@ -912,7 +912,7 @@ local function Init()
     elseif not state.warned then
         state.warned = true
         FS.LogDegradeOnce("buffs_aura_container",
-            "|cffff4488ForeverSynthwave|r: player aura containers unavailable, buffs and debuffs freeze in combat ("
+            "|cffff4488Forever STUwave|r: player aura containers unavailable, buffs and debuffs freeze in combat ("
             .. tostring(engineErr) .. ")")
     end
     state.legacyEnchants = HAS_WEAPON_ENCHANT and not (state.nativeMainHand and state.nativeOffHand)

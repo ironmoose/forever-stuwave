@@ -357,7 +357,7 @@ local function Init()
     -- loudly instead of throwing on a nil frame.
     if not FS.target or not FS.focus then
         FS.LogDegradeOnce("targetauras_nounits",
-            "|cffff4488ForeverSynthwave|r targetauras: FS.target/FS.focus not set at init, skipping")
+            "|cffff4488Forever STUwave|r targetauras: FS.target/FS.focus not set at init, skipping")
         return
     end
 

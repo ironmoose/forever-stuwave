@@ -1,66 +1,175 @@
-# Trying the alpha
+# Forever STUwave: alpha testing
 
-Forever STUwave targets the WoW Forever beta client, interface 16001. The current layout is centered on 16:9. Priest and Warlock have combat HUD profiles; Paladin testing is gathering the evidence for its own HUD.
+Use the [README installation and update instructions](README.md). Close the game before installing or pulling an update, and fully restart for newly added files, bindings or textures. The visible addon name is **Forever STUwave**; its installed folder and `.toc` must remain `ForeverSynthwave`.
 
-## First login
+Judgement behavior and its HUD lane, Quick Keybind, and the current key label visuals have been checked in game. Seal/aura clicks, chamber expiry and no-seal states, the shoulder seam, and minimap placement on a new character's first login still need checks. Advanced Paladin level 10/20 rotation rules remain incomplete. The checklist below also helps catch regressions in checked features.
 
-1. Close the game and install the folder as described in the [README](README.md#install).
-2. Confirm the file is at `Interface/AddOns/ForeverSynthwave/ForeverSynthwave.toc`, with no extra wrapper folder.
-3. Restart the client and enable Forever STUwave at character selection.
-4. Check the player frame, action deck, chat, minimap, and quest tracker. Note your resolution and any overlaps or missing elements.
-5. Try selecting a friendly and hostile target, entering and leaving combat, opening bags, and joining or leaving a party when convenient. Record anything that changes unexpectedly.
+## Report a bug: /fsbug
 
-The addon folder is named `ForeverSynthwave` even though the displayed project name is Forever STUwave. `/reload` cannot discover a newly installed addon or newly added files; restart for those.
+Inspect reports before posting them publicly. Use [GitHub issues](https://github.com/ironmoose/forever-stuwave/issues/new) or send the report directly to the maintainer. Include the build's version or Git commit when you know it.
 
-## Report a problem
+Type this in chat the moment something looks wrong:
 
-Run this as soon as something looks wrong:
+    /fsbug what you were doing and what looked wrong
 
-```text
-/fsbug what you were doing and what looked wrong
-```
+The note is optional. A window opens with the report in it.
 
-The note is optional. The command is designed to run in combat. A copy window opens: click inside, press Ctrl+A then Ctrl+C, and paste into a `.txt` file. Escape or the Close button closes it. If the window itself misbehaves, record that too.
+1. Click inside the window.
+2. Press Ctrl+A, then Ctrl+C.
+3. Paste into a new .txt file and send it to the maintainer.
 
-Send the maintainer the report and a sentence describing the expected result. Include a screenshot when the problem is visual. Once the public repo exists, a [new issue](https://github.com/ironmoose/forever-stuwave/issues/new) is another place to report it.
+It is safe to run in combat. Escape or the Close button closes the window.
 
-**Read the report before posting it publicly.** It includes class, level, zone, addon list, settings, recent errors and, when available, class recon. Remove anything you do not want shared.
+Other commands:
 
-| Command | Use |
-| --- | --- |
-| `/fsbug all` | Show stored reports; the last 20 are kept. |
-| `/fsbug clear` | Delete stored reports, after saving the ones you need. |
-| `/fserr` | Inspect captured errors. |
-| `/fserr clear` | Clear the error log, after saving a report. |
+- `/fsbug all` shows every stored report (the last 20 are kept).
+- `/fsbug clear` deletes the stored reports.
 
-If chat says `error was thrown and logged (/fsbug to report)`, capture a report then. The addon suppresses popups for its captured Lua errors; protected action warnings can still appear and should also be reported. If chat says the error log is full, save a report before using `/fserr clear`.
+## Minimap on a new character's first login
 
-## Paladin recon: level 1, then around level 10
+The minimap may sit in the wrong place on a character's very first login only.
 
-The Paladin seal, aura, and Judgement HUD has not been implemented. These runs tell us what the Forever client exposes on your character; a missing HUD profile is expected.
+1. Create a new character and log in. Do NOT type /reload.
+2. Look at the minimap: it should sit in its usual seat at the top right.
+3. Type `/fsbug minimap first login`, copy the window as above and send it to the maintainer, whether the minimap looked right or not.
 
-1. If you know a seal, aura, or blessing, activate the ones available to you. A blessing can be on yourself or a party member.
-2. Select a suitable enemy and attack it. If you have learned Judgement, use it and observe what happens to your seal and the target. Record the behavior without assuming whether the seal is consumed.
-3. Stop attacking and let combat end. Keep the target selected. If practical, choose an encounter where the target survives and its effects can still be inspected afterward.
-4. Note the state of your seal, aura, and blessing. Restore available effects for the snapshot if needed, and mention what you restored in the report.
-5. Promptly run `/fsrecon class` out of combat, with the target still selected.
-6. Look for chat lines beginning `synthwave://class`. If an aura section says `skipped` or `no target`, retry out of combat with your target selected. If it remains unavailable, report that result too.
-7. Immediately run `/fsbug Paladin recon, level and observations here`, then copy and save the report.
+The log is account wide: if another character already logged in with this build, send the /fsbug before your next login or /reload, or this login's log is lost.
 
-Only the first successful `/fsbug` after a recon includes the full run; later reports carry a reference to it. If the copy window did not open, run `/fsbug` again. Do not clear reports until you have saved and sent the full one.
+## Class recon (Paladin testers: once at level 1, then again around level 10)
 
-The most recent class recon is shared across the account. Capture the report before switching characters or running another recon.
+The recon writes down what your Paladin has right now, so set it up first. If you have them, have
+these active before you start: a seal, an aura, and a blessing (on yourself or on a party member).
 
-## Mouseover experiment
+Do these in order:
 
-`/fsmouseover [on|off] [alt|ctrl|shift|none]` controls the client mouseover casting setting. Party row behavior has not been verified in game. If you try it, record which row you hovered, the spell and modifier, the actual recipient, and whether you were in combat; include `/fsbug` if it behaves unexpectedly.
+1. Target a training dummy, or a mob you can leave behind, and attack it.
+2. If you have Judgement, use it on the target. At level 1 you will not have it yet, so skip this step.
+3. Keep the target selected. Stop attacking and let combat end: kill it or walk away.
+4. Check that your seal is still active. Judgement does not use it up on Forever, so only cast one
+   again if it has run out.
+5. Right away, before the Judgement debuff on the target runs out, type `/fsrecon class`.
+6. Check chat. It worked when you see lines starting with `synthwave://class` and none of them say
+   "skipped" or "no target". If one does, wait a few seconds out of combat, keep your target selected,
+   and run `/fsrecon class` again.
+7. Then run `/fsbug`.
 
-## If the report window will not open
+Send the `/fsbug` .txt with your report; it holds the recon. Only the first `/fsbug` after a recon carries it, so
+run `/fsbug` right after. If the `/fsbug` window did not open, just run `/fsbug` again: the recon is kept
+until a report has been shown to you.
 
-Reports are also stored in the account SavedVariables file, written on `/reload` or logout:
+Do not run `/fsbug clear` until you have sent the report. Clearing deletes the stored report, and the
+recon will not ride along in a later one.
 
-```text
-WTF/Account/<ACCOUNT>/SavedVariables/ForeverSynthwave.lua
-```
+## Paladin: seals, auras, Seal Chamber, chat font
 
-Use the `WTF` folder for the same client where you installed the addon. This file contains settings, diagnostic probes, and multiple reports. Ask the maintainer for a private way to share it if needed; inspect it first and avoid posting the entire file in a public issue by default.
+Use a Paladin that has learned at least one seal. Step 6 works on any class.
+
+1. Install this build and do a FULL client restart, not /reload. This build
+   adds new files (.toc lines, Bindings.xml, .tga images) that only load on
+   a restart.
+2. Seal and aura buttons, on the Console's top-left shoulder:
+   - Top row is seals. Each seal you have learned shows, packed from the
+     left. Slots for seals you have not learned stay hidden.
+   - Bottom row is auras. They are your Paladin's forms. The active one is
+     highlighted. Switch aura and check the highlight follows (needs two
+     auras, skip otherwise).
+   - Click a button: it casts. After you cast, the swipe shows on the button.
+   - If you turn the Console off (`/fsconsole off`), the buttons sit above
+     the stance bar spot instead. Then `/fsconsole on` before step 4 (the
+     switch waits for combat to end).
+3. Quick Keybind (button names are Blizzard's wording and may vary):
+   - Open Blizzard's Quick Keybind mode: Esc > Options > Keybindings, then the
+     "Quick Keybind Mode" button.
+   - Hover a seal button, press a key, then click Okay.
+   - Leave the mode and press the key: it casts that seal.
+   - Type /reload and press the key again: the binding is still there.
+   - Check the labels: white text on dark backing, matching the action bars.
+     Middle Mouse displays as `MM`; Mouse Button 4 as `MB4`, and so on.
+     Modified labels stay compact, such as `C-MB4` and `S-MM`.
+   - If Quick Keybind won't take, bind the key through Key Bindings > AddOns
+     instead, and say so in your report.
+   - Open Key Bindings > AddOns. The "Forever STUwave" header lists the seal
+     names ("Seal of Righteousness" and so on).
+   - Turn the "Cast on key down" option on, test, then turn it off and test
+     again. It must be one cast per press either way. (Wording varies. It is
+     in Options > Combat; some clients put it under Gameplay > Controls.)
+   - Optional, needs a level-up: bind a key to a seal, then learn a new seal.
+     The buttons repack, but the key still casts the same seal.
+   - Aura keys use the game's own stance bindings, so learning a new aura can
+     move a key to the neighbouring aura, the same as Blizzard's stance bar.
+4. Seal Chamber, in the Gunsight's DoT area. Hover the keys on the Console's
+   shoulder tab until one reads "Seal Chamber". If its tooltip says it is off,
+   click it to turn it on (a click toggles it). Seals last 30 s (the ruler
+   runs 0 to 30). Then:
+   - Cast a seal. It shows the glyph in the seal's colour, a quick
+     strike-up flicker, the drain, and the countdown.
+   - In the last 5 s it flickers and reads EXPIRING.
+   - At 3 s or less the RESEAL band lights.
+   - At expiry it reads NO SEAL. "IN COMBAT" shows under it only while you
+     are in combat, and in combat it pulses.
+   - Cast a seal again, then cast Judgement. A ring pulses out from the
+     glyph. The seal stays up after Judgement: the chamber keeps draining
+     and does not drop to NO SEAL.
+   - Judgement lane (the JUDGED side). Judge a target while a Crusader,
+     Light, Wisdom or Justice seal is up:
+     - The lane shows a bar and a chip with the Judgement icon, counting down
+       40 s (10 s for Justice). It is coloured like the chamber: the current
+       seal, red under NO SEAL. A white flash shows when it lands.
+     - Judging under Righteousness, Command or Fury puts no bar up.
+     - Switch target: the lane follows the new target at once. If that
+       target is not judged, it shows the muted stacked letters NOT JUDGED
+       (or NO DEBUFF), with a seal up. Under NO SEAL the empty lane shows no
+       letters.
+     - A dead target hides the lane. A revived target relights it without a
+       flash.
+     - After a loading screen the lane reads NOT JUDGED until you judge
+       again. That is expected.
+5. Look at the shoulder where it meets the Console's top line. It should look
+   like part of the Console, with no notch and no bright seam.
+6. Chat font. Chat text defaults to 14 pt. `/fschat size` prints the size and
+   `/fschat size N` sets it (whole numbers, 10 to 24). A chat window where you
+   picked a size earlier in Blizzard's font menu is left alone: use
+   `/fschat size 14` to force it.
+7. Send back: `/fsbug` with a note on what you were doing, sent as above, plus
+   a screenshot of anything that looks off.
+
+## If the window does not open
+
+Every report is also saved in the SavedVariables file. It is written on
+`/reload` or logout. Send that file instead:
+
+    World of Warcraft\_classic_beta_\WTF\Account\<ACCOUNT>\SavedVariables\ForeverSynthwave.lua
+
+`<ACCOUNT>` is your account folder name.
+
+## The "error was thrown and logged" line
+
+If you see this in chat:
+
+    Forever STUwave: error was thrown and logged (/fsbug to report)
+
+the addon hit a Lua error, caught it, and kept the game running. No Lua error
+popup is shown for it. It prints at most once every 10 seconds, with `(x3)`
+style counts if it repeated. Run `/fsbug` right then so the report includes it.
+You do not need `/console scriptErrors 1` for any of this.
+
+If chat says "error log full, /fserr clear", new errors are counted but not stored, so run /fsbug, send it, then /fserr clear.
+
+That only covers Lua errors. Blizzard's own "ForeverSynthwave has been blocked
+from an action only available to the Blizzard UI" popup can still appear, and
+the same chat line prints when it does. Run `/fsbug` for that too.
+
+Errors from other addons are not hidden. They are left to the game's normal
+handling, which under the default settings may mean no popup at all.
+
+## What to send
+
+- The .txt from `/fsbug`, or the SavedVariables file.
+- One line on what you were doing (target, combat or not, which frame).
+- A screenshot only if the problem is how something looks.
+
+The report holds your class, level, zone, addon list, settings and recent
+errors. Share the focused report first; inspect any larger SavedVariables file
+before sharing it. The SavedVariables file holds more: the addon's settings, its probe
+results and every stored report. Neither one holds chat text, and neither holds
+your login or password.

@@ -1,0 +1,15 @@
+[project]
+name = "forever-stuwave-dev"
+version = "0.1.0"
+description = "Local development tools for the Forever STUwave addon"
+requires-python = ">=3.11"
+dependencies = ["lupa>=2", "pytest>=8", "Pillow>=10", "numpy>=1.26", "fonttools>=4"]
+
+[project.optional-dependencies]
+fsdev = ["jeepney>=0.8; sys_platform == 'linux'", "evdev>=1.7; sys_platform == 'linux'", "mss>=9"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tools", "media"]

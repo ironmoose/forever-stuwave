@@ -69,6 +69,19 @@
 -- Show/Hide of the gate is legal in combat (a plain addon frame, nothing protected parented under it) and it
 -- adds no OnUpdate. The Hud ledger keeps running while the gate is hidden, only the visuals go.
 --
+-- CLASS SLOT. The DoT area is a class-specific seat behind deck key 6 (the mockup: drawDots for a Warlock and a
+-- Priest, drawSealChamber for a Paladin, picked at the dispatch `CLS==='pl' ? drawSealChamber : drawDots`).
+-- This file is the DoT time tape. A profile with a `seals` table and no `dots` (the Paladin) draws NOTHING here:
+-- no axis, ticks, labels, band, guides, header or chips, because the Seal Chamber (another file) owns that
+-- space and draws its own 0 to 30 s ruler and refresh band there. The piece frame, its target gate and its
+-- registration under key "dot" are still built, so the console key's toggle and Gunsight.SetPiece work and the
+-- chamber can hang off the same piece; the Hud is not subscribed for a slot this file does not draw. The horizon
+-- hairline that leads in (mockup: drawDots and drawSealChamber both draw `hline(630, TR.x1 + 10, DOT_AX - 12)`
+-- when there is a target) belongs to GunsightFrame's `dot` segment and stays for every class. The profile is
+-- read at build (HudLogic resolves it at load or PLAYER_LOGIN, before the Gunsight's OnReady), then re-asked on
+-- every show and push (see Yield), in case it was not readable yet; a Warlock or Priest takes the same code path
+-- as before and draws byte for byte the same thing.
+--
 -- Not drawn on purpose: the mockup's "PENDING PROBE" tag (decided), and the horizon segment
 -- that leads into this scale, which belongs to the frame lane.
 
@@ -148,11 +161,12 @@ local function LogOnce(key, msg)
     logged[key] = true
     if FS.LogDegradeOnce then
         pcall(FS.LogDegradeOnce, "gunsightdots_" .. key,
-            "|cffff4488ForeverSynthwave|r: gunsight dots: " .. tostring(msg))
+            "|cffff4488Forever STUwave|r: gunsight dots: " .. tostring(msg))
     end
 end
 
 local built, pieceOn, ticking, subscribed = false, false, false, false
+local classSlot = false        -- true when the profile gives this seat to another module (a Paladin's Seal Chamber)
 local gateOn                   -- the last answer written to the gate (nil until the first read)
 local lastEpoch                -- state.targetEpoch of the last push (a plain integer, or nil)
 local frame, content, gate
@@ -623,7 +637,67 @@ local function HealCombat(state)
     if not inCombat then SyncAbsentChips() end
 end
 
+-- Who owns this seat, asked of the class profile through the one shared rule (FS.HudProfiles.ClassSlot,
+-- HudProfiles.lua, the same call ConsoleKeys.lua makes for the key): "seals" when the Seal Chamber does, "dots"
+-- when this tape does, nil when the profile cannot say. `atBuild` is the one-time read in BuildAll: a Hud or a
+-- profile that cannot be read THEN is logged once, because the build latches on the answer. A class that has no
+-- HUD profile at all (a Rogue) is normal and stays silent; a class that does have one but whose profile is not
+-- resolved yet is not (it is re-checked on every show and push, see Yield).
+local function ShippedProfileExists()
+    if type(UnitClass) ~= "function" or type(FS.HudProfiles) ~= "table" then return false end
+    local ok, _, token = pcall(UnitClass, "player")
+    if not ok or (FS.IsSecret and FS.IsSecret(token)) or type(token) ~= "string" then return false end
+    return FS.HudProfiles[token] ~= nil
+end
+
+local function SlotOwner(atBuild)
+    local Hud = FS.Hud
+    if type(Hud) ~= "table" or type(Hud.GetProfile) ~= "function" then
+        if atBuild then LogOnce("noprofile", "FS.Hud.GetProfile is missing, the DoT scale cannot tell whose seat it is") end
+        return nil
+    end
+    local ok, profile = pcall(Hud.GetProfile)
+    if not ok then
+        if atBuild then LogOnce("noprofile", profile) end
+        return nil
+    end
+    if profile == nil then
+        if atBuild and ShippedProfileExists() then
+            LogOnce("noprofile", "the class profile is not resolved yet, the DoT scale is built for a class slot it may not own")
+        end
+        return nil
+    end
+    local Profiles = FS.HudProfiles
+    if type(Profiles) ~= "table" or type(Profiles.ClassSlot) ~= "function" then
+        LogOnce("noclassslot", "FS.HudProfiles.ClassSlot is missing, the DoT scale draws as before")
+        return nil
+    end
+    local ok2, slot = pcall(Profiles.ClassSlot, profile)
+    if not ok2 then
+        LogOnce("classslot", slot)
+        return nil
+    end
+    return slot
+end
+
+-- The scale was built (no profile was readable then) and the profile now gives the seat to the Seal Chamber:
+-- step aside for good. Only plain Hide calls on our own non secure frames, so it is legal in combat; the
+-- piece, its gate and its toggle stay as they are. The Hud subscription is NOT dropped here, because this runs
+-- from inside a Hud push and Hud.Unsubscribe during the push loop would make it skip a neighbour: OnState is
+-- inert from now on and the next piece hide or show drops the subscription.
+local function Yield()
+    classSlot = true
+    content:Hide()
+    StopTicking()
+    lastEpoch = nil
+    for i = 1, #chips do
+        chips[i].mode, chips[i].expiresAt = "off", nil
+        ApplyLook(chips[i])
+    end
+end
+
 local function Apply(state)
+    if SlotOwner() == "seals" then Yield(); return end
     HealCombat(state)
     local profile = FS.Hud and FS.Hud.GetProfile and FS.Hud.GetProfile()
     local dots = profile and profile.dots
@@ -655,7 +729,7 @@ local function Apply(state)
 end
 
 local function OnState(state)
-    if not pieceOn then return end
+    if not pieceOn or classSlot then return end
     local ok, err = pcall(Apply, state)
     if not ok then LogOnce("state", err) end
 end
@@ -666,6 +740,8 @@ end
 
 local function OnPieceShow()
     pieceOn = true
+    if not classSlot and SlotOwner() == "seals" then Yield() end
+    if classSlot then return end           -- a class slot this file does not draw: nothing to keep up to date
     local Hud = FS.Hud
     if not (Hud and Hud.Subscribe) then
         LogOnce("nohud", "FS.Hud is missing, the DoT scale has no data")
@@ -700,6 +776,7 @@ local function RefreshTargetLayer()
 end
 
 local function BuildAll()
+    classSlot = SlotOwner(true) == "seals"
     frame = CreateFrame("Frame", "ForeverSynthwaveGunsightDots", Gunsight.root)
     frame:SetSize(1, 1)
     frame:SetPoint("CENTER", Gunsight.root, "CENTER", 0, 0)
@@ -712,8 +789,10 @@ local function BuildAll()
     content:SetPoint("CENTER", gate, "CENTER", 0, 0)
     content:Hide()                         -- shown once a state has a DoT lane
 
-    BuildScale()
-    for i = 1, D.MAX_LANES do chips[i] = BuildChip(i) end
+    if not classSlot then
+        BuildScale()
+        for i = 1, D.MAX_LANES do chips[i] = BuildChip(i) end
+    end
 
     Dots.frame, Dots.gate, Dots.content, Dots.chips, Dots.parts = frame, gate, content, chips, parts
 
@@ -760,7 +839,8 @@ local function Build()
         return
     end
     if FS.Layout and FS.Layout.OnRescale then FS.Layout.OnRescale(SeatAll) end
-    Gunsight.RegisterPiece("dot", { frame = frame, onShow = OnPieceShow, onHide = OnPieceHide })
+    -- Dots.registered is the signal GunsightSeals.lua gates on: Dots.frame exists even when BuildAll threw, the piece does not
+    Dots.registered = Gunsight.RegisterPiece("dot", { frame = frame, onShow = OnPieceShow, onHide = OnPieceHide }) and true or false
 end
 
 Gunsight.OnReady(Build)

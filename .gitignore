@@ -8,3 +8,7 @@ Thumbs.db
 *.bak
 WTF/
 SavedVariables/
+dist/
+.uv/
+.coverage
+htmlcov/

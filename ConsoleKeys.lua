@@ -17,9 +17,17 @@
 --   prc    a profile.procs entry with a side (GunsightFrame draws a rung only for a proc with a side)
 --   next   profile.rotation not empty       (HudLogic's next cast comes from the rotation)
 --   buff   profile.selfBuffs not empty      (the buff reminder tile comes from the self buffs)
---   dot    profile.dots not empty           (GunsightDots draws one lane per profile dot, so no dots = no lanes;
---                                           the horizon segment is a hairline that stays)
+--   dot    FS.HudProfiles.ClassSlot(profile) is not nil
+--          (the DoT area is a CLASS-SPECIFIC slot behind this key, and HudProfiles.lua owns the one rule for who
+--          holds it, shared with GunsightDots: a non empty profile.dots gets the DoT time tape, a profile.seals
+--          table with no dots (the Paladin) gets the Seal Chamber there instead, so the key stays and toggles
+--          that slot; neither = nothing to toggle. The horizon segment is a hairline that stays)
 --   you, tgt, party                         never read the profile: always shown
+-- TOOLTIP. The dot key names its slot from the profile: a profile `dotLabel = { n, d }` (HudProfiles.lua, the
+-- Paladin's "Seal Chamber") replaces the key's title and description, each field on its own, and a missing or
+-- non string field keeps the mockup's DoT text. It is read from the profile every time the tooltip is built
+-- (ConsoleKeys.Label), so it follows the profile as it resolves, like the shown set.
+--
 -- No profile (a class with no HUD) hides all five profile keys. Hiding is VISUAL ONLY: the key is
 -- Hidden, the piece's on/off setting is never touched (Gunsight.SetPiece is not called) and the
 -- hidden key still follows OnPieceChanged. The shown keys take consecutive slots (the Console's
@@ -85,7 +93,7 @@ local Theme = FS.Theme
 
 local function Degrade(key, msg)
     if FS.LogDegradeOnce then
-        FS.LogDegradeOnce("consolekeys_" .. key, "|cffff4488ForeverSynthwave|r: console keys " .. key .. ": " .. tostring(msg))
+        FS.LogDegradeOnce("consolekeys_" .. key, "|cffff4488Forever STUwave|r: console keys " .. key .. ": " .. tostring(msg))
     end
 end
 
@@ -131,7 +139,7 @@ local DEFS = {
     { key = "buff", n = "Buff Reminder", d = "Missing self buff tile", c = "pink", g = "shield" },
     { key = "tgt", n = "Target Cast", d = "Enemy cast tape, kick and lock state", c = "pink", g = "cross" },
     { key = "dot", n = "DoT Timers", d = "DoT time scale with refresh band", c = "violet", g = "clock" },
-    { key = "prc", n = "Procs", d = "Trance and Backlash posts", c = "amber", g = "bolt" },
+    { key = "prc", n = "Procs", d = "Proc and cooldown posts", c = "amber", g = "bolt" },
     { key = "party", n = "Party Frame", d = "Show or hide the party frame", c = "green", g = "group" },
 }
 ConsoleKeys.DEFS = DEFS
@@ -151,13 +159,22 @@ local function HasDrawnProc(p)
     return false
 end
 
+-- True when the class profile gives the DoT area to some module. The rule lives in HudProfiles.lua (read at
+-- call time); a missing or throwing helper hides the key rather than guessing the rule a second time.
+local function ClassSlot(p)
+    local Profiles = FS.HudProfiles
+    if type(Profiles) ~= "table" or type(Profiles.ClassSlot) ~= "function" then return false end
+    local ok, slot = pcall(Profiles.ClassSlot, p)
+    return ok and slot ~= nil
+end
+
 -- piece key -> function(profile) (profile is a table). A key with no rule always shows.
 local NEEDS = {
     shard = function(p) return type(p.resource) == "table" and p.resource.shards ~= nil and p.resource.shards ~= false end,
     prc = HasDrawnProc,
     next = function(p) return Filled(p.rotation) end,
     buff = function(p) return Filled(p.selfBuffs) end,
-    dot = function(p) return Filled(p.dots) end,
+    dot = ClassSlot,
 }
 
 -- True when the key for `piece` has something to show for `profile` (nil: no profile).
@@ -174,6 +191,21 @@ local function Profile()
     local ok, p = pcall(Hud.GetProfile)
     if ok and type(p) == "table" then return p end
     return nil
+end
+
+local function Text(v) return type(v) == "string" and v ~= "" and v or nil end
+
+-- Title and description of the key for `piece` under `profile`. Only the dot key reads the profile: its
+-- `dotLabel` fields replace the DEFS text one by one. Plain strings only (a profile is addon data).
+function ConsoleKeys.Label(piece, profile)
+    for _, def in ipairs(DEFS) do
+        if def.key == piece then
+            local label = piece == "dot" and type(profile) == "table" and type(profile.dotLabel) == "table"
+                and profile.dotLabel or nil
+            if not label then return def.n, def.d end
+            return Text(label.n) or def.n, Text(label.d) or def.d
+        end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -381,8 +413,9 @@ local function ShowTip(k)
             GameTooltip:SetPoint("BOTTOM", k.btn, "TOP", 0, TIP_GAP * s)
         end
         local sc = on and COLORS.cyan or MUTED
-        GameTooltip:AddDoubleLine(k.def.n, on and "ON" or "OFF", 1, 1, 1, sc[1], sc[2], sc[3])
-        GameTooltip:AddLine(k.def.d, MUTED[1], MUTED[2], MUTED[3], true)
+        local name, desc = ConsoleKeys.Label(k.key, Profile())
+        GameTooltip:AddDoubleLine(name, on and "ON" or "OFF", 1, 1, 1, sc[1], sc[2], sc[3])
+        GameTooltip:AddLine(desc, MUTED[1], MUTED[2], MUTED[3], true)
         GameTooltip:Show()
     end)
     if not ok then Degrade("tooltip", err) end

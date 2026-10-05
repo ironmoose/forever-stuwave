@@ -395,7 +395,7 @@ end
 local function SetHideStrategy(which)
     if which ~= "stash" and which ~= "dim" then return false end
     if InCombatLockdown() then
-        print("|cff22e0ffForeverSynthwave|r: not while in combat -- hiding secure "
+        print("|cff22e0ffForever STUwave|r: not while in combat -- hiding secure "
             .. "frames is protected during lockdown.")
         return true
     end
@@ -406,7 +406,7 @@ local function SetHideStrategy(which)
     ForeverSynthwaveDB.barHideStrategy = which
     ForEachBlizzardBar(HideBlizzardBar)
 
-    print(("|cff22e0ffForeverSynthwave|r: Blizzard bars hidden by |cffff2e97%s|r. "
+    print(("|cff22e0ffForever STUwave|r: Blizzard bars hidden by |cffff2e97%s|r. "
         .. "Clear the error log (/fserr clear), play a few pulls, then compare.")
         :format(which))
     return true
@@ -416,7 +416,7 @@ SLASH_FSTAINT1 = "/fstaint"
 SlashCmdList["FSTAINT"] = function(msg)
     msg = (msg or ""):lower():gsub("%s", "")
     if not SetHideStrategy(msg) then
-        print("|cff22e0ffForeverSynthwave|r: /fstaint dim | stash   (currently "
+        print("|cff22e0ffForever STUwave|r: /fstaint dim | stash   (currently "
             .. "|cffff2e97" .. hideStrategy .. "|r)")
         print("  |cffaaaaaadim|r    default. Leave them in place, SetAlpha(0) + mouse off "
             .. "on the bar, its containers and every stock button. Runs no Blizzard script.")
@@ -574,10 +574,8 @@ end
 --
 -- Mirrors ActionBarActionButtonMixin:UpdateHotkeys: look up the binding by its
 -- canonical name, fall back to a direct CLICK binding on the button itself
--- (which is how a player binds a key straight to a custom button), and let
--- GetBindingText abbreviate it. The second argument to GetBindingText is the
--- abbreviate flag -- that is Blizzard's own shortening, which handles gamepad
--- and mouse tokens properly, so there is no reason to hand-roll a gsub chain.
+-- (which is how a player binds a key straight to a custom button). The shared
+-- formatter shortens mouse labels and keeps Blizzard's keyboard/gamepad text.
 --
 -- None of these return secret values; bindings are player config, not combat
 -- state.
@@ -593,7 +591,7 @@ local function UpdateHotkey(button)
         key = GetBindingKey("CLICK " .. button:GetName() .. ":LeftButton")
     end
 
-    local text = key and GetBindingText(key, 1) or ""
+    local text = FS.FrameHelpers.FormatBindingText(key)
     if text == "" then
         hotkey:SetText("")
         hotkey:Hide()
@@ -765,7 +763,7 @@ local function ShowActionTooltip(self)
         if not warnedNoTooltipApi then
             warnedNoTooltipApi = true
             FS.LogDegradeOnce("actionbar_notooltipapi",
-                "|cffff4488ForeverSynthwave|r: GameTooltip:SetAction unavailable, " ..
+                "|cffff4488Forever STUwave|r: GameTooltip:SetAction unavailable, " ..
                 "action bar tooltips disabled")
         end
         return
@@ -1563,7 +1561,7 @@ end
 
 local function SetMode(mode)
     if InCombatLockdown() then
-        print("|cff22e0ffForeverSynthwave|r: cannot switch action bars in combat.")
+        print("|cff22e0ffForever STUwave|r: cannot switch action bars in combat.")
         return
     end
 
@@ -1573,14 +1571,14 @@ local function SetMode(mode)
         ForEachBlizzardBar(RestoreBlizzardBar)
         usingFS = false
         if ActionBars.geometry then ActionBars.geometry.shown = false; NotifyGeometry() end
-        print("|cff22e0ffForeverSynthwave|r: Blizzard action bars restored. /fsbars fs to switch back.")
+        print("|cff22e0ffForever STUwave|r: Blizzard action bars restored. /fsbars fs to switch back.")
     else
         ForEachBlizzardBar(HideBlizzardBar)
         if stack then stack:Show() end
         if gridFrame then gridFrame:Show() end
         usingFS = true
         if ActionBars.geometry then ActionBars.geometry.shown = true; NotifyGeometry() end
-        print("|cff22e0ffForeverSynthwave|r: synthwave action bars active.")
+        print("|cff22e0ffForever STUwave|r: synthwave action bars active.")
     end
 end
 
@@ -1592,7 +1590,7 @@ SlashCmdList["FSBARS"] = function(msg)
     elseif msg == "fs" or msg == "on" then
         SetMode("fs")
     else
-        print("|cff22e0ffForeverSynthwave|r: /fsbars blizz | /fsbars fs  (currently "
+        print("|cff22e0ffForever STUwave|r: /fsbars blizz | /fsbars fs  (currently "
             .. (usingFS and "synthwave" or "Blizzard") .. ")")
     end
 end
@@ -1616,13 +1614,13 @@ end
 local Mouseover = {
     CVAR = "enableMouseoverCast",
     CLICK = "MOUSEOVERCAST",
-    HINT = "Forever Synthwave: mouseover casting is off. /fsmouseover on to cast on the "
+    HINT = "Forever STUwave: mouseover casting is off. /fsmouseover on to cast on the "
         .. "unit under your mouse without changing target.",
     pending = nil,   -- modifier key waiting for the end of combat
 }
 
 local function MouseoverSay(text)
-    print("|cff22e0ffForeverSynthwave|r: " .. text)
+    print("|cff22e0ffForever STUwave|r: " .. text)
 end
 
 function Mouseover.IsOn()
@@ -1737,7 +1735,7 @@ local function Apply()
     -- leaves the player with working stock bars rather than none.
     local ok, err = pcall(BuildStack)
     if not ok or not stack then
-        print("|cff22e0ffForeverSynthwave|r: action bars failed to build ("
+        print("|cff22e0ffForever STUwave|r: action bars failed to build ("
             .. tostring(err) .. "); Blizzard bars left in place.")
         return
     end

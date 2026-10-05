@@ -42,7 +42,7 @@ end
 function PanelSkins.RequireExport(export, label)
     if export then return true end
 
-    local msg = ("|cffff4488ForeverSynthwave|r: %s"):format(label)
+    local msg = ("|cffff4488Forever STUwave|r: %s"):format(label)
     FS.LogDegradeOnce("require:" .. label, msg)
     return false
 end
@@ -241,7 +241,7 @@ local function ResolveGutsPath(path, silent)
     if not region and not silent and not loggedGutsPaths[path] then
         loggedGutsPaths[path] = true
         FS.LogDegradeOnce("guts-path:" .. path,
-            ("|cffff4488ForeverSynthwave|r: panel-guts path not found: %s"):format(path))
+            ("|cffff4488Forever STUwave|r: panel-guts path not found: %s"):format(path))
     end
     return region
 end
@@ -434,7 +434,7 @@ function PanelSkins.HookInlineColorRewrite(target, color)
             if FS.LogDegradeOnce then
                 loggedInlineRewriteError = true
                 FS.LogDegradeOnce("inline_rewrite",
-                    ("|cffff4488ForeverSynthwave|r: inline colour rewrite SetText failed: %s"):format(tostring(err)))
+                    ("|cffff4488Forever STUwave|r: inline colour rewrite SetText failed: %s"):format(tostring(err)))
             end
         end
     end
@@ -559,7 +559,7 @@ function PanelSkins.ApplyGuts(spec)
                 -- FS.LogDegradeOnce's own key string; the dedup above is the
                 -- loggedGutsEntryErrors[entry] table-identity lookup, not this string.
                 FS.LogDegradeOnce("guts-entry:" .. entry.parent,
-                    ("|cffff4488ForeverSynthwave|r: panel-guts entry '%s' failed: %s"):format(entry.parent, tostring(err)))
+                    ("|cffff4488Forever STUwave|r: panel-guts entry '%s' failed: %s"):format(entry.parent, tostring(err)))
             end
             parent.fsGutsApplied = true
         end
@@ -604,7 +604,7 @@ local reconFrameAliases = {
 -- Usage line shared by the plain "/fsrecon" call and any unrecognised
 -- subcommand, so there is exactly one place naming all three.
 local function PrintReconUsage()
-    print("|cff22e0ffForeverSynthwave|r: /fsrecon skins | pos <frame> | threat [auto [N]|clear] | " ..
+    print("|cff22e0ffForever STUwave|r: /fsrecon skins | pos <frame> | threat [auto [N]|clear] | " ..
         "pet [auto [N]|clear] | probe [stop] | surname | minimap [paint|spill|clear] | microbags | plateauras [arm|off] | class | all -- panel-skin idempotency readback | " ..
         "frame position report | threat/role/reaction secret-value probe | pet Phase-0 probe | " ..
         "name-API surname probe | Minimap/MinimapCluster geometry probe | " ..
@@ -739,7 +739,7 @@ SlashCmdList["FSRECON"] = function(msg)
         -- trailing %s*$ anchor eats leading/trailing whitespace in one match.
         local id = msg:match("^pos%s*(.-)%s*$") or ""
         if id == "" then
-            print("|cff22e0ffForeverSynthwave|r: /fsrecon pos <FrameName> -- reports a frame's position")
+            print("|cff22e0ffForever STUwave|r: /fsrecon pos <FrameName> -- reports a frame's position")
             return
         end
 
@@ -747,7 +747,7 @@ SlashCmdList["FSRECON"] = function(msg)
         -- the small alias table keyed by lowercase.
         local frame = _G[id] or _G[reconFrameAliases[id:lower()]]
         if type(frame) ~= "table" or type(frame.GetRect) ~= "function" then
-            print(("|cffff4488ForeverSynthwave|r: /fsrecon pos -- frame '%s' not found or has no GetRect"):format(id))
+            print(("|cffff4488Forever STUwave|r: /fsrecon pos -- frame '%s' not found or has no GetRect"):format(id))
             return
         end
 
@@ -756,7 +756,7 @@ SlashCmdList["FSRECON"] = function(msg)
         -- guard before any arithmetic/formatting touches l/b/w/h.
         local l, b, w, h = frame:GetRect()
         if not l then
-            print(("|cffff4488ForeverSynthwave|r: /fsrecon pos -- frame '%s' has no resolved position " ..
+            print(("|cffff4488Forever STUwave|r: /fsrecon pos -- frame '%s' has no resolved position " ..
                 "(GetRect returned nil)"):format(id))
             return
         end
@@ -800,7 +800,7 @@ SlashCmdList["FSRECON"] = function(msg)
     local presentUnskinned = {}
     local skippedCount = 0
 
-    print("|cff22e0ffForeverSynthwave|r: /fsrecon skins")
+    print("|cff22e0ffForever STUwave|r: /fsrecon skins")
     for _, group in ipairs(reconGroups) do
         local resolved = 0
         for _, entry in ipairs(group.entries) do

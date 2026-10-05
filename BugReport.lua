@@ -34,7 +34,7 @@ local BR = FS.BugReport or {}
 FS.BugReport = BR
 
 local SECRET = "secret"
-local PREFIX = "|cff22e0ffForever Synthwave|r"
+local PREFIX = "|cff22e0ffForever STUwave|r"
 
 local LIMITS = {
     reports = 20,    -- stored reports kept
@@ -58,6 +58,8 @@ BR.EXCLUDE = {
     fsprobe = true, fontProbe = true, labelsAtApply = true,
     -- Reported in their own `chatSeat` section (ChatSeat below), not through the generic copy.
     chatSeatLog = true, chatSeatLogPrev = true,
+    -- Likewise reported in their own `minimapSeat` section (MinimapSeat below).
+    minimapSeatLog = true, minimapSeatLogPrev = true, minimapSeatLogFirst = true,
 }
 
 -- Frames reported by global name: ours, then the Blizzard ones we sit over.
@@ -521,16 +523,37 @@ local function Settings()
     return Sanitize(copy, st, 0, {}) or {}
 end
 
--- ChatWindowState.lua's seat log (this session and the last one): what seated or moved ChatFrame1, in
--- order, so a chat that sat wrong after a first login can be traced to the call that moved it. Its own
+-- A seat log (this session and the last one, plus an optional third slot): what seated or moved a frame, in
+-- order, so a frame that sat wrong after a first login can be traced to the call that moved it. Its own
 -- section with its own small budget, so it neither crowds out the settings nor depends on them.
-local function ChatSeat()
+local function SeatLogs(keys, limits)
     local db = _G.ForeverSynthwaveDB
     if type(db) ~= "table" then return "unavailable" end
-    local okLog, log = pcall(rawget, db, "chatSeatLog")
-    local okPrev, prev = pcall(rawget, db, "chatSeatLogPrev")
-    local st = NewState({ maxItems = 25, maxNodes = 500, maxBytes = 6000, maxDepth = 4, maxString = 40 })
-    return Sanitize({ log = okLog and log or nil, prev = okPrev and prev or nil }, st, 0, {}) or {}
+    local out = {}
+    for field, key in pairs(keys) do
+        local ok, v = pcall(rawget, db, key)
+        if ok then out[field] = v end
+    end
+    local st = NewState(limits)
+    return Sanitize(out, st, 0, {}) or {}
+end
+
+-- ChatWindowState.lua's seat log (ChatFrame1).
+local function ChatSeat()
+    return SeatLogs({ log = "chatSeatLog", prev = "chatSeatLogPrev" },
+        { maxItems = 25, maxNodes = 500, maxBytes = 6000, maxDepth = 4, maxString = 40 })
+end
+
+-- Minimap.lua's seat log (MinimapCluster and the map inside it): this session (`log`), the last one (`prev`)
+-- and the first session ever logged (`first`, never overwritten, so two reloads cannot erase a first login).
+-- The byte budget counts string VALUES and string KEYS (numbers are free). A full entry is a table, an event
+-- name of up to 33 characters, a point name of up to 11 and 13 keys of 25 bytes in all, so the worst case is
+-- 3 logs x 20 entries x 69 bytes = 4140 bytes and 3 x 20 x 3 = 180 nodes; a typical entry (12 + 3 + 25) is
+-- about 40, so a typical set of three logs is about 2.4 KB and two (log and prev) about 1.6 KB. The caps
+-- sit just above the worst case, so a full set of logs is never cut.
+local function MinimapSeat()
+    return SeatLogs({ log = "minimapSeatLog", prev = "minimapSeatLogPrev", first = "minimapSeatLogFirst" },
+        { maxItems = 25, maxNodes = 260, maxBytes = 4600, maxDepth = 4, maxString = 40 })
 end
 
 local function Field(e, key)
@@ -690,6 +713,7 @@ function BR.Build(note)
     report.frames = Guard(Frames)
     report.settings = Guard(Settings)
     report.chatSeat = Guard(ChatSeat)
+    report.minimapSeat = Guard(MinimapSeat)
     report.classRecon = Guard(ClassRecon)
 
     local errors, errorCount, otherCount = Guard(Errors)

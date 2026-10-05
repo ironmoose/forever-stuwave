@@ -181,7 +181,9 @@ def _safe_parts(name: str) -> tuple[str, ...]:
 def _is_runtime(name: str) -> bool:
     parts = _safe_parts(name)
     if len(parts) == 1:
-        return name == TOC_NAME or (not name.startswith(".") and name.endswith(".lua"))
+        return name in (TOC_NAME, "Bindings.xml") or (
+            not name.startswith(".") and name.endswith(".lua")
+        )
     if len(parts) != 2 or parts[1].startswith("."):
         return False
     if parts[0] == "media":

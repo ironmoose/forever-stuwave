@@ -265,54 +265,418 @@ RefreshMetrics()
 -- offset is MEASURED: seat the cluster, then read how far the map's own edges
 -- sit inside the cluster's and shift the cluster by that much so the MAP lands
 -- where the layout meant. Self-correcting, and it needs no name to be right.
-local function CompensateClusterInset()
-    local cluster = MinimapCluster
-    if not (cluster and Minimap and cluster ~= Minimap) then return end
-    if not (cluster.GetTop and Minimap.GetTop) then return end
-    if cluster.SetClampedToScreen then
-        cluster:SetClampedToScreen(false)
+-- WHY the cluster is anchored by the edge the map hangs from, not by its middle.
+-- MinimapContainer hangs from ONE cluster edge, centred: its TOP at (10, -30), or its
+-- BOTTOM at (10, 30) with Edit Mode's Header Underneath setting (Blizzard_Minimap/
+-- Mainline/Minimap.lua, SetHeaderUnderneath), and the Minimap sits CENTER in it. So the
+-- map's offset from THAT edge and from the cluster's centre column does not depend on
+-- the cluster's size. MinimapCluster is a ResizeLayoutFrame (Minimap.xml:3): every
+-- Layout pass (the synchronous one in EditModeMinimapSystemMixin:
+-- UpdateSystemSettingHeaderUnderneath, or the deferred OnUpdate one a MarkDirty arms)
+-- resets its size to its children's extents and overrides the SetSize FS.Layout.Apply
+-- wrote. The old compensation anchored the cluster's CENTER at the layout point, which
+-- is right only while the cluster stays exactly the height Apply set; a Layout pass
+-- after it moved the map by (H' - H) / 2 (about 30 units too high). That is what the
+-- mock in minimap-harness.py reproduces, and ONLY when a Layout pass lands after our
+-- re-seat. Whether Blizzard's real first-login sequence does that (Parker's new Mage,
+-- 2026-10-05: chat right, minimap not) is UNVERIFIED; the seat log (minimapSeatLog,
+-- mt vs tt and ml vs tl) is the instrument that settles it.
+--
+-- The inset itself is MEASURED and re-measured, because it is not constant: Edit
+-- Mode's Size setting (SetEditModeScale on the container) and header setting change
+-- it, and both are applied by EditModeManagerFrame:UpdateLayoutInfo, which the server
+-- triggers AFTER login on a character's first login (on a /reload the layout is
+-- already applied before addons load). Hooks below re-run the compensation after each
+-- of them, and re-seat when Edit Mode puts the cluster back at its own anchor. Every
+-- hooked name is verified against the retail 12.1.0 source only; each hook is
+-- feature-detected, a missing one is skipped, and the seat log's "hooks" entry says
+-- which ones installed.
+local CompensateClusterInset, ScheduleCompensate, InstallSeatWatch
+
+do
+    local FRAC = {
+        TOPLEFT = { 0, 1 }, TOP = { 0.5, 1 }, TOPRIGHT = { 1, 1 },
+        LEFT = { 0, 0.5 }, CENTER = { 0.5, 0.5 }, RIGHT = { 1, 0.5 },
+        BOTTOMLEFT = { 0, 0 }, BOTTOM = { 0.5, 0 }, BOTTOMRIGHT = { 1, 0 },
+    }
+
+    local compensatePending = false   -- a compensation timer is armed
+    local compensateHeld = false      -- a compensation was refused in combat (protected cluster)
+    local reseatPending = false       -- a re-seat is armed, or refused in combat
+    local installed = false
+
+    -- A plain number or nil: a secret is never read, a non-number never used.
+    local function Num(v)
+        if type(v) ~= "number" then return nil end
+        if FS.IsSecret and FS.IsSecret(v) then return nil end
+        return v
     end
 
-    local clusterTop, mapTop = cluster:GetTop(), Minimap:GetTop()
-    local clusterLeft, mapLeft = cluster:GetLeft(), Minimap:GetLeft()
-    if not (clusterTop and mapTop and clusterLeft and mapLeft) then return end
-
-    local dy = clusterTop - mapTop    -- header strip above the map
-    local dx = mapLeft - clusterLeft  -- any gutter to its left
-
-    -- Sub-pixel deltas are just float noise; re-anchoring on those would fight
-    -- the layout watcher every time it re-seats.
-    if math.abs(dy) < 0.5 and math.abs(dx) < 0.5 then return end
-
-    local L = FS.Layout and FS.Layout.minimap
-    local scale = (FS.Layout and FS.Layout.Scale and FS.Layout.Scale()) or 1
-    if not L then return end
-
-    -- MinimapCluster is an Edit Mode system frame: its ClearAllPoints/SetPoint
-    -- are overrides that write an Edit Mode flag under our taint (see
-    -- FS.Layout.Apply). Use the stored originals when present.
-    local clear = cluster.ClearAllPointsBase or cluster.ClearAllPoints
-    local set = cluster.SetPointBase or cluster.SetPoint
-    clear(cluster)
-    set(cluster, L.point, UIParent, L.relPoint,
-        L.x * scale - dx, L.y * scale + dy)
-end
-
--- A frame's rect is not final in the same frame it was anchored, so the inset
--- can only be read on the next one.
-local function ScheduleCompensate()
-    if C_Timer and C_Timer.After then
-        C_Timer.After(0, CompensateClusterInset)
-    else
-        CompensateClusterInset()
+    local function Round(v, step)
+        if not v then return nil end
+        return math.floor(v / step + 0.5) * step
     end
-end
 
--- FS.Layout's watcher re-Applies every seated frame on PLAYER_LOGIN, UI scale
--- and resolution changes, which overwrites the corrected anchor with the raw
--- one. Callbacks run after that pass, so this puts the correction back.
-if FS.Layout and FS.Layout.OnRescale then
-    FS.Layout.OnRescale(ScheduleCompensate)
+    -- GetTop/GetLeft/GetCenter answer in the frame's OWN scale space (the Minimap
+    -- sits in a container scaled by Edit Mode's Size setting, the cluster does not),
+    -- so every reading is converted to UIParent units before two of them are compared.
+    local function EffScale(frame)
+        if not (frame and frame.GetEffectiveScale) then return 1 end
+        local ok, s = pcall(frame.GetEffectiveScale, frame)
+        s = ok and Num(s)
+        if s and s > 0 then return s end
+        return 1
+    end
+
+    local function ToUI(v, frame)
+        v = Num(v)
+        if not v then return nil end
+        return v * EffScale(frame) / EffScale(UIParent)
+    end
+
+    -- Where the visible MAP should sit for FS.Layout.minimap: its top and left as
+    -- offsets from the layout's relPoint on UIParent (UIParent units), plus the layout
+    -- entry and scale.
+    local function WantedMapEdges()
+        local L = FS.Layout and FS.Layout.minimap
+        if not (L and L.w and L.h and L.x and L.y) then return end
+        local scale = (FS.Layout.Scale and FS.Layout.Scale()) or 1
+        local f = FRAC[L.point] or FRAC.CENTER
+        return L, scale,
+            L.y * scale + (1 - f[2]) * L.h * scale,   -- map top, above the relPoint
+            L.x * scale - f[1] * L.w * scale          -- map left, right of the relPoint
+    end
+
+    -- Same rule as Layout.lua's IsHeldInCombat: a protected frame refuses SetPoint
+    -- in combat. MinimapCluster normally is not protected, so this is a guard only.
+    local function HeldInCombat(frame)
+        if not (InCombatLockdown and InCombatLockdown()) then return false end
+        if not frame.IsProtected then return false end
+        local ok, protected = pcall(frame.IsProtected, frame)
+        return not ok or protected and true or false
+    end
+
+    -- The cluster edge the map hangs from: "BOTTOM" when MinimapContainer is anchored
+    -- by its BOTTOM to the cluster (Header Underneath), else "TOP".
+    local function HangEdge(cluster)
+        local container = cluster.MinimapContainer
+        if container and container.GetPoint then
+            local ok, point, rel = pcall(container.GetPoint, container, 1)
+            if ok and rel == cluster and point == "BOTTOM" then return "BOTTOM" end
+        end
+        return "TOP"
+    end
+
+    ---------------------------------------------------------------------------
+    -- Seat log (ForeverSynthwaveDB.minimapSeatLog, shown by /fsbug as minimapSeat)
+    ---------------------------------------------------------------------------
+    -- Whether the minimap lands where the layout asks depends on the order of
+    -- Blizzard's Edit Mode steps on a character's first login, which the UI source
+    -- does not settle. 20 entries, the first 10 pinned (the login sequence), the
+    -- previous session kept as minimapSeatLogPrev, and the FIRST session ever logged
+    -- (no log existed: a new install of this build) kept as minimapSeatLogFirst so two
+    -- reloads cannot erase a first login. Plain numbers and strings only, all under
+    -- pcall: logging can never break a seat.
+    local SEAT_LOG_MAX = 20
+    local SEAT_LOG_PIN = 10
+    local rotated = false
+
+    -- Starts this session's log. Done on the FIRST entry, not at install, so the
+    -- rescale pass of PLAYER_LOGIN (which runs before the seat is installed) lands in
+    -- this session's log and not in the previous one's.
+    local function SessionLog(db)
+        if not rotated then
+            rotated = true
+            if db.minimapSeatLogFirst == nil and db.minimapSeatLog == nil then
+                local fresh = {}
+                db.minimapSeatLogFirst = fresh   -- the live table: it stays as it ends this session
+                db.minimapSeatLog = fresh
+            else
+                db.minimapSeatLogPrev = db.minimapSeatLog
+                db.minimapSeatLog = {}
+            end
+        end
+        local log = db.minimapSeatLog
+        if type(log) ~= "table" then
+            log = {}
+            db.minimapSeatLog = log
+        end
+        return log
+    end
+
+    local function LogSeat(ev, hooks)
+        pcall(function()
+            local db = ForeverSynthwaveDB
+            if type(db) ~= "table" then return end
+            local log = SessionLog(db)
+
+            local entry = { ev = ev, hk = hooks }
+            if type(GetTime) == "function" then entry.t = Round(Num(GetTime()), 0.01) end
+
+            local cluster = MinimapCluster
+            if cluster and cluster.GetPoint then
+                local ok, point, _, _, x, y = pcall(cluster.GetPoint, cluster, 1)
+                if ok then
+                    if type(point) == "string" and not (FS.IsSecret and FS.IsSecret(point)) then
+                        entry.pt = point
+                    end
+                    entry.x, entry.y = Round(Num(x), 0.1), Round(Num(y), 0.1)
+                end
+            end
+            if cluster and cluster.IsClampedToScreen then
+                local ok, clamped = pcall(cluster.IsClampedToScreen, cluster)
+                if ok and type(clamped) == "boolean" then entry.clamp = clamped end
+            end
+            if Minimap and Minimap.GetTop and Minimap.GetLeft then
+                local okT, top = pcall(Minimap.GetTop, Minimap)
+                local okL, left = pcall(Minimap.GetLeft, Minimap)
+                if okT then entry.mt = Round(ToUI(top, Minimap), 0.1) end
+                if okL then entry.ml = Round(ToUI(left, Minimap), 0.1) end
+            end
+            local L, scale, topOff, leftOff = WantedMapEdges()
+            if L then
+                entry.sc = Round(scale, 0.001)
+                local rf = FRAC[L.relPoint] or FRAC.CENTER
+                local okH, h = pcall(UIParent.GetHeight, UIParent)
+                local okW, w = pcall(UIParent.GetWidth, UIParent)
+                h, w = okH and Num(h), okW and Num(w)
+                if h then entry.tt = Round(rf[2] * h + topOff, 0.1) end
+                if w then entry.tl = Round(rf[1] * w + leftOff, 0.1) end
+                if h then entry.ui = Round(h, 0.1) end
+            end
+
+            -- The same state repeated counts up instead of taking a slot.
+            local last = log[#log]
+            if last and last.ev == ev and last.hk == entry.hk and last.pt == entry.pt
+                and last.x == entry.x and last.y == entry.y and last.mt == entry.mt
+                and last.ml == entry.ml and last.tt == entry.tt and last.tl == entry.tl
+                and last.clamp == entry.clamp then
+                last.n = (last.n or 1) + 1
+                return
+            end
+            log[#log + 1] = entry
+            while #log > SEAT_LOG_MAX do table.remove(log, SEAT_LOG_PIN + 1) end
+        end)
+    end
+
+    ---------------------------------------------------------------------------
+    -- Compensation
+    ---------------------------------------------------------------------------
+    -- The last measured inset (see CompensateClusterInset): where the map hangs from
+    -- and its offsets, in UIParent units. Session-only; nil until the first measurement.
+    local inset
+
+    -- The anchor that puts the map's top and left on the layout seat, from the last
+    -- measured inset: edge, relPoint, x, y (cluster-space offsets), or nil with none.
+    -- The offsets are the wanted map edges, which follow the CURRENT scale, plus the
+    -- inset; SetPoint offsets are in the cluster's own scale space.
+    local function CompensatedAnchor()
+        local cluster = MinimapCluster
+        if not (inset and cluster) then return end
+        local L, _, topOff, leftOff = WantedMapEdges()
+        if not L then return end
+        local k = EffScale(cluster) / EffScale(UIParent)
+        local x = leftOff - inset.dl
+        local y = (inset.edge == "TOP" and topOff or (topOff - inset.mh)) + inset.d
+        return inset.edge, L.relPoint or "CENTER", x / k, y / k
+    end
+
+    function CompensateClusterInset()
+        compensatePending = false
+        local cluster = MinimapCluster
+        if not (cluster and Minimap and cluster ~= Minimap) then return end
+        if not (cluster.GetTop and cluster.GetBottom and cluster.GetCenter
+            and Minimap.GetTop and Minimap.GetBottom and Minimap.GetLeft) then return end
+        if HeldInCombat(cluster) then
+            compensateHeld = true   -- PLAYER_REGEN_ENABLED finishes it
+            return
+        end
+        if cluster.SetClampedToScreen then
+            cluster:SetClampedToScreen(false)
+        end
+
+        local edge = HangEdge(cluster)
+        local clusterEdge = ToUI(edge == "TOP" and cluster:GetTop() or cluster:GetBottom(), cluster)
+        local mapTop, mapBottom = ToUI(Minimap:GetTop(), Minimap), ToUI(Minimap:GetBottom(), Minimap)
+        local clusterMid = ToUI((cluster:GetCenter()), cluster)
+        local mapLeft = ToUI(Minimap:GetLeft(), Minimap)
+        if not (clusterEdge and mapTop and mapBottom and clusterMid and mapLeft) then return end
+
+        -- All in UIParent units: the map's offset from the edge it hangs from, from
+        -- the cluster's centre column, and its own height (it scales with Edit Mode's
+        -- Size). Kept as the last known inset so FS.Layout.Apply can write the
+        -- compensated anchor itself (the SeatAdjust registration below).
+        inset = { edge = edge, d = clusterEdge - (edge == "TOP" and mapTop or mapBottom),
+                  dl = mapLeft - clusterMid, mh = mapTop - mapBottom }
+        local _, relPoint, x, y = CompensatedAnchor()
+        if not relPoint then return end
+
+        -- Already there (the inset did not change): no write, so a repeat pass
+        -- is a no-op and nothing fights the layout watcher.
+        if cluster.GetPoint then
+            local ok, point, rel, rp, cx, cy = pcall(cluster.GetPoint, cluster, 1)
+            if ok and point == edge and rel == UIParent and rp == relPoint
+                and Num(cx) and Num(cy) and math.abs(cx - x) < 0.01 and math.abs(cy - y) < 0.01 then
+                return
+            end
+        end
+
+        -- MinimapCluster is an Edit Mode system frame: its ClearAllPoints/SetPoint
+        -- are overrides that write an Edit Mode flag under our taint (see
+        -- FS.Layout.Apply). Use the stored originals when present.
+        local clear = cluster.ClearAllPointsBase or cluster.ClearAllPoints
+        local set = cluster.SetPointBase or cluster.SetPoint
+        clear(cluster)
+        set(cluster, edge, UIParent, relPoint, x, y)
+        LogSeat("compensate")
+    end
+
+    -- A frame's rect is not final in the same frame it was anchored, so the inset
+    -- can only be read on the next one. One timer however many callers ask.
+    function ScheduleCompensate()
+        if compensatePending then return end
+        if C_Timer and C_Timer.After then
+            compensatePending = true
+            C_Timer.After(0, CompensateClusterInset)
+        else
+            CompensateClusterInset()
+        end
+    end
+
+    -- Puts the cluster back at the layout seat (raw). The compensation goes on top of
+    -- it one frame later, like after a rescale: reading the rects in the frame they
+    -- were anchored would measure a map that has not moved yet.
+    local function Reseat(why)
+        reseatPending = false
+        local cluster = MinimapCluster
+        if not (cluster and Minimap and cluster ~= Minimap) then return end
+        if not (FS.Layout and FS.Layout.Apply) then return end
+        if HeldInCombat(cluster) then
+            reseatPending = true   -- PLAYER_REGEN_ENABLED finishes it
+            return
+        end
+        local ok, err = pcall(function()
+            FS.Layout.Apply(cluster, "minimap")
+            local mm = FS.Layout.minimap
+            if mm and mm.scaledW and mm.scaledH and Minimap.SetSize then
+                Minimap:SetSize(mm.scaledW, mm.scaledH)
+            end
+            LogSeat(why)
+        end)
+        if not ok and FS.Layout.ForwardError then FS.Layout.ForwardError(err) end
+        ScheduleCompensate()
+    end
+
+    -- One re-seat a frame from now, however many Blizzard calls ask for it.
+    local function DeferReseat(why)
+        LogSeat(why)
+        if reseatPending then return end
+        if not (C_Timer and type(C_Timer.After) == "function") then return end
+        reseatPending = true
+        C_Timer.After(0, function()
+            if reseatPending then Reseat("reseat") end
+        end)
+    end
+
+    -- FS.Layout.Apply (the PLAYER_LOGIN and rescale watcher, and the Edit Mode re-seat
+    -- hook in Layout.lua) writes the cluster's anchor itself; with a measured inset it
+    -- writes the compensated one, so the map is never shown at the raw seat for a frame
+    -- until our compensation (a frame later) fixes it. The very first seat has no
+    -- inset yet and is the raw seat, which the compensation then corrects.
+    if FS.Layout then
+        FS.Layout.SeatAdjust = FS.Layout.SeatAdjust or {}
+        FS.Layout.SeatAdjust.minimap = CompensatedAnchor
+    end
+
+    -- FS.Layout's watcher re-Applies every seated frame on PLAYER_LOGIN, UI scale
+    -- and resolution changes, which overwrites the corrected anchor with the raw
+    -- one. Callbacks run after that pass (also after the Edit Mode re-seat), so
+    -- this puts the correction back.
+    if FS.Layout and FS.Layout.OnRescale then
+        FS.Layout.OnRescale(function()
+            LogSeat("rescale:" .. tostring(FS.Layout.rescaleWhy or "?"))
+            ScheduleCompensate()
+        end)
+    end
+
+    ---------------------------------------------------------------------------
+    -- Watching Blizzard move the cluster after us
+    ---------------------------------------------------------------------------
+    -- Layout.lua re-seats every Edit Mode frame from a post-hook on
+    -- EditModeManagerFrame:UpdateLayoutInfo (after every system applied) and runs
+    -- the rescale callbacks above. What it does not cover: a Layout pass the cluster
+    -- takes later, the container scale (SetEditModeScale) and header
+    -- (SetHeaderUnderneath) steps that change the inset, and ApplySystemAnchor
+    -- reached without UpdateLayoutInfo (Reset to default position). None of these
+    -- seats from inside Blizzard's call (that would land before its settings loop
+    -- and put OUR seat into the layout's stored anchor, see ChatWindowState.lua):
+    -- every one defers a frame.
+    local HOOKS = {
+        { key = "S", frame = function() return MinimapCluster end, name = "SetEditModeScale",
+          run = function() LogSeat("SetEditModeScale"); ScheduleCompensate() end },
+        { key = "H", frame = function() return MinimapCluster end, name = "SetHeaderUnderneath",
+          run = function() LogSeat("SetHeaderUnderneath"); ScheduleCompensate() end },
+        { key = "A", frame = function() return MinimapCluster end, name = "ApplySystemAnchor",
+          run = function() DeferReseat("ApplySystemAnchor") end },
+        { key = "U", frame = function() return EditModeManagerFrame end, name = "UpdateLayoutInfo",
+          run = function() DeferReseat("UpdateLayoutInfo") end },
+    }
+    local hooked = {}   -- by key, so a late-defined method is retried on its own
+
+    -- Hooks every method that exists and is not hooked yet; returns the keys of the
+    -- ones installed so far, and whether all of them are.
+    local function InstallHooks()
+        if type(hooksecurefunc) ~= "function" then return "", false end
+        local keys, all = {}, true
+        for _, h in ipairs(HOOKS) do
+            if not hooked[h.key] then
+                local frame = h.frame()
+                if frame and type(frame[h.name]) == "function" then
+                    hooksecurefunc(frame, h.name, function()
+                        local ok, err = pcall(h.run)
+                        if not ok and FS.Layout and FS.Layout.ForwardError then FS.Layout.ForwardError(err) end
+                    end)
+                    hooked[h.key] = true
+                end
+            end
+            if hooked[h.key] then keys[#keys + 1] = h.key else all = false end
+        end
+        return table.concat(keys), all
+    end
+
+    function InstallSeatWatch()
+        if installed then return end
+        installed = true
+        local keys, all = InstallHooks()
+        LogSeat("seat")
+        LogSeat("hooks", keys)   -- which of S H A U (see HOOKS) exist on this client
+
+        local watcher = CreateFrame("Frame")
+        watcher:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED")
+        watcher:RegisterEvent("PLAYER_ENTERING_WORLD")
+        watcher:RegisterEvent("PLAYER_REGEN_ENABLED")
+        if not all then watcher:RegisterEvent("ADDON_LOADED") end
+        watcher:SetScript("OnEvent", function(self, event, arg1, arg2)
+            if event == "PLAYER_REGEN_ENABLED" then
+                if reseatPending then Reseat("regen") end
+                if compensateHeld then
+                    compensateHeld = false
+                    ScheduleCompensate()
+                end
+            elseif event == "ADDON_LOADED" then
+                if arg1 == "Blizzard_EditMode" then
+                    local late = InstallHooks()
+                    LogSeat("hooks", late)
+                    self:UnregisterEvent("ADDON_LOADED")
+                end
+            elseif event == "PLAYER_ENTERING_WORLD" then
+                -- Zone changes fire this too; only a login or reload needs the re-seat.
+                if arg1 or arg2 then DeferReseat(event) end
+            else
+                DeferReseat(event)
+            end
+        end)
+    end
 end
 
 -- ROOT CAUSE of the right-edge cutoff: FS.Layout.Apply(target, "minimap")
@@ -343,7 +707,10 @@ local function ApplyLayout()
             Minimap:SetSize(mm.scaledW, mm.scaledH)
         end
 
-        if target ~= Minimap then ScheduleCompensate() end
+        if target ~= Minimap then
+            ScheduleCompensate()
+            InstallSeatWatch()
+        end
 
         -- Minimap's real (scale-correct) size is now known -- re-derive every
         -- size-dependent metric (bezel/key/font/glow/readout sizes) from it,
@@ -1308,7 +1675,7 @@ local function LogTrayFailure(where, err)
     Tray.failureLogged = true
     if FS.LogDegradeOnce then
         FS.LogDegradeOnce("minimap_tray",
-            "|cffff4488ForeverSynthwave|r: minimap button tray degraded (" .. tostring(where) .. "): " .. tostring(err))
+            "|cffff4488Forever STUwave|r: minimap button tray degraded (" .. tostring(where) .. "): " .. tostring(err))
     end
 end
 

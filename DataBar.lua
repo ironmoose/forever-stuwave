@@ -52,19 +52,20 @@ local PAD_X = 8
 local LABEL_GAP = 6
 local REFRESH_THROTTLE = 1.0 -- seconds; every-frame updates are wasted work for these values
 
--- LINK segment: the ForeverBridge pixel lattice drawn INSIDE this bar. Coupling is by global
--- frame name only, in both directions, and neither addon needs the other: this file builds the
--- slot `ForeverSynthwaveDataBarLink` (and `FS.dataBar.linkSlot`) but shows it only while
--- `_G.ForeverBridgeFrame` exists and is shown; ForeverBridge.lua anchors itself to the slot's
--- recess when it finds it. The lattice is a fixed number of PHYSICAL pixels (the bot reads
--- pixels), so the slot width is converted into bar units at runtime from the bar's effective
--- scale; nothing here assumes a scale of 1.
+-- DEBUG segment: the optional ForeverDebugBridge dev strip (a small state lattice) drawn INSIDE
+-- this bar. Coupling is by global frame name only, in both directions, and neither addon needs
+-- the other: this file builds the slot `ForeverSynthwaveDataBarLink` (and `FS.dataBar.linkSlot`)
+-- but shows it only while `_G.ForeverDebugBridgeFrame` exists and is shown;
+-- ForeverDebugBridge.lua anchors itself to the slot's recess when it finds it. The lattice is a
+-- fixed number of PHYSICAL pixels (it is read off the screen as pixels), so the slot width is
+-- converted into bar units at runtime from the bar's effective scale;
+-- nothing here assumes a scale of 1.
 local UI_REFERENCE_HEIGHT = 768 -- effective scale 1.0 spans 768 units of physical screen height
 local LINK_FOOTPRINT_W = 228    -- fallback when the bridge frame does not publish `footprint`
-local LINK_FOOTPRINT_H = 18     -- ((23 - 1) * 10 + 8 by (2 - 1) * 10 + 8, ForeverBridge Layout.lua)
+local LINK_FOOTPRINT_H = 18     -- ((23 - 1) * 10 + 8 by (2 - 1) * 10 + 8, ForeverDebugBridge Layout.lua)
 local LINK_RECESS_PAD_PX = 4    -- the recess frame is 4 px wider than the cells each side
 local LINK_END_PAD_PX = 4       -- the recess to the slot's right edge, before TIME's own divider
-local LINK_LABEL_FALLBACK_W = 26
+local LINK_LABEL_FALLBACK_W = 32
 
 -------------------------------------------------------------------------------
 -- Feature detection (module scope, checked once)
@@ -544,9 +545,9 @@ local function CreateSegment(bar, index, def)
     }
 end
 
--- The LINK slot: the bar's own divider, an Orbitron "LINK" label like its neighbours, then a
--- bare recess frame (no fill, the bar background shows through) that the bridge lattice is
--- centred in (`frame.recess`, read by ForeverBridge.lua).
+-- The DEBUG slot: the bar's own divider, an Orbitron "DEBUG" label like its neighbours, then a
+-- bare recess frame (no fill, the bar background shows through) that the debug lattice is
+-- centred in (`frame.recess`, read by ForeverDebugBridge.lua).
 -- Built once, hidden; LayoutSegments sizes, seats and shows it only while a bridge is shown.
 local link
 
@@ -562,7 +563,7 @@ local function CreateLink(bar)
     local label = frame:CreateFontString(nil, "OVERLAY")
     label:SetPoint("LEFT", frame, "LEFT", PAD_X, 0)
     ApplyOrbitron(label, 9, COLOR_POWER)
-    label:SetText("LINK")
+    label:SetText("DEBUG")
 
     -- No fill of its own: the lattice sits directly on the data bar's background.
     local recess = CreateFrame("Frame", nil, frame)
@@ -575,7 +576,7 @@ end
 
 local linkShortWarned = false
 
--- Physical pixels per bar unit, or nil when the client cannot say (then there is no LINK slot:
+-- Physical pixels per bar unit, or nil when the client cannot say (then there is no DEBUG slot:
 -- a unit would not be a pixel and the lattice could not be sized).
 local function PixelsPerUnit(bar)
     if type(GetPhysicalScreenSize) ~= "function" then return nil end
@@ -585,11 +586,11 @@ local function PixelsPerUnit(bar)
     return eff * physH / UI_REFERENCE_HEIGHT
 end
 
--- The slot's width and its recess width in bar units, or nil when there is no LINK: no slot
--- built, no bridge frame, the bridge hidden (/fbridge hide), or no pixel scale.
+-- The slot's width and its recess width in bar units, or nil when there is no DEBUG: no slot
+-- built, no bridge frame, the bridge hidden (/fdebug hide), or no pixel scale.
 local function LinkSize(bar)
     if not link then return nil end
-    local bridge = _G.ForeverBridgeFrame
+    local bridge = _G.ForeverDebugBridgeFrame
     if type(bridge) ~= "table" or not bridge.IsShown or not bridge:IsShown() then return nil end
     local ppu = PixelsPerUnit(bar)
     if not ppu then return nil end
@@ -600,8 +601,8 @@ local function LinkSize(bar)
     -- The 0.01 keeps float noise at the exact pixel-perfect scale (20 units = 20.0 px) from warning.
     if BAR_HEIGHT * ppu + 0.01 < cellsH + 2 and not linkShortWarned then
         linkShortWarned = true
-        FS.LogDegradeOnce("databar_link_short", ("|cff22e0ffForeverSynthwave|r data bar: at this UI scale it is " ..
-            "%.1f px tall, shorter than the %d px bridge plus its rails; the LINK cells overhang the bar."):format(
+        FS.LogDegradeOnce("databar_link_short", ("|cff22e0ffForever STUwave|r data bar: at this UI scale it is " ..
+            "%.1f px tall, shorter than the %d px debug strip plus its rails; the DEBUG cells overhang the bar."):format(
             BAR_HEIGHT * ppu, cellsH))
     end
 
@@ -620,21 +621,21 @@ local function TryUpdate(segment)
     if not ok then
         segment.available = false
         segment.frame:Hide()
-        print("|cff22e0ffForeverSynthwave|r databar segment '" .. segment.key ..
+        print("|cff22e0ffForever STUwave|r databar segment '" .. segment.key ..
             "' failed: " .. tostring(err) .. " (hidden)")
     end
 end
 
 -- Re-seats every segment across `bar`. Called once from Init, right after the segments are
 -- built, and again from Rescale and whenever the bridge is shown or hidden, so the build-time
--- and rescale-time formulas can never drift apart. Without a LINK slot every segment gets an
--- equal share, exactly as before; with one, LINK takes its fixed width just before TIME (so
+-- and rescale-time formulas can never drift apart. Without a DEBUG slot every segment gets an
+-- equal share, exactly as before; with one, DEBUG takes its fixed width just before TIME (so
 -- between BAGS and TIME) and the others share the remainder equally.
 local function LayoutSegments(bar, screenWidth)
     if #segments == 0 then return end
     local linkWidth, recessWidth = LinkSize(bar)
     local segWidth = (screenWidth - (linkWidth or 0)) / SEGMENT_COUNT
-    local x = 0   -- running offset, used only while a LINK slot is being seated
+    local x = 0   -- running offset, used only while a DEBUG slot is being seated
     local function placeLink()
         link.frame:SetSize(linkWidth, BAR_HEIGHT)
         link.frame:ClearAllPoints()
@@ -651,8 +652,8 @@ local function LayoutSegments(bar, screenWidth)
         end
         segment.frame:SetSize(segWidth, BAR_HEIGHT)
         segment.frame:ClearAllPoints()
-        -- No LINK: the original `(index - 1) * segWidth`, bit for bit; the running offset
-        -- only exists to step past the LINK slot.
+        -- No DEBUG: the original `(index - 1) * segWidth`, bit for bit; the running offset
+        -- only exists to step past the DEBUG slot.
         segment.frame:SetPoint("TOPLEFT", bar, "TOPLEFT", linkWidth and x or (index - 1) * segWidth, 0)
         x = x + segWidth
     end
@@ -756,14 +757,14 @@ end
 -- Re-measures for a new screen width. XPBar docks flush to this bar's top
 -- edge and re-derives its own width on the same callback, so a stale width
 -- here would desync the "one console strip" the two bars are meant to be.
--- Also the LINK refresh: the slot's width depends on the bar's effective scale.
+-- Also the DEBUG refresh: the slot's width depends on the bar's effective scale.
 --
 -- In combat this is DEFERRED to PLAYER_REGEN_ENABLED: the XP bar is anchored to this bar,
 -- the deck chassis to the XP bar and the chassis hosts secure buttons, so this bar is
 -- restricted then and SetSize on it would be blocked. The segments are children of the
 -- restricted bar, so they are deferred alongside its width only to keep the two consistent.
 -- The replay re-reads the screen width, the UI scale and the bridge state current THEN.
--- A /fbridge show|hide in combat therefore moves LINK after combat. Replay order against
+-- A /fdebug show|hide in combat therefore moves DEBUG after combat. Replay order against
 -- XPBar.lua and Deck.lua does not matter: all three are anchored to each other, not sized
 -- from each other.
 local pendingRescale = false
@@ -782,11 +783,11 @@ local function Rescale()
     LayoutSegments(FS.dataBar, screenWidth)
 end
 
--- /fbridge hide|show flips the bridge frame; relayout so LINK appears or goes and the other
+-- /fdebug hide|show flips the bridge frame; relayout so DEBUG appears or goes and the other
 -- segments close up. Hooked once, as soon as the frame exists (it may load after us).
 local hookedBridge
 local function HookBridge()
-    local bridge = _G.ForeverBridgeFrame
+    local bridge = _G.ForeverDebugBridgeFrame
     if type(bridge) ~= "table" or bridge == hookedBridge or not bridge.HookScript then return end
     hookedBridge = bridge
     bridge:HookScript("OnShow", Rescale)

@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Forever STUwave Development
+Exec=python3
+NoDisplay=true
+Terminal=true

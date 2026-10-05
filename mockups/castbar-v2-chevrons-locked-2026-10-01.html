@@ -1,0 +1,1902 @@
+<title>Cast Bar V2 Fills</title>
+<style>
+:root {
+  color-scheme: dark;
+
+  /* Addon palette (Theme.lua:22-33, XPBar.lua:44-46, PetCastBar.lua:114-115, PetActionBar.lua:45) */
+  --bg: #1a1025;
+  --track: #0a0416;
+  --line: #3a2168;
+  --violet: #a855f7;
+  --pink: #ff2e97;
+  --cyan: #22e0ff;
+  --green: #39ff14;
+  --parchment: #bfe9d6;
+  --surface: #2d1b4e;
+  --text: #e2e8f0;
+
+  /* Page only, not from the addon */
+  --page: #0e0719;
+  --muted: #9a8fbd;
+  --warm: #ff3d1f;
+  --core: #eafcff;
+  --stage-grid: rgba(168, 85, 247, 0.07);
+  --scan: rgba(0, 0, 0, 0.22);
+  --glow: rgba(168, 85, 247, 0.35);
+
+  --font-display: "Orbitron", "Eurostile", "Bank Gothic", "Arial Narrow", sans-serif;
+  --font-body: "Rajdhani", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Share Tech Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --zoom: 1;
+  --gutter: 16px;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.4;
+  font-weight: 500;
+  overflow-x: hidden;
+}
+
+.wrap {
+  max-width: 1240px;
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+  padding-block: 0 56px;
+}
+
+/* Header */
+.top { padding-block: 28px 18px; }
+.kicker {
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+h1 {
+  margin: 0 0 10px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(1.35rem, 6vw, 2.3rem);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.1;
+  color: var(--text);
+}
+h1 span { color: var(--pink); }
+.lede { margin: 0 0 8px; max-width: 70ch; color: var(--parchment); font-size: 1.05rem; }
+.lede b { color: var(--cyan); font-weight: 600; }
+
+/* Controls */
+.controls {
+  background: var(--page);
+  border-block: 1px solid var(--line);
+  padding-block: 10px;
+  margin-inline: calc(var(--gutter) * -1);
+  padding-inline: var(--gutter);
+}
+.controls-in {
+  max-width: 1240px;
+  margin-inline: auto;
+  display: grid;
+  gap: 10px 24px;
+  grid-template-columns: 1fr;
+  align-items: center;
+}
+.scrub { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; }
+.scrub label, .field > span:first-child {
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.readout {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  min-width: 4ch;
+  text-align: right;
+  color: var(--cyan);
+}
+.buttons, .opts { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.opts { grid-column: 1 / -1; }
+.field { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; }
+
+.btn, .seg button {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--violet);
+  padding: 8px 14px;
+  min-height: 36px;
+  cursor: pointer;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+.btn:hover:not(:disabled), .seg button:hover { background: var(--line); }
+.btn[aria-pressed="true"] { background: var(--pink); border-color: var(--pink); color: var(--track); }
+.btn-warn { border-color: var(--warm); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.seg { display: inline-flex; gap: 0; }
+.seg button { clip-path: none; border-radius: 0; margin-left: -1px; }
+.seg button:first-child { margin-left: 0; }
+.seg button[aria-pressed="true"] { background: var(--violet); color: var(--track); }
+
+.chk {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  cursor: pointer;
+  min-height: 36px;
+}
+.chk input { width: 18px; height: 18px; accent-color: var(--cyan); margin: 0; }
+
+select {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  color: var(--cyan);
+  background: var(--track);
+  border: 1px solid var(--line);
+  padding: 6px 8px;
+  min-height: 36px;
+}
+.others { margin-top: 26px; }
+.others > summary {
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 10px 0;
+}
+.others .grid { margin-top: 12px; }
+input[type="number"] {
+  width: 4.6em;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  color: var(--cyan);
+  background: var(--track);
+  border: 1px solid var(--line);
+  padding: 6px 6px;
+  min-height: 36px;
+}
+
+:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.btn:focus-visible { clip-path: none; outline-offset: 2px; }
+
+/* Range input */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  --fill: 60%;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  background: linear-gradient(90deg, var(--violet) 0, var(--pink) var(--fill), var(--line) var(--fill));
+  border: 1px solid var(--line);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 22px;
+  margin-top: -9px;
+  background: var(--cyan);
+  border: 1px solid var(--track);
+  border-radius: 0;
+}
+input[type="range"]::-moz-range-track { height: 6px; background: var(--line); border: 1px solid var(--line); }
+input[type="range"]::-moz-range-progress { height: 6px; background: var(--pink); }
+input[type="range"]::-moz-range-thumb {
+  width: 10px;
+  height: 20px;
+  background: var(--cyan);
+  border: 1px solid var(--track);
+  border-radius: 0;
+}
+
+/* Cards */
+.grid {
+  display: grid;
+  gap: 18px;
+  margin-top: 22px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--zoom) * 320px + 56px)), 1fr));
+}
+.card {
+  background: linear-gradient(135deg, var(--violet), var(--line) 45%, var(--line));
+  padding: 1px;
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+}
+.card-in {
+  background: var(--bg);
+  padding: 14px;
+  height: 100%;
+  clip-path: polygon(0 0, calc(100% - 15px) 0, 100% 15px, 100% 100%, 15px 100%, 0 calc(100% - 15px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.card-head { display: flex; align-items: center; gap: 12px; }
+.letter {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  background: var(--pink);
+  color: var(--track);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 18px;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.25;
+  flex: 1;
+  min-width: 0;
+}
+.badge {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pink);
+  border: 1px solid var(--pink);
+  padding: 2px 6px;
+}
+.badge.pick { color: var(--green); border-color: var(--green); }
+.row { display: flex; flex-direction: column; gap: 6px; }
+.rowhead {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--muted);
+}
+.rowhead b { font-weight: 400; color: var(--cyan); }
+.stage {
+  background:
+    repeating-linear-gradient(0deg, var(--scan) 0 1px, transparent 1px 3px),
+    linear-gradient(var(--stage-grid) 1px, transparent 1px) 0 0 / 100% 12px,
+    linear-gradient(90deg, var(--stage-grid) 1px, transparent 1px) 0 0 / 12px 100%,
+    var(--track);
+  border: 1px solid var(--line);
+  padding: 12px 10px;
+  overflow: visible;
+  display: flex;
+  justify-content: center;
+}
+.bar-host { width: 100%; display: flex; justify-content: center; min-height: 20px; }
+.bar-host svg {
+  display: block;
+  overflow: visible;
+  width: calc(var(--w) * 1px * var(--zoom));
+  max-width: 100%;
+  height: auto;
+  filter: drop-shadow(0 0 5px var(--glow));
+}
+.desc { margin: 2px 0 0; font-size: 16px; color: var(--parchment); }
+
+/* Lock-in gallery */
+.gallery { margin-top: 30px; }
+.gallery h3 {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+#grid .card { max-width: 640px; }
+.gal-row { margin: 16px 0 0; font-family: var(--font-mono); font-size: 14px; color: var(--muted); }
+.gal-grid { display: grid; gap: 14px; margin-top: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 900px) { .gal-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .gal-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* Pet slot rings */
+.slots { margin-top: 30px; }
+.slots h3 {
+  margin: 0 0 6px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.slots .caption { margin: 0 0 14px; color: var(--parchment); }
+.slot-row { display: flex; flex-wrap: wrap; gap: 18px; }
+.slot-stage {
+  background:
+    repeating-linear-gradient(0deg, var(--scan) 0 1px, transparent 1px 3px),
+    var(--track);
+  border: 1px solid var(--line);
+  padding: 16px 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+}
+.slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: 0;
+  padding: 4px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  cursor: pointer;
+}
+.slot svg { display: block; width: 90px; height: 90px; filter: drop-shadow(0 0 5px var(--glow)); }
+.slot[aria-pressed="true"] { color: var(--green); }
+
+.note { margin: 26px 0 0; font-size: 15px; color: var(--muted); max-width: 74ch; }
+
+@media (min-width: 760px) {
+  .controls-in { grid-template-columns: minmax(280px, 1.2fr) auto; }
+}
+@media (min-width: 900px) and (min-height: 640px) {
+  .controls { position: sticky; top: 0; z-index: 10; }
+}
+@media (max-width: 560px) {
+  .zoom { display: none; }
+  .card-in { padding: 12px; }
+  .stage { padding: 10px 6px; }
+  .scrub { grid-template-columns: 1fr auto; }
+  .scrub label { grid-column: 1 / -1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&amp;family=Rajdhani:wght@500;600&amp;family=Share+Tech+Mono&amp;display=swap">
+
+<div class="wrap">
+  <header class="top">
+    <p class="kicker">Forever Synthwave / Pet cast bar</p>
+    <h1>Cast Bar <span>V2</span> Fills</h1>
+    <p class="lede">Eight ways to fill the same bar. The layout is fixed from the reference image: a chamfered frame, spell icon, fill run, cast time, and a name tab hanging under the left side. Scrub the slider or press play, then pick a letter.</p>
+    <p class="lede"><b>Fill behavior.</b> Smooth fills the leading segment partway. Ignite (default) keeps every segment whole: it stays dim until the cast passes its start, then strikes up with an old neon flicker and settles lit. F is always smooth. A full cast holds lit, then fades. Interrupt plays a power outage. Ignite style sets how busy the flicker is: Calm, Medium (default) or Busy.</p>
+  </header>
+
+  <section class="controls" aria-label="Preview controls">
+    <div class="controls-in">
+      <div class="scrub">
+        <label for="progress">Cast progress</label>
+        <input type="range" id="progress" min="0" max="100" step="1" value="60" aria-describedby="progress-out">
+        <output id="progress-out" class="readout" for="progress">60%</output>
+      </div>
+      <div class="buttons">
+        <button type="button" class="btn" id="play" aria-pressed="false">Play loop</button>
+        <button type="button" class="btn btn-warn" id="interrupt" disabled>Interrupt</button>
+        <label class="chk" for="channel"><input type="checkbox" id="channel"> Channel mode</label>
+        <label class="chk" for="rand-int"><input type="checkbox" id="rand-int"> Random interrupts</label>
+      </div>
+      <div class="opts">
+        <div class="field" role="group" aria-labelledby="fb-label">
+          <span id="fb-label">Fill behavior</span>
+          <div class="seg" id="fillmode">
+            <button type="button" id="fillmode-smooth" data-mode="smooth" aria-pressed="false">Smooth</button>
+            <button type="button" id="fillmode-ignite" data-mode="ignite" aria-pressed="true">Ignite</button>
+          </div>
+        </div>
+        <div class="field" role="group" aria-labelledby="cc-label">
+          <span id="cc-label">Chevron color</span>
+          <div class="seg" id="chevcolor">
+            <button type="button" id="chev-cyan" data-chev="cyan" aria-pressed="true">Cyan (reference)</button>
+            <button type="button" id="chev-ramp" data-chev="ramp" aria-pressed="false">Ramp</button>
+          </div>
+        </div>
+        <label class="field" for="ignitestyle"><span>Ignite style</span>
+          <select id="ignitestyle">
+            <option value="calm">Calm</option>
+            <option value="medium" selected>Medium</option>
+            <option value="busy">Busy</option>
+          </select>
+        </label>
+        <label class="field" for="finishstyle"><span>Finish style</span>
+          <select id="finishstyle">
+            <option value="both">Sweep + chase</option>
+            <option value="sweep">Sweep only</option>
+            <option value="chase">Chase-off only</option>
+            <option value="none" selected>None</option>
+          </select>
+        </label>
+        <label class="field" for="caretstyle"><span>Caret style</span>
+          <select id="caretstyle">
+            <option value="outline" selected>Chevron outline (locked)</option>
+            <option value="stroke">Stroke &gt;</option>
+          </select>
+        </label>
+        <label class="field" for="lockin"><span>Lock-in</span>
+          <select id="lockin">
+            <option value="snapburst">Snap + burst</option>
+            <option value="snap">Flash + snap</option>
+            <option value="flash">Flash only</option>
+            <option value="burst">Chevron burst</option>
+            <option value="burstnf">Burst, no flare</option>
+            <option value="launch">Chevron launch</option>
+            <option value="all" selected>All (flash, snap, chevron burst)</option>
+            <option value="none">None</option>
+          </select>
+        </label>
+        <label class="field" for="hold-len"><span>Completion hold</span><input type="number" id="hold-len" min="0" max="5" step="0.1" value="1.0" inputmode="decimal"><span>s</span></label>
+        <label class="field" for="int-len"><span>Interrupt length</span><input type="number" id="int-len" min="0.2" max="3" step="0.1" value="1.0" inputmode="decimal"><span>s</span></label>
+        <div class="field zoom" role="group" aria-labelledby="zoom-label">
+          <span id="zoom-label">Zoom</span>
+          <div class="seg">
+            <button type="button" id="zoom-1x" data-zoom="1" aria-pressed="true">1x</button>
+            <button type="button" id="zoom-2x" data-zoom="2" aria-pressed="false">2x</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <main class="grid" id="grid">
+    <article class="card" data-v="H">
+      <div class="card-in">
+        <div class="card-head"><span class="letter">H</span><h2>Solid chevrons</h2><span class="badge pick">Locked</span></div>
+        <div class="row">
+          <div class="rowhead"><span>Pet bar <b>180 x 14</b></span><span data-segs></span></div>
+          <div class="stage"><div class="bar-host" data-size="pet"></div></div>
+        </div>
+        <div class="row">
+          <div class="rowhead"><span>Player bar <b>320 x 22</b></span><span data-segs></span></div>
+          <div class="stage"><div class="bar-host" data-size="player"></div></div>
+        </div>
+        <p class="desc">Nested chevrons, filled solid and without a glow, with a hot near-white caret on the cyan fill.</p>
+      </div>
+    </article>
+
+  </main>
+
+  <section class="gallery" aria-labelledby="gal-h">
+    <h3 id="gal-h">Lock-in gallery</h3>
+    <p class="note">Every bar below runs off the same play loop and slider and finishes at the same instant. Each one is the solid chevron bar and always shows its own lock-in and ignores the Lock-in select. Press Play loop, or drag the slider to 99 and then play.</p>
+    <div class="gal-grid">
+      <article class="card" data-v="H" data-lock="all">
+        <div class="card-in">
+          <div class="card-head"><h2>All (burst)</h2></div>
+          <div class="stage"><div class="bar-host" data-size="player"></div></div>
+        </div>
+      </article>
+      <article class="card" data-v="H" data-lock="burst">
+        <div class="card-in">
+          <div class="card-head"><h2>Chevron burst</h2></div>
+          <div class="stage"><div class="bar-host" data-size="player"></div></div>
+        </div>
+      </article>
+      <article class="card" data-v="H" data-lock="snapburst">
+        <div class="card-in">
+          <div class="card-head"><h2>Snap + burst</h2></div>
+          <div class="stage"><div class="bar-host" data-size="player"></div></div>
+        </div>
+      </article>
+      <article class="card" data-v="H" data-lock="burstnf">
+        <div class="card-in">
+          <div class="card-head"><h2>Burst, no flare</h2></div>
+          <div class="stage"><div class="bar-host" data-size="player"></div></div>
+        </div>
+      </article>
+      <article class="card" data-v="H" data-lock="snap">
+        <div class="card-in">
+          <div class="card-head"><h2>Flash + snap</h2></div>
+          <div class="stage"><div class="bar-host" data-size="player"></div></div>
+        </div>
+      </article>
+      <article class="card" data-v="H" data-lock="flash">
+        <div class="card-in">
+          <div class="card-head"><h2>Flash only</h2></div>
+          <div class="stage"><div class="bar-host" data-size="player"></div></div>
+        </div>
+      </article>
+      <article class="card" data-v="H" data-lock="launch">
+        <div class="card-in">
+          <div class="card-head"><h2>Chevron launch</h2></div>
+          <div class="stage"><div class="bar-host" data-size="player"></div></div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <details class="others">
+    <summary>Other fills (not the locked pick)</summary>
+    <div class="grid">
+    <article class="card" data-v="G">
+      <div class="card-in">
+        <div class="card-head"><span class="letter">G</span><h2>Neon chevrons (outline)</h2><span class="badge">Dropped</span></div>
+        <div class="row">
+          <div class="rowhead"><span>Pet bar <b>180 x 14</b></span><span data-segs></span></div>
+          <div class="stage"><div class="bar-host" data-size="pet"></div></div>
+        </div>
+        <div class="row">
+          <div class="rowhead"><span>Player bar <b>320 x 22</b></span><span data-segs></span></div>
+          <div class="stage"><div class="bar-host" data-size="player"></div></div>
+        </div>
+        <p class="desc">Hollow chevrons that nest into each other and point the way the cast runs. A lit one gets a bright stroke and a soft glow. Channel mode flips them to point left. Dropped, kept here for comparison.</p>
+      </div>
+    </article>
+
+    <article class="card" data-v="D">
+      <div class="card-in">
+        <div class="card-head"><span class="letter">D</span><h2>Slanted pips</h2><span class="badge">Retired</span></div>
+        <div class="row">
+          <div class="rowhead"><span>Pet bar <b>180 x 14</b></span><span data-segs></span></div>
+          <div class="stage"><div class="bar-host" data-size="pet"></div></div>
+        </div>
+        <div class="row">
+          <div class="rowhead"><span>Player bar <b>320 x 22</b></span><span data-segs></span></div>
+          <div class="stage"><div class="bar-host" data-size="player"></div></div>
+        </div>
+        <p class="desc">Leaning parallelogram pips with a small gap, the same cut as the XP bar cells.</p>
+      </div>
+    </article>
+    <article class="card" data-v="A">
+      <div class="card-in">
+        <div class="card-head"><span class="letter">A</span><h2>Current triangles</h2><span class="badge">Before</span></div>
+        <div class="row">
+          <div class="rowhead"><span>Pet bar <b>180 x 14</b></span><span data-segs></span></div>
+          <div class="stage"><div class="bar-host" data-size="pet"></div></div>
+        </div>
+        <div class="row">
+          <div class="rowhead"><span>Player bar <b>320 x 22</b></span><span data-segs></span></div>
+          <div class="stage"><div class="bar-host" data-size="player"></div></div>
+        </div>
+        <p class="desc">What the pet bar does now: each triangle advances a full width and the spare room becomes gaps, so up and down triangles never interlock.</p>
+      </div>
+    </article>
+
+    <article class="card" data-v="B">
+      <div class="card-in">
+        <div class="card-head"><span class="letter">B</span><h2>Interlocking triangles</h2></div>
+        <div class="row">
+          <div class="rowhead"><span>Pet bar <b>180 x 14</b></span><span data-segs></span></div>
+          <div class="stage"><div class="bar-host" data-size="pet"></div></div>
+        </div>
+        <div class="row">
+          <div class="rowhead"><span>Player bar <b>320 x 22</b></span><span data-segs></span></div>
+          <div class="stage"><div class="bar-host" data-size="player"></div></div>
+        </div>
+        <p class="desc">Up and down triangles advance half a width with no gap, so the lit run is one solid band. Down triangles are drawn a touch darker so the zigzag still reads.</p>
+      </div>
+    </article>
+
+    <article class="card" data-v="C">
+      <div class="card-in">
+        <div class="card-head"><span class="letter">C</span><h2>Interlocking with a seam</h2></div>
+        <div class="row">
+          <div class="rowhead"><span>Pet bar <b>180 x 14</b></span><span data-segs></span></div>
+          <div class="stage"><div class="bar-host" data-size="pet"></div></div>
+        </div>
+        <div class="row">
+          <div class="rowhead"><span>Player bar <b>320 x 22</b></span><span data-segs></span></div>
+          <div class="stage"><div class="bar-host" data-size="player"></div></div>
+        </div>
+        <p class="desc">The same interlocking zigzag, but a thin seam (1px small, 2px large) keeps every triangle readable as its own piece.</p>
+      </div>
+    </article>
+
+    <article class="card" data-v="E">
+      <div class="card-in">
+        <div class="card-head"><span class="letter">E</span><h2>Vertical pills</h2></div>
+        <div class="row">
+          <div class="rowhead"><span>Pet bar <b>180 x 14</b></span><span data-segs></span></div>
+          <div class="stage"><div class="bar-host" data-size="pet"></div></div>
+        </div>
+        <div class="row">
+          <div class="rowhead"><span>Player bar <b>320 x 22</b></span><span data-segs></span></div>
+          <div class="stage"><div class="bar-host" data-size="player"></div></div>
+        </div>
+        <p class="desc">Tall rounded segments, one per slot, like the reference image.</p>
+      </div>
+    </article>
+
+    <article class="card" data-v="F">
+      <div class="card-in">
+        <div class="card-head"><span class="letter">F</span><h2>Solid fill with ticks</h2><span class="badge">Always smooth</span></div>
+        <div class="row">
+          <div class="rowhead"><span>Pet bar <b>180 x 14</b></span><span data-segs></span></div>
+          <div class="stage"><div class="bar-host" data-size="pet"></div></div>
+        </div>
+        <div class="row">
+          <div class="rowhead"><span>Player bar <b>320 x 22</b></span><span data-segs></span></div>
+          <div class="stage"><div class="bar-host" data-size="player"></div></div>
+        </div>
+        <p class="desc">One smooth gradient fill with faint tick marks every 10 percent, as the plain control.</p>
+      </div>
+    </article>
+    </div>
+  </details>
+
+  <section class="slots" aria-labelledby="slots-h">
+    <h3 id="slots-h">Pet slot rings</h3>
+    <p class="caption">Click a slot to toggle autocast.</p>
+    <div class="slot-stage" id="slot-stage">
+      <button type="button" class="slot" id="pet-slot-1" aria-pressed="true" aria-label="Firebolt autocast"></button>
+      <button type="button" class="slot" id="pet-slot-2" aria-pressed="false" aria-label="Torment autocast"></button>
+      <button type="button" class="slot" id="pet-slot-3" aria-pressed="false" aria-label="Lash of Pain autocast"></button>
+    </div>
+    <p class="note">Each slot is drawn at the 30px design size and shown at 3x. The green ring uses the addon autocast color. Turning it on uses the same ignite flicker as the bar segments. Turning it off uses the same outage as the Interrupt button, and the Interrupt length input sets how long it takes.</p>
+  </section>
+
+  <p class="note">Notes. Lit color runs violet to hot pink across the run (G and H default to cyan, see Chevron color), with a cyan leading edge in Smooth mode and at the last lit segment in Ignite mode. Unfilled segments are dim cyan: flat for A, C and H, outlined for B, D, E and G. In channel mode the bar starts full, lights right to left, then drains toward the left, and it has no completion hold because the bar ends empty. Use 2x zoom to check pixel edges. With reduced motion on, segments snap on, the hold still happens, the completion fade is instant, and an outage (cast bar or ring) becomes a plain dim over the same length.</p>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var NS = "http://www.w3.org/2000/svg";
+  var CAST = 2.5;
+  var CAST_MS = CAST * 1000;
+  var FADE_MS = 300;
+  var WAVE_MS = 300;   /* finish wave sweep, runs inside the hold */
+  var LOCK_MS = 360;   /* lock-in flare, starts as the sweep wave reaches the far end, inside the hold */
+  var POP_MS = 180;    /* scale pop part of the lock-in */
+  var FLARE_MS = 250;  /* frame flare easing back */
+  var OFF_MS = 110;    /* one segment going dark during the chase-off */
+  var PAUSE_MS = 500;
+  /* Interrupt phases as fractions of the one total length (default 1000ms) */
+  var INT_FR = { brown: 0.25, stutter: 0.30, cut: 0.25, fade: 0.20 };
+
+  var S = {
+    mode: "ignite", style: "medium", chev: "cyan", finish: "none", lockin: "all", caret: "outline", restoreAt: null, channel: false, p: 0.6, playing: false, seq: null,
+    holdMs: 1000, intMs: 1000, randInt: false, raf: 0
+  };
+  var C = {};
+  var bars = [];
+  var rings = [];
+  var uidN = 0;
+  var measureCtx = document.createElement("canvas").getContext("2d");
+  var reducedMQ = window.matchMedia("(prefers-reduced-motion: reduce)");
+  function isReduced() { return reducedMQ.matches; }
+
+  var SIZES = {
+    pet:    { W: 180, H: 14, c: 3, tabH: 9,  fs: 7,  tfs: 7,  gap: 3, pad: 4, sl: 3, cap: 1, glow: 1.3, spell: "Firebolt" },
+    player: { W: 320, H: 22, c: 5, tabH: 13, fs: 11, tfs: 10, gap: 4, pad: 6, sl: 5, cap: 2, glow: 2.2, spell: "Shadow Bolt" }
+  };
+  var TUNE = {
+    pet:    { slant: 3, pgap: 1, ppitch: 6, pillW: 3, pillGap: 1, pillR: 1.5, seam: 1, chevD: 5, chevG: 2, chevSw: 1 },
+    player: { slant: 5, pgap: 2, ppitch: 9, pillW: 4, pillGap: 2, pillR: 2,   seam: 2, chevD: 9, chevG: 3, chevSw: 2 }
+  };
+
+  /* ---------- Helpers ---------- */
+
+  function tok(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+  function parseHex(h) {
+    h = h.replace("#", "");
+    return [parseInt(h.substr(0, 2), 16), parseInt(h.substr(2, 2), 16), parseInt(h.substr(4, 2), 16)];
+  }
+  function loadColors() {
+    ["violet", "pink", "cyan", "green", "track", "line", "surface", "text", "parchment", "muted", "warm", "core"].forEach(function (k) {
+      C[k] = parseHex(tok("--" + k) || tok("--text"));
+    });
+    C.pale = mix(C.cyan, C.text, 0.6);
+  }
+  function rgb(c) { return "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")"; }
+  function rgba(c, a) { return "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + a + ")"; }
+  function clamp(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
+  function ease(u) { return u * u * (3 - 2 * u); }
+  function mix(a, b, t) {
+    return [0, 1, 2].map(function (i) { return Math.round(a[i] + (b[i] - a[i]) * t); });
+  }
+  function el(tag, attrs, parent) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) { if (Object.prototype.hasOwnProperty.call(attrs, k)) { n.setAttribute(k, attrs[k]); } }
+    if (parent) { parent.appendChild(n); }
+    return n;
+  }
+  function setA(n, k, v) {
+    var c = n._c || (n._c = {});
+    if (c[k] === v) { return; }
+    c[k] = v;
+    n.setAttribute(k, v);
+  }
+  function ptsStr(a) { return a.map(function (p) { return p[0] + "," + p[1]; }).join(" "); }
+  function measure(text, size) {
+    measureCtx.font = size + "px " + tok("--font-mono");
+    return measureCtx.measureText(text).width;
+  }
+  function nearestOdd(v) {
+    var r = Math.round(v);
+    if (r % 2 === 0) { r += (v >= r ? 1 : -1); }
+    return r;
+  }
+
+  /* Inset a simple polygon by d pixels, so a 1px outline sits inside its shape */
+  function insetPoly(pts, d) {
+    var n = pts.length, area = 0, i;
+    for (i = 0; i < n; i++) {
+      var a = pts[i], b = pts[(i + 1) % n];
+      area += a[0] * b[1] - b[0] * a[1];
+    }
+    var s = area > 0 ? 1 : -1;
+    var lines = pts.map(function (p, idx) {
+      var q = pts[(idx + 1) % n];
+      var dx = q[0] - p[0], dy = q[1] - p[1];
+      var len = Math.sqrt(dx * dx + dy * dy);
+      return { x: p[0] + s * (-dy) / len * d, y: p[1] + s * dx / len * d, dx: dx, dy: dy };
+    });
+    return pts.map(function (p, idx) {
+      var l1 = lines[(idx + n - 1) % n], l2 = lines[idx];
+      var cr = l1.dx * l2.dy - l1.dy * l2.dx;
+      if (Math.abs(cr) < 1e-6) { return p; }
+      var t = ((l2.x - l1.x) * l2.dy - (l2.y - l1.y) * l2.dx) / cr;
+      return [l1.x + t * l1.dx, l1.y + t * l1.dy];
+    });
+  }
+
+  /* =====================================================================
+     SHARED MOTION LANGUAGE
+     One ignite flicker and one outage sequence. The cast bar segments and
+     the pet slot rings both call exactly these functions.
+     ===================================================================== */
+
+  function rng(seed) {
+    var s = seed >>> 0;
+    return function () {
+      s = (s + 0x6D2B79F5) >>> 0;
+      var t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  /* Seeded strike-up. Busy: 250-400ms, 3-5 uneven blinks, one at least in an off hue.
+     Calm: one quick dim, dip, on strike (about 120ms); a seeded "bad tube" gets a stutter and a faint off-hue blink.
+     Medium: two blinks over about 200ms, off-hue flash on about 1 in 3. */
+  function makeFlicker(seed, style, bad, spacingMs) {
+    var fk = makeBusyFlicker(seed);
+    fk.settle = 0.78;
+    fk.boostMax = 0.4;
+    if (style === "calm") {
+      if (bad) {
+        fk.ign = 320;
+        fk.blinks = [{ t0: 0, t1: 0.15, code: 1 }, { t0: 0.25, t1: 0.4, code: 1 }, { t0: 0.5, t1: 0.6, code: 5 }];
+        fk.settle = 0.7;
+        fk.boostMax = 0.25;
+      } else {
+        /* about 120ms, shortened on dense bars so one strike ends before the next segment starts */
+        fk.ign = Math.round(Math.min(120, Math.max(50, spacingMs * 0.95)));
+        fk.blinks = [{ t0: 0, t1: 0.3, code: 1 }];
+        fk.settle = 0.5;
+        fk.boostMax = 0.2;
+      }
+    } else if (style === "medium") {
+      var r = rng(seed + 31);
+      var alt = r() < 0.34;
+      var a0 = 0.04 + r() * 0.06, b0 = 0.40 + r() * 0.08;
+      fk.ign = 190 + Math.floor(r() * 30);
+      fk.blinks = [{ t0: a0, t1: a0 + 0.2, code: alt ? 2 : 1 }, { t0: b0, t1: b0 + 0.18, code: 4 }];
+      fk.settle = 0.75;
+      fk.boostMax = 0.3;
+    }
+    return fk;
+  }
+  function makeBusyFlicker(seed) {
+    var r = rng(seed);
+    var ign = 250 + Math.floor(r() * 150);
+    var nb = 3 + Math.floor(r() * 3);
+    var ws = [], tot = 0, i;
+    for (i = 0; i < nb * 2 + 1; i++) {
+      var w = (i % 2 === 0) ? 0.5 + r() * 1.4 : 0.35 + r() * 0.8;
+      ws.push(w);
+      tot += w;
+    }
+    var span = 0.78, t = 0, blinks = [], hasAlt = false;
+    for (i = 0; i < ws.length; i++) {
+      var d = ws[i] / tot * span;
+      if (i % 2 === 1) {
+        var pick = r();
+        var code = pick < 0.34 ? 1 : (pick < 0.68 ? 2 : 4);
+        if (code === 2) { hasAlt = true; }
+        blinks.push({ t0: t, t1: t + d, code: code });
+      }
+      t += d;
+    }
+    if (!hasAlt && blinks.length) { blinks[Math.floor(r() * blinks.length)].code = 2; }
+    return { ign: ign, blinks: blinks, jit: r() };
+  }
+
+  /* Give every segment its flicker for the current style. In Calm, about 1 in 5 segments is a bad tube,
+     picked by seed but never closer than minGap segments, where minGap covers one bad tube window
+     (320ms) plus a pause at the time spacing between neighbours. */
+  function applyFlicker(segs, seedOf, spacingMs) {
+    var minGap = Math.ceil(450 / Math.max(1, spacingMs)), last = -1e9;
+    segs.forEach(function (sg, i) {
+      var bad = false;
+      if (S.style === "calm" && rng(seedOf(i) + 4242)() < 0.2 && i - last >= minGap) { bad = true; last = i; }
+      var fk = makeFlicker(seedOf(i), S.style, bad, spacingMs);
+      sg.ign = fk.ign;
+      sg.blinks = fk.blinks;
+      sg.jit = fk.jit;
+      sg.settle = fk.settle;
+      sg.boostMax = fk.boostMax;
+      sg.bad = bad;
+    });
+  }
+
+  /* Returns 0 off, 1 dim, 2 off-hue flash, 3 lit, 4 mid, 5 faint off-hue. Sets BOOST for the settle overshoot. */
+  var BOOST = 0;
+  function flick(seg, age) {
+    BOOST = 0;
+    if (age < 0) { return 0; }
+    var u = age / seg.ign;
+    if (u >= 1) { return 3; }
+    if (u >= seg.settle) {
+      var k = (u - seg.settle) / (1 - seg.settle);
+      BOOST = seg.boostMax * (1 - k) * (1 - k);
+      return 3;
+    }
+    for (var i = 0; i < seg.blinks.length; i++) {
+      var b = seg.blinks[i];
+      if (u >= b.t0 && u < b.t1) { return b.code; }
+    }
+    return 0;
+  }
+
+  /* Interrupt phase from the total fraction */
+  function phaseOf(uT) {
+    var b = INT_FR.brown, s = b + INT_FR.stutter, c = s + INT_FR.cut;
+    if (uT < b) { return { phase: "brown", u: uT / b, uT: uT }; }
+    if (uT < s) { return { phase: "stutter", u: (uT - b) / INT_FR.stutter, uT: uT }; }
+    if (uT < c) { return { phase: "cut", u: (uT - s) / INT_FR.cut, uT: uT }; }
+    return { phase: "fade", u: (uT - c) / INT_FR.fade, uT: uT };
+  }
+  function pulse(u, a, b, h) {
+    if (u < a || u > b) { return 0; }
+    return h * Math.sin(Math.PI * (u - a) / (b - a));
+  }
+  /* Two uneven flickers on top of the 0.4 floor, each surging up to full lit (0.4 + 0.6). The second is the last one before the cut-out. */
+  var SURGE = 0.6;
+  function bumpA(u, j) { return pulse(u, 0.12 + j * 0.06, 0.30 + j * 0.04, SURGE); }
+  function bumpB(u, j) { return pulse(u, 0.55 + j * 0.05, 0.72, SURGE); }
+  function bumps(u, j) { return Math.max(bumpA(u, j), bumpB(u, j)); }
+  /* Brownout red tint fades out at a surge peak and returns in the troughs, so the failing power still reads */
+  function stutterTint(u, j) { return 0.55 * (1 - bumps(u, j) / SURGE); }
+  var NO_INTR = { level: 1, tint: 0, cutU: -1, reduced: false, dead: false };
+  function intrParams(intr) {
+    if (!intr) { return NO_INTR; }
+    if (intr.phase === "reduced") { return { level: 1 - intr.uT, tint: 0, cutU: -1, reduced: true, dead: false }; }
+    var e = ease(intr.u);
+    switch (intr.phase) {
+      case "brown": return { level: 1 - 0.6 * e, tint: 0.55 * e, cutU: -1, reduced: false, dead: false };
+      case "stutter": return { level: 0.4 + bumps(intr.u, 0.5), tint: stutterTint(intr.u, 0.5), cutU: -1, reduced: false, dead: false };
+      case "cut": return { level: 0.4, tint: 0.55, cutU: intr.u, reduced: false, dead: false };
+      default: return { level: 0, tint: 0.55, cutU: -1, reduced: false, dead: true };
+    }
+  }
+
+  function colorOf(base, tint, boost) {
+    var c = base;
+    if (tint) { c = mix(c, C.warm, tint); }
+    if (boost) { c = mix(c, C.text, boost); }
+    return rgb(c);
+  }
+
+  /* The one segment look function. c = { lit, snap, stagger, intr, ip, level, fadeLit, extent }.
+     Writes LOOK.alpha (0 = unlit), LOOK.color, LOOK.anim. */
+  var LOOK = { alpha: 0, color: "", anim: false };
+
+  /* Finish animation per segment. view.wt = ms into the wave (-1 none), view.wd = wave length, view.ct = ms into the
+     chase-off (-1 none). Both run in the cast direction, mirrored right to left in channel mode.
+     Sets FIN.k (0..1 near-white wave boost, sharp attack then ease back to lit) and FIN.lvl (1 lit, 0 gone). */
+  var FIN = { k: 0, lvl: 1 };
+  function finishLook(view, seg) {
+    var d = S.channel ? 1 - seg.frac : seg.frac, u;
+    FIN.k = 0;
+    FIN.lvl = 1;
+    if (view.wt >= 0) {
+      var fl = view.wd * 0.5;
+      u = (view.wt - d * (view.wd - fl)) / fl;
+      if (u > 0 && u < 1) { FIN.k = u < 0.2 ? u / 0.2 : Math.pow(1 - (u - 0.2) / 0.8, 2); }
+    }
+    if (view.ct >= 0) {
+      FIN.lvl = 1 - clamp((view.ct - d * (FADE_MS - OFF_MS)) / OFF_MS);
+    }
+  }
+  function segLook(seg, now, c) {
+    LOOK.anim = false;
+    LOOK.alpha = 0;
+    if (!c.lit) { seg.litSince = null; return LOOK; }
+    if (seg.litSince === null) {
+      var st = now + (c.stagger ? c.stagger(seg) : 0);
+      /* A bad tube waits until the previous bad tube in the same bar or ring has finished */
+      if (seg.bad && c.gate && !c.snap) {
+        st = Math.max(st, c.gate.badUntil);
+        c.gate.badUntil = st + seg.ign + 100;
+      }
+      seg.litSince = st;
+    }
+    if (c.snap) { seg.litSince = -1e9; }
+    var code = 3, boost = 0;
+    if (!isReduced() && !c.snap) {
+      var age = now - seg.litSince;
+      if (age < seg.ign) { LOOK.anim = true; code = flick(seg, age); boost = BOOST; }
+    }
+    var lvl = c.level, tn = c.ip.tint, intr = c.intr, hot = 0;
+    if (intr && !c.ip.reduced) {
+      if (intr.phase === "stutter") {
+        lvl = c.fadeLit * (0.4 + bumps(intr.u, seg.jit));
+        tn = stutterTint(intr.u, seg.jit);
+        hot = 0.3 * bumpB(intr.u, seg.jit) / SURGE;
+      } else if (intr.phase === "cut") {
+        var t = 1 - clamp(seg.a / Math.max(c.extent, 1e-6));
+        var thr = Math.min(0.97, 0.9 * t + seg.jit * 0.08);
+        if (intr.u > thr) { return LOOK; }
+      } else if (intr.phase === "fade") {
+        return LOOK;
+      }
+    }
+    switch (code) {
+      case 0: return LOOK;
+      case 1: LOOK.color = colorOf(seg.base, tn, 0); LOOK.alpha = 0.35 * lvl; break;
+      case 2: LOOK.color = rgb(C.pale); LOOK.alpha = 0.95 * lvl; break;
+      case 4: LOOK.color = colorOf(seg.base, tn, 0); LOOK.alpha = 0.8 * lvl; break;
+      case 5: LOOK.color = rgb(C.pale); LOOK.alpha = 0.5 * lvl; break;
+      default:
+        LOOK.color = colorOf(seg.base, tn, boost);
+        if (hot > 0) { LOOK.color = rgb(mix(tn ? mix(seg.base, C.warm, tn) : seg.base, C.core, hot)); }
+        LOOK.alpha = lvl;
+    }
+    return LOOK;
+  }
+  function paintSeg(seg, color, alpha) {
+    var n = seg.node;
+    if (seg.mode === "stroke") { setA(n, "stroke", color); }
+    else {
+      setA(n, "fill", color);
+      if (seg.mode === "bleed") { setA(n, "stroke", color); }
+    }
+    setA(n, "opacity", Math.round(alpha * 100) / 100);
+  }
+
+  /* ---------- Segment generators. r = { x, y, w, h } of the fill run ---------- */
+
+  function segsA(r) {
+    var tw = nearestOdd(r.h * 1.1547);
+    var gap = tw * 0.09;
+    var n = Math.floor((r.w + gap) / (tw + gap));
+    if (n % 2 === 0) { n -= 1; }
+    if (n < 3) { n = 3; }
+    if (n > 1) {
+      var g = (r.w - n * tw) / (n - 1);
+      if (g >= 0) { gap = g; }
+    }
+    var segs = [];
+    for (var i = 0; i < n; i++) {
+      var x = r.x + Math.round(i * (tw + gap));
+      var down = (i % 2 === 0);
+      var y = r.y, y2 = r.y + r.h;
+      segs.push({
+        kind: "poly",
+        pts: down ? [[x, y], [x + tw, y], [x + tw / 2, y2]] : [[x, y2], [x + tw, y2], [x + tw / 2, y]],
+        frac: clamp((x + tw / 2 - r.x) / r.w)
+      });
+    }
+    return { segs: segs, count: n + " triangles" };
+  }
+
+  function segsInter(r) {
+    var step = r.h * 1.1547 / 2;
+    var m = Math.max(4, Math.round(r.w / step));
+    function P(k) { return r.x + Math.round(k * r.w / m); }
+    var segs = [], zig = [], k;
+    var y = r.y, y2 = r.y + r.h;
+    for (k = -1; k <= m - 1; k++) {
+      var a = P(k), b = P(k + 1), c = P(k + 2);
+      var up = (((k % 2) + 2) % 2 === 0);
+      segs.push({
+        kind: "poly",
+        pts: up ? [[a, y2], [c, y2], [b, y]] : [[a, y], [c, y], [b, y2]],
+        frac: clamp((b - r.x) / r.w),
+        mul: up ? 1 : 0.8
+      });
+    }
+    for (var j = 0; j <= m + 1; j++) { zig.push([P(j), (j % 2 === 1) ? y : y2]); }
+    return { segs: segs, zig: zig, count: (m + 1) + " triangles" };
+  }
+
+  function segsD(r, t) {
+    var s = t.slant, g = t.pgap;
+    var n = Math.max(3, Math.round((r.w - s + g) / t.ppitch));
+    var pf = (r.w - s + g) / n;
+    var segs = [];
+    for (var i = 0; i < n; i++) {
+      var x0 = r.x + Math.round(i * pf);
+      var x1 = r.x + Math.round((i + 1) * pf) - g;
+      var w = x1 - x0;
+      var y = r.y, y2 = r.y + r.h;
+      segs.push({
+        kind: "poly",
+        pts: [[x0 + s, y], [x0 + s + w, y], [x0 + w, y2], [x0, y2]],
+        frac: clamp((x0 + (w + s) / 2 - r.x) / r.w)
+      });
+    }
+    return { segs: segs, count: n + " pips" };
+  }
+
+  function segsE(r, t) {
+    var pitch = t.pillW + t.pillGap;
+    var n = Math.max(4, Math.floor((r.w + t.pillGap) / pitch));
+    var pf = (r.w + t.pillGap) / n;
+    var segs = [];
+    for (var i = 0; i < n; i++) {
+      var x0 = r.x + Math.round(i * pf);
+      var x1 = r.x + Math.round((i + 1) * pf) - t.pillGap;
+      segs.push({ kind: "rect", x: x0, y: r.y, w: x1 - x0, h: r.h, rx: t.pillR, frac: clamp((x0 + (x1 - x0) / 2 - r.x) / r.w) });
+    }
+    return { segs: segs, count: n + " pills" };
+  }
+
+  /* G and H: nested chevrons. Pitch = arm width + gap, so each tip sits in the next notch. */
+  function segsChev(r, t, mirror) {
+    var h = r.h, ah = h / 2, w = t.chevD + ah, d = t.chevD;
+    var pitch = d + t.chevG;
+    var n = Math.floor((r.w - w) / pitch) + 1;
+    var pf = n > 1 ? (r.w - w) / (n - 1) : 0;
+    var rel = [[0, 0], [d, 0], [d + ah, h / 2], [d, h], [0, h], [ah, h / 2]];
+    var segs = [];
+    for (var i = 0; i < n; i++) {
+      var x0 = r.x + Math.round(i * pf);
+      segs.push({
+        kind: "poly",
+        pts: rel.map(function (p) { return [x0 + (mirror ? w - p[0] : p[0]), r.y + p[1]]; }),
+        frac: clamp((x0 + w / 2 - r.x) / r.w)
+      });
+    }
+    return { segs: segs, count: n + " chevrons" };
+  }
+
+  function seedFor(v, size, i) {
+    return (v.charCodeAt(0) * 131 + (size === "pet" ? 7 : 13)) * 1009 + i * 7919 + 12345;
+  }
+  function finishSeg(seg, v, size, i, r) {
+    var xl, xr, xs;
+    if (seg.kind === "rect") { xl = seg.x; xr = seg.x + seg.w; }
+    else {
+      xs = seg.pts.map(function (p) { return p[0]; });
+      xl = Math.min.apply(null, xs);
+      xr = Math.max.apply(null, xs);
+    }
+    seg.a = clamp((xl - r.x) / r.w);
+    seg.b = clamp((xr - r.x) / r.w);
+    seg.xr = xr;
+    seg.seed = seedFor(v, size, i);
+    seg.litSince = null;
+    var base = mix(C.violet, C.pink, clamp(seg.frac));
+    if (seg.mul) { base = base.map(function (x) { return Math.round(x * seg.mul); }); }
+    if ((v === "G" || v === "H") && S.chev === "cyan") { base = C.cyan; }
+    seg.base = base;
+  }
+
+  /* ---------- Cast bar builder ---------- */
+
+  function build(host, v, sizeKey, lockMode) {
+    var Z = SIZES[sizeKey], T = TUNE[sizeKey];
+    var W = Z.W, H = Z.H, c = Z.c, tabH = Z.tabH;
+    var uid = "b" + (++uidN);
+    var svg = el("svg", {
+      viewBox: "0 0 " + W + " " + (H + tabH), width: W, height: H + tabH,
+      role: "img", "aria-label": "Variant " + v + ", " + sizeKey + " bar, spell " + Z.spell
+    }, host);
+    svg.style.setProperty("--w", W);
+    var defs = el("defs", {}, svg);
+
+    var framePts = ptsStr([[c + 0.5, 0.5], [W - c - 0.5, 0.5], [W - 0.5, c + 0.5], [W - 0.5, H - c - 0.5],
+                           [W - c - 0.5, H - 0.5], [c + 0.5, H - 0.5], [0.5, H - c - 0.5], [0.5, c + 0.5]]);
+    var fglow = el("filter", { id: uid + "-fg", x: "-10%", y: "-60%", width: "120%", height: "220%" }, defs);
+    el("feGaussianBlur", { stdDeviation: 1.6 }, fglow);
+    var frameGlow = el("polygon", {
+      points: framePts, fill: "none", stroke: rgb(C.pink), "stroke-width": 2, opacity: 0, filter: "url(#" + uid + "-fg)"
+    }, svg);
+    var burst = el("polygon", {
+      points: framePts, fill: "none", stroke: rgb(mix(C.pink, C.core, 0.35)), "stroke-width": 1, "stroke-linejoin": "round",
+      opacity: 0, display: "none", filter: "url(#" + uid + "-bf)"
+    }, svg);
+    var bfl = el("filter", { id: uid + "-bf", x: "-20%", y: "-120%", width: "140%", height: "340%" }, defs);
+    el("feGaussianBlur", { stdDeviation: 1.2 }, bfl);
+    var frame = el("polygon", {
+      points: framePts, fill: rgba(C.track, 0.92), stroke: rgb(C.violet), "stroke-width": 1, "stroke-linejoin": "miter"
+    }, svg);
+    svg.style.transformOrigin = "50% " + (Math.round(H / 2 / (H + tabH) * 1000) / 10) + "%";
+
+    /* Icon */
+    var iconS = H - 4;
+    el("rect", { x: c, y: 2, width: iconS, height: iconS, fill: rgb(C.surface) }, svg);
+    var cx = c + iconS / 2, cyy = 2 + iconS / 2, rr = Math.round(iconS * 0.32);
+    el("polygon", { points: ptsStr([[cx, cyy - rr], [cx + rr, cyy], [cx, cyy + rr], [cx - rr, cyy]]), fill: rgb(C.pink) }, svg);
+    el("rect", { x: c + 0.5, y: 2.5, width: iconS - 1, height: iconS - 1, fill: "none", stroke: rgb(C.line), "stroke-width": 1, "shape-rendering": "crispEdges" }, svg);
+
+    /* Timer column and fill run */
+    var tw = Math.ceil(measure("0.0 / 0.0", Z.fs)) + 2;
+    var run = { x: c + iconS + Z.gap, y: 2, h: H - 4 };
+    run.w = (W - c - 2 - tw - Z.gap) - run.x;
+
+    var ty = Math.round(H / 2 + Z.fs * 0.35);
+    var timer = el("text", {
+      x: W - c - 2, y: ty, "text-anchor": "end", "font-size": Z.fs, "font-family": tok("--font-mono"), fill: rgb(C.parchment)
+    }, svg);
+    var t1 = el("tspan", {}, timer);
+    t1.textContent = "0.0";
+    var t2 = el("tspan", { fill: rgb(C.muted) }, timer);
+    t2.textContent = " / " + CAST.toFixed(1);
+
+    /* Segments */
+    var gen;
+    if (v === "A") { gen = segsA(run); }
+    else if (v === "B" || v === "C") { gen = segsInter(run); }
+    else if (v === "D") { gen = segsD(run, T); }
+    else if (v === "E") { gen = segsE(run, T); }
+    else if (v === "G" || v === "H") { gen = segsChev(run, T, S.channel); }
+    else { gen = { segs: [], count: "10 ticks" }; }
+    var segs = gen.segs;
+    var smoothOnly = (v === "F");
+
+    el("clipPath", { id: uid + "-run" }, defs).appendChild(el("rect", { x: run.x, y: run.y, width: run.w, height: run.h }));
+    var litRect = el("rect", { x: run.x, y: v === "G" ? 1 : run.y - 1, width: 0, height: v === "G" ? H - 2 : run.h + 2 });
+    el("clipPath", { id: uid + "-lit" }, defs).appendChild(litRect);
+
+    var gRun = el("g", v === "G" ? {} : { "clip-path": "url(#" + uid + "-run)" }, svg);
+    var gDim = el("g", {}, gRun);
+    var gLit = el("g", { "clip-path": "url(#" + uid + "-lit)" }, gRun);
+    var gGlow = gLit;
+    if (v === "G") {
+      var glow = el("filter", { id: uid + "-gl", x: "-5%", y: "-40%", width: "110%", height: "180%", "color-interpolation-filters": "sRGB" }, defs);
+      el("feGaussianBlur", { "in": "SourceGraphic", stdDeviation: Z.glow, result: "b" }, glow);
+      var mg = el("feMerge", {}, glow);
+      el("feMergeNode", { "in": "b" }, mg);
+      el("feMergeNode", { "in": "b" }, mg);
+      el("feMergeNode", { "in": "SourceGraphic" }, mg);
+      gGlow = el("g", { filter: "url(#" + uid + "-gl)" }, gLit);
+    }
+
+    var stops = null, i, band = null, bandW = 0;
+    segs.forEach(function (s, idx) { finishSeg(s, v, sizeKey, idx, run); });
+    function restyle() { applyFlicker(segs, function (i) { return segs[i].seed; }, CAST_MS / Math.max(1, segs.length)); }
+    restyle();
+    var gate = { badUntil: 0 };
+
+    if (v === "A" || v === "C") {
+      var dimA = v === "A" ? 0.35 : 0.22;
+      segs.forEach(function (s) { el("polygon", { points: ptsStr(s.pts), fill: rgba(C.cyan, dimA) }, gDim); });
+    } else if (v === "B") {
+      el("rect", { x: run.x, y: run.y, width: run.w, height: run.h, fill: rgba(C.cyan, 0.07) }, gDim);
+      el("polyline", { points: ptsStr(gen.zig), fill: "none", stroke: rgba(C.cyan, 0.5), "stroke-width": 1, "stroke-linejoin": "miter" }, gDim);
+      el("rect", { x: run.x, y: run.y + 0.5, width: run.w, height: run.h - 1, fill: "none", stroke: rgba(C.cyan, 0.5), "stroke-width": 1, "shape-rendering": "crispEdges" }, gDim);
+    } else if (v === "D" || v === "E") {
+      segs.forEach(function (s) {
+        if (s.kind === "rect") {
+          el("rect", {
+            x: s.x + 0.5, y: s.y + 0.5, width: Math.max(0, s.w - 1), height: s.h - 1, rx: Math.max(0, s.rx - 0.5),
+            fill: rgba(C.cyan, 0.07), stroke: rgba(C.cyan, 0.5), "stroke-width": 1, "shape-rendering": "crispEdges"
+          }, gDim);
+        } else {
+          el("polygon", {
+            points: ptsStr(insetPoly(s.pts, 0.5)), fill: rgba(C.cyan, 0.07), stroke: rgba(C.cyan, 0.5),
+            "stroke-width": 1, "stroke-linejoin": "miter"
+          }, gDim);
+        }
+      });
+    } else if (v === "G") {
+      segs.forEach(function (s) {
+        el("polygon", {
+          points: ptsStr(insetPoly(s.pts, T.chevSw / 2)), fill: "none", stroke: rgba(C.cyan, 0.32),
+          "stroke-width": T.chevSw, "stroke-linejoin": "miter"
+        }, gDim);
+      });
+    } else if (v === "H") {
+      segs.forEach(function (s) { el("polygon", { points: ptsStr(s.pts), fill: rgba(C.cyan, 0.2) }, gDim); });
+    } else {
+      el("rect", { x: run.x + 0.5, y: run.y + 0.5, width: run.w - 1, height: run.h - 1, fill: rgba(C.cyan, 0.07), stroke: rgba(C.cyan, 0.5), "stroke-width": 1, "shape-rendering": "crispEdges" }, gDim);
+    }
+
+    /* Lit shapes, created hidden */
+    if (v === "F") {
+      var grad = el("linearGradient", { id: uid + "-g", gradientUnits: "userSpaceOnUse", x1: run.x, y1: 0, x2: run.x + run.w, y2: 0 }, defs);
+      stops = [
+        el("stop", { offset: "0", "stop-color": rgb(C.violet) }, grad),
+        el("stop", { offset: "1", "stop-color": rgb(C.pink) }, grad)
+      ];
+      el("rect", { x: run.x, y: run.y, width: run.w, height: run.h, fill: "url(#" + uid + "-g)", "shape-rendering": "crispEdges" }, gLit);
+      var wg = el("linearGradient", { id: uid + "-wv", x1: "0", y1: "0", x2: "1", y2: "0" }, defs);
+      el("stop", { offset: "0", "stop-color": rgb(C.core), "stop-opacity": 0 }, wg);
+      el("stop", { offset: "0.7", "stop-color": rgb(C.core), "stop-opacity": 0.85 }, wg);
+      el("stop", { offset: "1", "stop-color": rgb(C.core), "stop-opacity": 0 }, wg);
+      bandW = Math.max(12, Math.round(run.w * 0.2));
+      band = el("rect", { x: run.x, y: run.y, width: bandW, height: run.h, fill: "url(#" + uid + "-wv)", display: "none" }, gLit);
+    } else {
+      segs.forEach(function (s) {
+        if (v === "G") {
+          s.mode = "stroke";
+          s.node = el("polygon", {
+            points: ptsStr(insetPoly(s.pts, T.chevSw / 2)), fill: "none", stroke: rgb(C.violet),
+            "stroke-width": T.chevSw, "stroke-linejoin": "miter", opacity: 0
+          }, gGlow);
+        } else if (s.kind === "rect") {
+          s.mode = "fill";
+          s.node = el("rect", { x: s.x, y: s.y, width: s.w, height: s.h, rx: s.rx, fill: rgb(C.violet), "shape-rendering": "crispEdges", opacity: 0 }, gGlow);
+        } else {
+          s.mode = (v === "B") ? "bleed" : "fill";
+          var a = { points: ptsStr(s.pts), fill: rgb(C.violet), opacity: 0 };
+          if (v === "B") { a["stroke-width"] = 1; a["stroke-linejoin"] = "round"; }
+          s.node = el("polygon", a, gGlow);
+        }
+      });
+    }
+
+    if (v === "C") {
+      el("polyline", {
+        points: ptsStr(gen.zig), fill: "none", stroke: rgb(C.track), "stroke-width": T.seam,
+        "stroke-linejoin": "miter", "stroke-miterlimit": 4
+      }, gRun);
+    }
+    if (v === "F") {
+      var gTicks = el("g", { "clip-path": "url(#" + uid + "-run)" }, svg);
+      for (i = 1; i < 10; i++) {
+        el("rect", { x: run.x + Math.round(i * run.w / 10), y: run.y, width: 1, height: run.h, fill: rgba(C.text, 0.22), "shape-rendering": "crispEdges" }, gTicks);
+      }
+    }
+
+    /* Leading edge caret. G and H use a ">" (mirrored "<" in channel mode) at the chevron angle, D a "/" at the pip slant,
+       everything else keeps the straight line. The shaped carets ride the true progress, not segment boundaries. */
+    var caretShape = (v === "G" || v === "H") ? "chev" : (v === "D" ? "slash" : "line");
+    var caret;
+    if (caretShape === "line") {
+      caret = el("rect", { x: run.x, y: run.y, width: Z.cap, height: run.h, fill: rgb(C.cyan), "shape-rendering": "crispEdges", display: "none" }, svg);
+    } else {
+      var cg = el("filter", { id: uid + "-cg", x: "-100%", y: "-30%", width: "300%", height: "160%", "color-interpolation-filters": "sRGB" }, defs);
+      el("feGaussianBlur", { "in": "SourceGraphic", stdDeviation: Z.glow, result: "b" }, cg);
+      var cmg = el("feMerge", {}, cg);
+      el("feMergeNode", { "in": "b" }, cmg);
+      el("feMergeNode", { "in": "SourceGraphic" }, cmg);
+      caret = el("polyline", {
+        points: "0,0", fill: "none", stroke: rgb(C.cyan), "stroke-width": Z.cap, "stroke-linejoin": "miter",
+        "stroke-linecap": "butt", display: "none", filter: "url(#" + uid + "-cg)", "clip-path": "url(#" + uid + "-run)"
+      }, svg);
+    }
+    /* On a cyan fill (G and H in Cyan mode) a cyan caret vanishes, so add a hot near-white core on top of the cyan glow */
+    var core = null;
+    if (caretShape === "chev" && S.chev === "cyan") {
+      core = el("polyline", {
+        points: "0,0", fill: "none", stroke: rgb(C.core), "stroke-width": Z.cap, "stroke-linejoin": "miter",
+        "stroke-linecap": "butt", display: "none", "clip-path": "url(#" + uid + "-run)"
+      }, svg);
+    }
+    function round2(n) { return Math.round(n * 100) / 100; }
+    function placeShapedCaret(xe) {
+      var y0 = run.y, y1 = run.y + run.h, pts, x;
+      if (caretShape === "chev") {
+        var ah = run.h / 2, mir = S.channel;
+        x = xe;
+        if (S.caret === "outline") {
+          /* The hollow outline of one full chevron segment, same shape and size as the solid chevrons, tip at progress */
+          var cd = T.chevD, cw = cd + ah, cx0 = mir ? x : x - cw;
+          pts = [[0, 0], [cd, 0], [cd + ah, ah], [cd, run.h], [0, run.h], [ah, ah], [0, 0]].map(function (q) {
+            return [cx0 + (mir ? cw - q[0] : q[0]), y0 + q[1]];
+          });
+        } else {
+          var bx = mir ? x + ah : x - ah;
+          pts = [[bx, y0], [x, y0 + ah], [bx, y1]];
+        }
+      } else {
+        var sh = T.slant;
+        x = xe;
+        /* Lies on the slanted leading edge of the lit run: top end at progress going right, bottom end at progress in channel mode */
+        pts = S.channel ? [[x, y1], [x + sh, y0]] : [[x - sh, y1], [x, y0]];
+      }
+      var ps = pts.map(function (q) { return round2(q[0]) + "," + round2(q[1]); }).join(" ");
+      setA(caret, "points", ps);
+      if (core) { setA(core, "points", ps); }
+    }
+
+    /* Chevron glints: a near-white solid ">" in the bar's own chevron shape, tip on the run's far end, with a cyan glow behind it.
+       Two are built so Chevron launch can trail an echo behind the lead. */
+    var gfl = el("filter", { id: uid + "-gg", x: "-60%", y: "-60%", width: "220%", height: "220%" }, defs);
+    el("feGaussianBlur", { stdDeviation: Math.max(1, Z.glow * 0.8) }, gfl);
+    var chRel = [[0, 0], [T.chevD, 0], [T.chevD + run.h / 2, run.h / 2], [T.chevD, run.h], [0, run.h], [run.h / 2, run.h / 2]];
+    var chW = T.chevD + run.h / 2;
+    var chX0 = run.x + run.w - chW, chCx = chX0 + chW / 2, chCy = run.y + run.h / 2;
+    function makeGlint() {
+      var g = el("g", { display: "none", opacity: 0 }, svg);
+      var gw = el("polygon", { points: "0,0", fill: rgb(C.cyan), stroke: rgb(C.cyan), "stroke-width": 2, "stroke-linejoin": "round", filter: "url(#" + uid + "-gg)" }, g);
+      var gc = el("polygon", { points: "0,0", fill: rgb(C.core) }, g);
+      return { g: g, gw: gw, gc: gc };
+    }
+    var glA = makeGlint(), glB = makeGlint();
+    /* sc scales around the chevron's own center, dx slides it forward, al is its opacity (0 hides it) */
+    function placeGlint(gl, sc, dx, al) {
+      if (al <= 0.01) { setA(gl.g, "display", "none"); return; }
+      var ps = chRel.map(function (q) {
+        var x = chCx + (chX0 + q[0] - chCx) * sc + dx, y = chCy + (run.y + q[1] - chCy) * sc;
+        return round2(x) + "," + round2(y);
+      }).join(" ");
+      setA(gl.gw, "points", ps);
+      setA(gl.gc, "points", ps);
+      setA(gl.g, "opacity", round2(al));
+      setA(gl.g, "display", "inline");
+    }
+    var slide = Math.max(8, Math.min(14, Math.round(run.h * 0.6)));
+
+    /* Lock-in: frame flare, outer glow burst, scale pop and chevron glints, driven by view.lt (ms into it, -1 off) */
+    function lockIn(view) {
+      var mode = lockMode || S.lockin, on = view.lt >= 0 && mode !== "none";
+      var red = isReduced();
+      var doFlash = mode === "snap" || mode === "flash" || mode === "all";
+      var doSnap = (mode === "snap" || mode === "all" || mode === "snapburst") && !red;
+      var doBurst = mode === "burst" || mode === "all" || mode === "snapburst" || mode === "burstnf";
+      var doLaunch = mode === "launch";
+      var fk = 0, bo = 0, bw = 1, sc = 1, u, e;
+      var aA = 0, sA = 1, dA = 0, aB = 0, dB = 0;
+      if (on) {
+        u = clamp(view.lt / FLARE_MS);
+        fk = u < 0.12 ? u / 0.12 : Math.pow(1 - (u - 0.12) / 0.88, 2);
+        /* Full flare with the flash options, half with plain Chevron burst or launch, none for Snap + burst and Burst, no flare */
+        if (!doFlash) { fk = (mode === "burst" || mode === "launch") ? fk * 0.5 : 0; }
+        if (doFlash) {
+          u = clamp(view.lt / 300);
+          bo = 0.9 * Math.pow(1 - u, 1.5);
+          bw = red ? 3 : 1 + 2 * (5 * (1 - Math.pow(1 - u, 3)));
+        }
+        if (doSnap) {
+          u = clamp(view.lt / POP_MS);
+          sc = 1 + 0.04 * (u < 0.2 ? u / 0.2 : Math.pow(1 - (u - 0.2) / 0.8, 2));
+        }
+        if (red) {
+          /* Static ">" that flashes and fades: no scale, no slide */
+          if (doBurst || doLaunch) {
+            u = clamp(view.lt / view.ld);
+            aA = u < 0.15 ? u / 0.15 : 1 - (u - 0.15) / 0.85;
+          }
+        } else if (doBurst) {
+          u = clamp(view.lt / 300);
+          e = 1 - Math.pow(1 - u, 3);
+          sA = 1 + 0.6 * e;
+          aA = Math.pow(1 - u, 1.2);
+        } else if (doLaunch) {
+          u = clamp(view.lt / 300);
+          e = 1 - Math.pow(1 - u, 3);
+          dA = slide * e;
+          aA = Math.pow(1 - u, 1.2);
+          u = clamp((view.lt - 60) / 300);
+          if (view.lt >= 60) {
+            e = 1 - Math.pow(1 - u, 3);
+            dB = slide * e;
+            aB = 0.5 * Math.pow(1 - u, 1.2);
+          }
+        }
+      }
+      setA(frame, "stroke", fk > 0.001 ? rgb(mix(C.violet, C.core, fk)) : rgb(C.violet));
+      setA(burst, "display", bo > 0.01 ? "inline" : "none");
+      if (bo > 0.01) { setA(burst, "stroke-width", round2(bw)); setA(burst, "opacity", round2(bo)); }
+      placeGlint(glA, sA, dA, aA);
+      placeGlint(glB, 1, dB, aB);
+      var scs = sc === 1 ? "" : "scale(" + sc.toFixed(4) + ")";
+      if (svg._sc !== scs) { svg._sc = scs; svg.style.transform = scs; }
+    }
+
+    /* Hanging tab */
+    var name = Z.spell.toUpperCase();
+    var tabW = Math.ceil(measure(name, Z.tfs)) + 2 * Z.pad;
+    var L = c + 1, sl = Z.sl;
+    var yTop = H, yBot = H + tabH;
+    el("polygon", {
+      points: ptsStr([[L, yTop], [L + 2 * sl + tabW, yTop], [L + sl + tabW, yBot], [L + sl, yBot]]),
+      fill: rgba(C.track, 0.95)
+    }, svg);
+    el("polyline", {
+      points: ptsStr([[L, H - 0.5], [L + sl, yBot - 0.5], [L + sl + tabW, yBot - 0.5], [L + 2 * sl + tabW, H - 0.5]]),
+      fill: "none", stroke: rgb(C.violet), "stroke-width": 1, "stroke-linejoin": "miter"
+    }, svg);
+    var tabText = el("text", {
+      x: L + sl + Z.pad, y: Math.round(H + tabH / 2 + Z.tfs * 0.33), "font-size": Z.tfs,
+      "font-family": tok("--font-mono"), fill: rgb(C.cyan)
+    }, svg);
+    tabText.textContent = name;
+
+    /* Per frame update. Returns true while something is still animating. */
+    function update(view, now) {
+      var ign = S.mode === "ignite" && !smoothOnly;
+      var intr = view.intr;
+      var f = S.channel ? 1 - view.p : view.p;
+      var ip = intrParams(intr);
+      var baseLevel = (stops ? view.flatLit : view.fadeLit) * ip.level;
+      var anim = false;
+      var caretShow = false, caretX = run.x;
+      var j, s;
+
+      if (!ign) {
+        var lw = Math.round(f * run.w);
+        if (view.hold) { lw = run.w; }
+        if (intr && !ip.reduced) {
+          if (ip.dead) { lw = 0; }
+          else if (ip.cutU >= 0) { lw = Math.round(f * run.w * (1 - ip.cutU)); }
+        }
+        setA(litRect, "width", lw);
+        if (band) {
+          if (view.wt >= 0) {
+            setA(band, "x", Math.round(run.x - bandW + (run.w + bandW) * clamp(view.wt / view.wd)));
+            setA(band, "display", "inline");
+          } else { setA(band, "display", "none"); }
+        }
+        setA(gLit, "opacity", Math.round(baseLevel * 100) / 100);
+        if (stops) {
+          setA(stops[0], "stop-color", colorOf(C.violet, ip.tint, 0));
+          setA(stops[1], "stop-color", colorOf(C.pink, ip.tint, 0));
+        } else {
+          for (j = 0; j < segs.length; j++) {
+            s = segs[j];
+            s.litSince = null;
+            if (view.wt >= 0 || view.ct >= 0) {
+              finishLook(view, s);
+              paintSeg(s, FIN.k > 0 ? rgb(mix(s.base, C.core, FIN.k)) : colorOf(s.base, ip.tint, 0), FIN.lvl);
+            } else {
+              paintSeg(s, colorOf(s.base, ip.tint, 0), 1);
+            }
+          }
+        }
+        caretShow = lw > 0 && lw < run.w && !view.hold && !intr;
+        caretX = run.x + lw;
+      } else {
+        setA(litRect, "width", run.w);
+        setA(gLit, "opacity", 1);
+        var ctx = {
+          lit: false, snap: view.hold || !!intr, intr: intr, ip: ip, level: baseLevel, fadeLit: view.fadeLit, extent: f, gate: gate,
+          stagger: (S.channel && view.p <= 0.02 && !intr) ? function (sg) { return (1 - sg.frac) * 350; } : null
+        };
+        var litCount = 0, maxXr = run.x;
+        for (j = 0; j < segs.length; j++) {
+          s = segs[j];
+          /* Cast: a segment lights once the caret has cleared its END, so the arrow leads and the light follows.
+             Channel (mirror): it goes dark once the caret has passed its START. */
+          ctx.lit = view.hold || (S.channel ? f > s.a : f >= s.b);
+          var lk = segLook(s, now, ctx);
+          if (ctx.lit) { litCount++; if (s.xr > maxXr) { maxXr = s.xr; } }
+          if (lk.anim) { anim = true; }
+          if (lk.alpha > 0 && (view.wt >= 0 || view.ct >= 0)) {
+            finishLook(view, s);
+            if (FIN.k > 0) { lk.color = rgb(mix(s.base, C.core, FIN.k)); }
+            lk.alpha *= FIN.lvl;
+          }
+          if (lk.alpha <= 0) { setA(s.node, "opacity", 0); }
+          else { paintSeg(s, lk.color, lk.alpha); }
+        }
+        caretShow = litCount > 0 && litCount < segs.length && !view.hold && !intr;
+        caretX = maxXr;
+      }
+
+      if (caretShape !== "line") {
+        caretShow = f > 0.0001 && f < 0.9999 && !view.hold && !intr;
+        if (caretShow) { placeShapedCaret(run.x + f * run.w); }
+      }
+      if (caretShow) {
+        if (caretShape === "line") { setA(caret, "x", Math.max(run.x, caretX - Z.cap)); }
+        setA(caret, "display", "inline");
+        if (core) { setA(core, "display", "inline"); }
+      } else {
+        setA(caret, "display", "none");
+        if (core) { setA(core, "display", "none"); }
+      }
+      lockIn(view);
+      setA(frameGlow, "opacity", Math.round(view.glow * 70) / 100);
+      var sf = Math.round(view.svgFade * 100) / 100;
+      if (svg._sf !== sf) { svg._sf = sf; svg.style.opacity = sf; }
+      t1.textContent = ((S.channel ? 1 - view.p : view.p) * CAST).toFixed(1);
+      return anim;
+    }
+    return { update: update, count: gen.count, restyle: restyle };
+  }
+
+  /* ---------- Pet slot rings (reuse segLook, flick, phaseOf, intrParams) ---------- */
+
+  var RING_N = 16;
+  var SLOT_DEFS = [
+    { id: "pet-slot-1", name: "Firebolt", on: true },
+    { id: "pet-slot-2", name: "Torment", on: false },
+    { id: "pet-slot-3", name: "Lash of Pain", on: false }
+  ];
+
+  function buildRing(def, idx) {
+    var btn = document.getElementById(def.id);
+    while (btn.firstChild) { btn.removeChild(btn.firstChild); }
+    var uid = "r" + (++uidN);
+    var size = 30, c = 4, mid = size / 2, rad = 11.5, sw = 1.5;
+    var svg = el("svg", { viewBox: "0 0 " + size + " " + size, width: 90, height: 90, "aria-hidden": "true", focusable: "false" }, btn);
+    var defs = el("defs", {}, svg);
+    var glow = el("filter", { id: uid + "-gl", x: "-30%", y: "-30%", width: "160%", height: "160%", "color-interpolation-filters": "sRGB" }, defs);
+    el("feGaussianBlur", { "in": "SourceGraphic", stdDeviation: 1.1, result: "b" }, glow);
+    var mg = el("feMerge", {}, glow);
+    el("feMergeNode", { "in": "b" }, mg);
+    el("feMergeNode", { "in": "SourceGraphic" }, mg);
+
+    var chamfer = ptsStr([[c + 0.5, 0.5], [size - 0.5, 0.5], [size - 0.5, size - c - 0.5], [size - c - 0.5, size - 0.5], [0.5, size - 0.5], [0.5, c + 0.5]]);
+    el("polygon", { points: chamfer, fill: rgba(C.track, 0.95), stroke: rgb(C.violet), "stroke-width": 1, "stroke-linejoin": "miter" }, svg);
+    el("rect", { x: 3, y: 3, width: size - 6, height: size - 6, fill: rgb(C.surface) }, svg);
+    var q = 7;
+    el("polygon", { points: ptsStr([[mid, mid - q], [mid + q, mid], [mid, mid + q], [mid - q, mid]]), fill: rgb(C.pink), opacity: 0.9 }, svg);
+
+    /* Faint unlit ring, then the arcs */
+    el("circle", { cx: mid, cy: mid, r: rad, fill: "none", stroke: rgba(C.green, 0.14), "stroke-width": sw }, svg);
+    var gArcs = el("g", { filter: "url(#" + uid + "-gl)" }, svg);
+    var arcs = [];
+    for (var i = 0; i < RING_N; i++) {
+      var a0 = -Math.PI / 2 + (i / RING_N) * Math.PI * 2;
+      var a1 = -Math.PI / 2 + ((i + 1) / RING_N) * Math.PI * 2 + 0.02;
+      var d = "M" + (mid + rad * Math.cos(a0)).toFixed(3) + " " + (mid + rad * Math.sin(a0)).toFixed(3) +
+              " A" + rad + " " + rad + " 0 0 1 " + (mid + rad * Math.cos(a1)).toFixed(3) + " " + (mid + rad * Math.sin(a1)).toFixed(3);
+      var seg = {
+        a: i / RING_N, frac: i / RING_N, seed: 9000 + idx * 977 + i * 131, litSince: null, base: C.green, mode: "stroke"
+      };
+      seg.node = el("path", { d: d, fill: "none", stroke: rgb(C.green), "stroke-width": sw, opacity: 0 }, gArcs);
+      arcs.push(seg);
+    }
+    var label = document.createElement("span");
+    label.textContent = def.name;
+    btn.appendChild(label);
+
+    var ring = { btn: btn, on: def.on, phase: def.on ? "on" : "off", t0: performance.now(), T: 1000, arcs: arcs, gate: { badUntil: 0 } };
+    ring.restyle = function () { applyFlicker(arcs, function (k) { return arcs[k].seed; }, 30); };
+    ring.restyle();
+    btn.setAttribute("aria-pressed", def.on ? "true" : "false");
+    btn.addEventListener("click", function () { toggleRing(ring); });
+    return ring;
+  }
+
+  function toggleRing(ring) {
+    var now = performance.now();
+    var k;
+    if (ring.on && ring.phase !== "outage") {
+      ring.btn.setAttribute("aria-pressed", "false");
+      ring.phase = "outage";
+      ring.t0 = now;
+      ring.T = S.intMs;
+    } else {
+      ring.btn.setAttribute("aria-pressed", "true");
+      ring.on = true;
+      ring.phase = "on";
+      ring.t0 = now;
+      for (k = 0; k < ring.arcs.length; k++) { ring.arcs[k].litSince = null; }
+    }
+    kick();
+  }
+
+  function ringUpdate(ring, now) {
+    var anim = false, intr = null, lit = ring.on, k;
+    if (ring.phase === "outage") {
+      var uT = clamp((now - ring.t0) / ring.T);
+      if (uT >= 1) {
+        ring.on = false;
+        ring.phase = "off";
+        lit = false;
+      } else {
+        intr = isReduced() ? { phase: "reduced", u: uT, uT: uT } : phaseOf(uT);
+        anim = true;
+      }
+    }
+    var ip = intrParams(intr);
+    var level = ip.level;
+    if (!intr && lit && !isReduced()) {
+      var amp = clamp((now - ring.t0 - 450) / 500);
+      level = 1 - amp * 0.3 * (0.5 + 0.5 * Math.sin((now - ring.t0) / 2200 * Math.PI * 2));
+      anim = true;
+    }
+    var ctx = {
+      lit: lit, snap: false, intr: intr, ip: ip, level: level, fadeLit: 1, extent: 1, gate: ring.gate,
+      stagger: S.style === "calm" ? function (sg) { return sg.a * 480; } : null
+    };
+    for (k = 0; k < ring.arcs.length; k++) {
+      var s = ring.arcs[k];
+      var lk = segLook(s, now, ctx);
+      if (lk.anim) { anim = true; }
+      if (lk.alpha <= 0) { setA(s.node, "opacity", 0); }
+      else { paintSeg(s, lk.color, lk.alpha); }
+    }
+    return anim;
+  }
+
+  /* ---------- Timeline ---------- */
+
+  var slider = document.getElementById("progress");
+  var out = document.getElementById("progress-out");
+  var playBtn = document.getElementById("play");
+  var intBtn = document.getElementById("interrupt");
+  var chan = document.getElementById("channel");
+  var randInt = document.getElementById("rand-int");
+  var holdIn = document.getElementById("hold-len");
+  var intIn = document.getElementById("int-len");
+
+  function startCast(now, p0) {
+    var restore = S.seq && S.seq.afterIntr;
+    S.restoreAt = null;
+    S.p = p0 || 0;
+    S.seq = {
+      phase: "cast", t0: now - S.p * CAST_MS, restore: !!restore,
+      intrAt: (S.randInt && Math.random() < 1 / 3) ? 0.15 + Math.random() * 0.7 : null
+    };
+    if (S.seq.intrAt !== null && S.seq.intrAt <= S.p) { S.seq.intrAt = null; }
+  }
+  function beginInterrupt(now) {
+    var q = S.seq;
+    var keepOnce = q ? q.once : !S.playing;
+    S.seq = { phase: "intr", t0: now, p0: S.p, T: S.intMs, once: keepOnce };
+  }
+  function stepSeq(now) {
+    var q = S.seq;
+    if (!q) { return; }
+    var el = now - q.t0;
+    switch (q.phase) {
+      case "cast":
+        S.p = clamp(el / CAST_MS);
+        if (q.intrAt !== null && S.p >= q.intrAt) { beginInterrupt(now); return; }
+        if (S.p >= 1) {
+          if (S.channel) { q.phase = "pause"; q.t0 = now; } else { q.phase = "hold"; q.t0 = now; }
+        }
+        break;
+      case "hold":
+        if (el >= S.holdMs) {
+          if (isReduced() && S.finish === "none") { q.phase = "pause"; q.t0 = now; } else { q.phase = "fade"; q.t0 = now; }
+        }
+        break;
+      case "fade":
+        if (el >= FADE_MS) { q.phase = "pause"; q.t0 = now; }
+        break;
+      case "intr":
+        if (el >= q.T) { q.phase = "pause"; q.t0 = now; q.afterIntr = true; S.p = 0; }
+        break;
+      default:
+        if (el >= PAUSE_MS) {
+          if (S.playing) { startCast(now, 0); }
+          else { S.seq = null; S.p = 0; if (q.afterIntr) { S.restoreAt = now; } }
+        }
+    }
+  }
+  function waveOn() { return (S.finish === "both" || S.finish === "sweep") && !isReduced(); }
+  function chaseOn() { return (S.finish === "both" || S.finish === "chase") && !isReduced(); }
+  function computeView(now) {
+    var q = S.seq;
+    var v = { p: S.p, hold: false, fadeLit: 1, flatLit: 1, glow: 0, svgFade: 1, intr: null, wt: -1, wd: 0, ct: -1, lt: -1, ld: 0 };
+    var rest = S.channel ? 1 : 0;
+    if (!q) {
+      if (!S.channel && S.p >= 0.9999) { v.hold = true; v.glow = 1; }
+      if (S.restoreAt !== null) {
+        var ur = clamp((now - S.restoreAt) / 200);
+        v.svgFade = 0.3 + 0.7 * ur;
+        if (ur >= 1) { S.restoreAt = null; }
+      }
+      return v;
+    }
+    var u;
+    switch (q.phase) {
+      case "cast":
+        if (q.restore) { v.svgFade = 0.3 + 0.7 * clamp((now - q.t0) / 200); }
+        break;
+      case "hold":
+        v.p = 1; v.hold = true; v.glow = 1;
+        if (waveOn() && S.holdMs > 0) { v.wd = Math.min(WAVE_MS, S.holdMs); v.wt = now - q.t0; }
+        {
+          /* Starts as the wave reaches the far end (no wave: at the start of the hold), and always ends inside the hold */
+          var ls = v.wt >= 0 ? v.wd * 0.75 : 0;
+          var ld = Math.min(isReduced() ? 200 : LOCK_MS, S.holdMs - ls);
+          var lt = now - q.t0 - ls;
+          if (ld >= 80 && lt >= 0 && lt < ld) { v.lt = lt; v.ld = ld; }
+        }
+        break;
+      case "fade":
+        u = clamp((now - q.t0) / FADE_MS);
+        v.p = 1; v.hold = true; v.flatLit = 1 - u; v.glow = 1 - u;
+        if (chaseOn()) { v.ct = now - q.t0; } else { v.fadeLit = 1 - u; }
+        break;
+      case "intr":
+        v.p = q.p0;
+        u = clamp((now - q.t0) / q.T);
+        v.intr = isReduced() ? { phase: "reduced", u: u, uT: u } : phaseOf(u);
+        if (v.intr.phase === "fade") { v.svgFade = 1 - 0.7 * v.intr.u; }
+        break;
+      default:
+        v.p = rest;
+        if (q.afterIntr) { v.svgFade = 0.3; }
+    }
+    return v;
+  }
+
+  var uiCache = {};
+  function syncUI(view) {
+    var pct = Math.round(view.p * 100);
+    if (uiCache.pct !== pct) {
+      uiCache.pct = pct;
+      slider.value = pct;
+      out.textContent = pct + "%";
+      slider.style.setProperty("--fill", pct + "%");
+    }
+    var q = S.seq;
+    var can = pct >= 1 && pct <= 99 && (!q || q.phase === "cast");
+    if (uiCache.can !== can) { uiCache.can = can; intBtn.disabled = !can; }
+  }
+
+  function render(now) {
+    stepSeq(now);
+    var view = computeView(now);
+    var anim = false, i;
+    for (i = 0; i < bars.length; i++) { if (bars[i].update(view, now)) { anim = true; } }
+    for (i = 0; i < rings.length; i++) { if (ringUpdate(rings[i], now)) { anim = true; } }
+    syncUI(view);
+    return anim || !!S.seq || S.restoreAt !== null;
+  }
+  function frame() {
+    S.raf = 0;
+    if (render(performance.now())) { S.raf = requestAnimationFrame(frame); }
+  }
+  function kick() {
+    if (!S.raf) { S.raf = requestAnimationFrame(frame); }
+  }
+
+  function setPlaying(on) {
+    S.playing = on;
+    playBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    playBtn.textContent = on ? "Pause" : "Play loop";
+  }
+
+  function renderAll() {
+    bars = [];
+    var hosts = document.querySelectorAll(".bar-host");
+    for (var i = 0; i < hosts.length; i++) {
+      var host = hosts[i];
+      while (host.firstChild) { host.removeChild(host.firstChild); }
+      var v = host.closest(".card").getAttribute("data-v");
+      var b = build(host, v, host.getAttribute("data-size"), host.closest(".card").getAttribute("data-lock"));
+      bars.push(b);
+      var rowEl = host.closest(".row");
+      var segEl = rowEl ? rowEl.querySelector("[data-segs]") : null;
+      if (segEl) { segEl.textContent = b.count; }
+    }
+    uiCache = {};
+    kick();
+  }
+  function renderRings() {
+    var keep = rings.map(function (r) { return { on: r.on }; });
+    rings = SLOT_DEFS.map(function (d, i) {
+      var def = { id: d.id, name: d.name, on: keep[i] ? keep[i].on : d.on };
+      return buildRing(def, i);
+    });
+    kick();
+  }
+
+  /* ---------- Wiring ---------- */
+
+  slider.addEventListener("input", function () {
+    S.seq = null;
+    S.restoreAt = null;
+    setPlaying(false);
+    S.p = slider.value / 100;
+    uiCache = {};
+    kick();
+  });
+  playBtn.addEventListener("click", function () {
+    var now = performance.now();
+    if (S.playing) {
+      var q = S.seq;
+      setPlaying(false);
+      if (q && q.phase === "intr") { S.p = q.p0; }
+      if (q && q.phase !== "cast" && q.phase !== "intr") { S.p = (q.phase === "pause") ? (S.channel ? 1 : 0) : 1; }
+      S.seq = null;
+    } else {
+      setPlaying(true);
+      if (S.seq && (S.seq.phase === "intr" || S.seq.phase === "pause")) {
+        S.seq.once = false;
+      } else {
+        startCast(now, (S.p > 0 && S.p < 1) ? S.p : 0);
+      }
+    }
+    uiCache = {};
+    kick();
+  });
+  intBtn.addEventListener("click", function () {
+    var now = performance.now();
+    var pct = Math.round(S.p * 100);
+    if (pct < 1 || pct > 99) { return; }
+    if (S.seq && S.seq.phase !== "cast") { return; }
+    beginInterrupt(now);
+    uiCache = {};
+    kick();
+  });
+  chan.addEventListener("change", function () {
+    S.channel = chan.checked;
+    renderAll();
+  });
+  randInt.addEventListener("change", function () { S.randInt = randInt.checked; });
+  function readNum(inp, lo, hi, dflt) {
+    var v = parseFloat(inp.value);
+    if (!isFinite(v)) { v = dflt; }
+    return Math.min(hi, Math.max(lo, v));
+  }
+  holdIn.addEventListener("input", function () { S.holdMs = readNum(holdIn, 0, 5, 1) * 1000; });
+  intIn.addEventListener("input", function () { S.intMs = readNum(intIn, 0.2, 3, 1) * 1000; });
+  Array.prototype.forEach.call(document.querySelectorAll("#fillmode button"), function (b) {
+    b.addEventListener("click", function () {
+      S.mode = b.getAttribute("data-mode");
+      Array.prototype.forEach.call(document.querySelectorAll("#fillmode button"), function (o) {
+        o.setAttribute("aria-pressed", o === b ? "true" : "false");
+      });
+      renderAll();
+    });
+  });
+  document.getElementById("caretstyle").addEventListener("change", function (e) {
+    S.caret = e.target.value;
+    kick();
+  });
+  document.getElementById("lockin").addEventListener("change", function (e) {
+    S.lockin = e.target.value;
+    kick();
+  });
+  document.getElementById("finishstyle").addEventListener("change", function (e) {
+    S.finish = e.target.value;
+    kick();
+  });
+  document.getElementById("ignitestyle").addEventListener("change", function (e) {
+    S.style = e.target.value;
+    bars.forEach(function (b) { b.restyle(); });
+    rings.forEach(function (r) { r.restyle(); });
+    kick();
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("#chevcolor button"), function (b) {
+    b.addEventListener("click", function () {
+      S.chev = b.getAttribute("data-chev");
+      Array.prototype.forEach.call(document.querySelectorAll("#chevcolor button"), function (o) {
+        o.setAttribute("aria-pressed", o === b ? "true" : "false");
+      });
+      renderAll();
+    });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-zoom]"), function (b) {
+    b.addEventListener("click", function () {
+      document.documentElement.style.setProperty("--zoom", b.getAttribute("data-zoom"));
+      Array.prototype.forEach.call(document.querySelectorAll("[data-zoom]"), function (o) {
+        o.setAttribute("aria-pressed", o === b ? "true" : "false");
+      });
+    });
+  });
+  reducedMQ.addEventListener && reducedMQ.addEventListener("change", function () { kick(); });
+
+  loadColors();
+  renderAll();
+  renderRings();
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(function () { renderAll(); });
+  }
+})();
+</script>

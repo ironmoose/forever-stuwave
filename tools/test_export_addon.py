@@ -115,6 +115,37 @@ def test_export_changes_display_metadata_and_preserves_runtime_identity(
     ]
 
 
+def test_export_keeps_toc_bindings_xml_without_exporting_other_xml(
+    tmp_path: Path, destination: Path, package: dict[str, bytes],
+) -> None:
+    bindings = (
+        b'<?xml version="1.0" encoding="UTF-8"?>\r\n'
+        b'<Bindings>\r\n'
+        b'  <Binding name="CLICK FSSealButton1:LeftButton" '
+        b'header="FOREVERSYNTHWAVE"/>\r\n'
+        b'</Bindings>\r\n'
+    )
+    package["ForeverSynthwave.toc"] += b"Bindings.xml\n"
+    package["Bindings.xml"] = bindings
+    package["Preview.xml"] = b"<Ui>private preview</Ui>\n"
+    package["tools/Bindings.xml"] = b"<Bindings>private tooling</Bindings>\n"
+    package["mockups/Private.xml"] = b"<Ui>private mockup</Ui>\n"
+
+    result = _export(_archive(tmp_path, package), destination)
+
+    assert result.returncode == 0, result.stderr
+    exported = _snapshot(destination)
+    public_files = {name for name in exported if not name.startswith(".git/")}
+    assert public_files == set(RUNTIME) | {"Bindings.xml", ".stuwave-export.json"}
+    assert exported["Bindings.xml"] == bindings
+    assert exported["ForeverSynthwave.lua"] == RUNTIME["ForeverSynthwave.lua"]
+    lines = exported["ForeverSynthwave.toc"].decode("utf-8").splitlines()
+    assert "## SavedVariables: ForeverSynthwaveDB" in lines
+    assert [line for line in lines if line and not line.startswith("#")] == [
+        "ForeverSynthwave.lua", "DataBar.lua", "Bindings.xml",
+    ]
+
+
 def test_export_curates_private_comment_rationale_without_changing_lua_strings_or_lines(
     tmp_path: Path, destination: Path, package: dict[str, bytes],
 ) -> None:

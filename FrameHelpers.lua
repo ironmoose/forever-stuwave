@@ -578,7 +578,7 @@ function Helpers.UpdateCaretFull(caret, unit, kind)
         if not warnedNoCaretFullHide then
             warnedNoCaretFullHide = true
             FS.LogDegradeOnce("caret_full_hide",
-                "|cffff4488ForeverSynthwave|r: caret full-value hide setter refused, falling back to plain compare")
+                "|cffff4488Forever STUwave|r: caret full-value hide setter refused, falling back to plain compare")
         end
         host:SetAlpha(1)
         host:SetShown(true)
@@ -644,7 +644,7 @@ function Helpers.UpdatePowerHostEmpty(host, unit)
 
         emptyHideBroken = true
         FS.LogDegradeOnce("power_empty_hide",
-            "|cffff4488ForeverSynthwave|r: power empty-hide setter refused, leaving power rail glow visible")
+            "|cffff4488Forever STUwave|r: power empty-hide setter refused, leaving power rail glow visible")
     end
     host:SetAlpha(1)
 end
@@ -695,7 +695,7 @@ function Helpers.SetRailGradient(tex, r, g, b, alphaFrom, alphaTo)
     if not ok then
         railGradientBroken = true
         FS.LogDegradeOnce("rail_gradient",
-            "|cffff4488ForeverSynthwave|r: rail SetGradient failed, using flat tint")
+            "|cffff4488Forever STUwave|r: rail SetGradient failed, using flat tint")
     end
     return ok
 end
@@ -1276,6 +1276,25 @@ function Helpers.SeatButtonText(button, ...)
     return host
 end
 
+-- Mouse labels use raw binding tokens so localization cannot change their identity.
+-- Keyboard and gamepad labels keep Blizzard's abbreviated text.
+local MOUSE_MODIFIER_TEXT = { SHIFT = "S-", CTRL = "C-", ALT = "A-" }
+function Helpers.FormatBindingText(key)
+    if not key or key == "" then return "" end
+    local modifiers, number = key:match("^(.-)BUTTON(%d+)$")
+    if not number then return GetBindingText(key, 1) end
+
+    local prefix = ""
+    while modifiers ~= "" do
+        local modifier, rest = modifiers:match("^(%a+)%-(.*)$")
+        local text = modifier and MOUSE_MODIFIER_TEXT[modifier]
+        if not text then return GetBindingText(key, 1) end
+        prefix = prefix .. text
+        modifiers = rest
+    end
+    return prefix .. (number == "3" and "MM" or "MB" .. number)
+end
+
 -------------------------------------------------------------------------------
 -- Quick Keybind support
 -------------------------------------------------------------------------------
@@ -1369,7 +1388,7 @@ local QK_OVERLAY_LEVEL_OFFSET = 20
 local function WarnQuickKeybindOnce(key, message)
     if qkWarned then return end
     qkWarned = true
-    FS.LogDegradeOnce(key, "|cffff4488ForeverSynthwave|r: " .. message)
+    FS.LogDegradeOnce(key, "|cffff4488Forever STUwave|r: " .. message)
 end
 
 local function InQuickKeybindMode()
@@ -1441,7 +1460,7 @@ local function SyncQuickKeybindState()
     elseif not inMode and not qkCombatNoticeShown then
         qkCombatNoticeShown = true
         FS.LogDegradeOnce("quickkeybind_combat_close",
-            "|cffff4488ForeverSynthwave|r: bar clicks resume after combat "
+            "|cffff4488Forever STUwave|r: bar clicks resume after combat "
             .. "(Quick Keybind closed mid-fight); keybinds still work.")
     end
 end

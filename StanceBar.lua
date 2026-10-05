@@ -65,7 +65,7 @@ local function UpdateCooldown(button)
         if not warnedNoCooldownApi then
             warnedNoCooldownApi = true
             FS.LogDegradeOnce("stancebar_nocooldownapi",
-                "|cffff4488ForeverSynthwave|r: GetShapeshiftFormCooldown unavailable, " ..
+                "|cffff4488Forever STUwave|r: GetShapeshiftFormCooldown unavailable, " ..
                 "stance bar cooldown display disabled")
         end
         cooldown:Hide()
@@ -121,7 +121,7 @@ local function WatchForSpellId(button)
         if button.fsCastSpell == nil and button:IsShown() and not warnedNoSpellId then
             warnedNoSpellId = true
             FS.LogDegradeOnce("stancebar_nospellid",
-                "|cffff4488ForeverSynthwave|r: GetShapeshiftFormInfo gave no spell id, " ..
+                "|cffff4488Forever STUwave|r: GetShapeshiftFormInfo gave no spell id, " ..
                 "stance button " .. tostring(button.index) .. " cannot cast")
         end
     end)
@@ -155,7 +155,7 @@ local function UpdateHotkey(button)
     if not hotkey then return end
 
     local key = GetBindingKey("SHAPESHIFTBUTTON" .. button.index)
-    local text = key and GetBindingText(key, 1) or ""
+    local text = FS.FrameHelpers.FormatBindingText(key)
 
     if text == "" then
         hotkey:SetText("")
@@ -200,7 +200,7 @@ local function UpdateButton(button)
         if not warnedNoFormInfoApi then
             warnedNoFormInfoApi = true
             FS.LogDegradeOnce("stancebar_noforminfoapi",
-                "|cffff4488ForeverSynthwave|r: GetShapeshiftFormInfo unavailable, " ..
+                "|cffff4488Forever STUwave|r: GetShapeshiftFormInfo unavailable, " ..
                 "stance bar button info disabled")
         end
         return
@@ -269,7 +269,7 @@ local function ShowStanceTooltip(self)
         if not warnedNoTooltipApi then
             warnedNoTooltipApi = true
             FS.LogDegradeOnce("stancebar_notooltipapi",
-                "|cffff4488ForeverSynthwave|r: GameTooltip:SetShapeshift unavailable, " ..
+                "|cffff4488Forever STUwave|r: GameTooltip:SetShapeshift unavailable, " ..
                 "stance bar tooltips disabled")
         end
         return
@@ -435,6 +435,9 @@ local function Build()
 
     local numForms = GetNumShapeshiftForms and GetNumShapeshiftForms() or 0
     if not numForms or numForms < 0 then numForms = 0 end
+    -- A Paladin's auras are its forms; SealBar.lua draws them (with the seals), so no stance
+    -- bar is built. Re-asked on every build: SealBar decides after this file's first build.
+    if FS.SealBar and FS.SealBar.OwnsForms and FS.SealBar.OwnsForms() then numForms = 0 end
     for i = numForms + 1, #buttons do buttons[i]:Hide() end
     if numForms == 0 then
         container:Hide()
@@ -478,6 +481,9 @@ local function RequestBuild()
     pendingBuild = false
     Build()
 end
+
+-- SealBar.lua asks for a rebuild once it owns a Paladin's forms.
+FS.StanceBar = { Rebuild = RequestBuild }
 
 -------------------------------------------------------------------------------
 -- Events
@@ -537,7 +543,7 @@ local function Apply()
     -- PLAYER_LOGIN/PLAYER_REGEN_ENABLED.
     local ok, err = pcall(Build)
     if not ok then
-        print("|cff22e0ffForeverSynthwave|r: stance bar failed to build ("
+        print("|cff22e0ffForever STUwave|r: stance bar failed to build ("
             .. tostring(err) .. "); Blizzard bars left in place.")
         return
     end

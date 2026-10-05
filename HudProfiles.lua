@@ -1,4 +1,5 @@
--- Forever Synthwave: combat HUD class profiles. DATA ONLY.
+-- Forever Synthwave: combat HUD class profiles. DATA ONLY, plus one pure helper, FS.HudProfiles.ClassSlot,
+-- the single home of the "who owns the Gunsight DoT area" rule (see below).
 --
 -- Keyed by the class token UnitClass("player") returns as its second value. A class with no
 -- entry gets no HUD. Spell keys are HudSpells.lua keys; HudLogic.lua interprets this table.
@@ -19,6 +20,12 @@
 --              proc rung (GunsightFrame.lua): the post on that side of the horizon and the
 --              text above its tape; a proc with no side is not drawn there, and a profile
 --              with no procs (priest) gets no rungs.
+--              A proc with `ready = key` (a dictionary spell) is a COOLDOWN tracker instead:
+--              it is active while that spell is off cooldown (CooldownState, so the global
+--              cooldown does not darken it), false when the spell is unknown, nil when the
+--              cooldown is unreadable; it has no aura or overlay source. Its icon is the
+--              spell's own.
+--              `needsTarget = true` on a `ready` proc keeps it dark unless the target is attackable (Judgement).
 --              overlaySpell is the spell whose action-bar glow marks the proc (Shadow Trance
 --              lights Shadow Bolt). Two sources, in order: the overlay glow (the
 --              SPELL_ACTIVATION_OVERLAY_GLOW_SHOW/HIDE events and
@@ -28,6 +35,14 @@
 --              oocOnly = true }. A buff whose spell the player does not know is not reported
 --              (a Holy priest never gets a Shadowform reminder).
 --   resource   shards = { item = id } enables the shard count.
+--   seals      Paladin seal data: { order = { keys }, duration = seconds, judge = { key = seconds } }.
+--              Having it makes HudLogic keep the seal ledger (`state.seal`, `FS.Hud.GetSeals()` and
+--              the `sealMissing` primitive). `order` is the display order of the seals the player
+--              knows; `duration` is the length of any seal; `judge` is the Judgement debuff length
+--              per seal: HudLogic records it on the target when our own Judgement lands under that seal
+--              (`state.judged`); a seal absent from `judge` (Righteousness) records none.
+--   dotLabel   { n = name, d = description }: how a display names this class's DoT lane. The reader is
+--              ConsoleKeys.Label (the tooltip of the console's DoT key); nothing else reads it.
 --   fillerOrder  "wand" (the default) or "spell". Rotation rules tagged `filler = "wand"`
 --              or `filler = "spell"` are pulled out and re-inserted, together, at the place
 --              of the first filler rule: wand rules first by default, spell rules first for
@@ -65,6 +80,19 @@
 local _, FS = ...
 
 FS.HudProfiles = {}
+
+-- The DoT area of the Gunsight HUD (deck key 6) is a CLASS slot: a Warlock and a Priest get the DoT time
+-- tape, a Paladin gets the Seal Chamber. This is the one rule for who owns it, shared by ConsoleKeys.lua (does
+-- the key show) and GunsightDots.lua (does the tape draw), so the two cannot disagree. Returns "dots" for a
+-- profile with a non empty `dots` table (a profile with dots AND seals keeps the tape), "seals" for a `seals`
+-- table with no dots, nil for anything else (no profile, a profile that is not a table, neither field a table).
+-- Pure: it only indexes the profile and walks it with `next`.
+function FS.HudProfiles.ClassSlot(profile)
+    if type(profile) ~= "table" then return nil end
+    if type(profile.dots) == "table" and next(profile.dots) ~= nil then return "dots" end
+    if type(profile.seals) == "table" then return "seals" end
+    return nil
+end
 
 -- Priest. One list covers L4 to 39 (wand priest) and 40+ (Shadowform): an unknown spell is
 -- skipped (Devouring Plague L20, Shadow Word: Death L32, Mind Flay and Shadowform talents).
@@ -194,5 +222,49 @@ FS.HudProfiles.WARLOCK = {
         -- there is no wand.
         { cast = "shoot", filler = "wand", when = { { "wandEquipped" } } },
         { cast = "shadow_bolt", filler = "spell", when = {} },
+    },
+}
+
+-- Paladin. Two cooldown trackers (Holy Strike on the left rung, learned at 6, and Judgement on the
+-- right, known from 4; each lit while off cooldown, Judgement also needing an attackable target,
+-- `needsTarget`) plus a seal ledger (`seals`, HudLogic `state.seal`) and a three rule rotation,
+-- first true rule wins, sourced from the 2026-10-04 paladin research (design notes
+-- design record):
+--   1. Seal of Righteousness while no seal is up or the one up has 5 s or less left. An unknown
+--      seal state (nil) skips the rule, never guessed.
+--   2. Judgement while it is ready; it is off the global cooldown, so it leads Holy Strike. The
+--      procActive link makes NEXT gold and folds in the attackable-target rule.
+--   3. Holy Strike while it is ready, in melee range or the range unknown.
+-- NOT PORTED yet (no rules for them): the Crusader judge-and-swap detour (L10+), Seal of Command
+-- on a slow two-hander (L20+), Exorcism, Consecration, Hammer of Justice. UNVERIFIED in game:
+-- every seal name and id except Righteousness and the Crusader, the aura reconcile on 1.60.1,
+-- Holy Strike's id, cooldown and global cooldown status, Hammer of the Righteous sharing Holy
+-- Strike's cooldown (not in the ledger), isActive during the global cooldown, and Judgement
+-- reading ready with no seal up or out of range.
+FS.HudProfiles.PALADIN = {
+    row = {},
+    dots = {},
+    cooldowns = {},
+    channels = {},
+    procs = {
+        hs = { ready = "hs", glow = "gold", label = "HOLY STRIKE", side = "left" },
+        jd = { ready = "jd", glow = "gold", label = "JUDGEMENT", side = "right", needsTarget = true },
+    },
+    selfBuffs = {},
+    seals = {
+        order = { "sor", "sotc", "sofu", "soc", "sol", "sow", "soj" },
+        duration = 30,
+        -- Judgement debuff length per seal (HudLogic `state.judged`).
+        judge = { sotc = 40, sol = 40, sow = 40, soj = 10 },
+    },
+    -- The reader is ConsoleKeys.Label (the tooltip of the console's DoT key).
+    dotLabel = { n = "Seal Chamber", d = "Active seal, drain timer and Judgement lane" },
+    rotation = {
+        { cast = "sor", when = { { "sealMissing", 5 } } },
+        -- procActive "jd" is "Judgement is off cooldown and the target is attackable"; it is what
+        -- makes NEXT gold. An unknown range (nil) still shows NEXT, like the priest opener.
+        { cast = "jd", when = { { "procActive", "jd" }, { "orUnknown", { "inRange", "jd" } } } },
+        -- Melee range gates Holy Strike the same way.
+        { cast = "hs", when = { { "procActive", "hs" }, { "orUnknown", { "inRange", "hs" } } } },
     },
 }

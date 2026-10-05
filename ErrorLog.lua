@@ -51,7 +51,7 @@ local foreignStored = 0
 local preLoad = {}
 local loaded = false
 
-local PREFIX = "|cff22e0ffForever Synthwave|r"
+local PREFIX = "|cff22e0ffForever STUwave|r"
 local CHAT_INTERVAL = 10
 
 local function Secret(v)
@@ -508,25 +508,25 @@ SlashCmdList["FSERR"] = function(msg)
         wipe(preLoad)
         foreignStored = 0
         FS.ErrorLogDropped = 0
-        print("|cff22e0ffForeverSynthwave|r: error log cleared.")
+        print("|cff22e0ffForever STUwave|r: error log cleared.")
         return
     end
 
     local total = #ForeverSynthwaveErrorLog
     if total == 0 then
-        print("|cff22e0ffForeverSynthwave|r: no errors captured.")
+        print("|cff22e0ffForever STUwave|r: no errors captured.")
         return
     end
 
-    print(("|cff22e0ffForeverSynthwave|r: %d distinct error(s) captured."):format(total))
+    print(("|cff22e0ffForever STUwave|r: %d distinct error(s) captured."):format(total))
     if (FS.ErrorLogDropped or 0) > 0 then
-        print(("|cff22e0ffForeverSynthwave|r: log full, %d error(s) of ours not stored. /fserr clear."):format(FS.ErrorLogDropped))
+        print(("|cff22e0ffForever STUwave|r: log full, %d error(s) of ours not stored. /fserr clear."):format(FS.ErrorLogDropped))
     end
     for i = 1, math.min(total, 5) do
         local entry = ForeverSynthwaveErrorLog[i]
         print(("  %d) x%d  %s"):format(i, entry.count, entry.message))
     end
-    print("|cff22e0ffForeverSynthwave|r: /reload to flush them to SavedVariables.")
+    print("|cff22e0ffForever STUwave|r: /reload to flush them to SavedVariables.")
 end
 
 -------------------------------------------------------------------------------
@@ -551,18 +551,18 @@ end
 SLASH_FSRELOAD1 = "/fsreload"
 SlashCmdList["FSRELOAD"] = function()
     if InCombatLockdown() then
-        print("|cff22e0ffForeverSynthwave|r: reload refused -- in combat.")
+        print("|cff22e0ffForever STUwave|r: reload refused -- in combat.")
         return
     end
 
     if type(GetUnitSpeed) ~= "function" then
-        print("|cff22e0ffForeverSynthwave|r: reload refused -- can't verify movement, refusing to be safe.")
+        print("|cff22e0ffForever STUwave|r: reload refused -- can't verify movement, refusing to be safe.")
         return
     end
 
     local speed = GetUnitSpeed("player")
     if speed > 0 then
-        print("|cff22e0ffForeverSynthwave|r: reload refused -- moving.")
+        print("|cff22e0ffForever STUwave|r: reload refused -- moving.")
         return
     end
 
@@ -592,7 +592,7 @@ local lastRetained, lastAt
 SLASH_FSMEM1 = "/fsmem"
 SlashCmdList["FSMEM"] = function()
     if not (UpdateAddOnMemoryUsage and GetAddOnMemoryUsage) then
-        print("|cff22e0ffForeverSynthwave|r: memory APIs unavailable on this client.")
+        print("|cff22e0ffForever STUwave|r: memory APIs unavailable on this client.")
         return
     end
 
@@ -605,7 +605,7 @@ SlashCmdList["FSMEM"] = function()
     local retained = GetAddOnMemoryUsage(addonName) or 0
     local heapRetained = collectgarbage("count")
 
-    print(("|cff22e0ffForeverSynthwave|r: live %.0fK -> retained %.0fK after GC (UI heap %.0fK -> %.0fK)")
+    print(("|cff22e0ffForever STUwave|r: live %.0fK -> retained %.0fK after GC (UI heap %.0fK -> %.0fK)")
         :format(live, retained, heapLive, heapRetained))
 
     local now = GetTime and GetTime() or 0
@@ -744,7 +744,7 @@ end)
 SLASH_FSSNIPPET1 = "/fssnippet"
 SlashCmdList["FSSNIPPET"] = function()
     pcall(Probe)
-    print("|cff22e0ffForeverSynthwave|r: probe run; /reload to flush it to SavedVariables.")
+    print("|cff22e0ffForever STUwave|r: probe run; /reload to flush it to SavedVariables.")
 end
 
 -------------------------------------------------------------------------------
@@ -772,7 +772,7 @@ local testButton
 SLASH_FSBTN1 = "/fsbtn"
 SlashCmdList["FSBTN"] = function()
     if InCombatLockdown() then
-        print("|cff22e0ffForeverSynthwave|r: out of combat only.")
+        print("|cff22e0ffForever STUwave|r: out of combat only.")
         return
     end
 
@@ -798,7 +798,7 @@ SlashCmdList["FSBTN"] = function()
 
     testButton:Show()
 
-    print("|cff22e0ffForeverSynthwave|r: test button up, centre screen, bound to "
+    print("|cff22e0ffForever STUwave|r: test button up, centre screen, bound to "
         .. "action slot 1. Click it -- does it cast what is in slot 1?")
-    print(("|cff22e0ffForeverSynthwave|r: slot 1 texture = %s"):format(tostring(texture)))
+    print(("|cff22e0ffForever STUwave|r: slot 1 texture = %s"):format(tostring(texture)))
 end

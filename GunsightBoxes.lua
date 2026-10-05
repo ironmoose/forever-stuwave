@@ -9,10 +9,11 @@
 --           shrunk to fit), line 2 the timer "0.9 / 2.5" (cyan, 18); the icon tile to the RIGHT of the
 --           box; the channel tick counter "n/T" / "CUT" in the header row at the box's right end (not in
 --           the mockup: the mockup has no counter, this is where the Stack A tab's counter now lives)
---   target  header TARGET; line 1 the unit name (white while it casts, muted between casts, 14),
---           a divider, line 2 the spell name (18); the icon tile to the LEFT of the box, only while
+--   target  no header (the mockup drops the TARGET label); line 1 the unit name (white while it casts, muted between casts, 14),
+--           an HP rule and a power rule under it (below), a divider, line 2 the spell name (14, the
+--           mockup's fs2; yours stays 18); the icon tile to the LEFT of the box, only while
 --           a cast is live; NO timer (target cast timing is secret, the mockup draws none). The box
---           edge, header, line 2, divider and tile edge are pink while the cast can be kicked and
+--           edge, line 2, divider and tile edge are pink while the cast can be kicked and
 --           steel while it cannot (flag through SetAlphaFromBoolean, see below)
 --
 -- NO STATE MACHINE HERE. CastBars.lua owns every cast rule. A box exposes the MEMBERS its bar table
@@ -45,7 +46,25 @@
 -- HEADER. Yours reads the character's name, `UnitName("player")` upper-cased and shrunk to fit the header
 -- width (the box minus C.HEAD_RESERVE kept for the tick counter), falling back to YOU for nil, "Unknown", an
 -- empty string or a secret; refreshed on PLAYER_LOGIN / PLAYER_ENTERING_WORLD because the name is not always
--- ready at build. The target's header stays TARGET.
+-- ready at build. The target's box has no header at all (no FontString, in any tone copy).
+--
+-- TARGET BARS (mockup option B "Underline", drawTargetBars / tbBarH). The target frame grows UP by C.TGT_GROW
+-- (8 image px) above boxR so two thin rules fit under the unit name: HP (3 high) and power (2 high, one px
+-- below), as wide as the name (at least 24 image px; a secret name has no measurable width, so the full text
+-- width). The divider, line 2 and the icon tile keep their old screen seats; line 1 rides the
+-- new top. A rail is a track in the bar colour (alpha .2), a StatusBar fill with a horizontal alpha gradient
+-- (.35 to 1, flat colour if SetGradient is missing or refused) and a 1.5 px tip anchored to the fill
+-- texture's RIGHT edge, so no fraction is ever computed. UnitHealth / UnitHealthMax / UnitPower / UnitPowerMax
+-- go straight to SetMinMaxValues / SetValue (secret in combat, never compared). LOW HP is a red twin of the
+-- HP rail: UnitHealthPercent("target", false, curve) with a Step curve (1 from 0 to TB_LOW, 0 above) goes
+-- straight to SetAlpha on the red rail and the inverse curve on the green one (the PartyFrames / PetFrame
+-- pattern; the first failure latches and logs once, then a plain cur / max compare when neither value is
+-- secret, else red stays down). Power takes its colour from UnitPowerType (plain): mana cyan, rage, focus,
+-- energy gold; an unlisted type reads as mana; no power (a plain max of 0, or no type) hides the rule, a
+-- secret max keeps it. The events (UNIT_HEALTH, UNIT_MAXHEALTH, UNIT_POWER_UPDATE, UNIT_MAXPOWER,
+-- UNIT_DISPLAYPOWER, registered for "target" on a listener frame of their own) and the target / world events
+-- of the name listener refresh them; no OnUpdate. GunsightTape's KICK tag is seated off boxR and rides the
+-- box top in the mockup, so it needs C.TGT_GROW more rise (see the tape file).
 --
 -- AT REST (when a box is shown but idle: the target's only): the plate and steel edge, the unit's name muted,
 -- no spell and no tile.
@@ -57,7 +76,9 @@
 -- frame per colour with the tile edge). A tone is a frame so SetAlphaFromBoolean lands on a frame, as
 -- it already does for the tape's own layers. Plain frames only, nothing protected.
 --
--- UNVERIFIED IN GAME (needs an eyeball): the text baselines (C.DESCENT is an estimate of the font's
+-- UNVERIFIED IN GAME (needs an eyeball): the target bars (SetGradient on a StatusBar fill texture, the tip riding
+-- that fill at a value of 0, SetAlpha taking the secret curve result, the rules against line one's descenders),
+-- the text baselines (C.DESCENT is an estimate of the font's
 -- descent, as GunsightFrame's LABEL_DESCENT), line 2's clip for a secret name (the text is cut at
 -- the width, or overflows if the client does not clip), the chamfer (baked 6, the mockup 8 image px),
 -- the box edge without the mockup's glow halo, the tick counter in the header row, the "0.9 / 2.5"
@@ -100,7 +121,18 @@ local C = {
     STROKE_A = 1,                                    -- A(a), a = 1
     PAD = 7,                                         -- text x = b.x + 7, wmax = b.w - 14
     L1_SIZE = 14, L1_Y = 23,                         -- fs = o.fs1 || 14, text(l1, b.x + 7, b.y + 23, ...)
-    L2_SIZE = 18, L2_Y = 45,                         -- f2 = 18, text(l2, b.x + 7, b.y + 45, ...)
+    L2_SIZE = 18, L2_Y = 45,                         -- f2 = o.fs2 || 18 (your timer), text(l2, b.x + 7, b.y + 45, ...)
+    TGT_L2_SIZE = 14,                                -- the target call passes fs2: 14 (its spell line)
+    TGT_GROW = 8,                                    -- tbBox() 'b': y: BOXR.y - 8, h: BOXR.h + 8 (grows UP)
+    -- target bars, option B (drawTargetBars, tbBarH)
+    TB_X = 7, TB_MIN_W = 24,                         -- x = BR.x + 7, w = max(24, name width)
+    TB_HP_Y = 26, TB_HP_H = 3,                       -- tbBarH(x, y = BR.y + 26, w, 3, ...)
+    TB_PW_Y = 30, TB_PW_H = 2,                       -- tbBarH(x, y + 4, w, 2, ...)
+    TB_TRACK_A = 0.2, TB_TAIL_A = 0.35,              -- rgba(col, .2) track; fill gradient rgba(col, .35) to rgba(col, 1)
+    TB_TIP_W = 1.5, TB_TIP_A = 0.9, TB_TIP_MIX = 0.55,  -- fillRect(x + fw - 1.5, y, 1.5, h) in mix(col, white, .55) at A(.9)
+    TB_LOW = 0.35, LOW_EPSILON = 0.0005,             -- TB_LOW; PartyFrames' LOW_HP_EPSILON
+    POWER_KEYS = { [0] = "mana", [1] = "rage", [2] = "focus", [3] = "energy" },  -- UnitPowerType -> TB_PC key
+    BAR_EVENTS = { "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_POWER_UPDATE", "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER" },
     DIV_Y = 29, DIV_A = 0.4,                         -- hline(b.y + 29, b.x + 7, b.x + b.w - 7, ..., .4 * a)
     HEAD_SIZE = 11, HEAD_DY = 14, HEAD_A = 0.9,      -- header(s, x, BOX.y - 14, col, .9), text size 11
     HEAD_RESERVE = 26,                               -- image px kept at the header's right end for the tick
@@ -128,6 +160,10 @@ local colors = {
     white = { 0xf3 / 255, 0xfb / 255, 1, 1 },                                    -- --white #f3fbff
     muted = { 0x9d / 255, 0x93 / 255, 0xc4 / 255, 1 },                           -- --muted #9d93c4
     bg = BG,
+    green = (FS.Theme and FS.Theme.COLOR_HEAL) or { 0.224, 1, 0.078, 1 },        -- TB_HP #39ff14
+    gold = (FS.Theme and FS.Theme.COLOR_GOLD) or { 1, 0.8235, 0.2471, 1 },       -- K.gold #ffd23f (energy)
+    rage = { 0xc4 / 255, 0x1f / 255, 0x3b / 255, 1 },                            -- TB_PC.rage #c41f3b
+    focus = { 1, 0x80 / 255, 0x40 / 255, 1 },                                    -- TB_PC.focus #ff8040
 }
 GunsightBoxes.colors = colors
 
@@ -299,11 +335,18 @@ end
 -- Your header: the character's name
 -------------------------------------------------------------------------------
 
--- The player's name when it is real: nil for a missing name, an empty string, "Unknown" (the client's
+-- The player's full name when it is real: nil for a missing name, an empty string, "Unknown" (the client's
 -- placeholder very early on) and a secret (never inspected past IsSecret).
 local function ReadPlayerName()
-    if type(UnitName) ~= "function" then return nil end
-    local name = UnitName("player")
+    -- The full name (first + surname, this server has surnames): FS.GetFullUnitName, read at call time, else UnitName.
+    local name
+    if type(FS.GetFullUnitName) == "function" then
+        name = FS.GetFullUnitName("player")
+    elseif type(UnitName) == "function" then
+        name = UnitName("player")
+    else
+        return nil
+    end
     if IsSecret(name) or type(name) ~= "string" or name == "" then return nil end
     if name == "Unknown" or name == _G.UNKNOWNOBJECT then return nil end
     return name
@@ -316,7 +359,274 @@ local function RefreshPlayerName(box)
 end
 
 -------------------------------------------------------------------------------
--- The target's unit name (line 1): the only thing a box reads itself
+-- The target's HP and power rules (option B, see the header)
+-------------------------------------------------------------------------------
+
+-- State and helpers hang off one table: the file is well clear of the file-scope local limit, but this keeps
+-- it that way.
+local Bars = { gradientBroken = false, warnedGradient = false, tipBroken = false, warnedTip = false }
+local FLAT_TEXTURE = (FS.Theme and FS.Theme.FLAT_TEXTURE) or "Interface\\Buttons\\WHITE8x8"
+
+local function Logged(key, msg)
+    if FS.LogDegradeOnce then FS.LogDegradeOnce(key, msg) end
+end
+
+-- A colour moved toward white by t (mix(col, '#ffffff', t)).
+local function TowardWhite(color, t)
+    return { color[1] + (1 - color[1]) * t, color[2] + (1 - color[2]) * t, color[3] + (1 - color[3]) * t }
+end
+
+-- The fill: a horizontal alpha gradient on the StatusBar's fill texture (the tail alpha up to 1 at the tip),
+-- a flat colour when SetGradient is missing or refuses. The first refusal latches (every rail then takes the
+-- flat colour) and is logged once, since LogDegradeOnce does not dedupe.
+function Bars.PaintFill(rail, color)
+    local fill = rail.fill
+    if not Bars.gradientBroken and HasMethod(fill, "SetGradient") and type(CreateColor) == "function" then
+        local ok = pcall(fill.SetGradient, fill, "HORIZONTAL",
+            CreateColor(color[1], color[2], color[3], C.TB_TAIL_A), CreateColor(color[1], color[2], color[3], 1))
+        if ok then return end
+        Bars.gradientBroken = true
+    end
+    if Bars.gradientBroken and not Bars.warnedGradient then
+        Bars.warnedGradient = true
+        Logged("gunsightboxes_target_gradient",
+            "|cffff4488Forever STUwave|r: target bar SetGradient refused, using a flat colour")
+    end
+    rail.sb:SetStatusBarColor(color[1], color[2], color[3], 1)
+end
+
+-- Track, fill and tip in one colour. Cached on the colour table last applied (a steady bar retints nothing).
+function Bars.Tint(rail, color)
+    if rail.color == color then return end
+    rail.color = color
+    rail.track:SetColorTexture(color[1], color[2], color[3], C.TB_TRACK_A)
+    local tip = TowardWhite(color, C.TB_TIP_MIX)
+    rail.tip:SetColorTexture(tip[1], tip[2], tip[3], C.TB_TIP_A)
+    Bars.PaintFill(rail, color)
+end
+
+-- One rail: a host frame (its alpha is the whole rail's, which is what the low-HP curve drives) holding the
+-- track, the StatusBar and the tip. The tip is anchored to the fill texture's RIGHT edge: the engine moves it
+-- with the fill, and no fraction of a possibly secret value is ever computed.
+function Bars.NewRail(parent, color)
+    local host = CreateFrame("Frame", nil, parent)
+    local sb = CreateFrame("StatusBar", nil, host)
+    FillParent(sb, host)
+    sb:SetStatusBarTexture(FLAT_TEXTURE)
+    sb:SetMinMaxValues(0, 1)
+    sb:SetValue(0)
+    local track = host:CreateTexture(nil, "BACKGROUND")
+    track:SetTexture(FLAT_TEXTURE)
+    FillParent(track, host)
+    Crisp(track)
+    local fill = sb:GetStatusBarTexture()
+    local tip = sb:CreateTexture(nil, "OVERLAY")
+    tip:SetTexture(FLAT_TEXTURE)
+    tip:SetPoint("TOPRIGHT", fill, "TOPRIGHT", 0, 0)
+    tip:SetPoint("BOTTOMRIGHT", fill, "BOTTOMRIGHT", 0, 0)
+    Crisp(tip)
+    local rail = { host = host, sb = sb, fill = fill, track = track, tip = tip }
+    Bars.Tint(rail, color)
+    return rail
+end
+
+-- A Step curve: `from` up to `at`, `to` from there on (the PartyFrames / PetFrame / FrameHelpers shape).
+function Bars.NewStep(at, from, to)
+    local curve = C_CurveUtil.CreateCurve()
+    curve:SetType(Enum.LuaCurveType.Step)
+    curve:AddPoint(0, from)
+    curve:AddPoint(at, to)
+    return curve
+end
+
+-- Built with the box, before the listeners. The red twin starts at alpha 0 and the green rail at 1.
+function Bars.Build(box)
+    local b = {}
+    b.frame = CreateFrame("Frame", nil, box.frame)
+    FillParent(b.frame, box.frame)
+    b.hp = { green = Bars.NewRail(b.frame, colors.green), red = Bars.NewRail(b.frame, colors.red) }
+    b.hp.red.host:SetAlpha(0)
+    b.power = Bars.NewRail(b.frame, colors.cyan)
+    b.powerShown = true
+    if type(UnitHealthPercent) == "function" and type(C_CurveUtil) == "table" and type(C_CurveUtil.CreateCurve) == "function"
+        and type(Enum) == "table" and type(Enum.LuaCurveType) == "table" and Enum.LuaCurveType.Step ~= nil then
+        local atLow = C.TB_LOW + C.LOW_EPSILON
+        local okLow, low = pcall(Bars.NewStep, atLow, 1, 0)
+        local okBase, base = pcall(Bars.NewStep, atLow, 0, 1)
+        if okLow and okBase then
+            b.lowCurve, b.baseCurve = low, base
+        else
+            b.lowBroken = true                       -- logged by the first update, through the same latch
+        end
+        -- The tip hides at an empty bar the way FrameHelpers hides a caret: alpha 0 at a 0 fraction, 1 above.
+        local okEmpty, empty = pcall(Bars.NewStep, C.LOW_EPSILON, 0, 1)
+        if okEmpty then b.emptyCurve = empty end
+    end
+    box.bars = b
+end
+
+-- Width of the rules: the unit name as drawn (at least 24 image px), or the full text width when the name
+-- is secret. Measured only from a plain string (the name sinks never measure a secret). While the
+-- INTERRUPTED look owns line one, the width of the name stays.
+function Bars.Measure(box)
+    local line = box.lineOne
+    if box.verdict then return end
+    box.nameSecret = line.secretNow
+    if line.secretNow then return end
+    box.nameImg = 0
+    if line.text then
+        local fs = line.fonts[1]
+        local ok, w = pcall(fs.GetStringWidth, fs)
+        if ok and type(w) == "number" and not IsSecret(w) and w > 0 then box.nameImg = w / ui(1) end
+    end
+end
+
+function Bars.Seat(box)
+    local b = box.bars
+    local k = ui(1)
+    local wmax = (box.geom.w - 2 * C.PAD) * k
+    local w = wmax
+    if not box.nameSecret then w = math.min(wmax, math.max(C.TB_MIN_W * k, (box.nameImg or 0) * k)) end
+    local function seat(rail, y, h)
+        rail.host:ClearAllPoints()
+        rail.host:SetPoint("TOPLEFT", box.frame, "TOPLEFT", C.TB_X * k, -y * k)
+        rail.host:SetSize(w, h * k)
+        rail.tip:SetWidth(C.TB_TIP_W * k)
+    end
+    seat(b.hp.green, C.TB_HP_Y, C.TB_HP_H)
+    seat(b.hp.red, C.TB_HP_Y, C.TB_HP_H)
+    seat(b.power, C.TB_PW_Y, C.TB_PW_H)
+end
+
+-- cur and max go straight to the setters (either may be secret); a setter that refuses is not an error here.
+function Bars.SetBar(sb, cur, max)
+    pcall(sb.SetMinMaxValues, sb, 0, max)
+    pcall(sb.SetValue, sb, cur)
+end
+
+-- `red` drives the red twin, `green` the normal rail (numbers, or a secret curve result). False when a setter
+-- refused.
+function Bars.SetLowAlphas(b, red, green)
+    local okRed = pcall(b.hp.red.host.SetAlpha, b.hp.red.host, red)
+    local okGreen = pcall(b.hp.green.host.SetAlpha, b.hp.green.host, green)
+    return okRed and okGreen
+end
+
+-- Both HP tips take the empty-curve alpha. No curve, or a refusal (logged once, latched), leaves them visible.
+function Bars.UpdateHealthTips(b)
+    if not b.emptyCurve or Bars.tipBroken then return end
+    local ok, alpha = pcall(UnitHealthPercent, "target", false, b.emptyCurve)
+    local green, red = b.hp.green.tip, b.hp.red.tip
+    if ok and type(alpha) == "number" and pcall(green.SetAlpha, green, alpha) and pcall(red.SetAlpha, red, alpha) then
+        return
+    end
+    Bars.tipBroken = true
+    if not Bars.warnedTip then
+        Bars.warnedTip = true
+        Logged("gunsightboxes_target_tip",
+            "|cffff4488Forever STUwave|r: target bar tip empty-hide refused, leaving the tip visible")
+    end
+    pcall(green.SetAlpha, green, 1)
+    pcall(red.SetAlpha, red, 1)
+end
+
+function Bars.UpdateHealth(box)
+    local b = box.bars
+    local cur, max = UnitHealth("target"), UnitHealthMax("target")
+    Bars.SetBar(b.hp.green.sb, cur, max)
+    Bars.SetBar(b.hp.red.sb, cur, max)
+    Bars.UpdateHealthTips(b)
+    if b.lowCurve and not b.lowBroken then
+        local okLow, low = pcall(UnitHealthPercent, "target", false, b.lowCurve)
+        local okBase, base = pcall(UnitHealthPercent, "target", false, b.baseCurve)
+        if okLow and okBase and type(low) == "number" and type(base) == "number" and Bars.SetLowAlphas(b, low, base) then
+            return
+        end
+        b.lowBroken = true
+    end
+    if b.lowBroken and not b.warnedLow then
+        b.warnedLow = true
+        Logged("gunsightboxes_target_lowhp",
+            "|cffff4488Forever STUwave|r: target low-HP curve refused, falling back to a plain compare")
+    end
+    -- Unknown (secret) health: red stays down and the normal rail up.
+    local low = false
+    if not IsSecret(cur) and not IsSecret(max) and type(cur) == "number" and type(max) == "number" and max > 0 then
+        low = cur / max <= C.TB_LOW
+    end
+    Bars.SetLowAlphas(b, low and 1 or 0, low and 0 or 1)
+end
+
+-- The power colour for UnitPowerType (a plain number): the palette's, mana for an unlisted type, nil (no rule)
+-- for a missing or negative one. A secret type reads as mana.
+function Bars.PowerColor(ptype)
+    if IsSecret(ptype) then return colors.cyan end
+    if type(ptype) ~= "number" or ptype < 0 then return nil end
+    local key = C.POWER_KEYS[ptype]
+    if key == "rage" then return colors.rage end
+    if key == "focus" then return colors.focus end
+    if key == "energy" then return colors.gold end
+    return colors.cyan
+end
+
+function Bars.UpdatePower(box)
+    local b = box.bars
+    local rail = b.power
+    local show = false
+    local max
+    if type(UnitPower) == "function" and type(UnitPowerMax) == "function" and type(UnitPowerType) == "function" then
+        local color = Bars.PowerColor((UnitPowerType("target")))
+        max = UnitPowerMax("target")
+        -- No power: a plain max of 0 (a secret max keeps the rule).
+        show = color ~= nil and (IsSecret(max) or (max ~= nil and max ~= 0))
+        if show then Bars.Tint(rail, color) end
+    end
+    if show ~= b.powerShown then
+        b.powerShown = show
+        rail.host:SetShown(show)
+    end
+    if show then
+        Bars.SetBar(rail.sb, UnitPower("target"), max)
+        -- The power tip hides at empty power through FrameHelpers' shared helper (its own curve, latch and log).
+        local helpers = FS.FrameHelpers
+        if type(helpers) == "table" and type(helpers.UpdatePowerHostEmpty) == "function" then
+            pcall(helpers.UpdatePowerHostEmpty, rail.tip, "target")
+        end
+    end
+end
+
+-- Runs a bar update so that a throw (a bad API on this client) never reaches the box build or a handler that
+-- also refreshes the unit name. The first failure is logged; the bars just stay as they were.
+function Bars.Guard(fn, ...)
+    local ok, err = pcall(fn, ...)
+    if ok then return end
+    if not Bars.warnedThrow then
+        Bars.warnedThrow = true
+        Logged("gunsightboxes_target_bars",
+            "|cffff4488Forever STUwave|r: target bars update failed: " .. tostring(err))
+    end
+end
+
+-- Everything, for the target / world events and the build. Nothing is read without a target.
+function Bars.Refresh(box)
+    if box.retired or not box.bars or not FS.HasTarget() then return end
+    if type(UnitHealth) == "function" and type(UnitHealthMax) == "function" then Bars.UpdateHealth(box) end
+    Bars.UpdatePower(box)
+end
+
+function Bars.OnEvent(box, event, unit)
+    if box.retired or not box.bars or not FS.HasTarget() then return end
+    -- The unfiltered RegisterEvent fallback hears every unit: only the target's reach the bars.
+    if not IsSecret(unit) and type(unit) == "string" and unit ~= "target" then return end
+    if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
+        if type(UnitHealth) == "function" and type(UnitHealthMax) == "function" then Bars.UpdateHealth(box) end
+    else
+        Bars.UpdatePower(box)
+    end
+end
+
+-------------------------------------------------------------------------------
+-- The target's unit name (line 1): the only text a box reads itself
 -------------------------------------------------------------------------------
 
 local function ReadTargetName()
@@ -342,16 +652,22 @@ local function RefreshTargetName(box)
     else
         WriteLine(box.lineOne, "")
     end
+    if box.bars then
+        Bars.Measure(box)
+        Bars.Seat(box)
+    end
 end
 
 -- Takes the unit-name listener down: events unregistered and the handler dropped. Shared by every path that
 -- abandons a box (a failing build step, a failing rescale registration, Retire), so none of them can leave
 -- one live. Safe on a box that never had one.
 local function Unlisten(box)
-    local events = box.events
-    if not events then return end
-    events:UnregisterAllEvents()
-    events:SetScript("OnEvent", nil)
+    for _, events in ipairs({ box.events or false, box.barEvents or false }) do
+        if events then
+            events:UnregisterAllEvents()
+            events:SetScript("OnEvent", nil)
+        end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -456,20 +772,22 @@ local function BuildMembers(box)
     return members
 end
 
--- One colour's frame of the box: edge, header, line 2 and (target) the divider.
+-- One colour's frame of the box: edge, header (yours only), line 2 and (target) the divider.
 local function BuildTone(box, key, color)
     local Theme = FS.Theme
     local tone = CreateFrame("Frame", nil, box.frame)
     FillParent(tone, box.frame)
     box.tones[key] = tone
     box.stroke[key] = Theme.AddCut2Texture(tone, Theme.SLICE_CUT2_OUTLINE_TEXTURE, WithAlpha(color, C.STROKE_A), "BORDER")
-    local head = tone:CreateFontString(nil, "OVERLAY")
-    FS.Theme.ApplyMono(head, FontSize(C.HEAD_SIZE), color)       -- a font before the first SetText
-    head:SetText(box.isTarget and "TARGET" or "YOU")
-    head:SetAlpha(C.HEAD_A)
-    box.head[key] = head
-    box.headFonts[#box.headFonts + 1] = head
-    local l2 = NewFont(tone, C.L2_SIZE, color)
+    if not box.isTarget then                                     -- the target's box carries no header label
+        local head = tone:CreateFontString(nil, "OVERLAY")
+        FS.Theme.ApplyMono(head, FontSize(C.HEAD_SIZE), color)   -- a font before the first SetText
+        head:SetText("YOU")
+        head:SetAlpha(C.HEAD_A)
+        box.head[key] = head
+        box.headFonts[#box.headFonts + 1] = head
+    end
+    local l2 = NewFont(tone, box.l2Size, color)
     box.l2[key] = l2
     if box.isTarget then
         box.divider[key] = SolidTexture(tone, color, C.DIV_A)
@@ -498,10 +816,21 @@ local function SeatBottom(fs, point, rel, relPoint, x, y)
     fs:SetPoint(point, rel, relPoint, x, y)
 end
 
+-- The frame fills its anchor; the target's box also grows UP by box.grow image px (the bars' room), so its
+-- top edge sits above the anchor's and everything seated from the top rides it.
+local function SeatFrame(box)
+    local frame, anchor = box.frame, box.anchor
+    frame:ClearAllPoints()
+    frame:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0, box.grow * ui(1))
+    frame:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", 0, 0)
+end
+
 local function Layout(box)
     local k = ui(1)
     local g = box.geom
     local frame = box.frame
+    local grow = box.grow
+    if grow > 0 then SeatFrame(box) end
     local wmax = (g.w - 2 * C.PAD) * k
     local left = not box.isTarget
 
@@ -511,20 +840,15 @@ local function Layout(box)
     SeatBottom(box.l1, "BOTTOMLEFT", frame, "TOPLEFT", C.PAD * k, -(C.L1_Y + C.L1_SIZE * C.DESCENT) * k)
     for _, fs in pairs(box.l2) do
         fs:SetWidth(wmax)
-        SeatBottom(fs, "BOTTOMLEFT", frame, "TOPLEFT", C.PAD * k, -(C.L2_Y + C.L2_SIZE * C.DESCENT) * k)
+        SeatBottom(fs, "BOTTOMLEFT", frame, "TOPLEFT", C.PAD * k, -(C.L2_Y + grow + box.l2Size * C.DESCENT) * k)
     end
 
-    -- Header row: the name of the side at the box's outer end, the tick counter at the other.
+    -- Header row: your box's name at its outer (left) end, the tick counter at the other. The name is sized
+    -- and fitted through box.headLine below (it varies); the target box has no header.
     local headY = (C.HEAD_DY - C.HEAD_SIZE * C.DESCENT) * k
     local headSize = FontSize(C.HEAD_SIZE)
-    for key, fs in pairs(box.head) do
-        -- Yours is sized and fitted through box.headLine below (the name varies); the target's is fixed text.
-        if not box.headLine then FS.Theme.ApplyMono(fs, headSize, box.toneColors[key]) end
-        if left then
-            SeatBottom(fs, "BOTTOMLEFT", frame, "TOPLEFT", 0, headY)
-        else
-            SeatBottom(fs, "BOTTOMRIGHT", frame, "TOPRIGHT", 0, headY)
-        end
+    for _, fs in pairs(box.head) do
+        SeatBottom(fs, "BOTTOMLEFT", frame, "TOPLEFT", 0, headY)
     end
     FS.Theme.ApplyMono(box.ticks, headSize, colors.white)
     if left then
@@ -536,14 +860,14 @@ local function Layout(box)
     -- Target divider: one line, padded.
     for _, d in pairs(box.divider) do
         d:ClearAllPoints()
-        d:SetPoint("TOPLEFT", frame, "TOPLEFT", C.PAD * k, -C.DIV_Y * k)
+        d:SetPoint("TOPLEFT", frame, "TOPLEFT", C.PAD * k, -(C.DIV_Y + grow) * k)
         d:SetSize((g.w - 2 * C.PAD) * k, k)
     end
 
     -- Icon tile: on the box's inner side, centred on its height.
     local tile = box.tile
     tile:ClearAllPoints()
-    local y = -((g.h - C.CI) / 2) * k
+    local y = -((g.h - C.CI) / 2 + grow) * k
     if left then
         tile:SetPoint("TOPLEFT", frame, "TOPRIGHT", C.CIG * k, y)
     else
@@ -566,6 +890,10 @@ local function Layout(box)
     for _, line in ipairs({ box.lineOne, box.lineTwo, box.headLine }) do
         ApplySize(line, FontSize(line.baseImg))
         RefitLine(line)
+    end
+    if box.bars then
+        Bars.Measure(box)
+        Bars.Seat(box)
     end
 end
 
@@ -601,11 +929,13 @@ local function BuildBox(spec)
         geom = isTarget and G.BOXR or G.BOXL,
         tones = {}, tileTones = {}, stroke = {}, head = {}, l2 = {}, divider = {},
         toneColors = {}, fb = { pink = {}, steel = {} }, headFonts = {},
+        grow = isTarget and C.TGT_GROW or 0, l2Size = isTarget and C.TGT_L2_SIZE or C.L2_SIZE,
     }
 
     local frame = CreateFrame("Frame", NAME .. spec.key, spec.parent)
     box.frame = frame
     FillParent(frame, spec.anchor)
+    if box.grow > 0 then SeatFrame(box) end
     spec.built[#spec.built + 1] = frame
 
     -- Plate and line 1 (shared by the colours).
@@ -615,6 +945,10 @@ local function BuildBox(spec)
     FS.Theme.ApplyMono(box.ticks, FontSize(C.HEAD_SIZE), colors.white)
     box.ticks:SetText("")
     box.ticks:Hide()
+    -- The bars frame is a child of the box (level +1, like the tone frames); its rail hosts sit at +2 and the
+    -- StatusBars at +3, so the rails draw above the tone frames' art, and line 1 (a region of the box frame) under
+    -- them. The geometry keeps them apart: the rules start at y 26, line 1's baseline is at 23.
+    if isTarget then Bars.Build(box) end
 
     -- The icon tile (shared plate and icon, then one edge frame per colour).
     local tile = CreateFrame("Frame", nil, frame)
@@ -647,7 +981,7 @@ local function BuildBox(spec)
         i = i + 1
         twoFonts[i] = box.l2[t[1]]
     end
-    box.lineTwo = NewLine(twoFonts, C.L2_SIZE, isTarget and C.SECRET_L2_SIZE or nil)
+    box.lineTwo = NewLine(twoFonts, box.l2Size, isTarget and C.SECRET_L2_SIZE or nil)
     i = 0
     for _, t in ipairs(tones) do
         i = i + 1
@@ -679,6 +1013,7 @@ local function BuildBox(spec)
     if isTarget then
         RefreshTargetName(box)
         RefreshTargetShown(box)
+        Bars.Guard(Bars.Refresh, box)
     else
         RefreshPlayerName(box)
         frame:Hide()                                 -- yours exists only while a cast is live
@@ -699,7 +1034,18 @@ local function BuildBox(spec)
             events:SetScript("OnEvent", function()
                 RefreshTargetName(box)
                 RefreshTargetShown(box)
+                Bars.Guard(Bars.Refresh, box)
             end)
+            -- The bar events get a frame of their own: RegisterUnitEvent's whitelist is frame-wide, and the
+            -- listener above also takes events that are not for "target".
+            local barEvents = CreateFrame("Frame", nil, frame)
+            box.barEvents = barEvents
+            for _, event in ipairs(C.BAR_EVENTS) do
+                if not pcall(barEvents.RegisterUnitEvent, barEvents, event, "target") then
+                    barEvents:RegisterEvent(event)
+                end
+            end
+            barEvents:SetScript("OnEvent", function(_, event, unit) Bars.Guard(Bars.OnEvent, box, event, unit) end)
         else
             -- the character name is not always ready at build
             events:RegisterEvent("PLAYER_LOGIN")

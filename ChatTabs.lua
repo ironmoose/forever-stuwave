@@ -168,12 +168,12 @@ end
 
 -- HARDCODED interim ordering: comms always leads the pill strip.
 --
--- Drag-to-reorder is deferred because the Forever beta client does not
--- restore per-character SavedVariables across /reload. Keep comms first
--- until a user-selected dock order can persist. Replace this default
--- with saved user ordering when client persistence works.
---
---
+-- A real drag-to-reorder feature is deferred -- the Forever beta client
+-- discards per-character SavedVariables across a /reload (design notes),
+-- so a user-chosen dock order cannot be persisted yet. Parker's call: "for
+-- now hard code the comms channel as the first one." When that client bug is
+-- fixed, replace this with the real reorder feature (design notes) driven
+-- by a persisted user order, and this function goes away.
 --
 -- Matches on Chat.TabLabel's RESOLVED label, not a dock index -- index is
 -- per-character and unstable (the same lesson as the channel-colour work).
@@ -733,15 +733,15 @@ function Chat.ApplyDockState()
         Chat.activeChatFrame = Chat.ActiveChatFrame()
     end
 
-    -- Select comms once at login when ChatCore.lua set pendingDefaultComms
-    -- because there was no saved tab to restore. This accompanies
-    -- OrderedDockedFrames' comms-first ordering while the client cannot
-    -- restore per-character SavedVariables across /reload. Revisit these
-    -- defaults when persisted order/selection works. Clear the flag now
-    -- so it cannot fire twice or override a later manual tab switch.
-    --
-    --
-    --
+    -- Interim hardcoded default-active-tab: force comms active at login when
+    -- Chat.pendingDefaultComms was set (ChatCore.lua, only when there was no
+    -- saved tab for the block above to restore). Companion to
+    -- OrderedDockedFrames' comms-first pill hardcode further up this file;
+    -- blocked on the client SavedVariables /reload bug (design notes), to
+    -- be revisited alongside the real persisted-order/selection feature (design notes
+    -- design record) once the client is fixed. Cleared immediately so it can
+    -- never fire twice or fight a later manual tab switch, same discipline as
+    -- the pendingSelectedTab block above.
     if Chat.pendingDefaultComms then
         Chat.pendingDefaultComms = nil
 

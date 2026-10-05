@@ -256,7 +256,7 @@ local fallbackHost
 local function EnsureFallbackHost()
     if fallbackHost then return fallbackHost end
     LogDegrade("bagbar_nodeck",
-        "|cffff4488ForeverSynthwave|r: FS.Deck missing, bag bar seated bottom-right")
+        "|cffff4488Forever STUwave|r: FS.Deck missing, bag bar seated bottom-right")
     fallbackHost = CreateFrame("Frame", "ForeverSynthwaveBagBarHost", UIParent)
     fallbackHost:SetFrameStrata("MEDIUM")
     bar:SetParent(fallbackHost)
@@ -491,7 +491,7 @@ local function BindSlot(slot)
         if not slot.warnedNoStock then
             slot.warnedNoStock = true
             LogDegrade("bagbar_nostock_" .. slot.key,
-                "|cffff4488ForeverSynthwave|r: bag slot " .. slot.key .. " has no stock button ("
+                "|cffff4488Forever STUwave|r: bag slot " .. slot.key .. " has no stock button ("
                 .. tostring(slot.stock) .. "), hidden")
         end
         return false
@@ -677,7 +677,7 @@ local function RefreshAvailability()
             elseif not active and not slot.warnedNoInv then
                 slot.warnedNoInv = true
                 LogDegrade("bagbar_noinv_" .. slot.key,
-                    "|cffff4488ForeverSynthwave|r: bag slot " .. slot.key .. " has no inventory slot, hidden")
+                    "|cffff4488Forever STUwave|r: bag slot " .. slot.key .. " has no inventory slot, hidden")
             end
         end
         if active and not BindSlot(slot) then active = false end

@@ -57,7 +57,7 @@ local PROC_BASE, PROC_GROW, PROC_TICK = 16, 54, 7   -- drawProc: half = 16 + q*5
 
 local PIECE_KEYS = { "you", "next", "shard", "buff", "tgt", "dot", "prc", "party" }
 local FADE_SECONDS = 0.25
-local PREFIX = "|cffff4488ForeverSynthwave|r: gunsight: "
+local PREFIX = "|cffff4488Forever STUwave|r: gunsight: "
 
 Gunsight.G = {
     GRID = GRID, U = U, W = W, H = H, CX = CX, CY = CY,

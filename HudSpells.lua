@@ -24,6 +24,12 @@
 --             Vampiric Embrace, summons). Casting one never marks the target as engaged.
 --   offGcd    true for a spell that does not start the global cooldown (the wand). It also
 --             never counts as a cast on the target (no fresh-target or fight-age effect).
+--   seal      true for a Paladin seal. Casting one is a `self` cast (never a cast on the target)
+--             that HudLogic additionally records as the active seal (`state.seal`, a ledger
+--             of our own casts); `apply` is the seal's length in seconds.
+--   judgement true for Paladin Judgement. HudLogic stamps `state.judgeAt` on each own cast and, when
+--             the active seal has a `seals.judge` length in the profile, records the Judgement debuff
+--             on the target (`state.judged`).
 --
 -- Spells that are exclusive on one target (the banes) are declared in the profile's `dots`
 -- (`group`), not here.
@@ -83,4 +89,25 @@ FS.HudSpells = {
     -- Pseudo entry for the "summon a pet" reminder: known when any summon is known.
     pet         = { names = { "Summon Imp", "Summon Voidwalker", "Summon Succubus",
                               "Summon Felhunter" }, self = true },
+
+    -- Paladin ----------------------------------------------------------------------------
+    -- Holy Strike: new on Forever, learned at 6, a 10 s cooldown at every rank (third-party
+    -- research, UNVERIFIED in game; so it is name-only, the ids stay out). Whether it is on the
+    -- global cooldown is unverified too. Hammer of the Righteous reportedly shares its
+    -- cooldown and is not in the ledger, so a cast of it will not darken the rung.
+    hs = { names = { "Holy Strike" }, cooldown = 10 },
+    -- Judgement (spelled that way on Forever): id 20271 is verified in game; a 10 s cooldown
+    -- that does not consume the seal. Not marked offGcd: that is unverified.
+    jd = { names = { "Judgement" }, ids = { 20271 }, cooldown = 10, judgement = true },
+    -- Seals: self casts, 30 s each (research, design notes). Seal of
+    -- Righteousness 21084 and Seal of the Crusader 21082 are verified in game; the other five
+    -- are name-only because their ids are not verified on Forever. A cast reports the rank id
+    -- actually cast, so everything also matches by name.
+    sor  = { names = { "Seal of Righteousness" }, ids = { 21084 }, apply = 30, self = true, seal = true },
+    sotc = { names = { "Seal of the Crusader" }, ids = { 21082 }, apply = 30, self = true, seal = true },
+    sofu = { names = { "Seal of Fury" }, apply = 30, self = true, seal = true },
+    soc  = { names = { "Seal of Command" }, apply = 30, self = true, seal = true },
+    sol  = { names = { "Seal of Light" }, apply = 30, self = true, seal = true },
+    sow  = { names = { "Seal of Wisdom" }, apply = 30, self = true, seal = true },
+    soj  = { names = { "Seal of Justice" }, apply = 30, self = true, seal = true },
 }

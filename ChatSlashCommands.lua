@@ -429,6 +429,30 @@ SlashCmdList["FSCHAT"] = function(msg)
         return
     end
 
+    -- `/fschat size` prints the chat font size, `/fschat size <10-24>` saves it
+    -- in ForeverSynthwaveDB.chatFontSize and applies it to every chat window.
+    -- The dispatcher strips all whitespace above, so "size 14" arrives as
+    -- "size14".
+    local sizeArg = msg:match("^size(.*)$")
+    if sizeArg then
+        local tag = "|cff22e0ffsynthwave://chat|r  "
+        local lo, hi = Chat.MIN_FONT_SIZE, Chat.MAX_FONT_SIZE
+        if sizeArg == "" then
+            print(("%schat font size %d (/fschat size <%d-%d>)"):format(tag, Chat.FontSize(), lo, hi))
+            return
+        end
+        local n = sizeArg:match("^%d+$") and tonumber(sizeArg)
+        if not n or n < lo or n > hi then
+            print(("%schat font size must be a whole number %d-%d"):format(tag, lo, hi))
+            return
+        end
+        ForeverSynthwaveDB = ForeverSynthwaveDB or {}
+        ForeverSynthwaveDB.chatFontSize = n
+        Chat.ApplyAllFontSizes()
+        print(("%schat font size %d"):format(tag, n))
+        return
+    end
+
     if msg ~= "levels" then
         return ForeverSynthwave_CycleChatTab()
     end
@@ -595,6 +619,9 @@ local function SkinLateChatFrame(frame)
     if not index or index < 1 then return end
 
     Chat.SkinChatFrame(frame, index)
+    -- Also for a window that was skinned already and is being reused: the
+    -- skin is once-only, the size is not. Writes nothing when it matches.
+    Chat.ApplyFontSize(frame)
     -- A late window (whisper, combat log) joins the dock, so the strip has a
     -- new pill to draw and Blizzard has a new tab to hide.
     Chat.HideAllBlizzardTabs()
@@ -673,6 +700,22 @@ local function Apply()
     Chat.HookEditBoxArrowKeys()
     Chat.HookPromptSeating()
 end
+
+-- The size has to be asserted again after load, not just at skin time. The
+-- saved variables table does not exist while the files run, so the first apply
+-- can only use the default; PLAYER_LOGIN is the first moment the saved size is
+-- readable. UPDATE_CHAT_WINDOWS (and the floating variant) make Blizzard put
+-- every window back to its chat-cache size, which would undo ours. Chat
+-- frames are plain non-secure frames, so none of this is combat-gated, and
+-- ApplyFontSize writes nothing when the size already matches, so the
+-- writes it makes cannot feed back through these events.
+local fontWatcher = CreateFrame("Frame")
+for _, event in ipairs({ "PLAYER_LOGIN", "UPDATE_CHAT_WINDOWS", "UPDATE_FLOATING_CHAT_WINDOWS" }) do
+    pcall(fontWatcher.RegisterEvent, fontWatcher, event)
+end
+fontWatcher:SetScript("OnEvent", function()
+    Chat.ApplyAllFontSizes()
+end)
 
 if InCombatLockdown() then
     local regen = CreateFrame("Frame")

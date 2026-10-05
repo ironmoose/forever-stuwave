@@ -79,7 +79,7 @@ ForeverSynthwaveIssueReporterPos = ForeverSynthwaveIssueReporterPos or {}
 
 -- Fallback, used ALWAYS in practice, not just until the first drag: the
 -- Forever beta client never restores SavedVariables on load (confirmed via
--- the boot-counter probe above), so `saved.x/saved.y` below
+-- the boot-counter probe above; design notes), so `saved.x/saved.y` below
 -- can never survive a reload and this branch is the one that actually seats
 -- the frame every single time. A dragged position simply cannot persist
 -- until that client bug is fixed.
