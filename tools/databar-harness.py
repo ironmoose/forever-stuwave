@@ -31,7 +31,7 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent
+ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
 DATABAR = Path(os.environ.get("DATABAR_LUA", ADDON / "DataBar.lua"))   # DATABAR_LUA: a mutated scratch copy
 SCREEN_W, PHYS_H = 2560, 1440
 LABEL_W = 32.5          # the mock's GetStringWidth for "DEBUG"

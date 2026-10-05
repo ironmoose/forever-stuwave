@@ -15,7 +15,7 @@
 # Usage:
 #   .\deploy-forever-synthwave.ps1
 #   .\deploy-forever-synthwave.ps1 -WowFlavor _classic_      # TBC Anniversary
-#   .\deploy-forever-synthwave.ps1 -SkipParseGate            # emergencies only
+#   .\deploy-forever-synthwave.ps1 -SkipParseGate            # trusted tester checkout; no Python needed
 #
 # After it runs: /reload in-client.
 
@@ -28,8 +28,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$addonRoot = Split-Path -Parent $PSScriptRoot
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$addonRoot = Join-Path $repoRoot "addon\ForeverSynthwave"
 $destination = Join-Path $WowRoot "$WowFlavor\Interface\AddOns\ForeverSynthwave"
 
 if (-not (Test-Path $addonRoot)) {
@@ -58,14 +58,20 @@ if (-not $SkipParseGate) {
 
 # Stage runtime only; never copy tools, mockups, source metadata or generators.
 $sourcePath = [IO.Path]::GetFullPath($addonRoot).TrimEnd('\')
+$repoPath = [IO.Path]::GetFullPath($repoRoot).TrimEnd('\')
 $targetPath = [IO.Path]::GetFullPath($destination).TrimEnd('\')
-if ($targetPath -eq $sourcePath -or $targetPath.StartsWith($sourcePath + '\', [StringComparison]::OrdinalIgnoreCase) -or (Test-Path (Join-Path $destination ".git"))) {
-    throw "Destination is a source/Git checkout; update it with git pull."
+if ($targetPath -eq $repoPath -or
+    $targetPath.StartsWith($repoPath + '\', [StringComparison]::OrdinalIgnoreCase) -or
+    $targetPath -eq $sourcePath -or
+    $targetPath.StartsWith($sourcePath + '\', [StringComparison]::OrdinalIgnoreCase) -or
+    (Test-Path (Join-Path $destination ".git"))) {
+    throw "Destination is a source/Git checkout. Move the checkout outside AddOns, then deploy."
 }
 $stage = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString())
 try {
     New-Item -ItemType Directory -Path $stage | Out-Null
-    Get-ChildItem $addonRoot -File | Where-Object { $_.Extension -eq ".lua" -or $_.Name -in @("ForeverSynthwave.toc", "Bindings.xml", "LICENSE") } | Copy-Item -Destination $stage
+    Get-ChildItem $addonRoot -File | Where-Object { $_.Extension -eq ".lua" -or $_.Name -in @("ForeverSynthwave.toc", "Bindings.xml") } | Copy-Item -Destination $stage
+    Copy-Item (Join-Path $repoRoot "LICENSE") -Destination $stage
     foreach ($folder in @("media", "fonts")) {
         $subdir = Join-Path $stage $folder
         New-Item -ItemType Directory -Path $subdir | Out-Null

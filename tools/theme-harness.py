@@ -26,11 +26,11 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent
+ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
 THEME_SRC = Path(os.environ.get("THEME_LUA") or ADDON / "Theme.lua").read_text(encoding="utf-8")
 FRAMEHELPERS_SRC = (ADDON / "FrameHelpers.lua").read_text(encoding="utf-8")
 PETDOCK_SRC = (ADDON / "PetDock.lua").read_text(encoding="utf-8")  # the pet panel fill moved here in ac8662e
-MOCKUP_HTML = ADDON / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
+MOCKUP_HTML = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
 # The SLICE_* constants and the SkinButton default read the flag when Theme.lua LOADS, so the
 # "round" cases load a copy of the real file with only the flag line changed.
 ROUND_THEME_SRC = THEME_SRC.replace('Theme.CHROME_CORNERS = "cut"', 'Theme.CHROME_CORNERS = "round"', 1)

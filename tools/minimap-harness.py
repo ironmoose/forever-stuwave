@@ -42,7 +42,7 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent
+ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
 THEME_SRC = (ADDON / "Theme.lua").read_text(encoding="utf-8")
 # MINIMAP_LUA / LAYOUT_LUA point the harness at a mutant copy (mutation checks).
 LAYOUT_SRC = Path(os.environ.get("LAYOUT_LUA", ADDON / "Layout.lua")).read_text(encoding="utf-8")

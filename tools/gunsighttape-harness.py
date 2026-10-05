@@ -49,13 +49,13 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent
+ADDON = HERE.parent / "addon" / "ForeverSynthwave"
 TAPE = Path(os.environ.get("GUNSIGHTTAPE_LUA") or ADDON / "GunsightTape.lua")
 CASTBARS = Path(os.environ.get("GUNSIGHTTAPE_CASTBARS_LUA") or ADDON / "CastBars.lua")
 GUNSIGHT = ADDON / "Gunsight.lua"
 LAYOUT = ADDON / "Layout.lua"
 TOC = ADDON / "ForeverSynthwave.toc"
-MOCKUP = ADDON / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
+MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
 
 
 def _load(name: str, file: str):

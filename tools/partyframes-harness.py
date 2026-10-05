@@ -13,7 +13,7 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent
+ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
 PARTY_SRC = (ADDON / "PartyFrames.lua").read_text(encoding="utf-8")
 
 MOCK = r"""

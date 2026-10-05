@@ -33,7 +33,7 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent
+ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
 LAYOUT_FILE = Path(os.environ.get("LAYOUT_LUA", ADDON / "Layout.lua"))   # a mutant copy for mutation checks
 
 MOCK = r"""

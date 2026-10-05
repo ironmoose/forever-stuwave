@@ -52,7 +52,7 @@ gh = importlib.util.module_from_spec(_spec)
 sys.modules["gunsight_harness"] = gh
 _spec.loader.exec_module(gh)
 
-ADDON = HERE.parent
+ADDON = HERE.parent / "addon" / "ForeverSynthwave"
 FRAME_LUA = Path(os.environ.get("GUNSIGHTFRAME_LUA") or ADDON / "GunsightFrame.lua")
 GUNSIGHT = ADDON / "Gunsight.lua"
 PROFILES = ADDON / "HudProfiles.lua"

@@ -31,7 +31,7 @@ import sys
 import os
 from pathlib import Path
 
-ADDON = Path(__file__).resolve().parent.parent
+ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
 GLOBALS_DUMP = Path(os.environ.get("FS_GLOBALS_DUMP", ADDON / "reference" / "globals.txt"))
 
 # Only strings the addon actually uses as a global frame lookup.

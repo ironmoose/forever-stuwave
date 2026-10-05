@@ -26,11 +26,13 @@ trap 'rm -rf "$TMP"' EXIT
 # Select committed runtime files explicitly. Developer tooling and prototypes
 # remain in the repository but never enter the installed addon.
 mapfile -t RUNTIME < <(git -C "$REPO" ls-tree -r --name-only HEAD | \
-  "$PYTHON" -c 'import sys,re; print("\n".join(p for p in sys.stdin.read().splitlines() if re.fullmatch(r"[^/.][^/]*\.lua|ForeverSynthwave\.toc|Bindings\.xml|LICENSE|media/[^/]+\.tga|fonts/[^/]+\.ttf|fonts/(?:OFL|LICENSE|COPYING)(?:[-_][^/]+)?\.txt", p)))')
+  "$PYTHON" -c 'import sys,re; print("\n".join(p for p in sys.stdin.read().splitlines() if re.fullmatch(r"LICENSE|addon/ForeverSynthwave/(?:[^/.][^/]*\.lua|ForeverSynthwave\.toc|Bindings\.xml|media/[^/]+\.tga|fonts/[^/]+\.ttf|fonts/(?:OFL|LICENSE|COPYING)(?:[-_][^/]+)?\.txt)", p)))')
 (( ${#RUNTIME[@]} > 0 )) || { echo "ERROR: no committed runtime files" >&2; exit 1; }
 STAGE="$TMP/ForeverSynthwave"
 mkdir -p "$STAGE"
-git -C "$REPO" archive HEAD "${RUNTIME[@]}" | tar -x -C "$STAGE"
+git -C "$REPO" archive HEAD "${RUNTIME[@]}" | tar -x -C "$TMP"
+cp -a "$TMP/addon/ForeverSynthwave/." "$STAGE/"
+cp "$TMP/LICENSE" "$STAGE/"
 
 # Version comes from the staged copy (committed HEAD), not the working tree.
 VERSION="$(sed -n 's/^## Version:[[:space:]]*//p' "$STAGE/ForeverSynthwave.toc" | tr -d '\r' | head -1)"

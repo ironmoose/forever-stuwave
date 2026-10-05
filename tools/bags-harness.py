@@ -55,7 +55,7 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent
+ADDON = HERE.parent / "addon" / "ForeverSynthwave"
 BAGS_LUA = Path(os.environ.get("BAGS_LUA") or ADDON / "Bags.lua")   # BAGS_LUA: a mutated scratch copy
 DATABAR_LUA = ADDON / "DataBar.lua"
 

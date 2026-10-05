@@ -35,7 +35,7 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent
+ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
 PANELSKINS_SRC = (ADDON / "PanelSkins.lua").read_text(encoding="utf-8")
 THEME_SRC = (ADDON / "Theme.lua").read_text(encoding="utf-8")
 

@@ -49,7 +49,7 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent
+ADDON = HERE.parent / "addon" / "ForeverSynthwave"
 CLASSSHOULDER = Path(os.environ.get("CLASSSHOULDER_LUA", ADDON / "ClassShoulder.lua"))
 PETDOCK = Path(os.environ.get("PETDOCK_LUA", ADDON / "PetDock.lua"))
 

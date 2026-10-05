@@ -38,7 +38,7 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent
+ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
 XPBAR = Path(os.environ.get("XPBAR_LUA", ADDON / "XPBar.lua"))   # XPBAR_LUA: a mutated scratch copy
 SCREEN_W = 2560.0
 

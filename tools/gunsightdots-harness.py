@@ -47,13 +47,13 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent
+ADDON = HERE.parent / "addon" / "ForeverSynthwave"
 DOTS = Path(os.environ.get("GUNSIGHTDOTS_LUA") or ADDON / "GunsightDots.lua")
 GUNSIGHT = ADDON / "Gunsight.lua"
 LAYOUT = ADDON / "Layout.lua"
 PROFILES = ADDON / "HudProfiles.lua"
 TOC = ADDON / "ForeverSynthwave.toc"
-MOCKUP = ADDON / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
+MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
 
 
 def _load_gunsight_harness():

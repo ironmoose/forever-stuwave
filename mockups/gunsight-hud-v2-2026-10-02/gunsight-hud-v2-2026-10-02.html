@@ -1,8 +1,8 @@
 <!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"></head><body>
 <title>Gunsight HUD</title>
 <style>
-@font-face{font-family:'Mononoki';src:url(../../fonts/MononokiNerdFontMono-Bold.ttf) format('truetype');font-weight:100 900;font-style:normal;font-display:block}
-@font-face{font-family:'FS Display';src:url(../../fonts/FSDisplay-Bold.ttf) format('truetype');font-weight:700;font-style:normal;font-display:block}
+@font-face{font-family:'Mononoki';src:url(../../addon/ForeverSynthwave/fonts/MononokiNerdFontMono-Bold.ttf) format('truetype');font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:'FS Display';src:url(../../addon/ForeverSynthwave/fonts/FSDisplay-Bold.ttf) format('truetype');font-weight:700;font-style:normal;font-display:block}
 :root{
   color-scheme:dark;
   --bg:#0d0620;
@@ -40,7 +40,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font-family:'Mononoki',ui-mon
 .wrap{max-width:1400px;margin:0 auto;padding:28px 0 56px}
 .head h1{margin:0;font-family:'Mononoki',monospace;font-weight:700;font-size:clamp(24px,4vw,38px);letter-spacing:.08em;color:var(--white);text-shadow:0 0 18px var(--violet)}
 .head p{margin:8px 0 22px;max-width:70ch;color:var(--muted);font-size:clamp(14px,1.5vw,17px)}
-.stage{position:relative;width:100%;max-width:1400px;margin:0 auto;aspect-ratio:16/9;background:var(--bg) url(game.png) center/cover no-repeat;overflow:hidden;container-type:inline-size;border:1px solid var(--edge)}
+.stage{position:relative;width:100%;max-width:1400px;margin:0 auto;aspect-ratio:16/9;background:var(--bg);overflow:hidden;container-type:inline-size;border:1px solid var(--edge)}
 .stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 /* CONTROL DECK: a mini Control Deck (Deck.lua geometry, DK.CW x 38 design px, 368 at 8 keys, 1 design px = 1/1.28 image px) docked on the action bar stack, in one of three panel styles: Console (classes bm cn, the default: the tab is a stepped shoulder of the one console chassis), Bar-matched (class bm: a tab grown out of bar 2) or Deck (class dk).
    The box is placed in percent of the stage (vars set by the script), and everything inside is in percent of that box or in svg units, so it scales with the stage. */

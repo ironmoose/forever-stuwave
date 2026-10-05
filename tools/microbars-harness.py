@@ -53,13 +53,13 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent
+ADDON = HERE.parent / "addon" / "ForeverSynthwave"
 MICRO_LUA = Path(os.environ.get("MICROBARS_LUA") or ADDON / "MicroBars.lua")
 DECK_LUA = Path(os.environ.get("DECK_LUA") or ADDON / "Deck.lua")
 LAYOUT_LUA = ADDON / "Layout.lua"
 THEME_LUA = ADDON / "Theme.lua"
 DATABAR_LUA = ADDON / "DataBar.lua"
-MOCKUP = ADDON / "mockups" / "control-deck-v1-2026-10-01.html"
+MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "control-deck-v1-2026-10-01.html"
 CELL_SLANT = ADDON / "media" / "cell_slant.tga"
 EPS = 0.01
 

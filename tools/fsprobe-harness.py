@@ -35,7 +35,7 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-SOURCE = HERE.parent / "FSProbe.lua"
+SOURCE = HERE.parent / "addon" / "ForeverSynthwave" / "FSProbe.lua"
 
 MOCK = r"""
 __realType = type

@@ -35,7 +35,7 @@ except ImportError:
         "  UV_LINK_MODE=copy uv pip install --python tools/.venv-lua/Scripts/python.exe lupa"
     )
 
-ADDON_DIR = Path(__file__).resolve().parent.parent
+ADDON_DIR = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
 
 # Lua allows 200 local variables per function, and a file is one function: at 200 the file
 # stops compiling ("too many local variables"; luac 5.4 refuses it, LuaJIT has zero headroom

@@ -39,7 +39,7 @@ try:
 except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
-ADDON = Path(__file__).resolve().parent.parent
+ADDON = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
 DIAG_SRC = (ADDON / "Diagnostics.lua").read_text(encoding="utf-8")
 HUD_SPELLS_SRC = (ADDON / "HudSpells.lua").read_text(encoding="utf-8")
 HUD_PROFILES_SRC = (ADDON / "HudProfiles.lua").read_text(encoding="utf-8")

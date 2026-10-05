@@ -76,11 +76,11 @@ except ImportError:
         "Then run this with tools/.venv-lua/Scripts/python.exe"
     )
 
-ADDON_DIR = Path(__file__).resolve().parent.parent
+ADDON_DIR = Path(__file__).resolve().parent.parent / "addon" / "ForeverSynthwave"
 # Dump of every global on the live 16001 client, used by check 2. Resolution
 # order: $FS_GLOBALS_DUMP (explicit override; if set it is the only candidate),
 # then the first existing path below (Fedora reference copy, then Windows).
-GLOBALS_DUMP_CANDIDATES = [ADDON_DIR / "reference" / "globals.txt"]
+GLOBALS_DUMP_CANDIDATES = [Path(__file__).resolve().parent.parent / "reference" / "globals.txt"]
 
 
 def resolve_globals_dump() -> Path | None:

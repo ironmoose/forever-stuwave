@@ -50,7 +50,7 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-SOURCE = HERE.parent / "ForeverSynthwave.lua"
+SOURCE = HERE.parent / "addon" / "ForeverSynthwave" / "ForeverSynthwave.lua"
 
 MOCK = r"""
 __realType = type

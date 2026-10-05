@@ -61,7 +61,7 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent
+ADDON = HERE.parent / "addon" / "ForeverSynthwave"
 MEDIA = ADDON / "media"
 SEALS = Path(os.environ.get("GUNSIGHTSEALS_LUA") or ADDON / "GunsightSeals.lua")
 TOC = ADDON / "ForeverSynthwave.toc"
@@ -286,9 +286,9 @@ def mockup_seals() -> dict:
         sys.exit(f"mockup: expected seven seals, found {len(seals)}")
 
     # media: texel counts from the baked headers, the scale from the generators
-    lens_gen = (MEDIA / "generate_seal_lens.py").read_text(encoding="utf-8")
-    ring_gen = (MEDIA / "generate_seal_ring.py").read_text(encoding="utf-8")
-    glyph_gen = (MEDIA / "generate_seal_glyphs.py").read_text(encoding="utf-8")
+    lens_gen = (HERE / "assets" / "generate_seal_lens.py").read_text(encoding="utf-8")
+    ring_gen = (HERE / "assets" / "generate_seal_ring.py").read_text(encoding="utf-8")
+    glyph_gen = (HERE / "assets" / "generate_seal_glyphs.py").read_text(encoding="utf-8")
     lens_k = float(_m(r"(?m)^K = ([\d.]+)\s", lens_gen, "the lens texels per image px (K)").group(1))
     texels_per_unit = int(_m(r"Scale: (\d+) texels per unit", glyph_gen, "the glyph texels per unit").group(1))
     ring_k = float(_m(r"(?m)^K = ([\d.]+)\s", ring_gen, "the ring texels per image px (K)").group(1))

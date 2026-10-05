@@ -68,7 +68,7 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent
+ADDON = HERE.parent / "addon" / "ForeverSynthwave"
 
 
 def _load_chevron_harness():
@@ -83,7 +83,7 @@ def _load_chevron_harness():
 CHEV = _load_chevron_harness()
 
 
-MOCKUP_HTML = ADDON / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
+MOCKUP_HTML = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
 MONONOKI = ADDON / "fonts" / "MononokiNerdFontMono-Bold.ttf"
 # Mononoki Bold's advance as a fraction of the em (561.5 / 1000, read from the TTF with PIL). The
 # mockup's canvas measureText and this mock's GetStringWidth both use it, so the derived chevron

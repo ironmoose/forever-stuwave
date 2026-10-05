@@ -51,8 +51,8 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent
-MOCKUP = ADDON / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
+ADDON = HERE.parent / "addon" / "ForeverSynthwave"
+MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
 TOC = Path(os.environ.get("TOC_FILE", ADDON / "ForeverSynthwave.toc"))
 BINDINGS = Path(os.environ.get("BINDINGS_XML", ADDON / "Bindings.xml"))
 SEALBAR = Path(os.environ.get("SEALBAR_LUA", ADDON / "SealBar.lua"))

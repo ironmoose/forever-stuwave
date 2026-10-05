@@ -67,12 +67,12 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent
+ADDON = HERE.parent / "addon" / "ForeverSynthwave"
 COMBATHUD = Path(os.environ.get("COMBATHUD_LUA") or ADDON / "CombatHud.lua")
-MOCKUP = ADDON / "mockups" / "combat-hud-stack-a-2026-10-02.html"
-OFFSTATE_MOCKUP = ADDON / "mockups" / "off-state-and-bridge-2026-10-02.html"
-GUNSIGHT_MOCKUP = ADDON / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
-SHARD_GENERATOR = ADDON / "media" / "generate_hud_shard.py"
+MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "combat-hud-stack-a-2026-10-02.html"
+OFFSTATE_MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "off-state-and-bridge-2026-10-02.html"
+GUNSIGHT_MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
+SHARD_GENERATOR = HERE / "assets" / "generate_hud_shard.py"
 CASTBARS = ADDON / "CastBars.lua"
 THEME = ADDON / "Theme.lua"
 TOC = ADDON / "ForeverSynthwave.toc"
@@ -252,7 +252,7 @@ def _extract_theme_function(source: str, name: str) -> str:
 
 def tile_cut_fraction() -> float:
     """The chamfer of hud_tile_cut2.tga as a fraction of the tile, read from its generator."""
-    gen = (ADDON / "media" / "generate_hud_tile.py").read_text(encoding="utf-8")
+    gen = (HERE / "assets" / "generate_hud_tile.py").read_text(encoding="utf-8")
     m = re.search(r"(?m)^CUT_FRACTION = ([0-9.]+) / ([0-9.]+)", gen)
     if not m:
         sys.exit("generate_hud_tile.py: CUT_FRACTION not found; update combathud-harness.py")
@@ -3327,7 +3327,7 @@ def _shard_textures():
 
 @file_check("hud_tile_texture_is_the_mockups_135_degree_gradient_with_a_generator")
 def _tile():
-    gen = ADDON / "media" / "generate_hud_tile.py"
+    gen = HERE / "assets" / "generate_hud_tile.py"
     tga = ADDON / "media" / "hud_tile_cut2.tga"
     if not gen.exists():
         return "media/generate_hud_tile.py is missing"

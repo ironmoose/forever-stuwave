@@ -48,11 +48,11 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent
+ADDON = HERE.parent / "addon" / "ForeverSynthwave"
 # PETFRAME_LUA points the harness at a mutant copy of PetFrame.lua (a check must fail on a broken one).
 PETFRAME = Path(os.environ.get("PETFRAME_LUA", ADDON / "PetFrame.lua"))
 # The panel and status block come from the approved Gunsight mockup (option C, the console dock).
-MOCKUP = ADDON / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
+MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
 
 SCALES = (1.0, 0.64)  # UIParent height / 1440
 # PetFrame.lua NAME_LEVEL_GAP: the name stops this many design px short of the LV text. Not in the

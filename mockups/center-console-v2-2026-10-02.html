@@ -6,9 +6,9 @@
 <title>Center Console v2</title>
 <style>
 /* The addon's own bundled faces (ForeverSynthwave/fonts). Falls back to the stacks below. */
-@font-face { font-family: "FS Display"; src: url("../fonts/FSDisplay-Bold.ttf"); font-weight: 700; }
-@font-face { font-family: "FS Mono"; src: url("../fonts/MononokiNerdFontMono-Bold.ttf"); font-weight: 700; }
-@font-face { font-family: "Share Tech Mono"; src: url("../fonts/ShareTechMono-Regular.ttf"); }
+@font-face { font-family: "FS Display"; src: url("../addon/ForeverSynthwave/fonts/FSDisplay-Bold.ttf"); font-weight: 700; }
+@font-face { font-family: "FS Mono"; src: url("../addon/ForeverSynthwave/fonts/MononokiNerdFontMono-Bold.ttf"); font-weight: 700; }
+@font-face { font-family: "Share Tech Mono"; src: url("../addon/ForeverSynthwave/fonts/ShareTechMono-Regular.ttf"); }
 
 :root {
   color-scheme: dark;
@@ -469,7 +469,6 @@ h2 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 1
 
     svg += '<g data-ui="1">' + ui + '</g>';
     var world = '';
-    if (ref) { world += '<img class="refimg" src="center-console-ref-normal-zoom-2026-10-02.png" alt="">' + '<div class="refdark"></div>'; }
     world += '<svg width="' + SW + '" height="' + SH + '" viewBox="0 0 ' + SW + ' ' + SH + '">' + svg + '</svg>' + html;
     return { world: world, ell: [CX, z.ey, z.a, z.b], info: { Hc: Hc, z: z, need: need, inner: inner, clamped: clamped, Lx0: Lx0, Jy: Jy, ry: ry, rowY: rowY, plateY: plateY } };
   }
@@ -495,7 +494,7 @@ h2 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 1
 
   function render() {
     var p1 = buildConsole({ Hc: 210, state: "combat", partyOpen: true });
-    var p1r = buildConsole({ Hc: 210, state: "combat", partyOpen: true, ref: true });
+    var p1r = buildConsole({ Hc: 210, state: "combat", partyOpen: true, ref: false });
     var p2 = buildConsole({ Hc: 340, state: "combat", partyOpen: true });
     var p3 = buildConsole({ Hc: 120, state: "combat", partyOpen: true });
     var p4 = buildConsole({ Hc: 210, state: "off", partyOpen: false });

@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pet Component</title>
 <style>
-@font-face { font-family: "FS Display"; src: url("../fonts/FSDisplay-Bold.ttf"); font-weight: 700; }
-@font-face { font-family: "FS Mono"; src: url("../fonts/MononokiNerdFontMono-Bold.ttf"); font-weight: 700; }
-@font-face { font-family: "Share Tech Mono"; src: url("../fonts/ShareTechMono-Regular.ttf"); }
+@font-face { font-family: "FS Display"; src: url("../addon/ForeverSynthwave/fonts/FSDisplay-Bold.ttf"); font-weight: 700; }
+@font-face { font-family: "FS Mono"; src: url("../addon/ForeverSynthwave/fonts/MononokiNerdFontMono-Bold.ttf"); font-weight: 700; }
+@font-face { font-family: "Share Tech Mono"; src: url("../addon/ForeverSynthwave/fonts/ShareTechMono-Regular.ttf"); }
 
 :root {
   color-scheme: dark;
@@ -70,14 +70,6 @@ svg text { font-family: var(--font-label); }
     <h1>Pet block, <span>retro'd</span> into one panel</h1>
     <p class="lede"><b>Parker:</b> "retro the pet bar, and make it better. Put the pet HP and mana bar above the action bar and only take up like 2/5, and leave the rest for the cast bar. So the hp/mana bar and then the cast bar on top of the pet bar, as one component." Everything below is drawn at <b>real game pixels</b> (the 2560 x 1440 UI, one unit is one pixel), one panel, one chrome. <b>Top row</b>: pet HP and mana at 2/5 of the width, the pet cast bar in the other 3/5. <b>Bottom row</b>: the 10 pet buttons, unchanged. Every rectangle cuts <b>top left and bottom right only</b>: panel 6, bars 3 to 4, cast bar 4, buttons 6 (a fifth of the 30). Only the label tab keeps a flat left edge, because it hangs off the cast bar's bottom edge.</p>
   </header>
-
-  <h2>Before: what is in game now</h2>
-  <p class="note">Crop from Parker's screenshot, scaled to the 2560 layout (1.28x). Three stacked slots: a 14 high cast strip, the 30 high button row, then a 22 high name, level and two laser rails strip. The cast bar is a lone run of chevrons with no label and no timer unless something is casting, and HP and mana take the full width.</p>
-  <div class="refbox">
-    <img src="pet-component-ref-current-2026-10-02.png" width="364" height="92" alt="Current in game pet block">
-    <p class="math">now: container 348 x 86 (Layout.petcontainer) = 6 pad + 14 cast + 4 + 30 buttons + 4 + 22 status + 6 pad<br>
-    <b>new</b>: container 348 x 82 = 6 pad + 36 top row + 4 + 30 buttons + 6 pad. Four design px shorter, same width, same seat, same 10 buttons at 30 / 4.</p>
-  </div>
 
   <h2>V1 / HP and mana stacked, two thin bars</h2>
   <p class="note">Name and level on a small line, then an 11 high HP bar over an 11 high mana bar, both with the "253 / 253" value inside. The cast bar sits beside them at the top of its 36 high slot (22 high bar plus a 14 high spell tab hanging underneath), so both halves of the top row end on the same line.</p>

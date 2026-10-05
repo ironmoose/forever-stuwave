@@ -37,7 +37,7 @@ except ImportError:
 
 HERE = Path(__file__).resolve().parent
 # HUD_HARNESS_ADDON_DIR points the harness at a scratch copy, for mutation checks.
-ADDON = Path(os.environ.get("HUD_HARNESS_ADDON_DIR") or HERE.parent)
+ADDON = Path(os.environ.get("HUD_HARNESS_ADDON_DIR") or HERE.parent / "addon" / "ForeverSynthwave")
 FILES = ["HudSpells.lua", "HudProfiles.lua", "HudLogic.lua"]
 
 MOCK = r"""

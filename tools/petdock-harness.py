@@ -49,7 +49,7 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent
+ADDON = HERE.parent / "addon" / "ForeverSynthwave"
 MEDIA = ADDON / "media"
 # PETDOCK_LUA points the harness at a mutant copy of PetDock.lua (a check must fail on a broken one).
 PETDOCK = Path(os.environ.get("PETDOCK_LUA", ADDON / "PetDock.lua"))
@@ -550,7 +550,7 @@ def check_the_baked_textures_are_128_square_bgra() -> None:
     for name in ("pet_dock_flare_line.tga", "pet_dock_flare_glow.tga"):
         w, h, _ = read_tga(MEDIA / name)
         assert (w, h) == (128, 128), f"{name} is {w} x {h}"
-    assert (MEDIA / "generate_pet_dock_flare.py").exists(), "no generator for the baked flare textures"
+    assert (HERE / "assets" / "generate_pet_dock_flare.py").exists(), "no generator for the baked flare textures"
 
 
 # ---------------------------------------------------------------------------------------------

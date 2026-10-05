@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy the Forever Synthwave addon from this repo to the live WoW Forever
+# Deploy the Forever STUwave addon from this repo to the live WoW Forever
 # beta in the Fedora Lutris Battle.net prefix. WOW_ROOT can override the default
 # for another installation.
 #
@@ -7,7 +7,7 @@
 #   ./deploy-forever-synthwave.sh          # deploy to the beta client
 #   WOW_FLAVOR=_classic_ ./deploy-...sh    # deploy to TBC Anniversary instead
 #   WOW_ROOT=/other/wow/root ./deploy-...sh  # override the install location
-#   FS_SKIP_GATES=1 ./deploy-...sh         # bypass the pre-deploy gates (emergencies only)
+#   FS_SKIP_GATES=1 ./deploy-...sh         # install a trusted tester checkout without Python
 #
 # Pre-deploy gates (run before anything is copied; a failure aborts the deploy):
 #   parse-gate.py  every .lua must compile as Lua 5.1 (a bad file is skipped
@@ -21,7 +21,8 @@
 # After it runs: /reload in-client to pick up the new copy.
 set -euo pipefail
 
-SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SRC="$REPO/addon/ForeverSynthwave"
 
 WOW_ROOT="${WOW_ROOT:-$HOME/Games/battlenet/drive_c/Program Files (x86)/World of Warcraft}"
 WOW_FLAVOR="${WOW_FLAVOR:-_classic_beta_}"   # _classic_beta_ = Forever beta; _classic_ = TBC Anniversary
@@ -73,14 +74,14 @@ fi
 # Never mirror a source checkout onto itself or prune a tester's Git checkout.
 SRC_REAL="$(realpath "$SRC")"
 DST_REAL="$(realpath -m "$DST")"
-if [[ "$DST_REAL" == "$SRC_REAL" || "$DST_REAL" == "$SRC_REAL/"* || -e "$DST/.git" ]]; then
-  echo "ERROR: destination is a source/Git checkout; update it with git pull." >&2
+if [[ "$DST_REAL" == "$REPO" || "$DST_REAL" == "$REPO/"* || "$DST_REAL" == "$SRC_REAL" || "$DST_REAL" == "$SRC_REAL/"* || -e "$DST/.git" ]]; then
+  echo "ERROR: destination is a source/Git checkout. Move the checkout outside AddOns, then deploy." >&2
   exit 1
 fi
 mkdir -p "$DST"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
-cp "$SRC"/*.lua "$SRC/ForeverSynthwave.toc" "$SRC/Bindings.xml" "$SRC/LICENSE" "$STAGE/"
+cp "$SRC"/*.lua "$SRC/ForeverSynthwave.toc" "$SRC/Bindings.xml" "$REPO/LICENSE" "$STAGE/"
 mkdir -p "$STAGE/media" "$STAGE/fonts"
 find "$SRC/media" -maxdepth 1 -name '*.tga' -exec cp -t "$STAGE/media" {} +
 find "$SRC/fonts" -maxdepth 1 -type f \( -name '*.ttf' -o -name 'OFL*.txt' -o -name 'LICENSE*.txt' -o -name 'COPYING*.txt' \) -exec cp -t "$STAGE/fonts" {} +

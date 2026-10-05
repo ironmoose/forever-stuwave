@@ -45,7 +45,7 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent
+ADDON = HERE.parent / "addon" / "ForeverSynthwave"
 # BUFFS_LUA / THEME_LUA point the run at a mutant copy (the other harnesses do the same).
 SOURCE = Path(os.environ.get("BUFFS_LUA", ADDON / "Buffs.lua"))
 THEME = Path(os.environ.get("THEME_LUA", ADDON / "Theme.lua"))

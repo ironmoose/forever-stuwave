@@ -45,8 +45,8 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent
-MOCKUP = ADDON / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
+ADDON = HERE.parent / "addon" / "ForeverSynthwave"
+MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
 TOC = ADDON / "ForeverSynthwave.toc"
 CONSOLE = ADDON / "Console.lua"
 LAYOUT = ADDON / "Layout.lua"
@@ -1459,7 +1459,7 @@ def static_checks(mu: dict) -> list[tuple[str, str | None]]:
         out.append((f"chat_chrome_edge_is_not_left_of_what_the_chat_code_implies @scale={sc:.4f}",
                     None if lay["CHAT_CHROME_RIGHT"] >= implied
                     else f"CHAT_CHROME_RIGHT {lay['CHAT_CHROME_RIGHT']} is left of the {implied:.1f} the code implies"))
-    ok_slash = "SLASH_FSCONSOLE1" in (ADDON / ".luacheckrc").read_text(encoding="utf-8")
+    ok_slash = "SLASH_FSCONSOLE1" in (Path(__file__).resolve().parent.parent / ".luacheckrc").read_text(encoding="utf-8")
     out.append(("luacheckrc_declares_the_slash_global", None if ok_slash else "SLASH_FSCONSOLE1 missing from .luacheckrc"))
     return out
 

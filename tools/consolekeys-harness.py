@@ -50,7 +50,7 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent
+ADDON = HERE.parent / "addon" / "ForeverSynthwave"
 KEYS_LUA = Path(os.environ.get("CONSOLEKEYS_LUA") or ADDON / "ConsoleKeys.lua")
 TOC = ADDON / "ForeverSynthwave.toc"
 THEME = ADDON / "Theme.lua"

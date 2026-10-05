@@ -50,7 +50,7 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-ADDON = HERE.parent
+ADDON = HERE.parent / "addon" / "ForeverSynthwave"
 CASTBARS = Path(os.environ.get("CASTBARS_LUA", ADDON / "CastBars.lua"))
 
 
