@@ -2,26 +2,48 @@
   <img src="docs/images/stuwave.svg" alt="Forever STUwave — WoW Forever / Custom UI / Alpha" width="1200">
 </p>
 
-A custom UI for WoW Forever, built for the beta client (interface 16001) and a 16:9 display.
+<p align="center">
+  A custom UI for WoW Forever.<br>
+  <strong>Beta · Interface 16001 · 16:9</strong>
+</p>
 
-### Install
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#update">Update</a> ·
+  <a href="#help-shape-it">Help shape it</a> ·
+  <a href="docs/DEVELOPMENT.md">Development</a>
+</p>
 
-Close WoW. Clone the repo outside your game folder:
+## Install
 
-```sh
-git clone https://github.com/ironmoose/forever-stuwave.git
-```
+1. **Close WoW.**
+2. Clone the repo somewhere outside your game folder:
 
-Copy the inner `forever-stuwave/` folder into `_classic_beta_/Interface/AddOns/`, then start WoW and enable **Forever STUwave**. Keep the installed folder named `forever-stuwave`.
+   ```sh
+   git clone https://github.com/ironmoose/forever-stuwave.git
+   cd forever-stuwave
+   ```
 
-For an existing install, use the [deployment script](docs/DEVELOPMENT.md#deploying-a-development-build) to migrate settings and retire the old copy.
+3. Copy the **inner `forever-stuwave/` folder** into your game's `_classic_beta_/Interface/AddOns/` folder. Keep its name unchanged.
+4. Start WoW and enable **Forever STUwave** in the AddOns menu.
 
-### Update
+> **Existing install?** Use the [deployment script](docs/DEVELOPMENT.md#deploying-a-development-build) to migrate settings and retire the old copy.
 
-Close WoW, run `git pull --ff-only` in your checkout, and replace the installed addon with the inner `forever-stuwave/` folder. Fully restart WoW. [Deployment scripts](docs/DEVELOPMENT.md#deploying-a-development-build) can handle the copy for you.
+## Update
 
-### Help shape it
+1. **Close WoW.** From your repo checkout, run:
+
+   ```sh
+   git pull --ff-only
+   ```
+
+2. Replace the installed addon with the inner `forever-stuwave/` folder, or use the [deployment script](docs/DEVELOPMENT.md#deploying-a-development-build).
+3. **Fully restart WoW.**
+
+## Help shape it
 
 Bugs and ideas are welcome through [GitHub issues](https://github.com/ironmoose/forever-stuwave/issues). When something breaks, run `/fsbug` and include what happened; [the testing guide](docs/TESTING.md) covers reporting and checks.
 
-[Development](docs/DEVELOPMENT.md) · [MIT license](LICENSE) · [Third party notices](docs/THIRD_PARTY_NOTICES.md)
+---
+
+[Testing guide](docs/TESTING.md) · [Development](docs/DEVELOPMENT.md) · [MIT license](LICENSE) · [Third party notices](docs/THIRD_PARTY_NOTICES.md)
