@@ -42,7 +42,13 @@
 
 ## Help shape it
 
-Bugs and ideas are welcome through [GitHub issues](https://github.com/ironmoose/forever-stuwave/issues). When something breaks, run `/fsbug` and include what happened; [the testing guide](docs/TESTING.md) covers reporting and checks.
+Bugs and ideas are welcome through [GitHub issues](https://github.com/ironmoose/forever-stuwave/issues). When something breaks, describe it in chat:
+
+```text
+/fsbug what went wrong
+```
+
+`/fsbug` opens a copyable report with your class, level, addon settings, and recent errors. Review it, then paste it into your issue.
 
 ---
 
