@@ -489,6 +489,12 @@ local GetActionCooldownDuration = C_ActionBar and C_ActionBar.GetActionCooldownD
 local function UpdateCooldown(button)
     local cooldown = button.cooldown
     if not cooldown then return end
+    -- An empty slot has nothing to sweep; asking for its duration object would allocate one per
+    -- empty button on every cooldown event.
+    if not HasAction(button.action) then
+        if cooldown.Clear then cooldown:Clear() end
+        return
+    end
     -- SetCooldown is NOT on the secret whitelist, which I assumed it was. It
     -- refuses outright:
     --
@@ -853,6 +859,19 @@ end
 local function UpdateAll()
     for _, button in ipairs(allButtons) do
         UpdateButton(button)
+    end
+end
+
+-- The refresh the high-rate events get. Hotkey text only changes with bindings, and the cooldown
+-- duration object is only worth requesting on a cooldown event; both allocate on every call, so a
+-- usable/state event storm that ran them for all 72 buttons churned the heap while idle.
+local function UpdateAllLive(withCooldown)
+    for _, button in ipairs(allButtons) do
+        UpdateIcon(button)
+        UpdateCount(button)
+        if withCooldown then UpdateCooldown(button) end
+        UpdateUsable(button)
+        UpdateState(button)
     end
 end
 
@@ -1512,6 +1531,11 @@ local function OnEvent(_, event, arg1)
         or event == "PLAYER_ENTER_COMBAT"
         or event == "PLAYER_LEAVE_COMBAT" then
         UpdateAllState()
+    elseif event == "ACTIONBAR_UPDATE_COOLDOWN" or event == "SPELL_UPDATE_COOLDOWN" then
+        UpdateAllLive(true)
+    elseif event == "ACTIONBAR_UPDATE_USABLE" or event == "SPELL_UPDATE_USABLE"
+        or event == "ACTIONBAR_UPDATE_STATE" or event == "PLAYER_TARGET_CHANGED" then
+        UpdateAllLive(false)
     else
         UpdateAll()
     end

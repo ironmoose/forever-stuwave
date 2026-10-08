@@ -1072,6 +1072,64 @@ function T.gcd_swipe_is_asked_for_with_the_gcd_included_and_applied()
     eq(b.cooldown._cdObj ~= nil, true, "ACTIONBAR_UPDATE_COOLDOWN refreshes it too")
 end
 
+-- The usable/state events can fire many times a second while idle, and each one used to
+-- rebuild every button's hotkey strings and cooldown duration object. Only the events that own that
+-- data may pay for it, and an empty slot never asks for a duration object at all.
+function T.idle_usable_and_state_events_skip_hotkeys_and_cooldown_objects()
+    __cdAsked, __keyAsked = 0, 0
+    for _, ev in ipairs({ "ACTIONBAR_UPDATE_USABLE", "SPELL_UPDATE_USABLE", "ACTIONBAR_UPDATE_STATE",
+                          "PLAYER_TARGET_CHANGED" }) do
+        __fire_event(ev)
+    end
+    eq(__cdAsked, 0, "usable/state events request no cooldown duration objects")
+    eq(__keyAsked, 0, "usable/state events resolve no hotkeys")
+    __fire_event("SPELL_UPDATE_COOLDOWN")
+    eq(__cdAsked > 0, true, "a cooldown event still refreshes the swipe")
+    eq(__keyAsked, 0, "a cooldown event resolves no hotkeys")
+    __fire_event("UPDATE_BINDINGS")
+    eq(__keyAsked > 0, true, "a bindings change still refreshes the hotkeys")
+end
+
+-- The cheaper path must still do its job: a usable change reaches the icon tint.
+function T.usable_event_still_retints_the_icon()
+    local icon = __button(1, 1).icon
+    __fire_event("ACTIONBAR_UPDATE_USABLE")
+    eq(icon._vertex[1], 1, "usable slot is untinted")
+    IsUsableAction = function() return false, false end
+    __fire_event("ACTIONBAR_UPDATE_USABLE")
+    eq(icon._vertex[1], 0.4, "unusable slot is greyed by the usable event")
+    IsUsableAction = function() return true, false end
+    IsActionInRange = function() return false end
+    __fire_event("PLAYER_TARGET_CHANGED")
+    eq(icon._vertex[1], 0.8, "out of range is reddened by a target change")
+end
+
+function T.cooldown_refresh_skips_empty_slots()
+    local b = __button(1, 1)
+    local emptySlot = b.action
+    __cdAsked = 0
+    __fire_event("ACTIONBAR_UPDATE_COOLDOWN")
+    local all = __cdAsked
+    eq(all > 1, true, "every filled slot asks for its duration object")
+    HasAction = function(slot) return slot ~= emptySlot end
+    b.cooldown._cdObj = "stale"
+    __cdAsked = 0
+    __fire_event("ACTIONBAR_UPDATE_COOLDOWN")
+    eq(__cdAsked, all - 1, "the empty slot asks for no duration object")
+    eq(b.cooldown._cdObj, nil, "the empty slot's swipe was cleared")
+    eq(__button(1, 2).cooldown._cdObj ~= nil, true, "a filled slot still gets its duration object")
+end
+
+function T.slot_change_to_an_empty_slot_clears_its_cooldown()
+    local b = __button(1, 1)
+    __fire_event("ACTIONBAR_UPDATE_COOLDOWN")
+    eq(b.cooldown._cdObj ~= nil, true, "swipe shown while the slot is filled")
+    local slot = b.action
+    HasAction = function(s) return s ~= slot end
+    __fire_event("ACTIONBAR_SLOT_CHANGED", slot)
+    eq(b.cooldown._cdObj, nil, "slot change to empty cleared the swipe")
+end
+
 -- ---- Quick Keybind ------------------------------------------------------
 local function qkShow() QuickKeybindFrame:Show() end
 local function qkHide() QuickKeybindFrame:Hide() end
@@ -2548,6 +2606,14 @@ STANCE_RESCALE = """
     FS.Layout.OnRescale = function(fn) __rescaleFns[#__rescaleFns + 1] = fn end
 """
 
+# Counting stand-ins for the two calls that allocate per button, installed before the addon loads.
+COUNT_APIS = """
+    __cdAsked, __keyAsked = 0, 0
+    C_ActionBar.GetActionCooldownDuration = function() __cdAsked = __cdAsked + 1; return { duration = true } end
+    local realGetBindingKey = GetBindingKey
+    GetBindingKey = function(action) __keyAsked = __keyAsked + 1; return realGetBindingKey(action) end
+"""
+
 VARIANTS = {
     "bar6_first_slot_follows_the_clients_multibar5_page": "MULTIBAR_5_ACTIONBAR_PAGE = 15",
     "gcd_swipe_is_asked_for_with_the_gcd_included_and_applied": """
@@ -2557,6 +2623,8 @@ VARIANTS = {
             return { gcd = true }
         end
     """,
+    "idle_usable_and_state_events_skip_hotkeys_and_cooldown_objects": COUNT_APIS,
+    "cooldown_refresh_skips_empty_slots": COUNT_APIS,
     "keybind_press_pushes_our_button_and_release_clears_it": PRESS_HOOKS,
     "keybind_press_is_released_when_the_release_never_arrives": PRESS_HOOKS,
     "keybind_press_survives_the_start_of_combat": PRESS_HOOKS,
