@@ -790,6 +790,34 @@ function T.a_nudge_on_a_frame_that_is_gone_writes_nothing()
     eq(FS.LayoutEdit.GetHandle("petcontainer"), nil)
 end
 
+-- StanceBar.lua takes its container off the re-seat list while the Warrior's class shoulder carries the stances
+-- (the same way PetFrame.SeatDocked does), and that is all the handle needs: no applied frame, no handle.
+function T.a_stance_bar_on_the_class_shoulder_has_no_handle_and_others_keep_theirs()
+    edit()
+    local stance = seat("stance"); seat("player")
+    FS.Layout._applied[stance] = nil
+    FS.LayoutEdit.Enter()
+    eq(FS.LayoutEdit.GetHandle("stance"), nil, "no handle for a shouldered stance bar")
+    eq(FS.LayoutEdit.GetHandle("player") ~= nil, true, "other frames keep theirs")
+    FS.LayoutEdit.Exit()
+    seat("stance")
+    FS.LayoutEdit.Enter()
+    eq(FS.LayoutEdit.GetHandle("stance") ~= nil, true, "back on its own seat the stance bar is draggable again")
+end
+
+function T.a_stance_bar_that_goes_onto_the_shoulder_mid_edit_loses_its_handle_and_a_drop_writes_nothing()
+    edit()
+    local stance = seat("stance")
+    FS.LayoutEdit.Enter()
+    local h = FS.LayoutEdit.GetHandle("stance")
+    h._scripts.OnDragStart(h)
+    FS.Layout._applied[stance] = nil
+    h:ClearAllPoints(); h:SetPoint("CENTER", UIParent, "CENTER", 200, 200)
+    h._scripts.OnDragStop(h)
+    eq(next(frames()), nil, "nothing was written for a frame that is gone")
+    eq(FS.LayoutEdit.GetHandle("stance"), nil, "and its handle is hidden")
+end
+
 function T.resetting_the_pet_also_drops_the_old_pet_drag_position()
     edit(); seat("petcontainer")
     ForeverSTUwaveDB.petFrame = { pos = { point = "CENTER", relativePoint = "CENTER", x = 1, y = 1 } }

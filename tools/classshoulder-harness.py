@@ -24,7 +24,10 @@ numbers back out of the HTML, so a mockup move fails here:
   * the look is the chassis' (fill tint, stroke alpha, halo alpha and blend, no red twin, no
     overrun into the Console's line row);
   * nothing protected is touched in combat; the re-seat waits for PLAYER_REGEN_ENABLED; no secure
-    frame is ever anchored to the art.
+    frame is ever anchored to the art;
+  * a Warrior (StanceBar owns the shoulder) gets the same chrome as a 3 x 1 block, 135.6 x 49 design px
+    (mockup `{id:'st',n:3,rows:1}`), cached apart from the Paladin's, on the same baked halo atlas;
+    Druid, Rogue, Priest and Mage get none.
 
 The mock is strict and is NOT the real client. CLASSSHOULDER_LUA, SEALBAR_LUA, PETDOCK_LUA and TOC_FILE
 point the harness at mutant copies (a check must fail on a broken one).
@@ -104,6 +107,19 @@ def look() -> dict:
 
 
 LOOK = look()
+
+
+def warrior_block() -> dict:
+    """The Warrior's stance shoulder as the mockup builds it: 3 wide, 1 row (lsRowW(3) by LS_PT + LS_BTN + LS_PB)."""
+    src = sb.MOCKUP.read_text(encoding="utf-8")
+    sb._m(r"if\(CLS==='wr'\)o\.push\(\{id:'st',x:LS_X,n:3,rows:1\}\);", src, "the Warrior stance shoulder (3 wide, 1 row)")
+    stances = sb._m(r"var STANCES=\[(.*?)\];", src, "STANCES").group(1)
+    order = re.findall(r"id:'(\w+)'", stances)
+    return dict(W=2 * MU["PAD"] + 3 * MU["BTN"] + 2 * MU["BG"], H=MU["PT"] + MU["BTN"] + MU["PB"], ORDER=order)
+
+
+WR = warrior_block()
+WARRIOR_FORMS = ("Battle Stance", "Defensive Stance", "Berserker Stance")
 
 # The mockup's stepped halo, worked out here from its HALO table and nothing under test. `halo(true)` strokes
 # the outline four times, each wider by 2 w and drawn at alpha a x CN_GK x A(.7); outside the path the layers
@@ -435,7 +451,7 @@ def check_no_button_or_host_position_moves_with_the_shoulder(scale):
 
 
 def check_a_non_paladin_builds_nothing_and_asks_for_nothing():
-    for klass in ("WARLOCK", "PRIEST", "MAGE"):
+    for klass in ("WARLOCK", "PRIEST", "MAGE", "DRUID", "ROGUE"):
         lua = boot(klass=klass)
         assert cs(lua).shoulder is None, f"{klass}: a shoulder was built"
         assert not cs(lua).IsShown()
@@ -1137,6 +1153,208 @@ def check_bad_chassis_opts_build_nothing():
         approx(tex._vertex[4], 0.6, "SetEdge default halo alpha")
 
 
+# ---------------------------------------------------------------------------------------------
+# The Warrior's shoulder: the same chrome as a 3 x 1 block
+# ---------------------------------------------------------------------------------------------
+
+
+def warrior(scale: float = 1.0, **kw):
+    kw.setdefault("forms", list(WARRIOR_FORMS))
+    return boot(scale, klass="WARRIOR", **kw)
+
+
+def check_the_mockups_warrior_block_is_three_by_one():
+    assert WR["ORDER"] == ["ba", "de", "be"], f"the mockup's stance order changed: {WR['ORDER']}"
+    approx(WR["W"], 135.6, "Warrior block width"), approx(WR["H"], 49, "Warrior block height")
+    approx(W, 306.8, "the Paladin block stays 306.8 wide"), approx(H, 91.8, "and 91.8 tall")
+
+
+def check_a_warrior_with_the_console_drawn_builds_one_3x1_shoulder():
+    lua = warrior()
+    assert console(lua).IsDrawn(), "setup: the Console should be drawn"
+    assert g(lua).FS.StanceBar.OwnsShoulder() and not g(lua).FS.SealBar.OwnsForms()
+    s = shoulder(lua)
+    assert s is not None and cs(lua).IsShown(), "no Warrior shoulder stands"
+    art = s.art
+    assert art._parent._name == "FSConsole" and art._shown
+    approx(art._w, WR["W"], "art width"), approx(art._h, WR["H"], "art height")
+    assert len(art._points) == 1
+    p = art._points[1]
+    assert (p.point, p.rel._name, p.relPoint) == ("BOTTOMLEFT", "FSConsole", "TOPLEFT"), (
+        f"art anchor {p.point} {p.rel._name} {p.relPoint}")
+    approx(p.x, DX, "art x (art units)", 0.5), approx(p.y, 0, "art y")
+    # the art is the one NewShoulder size for this owner and nothing else
+    approx(s.W, WR["W"], "shoulder W"), approx(s.H, WR["H"], "shoulder H")
+
+
+def check_the_warrior_shoulder_is_the_mockups_block_at_both_scales(scale):
+    lua = warrior(scale)
+    d = D(lua, shoulder(lua).art)
+    approx(d["w"], WR["W"], "width in design px", 0.01), approx(d["h"], WR["H"], "height in design px", 0.01)
+    approx(d["x"], DX, "left in design px from the chassis", 0.5)
+    approx(d["y"] + d["h"], 0, "bottom stands on the chassis top edge", 0.01)
+    approx(shoulder(lua).art._scale, scale, "art scale follows the layout scale")
+    point, rel, rel_point, x, y = cs(lua).HostPoint()
+    assert (point, rel._name, rel_point) == ("BOTTOMLEFT", "FSConsole", "TOPLEFT")
+    approx(x, DX * scale, "host x", 0.5 * scale), approx(y, 0, "host y")
+    host = g(lua).FSStanceBar
+    for col in range(1, 4):
+        point, rel, rel_point, x, y = cs(lua).SlotPoint(host, 1, col)
+        assert point == "BOTTOMLEFT" and rel_point == "BOTTOMLEFT" and sb.same(lua, rel, host)
+        approx(x, (MU["PAD"] + (col - 1) * PITCH) * scale, f"slot {col} x")
+        approx(y, MU["PB"] * scale, f"slot {col} y: one row sits PB above the bottom")
+    bw, bh, edge = cs(lua).BlockSize()
+    approx(bw, WR["W"] * scale, "BlockSize width"), approx(bh, WR["H"] * scale, "BlockSize height")
+    approx(edge, MU["BTN"] * scale, "BlockSize button edge")
+
+
+def check_the_warrior_shoulder_takes_the_gap_in_order_and_gives_it_back():
+    lua = warrior()
+    c = calls(lua)
+    gaps = [x for x in c if x.startswith("gap:") and x != "gap:nil:nil"]
+    assert "yield:classshoulder" in c and gaps, f"never took the gap: {c}"
+    assert c.index("yield:classshoulder") < c.index(gaps[0]), f"SetDockGap before YieldGap: {c}"
+    nums = [float(v) for v in gaps[-1].split(":")[1:]]
+    # line [dx + 1, dx + W + 10 - 1], halo [dx - 11, dx + W + 15], from the shoulder's own width
+    want = (DX + 1, DX + WR["W"] + 9, DX - GP, DX + WR["W"] + 15)
+    for got, w, what in zip(nums, want, ("line x0", "line x1", "halo x0", "halo x1")):
+        approx(got, w, what, 1e-6)
+    clear_calls(lua)
+    console(lua).SetActive(False)
+    assert not cs(lua).IsShown() and not shoulder(lua).art._shown
+    c = calls(lua)
+    assert c.count("reclaim:classshoulder") == 1, f"ReclaimGap calls: {c}"
+    assert c.index([x for x in c if x.startswith("gap:nil")][0]) < c.index("reclaim:classshoulder")
+    assert cs(lua).HostPoint() is None and cs(lua).SlotPoint(g(lua).FSStanceBar, 1, 1) is None
+    assert cs(lua).BlockSize() is None
+    first = shoulder(lua)
+    console(lua).SetActive(True)
+    assert cs(lua).IsShown() and sb.same(lua, shoulder(lua), first), "the Console coming back rebuilt the shoulder"
+
+
+def check_a_warrior_without_the_console_or_without_forms_has_no_shoulder():
+    lua = warrior(console=False)
+    assert shoulder(lua) is None and not cs(lua).IsShown() and calls(lua) == []
+    lua = warrior(forms=[])
+    assert not g(lua).FS.StanceBar.OwnsShoulder(), "a Warrior with no forms owns a shoulder"
+    assert shoulder(lua) is None and not cs(lua).IsShown() and calls(lua) == [], calls(lua)
+    gap, halo = gap_of(lua)
+    assert gap is None and halo is None, "the Console gap was set for no shoulder"
+
+
+def check_a_warrior_shoulder_is_built_once_and_kept_per_owner():
+    lua = warrior()
+    first = shoulder(lua)
+    n = len(frames_under(g(lua).FSConsole))
+    for event in ("PLAYER_ENTERING_WORLD", "UPDATE_SHAPESHIFT_FORMS", "PLAYER_REGEN_ENABLED"):
+        fire(lua, event)
+    lua.eval("__rescale")(1.0)
+    cs(lua).Refresh()
+    assert sb.same(lua, shoulder(lua), first), "the Warrior shoulder was rebuilt"
+    assert len(frames_under(g(lua).FSConsole)) == n, "a refresh grew the frame tree"
+    c = calls(lua)
+    assert c.count("yield:classshoulder") == 1, f"the gap was yielded again: {c}"
+    assert len([x for x in c if x.startswith("gap:")]) == 1, f"the gap was set again: {c}"
+    # the Paladin's own is another object entirely, at its own size
+    pal = boot()
+    approx(shoulder(pal).art._w, W, "Paladin art width"), approx(shoulder(pal).art._h, H, "Paladin art height")
+
+
+def check_the_warrior_halo_is_the_mockups_halo_around_a_3x1_path():
+    """Every piece of the Warrior's halo, texel by texel, against the mockup's stepped halo around ITS outline.
+    The baked corner pieces are fixed texel rects, so this is also the proof media/shoulder_glow.tga needs no
+    re-bake for another width or height."""
+    lua = warrior()
+    ww, hh = WR["W"], WR["H"]
+    path = outline_path(ww, hh)
+    pieces = shoulder_halo(lua)
+    assert len(pieces) >= 7, f"only {len(pieces)} halo pieces"
+    for t in pieces:
+        assert t.w > 0 and t.h > 0, f"an empty halo piece at ({t.x}, {t.y})"
+        for j in range(int(t.h)):
+            for i in range(int(t.w)):
+                x0, y0 = t.x + i, t.y + j
+                got = t.alpha(x0 + 0.5, y0 + 0.5)
+                want = texel_mean(x0, y0, path)
+                assert abs(got - want) <= 1.5 / 255, (
+                    f"{t.file} piece at ({t.x:.1f}, {t.y:.1f}): texel ({x0:.1f}, {y0:.1f}) is {got:.4f}, "
+                    f"the mockup's halo there is {want:.4f}")
+    # the baked pieces are the same texel windows at the same size as on the Paladin's block
+    pal = shoulder_halo(boot())
+    def baked(ps):
+        return sorted((t.file, tuple(round(v, 6) for v in t.tc), t.w, t.h) for t in ps if t.file == "shoulder_glow.tga")
+    assert baked(pieces) == baked(pal) and len(baked(pieces)) == 3, "the baked corner pieces changed with the block"
+
+
+def check_the_warrior_halo_tiles_without_overlap_or_holes():
+    lua = warrior()
+    ww, hh = WR["W"], WR["H"]
+    pieces = shoulder_halo(lua)
+    for i, a in enumerate(pieces):
+        for b in pieces[i + 1:]:
+            ox = min(a.x + a.w, b.x + b.w) - max(a.x, b.x)
+            oy = min(a.y + a.h, b.y + b.h) - max(a.y, b.y)
+            assert not (ox > 1e-6 and oy > 1e-6), f"halo pieces overlap: ({a.x}, {a.y}) and ({b.x}, {b.y})"
+    path = outline_path(ww, hh)
+    y = -GP + 0.25
+    while y < hh - 1.0:
+        x = -GP + 0.25
+        while x < ww + 15.0:
+            cover = [t for t in pieces if t.visible and t.contains(x, y)]
+            assert len(cover) <= 1, f"{len(cover)} halo pieces draw ({x}, {y})"
+            if not cover:
+                assert mockup_halo(x, y, path) < 1 / 255 + 1e-9, (
+                    f"nothing draws ({x}, {y}) where the mockup has {mockup_halo(x, y, path):.4f}")
+            x += 1.0
+        y += 1.0
+    for tex in seq(shoulder(lua).stroke) + seq(shoulder(lua).halo):
+        p = tex._points[1]
+        assert -p.y <= hh - 1e-6 or tex._h == 0, f"a stroke or halo piece starts below the block: {-p.y}"
+
+
+def check_a_warrior_login_in_combat_builds_the_shoulder_at_regen():
+    lua = warrior(combat=True)
+    assert shoulder(lua) is None and calls(lua) == []
+    set_combat(lua, False)
+    fire(lua, "PLAYER_REGEN_ENABLED")
+    assert shoulder(lua) is not None and cs(lua).IsShown(), "not built at regen"
+    assert any(x.startswith("gap:37") for x in calls(lua))
+    assert blocked(lua) == 0 and g(lua).__protectedTouch == 0
+
+
+def check_the_warrior_shoulder_touches_nothing_protected_in_combat():
+    lua = warrior(1.0)
+    art = shoulder(lua).art
+    set_combat(lua, True)
+    clear_calls(lua)
+    before = (art._scale, art._points[1].x, art._points[1].y, art._level, art._shown)
+    lua.eval("__rescale")(0.64)
+    cs(lua).Refresh()
+    console(lua).SetActive(False)
+    assert blocked(lua) == 0 and g(lua).__protectedTouch == 0, "a protected operation ran in combat"
+    assert calls(lua) == [], f"gap or owner calls in combat: {calls(lua)}"
+    assert (art._scale, art._points[1].x, art._points[1].y, art._level, art._shown) == before
+    set_combat(lua, False)
+    fire(lua, "PLAYER_REGEN_ENABLED")
+    assert blocked(lua) == 0
+
+
+def check_the_warrior_shoulder_hangs_no_secure_frame_off_the_art():
+    lua = warrior()
+    art_frames = [shoulder(lua).art] + frames_under(shoulder(lua).art)
+    for f in seq(lua.eval("__frames")):
+        if f._secure or f._protected:
+            for p in seq(f._points):
+                assert p.rel is None or all(not sb.same(lua, p.rel, a) for a in art_frames), (
+                    f"{f._name} is anchored to the shoulder art")
+            parent = f._parent
+            while parent is not None:
+                assert all(not sb.same(lua, parent, a) for a in art_frames), f"{f._name} is parented under the art"
+                parent = parent._parent
+    host_point = g(lua).FSStanceBar._points[1]
+    assert host_point.rel._name == "FSConsole", f"the stance host is anchored to {host_point.rel._name}"
+
+
 def check_no_em_dashes_in_the_new_files():
     for path in (CLASSSHOULDER, Path(__file__)):
         assert path.exists(), f"{path} is missing"
@@ -1159,6 +1377,16 @@ CHECKS = [
     check_the_chassis_look_is_read_from_the_mockup,
     check_toc_lists_classshoulder_between_petdock_and_sealbar,
     check_a_paladin_with_the_console_drawn_builds_one_shoulder,
+    check_the_mockups_warrior_block_is_three_by_one,
+    check_a_warrior_with_the_console_drawn_builds_one_3x1_shoulder,
+    check_the_warrior_shoulder_takes_the_gap_in_order_and_gives_it_back,
+    check_a_warrior_without_the_console_or_without_forms_has_no_shoulder,
+    check_a_warrior_shoulder_is_built_once_and_kept_per_owner,
+    check_the_warrior_halo_is_the_mockups_halo_around_a_3x1_path,
+    check_the_warrior_halo_tiles_without_overlap_or_holes,
+    check_a_warrior_login_in_combat_builds_the_shoulder_at_regen,
+    check_the_warrior_shoulder_touches_nothing_protected_in_combat,
+    check_the_warrior_shoulder_hangs_no_secure_frame_off_the_art,
     check_the_shoulder_is_built_once_and_survives_every_refresh_event,
     check_a_non_paladin_builds_nothing_and_asks_for_nothing,
     check_without_the_console_there_is_no_shoulder_and_the_buttons_keep_the_stance_seat,
@@ -1195,6 +1423,7 @@ CHECKS = [
 ]
 SCALED_CHECKS = [
     check_geometry_is_the_mockups,
+    check_the_warrior_shoulder_is_the_mockups_block_at_both_scales,
     check_the_seal_and_aura_buttons_sit_inside_the_block_by_the_mockups_padding,
     check_no_button_or_host_position_moves_with_the_shoulder,
     check_the_shoulder_takes_the_gap_in_the_right_order_with_the_right_span,

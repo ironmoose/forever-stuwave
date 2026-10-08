@@ -25,6 +25,11 @@
 -- count changes show or hide them), never re-created: a named secure frame cannot
 -- be destroyed, so re-creating under the same global name leaked one per rebuild.
 --
+-- WARRIOR: its three stances stand on the class shoulder (ClassShoulder.lua, mockup `{id:'st',n:3,rows:1}`)
+-- like the Paladin's seals, as three fixed slots in the order Battle, Defensive, Berserker. HostPoint/SlotPoint
+-- are the only places that know the seat: the shoulder answers while it stands, and the stance bar's own seat
+-- (Layout "stance") is the fallback. The container is the host, anchored to the Console root and never to the art.
+--
 -- First pass: click-to-activate only. Drag-and-drop (the shift/ctrl/alt-type1
 -- "none" dance ActionBars.lua uses) is deferred -- stances are not draggable
 -- Blizzard content in the first place (nothing to pick up/place), so there is
@@ -41,6 +46,9 @@ local IsSecret = FS.IsSecret
 local COLOR_POWER = FS.Theme.COLOR_POWER
 
 local BTN_GAP = 4
+
+-- The Warrior's stances in the mockup's order (STANCES): the slot of a form is its place here.
+local WARRIOR_STANCES = { "Battle Stance", "Defensive Stance", "Berserker Stance" }
 
 -------------------------------------------------------------------------------
 -- Cooldown
@@ -160,11 +168,13 @@ local function UpdateHotkey(button)
     if text == "" then
         hotkey:SetText("")
         hotkey:Hide()
+        if button.fsHotkeyPlate then button.fsHotkeyPlate:Hide() end
         return
     end
 
     hotkey:SetText(text)
     hotkey:Show()
+    if button.fsHotkeyPlate then button.fsHotkeyPlate:SetShown(button.fsShouldered) end
 end
 
 -- The CheckButton flips its checked state natively on every click, so clicking the
@@ -300,7 +310,7 @@ end
 -- not follow the size: SkinCutButton pins it to SLICE_CUT_MARGIN (6) like the action
 -- bars' baked plate, so a button of another height needs no re-chamfer, only the
 -- icon and swipe re-seated off the new rect (SeatCutIcon, SeatButtonCooldown).
-local function StyleButton(button, size)
+local function StyleButton(button, size, shouldered)
     button:SetSize(size, size)
 
     -- Same two-corner cut look as ActionBars.lua (top-left and bottom-right chamfered):
@@ -358,7 +368,30 @@ local function StyleButton(button, size)
 
     -- The full-face swipe would otherwise dim the keybind (drawn on the button,
     -- under the cooldown's child frame).
-    FS.FrameHelpers.SeatButtonText(button, button.HotKey)
+    local textHost = FS.FrameHelpers.SeatButtonText(button, button.HotKey)
+
+    -- On the shoulder the label is SealBar's: the action bars' dark text plate, 3 px in. Off it, the stance bar's own.
+    button.fsShouldered = shouldered and true or false
+    local hotkey = button.HotKey
+    if shouldered then
+        hotkey:ClearAllPoints()
+        hotkey:SetWidth(0)
+        hotkey:SetPoint("TOPRIGHT", button, "TOPRIGHT", -3, -2)
+        hotkey:SetDrawLayer("OVERLAY", 4)
+        if not button.fsHotkeyPlate then
+            local plate = textHost:CreateTexture(nil, "OVERLAY", nil, 3)
+            plate:SetColorTexture(0.024, 0.012, 0.071, 0.78)
+            plate:SetPoint("TOPLEFT", hotkey, "TOPLEFT", -3, 2)
+            plate:SetPoint("BOTTOMRIGHT", hotkey, "BOTTOMRIGHT", 3, -2)
+            plate:Hide()
+            button.fsHotkeyPlate = plate
+        end
+    elseif button.fsHotkeyPlate then
+        hotkey:ClearAllPoints()
+        hotkey:SetPoint("TOPRIGHT", button, "TOPRIGHT", -2, -2)
+        hotkey:SetDrawLayer("OVERLAY", 0)
+        button.fsHotkeyPlate:Hide()
+    end
 end
 
 -- Built once per form index (see the header). `spell` is filled by SyncCastSpell
@@ -417,13 +450,119 @@ local function HideBlizzardStanceBar()
     end
 end
 
+-- Re-dims the stock bar on UPDATE_BINDINGS, UPDATE_SHAPESHIFT_FORM and at PLAYER_REGEN_ENABLED, so a stock
+-- hotkey cannot draw under ours. A throw must not cost the state refresh around it; in combat the dim waits for regen.
+local function RedimBlizzardStanceBar()
+    pcall(HideBlizzardStanceBar)
+end
+
 -------------------------------------------------------------------------------
--- Assembly
+-- Warrior shoulder
 -------------------------------------------------------------------------------
 
 local container
 local buttons = {}      -- built buttons by form index; only ever grows, never re-created
 local pendingBuild = false
+local isWarrior = false
+local ownsShoulder = false
+
+local function PlayerIsWarrior()
+    local ok, _, token = pcall(UnitClass, "player")
+    return ok and not IsSecret(token) and token == "WARRIOR"
+end
+
+-- The English name of a spell id, a plain string or nil (SealBar.lua's, which keeps its own).
+local function SpellName(id)
+    if IsSecret(id) or type(id) ~= "number" then return nil end
+    local ok, name
+    if C_Spell and C_Spell.GetSpellInfo then
+        local info
+        ok, info = pcall(C_Spell.GetSpellInfo, id)
+        name = ok and not IsSecret(info) and type(info) == "table" and info.name or nil
+    elseif GetSpellInfo then
+        ok, name = pcall(GetSpellInfo, id)
+        if not ok then name = nil end
+    end
+    if IsSecret(name) or type(name) ~= "string" then return nil end
+    return name
+end
+
+-- The shoulder slot (1..3) of each form 1..numForms: the mockup order by the form's spell name, and a form
+-- whose name is unread or unlisted takes the slot of its own index when that is free (the trainer order is the
+-- mockup's, so a client that names the stances differently still lands right). A form with no slot stays hidden.
+local function ShoulderSlots(numForms)
+    local slots, taken = {}, {}
+    for form = 1, numForms do
+        local ok, _, _, _, id = pcall(GetShapeshiftFormInfo, form)
+        local name = ok and SpellName(id) or nil
+        for slot, stance in ipairs(WARRIOR_STANCES) do
+            if name == stance and not taken[slot] then
+                slots[form], taken[slot] = slot, true
+            end
+        end
+    end
+    for form = 1, math.min(numForms, #WARRIOR_STANCES) do
+        if not slots[form] and not taken[form] then slots[form], taken[form] = form, true end
+    end
+    return slots
+end
+
+-- Where the container stands while the shoulder carries the Warrior's stances, or nil for the stance bar's
+-- own seat. The same numbers as the shoulder: the answer is the shoulder's.
+local function HostPoint()
+    local shoulder = FS.ClassShoulder
+    if not (ownsShoulder and shoulder and shoulder.HostPoint) then return nil end
+    local ok, point, rel, relPoint, x, y = pcall(shoulder.HostPoint)
+    if ok and point then return point, rel, relPoint, x, y end
+end
+
+-- Where the button of shoulder slot `col` (1..3) stands on the container.
+local function SlotPoint(col)
+    local shoulder = FS.ClassShoulder
+    if not (ownsShoulder and container and shoulder and shoulder.SlotPoint) then return nil end
+    local ok, point, rel, relPoint, x, y = pcall(shoulder.SlotPoint, container, 1, col)
+    if ok and point then return point, rel, relPoint, x, y end
+end
+
+-- Seats the container on the shoulder and returns the button edge, or nil when no shoulder stands. The container
+-- leaves Layout's re-seat list (its watcher would pull it back to the stance seat on every rescale; Build seats it
+-- again from the rescale callback), which also takes its drag handle away in /fsedit.
+local function SeatOnShoulder()
+    local point, rel, relPoint, x, y = HostPoint()
+    if not point then return nil end
+    local w, h, edge = FS.ClassShoulder.BlockSize()
+    if not w then return nil end
+    if FS.Layout._applied then FS.Layout._applied[container] = nil end
+    container:ClearAllPoints()
+    container:SetPoint(point, rel, relPoint, x, y)
+    container:SetSize(w, h)
+    if rel.GetFrameLevel then container:SetFrameLevel(rel:GetFrameLevel() + 5) end
+    return edge
+end
+
+local warnedShoulder = false
+local refreshing = false     -- the shoulder is being asked to match: its notice back must not start a nested build
+
+-- Says whether the Warrior's stances are the shoulder's to carry (a Warrior with forms), and asks the shoulder
+-- to match, since it builds only for an owner that already says so. Out of combat only (Build).
+local function SetOwnsShoulder(owns)
+    if owns == ownsShoulder then return end
+    ownsShoulder = owns
+    local shoulder = FS.ClassShoulder
+    if not (shoulder and shoulder.Refresh) then return end
+    refreshing = true
+    local ok, why = pcall(shoulder.Refresh)
+    refreshing = false
+    if not ok and not warnedShoulder then
+        warnedShoulder = true
+        FS.LogDegradeOnce("stancebar_shoulder",
+            "|cffff4488Forever STUwave|r: class shoulder failed (" .. tostring(why) .. ")")
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Assembly
+-------------------------------------------------------------------------------
 
 -- Form count/order can change (talent respec, druid gaining a new form), so
 -- UPDATE_SHAPESHIFT_FORMS re-runs this: buttons up to the form count are re-seated
@@ -439,15 +578,21 @@ local function Build()
     -- bar is built. Re-asked on every build: SealBar decides after this file's first build.
     if FS.SealBar and FS.SealBar.OwnsForms and FS.SealBar.OwnsForms() then numForms = 0 end
     for i = numForms + 1, #buttons do buttons[i]:Hide() end
+    SetOwnsShoulder(isWarrior and numForms > 0)
     if numForms == 0 then
         container:Hide()
         HideBlizzardStanceBar()
         return
     end
 
-    local applied = FS.Layout.Apply(container, "stance")
-    local h = (applied and applied.scaledH) or 38
-    local size = h
+    -- On the shoulder: the container sits on the Console and each stance in its fixed slot. Otherwise the stance
+    -- bar's own seat, the buttons in a row.
+    local size = SeatOnShoulder()
+    local slots = size and ShoulderSlots(numForms)
+    if not size then
+        local applied = FS.Layout.Apply(container, "stance")
+        size = (applied and applied.scaledH) or 38
+    end
 
     local previous
     for i = 1, numForms do
@@ -459,11 +604,24 @@ local function Build()
             -- Build to finish, never to CreateFrame again under the same name.
             buttons[i] = button
         end
-        StyleButton(button, size)
-        SeatButton(container, button, previous)
-        button:Show()
-        allButtons[#allButtons + 1] = button
-        previous = button
+        StyleButton(button, size, slots ~= nil)
+        if not slots then
+            SeatButton(container, button, previous)
+            button:Show()
+            allButtons[#allButtons + 1] = button
+            previous = button
+        else
+            local point, rel, relPoint, x, y
+            if slots[i] then point, rel, relPoint, x, y = SlotPoint(slots[i]) end
+            if point then
+                button:ClearAllPoints()
+                button:SetPoint(point, rel, relPoint, x, y)
+                button:Show()
+                allButtons[#allButtons + 1] = button
+            else
+                button:Hide()
+            end
+        end
     end
 
     container:Show()
@@ -474,6 +632,7 @@ end
 local function RequestBuild()
     -- SetAttribute, Show and SetPoint on a secure button are illegal in combat;
     -- the whole build is deferred to PLAYER_REGEN_ENABLED the same way as Init below.
+    if refreshing then return end
     if InCombatLockdown() then
         pendingBuild = true
         return
@@ -482,8 +641,13 @@ local function RequestBuild()
     Build()
 end
 
--- SealBar.lua asks for a rebuild once it owns a Paladin's forms.
-FS.StanceBar = { Rebuild = RequestBuild }
+-- SealBar.lua asks for a rebuild once it owns a Paladin's forms. ClassShoulder.lua asks OwnsShoulder.
+FS.StanceBar = {
+    Rebuild = RequestBuild,
+    OwnsShoulder = function() return ownsShoulder end,
+    HostPoint = HostPoint,
+    SlotPoint = SlotPoint,
+}
 
 -------------------------------------------------------------------------------
 -- Events
@@ -499,13 +663,15 @@ local function OnEvent(_, event)
     elseif event == "PLAYER_REGEN_ENABLED" then
         if pendingBuild then
             RequestBuild()
-        elseif pendingSync then
-            UpdateAll()
+        else
+            if pendingSync then UpdateAll() end
+            RedimBlizzardStanceBar()
         end
     else
-        -- UPDATE_SHAPESHIFT_FORM / UPDATE_SHAPESHIFT_COOLDOWN: state refresh
-        -- only, no rebuild.
+        -- UPDATE_BINDINGS / UPDATE_SHAPESHIFT_FORM / UPDATE_SHAPESHIFT_COOLDOWN: state
+        -- refresh only, no rebuild. The first two are when a stock hotkey would redraw.
         UpdateAll()
+        if event ~= "UPDATE_SHAPESHIFT_COOLDOWN" then RedimBlizzardStanceBar() end
     end
 end
 
@@ -532,6 +698,7 @@ end
 local function Apply()
     if not (FS.Layout and FS.Layout.Apply and FS.Layout.stance) then return end
 
+    isWarrior = PlayerIsWarrior()
     container = CreateFrame("Frame", "FSStanceBar", UIParent)
     container:SetFrameStrata("LOW")
     FS.Layout.Apply(container, "stance")
@@ -553,6 +720,11 @@ local function Apply()
     -- RequestBuild defers it to PLAYER_REGEN_ENABLED in combat.
     if FS.Layout.OnRescale then
         FS.Layout.OnRescale(RequestBuild)
+    end
+    -- The Console going on or off moves the shoulder (ClassShoulder.lua's own notice comes first), and the
+    -- Warrior's stances follow it.
+    if isWarrior and FS.ActionBars and FS.ActionBars.OnGeometry then
+        FS.ActionBars.OnGeometry(RequestBuild)
     end
 
     FS.FrameHelpers.OnQuickKeybindChanged(function()
