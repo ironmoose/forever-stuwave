@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1560">
+<title>Gunsight Class Module Warrior</title>
+<style>
+@font-face{font-family:'Mononoki';src:url(../forever-stuwave/Media/Fonts/MononokiNerdFontMono-Bold.ttf) format('truetype');font-weight:100 900;font-style:normal;font-display:block}
+:root{
+  color-scheme:dark;
+  --bg:#0d0620; --fg:#e9e2ff; --muted:#9d93c4; --white:#f3fbff; --text:#e2e8f0;
+  --violet:#a855f7; --cyan:#22e0ff; --pink:#ff2e97; --amber:#ffb648; --green:#39ff14;
+  --track:#0a0416; --line:#3a2168;
+  --edge:rgba(168,85,247,.35);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg)}
+body{width:1560px;padding:28px 28px 40px;color:var(--fg);font-family:'Mononoki',ui-monospace,monospace;font-weight:700;line-height:1.45}
+h1{margin:0;font-size:30px;letter-spacing:.08em;color:var(--white);text-shadow:0 0 18px var(--violet);font-weight:700}
+.ref{display:inline-block;margin:10px 0 0;padding:2px 10px;font-size:13px;letter-spacing:.12em;color:var(--amber);border:1px solid rgba(255,182,72,.5);background:rgba(255,182,72,.06)}
+.sub{margin:10px 0 22px;color:var(--muted);font-size:15px;max-width:1450px}
+.sub b{color:var(--white);font-weight:700}
+h2{margin:30px 0 10px;font-size:20px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 14px var(--violet);font-weight:700}
+h2 i{font-style:normal;color:var(--pink)}
+.cols{display:grid;grid-template-columns:repeat(3,488px);gap:20px}
+.vt{font-size:22px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 14px var(--violet);margin:0 0 4px}
+.vt i{font-style:normal;color:var(--pink)}
+.cap{font-size:13px;line-height:1.5;color:var(--muted);margin:0 0 10px;min-height:80px}
+.cap b{color:var(--white);font-weight:700}
+.scene{position:relative;width:488px;height:568px;border:1px solid var(--edge);overflow:hidden;margin-bottom:12px}
+.scene svg{display:block}
+.state{position:absolute;left:8px;bottom:6px;z-index:2;font-size:11px;letter-spacing:.14em;color:var(--muted);padding:2px 8px;background:rgba(13,6,32,.7);border:1px solid rgba(168,85,247,.3)}
+.state b{color:var(--cyan);font-weight:700}
+.strip{display:grid;grid-template-columns:96px repeat(6,224px);gap:8px;align-items:start}
+.sh{font-size:11px;letter-spacing:.1em;color:var(--cyan);line-height:1.3}
+.sh small{display:block;color:var(--muted);font-size:10px;letter-spacing:.02em;margin-top:2px}
+.rl{font-size:12px;color:var(--white);padding-top:50px;line-height:1.3}
+.rl small{display:block;color:var(--muted);font-size:10px}
+.cell{width:224px;height:142px;border:1px solid var(--edge);background:rgba(13,6,32,.6)}
+.cell svg{display:block}
+.panel{position:relative;margin-top:14px;background:rgba(26,16,37,.96);border:1px solid var(--violet);padding:12px 18px 14px;clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px)}
+.panel h3{margin:0 0 6px;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--violet);font-weight:700}
+.panel p,.panel li{font-size:13px;line-height:1.5;color:var(--text);margin:0 0 6px}
+.panel ul,.panel ol{margin:0;padding-left:20px}
+.panel b{color:var(--white);font-weight:700}
+.panel .m{color:var(--muted)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th{font-weight:700;text-align:left;color:var(--violet);font-size:11px;letter-spacing:.08em;text-transform:uppercase;padding:4px 8px;border-bottom:1px solid rgba(168,85,247,.4)}
+td{padding:5px 8px;border-bottom:1px solid rgba(58,33,104,.5);vertical-align:top;color:var(--text);line-height:1.4}
+td.k{color:var(--white);white-space:nowrap} td:nth-child(2){white-space:nowrap}
+.ok{color:var(--green)} .est{color:var(--amber)} .no{color:var(--pink)} .unv{color:var(--cyan)}
+a{color:var(--cyan);text-decoration:none}
+.src{font-size:11px;color:var(--muted);word-break:break-all}
+</style>
+</head>
+<body>
+<h1>GUNSIGHT CLASS MODULE, WARRIOR</h1>
+<div class="ref">Design reference, 2026-10-08, Warrior</div>
+<div class="sub">Three takes on the Warrior <b>Class Module</b>, the area option that today shows nothing for a Warrior. Each is drawn in-situ on the approved v7 target side, once in the <b>upper</b> area and once in the <b>lower</b> area, with Target Debuffs Horizontal in the other area. Target Debuffs already lists Rend, Deep Wounds, Thunder Clap, Sunder Armor and Demoralizing Shout with timers and stacks, so the module earns its place with what that list does not do: a Battle Shout self buff readout with a missing reminder, Sunder as five pips, and (variant C) a rage readout that says what you can afford now.</div>
+<div id="root"></div>
+<div id="notes">
+<h2><i>3</i> NOTES</h2>
+<div class="two">
+<div class="panel"><h3>What each variant shows</h3>
+<ul>
+<li><b>A, Uptime board.</b> Battle Shout (drain bar, rebuff band, RECAST when missing), Sunder pips and count, Thunder Clap, Rend and Deep Wounds chips with time. The only variant with every named item. Largest, closest to the Paladin Seal module.</li>
+<li><b>B, Stack and shout.</b> Sunder pips plus count, Battle Shout time or MISSING, Thunder Clap time. Mirrors the Warlock shard and Rogue combo layout so the Class Module reads the same on every class. Smallest. Leaves bleeds to Target Debuffs.</li>
+<li><b>C, Rage checklist.</b> Rage bar with cost ticks plus five tiles (BS, SA, TC, RN, DW). Cyan means absent and you have the rage; amber is the Battle Shout version. Adds information no other element carries (rage vs cost), at the price of reading as a prompt rather than a status.</li>
+</ul>
+<p class="m">Why a module at all: Target Debuffs already shows Rend, Deep Wounds, Thunder Clap and Sunder x5 with timers. Battle Shout is a buff on you, so it is not in that list. Sunder as pips reads faster than a "x3" suffix on a row. Rage affordability is not shown anywhere on the Gunsight today.</p>
+<p class="m"><b>My pick: B</b> for parity and size, <b>C</b> if rage matters to you. A repeats too much of what the other area already lists.</p>
+</div>
+<div class="panel"><h3>Open questions</h3>
+<ol>
+<li>Overlap: with a Warrior Class Module up, should Target Debuffs hide the spells the module owns (as it already hides Judgement for the Paladin)? The crops above show the unhidden overlap on purpose.</li>
+<li>Deep Wounds is a crit proc, not a cast, so the ledger cannot see it in combat. Drop it, or show it dashed (as drawn) as "last snapshot"?</li>
+<li>Battle Shout duplicates My buffs and the missing reminder chip under the cast bar. Keep the module row for the drain bar, or let the module carry only Sunder?</li>
+<li>Does the player's rage read plain in combat? <span class="unv">UNVERIFIED in game.</span> If not, C falls back to UnitPowerPercent as GunsightBoxes does, and the cost ticks would need a percent scale.</li>
+<li>Another Warrior's Battle Shout or Sunder Armor: shared auras. The snapshot sees them, the own-cast ledger does not. Is "present from anyone" the right reading for the reminder?</li>
+<li>Thunder Clap hits up to 4 targets but the debuff is tracked on the current target only. Fine for a readout, but should the chip say so in a tooltip?</li>
+<li>Cooldown (6 s) is not drawn. Worth a sweep on the TC chip, or does that clutter it?</li>
+</ol>
+</div>
+</div>
+
+<div class="panel"><h3>Data source per element, and feasibility under secrecy</h3>
+<p class="m">Legend: <span class="ok">OK</span> works as designed, <span class="est">EST</span> estimate in combat (ledger), <span class="no">NO</span> not obtainable in combat, <span class="unv">UNVERIFIED</span> needs a client check. Target elements ride FS.TargetDebuffs (Subscribe), so the module adds no new ledger; Battle Shout and rage are the only new reads.</p>
+<table>
+<tr><th>Element</th><th>In</th><th>Data path</th><th>Under secrecy</th></tr>
+<tr><td class="k">Battle Shout time left</td><td>A B C</td><td>Player aura snapshot (the Buffs.lua scan, sourceUnit aware) while FS.AurasReadable(); in combat an own-cast ledger on UNIT_SPELLCAST_SUCCEEDED "Battle Shout" sets expiry = now + 180 s (3 min, verified).</td><td><span class="est">EST</span> The fixed 3 min duration makes the ledger tight. A buff lost in combat (death, cancel) is not seen until auras read again.</td></tr>
+<tr><td class="k">Battle Shout missing</td><td>A B C</td><td>Same: no expiry known, or expiry in the past.</td><td><span class="est">EST</span> Never false-positive after a cast; may stay "up" if the buff was cancelled mid fight.</td></tr>
+<tr><td class="k">Sunder stacks</td><td>A B C</td><td>FS.TargetDebuffs entry "Sunder Armor" (count, expires). Snapshot out of combat is exact; in combat the ledger adds 1 per own cast, capped at 5. Cap 5 and 30 s are verified constants, so no learning needed.</td><td><span class="est">EST</span> A dodged or missed cast over-counts; stacks from another Warrior are invisible until a readable snapshot.</td></tr>
+<tr><td class="k">Thunder Clap debuff</td><td>A B C</td><td>FS.TargetDebuffs entry "Thunder Clap". Duration 18 s at rank 3 (level 28 and up), longer ranks later; use the last snapshot, fall back to a rank table.</td><td><span class="est">EST</span> Same ledger limits. A clap that hit other targets but not the current one is correctly absent.</td></tr>
+<tr><td class="k">Rend time</td><td>A C</td><td>FS.TargetDebuffs entry "Rend". Duration by rank: 9 s (4), 12 s (10), 15 s (20), 18 s (30).</td><td><span class="est">EST</span> Ledger starts the timer on the cast.</td></tr>
+<tr><td class="k">Deep Wounds</td><td>A C</td><td>FS.TargetDebuffs snapshot only. It is a critical strike proc, 12 s bleed, not a cast; TargetDebuffs.lua already lists it as invisible to the ledger.</td><td><span class="no">NO</span> in combat. Drawn dashed as "last snapshot". Also <span class="unv">UNVERIFIED</span> whether Forever exposes it as its own aura on the target.</td></tr>
+<tr><td class="k">Rage value</td><td>C</td><td>UnitPower("player", 1) with UnitPowerMax; UnitPowerType("player") is the plain gate (GunsightBoxes already colours rage this way). UNIT_POWER_UPDATE on player.</td><td><span class="unv">UNVERIFIED</span> Player power is expected to be plain; confirm in combat. Fallback UnitPowerPercent.</td></tr>
+<tr><td class="k">Rage costs 10 / 15 / 20</td><td>C</td><td>C_Spell.GetSpellPowerCost at build time, not hardcoded (Improved Thunder Clap, Improved Sunder Armor change them). Baseline costs verified below.</td><td><span class="ok">OK</span> Static spell data, not an aura.</td></tr>
+<tr><td class="k">Module host, no target</td><td>A B C</td><td>The class host stays up without a target; target parts dim, Battle Shout stays live.</td><td><span class="ok">OK</span></td></tr>
+</table>
+</div>
+
+<div class="panel"><h3>Spell verification, WoW Forever, level 30 or below (beta cap 30)</h3>
+<p class="m">Checked 2026-10-08 against Forever data (build 1.60.1.70205). Wowhead's Forever spell pages for Battle Shout and Sunder Armor came up in search with matching text; the Wowhead Forever level 30 Arms guide page returned only its title and header when fetched, so Rend, Thunder Clap and Deep Wounds rest on ForeverDB and other Forever databases. Not read in game.</p>
+<table>
+<tr><th>Spell</th><th>Status</th><th>What is confirmed</th><th>Source</th></tr>
+<tr><td class="k">Battle Shout</td><td class="ok">VERIFIED</td><td>Rank 3 at level 22 (rank 4 is level 32, so rank 3 at the cap). 10 Rage, instant, party members within 20 yd, lasts 3 min (Classic Era 2 min). Self buff, so it is an aura on the player.</td><td class="src"><a href="https://www.wowhead.com/forever/spell=6192/battle-shout">wowhead.com/forever/spell=6192/battle-shout</a><br><a href="https://foreverdb.net/class/Warrior/changes">foreverdb.net/class/Warrior/changes</a></td></tr>
+<tr><td class="k">Thunder Clap</td><td class="ok">VERIFIED</td><td>Rank 1 level 6, rank 3 level 28. Rank 3: 20 Rage, 6 s cooldown, +20% time between attacks for 18 s, up to 4 targets, usable in Battle or Defensive Stance.</td><td class="src"><a href="https://foreverdb.net/spell/8204">foreverdb.net/spell/8204</a><br><a href="https://wow-forever.gg/db/spells/8204-thunder-clap/">wow-forever.gg/db/spells/8204-thunder-clap</a></td></tr>
+<tr><td class="k">Rend</td><td class="ok">VERIFIED</td><td>Rank 1 level 4 (9 s), rank 4 level 30 (66 over 18 s, 3 s ticks). 10 Rage, instant, Battle or Defensive Stance. Rank 4 is the cap rank.</td><td class="src"><a href="https://foreverdb.net/spell/772">foreverdb.net/spell/772</a><br><a href="https://foreverdb.net/spell/6548">foreverdb.net/spell/6548</a></td></tr>
+<tr><td class="k">Sunder Armor</td><td class="ok">VERIFIED</td><td>Learned level 10, rank 2 at level 22 (the cap rank). 15 Rage, instant, stacks up to 5, lasts 30 s.</td><td class="src"><a href="https://www.wowhead.com/forever/spell=7386/sunder-armor">wowhead.com/forever/spell=7386/sunder-armor</a><br><a href="https://foreverdb.net/spell/7386">foreverdb.net/spell/7386</a></td></tr>
+<tr><td class="k">Deep Wounds</td><td class="est">VERIFIED, talent</td><td>Arms talent, 3 ranks: crits cause a bleed for 20/40/60% of weapon average damage over 12 s. Needs Improved Rend 3/3. Level 30 gives 21 talent points, so it is reachable only in an Arms build. The module must hide it for builds without it.</td><td class="src"><a href="https://classicwow.gg/forever/tools/talent-calculator/warrior">classicwow.gg/forever/tools/talent-calculator/warrior</a><br><a href="https://classicwowforever.com/talents/warrior/">classicwowforever.com/talents/warrior</a><br><a href="https://www.wowhead.com/forever/guide/classes/warrior/arms/level-30-dps-overview">wowhead.com/forever/guide/.../level-30-dps-overview</a> (21 points)</td></tr>
+<tr><td class="k">Demoralizing Shout</td><td class="ok">VERIFIED</td><td>Not in any variant (Target Debuffs still lists it). Rank 2 at level 24, 45 s (Classic Era 30 s).</td><td class="src"><a href="https://foreverdb.net/class/Warrior/changes">foreverdb.net/class/Warrior/changes</a></td></tr>
+<tr><td class="k">Aura names / ids</td><td class="unv">UNVERIFIED</td><td>The English aura names used by TargetDebuffs.lua ("Rend", "Deep Wounds", "Thunder Clap", "Sunder Armor") match the spell names above but were not read from the client. Rank ids differ per rank, so match by name or by a rank id table.</td><td class="src">in game check</td></tr>
+</table>
+</div>
+</div>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <filter id="gl" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.1" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="gls" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b0716"/><stop offset=".62" stop-color="#150d28"/><stop offset="1" stop-color="#1c1030"/></linearGradient>
+    <radialGradient id="glowL" cx="22%" cy="108%" r="55%"><stop offset="0" stop-color="#3a2160"/><stop offset="1" stop-color="#3a2160" stop-opacity="0"/></radialGradient>
+    <radialGradient id="glowR" cx="85%" cy="0%" r="60%"><stop offset="0" stop-color="#1d1840"/><stop offset="1" stop-color="#1d1840" stop-opacity="0"/></radialGradient>
+  </defs>
+</svg>
+<script>
+(function(){
+var C={cyan:'#22e0ff',pink:'#ff2e97',violet:'#a855f7',green:'#39ff14',amber:'#ffb648',white:'#f3fbff',muted:'#9d93c4',fg:'#e9e2ff',bg:'#0d0620',gold:'#ffd23f'};
+function hex(h){h=h.replace('#','');return [parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)];}
+function mix(a,b,t){var x=hex(a),y=hex(b);return '#'+[0,1,2].map(function(i){return ('0'+Math.round(x[i]+(y[i]-x[i])*t).toString(16)).slice(-2);}).join('');}
+function ch(x,y,w,h,c){return (x+c)+','+y+' '+(x+w)+','+y+' '+(x+w)+','+(y+h-c)+' '+(x+w-c)+','+(y+h)+' '+x+','+(y+h)+' '+x+','+(y+c);}
+function txt(x,y,s,size,fill,o){o=o||{};
+  return '<text x="'+x+'" y="'+y+'" font-size="'+size+'" fill="'+fill+'" text-anchor="'+(o.a||'start')+'"'+(o.op?' opacity="'+o.op+'"':'')+(o.rot?' transform="rotate('+o.rot+' '+x+' '+y+')"':'')+
+    ' stroke="rgba(13,6,32,.92)" stroke-width="2.6" paint-order="stroke" stroke-linejoin="round">'+s+'</text>';}
+function line(x1,y1,x2,y2,col,op,w,dash){return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="'+(w||1)+'"'+(dash?' stroke-dasharray="'+dash+'"':'')+'/>';}
+function chevPath(cx,ay,hw,d,t){return cx+','+ay+' '+(cx+hw)+','+(ay+d)+' '+(cx+hw)+','+(ay+d+t)+' '+cx+','+(ay+t)+' '+(cx-hw)+','+(ay+d+t)+' '+(cx-hw)+','+(ay+d);}
+function rect(x,y,w,h,fill,op){return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" fill="'+fill+'"'+(op!=null?' fill-opacity="'+op+'"':'')+'/>';}
+var TOP=508,TBOT=752,PITCH=(TBOT-TOP)/10,N=20,CP=(TBOT-TOP)/N;
+var DOT_AX=1239,LANE=[1283,1312,1341,1370];
+var HZ=630;
+
+function chipIcon(x,y,s,d,absent){
+  var c=Math.max(2,Math.round(s/6)),o='';
+  if(absent){
+    return '<polygon points="'+ch(x,y,s,s,c)+'" fill="rgba(13,6,32,.7)" stroke="'+mix(C.muted,'#ffffff',.25)+'" stroke-opacity=".9" stroke-width="1.2"/>'+
+      '<text x="'+(x+s/2)+'" y="'+(y+s/2+s*.18)+'" font-size="'+Math.round(s*.5)+'" fill="'+mix(C.muted,'#ffffff',.25)+'" fill-opacity=".8" text-anchor="middle">'+d.ab+'</text>';
+  }
+  o+='<polygon points="'+ch(x,y,s,s,c)+'" fill="'+mix(d.c,C.bg,.35)+'"/>';
+  o+='<polygon points="'+ch(x,y,s,s*.45,c)+'" fill="'+mix(d.c,'#ffffff',.35)+'" opacity=".3"/>';
+  o+='<polygon points="'+ch(x,y,s,s,c)+'" fill="none" stroke="'+mix(d.c,'#ffffff',.3)+'" stroke-width="1.2"/>';
+  o+='<text x="'+(x+s/2)+'" y="'+(y+s/2+s*.18)+'" font-size="'+Math.round(s*.5)+'" fill="'+C.white+'" text-anchor="middle">'+d.ab+'</text>';
+  return o;
+}
+/* ---------- the shared composition ---------- */
+function bar(x0,x1,col,p,out,caretCol){
+  var o='',cx=(x0+x1)/2,k,i;
+  o+='<polygon points="'+ch(x0,500,x1-x0,260,8)+'" fill="rgba(13,6,32,.55)" fill-opacity=".45"/>';
+  o+='<polygon points="'+ch(x0,500,x1-x0,260,8)+'" fill="none" stroke="'+col+'" stroke-width="1.3" filter="url(#gls)"/>';
+  var ex=out<0?x0:x1;
+  for(k=0;k<=10;k++){var ty=TBOT-k*PITCH;o+=line(ex,ty,ex+out*(k===5?10:5),ty,col,.75,1.2);}
+  for(i=0;i<N;i++){
+    var ay=TBOT-(i+1)*CP,lit=(i+1)/N<=p;
+    o+='<polygon points="'+chevPath(cx,ay,10,8,5.5)+'" fill="'+col+'" fill-opacity="'+(lit?1:.2)+'"'+(lit?' filter="url(#gls)"':'')+'/>';
+  }
+  var fy=TBOT-p*(TBOT-TOP);
+  o+='<polygon points="'+chevPath(cx,fy-17,13,9,7)+'" fill="none" stroke="'+caretCol+'" stroke-width="1.8" stroke-linejoin="miter"/>';
+  return o;
+}
+function box(x,y,w,h,col){
+  return '<polygon points="'+ch(x,y,w,h,8)+'" fill="rgba(13,6,32,.85)"/>'+
+    '<polygon points="'+ch(x,y,w,h,8)+'" fill="none" stroke="'+col+'" stroke-width="1.4" filter="url(#gl)"/>';
+}
+function brackets(x,y,w,h,col,op,a){
+  a=a||12;var s='';
+  [[x,y+a,x,y,x+a,y],[x+w-a,y,x+w,y,x+w,y+a],[x,y+h-a,x,y+h,x+a,y+h],[x+w-a,y+h,x+w,y+h,x+w,y+h-a]].forEach(function(q){
+    s+='<polyline points="'+q[0]+','+q[1]+' '+q[2]+','+q[3]+' '+q[4]+','+q[5]+'" fill="none" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="1.6"/>';});
+  return s;
+}
+function party(){
+  var o='',x=606,y=506,w=180,h=230;
+  o+=brackets(x,y,w,h,C.cyan,.6,12);
+  var rows=[['Parker',.82,C.green],['Thalia',.55,C.green],['Brogan',.18,'#ff3b4e'],['Mira',.95,C.green],['Jex',.70,C.green]];
+  var rh=(h-16)/5;
+  rows.forEach(function(r,i){
+    var ry=y+8+i*rh;
+    if(i>0)o+=line(x+8,ry,x+w-8,ry,C.violet,.2,1);
+    o+=txt(x+12,ry+14,r[0],11,i===0?C.cyan:C.white);
+    o+=rect(x+12,ry+20,w-24,5,r[2],.18)+rect(x+12,ry+20,(w-24)*r[1],5,r[2],1);
+    o+=rect(x+12,ry+27,w-24,3,'#4aa8ff',.18)+rect(x+12,ry+27,(w-24)*.7,3,'#4aa8ff',1);
+  });
+  o+='<polygon points="'+ch(578,y+8+2*rh+8,22,22,4)+'" fill="'+mix('#a05030',C.bg,.35)+'" stroke="'+C.amber+'" stroke-width="1.2"/><text x="589" y="'+(y+8+2*rh+8+16)+'" font-size="12" fill="'+C.white+'" text-anchor="middle">P</text>';
+  return o;
+}
+function shard(x,y,w,h,col,filled){
+  var cx=x+w/2;
+  return '<polygon points="'+cx+','+y+' '+(x+w)+','+(y+h*.35)+' '+cx+','+(y+h)+' '+x+','+(y+h*.35)+'" fill="'+col+'" fill-opacity="'+(filled?.28:.06)+'" stroke="'+col+'" stroke-opacity="'+(filled?1:.4)+'" stroke-width="1.2"'+(filled?' filter="url(#gls)"':'')+'/>'+
+    '<line x1="'+cx+'" y1="'+y+'" x2="'+cx+'" y2="'+(y+h)+'" stroke="'+col+'" stroke-opacity="'+(filled?.5:.2)+'"/>';
+}
+function homeShards(){ /* the old seat, under your cast bar */
+  var o='',n=arguments.length?arguments[0]:3;
+  o+=shard(805,763,9.5,17,C.violet,n>0);
+  o+=txt(826,777,String(n),14,n>0?C.white:C.muted,{a:'end'});
+  return o;
+}
+function buffTile(){
+  return '<polygon points="'+ch(801.6,785.3,19,19,4)+'" fill="'+mix('#2f8f5a',C.bg,.5)+'" stroke="#5fe0a0" stroke-width="1.2"/><text x="811" y="799" font-size="11" fill="'+C.white+'" text-anchor="middle">B</text>';
+}
+function proc(){
+  var o='';
+  o+=line(1154,590,1154,670,C.amber,.95,2)+line(1147,590,1161,590,C.amber,.9,1.2)+line(1147,670,1161,670,C.amber,.9,1.2);
+  o+='<polygon points="'+ch(1145,566,18,18,3)+'" fill="'+mix('#c4423b',C.bg,.4)+'" stroke="'+C.amber+'" stroke-width="1.2"/><text x="1154" y="579" font-size="10" fill="'+C.white+'" text-anchor="middle">BL</text>';
+  return o;
+}
+/* a KICK style tag: the same cut corners, outline in the box colour, 15 high */
+function tag(x,y,w,html,col){
+  return '<polygon points="'+ch(x,y,w,15,5)+'" fill="rgba(13,6,32,.95)" stroke="'+C.pink+'" stroke-width="1.3" filter="url(#gls)"/>'+
+    '<text x="'+(x+w/2)+'" y="'+(y+11)+'" font-size="11" fill="'+col+'" text-anchor="middle">'+html+'</text>';
+}
+function base(S){
+  var o='',X=480,Y=380,W=1000,H=450;
+  var pal=S.cls==='pl',wl=S.cls==='wl';
+  var CS={wl:['SHADOW BOLT',13,'SB','1.4 / 2.5',18],pl:['HOLY LIGHT',13,'HL','1.4 / 2.5',18],wr:['HEROIC STRIKE',12,'HS','NEXT SWING',14],rg:['EVISCERATE',13,'EV','INSTANT',14]}[S.cls];
+  o+=rect(X,Y,W,H,'url(#sky)')+rect(X,Y,W,H,'url(#glowL)')+rect(X,Y,W,H,'url(#glowR)');
+  o+='<g fill="rgba(120,96,190,.16)" stroke="'+C.violet+'" stroke-opacity=".35" stroke-dasharray="4 4" stroke-width="1">'+
+     '<circle cx="995" cy="540" r="24"/><rect x="953" y="570" width="84" height="100" rx="20"/>'+
+     '<rect x="962" y="664" width="30" height="88" rx="8"/><rect x="998" y="664" width="30" height="88" rx="8"/>'+
+     '<rect x="926" y="576" width="24" height="86" rx="10"/><rect x="1040" y="576" width="24" height="86" rx="10"/></g>';
+  o+='<ellipse cx="995" cy="752" rx="112" ry="26" fill="rgba(80,70,230,.12)" stroke="#5b57e8" stroke-opacity=".6" stroke-width="2"/>';
+  o+=line(838,HZ,1150,HZ,C.violet,.3,1,'6 6');
+  o+=party();
+  /* your side */
+  o+=bar(796,826,C.cyan,.58,-1,C.white);
+  o+=box(724,424,114,56,C.cyan);
+  o+=txt(731,447,CS[0],CS[1],C.white)+txt(731,469,CS[3],CS[4],C.cyan);
+  o+='<polygon points="'+ch(844,438,28,28,5)+'" fill="rgba(13,6,32,.9)" stroke="'+C.cyan+'" stroke-width="1.3"/><text x="858" y="457" font-size="13" fill="'+C.cyan+'" text-anchor="middle">'+CS[2]+'</text>';
+  if(S.next!==false){o+='<polygon points="'+ch(672,430,44,44,6)+'" fill="rgba(13,6,32,.85)" stroke="'+C.cyan+'" stroke-opacity=".8" stroke-width="1.2"/><text x="694" y="458" font-size="13" fill="'+C.cyan+'" text-anchor="middle">NX</text>';}
+  if(wl)o+=buffTile();
+  if(S.shardsHome)o+=homeShards();
+  /* target side */
+  o+=bar(1164,1194,C.pink,.45,1,C.pink);
+  o+=box(1152,416,114,64,C.pink);
+  o+=txt(1159,436,'Kobold Miner',14,C.white);
+  o+=rect(1159,440,100,3,'#39ff14',.2)+rect(1159,440,62,3,'#39ff14')+rect(1159,445,100,2,'#4aa8ff',.2)+rect(1159,445,70,2,'#4aa8ff');
+  o+=line(1159,453,1259,453,C.pink,.4,1.2)+txt(1159,469,'Mining',14,C.pink);
+  o+=tag(1226,408,36,'KICK',C.pink);
+  o+='<polygon points="'+ch(1118,438,28,28,5)+'" fill="rgba(13,6,32,.9)" stroke="'+C.pink+'" stroke-width="1.3"/><text x="1132" y="457" font-size="13" fill="'+C.pink+'" text-anchor="middle">PK</text>';
+  if(wl)o+=proc();
+  return o;
+}
+
+/* ---------- box tags: top left, and the bottom edge ---------- */
+function tags(){
+  var o='';
+  o+=tag(1153,408,68,'L28 <tspan fill="'+C.gold+'">ELITE</tspan>',C.white);   /* top edge, left of KICK */
+  o+=tag(1156,473,32,'62%',C.green);                                         /* bottom edge, left */
+  o+=tag(1193,473,69,'<tspan fill="'+C.cyan+'">KERRA</tspan>',C.white);   /* bottom edge, right */
+  return o;
+}
+
+/* ---------- my buffs: the concept B flank plate on your side, outboard of the next cast tile ---------- */
+var BUFFS_WL=[
+  {k:'DA',c:'#b2452e',t:'28m'},   /* Demon Armor */
+  {k:'UB',c:'#3f9d8a',t:'12m'},   /* Unending Breath */
+  {k:'WF',c:'#d9a521',t:'38m'},   /* Well Fed (food) */
+  {k:'AI',c:'#4aa8ff',t:'47m',party:true}  /* Arcane Intellect, from a party member */
+];
+var BUFFS_PL=[
+  {k:'BK',c:'#d97ab5',t:'4m'},
+  {k:'DV',c:'#d9a521',t:'AUR'},
+  {k:'WF',c:'#d9a521',t:'38m'},
+  {k:'AI',c:'#4aa8ff',t:'47m',party:true}
+];
+var BUFFS_WR=[
+  {k:'BS',c:'#c4423b',t:'1m'},    /* Battle Shout, a buff on you */
+  {k:'WF',c:'#d9a521',t:'38m'},
+  {k:'AI',c:'#4aa8ff',t:'47m',party:true},
+  {k:'MW',c:'#5fb04a',t:'52m',party:true}
+];
+var BUFFS_RG=[
+  {k:'MH',c:'#4fa05a',t:'28m'},   /* main hand: Instant Poison */
+  {k:'OH',c:'#3f7f4a',t:'12m'},   /* off hand: Deadly Poison */
+  {k:'SD',c:'#d9a521',t:'14s'},   /* Slice and Dice */
+  {k:'AI',c:'#4aa8ff',t:'47m',party:true}
+];
+function buffs(cls){
+  var o='',L={wl:BUFFS_WL,pl:BUFFS_PL,wr:BUFFS_WR,rg:BUFFS_RG}[cls],x0=498,w=164;
+  o+='<polygon points="'+ch(x0,424,w,56,6)+'" fill="rgba(13,6,32,.7)"/><polygon points="'+ch(x0,424,w,56,6)+'" fill="none" stroke="'+C.cyan+'" stroke-opacity=".75" stroke-width="1.2" filter="url(#gls)"/>';
+  L.forEach(function(d,i){
+    var x=x0+6+i*38;
+    o+='<g>'+chipIcon(x+4,430,24,{ab:d.k,c:d.c},false)+'</g>';
+    if(d.party)o+='<circle cx="'+(x+28)+'" cy="432" r="3.2" fill="'+C.cyan+'" stroke="'+C.bg+'" stroke-width="1"/>';
+    o+=txt(x+16,470,d.t,12,C.white,{a:'middle'});
+  });
+  return o;
+}
+
+/* ---------- slot content ---------- */
+function slotDivider(x1){return line(1204,HZ,1227,HZ,C.violet,.85,1.2)+line(1227,HZ,x1,HZ,C.violet,.4,1);}
+
+/* upper slot, horizontal rows: icon, time, drain bar, one per tick gap */
+function dotsH(list,lower){
+  list=list||DOTS;
+  var o='',k,ytop=lower?HZ:TOP,k0=lower?0:5,k1=lower?4:10;
+  for(k=k0;k<=k1;k++){var ty=TBOT-k*PITCH;
+    if(k<10)o+=line(1204,ty,1213,ty,C.pink,.45,1);
+    o+=line(1213,ty,1344,ty,C.violet,k===5?.55:.12,1);}
+  list.forEach(function(d,j){
+    var cy=ytop+PITCH*(j+.5),abs=d.rem<=0,band=!abs&&d.rem<=3,col=band?C.amber:mix(d.c,'#ffffff',.25);
+    o+=chipIcon(1220,cy-10,20,d,abs);
+    if(d.n>1)o+=txt(1332,cy+4,'x'+d.n,11,C.white);
+    if(abs){o+=txt(1246,cy+4.5,'--',13,C.muted,{op:.7});o+=rect(1274,cy-2,52,4,C.muted,.18);}
+    else{
+      o+=txt(1246,cy+4.5,(d.rem<3?d.rem.toFixed(1):Math.round(d.rem))+'s',13,band?C.amber:C.white);
+      o+=rect(1274,cy-2,52,4,col,.2)+rect(1274,cy-2,52*d.rem/30,4,col);
+    }
+  });
+  return o;
+}
+var WDEB=[
+  {ab:'RN',c:'#c4423b',rem:9},          /* Rend, bleed */
+  {ab:'DW',c:'#a02030',rem:12},         /* Deep Wounds, bleed */
+  {ab:'TC',c:'#4a9de0',rem:2.8},        /* Thunder Clap */
+  {ab:'SA',c:'#9a9aa8',rem:22,n:5},     /* Sunder Armor x5 */
+  {ab:'DS',c:'#e0902a',rem:26}          /* Demoralizing Shout */
+];
+
+/* ======================================================================
+   WARRIOR CLASS MODULE. Everything below is new; everything above is v7.
+   Module origin x=1220, y0 = area top (500 upper, 632 lower), 190 wide.
+   ====================================================================== */
+var ACC='#c79c6e', STEEL='#b8bccf', RAGEC='#c41f3b';
+var K={bs:'#c4423b',sa:'#9a9aa8',tc:'#4a9de0',rn:'#c4423b',dw:'#a02030'};
+var X0=1220, W0=188;
+function fmt(s){s=Math.ceil(s);if(s>=60){var r=s%60;return Math.floor(s/60)+':'+(r<10?'0':'')+r;}return s+'s';}
+
+/* a module chip. mode: up, warn (3 s or less), miss (hollow, muted), alert (hollow, amber: reminder),
+   cue (hollow, cyan: absent and affordable, press it), dim (no target). dash marks an estimate. */
+function mchip(x,y,s,ab,col,mode,dash){
+  var c=Math.max(2,Math.round(s/6)),p=ch(x,y,s,s,c),fs=Math.round(s*.5),tx=x+s/2,ty=y+s/2+s*.18,o='';
+  var dd=dash?' stroke-dasharray="3 2"':'';
+  if(mode==='up'||mode==='warn'||mode==='dim'){
+    var st=mode==='warn'?C.amber:mix(col,'#ffffff',.3);
+    o+='<g'+(mode==='dim'?' opacity=".32"':'')+'>';
+    o+='<polygon points="'+p+'" fill="'+mix(col,C.bg,.35)+'"/>';
+    o+='<polygon points="'+ch(x,y,s,s*.45,c)+'" fill="'+mix(col,'#ffffff',.35)+'" opacity=".3"/>';
+    o+='<polygon points="'+p+'" fill="none" stroke="'+st+'" stroke-width="'+(mode==='warn'?1.6:1.2)+'"'+dd+(mode==='warn'?' filter="url(#gls)"':'')+'/>';
+    o+='<text x="'+tx+'" y="'+ty+'" font-size="'+fs+'" fill="'+C.white+'" text-anchor="middle">'+ab+'</text></g>';
+    return o;
+  }
+  var sc=mode==='alert'?C.amber:mode==='cue'?C.cyan:mix(C.muted,'#ffffff',.25);
+  o+='<polygon points="'+p+'" fill="'+(mode==='alert'?mix(C.bg,C.amber,.18):mode==='cue'?mix(C.bg,C.cyan,.14):'rgba(13,6,32,.7)')+'"/>';
+  o+='<polygon points="'+p+'" fill="none" stroke="'+sc+'" stroke-width="'+(mode==='miss'?1.1:1.5)+'" stroke-opacity="'+(mode==='miss'?.85:1)+'"'+(mode==='miss'?' stroke-dasharray="3 2"':dd)+(mode==='miss'?'':' filter="url(#gls)"')+'/>';
+  o+='<text x="'+tx+'" y="'+ty+'" font-size="'+fs+'" fill="'+(mode==='miss'?sc:C.white)+'" fill-opacity="'+(mode==='miss'?.8:1)+'" text-anchor="middle">'+ab+'</text>';
+  return o;
+}
+function pip(cx,cy,r,lit,col,glow){
+  return '<polygon points="'+cx+','+(cy-r)+' '+(cx+r)+','+cy+' '+cx+','+(cy+r)+' '+(cx-r)+','+cy+'" fill="'+col+'" fill-opacity="'+(lit?.9:.06)+'" stroke="'+col+'" stroke-opacity="'+(lit?1:.4)+'" stroke-width="1.2"'+((lit&&glow)?' filter="url(#gls)"':'')+'/>';
+}
+/* chip mode for a target timer: absent, expiring or up; the target rows dim with no target */
+function tmode(sec,s){if(!s.tgt)return 'dim';if(!(sec>0))return 'miss';return sec<=3?'warn':'up';}
+function tcol(sec,s){return !s.tgt?C.muted:sec>0&&sec<=3?C.amber:C.white;}
+function tval(sec,s){return !s.tgt||!(sec>0)?'--':fmt(sec);}
+
+/* ---- A: uptime board. Same grammar as the Seal module: row 1 buff, row 2 drain bar, row 3 the target lane. ---- */
+function modA(y0,s){
+  var o='',x=X0,w=W0,miss=s.bs==null,col=ACC,i;
+  o+=mchip(x,y0+6,28,'BS',K.bs,miss?'alert':'up');
+  o+=txt(x+36,y0+19,'BATTLE SHOUT',12,miss?C.amber:C.white);
+  o+=txt(x+36,y0+31,miss?'MISSING':'ON YOU',10,miss?C.amber:C.muted);
+  o+=txt(x+w,y0+27,miss?'--':fmt(s.bs),20,miss?C.amber:col,{a:'end'});
+  var by=y0+44,bh=12,bx=x,bw=w;                       /* 0 to 3 min, rebuff band on the last 30 s */
+  o+=rect(bx,by,bw,bh,miss?C.amber:'#0a0416',miss?.14:.9);
+  o+=rect(bx,by,bw*30/180,bh,C.amber,.28);
+  if(!miss){o+=rect(bx,by,bw*s.bs/180,bh,col,.9);o+=rect(bx+bw*s.bs/180-2,by-2,2,bh+4,'#ffffff',.95);}
+  o+='<rect x="'+bx+'" y="'+by+'" width="'+bw+'" height="'+bh+'" fill="none" stroke="'+(miss?C.amber:col)+'" stroke-opacity=".6"/>';
+  o+=line(bx+bw*30/180,by-3,bx+bw*30/180,by+bh+3,C.amber,.85,1,'3 2');
+  for(i=0;i<=6;i++){var tx=bx+bw*i/6;o+=line(tx,by+bh,tx,by+bh+(i%2===0?5:3),C.violet,.7,1);}
+  if(miss)o+=txt(bx+bw/2,by+bh-2.5,'RECAST',10,C.amber,{a:'middle'});
+  /* row 3: Sunder pips and count on the left, three target chips on the right */
+  var sa=s.sa,tg=s.tgt,sc=!tg?C.muted:sa>=5?C.gold:sa===0?C.muted:C.white;
+  o+=txt(x,y0+82,'SUNDER',10,C.violet,{op:.85});
+  for(i=0;i<5;i++)o+=pip(x+6+i*13,y0+97,6,tg&&i<sa,STEEL,sa>=5);
+  o+=txt(x+72,y0+104,tg?String(sa):'-',18,sc);
+  var cells=[['TC',K.tc,s.tc,0],['RN',K.rn,s.rn,0],['DW',K.dw,s.dw,1]];
+  cells.forEach(function(c,j){
+    var cx=x+92+j*32;
+    o+=mchip(cx,y0+86,20,c[0],c[1],tmode(c[2],s),c[3]);
+    o+=txt(cx+10,y0+119,tval(c[2],s),10,tcol(c[2],s),{a:'middle'});
+  });
+  return o;
+}
+
+/* ---- B: shard and combo shaped. Header, five pips plus the count (same size as combo points), then one reminder row. ---- */
+function modB(y0,s){
+  var o='',x=X0,i,miss=s.bs==null,tg=s.tgt,sa=s.sa;
+  o+=txt(x,y0+14,'SUNDER ARMOR',10,C.violet,{op:.85});
+  for(i=0;i<5;i++)o+=pip(1230+i*20,y0+38,8,tg&&i<sa,STEEL,sa>=5);
+  o+=txt(1338,y0+49,tg?String(sa):'-',32,!tg?C.muted:sa>=5?C.gold:sa===0?C.muted:C.white);
+  o+=line(x,y0+62,1358,y0+62,C.violet,.2,1);
+  o+=mchip(1222,y0+70,22,'BS',K.bs,miss?'alert':'up');
+  o+=txt(1252,y0+85,miss?'MISSING':fmt(s.bs),miss?11:13,miss?C.amber:C.white,{op:miss?.95:1});
+  o+=mchip(1308,y0+70,22,'TC',K.tc,tmode(s.tc,s));
+  o+=txt(1336,y0+85,tval(s.tc,s),13,tcol(s.tc,s));
+  return o;
+}
+
+/* ---- C: rage-aware checklist. A rage bar with cost ticks, then five tiles; a missing spell you can afford lights cyan. ---- */
+var COST={bs:10,sa:15,tc:20,rn:10};
+function modC(y0,s){
+  var o='',x=X0,w=W0,tg=s.tgt,i,rage=s.rage;
+  o+=txt(x,y0+14,'RAGE',10,C.violet,{op:.85});
+  var bx=x,by=y0+22,bh=12,bw=150,px=bw/50;               /* bar scale 0 to 50 rage: every cost sits in the first 20 */
+  o+=rect(bx,by,bw,bh,'#0a0416',.9)+rect(bx,by,Math.min(rage,50)*px,bh,RAGEC,.95);
+  o+='<rect x="'+bx+'" y="'+by+'" width="'+bw+'" height="'+bh+'" fill="none" stroke="'+RAGEC+'" stroke-opacity=".7"/>';
+  [10,15,20].forEach(function(v){
+    o+=line(bx+v*px,by-2,bx+v*px,by+bh+3,C.amber,.9,1);
+    o+=txt(bx+v*px,by+bh+14,String(v),10,C.fg,{a:'middle',op:.85});
+  });
+  o+=txt(x+w,y0+34,String(rage),22,rage>=50?C.gold:C.white,{a:'end'});
+  var T=[['BS',K.bs,s.bs,'bs',1],['SA',K.sa,null,'sa',1],['TC',K.tc,s.tc,'tc',tg],['RN',K.rn,s.rn,'rn',tg],['DW',K.dw,s.dw,'dw',tg]];
+  T.forEach(function(t,j){
+    var cx=x+j*38,chx=cx+7,cy=y0+62,present,mode,dash=false,txtv,txtc;
+    if(t[3]==='sa'){present=tg&&s.sa>0;txtv=tg?'x'+s.sa:'--';}
+    else if(t[3]==='bs'){present=s.bs!=null;txtv=present?fmt(s.bs):'--';}
+    else{present=tg&&t[2]>0;txtv=present?fmt(t[2]):'--';}
+    txtc=present?(t[3]!=='sa'&&t[3]!=='bs'&&t[2]<=3&&t[2]>0?C.amber:C.white):C.muted;
+    if(t[3]==='dw')dash=true;
+    if(!t[4]&&t[3]!=='bs'){mode='dim';txtc=C.muted;}
+    else if(present)mode=(t[3]!=='sa'&&t[2]<=3&&t[2]>0)?'warn':'up';
+    else if(t[3]==='dw')mode='miss';
+    else if(rage>=COST[t[3]])mode=(t[3]==='bs')?'alert':'cue';
+    else mode='miss';
+    if(t[3]==='bs'&&!present&&mode==='cue')mode='alert';
+    if(mode==='cue'||mode==='alert'){
+      var cc=mode==='alert'?C.amber:C.cyan;
+      o+='<polygon points="'+(cx+19)+','+(cy-4)+' '+(cx+15)+','+(cy-9)+' '+(cx+23)+','+(cy-9)+'" fill="'+cc+'"/>';
+      txtc=cc;
+    }
+    o+=mchip(chx,cy,24,t[0],t[1],mode,dash);
+    o+=txt(cx+19,y0+101,txtv,11,txtc,{a:'middle'});
+  });
+  return o;
+}
+var MODS={A:modA,B:modB,C:modC};
+
+/* ---------- scenes ---------- */
+var WTD=[
+  {ab:'RN',c:'#c4423b',rem:9},{ab:'DW',c:'#a02030',rem:8},{ab:'TC',c:'#4a9de0',rem:11},
+  {ab:'SA',c:'#9a9aa8',rem:22,n:3},{ab:'DS',c:'#e0902a',rem:26}
+];
+var DEF={bs:154,sa:3,tc:11,rn:9,dw:8,rage:34,tgt:1};
+function sc(base0,over){var o={},k;for(k in base0)o[k]=base0[k];for(k in over)o[k]=over[k];return o;}
+function crop(v,area){
+  var o=base({cls:'wr',next:true}),y0=area==='upper'?500:632;
+  o+=slotDivider(1410);
+  if(area==='upper'){o+=MODS[v](500,DEF);o+=dotsH(WTD,true);}
+  else{o+=dotsH(WTD,false);o+=MODS[v](632,DEF);}
+  o+=tags();
+  return '<div class="scene"><div class="state"><b>'+area.toUpperCase()+' AREA</b>, CLASS MODULE</div>'+
+    '<svg width="488" height="568" viewBox="1105 396 330 384" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg></div>';
+}
+var VT={
+ A:['UPTIME BOARD','<b>Everything named, in the Paladin Seal grammar.</b> Row 1: Battle Shout chip with a 3:00 drain bar and an amber rebuff band on the last 30 s. Row 3: Sunder as five pips with the count, then Thunder Clap, Rend and Deep Wounds chips with their time. About 190 x 120.'],
+ B:['STACK AND SHOUT','<b>The tight one, shaped like the Warlock shard and Rogue combo modules.</b> Sunder Armor as five pips plus a 32 px count, then one reminder row: Battle Shout time (or MISSING) and the Thunder Clap debuff. Bleeds stay in Target Debuffs. About 140 x 96.'],
+ C:['RAGE CHECKLIST','<b>Answers "what can I press right now".</b> A 0 to 50 rage bar with the 10, 15 and 20 cost ticks, then five tiles. A tile that is missing and affordable turns cyan with a caret (amber for Battle Shout). About 190 x 104.']
+};
+var STATES=[
+ {n:'DEFAULT, SUNDER 3',d:'BS 2:34, TC 11s, Rend 9s',s:DEF},
+ {n:'SHOUT MISSING',d:'reminder state, amber',s:sc(DEF,{bs:null})},
+ {n:'SUNDER 0',d:'no stacks on target',s:sc(DEF,{sa:0})},
+ {n:'SUNDER 5',d:'full stacks, gold count',s:sc(DEF,{sa:5})},
+ {n:'BLEEDS OFF',d:'Rend and Deep Wounds down',s:sc(DEF,{rn:0,dw:0})},
+ {n:'NO TARGET',d:'module stays up, target parts dim',s:sc(DEF,{tgt:0})}
+];
+function cell(v,s){
+  var o='<rect x="1213" y="0" width="202" height="128" fill="rgba(168,85,247,.04)" stroke="'+C.violet+'" stroke-opacity=".4" stroke-dasharray="6 4"/>';
+  o+=MODS[v](0,s);
+  return '<div class="cell"><svg width="224" height="142" viewBox="1213 0 202 128" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg></div>';
+}
+
+var html='<h2><i>1</i> IN SITU, UPPER AND LOWER AREA</h2><div class="cols">';
+['A','B','C'].forEach(function(v){
+  html+='<div><div class="vt"><i>'+v+'</i> '+VT[v][0]+'</div><div class="cap">'+VT[v][1]+'</div>'+crop(v,'upper')+crop(v,'lower')+'</div>';
+});
+html+='</div>';
+html+='<h2><i>2</i> STATES, EACH VARIANT</h2><div class="strip"><div></div>';
+STATES.forEach(function(S){html+='<div class="sh">'+S.n+'<small>'+S.d+'</small></div>';});
+['A','B','C'].forEach(function(v){
+  html+='<div class="rl"><b style="color:#ff2e97">'+v+'</b> '+VT[v][0]+(v==='B'?'<small>no bleeds element, so BLEEDS OFF looks unchanged</small>':'')+'</div>';
+  STATES.forEach(function(S){html+=cell(v,S.s);});
+});
+html+='</div>';
+document.getElementById('root').innerHTML=html;
+})();
+</script>
+</body>
+</html>
