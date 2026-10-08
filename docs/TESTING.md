@@ -141,9 +141,9 @@ Not yet checked in game. `/fsprof` shows or hides the panel and the choice survi
 
 1. Click each profession row once (an Alchemy, Blacksmithing, Cooking or First Aid row, for example). That profession's window opens. Hovering a row names the profession and, on those rows, adds "Click to open".
 2. A Mining row opens the Smelting window.
-3. Herbalism, Skinning and Fishing rows do nothing when clicked: no window, no cast, no bobber. Their tooltip shows the name only.
+3. Herbalism, Skinning and Fishing rows do nothing when clicked: no window, no cast, no bobber. Their tooltip shows the name only. Unknown or non-English profession names are not clickable.
 4. In combat, type `/fsprof`. It prints that the change applies after combat, the panel stays as it is, and it flips when combat ends. Learn or drop a profession in combat (if you can) and the rows catch up after combat.
-5. `/reload` with the panel hidden: it stays hidden. Mouse-down or mouse-up clicking should both work (the Interface action-button "on key down" option decides which).
+5. `/reload` with the panel hidden: it stays hidden. A click opens the window once (it does not open and immediately close), with the action-button "on key down" option both on and off.
 
 ## If the window does not open
 
