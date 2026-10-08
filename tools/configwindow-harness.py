@@ -14,7 +14,8 @@ The window is a plain themed frame with a category nav and a content well. These
     defaults, ranges, tooltip and format options from mockups/config-window-2026-10-07.html;
   * UI.Slider is built from Theme pieces (no Blizzard slider), binds a key or get/set, auto-stacks, snaps to
     its step, and takes mouse down, drag, release, wheel and click-on-track;
-  * the Unit Frames page carries the Professions panel toggle (professions.shown);
+  * the Unit Frames page carries the Professions panel toggle (professions.shown) and the
+    Background grid toggle (actionbars.grid);
   * the Profiles page calls the Config API (switch, new, copy, rename, delete, reset), asks before
     anything destructive, and keeps Delete off for Default and the active profile;
   * read-only Config disables every control; no player-facing string says "tape"; explanations
@@ -593,6 +594,7 @@ local function unitFramesDefaults()
     FS.Config.RegisterDefault("unitFrames.hidePlayer", false)
     FS.Config.RegisterDefault("unitFrames.hideTarget", false)
     FS.Config.RegisterDefault("professions.shown", true)
+    FS.Config.RegisterDefault("actionbars.grid", true)
 end
 
 function T.unit_frames_toggles_write_config_and_follow_changes()
@@ -622,6 +624,21 @@ function T.the_unit_frames_page_has_the_professions_panel_toggle()
     FS.Config.Set("professions.shown", true)
     yes(r.control.fsChecked, "an external change shows")
     eq(#texts(r), 2, "label and state only")
+end
+
+function T.the_unit_frames_page_has_the_background_grid_toggle()
+    local W = boot({ preWindow = unitFramesDefaults })
+    W.Open("unitframes")
+    local r = row("Background grid")
+    yes(r, "a Background grid row")
+    yes(r.control.fsChecked, "shown by default")
+    press("Background grid")
+    eq(FS.Config.Get("actionbars.grid"), false)
+    no(r.control.fsChecked)
+    FS.Config.Set("actionbars.grid", true)
+    yes(r.control.fsChecked, "an external change shows")
+    eq(#texts(r), 2, "label and state only")
+    eq(FS.Config.Get("professions.shown"), true, "the Professions key is untouched")
 end
 
 function T.the_toggle_states_show_on_and_off()

@@ -1324,6 +1324,17 @@ end
 -- squeezed a 2560x183 full-width floor into the 1089x178 action-bar box.
 local gridFrame
 
+-- The grid is a profile setting; /fsbars blizz hides it whatever the setting says.
+local Config = FS.Config
+local CFG_GRID = "actionbars.grid"
+Config.RegisterDefault(CFG_GRID, true)
+
+local function RefreshGrid()
+    if not gridFrame then return end
+    gridFrame:SetShown(usingFS and Config.Get(CFG_GRID) == true)
+end
+Config.OnChange(CFG_GRID, RefreshGrid)
+
 local function EnsureGrid()
     if gridFrame or not (FS.Layout and FS.Layout.Apply and FS.Layout.grid) then return end
     gridFrame = CreateFrame("Frame", "FSActionGrid", UIParent)
@@ -1344,6 +1355,7 @@ local function EnsureGrid()
     tex:SetTexture("Interface\\AddOns\\forever-stuwave\\Media\\Textures\\grid.tga")
     tex:SetAllPoints(gridFrame)
     gridFrame.fsTexture = tex
+    RefreshGrid()
 end
 
 -------------------------------------------------------------------------------
@@ -1591,16 +1603,16 @@ local function SetMode(mode)
 
     if mode == "blizz" then
         if stack then stack:Hide() end
-        if gridFrame then gridFrame:Hide() end
         ForEachBlizzardBar(RestoreBlizzardBar)
         usingFS = false
+        RefreshGrid()
         if ActionBars.geometry then ActionBars.geometry.shown = false; NotifyGeometry() end
         print("|cff22e0ffForever STUwave|r: Blizzard action bars restored. /fsbars fs to switch back.")
     else
         ForEachBlizzardBar(HideBlizzardBar)
         if stack then stack:Show() end
-        if gridFrame then gridFrame:Show() end
         usingFS = true
+        RefreshGrid()
         if ActionBars.geometry then ActionBars.geometry.shown = true; NotifyGeometry() end
         print("|cff22e0ffForever STUwave|r: synthwave action bars active.")
     end
