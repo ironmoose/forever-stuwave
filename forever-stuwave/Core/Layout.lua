@@ -117,6 +117,10 @@ FS.Layout = FS.Layout or {
     tracker     = { point = "CENTER", relPoint = "CENTER", x = 975,   y = 170,  w = 270,  h = 320 },
     -- Mirrors `chat` on the opposite side of the screen: same y, x negated.
     professions = { point = "CENTER", relPoint = "CENTER", x = 923,   y = -450, w = 300,  h = 210 },
+    -- Seat for the default GameTooltip anchor (TooltipAnchor.lua); the tooltip grows up and left from its
+    -- bottom right corner. Blizzard's default container: BOTTOMRIGHT of UIParent, 9 in and 85 up in raw UI units
+    -- (12.1.0 UI source, unconfirmed on this client), so it hugs the corner at any width and UI scale.
+    tooltip     = { point = "BOTTOMRIGHT", relPoint = "BOTTOMRIGHT", x = -9, y = 85, w = 160, h = 80, unscaled = true },
 }
 
 -- Clearances the Console chassis and the pet panel keep from the chat terminal, in DESIGN

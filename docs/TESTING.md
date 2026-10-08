@@ -147,6 +147,16 @@ Out of combat only. Close Blizzard Edit Mode first.
 8. The Layout page of `/fsconfig` has the same controls: EDIT LAYOUT, snap on/off, grid size 4/8/16/32, and Reset all positions.
 9. EDIT LAYOUT closes the settings window; DONE or Esc reopens it on the Layout page. Leaving after `/fsedit`, by a fight, or by Blizzard Edit Mode does not open it.
 
+## Moving the tooltip
+
+Out of combat for the editing; the tooltip itself follows in combat too.
+
+1. Type `/fsedit` and drag the Tooltip box (bottom right, above the control deck) somewhere else, then DONE.
+2. Hover a unit, an item and an action button: the tooltip shows there, growing up and left from the box's bottom right corner.
+3. Open `/fsconfig` and hover a `?` icon: its tooltip still shows beside its icon, not at the Tooltip box.
+4. `/reload`: the Tooltip box and the tooltip stay where you put them.
+5. In `/fsedit`, right-click the Tooltip box (or run `/fsedit reset all`, then `/fsedit reset all confirm`): the tooltip returns to the bottom right.
+
 ## Settings window: /fsconfig
 
 Safe in combat. Esc, the X, or `/fsconfig` again closes it; with a menu or confirm box open, Esc closes only that. `/fsconfig profiles` opens a page directly.
