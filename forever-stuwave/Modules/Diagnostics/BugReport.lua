@@ -60,6 +60,9 @@ BR.EXCLUDE = {
     chatSeatLog = true, chatSeatLogPrev = true,
     -- Likewise reported in their own `minimapSeat` section (MinimapSeat below).
     minimapSeatLog = true, minimapSeatLogPrev = true, minimapSeatLogFirst = true,
+    -- Account-wide profile data names every character (GUID, Name-Realm) and every profile; only the
+    -- active profile's name and layout are reported (ActiveProfile below).
+    profiles = true, profileKeys = true, profileLabels = true,
 }
 
 -- Frames reported by global name: ours, then the Blizzard ones we sit over.
@@ -507,6 +510,16 @@ local function Addons()
     return names, loadedCount
 end
 
+local function ActiveProfile(db)
+    local config = FS.Config
+    if type(config) ~= "table" or type(config.ActiveProfile) ~= "function" then return nil end
+    local ok, name = pcall(config.ActiveProfile)
+    if not ok or type(name) ~= "string" then return nil end
+    local okGet, profiles = pcall(rawget, db, "profiles")
+    local profile = okGet and type(profiles) == "table" and rawget(profiles, name) or nil
+    return { name = name, layout = type(profile) == "table" and rawget(profile, "layout") or nil }
+end
+
 local function Settings()
     local db = _G.ForeverSTUwaveDB
     if type(db) ~= "table" then return {} end
@@ -519,6 +532,7 @@ local function Settings()
             if okGet then copy[k] = v end
         end
     end
+    copy.activeProfile = ActiveProfile(db)
     local st = NewState({ maxBytes = LIMITS.bytes })
     return Sanitize(copy, st, 0, {}) or {}
 end

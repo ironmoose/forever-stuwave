@@ -32,10 +32,10 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: #07030e; }
-body { width: 2560px; height: 1440px; overflow: hidden; position: relative; color: var(--text); font-family: var(--font-mono); font-weight: 700; }
+body { width: 2560px; height: 1860px; overflow: visible; position: relative; color: var(--text); font-family: var(--font-mono); font-weight: 700; }
 
 /* ------------------------------------------------------------------ backdrop (a dimmed stand-in for the game) */
-.world { position: absolute; inset: 0; overflow: hidden;
+.world { position: absolute; left: 0; top: 0; width: 2560px; height: 1440px; overflow: hidden;
   background: linear-gradient(180deg, #0a0418 0%, #1c0a35 38%, #4a1766 58%, #8a2a78 63.5%, #1a0a2c 63.6%, #0d0518 100%); }
 .sun { position: absolute; left: 1280px; top: 560px; width: 420px; height: 210px; margin-left: -210px; border-radius: 210px 210px 0 0;
   background: repeating-linear-gradient(180deg, rgba(255,120,60,.9) 0 14px, rgba(255,46,151,.85) 14px 28px, transparent 28px 34px);
@@ -47,6 +47,8 @@ body { width: 2560px; height: 1440px; overflow: hidden; position: relative; colo
     repeating-linear-gradient(90deg, rgba(168,85,247,.55) 0 2px, transparent 2px 120px),
     repeating-linear-gradient(0deg, rgba(168,85,247,.55) 0 2px, transparent 2px 90px), #0e0619; }
 .dim { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 55%, rgba(5,2,12,.35) 0%, rgba(5,2,12,.72) 100%); }
+
+.world-ext { position: absolute; left: 0; top: 1440px; width: 2560px; height: 420px; background: #0d0518; border-top: 1px solid #1c0f33; }
 
 /* ghosted Gunsight HUD + bars so the window reads as "over the game" */
 .ghost { position: absolute; opacity: .22; }
@@ -105,7 +107,7 @@ body { width: 2560px; height: 1440px; overflow: hidden; position: relative; colo
 .nav-v { font-size: 9px; color: var(--line); padding: 0 0 2px 2px; }
 
 /* the "well": BugReport's #0a0416 @ .95 track behind the readable area */
-.well { position: relative; flex: 1; min-width: 0; background: rgba(10,4,22,.95); border: 1px solid var(--line); padding: 10px 22px 8px 14px; overflow: hidden; }
+.well { position: relative; flex: 1; min-width: 0; background: rgba(10,4,22,.95); border: 1px solid var(--line); padding: 10px 22px 8px 14px; overflow: visible; }
 .sbar { position: absolute; right: 4px; top: 4px; bottom: 4px; width: 4px; background: rgba(58,33,104,.6); }
 .sbar b { position: absolute; left: 0; right: 0; top: 0; height: 78%; background: var(--violet); }
 
@@ -117,19 +119,25 @@ body { width: 2560px; height: 1440px; overflow: hidden; position: relative; colo
 
 .row { position: relative; display: flex; align-items: center; height: 28px; gap: 10px; }
 .row .lab { flex: 1; font-size: 11px; color: var(--text); white-space: nowrap; }
-.row .lab small { display: block; font-size: 9px; color: var(--muted); font-weight: 700; margin-top: 1px; }
 .row.dim .lab { color: var(--muted); }
 .row.sub1 { padding-left: 16px; }
 .row.sub1::before { content: ""; position: absolute; left: 4px; top: 0; height: 14px; width: 8px; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.help { font-size: 9.5px; line-height: 1.45; color: var(--muted); padding: 2px 0 0 0; font-weight: 700; }
+.help { font-size: 10px; line-height: 1.45; color: var(--muted); padding: 2px 0 0 0; font-weight: 700; }
 .help b { color: var(--cyan); font-weight: 700; }
+/* slider: thin track, cyan fill, cut-corner slab thumb, mono readout */
+.sl { position: relative; width: 150px; height: 12px; flex: none; }
+.sl i { position: absolute; left: 0; right: 0; top: 5px; height: 2px; background: color-mix(in srgb, var(--violet) 45%, var(--line)); }
+.sl i::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: var(--p); background: var(--cyan); box-shadow: 0 0 4px rgba(34,224,255,.6); }
+.sl b { position: absolute; top: 0; left: calc(var(--p) - 4px); width: 8px; height: 12px; background: var(--cyan); filter: drop-shadow(0 0 3px rgba(34,224,255,.55));
+  clip-path: polygon(3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%, 0 3px); }
+.sl b::before { content: ""; position: absolute; inset: 1px; background: #170c2a; clip-path: polygon(2.3px 0, 100% 0, 100% calc(100% - 2.3px), calc(100% - 2.3px) 100%, 0 100%, 0 2.3px); }
+.rd { width: 34px; flex: none; text-align: right; font-size: 10.5px; color: var(--cyan); }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; }
 .master { display: flex; align-items: center; height: 34px; padding: 0 10px; margin-bottom: 4px; position: relative; }
 .master::before { content: ""; position: absolute; inset: 0; background: rgba(168,85,247,.07); border: 1px solid rgba(168,85,247,.35);
   clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
 .master > * { position: relative; }
 .master .lab { flex: 1; font-size: 12px; color: var(--text); }
-.master .lab small { font-size: 9px; color: var(--muted); margin-left: 8px; }
 
 /* ------------------------------------------------------------------ controls */
 /* toggle: cut track, slab knob. off = --line ring, on = cyan ring + glow */
@@ -170,8 +178,6 @@ body { width: 2560px; height: 1440px; overflow: hidden; position: relative; colo
 /* tags */
 .new { display: inline-block; margin-left: 8px; padding: 2px 6px 2px 7px; font-size: 8.5px; letter-spacing: .12em; color: #170c2a; background: var(--gold);
   clip-path: polygon(3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%, 0 3px); vertical-align: 1px; }
-.tag-oc { display: inline-flex; align-items: center; gap: 6px; font-size: 9.5px; color: var(--amber); letter-spacing: .04em; }
-.tag-oc i { width: 6px; height: 6px; background: var(--amber); box-shadow: 0 0 5px var(--amber); display: inline-block; }
 
 /* footer */
 .foot { position: absolute; left: 3px; right: 3px; bottom: 3px; height: 31px; border-top: 1px solid rgba(168,85,247,.30); display: flex; align-items: center; justify-content: space-between; padding: 0 14px; font-size: 10px; color: var(--muted); }
@@ -181,11 +187,40 @@ body { width: 2560px; height: 1440px; overflow: hidden; position: relative; colo
 .key { color: var(--cyan); padding: 2px 7px; background: rgba(34,224,255,.08); border: 1px solid rgba(34,224,255,.4); }
 
 /* ------------------------------------------------------------------ layout category */
-.big { --c: var(--cyan); --ch: 10px; height: 54px; width: 100%; display: block; }
-.big > b { flex-direction: column; gap: 3px; font-size: 14px; letter-spacing: .08em; }
-.big > b small { font-size: 9.5px; color: var(--muted); letter-spacing: .02em; font-weight: 700; }
+.big { --c: var(--cyan); --ch: 10px; height: 36px; width: 100%; display: block; }
+.big > b { font-size: 14px; letter-spacing: .08em; }
+.btn.dis { filter: none; opacity: .4; }
+.btn.dd > b { justify-content: space-between; min-width: 200px; }
+.dd .chev { width: 0; height: 0; border: 4px solid transparent; border-top: 5px solid var(--cyan); margin-top: 5px; }
+.btnrow { display: flex; gap: 8px; align-items: center; height: 32px; }
+.grp.later .grp-h, .grp.later .btnrow { opacity: .45; }
+.grp.later .grp-h .new { opacity: 1; }
 .btn.warnb { --c: var(--pink); }
 .btn.warnb > b { color: var(--pink); }
+
+/* explain-icon: a 10px ring with a tiny "?", the whole explanation lives in the tooltip (data-tip).
+   The ? is a centred SVG background (the text glyph is hidden) so it is truly dead centre, font metrics do not matter. */
+.q { position: relative; display: inline-block; flex: none;
+  width: 10px; height: 10px; margin-left: 6px; vertical-align: middle; border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--violet) 70%, var(--line));
+  background: var(--track) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'%3E%3Cg transform='translate(0 0.17)' fill='none' stroke='%239d93c4' stroke-width='1.1'%3E%3Cpath d='M2.3 2.6C2.3 1.5 3 1 4 1C5 1 5.7 1.6 5.7 2.4C5.7 3.3 4 3.6 4 4.9'/%3E%3C/g%3E%3Ccircle cx='4' cy='6.77' r='.6' fill='%239d93c4'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  font-size: 0; line-height: 0; color: transparent; cursor: help; }
+.grp-h .q { margin-left: -2px; }
+.q:hover, .q.open { border-color: var(--cyan); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'%3E%3Cg transform='translate(0 0.17)' fill='none' stroke='%2322e0ff' stroke-width='1.1'%3E%3Cpath d='M2.3 2.6C2.3 1.5 3 1 4 1C5 1 5.7 1.6 5.7 2.4C5.7 3.3 4 3.6 4 4.9'/%3E%3C/g%3E%3Ccircle cx='4' cy='6.77' r='.6' fill='%2322e0ff'/%3E%3C/svg%3E"); box-shadow: 0 0 4px rgba(34,224,255,.55); }
+/* tooltip: dark fill, violet 1px ring, cut corners top left and bottom right (like the panels), notch toward the ? */
+.q::after, .q::before { display: none; position: absolute; z-index: 8; pointer-events: none; }
+.q:hover::after, .q:hover::before, .q.open::after, .q.open::before { display: block; }
+.q::after { content: attr(data-tip); left: calc(100% + 8px); top: 50%; transform: translateY(-50%); width: 232px; padding: 6px 9px 6px 10px;
+  white-space: normal; text-align: left; text-transform: none; letter-spacing: .01em; font-family: var(--font-mono); font-weight: 700;
+  font-size: 9.5px; line-height: 1.45; color: var(--text); border: 1px solid var(--violet);
+  background:
+    linear-gradient(135deg, transparent 3.5px, var(--violet) 3.5px 4.7px, transparent 4.7px),
+    linear-gradient(315deg, transparent 3.5px, var(--violet) 3.5px 4.7px, transparent 4.7px),
+    #120a22;
+  background-origin: border-box;
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px); }
+.q::before { content: ""; z-index: 9; left: calc(100% + 4.5px); top: 50%; width: 7px; height: 7px; background: #120a22;
+  border-left: 1px solid var(--violet); border-bottom: 1px solid var(--violet); transform: translateY(-50%) rotate(45deg); }
 
 /* ------------------------------------------------------------------ annotations (page only) */
 .cap { position: absolute; font-family: var(--font-note); font-weight: 400; font-size: 17px; letter-spacing: .06em; color: var(--cyan); }
@@ -213,7 +248,9 @@ body { width: 2560px; height: 1440px; overflow: hidden; position: relative; colo
   <div class="dim"></div>
 </div>
 
-<div class="stamp">Config window <span>/</span> design reference<small>2026-10-07  /  2560 x 1440 canvas  /  mockup, not code  /  backdrop is a dimmed stand-in for the game</small></div>
+<div class="world-ext"></div>
+
+<div class="stamp">Config window <span>/</span> design reference<small>2026-10-07  /  2560 x 1860 canvas  /  mockup, not code  /  backdrop is a dimmed stand-in for the game</small></div>
 
 <!-- =========================================================== MAIN: Gunsight HUD selected -->
 <div class="cap" style="left:132px;top:112px"><i>A</i> / Gunsight HUD category <span>(780 x 560 UI units, 1.333 px per unit)</span></div>
@@ -233,13 +270,10 @@ body { width: 2560px; height: 1440px; overflow: hidden; position: relative; colo
   <div class="body">
     <div class="nav">
       <div class="nav-h">// settings</div>
-      <div class="nav-i"><em>01</em><span>General</span></div>
-      <div class="nav-i"><em>02</em><span>Unit Frames</span></div>
-      <div class="nav-i on"><em>03</em><span>Gunsight HUD</span></div>
-      <div class="nav-i"><em>04</em><span>Layout</span></div>
-      <div class="nav-i"><em>05</em><span>Chat</span></div>
-      <div class="nav-i"><em>06</em><span>Console</span></div>
-      <div class="nav-i"><em>07</em><span>Accessibility</span></div>
+      <div class="nav-i"><em>01</em><span>Unit Frames</span></div>
+      <div class="nav-i on"><em>02</em><span>Gunsight HUD</span></div>
+      <div class="nav-i"><em>03</em><span>Layout</span></div>
+      <div class="nav-i"><em>04</em><span>Profiles</span></div>
       <div class="nav-sp"></div>
       <div class="nav-v">/fsgun  /fsedit  /fsbug</div>
     </div>
@@ -248,7 +282,7 @@ body { width: 2560px; height: 1440px; overflow: hidden; position: relative; colo
       <div class="sbar"><b></b></div>
 
       <div class="master">
-        <div class="lab">Gunsight HUD<small>master switch, fades every piece out together</small></div>
+        <div class="lab">Gunsight HUD<span class="q open" data-tip="Master switch. Fades every piece out together.">?</span></div>
         <span class="tg-s on">ON</span><span class="tg on"><b></b></span>
       </div>
 
@@ -268,8 +302,9 @@ body { width: 2560px; height: 1440px; overflow: hidden; position: relative; colo
 
       <div class="grp">
         <div class="grp-h"><span class="slash">//</span> Target health and resource</div>
-        <div class="row"><div class="lab">Bar thickness</div>
-          <div class="seg"><span class="btn"><b>Thin</b></span><span class="btn on"><b>Medium</b></span><span class="btn"><b>Thick</b></span></div></div>
+        <div class="row"><div class="lab">Health bar height</div><div class="sl" style="--p:40%"><i></i><b></b></div><span class="rd">6 px</span></div>
+        <div class="row"><div class="lab">Resource bar height</div><div class="sl" style="--p:20%"><i></i><b></b></div><span class="rd">4 px</span></div>
+        <div class="row"><div class="lab">Bar width<span class="q" data-tip="Percent of the target name width.">?</span></div><div class="sl" style="--p:50%"><i></i><b></b></div><span class="rd">100%</span></div>
         <div class="row"><div class="lab">Show numbers</div><span class="tg-s on">ON</span><span class="tg on"><b></b></span></div>
         <div class="row sub1"><div class="lab">Number format</div>
           <div class="seg"><span class="btn"><b>Current</b></span><span class="btn on"><b>Current / max</b></span><span class="btn"><b>Percent</b></span></div></div>
@@ -277,8 +312,7 @@ body { width: 2560px; height: 1440px; overflow: hidden; position: relative; colo
 
       <div class="grp">
         <div class="grp-h"><span class="slash">//</span> Target buffs and debuffs</div>
-        <div class="row"><div class="lab">Show on the Gunsight<span class="new">NEW</span></div><span class="tg-s on">ON</span><span class="tg on"><b></b></span></div>
-        <div class="help">Replaces the Blizzard target auras. Needs the Unit Frames <b>Hide target frame</b> option to stay clean.</div>
+        <div class="row"><div class="lab">Show on the Gunsight<span class="q" data-tip="Replaces the Blizzard target auras. Needs the Unit Frames option Hide target frame turned on to stay clean.">?</span><span class="new">NEW</span></div><span class="tg-s on">ON</span><span class="tg on"><b></b></span></div>
       </div>
     </div>
   </div>
@@ -305,22 +339,18 @@ body { width: 2560px; height: 1440px; overflow: hidden; position: relative; colo
   <div class="body">
     <div class="nav">
       <div class="nav-h">// settings</div>
-      <div class="nav-i"><em>01</em><span>General</span></div>
-      <div class="nav-i on"><em>02</em><span>Unit Frames</span></div>
-      <div class="nav-i"><em>03</em><span>Gunsight HUD</span></div>
-      <div class="nav-i"><em>04</em><span>Layout</span></div>
-      <div class="nav-i"><em>05</em><span>Chat</span></div>
-      <div class="nav-i"><em>06</em><span>Console</span></div>
-      <div class="nav-i"><em>07</em><span>Accessibility</span></div>
+      <div class="nav-i on"><em>01</em><span>Unit Frames</span></div>
+      <div class="nav-i"><em>02</em><span>Gunsight HUD</span></div>
+      <div class="nav-i"><em>03</em><span>Layout</span></div>
+      <div class="nav-i"><em>04</em><span>Profiles</span></div>
       <div class="nav-sp"></div>
       <div class="nav-v">/fsgun  /fsedit  /fsbug</div>
     </div>
     <div class="well">
       <div class="grp">
-        <div class="grp-h"><span class="slash">//</span> Blizzard frames</div>
+        <div class="grp-h"><span class="slash">//</span> Player and target<span class="q" data-tip="Hidden frames stay click-through and invisible. Target auras move to the Gunsight HUD when it is enabled.">?</span></div>
         <div class="row"><div class="lab">Hide player frame</div><span class="tg-s on">ON</span><span class="tg on"><b></b></span></div>
         <div class="row"><div class="lab">Hide target frame</div><span class="tg-s">OFF</span><span class="tg"><b></b></span></div>
-        <div class="help">Hidden frames stay click-through and invisible; target auras move to the <b>Gunsight HUD</b> when enabled.</div>
       </div>
     </div>
   </div>
@@ -346,21 +376,17 @@ body { width: 2560px; height: 1440px; overflow: hidden; position: relative; colo
   <div class="body">
     <div class="nav">
       <div class="nav-h">// settings</div>
-      <div class="nav-i"><em>01</em><span>General</span></div>
-      <div class="nav-i"><em>02</em><span>Unit Frames</span></div>
-      <div class="nav-i"><em>03</em><span>Gunsight HUD</span></div>
-      <div class="nav-i on"><em>04</em><span>Layout</span></div>
-      <div class="nav-i"><em>05</em><span>Chat</span></div>
-      <div class="nav-i"><em>06</em><span>Console</span></div>
-      <div class="nav-i"><em>07</em><span>Accessibility</span></div>
+      <div class="nav-i"><em>01</em><span>Unit Frames</span></div>
+      <div class="nav-i"><em>02</em><span>Gunsight HUD</span></div>
+      <div class="nav-i on"><em>03</em><span>Layout</span></div>
+      <div class="nav-i"><em>04</em><span>Profiles</span></div>
       <div class="nav-sp"></div>
       <div class="nav-v">/fsgun  /fsedit  /fsbug</div>
     </div>
     <div class="well">
       <div class="grp">
-        <div class="grp-h"><span class="slash">//</span> Edit mode</div>
-        <span class="btn big"><b>EDIT LAYOUT<small>enters /fsedit, drag every piece, Esc to leave</small></b></span>
-        <div class="row" style="margin-top:6px"><span class="tag-oc"><i></i>Out of combat only</span></div>
+        <div class="grp-h"><span class="slash">//</span> Edit mode<span class="q" data-tip="Enters /fsedit. Drag every piece, Esc to leave. Out of combat only.">?</span></div>
+        <span class="btn big"><b>EDIT LAYOUT</b></span>
       </div>
       <div class="grp">
         <div class="grp-h"><span class="slash">//</span> Snapping</div>
@@ -369,9 +395,54 @@ body { width: 2560px; height: 1440px; overflow: hidden; position: relative; colo
           <div class="seg"><span class="btn"><b>4</b></span><span class="btn on"><b>8</b></span><span class="btn"><b>16</b></span><span class="btn"><b>32</b></span></div></div>
       </div>
       <div class="grp">
-        <div class="grp-h"><span class="slash">//</span> Reset</div>
-        <div class="row"><div class="lab">Put every piece back where the design seats it<small>cannot be undone</small></div>
-          <span class="btn warnb" style="height:24px;--ch:6px"><b>Reset all positions</b></span></div>
+        <div class="grp-h"><span class="slash">//</span> Reset<span class="q" data-tip="Puts every piece back where the design seats it. Cannot be undone.">?</span></div>
+        <div class="btnrow"><span class="btn warnb" style="height:24px;--ch:6px"><b>Reset all positions</b></span></div>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <div class="l"><span class="dot"></span>Changes apply instantly</div>
+    <div class="r"><span>open with</span><span class="key">/fsconfig</span></div>
+  </div>
+</div>
+
+<!-- =========================================================== THUMB: Profiles -->
+<div class="cap" style="left:132px;top:1210px"><i>D</i> / Profiles category <span>(1.0 canvas px per unit)</span></div>
+<div class="win" style="--z:1;left:132px;top:1244px">
+  <div class="win-in"><div class="win-fill"></div></div>
+  <div class="scan"></div>
+  <div class="band"></div><div class="rule"></div>
+  <div class="band-label">stuwave://config</div>
+  <div class="close"><span class="btnx"><b><span>X</span></b></span></div>
+  <div class="head">
+    <div class="title">Forever <i>STU</i>wave</div>
+    <div class="sub">v0.1.0-alpha.1  ·  <b>/fsconfig</b></div>
+    <div class="cat">category <b>/ profiles</b></div>
+  </div>
+  <div class="body">
+    <div class="nav">
+      <div class="nav-h">// settings</div>
+      <div class="nav-i"><em>01</em><span>Unit Frames</span></div>
+      <div class="nav-i"><em>02</em><span>Gunsight HUD</span></div>
+      <div class="nav-i"><em>03</em><span>Layout</span></div>
+      <div class="nav-i on"><em>04</em><span>Profiles</span></div>
+      <div class="nav-sp"></div>
+      <div class="nav-v">/fsgun  /fsedit  /fsbug</div>
+    </div>
+    <div class="well">
+      <div class="grp">
+        <div class="grp-h"><span class="slash">//</span> Active profile<span class="q" data-tip="A profile holds layout positions and every setting in this window. Bug reports and logs stay account-wide.">?</span></div>
+        <div class="row"><div class="lab">Profile in use</div>
+          <span class="btn dd" style="height:24px"><b>Default<i class="chev"></i></b></span></div>
+        <div class="help">This character: <b>Khildrak-Forever</b></div>
+      </div>
+      <div class="grp">
+        <div class="grp-h"><span class="slash">//</span> Manage</div>
+        <div class="btnrow"><span class="btn" style="height:24px"><b>New profile</b></span><span class="btn" style="height:24px"><b>Copy from...</b></span><span class="btn" style="height:24px"><b>Rename</b></span></div>
+        <div class="row"><div class="lab">Delete the selected profile<span class="q" data-tip="Default and the active profile cannot be deleted. Cannot be undone.">?</span></div>
+          <span class="btn warnb dis" style="height:24px"><b>Delete</b></span></div>
+        <div class="row"><div class="lab">Put this profile back to the defaults<span class="q" data-tip="Cannot be undone.">?</span></div>
+          <span class="btn warnb" style="height:24px"><b>Reset profile</b></span></div>
       </div>
     </div>
   </div>
@@ -391,7 +462,7 @@ body { width: 2560px; height: 1440px; overflow: hidden; position: relative; colo
   </ul>
 </div>
 <div class="note" style="left:1360px;top:1340px;width:1100px;font-size:15px;color:var(--muted)">
-  Hover, focus, pressed and disabled states are not drawn. A and the two thumbnails are the same window, so the nav and footer never move between categories.
+  The ? icons carry the explanations; hover one in the browser to read it, A shows one open. Focus, pressed and disabled states are not drawn. A and the two thumbnails are the same window, so the nav and footer never move between categories.
 </div>
 
 </body>

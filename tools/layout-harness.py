@@ -343,49 +343,72 @@ end
 
 local function stanceX() return FS.Layout.stance.x end
 
+-- The override store is the active profile's layout table, handed over with UseStore.
+local function useStore(layout)
+    layout = layout or {}
+    FS.Layout.UseStore(layout)
+    return layout
+end
+
 function T.overrides_load_and_mutate_the_layout_entry_in_place()
-    ForeverSTUwaveDB = { layout = { v = 1, frames = { stance = { x = 10.5, y = -400 } } } }
     local entry = FS.Layout.stance
-    FS.Layout.LoadOverrides()
+    useStore({ v = 1, frames = { stance = { x = 10.5, y = -400 } } })
     eq(FS.Layout.stance, entry, "the same table, mutated in place")
     eq(entry.x, 10.5); eq(entry.y, -400)
     eq(FS.Layout.action.x, -7, "an id with no override keeps its default")
 end
 
-function T.overrides_load_on_our_addon_loaded_before_the_login_reseat()
+function T.the_login_reseat_seats_frames_at_the_bound_store_overrides()
     local f = seated(false)
-    ForeverSTUwaveDB = { layout = { v = 1, frames = { stance = { x = 30, y = -300 } } } }
-    __fire("ADDON_LOADED", "SomeOtherAddon")
-    eq(stanceX(), 0, "another addon's load does nothing")
-    __fire("ADDON_LOADED", "forever-stuwave")
-    eq(stanceX(), 30, "loaded on our own ADDON_LOADED")
+    useStore({ v = 1, frames = { stance = { x = 30, y = -300 } } })
+    eq(stanceX(), 30, "bound store applied")
     __fire("PLAYER_LOGIN")
     eq(f._points[1].x, 30, "the login pass seats the frame at the override")
     eq(f._points[1].y, -300)
 end
 
 function T.defaults_are_snapshotted_before_the_first_mutation()
-    ForeverSTUwaveDB = { layout = { v = 1, frames = { stance = { x = 10, y = 20 } } } }
-    FS.Layout.LoadOverrides()
+    local layout = useStore({ v = 1, frames = { stance = { x = 10, y = 20 } } })
     eq(FS.Layout._defaults.stance.x, 0); eq(FS.Layout._defaults.stance.y, -427)
     eq(FS.Layout._defaults.action.x, -7)
-    ForeverSTUwaveDB.layout.frames.stance = { x = 50, y = 60 }
+    layout.frames.stance = { x = 50, y = 60 }
     FS.Layout.LoadOverrides()
     eq(FS.Layout._defaults.stance.x, 0, "a second load does not snapshot an override")
     eq(stanceX(), 50)
-    ForeverSTUwaveDB.layout.frames.stance = nil
+    layout.frames.stance = nil
     FS.Layout.LoadOverrides()
     eq(stanceX(), 0, "a reload without the entry is back on the default")
 end
 
+function T.binding_another_store_restores_defaults_then_applies_its_overrides()
+    useStore({ v = 1, frames = { stance = { x = 10, y = 20 }, action = { x = 1, y = 2 } } })
+    eq(stanceX(), 10); eq(FS.Layout.action.x, 1)
+    useStore({ v = 1, frames = { stance = { x = 70, y = 80 } } })
+    eq(stanceX(), 70, "the new store's override")
+    eq(FS.Layout.action.x, -7, "the old store's override is gone")
+    useStore({})
+    eq(stanceX(), 0, "an empty store is all defaults")
+end
+
+function T.an_unbound_or_non_table_store_applies_nothing_and_refuses_writes()
+    useStore({ v = 1, frames = { stance = { x = 10, y = 20 } } })
+    FS.Layout.UseStore(nil)
+    eq(stanceX(), 0, "unbinding restores the defaults")
+    eq(FS.Layout.SetOverride("stance", 1, 2), false)
+    eq(FS.Layout.ClearOverride("stance"), false)
+    eq(FS.Layout.ClearAllOverrides(), false)
+    FS.Layout.UseStore("junk")
+    eq(FS.Layout.SetOverride("stance", 1, 2), false, "a non-table store is refused too")
+    eq(stanceX(), 0)
+    eq(#__printed, 0, "no version warning for a missing store")
+end
+
 function T.a_higher_version_is_ignored_with_one_warning_and_never_written()
     local layout = { v = 2, frames = { stance = { x = 5, y = 5 } }, future = "keep" }
-    ForeverSTUwaveDB = { layout = layout }
-    FS.Layout.LoadOverrides()
+    FS.Layout.UseStore(layout)
     FS.Layout.LoadOverrides()
     eq(stanceX(), 0, "overrides not applied")
     eq(#__printed, 1, "one warning")
-    eq(ForeverSTUwaveDB.layout, layout, "same table")
     eq(layout.v, 2); eq(layout.future, "keep")
     eq(layout.frames.stance.x, 5, "entry untouched")
     eq(FS.Layout.SetOverride("stance", 9, 9), false)
@@ -396,22 +419,18 @@ function T.a_higher_version_is_ignored_with_one_warning_and_never_written()
     eq(stanceX(), 0, "and the layout stayed on the default")
 end
 
-function T.a_missing_db_layout_is_created_at_the_current_version()
-    ForeverSTUwaveDB = {}
-    FS.Layout.LoadOverrides()
-    eq(type(ForeverSTUwaveDB.layout), "table")
-    eq(ForeverSTUwaveDB.layout.v, 1)
-    eq(type(ForeverSTUwaveDB.layout.frames), "table")
-    ForeverSTUwaveDB = { layout = "junk" }
-    FS.Layout.LoadOverrides()
-    eq(ForeverSTUwaveDB.layout.v, 1, "a non-table layout is replaced")
-    ForeverSTUwaveDB = { layout = { v = 1, frames = 7 } }
-    FS.Layout.LoadOverrides()
-    eq(type(ForeverSTUwaveDB.layout.frames), "table", "a non-table frames is replaced")
+function T.a_store_missing_its_version_or_frames_is_repaired_to_the_current_version()
+    local layout = useStore({})
+    eq(layout.v, 1)
+    eq(type(layout.frames), "table")
+    layout = useStore({ v = 1, frames = 7 })
+    eq(type(layout.frames), "table", "a non-table frames is replaced")
+    layout = useStore({ v = "x" })
+    eq(layout.v, 1, "a non-numeric version is replaced")
 end
 
 function T.garbage_entries_are_ignored()
-    ForeverSTUwaveDB = { layout = { v = 1, frames = {
+    useStore({ v = 1, frames = {
         stance = { x = "10", y = 1 },
         action = { x = 3 },
         petbar = { x = 0 / 0, y = 1 },
@@ -421,8 +440,7 @@ function T.garbage_entries_are_ignored()
         grid = 7,
         [5] = { x = 1, y = 1 },
         pcast = { x = 11, y = -22 },
-    } } }
-    FS.Layout.LoadOverrides()
+    } })
     eq(stanceX(), 0, "string x ignored")
     eq(FS.Layout.action.x, -7, "missing y ignored")
     eq(FS.Layout.petbar.x, -380, "NaN ignored")
@@ -433,69 +451,53 @@ function T.garbage_entries_are_ignored()
     eq(FS.Layout.pcast.y, -22)
 end
 
-function T.set_and_clear_override_round_trip_the_db()
-    ForeverSTUwaveDB = {}
-    FS.Layout.LoadOverrides()
+function T.set_and_clear_override_round_trip_the_store()
+    local layout = useStore()
     eq(FS.Layout.SetOverride("stance", 12.3, -400.74), true)
-    local saved = ForeverSTUwaveDB.layout.frames.stance
+    local saved = layout.frames.stance
     eq(saved.x, 12.5, "rounded to half a design px"); eq(saved.y, -400.5)
     eq(FS.Layout.stance.x, 12.5); eq(FS.Layout.stance.y, -400.5)
     eq(FS.Layout.ClearOverride("stance"), true)
-    eq(ForeverSTUwaveDB.layout.frames.stance, nil, "DB entry removed")
+    eq(layout.frames.stance, nil, "store entry removed")
     eq(stanceX(), 0); eq(FS.Layout.stance.y, -427, "default restored")
     FS.Layout.SetOverride("stance", 1, 2)
     FS.Layout.SetOverride("action", 3, 4)
     FS.Layout.ClearAllOverrides()
-    eq(next(ForeverSTUwaveDB.layout.frames), nil, "every DB entry removed")
+    eq(next(layout.frames), nil, "every store entry removed")
     eq(stanceX(), 0); eq(FS.Layout.action.x, -7); eq(FS.Layout.action.y, -540)
-    eq(ForeverSTUwaveDB.layout.v, 1)
-end
-
-function T.a_nil_saved_variable_is_created_not_thrown_on()
-    ForeverSTUwaveDB = nil
-    FS.Layout.LoadOverrides()
-    eq(type(ForeverSTUwaveDB), "table", "first run: the global is created")
-    eq(ForeverSTUwaveDB.layout.v, 1)
-    eq(type(ForeverSTUwaveDB.layout.frames), "table")
-    ForeverSTUwaveDB = nil
-    eq(FS.Layout.SetOverride("stance", 1, 2), true, "a write also creates it")
-    eq(ForeverSTUwaveDB.layout.frames.stance.x, 1)
+    eq(layout.v, 1)
 end
 
 function T.huge_override_values_are_refused_on_write_and_ignored_on_load()
-    ForeverSTUwaveDB = {}
-    FS.Layout.LoadOverrides()
+    local layout = useStore()
     for _, v in ipairs({ 9e307, -9e307, 1e300, 5121, -5121 }) do
         eq(FS.Layout.SetOverride("stance", v, 0), false, "x " .. v)
         eq(FS.Layout.SetOverride("player", 0, v), false, "y " .. v)
     end
-    eq(next(ForeverSTUwaveDB.layout.frames), nil, "nothing written")
+    eq(next(layout.frames), nil, "nothing written")
     eq(FS.Layout.SetOverride("stance", 5120, -5120), true, "the bound itself is allowed")
-    ForeverSTUwaveDB = { layout = { v = 1, frames = {
+    useStore({ v = 1, frames = {
         stance = { x = 9e307, y = 0 }, action = { x = 0, y = -1e300 }, player = { x = 6000, y = 0 },
         pcast = { x = 100, y = 200 },
-    } } }
-    FS.Layout.LoadOverrides()
+    } })
     eq(stanceX(), 0); eq(FS.Layout.action.y, -540); eq(FS.Layout.player.x, 20)
     eq(FS.Layout.pcast.x, 100, "a sane entry beside them still applies")
 end
 
 function T.set_override_rejects_unknown_ids_and_non_numbers()
-    ForeverSTUwaveDB = {}
-    FS.Layout.LoadOverrides()
+    local layout = useStore()
     eq(FS.Layout.SetOverride("nope", 1, 1), false)
     eq(FS.Layout.SetOverride("deck", 1, 1), false)
     eq(FS.Layout.SetOverride("stance", "1", 1), false)
     eq(FS.Layout.SetOverride("stance", 1, nil), false)
     eq(FS.Layout.SetOverride("stance", 0 / 0, 1), false)
     eq(FS.Layout.SetOverride("stance", math.huge, 1), false)
-    eq(next(ForeverSTUwaveDB.layout.frames), nil, "nothing written")
+    eq(next(layout.frames), nil, "nothing written")
     eq(stanceX(), 0)
 end
 
 function T.reseat_moves_every_frame_seated_with_that_id_and_runs_the_callbacks()
-    ForeverSTUwaveDB = {}
-    FS.Layout.LoadOverrides()
+    useStore()
     local a, b, other = seated(false), seated(true), CreateFrame()
     FS.Layout.Apply(other, "action")
     local why = {}
@@ -510,9 +512,20 @@ function T.reseat_moves_every_frame_seated_with_that_id_and_runs_the_callbacks()
     eq(type(FS.Layout.RunRescaleCallbacks), "function")
 end
 
+function T.reseat_all_moves_every_applied_frame_and_runs_the_callbacks_once()
+    useStore({ v = 1, frames = { stance = { x = 40, y = -100 }, action = { x = 5, y = 6 } } })
+    local a, other = seated(false), CreateFrame()
+    FS.Layout.Apply(other, "action")
+    local why = {}
+    FS.Layout.OnRescale(function() why[#why + 1] = tostring(FS.Layout.rescaleWhy) end)
+    FS.Layout.ReseatAll()
+    eq(a._points[1].x, 40); eq(other._points[1].x, 5)
+    eq(#a._points, 1, "re-seated, not stacked")
+    eq(#why, 1, "the rescale callbacks ran once for the whole pass")
+end
+
 function T.reseat_defers_a_held_frame_in_combat_and_seats_it_after_regen()
-    ForeverSTUwaveDB = {}
-    FS.Layout.LoadOverrides()
+    useStore()
     local held, free = seated(true), seated(false)
     local runs = 0
     FS.Layout.OnRescale(function() runs = runs + 1 end)
@@ -529,6 +542,20 @@ function T.reseat_defers_a_held_frame_in_combat_and_seats_it_after_regen()
     eq(#held._points, 1)
     eq(__blocked, 0)
     eq(runs, 2, "and the callbacks ran again once it was seated")
+end
+
+function T.reseat_all_defers_a_held_frame_in_combat_and_seats_it_after_regen()
+    local held, free = seated(true), seated(false)
+    __combat = true
+    useStore({ v = 1, frames = { stance = { x = 40, y = -100 } } })
+    FS.Layout.ReseatAll()
+    eq(__blocked, 0, "no protected operation was attempted")
+    eq(held._points[1].x, 0, "held frame untouched in combat")
+    eq(free._points[1].x, 40, "unprotected frame seated at once")
+    __combat = false
+    __fire("PLAYER_REGEN_ENABLED")
+    eq(held._points[1].x, 40, "held frame seated after combat")
+    eq(__blocked, 0)
 end
 
 -------------------------------------------------------------------------------
@@ -571,14 +598,13 @@ function T.scaled_entries_are_unchanged_by_the_unscaled_flag()
 end
 
 function T.an_unscaled_override_is_stored_and_applied_in_the_entrys_own_units()
-    ForeverSTUwaveDB = {}
-    FS.Layout.LoadOverrides()
+    local layout = useStore()
     UIParent:SetHeight(1200)
     local t = CreateFrame()
     FS.Layout.Apply(t, "target")
     eq(FS.Layout.SetOverride("target", 41.26, -9.8), true)
-    eq(ForeverSTUwaveDB.layout.frames.target.x, 41.5, "rounded to 0.5 like a scaled entry")
-    eq(ForeverSTUwaveDB.layout.frames.target.y, -10)
+    eq(layout.frames.target.x, 41.5, "rounded to 0.5 like a scaled entry")
+    eq(layout.frames.target.y, -10)
     FS.Layout.Reseat("target")
     eq(t._points[1].x, 41.5, "applied unscaled"); eq(t._points[1].y, -10)
     FS.Layout.ClearOverride("target")
@@ -586,8 +612,7 @@ function T.an_unscaled_override_is_stored_and_applied_in_the_entrys_own_units()
 end
 
 function T.player_and_target_move_independently()
-    ForeverSTUwaveDB = {}
-    FS.Layout.LoadOverrides()
+    useStore()
     local p, t = CreateFrame(), CreateFrame()
     FS.Layout.Apply(p, "player")
     FS.Layout.Apply(t, "target")

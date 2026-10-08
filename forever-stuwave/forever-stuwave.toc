@@ -9,6 +9,7 @@ Core/ErrorLog.lua
 Modules/Nameplates/Nameplates.lua
 Core/Theme.lua
 Core/Layout.lua
+Core/Config.lua
 Core/FrameHelpers.lua
 Core/ChevronCastBar.lua
 Core/PanelSkins.lua

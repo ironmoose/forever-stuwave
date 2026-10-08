@@ -361,8 +361,9 @@ FS.Layout.RunRescaleCallbacks = RunRescaleCallbacks
 -------------------------------------------------------------------------------
 -- Saved position overrides
 --
--- ForeverSTUwaveDB.layout = { v = 1, frames = { [id] = { x = , y = } } }, in the same
--- design px as the entries above. Overrides MUTATE FS.Layout[id].x/.y in place, because
+-- The store is the active profile's layout table, { v = 1, frames = { [id] = { x = , y = } } },
+-- bound with UseStore (Config.lua owns profiles and the SavedVariable). Offsets are in the
+-- same design px as the entries above. Overrides MUTATE FS.Layout[id].x/.y in place, because
 -- several modules read those fields directly instead of going through Apply.
 -------------------------------------------------------------------------------
 
@@ -370,6 +371,9 @@ local OVERRIDE_VERSION = 1
 local OVERRIDE_STEP = 0.5
 
 FS.Layout._defaults = FS.Layout._defaults or {}
+
+-- The bound layout table; nil refuses every write and applies nothing.
+local activeStore = nil
 
 -- Warn once when a newer addon wrote the table (OverrideStore then refuses all writes).
 local lockedWarned = false
@@ -408,17 +412,8 @@ local function RestoreDefault(id)
 end
 
 local function OverrideStore()
-    local db = ForeverSTUwaveDB
-    if db == nil then
-        db = {}
-        ForeverSTUwaveDB = db
-    end
-    if type(db) ~= "table" then return nil end
-    local saved = db.layout
-    if type(saved) ~= "table" then
-        saved = {}
-        db.layout = saved
-    end
+    local saved = activeStore
+    if type(saved) ~= "table" then return nil end
     if type(saved.v) == "number" and saved.v > OVERRIDE_VERSION then
         return nil, saved
     end
@@ -446,6 +441,13 @@ function FS.Layout.LoadOverrides()
             FS.Layout[id].x, FS.Layout[id].y = pos.x, pos.y
         end
     end
+end
+
+-- Binds the layout table overrides are read from and written to, then restores the
+-- defaults and applies its overrides. It moves no frames; follow with ReseatAll.
+function FS.Layout.UseStore(layout)
+    activeStore = type(layout) == "table" and layout or nil
+    FS.Layout.LoadOverrides()
 end
 
 local function Round(v)
@@ -481,11 +483,11 @@ function FS.Layout.ClearAllOverrides()
     return true
 end
 
--- Re-seats every frame placed with `id`. A frame held back in combat is left to the
+-- Seats every applied frame `matches` accepts. A frame held back in combat is left to the
 -- PLAYER_REGEN_ENABLED pass above, which also runs the rescale callbacks again.
-function FS.Layout.Reseat(id)
+local function ReseatMatching(matches)
     for frame, info in pairs(FS.Layout._applied) do
-        if info.id == id and frame and frame.SetPoint then
+        if matches(info) and frame and frame.SetPoint then
             if IsHeldInCombat(frame) then
                 deferredRescale = true
             else
@@ -496,15 +498,13 @@ function FS.Layout.Reseat(id)
     RunRescaleCallbacks("Reseat")
 end
 
--- Our own ADDON_LOADED fires after every file has run and before PLAYER_LOGIN, so
--- the saved globals exist and the login re-seat above already sees the overrides.
-local overrideLoader = CreateFrame("Frame")
-overrideLoader:RegisterEvent("ADDON_LOADED")
-overrideLoader:SetScript("OnEvent", function(self, _, name)
-    if name ~= addonName then return end
-    self:UnregisterEvent("ADDON_LOADED")
-    FS.Layout.LoadOverrides()
-end)
+function FS.Layout.Reseat(id)
+    ReseatMatching(function(info) return info.id == id end)
+end
+
+function FS.Layout.ReseatAll()
+    ReseatMatching(function() return true end)
+end
 
 -------------------------------------------------------------------------------
 -- Edit Mode re-seat

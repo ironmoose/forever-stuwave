@@ -1073,6 +1073,37 @@ case("report_settings_exclude_bulky_logs_and_reports", """
     assert(r.settings.petFrame.x == 1 and r.settings.degradeLog.k.msg == "m")
 """)
 
+case("report_settings_carry_only_the_active_profile_never_account_characters", """
+    local FS, BR = LoadBR()
+    FS.Config = { ActiveProfile = function() return "Raid" end }
+    ForeverSTUwaveDB = {
+        petFrame = { x = 1 }, profilesVersion = 1,
+        profileKeys = { ["Player-1-AAAA"] = "Raid", ["Player-1-BBBB"] = "Default" },
+        profileLabels = { ["Player-1-AAAA"] = "Bob-Realm", ["Player-1-BBBB"] = "Alice-Realm" },
+        profiles = {
+            Default = { settings = { secretDefault = 1 }, layout = { v = 1, frames = { stance = { x = 9, y = 9 } } } },
+            Raid = { settings = {}, layout = { v = 1, frames = { stance = { x = 5, y = 6 }, action = { x = 1, y = 2 } } } },
+        },
+    }
+    local r = BR.Build()
+    assert(r.settings.profileKeys == nil and r.settings.profileLabels == nil, "no character GUIDs or labels")
+    assert(r.settings.profiles == nil, "no profile table")
+    assert(r.settings.petFrame.x == 1 and r.settings.profilesVersion == 1)
+    local text = BR.Encode(r)
+    assert(not text:find("Player-1", 1, true), "no GUID anywhere in the report")
+    assert(not text:find("Realm", 1, true), "no label anywhere in the report")
+    assert(not text:find("Default", 1, true) and not text:find("secretDefault", 1, true), "no other profile")
+    local a = r.settings.activeProfile
+    assert(a.name == "Raid" and a.layout.frames.stance.x == 5 and a.layout.frames.action.y == 2, "active profile layout")
+    FS.Config = nil
+    assert(BR.Build().settings.activeProfile == nil, "no Config, no section")
+    FS.Config = { ActiveProfile = function() error("boom") end }
+    assert(BR.Build().settings.activeProfile == nil, "a throwing Config is survived")
+    FS.Config = { ActiveProfile = function() return "Gone" end }
+    local g = BR.Build().settings.activeProfile
+    assert(g.name == "Gone" and g.layout == nil, "a missing profile reports its name only")
+""")
+
 case("report_carries_the_chat_seat_log_in_its_own_section", """
     local FS, BR = LoadBR()
     local log, prev = {}, { { ev = "old", t = 1, pt = "TOPLEFT", x = 0, y = 0 } }
