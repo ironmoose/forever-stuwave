@@ -11,6 +11,8 @@ class modules plug into (mockups/gunsight-modules-concepts-v7-2026-10-08.html). 
     on a rescale), onShow / onHide with the area name, AreaOf, OnAreaChanged;
   * assignment: a pick, a swap, a profile switch and a direct config write move modules between areas,
     Empty draws nothing, the dot piece off hides both areas, two areas that name one family show it once;
+  * the "classSoon" fallback: shown in an area set to the Class Module only when the player's class has no class
+    module, retired by a later registration, never shown for an unreadable class token;
   * the target gate: a Target Debuffs host follows FS.TargetTakesDots, the class host does not.
 
 The mock is the Gunsight harness mock plus SetParent and RegisterUnitEvent. Theme is not loaded and
@@ -164,6 +166,74 @@ local Gs, Areas = boot({ class = "MAGE", before = function() FS.GunsightAreas.Re
 check(pal.built == 0, "no build for another class")
 check(Areas.AreaOf("class") == nil, "AreaOf class is nil for a mage")
 check(not Areas.Host("lower"):IsShown(), "the lower host draws nothing")
+""")
+
+case("a_class_with_no_module_falls_back_to_the_coming_soon_plate")(r"""
+local pal, soon = module("pal"), module("soon")
+pal.spec.classes = { "PALADIN" }
+local Gs, Areas = boot({ class = "MAGE", before = function()
+    FS.GunsightAreas.RegisterModule("class", pal.spec)
+    FS.GunsightAreas.RegisterModule("classSoon", soon.spec)
+end })
+check(Gs.GetArea("lower") == "class", "the lower area is set to the Class Module by default")
+check(soon.built == 1 and soon.host == Areas.Host("lower"), "the plate is built into the lower host")
+check(soon.frame:IsShown() and table.concat(soon.shows, ",") == "lower", "the plate is shown with onShow(lower)")
+check(soon.seated[1] and soon.seated[1].y == 632, "the plate is seated with the lower rect")
+check(pal.built == 0, "another class's module is never built")
+check(Areas.AreaOf("class") == nil, "AreaOf class stays nil: no real class module is shown")
+check(Areas.AreaOf("classSoon") == "lower", "AreaOf classSoon reports where the plate is")
+check(Areas.Host("lower"):IsShown(), "the host is shown for the plate")
+Gs.SetArea("upper", "class")
+check(Areas.AreaOf("classSoon") == "upper" and soon.shows[#soon.shows] == "upper", "the plate follows the Class Module pick")
+check(soon.hides[#soon.hides] == "lower", "and left the lower area")
+""")
+
+case("a_class_with_a_module_never_gets_the_plate")(r"""
+local cl, soon = module("cl"), module("soon")
+cl.spec.classes = { "WARLOCK" }
+local Gs, Areas = boot({ class = "WARLOCK", before = function()
+    FS.GunsightAreas.RegisterModule("classSoon", soon.spec)
+    FS.GunsightAreas.RegisterModule("class", cl.spec)
+end })
+check(cl.built == 1 and Areas.AreaOf("class") == "lower", "the real module is shown")
+check(soon.built == 0 and #soon.shows == 0 and Areas.AreaOf("classSoon") == nil, "the plate is never built or shown")
+""")
+
+case("the_plate_shows_only_while_an_area_is_set_to_the_class_module")(r"""
+local soon = module("soon")
+local Gs, Areas = boot({ class = "MAGE", before = function() FS.GunsightAreas.RegisterModule("classSoon", soon.spec) end })
+check(Areas.AreaOf("classSoon") == "lower", "shown while the lower area is the Class Module")
+Gs.SetArea("lower", "empty")
+check(Areas.AreaOf("classSoon") == nil and not soon.frame:IsShown(), "an area set to Empty hides it")
+check(soon.hides[#soon.hides] == "lower", "onHide(lower)")
+Gs.SetArea("upper", "empty")
+Gs.SetArea("lower", "debuffsH")
+check(Areas.AreaOf("classSoon") == nil, "no plate while no area is the Class Module")
+local before = #soon.shows
+Gs.SetArea("lower", "class")
+check(Areas.AreaOf("classSoon") == "lower" and #soon.shows == before + 1, "back when the pick returns")
+Gs.SetPiece("dot", false, true)
+check(Areas.AreaOf("classSoon") == nil and not soon.frame:IsShown(), "the dot piece off hides it")
+""")
+
+case("a_class_module_registered_later_retires_the_plate")(r"""
+local soon, cl = module("soon"), module("cl")
+cl.spec.classes = { "MAGE" }
+local Gs, Areas = boot({ class = "MAGE", before = function() FS.GunsightAreas.RegisterModule("classSoon", soon.spec) end })
+check(Areas.AreaOf("classSoon") == "lower", "the plate shows first")
+Areas.RegisterModule("class", cl.spec)
+check(Areas.AreaOf("class") == "lower" and cl.frame:IsShown(), "the new module takes the area")
+check(Areas.AreaOf("classSoon") == nil and not soon.frame:IsShown(), "the plate is gone without any change to the plate")
+check(soon.hides[#soon.hides] == "lower", "onHide(lower)")
+""")
+
+case("no_plate_when_the_class_cannot_be_read")(r"""
+local soon = module("soon")
+local Gs, Areas = boot({ class = nil, before = function()
+    CLASS = nil
+    FS.GunsightAreas.RegisterModule("classSoon", soon.spec)
+end })
+check(Areas.AreaOf("classSoon") == nil and soon.built == 0, "an unreadable class token draws nothing, not a wrong coming soon")
 """)
 
 case("bad_specs_are_refused")(r"""
@@ -432,6 +502,8 @@ SetScreen(1200)
 fire("UI_SCALE_CHANGED")
 local late = module("late")
 Areas.RegisterModule("debuffsV", late.spec)
+local soonLate = module("soonLate")
+Areas.RegisterModule("classSoon", soonLate.spec)
 Gs.SetArea("lower", "debuffsV")
 check(Areas.AreaOf("debuffsV") == "lower", "a module first built in combat is placed")
 for _, f in ipairs(FRAMES) do

@@ -364,3 +364,91 @@ local ok, result = pcall(Areas.RegisterModule, "class", {
     build = Build, seat = Seat, onShow = OnShow, onHide = OnHide,
 })
 if not ok or not result then LogOnce("register", "FS.GunsightAreas.RegisterModule refused the class module (" .. tostring(result) .. ")") end
+
+-------------------------------------------------------------------------------
+-- Coming soon: the fallback for a class with no class module
+-------------------------------------------------------------------------------
+-- Registered as "classSoon", which GunsightAreas shows in an area set to the Class Module whenever no spec above
+-- lists the player's class. A class that gains a module stops showing it with no change here. A small dim plate in
+-- the empty slot's language (violet wash, violet edge, muted text; mockup emptySlot) with the class caption's
+-- header style; a plain frame, so a refresh in combat is never blocked.
+
+local SOON = {
+    DX = 0, DY = 2, W = 118, H = 46,               -- the plate, image px from the area rect's corner
+    EDGE = 1, EDGE_ALPHA = 0.4, WASH_ALPHA = 0.04, -- 1 image px edge, the emptySlot violet wash
+    HDR_PX = 10, HDR_ALPHA = 0.9, HDR_DX = 7, HDR_BASE = 14,   -- the TARGET DEBUFFS header style
+    MAIN_PX = 13, MAIN_ALPHA = 0.8, MAIN_DX = 7, MAIN_BASE = 31,
+    NAME_PX = 10, NAME_ALPHA = 0.6, NAME_DX = 7, NAME_BASE = 43,
+    HEADER = "CLASS MODULE", MAIN = "COMING SOON",
+}
+
+local soonRect, soonFrame, soonBuilt           -- the corner of the last seat() rect, the plate frame
+local soonWash, soonEdge, soonHdr, soonMain, soonName, soonNamed = nil, {}, nil, nil, nil, false
+
+-- The localized class name, or nil when it cannot be read as a plain string.
+local function ClassName()
+    if type(UnitClass) ~= "function" then return nil end
+    local ok, name = pcall(UnitClass, "player")
+    if not ok or IsSecret(name) or type(name) ~= "string" or name == "" then return nil end
+    return name
+end
+
+local function SoonText(fs, px, color, alpha, dx, base)
+    Theme().ApplyMono(fs, ui(px), { color[1], color[2], color[3], alpha })
+    if soonRect then Point(fs, "LEFT", soonRect.x + dx, soonRect.y + base - M.TEXT_MID * px) end
+end
+
+local function SoonSeatAll()
+    if not soonBuilt then return end
+    local T = Theme()
+    if soonRect then
+        local x, y, w, h, e = soonRect.x + SOON.DX, soonRect.y + SOON.DY, SOON.W, SOON.H, SOON.EDGE
+        local function place(tex, tx, ty, tw, th)
+            Point(tex, "TOPLEFT", tx, ty)
+            tex:SetSize(ui(tw), ui(th))
+        end
+        place(soonWash, x, y, w, h)
+        place(soonEdge.top, x, y, w, e)
+        place(soonEdge.bottom, x, y + h - e, w, e)
+        place(soonEdge.left, x, y, e, h)
+        place(soonEdge.right, x + w - e, y, e, h)
+    end
+    SoonText(soonHdr, SOON.HDR_PX, T.COLOR_BORDER, SOON.HDR_ALPHA, SOON.HDR_DX, SOON.HDR_BASE)
+    SoonText(soonMain, SOON.MAIN_PX, T.COLOR_MUTED, SOON.MAIN_ALPHA, SOON.MAIN_DX, SOON.MAIN_BASE)
+    if soonNamed then SoonText(soonName, SOON.NAME_PX, T.COLOR_MUTED, SOON.NAME_ALPHA, SOON.NAME_DX, SOON.NAME_BASE) end
+end
+
+local function SoonBuild(host)
+    soonFrame = CreateFrame("Frame", nil, host)
+    soonFrame:SetAllPoints(host)
+    soonBuilt = false
+    local violet = Theme().COLOR_BORDER
+    soonWash = soonFrame:CreateTexture(nil, "BACKGROUND")
+    soonWash:SetColorTexture(violet[1], violet[2], violet[3], SOON.WASH_ALPHA)
+    for _, side in ipairs({ "top", "bottom", "left", "right" }) do
+        local tex = soonFrame:CreateTexture(nil, "BORDER")
+        tex:SetColorTexture(violet[1], violet[2], violet[3], SOON.EDGE_ALPHA)
+        soonEdge[side] = tex
+    end
+    soonHdr, soonMain, soonName = NewText(soonFrame), NewText(soonFrame), NewText(soonFrame)
+    local name = ClassName()
+    soonNamed = name ~= nil
+    soonBuilt = true
+    SoonSeatAll()          -- sets each font; SetText on a FontString with none throws
+    soonHdr:SetText(SOON.HEADER)
+    soonMain:SetText(SOON.MAIN)
+    if soonNamed then soonName:SetText(name) else soonName:Hide() end
+    return soonFrame
+end
+
+local function SoonSeat(r)
+    if type(r) ~= "table" or type(r.x) ~= "number" or type(r.y) ~= "number" then return end
+    soonRect = { x = r.x, y = r.y }
+    local ok, err = pcall(SoonSeatAll)
+    if not ok then LogOnce("soon_seat", err) end
+end
+
+local okSoon, resultSoon = pcall(Areas.RegisterModule, "classSoon", { build = SoonBuild, seat = SoonSeat })
+if not okSoon or not resultSoon then
+    LogOnce("register_soon", "FS.GunsightAreas.RegisterModule refused the coming soon plate (" .. tostring(resultSoon) .. ")")
+end

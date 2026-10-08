@@ -13,6 +13,8 @@ with the same API as the real one (its own harness covers it). The checks pin:
   * the combo module: five diamond pips (yellow, the lit ones bright) and the count, the label COMBO POINTS,
     the events that refresh it, a secret count reaching the number only through SetFormattedText with the pips
     hidden, a Druid outside cat form (or one whose form cannot be read) drawing nothing;
+  * the "classSoon" plate (the fallback for a class with no module): CLASS MODULE header in the TARGET DEBUFFS style,
+    COMING SOON, the class name when readable, compact and inside the area, re-seated on a rescale;
   * any other class (a Mage) draws nothing, a secret class token draws nothing, a rescale re-seats in place.
 
 The mock is strict (a widget method it does not define fails as a nil call); Layout.lua, Config.lua and
@@ -204,6 +206,7 @@ local function boot(opts)
     stubTheme_()
     FS.Theme.COLOR_TEXT_WHITE = { 1, 1, 1, 1 }
     FS.Theme.COLOR_MUTED = { 0.6157, 0.5765, 0.7686, 1 }
+    FS.Theme.COLOR_BAR_BORDER = { 0.227, 0.129, 0.408, 1 }
     -- the real ApplyMono sets the font and the colour; the stub records both the way SetTextColor would
     function FS.Theme.ApplyMono(fs, size, color)
         fs.monoSize, fs.hasFont = size, true
@@ -234,15 +237,15 @@ local function boot(opts)
 end
 
 -- Mounts the registered module the way the area host does: build(host), seat(rect), onShow(area).
-local function mount(area)
-    local spec = MODS.class
-    check(spec, "no class module registered")
+local function mount(area, id)
+    local spec = MODS[id or "class"]
+    check(spec, "no " .. (id or "class") .. " module registered")
     local host = CreateFrame("Frame", nil, FS.Gunsight.root)
     host:SetSize(1, 1)
     local frame = spec.build(host)
     check(frame ~= nil, "build(host) returned no frame")
     spec.seat(RECTS[area])
-    spec.onShow(area)
+    if spec.onShow then spec.onShow(area) end
     return spec, host, frame
 end
 
@@ -632,6 +635,105 @@ boot({ classToken = SECRET, combo = 3, state = shardState(4) })
 local spec, host = mount("lower")
 local tex, txt = drawn(host)
 check(#tex == 0 and #txt == 0, "a secret class token draws nothing")
+""")
+
+case("a_coming_soon_fallback_registers_through_the_seam_without_a_class_list")(r"""
+boot({ class = "MAGE" })
+local spec = MODS.classSoon
+check(spec, "no module registered under the id classSoon")
+for _, f in ipairs({ "build", "seat" }) do
+    check(type(spec[f]) == "function", "the fallback has no " .. f)
+end
+check(spec.classes == nil, "the fallback lists no classes: it is whatever has no class module, not a hard coded list")
+check(#DEGRADED == 0 and next(DEGRADED) == nil, "a degrade was logged: " .. tostring(next(DEGRADED)))
+""")
+
+case("coming_soon_plate_says_class_module_coming_soon_and_names_the_class")(r"""
+boot({ class = "MAGE" })
+UnitClass = function() return "Mage", "MAGE" end
+local spec, host = mount("lower", "classSoon")
+check(textOf(host, "CLASS MODULE"), "the header CLASS MODULE is not drawn")
+check(textOf(host, "COMING SOON"), "COMING SOON is not drawn")
+check(textOf(host, "Mage"), "the class name is not drawn")
+local _, txt = drawn(host)
+for _, t in ipairs(txt) do
+    check(not (t.text or ""):find("\226\128\148"), "no em dash in player text")
+end
+check(#SUBS == 0, "the plate never subscribes to the Hud")
+""")
+
+case("coming_soon_header_matches_the_target_debuffs_header_style")(r"""
+boot({ class = "MAGE" })
+UnitClass = function() return "Mage", "MAGE" end
+local spec, host = mount("lower", "classSoon")
+local hdr = textOf(host, "CLASS MODULE")
+near3(fsPx(hdr), 10, "header size matches the TARGET DEBUFFS header (10 image px)")
+colorIs(hdr.textColor, FS.Theme.COLOR_BORDER, "header is the violet")
+near3(hdr.textColor[4], 0.9, "header alpha matches the TARGET DEBUFFS header")
+local soon = textOf(host, "COMING SOON")
+colorIs(soon.textColor, FS.Theme.COLOR_MUTED, "COMING SOON is muted")
+check(soon.textColor[4] < 1, "COMING SOON is dim")
+check(fsPx(soon) > fsPx(hdr) and fsPx(soon) <= 13, "COMING SOON is the larger line but small")
+""")
+
+case("coming_soon_plate_is_compact_and_stays_inside_its_area")(r"""
+boot({ class = "MAGE" })
+UnitClass = function() return "Mage", "MAGE" end
+for _, area in ipairs({ "lower", "upper" }) do
+    local spec, host = mount(area, "classSoon")
+    local tex, txt = drawn(host)
+    check(#tex >= 5, "the plate draws a fill and four edges, got " .. #tex)
+    local r = RECTS[area]
+    local l, t, r2, b = 1e9, 1e9, -1e9, -1e9
+    for _, x in ipairs(tex) do
+        local xl, xt, xw, xh = imgRect(x)
+        l, t, r2, b = math.min(l, xl), math.min(t, xt), math.max(r2, xl + xw), math.max(b, xt + xh)
+    end
+    check(l >= r.x - 1e-2 and t >= r.y - 1e-2, area .. ": the plate starts inside the area")
+    check(r2 - l <= 130 and b - t <= 56, area .. ": the plate stays compact, got " .. (r2 - l) .. " x " .. (b - t))
+    check(r2 <= r.x + r.w and b <= r.y + r.h, area .. ": the plate ends inside the area")
+    for _, s in ipairs(txt) do
+        local sx, sy = cx(s)
+        check(sx >= l and sx <= r2 and sy >= t and sy <= b, area .. ": text '" .. tostring(s.text) .. "' sits on the plate")
+    end
+    resetWorld()
+    boot({ class = "MAGE" })
+    UnitClass = function() return "Mage", "MAGE" end
+end
+""")
+
+case("coming_soon_plate_follows_the_area_and_a_rescale_without_building_more")(r"""
+boot({ class = "MAGE", height = 1440 })
+UnitClass = function() return "Mage", "MAGE" end
+local spec, host = mount("lower", "classSoon")
+local hdr = textOf(host, "CLASS MODULE")
+local _, ly = cx(hdr)
+local frames, texes, strs = #FRAMES, #TEXTURES, #FONTSTRINGS
+SetScreen(1200)
+fire("UI_SCALE_CHANGED")
+spec.seat(RECTS.lower)
+near3(fsPx(hdr), 10, "header size in image px after a rescale")
+local _, ly2 = cx(hdr)
+near3(ly2, ly, "header stays put after a rescale")
+check(#FRAMES == frames and #TEXTURES == texes and #FONTSTRINGS == strs, "a rescale built regions")
+spec.seat(RECTS.upper)
+local _, uy = cx(hdr)
+near3(uy, ly - (MU.LOWER_Y - MU.UPPER_Y), "seat to the upper rect moves the plate")
+""")
+
+case("coming_soon_plate_omits_a_class_name_it_cannot_read")(r"""
+boot({ class = "MAGE" })
+UnitClass = function() return SECRET, "MAGE" end
+local spec, host = mount("lower", "classSoon")
+check(textOf(host, "CLASS MODULE") and textOf(host, "COMING SOON"), "the plate still reads CLASS MODULE and COMING SOON")
+local _, txt = drawn(host)
+check(#txt == 2, "a secret class name draws no third line, got " .. #txt)
+resetWorld()
+boot({ class = "MAGE" })
+UnitClass = function() return nil, "MAGE" end
+spec, host = mount("lower", "classSoon")
+_, txt = drawn(host)
+check(#txt == 2, "a missing class name draws no third line, got " .. #txt)
 """)
 
 
