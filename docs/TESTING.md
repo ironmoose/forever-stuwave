@@ -136,6 +136,7 @@ Safe in combat. Esc, the X, or `/fsconfig` again closes it; with a menu or confi
 5. Rename and Delete: Rename is off on Default. Delete lists only profiles that are neither Default nor the active one, and asks before deleting. "Copy from..." and "Reset profile" also ask first.
 6. Hover each small ? icon: the explanation shows in the addon's tooltip. No settings text mentions the word "tape".
 7. After `/reload`, the profile and every switch you set are still in place.
+8. Unit Frames, Panels: turn "Background grid" off. The perspective grid at the bottom of the screen disappears at once, in or out of combat, and the action bars stay. Turn it on and it returns. Switch to a profile with the opposite setting and it follows. With `/fsbars blizz` it stays hidden whatever the switch says; `/fsbars fs` brings it back only if the switch is on.
 
 ## Target bars and numbers: /fsconfig, Gunsight HUD page
 

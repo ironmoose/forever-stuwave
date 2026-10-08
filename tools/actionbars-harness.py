@@ -92,7 +92,7 @@ function Region:GetParent() return self._parent end
 function Region:SetParent(p) self._parent = p end
 function Region:GetFrameLevel() return self._level end
 function Region:SetFrameLevel(l) touchUnderProtected(self); self._level = l end
-function Region:SetFrameStrata() end
+function Region:SetFrameStrata(strata) self._strata = strata end
 -- The engine refuses protected operations on a protected frame in combat and
 -- (for a SecureActionButtonTemplate button) SetAttribute. Frames opt in with
 -- _protected; secure buttons are marked in CreateFrame below.
@@ -387,7 +387,7 @@ FS = {
     IsSecret = function(v) return rawequal(v, __SECRET) or (__secretFalse == true and v == false) end,
     LogDegradeOnce = function(key, msg) __degraded[key] = msg; __degradeCount = __degradeCount + 1 end,
     Layout = {
-        action = { w = 1089, h = 178 }, stance = { w = 100, h = 38 },
+        action = { w = 1089, h = 178 }, stance = { w = 100, h = 38 }, grid = { w = 2560, h = 183 },
         Apply = function(frame, id)
             local L = FS.Layout[id]
             frame:SetSize(L.w, L.h)
@@ -427,6 +427,44 @@ FS = {
     },
 }
 FS.PetFrame = { barSlot = new("Frame", "FSPetBarSlot", UIParent) }
+
+-- The Config surface ActionBars reads: defaults, per-profile settings, OnChange callbacks, and a
+-- profile switch that fires the keys whose effective value differs (Config.lua's FireDifferences).
+do
+    local defaults, callbacks = {}, {}
+    local profiles, active = { Default = {}, Other = {} }, "Default"
+    local function effective(name, key)
+        local v = profiles[name][key]
+        if v == nil then v = defaults[key] end
+        return v
+    end
+    FS.Config = {
+        RegisterDefault = function(key, value) defaults[key] = value end,
+        Get = function(key) return effective(active, key) end,
+        Set = function(key, value)
+            local old = effective(active, key)
+            profiles[active][key] = value
+            local new = effective(active, key)
+            if old ~= new then
+                for _, fn in ipairs(callbacks[key] or {}) do fn(new, old, key) end
+            end
+            return true
+        end,
+        OnChange = function(key, fn)
+            callbacks[key] = callbacks[key] or {}
+            table.insert(callbacks[key], fn)
+        end,
+        SetActiveProfile = function(name)
+            local old = active
+            active = name
+            for key, fns in pairs(callbacks) do
+                local was, now = effective(old, key), effective(active, key)
+                if was ~= now then for _, fn in ipairs(fns) do fn(now, was, key) end end
+            end
+            return true
+        end,
+    }
+end
 
 function __load(path, src)
     local fn = assert(loadstring(src, "@" .. path))
@@ -2496,6 +2534,67 @@ function T.blizz_dim_reaches_the_stock_buttons_not_only_the_containers()
     for i, b in ipairs(stockButtons("StanceBar")) do
         eq(b._mouse, false, "stance button " .. i .. " mouse")
     end
+end
+
+-- The perspective grid: FSActionGrid shows only while actionbars.grid is on AND the bars are ours.
+function T.grid_is_shown_by_default()
+    local g = _G.FSActionGrid
+    eq(g ~= nil, true, "grid frame built")
+    eq(g:IsShown(), true, "shown by default")
+    eq(FS.Config.Get("actionbars.grid"), true, "default is on")
+end
+
+function T.grid_turning_the_key_off_hides_it_and_on_shows_it_again()
+    local g = _G.FSActionGrid
+    FS.Config.Set("actionbars.grid", false)
+    eq(g:IsShown(), false, "hidden at once")
+    FS.Config.Set("actionbars.grid", true)
+    eq(g:IsShown(), true, "shown again")
+    __combat = true
+    FS.Config.Set("actionbars.grid", false)
+    eq(g:IsShown(), false, "also hidden in combat")
+    __combat = false
+end
+
+function T.grid_fsbars_blizz_still_hides_it_whatever_the_key_says()
+    local g = _G.FSActionGrid
+    SlashCmdList["FSBARS"]("blizz")
+    eq(g:IsShown(), false, "hidden by blizz")
+    FS.Config.Set("actionbars.grid", false)
+    FS.Config.Set("actionbars.grid", true)
+    eq(g:IsShown(), false, "the key being on does not beat /fsbars blizz")
+    SlashCmdList["FSBARS"]("fs")
+    eq(g:IsShown(), true, "/fsbars fs with the key on brings it back")
+end
+
+function T.grid_fsbars_fs_honours_a_key_that_is_off()
+    local g = _G.FSActionGrid
+    FS.Config.Set("actionbars.grid", false)
+    SlashCmdList["FSBARS"]("blizz")
+    SlashCmdList["FSBARS"]("fs")
+    eq(g:IsShown(), false, "fs mode with the grid off keeps it hidden")
+    FS.Config.Set("actionbars.grid", true)
+    eq(g:IsShown(), true, "and turning it on shows it")
+end
+
+function T.grid_a_profile_switch_applies_the_new_profiles_value()
+    local g = _G.FSActionGrid
+    FS.Config.SetActiveProfile("Other")
+    FS.Config.Set("actionbars.grid", false)
+    eq(g:IsShown(), false, "Other hides it")
+    FS.Config.SetActiveProfile("Default")
+    eq(g:IsShown(), true, "Default shows it again")
+    FS.Config.SetActiveProfile("Other")
+    eq(g:IsShown(), false, "switching back hides it")
+end
+
+function T.grid_look_is_unchanged()
+    local g = _G.FSActionGrid
+    eq(g._strata, "BACKGROUND", "strata unchanged")
+    eq(g._mouse, false, "still click-through")
+    eq(g:GetWidth(), UIParent:GetWidth(), "edge to edge")
+    eq(g:GetHeight(), 183, "layout height")
+    eq(g.fsTexture._texture, "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\grid.tga", "texture")
 end
 
 -- ActionBarButtonEventsFrame.frames is what the dispatcher iterates; other Blizzard systems

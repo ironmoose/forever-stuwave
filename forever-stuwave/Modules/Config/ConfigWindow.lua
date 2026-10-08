@@ -1103,6 +1103,7 @@ CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, buil
     UI.Toggle(page, { label = "Hide target frame", key = "unitFrames.hideTarget" })
     UI.Header(page, "Panels")
     UI.Toggle(page, { label = "Professions panel", key = "professions.shown" })
+    UI.Toggle(page, { label = "Background grid", key = "actionbars.grid" })
 end })
 
 local PIECE_ORDER = { "you", "tgt", "next", "dot", "shard", "prc", "buff", "party" }
