@@ -25,6 +25,12 @@ the castbars-harness stubs) and adds the real GunsightBoxes.lua. It pins:
     a long name; the idle tile is gray;
   * INTERRUPTED: CastBars' onVerdict hook shows the red tone, "INTERRUPTED" and a flicker group, the next
     write or cast clears them, Stack A bars never have a hook;
+  * target bar settings (FS.Config keys under gunsight.targetBars.*, defaults and ranges read from
+    mockups/config-window-2026-10-07.html): the defaults draw exactly the option B rails, a change applies
+    live to the heights, width and numbers and survives a rescale and a profile switch, a protected
+    frame defers the change to PLAYER_REGEN_ENABLED, and the numbers (current, current / max, percent) go only
+    to SetFormattedText with a secret health or power value, percent through the engine's UnitHealthPercent /
+    UnitPowerPercent and never through arithmetic on a secret;
   * degrade: a failed build falls back to the alpha 0 text sinks of the tape and never stops the tape; a tape
     that fails after its box built retires the box (no listener, no layout or name write afterwards).
 
@@ -53,6 +59,7 @@ ADDON = HERE.parent / "forever-stuwave"
 BOXES = Path(os.environ.get("GUNSIGHTBOXES_LUA") or ADDON / "Modules/CombatHud/GunsightBoxes.lua")
 TOC = ADDON / "forever-stuwave.toc"
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
+CONFIG_MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "config-window-2026-10-07.html"
 
 
 def _load(name: str, file: str):
@@ -71,6 +78,24 @@ def _m(pattern: str, text: str, what: str) -> re.Match:
     if not m:
         sys.exit(f"mockup: cannot find {what} (pattern {pattern!r}); the mockup changed shape")
     return m
+
+
+def mockup_config() -> dict:
+    """The target bar controls of the config window mockup: readout defaults, track positions, format options."""
+    src = CONFIG_MOCKUP.read_text(encoding="utf-8")
+
+    def slider(label: str) -> tuple[int, int]:
+        m = _m(r'<div class="lab">' + re.escape(label) + r'(?:<span class="q"[^>]*>\?</span>)?</div>'
+               r'<div class="sl" style="--p:(\d+)%"><i></i><b></b></div><span class="rd">(\d+)', src, label + " slider")
+        return int(m.group(2)), int(m.group(1))
+
+    health, resource, width = slider("Health bar height"), slider("Resource bar height"), slider("Bar width")
+    seg = _m(r'<div class="lab">Number format</div>\s*<div class="seg">(.*?)</div></div>', src, "Number format").group(1)
+    options = re.findall(r'<span class="btn( on)?"><b>([^<]*)</b></span>', seg)
+    return dict(
+        HEALTH=health[0], HEALTH_P=health[1], RESOURCE=resource[0], RESOURCE_P=resource[1], WIDTH=width[0], WIDTH_P=width[1],
+        FORMAT_OPTIONS=[o[1] for o in options], FORMAT_SELECTED=[o[1] for o in options if o[0]][0],
+    )
 
 
 def mockup_boxes() -> dict:
@@ -113,6 +138,7 @@ def mockup_boxes() -> dict:
         if need not in css:
             sys.exit(f"mockup: colour token --{need} missing")
     return dict(
+        CFG=mockup_config(),
         base=TH.GS.mockup_constants(), CHAMFER=int(chamfer), FILL=[int(fill[0]), int(fill[1]), int(fill[2]), float(fill[3])],
         FILL_A=float(fill_a), L1_SIZE=int(l1_size), PAD=int(l1_x), WMAX_PAD=int(wmax_pad), L1_Y=int(l1_y),
         DIV_Y=int(div_y), DIV_A=float(div_a), L2_SIZE=int(l2_size), L2_X=int(l2_x), L2_Y=int(l2_y),
@@ -178,12 +204,36 @@ C_CurveUtil = { CreateCurve = function()
     return c
 end }
 Enum = Enum or {}
-Enum.LuaCurveType = { Step = 1 }
+Enum.LuaCurveType = { Step = 1, Linear = 0 }
+-- The engine evaluates a curve at the hidden fraction: Step holds the last point at or below it, Linear
+-- interpolates between the points around it.
+local function evalCurve(curve, x)
+    local y
+    if curve.type == Enum.LuaCurveType.Linear then
+        local lo, hi
+        for _, p in ipairs(curve.pts) do
+            if p[1] <= x then lo = p end
+            if p[1] >= x and not hi then hi = p end
+        end
+        if lo and hi and hi[1] ~= lo[1] then return lo[2] + (hi[2] - lo[2]) * (x - lo[1]) / (hi[1] - lo[1]) end
+        return (lo or hi)[2]
+    end
+    for _, p in ipairs(curve.pts) do if p[1] <= x then y = p[2] end end
+    return y
+end
+__units.target.pwPct = 0.70
 function UnitHealthPercent(u, predicted, curve)
     if __curveRefuses then error("curve refused") end
     __curveCalls = (__curveCalls or 0) + 1
-    local y
-    for _, p in ipairs(curve.pts) do if p[1] <= __units[u].pct then y = p[2] end end
+    local y = evalCurve(curve, __units[u].pct)
+    if __curveSecret then return __SECRET end
+    return y
+end
+-- UnitPowerPercent(unit, powerType, usePredicted, curve), as FrameHelpers calls it.
+function UnitPowerPercent(u, powerType, predicted, curve)
+    if __powerCurveRefuses then error("power curve refused") end
+    __powerCurveCalls = (__powerCurveCalls or 0) + 1
+    local y = evalCurve(curve, __units[u].pwPct)
     if __curveSecret then return __SECRET end
     return y
 end
@@ -1603,6 +1653,508 @@ function T.the_player_box_has_no_bars_and_keeps_its_timer_line_at_18()
     eq(W.tgt.box.lineTwo.baseImg, MB.TGT_L2_SIZE, "the target's spell line fits from 14")
 end
 
+-- ---- the target bar settings (FS.Config gunsight.targetBars.*, the config window's controls) ------------
+
+local function S() return FS.GunsightBoxes.SETTINGS end
+local function flush() FS.GunsightBoxes.Flush() end    -- the one-shot OnUpdate a setting change schedules
+local function setting(name, value) FS.Config.Set(S()[name].key, value); flush() end
+local function hpPx(v) return v * FS.GunsightBoxes.C.BAR_PX end
+local function textOf(fs) return fs._text end
+local function numbersOn(format)
+    setting("numbers", true)
+    if format then setting("numberFormat", format) end
+end
+local function pctWidth(W, pct)       -- the rule width a width setting should give, from the name width
+    local k = K()
+    local wmax = (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * k
+    return math.min(wmax, W.tgt.box.l1:GetStringWidth() * pct / 100)
+end
+
+function T.the_settings_default_to_the_mockups_values_and_draw_todays_rails()
+    local W = world()
+    local C, s = FS.GunsightBoxes.C, S()
+    eq(s.hpHeight.default, MB.CFG.HEALTH, "the config mockup's health default"); eq(s.powerHeight.default, MB.CFG.RESOURCE)
+    eq(s.width.default, MB.CFG.WIDTH)
+    -- a slider px is half a mockup image px, so the config mockup's defaults are the option B rails (3 and 2)
+    near(hpPx(s.hpHeight.default), MB.TB_HP_H, 1e-9, "6 px renders as the 3 image px rail")
+    near(hpPx(s.powerHeight.default), MB.TB_PW_H, 1e-9, "4 px renders as the 2 image px rail")
+    eq(C.TB_GAP, MB.TB_PW_Y - MB.TB_HP_Y - MB.TB_HP_H, "the gap between the rules is the mockup's")
+    for name, def in pairs(s) do
+        if type(def) == "table" and def.key then
+            eq(FS.Config.Get(def.key), def.default, name .. " reads its default")
+            ok(not FS.Config.IsStored(def.key), name .. " pins nothing")
+        end
+    end
+    -- the config mockup's track positions are where the defaults sit in the ranges
+    for _, pair in ipairs({ { s.hpHeight, MB.CFG.HEALTH_P }, { s.powerHeight, MB.CFG.RESOURCE_P }, { s.width, MB.CFG.WIDTH_P } }) do
+        near((pair[1].default - pair[1].min) / (pair[1].max - pair[1].min) * 100, pair[2], 1e-9, pair[1].key .. " range")
+    end
+    eq(s.hpHeight.step, 1); eq(s.powerHeight.step, 1); ok(s.width.step >= 1)
+    eq(s.numbers.default, false, "no numbers until asked: approved visuals do not change")
+    eq(s.numberFormat.default, "both")
+    local fmts = FS.GunsightBoxes.NUMBER_FORMATS
+    eq(#fmts, #MB.CFG.FORMAT_OPTIONS)
+    for i, text in ipairs(MB.CFG.FORMAT_OPTIONS) do eq(fmts[i].text, text, "format label " .. i) end
+    eq(fmts[2].text, MB.CFG.FORMAT_SELECTED); eq(fmts[2].value, s.numberFormat.default, "the mockup's selected format is the default")
+    eq(C.NUM_SIZE > 0, true)
+    W.clean(); noFails()
+end
+
+function T.with_the_defaults_no_number_text_is_shown_or_written()
+    local calls = 0
+    local W = world({ beforeLoad = function()
+        local Region = getmetatable(UIParent)
+        local real = Region.SetFormattedText
+        function Region:SetFormattedText(...) calls = calls + 1; return real(self, ...) end
+    end })
+    target("Kurak")
+    allBarEvents()
+    local b = bars(W)
+    eq(b.hpText:IsShown(), false); eq(b.powerText:IsShown(), false)
+    eq(textOf(b.hpText), ""); eq(textOf(b.powerText), "")
+    eq(calls, 0, "numbers off: no SetFormattedText at all")
+    W.clean(); noFails()
+end
+
+function T.bar_heights_apply_live_and_the_power_rule_rides_under_the_health_rule()
+    local W = world()
+    local C = FS.GunsightBoxes.C
+    target("Kurak")
+    local k, b = K(), bars(W)
+    setting("hpHeight", 10)
+    for _, r in ipairs({ b.hp.green, b.hp.red }) do
+        near(r.host._h, hpPx(10) * k, 1e-6, "health rule 5 image px"); near(r.host._points.TOPLEFT.y, -C.TB_HP_Y * k, 1e-6)
+    end
+    near(b.power.host._points.TOPLEFT.y, -(C.TB_HP_Y + hpPx(10) + C.TB_GAP) * k, 1e-6, "the power rule keeps its one px gap")
+    near(b.power.host._h, MB.TB_PW_H * k, 1e-6, "its own height is untouched")
+    setting("powerHeight", 12)
+    near(b.power.host._h, hpPx(12) * k, 1e-6, "power rule 6 image px")
+    near(b.hp.green.host._h, hpPx(10) * k, 1e-6, "health untouched by the power slider")
+    setting("hpHeight", nil); setting("powerHeight", nil)
+    for _, r in ipairs({ b.hp.green, b.hp.red }) do near(r.host._h, MB.TB_HP_H * k, 1e-6, "back to 3") end
+    near(b.power.host._points.TOPLEFT.y, -MB.TB_PW_Y * k, 1e-6, "back to y = 30")
+    near(b.power.host._h, MB.TB_PW_H * k, 1e-6, "back to 2")
+    W.clean(); noFails()
+end
+
+function T.bar_size_settings_survive_a_rescale()
+    local W = world()
+    target("Kurak")
+    setting("hpHeight", 8); setting("powerHeight", 6); setting("width", 60)
+    UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
+    __fireEvent("UI_SCALE_CHANGED")
+    local k, b = K(), bars(W)
+    near(b.hp.green.host._h, hpPx(8) * k, 1e-6); near(b.power.host._h, hpPx(6) * k, 1e-6)
+    near(b.hp.green.host._w, pctWidth(W, 60), 1e-6, "width follows the setting after a rescale")
+    W.clean(); noFails()
+end
+
+function T.bar_width_is_a_percent_of_the_name_width_clamped_to_the_text_width()
+    local W = world()
+    target("Kurak")
+    local b = bars(W)
+    setting("width", 50)
+    near(b.hp.green.host._w, pctWidth(W, 50), 1e-6, "half the name width"); near(b.power.host._w, pctWidth(W, 50), 1e-6, "both rules")
+    near(b.hp.red.host._w, pctWidth(W, 50), 1e-6, "and the red twin")
+    setting("width", 150)
+    near(b.hp.green.host._w, pctWidth(W, 150), 1e-6)
+    target("Archmage Antonidas the Great")
+    local wmax = (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * K()
+    near(b.hp.green.host._w, wmax, 1e-6, "never wider than the box text")
+    secretUnit(); __fireEvent("PLAYER_TARGET_CHANGED")
+    setting("width", 50)
+    near(b.hp.green.host._w, wmax * 0.5, 1e-6, "a secret name has the full text width, so half of it")
+    setting("width", 100)
+    near(b.hp.green.host._w, wmax, 1e-6)
+    W.clean(); noFails("a secret name was measured")
+end
+
+function T.junk_and_out_of_range_settings_read_as_the_default_or_the_nearest_end()
+    local W = world()
+    target("Kurak")
+    local k, b, s = K(), bars(W), S()
+    setting("hpHeight", "tall")
+    near(b.hp.green.host._h, MB.TB_HP_H * k, 1e-6, "a string reads as the default")
+    setting("hpHeight", 99)
+    near(b.hp.green.host._h, hpPx(s.hpHeight.max) * k, 1e-6, "clamped to the maximum")
+    setting("hpHeight", -4)
+    near(b.hp.green.host._h, hpPx(s.hpHeight.min) * k, 1e-6, "clamped to the minimum")
+    setting("width", 0 / 0)
+    near(b.hp.green.host._w, pctWidth(W, s.width.default), 1e-6, "NaN reads as the default")
+    setting("numbers", "yes")
+    eq(b.hpText:IsShown(), false, "only a real true turns numbers on")
+    setting("numbers", true); setting("numberFormat", "bogus")
+    eq(textOf(b.hpText), "62 / 100", "an unknown format reads as the default")
+    W.clean(); noFails()
+end
+
+function T.numbers_sit_outside_the_box_at_its_outer_end_one_line_under_the_other()
+    local W = world()
+    local C = FS.GunsightBoxes.C
+    target("Kurak")
+    numbersOn()
+    local k, b, box = K(), bars(W), W.tgt.box
+    eq(b.hpText:GetParent(), b.frame, "numbers belong to the bars frame (they go with the target)")
+    local hp, pw = b.hpText._points.BOTTOMLEFT, b.powerText._points.BOTTOMLEFT
+    eq(hp.rel, box.frame); eq(hp.relPoint, "TOPRIGHT"); near(hp.x, C.NUM_GAP * k, 1e-6, "past the outer edge")
+    eq(pw.rel, box.frame); eq(pw.relPoint, "TOPRIGHT"); near(pw.x, C.NUM_GAP * k, 1e-6)
+    local hpBase = C.TB_HP_Y + hpPx(S().hpHeight.default)
+    near(hp.y, -(hpBase + C.NUM_SIZE * C.DESCENT) * k, 1e-6, "health number on the health rule's bottom edge")
+    near(pw.y, -(hpBase + C.NUM_SIZE + C.NUM_LINE + C.NUM_SIZE * C.DESCENT) * k, 1e-6, "power number one line below")
+    eq(b.hpText._fontSize, fontFor(C.NUM_SIZE)); eq(b.powerText._fontSize, fontFor(C.NUM_SIZE))
+    eq(b.hpText._justifyH, "LEFT")
+    setting("hpHeight", 12)
+    local hp2 = b.hpText._points.BOTTOMLEFT
+    near(hp2.y, -(C.TB_HP_Y + hpPx(12) + C.NUM_SIZE * C.DESCENT) * k, 1e-6, "the numbers follow a taller health rule")
+    UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
+    __fireEvent("UI_SCALE_CHANGED")
+    eq(b.hpText._fontSize, fontFor(C.NUM_SIZE), "and a rescale resizes the type")
+    near(b.hpText._points.BOTTOMLEFT.x, C.NUM_GAP * K(), 1e-6)
+    W.clean(); noFails()
+end
+
+function T.the_three_formats_write_current_current_over_max_and_percent()
+    local W = world()
+    target("Kurak")
+    local b = bars(W)
+    numbersOn()
+    eq(b.hpText:IsShown(), true); eq(b.powerText:IsShown(), true)
+    eq(textOf(b.hpText), "62 / 100", "current / max is the default"); eq(textOf(b.powerText), "70 / 100")
+    setting("numberFormat", "current")
+    eq(textOf(b.hpText), "62"); eq(textOf(b.powerText), "70")
+    setting("numberFormat", "percent")
+    eq(textOf(b.hpText), "62%", "percent comes from the engine's UnitHealthPercent")
+    eq(textOf(b.powerText), "70%", "and UnitPowerPercent")
+    setting("numberFormat", "both")
+    eq(textOf(b.hpText), "62 / 100")
+    W.clean(); noFails()
+end
+
+function T.numbers_follow_health_and_power_events_and_each_format()
+    local W = world()
+    target("Kurak")
+    local b, u = bars(W), __units.target
+    numbersOn("both")
+    u.hp = 41; fireBar("UNIT_HEALTH"); eq(textOf(b.hpText), "41 / 100")
+    u.hpMax = 120; fireBar("UNIT_MAXHEALTH"); eq(textOf(b.hpText), "41 / 120")
+    u.pw = 55; fireBar("UNIT_POWER_UPDATE"); eq(textOf(b.powerText), "55 / 100")
+    u.pwMax = 80; fireBar("UNIT_MAXPOWER"); eq(textOf(b.powerText), "55 / 80")
+    setting("numberFormat", "percent")
+    u.pct = 0.41; u.pwPct = 0.55
+    fireBar("UNIT_HEALTH", "UNIT_POWER_UPDATE")
+    eq(textOf(b.hpText), "41%"); eq(textOf(b.powerText), "55%")
+    W.clean(); noFails()
+end
+
+function T.numbers_hide_with_the_target_and_the_power_number_hides_with_the_power_rule()
+    local W = world()
+    target("Kurak")
+    local b, u = bars(W), __units.target
+    numbersOn()
+    eq(b.powerText:IsShown(), true)
+    u.pwMax = 0; fireBar("UNIT_MAXPOWER")
+    eq(b.powerText:IsShown(), false, "no power, no power number"); eq(b.hpText:IsShown(), true)
+    u.pwMax = 100; fireBar("UNIT_MAXPOWER")
+    eq(b.powerText:IsShown(), true)
+    u.exists = false; __fireEvent("PLAYER_TARGET_CHANGED")
+    eq(b.hpText:IsVisible(), false, "the numbers go with the bars when the target goes")
+    W.clean(); noFails()
+end
+
+function T.turning_numbers_off_clears_and_stops_the_writes()
+    local calls = 0
+    local W = world({ beforeLoad = function()
+        local Region = getmetatable(UIParent)
+        local real = Region.SetFormattedText
+        function Region:SetFormattedText(...) calls = calls + 1; return real(self, ...) end
+    end })
+    target("Kurak")
+    local b = bars(W)
+    numbersOn()
+    ok(calls > 0, "numbers on writes")
+    setting("numbers", false)
+    eq(b.hpText:IsShown(), false); eq(b.powerText:IsShown(), false)
+    eq(textOf(b.hpText), ""); eq(textOf(b.powerText), "")
+    calls = 0
+    allBarEvents()
+    eq(calls, 0, "numbers off again: nothing written")
+    W.clean(); noFails()
+end
+
+function T.secret_health_and_power_numbers_reach_only_formatted_text_sinks()
+    local W = world()
+    target("Kurak")
+    local b, u = bars(W), __units.target
+    u.hp, u.hpMax, u.pw, u.pwMax = __SECRET, __SECRET, __SECRET, __SECRET
+    numbersOn("both")
+    for _, format in ipairs({ "both", "current" }) do
+        setting("numberFormat", format)
+        allBarEvents()
+        fireBar("PLAYER_TARGET_CHANGED")
+        eq(b.hpText._secretText, true, format .. ": the secret health went to SetFormattedText untouched")
+        eq(b.powerText._secretText, true, format .. ": and the secret power")
+    end
+    -- percent with a plain percent from the engine: the secret values are never touched at all
+    setting("numberFormat", "percent")
+    allBarEvents()
+    eq(textOf(b.hpText), "62%", "the percent is the engine's, not computed from the secret health")
+    eq(textOf(b.powerText), "70%")
+    -- percent: the engine hands back a secret percent, which also only reaches the setter
+    __curveSecret = true
+    allBarEvents()
+    eq(b.hpText._secretText, true, "a secret percent goes straight to SetFormattedText")
+    eq(b.powerText._secretText, true)
+    __curveSecret = false
+    eq(countKey("gunsightboxes_target_numbers"), 0, "nothing was refused")
+    W.clean(); noFails("a secret operation was swallowed by a pcall")
+end
+
+function T.percent_never_divides_a_secret_and_falls_back_to_a_blank_when_the_engine_refuses()
+    local W = world()
+    target("Kurak")
+    local b, u = bars(W), __units.target
+    u.hp, u.hpMax, u.pw, u.pwMax = __SECRET, __SECRET, __SECRET, __SECRET
+    numbersOn("percent")
+    local healthCalls = 0
+    local real = UnitHealthPercent
+    UnitHealthPercent = function(...) healthCalls = healthCalls + 1; return real(...) end
+    __curveRefuses, __powerCurveRefuses = true, true
+    allBarEvents()
+    eq(textOf(b.hpText), "", "no percent from a secret without the engine: blank, not arithmetic")
+    eq(textOf(b.powerText), "")
+    eq(countKey("gunsightboxes_target_health_percent"), 1, "the health refusal is logged once")
+    eq(countKey("gunsightboxes_target_power_percent"), 1, "and the power one")
+    local after = healthCalls
+    allBarEvents()
+    eq(healthCalls, after, "every refused path is latched: no retry")
+    eq(countKey("gunsightboxes_target_health_percent"), 1, "and not logged again")
+    __pcallFails = {}
+    -- with plain values the same refusal falls back to a plain compare
+    u.hp, u.hpMax, u.pw, u.pwMax = 30, 120, 25, 50
+    allBarEvents()
+    eq(textOf(b.hpText), "25%", "30 / 120"); eq(textOf(b.powerText), "50%", "25 / 50")
+    UnitHealthPercent = real
+    W.clean()
+end
+
+function T.percent_without_the_percent_apis_uses_a_plain_compare_or_stays_blank()
+    local W = world({ beforeLoad = function() UnitHealthPercent, UnitPowerPercent = nil, nil end })
+    target("Kurak")
+    local b, u = bars(W), __units.target
+    numbersOn("percent")
+    eq(textOf(b.hpText), "62%", "62 / 100 in plain numbers"); eq(textOf(b.powerText), "70%")
+    u.hp, u.pw = __SECRET, __SECRET
+    allBarEvents()
+    eq(textOf(b.hpText), "", "a secret cannot be divided: blank"); eq(textOf(b.powerText), "")
+    W.clean(); noFails()
+end
+
+function T.percent_uses_the_clients_scale_to_100_curve_when_it_has_one()
+    local W = world({ beforeLoad = function() CurveConstants = { ScaleTo100 = { pts = { { 0, 0 }, { 1, 100 } }, type = Enum.LuaCurveType.Linear } } end })
+    local before = #__curves
+    target("Kurak")
+    numbersOn("percent")
+    eq(textOf(bars(W).hpText), "62%")
+    eq(#__curves, before, "no curve of ours was built")
+    CurveConstants = nil
+end
+
+function T.the_percent_curve_is_built_only_when_percent_is_used_and_only_once()
+    local W = world()
+    target("Kurak")
+    eq(#__curves, 3, "the three Step curves of the rails and nothing else")
+    numbersOn("both")
+    eq(#__curves, 3, "current / max builds nothing")
+    setting("numberFormat", "percent")
+    eq(#__curves, 4, "percent builds one Linear curve")
+    eq(__curves[4].type, Enum.LuaCurveType.Linear)
+    allBarEvents(); setting("numberFormat", "current"); setting("numberFormat", "percent")
+    eq(#__curves, 4, "and reuses it")
+    W.clean(); noFails()
+end
+
+function T.a_refused_number_write_latches_the_numbers_off_and_logs_once()
+    local W = world()
+    target("Kurak")
+    local b = bars(W)
+    local calls = 0
+    local Region = getmetatable(UIParent)
+    local real = Region.SetFormattedText
+    function Region:SetFormattedText(...) calls = calls + 1; error("secret refused") end
+    numbersOn("both")
+    eq(countKey("gunsightboxes_target_numbers"), 1, "logged once")
+    eq(textOf(b.hpText), "", "cleared")
+    local after = calls
+    allBarEvents(); setting("numberFormat", "current")
+    eq(calls, after, "not retried after the latch")
+    eq(countKey("gunsightboxes_target_numbers"), 1)
+    Region.SetFormattedText = real
+    eq(W.tgt.box.retired, nil, "the box is alive")
+    eq(b.frame:IsVisible(), true)
+    __pcallFails = {}
+    W.clean()
+end
+
+function T.non_number_values_blank_the_text_instead_of_throwing()
+    local W = world()
+    target("Kurak")
+    local b, u = bars(W), __units.target
+    numbersOn("both")
+    u.hp, u.hpMax = nil, nil
+    fireBar("UNIT_HEALTH")
+    eq(textOf(b.hpText), "", "nil health: blank")
+    eq(countKey("gunsightboxes_target_numbers"), 0, "and nothing latched")
+    u.hp, u.hpMax = 62, 100
+    fireBar("UNIT_HEALTH")
+    eq(textOf(b.hpText), "62 / 100")
+    W.clean(); noFails()
+end
+
+function T.a_nil_percent_blanks_one_tick_without_latching_and_the_next_valid_one_renders()
+    local W = world()
+    target("Kurak")
+    local b, u = bars(W), __units.target
+    numbersOn("percent")
+    eq(textOf(b.hpText), "62%"); eq(textOf(b.powerText), "70%")
+    local real, realPower = UnitHealthPercent, UnitPowerPercent
+    local returnNil = true
+    UnitHealthPercent = function(unit, predicted, curve)
+        if returnNil and curve.type == Enum.LuaCurveType.Linear then return nil end
+        return real(unit, predicted, curve)
+    end
+    UnitPowerPercent = function(unit, ptype, predicted, curve)
+        if returnNil and curve.type == Enum.LuaCurveType.Linear then return nil end
+        return realPower(unit, ptype, predicted, curve)
+    end
+    allBarEvents()
+    eq(textOf(b.hpText), "", "no percent this tick: blank"); eq(textOf(b.powerText), "")
+    returnNil = false
+    u.pct, u.pwPct = 0.5, 0.25
+    allBarEvents()
+    eq(textOf(b.hpText), "50%", "the next valid percent renders: nothing was latched")
+    eq(textOf(b.powerText), "25%")
+    eq(countKey("gunsightboxes_target_health_percent"), 0, "nothing logged"); eq(countKey("gunsightboxes_target_power_percent"), 0)
+    UnitHealthPercent, UnitPowerPercent = real, realPower
+    W.clean(); noFails()
+end
+
+function T.a_profile_switch_applies_the_settings_live()
+    local W = world({ beforeLoad = function() UnitGUID = function() return "Player-1-AAAA" end end })
+    target("Kurak")
+    local k, b = K(), bars(W)
+    FS.Config.NewProfile("Raid")
+    ok(FS.Config.SetActiveProfile("Raid"), "the character is known")
+    flush()
+    setting("hpHeight", 10); setting("numbers", true)
+    near(b.hp.green.host._h, hpPx(10) * k, 1e-6); eq(b.hpText:IsShown(), true)
+    FS.Config.SetActiveProfile("Default")
+    flush()
+    near(b.hp.green.host._h, MB.TB_HP_H * k, 1e-6, "Default still has the rails as designed")
+    eq(b.hpText:IsShown(), false)
+    FS.Config.SetActiveProfile("Raid")
+    flush()
+    near(b.hp.green.host._h, hpPx(10) * k, 1e-6); eq(textOf(b.hpText), "62 / 100")
+    W.clean(); noFails()
+end
+
+function T.one_profile_switch_costs_one_seat_and_one_refresh_per_box()
+    local W = world({ beforeLoad = function() UnitGUID = function() return "Player-1-AAAA" end end })
+    target("Kurak")
+    local k, b = K(), bars(W)
+    FS.Config.NewProfile("Raid")
+    ok(FS.Config.SetActiveProfile("Raid"), "the character is known")
+    flush()
+    for _, name in ipairs({ "hpHeight", "powerHeight", "width", "numbers", "numberFormat" }) do
+        FS.Config.Set(S()[name].key, ({ hpHeight = 10, powerHeight = 8, width = 70, numbers = true, numberFormat = "percent" })[name])
+    end
+    flush()
+    FS.Config.SetActiveProfile("Default")
+    flush()
+    local seats, reads = 0, 0
+    local realHealth = UnitHealth
+    local host = b.hp.green.host
+    local realClear = host.ClearAllPoints
+    host.ClearAllPoints = function(self, ...) seats = seats + 1; return realClear(self, ...) end
+    UnitHealth = function(...) reads = reads + 1; return realHealth(...) end
+    FS.Config.SetActiveProfile("Raid")
+    local before, readsBefore = seats, reads
+    eq(before, 1, "inside the callbacks only Layout's own rescale seat ran: the five keys applied nothing")
+    eq(readsBefore, 0, "and read nothing")
+    flush()
+    eq(seats - before, 1, "five keys changed: one Seat for the box")
+    eq(reads - readsBefore, 1, "and one Refresh (one health read)")
+    near(host._h, hpPx(10) * k, 1e-6); eq(textOf(b.hpText), "62%")
+    flush()
+    eq(seats - before, 1, "a second flush has nothing left to apply")
+    UnitHealth = realHealth
+    W.clean(); noFails()
+end
+
+function T.plain_frames_take_a_change_in_combat_at_once()
+    local W = world()
+    target("Kurak")
+    InCombatLockdown = function() return true end
+    setting("hpHeight", 10)
+    near(bars(W).hp.green.host._h, hpPx(10) * K(), 1e-6, "nothing here is protected")
+    InCombatLockdown = function() return false end
+end
+
+function T.a_protected_bar_frame_defers_the_change_to_the_end_of_combat()
+    local W = world()
+    target("Kurak")
+    local k, b = K(), bars(W)
+    getmetatable(UIParent).IsProtected = function(self) return self._prot == true end
+    b.frame._prot = true
+    local inCombat = true
+    InCombatLockdown = function() return inCombat end
+    local sizes = 0
+    local Region = getmetatable(UIParent)
+    local realSize = Region.SetSize
+    function Region:SetSize(w, h) sizes = sizes + 1; return realSize(self, w, h) end
+    setting("hpHeight", 10); setting("width", 60); setting("numbers", true)
+    eq(sizes, 0, "no geometry call while locked down")
+    near(b.hp.green.host._h, MB.TB_HP_H * k, 1e-6, "the rails wait")
+    eq(b.hpText:IsShown(), false, "and so do the numbers")
+    setting("hpHeight", 8)
+    inCombat = false
+    __fireEvent("PLAYER_REGEN_ENABLED")
+    near(b.hp.green.host._h, hpPx(8) * k, 1e-6, "applied once, with the latest value")
+    eq(b.hpText:IsShown(), true)
+    near(b.hp.green.host._w, pctWidth(W, 60), 1e-6)
+    local after = sizes
+    __fireEvent("PLAYER_REGEN_ENABLED")
+    eq(sizes, after, "not replayed twice")
+    Region.SetSize = realSize
+    InCombatLockdown = function() return false end
+    W.clean(); noFails()
+end
+
+function T.a_retired_box_ignores_setting_changes_and_the_player_box_has_nothing_to_change()
+    local W = world()
+    target("Kurak")
+    local k, box = K(), W.tgt.box
+    FS.GunsightBoxes.Retire(box)
+    setting("hpHeight", 10); setting("numbers", true)
+    near(box.bars.hp.green.host._h, MB.TB_HP_H * k, 1e-6, "a retired box is left alone")
+    eq(box.bars.hpText:IsShown(), false)
+    eq(W.you.box.bars, nil, "the player box has no bars to size")
+    W.clean(); noFails()
+end
+
+function T.the_settings_code_adds_no_per_event_allocation_path_for_defaults()
+    -- The hot path for a default profile: no Config read per UNIT_HEALTH, no text. Settings are cached by
+    -- the change callbacks, so only Seat (name events, rescale) reads them.
+    local W = world()
+    target("Kurak")
+    local gets = 0
+    local real = FS.Config.Get
+    FS.Config.Get = function(...) gets = gets + 1; return real(...) end
+    allBarEvents()
+    eq(gets, 0, "UNIT_* events read no setting")
+    FS.Config.Get = real
+    W.clean(); noFails()
+end
+
 __checks = T
 """
 
@@ -1622,7 +2174,9 @@ def static_checks() -> list[tuple[str, str | None]]:
     code = "\n".join(ln.split("--", 1)[0] for ln in src.splitlines())      # comments may name them
     reads = [n for n in ("UnitCastingInfo", "UnitChannelInfo", "UnitCastingDuration", "UnitChannelDuration") if n in code]
     out.append(("boxes_never_read_cast_data", None if not reads else f"GunsightBoxes.lua must leave cast data to CastBars.lua, it mentions {reads}"))
-    out.append(("boxes_have_no_onupdate", None if "OnUpdate" not in code else "GunsightBoxes.lua must not install an OnUpdate"))
+    out.append(("boxes_install_no_onupdate_but_the_one_shot_flusher",
+                None if len(re.findall(r"OnUpdate", code)) <= 2 else
+                "GunsightBoxes.lua may only set and clear the one-shot setting flusher's OnUpdate"))
     out.append(("boxes_measure_text_in_three_places_only",
                 None if len(re.findall(r"GetStringWidth", code)) <= 4 else
                 "GetStringWidth appears outside FitLine (plain text only), the name sink's forward for CastBars and the bar width measure"))

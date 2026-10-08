@@ -20,10 +20,14 @@ so opens its window. These checks pin that:
     overrides OnClick, not the client's dispatch);
   * /fsprof in combat prints that it applies after combat and applies then (latest request wins);
   * the saved hidden state is still restored at login and not re-applied by a later loading screen;
+  * visibility is the profile setting professions.shown (default true): a change from /fsprof, the config
+    window or a profile switch takes the same combat deferral, the legacy ForeverSTUwaveDB.professionsHidden
+    migrates once into the active profile without overwriting a pinned value and is then cleared, and a
+    read-only Config refuses the toggle;
   * the tooltip names the profession and adds "Click to open" only on a clickable row.
 
-Professions.lua is the real file; the frames are a recording mock that refuses protected calls in
-combat the way the client does, and Theme / PanelSkins are stubs. This is NOT the real client.
+Professions.lua and Config.lua are the real files; the frames are a recording mock that refuses protected
+calls in combat the way the client does, and Theme / PanelSkins are stubs. This is NOT the real client.
 
     python3 tools/professions-harness.py
 
@@ -44,6 +48,7 @@ except ImportError:
 ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
 # PROFESSIONS_LUA points the harness at a mutant copy (a check must fail on a broken one).
 PROFESSIONS_FILE = Path(os.environ.get("PROFESSIONS_LUA", ADDON / "Modules/Skins/Professions.lua"))
+CONFIG_FILE = ADDON / "Core/Config.lua"
 
 MOCK = r"""
 __combat = false
@@ -111,6 +116,7 @@ end
 function Frame.IsShown(self) return self._shown end
 
 function InCombatLockdown() return __combat end
+function UnitGUID() return "Player-1-AAAA" end
 function print(...)
     local parts = {}
     for i = 1, select("#", ...) do parts[i] = tostring((select(i, ...))) end
@@ -148,9 +154,9 @@ UIParent = newFrame("Frame", "UIParent")
 """
 
 SESSION = r"""
-function(src, opts)
+function(src, opts, configSrc)
     opts = opts or {}
-    __frames, __printed, __violations, __profCalls = {}, {}, {}, 0
+    __frames, __printed, __violations, __profCalls, __errors = {}, {}, {}, 0, {}
     __frames[1] = UIParent
     ForeverSTUwaveProfessions = nil
     __combat = opts.combatAtLoad == true
@@ -167,7 +173,7 @@ function(src, opts)
     FS.Layout = { Apply = function(frame)
         __layoutApplied = __layoutApplied + 1
         if __combat then __violations[#__violations + 1] = "Layout.Apply" end
-    end }
+    end, ForwardError = function(err) __errors[#__errors + 1] = tostring(err) end }
     FS.PanelSkins = { RegisterRecon = function() end }
     local Theme = {}
     for _, name in ipairs({ "ApplyMono", "AddOuterGlow", "AddRoundedFill", "AddGradientBorder" }) do
@@ -179,7 +185,9 @@ function(src, opts)
     local color = { 1, 1, 1, 1 }
     Theme.COLOR_POWER, Theme.COLOR_TEXT_WHITE, Theme.COLOR_BG = color, color, color
     FS.Theme = Theme
+    assert(load(configSrc, "@Config.lua"))("forever-stuwave", FS)
     assert(load(src, "@Professions.lua"))("forever-stuwave", FS)
+    Fire("ADDON_LOADED", "forever-stuwave")
 end
 """
 
@@ -192,7 +200,7 @@ end
 local ALL = { "Alchemy", "Mining", "Herbalism", "Skinning", "Fishing", "Cooking" }
 
 local function boot(opts)
-    __session(__professionsSrc, opts)
+    __session(__professionsSrc, opts, __configSrc)
     Fire("PLAYER_LOGIN")
 end
 local function panel() return ForeverSTUwaveProfessions end
@@ -321,7 +329,7 @@ function T.fsprof_in_combat_defers_and_prints_it()
     eq(lastPrinted():find("after combat", 1, true) ~= nil, true, lastPrinted())
     eq(panel()._shown, true, "panel untouched in combat")
     eq(#__violations, 0, table.concat(__violations, ","))
-    eq(ForeverSTUwaveDB.professionsHidden, true, "the choice is saved right away")
+    eq(FS.Config.Get("professions.shown"), false, "the choice is saved right away, through Config")
     endCombat()
     eq(panel()._shown, false, "applied after combat")
     eq(#__violations, 0, table.concat(__violations, ","))
@@ -334,7 +342,7 @@ function T.fsprof_twice_in_combat_nets_out_to_no_change()
     slash()
     endCombat()
     eq(panel()._shown, true)
-    eq(ForeverSTUwaveDB.professionsHidden, false)
+    eq(FS.Config.Get("professions.shown"), true)
 end
 
 function T.fsprof_in_combat_shows_a_hidden_panel_after_combat()
@@ -457,6 +465,157 @@ function T.entering_world_in_combat_parks_one_setup_for_the_regen()
     eq(__profCalls, 1, "and is not replayed again")
 end
 
+-- ---- visibility is the profile setting professions.shown --------------------------------------------
+
+local KEY = "professions.shown"
+local function stored() return ForeverSTUwaveDB.profiles.Default.settings[KEY] end
+
+function T.visibility_is_a_profile_setting_that_defaults_to_shown()
+    boot({ profs = { "Alchemy" } })
+    eq(FS.Config.Get(KEY), true, "default true")
+    eq(FS.Config.IsStored(KEY), false, "the default pins nothing")
+    eq(panel()._shown, true)
+end
+
+function T.a_config_change_shows_and_hides_the_panel()
+    boot({ profs = { "Alchemy" } })
+    FS.Config.Set(KEY, false)
+    eq(panel()._shown, false, "hidden through Config")
+    FS.Config.Set(KEY, true)
+    eq(panel()._shown, true, "shown through Config")
+    eq(#__violations, 0, table.concat(__violations, ","))
+end
+
+function T.a_config_change_in_combat_takes_the_same_deferral_as_fsprof()
+    boot({ profs = { "Alchemy" } })
+    __combat = true
+    FS.Config.Set(KEY, false)
+    eq(panel()._shown, true, "panel untouched in combat")
+    eq(#__violations, 0, table.concat(__violations, ","))
+    endCombat()
+    eq(panel()._shown, false, "applied after combat")
+    eq(#__violations, 0, table.concat(__violations, ","))
+end
+
+function T.config_changes_in_combat_net_out_and_the_latest_wins()
+    boot({ profs = { "Alchemy" } })
+    __combat = true
+    FS.Config.Set(KEY, false)
+    FS.Config.Set(KEY, true)
+    endCombat()
+    eq(panel()._shown, true)
+    __combat = true
+    FS.Config.Set(KEY, false)
+    slash()                      -- /fsprof reads the parked request: it was going to hide, so this shows
+    eq(FS.Config.Get(KEY), true)
+    endCombat()
+    eq(panel()._shown, true)
+    eq(#__violations, 0, table.concat(__violations, ","))
+end
+
+function T.a_profile_switch_moves_the_panel_and_defers_in_combat()
+    boot({ profs = { "Alchemy" } })
+    FS.Config.NewProfile("Raid")
+    FS.Config.SetActiveProfile("Raid")
+    FS.Config.Set(KEY, false)
+    eq(panel()._shown, false)
+    __combat = true
+    FS.Config.SetActiveProfile("Default")
+    eq(panel()._shown, false, "no Show in combat")
+    eq(#__violations, 0, table.concat(__violations, ","))
+    endCombat()
+    eq(panel()._shown, true, "Default shows it after combat")
+    FS.Config.SetActiveProfile("Raid")
+    eq(panel()._shown, false, "out of combat the switch applies at once")
+end
+
+function T.fsprof_writes_through_config_and_leaves_the_legacy_field_alone()
+    boot({ profs = { "Alchemy" } })
+    slash()
+    eq(FS.Config.Get(KEY), false)
+    eq(stored(), false, "pinned in the active profile")
+    eq(ForeverSTUwaveDB.professionsHidden, nil, "nothing written to the legacy field")
+    slash()
+    eq(FS.Config.Get(KEY), true)
+    eq(stored(), nil, "back to the default pins nothing")
+end
+
+function T.fsprof_follows_a_config_change_made_elsewhere()
+    boot({ profs = { "Alchemy" } })
+    FS.Config.Set(KEY, false)
+    slash()
+    eq(panel()._shown, true, "the toggle starts from the live state")
+    eq(FS.Config.Get(KEY), true)
+end
+
+function T.a_read_only_config_refuses_the_toggle_and_says_so()
+    boot({ db = { profilesVersion = 99 }, profs = { "Alchemy" } })
+    eq(FS.Config.IsReadOnly(), true)
+    slash()
+    eq(panel()._shown, true, "the panel did not change")
+    eq(lastPrinted():lower():find("read-only", 1, true) ~= nil, true, lastPrinted())
+end
+
+function T.the_legacy_hidden_flag_migrates_into_the_active_profile_once()
+    boot({ db = { professionsHidden = true }, profs = { "Alchemy" } })
+    eq(FS.Config.Get(KEY), false)
+    eq(stored(), false, "pinned in Default")
+    eq(ForeverSTUwaveDB.professionsHidden, nil, "the legacy field is cleared")
+    eq(panel()._shown, false)
+    -- the player turns it back on; the next load must not import anything again
+    FS.Config.Set(KEY, true)
+    boot({ db = ForeverSTUwaveDB, profs = { "Alchemy" } })
+    eq(FS.Config.Get(KEY), true, "no second migration")
+    eq(panel()._shown, true)
+end
+
+function T.a_legacy_shown_flag_migrates_to_the_default_and_is_cleared()
+    boot({ db = { professionsHidden = false }, profs = { "Alchemy" } })
+    eq(FS.Config.Get(KEY), true)
+    eq(stored(), nil, "shown is the default, nothing is pinned")
+    eq(ForeverSTUwaveDB.professionsHidden, nil)
+end
+
+function T.migration_never_overwrites_a_value_the_profile_already_pins()
+    local db = {
+        professionsHidden = false,
+        profiles = { Default = { settings = { [KEY] = false }, layout = { v = 1, frames = {} } } },
+        profileKeys = {}, profilesVersion = 1,
+    }
+    boot({ db = db, profs = { "Alchemy" } })
+    eq(FS.Config.Get(KEY), false, "the pinned value wins over the legacy shown flag")
+    eq(db.professionsHidden, nil, "and the legacy field is still cleared")
+    eq(panel()._shown, false)
+end
+
+function T.migration_waits_while_config_is_read_only_and_keeps_the_legacy_flag()
+    local db = { professionsHidden = true, profilesVersion = 99 }
+    boot({ db = db, profs = { "Alchemy" } })
+    eq(FS.Config.IsReadOnly(), true)
+    eq(db.professionsHidden, true, "kept for a later session")
+    eq(panel()._shown, true, "defaults apply in read-only")
+end
+
+function T.a_login_in_combat_migrates_without_touching_the_panel()
+    boot({ combatAtLoad = true, db = { professionsHidden = true }, profs = { "Alchemy" } })
+    eq(FS.Config.Get(KEY), false, "migrated at login")
+    eq(ForeverSTUwaveDB.professionsHidden, nil)
+    eq(panel(), nil, "no panel in combat")
+    eq(#__violations, 0, table.concat(__violations, ","))
+    endCombat()
+    eq(panel()._shown, false)
+    eq(#__violations, 0, table.concat(__violations, ","))
+end
+
+function T.a_config_change_before_the_panel_exists_is_read_at_setup()
+    boot({ combatAtLoad = true, profs = { "Alchemy" } })
+    FS.Config.Set(KEY, false)
+    eq(panel(), nil, "still nothing built in combat")
+    endCombat()
+    eq(panel()._shown, false, "Setup reads the setting")
+    eq(#__violations, 0, table.concat(__violations, ","))
+end
+
 -- The harness's model of SecureActionButton_OnClick: the action runs on the one edge picked by the
 -- button's useOnKeyDown attribute (nil follows the ActionButtonUseKeyDown CVar), and only for an edge
 -- the button registered for. OnClick must not be overridden, or the secure handler never runs.
@@ -497,6 +656,7 @@ def boot() -> "LuaRuntime":
     lua.execute(MOCK)
     lua.globals().__session = lua.eval(SESSION)
     lua.globals().__professionsSrc = PROFESSIONS_FILE.read_text(encoding="utf-8")
+    lua.globals().__configSrc = CONFIG_FILE.read_text(encoding="utf-8")
     lua.execute(CHECKS)
     return lua
 

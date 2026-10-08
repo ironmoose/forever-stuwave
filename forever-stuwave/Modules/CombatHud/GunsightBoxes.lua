@@ -66,6 +66,12 @@
 -- of the name listener refresh them; no OnUpdate. GunsightTape's KICK tag is seated off boxR and rides the
 -- box top in the mockup, so it needs C.TGT_GROW more rise (see the tape file).
 --
+-- TARGET BAR SETTINGS. The rail heights, the rail width and the value numbers beside them are FS.Config keys
+-- (SETTINGS, edited in the config window); a change applies live, in combat too (plain frames), through
+-- Config.OnChange, coalesced to one apply per box on the next frame, and a profile switch moves them too. One slider px is C.BAR_PX image px, so the defaults (6 and 4) are the 3 and 2 image px rails above
+-- and the numbers are off: nothing changes until a player moves a control. UNVERIFIED IN GAME: where the numbers stand, and
+-- UnitPowerPercent with the ScaleTo100 curve.
+--
 -- AT REST (when a box is shown but idle: the target's only): the plate and steel edge, the unit's name muted,
 -- no spell and no tile.
 --
@@ -126,11 +132,14 @@ local C = {
     TGT_GROW = 8,                                    -- tbBox() 'b': y: BOXR.y - 8, h: BOXR.h + 8 (grows UP)
     -- target bars, option B (drawTargetBars, tbBarH)
     TB_X = 7, TB_MIN_W = 24,                         -- x = BR.x + 7, w = max(24, name width)
-    TB_HP_Y = 26, TB_HP_H = 3,                       -- tbBarH(x, y = BR.y + 26, w, 3, ...)
-    TB_PW_Y = 30, TB_PW_H = 2,                       -- tbBarH(x, y + 4, w, 2, ...)
+    TB_HP_Y = 26, TB_HP_H = 3,                       -- tbBarH(x, y = BR.y + 26, w, 3, ...); H is the default and mockup
+    TB_PW_Y = 30, TB_PW_H = 2,                       -- tbBarH(x, y + 4, w, 2, ...); reference, the rails draw SETTINGS * BAR_PX
     TB_TRACK_A = 0.2, TB_TAIL_A = 0.35,              -- rgba(col, .2) track; fill gradient rgba(col, .35) to rgba(col, 1)
     TB_TIP_W = 1.5, TB_TIP_A = 0.9, TB_TIP_MIX = 0.55,  -- fillRect(x + fw - 1.5, y, 1.5, h) in mix(col, white, .55) at A(.9)
     TB_LOW = 0.35, LOW_EPSILON = 0.0005,             -- TB_LOW; PartyFrames' LOW_HP_EPSILON
+    -- target bar settings and numbers (not in the mockup; the config window mockup has the controls)
+    BAR_PX = 0.5,                                    -- image px per slider px: its 6 and 4 are the 3 and 2 above
+    NUM_SIZE = 9, NUM_GAP = 5, NUM_LINE = 1,         -- number type size, gap past the box edge, gap between lines
     POWER_KEYS = { [0] = "mana", [1] = "rage", [2] = "focus", [3] = "energy" },  -- UnitPowerType -> TB_PC key
     BAR_EVENTS = { "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_POWER_UPDATE", "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER" },
     DIV_Y = 29, DIV_A = 0.4,                         -- hline(b.y + 29, b.x + 7, b.x + b.w - 7, ..., .4 * a)
@@ -149,6 +158,7 @@ local C = {
     FLICK_DELAY = 0.2, FLICK_STEP = 0.05,
     FLICK = { 0.5, 1, 0.35, 0.85, 0.3, 0.7, 0.45 },
 }
+C.TB_GAP = C.TB_PW_Y - C.TB_HP_Y - C.TB_HP_H       -- the one image px between the two rules
 GunsightBoxes.C = C
 
 local BG = { 13 / 255, 6 / 255, 32 / 255, 1 }          -- --bg #0d0620
@@ -166,6 +176,34 @@ local colors = {
     focus = { 1, 0x80 / 255, 0x40 / 255, 1 },                                    -- TB_PC.focus #ff8040
 }
 GunsightBoxes.colors = colors
+
+-------------------------------------------------------------------------------
+-- Settings (FS.Config keys, profile aware; ranges and defaults are the config window mockup's)
+-------------------------------------------------------------------------------
+
+local Config = FS.Config
+local KEY = "gunsight.targetBars."
+local SETTINGS = {
+    hpHeight = { key = KEY .. "hpHeight", default = 6, min = 2, max = 12, step = 1 },
+    powerHeight = { key = KEY .. "powerHeight", default = 4, min = 2, max = 12, step = 1 },
+    width = { key = KEY .. "width", default = 100, min = 50, max = 150, step = 5 },
+    numbers = { key = KEY .. "numbers", default = false },
+    numberFormat = { key = KEY .. "numberFormat", default = "both" },
+}
+GunsightBoxes.SETTINGS = SETTINGS
+GunsightBoxes.NUMBER_FORMATS = {
+    { value = "current", text = "Current" },
+    { value = "both", text = "Current / max" },
+    { value = "percent", text = "Percent" },
+}
+for _, def in pairs(SETTINGS) do Config.RegisterDefault(def.key, def.default) end
+
+-- A number setting clamped into its range; anything else (a string, NaN) reads as the default.
+local function Setting(def)
+    local v = Config.Get(def.key)
+    if type(v) ~= "number" or v ~= v then return def.default end
+    return math.min(def.max, math.max(def.min, v))
+end
 
 -------------------------------------------------------------------------------
 -- Small helpers
@@ -364,7 +402,11 @@ end
 
 -- State and helpers hang off one table: the file is well clear of the file-scope local limit, but this keeps
 -- it that way.
-local Bars = { gradientBroken = false, warnedGradient = false, tipBroken = false, warnedTip = false }
+local Bars = {
+    gradientBroken = false, warnedGradient = false, tipBroken = false, warnedTip = false,
+    textBroken = false, pending = {}, dirty = {},
+    percent = { health = { broken = false }, power = { broken = false } },
+}
 local FLAT_TEXTURE = (FS.Theme and FS.Theme.FLAT_TEXTURE) or "Interface\\Buttons\\WHITE8x8"
 
 local function Logged(key, msg)
@@ -448,6 +490,11 @@ function Bars.Build(box)
     b.hp.red.host:SetAlpha(0)
     b.power = Bars.NewRail(b.frame, colors.cyan)
     b.powerShown = true
+    b.hpText = NewFont(b.frame, C.NUM_SIZE, colors.white)       -- the value numbers, off until a player asks
+    b.powerText = NewFont(b.frame, C.NUM_SIZE, colors.white)
+    b.hpText:Hide()
+    b.powerText:Hide()
+    b.numbers, b.mode = false, SETTINGS.numberFormat.default
     if type(UnitHealthPercent) == "function" and type(C_CurveUtil) == "table" and type(C_CurveUtil.CreateCurve) == "function"
         and type(Enum) == "table" and type(Enum.LuaCurveType) == "table" and Enum.LuaCurveType.Step ~= nil then
         local atLow = C.TB_LOW + C.LOW_EPSILON
@@ -481,21 +528,36 @@ function Bars.Measure(box)
     end
 end
 
+function Bars.SeatRail(box, rail, y, h, w)
+    local k = ui(1)
+    rail.host:ClearAllPoints()
+    rail.host:SetPoint("TOPLEFT", box.frame, "TOPLEFT", C.TB_X * k, -y * k)
+    rail.host:SetSize(w, h * k)
+    rail.tip:SetWidth(C.TB_TIP_W * k)
+end
+
+-- The numbers stand past the box's outer edge: `base` is the baseline's image px below the box top.
+function Bars.SeatText(box, fs, base)
+    local k = ui(1)
+    FS.Theme.ApplyMono(fs, FontSize(C.NUM_SIZE), colors.white)
+    fs:ClearAllPoints()
+    fs:SetPoint("BOTTOMLEFT", box.frame, "TOPRIGHT", C.NUM_GAP * k, -(base + C.NUM_SIZE * C.DESCENT) * k)
+end
+
 function Bars.Seat(box)
     local b = box.bars
     local k = ui(1)
     local wmax = (box.geom.w - 2 * C.PAD) * k
     local w = wmax
     if not box.nameSecret then w = math.min(wmax, math.max(C.TB_MIN_W * k, (box.nameImg or 0) * k)) end
-    local function seat(rail, y, h)
-        rail.host:ClearAllPoints()
-        rail.host:SetPoint("TOPLEFT", box.frame, "TOPLEFT", C.TB_X * k, -y * k)
-        rail.host:SetSize(w, h * k)
-        rail.tip:SetWidth(C.TB_TIP_W * k)
-    end
-    seat(b.hp.green, C.TB_HP_Y, C.TB_HP_H)
-    seat(b.hp.red, C.TB_HP_Y, C.TB_HP_H)
-    seat(b.power, C.TB_PW_Y, C.TB_PW_H)
+    w = math.min(wmax, w * (Setting(SETTINGS.width) / 100))
+    local hpH = Setting(SETTINGS.hpHeight) * C.BAR_PX
+    local pwH = Setting(SETTINGS.powerHeight) * C.BAR_PX
+    Bars.SeatRail(box, b.hp.green, C.TB_HP_Y, hpH, w)
+    Bars.SeatRail(box, b.hp.red, C.TB_HP_Y, hpH, w)
+    Bars.SeatRail(box, b.power, C.TB_HP_Y + hpH + C.TB_GAP, pwH, w)
+    Bars.SeatText(box, b.hpText, C.TB_HP_Y + hpH)
+    Bars.SeatText(box, b.powerText, C.TB_HP_Y + hpH + C.NUM_SIZE + C.NUM_LINE)
 end
 
 -- cur and max go straight to the setters (either may be secret); a setter that refuses is not an error here.
@@ -530,11 +592,93 @@ function Bars.UpdateHealthTips(b)
     pcall(red.SetAlpha, red, 1)
 end
 
+-- A Linear 0..1 -> 0..100 curve for the percent text, built the first time percent is shown. The client's own
+-- ScaleTo100 is used when it has one.
+function Bars.NewScaleTo100()
+    local curve = C_CurveUtil.CreateCurve()
+    curve:SetType(Enum.LuaCurveType.Linear)
+    curve:AddPoint(0, 0)
+    curve:AddPoint(1, 100)
+    return curve
+end
+
+function Bars.PercentCurve()
+    if Bars.percentCurve ~= nil then return Bars.percentCurve or nil end
+    Bars.percentCurve = false
+    local constants = _G.CurveConstants
+    if type(constants) == "table" and constants.ScaleTo100 ~= nil then
+        Bars.percentCurve = constants.ScaleTo100
+    elseif type(C_CurveUtil) == "table" and type(C_CurveUtil.CreateCurve) == "function"
+        and type(Enum) == "table" and type(Enum.LuaCurveType) == "table" and Enum.LuaCurveType.Linear ~= nil then
+        local ok, curve = pcall(Bars.NewScaleTo100)
+        if ok then Bars.percentCurve = curve end
+    end
+    return Bars.percentCurve or nil
+end
+
+-- The engine hands back the percent (secret or not) and it goes straight to SetFormattedText, so a secret health
+-- or power is never divided. A throw or a refused setter latches that kind and logs once; the plain cur / max division
+-- then runs only for two plain numbers, else the text stays blank.
+function Bars.WritePercent(fs, kind, cur, max)
+    local state = Bars.percent[kind]
+    local read = kind == "health" and UnitHealthPercent or UnitPowerPercent
+    local curve = (not state.broken and type(read) == "function") and Bars.PercentCurve() or nil
+    if curve then
+        local ok, percent
+        if kind == "health" then
+            ok, percent = pcall(read, "target", false, curve)
+        else
+            ok, percent = pcall(read, "target", nil, false, curve)
+        end
+        if ok and type(percent) ~= "number" then            -- no percent this tick: blank, and try again next time
+            fs:SetText("")
+            return
+        end
+        if ok and pcall(fs.SetFormattedText, fs, "%.0f%%", percent) then return end
+        state.broken = true                                 -- a throw or a refused setter latches this kind
+        Logged("gunsightboxes_target_" .. kind .. "_percent",
+            "|cffff4488Forever STUwave|r: target " .. kind .. " percent refused, using a plain compare")
+    end
+    if not IsSecret(cur) and not IsSecret(max) and max > 0 then
+        fs:SetFormattedText("%.0f%%", cur / max * 100)
+    else
+        fs:SetText("")
+    end
+end
+
+-- One rail's number. cur and max go straight to SetFormattedText (either may be secret: type() is legal on one, and
+-- nothing here compares, adds or divides it). The first refusal latches the numbers off for the session and logs once.
+function Bars.WriteValue(b, fs, kind, cur, max)
+    if Bars.textBroken then return end
+    local mode = b.mode
+    if type(cur) ~= "number" or (mode ~= "current" and type(max) ~= "number") then
+        fs:SetText("")
+        return
+    end
+    if mode == "percent" then
+        Bars.WritePercent(fs, kind, cur, max)
+        return
+    end
+    local ok
+    if mode == "current" then
+        ok = pcall(fs.SetFormattedText, fs, "%d", cur)
+    else
+        ok = pcall(fs.SetFormattedText, fs, "%d / %d", cur, max)
+    end
+    if ok then return end
+    Bars.textBroken = true
+    b.hpText:SetText("")
+    b.powerText:SetText("")
+    Logged("gunsightboxes_target_numbers",
+        "|cffff4488Forever STUwave|r: target bar numbers disabled, SetFormattedText rejected the value")
+end
+
 function Bars.UpdateHealth(box)
     local b = box.bars
     local cur, max = UnitHealth("target"), UnitHealthMax("target")
     Bars.SetBar(b.hp.green.sb, cur, max)
     Bars.SetBar(b.hp.red.sb, cur, max)
+    if b.numbers then Bars.WriteValue(b, b.hpText, "health", cur, max) end
     Bars.UpdateHealthTips(b)
     if b.lowCurve and not b.lowBroken then
         local okLow, low = pcall(UnitHealthPercent, "target", false, b.lowCurve)
@@ -584,9 +728,12 @@ function Bars.UpdatePower(box)
     if show ~= b.powerShown then
         b.powerShown = show
         rail.host:SetShown(show)
+        b.powerText:SetShown(show and b.numbers)
     end
     if show then
-        Bars.SetBar(rail.sb, UnitPower("target"), max)
+        local cur = UnitPower("target")
+        Bars.SetBar(rail.sb, cur, max)
+        if b.numbers then Bars.WriteValue(b, b.powerText, "power", cur, max) end
         -- The power tip hides at empty power through FrameHelpers' shared helper (its own curve, latch and log).
         local helpers = FS.FrameHelpers
         if type(helpers) == "table" and type(helpers.UpdatePowerHostEmpty) == "function" then
@@ -613,6 +760,77 @@ function Bars.Refresh(box)
     if type(UnitHealth) == "function" and type(UnitHealthMax) == "function" then Bars.UpdateHealth(box) end
     Bars.UpdatePower(box)
 end
+
+-- Reads the settings and re-seats, re-sizes and re-reads the bars: at build and on a setting change.
+function Bars.ApplyConfig(box)
+    local b = box.bars
+    if box.retired or not b then return end
+    b.numbers = Config.Get(SETTINGS.numbers.key) == true
+    local mode = Config.Get(SETTINGS.numberFormat.key)
+    b.mode = (mode == "current" or mode == "both" or mode == "percent") and mode or SETTINGS.numberFormat.default
+    Bars.Seat(box)
+    b.hpText:SetShown(b.numbers)
+    b.powerText:SetShown(b.numbers and b.powerShown)
+    if not b.numbers then
+        b.hpText:SetText("")
+        b.powerText:SetText("")
+    end
+    Bars.Refresh(box)
+end
+
+-- Defensive: none of the bar frames is protected today, so a change applies at once even in combat. This parks it
+-- for PLAYER_REGEN_ENABLED if one ever is.
+function Bars.Locked(box)
+    if type(InCombatLockdown) ~= "function" or not InCombatLockdown() then return false end
+    local b = box.bars
+    for _, frame in ipairs({ box.frame, b.frame, b.hp.green.host, b.hp.red.host, b.power.host }) do
+        if HasMethod(frame, "IsProtected") and frame:IsProtected() then return true end
+    end
+    return false
+end
+
+function Bars.Apply(box)
+    if box.retired or not box.bars then return end
+    if Bars.Locked(box) then
+        Bars.pending[box] = true
+        if not Bars.regen then
+            local regen = CreateFrame("Frame")
+            regen:RegisterEvent("PLAYER_REGEN_ENABLED")
+            regen:SetScript("OnEvent", function()
+                local parked = {}
+                for parkedBox in pairs(Bars.pending) do parked[#parked + 1] = parkedBox end
+                Bars.pending = {}
+                for _, parkedBox in ipairs(parked) do Bars.Apply(parkedBox) end
+            end)
+            Bars.regen = regen
+        end
+        return
+    end
+    Bars.Guard(Bars.ApplyConfig, box)
+end
+
+-- Applies every box a setting change marked dirty: one Seat and one Refresh per box, however many keys changed
+-- (a profile switch changes all five). The OnUpdate exists only between the first change and this flush.
+function Bars.Flush()
+    if Bars.flusher then Bars.flusher:SetScript("OnUpdate", nil) end
+    local dirty = Bars.dirty
+    Bars.dirty = {}
+    for box in pairs(dirty) do Bars.Apply(box) end
+end
+GunsightBoxes.Flush = Bars.Flush
+
+function Bars.Request(box)
+    if box.retired or not box.bars then return end
+    Bars.dirty[box] = true
+    Bars.flusher = Bars.flusher or CreateFrame("Frame")
+    Bars.flusher:SetScript("OnUpdate", Bars.Flush)
+end
+
+local liveBoxes = setmetatable({}, { __mode = "k" })
+local function OnSettingChanged()
+    for box in pairs(liveBoxes) do Bars.Request(box) end
+end
+for _, def in pairs(SETTINGS) do Config.OnChange(def.key, OnSettingChanged) end
 
 function Bars.OnEvent(box, event, unit)
     if box.retired or not box.bars or not FS.HasTarget() then return end
@@ -1013,7 +1231,7 @@ local function BuildBox(spec)
     if isTarget then
         RefreshTargetName(box)
         RefreshTargetShown(box)
-        Bars.Guard(Bars.Refresh, box)
+        Bars.Guard(Bars.ApplyConfig, box)
     else
         RefreshPlayerName(box)
         frame:Hide()                                 -- yours exists only while a cast is live
@@ -1070,6 +1288,7 @@ local function BuildBox(spec)
             error(errRescale, 0)
         end
     end
+    if isTarget then liveBoxes[box] = true end
     return box
 end
 

@@ -24,7 +24,8 @@ local WELL_W = WIN_W - 2 * 17 - NAV_W - 10
 local CONTENT_W = WELL_W - 14 - 22
 local HALF_GAP = 28
 local HALF_W = (CONTENT_W - HALF_GAP) / 2
-local ROW_H, GROUP_GAP = 28, 12
+local ROW_H, GROUP_GAP, SUB_INSET = 28, 12, 16
+local SLIDER_W, SLIDER_H, THUMB_W, READOUT_W = 150, 12, 8, 34
 
 local C = {
     text = { 0.886, 0.910, 0.941, 1 },
@@ -368,6 +369,7 @@ local function WriteValue(o, value)
     elseif result == false then
         Say("settings are read-only this session.")
     end
+    return ok and result ~= false
 end
 
 local function MakeToggle(parent)
@@ -430,9 +432,20 @@ function UI.Toggle(content, o)
     return row
 end
 
--- {label, options = {{value, text}, ...}, key, get, set, tip}: one button per option, one selected.
+-- {label, options = {{value, text}, ...}, key, get, set, tip, sub, enabled}: one button per option, one selected.
+-- `sub` indents the row under the toggle above it with the mockup's elbow; `enabled` is re-read on refresh.
 function UI.Segmented(content, o)
-    local row = NewRow(content, { label = o.label, tip = o.tip })
+    local row = NewRow(content, { label = o.label, tip = o.tip, inset = o.sub and SUB_INSET or 0 })
+    if o.sub then
+        local down = row:CreateTexture(nil, "ARTWORK")
+        down:SetColorTexture(C.line[1], C.line[2], C.line[3], 1)
+        down:SetSize(1, 14)
+        down:SetPoint("TOPLEFT", row, "TOPLEFT", 4, 0)
+        local across = row:CreateTexture(nil, "ARTWORK")
+        across:SetColorTexture(C.line[1], C.line[2], C.line[3], 1)
+        across:SetSize(8, 1)
+        across:SetPoint("TOPLEFT", row, "TOPLEFT", 4, -13)
+    end
     local holder = CreateFrame("Frame", nil, row)
     holder:SetPoint("RIGHT", row, "RIGHT", 0, 0)
     local buttons, total = {}, 0
@@ -463,10 +476,122 @@ function UI.Segmented(content, o)
             else
                 Restyle(item.button, C.line, C.muted, C.ink, 0)
             end
-            SetLook(item.button, Writable())
+            SetLook(item.button, Writable() and (o.enabled == nil or o.enabled() == true))
         end
     end)
     row.control = holder
+    return row
+end
+
+-------------------------------------------------------------------------------
+-- Slider
+-------------------------------------------------------------------------------
+
+-- The value for a position along the track (0 to 1), held inside the range and snapped to the step.
+local function SliderValue(lo, hi, step, fraction)
+    if not (hi > lo) then return lo end
+    local steps = math.floor(math.min(1, math.max(0, fraction)) * (hi - lo) / step + 0.5)
+    local value = math.floor((lo + steps * step) * 1e6 + 0.5) / 1e6
+    return math.min(hi, value)
+end
+
+-- The mouse position along the track as a fraction of its width, or nil when the client cannot say.
+local function CursorFraction(track)
+    local left, scale = track:GetLeft(), track:GetEffectiveScale()
+    if type(GetCursorPosition) ~= "function" or not left or not scale or scale <= 0 then return nil end
+    return ((GetCursorPosition()) / scale - left) / SLIDER_W
+end
+
+local function PaintSlider(track, lo, hi, value)
+    local x = hi > lo and (value - lo) / (hi - lo) * SLIDER_W or 0
+    track.fsValue = value
+    track.fsThumb:ClearAllPoints()
+    track.fsThumb:SetPoint("CENTER", track, "LEFT", x, 0)
+    track.fsFill:SetShown(x > 0)
+    if x > 0 then track.fsFill:SetWidth(x) end
+end
+
+-- {label, key, get, set, min, max, step, fmt, tip}: a thin track with a cyan fill, a slab thumb and a mono readout.
+-- `fmt` is a format string or a function of the value. Click or drag the track, or use the mouse wheel.
+function UI.Slider(content, o)
+    local lo, hi = o.min or 0, o.max or 100
+    local step = (o.step and o.step > 0) and o.step or 1
+    local row = NewRow(content, { label = o.label, tip = o.tip })
+    local readout = Label(row, "", 10.5, C.cyan)
+    readout:SetWidth(READOUT_W)
+    readout:SetJustifyH("RIGHT")
+    readout:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+    row.fsReadout = readout
+
+    local track = CreateFrame("Button", nil, row)
+    track:SetSize(SLIDER_W, SLIDER_H)
+    track:SetPoint("RIGHT", readout, "LEFT", -10, 0)
+    track:EnableMouse(true)
+    track:EnableMouseWheel(true)
+    track:SetHitRectInsets(0, 0, -8, -8)
+    local rail = track:CreateTexture(nil, "ARTWORK")
+    local railColor = Mix(C.line, C.violet, 0.45)
+    rail:SetColorTexture(railColor[1], railColor[2], railColor[3], 1)
+    rail:SetHeight(2)
+    rail:SetPoint("LEFT", track, "LEFT", 0, 0)
+    rail:SetPoint("RIGHT", track, "RIGHT", 0, 0)
+    track.fsFill = track:CreateTexture(nil, "ARTWORK", nil, 1)
+    track.fsFill:SetColorTexture(C.cyan[1], C.cyan[2], C.cyan[3], 1)
+    track.fsFill:SetHeight(2)
+    track.fsFill:SetPoint("LEFT", track, "LEFT", 0, 0)
+    local thumb = CreateFrame("Frame", nil, track)
+    thumb:SetSize(THUMB_W, SLIDER_H)
+    thumb.fsFill = Theme.AddCutSliceFill(thumb, C.ink, 3)
+    thumb.fsSkin = Theme.SkinButton(thumb, { borderColor = C.cyan, chamfer = 3, glowAlpha = 0.55 })
+    track.fsThumb = thumb
+
+    local function Refresh()
+        local value = ReadValue(o)
+        if type(value) ~= "number" or value ~= value then value = lo end
+        value = math.min(hi, math.max(lo, value))
+        local text = o.fmt
+        if type(text) == "function" then text = text(value) else text = (text or "%s"):format(value) end
+        readout:SetText(tostring(text))
+        PaintSlider(track, lo, hi, value)
+        return value
+    end
+
+    local function StopDrag()
+        track.fsDragging = false
+        track:SetScript("OnUpdate", nil)
+    end
+    -- Writes only a changed value; a refused write ends a drag so it cannot repeat every frame. A keyed slider is
+    -- repainted by the Config.OnAnyChange refresh; only a get / set one has to repaint itself.
+    local function Commit(value)
+        if value == ReadValue(o) then return end
+        if not WriteValue(o, value) then StopDrag() end
+        if not o.key then Refresh() end
+    end
+    local function Drag()
+        if not track:IsEnabled() then StopDrag() return end
+        local fraction = CursorFraction(track)
+        if fraction then Commit(SliderValue(lo, hi, step, fraction)) end
+    end
+    track:SetScript("OnMouseDown", function(self, button)
+        if button ~= "LeftButton" or not self:IsEnabled() then return end
+        self.fsDragging = true
+        Drag()
+        self:SetScript("OnUpdate", Drag)
+    end)
+    track:SetScript("OnMouseUp", StopDrag)
+    track:SetScript("OnHide", StopDrag)
+    track:SetScript("OnMouseWheel", function(self, delta)
+        if not self:IsEnabled() or not (hi > lo) then return end
+        local value = Refresh() + (delta > 0 and step or -step)
+        Commit(SliderValue(lo, hi, step, (value - lo) / (hi - lo)))
+    end)
+    Track(function()
+        Refresh()
+        local on = Writable()
+        if on then track:Enable() else track:Disable() end
+        row:SetAlpha(on and 1 or 0.4)                    -- the label and the readout dim with the track
+    end)
+    row.control = track
     return row
 end
 
@@ -975,6 +1100,8 @@ CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, buil
     UI.Header(page, "Player and target", "Hidden frames stay click-through and invisible.")
     UI.Toggle(page, { label = "Hide player frame", key = "unitFrames.hidePlayer" })
     UI.Toggle(page, { label = "Hide target frame", key = "unitFrames.hideTarget" })
+    UI.Header(page, "Panels")
+    UI.Toggle(page, { label = "Professions panel", key = "professions.shown" })
 end })
 
 local PIECE_ORDER = { "you", "tgt", "next", "dot", "shard", "prc", "buff", "party" }
@@ -1001,6 +1128,28 @@ if FS.Gunsight and FS.Gunsight.PIECES then
                     half = n % 2 == 1 and "left" or "right",
                 })
             end
+        end
+        local Boxes = FS.GunsightBoxes
+        if Boxes and Boxes.SETTINGS then
+            local S = Boxes.SETTINGS
+            UI.Header(page, "Target health and resource")
+            UI.Slider(page, {
+                label = "Health bar height", key = S.hpHeight.key, min = S.hpHeight.min, max = S.hpHeight.max,
+                step = S.hpHeight.step, fmt = "%d px",
+            })
+            UI.Slider(page, {
+                label = "Resource bar height", key = S.powerHeight.key, min = S.powerHeight.min, max = S.powerHeight.max,
+                step = S.powerHeight.step, fmt = "%d px",
+            })
+            UI.Slider(page, {
+                label = "Bar width", key = S.width.key, min = S.width.min, max = S.width.max, step = S.width.step,
+                fmt = "%d%%", tip = "Percent of the target name width.",
+            })
+            UI.Toggle(page, { label = "Show numbers", key = S.numbers.key })
+            UI.Segmented(page, {
+                label = "Number format", key = S.numberFormat.key, options = Boxes.NUMBER_FORMATS, sub = true,
+                enabled = function() return Config.Get(S.numbers.key) == true end,
+            })
         end
     end })
 end
