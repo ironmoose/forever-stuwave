@@ -70,6 +70,7 @@ ch = _load("console_harness", HERE / "console-harness.py")
 
 SRC_FILES = {
     "LAYOUT_SRC": ADDON / "Core/Layout.lua",
+    "CONFIG_SRC": ADDON / "Core/Config.lua",
     "GUNSIGHT_SRC": ADDON / "Modules/CombatHud/Gunsight.lua",
     "CHEVRON_SRC": ADDON / "Core/ChevronCastBar.lua",
     "CONSOLE_SRC": ADDON / "Modules/ActionBars/Console.lua",
@@ -262,6 +263,14 @@ end
 """
 
 PRELUDE = r"""
+-- The locked mockup still says "tape"; the player-facing text says "cast bar".
+local REWORD = {
+    ["Cast tape and timer box"] = "Your cast bar and timer box",
+    ["Held shards under your tape"] = "Held shards under your cast bar",
+    ["Enemy cast tape, kick and lock state"] = "Target cast bar, kick and lock state",
+}
+local function reword(text) return REWORD[text] or text end
+
 local function boot(opts)
     opts = opts or {}
     SetScreen(opts.height or 1440)
@@ -270,6 +279,7 @@ local function boot(opts)
     IN_COMBAT = false
     MakeTheme()
     loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
+    loadAddonFile(CONFIG_SRC, "Core/Config.lua")
     loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
     if not opts.noFx then loadAddonFile(CHEVRON_SRC, "Core/ChevronCastBar.lua") end
     FS.ActionBars = AB
@@ -373,7 +383,7 @@ for i, d in ipairs(MU.defs) do
     local def = CK.DEFS[i]
     check(def.key == d.piece, "key " .. i .. " toggles " .. def.key .. ", mockup says " .. d.piece)
     check(def.n == d.n, "key " .. i .. " name " .. def.n .. " vs " .. d.n)
-    check(def.d == d.d, "key " .. i .. " description " .. def.d .. " vs " .. d.d)
+    check(def.d == reword(d.d), "key " .. i .. " description " .. def.d .. " vs " .. reword(d.d))
     check(def.c == d.c, "key " .. i .. " colour " .. def.c .. " vs " .. d.c)
     check(def.g == d.g, "key " .. i .. " glyph " .. def.g .. " vs " .. d.g)
     local want, got = MU.colors[d.c], CK.COLORS[d.c]
@@ -399,6 +409,18 @@ eq(k.body.sliceMargins[1], T.SLICE_CUT_MARGIN, "plate margin is the chamfer")
 eq(k.glow.sliceMargins[1], T.SLICE_CUT2_GLOW_MARGIN, "halo margin is pad + chamfer")
 """)
 
+case("player_facing_key_text_says_cast_bar_never_tape")(r"""
+local CK = boot({})
+for _, def in ipairs(CK.DEFS) do
+    check(not def.n:lower():find("tape", 1, true), def.key .. " name says tape: " .. def.n)
+    check(not def.d:lower():find("tape", 1, true), def.key .. " description says tape: " .. def.d)
+end
+local function desc(key) for _, def in ipairs(CK.DEFS) do if def.key == key then return def.d end end end
+check(desc("you") == "Your cast bar and timer box", "you: " .. tostring(desc("you")))
+check(desc("tgt") == "Target cast bar, kick and lock state", "tgt: " .. tostring(desc("tgt")))
+check(desc("shard") == "Held shards under your cast bar", "shard: " .. tostring(desc("shard")))
+""")
+
 # ---------------------------------------------------------------------------------------
 # Clicks and state
 # ---------------------------------------------------------------------------------------
@@ -413,7 +435,7 @@ for _, piece in ipairs(G.PIECES) do
     for _, other in ipairs(G.PIECES) do
         if other ~= piece then check(G.IsPieceOn(other), "clicking " .. piece .. " also changed " .. other) end
     end
-    check(ForeverSTUwaveDB.gunsight.pieces[piece] == false, piece .. " off was not saved")
+    check(FS.Config.Get("gunsight.pieces." .. piece) == false, piece .. " off was not saved")
     click(k)
     check(G.IsPieceOn(piece), "clicking " .. piece .. " again did not turn it on")
 end
@@ -475,7 +497,7 @@ for i, d in ipairs(MU.defs) do
     check(GameTooltip.shown and GameTooltip.owner == k.btn, "tooltip not shown on key " .. i)
     check(GameTooltip.lines[1].text == d.n, "first line is the name, got " .. tostring(GameTooltip.lines[1].text))
     check(GameTooltip.lines[1].right == "ON", "state word is ON while the piece is on")
-    check(GameTooltip.lines[2].text == d.d, "second line is the mockup description, got " .. tostring(GameTooltip.lines[2].text))
+    check(GameTooltip.lines[2].text == reword(d.d), "second line is the mockup description (cast bar wording), got " .. tostring(GameTooltip.lines[2].text))
     check(#GameTooltip.lines == 2, "tooltip carries more than name, state and description")
     check(GameTooltip.points[1][2] == k.btn, "tooltip anchored to the key")
     local corner = GameTooltip.points[1][1]
@@ -526,7 +548,7 @@ for _, piece in ipairs({ "you", "next", "tgt", "prc", "party" }) do
     for _, d in ipairs(MU.defs) do if d.piece == piece then def = d end end
     o.btn.scripts.OnEnter(o.btn)
     eq(GameTooltip.lines[1].text, def.n, piece .. " title is the mockup's")
-    eq(GameTooltip.lines[2].text, def.d, piece .. " description is the mockup's")
+    eq(GameTooltip.lines[2].text, reword(def.d), piece .. " description is the mockup's")
     o.btn.scripts.OnLeave(o.btn)
 end
 """)
@@ -856,7 +878,8 @@ check(not CK.IsBuilt(), "keys built with the Gunsight disabled at login")
 SlashCmdList["FSGUN"]("on")
 FS.ActionBars.Publish()
 fire("PLAYER_REGEN_ENABLED")
-check(G.IsEnabled(), "the mock /fsgun on flips the Gunsight state")
+check(FS.Config.Get("gunsight.enabled") == true, "/fsgun on saves the setting")
+check(not G.IsEnabled(), "the live state is fixed at load, so a built UI never changes under it")
 check(not CK.IsBuilt(), "/fsgun on built the keys without a reload")
 for _, f in ipairs(FRAMES) do check(not (f.name and f.name:find("^FSConsoleKey")), "a key frame exists: " .. tostring(f.name)) end
 check(FS.partyContainer:IsShown() and FS.partyContainer:GetAlpha() == 1, "the party frames were touched after a disabled login")
@@ -1102,7 +1125,7 @@ end
 check(not G.IsPieceOn("shard") and G.IsPieceOn("prc"), "piece state is as saved")
 CK.Refresh(); FS.ActionBars.Publish(); fire("PLAYER_REGEN_ENABLED"); fire("PLAYER_ENTERING_WORLD")
 eq(calls, 0, "ConsoleKeys never calls Gunsight.SetPiece for visibility")
-check(ForeverSTUwaveDB.gunsight.pieces.prc ~= false, "prc was not saved off by hiding its key")
+check(FS.Config.Get("gunsight.pieces.prc") ~= false, "prc was not saved off by hiding its key")
 -- the piece still follows /fsgun while its key is hidden, and the key is right when it comes back
 SlashCmdList["FSGUN"]("piece shard on")
 check(keyOf(CK, "shard").phase == "on", "a hidden key still tracks its piece")

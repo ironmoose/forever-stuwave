@@ -48,6 +48,7 @@ HERE = Path(__file__).resolve().parent
 ADDON = HERE.parent / "forever-stuwave"
 GUNSIGHT = Path(os.environ.get("GUNSIGHT_LUA") or ADDON / "Modules/CombatHud/Gunsight.lua")
 LAYOUT = ADDON / "Core/Layout.lua"
+CONFIG = ADDON / "Core/Config.lua"
 THEME = Path(os.environ.get("THEME_LUA") or ADDON / "Core/Theme.lua")
 TOC = ADDON / "forever-stuwave.toc"
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
@@ -451,6 +452,7 @@ local function boot(opts)
     SetScreen(opts.fileLoadHeight or opts.height or 1440)
     ForeverSTUwaveDB = opts.db
     loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
+    loadAddonFile(CONFIG_SRC, "Core/Config.lua")
     loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
     if opts.height then SetScreen(opts.height) end
     if not opts.noEvents then
@@ -631,10 +633,11 @@ case("db_defaults_and_repair")(r"""
 local Gs = boot({ height = 1440, db = {} })
 local g = ForeverSTUwaveDB.gunsight
 check(type(g) == "table", "ForeverSTUwaveDB.gunsight not created")
-check(g.enabled == true, "enabled defaults to true")
+check(g.enabled == nil and g.pieces == nil, "enabled and pieces live in FS.Config now, not in ForeverSTUwaveDB.gunsight")
+check(FS.Config.Get("gunsight.enabled") == true, "enabled defaults to true")
 check(g.seat and g.seat.dx == 0 and g.seat.dy == 0, "seat defaults to 0,0")
 for _, k in ipairs({ "you", "next", "shard", "buff", "tgt", "dot", "prc", "party" }) do
-    check(g.pieces[k] == true, "piece " .. k .. " defaults to on")
+    check(FS.Config.Get("gunsight.pieces." .. k) == true, "piece " .. k .. " defaults to on")
     check(Gs.IsPieceOn(k) == true, "IsPieceOn(" .. k .. ") defaults to true")
 end
 check(Gs.IsEnabled() == true, "IsEnabled default")
@@ -643,9 +646,9 @@ check(Gs.IsEnabled() == true, "IsEnabled default")
 case("db_garbage_is_repaired_and_saved_values_kept")(r"""
 local Gs = boot({ height = 1440, db = { gunsight = { enabled = false, pieces = { buff = false, you = "yes", bogus = true, frame = false }, seat = { dx = "x" } } } })
 local g = ForeverSTUwaveDB.gunsight
-check(g.enabled == false and Gs.IsEnabled() == false, "enabled=false must survive")
-check(g.pieces.buff == false and Gs.IsPieceOn("buff") == false, "a saved off piece stays off")
-check(g.pieces.you == true, "a non boolean piece value falls back to on")
+check(FS.Config.Get("gunsight.enabled") == false and Gs.IsEnabled() == false, "enabled=false must survive the migration")
+check(FS.Config.Get("gunsight.pieces.buff") == false and Gs.IsPieceOn("buff") == false, "a saved off piece stays off")
+check(FS.Config.Get("gunsight.pieces.you") == true, "a non boolean piece value falls back to on")
 -- a saved value for the retired `frame` piece (the removed HUD Frame) is ignored, not an error
 check(Gs.IsPieceOn("frame") == false and Gs.SetPiece("frame", true) == false, "the retired frame piece is not a known piece")
 check(#Gs.PIECES == 8, "eight pieces, got " .. #Gs.PIECES)
@@ -673,11 +676,11 @@ log = {}
 Gs.SetPiece("buff", false, true)
 check(not f:IsShown(), "instant off hides at once")
 check(Gs.IsPieceOn("buff") == false, "IsPieceOn after off")
-check(ForeverSTUwaveDB.gunsight.pieces.buff == false, "off is not persisted")
+check(FS.Config.Get("gunsight.pieces.buff") == false, "off is not persisted")
 check(table.concat(log, ",") == "hide", "hooks after off: " .. table.concat(log, ","))
 Gs.SetPiece("buff", true, true)
 check(f:IsShown() and f:GetAlpha() == 1, "instant on shows at full alpha")
-check(ForeverSTUwaveDB.gunsight.pieces.buff == true, "on is not persisted")
+check(FS.Config.Get("gunsight.pieces.buff") == true, "on is not persisted")
 check(table.concat(log, ",") == "hide,show", "hooks after on: " .. table.concat(log, ","))
 -- same state again is a no-op for the hooks
 Gs.SetPiece("buff", true, true)
@@ -835,6 +838,7 @@ case("early_registration_waits_for_the_saved_state")(r"""
 -- Files that load before ADDON_LOADED register before SavedVariables exist: the state lands at init.
 SetScreen(1440)
 loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
+loadAddonFile(CONFIG_SRC, "Core/Config.lua")
 loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
 local Gs = FS.Gunsight
 local f = CreateFrame("Frame", nil, Gs.root)
@@ -944,11 +948,11 @@ for _, k in ipairs({ "you", "next", "shard", "buff", "tgt", "dot", "prc", "party
 end
 PRINTED = {}
 slash("off")
-check(ForeverSTUwaveDB.gunsight.enabled == false, "off did not save")
+check(FS.Config.Get("gunsight.enabled") == false, "off did not save")
 check(table.concat(PRINTED, "\n"):lower():find("reload", 1, true), "off must say a reload is needed")
 PRINTED = {}
 slash("on")
-check(ForeverSTUwaveDB.gunsight.enabled == true, "on did not save")
+check(FS.Config.Get("gunsight.enabled") == true, "on did not save")
 check(table.concat(PRINTED, "\n"):lower():find("reload", 1, true), "on must say a reload is needed")
 slash("seat 12 -7")
 check(ForeverSTUwaveDB.gunsight.seat.dx == 12 and ForeverSTUwaveDB.gunsight.seat.dy == -7, "seat not saved")
@@ -961,7 +965,7 @@ local f = CreateFrame("Frame", nil, Gs.root)
 Gs.RegisterPiece("shard", { frame = f })
 slash("piece shard off")
 check(Gs.IsPieceOn("shard") == false, "piece off via slash")
-check(ForeverSTUwaveDB.gunsight.pieces.shard == false, "piece off via slash not saved")
+check(FS.Config.Get("gunsight.pieces.shard") == false, "piece off via slash not saved")
 slash("piece shard on")
 check(Gs.IsPieceOn("shard") == true, "piece on via slash")
 PRINTED = {}
@@ -1019,6 +1023,7 @@ def run_case(name: str, body: str, mu: dict, expect: dict, gunsight_src: str) ->
     lua.execute(f"MU = {lua_value(mu)}; EXPECT = {lua_value(expect)}")
     g = lua.globals()
     g.LAYOUT_SRC = LAYOUT.read_text(encoding="utf-8")
+    g.CONFIG_SRC = CONFIG.read_text(encoding="utf-8")
     g.GUNSIGHT_SRC = gunsight_src
     runner = lua.eval("function(src) local f, e = loadstring(src, '=case'); if not f then return false, e end; local ok, err = pcall(f); if ok then if #BLOCKED > 0 then return false, 'ADDON_ACTION_BLOCKED: ' .. table.concat(BLOCKED, ', ') end; return true, '' end; return false, tostring(err) end")
     ok, err = runner(PRELUDE + "\n" + body)

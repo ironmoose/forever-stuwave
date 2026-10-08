@@ -226,6 +226,21 @@ function T.get_returns_the_registered_default_until_set()
     eq(ForeverSTUwaveDB.profiles.Default.settings.x, 7, "stored in the active profile")
 end
 
+function T.is_stored_tells_a_pinned_value_from_a_default()
+    local C = boot({})
+    C.RegisterDefault("x", 5)
+    eq(C.IsStored("x"), false, "a default is not stored")
+    C.Set("x", 7)
+    eq(C.IsStored("x"), true)
+    C.Set("x", 5)
+    eq(C.IsStored("x"), false, "back at the default stores nothing")
+    eq(C.IsStored(nil), false)
+    eq(C.NewProfile("Raid"), true)
+    C.Set("x", 7)
+    eq(C.SetActiveProfile("Raid"), true)
+    eq(C.IsStored("x"), false, "per profile")
+end
+
 function T.set_fires_key_and_any_callbacks_with_new_old_and_key()
     local C = boot({})
     C.RegisterDefault("x", 5)

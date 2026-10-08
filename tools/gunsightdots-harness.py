@@ -51,6 +51,7 @@ ADDON = HERE.parent / "forever-stuwave"
 DOTS = Path(os.environ.get("GUNSIGHTDOTS_LUA") or ADDON / "Modules/CombatHud/GunsightDots.lua")
 GUNSIGHT = ADDON / "Modules/CombatHud/Gunsight.lua"
 LAYOUT = ADDON / "Core/Layout.lua"
+CONFIG = ADDON / "Core/Config.lua"
 PROFILES = ADDON / "Modules/CombatHud/HudProfiles.lua"
 TOC = ADDON / "forever-stuwave.toc"
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
@@ -556,6 +557,7 @@ local function boot(opts)
     stubTheme_()
     stubHud_()
     loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
+    loadAddonFile(CONFIG_SRC, "Core/Config.lua")
     loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
     loadAddonFile(PROFILES_SRC, "Modules/CombatHud/HudProfiles.lua")
     PROFILE = opts.profile or FS.HudProfiles[opts.class or "WARLOCK"]
@@ -1448,7 +1450,7 @@ case("no_hud_leaves_the_piece_inert")(r"""
 resetWorld()
 SetScreen(1440)
 stubTheme_()
-loadAddonFile(LAYOUT_SRC, "Core/Layout.lua"); loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
+loadAddonFile(LAYOUT_SRC, "Core/Layout.lua"); loadAddonFile(CONFIG_SRC, "Core/Config.lua"); loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
 FS.Hud = nil
 loadAddonFile(DOTS_SRC, "Modules/CombatHud/GunsightDots.lua")
 fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
@@ -1896,6 +1898,7 @@ def run_case(name: str, body: str, mu: dict) -> str | None:
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.execute(MOCK)
     lua.globals().LAYOUT_SRC = LAYOUT.read_text(encoding="utf-8")
+    lua.globals().CONFIG_SRC = CONFIG.read_text(encoding="utf-8")
     lua.globals().GUNSIGHT_SRC = GUNSIGHT.read_text(encoding="utf-8")
     lua.globals().PROFILES_SRC = PROFILES.read_text(encoding="utf-8")
     lua.globals().DOTS_SRC = DOTS.read_text(encoding="utf-8")

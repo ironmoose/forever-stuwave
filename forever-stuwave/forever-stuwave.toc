@@ -66,3 +66,5 @@ Modules/ActionBars/SealBar.lua
 Modules/CombatHud/CombatHud.lua
 Modules/Diagnostics/FSProbe.lua
 Modules/Diagnostics/BugReport.lua
+Modules/Config/ConfigWindow.lua
+Core/LayoutEdit.lua
