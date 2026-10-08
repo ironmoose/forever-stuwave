@@ -1008,6 +1008,9 @@ function T.the_reveal_is_a_clipped_frame_riding_the_strip_fill_top()
         eq(p.BOTTOMLEFT.rel, rv.strip, "bottom on the run column's bottom (where the fill starts)")
         eq(p.BOTTOMLEFT.relPoint, "BOTTOMLEFT"); eq(p.BOTTOMRIGHT.relPoint, "BOTTOMRIGHT")
         eq(p.BOTTOMRIGHT.rel, rv.strip)
+        local drop = W.tgt.run.capH * FS.GunsightTape.C.CAP_DROP
+        near(p.BOTTOMLEFT.y, -drop, 1e-9, "the bottom corners drop with the top, so the clip never inverts at value 0")
+        near(p.BOTTOMRIGHT.y, -drop, 1e-9); near(p.TOP.y, -drop, 1e-9)
         near(p.BOTTOMLEFT.x, -W.tgt.run.capW, 1e-6, "widened across by the caret width, like the engine's clip")
         near(p.BOTTOMRIGHT.x, W.tgt.run.capW, 1e-6)
         eq(rv.host:GetParent(), rv.clip, "the chevrons live on a child frame of the clipping frame")
@@ -1083,7 +1086,8 @@ function T.the_caret_caps_the_reveal_top_edge_inside_the_run()
         local p = c._points.BOTTOMLEFT
         eq(c._points.TOPLEFT, nil, "it hangs from no top anchor: its bottom is a caret height under the edge")
         eq(p.rel, rv.clip, "anchored to the fill's clip frame"); eq(p.relPoint, "TOPLEFT")
-        near(p.y, -run.capH, 1e-9, "its TIP sits on the fill's top edge, as the engine's own caret tip is at progress")
+        local drop = run.capH * FS.GunsightTape.C.CAP_DROP
+        near(p.y, -(run.capH - drop), 1e-9, "its TIP sits on the fill's top edge, as the engine's own caret tip is at progress")
         near(p.x, run.capX, 1e-9, "centred on the column, like the engine's caret")
         near(c._w, run.capW, 1e-9); near(c._h, run.capH, 1e-9)
         -- rv.clip's left edge is the run's left edge widened by m = capW, and capX includes that m, so in
@@ -1098,10 +1102,10 @@ function T.the_caret_caps_the_reveal_top_edge_inside_the_run()
         eq(rv.glow._blend, "ADD", "the glow adds light, like the engine's")
         local gp = rv.glow._points.CENTER
         eq(gp.rel, rv.caret); eq(gp.relPoint, "CENTER"); near(gp.x, 0, 1e-9); near(gp.y, 0, 1e-9)
-        -- the tip test above only holds if the clip's top rides the fill's top with no offset
+        -- the tip test above holds because the clip's top rides the fill's top, lowered by exactly `drop`
         local tp = rv.clip._points.TOP
         eq(tp.rel, rv.strip._fill, "the clip's top is the fill's top"); eq(tp.relPoint, "TOP")
-        near(tp.x, 0, 1e-9); near(tp.y, 0, 1e-9, "no offset between the clip top and the fill top")
+        near(tp.x, 0, 1e-9); near(tp.y, -drop, 1e-9, "the lit fill's top is `drop` under the fill's top edge")
         -- not under the fill's clip (the clip would cut the raised caret away), but on its own clip ...
         local up = c:GetParent()
         eq(up, rv.caretHost, "on its own host frame")
@@ -1119,6 +1123,107 @@ function T.the_caret_caps_the_reveal_top_edge_inside_the_run()
         -- the host fills the caret clip so the caret's anchor math is unchanged
         eq(up._points.TOPLEFT.rel, cc); eq(up._points.BOTTOMRIGHT.rel, cc)
     end
+end
+
+-- THE CAP. MaskTexture does not clip on this client (Theme.lua, verified in game), so the flat cut the
+-- clip makes through the next chevron cannot be shaped by a mask. The lit fill's top is lowered by `drop`
+-- under the fill edge and a solid caret-roof cap (TEXTURES_UP.cap, the lit tone) sits under the outline and
+-- covers the cut: the fill's leading edge is then the caret's own chevron.
+local function upright(tex)
+    local c = tex._tc
+    return c[1] == 0 and c[2] == 1 and c[3] == 0 and c[4] == 1
+end
+
+function T.the_lit_fill_ends_under_the_caret_and_a_roof_shaped_cap_covers_the_cut()
+    local W = world()
+    local run = W.tgt.run
+    local art = FS.ChevronCastBar.TEXTURES_UP
+    local C = FS.GunsightTape.C
+    local u = run.capH / 16                       -- one caret unit (1 image px of the mockup)
+    local drop = run.capH * C.CAP_DROP
+    -- The cut is a straight line across the lit column (half width segW / 2) and the cap must contain it.
+    -- The roof still falls roofAtEdge by the column edge and the cap's lower edge crosses the centre at
+    -- apex, so the cut has (drop - roofAtEdge) above it and (apex - drop) below it: 2 caret units each at
+    -- least, about 2.5 px at 1080p and more than the scissor and texture snapping can move it.
+    local roofAtEdge = (run.segW / run.capW) * MU.CAP_ARM * run.capH
+    local apex = MU.CAP_APEX * run.capH
+    ok(drop - roofAtEdge >= 2 * u, "the cut is under the roof at the column edge by " .. (drop - roofAtEdge) / u .. " u")
+    ok(apex - drop >= 2 * u, "the cut is above the cap's lower apex by " .. (apex - drop) / u .. " u")
+    ok(apex <= 12 * u, "the cap is no thicker than needed: apex " .. apex / u .. " u")
+    for _, rv in ipairs(W.tgt.reveals) do
+        local cap = rv.cap
+        ok(cap ~= nil, "the reveal has a cap")
+        eq(art.cap:find("cast_chevron_up_cap.tga", 1, true) ~= nil, true, "the shipped cap art path")
+        eq(cap._texture, art.cap)
+        eq(cap:GetParent(), rv.caretHost, "on the caret's own host: under the caret clip, the reveal's tone alpha, hidden with it")
+        eq(rv.frame, rv.caretHost:GetParent():GetParent(), "the caret clip hangs off the reveal frame")
+        eq(cap._layer, "ARTWORK"); eq(cap._sub, -1)
+        ok(cap._sub < rv.glow._sub and rv.glow._sub < rv.caret._sub, "under the glow, which is under the outline")
+        eq(cap._vc[1], rv.color[1]); eq(cap._vc[2], rv.color[2]); eq(cap._vc[3], rv.color[3])
+        eq(cap._vc[4], 1, "as opaque as the lit chevrons it joins, so the cut vanishes")
+        local tl, br = cap._points.TOPLEFT, cap._points.BOTTOMRIGHT
+        ok(tl and br, "anchored by two corners to the caret, so it follows the caret by anchoring alone")
+        eq(tl.rel, rv.caret); eq(tl.relPoint, "TOPLEFT"); near(tl.x, 0, 1e-9); near(tl.y, 0, 1e-9)
+        eq(br.rel, rv.caret); eq(br.relPoint, "BOTTOMRIGHT"); near(br.x, 0, 1e-9); near(br.y, 0, 1e-9)
+        ok(upright(cap), "never flipped: a target channel fills up like a cast")
+        -- the lit chevrons stay full strength and on the clipped host; the dim row is untouched
+        eq(rv.lit[1]:GetParent(), rv.host); eq(rv.dim[1]:GetParent(), rv.frame)
+        near(rv.dim[1]._vc[4], MU.DIM, 1e-9)
+        eq(rv.dim[1]._texture, art.fill)
+    end
+end
+
+function T.the_cap_never_leaves_the_caret_when_a_target_channel_starts_or_the_tape_rescales()
+    local W = world()
+    __units.target.cast = nil
+    __units.target.chan = { name = "Drain", tex = "icon", startMS = 100000, endMS = 101500, notInt = false, spellID = 1 }
+    W.fire(W.tgt.S, "UNIT_SPELLCAST_CHANNEL_START")
+    for _, h in ipairs({ 1080, 1440 }) do
+        UIParent._h = h; UIParent._w = h * 16 / 9
+        __fireEvent("UI_SCALE_CHANGED")
+        for _, rv in ipairs(W.tgt.reveals) do
+            ok(upright(rv.cap), "not flipped for a channel")
+            ok(upright(rv.caret), "the caret too")
+            near(rv.cap._points.TOPLEFT.y, 0, 1e-9)
+            eq(rv.cap._points.TOPLEFT.rel, rv.caret)
+            near(rv.clip._points.TOP.y, -W.tgt.run.capH * FS.GunsightTape.C.CAP_DROP, 1e-9,
+                "the cut stays `drop` under the edge after a rescale")
+        end
+    end
+    W.clean()
+end
+
+-- The cap rides the caret by its two build-time anchors. Nothing may re-anchor it while a cast runs, the
+-- tape rescales or a channel starts (the caret itself is the only thing that moves).
+function T.the_cap_keeps_its_two_anchors_and_is_never_reseated_after_build()
+    local W = world()
+    local calls = 0
+    for _, rv in ipairs(W.tgt.reveals) do
+        local n = 0
+        for _ in pairs(rv.cap._points) do n = n + 1 end
+        eq(n, 2, "two anchors")
+        for _, name in ipairs({ "SetPoint", "ClearAllPoints", "SetAllPoints", "SetSize", "SetWidth", "SetHeight" }) do
+            rv.cap[name] = function() calls = calls + 1 end
+        end
+    end
+    startTargetCast(W, true)
+    W.at(W.tgt.S, __now + 0.3)
+    UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
+    __fireEvent("UI_SCALE_CHANGED")
+    W.endCast("target")
+    W.fire(W.tgt.S, "UNIT_SPELLCAST_STOP", __SECRET_ID)
+    __units.target.cast = nil
+    __units.target.chan = { name = "Drain", tex = "icon", startMS = 100000, endMS = 101500, notInt = false, spellID = 1 }
+    W.fire(W.tgt.S, "UNIT_SPELLCAST_CHANNEL_START")
+    W.at(W.tgt.S, __now + 0.3)
+    eq(calls, 0, "no re-anchoring or resizing of the cap after build")
+    for _, rv in ipairs(W.tgt.reveals) do
+        local n = 0
+        for _ in pairs(rv.cap._points) do n = n + 1 end
+        eq(n, 2, "still two anchors")
+        eq(rv.cap._points.TOPLEFT.rel, rv.caret)
+    end
+    W.clean()
 end
 
 -- The engine sets the caret glow size only in a successful vertical layout; a rejected one (secret or
@@ -1632,8 +1737,22 @@ def run_case(name: str, mu: dict) -> str | None:
     return None
 
 
+ART_GENERATOR = HERE / "assets" / "generate_cast_chevron_up.py"
+
+
+def art_constants() -> dict:
+    """The cap art's own geometry, read back from its generator: the caret's arm depth and the cap's
+    lower apex, each as a fraction of the 32 row box (which the reveal sizes to the caret)."""
+    src = ART_GENERATOR.read_text(encoding="utf-8")
+    box_h = float(_m(r"\bBOX_H = (\d+)", src, "generator BOX_H").group(1))
+    arm_n, arm_d = _m(r"\bCARET_DEPTH = ([\d.]+) / ([\d.]+)", src, "generator CARET_DEPTH").groups()
+    notch = float(_m(r"\bCAP_NOTCH = ([\d.]+)", src, "generator CAP_NOTCH").group(1))
+    return dict(CAP_ARM=float(arm_n) / float(arm_d), CAP_APEX=notch / box_h)
+
+
 def main() -> int:
     mu = mockup_tape()
+    mu.update(art_constants())
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.execute(CHECKS.replace("__checks = T", "__names = T"))
     names = sorted(k for k in lua.eval("__names").keys())

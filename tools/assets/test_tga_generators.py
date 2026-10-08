@@ -63,6 +63,7 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "cast_chevron_up_glow": (128, 64),
         "cast_chevron_up_burst": (128, 64),
         "cast_chevron_up_strip": (32, 16),
+        "cast_chevron_up_cap": (64, 32),
     },
     # generate_hud_key_glyphs.py: the eight HUD toggle key glyphs.
     "hud_key_glyphs": {
@@ -972,7 +973,7 @@ def chevron_up_outputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return work
 
 
-@pytest.mark.parametrize("name", ["fill", "outline", "glow", "burst", "strip"])
+@pytest.mark.parametrize("name", ["fill", "outline", "glow", "burst", "strip", "cap"])
 def test_chevron_up_textures_are_white_with_shape_in_alpha(
         chevron_up_outputs: Path, name: str) -> None:
     path = chevron_up_outputs / f"cast_chevron_up_{name}.tga"
@@ -982,7 +983,7 @@ def test_chevron_up_textures_are_white_with_shape_in_alpha(
     assert max(alphas) >= (150 if name == "glow" else 255) and min(alphas) == 0
 
 
-@pytest.mark.parametrize("name", ["fill", "outline", "glow", "burst"])
+@pytest.mark.parametrize("name", ["fill", "outline", "glow", "burst", "cap"])
 def test_chevron_up_is_mirror_symmetric(chevron_up_outputs: Path, name: str) -> None:
     grid = _alpha_grid(chevron_up_outputs / f"cast_chevron_up_{name}.tga")
     w = len(grid[0])
@@ -1018,6 +1019,48 @@ def test_chevron_up_outline_is_a_hollow_caret(chevron_up_outputs: Path) -> None:
         for x in range(UP_W):
             if not _poly_inside(x + 0.5, y + 0.5, poly) and _poly_dist(x + 0.5, y + 0.5, poly) > 0.9:
                 assert _alpha_at(path, x, y) == 0, (x, y)
+
+
+# The cap is the caret's roof (same tip, same arm ends) filled solid down to CAP_APEX rows under the
+# tip: the lit fill under the caret ends 9.2 caret units under the tip, and the cap hides that cut.
+UP_CAP_ROOF_END = UP_CARET_D * UP_H     # row of the arm ends: the roof falls this far over half the box
+UP_CAP_APEX = 23                        # rows under the tip where the cap's lower edge crosses the centre
+UP_CAP_CUT_ROW = 18.4                   # the lit fill's flat top: 9.2 of the caret's 16 units (two rows a unit) under the tip
+UP_LIT_W, UP_CARET_W = 20.0, 26.0       # image px: the lit chevron inside the caret box
+
+
+def _roof_row(x: float) -> float:
+    return UP_CAP_ROOF_END * abs(x - UP_W / 2) / (UP_W / 2)
+
+
+def test_chevron_up_cap_follows_the_caret_roof_and_never_rises_above_it(
+        chevron_up_outputs: Path) -> None:
+    path = chevron_up_outputs / "cast_chevron_up_cap.tga"
+    assert _alpha_at(path, 32, 1) >= 250, "solid to the tip"
+    assert _alpha_at(path, 3, 3) == 0, "above the arm is empty"
+    for y in range(UP_H):
+        for x in range(UP_W):
+            if y + 0.5 < _roof_row(x + 0.5) - 0.9:
+                assert _alpha_at(path, x, y) == 0, ("above the roof", x, y)
+            if _roof_row(x + 0.5) + 0.9 < y + 0.5 < min(UP_H, UP_CAP_APEX + _roof_row(x + 0.5)) - 0.9:
+                assert _alpha_at(path, x, y) >= 250, ("inside the band", x, y)
+    assert _alpha_at(path, 32, UP_CAP_APEX + 2) == 0, "open under the lower edge at the centre"
+
+
+def test_chevron_up_cap_covers_the_lit_fills_flat_top_across_the_lit_column(
+        chevron_up_outputs: Path) -> None:
+    path = chevron_up_outputs / "cast_chevron_up_cap.tga"
+    # The lit chevron is 20 image px wide inside the caret's 26, centred: texel columns 7.38 .. 56.62, so
+    # columns 7 .. 56 (edge columns included). Every row within 2 caret units (4 rows) of the cut must be
+    # solid in each, whole rows only: 15 .. 22.
+    edge = (UP_W - UP_W * UP_LIT_W / UP_CARET_W) / 2
+    first, last = int(edge), int(UP_W - edge)
+    assert (first, last) == (7, 56)
+    top, bottom = math.ceil(UP_CAP_CUT_ROW - 4), math.floor(UP_CAP_CUT_ROW + 4)
+    assert (top, bottom) == (15, 22) and bottom + 1 <= UP_CAP_APEX
+    for x in range(first, last + 1):
+        for y in range(top, bottom + 1):
+            assert _alpha_at(path, x, y) >= 250, (x, y)
 
 
 @pytest.mark.parametrize("name", ["glow", "burst"])
