@@ -110,6 +110,28 @@ Use a Paladin that has learned at least one seal. Step 6 works on any class.
 7. Send back: `/fsbug` with a note on what you were doing, sent as above, plus
    a screenshot of anything that looks off.
 
+## Warrior: stance shoulder and stance keys
+
+Use a Warrior with at least Battle Stance. Defensive and Berserker stance
+slots stay empty until learned. Do a FULL client restart, not /reload.
+
+1. Stance shoulder: with the Console on, the stances stand on the Console's
+   top-left shoulder, the same place as the Paladin's seals, in the order
+   Battle, Defensive, Berserker. A stance you have not learned leaves its
+   slot empty. The block should look like part of the Console, with no seam.
+2. Click a stance: it casts, and the active one is highlighted. Quick Keybind
+   (Esc > Options > Keybindings) binds each stance button; the key follows the
+   stance, not the slot.
+3. Stance keys: bind a key to a stance, switch stance, `/reload` and zone
+   through a loading screen. Each button shows ONE key label, never two drawn
+   over each other. Report it with `/fsbug` if a second label
+   returns, and say when it came back.
+4. `/fsconsole off`: the stances go back to their own row (the old stance bar
+   seat), `/fsconsole on` returns them to the shoulder. The switch waits for
+   combat to end. `/fsedit` offers a box for the stance bar only while it is
+   on its own row.
+5. Other classes keep their stance bar as before (Druid forms, Rogue stealth).
+
 ## Layout editor: /fsedit
 
 Out of combat only. Close Blizzard Edit Mode first.
