@@ -552,6 +552,11 @@ function T.chrome_title_subtitle_footer_and_close()
     yes(findText("// settings", f))
     local x = findText("X", f)
     yes(x, "close X")
+    local xb = x.parent
+    eq(xb:GetWidth(), 26, "close X width matches the mockup")
+    eq(xb:GetHeight(), 14, "close X height matches the mockup")
+    yes(xb.fsSkin.opts.glowAlpha <= 0.25,
+        "a 14px button's halo stays faint, or it reads as a second ring (" .. tostring(xb.fsSkin.opts.glowAlpha) .. ")")
     click("X", f)
     no(W.IsShown(), "the X closes the window")
 end
@@ -1544,6 +1549,33 @@ function T.builders_auto_stack_and_bind_keys_or_get_set()
     eq(confirmed, 1)
     click("Wipe", win()); click("Cancel", dialog())
     eq(confirmed, 1, "cancel does not fire")
+end
+
+function T.big_button_spans_the_page_by_anchors_not_by_a_held_width()
+    local W = boot()
+    local frames = {}
+    W.RegisterCategory({ key = "demo", label = "Demo", order = 3, build = function(content)
+        frames.content = content
+        frames.big = W.UI.Button(content, { text = "EDIT LAYOUT", big = true, onClick = function() end })
+        frames.small = W.UI.Button(content, { text = "Fire", onClick = function() end })
+    end })
+    W.Open("demo")
+    local big = frames.big
+    local left, right
+    for _, p in ipairs(big.points) do
+        if p.point == "TOPLEFT" then left = p elseif p.point == "TOPRIGHT" then right = p end
+    end
+    yes(left and right, "big button is anchored on both sides")
+    yes(left.rel == frames.content and right.rel == frames.content, "both anchors are on the page content")
+    eq(right.x, 0, "right anchor is flush with the content edge")
+    eq(right.y, left.y, "both anchors sit on the same row")
+    -- A held 1px width is the stretch sentinel; it must not survive next to the two anchors.
+    yes(big:GetWidth() == 0, "big button holds no explicit width (" .. tostring(big:GetWidth()) .. ")")
+    eq(big:GetHeight(), 36)
+    eq(big.fsLabel.points[1].rel, big, "label is centred on the button")
+    eq(big.fsLabel.points[1].point, "CENTER")
+    yes(frames.small:GetWidth() >= 70, "a regular button keeps its text width")
+    eq(#frames.small.points, 1, "a regular button is anchored on the left only")
 end
 
 function T.ui_confirm_runs_the_callback_only_on_accept()

@@ -160,8 +160,8 @@ local function Cursor(content)
     return c
 end
 
--- Seats `frame` below the previous row of `content`. A frame at most 1 wide stretches across the page;
--- half = "left" or "right" places two rows side by side and drops the cursor after the right one.
+-- Seats `frame` below the previous row of `content`. A frame with `fsStretch` set, or at most 1 wide,
+-- stretches across the page; half = "left" or "right" places two rows side by side and drops the cursor after the right one.
 function UI.Stack(content, frame, half)
     local c = Cursor(content)
     local h = frame:GetHeight()
@@ -181,7 +181,7 @@ function UI.Stack(content, frame, half)
         c.pending = nil
     end
     frame:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -c.y)
-    if frame:GetWidth() <= 1 then frame:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, -c.y) end
+    if frame.fsStretch or frame:GetWidth() <= 1 then frame:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, -c.y) end
     c.y = c.y + h
     return frame
 end
@@ -268,7 +268,7 @@ end
 
 local function MakeButton(parent, o)
     local b = CreateFrame("Button", nil, parent)
-    b:SetSize(o.width, o.height)
+    if o.width then b:SetSize(o.width, o.height) else b:SetHeight(o.height) end
     b:RegisterForClicks("LeftButtonUp")
     b.fsRing = o.ring
     b.fsFill = Theme.AddCutSliceFill(b, o.fill or C.ink, o.chamfer)
@@ -301,12 +301,13 @@ end
 local function BuildButton(parent, o)
     local ring = o.warn and C.pink or (o.big and C.cyan or C.violet)
     local textColor = o.warn and C.pink or C.cyan
-    local width = o.big and 1 or math.max(70, math.floor(#o.text * 6.6 + 28))
+    local width = not o.big and math.max(70, math.floor(#o.text * 6.6 + 28)) or nil
     local b = MakeButton(parent, {
         width = width, height = o.big and 36 or 24, ring = ring, textColor = textColor,
         chamfer = 6, size = o.big and 14 or 11, text = o.text,
     })
     b.fsWarn = o.warn == true
+    b.fsStretch = o.big == true
     HoverStyle(b, ring)
     b:SetScript("OnClick", function(self)
         if not self:IsEnabled() then return end
@@ -932,7 +933,7 @@ local function BuildChrome(frame)
     ui.category:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -17, -36)
 
     local close = MakeButton(frame, {
-        width = 26, height = 14, ring = C.pink, textColor = C.pink, chamfer = 4, size = 11, text = "X", glow = 0.55,
+        width = 26, height = 14, ring = C.pink, textColor = C.pink, chamfer = 4, size = 11, text = "X", glow = 0.2,
     })
     close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -7, -5)
     close:SetScript("OnClick", function() CW.Close() end)

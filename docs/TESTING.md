@@ -118,10 +118,12 @@ Out of combat only. Close Blizzard Edit Mode first.
 2. Drag a box. On release the piece moves there and snaps to the grid.
 3. Click a box, then press the arrow keys: 1 unit per press, Shift+arrow moves one grid step. (Keys that are not arrows or Esc should still reach the game; report it if movement keys stop working.)
 4. Right-click a box: that piece goes back to its default seat.
-5. Esc leaves. Starting a fight leaves too and drops a drag in progress.
+5. A small LAYOUT EDIT panel with a DONE button sits top-centre while editing. DONE or Esc leaves; positions are already saved as you drop. Starting a fight leaves too and drops a drag in progress.
+   The DONE bar can cover a box seated under it (buffs, minimap): a box is selected only by clicking it, so click its visible part, then use the arrow keys.
 6. Check the minimap moves with its addon tray, the chat keeps its minimised and maximised states, and the pet panel (floating, not on the Console) follows the box.
 7. `/reload`: every position holds. `/fsedit reset all`, then `/fsedit reset all confirm` puts everything back.
 8. The Layout page of `/fsconfig` has the same controls: EDIT LAYOUT, snap on/off, grid size 4/8/16/32, and Reset all positions.
+9. EDIT LAYOUT closes the settings window; DONE or Esc reopens it on the Layout page. Leaving after `/fsedit`, by a fight, or by Blizzard Edit Mode does not open it.
 
 ## Settings window: /fsconfig
 
