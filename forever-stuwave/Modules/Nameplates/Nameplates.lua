@@ -1372,6 +1372,12 @@ local function AcquireFrame()
     -- type>) in the gap between acquire and the new unit's own UpdatePower
     -- call.
     frame.powerType = nil
+    -- UpdateName's unchanged-input cache and the dead-flag baseline are
+    -- per-unit too; clearing them makes the new occupant write its own text
+    -- and colour and seed its own dead state.
+    frame.nameKey, frame.nameLevel, frame.nameClass, frame.namePlayerLevel = nil, nil, nil, nil
+    frame.nameR, frame.nameG, frame.nameB = nil, nil, nil
+    frame.dead = nil
     -- Sizer back to empty so a reused plate doesn't inherit the previous
     -- unit's height (and its mid-plate wedge closes with it); UpdatePower sets
     -- it for the new unit.
@@ -1560,12 +1566,15 @@ end
 -- GetEngagementColor itself falls back to GetReactionColor for a
 -- not-attackable or not-yet-engaged unit, so an untouched mob's fill shows
 -- its reaction color (amber neutral, hostile pink) until threat starts.
+local function ReadTapDenied(unit)
+    return UnitIsTapDenied(unit) and true or false
+end
+
 local function UpdateFillColor(unit)
     local root = FS.framesByUnit[unit]
     if not root then return end
 
-    local denied = false
-    local ok = pcall(function() denied = UnitIsTapDenied(unit) and true or false end)
+    local ok, denied = pcall(ReadTapDenied, unit)
     root.tapDenied = ok and denied
 
     if root.tapDenied then
@@ -1667,8 +1676,9 @@ local function UpdateGlowState(unit)
 end
 
 -- Level prefix for the nameplate name, coloured by difficulty so an out-of-depth
--- mob is obvious before you pull it. UnitLevel/UnitClassification are plain
--- (non-secret) on this client, so ordinary comparisons are fine here.
+-- mob is obvious before you pull it. UnitLevel/UnitClassification are expected
+-- to be plain (non-secret) on this client, so this builder compares freely; it
+-- runs under pcall, and UpdateName checks IsSecret on them before caching.
 --
 -- Level -1 means "cannot determine", which the game shows as a skull; that is
 -- exactly the case worth shouting about, so it renders as a red "??".
@@ -1747,56 +1757,123 @@ local function UpdateName(unit)
     if not root then return end
 
     local name = GetPlateUnitName(unit)
+    local nameText = root.nameText
 
-    -- A secret name cannot be concatenated, so it skips the level prefix and
-    -- goes straight to SetText, which accepts secrets.
+    -- A secret name cannot be concatenated or compared, so it skips the level
+    -- prefix and the unchanged-input cache, and goes straight to SetText,
+    -- which accepts secrets.
     if FS.IsSecret(name) then
-        root.nameText:SetText(name)
+        root.nameKey = nil
+        nameText:SetText(name)
     else
-        -- Other players show a level too, but their classification is meaningless.
-        local ok, prefix = pcall(BuildLevelPrefix, unit)
-        if ok and prefix then
-            root.nameText:SetText(prefix .. name)
-        else
-            root.nameText:SetText(name)
+        -- The text depends on exactly these four inputs (BuildLevelPrefix tints
+        -- by the player's level), so an event that changes none of them skips
+        -- the format/concat and the SetText.
+        local level = UnitLevel(unit)
+        local classification = UnitClassification(unit)
+        local playerLevel = UnitLevel("player")
+        local plain = not (FS.IsSecret(level) or FS.IsSecret(classification) or FS.IsSecret(playerLevel))
+        if not plain or root.nameKey ~= name or root.nameLevel ~= level
+            or root.nameClass ~= classification or root.namePlayerLevel ~= playerLevel then
+            if plain then
+                root.nameKey, root.nameLevel = name, level
+                root.nameClass, root.namePlayerLevel = classification, playerLevel
+            else
+                root.nameKey = nil
+            end
+            -- Other players show a level too, but their classification is meaningless.
+            local ok, prefix = pcall(BuildLevelPrefix, unit)
+            if ok and prefix then
+                nameText:SetText(prefix .. name)
+            else
+                nameText:SetText(name)
+            end
         end
     end
 
-    local color
+    local r, g, b
     local isPlayer = UnitIsPlayer(unit)
     if not FS.IsSecret(isPlayer) and isPlayer then
         local classFile = select(2, UnitClass(unit))
         if not FS.IsSecret(classFile) then
             local cc = HAS_RAID_CLASS_COLORS and classFile and RAID_CLASS_COLORS[classFile]
             if cc then
-                color = { cc.r, cc.g, cc.b }
+                r, g, b = cc.r, cc.g, cc.b
             end
         end
     end
 
-    if not color then
+    if not r then
         -- Checked here so a non-attackable unit goes straight to the name
         -- palette; for an attackable one, GetNameReactionColor is passed as
         -- the engagement fallback so an unengaged mob's name reads yellow/red
         -- (the NAME palette) rather than the fill palette.
+        local color
         local attackable = UnitCanAttack("player", unit)
         if not FS.IsSecret(attackable) and attackable then
             color = GetEngagementColor(unit, GetNameReactionColor)
         else
             color = GetNameReactionColor(unit)
         end
+        r, g, b = color[1], color[2], color[3]
     end
-    root.nameText:SetTextColor(color[1], color[2], color[3])
+    if root.nameR ~= r or root.nameG ~= g or root.nameB ~= b then
+        root.nameR, root.nameG, root.nameB = r, g, b
+        nameText:SetTextColor(r, g, b)
+    end
 end
 
 -- Quest objective indicator: shown when the plate's unit is relevant to any
 -- quest in the player's own quest log. No cleaner single-call "is this unit a
--- quest objective" API exists, so this scans the quest log (typically well
--- under 30 entries) rather than tooltip-scan the unit. IsUnitOnQuest's
+-- quest objective" API exists, so this tests the unit against each logged
+-- quest's ID (cached below) rather than tooltip-scan the unit. IsUnitOnQuest's
 -- secrecy on a nameplate unit token is UNVERIFIED on this client, so its
 -- boolean return is FS.IsSecret-guarded before any truth-test, same ordering
 -- as UpdateRaidMarker's index read above. Missing API degrades to a
 -- permanently-hidden icon, not a guess.
+-- questIDs holds the non-header questIDs of the quest log. QUEST_LOG_UPDATE
+-- and QUEST_WATCH_UPDATE only mark it dirty; the first read after that
+-- rebuilds it, so a burst of events with no plates (or no read) costs nothing.
+local questIDs = {}
+local questIDCount = 0
+local questCacheDirty = true
+
+local function ScanQuestLog()
+    wipe(questIDs)
+    questIDCount = 0
+    for i = 1, C_QuestLog.GetNumQuestLogEntries() do
+        local info = C_QuestLog.GetInfo(i)
+        if info and not info.isHeader then
+            questIDCount = questIDCount + 1
+            questIDs[questIDCount] = info.questID
+        end
+    end
+end
+
+local function IsUnitOnAnyQuest(unit)
+    for i = 1, questIDCount do
+        local isOnQuest = C_QuestLog.IsUnitOnQuest(unit, questIDs[i])
+        if not FS.IsSecret(isOnQuest) and isOnQuest then
+            return true
+        end
+    end
+    return false
+end
+
+-- Tracks UnitIsDead per plate and reports whether it flipped since the last
+-- call, so the health events can refresh the quest icon on a death and stay
+-- free on every other tick. A secret answer changes nothing.
+local function SyncDeadFlag(unit)
+    local root = FS.framesByUnit[unit]
+    if not root then return false end
+    local isDead = UnitIsDead(unit)
+    if FS.IsSecret(isDead) then return false end
+    isDead = isDead and true or false
+    if root.dead == isDead then return false end
+    root.dead = isDead
+    return true
+end
+
 local function UpdateQuestIcon(unit)
     local root = FS.framesByUnit[unit]
     if not root then return end
@@ -1806,22 +1883,19 @@ local function UpdateQuestIcon(unit)
         return
     end
 
-    local onQuest = false
-    pcall(function()
-        local numShown = C_QuestLog.GetNumQuestLogEntries()
-        for i = 1, numShown do
-            local info = C_QuestLog.GetInfo(i)
-            if info and not info.isHeader then
-                local isOnQuest = C_QuestLog.IsUnitOnQuest(unit, info.questID)
-                if not FS.IsSecret(isOnQuest) and isOnQuest then
-                    onQuest = true
-                    break
-                end
-            end
+    if questCacheDirty then
+        -- A failed scan leaves the cache dirty (retried on the next read) and
+        -- empty, so the icon hides rather than showing a stale answer.
+        if pcall(ScanQuestLog) then
+            questCacheDirty = false
+        else
+            wipe(questIDs)
+            questIDCount = 0
         end
-    end)
+    end
 
-    if onQuest then
+    local ok, onQuest = pcall(IsUnitOnAnyQuest, unit)
+    if ok and onQuest then
         root.questIcon:Show()
     else
         root.questIcon:Hide()
@@ -2040,6 +2114,7 @@ local function OnNamePlateAdded(unit)
     UpdateGlowState(unit)
     UpdateRaidMarker(unit)
     UpdateName(unit)
+    SyncDeadFlag(unit)
     UpdateQuestIcon(unit)
     UpdateAuraIcons(unit)
     -- Seed the cast bar in case the plate appeared mid-cast.
@@ -2159,6 +2234,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
     -- which units are quest-relevant addon-wide) -- refresh every live plate's
     -- quest icon the same unitless way as the two events above.
     if event == "QUEST_LOG_UPDATE" or event == "QUEST_WATCH_UPDATE" then
+        questCacheDirty = true
         for otherUnit in pairs(FS.framesByUnit) do
             UpdateQuestIcon(otherUnit)
         end
@@ -2219,7 +2295,13 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
             UpdateFillColor(unit)
             UpdateGlowState(unit)
             UpdateName(unit)
-            UpdateQuestIcon(unit)
+            -- Quest relevance does not follow ordinary health ticks: a faction
+            -- or flag change, or the unit dying, can move it.
+            if event == "UNIT_FACTION" or event == "UNIT_FLAGS" then
+                UpdateQuestIcon(unit)
+            elseif SyncDeadFlag(unit) then
+                UpdateQuestIcon(unit)
+            end
         end
     elseif event == "UNIT_THREAT_LIST_UPDATE" or event == "UNIT_THREAT_SITUATION_UPDATE" then
         -- Carries a unit arg like UNIT_HEALTH (no "player"-token case to

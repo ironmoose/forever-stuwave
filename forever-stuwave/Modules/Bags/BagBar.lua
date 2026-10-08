@@ -310,7 +310,7 @@ local function ApplySlotState(slot)
         er, eg, eb, ea = EDGE_EMPTY[1], EDGE_EMPTY[2], EDGE_EMPTY[3], 0.55
     elseif slot.quality and slot.quality >= 2 and slot.qualityColor then
         local qc = slot.qualityColor
-        er, eg, eb, ea = qc[1], qc[2], qc[3], 0.85
+        er, eg, eb, ea = qc.r, qc.g, qc.b, 0.85
     else
         er, eg, eb, ea = accent[1], accent[2], accent[3], 0.75
     end
@@ -374,11 +374,7 @@ local function ReadItem(slot)
         slot.quality = type(quality) == "number" and quality or nil
         local colors = ITEM_QUALITY_COLORS
         local color = slot.quality and colors and colors[slot.quality]
-        if color then
-            slot.qualityColor = { color.r, color.g, color.b }
-        else
-            slot.qualityColor = nil
-        end
+        slot.qualityColor = color or nil
     else
         slot.quality, slot.qualityColor = nil, nil
     end
@@ -401,32 +397,33 @@ local function EachActive(fn)
     end
 end
 
-local function RefreshItems()
-    EachActive(function(slot)
-        ReadItem(slot)
-        ReadLock(slot)
-        ApplySlotState(slot)
-    end)
+local function RefreshItemSlot(slot)
+    ReadItem(slot)
+    ReadLock(slot)
+    ApplySlotState(slot)
 end
 
-local function RefreshLocks()
-    EachActive(function(slot)
-        ReadLock(slot)
-        ApplySlotState(slot)
-    end)
+local function RefreshLockSlot(slot)
+    ReadLock(slot)
+    ApplySlotState(slot)
 end
 
-local function RefreshOpen()
-    EachActive(function(slot)
-        ReadOpen(slot)
-        ApplySlotState(slot)
-    end)
+local function RefreshOpenSlot(slot)
+    ReadOpen(slot)
+    ApplySlotState(slot)
 end
+
+local function RefreshItems() EachActive(RefreshItemSlot) end
+
+local function RefreshLocks() EachActive(RefreshLockSlot) end
+
+local function RefreshOpen() EachActive(RefreshOpenSlot) end
 
 local function RefreshFree()
     local free = FreeSlotCount()
     for _, slot in ipairs(slots) do
-        if slot.kind == "backpack" and slot.count then
+        if slot.kind == "backpack" and slot.count and (not slot.freeShown or slot.free ~= free) then
+            slot.freeShown = true
             slot.free = free
             slot.count:SetText(free and tostring(free) or "")
         end
@@ -435,26 +432,33 @@ end
 
 local pulseDriver = CreateFrame("Frame")
 pulseDriver:Hide()
+local function PulseDragSlot(slot)
+    if slot.dragTarget then ApplySlotState(slot) end
+end
+
 pulseDriver:SetScript("OnUpdate", function(_, elapsed)
     pulseT = pulseT + (elapsed or 0)
     pulse = 0.5 + 0.5 * math.sin(pulseT * PULSE_RATE)
-    EachActive(function(slot)
-        if slot.dragTarget then ApplySlotState(slot) end
-    end)
+    EachActive(PulseDragSlot)
 end)
 
+-- Per-pass state for SyncCursorSlot, set by RefreshCursor so the callback needs no closure.
+local cursorHoldsBag, cursorAnyTarget = false, false
+
+local function SyncCursorSlot(slot)
+    local target = cursorHoldsBag and (slot.kind == "bag" or slot.kind == "reagent") and slot.invSlot ~= nil
+    if target then cursorAnyTarget = true end
+    if (slot.dragTarget or false) ~= target then
+        slot.dragTarget = target
+        ApplySlotState(slot)
+    end
+end
+
 local function RefreshCursor()
-    local holdsBag = CursorHoldsBag()
-    local any = false
-    EachActive(function(slot)
-        local target = holdsBag and (slot.kind == "bag" or slot.kind == "reagent") and slot.invSlot ~= nil
-        if target then any = true end
-        if (slot.dragTarget or false) ~= target then
-            slot.dragTarget = target
-            ApplySlotState(slot)
-        end
-    end)
-    pulseDriver:SetShown(any)
+    cursorHoldsBag = CursorHoldsBag()
+    cursorAnyTarget = false
+    EachActive(SyncCursorSlot)
+    pulseDriver:SetShown(cursorAnyTarget)
 end
 
 -------------------------------------------------------------------------------
@@ -814,13 +818,15 @@ end
 local function OnContainerToggled(_, frame)
     if type(frame) == "table" and frame.MatchesBagID and frame.IsShown then
         local shown = Clean(pcall(frame.IsShown, frame)) and true or false
-        EachActive(function(slot)
-            local bagID = slot.kind == "keyring" and KeyringBagID() or slot.bagID
-            if bagID ~= nil and Call(frame.MatchesBagID, frame, bagID) == true then
-                slot.open = shown
-                ApplySlotState(slot)
+        for _, slot in ipairs(slots) do
+            if slot.active then
+                local bagID = slot.kind == "keyring" and KeyringBagID() or slot.bagID
+                if bagID ~= nil and Call(frame.MatchesBagID, frame, bagID) == true then
+                    slot.open = shown
+                    ApplySlotState(slot)
+                end
             end
-        end)
+        end
     end
     if C_Timer and C_Timer.After then C_Timer.After(0, RefreshOpen) end
 end

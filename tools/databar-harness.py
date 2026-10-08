@@ -100,7 +100,7 @@ function InCombatLockdown() return __combat end
 date = os.date
 GetFramerate = function() return 60 end
 GetMoney = function() return 0 end
-C_Container = { GetContainerNumFreeSlots = function() return 10 end, GetContainerNumSlots = function() return 20 end }
+C_Container = { GetContainerNumFreeSlots = function() return __bagFree or 10 end, GetContainerNumSlots = function() return 20 end }
 unpack = unpack or table.unpack
 
 local noop = function() end
@@ -419,6 +419,41 @@ def test_combat() -> None:
     check(b.rt.eval("ForeverSTUwaveDataBar.w") == 1600, "out of combat a rescale still applies at once")
 
 
+def test_bags_gradient_colors_are_reused() -> None:
+    print("\n== bags meter: the per-tick gradient reuses its colour objects")
+    b = Bar()
+    b.login()
+    b.run("""
+__colors = 0
+CreateColor = function(r, g, bl, a) __colors = __colors + 1; return { r = r, g = g, b = bl, a = a } end
+__gradients, __lastGradient = 0, nil
+for _, f in ipairs(__frames) do
+    if f.kind == "StatusBar" then
+        f.GetStatusBarTexture = function()
+            return { SetGradient = function(_, dir, left, right)
+                __gradients = __gradients + 1; __lastGradient = { dir = dir, left = left, right = right }
+            end }
+        end
+    end
+end
+local bar = ForeverSTUwaveDataBar
+function __tick(free) __bagFree = free; bar.scripts.OnUpdate(bar, 100); return __lastGradient end
+-- 20 slots per bag: free 10 = half used (OK), 4 = 80% (WARN, from 75%), 1 = 95% (FULL, from 90%)
+__ok1, __warn1, __full1 = __tick(10), __tick(4), __tick(1)
+__colors = 0
+__ok2, __warn2, __full2 = __tick(10), __tick(4), __tick(1)
+""")
+    for label, var, rgb in (("OK", "ok", (0.133, 1, 0.463)), ("WARN", "warn", (1, 0.714, 0.282)),
+                            ("FULL", "full", (1, 0.180, 0.592))):
+        got = [b.rt.eval(f"__{var}1.left.{k}") for k in ("r", "g", "b", "a")]
+        check(got == [*rgb, 1], f"bags {label}: gradient colour is the state's colour", str(got))
+        check(b.rt.eval(f"__{var}1.dir") == "HORIZONTAL", f"bags {label}: gradient runs HORIZONTAL")
+        check(b.rt.eval(f"__{var}1.left == __{var}1.right"), f"bags {label}: both gradient ends are the same object")
+        check(b.rt.eval(f"__{var}2.left == __{var}1.left"), f"bags {label}: revisiting the state returns the same object")
+    check(b.rt.eval("__ok1.left ~= __warn1.left and __warn1.left ~= __full1.left"), "bags: each state has its own colour object")
+    check(b.rt.eval("__colors") == 0, "revisiting every state created no new colour objects", str(b.rt.eval("__colors")))
+
+
 def main() -> int:
     test_equal_without_bridge()
     test_link_between_bags_and_time()
@@ -427,6 +462,7 @@ def main() -> int:
     test_rescale_and_footprint()
     test_meter_corners()
     test_combat()
+    test_bags_gradient_colors_are_reused()
     print(f"\n{CHECKS} checks, {len(FAILURES)} failed")
     for f in FAILURES:
         print(f"  - {f}")

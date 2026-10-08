@@ -145,6 +145,11 @@ Not yet checked in game. `/fsprof` shows or hides the panel and the choice survi
 4. In combat, type `/fsprof`. It prints that the change applies after combat, the panel stays as it is, and it flips when combat ends. Learn or drop a profession in combat (if you can) and the rows catch up after combat.
 5. `/reload` with the panel hidden: it stays hidden. A click opens the window once (it does not open and immediately close), with the action-button "on key down" option both on and off.
 
+## Nameplate quest icon
+
+1. Accept a quest with kill or collect objectives and find its mobs: the "!" shows beside their names, and goes when the objective is done or the quest is turned in.
+2. Collapse a zone header in the quest log; quest mobs under it should still show the !
+
 ## If the window does not open
 
 Every report is also saved in the SavedVariables file. It is written on
