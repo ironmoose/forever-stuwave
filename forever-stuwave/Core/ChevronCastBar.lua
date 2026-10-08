@@ -1422,6 +1422,7 @@ function ChevronCastBar.Create(parent, opts)
     run.textures = resolveTextures(opts.textures)
     run.origin, run.segLen, run.xOff = 0, 0, 0
     run.capW, run.capH, run.capX = 0, 0, 0
+    run.capGlowW, run.capGlowH = 0, 0
 
     local frame = CreateFrame("Frame", nil, parent)
     run.frame = frame
@@ -1628,6 +1629,7 @@ local function layoutVertical(self, width, height)
     self.capX = x + (w - capW) / 2 + m              -- relative to the body (= the clip frame)
     self.outline:SetSize(capW, capH)
     self.glow:SetSize(capW * GLOW_SCALE, capH * GLOW_SCALE)
+    self.capGlowW, self.capGlowH = capW * GLOW_SCALE, capH * GLOW_SCALE   -- for a caret built outside the run
     self.caretX = nil
     self.burst:SetSize(w * GLOW_SCALE, hSeg * GLOW_SCALE)
     placeBurst(self, self.burstLeft or false)

@@ -1079,9 +1079,9 @@ function T.the_caret_caps_the_reveal_top_edge_inside_the_run()
     for _, rv in ipairs(W.tgt.reveals) do
         local c = rv.caret
         local p = c._points.BOTTOMLEFT
-        eq(c._points.TOPLEFT, nil, "it hangs from no top anchor: its bottom is the edge")
+        eq(c._points.TOPLEFT, nil, "it hangs from no top anchor: its bottom is a caret height under the edge")
         eq(p.rel, rv.clip, "anchored to the fill's clip frame"); eq(p.relPoint, "TOPLEFT")
-        near(p.y, 0, 1e-9, "its bottom edge sits on the fill's top edge, not under it")
+        near(p.y, -run.capH, 1e-9, "its TIP sits on the fill's top edge, as the engine's own caret tip is at progress")
         near(p.x, run.capX, 1e-9, "centred on the column, like the engine's caret")
         near(c._w, run.capW, 1e-9); near(c._h, run.capH, 1e-9)
         -- rv.clip's left edge is the run's left edge widened by m = capW, and capX includes that m, so in
@@ -1089,7 +1089,17 @@ function T.the_caret_caps_the_reveal_top_edge_inside_the_run()
         near((p.x - run.capW) + run.capW / 2, run.xOff + run.segW / 2, 1e-6,
             "the caret is centred on the chevron column in run coordinates (the +m is kept)")
         eq(c._texture, art.outline, "the run's outline caret art")
-        eq(c._vc[1], rv.color[1], "tinted like its fill")
+        eq(c._vc[1], run.coreR, "the engine caret's near-white outline, so it shows on the lit fill")
+        eq(rv.glow._vc[1], rv.color[1], "its glow carries the tone")
+        near(rv.glow._w, run.capGlowW, 1e-9, "the engine's caret glow size")
+        near(rv.glow._h, run.capGlowH, 1e-9, "the engine's caret glow height")
+        eq(rv.glow._blend, "ADD", "the glow adds light, like the engine's")
+        local gp = rv.glow._points.CENTER
+        eq(gp.rel, rv.caret); eq(gp.relPoint, "CENTER"); near(gp.x, 0, 1e-9); near(gp.y, 0, 1e-9)
+        -- the tip test above only holds if the clip's top rides the fill's top with no offset
+        local tp = rv.clip._points.TOP
+        eq(tp.rel, rv.strip._fill, "the clip's top is the fill's top"); eq(tp.relPoint, "TOP")
+        near(tp.x, 0, 1e-9); near(tp.y, 0, 1e-9, "no offset between the clip top and the fill top")
         -- not under the fill's clip (the clip would cut the raised caret away), but on its own clip ...
         local up = c:GetParent()
         eq(up, rv.caretHost, "on its own host frame")
@@ -1106,6 +1116,27 @@ function T.the_caret_caps_the_reveal_top_edge_inside_the_run()
         near(q.BOTTOMRIGHT.x, run.capW, 1e-6); near(q.BOTTOMRIGHT.y, 0, 1e-9)
         -- the host fills the caret clip so the caret's anchor math is unchanged
         eq(up._points.TOPLEFT.rel, cc); eq(up._points.BOTTOMRIGHT.rel, cc)
+    end
+end
+
+-- The engine sets the caret glow size only in a successful vertical layout; a rejected one (secret or
+-- zero size) must still leave SeatReveal a number to size the reveal's glow with.
+function T.a_rejected_layout_leaves_the_reveal_glow_a_size_and_seating_does_not_throw()
+    local W = world({ beforeLoad = function()
+        local create = FS.ChevronCastBar.Create
+        FS.ChevronCastBar.Create = function(host, opts)
+            local run = create(host, opts)
+            if run and opts.vertical then
+                eq(run.capGlowW, 0, "the glow size starts at 0 like the caret size"); eq(run.capGlowH, 0)
+                function run.Layout() return false end
+            end
+            return run
+        end
+    end })
+    W.clean()
+    ok(W.tgt and W.tgt.reveals, "the target tape and its reveals still build")
+    for _, rv in ipairs(W.tgt.reveals) do
+        eq(rv.glow._w, 0); eq(rv.glow._h, 0)
     end
 end
 

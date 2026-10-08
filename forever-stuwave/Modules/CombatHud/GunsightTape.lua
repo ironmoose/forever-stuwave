@@ -31,10 +31,10 @@
 --   reveals   the target only (BuildReveal, SeatReveal): the strips are the CLOCK and draw nothing (fill
 --             alpha 0, still shown and timer driven); a clipped frame anchored from the strip's bottom to
 --             its fill's TOP edge shows a column of the run's own lit chevrons at the run's segment rects,
---             with a dim row under it and the outline caret ON TOP of its top edge (the caret's bottom sits
---             on the edge, it caps the fill and does not hang into it), tinted pink and steel. The caret
---             lives on its own clipping frame that spans the run, so it never pokes past the run's top at
---             the end of a cast. The tone alpha (SetAlphaFromBoolean) lands on the reveal frames. A channel
+--             with a dim row under it and the outline caret with its TIP on the fill's top edge, exactly where
+--             the player run puts its own caret (the box hangs below the edge), near-white over a pink or steel glow. The
+--             caret lives on its own clipping frame that spans the run, so it never pokes past the run's top
+--             at the end of a cast. The tone alpha (SetAlphaFromBoolean) lands on the reveal frames. A channel
 --             fills up (StatusBar has no reverse fill on this client), the reveal edge is smooth, not a
 --             chevron at a time.
 --   cast tag  the target only: the KICK tag (pink) and the padlock (steel), seated off the boxR anchor
@@ -265,19 +265,12 @@ local function BuildStrip(run, parent, color, tile)
     return strip
 end
 
--- THE CHEVRON REVEAL (target tape). The target's cast times are secret, so the engine run cannot light
--- its chevrons; the strip StatusBar (SetTimerDuration) is the clock instead. Its own fill draws nothing
--- (texture alpha 0, the bar stays shown so it keeps updating); a clipped frame is anchored from the
--- strip's bottom up to the strip FILL's top edge (pure anchor geometry, nothing secret is read, the same
--- idea as FrameHelpers.CreateCaret riding a fill edge) and shows a full column of the run's own lit
--- chevron art, seated at the run's segment rects (SeatReveal), so the target fills with the same
--- chevrons as yours. One reveal per strip colour: the frame carries the tone alpha (SetAlphaFromBoolean),
--- a dim chevron row sits under the clip, and the outline caret sits ON TOP of the clip's top edge (its
--- bottom on that edge). The raised caret cannot live under the fill's clip (the clip would cut it away),
--- so it has its own clipping frame, a child of the reveal frame spanning the run vertically and widened
--- across by the caret width on each side, the way the engine clips its own caret (ChevronCastBar.lua
--- layoutVertical). That keeps the caret inside the run at the end of a cast.
---   { frame, clip, host, caretClip, caretHost, strip, fill, color, lit = {}, dim = {}, caret }
+-- THE CHEVRON REVEAL (target tape). The target's cast times are secret, so the strip StatusBar
+-- (SetTimerDuration) is the clock: its own fill draws nothing, and a clipped frame anchored from the
+-- strip's bottom to the fill's top edge (pure anchor geometry) shows a column of the run's lit chevron art.
+-- The outline caret has its tip on that clip's top edge, on its own run-height clip widened by the caret
+-- width (as the engine clips its own caret), so the clip does not cut it away or let it poke past the run.
+--   { frame, clip, host, caretClip, caretHost, strip, fill, color, lit = {}, dim = {}, caret, glow }
 -- nil when the strip has no fill texture to ride (BuildTape then degrades like a missing
 -- SetClipsChildren). The caller zeroes the fill's alpha once every reveal built, so a half built pair
 -- never leaves one strip invisible.
@@ -311,10 +304,16 @@ local function BuildReveal(run, parent, strip, color)
     caretClip:SetClipsChildren(true)
     local caretHost = CreateFrame("Frame", nil, caretClip)
     FillParent(caretHost, caretClip)
-    local caret = caretHost:CreateTexture(nil, "OVERLAY")
+    -- The engine's own caret recipe (ChevronCastBar.lua Create): a tinted ADD glow under a near-white outline.
+    local glow = caretHost:CreateTexture(nil, "ARTWORK", nil, 0)
+    glow:SetTexture(art.glow)
+    glow:SetBlendMode("ADD")
+    glow:SetVertexColor(color[1], color[2], color[3], 0.9)
+    local caret = caretHost:CreateTexture(nil, "ARTWORK", nil, 1)
     caret:SetTexture(art.outline)
-    caret:SetVertexColor(color[1], color[2], color[3], 1)
-    reveal.caretClip, reveal.caretHost, reveal.caret = caretClip, caretHost, caret
+    caret:SetVertexColor(run.coreR, run.coreG, run.coreB, 1)
+    glow:SetPoint("CENTER", caret, "CENTER", 0, 0)
+    reveal.caretClip, reveal.caretHost, reveal.caret, reveal.glow = caretClip, caretHost, caret, glow
     reveal.fill = fill
     return reveal
 end
@@ -500,8 +499,8 @@ end
 -- strips span exactly the chevron run (origin to origin + span, so the top chevron is reached at the end
 -- of the cast; no tile scale, the tile is not drawn), each clip runs from its strip's bottom to its fill
 -- top (the TOP anchor is static, and the bottom corners are widened across by the caret width like the
--- engine's own clip), the caret sits on top of that fill edge (its bottom on the edge, so it is raised by
--- its own height) under a clip spanning the run vertically, and every lit and dim chevron takes the very
+-- engine's own clip), the caret's tip is on that fill edge (its bottom a caret height below, as the engine
+-- seats its own caret) under a clip spanning the run vertically, and every lit and dim chevron takes the very
 -- seat of the run's segment (whole pixel pitch and origin). Creates nothing: called from the run's
 -- onLayout (every relayout, the engine's own rescale watcher included) and from LayoutTape.
 local function SeatReveal(t)
@@ -525,15 +524,16 @@ local function SeatReveal(t)
             SeatChevron(rv.lit[i], rv.frame, run, seg)
         end
         if run.capW and run.capH then
-            -- Same widened span as the fill's clip, but the full run height, so the raised caret is
-            -- trimmed at the run's top instead of poking onto the plate and ticks.
+            -- Same widened span as the fill's clip, but the full run height, so the caret is trimmed at
+            -- the run's top instead of poking onto the plate and ticks.
             rv.caretClip:ClearAllPoints()
             rv.caretClip:SetPoint("TOPLEFT", run.frame, "TOPLEFT", -m, 0)
             rv.caretClip:SetPoint("BOTTOMRIGHT", run.frame, "BOTTOMRIGHT", m, 0)
             -- capX already includes the widening m, and the fill clip's left edge is widened by the same m.
             rv.caret:ClearAllPoints()
-            rv.caret:SetPoint("BOTTOMLEFT", rv.clip, "TOPLEFT", run.capX, 0)
+            rv.caret:SetPoint("BOTTOMLEFT", rv.clip, "TOPLEFT", run.capX, -run.capH)
             rv.caret:SetSize(run.capW, run.capH)
+            rv.glow:SetSize(run.capGlowW, run.capGlowH)
         end
     end
 end
