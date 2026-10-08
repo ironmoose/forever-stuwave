@@ -38,6 +38,7 @@ Modules/Pet/PetCastBar.lua
 Modules/Minimap/Minimap.lua
 Modules/Skins/Panels.lua
 Modules/Skins/Tooltip.lua
+Modules/Skins/TooltipAnchor.lua
 Modules/Skins/Popups.lua
 Modules/Skins/Menus.lua
 Modules/Bags/Bags.lua

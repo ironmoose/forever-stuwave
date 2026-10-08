@@ -32,6 +32,7 @@ local MOVABLE = {
     { id = "action",       label = "Action bars" },
     { id = "professions",  label = "Professions" },
     { id = "petcontainer", label = "Pet" },
+    { id = "tooltip",      label = "Tooltip" },
 }
 
 local ARROWS = { UP = { 0, 1 }, DOWN = { 0, -1 }, LEFT = { -1, 0 }, RIGHT = { 1, 0 } }
