@@ -42,6 +42,11 @@ local AddOuterGlow = Theme.AddOuterGlow
 local AddRoundedFill = Theme.AddRoundedFill
 local AddGradientBorder = Theme.AddGradientBorder
 local IsSecret = FS.IsSecret
+local Config = FS.Config
+
+-- Whether the panel is shown is a profile setting; /fsprof and the config window both write it.
+local CFG_SHOWN = "professions.shown"
+Config.RegisterDefault(CFG_SHOWN, true)
 
 -- Cyan, matching Tracker.lua's header accent (the closest analog -- a simple
 -- read-only info panel) rather than the generic violet Theme.COLOR_BORDER
@@ -382,36 +387,63 @@ end
 -- Slash command + persisted visibility
 -------------------------------------------------------------------------------
 
--- ForeverSTUwaveDB.professionsHidden persists across sessions -- toggling
--- with /fsprof sticks on relog, same pattern as XPBar.lua's
--- ForeverSTUwaveDB.xpVariant / ActionBars.lua's barHideStrategy.
+-- Copies the legacy ForeverSTUwaveDB.professionsHidden into the active profile unless that profile stores a value,
+-- then drops it so the next load cannot import it again. A profile pinned to the default (true) stores nothing, so
+-- it can still take the legacy value. A read-only Config keeps it for a later session.
+local function MigrateLegacy()
+    local db = ForeverSTUwaveDB
+    if type(db) ~= "table" or db.professionsHidden == nil then return end
+    -- Setting a key to its current value changes nothing and answers whether settings are writable yet.
+    if not Config.Set(CFG_SHOWN, Config.Get(CFG_SHOWN)) then return end
+    if type(db.professionsHidden) == "boolean" and not Config.IsStored(CFG_SHOWN) then
+        Config.Set(CFG_SHOWN, not db.professionsHidden)
+    end
+    db.professionsHidden = nil
+end
+
 local function ApplyVisible(p, visible)
     if visible then p:Show() else p:Hide() end
 end
 
 -- The state /fsprof toggles from: a request parked for combat wins, then the live
--- panel, then (panel not built yet) the saved setting.
+-- panel, then (panel not built yet) the setting.
 local function CurrentlyVisible()
     if pendingVisible ~= nil then return pendingVisible end
     if panel then return panel:IsShown() end
-    return not (type(ForeverSTUwaveDB) == "table" and ForeverSTUwaveDB.professionsHidden)
+    return Config.Get(CFG_SHOWN) == true
 end
+
+-- The one path every visibility change takes: the panel parents secure buttons, so Show and Hide on it are
+-- refused in combat and wait for PLAYER_REGEN_ENABLED. Returns false when it was parked.
+local function RequestVisible(visible)
+    if InCombatLockdown() then
+        pendingVisible = visible
+        return false
+    end
+    pendingVisible = nil
+    ApplyVisible(EnsurePanel(), visible)
+    return true
+end
+
+-- A change from the config window or a profile switch. Until Setup has run, Setup reads the setting itself.
+Config.OnChange(CFG_SHOWN, function(value)
+    if not (panel and panel.fsRestoredVisibility) then return end
+    RequestVisible(value == true)
+end)
 
 SLASH_FSPROF1 = "/fsprof"
 SlashCmdList["FSPROF"] = function()
     local visible = not CurrentlyVisible()
 
-    ForeverSTUwaveDB = ForeverSTUwaveDB or {}
-    ForeverSTUwaveDB.professionsHidden = not visible
-
-    -- The panel parents secure buttons, so Show and Hide on it are refused in combat.
-    if InCombatLockdown() then
-        pendingVisible = visible
-        print(("|cff22e0ffForever STUwave|r: professions panel will be %s after combat"):format(visible and "shown" or "hidden"))
+    if not Config.Set(CFG_SHOWN, visible) then
+        print("|cff22e0ffForever STUwave|r: settings are read-only this session")
         return
     end
 
-    ApplyVisible(EnsurePanel(), visible)
+    if not RequestVisible(visible) then
+        print(("|cff22e0ffForever STUwave|r: professions panel will be %s after combat"):format(visible and "shown" or "hidden"))
+        return
+    end
     print(("|cff22e0ffForever STUwave|r: professions panel %s"):format(visible and "shown" or "hidden"))
 end
 
@@ -448,8 +480,7 @@ local function Setup()
     -- re-apply a stale saved value over a mid-session manual toggle.
     if not p.fsRestoredVisibility then
         p.fsRestoredVisibility = true
-        local hidden = type(ForeverSTUwaveDB) == "table" and ForeverSTUwaveDB.professionsHidden
-        ApplyVisible(p, not hidden)
+        ApplyVisible(p, Config.Get(CFG_SHOWN) == true)
     end
 end
 
@@ -486,6 +517,8 @@ events:SetScript("OnEvent", function(_, event)
         if panel then RefreshRows() end
         return
     end
+
+    MigrateLegacy()
 
     -- The first build creates secure buttons and shows the panel, neither of which is
     -- allowed in combat (a /reload mid-fight), so it waits for PLAYER_REGEN_ENABLED.

@@ -10,6 +10,11 @@ The window is a plain themed frame with a category nav and a content well. These
   * the Gunsight HUD page lists the author's piece labels, writes gunsight.* settings, and /fsgun
     shows the same state; the legacy ForeverSTUwaveDB.gunsight values migrate once into the
     active profile and a profile switch moves the live pieces;
+  * the target bar group (health and resource heights, width, numbers, number format) takes its labels,
+    defaults, ranges, tooltip and format options from mockups/config-window-2026-10-07.html;
+  * UI.Slider is built from Theme pieces (no Blizzard slider), binds a key or get/set, auto-stacks, snaps to
+    its step, and takes mouse down, drag, release, wheel and click-on-track;
+  * the Unit Frames page carries the Professions panel toggle (professions.shown);
   * the Profiles page calls the Config API (switch, new, copy, rename, delete, reset), asks before
     anything destructive, and keeps Delete off for Default and the active profile;
   * read-only Config disables every control; no player-facing string says "tape"; explanations
@@ -39,7 +44,9 @@ ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
 WINDOW_FILE = Path(os.environ.get("CONFIGWINDOW_LUA", ADDON / "Modules/Config/ConfigWindow.lua"))
 CONFIG_FILE = ADDON / "Core/Config.lua"
 GUNSIGHT_FILE = ADDON / "Modules/CombatHud/Gunsight.lua"
+BOXES_FILE = ADDON / "Modules/CombatHud/GunsightBoxes.lua"
 TOC_FILE = ADDON / "forever-stuwave.toc"
+MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "config-window-2026-10-07.html"
 
 MOCK = r"""
 ALL = {}            -- every frame and region, in creation order
@@ -70,8 +77,9 @@ local function new(kind, name, parent)
     return o
 end
 
-function CreateFrame(kind, name, parent)
+function CreateFrame(kind, name, parent, template)
     local f = new(kind, name, parent or UIParent)
+    f.template = template
     f.isFrame = true
     f.protected = false
     return f
@@ -133,6 +141,10 @@ end
 function Obj:ClearAllPoints() self.points = {} end
 function Obj:SetAllPoints(rel) self.points = { { point = "ALL", rel = rel or self.parent, x = 0, y = 0 } } end
 function Obj:GetParent() return self.parent end
+-- Geometry the mock does not lay out: a check sets .left on a frame and __cursorX for the mouse.
+function Obj:GetLeft() return self.left end
+function Obj:GetEffectiveScale() return 1 end
+function GetCursorPosition() return __cursorX or 0, 0 end
 function Obj:SetAlpha(a) self.alpha = a end
 function Obj:GetAlpha() return self.alpha end
 function Obj:SetScript(k, fn) self.scripts[k] = fn end
@@ -144,6 +156,7 @@ end
 function Obj:RegisterEvent(e) self.events[e] = true end
 function Obj:UnregisterEvent(e) self.events[e] = nil end
 function Obj:EnableMouse(v) blockedAction(self, "EnableMouse"); self.mouse = v and true or false end
+function Obj:EnableMouseWheel(v) self.mouseWheel = v and true or false end
 function Obj:EnableKeyboard(v) self.keyboard = v and true or false end
 function Obj:SetPropagateKeyboardInput(v) self.propagate = v end
 function Obj:Enable() self.enabled = true end
@@ -194,7 +207,7 @@ end
 """
 
 SESSION = r"""
-function(configSrc, gunsightSrc, windowSrc, opts)
+function(configSrc, gunsightSrc, windowSrc, opts, boxesSrc)
     opts = opts or {}
     ALL, __printed, __errors, __combat, BLOCKED = {}, {}, {}, false, {}
     ALL[1], ALL[2] = UIParent, GameTooltip
@@ -243,6 +256,9 @@ function(configSrc, gunsightSrc, windowSrc, opts)
     if opts.noGunsight ~= true then
         assert(load(gunsightSrc, "@Gunsight.lua"))("forever-stuwave", FS)
     end
+    if opts.noBoxes ~= true and opts.noGunsight ~= true then
+        assert(load(boxesSrc, "@GunsightBoxes.lua"))("forever-stuwave", FS)
+    end
     if opts.preWindow then opts.preWindow() end
     assert(load(windowSrc, "@ConfigWindow.lua"))("forever-stuwave", FS)
     if opts.beforeLogin then opts.beforeLogin() end
@@ -262,7 +278,7 @@ local function yes(v, msg) if not v then error(msg or "expected true", 2) end en
 local function no(v, msg) if v then error(msg or "expected false", 2) end end
 
 local function boot(opts)
-    __session(__configSrc, __gunsightSrc, __windowSrc, opts)
+    __session(__configSrc, __gunsightSrc, __windowSrc, opts, __boxesSrc)
     return FS.ConfigWindow
 end
 
@@ -571,6 +587,7 @@ end
 local function unitFramesDefaults()
     FS.Config.RegisterDefault("unitFrames.hidePlayer", false)
     FS.Config.RegisterDefault("unitFrames.hideTarget", false)
+    FS.Config.RegisterDefault("professions.shown", true)
 end
 
 function T.unit_frames_toggles_write_config_and_follow_changes()
@@ -586,6 +603,20 @@ function T.unit_frames_toggles_write_config_and_follow_changes()
     no(r.control.fsChecked, "an external change shows")
     press("Hide target frame")
     eq(FS.Config.Get("unitFrames.hideTarget"), true)
+end
+
+function T.the_unit_frames_page_has_the_professions_panel_toggle()
+    local W = boot({ preWindow = unitFramesDefaults })
+    W.Open("unitframes")
+    local r = row("Professions panel")
+    yes(r, "a Professions panel row")
+    yes(r.control.fsChecked, "shown by default")
+    press("Professions panel")
+    eq(FS.Config.Get("professions.shown"), false)
+    no(r.control.fsChecked)
+    FS.Config.Set("professions.shown", true)
+    yes(r.control.fsChecked, "an external change shows")
+    eq(#texts(r), 2, "label and state only")
 end
 
 function T.the_toggle_states_show_on_and_off()
@@ -667,14 +698,12 @@ function T.every_gunsight_piece_has_a_label_and_a_row()
     yes(hasText(win(), "PIECES"), "section header")
 end
 
-function T.gunsight_page_has_no_numbers_sliders_or_aura_rows()
+function T.gunsight_page_has_no_aura_rows_yet()
     local W = boot()
     W.Open("gunsight")
     local page = row("Gunsight HUD").parent
-    local seen = {}
-    for _, t in ipairs(texts(page)) do seen[#seen + 1] = t end
-    for _, t in ipairs(seen) do
-        yes(not t:lower():find("height") and not t:lower():find("width") and not t:lower():find("aura"), "unbuilt setting shown: " .. t)
+    for _, t in ipairs(texts(page)) do
+        yes(not t:lower():find("aura") and not t:lower():find("debuff"), "unbuilt setting shown: " .. t)
     end
 end
 
@@ -828,6 +857,157 @@ function T.fsgun_reports_a_read_only_config()
     SlashCmdList.FSGUN("piece shard off")
     yes(table.concat(__printed, " "):lower():find("read-only", 1, true), "read-only is said")
     eq(FS.Gunsight.IsPieceOn("shard"), true)
+end
+
+
+-- ---- the target health and resource group (mockups/config-window-2026-10-07.html) ----------------------
+
+local function boxSettings() return FS.GunsightBoxes.SETTINGS end
+local function sliderRow(label) return assert(row(label), "no row " .. label) end
+local function tipOf(r)
+    for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then return o.fsTip end end
+end
+-- Presses the track at a fraction of its width, then lets go.
+local function clickTrack(t, frac)
+    t.left = 40
+    __cursorX = 40 + frac * 150
+    t.scripts.OnMouseDown(t, "LeftButton")
+    t.scripts.OnMouseUp(t, "LeftButton")
+end
+
+function T.the_target_bar_group_has_the_mockups_header_and_rows_in_order()
+    local W = boot()
+    W.Open("gunsight")
+    yes(hasText(win(), MC.header:upper()), "header " .. MC.header)
+    local labels = { MC.health.label, MC.resource.label, MC.width.label, MC.numbers.label, MC.format.label }
+    local last = -row("Party frames").points[1].y
+    for _, label in ipairs(labels) do
+        local r = sliderRow(label)
+        local y = -r.points[1].y
+        yes(y > last, label .. " stacks below the previous (" .. y .. " <= " .. last .. ")")
+        last = y
+    end
+end
+
+function T.the_target_bar_sliders_open_on_the_mockups_readouts_and_positions()
+    local W = boot()
+    W.Open("gunsight")
+    local S = boxSettings()
+    for _, pair in ipairs({ { MC.health, S.hpHeight }, { MC.resource, S.powerHeight }, { MC.width, S.width } }) do
+        local mock, def = pair[1], pair[2]
+        local r = sliderRow(mock.label)
+        eq(r.fsReadout:GetText(), mock.readout, mock.label .. " readout")
+        eq(r.control.fsValue, def.default, mock.label .. " default")
+        local at = ((def.default - def.min) / (def.max - def.min)) * 100
+        yes(math.abs(at - mock.p) < 1e-9, mock.label .. " sits at " .. mock.p .. "% of its track, not " .. at)
+        eq(FS.Config.Get(def.key), def.default, mock.label .. " Config default")
+        no(FS.Config.IsStored(def.key), mock.label .. " pins nothing")
+    end
+end
+
+function T.bar_width_carries_the_mockups_tooltip_and_the_heights_carry_none()
+    local W = boot()
+    W.Open("gunsight")
+    eq(tipOf(sliderRow(MC.width.label)), MC.width.tip)
+    eq(tipOf(sliderRow(MC.health.label)), nil)
+    eq(tipOf(sliderRow(MC.resource.label)), nil)
+end
+
+function T.the_target_bar_sliders_write_their_config_keys()
+    local W = boot()
+    W.Open("gunsight")
+    local S = boxSettings()
+    for _, pair in ipairs({ { MC.health, S.hpHeight }, { MC.resource, S.powerHeight }, { MC.width, S.width } }) do
+        local mock, def = pair[1], pair[2]
+        local t = sliderRow(mock.label).control
+        clickTrack(t, 1)
+        eq(FS.Config.Get(def.key), def.max, mock.label .. " to its maximum")
+        clickTrack(t, 0)
+        eq(FS.Config.Get(def.key), def.min, mock.label .. " to its minimum")
+    end
+end
+
+function T.show_numbers_is_off_until_the_player_turns_it_on()
+    local W = boot()
+    W.Open("gunsight")
+    local S = boxSettings()
+    no(row(MC.numbers.label).control.fsChecked, "off by default: approved visuals do not change on their own")
+    eq(FS.Config.Get(S.numbers.key), false)
+    press(MC.numbers.label)
+    eq(FS.Config.Get(S.numbers.key), true)
+    yes(row(MC.numbers.label).control.fsChecked)
+end
+
+function T.number_format_offers_the_mockups_options_in_order_and_follows_show_numbers()
+    local W = boot()
+    W.Open("gunsight")
+    local S = boxSettings()
+    local holder = row(MC.format.label).control
+    local shown = {}
+    for _, o in ipairs(ALL) do
+        if o.kind == "FontString" and o:IsVisible() and under(holder, o) then
+            shown[#shown + 1] = { x = o.parent.points[1].x, text = o:GetText() }
+        end
+    end
+    table.sort(shown, function(a, b) return a.x < b.x end)
+    eq(#shown, #MC.format.options)
+    for i, want in ipairs(MC.format.options) do eq(shown[i].text, want, "option " .. i) end
+    eq(#FS.GunsightBoxes.NUMBER_FORMATS, #MC.format.options)
+    for i, want in ipairs(MC.format.options) do eq(FS.GunsightBoxes.NUMBER_FORMATS[i].text, want, "export " .. i) end
+    -- the mockup's selected option is the default
+    eq(FS.Config.Get(S.numberFormat.key), FS.GunsightBoxes.NUMBER_FORMATS[2].value)
+    eq(MC.format.options[2], MC.format.selected)
+    -- dimmed and inert while Show numbers is off
+    no(click("Percent", win()), "the control is off while numbers are off")
+    eq(FS.Config.Get(S.numberFormat.key), "both")
+    press(MC.numbers.label)
+    yes(click("Percent", win()))
+    eq(FS.Config.Get(S.numberFormat.key), "percent")
+    yes(click("Current", win()))
+    eq(FS.Config.Get(S.numberFormat.key), "current")
+    yes(click("Current / max", win()))
+    eq(FS.Config.Get(S.numberFormat.key), "both")
+end
+
+function T.number_format_is_a_sub_row_of_show_numbers()
+    local W = boot()
+    W.Open("gunsight")
+    eq(sliderRow(MC.format.label).fsLabel.points[1].x, 16, "indented under its toggle, as .row.sub1")
+    eq(sliderRow(MC.numbers.label).fsLabel.points[1].x, 0)
+end
+
+function T.a_profile_switch_moves_the_target_bar_controls()
+    local W = boot()
+    W.Open("gunsight")
+    local S = boxSettings()
+    FS.Config.NewProfile("Raid")
+    FS.Config.SetActiveProfile("Raid")
+    FS.Config.Set(S.hpHeight.key, 10)
+    FS.Config.Set(S.numbers.key, true)
+    eq(sliderRow(MC.health.label).fsReadout:GetText(), "10 px")
+    yes(row(MC.numbers.label).control.fsChecked)
+    FS.Config.SetActiveProfile("Default")
+    eq(sliderRow(MC.health.label).fsReadout:GetText(), MC.health.readout)
+    no(row(MC.numbers.label).control.fsChecked)
+end
+
+function T.the_target_bar_group_is_absent_without_the_boxes_module()
+    local W = boot({ noBoxes = true })
+    W.Open("gunsight")
+    yes(row("Party frames"), "the pieces still build")
+    no(row(MC.health.label), "no slider without GunsightBoxes")
+    no(hasText(win(), MC.header:upper()))
+end
+
+function T.the_target_bar_controls_work_in_combat()
+    local W = boot()
+    __combat = true
+    W.Open("gunsight")
+    local S = boxSettings()
+    clickTrack(sliderRow(MC.health.label).control, 1)
+    eq(FS.Config.Get(S.hpHeight.key), S.hpHeight.max)
+    yes(press(MC.numbers.label))
+    eq(#BLOCKED, 0)
 end
 
 -------------------------------------------------------------------------------
@@ -1048,6 +1228,261 @@ function T.the_read_only_icon_is_hidden_when_settings_are_writable()
     local W = boot({ preWindow = unitFramesDefaults })
     W.Open("unitframes")
     for _, o in ipairs(ALL) do if o.fsReadOnlyIcon then no(o:IsVisible(), "icon hidden") end end
+end
+
+
+-------------------------------------------------------------------------------
+-- UI.Slider
+-------------------------------------------------------------------------------
+
+-- A demo page with a keyed slider (2..12, step 1, default 6), a get/set one and a coarse keyed one.
+local function sliderDemo(opts)
+    local W = boot(opts)
+    FS.Config.RegisterDefault("demo.level", 6)
+    FS.Config.RegisterDefault("demo.coarse", 100)
+    local d = { W = W, store = { v = 3 }, frames = {}, sets = 0 }
+    W.RegisterCategory({ key = "demo", label = "Demo", order = 3, build = function(content)
+        local UI = W.UI
+        d.frames.header = UI.Header(content, "Levels")
+        d.frames.keyed = UI.Slider(content, { label = "Level", key = "demo.level", min = 2, max = 12, step = 1, fmt = "%d px", tip = "why" })
+        d.frames.manual = UI.Slider(content, { label = "Manual", min = 0, max = 10, step = 1,
+            get = function() return d.store.v end, set = function(v) d.sets = d.sets + 1; d.store.v = v end,
+            fmt = function(v) return "<" .. v .. ">" end })
+        d.frames.coarse = UI.Slider(content, { label = "Coarse", key = "demo.coarse", min = 50, max = 150, step = 5, fmt = "%d%%" })
+    end })
+    W.Open("demo")
+    return d
+end
+local function track(label) return row(label).control end
+local function pressAt(t, frac, button)
+    t.left = 100
+    __cursorX = 100 + frac * 150
+    t.scripts.OnMouseDown(t, button or "LeftButton")
+end
+local function dragTo(t, frac)
+    __cursorX = 100 + frac * 150
+    local fn = t.scripts.OnUpdate
+    if fn then fn(t, 0.016) end
+end
+local function release(t) t.scripts.OnMouseUp(t, "LeftButton") end
+
+function T.a_slider_is_built_from_theme_pieces_and_never_a_blizzard_slider()
+    local d = sliderDemo()
+    local r = row("Level")
+    eq(d.frames.keyed, r, "the builder returns its row frame")
+    yes(r.control, "the track is the control")
+    eq(r.control.w, 150); eq(r.control.h, 12)
+    eq(r.control.fsThumb.w, 8); eq(r.control.fsThumb.h, 12)
+    for _, o in ipairs(ALL) do
+        yes(o.kind ~= "Slider", "a Blizzard Slider was created")
+        eq(o.template, nil, "a frame template was used")
+    end
+    yes(r.control.fsThumb.fsSkin, "the thumb is skinned like the other buttons (SkinButton ring)")
+    eq(r.control.fsThumb.fsSkin.opts.borderColor, FS.Theme.COLOR_POWER, "cyan ring")
+    eq(r.fsReadout:GetText(), "6 px")
+    eq(r.fsReadout.themeColor, FS.Theme.COLOR_POWER, "cyan mono readout")
+    eq(tipOf(r), "why", "the ? icon carries the tip")
+end
+
+function T.sliders_auto_stack_below_the_previous_row()
+    local d = sliderDemo()
+    local last = -1
+    for _, name in ipairs({ "header", "keyed", "manual", "coarse" }) do
+        local y = -d.frames[name].points[1].y
+        yes(y > last, name .. " stacks below the previous")
+        last = y
+    end
+    eq(d.frames.keyed:GetHeight(), 28, "a normal row")
+end
+
+function T.the_thumb_and_fill_follow_the_value()
+    local d = sliderDemo()
+    local t = track("Level")
+    local at = t.fsThumb.points[1]
+    eq(at.point, "CENTER"); eq(at.relPoint, "LEFT"); eq(at.rel, t)
+    eq(at.x, 60, "6 of 2..12 is 40% of 150")
+    eq(t.fsFill.w, 60); yes(t.fsFill:IsShown())
+    FS.Config.Set("demo.level", 12)
+    eq(t.fsThumb.points[1].x, 150); eq(t.fsFill.w, 150)
+    FS.Config.Set("demo.level", 2)
+    eq(t.fsThumb.points[1].x, 0); no(t.fsFill:IsShown(), "no fill at the minimum")
+    eq(#t.fsThumb.points, 1, "the thumb is re-anchored, not stacked")
+end
+
+function T.a_click_on_the_track_sets_the_value_under_the_cursor()
+    local d = sliderDemo()
+    local t = track("Level")
+    pressAt(t, 0.5)
+    eq(FS.Config.Get("demo.level"), 7)
+    eq(row("Level").fsReadout:GetText(), "7 px")
+    release(t)
+    pressAt(t, 0.2)
+    eq(FS.Config.Get("demo.level"), 4)
+    release(t)
+end
+
+function T.dragging_follows_the_cursor_clamps_and_stops_on_release()
+    local d = sliderDemo()
+    local t = track("Level")
+    eq(t.scripts.OnUpdate, nil, "no OnUpdate while idle")
+    pressAt(t, 0.2)
+    yes(t.scripts.OnUpdate, "an OnUpdate while dragging")
+    dragTo(t, 0.8); eq(FS.Config.Get("demo.level"), 10)
+    dragTo(t, 1.7); eq(FS.Config.Get("demo.level"), 12, "clamped to the maximum")
+    dragTo(t, -0.6); eq(FS.Config.Get("demo.level"), 2, "clamped to the minimum")
+    release(t)
+    eq(t.scripts.OnUpdate, nil, "OnUpdate removed on release")
+    __cursorX = 100 + 0.9 * 150
+    eq(FS.Config.Get("demo.level"), 2, "later cursor moves change nothing")
+end
+
+function T.a_drag_that_ends_off_the_track_still_releases()
+    local d = sliderDemo()
+    local t = track("Level")
+    pressAt(t, 0.5)
+    dragTo(t, 3)
+    t.scripts.OnMouseUp(t, "LeftButton")      -- the client sends the up to the frame that took the down
+    eq(t.scripts.OnUpdate, nil)
+    eq(FS.Config.Get("demo.level"), 12)
+end
+
+function T.the_value_snaps_to_the_step_and_only_writes_when_it_changes()
+    local d = sliderDemo()
+    local writes = 0
+    local realSet = FS.Config.Set
+    FS.Config.Set = function(...) writes = writes + 1; return realSet(...) end
+    local t = track("Level")
+    pressAt(t, 0.4)                       -- 6, already the value
+    eq(writes, 0, "no write for the same value")
+    dragTo(t, 0.41); eq(writes, 0, "6.05 snaps back to 6")
+    dragTo(t, 0.6); eq(FS.Config.Get("demo.level"), 8); eq(writes, 1)
+    dragTo(t, 0.6); eq(writes, 1, "a still cursor writes nothing")
+    release(t)
+    local c = track("Coarse")
+    pressAt(c, 0.33); release(c)
+    eq(FS.Config.Get("demo.coarse"), 85, "83 snaps to the 5 step")
+    eq(row("Coarse").fsReadout:GetText(), "85%")
+    pressAt(c, 0.5); release(c)
+    eq(FS.Config.Get("demo.coarse"), 100)
+    no(FS.Config.IsStored("demo.coarse"), "the default pins nothing")
+    local m = track("Manual")
+    local sets = d.sets
+    pressAt(m, 0.3); release(m)           -- 3, the value it holds
+    eq(d.sets, sets, "a get/set slider is not written for the value it already holds")
+    FS.Config.Set = realSet
+end
+
+function T.the_mouse_wheel_steps_by_one_step_and_stops_at_the_ends()
+    local d = sliderDemo()
+    local writes = 0
+    FS.Config.OnChange("demo.level", function() writes = writes + 1 end)
+    local t = track("Level")
+    t.scripts.OnMouseWheel(t, 1); eq(FS.Config.Get("demo.level"), 7)
+    t.scripts.OnMouseWheel(t, -1); t.scripts.OnMouseWheel(t, -1); eq(FS.Config.Get("demo.level"), 5)
+    FS.Config.Set("demo.level", 12)
+    writes = 0
+    t.scripts.OnMouseWheel(t, 1); eq(FS.Config.Get("demo.level"), 12, "not past the maximum"); eq(writes, 0)
+    FS.Config.Set("demo.level", 2)
+    writes = 0
+    t.scripts.OnMouseWheel(t, -1); eq(FS.Config.Get("demo.level"), 2, "not below the minimum"); eq(writes, 0)
+    local c = track("Coarse")
+    c.scripts.OnMouseWheel(c, 1); eq(FS.Config.Get("demo.coarse"), 105, "a notch is one step")
+    yes(t.mouseWheel, "the track takes the wheel")
+end
+
+function T.a_get_set_slider_reads_and_writes_through_its_functions()
+    local d = sliderDemo()
+    local t = track("Manual")
+    pressAt(t, 0.5); release(t)
+    eq(d.store.v, 5)
+    eq(row("Manual").fsReadout:GetText(), "<5>", "fmt may be a function")
+    d.store.v = 9
+    d.W.RefreshAll()
+    eq(row("Manual").fsReadout:GetText(), "<9>", "get/set controls re-read on RefreshAll")
+    eq(t.fsThumb.points[1].x, 135)
+end
+
+function T.keyed_sliders_follow_external_changes_and_profile_switches()
+    local d = sliderDemo()
+    FS.Config.Set("demo.level", 11)
+    eq(row("Level").fsReadout:GetText(), "11 px")
+    FS.Config.NewProfile("Raid")
+    FS.Config.SetActiveProfile("Raid")
+    eq(row("Level").fsReadout:GetText(), "6 px", "Raid has the default")
+    eq(track("Level").fsThumb.points[1].x, 60)
+    FS.Config.SetActiveProfile("Default")
+    eq(row("Level").fsReadout:GetText(), "11 px")
+end
+
+function T.an_out_of_range_stored_value_is_drawn_clamped()
+    local d = sliderDemo()
+    FS.Config.Set("demo.level", 99)
+    eq(row("Level").fsReadout:GetText(), "12 px")
+    eq(track("Level").fsThumb.points[1].x, 150)
+    FS.Config.Set("demo.level", "junk")
+    eq(row("Level").fsReadout:GetText(), "2 px", "a non number reads as the minimum")
+end
+
+function T.only_the_left_button_drags()
+    local d = sliderDemo()
+    local t = track("Level")
+    pressAt(t, 0.9, "RightButton")
+    eq(FS.Config.Get("demo.level"), 6)
+    eq(t.scripts.OnUpdate, nil)
+end
+
+function T.a_read_only_config_leaves_the_slider_inert()
+    local d = sliderDemo({ db = "junk" })
+    local t = track("Level")
+    no(t.enabled, "disabled")
+    eq(row("Level").alpha, 0.4, "the whole row dims: label and readout with the track")
+    eq(t.alpha, 1, "the track is not dimmed twice")
+    pressAt(t, 1)
+    eq(t.scripts.OnUpdate, nil)
+    t.scripts.OnMouseWheel(t, 1)
+    eq(FS.Config.Get("demo.level"), 6)
+end
+
+function T.a_keyed_slider_write_repaints_once_through_the_any_change_hook()
+    local d = sliderDemo()
+    local runs, real = 0, d.W.RefreshAll
+    d.W.RefreshAll = function(...) runs = runs + 1; return real(...) end
+    local t = track("Level")
+    pressAt(t, 0.6); release(t)
+    d.W.RefreshAll = real
+    eq(FS.Config.Get("demo.level"), 8)
+    eq(runs, 1, "the write itself adds no RefreshAll on top of Config.OnAnyChange")
+    eq(row("Level").fsReadout:GetText(), "8 px")
+end
+
+function T.hiding_the_track_ends_a_drag()
+    local d = sliderDemo()
+    local t = track("Level")
+    pressAt(t, 0.7)
+    yes(t.scripts.OnUpdate)
+    t.scripts.OnHide(t)          -- the client runs OnHide on a child when its window closes
+    eq(t.scripts.OnUpdate, nil, "OnHide drops the drag")
+end
+
+function T.dragging_and_refreshing_create_no_frames()
+    local d = sliderDemo()
+    local t = track("Level")
+    local before = #ALL
+    pressAt(t, 0.1); dragTo(t, 0.9); dragTo(t, 0.3); release(t)
+    t.scripts.OnMouseWheel(t, 1)
+    d.W.RefreshAll()
+    eq(#ALL, before, "no frame or region was created")
+end
+
+function T.a_slider_with_a_bad_range_does_not_divide_by_zero()
+    local W = boot()
+    W.RegisterCategory({ key = "demo", label = "Demo", order = 3, build = function(content)
+        W.UI.Slider(content, { label = "Flat", min = 5, max = 5, step = 1, get = function() return 5 end, set = function() end, fmt = "%d" })
+    end })
+    W.Open("demo")
+    local t = track("Flat")
+    pressAt(t, 0.5); release(t)
+    eq(row("Flat").fsReadout:GetText(), "5")
 end
 
 -------------------------------------------------------------------------------
@@ -1327,12 +1762,53 @@ __checks = T
 """
 
 
+def _need(pattern: str, text: str, what: str) -> re.Match:
+    m = re.search(pattern, text, re.S)
+    if not m:
+        sys.exit(f"mockup: cannot find {what} (pattern {pattern!r}); the mockup changed shape")
+    return m
+
+
+def mockup_target_bars() -> dict:
+    """The target health and resource group of the Gunsight HUD page, read out of the config window mockup."""
+    src = MOCKUP.read_text(encoding="utf-8")
+    group = _need(r'<span class="slash">//</span> (Target health and resource)</div>(.*?)</div>\s*\n\s*<div class="grp">', src,
+                  "the Target health and resource group")
+    body = group.group(2)
+
+    def slider(label: str) -> dict:
+        m = _need(r'<div class="lab">' + re.escape(label) + r'(?:<span class="q" data-tip="([^"]*)">\?</span>)?</div>'
+                  r'<div class="sl" style="--p:(\d+)%"><i></i><b></b></div><span class="rd">([^<]*)</span>', body, label + " slider")
+        return {"label": label, "tip": m.group(1) or "", "p": int(m.group(2)), "readout": m.group(3)}
+
+    toggle = _need(r'<div class="lab">(Show numbers)</div><span class="tg-s (on)?">', body, "the Show numbers toggle")
+    seg = _need(r'<div class="lab">(Number format)</div>\s*<div class="seg">(.*?)</div></div>', body, "the Number format control")
+    options = re.findall(r'<span class="btn( on)?"><b>([^<]*)</b></span>', seg.group(2))
+    return {
+        "header": group.group(1),
+        "health": slider("Health bar height"), "resource": slider("Resource bar height"), "width": slider("Bar width"),
+        "numbers": {"label": toggle.group(1), "on": toggle.group(2) == "on"},
+        "format": {"label": seg.group(1), "options": [o[1] for o in options], "selected": [o[1] for o in options if o[0]][0]},
+    }
+
+
+def to_lua(lua, value):
+    """A nested dict / list / scalar as Lua tables."""
+    if isinstance(value, dict):
+        return lua.table_from({k: to_lua(lua, v) for k, v in value.items()})
+    if isinstance(value, list):
+        return lua.table_from([to_lua(lua, v) for v in value])
+    return value
+
+
 def boot() -> "LuaRuntime":
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.execute(MOCK)
     lua.globals().__session = lua.eval(SESSION)
     lua.globals().__configSrc = CONFIG_FILE.read_text(encoding="utf-8")
     lua.globals().__gunsightSrc = GUNSIGHT_FILE.read_text(encoding="utf-8")
+    lua.globals().MC = to_lua(lua, mockup_target_bars())
+    lua.globals().__boxesSrc = BOXES_FILE.read_text(encoding="utf-8")
     lua.globals().__windowSrc = WINDOW_FILE.read_text(encoding="utf-8") if WINDOW_FILE.exists() else "error('ConfigWindow.lua is missing')"
     lua.execute(CHECKS)
     return lua
@@ -1344,9 +1820,10 @@ def source_checks() -> list[tuple[str, str | None]]:
     src = WINDOW_FILE.read_text(encoding="utf-8") if WINDOW_FILE.exists() else ""
     out.append(("source_exists", None if src else f"{WINDOW_FILE} does not exist"))
     out.append(("source_never_says_tape", "the word 'tape' appears in ConfigWindow.lua" if re.search("tape", src, re.I) else None))
-    banned = [r"\bSettings\.", r"RegisterCanvasLayoutCategory", r"StaticPopup", r"InterfaceOptions", r"\u2014"]
+    banned = [r"\bSettings\.", r"RegisterCanvasLayoutCategory", r"StaticPopup", r"InterfaceOptions", r"\u2014",
+              r'CreateFrame\(\s*"Slider"', r"SliderTemplate", r"SetThumbTexture"]
     hits = [p for p in banned if re.search(p, src)]
-    out.append(("source_uses_no_blizzard_settings_or_static_popup_and_no_em_dash",
+    out.append(("source_uses_no_blizzard_settings_static_popup_or_slider_and_no_em_dash",
                 f"banned pattern(s): {hits}" if hits else None))
     toc = [ln.strip() for ln in TOC_FILE.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("##")]
     want = "Modules/Config/ConfigWindow.lua"
