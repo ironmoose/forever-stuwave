@@ -1645,6 +1645,7 @@ def run_case(name: str, mu: dict, mb: dict) -> str | None:
     g = lua.globals()
     g.__castSrc = TH.CASTBARS.read_text(encoding="utf-8")
     g.__layoutSrc = TH.LAYOUT.read_text(encoding="utf-8")
+    g.__configSrc = TH.CONFIG.read_text(encoding="utf-8")
     g.__gunsightSrc = TH.GUNSIGHT.read_text(encoding="utf-8")
     g.__tapeSrc = TH.TAPE.read_text(encoding="utf-8")
     g.__boxSrc = BOXES.read_text(encoding="utf-8") if BOXES.exists() else "error('GunsightBoxes.lua is missing')"

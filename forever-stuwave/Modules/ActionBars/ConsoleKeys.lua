@@ -133,11 +133,11 @@ local MUTED = Hex(0x9d, 0x93, 0xc4)
 
 -- DECK_DEFS: piece key, name, description, colour, glyph file. Order = key order (index 0 to 7).
 local DEFS = {
-    { key = "you", n = "Your Cast", d = "Cast tape and timer box", c = "cyan", g = "chev" },
+    { key = "you", n = "Your Cast", d = "Your cast bar and timer box", c = "cyan", g = "chev" },
     { key = "next", n = "Next Cast", d = "Profile's next spell, gold on proc", c = "gold", g = "play" },
-    { key = "shard", n = "Soul Shards", d = "Held shards under your tape", c = "violet", g = "diamond" },
+    { key = "shard", n = "Soul Shards", d = "Held shards under your cast bar", c = "violet", g = "diamond" },
     { key = "buff", n = "Buff Reminder", d = "Missing self buff tile", c = "pink", g = "shield" },
-    { key = "tgt", n = "Target Cast", d = "Enemy cast tape, kick and lock state", c = "pink", g = "cross" },
+    { key = "tgt", n = "Target Cast", d = "Target cast bar, kick and lock state", c = "pink", g = "cross" },
     { key = "dot", n = "DoT Timers", d = "DoT time scale with refresh band", c = "violet", g = "clock" },
     { key = "prc", n = "Procs", d = "Proc and cooldown posts", c = "amber", g = "bolt" },
     { key = "party", n = "Party Frame", d = "Show or hide the party frame", c = "green", g = "group" },

@@ -282,6 +282,7 @@ local function boot(opts)
     FS.IsSecret = function(v) return v == SECRET end
     assert(loadstring(HAS_TARGET_SRC, "@Theme.lua"))()      -- the real FS.HasTarget / FS.TargetTakesDots out of Theme.lua
     loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
+    loadAddonFile(CONFIG_SRC, "Core/Config.lua")
     loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
     loadAddonFile(PROFILES_SRC, "Modules/CombatHud/HudProfiles.lua")
     if not opts.noHud then
@@ -1297,6 +1298,7 @@ def run_case(body: str, mu: dict, fc: dict, expect: dict, srcs: dict) -> str | N
     lua.execute(f"MU = {gh.lua_value(mu)}; FC = {gh.lua_value(fc)}; EXPECT = {gh.lua_value(expect)}")
     g = lua.globals()
     g.LAYOUT_SRC = gh.LAYOUT.read_text(encoding="utf-8")
+    g.CONFIG_SRC = gh.CONFIG.read_text(encoding="utf-8")
     g.GUNSIGHT_SRC = srcs["gunsight"]
     g.PROFILES_SRC = srcs["profiles"]
     g.FRAME_SRC = srcs["frame"]

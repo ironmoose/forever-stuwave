@@ -16,15 +16,16 @@
 --
 -- PIECES. Keys you, next, shard, buff, tgt, dot, prc, party. RegisterPiece(key, {frame,
 -- onShow, onHide}) hands a piece's frame to the registry; SetPiece(key, on, instant) fades it
--- (a 0.25 s Alpha AnimationGroup, never OnUpdate) and persists the state. State lives in
--- ForeverSTUwaveDB.gunsight and is applied to a piece when it registers, or at init for pieces
--- that registered before SavedVariables existed. A PROTECTED frame (the party frames) is never
+-- (a 0.25 s Alpha AnimationGroup, never OnUpdate) and persists the state. The on/off state lives in
+-- FS.Config (gunsight.enabled, gunsight.pieces.<key>), so it follows the active profile, and is
+-- applied to a piece when it registers, or at init for pieces that registered before SavedVariables
+-- existed. Only the seat stays in ForeverSTUwaveDB.gunsight. A PROTECTED frame (the party frames) is never
 -- Show/Hidden or EnableMouse'd in combat (ADDON_ACTION_BLOCKED fires even inside a pcall): alpha
 -- only, the rest reconciled on PLAYER_REGEN_ENABLED.
 --
 -- Slash: /fsgun [on | off | seat <dx> <dy> | piece <key> on|off | debug]. Public surface (all
 -- FS.Gunsight.*): ui, Point, root, anchors, G, RegisterPiece, SetPiece, IsPieceOn, OnPieceChanged,
--- OnReady, IsEnabled, SetSeat, Reseat.
+-- OnReady, IsEnabled, SetSeat, Reseat, CONFIG_ENABLED, PieceConfigKey.
 
 local addonName, FS = ...
 
@@ -112,6 +113,11 @@ local outlines = {}
 
 for _, key in ipairs(PIECE_KEYS) do pieceState[key] = true end
 
+local CFG_ENABLED = "gunsight.enabled"
+local function PieceKey(key) return "gunsight.pieces." .. key end
+FS.Config.RegisterDefault(CFG_ENABLED, true)
+for _, key in ipairs(PIECE_KEYS) do FS.Config.RegisterDefault(PieceKey(key), true) end
+
 local function IsKnownKey(key)
     for _, k in ipairs(PIECE_KEYS) do
         if k == key then return true end
@@ -195,7 +201,8 @@ local function IsFiniteNumber(v)
     return type(v) == "number" and v == v and v > -1e9 and v < 1e9
 end
 
--- ForeverSTUwaveDB.gunsight = { enabled = true, pieces = { key = true ... }, seat = { dx, dy } }.
+-- ForeverSTUwaveDB.gunsight = { seat = { dx, dy } }. The older enabled and pieces fields are
+-- moved onto FS.Config once and then removed.
 local function NormalizedDB()
     if type(ForeverSTUwaveDB) ~= "table" then ForeverSTUwaveDB = {} end
     local db = ForeverSTUwaveDB.gunsight
@@ -203,15 +210,25 @@ local function NormalizedDB()
         db = {}
         ForeverSTUwaveDB.gunsight = db
     end
-    db.enabled = db.enabled ~= false
-    if type(db.pieces) ~= "table" then db.pieces = {} end
-    for _, key in ipairs(PIECE_KEYS) do
-        if type(db.pieces[key]) ~= "boolean" then db.pieces[key] = true end
-    end
     if type(db.seat) ~= "table" then db.seat = {} end
     if not IsFiniteNumber(db.seat.dx) then db.seat.dx = 0 end
     if not IsFiniteNumber(db.seat.dy) then db.seat.dy = 0 end
     return db
+end
+
+-- Copies the legacy enabled and pieces values into the active profile unless it already holds its own, then
+-- drops them so the next load cannot import them again. A read-only Config keeps them for a later session.
+local function MigrateLegacy(db)
+    -- Setting a key to its current value changes nothing and answers whether settings are writable yet.
+    if not FS.Config.Set(CFG_ENABLED, FS.Config.Get(CFG_ENABLED)) then return end
+    if db.enabled == false and not FS.Config.IsStored(CFG_ENABLED) then FS.Config.Set(CFG_ENABLED, false) end
+    if type(db.pieces) == "table" then
+        for _, key in ipairs(PIECE_KEYS) do
+            local legacy = db.pieces[key]
+            if type(legacy) == "boolean" and not FS.Config.IsStored(PieceKey(key)) then FS.Config.Set(PieceKey(key), legacy) end
+        end
+    end
+    db.enabled, db.pieces = nil, nil
 end
 
 -------------------------------------------------------------------------------
@@ -306,6 +323,10 @@ local function ApplyAndHook(piece, on, instant)
     RunHook(piece, on and "onShow" or "onHide")
 end
 
+-- The FS.Config keys behind the master switch and each piece, for the config window.
+Gunsight.CONFIG_ENABLED = CFG_ENABLED
+Gunsight.PieceConfigKey = PieceKey
+
 function Gunsight.IsPieceOn(key)
     return pieceState[key] == true
 end
@@ -345,7 +366,11 @@ function Gunsight.SetPiece(key, on, instant)
     local changed = pieceState[key] ~= on
     pieceState[key] = on
     if inited then
-        ForeverSTUwaveDB.gunsight.pieces[key] = on
+        -- Set before the OnChange hook can see a difference, so the hook does not apply it twice.
+        if not FS.Config.Set(PieceKey(key), on) then
+            pieceState[key] = not on
+            return false
+        end
     else
         earlySaves[key] = on
     end
@@ -395,16 +420,17 @@ end
 local function Init()
     if inited then return end
     local db = NormalizedDB()
-    for key, on in pairs(earlySaves) do db.pieces[key] = on end
+    MigrateLegacy(db)
+    for key, on in pairs(earlySaves) do FS.Config.Set(PieceKey(key), on) end
     earlySaves = {}
-    enabled = db.enabled
+    enabled = FS.Config.Get(CFG_ENABLED) == true
     seat.dx, seat.dy = db.seat.dx, db.seat.dy
     if pendingSeat then
         seat.dx, seat.dy = pendingSeat.dx, pendingSeat.dy
         db.seat.dx, db.seat.dy = seat.dx, seat.dy
         pendingSeat = nil
     end
-    for _, key in ipairs(PIECE_KEYS) do pieceState[key] = db.pieces[key] end
+    for _, key in ipairs(PIECE_KEYS) do pieceState[key] = FS.Config.Get(PieceKey(key)) == true end
     inited = true
     for _, key in ipairs(PIECE_KEYS) do
         local piece = pieces[key]
@@ -413,6 +439,19 @@ local function Init()
             RunHook(piece, pieceState[key] and "onShow" or "onHide")
         end
     end
+end
+
+-- A profile switch, reset or copy changes piece settings behind SetPiece's back; follow them like a
+-- SetPiece. The master switch is read at load (builders choose their view then), so it waits for a reload.
+for _, key in ipairs(PIECE_KEYS) do
+    FS.Config.OnChange(PieceKey(key), function(new)
+        local on = new == true
+        if not inited or pieceState[key] == on then return end
+        pieceState[key] = on
+        local piece = pieces[key]
+        if piece then ApplyAndHook(piece, on, false) end
+        Notify(key, on)
+    end)
 end
 
 -- Out of combat again: finish whatever a protected frame could not do under lockdown.
@@ -506,15 +545,17 @@ local function PrintStatus()
     for _, key in ipairs(PIECE_KEYS) do
         parts[#parts + 1] = key .. " " .. (pieceState[key] and "on" or "off")
     end
-    Say((enabled and "enabled" or "disabled") .. ", seat " .. seat.dx .. ", " .. seat.dy .. " (design px), debug "
+    Say((FS.Config.Get(CFG_ENABLED) == true and "enabled" or "disabled") .. ", seat " .. seat.dx .. ", " .. seat.dy .. " (design px), debug "
         .. (debugOn and "on" or "off"))
     Say("pieces: " .. table.concat(parts, ", "))
     Say("/fsgun on | off | seat <dx> <dy> | piece <key> on|off | debug")
 end
 
 local function SetEnabled(on)
-    enabled = on
-    if inited then ForeverSTUwaveDB.gunsight.enabled = on end
+    if not FS.Config.Set(CFG_ENABLED, on) then
+        Say("settings are read-only this session.")
+        return
+    end
     Say((on and "enabled" or "disabled") .. "; /reload for it to take effect.")
 end
 
@@ -539,8 +580,11 @@ SlashCmdList["FSGUN"] = function(msg)
         elseif b ~= "on" and b ~= "off" then
             Say("usage: /fsgun piece <key> on|off")
         else
-            Gunsight.SetPiece(a, b == "on")
-            Say(a .. " " .. b .. ".")
+            if Gunsight.SetPiece(a, b == "on") then
+                Say(a .. " " .. b .. ".")
+            else
+                Say("settings are read-only this session.")
+            end
         end
     elseif cmd == "debug" then
         SetDebug(not debugOn)

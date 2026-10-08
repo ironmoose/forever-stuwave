@@ -843,7 +843,7 @@ def build_runtime(cls: str, gunsight: bool = False):
     if gunsight:
         # the real Layout.lua and Gunsight.lua replace the disabled stub; GU is the Gunsight mockup's numbers
         lua.execute("FS.Gunsight = nil; __gsCalls = nil; setScreen(1440)")
-        for fname in ("Core/Layout.lua", "Modules/CombatHud/Gunsight.lua"):
+        for fname in ("Core/Layout.lua", "Core/Config.lua", "Modules/CombatHud/Gunsight.lua"):
             loader(fname, (ADDON / fname).read_text(encoding="utf-8"))
         lua.execute(f"GU = {lua_value(gunsight_units())}")
     return lua

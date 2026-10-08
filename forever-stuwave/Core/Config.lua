@@ -303,6 +303,12 @@ function Config.Get(key)
     return Effective(ActiveTable().settings, key)
 end
 
+-- True when the active profile holds its own value for `key` (a value equal to the default is stored as nothing).
+function Config.IsStored(key)
+    if type(key) ~= "string" then return false end
+    return ActiveTable().settings[key] ~= nil
+end
+
 -- Stores the value in the active profile and fires callbacks when the effective value changed.
 -- A value equal to the default (or nil) is stored as nothing so the default is not pinned.
 -- Until the character's GUID resolves the active profile is Default, so earlier writes land there.

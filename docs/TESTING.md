@@ -110,6 +110,41 @@ Use a Paladin that has learned at least one seal. Step 6 works on any class.
 7. Send back: `/fsbug` with a note on what you were doing, sent as above, plus
    a screenshot of anything that looks off.
 
+## Layout editor: /fsedit
+
+Out of combat only. Close Blizzard Edit Mode first.
+
+1. Type `/fsedit`. A cyan box with a name appears over each movable piece.
+2. Drag a box. On release the piece moves there and snaps to the grid.
+3. Click a box, then press the arrow keys: 1 unit per press, Shift+arrow moves one grid step. (Keys that are not arrows or Esc should still reach the game; report it if movement keys stop working.)
+4. Right-click a box: that piece goes back to its default seat.
+5. Esc leaves. Starting a fight leaves too and drops a drag in progress.
+6. Check the minimap moves with its addon tray, the chat keeps its minimised and maximised states, and the pet panel (floating, not on the Console) follows the box.
+7. `/reload`: every position holds. `/fsedit reset all`, then `/fsedit reset all confirm` puts everything back.
+8. The Layout page of `/fsconfig` has the same controls: EDIT LAYOUT, snap on/off, grid size 4/8/16/32, and Reset all positions.
+
+## Settings window: /fsconfig
+
+Safe in combat. Esc, the X, or `/fsconfig` again closes it; with a menu or confirm box open, Esc closes only that. `/fsconfig profiles` opens a page directly.
+
+1. Unit Frames: turn "Hide player frame" on. The player frame goes invisible and click-through at once (in combat it waits until combat ends). Turn it off again, then do the same for the target frame.
+2. Gunsight HUD: switch "Your cast bar" off, then on. The piece fades with the console key light following. Check each of the eight pieces the same way: Your cast bar, Target cast bar, Next cast tile, DoT time axis, Soul shards, Proc posts, Buff reminders, Party frames. `/fsgun piece shard off` must flip the same switch while the window is open.
+3. Gunsight HUD master switch: turn it off, `/reload`, and no Gunsight piece builds. Turn it back on and `/reload`.
+4. Profiles: type a name under "New profile". It is created and switched to. Switch between profiles with "Profile in use": every switch in the other pages and every Gunsight piece follows. "This character" shows your name and realm.
+5. Rename and Delete: Rename is off on Default. Delete lists only profiles that are neither Default nor the active one, and asks before deleting. "Copy from..." and "Reset profile" also ask first.
+6. Hover each small ? icon: the explanation shows in the addon's tooltip. No settings text mentions the word "tape".
+7. After `/reload`, the profile and every switch you set are still in place.
+
+## Professions panel: /fsprof
+
+Not yet checked in game. `/fsprof` shows or hides the panel and the choice survives `/reload`.
+
+1. Click each profession row once (an Alchemy, Blacksmithing, Cooking or First Aid row, for example). That profession's window opens. Hovering a row names the profession and, on those rows, adds "Click to open".
+2. A Mining row opens the Smelting window.
+3. Herbalism, Skinning and Fishing rows do nothing when clicked: no window, no cast, no bobber. Their tooltip shows the name only.
+4. In combat, type `/fsprof`. It prints that the change applies after combat, the panel stays as it is, and it flips when combat ends. Learn or drop a profession in combat (if you can) and the rows catch up after combat.
+5. `/reload` with the panel hidden: it stays hidden. Mouse-down or mouse-up clicking should both work (the Interface action-button "on key down" option decides which).
+
 ## If the window does not open
 
 Every report is also saved in the SavedVariables file. It is written on

@@ -54,6 +54,7 @@ TAPE = Path(os.environ.get("GUNSIGHTTAPE_LUA") or ADDON / "Modules/CombatHud/Gun
 CASTBARS = Path(os.environ.get("GUNSIGHTTAPE_CASTBARS_LUA") or ADDON / "Modules/CastBars/CastBars.lua")
 GUNSIGHT = ADDON / "Modules/CombatHud/Gunsight.lua"
 LAYOUT = ADDON / "Core/Layout.lua"
+CONFIG = ADDON / "Core/Config.lua"
 TOC = ADDON / "forever-stuwave.toc"
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
 
@@ -221,6 +222,7 @@ local function world(opts)
     PlayerCastingBarFrame, TargetFrameSpellBar = CreateFrame("Frame"), CreateFrame("Frame")
     if opts.beforeLoad then opts.beforeLoad() end
     __load("Core/Layout.lua", __layoutSrc)
+    __load("Core/Config.lua", __configSrc)
     __load("Modules/CastBars/CastBars.lua", __castSrc)
     if opts.stripView then FS.CastBars.SetView = nil end
     __load("Modules/CombatHud/Gunsight.lua", __gunsightSrc)
@@ -1618,6 +1620,7 @@ def run_case(name: str, mu: dict) -> str | None:
     g = lua.globals()
     g.__castSrc = CASTBARS.read_text(encoding="utf-8")
     g.__layoutSrc = LAYOUT.read_text(encoding="utf-8")
+    g.__configSrc = CONFIG.read_text(encoding="utf-8")
     g.__gunsightSrc = GUNSIGHT.read_text(encoding="utf-8")
     g.__tapeSrc = TAPE.read_text(encoding="utf-8") if TAPE.exists() else "error('GunsightTape.lua is missing')"
     lua.execute("MU = " + lua_value(mu))
