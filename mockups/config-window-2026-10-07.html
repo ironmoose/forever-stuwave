@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=2560">
+<title>Config Window</title>
+<style>
+/* The addon's own bundled faces, same as every other mockup in this folder. */
+@font-face { font-family: "FS Display"; src: url("../forever-stuwave/Media/Fonts/FSDisplay-Bold.ttf"); font-weight: 700; }
+@font-face { font-family: "FS Mono"; src: url("../forever-stuwave/Media/Fonts/MononokiNerdFontMono-Bold.ttf"); font-weight: 700; }
+@font-face { font-family: "Share Tech Mono"; src: url("../forever-stuwave/Media/Fonts/ShareTechMono-Regular.ttf"); }
+
+:root {
+  color-scheme: dark;
+  /* Theme.lua tokens */
+  --bg: #1a1025;            /* COLOR_BG, 80% in the panel fill */
+  --scrim: #0d0620;         /* COLOR_HUD_SCRIM */
+  --track: #0a0416;         /* COLOR_BAR_TRACK */
+  --line: #3a2168;          /* COLOR_BAR_BORDER */
+  --violet: #a855f7;        /* COLOR_BORDER, the panel accent */
+  --pink: #ff2e97;          /* COLOR_HEALTH, close X */
+  --cyan: #22e0ff;          /* COLOR_POWER, menu / button text */
+  --green: #39ff14;         /* COLOR_CARET_HEALTH */
+  --gold: #ffd23f;          /* COLOR_GOLD */
+  --amber: #ffb648;         /* COLOR_AMBER */
+  --muted: #9d93c4;         /* COLOR_MUTED */
+  --text: #e2e8f0;
+  --parchment: #bfe9d6;
+  --font-display: "FS Display", "Orbitron", "Eurostile", sans-serif;
+  --font-mono: "FS Mono", "Mononoki", "Mononoki Nerd Font", "Share Tech Mono", ui-monospace, Menlo, Consolas, monospace;
+  --font-note: "Share Tech Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #07030e; }
+body { width: 2560px; height: 1440px; overflow: hidden; position: relative; color: var(--text); font-family: var(--font-mono); font-weight: 700; }
+
+/* ------------------------------------------------------------------ backdrop (a dimmed stand-in for the game) */
+.world { position: absolute; inset: 0; overflow: hidden;
+  background: linear-gradient(180deg, #0a0418 0%, #1c0a35 38%, #4a1766 58%, #8a2a78 63.5%, #1a0a2c 63.6%, #0d0518 100%); }
+.sun { position: absolute; left: 1280px; top: 560px; width: 420px; height: 210px; margin-left: -210px; border-radius: 210px 210px 0 0;
+  background: repeating-linear-gradient(180deg, rgba(255,120,60,.9) 0 14px, rgba(255,46,151,.85) 14px 28px, transparent 28px 34px);
+  -webkit-mask: linear-gradient(180deg, #000 0%, #000 55%, transparent 100%); mask: linear-gradient(180deg, #000 0%, #000 55%, transparent 100%); opacity: .7; }
+.hills { position: absolute; left: 0; right: 0; top: 700px; height: 216px; background: #12081f;
+  clip-path: polygon(0 70%, 8% 45%, 15% 62%, 26% 30%, 36% 58%, 47% 40%, 58% 66%, 69% 34%, 80% 60%, 90% 38%, 100% 58%, 100% 100%, 0 100%); }
+.floor { position: absolute; left: -600px; right: -600px; top: 915px; height: 900px; transform-origin: 50% 0; transform: perspective(500px) rotateX(62deg);
+  background:
+    repeating-linear-gradient(90deg, rgba(168,85,247,.55) 0 2px, transparent 2px 120px),
+    repeating-linear-gradient(0deg, rgba(168,85,247,.55) 0 2px, transparent 2px 90px), #0e0619; }
+.dim { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 55%, rgba(5,2,12,.35) 0%, rgba(5,2,12,.72) 100%); }
+
+/* ghosted Gunsight HUD + bars so the window reads as "over the game" */
+.ghost { position: absolute; opacity: .22; }
+.ghost.tape { width: 38px; top: 560px; height: 340px; border: 2px solid var(--cyan); background: rgba(34,224,255,.08); }
+.ghost.abar { left: 880px; width: 800px; height: 64px; top: 1310px; border: 2px solid var(--violet); background: rgba(168,85,247,.12);
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+.ghost.abar.b2 { top: 1236px; height: 58px; opacity: .14; }
+
+/* ------------------------------------------------------------------ panel chrome (Theme.SkinPanel language) */
+/* Units: the window is authored in addon UI units (BugReport is 640 x 440). The main copy is zoomed
+   to --uiz canvas px per unit; 1.333 assumes UIParent is 1080 units tall (UI scale 0.75 on 1440p). */
+.win { position: absolute; width: 780px; height: 560px; zoom: var(--z, 1); filter: drop-shadow(0 0 6px rgba(168,85,247,.55)) drop-shadow(0 0 22px rgba(168,85,247,.22)); }
+.win-in { position: absolute; inset: 0; background: var(--violet);
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+.win-fill { position: absolute; inset: 1px; background: rgba(26,16,37,.92);
+  clip-path: polygon(5.3px 0, 100% 0, 100% calc(100% - 5.3px), calc(100% - 5.3px) 100%, 0 100%, 0 5.3px); }
+/* scanline: one dark row over transparent, 4px period, alpha .25, inset ceil(6/2)=3 */
+.scan { position: absolute; inset: 3px; pointer-events: none; z-index: 9; opacity: .25;
+  background: repeating-linear-gradient(180deg, rgba(0,0,0,.8) 0 1px, transparent 1px 4px); }
+.band { position: absolute; left: 3px; right: 3px; top: 3px; height: 18px; background: rgba(168,85,247,.08); }
+.rule { position: absolute; left: 3px; right: 3px; top: 21px; height: 1px; background: rgba(168,85,247,.30); }
+.band-label { position: absolute; left: 13px; top: 3px; height: 18px; line-height: 18px; font-size: 10px; color: var(--violet); letter-spacing: .02em; }
+
+/* close: SkinCloseButton = pink mono "X" in a SkinButton ring */
+.close { position: absolute; right: 7px; top: 5px; width: 26px; height: 14px; }
+.btnx { position: absolute; inset: 0; filter: drop-shadow(0 0 3px rgba(255,46,151,.55)); }
+.btnx > b { position: absolute; inset: 0; display: grid; place-items: center; background: var(--pink); font-size: 11px; line-height: 1; color: var(--pink);
+  clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px); }
+.btnx > b::before { content: ""; position: absolute; inset: 1px; background: #1a0b22; clip-path: polygon(3.3px 0, 100% 0, 100% calc(100% - 3.3px), calc(100% - 3.3px) 100%, 0 100%, 0 3.3px); }
+.btnx > b span { position: relative; }
+
+/* header block under the band */
+.head { position: absolute; left: 17px; right: 17px; top: 29px; height: 40px; }
+.title { font-family: var(--font-display); font-size: 17px; letter-spacing: .06em; text-transform: uppercase; color: var(--text); line-height: 1; padding-top: 4px; }
+.title i { font-style: normal; color: var(--pink); }
+.sub { margin-top: 5px; font-size: 10px; color: var(--muted); letter-spacing: .02em; }
+.sub b { color: var(--cyan); font-weight: 700; }
+.head .cat { position: absolute; right: 0; top: 7px; font-size: 10px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+.head .cat b { color: var(--cyan); }
+
+/* body: nav + well + footer */
+.body { position: absolute; left: 17px; right: 17px; top: 74px; bottom: 36px; display: flex; gap: 10px; }
+
+.nav { width: 150px; flex: none; display: flex; flex-direction: column; gap: 3px; padding-top: 2px; }
+.nav-h { font-size: 9px; letter-spacing: .14em; color: var(--muted); text-transform: uppercase; padding: 0 0 5px 2px; }
+.nav-i { position: relative; height: 28px; display: flex; align-items: center; gap: 8px; padding-left: 10px; font-size: 11px; color: var(--muted); }
+.nav-i em { font-style: normal; font-size: 9px; color: var(--line); width: 14px; }
+.nav-i.on { color: var(--cyan); }
+.nav-i.on em { color: var(--pink); }
+.nav-i.on::before { content: ""; position: absolute; inset: 0; background: rgba(34,224,255,.10);
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px); }
+.nav-i.on::after { content: ""; position: absolute; left: 0; top: 5px; bottom: 5px; width: 2px; background: var(--cyan); box-shadow: 0 0 6px var(--cyan); }
+.nav-i span { position: relative; }
+.nav-i em { position: relative; }
+.nav-sp { flex: 1; }
+.nav-v { font-size: 9px; color: var(--line); padding: 0 0 2px 2px; }
+
+/* the "well": BugReport's #0a0416 @ .95 track behind the readable area */
+.well { position: relative; flex: 1; min-width: 0; background: rgba(10,4,22,.95); border: 1px solid var(--line); padding: 10px 22px 8px 14px; overflow: hidden; }
+.sbar { position: absolute; right: 4px; top: 4px; bottom: 4px; width: 4px; background: rgba(58,33,104,.6); }
+.sbar b { position: absolute; left: 0; right: 0; top: 0; height: 78%; background: var(--violet); }
+
+.grp { margin-top: 12px; }
+.grp:first-child { margin-top: 0; }
+.grp-h { display: flex; align-items: center; gap: 8px; height: 16px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--violet); }
+.grp-h::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, rgba(168,85,247,.45), rgba(58,33,104,.25)); }
+.grp-h .slash { color: var(--line); }
+
+.row { position: relative; display: flex; align-items: center; height: 28px; gap: 10px; }
+.row .lab { flex: 1; font-size: 11px; color: var(--text); white-space: nowrap; }
+.row .lab small { display: block; font-size: 9px; color: var(--muted); font-weight: 700; margin-top: 1px; }
+.row.dim .lab { color: var(--muted); }
+.row.sub1 { padding-left: 16px; }
+.row.sub1::before { content: ""; position: absolute; left: 4px; top: 0; height: 14px; width: 8px; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.help { font-size: 9.5px; line-height: 1.45; color: var(--muted); padding: 2px 0 0 0; font-weight: 700; }
+.help b { color: var(--cyan); font-weight: 700; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; }
+.master { display: flex; align-items: center; height: 34px; padding: 0 10px; margin-bottom: 4px; position: relative; }
+.master::before { content: ""; position: absolute; inset: 0; background: rgba(168,85,247,.07); border: 1px solid rgba(168,85,247,.35);
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+.master > * { position: relative; }
+.master .lab { flex: 1; font-size: 12px; color: var(--text); }
+.master .lab small { font-size: 9px; color: var(--muted); margin-left: 8px; }
+
+/* ------------------------------------------------------------------ controls */
+/* toggle: cut track, slab knob. off = --line ring, on = cyan ring + glow */
+.tg { position: relative; width: 34px; height: 16px; flex: none; filter: drop-shadow(0 0 0 transparent); }
+.tg > b { position: absolute; inset: 0; background: var(--line);
+  clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px); }
+.tg > b::before { content: ""; position: absolute; inset: 1px; background: var(--track);
+  clip-path: polygon(3.3px 0, 100% 0, 100% calc(100% - 3.3px), calc(100% - 3.3px) 100%, 0 100%, 0 3.3px); }
+.tg > b::after { content: ""; position: absolute; top: 4px; bottom: 4px; left: 4px; width: 12px; background: #5b4a8a;
+  clip-path: polygon(3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%, 0 3px); }
+.tg.on { filter: drop-shadow(0 0 3px rgba(34,224,255,.55)); }
+.tg.on > b { background: var(--cyan); }
+.tg.on > b::before { background: color-mix(in srgb, var(--cyan) 14%, var(--track)); }
+.tg.on > b::after { left: auto; right: 4px; background: var(--cyan); }
+.tg-s { font-size: 9px; width: 20px; text-align: right; color: var(--line); flex: none; letter-spacing: .04em; margin-right: 6px; }
+.tg-s.on { color: var(--cyan); }
+
+/* button (SkinButton: cut ring + additive glow in the accent) */
+.btn { position: relative; display: inline-block; filter: drop-shadow(0 0 3px color-mix(in srgb, var(--c, var(--violet)) 55%, transparent)); }
+.btn > b { position: relative; display: flex; align-items: center; justify-content: center; gap: 8px; height: 100%; padding: 0 14px; background: var(--c, var(--violet));
+  font-size: 11px; color: var(--cyan); letter-spacing: .03em; white-space: nowrap;
+  clip-path: polygon(var(--ch, 6px) 0, 100% 0, 100% calc(100% - var(--ch, 6px)), calc(100% - var(--ch, 6px)) 100%, 0 100%, 0 var(--ch, 6px)); }
+.btn > b { isolation: isolate; }
+.btn > b::before { z-index: -1; content: ""; position: absolute; inset: 1px; background: #170c2a;
+  clip-path: polygon(calc(var(--ch, 6px) - .7px) 0, 100% 0, 100% calc(100% - var(--ch, 6px) + .7px), calc(100% - var(--ch, 6px) + .7px) 100%, 0 100%, 0 calc(var(--ch, 6px) - .7px)); }
+.btn > b > * { position: relative; }
+.btn.on > b::before { background: color-mix(in srgb, var(--c) 16%, #170c2a); }
+
+/* segmented: buttons butted 2px apart, selected cyan (same idea as gunsight-hud-v2 .segopt) */
+.seg { display: flex; gap: 2px; flex: none; }
+.seg .btn { --c: var(--line); --ch: 5px; height: 22px; filter: none; }
+.seg .btn > b { padding: 0 11px; color: var(--muted); font-size: 10.5px; }
+.seg .btn.on { --c: var(--cyan); filter: drop-shadow(0 0 3px rgba(34,224,255,.5)); }
+.seg .btn.on > b { color: var(--cyan); }
+.seg .btn.on > b::before { background: color-mix(in srgb, var(--cyan) 20%, #170c2a); }
+.seg.dis { opacity: .4; }
+
+/* tags */
+.new { display: inline-block; margin-left: 8px; padding: 2px 6px 2px 7px; font-size: 8.5px; letter-spacing: .12em; color: #170c2a; background: var(--gold);
+  clip-path: polygon(3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%, 0 3px); vertical-align: 1px; }
+.tag-oc { display: inline-flex; align-items: center; gap: 6px; font-size: 9.5px; color: var(--amber); letter-spacing: .04em; }
+.tag-oc i { width: 6px; height: 6px; background: var(--amber); box-shadow: 0 0 5px var(--amber); display: inline-block; }
+
+/* footer */
+.foot { position: absolute; left: 3px; right: 3px; bottom: 3px; height: 31px; border-top: 1px solid rgba(168,85,247,.30); display: flex; align-items: center; justify-content: space-between; padding: 0 14px; font-size: 10px; color: var(--muted); }
+.foot .l { display: flex; align-items: center; gap: 8px; }
+.foot .dot { width: 6px; height: 6px; background: var(--green); box-shadow: 0 0 6px var(--green); }
+.foot .r { display: flex; align-items: center; gap: 8px; }
+.key { color: var(--cyan); padding: 2px 7px; background: rgba(34,224,255,.08); border: 1px solid rgba(34,224,255,.4); }
+
+/* ------------------------------------------------------------------ layout category */
+.big { --c: var(--cyan); --ch: 10px; height: 54px; width: 100%; display: block; }
+.big > b { flex-direction: column; gap: 3px; font-size: 14px; letter-spacing: .08em; }
+.big > b small { font-size: 9.5px; color: var(--muted); letter-spacing: .02em; font-weight: 700; }
+.btn.warnb { --c: var(--pink); }
+.btn.warnb > b { color: var(--pink); }
+
+/* ------------------------------------------------------------------ annotations (page only) */
+.cap { position: absolute; font-family: var(--font-note); font-weight: 400; font-size: 17px; letter-spacing: .06em; color: var(--cyan); }
+.cap i { font-style: normal; color: var(--pink); }
+.cap span { color: var(--muted); }
+.note { position: absolute; font-family: var(--font-note); font-weight: 400; font-size: 17px; line-height: 1.5; color: var(--parchment); }
+.note b { color: var(--cyan); font-weight: 400; }
+.note ul { margin: 6px 0 0; padding-left: 20px; }
+.note li { margin: 3px 0; }
+.stamp { position: absolute; left: 36px; top: 28px; font-family: var(--font-display); font-weight: 700; font-size: 26px; letter-spacing: .06em; text-transform: uppercase; color: var(--text); }
+.stamp span { color: var(--pink); }
+.stamp small { display: block; margin-top: 6px; font-family: var(--font-note); font-weight: 400; font-size: 15px; letter-spacing: .1em; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<div class="world">
+  <div class="sun"></div>
+  <div class="hills"></div>
+  <div class="floor"></div>
+  <div class="ghost tape" style="left:1180px"></div>
+  <div class="ghost tape" style="left:1342px"></div>
+  <div class="ghost abar b2"></div>
+  <div class="ghost abar"></div>
+  <div class="dim"></div>
+</div>
+
+<div class="stamp">Config window <span>/</span> design reference<small>2026-10-07  /  2560 x 1440 canvas  /  mockup, not code  /  backdrop is a dimmed stand-in for the game</small></div>
+
+<!-- =========================================================== MAIN: Gunsight HUD selected -->
+<div class="cap" style="left:132px;top:112px"><i>A</i> / Gunsight HUD category <span>(780 x 560 UI units, 1.333 px per unit)</span></div>
+<div class="win" style="--z:1.3333;left:132px;top:150px">
+  <div class="win-in"><div class="win-fill"></div></div>
+  <div class="scan"></div>
+  <div class="band"></div><div class="rule"></div>
+  <div class="band-label">stuwave://config</div>
+  <div class="close"><span class="btnx"><b><span>X</span></b></span></div>
+
+  <div class="head">
+    <div class="title">Forever <i>STU</i>wave</div>
+    <div class="sub">v0.1.0-alpha.1  ·  <b>/fsconfig</b></div>
+    <div class="cat">category <b>/ gunsight hud</b></div>
+  </div>
+
+  <div class="body">
+    <div class="nav">
+      <div class="nav-h">// settings</div>
+      <div class="nav-i"><em>01</em><span>General</span></div>
+      <div class="nav-i"><em>02</em><span>Unit Frames</span></div>
+      <div class="nav-i on"><em>03</em><span>Gunsight HUD</span></div>
+      <div class="nav-i"><em>04</em><span>Layout</span></div>
+      <div class="nav-i"><em>05</em><span>Chat</span></div>
+      <div class="nav-i"><em>06</em><span>Console</span></div>
+      <div class="nav-i"><em>07</em><span>Accessibility</span></div>
+      <div class="nav-sp"></div>
+      <div class="nav-v">/fsgun  /fsedit  /fsbug</div>
+    </div>
+
+    <div class="well">
+      <div class="sbar"><b></b></div>
+
+      <div class="master">
+        <div class="lab">Gunsight HUD<small>master switch, fades every piece out together</small></div>
+        <span class="tg-s on">ON</span><span class="tg on"><b></b></span>
+      </div>
+
+      <div class="grp">
+        <div class="grp-h"><span class="slash">//</span> Pieces</div>
+        <div class="grid2">
+          <div class="row"><div class="lab">Your cast bar</div><span class="tg on"><b></b></span></div>
+          <div class="row"><div class="lab">Target cast bar</div><span class="tg on"><b></b></span></div>
+          <div class="row"><div class="lab">Next cast tile</div><span class="tg on"><b></b></span></div>
+          <div class="row"><div class="lab">DoT time axis</div><span class="tg on"><b></b></span></div>
+          <div class="row"><div class="lab">Soul shards</div><span class="tg on"><b></b></span></div>
+          <div class="row"><div class="lab">Proc posts</div><span class="tg"><b></b></span></div>
+          <div class="row"><div class="lab">Buff reminders</div><span class="tg on"><b></b></span></div>
+          <div class="row"><div class="lab">Party frames</div><span class="tg on"><b></b></span></div>
+        </div>
+      </div>
+
+      <div class="grp">
+        <div class="grp-h"><span class="slash">//</span> Target health and resource</div>
+        <div class="row"><div class="lab">Bar thickness</div>
+          <div class="seg"><span class="btn"><b>Thin</b></span><span class="btn on"><b>Medium</b></span><span class="btn"><b>Thick</b></span></div></div>
+        <div class="row"><div class="lab">Show numbers</div><span class="tg-s on">ON</span><span class="tg on"><b></b></span></div>
+        <div class="row sub1"><div class="lab">Number format</div>
+          <div class="seg"><span class="btn"><b>Current</b></span><span class="btn on"><b>Current / max</b></span><span class="btn"><b>Percent</b></span></div></div>
+      </div>
+
+      <div class="grp">
+        <div class="grp-h"><span class="slash">//</span> Target buffs and debuffs</div>
+        <div class="row"><div class="lab">Show on the Gunsight<span class="new">NEW</span></div><span class="tg-s on">ON</span><span class="tg on"><b></b></span></div>
+        <div class="help">Replaces the Blizzard target auras. Needs the Unit Frames <b>Hide target frame</b> option to stay clean.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div class="l"><span class="dot"></span>Changes apply instantly</div>
+    <div class="r"><span>open with</span><span class="key">/fsconfig</span></div>
+  </div>
+</div>
+
+<!-- =========================================================== THUMB: Unit Frames -->
+<div class="cap" style="left:1360px;top:78px"><i>B</i> / Unit Frames category <span>(1.0 canvas px per unit, so 75% of A)</span></div>
+<div class="win" style="--z:1;left:1360px;top:112px">
+  <div class="win-in"><div class="win-fill"></div></div>
+  <div class="scan"></div>
+  <div class="band"></div><div class="rule"></div>
+  <div class="band-label">stuwave://config</div>
+  <div class="close"><span class="btnx"><b><span>X</span></b></span></div>
+  <div class="head">
+    <div class="title">Forever <i>STU</i>wave</div>
+    <div class="sub">v0.1.0-alpha.1  ·  <b>/fsconfig</b></div>
+    <div class="cat">category <b>/ unit frames</b></div>
+  </div>
+  <div class="body">
+    <div class="nav">
+      <div class="nav-h">// settings</div>
+      <div class="nav-i"><em>01</em><span>General</span></div>
+      <div class="nav-i on"><em>02</em><span>Unit Frames</span></div>
+      <div class="nav-i"><em>03</em><span>Gunsight HUD</span></div>
+      <div class="nav-i"><em>04</em><span>Layout</span></div>
+      <div class="nav-i"><em>05</em><span>Chat</span></div>
+      <div class="nav-i"><em>06</em><span>Console</span></div>
+      <div class="nav-i"><em>07</em><span>Accessibility</span></div>
+      <div class="nav-sp"></div>
+      <div class="nav-v">/fsgun  /fsedit  /fsbug</div>
+    </div>
+    <div class="well">
+      <div class="grp">
+        <div class="grp-h"><span class="slash">//</span> Blizzard frames</div>
+        <div class="row"><div class="lab">Hide player frame</div><span class="tg-s on">ON</span><span class="tg on"><b></b></span></div>
+        <div class="row"><div class="lab">Hide target frame</div><span class="tg-s">OFF</span><span class="tg"><b></b></span></div>
+        <div class="help">Hidden frames stay click-through and invisible; target auras move to the <b>Gunsight HUD</b> when enabled.</div>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <div class="l"><span class="dot"></span>Changes apply instantly</div>
+    <div class="r"><span>open with</span><span class="key">/fsconfig</span></div>
+  </div>
+</div>
+
+<!-- =========================================================== THUMB: Layout -->
+<div class="cap" style="left:1360px;top:716px"><i>C</i> / Layout category <span>(1.0 canvas px per unit)</span></div>
+<div class="win" style="--z:1;left:1360px;top:750px">
+  <div class="win-in"><div class="win-fill"></div></div>
+  <div class="scan"></div>
+  <div class="band"></div><div class="rule"></div>
+  <div class="band-label">stuwave://config</div>
+  <div class="close"><span class="btnx"><b><span>X</span></b></span></div>
+  <div class="head">
+    <div class="title">Forever <i>STU</i>wave</div>
+    <div class="sub">v0.1.0-alpha.1  ·  <b>/fsconfig</b></div>
+    <div class="cat">category <b>/ layout</b></div>
+  </div>
+  <div class="body">
+    <div class="nav">
+      <div class="nav-h">// settings</div>
+      <div class="nav-i"><em>01</em><span>General</span></div>
+      <div class="nav-i"><em>02</em><span>Unit Frames</span></div>
+      <div class="nav-i"><em>03</em><span>Gunsight HUD</span></div>
+      <div class="nav-i on"><em>04</em><span>Layout</span></div>
+      <div class="nav-i"><em>05</em><span>Chat</span></div>
+      <div class="nav-i"><em>06</em><span>Console</span></div>
+      <div class="nav-i"><em>07</em><span>Accessibility</span></div>
+      <div class="nav-sp"></div>
+      <div class="nav-v">/fsgun  /fsedit  /fsbug</div>
+    </div>
+    <div class="well">
+      <div class="grp">
+        <div class="grp-h"><span class="slash">//</span> Edit mode</div>
+        <span class="btn big"><b>EDIT LAYOUT<small>enters /fsedit, drag every piece, Esc to leave</small></b></span>
+        <div class="row" style="margin-top:6px"><span class="tag-oc"><i></i>Out of combat only</span></div>
+      </div>
+      <div class="grp">
+        <div class="grp-h"><span class="slash">//</span> Snapping</div>
+        <div class="row"><div class="lab">Snap to grid</div><span class="tg-s on">ON</span><span class="tg on"><b></b></span></div>
+        <div class="row sub1"><div class="lab">Grid size</div>
+          <div class="seg"><span class="btn"><b>4</b></span><span class="btn on"><b>8</b></span><span class="btn"><b>16</b></span><span class="btn"><b>32</b></span></div></div>
+      </div>
+      <div class="grp">
+        <div class="grp-h"><span class="slash">//</span> Reset</div>
+        <div class="row"><div class="lab">Put every piece back where the design seats it<small>cannot be undone</small></div>
+          <span class="btn warnb" style="height:24px;--ch:6px"><b>Reset all positions</b></span></div>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <div class="l"><span class="dot"></span>Changes apply instantly</div>
+    <div class="r"><span>open with</span><span class="key">/fsconfig</span></div>
+  </div>
+</div>
+
+<!-- =========================================================== notes -->
+<div class="note" style="left:132px;top:990px;width:1040px">
+  <b>Taken from the addon</b>
+  <ul>
+    <li>Panel: SkinPanel chrome. Violet 1px ring and glow, fill #1a1025 at 92%, cut corners top left and bottom right (6), scanline at .25, 18 high title band with a rule and the mono <b>stuwave://config</b> label.</li>
+    <li>Well: BugReport's #0a0416 at 95% reading area with a 4 wide violet scroll thumb. Close X: SkinCloseButton, pink mono X in a pink cut ring.</li>
+    <li>Type: FS Display for the title, Mononoki Bold for everything else, cyan for live text, muted #9d93c4 for helpers.</li>
+  </ul>
+</div>
+<div class="note" style="left:1360px;top:1340px;width:1100px;font-size:15px;color:var(--muted)">
+  Hover, focus, pressed and disabled states are not drawn. A and the two thumbnails are the same window, so the nav and footer never move between categories.
+</div>
+
+</body>
+</html>

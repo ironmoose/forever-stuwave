@@ -25,6 +25,7 @@ Exit 0 = every check passed.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -35,6 +36,8 @@ except ImportError:
 
 ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
 LAYOUT_FILE = Path(os.environ.get("LAYOUT_LUA", ADDON / "Core/Layout.lua"))   # a mutant copy for mutation checks
+
+UNITFRAMES_FILE = ADDON / "Modules/UnitFrames/UnitFrames.lua"
 
 MOCK = r"""
 __combat = false
@@ -53,6 +56,7 @@ function Frame:SetPoint(point, rel, relPoint, x, y)
 end
 function Frame:SetSize(w, h) if guarded(self) then return end; self._w, self._h = w, h end
 function Frame:RegisterEvent(e) self._events[e] = true end
+function Frame:UnregisterEvent(e) self._events[e] = nil end
 function Frame:SetScript(k, fn) self._scripts[k] = fn end
 function Frame:IsProtected()
     if self._isProtectedThrows then error("IsProtected failed") end
@@ -67,11 +71,13 @@ function CreateFrame()
     return f
 end
 function InCombatLockdown() return __combat end
-function __fire(event)
+function __fire(event, ...)
     for _, f in ipairs(__frames) do
-        if f._events[event] and f._scripts.OnEvent then f._scripts.OnEvent(f, event) end
+        if f._events[event] and f._scripts.OnEvent then f._scripts.OnEvent(f, event, ...) end
     end
 end
+__printed = {}
+function print(...) __printed[#__printed + 1] = table.concat({ ... }, " ") end
 
 UIParent = CreateFrame()
 UIParent:SetHeight(1440)
@@ -331,8 +337,312 @@ function T.a_seat_adjust_is_not_used_for_a_frame_seated_on_another_parent()
     eq(f._points[1].rel, other)
 end
 
+-------------------------------------------------------------------------------
+-- Saved overrides
+-------------------------------------------------------------------------------
+
+local function stanceX() return FS.Layout.stance.x end
+
+function T.overrides_load_and_mutate_the_layout_entry_in_place()
+    ForeverSTUwaveDB = { layout = { v = 1, frames = { stance = { x = 10.5, y = -400 } } } }
+    local entry = FS.Layout.stance
+    FS.Layout.LoadOverrides()
+    eq(FS.Layout.stance, entry, "the same table, mutated in place")
+    eq(entry.x, 10.5); eq(entry.y, -400)
+    eq(FS.Layout.action.x, -7, "an id with no override keeps its default")
+end
+
+function T.overrides_load_on_our_addon_loaded_before_the_login_reseat()
+    local f = seated(false)
+    ForeverSTUwaveDB = { layout = { v = 1, frames = { stance = { x = 30, y = -300 } } } }
+    __fire("ADDON_LOADED", "SomeOtherAddon")
+    eq(stanceX(), 0, "another addon's load does nothing")
+    __fire("ADDON_LOADED", "forever-stuwave")
+    eq(stanceX(), 30, "loaded on our own ADDON_LOADED")
+    __fire("PLAYER_LOGIN")
+    eq(f._points[1].x, 30, "the login pass seats the frame at the override")
+    eq(f._points[1].y, -300)
+end
+
+function T.defaults_are_snapshotted_before_the_first_mutation()
+    ForeverSTUwaveDB = { layout = { v = 1, frames = { stance = { x = 10, y = 20 } } } }
+    FS.Layout.LoadOverrides()
+    eq(FS.Layout._defaults.stance.x, 0); eq(FS.Layout._defaults.stance.y, -427)
+    eq(FS.Layout._defaults.action.x, -7)
+    ForeverSTUwaveDB.layout.frames.stance = { x = 50, y = 60 }
+    FS.Layout.LoadOverrides()
+    eq(FS.Layout._defaults.stance.x, 0, "a second load does not snapshot an override")
+    eq(stanceX(), 50)
+    ForeverSTUwaveDB.layout.frames.stance = nil
+    FS.Layout.LoadOverrides()
+    eq(stanceX(), 0, "a reload without the entry is back on the default")
+end
+
+function T.a_higher_version_is_ignored_with_one_warning_and_never_written()
+    local layout = { v = 2, frames = { stance = { x = 5, y = 5 } }, future = "keep" }
+    ForeverSTUwaveDB = { layout = layout }
+    FS.Layout.LoadOverrides()
+    FS.Layout.LoadOverrides()
+    eq(stanceX(), 0, "overrides not applied")
+    eq(#__printed, 1, "one warning")
+    eq(ForeverSTUwaveDB.layout, layout, "same table")
+    eq(layout.v, 2); eq(layout.future, "keep")
+    eq(layout.frames.stance.x, 5, "entry untouched")
+    eq(FS.Layout.SetOverride("stance", 9, 9), false)
+    eq(FS.Layout.ClearOverride("stance"), false)
+    eq(FS.Layout.ClearAllOverrides(), false)
+    eq(layout.frames.stance.x, 5, "still untouched after every write attempt")
+    eq(layout.frames.stance.y, 5)
+    eq(stanceX(), 0, "and the layout stayed on the default")
+end
+
+function T.a_missing_db_layout_is_created_at_the_current_version()
+    ForeverSTUwaveDB = {}
+    FS.Layout.LoadOverrides()
+    eq(type(ForeverSTUwaveDB.layout), "table")
+    eq(ForeverSTUwaveDB.layout.v, 1)
+    eq(type(ForeverSTUwaveDB.layout.frames), "table")
+    ForeverSTUwaveDB = { layout = "junk" }
+    FS.Layout.LoadOverrides()
+    eq(ForeverSTUwaveDB.layout.v, 1, "a non-table layout is replaced")
+    ForeverSTUwaveDB = { layout = { v = 1, frames = 7 } }
+    FS.Layout.LoadOverrides()
+    eq(type(ForeverSTUwaveDB.layout.frames), "table", "a non-table frames is replaced")
+end
+
+function T.garbage_entries_are_ignored()
+    ForeverSTUwaveDB = { layout = { v = 1, frames = {
+        stance = { x = "10", y = 1 },
+        action = { x = 3 },
+        petbar = { x = 0 / 0, y = 1 },
+        nope = { x = 1, y = 1 },
+        deck = { x = 1, y = 1 },
+        _applied = { x = 1, y = 1 },
+        grid = 7,
+        [5] = { x = 1, y = 1 },
+        pcast = { x = 11, y = -22 },
+    } } }
+    FS.Layout.LoadOverrides()
+    eq(stanceX(), 0, "string x ignored")
+    eq(FS.Layout.action.x, -7, "missing y ignored")
+    eq(FS.Layout.petbar.x, -380, "NaN ignored")
+    eq(FS.Layout.nope, nil, "unknown id not created")
+    eq(FS.Layout.deck.x, nil, "an entry with no x/y is not overridable")
+    eq(FS.Layout.grid.x, 2, "non-table entry ignored")
+    eq(FS.Layout.pcast.x, 11, "a good entry beside the garbage still applies")
+    eq(FS.Layout.pcast.y, -22)
+end
+
+function T.set_and_clear_override_round_trip_the_db()
+    ForeverSTUwaveDB = {}
+    FS.Layout.LoadOverrides()
+    eq(FS.Layout.SetOverride("stance", 12.3, -400.74), true)
+    local saved = ForeverSTUwaveDB.layout.frames.stance
+    eq(saved.x, 12.5, "rounded to half a design px"); eq(saved.y, -400.5)
+    eq(FS.Layout.stance.x, 12.5); eq(FS.Layout.stance.y, -400.5)
+    eq(FS.Layout.ClearOverride("stance"), true)
+    eq(ForeverSTUwaveDB.layout.frames.stance, nil, "DB entry removed")
+    eq(stanceX(), 0); eq(FS.Layout.stance.y, -427, "default restored")
+    FS.Layout.SetOverride("stance", 1, 2)
+    FS.Layout.SetOverride("action", 3, 4)
+    FS.Layout.ClearAllOverrides()
+    eq(next(ForeverSTUwaveDB.layout.frames), nil, "every DB entry removed")
+    eq(stanceX(), 0); eq(FS.Layout.action.x, -7); eq(FS.Layout.action.y, -540)
+    eq(ForeverSTUwaveDB.layout.v, 1)
+end
+
+function T.a_nil_saved_variable_is_created_not_thrown_on()
+    ForeverSTUwaveDB = nil
+    FS.Layout.LoadOverrides()
+    eq(type(ForeverSTUwaveDB), "table", "first run: the global is created")
+    eq(ForeverSTUwaveDB.layout.v, 1)
+    eq(type(ForeverSTUwaveDB.layout.frames), "table")
+    ForeverSTUwaveDB = nil
+    eq(FS.Layout.SetOverride("stance", 1, 2), true, "a write also creates it")
+    eq(ForeverSTUwaveDB.layout.frames.stance.x, 1)
+end
+
+function T.huge_override_values_are_refused_on_write_and_ignored_on_load()
+    ForeverSTUwaveDB = {}
+    FS.Layout.LoadOverrides()
+    for _, v in ipairs({ 9e307, -9e307, 1e300, 5121, -5121 }) do
+        eq(FS.Layout.SetOverride("stance", v, 0), false, "x " .. v)
+        eq(FS.Layout.SetOverride("player", 0, v), false, "y " .. v)
+    end
+    eq(next(ForeverSTUwaveDB.layout.frames), nil, "nothing written")
+    eq(FS.Layout.SetOverride("stance", 5120, -5120), true, "the bound itself is allowed")
+    ForeverSTUwaveDB = { layout = { v = 1, frames = {
+        stance = { x = 9e307, y = 0 }, action = { x = 0, y = -1e300 }, player = { x = 6000, y = 0 },
+        pcast = { x = 100, y = 200 },
+    } } }
+    FS.Layout.LoadOverrides()
+    eq(stanceX(), 0); eq(FS.Layout.action.y, -540); eq(FS.Layout.player.x, 20)
+    eq(FS.Layout.pcast.x, 100, "a sane entry beside them still applies")
+end
+
+function T.set_override_rejects_unknown_ids_and_non_numbers()
+    ForeverSTUwaveDB = {}
+    FS.Layout.LoadOverrides()
+    eq(FS.Layout.SetOverride("nope", 1, 1), false)
+    eq(FS.Layout.SetOverride("deck", 1, 1), false)
+    eq(FS.Layout.SetOverride("stance", "1", 1), false)
+    eq(FS.Layout.SetOverride("stance", 1, nil), false)
+    eq(FS.Layout.SetOverride("stance", 0 / 0, 1), false)
+    eq(FS.Layout.SetOverride("stance", math.huge, 1), false)
+    eq(next(ForeverSTUwaveDB.layout.frames), nil, "nothing written")
+    eq(stanceX(), 0)
+end
+
+function T.reseat_moves_every_frame_seated_with_that_id_and_runs_the_callbacks()
+    ForeverSTUwaveDB = {}
+    FS.Layout.LoadOverrides()
+    local a, b, other = seated(false), seated(true), CreateFrame()
+    FS.Layout.Apply(other, "action")
+    local why = {}
+    FS.Layout.OnRescale(function() why[#why + 1] = tostring(FS.Layout.rescaleWhy) end)
+    FS.Layout.SetOverride("stance", 40, -100)
+    FS.Layout.Reseat("stance")
+    eq(a._points[1].x, 40); eq(a._points[1].y, -100)
+    eq(b._points[1].x, 40, "a protected frame is seated out of combat")
+    eq(other._points[1].x, -7, "a frame with another id is left alone")
+    eq(#a._points, 1, "re-seated, not stacked")
+    eq(#why, 1, "the rescale callbacks ran once")
+    eq(type(FS.Layout.RunRescaleCallbacks), "function")
+end
+
+function T.reseat_defers_a_held_frame_in_combat_and_seats_it_after_regen()
+    ForeverSTUwaveDB = {}
+    FS.Layout.LoadOverrides()
+    local held, free = seated(true), seated(false)
+    local runs = 0
+    FS.Layout.OnRescale(function() runs = runs + 1 end)
+    __combat = true
+    FS.Layout.SetOverride("stance", 40, -100)
+    FS.Layout.Reseat("stance")
+    eq(__blocked, 0, "no protected operation was attempted")
+    eq(held._points[1].x, 0, "held frame untouched in combat")
+    eq(free._points[1].x, 40, "unprotected frame seated at once")
+    eq(runs, 1, "callbacks still ran")
+    __combat = false
+    __fire("PLAYER_REGEN_ENABLED")
+    eq(held._points[1].x, 40, "held frame seated after combat")
+    eq(#held._points, 1)
+    eq(__blocked, 0)
+    eq(runs, 2, "and the callbacks ran again once it was seated")
+end
+
+-------------------------------------------------------------------------------
+-- Player and target seats
+-------------------------------------------------------------------------------
+
+function T.player_and_target_land_on_the_old_corner_seat_at_any_ui_scale()
+    for _, height in ipairs({ 1440, 1200, 768 }) do
+        UIParent:SetHeight(height)
+        local p, t = CreateFrame(), CreateFrame()
+        p:SetSize(260, 73); t:SetSize(260, 73)   -- the size UnitFrames.lua builds them at
+        FS.Layout.Apply(p, "player")
+        FS.Layout.Apply(t, "target")
+        local a, b = p._points[1], t._points[1]
+        eq(a.point, "TOPLEFT", "player point at " .. height); eq(a.rel, UIParent); eq(a.relPoint, "TOPLEFT")
+        eq(a.x, 20, "player x is raw UI units at " .. height); eq(a.y, -20)
+        eq(b.point, "TOPLEFT"); eq(b.rel, UIParent, "target is not chained to player"); eq(b.relPoint, "TOPLEFT")
+        eq(b.x, 300, "target x is raw UI units at " .. height); eq(b.y, -20)
+        eq(p._w, 260, "player size untouched at " .. height); eq(p._h, 73)
+        eq(t._w, 260); eq(t._h, 73)
+    end
+end
+
+function T.an_unsized_entry_is_never_resized_by_apply_or_a_rescale()
+    local p = CreateFrame()
+    p:SetSize(260, 61)   -- SetPanelHeight shrank it for a unit without a power bar
+    FS.Layout.Apply(p, "player")
+    rescale(0.5)
+    eq(p._w, 260); eq(p._h, 61, "the module's own height survives Apply and a rescale")
+    eq(p._points[1].x, 20, "and the position stays in raw UI units")
+end
+
+function T.scaled_entries_are_unchanged_by_the_unscaled_flag()
+    eq(FS.Layout.IsUnscaled("player"), true); eq(FS.Layout.IsUnscaled("target"), true)
+    eq(FS.Layout.IsUnscaled("stance"), false); eq(FS.Layout.IsUnscaled("nope"), false)
+    UIParent:SetHeight(720)
+    local f = CreateFrame()
+    FS.Layout.Apply(f, "stance")
+    eq(f._points[1].y, -427 * 0.5); eq(f._w, STANCE_W * 0.5); eq(f._h, 38 * 0.5)
+end
+
+function T.an_unscaled_override_is_stored_and_applied_in_the_entrys_own_units()
+    ForeverSTUwaveDB = {}
+    FS.Layout.LoadOverrides()
+    UIParent:SetHeight(1200)
+    local t = CreateFrame()
+    FS.Layout.Apply(t, "target")
+    eq(FS.Layout.SetOverride("target", 41.26, -9.8), true)
+    eq(ForeverSTUwaveDB.layout.frames.target.x, 41.5, "rounded to 0.5 like a scaled entry")
+    eq(ForeverSTUwaveDB.layout.frames.target.y, -10)
+    FS.Layout.Reseat("target")
+    eq(t._points[1].x, 41.5, "applied unscaled"); eq(t._points[1].y, -10)
+    FS.Layout.ClearOverride("target")
+    eq(FS.Layout.target.x, 300)
+end
+
+function T.player_and_target_move_independently()
+    ForeverSTUwaveDB = {}
+    FS.Layout.LoadOverrides()
+    local p, t = CreateFrame(), CreateFrame()
+    FS.Layout.Apply(p, "player")
+    FS.Layout.Apply(t, "target")
+    FS.Layout.SetOverride("target", 500, -60)
+    FS.Layout.Reseat("target")
+    eq(t._points[1].x, 500); eq(t._points[1].y, -60)
+    eq(p._points[1].x, 20, "player stayed put"); eq(p._points[1].y, -20)
+    FS.Layout.SetOverride("player", 80, -90)
+    FS.Layout.Reseat("player")
+    eq(p._points[1].x, 80)
+    eq(t._points[1].x, 500, "target stayed put")
+end
+
 __checks = T
 """
+
+
+def check_unitframes_parity() -> int:
+    """The player/target defaults must equal the old chained corner seat in UnitFrames.lua."""
+    src = UNITFRAMES_FILE.read_text(encoding="utf-8")
+
+    def const(name: str) -> int:
+        match = re.search(rf"^local {name}\s*=\s*(\d+)\b", src, re.M)
+        if not match:
+            raise SystemExit(f"UnitFrames.lua: constant {name} not found")
+        return int(match.group(1))
+
+    width = const("PANEL_WIDTH")
+    height = 2 * const("PAD_Y") + const("NAME_ROW_HEIGHT") + const("NAME_GAP") + const("HEALTH_HEIGHT") + const("BAR_GAP") + const("POWER_HEIGHT")
+    lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
+    lua.execute(MOCK)
+    lua.execute("FS = {}")
+    lua.eval(LOAD)(LAYOUT_FILE.read_text(encoding="utf-8"), lua.eval("FS"))
+    player, target = lua.eval("FS.Layout.player"), lua.eval("FS.Layout.target")
+    want_player = (20, -20, width, height)
+    want_target = (20 + width + 20, -20, width, height)
+    problems = []
+    if (player.x, player.y, player.w, player.h) != want_player or player.point != "TOPLEFT" or player.relPoint != "TOPLEFT":
+        problems.append(f"FS.Layout.player is not the old corner seat {want_player}")
+    if (target.x, target.y, target.w, target.h) != want_target or target.point != "TOPLEFT" or target.relPoint != "TOPLEFT":
+        problems.append(f"FS.Layout.target is not where the old chain put it {want_target}")
+    if not re.search(r'FS\.Layout\.Apply\(\s*player\s*,\s*"player"\s*\)', src):
+        problems.append('UnitFrames.lua does not seat the player with FS.Layout.Apply(player, "player")')
+    if not re.search(r'FS\.Layout\.Apply\(\s*target\s*,\s*"target"\s*\)', src):
+        problems.append('UnitFrames.lua does not seat the target with FS.Layout.Apply(target, "target")')
+    if re.search(r'"TOPRIGHT"\s*,\s*20\s*,\s*0', src) or re.search(r'player:SetPoint|target:SetPoint', src):
+        problems.append("UnitFrames.lua still hardcodes the player/target anchors")
+    for entry, name in ((player, "player"), (target, "target")):
+        if not (entry.unscaled and entry.noSize):
+            problems.append(f"FS.Layout.{name} must be unscaled and noSize (approved look at any UI scale)")
+    for problem in problems:
+        print(f"FAIL  unitframes_parity: {problem}")
+    if not problems:
+        print("ok    unitframes_parity")
+    return len(problems)
 
 
 def boot() -> "LuaRuntime":
@@ -347,7 +657,8 @@ def boot() -> "LuaRuntime":
 
 def main() -> int:
     names = sorted(k for k in boot().eval("__checks").keys())
-    failed = 0
+    failed = 1 if check_unitframes_parity() else 0
+    names_total = len(names) + 1
     for name in names:
         # A fresh client per check: the combat flag, the applied frames and the
         # registered callbacks must not leak between them.
@@ -357,7 +668,7 @@ def main() -> int:
         except LuaError as err:
             failed += 1
             print(f"FAIL  {name}: {err}")
-    print(f"{len(names) - failed}/{len(names)} checks passed")
+    print(f"{names_total - failed}/{names_total} checks passed")
     return 1 if failed else 0
 
 

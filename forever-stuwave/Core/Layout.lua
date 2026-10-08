@@ -4,7 +4,7 @@
 -- Split out of Theme.lua, which still owns chrome/tokens. Loads after
 -- Theme.lua and before every component that consumes FS.Layout (see .toc).
 
-local _, FS = ...
+local addonName, FS = ...
 
 -------------------------------------------------------------------------------
 -- Layout
@@ -19,8 +19,11 @@ local _, FS = ...
 -- frame yet -- this is the complete canonical map, not what exists today.
 FS.Layout = FS.Layout or {
     grid        = { point = "CENTER", relPoint = "CENTER", x = 2,     y = -625, w = 2560, h = 183 },
-    player      = { point = "CENTER", relPoint = "CENTER", x = -1089, y = 643,  w = 320,  h = 92  },
-    target      = { point = "CENTER", relPoint = "CENTER", x = -706,  y = 640,  w = 320,  h = 92  },
+    -- player/target keep the approved corner seat at every UI scale: TOPLEFT, raw UI
+    -- units (unscaled), player 20,-20 and target one 260 wide panel plus a 20 gap to its
+    -- right. UnitFrames.lua owns their size (noSize), so w/h only record its panel size.
+    player      = { point = "TOPLEFT", relPoint = "TOPLEFT", x = 20,   y = -20, w = 260, h = 73, unscaled = true, noSize = true },
+    target      = { point = "TOPLEFT", relPoint = "TOPLEFT", x = 300,  y = -20, w = 260, h = 73, unscaled = true, noSize = true },
     tot         = { point = "CENTER", relPoint = "CENTER", x = -451,  y = 623,  w = 150,  h = 54  },
     focus       = { point = "CENTER", relPoint = "CENTER", x = -723,  y = -142, w = 190,  h = 66  },
     pet         = { point = "CENTER", relPoint = "CENTER", x = -448,  y = -361, w = 180,  h = 62  },
@@ -210,6 +213,13 @@ function FS.Layout.CallTraced(fn)
     end)
 end
 
+-- True when the entry's x/y (and any override of them) are raw UI units rather than
+-- design px, so a drag handle must not divide its screen delta by Scale() for it.
+function FS.Layout.IsUnscaled(id)
+    local L = type(id) == "string" and FS.Layout[id]
+    return type(L) == "table" and L.unscaled == true
+end
+
 -- Applies a saved layout entry to `frame`, clearing any prior anchor first.
 -- Nil-safe: does nothing if `frame` or the `id` entry is missing. Returns the
 -- layout entry so callers can read w/h to size children.
@@ -221,7 +231,7 @@ function FS.Layout.Apply(frame, id, parent)
     local L = FS.Layout[id]
     if not frame or not L then return end
 
-    local scale = FS.Layout.Scale()
+    local scale = L.unscaled and 1 or FS.Layout.Scale()
 
     -- Edit Mode system frames (ChatFrame1) replace ClearAllPoints/SetPoint with
     -- overrides that write EditModeManagerFrame's anchor-dirty flag, which our
@@ -261,7 +271,7 @@ function FS.Layout.Apply(frame, id, parent)
     local ok, err = FS.Layout.CallTraced(function()
         clear(frame)
         set(frame, point, parent or UIParent, relPoint, x, y)
-        if L.w and L.h and frame.SetSize then
+        if L.w and L.h and frame.SetSize and not L.noSize then
             frame:SetSize(L.w * scale, L.h * scale)
         end
     end)
@@ -344,6 +354,156 @@ layoutWatcher:SetScript("OnEvent", function(_, event)
     -- from the layout sees their final position; each callback guards its own combat
     -- work (the action bars and the stance bar both defer to PLAYER_REGEN_ENABLED).
     RunRescaleCallbacks(event)
+end)
+
+FS.Layout.RunRescaleCallbacks = RunRescaleCallbacks
+
+-------------------------------------------------------------------------------
+-- Saved position overrides
+--
+-- ForeverSTUwaveDB.layout = { v = 1, frames = { [id] = { x = , y = } } }, in the same
+-- design px as the entries above. Overrides MUTATE FS.Layout[id].x/.y in place, because
+-- several modules read those fields directly instead of going through Apply.
+-------------------------------------------------------------------------------
+
+local OVERRIDE_VERSION = 1
+local OVERRIDE_STEP = 0.5
+
+FS.Layout._defaults = FS.Layout._defaults or {}
+
+-- Warn once when a newer addon wrote the table (OverrideStore then refuses all writes).
+local lockedWarned = false
+
+-- Finite and within 2 design widths either way, for scaled and unscaled entries alike
+-- (UI units never exceed design px), so a corrupt value cannot park a frame off-screen.
+local OVERRIDE_LIMIT = 2 * FS.Layout.DESIGN_W
+
+local function IsUsableOffset(v)
+    return type(v) == "number" and v - v == 0 and v >= -OVERRIDE_LIMIT and v <= OVERRIDE_LIMIT
+end
+
+local function IsFiniteNumber(v)
+    return type(v) == "number" and v - v == 0
+end
+
+-- Only an entry with a numeric x and y is a seat; this also screens out the helper
+-- tables hanging off FS.Layout (_applied, SeatAdjust, ...) and `deck`.
+local function SeatEntry(id)
+    if type(id) ~= "string" then return nil end
+    local L = FS.Layout[id]
+    if type(L) == "table" and IsFiniteNumber(L.x) and IsFiniteNumber(L.y) then return L end
+end
+
+local function SnapshotDefault(id)
+    local L = SeatEntry(id)
+    if L and not FS.Layout._defaults[id] then
+        FS.Layout._defaults[id] = { x = L.x, y = L.y }
+    end
+    return L
+end
+
+local function RestoreDefault(id)
+    local def, L = FS.Layout._defaults[id], FS.Layout[id]
+    if def and L then L.x, L.y = def.x, def.y end
+end
+
+local function OverrideStore()
+    local db = ForeverSTUwaveDB
+    if db == nil then
+        db = {}
+        ForeverSTUwaveDB = db
+    end
+    if type(db) ~= "table" then return nil end
+    local saved = db.layout
+    if type(saved) ~= "table" then
+        saved = {}
+        db.layout = saved
+    end
+    if type(saved.v) == "number" and saved.v > OVERRIDE_VERSION then
+        return nil, saved
+    end
+    if type(saved.v) ~= "number" then saved.v = OVERRIDE_VERSION end
+    if type(saved.frames) ~= "table" then saved.frames = {} end
+    return saved.frames
+end
+
+function FS.Layout.LoadOverrides()
+    for id in pairs(FS.Layout) do SnapshotDefault(id) end
+    for id in pairs(FS.Layout._defaults) do RestoreDefault(id) end
+    local frames, newer = OverrideStore()
+    if newer then
+        if not lockedWarned then
+            lockedWarned = true
+            print(("|cff22e0ffstuwave://layout|r  saved layout is version %s, newer than this addon (%d); position overrides ignored")
+                :format(tostring(newer.v), OVERRIDE_VERSION))
+        end
+        return
+    end
+    if not frames then return end
+    for id, pos in pairs(frames) do
+        if SnapshotDefault(id) and type(pos) == "table"
+            and IsUsableOffset(pos.x) and IsUsableOffset(pos.y) then
+            FS.Layout[id].x, FS.Layout[id].y = pos.x, pos.y
+        end
+    end
+end
+
+local function Round(v)
+    return math.floor(v / OVERRIDE_STEP + 0.5) * OVERRIDE_STEP
+end
+
+-- Each write returns true when it took effect, false when refused.
+function FS.Layout.SetOverride(id, x, y)
+    if not SnapshotDefault(id) or not IsUsableOffset(x) or not IsUsableOffset(y) then return false end
+    x, y = Round(x), Round(y)
+    if not IsUsableOffset(x) or not IsUsableOffset(y) then return false end
+    local frames = OverrideStore()
+    if not frames then return false end
+    frames[id] = { x = x, y = y }
+    FS.Layout[id].x, FS.Layout[id].y = x, y
+    return true
+end
+
+function FS.Layout.ClearOverride(id)
+    if not SnapshotDefault(id) then return false end
+    local frames = OverrideStore()
+    if not frames then return false end
+    frames[id] = nil
+    RestoreDefault(id)
+    return true
+end
+
+function FS.Layout.ClearAllOverrides()
+    local frames = OverrideStore()
+    if not frames then return false end
+    for id in pairs(frames) do frames[id] = nil end
+    for id in pairs(FS.Layout._defaults) do RestoreDefault(id) end
+    return true
+end
+
+-- Re-seats every frame placed with `id`. A frame held back in combat is left to the
+-- PLAYER_REGEN_ENABLED pass above, which also runs the rescale callbacks again.
+function FS.Layout.Reseat(id)
+    for frame, info in pairs(FS.Layout._applied) do
+        if info.id == id and frame and frame.SetPoint then
+            if IsHeldInCombat(frame) then
+                deferredRescale = true
+            else
+                FS.Layout.Apply(frame, info.id, info.parent)
+            end
+        end
+    end
+    RunRescaleCallbacks("Reseat")
+end
+
+-- Our own ADDON_LOADED fires after every file has run and before PLAYER_LOGIN, so
+-- the saved globals exist and the login re-seat above already sees the overrides.
+local overrideLoader = CreateFrame("Frame")
+overrideLoader:RegisterEvent("ADDON_LOADED")
+overrideLoader:SetScript("OnEvent", function(self, _, name)
+    if name ~= addonName then return end
+    self:UnregisterEvent("ADDON_LOADED")
+    FS.Layout.LoadOverrides()
 end)
 
 -------------------------------------------------------------------------------

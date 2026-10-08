@@ -1096,17 +1096,15 @@ local function Init()
     end
 
     local player = BuildUnitFrame("player", "ForeverSTUwavePlayerFrame", false)
-    player:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 20, -20)
+    FS.Layout.Apply(player, "player")
     player:Show() -- "player" always exists; shown unconditionally, no watch needed
 
     local target = BuildUnitFrame("target", "ForeverSTUwaveTargetFrame", true)
-    target:SetPoint("TOPLEFT", player, "TOPRIGHT", 20, 0)
+    FS.Layout.Apply(target, "target")
     RegisterUnitWatch(target) -- shows/hides securely based on whether "target" exists
 
-    -- Focus has no on-screen neighbor to anchor to the way target anchors off
-    -- player -- its design position (FS.Layout.focus) is a separate spot on
-    -- screen, not adjacent to the player/target pair -- so it seats from the
-    -- canonical layout table instead of a relative SetPoint.
+    -- Focus sits at its own design position (FS.Layout.focus), away from the
+    -- player/target corner, and seats from the layout table like they do.
     local focus = BuildUnitFrame("focus", "ForeverSTUwaveFocusFrame", true)
     FS.Layout.Apply(focus, "focus")
     RegisterUnitWatch(focus) -- shows/hides securely based on whether "focus" exists
