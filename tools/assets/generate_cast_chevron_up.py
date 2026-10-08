@@ -25,6 +25,15 @@ Outputs:
     cast_chevron_up_strip.tga    32x16    vertical tile, ONE chevron per 16 texel
                                           pitch, for the engine-timed StatusBar fill
                                           (SetVertTile). Tiles seamlessly.
+    cast_chevron_up_cap.tga      64x32    the caret's roof filled solid: same tip and arm
+                                          ends as the outline, a band CAP_NOTCH texels
+                                          thick under it, clipped at the box bottom. The
+                                          target tape's reveal tints it like the lit fill
+                                          and seats it under the outline: the lit fill's
+                                          flat clip ends 9.2 caret units under the tip,
+                                          inside this band, so the fill's leading edge is
+                                          the caret's chevron (MaskTexture does not clip on
+                                          the client, so a mask cannot shape it).
 
 ONE TEXTURE SERVES BOTH TAPES (the simpler choice). The player tape uses half
 width hw 10 and the target tape hw 14 (image px, design = image x 1.28). The
@@ -79,6 +88,10 @@ FILL_DEPTH = 8.0 / 13.5      # tape chevron: d 8, t 5.5
 CARET_DEPTH = 9.0 / 16.0     # caret: d 9, t 7
 # Caret stroke, texels, drawn INSIDE the polygon (about 0.11 of the box height).
 STROKE = 3.5
+# Cap band: rows under the tip where its lower edge crosses the centre (11.5 caret units of 16, two
+# rows a unit). The lit fill's cut (9.2 units, CAP_DROP in GunsightTape.lua) must stay 2 units under the
+# roof's drop at the lit column's edge (6.9) and 2 units over this apex.
+CAP_NOTCH = 23.0
 
 GLOW_PAD_X = 32
 GLOW_PAD_Y = 16
@@ -194,6 +207,18 @@ def build_outline():
     )
 
 
+def build_cap():
+    """The caret's roof filled solid: rows from the roof down to CAP_NOTCH rows under it (a band
+    parallel to the roof), clipped at the box bottom."""
+    arm = CARET_DEPTH * BOX_H
+
+    def hit(px, py):
+        roof = arm * abs(px - BOX_W / 2.0) / (BOX_W / 2.0)
+        return roof <= py <= roof + CAP_NOTCH
+
+    return _coverage_grid(BOX_W, BOX_H, hit)
+
+
 def build_glow():
     blurred = _blur(_pad(build_outline(), GLOW_PAD_X, GLOW_PAD_Y, GLOW_W, GLOW_H), GLOW_SIGMA)
     return [[min(1.0, v * GLOW_GAIN) for v in row] for row in blurred]
@@ -246,6 +271,7 @@ def main():
     write_tga(os.path.join(here, "cast_chevron_up_glow.tga"), build_glow())
     write_tga(os.path.join(here, "cast_chevron_up_burst.tga"), build_burst())
     write_tga(os.path.join(here, "cast_chevron_up_strip.tga"), build_strip())
+    write_tga(os.path.join(here, "cast_chevron_up_cap.tga"), build_cap())
 
 
 if __name__ == "__main__":

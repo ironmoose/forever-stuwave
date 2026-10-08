@@ -136,7 +136,8 @@
 --                               fills from SetTimerDuration is the in-game probe's answer (/fsprobe
 --                               gunsight), and a consumer falls back when it fails.
 --   FS.ChevronCastBar.TEXTURES_UP  the up-pointing art set for opts.textures (fill, outline, glow, burst,
---                               strip = media/cast_chevron_up_*.tga).
+--                               strip = media/cast_chevron_up_*.tga; cap is the same folder's filled caret, not
+--                               an engine texture: resolveTextures ignores it).
 --   FS.ChevronCastBar.Fx        the motion functions, for other consumers (see FX below).
 --   run:RefreshPixels()         re-Layout at the last size when the physical pixel size
 --                               (in the run's units) differs from the one the segments were
@@ -414,6 +415,7 @@ ChevronCastBar.TEXTURES_UP = {
     glow = MEDIA .. "cast_chevron_up_glow.tga",       -- 128x64, drawn 2x, centred
     burst = MEDIA .. "cast_chevron_up_burst.tga",     -- 128x64, drawn 2x, centred
     strip = MEDIA .. "cast_chevron_up_strip.tga",     -- 32x16, one chevron per 16 texels
+    cap = MEDIA .. "cast_chevron_up_cap.tga",         -- 64x32, the caret's roof filled; GunsightTape's reveal reads it, not the engine
 }
 
 local Run = {}

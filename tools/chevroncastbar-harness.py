@@ -1977,6 +1977,26 @@ function T.vertical_progress_lights_from_the_bottom_and_maps_onto_the_span()
     eq(litCount(run), run.count, "all lit at 1")
 end
 
+-- The player tape needs no cap: a cast lights a whole chevron only once the caret tip has cleared its top, so no
+-- lit pixel is ever above the tip (the target's reveal is a flat clip through a chevron and does need one).
+function T.vertical_cast_never_lights_anything_above_the_caret_tip()
+    local run = mkv()
+    ok(run:StartCast(100, 100 + CAST, false))
+    local t = 101
+    for step = 1, 399 do
+        local f = step / 400
+        run:SetProgressOverride(f); t = t + 0.01; at(run, t)
+        local tip = run.outline._points["BOTTOMLEFT"].y + run.outline._h
+        near(tip, run.origin + f * run.span, 1e-9, "tip at origin + f * span")
+        for i = 1, run.count do
+            if lit(run.segs[i]) then
+                ok(run.segs[i].x0 + run.segLen <= tip + 1e-9,
+                    "segment " .. i .. " top " .. run.segs[i].x0 + run.segLen .. " is above the tip " .. tip .. " at f " .. f)
+            end
+        end
+    end
+end
+
 function T.vertical_caret_moves_along_y_and_the_clip_leaves_room_across()
     local run = mkv()
     ok(run:StartCast(100, 100 + CAST, false))
@@ -2129,9 +2149,9 @@ function T.textures_option_overrides_each_art_path_and_lit_defaults_to_fill()
     local hz = mk({ textures = { fill = "HF.tga" } })
     eq(hz.segs[1].dim._texture, "HF.tga"); eq(hz.segs[1].lit._texture, "HF.tga")
     eq(hz.outline._texture, def.outline._texture)
-    -- The up set: five files the media generator writes.
+    -- The up set: six files the media generator writes (cap is read by GunsightTape's reveal, not the engine).
     local up = CCB.TEXTURES_UP
-    for _, k in ipairs({ "fill", "outline", "glow", "burst", "strip" }) do
+    for _, k in ipairs({ "fill", "outline", "glow", "burst", "strip", "cap" }) do
         ok(type(up[k]) == "string" and up[k]:find("cast_chevron_up_" .. k .. ".tga", 1, true), "TEXTURES_UP." .. k)
     end
     local viaPreset = mkv({ textures = CCB.TEXTURES_UP })
@@ -2315,6 +2335,7 @@ __checks = T
 # 16 texels per chevron strip scale assume (media/generate_cast_chevron_up.py writes them).
 UP_ART_SIZES = {
     "fill": (64, 32), "outline": (64, 32), "glow": (128, 64), "burst": (128, 64), "strip": (32, 16),
+    "cap": (64, 32),
 }
 
 

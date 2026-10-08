@@ -30,9 +30,12 @@
 --             not the run) is on screen.
 --   reveals   the target only (BuildReveal, SeatReveal): the strips are the CLOCK and draw nothing (fill
 --             alpha 0, still shown and timer driven); a clipped frame anchored from the strip's bottom to
---             its fill's TOP edge shows a column of the run's own lit chevrons at the run's segment rects,
---             with a dim row under it and the outline caret with its TIP on the fill's top edge, exactly where
---             the player run puts its own caret (the box hangs below the edge), near-white over a pink or steel glow. The
+--             a point CAP_DROP of a caret depth UNDER its fill's TOP edge shows a column of the run's own lit
+--             chevrons at the run's segment rects, with a dim row under it and the outline caret with its TIP
+--             on the fill's top edge, exactly where the player run puts its own caret (the box hangs below the
+--             edge), near-white over a pink or steel glow. A solid cap (the caret's roof filled, in the lit
+--             tone) sits under the outline and covers the lit fill's flat cut, so the fill ends in the caret's
+--             chevron, not a straight line (MaskTexture does not clip on this client, so no mask is used). The
 --             caret lives on its own clipping frame that spans the run, so it never pokes past the run's top
 --             at the end of a cast. The tone alpha (SetAlphaFromBoolean) lands on the reveal frames. A channel
 --             fills up (StatusBar has no reverse fill on this client), the reveal edge is smooth, not a
@@ -79,7 +82,8 @@
 -- and goes to SetText only, and the target box has no timer region).
 --
 -- UNVERIFIED IN GAME (needs an eyeball): the reveal (a clip frame whose TOP rides a vertical StatusBar's
--- fill texture, and that fill texture having a rect at value 0), the strip's tile phase and scale on a
+-- fill texture, and that fill texture having a rect at value 0), the reveal cap hiding the lit fill's cut
+-- (its solid roof against the lit tone, and the cut landing inside its band at whole pixels), the strip's tile phase and scale on a
 -- vertical bar (the degrade path), vertical SetTimerDuration, SetAlphaFromBoolean on frames, the pulse,
 -- the chamfer (the baked cut is 6, the mockup 8 image px), the rectangular padlock shackle (the
 -- mockup's is an arc).
@@ -97,7 +101,8 @@ local ui = Gunsight.ui
 local NAME = "ForeverSTUwaveGunsightTape_"
 
 -------------------------------------------------------------------------------
--- Constants (mockup name in the comment; gunsighttape-harness.py re-reads every one from the HTML)
+-- Constants (mockup name in the comment; gunsighttape-harness.py re-reads every one from the HTML, except
+-- CAP_DROP: it has no mockup counterpart, and the harness pins it against the cap art's own geometry)
 -------------------------------------------------------------------------------
 
 local N = 20                                          -- N: chevrons per tape
@@ -113,6 +118,7 @@ local C = {
     FRAME_FILL = { 13 / 255, 6 / 255, 32 / 255, 0.55 * 0.3 },  -- rgba(13,6,32,.55) under A(.3)
     EDGE_A0 = 0.55, EDGE_A1 = 0.45,                   -- edge = .55 + .45 * pulse
     DIM = 0.2,                                        -- unlit chevrons, A(.2)
+    CAP_DROP = 0.575,                                 -- code only, no mockup counterpart: the target's lit fill ends this fraction of the caret depth (9.2 of 16 units) under its tip
     PULSE_HZ = 7 / (2 * math.pi),                     -- pulse = .5 + .5 * sin(clock * 7)
     KICK_W = 36, KICK_H = 15, KICK_CHAMFER = 5,       -- kickTag: w, h, chamfer
     KICK_TEXT_Y = 11, KICK_TEXT_SIZE = 11,            -- text('KICK', x + w / 2, y + 11, 11)
@@ -267,10 +273,10 @@ end
 
 -- THE CHEVRON REVEAL (target tape). The target's cast times are secret, so the strip StatusBar
 -- (SetTimerDuration) is the clock: its own fill draws nothing, and a clipped frame anchored from the
--- strip's bottom to the fill's top edge (pure anchor geometry) shows a column of the run's lit chevron art.
--- The outline caret has its tip on that clip's top edge, on its own run-height clip widened by the caret
--- width (as the engine clips its own caret), so the clip does not cut it away or let it poke past the run.
---   { frame, clip, host, caretClip, caretHost, strip, fill, color, lit = {}, dim = {}, caret, glow }
+-- strip's bottom to CAP_DROP of a caret depth under the fill's top edge (pure anchor geometry) shows a column
+-- of the run's lit chevron art. The outline caret has its tip on the fill's top edge, on its own run-height clip
+-- widened by the caret width (as the engine clips its own caret), and the cap under it covers the lit clip's cut.
+--   { frame, clip, host, caretClip, caretHost, strip, fill, color, lit = {}, dim = {}, caret, glow, cap }
 -- nil when the strip has no fill texture to ride (BuildTape then degrades like a missing
 -- SetClipsChildren). The caller zeroes the fill's alpha once every reveal built, so a half built pair
 -- never leaves one strip invisible.
@@ -313,7 +319,14 @@ local function BuildReveal(run, parent, strip, color)
     caret:SetTexture(art.outline)
     caret:SetVertexColor(run.coreR, run.coreG, run.coreB, 1)
     glow:SetPoint("CENTER", caret, "CENTER", 0, 0)
-    reveal.caretClip, reveal.caretHost, reveal.caret, reveal.glow = caretClip, caretHost, caret, glow
+    -- The cap fills the caret's roof in the lit tone under the glow and outline. It hides the cut where the
+    -- lit fill's clip ends, and rides the caret by two anchors.
+    local cap = caretHost:CreateTexture(nil, "ARTWORK", nil, -1)
+    cap:SetTexture(FS.ChevronCastBar.TEXTURES_UP.cap)
+    cap:SetVertexColor(color[1], color[2], color[3], 1)
+    cap:SetPoint("TOPLEFT", caret, "TOPLEFT", 0, 0)
+    cap:SetPoint("BOTTOMRIGHT", caret, "BOTTOMRIGHT", 0, 0)
+    reveal.caretClip, reveal.caretHost, reveal.caret, reveal.glow, reveal.cap = caretClip, caretHost, caret, glow, cap
     reveal.fill = fill
     return reveal
 end
@@ -497,11 +510,11 @@ end
 
 -- Seats the target's reveal from the run's own layout (plain numbers the engine just computed): the
 -- strips span exactly the chevron run (origin to origin + span, so the top chevron is reached at the end
--- of the cast; no tile scale, the tile is not drawn), each clip runs from its strip's bottom to its fill
--- top (the TOP anchor is static, and the bottom corners are widened across by the caret width like the
--- engine's own clip), the caret's tip is on that fill edge (its bottom a caret height below, as the engine
--- seats its own caret) under a clip spanning the run vertically, and every lit and dim chevron takes the very
--- seat of the run's segment (whole pixel pitch and origin). Creates nothing: called from the run's
+-- of the cast; no tile scale, the tile is not drawn), each clip runs from `drop` under its strip's bottom to
+-- `drop` under its fill top (the TOP anchor is static, and the bottom corners are widened across by the caret
+-- width like the engine's own clip), the caret's tip is on the fill edge itself (its bottom a caret height
+-- below, as the engine seats its own caret) under a clip spanning the run vertically, and every lit and dim
+-- chevron takes the very seat of the run's segment (whole pixel pitch and origin). Creates nothing: called from the run's
 -- onLayout (every relayout, the engine's own rescale watcher included) and from LayoutTape.
 local function SeatReveal(t)
     local run = t.run
@@ -513,11 +526,13 @@ local function SeatReveal(t)
         strip:SetPoint("TOPRIGHT", run.frame, "BOTTOMRIGHT", 0, origin + span)
     end
     local m = run.capW or 0
+    -- Both clip edges drop together, so the clip never inverts at value 0 and the cut stays under the cap.
+    local drop = (run.capH or 0) * C.CAP_DROP
     for _, rv in ipairs(t.reveals) do
         rv.clip:ClearAllPoints()
-        rv.clip:SetPoint("BOTTOMLEFT", rv.strip, "BOTTOMLEFT", -m, 0)
-        rv.clip:SetPoint("BOTTOMRIGHT", rv.strip, "BOTTOMRIGHT", m, 0)
-        rv.clip:SetPoint("TOP", rv.fill, "TOP", 0, 0)
+        rv.clip:SetPoint("BOTTOMLEFT", rv.strip, "BOTTOMLEFT", -m, -drop)
+        rv.clip:SetPoint("BOTTOMRIGHT", rv.strip, "BOTTOMRIGHT", m, -drop)
+        rv.clip:SetPoint("TOP", rv.fill, "TOP", 0, -drop)
         for i = 1, #rv.lit do
             local seg = i <= run.count and run.segs[i] or nil
             SeatChevron(rv.dim[i], rv.frame, run, seg)
@@ -531,7 +546,7 @@ local function SeatReveal(t)
             rv.caretClip:SetPoint("BOTTOMRIGHT", run.frame, "BOTTOMRIGHT", m, 0)
             -- capX already includes the widening m, and the fill clip's left edge is widened by the same m.
             rv.caret:ClearAllPoints()
-            rv.caret:SetPoint("BOTTOMLEFT", rv.clip, "TOPLEFT", run.capX, -run.capH)
+            rv.caret:SetPoint("BOTTOMLEFT", rv.clip, "TOPLEFT", run.capX, drop - run.capH)
             rv.caret:SetSize(run.capW, run.capH)
             rv.glow:SetSize(run.capGlowW, run.capGlowH)
         end
