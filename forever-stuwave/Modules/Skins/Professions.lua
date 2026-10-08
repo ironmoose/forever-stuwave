@@ -27,7 +27,8 @@
 --
 -- No CHAT_MSG_SKILL or TRADE_SKILL_UPDATE anywhere in this file.
 --
--- UNVALIDATED in-game (no /fstack or visual check done yet).
+-- UNVALIDATED in-game (no /fstack or visual check done yet), including that casting
+-- each profession name (and Smelting for Mining) opens its window on this client.
 
 local _, FS = ...
 
@@ -61,6 +62,24 @@ local ROW_PAD_X = 10
 local ICON_SIZE = 20
 local ICON_TEXT_GAP = 6
 local NAME_VALUE_GAP = 6
+
+-- Click action per row: an ALLOWLIST of English profession names mapped to the spell
+-- whose cast opens that profession's window (Mining opens Smelting). Any other name,
+-- including gatherers, Archaeology, localized and unknown names, gets no type attribute,
+-- so a click does nothing and can never cast something unintended such as Fishing.
+local SPELL_FOR_PROFESSION = {
+    Alchemy = "Alchemy",
+    Blacksmithing = "Blacksmithing",
+    Enchanting = "Enchanting",
+    Engineering = "Engineering",
+    Leatherworking = "Leatherworking",
+    Tailoring = "Tailoring",
+    Cooking = "Cooking",
+    ["First Aid"] = "First Aid",
+    Jewelcrafting = "Jewelcrafting",
+    Inscription = "Inscription",
+    Mining = "Smelting",
+}
 
 -------------------------------------------------------------------------------
 -- Feature detection + one-time API usability check
@@ -144,13 +163,30 @@ end
 -- Frame assembly
 -------------------------------------------------------------------------------
 
--- One row: 20x20 icon, Mononoki name (left), Mononoki skill/max (right).
+local function ShowRowTooltip(row)
+    local tip = GameTooltip
+    if not tip or not row.fsProfession then return end
+    tip:SetOwner(row, "ANCHOR_LEFT")
+    tip:SetText(row.fsProfession, 1, 1, 1)
+    if row.fsClickable then tip:AddLine("Click to open") end
+    tip:Show()
+end
+
+local function HideRowTooltip(row)
+    local tip = GameTooltip
+    if tip and tip.GetOwner and tip:GetOwner() == row then tip:Hide() end
+end
+
+-- One row: 20x20 icon, Mononoki name (left), Mononoki skill/max (right). The row is a
+-- secure button (AnyUp+AnyDown, the pairing every action button here uses) so a click
+-- casts its profession; SetAttribute, Show and Hide on it are refused in combat.
 -- Text only, no pill/progress bar, per the design brief. All MAX_PROFESSIONS
 -- rows are pre-built once and hidden/shown per refresh rather than
 -- created/destroyed on demand -- WoW frames can't be destroyed anyway (see
 -- XPBar.lua's SetVariant comment), and a fixed 6-row pool is cheap.
 local function BuildRow(panel, index)
-    local row = CreateFrame("Frame", nil, panel)
+    local row = CreateFrame("Button", nil, panel, "SecureActionButtonTemplate")
+    row:RegisterForClicks("AnyUp", "AnyDown")
     row:SetHeight(ROW_HEIGHT)
     local y = -(PAD_TOP + (index - 1) * ROW_HEIGHT)
     row:SetPoint("TOPLEFT", panel, "TOPLEFT", ROW_PAD_X, y)
@@ -181,12 +217,19 @@ local function BuildRow(panel, index)
     row.icon = icon
     row.name = name
     row.value = value
+    row:HookScript("OnEnter", ShowRowTooltip)
+    row:HookScript("OnLeave", HideRowTooltip)
     row:Hide()
     return row
 end
 
 local panel
 local rows
+
+-- Work that touched a secure button while in combat, replayed on PLAYER_REGEN_ENABLED.
+local pendingInit = false
+local pendingRefresh = false
+local pendingVisible = nil -- nil, or the shown state a combat /fsprof asked for
 
 -- Chrome built directly on `panel` itself (it IS the shell -- there is no
 -- separate inner fill StatusBar the way FrameHelpers.CreatePillBar's shell
@@ -247,11 +290,29 @@ end
 -- Refresh (initial build + SKILL_LINES_CHANGED)
 -------------------------------------------------------------------------------
 
+-- Writes the row's click action: the allowlisted spell, or no type at all.
+local function ConfigureRowAction(row, name)
+    local label = type(name) == "string" and not IsSecret(name) and name or nil
+    local spell = label and SPELL_FOR_PROFESSION[label] or nil
+    row.fsProfession = label
+    row.fsClickable = spell ~= nil
+    row:SetAttribute("type", spell and "spell" or nil)
+    row:SetAttribute("spell", spell)
+end
+
 -- Safe to call repeatedly (rebuild-in-place): re-reads GetProfessions/
 -- GetProfessionInfo and re-populates/shows/hides the pre-built row pool.
 -- Skips nil/unlearned slots entirely rather than rendering an empty row for
 -- them.
 local function RefreshRows()
+    -- Attributes, Show and Hide are all refused on the row buttons in combat, and a
+    -- label that disagrees with its click is worse than a stale one, so all of it waits.
+    if InCombatLockdown() then
+        pendingRefresh = true
+        return
+    end
+    pendingRefresh = false
+
     if not professionsUsable then
         for i = 1, MAX_PROFESSIONS do rows[i]:Hide() end
         return
@@ -297,6 +358,7 @@ local function RefreshRows()
                 row.icon:SetTexture(icon)
                 row.name:SetText(name)
                 row.value:SetText(FormatSkill(skillLevel, maxSkillLevel))
+                ConfigureRowAction(row, name)
                 row:Show()
             elseif not ok2 and not loggedSlotFailure then
                 -- A genuine throw for one specific occupied slot (as opposed
@@ -323,21 +385,34 @@ end
 -- ForeverSTUwaveDB.professionsHidden persists across sessions -- toggling
 -- with /fsprof sticks on relog, same pattern as XPBar.lua's
 -- ForeverSTUwaveDB.xpVariant / ActionBars.lua's barHideStrategy.
+local function ApplyVisible(p, visible)
+    if visible then p:Show() else p:Hide() end
+end
+
+-- The state /fsprof toggles from: a request parked for combat wins, then the live
+-- panel, then (panel not built yet) the saved setting.
+local function CurrentlyVisible()
+    if pendingVisible ~= nil then return pendingVisible end
+    if panel then return panel:IsShown() end
+    return not (type(ForeverSTUwaveDB) == "table" and ForeverSTUwaveDB.professionsHidden)
+end
+
 SLASH_FSPROF1 = "/fsprof"
 SlashCmdList["FSPROF"] = function()
-    local p = EnsurePanel()
-    local wasShown = p:IsShown()
+    local visible = not CurrentlyVisible()
 
     ForeverSTUwaveDB = ForeverSTUwaveDB or {}
-    ForeverSTUwaveDB.professionsHidden = wasShown
+    ForeverSTUwaveDB.professionsHidden = not visible
 
-    if wasShown then
-        p:Hide()
-    else
-        p:Show()
+    -- The panel parents secure buttons, so Show and Hide on it are refused in combat.
+    if InCombatLockdown() then
+        pendingVisible = visible
+        print(("|cff22e0ffForever STUwave|r: professions panel will be %s after combat"):format(visible and "shown" or "hidden"))
+        return
     end
 
-    print(("|cff22e0ffForever STUwave|r: professions panel %s"):format(wasShown and "hidden" or "shown"))
+    ApplyVisible(EnsurePanel(), visible)
+    print(("|cff22e0ffForever STUwave|r: professions panel %s"):format(visible and "shown" or "hidden"))
 end
 
 -------------------------------------------------------------------------------
@@ -352,24 +427,7 @@ FS.PanelSkins.RegisterRecon("Professions", {
 -- Init
 -------------------------------------------------------------------------------
 
--- One event frame for both login-time events (per UnitFrames.lua's
--- WireEvents precedent for registering PLAYER_ENTERING_WORLD alongside other
--- events on a single frame) plus SKILL_LINES_CHANGED for the life of the
--- session. Neither event is unregistered after firing: EnsurePanel/
--- fsRestoredVisibility below are idempotent, so a PLAYER_ENTERING_WORLD that
--- fires again on every later loading screen just re-runs RefreshRows
--- harmlessly rather than double-building.
-local events = CreateFrame("Frame")
-events:RegisterEvent("PLAYER_LOGIN")
-events:RegisterEvent("PLAYER_ENTERING_WORLD")
-events:RegisterEvent("SKILL_LINES_CHANGED")
-
-events:SetScript("OnEvent", function(_, event)
-    if event == "SKILL_LINES_CHANGED" then
-        if panel then RefreshRows() end
-        return
-    end
-
+local function Setup()
     local p = EnsurePanel()
 
     -- Validated exactly once (first successful login event), regardless of
@@ -391,10 +449,49 @@ events:SetScript("OnEvent", function(_, event)
     if not p.fsRestoredVisibility then
         p.fsRestoredVisibility = true
         local hidden = type(ForeverSTUwaveDB) == "table" and ForeverSTUwaveDB.professionsHidden
-        if hidden then
-            p:Hide()
-        else
-            p:Show()
-        end
+        ApplyVisible(p, not hidden)
     end
+end
+
+-- One event frame for both login-time events (per UnitFrames.lua's
+-- WireEvents precedent for registering PLAYER_ENTERING_WORLD alongside other
+-- events on a single frame) plus SKILL_LINES_CHANGED for the life of the
+-- session. Neither event is unregistered after firing: EnsurePanel/
+-- fsRestoredVisibility below are idempotent, so a PLAYER_ENTERING_WORLD that
+-- fires again on every later loading screen just re-runs RefreshRows
+-- harmlessly rather than double-building.
+local events = CreateFrame("Frame")
+events:RegisterEvent("PLAYER_LOGIN")
+events:RegisterEvent("PLAYER_ENTERING_WORLD")
+events:RegisterEvent("SKILL_LINES_CHANGED")
+events:RegisterEvent("PLAYER_REGEN_ENABLED")
+
+events:SetScript("OnEvent", function(_, event)
+    if event == "PLAYER_REGEN_ENABLED" then
+        if pendingInit then
+            pendingInit = false
+            Setup()
+        elseif pendingRefresh and panel then
+            RefreshRows()
+        end
+        if pendingVisible ~= nil then
+            local visible = pendingVisible
+            pendingVisible = nil
+            ApplyVisible(EnsurePanel(), visible)
+        end
+        return
+    end
+
+    if event == "SKILL_LINES_CHANGED" then
+        if panel then RefreshRows() end
+        return
+    end
+
+    -- The first build creates secure buttons and shows the panel, neither of which is
+    -- allowed in combat (a /reload mid-fight), so it waits for PLAYER_REGEN_ENABLED.
+    if InCombatLockdown() then
+        pendingInit = true
+        return
+    end
+    Setup()
 end)
