@@ -263,6 +263,7 @@ local function ScanAuras(filter, maxSlots)
             dispelType = CleanText(data.dispelType),
             duration = CleanNumber(data.duration),
             expirationTime = CleanNumber(data.expirationTime),
+            sourceUnit = CleanText(data.caster),
         }
     end
     if readFailed then return nil end
@@ -293,7 +294,7 @@ local function SnapshotBuffRows()
 end
 
 FS.PlayerAuras = {
-    -- { buffs = { {name, icon, count, dispelType, duration, expirationTime}, ... }, debuffs = ... }
+    -- { buffs = { {name, icon, count, dispelType, duration, expirationTime, sourceUnit}, ... }, debuffs = ... }
     -- Plain values only, in aura slot order. Read-only by convention; replaced, never mutated.
     Get = function() return snapshot end,
     -- True while the snapshot cannot refresh (auras are secret): what it holds is as of

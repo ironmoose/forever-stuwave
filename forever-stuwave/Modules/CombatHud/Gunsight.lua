@@ -14,7 +14,7 @@
 -- coordinates, never by a hand-converted number. Nothing is positioned at file load (UIParent is
 -- only 768 tall then); PLAYER_LOGIN and the FS.Layout rescale hook seat everything.
 --
--- PIECES. Keys you, next, shard, buff, tgt, dot, prc, party. RegisterPiece(key, {frame,
+-- PIECES. Keys you, next, shard, buff, tgt, dot, prc, party, mybuffs. RegisterPiece(key, {frame,
 -- onShow, onHide}) hands a piece's frame to the registry; SetPiece(key, on, instant) fades it
 -- (a 0.25 s Alpha AnimationGroup, never OnUpdate) and persists the state. The on/off state lives in
 -- FS.Config (gunsight.enabled, gunsight.pieces.<key>), so it follows the active profile, and is
@@ -23,9 +23,13 @@
 -- Show/Hidden or EnableMouse'd in combat (ADDON_ACTION_BLOCKED fires even inside a pcall): alpha
 -- only, the rest reconciled on PLAYER_REGEN_ENABLED.
 --
+-- TARGET SIDE. Two areas (upper, lower) beside the target cast bar each hold one module id; the choice
+-- is FS.Config (gunsight.target.upper / .lower) and GunsightAreas.lua draws it.
+--
 -- Slash: /fsgun [on | off | seat <dx> <dy> | piece <key> on|off | debug]. Public surface (all
 -- FS.Gunsight.*): ui, Point, root, anchors, G, RegisterPiece, SetPiece, IsPieceOn, OnPieceChanged,
--- OnReady, IsEnabled, SetSeat, Reseat, CONFIG_ENABLED, PieceConfigKey.
+-- OnReady, IsEnabled, SetSeat, Reseat, CONFIG_ENABLED, PieceConfigKey, AREA_IDS, AreaFamily, GetArea,
+-- SetArea, OnAreaChanged.
 
 local addonName, FS = ...
 
@@ -56,7 +60,10 @@ local BUFF_S, BUFF_GAP = 24, 8                      -- drawBuff bs, and its 8*U 
 local HZ_PAD_L, HZ_PAD_R = 2, 12                    -- horizon: TL.x1 + 2 ... DOT_AX - 12
 local PROC_BASE, PROC_GROW, PROC_TICK = 16, 54, 7   -- drawProc: half = 16 + q*54, tick 7 long
 
-local PIECE_KEYS = { "you", "next", "shard", "buff", "tgt", "dot", "prc", "party" }
+local AREA = { x = 1213, w = 202, h = 128, upperY = 500, lowerY = 632 }   -- emptySlot(500|632, 128): the two target side areas
+local MYBUFFS = { x = 498, y = 424, w = 164, h = 56 }                       -- buffs(): x0 = 498, w = 164, plate 424 + 56
+
+local PIECE_KEYS = { "you", "next", "shard", "buff", "tgt", "dot", "prc", "party", "mybuffs" }
 local FADE_SECONDS = 0.25
 local PREFIX = "|cffff4488Forever STUwave|r: gunsight: "
 
@@ -67,6 +74,7 @@ Gunsight.G = {
     NXT_S = NXT_S, NXT_PAD = NXT_PAD, SH_SC = SH_SC, SH_W = SH_W, SH_H = SH_H, SH_G = SH_G,
     SH_DROP = SH_DROP, BUFF_S = BUFF_S, BUFF_GAP = BUFF_GAP, HZ_PAD_L = HZ_PAD_L, HZ_PAD_R = HZ_PAD_R,
     PROC_BASE = PROC_BASE, PROC_GROW = PROC_GROW, PROC_TICK = PROC_TICK,
+    AREA = AREA, MYBUFFS = MYBUFFS,
 }
 Gunsight.PIECES = PIECE_KEYS
 
@@ -91,6 +99,9 @@ local ANCHOR_SPECS = {
     { "procL", LBRK - PROC_W / 2, CY - PROC_H / 2, PROC_W, PROC_H },              -- left proc post, horizon centred
     { "procR", RBRK - PROC_W / 2, CY - PROC_H / 2, PROC_W, PROC_H },              -- right proc post
     { "horizon", TL.x1 + HZ_PAD_L, CY, (DOT_AX - HZ_PAD_R) - (TL.x1 + HZ_PAD_L), 0 }, -- horizon hairline
+    { "areaU", AREA.x, AREA.upperY, AREA.w, AREA.h },                             -- target side upper area
+    { "areaL", AREA.x, AREA.lowerY, AREA.w, AREA.h },                             -- target side lower area
+    { "mybuffs", MYBUFFS.x, MYBUFFS.y, MYBUFFS.w, MYBUFFS.h },                    -- My buffs flank plate
 }
 
 -------------------------------------------------------------------------------
@@ -178,8 +189,17 @@ for _, spec in ipairs(ANCHOR_SPECS) do
 end
 Gunsight.anchors = anchors
 
+-- Moving the root or an anchor in combat taints any protected frame hung from them (the target of target button), so a
+-- reseat after the first one waits for PLAYER_REGEN_ENABLED. The first seat always runs: nothing protected hangs there yet.
+local pendingReseat, seatedOnce = false, false
+
 local function Reseat()
     if not loggedIn then return end
+    if seatedOnce and type(InCombatLockdown) == "function" and InCombatLockdown() then
+        pendingReseat = true
+        return
+    end
+    pendingReseat, seatedOnce = false, true
     local scale = Scale()
     root:ClearAllPoints()
     root:SetPoint("CENTER", UIParent, "CENTER", (ROOT_DX + seat.dx) * scale, (ROOT_DY + seat.dy) * scale)
@@ -454,6 +474,80 @@ for _, key in ipairs(PIECE_KEYS) do
     end)
 end
 
+-------------------------------------------------------------------------------
+-- Target side areas
+-------------------------------------------------------------------------------
+
+local AREA_IDS = { "debuffsH", "debuffsV", "class", "empty" }
+local AREA_FAMILY = { debuffsH = "debuffs", debuffsV = "debuffs", class = "class" }
+local AREA_KEYS = { upper = "gunsight.target.upper", lower = "gunsight.target.lower" }
+local AREA_DEFAULTS = { upper = "debuffsH", lower = "class" }
+local areaCallbacks = {}
+local areaBatch = false         -- a swap writes two keys and notifies once, after both
+
+Gunsight.AREA_IDS = AREA_IDS
+for which, key in pairs(AREA_KEYS) do FS.Config.RegisterDefault(key, AREA_DEFAULTS[which]) end
+
+-- "debuffs" for both Target Debuffs modules, "class" for the Class Module, nil for Empty or an unknown id.
+function Gunsight.AreaFamily(id)
+    return AREA_FAMILY[id]
+end
+
+local function IsAreaId(id)
+    for _, known in ipairs(AREA_IDS) do
+        if known == id then return true end
+    end
+    return false
+end
+
+-- The module id the area shows ("upper" or "lower"); an unset or unknown stored value reads as the default.
+function Gunsight.GetArea(which)
+    local key = AREA_KEYS[which]
+    if not key then return nil end
+    local id = FS.Config.Get(key)
+    if IsAreaId(id) then return id end
+    return AREA_DEFAULTS[which]
+end
+
+local function NotifyArea(which)
+    local id = Gunsight.GetArea(which)
+    for _, fn in ipairs(areaCallbacks) do
+        local ok, err = pcall(fn, which, id)
+        if not ok then LogOnce("area_callback", "an OnAreaChanged callback failed: " .. tostring(err)) end
+    end
+end
+
+-- Picking a module the other area already shows (Target Debuffs H and V count as one) gives the other
+-- area this area's previous value. Returns false for an unknown area or id, or a read only Config.
+function Gunsight.SetArea(which, id)
+    local key = AREA_KEYS[which]
+    if not key or not IsAreaId(id) then return false end
+    local previous = Gunsight.GetArea(which)
+    if previous == id then return true end
+    local other = which == "upper" and "lower" or "upper"
+    local family = AREA_FAMILY[id]
+    areaBatch = true
+    local ok = true
+    if family and AREA_FAMILY[Gunsight.GetArea(other)] == family then
+        ok = FS.Config.Set(AREA_KEYS[other], previous)
+    end
+    ok = ok and FS.Config.Set(key, id)
+    areaBatch = false
+    if ok then NotifyArea(which) end
+    return ok
+end
+
+-- fn(which, id) runs after an area's module id changes (a pick, a swap, a profile switch or a reset).
+function Gunsight.OnAreaChanged(fn)
+    if type(fn) == "function" then areaCallbacks[#areaCallbacks + 1] = fn end
+end
+
+for which, key in pairs(AREA_KEYS) do
+    FS.Config.OnChange(key, function()
+        if not areaBatch then NotifyArea(which) end
+    end)
+end
+
 -- Out of combat again: finish whatever a protected frame could not do under lockdown.
 local function Reconcile()
     for _, key in ipairs(PIECE_KEYS) do
@@ -536,6 +630,7 @@ events:SetScript("OnEvent", function(_, event, arg1)
             end
         end
     elseif event == "PLAYER_REGEN_ENABLED" then
+        if pendingReseat then Reseat() end
         Reconcile()
     end
 end)

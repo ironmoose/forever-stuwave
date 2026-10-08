@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=2100">
+<title>Target Box Options</title>
+<style>
+/* Tokens copied from gunsight-hud-v2-2026-10-02.html (:root). Geometry copied from GunsightBoxes.lua / Gunsight.lua (the live addon wins over the mockup). */
+@font-face{font-family:'Mononoki';src:url(../forever-stuwave/Media/Fonts/MononokiNerdFontMono-Bold.ttf) format('truetype');font-weight:100 900;font-style:normal;font-display:block}
+:root{
+  --bg:#0d0620;
+  --fg:#e9e2ff;
+  --muted:#9d93c4;
+  --white:#f3fbff;
+  --violet:#a855f7;
+  --cyan:#22e0ff;
+  --pink:#ff2e97;
+  --amber:#ffb648;
+  --steel:#8d93a6;
+  --red:#ff3b4e;
+  --gold:#ffd23f;
+  --green:#39ff14;
+  --edge:rgba(168,85,247,.35);
+}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font-family:'Mononoki',ui-monospace,monospace;font-weight:700;font-size:16px;line-height:1.45;width:2100px;padding:28px 24px 32px;box-sizing:border-box}
+.row{display:flex;gap:16px;justify-content:center}
+.col{width:496px}
+.lab{font-size:20px;letter-spacing:.12em;color:var(--white);text-shadow:0 0 14px var(--violet);margin:0 0 10px 2px}
+.lab i{font-style:normal;color:var(--pink)}
+.panel{position:relative;width:496px;height:496px;border:1px solid var(--edge);overflow:hidden;
+  background:
+    radial-gradient(ellipse at 22% 108%,#3a2160 0,rgba(58,33,96,0) 55%),
+    radial-gradient(ellipse at 85% 0%,#1d1840 0,rgba(29,24,64,0) 60%),
+    linear-gradient(#0b0716,#150d28 62%,#1c1030)}
+canvas{display:block;width:496px;height:496px}
+.cap{margin:10px 2px 0;font-size:15px;line-height:1.5;color:var(--muted)}
+.cap b{color:var(--white);font-weight:700}
+</style>
+</head>
+<body>
+<div class="row">
+  <div class="col"><div class="lab">CURRENT</div><div class="panel"><canvas id="c0"></canvas></div><div class="cap" id="k0"></div></div>
+  <div class="col"><div class="lab"><i>A</i> DEBUFFS UNDER</div><div class="panel"><canvas id="c1"></canvas></div><div class="cap" id="k1"></div></div>
+  <div class="col"><div class="lab"><i>B</i> DEBUFFS INSIDE</div><div class="panel"><canvas id="c2"></canvas></div><div class="cap" id="k2"></div></div>
+  <div class="col"><div class="lab"><i>C</i> WIDE, DEBUFFS BESIDE</div><div class="panel"><canvas id="c3"></canvas></div><div class="cap" id="k3"></div></div>
+</div>
+<script>
+(function(){
+var rs=getComputedStyle(document.documentElement);
+function tok(n){return rs.getPropertyValue(n).trim();}
+var K={violet:tok('--violet'),cyan:tok('--cyan'),pink:tok('--pink'),amber:tok('--amber'),white:tok('--white'),red:tok('--red'),muted:tok('--muted'),steel:tok('--steel'),green:tok('--green'),bg:tok('--bg')};
+function hex(h){h=h.replace('#','');return [parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)];}
+function rgba(h,a){var c=hex(h);return 'rgba('+c[0]+','+c[1]+','+c[2]+','+a+')';}
+function mix(a,b,t){var x=hex(a),y=hex(b);t=Math.max(0,Math.min(1,t));
+  var r=[0,1,2].map(function(i){return Math.round(x[i]+(y[i]-x[i])*t);});
+  return '#'+r.map(function(v){return ('0'+v.toString(16)).slice(-2);}).join('');}
+function clamp(v,a,b){return v<a?a:v>b?b:v;}
+
+/* view: image px window x 1100..1348, y 368..616, shown at 2x */
+var X0=1100,Y0=368,VW=248,VH=248,S=2,BK=2;   /* S display scale, BK backing multiplier */
+var LW=1.86;  /* the source's line weight in image px at its own 0.7 view scale (1.3 / 0.7) */
+var ctx,base=1,gcol=null,gk=1,_stroke,_fill;
+
+/* ---- helpers copied from the source mockup ---- */
+function A(a){ctx.globalAlpha=clamp(base*a,0,1);}
+var HALO=[[1.5,.26],[3.2,.17],[5,.10],[7,.055]];
+function glow(c,k){gcol=c;gk=k==null?1:k;}
+function noglow(){gcol=null;}
+function halo(core){
+  var ga=ctx.globalAlpha,lw=core?ctx.lineWidth:0,ss=ctx.strokeStyle,lj=ctx.lineJoin,ld=ctx.getLineDash();
+  ctx.setLineDash([]);ctx.lineJoin='round';ctx.strokeStyle=gcol;
+  for(var i=0;i<HALO.length;i++){ctx.globalAlpha=clamp(ga*gk*HALO[i][1],0,1);ctx.lineWidth=lw+2*HALO[i][0];_stroke();}
+  ctx.globalAlpha=ga;ctx.strokeStyle=ss;ctx.lineJoin=lj;ctx.lineWidth=lw;ctx.setLineDash(ld);
+}
+function chamfer(x,y,w,h,c){
+  ctx.beginPath();
+  ctx.moveTo(x+c,y);ctx.lineTo(x+w,y);ctx.lineTo(x+w,y+h-c);ctx.lineTo(x+w-c,y+h);ctx.lineTo(x,y+h);ctx.lineTo(x,y+c);ctx.closePath();
+}
+function tick(x,y,len,dir,col,a){A(a);ctx.strokeStyle=col;ctx.lineWidth=LW;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+dir*len,y);ctx.stroke();}
+function text(s,x,y,size,col,a,align){
+  A(a);ctx.fillStyle=col;ctx.font='700 '+size+'px "Mononoki",monospace';ctx.textAlign=align||'left';ctx.textBaseline='alphabetic';ctx.fillText(s,x,y);
+}
+function chevPath(cx,ay,hw,d,t){
+  ctx.beginPath();ctx.moveTo(cx,ay);ctx.lineTo(cx+hw,ay+d);ctx.lineTo(cx+hw,ay+d+t);ctx.lineTo(cx,ay+t);ctx.lineTo(cx-hw,ay+d+t);ctx.lineTo(cx-hw,ay+d);ctx.closePath();
+}
+function vline(x,y0,y1,col,a,lw){A(a);ctx.strokeStyle=col;ctx.lineWidth=lw||LW;ctx.beginPath();ctx.moveTo(x,y0);ctx.lineTo(x,y1);ctx.stroke();}
+function hline(y,x0,x1,col,a,lw){A(a);ctx.strokeStyle=col;ctx.lineWidth=lw||LW;ctx.beginPath();ctx.moveTo(x0,y);ctx.lineTo(x1,y);ctx.stroke();}
+function outlined(s,x,y,size,col,align){ /* text with the dark edge the source uses over icons */
+  ctx.font='700 '+size+'px "Mononoki",monospace';ctx.textAlign=align||'left';ctx.textBaseline='alphabetic';
+  A(1);ctx.lineJoin='round';ctx.lineWidth=2.4;ctx.strokeStyle='rgba(13,6,32,.95)';ctx.strokeText(s,x,y);ctx.lineJoin='miter';
+  ctx.fillStyle=col;ctx.fillText(s,x,y);
+}
+/* target rules (tbBarH): HP green, power cyan */
+function tbBarH(x,y,w,h,f,col){
+  var fw=Math.max(0,Math.min(1,f))*w,g;
+  A(1);ctx.fillStyle=rgba(col,.2);ctx.fillRect(x,y,w,h);
+  if(fw<.5)return;
+  g=ctx.createLinearGradient(x,0,x+fw,0);g.addColorStop(0,rgba(col,.35));g.addColorStop(1,rgba(col,1));
+  A(1);ctx.fillStyle=g;ctx.fillRect(x,y,fw,h);
+  A(.9);ctx.fillStyle=mix(col,'#ffffff',.55);ctx.fillRect(x+fw-1.5,y,1.5,h);
+}
+function kickTag(x,y,col,a){
+  var w=36,h=15;
+  chamfer(x,y,w,h,5);A(a);ctx.fillStyle='rgba(13,6,32,.95)';ctx.fill();
+  glow(col,.8);ctx.strokeStyle=col;ctx.lineWidth=LW;ctx.stroke();noglow();
+  text('KICK',x+w/2,y+11,11,col,a,'center');
+}
+/* castIcon with no icon file: dashed placeholder and a question mark (the source does this for spells with no extracted icon) */
+var CI=28,CIC=5;
+function castIconPlaceholder(x,y,a){
+  chamfer(x,y,CI,CI,CIC);A(.85*a);ctx.fillStyle='rgba(13,6,32,.9)';ctx.fill();
+  text('?',x+CI/2,y+CI/2+6,17,K.muted,a*.9,'center');
+  chamfer(x,y,CI,CI,CIC);ctx.setLineDash([3,3]);
+  A(.9*a);ctx.strokeStyle=K.muted;ctx.lineWidth=LW;ctx.stroke();ctx.setLineDash([]);
+}
+
+/* ---- geometry ---- */
+var BOXR={x:1152,y:424,w:114,h:56};           /* Gunsight.lua BOXR */
+var GROW=8;                                    /* GunsightBoxes.lua C.TGT_GROW: the live box is 114 x 64 (grows UP) */
+var BOT=480;                                   /* BOXR.y + BOXR.h: the bottom edge never moves, anything extra grows UP */
+var TR={x0:1164,x1:1194},FR_T=500,TOP=508,TBOT=752,N=20,PITCH=(TBOT-TOP)/N;
+var PAD=7,CIG=6;
+var NAME='Bloodsail Swashbuckler',SPELL='Shadow Bolt Volley',HP=.62,PW=.70;
+/* sample debuffs: the player's own, letters and colours stand in for the spell icons */
+var DEB=[
+  {k:'S',c:'#9b59ff',t:'14',n:0,low:false},   /* Shadow Word: Pain */
+  {k:'C',c:'#c4423b',t:'9', n:0,low:false},   /* Corruption */
+  {k:'A',c:'#d9a521',t:'22',n:0,low:false},   /* Curse of Agony */
+  {k:'E',c:'#6b3fc4',t:'4', n:3,low:true}     /* a stacking debuff, 3 stacks, about to fall off */
+];
+
+/* a debuff icon: s square, chamfer 3, letter, remaining-time number under it, stack count at the corner */
+function debuff(d,x,y,s,tfs,lfs){
+  var c=Math.max(2,Math.round(s/6));
+  chamfer(x,y,s,s,c);A(1);ctx.fillStyle=mix(d.c,K.bg,.35);ctx.fill();
+  /* a soft top light so the stand-in reads as art, not a flat tile */
+  chamfer(x,y,s,s,c);A(.35);ctx.fillStyle=mix(d.c,'#ffffff',.35);ctx.save();ctx.clip();ctx.fillRect(x,y,s,s*.45);ctx.restore();
+  text(d.k,x+s/2,y+s/2+lfs*.36,lfs,K.white,1,'center');
+  chamfer(x,y,s,s,c);A(.95);ctx.strokeStyle=mix(d.c,'#ffffff',.3);ctx.lineWidth=LW;ctx.stroke();
+  text(d.t,x+s/2,y+s+tfs+1,tfs,d.low?K.amber:K.white,.95,'center');
+  if(d.n>1)outlined(String(d.n),x+s-1,y+s-1,tfs,K.white,'right');
+}
+
+/* tape: the target cast bar, drawn like the source (frame, outer ticks, 20 chevrons, engine fill, caret), cropped */
+function tape(col,pulse,p){
+  var x0=TR.x0,x1=TR.x1,cx=(x0+x1)/2,hw=10,d=8,tk=5.5;
+  ctx.save();
+  ctx.beginPath();ctx.rect(X0,FR_T-12,VW,616-FR_T+12);ctx.clip();
+  chamfer(x0,FR_T,x1-x0,FR_B-FR_T,8);
+  A(.3);ctx.fillStyle='rgba(13,6,32,.55)';ctx.fill();
+  A(clamp(.55+.45*pulse,0,1));glow(col,.6+.5*pulse);ctx.strokeStyle=col;ctx.lineWidth=LW;ctx.stroke();noglow();
+  for(var k=0;k<=10;k++){var ty=TBOT-k*(TBOT-TOP)/10;tick(x1,ty,k===5?10:5,1,col,.7);}
+  for(var i=0;i<N;i++){var ay=TBOT-(i+1)*PITCH;A(.2);ctx.fillStyle=col;chevPath(cx,ay,hw,d,tk);ctx.fill();}
+  var fy=TBOT-p*(TBOT-TOP);
+  ctx.save();ctx.beginPath();ctx.rect(x0-4,fy,x1-x0+8,TBOT+4-fy);ctx.clip();
+  A(1);ctx.fillStyle=col;for(var e=0;e<N;e++){chevPath(cx,TBOT-(e+1)*PITCH,hw,d,tk);ctx.fill();}
+  ctx.restore();
+  ctx.save();ctx.beginPath();ctx.rect(x0-26,TOP,x1-x0+52,753.3-TOP);ctx.clip();
+  A(1);ctx.strokeStyle=col;ctx.lineWidth=LW*1.75;ctx.lineJoin='miter';chevPath(cx,fy-16,13,9,7);ctx.stroke();
+  ctx.restore();
+  ctx.restore();
+}
+var FR_B=760;
+
+/* GunsightBoxes.lua FitLine: a string wider than its field shrinks (floor of size * field / width, never under MIN_FONT 6);
+   if it is still too wide the FontString (no word wrap, one line) cuts it with an ellipsis. */
+function fitText(str,size,wmax){
+  var MINF=6;
+  ctx.font='700 '+size+'px "Mononoki",monospace';
+  var w=ctx.measureText(str).width,adv=ctx.measureText('M').width,fit14=Math.floor(wmax/adv),s=size,out=str,cut=false;
+  if(w>wmax){
+    s=Math.max(MINF,Math.floor(size*wmax/w));
+    ctx.font='700 '+s+'px "Mononoki",monospace';
+    if(ctx.measureText(out).width>wmax){
+      cut=true;
+      while(out.length>1&&ctx.measureText(out+'...').width>wmax)out=out.slice(0,-1);
+      out=out+'...';
+    }
+  }
+  ctx.font='700 '+s+'px "Mononoki",monospace';
+  return {text:out,size:s,w:ctx.measureText(out).width,cut:cut,fit:fit14,field:wmax};
+}
+
+/* the box. o: x,y,w,h (outline), mode: 'cur'|'a'|'b'|'c' */
+function box(mode,col,pulse){
+  var w,h,top,x=BOXR.x;
+  if(mode==='cur'){w=114;h=64;}
+  if(mode==='a'){w=131;h=64;}
+  if(mode==='b'){w=131;h=96;}
+  if(mode==='c'){w=148;h=64;}
+  var tabH=32,tabW=101;
+  top=BOT-h-(mode==='a'?tabH:0);
+  var by=top;
+  /* A: the debuff tab hangs under the box, attached along its bottom-left edge */
+  if(mode==='a'){
+    var ty=by+h;
+    chamfer(x,ty-1,tabW,tabH+1,5);
+    A(.82);ctx.fillStyle='rgba(13,6,32,.85)';ctx.fill();
+    A(1);glow(col,.9);ctx.strokeStyle=col;ctx.lineWidth=LW;ctx.stroke();noglow();
+  }
+  /* plate */
+  chamfer(x,by,w,h,8);
+  A(.82);ctx.fillStyle='rgba(13,6,32,.85)';ctx.fill();
+  A(1);glow(col,.7+.4*pulse);ctx.strokeStyle=col;ctx.lineWidth=LW;ctx.stroke();noglow();
+  /* line 1: the unit name, 14, baseline +23 from the (grown) top, white while it casts */
+  /* the name field: the whole inner width, less the level and percent in A and B, less the icon row in C */
+  var nameField=w-2*PAD;
+  if(mode==='a'||mode==='b'){
+    ctx.font='700 11px "Mononoki",monospace';
+    nameField-=ctx.measureText('62%').width+5+ctx.measureText('L70').width+6;
+  }
+  if(mode==='c')nameField-=4*15+3*2+6;
+  var nf=fitText(NAME,14,nameField);
+  text(nf.text,x+PAD,by+23,nf.size,K.white,1,'left');
+  var nameW=nf.w;
+  /* extra info on the name line (A, B): level, muted, and health percent in the rule's colour, right aligned */
+  if(mode==='a'||mode==='b'){
+    ctx.font='700 11px "Mononoki",monospace';
+    var pctW=ctx.measureText('62%').width;
+    text('62%',x+w-PAD,by+23,11,K.green,.95,'right');
+    text('L70',x+w-PAD-pctW-5,by+23,11,K.muted,.95,'right'); /* 5 px left of the percent */
+  }
+  /* HP and power rules under the name, as wide as the name (min 24), live offsets +26 and +30 */
+  var rw=Math.max(24,nameW);
+  tbBarH(x+PAD,by+26,rw,3,HP,K.green);
+  tbBarH(x+PAD,by+30,rw,2,PW,K.cyan);
+  /* C: debuffs in a single row at the right of the name and health area */
+  if(mode==='c'){
+    var s=15,g=2,n=DEB.length,rx=x+w-PAD-(n*s+(n-1)*g);
+    for(var i=0;i<n;i++)debuff(DEB[i],rx+i*(s+g),by+10,s,8,10);
+  }
+  /* divider +37 and the spell line +53 (the live seats once the box has grown up by 8) */
+  hline(by+37,x+PAD,x+w-PAD,col,.4);
+  var sf=fitText(SPELL,14,w-2*PAD);
+  text(sf.text,x+PAD,by+53,sf.size,col,1,'left');
+  /* B: debuff row inside at the bottom, under a second divider */
+  if(mode==='b'){
+    hline(by+64,x+PAD,x+w-PAD,col,.4);
+    var s2=18,g2=5;
+    for(var j=0;j<DEB.length;j++)debuff(DEB[j],x+PAD+j*(s2+g2),by+67,s2,9,11);
+  }
+  /* A: the same row sits on the tab */
+  if(mode==='a'){
+    var s3=18,g3=5;
+    for(var q=0;q<DEB.length;q++)debuff(DEB[q],x+PAD+q*(s3+g3),by+h+3,s3,9,11);
+  }
+  /* KICK tag rides the top right corner of the box */
+  kickTag(x+w-40,by-8,K.pink,1);
+  return {nf:nf,sf:sf};
+}
+
+function draw(id,mode){
+  var cv=document.getElementById(id);
+  cv.width=VW*S*BK;cv.height=VH*S*BK;
+  ctx=cv.getContext('2d');
+  if(!ctx._orig){ /* patch once per context: go() runs twice (fonts loaded, fonts ready) */
+    ctx._orig={s:ctx.stroke.bind(ctx),f:ctx.fill.bind(ctx)};
+    ctx.stroke=function(){if(gcol)halo(true);ctx._orig.s();};
+    ctx.fill=function(){if(gcol)halo(false);ctx._orig.f.apply(ctx,arguments);};
+  }
+  _stroke=ctx._orig.s;_fill=ctx._orig.f;
+  ctx.setTransform(S*BK,0,0,S*BK,-X0*S*BK,-Y0*S*BK);
+  base=1;
+  var col=K.pink,pulse=.5;
+  /* DoT time tape axis, faint, so the right-hand fit is visible */
+  ctx.save();ctx.setLineDash([5,5]);
+  vline(1239,TOP,616,K.violet,.4);
+  ctx.setLineDash([]);
+  [1283,1312,1341].forEach(function(lx){vline(lx,TOP+14,616,K.violet,.15);});
+  ctx.restore();
+  tape(col,pulse,.72);
+  /* spell icon tile on the box's inner (left) side, old screen seat */
+  castIconPlaceholder(BOXR.x-CIG-CI,BOXR.y+(BOXR.h-CI)/2,1);
+  var r=box(mode,col,pulse);
+  /* fade the cropped tape and rail out at the bottom edge of the view */
+  ctx.save();ctx.globalCompositeOperation='destination-out';
+  var g=ctx.createLinearGradient(0,576,0,616);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,'rgba(0,0,0,1)');
+  ctx.fillStyle=g;ctx.fillRect(X0,576,VW,40);ctx.restore();
+  return r;
+}
+
+function caption(id,html){document.getElementById(id).innerHTML=html;}
+function go(){
+  var res=[];
+  [['c0','cur'],['c1','a'],['c2','b'],['c3','c']].forEach(function(m){
+    try{res.push(draw(m[0],m[1]));}catch(e){document.getElementById('k'+m[0].slice(1)).textContent='ERR '+e.message;throw e;}
+  });
+  function fitLine(r){
+    var n=r.nf,t=r.sf;
+    return 'name field '+Math.round(n.field)+' px: '+n.fit+' chars at 14 px, '+(n.cut?'cut with ellipsis at '+n.size+' px':(n.size<14?'shrinks to '+n.size+' px':'fits at 14 px'))
+      +'<br>cast field '+Math.round(t.field)+' px: '+t.fit+' chars at 14 px, '+(t.cut?'cut at '+t.size+' px':(t.size<14?'shrinks to '+t.size+' px':'fits at 14 px'));
+  }
+  caption('k0','<b>114 x 64 px</b><br>name 14 px, cast 14 px<br>'+fitLine(res[0]));
+  caption('k1','<b>131 x 64 px</b> box + <b>101 x 32 px</b> row (131 x 96 total)<br>name 14, level and % 11, icons 18, time 9 px<br>'+fitLine(res[1]));
+  caption('k2','<b>131 x 96 px</b> box, row in the bottom 32 px<br>name 14, level and % 11, icons 18, time 9 px<br>'+fitLine(res[2]));
+  caption('k3','<b>148 x 64 px</b> box, icons 15 px at right<br>name 14, cast 14, time 8 px<br>'+fitLine(res[3]));
+}
+var fonts=['700 14px Mononoki','700 11px Mononoki','700 9px Mononoki','700 8px Mononoki'];
+if(document.fonts&&document.fonts.load){
+  Promise.all(fonts.map(function(f){return document.fonts.load(f);})).then(go,go);
+}else go();
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(go);
+})();
+</script>
+</body>
+</html>

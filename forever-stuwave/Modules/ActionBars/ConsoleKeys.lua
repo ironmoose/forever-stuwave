@@ -5,7 +5,7 @@
 -- the `.cdeck.bm` key rules and the Rings block). Each key toggles ONE Gunsight piece (DEFS order is
 -- the slot order when every key shows; the pitch is one even gap, there are no group gaps):
 --
---   key 1  you    Your Cast      cyan    glyph_hud_chev       key 6  dot    DoT Timers     violet  clock
+--   key 1  you    Your Cast      cyan    glyph_hud_chev       key 6  dot    Target side    violet  clock
 --   key 2  next   Next Cast      gold    play                 key 7  prc    Procs          amber   bolt
 --   key 3  shard  Soul Shards    violet  diamond              key 8  party  Party Frame    green   group
 --   key 4  buff   Buff Reminder  pink    shield
@@ -17,19 +17,16 @@
 --   prc    a profile.procs entry with a side (GunsightFrame draws a rung only for a proc with a side)
 --   next   profile.rotation not empty       (HudLogic's next cast comes from the rotation)
 --   buff   profile.selfBuffs not empty      (the buff reminder tile comes from the self buffs)
---   dot    FS.HudProfiles.ClassSlot(profile) is not nil
---          (the DoT area is a CLASS-SPECIFIC slot behind this key, and HudProfiles.lua owns the one rule for who
---          holds it, shared with GunsightDots: a non empty profile.dots gets the DoT time tape, a profile.seals
---          table with no dots (the Paladin) gets the Seal Chamber there instead, so the key stays and toggles
---          that slot; neither = nothing to toggle. The horizon segment is a hairline that stays)
---   you, tgt, party                         never read the profile: always shown
+--   you, tgt, dot, party                    never read the profile: always shown
+--          (the dot key switches both target side areas, Target debuffs and the class module, and Target debuffs
+--          applies to every class, so it shows even for a class with no HUD profile)
 -- TOOLTIP. The dot key names its slot from the profile: a profile `dotLabel = { n, d }` (HudProfiles.lua, the
--- Paladin's "Seal Chamber") replaces the key's title and description, each field on its own, and a missing or
--- non string field keeps the mockup's DoT text. It is read from the profile every time the tooltip is built
+-- Paladin's "Target side" text naming the Seal module) replaces the key's title and description, each field on its own, and a missing or
+-- non string field keeps the default Target side text. It is read from the profile every time the tooltip is built
 -- (ConsoleKeys.Label), so it follows the profile as it resolves, like the shown set.
 --
--- No profile (a class with no HUD) hides all five profile keys. Hiding is VISUAL ONLY: the key is
--- Hidden, the piece's on/off setting is never touched (Gunsight.SetPiece is not called) and the
+-- No profile (a class with no HUD) hides the four profile keys (shard, prc, next, buff). Hiding is VISUAL ONLY:
+-- the key is Hidden, the piece's on/off setting is never touched (Gunsight.SetPiece is not called) and the
 -- hidden key still follows OnPieceChanged. The shown keys take consecutive slots (the Console's
 -- KeyRect(slot)) at the even pitch, and `Console.SetKeyCount(n)` sizes the shoulder tab for the shown
 -- count. The profile is resolved by HudLogic at load or PLAYER_LOGIN, before the Gunsight's OnReady
@@ -138,7 +135,7 @@ local DEFS = {
     { key = "shard", n = "Soul Shards", d = "Held shards under your cast bar", c = "violet", g = "diamond" },
     { key = "buff", n = "Buff Reminder", d = "Missing self buff tile", c = "pink", g = "shield" },
     { key = "tgt", n = "Target Cast", d = "Target cast bar, kick and lock state", c = "pink", g = "cross" },
-    { key = "dot", n = "DoT Timers", d = "DoT time scale with refresh band", c = "violet", g = "clock" },
+    { key = "dot", n = "Target side", d = "Target debuffs and class module beside the target cast bar", c = "violet", g = "clock" },
     { key = "prc", n = "Procs", d = "Proc and cooldown posts", c = "amber", g = "bolt" },
     { key = "party", n = "Party Frame", d = "Show or hide the party frame", c = "green", g = "group" },
 }
@@ -159,22 +156,12 @@ local function HasDrawnProc(p)
     return false
 end
 
--- True when the class profile gives the DoT area to some module. The rule lives in HudProfiles.lua (read at
--- call time); a missing or throwing helper hides the key rather than guessing the rule a second time.
-local function ClassSlot(p)
-    local Profiles = FS.HudProfiles
-    if type(Profiles) ~= "table" or type(Profiles.ClassSlot) ~= "function" then return false end
-    local ok, slot = pcall(Profiles.ClassSlot, p)
-    return ok and slot ~= nil
-end
-
 -- piece key -> function(profile) (profile is a table). A key with no rule always shows.
 local NEEDS = {
     shard = function(p) return type(p.resource) == "table" and p.resource.shards ~= nil and p.resource.shards ~= false end,
     prc = HasDrawnProc,
     next = function(p) return Filled(p.rotation) end,
     buff = function(p) return Filled(p.selfBuffs) end,
-    dot = ClassSlot,
 }
 
 -- True when the key for `piece` has something to show for `profile` (nil: no profile).

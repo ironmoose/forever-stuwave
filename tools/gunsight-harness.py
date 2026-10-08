@@ -52,6 +52,7 @@ CONFIG = ADDON / "Core/Config.lua"
 THEME = Path(os.environ.get("THEME_LUA") or ADDON / "Core/Theme.lua")
 TOC = ADDON / "forever-stuwave.toc"
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
+MOCKUP_V7 = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-modules-concepts-v7-2026-10-08.html"
 
 
 # ---------------------------------------------------------------------------------------
@@ -63,6 +64,19 @@ def _m(pattern: str, text: str, what: str) -> re.Match:
     if not m:
         sys.exit(f"mockup: cannot find {what} (pattern {pattern!r}); the mockup changed shape")
     return m
+
+
+def v7_constants() -> dict:
+    """The target side areas and the My buffs plate, from the v7 concept mockup (emptySlot and buffs)."""
+    src = MOCKUP_V7.read_text(encoding="utf-8")
+    ax, aw = (int(v) for v in _m(r"""<rect x="(\d+)" y="'\+y\+'" width="(\d+)" height="'\+h\+'\"""", src, "emptySlot x and width").groups())
+    uy, ah = (int(v) for v in _m(r"emptySlot\((\d+),(\d+),'UPPER AREA", src, "upper emptySlot y and height").groups())
+    ly, lh = (int(v) for v in _m(r"emptySlot\((\d+),(\d+),'LOWER AREA", src, "lower emptySlot y and height").groups())
+    if ah != lh:
+        sys.exit("mockup v7: the two areas differ in height")
+    bx, bw = (int(v) for v in _m(r"x0=(\d+),w=(\d+);", src, "buffs plate x and width").groups())
+    by, bh = (int(v) for v in _m(r"ch\(x0,(\d+),w,(\d+),6\)", src, "buffs plate y and height").groups())
+    return dict(AREA_X=ax, AREA_W=aw, AREA_H=ah, AREA_UY=uy, AREA_LY=ly, MYB_X=bx, MYB_Y=by, MYB_W=bw, MYB_H=bh)
 
 
 def mockup_constants() -> dict:
@@ -111,6 +125,7 @@ def design_constants() -> tuple[int, int]:
 
 def expected_rects(mu: dict) -> dict:
     """Image-px rects (x, y, w, h), top-left origin, straight from the mockup's own formulas."""
+    mu = {**mu, **v7_constants()}
     U = 1 / 1.28
     tl, tr, bl, br = mu["TL"], mu["TR"], mu["BOXL"], mu["BOXR"]
     nxt_s = mu["NXT_S"] * U
@@ -131,6 +146,9 @@ def expected_rects(mu: dict) -> dict:
         "procL": (mu["LBRK"] - proc_w / 2, mu["CY"] - proc_h / 2, proc_w, proc_h),
         "procR": (mu["RBRK"] - proc_w / 2, mu["CY"] - proc_h / 2, proc_w, proc_h),
         "horizon": (tl["x1"] + mu["HZ_PAD_L"], mu["CY"], (mu["DOT_AX"] - mu["HZ_PAD_R"]) - (tl["x1"] + mu["HZ_PAD_L"]), 0),
+        "areaU": (mu["AREA_X"], mu["AREA_UY"], mu["AREA_W"], mu["AREA_H"]),
+        "areaL": (mu["AREA_X"], mu["AREA_LY"], mu["AREA_W"], mu["AREA_H"]),
+        "mybuffs": (mu["MYB_X"], mu["MYB_Y"], mu["MYB_W"], mu["MYB_H"]),
     }
 
 
@@ -485,6 +503,10 @@ eq(G.SH_G, MU.SH_G, "SH_G (addon units)"); eq(G.SH_DROP, MU.SH_DROP, "shard drop
 eq(G.BUFF_S, MU.BUFF_S, "buff tile (addon units)"); eq(G.BUFF_GAP, MU.BUFF_GAP, "buff gap (addon units)")
 eq(G.HZ_PAD_L, MU.HZ_PAD_L, "horizon left pad"); eq(G.HZ_PAD_R, MU.HZ_PAD_R, "horizon right pad")
 eq(G.PROC_BASE, MU.PROC_BASE, "proc half base"); eq(G.PROC_GROW, MU.PROC_GROW, "proc half growth"); eq(G.PROC_TICK, MU.PROC_TICK, "proc tick")
+eq(G.AREA.x, MU.AREA_X, "area x"); eq(G.AREA.w, MU.AREA_W, "area width"); eq(G.AREA.h, MU.AREA_H, "area height")
+eq(G.AREA.upperY, MU.AREA_UY, "upper area y"); eq(G.AREA.lowerY, MU.AREA_LY, "lower area y")
+eq(G.MYBUFFS.x, MU.MYB_X, "My buffs plate x"); eq(G.MYBUFFS.y, MU.MYB_Y, "My buffs plate y")
+eq(G.MYBUFFS.w, MU.MYB_W, "My buffs plate width"); eq(G.MYBUFFS.h, MU.MYB_H, "My buffs plate height")
 eq(MU.W * G.GRID, FS.Layout.DESIGN_W, "image width * 1.28 is the design width")
 eq(MU.H * G.GRID, FS.Layout.DESIGN_H, "image height * 1.28 is the design height")
 """)
@@ -554,6 +576,43 @@ local _, _, w2 = rect(Gs.anchors.boxL)
 near(w2, 114 * 1.28 * 1080 / 1440, "boxL width after a display size change")
 """)
 
+case("a_rescale_and_a_seat_move_in_combat_wait_for_the_end_of_combat")(r"""
+local Gs = boot({ height = 1200, db = {} })
+local x0, y0 = select(4, Gs.root:GetPoint(1)), select(5, Gs.root:GetPoint(1))
+local _, _, w0 = rect(Gs.anchors.boxL)
+IN_COMBAT = true
+Gs.root.calls, Gs.anchors.boxR.calls = {}, {}
+SetScreen(1440)
+fire("UI_SCALE_CHANGED")
+check(Gs.SetSeat(10, 20) ~= false, "SetSeat refused")
+check(Gs.root.calls.SetPoint == nil and Gs.root.calls.ClearAllPoints == nil, "the root was moved in combat")
+check(Gs.anchors.boxR.calls.SetPoint == nil and Gs.anchors.boxR.calls.SetSize == nil, "an anchor was moved or sized in combat")
+near(select(4, Gs.root:GetPoint(1)), x0, "root x waits"); near(select(5, Gs.root:GetPoint(1)), y0, "root y waits")
+local _, _, w1 = rect(Gs.anchors.boxL)
+near(w1, w0, "boxL keeps its size in combat")
+IN_COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+near(select(4, Gs.root:GetPoint(1)), -6.4 + 10, "root x applied once combat ends")
+near(select(5, Gs.root:GetPoint(1)), -86.4 + 20, "root y applied with the latest seat")
+local _, _, w2 = rect(Gs.anchors.boxL)
+near(w2, 114 * 1.28, "boxL resized at the new scale")
+local n = Gs.root.calls.SetPoint
+fire("PLAYER_REGEN_ENABLED")
+check(Gs.root.calls.SetPoint == n, "the deferred reseat is not replayed")
+""")
+
+case("a_login_in_combat_still_seats_the_first_time_and_defers_only_later_moves")(r"""
+IN_COMBAT = true
+local Gs = boot({ height = 1200, db = {} })
+IN_COMBAT = false
+check(Gs.root:GetNumPoints() > 0 and Gs.anchors.boxL:GetWidth() > 0, "a reload in combat left the HUD unseated until the fight ended")
+IN_COMBAT = true
+Gs.root.calls = {}
+fire("UI_SCALE_CHANGED")
+check(Gs.root.calls.SetPoint == nil, "a later reseat in combat moved the root")
+IN_COMBAT = false
+""")
+
 case("root_has_a_rect_so_children_resolve")(r"""
 local Gs = boot({ height = 1200 })
 local root = Gs.root
@@ -571,7 +630,7 @@ check(root.kind == "Frame", "root kind")
 check(root.template == nil, "root must not use a secure template: " .. tostring(root.template))
 check(root:IsProtected() == false, "root must be non-secure")
 check(root:GetFrameStrata() == "MEDIUM", "root strata is " .. tostring(root:GetFrameStrata()))
-local want = { "tapeL", "tapeR", "boxL", "boxR", "dotAxis", "next", "shards", "buff", "procL", "procR", "horizon" }
+local want = { "tapeL", "tapeR", "boxL", "boxR", "dotAxis", "next", "shards", "buff", "procL", "procR", "horizon", "areaU", "areaL", "mybuffs" }
 for _, name in ipairs(want) do
     local a = Gs.anchors[name]
     check(a, "anchor " .. name .. " is missing")
@@ -636,7 +695,7 @@ check(type(g) == "table", "ForeverSTUwaveDB.gunsight not created")
 check(g.enabled == nil and g.pieces == nil, "enabled and pieces live in FS.Config now, not in ForeverSTUwaveDB.gunsight")
 check(FS.Config.Get("gunsight.enabled") == true, "enabled defaults to true")
 check(g.seat and g.seat.dx == 0 and g.seat.dy == 0, "seat defaults to 0,0")
-for _, k in ipairs({ "you", "next", "shard", "buff", "tgt", "dot", "prc", "party" }) do
+for _, k in ipairs({ "you", "next", "shard", "buff", "tgt", "dot", "prc", "party", "mybuffs" }) do
     check(FS.Config.Get("gunsight.pieces." .. k) == true, "piece " .. k .. " defaults to on")
     check(Gs.IsPieceOn(k) == true, "IsPieceOn(" .. k .. ") defaults to true")
 end
@@ -651,8 +710,80 @@ check(FS.Config.Get("gunsight.pieces.buff") == false and Gs.IsPieceOn("buff") ==
 check(FS.Config.Get("gunsight.pieces.you") == true, "a non boolean piece value falls back to on")
 -- a saved value for the retired `frame` piece (the removed HUD Frame) is ignored, not an error
 check(Gs.IsPieceOn("frame") == false and Gs.SetPiece("frame", true) == false, "the retired frame piece is not a known piece")
-check(#Gs.PIECES == 8, "eight pieces, got " .. #Gs.PIECES)
+check(#Gs.PIECES == 9, "nine pieces, got " .. #Gs.PIECES)
 check(g.seat.dx == 0 and g.seat.dy == 0, "a bad seat falls back to 0,0")
+""")
+
+
+case("area_defaults_and_invalid_values_read_the_default")(r"""
+local Gs = boot({ height = 1440, db = {} })
+check(Gs.GetArea("upper") == "debuffsH", "upper defaults to debuffsH, got " .. tostring(Gs.GetArea("upper")))
+check(Gs.GetArea("lower") == "class", "lower defaults to class, got " .. tostring(Gs.GetArea("lower")))
+check(FS.Config.Get("gunsight.target.upper") == "debuffsH" and FS.Config.Get("gunsight.target.lower") == "class", "the config defaults")
+FS.Config.Set("gunsight.target.upper", "bogus"); FS.Config.Set("gunsight.target.lower", 7)
+check(Gs.GetArea("upper") == "debuffsH", "an unknown upper value reads as the default")
+check(Gs.GetArea("lower") == "class", "a non string lower value reads as the default")
+check(Gs.GetArea("middle") == nil, "an unknown area reads nil")
+local ids = table.concat(Gs.AREA_IDS, ",")
+check(ids == "debuffsH,debuffsV,class,empty", "the module ids in menu order: " .. ids)
+""")
+
+case("set_area_swaps_with_the_other_area")(r"""
+local Gs = boot({ height = 1440, db = {} })
+-- upper debuffsH, lower class: picking class for upper hands the lower area the old upper value
+check(Gs.SetArea("upper", "class") == true, "SetArea refused")
+check(Gs.GetArea("upper") == "class" and Gs.GetArea("lower") == "debuffsH", "swap upper: " .. Gs.GetArea("upper") .. "/" .. Gs.GetArea("lower"))
+-- and the other direction
+check(Gs.SetArea("lower", "class") == true, "SetArea lower refused")
+check(Gs.GetArea("lower") == "class" and Gs.GetArea("upper") == "debuffsH", "swap lower: " .. Gs.GetArea("upper") .. "/" .. Gs.GetArea("lower"))
+-- debuffsH and debuffsV are one family: picking V for the lower area (debuffsH sits upper) swaps
+check(Gs.SetArea("lower", "debuffsV") == true, "SetArea debuffsV refused")
+check(Gs.GetArea("lower") == "debuffsV" and Gs.GetArea("upper") == "class", "family swap: " .. Gs.GetArea("upper") .. "/" .. Gs.GetArea("lower"))
+-- a pick the other area does not hold changes only this area
+Gs.SetArea("lower", "empty")
+check(Gs.GetArea("lower") == "empty" and Gs.GetArea("upper") == "class", "plain pick: " .. Gs.GetArea("upper") .. "/" .. Gs.GetArea("lower"))
+-- Empty may sit in both areas: no swap
+Gs.SetArea("upper", "empty")
+check(Gs.GetArea("upper") == "empty" and Gs.GetArea("lower") == "empty", "both empty")
+-- switching the same family inside one area is not a conflict with the other
+Gs.SetArea("upper", "debuffsH"); Gs.SetArea("upper", "debuffsV")
+check(Gs.GetArea("upper") == "debuffsV" and Gs.GetArea("lower") == "empty", "H to V in place")
+check(Gs.SetArea("upper", "debuffsV") == true, "re-picking the current value is fine")
+check(Gs.SetArea("upper", "bogus") == false and Gs.SetArea("nowhere", "class") == false, "bad arguments are refused")
+check(Gs.GetArea("upper") == "debuffsV", "a refused pick changes nothing")
+""")
+
+case("on_area_changed_fires_on_set_and_on_a_profile_switch")(r"""
+function UnitGUID() return "Player-1-0001" end
+local Gs = boot({ height = 1440, db = {} })
+local calls = 0
+Gs.OnAreaChanged(function() calls = calls + 1 end)
+Gs.SetArea("upper", "debuffsV")
+check(calls == 1, "one notification for a plain pick, got " .. calls)
+Gs.SetArea("upper", "class")
+check(calls == 2, "one notification for a swap (two keys change), got " .. calls)
+Gs.SetArea("upper", "class")
+check(calls == 2, "re-picking the same value must not notify")
+check(FS.Config.NewProfile("Other") == true, "NewProfile")
+check(FS.Config.SetActiveProfile("Other") == true, "SetActiveProfile")
+check(calls >= 3, "a profile switch to different areas must notify, got " .. calls)
+local before = calls
+FS.Config.Set("gunsight.target.lower", "empty")
+check(calls == before + 1, "a direct config write notifies, got " .. (calls - before))
+Gs.OnAreaChanged(function() error("boom") end)
+FS.Config.Set("gunsight.target.lower", "class")
+check(calls == before + 2, "a throwing callback must not stop the others")
+""")
+
+case("set_area_under_a_read_only_config_returns_false_and_changes_nothing")(r"""
+local Gs = boot({ height = 1440, db = { profilesVersion = 999 } })
+check(FS.Config.IsReadOnly(), "setup: Config is read-only (saved profiles newer than the addon)")
+local calls = 0
+Gs.OnAreaChanged(function() calls = calls + 1 end)
+check(Gs.SetArea("upper", "class") == false, "a pick on a read-only Config is refused")
+check(Gs.SetArea("lower", "debuffsV") == false, "so is a pick that would swap")
+check(Gs.GetArea("upper") == "debuffsH" and Gs.GetArea("lower") == "class", "both areas keep their values")
+check(calls == 0, "no notification for a refused pick, got " .. calls)
 """)
 
 case("piece_registry_defaults_all_on")(r"""
@@ -1059,6 +1190,7 @@ def static_checks(mu: dict) -> list[tuple[str, str | None]]:
 
 def main() -> int:
     mu = mockup_constants()
+    mu.update(v7_constants())
     dw, dh = design_constants()
     failures = 0
 

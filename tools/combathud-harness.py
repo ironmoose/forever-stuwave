@@ -72,6 +72,7 @@ COMBATHUD = Path(os.environ.get("COMBATHUD_LUA") or ADDON / "Modules/CombatHud/C
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "combat-hud-stack-a-2026-10-02.html"
 OFFSTATE_MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "off-state-and-bridge-2026-10-02.html"
 GUNSIGHT_MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
+CLASS_MODULE_MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-modules-concepts-v7-2026-10-08.html"
 SHARD_GENERATOR = HERE / "assets" / "generate_hud_shard.py"
 CASTBARS = ADDON / "Modules/CastBars/CastBars.lua"
 THEME = ADDON / "Core/Theme.lua"
@@ -79,7 +80,7 @@ TOC = ADDON / "forever-stuwave.toc"
 
 THEME_CONSTANTS = (
     "COLOR_TEXT_WHITE", "COLOR_BG", "COLOR_BORDER", "COLOR_BAR_TRACK", "COLOR_BAR_BORDER",
-    "COLOR_HEALTH", "COLOR_POWER", "FONT_MONO", "FLAT_TEXTURE",
+    "COLOR_HEALTH", "COLOR_POWER", "COLOR_MUTED", "FONT_MONO", "FLAT_TEXTURE",
     "CHROME_CORNERS", "CUT_SIZES", "SLICE_CUT2_OUTLINE_TEXTURE", "SLICE_CUT2_GLOW_TEXTURE",
     "SLICE_CUT2_GLOW_PAD",
 )
@@ -206,6 +207,32 @@ def gunsight_units() -> dict:
         "NXT_CUT": int(m(r"tileFill\(n\.x,n\.y,n\.s,(\d+)\*U\)", "next chamfer").group(1)),
         "BUFF_CUT": int(m(r"tileFill\(bx,by,bs,(\d+)\*U\)", "buff chamfer").group(1)),
         "PULSE_FROM": float("0." + pulse_from), "PULSE_SPAN": float("0." + pulse_span), "PULSE_S": seconds,
+    }
+
+
+def home_shard_units() -> dict:
+    """The v7 mockup's homeShards (state D): one shard glyph and the count under your cast bar, image px."""
+    src = CLASS_MODULE_MOCKUP.read_text(encoding="utf-8")
+    fn = re.search(r"function homeShards\(\)\{.*?\n\}", src, re.S)
+    if not fn:
+        sys.exit("v7 mockup: homeShards not found; update combathud-harness.py")
+    glyph = re.search(r"shard\((\d+),(\d+),([\d.]+),(\d+),C\.violet,n>0\)", fn.group(0))
+    num = re.search(r"txt\((\d+),(\d+),String\(n\),(\d+),", fn.group(0))
+    if not (glyph and num):
+        sys.exit("v7 mockup: homeShards glyph or count not found; update combathud-harness.py")
+    shard_fn = re.search(r"function shard\(x,y,w,h,col,filled\)\{(.*?)\n\}", src, re.S)
+    off = shard_fn and re.search(r"fill-opacity=\"'\+\(filled\?\.\d+:\.(\d+)\)", shard_fn.group(1))
+    off_stroke = shard_fn and re.search(r"stroke-opacity=\"'\+\(filled\?1:\.(\d+)\)", shard_fn.group(1))
+    if not (off and off_stroke):
+        sys.exit("v7 mockup: shard() unlit alphas not found; update combathud-harness.py")
+    gx, gy, gw, gh = (float(v) for v in glyph.groups())
+    nx, ny, npx = (float(v) for v in num.groups())
+    return {
+        "HOME_GLYPH_W": gw, "HOME_GLYPH_H": gh, "HOME_GLYPH_DX": nx - (gx + gw / 2), "HOME_GLYPH_CY": gy + gh / 2,
+        "HOME_NUM_PX": npx, "HOME_NUM_BASE": ny,
+        "HOME_FILL_OFF": float("0." + off.group(1)), "HOME_STROKE_OFF": float("0." + off_stroke.group(1)),
+        # CombatHud TUNE.HOME_DIGIT: the mono face's advance as a fraction of its size, how far the glyph steps left per extra digit
+        "HOME_DIGIT": 0.6,
     }
 
 
@@ -845,7 +872,7 @@ def build_runtime(cls: str, gunsight: bool = False):
         lua.execute("FS.Gunsight = nil; __gsCalls = nil; setScreen(1440)")
         for fname in ("Core/Layout.lua", "Core/Config.lua", "Modules/CombatHud/Gunsight.lua"):
             loader(fname, (ADDON / fname).read_text(encoding="utf-8"))
-        lua.execute(f"GU = {lua_value(gunsight_units())}")
+        lua.execute(f"GU = {lua_value({**gunsight_units(), **home_shard_units()})}")
     return lua
 
 
@@ -2060,6 +2087,22 @@ check(shown == 20, "a huge stack is clamped to what fits the column: " .. shown)
 check(ui.shards:GetWidth() <= 268, "the row never widens the HUD column")
 """)
 
+case("stack_a_keeps_its_diamonds_and_never_asks_the_class_module_seam")(r"""
+standard()
+FS.GunsightAreas = {
+    AreaOf = function() error("Stack A asked FS.GunsightAreas.AreaOf") end,
+    OnAreaChanged = function() error("Stack A listened to FS.GunsightAreas.OnAreaChanged") end,
+}
+__state = mkState({ inCombat = true, row = lockRow(), shards = 3 })
+login()
+local ui = FS.CombatHud.ui
+local shown = 0
+for _, d in ipairs(ui.diamonds) do if d:IsShown() then shown = shown + 1 end end
+check(shown == 3 and ui.shards:IsShown(), "Stack A still draws three diamonds with the Class Module seam present, got " .. shown)
+check(ui.shardGlyph == nil and ui.shardNum == nil, "Stack A builds no home glyph or count")
+check(degraded("combathud_render") == 0, "Stack A render did not fail")
+""")
+
 case("a_class_without_shards_never_shows_the_row", "PRIEST")(r"""
 learnAll(); useCastBars(0, -317)
 __state = mkState({ inCombat = true, row = { rowEntry("sw_pain", { missing = false }) }, shards = 5 })
@@ -2611,6 +2654,20 @@ function gsBoot(o)
         FS.targetCastBar, FS.playerCastBar, FS.CastBars = trap("targetCastBar"), trap("playerCastBar"), trap("CastBars")
     end
     __state = o.state
+    -- The Class Module seam (FS.GunsightAreas, built in another lane): AreaOf("class") answers where the Class Module
+    -- sits (nil: in neither area), OnAreaChanged keeps the callbacks. o.noAreas leaves the seam out entirely.
+    AREA_OF, AREA_CBS, AREA_CALLS = { class = o.area }, {}, { areaOf = 0 }
+    if not o.noAreas then
+        FS.GunsightAreas = {
+            AreaOf = function(id)
+                AREA_CALLS.areaOf = AREA_CALLS.areaOf + 1
+                if o.areaThrows then error("boom: AreaOf") end
+                return AREA_OF[id]
+            end,
+            OnAreaChanged = function(fn) AREA_CBS[#AREA_CBS + 1] = fn end,
+            RegisterModule = function() return true end,
+        }
+    end
     fire("ADDON_LOADED", "forever-stuwave")
     seen = {}
     local gs = FS.Gunsight
@@ -2623,6 +2680,10 @@ function gsBoot(o)
     login()
     return FS.CombatHud.ui, gs
 end
+function setClassArea(area)
+    AREA_OF.class = area
+    for _, fn in ipairs(AREA_CBS) do fn("class", area) end
+end
 function sameRect(a, b, msg)
     local q = rect(b)
     rectEq(a, q.l, q.b, q.r, q.t, msg)
@@ -2630,40 +2691,38 @@ end
 function rectSize(f) local q = rect(f); return q.r - q.l, q.t - q.b end
 function shownCount(list) local n = 0; for _, f in ipairs(list) do if f._shown then n = n + 1 end end; return n end
 function isUnder(f, root) while f do if f == root then return true end; f = f._parent end; return false end
--- The shard glyphs: four textures per held shard (glow, line, fill, facet), each a canvas larger than the 10 x 18
--- cell and centred on it, cells right aligned to the shard anchor with SH_G between.
-function checkShardGlyphs(ui, anchor, k, n, label)
+-- The home shard seat: ONE line art glyph (four textures: glow, line, fill, facet) and the count, as v7's homeShards
+-- draws them. The count is flush with the anchor's right edge, the glyph centre HOME_GLYPH_DX image px left of it
+-- (one digit further left per extra digit), both centred on the anchor's height; the baked canvases scale by the
+-- glyph box over the 10 x 18 cell they were baked for.
+function checkHomeShard(ui, anchor, k, n, label)
     local sa = rect(anchor)
-    local step = (GU.SH_W + GU.SH_G) * k
-    for i = 1, n do
-        local g = ui.shardGlyphs[i]
-        check(g ~= nil, label .. " glyph " .. i .. " exists")
-        local cx = sa.r - (i - 1) * step - GU.SH_W * k / 2
-        local cy = (sa.t + sa.b) / 2
-        for _, e in ipairs({ { "line", GU.SHARD_LINE_W, GU.SHARD_LINE_H }, { "fill", GU.SHARD_LINE_W, GU.SHARD_LINE_H },
-                             { "facet", GU.SHARD_LINE_W, GU.SHARD_LINE_H }, { "glow", GU.SHARD_GLOW_W, GU.SHARD_GLOW_H } }) do
-            local t = g[e[1]]
-            check(t ~= nil and t._shown, label .. " glyph " .. i .. " " .. e[1] .. " shows")
-            local q = rect(t)
-            -- the four textures share one centre, so every glyph's position is checked on the line texture and
-            -- the other kinds on glyph 1; the size is a per kind check
-            if i == 1 then
-                near(q.r - q.l, e[2] * k, label .. " " .. e[1] .. " width")
-                near(q.t - q.b, e[3] * k, label .. " " .. e[1] .. " height")
-            end
-            if e[1] == "line" or i == 1 then
-                near((q.l + q.r) / 2, cx, label .. " glyph " .. i .. " " .. e[1] .. " centre x")
-                near((q.t + q.b) / 2, cy, label .. " glyph " .. i .. " " .. e[1] .. " centre y")
-            end
-        end
+    local gk = GU.GRID * k
+    local g = ui.shardGlyph
+    check(g ~= nil, label .. ": the glyph exists")
+    local digits = #tostring(n)
+    local num = ui.shardNum
+    check(num ~= nil and num._shown and num._text == tostring(n), label .. ": the count reads " .. n .. ", got " .. tostring(num and num._text))
+    near(rect(num).r, sa.r, label .. " count is flush with the anchor's right edge")
+    near((rect(num).t + rect(num).b) / 2, (sa.t + sa.b) / 2, label .. " count centred on the anchor height")
+    local want = math.max(1, math.floor(GU.HOME_NUM_PX * gk + 0.5))
+    check(num._font and num._font[2] == want, label .. ": count font " .. tostring(num._font and num._font[2]) .. ", want " .. want)
+    local cx = sa.r - GU.HOME_GLYPH_DX * gk - (digits - 1) * GU.HOME_DIGIT * GU.HOME_NUM_PX * gk
+    local cell_w, cell_h = GU.HOME_GLYPH_W * GU.GRID / GU.SH_W, GU.HOME_GLYPH_H * GU.GRID / GU.SH_H
+    for _, e in ipairs({ { "line", GU.SHARD_LINE_W, GU.SHARD_LINE_H }, { "fill", GU.SHARD_LINE_W, GU.SHARD_LINE_H },
+                         { "facet", GU.SHARD_LINE_W, GU.SHARD_LINE_H }, { "glow", GU.SHARD_GLOW_W, GU.SHARD_GLOW_H } }) do
+        local t = g[e[1]]
+        local want_shown = not (e[1] == "glow" and n == 0)      -- the unlit glyph has no halo
+        check(t ~= nil and t._shown == want_shown, label .. " " .. e[1] .. (want_shown and " shows" or " is hidden"))
+        local q = rect(t)
+        near(q.r - q.l, e[2] * cell_w * k, label .. " " .. e[1] .. " width")
+        near(q.t - q.b, e[3] * cell_h * k, label .. " " .. e[1] .. " height")
+        near((q.l + q.r) / 2, cx, label .. " " .. e[1] .. " centre x")
+        near((q.t + q.b) / 2, (sa.t + sa.b) / 2, label .. " " .. e[1] .. " centre y")
     end
 end
 function textureCount(parent) local n = 0; for _, f in ipairs(__frames) do if f._kind == "Texture" and (parent == nil or f._parent == parent) then n = n + 1 end end; return n end
-function shardGlyphCount(ui)
-    local n = 0
-    for _, g in ipairs(ui.shardGlyphs) do if g.line._shown then n = n + 1 end end
-    return n
-end
+function homeGlyphShown(ui) return ui.shardGlyph ~= nil and ui.shardGlyph.line._shown == true end
 function effectivelyShown(f) while f do if f._shown == false then return false end; f = f._parent end; return true end
 function nextState(over)
     local s = { inCombat = false, shards = 3, next = { key = "shadow_bolt", icon = iconOf("shadow_bolt") },
@@ -2687,13 +2746,13 @@ local A = gs.anchors
 sameRect(ui.nextTile.holder, A.next, "the next tile sits exactly on anchors.next")
 local w, h = rectSize(ui.nextTile.holder)
 near(w, GU.NXT * k, "next tile width"); near(h, GU.NXT * k, "next tile height")
--- SHARDS: the line art glyphs, a 10 x 18 cell with gap 4, right aligned to the anchor, which is sized for the mockup's four
+-- SHARDS: the home seat is ONE line art glyph and the count (v7 homeShards) on the shard anchor, which keeps its size
 local sa = rect(A.shards)
 near(sa.r - sa.l, (GU.SH_SC * GU.SH_W + (GU.SH_SC - 1) * GU.SH_G) * k, "the shard anchor is sized for four")
 near(sa.t - sa.b, GU.SH_H * k, "the shard anchor is SH_H tall")
-check(shardGlyphCount(ui) == 3, "three held shards are three glyphs")
+check(homeGlyphShown(ui), "three held shards draw the one glyph")
 check(#ui.diamonds == 0, "the Gunsight view builds no diamonds")
-checkShardGlyphs(ui, A.shards, k, 3, "geometry")
+checkHomeShard(ui, A.shards, k, 3, "geometry")
 -- BUFF: 24 design px, on anchors.buff
 local tile = ui.buffTiles.demon_armor
 check(tile and tile.holder._shown, "the buff tile shows")
@@ -2714,7 +2773,7 @@ sameRect(seen.next.frame, gs.anchors.next, "next piece frame is on anchors.next"
 sameRect(seen.shard.frame, gs.anchors.shards, "shard piece frame is on anchors.shards")
 sameRect(seen.buff.frame, gs.anchors.buff, "buff piece frame is on anchors.buff")
 check(isUnder(ui.nextTile.holder, seen.next.frame), "the next tile lives inside its piece frame")
-check(isUnder(ui.shards, seen.shard.frame) and isUnder(ui.shardGlyphs[1].line, seen.shard.frame), "the shard row lives inside its piece frame")
+check(isUnder(ui.shards, seen.shard.frame) and isUnder(ui.shardGlyph.line, seen.shard.frame) and isUnder(ui.shardNum, seen.shard.frame), "the shard glyph and count live inside the piece frame")
 check(isUnder(ui.buffs, seen.buff.frame) and isUnder(ui.buffTiles.demon_armor.holder, seen.buff.frame), "the buff row lives inside its piece frame")
 -- the registry owns the piece frames: switching a piece off hides it, on shows it
 gs.SetPiece("next", false, true)
@@ -2765,30 +2824,32 @@ FS.CombatHud.Disable()
 check(degraded("combathud_render") == 0, "nothing touched the cast bars on any state")
 """)
 
-gcase("gunsight_shard_row_shows_only_held_shards_and_a_plus_n_count_above_four", r"""
+gcase("gunsight_home_seat_is_one_glyph_and_the_count_whatever_the_count", r"""
 local ui, gs = gsBoot({ state = nextState({ shards = 1 }) })
-local expect = { { 1, 1, nil }, { 2, 2, nil }, { 4, 4, nil }, { 5, 4, "+1" }, { 7, 4, "+3" }, { 20, 4, "+16" }, { 3, 3, nil } }
-for _, e in ipairs(expect) do
-    push(nextState({ shards = e[1] }))
-    check(ui.shards._shown, e[1] .. " shards: the row shows")
-    check(shardGlyphCount(ui) == e[2], e[1] .. " shards: " .. e[2] .. " glyphs, got " .. shardGlyphCount(ui))
-    if e[3] then
-        check(ui.shardMore and ui.shardMore._shown and ui.shardMore._text == e[3], e[1] .. " shards: the count reads " .. e[3] .. ", got " .. tostring(ui.shardMore and ui.shardMore._text))
-        local fourth = rect(gs.anchors.shards).r - 3 * (GU.SH_W + GU.SH_G) - GU.SH_W
-        near(rect(ui.shardMore).r, fourth - GU.SH_G, "the count is one gap left of the fourth cell")
-    else
-        check(ui.shardMore == nil or not ui.shardMore._shown, e[1] .. " shards: no count")
-    end
+for _, n in ipairs({ 1, 2, 4, 5, 7, 12, 20, 99, 3 }) do
+    push(nextState({ shards = n }))
+    check(ui.shards._shown, n .. " shards: the seat shows")
+    check(homeGlyphShown(ui), n .. " shards: the glyph shows")
+    check(ui.shardGlyphs == nil and ui.shardMore == nil, n .. " shards: no row of glyphs and no +N count")
+    checkHomeShard(ui, gs.anchors.shards, 1, n, n .. " shards")
 end
 push(nextState({ shards = 0 }))
-check(not ui.shards._shown, "zero shards hides the row")
+check(ui.shards._shown and homeGlyphShown(ui), "zero shards still shows the seat (v7 state D inset)")
+checkHomeShard(ui, gs.anchors.shards, 1, 0, "zero shards")
+near(ui.shardGlyph.line._vc[4], GU.HOME_STROKE_OFF, "the unlit outline alpha is the mockup's")
+near(ui.shardGlyph.fill._vc[4], GU.HOME_FILL_OFF, "the unlit fill alpha is the mockup's")
+check(colorEq(ui.shardNum._textColor, FS.Theme.COLOR_MUTED), "the 0 is muted")
+push(nextState({ shards = 2 }))
+check(ui.shardGlyph.glow._shown and colorEq(ui.shardNum._textColor, FS.Theme.COLOR_TEXT_WHITE) and ui.shardGlyph.line._vc[4] == 1, "a held shard lights the glyph again")
 local none = nextState(); none.shards = nil
 push(none)
-check(not ui.shards._shown, "an unknown shard count hides the row")
+check(not ui.shards._shown, "an unknown shard count hides the seat")
 push(nextState({ shards = SN }))
-check(not ui.shards._shown, "a secret shard count hides the row")
+check(not ui.shards._shown, "a secret shard count hides the seat")
+push(nextState({ shards = 2 }))
+check(ui.shards._shown and ui.shardNum._text == "2", "the seat comes back with a plain count")
 local V = FS.Theme.COLOR_BORDER
-local g1 = ui.shardGlyphs[1]
+local g1 = ui.shardGlyph
 check(colorEq(g1.line._vc, V) and g1.line._vc[4] == 1, "the line is the mockup's violet at full alpha")
 check(colorEq(g1.glow._vc, V) and g1.glow._vc[4] == 1, "the glow texture is violet (its strength is baked into the file)")
 check(colorEq(g1.fill._vc, V), "the lit facet fill is violet")
@@ -2799,6 +2860,58 @@ for _, name in ipairs({ "line", "fill", "facet", "glow" }) do
     local tex = g1[name]._texture
     check(tex and tex:find("hud_shard_" .. name .. ".tga", 1, true), "the " .. name .. " texture is hud_shard_" .. name .. ".tga, got " .. tostring(tex))
 end
+check(colorEq(ui.shardNum._textColor, FS.Theme.COLOR_TEXT_WHITE), "the count is white")
+""")
+
+gcase("gunsight_home_seat_hides_while_the_class_module_shows_the_shards_and_follows_the_area", r"""
+local ui, gs = gsBoot({ state = nextState({ shards = 3 }), area = "lower" })
+check(not ui.shards._shown, "the Class Module shows the shards in the lower area: the home seat hides")
+push(nextState({ shards = 4 }))
+check(not ui.shards._shown, "a new count does not bring the home seat back while the area shows the module")
+check(#AREA_CBS == 1, "exactly one OnAreaChanged listener, got " .. #AREA_CBS)
+setClassArea("upper")
+check(not ui.shards._shown, "the module in the upper area also hides the home seat")
+setClassArea(nil)
+check(ui.shards._shown and ui.shardNum._text == "4" and homeGlyphShown(ui), "the area emptied: the home seat is back with the current count")
+checkHomeShard(ui, gs.anchors.shards, 1, 4, "back at home")
+setClassArea("lower")
+check(not ui.shards._shown, "the module back in an area hides the home seat again")
+setClassArea(nil)
+push(nextState({ shards = 0 }))
+check(ui.shards._shown and ui.shardNum._text == "0", "the area is empty: the home seat shows the dim 0")
+setClassArea("upper")
+check(not ui.shards._shown, "the module in an area hides the 0 as well")
+setClassArea(nil)
+check(ui.shards._shown and ui.shardNum._text == "0", "and it returns at 0 shards")
+check(degraded("combathud_render") == 0, "no render failure")
+""")
+
+gcase("gunsight_home_seat_follows_the_shard_piece", r"""
+local ui, gs = gsBoot({ state = nextState({ shards = 3 }) })
+check(effectivelyShown(ui.shards), "the piece is on: the home seat shows")
+gs.SetPiece("shard", false, true)
+check(not effectivelyShown(ui.shards), "the shard piece off hides the home seat")
+gs.SetPiece("shard", true, true)
+check(effectivelyShown(ui.shards), "the shard piece back on shows it")
+setClassArea("lower")
+check(not ui.shards._shown, "the area showing the module hides it with the piece on")
+gs.SetPiece("shard", false, true)
+setClassArea(nil)
+check(not effectivelyShown(ui.shards), "the area emptied but the piece is off: still hidden")
+gs.SetPiece("shard", true, true)
+check(effectivelyShown(ui.shards), "the piece back on: shown")
+""")
+
+gcase("gunsight_home_seat_shows_when_the_areas_seam_is_missing_or_fails", r"""
+local ui = gsBoot({ state = nextState({ shards = 3 }), noAreas = true })
+check(ui.shards._shown and ui.shardNum._text == "3", "no FS.GunsightAreas: the home seat shows")
+check(degraded("combathud_render") == 0 and degraded("combathud_piece_ready") == 0, "no failure logged without the seam")
+local ui2 = gsBoot({ state = nextState({ shards = 3 }), areaThrows = true, area = "lower" })
+check(ui2.shards._shown and ui2.shardNum._text == "3", "a failing AreaOf reads as no module in an area: the home seat shows")
+check(degraded("combathud_render") == 0, "the AreaOf failure is swallowed")
+FS.GunsightAreas = { AreaOf = function() return SS end }
+push(nextState({ shards = 5 }))
+check(ui2.shards._shown and ui2.shardNum._text == "5", "a secret answer reads as no module in an area")
 """)
 
 gcase("gunsight_buff_row_is_one_tile_on_the_anchor_and_grows_as_a_centred_row", r"""
@@ -2895,7 +3008,7 @@ check(not ui.nextTile.holder._shown, "no next cast hides the tile")
 gcase("gunsight_view_out_of_combat_with_no_next_hides_only_the_next_tile", r"""
 local ui, gs = gsBoot({ state = nextState({ next = false, shards = 2 }) })
 check(not ui.nextTile.holder._shown, "ooc with no next: no next tile")
-check(ui.shards._shown and shardGlyphCount(ui) == 2, "shards still show")
+check(ui.shards._shown and ui.shardNum._text == "2", "shards still show")
 check(ui.buffs._shown and ui.buffTiles.demon_armor.holder._shown, "buffs still show")
 check(degraded("combathud_render") == 0, "no cast bar call")
 """)
@@ -2931,22 +3044,21 @@ local k = 1200 / 1440
 sameRect(ui.nextTile.holder, gs.anchors.next, "next tile follows its anchor")
 local w = rectSize(ui.nextTile.holder)
 near(w, GU.NXT * k, "next width after the rescale")
-local glyphs, g1line = ui.shardGlyphs, ui.shardGlyphs[1].line
-checkShardGlyphs(ui, gs.anchors.shards, k, 4, "after the rescale")
-check(shardGlyphCount(ui) == 4, "four glyphs shown after the rescale")
+local glyph, g1line, num = ui.shardGlyph, ui.shardGlyph.line, ui.shardNum
+checkHomeShard(ui, gs.anchors.shards, k, 5, "after the rescale")
 local t1, t2 = rect(ui.buffTiles.demon_armor.holder), rect(ui.buffTiles.pet.holder)
 near(t1.r - t1.l, GU.BUFF * k, "buff tile width after the rescale")
 near(t2.l - t1.r, 6 * k, "buff gap after the rescale")
 check(#ui.nextTile.ring.edges == math.max(1, math.floor(2 * k + 0.5)), "next border thickness follows the scale")
-check(ui.shardMore and ui.shardMore._text == "+1", "the shard count survives the rescale")
+check(ui.shardNum._text == "5", "the shard count survives the rescale")
 local frames = #__frames
 fire("UI_SCALE_CHANGED")
 check(#__frames == frames, "a rescale to the same scale builds nothing")
 local tex = textureCount(ui.shards)
 setScreen(720); fire("UI_SCALE_CHANGED"); setScreen(1440); fire("UI_SCALE_CHANGED")
 check(textureCount(ui.shards) == tex, "a rescale builds no new shard texture, got " .. (textureCount(ui.shards) - tex))
-check(ui.shardGlyphs == glyphs and ui.shardGlyphs[1].line == g1line, "the glyph textures are reused in place")
-checkShardGlyphs(ui, gs.anchors.shards, 1, 4, "back at full scale")
+check(ui.shardGlyph == glyph and ui.shardGlyph.line == g1line and ui.shardNum == num, "the glyph textures and the count are reused in place")
+checkHomeShard(ui, gs.anchors.shards, 1, 5, "back at full scale")
 """)
 
 gcase("gunsight_rescale_reuses_rings_and_glow_hosts_instead_of_building_new_ones", r"""
@@ -3137,33 +3249,23 @@ push(nextState({ inCombat = true, buffsMissing = {} }))
 check(ui.buffTiles.demon_armor.holder._shown and c._alpha == 1, "the next fight shows the warning behind its cover")
 """)
 
-gcase("gunsight_shard_glyphs_carry_a_baked_glow_texture_and_a_rescale_builds_nothing", r"""
+gcase("gunsight_home_glyph_carries_a_baked_glow_texture_and_re_rendering_builds_nothing", r"""
 local ui, gs = gsBoot({ h = 1440, state = nextState({ shards = 2 }) })
-local function glows()
-    local n = 0
-    for _, g in ipairs(ui.shardGlyphs) do if g.glow._shown then n = n + 1 end end
-    return n
-end
-check(glows() == 2, "only the two held shards glow, got " .. glows())
-for _, g in ipairs(ui.shardGlyphs) do
-    check(not g.glow._shown == not g.line._shown, "a glyph's glow follows its line")
-    check(g.glow._parent == ui.shards, "the glows sit on the row, under every glyph")
-end
-push(nextState({ shards = 4 }))
-check(glows() == 4, "four held shards, four glows, got " .. glows())
+local g = ui.shardGlyph
+check(g.glow._shown and g.line._shown, "the held shard glows")
+check(g.glow._parent == ui.shards, "the glow sits on the seat frame, under the glyph")
 local built, glowHosts = textureCount(ui.shards), #__glows
-for i = 1, 5 do push(nextState({ shards = 4 })); push(nextState({ shards = 3 })); push(nextState({ shards = 4 })) end
+local fonts = 0
+for _, f in ipairs(__frames) do if f._kind == "FontString" then fonts = fonts + 1 end end
+for i = 1, 5 do push(nextState({ shards = 4 })); push(nextState({ shards = 12 })); push(nextState({ shards = 3 })) end
 check(textureCount(ui.shards) == built, "re-rendering builds no more textures, got " .. (textureCount(ui.shards) - built) .. " new")
 check(#__glows == glowHosts, "the shards never build an AddOuterGlow host, got " .. (#__glows - glowHosts) .. " new")
-push(nextState({ shards = 1 }))
-check(glows() == 1 and ui.shardGlyphs[1].glow._shown, "one held shard, one glow")
-for i = 2, 4 do
-    for _, name in ipairs({ "glow", "line", "fill", "facet" }) do
-        check(not ui.shardGlyphs[i][name]._shown, "glyph " .. i .. " " .. name .. " hides when the shard is not held")
-    end
-end
+local fonts2 = 0
+for _, f in ipairs(__frames) do if f._kind == "FontString" then fonts2 = fonts2 + 1 end end
+check(fonts2 == fonts, "re-rendering builds no more font strings, got " .. (fonts2 - fonts) .. " new")
+check(ui.shardGlyph == g, "the one glyph is reused")
 setScreen(720); fire("UI_SCALE_CHANGED")
-checkShardGlyphs(ui, gs.anchors.shards, 0.5, 1, "half scale")
+checkHomeShard(ui, gs.anchors.shards, 0.5, 3, "half scale")
 """)
 
 gcase("gunsight_next_ring_glow_is_the_mockups_full_strength_in_cyan_and_gold", r"""

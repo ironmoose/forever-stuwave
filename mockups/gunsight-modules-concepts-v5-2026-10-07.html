@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1920">
+<title>Gunsight Target Side Slots v5</title>
+<style>
+@font-face{font-family:'Mononoki';src:url(../forever-stuwave/Media/Fonts/MononokiNerdFontMono-Bold.ttf) format('truetype');font-weight:100 900;font-style:normal;font-display:block}
+:root{
+  color-scheme:dark;
+  --bg:#0d0620; --fg:#e9e2ff; --muted:#9d93c4; --white:#f3fbff; --text:#e2e8f0;
+  --violet:#a855f7; --cyan:#22e0ff; --pink:#ff2e97; --amber:#ffb648; --green:#39ff14;
+  --track:#0a0416; --line:#3a2168;
+  --edge:rgba(168,85,247,.35);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg)}
+body{width:1920px;padding:28px 30px 40px;color:var(--fg);font-family:'Mononoki',ui-monospace,monospace;font-weight:700;line-height:1.45}
+h1{margin:0;font-size:30px;letter-spacing:.08em;color:var(--white);text-shadow:0 0 18px var(--violet);font-weight:700}
+.sub{margin:6px 0 24px;color:var(--muted);font-size:15px;max-width:1750px}
+.row{display:flex;gap:26px;margin-bottom:26px;align-items:flex-start}
+.scene{position:relative;width:1000px;height:450px;border:1px solid var(--edge);overflow:hidden;flex:none}
+.scene svg{display:block}
+.state{position:absolute;left:10px;top:8px;z-index:2;font-size:12px;letter-spacing:.14em;color:var(--muted);padding:2px 8px;background:rgba(13,6,32,.7);border:1px solid rgba(168,85,247,.3)}
+.state b{color:var(--cyan);font-weight:700}
+.side{width:820px}
+.side .t{font-size:24px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 14px var(--violet);margin:0 0 8px}
+.side .t i{font-style:normal;color:var(--pink)}
+.side .cap{font-size:15px;line-height:1.5;color:var(--muted);margin:0 0 14px}
+.side .cap b{color:var(--white);font-weight:700}
+
+/* ---- /fsconfig style panel ---- */
+.cfg{position:relative;width:560px;filter:drop-shadow(0 0 6px rgba(168,85,247,.5))}
+.cfg-in{background:var(--violet);padding:1px;clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px)}
+.cfg-fill{background:rgba(26,16,37,.96);padding:0 0 10px;clip-path:polygon(5.3px 0,100% 0,100% calc(100% - 5.3px),calc(100% - 5.3px) 100%,0 100%,0 5.3px)}
+.cfg-band{height:18px;line-height:18px;padding:0 12px;font-size:10px;color:var(--violet);background:rgba(168,85,247,.08);border-bottom:1px solid rgba(168,85,247,.3);letter-spacing:.02em}
+.cfg-body{padding:6px 16px 0}
+.grp-h{display:flex;align-items:center;gap:8px;height:20px;margin-top:6px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--violet)}
+.grp-h::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,rgba(168,85,247,.45),rgba(58,33,104,.25))}
+.grp-h .sl{color:var(--line)}
+.r{display:flex;align-items:center;height:28px;gap:10px}
+.r .lab{flex:1;font-size:11px;color:var(--text);white-space:nowrap}
+.r.dim .lab{color:var(--muted)}
+.q{display:inline-block;width:10px;height:10px;margin-left:6px;border-radius:50%;border:1px solid color-mix(in srgb,var(--violet) 70%,var(--line));vertical-align:middle;position:relative;background:var(--track)}
+.q::after{content:"?";position:absolute;inset:0;font-size:7px;line-height:8px;text-align:center;color:var(--muted)}
+.seg{display:flex;gap:2px}
+.sb{position:relative;display:block;height:22px;padding:0 11px;line-height:22px;font-size:10.5px;color:var(--muted);white-space:nowrap}
+.sb::before{content:"";position:absolute;inset:0;background:var(--line);clip-path:polygon(5px 0,100% 0,100% calc(100% - 5px),calc(100% - 5px) 100%,0 100%,0 5px)}
+.sb::after{content:"";position:absolute;inset:1px;background:#170c2a;clip-path:polygon(4.3px 0,100% 0,100% calc(100% - 4.3px),calc(100% - 4.3px) 100%,0 100%,0 4.3px)}
+.sb span{position:relative;z-index:1}
+.sb.on{color:var(--cyan);filter:drop-shadow(0 0 3px rgba(34,224,255,.5))}
+.sb.on::before{background:var(--cyan)}
+.sb.on::after{background:color-mix(in srgb,var(--cyan) 20%,#170c2a)}
+.sb.dis{opacity:.35}
+.tg{position:relative;width:34px;height:16px;flex:none}
+.tg::before{content:"";position:absolute;inset:0;background:var(--line);clip-path:polygon(4px 0,100% 0,100% calc(100% - 4px),calc(100% - 4px) 100%,0 100%,0 4px)}
+.tg::after{content:"";position:absolute;inset:1px;background:var(--track);clip-path:polygon(3.3px 0,100% 0,100% calc(100% - 3.3px),calc(100% - 3.3px) 100%,0 100%,0 3.3px)}
+.tg i{position:absolute;z-index:1;top:4px;bottom:4px;left:4px;width:12px;background:#5b4a8a;clip-path:polygon(3px 0,100% 0,100% calc(100% - 3px),calc(100% - 3px) 100%,0 100%,0 3px)}
+.tg.on{filter:drop-shadow(0 0 3px rgba(34,224,255,.55))}
+.tg.on::before{background:var(--cyan)}
+.tg.on::after{background:color-mix(in srgb,var(--cyan) 14%,var(--track))}
+.tg.on i{left:auto;right:4px;background:var(--cyan)}
+.tgs{font-size:9px;width:20px;text-align:right;color:var(--line);margin-right:6px}
+.tgs.on{color:var(--cyan)}
+
+.dd{position:relative;width:200px;height:24px;flex:none;filter:drop-shadow(0 0 3px rgba(168,85,247,.45))}
+.dd::before{content:"";position:absolute;inset:0;background:var(--violet);clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px)}
+.dd::after{content:"";position:absolute;inset:1px;background:#170c2a;clip-path:polygon(5.3px 0,100% 0,100% calc(100% - 5.3px),calc(100% - 5.3px) 100%,0 100%,0 5.3px)}
+.dd .v{position:absolute;z-index:1;left:10px;top:0;line-height:24px;font-size:11px;color:var(--cyan)}
+.dd .c{position:absolute;z-index:1;right:9px;top:10px;width:0;height:0;border:4px solid transparent;border-top:5px solid var(--cyan)}
+.dd.open .c{border-top:0;border-bottom:5px solid var(--cyan);top:9px}
+.menu{position:absolute;z-index:5;left:343px;top:79px;width:200px;background:var(--violet);padding:1px;filter:drop-shadow(0 0 6px rgba(168,85,247,.5));clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px)}
+.menu-in{background:#120a22;padding:4px;clip-path:polygon(5.3px 0,100% 0,100% calc(100% - 5.3px),calc(100% - 5.3px) 100%,0 100%,0 5.3px)}
+.mi{height:24px;line-height:24px;padding-left:10px;font-size:11px;color:var(--text)}
+.mi.sel{color:var(--cyan);background:rgba(34,224,255,.12)}
+.mi.dis{color:var(--muted);opacity:.4}
+</style>
+</head>
+<body>
+<h1>GUNSIGHT TARGET SIDE, TWO CONFIGURABLE AREAS</h1>
+<div class="sub">Beside the target cast bar the horizon tick splits two areas: upper (My debuffs by default) and lower (class module by default). Level, health and target of target ride on the box as KICK style tags. On your side, My buffs is a flank plate outboard of the next cast tile and above the party frame.</div>
+<div id="root"></div>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <filter id="gl" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.1" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="gls" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b0716"/><stop offset=".62" stop-color="#150d28"/><stop offset="1" stop-color="#1c1030"/></linearGradient>
+    <radialGradient id="glowL" cx="22%" cy="108%" r="55%"><stop offset="0" stop-color="#3a2160"/><stop offset="1" stop-color="#3a2160" stop-opacity="0"/></radialGradient>
+    <radialGradient id="glowR" cx="85%" cy="0%" r="60%"><stop offset="0" stop-color="#1d1840"/><stop offset="1" stop-color="#1d1840" stop-opacity="0"/></radialGradient>
+  </defs>
+</svg>
+
+<script>
+(function(){
+var C={cyan:'#22e0ff',pink:'#ff2e97',violet:'#a855f7',green:'#39ff14',amber:'#ffb648',white:'#f3fbff',muted:'#9d93c4',fg:'#e9e2ff',bg:'#0d0620',gold:'#ffd23f'};
+function hex(h){h=h.replace('#','');return [parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)];}
+function mix(a,b,t){var x=hex(a),y=hex(b);return '#'+[0,1,2].map(function(i){return ('0'+Math.round(x[i]+(y[i]-x[i])*t).toString(16)).slice(-2);}).join('');}
+function ch(x,y,w,h,c){return (x+c)+','+y+' '+(x+w)+','+y+' '+(x+w)+','+(y+h-c)+' '+(x+w-c)+','+(y+h)+' '+x+','+(y+h)+' '+x+','+(y+c);}
+function txt(x,y,s,size,fill,o){o=o||{};
+  return '<text x="'+x+'" y="'+y+'" font-size="'+size+'" fill="'+fill+'" text-anchor="'+(o.a||'start')+'"'+(o.op?' opacity="'+o.op+'"':'')+(o.rot?' transform="rotate('+o.rot+' '+x+' '+y+')"':'')+
+    ' stroke="rgba(13,6,32,.92)" stroke-width="2.6" paint-order="stroke" stroke-linejoin="round">'+s+'</text>';}
+function line(x1,y1,x2,y2,col,op,w,dash){return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="'+(w||1)+'"'+(dash?' stroke-dasharray="'+dash+'"':'')+'/>';}
+function chevPath(cx,ay,hw,d,t){return cx+','+ay+' '+(cx+hw)+','+(ay+d)+' '+(cx+hw)+','+(ay+d+t)+' '+cx+','+(ay+t)+' '+(cx-hw)+','+(ay+d+t)+' '+(cx-hw)+','+(ay+d);}
+function rect(x,y,w,h,fill,op){return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" fill="'+fill+'"'+(op!=null?' fill-opacity="'+op+'"':'')+'/>';}
+
+/* ---------- data: a Warlock's four DoT lanes, profile order ---------- */
+var DOTS=[
+  {ab:'CO',c:'#c4423b',rem:18},
+  {ab:'CA',c:'#d9a521',rem:22},
+  {ab:'IM',c:'#e0702a',rem:2.4},
+  {ab:'SL',c:'#3fb36a',rem:0}      /* absent: dim hollow, recast cue */
+];
+
+/* ---------- geometry (image px, from Gunsight.lua) ---------- */
+var TOP=508,TBOT=752,PITCH=(TBOT-TOP)/10,N=20,CP=(TBOT-TOP)/N;
+var DOT_AX=1239,LANE=[1283,1312,1341,1370];
+var HZ=630;
+
+function chipIcon(x,y,s,d,absent){
+  var c=Math.max(2,Math.round(s/6)),o='';
+  if(absent){
+    return '<polygon points="'+ch(x,y,s,s,c)+'" fill="rgba(13,6,32,.7)" stroke="'+mix(C.muted,'#ffffff',.25)+'" stroke-opacity=".9" stroke-width="1.2"/>'+
+      '<text x="'+(x+s/2)+'" y="'+(y+s/2+s*.18)+'" font-size="'+Math.round(s*.5)+'" fill="'+mix(C.muted,'#ffffff',.25)+'" fill-opacity=".8" text-anchor="middle">'+d.ab+'</text>';
+  }
+  o+='<polygon points="'+ch(x,y,s,s,c)+'" fill="'+mix(d.c,C.bg,.35)+'"/>';
+  o+='<polygon points="'+ch(x,y,s,s*.45,c)+'" fill="'+mix(d.c,'#ffffff',.35)+'" opacity=".3"/>';
+  o+='<polygon points="'+ch(x,y,s,s,c)+'" fill="none" stroke="'+mix(d.c,'#ffffff',.3)+'" stroke-width="1.2"/>';
+  o+='<text x="'+(x+s/2)+'" y="'+(y+s/2+s*.18)+'" font-size="'+Math.round(s*.5)+'" fill="'+C.white+'" text-anchor="middle">'+d.ab+'</text>';
+  return o;
+}
+
+/* ---------- the shared composition ---------- */
+function bar(x0,x1,col,p,out,caretCol){
+  var o='',cx=(x0+x1)/2,k,i;
+  o+='<polygon points="'+ch(x0,500,x1-x0,260,8)+'" fill="rgba(13,6,32,.55)" fill-opacity=".45"/>';
+  o+='<polygon points="'+ch(x0,500,x1-x0,260,8)+'" fill="none" stroke="'+col+'" stroke-width="1.3" filter="url(#gls)"/>';
+  var ex=out<0?x0:x1;
+  for(k=0;k<=10;k++){var ty=TBOT-k*PITCH;o+=line(ex,ty,ex+out*(k===5?10:5),ty,col,.75,1.2);}
+  for(i=0;i<N;i++){
+    var ay=TBOT-(i+1)*CP,lit=(i+1)/N<=p;
+    o+='<polygon points="'+chevPath(cx,ay,10,8,5.5)+'" fill="'+col+'" fill-opacity="'+(lit?1:.2)+'"'+(lit?' filter="url(#gls)"':'')+'/>';
+  }
+  var fy=TBOT-p*(TBOT-TOP);
+  o+='<polygon points="'+chevPath(cx,fy-17,13,9,7)+'" fill="none" stroke="'+caretCol+'" stroke-width="1.8" stroke-linejoin="miter"/>';
+  return o;
+}
+function box(x,y,w,h,col){
+  return '<polygon points="'+ch(x,y,w,h,8)+'" fill="rgba(13,6,32,.85)"/>'+
+    '<polygon points="'+ch(x,y,w,h,8)+'" fill="none" stroke="'+col+'" stroke-width="1.4" filter="url(#gl)"/>';
+}
+function brackets(x,y,w,h,col,op,a){
+  a=a||12;var s='';
+  [[x,y+a,x,y,x+a,y],[x+w-a,y,x+w,y,x+w,y+a],[x,y+h-a,x,y+h,x+a,y+h],[x+w-a,y+h,x+w,y+h,x+w,y+h-a]].forEach(function(q){
+    s+='<polyline points="'+q[0]+','+q[1]+' '+q[2]+','+q[3]+' '+q[4]+','+q[5]+'" fill="none" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="1.6"/>';});
+  return s;
+}
+function party(){
+  var o='',x=606,y=506,w=180,h=230;
+  o+=brackets(x,y,w,h,C.cyan,.6,12);
+  var rows=[['Parker',.82,C.green],['Thalia',.55,C.green],['Brogan',.18,'#ff3b4e'],['Mira',.95,C.green],['Jex',.70,C.green]];
+  var rh=(h-16)/5;
+  rows.forEach(function(r,i){
+    var ry=y+8+i*rh;
+    if(i>0)o+=line(x+8,ry,x+w-8,ry,C.violet,.2,1);
+    o+=txt(x+12,ry+14,r[0],11,i===0?C.cyan:C.white);
+    o+=rect(x+12,ry+20,w-24,5,r[2],.18)+rect(x+12,ry+20,(w-24)*r[1],5,r[2],1);
+    o+=rect(x+12,ry+27,w-24,3,'#4aa8ff',.18)+rect(x+12,ry+27,(w-24)*.7,3,'#4aa8ff',1);
+  });
+  o+='<polygon points="'+ch(578,y+8+2*rh+8,22,22,4)+'" fill="'+mix('#a05030',C.bg,.35)+'" stroke="'+C.amber+'" stroke-width="1.2"/><text x="589" y="'+(y+8+2*rh+8+16)+'" font-size="12" fill="'+C.white+'" text-anchor="middle">P</text>';
+  return o;
+}
+function shard(x,y,w,h,col,filled){
+  var cx=x+w/2;
+  return '<polygon points="'+cx+','+y+' '+(x+w)+','+(y+h*.35)+' '+cx+','+(y+h)+' '+x+','+(y+h*.35)+'" fill="'+col+'" fill-opacity="'+(filled?.28:.06)+'" stroke="'+col+'" stroke-opacity="'+(filled?1:.4)+'" stroke-width="1.2"'+(filled?' filter="url(#gls)"':'')+'/>'+
+    '<line x1="'+cx+'" y1="'+y+'" x2="'+cx+'" y2="'+(y+h)+'" stroke="'+col+'" stroke-opacity="'+(filled?.5:.2)+'"/>';
+}
+function homeShards(){ /* the old seat, under your cast bar */
+  var o='',n=arguments.length?arguments[0]:3;
+  o+=shard(805,763,9.5,17,C.violet,n>0);
+  o+=txt(826,777,String(n),14,n>0?C.white:C.muted,{a:'end'});
+  return o;
+}
+function buffTile(){
+  return '<polygon points="'+ch(801.6,785.3,19,19,4)+'" fill="'+mix('#2f8f5a',C.bg,.5)+'" stroke="#5fe0a0" stroke-width="1.2"/><text x="811" y="799" font-size="11" fill="'+C.white+'" text-anchor="middle">B</text>';
+}
+function proc(){
+  var o='';
+  o+=line(1154,590,1154,670,C.amber,.95,2)+line(1147,590,1161,590,C.amber,.9,1.2)+line(1147,670,1161,670,C.amber,.9,1.2);
+  o+='<polygon points="'+ch(1145,566,18,18,3)+'" fill="'+mix('#c4423b',C.bg,.4)+'" stroke="'+C.amber+'" stroke-width="1.2"/><text x="1154" y="579" font-size="10" fill="'+C.white+'" text-anchor="middle">BL</text>';
+  return o;
+}
+/* a KICK style tag: the same cut corners, outline in the box colour, 15 high */
+function tag(x,y,w,html,col){
+  return '<polygon points="'+ch(x,y,w,15,5)+'" fill="rgba(13,6,32,.95)" stroke="'+C.pink+'" stroke-width="1.3" filter="url(#gls)"/>'+
+    '<text x="'+(x+w/2)+'" y="'+(y+11)+'" font-size="11" fill="'+col+'" text-anchor="middle">'+html+'</text>';
+}
+function base(S){
+  var o='',X=480,Y=380,W=1000,H=450;
+  var pal=S.cls==='pl';
+  o+=rect(X,Y,W,H,'url(#sky)')+rect(X,Y,W,H,'url(#glowL)')+rect(X,Y,W,H,'url(#glowR)');
+  o+='<g fill="rgba(120,96,190,.16)" stroke="'+C.violet+'" stroke-opacity=".35" stroke-dasharray="4 4" stroke-width="1">'+
+     '<circle cx="995" cy="540" r="24"/><rect x="953" y="570" width="84" height="100" rx="20"/>'+
+     '<rect x="962" y="664" width="30" height="88" rx="8"/><rect x="998" y="664" width="30" height="88" rx="8"/>'+
+     '<rect x="926" y="576" width="24" height="86" rx="10"/><rect x="1040" y="576" width="24" height="86" rx="10"/></g>';
+  o+='<ellipse cx="995" cy="752" rx="112" ry="26" fill="rgba(80,70,230,.12)" stroke="#5b57e8" stroke-opacity=".6" stroke-width="2"/>';
+  o+=line(838,HZ,1150,HZ,C.violet,.3,1,'6 6');
+  o+=party();
+  /* your side */
+  o+=bar(796,826,C.cyan,.58,-1,C.white);
+  o+=box(724,424,114,56,C.cyan);
+  o+=txt(731,447,pal?'HOLY LIGHT':'SHADOW BOLT',13,C.white)+txt(731,469,'1.4 / 2.5',18,C.cyan);
+  o+='<polygon points="'+ch(844,438,28,28,5)+'" fill="rgba(13,6,32,.9)" stroke="'+C.cyan+'" stroke-width="1.3"/><text x="858" y="457" font-size="13" fill="'+C.cyan+'" text-anchor="middle">'+(pal?'HL':'SB')+'</text>';
+  if(S.next!==false){o+='<polygon points="'+ch(672,430,44,44,6)+'" fill="rgba(13,6,32,.85)" stroke="'+C.cyan+'" stroke-opacity=".8" stroke-width="1.2"/><text x="694" y="458" font-size="13" fill="'+C.cyan+'" text-anchor="middle">NX</text>';}
+  if(!pal)o+=buffTile();
+  if(S.shardsHome)o+=homeShards();
+  /* target side */
+  o+=bar(1164,1194,C.pink,.45,1,C.pink);
+  o+=box(1152,416,114,64,C.pink);
+  o+=txt(1159,436,'Kobold Miner',14,C.white);
+  o+=rect(1159,440,100,3,'#39ff14',.2)+rect(1159,440,62,3,'#39ff14')+rect(1159,445,100,2,'#4aa8ff',.2)+rect(1159,445,70,2,'#4aa8ff');
+  o+=line(1159,453,1259,453,C.pink,.4,1.2)+txt(1159,469,'Mining',14,C.pink);
+  o+=tag(1226,408,36,'KICK',C.pink);
+  o+='<polygon points="'+ch(1118,438,28,28,5)+'" fill="rgba(13,6,32,.9)" stroke="'+C.pink+'" stroke-width="1.3"/><text x="1132" y="457" font-size="13" fill="'+C.pink+'" text-anchor="middle">PK</text>';
+  if(!pal)o+=proc();
+  return o;
+}
+
+/* ---------- box tags: top left, and the bottom edge ---------- */
+function tags(){
+  var o='';
+  o+=tag(1153,408,68,'L62 <tspan fill="'+C.gold+'">ELITE</tspan>',C.white);   /* top edge, left of KICK */
+  o+=tag(1156,473,32,'62%',C.green);                                         /* bottom edge, left */
+  o+=tag(1193,473,69,'ToT <tspan fill="'+C.cyan+'">KERRA</tspan>',C.white);   /* bottom edge, right */
+  return o;
+}
+
+
+/* ---------- my buffs: the concept B flank plate on your side, outboard of the next cast tile ---------- */
+var BUFFS_WL=[
+  {k:'DA',c:'#b2452e',t:'28m'},   /* Demon Armor */
+  {k:'UB',c:'#3f9d8a',t:'12m'},   /* Unending Breath */
+  {k:'WF',c:'#d9a521',t:'38m'},   /* Well Fed (food) */
+  {k:'AI',c:'#4aa8ff',t:'47m',party:true}  /* Arcane Intellect, from a party member */
+];
+var BUFFS_PL=[
+  {k:'BK',c:'#d97ab5',t:'4m'},
+  {k:'DV',c:'#d9a521',t:'AUR'},
+  {k:'WF',c:'#d9a521',t:'38m'},
+  {k:'AI',c:'#4aa8ff',t:'47m',party:true}
+];
+function buffs(pal){
+  var o='',L=pal?BUFFS_PL:BUFFS_WL,x0=498,w=164;
+  o+='<polygon points="'+ch(x0,424,w,56,6)+'" fill="rgba(13,6,32,.7)"/><polygon points="'+ch(x0,424,w,56,6)+'" fill="none" stroke="'+C.cyan+'" stroke-opacity=".75" stroke-width="1.2" filter="url(#gls)"/>';
+  L.forEach(function(d,i){
+    var x=x0+6+i*38;
+    o+='<g>'+chipIcon(x+4,430,24,{ab:d.k,c:d.c},false)+'</g>';
+    if(d.party)o+='<circle cx="'+(x+28)+'" cy="432" r="3.2" fill="'+C.cyan+'" stroke="'+C.bg+'" stroke-width="1"/>';
+    o+=txt(x+16,470,d.t,12,C.white,{a:'middle'});
+  });
+  return o;
+}
+
+/* ---------- slot content ---------- */
+function slotDivider(x1){return line(1204,HZ,1227,HZ,C.violet,.85,1.2)+line(1227,HZ,x1,HZ,C.violet,.4,1);}
+
+/* upper slot, horizontal rows: icon, time, drain bar, one per tick gap */
+function dotsH(list,lower){
+  list=list||DOTS;
+  var o='',k,ytop=lower?HZ:TOP,k0=lower?0:5,k1=lower?4:10;
+  for(k=k0;k<=k1;k++){var ty=TBOT-k*PITCH;
+    if(k<10)o+=line(1204,ty,1213,ty,C.pink,.45,1);
+    o+=line(1213,ty,1344,ty,C.violet,k===5?.55:.12,1);}
+  list.forEach(function(d,j){
+    var cy=ytop+PITCH*(j+.5),abs=d.rem<=0,band=!abs&&d.rem<=3,col=band?C.amber:mix(d.c,'#ffffff',.25);
+    o+=chipIcon(1220,cy-10,20,d,abs);
+    if(d.n>1)o+=txt(1332,cy+4,'x'+d.n,11,C.white);
+    if(abs){o+=txt(1246,cy+4.5,'--',13,C.muted,{op:.7});o+=rect(1274,cy-2,52,4,C.muted,.18);}
+    else{
+      o+=txt(1246,cy+4.5,(d.rem<3?d.rem.toFixed(1):Math.round(d.rem))+'s',13,band?C.amber:C.white);
+      o+=rect(1274,cy-2,52,4,col,.2)+rect(1274,cy-2,52*d.rem/30,4,col);
+    }
+  });
+  return o;
+}
+/* the Paladin's own debuffs besides Judgement (the seal module already carries that one) */
+var PDEB=[
+  {ab:'HV',c:'#d9a521',rem:12,n:5},   /* Holy Vengeance, 5 stacks */
+  {ab:'HJ',c:'#e0b030',rem:4}         /* Hammer of Justice */
+];
+/* compact Seal module: one half height area, 190 x 114. y0 is the area top (500 upper, 632 lower) */
+function sealModule(y0){
+  var o='',x=1220,w=188,col=C.gold,seal=21,jud=14,i;
+  /* row 1: active seal icon, name and the time left */
+  o+='<polygon points="'+ch(x,y0+6,28,28,5)+'" fill="'+mix(C.bg,col,.3)+'"/><polygon points="'+ch(x,y0+6,28,28,5)+'" fill="none" stroke="'+col+'" stroke-width="1.4" filter="url(#gls)"/>';
+  o+=txt(x+14,y0+25,'SV',12,C.white,{a:'middle'});
+  o+=txt(x+36,y0+19,'VENGEANCE',12,C.white);
+  o+=txt(x+36,y0+31,'SEAL ACTIVE',10,C.muted);
+  o+=txt(x+w,y0+27,seal+'s',20,col,{a:'end'});
+  /* row 2: drain bar, 0 to 30 s left to right, amber reseal band on the 0 to 3 s end */
+  var by=y0+44,bh=12,bw=w*(30/30),bx=x;
+  o+=rect(bx,by,bw,bh,'#0a0416',.9);
+  o+=rect(bx,by,bw*3/30,bh,C.amber,.28);
+  o+=rect(bx,by,bw*seal/30,bh,col,.9);
+  o+=rect(bx+bw*seal/30-2,by-2,2,bh+4,'#ffffff',.95);
+  o+='<rect x="'+bx+'" y="'+by+'" width="'+bw+'" height="'+bh+'" fill="none" stroke="'+col+'" stroke-opacity=".6"/>';
+  o+=line(bx+bw*3/30,by-3,bx+bw*3/30,by+bh+3,C.amber,.85,1,'3 2');
+  for(i=0;i<=6;i++){var tx=bx+bw*i/6;o+=line(tx,by+bh,tx,by+bh+(i%2===0?5:3),C.violet,.7,1);}
+  [0,15,30].forEach(function(v){o+=txt(bx+bw*v/30,by+bh+16,String(v),10,C.fg,{a:v===0?'start':v===30?'end':'middle',op:.85});});
+  o+=txt(bx+bw*3/30+30,by+bh+16,'RESEAL',10,C.amber,{a:'middle',op:.9});
+  /* row 3: the Judgement lane, a chip and a 0 to 40 s drain with the time on the target */
+  var jy=y0+90;
+  o+='<polygon points="'+ch(x,jy,20,20,4)+'" fill="'+mix(C.bg,'#d9a521',.4)+'" stroke="'+col+'" stroke-width="1.2"/><text x="'+(x+10)+'" y="'+(jy+14)+'" font-size="12" fill="'+C.white+'" text-anchor="middle">J</text>';
+  o+=rect(x+30,jy+7,w-72,5,col,.2)+rect(x+30,jy+7,(w-72)*jud/40,5,col);
+  o+=txt(x+w,jy+15,jud+'s',13,C.white,{a:'end'});
+  return o;
+}
+
+/* upper slot, vertical: the DoT time axis, compressed into the upper half (0 to 30 s over 112 px) */
+var AXT=504,AXB=616;
+function axY(s){return AXB-s/30*(AXB-AXT);}
+function dotsV(){
+  /* pulled in 19 px: the axis line sits at 1220, the same left inset as the horizontal rows' icons;
+     ticks point inward (right) and the labels sit just right of the long ticks */
+  var o='',s,i,yb=axY(3),AX=1220,END=1368,LV=LANE.map(function(x){return x-19;});
+  o+=txt(1384,497,'MY DEBUFFS',10,C.violet,{a:'end',op:.9});
+  o+=rect(AX,yb,END-AX,AXB-yb,C.amber,.16);
+  o+=line(AX,yb,END,yb,C.amber,.75,1,'5 4')+line(AX,AXB,END,AXB,C.amber,.95,1.5);
+  o+=txt(END+13,(yb+AXB)/2+3,'REFRESH',9,C.amber,{a:'middle',op:.8,rot:-90});
+  for(i=0;i<4;i++)o+=line(LV[i],AXT,LV[i],AXB,C.violet,.3,1,'2 6');
+  o+=line(AX,AXT-4,AX,AXB+4,C.violet,.85,1.2);
+  for(s=0;s<=30;s++){var y=axY(s),maj=s%5===0;
+    o+=line(AX,y,AX+(maj?10:5),y,C.violet,maj?.7:.45,1);
+    if(maj)o+=txt(AX+14,y+4,String(s),11,C.fg,{op:.9});}
+  DOTS.forEach(function(d,i){
+    var x=LV[i],abs=d.rem<=0,band=!abs&&d.rem<=3,y=abs?AXB:axY(d.rem),col=band?C.amber:C.violet;
+    if(abs){o+=chipIcon(x-12,y-12,24,d,true);return;}
+    o+=line(x,AXB,x,Math.min(AXB,y+12),col,.25,7)+line(x,AXB,x,Math.min(AXB,y+12),col,1,2.6);
+    o+='<polygon points="'+ch(x-12,y-12,24,24,5)+'" fill="'+mix(C.bg,d.c,.4)+'"/>'+
+       '<polygon points="'+ch(x-12,y-12,24,24,5)+'" fill="none" stroke="'+col+'" stroke-width="1.4" filter="url(#gls)"/>'+
+       '<text x="'+x+'" y="'+(y+4.5)+'" font-size="12" fill="'+(band?C.amber:C.white)+'" text-anchor="middle">'+d.ab+'</text>';
+  });
+  return o;
+}
+/* lower slot, Warlock class module: soul shards, then the buff reminder */
+function shardsSlot(){
+  var o='',i;
+  o+=txt(1220,646,'SOUL SHARDS',10,C.violet,{op:.85});
+  o+=shard(1224,654,16,30,C.violet,true);
+  o+=txt(1252,681,'3',32,C.white);
+  o+=line(1220,694,1344,694,C.violet,.2,1);
+  o+='<polygon points="'+ch(1222,702,22,22,4)+'" fill="'+mix('#2f8f5a',C.bg,.5)+'" stroke="#5fe0a0" stroke-width="1.2"/><text x="1233" y="718" font-size="12" fill="'+C.white+'" text-anchor="middle">B</text>';
+  o+=txt(1252,717,'MISSING',11,C.amber,{op:.95});
+  return o;
+}
+/* Paladin class module: the Seal Chamber, 164 x 260, takes both areas */
+function chamber(){
+  var o='',x=1239,y=500,w=164,h=260,col=C.gold,s;
+  var sy=function(v){return TBOT-v/30*(TBOT-TOP);};
+  o+=txt(1403,497,'SEAL',10,col,{a:'end',op:.9});
+  o+='<polygon points="'+ch(x,y,w,h,8)+'" fill="rgba(13,6,32,.7)"/><polygon points="'+ch(x,y,w,h,8)+'" fill="none" stroke="'+col+'" stroke-width="1.3" filter="url(#gls)"/>';
+  o+='<radialGradient id="wash" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="'+col+'" stop-opacity=".18"/><stop offset="1" stop-color="'+col+'" stop-opacity="0"/></radialGradient>';
+  o+='<circle cx="1349" cy="612" r="70" fill="url(#wash)"/>';
+  for(s=0;s<=30;s++){var yy=sy(s);o+=line(x,yy,x+(s%5===0?8:4),yy,C.violet,.7,1);if(s%5===0&&s>0&&s<30)o+=txt(x+11,yy+4,String(s),11,C.fg,{op:.8});}
+  var yb=sy(3);
+  o+=rect(x+1,yb,w-2,TBOT-yb,C.amber,.16)+line(x+1,yb,x+w-1,yb,C.amber,.7,1,'5 4');
+  o+=txt(1349,(yb+TBOT)/2+3.5,'RESEAL',10,C.amber,{a:'middle',op:.6});
+  /* drain tube */
+  o+=rect(1272,TOP,12,TBOT-TOP,'#0a0416',.9);
+  o+=rect(1272,sy(21),12,TBOT-sy(21),col,.9);
+  o+='<rect x="1272" y="'+TOP+'" width="12" height="'+(TBOT-TOP)+'" fill="none" stroke="'+col+'" stroke-opacity=".6"/>';
+  o+=line(1269,sy(21),1287,sy(21),'#ffffff',.9,2);
+  /* lens + glyph */
+  o+='<circle cx="1349" cy="612" r="40" fill="none" stroke="'+col+'" stroke-width="1.6" filter="url(#gls)"/><circle cx="1349" cy="612" r="30" fill="none" stroke="'+col+'" stroke-opacity=".4" stroke-dasharray="3 5"/>';
+  o+=txt(1349,619,'SoC',20,col,{a:'middle'});
+  o+=txt(1349,556,'21s',20,col,{a:'middle'});
+  o+=txt(1349,684,'COMMAND',12,C.white,{a:'middle'});
+  o+=txt(1349,700,'SEAL ACTIVE',10,C.muted,{a:'middle'});
+  /* judgement lane */
+  o+=line(1390,TOP,1390,TBOT,C.violet,.3,1,'2 6');
+  o+='<polygon points="'+ch(1381,sy(14*.75)-9,18,18,4)+'" fill="'+mix(C.bg,'#d9a521',.4)+'" stroke="'+col+'" stroke-width="1.2"/><text x="1390" y="'+(sy(14*.75)+4)+'" font-size="11" fill="'+C.white+'" text-anchor="middle">J</text>';
+  return o;
+}
+/* empty-slot outlines, drawn only when an area is empty */
+function emptySlot(y,h,label){
+  return '<rect x="1213" y="'+y+'" width="202" height="'+h+'" fill="rgba(168,85,247,.04)" stroke="'+C.violet+'" stroke-opacity=".5" stroke-dasharray="6 4"/>'+
+    txt(1314,y+h/2+4,label,11,C.muted,{a:'middle',op:.8});
+}
+
+/* ---------- scene builders per state ---------- */
+var STATES=[
+  {id:'a',cls:'wl',style:'h',upper:'dots',lower:'class',tags:true,buffs:true,next:true,
+   state:'WARLOCK, HORIZONTAL DOTS',
+   name:'WARLOCK, HORIZONTAL DOTS',
+   cap:'<b>Upper area holds the My debuffs rows, lower area holds the soul shard count (one glyph, one number, about 60 px) and the buff reminder, split at the horizon tick.</b><br>Rows follow the ruler, one per tick gap. The shards leave their seat under your cast bar. My buffs sits left of the next cast tile.'},
+  {id:'b',cls:'wl',style:'v',upper:'dots',lower:'class',tags:true,buffs:true,next:true,
+   state:'WARLOCK, VERTICAL DOTS',
+   name:'WARLOCK, VERTICAL DOTS',
+   cap:'<b>Same two areas, but the upper one runs the DoT time axis: the vertical style, chips slide down the 0 to 30 s axis toward the amber refresh band.</b><br>Tradeoff: the scale shrinks to 112 px, about 3.7 px a second, so it reads coarser than the full height axis. The cyan pip on Arcane Intellect marks a buff from a party member.'},
+  {id:'c1',cls:'pl',style:'h',upper:'seals',lower:'dots',tags:true,buffs:true,next:true,openUpper:true,
+   state:'PALADIN, SEALS UPPER',
+   name:'PALADIN, SEALS IN THE UPPER AREA',
+   cap:'<b>The Seal module is half height, so it fits either area: seal and time, a 0 to 30 s drain with the amber reseal band, and the Judgement lane.</b><br>The lower area is the same My debuffs module, horizontal style: Holy Vengeance x5 and Hammer of Justice. Judgement stays in the seal module.'},
+  {id:'c2',cls:'pl',style:'h',upper:'dots',lower:'seals',tags:true,buffs:true,next:true,
+   state:'PALADIN, SEALS LOWER',
+   name:'PALADIN, SEALS IN THE LOWER AREA',
+   cap:'<b>Same modules, swapped: My debuffs above the horizon tick, the Seal module below it. The player picks the order.</b><br>Tradeoff: 190 x 114 px on a 128 px area. The drain reads left to right, so it is shorter than the old 260 px chamber.'},
+  {id:'d',cls:'wl',style:'h',upper:'empty',lower:'empty',tags:false,buffs:false,next:false,zeroInset:true,shardsHome:true,
+   state:'ALL OPTIONAL MODULES OFF',
+   name:'ALL OFF',
+   cap:'<b>Both areas empty, no tags, no buffs plate. The box is exactly today\'s box, and the shard count sits back in its seat under your cast bar. The inset shows 0 shards.</b><br>Dashed outlines show the two areas here only, they never draw in game.'}
+];
+
+function scene(S){
+  var o=base(S);
+  if(S.upper!=='empty'||S.lower!=='empty'||true){}
+  if(S.upper==='dots'||S.upper==='class'){o+=slotDivider(S.style==='v'?1384:1344);}
+  if(S.cls==='wl'){
+    if(S.upper==='dots')o+=S.style==='v'?dotsV():dotsH();
+    if(S.lower==='class')o+=shardsSlot();
+    if(S.upper==='empty')o+=emptySlot(500,128,'UPPER AREA, EMPTY');
+    if(S.lower==='empty')o+=emptySlot(632,128,'LOWER AREA, EMPTY');
+  }else{
+    o+=slotDivider(1410);
+    if(S.upper==='seals')o+=sealModule(500);
+    if(S.upper==='dots')o+=dotsH(PDEB,false);
+    if(S.lower==='seals')o+=sealModule(632);
+    if(S.lower==='dots')o+=dotsH(PDEB,true);
+  }
+  if(S.zeroInset){o+='<rect x="1213" y="772" width="202" height="44" fill="rgba(168,85,247,.04)" stroke="'+C.violet+'" stroke-opacity=".4"/>'+txt(1221,787,'AT 0 SHARDS',10,C.muted,{op:.85})+shard(1224,792,10,19,C.violet,false)+txt(1244,808,'0',20,C.muted);}
+  if(S.tags)o+=tags();
+  if(S.buffs)o+=buffs(S.cls==='pl');
+  return '<div class="scene"><div class="state">'+S.state.replace(/^(.*?)(,|$)/,'<b>$1</b>$2')+'</div>'+
+    '<svg width="1000" height="450" viewBox="480 380 1000 450" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg></div>';
+}
+
+/* ---------- /fsconfig style panel ---------- */
+function seg(opts,sel,disabled){
+  var s='<div class="seg">';
+  opts.forEach(function(t,i){s+='<span class="sb'+(i===sel?' on':'')+((disabled&&disabled.indexOf(i)>=0)?' dis':'')+'"><span>'+t+'</span></span>';});
+  return s+'</div>';
+}
+function tg(on){return '<span class="tgs'+(on?' on':'')+'">'+(on?'ON':'OFF')+'</span><span class="tg'+(on?' on':'')+'"><i></i></span>';}
+/* dropdown, UI.Dropdown style: 200 x 24, violet ring, cut corners, cyan value, caret on the right */
+var LABEL={dots:'My debuffs',class:'Shards',seals:'Seals',empty:'Empty'};
+function dd(value,open){return '<div class="dd'+(open?' open':'')+'"><span class="v">'+LABEL[value]+'</span><span class="c"></span></div>';}
+/* open menu lists every module; options the class cannot use are greyed, not removed */
+function menu(S,cur){
+  var pal=S.cls==='pl';
+  var all=[['dots','My debuffs',true],['class','Shards',!pal],['seals','Seals',pal],['empty','Empty',true]];
+  var h='<div class="menu"><div class="menu-in">';
+  all.forEach(function(m){h+='<div class="mi'+(m[0]===cur?' sel':'')+(m[2]?'':' dis')+'">'+m[1]+'</div>';});
+  return h+'</div></div>';
+}
+function cfg(S){
+  var pal=S.cls==='pl';
+  var up=dd(S.upper==='class'?'class':S.upper,S.openUpper);
+  var lo=dd(S.lower==='class'?'class':S.lower,false);
+  var dotsOn=S.upper==='dots'||S.lower==='dots';
+  var st=seg(['Horizontal','Vertical'],S.style==='v'?1:0,dotsOn?null:[0,1]);
+  var h='<div class="cfg"><div class="cfg-in"><div class="cfg-fill"><div class="cfg-band">stuwave://config / gunsight hud</div><div class="cfg-body">';
+  h+='<div class="grp-h"><span class="sl">//</span> Target side<span class="q"></span></div>';
+  h+='<div class="r"><div class="lab">Upper area</div>'+up+'</div>';
+  h+='<div class="r"><div class="lab">Lower area</div>'+lo+'</div>';
+  h+='<div class="r'+(dotsOn?'':' dim')+'"><div class="lab">Debuff style<span class="q"></span></div>'+st+'</div>';
+  h+='<div class="grp-h"><span class="sl">//</span> Target box tags<span class="q"></span></div>';
+  h+='<div class="r"><div class="lab">Level and class</div>'+tg(S.tags)+'</div>';
+  h+='<div class="r"><div class="lab">Health percent</div>'+tg(S.tags)+'</div>';
+  h+='<div class="r"><div class="lab">Target of target</div>'+tg(S.tags)+'</div>';
+  h+='<div class="grp-h"><span class="sl">//</span> Player side<span class="q"></span></div>';
+  h+='<div class="r"><div class="lab">My buffs</div>'+tg(S.buffs)+'</div>';
+  h+='<div class="r"><div class="lab">Next cast</div>'+tg(S.next)+'</div>';
+  h+='</div></div></div>';
+  if(S.openUpper)h+=menu(S,S.upper);
+  h+='</div>';
+  return h;
+}
+
+var html='';
+STATES.forEach(function(S){
+  html+='<div class="row">'+scene(S)+'<div class="side"><div class="t"><i>'+S.id.toUpperCase()+'</i> '+S.name+'</div><div class="cap">'+S.cap+'</div>'+cfg(S)+'</div></div>';
+});
+document.getElementById('root').innerHTML=html;
+})();
+</script>
+</body>
+</html>

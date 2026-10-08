@@ -704,14 +704,14 @@ end
 -------------------------------------------------------------------------------
 
 local PIECE_LABELS = {
-    you = "Your cast bar", tgt = "Target cast bar", next = "Next cast tile", dot = "DoT time axis",
-    shard = "Soul shards", prc = "Proc posts", buff = "Buff reminders", party = "Party frames",
+    you = "Your cast bar", tgt = "Target cast bar", next = "Next cast", dot = "Target side areas",
+    shard = "Soul shards", prc = "Proc posts", buff = "Buff reminders", party = "Party frames", mybuffs = "My buffs",
 }
 
 function T.every_gunsight_piece_has_a_label_and_a_row()
     local W = boot()
     W.Open("gunsight")
-    eq(#FS.Gunsight.PIECES, 8)
+    eq(#FS.Gunsight.PIECES, 9)
     for _, key in ipairs(FS.Gunsight.PIECES) do
         yes(PIECE_LABELS[key], "no label for piece " .. key)
         yes(row(PIECE_LABELS[key]), "no row for " .. key)
@@ -725,7 +725,7 @@ function T.gunsight_page_has_no_aura_rows_yet()
     W.Open("gunsight")
     local page = row("Gunsight HUD").parent
     for _, t in ipairs(texts(page)) do
-        yes(not t:lower():find("aura") and not t:lower():find("debuff"), "unbuilt setting shown: " .. t)
+        yes(not t:lower():find("aura"), "unbuilt setting shown: " .. t)
     end
 end
 
@@ -881,6 +881,157 @@ function T.fsgun_reports_a_read_only_config()
     eq(FS.Gunsight.IsPieceOn("shard"), true)
 end
 
+
+-- ---- the target side, target box tags and player side groups (mockups/gunsight-modules-concepts-v7-2026-10-08.html) ----
+
+local TAG_KEYS = { level = "gunsight.tags.level", health = "gunsight.tags.health", tot = "gunsight.tags.tot" }
+local function withTags()
+    FS.GunsightTags = { SETTINGS = {
+        level = { key = TAG_KEYS.level }, health = { key = TAG_KEYS.health }, tot = { key = TAG_KEYS.tot },
+    } }
+    for _, key in pairs(TAG_KEYS) do FS.Config.RegisterDefault(key, true) end
+end
+local function yOf(label) return -row(label).points[1].y end
+local function headerY(text)
+    for _, o in ipairs(ALL) do
+        if o.kind == "FontString" and o:IsVisible() and o:GetText() == text then return -o.parent.points[1].y end
+    end
+end
+local function tipFor(headerText)
+    for _, o in ipairs(ALL) do
+        if o.kind == "FontString" and o:IsVisible() and o:GetText() == headerText then
+            for _, sib in ipairs(ALL) do if sib.fsTip and sib.parent == o.parent then return sib.fsTip end end
+        end
+    end
+end
+local function openMenu(label)
+    local b = row(label).control
+    b.scripts.OnClick(b)
+    return menu()
+end
+local function menuTexts()
+    local out = {}
+    for _, t in ipairs(texts(menu())) do out[#out + 1] = t end
+    return table.concat(out, ",")
+end
+
+function T.the_gunsight_page_has_the_three_target_and_player_groups_in_the_mockups_order()
+    local W = boot({ preWindow = withTags })
+    W.Open("gunsight")
+    local order = {
+        headerY("TARGET SIDE"), yOf("Upper area"), yOf("Lower area"),
+        headerY("TARGET BOX TAGS"), yOf("Level and class"), yOf("Health percent"), yOf("Target of target"),
+        headerY("PLAYER SIDE"), yOf("My buffs"), yOf("Next cast"),
+    }
+    for i = 1, #order do yes(order[i], "missing row or header number " .. i) end
+    for i = 2, #order do yes(order[i] > order[i - 1], "order broken at item " .. i) end
+    yes(headerY("PIECES") > order[#order], "the pieces list follows the new groups")
+end
+
+function T.next_cast_moved_out_of_the_pieces_list()
+    local W = boot({ preWindow = withTags })
+    W.Open("gunsight")
+    no(row("Next cast tile"), "the old pieces row is gone")
+    yes(yOf("Next cast") > headerY("PLAYER SIDE") and yOf("Next cast") < headerY("PIECES"), "Next cast sits in Player side")
+    for _, label in ipairs({ "Your cast bar", "Target cast bar", "Soul shards", "Proc posts", "Buff reminders", "Party frames" }) do
+        yes(yOf(label) > headerY("PIECES"), label .. " stays in the pieces list")
+    end
+    yes(row("Target side areas"), "the dot piece row stays, renamed for what it now switches")
+end
+
+function T.player_side_toggles_write_their_piece_keys()
+    local W = boot({ preWindow = withTags })
+    W.Open("gunsight")
+    yes(row("My buffs").control.fsChecked and row("Next cast").control.fsChecked, "both default on")
+    press("My buffs")
+    eq(FS.Config.Get("gunsight.pieces.mybuffs"), false)
+    eq(FS.Gunsight.IsPieceOn("mybuffs"), false)
+    press("Next cast")
+    eq(FS.Config.Get("gunsight.pieces.next"), false)
+    eq(FS.Gunsight.IsPieceOn("next"), false)
+    no(row("My buffs").control.fsChecked or row("Next cast").control.fsChecked, "the toggles repaint")
+end
+
+function T.target_box_tag_toggles_write_the_gunsight_tags_settings_keys()
+    local W = boot({ preWindow = withTags })
+    W.Open("gunsight")
+    for label, key in pairs({ ["Level and class"] = TAG_KEYS.level, ["Health percent"] = TAG_KEYS.health, ["Target of target"] = TAG_KEYS.tot }) do
+        yes(row(label).control.fsChecked, label .. " opens on")
+        press(label)
+        eq(FS.Config.Get(key), false, label .. " writes " .. key)
+        no(row(label).control.fsChecked, label .. " repaints")
+    end
+end
+
+function T.the_tags_group_is_absent_without_the_tags_module()
+    local W = boot()
+    W.Open("gunsight")
+    no(row("Level and class"), "no tag rows without FS.GunsightTags")
+    no(hasText(win(), "TARGET BOX TAGS"), "no tags header")
+    yes(row("Upper area") and row("My buffs"), "the other groups still build")
+end
+
+function T.the_area_dropdowns_show_the_default_labels_and_list_the_four_modules_in_order()
+    local W = boot({ preWindow = withTags })
+    W.Open("gunsight")
+    eq(row("Upper area").control.fsLabel:GetText(), "Target Debuffs Horizontal")
+    eq(row("Lower area").control.fsLabel:GetText(), "Class Module")
+    openMenu("Upper area")
+    eq(menuTexts(), "Target Debuffs Horizontal,Target Debuffs Vertical,Class Module,Empty")
+end
+
+function T.picking_in_an_area_dropdown_writes_the_key_and_swaps_with_the_other_area()
+    local W = boot({ preWindow = withTags })
+    W.Open("gunsight")
+    openMenu("Upper area")
+    click("Class Module", menu())
+    eq(FS.Gunsight.GetArea("upper"), "class")
+    eq(FS.Gunsight.GetArea("lower"), "debuffsH", "the lower area took the old upper module")
+    eq(FS.Config.Get("gunsight.target.upper"), "class")
+    eq(row("Upper area").control.fsLabel:GetText(), "Class Module")
+    eq(row("Lower area").control.fsLabel:GetText(), "Target Debuffs Horizontal", "the other dropdown repaints at once")
+    openMenu("Lower area")
+    click("Target Debuffs Vertical", menu())
+    eq(FS.Config.Get("gunsight.target.lower"), "debuffsV")
+    eq(row("Lower area").control.fsLabel:GetText(), "Target Debuffs Vertical")
+    openMenu("Lower area")
+    click("Empty", menu())
+    eq(FS.Config.Get("gunsight.target.lower"), "empty")
+    eq(row("Lower area").control.fsLabel:GetText(), "Empty")
+end
+
+function T.the_area_dropdowns_follow_a_profile_switch()
+    local W = boot({ preWindow = withTags })
+    W.Open("gunsight")
+    FS.Config.NewProfile("Raid")
+    FS.Config.SetActiveProfile("Raid")
+    FS.Config.Set("gunsight.target.upper", "empty")
+    eq(row("Upper area").control.fsLabel:GetText(), "Empty")
+    FS.Config.SetActiveProfile("Default")
+    eq(row("Upper area").control.fsLabel:GetText(), "Target Debuffs Horizontal")
+end
+
+function T.the_group_headers_carry_the_mockups_tooltips()
+    local W = boot({ preWindow = withTags })
+    W.Open("gunsight")
+    local side = tipFor("TARGET SIDE")
+    yes(side, "a ? tip on Target side")
+    yes(side:find("only the debuffs you applied", 1, true), "tip says what Target debuffs shows")
+    yes(side:find("soul shards, seals, combo points", 1, true), "tip says what the Class Module shows")
+    yes(tipFor("TARGET BOX TAGS"), "a ? tip on Target box tags")
+    yes(tipFor("PLAYER SIDE"), "a ? tip on Player side")
+    for _, text in ipairs({ side, tipFor("TARGET BOX TAGS"), tipFor("PLAYER SIDE") }) do
+        yes(not text:lower():find("tape") and not text:find("\226\128\148"), "no tape wording and no em dash: " .. text)
+    end
+end
+
+function T.the_dropdown_text_option_maps_the_value_to_its_label()
+    local W = boot({ preWindow = withTags })
+    W.Open("gunsight")
+    local b = row("Upper area").control
+    eq(b.fsValue, "debuffsH", "the control keeps the raw value")
+    eq(b.fsLabel:GetText(), "Target Debuffs Horizontal", "the text option decides what shows")
+end
 
 -- ---- the target health and resource group (mockups/config-window-2026-10-07.html) ----------------------
 

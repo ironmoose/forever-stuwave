@@ -1,32 +1,28 @@
 #!/usr/bin/env python3
-"""Runs the real GunsightDots.lua (the DoT time scale of the Gunsight HUD) headless against a mock WoW API.
+"""Runs the real GunsightDots.lua (the Gunsight "Target debuffs" modules, Horizontal and Vertical) headless
+against a mock WoW API.
 
-GunsightDots.lua is piece "dot" of mockups/gunsight-hud-v2-2026-10-02/gunsight-hud-v2-2026-10-02.html
-(drawDots): a 0 to 30 s altitude axis on the enemy side, an amber refresh band under 3 s, four
-lane guides, and one cut-corner chip per DoT that slides down the scale like a note on a rhythm
-game highway. The checks pin:
+GunsightDots.lua registers two modules with FS.GunsightAreas, "debuffsH" and "debuffsV", that draw
+FS.TargetDebuffs inside one target side area. The numbers are parsed back out of
+mockups/gunsight-modules-concepts-v7-2026-10-08.html (dotsH, dotsV), so a mockup edit fails here instead of
+drifting. The checks pin:
 
-  * constants: chip size, scale length, band, header and label offsets are parsed back
-    out of the mockup's drawDots, so a mockup edit fails here instead of drifting silently;
-  * the static scale (axis, 31 ticks with labels at every fifth, band, dashed guides, header,
-    vertical REFRESH label) lands where the mockup draws it, and no PENDING PROBE tag exists;
-  * chips: a lane per DoT of the active class profile in profile order (warlock four, priest two,
-    never more than four), the chip y from expiresAt - GetTime() between pushes (one OnUpdate that
-    runs only while a chip is live), the amber band at 3 s or less, a dim hollow absent chip with
-    a desaturated icon at 0, an expiring chip turning absent by itself, a white pop for 0.35 s on
-    a (re)apply, nothing at all for an unknown DoT;
-  * the in-combat rule: the absent chip shows ONLY while the player is in combat, a file-local flag
-    set by PLAYER_REGEN_DISABLED / PLAYER_REGEN_ENABLED (with no Hud push) and seeded at build and on
-    PLAYER_ENTERING_WORLD from InCombatLockdown() OR UnitAffectingCombat(). The mock models the real
-    ordering (InCombatLockdown() reads false during the REGEN_DISABLED dispatch), so a pure
-    InCombatLockdown() read fails here. Written only on a change; a live ticking chip is never touched;
-  * the piece: registered under key "dot", hidden (and unsubscribed, OnUpdate cleared) when the
-    piece is off, nothing built when the gunsight is disabled, re-seated on a rescale, and no
-    aura API is ever read.
+  * the seam: both modules register with the areas, the dot piece is NOT registered here any more, nothing
+    is built before the areas call build, and a missing FS.GunsightAreas loads silently;
+  * Horizontal: at most five rows at a 24.4 px pitch from the area top (the upper area 8 px down, the lower 2 px
+    up), each an icon chip, the time ("13s" above 3 s, "2.6s" below), a 0 to 30 s drain bar that turns amber at
+    3 s or less, "xN" for stacks, a dim "--" row for an absent debuff, and the ruler rules and ticks;
+  * Vertical: the existing time axis compressed into 112 px (3.73 px a second) with its axis 26 px right of the
+    target cast bar, ticks and labels inside, the amber band, four lanes, a header, a chip per debuff;
+  * the in-combat rule: the absent row or chip shows ONLY in combat (a file-local flag from the REGEN events,
+    seeded from InCombatLockdown() OR UnitAffectingCombat(), one-way self heal on a push), a live one is never
+    touched, and a visibility write happens only on a change;
+  * motion: one OnUpdate per module, only while a row is live, a row turning absent by itself, a white pop for
+    0.35 s on a (re)apply, and nothing read from any aura API.
 
-The mock is strict (a widget method it does not define fails as a nil call). Theme and the
-FrameHelpers aura tile helper are STUBS here (their own harnesses cover the real ones); the real
-Layout.lua, Gunsight.lua and HudProfiles.lua are loaded.
+The mock is strict (a widget method it does not define fails as a nil call). Theme and the FrameHelpers aura
+tile helper are STUBS here, and FS.GunsightAreas and FS.TargetDebuffs are fakes with the real API (their own
+harnesses cover the real ones); the real Layout.lua and Gunsight.lua are loaded.
 
     python3 tools/gunsightdots-harness.py
 
@@ -52,9 +48,9 @@ DOTS = Path(os.environ.get("GUNSIGHTDOTS_LUA") or ADDON / "Modules/CombatHud/Gun
 GUNSIGHT = ADDON / "Modules/CombatHud/Gunsight.lua"
 LAYOUT = ADDON / "Core/Layout.lua"
 CONFIG = ADDON / "Core/Config.lua"
-PROFILES = ADDON / "Modules/CombatHud/HudProfiles.lua"
+AREAS = ADDON / "Modules/CombatHud/GunsightAreas.lua"
 TOC = ADDON / "forever-stuwave.toc"
-MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
+MOCKUP = HERE.parent / "mockups" / "gunsight-modules-concepts-v7-2026-10-08.html"
 
 
 def _load_gunsight_harness():
@@ -71,36 +67,62 @@ def _m(pattern: str, text: str, what: str) -> re.Match:
     return m
 
 
-def mockup_dots() -> dict:
-    """Everything drawDots owns, read out of the mockup."""
+def mockup_v7() -> dict:
+    """Everything dotsH and dotsV own, read out of the v7 mockup."""
     src = MOCKUP.read_text(encoding="utf-8")
-    base = _load_gunsight_harness().mockup_constants()
-    chs = int(_m(r"var CHS=(\d+),CHP=CHS/2;", src, "CHS").group(1))
-    chamfer = int(_m(r"chamfer\(bx,by,CHS,CHS,(\d+)\);\s*A\(\.92\)", src, "chip chamfer").group(1))
-    max_s = int(_m(r"function secY\(s\)\{return BOT-s/(\d+)\*\(BOT-TOP\);\}", src, "secY scale").group(1))
-    band_s = int(_m(r"var yb=secY\((\d+)\);", src, "band seconds").group(1))
-    band_fill = float(_m(r"A\((\.\d+)\);ctx\.fillStyle=K\.amber;ctx\.fillRect\(DOT_AX,yb", src, "band fill alpha").group(1))
-    ax_up, ax_dn = (int(v) for v in _m(r"vline\(DOT_AX,TOP-(\d+),BOT\+(\d+),K\.violet", src, "axis ends").groups())
-    hdr_y = int(_m(r"header\('DOT TIME',DOT_AX,(\d+),", src, "header").group(1))
-    maj = int(_m(r"maj=s%(\d+)===0", src, "major tick step").group(1))
-    maj_len, min_len = (int(v) for v in _m(r"tick\(DOT_AX,y,maj\?(\d+):(\d+),-1", src, "tick lengths").groups())
-    label_dx = int(_m(r"text\(String\(s\),DOT_AX\+(\d+),y\+4,12", src, "tick label offset").group(1))
-    refresh_dx = int(_m(r"ctx\.translate\(DOT_END\+(\d+),\(yb\+BOT\)/2\)", src, "REFRESH label x").group(1))
-    pop_s = float(_m(r"var pop=ds\.age<(\.\d+)\?", src, "pop seconds").group(1))
-    pop_a = float(_m(r"A\(pop\*(\.\d+)\);ctx\.fillStyle=K\.white", src, "pop alpha").group(1))
-    dash_guide = [int(v) for v in _m(r"ctx\.setLineDash\(\[(\d+),(\d+)\]\);vline\(LANE\[l\]", src, "guide dash").groups()]
-    dash_band = [int(v) for v in _m(r"ctx\.setLineDash\(\[(\d+),(\d+)\]\);hline\(yb", src, "band dash").groups()]
-    wl = _m(r"(?s)var DOTS_WL=\[(.*?)\];", src, "Warlock DoT list").group(1)
-    lanes = len(re.findall(r"\{ab:'\w+',ic:'\w+',dur:\d+,rem0:[\d.]+,lane:\d", wl))
-    css = {n: v.lower() for n, v in re.findall(r"^\s*--(fg|muted|white|violet|amber):(#[0-9a-fA-F]{6});", src, re.M)}
+    top, tbot, pdiv = (int(v) for v in _m(r"var TOP=(\d+),TBOT=(\d+),PITCH=\(TBOT-TOP\)/(\d+),", src, "TOP / TBOT / PITCH").groups())
+    hz = int(_m(r"var HZ=(\d+);", src, "HZ").group(1))
+    upper_y, area_h = (int(v) for v in _m(r"emptySlot\((\d+),(\d+),'UPPER AREA, EMPTY'\)", src, "upper area").groups())
+    lower_y = int(_m(r"emptySlot\((\d+),\d+,'LOWER AREA, EMPTY'\)", src, "lower area").group(1))
+    area_x, area_w = (int(v) for v in _m(r'<rect x="(\d+)" y="\'\+y\+\'" width="(\d+)"', src, "area x and width").groups())
+    chip_x, chip_dy, chip = (int(v) for v in _m(r"chipIcon\((\d+),cy-(\d+),(\d+),d,abs\)", src, "H chip").groups())
+    stack_x, stack_size = (int(v) for v in _m(r"txt\((\d+),cy\+4,'x'\+d\.n,(\d+),C\.white\)", src, "H stacks").groups())
+    abs_x, abs_size = (int(v) for v in _m(r"txt\((\d+),cy\+4\.5,'--',(\d+),C\.muted,\{op:\.7\}\)", src, "H absent dash").groups())
+    abs_bar_a = float(_m(r"rect\(\d+,cy-2,\d+,4,C\.muted,(\.\d+)\)", src, "H absent bar").group(1))
+    time_x, tenths, time_size = (int(v) for v in _m(
+        r"txt\((\d+),cy\+4\.5,\(d\.rem<(\d+)\?d\.rem\.toFixed\(1\):Math\.round\(d\.rem\)\)\+'s',(\d+),band\?C\.amber:C\.white\)", src, "H time").groups())
+    bar_x, bar_w, bar_secs = (int(v) for v in _m(
+        r"rect\((\d+),cy-2,(\d+),4,col,\.2\)\+rect\(\1,cy-2,\2\*d\.rem/(\d+),4,col\)", src, "H drain bar").groups())
+    bar_h = 4
+    bar_bg_a = float(_m(r"rect\(\d+,cy-2,\d+,4,col,(\.\d+)\)\+rect", src, "H bar background alpha").group(1))
+    band_s = int(_m(r"band=!abs&&d\.rem<=(\d+)", src, "band seconds").group(1))
+    sep_x0, sep_x1, sep_hz, sep_a = _m(
+        r"line\((\d+),ty,(\d+),ty,C\.violet,k===5\?(\.\d+):(\.\d+),1\)", src, "H separators").groups()
+    sep_x0, sep_x1, sep_hz, sep_a = int(sep_x0), int(sep_x1), float(sep_hz), float(sep_a)
+    tick_x0, tick_x1, tick_a = (float(v) for v in _m(r"line\((\d+),ty,(\d+),ty,C\.pink,(\.\d+),1\)", src, "H pink ticks").groups())
+    # V
+    axt, axb = (int(v) for v in _m(r"var AXT=(\d+),AXB=(\d+);", src, "AXT / AXB").groups())
+    dot_ax, lanes = _m(r"var DOT_AX=(\d+),LANE=\[([\d,]+)\];", src, "DOT_AX / LANE").groups()
+    lanes = [int(v) for v in lanes.split(",")]
+    ax, end, shift = (int(v) for v in _m(r"AX=(\d+),END=(\d+),LV=LANE\.map\(function\(x\)\{return x-(\d+);\}\)", src, "AX / END / LV").groups())
+    hdr_x, hdr_y, hdr_size = (int(v) for v in _m(r"txt\((\d+),(\d+),'TARGET DEBUFFS',(\d+),C\.violet,\{a:'end',op:\.9\}\)", src, "header").groups())
+    band_fill = float(_m(r"rect\(AX,yb,END-AX,AXB-yb,C\.amber,(\.\d+)\)", src, "V band fill").group(1))
+    band_dash = [int(v) for v in _m(r"line\(AX,yb,END,yb,C\.amber,\.75,1,'(\d+) (\d+)'\)", src, "V band dash").groups()]
+    guide_a = float(_m(r"line\(LV\[i\],AXT,LV\[i\],AXB,C\.violet,(\.\d+),1,'2 6'\)", src, "V guides").group(1))
+    guide_dash = [int(v) for v in _m(r"line\(LV\[i\],AXT,LV\[i\],AXB,C\.violet,\.\d+,1,'(\d+) (\d+)'\)", src, "V guide dash").groups()]
+    ax_up, ax_dn = (int(v) for v in _m(r"line\(AX,AXT-(\d+),AX,AXB\+(\d+),C\.violet,\.85,1\.2\)", src, "V axis ends").groups())
+    maj_len, min_len = (int(v) for v in _m(r"line\(AX,y,AX\+\(maj\?(\d+):(\d+)\),y,C\.violet", src, "V tick lengths").groups())
+    maj = int(_m(r"maj=s%(\d+)===0", src, "V major step").group(1))
+    label_dx, label_size = (int(v) for v in _m(r"txt\(AX\+(\d+),y\+4,String\(s\),(\d+),C\.fg", src, "V labels").groups())
+    refresh_dx, refresh_size = (int(v) for v in _m(r"txt\(END\+(\d+),\(yb\+AXB\)/2\+3,'REFRESH',(\d+),", src, "V REFRESH").groups())
+    v_chip = int(_m(r"ch\(x-12,y-12,(\d+),\d+,5\)", src, "V chip").group(1))
+    css = {n: v.lower() for n, v in re.findall(r"\b(fg|muted|white|violet|amber|pink):'(#[0-9a-fA-F]{6})'", src)}
     for need in ("fg", "muted", "white", "violet", "amber"):
         if need not in css:
-            sys.exit(f"mockup: colour token --{need} missing")
+            sys.exit(f"mockup: colour token {need} missing")
     return dict(
-        base=base, CHS=chs, CHAMFER=chamfer, MAX_S=max_s, BAND_S=band_s, BAND_FILL=band_fill,
-        AX_UP=ax_up, AX_DN=ax_dn, HDR_Y=hdr_y, MAJ=maj, MAJ_LEN=maj_len, MIN_LEN=min_len,
-        LABEL_DX=label_dx, REFRESH_DX=refresh_dx, POP_S=pop_s, POP_A=pop_a,
-        GUIDE_DASH=dash_guide, BAND_DASH=dash_band, LANES=lanes, CSS=css,
+        TOP=top, TBOT=tbot, PITCH=(tbot - top) / pdiv, HZ=hz,
+        AREA_X=area_x, AREA_W=area_w, AREA_H=area_h, UPPER_Y=upper_y, LOWER_Y=lower_y,
+        CHIP_X=chip_x, CHIP_DY=chip_dy, CHIP=chip, STACK_X=stack_x, STACK_SIZE=stack_size,
+        ABS_X=abs_x, ABS_SIZE=abs_size, ABS_BAR_A=abs_bar_a,
+        TIME_X=time_x, TENTHS=tenths, TIME_SIZE=time_size, BAR_X=bar_x, BAR_W=bar_w, BAR_H=bar_h, BAR_SECS=bar_secs,
+        BAR_BG_A=bar_bg_a, BAND_S=band_s, SEP_X0=sep_x0, SEP_X1=sep_x1, SEP_A=sep_a, SEP_HZ=sep_hz,
+        TICK_X0=tick_x0, TICK_X1=tick_x1, TICK_A=tick_a,
+        AXT=axt, AXB=axb, DOT_AX=int(dot_ax), LANES=lanes, AX=ax, END=end, LV_SHIFT=shift,
+        HDR_X=hdr_x, HDR_Y=hdr_y, HDR_SIZE=hdr_size, V_BAND_FILL=band_fill, V_BAND_DASH=band_dash,
+        GUIDE_A=guide_a, GUIDE_DASH=guide_dash, AX_UP=ax_up, AX_DN=ax_dn, MAJ=maj, MAJ_LEN=maj_len, MIN_LEN=min_len,
+        LABEL_DX=label_dx, LABEL_SIZE=label_size, REFRESH_DX=refresh_dx, REFRESH_SIZE=refresh_size, V_CHIP=v_chip,
+        CSS=css,
     )
 
 
@@ -218,6 +240,7 @@ function Frame:Hide() self.writes = (self.writes or 0) + 1; self.shown = false e
 function Frame:SetShown(on) self.writes = (self.writes or 0) + 1; self.shown = on and true or false end
 function Frame:IsShown() return self.shown end
 function Frame:GetParent() return self.parent end
+function Frame:SetParent(p) self.parent = p end
 function Frame:SetFrameStrata(s) self.strata = s end
 function Frame:GetFrameStrata() return self.strata end
 function Frame:SetFrameLevel(l) self.level = l end
@@ -477,51 +500,7 @@ function stubTheme_()
         SeatCutIcon = function(button) button.seatedBy = "SeatCutIcon" end,
     }
 end
-
--- A stand-in for FS.Hud: the ledger-backed state is pushed by the test.
-function stubHud_()
-    FS.Hud = {
-        GetProfile = function() return PROFILE end,
-        GetState = function() return STATE end,
-        Subscribe = function(fn)
-            SUBS[#SUBS + 1] = fn
-            if STATE then fn(STATE) end
-            return fn
-        end,
-        Unsubscribe = function(fn)
-            for i = #SUBS, 1, -1 do if SUBS[i] == fn then table.remove(SUBS, i) end end
-        end,
-    }
-end
-function push(state)
-    STATE = state
-    for _, fn in ipairs({ unpack(SUBS) }) do fn(state) end
-end
-
--- Builds a Hud state from the profile's own row. spec[key]: "absent", a number of seconds left,
--- a table { remaining =, expiresAt =, duration = }, or nil for an UNKNOWN DoT (every field nil).
-function mkState(spec, extra)
-    local rows = {}
-    for i, key in ipairs(PROFILE.row) do
-        local e = { key = key, icon = 130000 + i }
-        if PROFILE.dots[key] then
-            local s = spec[key]
-            if s == "absent" then
-                e.missing, e.remaining = true, 0
-            elseif type(s) == "number" then
-                e.missing, e.remaining, e.expiresAt, e.duration = false, s, NOW + s, 18
-            elseif type(s) == "table" then
-                e.missing, e.remaining, e.expiresAt, e.duration = false, s.remaining, s.expiresAt, s.duration or 18
-            end
-        end
-        rows[#rows + 1] = e
-    end
-    local state = { active = true, class = "TEST", row = rows, buffsMissing = {}, procs = {}, inCombat = false }
-    for k, v in pairs(extra or {}) do state[k] = v end
-    return state
-end
 """
-
 
 # ---------------------------------------------------------------------------------------
 # Cases
@@ -539,1339 +518,771 @@ def case(name: str):
 
 PRELUDE = r"""
 local K = 1.28
-local function secY(s) return MU.base.BOT - s / MU.MAX_S * (MU.base.BOT - MU.base.TOP) end
-
-SECRET_FN = function() return false end      -- what FS.IsSecret answers; a case may swap it
-local function boot(opts)
-    opts = opts or {}
-    resetWorld()
-    -- The absent chip is the recast cue and shows only in combat (Parker, 2026-10-03), so a case that looks at
-    -- one boots in combat; the out-of-combat cases pass combat = false.
-    IN_COMBAT = opts.combat ~= false
-    AFFECTING = opts.affecting          -- nil follows IN_COMBAT; a case sets it to model a reload mid-combat
-    SetScreen(opts.height or 1440)
-    ForeverSTUwaveDB = opts.db
-    -- Theme.lua's FS.IsSecret (a test may swap SECRET_FN) and the real FS.HasTarget / FS.TargetTakesDots out of it
-    FS.IsSecret = function(v) return SECRET_FN(v) end
-    assert(loadstring(HAS_TARGET_SRC, "@Theme.lua"))()
-    stubTheme_()
-    stubHud_()
-    loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
-    loadAddonFile(CONFIG_SRC, "Core/Config.lua")
-    loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
-    loadAddonFile(PROFILES_SRC, "Modules/CombatHud/HudProfiles.lua")
-    PROFILE = opts.profile or FS.HudProfiles[opts.class or "WARLOCK"]
-    UnitClass = function() return "Class", opts.class or "WARLOCK" end
-    if opts.state then STATE = opts.state end
-    if opts.refusePiece then FS.Gunsight.RegisterPiece = function() return false end end   -- the registry refuses the "dot" piece
-    loadAddonFile(DOTS_SRC, "Modules/CombatHud/GunsightDots.lua")
-    if not opts.noEvents then
-        fire("ADDON_LOADED", "forever-stuwave")
-        fire("PLAYER_LOGIN")
-    end
-    return FS.GunsightDots
-end
-
-local function liveChips(D)
-    local out = {}
-    for i, c in ipairs(D.chips) do if c.mode == "live" then out[#out + 1] = i end end
-    return out
-end
-local function ringColor(chip) return chip.frame.fsSkin.border.ring.vertex end
-local function glowAlpha(chip) return chip.frame.fsSkin.glow.vertex[4] end
+local RECTS = {
+    upper = { x = MU.AREA_X, y = MU.UPPER_Y, w = MU.AREA_W, h = MU.AREA_H },
+    lower = { x = MU.AREA_X, y = MU.LOWER_Y, w = MU.AREA_W, h = MU.AREA_H },
+}
 local function near3(a, b, what) near(a, b, what, 1e-3) end
 local function same(a, b) return math.abs(a - b) < 1e-3 end
 local function colorIs(c, want, what)
-    check(same(c[1], want[1]) and same(c[2], want[2]) and same(c[3], want[3]),
-        string.format("%s: got %.3f %.3f %.3f, want %.3f %.3f %.3f", what, c[1], c[2], c[3], want[1], want[2], want[3]))
+    check(c and same(c[1], want[1]) and same(c[2], want[2]) and same(c[3], want[3]),
+        string.format("%s: got %s, want %.3f %.3f %.3f", what, c and string.format("%.3f %.3f %.3f", c[1], c[2], c[3]) or "nil", want[1], want[2], want[3]))
 end
 local function mix(a, b, t) return { a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t } end
 
--- A fingerprint of everything the piece frame has drawn: the tree under D.frame in creation order (frames,
--- textures, font strings), each with its geometry, anchors, colours, text and visibility. Two builds that
--- draw the same thing give the same string; the number is a polynomial hash of it (mod 2^31 - 1).
-local function fmtv(v)
-    if type(v) == "number" then return string.format("%.4f", v) end
-    if type(v) == "table" then
-        local t = {}
-        for i = 1, #v do t[#t + 1] = fmtv(v[i]) end
-        return "{" .. table.concat(t, ",") .. "}"
+-- A secret value: any touch but passing it along throws.
+local function boom() error("secret value touched", 2) end
+SECRETV = setmetatable({}, { __lt = boom, __le = boom, __add = boom, __sub = boom, __mul = boom, __div = boom,
+    __concat = boom, __len = boom, __unm = boom, __index = boom, __call = boom })
+SECRET_FN = function(v) return rawequal(v, SECRETV) end
+
+MODULES, PIECE_CALLS, TDSUBS = {}, {}, {}
+TDLIST, TDEPOCH = {}, 1
+
+local function boot(opts)
+    opts = opts or {}
+    resetWorld()
+    MODULES, PIECE_CALLS, TDSUBS, TDLIST, TDEPOCH = {}, {}, {}, {}, 1
+    IN_COMBAT = opts.combat ~= false
+    AFFECTING = opts.affecting
+    SetScreen(opts.height or 1440)
+    ForeverSTUwaveDB = opts.db or {}
+    FS.IsSecret = function(v) return SECRET_FN(v) end
+    stubTheme_()
+    if opts.realareas then assert(loadstring(HAS_TARGET_SRC, "@Theme.lua"))() end
+    loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
+    loadAddonFile(CONFIG_SRC, "Core/Config.lua")
+    loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
+    local realPiece = FS.Gunsight.RegisterPiece
+    FS.Gunsight.RegisterPiece = function(key, spec) PIECE_CALLS[#PIECE_CALLS + 1] = key; return realPiece(key, spec) end
+    if opts.realareas then
+        loadAddonFile(AREAS_SRC, "Modules/CombatHud/GunsightAreas.lua")
+    elseif not opts.noareas then
+        FS.GunsightAreas = {
+            RegisterModule = function(id, spec) MODULES[id] = spec; return true end,
+            AreaOf = function() return nil end,
+            OnAreaChanged = function() end,
+        }
     end
-    return tostring(v)
+    FS.TargetDebuffs = {
+        Subscribe = function(fn) TDSUBS[#TDSUBS + 1] = fn; fn(TDLIST, TDEPOCH) end,
+        Unsubscribe = function(fn) for i = #TDSUBS, 1, -1 do if TDSUBS[i] == fn then table.remove(TDSUBS, i) end end end,
+        Get = function() return TDLIST end,
+        Epoch = function() return TDEPOCH end,
+    }
+    UnitClass = function() return "Class", "WARRIOR" end
+    loadAddonFile(DOTS_SRC, "Modules/CombatHud/GunsightDots.lua")
+    fire("ADDON_LOADED", "forever-stuwave")
+    fire("PLAYER_LOGIN")
+    return FS.GunsightDots
 end
-function renderDump(D)
-    local ids, out = {}, {}
-    local function walk(r)
-        ids[r] = #out + 1
-        local line = { r.kind, tostring(r.name), tostring(r.layer), tostring(r.sublevel), "lv" .. tostring(r.level),
-            fmtv(r.w), fmtv(r.h), tostring(r.shown), fmtv(r.alpha) }
-        for _, p in ipairs(r.points) do
-            line[#line + 1] = p[1] .. ">" .. tostring(ids[p[2]] or p[2].name or "ext") .. ":" .. p[3] .. "@" .. fmtv(p[4]) .. "," .. fmtv(p[5])
-        end
-        for _, f in ipairs({ "color", "vertex", "path", "blend", "texcoord", "text", "textColor", "font", "justifyH", "justifyV", "slice", "sliceMode" }) do
-            if r[f] ~= nil then line[#line + 1] = f .. "=" .. fmtv(r[f]) end
-        end
-        if r.desaturated then line[#line + 1] = "desat" end
-        if r.gradient then line[#line + 1] = "grad=" .. r.gradient.orientation end
-        local ev = {}
-        for e in pairs(r.events) do ev[#ev + 1] = e end
-        table.sort(ev)
-        line[#line + 1] = "ev=" .. table.concat(ev, "/")
-        if r.scripts.OnUpdate then line[#line + 1] = "OnUpdate" end
-        out[#out + 1] = table.concat(line, "|")
-        for _, c in ipairs(r.children) do walk(c) end
-    end
-    walk(D.frame)
-    return table.concat(out, "\n"), #out
+
+-- What GunsightAreas does for a module: build, seat, show, onShow.
+local function mount(id, area, rect)
+    local host = CreateFrame("Frame", "Host_" .. id, FS.Gunsight.root)
+    local spec = MODULES[id]
+    check(spec, "module not registered: " .. tostring(id))
+    local frame = spec.build(host)
+    spec.seat(rect or RECTS[area])
+    frame:Show()
+    spec.onShow(area)
+    return FS.GunsightDots.modules[id], frame, spec
 end
-function renderHash(D)
-    local text, n = renderDump(D)
-    local h = 7
-    for i = 1, #text do h = (h * 31 + text:byte(i)) % 2147483647 end
-    return h, n
+
+local nid = 0
+-- rem: seconds left, 0 = absent (expiry in the past), nil = unknown duration.
+local function ent(name, rem, o)
+    o = o or {}
+    nid = nid + 1
+    local e = { name = name, icon = (not o.noicon) and (9000 + nid) or nil, count = o.count or 1, order = nid, duration = o.duration or 18 }
+    if rem == nil then e.expires = nil elseif rem <= 0 then e.expires = 0 else e.expires = NOW + rem end
+    return e
 end
+local function pushList(list, epoch)
+    TDLIST = list
+    if epoch then TDEPOCH = epoch end
+    for _, fn in ipairs({ unpack(TDSUBS) }) do fn(TDLIST, TDEPOCH) end
+end
+local function rowCenterY(top, j) return top + MU.PITCH * (j - 0.5) end
+local function liveRows(m) local n = 0 for _, r in ipairs(m.rows) do if r.mode == "live" then n = n + 1 end end return n end
 """
 
 case("constants_match_the_mockup")(r"""
-local D = boot({ noEvents = true })
-check(type(D) == "table" and type(D.D) == "table", "FS.GunsightDots.D (the constants table) is missing")
-local c = D.D
+local D = boot()
+local H, V, C = D.H, D.V, D.D
+check(type(H) == "table" and type(V) == "table" and type(C) == "table", "FS.GunsightDots.D, .H and .V are the constants tables")
 local function eq(a, b, what) near(a, b, what .. " (GunsightDots has " .. tostring(a) .. ", mockup has " .. tostring(b) .. ")") end
-eq(c.CHS, MU.CHS, "chip size")
-eq(c.MAX_S, MU.MAX_S, "scale seconds"); eq(c.BAND_S, MU.BAND_S, "band seconds"); eq(c.BAND_FILL, MU.BAND_FILL, "band fill alpha")
-eq(c.AX_UP, MU.AX_UP, "axis overshoot up"); eq(c.AX_DN, MU.AX_DN, "axis overshoot down")
-eq(c.HDR_Y, MU.HDR_Y, "header y"); eq(c.MAJ, MU.MAJ, "major tick step")
-eq(c.MAJ_LEN, MU.MAJ_LEN, "major tick length"); eq(c.MIN_LEN, MU.MIN_LEN, "minor tick length")
-eq(c.LABEL_DX, MU.LABEL_DX, "tick label offset"); eq(c.REFRESH_DX, MU.REFRESH_DX, "REFRESH label offset")
-eq(c.POP_S, MU.POP_S, "pop seconds"); eq(c.POP_A, MU.POP_A, "pop alpha")
-eq(c.GUIDE_DASH[1], MU.GUIDE_DASH[1], "guide dash on"); eq(c.GUIDE_DASH[2], MU.GUIDE_DASH[2], "guide dash off")
-eq(c.BAND_DASH[1], MU.BAND_DASH[1], "band dash on"); eq(c.BAND_DASH[2], MU.BAND_DASH[2], "band dash off")
-eq(c.MAX_LANES, MU.LANES, "lane count")
+eq(H.PITCH, MU.PITCH, "row pitch"); eq(H.MAX_ROWS, 5, "rows per area")
+eq(H.TOP_UPPER, MU.TOP - MU.UPPER_Y, "upper row top"); eq(H.TOP_LOWER, MU.HZ - MU.LOWER_Y, "lower row top")
+eq(H.CHIP, MU.CHIP, "chip size"); eq(H.CHIP_DX, MU.CHIP_X - MU.AREA_X, "chip x")
+eq(H.TIME_DX, MU.TIME_X - MU.AREA_X, "time x"); eq(H.TIME_SIZE, MU.TIME_SIZE, "time font"); eq(H.TENTHS_S, MU.TENTHS, "tenths below")
+eq(H.BAR_DX, MU.BAR_X - MU.AREA_X, "bar x"); eq(H.BAR_W, MU.BAR_W, "bar width"); eq(H.BAR_H, MU.BAR_H, "bar height")
+eq(H.BAR_BG_A, MU.BAR_BG_A, "bar background alpha"); eq(H.ABSENT_BAR_A, MU.ABS_BAR_A, "absent bar alpha")
+eq(H.STACK_DX, MU.STACK_X - MU.AREA_X, "stack x"); eq(H.STACK_SIZE, MU.STACK_SIZE, "stack font")
+eq(H.SEP_W, MU.SEP_X1 - MU.SEP_X0, "rule width"); eq(H.SEP_A, MU.SEP_A, "rule alpha"); eq(H.SEP_HZ_A, MU.SEP_HZ, "horizon rule alpha")
+eq(H.TICK_DX, MU.TICK_X0 - MU.AREA_X, "tick x"); eq(H.TICK_A, MU.TICK_A, "tick alpha")
+eq(C.MAX_S, MU.BAR_SECS, "drain seconds"); eq(C.BAND_S, MU.BAND_S, "band seconds")
+eq(V.AXT_DY, MU.AXT - MU.UPPER_Y, "axis top"); eq(V.AXB_DY, MU.AXB - MU.UPPER_Y, "axis bottom"); eq(V.SPAN, MU.AXB - MU.AXT, "axis span")
+eq(V.AX_DX, MU.AX - MU.AREA_X, "axis x"); eq(V.END_DX, MU.END - MU.AREA_X, "band end")
+for i = 1, 4 do eq(V.LANE_DX[i], MU.LANES[i] - MU.LV_SHIFT - MU.AREA_X, "lane " .. i) end
+eq(V.AX_UP, MU.AX_UP, "axis overshoot up"); eq(V.AX_DN, MU.AX_DN, "axis overshoot down")
+eq(V.HDR_DX, MU.HDR_X - MU.AREA_X, "header x"); eq(V.HDR_DY, MU.HDR_Y - MU.UPPER_Y, "header y"); eq(V.HDR_SIZE, MU.HDR_SIZE, "header font")
+eq(V.MAJ, MU.MAJ, "major tick step"); eq(V.MAJ_LEN, MU.MAJ_LEN, "major tick length"); eq(V.MIN_LEN, MU.MIN_LEN, "minor tick length")
+eq(V.LABEL_DX, MU.LABEL_DX, "label x"); eq(V.LABEL_SIZE, MU.LABEL_SIZE, "label font")
+eq(V.REFRESH_DX, MU.REFRESH_DX, "REFRESH x"); eq(V.REFRESH_SIZE, MU.REFRESH_SIZE, "REFRESH font")
+eq(V.BAND_FILL, MU.V_BAND_FILL, "band fill"); eq(V.GUIDE_A, MU.GUIDE_A, "guide alpha")
+eq(V.GUIDE_DASH[1], MU.GUIDE_DASH[1], "guide dash"); eq(V.GUIDE_DASH[2], MU.GUIDE_DASH[2], "guide gap")
+eq(V.BAND_DASH[1], MU.V_BAND_DASH[1], "band dash"); eq(V.BAND_DASH[2], MU.V_BAND_DASH[2], "band gap")
+eq(V.CHIP, MU.V_CHIP, "vertical chip size")
+near(V.PX_PER_S, 112 / 30, "3.7 px a second", 1e-6)
 local function rgb(hex) return { tonumber(hex:sub(2, 3), 16) / 255, tonumber(hex:sub(4, 5), 16) / 255, tonumber(hex:sub(6, 7), 16) / 255 } end
-for _, name in ipairs({ "fg", "muted", "white", "violet", "amber" }) do
-    colorIs(c.COLORS[name], rgb(MU.CSS[name]), "colour " .. name)
+for _, name in ipairs({ "fg", "muted", "white", "violet", "amber" }) do colorIs(C.COLORS[name], rgb(MU.CSS[name]), "colour " .. name) end
+""")
+
+case("registers_two_modules_with_the_seam_and_no_dot_piece")(r"""
+local D = boot()
+for _, id in ipairs({ "debuffsH", "debuffsV" }) do
+    local spec = MODULES[id]
+    check(spec, id .. " is registered with FS.GunsightAreas")
+    for _, fn in ipairs({ "build", "seat", "onShow", "onHide" }) do check(type(spec[fn]) == "function", id .. "." .. fn .. " is a function") end
+end
+check(D.registered == true, "FS.GunsightDots.registered reads true once both registered")
+check(#PIECE_CALLS == 0, "GunsightAreas owns the dot piece: RegisterPiece was called " .. #PIECE_CALLS .. " times (" .. tostring(PIECE_CALLS[1]) .. ")")
+check(FS.Gunsight.IsPieceOn("dot"), "the key stays known to the registry")
+""")
+
+case("nothing_is_built_until_the_areas_call_build")(r"""
+local D = boot()
+for _, f in ipairs(FRAMES) do check(not (f.name or ""):find("Debuffs"), "frame built at load: " .. tostring(f.name)) end
+check(D.modules.debuffsH.built ~= true, "the horizontal module is not built before build()")
+mount("debuffsH", "upper")
+local found = false
+for _, f in ipairs(FRAMES) do if f.name == "ForeverSTUwaveGunsightDebuffsH" then found = true end end
+check(found, "build() makes the module frame")
+local vfound = false
+for _, f in ipairs(FRAMES) do if f.name == "ForeverSTUwaveGunsightDebuffsV" then vfound = true end end
+check(not vfound, "the other module is still unbuilt")
+""")
+
+case("a_missing_areas_registry_loads_silently")(r"""
+local D = boot({ noareas = true })
+check(type(D) == "table", "the file still loads")
+check(next(MODULES) == nil, "nothing to register with")
+check(next(DEGRADED) == nil, "and nothing to log: " .. tostring(next(DEGRADED)))
+FS.GunsightAreas = {}
+loadAddonFile(DOTS_SRC, "Modules/CombatHud/GunsightDots.lua")
+check(next(DEGRADED) == nil, "a registry without RegisterModule is silent too")
+""")
+
+case("horizontal_rows_follow_the_v7_layout_in_the_upper_area")(r"""
+boot({ combat = true })
+local m = mount("debuffsH", "upper")
+local list = { ent("Rend", 9), ent("Deep Wounds", 12), ent("Thunder Clap", 2.8), ent("Sunder Armor", 22, { count = 5 }), ent("Demoralizing Shout", 26) }
+pushList(list)
+check(#m.rows == 5, "five rows are built, got " .. #m.rows)
+local want = { "9s", "12s", "2.8s", "22s", "26s" }
+local rem = { 9, 12, 2.8, 22, 26 }
+for j = 1, 5 do
+    local row = m.rows[j]
+    local cy = rowCenterY(MU.TOP, j)
+    check(row.mode == "live" and isVisible(row.frame), "row " .. j .. " is live and shown")
+    local cx, cyy = imgCenter(row.chip.frame)
+    near3(cx, MU.CHIP_X + MU.CHIP / 2, "row " .. j .. " chip x"); near3(cyy, cy, "row " .. j .. " chip y")
+    near3(row.chip.frame:GetWidth(), MU.CHIP * K, "row " .. j .. " chip size")
+    check(row.chip.frame.icon.path == list[j].icon, "row " .. j .. " shows the entry's icon")
+    local tl, ty = imgRect(row.time)
+    near3(tl, MU.TIME_X, "row " .. j .. " time x"); near3(ty, cy, "row " .. j .. " time y")
+    near3(row.time.monoSize, MU.TIME_SIZE * K, "row " .. j .. " time font")
+    check(row.time.text == want[j], "row " .. j .. " time, got " .. tostring(row.time.text) .. ", want " .. want[j])
+    local bl, bt, bw, bh = imgRect(row.barBg)
+    near3(bl, MU.BAR_X, "row " .. j .. " bar x"); near3(bw, MU.BAR_W, "row " .. j .. " bar width")
+    near3(bt + bh / 2, cy, "row " .. j .. " bar y"); near3(bh, MU.BAR_H, "row " .. j .. " bar height")
+    local fl, ft, fw = imgRect(row.fillTex)
+    near3(fl, MU.BAR_X, "row " .. j .. " fill x"); near3(fw, MU.BAR_W * rem[j] / MU.BAR_SECS, "row " .. j .. " fill width")
+    near3(row.barBg.color[4], MU.BAR_BG_A, "row " .. j .. " bar background alpha")
+end
+check(m.rows[4].stack.text == "x5", "the stack count reads x5, got " .. tostring(m.rows[4].stack.text))
+local sl = imgRect(m.rows[4].stack)
+near3(sl, MU.STACK_X, "stack x"); near3(m.rows[4].stack.monoSize, MU.STACK_SIZE * K, "stack font")
+for _, j in ipairs({ 1, 2, 3, 5 }) do check(m.rows[j].stack.text == "", "row " .. j .. " has one stack: no text") end
+""")
+
+case("horizontal_rows_in_the_lower_area_start_at_the_horizon")(r"""
+boot()
+local m = mount("debuffsH", "lower")
+pushList({ ent("Holy Vengeance", 12, { count = 5 }), ent("Hammer of Justice", 4) })
+for j = 1, 2 do
+    local _, cy = imgCenter(m.rows[j].chip.frame)
+    near3(cy, rowCenterY(MU.HZ, j), "lower row " .. j .. " y")
+end
+local l = imgRect(m.rows[1].time)
+near3(l, MU.TIME_X, "same x as the upper area")
+""")
+
+case("at_most_five_rows_per_area")(r"""
+boot()
+local m = mount("debuffsH", "upper")
+local list = {}
+for i = 1, 8 do list[i] = ent("Debuff " .. i, 10 + i) end
+pushList(list)
+check(#m.rows == 5, "never more than five rows, got " .. #m.rows)
+check(m.rows[5].key == "Debuff 5", "the first five entries are the rows, got " .. tostring(m.rows[5].key))
+local shown = 0
+for _, r in ipairs(m.rows) do if isVisible(r.frame) then shown = shown + 1 end end
+check(shown == 5, "five shown")
+pushList({ list[1], list[2] })
+shown = 0
+for _, r in ipairs(m.rows) do if isVisible(r.frame) then shown = shown + 1 end end
+check(shown == 2 and m.rows[3].mode == "off", "a shorter list hides the extra rows, shown " .. shown)
+""")
+
+case("time_text_is_whole_seconds_above_three_and_tenths_below")(r"""
+boot()
+local m = mount("debuffsH", "upper")
+local function textFor(rem) pushList({ ent("Rend", rem) }); return m.rows[1].time.text end
+check(textFor(13.4) == "13s", "13.4 reads 13s, got " .. textFor(13.4))
+check(textFor(13.6) == "14s", "13.6 reads 14s, got " .. textFor(13.6))
+check(textFor(2.6) == "2.6s", "2.6 reads 2.6s, got " .. textFor(2.6))
+check(textFor(3) == "3s", "exactly 3 reads 3s, got " .. textFor(3))
+check(textFor(0.4) == "0.4s", "0.4 reads 0.4s, got " .. textFor(0.4))
+check(textFor(45) == "45s", "45 reads 45s, got " .. textFor(45))
+check(textFor(130) == "2m", "130 reads 2m, got " .. textFor(130))
+""")
+
+case("the_drain_bar_runs_zero_to_thirty_seconds_and_turns_amber_at_three")(r"""
+local D = boot()
+local C = D.D.COLORS
+local m = mount("debuffsH", "upper")
+local function fillW(rem) pushList({ ent("Rend", rem) }); local _, _, w = imgRect(m.rows[1].fillTex); return w end
+near3(fillW(15), MU.BAR_W / 2, "15 s is half the bar")
+near3(fillW(45), MU.BAR_W, "past 30 s the bar is full")
+near3(fillW(3), MU.BAR_W * 3 / 30, "3 s")
+local row = m.rows[1]
+pushList({ ent("Rend", 3) })
+colorIs(row.time.textColor, C.amber, "time at 3 s"); colorIs(row.fillTex.color, C.amber, "fill at 3 s")
+colorIs(row.barBg.color, C.amber, "bar background at 3 s"); colorIs(row.chip.frame.fsSkin.border.ring.vertex, C.amber, "ring at 3 s")
+pushList({ ent("Rend", 3.5) })
+colorIs(row.time.textColor, C.white, "time above 3 s"); colorIs(row.fillTex.color, mix(C.violet, { 1, 1, 1 }, 0.25), "fill above 3 s")
+colorIs(row.chip.frame.fsSkin.border.ring.vertex, C.violet, "ring above 3 s")
+""")
+
+case("an_absent_row_is_dim_with_dashes_and_no_fill")(r"""
+local D = boot()
+local C = D.D.COLORS
+local m = mount("debuffsH", "upper")
+pushList({ ent("Rend", 0), ent("Deep Wounds", 9) })
+local row = m.rows[1]
+check(row.mode == "absent", "mode absent, got " .. tostring(row.mode))
+check(row.time.text == "--", "the time reads --, got " .. tostring(row.time.text))
+colorIs(row.time.textColor, C.muted, "dash colour"); near3(row.time.textColor[4], 0.7, "dash alpha")
+check(not row.fillTex:IsShown(), "no drain fill")
+colorIs(row.barBg.color, C.muted, "bar background colour"); near3(row.barBg.color[4], MU.ABS_BAR_A, "bar background alpha")
+check(row.chip.frame.icon.desaturated == true, "grey icon")
+colorIs(row.chip.frame.fsSkin.border.ring.vertex, mix(C.muted, { 1, 1, 1 }, 0.25), "grey ring")
+near3(row.chip.frame.fsSkin.glow.vertex[4], 0, "no glow")
+check(isVisible(row.frame), "in combat the row shows")
+local _, cy = imgCenter(row.chip.frame)
+near3(cy, rowCenterY(MU.TOP, 1), "an absent row keeps its row")
+""")
+
+case("an_unknown_duration_shows_the_icon_and_dashes_in_and_out_of_combat")(r"""
+local D = boot({ combat = false })
+local m = mount("debuffsH", "upper")
+pushList({ ent("Thunder Clap", nil) })
+local row = m.rows[1]
+check(row.mode == "unknown", "mode unknown, got " .. tostring(row.mode))
+check(isVisible(row.frame), "an unknown row is shown out of combat (it is not the recast cue)")
+check(row.time.text == "--", "time --")
+check(row.chip.frame.icon.desaturated == false and row.chip.frame.icon.path ~= nil, "the icon is drawn normally")
+check(not row.fillTex:IsShown(), "no fill without a duration")
+check(onUpdateFrames() == 0, "nothing to animate")
+""")
+
+case("the_ruler_rules_and_ticks_follow_the_area")(r"""
+local D = boot()
+local m = mount("debuffsH", "upper")
+pushList({ ent("Rend", 9) })
+local R, T = m.parts.rules, m.parts.ticks
+for j = 0, 5 do
+    local y = MU.TOP + MU.PITCH * j
+    check(R[j]:IsShown(), "upper rule " .. j .. " is drawn")
+    local l, _, w = imgRect(R[j]); local _, cy = imgCenter(R[j])
+    near3(l, MU.SEP_X0, "rule " .. j .. " x"); near3(w, MU.SEP_X1 - MU.SEP_X0, "rule " .. j .. " width"); near3(cy, y, "rule " .. j .. " y")
+    near3(R[j].color[4], j == 5 and MU.SEP_HZ or MU.SEP_A, "rule " .. j .. " alpha")
+end
+for j = 1, 5 do
+    local l, _, w = imgRect(T[j]); local _, cy = imgCenter(T[j])
+    near3(l, MU.TICK_X0, "tick " .. j .. " x"); near3(w, MU.TICK_X1 - MU.TICK_X0, "tick " .. j .. " width")
+    near3(cy, MU.TOP + MU.PITCH * j, "tick " .. j .. " y"); near3(T[j].color[4], MU.TICK_A, "tick " .. j .. " alpha")
+end
+local L = boot()
+local ml = mount("debuffsH", "lower")
+pushList({ ent("Rend", 9) })
+check(not ml.parts.rules[0]:IsShown(), "the lower area has no rule at the horizon (the divider is there)")
+for j = 1, 5 do
+    local _, cy = imgCenter(ml.parts.rules[j])
+    check(ml.parts.rules[j]:IsShown(), "lower rule " .. j)
+    near3(cy, MU.HZ + MU.PITCH * j, "lower rule " .. j .. " y"); near3(ml.parts.rules[j].color[4], MU.SEP_A, "lower rule alpha")
 end
 """)
 
-case("nothing_is_built_before_login_and_nothing_when_disabled")(r"""
-local D = boot({ noEvents = true })
-check(D.frame == nil, "the piece frame was built at file load (UIParent is not real yet)")
-for _, f in ipairs(FRAMES) do check(not (f.name or ""):find("GunsightDots"), "frame built at file load: " .. tostring(f.name)) end
-local D2 = boot({ db = { gunsight = { enabled = false } } })
-check(D2.frame == nil, "a disabled gunsight must build nothing")
-""")
-
-case("registers_piece_dot_and_hides_with_it")(r"""
-local D = boot({ db = {} })
-check(D.frame and D.frame:GetParent() == FS.Gunsight.root, "piece frame is a child of the gunsight root")
-check(D.frame:IsShown() and isVisible(D.frame), "piece on by default")
-check(FS.Gunsight.IsPieceOn("dot"), "key dot is on")
-check(#SUBS == 1, "subscribes to the Hud while the piece is on, got " .. #SUBS)
-FS.Gunsight.SetPiece("dot", false, true)
-check(not D.frame:IsShown(), "frame hidden when the piece is off")
-check(#SUBS == 0, "unsubscribed while the piece is off, got " .. #SUBS)
-check(onUpdateFrames() == 0, "no OnUpdate while the piece is off")
-push(mkState({ corruption = 10 }))
-check(onUpdateFrames() == 0, "a push while off (a stale subscriber) must not start the OnUpdate")
-FS.Gunsight.SetPiece("dot", true, true)
-check(D.frame:IsShown() and #SUBS == 1, "back on: shown and subscribed again")
-""")
-
-case("piece_off_state_is_applied_at_login")(r"""
-local D = boot({ db = { gunsight = { pieces = { dot = false } } } })
-check(not D.frame:IsShown(), "a saved off piece stays hidden")
-check(#SUBS == 0, "no subscription while saved off")
-check(onUpdateFrames() == 0, "no OnUpdate while saved off")
-""")
-
-case("static_scale_matches_the_mockup")(r"""
-local D = boot({ db = {} })
-local P = D.parts
-check(P, "FS.GunsightDots.parts is missing")
-local B = MU.base
--- axis
-local l, t, w, h = imgRect(P.axis)
-near3(l + w / 2, B.DOT_AX, "axis x"); near3(t, B.TOP - MU.AX_UP, "axis top"); near3(t + h, B.BOT + MU.AX_DN, "axis bottom")
--- ticks: every second, 10 long every fifth and 5 long between, right edge on the axis
-check(#P.ticks == 31, "31 ticks, got " .. #P.ticks)
-for s = 0, 30 do
-    local tl, tt, tw, th = imgRect(P.ticks[s + 1])
-    local maj = s % MU.MAJ == 0
-    near3(tt + th / 2, secY(s), "tick " .. s .. " y")
-    near3(tl + tw, B.DOT_AX, "tick " .. s .. " right edge")
-    near3(tw, maj and MU.MAJ_LEN or MU.MIN_LEN, "tick " .. s .. " length")
-end
--- labels: 0 5 ... 30 as text, once each, at the axis + 6
-local found = {}
-for _, fs in ipairs(FONTSTRINGS) do
-    if fs.text and tostring(fs.text):match("^%d+$") then found[fs.text] = (found[fs.text] or 0) + 1 end
-end
-for s = 0, 30, MU.MAJ do check(found[tostring(s)] == 1, "label " .. s .. " appears " .. tostring(found[tostring(s)]) .. " times") end
-for s = 0, 30 do if s % MU.MAJ ~= 0 then check(found[tostring(s)] == nil, "minor tick " .. s .. " must not be labelled") end end
-for s = 0, 30, MU.MAJ do
-    local fs = P.labels[s]
-    check(fs, "label " .. s .. " is not in parts.labels")
-    check(fs.monoSize and math.abs(fs.monoSize - 12 * K) < 1e-6, "label font is Mononoki 12 image px, got " .. tostring(fs.monoSize))
-    local x, y = imgCenter(fs)
-    local ll = imgRect(fs)
-    near3(ll, B.DOT_AX + MU.LABEL_DX, "label " .. s .. " left edge")
-    near3(y, secY(s), "label " .. s .. " centred on its tick")
-end
--- band: amber .16 from 3 s to 0, dashed top, solid bottom
-local bl, bt, bw, bh = imgRect(P.band)
-near3(bl, B.DOT_AX, "band left"); near3(bl + bw, B.DOT_END, "band right")
-near3(bt, secY(MU.BAND_S), "band top is 3 s"); near3(bt + bh, B.BOT, "band bottom is 0")
-near3(P.band.color[4], MU.BAND_FILL, "band fill alpha")
-colorIs(P.band.color, D.D.COLORS.amber, "band colour")
-check(#P.bandTop >= 8, "band top is dashed, got " .. #P.bandTop .. " dashes")
-local prevRight
-for i, d in ipairs(P.bandTop) do
-    local dl, dt, dw, dh = imgRect(d)
-    near3(dt + dh / 2, secY(MU.BAND_S), "band dash y")
-    if i < #P.bandTop then near3(dw, MU.BAND_DASH[1], "band dash length") else check(dw <= MU.BAND_DASH[1] + 1e-3, "last band dash is clipped to the span") end
-    check(dl >= B.DOT_AX - 1e-3 and dl + dw <= B.DOT_END + 1e-3, "band dash inside the band span")
-    if prevRight then near3(dl - prevRight, MU.BAND_DASH[2], "band dash gap") end
-    prevRight = dl + dw
-end
-local el, et, ew, eh = imgRect(P.bandBottom)
-near3(et + eh / 2, B.BOT, "band bottom line y"); near3(el, B.DOT_AX, "band bottom line left"); near3(el + ew, B.DOT_END, "band bottom line right")
--- lane guides: four dashed verticals from the top to the bottom of the scale
-check(#P.guides == 4, "four lane guides")
-for lane = 1, 4 do
-    local g = P.guides[lane]
-    check(#g >= 20, "guide " .. lane .. " is dashed, got " .. #g)
-    for i, d in ipairs(g) do
-        local dl, dt, dw, dh = imgRect(d)
-        near3(dl + dw / 2, B.LANE[lane], "guide " .. lane .. " x")
-        near3(dh, MU.GUIDE_DASH[1], "guide dash length")
-        check(dt >= B.TOP - 1e-3 and dt + dh <= B.BOT + 1e-3, "guide dash inside the scale")
-        if i == 1 then near3(dt, B.TOP, "first dash starts at the top") end
-    end
-end
--- header and the vertical REFRESH label
-local hdr = P.header
-check(hdr and hdr.text == "DOT TIME", "header text")
-check(math.abs(hdr.monoSize - 11 * K) < 1e-6, "header font 11 image px")
-local hl, ht, hw, hh = imgRect(hdr)
-near3(hl, B.DOT_AX, "header left")
-check(ht + hh <= MU.HDR_Y + 4 and ht + hh >= MU.HDR_Y - 1, "header sits on the 488 baseline, bottom " .. (ht + hh))
-local word = {}
-for _, fs in ipairs(P.refresh) do word[#word + 1] = fs.text end
-check(table.concat(word) == "REFRESH", "REFRESH label letters, got " .. table.concat(word))
-local ys = {}
-for i, fs in ipairs(P.refresh) do
-    local cx, cy = imgCenter(fs)
-    near3(cx, B.DOT_END + MU.REFRESH_DX, "REFRESH letter x")
-    ys[i] = cy
-    if i > 1 then check(ys[i] > ys[i - 1], "REFRESH letters run top to bottom") end
-end
-near3((ys[1] + ys[#ys]) / 2, (secY(MU.BAND_S) + B.BOT) / 2, "REFRESH label is centred on the band")
--- the decided omission
-for _, fs in ipairs(FONTSTRINGS) do
-    check(not tostring(fs.text or ""):upper():find("PENDING"), "the PENDING PROBE tag must not be drawn: " .. tostring(fs.text))
-end
-""")
-
-case("warlock_lanes_follow_the_profile_order")(r"""
-local D = boot({ db = {} })
-push(mkState({ corruption = 15, bane_agony = 20, immolate = 10, siphon = 25 }))
-check(#D.chips == 4, "four chips built, got " .. #D.chips)
-local keys = { "corruption", "bane_agony", "immolate", "siphon" }
-for i = 1, 4 do
-    local c = D.chips[i]
-    check(c.mode == "live" and c.key == keys[i], "lane " .. i .. " is " .. keys[i] .. ", got " .. tostring(c.key) .. "/" .. tostring(c.mode))
-    check(c.frame:IsShown(), "chip " .. i .. " shown")
-    near3(imgCenter(c.frame), MU.base.LANE[i], "chip " .. i .. " x is lane " .. i)
-end
--- the abbreviations and icons come from the state row
-check(D.chips[1].frame.icon.path == 130001, "chip 1 wears the corruption icon, got " .. tostring(D.chips[1].frame.icon.path))
-check(D.chips[3].frame.icon.path == 130003, "chip 3 wears the immolate icon")
-""")
-
-case("priest_gets_two_lanes")(r"""
-local D = boot({ db = {}, class = "PRIEST" })
-push(mkState({ sw_pain = 12, dplague = 20 }))
-check(D.chips[1].mode == "live" and D.chips[1].key == "sw_pain", "lane 1 is SW:P")
-check(D.chips[2].mode == "live" and D.chips[2].key == "dplague", "lane 2 is Devouring Plague")
-near3(imgCenter(D.chips[1].frame), MU.base.LANE[1], "SW:P x"); near3(imgCenter(D.chips[2].frame), MU.base.LANE[2], "DP x")
-for i = 3, 4 do check(D.chips[i].mode == "off" and not D.chips[i].frame:IsShown(), "chip " .. i .. " is unused for a priest") end
--- a priest below level 20 has no Devouring Plague in the row: one lane
-local s = mkState({ sw_pain = 12 })
-for i = #s.row, 1, -1 do if s.row[i].key == "dplague" then table.remove(s.row, i) end end
-push(s)
-check(D.chips[1].mode == "live" and D.chips[2].mode == "off", "an unknown spell is not given a lane")
-""")
-
-case("at_most_four_lanes")(r"""
-local prof = { row = { "a", "b", "c", "d", "e", "f", "bolt" }, dots = { a = {}, b = {}, c = {}, d = {}, e = {}, f = {} } }
-local D = boot({ db = {}, profile = prof })
-push(mkState({ a = 5, b = 6, c = 7, d = 8, e = 9, f = 10 }))
-check(#D.chips == 4, "never more than four chips, got " .. #D.chips)
-for i = 1, 4 do check(D.chips[i].key == string.char(96 + i), "lane " .. i .. " keeps profile order") end
-""")
-
-case("chip_y_follows_the_time_left")(r"""
-local D = boot({ db = {} })
-push(mkState({ corruption = 15, bane_agony = 30, immolate = 5, siphon = 0.5 }))
-near3(select(2, imgCenter(D.chips[1].frame)), secY(15), "15 s")
-near3(select(2, imgCenter(D.chips[2].frame)), secY(30), "30 s sits on the top of the scale")
-near3(select(2, imgCenter(D.chips[3].frame)), secY(5), "5 s")
-near3(select(2, imgCenter(D.chips[4].frame)), secY(0.5), "half a second")
-push(mkState({ corruption = 45 }))
-near3(select(2, imgCenter(D.chips[1].frame)), MU.base.TOP, "a DoT longer than the scale is held at the top")
--- the chip is a 24 image px square
-local _, _, w, h = imgRect(D.chips[1].frame)
-near3(w, MU.CHS, "chip width"); near3(h, MU.CHS, "chip height")
-""")
-
-case("chips_slide_between_pushes_on_one_onupdate")(r"""
-local D = boot({ db = {} })
-push(mkState({ corruption = 15, immolate = 8 }))
-check(onUpdateFrames() == 1, "exactly one OnUpdate frame, got " .. onUpdateFrames())
-check(D.frame:GetScript("OnUpdate") ~= nil, "the OnUpdate lives on the piece frame")
-local pushes = 0
-FS.Hud.Subscribe(function() pushes = pushes + 1 end)
-local pushes0 = pushes
+case("rows_slide_on_one_onupdate_and_the_driver_stops_when_none_is_live")(r"""
+boot()
+local m, frame = mount("debuffsH", "upper")
+pushList({ ent("Rend", 9), ent("Deep Wounds", 12) })
+check(onUpdateFrames() == 1 and frame.scripts.OnUpdate, "one OnUpdate, on the module frame")
 tick(1.0)
-near3(select(2, imgCenter(D.chips[1].frame)), secY(14), "one second later, no push")
-near3(select(2, imgCenter(D.chips[3].frame)), secY(7), "the other lane moves too")
+check(m.rows[1].time.text == "8s" and m.rows[2].time.text == "11s", "times follow GetTime, got " .. m.rows[1].time.text .. " " .. m.rows[2].time.text)
+local _, _, w = imgRect(m.rows[1].fillTex)
+near3(w, MU.BAR_W * 8 / 30, "the fill drains")
+local writes = m.rows[1].fillTex.setPointCalls
+tick(0.001)
+check(m.rows[1].fillTex.setPointCalls == writes, "a steady frame re-anchors nothing")
+tick(8)                                -- Rend runs out at 9 s (1.001 s are gone already)
+check(m.rows[1].mode == "absent" and m.rows[1].time.text == "--", "an expiring row turns absent by itself")
+check(m.rows[2].mode == "live", "the other keeps counting")
+check(onUpdateFrames() == 1, "still one OnUpdate")
+tick(5)
+check(m.rows[2].mode == "absent" and onUpdateFrames() == 0, "the driver is gone with the last live row")
+pushList({})
+check(onUpdateFrames() == 0, "an empty list runs nothing")
+""")
+
+case("the_band_pulses_and_a_row_enters_it_by_itself")(r"""
+local D = boot()
+local C = D.D.COLORS
+local m = mount("debuffsH", "upper")
+pushList({ ent("Rend", 3.4) })
+local row = m.rows[1]
+colorIs(row.time.textColor, C.white, "outside the band")
 tick(0.5)
-near3(select(2, imgCenter(D.chips[1].frame)), secY(13.5), "half a second more")
-check(pushes == pushes0, "movement needs no new Hud push")
--- the rail from the chip down to 0 shortens as the chip falls
-local r1 = D.chips[1].rail.h
-tick(2.0)
-check(D.chips[1].rail.h < r1, "the rail shortens as the chip falls")
+colorIs(row.time.textColor, C.amber, "inside the band after 0.5 s")
+colorIs(row.fillTex.color, C.amber, "fill turned amber with no push")
+check(row.time.text == "2.9s", "tenths below three seconds, got " .. tostring(row.time.text))
 """)
 
-case("band_state_at_three_seconds_or_less")(r"""
-local D = boot({ db = {} })
+case("a_pop_flashes_on_apply_and_reapply_and_not_on_a_target_switch")(r"""
+local D = boot()
 local C = D.D.COLORS
-push(mkState({ corruption = 3.5, immolate = 3.0, siphon = 3.01, bane_agony = 10 }))
-colorIs(ringColor(D.chips[1]), C.violet, "3.5 s is violet")
-colorIs(ringColor(D.chips[3]), C.amber, "exactly 3.0 s is in the band")
-colorIs(ringColor(D.chips[4]), C.violet, "3.01 s is not")
-colorIs(ringColor(D.chips[2]), C.violet, "10 s is violet")
-tick(0.6)
-colorIs(ringColor(D.chips[1]), C.amber, "3.5 s crossed into the band by time alone")
-colorIs(ringColor(D.chips[2]), C.violet, "the 10 s chip stays violet")
--- crossing exactly 3.0 s by time alone (no push) is in the band too
-push(mkState({ corruption = 4.0 }))
-colorIs(ringColor(D.chips[1]), C.violet, "4 s is violet")
-tick(1.0)
-colorIs(ringColor(D.chips[1]), C.amber, "reaching exactly 3.0 s on the clock enters the band")
-push(mkState({ corruption = 3.5, immolate = 3.0, siphon = 3.01, bane_agony = 10 }))
-tick(0.6)
--- the rail and the dot go amber with it
-check(D.chips[1].railColor == "amber" and D.chips[2].railColor == "violet", "rail colour follows the band")
--- a chip in the band pulses its glow; one outside holds steady
-local seen, steady = {}, {}
-for i = 1, 8 do
-    tick(0.07)
-    seen[#seen + 1] = glowAlpha(D.chips[1]); steady[#steady + 1] = glowAlpha(D.chips[2])
-end
-local lo, hi = math.huge, -math.huge
-for _, v in ipairs(seen) do lo = math.min(lo, v); hi = math.max(hi, v) end
-check(hi - lo > 0.05, "the band glow pulses, range " .. (hi - lo))
-for i = 2, #steady do near3(steady[i], steady[1], "the violet glow is steady") end
+local m = mount("debuffsH", "upper")
+pushList({ ent("Rend", 12) }, 1)
+local row = m.rows[1]
+check(not row.chip.pop:IsShown(), "a debuff already up when first seen does not pop")
+tick(5)
+pushList({ ent("Rend", 17.9) }, 1)
+check(row.chip.pop:IsShown(), "a reapply pops")
+near3(row.chip.pop.vertex[4], D.D.POP_A, "starts at .8"); colorIs(row.chip.pop.vertex, C.white, "white")
+tick(D.D.POP_S / 2)
+near(row.chip.pop.vertex[4], D.D.POP_A * 0.5, "half way", 0.02)
+tick(D.D.POP_S / 2 + 0.01)
+check(not row.chip.pop:IsShown(), "the pop ends after 0.35 s")
+local e = ent("Rend", 12.1 - 0.0); e.expires = row.expires + 0.1
+pushList({ e }, 1)
+check(not row.chip.pop:IsShown(), "a 0.1 s shift is not a reapply")
+pushList({ ent("Rend", 0) }, 1)
+pushList({ ent("Rend", 18) }, 1)
+check(row.chip.pop:IsShown(), "absent to live on the same target pops")
+pushList({ ent("Rend", 9) }, 2)
+check(not row.chip.pop:IsShown(), "a new target's debuff that was already up does not pop")
+pushList({ ent("Rend", 18, { duration = 18 }) }, 3)
+check(row.chip.pop:IsShown(), "a fresh apply on a new target (remaining == duration) pops")
+pushList({ ent("Sunder Armor", 18) }, 3)
+check(not row.chip.pop:IsShown(), "another debuff in the same row is not a reapply")
 """)
 
-case("absent_chip_is_a_dim_hollow_chip_at_zero")(r"""
-local D = boot({ db = {} })
-local C = D.D.COLORS
-push(mkState({ corruption = "absent", bane_agony = 10 }))
-local c = D.chips[1]
-check(c.mode == "absent" and c.frame:IsShown(), "absent chip is shown")
-near3(select(2, imgCenter(c.frame)), MU.base.BOT, "rests at 0")
-near3(imgCenter(c.frame), MU.base.LANE[1], "in its own lane")
-check(c.frame.icon.desaturated == true, "grey desaturated icon")
-check(c.frame.icon.alpha < 1 or c.frame.icon.vertex[4] < 1, "the icon is dimmed")
-local want = mix(C.muted, { 1, 1, 1 }, 0.25)
-colorIs(ringColor(c), want, "absent border is the muted grey")
-check(glowAlpha(c) == 0, "no glow on an absent chip")
-check(not c.rail:IsShown() and not c.dot:IsShown(), "no rail and no dot on an absent chip")
-check(not c.pop:IsShown(), "no pop on an absent chip")
--- the live chip next to it is untouched
-check(D.chips[2].frame.icon.desaturated == false and D.chips[2].rail:IsShown(), "a live chip is not desaturated and has a rail")
--- back to live: the saturation is restored
-push(mkState({ corruption = 10 }))
-check(c.frame.icon.desaturated == false and c.rail:IsShown(), "live again: colour back, rail back")
-""")
-
-case("an_absent_chip_shows_nothing_out_of_combat")(r"""
--- Parker, 2026-10-03: "dim recast, it i am not in combat it should hide."
-local D = boot({ db = {}, combat = false })
-push(mkState({ corruption = "absent", bane_agony = 10 }))
-local c = D.chips[1]
-check(c.mode == "absent", "the ledger state is still absent, got " .. tostring(c.mode))
-check(not c.frame:IsShown() and not isVisible(c.frame), "out of combat: the absent chip is hidden")
-check(not c.rail:IsShown() and not c.dot:IsShown() and not c.pop:IsShown(), "and so are its rail, dot and pop")
-check(isVisible(D.chips[2].frame) and D.chips[2].rail:IsShown(), "the live chip next to it is drawn")
-check(D.content:IsShown() and D.gate:IsShown(), "the scale itself stays up out of combat")
--- an absent chip that is not drawn must not start the motion driver either
-check(onUpdateFrames() == 1, "one OnUpdate, for the live chip only")
-""")
-
-case("entering_combat_shows_the_dim_absent_chip_at_zero")(r"""
-local D = boot({ db = {}, combat = false })
-local C = D.D.COLORS
-push(mkState({ corruption = "absent", bane_agony = 10 }))
-local c = D.chips[1]
-check(not isVisible(c.frame), "setup: hidden out of combat")
-IN_COMBAT = true
-fire("PLAYER_REGEN_DISABLED")           -- no Hud push: the chip must follow the event itself
-check(c.frame:IsShown() and isVisible(c.frame), "PLAYER_REGEN_DISABLED shows the absent chip at once")
-near3(select(2, imgCenter(c.frame)), MU.base.BOT, "resting at 0")
-near3(imgCenter(c.frame), MU.base.LANE[1], "in its own lane")
-check(c.frame.icon.desaturated == true, "grey desaturated icon")
-colorIs(ringColor(c), mix(C.muted, { 1, 1, 1 }, 0.25), "the muted grey ring")
-check(glowAlpha(c) == 0, "no glow on the absent chip")
-check(not c.rail:IsShown() and not c.dot:IsShown() and not c.pop:IsShown(), "no rail, dot or pop")
-check(isVisible(D.chips[2].frame), "the live chip is untouched")
-""")
-
-case("leaving_combat_hides_the_absent_chip_again")(r"""
-local D = boot({ db = {} })              -- in combat
-push(mkState({ corruption = "absent", bane_agony = 10 }))
-local c = D.chips[1]
-check(isVisible(c.frame), "setup: shown in combat")
-IN_COMBAT = false
-fire("PLAYER_REGEN_ENABLED")
-check(not c.frame:IsShown() and not isVisible(c.frame), "PLAYER_REGEN_ENABLED hides the absent chip at once")
-check(c.mode == "absent", "it is hidden, not dropped: still absent in the ledger")
-check(isVisible(D.chips[2].frame) and D.chips[2].rail:IsShown(), "the live chip stays")
--- and the next fight brings it back with no push
+case("the_absent_cue_shows_only_in_combat_and_follows_the_events")(r"""
+boot({ combat = false })
+local m = mount("debuffsH", "upper")
+pushList({ ent("Rend", 0), ent("Deep Wounds", 10) })
+local a, b = m.rows[1], m.rows[2]
+check(a.mode == "absent" and not isVisible(a.frame), "out of combat the absent row is hidden")
+check(isVisible(b.frame) and b.mode == "live", "the live row is drawn")
+check(onUpdateFrames() == 1, "one OnUpdate, for the live row only")
 IN_COMBAT = true
 fire("PLAYER_REGEN_DISABLED")
-check(isVisible(c.frame), "the next pull shows it again")
--- a repeat of the same answer writes nothing (written only on a change)
-local w = c.frame.writes
+check(isVisible(a.frame), "PLAYER_REGEN_DISABLED shows it with no push, even though lockdown reads false in the dispatch")
+local w = a.frame.writes
 fire("PLAYER_REGEN_DISABLED"); fire("PLAYER_REGEN_DISABLED")
-check(c.frame.writes == w, "a steady combat state writes no visibility, got " .. tostring(c.frame.writes - w) .. " writes")
+check(a.frame.writes == w, "a steady state writes no visibility, got " .. (a.frame.writes - w))
 IN_COMBAT = false
 fire("PLAYER_REGEN_ENABLED")
-w = c.frame.writes
-fire("PLAYER_REGEN_ENABLED"); fire("PLAYER_REGEN_ENABLED")
-check(c.frame.writes == w, "a steady rest state writes no visibility, got " .. tostring(c.frame.writes - w) .. " writes")
--- a push out of combat keeps it hidden too (the Hud pushes about once a second)
-push(mkState({ corruption = "absent", bane_agony = 10 }))
-check(not isVisible(c.frame), "a Hud push out of combat leaves it hidden")
+check(not isVisible(a.frame) and a.mode == "absent", "PLAYER_REGEN_ENABLED hides it again: hidden, not dropped")
+check(isVisible(b.frame), "the live row never changes")
+pushList({ ent("Rend", 0), ent("Deep Wounds", 10) })
+check(not isVisible(a.frame), "a push out of combat keeps it hidden")
 """)
 
-case("a_live_chip_stays_visible_in_and_out_of_combat")(r"""
-local D = boot({ db = {}, combat = false })
-push(mkState({ corruption = 12, bane_agony = 20 }))
-local a, b = D.chips[1], D.chips[2]
-check(isVisible(a.frame) and a.rail:IsShown() and isVisible(b.frame), "out of combat: live chips are drawn")
-near3(select(2, imgCenter(a.frame)), secY(12), "and sit at their time")
-check(onUpdateFrames() == 1, "and tick")
-IN_COMBAT = true;  fire("PLAYER_REGEN_DISABLED")
-check(isVisible(a.frame) and a.rail:IsShown() and isVisible(b.frame), "entering combat: still drawn")
-IN_COMBAT = false; fire("PLAYER_REGEN_ENABLED")
-check(isVisible(a.frame) and a.rail:IsShown() and isVisible(b.frame), "leaving combat: still drawn")
-tick(1.0)
-near3(select(2, imgCenter(a.frame)), secY(11), "still sliding down the scale out of combat")
--- running out out of combat turns it absent, and absent hides at rest
-tick(11.5)
-check(a.mode == "absent" and not isVisible(a.frame), "expired out of combat: absent and hidden")
-check(isVisible(b.frame), "the other live chip is still up")
-IN_COMBAT = true;  fire("PLAYER_REGEN_DISABLED")
-check(isVisible(a.frame), "the expired DoT is the recast cue once combat starts")
-""")
-
-case("both_combat_events_are_registered")(r"""
-local D = boot({ db = {} })
-local function listens(event)
-    for _, f in ipairs(FRAMES) do
-        if f.events[event] and f.scripts.OnEvent then
-            local p = f
-            while p do
-                if p == D.frame then return true end
-                p = p.parent
-            end
-        end
-    end
-    return false
-end
-check(listens("PLAYER_REGEN_DISABLED"), "PLAYER_REGEN_DISABLED is not registered by the piece")
-check(listens("PLAYER_REGEN_ENABLED"), "PLAYER_REGEN_ENABLED is not registered by the piece")
-""")
-
-case("an_unreadable_combat_seed_keeps_the_recast_cue_shown")(r"""
--- Like the target gate: never hide on a guess. A throwing or secret seed reads as in combat.
--- A real secret boolean throws on a truth test, so the guard must run BEFORE `r and true or false`. The mock
--- cannot throw there, so the secret answers FALSE (and is flagged for the next IsSecret check): code that skips
--- the guard reads it as plainly "out of combat" and hides the cue.
-local D = boot({ db = {}, combat = false })
-local flagged = false
-local secretFalse = function() flagged = true; return false end
-SECRET_FN = function(v)
-    if flagged and v == false then flagged = false; return true end
-    return false
-end
-local function seedWith(lock, aff)
-    flagged = false
-    InCombatLockdown = lock
-    UnitAffectingCombat = aff
-    fire("PLAYER_ENTERING_WORLD")
-end
-local no = function() return false end
-push(mkState({ corruption = "absent" }))
-seedWith(no, no)
-check(not isVisible(D.chips[1].frame), "setup: both plainly false hides it")
-seedWith(function() error("boom") end, no)
-check(isVisible(D.chips[1].frame), "a throwing InCombatLockdown keeps the absent chip shown")
-seedWith(no, no)
-check(not isVisible(D.chips[1].frame), "setup: back to hidden")
-seedWith(no, function() error("boom") end)
-check(isVisible(D.chips[1].frame), "a throwing UnitAffectingCombat keeps it shown too")
-seedWith(no, no)
-check(not isVisible(D.chips[1].frame), "setup: hidden again")
-seedWith(secretFalse, no)
-check(isVisible(D.chips[1].frame), "a secret (false-reading) InCombatLockdown keeps the absent chip shown")
-seedWith(no, no)
-check(not isVisible(D.chips[1].frame), "setup: hidden once more")
-seedWith(no, secretFalse)
-check(isVisible(D.chips[1].frame), "a secret (false-reading) UnitAffectingCombat keeps it shown too")
-""")
-
-case("a_stuck_true_combat_flag_heals_from_a_plain_false_hud_push")(r"""
--- A missed PLAYER_REGEN_ENABLED would leave the flag true for good; the Hud's own plainly false
--- state.inCombat (InCombatLockdown, pushed about once a second) clears it, but only if the seed agrees.
-local D = boot({ db = {} })              -- in combat
-push(mkState({ corruption = "absent", bane_agony = 10 }))
-local c = D.chips[1]
-check(isVisible(c.frame), "setup: shown in combat")
-IN_COMBAT = false                        -- combat ended, and the REGEN_ENABLED event never reached us
-check(isVisible(c.frame), "setup: nothing has told the piece yet, the flag is stuck true")
-push(mkState({ corruption = "absent", bane_agony = 10 }))      -- inCombat = false
-check(not c.frame:IsShown() and not isVisible(c.frame), "a plainly false Hud inCombat clears the stuck flag and hides the cue")
-check(c.mode == "absent" and isVisible(D.chips[2].frame), "the chip is hidden, not dropped, and the live chip stays")
--- healed for good: a steady push writes nothing, and the next pull still turns it on
-local w = c.frame.writes
-push(mkState({ corruption = "absent", bane_agony = 10 }))
-check(c.frame.writes == w, "a steady rest push writes no visibility")
-IN_COMBAT = true
-fire("PLAYER_REGEN_DISABLED")
-check(isVisible(c.frame), "the next pull shows it again")
-""")
-
-case("the_hud_can_clear_the_combat_flag_but_never_set_it")(r"""
--- One way only: REGEN_DISABLED and the seed own "true" (HudLogic can flip early).
-local D = boot({ db = {}, combat = false })
-push(mkState({ corruption = "absent", bane_agony = 10 }))
-local c = D.chips[1]
-check(not isVisible(c.frame), "setup: hidden out of combat")
-push(mkState({ corruption = "absent", bane_agony = 10 }, { inCombat = true }))
-check(not isVisible(c.frame), "a Hud push saying inCombat = true does not show the cue")
-push(mkState({ corruption = "absent", bane_agony = 10 }, { inCombat = true }))
-check(not isVisible(c.frame), "and neither does a repeat")
-""")
-
-case("the_hud_heal_needs_the_seed_to_agree")(r"""
--- state.inCombat is InCombatLockdown() alone, which can read false while UnitAffectingCombat is already true;
--- a push in that window must not hide the cue, so the heal re-reads both APIs and only clears on "both false".
-local D = boot({ db = {}, combat = false, affecting = true })
-push(mkState({ corruption = "absent", bane_agony = 10 }))      -- inCombat = false (lockdown), affecting true
-check(isVisible(D.chips[1].frame), "setup: the seed read in combat from UnitAffectingCombat")
-push(mkState({ corruption = "absent", bane_agony = 10, siphon = 5 }))
-check(isVisible(D.chips[1].frame), "a Hud inCombat = false does not clear the flag while UnitAffectingCombat says combat")
-AFFECTING = false
-push(mkState({ corruption = "absent", bane_agony = 10 }))
-check(not isVisible(D.chips[1].frame), "once both APIs agree it is over, the next plain false push clears it")
-""")
-
-case("the_recast_cue_follows_the_events_when_lockdown_lags_the_event")(r"""
--- The real ordering: InCombatLockdown() is FALSE during the PLAYER_REGEN_DISABLED dispatch and true after.
-local D = boot({ db = {}, combat = false })
-push(mkState({ corruption = "absent", bane_agony = 10 }))
-local c = D.chips[1]
-check(not isVisible(c.frame), "setup: hidden out of combat")
-IN_COMBAT = true
-local seen
-local probe = CreateFrame("Frame")
-probe:RegisterEvent("PLAYER_REGEN_DISABLED")
-probe:SetScript("OnEvent", function() seen = InCombatLockdown() end)
-fire("PLAYER_REGEN_DISABLED")
-check(seen == false, "the mock models the real ordering: lockdown reads false inside the dispatch, got " .. tostring(seen))
-check(InCombatLockdown() == true, "and true once the dispatch is over")
-check(c.frame:IsShown() and isVisible(c.frame), "the absent chip shows at once on PLAYER_REGEN_DISABLED, with no Hud push")
-check(isVisible(D.chips[2].frame), "the live chip is untouched")
--- the other side: lockdown is already off when PLAYER_REGEN_ENABLED arrives
-IN_COMBAT = false
-check(InCombatLockdown() == false, "setup: lockdown already false")
-fire("PLAYER_REGEN_ENABLED")
-check(not c.frame:IsShown() and not isVisible(c.frame), "PLAYER_REGEN_ENABLED hides it with InCombatLockdown already false")
--- and robust to the opposite ordering: lockdown still true while PLAYER_REGEN_ENABLED dispatches
-IN_COMBAT = true
-fire("PLAYER_REGEN_DISABLED")
-check(isVisible(c.frame), "setup: shown again")
+case("lockdown_lagging_the_regen_enabled_event_does_not_keep_the_cue")(r"""
+boot({ combat = true })
+local m = mount("debuffsH", "upper")
+pushList({ ent("Rend", 0) })
+check(isVisible(m.rows[1].frame), "setup: shown in combat")
 InCombatLockdown = function() return true end
 fire("PLAYER_REGEN_ENABLED")
-check(not isVisible(c.frame), "PLAYER_REGEN_ENABLED hides it even if lockdown lags the event")
+check(not isVisible(m.rows[1].frame), "the event decides, not a live InCombatLockdown() read")
 """)
 
-case("a_reload_mid_combat_seeds_the_recast_cue_from_the_api")(r"""
--- /reload in a fight: no REGEN event fires, so the build seed decides. UnitAffectingCombat alone is enough.
-local D = boot({ db = {}, combat = false, affecting = true })
-push(mkState({ corruption = "absent", bane_agony = 10 }))
-check(isVisible(D.chips[1].frame), "UnitAffectingCombat true at build shows the absent chip (lockdown still false)")
--- and InCombatLockdown alone is enough too
-D = boot({ db = {}, combat = true, affecting = false })
-push(mkState({ corruption = "absent", bane_agony = 10 }))
-check(isVisible(D.chips[1].frame), "InCombatLockdown true at build shows it (UnitAffectingCombat false)")
--- both false: hidden
-D = boot({ db = {}, combat = false, affecting = false })
-push(mkState({ corruption = "absent", bane_agony = 10 }))
-check(not isVisible(D.chips[1].frame), "both false at build keeps it hidden")
--- zoning mid-combat re-seeds on PLAYER_ENTERING_WORLD
+case("a_reload_mid_combat_seeds_the_flag_from_either_api")(r"""
+boot({ combat = false, affecting = true })
+local m = mount("debuffsH", "upper")
+pushList({ ent("Rend", 0) })
+check(isVisible(m.rows[1].frame), "UnitAffectingCombat true at build shows the cue")
+boot({ combat = true, affecting = false })
+m = mount("debuffsH", "upper")
+pushList({ ent("Rend", 0) })
+check(isVisible(m.rows[1].frame), "InCombatLockdown true at build shows it")
+boot({ combat = false, affecting = false })
+m = mount("debuffsH", "upper")
+pushList({ ent("Rend", 0) })
+check(not isVisible(m.rows[1].frame), "both false keeps it hidden")
 IN_COMBAT, AFFECTING = false, true
 fire("PLAYER_ENTERING_WORLD")
-check(isVisible(D.chips[1].frame), "PLAYER_ENTERING_WORLD re-seeds from UnitAffectingCombat and shows it")
+check(isVisible(m.rows[1].frame), "PLAYER_ENTERING_WORLD re-seeds and shows it")
 IN_COMBAT, AFFECTING = false, false
 fire("PLAYER_ENTERING_WORLD")
-check(not isVisible(D.chips[1].frame), "and re-seeds out of combat, hiding it")
+check(not isVisible(m.rows[1].frame), "and hides it again")
 """)
 
-case("unknown_dot_draws_no_chip")(r"""
-local D = boot({ db = {} })
-push(mkState({ corruption = 10, immolate = 12 }))
-check(D.chips[2].mode == "off" and not D.chips[2].frame:IsShown(), "an unknown DoT (every field nil) draws nothing")
-check(D.chips[1].mode == "live", "a known one is drawn")
-push(mkState({}))
-for i = 1, 4 do check(not D.chips[i].frame:IsShown(), "all unknown: chip " .. i .. " hidden") end
-check(onUpdateFrames() == 0, "nothing live: no OnUpdate")
-check(D.content:IsShown(), "the scale itself stays up while the class has DoT lanes")
+case("an_unreadable_seed_keeps_the_cue_shown")(r"""
+boot({ combat = false })
+local m = mount("debuffsH", "upper")
+pushList({ ent("Rend", 0) })
+local no = function() return false end
+InCombatLockdown, UnitAffectingCombat = no, no
+fire("PLAYER_ENTERING_WORLD")
+check(not isVisible(m.rows[1].frame), "setup: hidden when both are plainly false")
+InCombatLockdown = function() error("boom") end
+fire("PLAYER_ENTERING_WORLD")
+check(isVisible(m.rows[1].frame), "a throwing InCombatLockdown keeps it shown")
+InCombatLockdown = no
+fire("PLAYER_ENTERING_WORLD")
+UnitAffectingCombat = function() return SECRETV end
+fire("PLAYER_ENTERING_WORLD")
+check(isVisible(m.rows[1].frame), "a secret UnitAffectingCombat keeps it shown")
 """)
 
-case("an_expiring_chip_turns_absent_by_itself_and_the_onupdate_stops")(r"""
-local D = boot({ db = {} })
-push(mkState({ corruption = 2.0 }))
-check(onUpdateFrames() == 1, "running while a chip is live")
-tick(1.0)
-check(D.chips[1].mode == "live", "still live at 1 s")
-tick(1.5)    -- crossed 0 with no push (Signature would not republish an expired pandemic DoT)
-check(D.chips[1].mode == "absent", "expired: absent, got " .. tostring(D.chips[1].mode))
-near3(select(2, imgCenter(D.chips[1].frame)), MU.base.BOT, "rests at 0")
-check(D.chips[1].frame.icon.desaturated == true and not D.chips[1].rail:IsShown(), "the absent look")
-check(onUpdateFrames() == 0, "the OnUpdate stopped with the last live chip")
+case("a_stuck_combat_flag_heals_from_a_push_but_a_push_never_sets_it")(r"""
+boot({ combat = true })
+local m = mount("debuffsH", "upper")
+pushList({ ent("Rend", 0), ent("Deep Wounds", 10) })
+check(isVisible(m.rows[1].frame), "setup: shown in combat")
+IN_COMBAT = false                       -- the REGEN_ENABLED event never reached us
+check(isVisible(m.rows[1].frame), "setup: still stuck")
+pushList({ ent("Rend", 0), ent("Deep Wounds", 10) })
+check(not isVisible(m.rows[1].frame), "a push that finds both APIs false clears the flag")
+IN_COMBAT = true                        -- combat began, but REGEN_DISABLED was missed
+pushList({ ent("Rend", 0), ent("Deep Wounds", 10) })
+check(not isVisible(m.rows[1].frame), "a push never sets the flag")
 """)
 
-case("onupdate_runs_only_while_a_chip_is_live")(r"""
-local D = boot({ db = {} })
-check(onUpdateFrames() == 0, "no state yet: no OnUpdate")
-push(mkState({ corruption = "absent", immolate = "absent" }))
-check(onUpdateFrames() == 0, "only absent chips: no OnUpdate")
-push(mkState({ corruption = 10 }))
-check(onUpdateFrames() == 1, "a live chip: OnUpdate")
-push(mkState({ corruption = 10, immolate = 4 }))
-check(onUpdateFrames() == 1, "still exactly one")
-push(mkState({}))
-check(onUpdateFrames() == 0, "no chips: OnUpdate cleared")
-push({ active = false, row = {}, buffsMissing = {}, procs = {} })
-check(onUpdateFrames() == 0, "inactive state: still none")
-""")
-
-case("pop_flash_on_apply_and_reapply")(r"""
-local D = boot({ db = {} })
-push(mkState({ corruption = 12 }))
-local c = D.chips[1]
-check(not c.pop:IsShown(), "no pop for a DoT that was already up when the HUD first saw it")
-tick(5.0)
--- reapplied: expiresAt jumps by about the full duration
-push(mkState({ corruption = { remaining = 17.9, expiresAt = NOW + 17.9, duration = 18 } }))
-check(c.pop:IsShown(), "a reapply pops")
-near3(c.pop.vertex[4], MU.POP_A, "the pop starts at .8")
-colorIs(c.pop.vertex, D.D.COLORS.white, "the pop is the mockup white")
-check(c.pop.path:find("slice_cut2_fill", 1, true), "the pop is the cut fill, not a square: " .. tostring(c.pop.path))
-tick(MU.POP_S / 2)
-near(c.pop.vertex[4], MU.POP_A * 0.5, "half way through the pop", 0.02)
-tick(MU.POP_S / 2 + 0.01)
-check(not c.pop:IsShown(), "the pop ends after 0.35 s")
--- a small shift of the expiry (a reconcile correcting the estimate) is not a reapply
-local exp1 = c.expiresAt
-push(mkState({ corruption = { remaining = exp1 + 0.1 - NOW, expiresAt = exp1 + 0.1, duration = 18 } }))
-check(not c.pop:IsShown(), "a 0.1 s shift is not a reapply")
--- absent then applied again pops too
-push(mkState({ corruption = "absent" }))
-check(not c.pop:IsShown(), "absent: no pop")
-push(mkState({ corruption = 18 }))
-check(c.pop:IsShown(), "absent to live pops")
-""")
-
-case("a_target_switch_is_not_a_reapply")(r"""
-local D = boot({ db = {} })
-local c = D.chips[1]
--- a target with no DoT, then a target carrying a live one: absent to live on a NEW target is not a reapply
-push(mkState({ corruption = "absent" }, { targetEpoch = 1 }))
-check(c.mode == "absent", "the first target has no DoT")
-push(mkState({ corruption = 12 }, { targetEpoch = 2 }))
-check(c.mode == "live", "the new target's DoT is live")
-check(not c.pop:IsShown(), "absent to live on a new target does not pop")
-near3(select(2, imgCenter(c.frame)), secY(12), "the chip is still placed from the time left")
--- live on one target, live with a later expiry on the next: also no pop
-push(mkState({ corruption = 17 }, { targetEpoch = 3 }))
-check(not c.pop:IsShown(), "a later expiry on a new target does not pop")
--- a pop still running from the old target is dropped with the switch
-tick(1.0)
-push(mkState({ corruption = { remaining = 17.9, expiresAt = NOW + 17.9, duration = 18 } }, { targetEpoch = 3 }))
-check(c.pop:IsShown(), "a reapply on the same target pops")
-push(mkState({ corruption = 5 }, { targetEpoch = 4 }))
-check(not c.pop:IsShown(), "the old target's pop does not follow the switch")
--- the flash is back once the target holds still: the next push of the same epoch compares as usual
-push(mkState({ corruption = "absent" }, { targetEpoch = 4 }))
-push(mkState({ corruption = 18 }, { targetEpoch = 4 }))
-check(c.pop:IsShown(), "absent to live on the same target pops")
-""")
-
-case("a_fresh_apply_on_a_new_epoch_still_pops")(r"""
-local D = boot({ db = {} })
-local c = D.chips[1]
-push(mkState({ corruption = "absent" }, { targetEpoch = 1 }))
--- Tab plus an instant cast inside one Hud tick: absent to live in a single new-epoch push, remaining == duration
-push(mkState({ corruption = { remaining = 18, expiresAt = NOW + 18, duration = 18 } }, { targetEpoch = 2 }))
-check(c.mode == "live", "the fresh DoT is live")
-check(c.pop:IsShown(), "a fresh apply (remaining == duration) on a new epoch pops")
-near3(c.pop.vertex[4], MU.POP_A, "the pop starts at .8")
--- within 0.5 s of the full duration still counts as fresh
-tick(1.0)
-push(mkState({ corruption = { remaining = 17.6, expiresAt = NOW + 17.6, duration = 18 } }, { targetEpoch = 3 }))
-check(c.pop:IsShown(), "remaining 0.4 s under the duration on a new epoch is still a fresh apply")
--- well below the duration is a DoT the new target already carried: no pop
-push(mkState({ corruption = { remaining = 12, expiresAt = NOW + 12, duration = 18 } }, { targetEpoch = 4 }))
-check(not c.pop:IsShown(), "remaining well below the duration on a new epoch does not pop")
-push(mkState({ corruption = { remaining = 17.4, expiresAt = NOW + 17.4, duration = 18 } }, { targetEpoch = 5 }))
-check(not c.pop:IsShown(), "remaining 0.6 s under the duration on a new epoch is not fresh")
--- no duration on the row: nothing to compare, so no pop on a new epoch
-local noDur = mkState({ corruption = { remaining = 18, expiresAt = NOW + 18 } }, { targetEpoch = 6 })
-noDur.row[1].duration = nil
-push(noDur)
-check(c.mode == "live" and not c.pop:IsShown(), "a row with no usable duration never reads as fresh on a new epoch")
-""")
-
-case("piece_hide_resets_the_epoch_memory")(r"""
-local D = boot({ db = {} })
-local c = D.chips[1]
-push(mkState({ corruption = 12 }, { targetEpoch = 5 }))
-check(c.mode == "live" and not c.pop:IsShown(), "first sight of a live DoT: no pop")
-FS.Gunsight.SetPiece("dot", false, true)
-check(c.mode == "off", "hiding the piece forgets the chips")
-FS.Gunsight.SetPiece("dot", true, true)    -- Subscribe replays the last state, still epoch 5
-push(mkState({ corruption = 11.8 }, { targetEpoch = 5 }))
-check(c.mode == "live", "the DoT is live after the re-show")
-check(not c.pop:IsShown(), "a mid duration DoT with the same epoch number after hide and show does not pop")
--- the reset is what makes the first push after a show a NEW epoch: a genuine fresh apply right after a
--- re-show then pops (without the reset the same epoch number takes the same-target path, where an "off"
--- chip never pops)
-FS.Gunsight.SetPiece("dot", false, true)
-STATE = nil
-FS.Gunsight.SetPiece("dot", true, true)
-push(mkState({ corruption = { remaining = 18, expiresAt = NOW + 18, duration = 18 } }, { targetEpoch = 5 }))
-check(c.mode == "live" and c.pop:IsShown(), "after hide and show the epoch is forgotten: a fresh apply pops")
-""")
-
-case("same_target_expiry_moved_later_pops")(r"""
-local D = boot({ db = {} })
-local c = D.chips[1]
-push(mkState({ corruption = 12 }, { targetEpoch = 7 }))
-check(not c.pop:IsShown(), "first sight: no pop")
-tick(5.0)
-push(mkState({ corruption = { remaining = 17.9, expiresAt = NOW + 17.9, duration = 18 } }, { targetEpoch = 7 }))
-check(c.pop:IsShown(), "expiry moved later by more than 0.5 s on the same target pops")
-tick(1.0)
-local exp1 = c.expiresAt
-push(mkState({ corruption = { remaining = exp1 + 0.2 - NOW, expiresAt = exp1 + 0.2, duration = 18 } }, { targetEpoch = 7 }))
-check(not c.pop:IsShown(), "a 0.2 s shift on the same target is not a reapply")
-""")
-
-case("scale_hides_for_a_class_with_no_dot_lanes")(r"""
-local D = boot({ db = {} })
-push(mkState({ corruption = 10 }))
-check(D.content:IsShown(), "scale up with a lane")
-push({ active = false, row = {}, buffsMissing = {}, procs = {} })
-check(not D.content:IsShown(), "an inactive Hud draws no scale")
-local s = mkState({ corruption = 10 })
-local row = {}
-for _, e in ipairs(s.row) do if e.key == "shadow_bolt" then row[#row + 1] = e end end
-s.row = row
-push(s)
-check(not D.content:IsShown(), "no DoT rows: no scale")
-check(onUpdateFrames() == 0, "and nothing runs")
-""")
-
-case("class_without_a_profile_keeps_the_scale_hidden")(r"""
-local D = boot({ db = {}, class = "ROGUE" })    -- HudProfiles has no ROGUE entry: PROFILE is nil
-check(PROFILE == nil, "setup: ROGUE resolves to no profile")
-push({ active = false, class = "ROGUE", row = {}, buffsMissing = {}, procs = {}, inCombat = false })
-check(not isVisible(D.content), "a rogue has no DoT lanes, so the scale is hidden")
-IN_COMBAT = true
-push({ active = false, class = "ROGUE", row = {}, buffsMissing = {}, procs = {}, inCombat = true })
-tick(0.5)
-check(not isVisible(D.content), "and stays hidden in combat")
-check(onUpdateFrames() == 0, "nothing runs")
-check(#AURA_TOUCHED == 0, "no aura (secret) API was read: " .. tostring(AURA_TOUCHED[1]))
-check(next(DEGRADED) == nil, "a degrade was logged: " .. tostring(next(DEGRADED)))
-""")
-
-# The DoT area is a CLASS slot (mockup drawDots for Warlock and Priest, drawSealChamber for the Paladin,
-# both behind deck key 6). The Paladin's chamber is another file's; here the Paladin draws nothing.
-case("warlock_and_priest_render_is_byte_identical_to_the_approved_look")(r"""
--- Fingerprints include frame names and texture paths as well as geometry and drawn state.
-local GOLD = { WL_IDLE = 1183434497, WL_LIVE = 565967534, WL_TICK = 599751858, PR_LIVE = 1901135936,
-    RG = 1183434497, WL_ABSENT_OOC = 1410475816 }
-local got = {}
-local D = boot({ db = {} })
-got.WL_IDLE = renderHash(D)
-push(mkState({ corruption = 15, bane_agony = 20, immolate = 10, siphon = 25 }))
-got.WL_LIVE = renderHash(D)
-tick(0.5)
-got.WL_TICK = renderHash(D)
-D = boot({ db = {}, class = "PRIEST" })
-push(mkState({ sw_pain = 12, dplague = 20 }))
-got.PR_LIVE = renderHash(D)
-D = boot({ db = {}, class = "ROGUE" })      -- no profile: the scale is still built (and hidden), as before
-got.RG = renderHash(D)
-D = boot({ db = {}, combat = false })
-push(mkState({ corruption = "absent", immolate = 2 }))
-got.WL_ABSENT_OOC = renderHash(D)
-local bad = {}
-for k, want in pairs(GOLD) do
-    if got[k] ~= want then bad[#bad + 1] = k .. " got " .. tostring(got[k]) .. " want " .. tostring(want) end
-end
-table.sort(bad)
-check(#bad == 0, "render changed: " .. table.concat(bad, "; "))
-""")
-
-case("warlock_and_priest_still_build_the_scale_and_subscribe")(r"""
-for _, class in ipairs({ "WARLOCK", "PRIEST" }) do
-    local D = boot({ db = {}, class = class })
-    check(D.parts.axis and #D.parts.ticks == 31 and D.parts.header and D.parts.band, class .. ": the scale is built")
-    check(#D.chips == D.D.MAX_LANES, class .. ": all four chip slots are built")
-    check(#SUBS == 1, class .. ": subscribed to the Hud while the piece is on")
-end
-""")
-
-case("paladin_slot_draws_no_scale_and_no_lanes")(r"""
-local D = boot({ db = {}, class = "PALADIN" })
-check(next(FS.HudProfiles.PALADIN.dots) == nil and type(FS.HudProfiles.PALADIN.seals) == "table",
-      "setup: the paladin profile has a seals table and no dots")
--- the piece is still there: the console key's toggle, Gunsight.SetPiece and the chamber's future parent
-check(D.frame and D.frame:GetParent() == FS.Gunsight.root, "the piece frame is built under the gunsight root")
-check(D.frame.name == "ForeverSTUwaveGunsightDots" and _G.ForeverSTUwaveGunsightDots == D.frame, "and keeps its global name")
-check(FS.Gunsight.IsPieceOn("dot") and D.frame:IsShown(), "piece key dot is registered and on")
--- nothing drawn: no axis, no ticks, no labels, no band, no guides, no header, no refresh letters, no chips
-check(next(D.parts) == nil, "no scale parts, got " .. tostring(next(D.parts)))
-check(#D.chips == 0, "no chips")
-local n = 0
-for _, t in ipairs(TEXTURES) do
-    local p = t
-    while p do
-        if p == D.frame then n = n + 1 end
-        p = p.parent
-    end
-end
-check(n == 0, "no texture under the piece frame, got " .. n)
-n = 0
-for _, fs in ipairs(FONTSTRINGS) do
-    local p = fs
-    while p do
-        if p == D.frame then n = n + 1 end
-        p = p.parent
-    end
-end
-check(n == 0, "no font string under the piece frame, got " .. n)
-for _, fs in ipairs(FONTSTRINGS) do
-    check(not (fs.text and (tostring(fs.text):match("^%d+$") or fs.text == "DOT TIME")), "a scale label was drawn: " .. tostring(fs.text))
-end
--- a paladin state changes nothing: no lanes, nothing runs, no Hud work for a piece with nothing to draw
-push(mkState({}))
-check(not D.content:IsShown(), "the content stays hidden")
-IN_COMBAT = true
-push(mkState({}, { inCombat = true, targetEpoch = 2 }))
-tick(0.5)
-check(not isVisible(D.content), "and in combat")
-check(onUpdateFrames() == 0, "no OnUpdate")
-check(#SUBS == 0, "the dot piece does not subscribe to the Hud for a class slot it does not draw")
-check(#AURA_TOUCHED == 0, "no aura API was read")
-check(next(DEGRADED) == nil, "a degrade was logged: " .. tostring(next(DEGRADED)))
-""")
-
-case("paladin_piece_toggle_and_target_gate_keep_working")(r"""
-local D = boot({ db = {}, class = "PALADIN" })
-check(D.gate and D.content, "the gate and the content frame exist for the chamber to hang off")
--- the key's toggle: SetPiece hides and shows the piece frame like any other piece
-FS.Gunsight.SetPiece("dot", false, true)
-check(not D.frame:IsShown() and not FS.Gunsight.IsPieceOn("dot"), "off hides the piece frame")
-FS.Gunsight.SetPiece("dot", true, true)
-check(D.frame:IsShown() and FS.Gunsight.IsPieceOn("dot"), "on shows it again")
-local seen = {}
-FS.Gunsight.OnPieceChanged(function(key, on) seen[#seen + 1] = key .. tostring(on) end)
-FS.Gunsight.SetPiece("dot", false, true)
-check(#seen == 1 and seen[1] == "dotfalse", "OnPieceChanged fires once with the key and state, got " .. table.concat(seen, ","))
-FS.Gunsight.SetPiece("dot", true, true)
--- a saved off piece stays off, with nothing built under it
-local D2 = boot({ db = { gunsight = { pieces = { dot = false } } }, class = "PALADIN" })
-check(not D2.frame:IsShown(), "a saved off piece stays hidden")
--- the target layer still follows the target: a chamber hung off the gate inherits it
-local D3 = boot({ db = {}, class = "PALADIN" })
-check(D3.gate:IsShown(), "gate up with a target")
-local savedExists = UnitExists
-UnitExists = function() return false end
-fire("PLAYER_TARGET_CHANGED")
-check(not D3.gate:IsShown(), "no target: the gate hides")
-UnitExists = savedExists
-fire("PLAYER_TARGET_CHANGED")
-check(D3.gate:IsShown(), "target back: the gate shows")
--- a rescale re-seats nothing it does not have
-local ok = pcall(function() SetScreen(1080); fire("UI_SCALE_CHANGED"); fire("DISPLAY_SIZE_CHANGED") end)
-check(ok, "a rescale with an empty slot does not throw")
-check(next(DEGRADED) == nil, "a degrade was logged: " .. tostring(next(DEGRADED)))
-""")
-
-case("a_profile_with_dots_and_seals_still_draws_the_scale")(r"""
--- the rule is: seals AND no dots. Dots keep the scale whatever else the profile carries.
-local prof = { row = { "a", "b" }, dots = { a = {}, b = {} }, seals = { order = { "sor" } } }
-local D = boot({ db = {}, profile = prof })
-check(D.parts.axis and #D.chips == D.D.MAX_LANES and #SUBS == 1, "dots plus seals: the scale and lanes are built")
-push(mkState({ a = 5, b = 6 }))
-check(D.chips[1].mode == "live" and D.chips[2].mode == "live", "and drawn")
--- seals with an empty dots table (the paladin shape) draws nothing; seals as a non table does not count
-local D2 = boot({ db = {}, profile = { row = {}, dots = {}, seals = { order = {} } } })
-check(next(D2.parts) == nil and #D2.chips == 0, "empty dots plus a seals table: nothing drawn")
-local D3 = boot({ db = {}, profile = { row = {}, seals = { order = {} } } })
-check(next(D3.parts) == nil and #D3.chips == 0, "no dots field plus a seals table: nothing drawn")
-local D4 = boot({ db = {}, profile = { row = {}, dots = {}, seals = true } })
-check(D4.parts.axis, "a seals value that is not a table is not a class slot")
-local D5 = boot({ db = {}, profile = { row = {}, dots = {} } })
-check(D5.parts.axis, "no seals: the scale is built as before")
-""")
-
-case("no_hud_leaves_the_piece_inert")(r"""
-resetWorld()
-SetScreen(1440)
-stubTheme_()
-loadAddonFile(LAYOUT_SRC, "Core/Layout.lua"); loadAddonFile(CONFIG_SRC, "Core/Config.lua"); loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
-FS.Hud = nil
-loadAddonFile(DOTS_SRC, "Modules/CombatHud/GunsightDots.lua")
-fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
-check(onUpdateFrames() == 0, "no OnUpdate without a Hud")
-""")
-
-case("chip_is_built_the_way_the_action_buttons_are")(r"""
-local D = boot({ db = {} })
-check(#SKIN_CALLS == 4, "SkinButton once per chip, got " .. #SKIN_CALLS)
+case("the_vertical_axis_geometry_is_112_px_with_the_axis_26_px_from_the_cast_bar")(r"""
+local D = boot()
 local C = D.D.COLORS
-for i, call in ipairs(SKIN_CALLS) do
-    colorIs(call.opts.borderColor, C.violet, "chip " .. i .. " starts with the violet border")
-    check(call.button.seatedBy == "SeatAuraTile", "chip " .. i .. " is seated by SeatAuraTile, got " .. tostring(call.button.seatedBy))
-    check(call.button.fsAuraPlate and call.button.fsAuraPlate.seated, "chip " .. i .. " has the dark plate behind the icon")
-    check(call.button.mouse == false, "chip " .. i .. " is click through")
+local m = mount("debuffsV", "upper")
+local P = m.parts
+pushList({ ent("Rend", 18) })
+local G = FS.Gunsight.G
+local l, t, w, h = imgRect(P.axis)
+near3(l + w / 2, MU.AX, "axis x")
+near3(l + w / 2 - G.TR.x1, 26, "26 px right of the target cast bar")
+near3(t, MU.AXT - MU.AX_UP, "axis top"); near3(t + h, MU.AXB + MU.AX_DN, "axis bottom")
+check(#P.ticks == 31, "31 ticks, got " .. #P.ticks)
+local function secY(s) return MU.AXB - s / 30 * (MU.AXB - MU.AXT) end
+near3(MU.AXB - MU.AXT, 112, "the scale is 112 px")
+near3(secY(0) - secY(1), 112 / 30, "3.73 px a second")
+for s = 0, 30 do
+    local tl, _, tw = imgRect(P.ticks[s + 1]); local _, ty = imgCenter(P.ticks[s + 1])
+    local maj = s % MU.MAJ == 0
+    near3(ty, secY(s), "tick " .. s .. " y"); near3(tl, MU.AX, "tick " .. s .. " starts on the axis")
+    near3(tw, maj and MU.MAJ_LEN or MU.MIN_LEN, "tick " .. s .. " points inward, length")
 end
-near3(D.chips[1].frame:GetWidth(), 24 * K, "chip is 24 image px wide")
+for s = 0, 30, 5 do
+    local fs = P.labels[s]
+    check(fs and fs.text == tostring(s), "label " .. s)
+    local ll, ly = imgRect(fs)
+    near3(ll, MU.AX + MU.LABEL_DX, "label " .. s .. " x (inside the scale)"); near3(ly, secY(s), "label " .. s .. " y")
+    near3(fs.monoSize, MU.LABEL_SIZE * K, "label font")
+end
+local n = 0
+for _, fs in ipairs(FONTSTRINGS) do if fs.text and tostring(fs.text):match("^%d+$") then n = n + 1 end end
+check(n == 7, "labels at every fifth second only, got " .. n)
+local bl, bt, bw, bh = imgRect(P.band)
+near3(bl, MU.AX, "band left"); near3(bl + bw, MU.END, "band right")
+near3(bt, secY(3), "band top is 3 s"); near3(bt + bh, MU.AXB, "band bottom is 0")
+near3(P.band.color[4], MU.V_BAND_FILL, "band alpha"); colorIs(P.band.color, C.amber, "band colour")
+local prevRight
+for i, d in ipairs(P.bandTop) do
+    local dl, _, dw = imgRect(d); local _, dy = imgCenter(d)
+    near3(dy, secY(3), "band dash y")
+    if i < #P.bandTop then near3(dw, MU.V_BAND_DASH[1], "band dash") else check(dw <= MU.V_BAND_DASH[1] + 1e-3, "last dash clipped") end
+    if prevRight then near3(dl - prevRight, MU.V_BAND_DASH[2], "band gap") end
+    prevRight = dl + dw
+end
+check(#P.bandTop >= 8, "dashed band top")
+local el, _, ew = imgRect(P.bandBottom); local _, ey = imgCenter(P.bandBottom)
+near3(el, MU.AX, "band bottom left"); near3(el + ew, MU.END, "band bottom right"); near3(ey, MU.AXB, "band bottom y")
+check(#P.guides == 4, "four lane guides")
+for lane = 1, 4 do
+    for i, d in ipairs(P.guides[lane]) do
+        local dl, dt, dw, dh = imgRect(d)
+        near3(dl + dw / 2, MU.LANES[lane] - MU.LV_SHIFT, "guide " .. lane .. " x")
+        check(dt >= MU.AXT - 1e-3 and dt + dh <= MU.AXB + 1e-3, "guide inside the axis")
+        if i < #P.guides[lane] then near3(dh, MU.GUIDE_DASH[1], "guide dash") end
+    end
+    near3(select(2, imgRect(P.guides[lane][1])), MU.AXT, "guide starts at the top")
+    near3(P.guides[lane][1].color[4], MU.GUIDE_A, "guide alpha")
+end
+check(P.header.text == "TARGET DEBUFFS", "header text")
+local hl, hy = imgRect(P.header)
+near3(hl, MU.HDR_X, "header right edge x"); near3(P.header.monoSize, MU.HDR_SIZE * K, "header font")
+check(P.header.justifyH == "RIGHT", "header is right aligned")
+local word = {}
+for _, fs in ipairs(P.refresh) do word[#word + 1] = fs.text end
+check(table.concat(word) == "REFRESH", "REFRESH letters, got " .. table.concat(word))
 """)
 
-case("chip_label_is_the_fallback_for_a_missing_icon")(r"""
-local D = boot({ db = {} })
-local s = mkState({ corruption = 10, immolate = 8 })
-s.row[1].icon = nil
-push(s)
-check(D.chips[1].label:IsShown() and D.chips[1].label.text == "CO", "no icon: the abbreviation shows, got " .. tostring(D.chips[1].label.text))
-check(D.chips[3].label.text == nil or not D.chips[3].label:IsShown(), "an icon hides the abbreviation")
+case("vertical_chips_sit_on_their_lane_at_3_7_px_a_second")(r"""
+local D = boot({ combat = true })
+local C = D.D.COLORS
+local m = mount("debuffsV", "upper")
+local list = { ent("Corruption", 18), ent("Curse of Agony", 22), ent("Immolate", 2.4), ent("Siphon Life", 0) }
+pushList(list)
+local function secY(s) return MU.AXB - s / 30 * (MU.AXB - MU.AXT) end
+local rem = { 18, 22, 2.4, 0 }
+for i = 1, 4 do
+    local row = m.rows[i]
+    local cx, cy = imgCenter(row.chip.frame)
+    near3(cx, MU.LANES[i] - MU.LV_SHIFT, "chip " .. i .. " lane x"); near3(cy, secY(rem[i]), "chip " .. i .. " y")
+    near3(row.chip.frame:GetWidth(), MU.V_CHIP * K, "chip size")
+end
+check(m.rows[1].mode == "live" and m.rows[3].mode == "live" and m.rows[4].mode == "absent", "modes")
+check(m.rows[1].rail:IsShown() and m.rows[1].dot:IsShown(), "a live chip has its rail and dot")
+colorIs(m.rows[1].chip.frame.fsSkin.border.ring.vertex, C.violet, "violet outside the band")
+colorIs(m.rows[3].chip.frame.fsSkin.border.ring.vertex, C.amber, "amber inside the band")
+check(isVisible(m.rows[4].frame) and not m.rows[4].rail:IsShown(), "the absent chip rests at 0 with no rail")
+check(m.rows[4].chip.frame.icon.desaturated == true, "grey")
+local _, y10 = imgCenter(m.rows[1].chip.frame)
+pushList({ ent("Corruption", 10) })
+local _, y10b = imgCenter(m.rows[1].chip.frame)
+near3(y10b - y10, 8 * 112 / 30, "eight seconds less is 29.9 px further down the axis")
 """)
 
-case("label_set_when_a_row_first_arrives_off_then_live_with_no_icon")(r"""
-local D = boot({ db = {} })
--- first push: the row is UNKNOWN (off) and carries no icon
-local s = mkState({})
-s.row[1].icon = nil
-push(s)
-check(not D.chips[1].label:IsShown(), "an off chip shows no label")
--- second push: the same key and still no icon, but now live
-local s2 = mkState({ corruption = 10 })
-s2.row[1].icon = nil
-push(s2)
-check(D.chips[1].label:IsShown() and D.chips[1].label.text == "CO",
-    "off then live with a nil icon: the abbreviation must be set, got " .. tostring(D.chips[1].label.text))
-check(not D.chips[1].frame.icon:IsShown(), "no icon: the icon texture stays hidden")
+case("vertical_chips_slide_and_the_absent_chip_follows_combat")(r"""
+boot({ combat = false })
+local m, frame = mount("debuffsV", "upper")
+pushList({ ent("Corruption", 0), ent("Immolate", 12) })
+check(not isVisible(m.rows[1].frame), "out of combat the absent chip is hidden")
+check(isVisible(m.rows[2].frame) and m.rows[2].rail:IsShown(), "the live one is drawn")
+local _, y0 = imgCenter(m.rows[2].chip.frame)
+tick(1.0)
+local _, y1 = imgCenter(m.rows[2].chip.frame)
+near3(y1 - y0, 112 / 30, "one second slides 3.73 px")
+check(onUpdateFrames() == 1, "one OnUpdate")
+IN_COMBAT = true
+fire("PLAYER_REGEN_DISABLED")
+check(isVisible(m.rows[1].frame), "the cue shows at pull")
+tick(11.5)
+check(m.rows[2].mode == "absent" and isVisible(m.rows[2].frame), "an expired chip becomes the recast cue")
+near3(select(2, imgCenter(m.rows[2].chip.frame)), MU.AXB, "resting at 0")
+check(onUpdateFrames() == 0, "no OnUpdate with nothing live")
 """)
 
-case("rescale_reseats_the_scale_and_the_chips")(r"""
-local D = boot({ db = {}, height = 1440 })
-push(mkState({ corruption = 15, immolate = 6, siphon = "absent" }))
+case("the_vertical_axis_takes_four_lanes_and_skips_entries_with_no_expiry")(r"""
+boot()
+local m = mount("debuffsV", "upper")
+local list = { ent("Sunder Armor", nil), ent("A", 10), ent("B", 11), ent("C", 12), ent("D", 13), ent("E", 14) }
+pushList(list)
+check(#m.rows == 4, "four lanes, got " .. #m.rows)
+check(m.rows[1].key == "A" and m.rows[4].key == "D", "an unknown duration has no place on the axis; the next entries take the lanes, got " .. tostring(m.rows[1].key))
+pushList({ ent("Sunder Armor", nil) })
+check(m.rows[1].mode == "off" and not isVisible(m.rows[1].frame), "only unknowns: nothing drawn")
+check(not isVisible(m.parts.axis), "and the scale hides")
+""")
+
+case("the_vertical_scale_is_seated_from_the_lower_area_rect_too")(r"""
+boot()
+local m = mount("debuffsV", "lower")
+pushList({ ent("Rend", 15) })
+local lx, ly, lw, lh = RECTS.lower.x, RECTS.lower.y, RECTS.lower.w, RECTS.lower.h
+local l, t, w, h = imgRect(m.parts.axis)
+near3(l + w / 2, lx + MU.AX - MU.AREA_X, "axis x")
+near3(t, ly + (MU.AXT - MU.UPPER_Y) - MU.AX_UP, "axis top follows the rect")
+local _, cy = imgCenter(m.rows[1].chip.frame)
+near3(cy, ly + (MU.AXB - MU.UPPER_Y) - 15 * 112 / 30, "chip y follows the rect")
+""")
+
+case("both_modules_run_side_by_side_with_their_own_subscriptions")(r"""
+boot()
+local mv = mount("debuffsV", "upper")
+local mh = mount("debuffsH", "lower")
+check(#TDSUBS == 2, "two subscriptions, got " .. #TDSUBS)
+pushList({ ent("Rend", 9), ent("Deep Wounds", 12) })
+check(mv.rows[1].mode == "live" and mh.rows[1].mode == "live", "both took the list")
+check(onUpdateFrames() == 2, "one OnUpdate each, got " .. onUpdateFrames())
+MODULES.debuffsH.onHide("lower")
+check(#TDSUBS == 1 and onUpdateFrames() == 1, "hiding one leaves the other running")
+check(mv.rows[1].mode == "live", "the vertical module is untouched")
+""")
+
+case("show_subscribes_once_and_hide_releases_everything")(r"""
+boot()
+local m, frame, spec = mount("debuffsH", "upper")
+check(#TDSUBS == 1, "subscribed on show")
+spec.onShow("upper")
+check(#TDSUBS == 1, "a second onShow does not subscribe again")
+pushList({ ent("Rend", 9) })
+check(onUpdateFrames() == 1, "ticking")
+spec.onHide("upper")
+check(#TDSUBS == 0, "unsubscribed on hide")
+check(onUpdateFrames() == 0, "OnUpdate cleared")
+check(m.rows[1].mode == "off" and not isVisible(m.rows[1].frame) and not m.body:IsShown(), "rows forgotten and hidden")
+local ok = pcall(pushList, { ent("Rend", 9) })
+check(ok and m.rows[1].mode == "off" and onUpdateFrames() == 0, "a stale push after hide does nothing")
+spec.onShow("lower")
+check(#TDSUBS == 1 and m.rows[1].mode == "live", "show again replays the current list")
+""")
+
+case("an_empty_list_hides_the_body_and_the_scale")(r"""
+boot()
+local m = mount("debuffsH", "upper")
+pushList({})
+check(not m.body:IsShown(), "no rows: the ruler is not drawn")
+pushList({ ent("Rend", 9) })
+check(m.body:IsShown(), "a row brings it back")
+local mv = mount("debuffsV", "lower")
+pushList({})
+check(not mv.body:IsShown(), "no lanes: no axis")
+""")
+
+case("a_rescale_reseats_rows_and_the_axis_in_image_pixels")(r"""
+boot({ height = 1440 })
+local m, _, spec = mount("debuffsH", "upper")
+pushList({ ent("Rend", 15), ent("Deep Wounds", 6) })
 SetScreen(1200)
 fire("UI_SCALE_CHANGED")
-near3(D.chips[1].frame:GetWidth(), 24 * K * 1200 / 1440, "chip size at 1200")
-near3(select(2, imgCenter(D.chips[1].frame)), secY(15), "chip y after the rescale")
-near3(select(2, imgCenter(D.chips[4].frame)), MU.base.BOT, "absent chip y after the rescale")
-local l, t, w, h = imgRect(D.parts.axis)
-near3(t, MU.base.TOP - MU.AX_UP, "axis top after the rescale"); near3(l + w / 2, MU.base.DOT_AX, "axis x after the rescale")
-local _, tt, _, th = imgRect(D.parts.ticks[31])
-near3(tt + th / 2, MU.base.TOP, "the 30 s tick after the rescale")
-tick(1)
-near3(select(2, imgCenter(D.chips[1].frame)), secY(14), "still moving after the rescale")
+spec.seat(RECTS.upper)
+near3(m.rows[1].chip.frame:GetWidth(), 20 * K * 1200 / 1440, "chip size at 1200")
+local cx, cy = imgCenter(m.rows[1].chip.frame)
+near3(cx, MU.CHIP_X + MU.CHIP / 2, "chip x after the rescale"); near3(cy, rowCenterY(MU.TOP, 1), "chip y after the rescale")
+local _, _, w = imgRect(m.rows[1].fillTex)
+near3(w, MU.BAR_W * 15 / 30, "the drain keeps its width in image px")
+check(m.rows[1].time.monoSize and math.abs(m.rows[1].time.monoSize - MU.TIME_SIZE * K * 1200 / 1440) < 1e-6, "text restyled")
+-- the vertical one too
+SetScreen(1440)
+local mv, _, vspec = mount("debuffsV", "upper")
+pushList({ ent("Corruption", 15) })
+SetScreen(1200)
+vspec.seat(RECTS.upper)
+local _, ty = imgCenter(mv.rows[1].chip.frame)
+near3(ty, MU.AXB - 15 * 112 / 30, "vertical chip y after the rescale")
 """)
 
-case("dots_hide_with_no_target_and_show_with_one")(r"""
-HAS = false
-UnitExists = function(unit) check(unit == "target", "UnitExists asked about " .. tostring(unit)); return HAS end
-local D = boot({ db = {} })
-check(D.gate, "FS.GunsightDots.gate (the target visibility layer) is missing")
-check(D.gate:GetParent() == D.frame and D.content:GetParent() == D.gate, "the layer sits between the piece frame and the content")
-check(not D.gate:IsShown() and not isVisible(D.content), "no target at build: the whole scale is hidden")
-check(D.gate:GetFrameLevel() == D.frame:GetFrameLevel(),
-    "the gate takes the piece frame's level, so it adds no stacking level")
-check(D.content:GetFrameLevel() == D.frame:GetFrameLevel() + 1,
-    "the content keeps the level it had as a direct child of the piece frame")
-check(D.frame:IsShown() and FS.Gunsight.IsPieceOn("dot"), "the piece itself stays on (that is the user's setting)")
-push(mkState({ corruption = 10 }))
-check(not isVisible(D.chips[1].frame), "a live chip is hidden with no target")
-HAS = true; fire("PLAYER_TARGET_CHANGED")
-check(D.gate:IsShown() and isVisible(D.content) and isVisible(D.chips[1].frame), "a target: scale and chip are visible")
-HAS = false; fire("PLAYER_TARGET_CHANGED")
-check(not isVisible(D.content) and not isVisible(D.chips[1].frame), "target dropped: hidden again")
-check(D.frame:IsShown(), "dropping the target never touches the piece")
-HAS = true; fire("PLAYER_ENTERING_WORLD")
-check(D.gate:IsShown(), "PLAYER_ENTERING_WORLD re-reads the target")
+case("seat_copies_the_rect_and_does_not_keep_the_table")(r"""
+boot()
+local m, _, spec = mount("debuffsH", "upper")
+pushList({ ent("Rend", 9) })
+local shared = { x = MU.AREA_X, y = MU.LOWER_Y, w = MU.AREA_W, h = MU.AREA_H }
+spec.seat(shared)
+shared.y = 0                            -- GunsightAreas reuses one table per area
+local _, cy = imgCenter(m.rows[1].chip.frame)
+near3(cy, rowCenterY(MU.HZ, 1), "the row stays where it was seated")
+spec.seat(RECTS.lower)
+local _, cy2 = imgCenter(m.rows[1].chip.frame)
+near3(cy2, rowCenterY(MU.HZ, 1), "moved to the lower area")
 """)
 
-case("dots_gate_is_written_only_when_its_answer_changes")(r"""
-HAS = true
-UnitExists = function() return HAS end
-local D = boot({ db = {} })
-local function writes() return D.gate.writes or 0 end
-HAS = false; fire("PLAYER_TARGET_CHANGED")
-check(not D.gate:IsShown(), "setup: no target, hidden")
-local base = writes()
-fire("PLAYER_TARGET_CHANGED"); fire("UNIT_HEALTH", "target"); fire("UNIT_HEALTH", "target")
-fire("UNIT_FLAGS", "target"); fire("UNIT_FACTION", "target")
-check(writes() == base, "an unchanged hidden answer writes nothing: " .. (writes() - base) .. " extra write(s)")
-HAS = true; fire("PLAYER_TARGET_CHANGED")
-check(D.gate:IsShown() and writes() == base + 1, "a changed answer is written exactly once")
-local shown = writes()
-fire("PLAYER_TARGET_CHANGED"); fire("UNIT_HEALTH", "target"); fire("UNIT_HEALTH", "target")
-check(writes() == shown, "an unchanged shown answer writes nothing: " .. (writes() - shown) .. " extra write(s)")
-""")
-
-case("dot_target_layer_composes_with_the_piece_toggle")(r"""
-HAS = true
-UnitExists = function() return HAS end
-local D = boot({ db = {} })
-push(mkState({ corruption = 10 }))
-check(isVisible(D.content), "piece on and a target: visible")
-FS.Gunsight.SetPiece("dot", false, true)
-check(not isVisible(D.content) and D.gate:IsShown(), "piece off with a target: hidden by the piece, the layer is untouched")
-HAS = false; fire("PLAYER_TARGET_CHANGED")
-FS.Gunsight.SetPiece("dot", true, true)
-check(D.frame:IsShown() and not isVisible(D.content), "piece on again with no target: still hidden")
-HAS = true; fire("PLAYER_TARGET_CHANGED")
-check(isVisible(D.content), "piece on and a target again: visible")
-FS.Gunsight.SetPiece("dot", false, true)
-HAS = false; fire("PLAYER_TARGET_CHANGED")
-HAS = true; fire("PLAYER_TARGET_CHANGED")
-check(not D.frame:IsShown(), "a target change never re-shows a piece the user turned off")
-check(not isVisible(D.content), "piece off stays off through target changes")
-check(onUpdateFrames() == 0, "the layer adds no OnUpdate")
-""")
-
-case("a_secret_target_answer_keeps_the_dots_shown")(r"""
-HAS = false
-UnitExists = function() return HAS end
-local D = boot({ db = {} })
-check(not D.gate:IsShown(), "setup: no target, hidden")
--- the mock calls the plain false UnitExists returns "secret": a truth test would hide the scale (the rule
--- itself is pinned once in theme-harness.py; this proves the dots go through it)
-SECRET_FN = function(v) return v == false end
-fire("PLAYER_TARGET_CHANGED")
-check(D.gate:IsShown(), "a value IsSecret flags keeps the scale shown (never truth-tested)")
-""")
-
-case("a_rescale_does_not_re_show_the_dots_without_a_target")(r"""
-HAS = false
-UnitExists = function() return HAS end
-local D = boot({ db = {} })
-SetScreen(1200); fire("UI_SCALE_CHANGED")
-check(not D.gate:IsShown() and not isVisible(D.content), "hidden with no target after a rescale")
-HAS = true; fire("PLAYER_TARGET_CHANGED")
-SetScreen(1440); fire("UI_SCALE_CHANGED")
-check(D.gate:IsShown(), "still shown with a target after a rescale")
-""")
-
-case("a_target_no_dot_can_land_on_shows_no_scale_and_no_stuck_chip")(r"""
--- The reported bug: a SW:P chip left resting at 0 under a friendly target (THRALL). The ledger knows nothing about
--- a GUID it never saw, so it answers "absent" and the dim hollow chip drew for a target nothing can be DoT'd on.
-HAS, ATTACKABLE = true, true
-UnitExists = function() return HAS end
-UnitCanAttack = function(a, b)
-    check(a == "player" and b == "target", "UnitCanAttack asked about " .. tostring(a) .. ", " .. tostring(b))
-    return ATTACKABLE
-end
-local D = boot({ db = {} })
-push(mkState({ corruption = 10 }, { targetEpoch = 1 }))
-check(D.gate:IsShown() and isVisible(D.chips[1].frame), "an attackable target with a live DoT: chip visible")
-ATTACKABLE = false; fire("PLAYER_TARGET_CHANGED")
-push(mkState({ corruption = "absent" }, { targetEpoch = 2 }))
-check(D.chips[1].mode == "absent", "setup: the ledger reads the unseen friendly GUID as absent")
-check(not D.gate:IsShown(), "a target that cannot be attacked: the gate is hidden")
-check(not isVisible(D.content) and not isVisible(D.chips[1].frame), "no chip, absent or live, shows under a friendly target")
-check(D.frame:IsShown() and FS.Gunsight.IsPieceOn("dot"), "the piece toggle is never touched")
-ATTACKABLE = true; fire("PLAYER_TARGET_CHANGED")
-check(D.gate:IsShown() and isVisible(D.chips[1].frame), "back on an attackable target: the absent chip is the refresh cue again")
--- a duel or mind control flips attackability with no target change: UNIT_FLAGS / UNIT_FACTION on the target re-read it
-ATTACKABLE = false; fire("UNIT_FACTION", "target")
-check(not D.gate:IsShown(), "UNIT_FACTION on the target re-reads attackability")
-ATTACKABLE = true; fire("UNIT_FLAGS", "target")
-check(D.gate:IsShown(), "UNIT_FLAGS on the target re-reads attackability")
-""")
-
-case("a_dead_target_hides_the_scale_because_its_dots_are_gone")(r"""
--- A corpse stays targeted and nothing tells the ledger its DoTs died with it: the chip kept sliding, then sat at 0.
-HAS, DEAD = true, false
-UnitExists = function() return HAS end
-UnitIsDeadOrGhost = function(unit) check(unit == "target", "UnitIsDeadOrGhost asked about " .. tostring(unit)); return DEAD end
-local D = boot({ db = {} })
-push(mkState({ corruption = 12 }))
-check(D.gate:IsShown() and isVisible(D.chips[1].frame), "a live target with a DoT: chip visible")
-DEAD = true; fire("UNIT_HEALTH", "target")
-check(not D.gate:IsShown() and not isVisible(D.chips[1].frame), "the target died: the scale and its chip are gone")
-tick(30)
-check(not isVisible(D.chips[1].frame), "and the ledger's expiry never brings the corpse's chip back")
-DEAD = false; fire("UNIT_HEALTH", "target")
-check(D.gate:IsShown(), "alive again: shown")
-DEAD = true; fire("PLAYER_TARGET_CHANGED")
-check(not D.gate:IsShown(), "a dead target selected: hidden at once")
--- the death event is a target-only unit event: no all-units UNIT_HEALTH spam
-local only
-for _, f in ipairs(FRAMES) do
-    if f.events.UNIT_HEALTH then only = f.unitOnly and f.unitOnly.UNIT_HEALTH end
-end
-check(only and #only == 1 and only[1] == "target", "UNIT_HEALTH is registered for the target unit only")
-""")
-
-case("an_enemy_ghost_hides_the_scale_like_a_dead_target")(r"""
--- UnitIsDead is false for a ghost; UnitIsDeadOrGhost is the one the shared rule asks, so a released enemy player hides it too
-HAS = true
-UnitExists = function() return HAS end
-UnitIsDead = function() return false end
-UnitIsDeadOrGhost = function() return true end
-local D = boot({ db = {} })
-check(not D.gate:IsShown(), "an enemy ghost: the scale is hidden")
-UnitIsDeadOrGhost = function() return false end
-fire("UNIT_HEALTH", "target")
-check(D.gate:IsShown(), "a live enemy: shown")
-""")
-
-case("an_unreadable_target_flag_keeps_the_scale_shown")(r"""
-HAS = true
-UnitExists = function() return HAS end
-local D = boot({ db = {} })
--- a secret answer (FS.IsSecret, checked before anything touches the value) reads as "can take a DoT"
-UnitCanAttack = function() return false end
-UnitIsDeadOrGhost = function() return true end
-SECRET_FN = function(v) return v == false or v == true end
-fire("PLAYER_TARGET_CHANGED")
-check(D.gate:IsShown(), "secret UnitCanAttack / UnitIsDeadOrGhost keep the scale shown (never truth-tested)")
--- a throwing or odd answer likewise
-SECRET_FN = function() return false end
-UnitCanAttack = function() error("hidden API") end
-UnitIsDeadOrGhost = function() return "odd" end
-fire("PLAYER_TARGET_CHANGED")
-check(D.gate:IsShown(), "a throwing or non-boolean answer keeps the scale shown")
--- the legacy 1 / nil forms still mean true / false
-UnitCanAttack = function() return nil end
-UnitIsDeadOrGhost = function() return nil end
-fire("PLAYER_TARGET_CHANGED")
-check(not D.gate:IsShown(), "a plain nil from UnitCanAttack is false: hidden")
-UnitCanAttack = function() return 1 end
-fire("PLAYER_TARGET_CHANGED")
-check(D.gate:IsShown(), "a plain 1 is true: shown")
-""")
-
-case("one_chip_that_throws_does_not_strand_the_others")(r"""
--- Apply ran every chip inside ONE pcall: a throw in chip 1 skipped chips 2..4 (and the tick start), so they kept
--- their old look, which on a stale push is a stuck icon. Each chip is its own pcall and the failed one goes off.
-local D = boot({ db = {}, class = "WARLOCK" })
-push(mkState({ corruption = 10, bane_agony = 10, immolate = 10 }))
-check(D.chips[2].mode == "live" and D.chips[3].mode == "live", "setup: three live chips")
-local boom = D.chips[1].frame.icon
-local thrown = false     -- throws ONCE: the retry below must be able to succeed
-boom.SetTexture = function(self, id)
-    if id == 666 and not thrown then thrown = true; error("boom") end
-    self.path = id
-end
-local state = mkState({ corruption = 10, bane_agony = "absent", immolate = "absent" })
-state.row[1].icon = 666
-local ok = pcall(push, state)
-check(ok, "the throw never escapes the subscriber")
-check(D.chips[1].mode == "off" and not isVisible(D.chips[1].frame), "the chip that threw is off and hidden, not left stale")
-check(D.chips[2].mode == "absent" and D.chips[3].mode == "absent", "the chips after it still took the new state")
-check(not isVisible(D.chips[1].frame) and isVisible(D.chips[2].frame), "the others are drawn")
-check(onUpdateFrames() == 0, "no live chip is left: no OnUpdate")
-check(DEGRADED.gunsightdots_state ~= nil, "the failure is logged (once per session), not swallowed")
--- the retry: the SAME bad row again, now that the stub no longer throws. DropChip cleared key / iconId, so the
--- chip reseats its icon; without that clear the cache still reads 666 and the stale icon survives on a live chip
-check(D.chips[1].frame.icon.path ~= 666, "setup: the throw left the old icon on the chip")
-push(state)
-check(D.chips[1].mode == "live" and isVisible(D.chips[1].frame), "the retry shows the chip again")
-check(D.chips[1].frame.icon.path == 666, "the retry reseated the icon (a skipped reseat leaves the stale one): " .. tostring(D.chips[1].frame.icon.path))
-""")
-
-# One rule decides who owns the seat: FS.HudProfiles.ClassSlot (HudProfiles.lua), shared with ConsoleKeys. This
-# file asks it at call time, so a swapped answer must change what is drawn (and a missing helper must not throw).
-case("the_class_slot_comes_from_the_shared_helper")(r"""
-boot({ db = {}, noEvents = true })
-local asked = 0
-FS.HudProfiles.ClassSlot = function(p) asked = asked + 1; return "seals" end
-fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
-local D = FS.GunsightDots
-check(asked >= 1, "the build asked the shared helper")
-check(next(D.parts) == nil and #D.chips == 0, "a Warlock profile with the helper answering seals draws no scale")
-boot({ db = {}, class = "PALADIN", noEvents = true })
-FS.HudProfiles.ClassSlot = function() return "dots" end
-fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
-D = FS.GunsightDots
-check(D.parts.axis and #D.chips == D.D.MAX_LANES, "a Paladin profile with the helper answering dots draws the scale")
--- the helper missing (a load order bug) keeps the old path and says so, instead of throwing
-boot({ db = {}, noEvents = true })
-FS.HudProfiles.ClassSlot = nil
-fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
-D = FS.GunsightDots
-check(D.parts.axis and #D.chips == D.D.MAX_LANES, "no helper: the scale is built as before")
-check(DEGRADED.gunsightdots_noclassslot ~= nil, "and the missing helper is logged")
--- a throwing helper is contained the same way
-boot({ db = {}, noEvents = true })
-FS.HudProfiles.ClassSlot = function() error("boom") end
-fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
-D = FS.GunsightDots
-check(D.parts.axis, "a throwing helper keeps the scale")
-check(DEGRADED.gunsightdots_classslot ~= nil, "and is logged")
-""")
-
-# The build latches the class slot once. If the Hud or its profile cannot be read, say so.
-case("an_unreadable_profile_at_build_is_logged")(r"""
-boot({ db = {}, noEvents = true })
-FS.Hud = nil
-fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
-check(DEGRADED.gunsightdots_noprofile ~= nil, "FS.Hud missing at build is logged")
-boot({ db = {}, noEvents = true })
-FS.Hud.GetProfile = nil
-fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
-check(DEGRADED.gunsightdots_noprofile ~= nil, "GetProfile missing at build is logged")
-boot({ db = {}, noEvents = true })
-FS.Hud.GetProfile = function() error("boom") end
-fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
-check(DEGRADED.gunsightdots_noprofile ~= nil, "a throwing GetProfile at build is logged")
--- a class that HAS a shipped profile but GetProfile has none yet: the build would latch the dots path
-boot({ db = {}, class = "PALADIN", noEvents = true })
-PROFILE = nil
-fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
-check(DEGRADED.gunsightdots_noprofile ~= nil, "no profile yet for a class that has one is logged")
--- a class with no HUD profile at all is normal: silent
-boot({ db = {}, class = "ROGUE", noEvents = true })
-fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
-check(next(DEGRADED) == nil, "a rogue is silent, got " .. tostring(next(DEGRADED)))
-boot({ db = {}, class = "WARLOCK", noEvents = true })
-fire("ADDON_LOADED", "forever-stuwave"); fire("PLAYER_LOGIN")
-check(next(DEGRADED) == nil, "a warlock is silent, got " .. tostring(next(DEGRADED)))
-""")
-
-# The dots path was built because no profile was readable then; if the profile turns out to give the seat to the
-# seal chamber, the scale steps aside (hidden, unsubscribed) at the next show or push.
-case("a_seal_profile_arriving_after_the_build_yields_on_piece_show")(r"""
-local D = boot({ db = {}, class = "ROGUE" })    -- no profile at build: the dots path is built
-check(PROFILE == nil and D.parts.axis and #D.chips == D.D.MAX_LANES, "setup: the scale was built")
-check(#SUBS == 1, "setup: subscribed")
-PROFILE = FS.HudProfiles.PALADIN              -- the Hud resolves the profile late
-FS.Gunsight.SetPiece("dot", false, true)
-check(#SUBS == 0, "off unsubscribes")
-FS.Gunsight.SetPiece("dot", true, true)
-check(#SUBS == 0, "on does not subscribe again: the seat belongs to the seal chamber now")
-check(not isVisible(D.content), "the scale content is hidden")
-for i, c in ipairs(D.chips) do check(not isVisible(c.frame), "chip " .. i .. " is hidden") end
-check(onUpdateFrames() == 0, "nothing runs")
-check(D.frame:IsShown() and FS.Gunsight.IsPieceOn("dot"), "the piece itself stays registered and on")
-push(mkState({}))
-check(not isVisible(D.content), "a later push draws nothing")
-check(#AURA_TOUCHED == 0, "no aura API was read")
+case("secret_or_malformed_entries_never_throw_and_draw_nothing")(r"""
+boot()
+local m = mount("debuffsH", "upper")
+local ok = pcall(pushList, {
+    { name = SECRETV, icon = 1, expires = NOW + 5, count = 1 },
+    { name = "Rend", icon = 1, expires = SECRETV, count = SECRETV, duration = SECRETV },
+    { name = "Sunder Armor", icon = SECRETV, expires = NOW + 9, count = 3, duration = 30 },
+    { name = "Expose Armor", icon = 5, expires = "soon", count = "x" },
+    { name = "Garrote", icon = 5, expires = NOW + 7 },
+})
+check(ok, "a throw escaped the subscriber")
+check(m.rows[1].mode == "off" and m.rows[2].mode == "off", "a secret name or expiry reads as unusable")
+check(m.rows[3].mode == "live" and m.rows[3].chip.label:IsShown(), "a secret icon falls back to the abbreviation")
+check(m.rows[3].stack.text == "x3", "plain stacks still show")
+check(m.rows[4].mode == "off", "a string expiry is not a number")
+check(m.rows[5].mode == "live" and m.rows[5].time.text == "7s", "the plain one is drawn")
 check(next(DEGRADED) == nil, "no degrade: " .. tostring(next(DEGRADED)))
 """)
 
-case("a_seal_profile_arriving_after_the_build_yields_on_a_push")(r"""
-local D = boot({ db = {}, class = "ROGUE" })
-check(#SUBS == 1, "setup: subscribed")
-PROFILE = FS.HudProfiles.PALADIN
-IN_COMBAT = true
-push(mkState({}, { inCombat = true }))
--- the subscription stays (Hud.Unsubscribe inside the Hud's own push loop would skip a neighbour) but is inert
-check(not isVisible(D.content), "the push made the scale step aside: content hidden")
-for i, c in ipairs(D.chips) do check(not isVisible(c.frame), "chip " .. i .. " is hidden") end
-tick(0.5)
-check(onUpdateFrames() == 0, "nothing runs")
-fire("PLAYER_REGEN_DISABLED"); fire("PLAYER_REGEN_ENABLED")
-check(not isVisible(D.content), "combat events do not bring it back")
-push(mkState({}, { inCombat = true, targetEpoch = 9 }))
-check(not isVisible(D.content) and onUpdateFrames() == 0, "a further push stays inert")
-FS.Gunsight.SetPiece("dot", false, true)
-check(#SUBS == 0, "the next piece hide drops the subscription")
-FS.Gunsight.SetPiece("dot", true, true)
-check(#SUBS == 0 and not isVisible(D.content), "and showing it again does not bring it back")
-check(#AURA_TOUCHED == 0, "no aura API was read")
+case("one_row_that_throws_does_not_strand_the_others")(r"""
+boot()
+local m = mount("debuffsH", "upper")
+m.rows[1].chip.frame.icon.SetTexture = function() error("boom") end
+local ok = pcall(pushList, { ent("Rend", 9), ent("Deep Wounds", 12), ent("Thunder Clap", 5) })
+check(ok, "the throw never escapes the subscriber")
+check(m.rows[1].mode == "off" and not isVisible(m.rows[1].frame), "the row that threw is off and hidden")
+check(m.rows[2].mode == "live" and m.rows[3].mode == "live" and isVisible(m.rows[3].frame), "the rows after it took the list")
+check(DEGRADED.gunsightdots_state ~= nil, "logged once under gunsightdots_state")
 """)
 
-case("a_seal_profile_arriving_while_chips_are_live_clears_them_and_the_ticker")(r"""
-local D = boot({ db = {}, class = "ROGUE" })
-PROFILE = FS.HudProfiles.WARLOCK
-push(mkState({ corruption = 15, immolate = 10 }))     -- a profile that reads as dots for now: chips go live
-check(#liveChips(D) == 2 and onUpdateFrames() == 1, "setup: two live chips, one ticker")
-PROFILE = FS.HudProfiles.PALADIN
-IN_COMBAT = true
-push(mkState({}, { inCombat = true }))
-check(#liveChips(D) == 0, "no chip is left live")
-for i, c in ipairs(D.chips) do
-    check(c.mode == "off" and not isVisible(c.frame), "chip " .. i .. " is off and hidden, mode " .. tostring(c.mode))
+case("a_chip_is_built_the_way_the_action_buttons_are")(r"""
+local D = boot()
+local m = mount("debuffsH", "upper")
+check(#SKIN_CALLS == 5, "SkinButton once per row, got " .. #SKIN_CALLS)
+for i, call in ipairs(SKIN_CALLS) do
+    colorIs(call.opts.borderColor, D.D.COLORS.violet, "chip " .. i .. " violet border")
+    check(call.button.seatedBy == "SeatAuraTile", "chip " .. i .. " seated by SeatAuraTile")
+    check(call.button.fsAuraPlate and call.button.fsAuraPlate.seated, "chip " .. i .. " has the plate")
+    check(call.button.mouse == false, "chip " .. i .. " is click through")
 end
-check(onUpdateFrames() == 0, "the ticker is cleared")
-check(not isVisible(D.content), "content hidden")
--- once yielded it stays yielded, whatever the profile says later
-PROFILE = FS.HudProfiles.WARLOCK
-push(mkState({ corruption = 15 }))
-check(not isVisible(D.content) and #liveChips(D) == 0 and onUpdateFrames() == 0, "a later dots push does not bring the scale back")
+local mv = mount("debuffsV", "lower")
+check(#SKIN_CALLS == 9, "four chips more for the axis, got " .. #SKIN_CALLS)
 """)
 
-case("a_dots_profile_arriving_after_the_build_keeps_the_scale")(r"""
-local D = boot({ db = {}, class = "ROGUE" })    -- built with no profile, then a Warlock profile arrives
-PROFILE = FS.HudProfiles.WARLOCK
-push(mkState({ corruption = 10 }))
-check(#SUBS == 1 and isVisible(D.content), "a dots profile keeps the scale and the subscription")
-FS.Gunsight.SetPiece("dot", false, true); FS.Gunsight.SetPiece("dot", true, true)
-check(#SUBS == 1, "and a toggle resubscribes")
+case("a_missing_icon_falls_back_to_the_abbreviation")(r"""
+boot()
+local m = mount("debuffsH", "upper")
+pushList({ ent("Rend", 9, { noicon = true }), ent("Deep Wounds", 9) })
+check(m.rows[1].chip.label:IsShown() and m.rows[1].chip.label.text == "RE", "no icon: two letters of the name, got " .. tostring(m.rows[1].chip.label.text))
+check(not m.rows[1].chip.frame.icon:IsShown(), "the icon texture is hidden")
+check(not m.rows[2].chip.label:IsShown(), "an icon hides the label")
 """)
 
-case("the_registered_flag_follows_the_registry_answer")(r"""
-local D = boot({ db = {}, class = "WARLOCK" })
-check(D.frame ~= nil and D.registered == true, "an accepted piece reads registered, got " .. tostring(D.registered))
-local R = boot({ db = {}, class = "WARLOCK", refusePiece = true })
-check(R.frame ~= nil, "setup: the build ran and left its frame")
-check(R.registered == false, "a refused registration reads false, got " .. tostring(R.registered))
-local T = boot({ db = {}, class = "PALADIN" })
-check(T.frame ~= nil and T.registered == true, "the seals class slot registers its piece too")
-""")
-
-case("no_aura_api_is_ever_read")(r"""
-local D = boot({ db = {}, class = "WARLOCK" })
+case("no_aura_api_is_ever_read_and_nothing_is_logged")(r"""
+boot()
+local mh = mount("debuffsH", "upper")
+local mv = mount("debuffsV", "lower")
 IN_COMBAT = true
-push(mkState({ corruption = 10, bane_agony = 2, immolate = "absent" }))
-tick(0.5); tick(5)
-push(mkState({}))
-FS.Gunsight.SetPiece("dot", false, true); FS.Gunsight.SetPiece("dot", true, true)
+fire("PLAYER_REGEN_DISABLED")
+pushList({ ent("Rend", 9), ent("Deep Wounds", 0), ent("Thunder Clap", nil), ent("Sunder Armor", 2.5, { count = 5 }) }, 4)
+tick(0.5); tick(5); tick(10)
+pushList({})
+IN_COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
 check(#AURA_TOUCHED == 0, "an aura API was read: " .. tostring(AURA_TOUCHED[1]))
 check(next(DEGRADED) == nil, "a degrade was logged: " .. tostring(next(DEGRADED)))
 """)
 
-case("a_throwing_stub_never_escapes_a_push")(r"""
-local D = boot({ db = {} })
--- a state with garbage in it must not throw out of the subscriber
-local ok = pcall(push, { active = true, row = { { key = "corruption", remaining = "x", expiresAt = "y" } }, buffsMissing = {}, procs = {} })
-check(ok, "a malformed row threw out of the subscriber")
+
+case("the_modules_work_inside_the_real_gunsight_areas")(r"""
+boot({ realareas = true })
+local Areas = FS.GunsightAreas
+check(Areas.AreaOf("debuffsH") == "upper", "the default upper area holds Target debuffs Horizontal, got " .. tostring(Areas.AreaOf("debuffsH")))
+local mh = FS.GunsightDots.modules.debuffsH
+check(mh.built and #TDSUBS == 1, "the areas built the module and onShow subscribed it")
+pushList({ ent("Rend", 9), ent("Deep Wounds", 12) })
+check(isVisible(mh.rows[1].frame), "a row is drawn inside the real upper host")
+local _, cy = imgCenter(mh.rows[1].chip.frame)
+near3(cy, rowCenterY(MU.TOP, 1), "row 1 sits on the first tick gap of the upper area")
+FS.Gunsight.SetArea("upper", "debuffsV")
+check(Areas.AreaOf("debuffsH") == nil and Areas.AreaOf("debuffsV") == "upper", "the picker swaps the module")
+local mv = FS.GunsightDots.modules.debuffsV
+check(#TDSUBS == 1 and mh.rows[1].mode == "off", "the old module released its subscription and rows")
+check(mv.rows[1].mode == "live", "the new one drew the current list")
+local _, vy = imgCenter(mv.rows[1].chip.frame)
+near3(vy, MU.AXB - 9 * 112 / 30, "vertical chip on the 0 to 30 s axis")
+FS.Gunsight.SetArea("upper", "empty")
+FS.Gunsight.SetArea("lower", "debuffsH")
+check(Areas.AreaOf("debuffsH") == "lower", "Horizontal can move to the lower area")
+local _, ly = imgCenter(mh.rows[1].chip.frame)
+near3(ly, rowCenterY(MU.HZ, 1), "and its rows start at the horizon there")
+check(next(DEGRADED) == nil, "no degrade: " .. tostring(next(DEGRADED)))
 """)
 
 
@@ -1879,18 +1290,19 @@ def static_checks() -> list[tuple[str, str | None]]:
     out: list[tuple[str, str | None]] = []
     toc = [ln.strip() for ln in TOC.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")]
     try:
-        g, d = toc.index("Modules/CombatHud/Gunsight.lua"), toc.index("Modules/CombatHud/GunsightDots.lua")
-        out.append(("toc_order", None if d > g else
-                    f"GunsightDots.lua must load after Gunsight.lua (positions {g}, {d})"))
-        hp = toc.index("Modules/CombatHud/HudProfiles.lua")
-        out.append(("toc_after_hud_profiles", None if d > hp else
-                    "GunsightDots.lua must load after HudProfiles.lua (it calls FS.HudProfiles.ClassSlot)"))
-        fh = toc.index("Core/FrameHelpers.lua")
-        out.append(("toc_after_frame_helpers", None if d > fh else "GunsightDots.lua must load after FrameHelpers.lua"))
+        d = toc.index("Modules/CombatHud/GunsightDots.lua")
+        for dep in ("Modules/CombatHud/Gunsight.lua", "Modules/CombatHud/GunsightAreas.lua",
+                    "Modules/CombatHud/TargetDebuffs.lua", "Core/FrameHelpers.lua"):
+            out.append((f"toc_after_{Path(dep).stem}", None if toc.index(dep) < d else f"GunsightDots.lua must load after {dep}"))
     except ValueError as e:
         out.append(("toc_order", f"{e}"))
     raw = TOC.read_bytes()
     out.append(("toc_stays_crlf", None if raw.count(b"\r\n") == raw.count(b"\n") else "forever-stuwave.toc must stay CRLF"))
+    src = DOTS.read_text(encoding="utf-8") if DOTS.exists() else ""
+    out.append(("source_does_not_register_the_dot_piece", None if "RegisterPiece" not in src else
+                "GunsightDots.lua mentions RegisterPiece: GunsightAreas owns the dot piece"))
+    for pat in ("UnitAura", "UnitDebuff", "GetAuraDataByIndex", "C_UnitAuras", "ReadAuraSlot"):
+        out.append((f"source_never_reads_{pat}", None if pat not in src else f"GunsightDots.lua mentions {pat}"))
     return out
 
 
@@ -1900,20 +1312,19 @@ def run_case(name: str, body: str, mu: dict) -> str | None:
     lua.globals().LAYOUT_SRC = LAYOUT.read_text(encoding="utf-8")
     lua.globals().CONFIG_SRC = CONFIG.read_text(encoding="utf-8")
     lua.globals().GUNSIGHT_SRC = GUNSIGHT.read_text(encoding="utf-8")
-    lua.globals().PROFILES_SRC = PROFILES.read_text(encoding="utf-8")
     lua.globals().DOTS_SRC = DOTS.read_text(encoding="utf-8")
+    lua.globals().AREAS_SRC = AREAS.read_text(encoding="utf-8")
     lua.globals().HAS_TARGET_SRC = _load_gunsight_harness().theme_target_rule_lua()
     lua.execute("MU = " + lua_value(mu))
-    chunk = PRELUDE + "\n" + body
     try:
-        lua.execute(chunk)
+        lua.execute(PRELUDE + "\n" + body)
     except LuaError as e:
         return str(e)
     return None
 
 
 def main() -> int:
-    mu = mockup_dots()
+    mu = mockup_v7()
     failures = 0
 
     def report(name: str, err: str | None) -> None:
@@ -1938,10 +1349,11 @@ def main() -> int:
         except LuaError as e:  # a harness bug, not a pass
             err = f"harness error: {e}"
         report(name, err)
-    for name, err in static_checks():
+    statics = static_checks()
+    for name, err in statics:
         report(name, err)
 
-    total = len(CASES) + len(static_checks())
+    total = len(CASES) + len(statics)
     print(f"\n{total - failures}/{total} passed")
     return 1 if failures else 0
 

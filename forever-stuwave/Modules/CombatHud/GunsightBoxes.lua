@@ -71,7 +71,9 @@
 -- Config.OnChange, coalesced to one apply per box on the next frame, and a profile switch moves them too. One slider px is
 -- C.BAR_PX image px: the resource default (4) is the 2 image px rail above, the health default (11) a taller 5.5, and the
 -- width setting is scaled by C.BAR_WIDTH_SCALE (its 100% is 1.2 x the name). The numbers are off until a player turns them on.
--- UNVERIFIED IN GAME: where the numbers stand, and UnitPowerPercent with the ScaleTo100 curve.
+-- With them on the box grows UP (box.grow, Bars.Extra) so one row fits under the rails: health at its left end, resource at the right
+-- end, a fixed width each so a long value clips; the divider, line 2 and the tile keep their screen seats, and box.onGrow tells the tape.
+-- UNVERIFIED IN GAME: the numbers row and its clip, and UnitPowerPercent with the ScaleTo100 curve.
 --
 -- AT REST (when a box is shown but idle: the target's only): the plate and steel edge, the unit's name muted,
 -- no spell and no tile.
@@ -141,7 +143,7 @@ local C = {
     -- target bar settings and numbers (not in the mockup; the config window mockup has the controls)
     BAR_PX = 0.5,                                    -- image px per slider px: its 4 is the 2 above (the health default is 11)
     BAR_WIDTH_SCALE = 1.2,                           -- the width setting's 100% is the look the old 120% gave (Parker, in game)
-    NUM_SIZE = 9, NUM_GAP = 5, NUM_LINE = 1,         -- number type size, gap past the box edge, gap between lines
+    NUM_SIZE = 9, NUM_PAD = 1,                       -- number type size, gap above and below the numbers row
     POWER_KEYS = { [0] = "mana", [1] = "rage", [2] = "focus", [3] = "energy" },  -- UnitPowerType -> TB_PC key
     BAR_EVENTS = { "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_POWER_UPDATE", "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER" },
     DIV_Y = 29, DIV_A = 0.4,                         -- hline(b.y + 29, b.x + 7, b.x + b.w - 7, ..., .4 * a)
@@ -436,6 +438,9 @@ end
 -- The target's HP and power rules (option B, see the header)
 -------------------------------------------------------------------------------
 
+-- Layout is defined with the build code below; the numbers' growth re-runs it.
+local Layout
+
 -- State and helpers hang off one table: the file is well clear of the file-scope local limit, but this keeps
 -- it that way.
 local Bars = {
@@ -528,6 +533,7 @@ function Bars.Build(box)
     b.powerShown = true
     b.hpText = NewFont(b.frame, C.NUM_SIZE, colors.white)       -- the value numbers, off until a player asks
     b.powerText = NewFont(b.frame, C.NUM_SIZE, colors.white)
+    b.powerText:SetJustifyH("RIGHT")                            -- health reads from the left end, the resource from the right
     b.hpText:Hide()
     b.powerText:Hide()
     b.numbers, b.mode = false, SETTINGS.numberFormat.default
@@ -572,12 +578,14 @@ function Bars.SeatRail(box, rail, y, h, w)
     rail.tip:SetWidth(C.TB_TIP_W * k)
 end
 
--- The numbers stand past the box's outer edge: `base` is the baseline's image px below the box top.
-function Bars.SeatText(box, fs, base)
+-- One half of the numbers row inside the box: `base` is the baseline's image px below the box top, `x` the
+-- UI-unit offset of the half's inner edge from the box's left. A fixed width, so a long "current / max" clips.
+function Bars.SeatText(box, fs, point, x, base, width)
     local k = ui(1)
     FS.Theme.ApplyMono(fs, FontSize(C.NUM_SIZE), colors.white)
     fs:ClearAllPoints()
-    fs:SetPoint("BOTTOMLEFT", box.frame, "TOPRIGHT", C.NUM_GAP * k, -(base + C.NUM_SIZE * C.DESCENT) * k)
+    fs:SetPoint(point, box.frame, "TOPLEFT", x, -(base + C.NUM_SIZE * C.DESCENT) * k)
+    fs:SetWidth(width)
 end
 
 -- Rail heights in image px. The power rule's bottom edge stops one px above the divider: it shrinks first, then the
@@ -600,8 +608,20 @@ function Bars.Seat(box)
     Bars.SeatRail(box, b.hp.green, C.TB_HP_Y, hpH, w)
     Bars.SeatRail(box, b.hp.red, C.TB_HP_Y, hpH, w)
     Bars.SeatRail(box, b.power, C.TB_HP_Y + hpH + C.TB_GAP, pwH, w)
-    Bars.SeatText(box, b.hpText, C.TB_HP_Y + hpH)
-    Bars.SeatText(box, b.powerText, C.TB_HP_Y + hpH + C.NUM_SIZE + C.NUM_LINE)
+    -- The numbers row spans the box's padded width (the rails' widest span): health from its left end, the
+    -- resource to its right end, one row under the rails.
+    local base = C.TB_HP_Y + hpH + C.TB_GAP + pwH + C.NUM_PAD + C.NUM_SIZE
+    Bars.SeatText(box, b.hpText, "BOTTOMLEFT", C.TB_X * k, base, wmax / 2)
+    Bars.SeatText(box, b.powerText, "BOTTOMRIGHT", C.TB_X * k + wmax, base, wmax / 2)
+end
+
+-- Image px the box rises above the option B box so a row of numbers fits between the power rail and the divider
+-- (the divider keeps its screen seat); 0 with the numbers off, so that box is exactly today's.
+function Bars.Extra()
+    if Config.Get(SETTINGS.numbers.key) ~= true then return 0 end
+    local hpH, pwH = Bars.Heights()
+    local railsEnd = C.TB_HP_Y + hpH + C.TB_GAP + pwH
+    return math.max(0, math.ceil(railsEnd + C.NUM_PAD + C.NUM_SIZE + C.NUM_PAD - (C.DIV_Y + C.TGT_GROW)))
 end
 
 -- cur and max go straight to the setters (either may be secret); a setter that refuses is not an error here.
@@ -723,6 +743,8 @@ function Bars.UpdateHealth(box)
     Bars.SetBar(b.hp.green.sb, cur, max)
     Bars.SetBar(b.hp.red.sb, cur, max)
     if b.numbers then Bars.WriteValue(b, b.hpText, "health", cur, max) end
+    -- GunsightTags' health tag label, set only while its toggle is on.
+    if box.healthTag then Bars.WritePercent(box.healthTag, "health", cur, max) end
     Bars.UpdateHealthTips(b)
     if b.lowCurve and not b.lowBroken then
         local okLow, low = pcall(UnitHealthPercent, "target", false, b.lowCurve)
@@ -812,7 +834,14 @@ function Bars.ApplyConfig(box)
     b.numbers = Config.Get(SETTINGS.numbers.key) == true
     local mode = Config.Get(SETTINGS.numberFormat.key)
     b.mode = (mode == "current" or mode == "both" or mode == "percent") and mode or SETTINGS.numberFormat.default
-    Bars.Seat(box)
+    local grow = C.TGT_GROW + Bars.Extra()
+    if grow ~= box.grow then
+        box.grow = grow
+        Layout(box)                                  -- the divider, line 2 and the tile keep their screen seats; it seats the bars too
+        if box.onGrow then box.onGrow(box) end
+    else
+        Bars.Seat(box)
+    end
     b.hpText:SetShown(b.numbers)
     b.powerText:SetShown(b.numbers and b.powerShown)
     if not b.numbers then
@@ -862,6 +891,11 @@ function Bars.Flush()
     for box in pairs(dirty) do Bars.Apply(box) end
 end
 GunsightBoxes.Flush = Bars.Flush
+
+-- Re-reads the target bars of a box (and so any tag a module hung on it): for a module that just changed one.
+function GunsightBoxes.Refresh(box)
+    if type(box) == "table" and box.bars then Bars.Guard(Bars.Refresh, box) end
+end
 
 function Bars.Request(box)
     if box.retired or not box.bars then return end
@@ -1087,7 +1121,7 @@ local function SeatFrame(box)
     frame:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", 0, 0)
 end
 
-local function Layout(box)
+function Layout(box)
     local k = ui(1)
     local g = box.geom
     local frame = box.frame

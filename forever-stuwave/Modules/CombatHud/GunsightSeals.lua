@@ -1,241 +1,120 @@
--- Forever STUwave: Gunsight Seal Chamber chrome (the Paladin's class slot, piece key "dot").
+-- Forever STUwave: Gunsight Seal module, the Paladin's class module for one half height area (upper or lower).
 --
--- The Paladin's seat of the DoT area (mockups/gunsight-hud-v2-2026-10-02/gunsight-hud-v2-2026-10-02.html,
--- drawSealChamber, lines 2099 to 2255; the dispatch at 2361 is CLS==='pl' ? drawSealChamber : drawDots).
--- GunsightDots.lua gives the seat away for a profile whose FS.HudProfiles.ClassSlot is "seals": it builds the
--- piece frame (ForeverSTUwaveGunsightDots, exposed as FS.GunsightDots.frame) and registers it under "dot" but
--- draws nothing. This file hangs the chamber off that frame, so the console's dot key shows and hides it.
+-- The approved design is mockups/gunsight-modules-concepts-v7-2026-10-08.html, sealModule(y0): the seal tile with its name and
+-- "SEAL ACTIVE", the time left large, a 188 px drain bar (0 to 30 s left to right, an amber RESEAL band on the 0 to 3 s end,
+-- ticks and 0 / 15 / 30 numbers) and the Judgement row (a J chip, a 0 to 40 s bar, the time on the target). Every image px number
+-- is in the constants block with its mockup name, and gunsightseals-harness.py re-reads them from the HTML.
 --
--- Lane 7 built the static chrome, lane 8 drives it live from the Hud state, lane 9 makes the Judgement lane live.
---   built   the chamfered frame (fill, edge, halo, the seal's soft radial wash), the "SEAL" header, the 0 to 30 s
---           ruler on the left edge (31 ticks, numbers at the fives), the lens ring (seal_lens.tga) and its three
---           arcs (seal_arcs.tga, at rest), the glyph (seal_glyph_<id>.tga) with a dim halo copy, the seal name,
---           the "SEAL ACTIVE" caption, the amber reseal band (RESEAL), the drain tube (track, rungs, outline),
---           the NO SEAL labels, and the Judgement lane's geometry (JUDGED header, 0 to 40 s ruler, guide, the
---           empty-lane label).
---   LIVE    (drawSealChamber's animated terms, all from own cast times: remaining = expiresAt - GetTime(), both
---           plain, a secret or non number reads as unknown and draws nothing for that part)
---           the drain fill (the seal colour, tail .35 to tip 1, height remaining / 30 s) with its tip bar and tip dot;
---           the countdown (whole seconds above 5, tenths from 5 down) and its muted S; the RESEAL band cue at 3 s
---           (amber tube, fill, tip and number, the wash pulsing with the clock, RESEAL breathing with the pulse); the
---           strike up flicker on a fresh cast (castAt) and the dying tube in the last 5 s (sealNeon: dropouts that get
---           likelier and deeper), both through one neon level that scales every neon driven part; EXPIRING in
---           amber in the last 5 s; the NO SEAL pulse (edge, halo, label) in combat; the Judgement ring (judgeAt).
---           A seal that runs out flips the chamber to NO SEAL by itself for immediacy: HudLogic's change detector sees the
---           seal as gone and pushes within one 0.2 s tick, and that late push repaints nothing.
---   JUDGEMENT LANE (lane 9, mockup 2180 to 2198; the debuff on the CURRENT TARGET, from state.judged, whatever the seal look):
---           a debuff lights the lane: the JUDGED header in the chamber's colour, the axis, ticks and numbers at their on alphas, a
---           bar from the foot up to the chip's lower edge (a faint wide stroke under a narrow core, the colour .35 to 1), the
---           chip centred on jY(remaining) on the 0 to 40 s axis with the Judgement spell icon in it and a white flash for
---           .35 s after it lands. No debuff (false), an unknown one (nil, DECIDED: the mockup has no unknown lane look, so the
---           empty look) or one that cannot be read gets the empty lane and its label. The colour is the chamber's (the mockup's
---           `col`: the current seal's, red with no seal, violet unknown), so a seal swap recolours the lane. A retarget reads
---           Hud.GetJudgement at once (an unreadable answer, or a secret target GUID, empties the lane until the next push) and a
---           dead target hides it (UnitIsDead, plus UNIT_HEALTH for the target, which also relights it on a resurrection). The event frame listens only while subscribed. The landing flash starts late, because the Hud tells the lane of a fresh Judgement
---           on its 0.2 s tick (the first paint can be up to .2 s into the .35 s flash). The mockup has no countdown and no
---           expiring cue in the lane.
---   REDUCED MOTION  ForeverSTUwaveDB.reducedMotion == true (ConsoleKeys.lua's convention) ports the mockup's reduce branch:
---           the neon is a steady .8 while expiring and 1 otherwise, with no strike, no dropouts and no shimmer; the pulse
---           is held at u = 1, so the RESEAL wash and the NO SEAL look are steady; the ticker runs only for what still moves
---           (the drain and countdown, and the Judgement ring, which the mockup does not gate). The flag is read at each
---           Hud push, so a change shows at the next push.
---   TICKER  ONE OnUpdate on the chamber, installed only while the piece is on AND something moves (a timed seal, a
---           strike or ring window, the NO SEAL pulse in combat) and cleared the moment nothing does. The per frame
---           path (Tick and what it calls) allocates nothing: no table, closure, concatenation or format; the number
---           strings come from tables built at load, and a steady frame writes only the fill height.
---   v1 DROPS, not built on purpose: the turning arcs (the arcs sit at their start angles), the comet and the
---           target-box flash, the NO SEAL scan sweep and scanlines, the judge chip's glyph (the chip wears the Judgement
---           spell icon instead), the lsLive shoulder, and both NO SEAL rings (mockup lines 2172 and 2173: the dashed r=50 at alpha
---           .35 and the solid r=36 at .2; each needs a baked ring texture, and a new TGA needs a client restart).
---           The Judgement ring (line 2202) is built: seal_ring.tga, the baked full circle with its glow(col, 1) halo.
---   NOT MAPPED, approximations to look at in game: the two rings above; the lane label's reading direction (the mockup
---           rotates it to read bottom to top, Lua cannot rotate, so the stacked letters read top to bottom); the
---           letter spacing of pSpaced and header; the baked chamfer 6 against the mockup's 8; the shadow-blur glows
---           (edge, glyph, band) as four nested plain strokes or one scaled copy; the 1.3 line weight (see LINE); the
---           Judgement ring grows by scaling its texture, so its stroke and halo thicken a little as it fades (the mockup
---           keeps their width); the tip dot is one soft glow_round disc, not a hard 3 px disc with a shadow glow; the ring
---           and the fill draw under the labels (the mockup paints the ring over text); the fill and the number pin at
---           30 s (the own cast ledger holds 30, but a reconcile can report a longer duration, and then remaining exceeds 30);
---           the steady drain height is quantised to a quarter screen pixel where the client reports the pixel size; the
---           countdown rounds tenths as floor(x * 10 + .5), which differs from toFixed only at inexact .x5 ties.
---           Lane 9: the chip's plate is the baked button plate (the mockup tints it .18 toward the seal, 2192), its cut is
---           the shared baked one (6, the mockup's 5) and its edge glow is Theme.SkinButton's ADD halo at the mockup's
---           coverage rather than the nested strokes; the icon is inset inside the cut (masks do not clip) where the
---           mockup's glyph is centred; a debuff longer than 40 s (a reconcile can report one) pins at the top of the axis.
+-- GunsightAreas.lua owns the upper and lower area frames and calls this module back: build(host) once, seat(rect) with the area's
+-- image px rect (again on every rescale, and when the player moves the module to the other area), onShow(area) and onHide(area).
+-- The module draws from the rect it was last given, so it works in either area, and it follows the Hud only while an area shows it.
 --
--- STATE. Three looks, picked from FS.Hud's state.seal: a known seal (its key maps to a mockup id: sor righteousness,
--- sotc crusader, sofu fury, soc command, sol light, sow wisdom, soj justice) gets its colour and glyph; false (no
--- seal) is the mockup's NO SEAL look (red, the seal parts hidden); nil, a secret or an unmapped key is UNKNOWN: a
--- dim violet chamber with no seal parts and no NO SEAL cry, so a guess is never drawn. The Hud is subscribed to only
--- while the "dot" piece is on (GunsightSeals follows Gunsight.OnPieceChanged and reads IsPieceOn once at build,
--- because the piece hooks belong to GunsightDots), and a repaint is written only when the look changes. The NO SEAL
--- look also wears the Hud's in-combat flag: its IN COMBAT sub-label shows only in combat, and that flag change repaints.
--- The profile can arrive after the pieces build (HudLogic has no change hook): until a profile answers, a piece change
--- or a rescale asks again; the chamber only latches off once the class is decided.
+-- STATE. Three looks from FS.Hud's state.seal: a known seal (its key maps to a seal id: sor righteousness, sotc crusader, sofu fury,
+-- soc command, sol light, sow wisdom, soj justice) in its colour; false (no seal) is NO SEAL in red; nil, a secret or an unmapped
+-- key is UNKNOWN, a dim violet tile that guesses nothing. A known seal under 3 s left is the reseal warning: the fill, the time
+-- and the caption go amber and the band breathes. The Judgement row follows the TARGET's debuff (state.judged) in the look's colour.
 --
--- Every image px number is in the constants block with its mockup name in a comment, and
--- gunsightseals-harness.py parses each back out of the HTML. Nothing is built at file load, for a class that is
--- not on the seals slot, or when the Gunsight is disabled.
+-- TICKER. ONE OnUpdate on the module frame, installed only while the module is subscribed AND something moves (a timed seal, a
+-- debuff on the target, the NO SEAL pulse in combat) and cleared the moment nothing does. The per frame path (Tick and what it
+-- calls) allocates nothing: no table, closure, concatenation or format; the time strings come from tables built at load.
+--
+-- Reduced motion (ForeverSTUwaveDB.reducedMotion == true, read at each Hud push) holds the pulse steady; the bars and the
+-- countdown still move. Nothing is built at file load: build runs only when GunsightAreas asks for the module.
 
 local _, FS = ...
 
 local Gunsight = FS.Gunsight
-if not (Gunsight and Gunsight.G and Gunsight.OnReady and Gunsight.OnPieceChanged) then return end
+if not (Gunsight and Gunsight.G and Gunsight.ui and Gunsight.Point) then return end
 
 FS.GunsightSeals = FS.GunsightSeals or {}
 local Seals = FS.GunsightSeals
 
 local G = Gunsight.G
 local ui, Point = Gunsight.ui, Gunsight.Point
-local TOP, BOT, DOT_AX, FR_T, FR_B = G.TOP, G.BOT, G.DOT_AX, G.FR_T, G.FR_B
 
 -------------------------------------------------------------------------------
--- Constants (mockup name in the comment; gunsightseals-harness.py re-reads them from drawSealChamber)
+-- Constants (mockup name in the comment; gunsightseals-harness.py re-reads them from sealModule)
 -------------------------------------------------------------------------------
 
 local function Hex(h)
     return { tonumber(h:sub(2, 3), 16) / 255, tonumber(h:sub(4, 5), 16) / 255, tonumber(h:sub(6, 7), 16) / 255 }
 end
 
+-- Module coordinates are image px from the module's top left: x from 0 to W across the area's width less the inset, y from 0
+-- at the area's top (the mockup's y0). seat(rect) centres the module across rect.w, so rect.x + 7 is the mockup's x = 1220.
 local C = {
-    -- the chamber frame: SC = { x: DOT_AX, y: FR_T, w: 164, h: FR_B - FR_T, c: 8 }
-    SC = { x = DOT_AX, y = FR_T, w = 164, h = FR_B - FR_T, c = 8 },
-    TX_DX = 33, TW = 12,                      -- SC_TX = DOT_AX + 33, SC_TW = 12 (the drain tube)
-    GX = 1349, GY = 612, GR = 50,             -- SC_GX, SC_GY, SC_GR (the lens centre and radius)
-    JL_X = 1431, JL_AX = 1457,                -- the Judgement lane: its guide and its ruler axis
-    JL_MAX_S = 40,                            -- jY(s) = BOT - s / 40 * (BOT - TOP)
-    HDR_Y = 488, JUDGED_DX = 14,              -- header('SEAL', DOT_AX, 488), header('JUDGED', JL_X - 14, 488)
-    JUDGED_A = 0.6,                           -- header('JUDGED', ..., K.muted, .6) with no debuff
-    HDR_A = 0.9,                              -- header('SEAL', ..., col, .9)
-    PLATE_RGB = { 13 / 255, 6 / 255, 32 / 255 }, PLATE_FILL = 0.8,   -- rgba(13,6,32,.8)
-    PLATE_A = 0.55, PLATE_A_NO = 0.7,         -- A(no ? .7 : .55)
-    RADIAL_A = 0.2, RADIAL_R0 = 6, RADIAL_PAD = 30,   -- createRadialGradient(.., 6, .., SC_GR + 30) from rgba(col, .2)
-    EDGE_A0 = 0.55, EDGE_A1 = 0.45,           -- A(.55 + .45 * neon)
-    NO_EDGE_A0 = 0.35, NO_EDGE_A1 = 0.65,     -- A(.35 + .65 * u) with no seal
-    GLOW_K0 = 0.6, GLOW_K1 = 0.25,            -- glow(col, .6 + .5 * neon * .5)
-    MAJ = 5, MAJ_LEN = 10, MIN_LEN = 5,       -- tick(DOT_AX, y, s % 5 === 0 ? 10 : 5, -1, K.violet, .7)
-    TICK_A = 0.7, MAX_S = 30,                 -- the ruler runs 0 to 30 s
-    LABEL_DX = 6, LABEL_DY = 4, LABEL_SIZE = 12,      -- text(String(s), DOT_AX + 6, y + 4, 12, K.fg, ..)
-    LABEL_A = 0.9, LABEL_A_NO = 0.45,         -- no ? .45 : .9
-    BAND_S = 3, BAND_FILL = 0.16,             -- yb = secY(3); A(.16 + .2 * pl) fill across the frame
-    BAND_PAD = 2, BAND_DASH = { 5, 4 },       -- hline(yb, SC.x + 2, SC.x + SC.w - 2, ..) dashed [5, 4]
-    BAND_TOP_A = 0.75, BAND_BOT_A = 0.95, BAND_BOT_W = 1.3,   -- the dashed top .75, the solid foot .95 at LW * 1.3
-    RESEAL_DY = 3.5, RESEAL_SIZE = 10, RESEAL_A = 0.6,        -- text('RESEAL', SC_GX, (yb + BOT) / 2 + 3.5, 10, K.amber, .6)
-    TUBE_A = 0.18, TUBE_NO_A = 0.16,          -- the tube track: rgba(tcol, .18), rgba(K.steel, .16) with no seal
-    RUNG_STEP = 5, RUNG_A = 0.7,              -- hline(secY(s), .., K.bg, .7) for s = 5 .. 25
-    OUT_W = 0.8, OUT_A = 0.55, OUT_NO_A = 0.3,        -- strokeRect at LW * .8, A(no ? .3 : .55)
-    LENS_K = 1.2, LENS_SIZE = 128,            -- seal_lens.tga / seal_arcs.tga: 1.2 texels per image px (generator)
-    ARCS_A = 0.95,                            -- A(.95 * neon) on the arcs
-    GLYPH_R = 0.56, GLYPH_SIZE = 64,          -- strokeGlyph(.., SC_GR * .56, ..); seal_glyph_*.tga is 64 image px square
-    GLYPH_TINT = 0.3,                         -- mix(col, '#ffffff', .3)
-    NAME_Y = 541, NAME_SIZE = 12, NAME_SIZE_LONG = 10.5, NAME_LONG = 9,   -- pSpaced(sl.n, SC_GX, 541, n.length > 9 ? 10.5 : 12, ..)
-    NAME_TINT = 0.2, NAME_A = 0.95,           -- mix(col, '#ffffff', .2), .95 * neon
-    CAP_Y = 716, CAP_SIZE = 10.5, CAP_A = 0.85,       -- pSpaced('SEAL ACTIVE', SC_GX, 716, 10.5, col, .85)
-    NO_Y = 6, NO_SIZE = 19,                   -- text('NO SEAL', SC_GX, SC_GY + 6, 19, K.red, ..)
-    NO_SUB_Y = 24, NO_SUB_SIZE = 10.5, NO_SUB_A = 0.55,       -- pSpaced('IN COMBAT', SC_GX, SC_GY + 24, 10.5, K.red, .55)
-    NO_TIME_DX = 5, NO_TIME_Y = 700, NO_TIME_SIZE = 26, NO_TIME_A = 0.4,   -- text('--', SC_GX - 5, 700, 26, K.muted, .4)
-    NO_HINT_SIZE = 10.5, NO_HINT_A = 0.6,     -- pSpaced('CAST A SEAL', SC_GX, 716, 10.5, K.muted, .6)
-    NO_U = 0.5,                               -- u, the pulse (0 to 1): its resting mean, worn by every look that does not pulse
-    -- the live layer (sealNeon and drawSealChamber's animated terms)
-    STRIKE = { 0.2, 0.9, 0.1, 0.7, 0.3, 1, 0.6 }, STRIKE_S = 0.7,   -- [.2, .9, .1, .7, .3, 1, .6][min(6, floor(strike / .7 * 7))]
-    EXPIRE_S = 5, FLICK_RATE = 13,            -- st.rem <= 5 dies out; n = floor(t * 13)
-    FLICK_SEED = 91.7, FLICK_SEED2 = 12.9898, FLICK_MUL = 43758.5453,   -- fract(sin(n * 91.7) * 43758.5453), the depth with 12.9898
-    DROP_P0 = 0.28, DROP_P1 = 0.4,            -- p = .28 + .4 * (1 - rem / 5): the odds of a dropout
-    DROP_LO = 0.12, DROP_SPAN = 0.3,          -- a dropout is .12 + .3 * fract(..)
-    STEADY_BASE = 0.78, STEADY_AMP = 0.22, STEADY_FREQ = 37,   -- else .78 + .22 * sin(t * 37)
-    PULSE_S = 1.4,                            -- u = .5 - .5 * cos(PI * clock / 1.4)
-    BAND_PL_FREQ = 9, BAND_PL = 0.2,          -- pl = .5 + .5 * sin(clock * 9); the wash is A(.16 + .2 * pl)
-    RESEAL_IN0 = 0.55, RESEAL_IN1 = 0.45,     -- RESEAL in the band: .55 + .45 * u
-    FILL_MIN = 0.05, FILL_A0 = 0.35,          -- the drain shows for st.rem > .05; its tail is .35
-    TIP_A = 0.9, TIP_MIX = 0.55, TIP_H = 1.5, -- A(.9 * neon), mix(tcol, '#ffffff', .55), fillRect(.., tipY, SC_TW, 1.5)
-    DOT_MIX = 0.5, DOT_R = 3,                 -- the tip dot: mix(tcol, '#ffffff', .5), arc radius 3
-    COUNT_FROM = 5, COUNT_DX = 5, COUNT_Y = 700, COUNT_SIZE = 26,   -- whole seconds above 5; text(s, SC_GX - 5, 700, 26, tcol, neon)
-    S_GAP = 3, S_SIZE = 12, S_A = 0.9,        -- text('S', SC_GX - 5 + p / 2 + 3, 700, 12, K.muted, .9 * neon, 'left')
-    CAP_TEXT = "SEAL ACTIVE", CAP_EXPIRING = "EXPIRING",
-    RING_S = 0.9, RING_A = 0.85, RING_GROW = 26,   -- f < .9, A(.85 * (1 - p)), radius SC_GR + p * 26
-    RING_SIZE = 256, RING_K = 1.2,            -- seal_ring.tga: 256 texels, 1.2 texels per image px (generate_seal_ring.py), circle r = SC_GR
-    REDUCED_EXPIRING = 0.8,                   -- sealNeon under reduce: st.mode === 'expiring' ? .8 : 1
-    FILL_STEP = 0.25,                         -- not in the mockup: the steady drain height snaps to a quarter screen pixel
-    GLOW_HALF = 0.5634765625,                 -- glow_round.tga: the radius (as a share of the half size) where its alpha is a half
-    JL_AX_UP = 4, JL_AX_DN = 4, JL_AX_A = 0.35,       -- vline(JL_AX, TOP - 4, BOT + 4, K.violet, .35)
-    JL_MAJ = 10, JL_MID = 5, JL_MAJ_LEN = 10, JL_MID_LEN = 7, JL_MIN_LEN = 4, JL_TICK_A = 0.3,
-    JL_LABEL_A = 0.4,                         -- text(String(s), JL_AX + 6, y + 4, 12, K.fg, .4, 'left') at s % 10 === 0
-    JL_GUIDE_DASH = { 2, 6 }, JL_GUIDE_A = 0.2,       -- setLineDash([2, 6]); vline(JL_X, TOP, BOT, K.violet, .2)
-    JL_TEXT_DX = 4, JL_TEXT_SIZE = 10.5, JL_TEXT_SP = 1.4, JL_TEXT_A = 0.8,   -- the empty lane label, rotated in the mockup
-    NOT_JUDGED = "NOT JUDGED", NO_DEBUFF = "NO DEBUFF",
-    -- the Judgement lane live (lane 9; drawSealChamber 2180 to 2198): a debuff on the target lights the lane
-    JUDGED_A_ON = 0.9,                        -- header('JUDGED', .., st.jrem > 0 ? col : K.muted, st.jrem > 0 ? .9 : .6)
-    JL_AX_A_ON = 0.85, JL_TICK_A_ON = 0.7, JL_LABEL_A_ON = 0.9,   -- the ruler with a debuff up (off: .35, .3, .4)
-    CHS = 24,                                 -- CHS: the chip is a 24 image px square, CHP = CHS / 2
-    JL_BAR_A0 = 0.35,                         -- createLinearGradient(0, BOT, 0, min(BOT, y + CHP)): rgba(col, .35) to rgba(col, 1)
-    JL_BAR_GLOW_W = 7, JL_BAR_GLOW_A = 0.22,  -- A(.22), lineWidth 7: the faint wide stroke
-    JL_BAR_CORE_W = 2.6, JL_BAR_CORE_A = 1,   -- A(1), lineWidth 2.6: the core
-    ICON_ASKS = 3,                            -- NOT in the mockup: the chip's icon is logged as missing only after this many unanswered asks ...
-    ICON_WAIT = 5,                            -- ... the last one at least this many seconds after the first
-    CHIP_PLATE_A = 0.92,                      -- chamfer(JL_X - CHP, y - CHP, CHS, CHS, 5); A(.92) plate
-    CHIP_GLOW_K = 0.6,                        -- glow(col, .6) on the chip's edge
-    POP_S = 0.35, POP_A = 0.8,                -- if (st.jage < .35) A((1 - jage / .35) * .8), K.white fill
-    -- Mononoki Bold, read from the font file (the harness re-reads it): the line box of a font runs from the hhea ascender (900)
-    -- to the descender (-250) of 1024 units, so its middle sits (900 - 250) / 2 / 1024 above the baseline; the monospace
-    -- advance is 575 of 1024. The engine's centring on that box is UNVERIFIED in game.
-    CAP = 325 / 1024,                         -- baseline to the middle of a text line, as a fraction of its size
-    MONO_ADV = 575 / 1024,                    -- Mononoki's advance as a fraction of its size (the stacked letters)
-    -- the mockup's baked style halo (HALO, line 526): four nested strokes of reach r and alpha a, drawn at k * a under the core
-    HALO = { { 1.5, 0.26 }, { 3.2, 0.17 }, { 5, 0.10 }, { 7, 0.055 } },
-    GLYPH_GLOW_K = 0.9, BAND_GLOW_K = 0.8,    -- strokeGlyph(.., neon, .9, ..), glow(K.amber, .8) on the foot of the band
+    W = 188, H = 114,                         -- sealModule: w = 188; the module fills 114 of the area's 128
+    TILE = 28, TILE_Y = 6, TILE_CUT = 5,      -- ch(x, y0 + 6, 28, 28, 5); the baked cut is 6
+    TILE_MIX = 0.3, TILE_EDGE_W = 1.4,        -- mix(bg, col, .3) fill, stroke-width 1.4
+    AB_X = 14, AB_Y = 25, AB_SIZE = 12,       -- txt(x + 14, y0 + 25, 'SV', 12, white, middle)
+    NAME_X = 36, NAME_Y = 19, NAME_SIZE = 12, -- txt(x + 36, y0 + 19, 'VENGEANCE', 12, white)
+    CAP_Y = 31, CAP_SIZE = 10,                -- txt(x + 36, y0 + 31, 'SEAL ACTIVE', 10, muted)
+    TIME_Y = 27, TIME_SIZE = 20,              -- txt(x + w, y0 + 27, seal + 's', 20, col, end)
+    BAR_Y = 44, BAR_H = 12, MAX_S = 30,       -- by = y0 + 44, bh = 12, bw = w * (30 / 30)
+    TRACK_A = 0.9, FILL_A = 0.9,              -- rect '#0a0416' .9, rect col .9
+    BAND_S = 3, BAND_A = 0.28,                -- bw * 3 / 30 wide, amber .28
+    TIP_W = 2, TIP_PAD = 2, TIP_A = 0.95,     -- rect(.. - 2, by - 2, 2, bh + 4, '#ffffff', .95)
+    OUT_A = 0.6,                              -- stroke-opacity .6
+    CUT_PAD = 3, CUT_A = 0.85, CUT_DASH = { 3, 2 },   -- line(.., by - 3, .., by + bh + 3, amber, .85, 1, '3 2')
+    TICKS = 6, TICK_LONG = 5, TICK_SHORT = 3, TICK_A = 0.7,   -- i = 0 .. 6: by + bh + (i % 2 === 0 ? 5 : 3), violet .7
+    LABEL_Y = 16, LABEL_SIZE = 10, LABEL_A = 0.85,    -- txt(.., by + bh + 16, String(v), 10, fg, .85)
+    LABELS = { 0, 15, 30 },
+    RESEAL_DX = 30, RESEAL_SIZE = 10, RESEAL_A = 0.9, -- txt(bx + bw * 3 / 30 + 30, .., 'RESEAL', 10, amber, .9)
+    J_Y = 90, J_SIZE = 20, J_CUT = 4,         -- jy = y0 + 90; ch(x, jy, 20, 20, 4)
+    J_MIX = 0.4, J_PLATE = "#d9a521", J_EDGE_W = 1.2,   -- mix(bg, '#d9a521', .4) fill, stroke-width 1.2
+    J_LETTER_Y = 14, J_LETTER_SIZE = 12,      -- <text x + 10, jy + 14, 12, white>J</text>
+    JBAR_X = 30, JBAR_DY = 7, JBAR_SHRINK = 72, JBAR_H = 5,   -- rect(x + 30, jy + 7, w - 72, 5, col, .2)
+    JBAR_TRACK_A = 0.2, JMAX_S = 40,          -- rect(.. jud / 40 ..)
+    JTIME_Y = 15, JTIME_SIZE = 13,            -- txt(x + w, jy + 15, jud + 's', 13, white, end)
+    -- not in v7: the carried over look states (the v2 chamber's numbers)
+    FILL_MIN = 0.05,                          -- the drain shows for more than .05 s left
+    COUNT_FROM = 5,                           -- whole seconds above 5, tenths from 5 down
+    TILE_GLOW_A = 0.5,                        -- the tile edge's soft glow (the mockup's gls filter)
+    PULSE_S = 1.4, NO_U = 0.5,                -- u = .5 - .5 * cos(PI * clock / 1.4); NO_U is its resting mean
+    BAND_PL_FREQ = 9, BAND_PL = 0.2,          -- the band breathes with the clock under 3 s: BAND_A + .2 * (.5 + .5 * sin(clock * 9))
+    RESEAL_IN0 = 0.55, RESEAL_IN1 = 0.45,     -- RESEAL under 3 s: .55 + .45 * u
+    NO_EDGE_A0 = 0.35, NO_EDGE_A1 = 0.65,     -- the NO SEAL tile edge: .35 + .65 * u
+    NO_NAME_A0 = 0.5, NO_NAME_A1 = 0.5,       -- the NO SEAL name: .5 + .5 * u
+    UNKNOWN_EDGE_A = 0.55,
+    ICON_TEXCOORD = { 0.07, 0.93, 0.07, 0.93 },   -- not in v7 (its letter chips stand for icons): the icon inside the cut frame, border cropped
+    TRACK = "#0a0416", ABSENT_A = 0.45,       -- the track colour; the chip's alpha with no debuff on the target
+    FILL_STEP = 0.25,                         -- not in the mockup: bar widths snap to a quarter screen pixel
+    CAP_TEXT = "SEAL ACTIVE", CAP_EXPIRING = "EXPIRING", CAP_NONE = "CAST A SEAL",
+    NAME_NONE = "NO SEAL", NOT_JUDGED = "NOT JUDGED", NO_DEBUFF = "NO DEBUFF",
+    JEMPTY_X = 34, JEMPTY_SIZE = 10, JEMPTY_A = 0.8,
+    -- Mononoki Bold, read from the font file (the harness re-reads it): the line box runs from the hhea ascender (900) to the
+    -- descender (-250) of 1024 units, so its middle sits 325 / 1024 of the size above the baseline. UNVERIFIED in game.
+    CAP = 325 / 1024,
     COLORS = {                                -- the mockup's :root tokens
         bg = Hex("#0d0620"), fg = Hex("#e9e2ff"), violet = Hex("#a855f7"), amber = Hex("#ffb648"),
         red = Hex("#ff3b4e"), steel = Hex("#8d93a6"), muted = Hex("#9d93c4"), white = Hex("#f3fbff"),
     },
-    -- SEALS: n the name, c the colour, deb the Judgement debuff seconds (0 = none)
+    -- SEALS: n the name, ab the tile letters, c the colour, deb the Judgement debuff seconds (0 = none)
     SEALS = {
-        righteousness = { n = "RIGHTEOUSNESS", c = Hex("#ffd23f"), deb = 0 },
-        crusader = { n = "CRUSADER", c = Hex("#ff9a2e"), deb = 40 },
-        fury = { n = "FURY", c = Hex("#ff3b4e"), deb = 0 },
-        command = { n = "COMMAND", c = Hex("#b565ff"), deb = 0 },
-        light = { n = "LIGHT", c = Hex("#f3fbff"), deb = 40 },
-        wisdom = { n = "WISDOM", c = Hex("#4da3ff"), deb = 40 },
-        justice = { n = "JUSTICE", c = Hex("#c9d3e6"), deb = 10 },
+        righteousness = { n = "RIGHTEOUSNESS", ab = "RI", c = Hex("#ffd23f"), deb = 0 },
+        crusader = { n = "CRUSADER", ab = "CR", c = Hex("#ff9a2e"), deb = 40 },
+        fury = { n = "FURY", ab = "FU", c = Hex("#ff3b4e"), deb = 0 },
+        command = { n = "COMMAND", ab = "CO", c = Hex("#b565ff"), deb = 0 },
+        light = { n = "LIGHT", ab = "LI", c = Hex("#f3fbff"), deb = 40 },
+        wisdom = { n = "WISDOM", ab = "WI", c = Hex("#4da3ff"), deb = 40 },
+        justice = { n = "JUSTICE", ab = "JU", c = Hex("#c9d3e6"), deb = 10 },
     },
 }
+C.JBAR_W = C.W - C.JBAR_SHRINK
 Seals.C = C
 local K, SEALS = C.COLORS, C.SEALS
 
--- How much of a colour the halo lays down just outside a stroke: the four nested strokes at alpha k * a over each other,
--- counted from stroke `from` (1 = at the stroke's own edge, all four) outward.
-local function Coverage(k, from)
-    local keep = 1
-    for i = from or 1, #C.HALO do keep = keep * (1 - k * C.HALO[i][2]) end
-    return 1 - keep
-end
-
--- The glyph's glow(col, .9) is that halo around line art; one scaled ADD copy of the glyph stands in for it. It grows by the
--- halo's alpha weighted mean reach and wears the mean coverage over the 7 px reach.
-do
-    local sum, prev, wr, wa = 0, 0, 0, 0
-    for j = 1, #C.HALO do
-        sum = sum + (C.HALO[j][1] - prev) * Coverage(C.GLYPH_GLOW_K, j)
-        prev = C.HALO[j][1]
-        wr, wa = wr + C.HALO[j][1] * C.HALO[j][2], wa + C.HALO[j][2]
-    end
-    C.HALO_K = 1 + (wr / wa) / (C.GLYPH_SIZE / 2)
-    C.HALO_A = sum / C.HALO[#C.HALO][1]
-end
-
--- HudSpells seal key (the profile's `seals.order`, HudLogic state.seal.key) to the mockup's seal id.
+-- HudSpells seal key (the profile's `seals.order`, HudLogic state.seal.key) to the seal id.
 local KEY_ID = {
     sor = "righteousness", sotc = "crusader", sofu = "fury", soc = "command",
     sol = "light", sow = "wisdom", soj = "justice",
 }
 
 local WHITE = { 1, 1, 1 }
--- Hairline weight in image px: the DoT scale's own (GunsightDots.lua), so the two classes that share this seat match, and the
--- GunsightFrame lines beside it are a pixel snapped 1 image px. The mockup's LW is 1.3 CSS px at its 1400 px preview, which is
--- 1.857 image px, and the baked lens, arcs and glyph strokes carry that weight (a texture cannot be thinned); at 1.857 these
--- lines would be the heaviest in the HUD. UNVERIFIED in game next to the baked strokes.
+-- Hairline weight in image px: the DoT scale's own, so the classes that share an area match. The mockup's 1 px strokes are
+-- 1 image px; UNVERIFIED in game next to the baked tile edge.
 local LINE = G.LINE or 1.3
 local MEDIA = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
-local GLOW_ROUND = MEDIA .. "glow_round.tga"
 
 -------------------------------------------------------------------------------
 -- State
@@ -251,40 +130,35 @@ local function LogOnce(key, msg)
     end
 end
 
-local built, subscribed = false, false
-local chamber                  -- the chamfered frame itself, a child of the dot piece frame
+local subscribed = false
+local mod                      -- the module frame itself, a child of the area host
 local P = {}                   -- the named parts (exposed as Seals.parts)
-local seats = {}               -- closures re-run by every rescale
+local seats = {}               -- closures re-run by every seat(rect)
+local OX, OY = 0, 0            -- the module's top left in image px, from the rect seat() last got
 local mode, sealId             -- the look last painted: "seal" | "none" | "unknown", and the seal id for "seal"
 local inCombat = false         -- the combat flag the NO SEAL look last painted (false for every other look)
-local laneCol                  -- the colour the Judgement lane last painted a debuff in (the look's colour), nil for the empty lane
+local laneCol = false          -- the colour the Judgement row last painted a debuff in, nil for the empty row, false before the first paint
 
--- The live layer's state. The Hud's plain times (castAt, expiresAt, judgeAt), the last combat flag, and what the moving parts
--- last wore, so a frame writes only what changed. Paint resets the caches, so the first frame after a repaint writes everything.
+-- The live layer's state: the Hud's plain times and what the moving parts last wore, so a frame writes only what changed.
+-- Paint resets the caches, so the first frame after a repaint writes everything.
 local L = {
-    neon = 1,                  -- the neon level the seal parts wear
-    col = nil,                 -- the seal colour of the look painted
-    expiresAt = nil, castAt = nil, judgeAt = nil,   -- plain GetTime values, nil when absent or unreadable
+    col = nil,                 -- the colour of the look painted
+    expiresAt = nil,           -- the seal's plain GetTime expiry, nil when absent or unreadable
     combat = false,            -- the Hud's combat flag as of the last push (any look)
-    band = false, expiring = false,                 -- the RESEAL band and EXPIRING cue worn
-    fillShown = false, fillH = nil,                 -- the drain: shown, and its height in image px
-    countText = nil, countLen = 0,                  -- the countdown text worn, and the text length the S stands for (Paint leaves it: the S stays where it was seated)
-    ringOn = false, ringSize = 0,                   -- the Judgement ring: shown, and its size in image px
-    countShown = false,                             -- the number and its S are up (any readable time; the tube also needs rem > .05)
-    gradient = false,                               -- the client can draw the drain's gradient (decided at build)
-    fillQ = nil,                                    -- the steady drain height snaps to this many image px (nil: exact)
+    warn = false,              -- the reseal warning is worn
+    fillShown = false, fillW = nil,                 -- the drain: shown, and its width in image px
+    timeText = nil, timeShown = false,              -- the time text worn, and whether it is up
+    fillQ = nil,                                    -- bar widths snap to this many image px (nil: exact)
     reduced = false,                                -- ForeverSTUwaveDB.reducedMotion as of the last Paint
-    jExp = nil, jApplied = nil,                     -- the target's Judgement debuff: plain expiresAt and appliedAt, nil when none or unreadable
-    jH = nil,                                       -- the lane bar's height in image px (BOT - jY(remaining)), snapped like the drain
-    jBarOn = false, jChipOn = false, jPopOn = false,    -- the bar, the chip and the landing flash are up
-    jIcon = nil,                                    -- the Judgement spell texture once the client has answered
-    jDead = false,                                  -- the lane is hidden only because the target is dead: a health event may relight it
-    iconAsks = 0, iconSince = nil,                  -- unanswered icon asks so far and the time of the first (the noicon log waits for both)
-    jGrad = {},                                     -- per lane colour table: the bar's gradient colours, made once
-    laneText = "",                                  -- the empty lane label the seal look gives (NOT JUDGED, NO DEBUFF or none)
+    jExp = nil,                                     -- the target's Judgement debuff: plain expiresAt, nil when none or unreadable
+    jW = nil, jFillShown = false,                   -- the Judgement bar's width in image px, and whether it is up
+    jText = nil,                                    -- the Judgement time text worn
+    sealIcon = false, jIcon = false,                -- the tile and chip wear their spell icon (else their letters)
+    jDead = false,                                  -- the row is empty only because the target is dead: a health event may relight it
+    laneText = "",                                  -- the empty row label the look gives (NOT JUDGED, NO DEBUFF or none)
     broken = false,            -- a frame threw: the ticker stays off until the next push
 }
-local ticking = false          -- the chamber's OnUpdate is installed
+local ticking = false          -- the module's OnUpdate is installed
 local Sync                     -- forward: Tick stops itself through it
 
 local function Seat(fn)
@@ -303,101 +177,68 @@ local function Mix(a, b, t)
     return { a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t }
 end
 
-local function SecY(s) return BOT - s / C.MAX_S * (BOT - TOP) end
-local function JY(s) return BOT - s / C.JL_MAX_S * (BOT - TOP) end
+-------------------------------------------------------------------------------
+-- Drawing helpers (module coordinates, seated through Gunsight.Point from the rect origin)
+-------------------------------------------------------------------------------
 
--------------------------------------------------------------------------------
--- Drawing helpers (all seated by mockup image coordinates through Gunsight.Point)
--------------------------------------------------------------------------------
+local function At(region, anchor, x, y)
+    Point(region, anchor, OX + x, OY + y)
+end
 
 local function Tex(layer, sub)
-    return chamber:CreateTexture(nil, layer or "ARTWORK", nil, sub or 0)
+    return mod:CreateTexture(nil, layer or "ARTWORK", nil, sub or 0)
 end
 
 local function Solid(t, c, a)
     t:SetColorTexture(c[1], c[2], c[3], a)
 end
 
--- A horizontal line from x0 to x1 (image px) centred on y, `th` image px thick.
+-- A solid rectangle from (x, y), w by h image px.
+local function Rect(x, y, w, h, c, a, layer, sub)
+    local t = Tex(layer, sub)
+    Solid(t, c, a)
+    Seat(function()
+        At(t, "TOPLEFT", x, y)
+        t:SetSize(ui(w), ui(h))
+    end)
+    return t
+end
+
+-- A horizontal line from x0 to x1 centred on y, and a vertical one at x from y0 to y1, `th` image px thick.
 local function HLine(y, x0, x1, c, a, th, layer, sub)
-    local t = Tex(layer, sub)
-    Solid(t, c, a)
-    Seat(function()
-        Point(t, "LEFT", x0, y)
-        t:SetSize(ui(x1 - x0), ui(th))
-    end)
-    return t
+    return Rect(x0, y - th / 2, x1 - x0, th, c, a, layer, sub)
 end
-
--- A vertical line at x from y0 down to y1.
 local function VLine(x, y0, y1, c, a, th, layer, sub)
-    local t = Tex(layer, sub)
-    Solid(t, c, a)
-    Seat(function()
-        Point(t, "TOP", x, y0)
-        t:SetSize(ui(th), ui(y1 - y0))
-    end)
-    return t
+    return Rect(x - th / 2, y0, th, y1 - y0, c, a, layer, sub)
 end
 
-local function HDashes(y, x0, x1, dash, c, a, th, layer, sub)
-    local list, x = {}, x0
-    while x < x1 - 1e-6 do
-        list[#list + 1] = HLine(y, x, math.min(x1, x + dash[1]), c, a, th, layer, sub)
-        x = x + dash[1] + dash[2]
-    end
-    return list
-end
-
-local function VDashes(x, y0, y1, dash, c, a, th)
+local function VDashes(x, y0, y1, dash, c, a, th, layer, sub)
     local list, y = {}, y0
     while y < y1 - 1e-6 do
-        list[#list + 1] = VLine(x, y, math.min(y1, y + dash[1]), c, a, th)
+        list[#list + 1] = VLine(x, y, math.min(y1, y + dash[1]), c, a, th, layer, sub)
         y = y + dash[1] + dash[2]
     end
     return list
 end
 
--- A centred square texture of `size` image px on (cx, cy).
-local function Square(t, cx, cy, size)
-    Seat(function()
-        Point(t, "CENTER", cx, cy)
-        t:SetSize(ui(size), ui(size))
-    end)
-end
-
 -- The colour of a text region lives on the region (`cur`), because Theme.ApplyMono resets it at every rescale.
 local function TextColor(fs, c, a)
-    fs.cur = { c[1], c[2], c[3], a }
+    local cur = fs.cur
+    cur[1], cur[2], cur[3], cur[4] = c[1], c[2], c[3], a
     fs:SetTextColor(c[1], c[2], c[3], a)
 end
 
--- Text on a mockup baseline: `anchor` is "LEFT" or "CENTER", the line is centred C.CAP * size above the baseline.
-local function Text(text, size, anchor, x, baseline)
-    local fs = chamber:CreateFontString(nil, "OVERLAY")
+-- Text on a mockup baseline: `anchor` is "LEFT", "CENTER" or "RIGHT" (the mockup's start, middle, end); the line is centred
+-- C.CAP * size above the baseline.
+local function Text(parent, text, size, anchor, x, baseline)
+    local fs = parent:CreateFontString(nil, "OVERLAY")
     fs.cur = { 1, 1, 1, 1 }
-    fs.size = size                             -- image px; the seal name changes it, then calls fs.seat()
-    fs.x = x                                   -- image px; the countdown's S moves it, then calls fs.seat()
     fs:SetJustifyH(anchor)
-    fs.seat = function()
-        FS.Theme.ApplyMono(fs, ui(fs.size), fs.cur)
-        Point(fs, anchor, fs.x, baseline - C.CAP * fs.size)
-    end
-    Seat(fs.seat)
-    -- After Seat, which runs once at once and so sets the font: SetText on a FontString with none throws "Font not set".
-    fs:SetText(text)
-    return fs
-end
-
--- A header word: the DoT scale's own recipe (BOTTOMLEFT, 2.5 below the baseline), so the two classes line up.
-local function Header(text, x)
-    local fs = chamber:CreateFontString(nil, "OVERLAY")
-    fs.cur = { 1, 1, 1, 1 }
-    fs:SetJustifyH("LEFT")
     Seat(function()
-        FS.Theme.ApplyMono(fs, ui(11), fs.cur)
-        Point(fs, "BOTTOMLEFT", x, C.HDR_Y + 2.5)
+        FS.Theme.ApplyMono(fs, ui(size), fs.cur)
+        At(fs, anchor, x, baseline - C.CAP * size)
     end)
+    -- After Seat, which runs once at once and so sets the font: SetText on a FontString with none throws "Font not set".
     fs:SetText(text)
     return fs
 end
@@ -406,74 +247,37 @@ end
 -- Build
 -------------------------------------------------------------------------------
 
-local function BuildFrame()
-    local sc, Theme = C.SC, FS.Theme
-    -- the chamber frame is the chamfered rect itself; the dot piece frame is its parent
+-- A chamfered plate on its own small frame: fill and outline slices (and the tile's soft glow) over a square of `size` image px,
+-- with a hidden icon inside the cut.
+local function Plate(x, y, size, cut, fillPath, outlinePath, withGlow)
+    local Theme = FS.Theme
+    local f = CreateFrame("Frame", nil, mod)
+    f:SetFrameLevel(mod:GetFrameLevel() + 1)
+    f:EnableMouse(false)
     Seat(function()
-        Point(chamber, "TOPLEFT", sc.x, sc.y)
-        chamber:SetSize(ui(sc.w), ui(sc.h))
+        At(f, "TOPLEFT", x, y)
+        f:SetSize(ui(size), ui(size))
     end)
-    -- Draw order, from drawSealChamber's sequence (the harness derives it from the mockup and checks every overlapping pair):
-    -- plate, radial wash, edge halo, edge (BACKGROUND 0, 1, BORDER -1, 0); then ARTWORK 0 ruler, 1 band fill, 2 band top,
-    -- 3 band glow, 4 band foot, 5 tube, 6 rungs, 7 tube outline; then OVERLAY -4 lens, -3 arcs, -2 glyph halo, -1 glyph, and
-    -- every label at OVERLAY 0 above all of it. (The mockup paints the amber band wash over the ruler numbers, which sit
-    -- below it there; here the numbers are above it.) The baked cut is 6, the mockup 8 image px.
-    P.plate = Theme.AddCut2Texture(chamber, Theme.SLICE_CUT2_FILL_TEXTURE, WHITE, "BACKGROUND", 0)
-    P.glow = Theme.AddSliceTexture(chamber, Theme.SLICE_GLOW_TEXTURE, WHITE, "BORDER", -1, -Theme.SLICE_GLOW_PAD)
-    Theme.ApplyNineSlice(P.glow, Theme.SLICE_GLOW_MARGIN)
-    P.glow:SetBlendMode("ADD")
-    -- chamfer(..) fill with createRadialGradient(SC_GX, SC_GY, 6, SC_GX, SC_GY, SC_GR + 30): the soft round glow
-    -- texture, cropped at the frame's right edge (the circle reaches 26 image px past it and the fill is clipped)
-    local R = C.GR + C.RADIAL_PAD
-    local right = sc.x + sc.w
-    local u1 = (right - (C.GX - R)) / (2 * R)
-    P.radial = Tex("BACKGROUND", 1)
-    P.radial:SetTexture(GLOW_ROUND)
-    P.radial:SetTexCoord(0, u1, 0, 1)
+    f.plate = Theme.AddSliceTexture(f, fillPath, WHITE, "BACKGROUND", 0)
+    Theme.ApplyNineSlice(f.plate, cut)
+    f.edge = Theme.AddSliceTexture(f, outlinePath, WHITE, "BORDER", 0)
+    Theme.ApplyNineSlice(f.edge, cut)
+    -- the icon sits inside the cut frame, inset half the cut so its corners land on the chamfer line
+    local inset = math.ceil(cut / 2)
+    f.icon = f:CreateTexture(nil, "ARTWORK", nil, 0)
+    f.icon:SetTexCoord(C.ICON_TEXCOORD[1], C.ICON_TEXCOORD[2], C.ICON_TEXCOORD[3], C.ICON_TEXCOORD[4])
+    f.icon:Hide()
     Seat(function()
-        Point(P.radial, "TOPLEFT", C.GX - R, C.GY - R)
-        P.radial:SetSize(ui(right - (C.GX - R)), ui(2 * R))
+        f.icon:ClearAllPoints()
+        f.icon:SetPoint("TOPLEFT", f, "TOPLEFT", ui(inset), -ui(inset))
+        f.icon:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -ui(inset), ui(inset))
     end)
-    P.edge = Theme.AddCut2Texture(chamber, Theme.SLICE_CUT2_OUTLINE_TEXTURE, WHITE, "BORDER")
-end
-
-local function BuildRuler()
-    P.ticks, P.labels = {}, {}
-    for s = 0, C.MAX_S do
-        local y = SecY(s)
-        local maj = s % C.MAJ == 0
-        local len = maj and C.MAJ_LEN or C.MIN_LEN
-        P.ticks[s + 1] = HLine(y, DOT_AX - len, DOT_AX, K.violet, C.TICK_A, LINE, "ARTWORK", -4)
-        if maj then
-            P.labels[s] = Text(tostring(s), C.LABEL_SIZE, "LEFT", DOT_AX + C.LABEL_DX, y + C.LABEL_DY)
-            TextColor(P.labels[s], K.fg, C.LABEL_A)
-        end
+    if withGlow then
+        f.glow = Theme.AddSliceTexture(f, Theme.SLICE_GLOW_TEXTURE, WHITE, "BORDER", -1, -Theme.SLICE_GLOW_PAD)
+        Theme.ApplyNineSlice(f.glow, Theme.SLICE_GLOW_MARGIN)
+        f.glow:SetBlendMode("ADD")
     end
-    P.header = Header("SEAL", DOT_AX)
-end
-
-local function BuildBand()
-    local sc = C.SC
-    local yb = SecY(C.BAND_S)
-    local x0, x1 = sc.x + C.BAND_PAD, sc.x + sc.w - C.BAND_PAD
-    P.band = Tex("ARTWORK", -3)
-    Solid(P.band, K.amber, C.BAND_FILL)
-    Seat(function()
-        Point(P.band, "TOPLEFT", sc.x, yb)
-        P.band:SetSize(ui(sc.w), ui(BOT - yb))
-    end)
-    P.bandTop = HDashes(yb, x0, x1, C.BAND_DASH, K.amber, C.BAND_TOP_A, LINE, "ARTWORK", -2)
-    -- glow(K.amber, .8) on the foot: the four nested halo strokes, each wider than the core by twice its reach and at
-    -- k * a of the foot's alpha, plain blend (source over), as the mockup stacks them
-    P.bandGlow = {}
-    for i = 1, #C.HALO do
-        local reach, a = C.HALO[i][1], C.HALO[i][2]
-        P.bandGlow[i] = HLine(BOT, x0, x1, K.amber, C.BAND_BOT_A * C.BAND_GLOW_K * a, LINE * C.BAND_BOT_W + 2 * reach,
-            "ARTWORK", -1)
-    end
-    P.bandBottom = HLine(BOT, x0, x1, K.amber, C.BAND_BOT_A, LINE * C.BAND_BOT_W, "ARTWORK", 0)
-    P.reseal = Text("RESEAL", C.RESEAL_SIZE, "CENTER", C.GX, (yb + BOT) / 2 + C.RESEAL_DY)
-    TextColor(P.reseal, K.amber, C.RESEAL_A)
+    return f
 end
 
 -- UI units per physical pixel at the root's effective scale, or nil when the client will not say (GunsightFrame's PixelUnit).
@@ -487,7 +291,7 @@ local function PixelUnit()
         local ok, _, h = pcall(physical)
         if ok and type(h) == "number" and not (FS.IsSecret and FS.IsSecret(h)) and h > 0 then factor = 768 / h end
     end
-    -- a plain, finite, positive number or nothing (a NaN or an infinity would poison every height written after it)
+    -- a plain, finite, positive number or nothing (a NaN or an infinity would poison every width written after it)
     if type(factor) ~= "number" or (FS.IsSecret and FS.IsSecret(factor)) or factor ~= factor or factor <= 0 or factor == math.huge then return nil end
     local scale = 1
     local root = Gunsight.root
@@ -498,7 +302,7 @@ local function PixelUnit()
     return factor / scale
 end
 
--- How many image px a quarter screen pixel is at the current scale (nil: the client will not say, the height stays exact).
+-- How many image px a quarter screen pixel is at the current scale (nil: the client will not say, the width stays exact).
 local function SeatFillStep()
     L.fillQ = nil
     local px = PixelUnit()
@@ -507,383 +311,98 @@ local function SeatFillStep()
     if type(one) == "number" and one > 0 and one < math.huge then L.fillQ = C.FILL_STEP * px / one end
 end
 
-local function BuildTube()
-    local cx, hw = DOT_AX + C.TX_DX, C.TW / 2
-    L.amberTip = Mix(K.amber, WHITE, C.TIP_MIX)
-    L.amberDot = Mix(K.amber, WHITE, C.DOT_MIX)
-    P.tube = Tex("ARTWORK", 1)
-    Seat(function()
-        Point(P.tube, "TOPLEFT", cx - hw, TOP)
-        P.tube:SetSize(ui(C.TW), ui(BOT - TOP))
-    end)
-    -- The drain: a white colour texture the VERTICAL gradient multiplies (set once, here), grown from the foot by SetHeight
-    -- alone. The tip bar and the tip dot hang off its top edge, so a frame writes the fill height and nothing else.
-    P.fill = Tex("ARTWORK", 2)
-    P.fill:SetColorTexture(1, 1, 1, 1)
-    -- a client without Texture:SetGradient or CreateColor gets a flat tint (PaintFill), as GunsightDots' Gradient does; what the
-    -- drain wears in the RESEAL band is built once here so the flip into the band allocates nothing
-    L.gradient = type(P.fill.SetGradient) == "function" and type(CreateColor) == "function"
-    if L.gradient then
-        L.amberLo = CreateColor(K.amber[1], K.amber[2], K.amber[3], C.FILL_A0)
-        L.amberHi = CreateColor(K.amber[1], K.amber[2], K.amber[3], 1)
-    end
+local function BuildTile()
+    P.tile = Plate(0, C.TILE_Y, C.TILE, FS.Theme.SLICE_CUT_MARGIN, FS.Theme.SLICE_CUT2_FILL_TEXTURE,
+        FS.Theme.SLICE_CUT2_OUTLINE_TEXTURE, true)
+    P.ab = Text(P.tile, "", C.AB_SIZE, "CENTER", C.AB_X, C.AB_Y)
+    P.name = Text(mod, "", C.NAME_SIZE, "LEFT", C.NAME_X, C.NAME_Y)
+    P.cap = Text(mod, "", C.CAP_SIZE, "LEFT", C.NAME_X, C.CAP_Y)
+    P.time = Text(mod, "", C.TIME_SIZE, "RIGHT", C.W, C.TIME_Y)
+    TextColor(P.ab, K.white, 1)
+    TextColor(P.name, K.white, 1)
+    TextColor(P.cap, K.muted, 1)
+end
+
+local function BuildBar()
+    local by, bh, bw = C.BAR_Y, C.BAR_H, C.W
+    P.track = Rect(0, by, bw, bh, Hex(C.TRACK), C.TRACK_A, "BACKGROUND", 0)
+    local bandW = bw * C.BAND_S / C.MAX_S
+    P.band = Rect(0, by, bandW, bh, K.amber, C.BAND_A, "BACKGROUND", 1)
+    -- The drain grows from the left by SetWidth alone; the white tip rides its right edge by anchor, so a frame writes the fill
+    -- width and nothing else.
+    P.fill = Tex("ARTWORK", 0)
+    P.fill:SetColorTexture(1, 1, 1, C.FILL_A)
     Seat(SeatFillStep)
     Seat(function()
-        Point(P.fill, "BOTTOMLEFT", cx - hw, BOT)
-        P.fill:SetSize(ui(C.TW), ui(L.fillH or 0))
+        At(P.fill, "TOPLEFT", 0, by)
+        P.fill:SetSize(ui(L.fillW or 0), ui(bh))
     end)
-    P.tipBar = Tex("ARTWORK", 3)
-    Solid(P.tipBar, WHITE, C.TIP_A)
+    P.tip = Tex("ARTWORK", 1)
+    Solid(P.tip, WHITE, C.TIP_A)
     Seat(function()
-        P.tipBar:ClearAllPoints()
-        P.tipBar:SetPoint("TOPLEFT", P.fill, "TOPLEFT")
-        P.tipBar:SetSize(ui(C.TW), ui(C.TIP_H))
+        P.tip:ClearAllPoints()
+        P.tip:SetPoint("RIGHT", P.fill, "RIGHT")
+        P.tip:SetSize(ui(C.TIP_W), ui(bh + 2 * C.TIP_PAD))
     end)
-    P.tipDot = Tex("ARTWORK", 4)
-    P.tipDot:SetTexture(GLOW_ROUND)
-    Seat(function()
-        local size = ui(2 * C.DOT_R / C.GLOW_HALF)
-        P.tipDot:ClearAllPoints()
-        P.tipDot:SetPoint("CENTER", P.fill, "TOP")
-        P.tipDot:SetSize(size, size)
-    end)
-    P.rungs = {}
-    for s = C.RUNG_STEP, C.MAX_S - 1, C.RUNG_STEP do
-        P.rungs[#P.rungs + 1] = HLine(SecY(s), cx - hw, cx + hw, K.bg, C.RUNG_A, LINE, "ARTWORK", 5)
-    end
     -- strokeRect: four lines centred on the rect's edges
-    local th = LINE * C.OUT_W
     P.outline = {
-        HLine(TOP, cx - hw, cx + hw, WHITE, 1, th, "ARTWORK", 6),
-        HLine(BOT, cx - hw, cx + hw, WHITE, 1, th, "ARTWORK", 6),
-        VLine(cx - hw, TOP, BOT, WHITE, 1, th, "ARTWORK", 6),
-        VLine(cx + hw, TOP, BOT, WHITE, 1, th, "ARTWORK", 6),
+        HLine(by, -LINE / 2, bw + LINE / 2, WHITE, C.OUT_A, LINE, "ARTWORK", 2),
+        HLine(by + bh, -LINE / 2, bw + LINE / 2, WHITE, C.OUT_A, LINE, "ARTWORK", 2),
+        VLine(0, by, by + bh, WHITE, C.OUT_A, LINE, "ARTWORK", 2),
+        VLine(bw, by, by + bh, WHITE, C.OUT_A, LINE, "ARTWORK", 2),
     }
+    P.cut = VDashes(bandW, by - C.CUT_PAD, by + bh + C.CUT_PAD, C.CUT_DASH, K.amber, C.CUT_A, LINE, "ARTWORK", 3)
+    P.ticks = {}
+    for i = 0, C.TICKS do
+        local x = bw * i / C.TICKS
+        local len = i % 2 == 0 and C.TICK_LONG or C.TICK_SHORT
+        P.ticks[i + 1] = VLine(x, by + bh, by + bh + len, K.violet, C.TICK_A, LINE, "ARTWORK", 3)
+    end
+    P.labels = {}
+    for i, v in ipairs(C.LABELS) do
+        local anchor = v == 0 and "LEFT" or (v == C.MAX_S and "RIGHT" or "CENTER")
+        P.labels[i] = Text(mod, tostring(v), C.LABEL_SIZE, anchor, bw * v / C.MAX_S, by + bh + C.LABEL_Y)
+        TextColor(P.labels[i], K.fg, C.LABEL_A)
+    end
+    P.reseal = Text(mod, "RESEAL", C.RESEAL_SIZE, "CENTER", bandW + C.RESEAL_DX, by + bh + C.LABEL_Y)
+    TextColor(P.reseal, K.amber, C.RESEAL_A)
 end
 
-local function BuildLens()
-    local lens = C.LENS_SIZE / C.LENS_K
-    P.lens = Tex("OVERLAY", -5)
-    P.lens:SetTexture(MEDIA .. "seal_lens.tga")
-    Square(P.lens, C.GX, C.GY, lens)
-    P.arcs = Tex("OVERLAY", -4)
-    P.arcs:SetTexture(MEDIA .. "seal_arcs.tga")
-    Square(P.arcs, C.GX, C.GY, lens)
-    P.glyphHalo = Tex("OVERLAY", -3)
-    P.glyphHalo:SetBlendMode("ADD")
-    Square(P.glyphHalo, C.GX, C.GY, C.GLYPH_SIZE * C.HALO_K)
-    P.glyph = Tex("OVERLAY", -2)
-    Square(P.glyph, C.GX, C.GY, C.GLYPH_SIZE)
-    -- The Judgement ring (a fresh judgeAt): the baked full circle with its halo (seal_ring.tga, whose circle is the lens radius
-    -- at rest), above the glyph; its size follows L.ringSize, so a rescale re-seats it at the size it wears and a frame writes
-    -- SetSize only while it moves. Needs a full client restart the first time (a new TGA).
-    P.judgeRing = Tex("OVERLAY", -1)
-    P.judgeRing:SetTexture(MEDIA .. "seal_ring.tga")
-    L.ringSize = C.RING_SIZE / C.RING_K
+local function BuildJudgement()
+    local jy = C.J_Y
+    local plate = Hex(C.J_PLATE)
+    local cut = C.J_CUT
+    local base = MEDIA .. "slice_cut2_"
+    P.chip = Plate(0, jy, C.J_SIZE, cut, base .. "fill_c" .. cut .. ".tga", base .. "outline_c" .. cut .. ".tga", false)
+    local pc = Mix(K.bg, plate, C.J_MIX)
+    P.chip.plate:SetVertexColor(pc[1], pc[2], pc[3], 1)
+    P.jLetter = Text(P.chip, "J", C.J_LETTER_SIZE, "CENTER", C.J_SIZE / 2, jy + C.J_LETTER_Y)
+    TextColor(P.jLetter, K.white, 1)
+    P.jTrack = Rect(C.JBAR_X, jy + C.JBAR_DY, C.JBAR_W, C.JBAR_H, K.steel, C.JBAR_TRACK_A, "ARTWORK", 0)
+    P.jFill = Tex("ARTWORK", 1)
+    P.jFill:SetColorTexture(1, 1, 1, 1)
+    P.jFill:Hide()
     Seat(function()
-        Point(P.judgeRing, "CENTER", C.GX, C.GY)
-        P.judgeRing:SetSize(ui(L.ringSize), ui(L.ringSize))
+        At(P.jFill, "TOPLEFT", C.JBAR_X, jy + C.JBAR_DY)
+        P.jFill:SetSize(ui(L.jW or 0), ui(C.JBAR_H))
     end)
-    P.name = Text("", C.NAME_SIZE, "CENTER", C.GX, C.NAME_Y)
-    P.caption = Text("SEAL ACTIVE", C.CAP_SIZE, "CENTER", C.GX, C.CAP_Y)
-end
-
--- The countdown number and its muted S (the S sits right of the number: BuildCount seats it for two digits, the live layer
--- moves it when the text length changes).
-local function BuildCount()
-    local x = C.GX - C.COUNT_DX
-    P.count = Text("", C.COUNT_SIZE, "CENTER", x, C.COUNT_Y)
-    P.countS = Text("S", C.S_SIZE, "LEFT", x + 2 * C.MONO_ADV * C.COUNT_SIZE / 2 + C.S_GAP, C.COUNT_Y)
-end
-
-local function BuildNoSeal()
-    P.noSeal = Text("NO SEAL", C.NO_SIZE, "CENTER", C.GX, C.GY + C.NO_Y)
-    P.noSub = Text("IN COMBAT", C.NO_SUB_SIZE, "CENTER", C.GX, C.GY + C.NO_SUB_Y)
-    P.noTime = Text("--", C.NO_TIME_SIZE, "CENTER", C.GX - C.NO_TIME_DX, C.NO_TIME_Y)
-    P.noHint = Text("CAST A SEAL", C.NO_HINT_SIZE, "CENTER", C.GX, C.CAP_Y)
-    TextColor(P.noSub, K.red, C.NO_SUB_A)
-    TextColor(P.noTime, K.muted, C.NO_TIME_A)
-    TextColor(P.noHint, K.muted, C.NO_HINT_A)
-end
-
-local JL_LETTERS = #C.NOT_JUDGED       -- the longest empty lane label
-
--- The empty lane label runs bottom to top in the mockup; Lua cannot rotate text, so it is stacked upright letters
--- centred on the guide, top to bottom (the DoT scale's REFRESH label does the same).
-local stack = ""
-local function SeatStack()
-    local n = #stack
-    local pitch = C.MONO_ADV * C.JL_TEXT_SIZE + C.JL_TEXT_SP
-    local x = C.JL_X + C.JL_TEXT_DX - C.CAP * C.JL_TEXT_SIZE
-    local cy = (TOP + BOT) / 2
-    for i = 1, JL_LETTERS do
-        local fs = P.stack[i]
-        fs:SetShown(i <= n)
-        if i <= n then
-            Point(fs, "CENTER", x, cy + (i - (n + 1) / 2) * pitch)
-        end
-    end
-end
-
--- The Judgement chip (mockup 2192 to 2195): the DoT scale's own chip recipe (GunsightDots BuildChip), a 24 square frame whose
--- icon is the Judgement spell, inset inside the cut by FrameHelpers.SeatAuraTile, with Theme.SkinButton's ring and halo in the
--- seal colour and a cut shaped white pop for the landing flash. It stands in for the mockup's chip, which holds the seal's glyph
--- (a v1 drop: the plan puts the spell icon there). A frame on the chamber, so it stacks above every chamber texture (the bar).
--- Nothing here is needed by the bar: a missing helper or a throw (BuildJudgementLane's pcall) logs `nochip` once and the lane keeps its bar.
-local function BuildJudgeChip()
-    local Theme, FH = FS.Theme, FS.FrameHelpers
-    local f = CreateFrame("Frame", nil, chamber)
-    f:Hide()
-    f:SetFrameLevel(chamber:GetFrameLevel() + 1)
-    f:EnableMouse(false)
-    f:SetSize(ui(C.CHS), ui(C.CHS))             -- sized first: the chamfer comes from the height
-    f.icon = f:CreateTexture(nil, "ARTWORK")
-    f.icon:SetAllPoints(f)
-    Theme.SkinButton(f, { borderColor = K.violet })
-    FH.SeatAuraTile(f)
-    local c = (f.fsSkin and f.fsSkin.chamfer) or 6
-    local path = c == 6 and Theme.SLICE_CUT2_FILL_TEXTURE or (MEDIA .. "slice_cut2_fill_c" .. c .. ".tga")
-    local pop = Theme.AddSliceTexture(f, path, { K.white[1], K.white[2], K.white[3], 0 }, "OVERLAY", 2)
-    Theme.ApplyNineSlice(pop, c)
-    pop:Hide()
-    Seat(function()
-        f:SetSize(ui(C.CHS), ui(C.CHS))
-        Point(f, "CENTER", C.JL_X, BOT - (L.jH or 0))
-    end)
-    P.jChip, P.jPop = f, pop
-end
-
-local function BuildJudgementLane()
-    local jx, ax = C.JL_X, C.JL_AX
-    P.judged = Header("JUDGED", jx - C.JUDGED_DX)
-    TextColor(P.judged, K.muted, C.JUDGED_A)
-    P.jAxis = VLine(ax, TOP - C.JL_AX_UP, BOT + C.JL_AX_DN, K.violet, C.JL_AX_A, LINE)
-    P.jTicks, P.jLabels = {}, {}
-    for s = 0, C.JL_MAX_S do
-        local y = JY(s)
-        local len = s % C.JL_MAJ == 0 and C.JL_MAJ_LEN or (s % C.JL_MID == 0 and C.JL_MID_LEN or C.JL_MIN_LEN)
-        P.jTicks[s + 1] = HLine(y, ax - len, ax, K.violet, C.JL_TICK_A, LINE)
-        if s % C.JL_MAJ == 0 then
-            P.jLabels[s] = Text(tostring(s), C.LABEL_SIZE, "LEFT", ax + C.LABEL_DX, y + C.LABEL_DY)
-            TextColor(P.jLabels[s], K.fg, C.JL_LABEL_A)
-        end
-    end
-    P.jGuide = VDashes(jx, TOP, BOT, C.JL_GUIDE_DASH, K.violet, C.JL_GUIDE_A, LINE)
-    -- the debuff bar (2189 to 2191): a faint wide stroke under a narrow core, grown from BOT by SetHeight alone, hidden at rest
-    P.jBarGlow, P.jBarCore = Tex("ARTWORK", 3), Tex("ARTWORK", 4)
-    P.jBarGlow:SetAlpha(C.JL_BAR_GLOW_A)
-    P.jBarCore:SetAlpha(C.JL_BAR_CORE_A)
-    for _, spec in ipairs({ { P.jBarGlow, C.JL_BAR_GLOW_W }, { P.jBarCore, C.JL_BAR_CORE_W } }) do
-        local t, w = spec[1], spec[2]
-        t:SetColorTexture(1, 1, 1, 1)
-        t:Hide()
-        Seat(function()
-            Point(t, "BOTTOM", jx, BOT)
-            t:SetWidth(ui(w))
-            t:SetHeight(ui(math.max(0, (L.jH or 0) - C.CHS / 2)))
-        end)
-    end
-    local ok, err = pcall(BuildJudgeChip)
-    if not ok then LogOnce("nochip", err) end
-    P.stack = {}
-    for i = 1, JL_LETTERS do
-        local fs = chamber:CreateFontString(nil, "OVERLAY")
-        fs.cur = { K.muted[1], K.muted[2], K.muted[3], C.JL_TEXT_A }
-        fs:SetJustifyH("CENTER")
-        Seat(function() FS.Theme.ApplyMono(fs, ui(C.JL_TEXT_SIZE), fs.cur) end)
-        fs:SetText("")
-        P.stack[i] = fs
-    end
-    Seat(SeatStack)
-end
-
-local function SetStack(text)
-    stack = text
-    for i = 1, JL_LETTERS do P.stack[i]:SetText(text:sub(i, i)) end
-    SeatStack()
+    P.jTime = Text(mod, "", C.JTIME_SIZE, "RIGHT", C.W, jy + C.JTIME_Y)
+    TextColor(P.jTime, K.white, 1)
+    P.jEmpty = Text(mod, "", C.JEMPTY_SIZE, "LEFT", C.JEMPTY_X, jy + C.JTIME_Y)
+    TextColor(P.jEmpty, K.muted, C.JEMPTY_A)
 end
 
 -------------------------------------------------------------------------------
 -- Look
 -------------------------------------------------------------------------------
 
-local function Tint(t, c, a)
-    t:SetVertexColor(c[1], c[2], c[3], a)
-end
-
--- The drain's colour: the vertical gradient .35 to 1 where the client can draw one (L.gradient, decided at build), else a flat
--- tint of the same colour at full alpha (neon scales it through the fill's own alpha either way).
-local function PaintFill(on)
-    if L.gradient then
-        P.fill:SetGradient("VERTICAL", on and L.amberLo or L.sealLo, on and L.amberHi or L.sealHi)
-    else
-        local c = on and K.amber or L.col
-        P.fill:SetColorTexture(c[1], c[2], c[3], 1)
-    end
-end
-
 local function ShowAll(list, on)
     for i = 1, #list do list[i]:SetShown(on) end
 end
 
--- The seal parts: shown for a known seal only. The none parts: shown for "none" only.
-local function SealParts() return { P.radial, P.lens, P.arcs, P.glyphHalo, P.glyph, P.name, P.caption, P.reseal } end
-local function DrainParts() return { P.fill, P.tipBar, P.tipDot, P.count, P.countS, P.judgeRing } end
-local function NoneParts() return { P.noSeal, P.noTime, P.noHint } end
+local function DrainParts() return { P.fill, P.tip, P.time } end
 
--- Paints a look at rest (neon 1, no pulse, nothing moving) and resets what the live layer has worn, so the first frame after
--- a repaint writes everything again. The seal's drain parts (fill, tip bar, tip dot, number, S) and the Judgement ring start
--- hidden: the live layer shows them when it reads a time.
-local function Paint(newMode, id, combat, reduce)
-    local no, known = newMode == "none", newMode == "seal"
-    local sl = known and SEALS[id] or nil
-    local col = known and sl.c or (no and K.red or K.violet)
-    local pu = reduce and 1 or C.NO_U             -- reduced motion holds the pulse at u = 1
-    local neon = 1
-
-    L.neon, L.col = neon, col
-    L.band, L.expiring = false, false
-    L.fillShown, L.fillH, L.countShown, L.countText, L.ringOn = false, nil, false, nil, false
-
-    -- frame
-    local plateA = (no and C.PLATE_A_NO or C.PLATE_A) * C.PLATE_FILL
-    P.plate:SetVertexColor(C.PLATE_RGB[1], C.PLATE_RGB[2], C.PLATE_RGB[3], plateA)
-    local edgeA = known and (C.EDGE_A0 + C.EDGE_A1 * neon) or (no and (C.NO_EDGE_A0 + C.NO_EDGE_A1 * pu) or C.EDGE_A0)
-    Tint(P.edge, col, edgeA)
-    -- glow(col, k) lays the edge's own alpha down in four nested strokes: what shows is that alpha times their coverage
-    local glowK = known and (C.GLOW_K0 + C.GLOW_K1 * neon) or (no and pu or 0)
-    Tint(P.glow, col, edgeA * Coverage(glowK))
-    P.glow:SetShown(glowK > 0)
-    TextColor(P.header, col, C.HDR_A)
-
-    -- ruler numbers
-    local la = no and C.LABEL_A_NO or C.LABEL_A
-    for _, fs in pairs(P.labels) do TextColor(fs, K.fg, la) end
-
-    -- drain tube, and the amber band cue back at rest (the wash and RESEAL at their resting alphas)
-    local tc = known and col or K.steel
-    Solid(P.tube, tc, known and C.TUBE_A or C.TUBE_NO_A)
-    local oa = known and C.OUT_A or C.OUT_NO_A
-    for _, t in ipairs(P.outline) do Solid(t, tc, oa) end
-    Solid(P.band, K.amber, C.BAND_FILL)
-    TextColor(P.reseal, K.amber, C.RESEAL_A)
-
-    -- the drain parts hide until the live layer reads a time; the colours they wear are made here, never per frame
-    ShowAll(DrainParts(), false)
-    if known then
-        if L.gradient then
-            L.sealLo = CreateColor(col[1], col[2], col[3], C.FILL_A0)
-            L.sealHi = CreateColor(col[1], col[2], col[3], 1)
-        end
-        L.sealTip = Mix(col, WHITE, C.TIP_MIX)
-        L.sealDot = Mix(col, WHITE, C.DOT_MIX)
-        L.glyphTint = Mix(col, WHITE, C.GLYPH_TINT)
-        PaintFill(false)
-        P.fill:SetAlpha(neon)
-        Solid(P.tipBar, L.sealTip, C.TIP_A)
-        P.tipBar:SetAlpha(neon)
-        Tint(P.tipDot, L.sealDot, 1)
-        P.tipDot:SetAlpha(neon)
-        TextColor(P.count, col, neon)
-        TextColor(P.countS, K.muted, C.S_A * neon)
-    end
-
-    -- the seal parts and the none parts
-    ShowAll(SealParts(), known)
-    ShowAll(NoneParts(), no)
-    -- IN COMBAT is a statement about the fight: it shows only while the player is in combat. The mockup draws the NO SEAL
-    -- look with it always on (it has no out of combat state), so out of combat the look keeps NO SEAL, -- and CAST A SEAL
-    -- and drops the sub-label rather than claim a fight that is not on.
-    P.noSub:SetShown(no and combat == true)
-    if known then
-        Tint(P.radial, col, C.RADIAL_A * neon)
-        Tint(P.lens, col, neon)
-        Tint(P.arcs, col, C.ARCS_A * neon)
-        local path = MEDIA .. "seal_glyph_" .. id .. ".tga"
-        P.glyph:SetTexture(path)
-        Tint(P.glyph, L.glyphTint, neon)
-        P.glyphHalo:SetTexture(path)
-        Tint(P.glyphHalo, col, C.HALO_A * neon)
-        TextColor(P.name, Mix(col, WHITE, C.NAME_TINT), C.NAME_A * neon)
-        local long = #sl.n > C.NAME_LONG
-        P.name.size = long and C.NAME_SIZE_LONG or C.NAME_SIZE
-        P.name:SetText(sl.n)
-        P.name.seat()
-        P.caption:SetText(C.CAP_TEXT)
-        TextColor(P.caption, col, C.CAP_A)
-    end
-    if no then
-        TextColor(P.noSeal, K.red, 0.5 + 0.5 * pu)
-    end
-    -- the empty lane label follows the seal look; a debuff on the target takes the lane, so the label waits for it to clear
-    L.laneText = known and (sl.deb > 0 and C.NOT_JUDGED or C.NO_DEBUFF) or ""
-    SetStack(laneCol and "" or L.laneText)
-    mode, sealId, inCombat, L.reduced = newMode, id, combat, reduce
-end
-
--------------------------------------------------------------------------------
--- Live layer (drawSealChamber's animated terms; every function from Fract to Tick is on the per frame path)
--------------------------------------------------------------------------------
-
-local floor, ceil, sin, cos, pi, huge = math.floor, math.ceil, math.sin, math.cos, math.pi, math.huge
-local RING_BASE = C.RING_SIZE / C.RING_K        -- the ring texture at rest, image px (its circle is the lens radius)
-
--- The countdown strings, made once: the per frame path cannot format or concatenate. Whole seconds 0 to 30, tenths 0.0 to 5.0.
-local WHOLE, TENTHS = {}, {}
-for i = 0, C.MAX_S do WHOLE[i] = tostring(i) end
-for i = 0, C.COUNT_FROM * 10 do TENTHS[i] = string.format("%d.%d", floor(i / 10), i % 10) end
-
--- A time from the Hud as a plain finite number, or nil: a secret (the guard first), a string, NaN and infinity read as unknown.
-local function Plain(v)
-    if FS.IsSecret and FS.IsSecret(v) then return nil end
-    if type(v) ~= "number" or v ~= v or v == huge or v == -huge then return nil end
-    return v
-end
-
-local function Fract(x)
-    return x - floor(x)
-end
-
--- sealNeon (mockup 1995 to 2041): the strike up table for 0 <= strike < .7 s after a cast, the dying tube in the last 5 s
--- (dropouts that get likelier and deeper, else a fast shimmer), else 1. The dying tube wins over the strike. Reduced motion
--- (the mockup's `if(reduce)` line) is a steady .8 while expiring and 1 otherwise.
-local function NeonAt(strike, expiring, rem, t, reduce)
-    if reduce == true then
-        if expiring then return C.REDUCED_EXPIRING end
-        return 1
-    end
-    if expiring and rem > 0 then
-        local n = floor(t * C.FLICK_RATE)
-        local p = C.DROP_P0 + C.DROP_P1 * (1 - rem / C.EXPIRE_S)
-        if Fract(sin(n * C.FLICK_SEED) * C.FLICK_MUL) < p then
-            return C.DROP_LO + C.DROP_SPAN * Fract(sin(n * C.FLICK_SEED2) * C.FLICK_MUL)
-        end
-        return C.STEADY_BASE + C.STEADY_AMP * sin(t * C.STEADY_FREQ)
-    end
-    if strike >= 0 and strike < C.STRIKE_S then
-        local i = floor(strike / C.STRIKE_S * 7)
-        if i > 6 then i = 6 end
-        return C.STRIKE[i + 1]
-    end
-    return 1
-end
-
--- u = .5 - .5 * cos(PI * clock / 1.4)
-local function Pulse(t)
-    return 0.5 - 0.5 * cos(pi * t / C.PULSE_S)
-end
-
--- Whole seconds above 5 (a ceiling, clamped at 30), tenths from 5 down.
-local function CountText(rem)
-    if rem > C.COUNT_FROM then
-        local n = ceil(rem)
-        if n > C.MAX_S then n = C.MAX_S end
-        return WHOLE[n]
-    end
-    return TENTHS[floor(rem * 10 + 0.5)] or TENTHS[0]
-end
-
--- A text region's alpha, in place: the colour lives on fs.cur (Theme.ApplyMono resets from it at a rescale).
+-- A text region's alpha and colour, in place: the colour lives on fs.cur (Theme.ApplyMono resets from it at a rescale).
 local function TextAlpha(fs, a)
     local cur = fs.cur
     cur[4] = a
@@ -896,197 +415,189 @@ local function PaintText(fs, c, a)
     fs:SetTextColor(c[1], c[2], c[3], a)
 end
 
--- One neon level scales every neon driven part (mockup: edge .55 + .45 * neon, glow .6 + .25 * neon, radial, lens, arcs, glyph
--- and its halo, name, the caption while expiring, the drain with its tip, the number and its S). Nothing is written when the
--- level did not move.
-local function ApplyNeon(e)
-    if e == L.neon then return end
-    L.neon = e
-    local col = L.col
-    local edgeA = C.EDGE_A0 + C.EDGE_A1 * e
-    Tint(P.edge, col, edgeA)
-    Tint(P.glow, col, edgeA * Coverage(C.GLOW_K0 + C.GLOW_K1 * e))
-    Tint(P.radial, col, C.RADIAL_A * e)
-    Tint(P.lens, col, e)
-    Tint(P.arcs, col, C.ARCS_A * e)
-    Tint(P.glyph, L.glyphTint, e)
-    Tint(P.glyphHalo, col, C.HALO_A * e)
-    TextAlpha(P.name, C.NAME_A * e)
-    TextAlpha(P.caption, L.expiring and C.CAP_A * e or C.CAP_A)
-    TextAlpha(P.count, e)
-    TextAlpha(P.countS, C.S_A * e)
-    P.fill:SetAlpha(e)
-    P.tipBar:SetAlpha(e)
-    P.tipDot:SetAlpha(e)
+local function Tint(t, c, a)
+    t:SetVertexColor(c[1], c[2], c[3], a)
 end
 
--- The RESEAL band cue (remaining at or under 3 s): the wash breathes with the clock every frame in the band; the tube, its
--- outline, the drain, the tip, the dot and the number go amber once on the way in and back once on the way out.
-local function SetBand(on, now)
+-- Paints a look at rest (no pulse, nothing moving) and resets what the live layer has worn, so the first frame after a repaint
+-- writes everything again. The drain starts hidden: the live layer shows it when it reads a time.
+local function Paint(newMode, id, combat, reduce)
+    local no, known = newMode == "none", newMode == "seal"
+    local sl = known and SEALS[id] or nil
+    local col = known and sl.c or (no and K.red or K.violet)
+    local pu = reduce and 1 or C.NO_U             -- reduced motion holds the pulse at u = 1
+
+    L.col = col
+    L.warn = false
+    L.fillShown, L.fillW, L.timeShown, L.timeText = false, nil, false, nil
+
+    -- tile
+    local tile = P.tile
+    local plateC = Mix(K.bg, col, C.TILE_MIX)
+    tile.plate:SetVertexColor(plateC[1], plateC[2], plateC[3], 1)
+    local edgeA = known and 1 or (no and (C.NO_EDGE_A0 + C.NO_EDGE_A1 * pu) or C.UNKNOWN_EDGE_A)
+    Tint(tile.edge, col, edgeA)
+    Tint(tile.glow, col, C.TILE_GLOW_A * edgeA)
+    tile.glow:SetShown(known or no)
+    P.ab:SetText(known and sl.ab or (no and "--" or ""))
+    P.ab:SetShown(known or no)
+    tile.icon:Hide()
+    L.sealIcon = false
+    TextColor(P.ab, no and K.red or K.white, 1)
+    P.name:SetText(known and sl.n or (no and C.NAME_NONE or ""))
+    TextColor(P.name, no and K.red or K.white, no and (C.NO_NAME_A0 + C.NO_NAME_A1 * pu) or 1)
+    P.cap:SetText(known and C.CAP_TEXT or (no and C.CAP_NONE or ""))
+    TextColor(P.cap, no and combat and K.red or K.muted, no and combat and 0.8 or 1)
+
+    -- the bar: the track and the amber band stay, the drain and the time wait for a reading; with no seal the outline is steel
+    local oc = known and col or (no and K.steel or K.violet)
+    for _, t in ipairs(P.outline) do Solid(t, oc, C.OUT_A) end
+    Solid(P.band, K.amber, C.BAND_A)
+    TextColor(P.reseal, K.amber, C.RESEAL_A)
+    ShowAll(DrainParts(), false)
+    if known then Solid(P.fill, col, C.FILL_A) end
+    if no then
+        PaintText(P.time, K.muted, 0.4)
+        P.time:SetText("--")
+        P.time:Show()
+    else
+        TextColor(P.time, col, 1)
+    end
+
+    -- the Judgement row's empty label follows the look; a debuff on the target takes the row, so the label waits for it to clear
+    L.laneText = known and (sl.deb > 0 and C.NOT_JUDGED or C.NO_DEBUFF) or ""
+    P.jEmpty:SetText(laneCol and "" or L.laneText)
+    mode, sealId, inCombat, L.reduced = newMode, id, combat, reduce
+end
+
+-------------------------------------------------------------------------------
+-- Live layer (every function from Pulse to Tick is on the per frame path)
+-------------------------------------------------------------------------------
+
+local floor, ceil, sin, cos, pi, huge = math.floor, math.ceil, math.sin, math.cos, math.pi, math.huge
+
+-- The time strings, made once: the per frame path cannot format or concatenate. Whole seconds 0 to 40, tenths 0.0 to 5.0.
+local WHOLE, TENTHS = {}, {}
+for i = 0, C.JMAX_S do WHOLE[i] = i .. "s" end
+for i = 0, C.COUNT_FROM * 10 do TENTHS[i] = string.format("%d.%ds", floor(i / 10), i % 10) end
+
+-- A time from the Hud as a plain finite number, or nil: a secret (the guard first), a string, NaN and infinity read as unknown.
+local function Plain(v)
+    if FS.IsSecret and FS.IsSecret(v) then return nil end
+    if type(v) ~= "number" or v ~= v or v == huge or v == -huge then return nil end
+    return v
+end
+
+-- u = .5 - .5 * cos(PI * clock / 1.4)
+local function Pulse(t)
+    return 0.5 - 0.5 * cos(pi * t / C.PULSE_S)
+end
+
+-- Whole seconds above 5 (a ceiling, clamped at 30), tenths from 5 down.
+local function TimeText(rem)
+    if rem > C.COUNT_FROM then
+        local n = ceil(rem)
+        if n > C.MAX_S then n = C.MAX_S end
+        return WHOLE[n]
+    end
+    return TENTHS[floor(rem * 10 + 0.5)] or TENTHS[0]
+end
+
+-- A bar width in image px for `rem` seconds of `max`, pinned at the full bar (a reconcile can report a longer duration) and snapped
+-- to L.fillQ, a quarter screen pixel, so a steady drain writes only when a pixel quarter changes.
+local function BarWidth(rem, max, full)
+    local w = rem * full / max
+    local q = L.fillQ
+    if q then w = floor(w / q + 0.5) * q end
+    if w > full then w = full end
+    return w
+end
+
+-- The RESEAL cue (under 3 s): the band breathes with the clock every frame in it; the fill, the time and the caption go amber once
+-- on the way in and back once on the way out.
+local function SetWarn(on, now)
     if on and not L.reduced then
         local pl = 0.5 + 0.5 * sin(now * C.BAND_PL_FREQ)
-        P.band:SetColorTexture(K.amber[1], K.amber[2], K.amber[3], C.BAND_FILL + C.BAND_PL * pl)
+        P.band:SetColorTexture(K.amber[1], K.amber[2], K.amber[3], C.BAND_A + C.BAND_PL * pl)
         TextAlpha(P.reseal, C.RESEAL_IN0 + C.RESEAL_IN1 * Pulse(now))
     end
-    if on == L.band then return end
-    L.band = on
+    if on == L.warn then return end
+    L.warn = on
     local c = on and K.amber or L.col
-    Solid(P.tube, c, C.TUBE_A)
-    for i = 1, 4 do Solid(P.outline[i], c, C.OUT_A) end
-    PaintFill(on)
-    Solid(P.tipBar, on and L.amberTip or L.sealTip, C.TIP_A)
-    local dot = on and L.amberDot or L.sealDot
-    P.tipDot:SetVertexColor(dot[1], dot[2], dot[3], 1)
-    PaintText(P.count, c, P.count.cur[4])
-    if not on then
-        P.band:SetColorTexture(K.amber[1], K.amber[2], K.amber[3], C.BAND_FILL)
+    Solid(P.fill, c, C.FILL_A)
+    PaintText(P.time, c, 1)
+    if on then
+        P.cap:SetText(C.CAP_EXPIRING)
+        PaintText(P.cap, K.amber, 1)
+    else
+        P.cap:SetText(C.CAP_TEXT)
+        PaintText(P.cap, K.muted, 1)
+        P.band:SetColorTexture(K.amber[1], K.amber[2], K.amber[3], C.BAND_A)
         TextAlpha(P.reseal, C.RESEAL_A)
-    elseif L.reduced then
-        -- no breathing: the wash already rests at its base (Paint and the way out write it), RESEAL holds .55 + .45 * 1,
-        -- written once on the way in
+    end
+    if on and L.reduced then
+        -- no breathing: the band rests at its base, RESEAL holds .55 + .45 * 1, both written once on the way in
+        P.band:SetColorTexture(K.amber[1], K.amber[2], K.amber[3], C.BAND_A)
         TextAlpha(P.reseal, C.RESEAL_IN0 + C.RESEAL_IN1)
     end
 end
 
--- EXPIRING in amber for the last 5 s, else SEAL ACTIVE in the seal colour.
-local function SetExpiring(on)
-    if on == L.expiring then return end
-    L.expiring = on
-    if on then
-        P.caption:SetText(C.CAP_EXPIRING)
-        PaintText(P.caption, K.amber, C.CAP_A * L.neon)
-    else
-        P.caption:SetText(C.CAP_TEXT)
-        PaintText(P.caption, L.col, C.CAP_A)
-    end
-end
-
--- The NO SEAL pulse (u): edge .35 + .65 * u, the halo at that alpha times its coverage, the label .5 + .5 * u.
+-- The NO SEAL pulse (u): the tile edge .35 + .65 * u and its glow, the name .5 + .5 * u.
 local function ApplyNoSeal(u)
     local a = C.NO_EDGE_A0 + C.NO_EDGE_A1 * u
-    Tint(P.edge, K.red, a)
-    Tint(P.glow, K.red, a * Coverage(u))
-    TextAlpha(P.noSeal, 0.5 + 0.5 * u)
+    local tile = P.tile
+    Tint(tile.edge, K.red, a)
+    Tint(tile.glow, K.red, C.TILE_GLOW_A * a)
+    TextAlpha(P.name, C.NO_NAME_A0 + C.NO_NAME_A1 * u)
 end
 
--- The drain: height remaining / 30 s of the tube (pinned at the full tube: a reconcile can report a duration above 30), shown
--- for more than .05 s; the number and its S show for any readable time (the mockup gates only the tube on rem > .05). The tip
--- bar and the dot ride the fill's top edge by their anchors, so a frame writes the fill height and nothing else, and that
--- height snaps to L.fillQ (a quarter screen pixel) so a steady drain writes only when a pixel quarter changes. No time hides all.
-local function ApplyFill(rem)
+-- The drain: width remaining / 30 s of the bar, shown for more than .05 s; the time shows for any readable time (the tube
+-- gate is the fill's alone). The tip rides the fill's right edge by anchor. No time hides all three.
+local function ApplyBar(rem)
     if rem and rem > C.FILL_MIN then
-        local h = rem * (BOT - TOP) / C.MAX_S
-        local q = L.fillQ
-        if q then h = floor(h / q + 0.5) * q end
-        if h > BOT - TOP then h = BOT - TOP end
+        local w = BarWidth(rem, C.MAX_S, C.W)
         if not L.fillShown then
             L.fillShown = true
             P.fill:Show()
-            P.tipBar:Show()
-            P.tipDot:Show()
+            P.tip:Show()
         end
-        if h ~= L.fillH then
-            L.fillH = h
-            P.fill:SetHeight(ui(h))
+        if w ~= L.fillW then
+            L.fillW = w
+            P.fill:SetWidth(ui(w))
         end
     elseif L.fillShown then
         L.fillShown = false
         P.fill:Hide()
-        P.tipBar:Hide()
-        P.tipDot:Hide()
+        P.tip:Hide()
     end
     if rem then
-        if not L.countShown then
-            L.countShown = true
-            P.count:Show()
-            P.countS:Show()
+        local text = TimeText(rem)
+        if text ~= L.timeText then
+            L.timeText = text
+            P.time:SetText(text)
         end
-    elseif L.countShown then
-        L.countShown = false
-        P.count:Hide()
-        P.countS:Hide()
-    end
-end
-
--- The countdown: the text is written only when it changes, the S moves only when the text gets longer or shorter.
-local function ApplyCount(rem)
-    local text = CountText(rem)
-    if text == L.countText then return end
-    L.countText = text
-    P.count:SetText(text)
-    local len = #text
-    if len ~= L.countLen then
-        L.countLen = len
-        P.countS.x = C.GX - C.COUNT_DX + len * C.MONO_ADV * C.COUNT_SIZE / 2 + C.S_GAP
-        P.countS.seat()
-    end
-end
-
--- The Judgement ring: for .9 s after a Judgement it grows from the arcs' size by 26 of the lens radius's 50 on an ease out
--- cubic and fades with it (A(.85 * (1 - p))).
-local function ApplyRing(now)
-    local ja = L.judgeAt
-    local f = -1
-    if ja then f = now - ja end
-    if f >= 0 and f < C.RING_S then
-        local q = 1 - f / C.RING_S
-        local p = 1 - q * q * q
-        local size = RING_BASE * (C.GR + p * C.RING_GROW) / C.GR
-        local col = L.col
-        P.judgeRing:SetVertexColor(col[1], col[2], col[3], C.RING_A * (1 - p))
-        L.ringSize = size
-        P.judgeRing:SetSize(ui(size), ui(size))
-        if not L.ringOn then
-            L.ringOn = true
-            P.judgeRing:Show()
+        if not L.timeShown then
+            L.timeShown = true
+            P.time:Show()
         end
-    elseif L.ringOn then
-        L.ringOn = false
-        P.judgeRing:Hide()
+    elseif L.timeShown then
+        L.timeShown = false
+        P.time:Hide()
     end
 end
 
--- The Judgement lane (lane 9). It follows the TARGET's debuff in state.judged, so every seal look (a seal, NO SEAL, unknown) can
--- carry it, and it wears the chamber's colour as the mockup does (2111, 2188 to 2194: `col`, the current seal's, red with no seal,
--- violet for the unknown look). A repaint (LaneLook) happens only when the lane goes between empty and a colour, or the colour
--- changes. The mockup uses the seal's id inside the chip only for the glyph, which v1 replaces with the spell icon.
+-- The Judgement row follows the TARGET's debuff in state.judged, in the look's colour; LaneLook repaints it only on a change.
 
--- One texture answer as a plain usable value: a positive finite number (a file id; a NaN fails the > 0) or a non empty string, else nil.
-local function ReadTexture(fn, id)
-    local ok, tex = pcall(fn, id)
-    if not ok then return nil end
-    if FS.IsSecret and FS.IsSecret(tex) then return nil end
-    if type(tex) == "number" and tex > 0 and tex < huge then return tex end
-    if type(tex) == "string" and tex ~= "" then return tex end
-    return nil
-end
-
--- The Judgement spell's icon: the id comes from the Hud's own spell table (HudSpells jd, 20271 verified in game), the texture from
--- C_Spell.GetSpellTexture, else the legacy GetSpellTexture. nil when the client will not say (the chip then draws without an icon).
-local function JudgeIconId()
-    local spells = FS.HudSpells
-    local def = type(spells) == "table" and spells.jd
-    local ids = type(def) == "table" and def.ids
-    local id = type(ids) == "table" and ids[1]
-    if type(id) ~= "number" then return nil end
-    local tex
-    local modern = C_Spell and C_Spell.GetSpellTexture
-    if type(modern) == "function" then tex = ReadTexture(modern, id) end
-    if tex == nil and type(GetSpellTexture) == "function" then tex = ReadTexture(GetSpellTexture, id) end
-    return tex
-end
-
--- Is `key` (a ledger seal key) one a Judgement debuff can be cast under? Righteousness, Fury and Command carry none in the mockup
--- (deb 0), an unmapped key or a non string one is nothing, a secret is never indexed.
+-- Is `key` (a ledger seal key) one a Judgement debuff can be cast under? Righteousness, Fury and Command carry none (deb 0), an
+-- unmapped key or a non string one is nothing, a secret is never indexed.
 local function KeyHasDebuff(key)
     if FS.IsSecret and FS.IsSecret(key) then return false end
     local id = KEY_ID[key]
     return id ~= nil and SEALS[id].deb > 0
 end
 
--- The target's Judgement debuff from a Hud state: true with the plain expiresAt and appliedAt, or nil when there is none or it
--- cannot be read (false and nil both draw the empty lane: the mockup has no unknown look for the lane, DECIDED). An unreadable
--- expiresAt comes back as nil and the lane reads as empty, like any other time we cannot use.
+-- The target's Judgement debuff from a Hud state: true with the plain expiresAt, or nil when there is none or it cannot be read
+-- (false and nil both draw the empty row).
 local function JudgedOf(state)
     if FS.IsSecret and FS.IsSecret(state) then return nil end
     if type(state) ~= "table" then return nil end
@@ -1094,12 +605,11 @@ local function JudgedOf(state)
     if FS.IsSecret and FS.IsSecret(jd) then return nil end
     if type(jd) ~= "table" then return nil end
     if not KeyHasDebuff(jd.key) then return nil end
-    return true, Plain(jd.expiresAt), Plain(jd.appliedAt)
+    return true, Plain(jd.expiresAt)
 end
 
--- The current target's debuff straight from the Hud (FS.Hud.GetJudgement resolves the target itself): true with an absolute
--- expiresAt, or nil for none, unknown, a missing or throwing Hud and anything unreadable. No appliedAt, so no flash. A remaining of
--- zero or less lands on an expiresAt that is not in the future, which the next frame turns into the empty lane.
+-- The current target's debuff straight from FS.Hud.GetJudgement: true with an absolute expiresAt, or nil for none, unknown, a
+-- missing or throwing Hud and anything unreadable.
 local function ReadJudgement(now)
     local Hud = FS.Hud
     local fn = type(Hud) == "table" and Hud.GetJudgement
@@ -1113,7 +623,7 @@ local function ReadJudgement(now)
     return true, now + rem
 end
 
--- Is the target plainly dead? A secret, a missing API, a throw or an odd answer reads as alive (the lane is hidden only on a
+-- Is the target plainly dead? A secret, a missing API, a throw or an odd answer reads as alive (the row is emptied only on a
 -- plain yes; the legacy API answers 1).
 local function TargetDead()
     local ok, v = pcall(UnitIsDead, "target")
@@ -1122,118 +632,52 @@ local function TargetDead()
     return v == true or v == 1
 end
 
--- Asks the client for the chip's icon and seats it, or hides the icon. Apply calls it only while L.jIcon is nil: the icon is the same
--- for every seal, so once the client has answered it is kept, and until then every push that carries a debuff asks again (a push
--- is rare, the per frame path never asks).
-local function SeatJudgeIcon()
-    local chip = P.jChip
-    if not chip then return end
-    local tex = JudgeIconId()
-    L.jIcon = tex
-    if tex then
-        chip.icon:SetTexture(tex)
-        chip.icon:Show()
-    else
-        chip.icon:Hide()
-        -- spell data can simply be late, so the first nil is not a fault: log only when it stays unanswered across several asks
-        local now = GetTime()
-        L.iconAsks = L.iconAsks + 1
-        L.iconSince = L.iconSince or now
-        if L.iconAsks >= C.ICON_ASKS and now - L.iconSince >= C.ICON_WAIT then
-            LogOnce("noicon", "the Judgement spell texture is still unavailable, the lane chip has no icon (asked again at each push)")
-        end
-    end
-end
-
--- The lane's look in colour `col` (nil: the empty lane): the JUDGED header, the axis, ticks and numbers at their on or off alphas,
--- the bar and chip in the colour or hidden, the empty label. The moving parts start over (the next frame places them). The look
--- latches (laneCol) only after every write succeeded, so a throw is retried by the next push instead of leaving half a lane.
+-- The row's look in colour `col` (nil: the empty row): the chip, track and fill in the colour, or the chip dimmed with the empty
+-- label. The look latches (laneCol) only after every write succeeded, so a throw is retried by the next push.
 local function LaneLook(col)
     if col == laneCol then return end
     local on = col ~= nil
-    TextColor(P.judged, on and col or K.muted, on and C.JUDGED_A_ON or C.JUDGED_A)
-    Solid(P.jAxis, K.violet, on and C.JL_AX_A_ON or C.JL_AX_A)
-    local ta = on and C.JL_TICK_A_ON or C.JL_TICK_A
-    for i = 1, #P.jTicks do Solid(P.jTicks[i], K.violet, ta) end
-    local la = on and C.JL_LABEL_A_ON or C.JL_LABEL_A
-    for _, fs in pairs(P.jLabels) do TextColor(fs, K.fg, la) end
-    SetStack(on and "" or L.laneText)
-    L.jH, L.jBarOn, L.jChipOn, L.jPopOn = nil, false, false, false
-    P.jBarGlow:Hide()
-    P.jBarCore:Hide()
-    local chip = P.jChip
-    if chip then
-        chip:Hide()
-        P.jPop:Hide()
-    end
-    if not on then
-        laneCol = nil
-        return
-    end
-    if L.gradient then
-        local g = L.jGrad[col]
-        if not g then
-            g = { CreateColor(col[1], col[2], col[3], C.JL_BAR_A0), CreateColor(col[1], col[2], col[3], 1) }
-            L.jGrad[col] = g
-        end
-        P.jBarGlow:SetGradient("VERTICAL", g[1], g[2])
-        P.jBarCore:SetGradient("VERTICAL", g[1], g[2])
-    else
-        P.jBarGlow:SetColorTexture(col[1], col[2], col[3], 1)
-        P.jBarCore:SetColorTexture(col[1], col[2], col[3], 1)
-    end
-    if chip then
-        chip.fsSkin.border.ring:SetVertexColor(col[1], col[2], col[3], 1)
-        chip.fsSkin.glow:SetVertexColor(col[1], col[2], col[3], Coverage(C.CHIP_GLOW_K))
-        chip.fsAuraPlate:SetAlpha(C.CHIP_PLATE_A)
-    end
+    local c = col or K.steel
+    L.jW, L.jFillShown, L.jText = nil, false, nil
+    P.jFill:Hide()
+    P.jTime:Hide()
+    Solid(P.jTrack, c, C.JBAR_TRACK_A)
+    Tint(P.chip.edge, c, 1)
+    P.chip:SetAlpha(on and 1 or C.ABSENT_A)
+    P.jEmpty:SetText(on and "" or L.laneText)
+    if on then P.jFill:SetColorTexture(col[1], col[2], col[3], 1) end
     laneCol = col
 end
 
--- The bar and the chip for `rem` seconds left: the chip centred on jY(rem), the bar from the foot up to the chip's lower edge
--- (mockup: y = jY(jrem), the stroke runs BOT to min(BOT, y + CHP), so inside the last CHP the chip covers it and the bar goes). The
--- axis is 0 to 40 s and a longer debuff (a reconcile can report one; the mockup has none) pins at the top. The height snaps to a quarter screen pixel like the drain's, so a steady
--- tick writes only when a quarter changes; the bar and the chip are written together, nothing else moves.
-local function ApplyLaneBar(rem)
-    local h = rem * (BOT - TOP) / C.JL_MAX_S
-    local q = L.fillQ
-    if q then h = floor(h / q + 0.5) * q end
-    if h > BOT - TOP then h = BOT - TOP end
-    if h == L.jH then return end
-    L.jH = h
-    local len = h - C.CHS / 2
-    if len > 0 then
-        local u = ui(len)
-        P.jBarGlow:SetHeight(u)
-        P.jBarCore:SetHeight(u)
-        if not L.jBarOn then
-            L.jBarOn = true
-            P.jBarGlow:Show()
-            P.jBarCore:Show()
-        end
-    elseif L.jBarOn then
-        L.jBarOn = false
-        P.jBarGlow:Hide()
-        P.jBarCore:Hide()
+-- The row for `rem` seconds left on the target: the bar's width against the 0 to 40 s axis (a longer debuff pins at full) and the
+-- time. Both are written only when they change.
+local function ApplyJudgeBar(rem)
+    local w = BarWidth(rem, C.JMAX_S, C.JBAR_W)
+    if w ~= L.jW then
+        L.jW = w
+        P.jFill:SetWidth(ui(w))
     end
-    local chip = P.jChip
-    if chip then
-        Point(chip, "CENTER", C.JL_X, BOT - h)
-        if not L.jChipOn then
-            L.jChipOn = true
-            chip:Show()
-        end
+    local show = w > 0
+    if show ~= L.jFillShown then
+        L.jFillShown = show
+        P.jFill:SetShown(show)
+    end
+    local n = ceil(rem)
+    if n > C.JMAX_S then n = C.JMAX_S end
+    local text = WHOLE[n]
+    if text ~= L.jText then
+        L.jText = text
+        P.jTime:SetText(text)
+        P.jTime:Show()
     end
 end
 
--- The debuff ran out before the Hud said so: the lane empties at once (the Hud's late push for it, judged false, repaints nothing).
+-- The debuff ran out before the Hud said so: the row empties at once (the Hud's late push for it, judged false, repaints nothing).
 local function ExpireJudged()
-    L.jExp, L.jApplied = nil, nil
+    L.jExp = nil
     LaneLook(nil)
 end
 
--- The lane's frame: the bar and chip follow expiresAt - GetTime(); a debuff that landed within POP_S shows the white flash on the chip,
--- fading with its age (1 - age / .35, times .8). Neither is gated by reduced motion, as in the mockup.
 local function LiveJudged(now)
     local ea = L.jExp
     if not ea then return end
@@ -1242,33 +686,18 @@ local function LiveJudged(now)
         ExpireJudged()
         return
     end
-    ApplyLaneBar(rem)
-    local pop, pa = P.jPop, L.jApplied
-    if not pop then return end
-    local age = -1
-    if pa then age = now - pa end
-    if age >= 0 and age < C.POP_S then
-        pop:SetVertexColor(K.white[1], K.white[2], K.white[3], (1 - age / C.POP_S) * C.POP_A)
-        if not L.jPopOn then
-            L.jPopOn = true
-            pop:Show()
-        end
-    elseif L.jPopOn then
-        L.jPopOn = false
-        pop:Hide()
-    end
+    ApplyJudgeBar(rem)
 end
 
 local function LiveNone(now)
     if L.combat and not L.reduced then ApplyNoSeal(Pulse(now)) end
 end
 
--- The seal ran out: the chamber flips to NO SEAL itself, wearing the combat flag the last push carried. The Hud's own push for
--- the expiry (the change detector sees the seal as gone) lands within one 0.2 s tick; the self flip gives immediacy and that
--- late push repaints nothing.
+-- The seal ran out: flip to NO SEAL at once, wearing the last push's combat flag; the Hud's own push for the expiry (within
+-- 0.2 s) then repaints nothing.
 local function Expire()
     Paint("none", nil, L.combat, L.reduced)
-    LaneLook(L.jExp and L.col or nil)           -- a debuff on the target follows the chamber's colour to red at once
+    LaneLook(L.jExp and L.col or nil)           -- a debuff on the target follows the look's colour to red at once
 end
 
 local function LiveSeal(now)
@@ -1282,16 +711,8 @@ local function LiveSeal(now)
             return
         end
     end
-    local ca = L.castAt
-    local strike = -1
-    if ca then strike = now - ca end
-    local expiring = rem ~= nil and rem <= C.EXPIRE_S
-    SetBand(rem ~= nil and rem <= C.BAND_S, now)
-    SetExpiring(expiring)
-    ApplyNeon(NeonAt(strike, expiring, rem or 0, now, L.reduced))
-    ApplyFill(rem)
-    if L.countShown then ApplyCount(rem) end
-    ApplyRing(now)
+    SetWarn(rem ~= nil and rem <= C.BAND_S, now)
+    ApplyBar(rem)
 end
 
 local function Live(now)
@@ -1303,24 +724,16 @@ local function Live(now)
     LiveJudged(now)
 end
 
--- Does anything move? A debuff on the target (its bar drains), a timed seal, a strike or ring window still open, the NO SEAL pulse in
--- combat. Reduced motion drops the strike and the pulse; the drains, the countdown, the ring and the landing flash (which the mockup
--- does not gate) still move.
-local function Animating(now)
+-- Does anything move? A debuff on the target (its bar drains), a timed seal, the NO SEAL pulse in combat. Reduced motion drops
+-- the pulse; the drains and the countdown still move.
+local function Animating()
     if L.broken then return false end
     if L.jExp then return true end
-    if mode == "seal" then
-        if L.expiresAt then return true end
-        local ca = L.castAt
-        if not L.reduced and ca and now - ca >= 0 and now - ca < C.STRIKE_S then return true end
-        local ja = L.judgeAt
-        if ja and now - ja >= 0 and now - ja < C.RING_S then return true end
-        return false
-    end
+    if mode == "seal" then return L.expiresAt ~= nil end
     return mode == "none" and L.combat and not L.reduced
 end
 
--- The chamber's one OnUpdate. A throw stops the ticker (logged once) until the next push.
+-- The module's one OnUpdate. A throw stops the ticker (logged once) until the next push.
 local function Tick()
     local now = GetTime()
     local ok, err = pcall(Live, now)
@@ -1328,23 +741,23 @@ local function Tick()
         LogOnce("tick", err)
         L.broken = true
     end
-    if not Animating(now) then Sync() end
+    if not Animating() then Sync() end
 end
 
--- Install the OnUpdate when something moves and the piece is on, clear it the moment nothing does.
+-- Install the OnUpdate when something moves and the module is subscribed, clear it the moment nothing does.
 function Sync()
     local want = false
-    if subscribed and chamber and Animating(GetTime()) then want = true end
+    if subscribed and mod and Animating() then want = true end
     if want == ticking then return end
     ticking = want
     if want then
-        chamber:SetScript("OnUpdate", Tick)
+        mod:SetScript("OnUpdate", Tick)
     else
-        chamber:SetScript("OnUpdate", nil)
+        mod:SetScript("OnUpdate", nil)
     end
 end
 
-Seals.Neon, Seals.Pulse, Seals.CountText = NeonAt, Pulse, CountText
+Seals.Pulse, Seals.TimeText = Pulse, TimeText
 
 -- ForeverSTUwaveDB.reducedMotion == true, the flag ConsoleKeys.lua reads (only an exact true counts). Read at each Hud push.
 local function ReducedMotion()
@@ -1380,9 +793,46 @@ local function Resolve(state)
     return "unknown"
 end
 
--- One push: read the plain times and the reduced motion flag, repaint if the look changed, then let the live layer write what moves. A timed seal that
--- is already out reads as NO SEAL at once. The look latches (mode, sealId, inCombat) only after Paint succeeded, so a
--- throwing repaint is retried by the next push.
+-- One texture answer as a plain usable value: a positive finite number (a file id) or a non empty string, else nil.
+local function ReadTexture(fn, id)
+    local ok, tex = pcall(fn, id)
+    if not ok then return nil end
+    if FS.IsSecret and FS.IsSecret(tex) then return nil end
+    if type(tex) == "number" and tex > 0 and tex < huge then return tex end
+    if type(tex) == "string" and tex ~= "" then return tex end
+    return nil
+end
+
+-- A spell's icon texture from its plain id, through C_Spell.GetSpellTexture or the legacy global; nil when the client will not say.
+local function SpellIcon(id)
+    if type(id) ~= "number" or id ~= id or id <= 0 or id == huge then return nil end
+    local tex
+    local modern = C_Spell and C_Spell.GetSpellTexture
+    if type(modern) == "function" then tex = ReadTexture(modern, id) end
+    if tex == nil and type(GetSpellTexture) == "function" then tex = ReadTexture(GetSpellTexture, id) end
+    return tex
+end
+
+-- The Judgement spell id comes from the Hud's own spell table.
+local function JudgeSpellId()
+    local spells = FS.HudSpells
+    local def = type(spells) == "table" and spells.jd
+    local ids = type(def) == "table" and def.ids
+    return type(ids) == "table" and ids[1] or nil
+end
+
+-- A plate wears its spell icon and hides its letters, or shows the letters when no icon is readable. Applies only on a push, so a
+-- late client answer replaces the letters at the next one.
+local function WearIcon(plate, letters, tex)
+    if not tex then return false end
+    plate.icon:SetTexture(tex)
+    plate.icon:Show()
+    letters:Hide()
+    return true
+end
+
+-- One push: read the plain times, repaint if the look changed, then let the live layer write what moves. The look latches only
+-- after Paint succeeded, so a throwing repaint is retried by the next push.
 local function Apply(state)
     local newMode, id = Resolve(state)
     local reduce = ReducedMotion()
@@ -1390,41 +840,36 @@ local function Apply(state)
     L.broken = false
     L.combat = newMode ~= "unknown" and CombatOf(state) or false
     L.expiresAt = seal and Plain(seal.expiresAt) or nil
-    L.castAt = seal and Plain(seal.castAt) or nil
-    L.judgeAt = seal and Plain(state.judgeAt) or nil
     if L.expiresAt and L.expiresAt - GetTime() <= 0 then
         newMode, id = "none", nil
     end
-    local jid, jexp, japp = JudgedOf(state)
-    local dead = jid and TargetDead() or false                    -- a corpse carries no lane
-    if dead then jexp, japp = nil, nil end
+    local jid, jexp = JudgedOf(state)
+    local dead = jid and TargetDead() or false                    -- a corpse carries no debuff row
+    if dead then jexp = nil end
     L.jDead = dead
-    L.jExp, L.jApplied = jexp, japp
+    L.jExp = jexp
     local combat = newMode == "none" and L.combat or false
     if newMode ~= mode or id ~= sealId or combat ~= inCombat or reduce ~= L.reduced then
         Paint(newMode, id, combat, reduce)
     end
     LaneLook(L.jExp and L.col or nil)
-    if laneCol and not L.jIcon then SeatJudgeIcon() end
+    if newMode == "seal" and not L.sealIcon then L.sealIcon = WearIcon(P.tile, P.ab, SpellIcon(Plain(seal.id))) end
+    if not L.jIcon then L.jIcon = WearIcon(P.chip, P.jLetter, SpellIcon(JudgeSpellId())) end
     Live(GetTime())
     Sync()
 end
 
 local function OnState(state)
-    if not subscribed then return end          -- a stale push after the piece went off
+    if not subscribed then return end          -- a stale push after the module was hidden
     local ok, err = pcall(Apply, state)
     if not ok then LogOnce("state", err) end
 end
 
--- The lane between Hud pushes. HudLogic pushes on its 0.2 s tick, so after a retarget the lane would show the old target's bar for
--- up to 0.2 s: PLAYER_TARGET_CHANGED reads the Hud's own judgement for the target at once (ReadTarget below) and repaints, an
--- unreadable answer emptying the lane rather than keeping the old bar; the push that follows carries the full entry and takes over.
--- A target that dies keeps its ledger entry, so UNIT_HEALTH for the target hides the lane too (L.jDead remembers that death alone hid
--- it), and a UNIT_HEALTH that finds the target alive again relights it the same way a retarget does. Nothing is read with no debuff on
--- the lane, and a live target's health event changes nothing.
--- The current target's debuff straight from the Hud, but only when the target GUID is plain or nil. A secret GUID is where the Hud's
--- own target handler may not have run yet, so the direct read could be the old target's: nil (the lane stays empty) and the push that
--- follows decides. A GUID that cannot be read at all cannot be vouched for either. Returns the absolute expiresAt or nil.
+-- Between Hud pushes (0.2 s apart) a retarget reads the Hud's own judgement at once, so the old target's bar never lingers; the
+-- push that follows takes over. A dead target keeps its ledger entry, so UNIT_HEALTH empties the row (L.jDead) and relights it
+-- on a resurrection.
+-- The target's debuff straight from the Hud, only when the target GUID is plain: a secret GUID may mean the Hud has not seen the
+-- retarget yet, so the row stays empty until the push. Returns the absolute expiresAt or nil.
 local function ReadTarget(now)
     local ok, guid = pcall(UnitGUID, "target")
     if not ok or (FS.IsSecret and FS.IsSecret(guid)) then return nil end
@@ -1436,24 +881,23 @@ local function TargetMoved(event)
     local now = GetTime()
     local changed, dead = false, nil
     if event == "PLAYER_TARGET_CHANGED" then
-        L.jExp, L.jApplied = ReadTarget(now), nil
+        L.jExp = ReadTarget(now)
         changed = true
     elseif L.jDead then
-        -- hidden only because the target was dead: a resurrection relights it from the Hud's own read
+        -- empty only because the target was dead: a resurrection relights it from the Hud's own read
         if TargetDead() then return end
         dead = false
-        L.jExp, L.jApplied = ReadTarget(now), nil
+        L.jExp = ReadTarget(now)
         changed = true
     end
     if L.jExp then
         if dead == nil then dead = TargetDead() end
-        if dead then L.jExp, L.jApplied = nil, nil; changed = true end
+        if dead then L.jExp = nil; changed = true end
     end
     L.jDead = dead or false
     if not changed then return end
     L.broken = false
     LaneLook(L.jExp and L.col or nil)
-    if laneCol and not L.jIcon then SeatJudgeIcon() end
     Live(now)
     Sync()
 end
@@ -1463,15 +907,15 @@ local function OnTargetEvent(_, event)
     if not ok then LogOnce("target", err) end
 end
 
--- One frame on the chamber for the target change and the target's health (the DoT scale's own death watch registers the same way).
--- It is built bare and listens only while the piece is subscribed: Subscribe registers, Unsubscribe unregisters.
+-- One frame on the module for the target change and the target's health. It is built bare and listens only while subscribed:
+-- Subscribe registers, Unsubscribe unregisters.
 local function BuildEvents()
-    local f = CreateFrame("Frame", nil, chamber)
+    local f = CreateFrame("Frame", nil, mod)
     f:SetScript("OnEvent", OnTargetEvent)
     P.events = f
 end
 
--- Only reached with the chamber built (Subscribe and Unsubscribe run from the piece hooks after the build).
+-- Only reached with the module built (Subscribe and Unsubscribe run from onShow and onHide after the build).
 local function ListenTarget(on)
     local f = P.events
     if on then
@@ -1484,120 +928,87 @@ local function ListenTarget(on)
 end
 
 -------------------------------------------------------------------------------
--- Piece follow and build
+-- The GunsightAreas module: build, seat, onShow, onHide
 -------------------------------------------------------------------------------
 
 local function Subscribe()
-    if subscribed then return end
+    if subscribed or not mod then return end
     local Hud = FS.Hud
     if not (Hud and Hud.Subscribe) then
-        LogOnce("nohud", "FS.Hud is missing, the Seal Chamber has no data")
+        LogOnce("nohud", "FS.Hud is missing, the Seal module has no data")
         return
     end
     subscribed = true
     Hud.Subscribe(OnState)                     -- pushes the current state at once
-    local ok, err = pcall(ListenTarget, true)  -- the lane works from pushes alone if the events cannot be had
+    local ok, err = pcall(ListenTarget, true)  -- the row works from pushes alone if the events cannot be had
     if not ok then LogOnce("listen", err) end
 end
 
 local function Unsubscribe()
+    if not mod then return end
     if subscribed and FS.Hud and FS.Hud.Unsubscribe then FS.Hud.Unsubscribe(OnState) end
     subscribed = false
     ListenTarget(false)
     Sync()
 end
 
--- Does the class profile give the DoT seat to the chamber (the one shared rule, as ConsoleKeys and the DoT scale ask)?
--- true: it does. false: DECIDED, it does not (another class slot, a profile with neither, a missing or throwing helper).
--- nil: no profile yet, HudLogic has no change hook and may resolve it after the pieces build, so the question stays open.
-local function OwnsSeat()
-    local Hud, Profiles = FS.Hud, FS.HudProfiles
-    if type(Hud) ~= "table" or type(Hud.GetProfile) ~= "function" then return false end
-    if type(Profiles) ~= "table" or type(Profiles.ClassSlot) ~= "function" then return false end
-    local ok, profile = pcall(Hud.GetProfile)
-    if not ok then return false end
-    if profile == nil then return nil end
-    local ok2, slot = pcall(Profiles.ClassSlot, profile)
-    return ok2 and slot == "seals"
+-- The area hands the module its rect in image px; the module sits centred across rect.w from the rect's top.
+local function SeatModule(rect)
+    if type(rect) ~= "table" then return end
+    local x, y, w = rect.x, rect.y, rect.w
+    if type(x) ~= "number" or type(y) ~= "number" or type(w) ~= "number" then return end
+    OX, OY = x + (w - C.W) / 2, y
+    if mod then SeatAll() end
 end
 
-local settled = false          -- the answer is final (built, or decided never to build): nothing asks again
-local Build
-
--- The chamber follows the dot piece, and while no profile has arrived the same two signals ask again: a piece change and a
--- rescale. Both are registered once and never removed (a Layout callback cannot be); a class that decided at the first ask
--- never gets here, so Warlock and Priest add no callback.
-local retryHooked = false
-local function HookRetries()
-    if retryHooked then return end
-    retryHooked = true
-    if FS.Layout and FS.Layout.OnRescale then
-        FS.Layout.OnRescale(function()
-            if chamber then SeatAll() else Build() end
-        end)
-    end
-    Gunsight.OnPieceChanged(function(key, on)
-        if key ~= "dot" then return end
-        if not chamber then Build() return end
-        if on then Subscribe() else Unsubscribe() end
-    end)
-end
-
-local function BuildChamber()
+local function BuildModule(host)
     local Theme = FS.Theme
-    if not (Theme and Theme.ApplyMono and Theme.AddSliceTexture and Theme.AddCut2Texture and Theme.ApplyNineSlice
-            and Theme.SLICE_GLOW_TEXTURE and Theme.SLICE_CUT2_FILL_TEXTURE and Theme.SLICE_CUT2_OUTLINE_TEXTURE) then
-        LogOnce("notheme", "Theme is missing, the Seal Chamber is not built")
-        return
+    if not (Theme and Theme.ApplyMono and Theme.AddSliceTexture and Theme.ApplyNineSlice and Theme.SLICE_GLOW_TEXTURE
+            and Theme.SLICE_CUT2_FILL_TEXTURE and Theme.SLICE_CUT2_OUTLINE_TEXTURE) then
+        LogOnce("notheme", "Theme is missing, the Seal module is not built")
+        return nil
     end
-    chamber = CreateFrame("Frame", "ForeverSTUwaveGunsightSeals", FS.GunsightDots.frame)
+    if mod then return mod end
+    laneCol = false
+    mod = CreateFrame("Frame", "ForeverSTUwaveGunsightSeals", host)
+    Seat(function()
+        At(mod, "TOPLEFT", 0, 0)
+        mod:SetSize(ui(C.W), ui(C.H))
+    end)
     local ok, err = pcall(function()
-        BuildFrame()
-        BuildRuler()
-        BuildBand()
-        BuildTube()
-        BuildLens()
-        BuildCount()
-        BuildNoSeal()
-        BuildJudgementLane()
+        BuildTile()
+        BuildBar()
+        BuildJudgement()
         BuildEvents()
-        Paint("unknown", nil, false)
+        Paint("unknown", nil, false, false)
     end)
     if not ok then
         LogOnce("build", err)
-        chamber:Hide()
-        chamber = nil
-        return
+        mod:Hide()
+        mod = nil
+        seats = {}
+        return nil
     end
-    Seals.frame, Seals.parts = chamber, P
-    HookRetries()
-    if Gunsight.IsPieceOn("dot") then Subscribe() end
+    Seals.frame, Seals.parts = mod, P
+    return mod
 end
 
--- Latches only once the gates have an answer: a profile that has not arrived yet leaves the question open (a late Paladin
--- profile builds on the next ask), where the old build latched first and lost the chamber for the session.
-function Build()
-    if built or settled then return end
-    if not Gunsight.IsEnabled() then settled = true return end
-    local owns = OwnsSeat()
-    if owns == nil then HookRetries() return end
-    settled = true
-    if not owns then return end
-    local Dots = FS.GunsightDots
-    if not (Dots and Dots.frame) then
-        LogOnce("nodots", "FS.GunsightDots.frame is missing, the Seal Chamber has no piece frame to hang off")
-        return
-    end
-    -- the piece frame exists once the DoT file's build ran, but the piece registers only after that build succeeded: a
-    -- throw in it leaves a frame no console key or SetPiece can show, so the chamber would hang off a dead frame
-    if Dots.registered ~= true then
-        LogOnce("nopiece", "the DoT piece never registered (its build failed), the Seal Chamber is not built")
-        return
-    end
-    built = true
-    BuildChamber()
+local function OnAreaShown()
+    Subscribe()
+end
+
+local function OnAreaHidden()
+    Unsubscribe()
 end
 
 function Seals.Mode() return mode, sealId end
 
-Gunsight.OnReady(Build)
+if FS.GunsightAreas and FS.GunsightAreas.RegisterModule then
+    FS.GunsightAreas.RegisterModule("class", {
+        classes = { "PALADIN" },
+        build = BuildModule,
+        seat = SeatModule,
+        onShow = OnAreaShown,
+        onHide = OnAreaHidden,
+    })
+end
