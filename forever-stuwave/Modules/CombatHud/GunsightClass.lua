@@ -1,0 +1,3 @@
+-- Forever STUwave: Gunsight class module (Warlock shard count, Rogue and Druid combo points).
+
+local _, FS = ...
