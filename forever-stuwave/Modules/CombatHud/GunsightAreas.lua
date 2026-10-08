@@ -2,7 +2,8 @@
 --
 -- Two host frames, upper and lower, hang off the dot piece frame at the areaU and areaL rects.
 -- Modules register under "debuffsH", "debuffsV" or "class" (the class module is chosen by class token) and are
--- built on first use. A Target Debuffs host follows FS.TargetTakesDots, a class host stays up without a target.
+-- built on first use. A fifth id, "classSoon", is the fallback for "class": the area shows it when the player's
+-- class has no class module, so a class that later registers one stops showing it with no further change. A Target Debuffs host follows FS.TargetTakesDots, a class host stays up without a target.
 
 local _, FS = ...
 
@@ -16,11 +17,11 @@ local G = Gunsight.G
 local ui, Point = Gunsight.ui, Gunsight.Point
 
 local PREFIX = "|cffff4488Forever STUwave|r: gunsight areas: "
-local MODULE_IDS = { debuffsH = true, debuffsV = true, class = true }
+local MODULE_IDS = { debuffsH = true, debuffsV = true, class = true, classSoon = true }
 local GATED = { debuffsH = true, debuffsV = true }     -- hidden while FS.TargetTakesDots() is false
 local AREA_NAMES = { "upper", "lower" }
 
-local records = {}        -- id -> record, for debuffsH and debuffsV
+local records = {}        -- id -> record, for debuffsH, debuffsV and classSoon
 local classRecords = {}   -- one record per class spec
 local hosts = {}          -- area -> host frame (nil until built)
 local rects = {}          -- area -> { x, y, w, h } in image px, one table reused for every seat call
@@ -67,6 +68,14 @@ local function RecordFor(id)
         return nil
     end
     return records[id]
+end
+
+-- The record an area set to this module id draws: RecordFor, or for "class" with a readable class token that no
+-- class spec lists, the classSoon fallback. AreaOf deliberately skips the fallback (it answers "is a real module shown").
+local function RecordToShow(id)
+    local record = RecordFor(id)
+    if record or id ~= "class" or not ClassToken() then return record end
+    return records.classSoon
 end
 
 local function AllRecords()
@@ -159,7 +168,7 @@ local function Refresh(force)
     if Gunsight.IsPieceOn("dot") then
         local wanted = Wanted()
         for _, area in ipairs(AREA_NAMES) do
-            local record = wanted[area] and RecordFor(wanted[area])
+            local record = wanted[area] and RecordToShow(wanted[area])
             if record then want[record] = area end
         end
     end
@@ -179,7 +188,8 @@ local function Refresh(force)
 end
 
 -- spec = { build = function(host) return frame end, seat = function(rect), onShow = function(area),
--- onHide = function(area), classes = { "PALADIN" } }; classes is required for "class" only.
+-- onHide = function(area), classes = { "PALADIN" } }; classes is required for "class" only. "classSoon" takes the
+-- same spec without classes.
 function Areas.RegisterModule(id, spec)
     if not MODULE_IDS[id] then
         LogOnce("badid " .. tostring(id), "RegisterModule: unknown module id " .. tostring(id))
