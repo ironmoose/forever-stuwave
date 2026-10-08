@@ -21,8 +21,8 @@
 --           strike up flicker on a fresh cast (castAt) and the dying tube in the last 5 s (sealNeon: dropouts that get
 --           likelier and deeper), both through one neon level that scales every neon driven part; EXPIRING in
 --           amber in the last 5 s; the NO SEAL pulse (edge, halo, label) in combat; the Judgement ring (judgeAt).
---           A seal that runs out flips the chamber to NO SEAL by itself for immediacy: HudLogic's Signature turns the
---           seal term into knone and pushes within one 0.2 s tick, and that late push repaints nothing.
+--           A seal that runs out flips the chamber to NO SEAL by itself for immediacy: HudLogic's change detector sees the
+--           seal as gone and pushes within one 0.2 s tick, and that late push repaints nothing.
 --   JUDGEMENT LANE (lane 9, mockup 2180 to 2198; the debuff on the CURRENT TARGET, from state.judged, whatever the seal look):
 --           a debuff lights the lane: the JUDGED header in the chamber's colour, the axis, ticks and numbers at their on alphas, a
 --           bar from the foot up to the chip's lower edge (a faint wide stroke under a narrow core, the colour .35 to 1), the
@@ -1264,7 +1264,7 @@ local function LiveNone(now)
 end
 
 -- The seal ran out: the chamber flips to NO SEAL itself, wearing the combat flag the last push carried. The Hud's own push for
--- the expiry (Signature turns the seal term into knone) lands within one 0.2 s tick; the self flip gives immediacy and that
+-- the expiry (the change detector sees the seal as gone) lands within one 0.2 s tick; the self flip gives immediacy and that
 -- late push repaints nothing.
 local function Expire()
     Paint("none", nil, L.combat, L.reduced)

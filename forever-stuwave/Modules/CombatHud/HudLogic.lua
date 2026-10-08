@@ -26,7 +26,7 @@
 --                          `targetEpoch` is a plain integer bumped on every PLAYER_TARGET_CHANGED:
 --                          a consumer compares it between pushes to tell a target switch from a
 --                          change on the same target (never the GUID, which stays file-local). It
---                          is part of Signature, so a switch between two mobs with identical timers
+--                          is part of the change detector, so a switch between two mobs with identical timers
 --                          still pushes.
 --                          `missing` and `remaining` of a DoT are an ESTIMATE from the
 --                          own-cast ledger, not the target's real aura: a DoT that was
@@ -37,9 +37,10 @@
 --                          `expiresAt` (an absolute GetTime) and `duration` (the full length
 --                          of the cast made) are set only on a DoT row that is up: the DoT
 --                          scale moves a chip from expiresAt - GetTime() between pushes,
---                          which are coarse (Signature floors `remaining`).
+--                          which are coarse (the change detector floors `remaining`).
 --   FS.Hud.Subscribe(fn) / Unsubscribe(fn)   fn(state) runs at once on Subscribe, then when
---                          the state changes (0.2s tick; no subscribers, no state work).
+--                          the state changes (0.2s tick; no subscribers, no state work). A pushed
+--                          state is a table the subscriber owns: it is never written again.
 --   FS.Hud.Tick()       one throttled pass (the hidden OnUpdate frame calls it).
 --   FS.Hud.Eval(cond) / FS.Hud.Primitives     the rule primitives (the harness uses them).
 --   FS.Hud.GetProfile() the active profile table, or nil.
@@ -165,6 +166,7 @@ local MAX_CHANNEL = 60       -- a re-read channel end further out than this is n
 local GCD_WINDOW = 1.6       -- seconds after our own cast in which isActive may be the GCD
 local PENDING_TTL = 60       -- seconds a cast's captured target is kept without a verdict
 
+local EMPTY = {}    -- read-only stand-in for an absent list, so the tick never builds one
 local profile, classToken
 local setupDone = false
 local Prims = {}
@@ -245,12 +247,18 @@ local function SpellInfo(x)
     return nil
 end
 
+-- The three "is this spell id known" APIs, in order; a client without one skips it.
+local function KnownFn(i)
+    if i == 1 then return IsPlayerSpell end
+    if i == 2 then return IsSpellKnown end
+    return C_SpellBook and C_SpellBook.IsSpellKnown
+end
+
 -- true / false / nil (cannot tell) for "does the player know this spell id".
 local function IsKnownId(id)
-    local fns = { IsPlayerSpell, IsSpellKnown, C_SpellBook and C_SpellBook.IsSpellKnown }
     local sawFalse, unreadable = false, false
     for i = 1, 3 do
-        local fn = fns[i]
+        local fn = KnownFn(i)
         if fn then
             local ok, r = pcall(fn, id)
             if ok and Plain(r) then
@@ -268,6 +276,21 @@ end
 
 local spellCache = {}
 local idKey = {}
+-- A spell that cannot be told known or not is never cached (asked again next tick), but its result
+-- table is kept per key and refilled, so asking again does not allocate.
+local unknownRes = {}
+local resIndeterminate, resFirstIcon
+
+local function TryResolve(x)
+    local name, id, icon = SpellInfo(x)
+    if type(x) == "number" then id = id or x end
+    if not id then return nil end
+    resFirstIcon = resFirstIcon or icon
+    local known = IsKnownId(id)
+    if known == nil then resIndeterminate = true end
+    if known then return { id = id, name = name, icon = icon, known = true } end
+    return nil
+end
 
 -- key -> { id, name, icon, known }. known is true, false or nil (could not be determined,
 -- not cached). A name resolves to the player's current rank; ids are the fallback.
@@ -276,25 +299,15 @@ local function ResolveSpell(key)
     if not def then return nil end
     local hit = spellCache[key]
     if hit then return hit end
-    local indeterminate, firstIcon = false, nil
-    local function try(x)
-        local name, id, icon = SpellInfo(x)
-        if type(x) == "number" then id = id or x end
-        if not id then return nil end
-        firstIcon = firstIcon or icon
-        local known = IsKnownId(id)
-        if known == nil then indeterminate = true end
-        if known then return { id = id, name = name, icon = icon, known = true } end
-        return nil
-    end
+    resIndeterminate, resFirstIcon = false, nil
     local found
-    for _, n in ipairs(def.names or {}) do
-        found = try(n)
+    for _, n in ipairs(def.names or EMPTY) do
+        found = TryResolve(n)
         if found then break end
     end
     if not found then
-        for _, id in ipairs(def.ids or {}) do
-            found = try(id)
+        for _, id in ipairs(def.ids or EMPTY) do
+            found = TryResolve(id)
             if found then break end
         end
     end
@@ -302,11 +315,13 @@ local function ResolveSpell(key)
         spellCache[key] = found
         return found
     end
-    local res = { icon = firstIcon, known = false }
-    if indeterminate then
-        res.known = nil    -- could not be determined: not cached, asked again next time
+    if resIndeterminate then
+        local res = unknownRes[key]
+        if not res then res = {}; unknownRes[key] = res end
+        res.icon, res.known = resFirstIcon, nil
         return res
     end
+    local res = { icon = resFirstIcon, known = false }
     spellCache[key] = res
     return res
 end
@@ -447,7 +462,7 @@ function Seal.Reconcile(list)
     if a.expires and a.expires > 0 then
         if type(old) == "table" and old.key == found.key and math.abs(old.expiresAt - a.expires) <= SEAL_AGREE then
             -- the aura of the cast we already hold: keep the entry (castAt and the cast's rank id),
-            -- so the Signature does not move twice per cast. A disagreeing aura replaces it, and
+            -- so the change detector does not move twice per cast. A disagreeing aura replaces it, and
             -- then the id becomes the aura's spell id.
             return
         end
@@ -742,7 +757,7 @@ end
 
 -- expiresAt (an absolute GetTime) and the full duration of a DoT that is up, else nil. The ledger
 -- entry is the only combat-safe source; the gunsight DoT scale moves a chip from expiresAt - now
--- between pushes, and the pushes are coarse (Signature floors `remaining`).
+-- between pushes, and the pushes are coarse (the change detector floors `remaining`).
 local function DotTiming(key)
     if not DotSpec(key) then return nil end
     local r = ResolveSpell(key)
@@ -753,6 +768,21 @@ local function DotTiming(key)
     return e.expires, e.duration or (def and def.apply)
 end
 
+-- GetSpellCooldown answers with a fresh client table on every call. During a state build each
+-- spell is asked once (cdReads, wiped around the build); outside a build every call goes through.
+local cdReads, cdOpen = {}, false
+
+local function CooldownInfo(fn, id)
+    if cdOpen then
+        local hit = cdReads[id]
+        if hit ~= nil then return hit or nil end
+    end
+    local ok, cd = pcall(fn, id)
+    if not ok or not Plain(cd) or type(cd) ~= "table" then cd = false end
+    if cdOpen and id ~= nil then cdReads[id] = cd end
+    return cd or nil
+end
+
 -- ready (true/false/nil), remaining seconds (nil unless plain). See the GLOBAL COOLDOWN
 -- HEURISTIC in the file header for the isActive-during-GCD handling below.
 local function CooldownState(key)
@@ -761,8 +791,8 @@ local function CooldownState(key)
     if r.known == false then return false end
     local fn = C_Spell and C_Spell.GetSpellCooldown
     if not fn then return nil end
-    local ok, cd = pcall(fn, r.id)
-    if not ok or not Plain(cd) or type(cd) ~= "table" then return nil end
+    local cd = CooldownInfo(fn, r.id)
+    if not cd then return nil end
     local active = PlainOf(cd.isActive, "boolean")
     if active == nil then return nil end
     if not active then return true end
@@ -913,7 +943,7 @@ local function BuffMissing(entry, auras)
 end
 
 local function SelfBuffEntry(key)
-    for _, entry in ipairs(profile and profile.selfBuffs or {}) do
+    for _, entry in ipairs(profile and profile.selfBuffs or EMPTY) do
         if entry.spell == key then return entry end
     end
     return nil
@@ -1112,7 +1142,8 @@ local function ChannelData(key)
     return period, ticks, own.clipAfter
 end
 
-local function ChannelView()
+-- Fills and returns `into` (a reused table), or nil when no channel is up.
+local function ChannelView(into)
     if not channel then return nil end
     local period, ticks, clipAfter = ChannelData(channel.key)
     local now = Now()
@@ -1123,10 +1154,9 @@ local function ChannelView()
     end
     local done = math.floor((now - channel.start) / period + 0.001)
     done = math.max(0, math.min(ticks, done))
-    return {
-        key = channel.key, done = done, ticks = ticks,
-        cut = clipAfter ~= nil and done >= clipAfter,
-    }
+    into.key, into.done, into.ticks = channel.key, done, ticks
+    into.cut = clipAfter ~= nil and done >= clipAfter
+    return into
 end
 
 -- State -------------------------------------------------------------------------------------
@@ -1171,15 +1201,29 @@ local function OrderedRules()
     return list
 end
 
--- The first matching rule: key, glow, and which spells a live proc is lighting.
+-- Wipe/Trim reuse the tables of an unpushed scratch.
+local function Wipe(t)
+    for k in pairs(t) do t[k] = nil end
+end
+
+-- Clears the tail of an array that held more than `n` entries.
+local function Trim(list, n)
+    local i = n + 1
+    while list[i] ~= nil do list[i] = nil; i = i + 1 end
+end
+
+local procFor, procState, cooldownSet, procKeys = {}, {}, {}, {}
+
+-- The first matching rule: key, glow, and which spells a live proc is lighting. The third result
+-- is the shared procFor scratch, valid until the next call.
 local function EvalRotation()
-    local procFor = {}
-    local procState = {}
-    for key, spec in pairs(profile.procs or {}) do
+    Wipe(procFor)
+    Wipe(procState)
+    for key, spec in pairs(profile.procs or EMPTY) do
         procState[key] = ProcActive(key) == true and spec or nil
     end
-    for _, rule in ipairs(profile.rotation or {}) do
-        for _, cond in ipairs(rule.when or {}) do
+    for _, rule in ipairs(profile.rotation or EMPTY) do
+        for _, cond in ipairs(rule.when or EMPTY) do
             if cond[1] == "procActive" and procState[cond[2]] then
                 procFor[rule.cast] = procState[cond[2]].glow
             end
@@ -1190,7 +1234,7 @@ local function EvalRotation()
         local r = ResolveSpell(rule.cast)
         if r and r.known == true then
             local match = true
-            for _, cond in ipairs(rule.when or {}) do
+            for _, cond in ipairs(rule.when or EMPTY) do
                 if Eval(cond) ~= true then match = false; break end
             end
             if match and Affordable(r) then
@@ -1218,86 +1262,138 @@ local function DotView(key)
     return missing, remaining, expiresAt, duration
 end
 
-local function EmptyState()
+-- One state under construction plus the entry tables it points at. The tick builds into a single
+-- scratch; a state that changed is handed to the subscribers WITH its buffer and a new scratch
+-- takes over, so a state a subscriber holds is never written again.
+local function NewBuf()
     return {
-        active = false, row = {}, buffsMissing = {}, procs = {}, inCombat = InCombat(),
-        targetEpoch = targetEpoch,
+        state = { row = {}, buffsMissing = {}, procs = {} },
+        rows = {}, buffs = {}, procRows = {},
+        next = {}, channel = {}, seal = {}, judged = {},
     }
 end
+local scratch = NewBuf()
 
-function Hud.GetState()
-    local state = EmptyState()
-    if not profile then return state end
+local function Entry(pool, i)
+    local e = pool[i]
+    if e then Wipe(e) else e = {}; pool[i] = e end
+    return e
+end
+
+local function FillState(buf)
+    local state = buf.state
+    state.active, state.inCombat, state.targetEpoch = false, InCombat(), targetEpoch
+    state.class, state.next, state.shards, state.channel = nil, nil, nil, nil
+    state.seal, state.judgeAt, state.judged = nil, nil, nil
+    local row, buffsMissing, procs = state.row, state.buffsMissing, state.procs
+    if not profile then
+        Trim(row, 0); Trim(buffsMissing, 0); Trim(procs, 0)
+        return state
+    end
     state.active = true
     state.class = classToken
 
-    local nextKey, nextGlow, procFor, nextIcon = EvalRotation()
-    if nextKey then state.next = { key = nextKey, icon = nextIcon, glow = nextGlow } end
+    local nextKey, nextGlow, procForKey, nextIcon = EvalRotation()
+    if nextKey then
+        local nx = buf.next
+        nx.key, nx.icon, nx.glow = nextKey, nextIcon, nextGlow
+        state.next = nx
+    end
 
-    local cooldownSet = {}
-    for _, k in ipairs(profile.cooldowns or {}) do cooldownSet[k] = true end
+    Wipe(cooldownSet)
+    for _, k in ipairs(profile.cooldowns or EMPTY) do cooldownSet[k] = true end
 
-    for _, key in ipairs(profile.row or {}) do
+    local nRow = 0
+    for _, key in ipairs(profile.row or EMPTY) do
         local r = ResolveSpell(key)
         if r and r.known == true then
-            local e = { key = key, icon = r.icon, proc = procFor[key], isNext = nextKey == key }
+            nRow = nRow + 1
+            local e = Entry(buf.rows, nRow)
+            e.key, e.icon, e.proc, e.isNext = key, r.icon, procForKey[key], nextKey == key
             if DotSpec(key) then e.missing, e.remaining, e.expiresAt, e.duration = DotView(key) end
             if cooldownSet[key] then
                 local ready, cdRemaining = CooldownState(key)
                 if ready ~= nil then e.onCd = not ready end
                 e.cdRemaining = cdRemaining
             end
-            state.row[#state.row + 1] = e
+            row[nRow] = e
         end
     end
+    Trim(row, nRow)
 
+    local nBuff = 0
     local auras, fetched
-    for _, entry in ipairs(profile.selfBuffs or {}) do
+    for _, entry in ipairs(profile.selfBuffs or EMPTY) do
         if entry.kind == nil and not fetched then
             fetched = true
             auras = PlayerAuras()
         end
         if BuffMissing(entry, auras) == true then
             local r = ResolveSpell(entry.spell)
-            state.buffsMissing[#state.buffsMissing + 1] = { key = entry.spell, icon = r and r.icon }
+            nBuff = nBuff + 1
+            local b = Entry(buf.buffs, nBuff)
+            b.key, b.icon = entry.spell, r and r.icon
+            buffsMissing[nBuff] = b
         end
     end
+    Trim(buffsMissing, nBuff)
 
-    local procKeys = {}
-    for key in pairs(profile.procs or {}) do procKeys[#procKeys + 1] = key end
+    local nKeys = 0
+    for key in pairs(profile.procs or EMPTY) do nKeys = nKeys + 1; procKeys[nKeys] = key end
+    Trim(procKeys, nKeys)
     table.sort(procKeys)
+    local nProc = 0
     for _, key in ipairs(procKeys) do
         local spec = profile.procs[key]
         local r = spec.ready and ResolveSpell(spec.ready)
         -- a cooldown tracker for a spell the player does not know has no rung yet
         if not spec.ready or (r and r.known == true) then
-            state.procs[#state.procs + 1] = {
-                key = key, glow = spec.glow, active = ProcActive(key), icon = r and r.icon or nil,
-            }
+            nProc = nProc + 1
+            local p = Entry(buf.procRows, nProc)
+            p.key, p.glow, p.active, p.icon = key, spec.glow, ProcActive(key), r and r.icon or nil
+            procs[nProc] = p
         end
     end
+    Trim(procs, nProc)
 
     if profile.resource and profile.resource.shards then state.shards = ItemCount() end
-    state.channel = ChannelView()
+    state.channel = ChannelView(buf.channel)
     if profile.seals then
         local s = Seal.Read()
         if s then
-            state.seal = {
-                key = s.key, id = s.id, expiresAt = s.expiresAt, duration = s.duration,
-                castAt = s.castAt,
-            }
+            local sl = buf.seal
+            sl.key, sl.id, sl.expiresAt, sl.duration, sl.castAt = s.key, s.id, s.expiresAt, s.duration, s.castAt
+            state.seal = sl
         else
             state.seal = s    -- false (no seal) or nil (unknown)
         end
         state.judgeAt = Seal.judgeAt
         local e = Seal.ReadJudged()
         if e then
-            state.judged = { key = e.key, appliedAt = e.appliedAt, expiresAt = e.expires, duration = e.duration }
+            local jd = buf.judged
+            jd.key, jd.appliedAt, jd.expiresAt, jd.duration = e.key, e.appliedAt, e.expires, e.duration
+            state.judged = jd
         else
             state.judged = e    -- false (none) or nil (unknown)
         end
     end
     return state
+end
+
+-- Builds `buf`'s state with the cooldown reads shared; an error closes the share before it rises.
+local function BuildState(buf)
+    Wipe(cdReads)
+    cdOpen = true
+    local ok, state = pcall(FillState, buf)
+    cdOpen = false
+    Wipe(cdReads)
+    if not ok then error(state, 0) end
+    return state
+end
+
+-- A fresh, caller-owned state. The tick builds in its private scratch through BuildState instead.
+function Hud.GetState()
+    return BuildState(NewBuf())
 end
 
 function Hud.GetProfile() return profile end
@@ -1331,41 +1427,93 @@ end
 
 -- Change notification ---------------------------------------------------------------------
 
-local function Signature(state)
-    local parts = {
-        state.active and "A" or "a", state.inCombat and "C" or "c", "t" .. tostring(state.targetEpoch),
-    }
-    for _, e in ipairs(state.row) do
-        parts[#parts + 1] = table.concat({
-            e.key, tostring(e.missing), tostring(e.onCd), tostring(e.proc), tostring(e.isNext),
-            e.remaining and tostring(math.floor(e.remaining)) or "-",
-            e.cdRemaining and tostring(math.floor(e.cdRemaining)) or "-", tostring(e.icon),
-        }, ":")
+-- The change detector: a flat list of every field a subscriber redraws on, filled into a reused
+-- buffer and compared slot by slot with the last pushed one. Counts precede the variable-length
+-- sections so two different states never flatten to the same list.
+local NIL = {}    -- a nil, kept in the list so slots stay put
+
+local function Put(buf, n, v)
+    if v == nil then v = NIL end
+    n = n + 1
+    buf[n] = v
+    return n
+end
+
+-- A DoT's seconds are floored: a running timer must not push every tick.
+local function Whole(v)
+    if v then return math.floor(v) end
+    return nil
+end
+
+local function SigFill(state, buf)
+    local n = Put(buf, 0, state.active and true or false)
+    n = Put(buf, n, state.inCombat and true or false)
+    n = Put(buf, n, state.targetEpoch)
+    local row = state.row
+    n = Put(buf, n, #row)
+    for i = 1, #row do
+        local e = row[i]
+        n = Put(buf, n, e.key)
+        n = Put(buf, n, e.missing)
+        n = Put(buf, n, e.onCd)
+        n = Put(buf, n, e.proc)
+        n = Put(buf, n, e.isNext)
+        n = Put(buf, n, Whole(e.remaining))
+        n = Put(buf, n, Whole(e.cdRemaining))
+        n = Put(buf, n, e.icon)
     end
-    parts[#parts + 1] = "n" .. (state.next and state.next.key or "-")
-        .. (state.next and (tostring(state.next.glow) .. tostring(state.next.icon)) or "")
-    for _, b in ipairs(state.buffsMissing) do parts[#parts + 1] = "b" .. b.key end
-    for _, p in ipairs(state.procs) do parts[#parts + 1] = "p" .. p.key .. tostring(p.active) end
-    parts[#parts + 1] = "s" .. tostring(state.shards)
+    local nx = state.next
+    n = Put(buf, n, nx and nx.key)
+    n = Put(buf, n, nx and nx.glow)
+    n = Put(buf, n, nx and nx.icon)
+    local buffs = state.buffsMissing
+    n = Put(buf, n, #buffs)
+    for i = 1, #buffs do n = Put(buf, n, buffs[i].key) end
+    local procs = state.procs
+    n = Put(buf, n, #procs)
+    for i = 1, #procs do
+        n = Put(buf, n, procs[i].key)
+        n = Put(buf, n, procs[i].active)
+    end
+    n = Put(buf, n, state.shards)
     local c = state.channel
-    parts[#parts + 1] = c and ("c" .. c.key .. c.done .. tostring(c.cut)) or "c-"
+    n = Put(buf, n, c and c.key)
+    n = Put(buf, n, c and c.done)
+    n = Put(buf, n, c and c.cut)
     -- the seal by key and cast time only: a running timer must not push every second
     local sl = state.seal
-    if sl == nil then
-        parts[#parts + 1] = "kunk"
-    elseif sl == false then
-        parts[#parts + 1] = "knone"
+    if type(sl) == "table" then
+        n = Put(buf, n, "set")
+        n = Put(buf, n, sl.key)
+        n = Put(buf, n, sl.castAt)
     else
-        parts[#parts + 1] = "k" .. sl.key .. tostring(sl.castAt)
+        n = Put(buf, n, sl == false and "none" or "unknown")
     end
     -- Judgement by cast time and the target's debuff by seal and application time (no running timer)
+    n = Put(buf, n, state.judgeAt)
     local jd = state.judged
-    parts[#parts + 1] = "j" .. tostring(state.judgeAt) .. (type(jd) == "table" and (jd.key .. tostring(jd.appliedAt)) or tostring(jd))
-    return table.concat(parts, "|")
+    if type(jd) == "table" then
+        n = Put(buf, n, "set")
+        n = Put(buf, n, jd.key)
+        n = Put(buf, n, jd.appliedAt)
+    else
+        n = Put(buf, n, jd == false and "none" or "unknown")
+    end
+    return n
 end
 
 local subscribers = {}
-local lastSig, pruneAt = nil, 0
+local lastSig, lastLen = {}, nil    -- lastLen nil: nothing seeded yet
+local nextSig = {}
+local pruneAt = 0
+
+local function SameAsLast(n)
+    if n ~= lastLen then return false end
+    for i = 1, n do
+        if nextSig[i] ~= lastSig[i] then return false end
+    end
+    return true
+end
 
 local function Push(fn, state)
     local ok, err = pcall(fn, state)
@@ -1378,7 +1526,7 @@ function Hud.Subscribe(fn)
     if type(fn) ~= "function" then return fn end
     subscribers[#subscribers + 1] = fn
     local state = Hud.GetState()
-    if #subscribers == 1 then lastSig = Signature(state) end
+    if #subscribers == 1 then lastLen = SigFill(state, lastSig) end
     Push(fn, state)
     return fn
 end
@@ -1398,10 +1546,11 @@ function Hud.Tick()
         pruneAt = now + PRUNE_EVERY
     end
     if #subscribers == 0 then return end    -- nobody to tell: no state work
-    local state = Hud.GetState()
-    local sig = Signature(state)
-    if sig == lastSig then return end
-    lastSig = sig
+    local state = BuildState(scratch)
+    local n = SigFill(state, nextSig)
+    if SameAsLast(n) then return end
+    nextSig, lastSig, lastLen = lastSig, nextSig, n
+    scratch = NewBuf()    -- published: the buffer is theirs now
     for i = 1, #subscribers do Push(subscribers[i], state) end
 end
 

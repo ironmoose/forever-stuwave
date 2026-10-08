@@ -4,7 +4,7 @@
 -- buffsMissing, procs, shards, channel, inCombat). This file draws it, around the Stack A cast
 -- bars, exactly as mockups/combat-hud-stack-a-2026-10-02.html lays it out (that mockup is the
 -- locked design; its units are UIParent units here, the same as CastBars.lua, so nothing is
--- converted). It subscribes to FS.Hud, which pushes only when its own Signature changes, so
+-- converted). It subscribes to FS.Hud, which pushes only when its change detector fires, so
 -- there is no polling and no per-tile OnUpdate. The one OnUpdate is the root frame's, installed
 -- only while a cooldown number is counting down, and the work in it runs at most 10 times a
 -- second.

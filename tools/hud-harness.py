@@ -700,8 +700,9 @@ check(S().shards == nil and P.shardsAtLeast(1) == nil, "secret count is unknown"
 """)
 
 case("subscribers_hear_changes_only")(r"""
-local builds, real = 0, FS.Hud.GetState
-FS.Hud.GetState = function() builds = builds + 1; return real() end
+-- the tick builds in its own scratch (not through Hud.GetState), so count builds by the shard read
+local builds, realCount = 0, GetItemCount
+GetItemCount = function(...) builds = builds + 1; return realCount(...) end
 tick(0.25)
 check(builds == 0, "no subscribers: the tick builds no state")
 local n = 0
@@ -2201,6 +2202,168 @@ W.auras.player = {}
 fire("UNIT_AURA", "player")
 check(nxt() == nil, "no seal spell: the rule is skipped, got " .. tostring(nxt()))
 """)
+
+# Idle GC churn, ADDON side. Out of combat with unchanged inputs a tick must allocate (close to) nothing
+# of its own: the 0.2 s OnUpdate runs for as long as anything subscribes. The client's result tables
+# (GetSpellCooldown, GetSpellInfo) are served from a cache by the mock, so what is measured is the
+# addon alone. LuaJIT with jit.off is indicative only; the client runs PUC 5.1.
+IDLE_ALLOC = r"""
+if jit then jit.off() end
+local f = tickframe()
+local onUpdate = f._scripts.OnUpdate
+local function served(name)
+    local real, shared = C_Spell[name], {}
+    C_Spell[name] = function(x)
+        local t = shared[x]
+        if t == nil then t = real(x); shared[x] = t end
+        return t
+    end
+end
+served("GetSpellCooldown"); served("GetSpellInfo")
+local n = 0
+FS.Hud.Subscribe(function() n = n + 1 end)
+%s
+local function step() W.now = W.now + 0.25; onUpdate(f, 0.25) end
+for _ = 1, 40 do step() end
+local pushedBefore = n
+collectgarbage("collect")    -- shrinks the Lua stack: regrow it before the baseline, or it reads as growth
+collectgarbage("stop")
+for _ = 1, 3 do step() end
+local before = collectgarbage("count")
+local TICKS = 200
+for _ = 1, TICKS do step() end
+local grown = collectgarbage("count") - before
+collectgarbage("restart")
+check(n == pushedBefore, "an unchanged tick must not push, pushes went " .. pushedBefore .. " -> " .. n)
+local perTick = grown / TICKS
+check(perTick < 0.01, string.format("idle tick allocated %%.3f addon-side KB per tick (%%.1f KB over %%d ticks)", perTick, grown, TICKS))
+"""
+
+case("idle_tick_addon_side_allocation_priest_no_target", "PRIEST")(IDLE_ALLOC % "W.targetExists = false")
+case("idle_tick_addon_side_allocation_priest_target", "PRIEST")(IDLE_ALLOC % "")
+case("idle_tick_addon_side_allocation_warlock_target", "WARLOCK")(IDLE_ALLOC % "W.shards = 3")
+case("idle_tick_addon_side_allocation_paladin_seal_target", "PALADIN")(
+    IDLE_ALLOC % 'W.auras.player = { sealAura("Seal of Righteousness", 1000) }; fire("UNIT_AURA", "player")'
+)
+# every "is the spell known" answer unreadable, so no spell ever caches: known == nil persists tick after tick
+case("idle_tick_addon_side_allocation_priest_known_unreadable", "PRIEST")(
+    IDLE_ALLOC % 'W.sec.known = true; fire("SPELLS_CHANGED")'
+)
+case("idle_tick_addon_side_allocation_paladin_known_unreadable", "PALADIN")(
+    IDLE_ALLOC % 'W.sec.known = true; fire("SPELLS_CHANGED")'
+)
+
+# One GetSpellCooldown call per spell per tick: the client builds a fresh table on every call, and the
+# rotation, the row and the procs all ask about the same spells.
+COOLDOWN_CALLS = r"""
+local f = tickframe()
+FS.Hud.Subscribe(function() end)
+%s
+local counts, real = {}, C_Spell.GetSpellCooldown
+C_Spell.GetSpellCooldown = function(id) counts[id] = (counts[id] or 0) + 1; return real(id) end
+W.now = W.now + 0.25
+f._scripts.OnUpdate(f, 0.25)
+local unique, total = 0, 0
+for _, c in pairs(counts) do unique = unique + 1; total = total + c end
+check(unique >= 2, "the tick read the cooldowns, got " .. unique .. " spells")
+check(total == unique, "GetSpellCooldown was called " .. total .. " times for " .. unique .. " spells in one tick")
+"""
+
+# in Shadowform, so the rotation reaches the cooldown rules instead of stopping at the form rule
+case("tick_reads_each_spell_cooldown_once_priest", "PRIEST")(COOLDOWN_CALLS % "W.form = 1")
+case("tick_reads_each_spell_cooldown_once_paladin", "PALADIN")(
+    COOLDOWN_CALLS % 'W.auras.player = { sealAura("Seal of Righteousness", 1000) }; fire("UNIT_AURA", "player")'
+)
+case("cooldown_reads_outside_a_tick_are_never_cached", "PRIEST")(r"""
+local calls, real = 0, C_Spell.GetSpellCooldown
+C_Spell.GetSpellCooldown = function(id) calls = calls + 1; return real(id) end
+local P = FS.Hud.Primitives
+check(P.cooldownReady("mind_blast") == true, "ready")
+W.cd[NAME_ID["Mind Blast"]] = { isActive = true, startTime = W.now - 1, duration = 8 }
+check(P.cooldownReady("mind_blast") == false, "a read between ticks sees the new cooldown, not a cached one")
+check(calls == 2, "two reads, two client calls, got " .. calls)
+""")
+
+# What a subscriber is handed is never touched again: the scratch the idle tick builds into is
+# handed off on a change, so a state held across ticks (CombatHud keeps lastState) stays as pushed.
+NOMUT = r"""
+local function dumpv(v)
+    if type(v) ~= "table" then return tostring(v) end
+    local keys = {}
+    for k in pairs(v) do keys[#keys + 1] = k end
+    table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+    local parts = {}
+    for _, k in ipairs(keys) do parts[#parts + 1] = tostring(k) .. "=" .. dumpv(v[k]) end
+    return "{" .. table.concat(parts, ",") .. "}"
+end
+local pushed, dumps = {}, {}
+FS.Hud.Subscribe(function(s) pushed[#pushed + 1] = s; dumps[#dumps + 1] = dumpv(s) end)
+local function expect(count, why) check(#pushed == count, why .. ": expected " .. count .. " pushes, got " .. #pushed) end
+local function intact()
+    for i, s in ipairs(pushed) do check(dumpv(s) == dumps[i], "state pushed as #" .. i .. " was mutated afterwards") end
+end
+-- no table reachable from one push is also reachable from another
+local function disjoint(field)
+    local seen, count = {}, 0
+    for i, s in ipairs(pushed) do
+        local t = s[field]
+        if type(t) == "table" then
+            count = count + 1
+            check(seen[t] == nil, field .. " table of push " .. i .. " is the one pushed as #" .. tostring(seen[t]))
+            seen[t] = i
+        end
+    end
+    return count
+end
+"""
+
+case("subscribers_are_told_exactly_on_change_and_never_see_a_state_mutate")(NOMUT + r"""
+expect(1, "Subscribe")
+for _ = 1, 3 do tick(0.25) end
+expect(1, "idle ticks")
+cast("Corruption"); tick(0.25)
+expect(2, "a cast")
+for _ = 1, 2 do tick(0.25) end
+expect(2, "idle ticks inside the same second")
+retarget("Creature-B"); tick(0.25)
+expect(3, "a target switch")
+W.combat = true; tick(0.25)
+expect(4, "entering combat")
+for _ = 1, 3 do tick(0.25) end
+expect(4, "idle ticks in combat")
+for i = 2, #pushed do check(pushed[i] ~= pushed[i - 1], "push " .. i .. " reuses the previous table") end
+check(pushed[2].next ~= nil and rowOf(pushed[2]).corruption.missing == false, "push 2 shows the Corruption just cast")
+check(pushed[4].inCombat == true and pushed[3].inCombat == false, "the combat flip is in push 4 only")
+check(disjoint("next") >= 1, "some push carried a next")
+intact()
+""")
+
+case("paladin_seal_and_judgement_tables_are_never_mutated_after_a_push", "PALADIN")(NOMUT + r"""
+tick(0.25)
+cast("Seal of the Crusader"); tick(0.25)
+cast("Judgement"); tick(0.25)
+for _ = 1, 2 do tick(0.25) end
+cast("Seal of Light"); tick(0.25)
+cast("Judgement"); tick(0.25)
+W.combat = true; tick(0.25)
+for _ = 1, 3 do tick(0.25) end
+check(disjoint("seal") >= 2, "pushes carried at least two seal tables")
+check(disjoint("judged") >= 2, "pushes carried at least two judged tables")
+check(pushed[#pushed].judged.key == "sol" and pushed[#pushed].seal.key == "sol", "the last push shows Seal of Light judged")
+intact()
+""")
+
+case("priest_channel_table_is_never_mutated_after_a_push", "PRIEST")(NOMUT + r"""
+tick(0.25)
+fire("UNIT_SPELLCAST_CHANNEL_START", "player", "g", NAME_ID["Mind Flay"])
+for _ = 1, 6 do tick(0.5) end
+fire("UNIT_SPELLCAST_CHANNEL_STOP", "player")
+tick(0.25)
+check(disjoint("channel") >= 2, "pushes carried at least two channel tables")
+check(pushed[#pushed].channel == nil, "the last push has no channel")
+intact()
+""")
+
 
 case("priest_profile_is_well_formed", "PRIEST")(STRUCTURE)
 case("warlock_profile_is_well_formed", "WARLOCK")(STRUCTURE)
