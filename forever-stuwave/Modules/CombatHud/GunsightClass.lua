@@ -370,20 +370,21 @@ if not ok or not result then LogOnce("register", "FS.GunsightAreas.RegisterModul
 -------------------------------------------------------------------------------
 -- Registered as "classSoon", which GunsightAreas shows in an area set to the Class Module whenever no spec above
 -- lists the player's class. A class that gains a module stops showing it with no change here. A small dim plate in
--- the empty slot's language (violet wash, violet edge, muted text; mockup emptySlot) with the class caption's
--- header style; a plain frame, so a refresh in combat is never blocked.
+-- the empty slot's language (violet wash, violet edge, muted text; mockup emptySlot) with the TARGET DEBUFFS
+-- header style (size and alpha read from FS.GunsightDots.V, which loads first); a plain frame, so a refresh in
+-- combat is never blocked.
 
 local SOON = {
     DX = 0, DY = 2, W = 118, H = 46,               -- the plate, image px from the area rect's corner
     EDGE = 1, EDGE_ALPHA = 0.4, WASH_ALPHA = 0.04, -- 1 image px edge, the emptySlot violet wash
-    HDR_PX = 10, HDR_ALPHA = 0.9, HDR_DX = 7, HDR_BASE = 14,   -- the TARGET DEBUFFS header style
+    HDR_PX = 10, HDR_ALPHA = 0.9, HDR_DX = 7, HDR_BASE = 14,   -- HDR_PX and HDR_ALPHA only if GunsightDots is absent
     MAIN_PX = 13, MAIN_ALPHA = 0.8, MAIN_DX = 7, MAIN_BASE = 31,
     NAME_PX = 10, NAME_ALPHA = 0.6, NAME_DX = 7, NAME_BASE = 43,
     HEADER = "CLASS MODULE", MAIN = "COMING SOON",
 }
 
 local soonRect, soonFrame, soonBuilt           -- the corner of the last seat() rect, the plate frame
-local soonWash, soonEdge, soonHdr, soonMain, soonName, soonNamed = nil, {}, nil, nil, nil, false
+local soonWash, soonEdge, soonHdr, soonMain, soonName = nil, {}, nil, nil, nil
 
 -- The localized class name, or nil when it cannot be read as a plain string.
 local function ClassName()
@@ -391,6 +392,16 @@ local function ClassName()
     local ok, name = pcall(UnitClass, "player")
     if not ok or IsSecret(name) or type(name) ~= "string" or name == "" then return nil end
     return name
+end
+
+-- The TARGET DEBUFFS header's size and alpha, read from where GunsightDots keeps them so the two cannot drift; the
+-- SOON values only stand in when that file is absent.
+local function HeaderStyle()
+    local dots = FS.GunsightDots
+    local v = type(dots) == "table" and dots.V or nil
+    local px = type(v) == "table" and type(v.HDR_SIZE) == "number" and v.HDR_SIZE or SOON.HDR_PX
+    local alpha = type(v) == "table" and type(v.HDR_ALPHA) == "number" and v.HDR_ALPHA or SOON.HDR_ALPHA
+    return px, alpha
 end
 
 local function SoonText(fs, px, color, alpha, dx, base)
@@ -413,9 +424,18 @@ local function SoonSeatAll()
         place(soonEdge.left, x, y, e, h)
         place(soonEdge.right, x + w - e, y, e, h)
     end
-    SoonText(soonHdr, SOON.HDR_PX, T.COLOR_BORDER, SOON.HDR_ALPHA, SOON.HDR_DX, SOON.HDR_BASE)
+    local hdrPx, hdrAlpha = HeaderStyle()
+    SoonText(soonHdr, hdrPx, T.COLOR_BORDER, hdrAlpha, SOON.HDR_DX, SOON.HDR_BASE)
     SoonText(soonMain, SOON.MAIN_PX, T.COLOR_MUTED, SOON.MAIN_ALPHA, SOON.MAIN_DX, SOON.MAIN_BASE)
-    if soonNamed then SoonText(soonName, SOON.NAME_PX, T.COLOR_MUTED, SOON.NAME_ALPHA, SOON.NAME_DX, SOON.NAME_BASE) end
+    SoonText(soonName, SOON.NAME_PX, T.COLOR_MUTED, SOON.NAME_ALPHA, SOON.NAME_DX, SOON.NAME_BASE)
+    -- re-read on every seat, so a name that was unreadable at build can still appear later
+    local name = ClassName()
+    if name then
+        soonName:SetText(name)
+        soonName:Show()
+    else
+        soonName:Hide()
+    end
 end
 
 local function SoonBuild(host)
@@ -431,13 +451,10 @@ local function SoonBuild(host)
         soonEdge[side] = tex
     end
     soonHdr, soonMain, soonName = NewText(soonFrame), NewText(soonFrame), NewText(soonFrame)
-    local name = ClassName()
-    soonNamed = name ~= nil
     soonBuilt = true
-    SoonSeatAll()          -- sets each font; SetText on a FontString with none throws
+    SoonSeatAll()          -- sets each font and the class name; SetText on a FontString with none throws
     soonHdr:SetText(SOON.HEADER)
     soonMain:SetText(SOON.MAIN)
-    if soonNamed then soonName:SetText(name) else soonName:Hide() end
     return soonFrame
 end
 

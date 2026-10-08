@@ -482,6 +482,25 @@ check(got >= 1, "the second listener still runs")
 """)
 
 
+case("the_coming_soon_plate_shows_swaps_and_hides_in_combat")(r"""
+-- a class with no module (MAGE), so the plate really is the occupant; the plate is a plain frame and nothing gates it on combat
+local soon = module("soon")
+IN_COMBAT = true
+local Gs, Areas = boot({ class = "MAGE", before = function() FS.GunsightAreas.RegisterModule("classSoon", soon.spec) end })
+check(InCombatLockdown() == true, "the case runs in combat")
+check(Areas.AreaOf("classSoon") == "lower" and soon.frame:IsShown(), "the plate shows in combat")
+check(soon.shows[#soon.shows] == "lower", "onShow(lower) in combat")
+Gs.SetArea("upper", "class")
+check(Areas.AreaOf("classSoon") == "upper" and soon.shows[#soon.shows] == "upper", "the plate follows a swap to the upper area in combat")
+check(soon.hides[#soon.hides] == "lower" and soon.frame:IsShown(), "and left the lower area in combat")
+Gs.SetArea("upper", "empty")
+check(Areas.AreaOf("classSoon") == nil and not soon.frame:IsShown(), "an area set to something else hides the plate in combat")
+check(soon.hides[#soon.hides] == "upper", "onHide(upper) in combat")
+Gs.SetArea("lower", "class")
+check(Areas.AreaOf("classSoon") == "lower" and soon.frame:IsShown(), "and it comes back in combat")
+check(#BLOCKED == 0, "nothing protected was touched in combat: " .. table.concat(BLOCKED, ","))
+""")
+
 case("refreshing_in_combat_blocks_nothing")(r"""
 local dh, cl = module("dh"), module("cl")
 cl.spec.classes = { "WARLOCK" }
@@ -502,8 +521,6 @@ SetScreen(1200)
 fire("UI_SCALE_CHANGED")
 local late = module("late")
 Areas.RegisterModule("debuffsV", late.spec)
-local soonLate = module("soonLate")
-Areas.RegisterModule("classSoon", soonLate.spec)
 Gs.SetArea("lower", "debuffsV")
 check(Areas.AreaOf("debuffsV") == "lower", "a module first built in combat is placed")
 for _, f in ipairs(FRAMES) do

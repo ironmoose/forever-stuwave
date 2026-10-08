@@ -206,7 +206,6 @@ local function boot(opts)
     stubTheme_()
     FS.Theme.COLOR_TEXT_WHITE = { 1, 1, 1, 1 }
     FS.Theme.COLOR_MUTED = { 0.6157, 0.5765, 0.7686, 1 }
-    FS.Theme.COLOR_BAR_BORDER = { 0.227, 0.129, 0.408, 1 }
     -- the real ApplyMono sets the font and the colour; the stub records both the way SetTextColor would
     function FS.Theme.ApplyMono(fs, size, color)
         fs.monoSize, fs.hasFont = size, true
@@ -230,6 +229,14 @@ local function boot(opts)
     if opts.noCombo then GetComboPoints = nil end
     if opts.noPowerType then UnitPowerType = nil end
     STATE = opts.state
+    if opts.dots then
+        -- the real TARGET DEBUFFS modules, loaded before the class file as the .toc does; they register into MODS
+        FS.TargetDebuffs = {
+            Subscribe = function(fn) fn({}, 1) end, Unsubscribe = function() end,
+            Get = function() return {} end, Epoch = function() return 1 end,
+        }
+        loadAddonFile(DOTS_SRC, "Modules/CombatHud/GunsightDots.lua")
+    end
     loadAddonFile(CLASS_SRC, "Modules/CombatHud/GunsightClass.lua")
     fire("ADDON_LOADED", "forever-stuwave")
     fire("PLAYER_LOGIN")
@@ -663,13 +670,19 @@ check(#SUBS == 0, "the plate never subscribes to the Hud")
 """)
 
 case("coming_soon_header_matches_the_target_debuffs_header_style")(r"""
-boot({ class = "MAGE" })
+boot({ class = "MAGE", dots = true })
 UnitClass = function() return "Mage", "MAGE" end
+-- what GunsightDots actually draws for its TARGET DEBUFFS header, not a copy of its constants
+local dspec, dhost = mount("upper", "debuffsV")
+local dhdr   -- the header sits in the module body, which stays hidden until a row exists, so look past visibility
+for _, fs in ipairs(FONTSTRINGS) do if under(fs, dhost) and fs.text == "TARGET DEBUFFS" then dhdr = fs end end
+check(dhdr, "the TARGET DEBUFFS header is not drawn by GunsightDots")
 local spec, host = mount("lower", "classSoon")
 local hdr = textOf(host, "CLASS MODULE")
-near3(fsPx(hdr), 10, "header size matches the TARGET DEBUFFS header (10 image px)")
+near3(fsPx(hdr), fsPx(dhdr), "header size matches the TARGET DEBUFFS header")
+near3(hdr.textColor[4], dhdr.textColor[4], "header alpha matches the TARGET DEBUFFS header")
+check(fsPx(dhdr) > 0 and dhdr.textColor[4] > 0, "the TARGET DEBUFFS header style was read")
 colorIs(hdr.textColor, FS.Theme.COLOR_BORDER, "header is the violet")
-near3(hdr.textColor[4], 0.9, "header alpha matches the TARGET DEBUFFS header")
 local soon = textOf(host, "COMING SOON")
 colorIs(soon.textColor, FS.Theme.COLOR_MUTED, "COMING SOON is muted")
 check(soon.textColor[4] < 1, "COMING SOON is dim")
@@ -734,6 +747,13 @@ UnitClass = function() return nil, "MAGE" end
 spec, host = mount("lower", "classSoon")
 _, txt = drawn(host)
 check(#txt == 2, "a missing class name draws no third line, got " .. #txt)
+-- unreadable at build, readable at a later seat: the name appears
+UnitClass = function() return "Mage", "MAGE" end
+spec.seat(RECTS.lower)
+check(textOf(host, "Mage"), "a class name that becomes readable later is drawn on the next seat")
+UnitClass = function() return SECRET, "MAGE" end
+spec.seat(RECTS.lower)
+check(not textOf(host, "Mage"), "and hidden again when it turns secret")
 """)
 
 
@@ -762,6 +782,7 @@ def run_case(name: str, body: str, mu: dict, tn: dict) -> str | None:
     g.CONFIG_SRC = CONFIG.read_text(encoding="utf-8")
     g.GUNSIGHT_SRC = GUNSIGHT.read_text(encoding="utf-8")
     g.CLASS_SRC = CLASS.read_text(encoding="utf-8")
+    g.DOTS_SRC = DOTS_HARNESS.DOTS.read_text(encoding="utf-8")
     g.HAS_TARGET_SRC = _load("gunsight-harness").theme_target_rule_lua()
     lua.execute("MU = " + lua_value(mu) + "\nTN = " + lua_value(tn))
     try:

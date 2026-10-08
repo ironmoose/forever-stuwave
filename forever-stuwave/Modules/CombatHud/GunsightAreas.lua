@@ -1,9 +1,10 @@
 -- Forever STUwave: Gunsight target side areas (the dot piece) and the module registry that fills them.
 --
 -- Two host frames, upper and lower, hang off the dot piece frame at the areaU and areaL rects.
--- Modules register under "debuffsH", "debuffsV" or "class" (the class module is chosen by class token) and are
--- built on first use. A fifth id, "classSoon", is the fallback for "class": the area shows it when the player's
--- class has no class module, so a class that later registers one stops showing it with no further change. A Target Debuffs host follows FS.TargetTakesDots, a class host stays up without a target.
+-- Modules register under "debuffsH", "debuffsV", "class" or "classSoon" (the class module is chosen by class token)
+-- and are built on first use. "classSoon" is the fallback for "class": the area shows it when the player's class has
+-- no class module, so a class that later registers one stops showing it with no further change. A Target Debuffs
+-- host follows FS.TargetTakesDots; a class host stays up without a target.
 
 local _, FS = ...
 
