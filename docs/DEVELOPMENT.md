@@ -88,6 +88,6 @@ Feature-detect APIs and use secret guards before reading or transforming values.
 
 ## Current alpha boundary
 
-Priest and Warlock HUD profiles ship alongside Paladin seal/aura controls, the Seal Chamber and Judgement lane. Judgement does not consume the seal on Forever. Judgement and its lane, Quick Keybind, and label visuals have live signoff; seal/aura clicks, expiry/no-seal states, shoulder seam and minimap first login still need checks. Advanced Paladin level 10/20 rotation rules are incomplete. Party row mouseover casting also needs live verification. See [TESTING.md](TESTING.md).
+Priest and Warlock HUD profiles ship alongside Paladin seal/aura controls, the compact Seal module and its Judgement row. Judgement does not consume the seal on Forever. Judgement and its lane, Quick Keybind, and label visuals have live signoff; seal/aura clicks, expiry/no-seal states, shoulder seam and minimap first login still need checks. Advanced Paladin level 10/20 rotation rules are incomplete. Party row mouseover casting also needs live verification. See [TESTING.md](TESTING.md).
 
 Project code is MIT; preserve [third party notices](THIRD_PARTY_NOTICES.md) and font OFL files.

@@ -631,6 +631,10 @@ local function BuildMembers(t, piece, host)
     end
     t.box = box
     builtBoxes[#builtBoxes + 1] = box
+    -- The tag rides the box top, so a box that grows (the numbers' row) seats it again.
+    box.onGrow = function()
+        if t.kick and t.padlock then LayoutKick(t, Gunsight.anchors.boxR) end
+    end
     t.icon, t.timer, t.name, t.tabTicks = box.regions.icon, box.regions.timer, box.regions.name, box.regions.ticks
     for _, side in ipairs({ "pink", "steel" }) do
         for _, region in ipairs(box.fb[side]) do t.fb[side][#t.fb[side] + 1] = region end

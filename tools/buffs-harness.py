@@ -299,7 +299,7 @@ FS.FrameHelpers = {
         if not data then return nil end
         return { name = data.name, icon = data.icon, count = data.applications or 0,
             dispelType = data.dispelName, duration = data.duration or 0,
-            expirationTime = data.expirationTime or 0 }
+            expirationTime = data.expirationTime or 0, caster = data.sourceUnit }
     end,
     SeatAuraTile = function(button)
         __seated[#__seated + 1] = { button = button, hadLabels = button.count ~= nil or button.duration ~= nil }
@@ -344,7 +344,7 @@ end
 function aura(name, opts)
     opts = opts or {}
     return { name = name, icon = "icon-" .. name, applications = opts.count or 1, dispelName = opts.dispel,
-        duration = opts.duration or 60, expirationTime = opts.expires or (__now + 60) }
+        duration = opts.duration or 60, expirationTime = opts.expires or (__now + 60), sourceUnit = opts.source }
 end
 function degraded(key)
     local n = 0
@@ -635,6 +635,18 @@ __combat = false
 fire("PLAYER_REGEN_ENABLED")
 check(#PA.Get().buffs == 4 and #PA.Get().debuffs == 0, "no refresh at regen")
 check(PA.IsFrozen() == false, "still frozen after regen")
+"""),
+    ("cache: a buff carries its plain sourceUnit (a party caster), a secret or missing one is nil", "", r"""
+boot()
+local PA = FS.PlayerAuras
+__auras.HELPFUL = { aura("Arcane Intellect", { source = "party2" }), aura("Mark"), aura("Fortitude", { source = "player" }),
+    { name = "Hidden", icon = "icon-Hidden", applications = 1, duration = 60, expirationTime = __now + 60, sourceUnit = __secret() } }
+fire("UNIT_AURA")
+local b = PA.Get().buffs
+check(b[1].sourceUnit == "party2", "a party-cast buff lost its source: " .. tostring(b[1].sourceUnit))
+check(b[2].sourceUnit == nil, "a buff with no source got one")
+check(b[3].sourceUnit == "player", "your own buff's source")
+check(b[4].sourceUnit == nil, "a secret source was stored")
 """),
     ("cache: secret fields never enter it, and a list that cannot be read keeps the last snapshot", "", r"""
 boot()

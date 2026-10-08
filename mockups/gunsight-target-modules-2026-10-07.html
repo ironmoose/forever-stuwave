@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=2260">
+<title>Target Modules</title>
+<style>
+@font-face{font-family:'Mononoki';src:url(../forever-stuwave/Media/Fonts/MononokiNerdFontMono-Bold.ttf) format('truetype');font-weight:100 900;font-style:normal;font-display:block}
+/* The addon's own bundled faces, same as every other mockup in this folder. */
+@font-face { font-family: "FS Display"; src: url("../forever-stuwave/Media/Fonts/FSDisplay-Bold.ttf"); font-weight: 700; }
+@font-face { font-family: "FS Mono"; src: url("../forever-stuwave/Media/Fonts/MononokiNerdFontMono-Bold.ttf"); font-weight: 700; }
+@font-face { font-family: "Share Tech Mono"; src: url("../forever-stuwave/Media/Fonts/ShareTechMono-Regular.ttf"); }
+
+:root {
+  color-scheme: dark;
+  /* Theme.lua tokens */
+  --bg: #1a1025;            /* COLOR_BG, 80% in the panel fill */
+  --scrim: #0d0620;         /* COLOR_HUD_SCRIM */
+  --track: #0a0416;         /* COLOR_BAR_TRACK */
+  --line: #3a2168;          /* COLOR_BAR_BORDER */
+  --violet: #a855f7;        /* COLOR_BORDER, the panel accent */
+  --pink: #ff2e97;          /* COLOR_HEALTH, close X */
+  --cyan: #22e0ff;          /* COLOR_POWER, menu / button text */
+  --green: #39ff14;         /* COLOR_CARET_HEALTH */
+  --gold: #ffd23f;          /* COLOR_GOLD */
+  --amber: #ffb648;         /* COLOR_AMBER */
+  --muted: #9d93c4;         /* COLOR_MUTED */
+  --text: #e2e8f0;
+  --parchment: #bfe9d6;
+  --font-display: "FS Display", "Orbitron", "Eurostile", sans-serif;
+  --font-mono: "FS Mono", "Mononoki", "Mononoki Nerd Font", "Share Tech Mono", ui-monospace, Menlo, Consolas, monospace;
+  --font-note: "Share Tech Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+
+
+
+/* ------------------------------------------------------------------ panel chrome (Theme.SkinPanel language) */
+/* Units: the window is authored in addon UI units (BugReport is 640 x 440). The main copy is zoomed
+   to --uiz canvas px per unit; 1.333 assumes UIParent is 1080 units tall (UI scale 0.75 on 1440p). */
+.win { position: absolute; width: 780px; height: 560px; zoom: var(--z, 1); filter: drop-shadow(0 0 6px rgba(168,85,247,.55)) drop-shadow(0 0 22px rgba(168,85,247,.22)); }
+.win-in { position: absolute; inset: 0; background: var(--violet);
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+.win-fill { position: absolute; inset: 1px; background: rgba(26,16,37,.92);
+  clip-path: polygon(5.3px 0, 100% 0, 100% calc(100% - 5.3px), calc(100% - 5.3px) 100%, 0 100%, 0 5.3px); }
+/* scanline: one dark row over transparent, 4px period, alpha .25, inset ceil(6/2)=3 */
+.scan { position: absolute; inset: 3px; pointer-events: none; z-index: 9; opacity: .25;
+  background: repeating-linear-gradient(180deg, rgba(0,0,0,.8) 0 1px, transparent 1px 4px); }
+.band { position: absolute; left: 3px; right: 3px; top: 3px; height: 18px; background: rgba(168,85,247,.08); }
+.rule { position: absolute; left: 3px; right: 3px; top: 21px; height: 1px; background: rgba(168,85,247,.30); }
+.band-label { position: absolute; left: 13px; top: 3px; height: 18px; line-height: 18px; font-size: 10px; color: var(--violet); letter-spacing: .02em; }
+
+/* close: SkinCloseButton = pink mono "X" in a SkinButton ring */
+.close { position: absolute; right: 7px; top: 5px; width: 26px; height: 14px; }
+.btnx { position: absolute; inset: 0; filter: drop-shadow(0 0 3px rgba(255,46,151,.55)); }
+.btnx > b { position: absolute; inset: 0; display: grid; place-items: center; background: var(--pink); font-size: 11px; line-height: 1; color: var(--pink);
+  clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px); }
+.btnx > b::before { content: ""; position: absolute; inset: 1px; background: #1a0b22; clip-path: polygon(3.3px 0, 100% 0, 100% calc(100% - 3.3px), calc(100% - 3.3px) 100%, 0 100%, 0 3.3px); }
+.btnx > b span { position: relative; }
+
+/* header block under the band */
+.head { position: absolute; left: 17px; right: 17px; top: 29px; height: 40px; }
+.title { font-family: var(--font-display); font-size: 17px; letter-spacing: .06em; text-transform: uppercase; color: var(--text); line-height: 1; padding-top: 4px; }
+.title i { font-style: normal; color: var(--pink); }
+.sub { margin-top: 5px; font-size: 10px; color: var(--muted); letter-spacing: .02em; }
+.sub b { color: var(--cyan); font-weight: 700; }
+.head .cat { position: absolute; right: 0; top: 7px; font-size: 10px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+.head .cat b { color: var(--cyan); }
+
+/* body: nav + well + footer */
+.body { position: absolute; left: 17px; right: 17px; top: 74px; bottom: 36px; display: flex; gap: 10px; }
+
+.nav { width: 150px; flex: none; display: flex; flex-direction: column; gap: 3px; padding-top: 2px; }
+.nav-h { font-size: 9px; letter-spacing: .14em; color: var(--muted); text-transform: uppercase; padding: 0 0 5px 2px; }
+.nav-i { position: relative; height: 28px; display: flex; align-items: center; gap: 8px; padding-left: 10px; font-size: 11px; color: var(--muted); }
+.nav-i em { font-style: normal; font-size: 9px; color: var(--line); width: 14px; }
+.nav-i.on { color: var(--cyan); }
+.nav-i.on em { color: var(--pink); }
+.nav-i.on::before { content: ""; position: absolute; inset: 0; background: rgba(34,224,255,.10);
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px); }
+.nav-i.on::after { content: ""; position: absolute; left: 0; top: 5px; bottom: 5px; width: 2px; background: var(--cyan); box-shadow: 0 0 6px var(--cyan); }
+.nav-i span { position: relative; }
+.nav-i em { position: relative; }
+.nav-sp { flex: 1; }
+.nav-v { font-size: 9px; color: var(--line); padding: 0 0 2px 2px; }
+
+/* the "well": BugReport's #0a0416 @ .95 track behind the readable area */
+.well { position: relative; flex: 1; min-width: 0; background: rgba(10,4,22,.95); border: 1px solid var(--line); padding: 10px 22px 8px 14px; overflow: visible; }
+.sbar { position: absolute; right: 4px; top: 4px; bottom: 4px; width: 4px; background: rgba(58,33,104,.6); }
+.sbar b { position: absolute; left: 0; right: 0; top: 0; height: 78%; background: var(--violet); }
+
+.grp { margin-top: 12px; }
+.grp:first-child { margin-top: 0; }
+.grp-h { display: flex; align-items: center; gap: 8px; height: 16px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--violet); }
+.grp-h::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, rgba(168,85,247,.45), rgba(58,33,104,.25)); }
+.grp-h .slash { color: var(--line); }
+
+.row { position: relative; display: flex; align-items: center; height: 28px; gap: 10px; }
+.row .lab { flex: 1; font-size: 11px; color: var(--text); white-space: nowrap; }
+.row.dim .lab { color: var(--muted); }
+.row.sub1 { padding-left: 16px; }
+.row.sub1::before { content: ""; position: absolute; left: 4px; top: 0; height: 14px; width: 8px; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.help { font-size: 10px; line-height: 1.45; color: var(--muted); padding: 2px 0 0 0; font-weight: 700; }
+.help b { color: var(--cyan); font-weight: 700; }
+/* slider: thin track, cyan fill, cut-corner slab thumb, mono readout */
+.sl { position: relative; width: 150px; height: 12px; flex: none; }
+.sl i { position: absolute; left: 0; right: 0; top: 5px; height: 2px; background: color-mix(in srgb, var(--violet) 45%, var(--line)); }
+.sl i::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: var(--p); background: var(--cyan); box-shadow: 0 0 4px rgba(34,224,255,.6); }
+.sl b { position: absolute; top: 0; left: calc(var(--p) - 4px); width: 8px; height: 12px; background: var(--cyan); filter: drop-shadow(0 0 3px rgba(34,224,255,.55));
+  clip-path: polygon(3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%, 0 3px); }
+.sl b::before { content: ""; position: absolute; inset: 1px; background: #170c2a; clip-path: polygon(2.3px 0, 100% 0, 100% calc(100% - 2.3px), calc(100% - 2.3px) 100%, 0 100%, 0 2.3px); }
+.rd { width: 34px; flex: none; text-align: right; font-size: 10.5px; color: var(--cyan); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; }
+.master { display: flex; align-items: center; height: 34px; padding: 0 10px; margin-bottom: 4px; position: relative; }
+.master::before { content: ""; position: absolute; inset: 0; background: rgba(168,85,247,.07); border: 1px solid rgba(168,85,247,.35);
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+.master > * { position: relative; }
+.master .lab { flex: 1; font-size: 12px; color: var(--text); }
+
+/* ------------------------------------------------------------------ controls */
+/* toggle: cut track, slab knob. off = --line ring, on = cyan ring + glow */
+.tg { position: relative; width: 34px; height: 16px; flex: none; filter: drop-shadow(0 0 0 transparent); }
+.tg > b { position: absolute; inset: 0; background: var(--line);
+  clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px); }
+.tg > b::before { content: ""; position: absolute; inset: 1px; background: var(--track);
+  clip-path: polygon(3.3px 0, 100% 0, 100% calc(100% - 3.3px), calc(100% - 3.3px) 100%, 0 100%, 0 3.3px); }
+.tg > b::after { content: ""; position: absolute; top: 4px; bottom: 4px; left: 4px; width: 12px; background: #5b4a8a;
+  clip-path: polygon(3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%, 0 3px); }
+.tg.on { filter: drop-shadow(0 0 3px rgba(34,224,255,.55)); }
+.tg.on > b { background: var(--cyan); }
+.tg.on > b::before { background: color-mix(in srgb, var(--cyan) 14%, var(--track)); }
+.tg.on > b::after { left: auto; right: 4px; background: var(--cyan); }
+.tg-s { font-size: 9px; width: 20px; text-align: right; color: var(--line); flex: none; letter-spacing: .04em; margin-right: 6px; }
+.tg-s.on { color: var(--cyan); }
+
+/* button (SkinButton: cut ring + additive glow in the accent) */
+.btn { position: relative; display: inline-block; filter: drop-shadow(0 0 3px color-mix(in srgb, var(--c, var(--violet)) 55%, transparent)); }
+.btn > b { position: relative; display: flex; align-items: center; justify-content: center; gap: 8px; height: 100%; padding: 0 14px; background: var(--c, var(--violet));
+  font-size: 11px; color: var(--cyan); letter-spacing: .03em; white-space: nowrap;
+  clip-path: polygon(var(--ch, 6px) 0, 100% 0, 100% calc(100% - var(--ch, 6px)), calc(100% - var(--ch, 6px)) 100%, 0 100%, 0 var(--ch, 6px)); }
+.btn > b { isolation: isolate; }
+.btn > b::before { z-index: -1; content: ""; position: absolute; inset: 1px; background: #170c2a;
+  clip-path: polygon(calc(var(--ch, 6px) - .7px) 0, 100% 0, 100% calc(100% - var(--ch, 6px) + .7px), calc(100% - var(--ch, 6px) + .7px) 100%, 0 100%, 0 calc(var(--ch, 6px) - .7px)); }
+.btn > b > * { position: relative; }
+.btn.on > b::before { background: color-mix(in srgb, var(--c) 16%, #170c2a); }
+
+/* segmented: buttons butted 2px apart, selected cyan (same idea as gunsight-hud-v2 .segopt) */
+.seg { display: flex; gap: 2px; flex: none; }
+.seg .btn { --c: var(--line); --ch: 5px; height: 22px; filter: none; }
+.seg .btn > b { padding: 0 11px; color: var(--muted); font-size: 10.5px; }
+.seg .btn.on { --c: var(--cyan); filter: drop-shadow(0 0 3px rgba(34,224,255,.5)); }
+.seg .btn.on > b { color: var(--cyan); }
+.seg .btn.on > b::before { background: color-mix(in srgb, var(--cyan) 20%, #170c2a); }
+.seg.dis { opacity: .4; }
+
+/* tags */
+.new { display: inline-block; margin-left: 8px; padding: 2px 6px 2px 7px; font-size: 8.5px; letter-spacing: .12em; color: #170c2a; background: var(--gold);
+  clip-path: polygon(3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%, 0 3px); vertical-align: 1px; }
+
+/* footer */
+.foot { position: absolute; left: 3px; right: 3px; bottom: 3px; height: 31px; border-top: 1px solid rgba(168,85,247,.30); display: flex; align-items: center; justify-content: space-between; padding: 0 14px; font-size: 10px; color: var(--muted); }
+.foot .l { display: flex; align-items: center; gap: 8px; }
+.foot .dot { width: 6px; height: 6px; background: var(--green); box-shadow: 0 0 6px var(--green); }
+.foot .r { display: flex; align-items: center; gap: 8px; }
+.key { color: var(--cyan); padding: 2px 7px; background: rgba(34,224,255,.08); border: 1px solid rgba(34,224,255,.4); }
+
+/* ------------------------------------------------------------------ layout category */
+.big { --c: var(--cyan); --ch: 10px; height: 36px; width: 100%; display: block; }
+.big > b { font-size: 14px; letter-spacing: .08em; }
+.btn.dis { filter: none; opacity: .4; }
+.btn.dd > b { justify-content: space-between; min-width: 200px; }
+.dd .chev { width: 0; height: 0; border: 4px solid transparent; border-top: 5px solid var(--cyan); margin-top: 5px; }
+.btnrow { display: flex; gap: 8px; align-items: center; height: 32px; }
+.grp.later .grp-h, .grp.later .btnrow { opacity: .45; }
+.grp.later .grp-h .new { opacity: 1; }
+.btn.warnb { --c: var(--pink); }
+.btn.warnb > b { color: var(--pink); }
+
+/* explain-icon: a 10px ring with a tiny "?", the whole explanation lives in the tooltip (data-tip).
+   The ? is a centred SVG background (the text glyph is hidden) so it is truly dead centre, font metrics do not matter. */
+.q { position: relative; display: inline-block; flex: none;
+  width: 10px; height: 10px; margin-left: 6px; vertical-align: middle; border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--violet) 70%, var(--line));
+  background: var(--track) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'%3E%3Cg transform='translate(0 0.17)' fill='none' stroke='%239d93c4' stroke-width='1.1'%3E%3Cpath d='M2.3 2.6C2.3 1.5 3 1 4 1C5 1 5.7 1.6 5.7 2.4C5.7 3.3 4 3.6 4 4.9'/%3E%3C/g%3E%3Ccircle cx='4' cy='6.77' r='.6' fill='%239d93c4'/%3E%3C/svg%3E") center / 80% 80% no-repeat;
+  background-position: center;
+  background-size: 80%;
+  background-repeat: no-repeat;
+  font-size: 0; line-height: 0; color: transparent; cursor: help; }
+.grp-h .q { margin-left: -2px; }
+.q:hover, .q.open { border-color: var(--cyan); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'%3E%3Cg transform='translate(0 0.17)' fill='none' stroke='%2322e0ff' stroke-width='1.1'%3E%3Cpath d='M2.3 2.6C2.3 1.5 3 1 4 1C5 1 5.7 1.6 5.7 2.4C5.7 3.3 4 3.6 4 4.9'/%3E%3C/g%3E%3Ccircle cx='4' cy='6.77' r='.6' fill='%2322e0ff'/%3E%3C/svg%3E"); background-position: center; background-size: 80%; background-repeat: no-repeat; box-shadow: 0 0 4px rgba(34,224,255,.55); }
+/* tooltip: dark fill, violet 1px ring, cut corners top left and bottom right (like the panels), notch toward the ? */
+.q::after, .q::before { display: none; position: absolute; z-index: 8; pointer-events: none; }
+.q:hover::after, .q:hover::before, .q.open::after, .q.open::before { display: block; }
+.q::after { content: attr(data-tip); left: calc(100% + 8px); top: 50%; transform: translateY(-50%); width: 232px; padding: 6px 9px 6px 10px;
+  white-space: normal; text-align: left; text-transform: none; letter-spacing: .01em; font-family: var(--font-mono); font-weight: 700;
+  font-size: 9.5px; line-height: 1.45; color: var(--text); border: 1px solid var(--violet);
+  background:
+    linear-gradient(135deg, transparent 3.5px, var(--violet) 3.5px 4.7px, transparent 4.7px),
+    linear-gradient(315deg, transparent 3.5px, var(--violet) 3.5px 4.7px, transparent 4.7px),
+    #120a22;
+  background-origin: border-box;
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px); }
+.q::before { content: ""; z-index: 9; left: calc(100% + 4.5px); top: 50%; width: 7px; height: 7px; background: #120a22;
+  border-left: 1px solid var(--violet); border-bottom: 1px solid var(--violet); transform: translateY(-50%) rotate(45deg); }
+
+
+/* ---- page (HUD tokens copied from gunsight-hud-v2-2026-10-02.html :root, geometry from GunsightBoxes.lua) ---- */
+html,body{margin:0;background:#0d0620}
+body{position:relative;width:2260px;height:auto;padding:28px 30px 36px;box-sizing:border-box;color:#e9e2ff;font-family:"FS Mono",'Mononoki',ui-monospace,monospace;font-weight:700}
+.h-row{display:flex;gap:20px;align-items:flex-start;margin-bottom:26px}
+.h-col{flex:none;min-width:440px}
+.h-lab{font-size:20px;letter-spacing:.12em;color:#f3fbff;text-shadow:0 0 14px #a855f7;margin:0 0 10px 2px;height:28px}
+.h-lab i{font-style:normal;color:#ff2e97}
+.h-panel{position:relative;border:1px solid rgba(168,85,247,.35);overflow:hidden;
+  background:
+    radial-gradient(ellipse at 22% 108%,#3a2160 0,rgba(58,33,96,0) 55%),
+    radial-gradient(ellipse at 85% 0%,#1d1840 0,rgba(29,24,64,0) 60%),
+    linear-gradient(#0b0716,#150d28 62%,#1c1030)}
+.h-panel canvas{display:block}
+.h-cap{margin:10px 2px 0;font-size:15px;line-height:1.5;color:#9d93c4}
+.h-cap b{color:#f3fbff;font-weight:700}
+.cfgwrap{position:relative;width:780px;height:560px;margin-top:4px}
+.cfgwrap .win{left:0;top:0}
+/* module rows in the config */
+.ord{width:18px;flex:none;font-size:10px;color:var(--cyan);text-align:left}
+.ord.off{color:var(--line)}
+.arrs{display:flex;gap:2px;flex:none;margin-right:10px}
+.arr{position:relative;width:18px;height:16px;flex:none;display:block;filter:drop-shadow(0 0 2px rgba(168,85,247,.35))}
+.arr::before{content:"";position:absolute;inset:0;background:var(--violet);clip-path:polygon(4px 0,100% 0,100% calc(100% - 4px),calc(100% - 4px) 100%,0 100%,0 4px)}
+.arr::after{content:"";position:absolute;inset:1px;background:#170c2a;clip-path:polygon(3.3px 0,100% 0,100% calc(100% - 3.3px),calc(100% - 3.3px) 100%,0 100%,0 3.3px)}
+.arr i{position:absolute;left:50%;top:50%;width:0;height:0;margin-left:-4px;border:4px solid transparent;z-index:1}
+.arr.up i{border-bottom:5px solid var(--cyan);margin-top:-6px}
+.arr.dn i{border-top:5px solid var(--cyan);margin-top:-2px}
+.arr.dis{filter:none;opacity:.35}
+.row.moff .lab{color:var(--muted)}
+
+</style>
+</head>
+<body>
+<div class="h-row">
+  <div class="h-col"><div class="h-lab"><i>A</i> NO MODULES</div><div class="h-panel" id="p0"><canvas id="c0"></canvas></div><div class="h-cap" id="k0"></div></div>
+  <div class="h-col"><div class="h-lab"><i>B</i> DEBUFFS ONLY</div><div class="h-panel" id="p1"><canvas id="c1"></canvas></div><div class="h-cap" id="k1"></div></div>
+  <div class="h-col"><div class="h-lab"><i>C</i> SEVERAL MODULES</div><div class="h-panel" id="p2"><canvas id="c2"></canvas></div><div class="h-cap" id="k2"></div></div>
+  <div class="h-col"><div class="h-lab"><i>D</i> CONFIG SECTION</div>
+<div class="cfgwrap">
+<div class="win" style="--z:1">
+  <div class="win-in"><div class="win-fill"></div></div>
+  <div class="scan"></div>
+  <div class="band"></div><div class="rule"></div>
+  <div class="band-label">stuwave://config</div>
+  <div class="close"><span class="btnx"><b><span>X</span></b></span></div>
+  <div class="head">
+    <div class="title">Forever <i>STU</i>wave</div>
+    <div class="sub">v0.1.0-alpha.1  ·  <b>/fsconfig</b></div>
+    <div class="cat">category <b>/ gunsight hud</b></div>
+  </div>
+  <div class="body">
+    <div class="nav">
+      <div class="nav-h">// settings</div>
+      <div class="nav-i"><em>01</em><span>Unit Frames</span></div>
+      <div class="nav-i on"><em>02</em><span>Gunsight HUD</span></div>
+      <div class="nav-i"><em>03</em><span>Layout</span></div>
+      <div class="nav-i"><em>04</em><span>Profiles</span></div>
+      <div class="nav-sp"></div>
+      <div class="nav-v">/fsgun  /fsedit  /fsbug</div>
+    </div>
+    <div class="well">
+      <div class="sbar"><b></b></div>
+      <div class="master">
+        <div class="lab">Gunsight HUD<span class="q" data-tip="Master switch. Fades every piece out together.">?</span></div>
+        <span class="tg-s on">ON</span><span class="tg on"><b></b></span>
+      </div>
+      <div class="grp">
+        <div class="grp-h"><span class="slash">//</span> Pieces</div>
+        <div class="grid2">
+          <div class="row"><div class="lab">Your cast bar</div><span class="tg on"><b></b></span></div>
+          <div class="row"><div class="lab">Target cast bar</div><span class="tg on"><b></b></span></div>
+          <div class="row"><div class="lab">Next cast tile</div><span class="tg on"><b></b></span></div>
+          <div class="row"><div class="lab">DoT time axis</div><span class="tg on"><b></b></span></div>
+        </div>
+      </div>
+      <div class="grp">
+        <div class="grp-h"><span class="slash">//</span> Target modules<span class="q" data-tip="Optional tabs docked under the target box. The order here is the stack order.">?</span></div>
+        <div class="row"><span class="ord">01</span><div class="lab">Level and classification<span class="q" data-tip="Level plus Elite, Rare or Boss, in a small tab.">?</span></div><span class="arrs"><span class="arr up dis"><i></i></span><span class="arr dn"><i></i></span></span><span class="tg-s on">ON</span><span class="tg on"><b></b></span></div><div class="row"><span class="ord">02</span><div class="lab">Health percent<span class="q" data-tip="The target health as a number, in a small tab.">?</span></div><span class="arrs"><span class="arr up"><i></i></span><span class="arr dn"><i></i></span></span><span class="tg-s on">ON</span><span class="tg on"><b></b></span></div><div class="row"><span class="ord">03</span><div class="lab">Target of target<span class="q open" data-tip="Who the target is attacking, with its name.">?</span></div><span class="arrs"><span class="arr up"><i></i></span><span class="arr dn"><i></i></span></span><span class="tg-s on">ON</span><span class="tg on"><b></b></span></div><div class="row"><span class="ord">04</span><div class="lab">My debuffs and DoTs<span class="q" data-tip="Your own debuffs on the target: icon, time left and stacks.">?</span></div><span class="arrs"><span class="arr up"><i></i></span><span class="arr dn"><i></i></span></span><span class="tg-s on">ON</span><span class="tg on"><b></b></span></div><div class="row moff"><span class="ord off">--</span><div class="lab">Range<span class="q" data-tip="Distance to the target in yards.">?</span></div><span class="arrs"><span class="arr up"><i></i></span><span class="arr dn dis"><i></i></span></span><span class="tg-s">OFF</span><span class="tg"><b></b></span></div>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <div class="l"><span class="dot"></span>Changes apply instantly</div>
+    <div class="r"><span>open with</span><span class="key">/fsconfig</span></div>
+  </div>
+</div>
+</div>
+</div>
+</div>
+<div class="h-row">
+  <div class="h-col"><div class="h-lab"><i>E</i> LONG NAME</div><div class="h-panel" id="p3"><canvas id="c3"></canvas></div><div class="h-cap" id="k3"></div></div>
+  <div class="h-col"><div class="h-lab"><i>F</i> SHORT NAME</div><div class="h-panel" id="p4"><canvas id="c4"></canvas></div><div class="h-cap" id="k4"></div></div>
+</div>
+<script>
+(function(){
+/* HUD tokens, same values as gunsight-hud-v2-2026-10-02.html :root */
+var K={violet:'#a855f7',cyan:'#22e0ff',pink:'#ff2e97',amber:'#ffb648',white:'#f3fbff',red:'#ff3b4e',muted:'#9d93c4',steel:'#8d93a6',green:'#39ff14',bg:'#0d0620'};
+function hex(h){h=h.replace('#','');return [parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)];}
+function rgba(h,a){var c=hex(h);return 'rgba('+c[0]+','+c[1]+','+c[2]+','+a+')';}
+function mix(a,b,t){var x=hex(a),y=hex(b);t=Math.max(0,Math.min(1,t));
+  var r=[0,1,2].map(function(i){return Math.round(x[i]+(y[i]-x[i])*t);});
+  return '#'+r.map(function(v){return ('0'+v.toString(16)).slice(-2);}).join('');}
+function clamp(v,a,b){return v<a?a:v>b?b:v;}
+
+var S=2,BK=2,X0=1100,VW=220;      /* display scale 2, backing 4x; view x 1100..1320 */
+var LW=1.86;                      /* the source's line weight in image px at its own view scale */
+var ctx,base=1,gcol=null,gk=1,_stroke,_fill,VY0,VH;
+
+function A(a){ctx.globalAlpha=clamp(base*a,0,1);}
+var HALO=[[1.5,.26],[3.2,.17],[5,.10],[7,.055]];
+function glow(c,k){gcol=c;gk=k==null?1:k;}
+function noglow(){gcol=null;}
+function halo(core){
+  var ga=ctx.globalAlpha,lw=core?ctx.lineWidth:0,ss=ctx.strokeStyle,lj=ctx.lineJoin,ld=ctx.getLineDash();
+  ctx.setLineDash([]);ctx.lineJoin='round';ctx.strokeStyle=gcol;
+  for(var i=0;i<HALO.length;i++){ctx.globalAlpha=clamp(ga*gk*HALO[i][1],0,1);ctx.lineWidth=lw+2*HALO[i][0];_stroke();}
+  ctx.globalAlpha=ga;ctx.strokeStyle=ss;ctx.lineJoin=lj;ctx.lineWidth=lw;ctx.setLineDash(ld);
+}
+function chamfer(x,y,w,h,c){
+  ctx.beginPath();
+  ctx.moveTo(x+c,y);ctx.lineTo(x+w,y);ctx.lineTo(x+w,y+h-c);ctx.lineTo(x+w-c,y+h);ctx.lineTo(x,y+h);ctx.lineTo(x,y+c);ctx.closePath();
+}
+/* a hanging tab: square top, only the bottom right corner cut */
+function tabPath(x,y,w,h,c){
+  ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+w,y);ctx.lineTo(x+w,y+h-c);ctx.lineTo(x+w-c,y+h);ctx.lineTo(x,y+h);ctx.closePath();
+}
+function tick(x,y,len,dir,col,a){A(a);ctx.strokeStyle=col;ctx.lineWidth=LW;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+dir*len,y);ctx.stroke();}
+function text(s,x,y,size,col,a,align){
+  A(a);ctx.fillStyle=col;ctx.font='700 '+size+'px "Mononoki",monospace';ctx.textAlign=align||'left';ctx.textBaseline='alphabetic';ctx.fillText(s,x,y);
+}
+function chevPath(cx,ay,hw,d,t){
+  ctx.beginPath();ctx.moveTo(cx,ay);ctx.lineTo(cx+hw,ay+d);ctx.lineTo(cx+hw,ay+d+t);ctx.lineTo(cx,ay+t);ctx.lineTo(cx-hw,ay+d+t);ctx.lineTo(cx-hw,ay+d);ctx.closePath();
+}
+function vline(x,y0,y1,col,a,lw){A(a);ctx.strokeStyle=col;ctx.lineWidth=lw||LW;ctx.beginPath();ctx.moveTo(x,y0);ctx.lineTo(x,y1);ctx.stroke();}
+function hline(y,x0,x1,col,a,lw){A(a);ctx.strokeStyle=col;ctx.lineWidth=lw||LW;ctx.beginPath();ctx.moveTo(x0,y);ctx.lineTo(x1,y);ctx.stroke();}
+function outlined(s,x,y,size,col,align){
+  ctx.font='700 '+size+'px "Mononoki",monospace';ctx.textAlign=align||'left';ctx.textBaseline='alphabetic';
+  A(1);ctx.lineJoin='round';ctx.lineWidth=2.4;ctx.strokeStyle='rgba(13,6,32,.95)';ctx.strokeText(s,x,y);ctx.lineJoin='miter';
+  ctx.fillStyle=col;ctx.fillText(s,x,y);
+}
+function tbBarH(x,y,w,h,f,col){
+  var fw=Math.max(0,Math.min(1,f))*w,g;
+  A(1);ctx.fillStyle=rgba(col,.2);ctx.fillRect(x,y,w,h);
+  if(fw<.5)return;
+  g=ctx.createLinearGradient(x,0,x+fw,0);g.addColorStop(0,rgba(col,.35));g.addColorStop(1,rgba(col,1));
+  A(1);ctx.fillStyle=g;ctx.fillRect(x,y,fw,h);
+  A(.9);ctx.fillStyle=mix(col,'#ffffff',.55);ctx.fillRect(x+fw-1.5,y,1.5,h);
+}
+function kickTag(x,y,col,a){
+  var w=36,h=15;
+  chamfer(x,y,w,h,5);A(a);ctx.fillStyle='rgba(13,6,32,.95)';ctx.fill();
+  glow(col,.8);ctx.strokeStyle=col;ctx.lineWidth=LW;ctx.stroke();noglow();
+  text('KICK',x+w/2,y+11,11,col,a,'center');
+}
+var CI=28,CIC=5;
+function castIconPlaceholder(x,y,a){
+  chamfer(x,y,CI,CI,CIC);A(.85*a);ctx.fillStyle='rgba(13,6,32,.9)';ctx.fill();
+  text('?',x+CI/2,y+CI/2+6,17,K.muted,a*.9,'center');
+  chamfer(x,y,CI,CI,CIC);ctx.setLineDash([3,3]);
+  A(.9*a);ctx.strokeStyle=K.muted;ctx.lineWidth=LW;ctx.stroke();ctx.setLineDash([]);
+}
+
+/* geometry: the live box is 114 x 64 (BOXR 114 x 56 plus the 8 px the HP and power rules add, growing UP) */
+var BOXR={x:1152,y:424,w:114,h:56};
+var BW=114,BH=64,BOT=480;          /* the box's bottom edge: 20 px above the cast bar frame at y 500 */
+var TR={x0:1164,x1:1194},FR_T=500,FR_B=760,TOP=508,TBOT=752,N=20,PITCH=(TBOT-TOP)/N;
+var PAD=7,CIG=6;
+var HP=.62,PW=.70;
+var DEB=[
+  {k:'S',c:'#9b59ff',t:'14',n:0,low:false},
+  {k:'C',c:'#c4423b',t:'9', n:0,low:false},
+  {k:'A',c:'#d9a521',t:'22',n:0,low:false},
+  {k:'E',c:'#6b3fc4',t:'4', n:3,low:true}
+];
+function debuff(d,x,y,s,tfs,lfs){
+  var c=Math.max(2,Math.round(s/6));
+  chamfer(x,y,s,s,c);A(1);ctx.fillStyle=mix(d.c,K.bg,.35);ctx.fill();
+  chamfer(x,y,s,s,c);A(.35);ctx.fillStyle=mix(d.c,'#ffffff',.35);ctx.save();ctx.clip();ctx.fillRect(x,y,s,s*.45);ctx.restore();
+  text(d.k,x+s/2,y+s/2+lfs*.36,lfs,K.white,1,'center');
+  chamfer(x,y,s,s,c);A(.95);ctx.strokeStyle=mix(d.c,'#ffffff',.3);ctx.lineWidth=LW;ctx.stroke();
+  text(d.t,x+s/2,y+s+tfs+1,tfs,d.low?K.amber:K.white,.95,'center');
+  if(d.n>1)outlined(String(d.n),x+s-1,y+s-1,tfs,K.white,'right');
+}
+
+/* GunsightBoxes.lua FitLine with the new floor: shrink (floor of size * field / width) but never under MINF,
+   then, if the text is still too wide, cut it with an ellipsis (one line, no word wrap) */
+var MINF=11;
+function fitText(str,size,wmax){
+  ctx.font='700 '+size+'px "Mononoki",monospace';
+  var w=ctx.measureText(str).width,adv=ctx.measureText('M').width,s=size,out=str,cut=false;
+  if(w>wmax){
+    s=Math.max(MINF,Math.floor(size*wmax/w));
+    ctx.font='700 '+s+'px "Mononoki",monospace';
+    if(ctx.measureText(out).width>wmax){
+      cut=true;
+      while(out.length>1&&ctx.measureText(out+'...').width>wmax)out=out.slice(0,-1);
+      out=out+'...';
+    }
+  }
+  ctx.font='700 '+s+'px "Mononoki",monospace';
+  return {text:out,size:s,w:ctx.measureText(out).width,cut:cut,field:wmax,fit14:Math.floor(wmax/adv)};
+}
+
+/* ---- target modules ----
+   info modules are small chips; consecutive ones share one hanging tab up to the box width, a tab that would overflow starts the next one.
+   the debuffs module is always its own tab (an icon row). Everything docks BELOW the box in the user's order and the stack grows UP:
+   the box's bottom edge is not fixed, the bottom of the whole stack is, so nothing ever touches the cast bar. */
+var INFO={
+  level:{t:'L62 Elite',c:K.white},
+  hp:{t:'62%',c:K.green},
+  tot:{t:'ToT Kerra',c:K.cyan},
+  range:{t:'28 yd',c:K.muted}
+};
+var INFO_H=15,DEB_H=32,DEB_W=101,CHIP_PAD=6;
+function buildDock(mods){ /* mods: ordered ids that are ON */
+  var rows=[],cur=null;
+  ctx.font='700 11px "Mononoki",monospace';
+  mods.forEach(function(id){
+    if(id==='dbf'){cur=null;rows.push({kind:'dbf',w:DEB_W,h:DEB_H});return;}
+    var cw=ctx.measureText(INFO[id].t).width+2*CHIP_PAD;
+    if(cur&&cur.w+cw<=BW){cur.chips.push({id:id,w:cw});cur.w+=cw;}
+    else{cur={kind:'info',w:cw,h:INFO_H,chips:[{id:id,w:cw}]};rows.push(cur);}
+  });
+  return rows;
+}
+function drawDock(rows,x,y0,col){ /* bottom row first so each tab tucks under the one above it */
+  var ys=[],y=y0,i;
+  for(i=0;i<rows.length;i++){ys.push(y);y+=rows[i].h;}
+  for(i=rows.length-1;i>=0;i--){
+    var r=rows[i],ty=ys[i];
+    tabPath(x,ty-1,r.w,r.h+1,5);
+    A(.82);ctx.fillStyle='rgba(13,6,32,.97)';ctx.fill();
+    tabPath(x,ty-1,r.w,r.h+1,5);
+    A(.82);ctx.fillStyle='rgba(13,6,32,.85)';ctx.fill();
+    A(1);glow(col,.9);ctx.strokeStyle=col;ctx.lineWidth=LW;ctx.stroke();noglow();
+    if(r.kind==='dbf'){
+      for(var j=0;j<DEB.length;j++)debuff(DEB[j],x+PAD+j*23,ty+3,18,9,11);
+    }else{
+      var cx=x;
+      r.chips.forEach(function(ch,k){
+        if(k>0)vline(cx,ty+3,ty+r.h-3,col,.4);
+        text(INFO[ch.id].t,cx+ch.w/2,ty+11,11,INFO[ch.id].c,1,'center');
+        cx+=ch.w;
+      });
+    }
+  }
+}
+
+function tape(col,pulse,p){
+  var x0=TR.x0,x1=TR.x1,cx=(x0+x1)/2,hw=10,d=8,tk=5.5;
+  ctx.save();
+  ctx.beginPath();ctx.rect(X0,FR_T-12,VW,616-FR_T+12);ctx.clip();
+  chamfer(x0,FR_T,x1-x0,FR_B-FR_T,8);
+  A(.3);ctx.fillStyle='rgba(13,6,32,.55)';ctx.fill();
+  A(clamp(.55+.45*pulse,0,1));glow(col,.6+.5*pulse);ctx.strokeStyle=col;ctx.lineWidth=LW;ctx.stroke();noglow();
+  for(var k=0;k<=10;k++){var ty=TBOT-k*(TBOT-TOP)/10;tick(x1,ty,k===5?10:5,1,col,.7);}
+  for(var i=0;i<N;i++){var ay=TBOT-(i+1)*PITCH;A(.2);ctx.fillStyle=col;chevPath(cx,ay,hw,d,tk);ctx.fill();}
+  var fy=TBOT-p*(TBOT-TOP);
+  ctx.save();ctx.beginPath();ctx.rect(x0-4,fy,x1-x0+8,TBOT+4-fy);ctx.clip();
+  A(1);ctx.fillStyle=col;for(var e=0;e<N;e++){chevPath(cx,TBOT-(e+1)*PITCH,hw,d,tk);ctx.fill();}
+  ctx.restore();
+  ctx.save();ctx.beginPath();ctx.rect(x0-26,TOP,x1-x0+52,753.3-TOP);ctx.clip();
+  A(1);ctx.strokeStyle=col;ctx.lineWidth=LW*1.75;ctx.lineJoin='miter';chevPath(cx,fy-16,13,9,7);ctx.stroke();
+  ctx.restore();
+  ctx.restore();
+}
+
+function drawBox(o,col,pulse){
+  var rows=buildDock(o.mods),dockH=0;
+  rows.forEach(function(r){dockH+=r.h;});
+  var x=BOXR.x,by=BOT-BH-dockH;
+  drawDock(rows,x,by+BH,col);
+  /* the box: unchanged from today, 114 x 64 */
+  chamfer(x,by,BW,BH,8);
+  A(.82);ctx.fillStyle='rgba(13,6,32,.85)';ctx.fill();
+  A(1);glow(col,.7+.4*pulse);ctx.strokeStyle=col;ctx.lineWidth=LW;ctx.stroke();noglow();
+  var nf=fitText(o.name,14,BW-2*PAD);
+  text(nf.text,x+PAD,by+23,nf.size,K.white,1,'left');
+  var rw=Math.max(24,nf.w);
+  tbBarH(x+PAD,by+26,rw,3,HP,K.green);
+  tbBarH(x+PAD,by+30,rw,2,PW,K.cyan);
+  hline(by+37,x+PAD,x+BW-PAD,col,.4);
+  var sf=fitText(o.spell,14,BW-2*PAD);
+  text(sf.text,x+PAD,by+53,sf.size,col,1,'left');
+  kickTag(x+BW-40,by-8,K.pink,1);
+  return {nf:nf,sf:sf,rows:rows,dockH:dockH,top:by};
+}
+
+function draw(id,o){
+  var cv=document.getElementById(id),pn=document.getElementById('p'+id.slice(1));
+  VY0=o.y0;VH=616-o.y0;
+  cv.width=VW*S*BK;cv.height=VH*S*BK;
+  cv.style.width=(VW*S)+'px';cv.style.height=(VH*S)+'px';
+  pn.style.width=(VW*S)+'px';pn.style.height=(VH*S)+'px';
+  ctx=cv.getContext('2d');
+  if(!ctx._orig){
+    ctx._orig={s:ctx.stroke.bind(ctx),f:ctx.fill.bind(ctx)};
+    ctx.stroke=function(){if(gcol)halo(true);ctx._orig.s();};
+    ctx.fill=function(){if(gcol)halo(false);ctx._orig.f.apply(ctx,arguments);};
+  }
+  _stroke=ctx._orig.s;_fill=ctx._orig.f;
+  ctx.setTransform(S*BK,0,0,S*BK,-X0*S*BK,-VY0*S*BK);
+  base=1;gcol=null;
+  var col=K.pink,pulse=.5;
+  ctx.save();ctx.setLineDash([5,5]);vline(1239,TOP,616,K.violet,.4);ctx.setLineDash([]);
+  [1283,1312].forEach(function(lx){vline(lx,TOP+14,616,K.violet,.15);});
+  ctx.restore();
+  tape(col,pulse,.72);
+  castIconPlaceholder(BOXR.x-CIG-CI,BOXR.y+(BOXR.h-CI)/2,1);
+  var r=drawBox(o,col,pulse);
+  ctx.save();ctx.globalCompositeOperation='destination-out';
+  var g=ctx.createLinearGradient(0,616-40,0,616);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,'rgba(0,0,0,1)');
+  ctx.fillStyle=g;ctx.fillRect(X0,616-40,VW,40);ctx.restore();
+  return r;
+}
+
+function cap(id,h){document.getElementById(id).innerHTML=h;}
+function go(){
+  var Y0A=336,Y0B=392;
+  var L='Bloodsail Swashbuckler',SH='Kobold Miner';
+  var r0=draw('c0',{y0:Y0A,name:SH,spell:'Mining',mods:[]});
+  var r1=draw('c1',{y0:Y0A,name:SH,spell:'Mining',mods:['dbf']});
+  var r2=draw('c2',{y0:Y0A,name:SH,spell:'Mining',mods:['level','hp','tot','dbf']});
+  var r3=draw('c3',{y0:Y0B,name:L,spell:'Shadow Bolt Volley',mods:[]});
+  var r4=draw('c4',{y0:Y0B,name:SH,spell:'Thundering Exile',mods:[]});
+  function dims(r){return r.rows.map(function(t){return Math.round(t.w)+' x '+t.h;}).join(', ');}
+  cap('k0','<b>114 x 64 px</b>, name 14 px<br>as today');
+  cap('k1','<b>114 x 64 px</b> box + tab <b>'+dims(r1)+' px</b><br>box rises '+r1.dockH+' px, bottom of the stack fixed');
+  cap('k2','<b>114 x 64 px</b> box + tabs <b>'+dims(r2)+' px</b><br>box rises '+r2.dockH+' px, stack docks below, grows upward');
+  function fl(r){var n=r.nf,t=r.sf;
+    function d(f){return f.cut?'ellipsis at '+f.size+' px':(f.size<14?'shrinks to '+f.size+' px':'14 px');}
+    return 'name field '+n.field+' px: '+n.fit14+' chars at 14 px, shown '+d(n)+'<br>cast field '+t.field+' px: '+t.fit14+' chars at 14 px, shown '+d(t);}
+  cap('k3','<b>114 x 64 px</b>, floor 11 px<br>'+fl(r3));
+  cap('k4','<b>114 x 64 px</b>, floor 11 px<br>'+fl(r4));
+}
+var fonts=['700 14px Mononoki','700 11px Mononoki','700 9px Mononoki'];
+if(document.fonts&&document.fonts.load){Promise.all(fonts.map(function(f){return document.fonts.load(f);})).then(go,go);}else go();
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(go);
+})();
+
+</script>
+</body>
+</html>

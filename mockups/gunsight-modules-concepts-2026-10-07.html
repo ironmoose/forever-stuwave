@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1920">
+<title>Gunsight Module Concepts</title>
+<style>
+@font-face{font-family:'Mononoki';src:url(../forever-stuwave/Media/Fonts/MononokiNerdFontMono-Bold.ttf) format('truetype');font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:'FS Display';src:url(../forever-stuwave/Media/Fonts/FSDisplay-Bold.ttf) format('truetype');font-weight:700;font-style:normal;font-display:block}
+:root{
+  color-scheme:dark;
+  --bg:#0d0620; --fg:#e9e2ff; --muted:#9d93c4; --white:#f3fbff;
+  --violet:#a855f7; --cyan:#22e0ff; --pink:#ff2e97; --amber:#ffb648; --green:#39ff14;
+  --edge:rgba(168,85,247,.35);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg)}
+body{width:1920px;padding:28px 30px 40px;color:var(--fg);font-family:'Mononoki',ui-monospace,monospace;font-weight:700;line-height:1.45}
+h1{margin:0;font-size:30px;letter-spacing:.08em;color:var(--white);text-shadow:0 0 18px var(--violet);font-weight:700}
+.sub{margin:6px 0 26px;color:var(--muted);font-size:15px}
+.concept{margin-bottom:34px}
+.chead{display:flex;align-items:baseline;gap:18px;margin:0 0 10px 2px}
+.chead .t{font-size:22px;letter-spacing:.12em;color:var(--white);text-shadow:0 0 14px var(--violet)}
+.chead .t i{font-style:normal;color:var(--pink)}
+.chead .o{font-size:13px;color:var(--muted);letter-spacing:.04em}
+.chead .o b{color:var(--cyan);font-weight:700}
+.pair{display:flex;gap:20px}
+.scene{position:relative;width:920px;height:410px;border:1px solid var(--edge);overflow:hidden}
+.scene svg{display:block}
+.state{position:absolute;left:10px;top:8px;z-index:2;font-size:12px;letter-spacing:.14em;color:var(--muted);padding:2px 8px;background:rgba(13,6,32,.7);border:1px solid rgba(168,85,247,.3)}
+.state b{color:var(--cyan);font-weight:700}
+.cap{margin:10px 2px 0;font-size:15px;line-height:1.5;color:var(--muted)}
+.cap b{color:var(--white);font-weight:700}
+</style>
+</head>
+<body>
+<h1>GUNSIGHT TARGET MODULES, 3 PLACEMENT CONCEPTS</h1>
+<div class="sub">Target box unchanged in all three. Modules never touch the cast bars. Dim cyan outlines on the player side is the future mirror (my buffs). Debuffs sort by time left, shortest first.</div>
+<div id="root"></div>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <filter id="gl" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.1" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="gls" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b0716"/><stop offset=".62" stop-color="#150d28"/><stop offset="1" stop-color="#1c1030"/></linearGradient>
+    <radialGradient id="glowL" cx="22%" cy="108%" r="55%"><stop offset="0" stop-color="#3a2160"/><stop offset="1" stop-color="#3a2160" stop-opacity="0"/></radialGradient>
+    <radialGradient id="glowR" cx="85%" cy="0%" r="60%"><stop offset="0" stop-color="#1d1840"/><stop offset="1" stop-color="#1d1840" stop-opacity="0"/></radialGradient>
+  </defs>
+</svg>
+
+<script>
+(function(){
+var C={cyan:'#22e0ff',pink:'#ff2e97',violet:'#a855f7',green:'#39ff14',amber:'#ffb648',white:'#f3fbff',muted:'#9d93c4',steel:'#8d93a6',bg:'#0d0620',gold:'#ffd23f'};
+function hex(h){h=h.replace('#','');return [parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)];}
+function mix(a,b,t){var x=hex(a),y=hex(b);return '#'+[0,1,2].map(function(i){return ('0'+Math.round(x[i]+(y[i]-x[i])*t).toString(16)).slice(-2);}).join('');}
+function ch(x,y,w,h,c){return (x+c)+','+y+' '+(x+w)+','+y+' '+(x+w)+','+(y+h-c)+' '+(x+w-c)+','+(y+h)+' '+x+','+(y+h)+' '+x+','+(y+c);}
+function txt(x,y,s,size,fill,o){o=o||{};
+  return '<text x="'+x+'" y="'+y+'" font-size="'+size+'" fill="'+fill+'" text-anchor="'+(o.a||'start')+'"'+(o.op?' opacity="'+o.op+'"':'')+
+    ' stroke="rgba(13,6,32,.92)" stroke-width="2.6" paint-order="stroke" stroke-linejoin="round">'+s+'</text>';}
+function line(x1,y1,x2,y2,col,op,w,dash){return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="'+(w||1)+'"'+(dash?' stroke-dasharray="'+dash+'"':'')+'/>';}
+function chevPath(cx,ay,hw,d,t){return cx+','+ay+' '+(cx+hw)+','+(ay+d)+' '+(cx+hw)+','+(ay+d+t)+' '+cx+','+(ay+t)+' '+(cx-hw)+','+(ay+d+t)+' '+(cx-hw)+','+(ay+d);}
+
+/* ---------- data ---------- */
+var DEB=[
+  {k:'E',c:'#6b3fc4',t:4, n:3},
+  {k:'C',c:'#c4423b',t:9, n:0},
+  {k:'S',c:'#9b59ff',t:14,n:0},
+  {k:'A',c:'#d9a521',t:22,n:0}
+];
+var INFO=[
+  {h:'L62 <tspan fill="'+C.gold+'">Elite</tspan>',c:C.white},
+  {h:'62%',c:C.green},
+  {h:'ToT Kerra',c:C.cyan},
+  {h:'30 yd',c:C.muted}
+];
+
+/* ---------- pieces ---------- */
+function icon(x,y,s,d,ghost){
+  var c=Math.max(2,Math.round(s/6)),o='';
+  if(ghost){return '<polygon points="'+ch(x,y,s,s,c)+'" fill="rgba(34,224,255,.05)" stroke="'+C.cyan+'" stroke-opacity=".45" stroke-width="1" stroke-dasharray="3 3"/>';}
+  o+='<polygon points="'+ch(x,y,s,s,c)+'" fill="'+mix(d.c,C.bg,.35)+'"/>';
+  o+='<polygon points="'+ch(x,y,s,s*.45,c)+'" fill="'+mix(d.c,'#ffffff',.35)+'" opacity=".3"/>';
+  o+='<polygon points="'+ch(x,y,s,s,c)+'" fill="none" stroke="'+mix(d.c,'#ffffff',.3)+'" stroke-width="1.2"/>';
+  o+='<text x="'+(x+s/2)+'" y="'+(y+s/2+s*.18)+'" font-size="'+Math.round(s*.55)+'" fill="'+C.white+'" text-anchor="middle">'+d.k+'</text>';
+  if(d.n>1)o+=txt(x+s-2,y+s-2,d.n,11,C.white,{a:'end'});
+  return o;
+}
+function dbar(x,y,w,h,f,col){
+  return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" fill="'+col+'" fill-opacity=".2"/>'+
+    '<rect x="'+x+'" y="'+y+'" width="'+(w*Math.min(1,f)).toFixed(1)+'" height="'+h+'" fill="'+col+'"/>';
+}
+function tcol(d){return d.t<=5?C.amber:C.white;}
+
+/* ---------- the base composition (identical in every concept) ---------- */
+var TOP=508,TBOT=752,PITCH=(TBOT-TOP)/10,N=20,CP=(TBOT-TOP)/N;
+function bar(x0,x1,col,p,out,caretCol){
+  var o='',cx=(x0+x1)/2,k,i;
+  o+='<polygon points="'+ch(x0,500,x1-x0,260,8)+'" fill="rgba(13,6,32,.55)" fill-opacity=".45"/>';
+  o+='<polygon points="'+ch(x0,500,x1-x0,260,8)+'" fill="none" stroke="'+col+'" stroke-width="1.3" filter="url(#gls)"/>';
+  var ex=out<0?x0:x1;
+  for(k=0;k<=10;k++){var ty=TBOT-k*PITCH;o+=line(ex,ty,ex+out*(k===5?10:5),ty,col,.75,1.2);}
+  for(i=0;i<N;i++){
+    var ay=TBOT-(i+1)*CP,lit=(i+1)/N<=p;
+    o+='<polygon points="'+chevPath(cx,ay,10,8,5.5)+'" fill="'+col+'" fill-opacity="'+(lit?1:.2)+'"'+(lit?' filter="url(#gls)"':'')+'/>';
+  }
+  var fy=TBOT-p*(TBOT-TOP);
+  o+='<polygon points="'+chevPath(cx,fy-17,13,9,7)+'" fill="none" stroke="'+caretCol+'" stroke-width="1.8" stroke-linejoin="miter"/>';
+  return o;
+}
+function box(x,y,w,h,col){
+  return '<polygon points="'+ch(x,y,w,h,8)+'" fill="rgba(13,6,32,.85)"/>'+
+    '<polygon points="'+ch(x,y,w,h,8)+'" fill="none" stroke="'+col+'" stroke-width="1.4" filter="url(#gl)"/>';
+}
+function base(){
+  var o='';
+  o+='<rect x="540" y="380" width="920" height="410" fill="url(#sky)"/><rect x="540" y="380" width="920" height="410" fill="url(#glowL)"/><rect x="540" y="380" width="920" height="410" fill="url(#glowR)"/>';
+  /* character silhouette placeholder */
+  o+='<g fill="rgba(120,96,190,.16)" stroke="'+C.violet+'" stroke-opacity=".35" stroke-dasharray="4 4" stroke-width="1">'+
+     '<circle cx="995" cy="540" r="24"/>'+
+     '<rect x="953" y="570" width="84" height="100" rx="20"/>'+
+     '<rect x="962" y="664" width="30" height="88" rx="8"/><rect x="998" y="664" width="30" height="88" rx="8"/>'+
+     '<rect x="926" y="576" width="24" height="86" rx="10"/><rect x="1040" y="576" width="24" height="86" rx="10"/></g>';
+  o+='<ellipse cx="995" cy="752" rx="112" ry="26" fill="rgba(80,70,230,.12)" stroke="#5b57e8" stroke-opacity=".6" stroke-width="2"/>';
+  o+=txt(995,610,'CHARACTER',10,C.muted,{a:'middle',op:.55});
+  /* horizon: faint dashed hairline between the bars, ticks at the bar edges */
+  o+=line(838,630,1150,630,C.violet,.3,1,'6 6');
+  /* player side */
+  o+=bar(796,826,C.cyan,.58,-1,C.white);
+  o+=box(724,424,114,56,C.cyan);
+  o+=txt(731,447,'SHADOW BOLT',13,C.white);
+  o+=txt(731,469,'1.4 / 2.5',18,C.cyan);
+  o+='<polygon points="'+ch(844,438,28,28,5)+'" fill="rgba(13,6,32,.9)" stroke="'+C.cyan+'" stroke-width="1.3"/>'+
+     '<text x="858" y="457" font-size="13" fill="'+C.cyan+'" text-anchor="middle">SB</text>';
+  /* target side (box 114 x 64, grows up from y 480) */
+  o+=bar(1164,1194,C.pink,.45,1,C.pink);
+  o+=box(1152,416,114,64,C.pink);
+  o+=txt(1159,436,'Kobold Miner',14,C.white);
+  o+='<rect x="1159" y="440" width="100" height="3" fill="#39ff14" fill-opacity=".2"/><rect x="1159" y="440" width="62" height="3" fill="#39ff14"/>';
+  o+='<rect x="1159" y="445" width="100" height="2" fill="#4aa8ff" fill-opacity=".2"/><rect x="1159" y="445" width="70" height="2" fill="#4aa8ff"/>';
+  o+=line(1159,453,1259,453,C.pink,.4,1.2);
+  o+=txt(1159,469,'Mining',14,C.pink);
+  o+='<polygon points="'+ch(1226,408,36,15,5)+'" fill="rgba(13,6,32,.95)" stroke="'+C.pink+'" stroke-width="1.3" filter="url(#gls)"/>'+
+     '<text x="1244" y="419" font-size="11" fill="'+C.pink+'" text-anchor="middle">KICK</text>';
+  o+='<polygon points="'+ch(1118,438,28,28,5)+'" fill="rgba(13,6,32,.9)" stroke="'+C.pink+'" stroke-width="1.3"/>'+
+     '<text x="1132" y="457" font-size="13" fill="'+C.pink+'" text-anchor="middle">PK</text>';
+  return o;
+}
+
+/* ---------- concept A: outer scale, rows tied to the cast bar ruler ---------- */
+function conceptA(on){
+  if(!on)return '';
+  var o='',k,j,cy;
+  /* mirror ghost: my buffs, left of the player bar (outer edge) */
+  o+=line(777,508,777,752,C.cyan,.18,1);
+  o+=txt(777,503,'MY BUFFS',10,C.cyan,{a:'end',op:.5});
+  for(k=0;k<=10;k++){var ty=TBOT-k*PITCH;o+=line(777,ty,680,ty,C.cyan,.08,1);}
+  for(j=0;j<3;j++){cy=TOP+PITCH*(j+.5);o+=icon(751,cy-10,20,null,true);}
+  /* target column: ruler hairlines continue into the column */
+  o+=line(1213,508,1213,752,C.violet,.35,1);
+  for(k=0;k<=10;k++){var ty2=TBOT-k*PITCH;o+=line(1204,ty2,1213,ty2,C.pink,.45,1)+line(1213,ty2,1340,ty2,C.violet,.12,1);}
+  o+=txt(1220,503,'MY DOTS',10,C.violet,{op:.8});
+  DEB.forEach(function(d,j){
+    var cy=TOP+PITCH*(j+.5),low=d.t<=5;
+    o+=icon(1220,cy-10,20,d);
+    o+=txt(1246,cy+4.5,d.t+'s',13,tcol(d));
+    o+=dbar(1274,cy-2,52,4,d.t/30,low?C.amber:mix(d.c,'#ffffff',.25));
+  });
+  o+=line(1213,630,1340,630,C.violet,.55,1);
+  INFO.forEach(function(m,k){
+    var cy=630+PITCH*(k+.5);
+    o+=txt(1220,cy+4.5,m.h,13,m.c);
+  });
+  return o;
+}
+
+/* ---------- concept B: flank strip beside the box, same height as the box ---------- */
+function conceptB(on){
+  if(!on)return '';
+  var o='',i;
+  /* mirror ghost left of the player box */
+  o+='<polygon points="'+ch(550,424,160,56,6)+'" fill="rgba(34,224,255,.03)" stroke="'+C.cyan+'" stroke-opacity=".4" stroke-dasharray="4 4" stroke-width="1"/>';
+  o+=txt(630,456,'MY BUFFS',10,C.cyan,{a:'middle',op:.5});
+  /* socket joining box and strip */
+  o+=line(1266,448,1280,448,C.violet,.8,1.2);
+  o+='<rect x="1263" y="445" width="6" height="6" fill="'+C.violet+'"/>';
+  /* debuff plate, shares the box top and bottom */
+  o+='<polygon points="'+ch(1280,416,160,64,6)+'" fill="rgba(13,6,32,.7)"/>';
+  o+='<polygon points="'+ch(1280,416,160,64,6)+'" fill="none" stroke="'+C.violet+'" stroke-opacity=".75" stroke-width="1.2" filter="url(#gls)"/>';
+  DEB.forEach(function(d,i){
+    var x=1286+i*38;
+    o+=icon(x+4,425,26,d);
+    o+=txt(x+17,470,d.t+'s',13,tcol(d),{a:'middle'});
+  });
+  /* data rail: hairline spine plus a 2 x 2 readout grid, reading order = order */
+  o+=line(1280,488,1280,530,C.violet,.8,1.2);
+  o+=line(1280,488,1290,488,C.violet,.8,1.2);
+  var cols=[1290,1386];
+  INFO.forEach(function(m,k){
+    var x=cols[k%2],y=502+Math.floor(k/2)*20;
+    o+=txt(x,y,m.h,13,m.c);
+  });
+  o+=line(1377,492,1377,526,C.violet,.25,1);
+  return o;
+}
+
+/* ---------- concept C: bracket window on the horizon ---------- */
+function brackets(x,y,w,h,col,op,dash){
+  var a=12,s='';
+  var p=[
+    [x,y+a,x,y,x+a,y],
+    [x+w-a,y,x+w,y,x+w,y+a],
+    [x,y+h-a,x,y+h,x+a,y+h],
+    [x+w-a,y+h,x+w,y+h,x+w,y+h-a]
+  ];
+  p.forEach(function(q){s+='<polyline points="'+q[0]+','+q[1]+' '+q[2]+','+q[3]+' '+q[4]+','+q[5]+'" fill="none" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="1.6"'+(dash?' stroke-dasharray="3 3"':' filter="url(#gls)"')+'/>';});
+  return s;
+}
+function conceptC(on){
+  if(!on)return '';
+  var o='';
+  /* mirror ghost: left window on the left horizon */
+  o+=brackets(554,548,150,164,C.cyan,.55,false);
+  o+=txt(629,634,'MY BUFFS',10,C.cyan,{a:'middle',op:.5});
+  o+=line(704,630,786,630,C.cyan,.25,1,'3 3');
+  /* leader: horizon hairline from the bar's 50% tick to the window */
+  o+=line(1204,630,1286,630,C.violet,.75,1.2);
+  o+='<polygon points="1286,626 1290,630 1286,634 1282,630" fill="'+C.violet+'"/>';
+  o+=brackets(1286,548,150,164,C.violet,.95,false);
+  DEB.forEach(function(d,j){
+    var cy=570+j*24,low=d.t<=5;
+    o+=icon(1300,cy-10,20,d);
+    o+=dbar(1328,cy-2,64,4,d.t/30,low?C.amber:mix(d.c,'#ffffff',.25));
+    o+=txt(1426,cy+4.5,d.t+'s',13,tcol(d),{a:'end'});
+  });
+  o+=line(1298,654,1424,654,C.violet,.35,1);
+  var pos=[[1300,675],[1386,675],[1300,697],[1386,697]];
+  INFO.forEach(function(m,k){o+=txt(pos[k][0],pos[k][1],m.h,13,m.c);});
+  return o;
+}
+
+var CONCEPTS=[
+  {id:'A',name:'OUTER SCALE',fn:conceptA,
+   order:'<b>ORDER</b> fixed: debuffs above the horizon, readouts below, so every row keeps its place',
+   cap:'<b>Rows hang off the target cast bar outer ruler, one row per tick gap: debuffs above the horizon tick, readouts below.</b><br>Tradeoff: only 5 rows per half and no spell names, but it is the most compact and mirrors cleanly for buffs.'},
+  {id:'B',name:'FLANK STRIP',fn:conceptB,
+   order:'<b>ORDER</b> configurable: the 2 x 2 readout grid fills in the user order, debuffs stay first',
+   cap:'<b>A plate beside the box shares its top and bottom edge and holds the debuffs, with a spine and 2 x 2 data rail below it.</b><br>Tradeoff: biggest icons and times, but it sits far from the cast bar and your side already has the next cast tile.'},
+  {id:'C',name:'BRACKET WINDOW',fn:conceptC,
+   order:'<b>ORDER</b> fixed: debuffs on top, a 2 x 2 readout grid under them, centred on the horizon',
+   cap:'<b>A fixed size corner bracket window, tied to the cast bar by the horizon hairline, shows drain bars and the readout grid.</b><br>Tradeoff: reads most like a jet HUD, but it floats out away from the bar and the window is wide.'}
+];
+
+function scene(fn,on){
+  return '<div class="scene"><div class="state">'+(on?'ALL MODULES <b>ON</b>':'ALL MODULES <b>OFF</b>')+'</div>'+
+    '<svg width="920" height="410" viewBox="540 380 920 410" font-family="Mononoki, monospace" font-weight="700">'+
+    base()+fn(on)+'</svg></div>';
+}
+var html='';
+CONCEPTS.forEach(function(c){
+  html+='<div class="concept"><div class="chead"><span class="t"><i>'+c.id+'</i> '+c.name+'</span><span class="o">'+c.order+'</span></div>'+
+    '<div class="pair">'+scene(c.fn,false)+scene(c.fn,true)+'</div><div class="cap">'+c.cap+'</div></div>';
+});
+document.getElementById('root').innerHTML=html;
+})();
+</script>
+</body>
+</html>

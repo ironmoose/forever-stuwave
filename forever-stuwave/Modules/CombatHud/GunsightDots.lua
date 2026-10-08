@@ -1,158 +1,107 @@
--- Forever STUwave: Gunsight DoT time scale (piece key "dot").
+-- Forever STUwave: Gunsight Target debuffs modules, Horizontal ("debuffsH") and Vertical ("debuffsV").
+-- Both draw FS.TargetDebuffs inside one target side area (mockups/gunsight-modules-concepts-v7-2026-10-08.html,
+-- dotsH and dotsV): rows of icon, time and drain bar, or the 0 to 30 s axis compressed to 112 px with a chip per debuff.
+-- gunsightdots-harness.py parses the mockup for the numbers below, so a mockup edit fails there instead of drifting.
 --
--- The enemy side of the Gunsight HUD (mockups/gunsight-hud-v2-2026-10-02/
--- gunsight-hud-v2-2026-10-02.html, drawDots): a 0 to 30 second altitude axis, an amber refresh
--- band for the last 3 seconds, four dashed lane guides, and one cut-corner chip per DoT that
--- slides down the scale toward the band like a note on a rhythm game highway. Recast it when it
--- lands. gunsight-harness.py parses the mockup constants for Gunsight.lua; gunsightdots-harness.py
--- does the same for the numbers below, so a mockup edit fails there instead of drifting.
+-- ABSENT CUE (Parker, 2026-10-03): the dim recast row or chip shows ONLY in combat; out of combat it is hidden and a
+-- live one is never touched. "In combat" is a file-local flag driven by PLAYER_REGEN_DISABLED / PLAYER_REGEN_ENABLED
+-- and seeded from InCombatLockdown() OR UnitAffectingCombat(), because lockdown can still read false inside the
+-- REGEN_DISABLED dispatch; a throwing or secret answer reads as in combat so the cue is never hidden on a guess.
+-- A list push that finds both APIs plainly false clears a stuck flag (a missed REGEN_ENABLED), and never sets it.
 --
--- DATA. The HudLogic DoT ledger is the only combat-safe source (aura timers are secret in combat,
--- and this file never reads an aura): each row of FS.Hud.GetState() that belongs to a DoT of the
--- class profile carries `remaining`, `expiresAt` (an absolute GetTime) and `duration`. A DoT row
--- whose fields are all nil is UNKNOWN and draws nothing; `remaining == 0` (or an expiry in the
--- past) is ABSENT and draws a dim hollow chip resting at 0. Lanes follow the profile's own row
--- order, at most four, so a priest gets two and a warlock four.
+-- MOTION: one OnUpdate per module, installed only while a row is live, places everything from expires - GetTime()
+-- and allocates nothing. A row that runs out turns absent by itself, since the service pushes nothing at an expiry.
 --
--- LOCKED LOOK, with one rule on top (Parker, 2026-10-03): the absent chip is the mockup's dim hollow
--- "DoT not on the target, recast it" cue, and it shows ONLY while the player is in combat. Parker:
--- "dim recast, it i am not in combat it should hide." Out of combat an absent chip is hidden (its look
--- stays seated, only its visibility goes), a live ticking chip is never touched by this, and the scale
--- gate (FS.TargetTakesDots) is unchanged.
---
--- "IN COMBAT" is a file-local flag driven by the events, not a live InCombatLockdown() read. Nothing in this
--- repo or the Blizzard UI source settles whether InCombatLockdown() is already true inside the
--- PLAYER_REGEN_DISABLED handler (it is widely documented as still false there: the event fires just before
--- lockdown begins, which is why secure work is still legal in it; CombatHud.lua says HudLogic's
--- UnitAffectingCombat flips "a beat before" lockdown too), and Blizzard's own LowHealthFrame keeps a flag set
--- from these two events rather than reading the API (LowHealthFrame.lua:24-25 registers them, :34-37 hands
--- them to SetInCombat, :172-180 stores self.inCombat). So the flag is the rule and it holds under either
--- ordering: PLAYER_REGEN_DISABLED sets it true, PLAYER_REGEN_ENABLED sets it false, and each re-evaluates the
--- absent chips at once instead of waiting for a Hud push. The flag is seeded at build and on
--- PLAYER_ENTERING_WORLD (a /reload or a zoning mid-fight fires no REGEN event) from InCombatLockdown() OR
--- UnitAffectingCombat("player"), each pcall'd and secret-guarded; it reads as out of combat only when BOTH
--- answers are plain false; a throwing, secret or missing answer reads as in combat, so the cue is never hidden
--- on a guess.
--- It is NOT OR-ed with a live InCombatLockdown() on read: that would keep the cue up through a
--- PLAYER_REGEN_ENABLED dispatch if lockdown lifted a beat after the event.
--- One-way self-heal: a missed PLAYER_REGEN_ENABLED would leave the flag true until the next pull, so a Hud push
--- whose state.inCombat (HudLogic's InCombatLockdown() alone, fail closed) is plainly false while the flag is
--- true re-runs the seed, and the flag clears only if BOTH APIs then read plainly false (lockdown alone can lag
--- UnitAffectingCombat). The Hud never sets the flag true: REGEN_DISABLED and the seed own "true".
---
--- MOTION. Hud pushes are coarse (once a second), so a chip is placed from expiresAt - GetTime()
--- by ONE OnUpdate on the piece frame, installed only while at least one chip is live and cleared
--- the moment the last one expires. Nothing is allocated per frame and a steady chip writes
--- nothing. A chip that runs out turns into the absent chip by itself, because the ledger pushes
--- nothing at an expiry (Signature floors `remaining`).
---
--- CHIP. The 24 image px square is built the way the action buttons are: a dark plate behind the
--- icon, the icon seated inside the cut by FrameHelpers.SeatAuraTile, the cut ring over it
--- (Theme.SkinButton, violet; amber with a pulsing glow inside the band). Masks do not clip on
--- this client, so unlike the mockup (icon clipped to the cut, edge to edge) the icon is inset
--- ceil(chamfer / 2) like every other tile, which keeps its square corners under the stroke.
--- A white cut-shaped pop flashes for 0.35 s when the DoT is (re)applied.
---
--- TARGET LAYER. With no target the whole scale hides ("if no target ... hide ... dot timers"). The same goes
--- for a target no DoT of ours can be on: a friendly or otherwise unattackable unit, and a dead one. The ledger
--- cannot say either (it reads a GUID it never saw as "absent", and nothing tells it a corpse took its DoTs
--- with it), so without this a dim hollow chip rested at 0 under a friendly target and a corpse's chip slid
--- down and then sat there ("a dot stays"). That is a SEPARATE layer from the piece toggle (Gunsight.SetPiece
--- is the user's on/off setting and drives the console key LED, so it is never used for this): `gate`, a plain
--- child of the piece frame (at the piece frame's own level, so `content` keeps the stacking it had there) that
--- holds `content`, is shown while the target can carry our DoTs and hidden while not, driven by
--- PLAYER_TARGET_CHANGED and PLAYER_ENTERING_WORLD (and read once at build) plus UNIT_HEALTH, UNIT_FLAGS and
--- UNIT_FACTION for the target only (death, a duel or mind control changes the answer with no target change).
--- A visible chip therefore needs the piece ON and such a target. The target rule is FS.TargetTakesDots (Theme.lua,
--- shared with the horizon's dot segment in GunsightFrame): FS.HasTarget plus plain UnitIsDeadOrGhost / UnitCanAttack
--- answers; a secret, throwing or missing answer reads as "can take a DoT" and keeps the scale shown, like HasTarget.
--- Show/Hide of the gate is legal in combat (a plain addon frame, nothing protected parented under it) and it
--- adds no OnUpdate. The Hud ledger keeps running while the gate is hidden, only the visuals go.
---
--- CLASS SLOT. The DoT area is a class-specific seat behind deck key 6 (the mockup: drawDots for a Warlock and a
--- Priest, drawSealChamber for a Paladin, picked at the dispatch `CLS==='pl' ? drawSealChamber : drawDots`).
--- This file is the DoT time tape. A profile with a `seals` table and no `dots` (the Paladin) draws NOTHING here:
--- no axis, ticks, labels, band, guides, header or chips, because the Seal Chamber (another file) owns that
--- space and draws its own 0 to 30 s ruler and refresh band there. The piece frame, its target gate and its
--- registration under key "dot" are still built, so the console key's toggle and Gunsight.SetPiece work and the
--- chamber can hang off the same piece; the Hud is not subscribed for a slot this file does not draw. The horizon
--- hairline that leads in (mockup: drawDots and drawSealChamber both draw `hline(630, TR.x1 + 10, DOT_AX - 12)`
--- when there is a target) belongs to GunsightFrame's `dot` segment and stays for every class. The profile is
--- read at build (HudLogic resolves it at load or PLAYER_LOGIN, before the Gunsight's OnReady), then re-asked on
--- every show and push (see Yield), in case it was not readable yet; a Warlock or Priest takes the same code path
--- as before and draws byte for byte the same thing.
---
--- Not drawn on purpose: the mockup's "PENDING PROBE" tag (decided), and the horizon segment
--- that leads into this scale, which belongs to the frame lane.
+-- CHIP: a dark plate, the icon seated inside the cut by FrameHelpers.SeatAuraTile, the cut ring over it (violet,
+-- amber inside the 3 s band), and a white pop for 0.35 s when the debuff is (re)applied. Masks do not clip on this
+-- client, so the icon is inset like every other tile. The target gate belongs to GunsightAreas, not to this file.
 
 local _, FS = ...
 
 local Gunsight = FS.Gunsight
-if not (Gunsight and Gunsight.G and Gunsight.RegisterPiece) then return end
+if not (Gunsight and Gunsight.G and Gunsight.ui and Gunsight.Point) then return end
 
 FS.GunsightDots = FS.GunsightDots or {}
 local Dots = FS.GunsightDots
 
 local G = Gunsight.G
 local ui, Point = Gunsight.ui, Gunsight.Point
+local CX, CY = G.CX, G.CY
 
 -------------------------------------------------------------------------------
--- Constants (mockup name in the comment; gunsightdots-harness.py re-reads them from drawDots)
+-- Constants (mockup names in the comments; gunsightdots-harness.py re-reads them from the v7 mockup)
 -------------------------------------------------------------------------------
 
-local TOP, BOT, DOT_AX, DOT_END, LANE, CX, CY = G.TOP, G.BOT, G.DOT_AX, G.DOT_END, G.LANE, G.CX, G.CY
-
-local D = {
-    CHS = 24,                  -- CHS: the chip is a 24 image px square
-    MAX_S = 30,                -- secY: the scale runs 0 to 30 s
-    BAND_S = 3,                -- yb = secY(3): the refresh band
-    BAND_FILL = 0.16,          -- band fill alpha
-    AX_UP = 4, AX_DN = 4,      -- axis runs from TOP - 4 to BOT + 4
-    HDR_Y = 488,               -- header('DOT TIME', DOT_AX, 488)
-    MAJ = 5,                   -- a long tick and a label every 5 s
-    MAJ_LEN = 10, MIN_LEN = 5, -- tick lengths
-    LABEL_DX = 6,              -- labels at DOT_AX + 6
-    REFRESH_DX = 14,           -- REFRESH label at DOT_END + 14
-    POP_S = 0.35, POP_A = 0.8, -- pop: 0.35 s, white at .8 fading out
-    GUIDE_DASH = { 2, 6 },     -- lane guide dash and gap
-    BAND_DASH = { 5, 4 },      -- band top line dash and gap
-    MAX_LANES = #LANE,
-    COLORS = {                 -- the mockup's :root tokens
-        violet = { 168 / 255, 85 / 255, 247 / 255 },    -- #a855f7 --violet
-        amber = { 255 / 255, 182 / 255, 72 / 255 },     -- #ffb648 --amber
-        fg = { 233 / 255, 226 / 255, 255 / 255 },       -- #e9e2ff --fg
-        muted = { 157 / 255, 147 / 255, 196 / 255 },    -- #9d93c4 --muted
-        white = { 243 / 255, 251 / 255, 255 / 255 },    -- #f3fbff --white
-    },
+local K = {
+    violet = { 168 / 255, 85 / 255, 247 / 255 },    -- #a855f7
+    amber = { 255 / 255, 182 / 255, 72 / 255 },     -- #ffb648
+    fg = { 233 / 255, 226 / 255, 255 / 255 },       -- #e9e2ff
+    muted = { 157 / 255, 147 / 255, 196 / 255 },    -- #9d93c4
+    white = { 243 / 255, 251 / 255, 255 / 255 },    -- #f3fbff
 }
-Dots.D = D
-local K = D.COLORS
 
-local CHP = D.CHS / 2
-local LINE = G.LINE or 1.3             -- hairline weight in image px (the mockup's LW is about 1.9)
+-- Shared by both views. The default rect is the upper area, used until seat() hands over the real one.
+local D = {
+    MAX_S = 30,                -- the drain and the axis run 0 to 30 s
+    BAND_S = 3,                -- amber at 3 s or less
+    POP_S = 0.35, POP_A = 0.8, -- pop: 0.35 s, white at .8 fading out
+    COLORS = K,
+    RECT = { x = 1213, y = 500, w = 202, h = 128 },
+}
+
+-- Horizontal rows (dotsH). Offsets are from the area rect; the upper area starts its rows 8 px down, the lower 2 px up.
+local H = {
+    PITCH = 24.4,                       -- PITCH = (TBOT - TOP) / 10
+    MAX_ROWS = 5,
+    TOP_UPPER = 8, TOP_LOWER = -2,      -- TOP - 500, HZ - 632
+    CHIP = 20, CHIP_DX = 7,             -- chipIcon(1220, cy - 10, 20)
+    TIME_DX = 33, TIME_SIZE = 13,       -- txt(1246, cy + 4.5, ..., 13)
+    TENTHS_S = 3,                       -- d.rem < 3 shows tenths
+    BAR_DX = 61, BAR_W = 52, BAR_H = 4, -- rect(1274, cy - 2, 52, 4)
+    BAR_BG_A = 0.2, ABSENT_BAR_A = 0.18, ABSENT_TEXT_A = 0.7,
+    STACK_DX = 119, STACK_SIZE = 11,    -- txt(1332, cy + 4, 'x' + n, 11)
+    SEP_W = 131, SEP_A = 0.12, SEP_HZ_A = 0.55,   -- line(1213, ty, 1344, ty)
+    TICK_DX = -9, TICK_A = 0.45,        -- line(1204, ty, 1213, ty)
+}
+
+-- Vertical axis (dotsV): the DoT time axis compressed into one area, 3.7 px a second.
+local V = {
+    LANES = 4,
+    AXT_DY = 4, AXB_DY = 116,           -- AXT = 504, AXB = 616 for the area at y 500
+    SPAN = 112,                         -- AXB - AXT
+    AX_DX = 7, END_DX = 155,            -- AX = 1220 (26 px right of the target cast bar), END = 1368
+    LANE_DX = { 51, 80, 109, 138 },     -- LANE - 19
+    AX_UP = 4, AX_DN = 4,               -- axis runs AXT - 4 to AXB + 4
+    HDR_DX = 171, HDR_DY = -3, HDR_SIZE = 10,
+    MAJ = 5, MAJ_LEN = 10, MIN_LEN = 5, -- a long tick and a label every 5 s
+    LABEL_DX = 14, LABEL_SIZE = 11,
+    REFRESH_DX = 13, REFRESH_SIZE = 9,
+    BAND_FILL = 0.16, GUIDE_A = 0.3,
+    GUIDE_DASH = { 2, 6 }, BAND_DASH = { 5, 4 },
+    CHIP = 24,
+}
+V.PX_PER_S = V.SPAN / D.MAX_S
+
+Dots.D, Dots.H, Dots.V = D, H, V
+
+local LINE = G.LINE or 1.3
 local RAIL_CORE, RAIL_GLOW, DOT_BLOOM = 2.6, 7, 9
 local REAPPLY_EPS = 0.5                -- an expiry this much later than the last one is a reapply
 local FRESH_EPS = 0.5                  -- on a new target, a row this close to its full duration was applied just now
 local GLOW_BASE, GLOW_BAND = 0.25, 0.45
 local MEDIA = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
 local GLOW_ROUND = MEDIA .. "glow_round.tga"
-local ABBR = {
-    corruption = "CO", bane_agony = "CA", bane_doom = "CD", immolate = "IM", siphon = "SL",
-    sw_pain = "SW", dplague = "DP", wrack = "WR",
-}
-
-local function SecY(s)
-    return BOT - s / D.MAX_S * (BOT - TOP)
-end
 
 local function Mix(a, b, t)
     return { a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t }
 end
-local ABSENT_RING = Mix(K.muted, { 1, 1, 1 }, 0.25)       -- mix(K.muted, '#ffffff', .25)
-local WARM_PLATE = { 1, 0.88, 0.7 }                       -- the plate warms inside the band
+local ABSENT_RING = Mix(K.muted, { 1, 1, 1 }, 0.25)
+local BAR_COLOR = Mix(K.violet, { 1, 1, 1 }, 0.25)
+local WARM_PLATE = { 1, 0.88, 0.7 }
+local PLAIN_PLATE = { 1, 1, 1 }
 
 -------------------------------------------------------------------------------
--- State
+-- State shared by both modules
 -------------------------------------------------------------------------------
 
 local logged = {}
@@ -161,28 +110,7 @@ local function LogOnce(key, msg)
     logged[key] = true
     if FS.LogDegradeOnce then
         pcall(FS.LogDegradeOnce, "gunsightdots_" .. key,
-            "|cffff4488Forever STUwave|r: gunsight dots: " .. tostring(msg))
-    end
-end
-
-local built, pieceOn, ticking, subscribed = false, false, false, false
-local classSlot = false        -- true when the profile gives this seat to another module (a Paladin's Seal Chamber)
-local gateOn                   -- the last answer written to the gate (nil until the first read)
-local lastEpoch                -- state.targetEpoch of the last push (a plain integer, or nil)
-local frame, content, gate
-local chips = {}
-local parts = {}
-local seats = {}           -- closures re-run by every rescale
-
-local function Seat(fn)
-    seats[#seats + 1] = fn
-    fn()
-end
-
-local function SeatAll()
-    for i = 1, #seats do
-        local ok, err = pcall(seats[i])
-        if not ok then LogOnce("seat", err) end
+            "|cffff4488Forever STUwave|r: gunsight debuffs: " .. tostring(msg))
     end
 end
 
@@ -193,137 +121,98 @@ local function Num(v)
     return v
 end
 
--- True while the player is in combat: the event-driven flag from the header. The initial true is only a
--- placeholder: BuildAll calls SeedCombat before the event frame exists, and a chip is built in mode "off" (it
--- reads the flag only once a push makes it absent), so the seed always overwrites it before any paint.
-local inCombat = true
-local function InCombat() return inCombat end
+local function PlainString(v)
+    if FS.IsSecret and FS.IsSecret(v) then return nil end
+    if type(v) ~= "string" then return nil end
+    return v
+end
 
--- One boolean answer: true, false, or nil when it throws, is secret or the API is missing.
+local modules = {}             -- id -> module, in build order (iterate with pairs: two entries)
+local inCombat = true          -- placeholder: SeedCombat runs before any paint
+local sharedBuilt = false
+
 local function ReadCombat(fn, ...)
     local ok, r = pcall(fn, ...)
     if not ok or (FS.IsSecret and FS.IsSecret(r)) then return nil end
     return r and true or false
 end
 
--- Re-read the flag from the API. Either API answering true is in combat (they flip a beat apart); it is out of
--- combat only when both plainly answer false.
+-- Out of combat only when BOTH APIs plainly answer false.
 local function SeedCombat()
     local lock = ReadCombat(InCombatLockdown)
     local aff = ReadCombat(UnitAffectingCombat, "player")
     inCombat = not (lock == false and aff == false)
 end
 
--------------------------------------------------------------------------------
--- Static scale
--------------------------------------------------------------------------------
-
-local function Tex(layer, sub)
-    return content:CreateTexture(nil, layer or "ARTWORK", nil, sub or 0)
+local function SetRowShown(row, on)
+    if row.frame:IsShown() ~= on then row.frame:SetShown(on) end
 end
 
--- A horizontal line from x0 to x1 (image px) centred on y, `th` image px thick.
-local function HLine(y, x0, x1, c, a, th, layer, sub)
-    local t = Tex(layer, sub)
-    t:SetColorTexture(c[1], c[2], c[3], a)
-    Seat(function()
-        Point(t, "LEFT", x0, y)
-        t:SetSize(ui(x1 - x0), ui(th))
-    end)
-    return t
-end
-
--- A vertical line at x from y0 down to y1.
-local function VLine(x, y0, y1, c, a, th, layer, sub)
-    local t = Tex(layer, sub)
-    t:SetColorTexture(c[1], c[2], c[3], a)
-    Seat(function()
-        Point(t, "TOP", x, y0)
-        t:SetSize(ui(th), ui(y1 - y0))
-    end)
-    return t
-end
-
-local function HDashes(y, x0, x1, dash, c, a, th)
-    local list, x = {}, x0
-    while x < x1 - 1e-6 do
-        list[#list + 1] = HLine(y, x, math.min(x1, x + dash[1]), c, a, th)
-        x = x + dash[1] + dash[2]
+local function SyncAbsent()
+    for _, m in pairs(modules) do
+        for i = 1, #m.rows do
+            if m.rows[i].mode == "absent" then SetRowShown(m.rows[i], inCombat) end
+        end
     end
-    return list
 end
 
-local function VDashes(x, y0, y1, dash, c, a, th)
-    local list, y = {}, y0
-    while y < y1 - 1e-6 do
-        list[#list + 1] = VLine(x, y, math.min(y1, y + dash[1]), c, a, th)
-        y = y + dash[1] + dash[2]
+local function HealCombat()
+    if not inCombat then return end
+    SeedCombat()
+    if not inCombat then SyncAbsent() end
+end
+
+-------------------------------------------------------------------------------
+-- Time text, built once so a steady frame allocates nothing
+-------------------------------------------------------------------------------
+
+local TENTHS, SECONDS, MINUTES = {}, {}, {}
+for i = 0, D.MAX_S do TENTHS[i] = string.format("%.1fs", i / 10) end
+for i = 0, 99 do SECONDS[i] = i .. "s" end
+for i = 1, 60 do MINUTES[i] = i .. "m" end
+
+local function FormatTime(rem)
+    if rem < H.TENTHS_S then return TENTHS[math.floor(rem * 10 + 0.5)] end
+    if rem < 99.5 then return SECONDS[math.floor(rem + 0.5)] end
+    local m = math.floor(rem / 60 + 0.5)
+    if m > 60 then m = 60 end
+    return MINUTES[m]
+end
+
+-------------------------------------------------------------------------------
+-- Module plumbing
+-------------------------------------------------------------------------------
+
+local function NewModule(id, kind)
+    return { id = id, kind = kind, rows = {}, seats = {}, src = {}, rect = { x = D.RECT.x, y = D.RECT.y, w = D.RECT.w, h = D.RECT.h },
+        parts = {} }
+end
+
+local function Seat(m, fn)
+    m.seats[#m.seats + 1] = fn
+    fn()
+end
+
+local function SeatAll(m)
+    for i = 1, #m.seats do
+        local ok, err = pcall(m.seats[i])
+        if not ok then LogOnce("seat", err) end
     end
-    return list
 end
 
--- A text region seated by `anchor` at an image coordinate, restyled at every rescale.
-local function Label(text, size, c, a, anchor, x, y, layer)
-    local fs = content:CreateFontString(nil, layer or "ARTWORK")
+local function Tex(m, layer, sub)
+    return m.body:CreateTexture(nil, layer or "ARTWORK", nil, sub or 0)
+end
+
+local function Label(m, parent, size, c, a)
+    local fs = (parent or m.body):CreateFontString(nil, "ARTWORK")
     fs:SetJustifyH("LEFT")
-    Seat(function()
-        FS.Theme.ApplyMono(fs, ui(size), { c[1], c[2], c[3], a })
-        Point(fs, anchor, x, y)
-    end)
-    -- After Seat, which runs once at once and so sets the font: SetText on a FontString with none throws "Font not set".
-    fs:SetText(text)
+    Seat(m, function() FS.Theme.ApplyMono(fs, ui(size), { c[1], c[2], c[3], a }) end)
     return fs
 end
 
-local function BuildScale()
-    local yb = SecY(D.BAND_S)
-
-    -- refresh band: fill, dashed top line, solid bottom line with a faint bloom under it
-    local band = Tex("BACKGROUND")
-    band:SetColorTexture(K.amber[1], K.amber[2], K.amber[3], D.BAND_FILL)
-    Seat(function()
-        Point(band, "TOPLEFT", DOT_AX, yb)
-        band:SetSize(ui(DOT_END - DOT_AX), ui(BOT - yb))
-    end)
-    parts.band = band
-    parts.bandTop = HDashes(yb, DOT_AX, DOT_END, D.BAND_DASH, K.amber, 0.75, LINE)
-    parts.bandGlow = HLine(BOT, DOT_AX, DOT_END, K.amber, 0.2, LINE * 4)
-    parts.bandBottom = HLine(BOT, DOT_AX, DOT_END, K.amber, 0.95, LINE * 1.3)
-
-    -- the REFRESH label runs bottom to top in the mockup; Lua cannot rotate text, so it is stacked
-    -- upright letters centred on the band, top to bottom
-    parts.refresh = {}
-    local word = "REFRESH"
-    local pitch = 7.5
-    for i = 1, #word do
-        local dy = (i - (#word + 1) / 2) * pitch
-        parts.refresh[i] = Label(word:sub(i, i), 10, K.amber, 0.8, "CENTER", DOT_END + D.REFRESH_DX, (yb + BOT) / 2 + dy)
-    end
-
-    -- lane guides
-    parts.guides = {}
-    for lane = 1, D.MAX_LANES do
-        parts.guides[lane] = VDashes(LANE[lane], TOP, BOT, D.GUIDE_DASH, K.violet, 0.2, LINE)
-    end
-
-    -- axis, ticks and labels
-    parts.axis = VLine(DOT_AX, TOP - D.AX_UP, BOT + D.AX_DN, K.violet, 0.85, LINE)
-    parts.ticks, parts.labels = {}, {}
-    for s = 0, D.MAX_S do
-        local y = SecY(s)
-        local maj = s % D.MAJ == 0
-        local len = maj and D.MAJ_LEN or D.MIN_LEN
-        parts.ticks[s + 1] = HLine(y, DOT_AX - len, DOT_AX, K.violet, 0.7, LINE)
-        if maj then
-            parts.labels[s] = Label(tostring(s), 12, K.fg, 0.9, "LEFT", DOT_AX + D.LABEL_DX, y)
-        end
-    end
-
-    parts.header = Label("DOT TIME", 11, K.violet, 0.9, "BOTTOMLEFT", DOT_AX, D.HDR_Y + 2.5)
-end
-
 -------------------------------------------------------------------------------
--- Chips
+-- Chip (shared look)
 -------------------------------------------------------------------------------
 
 local function Gradient(tex, c, aBottom, aTop)
@@ -346,96 +235,18 @@ local function Desaturate(tex, on)
     end
 end
 
-local function SetRailColor(chip, name)
-    if chip.railColor == name then return end
-    chip.railColor = name
-    local c = name == "amber" and K.amber or K.violet
-    Gradient(chip.rail, c, 0.35, 1)
-    Gradient(chip.railGlow, c, 0.35 * 0.22, 0.22)
-    local w = Mix(c, { 1, 1, 1 }, 0.5)             -- mix(col, '#ffffff', .5)
-    chip.dot:SetVertexColor(w[1], w[2], w[3], 1)
-end
-
-local function HideRail(chip)
-    chip.rail:Hide(); chip.railGlow:Hide(); chip.dot:Hide()
-end
-
 local function HidePop(chip)
     chip.popAt = nil
     chip.pop:Hide()
 end
 
--- The static look of a chip: mode ("off", "absent", "live") and, when live, the band.
-local function ApplyLook(chip)
-    local f = chip.frame
-    if chip.mode == "off" then
-        f:Hide(); HideRail(chip); HidePop(chip)
-        return
-    end
-    local skin = f.fsSkin
-    if chip.mode == "absent" then
-        -- the recast cue shows only in combat (see the header); out of combat the look stays seated, hidden.
-        -- Written only on a change.
-        local want = InCombat()
-        if f:IsShown() ~= want then f:SetShown(want) end
-        -- a dim hollow chip resting at 0: grey desaturated icon, grey ring, no glow, no rail
-        Desaturate(f.icon, true)
-        f.icon:SetAlpha(0.5)
-        if chip.plate then chip.plate:SetAlpha(0.7); chip.plate:SetVertexColor(1, 1, 1, 1) end
-        skin.border.ring:SetVertexColor(ABSENT_RING[1], ABSENT_RING[2], ABSENT_RING[3], 0.9)
-        skin.glow:SetVertexColor(ABSENT_RING[1], ABSENT_RING[2], ABSENT_RING[3], 0)
-        chip.label:SetTextColor(ABSENT_RING[1], ABSENT_RING[2], ABSENT_RING[3], 0.9)
-        HideRail(chip); HidePop(chip)
-        chip.railColor = nil
-        return
-    end
-    f:Show()
-    local c = chip.band and K.amber or K.violet
-    Desaturate(f.icon, false)
-    f.icon:SetAlpha(1)
-    if chip.plate then
-        local p = chip.band and WARM_PLATE or { 1, 1, 1 }
-        chip.plate:SetAlpha(1)
-        chip.plate:SetVertexColor(p[1], p[2], p[3], 1)
-    end
-    skin.border.ring:SetVertexColor(c[1], c[2], c[3], 1)
-    skin.glow:SetVertexColor(c[1], c[2], c[3], chip.band and GLOW_BAND or GLOW_BASE)
-    local t = chip.band and K.amber or K.white
-    chip.label:SetTextColor(t[1], t[2], t[3], 1)
-    SetRailColor(chip, chip.band and "amber" or "violet")
-end
-
--- Seats the chip, its rail and the rail's end dot for `rem` seconds left (0 = resting at 0).
-local function Place(chip, rem)
-    local y = SecY(math.min(math.max(rem, 0), D.MAX_S))
-    if chip.y and math.abs(chip.y - y) < 0.02 then return end
-    chip.y = y
-    local k = ui(1)
-    local dx = (chip.x - CX) * k
-    chip.frame:SetPoint("CENTER", Gunsight.root, "CENTER", dx, -(y - CY) * k)
-    if chip.mode ~= "live" then return end
-    -- the rail runs from the chip's lower edge down to 0; inside the last 1.5 s the chip already
-    -- covers it, and the dot stays on the chip's lower edge, like the mockup's
-    local yt = math.min(BOT, y + CHP)
-    chip.dot:SetPoint("CENTER", Gunsight.root, "CENTER", dx, -(yt - CY) * k)
-    chip.dot:Show()
-    if BOT - yt > 0.5 then
-        chip.rail:SetHeight((BOT - yt) * k)
-        chip.railGlow:SetHeight((BOT - yt) * k)
-        chip.rail:Show(); chip.railGlow:Show()
-    else
-        chip.rail:Hide(); chip.railGlow:Hide()
-    end
-end
-
-local function BuildChip(i)
+local function BuildChip(m, parent, size, level)
     local Theme, FH = FS.Theme, FS.FrameHelpers
-    local chip = { index = i, mode = "off", x = LANE[i] }
-
-    local f = CreateFrame("Frame", nil, content)
-    f:SetFrameLevel(content:GetFrameLevel() + 2)
+    local chip = {}
+    local f = CreateFrame("Frame", nil, parent)
+    f:SetFrameLevel(level)
     f:EnableMouse(false)
-    f:SetSize(ui(D.CHS), ui(D.CHS))          -- sized first: the chamfer comes from the height
+    f:SetSize(ui(size), ui(size))          -- sized first: the chamfer comes from the height
     local icon = f:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints(f)
     f.icon = icon
@@ -444,7 +255,6 @@ local function BuildChip(i)
     if seat then seat(f) else LogOnce("noseat", "FrameHelpers.SeatAuraTile is missing, the icon is not seated inside the cut") end
     chip.frame, chip.plate = f, f.fsAuraPlate
 
-    -- the white pop, cut like the chip so no square corner shows
     local c = (f.fsSkin and f.fsSkin.chamfer) or 6
     local path = c == 6 and Theme.SLICE_CUT2_FILL_TEXTURE or (MEDIA .. "slice_cut2_fill_c" .. c .. ".tga")
     chip.pop = Theme.AddSliceTexture(f, path, { K.white[1], K.white[2], K.white[3], 0 }, "OVERLAY", 2)
@@ -455,392 +265,647 @@ local function BuildChip(i)
     chip.label = f:CreateFontString(nil, "OVERLAY")
     chip.label:SetPoint("CENTER", f, "CENTER", 0, 0)
     chip.label:Hide()
+    Seat(m, function()
+        f:SetSize(ui(size), ui(size))
+        Theme.ApplyMono(chip.label, ui(size * 0.52), { 1, 1, 1, 1 })
+    end)
+    return chip
+end
 
-    -- the rail from the chip down to 0 (a wide faint copy under a narrow core) and its end dot
-    chip.railGlow = Tex("ARTWORK", 1)
-    chip.rail = Tex("ARTWORK", 2)
-    chip.dot = Tex("ARTWORK", 3)
-    chip.dot:SetTexture(GLOW_ROUND)
-    chip.dot:SetBlendMode("ADD")
-    HideRail(chip)
+-- The chip's static look for a row mode ("absent", "live" or "unknown") and the band.
+local function ChipLook(chip, mode, band)
+    local f, skin = chip.frame, chip.frame.fsSkin
+    if mode == "absent" then
+        Desaturate(f.icon, true)
+        f.icon:SetAlpha(0.5)
+        if chip.plate then chip.plate:SetAlpha(0.7); chip.plate:SetVertexColor(1, 1, 1, 1) end
+        skin.border.ring:SetVertexColor(ABSENT_RING[1], ABSENT_RING[2], ABSENT_RING[3], 0.9)
+        skin.glow:SetVertexColor(ABSENT_RING[1], ABSENT_RING[2], ABSENT_RING[3], 0)
+        chip.label:SetTextColor(ABSENT_RING[1], ABSENT_RING[2], ABSENT_RING[3], 0.9)
+        HidePop(chip)
+        return
+    end
+    local c = band and K.amber or K.violet
+    Desaturate(f.icon, false)
+    f.icon:SetAlpha(1)
+    if chip.plate then
+        local p = band and WARM_PLATE or PLAIN_PLATE
+        chip.plate:SetAlpha(1)
+        chip.plate:SetVertexColor(p[1], p[2], p[3], 1)
+    end
+    skin.border.ring:SetVertexColor(c[1], c[2], c[3], 1)
+    skin.glow:SetVertexColor(c[1], c[2], c[3], band and GLOW_BAND or GLOW_BASE)
+    local t = band and K.amber or K.white
+    chip.label:SetTextColor(t[1], t[2], t[3], 1)
+end
 
-    Seat(function()
-        f:SetSize(ui(D.CHS), ui(D.CHS))
-        Theme.ApplyMono(chip.label, ui(12.5), { 1, 1, 1, 1 })
-        chip.rail:SetWidth(ui(RAIL_CORE))
-        chip.railGlow:SetWidth(ui(RAIL_GLOW))
-        chip.dot:SetSize(ui(DOT_BLOOM), ui(DOT_BLOOM))
-        Point(chip.rail, "BOTTOM", chip.x, BOT)
-        Point(chip.railGlow, "BOTTOM", chip.x, BOT)
-        chip.y = nil
-        if chip.mode == "live" then
-            Place(chip, chip.expiresAt - GetTime())
-        elseif chip.mode == "absent" then
-            Place(chip, 0)
+local function SetChipIcon(chip, e)
+    local icon = e.icon
+    if icon ~= nil and not (FS.IsSecret and FS.IsSecret(icon)) and (type(icon) == "number" or type(icon) == "string") then
+        chip.frame.icon:SetTexture(icon)
+        chip.frame.icon:Show()
+        chip.label:Hide()
+    else
+        chip.frame.icon:Hide()
+        chip.label:SetText(string.upper(string.sub(PlainString(e.name) or "?", 1, 2)))
+        chip.label:Show()
+    end
+end
+
+-- The pop flashes, then fades by itself from Step.
+local function StartPop(chip, now)
+    chip.popAt = now
+    chip.pop:SetVertexColor(K.white[1], K.white[2], K.white[3], D.POP_A)
+    chip.pop:Show()
+end
+
+local function StepPop(chip, now)
+    if not chip.popAt then return end
+    local age = now - chip.popAt
+    if age >= D.POP_S then
+        HidePop(chip)
+    else
+        chip.pop:SetVertexColor(K.white[1], K.white[2], K.white[3], D.POP_A * (1 - age / D.POP_S))
+    end
+end
+
+local function PulseGlow(chip, now)
+    local c = K.amber
+    local pl = 0.5 + 0.5 * math.sin(now * 9)
+    chip.frame.fsSkin.glow:SetVertexColor(c[1], c[2], c[3], math.min(1, GLOW_BAND * (0.55 + 0.6 * pl)))
+end
+
+-------------------------------------------------------------------------------
+-- Horizontal rows
+-------------------------------------------------------------------------------
+
+local function RowTop(m) return m.rect.y + (m.rect.y >= CY and H.TOP_LOWER or H.TOP_UPPER) end
+
+-- The text, bar and chip colours of one row for its mode and band.
+local function LookH(row)
+    local mode, band = row.mode, row.band
+    if mode == "off" then return end
+    ChipLook(row.chip, mode, band)
+    local bg, fg, tc, ta = BAR_COLOR, BAR_COLOR, K.white, 1
+    if mode == "absent" then
+        bg, tc, ta = K.muted, K.muted, H.ABSENT_TEXT_A
+        row.fillTex:Hide()
+        row.barBg:SetColorTexture(bg[1], bg[2], bg[3], H.ABSENT_BAR_A)
+    else
+        if band then bg, fg, tc = K.amber, K.amber, K.amber end
+        if mode == "unknown" then tc = K.fg end
+        row.barBg:SetColorTexture(bg[1], bg[2], bg[3], H.BAR_BG_A)
+        row.fillTex:SetColorTexture(fg[1], fg[2], fg[3], 1)
+        row.fillTex:SetShown(mode == "live")
+    end
+    row.time:SetTextColor(tc[1], tc[2], tc[3], ta)
+    if mode == "live" or mode == "unknown" then
+        row.stack:SetTextColor(K.white[1], K.white[2], K.white[3], 1)
+    end
+end
+
+local function SetTime(row, s)
+    if row.timeText ~= s then
+        row.timeText = s
+        row.time:SetText(s)
+    end
+end
+
+-- Seats the time text and the drain fill for `rem` seconds left.
+local function PaintH(row, rem)
+    SetTime(row, FormatTime(rem))
+    local w = H.BAR_W * math.min(rem, D.MAX_S) / D.MAX_S
+    if not row.fill or math.abs(row.fill - w) >= 0.02 then
+        row.fill = w
+        row.fillTex:SetWidth(ui(w))
+    end
+end
+
+-- An absent row and one with no known duration both read "--" and draw no fill.
+local function ParkH(row)
+    SetTime(row, "--")
+    row.fill = nil
+end
+
+local function BuildRowH(m, i)
+    local rf = CreateFrame("Frame", nil, m.body)
+    rf:SetFrameLevel(m.body:GetFrameLevel() + 1)
+    rf:EnableMouse(false)
+    local row = { index = i, mode = "off", frame = rf }
+    row.chip = BuildChip(m, rf, H.CHIP, rf:GetFrameLevel() + 1)
+    row.time = Label(m, rf, H.TIME_SIZE, K.white, 1)
+    row.stack = Label(m, rf, H.STACK_SIZE, K.white, 1)
+    row.barBg = rf:CreateTexture(nil, "ARTWORK", nil, 0)
+    row.fillTex = rf:CreateTexture(nil, "ARTWORK", nil, 1)
+    row.barBg:SetColorTexture(BAR_COLOR[1], BAR_COLOR[2], BAR_COLOR[3], H.BAR_BG_A)
+    row.fillTex:SetColorTexture(BAR_COLOR[1], BAR_COLOR[2], BAR_COLOR[3], 1)
+    row.time:SetText("--")
+    row.stack:SetText("")
+    rf:Hide()
+    Seat(m, function()
+        local x = m.rect.x
+        local cy = RowTop(m) + H.PITCH * (i - 0.5)
+        Point(row.chip.frame, "CENTER", x + H.CHIP_DX + H.CHIP / 2, cy)
+        Point(row.time, "LEFT", x + H.TIME_DX, cy)
+        Point(row.stack, "LEFT", x + H.STACK_DX, cy)
+        Point(row.barBg, "LEFT", x + H.BAR_DX, cy)
+        row.barBg:SetSize(ui(H.BAR_W), ui(H.BAR_H))
+        Point(row.fillTex, "LEFT", x + H.BAR_DX, cy)
+        row.fillTex:SetSize(ui(row.fill or 0), ui(H.BAR_H))
+        if row.mode ~= "off" then LookH(row) end
+    end)
+    return row
+end
+
+local function BuildChromeH(m)
+    -- the ruler: one faint rule per row bottom (plus the top of the upper area) and a pink tick before each
+    local rules, ticks = {}, {}
+    for j = 0, H.MAX_ROWS do
+        local t = Tex(m, "BACKGROUND")
+        rules[j] = t
+        if j >= 1 then
+            local k = Tex(m, "BACKGROUND")
+            k:SetColorTexture(1, 0.18, 0.59, H.TICK_A)
+            ticks[j] = k
+        end
+    end
+    m.parts.rules, m.parts.ticks = rules, ticks
+    Seat(m, function()
+        local upper = m.rect.y < CY
+        local top = RowTop(m)
+        for j = 0, H.MAX_ROWS do
+            local y = top + H.PITCH * j
+            local t = rules[j]
+            local a = (upper and j == H.MAX_ROWS) and H.SEP_HZ_A or H.SEP_A
+            t:SetColorTexture(K.violet[1], K.violet[2], K.violet[3], a)
+            t:SetShown(upper or j >= 1)
+            Point(t, "LEFT", m.rect.x, y)
+            t:SetSize(ui(H.SEP_W), ui(1))
+            if ticks[j] then
+                Point(ticks[j], "LEFT", m.rect.x + H.TICK_DX, y)
+                ticks[j]:SetSize(ui(-H.TICK_DX), ui(1))
+            end
         end
     end)
-    ApplyLook(chip)
-    return chip
+end
+
+-------------------------------------------------------------------------------
+-- Vertical axis
+-------------------------------------------------------------------------------
+
+local function AxisBottom(m) return m.rect.y + V.AXB_DY end
+
+local function SecY(m, s)
+    return AxisBottom(m) - math.min(math.max(s, 0), D.MAX_S) * V.PX_PER_S
+end
+
+-- A static line whose position is relative to the area rect: x0, x1 and y are offsets.
+local function RelH(m, y, x0, x1, c, a, th, layer, sub)
+    local t = Tex(m, layer, sub)
+    t:SetColorTexture(c[1], c[2], c[3], a)
+    Seat(m, function()
+        Point(t, "LEFT", m.rect.x + x0, m.rect.y + y)
+        t:SetSize(ui(x1 - x0), ui(th))
+    end)
+    return t
+end
+
+local function RelV(m, x, y0, y1, c, a, th, layer, sub)
+    local t = Tex(m, layer, sub)
+    t:SetColorTexture(c[1], c[2], c[3], a)
+    Seat(m, function()
+        Point(t, "TOP", m.rect.x + x, m.rect.y + y0)
+        t:SetSize(ui(th), ui(y1 - y0))
+    end)
+    return t
+end
+
+local function RelLabel(m, text, size, c, a, anchor, x, y)
+    local fs = Label(m, nil, size, c, a)
+    Seat(m, function() Point(fs, anchor, m.rect.x + x, m.rect.y + y) end)
+    fs:SetText(text)
+    return fs
+end
+
+local function BuildScaleV(m)
+    local P = m.parts
+    local axt, axb = V.AXT_DY, V.AXB_DY
+    local function dy(s) return axb - s * V.PX_PER_S end
+    local yb = dy(D.BAND_S)
+    local ax, e = V.AX_DX, V.END_DX
+
+    local band = Tex(m, "BACKGROUND")
+    band:SetColorTexture(K.amber[1], K.amber[2], K.amber[3], V.BAND_FILL)
+    Seat(m, function()
+        Point(band, "TOPLEFT", m.rect.x + ax, m.rect.y + yb)
+        band:SetSize(ui(e - ax), ui(axb - yb))
+    end)
+    P.band = band
+    P.bandTop = {}
+    local x = ax
+    while x < e - 1e-6 do
+        P.bandTop[#P.bandTop + 1] = RelH(m, yb, x, math.min(e, x + V.BAND_DASH[1]), K.amber, 0.75, LINE)
+        x = x + V.BAND_DASH[1] + V.BAND_DASH[2]
+    end
+    P.bandBottom = RelH(m, axb, ax, e, K.amber, 0.95, LINE * 1.3)
+
+    -- the REFRESH label runs bottom to top in the mockup; Lua cannot rotate text, so it is stacked upright letters
+    P.refresh = {}
+    local word, pitch = "REFRESH", 6.5
+    for i = 1, #word do
+        P.refresh[i] = RelLabel(m, word:sub(i, i), V.REFRESH_SIZE, K.amber, 0.8, "CENTER", e + V.REFRESH_DX,
+            (yb + axb) / 2 + (i - (#word + 1) / 2) * pitch)
+    end
+
+    P.guides = {}
+    for lane = 1, V.LANES do
+        P.guides[lane] = {}
+        local y = axt
+        while y < axb - 1e-6 do
+            P.guides[lane][#P.guides[lane] + 1] = RelV(m, V.LANE_DX[lane], y, math.min(axb, y + V.GUIDE_DASH[1]), K.violet, V.GUIDE_A, LINE)
+            y = y + V.GUIDE_DASH[1] + V.GUIDE_DASH[2]
+        end
+    end
+
+    P.axis = RelV(m, ax, axt - V.AX_UP, axb + V.AX_DN, K.violet, 0.85, LINE)
+    P.ticks, P.labels = {}, {}
+    for s = 0, D.MAX_S do
+        local maj = s % V.MAJ == 0
+        local len = maj and V.MAJ_LEN or V.MIN_LEN
+        P.ticks[s + 1] = RelH(m, dy(s), ax, ax + len, K.violet, maj and 0.7 or 0.45, LINE)
+        if maj then P.labels[s] = RelLabel(m, tostring(s), V.LABEL_SIZE, K.fg, 0.9, "LEFT", ax + V.LABEL_DX, dy(s)) end
+    end
+
+    local hdr = Label(m, nil, V.HDR_SIZE, K.violet, 0.9)
+    hdr:SetJustifyH("RIGHT")
+    Seat(m, function() Point(hdr, "BOTTOMRIGHT", m.rect.x + V.HDR_DX, m.rect.y + V.HDR_DY + 2.5) end)
+    hdr:SetText("TARGET DEBUFFS")
+    P.header = hdr
+end
+
+-- Seats the chip, its rail and the rail's end dot for `rem` seconds left (0 = resting at 0).
+local function PlaceV(m, row, rem)
+    local y = SecY(m, rem)
+    if row.y and math.abs(row.y - y) < 0.02 then return end
+    row.y = y
+    local k = ui(1)
+    local dx = (row.x - CX) * k
+    row.frame:SetPoint("CENTER", Gunsight.root, "CENTER", dx, -(y - CY) * k)
+    if row.mode ~= "live" then return end
+    -- the rail runs from the chip's lower edge down to 0; inside the last 1.5 s the chip already covers it
+    local axb = AxisBottom(m)
+    local yt = math.min(axb, y + V.CHIP / 2)
+    row.dot:SetPoint("CENTER", Gunsight.root, "CENTER", dx, -(yt - CY) * k)
+    row.dot:Show()
+    if axb - yt > 0.5 then
+        row.rail:SetHeight((axb - yt) * k)
+        row.railGlow:SetHeight((axb - yt) * k)
+        row.rail:Show(); row.railGlow:Show()
+    else
+        row.rail:Hide(); row.railGlow:Hide()
+    end
+end
+
+local function HideRail(row)
+    row.rail:Hide(); row.railGlow:Hide(); row.dot:Hide()
+end
+
+local function SetRailColor(row, name)
+    if row.railColor == name then return end
+    row.railColor = name
+    local c = name == "amber" and K.amber or K.violet
+    Gradient(row.rail, c, 0.35, 1)
+    Gradient(row.railGlow, c, 0.35 * 0.22, 0.22)
+    local w = Mix(c, { 1, 1, 1 }, 0.5)
+    row.dot:SetVertexColor(w[1], w[2], w[3], 1)
+end
+
+local function LookV(row)
+    local mode = row.mode
+    if mode == "off" then return end
+    ChipLook(row.chip, mode, row.band)
+    if mode == "absent" then
+        HideRail(row)
+        row.railColor = nil
+    else
+        SetRailColor(row, row.band and "amber" or "violet")
+    end
+end
+
+local function BuildRowV(m, i)
+    local chip = BuildChip(m, m.body, V.CHIP, m.body:GetFrameLevel() + 2)
+    local row = { index = i, mode = "off", frame = chip.frame, chip = chip }
+    chip.frame:Hide()
+    row.railGlow = Tex(m, "ARTWORK", 1)
+    row.rail = Tex(m, "ARTWORK", 2)
+    row.dot = Tex(m, "ARTWORK", 3)
+    row.dot:SetTexture(GLOW_ROUND)
+    row.dot:SetBlendMode("ADD")
+    HideRail(row)
+    Seat(m, function()
+        row.x = m.rect.x + V.LANE_DX[i]
+        row.rail:SetWidth(ui(RAIL_CORE))
+        row.railGlow:SetWidth(ui(RAIL_GLOW))
+        row.dot:SetSize(ui(DOT_BLOOM), ui(DOT_BLOOM))
+        Point(row.rail, "BOTTOM", row.x, AxisBottom(m))
+        Point(row.railGlow, "BOTTOM", row.x, AxisBottom(m))
+        row.y = nil
+        if row.mode == "live" then
+            PlaceV(m, row, row.expires - GetTime())
+        elseif row.mode == "absent" then
+            PlaceV(m, row, 0)
+        end
+    end)
+    return row
 end
 
 -------------------------------------------------------------------------------
 -- Motion
 -------------------------------------------------------------------------------
 
-local function StopTicking()
-    if ticking then
-        ticking = false
-        frame:SetScript("OnUpdate", nil)
+local function StopTicking(m)
+    if m.ticking then
+        m.ticking = false
+        m.frame:SetScript("OnUpdate", nil)
     end
 end
 
-local function Step()
-    local now = GetTime()
-    local live = 0
-    for i = 1, #chips do
-        local chip = chips[i]
-        if chip.mode == "live" then
-            local rem = chip.expiresAt - now
-            if rem <= 0 then
-                -- ran out: the ledger pushes nothing at an expiry, so turn into the absent chip here
-                chip.mode = "absent"
-                ApplyLook(chip)
-                chip.y = nil
-                Place(chip, 0)
-            else
-                live = live + 1
-                local band = rem <= D.BAND_S
-                if band ~= chip.band then
-                    chip.band = band
-                    ApplyLook(chip)
-                end
-                Place(chip, rem)
-                if band then
-                    local c = K.amber
-                    local pl = 0.5 + 0.5 * math.sin(now * 9)
-                    chip.frame.fsSkin.glow:SetVertexColor(c[1], c[2], c[3], math.min(1, GLOW_BAND * (0.55 + 0.6 * pl)))
-                end
-                if chip.popAt then
-                    local age = now - chip.popAt
-                    if age >= D.POP_S then
-                        HidePop(chip)
-                    else
-                        chip.pop:SetVertexColor(K.white[1], K.white[2], K.white[3], D.POP_A * (1 - age / D.POP_S))
-                    end
-                end
-            end
+local function StartTicking(m)
+    if not m.ticking and m.active then
+        m.ticking = true
+        m.frame:SetScript("OnUpdate", m.step)
+    end
+end
+
+local function ToAbsent(m, row)
+    row.mode, row.expires, row.band = "absent", nil, false
+    if m.kind == "H" then
+        ParkH(row)
+        LookH(row)
+    else
+        LookV(row)
+        row.y = nil
+        PlaceV(m, row, 0)
+    end
+    SetRowShown(row, inCombat)
+end
+
+local function StepRow(m, row, now)
+    local rem = row.expires - now
+    if rem <= 0 then
+        ToAbsent(m, row)
+        return false
+    end
+    local band = rem <= D.BAND_S
+    if band ~= row.band then
+        row.band = band
+        if m.kind == "H" then LookH(row) else LookV(row) end
+    end
+    if m.kind == "H" then PaintH(row, rem) else PlaceV(m, row, rem) end
+    if band then PulseGlow(row.chip, now) end
+    StepPop(row.chip, now)
+    return true
+end
+
+local function MakeStep(m)
+    return function()
+        local now = GetTime()
+        local live = 0
+        for i = 1, #m.rows do
+            local row = m.rows[i]
+            if row.mode == "live" and StepRow(m, row, now) then live = live + 1 end
         end
-    end
-    if live == 0 then StopTicking() end
-end
-
-local function StartTicking()
-    if not ticking and pieceOn then
-        ticking = true
-        frame:SetScript("OnUpdate", Step)
+        if live == 0 then StopTicking(m) end
     end
 end
 
 -------------------------------------------------------------------------------
--- State
+-- List to rows
 -------------------------------------------------------------------------------
 
-local function Abbreviation(key)
-    return ABBR[key] or string.upper(string.sub(tostring(key), 1, 2))
+local function ClearRow(m, row)
+    row.mode, row.key, row.iconId, row.expires, row.band, row.count = "off", nil, nil, nil, false, nil
+    row.fill, row.timeText = nil, nil
+    HidePop(row.chip)
+    if m.kind == "V" then HideRail(row); row.railColor = nil end
+    row.frame:Hide()
 end
 
--- One row of the Hud state into one chip. A nil row is an unused lane. `newTarget` is true when
--- this push follows a target switch: a DoT that shows up live on the new target was not applied
--- by us just now, so it is placed without the pop, unless the row is a fresh apply (a Tab and an
--- instant cast inside one Hud tick arrive together as absent to live in one new-epoch push).
-local function UpdateChip(chip, e, now, newTarget)
-    local prevMode, prevExpires = chip.mode, chip.expiresAt
-    local remaining = e and Num(e.remaining)
-    if not remaining then
-        -- key and iconId are cleared, not copied from the row: an off chip seats no icon or label, so
-        -- the live branch must always reseat (a nil icon would otherwise compare equal to the cache)
-        chip.mode, chip.key, chip.iconId, chip.expiresAt = "off", nil, nil, nil
-        if prevMode ~= "off" then ApplyLook(chip) end
+-- One entry into one row. A nil entry is an unused row.
+local function UpdateRow(m, row, e, now, newTarget)
+    if not e then
+        if row.mode ~= "off" then ClearRow(m, row) end
+        return
+    end
+    local name = PlainString(e.name)
+    if not name then
+        if row.mode ~= "off" then ClearRow(m, row) end
+        return
+    end
+    local prevMode, prevExpires = row.mode, row.expires
+    if row.key ~= name then
+        prevMode, prevExpires = "off", nil
+        HidePop(row.chip)                -- a flash belongs to the debuff that earned it
+    end
+    if row.key ~= name or row.iconId ~= e.icon then
+        row.key, row.iconId = name, e.icon
+        SetChipIcon(row.chip, e)
+    end
+
+    local raw = e.expires
+    local mode, expires
+    if FS.IsSecret and FS.IsSecret(raw) then
+        mode = "off"
+    elseif raw == nil then
+        mode = "unknown"
+    else
+        expires = Num(raw)
+        if not expires then mode = "off" elseif expires > now then mode = "live" else mode = "absent" end
+    end
+    if mode == "off" then
+        if row.mode ~= "off" then ClearRow(m, row) end
         return
     end
 
-    -- icon and abbreviation follow the row
-    if chip.key ~= e.key or chip.iconId ~= e.icon then
-        chip.key, chip.iconId = e.key, e.icon
-        if e.icon ~= nil then
-            chip.frame.icon:SetTexture(e.icon)
-            chip.frame.icon:Show()
-            chip.label:Hide()
-        else
-            chip.frame.icon:Hide()
-            chip.label:SetText(Abbreviation(e.key))
-            chip.label:Show()
-        end
-    end
-
-    local expiresAt = Num(e.expiresAt)
-    if not expiresAt and remaining > 0 then expiresAt = now + remaining end
-    if expiresAt and expiresAt > now then
-        chip.mode, chip.expiresAt = "live", expiresAt
-        chip.band = expiresAt - now <= D.BAND_S
+    row.mode, row.expires = mode, expires
+    row.band = mode == "live" and expires - now <= D.BAND_S
+    if mode == "live" then
         if newTarget then
             local duration = Num(e.duration)
-            if duration and remaining >= duration - FRESH_EPS then
-                chip.popAt = now             -- applied within the last half second: a genuine apply
+            if duration and expires - now >= duration - FRESH_EPS then
+                StartPop(row.chip, now)                  -- applied within the last half second: a genuine apply
             else
-                HidePop(chip)                -- the old target's flash does not follow the switch
+                HidePop(row.chip)                        -- the old target's flash does not follow the switch
             end
-        elseif prevMode == "absent" or (prevMode == "live" and expiresAt > prevExpires + REAPPLY_EPS) then
-            chip.popAt = now
-        end
-        ApplyLook(chip)
-        chip.y = nil
-        Place(chip, expiresAt - now)
-        if chip.popAt == now then
-            chip.pop:SetVertexColor(K.white[1], K.white[2], K.white[3], D.POP_A)
-            chip.pop:Show()
+        elseif prevMode == "absent" or (prevMode == "live" and expires > prevExpires + REAPPLY_EPS) then
+            StartPop(row.chip, now)
         end
     else
-        chip.mode, chip.expiresAt = "absent", nil
-        ApplyLook(chip)
-        chip.y = nil
-        Place(chip, 0)
+        HidePop(row.chip)
     end
-end
 
--- A chip whose update threw: off and hidden, never left showing whatever it showed before. The key and icon
--- are cleared so the next good row reseats them.
-local function DropChip(chip)
-    chip.mode, chip.key, chip.iconId, chip.expiresAt = "off", nil, nil, nil
-    pcall(ApplyLook, chip)
-    pcall(chip.frame.Hide, chip.frame)
-end
-
--- PLAYER_REGEN_DISABLED / PLAYER_REGEN_ENABLED / a re-seed: the absent chips follow the combat flag at once.
--- Live chips are not touched; a chip is written only when its visibility changes.
-local function SyncAbsentChips()
-    local want = InCombat()
-    for i = 1, #chips do
-        local f = chips[i].frame
-        if chips[i].mode == "absent" and f:IsShown() ~= want then f:SetShown(want) end
-    end
-end
-
--- A Hud push with a plainly false state.inCombat while the flag is true: re-seed from both APIs and, if they
--- agree it is over, clear the flag and hide the absent chips. One way only, never sets the flag true.
-local function HealCombat(state)
-    if not inCombat or type(state) ~= "table" then return end
-    local v = state.inCombat
-    if FS.IsSecret and FS.IsSecret(v) then return end
-    if v ~= false then return end
-    SeedCombat()
-    if not inCombat then SyncAbsentChips() end
-end
-
--- Who owns this seat, asked of the class profile through the one shared rule (FS.HudProfiles.ClassSlot,
--- HudProfiles.lua, the same call ConsoleKeys.lua makes for the key): "seals" when the Seal Chamber does, "dots"
--- when this tape does, nil when the profile cannot say. `atBuild` is the one-time read in BuildAll: a Hud or a
--- profile that cannot be read THEN is logged once, because the build latches on the answer. A class that has no
--- HUD profile at all (a Rogue) is normal and stays silent; a class that does have one but whose profile is not
--- resolved yet is not (it is re-checked on every show and push, see Yield).
-local function ShippedProfileExists()
-    if type(UnitClass) ~= "function" or type(FS.HudProfiles) ~= "table" then return false end
-    local ok, _, token = pcall(UnitClass, "player")
-    if not ok or (FS.IsSecret and FS.IsSecret(token)) or type(token) ~= "string" then return false end
-    return FS.HudProfiles[token] ~= nil
-end
-
-local function SlotOwner(atBuild)
-    local Hud = FS.Hud
-    if type(Hud) ~= "table" or type(Hud.GetProfile) ~= "function" then
-        if atBuild then LogOnce("noprofile", "FS.Hud.GetProfile is missing, the DoT scale cannot tell whose seat it is") end
-        return nil
-    end
-    local ok, profile = pcall(Hud.GetProfile)
-    if not ok then
-        if atBuild then LogOnce("noprofile", profile) end
-        return nil
-    end
-    if profile == nil then
-        if atBuild and ShippedProfileExists() then
-            LogOnce("noprofile", "the class profile is not resolved yet, the DoT scale is built for a class slot it may not own")
+    if m.kind == "H" then
+        local count = Num(e.count) or 1
+        if row.count ~= count then
+            row.count = count
+            row.stack:SetText(count > 1 and ("x" .. count) or "")
         end
-        return nil
+        LookH(row)
+        if mode == "live" then
+            row.fill, row.timeText = nil, nil
+            PaintH(row, expires - now)
+        else
+            ParkH(row)
+        end
+    else
+        LookV(row)
+        row.y = nil
+        PlaceV(m, row, mode == "live" and expires - now or 0)
     end
-    local Profiles = FS.HudProfiles
-    if type(Profiles) ~= "table" or type(Profiles.ClassSlot) ~= "function" then
-        LogOnce("noclassslot", "FS.HudProfiles.ClassSlot is missing, the DoT scale draws as before")
-        return nil
-    end
-    local ok2, slot = pcall(Profiles.ClassSlot, profile)
-    if not ok2 then
-        LogOnce("classslot", slot)
-        return nil
-    end
-    return slot
+    SetRowShown(row, mode ~= "absent" or inCombat)
 end
 
--- The scale was built (no profile was readable then) and the profile now gives the seat to the Seal Chamber:
--- step aside for good. Only plain Hide calls on our own non secure frames, so it is legal in combat; the
--- piece, its gate and its toggle stay as they are. The Hud subscription is NOT dropped here, because this runs
--- from inside a Hud push and Hud.Unsubscribe during the push loop would make it skip a neighbour: OnState is
--- inert from now on and the next piece hide or show drops the subscription.
-local function Yield()
-    classSlot = true
-    content:Hide()
-    StopTicking()
-    lastEpoch = nil
-    for i = 1, #chips do
-        chips[i].mode, chips[i].expiresAt = "off", nil
-        ApplyLook(chips[i])
-    end
+-- The vertical axis cannot place an entry with no expiry, so those are skipped.
+local function KnownExpiry(e)
+    local raw = type(e) == "table" and e.expires
+    if raw == nil or raw == false then return false end
+    if FS.IsSecret and FS.IsSecret(raw) then return false end
+    return true
 end
 
-local function Apply(state)
-    if SlotOwner() == "seals" then Yield(); return end
-    HealCombat(state)
-    local profile = FS.Hud and FS.Hud.GetProfile and FS.Hud.GetProfile()
-    local dots = profile and profile.dots
-    local lanes = {}
-    if dots and type(state) == "table" and state.active and type(state.row) == "table" then
-        for _, e in ipairs(state.row) do
-            if type(e) == "table" and dots[e.key] and #lanes < D.MAX_LANES then lanes[#lanes + 1] = e end
+local function Gather(m, list)
+    local src, n = m.src, 0
+    for i = 1, #list do
+        local e = list[i]
+        if n < #m.rows and type(e) == "table" and (m.kind == "H" or KnownExpiry(e)) then
+            n = n + 1
+            src[n] = e
         end
     end
-    if #lanes > 0 then content:Show() else content:Hide() end
+    for i = n + 1, #src do src[i] = nil end
+end
 
-    -- state.targetEpoch changes on every target switch (HudLogic exports the integer only)
-    local epoch = type(state) == "table" and Num(state.targetEpoch) or nil
-    local newTarget = epoch ~= lastEpoch
-    lastEpoch = epoch
+local function DropRow(m, row)
+    row.mode, row.key, row.iconId, row.expires = "off", nil, nil, nil
+    pcall(row.frame.Hide, row.frame)
+end
 
+local function Update(m, list, epoch)
+    HealCombat()
+    local newTarget = epoch ~= m.lastEpoch
+    m.lastEpoch = epoch
+    Gather(m, type(list) == "table" and list or {})
     local now = GetTime()
-    local live = false
-    for i = 1, #chips do
-        -- one pcall per chip: a throw in chip i must not skip chips i + 1.. (they would keep a stale icon)
-        local ok, err = pcall(UpdateChip, chips[i], lanes[i], now, newTarget)
+    local used, live = 0, false
+    for i = 1, #m.rows do
+        local row = m.rows[i]
+        local ok, err = pcall(UpdateRow, m, row, m.src[i], now, newTarget)
         if not ok then
             LogOnce("state", err)
-            DropChip(chips[i])
+            DropRow(m, row)
         end
-        if chips[i].mode == "live" then live = true end
+        if row.mode ~= "off" then used = used + 1 end
+        if row.mode == "live" then live = true end
     end
-    if live then StartTicking() else StopTicking() end
-end
-
-local function OnState(state)
-    if not pieceOn or classSlot then return end
-    local ok, err = pcall(Apply, state)
-    if not ok then LogOnce("state", err) end
+    m.body:SetShown(used > 0)
+    if live then StartTicking(m) else StopTicking(m) end
 end
 
 -------------------------------------------------------------------------------
--- Piece hooks and build
+-- Module build and hooks
 -------------------------------------------------------------------------------
 
-local function OnPieceShow()
-    pieceOn = true
-    if not classSlot and SlotOwner() == "seals" then Yield() end
-    if classSlot then return end           -- a class slot this file does not draw: nothing to keep up to date
-    local Hud = FS.Hud
-    if not (Hud and Hud.Subscribe) then
-        LogOnce("nohud", "FS.Hud is missing, the DoT scale has no data")
-        return
-    end
-    if not subscribed then
-        subscribed = true
-        Hud.Subscribe(OnState)             -- pushes the current state at once
-    end
-end
-
-local function OnPieceHide()
-    pieceOn = false
-    if subscribed and FS.Hud and FS.Hud.Unsubscribe then FS.Hud.Unsubscribe(OnState) end
-    subscribed = false
-    lastEpoch = nil
-    StopTicking()
-    -- forget the chips so the next show repaints cleanly and a stale expiry cannot read as a reapply
-    for i = 1, #chips do
-        chips[i].mode, chips[i].expiresAt = "off", nil
-        ApplyLook(chips[i])
-    end
-end
-
-local function RefreshTargetLayer()
-    if not gate then return end
-    local want = FS.TargetTakesDots()
-    if want ~= gateOn then
-        gateOn = want
-        gate:SetShown(want)
-    end
-end
-
-local function BuildAll()
-    classSlot = SlotOwner(true) == "seals"
-    frame = CreateFrame("Frame", "ForeverSTUwaveGunsightDots", Gunsight.root)
-    frame:SetSize(1, 1)
-    frame:SetPoint("CENTER", Gunsight.root, "CENTER", 0, 0)
-    gate = CreateFrame("Frame", nil, frame)
-    gate:SetSize(1, 1)
-    gate:SetPoint("CENTER", frame, "CENTER", 0, 0)
-    gate:SetFrameLevel(frame:GetFrameLevel())     -- no extra level: the content keeps the stacking it had on the piece
-    content = CreateFrame("Frame", nil, gate)
-    content:SetSize(1, 1)
-    content:SetPoint("CENTER", gate, "CENTER", 0, 0)
-    content:Hide()                         -- shown once a state has a DoT lane
-
-    if not classSlot then
-        BuildScale()
-        for i = 1, D.MAX_LANES do chips[i] = BuildChip(i) end
-    end
-
-    Dots.frame, Dots.gate, Dots.content, Dots.chips, Dots.parts = frame, gate, content, chips, parts
-
-    RefreshTargetLayer()
+local function EnsureShared()
+    if sharedBuilt then return end
+    sharedBuilt = true
     SeedCombat()
-    local events = CreateFrame("Frame", nil, frame)
-    events:RegisterEvent("PLAYER_TARGET_CHANGED")
-    events:RegisterEvent("PLAYER_ENTERING_WORLD")
-    events:RegisterEvent("PLAYER_REGEN_DISABLED")     -- the absent (recast) chips show only in combat
+    local events = CreateFrame("Frame", nil, Gunsight.root)
+    events:RegisterEvent("PLAYER_REGEN_DISABLED")     -- the absent cue shows only in combat
     events:RegisterEvent("PLAYER_REGEN_ENABLED")
+    events:RegisterEvent("PLAYER_ENTERING_WORLD")
     events:SetScript("OnEvent", function(_, event)
         if event == "PLAYER_REGEN_DISABLED" then
-            inCombat = true                 -- the event itself, not InCombatLockdown(): it may still read false here
-            SyncAbsentChips()
+            inCombat = true                 -- the event itself: InCombatLockdown() may still read false here
         elseif event == "PLAYER_REGEN_ENABLED" then
             inCombat = false
-            SyncAbsentChips()
         else
-            if event == "PLAYER_ENTERING_WORLD" then SeedCombat(); SyncAbsentChips() end
-            RefreshTargetLayer()
+            SeedCombat()
         end
+        SyncAbsent()
     end)
-    -- death, a duel and mind control change the answer with no target change; one frame, the target only
-    local unitEvents = CreateFrame("Frame", nil, frame)
-    for _, name in ipairs({ "UNIT_HEALTH", "UNIT_FLAGS", "UNIT_FACTION" }) do
-        if unitEvents.RegisterUnitEvent then pcall(unitEvents.RegisterUnitEvent, unitEvents, name, "target") end
-    end
-    unitEvents:SetScript("OnEvent", RefreshTargetLayer)
 end
 
-local function Build()
-    if built then return end
-    built = true
-    if not Gunsight.IsEnabled() then return end
+local function BuildModule(m, host)
     local Theme, FH = FS.Theme, FS.FrameHelpers
     if not (Theme and Theme.SkinButton and Theme.ApplyMono and Theme.AddSliceTexture and Theme.ApplyNineSlice and FH) then
-        LogOnce("notheme", "Theme or FrameHelpers is missing, the DoT scale is not built")
-        return
+        error("Theme or FrameHelpers is missing")
     end
-    local ok, err = pcall(BuildAll)
-    if not ok then
-        LogOnce("build", err)
-        if frame then frame:Hide() end
-        return
+    EnsureShared()
+    m.frame = CreateFrame("Frame", m.kind == "H" and "ForeverSTUwaveGunsightDebuffsH" or "ForeverSTUwaveGunsightDebuffsV", host)
+    m.frame:SetSize(1, 1)
+    m.frame:SetPoint("CENTER", Gunsight.root, "CENTER", 0, 0)
+    m.body = CreateFrame("Frame", nil, m.frame)
+    m.body:SetSize(1, 1)
+    m.body:SetPoint("CENTER", m.frame, "CENTER", 0, 0)
+    m.body:Hide()                                    -- shown once a list has a row
+    if m.kind == "H" then
+        BuildChromeH(m)
+        for i = 1, H.MAX_ROWS do m.rows[i] = BuildRowH(m, i) end
+    else
+        BuildScaleV(m)
+        for i = 1, V.LANES do m.rows[i] = BuildRowV(m, i) end
     end
-    if FS.Layout and FS.Layout.OnRescale then FS.Layout.OnRescale(SeatAll) end
-    -- Dots.registered is the signal GunsightSeals.lua gates on: Dots.frame exists even when BuildAll threw, the piece does not
-    Dots.registered = Gunsight.RegisterPiece("dot", { frame = frame, onShow = OnPieceShow, onHide = OnPieceHide }) and true or false
+    m.step = MakeStep(m)
+    m.built = true
+    modules[m.id] = m
+    return m.frame
 end
 
-Gunsight.OnReady(Build)
+local function ModuleSpec(m)
+    return {
+        build = function(host) return BuildModule(m, host) end,
+        seat = function(rect)
+            m.rect.x, m.rect.y, m.rect.w, m.rect.h = rect.x, rect.y, rect.w, rect.h
+            SeatAll(m)
+        end,
+        onShow = function(area)
+            m.active, m.area = true, area
+            local TD = FS.TargetDebuffs
+            if not (TD and TD.Subscribe) then
+                LogOnce("nodata", "FS.TargetDebuffs is missing, the target debuffs have no data")
+                return
+            end
+            if not m.subscribed then
+                m.subscribed = true
+                TD.Subscribe(m.onList)             -- pushes the current list at once
+            end
+        end,
+        onHide = function()
+            m.active, m.area = false, nil
+            if m.subscribed and FS.TargetDebuffs then FS.TargetDebuffs.Unsubscribe(m.onList) end
+            m.subscribed = false
+            m.lastEpoch = nil
+            StopTicking(m)
+            for i = 1, #m.rows do ClearRow(m, m.rows[i]) end
+            m.body:Hide()
+        end,
+    }
+end
+
+local function Register(id, kind)
+    local m = NewModule(id, kind)
+    m.onList = function(list, epoch)
+        if not m.active then return end
+        local ok, err = pcall(Update, m, list, epoch)
+        if not ok then LogOnce("state", err) end
+    end
+    Dots.modules = Dots.modules or {}
+    Dots.modules[id] = m
+    return FS.GunsightAreas.RegisterModule(id, ModuleSpec(m))
+end
+
+if FS.GunsightAreas and FS.GunsightAreas.RegisterModule then
+    local okH = Register("debuffsH", "H")
+    local okV = Register("debuffsV", "V")
+    Dots.registered = okH and okV and true or false
+end

@@ -684,7 +684,8 @@ local function OpenMenu(anchor, items, onPick, current)
     state.catcher:Show()
 end
 
--- {label, tip, get, items, set}: `items` is a function returning {value, text} entries.
+-- {label, tip, get, items, set, text}: `items` is a function returning {value, text} entries; `text(value)`
+-- names the current value on the button (it shows tostring(value) without it).
 function UI.Dropdown(content, o)
     local row = NewRow(content, { label = o.label, tip = o.tip })
     local b = MakeButton(row, { width = 200, height = 24, ring = C.violet, textColor = C.cyan, chamfer = 6, text = "" })
@@ -701,7 +702,7 @@ function UI.Dropdown(content, o)
     Track(function()
         local value = o.get()
         b.fsValue = value
-        b.fsLabel:SetText(tostring(value))
+        b.fsLabel:SetText(o.text and o.text(value) or tostring(value))
         SetLook(b, Writable())
     end)
     row.control = b
@@ -1106,11 +1107,52 @@ CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, buil
     UI.Toggle(page, { label = "Background grid", key = "actionbars.grid" })
 end })
 
-local PIECE_ORDER = { "you", "tgt", "next", "dot", "shard", "prc", "buff", "party" }
+local PIECE_ORDER = { "you", "tgt", "dot", "shard", "prc", "buff", "party" }
 local PIECE_LABELS = {
-    you = "Your cast bar", tgt = "Target cast bar", next = "Next cast tile", dot = "DoT time axis",
+    you = "Your cast bar", tgt = "Target cast bar", dot = "Target side areas",
     shard = "Soul shards", prc = "Proc posts", buff = "Buff reminders", party = "Party frames",
 }
+local AREA_LABELS = {
+    debuffsH = "Target Debuffs Horizontal", debuffsV = "Target Debuffs Vertical", class = "Class Module", empty = "Empty",
+}
+
+local function AreaItems()
+    local items = {}
+    for i, id in ipairs(FS.Gunsight.AREA_IDS) do items[i] = { value = id, text = AREA_LABELS[id] } end
+    return items
+end
+
+local function AreaDropdown(page, label, which)
+    local Gunsight = FS.Gunsight
+    UI.Dropdown(page, {
+        label = label,
+        get = function() return Gunsight.GetArea(which) end,
+        text = function(id) return AREA_LABELS[id] end,
+        items = AreaItems,
+        set = function(id) Gunsight.SetArea(which, id) end,
+    })
+end
+
+local function TargetSideGroups(page)
+    local Gunsight = FS.Gunsight
+    UI.Header(page, "Target side",
+        "Target debuffs shows only the debuffs you applied. Class Module shows your class's own resource: soul shards, seals, combo points.")
+    AreaDropdown(page, "Upper area", "upper")
+    AreaDropdown(page, "Lower area", "lower")
+    local Tags = FS.GunsightTags
+    if Tags and Tags.SETTINGS then
+        local S = Tags.SETTINGS
+        UI.Header(page, "Target box tags", "Small tags on the target info box.")
+        for _, tag in ipairs({ { "Level and class", "level" }, { "Health percent", "health" }, { "Target of target", "tot" } }) do
+            local setting = S[tag[2]]
+            if setting and setting.key then UI.Toggle(page, { label = tag[1], key = setting.key }) end
+        end
+    end
+    UI.Header(page, "Player side",
+        "My buffs is the plate left of the next cast tile. Next cast is the tile for your next spell.")
+    UI.Toggle(page, { label = "My buffs", key = Gunsight.PieceConfigKey("mybuffs") })
+    UI.Toggle(page, { label = "Next cast", key = Gunsight.PieceConfigKey("next") })
+end
 
 if FS.Gunsight and FS.Gunsight.PIECES then
     CW.RegisterCategory({ key = "gunsight", label = "Gunsight HUD", order = 2, build = function(page)
@@ -1119,6 +1161,7 @@ if FS.Gunsight and FS.Gunsight.PIECES then
             label = "Gunsight HUD", key = Gunsight.CONFIG_ENABLED, master = true,
             tip = "Master switch for the whole HUD. Takes effect after /reload.",
         })
+        TargetSideGroups(page)
         UI.Header(page, "Pieces")
         local known, n = {}, 0
         for _, key in ipairs(Gunsight.PIECES) do known[key] = true end

@@ -1550,7 +1550,7 @@ check(D.sor.names[1] == "Seal of Righteousness" and D.sotc.names[1] == "Seal of 
     and D.soj.names[1] == "Seal of Justice", "seal names")
 check(sl.judge.sotc == 40 and sl.judge.sol == 40 and sl.judge.sow == 40 and sl.judge.soj == 10, "judge seconds are data")
 for k in pairs(sl.judge) do check(D[k] and D[k].seal, "judge names a seal: " .. k) end
-check(type(prof.dotLabel) == "table" and prof.dotLabel.n == "Seal Chamber" and prof.dotLabel.d == "Active seal, drain timer and Judgement lane", "dotLabel is data")
+check(type(prof.dotLabel) == "table" and prof.dotLabel.n == "Target side" and prof.dotLabel.d == "Target debuffs and the Seal module beside the target cast bar", "dotLabel is data")
 check(#prof.row == 0 and next(prof.dots) == nil and #prof.selfBuffs == 0 and prof.resource == nil, "no row, dots, buffs or shards")
 check(D.hs.cooldown == 10 and D.jd.cooldown == 10, "both are 10 s cooldowns")
 check(D.hs.offGcd == nil and D.jd.offGcd == nil, "neither is marked off the global cooldown (unverified)")

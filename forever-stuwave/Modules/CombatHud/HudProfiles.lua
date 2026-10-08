@@ -82,7 +82,7 @@ local _, FS = ...
 FS.HudProfiles = {}
 
 -- The DoT area of the Gunsight HUD (deck key 6) is a CLASS slot: a Warlock and a Priest get the DoT time
--- tape, a Paladin gets the Seal Chamber. This is the one rule for who owns it, shared by ConsoleKeys.lua (does
+-- tape, a Paladin gets the Seal module. This is the one rule for who owns it, shared by ConsoleKeys.lua (does
 -- the key show) and GunsightDots.lua (does the tape draw), so the two cannot disagree. Returns "dots" for a
 -- profile with a non empty `dots` table (a profile with dots AND seals keeps the tape), "seals" for a `seals`
 -- table with no dots, nil for anything else (no profile, a profile that is not a table, neither field a table).
@@ -258,7 +258,7 @@ FS.HudProfiles.PALADIN = {
         judge = { sotc = 40, sol = 40, sow = 40, soj = 10 },
     },
     -- The reader is ConsoleKeys.Label (the tooltip of the console's DoT key).
-    dotLabel = { n = "Seal Chamber", d = "Active seal, drain timer and Judgement lane" },
+    dotLabel = { n = "Target side", d = "Target debuffs and the Seal module beside the target cast bar" },
     rotation = {
         { cast = "sor", when = { { "sealMissing", 5 } } },
         -- procActive "jd" is "Judgement is off cooldown and the target is attackable"; it is what

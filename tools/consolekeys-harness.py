@@ -95,6 +95,11 @@ def mockup_keys() -> dict:
         defs.append(dict(piece=PIECE_OF[k], n=n, d=d1 if d1 is not None else d2, c=c, g=g))
     if len(defs) != 8:
         sys.exit(f"mockup: expected 8 DECK_DEFS entries, found {len(defs)}")
+    # The v2 mockup names key 6 for the DoT scale; it now switches both target side areas, so only its
+    # tooltip text differs from the mockup (the glyph, colour and slot are still the mockup's).
+    for d in defs:
+        if d["piece"] == "dot":
+            d["n"], d["d"] = "Target side", "Target debuffs and class module beside the target cast bar"
     colors = {}
     for name, hexv in re.findall(r"^\s*--(cyan|gold|violet|pink|amber|green):(#[0-9a-fA-F]{6});", src, re.M):
         colors[name] = [int(hexv[i:i + 2], 16) / 255 for i in (1, 3, 5)]
@@ -427,7 +432,9 @@ check(desc("shard") == "Held shards under your cast bar", "shard: " .. tostring(
 
 case("click_toggles_the_right_piece")(r"""
 local CK, G = boot({})
-for _, piece in ipairs(G.PIECES) do
+-- one key per console piece; a piece with no key (the My buffs plate) has no click to test
+for _, def in ipairs(CK.DEFS) do
+    local piece = def.key
     local k = keyOf(CK, piece)
     for _, other in ipairs(G.PIECES) do check(G.IsPieceOn(other), "all pieces start on") end
     click(k)
@@ -532,14 +539,14 @@ check(k.btn:IsShown(), "the paladin shows the dot key")
 k.btn.scripts.OnEnter(k.btn)
 check(GameTooltip.shown and GameTooltip.owner == k.btn, "tooltip on the dot key")
 eq(GameTooltip.lines[1].text, FS.HudProfiles.PALADIN.dotLabel.n, "title is dotLabel.n")
-eq(GameTooltip.lines[1].text, "Seal Chamber", "the title is the Seal Chamber")
+eq(GameTooltip.lines[1].text, "Target side", "the title is Target side")
 eq(GameTooltip.lines[2].text, FS.HudProfiles.PALADIN.dotLabel.d, "description is dotLabel.d")
-eq(GameTooltip.lines[2].text, "Active seal, drain timer and Judgement lane", "the description is the chamber's")
+eq(GameTooltip.lines[2].text, "Target debuffs and the Seal module beside the target cast bar", "the description names the Seal module")
 eq(GameTooltip.lines[1].right, "ON", "the state word is still there")
 eq(#GameTooltip.lines, 2, "name, state and description only")
 click(k)
 eq(GameTooltip.lines[1].right, "OFF", "the state word follows a click")
-eq(GameTooltip.lines[1].text, "Seal Chamber", "and the title stays")
+eq(GameTooltip.lines[1].text, "Target side", "and the title stays")
 k.btn.scripts.OnLeave(k.btn)
 -- the other keys keep their own text
 for _, piece in ipairs({ "you", "next", "tgt", "prc", "party" }) do
@@ -563,7 +570,7 @@ for _, name in ipairs({ "WARLOCK", "PRIEST" }) do
     k.btn.scripts.OnEnter(k.btn)
     eq(GameTooltip.lines[1].text, dotDef.n, name .. " title")
     eq(GameTooltip.lines[2].text, dotDef.d, name .. " description")
-    eq(GameTooltip.lines[1].text, "DoT Timers", name .. " still says DoT Timers")
+    eq(GameTooltip.lines[1].text, "Target side", name .. " says Target side")
     k.btn.scripts.OnLeave(k.btn)
 end
 """)
@@ -571,15 +578,15 @@ end
 case("the_dot_label_follows_the_profile_as_it_resolves")(STR_EQ + r"""
 local CK = boot({ profile = false })
 local k = keyOf(CK, "dot")
-check(not k.btn:IsShown(), "no profile: the dot key is hidden")
+check(k.btn:IsShown(), "no profile: the dot key still shows, Target debuffs applies to every class")
 local dotDef
 for _, d in ipairs(MU.defs) do if d.piece == "dot" then dotDef = d end end
 -- the paladin resolves late: the key appears, and its tooltip reads the label at once
 HUD_PROFILE = FS.HudProfiles.PALADIN
 fire("PLAYER_ENTERING_WORLD")
-check(k.btn:IsShown(), "the dot key came back with the paladin profile")
+check(k.btn:IsShown(), "the dot key is still shown with the paladin profile")
 k.btn.scripts.OnEnter(k.btn)
-eq(GameTooltip.lines[1].text, "Seal Chamber", "label after a late paladin profile")
+eq(GameTooltip.lines[2].text, FS.HudProfiles.PALADIN.dotLabel.d, "label after a late paladin profile")
 k.btn.scripts.OnLeave(k.btn)
 -- a re-seat under another profile swaps the text back (nothing is cached on the key)
 HUD_PROFILE = FS.HudProfiles.WARLOCK
@@ -591,7 +598,7 @@ k.btn.scripts.OnLeave(k.btn)
 HUD_PROFILE = FS.HudProfiles.PALADIN
 FS.ActionBars.Publish()
 k.btn.scripts.OnEnter(k.btn)
-eq(GameTooltip.lines[1].text, "Seal Chamber", "and back")
+eq(GameTooltip.lines[2].text, FS.HudProfiles.PALADIN.dotLabel.d, "and back")
 k.btn.scripts.OnLeave(k.btn)
 """)
 
@@ -615,7 +622,7 @@ a, b = tip({ dots = { x = {} }, dotLabel = { d = "Only desc" } })
 eq(a, dotDef.n, "n falls back"); eq(b, "Only desc", "d alone is used")
 a, b = tip({ dots = { x = {} }, dotLabel = { n = "", d = 5 } })
 eq(a, dotDef.n, "an empty string falls back"); eq(b, dotDef.d, "a number falls back")
-a, b = tip({ dots = { x = {} }, dotLabel = "Seal Chamber" })
+a, b = tip({ dots = { x = {} }, dotLabel = "Seal module" })
 eq(a, dotDef.n, "a non table label falls back"); eq(b, dotDef.d, "and so does its description")
 a, b = tip({ dots = { x = {} }, dotLabel = {} })
 eq(a, dotDef.n, "an empty label falls back"); eq(b, dotDef.d, "both fields")
@@ -1015,49 +1022,50 @@ for i = 1, #shown - 1 do
 end
 """)
 
-case("no_profile_hides_shard_prc_next_buff_and_dot")(SHOWN_HELPERS + r"""
+case("no_profile_hides_shard_prc_next_and_buff_but_the_dot_key_stays")(SHOWN_HELPERS + r"""
 local CK = boot({ profile = false })
 check(HUD_PROFILE == nil, "no profile")
--- shard, prc, next and buff have nothing without a profile; the DoT lanes (one per profile dot)
--- draw nothing either, so that key hides too (the horizon segment is a hairline that stays)
-eq(joined(shownList(CK)), "you,tgt,party", "only the keys that need no profile")
-checkFits(CK, 3, "no profile")
+-- shard, prc, next and buff have nothing without a profile; the dot key (Target side) needs no profile
+eq(joined(shownList(CK)), "you,tgt,dot,party", "the keys that need no profile")
+checkFits(CK, 4, "no profile")
 eq(FS.HudProfiles.ROGUE, nil, "ROGUE has no HUD profile entry, so it takes this same path")
+""")
+
+case("a_mage_gets_the_dot_key")(SHOWN_HELPERS + r"""
+-- a Mage has no HUD profile (FS.HudProfiles only holds the priest, warlock and paladin)
+local CK = boot({ profile = false })
+eq(FS.HudProfiles.MAGE, nil, "no mage profile")
+local k = keyOf(CK, "dot")
+check(k.btn:IsShown(), "key 6 shows for a mage")
+eq(k.slot, 2, "and it takes its place after you and the target cast bar")
+eq(CK.KeyShown("dot", nil), true, "KeyShown says so with no profile")
 """)
 
 case("paladin_profile_shows_next_prc_and_the_dot_key_for_its_seal_slot")(SHOWN_HELPERS + r"""
 local CK = boot({ profile = "PALADIN" })
 check(HUD_PROFILE ~= nil, "the paladin has a profile")
 -- the cooldown tracker: a one rule rotation (next) and two sided procs (prc); no shards or buffs. The DoT slot
--- is a class slot: the paladin has no DoTs but a seal table, so its key stays and toggles the Seal Chamber.
+-- is a class slot: the paladin has no DoTs but a seal table, so its key stays and toggles the target side areas.
 eq(joined(shownList(CK)), "you,next,tgt,dot,prc,party", "next, dot and prc, no shard or buff")
 checkFits(CK, 6, "paladin")
 check(next(FS.HudProfiles.PALADIN.dots) == nil and type(FS.HudProfiles.PALADIN.seals) == "table",
       "the paladin profile has no dots and a seals table (the rule under test)")
 """)
 
-case("the_dot_key_asks_the_shared_class_slot_helper")(SHOWN_HELPERS + r"""
+case("the_dot_key_never_reads_the_profile")(SHOWN_HELPERS + r"""
 local CK = boot({ profile = "WARLOCK" })
--- the rule lives in FS.HudProfiles.ClassSlot (HudProfiles.lua), read at call time, shared with GunsightDots
-local asked = {}
+-- Target debuffs applies to every class, so the key has no rule: ClassSlot is not consulted at all
+local asked = 0
 local real = FS.HudProfiles.ClassSlot
-check(type(real) == "function", "setup: the real helper is loaded")
-FS.HudProfiles.ClassSlot = function(p) asked[#asked + 1] = p; return "seals" end
-local probe = {}
-eq(CK.KeyShown("dot", probe), true, "a helper answering seals shows the key whatever the profile holds")
-check(asked[1] == probe, "and it was asked about that profile")
-FS.HudProfiles.ClassSlot = function() return "dots" end
-eq(CK.KeyShown("dot", {}), true, "a helper answering dots shows the key")
-FS.HudProfiles.ClassSlot = function() return nil end
-eq(CK.KeyShown("dot", { dots = { x = {} }, seals = {} }), false, "a helper answering nothing hides it, even for a full profile")
--- a missing or throwing helper hides the key and never throws (the other keys are unaffected)
+FS.HudProfiles.ClassSlot = function() asked = asked + 1; return nil end
+eq(CK.KeyShown("dot", {}), true, "an empty profile")
+eq(CK.KeyShown("dot", { dots = {} }), true, "no dots and no seals")
+eq(CK.KeyShown("dot", FS.HudProfiles.PALADIN), true, "the paladin")
+eq(CK.KeyShown("dot", nil), true, "no profile")
 FS.HudProfiles.ClassSlot = nil
-eq(CK.KeyShown("dot", { dots = { x = {} } }), false, "no helper: hidden, no throw")
-eq(CK.KeyShown("next", { rotation = { { cast = "x", when = {} } } }), true, "no helper: the other keys keep their own rules")
-FS.HudProfiles.ClassSlot = function() error("boom") end
-eq(CK.KeyShown("dot", { dots = { x = {} } }), false, "a throwing helper: hidden, no throw")
+eq(CK.KeyShown("dot", { dots = {} }), true, "no helper")
 FS.HudProfiles.ClassSlot = real
-eq(CK.KeyShown("dot", FS.HudProfiles.PALADIN), true, "the real helper again: the paladin key shows")
+eq(asked, 0, "the shared class slot helper is never asked")
 """)
 
 case("a_profile_with_no_hud_fields_hides_each_key_by_its_own_rule")(SHOWN_HELPERS + r"""
@@ -1065,28 +1073,28 @@ local function shownFor(profile)
     local CK = boot({ profile = profile })
     return joined(shownList(CK))
 end
-eq(shownFor({}), "you,tgt,party", "an empty profile has nothing for any profile key")
-eq(shownFor({ resource = { shards = { item = 6265 } } }), "you,shard,tgt,party", "shards need resource.shards")
-eq(shownFor({ resource = {} }), "you,tgt,party", "a resource without shards shows no shard key")
-eq(shownFor({ procs = {} }), "you,tgt,party", "empty procs: no key")
-eq(shownFor({ procs = { x = { label = "X" } } }), "you,tgt,party", "a proc with no side draws no rung, so no key")
-eq(shownFor({ procs = { x = { side = "left" } } }), "you,tgt,prc,party", "a proc with a side shows the key")
-eq(shownFor({ rotation = {} }), "you,tgt,party", "an empty rotation has no next cast")
-eq(shownFor({ rotation = { { cast = "x", when = {} } } }), "you,next,tgt,party", "a rotation shows the next key")
-eq(shownFor({ selfBuffs = {} }), "you,tgt,party", "no self buffs: no buff key")
-eq(shownFor({ selfBuffs = { { spell = "x" } } }), "you,buff,tgt,party", "self buffs show the buff key")
-eq(shownFor({ dots = {} }), "you,tgt,party", "no dots and no seals: the DoT slot has nothing, so no key")
-eq(shownFor({ dots = { x = {} } }), "you,tgt,dot,party", "dots show the DoT key")
-eq(shownFor({ seals = { order = { "sor" } } }), "you,tgt,dot,party", "a seals table alone shows the DoT key")
+eq(shownFor({}), "you,tgt,dot,party", "an empty profile has nothing for any profile key")
+eq(shownFor({ resource = { shards = { item = 6265 } } }), "you,shard,tgt,dot,party", "shards need resource.shards")
+eq(shownFor({ resource = {} }), "you,tgt,dot,party", "a resource without shards shows no shard key")
+eq(shownFor({ procs = {} }), "you,tgt,dot,party", "empty procs: no key")
+eq(shownFor({ procs = { x = { label = "X" } } }), "you,tgt,dot,party", "a proc with no side draws no rung, so no key")
+eq(shownFor({ procs = { x = { side = "left" } } }), "you,tgt,dot,prc,party", "a proc with a side shows the key")
+eq(shownFor({ rotation = {} }), "you,tgt,dot,party", "an empty rotation has no next cast")
+eq(shownFor({ rotation = { { cast = "x", when = {} } } }), "you,next,tgt,dot,party", "a rotation shows the next key")
+eq(shownFor({ selfBuffs = {} }), "you,tgt,dot,party", "no self buffs: no buff key")
+eq(shownFor({ selfBuffs = { { spell = "x" } } }), "you,buff,tgt,dot,party", "self buffs show the buff key")
+eq(shownFor({ dots = {} }), "you,tgt,dot,party", "no dots and no seals: the dot key still shows")
+eq(shownFor({ dots = { x = {} } }), "you,tgt,dot,party", "dots show the dot key")
+eq(shownFor({ seals = { order = { "sor" } } }), "you,tgt,dot,party", "a seals table alone shows the dot key")
 eq(shownFor({ dots = {}, seals = { order = { "sor" } } }), "you,tgt,dot,party", "empty dots plus seals shows it")
 eq(shownFor({ dots = { x = {} }, seals = { order = { "sor" } } }), "you,tgt,dot,party", "dots plus seals shows it once")
-eq(shownFor({ seals = true }), "you,tgt,party", "a seals value that is not a table does not show it")
-eq(shownFor({ dotLabel = { n = "N", d = "D" } }), "you,tgt,party", "a dotLabel alone does not show the key")
-eq(shownFor({ rotation = { { cast = "x", when = {} } } }), "you,next,tgt,party", "other rules are untouched by the seals rule")
+eq(shownFor({ seals = true }), "you,tgt,dot,party", "a seals value that is not a table: the dot key still shows")
+eq(shownFor({ dotLabel = { n = "N", d = "D" } }), "you,tgt,dot,party", "a dotLabel alone: the dot key still shows")
+eq(shownFor({ rotation = { { cast = "x", when = {} } } }), "you,next,tgt,dot,party", "the other keys keep their own rules")
 local CK = boot({ profile = "WARLOCK" })
-eq(CK.KeyShown("dot", { dots = {} }), false, "KeyShown: no dots, no seals")
+eq(CK.KeyShown("dot", { dots = {} }), true, "KeyShown: no dots, no seals still shows")
 eq(CK.KeyShown("dot", { seals = {} }), true, "KeyShown: a seals table")
-eq(CK.KeyShown("dot", nil), false, "KeyShown: no profile")
+eq(CK.KeyShown("dot", nil), true, "KeyShown: no profile")
 eq(CK.KeyShown("you", nil), true, "KeyShown: the always keys")
 """)
 
@@ -1101,7 +1109,7 @@ local function gaps(CK)
     for i = 2, #xs do out[#out + 1] = xs[i] - xs[i - 1] - MU.KEY_W * s end
     return out
 end
-local four = { rotation = { { cast = "x", when = {} } } }   -- you, next, tgt, party
+local four = {}   -- an empty profile: you, tgt, dot, party
 for _, case in ipairs({ { 8, "WARLOCK" }, { 6, "PRIEST" }, { 4, four } }) do
     local n, profile = case[1], case[2]
     local CK = boot({ profile = profile })
@@ -1146,7 +1154,7 @@ check(not shard.hover, "hover cleared with the hidden key")
 
 case("a_late_profile_reruns_the_visibility_on_every_hook")(SHOWN_HELPERS + r"""
 local CK = boot({ profile = false })
-eq(joined(shownList(CK)), "you,tgt,party", "no profile yet")
+eq(joined(shownList(CK)), "you,tgt,dot,party", "no profile yet")
 HUD_PROFILE = FS.HudProfiles.PRIEST
 fire("PLAYER_ENTERING_WORLD")
 eq(joined(shownList(CK)), "you,next,buff,tgt,dot,party", "entering world picks the profile up")
@@ -1157,7 +1165,7 @@ eq(joined(shownList(CK)), "you,next,shard,buff,tgt,dot,prc,party", "a geometry p
 checkFits(CK, 8, "warlock after a publish")
 HUD_PROFILE = nil
 fire("PLAYER_REGEN_ENABLED")
-eq(joined(shownList(CK)), "you,tgt,party", "regen picks it up")
+eq(joined(shownList(CK)), "you,tgt,dot,party", "regen picks it up")
 HUD_PROFILE = FS.HudProfiles.PRIEST
 SetScreen(1200); fire("UI_SCALE_CHANGED"); FS.ActionBars.Publish()
 checkFits(CK, 6, "priest after a rescale")
@@ -1176,10 +1184,10 @@ local setSize, setPoint = tab.calls.SetSize, CK.keys[1].btn.calls.SetPoint
 IN_COMBAT = true
 HUD_PROFILE = FS.HudProfiles.WARLOCK
 fire("PLAYER_ENTERING_WORLD")
-eq(joined(shownList(CK)), "you,tgt,party", "nothing shown or hidden in combat")
+eq(joined(shownList(CK)), "you,tgt,dot,party", "nothing shown or hidden in combat")
 eq(tab.calls.SetSize, setSize, "the tab is not resized in combat")
 eq(CK.keys[1].btn.calls.SetPoint, setPoint, "keys are not re-anchored in combat")
-eq(FS.Console.GetKeyCount(), 3, "the Console keeps the old count in combat")
+eq(FS.Console.GetKeyCount(), 4, "the Console keeps the old count in combat")
 check(#BLOCKED == 0, "nothing protected was touched in combat")
 IN_COMBAT = false
 fire("PLAYER_REGEN_ENABLED")

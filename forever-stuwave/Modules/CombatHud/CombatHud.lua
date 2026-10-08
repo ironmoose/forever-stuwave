@@ -13,7 +13,7 @@
 -- only the NEXT tile, the soul shards and the buff reminder, each seated on its FS.Gunsight anchor
 -- (anchors.next, anchors.shards, anchors.buff) and registered as a Gunsight piece (`next`, `shard`,
 -- `buff`) from inside FS.Gunsight.OnReady, so /fsgun piece can switch it off. Their sizes are the
--- Gunsight mockup's DESIGN px (NEXT 56, shard 10 x 18 with gap 4, buff 24) times FS.Layout.Scale(),
+-- Gunsight mockup's DESIGN px (NEXT 56, buff 24; the shard seat is one 9.5 x 17 glyph and the count) times FS.Layout.Scale(),
 -- not the UI-unit table G below, and a rescale re-derives them. Nothing in that view reads a cast
 -- bar frame or calls FS.CastBars (the idle row and the rest alpha included), and the Stack A spell
 -- row, its cooldown ticker, the per-tile DoT slots (the "target" aura container) and the out of
@@ -134,6 +134,10 @@ local TUNE = {
     IDLE_IN_COMBAT = true,
     SHARD_CANVAS_W = 16, SHARD_CANVAS_H = 32,      -- design px of the line, fill and facet files (generate_hud_shard.py LINE_TEX)
     SHARD_GLOW_CANVAS = 40,                        -- design px of the square glow file (GLOW_TEX)
+    HOME_GLYPH_W = 9.5, HOME_GLYPH_H = 17,         -- v7 homeShards: the one glyph's box, image px
+    HOME_GLYPH_DX = 16.25, HOME_NUM_PX = 14,       -- its centre left of the count's right edge, and the count's size, image px
+    HOME_DIGIT = 0.6,                              -- the mono face's advance per size: the glyph steps left this far per extra digit
+    HOME_OFF_LINE = 0.4, HOME_OFF_FILL = 0.06, HOME_OFF_FACET = 0.2,   -- shard(..., filled=false): the unlit glyph's alphas
 }
 local GRID = 1.28                                    -- design px per canvas image px (the Gunsight mockup's U = 1 / 1.28)
 local BUFF_PULSE_FROM, BUFF_PULSE_S, BUFF_GLOW = 0.35, 1.4, 8   -- @keyframes hudpulse: border alpha from, seconds, box-shadow
@@ -379,7 +383,7 @@ end
 -- Frame building blocks
 -------------------------------------------------------------------------------
 
-local ui = { tiles = {}, buffTiles = {}, diamonds = {}, shardGlyphs = {} }
+local ui = { tiles = {}, buffTiles = {}, diamonds = {} }
 CombatHud.ui = ui
 local containers = {}
 CombatHud.containers = containers
@@ -388,8 +392,6 @@ CombatHud.stats = { cdTicks = 0 }
 -------------------------------------------------------------------------------
 -- The Gunsight view: which view, and the design px to UI unit multiplier
 -------------------------------------------------------------------------------
-
-local SHARD_GLYPHS = 4        -- the Gunsight row draws at most the mockup's SH_SC shards, then a "+N" count
 
 -- True while the Gunsight HUD is the view to draw. Read once per build (ui.gunsight): /fsgun on|off
 -- needs a reload, so the answer cannot change under a built UI.
@@ -1433,17 +1435,14 @@ end
 -- Soul shards
 -------------------------------------------------------------------------------
 
--- Gunsight view: each held shard is a LINE ART crystal, the mockup's SH_GLYPH (drawShards), as four
--- textures baked by media/generate_hud_shard.py and tinted here, nothing coloured in the files:
+-- Gunsight view (v7 homeShards): the seat under your cast bar is ONE line art crystal and the count. The glyph is the
+-- mockup's SH_GLYPH as four textures baked by media/generate_hud_shard.py and tinted here, nothing coloured in the files:
 --   glow   a soft violet halo of the outline (the strength glow(K.violet, .5) is baked into its alpha)
 --   line   the outline stroke, violet
 --   fill   the lit top facet, violet at the mockup's faint alpha (SHARD_FILL_ALPHA)
 --   facet  the three interior facet lines, violet mixed SHARD_FACET_MIX toward white
--- All four are canvases larger than the 10 x 18 cell (the stroke is centred on the outline and the
--- halo reaches further), centred on the cell, sized in design px times the UI scale. They are plain
--- textures on the row frame (no frame per shard): the glows are BACKGROUND regions, so every glyph
--- draws above every halo, as it must where neighbours' halos overlap. A rescale only re-sizes and
--- re-seats them, it builds nothing.
+-- The files are canvases larger than the cell they were baked for, so a glyph box scales them by its ratio to
+-- that cell. A rescale only re-sizes and re-seats them, it builds nothing.
 local SHARD_TEXTURES = {
     glow = MEDIA .. "hud_shard_glow.tga", line = MEDIA .. "hud_shard_line.tga",
     fill = MEDIA .. "hud_shard_fill.tga", facet = MEDIA .. "hud_shard_facet.tga",
@@ -1455,9 +1454,9 @@ local function Lighten(c, f)
     return { c[1] + (1 - c[1]) * f, c[2] + (1 - c[2]) * f, c[3] + (1 - c[3]) * f }
 end
 
--- Builds the four textures of shard i once. The glow goes on the row's BACKGROUND layer, the rest on
+-- Builds the glyph and the count once. The glow goes on the seat's BACKGROUND layer, the rest on
 -- ARTWORK sublevels 0 to 2 (line, fill, facet), all tinted from the Gunsight violet.
-local function BuildShardGlyph(i)
+local function BuildShardGlyph()
     local facet = Lighten(BORDER, SHARD_FACET_MIX)
     local glyph = {}
     glyph.glow = ui.shards:CreateTexture(nil, "BACKGROUND")
@@ -1472,74 +1471,74 @@ local function BuildShardGlyph(i)
     glyph.facet = ui.shards:CreateTexture(nil, "ARTWORK", nil, 2)
     glyph.facet:SetTexture(SHARD_TEXTURES.facet)
     glyph.facet:SetVertexColor(facet[1], facet[2], facet[3], 1)
-    ui.shardGlyphs[i] = glyph
-    return glyph
+    ui.shardGlyph = glyph
+    ui.shardNum = ui.shards:CreateFontString(nil, "OVERLAY")
+    ui.shardNum:SetJustifyH("RIGHT")
 end
 
-local function SetShardGlyphShown(glyph, shown)
-    glyph.glow:SetShown(shown)
-    glyph.line:SetShown(shown)
-    glyph.fill:SetShown(shown)
-    glyph.facet:SetShown(shown)
+-- Lit (a shard is held): the halo and the full strokes. Unlit (0 shards): no halo, the mockup's dim strokes.
+local function SetShardGlyphLit(glyph, lit)
+    local facet = Lighten(BORDER, SHARD_FACET_MIX)
+    glyph.glow:SetShown(lit)
+    glyph.line:SetVertexColor(BORDER[1], BORDER[2], BORDER[3], lit and 1 or TUNE.HOME_OFF_LINE)
+    glyph.fill:SetVertexColor(BORDER[1], BORDER[2], BORDER[3], lit and SHARD_FILL_ALPHA or TUNE.HOME_OFF_FILL)
+    glyph.facet:SetVertexColor(facet[1], facet[2], facet[3], lit and 1 or TUNE.HOME_OFF_FACET)
+    glyph.line:Show()
+    glyph.fill:Show()
+    glyph.facet:Show()
 end
 
--- Gunsight view: the shard row is the anchor's rect (sized for the mockup's four, right aligned to
--- the tape), a cell is SH_W x SH_H design px with SH_G between, the first flush right. Sizes and
--- seats are re-applied here so a rescale can re-run them over the glyphs already built.
+-- Gunsight view: the count is flush with the right edge of the shard anchor (the tape's edge) and the glyph
+-- centre sits HOME_GLYPH_DX image px left of it, one more advance per extra digit. Sizes and seats are
+-- re-applied here so a rescale can re-run them over what is already built.
 local function SeatShardsGunsight(k)
-    local GS = FS.Gunsight.G
-    local step = (GS.SH_W + GS.SH_G) * k
-    for i, glyph in ipairs(ui.shardGlyphs) do
-        -- the cell's centre: half a cell in from the row's right edge, i - 1 steps left
-        local x = -(i - 1) * step - GS.SH_W * k / 2
-        for name, tex in pairs(glyph) do
-            local w, h = TUNE.SHARD_CANVAS_W, TUNE.SHARD_CANVAS_H
-            if name == "glow" then w, h = TUNE.SHARD_GLOW_CANVAS, TUNE.SHARD_GLOW_CANVAS end
-            tex:SetSize(w * k, h * k)
-            tex:ClearAllPoints()
-            tex:SetPoint("CENTER", ui.shards, "RIGHT", x, 0)
-        end
+    local glyph, num = ui.shardGlyph, ui.shardNum
+    if not (glyph and num) then return end
+    local gs = FS.Gunsight.G
+    local imagePx = GRID * k
+    local cellW, cellH = TUNE.HOME_GLYPH_W * GRID / gs.SH_W, TUNE.HOME_GLYPH_H * GRID / gs.SH_H
+    local x = -(TUNE.HOME_GLYPH_DX + ((ui.shardDigits or 1) - 1) * TUNE.HOME_DIGIT * TUNE.HOME_NUM_PX) * imagePx
+    for name, tex in pairs(glyph) do
+        local w, h = TUNE.SHARD_CANVAS_W, TUNE.SHARD_CANVAS_H
+        if name == "glow" then w, h = TUNE.SHARD_GLOW_CANVAS, TUNE.SHARD_GLOW_CANVAS end
+        tex:SetSize(w * cellW * k, h * cellH * k)
+        tex:ClearAllPoints()
+        tex:SetPoint("CENTER", ui.shards, "RIGHT", x, 0)
     end
-    local more = ui.shardMore
-    if more then
-        ApplyFont(more, Sz(10, k), BORDER, true)
-        more:ClearAllPoints()
-        -- one gap left of the last glyph's cell: the cells span SHARD_GLYPHS steps from the right edge
-        more:SetPoint("RIGHT", ui.shards, "RIGHT", -SHARD_GLYPHS * step, 0)
-    end
+    ApplyFont(num, Sz(CanvasPx(TUNE.HOME_NUM_PX), k), (ui.shardCount or 0) >= 1 and Theme.COLOR_TEXT_WHITE or COLOR_MUTED, true, "OUTLINE")
+    num:ClearAllPoints()
+    num:SetPoint("RIGHT", ui.shards, "RIGHT", 0, 0)
 end
 
--- Only HELD shards are drawn (nothing at 0), at most SHARD_GLYPHS glyphs, then a "+N" count of the
--- shards past them to the left of the row.
+-- True while the Class Module draws the count in an area; the seat under your cast bar then stays empty.
+-- No seam, a failing or secret answer reads as "not in an area".
+local function ClassModuleShowsShards()
+    local areas = FS.GunsightAreas
+    if type(areas) ~= "table" or type(areas.AreaOf) ~= "function" then return false end
+    local ok, area = pcall(areas.AreaOf, "class")
+    return ok and not IsSecret(area) and type(area) == "string"
+end
+
+-- The glyph and the count; at 0 shards the glyph is dim and the count muted (v7 state D). Nothing for an
+-- unknown or secret count, or while the Class Module draws it in an area.
 local function RenderShardsGunsight(state, profile)
     local n = PlainNumber(state.shards)
     local has = profile.resource and profile.resource.shards
-    if not (has and n and n >= 1) then
+    if not (has and n and n >= 0) or ClassModuleShowsShards() then
         ui.shards:Hide()
-        ui.shardCount = 0
+        ui.shardCount = nil
         return false
     end
     n = math.floor(n)
     if ui.shardCount ~= n then
         ui.shardCount = n
-        local shown = math.min(n, SHARD_GLYPHS)
-        for i = 1, shown do
-            SetShardGlyphShown(ui.shardGlyphs[i] or BuildShardGlyph(i), true)
-        end
-        for i = shown + 1, #ui.shardGlyphs do SetShardGlyphShown(ui.shardGlyphs[i], false) end
-        local extra = n - shown
-        if extra > 0 and not ui.shardMore then
-            ui.shardMore = ui.shards:CreateFontString(nil, "OVERLAY")
-        end
+        if not ui.shardGlyph then BuildShardGlyph() end
+        SetShardGlyphLit(ui.shardGlyph, n >= 1)
+        ui.shardDigits = #tostring(n)
         SeatShardsGunsight(K())
-        if ui.shardMore then
-            if extra > 0 then
-                ui.shardMore:SetText("+" .. extra)
-                ui.shardMore:Show()
-            else
-                ui.shardMore:Hide()
-            end
-        end
+        local c = n >= 1 and Theme.COLOR_TEXT_WHITE or COLOR_MUTED
+        ui.shardNum:SetTextColor(c[1], c[2], c[3], c[4] or 1)
+        ui.shardNum:SetText(tostring(n))
     end
     ui.shards:Show()
     return true
@@ -1914,7 +1913,7 @@ local function HideAll()
     ui.rowSig = nil
     ui.nextTile.holder:Hide()
     ui.shards:Hide()
-    ui.shardCount = 0
+    ui.shardCount = nil
     ui.buffs:Hide()
     ui.buffSig = nil
     for _, tile in pairs(ui.tiles) do
@@ -2062,6 +2061,12 @@ local function RegisterPieces()
         if not ok or not result then
             LogOnce("piece_" .. p[1], "FS.Gunsight.RegisterPiece refused the " .. p[1] .. " piece (" .. tostring(result) .. ").")
         end
+    end
+    -- the shard seat follows the Class Module: it hides while an area shows the count, and returns when it leaves
+    local areas = FS.GunsightAreas
+    if type(areas) == "table" and type(areas.OnAreaChanged) == "function" then
+        local ok, err = pcall(areas.OnAreaChanged, Rerender)
+        if not ok then LogOnce("area_listener", "FS.GunsightAreas.OnAreaChanged failed (" .. tostring(err) .. ").") end
     end
 end
 

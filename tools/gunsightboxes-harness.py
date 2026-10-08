@@ -1939,28 +1939,145 @@ function T.junk_and_out_of_range_settings_read_as_the_default_or_the_nearest_end
     W.clean(); noFails()
 end
 
-function T.numbers_sit_outside_the_box_at_its_outer_end_one_line_under_the_other()
+-- The numbers' share of the box: the box grows UP so a row of NUM_SIZE type fits between the rails and the divider.
+-- Written out here from the geometry (rails y26 to the power rail's end, one px above and below the row, the
+-- divider at DIV_Y + TGT_GROW from the old top), not read from the code under test.
+local function wantExtra(W, hpSetting, pwSetting)
+    local C = FS.GunsightBoxes.C
+    local railsEnd = C.TB_HP_Y + hpPx(hpSetting) + C.TB_GAP + hpPx(pwSetting)
+    return math.ceil(railsEnd + 1 + C.NUM_SIZE + 1 - (C.DIV_Y + C.TGT_GROW))
+end
+
+-- Every seat of the target box that today's look pins, as one comparable string (frame-relative points, sizes).
+local function seatsOf(W)
+    local box, out = W.tgt.box, {}
+    local function pt(label, o)
+        for _, name in ipairs({ "TOPLEFT", "BOTTOMLEFT", "TOPRIGHT", "BOTTOMRIGHT" }) do
+            local p = o._points[name]
+            if p then out[#out + 1] = string.format("%s.%s=%s:%s:%.4f:%.4f", label, name, tostring(p.rel == box.frame and "box" or "other"), p.relPoint, p.x, p.y) end
+        end
+        out[#out + 1] = string.format("%s.size=%.4f:%.4f", label, o._w or 0, o._h or 0)
+    end
+    pt("frame", box.frame); pt("l1", box.l1); pt("tile", box.tile)
+    local keys = {}
+    for key in pairs(box.l2) do keys[#keys + 1] = key end
+    table.sort(keys)
+    for _, key in ipairs(keys) do pt("l2." .. key, box.l2[key]); if box.divider[key] then pt("div." .. key, box.divider[key]) end end
+    local b = box.bars
+    pt("hp", b.hp.green.host); pt("hpRed", b.hp.red.host); pt("pw", b.power.host)
+    out[#out + 1] = "grow=" .. tostring(box.grow)
+    out[#out + 1] = string.format("kick=%.4f", W.tgt.kick._points.TOPLEFT.y)
+    return table.concat(out, "\n")
+end
+
+function T.numbers_sit_inside_the_grown_box_under_the_rails_health_left_resource_right()
     local W = world()
     local C = FS.GunsightBoxes.C
     target("Kurak")
     numbersOn()
     local k, b, box = K(), bars(W), W.tgt.box
     eq(b.hpText:GetParent(), b.frame, "numbers belong to the bars frame (they go with the target)")
-    local hp, pw = b.hpText._points.BOTTOMLEFT, b.powerText._points.BOTTOMLEFT
-    eq(hp.rel, box.frame); eq(hp.relPoint, "TOPRIGHT"); near(hp.x, C.NUM_GAP * k, 1e-6, "past the outer edge")
-    eq(pw.rel, box.frame); eq(pw.relPoint, "TOPRIGHT"); near(pw.x, C.NUM_GAP * k, 1e-6)
-    local hpBase = C.TB_HP_Y + hpPx(S().hpHeight.default)
-    near(hp.y, -(hpBase + C.NUM_SIZE * C.DESCENT) * k, 1e-6, "health number on the health rule's bottom edge")
-    near(pw.y, -(hpBase + C.NUM_SIZE + C.NUM_LINE + C.NUM_SIZE * C.DESCENT) * k, 1e-6, "power number one line below")
+    local railsEnd = C.TB_HP_Y + hpPx(S().hpHeight.default) + C.TB_GAP + hpPx(S().powerHeight.default)
+    eq(railsEnd, 34.5, "the rails end at y 34.5 at the defaults")
+    local base = railsEnd + 1 + C.NUM_SIZE
+    local span = (MB.base.BOXR.w - 2 * C.PAD) * k
+    local hp, pw = b.hpText._points.BOTTOMLEFT, b.powerText._points.BOTTOMRIGHT
+    eq(hp.rel, box.frame); eq(hp.relPoint, "TOPLEFT"); near(hp.x, C.TB_X * k, 1e-6, "health starts at the rails' left edge")
+    near(hp.y, -(base + C.NUM_SIZE * C.DESCENT) * k, 1e-6, "one px under the rails, on a baseline")
+    eq(pw.rel, box.frame); eq(pw.relPoint, "TOPLEFT"); near(pw.x, C.TB_X * k + span, 1e-6, "resource ends at the rails' 100 px span")
+    near(pw.y, hp.y, 1e-6, "one row")
+    eq(b.hpText._justifyH, "LEFT"); eq(b.powerText._justifyH, "RIGHT")
+    near(b.hpText._w, span / 2, 1e-6, "a fixed width, so a long current / max clips"); near(b.powerText._w, span / 2, 1e-6)
     eq(b.hpText._fontSize, fontFor(C.NUM_SIZE)); eq(b.powerText._fontSize, fontFor(C.NUM_SIZE))
-    eq(b.hpText._justifyH, "LEFT")
-    setting("hpHeight", 12)
-    local hp2 = b.hpText._points.BOTTOMLEFT
-    near(hp2.y, -(C.TB_HP_Y + hpPx(12) + C.NUM_SIZE * C.DESCENT) * k, 1e-6, "the numbers follow a taller health rule")
+    ok(base + 1 <= C.DIV_Y + box.grow, "the row ends a px above the divider")
+    ok(railsEnd + 1 <= base - C.NUM_SIZE + 1e-9, "and starts a px under the rails")
+    ok(base < C.DIV_Y + box.grow, "inside the box: nothing is seated past its outer edge")
+    ok(hp.relPoint ~= "TOPRIGHT" and pw.relPoint ~= "TOPRIGHT", "no number is hung off the outer edge")
     UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
     __fireEvent("UI_SCALE_CHANGED")
-    eq(b.hpText._fontSize, fontFor(C.NUM_SIZE), "and a rescale resizes the type")
-    near(b.hpText._points.BOTTOMLEFT.x, C.NUM_GAP * K(), 1e-6)
+    k = K()
+    eq(b.hpText._fontSize, fontFor(C.NUM_SIZE), "a rescale resizes the type")
+    near(b.hpText._points.BOTTOMLEFT.x, C.TB_X * k, 1e-6)
+    near(b.powerText._w, (MB.base.BOXR.w - 2 * C.PAD) * k / 2, 1e-6, "and the row's width")
+    W.clean(); noFails()
+end
+
+function T.numbers_on_grow_the_box_up_and_the_divider_line_two_and_tile_keep_their_screen_seats()
+    local W = world()
+    local C = FS.GunsightBoxes.C
+    target("Kurak")
+    local k, box = K(), W.tgt.box
+    local function screen()
+        local div
+        for _, d in pairs(box.divider) do div = box.frame._points.TOPLEFT.y + d._points.TOPLEFT.y end
+        local l2
+        for _, fs in pairs(box.l2) do l2 = box.frame._points.TOPLEFT.y + fs._points.BOTTOMLEFT.y end
+        return { div = div, l2 = l2, tile = box.frame._points.TOPLEFT.y + box.tile._points.TOPRIGHT.y,
+                 bottom = box.frame._points.BOTTOMRIGHT.y }
+    end
+    local before, l1Before, railBefore = screen(), box.l1._points.BOTTOMLEFT.y, bars(W).hp.green.host._points.TOPLEFT.y
+    eq(box.grow, C.TGT_GROW, "numbers off: the box is the option B box")
+    numbersOn()
+    local extra = wantExtra(W, 11, 4)
+    eq(extra, 9, "about 9 image px at the defaults")
+    eq(box.grow, C.TGT_GROW + extra, "the box grew by the numbers' room")
+    near(box.frame._points.TOPLEFT.y, (C.TGT_GROW + extra) * k, 1e-6, "its top edge is higher by exactly that")
+    near(box.frame._points.BOTTOMRIGHT.y, 0, 1e-6, "its bottom stays on the anchor")
+    local after = screen()
+    for _, key in ipairs({ "div", "l2", "tile", "bottom" }) do near(after[key], before[key], 1e-6, key .. " keeps its screen seat") end
+    near(box.l1._points.BOTTOMLEFT.y, l1Before, 1e-6, "line 1 rides the top")
+    near(bars(W).hp.green.host._points.TOPLEFT.y, railBefore, 1e-6, "and so do the rails")
+    near(W.tgt.kick._points.TOPLEFT.y, (FS.GunsightTape.C.KICK_DY + box.grow) * k, 1e-6, "KICK rides the grown top")
+    W.clean(); noFails()
+end
+
+function T.the_numbers_room_follows_the_rail_heights_and_a_rescale_keeps_the_grown_top()
+    local W = world()
+    local C = FS.GunsightBoxes.C
+    target("Kurak")
+    numbersOn()
+    local box = W.tgt.box
+    setting("hpHeight", 2); setting("powerHeight", 2)
+    eq(wantExtra(W, 2, 2), 3, "thin rails leave more room")
+    eq(box.grow, C.TGT_GROW + 3, "the box shrinks back with them")
+    setting("hpHeight", 12); setting("powerHeight", 2)
+    eq(box.grow, C.TGT_GROW + wantExtra(W, 12, 2), "and grows with a taller health rail")
+    UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
+    __fireEvent("UI_SCALE_CHANGED")
+    near(box.frame._points.TOPLEFT.y, box.grow * K(), 1e-6, "a rescale keeps the grown top")
+    W.clean(); noFails()
+end
+
+function T.with_the_numbers_off_again_the_box_is_pixel_identical_to_today()
+    local W = world()
+    local C = FS.GunsightBoxes.C
+    target("Kurak")
+    local fresh = seatsOf(W)
+    numbersOn()
+    ok(seatsOf(W) ~= fresh, "the numbers change the box")
+    setting("numbers", false)
+    eq(seatsOf(W), fresh, "off again: every seat is back where today's box has it")
+    eq(W.tgt.box.grow, C.TGT_GROW)
+    setting("numbers", true); setting("hpHeight", 12); setting("numbers", false); setting("hpHeight", S().hpHeight.default)
+    eq(seatsOf(W), fresh, "whatever the rails did meanwhile")
+    W.clean(); noFails()
+end
+
+function T.numbers_off_and_a_default_box_grow_by_nothing_at_build()
+    local W = world()
+    eq(W.tgt.box.grow, FS.GunsightBoxes.C.TGT_GROW, "no numbers, no extra rise")
+    eq(W.you.box.grow, 0, "yours never grows")
+    W.clean(); noFails()
+end
+
+function T.the_box_grows_at_once_in_combat_because_nothing_it_holds_is_protected()
+    local W = world()
+    target("Kurak")
+    InCombatLockdown = function() return true end
+    numbersOn()
+    eq(W.tgt.box.grow, FS.GunsightBoxes.C.TGT_GROW + 9, "the box frame is plain")
+    near(W.tgt.box.frame._points.TOPLEFT.y, W.tgt.box.grow * K(), 1e-6)
+    InCombatLockdown = function() return false end
     W.clean(); noFails()
 end
 

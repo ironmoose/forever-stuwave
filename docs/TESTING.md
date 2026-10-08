@@ -37,7 +37,7 @@ The log is account wide: if another character already logged in with this build,
 
 Optional developer diagnostics: `/fsprobe` records what this client exposes in and out of combat.
 
-## Paladin: seals, auras, Seal Chamber, chat font
+## Paladin: seals, auras, Seal module, chat font
 
 Use a Paladin that has learned at least one seal. Step 6 works on any class.
 
@@ -74,33 +74,20 @@ Use a Paladin that has learned at least one seal. Step 6 works on any class.
      The buttons repack, but the key still casts the same seal.
    - Aura keys use the game's own stance bindings, so learning a new aura can
      move a key to the neighbouring aura, the same as Blizzard's stance bar.
-4. Seal Chamber, in the Gunsight's DoT area. Hover the keys on the Console's
-   shoulder tab until one reads "Seal Chamber". If its tooltip says it is off,
-   click it to turn it on (a click toggles it). Seals last 30 s (the ruler
-   runs 0 to 30). Then:
-   - Cast a seal. It shows the glyph in the seal's colour, a quick
-     strike-up flicker, the drain, and the countdown.
-   - In the last 5 s it flickers and reads EXPIRING.
-   - At 3 s or less the RESEAL band lights.
-   - At expiry it reads NO SEAL. "IN COMBAT" shows under it only while you
-     are in combat, and in combat it pulses.
-   - Cast a seal again, then cast Judgement. A ring pulses out from the
-     glyph. The seal stays up after Judgement: the chamber keeps draining
-     and does not drop to NO SEAL.
-   - Judgement lane (the JUDGED side). Judge a target while a Crusader,
-     Light, Wisdom or Justice seal is up:
-     - The lane shows a bar and a chip with the Judgement icon, counting down
-       40 s (10 s for Justice). It is coloured like the chamber: the current
-       seal, red under NO SEAL. A white flash shows when it lands.
-     - Judging under Righteousness, Command or Fury puts no bar up.
-     - Switch target: the lane follows the new target at once. If that
-       target is not judged, it shows the muted stacked letters NOT JUDGED
-       (or NO DEBUFF), with a seal up. Under NO SEAL the empty lane shows no
-       letters.
-     - A dead target hides the lane. A revived target relights it without a
-       flash.
-     - After a loading screen the lane reads NOT JUDGED until you judge
-       again. That is expected.
+4. Seal module, in the Gunsight's upper or lower area (pick "Class Module" for
+   an area in the config window; the "Seal module" section at the end of this
+   file has the full check). Cast a seal:
+   - The tile shows the seal's icon (two letters only if the game gives no
+     icon), its name and SEAL ACTIVE. The time left is large on the right and
+     the bar drains left to right over 30 s.
+   - At 3 s or less the amber RESEAL end of the bar lights, the fill and time
+     go amber and the caption reads EXPIRING.
+   - At expiry it reads NO SEAL and CAST A SEAL. In combat it pulses.
+   - Cast Judgement on a target under Crusader, Light, Wisdom or Justice. The
+     bottom row (Judgement icon chip, bar, time) counts down 40 s (10 s for
+     Justice). Switch to an unjudged target and it dims and reads NOT JUDGED
+     (NO DEBUFF under Righteousness, Fury or Command). A dead target empties
+     it. The seal stays up after Judgement.
 5. Look at the shoulder where it meets the Console's top line. It should look
    like part of the Console, with no notch and no bright seam.
 6. Chat font. Chat text defaults to 14 pt. `/fschat size` prints the size and
@@ -162,7 +149,7 @@ Out of combat for the editing; the tooltip itself follows in combat too.
 Safe in combat. Esc, the X, or `/fsconfig` again closes it; with a menu or confirm box open, Esc closes only that. `/fsconfig profiles` opens a page directly.
 
 1. Unit Frames: turn "Hide player frame" on. The player frame goes invisible and click-through at once (in combat it waits until combat ends). Turn it off again, then do the same for the target frame.
-2. Gunsight HUD: switch "Your cast bar" off, then on. The piece fades with the console key light following. Check each of the eight pieces the same way: Your cast bar, Target cast bar, Next cast tile, DoT time axis, Soul shards, Proc posts, Buff reminders, Party frames. `/fsgun piece shard off` must flip the same switch while the window is open.
+2. Gunsight HUD: switch "Your cast bar" off, then on. The piece fades with the console key light following. Check each piece the same way: Your cast bar, Target cast bar, Target side areas, Soul shards, Proc posts, Buff reminders, Party frames, and under Player side My buffs and Next cast. `/fsgun piece shard off` must flip the same switch while the window is open.
 3. Gunsight HUD master switch: turn it off, `/reload`, and no Gunsight piece builds. Turn it back on and `/reload`.
 4. Profiles: type a name under "New profile". It is created and switched to. Switch between profiles with "Profile in use": every switch in the other pages and every Gunsight piece follows. "This character" shows your name and realm.
 5. Rename and Delete: Rename is off on Default. Delete lists only profiles that are neither Default nor the active one, and asks before deleting. "Copy from..." and "Reset profile" also ask first.
@@ -176,10 +163,40 @@ Not yet checked in game. Mocked checks cover the sizes, the secret-safe numbers 
 
 1. Target a mob. Drag "Health bar height" and "Resource bar height": the two rules under the unit name get thicker and thinner live, the resource rule always one step under the health rule. Dragging, the mouse wheel and clicking the track all work, and the number to the right of the slider follows. At the top of the range, check the rules do not touch the divider or the spell line badly.
 2. "Bar width": the default 100% is as wide as the old 120% was; 50% is about half of that, and 150% stretches the rules to at most the box text width. Use a short and a long unit name. A width you had saved before this change converts once per profile to the same look (old 120 reads 100, old 150 reads 125).
-3. Turn "Show numbers" on. A health number and a resource number appear to the right of the target box. Try "Current", "Current / max" and "Percent" (the choice is dimmed while Show numbers is off). Check them in combat on a hostile target, where the values are hidden by the game: they must still show and update, and `/fsbug` should report no error. Say if Percent stays blank in combat, for either number.
+3. Turn "Show numbers" on. A health number and a resource number appear inside the target box, on one row under the two rules (health at the left end, resource at the right end); the box grows upward to make room. Try "Current", "Current / max" and "Percent" (the choice is dimmed while Show numbers is off). Check them in combat on a hostile target, where the values are hidden by the game: they must still show and update, and `/fsbug` should report no error. Say if Percent stays blank in combat, for either number.
 4. A target with no resource (a mob with no mana) shows only the health number.
 5. Switch profile, then `/reload`: every control and the look hold per profile. Do it all once during combat: the bars are plain frames, so each change applies at once and nothing is blocked.
 6. Reset to the starting look: health 11 px, resource 4 px, width 100%, numbers off.
+
+## Gunsight target side: /fsconfig, Gunsight HUD page
+
+Not yet checked in game. Mocked checks cover which module sits in which area, the swap rule and the combat rules, not how it looks. Beside the target cast bar the horizon line splits two areas: upper (Target Debuffs Horizontal by default) and lower (Class Module by default). The design is `mockups/gunsight-modules-concepts-v7-2026-10-08.html`.
+
+1. Open /fsconfig, Gunsight HUD. The page starts with Target side (Upper area, Lower area), then Target box tags, then Player side (My buffs, Next cast). Each group header has a ? icon; Target side's says Target debuffs shows only the debuffs you applied and the Class Module shows your class's own resource.
+2. Each area dropdown offers Target Debuffs Horizontal, Target Debuffs Vertical, Class Module, Empty, in that order. Pick Class Module for the upper area: the lower area takes Target Debuffs Horizontal at once (the swap), and both modules move on screen. Pick Target Debuffs Vertical for the lower area while the upper holds the Class Module: no swap, the lower area changes style.
+3. Pick Empty for an area: nothing draws there, no outline either (only `/fsgun debug` outlines the areas). Both areas Empty with the tags and My buffs off should look like the box did before this change.
+4. Switch "Target side areas" in the Pieces list off, or press the Console's key 6: both areas hide together. The key now shows for every class, including one with no class module yet (a Mage shows Target debuffs only).
+5. With no target, or a friendly or dead one, the Target Debuffs area is hidden; the Class Module stays. Retarget a hostile mob and it returns.
+6. Switch profile, then `/reload`: both dropdowns and the modules in the areas hold per profile. Do it once in combat: the areas are plain frames and nothing is blocked.
+
+### Target debuffs: rows, axis, time and stacks
+
+Not yet checked in game. Mocked checks cover the layout, the time text, the combat rules and the data rules, not how it looks or what this client reports in combat. It is available to every class and shows only debuffs you applied.
+
+1. Horizontal: Warrior on a hostile mob, cast Rend and Sunder Armor. Each debuff gets a row (icon, time, drain bar), at most five rows. Time reads whole seconds above 3 s ("13s") and tenths below ("2.6s"); the bar drains 30 s to 0 and turns amber at 3 s or less. Sunder Armor shows "x2", "x3" as it stacks.
+2. Vertical: pick Target Debuffs Vertical. The existing time axis shows compressed (about 3.7 px a second), 26 px right of the target cast bar, with TARGET DEBUFFS above it. A Priest or Warlock chip slides down toward the amber band; a DoT that is not on the target shows dim at 0 only in combat.
+3. In combat the numbers are an estimate: a cast that is resisted still counts, and refreshes that are not casts (a Rogue's poison procs, Deep Wounds) do not show until combat ends. A row with "--" has no known duration yet; it fills in after one fight on any mob with that debuff. Report a row that stays wrong after combat ends.
+4. Paladin: with the Class Module (Seal) in an area, Judgement is not listed in Target debuffs; Holy Vengeance and Hammer of Justice are. Retarget: the list restarts for the new target.
+
+### Class Module: shards and combo points
+
+Not yet checked in game. Mocked checks cover the layout and the events, not how it looks. Design: `mockups/gunsight-modules-concepts-v7-2026-10-08.html`, states A, B, D and F.
+
+1. Warlock: the Class Module area shows one shard glyph, the count and the caption SOUL SHARDS. At 0 shards the glyph is dim and the count reads 0. Create or delete a shard and the count follows.
+2. Warlock: with the Class Module in an area, the count under your cast bar is gone. Set both areas to Empty and the glyph and count return under your cast bar; at 0 shards they show a dim glyph and a muted 0.
+3. Rogue: the Class Module area shows five yellow pips, the lit count and the caption COMBO POINTS. Build combo points on a hostile target and the pips and the count follow; with no target, or a friendly or dead one, the area stays empty. Report it if the pips never light (the combo events are unverified on this client).
+4. Druid: the same combo display appears in cat form only. Shift to caster or bear form and it clears; report it if it stays up or never appears in cat form (the form check reads the power type and is unverified on this client).
+5. Any other class: the Class Module draws nothing.
 
 ## Professions panel: /fsprof
 
@@ -239,3 +256,44 @@ errors. Share the focused report first; inspect any larger SavedVariables file
 before sharing it. The SavedVariables file holds more: the addon's settings, its probe
 results and every stored report. Neither one holds chat text, and neither holds
 your login or password.
+
+## Seal module (Paladin class module, upper or lower area)
+
+Needs a full client restart.
+Pick the class module for the upper or lower Gunsight area in the config window, then check in BOTH areas:
+
+1. The module fits the area: the seal tile (the seal's icon) and name with SEAL ACTIVE, the time left large on the right, a bar with 0, 15 and 30 under it, and the Judgement row (Judgement icon chip, bar, time) at the bottom. Nothing spills over the area's edges.
+2. Cast a seal: the bar fills left to right and drains, the time counts down (whole seconds, tenths from 5 s). The amber RESEAL band is the 0 to 3 s end of the bar.
+3. At 3 s or less the fill, the time and the caption go amber and read EXPIRING, and the band breathes. At expiry it reads NO SEAL and CAST A SEAL; in combat the tile and name pulse.
+4. Judge a target under Crusader, Light, Wisdom or Justice: the row's bar and time count down from 40 s (10 s for Justice). Switch to an unjudged target: the row dims and says NOT JUDGED (NO DEBUFF under Righteousness, Fury or Command). A dead target empties the row.
+5. Move the module to the other area (and change the screen scale): it re-seats inside the new area.
+
+## Box tags: level and class, health percent, target of target
+
+Not yet checked in game. Mocked checks cover the seats, the secret-safe text and the combat rules, not how it looks. Design: `mockups/gunsight-modules-concepts-v7-2026-10-08.html`, states A to F. The three tags (Level and class, Health percent, Target of target) are switches on the Gunsight HUD page under Target box tags, all on by default.
+
+1. Target a hostile elite: a small tag on the top edge, left of KICK, reads L plus the level in white and ELITE in gold. A normal mob shows only the level, a rare shows RARE, a boss BOSS, a skull-level mob `??`. Switch target and the tag follows; level up on a target dummy of another level and it updates.
+2. A tag on the bottom edge, left, shows the target's health percent in green and follows hits and heals, in combat too (the value is hidden by the game there; say if it stays blank).
+3. A tag on the bottom edge, right, shows just the name of the target's target in white, no "ToT" prefix. Click it: you target that unit. With no target of target the tag is invisible and does nothing. Say what happens if you click the empty spot (not verified in game).
+4. In combat: the target of target tag fades in and out and changes its name as the mob switches target, and a click on it targets that unit, including a mob that only turned on you after the pull started. The button is always there (shown and clickable) while its switch is on, so only its fade changes in combat; `/fsbug` should report no blocked action. Changing the screen scale in combat takes effect when combat ends.
+5. Turn each switch off: its tag goes at once and the others stay. Turn "Show numbers" on (Target bars): the box grows upward, KICK and the level tag ride the new top, and the bottom tags stay put.
+6. Switch profile, then `/reload`: the three switches hold per profile.
+
+## Target bar numbers inside the box
+
+Not yet checked in game. With numbers off the target box is exactly as before.
+
+1. Turn "Show numbers" on: the box grows upward by about 9 px. Line 1, the rules, KICK and the level tag rise with the top edge; the divider, the spell line and the cast tile keep their place on screen. Health reads at the left end of the new row under the rules, the resource at the right end.
+2. Change the rule heights: the box grows or shrinks to match. Turn numbers off: the box returns to exactly its old size and place.
+3. Check "Current / max" with a large health pool: a long value is cut at the half row, not run into the other number. Say if it overlaps or looks too tight.
+4. Toggle numbers during combat: the box grows at once and nothing is blocked.
+
+## My buffs: /fsconfig, Gunsight HUD page
+
+Not yet checked in game. Mocked checks cover the seats, the order, the pip rule and the combat rule, not how it looks. The plate sits outboard of the Next cast tile; the switch is My buffs under Player side. A buff you gave yourself has no pip; a buff cast by a party or raid member has a cyan pip.
+
+1. With a few buffs up: a 164 px plate shows up to four of them as tiles with the time left under each (47m, 14s, 2h). Buffs without a timer show no time. The order is the order of the game's own buff row, not by time left.
+2. Get a buff from a party member (for example Arcane Intellect from a mage): its tile gets a cyan pip at the top right. Your own buffs have none. If every buff shows a pip, or a party buff shows none, report it: the pip needs the buff's source, which the aura snapshot has to carry.
+3. Enter combat with a short buff running: the times keep counting down (they are worked out from the stored end time), and a buff that runs out is dropped and the next one moves up. Report it if a new buff gained in combat does not appear until combat ends (expected: the list is frozen then).
+4. Remove every buff: the plate disappears. Switch My buffs off: the plate goes; on, it returns.
+5. Change the screen scale: the plate and its tiles re-seat.

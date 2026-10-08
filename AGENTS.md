@@ -10,7 +10,7 @@ This is the canonical Forever STUwave source repository. Read [docs/DEVELOPMENT.
 - Use `Theme.lua` for shared visual tokens and chrome helpers, and `Layout.lua` for geometry. Consume existing definitions instead of duplicating them.
 - Guard secret values before arithmetic, comparison, indexing, formatting, concatenation, or conversion. Feature-detect APIs and retain unavailable data as unavailable.
 - Defer protected frame and binding changes during combat. Reuse established secure button and combat deferral patterns.
-- Describe support from shipped code and recorded client evidence. Paladin seals, auras, Seal Chamber and Judgement lane are implemented; advanced level 10/20 rotation work remains incomplete. A shared `FS.PlayerClass` override is future work.
+- Describe support from shipped code and recorded client evidence. Paladin seals, auras, the compact Seal module and its Judgement row are implemented; advanced level 10/20 rotation work remains incomplete. A shared `FS.PlayerClass` override is future work.
 - Commit reviewed source and checks before making a tester ZIP: packaging reads committed HEAD. Deploy only when client changes are authorized; use the runtime staging scripts rather than copying a development tree over an installed addon.
 - Keep public files free of private machine paths, account dumps, credentials, and private project identifiers. Label mockups as design references and gameplay captures with their actual dates and classes.
 - Preserve MIT and third-party notices. Fonts remain under OFL, and borrowed game imagery is not project-owned.
