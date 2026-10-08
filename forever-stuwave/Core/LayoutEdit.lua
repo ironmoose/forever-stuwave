@@ -13,6 +13,9 @@ local GRID_CHOICES = { [4] = true, [8] = true, [16] = true, [32] = true }
 local GRID_DEFAULT = 8
 local MIN_HANDLE = 12
 local EDGE = 2
+local PAGE_KEY = "layout"
+local DONE_W, DONE_H, PANEL_W, PANEL_H = 64, 24, 214, 44
+local INK = { 0.090, 0.047, 0.165, 1 }
 
 -- Display order is also the label table; an id without an applied frame gets no handle.
 local MOVABLE = {
@@ -43,6 +46,8 @@ local selected = nil
 local dragging = nil
 local handles = {}
 local overlay = nil
+local donePanel = nil
+local returnToConfig = false
 local pageRegistered = false
 local blizzardHooked = false
 
@@ -363,6 +368,56 @@ end
 -- Edit mode
 -------------------------------------------------------------------------------
 
+-- A plain insecure panel above the handles; the overlay under them keeps the mouse off.
+local function NewDonePanel()
+    local Theme = FS.Theme
+    local r, g, b = Cyan()
+    local panel = CreateFrame("Frame", nil, UIParent)
+    panel:SetFrameStrata("FULLSCREEN_DIALOG")
+    panel:SetFrameLevel(30)
+    panel:SetSize(PANEL_W, PANEL_H)
+    panel:SetPoint("TOP", UIParent, "TOP", 0, -24)
+    panel:EnableMouse(true)
+    if Theme and Theme.SkinPanel then Theme.SkinPanel(panel, { strip = false, scanline = false }) end
+
+    panel.title = panel:CreateFontString(nil, "OVERLAY")
+    if Theme and Theme.ApplyMono then Theme.ApplyMono(panel.title, 11, { r, g, b, 1 }) end
+    panel.title:SetPoint("LEFT", panel, "LEFT", 16, 0)
+    panel.title:SetText("LAYOUT EDIT")
+
+    local done = CreateFrame("Button", nil, panel)
+    done:SetSize(DONE_W, DONE_H)
+    done:SetPoint("RIGHT", panel, "RIGHT", -10, 0)
+    done:RegisterForClicks("LeftButtonUp")
+    local fill = Theme and Theme.AddCutSliceFill and Theme.AddCutSliceFill(done, INK, 6)
+    if Theme and Theme.SkinButton then
+        Theme.SkinButton(done, { borderColor = { r, g, b, 1 }, chamfer = 6, glowAlpha = 0.35 })
+    end
+    done.label = done:CreateFontString(nil, "OVERLAY")
+    if Theme and Theme.ApplyMono then Theme.ApplyMono(done.label, 11, { r, g, b, 1 }) end
+    done.label:SetPoint("CENTER", done, "CENTER")
+    done.label:SetText("DONE")
+
+    done:SetScript("OnEnter", function(self)
+        if fill then fill:SetVertexColor(INK[1] + (r - INK[1]) * 0.16, INK[2] + (g - INK[2]) * 0.16, INK[3] + (b - INK[3]) * 0.16, 1) end
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:SetText("Save and leave layout edit. Esc does the same.", 1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    done:SetScript("OnLeave", function()
+        if fill then fill:SetVertexColor(INK[1], INK[2], INK[3], 1) end
+        GameTooltip:Hide()
+    end)
+    done:SetScript("OnClick", function() LayoutEdit.Done() end)
+    panel.done = done
+    panel:Hide()
+    return panel
+end
+
+function LayoutEdit.GetDonePanel()
+    if donePanel and donePanel:IsShown() then return donePanel end
+end
+
 -- Fullscreen keyboard catcher under the handles. Unhandled keys go on to the game.
 local function EnsureOverlay()
     if overlay then return overlay end
@@ -379,7 +434,7 @@ local function EnsureOverlay()
             LayoutEdit.Exit()
         elseif key == "ESCAPE" then
             self:SetPropagateKeyboardInput(false)
-            LayoutEdit.Exit()
+            LayoutEdit.Done()
         elseif arrow and selected then
             self:SetPropagateKeyboardInput(false)
             LayoutEdit.Nudge(arrow[1], arrow[2], IsShiftKeyDown and IsShiftKeyDown())
@@ -414,6 +469,7 @@ function LayoutEdit.Enter()
     local chatSkipped = false
     local ok, err = pcall(function()
         EnsureOverlay()
+        donePanel = donePanel or NewDonePanel()
         for _, def in ipairs(MOVABLE) do
             if HasHandle(def.id) then
                 handles[def.id] = handles[def.id] or NewHandle(def)
@@ -427,6 +483,7 @@ function LayoutEdit.Enter()
         end
         overlay:Show()
         overlay:EnableKeyboard(true)
+        donePanel:Show()
     end)
     if not ok then
         LayoutEdit.Exit()
@@ -439,6 +496,7 @@ function LayoutEdit.Enter()
 end
 
 function LayoutEdit.Exit()
+    returnToConfig = false
     if not editing then return end
     editing = false
     selected = nil
@@ -451,7 +509,16 @@ function LayoutEdit.Exit()
         overlay:EnableKeyboard(false)
         overlay:Hide()
     end
+    if donePanel then donePanel:Hide() end
     Say("layout editor off")
+end
+
+-- DONE and Esc: leave, and go back to the Layout page when the config button started the edit.
+function LayoutEdit.Done()
+    local reopen = returnToConfig and editing and not InCombatLockdown()
+    LayoutEdit.Exit()
+    local window = FS.ConfigWindow
+    if reopen and type(window) == "table" and type(window.Open) == "function" then window.Open(PAGE_KEY) end
 end
 
 function LayoutEdit.Toggle()
@@ -513,7 +580,8 @@ local function BuildPage(content)
             onClick = function()
                 if RefuseInCombat() then return end
                 if FS.ConfigWindow.Close then FS.ConfigWindow.Close() end
-                LayoutEdit.Enter()
+                local was = editing
+                returnToConfig = LayoutEdit.Enter() == true and not was
             end,
         })
     end
@@ -545,7 +613,7 @@ local function RegisterPage()
     local window = FS.ConfigWindow
     if type(window) ~= "table" or type(window.RegisterCategory) ~= "function" then return end
     pageRegistered = true
-    local ok, err = pcall(window.RegisterCategory, { key = "layout", label = "Layout", order = 3, build = BuildPage })
+    local ok, err = pcall(window.RegisterCategory, { key = PAGE_KEY, label = "Layout", order = 3, build = BuildPage })
     if not ok then FS.Layout.ForwardError(err) end
 end
 

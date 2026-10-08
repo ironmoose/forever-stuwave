@@ -13,7 +13,9 @@ These checks pin that:
     entries at two UI scales and lands the frame on the same screen point;
   * snap, grid size, arrow and Shift+arrow nudges, Esc, right-click reset and reset all;
   * pet, chat and minimap special cases;
-  * the Layout page registers when FS.ConfigWindow exists and is skipped cleanly when not.
+  * the Layout page registers when FS.ConfigWindow exists and is skipped cleanly when not;
+  * a DONE panel shows only while editing, and DONE or Esc reopens the Layout page when the
+    editor was entered from the config window, never after /fsedit, combat or Blizzard Edit Mode.
 
 The three Lua files are the real ones; the frames are a recording mock with a tiny anchor
 solver, NOT the real client. Keyboard propagation is a recorded call, not client behaviour.
@@ -103,6 +105,8 @@ function Frame:Hide() self._shown = false end
 function Frame:IsShown() return self._shown or false end
 function Frame:SetFrameStrata(s) self._strata = s end
 function Frame:GetFrameStrata() return self._strata end
+function Frame:SetFrameLevel(l) self._level = l end
+function Frame:GetFrameLevel() return self._level end
 function Frame:EnableMouse(v) self._mouse = v and true or false end
 function Frame:EnableKeyboard(v) self._keyboard = v and true or false end
 function Frame:SetPropagateKeyboardInput(v) self._propagate = v end
@@ -156,6 +160,12 @@ function __printedHas(text)
     for _, line in ipairs(__printed) do if line:find(text, 1, true) then return true end end
     return false
 end
+GameTooltip = {
+    SetOwner = function(self, owner) self._owner = owner end,
+    SetText = function(self, text) self._text = text end,
+    Show = function(self) self._shown = true end,
+    Hide = function(self) self._shown = false; self._text = nil end,
+}
 C_Timer = { After = function(_, fn) __timers[#__timers + 1] = fn end }
 SlashCmdList = {}
 
@@ -177,13 +187,25 @@ EditModeManagerFrame = {
     EnterEditMode = function() __blizTouched = __blizTouched + 1 end,
 }
 
-FS_THEME_STUB = { COLOR_POWER = { 0.133, 0.878, 1, 1 }, ApplyMono = function() end }
+__themed = { panels = {}, buttons = {}, fills = {} }
+FS_THEME_STUB = {
+    COLOR_POWER = { 0.133, 0.878, 1, 1 },
+    ApplyMono = function() end,
+    SkinPanel = function(frame) __themed.panels[#__themed.panels + 1] = frame end,
+    SkinButton = function(button) __themed.buttons[#__themed.buttons + 1] = button end,
+    AddCutSliceFill = function(frame)
+        __themed.fills[#__themed.fills + 1] = frame
+        return newRegion()
+    end,
+}
 """
 
 SESSION = r"""
 function(layoutSrc, configSrc, editSrc)
     __frames, __printed, __errors, __timers, __moves = { UIParent }, {}, {}, {}, {}
     __combat, __shift, __bliz, __blizTouched = false, false, false, 0
+    __themed.panels, __themed.buttons, __themed.fills = {}, {}, {}
+    GameTooltip._text, GameTooltip._shown, GameTooltip._owner = nil, false, nil
     SlashCmdList = {}
     ForeverSTUwaveDB = nil
     FS = { Theme = FS_THEME_STUB }
@@ -853,9 +875,10 @@ end
 -------------------------------------------------------------------------------
 
 local function fakeWindow()
-    local W = { categories = {}, closed = 0, calls = {} }
+    local W = { categories = {}, closed = 0, calls = {}, opened = {} }
     function W.RegisterCategory(def) W.categories[#W.categories + 1] = def end
     function W.Close() W.closed = W.closed + 1 end
+    function W.Open(key) W.opened[#W.opened + 1] = key end
     W.UI = {}
     for _, name in ipairs({ "Header", "Button", "Toggle", "Segmented" }) do
         W.UI[name] = function(content, spec, tip)
@@ -948,6 +971,183 @@ function T.the_reset_button_clears_every_override()
     for _, c in ipairs(FS.ConfigWindow.calls) do if c.name == "Button" and c.spec.warn then warn = c end end
     warn.spec.onClick()
     eq(next(frames()), nil)
+end
+
+-------------------------------------------------------------------------------
+-- DONE panel and the way back to settings
+-------------------------------------------------------------------------------
+
+local function pageButton()
+    FS.ConfigWindow.categories[1].build(CreateFrame())
+    for _, c in ipairs(FS.ConfigWindow.calls) do if c.name == "Button" and c.spec.big then return c.spec end end
+end
+-- Enter the way the config page's EDIT LAYOUT button does.
+local function enterFromConfig()
+    FS.ConfigWindow = fakeWindow()
+    edit(); seat("stance")
+    pageButton().onClick()
+    return FS.ConfigWindow
+end
+local function clickDone()
+    local panel = FS.LayoutEdit.GetDonePanel()
+    panel.done._scripts.OnClick(panel.done)
+end
+
+function T.the_done_panel_shows_only_while_editing()
+    edit(); seat("stance")
+    eq(FS.LayoutEdit.GetDonePanel(), nil, "not before entering")
+    FS.LayoutEdit.Enter()
+    local panel = FS.LayoutEdit.GetDonePanel()
+    eq(panel ~= nil, true)
+    eq(panel._parent, UIParent)
+    eq(panel:GetFrameStrata(), "FULLSCREEN_DIALOG")
+    eq(panel:GetFrameLevel() > FS.LayoutEdit.GetHandle("stance"):GetFrameLevel(), true, "above the handles")
+    eq(panel._mouse, true, "the panel takes clicks")
+    eq(overlay()._mouse, false, "the overlay still lets the mouse through")
+    eq(panel._protected, nil, "a plain non-secure frame")
+    eq(panel.done._template, nil, "no Blizzard button template")
+    eq(panel.done.label:GetText(), "DONE")
+    local point, rel, relPoint, _, y = panel:GetPoint(1)
+    eq(point, "TOP"); eq(rel, UIParent); eq(relPoint, "TOP"); eq(y < 0, true, "just below the top edge")
+    FS.LayoutEdit.Exit()
+    eq(FS.LayoutEdit.GetDonePanel(), nil, "hidden on exit")
+    FS.LayoutEdit.Enter()
+    eq(FS.LayoutEdit.GetDonePanel(), panel, "the same panel is reused")
+end
+
+function T.the_done_panel_is_built_from_the_theme_builders()
+    edit(); seat("stance")
+    FS.LayoutEdit.Enter()
+    local panel = FS.LayoutEdit.GetDonePanel()
+    eq(#__themed.panels, 1); eq(__themed.panels[1], panel)
+    eq(#__themed.buttons, 1); eq(__themed.buttons[1], panel.done)
+    eq(#__themed.fills, 1); eq(__themed.fills[1], panel.done)
+    FS.LayoutEdit.Exit(); FS.LayoutEdit.Enter()
+    eq(#__themed.panels, 1, "skinned once, not on every Enter")
+end
+
+function T.clicking_done_leaves_edit_mode()
+    edit(); seat("stance")
+    FS.LayoutEdit.Enter()
+    clickDone()
+    eq(FS.LayoutEdit.IsEditing(), false)
+    eq(FS.LayoutEdit.GetHandle("stance"), nil)
+    eq(FS.LayoutEdit.GetDonePanel(), nil)
+    eq(overlay(), nil, "the keyboard overlay is released")
+end
+
+function T.the_done_tooltip_names_esc_and_clears_on_leave()
+    edit(); seat("stance")
+    FS.LayoutEdit.Enter()
+    local done = FS.LayoutEdit.GetDonePanel().done
+    done._scripts.OnEnter(done)
+    eq(GameTooltip._owner, done)
+    eq(GameTooltip._text:find("Esc", 1, true) ~= nil, true)
+    done._scripts.OnLeave(done)
+    eq(GameTooltip._shown, false)
+end
+
+function T.done_after_entering_from_config_reopens_the_layout_page()
+    local W = enterFromConfig()
+    eq(FS.LayoutEdit.IsEditing(), true)
+    eq(W.closed, 1)
+    eq(#W.opened, 0, "settings stay closed while editing")
+    clickDone()
+    eq(#W.opened, 1)
+    eq(W.opened[1], W.categories[1].key)
+    eq(W.opened[1], "layout")
+    eq(FS.LayoutEdit.IsEditing(), false)
+end
+
+function T.escape_after_entering_from_config_reopens_the_layout_page()
+    local W = enterFromConfig()
+    local o = key("ESCAPE")
+    eq(FS.LayoutEdit.IsEditing(), false)
+    eq(o._propagate, false, "Esc is still consumed")
+    eq(#W.opened, 1)
+    eq(W.opened[1], "layout")
+end
+
+function T.leaving_a_slash_entered_session_does_not_open_settings()
+    FS.ConfigWindow = fakeWindow()
+    edit(); seat("stance")
+    SlashCmdList.FSEDIT("")
+    clickDone()
+    eq(FS.LayoutEdit.IsEditing(), false)
+    SlashCmdList.FSEDIT("")
+    key("ESCAPE")
+    eq(FS.LayoutEdit.IsEditing(), false)
+    eq(#FS.ConfigWindow.opened, 0)
+end
+
+function T.a_non_done_exit_after_entering_from_config_does_not_open_settings()
+    local exits = {
+        combat_event = function() __combat = true; __fire("PLAYER_REGEN_DISABLED") end,
+        combat_key = function() __combat = true; key("ESCAPE") end,
+        slash_toggle = function() SlashCmdList.FSEDIT("") end,
+    }
+    for name, leave in pairs(exits) do
+        local W = enterFromConfig()
+        leave()
+        eq(FS.LayoutEdit.IsEditing(), false, name)
+        eq(#W.opened, 0, name)
+        __combat = false
+        FS.LayoutEdit.Exit()
+    end
+end
+
+function T.entering_from_the_config_page_while_already_editing_does_not_arm_the_return()
+    FS.ConfigWindow = fakeWindow()
+    edit(); seat("stance")
+    SlashCmdList.FSEDIT("")
+    pageButton().onClick()
+    eq(FS.LayoutEdit.IsEditing(), true)
+    clickDone()
+    eq(FS.LayoutEdit.IsEditing(), false)
+    eq(#FS.ConfigWindow.opened, 0)
+end
+
+function T.blizzard_edit_mode_exit_after_entering_from_config_does_not_open_settings()
+    local W = enterFromConfig()
+    EditModeManagerFrame:EnterEditMode()
+    eq(FS.LayoutEdit.IsEditing(), false)
+    eq(#W.opened, 0)
+end
+
+function T.every_exit_clears_the_return_to_settings_flag()
+    local W = enterFromConfig()
+    __fire("PLAYER_REGEN_DISABLED")
+    __combat = false
+    SlashCmdList.FSEDIT("")
+    clickDone()
+    eq(#W.opened, 0, "a stale flag from the earlier config entry would open it")
+    pageButton().onClick()
+    clickDone()
+    eq(#W.opened, 1, "and a fresh config entry still works")
+    SlashCmdList.FSEDIT("")
+    clickDone()
+    eq(#W.opened, 1, "the flag was cleared again by that exit")
+end
+
+function T.a_refused_entry_from_config_does_not_arm_the_return()
+    FS.ConfigWindow = fakeWindow()
+    edit(); seat("stance")
+    local spec = pageButton()
+    __bliz = true
+    spec.onClick()
+    eq(FS.LayoutEdit.IsEditing(), false)
+    __bliz = false
+    SlashCmdList.FSEDIT("")
+    clickDone()
+    eq(#FS.ConfigWindow.opened, 0)
+end
+
+function T.leaving_without_a_config_window_is_quiet()
+    edit(); seat("stance")
+    FS.LayoutEdit.Enter()
+    clickDone()
+    eq(FS.LayoutEdit.IsEditing(), false)
+    eq(#__errors, 0)
 end
 
 __checks = T
