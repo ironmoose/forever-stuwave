@@ -24,7 +24,12 @@ so opens its window. These checks pin that:
     window or a profile switch takes the same combat deferral, the legacy ForeverSTUwaveDB.professionsHidden
     migrates once into the active profile without overwriting a pinned value and is then cleared, and a
     read-only Config refuses the toggle;
-  * the tooltip names the profession and adds "Click to open" only on a clickable row.
+  * the tooltip names the profession and adds "Click to open" only on a clickable row;
+  * the minimise glyph is a plain (non-secure) button reusing the chat's glyph texture and idle/hover alphas, its
+    tooltip reads Minimise or Restore, a click folds the rows into the title band with the top edge fixed and
+    a second click restores them, the state is the profile setting professions.minimized (default false), is
+    applied at login and survives /fsprof, a reseat or a profile switch, and in combat every part of it
+    (hide, show, resize, re-anchor) waits for PLAYER_REGEN_ENABLED.
 
 Professions.lua and Config.lua are the real files; the frames are a recording mock that refuses protected
 calls in combat the way the client does, and Theme / PanelSkins are stubs. This is NOT the real client.
@@ -69,7 +74,7 @@ end
 
 function newFrame(kind, name, parent, template)
     local f = setmetatable({ _kind = kind, _name = name, _parent = parent, _events = {}, _scripts = {}, _hooks = {},
-        _attrs = {}, _clicks = nil, _shown = true, _text = nil,
+        _attrs = {}, _clicks = nil, _shown = true, _text = nil, _points = {},
         _protected = type(template) == "string" and template:find("Secure", 1, true) ~= nil }, FrameMT)
     __frames[#__frames + 1] = f
     if name then _G[name] = f end
@@ -90,6 +95,7 @@ function Frame.RegisterForClicks(self, ...) self._clicks = table.concat({ ... },
 function Frame.SetText(self, t) self._text = t end
 function Frame.GetText(self) return self._text end
 function Frame.SetTexture(self, t) self._texture = t end
+function Frame.SetVertexColor(self, r, g, b, a) self._vc = { r, g, b, a } end
 
 local function locked(self) return __combat and (self._protected or self._hasProtectedChild) end
 local function refuse(self, what)
@@ -99,10 +105,26 @@ function Frame.SetAttribute(self, k, v)
     if locked(self) then return refuse(self, "SetAttribute") end
     self._attrs[k] = v
 end
-for _, m in ipairs({ "SetPoint", "ClearAllPoints", "SetSize", "SetParent" }) do
-    Frame[m] = function(self)
-        if locked(self) then return refuse(self, m) end
-    end
+-- Geometry is recorded (points as { point, relativeTo, relPoint, x, y }, size as _w/_h) so a check can
+-- read where a frame sits; each call is refused on a locked frame in combat, like the client.
+function Frame.SetPoint(self, point, rel, relPoint, x, y)
+    if locked(self) then return refuse(self, "SetPoint") end
+    self._points[#self._points + 1] = { point, rel, relPoint, x, y }
+end
+function Frame.ClearAllPoints(self)
+    if locked(self) then return refuse(self, "ClearAllPoints") end
+    self._points = {}
+end
+function Frame.SetSize(self, w, h)
+    if locked(self) then return refuse(self, "SetSize") end
+    self._w, self._h = w, h
+end
+function Frame.SetHeight(self, h)
+    if locked(self) then return refuse(self, "SetHeight") end
+    self._h = h
+end
+function Frame.SetParent(self)
+    if locked(self) then return refuse(self, "SetParent") end
 end
 function Frame.GetAttribute(self, k) return self._attrs[k] end
 function Frame.Show(self)
@@ -126,8 +148,8 @@ SlashCmdList = {}
 
 __tip = {}
 GameTooltip = {
-    SetOwner = function(self, owner) __tip = { owner = owner, lines = {}, shown = false }; self._owner = owner end,
-    SetText = function(_, t) __tip.lines[#__tip.lines + 1] = t end,
+    SetOwner = function(self, owner, anchor) __tip = { owner = owner, anchor = anchor, lines = {}, shown = false }; self._owner = owner end,
+    SetText = function(_, t) __tip.lines = { t } end,   -- SetText replaces the text, AddLine appends
     AddLine = function(_, t) __tip.lines[#__tip.lines + 1] = t end,
     Show = function() __tip.shown = true end,
     Hide = function() __tip.shown = false end,
@@ -170,10 +192,27 @@ function(src, opts, configSrc)
     FS.IsSecret = function() return false end
     FS.LogDegradeOnce = function() end
     __layoutApplied = 0
-    FS.Layout = { Apply = function(frame)
-        __layoutApplied = __layoutApplied + 1
-        if __combat then __violations[#__violations + 1] = "Layout.Apply" end
-    end, ForwardError = function(err) __errors[#__errors + 1] = tostring(err) end }
+    -- The seat is the real entry's shape: CENTER on CENTER, scaled by the UI scale (0.5 here).
+    __rescale = {}
+    FS.Layout = {
+        Scale = function() return 0.5 end,
+        professions = { point = "CENTER", relPoint = "CENTER", x = 923, y = -450, w = 300, h = 210 },
+        OnRescale = function(fn) __rescale[#__rescale + 1] = fn end,
+        Apply = function(frame, id)
+            __layoutApplied = __layoutApplied + 1
+            if __combat then __violations[#__violations + 1] = "Layout.Apply" end
+            local L = FS.Layout[id]
+            frame:ClearAllPoints()
+            frame:SetPoint(L.point, UIParent, L.relPoint, L.x * 0.5, L.y * 0.5)
+            frame:SetSize(L.w * 0.5, L.h * 0.5)
+            return L
+        end,
+        ForwardError = function(err) __errors[#__errors + 1] = tostring(err) end,
+    }
+    __placed = nil
+    if opts.chatPlace then
+        FS.Chat = { PlaceTermBarTooltip = function(button) __placed = button end }
+    end
     FS.PanelSkins = { RegisterRecon = function() end }
     local Theme = {}
     for _, name in ipairs({ "ApplyMono", "AddOuterGlow", "AddRoundedFill", "AddGradientBorder" }) do
@@ -184,6 +223,7 @@ function(src, opts, configSrc)
     Theme.PANEL_RADIUS = 4
     local color = { 1, 1, 1, 1 }
     Theme.COLOR_POWER, Theme.COLOR_TEXT_WHITE, Theme.COLOR_BG = color, color, color
+    Theme.COLOR_HEALTH = { 1, 0.180, 0.592, 1 }
     FS.Theme = Theme
     assert(load(configSrc, "@Config.lua"))("forever-stuwave", FS)
     assert(load(src, "@Professions.lua"))("forever-stuwave", FS)
@@ -207,10 +247,36 @@ local function panel() return ForeverSTUwaveProfessions end
 local function rows()
     local out = {}
     for _, f in ipairs(__frames) do
-        if f._kind == "Button" and f._parent == panel() then out[#out + 1] = f end
+        if f._kind == "Button" and f._parent == panel() and f._protected then out[#out + 1] = f end
     end
     return out
 end
+local function glyph()
+    for _, f in ipairs(__frames) do
+        if f._kind == "Button" and f._parent == panel() and not f._protected then return f end
+    end
+end
+local MIN = "professions.minimized"
+local FULL_H, BAND_H = 105, 27   -- the scaled seat height (210 * 0.5); band 3 + 20 + 1 rule + 3
+-- Screen y of the panel's top edge, from its one anchor and height (the stub UIParent is the origin).
+local function topEdge(p)
+    local pt = p._points[1]
+    if pt[1] == "TOP" then return pt[5] end
+    if pt[1] == "CENTER" then return pt[5] + p._h / 2 end
+    error("unexpected anchor " .. tostring(pt[1]))
+end
+local function pinned(value)
+    return { profiles = { Default = { settings = { [MIN] = value }, layout = { v = 1, frames = {} } } },
+        profileKeys = {}, profilesVersion = 1 }
+end
+local function shownRows()
+    local n = 0
+    for _, r in ipairs(rows()) do if r._shown then n = n + 1 end end
+    return n
+end
+local function clickGlyph() glyph()._scripts.OnClick(glyph()) end
+local function hoverGlyph() glyph()._scripts.OnEnter(glyph()) end
+local function leaveGlyph() glyph()._scripts.OnLeave(glyph()) end
 local function slash() SlashCmdList.FSPROF("") end
 local function endCombat() __combat = false; Fire("PLAYER_REGEN_ENABLED") end
 local function setProfs(list)
@@ -468,7 +534,7 @@ end
 -- ---- visibility is the profile setting professions.shown --------------------------------------------
 
 local KEY = "professions.shown"
-local function stored() return ForeverSTUwaveDB.profiles.Default.settings[KEY] end
+local function stored(key) return ForeverSTUwaveDB.profiles.Default.settings[key or KEY] end
 
 function T.visibility_is_a_profile_setting_that_defaults_to_shown()
     boot({ profs = { "Alchemy" } })
@@ -614,6 +680,294 @@ function T.a_config_change_before_the_panel_exists_is_read_at_setup()
     endCombat()
     eq(panel()._shown, false, "Setup reads the setting")
     eq(#__violations, 0, table.concat(__violations, ","))
+end
+
+-- ---- the minimise glyph (professions.minimized) -------------------------------------------------------
+
+function T.the_glyph_is_a_plain_button_with_the_chat_minimise_texture_and_alphas()
+    boot({ profs = { "Alchemy" } })
+    local g = glyph()
+    eq(g ~= nil, true, "a glyph button exists")
+    eq(g._protected, false, "plain, non-secure")
+    eq(g._clicks, "LeftButtonUp")
+    eq(g.icon._texture, "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\icon_minimize.tga")
+    eq(g._points[1][1], "RIGHT", "right end of the title band")
+    eq(g._points[1][2]._kind, "Texture", "anchored to the band")
+    eq(g._points[1][4], -4, "the chat's 4 px edge gap")
+    eq(g._w, 16)
+    eq(g._h, 16)
+    eq(g.icon._vc[1], 1)
+    eq(g.icon._vc[2], 0.180)
+    eq(g.icon._vc[4], 0.85, "quiet at rest")
+    hoverGlyph()
+    eq(g.icon._vc[4], 1.00, "full on hover")
+    leaveGlyph()
+    eq(g.icon._vc[4], 0.85, "quiet again after leaving")
+end
+
+function T.the_glyph_tooltip_reads_minimise_then_restore()
+    boot({ profs = { "Alchemy" } })
+    hoverGlyph()
+    eq(__tip.shown, true)
+    eq(__tip.owner, glyph())
+    eq(__tip.lines[1], "Minimise")
+    leaveGlyph()
+    eq(__tip.shown, false)
+    clickGlyph()
+    hoverGlyph()
+    eq(__tip.lines[1], "Restore")
+end
+
+function T.a_click_while_hovering_refreshes_the_open_tooltip()
+    boot({ profs = { "Alchemy" } })
+    hoverGlyph()
+    clickGlyph()
+    eq(__tip.lines[1], "Restore")
+    clickGlyph()
+    eq(__tip.lines[1], "Minimise")
+end
+
+function T.the_tooltip_uses_the_chat_placement_helper_when_it_exists()
+    boot({ chatPlace = true, profs = { "Alchemy" } })
+    hoverGlyph()
+    eq(__placed, glyph())
+    eq(__tip.anchor, "ANCHOR_NONE")
+end
+
+function T.the_tooltip_falls_back_to_a_standard_anchor_without_the_chat()
+    boot({ profs = { "Alchemy" } })
+    hoverGlyph()
+    eq(__tip.anchor, "ANCHOR_TOPRIGHT")
+end
+
+function T.minimised_defaults_to_false_and_pins_nothing()
+    boot({ profs = { "Alchemy", "Cooking" } })
+    eq(FS.Config.Get(MIN), false)
+    eq(FS.Config.IsStored(MIN), false)
+    eq(panel()._h, FULL_H)
+    eq(shownRows(), 2)
+end
+
+function T.a_click_folds_the_rows_into_the_band_and_keeps_the_top_edge()
+    boot({ profs = { "Alchemy", "Cooking", "Mining" } })
+    local top, left = topEdge(panel()), panel()._points[1][4]
+    clickGlyph()
+    eq(shownRows(), 0, "every row hidden")
+    eq(panel()._h, BAND_H, "height is the title band")
+    eq(topEdge(panel()), top, "top edge did not move")
+    eq(panel()._points[1][4], left, "nor did the horizontal seat")
+    eq(#panel()._points, 1, "one anchor")
+    eq(panel()._shown, true, "the band itself stays up")
+    eq(FS.Config.Get(MIN), true)
+    eq(stored(MIN), true, "saved in the active profile")
+    eq(#__violations, 0, table.concat(__violations, ","))
+end
+
+function T.a_second_click_restores_the_full_list()
+    boot({ profs = { "Alchemy", "Cooking", "Mining" } })
+    local top = topEdge(panel())
+    clickGlyph()
+    clickGlyph()
+    eq(shownRows(), 3, "the learned rows are back")
+    eq(rows()[4]._shown, false, "unlearned rows stay hidden")
+    eq(panel()._h, FULL_H)
+    eq(topEdge(panel()), top)
+    eq(panel()._points[1][1], "CENTER", "the layout seat is back")
+    eq(FS.Config.Get(MIN), false)
+    eq(stored(MIN), nil, "the default pins nothing")
+    eq(rows()[1]._attrs.spell, "Alchemy", "the click action survived the fold")
+end
+
+function T.the_stored_state_is_applied_on_load()
+    boot({ db = pinned(true), profs = { "Alchemy", "Cooking" } })
+    eq(shownRows(), 0)
+    eq(panel()._h, BAND_H)
+    eq(panel()._shown, true)
+    hoverGlyph()
+    eq(__tip.lines[1], "Restore")
+end
+
+function T.the_state_survives_a_reload()
+    boot({ profs = { "Alchemy" } })
+    clickGlyph()
+    boot({ db = ForeverSTUwaveDB, profs = { "Alchemy" } })
+    eq(FS.Config.Get(MIN), true)
+    eq(shownRows(), 0)
+    eq(panel()._h, BAND_H)
+end
+
+function T.a_minimised_panel_builds_with_a_single_layout_apply()
+    boot({ db = pinned(true), profs = { "Alchemy" } })
+    eq(__layoutApplied, 1)
+end
+
+function T.a_skill_refresh_does_not_reopen_a_minimised_panel()
+    boot({ profs = { "Alchemy" } })
+    clickGlyph()
+    setProfs({ "Mining", "Cooking" })
+    Fire("SKILL_LINES_CHANGED")
+    eq(shownRows(), 0, "still folded")
+    eq(rows()[1].name._text, "Mining", "but the rows track the skills")
+    clickGlyph()
+    eq(shownRows(), 2)
+    eq(rows()[1]._attrs.spell, "Smelting")
+end
+
+function T.fsprof_hide_and_show_keeps_the_minimised_state()
+    boot({ profs = { "Alchemy", "Cooking" } })
+    clickGlyph()
+    slash()
+    eq(panel()._shown, false)
+    slash()
+    eq(panel()._shown, true)
+    eq(shownRows(), 0)
+    eq(panel()._h, BAND_H)
+    eq(FS.Config.Get(MIN), true)
+end
+
+function T.minimising_a_hidden_panel_applies_when_it_is_shown()
+    boot({ profs = { "Alchemy" } })
+    slash()
+    FS.Config.Set(MIN, true)
+    eq(panel()._shown, false)
+    slash()
+    eq(panel()._shown, true)
+    eq(panel()._h, BAND_H)
+    eq(shownRows(), 0)
+end
+
+function T.a_click_in_combat_defers_everything_and_says_so()
+    boot({ profs = { "Alchemy", "Cooking" } })
+    __combat = true
+    clickGlyph()
+    eq(#__violations, 0, table.concat(__violations, ","))
+    eq(shownRows(), 2, "rows untouched in combat")
+    eq(panel()._h, FULL_H, "no resize in combat")
+    eq(panel()._points[1][1], "CENTER", "no re-anchor in combat")
+    eq(lastPrinted():find("after combat", 1, true) ~= nil, true, lastPrinted())
+    endCombat()
+    eq(shownRows(), 0, "folded when combat ends")
+    eq(panel()._h, BAND_H)
+    eq(panel()._points[1][1], "TOP")
+    eq(#__violations, 0, table.concat(__violations, ","))
+end
+
+function T.a_restore_click_in_combat_waits_for_regen_too()
+    boot({ db = pinned(true), profs = { "Alchemy", "Cooking" } })
+    __combat = true
+    clickGlyph()
+    eq(shownRows(), 0)
+    eq(panel()._h, BAND_H)
+    eq(#__violations, 0, table.concat(__violations, ","))
+    endCombat()
+    eq(shownRows(), 2)
+    eq(panel()._h, FULL_H)
+    eq(#__violations, 0, table.concat(__violations, ","))
+end
+
+function T.clicks_in_combat_net_out_to_the_latest()
+    boot({ profs = { "Alchemy" } })
+    __combat = true
+    clickGlyph()
+    clickGlyph()
+    endCombat()
+    eq(shownRows(), 1)
+    eq(panel()._h, FULL_H)
+    eq(FS.Config.Get(MIN), false)
+    eq(#__violations, 0, table.concat(__violations, ","))
+end
+
+function T.a_login_in_combat_builds_minimised_after_combat()
+    boot({ combatAtLoad = true, db = pinned(true), profs = { "Alchemy" } })
+    eq(panel(), nil)
+    endCombat()
+    eq(shownRows(), 0)
+    eq(panel()._h, BAND_H)
+    eq(#__violations, 0, table.concat(__violations, ","))
+end
+
+function T.a_reseat_keeps_a_minimised_panel_folded_on_its_top_edge()
+    boot({ profs = { "Alchemy" } })
+    local top = topEdge(panel())
+    clickGlyph()
+    FS.Layout.Apply(panel(), "professions")   -- what the rescale watcher and /fsedit do first
+    eq(panel()._h, FULL_H, "the reseat alone restores the seat height")
+    for _, fn in ipairs(__rescale) do fn() end
+    eq(panel()._h, BAND_H, "the rescale callback folds it again")
+    eq(topEdge(panel()), top)
+end
+
+function T.a_reseat_after_dragging_moves_the_folded_panel_with_its_seat()
+    boot({ db = pinned(true), profs = { "Alchemy" } })
+    FS.Layout.professions.x = FS.Layout.professions.x - 100
+    FS.Layout.professions.y = FS.Layout.professions.y + 40
+    FS.Layout.Apply(panel(), "professions")
+    for _, fn in ipairs(__rescale) do fn() end
+    eq(panel()._points[1][1], "TOP")
+    eq(panel()._points[1][4], (923 - 100) * 0.5)
+    eq(topEdge(panel()), (-450 + 40 + 105) * 0.5, "top of the full seat, not its centre")
+end
+
+function T.a_rescale_in_combat_touches_nothing_and_the_regen_refolds()
+    boot({ db = pinned(true), profs = { "Alchemy" } })
+    __combat = true
+    local applied = __layoutApplied
+    for _, fn in ipairs(__rescale) do fn() end
+    eq(#__violations, 0, table.concat(__violations, ","))
+    eq(__layoutApplied, applied, "no layout call in combat")
+    endCombat()
+    eq(__layoutApplied, applied + 1, "the regen re-seated and refolded the parked change")
+    eq(panel()._h, BAND_H)
+    FS.Layout.Apply(panel(), "professions")   -- the watcher's own regen pass, then the callbacks
+    for _, fn in ipairs(__rescale) do fn() end
+    eq(panel()._h, BAND_H)
+    eq(topEdge(panel()), (-450 + 105) * 0.5, "top of the full seat")
+    eq(#__violations, 0, table.concat(__violations, ","))
+end
+
+function T.only_the_first_parked_click_in_a_fight_prints()
+    boot({ profs = { "Alchemy" } })
+    __combat = true
+    clickGlyph()
+    local first = #__printed
+    eq(first >= 1, true, "the first parked click says so")
+    clickGlyph()
+    eq(#__printed, first, "the second stays quiet")
+    eq(lastPrinted():find("after combat", 1, true) ~= nil, true, lastPrinted())
+end
+
+function T.a_profile_switch_carries_each_profile_its_own_state()
+    boot({ profs = { "Alchemy" } })
+    FS.Config.NewProfile("Raid")
+    FS.Config.SetActiveProfile("Raid")
+    clickGlyph()
+    eq(panel()._h, BAND_H)
+    FS.Config.SetActiveProfile("Default")
+    eq(panel()._h, FULL_H, "Default is open")
+    eq(shownRows(), 1)
+    FS.Config.SetActiveProfile("Raid")
+    eq(panel()._h, BAND_H, "Raid is folded")
+    eq(shownRows(), 0)
+end
+
+function T.a_profile_switch_in_combat_waits_for_regen()
+    boot({ db = pinned(true), profs = { "Alchemy" } })
+    FS.Config.NewProfile("Raid")
+    __combat = true
+    FS.Config.SetActiveProfile("Raid")
+    eq(panel()._h, BAND_H, "untouched in combat")
+    eq(#__violations, 0, table.concat(__violations, ","))
+    endCombat()
+    eq(panel()._h, FULL_H)
+    eq(shownRows(), 1)
+end
+
+function T.a_read_only_config_refuses_the_click_and_says_so()
+    boot({ db = { profilesVersion = 99 }, profs = { "Alchemy" } })
+    clickGlyph()
+    eq(shownRows(), 1)
+    eq(panel()._h, FULL_H)
+    eq(lastPrinted():lower():find("read-only", 1, true) ~= nil, true, lastPrinted())
 end
 
 -- The harness's model of SecureActionButton_OnClick: the action runs on the one edge picked by the
