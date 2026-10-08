@@ -48,6 +48,14 @@ local Config = FS.Config
 local CFG_SHOWN = "professions.shown"
 Config.RegisterDefault(CFG_SHOWN, true)
 
+-- Minimised folds the rows into the title band; also a profile setting.
+local CFG_MINIMIZED = "professions.minimized"
+Config.RegisterDefault(CFG_MINIMIZED, false)
+
+local function IsMinimized()
+    return Config.Get(CFG_MINIMIZED) == true
+end
+
 -- Cyan, matching Tracker.lua's header accent (the closest analog -- a simple
 -- read-only info panel) rather than the generic violet Theme.COLOR_BORDER
 -- other panel chrome defaults to. Judgment call, not a design-doc token.
@@ -67,6 +75,17 @@ local ROW_PAD_X = 10
 local ICON_SIZE = 20
 local ICON_TEXT_GAP = 6
 local NAME_VALUE_GAP = 6
+
+-- Minimised height: the title band, its rule, and the same inset below as above.
+local COLLAPSED_H = BAND_INSET + Theme.PANEL_HEADER_H + 1 + BAND_INSET
+
+-- The chat term bar's minimise glyph (pink, COLOR_HEALTH): same texture, size, edge gap and idle/hover alphas.
+local GLYPH_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\icon_minimize.tga"
+local GLYPH_SIZE = 16
+local GLYPH_GAP = 4
+local GLYPH_ALPHA = 0.85
+local GLYPH_ALPHA_HOVER = 1.00
+local GLYPH_COLOR = Theme.COLOR_HEALTH
 
 -- Click action per row: an ALLOWLIST of English profession names mapped to the spell
 -- whose cast opens that profession's window (Mining opens Smelting). Any other name,
@@ -235,6 +254,56 @@ local rows
 local pendingInit = false
 local pendingRefresh = false
 local pendingVisible = nil -- nil, or the shown state a combat /fsprof asked for
+local pendingMinimized = false -- the minimised setting changed in combat; the panel catches up at regen
+
+local function GlyphText()
+    return IsMinimized() and "Restore" or "Minimise"
+end
+
+-- The chat term bar's tooltip placement, so both minimise glyphs read alike; nil when the chat is not loaded.
+local function ChatPlacer()
+    return FS.Chat and FS.Chat.PlaceTermBarTooltip
+end
+
+local function ShowGlyphTooltip(button)
+    local tip = GameTooltip
+    if not tip then return end
+    button.icon:SetVertexColor(GLYPH_COLOR[1], GLYPH_COLOR[2], GLYPH_COLOR[3], GLYPH_ALPHA_HOVER)
+    local place = ChatPlacer()
+    tip:SetOwner(button, place and "ANCHOR_NONE" or "ANCHOR_TOPRIGHT")
+    tip:SetText(GlyphText(), GLYPH_COLOR[1], GLYPH_COLOR[2], GLYPH_COLOR[3])
+    if place then place(button) end
+    tip:Show()
+end
+
+local function HideGlyphTooltip(button)
+    button.icon:SetVertexColor(GLYPH_COLOR[1], GLYPH_COLOR[2], GLYPH_COLOR[3], GLYPH_ALPHA)
+    if GameTooltip then GameTooltip:Hide() end
+end
+
+-- A click or profile switch changes the state without firing OnEnter again, so an open tooltip is
+-- rewritten in place.
+local function RefreshGlyphTooltip()
+    local tip = GameTooltip
+    local button = panel and panel.fsMinimizeButton
+    if not (button and tip and tip.GetOwner and tip:GetOwner() == button) then return end
+    tip:SetText(GlyphText(), GLYPH_COLOR[1], GLYPH_COLOR[2], GLYPH_COLOR[3])
+    local place = ChatPlacer()
+    if place then place(button) end
+end
+
+local function OnGlyphClick()
+    local alreadyParked = pendingMinimized
+    local minimized = not IsMinimized()
+    if not Config.Set(CFG_MINIMIZED, minimized) then
+        print("|cff22e0ffForever STUwave|r: settings are read-only this session")
+        return
+    end
+    -- Only the first click that parks a change says so; later clicks in the same fight stay quiet.
+    if pendingMinimized and not alreadyParked then
+        print(("|cff22e0ffForever STUwave|r: professions panel will be %s after combat"):format(minimized and "minimised" or "restored"))
+    end
+end
 
 -- Chrome built directly on `panel` itself (it IS the shell -- there is no
 -- separate inner fill StatusBar the way FrameHelpers.CreatePillBar's shell
@@ -266,6 +335,42 @@ local function BuildChrome(p)
     ApplyMono(label, 10, ACCENT)
     label:SetPoint("LEFT", band, "LEFT", 8, 0)
     label:SetText("stuwave://professions")
+
+    return band
+end
+
+-- The minimise glyph: a plain Button (never secure) at the band's right end; the label keeps the left.
+local function BuildGlyph(p, band)
+    local button = CreateFrame("Button", nil, p)
+    button:SetSize(GLYPH_SIZE, GLYPH_SIZE)
+    button:SetPoint("RIGHT", band, "RIGHT", -GLYPH_GAP, 0)
+    button:RegisterForClicks("LeftButtonUp")
+    button:SetScript("OnClick", OnGlyphClick)
+    button:SetScript("OnEnter", ShowGlyphTooltip)
+    button:SetScript("OnLeave", HideGlyphTooltip)
+
+    local icon = button:CreateTexture(nil, "ARTWORK")
+    icon:SetTexture(GLYPH_TEXTURE)
+    icon:SetAllPoints(button)
+    icon:SetVertexColor(GLYPH_COLOR[1], GLYPH_COLOR[2], GLYPH_COLOR[3], GLYPH_ALPHA)
+    button.icon = icon
+    return button
+end
+
+-- Folds a seated panel to the title band, keeping its top edge where the full seat has it. The seat is
+-- CENTER on CENTER, so the top sits h/2 above the seat's centre; another anchor only gets the height.
+local function CollapseToBand(p)
+    local L = FS.Layout.professions
+    p:SetHeight(COLLAPSED_H)
+    if not (L and L.point == "CENTER" and L.relPoint == "CENTER") then return end
+    local scale = L.unscaled and 1 or FS.Layout.Scale()
+    p:ClearAllPoints()
+    p:SetPoint("TOP", UIParent, L.relPoint, L.x * scale, (L.y + L.h / 2) * scale)
+end
+
+local function SeatPanel(p)
+    FS.Layout.Apply(p, "professions")
+    if IsMinimized() then CollapseToBand(p) end
 end
 
 -- Idempotent via the `panel` upvalue: a second call (PLAYER_LOGIN and
@@ -279,8 +384,9 @@ local function EnsurePanel()
     if panel then return panel end
 
     panel = CreateFrame("Frame", "ForeverSTUwaveProfessions", UIParent)
-    FS.Layout.Apply(panel, "professions")
-    BuildChrome(panel)
+    SeatPanel(panel)
+    local band = BuildChrome(panel)
+    panel.fsMinimizeButton = BuildGlyph(panel, band)
 
     rows = {}
     for i = 1, MAX_PROFESSIONS do
@@ -353,6 +459,7 @@ local function RefreshRows()
     local slots = { prof1, prof2, archaeology, fishing, cooking, firstAid }
 
     local shown = 0
+    local minimized = IsMinimized()
     for i = 1, MAX_PROFESSIONS do
         local slotIndex = slots[i]
         if slotIndex then
@@ -364,7 +471,7 @@ local function RefreshRows()
                 row.name:SetText(name)
                 row.value:SetText(FormatSkill(skillLevel, maxSkillLevel))
                 ConfigureRowAction(row, name)
-                row:Show()
+                if minimized then row:Hide() else row:Show() end
             elseif not ok2 and not loggedSlotFailure then
                 -- A genuine throw for one specific occupied slot (as opposed
                 -- to a merely-nil name, which just means "nothing to show
@@ -448,6 +555,39 @@ SlashCmdList["FSPROF"] = function()
 end
 
 -------------------------------------------------------------------------------
+-- Minimise glyph + persisted minimised state
+-------------------------------------------------------------------------------
+
+-- The one path every minimise change takes. The panel parents secure rows, so resizing it and showing
+-- or hiding them are refused in combat and wait for PLAYER_REGEN_ENABLED. Returns false when parked.
+local function RequestMinimized()
+    if not panel then return true end
+    if InCombatLockdown() then
+        pendingMinimized = true
+        return false
+    end
+    pendingMinimized = false
+    SeatPanel(panel)
+    RefreshRows()
+    return true
+end
+
+Config.OnChange(CFG_MINIMIZED, function()
+    RefreshGlyphTooltip()
+    RequestMinimized()
+end)
+
+-- A reseat (UI scale, resolution, /fsedit move or reset) re-applies the full seat first; this folds it again.
+FS.Layout.OnRescale(function()
+    if not (panel and IsMinimized()) then return end
+    if InCombatLockdown() then
+        pendingMinimized = true
+        return
+    end
+    CollapseToBand(panel)
+end)
+
+-------------------------------------------------------------------------------
 -- Recon
 -------------------------------------------------------------------------------
 
@@ -505,6 +645,7 @@ events:SetScript("OnEvent", function(_, event)
         elseif pendingRefresh and panel then
             RefreshRows()
         end
+        if pendingMinimized and panel then RequestMinimized() end
         if pendingVisible ~= nil then
             local visible = pendingVisible
             pendingVisible = nil
