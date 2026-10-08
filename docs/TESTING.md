@@ -139,14 +139,14 @@ Safe in combat. Esc, the X, or `/fsconfig` again closes it; with a menu or confi
 
 ## Target bars and numbers: /fsconfig, Gunsight HUD page
 
-Not yet checked in game. Mocked checks cover the sizes, the secret-safe numbers and the combat rules, not how it looks. With every control left alone the target box must look exactly as it did before (3 and 2 px rules, no numbers).
+Not yet checked in game. Mocked checks cover the sizes, the secret-safe numbers and the combat rules, not how it looks. With every control left alone the target box has a taller health rule than before (11 px, was 6), a 4 px resource rule, the bars as wide as the old 120% setting drew them, and no numbers.
 
 1. Target a mob. Drag "Health bar height" and "Resource bar height": the two rules under the unit name get thicker and thinner live, the resource rule always one step under the health rule. Dragging, the mouse wheel and clicking the track all work, and the number to the right of the slider follows. At the top of the range, check the rules do not touch the divider or the spell line badly.
-2. "Bar width": 50% halves the rules, 150% stretches them to at most the box text width. Use a short and a long unit name.
+2. "Bar width": the default 100% is as wide as the old 120% was; 50% is about half of that, and 150% stretches the rules to at most the box text width. Use a short and a long unit name. A width you had saved before this change converts once per profile to the same look (old 120 reads 100, old 150 reads 125).
 3. Turn "Show numbers" on. A health number and a resource number appear to the right of the target box. Try "Current", "Current / max" and "Percent" (the choice is dimmed while Show numbers is off). Check them in combat on a hostile target, where the values are hidden by the game: they must still show and update, and `/fsbug` should report no error. Say if Percent stays blank in combat, for either number.
 4. A target with no resource (a mob with no mana) shows only the health number.
 5. Switch profile, then `/reload`: every control and the look hold per profile. Do it all once during combat: the bars are plain frames, so each change applies at once and nothing is blocked.
-6. Reset to the starting look: health 6 px, resource 4 px, width 100%, numbers off.
+6. Reset to the starting look: health 11 px, resource 4 px, width 100%, numbers off.
 
 ## Professions panel: /fsprof
 

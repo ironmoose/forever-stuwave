@@ -68,9 +68,10 @@
 --
 -- TARGET BAR SETTINGS. The rail heights, the rail width and the value numbers beside them are FS.Config keys
 -- (SETTINGS, edited in the config window); a change applies live, in combat too (plain frames), through
--- Config.OnChange, coalesced to one apply per box on the next frame, and a profile switch moves them too. One slider px is C.BAR_PX image px, so the defaults (6 and 4) are the 3 and 2 image px rails above
--- and the numbers are off: nothing changes until a player moves a control. UNVERIFIED IN GAME: where the numbers stand, and
--- UnitPowerPercent with the ScaleTo100 curve.
+-- Config.OnChange, coalesced to one apply per box on the next frame, and a profile switch moves them too. One slider px is
+-- C.BAR_PX image px: the resource default (4) is the 2 image px rail above, the health default (11) a taller 5.5, and the
+-- width setting is scaled by C.BAR_WIDTH_SCALE (its 100% is 1.2 x the name). The numbers are off until a player turns them on.
+-- UNVERIFIED IN GAME: where the numbers stand, and UnitPowerPercent with the ScaleTo100 curve.
 --
 -- AT REST (when a box is shown but idle: the target's only): the plate and steel edge, the unit's name muted,
 -- no spell and no tile.
@@ -104,7 +105,7 @@
 -- FONTS. Every FontString gets its font (ApplyMono at the base size) at creation: SetText on one without
 -- a font throws "Font not set", which would land in pcall(BuildBox) and silently drop the box.
 
-local _, FS = ...
+local addonName, FS = ...
 
 local Gunsight = FS.Gunsight
 if type(Gunsight) ~= "table" or type(Gunsight.OnReady) ~= "function" then return end
@@ -132,13 +133,14 @@ local C = {
     TGT_GROW = 8,                                    -- tbBox() 'b': y: BOXR.y - 8, h: BOXR.h + 8 (grows UP)
     -- target bars, option B (drawTargetBars, tbBarH)
     TB_X = 7, TB_MIN_W = 24,                         -- x = BR.x + 7, w = max(24, name width)
-    TB_HP_Y = 26, TB_HP_H = 3,                       -- tbBarH(x, y = BR.y + 26, w, 3, ...); H is the default and mockup
-    TB_PW_Y = 30, TB_PW_H = 2,                       -- tbBarH(x, y + 4, w, 2, ...); reference, the rails draw SETTINGS * BAR_PX
+    TB_HP_Y = 26, TB_HP_H = 3,                       -- tbBarH(x, y = BR.y + 26, w, 3, ...); the mockup's, no longer the default
+    TB_PW_Y = 30, TB_PW_H = 2,                       -- tbBarH(x, y + 4, w, 2, ...); the rails draw SETTINGS * BAR_PX
     TB_TRACK_A = 0.2, TB_TAIL_A = 0.35,              -- rgba(col, .2) track; fill gradient rgba(col, .35) to rgba(col, 1)
     TB_TIP_W = 1.5, TB_TIP_A = 0.9, TB_TIP_MIX = 0.55,  -- fillRect(x + fw - 1.5, y, 1.5, h) in mix(col, white, .55) at A(.9)
     TB_LOW = 0.35, LOW_EPSILON = 0.0005,             -- TB_LOW; PartyFrames' LOW_HP_EPSILON
     -- target bar settings and numbers (not in the mockup; the config window mockup has the controls)
-    BAR_PX = 0.5,                                    -- image px per slider px: its 6 and 4 are the 3 and 2 above
+    BAR_PX = 0.5,                                    -- image px per slider px: its 4 is the 2 above (the health default is 11)
+    BAR_WIDTH_SCALE = 1.2,                           -- the width setting's 100% is the look the old 120% gave (Parker, in game)
     NUM_SIZE = 9, NUM_GAP = 5, NUM_LINE = 1,         -- number type size, gap past the box edge, gap between lines
     POWER_KEYS = { [0] = "mana", [1] = "rage", [2] = "focus", [3] = "energy" },  -- UnitPowerType -> TB_PC key
     BAR_EVENTS = { "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_POWER_UPDATE", "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER" },
@@ -184,7 +186,7 @@ GunsightBoxes.colors = colors
 local Config = FS.Config
 local KEY = "gunsight.targetBars."
 local SETTINGS = {
-    hpHeight = { key = KEY .. "hpHeight", default = 6, min = 2, max = 12, step = 1 },
+    hpHeight = { key = KEY .. "hpHeight", default = 11, min = 2, max = 12, step = 1 },
     powerHeight = { key = KEY .. "powerHeight", default = 4, min = 2, max = 12, step = 1 },
     width = { key = KEY .. "width", default = 100, min = 50, max = 150, step = 5 },
     numbers = { key = KEY .. "numbers", default = false },
@@ -198,8 +200,42 @@ GunsightBoxes.NUMBER_FORMATS = {
 }
 for _, def in pairs(SETTINGS) do Config.RegisterDefault(def.key, def.default) end
 
+-- Marks a profile whose stored width was converted off the old scale (whose 120 is today's 100), per profile.
+local WIDTH_MIGRATED = { key = KEY .. "widthMigrated", default = false }
+GunsightBoxes.WIDTH_MIGRATED = WIDTH_MIGRATED
+Config.RegisterDefault(WIDTH_MIGRATED.key, WIDTH_MIGRATED.default)
+
+-- Converts the ACTIVE profile's stored width once (old v becomes v / BAR_WIDTH_SCALE, rounded to the step, clamped);
+-- an unstored width stays unstored. Runs at load, on a width read and when the flag changes (a switch, copy or reset), so
+-- every profile converts when it first becomes active; a width write alone must never trigger it.
+local migrating = false
+local function MigrateWidth()
+    if migrating or Config.Get(WIDTH_MIGRATED.key) == true then return end
+    migrating = true
+    local def = SETTINGS.width
+    local v = Config.Get(def.key)
+    local done = true
+    if Config.IsStored(def.key) and type(v) == "number" and v == v then
+        local scaled = math.floor(v / C.BAR_WIDTH_SCALE / def.step + 0.5) * def.step
+        done = Config.Set(def.key, math.min(def.max, math.max(def.min, scaled)))
+    end
+    if done then Config.Set(WIDTH_MIGRATED.key, true) end
+    migrating = false
+end
+Config.OnChange(WIDTH_MIGRATED.key, MigrateWidth)
+
+-- Convert the active profile as soon as the saved variables are in (and again after the login profile resolve), so the
+-- read in Setting is only a backstop and no width written later can be taken for an old one.
+local migrator = CreateFrame("Frame")
+migrator:RegisterEvent("ADDON_LOADED")
+migrator:RegisterEvent("PLAYER_LOGIN")
+migrator:SetScript("OnEvent", function(_, event, name)
+    if event == "PLAYER_LOGIN" or name == addonName then MigrateWidth() end
+end)
+
 -- A number setting clamped into its range; anything else (a string, NaN) reads as the default.
 local function Setting(def)
+    if def == SETTINGS.width then MigrateWidth() end
     local v = Config.Get(def.key)
     if type(v) ~= "number" or v ~= v then return def.default end
     return math.min(def.max, math.max(def.min, v))
@@ -544,15 +580,23 @@ function Bars.SeatText(box, fs, base)
     fs:SetPoint("BOTTOMLEFT", box.frame, "TOPRIGHT", C.NUM_GAP * k, -(base + C.NUM_SIZE * C.DESCENT) * k)
 end
 
+-- Rail heights in image px. The power rule's bottom edge stops one px above the divider: it shrinks first, then the
+-- health rule gives way, but the power rule never goes below its minimum.
+function Bars.Heights()
+    local pwMin = SETTINGS.powerHeight.min * C.BAR_PX
+    local room = C.DIV_Y + C.TGT_GROW - 1 - C.TB_HP_Y - C.TB_GAP
+    local hpH = math.min(Setting(SETTINGS.hpHeight) * C.BAR_PX, room - pwMin)
+    return hpH, math.min(Setting(SETTINGS.powerHeight) * C.BAR_PX, room - hpH)
+end
+
 function Bars.Seat(box)
     local b = box.bars
     local k = ui(1)
     local wmax = (box.geom.w - 2 * C.PAD) * k
     local w = wmax
     if not box.nameSecret then w = math.min(wmax, math.max(C.TB_MIN_W * k, (box.nameImg or 0) * k)) end
-    w = math.min(wmax, w * (Setting(SETTINGS.width) / 100))
-    local hpH = Setting(SETTINGS.hpHeight) * C.BAR_PX
-    local pwH = Setting(SETTINGS.powerHeight) * C.BAR_PX
+    w = math.min(wmax, w * (Setting(SETTINGS.width) / 100) * C.BAR_WIDTH_SCALE)
+    local hpH, pwH = Bars.Heights()
     Bars.SeatRail(box, b.hp.green, C.TB_HP_Y, hpH, w)
     Bars.SeatRail(box, b.hp.red, C.TB_HP_Y, hpH, w)
     Bars.SeatRail(box, b.power, C.TB_HP_Y + hpH + C.TB_GAP, pwH, w)
