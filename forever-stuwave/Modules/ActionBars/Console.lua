@@ -11,7 +11,7 @@
 -- child frame scaled by FS.Layout.Scale(): one unit there is one design px, which is one
 -- physical pixel at 1440p, so a 1 texel line is a 1 pixel line and the baked textures
 -- (made at 1 texel = 1 design px) land at their native size. Nine-slice margins and the
--- tab foot's 59.2 x 49.2 box therefore need no conversion. `root` and `tab` are plain UI
+-- tab foot's 59.2 x 50.2 box therefore need no conversion. `root` and `tab` are plain UI
 -- unit frames (what a key lane wants to parent to); `keyArea` is in UI units.
 --
 -- WHY IT IS NOT PARENTED TO THE STACK. FSActionBarStack parents secure buttons, so it is
@@ -62,7 +62,7 @@ local TEX = {
     fill = MEDIA .. "console_fill_c14.tga",       -- 64x64 solid plate, TL + BR cut 14
     outline = MEDIA .. "console_outline_c14.tga", -- 64x64 1 texel rail on the same shape
     glow = MEDIA .. "console_glow_c14.tga",       -- 64x64 hollow halo, outline 11 texels in
-    foot = MEDIA .. "console_tab_foot.tga",       -- 128x128 over 59.2 x 49.2 design units
+    foot = MEDIA .. "console_tab_foot.tga",       -- 128x128 over 59.2 x 50.2 design units
     slant = MEDIA .. "tab_slant.tga",             -- 32x32 wedge, 45 degrees stretched square
     round = MEDIA .. "glow_round.tga",            -- soft round dot for the screws
 }
@@ -125,7 +125,7 @@ Console.GLOW = GLOW
 -- action footprint and clear of the chat terminal (it cannot read the paddings above any
 -- other way: it loads first and Console.lua only owns the art).
 Console.EXTENT = { left = C.PAD + C.MARG + GP, right = C.PAD + GP }
-local FOOT_W, FOOT_H, FOOT_PAD = 59.2, 49.2, 10
+local FOOT_W, FOOT_H, FOOT_PAD = 59.2, 50.2, 10
 local LINE = 1                 -- outline thickness, one texel
 local SEAM = 0.5               -- the foot ends half way down the chassis top line
 
@@ -190,7 +190,8 @@ function Console.Compute(g, s, n)
     if dockGap then
         local x0, x1 = math.max(dockGap[1], L.cut), math.min(dockGap[2], L.tx)
         if x1 > x0 then L.gap = { x0 = x0, x1 = x1 } end
-        local h0, h1 = math.max(dockGap[3], L.cut), math.min(dockGap[4], L.tx)
+        -- the halo stops where the foot texture's own halo begins (SeatHalo)
+        local h0, h1 = math.max(dockGap[3], L.cut), math.min(dockGap[4], L.tx - FOOT_PAD)
         if h1 > h0 then L.haloGap = { x0 = h0, x1 = h1 } end
     end
     return L
@@ -400,7 +401,8 @@ end
 local function SeatHalo(L)
     local W, H, cut, tx, th = L.w, L.h, L.cut, L.tx, L.th
     local gap = L.haloGap
-    local footEnd = tx - FOOT_PAD + FOOT_W
+    local footStart = tx - FOOT_PAD   -- from here the foot texture carries the halo, chassis top line included
+    local footEnd = footStart + FOOT_W
     local mid0, mid1 = GLOW.mid0 / TEXN, GLOW.mid1 / TEXN   -- the straight middle: does not vary along the edge
     local edge0 = (TEXN - GP) / TEXN              -- the texel the outline sits on, right and bottom
     local block1 = 1 - GM / TEXN                  -- start of the far corner block
@@ -409,13 +411,13 @@ local function SeatHalo(L)
     Place(parts.haloTR, W - cut, -th - GP, GM, GM);        Uv(parts.haloTR, block1, 1, 0, GM / TEXN)
     Place(parts.haloBR, W - cut, H - cut, GM, GM);         Uv(parts.haloBR, block1, 1, block1, 1)
     Place(parts.haloBL, -GP, H - cut, GM, GM);             Uv(parts.haloBL, 0, GM / TEXN, block1, 1)
-    -- straight runs: left, the chassis top up to the foot, the tab top from the foot stub on, right, bottom
+    -- straight runs: left, the chassis top up to the foot texture, the tab top from the foot stub on, right, bottom
     Place(parts.haloLeft, -GP, cut, GP, H - 2 * cut);      Uv(parts.haloLeft, 0, GP / TEXN, mid0, mid1)
-    -- (the pet dock gap splits the top run in two: [cut, hx0] and [hx1, tx], the halo's own pair, which
+    -- (the pet dock gap splits the top run in two: [cut, hx0] and [hx1, tx - FOOT_PAD], the halo's own pair, which
     -- is the line's pair unless SetDockGap was given another)
-    PlaceRun(parts.haloTop, cut, -GP, (gap and gap.x0 or tx) - cut, GP)
+    PlaceRun(parts.haloTop, cut, -GP, (gap and gap.x0 or footStart) - cut, GP)
     Uv(parts.haloTop, mid0, mid1, 0, GP / TEXN)
-    PlaceRun(parts.haloTop2, gap and gap.x1 or tx, -GP, gap and tx - gap.x1 or 0, GP)
+    PlaceRun(parts.haloTop2, gap and gap.x1 or footStart, -GP, gap and footStart - gap.x1 or 0, GP)
     Uv(parts.haloTop2, mid0, mid1, 0, GP / TEXN)
     -- (and the gap patch, the top halo's own strip over the gap, carries it whole when its alpha is 1)
     PlaceRun(parts.gapHalo, gap and gap.x0 or 0, -GP, gap and gap.x1 - gap.x0 or 0, GP)
@@ -642,8 +644,9 @@ function Console.SetKeyCount(n)
 end
 
 -- Opens the top outline and its halo between `x0` and `x1` (design px from the chassis left) where
--- the pet panel docks, the way the key tab omits the line under itself: the top line and the top
--- halo each split into [TL cut, x0] and [x1, foot], and the chassis fill stays whole. An optional
+-- the pet panel docks, the way the key tab omits the line under itself: the top line splits
+-- into [TL cut, x0] and [x1, foot], the top halo the same but ending where the foot texture's own
+-- halo begins, and the chassis fill stays whole. An optional
 -- second pair `hx0, hx1` gives the HALO its own span (the pet dock lets the line run under its sides
 -- but keeps the Console's glow off its own side glow); omitted or not two numbers, the halo uses
 -- x0, x1. The GAP IS COVERED by the gap patch (parts.gapLine over x0..x1, parts.gapHalo over

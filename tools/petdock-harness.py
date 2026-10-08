@@ -1126,6 +1126,7 @@ def check_the_normal_edge_can_be_retinted_and_reset() -> None:
 # Checks: docking onto the Console (S8)
 # ---------------------------------------------------------------------------------------------
 
+FOOT_PAD = 10  # Console.lua FOOT_PAD: the foot texture owns the top halo from tx - FOOT_PAD on
 DOCK_X = 24  # PetDock.lua's DOCK_X: the dock's left edge, design px right of the chassis left
 
 # A stand-in for Console.lua and ActionBars.lua's geometry feed: FS.Console answers IsDrawn, records
@@ -1571,8 +1572,8 @@ def check_the_dock_gap_fits_the_real_console_top_line() -> None:
         approx(layout["gap"]["x0"], x0, f"gap start at scale {s:.4f}")
         approx(layout["gap"]["x1"], x1, f"gap end at scale {s:.4f}")
         assert layout["cut"] < x0, "the gap eats the top-left cut"
-        assert x1 + c.REACH <= layout["tx"], \
-            f"the pet's halo (to {x1 + c.REACH}) reaches the shoulder tab foot at {layout['tx']:.1f} at scale {s:.4f}"
+        assert x1 + c.REACH <= layout["tx"] - FOOT_PAD, \
+            f"the pet's halo (to {x1 + c.REACH}) reaches the foot texture's halo at {layout['tx'] - FOOT_PAD:.1f} at scale {s:.4f}"
 
 
 
@@ -1938,8 +1939,8 @@ def check_new_shoulder_gap_fits_the_real_console_top_line() -> None:
         approx(layout["gap"]["x0"], x0, f"gap start at scale {scale:.4f}")
         approx(layout["gap"]["x1"], x1, f"gap end at scale {scale:.4f}")
         assert layout["cut"] < x0, "the gap eats the top-left cut"
-        assert hx1 + c.REACH <= layout["tx"], \
-            f"the block's halo (to {hx1 + c.REACH}) reaches the shoulder tab foot at {layout['tx']:.1f} at scale {scale:.4f}"
+        assert hx1 + c.REACH <= layout["tx"] - FOOT_PAD, \
+            f"the block's halo (to {hx1 + c.REACH}) reaches the foot texture's halo at {layout['tx'] - FOOT_PAD:.1f} at scale {scale:.4f}"
     # the Console's own halo gap follows the halo pair, not the line pair
     pieces = console_halo_pieces((x0, x1, hx0, hx1))
     approx(pieces["gapHalo"][0], hx0, "halo patch start"); approx(pieces["gapHalo"][0] + pieces["gapHalo"][1], hx1, "halo patch end")
