@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1920">
+<title>Gunsight Class Module Priest</title>
+<style>
+@font-face{font-family:'Mononoki';src:url(../forever-stuwave/Media/Fonts/MononokiNerdFontMono-Bold.ttf) format('truetype');font-weight:100 900;font-style:normal;font-display:block}
+:root{
+  color-scheme:dark;
+  --bg:#0d0620; --fg:#e9e2ff; --muted:#9d93c4; --white:#f3fbff; --text:#e2e8f0;
+  --violet:#a855f7; --cyan:#22e0ff; --pink:#ff2e97; --amber:#ffb648; --green:#39ff14;
+  --track:#0a0416; --line:#3a2168;
+  --edge:rgba(168,85,247,.35);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg)}
+body{width:100%;max-width:1920px;padding:28px 30px 40px;color:var(--fg);font-family:'Mononoki',ui-monospace,monospace;font-weight:700;line-height:1.45}
+h1{margin:0;font-size:30px;letter-spacing:.08em;color:var(--white);text-shadow:0 0 18px var(--violet);font-weight:700}
+.ref{display:inline-block;margin:10px 0 0;padding:2px 10px;font-size:13px;letter-spacing:.12em;color:var(--amber);border:1px solid rgba(255,182,72,.5);background:rgba(255,182,72,.06)}
+.sub{margin:10px 0 24px;color:var(--muted);font-size:15px;max-width:1750px}
+.sub b{color:var(--white);font-weight:700}
+.row{display:flex;flex-wrap:wrap;gap:26px;margin-bottom:26px;align-items:flex-start}
+.scene{position:relative;width:1000px;height:450px;border:1px solid var(--edge);overflow:hidden;flex:none}
+.scene.crop{width:440px}
+.scene svg{display:block}
+.state{position:absolute;left:10px;top:8px;z-index:2;font-size:12px;letter-spacing:.14em;color:var(--muted);padding:2px 8px;background:rgba(13,6,32,.7);border:1px solid rgba(168,85,247,.3)}
+.state b{color:var(--cyan);font-weight:700}
+.side{width:348px;flex:none}
+.side .t{font-size:24px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 14px var(--violet);margin:0 0 6px}
+.side .t i{font-style:normal;color:var(--pink)}
+.side .cap{font-size:13px;line-height:1.45;color:var(--muted);margin:0 0 10px}
+.side .cap b{color:var(--white);font-weight:700}
+.zoom{border:1px solid var(--edge);background:#120a22;margin:0 0 8px;width:348px}
+.zoom svg{display:block}
+table.dp{border-collapse:collapse;width:1466px;margin-top:12px;font-size:12px}
+.left{width:1466px;flex:none}
+.scenes{display:flex;gap:26px}
+table.dp td.e{width:240px;color:#fff;white-space:nowrap}
+table.dp td.v{width:150px;white-space:nowrap}
+table.dp td{padding:3px 4px;vertical-align:top;border-top:1px solid rgba(168,85,247,.2);color:var(--text);line-height:1.35}
+table.dp td.n{width:20px;color:var(--cyan)}
+table.dp td.s{color:var(--muted)}
+.pill{display:inline-block;padding:0 5px;margin-left:3px;font-size:9px;letter-spacing:.06em;border:1px solid;line-height:14px;white-space:nowrap}
+.pill.ok{color:var(--green);border-color:rgba(57,255,20,.5)}
+.pill.est{color:var(--amber);border-color:rgba(255,182,72,.6)}
+.pill.ooc{color:var(--pink);border-color:rgba(255,46,151,.6)}
+.pill.probe{color:var(--violet);border-color:rgba(168,85,247,.7)}
+h2{margin:34px 0 10px;font-size:22px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 12px var(--violet);font-weight:700}
+h2 i{font-style:normal;color:var(--pink)}
+.strip{display:flex;gap:16px;margin:0 0 22px;align-items:flex-start}
+.strip .lead{width:120px;flex:none;font-size:20px;color:var(--white);letter-spacing:.08em;text-shadow:0 0 12px var(--violet)}
+.strip .lead i{font-style:normal;color:var(--pink)}
+.strip .lead small{display:block;font-size:11px;color:var(--muted);letter-spacing:0;text-shadow:none;line-height:1.35;margin-top:4px}
+.tile{width:202px;flex:none}
+.tile svg{display:block;border:1px solid rgba(168,85,247,.45);background:#120a22}
+.tile .tc{margin-top:5px;font-size:11px;line-height:1.35;color:var(--muted)}
+.tile .tc b{color:var(--cyan);display:block;font-size:11px;letter-spacing:.06em}
+.notes{display:flex;gap:26px;align-items:flex-start}
+.panel{border:1px solid var(--edge);background:rgba(26,16,37,.7);padding:12px 16px 14px;font-size:12px;line-height:1.5;color:var(--text)}
+.panel h3{margin:0 0 6px;font-size:13px;letter-spacing:.12em;color:var(--violet);font-weight:700;text-transform:uppercase}
+.panel p{margin:0 0 8px}
+.panel b{color:var(--white);font-weight:700}
+.panel ul{margin:0;padding-left:18px}
+.panel li{margin-bottom:5px}
+.panel .mu{color:var(--muted)}
+table.sp{border-collapse:collapse;width:100%;font-size:11px}
+table.sp th{text-align:left;color:var(--violet);font-weight:700;letter-spacing:.08em;padding:3px 6px;border-bottom:1px solid rgba(168,85,247,.4);font-size:10px}
+table.sp td{padding:3px 6px;border-top:1px solid rgba(168,85,247,.15);vertical-align:top;line-height:1.35}
+table.sp td.u{color:var(--muted);word-break:break-all}
+</style>
+</head>
+<body>
+<h1>GUNSIGHT CLASS MODULE, PRIEST</h1>
+<div class="ref">Design reference, 2026-10-08, Priest</div>
+<div class="sub">The Class Module area for a Priest at the beta level cap of 30, drawn in the approved v7 chrome. <b>Target Debuffs already shows Shadow Word: Pain and Devouring Plague on the target</b>, so this module only carries what that list cannot: your own upkeep (Inner Fire charges, Fortitude), shield and cooldown timing, and the Shadow Weaving and Spirit Tap windows. Three variants, A to C. Each row shows the module in the lower area (full scene, the v7 default seat), in the upper area (target side crop), and a 1.5x annotated copy with its data paths. Shadowform (a 31 point talent) and Shadow Word: Death (level 32) are above the cap and are not drawn.</div>
+<div id="root"></div>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <filter id="gl" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.1" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="gls" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b0716"/><stop offset=".62" stop-color="#150d28"/><stop offset="1" stop-color="#1c1030"/></linearGradient>
+    <radialGradient id="glowL" cx="22%" cy="108%" r="55%"><stop offset="0" stop-color="#3a2160"/><stop offset="1" stop-color="#3a2160" stop-opacity="0"/></radialGradient>
+    <radialGradient id="glowR" cx="85%" cy="0%" r="60%"><stop offset="0" stop-color="#1d1840"/><stop offset="1" stop-color="#1d1840" stop-opacity="0"/></radialGradient>
+  </defs>
+</svg>
+
+<script>
+(function(){
+var C={cyan:'#22e0ff',pink:'#ff2e97',violet:'#a855f7',green:'#39ff14',amber:'#ffb648',white:'#f3fbff',muted:'#9d93c4',fg:'#e9e2ff',bg:'#0d0620',gold:'#ffd23f'};
+/* priest module palette: holy gold for Inner Fire, ice blue for the shield, shadow violet for Weaving and the shadow spells */
+var HOLY='#ffd23f', SHLD='#7fd8ff', SHAD='#b36bff', MBC='#e06bff', DPC='#8a5be0', TAPC='#39ff14';
+function hex(h){h=h.replace('#','');return [parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)];}
+function mix(a,b,t){var x=hex(a),y=hex(b);return '#'+[0,1,2].map(function(i){return ('0'+Math.round(x[i]+(y[i]-x[i])*t).toString(16)).slice(-2);}).join('');}
+function ch(x,y,w,h,c){return (x+c)+','+y+' '+(x+w)+','+y+' '+(x+w)+','+(y+h-c)+' '+(x+w-c)+','+(y+h)+' '+x+','+(y+h)+' '+x+','+(y+c);}
+function txt(x,y,s,size,fill,o){o=o||{};
+  return '<text x="'+x+'" y="'+y+'" font-size="'+size+'" fill="'+fill+'" text-anchor="'+(o.a||'start')+'"'+(o.op?' opacity="'+o.op+'"':'')+(o.rot?' transform="rotate('+o.rot+' '+x+' '+y+')"':'')+
+    ' stroke="rgba(13,6,32,.92)" stroke-width="2.6" paint-order="stroke" stroke-linejoin="round">'+s+'</text>';}
+function line(x1,y1,x2,y2,col,op,w,dash){return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="'+(w||1)+'"'+(dash?' stroke-dasharray="'+dash+'"':'')+'/>';}
+function chevPath(cx,ay,hw,d,t){return cx+','+ay+' '+(cx+hw)+','+(ay+d)+' '+(cx+hw)+','+(ay+d+t)+' '+cx+','+(ay+t)+' '+(cx-hw)+','+(ay+d+t)+' '+(cx-hw)+','+(ay+d);}
+function rect(x,y,w,h,fill,op){return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" fill="'+fill+'"'+(op!=null?' fill-opacity="'+op+'"':'')+'/>';}
+
+/* ---------- geometry (image px, from Gunsight.lua) ---------- */
+var TOP=508,TBOT=752,PITCH=(TBOT-TOP)/10,N=20,CP=(TBOT-TOP)/N;
+var HZ=630;
+
+function chipIcon(x,y,s,d,absent){
+  var c=Math.max(2,Math.round(s/6)),o='';
+  if(absent){
+    return '<polygon points="'+ch(x,y,s,s,c)+'" fill="rgba(13,6,32,.7)" stroke="'+mix(C.muted,'#ffffff',.25)+'" stroke-opacity=".9" stroke-width="1.2"/>'+
+      '<text x="'+(x+s/2)+'" y="'+(y+s/2+s*.18)+'" font-size="'+Math.round(s*.5)+'" fill="'+mix(C.muted,'#ffffff',.25)+'" fill-opacity=".8" text-anchor="middle">'+d.ab+'</text>';
+  }
+  o+='<polygon points="'+ch(x,y,s,s,c)+'" fill="'+mix(d.c,C.bg,.35)+'"/>';
+  o+='<polygon points="'+ch(x,y,s,s*.45,c)+'" fill="'+mix(d.c,'#ffffff',.35)+'" opacity=".3"/>';
+  o+='<polygon points="'+ch(x,y,s,s,c)+'" fill="none" stroke="'+mix(d.c,'#ffffff',.3)+'" stroke-width="1.2"/>';
+  o+='<text x="'+(x+s/2)+'" y="'+(y+s/2+s*.18)+'" font-size="'+Math.round(s*.5)+'" fill="'+C.white+'" text-anchor="middle">'+d.ab+'</text>';
+  return o;
+}
+
+/* ---------- the shared composition (copied from v7) ---------- */
+function bar(x0,x1,col,p,out,caretCol){
+  var o='',cx=(x0+x1)/2,k,i;
+  o+='<polygon points="'+ch(x0,500,x1-x0,260,8)+'" fill="rgba(13,6,32,.55)" fill-opacity=".45"/>';
+  o+='<polygon points="'+ch(x0,500,x1-x0,260,8)+'" fill="none" stroke="'+col+'" stroke-width="1.3" filter="url(#gls)"/>';
+  var ex=out<0?x0:x1;
+  for(k=0;k<=10;k++){var ty=TBOT-k*PITCH;o+=line(ex,ty,ex+out*(k===5?10:5),ty,col,.75,1.2);}
+  for(i=0;i<N;i++){
+    var ay=TBOT-(i+1)*CP,lit=(i+1)/N<=p;
+    o+='<polygon points="'+chevPath(cx,ay,10,8,5.5)+'" fill="'+col+'" fill-opacity="'+(lit?1:.2)+'"'+(lit?' filter="url(#gls)"':'')+'/>';
+  }
+  var fy=TBOT-p*(TBOT-TOP);
+  o+='<polygon points="'+chevPath(cx,fy-17,13,9,7)+'" fill="none" stroke="'+caretCol+'" stroke-width="1.8" stroke-linejoin="miter"/>';
+  return o;
+}
+function box(x,y,w,h,col){
+  return '<polygon points="'+ch(x,y,w,h,8)+'" fill="rgba(13,6,32,.85)"/>'+
+    '<polygon points="'+ch(x,y,w,h,8)+'" fill="none" stroke="'+col+'" stroke-width="1.4" filter="url(#gl)"/>';
+}
+function brackets(x,y,w,h,col,op,a){
+  a=a||12;var s='';
+  [[x,y+a,x,y,x+a,y],[x+w-a,y,x+w,y,x+w,y+a],[x,y+h-a,x,y+h,x+a,y+h],[x+w-a,y+h,x+w,y+h,x+w,y+h-a]].forEach(function(q){
+    s+='<polyline points="'+q[0]+','+q[1]+' '+q[2]+','+q[3]+' '+q[4]+','+q[5]+'" fill="none" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="1.6"/>';});
+  return s;
+}
+function party(){
+  var o='',x=606,y=506,w=180,h=230;
+  o+=brackets(x,y,w,h,C.cyan,.6,12);
+  var rows=[['Parker',.82,C.green],['Thalia',.55,C.green],['Brogan',.18,'#ff3b4e'],['Mira',.95,C.green],['Jex',.70,C.green]];
+  var rh=(h-16)/5;
+  rows.forEach(function(r,i){
+    var ry=y+8+i*rh;
+    if(i>0)o+=line(x+8,ry,x+w-8,ry,C.violet,.2,1);
+    o+=txt(x+12,ry+14,r[0],11,i===0?C.cyan:C.white);
+    o+=rect(x+12,ry+20,w-24,5,r[2],.18)+rect(x+12,ry+20,(w-24)*r[1],5,r[2],1);
+    o+=rect(x+12,ry+27,w-24,3,'#4aa8ff',.18)+rect(x+12,ry+27,(w-24)*.7,3,'#4aa8ff',1);
+  });
+  return o;
+}
+function tag(x,y,w,html,col){
+  return '<polygon points="'+ch(x,y,w,15,5)+'" fill="rgba(13,6,32,.95)" stroke="'+C.pink+'" stroke-width="1.3" filter="url(#gls)"/>'+
+    '<text x="'+(x+w/2)+'" y="'+(y+11)+'" font-size="11" fill="'+col+'" text-anchor="middle">'+html+'</text>';
+}
+function base(){
+  var o='',X=480,Y=380,W=1000,H=450;
+  var CS=['MIND BLAST',13,'MB','0.9 / 1.5',18];
+  o+=rect(X,Y,W,H,'url(#sky)')+rect(X,Y,W,H,'url(#glowL)')+rect(X,Y,W,H,'url(#glowR)');
+  o+='<g fill="rgba(120,96,190,.16)" stroke="'+C.violet+'" stroke-opacity=".35" stroke-dasharray="4 4" stroke-width="1">'+
+     '<circle cx="995" cy="540" r="24"/><rect x="953" y="570" width="84" height="100" rx="20"/>'+
+     '<rect x="962" y="664" width="30" height="88" rx="8"/><rect x="998" y="664" width="30" height="88" rx="8"/>'+
+     '<rect x="926" y="576" width="24" height="86" rx="10"/><rect x="1040" y="576" width="24" height="86" rx="10"/></g>';
+  o+='<ellipse cx="995" cy="752" rx="112" ry="26" fill="rgba(80,70,230,.12)" stroke="#5b57e8" stroke-opacity=".6" stroke-width="2"/>';
+  o+=line(838,HZ,1150,HZ,C.violet,.3,1,'6 6');
+  o+=party();
+  o+=bar(796,826,C.cyan,.58,-1,C.white);
+  o+=box(724,424,114,56,C.cyan);
+  o+=txt(731,447,CS[0],CS[1],C.white)+txt(731,469,CS[3],CS[4],C.cyan);
+  o+='<polygon points="'+ch(844,438,28,28,5)+'" fill="rgba(13,6,32,.9)" stroke="'+C.cyan+'" stroke-width="1.3"/><text x="858" y="457" font-size="13" fill="'+C.cyan+'" text-anchor="middle">'+CS[2]+'</text>';
+  o+='<polygon points="'+ch(672,430,44,44,6)+'" fill="rgba(13,6,32,.85)" stroke="'+C.cyan+'" stroke-opacity=".8" stroke-width="1.2"/><text x="694" y="458" font-size="13" fill="'+C.cyan+'" text-anchor="middle">NX</text>';
+  o+=bar(1164,1194,C.pink,.45,1,C.pink);
+  o+=box(1152,416,114,64,C.pink);
+  o+=txt(1159,436,'Kobold Miner',14,C.white);
+  o+=rect(1159,440,100,3,'#39ff14',.2)+rect(1159,440,62,3,'#39ff14')+rect(1159,445,100,2,'#4aa8ff',.2)+rect(1159,445,70,2,'#4aa8ff');
+  o+=line(1159,453,1259,453,C.pink,.4,1.2)+txt(1159,469,'Mining',14,C.pink);
+  o+=tag(1226,408,36,'KICK',C.pink);
+  o+='<polygon points="'+ch(1118,438,28,28,5)+'" fill="rgba(13,6,32,.9)" stroke="'+C.pink+'" stroke-width="1.3"/><text x="1132" y="457" font-size="13" fill="'+C.pink+'" text-anchor="middle">PK</text>';
+  return o;
+}
+function tags(){
+  var o='';
+  o+=tag(1153,408,68,'L24 <tspan fill="'+C.gold+'">ELITE</tspan>',C.white);
+  o+=tag(1156,473,32,'62%',C.green);
+  o+=tag(1193,473,69,'<tspan fill="'+C.cyan+'">KERRA</tspan>',C.white);
+  return o;
+}
+/* my buffs plate: what is on you right now. The module only adds charges and reminders. */
+var BUFFS_PR=[
+  {k:'FT',c:'#d9a521',t:'52m'},
+  {k:'IF',c:'#d9a521',t:'8m'},
+  {k:'WF',c:'#d9a521',t:'38m'},
+  {k:'DS',c:'#4aa8ff',t:'47m',party:true}
+];
+function buffs(){
+  var o='',L=BUFFS_PR,x0=498,w=164;
+  o+='<polygon points="'+ch(x0,424,w,56,6)+'" fill="rgba(13,6,32,.7)"/><polygon points="'+ch(x0,424,w,56,6)+'" fill="none" stroke="'+C.cyan+'" stroke-opacity=".75" stroke-width="1.2" filter="url(#gls)"/>';
+  L.forEach(function(d,i){
+    var x=x0+6+i*38;
+    o+='<g>'+chipIcon(x+4,430,24,{ab:d.k,c:d.c},false)+'</g>';
+    if(d.party)o+='<circle cx="'+(x+28)+'" cy="432" r="3.2" fill="'+C.cyan+'" stroke="'+C.bg+'" stroke-width="1"/>';
+    o+=txt(x+16,470,d.t,12,C.white,{a:'middle'});
+  });
+  return o;
+}
+function slotDivider(x1){return line(1204,HZ,1227,HZ,C.violet,.85,1.2)+line(1227,HZ,x1,HZ,C.violet,.4,1);}
+
+/* target debuffs rows (the existing module): a Priest's own DoTs, so the division of labour is visible */
+var PRDEB=[
+  {ab:'SP',c:'#8a4fd0',rem:11},
+  {ab:'DP',c:'#7a3fa0',rem:19}
+];
+function dotsH(list,lower){
+  var o='',k,ytop=lower?HZ:TOP,k0=lower?0:5,k1=lower?4:10;
+  for(k=k0;k<=k1;k++){var ty=TBOT-k*PITCH;
+    if(k<10)o+=line(1204,ty,1213,ty,C.pink,.45,1);
+    o+=line(1213,ty,1344,ty,C.violet,k===5?.55:.12,1);}
+  list.forEach(function(d,j){
+    var cy=ytop+PITCH*(j+.5),abs=d.rem<=0,band=!abs&&d.rem<=3,col=band?C.amber:mix(d.c,'#ffffff',.25);
+    o+=chipIcon(1220,cy-10,20,d,abs);
+    o+=txt(1246,cy+4.5,(d.rem<3?d.rem.toFixed(1):Math.round(d.rem))+'s',13,band?C.amber:C.white);
+    o+=rect(1274,cy-2,52,4,col,.2)+rect(1274,cy-2,52*d.rem/30,4,col);
+  });
+  return o;
+}
+
+/* ================= PRIEST MODULE PIECES ================= */
+function fmt(s){return s<3?s.toFixed(1)+'s':Math.round(s)+'s';}
+/* a chip: mode on (class colour), hollow (unknown or off), warn (amber reminder) */
+function pchip(x,y,s,ab,col,mode){
+  var c=Math.max(2,Math.round(s/6)),o='',fs=Math.round(s*.5);
+  if(mode==='hollow'||mode==='warn'){
+    var sc=mode==='warn'?C.amber:mix(C.muted,'#ffffff',.25);
+    o+='<polygon points="'+ch(x,y,s,s,c)+'" fill="'+(mode==='warn'?mix(C.bg,C.amber,.22):'rgba(13,6,32,.7)')+'" stroke="'+sc+'" stroke-opacity=".95" stroke-width="1.3"'+(mode==='warn'?' filter="url(#gls)"':'')+'/>';
+    o+='<text x="'+(x+s/2)+'" y="'+(y+s/2+s*.18)+'" font-size="'+fs+'" fill="'+sc+'" text-anchor="middle"'+(mode==='hollow'?' fill-opacity=".8"':'')+'>'+ab+'</text>';
+    return o;
+  }
+  o+='<polygon points="'+ch(x,y,s,s,c)+'" fill="'+mix(C.bg,col,.3)+'"/><polygon points="'+ch(x,y,s,s,c)+'" fill="none" stroke="'+col+'" stroke-width="1.4" filter="url(#gls)"/>';
+  o+='<text x="'+(x+s/2)+'" y="'+(y+s/2+s*.18)+'" font-size="'+fs+'" fill="'+C.white+'" text-anchor="middle">'+ab+'</text>';
+  return o;
+}
+/* a drain lane bar: frac of the bar filled, optional amber band over the last bandFrac end */
+function dbar(x,y,w,h,col,frac,band){
+  var o=rect(x,y,w,h,'#0a0416',.9);
+  if(band)o+=rect(x,y,w*band,h,C.amber,.22);
+  if(frac>0)o+=rect(x,y,w*Math.min(1,frac),h,col,.9);
+  o+='<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" fill="none" stroke="'+col+'" stroke-opacity=".6"/>';
+  return o;
+}
+/* the shield lane, shared by A and B: ready, absorbing (30 s), Weakened Soul (15 s), or unknown */
+function shieldLane(x,y,w,sh,an,n){
+  var o='',bx=x+28,bw=w-72,by=y+4,bh=12,mode=sh.s;
+  var chipMode=mode==='unknown'?'hollow':'on',cc=mode==='weak'?C.amber:SHLD;
+  if(mode==='ready'){cc=C.cyan;}
+  o+=pchip(x,y,20,'PS',cc,chipMode);
+  if(mode==='ready'){
+    o+=dbar(bx,by,bw,bh,C.cyan,1);
+    o+=rect(bx,by,bw,bh,C.cyan,.15);
+    o+=txt(bx+bw/2,by+10,'SHIELD READY',9,C.white,{a:'middle'});
+    o+=txt(x+w,y+15,'RDY',13,C.cyan,{a:'end'});
+  }else if(mode==='abs'){
+    o+=dbar(bx,by,bw,bh,SHLD,sh.t/30);
+    o+=txt(bx+4,by+10,'SHIELDED',9,C.white);
+    o+=txt(bx+bw-3,by+10,'30s',9,C.muted,{a:'end',op:.75});
+    o+=txt(x+w,y+15,fmt(sh.t),13,C.white,{a:'end'});
+  }else if(mode==='weak'){
+    o+=dbar(bx,by,bw,bh,C.amber,sh.t/15);
+    o+=txt(bx+4,by+10,'WEAKENED SOUL',9,C.white);
+    o+=txt(bx+bw-3,by+10,'15s',9,C.muted,{a:'end',op:.75});
+    o+=txt(x+w,y+15,fmt(sh.t),13,C.amber,{a:'end'});
+  }else{
+    o+=dbar(bx,by,bw,bh,C.muted,0);
+    o+=txt(bx+4,by+10,'LAST SEEN',9,C.muted,{op:.8});
+    o+=txt(x+w,y+15,'?',13,C.muted,{a:'end'});
+  }
+  if(an)an.push({n:n,y:y+10});
+  return o;
+}
+/* reminder pair: Inner Fire chip with its charges and Fortitude chip with its time (B header, C footer) */
+function remRow(x,y,st,an,n1,n2){
+  var o='',I=st.ifire,F=st.fort,s=22;
+  var im=I.s==='missing'?'warn':I.s==='unknown'?'hollow':'on';
+  o+=pchip(x,y,s,'IF',HOLY,im);
+  if(I.s==='missing')o+=txt(x+28,y+16,'DOWN',11,C.amber);
+  else if(I.s==='unknown')o+=txt(x+28,y+16,'?',14,C.muted);
+  else o+=txt(x+28,y+16,String(I.n),14,I.n<=4?C.amber:C.white)+txt(x+28+(I.n>=10?17:9),y+16,'/20',9,C.muted,{op:.8});
+  var fx=x+88;
+  var fm=F.s==='missing'?'warn':F.s==='unknown'?'hollow':'on';
+  o+=pchip(fx,y,s,'FT',HOLY,fm);
+  if(F.s==='missing')o+=txt(fx+28,y+16,'DOWN',11,C.amber);
+  else if(F.s==='unknown')o+=txt(fx+28,y+16,'?',14,C.muted);
+  else o+=txt(fx+28,y+16,F.t,12,C.white);
+  if(an){an.push({n:n1,y:y+11});an.push({n:n2,y:y+11,dx:1});}
+  return o;
+}
+
+/* ---------- VARIANT A: SELF WARD (Inner Fire charges, shield lane, Fortitude) ---------- */
+function modA(y0,st,an){
+  var o='',x=1220,w=188,I=st.ifire,F=st.fort,ty=y0+4;
+  var miss=I.s==='missing',unk=I.s==='unknown',low=!miss&&!unk&&I.n<=4;
+  var cc=miss?C.amber:unk?C.muted:(low?C.amber:HOLY);
+  o+=pchip(x,ty,28,'IF',HOLY,miss?'warn':unk?'hollow':'on');
+  o+=txt(x+36,ty+13,'INNER FIRE',12,miss?C.amber:C.white);
+  o+=txt(x+36,ty+25,miss?'MISSING':unk?'LAST SEEN':'ARMOR UP',10,miss?C.amber:C.muted);
+  var numTxt=miss?'--':unk?'?':String(I.n);
+  o+=txt(x+w-26,ty+24,numTxt,20,cc,{a:'end'});
+  o+=txt(x+w,ty+24,'/20',10,C.muted,{a:'end'});
+  if(an)an.push({n:1,y:ty+14});
+  /* 20 charge cells; the amber band marks the recast zone (4 charges or fewer) */
+  var cy=y0+38,pitch=(w+2)/20,cw=pitch-2,i,lit=miss?0:unk?0:I.n;
+  o+=rect(x-1,cy-2,4*pitch,14,C.amber,.14);
+  for(i=0;i<20;i++){
+    var on=i<lit;
+    o+=rect(x+i*pitch,cy,cw,10,unk?C.muted:cc,on?.95:.14);
+  }
+  o+='<rect x="'+(x-1)+'" y="'+(cy-2)+'" width="'+(w+2)+'" height="14" fill="none" stroke="'+(unk?C.muted:HOLY)+'" stroke-opacity=".45"/>';
+  o+=line(x+4*pitch-1,cy-5,x+4*pitch-1,cy+15,C.amber,.85,1,'3 2');
+  o+=txt(x+2*pitch-1,cy+25,'RECAST',9,C.amber,{a:'middle',op:.9});
+  var tm=miss?'':unk?'?':I.t;
+  o+=txt(x+w,cy+25,tm,12,unk?C.muted:C.white,{a:'end'});
+  if(an)an.push({n:2,y:cy+5});
+  o+=line(x,y0+68,x+w,y0+68,C.violet,.2,1);
+  /* shield lane */
+  o+=shieldLane(x,y0+73,w,st.shield,an,3);
+  /* fortitude lane */
+  var fy=y0+98,fm=F.s==='missing'?'warn':F.s==='unknown'?'hollow':'on';
+  o+=pchip(x,fy,20,'FT',HOLY,fm);
+  o+=txt(x+28,fy+14,'FORTITUDE',11,F.s==='missing'?C.amber:C.white);
+  if(F.s==='missing')o+=txt(x+w,fy+15,'MISSING',12,C.amber,{a:'end'});
+  else if(F.s==='unknown')o+=txt(x+w,fy+15,'?',13,C.muted,{a:'end'});
+  else o+=txt(x+w,fy+15,F.t,13,F.low?C.amber:C.white,{a:'end'});
+  if(an)an.push({n:4,y:fy+10});
+  return o;
+}
+
+/* ---------- VARIANT B: COOLDOWN LADDER (reminder header, three drain lanes) ---------- */
+function cdLane(x,y,w,ab,col,sec,max,an,n,unk){
+  var o='',bx=x+28,bw=w-72,by=y+4,bh=12;
+  if(unk){
+    o+=pchip(x,y,20,ab,col,'hollow')+dbar(bx,by,bw,bh,C.muted,0)+txt(bx+4,by+10,'LAST SEEN',9,C.muted,{op:.8})+txt(x+w,y+15,'?',13,C.muted,{a:'end'});
+  }else if(sec<=0){
+    o+=pchip(x,y,20,ab,C.cyan,'on')+dbar(bx,by,bw,bh,C.cyan,1)+rect(bx,by,bw,bh,C.cyan,.15);
+    o+=txt(bx+bw/2,by+10,'READY',9,C.white,{a:'middle'})+txt(x+w,y+15,'RDY',13,C.cyan,{a:'end'});
+  }else{
+    var band=sec<=1.5;
+    o+=pchip(x,y,20,ab,col,'on')+dbar(bx,by,bw,bh,band?C.amber:col,sec/max);
+    o+=txt(bx+bw-3,by+10,max+'s',9,C.muted,{a:'end',op:.75});
+    o+=txt(x+w,y+15,fmt(sec),13,band?C.amber:C.white,{a:'end'});
+  }
+  if(an)an.push({n:n,y:y+10});
+  return o;
+}
+function modB(y0,st,an){
+  var o='',x=1220,w=188;
+  o+=remRow(x,y0+4,st,an,1,2);
+  o+=txt(x+w,y0+19,'PRIEST',10,C.violet,{a:'end',op:.85});
+  o+=line(x,y0+32,x+w,y0+32,C.violet,.2,1);
+  o+=cdLane(x,y0+36,w,'MB',MBC,st.mb.cd,8,an,3,st.mb.unk);
+  o+=cdLane(x,y0+62,w,'DP',DPC,st.dp.cd,60,an,4,st.dp.unk);
+  o+=shieldLane(x,y0+88,w,st.shield,an,5);
+  return o;
+}
+
+/* ---------- VARIANT C: SHADOW STACKS (Shadow Weaving pips, Spirit Tap, reminders) ---------- */
+function modC(y0,st,an){
+  var o='',x=1220,w=188,i,W=st.sw,T=st.tap,Y=SHAD;
+  var tap=function(ty){
+    var oo='',bx=x+28,bw=w-72,by=ty+4,bh=12;
+    if(T.t>0){
+      oo+=pchip(x,ty,20,'ST',TAPC,'on')+dbar(bx,by,bw,bh,TAPC,T.t/15,0.2);
+      oo+=txt(bx+4,by+10,'SPIRIT TAP',9,C.white)+txt(bx+bw-3,by+10,'15s',9,C.muted,{a:'end',op:.75});
+      oo+=txt(x+w,ty+15,fmt(T.t),13,C.white,{a:'end'});
+    }else{
+      oo+=pchip(x,ty,20,'ST',TAPC,'hollow')+dbar(bx,by,bw,bh,C.muted,0);
+      oo+=txt(bx+4,by+10,'NO KILL YET',9,C.muted,{op:.8})+txt(x+w,ty+15,'--',13,C.muted,{a:'end',op:.7});
+    }
+    return oo;
+  };
+  if(st.noweave){
+    o+=txt(x+7,y0+14,'SPIRIT TAP',10,C.violet,{op:.85});
+    o+=tap(y0+26);
+    if(an)an.push({n:3,y:y0+36});
+    o+=line(x,y0+62,x+w,y0+62,C.violet,.2,1);
+    o+=remRow(x,y0+72,st,an,4,5);
+    o+=txt(x+7,y0+116,'SHADOW WEAVING NOT LEARNED',9,C.muted,{op:.7});
+    return o;
+  }
+  o+=txt(x+7,y0+14,'SHADOW WEAVING',10,C.violet,{op:.85});
+  o+=txt(x+w,y0+14,W.n>0?'+'+(W.n*2)+'%':'+0%',11,W.n>0?Y:C.muted,{a:'end'});
+  for(i=0;i<5;i++){
+    var cx=x+10+i*20+2,cy=y0+36,lit=i<W.n,Yc=Y;
+    o+='<polygon points="'+cx+','+(cy-8)+' '+(cx+8)+','+cy+' '+cx+','+(cy+8)+' '+(cx-8)+','+cy+'" fill="'+Yc+'" fill-opacity="'+(lit?.9:.06)+'" stroke="'+Yc+'" stroke-opacity="'+(lit?1:.4)+'" stroke-width="1.2"'+(lit?' filter="url(#gls)"':'')+'/>';
+  }
+  o+=txt(x+118,y0+48,String(W.n),32,W.n>0?C.white:C.muted);
+  if(an)an.push({n:1,y:y0+36});
+  /* 15 s decay bar under the pips, amber in the last 3 s */
+  var bx=x+2,bw=100,by=y0+53,wlow=W.n>0&&W.t<=3;
+  o+=dbar(bx,by,bw,5,wlow?C.amber:Y,W.n>0?W.t/15:0,3/15);
+  o+=txt(x+118,y0+59,W.n>0?fmt(W.t):'--',12,wlow?C.amber:(W.n>0?C.white:C.muted),{op:W.n>0?1:.7});
+  if(an)an.push({n:2,y:by+3});
+  o+=line(x,y0+68,x+w,y0+68,C.violet,.2,1);
+  o+=tap(y0+72);
+  if(an)an.push({n:3,y:y0+82});
+  o+=remRow(x,y0+98,st,an,4,5);
+  return o;
+}
+
+/* ---------- state defaults and the per variant strips ---------- */
+var DEF={ifire:{s:'up',n:17,t:'8m'},fort:{s:'up',t:'52m'},shield:{s:'ready'},mb:{cd:0},dp:{cd:34},sw:{n:5,t:12},tap:{t:0}};
+function S(o){var r={ifire:DEF.ifire,fort:DEF.fort,shield:DEF.shield,mb:DEF.mb,dp:DEF.dp,sw:DEF.sw,tap:DEF.tap},k;for(k in o)r[k]=o[k];return r;}
+var UNK={ifire:{s:'unknown'},fort:{s:'unknown'},shield:{s:'unknown'},mb:{unk:true},dp:{unk:true},sw:{n:3,t:9},tap:{t:0}};
+
+var V=[
+ {id:'a',name:'SELF WARD',mod:modA,
+  head:'<b>Upkeep first: Inner Fire charges, a shield lane and Fortitude.</b> One 20 cell strip drains as you take hits, with an amber recast zone at 4 charges, like the Paladin reseal band.',
+  state:S({}),
+  strip:[
+   ['NORMAL','Inner Fire 17 of 20, shield ready, Fortitude 52 minutes.',S({})],
+   ['CHARGES LOW','4 charges left: cells, count and the recast zone go amber.',S({ifire:{s:'up',n:4,t:'6m'}})],
+   ['INNER FIRE DOWN','Expired or spent: hollow amber tile and MISSING. Out of combat reminder.',S({ifire:{s:'missing'}})],
+   ['SHIELDED','Power Word: Shield on you, 22 s of its 30 s left.',S({shield:{s:'abs',t:22}})],
+   ['WEAKENED SOUL','Shield gone, 9 s of the 15 s lockout. Cannot shield yet.',S({shield:{s:'weak',t:9}})],
+   ['IN COMBAT, AURAS HIDDEN','Aura values read as secret: last seen, dim, never read as missing.',S(UNK)]
+  ],
+  rows:[
+   [1,'Inner Fire tile and charges','Player aura scan, applications field. Out of combat exact. In combat by-spell lookups return nothing, so show LAST SEEN. An AuraContainer slot on the player (spell 588 ranks) could draw the stack count in combat, unproven.','ooc','OOC ONLY'],
+   [2,'Charge cells, recast zone','Same count. Charges drop on each melee or ranged hit and hits are not visible to addons without the combat log, so it cannot be estimated.','ooc','OOC ONLY'],
+   [3,'Shield lane','Own-cast ledger (UNIT_SPELLCAST_SUCCEEDED 17 and ranks) gives 30 s shield and 15 s Weakened Soul. The cast event carries no target, so self is assumed when no friendly target is selected. READY comes from IsSpellUsable and the 4 s cooldown isActive, both plain.','est','ESTIMATE'],
+   [4,'Fortitude','Player aura expires time out of combat. In combat the ledger from the cast. One hour buff, so remind under 5 min.','ooc','OOC ONLY']
+  ]},
+ {id:'b',name:'COOLDOWN LADDER',mod:modB,
+  head:'<b>Reminders on top, then three drain lanes: Mind Blast, Devouring Plague, Shield.</b> Each lane has its own scale (8 s, 60 s, 30 or 15 s), shown at the bar end. A ready spell turns cyan.',
+  state:S({mb:{cd:5.2},dp:{cd:34},shield:{s:'weak',t:9}}),
+  strip:[
+   ['MB COUNTING','Mind Blast 5.2 s from ready, Devouring Plague 34 s, shield ready.',S({mb:{cd:5.2},dp:{cd:34}})],
+   ['ALL READY','Every lane cyan: the cast order is open.',S({mb:{cd:0},dp:{cd:0}})],
+   ['MB NEARLY READY','Under 1.5 s the bar goes amber so the next press is not early.',S({mb:{cd:1.1},dp:{cd:12}})],
+   ['WEAKENED SOUL','Shield lane counts the 15 s lockout in amber.',S({mb:{cd:5.2},shield:{s:'weak',t:9}})],
+   ['BUFFS DOWN','Inner Fire and Fortitude both missing: two hollow amber tiles.',S({ifire:{s:'missing'},fort:{s:'missing'}})],
+   ['IN COMBAT, AURAS HIDDEN','Cooldown readiness stays plain, aura chips fall back to unknown.',S({ifire:{s:'unknown'},fort:{s:'unknown'},mb:{cd:5.2},dp:{cd:34},shield:{s:'unknown'}})]
+  ],
+  rows:[
+   [1,'Inner Fire chip, charges','Player aura, applications. Same as A: exact out of combat only.','ooc','OOC ONLY'],
+   [2,'Fortitude chip, time','Player aura expires out of combat, cast ledger in combat.','ooc','OOC ONLY'],
+   [3,'Mind Blast lane','Ready flag is C_Spell.GetSpellCooldown isActive, plain in combat (probe verified). Seconds are secret, so the bar drains on a ledger estimate of the cast time plus 8 s. A duration object into a Cooldown widget would show the true value.','ok','READY PLAIN, BAR EST'],
+   [4,'Devouring Plague lane','Same path. 60 s cooldown, level 20 and up, lane hidden before it is learned.','ok','READY PLAIN, BAR EST'],
+   [5,'Shield lane','Cast ledger, as in A. Self target is an assumption.','est','ESTIMATE']
+  ]},
+ {id:'c',name:'SHADOW STACKS',mod:modC,
+  head:'<b>The Shadow Weaving stack as five pips, the Spirit Tap window, and the two reminders.</b> Only for a build that has the talents: Weaving needs 15 points in Shadow, Spirit Tap is tier 1. Without Weaving the top rows collapse.',
+  state:S({sw:{n:4,t:11},tap:{t:11}}),
+  strip:[
+   ['FULL STACK','Five Shadow Weaving stacks, +10% shadow damage, 12 s left.',S({sw:{n:5,t:12}})],
+   ['DECAYING','Two stacks, 2 s left: pips and bar go amber. Cast a shadow spell to refresh.',S({sw:{n:2,t:2}})],
+   ['NO STACKS','Fresh pull or a gap over 15 s: empty pips, +0%.',S({sw:{n:0,t:0}})],
+   ['SPIRIT TAP UP','Killing blow landed: 11 s of the 15 s spirit window. Skip the drink.',S({sw:{n:0,t:0},tap:{t:11}})],
+   ['INNER FIRE DOWN','Footer chip goes hollow amber with DOWN.',S({ifire:{s:'missing'}})],
+   ['WEAVING NOT LEARNED','Top rows collapse so the module is not dead space.',S({noweave:true,tap:{t:11}})]
+  ],
+  rows:[
+   [1,'Weaving pips, count, bonus','Player buff with 5 applications. Out of combat exact. In combat secret; at rank 3 (100% proc) the ledger could count own landing shadow casts, but a resist or miss makes it over-count.','probe','PROBE FIRST'],
+   [2,'15 s decay bar','Each shadow cast refreshes it. Ledger estimate from the last shadow cast; out of combat read from expires.','est','ESTIMATE'],
+   [3,'Spirit Tap window','Buff after a killing blow. The kill usually ends combat, so the aura read is out of combat and exact. Needs the talent.','ooc','OOC, USUALLY READABLE'],
+   [4,'Inner Fire chip','Aura applications, out of combat.','ooc','OOC ONLY'],
+   [5,'Fortitude chip','Aura expires out of combat, ledger in combat.','ooc','OOC ONLY']
+  ]}
+];
+
+/* ---------- scene builders ---------- */
+function sceneSvg(V0,area,vb){
+  var o=base();
+  var y0=area==='upper'?500:632,an=[];
+  o+=slotDivider(1410);
+  var mod=V0.mod(y0,V0.state,null);
+  if(area==='upper'){o+=mod;o+=dotsH(PRDEB,true);}else{o+=dotsH(PRDEB,false);o+=mod;}
+  o+=tags();
+  if(vb.w===1000)o+=buffs();
+  return '<svg width="'+vb.w+'" height="450" viewBox="'+vb.x+' 380 '+vb.w+' 450" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg>';
+}
+function scene(V0,area){
+  var full=area==='lower';
+  var lab=full?'<b>'+V0.id.toUpperCase()+'</b>, PRIEST CLASS MODULE, LOWER AREA':'<b>'+V0.id.toUpperCase()+'</b>, UPPER AREA';
+  return '<div class="scene'+(full?'':' crop')+'"><div class="state">'+lab+'</div>'+sceneSvg(V0,area,full?{x:480,w:1000}:{x:1040,w:440})+'</div>';
+}
+function zoom(V0){
+  var an=[],y0=632,m=V0.mod(y0,V0.state,an),o='';
+  o+='<rect x="1196" y="'+(y0-4)+'" width="226" height="136" fill="#120a22"/>';
+  o+='<rect x="1213" y="'+y0+'" width="202" height="128" fill="rgba(168,85,247,.04)" stroke="'+C.violet+'" stroke-opacity=".5" stroke-dasharray="6 4"/>';
+  o+=m;
+  an.forEach(function(a){
+    var cx=a.dx?1301:1205,cy=a.y;
+    o+='<circle cx="'+cx+'" cy="'+cy+'" r="6" fill="#0d0620" stroke="'+C.cyan+'" stroke-width="1.2"/><text x="'+cx+'" y="'+(cy+3.4)+'" font-size="9" fill="'+C.cyan+'" text-anchor="middle">'+a.n+'</text>';
+  });
+  return '<div class="zoom"><svg width="339" height="204" viewBox="1196 '+(y0-4)+' 226 136" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg></div>';
+}
+function table(V0){
+  var h='<table class="dp">';
+  V0.rows.forEach(function(r){h+='<tr><td class="n">'+r[0]+'</td><td class="e">'+r[1]+'</td><td class="v"><span class="pill ok" style="display:none"></span><span class="pill '+r[3]+'" style="margin-left:0">'+r[4]+'</span></td><td class="s">'+r[2]+'</td></tr>';});
+  return h+'</table>';
+}
+function strip(V0){
+  var h='<div class="strip"><div class="lead"><i>'+V0.id.toUpperCase()+'</i><small>'+V0.name+' states</small></div>';
+  V0.strip.forEach(function(s){
+    var o='<rect x="1213" y="632" width="202" height="128" fill="#120a22"/>'+V0.mod(632,s[2],null);
+    h+='<div class="tile"><svg width="202" height="128" viewBox="1213 632 202 128" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg><div class="tc"><b>'+s[0]+'</b>'+s[1]+'</div></div>';
+  });
+  return h+'</div>';
+}
+
+var html='';
+V.forEach(function(v){
+  html+='<div class="row"><div class="left"><div class="scenes">'+scene(v,'lower')+scene(v,'upper')+'</div>'+table(v)+'</div><div class="side"><div class="t"><i>'+v.id.toUpperCase()+'</i> '+v.name+'</div><div class="cap">'+v.head+'</div>'+zoom(v)+'</div></div>';
+});
+html+='<h2><i>//</i> STATES STRIP, PER VARIANT</h2><div style="color:#9d93c4;font-size:13px;margin:-4px 0 14px">Each tile is the module alone in a 202 x 128 area. Dashed area outlines never draw in game.</div>';
+V.forEach(function(v){html+=strip(v);});
+
+html+='<h2><i>//</i> NOTES</h2><div class="notes">';
+html+='<div class="panel" style="width:560px;flex:none"><h3>What each variant shows</h3><ul>'+
+ '<li><b>A, Self Ward.</b> Inner Fire charges and time, a Power Word: Shield lane (shielded 30 s, Weakened Soul 15 s, ready), and a Fortitude line. Best for a leveling or wand priest of any tree. Every piece survives secrecy out of combat; only the shield lane runs on the ledger in combat.</li>'+
+ '<li><b>B, Cooldown Ladder.</b> Inner Fire and Fortitude as two small chips, then Mind Blast, Devouring Plague and Shield drain lanes. The only variant that shows cooldown seconds, and the ready flag is the one value known to stay plain in combat. Overlaps the action bar cooldown spirals.</li>'+
+ '<li><b>C, Shadow Stacks.</b> Shadow Weaving as five pips with a 15 s decay bar, the Spirit Tap window, and the two reminders as a footer. Needs the talents and leans on aura reads that are secret in combat, so it is the riskiest.</li>'+
+ '</ul><p class="mu">Not drawn, and why: Shadowform is a 31 point Shadow talent and cannot be reached at level 30. Shadow Word: Death is level 32. Shadowfiend (spell 401977) has an unverified level. Fear Ward (level 20, 3 min cooldown and duration) is real but situational. Target Debuffs already owns Shadow Word: Pain and Devouring Plague on the target.</p>'+
+ '<h3 style="margin-top:12px">Open questions</h3><ul>'+
+ '<li>Which tree does the level 30 character run? Weaving needs 15 points in Shadow, Spirit Tap is tier 1. That picks between A or B and C.</li>'+
+ '<li>Can an AuraContainer on the player draw Inner Fire stacks in combat? It is the only route to charges under secrecy and has not been probed.</li>'+
+ '<li>Should Mind Blast and Devouring Plague cooldowns live here at all, given the action buttons already sweep them?</li>'+
+ '<li>The shield cast event has no target. Is "self unless a friendly is targeted" good enough for the Weakened Soul lane?</li>'+
+ '<li>Fortitude lasts one hour on Forever. The profile warns under 60, which reads as seconds; a 5 minute warning is likelier wanted.</li>'+
+ '<li>HudSpells lists Inner Fire only as rank 1 (588). Casts report the rank id, so the ledger needs every rank, and Power Word: Shield ranks too.</li>'+
+ '<li>Does the reminder duplicate My buffs? Here the plate keeps the present buffs with time; the module adds charges and the missing cue.</li>'+
+ '</ul></div>';
+html+='<div class="panel" style="flex:1"><h3>Spell research, Wowhead Forever first</h3><table class="sp"><tr><th>SPELL</th><th>FOUND</th><th>STATUS</th><th>SOURCE</th></tr>'+
+ [
+  ['Shadow Word: Pain','Level 4. 18 s, tick every 3 s, instant, 25 mana at rank 1.','Verified','wowhead.com/forever/spell=589/shadow-word-pain'],
+  ['Mind Blast','Level 10. 1.5 s cast, 8 s cooldown, 50 mana at rank 1.','Verified','wowhead.com/forever/spell=8092/mind-blast'],
+  ['Inner Fire','Level 12, six ranks (rank 3 at level 30: +720 armor, 105 mana). 10 min or 20 charges, one charge per melee or ranged hit.','Verified','wowhead.com/forever/spell=588/inner-fire ; theforeverera.com/en/spells/priest/inner-fire/'],
+  ['Power Word: Fortitude','Level 1. One hour. 60 mana at rank 1.','Verified','wowhead.com/forever/spell=1243/power-word-fortitude'],
+  ['Power Word: Shield','Level 6, rank every 6 levels (rank 5 at 30). 30 s, 4 s cooldown, 15 s lockout.','Verified','wowhead.com/forever/spell=10899/power-word-shield ; wowfwiki.com/wiki/Priest_spellbook'],
+  ['Weakened Soul','Debuff 6788, 15 s, blocks another Shield.','Verified','wowhead.com/forever/spell=6788/weakened-soul'],
+  ['Devouring Plague','Level 20, all priests. 24 s, 1 min cooldown, 215 mana at rank 1. The Wowhead page text did not render stats.','Verified by other sources','wowfwiki.com/wiki/Priest_spellbook ; news.blizzard.com/en-us/article/24301514'],
+  ['Shadow Weaving','Talent, shadow row 4, 3 ranks. Spell hits give 33, 67 or 100% to add +2% shadow damage, 15 s, 5 stacks. A self buff, not a target debuff. Needs 15 points above.','Verified, Wowhead spell page unreachable','wowforeverarmory.com/talents/priest/shadow-magic-shadow-weaving ; wowhead.com/forever/guide/classes/priest/shadow/overview-pve-dps'],
+  ['Spirit Tap','Talent, shadow tier 1, 5 ranks (20 to 100%). Killing blow gives +100% spirit for 15 s and 50% mana regen while casting.','Verified','wowhead.com/forever/spell=15270/spirit-tap ; 60.tools/talents/priest-246'],
+  ['Shadowform','Reworked. 31 point talent, not reachable at the cap. Level is derived from the talent depth.','Marked unverified level','wowhead.com/forever/guide/classes/priest/shadow/overview-pve-dps'],
+  ['Shadow Word: Death','Baseline at level 32, 15 s cooldown. Above the cap.','Verified','news.blizzard.com/en-us/article/24301514'],
+  ['Fear Ward','Level 20, 3 min cooldown, 3 min duration.','Verified, not used','wowhead.com/forever/spell=6346/fear-ward'],
+  ['Shadowfiend','Spell 401977, 5 min, from the adze research doc. Level not checked.','Unverified','adze 01M3XF87YX6JMD6PM6YDFYMJJ6']
+ ].map(function(r){return '<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td>'+r[2]+'</td><td class="u">'+r[3]+'</td></tr>';}).join('')+
+ '</table><p class="mu" style="margin-top:8px">Data constraints come from the 2026-10-01 probe: aura reads by spell return nothing in combat, cooldown isActive and IsSpellUsable stay plain, cooldown seconds, power and health are secret, cast events carry the rank id.</p></div>';
+html+='</div>';
+document.getElementById('root').innerHTML=html;
+})();
+</script>
+</body>
+</html>
