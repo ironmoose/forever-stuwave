@@ -1,0 +1,3 @@
+-- Forever STUwave: data service for the player's own debuffs on the target.
+
+local _, FS = ...

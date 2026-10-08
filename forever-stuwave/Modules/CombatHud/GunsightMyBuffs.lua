@@ -1,0 +1,3 @@
+-- Forever STUwave: Gunsight My buffs flank plate beside the player box.
+
+local _, FS = ...

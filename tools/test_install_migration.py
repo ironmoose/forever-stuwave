@@ -23,9 +23,10 @@ LOAD_ORDER = (
     "PetCastBar.lua", "Minimap.lua", "Panels.lua", "Tooltip.lua", "TooltipAnchor.lua", "Popups.lua", "Menus.lua",
     "Bags.lua", "Loot.lua", "DataBar.lua", "XPBar.lua", "Deck.lua", "MicroBars.lua",
     "BagBar.lua", "HudText.lua", "IssueReporter.lua", "AuctionHouse.lua", "Diagnostics.lua",
-    "HudSpells.lua", "HudProfiles.lua", "HudLogic.lua", "Gunsight.lua", "GunsightDots.lua",
+    "HudSpells.lua", "HudProfiles.lua", "HudLogic.lua", "Gunsight.lua", "GunsightAreas.lua", "TargetDebuffs.lua", "GunsightDots.lua",
     "GunsightSeals.lua", "GunsightFrame.lua", "GunsightBoxes.lua", "GunsightTape.lua",
-    "ConsoleKeys.lua", "ClassShoulder.lua", "SealBar.lua", "CombatHud.lua", "FSProbe.lua",
+    "GunsightTags.lua", "GunsightMyBuffs.lua",
+    "ConsoleKeys.lua", "ClassShoulder.lua", "SealBar.lua", "CombatHud.lua", "GunsightClass.lua", "FSProbe.lua",
     "BugReport.lua", "ConfigWindow.lua", "LayoutEdit.lua",
 )
 
@@ -79,7 +80,7 @@ def test_module_manifest_preserves_dependency_order_and_loads_every_runtime_modu
     modules = [Path(entry) for entry in entries if entry.endswith(".lua")]
 
     assert tuple(path.name for path in modules) == LOAD_ORDER
-    assert len(set(modules)) == 64
+    assert len(set(modules)) == 69
     assert all((RUNTIME / entry).is_file() for entry in entries)
     assert all(path.parts[0] in {"Core", "Modules"} for path in modules)
     assert not list(RUNTIME.glob("*.lua"))

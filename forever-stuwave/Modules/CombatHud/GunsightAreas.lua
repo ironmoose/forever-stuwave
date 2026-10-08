@@ -1,0 +1,3 @@
+-- Forever STUwave: Gunsight target-side upper and lower area hosts and their module registry.
+
+local _, FS = ...

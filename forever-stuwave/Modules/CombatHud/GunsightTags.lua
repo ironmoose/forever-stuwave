@@ -1,0 +1,3 @@
+-- Forever STUwave: KICK-style tags on the target box (level and class, health percent, clickable target of target).
+
+local _, FS = ...
