@@ -72,7 +72,7 @@ local V = {
     AX_DX = 7, END_DX = 155,            -- AX = 1220 (26 px right of the target cast bar), END = 1368
     LANE_DX = { 51, 80, 109, 138 },     -- LANE - 19
     AX_UP = 4, AX_DN = 4,               -- axis runs AXT - 4 to AXB + 4
-    HDR_DX = 171, HDR_DY = -3, HDR_SIZE = 10,
+    HDR_DX = 171, HDR_DY = -3, HDR_SIZE = 10, HDR_ALPHA = 0.9,   -- the TARGET DEBUFFS header; GunsightClass reads these two
     MAJ = 5, MAJ_LEN = 10, MIN_LEN = 5, -- a long tick and a label every 5 s
     LABEL_DX = 14, LABEL_SIZE = 11,
     REFRESH_DX = 13, REFRESH_SIZE = 9,
@@ -536,7 +536,7 @@ local function BuildScaleV(m)
         if maj then P.labels[s] = RelLabel(m, tostring(s), V.LABEL_SIZE, K.fg, 0.9, "LEFT", ax + V.LABEL_DX, dy(s)) end
     end
 
-    local hdr = Label(m, nil, V.HDR_SIZE, K.violet, 0.9)
+    local hdr = Label(m, nil, V.HDR_SIZE, K.violet, V.HDR_ALPHA)
     hdr:SetJustifyH("RIGHT")
     Seat(m, function() Point(hdr, "BOTTOMRIGHT", m.rect.x + V.HDR_DX, m.rect.y + V.HDR_DY + 2.5) end)
     hdr:SetText("TARGET DEBUFFS")
