@@ -203,10 +203,13 @@ body { width: 2560px; height: 1860px; overflow: visible; position: relative; col
 .q { position: relative; display: inline-block; flex: none;
   width: 10px; height: 10px; margin-left: 6px; vertical-align: middle; border-radius: 50%;
   border: 1px solid color-mix(in srgb, var(--violet) 70%, var(--line));
-  background: var(--track) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'%3E%3Cg transform='translate(0 0.17)' fill='none' stroke='%239d93c4' stroke-width='1.1'%3E%3Cpath d='M2.3 2.6C2.3 1.5 3 1 4 1C5 1 5.7 1.6 5.7 2.4C5.7 3.3 4 3.6 4 4.9'/%3E%3C/g%3E%3Ccircle cx='4' cy='6.77' r='.6' fill='%239d93c4'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  background: var(--track) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'%3E%3Cg transform='translate(0 0.17)' fill='none' stroke='%239d93c4' stroke-width='1.1'%3E%3Cpath d='M2.3 2.6C2.3 1.5 3 1 4 1C5 1 5.7 1.6 5.7 2.4C5.7 3.3 4 3.6 4 4.9'/%3E%3C/g%3E%3Ccircle cx='4' cy='6.77' r='.6' fill='%239d93c4'/%3E%3C/svg%3E") center / 80% 80% no-repeat;
+  background-position: center;
+  background-size: 80%;
+  background-repeat: no-repeat;
   font-size: 0; line-height: 0; color: transparent; cursor: help; }
 .grp-h .q { margin-left: -2px; }
-.q:hover, .q.open { border-color: var(--cyan); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'%3E%3Cg transform='translate(0 0.17)' fill='none' stroke='%2322e0ff' stroke-width='1.1'%3E%3Cpath d='M2.3 2.6C2.3 1.5 3 1 4 1C5 1 5.7 1.6 5.7 2.4C5.7 3.3 4 3.6 4 4.9'/%3E%3C/g%3E%3Ccircle cx='4' cy='6.77' r='.6' fill='%2322e0ff'/%3E%3C/svg%3E"); box-shadow: 0 0 4px rgba(34,224,255,.55); }
+.q:hover, .q.open { border-color: var(--cyan); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'%3E%3Cg transform='translate(0 0.17)' fill='none' stroke='%2322e0ff' stroke-width='1.1'%3E%3Cpath d='M2.3 2.6C2.3 1.5 3 1 4 1C5 1 5.7 1.6 5.7 2.4C5.7 3.3 4 3.6 4 4.9'/%3E%3C/g%3E%3Ccircle cx='4' cy='6.77' r='.6' fill='%2322e0ff'/%3E%3C/svg%3E"); background-position: center; background-size: 80%; background-repeat: no-repeat; box-shadow: 0 0 4px rgba(34,224,255,.55); }
 /* tooltip: dark fill, violet 1px ring, cut corners top left and bottom right (like the panels), notch toward the ? */
 .q::after, .q::before { display: none; position: absolute; z-index: 8; pointer-events: none; }
 .q:hover::after, .q:hover::before, .q.open::after, .q.open::before { display: block; }

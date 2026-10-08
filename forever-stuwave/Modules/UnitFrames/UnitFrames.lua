@@ -1071,6 +1071,72 @@ local function WireEvents(frame)
 end
 
 -------------------------------------------------------------------------------
+-- Hide player / hide target settings
+-------------------------------------------------------------------------------
+
+-- A hidden frame stays built and keeps its unit watch: it is only alpha 0 with the mouse off,
+-- never Hide()/Show() or UnregisterUnitWatch on a secure frame (the DimBlizzardFrame pattern).
+-- EnableMouse is restricted on a protected frame in combat, so the whole apply waits for
+-- PLAYER_REGEN_ENABLED and reads the settings then, keeping one consistent state.
+local HIDE_KEYS = { player = "unitFrames.hidePlayer", target = "unitFrames.hideTarget" }
+FS.Config.RegisterDefault(HIDE_KEYS.player, false)
+FS.Config.RegisterDefault(HIDE_KEYS.target, false)
+
+local visibilityEvents = CreateFrame("Frame")
+local appliedHidden = {}
+
+-- What is on screen now, not what the setting says: it differs while a change waits out combat.
+-- Mouse-live children of a hidden frame (the target's aura icons) use it to show no tooltip.
+FS.UnitFrames = FS.UnitFrames or {}
+function FS.UnitFrames.IsHidden(unit)
+    return appliedHidden[unit] == true
+end
+
+local function ApplyVisibility()
+    if InCombatLockdown() then
+        visibilityEvents:RegisterEvent("PLAYER_REGEN_ENABLED")
+        return
+    end
+    visibilityEvents:UnregisterEvent("PLAYER_REGEN_ENABLED")
+    for unit, key in pairs(HIDE_KEYS) do
+        local frame = FS[unit]
+        if frame then
+            local hidden = FS.Config.Get(key) == true
+            frame:SetAlpha(hidden and 0 or 1)
+            frame:EnableMouse(not hidden)
+            appliedHidden[unit] = hidden
+        end
+    end
+end
+
+visibilityEvents:RegisterEvent("PLAYER_LOGIN")
+visibilityEvents:SetScript("OnEvent", ApplyVisibility)
+FS.Config.OnChange(HIDE_KEYS.player, ApplyVisibility)
+FS.Config.OnChange(HIDE_KEYS.target, ApplyVisibility)
+
+local function FramesStateLine()
+    local parts = {}
+    for _, unit in ipairs({ "player", "target" }) do
+        parts[#parts + 1] = unit .. " " .. (FS.Config.Get(HIDE_KEYS[unit]) == true and "hidden" or "shown")
+    end
+    return table.concat(parts, ", ")
+end
+
+SLASH_FSFRAMES1 = "/fsframes"
+SlashCmdList["FSFRAMES"] = function(msg)
+    local unit, word = (msg or ""):lower():match("^%s*(%a+)%s+(%a+)%s*$")
+    if HIDE_KEYS[unit] and (word == "on" or word == "off") then
+        if not FS.Config.Set(HIDE_KEYS[unit], word == "off") then
+            print("|cff22e0ffForever STUwave|r: settings are read-only this session.")
+            return
+        end
+        print("|cff22e0ffForever STUwave|r: " .. FramesStateLine())
+        return
+    end
+    print("|cff22e0ffForever STUwave|r: /fsframes player|target on|off   (" .. FramesStateLine() .. ")")
+end
+
+-------------------------------------------------------------------------------
 -- Init (secure frame creation + SetAttribute must run out of combat)
 -------------------------------------------------------------------------------
 
@@ -1160,6 +1226,8 @@ local function Init()
     for i = 1, 5 do
         nameWatchFrames[#nameWatchFrames + 1] = boss[i]
     end
+
+    ApplyVisibility()
 
     UpdateAll(player)
     if UnitExists("target") then UpdateAll(target) end

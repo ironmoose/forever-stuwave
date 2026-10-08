@@ -110,7 +110,9 @@ end
 -- Button pool
 -------------------------------------------------------------------------------
 
+-- A hidden target frame leaves its aura icons mouse-live but invisible, so they show no tooltip.
 local function AuraButton_OnEnter(self)
+    if FS.UnitFrames and FS.UnitFrames.IsHidden(self.unit) then return end
     GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
     FS.FrameHelpers.ShowAuraTooltip(self)
 end
