@@ -340,6 +340,18 @@ local function UpdateCPU(segment)
     end
 end
 
+-- One CreateColor object per meter colour, built on first use: UpdateBags runs
+-- every tick and SetGradient copies the values, so a fresh pair each call is churn.
+local bagsGradientColors = {}
+local function BagsGradientColor(color)
+    local created = bagsGradientColors[color]
+    if not created then
+        created = CreateColor(color[1], color[2], color[3], 1)
+        bagsGradientColors[color] = created
+    end
+    return created
+end
+
 local function UpdateBags(segment)
     local free, total = 0, 0
     for _, bagID in ipairs(BAG_IDS) do
@@ -375,9 +387,8 @@ local function UpdateBags(segment)
         SetMeterCapColors(segment.meter.caps, color, color)
         local texture = segment.meter.fill:GetStatusBarTexture()
         if texture and texture.SetGradient and CreateColor then
-            texture:SetGradient("HORIZONTAL",
-                CreateColor(color[1], color[2], color[3], 1),
-                CreateColor(color[1], color[2], color[3], 1))
+            local gradientColor = BagsGradientColor(color)
+            texture:SetGradient("HORIZONTAL", gradientColor, gradientColor)
         end
     end
 

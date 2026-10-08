@@ -83,6 +83,7 @@ function InCombatLockdown()
     return __combat
 end
 function GetTime() return __now end
+function wipe(t) for k in pairs(t) do t[k] = nil end return t end
 
 -- Frames: capitalised keys are widget methods (recorded, stamped in call order), lowercase
 -- keys are plain fields and stay nil. Get* answers a ghost frame, Create* a child.
@@ -1317,6 +1318,191 @@ end
 check(lead == 2, "round chrome lost its leading-edge quads: " .. lead)
 for _, q in ipairs(pf.handle.quads) do check(q._shown, "round power quad hidden") end
 check(root.fsBorder._parent == root, "round border was re-hosted")
+"""),
+    ("quest icons follow the quest log: shown for units on a quest, hidden otherwise, across accept and complete", "true", r"""
+local log = { { questID = 1, isHeader = true }, { questID = 11 }, { questID = 12 }, { questID = 13, isHeader = true }, { questID = 14 } }
+local onQuest = { nameplate1 = { [12] = true }, nameplate3 = { [14] = true } }
+C_QuestLog = {
+    GetNumQuestLogEntries = function() return #log end,
+    GetInfo = function(i) local e = log[i]; return e and { questID = e.questID, isHeader = e.isHeader } end,
+    IsUnitOnQuest = function(unit, id) return onQuest[unit] and onQuest[unit][id] or false end,
+}
+boot()
+for i = 1, 5 do addPlate("nameplate" .. i) end
+local function icon(i) return FS.framesByUnit["nameplate" .. i].questIcon:IsShown() end
+check(icon(1) and not icon(2) and icon(3) and not icon(4) and not icon(5), "initial icons wrong")
+-- a header entry never counts, even when the unit claims its questID
+onQuest.nameplate4 = { [1] = true, [13] = true }
+fire("QUEST_LOG_UPDATE")
+check(not icon(4), "a quest-log header made a quest icon")
+-- a new quest is accepted: its objective unit gains the icon at the next update
+log[#log + 1] = { questID = 15 }
+onQuest.nameplate2 = { [15] = true }
+fire("QUEST_LOG_UPDATE")
+check(icon(2), "an accepted quest's unit got no icon")
+-- the quest completes and leaves the log: the icon goes with it
+table.remove(log, 3)
+onQuest.nameplate1 = nil
+fire("QUEST_WATCH_UPDATE")
+check(not icon(1), "a completed quest's unit kept its icon")
+check(icon(3) and icon(2), "an unrelated icon was lost")
+-- a plate added later reads the same log
+onQuest.nameplate6 = { [14] = true }
+addPlate("nameplate6")
+check(icon(6), "a late plate got no icon")
+-- a throwing quest API hides the icons and the handler survives
+C_QuestLog.GetInfo = function() error("boom") end
+fire("QUEST_LOG_UPDATE")
+check(not icon(2) and not icon(3) and not icon(6), "a failed scan left icons shown")
+"""),
+
+    ("the quest log is scanned once per update, not once per plate, and health events never scan it", "true", r"""
+local log = { { questID = 11 }, { questID = 12 }, { questID = 13 }, { questID = 14 } }
+local getInfo, onQuestCalls, dead = 0, 0, {}
+C_QuestLog = {
+    GetNumQuestLogEntries = function() return #log end,
+    GetInfo = function(i) getInfo = getInfo + 1; return { questID = log[i].questID } end,
+    IsUnitOnQuest = function() onQuestCalls = onQuestCalls + 1; return false end,
+}
+UnitIsDead = function(unit) return dead[unit] == true end
+boot()
+for i = 1, 8 do addPlate("nameplate" .. i) end
+check(getInfo == #log, "8 plates added: GetInfo called " .. getInfo .. " times, wanted " .. #log)
+getInfo = 0
+fire("QUEST_LOG_UPDATE")
+check(getInfo == #log, "QUEST_LOG_UPDATE over 8 plates: GetInfo called " .. getInfo .. " times, wanted " .. #log)
+getInfo = 0
+fire("QUEST_WATCH_UPDATE")
+check(getInfo == #log, "QUEST_WATCH_UPDATE over 8 plates: GetInfo called " .. getInfo .. " times, wanted " .. #log)
+getInfo = 0
+fire("QUEST_LOG_UPDATE"); fire("QUEST_LOG_UPDATE")
+check(getInfo == 2 * #log, "two updates: GetInfo called " .. getInfo .. " times, wanted " .. 2 * #log)
+-- ordinary health ticks leave the quest icon alone: no scan, no per-quest test
+getInfo, onQuestCalls = 0, 0
+for _ = 1, 25 do
+    for i = 1, 8 do
+        fire("UNIT_HEALTH", "nameplate" .. i)
+        fire("UNIT_MAXHEALTH", "nameplate" .. i)
+    end
+end
+check(getInfo == 0, "UNIT_HEALTH/UNIT_MAXHEALTH spam called GetInfo " .. getInfo .. " times")
+check(onQuestCalls == 0, "UNIT_HEALTH/UNIT_MAXHEALTH spam called IsUnitOnQuest " .. onQuestCalls .. " times")
+-- a death flips the plate's dead flag once: that plate alone re-tests its quests
+dead.nameplate3 = true
+fire("UNIT_HEALTH", "nameplate3")
+check(onQuestCalls == #log, "death of one plate: IsUnitOnQuest called " .. onQuestCalls .. " times, wanted " .. #log)
+onQuestCalls = 0
+for _ = 1, 5 do fire("UNIT_HEALTH", "nameplate3") end
+check(onQuestCalls == 0, "a plate staying dead re-tested its quests " .. onQuestCalls .. " times")
+dead.nameplate3 = false
+fire("UNIT_HEALTH", "nameplate3")
+check(onQuestCalls == #log, "a plate coming back alive: IsUnitOnQuest called " .. onQuestCalls .. " times, wanted " .. #log)
+check(getInfo == 0, "a death flip scanned the quest log")
+-- a faction or flag change re-tests the quests of the plate it names; the player's own token re-tests every plate
+onQuestCalls = 0
+fire("UNIT_FACTION", "nameplate3")
+check(onQuestCalls == #log, "UNIT_FACTION on one plate: IsUnitOnQuest called " .. onQuestCalls .. " times, wanted " .. #log)
+onQuestCalls = 0
+fire("UNIT_FLAGS", "player")
+check(onQuestCalls == 8 * #log, "UNIT_FLAGS on the player: IsUnitOnQuest called " .. onQuestCalls .. " times, wanted " .. 8 * #log)
+check(getInfo == 0, "faction/flag events scanned the quest log")
+"""),
+
+    ("the plate name is rewritten only when its name, level or colour changed", "true", r"""
+local name, level, playerLevel, reaction = "Boar", 10, 10, 2
+UnitName = function() return name end
+UnitLevel = function(unit) if unit == "player" then return playerLevel end return level end
+UnitReaction = function() return reaction end
+GetCreatureDifficultyColor = function() return { r = 1, g = 0.5, b = 0 } end
+boot()
+addPlate("nameplate1")
+local t = FS.framesByUnit.nameplate1.nameText
+check(t._args.SetText[1]:find("Boar", 1, true), "setup: name missing from " .. tostring(t._args.SetText[1]))
+local texts, colors = t._calls.SetText, t._calls.SetTextColor
+for _ = 1, 10 do fire("UNIT_HEALTH", "nameplate1") end
+check(t._calls.SetText == texts, "unchanged name rewritten " .. (t._calls.SetText - texts) .. " times")
+check(t._calls.SetTextColor == colors, "unchanged colour reapplied " .. (t._calls.SetTextColor - colors) .. " times")
+name = "Wolf"
+fire("UNIT_HEALTH", "nameplate1")
+check(t._calls.SetText == texts + 1 and t._args.SetText[1]:find("Wolf", 1, true), "a new name was not written")
+check(t._calls.SetTextColor == colors, "a new name reapplied the colour")
+level = 11
+fire("UNIT_HEALTH", "nameplate1")
+check(t._calls.SetText == texts + 2 and t._args.SetText[1]:find("11", 1, true), "a new level was not written")
+playerLevel = 12
+fire("UNIT_HEALTH", "nameplate1")
+check(t._calls.SetText == texts + 3, "a new player level (difficulty tint) was not rewritten")
+reaction = 5
+fire("UNIT_HEALTH", "nameplate1")
+check(t._calls.SetTextColor == colors + 1, "a changed colour was not applied")
+check(t._calls.SetText == texts + 3, "a changed colour rewrote the text")
+local a = t._args.SetTextColor
+check(a[1] == 1 and a[2] == 1 and a[3] == 1, "friendly name colour wrong: " .. tostring(a[1]) .. " " .. tostring(a[2]) .. " " .. tostring(a[3]))
+"""),
+    ("a recycled plate shows its new unit's name, level and colour", "true", r"""
+local units = {
+    nameplate1 = { name = "Boar", level = 10, reaction = 2 },
+    nameplate2 = { name = "Mage", level = 30, reaction = 5 },
+}
+UnitName = function(u) return units[u].name end
+UnitLevel = function(u) if u == "player" then return 20 end return units[u].level end
+UnitReaction = function(u) return units[u].reaction end
+GetCreatureDifficultyColor = function() return { r = 1, g = 0.5, b = 0 } end
+boot()
+addPlate("nameplate1")
+local root = FS.framesByUnit.nameplate1
+local t = root.nameText
+check(t._args.SetText[1]:find("Boar", 1, true), "setup: first unit's name missing")
+check(t._args.SetTextColor[1] == 1 and t._args.SetTextColor[2] ~= 1, "setup: the hostile name colour was not applied")
+removePlate("nameplate1")
+addPlate("nameplate2")
+check(FS.framesByUnit.nameplate2 == root, "setup: the pooled plate was not reused")
+local text = t._args.SetText[1]
+check(text:find("Mage", 1, true) and text:find("30", 1, true) and not text:find("Boar", 1, true), "recycled plate text: " .. tostring(text))
+local c = t._args.SetTextColor
+check(c[1] == 1 and c[2] == 1 and c[3] == 1, "recycled plate colour: " .. tostring(c[1]) .. " " .. tostring(c[2]) .. " " .. tostring(c[3]))
+"""),
+
+    ("a secret name goes to SetText untouched and is never cached", "true", r"""
+local SECRET = setmetatable({}, { __eq = function() error("compared a secret") end,
+    __lt = function() error("compared a secret") end, __le = function() error("compared a secret") end,
+    __concat = function() error("concatenated a secret") end })
+local name = SECRET
+UnitName = function() return name end
+UnitLevel = function() return 10 end
+boot()
+FS.IsSecret = function(v) return rawequal(v, SECRET) end
+addPlate("nameplate1")
+local t = FS.framesByUnit.nameplate1.nameText
+check(rawequal(t._args.SetText[1], SECRET), "the secret name was altered on the way to SetText")
+local n = t._calls.SetText
+fire("UNIT_HEALTH", "nameplate1")
+check(t._calls.SetText == n + 1 and rawequal(t._args.SetText[1], SECRET), "a secret name was cached")
+name = "Boar"
+fire("UNIT_HEALTH", "nameplate1")
+check(t._calls.SetText == n + 2 and t._args.SetText[1]:find("Boar", 1, true), "the plain name after a secret one was not written")
+fire("UNIT_HEALTH", "nameplate1")
+check(t._calls.SetText == n + 2, "the plain name was rewritten although unchanged")
+"""),
+
+    ("a secret level skips the prefix and the cache", "true", r"""
+local SECRET = setmetatable({}, { __eq = function() error("compared a secret") end,
+    __lt = function() error("compared a secret") end, __le = function() error("compared a secret") end })
+local level = SECRET
+UnitName = function() return "Boar" end
+UnitLevel = function(u) if u == "player" then return 20 end return level end
+GetCreatureDifficultyColor = function() return { r = 1, g = 0.5, b = 0 } end
+boot()
+FS.IsSecret = function(v) return rawequal(v, SECRET) end
+addPlate("nameplate1")
+local t = FS.framesByUnit.nameplate1.nameText
+check(t._args.SetText[1] == "Boar", "a secret level should leave the bare name, got " .. tostring(t._args.SetText[1]))
+local n = t._calls.SetText
+fire("UNIT_HEALTH", "nameplate1")
+check(t._calls.SetText == n + 1, "a secret level was cached")
+level = 12
+fire("UNIT_HEALTH", "nameplate1")
+check(t._calls.SetText == n + 2 and t._args.SetText[1]:find("12", 1, true), "the plain level after a secret one was not written")
 """),
 ]
 

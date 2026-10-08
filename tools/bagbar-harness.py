@@ -708,6 +708,52 @@ def check_events() -> None:
     check("events.no_degrade_logs", w.logs() == "", w.logs())
 
 
+def check_quality_border() -> None:
+    w = World()
+    w.lua.execute("""
+ITEM_QUALITY_COLORS = { [3] = { r = 0, g = 0.5, b = 1 } }
+function GetInventoryItemQuality() return 3 end
+function h_bag1() for _, x in ipairs(FS.BagBar.slots) do if x.key == "bag1" then return x end end end
+""")
+    w.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
+    v = py(w.lua.eval("h_bag1().edge.vertex"))
+    check("quality.a_rare_bag_edge_takes_its_quality_colour_at_0.85", v == [0, 0.5, 1, 0.85], f"{v}")
+    w.lua.execute("QC1 = h_bag1().qualityColor")
+    w.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
+    check("quality.rereading_an_item_allocates_no_new_colour_table", w.lua.eval("h_bag1().qualityColor == QC1"))
+    c = py(w.lua.eval("{ ITEM_QUALITY_COLORS[3].r, ITEM_QUALITY_COLORS[3].g, ITEM_QUALITY_COLORS[3].b }"))
+    check("quality.refreshing_leaves_the_shared_quality_colour_untouched", c == [0, 0.5, 1], f"{c}")
+    w.lua.execute("ITEM_QUALITY_COLORS[3] = { r = 1, g = 0, b = 0 }")
+    w.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
+    v = py(w.lua.eval("h_bag1().edge.vertex"))
+    check("quality.a_changed_quality_colour_is_picked_up", v == [1, 0, 0, 0.85], f"{v}")
+
+
+def check_free_count_text() -> None:
+    w = World()
+    w.lua.execute("""
+FREE = 7
+C_Container.CalculateTotalNumberOfFreeBagSlots = function() return FREE end
+function h_backpack() for _, x in ipairs(FS.BagBar.slots) do if x.kind == "backpack" then return x end end end
+TEXTS = 0
+local count = h_backpack().count
+local realSet = count.SetText
+count.SetText = function(self, t) TEXTS = TEXTS + 1; return realSet(self, t) end
+""")
+    w.g.h_fire("BAG_UPDATE")
+    check("free.the_count_text_shows_the_free_slots", w.lua.eval("h_backpack().count.text") == "7")
+    w.lua.execute("TEXTS = 0")
+    for _ in range(10):
+        w.g.h_fire("BAG_UPDATE")
+    check("free.an_unchanged_free_count_is_not_rewritten", w.lua.eval("TEXTS") == 0, f"{w.lua.eval('TEXTS')}")
+    w.lua.execute("FREE = 6; TEXTS = 0")
+    w.g.h_fire("BAG_UPDATE")
+    check("free.a_changed_free_count_is_rewritten", w.lua.eval("TEXTS") == 1 and w.lua.eval("h_backpack().count.text") == "6")
+    w.lua.execute("FREE = nil")
+    w.g.h_fire("BAG_UPDATE")
+    check("free.an_unreadable_free_count_blanks_the_text", w.lua.eval("h_backpack().count.text") == "")
+
+
 def main() -> int:
     check_build()
     check_clicks()
@@ -719,6 +765,8 @@ def main() -> int:
     check_entering_world_in_combat()
     check_login_retry_in_combat()
     check_events()
+    check_quality_border()
+    check_free_count_text()
     check_source()
     print(f"\n{len(FAILS)} failed" if FAILS else "\nall checks passed")
     return len(FAILS)
