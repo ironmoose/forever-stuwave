@@ -26,7 +26,8 @@ the castbars-harness stubs) and adds the real GunsightBoxes.lua. It pins:
   * INTERRUPTED: CastBars' onVerdict hook shows the red tone, "INTERRUPTED" and a flicker group, the next
     write or cast clears them, Stack A bars never have a hook;
   * target bar settings (FS.Config keys under gunsight.targetBars.*, defaults and ranges read from
-    mockups/config-window-2026-10-07.html): the defaults draw exactly the option B rails, a change applies
+    mockups/config-window-2026-10-07.html): the defaults are 11 / 4 / 100, the 100% width draws what
+    the old 120% drew, a width stored on the old scale is converted once per profile, a change applies
     live to the heights, width and numbers and survives a rescale and a profile switch, a protected
     frame defers the change to PLAYER_REGEN_ENABLED, and the numbers (current, current / max, percent) go only
     to SetFormattedText with a secret health or power value, percent through the engine's UnitHealthPercent /
@@ -1331,6 +1332,9 @@ local function mixHex(hex, t)
 end
 local function countKey(key) local n = 0; for _, k in ipairs(__degrades) do if k == key then n = n + 1 end end; return n end
 
+local OLD_WIDTH_120 = 1.2    -- the multiplier the old 120% setting gave; the new 100% must look the same
+local function hpPx(v) return v * FS.GunsightBoxes.C.BAR_PX end
+
 function T.the_target_bars_sit_under_line_one_at_the_option_b_offsets_at_two_heights()
     local W = world()
     local C = FS.GunsightBoxes.C
@@ -1341,15 +1345,16 @@ function T.the_target_bars_sit_under_line_one_at_the_option_b_offsets_at_two_hei
         local k = K()
         local box, b = W.tgt.box, bars(W)
         ok(b, "the target box carries its bars")
-        local want = math.max(MB.TB_MIN_W * k, box.l1:GetStringWidth())
+        local wmax = (MB.base.BOXR.w - 2 * MB.PAD) * k
+        local want = math.min(wmax, math.max(MB.TB_MIN_W * k, box.l1:GetStringWidth()) * OLD_WIDTH_120)
         for _, r in ipairs({ b.hp.green, b.hp.red }) do
             local p = r.host._points.TOPLEFT
             eq(p.rel, box.frame); eq(p.relPoint, "TOPLEFT")
             near(p.x, MB.TB_X * k, 1e-6, "x = box.x + 7"); near(p.y, -MB.TB_HP_Y * k, 1e-6, "y = box.y + 26")
-            near(r.host._w, want, 1e-6, "as wide as the name at " .. h); near(r.host._h, MB.TB_HP_H * k, 1e-6, "3 high")
+            near(r.host._w, want, 1e-6, "as wide as the name at " .. h .. " (the old 120%)"); near(r.host._h, hpPx(11) * k, 1e-6, "11 px high")
         end
         local p = b.power.host._points.TOPLEFT
-        eq(p.rel, box.frame); near(p.x, MB.TB_X * k, 1e-6); near(p.y, -MB.TB_PW_Y * k, 1e-6, "y = box.y + 30")
+        eq(p.rel, box.frame); near(p.x, MB.TB_X * k, 1e-6); near(p.y, -(MB.TB_HP_Y + hpPx(11) + C.TB_GAP) * k, 1e-6, "under the 11 px health rule, one image px down")
         near(b.power.host._w, want, 1e-6); near(b.power.host._h, MB.TB_PW_H * k, 1e-6, "2 high")
         local gap = (-p.y) - (-b.hp.green.host._points.TOPLEFT.y) - b.hp.green.host._h
         near(gap, k, 1e-6, "one image px between the rules")
@@ -1569,18 +1574,18 @@ function T.the_bar_width_is_the_name_width_and_the_full_text_width_for_a_secret_
     local k = K()
     local wmax = (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * k
     target("Kurak")
-    near(b.hp.green.host._w, box.l1:GetStringWidth(), 1e-6, "a plain name: its measured width")
-    near(b.power.host._w, box.l1:GetStringWidth(), 1e-6, "for both rules")
+    near(b.hp.green.host._w, box.l1:GetStringWidth() * OLD_WIDTH_120, 1e-6, "a plain name: its measured width, scaled")
+    near(b.power.host._w, box.l1:GetStringWidth() * OLD_WIDTH_120, 1e-6, "for both rules")
     target("Al")
-    near(b.hp.green.host._w, MB.TB_MIN_W * k, 1e-6, "a short name: the 24 image px floor")
+    near(b.hp.green.host._w, MB.TB_MIN_W * k * OLD_WIDTH_120, 1e-6, "a short name: the 24 image px floor, scaled")
     target("Archmage Antonidas the Great")
     ok(b.hp.green.host._w <= wmax + 1e-6, "a long name is fitted, and so is the bar")
-    near(b.hp.green.host._w, box.l1:GetStringWidth(), 1e-6)
+    near(b.hp.green.host._w, math.min(wmax, box.l1:GetStringWidth() * OLD_WIDTH_120), 1e-6)
     target("Kurak")
     UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
     __fireEvent("UI_SCALE_CHANGED")
-    near(b.hp.green.host._w, box.l1:GetStringWidth(), 1e-6, "a rescale measures it again")
-    ok(b.hp.green.host._w < 49, "at the smaller type")
+    near(b.hp.green.host._w, box.l1:GetStringWidth() * OLD_WIDTH_120, 1e-6, "a rescale measures it again")
+    ok(b.hp.green.host._w < 49 * OLD_WIDTH_120, "at the smaller type")
     secretUnit(); __fireEvent("PLAYER_TARGET_CHANGED")
     near(b.hp.green.host._w, (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * K(), 1e-6, "a secret name: the full text width")
     __fireEvent("UNIT_NAME_UPDATE", "target")
@@ -1658,26 +1663,32 @@ end
 local function S() return FS.GunsightBoxes.SETTINGS end
 local function flush() FS.GunsightBoxes.Flush() end    -- the one-shot OnUpdate a setting change schedules
 local function setting(name, value) FS.Config.Set(S()[name].key, value); flush() end
-local function hpPx(v) return v * FS.GunsightBoxes.C.BAR_PX end
 local function textOf(fs) return fs._text end
 local function numbersOn(format)
     setting("numbers", true)
     if format then setting("numberFormat", format) end
 end
-local function pctWidth(W, pct)       -- the rule width a width setting should give, from the name width
+local function pctWidth(W, pct)       -- the rule width a width setting should give, from the name width (100% is the old 120%)
     local k = K()
     local wmax = (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * k
-    return math.min(wmax, W.tgt.box.l1:GetStringWidth() * pct / 100)
+    return math.min(wmax, W.tgt.box.l1:GetStringWidth() * pct / 100 * OLD_WIDTH_120)
 end
 
-function T.the_settings_default_to_the_mockups_values_and_draw_todays_rails()
+function T.the_settings_default_to_11_4_and_100_and_draw_the_taller_rails()
     local W = world()
     local C, s = FS.GunsightBoxes.C, S()
-    eq(s.hpHeight.default, MB.CFG.HEALTH, "the config mockup's health default"); eq(s.powerHeight.default, MB.CFG.RESOURCE)
-    eq(s.width.default, MB.CFG.WIDTH)
-    -- a slider px is half a mockup image px, so the config mockup's defaults are the option B rails (3 and 2)
-    near(hpPx(s.hpHeight.default), MB.TB_HP_H, 1e-9, "6 px renders as the 3 image px rail")
+    -- Parker's call after playing: a taller health rail (the config mockup was updated to 11), resource and width as mocked
+    eq(s.hpHeight.default, 11, "health rail default"); eq(s.hpHeight.default, MB.CFG.HEALTH); eq(s.powerHeight.default, 4, "resource rail default")
+    eq(s.powerHeight.default, MB.CFG.RESOURCE); eq(s.width.default, 100, "width default"); eq(s.width.default, MB.CFG.WIDTH)
+    -- a slider px is half a mockup image px: 4 is still the option B power rule (2), 11 is a 5.5 image px health rule
+    near(hpPx(s.hpHeight.default), 5.5, 1e-9, "11 px renders as a 5.5 image px rail")
     near(hpPx(s.powerHeight.default), MB.TB_PW_H, 1e-9, "4 px renders as the 2 image px rail")
+    -- the default and the tallest health rule both leave the divider (the target frame is grown up by TGT_GROW) clear
+    local divider = C.DIV_Y + C.TGT_GROW
+    ok(C.TB_HP_Y + hpPx(s.hpHeight.default) + C.TB_GAP + hpPx(s.powerHeight.default) < divider, "defaults sit above the divider")
+    ok(C.TB_HP_Y + hpPx(s.hpHeight.max) + C.TB_GAP + hpPx(s.powerHeight.default) < divider, "tallest health rule sits above the divider")
+    eq(s.hpHeight.min, 2); eq(s.hpHeight.max, 12); eq(s.width.min, 50); eq(s.width.max, 150); eq(s.width.step, 5)
+    eq(C.BAR_WIDTH_SCALE, OLD_WIDTH_120, "the 100% width is the old 120%")
     eq(C.TB_GAP, MB.TB_PW_Y - MB.TB_HP_Y - MB.TB_HP_H, "the gap between the rules is the mockup's")
     for name, def in pairs(s) do
         if type(def) == "table" and def.key then
@@ -1726,14 +1737,38 @@ function T.bar_heights_apply_live_and_the_power_rule_rides_under_the_health_rule
         near(r.host._h, hpPx(10) * k, 1e-6, "health rule 5 image px"); near(r.host._points.TOPLEFT.y, -C.TB_HP_Y * k, 1e-6)
     end
     near(b.power.host._points.TOPLEFT.y, -(C.TB_HP_Y + hpPx(10) + C.TB_GAP) * k, 1e-6, "the power rule keeps its one px gap")
-    near(b.power.host._h, MB.TB_PW_H * k, 1e-6, "its own height is untouched")
-    setting("powerHeight", 12)
-    near(b.power.host._h, hpPx(12) * k, 1e-6, "power rule 6 image px")
+    near(b.power.host._h, hpPx(4) * k, 1e-6, "its own height is untouched")
+    setting("powerHeight", 8)
+    near(b.power.host._h, hpPx(8) * k, 1e-6, "power rule 4 image px, which still fits above the divider")
     near(b.hp.green.host._h, hpPx(10) * k, 1e-6, "health untouched by the power slider")
     setting("hpHeight", nil); setting("powerHeight", nil)
-    for _, r in ipairs({ b.hp.green, b.hp.red }) do near(r.host._h, MB.TB_HP_H * k, 1e-6, "back to 3") end
-    near(b.power.host._points.TOPLEFT.y, -MB.TB_PW_Y * k, 1e-6, "back to y = 30")
+    for _, r in ipairs({ b.hp.green, b.hp.red }) do near(r.host._h, hpPx(11) * k, 1e-6, "back to 11 px") end
+    near(b.power.host._points.TOPLEFT.y, -(C.TB_HP_Y + hpPx(11) + C.TB_GAP) * k, 1e-6, "back under the default health rule")
     near(b.power.host._h, MB.TB_PW_H * k, 1e-6, "back to 2")
+    W.clean(); noFails()
+end
+
+-- The target frame's divider is at DIV_Y + TGT_GROW; the power rule's bottom edge stops one image px short of it.
+local function powerBottom(b, k) return (-b.power.host._points.TOPLEFT.y + b.power.host._h) / k end
+
+function T.a_tall_power_slider_shrinks_the_power_rule_instead_of_crossing_the_divider()
+    local W = world()
+    local C = FS.GunsightBoxes.C
+    target("Kurak")
+    local k, b = K(), bars(W)
+    local limit = C.DIV_Y + C.TGT_GROW - 1
+    setting("powerHeight", 12)                                       -- health at its default 11
+    ok(powerBottom(b, k) <= limit + 1e-6, "11 with power 12 stays above the divider")
+    near(powerBottom(b, k), limit, 1e-6, "and the power rule takes all the room that is left")
+    near(b.hp.green.host._h, hpPx(11) * k, 1e-6, "health keeps its height")
+    ok(b.power.host._h < hpPx(12) * k, "the power rule shrank")
+    setting("powerHeight", 7)
+    ok(powerBottom(b, k) <= limit + 1e-6, "power 7 under health 11")
+    near(b.power.host._h, hpPx(7) * k, 1e-6, "power 7 under health 11 still fits whole")
+    setting("hpHeight", 12); setting("powerHeight", 12)
+    ok(powerBottom(b, k) <= limit + 1e-6, "both at their maximum stay above the divider")
+    ok(b.power.host._h >= hpPx(S().powerHeight.min) * k - 1e-6, "and the power rule keeps at least its minimum")
+    near(b.hp.green.host._h, hpPx(12) * k, 1e-6, "health 12 still fits with the minimum power rule")
     W.clean(); noFails()
 end
 
@@ -1763,10 +1798,126 @@ function T.bar_width_is_a_percent_of_the_name_width_clamped_to_the_text_width()
     near(b.hp.green.host._w, wmax, 1e-6, "never wider than the box text")
     secretUnit(); __fireEvent("PLAYER_TARGET_CHANGED")
     setting("width", 50)
-    near(b.hp.green.host._w, wmax * 0.5, 1e-6, "a secret name has the full text width, so half of it")
+    near(b.hp.green.host._w, wmax * 0.5 * OLD_WIDTH_120, 1e-6, "a secret name has the full text width, so half of it, times the scale")
     setting("width", 100)
     near(b.hp.green.host._w, wmax, 1e-6)
     W.clean(); noFails("a secret name was measured")
+end
+
+function T.the_default_width_draws_what_the_old_120_percent_drew_and_still_clamps_to_the_text()
+    local W = world()
+    local k = K()
+    target("Kurak")
+    local b = bars(W)
+    local wmax = (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * k
+    local name = W.tgt.box.l1:GetStringWidth()
+    ok(name * OLD_WIDTH_120 < wmax, "the short name leaves room, so the clamp is not what is measured")
+    near(b.hp.green.host._w, name * 1.2, 1e-6, "nothing stored: 100% is the old 120%")
+    near(b.power.host._w, name * 1.2, 1e-6, "on the power rule too")
+    near(b.hp.red.host._w, name * 1.2, 1e-6, "and the red twin")
+    target("Archmage Antonidas the Great")
+    near(b.hp.green.host._w, wmax, 1e-6, "a long name at the default is clamped to the box text width")
+    setting("width", 150)
+    near(b.hp.green.host._w, wmax, 1e-6, "and so at the top of the range")
+    W.clean(); noFails()
+end
+
+-- ---- the one-time conversion of a width stored on the old scale ------------------------------------------
+
+local WIDTH_KEY = "gunsight.targetBars.width"        -- pinned here: a saved profile names the key, so it must not move
+local MIGRATED_KEY = "gunsight.targetBars.widthMigrated"
+local function savedDb(profiles, active)    -- profiles: name -> settings table, as an older version saved them
+    local db = { profilesVersion = 1, profiles = {}, profileKeys = { ["Player-1-AAAA"] = active or "Default" } }
+    for name, settings in pairs(profiles) do db.profiles[name] = { settings = settings, layout = { v = 1, frames = {} } } end
+    return db
+end
+local function playerGuid() UnitGUID = function() return "Player-1-AAAA" end end
+local function loadedWith(settings)
+    local db = savedDb({ Default = settings })
+    local W = world({ db = db, beforeLoad = playerGuid })
+    return W, db
+end
+
+-- old value -> new value (nil = the default, stored as nothing): the nearest step of v / 1.2, half up, clamped to the range.
+-- One world per case: the config callbacks are registered per load, so a second world would hear the first one's.
+for _, c in ipairs({ { 120, nil }, { 150, 125 }, { 90, 75 }, { 100, 85 }, { 50, 50 }, { 60, 50 }, { 130, 110 },
+                     { 105, 90 }, { 75, 65 }, { 135, 115 } }) do
+    T["a_width_stored_on_the_old_scale_as_" .. c[1] .. "_becomes_" .. tostring(c[2] or "the_default")] = function()
+        local W, db = loadedWith({ [WIDTH_KEY] = c[1] })
+        eq(FS.Config.Get(WIDTH_KEY), c[2] or 100, "old " .. c[1])
+        eq(db.profiles.Default.settings[WIDTH_KEY], c[2], "stored as the new value, or as nothing at the default")
+        eq(FS.Config.IsStored(WIDTH_KEY), c[2] ~= nil)
+        eq(db.profiles.Default.settings[MIGRATED_KEY], true, "the profile is marked converted")
+        if c[1] == 150 then                          -- old 150 drew 1.5 x the name; the converted 125 draws 1.25 x 1.2
+            target("Kurak")
+            near(bars(W).hp.green.host._w, W.tgt.box.l1:GetStringWidth() * 1.5, 1e-6, "same rail width as the old 150%")
+        end
+        W.clean(); noFails()
+    end
+end
+
+function T.a_width_written_before_any_width_read_is_not_converted()
+    local db = savedDb({ Default = {} })
+    local W = world({ db = db, beforeLoad = playerGuid, noLogin = true })
+    __fireEvent("ADDON_LOADED", "forever-stuwave")                  -- the saved variables are in; no box has read the width
+    eq(db.profiles.Default.settings[MIGRATED_KEY], true, "the active profile is marked at load, not at the first read")
+    FS.Config.Set(WIDTH_KEY, 150)
+    __fireEvent("PLAYER_LOGIN")
+    eq(FS.Config.Get(WIDTH_KEY), 150, "a width chosen after the load is on the new scale and stays")
+    eq(db.profiles.Default.settings[WIDTH_KEY], 150)
+    W.clean(); noFails()
+end
+
+function T.the_conversion_runs_once_and_touches_nothing_else()
+    local W, db = loadedWith({ [WIDTH_KEY] = 150, ["gunsight.targetBars.hpHeight"] = 9, ["gunsight.targetBars.numbers"] = true })
+    local settings = db.profiles.Default.settings
+    eq(settings[WIDTH_KEY], 125)
+    eq(settings["gunsight.targetBars.hpHeight"], 9, "other keys are left alone"); eq(settings["gunsight.targetBars.numbers"], true)
+    setting("width", 150)                            -- a new-scale 150 chosen after the conversion
+    FS.Config.NewProfile("Raid"); FS.Config.SetActiveProfile("Raid"); FS.Config.SetActiveProfile("Default")
+    eq(FS.Config.Get(WIDTH_KEY), 150, "not converted a second time on a profile switch back")
+    W.clean(); noFails()
+end
+
+function T.an_unstored_width_stays_unstored_and_the_profile_is_still_marked()
+    local W, db = loadedWith({ ["gunsight.targetBars.hpHeight"] = 9 })
+    eq(db.profiles.Default.settings[WIDTH_KEY], nil, "no width written")
+    eq(FS.Config.IsStored(WIDTH_KEY), false)
+    eq(db.profiles.Default.settings[MIGRATED_KEY], true, "marked, so a width chosen later is not divided")
+    setting("width", 140)
+    FS.Config.NewProfile("Raid"); FS.Config.SetActiveProfile("Raid"); FS.Config.SetActiveProfile("Default")
+    eq(FS.Config.Get(WIDTH_KEY), 140)
+    W.clean(); noFails()
+end
+
+function T.each_profile_converts_when_it_is_first_switched_to_and_not_before()
+    local db = savedDb({ Default = { [WIDTH_KEY] = 120 }, Raid = { [WIDTH_KEY] = 150 }, Bare = {} })
+    local W = world({ db = db, beforeLoad = playerGuid })
+    target("Kurak")
+    local b = bars(W)
+    eq(db.profiles.Raid.settings[WIDTH_KEY], 150, "an inactive profile is not touched")
+    eq(db.profiles.Raid.settings[MIGRATED_KEY], nil)
+    ok(FS.Config.SetActiveProfile("Raid"), "switch to Raid")
+    flush()
+    eq(FS.Config.Get(WIDTH_KEY), 125, "Raid converted on first use")
+    near(b.hp.green.host._w, pctWidth(W, 125), 1e-6, "and its rails follow")
+    ok(FS.Config.SetActiveProfile("Bare"))
+    eq(FS.Config.IsStored(WIDTH_KEY), false, "Bare had no width and gets none")
+    eq(db.profiles.Bare.settings[MIGRATED_KEY], true)
+    ok(FS.Config.SetActiveProfile("Raid")); ok(FS.Config.SetActiveProfile("Default")); ok(FS.Config.SetActiveProfile("Raid"))
+    eq(FS.Config.Get(WIDTH_KEY), 125, "switching back and forth never converts again")
+    W.clean(); noFails()
+end
+
+function T.a_copied_unconverted_profile_converts_and_a_reset_profile_stays_at_the_default()
+    local db = savedDb({ Default = {}, Old = { [WIDTH_KEY] = 150 } })
+    local W = world({ db = db, beforeLoad = playerGuid })
+    ok(FS.Config.CopyProfile("Old"), "copy the old profile over Default")
+    eq(FS.Config.Get(WIDTH_KEY), 125, "the copy converts as the profile in use")
+    ok(FS.Config.ResetProfile())
+    eq(FS.Config.Get(WIDTH_KEY), 100, "a reset profile is back at the default")
+    eq(FS.Config.IsStored(WIDTH_KEY), false)
+    W.clean(); noFails()
 end
 
 function T.junk_and_out_of_range_settings_read_as_the_default_or_the_nearest_end()
@@ -1774,7 +1925,7 @@ function T.junk_and_out_of_range_settings_read_as_the_default_or_the_nearest_end
     target("Kurak")
     local k, b, s = K(), bars(W), S()
     setting("hpHeight", "tall")
-    near(b.hp.green.host._h, MB.TB_HP_H * k, 1e-6, "a string reads as the default")
+    near(b.hp.green.host._h, hpPx(11) * k, 1e-6, "a string reads as the default")
     setting("hpHeight", 99)
     near(b.hp.green.host._h, hpPx(s.hpHeight.max) * k, 1e-6, "clamped to the maximum")
     setting("hpHeight", -4)
@@ -2049,7 +2200,7 @@ function T.a_profile_switch_applies_the_settings_live()
     near(b.hp.green.host._h, hpPx(10) * k, 1e-6); eq(b.hpText:IsShown(), true)
     FS.Config.SetActiveProfile("Default")
     flush()
-    near(b.hp.green.host._h, MB.TB_HP_H * k, 1e-6, "Default still has the rails as designed")
+    near(b.hp.green.host._h, hpPx(11) * k, 1e-6, "Default still has the default rails")
     eq(b.hpText:IsShown(), false)
     FS.Config.SetActiveProfile("Raid")
     flush()
@@ -2113,7 +2264,7 @@ function T.a_protected_bar_frame_defers_the_change_to_the_end_of_combat()
     function Region:SetSize(w, h) sizes = sizes + 1; return realSize(self, w, h) end
     setting("hpHeight", 10); setting("width", 60); setting("numbers", true)
     eq(sizes, 0, "no geometry call while locked down")
-    near(b.hp.green.host._h, MB.TB_HP_H * k, 1e-6, "the rails wait")
+    near(b.hp.green.host._h, hpPx(11) * k, 1e-6, "the rails wait")
     eq(b.hpText:IsShown(), false, "and so do the numbers")
     setting("hpHeight", 8)
     inCombat = false
@@ -2135,7 +2286,7 @@ function T.a_retired_box_ignores_setting_changes_and_the_player_box_has_nothing_
     local k, box = K(), W.tgt.box
     FS.GunsightBoxes.Retire(box)
     setting("hpHeight", 10); setting("numbers", true)
-    near(box.bars.hp.green.host._h, MB.TB_HP_H * k, 1e-6, "a retired box is left alone")
+    near(box.bars.hp.green.host._h, hpPx(11) * k, 1e-6, "a retired box is left alone")
     eq(box.bars.hpText:IsShown(), false)
     eq(W.you.box.bars, nil, "the player box has no bars to size")
     W.clean(); noFails()
