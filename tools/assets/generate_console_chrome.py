@@ -53,16 +53,23 @@ texel or more before the canvas edge and a nine-slice shows no cutoff.
 TAB FOOT. The tab is CN_TH = 39.2 design px tall (DK.H - CN_KB + CN_TP, see the
 mockup), its left foot standing on the chassis top line and rising 45 degrees to
 the tab's top edge, which then runs right to the chassis right edge. The foot
-texture covers 59.2 x 49.2 design units: the 39.2 square of the foot, FOOT_PAD = 10
-of halo room to the left and above, and a 10 unit stub of the top edge to the right
-so the halo wraps the corner and carries on along the top. Its polygon is
-(10, 49.2) (49.2, 10) (59.2, 10) (59.2, 49.2): the diagonal, the stub, and the tab
-interior below them. The texture holds the rail line (1.15 wide, white alpha 1)
-along the diagonal and the stub, and the halo outside it. NOTHING inside the tab.
-In Lua: size it 59.2 x 49.2 design units and seat its TOPLEFT at (foot x - 10, chassis
-top - 49.2), so the texture's (10, 49.2) corner is the foot standing on the chassis top line.
+texture covers 59.2 x 50.2 design units: the 39.2 square of the foot, 10 of halo
+room to the left, FOOT_TOP = 11 above (the glow strip's 10.5 reach past a stroke's
+outer edge), and a 10 unit stub of the top edge to the right so the halo wraps the
+corner and carries on along the top. Its polygon is (10, 50.2) (49.2, 11) (59.2, 11)
+(59.2, 50.2): the diagonal, the stub, and the tab interior below them. The texture
+holds the rail line (white alpha 1; the diagonal 1.15 wide, the stub 1.0 like
+lineTabTop) and the halo outside it. NOTHING inside the tab. The straight runs (the
+chassis top line, running off the left edge, and the stub) carry console_glow_c14's
+own per-texel strip profile from their outer edge, so the strips that end at this
+texture's left edge and start at its right edge join with no step; the top strip must
+END where this texture begins, or the two composite into a brighter lobe at the
+concave corner.
+In Lua: size it 59.2 x 50.2 design units and seat its TOPLEFT at (foot x - 10, chassis
+top - 50.2 + 0.5), so the texture's (10, 50.2) corner is the foot standing on the chassis
+top line.
 The canvas is stretched, not square, so it is rasterised in
-design units (as generate_hud_key_ring.py does): a texel is 0.46 x 0.38 units and
+design units (as generate_hud_key_ring.py does): a texel is 0.46 x 0.39 units and
 the stroke and the 45 degree line come out true after the stretch. For the halo
 along the straight top and right edges, sample a one dimensional strip from the
 middle of console_glow_c14 with SetTexCoord (it does not vary along its edge).
@@ -92,13 +99,15 @@ OVERALL_ALPHA = 0.7          # A(.7) in front of halo(true)
 REACHES = [((w + CORE_HALF_IMAGE) * IMAGE_TO_DESIGN, min(1.0, a * GLOW_GAIN * OVERALL_ALPHA))
            for w, a in HALO]
 
-# Tab foot, design units (CN_TH = 39.2, 10 of halo room left and above, 10 stub right).
+# Tab foot, design units (CN_TH = 39.2, 10 of halo room left and 11 above, 10 stub right).
 FOOT_SIZE = 128
 FOOT_TH = 39.2
 FOOT_PAD = 10.0
+FOOT_TOP = 11.0              # room above the stub's centreline: the strip's 10.5 reach past the stroke's edge
 FOOT_W = FOOT_PAD + FOOT_TH + FOOT_PAD
-FOOT_H = FOOT_PAD + FOOT_TH
+FOOT_H = FOOT_TOP + FOOT_TH
 CORE_HALF = CORE_HALF_IMAGE * IMAGE_TO_DESIGN   # 0.576
+FOOT_SEAM = 0.5              # the texture ends half way down the 1 texel chassis top line (Console.lua SEAM)
 
 
 def halo_alpha(dist):
@@ -195,20 +204,48 @@ def build_glow():
     return supersample(SIZE, SIZE, fn, _identity)
 
 
+def glow_strip_profile():
+    """Per-texel alpha of console_glow_c14's straight top strip, as 8 bit values, outermost row first."""
+    grid = build_glow()
+    return [round(grid[row][SIZE // 2] * 255) / 255 for row in range(GLOW_PAD)]
+
+
+def strip_alpha(profile, dist):
+    """The strip as the engine draws it at 1:1: linear between texel centres, `dist` outside the outer edge."""
+    pos = GLOW_PAD - 0.5 - dist          # texel-centre coordinate: texel r is centred on r
+    if pos <= 0.0:
+        return profile[0]
+    if pos >= GLOW_PAD - 1:
+        return profile[-1]
+    lo = int(pos)
+    return profile[lo] + (profile[lo + 1] - profile[lo]) * (pos - lo)
+
+
 def build_tab_foot():
-    line = [(FOOT_PAD, FOOT_H), (FOOT_PAD + FOOT_TH, FOOT_PAD), (FOOT_W, FOOT_PAD)]
+    line = [(FOOT_PAD, FOOT_H), (FOOT_PAD + FOOT_TH, FOOT_TOP), (FOOT_W, FOOT_TOP)]
     tab = line + [(FOOT_W, FOOT_H)]
+    # The straight runs (the chassis top line, running off the left edge, and the stub) carry the
+    # Console glow strip's own per-texel profile, measured from their outer edge, so the strip pieces
+    # that end at the foot's left edge and start at its right edge join with no step.
+    profile = glow_strip_profile()
+    edge_y = FOOT_H - FOOT_SEAM
+    stub_y = FOOT_TOP - 0.5 * STROKE
+    top = [(-FOOT_PAD * 10.0, edge_y), (FOOT_PAD, edge_y)]
+    stub = [(FOOT_PAD + FOOT_TH, stub_y), (FOOT_W, stub_y)]
 
     def to_design(x, y):
         return x * FOOT_W / FOOT_SIZE, y * FOOT_H / FOOT_SIZE
 
     def fn(x, y):
-        dist = poly_dist(x, y, line, closed=False)
-        if dist <= CORE_HALF:
+        dist = poly_dist(x, y, line[:2], closed=False)
+        # the stub's core is lineTabTop's own 1 unit stroke; the diagonal keeps the mockup's core
+        if dist <= CORE_HALF or seg_dist(x, y, line[1], line[2]) <= 0.5 * STROKE:
             return 1.0
         if poly_inside(x, y, tab):
             return 0.0
-        return halo_alpha(dist)
+        return max(halo_alpha(dist),
+                   strip_alpha(profile, poly_dist(x, y, top, closed=False)),
+                   strip_alpha(profile, poly_dist(x, y, stub, closed=False)))
 
     return supersample(FOOT_SIZE, FOOT_SIZE, fn, to_design)
 

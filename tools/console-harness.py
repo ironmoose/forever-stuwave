@@ -340,9 +340,10 @@ function T.tab_is_one_continuous_outline_with_no_seam()
     local tt = D(P.lineTabTop)
     near(tt.y, -th, "tab top line at the tab top"); near(tt.r, W - 1, "tab top line ends at the right line")
     local foot = D(P.foot)
-    near(foot.w, 59.2, "foot texture is 59.2 wide", 1e-9); near(foot.h, 49.2, "foot texture is 49.2 tall", 1e-9)
+    near(foot.w, 59.2, "foot texture is 59.2 wide", 1e-9); near(foot.h, 50.2, "foot texture is 50.2 tall", 1e-9)
     near(foot.x, tx - 10, "foot left = foot x - 10")
     near(foot.b, 0.5, "foot bottom ends mid way down the chassis top line")
+    near(foot.y + 11, tt.y + 0.5, "the stub's centreline (11 down the texture) is the tab top line's centreline", 1e-9)
     near(tt.x, foot.x + 59.2, "top line carries on where the foot stub ends")
     -- the wedge fills the foot, the rect the rest of the tab, both above the chassis
     local wedge, rest = D(P.tabWedge), D(P.tabFill)
@@ -367,6 +368,28 @@ function T.halo_stays_outside_and_never_lights_the_tab_interior()
         eq(P[k]._texture, C().TEX.glow, k .. " texture")
         eq(#P[k]._tc, 4, k .. " samples a corner block, not the stretched plate")
     end
+end
+
+-- The foot texture's own halo (the chassis top line included) takes over from the top halo strip, so
+-- each pixel of halo around the concave corner is drawn by exactly one piece.
+function T.top_halo_strip_ends_where_the_foot_texture_begins()
+    local P = C().parts
+    local foot = D(P.foot)
+    near(D(P.haloTop).r, foot.x, "the top halo strip ends at the foot texture's left edge")
+    near(D(P.haloTop).r, C().layout.tx - 10, "...which is 10 left of the foot")
+    for _, n in ipairs({ 8, 6, 4 }) do
+        truthy(C().SetKeyCount(n))
+        near(D(P.haloTop).r, D(P.foot).x, "n=" .. n .. " the top halo strip ends at the foot texture")
+    end
+    C().SetKeyCount(8)
+    -- a dock gap reaching the foot never lets the patch halo or the right piece into the foot's span
+    truthy(C().SetDockGap(100, C().layout.tx + 500, 90, C().layout.tx + 500))
+    near(D(P.gapHalo).r, D(P.foot).x, "the patch halo stops at the foot texture")
+    eq(P.haloTop2:IsShown(), false, "no right halo piece past the patch")
+    truthy(C().SetDockGap(100, 300))
+    near(D(P.haloTop2).r, D(P.foot).x, "the right halo piece stops at the foot texture")
+    near(D(P.haloTop2).r - D(P.haloTop2).x, D(P.foot).x - 300, "...and is that much narrower than the line piece's span to the foot")
+    C().SetDockGap(nil, nil)
 end
 
 -- ---- the tab fits the shown keys ---------------------------------------------------------
@@ -467,7 +490,7 @@ local function noGap(tx, label)
     local a, ah = piece("lineTop"), piece("haloTop")
     truthy(a, label .. ": top line drawn"); truthy(ah, label .. ": top halo drawn")
     near(a.x, M.CUT, label .. ": top line from the cut"); near(a.r, tx, label .. ": top line to the foot")
-    near(ah.x, M.CUT, label .. ": halo from the cut"); near(ah.r, tx, label .. ": halo to the foot")
+    near(ah.x, M.CUT, label .. ": halo from the cut"); near(ah.r, tx - 10, label .. ": halo to the foot texture, which carries it from there")
     eq(piece("lineTop2"), nil, label .. ": no second line piece")
     eq(piece("haloTop2"), nil, label .. ": no second halo piece")
     eq(C().layout.gap, nil, label .. ": no gap in the layout")
@@ -523,7 +546,7 @@ function T.dock_gap_leaves_the_right_key_tab_alone()
     near(C().keyArea.x, areaBefore.x, "key area x"); near(C().keyArea.w, areaBefore.w, "key area w")
     -- the right piece stops where the foot stands, not under the tab
     near(piece("lineTop2").r, C().layout.tx, "right piece ends at the foot")
-    near(piece("haloTop2").r, C().layout.tx, "right halo piece ends at the foot")
+    near(piece("haloTop2").r, C().layout.tx - 10, "right halo piece ends where the foot texture begins")
     near(D(P.lineTabTop).x, D(P.foot).x + 59.2, "tab top line still carries on from the foot stub")
 end
 
@@ -535,7 +558,7 @@ function T.dock_gap_halo_matches_the_line_split()
         eq((l ~= nil), (h ~= nil), "left line and halo shown together " .. gap[1])
         eq((l2 ~= nil), (h2 ~= nil), "right line and halo shown together " .. gap[1])
         if l then near(l.x, h.x, "left piece x"); near(l.r, h.r, "left piece right edge") end
-        if l2 then near(l2.x, h2.x, "right piece x"); near(l2.r, h2.r, "right piece right edge") end
+        if l2 then near(l2.x, h2.x, "right piece x"); near(l2.r - 10, h2.r, "halo piece stops 10 short of the line piece: the foot texture carries it") end
         near(g.x0, math.max(gap[1], M.CUT), "effective x0 is clamped to the cut")
         near(g.x1, math.min(gap[2], C().layout.tx), "effective x1 is clamped to the foot")
     end
@@ -610,7 +633,7 @@ function T.gap_patch_follows_the_effective_gap_the_key_count_and_a_rescale()
     near(piece("gapLine").r, 100, "patch to x1")
     truthy(C().SetDockGap(100, C().layout.tx + 500))
     near(piece("gapLine").r, C().layout.tx, "a gap running past the foot: the patch stops at the foot")
-    near(piece("gapHalo").r, C().layout.tx, "...halo too")
+    near(piece("gapHalo").r, C().layout.tx - 10, "...halo stops where the foot texture begins")
     for _, gap in ipairs({ { 200, 200 }, { 300, 100 }, { 0, M.CUT } }) do
         truthy(C().SetDockGap(gap[1], gap[2]))
         eq(P.gapLine:IsShown(), false, "no patch for an empty gap " .. gap[1])
@@ -708,7 +731,7 @@ function T.dock_gap_halo_span_can_be_wider_than_the_line_span()
     local tx = C().layout.tx
     truthy(C().SetDockGap(100, 300, -50, tx + 500))
     eq(piece("haloTop"), nil, "the halo gap runs to the cut: no stub"); eq(piece("haloTop2"), nil, "...and to the foot: no right piece")
-    near(piece("gapHalo").x, M.CUT, "patch halo from the cut"); near(piece("gapHalo").r, tx, "patch halo to the foot")
+    near(piece("gapHalo").x, M.CUT, "patch halo from the cut"); near(piece("gapHalo").r, tx - 10, "patch halo to the foot texture")
     near(piece("lineTop").r, 100, "the line gap is unaffected")
     -- survives a key count change and a rescale
     truthy(C().SetDockGap(100, 300, 90, 310))

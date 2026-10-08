@@ -1335,9 +1335,10 @@ def test_console_glow_is_the_mockup_halo_outside_the_cut_chassis_only(
     assert all(_alpha_at(path, x, 63) == 0 and _alpha_at(path, 63, x) == 0 for x in range(64))
 
 
-# The tab foot canvas covers 59.2 x 49.2 design units: a 39.2 high tab foot (CN_TH) plus a
-# halo pad of 10 left and above, and a 10 unit stub of the top edge so the corner joins.
-FOOT_W, FOOT_H, FOOT_PAD, FOOT_TH = 59.2, 49.2, 10.0, 39.2
+# The tab foot canvas covers 59.2 x 50.2 design units: a 39.2 high tab foot (CN_TH) plus a halo pad
+# of 10 to the left and 11 above (the strip's reach, 10.5 past the line's outer edge), and a 10 unit
+# stub of the top edge so the corner joins.
+FOOT_W, FOOT_H, FOOT_PAD, FOOT_TH, FOOT_TOP = 59.2, 50.2, 10.0, 39.2, 11.0
 
 
 def _foot_design(x: int, y: int) -> tuple[float, float]:
@@ -1349,19 +1350,19 @@ def test_console_tab_foot_runs_at_45_degrees_with_halo_outside_only(
     path = console_outputs / "console_tab_foot.tga"
     assert _is_white(path)
     grid = _alpha_grid(path)
-    # Core pixels (the halo never exceeds 0.6) sit on x + y = FOOT_PAD * 2 + FOOT_TH in design units.
+    # Core pixels (the halo never exceeds 0.6) sit on x + y = FOOT_PAD + FOOT_H in design units.
     rows_with_core = 0
     for y in range(128):
         sums = [sum(_foot_design(x, y)) for x in range(128)
                 if grid[y][x] >= 230 and _foot_design(x, y)[0] < FOOT_PAD + FOOT_TH - 2]
         if sums:
             rows_with_core += 1
-            assert abs(sum(sums) / len(sums) - (2 * FOOT_PAD + FOOT_TH)) < 0.9, y
+            assert abs(sum(sums) / len(sums) - (FOOT_PAD + FOOT_H)) < 0.9, y
     assert rows_with_core > 70, "the whole diagonal is stroked"
     # The top edge stub continues the line to the right of the corner.
-    top = [x for x in range(128) if grid[int(FOOT_PAD * 128 / FOOT_H)][x] >= 230]
+    top = [x for x in range(128) if grid[int(FOOT_TOP * 128 / FOOT_H)][x] >= 230]
     assert top and max(top) == 127
-    poly = [(FOOT_PAD, FOOT_H), (FOOT_PAD + FOOT_TH, FOOT_PAD), (FOOT_W, FOOT_PAD), (FOOT_W, FOOT_H)]
+    poly = [(FOOT_PAD, FOOT_H), (FOOT_PAD + FOOT_TH, FOOT_TOP), (FOOT_W, FOOT_TOP), (FOOT_W, FOOT_H)]
     for y in range(128):
         for x in range(128):
             dx, dy = _foot_design(x, y)
@@ -1370,10 +1371,118 @@ def test_console_tab_foot_runs_at_45_degrees_with_halo_outside_only(
     # Outside the tab the halo follows the mockup profile at a perpendicular offset of 3.
     ox, oy = _foot_design(0, 0)
     nx = 30.0 - 3 / math.sqrt(2)
-    ny = (2 * FOOT_PAD + FOOT_TH) - 30.0 - 3 / math.sqrt(2)
+    ny = (FOOT_PAD + FOOT_H) - 30.0 - 3 / math.sqrt(2)
     tx, ty = int(nx * 128 / FOOT_W), int(ny * 128 / FOOT_H)
     want = 255 * _console_glow_alpha(3.0)
     assert abs(grid[ty][tx] - want) <= 14, (grid[ty][tx], want)
+
+
+FOOT_SEAM = 0.5   # the foot ends half way down the 1 texel chassis top line (Console.lua SEAM)
+FOOT_EDGE_Y = FOOT_H - FOOT_SEAM   # the chassis top line's outer edge in foot design y
+
+
+FOOT_RAIL = [(FOOT_PAD, FOOT_H), (FOOT_PAD + FOOT_TH, FOOT_TOP), (FOOT_W, FOOT_TOP)]
+
+
+def _strip_alpha(strip: list[list[int]], dist: float) -> float:
+    """The Console glow's straight strip (column 32) as drawn 1:1 with bilinear filtering, 0..255,
+    `dist` design units outside the outline's outer edge."""
+    pos = CN_PAD - 0.5 - dist
+    if pos <= 0:
+        return strip[0][32]
+    if pos >= CN_PAD - 1:
+        return strip[CN_PAD - 1][32]
+    lo = int(pos)
+    return strip[lo][32] + (strip[lo + 1][32] - strip[lo][32]) * (pos - lo)
+
+
+FOOT_STUB_EDGE_Y = FOOT_TOP - 0.5   # the tab top line's outer edge in foot design y
+FOOT_JOIN_TOLERANCE = 3             # max abs alpha step (of 255) across a strip/foot boundary
+
+
+def test_console_tab_foot_halo_matches_the_strip_row_by_row_at_the_left_edge(
+        console_outputs: Path) -> None:
+    # Left of the foot's first vertex the nearest outline is the chassis top line, so every row of the
+    # foot must carry the SAME alpha as the Console glow strip that ends where the foot begins.
+    foot = _alpha_grid(console_outputs / "console_tab_foot.tga")
+    strip = _alpha_grid(MEDIA_DIR / "console_glow_c14.tga")
+    worst, rows = 0.0, 0
+    for fy in range(128):
+        _, dy = _foot_design(0, fy)
+        dist = FOOT_EDGE_Y - dy
+        if not 0.4 < dist < CN_PAD:
+            continue
+        for design_x in (0.3, 2.0, 4.0):
+            fx = int(design_x * 128 / FOOT_W)
+            worst = max(worst, abs(foot[fy][fx] - _strip_alpha(strip, dist)))
+        rows += 1
+    assert rows > 22, "every row of the strip's reach is compared"
+    assert worst <= FOOT_JOIN_TOLERANCE, worst
+
+
+def test_console_tab_foot_halo_matches_the_strip_row_by_row_at_the_right_edge(
+        console_outputs: Path) -> None:
+    # The stub's halo ends at the texture's right edge, where the tab top strip carries on: the same
+    # per-row profile, measured from the stub line's outer edge and not its centreline.
+    foot = _alpha_grid(console_outputs / "console_tab_foot.tga")
+    strip = _alpha_grid(MEDIA_DIR / "console_glow_c14.tga")
+    worst, rows = 0.0, 0
+    for fy in range(128):
+        _, dy = _foot_design(127, fy)
+        dist = FOOT_STUB_EDGE_Y - dy
+        if not 0.4 < dist < CN_PAD:
+            continue
+        for design_x in (FOOT_W - 0.3, FOOT_W - 2.0, FOOT_W - 4.0):
+            fx = int(design_x * 128 / FOOT_W)
+            worst = max(worst, abs(foot[fy][fx] - _strip_alpha(strip, dist)))
+        rows += 1
+    assert rows > 24, "every row of the strip's reach above the stub is compared"
+    assert worst <= FOOT_JOIN_TOLERANCE, worst
+
+
+def test_console_tab_foot_stub_core_is_the_tab_top_lines_stroke(console_outputs: Path) -> None:
+    # The stub continues into lineTabTop, a 1 unit rect centred FOOT_TOP down the canvas: the same
+    # edges (to within a texel's blur) and a full alpha peak.
+    grid = _alpha_grid(console_outputs / "console_tab_foot.tga")
+    row_h = FOOT_H / 128
+    for design_x in (FOOT_W - 0.3, FOOT_W - 3.0, FOOT_W - 6.0):
+        fx = int(design_x * 128 / FOOT_W)
+        col = [grid[fy][fx] / 255 for fy in range(128)]
+        assert max(col) == 1.0
+        above = col[int((FOOT_TOP - 0.5 - 1.5) / row_h)]       # halo just above the stroke
+        top_edge = next(fy for fy in range(128) if col[fy] >= (1.0 + above) / 2) * row_h
+        bottom_edge = (max(fy for fy in range(128) if col[fy] >= 0.5) + 1) * row_h
+        assert abs(top_edge - (FOOT_TOP - 0.5)) <= row_h, (design_x, top_edge)
+        assert abs(bottom_edge - (FOOT_TOP + 0.5)) <= row_h, (design_x, bottom_edge)
+
+
+def test_console_tab_foot_halo_is_one_field_of_the_rail_and_the_chassis_line(
+        console_outputs: Path) -> None:
+    # Outside the tab the halo is the stepped profile of the diagonal (from its centreline) or the
+    # strip profile of the straight runs (from their outer edge), whichever is stronger: never a stack.
+    grid = _alpha_grid(console_outputs / "console_tab_foot.tga")
+    strip = _alpha_grid(MEDIA_DIR / "console_glow_c14.tga")
+    diag = [(FOOT_PAD, FOOT_H), (FOOT_PAD + FOOT_TH, FOOT_TOP)]
+    top = [(-100.0, FOOT_EDGE_Y), (FOOT_PAD, FOOT_EDGE_Y)]
+    stub = [(FOOT_PAD + FOOT_TH, FOOT_STUB_EDGE_Y), (FOOT_W, FOOT_STUB_EDGE_Y)]
+    tab = FOOT_RAIL + [(FOOT_W, FOOT_H)]
+    checked = 0
+    for fy in range(128):
+        for fx in range(128):
+            dx, dy = _foot_design(fx, fy)
+            if _poly_inside(dx, dy, tab):
+                continue
+            if _poly_dist(dx, dy, FOOT_RAIL, closed=False) < 1.2 or abs(dy - FOOT_EDGE_Y) < 0.4:
+                continue  # the stroke, and the texels straddling the chassis line's outer edge
+            d_diag = _poly_dist(dx, dy, diag, closed=False)
+            want = max(255 * _console_glow_alpha(d_diag),
+                       _strip_alpha(strip, _poly_dist(dx, dy, top, closed=False)),
+                       _strip_alpha(strip, _poly_dist(dx, dy, stub, closed=False)))
+            if any(abs(d_diag - (w + 0.45) * 1.28) < 0.4 for w, _ in CN_HALO):
+                continue  # an anti-aliased step boundary of the diagonal's own profile
+            assert abs(grid[fy][fx] - want) <= 8, (fx, fy, grid[fy][fx], want)
+            checked += 1
+    assert checked > 3000
 
 
 def test_console_textures_do_not_overwrite_existing_ones(console_outputs: Path) -> None:
