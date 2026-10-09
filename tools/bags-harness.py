@@ -37,8 +37,9 @@ What it pins:
     colorblind mode (letters instead of coins, no coin gap) the dots are hidden and come back when it is off;
   * the gamepad bag bar (Blizzard's GamepadBagBar, a child of the combined bags that covers the Clean Up button)
     is hidden while no controller is connected (C_GamePad missing, disabled, or GetAllDeviceIDs empty), stays
-    hidden when Blizzard shows it again (Show, SetShown, OnShow), is put back only if we hid it and a controller
-    appears, is left alone while one is connected, waits out combat, and nothing errors when C_GamePad,
+    hidden when Blizzard shows it again (Show, SetShown, OnShow), is never forced back on (a controller appearing just
+    stops us re-hiding it), is left alone while one is connected (an erroring C_GamePad counts as one), is hidden in combat
+    too, and nothing errors when C_GamePad,
     GamepadBagBar or one of the events is absent;
   * nothing errors when a region, a method or Theme.AddCut2Texture is absent.
 
@@ -818,15 +819,35 @@ def check_gamepad_bar() -> None:
     w.run("GamepadBagBar:Hide(); FireEvent('GAME_PAD_ACTIVE_CHANGED')")
     check("gamepad.device_never_shows_a_bar_we_did_not_hide", w.ev("not GamepadBagBar:IsShown()"))
 
-    # connect / disconnect on the events
+    # connect / disconnect on the events: connecting never forces the bar on, Blizzard shows it on its next update
     w = World(pre=BAR + NO_PAD)
     w.run("C_GamePad.GetAllDeviceIDs = function() return { 5 } end; FireEvent('GAME_PAD_CONNECTED')")
-    check("gamepad.connect_puts_the_bar_back", w.ev("GamepadBagBar:IsShown()"))
+    check("gamepad.connect_does_not_force_show", w.ev("not GamepadBagBar:IsShown()"))
+    w.run("GamepadBagBar:Show()")
+    check("gamepad.connect_then_blizzard_show_sticks", w.ev("GamepadBagBar:IsShown()"))
     w.run("C_GamePad.GetAllDeviceIDs = function() return {} end; FireEvent('GAME_PAD_DISCONNECTED')")
     check("gamepad.disconnect_hides_it_again", w.ev("not GamepadBagBar:IsShown()"))
     w.run("C_GamePad.GetAllDeviceIDs = function() return { 5 } end; FireEvent('GAME_PAD_ACTIVE_CHANGED')")
-    check("gamepad.active_changed_reevaluates", w.ev("GamepadBagBar:IsShown()"))
+    check("gamepad.active_changed_reevaluates", w.ev("not GamepadBagBar:IsShown()"))
+    w.run("GamepadBagBar:Show()")
+    check("gamepad.active_changed_then_show_sticks", w.ev("GamepadBagBar:IsShown()"))
     check("gamepad.events_nothing_swallowed", w.swallowed() == "", w.swallowed())
+
+    # Blizzard hid the bar after we did, then a controller connects: we do not show it back
+    w = World(pre=BAR + NO_PAD)
+    w.run("GamepadBagBar:Hide(); C_GamePad.GetAllDeviceIDs = function() return { 5 } end; FireEvent('GAME_PAD_CONNECTED')")
+    check("gamepad.connect_leaves_a_blizzard_hidden_bar_hidden", w.ev("not GamepadBagBar:IsShown()"))
+
+    # connecting while the bags frame is hidden leaves the bar not visible
+    w = World(pre=BAR + NO_PAD)
+    w.run("comb:Hide(); C_GamePad.GetAllDeviceIDs = function() return { 5 } end; FireEvent('GAME_PAD_CONNECTED')")
+    check("gamepad.connect_with_bags_hidden_shows_nothing", w.ev("not comb:IsShown() and not GamepadBagBar:IsShown()"))
+
+    # an API that errors counts as a controller, whichever call fails
+    w = World(pre=BAR + "C_GamePad = { IsEnabled = function() error('boom') end, GetAllDeviceIDs = function() return {} end }")
+    check("gamepad.is_enabled_error_leaves_blizzard_in_charge", w.ev("GamepadBagBar:IsShown()"))
+    w = World(pre=BAR + "C_GamePad = { IsEnabled = function() return true end, GetAllDeviceIDs = function() error('boom') end }")
+    check("gamepad.device_ids_error_leaves_blizzard_in_charge", w.ev("GamepadBagBar:IsShown()"))
 
     # a bar that does not exist yet at load time is caught on PLAYER_ENTERING_WORLD
     w = World(pre=NO_PAD)
@@ -840,15 +861,15 @@ def check_gamepad_bar() -> None:
     w = World(pre=BAR + NO_PAD + "; KNOWN_EVENTS.GAME_PAD_ACTIVE_CHANGED = nil")
     check("gamepad.unknown_event_still_hides", w.ev("not GamepadBagBar:IsShown()"))
     w.run("C_GamePad.GetAllDeviceIDs = function() return { 5 } end; FireEvent('GAME_PAD_CONNECTED')")
+    w.run("GamepadBagBar:Show()")
     check("gamepad.unknown_event_others_still_work", w.ev("GamepadBagBar:IsShown()"))
 
-    # combat: untouched until the defer wrapper releases it
-    w = World(pre=BAR + NO_PAD + "; INCOMBAT = true")
-    check("gamepad.combat_defers_the_hide", w.ev("GamepadBagBar:IsShown()"))
-    w.run("GamepadBagBar:Hide(); GamepadBagBar:Show()")
-    check("gamepad.combat_still_untouched_after_Show", w.ev("GamepadBagBar:IsShown()"))
-    w.run("EndCombat()")
-    check("gamepad.hidden_once_combat_ends", w.ev("not GamepadBagBar:IsShown()") and w.swallowed() == "", w.swallowed())
+    # combat: the bar is unprotected, so a Blizzard Show and a disconnect event are handled at once
+    w = World(pre=BAR + PAD)
+    w.run("INCOMBAT = true; C_GamePad.GetAllDeviceIDs = function() return {} end; FireEvent('GAME_PAD_DISCONNECTED')")
+    check("gamepad.combat_event_hides_immediately", w.ev("not GamepadBagBar:IsShown()"))
+    w.run("GamepadBagBar:Show()")
+    check("gamepad.combat_rehides_after_Show", w.ev("not GamepadBagBar:IsShown()") and w.swallowed() == "", w.swallowed())
 
     # nothing but the bar is touched: the sort button, its art and the CVar stay as Blizzard left them
     w = World(pre=BAR + NO_PAD + "; comb.sort = CreateFrame('Button', 'BagItemAutoSortButton', comb); CVARS.GamePadEnable = '1'")
