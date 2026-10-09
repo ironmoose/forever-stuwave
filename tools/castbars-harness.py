@@ -50,6 +50,8 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import spelltip_support as tips  # noqa: E402
 ADDON = HERE.parent / "forever-stuwave"
 CASTBARS = Path(os.environ.get("CASTBARS_LUA", ADDON / "Modules/CastBars/CastBars.lua"))
 
@@ -275,7 +277,7 @@ InCombatLockdown = InCombatLockdown or function() return false end
 
 # Stubs for what CastBars.lua reads off FS, then the engine; CastBars.lua itself loads inside
 # each check (its Init runs at file scope, after the check has set the screen and any bridge frame).
-WIRE = r"""
+WIRE = tips.COPY_LUA + r"""
 FS.IsSecret = function(v)
     return rawequal(v, __SECRET) or rawequal(v, __SECRET_ID) or rawequal(v, __SECRET_NAME) or rawequal(v, __SECRET_BOOL)
 end
@@ -319,9 +321,7 @@ if __helpers_source then
     local real = {}
     local scratch = { Theme = FS.Theme, IsSecret = FS.IsSecret, AurasReadable = function() return not InCombatLockdown() end, FrameHelpers = real }
     assert(loadstring(__helpers_source, "@Core/FrameHelpers.lua"))("forever-stuwave", scratch)
-    for _, k in ipairs({ "HoverOnly", "SetTipSpell", "SpellIDForName", "AttachSpellTooltip", "RefreshSpellTooltip", "ReleaseSpellTip" }) do
-        FS.FrameHelpers[k] = real[k]
-    end
+    copyTipHelpers(FS.FrameHelpers, real)
 end
 
 -- Capture every engine run the cast bars build, with the options they passed.

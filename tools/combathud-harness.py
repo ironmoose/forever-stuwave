@@ -3414,6 +3414,25 @@ hover(t.holder)
 check(TT.spellID == FS.HudSpells.demon_armor.ids[1], "no name resolves: ids[1] is used: " .. tostring(TT.spellID))
 """)
 
+case("tooltips_combat_miss_on_the_first_name_moves_back_after_the_fight")(r"""
+standard()
+__state = mkState({ inCombat = false, row = lockRow() })
+login()
+fire("SPELLS_CHANGED")                               -- cold caches, out of combat
+local armor = __spellInfo["Demon Armor"]
+__spellInfo["Demon Armor"] = nil                     -- a /reload in combat: the first name misses for now
+__spellInfo["Demon Skin"].spellID = 687
+__combat = true
+local frame = {}
+FS.CombatHud.SetTip(frame, "demon_armor")
+check(frame.fsSpellID == 687 and frame.fsName == "Demon Skin", "setup: the second name stands in: " .. tostring(frame.fsName))
+__combat = false
+__spellInfo["Demon Armor"] = armor                   -- the lookup works again once the fight is over
+fire("PLAYER_REGEN_ENABLED")
+FS.CombatHud.SetTip(frame, "demon_armor")
+check(frame.fsSpellID == armor.spellID and frame.fsName == "Demon Armor", "the tip moves to the first name: " .. tostring(frame.fsName))
+""")
+
 case("tooltips_follow_a_newly_trained_rank")(r"""
 standard()
 __state = mkState({ inCombat = false, row = lockRow(), next = { key = "shadow_bolt" } })

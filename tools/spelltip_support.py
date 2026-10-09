@@ -13,6 +13,20 @@ from pathlib import Path
 
 HELPERS = Path(__file__).resolve().parent.parent / "forever-stuwave" / "Core" / "FrameHelpers.lua"
 
+# The helper keys a harness lends to its FS.FrameHelpers stub; the one list every harness shares.
+HELPER_KEYS = (
+    "HoverOnly", "SetTipSpell", "SpellIDForName", "SpellCacheEpoch", "AttachSpellTooltip",
+    "RefreshSpellTooltip", "ReleaseSpellTip", "ReleaseGatedTips", "ShowAuraTooltip",
+)
+
+# Lua: copyTipHelpers(dst, src) lends HELPER_KEYS from the real helpers' table. For a harness that
+# builds its own mocks and does not take LUA below.
+COPY_LUA = (
+    "function copyTipHelpers(dst, src)\n    for _, k in ipairs({ "
+    + ", ".join(f'"{k}"' for k in HELPER_KEYS)
+    + " }) do dst[k] = src[k] end\nend\n"
+)
+
 # Frame-class additions, for a harness whose frame class is a table named `Frame` (pass its name to .format).
 HOOK_MOCK = r"""
 function {cls}:HookScript(name, fn)
@@ -24,7 +38,7 @@ function {cls}:SetMouseMotionEnabled(on) self.motion = on and true or false end
 function {cls}:SetMouseClickEnabled(on) self.click = on and true or false end
 """
 
-LUA = r"""
+LUA = COPY_LUA + r"""
 -- GameTooltip as the spell tooltip uses it; setOwner counts every SetOwner (a double hook would show twice).
 AURAS_READABLE = false
 GameTooltip = { setOwner = 0 }
@@ -50,10 +64,7 @@ function loadSpellTips(src)
     -- (the event frame is made lazily, on the first name lookup, so it can show up in a harness's FRAMES then)
     if FRAMES then for i = #FRAMES, nFrames + 1, -1 do FRAMES[i] = nil end end
     FS.FrameHelpers = FS.FrameHelpers or {}
-    for _, k in ipairs({ "HoverOnly", "SetTipSpell", "SpellIDForName", "SpellCacheEpoch", "AttachSpellTooltip",
-            "RefreshSpellTooltip", "ReleaseSpellTip", "ReleaseGatedTips", "ShowAuraTooltip" }) do
-        FS.FrameHelpers[k] = X.FrameHelpers[k]
-    end
+    copyTipHelpers(FS.FrameHelpers, X.FrameHelpers)
     tipReset()
 end
 
