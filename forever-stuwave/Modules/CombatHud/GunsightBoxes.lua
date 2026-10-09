@@ -338,7 +338,7 @@ end
 -- schedules ONE refit for the next frame (`deferred` marks that call, which schedules nothing).
 local FitLine
 
--- Runs fn on the next frame, once: `owner.nextFramePending` holds a second request off until the first has run
+-- Runs fn on the next frame, once: `owner.nextFramePending` holds a second request off until the callback has run
 -- (a burst of writes in one frame schedules one callback, not one each). No timer API, no refit.
 local function NextFrame(owner, fn)
     if owner.nextFramePending then return end
@@ -350,18 +350,28 @@ local function NextFrame(owner, fn)
     end)
 end
 
--- The next-frame refit of a line. What hangs off the line's width (line.onRefit: the rails' width and seat) is
--- measured again after it, and once more a frame later when the refit itself changed the size (that font lags
--- too), so the rails never keep the width of a stale font. Bounded: two frames, no loop.
-local function RefitLater(line)
-    NextFrame(line, function()
-        if line.secretNow or not line.text then return end
-        local before = line.size
-        FitLine(line, line.text, true)
-        if not line.onRefit then return end
-        line.onRefit()
-        if line.size ~= before then NextFrame(line, line.onRefit) end
-    end)
+-- The next-frame settle of a line, for a client that applies SetFont a frame late. What hangs off the line's width
+-- (line.onRefit: the rails' width and seat) follows each step. Step 1 (the frame after a write) measures the text
+-- again and re-seats; when that changed the size (its font lags too) step 2 measures again and re-seats, and when
+-- that changed it once more step 3 only re-seats, so the rails never keep the width of a stale font. Bounded:
+-- three frames per write, no loop. There is ONE pending callback per line and `line.settleStep` says which step it
+-- runs: a new write sets it back to 1, so a new name written while a later step waits restarts the settle from
+-- the full refit (the callback then measures that name, never an older one) instead of being dropped.
+local SETTLE_STEPS = 3
+local RunSettleStep
+local function RefitLater(line, step)
+    line.settleStep = step or 1
+    NextFrame(line, function() RunSettleStep(line) end)
+end
+
+function RunSettleStep(line)
+    local step = line.settleStep or 1
+    if line.secretNow or not line.text then return end
+    local before = line.size
+    if step < SETTLE_STEPS then FitLine(line, line.text, true) end
+    if not line.onRefit then return end
+    line.onRefit()
+    if step < SETTLE_STEPS and line.size ~= before then RefitLater(line, step + 1) end
 end
 
 function FitLine(line, text, deferred)
@@ -599,7 +609,7 @@ end
 
 -- Built with the box, before the listeners. The red twin starts at alpha 0 and the green rail at 1.
 function Bars.Build(box)
-    local b = {}
+    local b = { box = box }
     b.frame = CreateFrame("Frame", nil, box.frame)
     FillParent(b.frame, box.frame)
     b.hp = { green = Bars.NewRail(b.frame, colors.green), red = Bars.NewRail(b.frame, colors.red) }
@@ -866,20 +876,33 @@ function Bars.WritePlain(b, fs, mode, cur, max)
     local before = b.numSize[fs]
     if not Bars.FitPlain(b, fs, mode, cur, max) then return false end
     last.fitted = true
-    if b.numSize[fs] ~= before then
-        NextFrame(last, function()
-            local now = b.numLast[fs]
-            if Bars.textBroken or not now or not now.mode then return end
-            Bars.FitPlain(b, fs, now.mode, now.cur, now.max)
-        end)
-    end
+    if b.numSize[fs] ~= before then Bars.RefitNumberLater(b, fs) end
     return true
+end
+
+-- The next-frame refit of one number, in case the client applies SetFont a frame late. When that refit itself
+-- changes the size its font may lag too, so it is measured once more a frame later: at most two frames per write,
+-- no loop (one pending callback per number; a new write sets `settleStep` back to 1). Nothing runs for a retired
+-- box, a broken text path or a value that was cleared.
+function Bars.RefitNumberLater(b, fs, step)
+    local last = b.numLast[fs]
+    if not last then return end
+    last.settleStep = step or 1
+    NextFrame(last, function()
+        local now = b.numLast[fs]
+        if b.box.retired or Bars.textBroken or not now or not now.mode then return end
+        local before = b.numSize[fs]
+        Bars.FitPlain(b, fs, now.mode, now.cur, now.max)
+        local at = now.settleStep or 1
+        if at < 2 and b.numSize[fs] ~= before then Bars.RefitNumberLater(b, fs, at + 1) end
+    end)
 end
 
 -- After a seat: every number whose fit was dropped is fitted again with the value it holds, at once.
 function Bars.RefitNumbers(b)
     if Bars.textBroken or not b.numbers then return end
-    for _, fs in ipairs({ b.hpText, b.powerText }) do
+    for i = 1, 2 do
+        local fs = i == 1 and b.hpText or b.powerText
         local last = b.numLast[fs]
         if last and last.mode and not last.fitted then Bars.WritePlain(b, fs, last.mode, last.cur, last.max) end
     end
@@ -887,8 +910,9 @@ end
 
 -- A SECRET value cannot be measured or compared: the engine abbreviates it (AbbreviateNumbers takes a secret and
 -- hands back a secret string), the pair goes to SetFormattedText as two %s arguments, at a smaller fixed size.
--- A client without AbbreviateNumbers, or one that refuses it, gets the raw value in the plain format instead; the
--- first refusal latches AbbreviateNumbers off for the session (logged once) so it does not throw on every event.
+-- A client without AbbreviateNumbers, or one that refuses it, gets the raw value in the plain format instead; a
+-- refusal latches AbbreviateNumbers off until the target changes (so it does not throw on every event, and one
+-- transient failure costs at most one failed call per target). It is logged once per session.
 function Bars.WriteSecret(b, fs, mode, cur, max)
     Bars.SetNumSize(b, fs, FontSize(C.NUM_SECRET_SIZE))
     if type(AbbreviateNumbers) == "function" and not Bars.abbreviateBroken then
@@ -897,8 +921,11 @@ function Bars.WriteSecret(b, fs, mode, cur, max)
         if okCur and mode ~= "current" then okMax, shortMax = pcall(AbbreviateNumbers, max) end
         if not (okCur and okMax) then
             Bars.abbreviateBroken = true
-            Logged("gunsightboxes_target_abbreviate",
-                "|cffff4488Forever STUwave|r: AbbreviateNumbers refused a target bar value, writing the raw numbers")
+            if not Bars.abbreviateWarned then
+                Bars.abbreviateWarned = true
+                Logged("gunsightboxes_target_abbreviate",
+                    "|cffff4488Forever STUwave|r: AbbreviateNumbers refused a target bar value, writing the raw numbers")
+            end
         elseif mode == "current" then
             if pcall(fs.SetFormattedText, fs, "%s", short) then return true end
         elseif pcall(fs.SetFormattedText, fs, "%s/%s", short, shortMax) then
@@ -1537,7 +1564,8 @@ local function BuildBox(spec)
             if not pcall(events.RegisterUnitEvent, events, "UNIT_NAME_UPDATE", "target") then
                 events:RegisterEvent("UNIT_NAME_UPDATE")
             end
-            events:SetScript("OnEvent", function()
+            events:SetScript("OnEvent", function(_, event)
+                if event == "PLAYER_TARGET_CHANGED" then Bars.abbreviateBroken = false end
                 RefreshTargetName(box)
                 RefreshTargetShown(box)
                 Bars.Guard(Bars.Refresh, box)

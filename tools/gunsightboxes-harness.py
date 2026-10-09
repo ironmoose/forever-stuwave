@@ -816,26 +816,41 @@ function T.a_lagging_font_is_refitted_next_frame_and_the_rails_are_re_seated_for
     W.clean(); noFails()
 end
 
-function T.a_font_refit_that_is_itself_a_frame_late_re_seats_the_rails_once_more()
-    -- A name only a little too wide: the first fit overshoots (stale font) down to the floor, whose rails are
-    -- narrower than the box, and the refit that raises the size is itself a frame late, so the rails are measured
-    -- once more after it.
+function T.a_font_refit_that_is_itself_a_frame_late_settles_and_a_new_name_mid_settle_gets_its_own_refit()
+    -- A name only a little too wide: the first fit overshoots (stale font) down to the floor, and the refit that
+    -- raises the size is itself a frame late, so the name is measured and the rails seated once more after it
+    -- (the settle runs up to three frames, then stops).
     local W = world()
     local box, l1 = W.tgt.box, W.tgt.box.l1
-    __charW = 5.8                                       -- the 14 letter name is 4% wider than the box at the base size
-    local function run(lag)
+    local first, second = "ABCDEFGHIJKLMN", "ABCDEFGHIJKLMO"
+    __charW = 5.8                                       -- the 14 letter names are 4% wider than the box at the base size
+    local function settled(name, lag)
         target("KURAK"); settle()
         __fontLag = lag
-        target("ABCDEFGHIJKLMN"); settle()
+        target(name); settle()
         __fontLag = false
-        return box.bars.hp.green.host._w, l1._fontSize
+        return l1._fontSize, box.bars.hp.green.host._w
     end
-    local wantW, wantS = run(false)
-    local gotW, gotS = run(true)
-    __charW = nil
+    local wantS, wantW = settled(first, false)
+    local gotS, gotW = settled(first, true)
     ok(wantS > fontFor(FS.GunsightBoxes.C.NAME_FLOOR), "the name settles above the floor: " .. wantS)
     eq(gotS, wantS, "the narrow overshoot settles at the instant size")
     near(gotW, wantW, 1e-6, "and its rails are the settled name's, not the floor font's")
+    eq(#__timers, 0, "nothing more is pending")
+    -- Frame 0: the first name's write. Frame 1: its refit runs and queues the next step, and a NEW target's name is
+    -- written in the same frame: that name must not be dropped by the pending step.
+    local instantS, instantW = settled(second, false)
+    target("KURAK"); settle()
+    __fontLag = true
+    target(first)
+    __flushTimers()
+    target(second)
+    settle()
+    __fontLag = false
+    __charW = nil
+    eq(l1._fontSize, instantS, "the new name settles at the size an instant font gives")
+    near(box.bars.hp.green.host._w, instantW, 1e-6, "and its rails are the new name's")
+    eq(#__timers, 0, "and nothing more is pending")
     W.clean(); noFails()
 end
 
@@ -2332,6 +2347,56 @@ function T.the_abbreviate_numbers_failure_latches_once_so_it_does_not_throw_on_e
     eq(b.hpText._secretText, true)
     eq(countKey("gunsightboxes_target_numbers"), 0, "and the numbers are not latched off")
     __abbrevThrows = nil
+    __pcallFails = {}
+    W.clean()
+end
+
+function T.the_abbreviate_numbers_latch_resets_on_a_new_target_and_logs_only_once()
+    local W = world()
+    target("Kurak")
+    local b, u = bars(W), __units.target
+    u.hp, u.hpMax, u.pw, u.pwMax = __SECRET, __SECRET, __SECRET, __SECRET
+    numbersOn("both")
+    __abbrevThrows = true
+    __abbrevCalls = {}
+    for _ = 1, 3 do allBarEvents() end
+    eq(#__abbrevCalls, 1, "one failed call latches it off for the target")
+    eq(countKey("gunsightboxes_target_abbreviate"), 1, "and it is logged")
+    __abbrevThrows = nil                               -- a transient failure: the client recovers
+    target("Baine")
+    allBarEvents()
+    eq(b.hpText._fmt, "%s/%s", "a new target tries AbbreviateNumbers again")
+    __abbrevThrows = true                              -- and when it fails again for a third target
+    __abbrevCalls = {}
+    target("Kurak")
+    for _ = 1, 3 do allBarEvents() end
+    eq(#__abbrevCalls, 1, "that target costs one failed call too")
+    eq(countKey("gunsightboxes_target_abbreviate"), 1, "yet the log stays at one")
+    __abbrevThrows = nil
+    __pcallFails = {}
+    W.clean()
+end
+
+function T.a_number_refit_still_pending_when_the_box_retires_writes_nothing()
+    local W = world()
+    target("Kurak")
+    local b, u = bars(W), __units.target
+    numbersOn("both")
+    __charW = 14
+    __fontLag = true
+    u.hp, u.hpMax, u.pw, u.pwMax = 1234567, 1234567, 1234567, 1234567
+    allBarEvents()                                      -- the size changed: a refit is pending
+    ok(#__timers >= 1, "a refit is pending: " .. #__timers)
+    FS.GunsightBoxes.Retire(W.tgt.box)
+    b.hpText:SetText("sentinel")
+    b.powerText:SetText("sentinel")
+    local calls = __applyMonoCalls
+    settle()
+    __fontLag = false
+    __charW = nil
+    eq(textOf(b.hpText), "sentinel", "the retired box's number was not written again")
+    eq(textOf(b.powerText), "sentinel")
+    eq(__applyMonoCalls, calls, "nor refitted")
     __pcallFails = {}
     W.clean()
 end
