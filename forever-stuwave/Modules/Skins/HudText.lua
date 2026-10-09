@@ -113,7 +113,9 @@ local function StyleCombatText()
     local _, size, flags = font:GetFont()
     if not size then return end
 
-    font:SetFont(FONT_MONO, size, flags)
+    -- Read back and retried if the bundled face is not loaded yet (cold client start);
+    -- keepFace: until then the shared object keeps the face it already has.
+    Theme.SetFontChecked(font, FONT_MONO, size, flags, true)
 end
 
 -------------------------------------------------------------------------------

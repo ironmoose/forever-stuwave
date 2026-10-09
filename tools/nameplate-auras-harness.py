@@ -41,6 +41,7 @@ Exit 0 = every check passed.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -236,6 +237,16 @@ local Theme = setmetatable({ COLOR_HEALTH = COLOR_HEALTH, COLOR_BORDER = COLOR_B
         if k:match("^[A-Z0-9_]+$") then return 1 end
         return function() return __newFrame("Ghost", nil, nil) end
     end })
+__fontChecked = {}
+-- A spy: records every call so the checks below can pin that nameplate fonts go through Theme.SetFontChecked
+-- (readback + cold-start retry) and not a bare SetFont. The real readback/retry is covered by theme-harness.
+function Theme.SetFontChecked(fs, path, size, flags) __fontChecked[#__fontChecked + 1] = { fs, path, size, flags }; fs:SetFont(path, size, flags); return true end
+function __routedThroughSetFontChecked(fs, path, size)
+    for _, r in ipairs(__fontChecked) do
+        if r[1] == fs and r[2] == path and (size == nil or r[3] == size) then return true end
+    end
+    return false
+end
 function Theme.CutSizeIcon(h) return h >= 36 and 6 or (h >= 24 and 4 or 3) end -- h / 5 rule, 18 -> 3
 -- Plate chrome and fill mask (cut-corner migration): recording stubs, real values for the
 -- constants the nameplate code reads. AddFillCorners/AddLeadingEdgeCorners hand back the same
@@ -614,6 +625,7 @@ check(cd and cd._args.SetHideCountdownNumbers[1] == true and cd._args.SetDrawEdg
     and cd._args.SetReverse[1] == true and cd._args.EnableMouse[1] == false, "cooldown not set up")
 local fs = children(cd, "FontString")[1]
 check(fs and fs._args.SetFont[1] == "MONO" and fs._args.SetFont[2] == 8, "duration text is not 8pt mono")
+check(__routedThroughSetFontChecked(fs, "MONO", 8), "duration text font bypasses Theme.SetFontChecked")
 check(type(b._args.SetDurationText[2]) == "table", "SetDurationText needs an options table")
 -- the border colour is baked per group, and nothing retints afterwards
 local b2 = newButton()
@@ -1418,6 +1430,7 @@ boot()
 addPlate("nameplate1")
 local t = FS.framesByUnit.nameplate1.nameText
 check(t._args.SetText[1]:find("Boar", 1, true), "setup: name missing from " .. tostring(t._args.SetText[1]))
+check(__routedThroughSetFontChecked(t, "MONO"), "name text font bypasses Theme.SetFontChecked")
 local texts, colors = t._calls.SetText, t._calls.SetTextColor
 for _ = 1, 10 do fire("UNIT_HEALTH", "nameplate1") end
 check(t._calls.SetText == texts, "unchanged name rewritten " .. (t._calls.SetText - texts) .. " times")
@@ -1529,7 +1542,14 @@ def main() -> int:
         else:
             failures += 1
             print(f"FAIL  {name}\n      {error}")
-    total = len(CASES)
+    # The aura countdown Font object (FSPlateAuraCountdownFont) is behind CreateFont + SetCountdownFont, which the
+    # mock frames do not model, so pin its call site on the source: it must use the checked path, never a bare SetFont.
+    total = len(CASES) + 1
+    if "SetFontChecked(fontObject, FS.Theme.FONT_MONO" in source and not re.search(r"fontObject:SetFont\(", source):
+        print("ok    aura_countdown_font_object_uses_set_font_checked")
+    else:
+        failures += 1
+        print("FAIL  aura_countdown_font_object_uses_set_font_checked\n      bare fontObject:SetFont in Nameplates.lua")
     print(f"{total - failures}/{total} checks passed")
     return 1 if failures else 0
 

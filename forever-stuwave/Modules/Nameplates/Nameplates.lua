@@ -237,13 +237,11 @@ local function ApplyBackdrop(root)
 end
 
 -- Font fallback: the Mononoki file lives in a different addon's folder, so it may not
--- be installed; SetFont's boolean return tells us whether it actually loaded.
+-- be installed, and on a cold client start it may not be loaded yet. Theme.SetFontChecked
+-- reads the face back (SetFont's boolean return is not trusted), wears the default font
+-- meanwhile and retries, so a cold-start miss does not stick for the session.
 local function ApplyFont(fontString, size)
-    local ok = fontString:SetFont(FS.Theme.FONT_MONO, size, FONT_FLAGS)
-    if not ok then
-        local defaultFont, defaultSize = GameFontNormal:GetFont()
-        fontString:SetFont(defaultFont or "Fonts\\FRIZQT__.TTF", size or defaultSize, FONT_FLAGS)
-    end
+    FS.Theme.SetFontChecked(fontString, FS.Theme.FONT_MONO, size, FONT_FLAGS)
 end
 
 -- Flat chrome for the cast bar: opaque track behind the fill plus a 1px
@@ -495,9 +493,7 @@ local function EnsureAuraCountdownFont()
     local ok, fontObject = pcall(CreateFont, AURA_COUNTDOWN_FONT)
     if not ok or not fontObject then return false end
     local set = pcall(function()
-        if not fontObject:SetFont(FS.Theme.FONT_MONO, AURA_COUNTDOWN_SIZE, FONT_FLAGS) then
-            fontObject:SetFont("Fonts\\FRIZQT__.TTF", AURA_COUNTDOWN_SIZE, FONT_FLAGS)
-        end
+        FS.Theme.SetFontChecked(fontObject, FS.Theme.FONT_MONO, AURA_COUNTDOWN_SIZE, FONT_FLAGS)
     end)
     auraCountdownFontReady = set and true or false
     return auraCountdownFontReady

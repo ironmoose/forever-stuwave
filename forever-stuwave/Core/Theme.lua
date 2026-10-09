@@ -200,6 +200,28 @@ Theme.FONT_MONO = "Interface\\AddOns\\forever-stuwave\\Media\\Fonts\\MononokiNer
 -- fonts/make_display_font.py, renamed because "Orbitron" is an OFL Reserved
 -- Font Name and a pinned instance is a Modified Version.
 Theme.FONT_ORBITRON = "Interface\\AddOns\\forever-stuwave\\Media\\Fonts\\FSDisplay-Bold.ttf"
+
+-- Hand the engine each bundled font file as early as possible (file load), through
+-- a font object nothing draws with. On a COLD client start the first SetFont on an
+-- addon-bundled file can miss: the same file applies fine after /reload or a
+-- relog (see the retry window above Theme.ApplyFontGeneric). Whether this preload
+-- is enough is unverified on the client; it costs one font object per face and
+-- the retry window is what actually guarantees the real font ends up on screen.
+-- The objects are kept in a local so nothing collects them; the globals only
+-- exist because CreateFont requires a name. Feature-detected and pcall'd: a
+-- client without CreateFont, or one that rejects the call, must not break Theme
+-- load.
+local fontPreloads = {}
+local function PreloadFont(name, path)
+    if type(CreateFont) ~= "function" then return end
+    pcall(function()
+        local object = CreateFont("ForeverSTUwavePreload" .. name)
+        object:SetFont(path, 12, "")
+        fontPreloads[name] = object
+    end)
+end
+PreloadFont("Mono", Theme.FONT_MONO)
+PreloadFont("Display", Theme.FONT_ORBITRON)
 Theme.FLAT_TEXTURE = "Interface\\Buttons\\WHITE8x8" -- flat statusbar fill, shared by every bar-style component
 Theme.GLOW_EDGE_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\glow_edge.tga"
 Theme.GLOW_CORNER_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\glow_corner.tga"
@@ -677,33 +699,165 @@ end
 -- chunk and cannot see this local, only a FS.Theme.* table field.
 Theme.SameFontPath = SameFontPath
 
+-- Fontstrings whose bundled font did not read back, waiting for a retry. Keyed by
+-- the fontstring (weak, so a discarded one is not kept alive) and holding the
+-- LAST style asked for, so a later ApplyFontGeneric on the same fontstring
+-- replaces the entry instead of being overridden by a stale retry.
+local pendingFonts = setmetatable({}, { __mode = "k" })
+local fontRetry = { started = false, sawWorld = false, timerDone = false, settled = false }
+
+local function WarnFontFailed(path, keptFace)
+    if warnedFontPaths[path] then return end
+    warnedFontPaths[path] = true
+    -- A real failure. Say so: the silent version of this fallback cost a
+    -- full in-game verification cycle by making a failure look like it worked.
+    local outcome = keptFace and "keeping the current font" or "using fallback"
+    local msg = "|cffff4488Forever STUwave|r: SetFont failed for " .. tostring(path) .. ", " .. outcome
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage(msg)
+    else
+        print(msg)
+    end
+end
+
+local function ApplyFallbackFont(fontString, size, flags)
+    local defaultFont, defaultSize
+    if GameFontNormal and GameFontNormal.GetFont then defaultFont, defaultSize = GameFontNormal:GetFont() end
+    fontString:SetFont(defaultFont or "Fonts\\FRIZQT__.TTF", size or defaultSize, flags)
+end
+
+-- Do NOT branch on SetFont's return value. It is a boolean on a FontString
+-- but a FontInstance FRAME (e.g. ChatFrame1) returns nothing at all, so
+-- `if not ok` fired on a SUCCESSFUL call and the fallback overwrote
+-- our font with FRIZQT. Measured on interface 16001: chat went ARIALN ->
+-- FRIZQT and never to Mononoki because of exactly this. Read it back
+-- instead, which is true for every widget type.
+local function FontReadsBack(fontString, path)
+    local applied = fontString.GetFont and fontString:GetFont()
+    return SameFontPath(applied, path)
+end
+
+local fontEvents -- the listener frame; made at Theme load, below
+
+local function CloseFontEvents()
+    if fontEvents then
+        fontEvents:UnregisterEvent("PLAYER_LOGIN")
+        fontEvents:UnregisterEvent("PLAYER_ENTERING_WORLD")
+    end
+end
+
+local function RetryOneFont(fontString, pending, finalPass)
+    fontString:SetFont(pending.path, pending.size, pending.flags)
+    if FontReadsBack(fontString, pending.path) then
+        pendingFonts[fontString] = nil
+        return
+    end
+    if not pending.keepFace then ApplyFallbackFont(fontString, pending.size, pending.flags) end
+    if finalPass then
+        pendingFonts[fontString] = nil
+        WarnFontFailed(pending.path, pending.keepFace)
+    end
+end
+
+-- Retry the fontstrings that missed. Until the window closes, a miss keeps the
+-- fallback (so text stays drawable) and stays queued; on the final pass a
+-- fontstring that still misses is a genuine failure: warn, once per path.
+-- Each entry runs under pcall so one hostile fontstring cannot skip the rest or
+-- the settled bookkeeping. The keys are snapshotted first because a SetFont hook
+-- may call ApplyFontGeneric, which adds a key to pendingFonts, and adding a key
+-- during pairs() is undefined in Lua 5.1; a plain-Lua test cannot catch that, so
+-- the snapshot stays on this comment's authority. On the final pass `settled` is
+-- set BEFORE the loop: anything a hook queues meanwhile then takes the settled
+-- path in SetFontChecked and is reported at once, instead of landing in a queue
+-- that is never retried again.
+local function RetryPendingFonts()
+    local finalPass = fontRetry.sawWorld and fontRetry.timerDone
+    if finalPass then fontRetry.settled = true end
+    local snapshot = {}
+    for fontString in pairs(pendingFonts) do snapshot[#snapshot + 1] = fontString end
+    for _, fontString in ipairs(snapshot) do
+        local pending = pendingFonts[fontString]
+        if pending and not pcall(RetryOneFont, fontString, pending, finalPass) and finalPass then
+            pendingFonts[fontString] = nil
+            WarnFontFailed(pending.path, pending.keepFace)
+        end
+    end
+    if finalPass then CloseFontEvents() end
+end
+
+-- Opens the retry window on the first miss; healthy fonts never get here, so a
+-- good start queues no timer. A cold-start miss on a bundled font has been
+-- reported to clear later in the session and not to be fixed by waiting for
+-- any single login event, so retry at PLAYER_LOGIN, at PLAYER_ENTERING_WORLD
+-- and on timers, and call the font failed only once BOTH the world has been
+-- entered and the last timer has run (a long loading screen must not end the
+-- window early). IsLoggedIn() is no stand-in for "in the world": it is true
+-- from PLAYER_LOGIN, before PLAYER_ENTERING_WORLD. fontRetry.sawWorld is set
+-- by the listener below, which has been registered since Theme load, so a
+-- window opened after the world was entered already knows it.
+local function OpenFontRetryWindow()
+    if fontRetry.started then return end
+    fontRetry.started = true
+    fontRetry.timerDone = not (C_Timer and C_Timer.After)
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0, RetryPendingFonts)
+        C_Timer.After(2, RetryPendingFonts)
+        C_Timer.After(5, function()
+            fontRetry.timerDone = true
+            RetryPendingFonts()
+        end)
+    end
+end
+
+-- Registered at file load, not on the first miss: a miss made inside the
+-- PLAYER_LOGIN dispatch could not be sure to receive that same event if it
+-- registered then, and it is the only way to learn the world was entered before
+-- any miss happened. With nothing queued it drops its events at the first world
+-- entry (sawWorld stays recorded), so a clean start leaves no listener behind.
+if type(CreateFrame) == "function" then
+    fontEvents = CreateFrame("Frame")
+    fontEvents:RegisterEvent("PLAYER_LOGIN")
+    fontEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
+    fontEvents:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_ENTERING_WORLD" then fontRetry.sawWorld = true end
+        if fontRetry.started then
+            RetryPendingFonts()
+        elseif fontRetry.sawWorld then
+            CloseFontEvents()
+        end
+    end)
+end
+
+-- SetFont + readback + the cold-start retry, for any font owner (FontString or
+-- Font object). Returns true when the font took at once. On a miss the owner
+-- wears the default font while it waits (text stays drawable), unless keepFace:
+-- then it keeps whatever face it already had, which suits a shared Font object
+-- whose own face is acceptable until the bundled one loads.
+function Theme.SetFontChecked(fontString, path, size, flags, keepFace)
+    fontString:SetFont(path, size, flags)
+    if FontReadsBack(fontString, path) then
+        pendingFonts[fontString] = nil
+        return true
+    end
+    if not keepFace then ApplyFallbackFont(fontString, size, flags) end
+    if fontRetry.settled then
+        WarnFontFailed(path, keepFace)
+    else
+        pendingFonts[fontString] = { path = path, size = size, flags = flags, keepFace = keepFace and true or nil }
+        OpenFontRetryWindow()
+    end
+    return false
+end
+
 function Theme.ApplyFontGeneric(fontString, path, size, color, flags)
     if flags == nil then flags = "OUTLINE" end
 
-    fontString:SetFont(path, size, flags)
-
-    -- Do NOT branch on SetFont's return value. It is a boolean on a FontString
-    -- but a FontInstance FRAME (e.g. ChatFrame1) returns nothing at all, so
-    -- `if not ok` fired on a SUCCESSFUL call and the fallback below overwrote
-    -- our font with FRIZQT. Measured on interface 16001: chat went ARIALN ->
-    -- FRIZQT and never to Mononoki because of exactly this. Read it back
-    -- instead, which is true for every widget type.
-    local applied = fontString.GetFont and fontString:GetFont()
-    if not SameFontPath(applied, path) then
-        -- A real failure. Say so: the silent version of this fallback cost a
-        -- full in-game verification cycle by making a failure look like it worked.
-        if not warnedFontPaths[path] then
-            warnedFontPaths[path] = true
-            local msg = "|cffff4488Forever STUwave|r: SetFont failed for " .. tostring(path) .. ", using fallback"
-            if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-                DEFAULT_CHAT_FRAME:AddMessage(msg)
-            else
-                print(msg)
-            end
-        end
-        local defaultFont, defaultSize = GameFontNormal:GetFont()
-        fontString:SetFont(defaultFont or "Fonts\\FRIZQT__.TTF", size or defaultSize, flags)
-    end
+    -- On a cold client start the engine may not have loaded a bundled font file
+    -- yet, so the readback can miss for a perfectly good font. SetFontChecked does
+    -- not lock the fontstring to the fallback for the whole session on one miss:
+    -- it keeps the fallback for now and retries. Once the window has closed a
+    -- miss is a real failure and is reported at once.
+    Theme.SetFontChecked(fontString, path, size, flags)
     local c = color or Theme.COLOR_TEXT_WHITE
     fontString:SetTextColor(c[1], c[2], c[3], c[4] or 1)
     fontString:SetShadowColor(0, 0, 0, 1)

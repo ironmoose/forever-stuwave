@@ -29,6 +29,7 @@ except ImportError:
 ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
 THEME_SRC = Path(os.environ.get("THEME_LUA") or ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
 FRAMEHELPERS_SRC = (ADDON / "Core/FrameHelpers.lua").read_text(encoding="utf-8")
+HUDTEXT_SRC = (ADDON / "Modules/Skins/HudText.lua").read_text(encoding="utf-8")
 PETDOCK_SRC = (ADDON / "Modules/Pet/PetDock.lua").read_text(encoding="utf-8")  # the pet panel fill moved here in ac8662e
 MOCKUP_HTML = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
 # The SLICE_* constants and the SkinButton default read the flag when Theme.lua LOADS, so the
@@ -1226,6 +1227,333 @@ case("target_takes_dots_is_the_shared_live_hostile_target_rule", """
 """)
 
 
+FONT_COLD_PREAMBLE = """
+    -- A cold client start: the engine has not loaded the bundled font file yet, so SetFont on it does not
+    -- take and GetFont still reports the font the fontstring already had. engine.ready flips that for good.
+    -- Frames, timers and the chat frame are recording fakes so the retry schedule can be driven by hand.
+    local engine = { ready = false }
+    local FRIZQT = "Fonts\\\\FRIZQT__.TTF"
+    local function newFontString()
+        local fs = { font = "Fonts\\\\ARIALN.TTF" }
+        function fs:SetFont(path, size, flags)
+            self.setCalls = (self.setCalls or 0) + 1
+            if engine.ready or path == FRIZQT then self.font = path end
+            self.size, self.flags = size, flags
+            return engine.ready or path == FRIZQT
+        end
+        function fs:GetFont() return self.font, self.size, self.flags end
+        function fs:SetTextColor(...) self.color = { ... }; self.colorCalls = (self.colorCalls or 0) + 1 end
+        function fs:SetShadowColor(...) self.shadow = { ... }; self.shadowCalls = (self.shadowCalls or 0) + 1 end
+        function fs:SetShadowOffset() end
+        return fs
+    end
+    -- True from PLAYER_LOGIN on, i.e. BEFORE PLAYER_ENTERING_WORLD: it must not stand in for "in the world".
+    IsLoggedIn = function() return true end
+    local msgs, timers, frames = {}, {}, {}
+    DEFAULT_CHAT_FRAME = { AddMessage = function(_, m) msgs[#msgs + 1] = m end }
+    GameFontNormal = { GetFont = function() return FRIZQT, 12, "" end }
+    C_Timer = { After = function(delay, fn) timers[#timers + 1] = { delay = delay, fn = fn } end }
+    CreateFrame = function()
+        local f = { events = {} }
+        function f:RegisterEvent(e) self.events[e] = true end
+        function f:UnregisterEvent(e) self.events[e] = nil end
+        function f:SetScript(k, fn) self[k] = fn end
+        frames[#frames + 1] = f
+        return f
+    end
+    local function fire(event)
+        for _, f in ipairs(frames) do
+            if f.events[event] and f.OnEvent then f.OnEvent(f, event) end
+        end
+    end
+    local function runTimers()
+        local i = 1
+        while timers[i] do
+            local t = timers[i]; i = i + 1
+            t.fn()
+        end
+    end
+    local FS2 = { LogDegradeOnce = function() end }
+    assert(loadstring(THEME_SRC, "@Theme.lua"))("forever-stuwave", FS2)
+    local T = FS2.Theme
+"""
+
+case("font_readback_miss_on_a_cold_start_is_retried_not_locked_to_fallback", FONT_COLD_PREAMBLE + """
+    local a, b = newFontString(), newFontString()
+    T.ApplyFontGeneric(a, T.FONT_ORBITRON, 14, nil, "")
+    T.ApplyFontGeneric(b, T.FONT_MONO, 11, nil, "OUTLINE")
+    -- right now both read back wrong, so both wear the fallback (text must stay drawable) ...
+    assert(a.font == FRIZQT and b.font == FRIZQT, "the fallback is applied while the font is unavailable")
+    assert(#msgs == 0, "no warning yet, a first miss is not a verdict: " .. tostring(msgs[1]))
+    -- ... the engine finishes loading the file, and the next retry point puts the real font back
+    engine.ready = true
+    fire("PLAYER_LOGIN"); fire("PLAYER_ENTERING_WORLD"); runTimers()
+    assert(a.font == T.FONT_ORBITRON and a.size == 14 and a.flags == "", "display font restored: " .. tostring(a.font))
+    assert(b.font == T.FONT_MONO and b.size == 11 and b.flags == "OUTLINE", "mono restored with its own size and flags")
+    assert(#msgs == 0, "a recovered font never warns")
+""")
+
+case("font_that_never_loads_warns_once_per_path_after_the_retries", FONT_COLD_PREAMBLE + """
+    local a, b, c = newFontString(), newFontString(), newFontString()
+    T.ApplyFontGeneric(a, T.FONT_ORBITRON, 14, nil, "")
+    T.ApplyFontGeneric(b, T.FONT_ORBITRON, 12, nil, "")
+    T.ApplyFontGeneric(c, T.FONT_MONO, 11, nil, "")
+    fire("PLAYER_LOGIN")
+    assert(#msgs == 0, "still inside the retry window")
+    fire("PLAYER_ENTERING_WORLD"); runTimers()
+    assert(#msgs == 2, "one warning per failing path, got " .. #msgs)
+    local joined = table.concat(msgs, "\\n")
+    assert(joined:find("SetFont failed", 1, true) and joined:find("FSDisplay-Bold.ttf", 1, true), "names the display font")
+    assert(joined:find("MononokiNerdFontMono-Bold.ttf", 1, true), "names the mono font")
+    assert(a.font == FRIZQT and b.font == FRIZQT and c.font == FRIZQT, "a genuine failure stays on the fallback")
+    -- after the window has closed a failure is reported straight away (once per path), as before
+    T.ApplyFontGeneric(newFontString(), T.FONT_ORBITRON, 9, nil, "")
+    assert(#msgs == 2, "the display font was already reported")
+    T.ApplyFontGeneric(newFontString(), "Interface\\\\AddOns\\\\forever-stuwave\\\\Media\\\\Fonts\\\\Other.ttf", 9, nil, "")
+    assert(#msgs == 3, "a new failing path warns immediately once the retry window is over")
+""")
+
+case("font_retry_waits_for_both_the_world_and_the_timer_before_giving_up", FONT_COLD_PREAMBLE + """
+    local a = newFontString()
+    T.ApplyFontGeneric(a, T.FONT_ORBITRON, 14, nil, "")
+    runTimers()
+    assert(#msgs == 0, "timers alone do not end the window: a long loading screen may still be ahead")
+    engine.ready = true
+    fire("PLAYER_ENTERING_WORLD")
+    assert(a.font == T.FONT_ORBITRON, "a slow load that finishes before entering the world still recovers")
+    assert(#msgs == 0)
+""")
+
+case("font_retry_does_not_override_a_fontstring_restyled_in_the_meantime", FONT_COLD_PREAMBLE + """
+    local a = newFontString()
+    T.ApplyFontGeneric(a, T.FONT_ORBITRON, 14, nil, "")
+    -- someone restyles the same fontstring to a font that is available (Blizzard's own) before the retry
+    T.ApplyFontGeneric(a, FRIZQT, 20, nil, "")
+    engine.ready = true
+    fire("PLAYER_LOGIN"); fire("PLAYER_ENTERING_WORLD"); runTimers()
+    assert(a.font == FRIZQT and a.size == 20, "the later style wins, got " .. tostring(a.font) .. " " .. tostring(a.size))
+    -- and a fontstring re-applied to the bundled font after the engine is ready is never queued
+    local b = newFontString()
+    T.ApplyFontGeneric(b, T.FONT_MONO, 11, nil, "")
+    assert(b.font == T.FONT_MONO and #msgs == 0)
+""")
+
+case("healthy_fonts_schedule_no_retry_work", FONT_COLD_PREAMBLE + """
+    engine.ready = true
+    T.ApplyFontGeneric(newFontString(), T.FONT_ORBITRON, 14, nil, "")
+    T.ApplyFontGeneric(newFontString(), T.FONT_MONO, 11, nil, "")
+    assert(#timers == 0, "a good font queues no timer")
+    assert(#msgs == 0)
+""")
+
+case("font_retry_listens_from_theme_load_and_drops_its_events_when_done", FONT_COLD_PREAMBLE + """
+    -- Registered at file load, so PLAYER_LOGIN is delivered even to a miss made inside the PLAYER_LOGIN dispatch.
+    assert(#frames == 1, "one listener frame, made at Theme load")
+    local f = frames[1]
+    assert(f.events.PLAYER_LOGIN and f.events.PLAYER_ENTERING_WORLD, "listens for login and entering the world")
+    -- a healthy first world entry with nothing queued: nothing left to wait for
+    engine.ready = true
+    T.ApplyFontGeneric(newFontString(), T.FONT_MONO, 11, nil, "")
+    fire("PLAYER_ENTERING_WORLD")
+    assert(next(f.events) == nil, "events dropped after a clean first world entry")
+    assert(#timers == 0 and #msgs == 0)
+""")
+
+case("font_retry_unregisters_its_events_once_the_window_settles", FONT_COLD_PREAMBLE + """
+    local f = frames[1]
+    T.ApplyFontGeneric(newFontString(), T.FONT_ORBITRON, 14, nil, "")
+    fire("PLAYER_LOGIN"); fire("PLAYER_ENTERING_WORLD")
+    assert(f.events.PLAYER_LOGIN or f.events.PLAYER_ENTERING_WORLD, "still listening while the window is open")
+    runTimers()
+    assert(next(f.events) == nil, "settled: both events are unregistered")
+    assert(#msgs == 1)
+""")
+
+case("font_retry_after_the_world_was_entered_closes_on_the_timer_alone", FONT_COLD_PREAMBLE + """
+    fire("PLAYER_LOGIN"); fire("PLAYER_ENTERING_WORLD")
+    local a = newFontString()
+    T.ApplyFontGeneric(a, T.FONT_ORBITRON, 14, nil, "")   -- a miss long after the world was entered
+    assert(#msgs == 0)
+    runTimers()
+    assert(#msgs == 1, "no second world entry is needed to close the window")
+""")
+
+case("font_retry_is_not_closed_by_the_timer_between_login_and_entering_the_world", FONT_COLD_PREAMBLE + """
+    fire("PLAYER_LOGIN")              -- IsLoggedIn() is true now, the world has not been entered
+    local a = newFontString()
+    T.ApplyFontGeneric(a, T.FONT_ORBITRON, 14, nil, "")
+    runTimers()
+    assert(#msgs == 0, "timers alone must not close the window before PLAYER_ENTERING_WORLD")
+    engine.ready = true
+    fire("PLAYER_ENTERING_WORLD")
+    assert(a.font == T.FONT_ORBITRON and #msgs == 0, "a slow load finishing during the loading screen still recovers")
+""")
+
+case("font_retry_isolates_a_throwing_entry_and_survives_a_missing_game_font", FONT_COLD_PREAMBLE + """
+    local bad, good = newFontString(), newFontString()
+    T.ApplyFontGeneric(bad, T.FONT_ORBITRON, 14, nil, "")
+    T.ApplyFontGeneric(good, T.FONT_MONO, 11, nil, "")
+    bad.SetFont = function() error("hostile hook") end
+    engine.ready = true
+    fire("PLAYER_LOGIN"); fire("PLAYER_ENTERING_WORLD"); runTimers()
+    assert(good.font == T.FONT_MONO, "one throwing entry does not stop the others")
+    assert(#msgs == 1 and msgs[1]:find("FSDisplay-Bold.ttf", 1, true), "the throwing entry is reported on the final pass")
+    -- the window settled despite the throw: a later miss warns at once
+    engine.ready = false
+    T.ApplyFontGeneric(newFontString(), "Interface\\\\AddOns\\\\forever-stuwave\\\\Media\\\\Fonts\\\\Other.ttf", 9, nil, "")
+    assert(#msgs == 2, "settled bookkeeping ran")
+    -- no GameFontNormal yet (very early load): the literal FRIZQT is the fallback, nothing throws
+    GameFontNormal = nil
+    local early = newFontString()
+    T.ApplyFontGeneric(early, "Interface\\\\AddOns\\\\forever-stuwave\\\\Media\\\\Fonts\\\\Other.ttf", 9, nil, "")
+    assert(early.font == FRIZQT, "falls back to FRIZQT without GameFontNormal")
+""")
+
+case("font_retry_pass_survives_a_hook_that_queues_more_fontstrings", FONT_COLD_PREAMBLE + """
+    local first = newFontString()
+    local made = {}
+    T.ApplyFontGeneric(first, T.FONT_ORBITRON, 14, nil, "")
+    local inner = first.SetFont
+    first.SetFont = function(self, ...)
+        if engine.ready and #made == 0 then
+            engine.ready = false   -- these 60 miss, so they queue mid-pass
+            for i = 1, 60 do
+                local fs = newFontString(); made[i] = fs
+                T.ApplyFontGeneric(fs, T.FONT_MONO, 10, nil, "")
+            end
+            engine.ready = true
+        end
+        return inner(self, ...)
+    end
+    engine.ready = true
+    fire("PLAYER_LOGIN")
+    assert(first.font == T.FONT_ORBITRON, "the entry being retried recovers")
+    fire("PLAYER_ENTERING_WORLD")
+    for i = 1, 60 do assert(made[i].font == T.FONT_MONO, "queued mid-pass, recovered on the next pass " .. i) end
+""")
+
+case("font_retry_keeps_color_and_shadow", FONT_COLD_PREAMBLE + """
+    local fs = newFontString()
+    T.ApplyFontGeneric(fs, T.FONT_ORBITRON, 14, { 1, 0, 0, 0.5 }, "")
+    assert(fs.color[1] == 1 and fs.color[4] == 0.5 and fs.shadow[4] == 1, "colour and shadow applied at once")
+    local colorCalls, shadowCalls = fs.colorCalls, fs.shadowCalls
+    engine.ready = true
+    fire("PLAYER_LOGIN"); fire("PLAYER_ENTERING_WORLD"); runTimers()
+    assert(fs.font == T.FONT_ORBITRON, "font restored")
+    assert(fs.colorCalls == colorCalls and fs.shadowCalls == shadowCalls and fs.color[4] == 0.5,
+        "a retry touches only the font, never colour or shadow")
+""")
+
+case("font_retry_queue_does_not_keep_a_dropped_fontstring_alive_while_the_window_is_open", FONT_COLD_PREAMBLE + """
+    local anchor = newFontString()
+    T.ApplyFontGeneric(anchor, T.FONT_ORBITRON, 14, nil, "")   -- opens the window; it stays open (no events, no timers run)
+    local seen = setmetatable({}, { __mode = "v" })
+    do
+        local doomed = newFontString()
+        T.ApplyFontGeneric(doomed, T.FONT_MONO, 11, nil, "")   -- queued, window open
+        seen[1] = doomed
+    end
+    collectgarbage(); collectgarbage()
+    assert(seen[1] == nil, "the retry queue must hold its fontstrings weakly")
+    assert(anchor.font == FRIZQT, "the held one is still queued and untouched")
+""")
+
+case("font_retry_keep_face_entries_keep_their_face_until_the_font_loads_and_warn_accurately", FONT_COLD_PREAMBLE + """
+    local shared = newFontString()   -- stands in for a shared Font object such as CombatTextFont
+    assert(T.SetFontChecked(shared, T.FONT_MONO, 25, "", true) == false)
+    -- a NON-final retry that still misses must not overwrite its face with the fallback
+    fire("PLAYER_LOGIN")
+    assert(shared.font == "Fonts\\\\ARIALN.TTF", "keepFace survives a non-final miss, got " .. tostring(shared.font))
+    fire("PLAYER_ENTERING_WORLD"); runTimers()
+    assert(shared.font == "Fonts\\\\ARIALN.TTF", "and the final miss")
+    assert(#msgs == 1 and msgs[1]:find("MononokiNerdFontMono-Bold.ttf", 1, true), "reported")
+    assert(not msgs[1]:find("using fallback", 1, true), "it did not use the fallback, so it must not say so: " .. msgs[1])
+    -- an ordinary entry still says it
+    T.ApplyFontGeneric(newFontString(), T.FONT_ORBITRON, 9, nil, "")
+    assert(msgs[2] and msgs[2]:find("using fallback", 1, true), "the fallback wording is kept for the fallback path")
+""")
+
+case("font_misses_queued_by_a_hook_during_the_final_pass_are_reported", FONT_COLD_PREAMBLE + """
+    local first = newFontString()
+    T.ApplyFontGeneric(first, T.FONT_ORBITRON, 14, nil, "")
+    local late = newFontString()
+    local inner = first.SetFont
+    local tries = 0   -- bundled-path retries on `first` (the hook is installed after the first apply): PEW, After(0), After(2), After(5) = the final pass
+    first.SetFont = function(self, path, ...)
+        if path == T.FONT_ORBITRON then tries = tries + 1 end
+        if tries == 4 and not self.hooked then
+            self.hooked = true
+            T.ApplyFontGeneric(late, "Interface\\\\AddOns\\\\forever-stuwave\\\\Media\\\\Fonts\\\\Late.ttf", 9, nil, "")
+        end
+        return inner(self, path, ...)
+    end
+    fire("PLAYER_ENTERING_WORLD"); runTimers()   -- the last of these is the final pass
+    assert(tries == 4, "the hook fired on the final pass, got " .. tries)
+    local joined = table.concat(msgs, "\\n")
+    assert(joined:find("Late.ttf", 1, true), "an entry queued during the final pass is warned about, not dropped silently")
+    assert(joined:find("FSDisplay-Bold.ttf", 1, true))
+""")
+
+case("hud_text_combat_text_font_goes_through_the_checked_retry_path", FONT_COLD_PREAMBLE + """
+    InCombatLockdown = function() return false end
+    CombatTextFont = newFontString()
+    CombatTextFont.size, CombatTextFont.flags = 25, "OUTLINE"
+    assert(loadstring(HUDTEXT_SRC, "@HudText.lua"))("forever-stuwave", FS2)
+    -- cold start: the bundled face missed, the shared object keeps the face it had ...
+    assert(CombatTextFont.font == "Fonts\\\\ARIALN.TTF", "keeps its own face meanwhile, got " .. tostring(CombatTextFont.font))
+    -- ... and picks the real one up on the retry, with its size and flags intact
+    engine.ready = true
+    fire("PLAYER_LOGIN"); fire("PLAYER_ENTERING_WORLD"); runTimers()
+    assert(CombatTextFont.font == T.FONT_MONO and CombatTextFont.size == 25 and CombatTextFont.flags == "OUTLINE",
+        "CombatTextFont restored: " .. tostring(CombatTextFont.font))
+    assert(#msgs == 0)
+""")
+
+case("set_font_checked_reads_back_retries_and_can_keep_the_current_face", FONT_COLD_PREAMBLE + """
+    assert(type(T.SetFontChecked) == "function", "Theme.SetFontChecked is missing")
+    -- a miss: fallback face (the nameplate behaviour), then recovery
+    local fs = newFontString()
+    assert(T.SetFontChecked(fs, T.FONT_MONO, 8, "OUTLINE") == false, "reports the miss")
+    assert(fs.font == FRIZQT and fs.size == 8 and fs.flags == "OUTLINE")
+    -- keepFace (the CombatTextFont behaviour): the object's own face stays until the real one loads
+    local keep = newFontString()
+    assert(T.SetFontChecked(keep, T.FONT_MONO, 25, "", true) == false)
+    assert(keep.font == "Fonts\\\\ARIALN.TTF", "keepFace leaves the existing face on a miss, got " .. tostring(keep.font))
+    -- a font object (no fontstring methods beyond SetFont/GetFont) works too
+    local obj = { font = "Fonts\\\\ARIALN.TTF" }
+    function obj:SetFont(path, size, flags) if engine.ready then self.font = path end self.size = size end
+    function obj:GetFont() return self.font, self.size end
+    T.SetFontChecked(obj, T.FONT_MONO, 8, "OUTLINE")
+    engine.ready = true
+    fire("PLAYER_LOGIN"); fire("PLAYER_ENTERING_WORLD"); runTimers()
+    assert(fs.font == T.FONT_MONO and keep.font == T.FONT_MONO and obj.font == T.FONT_MONO, "all three recover")
+    assert(T.SetFontChecked(newFontString(), T.FONT_MONO, 8, "") == true, "reports success when it took")
+    assert(#msgs == 0)
+""")
+
+case("bundled_fonts_are_preloaded_through_font_objects_at_theme_load", """
+    local made, set = {}, {}
+    CreateFont = function(name)
+        local o = { name = name }
+        function o:SetFont(path, size, flags) set[#set + 1] = { name = self.name, path = path, size = size, flags = flags } end
+        made[#made + 1] = o
+        return o
+    end
+    local FS2 = { LogDegradeOnce = function() end }
+    assert(loadstring(THEME_SRC, "@Theme.lua"))("forever-stuwave", FS2)
+    local T = FS2.Theme
+    local seen = {}
+    for _, s in ipairs(set) do assert(type(s.name) == "string" and s.name:find("^ForeverSTUwave"), "global names carry the addon prefix: " .. tostring(s.name)); seen[s.path] = true end
+    assert(seen[T.FONT_ORBITRON], "the display font is preloaded")
+    assert(seen[T.FONT_MONO], "the mono font is preloaded")
+    -- a client without CreateFont, or one whose font object throws, must not break Theme load
+    CreateFont = nil
+    assert(loadstring(THEME_SRC, "@Theme.lua"))("forever-stuwave", { LogDegradeOnce = function() end })
+    CreateFont = function() error("boom") end
+    assert(loadstring(THEME_SRC, "@Theme.lua"))("forever-stuwave", { LogDegradeOnce = function() end })
+""")
+
+
 def assert_media_file(path) -> None:
     """Resolve an Interface\\AddOns\\forever-stuwave\\ path the way the client does (.tga) to the repo dir."""
     prefix = "Interface\\AddOns\\forever-stuwave\\"
@@ -1242,6 +1570,7 @@ def run_case(name: str, body: str, round_load: bool = False) -> str | None:
     rt.globals().FRAMEHELPERS_SRC = FRAMEHELPERS_SRC
     rt.globals().ASSERT_FILE = assert_media_file
     rt.globals().PETDOCK_SRC = PETDOCK_SRC
+    rt.globals().HUDTEXT_SRC = HUDTEXT_SRC
     if "MOCKUP_SCRIM" in body:
         rt.globals().MOCKUP_SCRIM = rt.table_from(list(mockup_scrim()))
     try:
