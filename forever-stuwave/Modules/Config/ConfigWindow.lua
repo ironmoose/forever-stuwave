@@ -26,6 +26,13 @@ local HALF_GAP = 28
 local HALF_W = (CONTENT_W - HALF_GAP) / 2
 local ROW_H, GROUP_GAP, SUB_INSET = 28, 12, 16
 local SLIDER_W, SLIDER_H, THUMB_W, READOUT_W = 150, 12, 8, 34
+-- The content area is WELL_H less its 10 top and 8 bottom insets. Each page scrolls inside a ScrollFrame
+-- that reaches PAD_X to the sides and PAD_TOP / PAD_BOT beyond it, so a button glow is not clipped.
+local WELL_H = WIN_H - 74 - 36
+local VIEW_H = WELL_H - 10 - 8
+local PAD_X, PAD_TOP, PAD_BOT = 8, 6, 4
+local WHEEL_STEP = 42
+local BAR_W, THUMB_MIN_H = 4, 24
 
 local C = {
     text = { 0.886, 0.910, 0.941, 1 },
@@ -184,6 +191,126 @@ function UI.Stack(content, frame, half)
     if frame.fsStretch or frame:GetWidth() <= 1 then frame:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, -c.y) end
     c.y = c.y + h
     return frame
+end
+
+-------------------------------------------------------------------------------
+-- Scrolling
+-------------------------------------------------------------------------------
+
+local function ShiftHeld()
+    return type(IsShiftKeyDown) == "function" and IsShiftKeyDown() == true
+end
+
+-- Sizes the page to what its builders stacked: a taller holder gives a scroll range, a page that fits has none.
+local function MeasurePage(page)
+    local c = Cursor(page.fsHolder)
+    local y = c.y + (c.pending or 0)
+    page.fsHolder:SetHeight(math.max(y, 1))
+    page.fsChild:SetHeight(y + PAD_TOP + PAD_BOT)
+    page.fsRange = math.max(0, y - VIEW_H)
+end
+
+-- The slim bar in the well's right margin: shown only while the current page overflows.
+local function UpdateBar()
+    local bar = ui.bar
+    if not bar then return end
+    local page = ui.current and ui.pages[ui.current]
+    local range = page and page.fsRange or 0
+    if range <= 0 then
+        bar:Hide()
+        return
+    end
+    local thumb = bar.fsThumb
+    local height = math.max(THUMB_MIN_H, math.floor(VIEW_H * VIEW_H / (VIEW_H + range)))
+    local travel = VIEW_H - height
+    thumb:SetHeight(height)
+    thumb:ClearAllPoints()
+    thumb:SetPoint("TOP", bar, "TOP", 0, -math.floor(travel * page:GetVerticalScroll() / range + 0.5))
+    bar:Show()
+end
+
+local function SetScroll(page, value)
+    value = math.min(page.fsRange or 0, math.max(0, value))
+    if value == page:GetVerticalScroll() then return end
+    page:SetVerticalScroll(value)
+    -- A tooltip owned by a row that just moved would hang over the wrong place.
+    local owner = GameTooltip:GetOwner()
+    while owner and owner ~= page do owner = owner:GetParent() end
+    if owner then GameTooltip:Hide() end
+    if ui.pages[ui.current] == page then UpdateBar() end
+end
+
+local function ScrollBy(page, delta)
+    SetScroll(page, page:GetVerticalScroll() - delta * WHEEL_STEP)
+end
+
+-- One ScrollFrame per page; builders stack into `fsHolder`, a frame inset by PAD_X inside the scroll child.
+local function NewPage(key)
+    local page = CreateFrame("ScrollFrame", nil, ui.content)
+    page:SetPoint("TOPLEFT", ui.content, "TOPLEFT", -PAD_X, PAD_TOP)
+    page:SetPoint("BOTTOMRIGHT", ui.content, "BOTTOMRIGHT", PAD_X, -PAD_BOT)
+    page:SetClipsChildren(true)
+    page:EnableMouseWheel(true)
+    page.fsPageKey = key
+    local child = CreateFrame("Frame", nil, page)
+    child:SetSize(CONTENT_W + 2 * PAD_X, 1)
+    page:SetScrollChild(child)
+    local holder = CreateFrame("Frame", nil, child)
+    holder:SetWidth(CONTENT_W)
+    holder:SetPoint("TOPLEFT", child, "TOPLEFT", PAD_X, -PAD_TOP)
+    holder.fsScrollPage = page
+    page.fsChild, page.fsHolder, page.fsRange = child, holder, 0
+    page:SetScript("OnMouseWheel", function(self, delta) ScrollBy(self, delta) end)
+    return page
+end
+
+local function BuildScrollbar(well)
+    local bar = CreateFrame("Frame", nil, well)
+    bar.fsScrollbar = true
+    bar:SetWidth(BAR_W)
+    bar:SetPoint("TOPRIGHT", well, "TOPRIGHT", -11, -10)
+    bar:SetPoint("BOTTOMRIGHT", well, "BOTTOMRIGHT", -11, 8)
+    bar:EnableMouseWheel(true)
+    bar:SetScript("OnMouseWheel", function(_, delta)
+        local page = ui.current and ui.pages[ui.current]
+        if page then ScrollBy(page, delta) end
+    end)
+    local rail = bar:CreateTexture(nil, "BACKGROUND")
+    rail:SetColorTexture(C.violet[1], C.violet[2], C.violet[3], 0.25)
+    rail:SetWidth(1)
+    rail:SetPoint("TOP", bar, "TOP", 0, 0)
+    rail:SetPoint("BOTTOM", bar, "BOTTOM", 0, 0)
+    local thumb = CreateFrame("Frame", nil, bar)
+    thumb:SetSize(BAR_W, THUMB_MIN_H)
+    thumb:SetPoint("TOP", bar, "TOP", 0, 0)
+    thumb:EnableMouse(true)
+    local fill = thumb:CreateTexture(nil, "ARTWORK")
+    fill:SetColorTexture(C.cyan[1], C.cyan[2], C.cyan[3], 0.85)
+    fill:SetAllPoints(thumb)
+    bar.fsThumb = thumb
+    -- Dragging maps the cursor's travel over the track to the page's scroll range.
+    local startY, startScroll
+    local function StopDrag()
+        startY = nil
+        thumb:SetScript("OnUpdate", nil)
+    end
+    thumb:SetScript("OnMouseDown", function(self, button)
+        if button ~= "LeftButton" then return end
+        local page = ui.current and ui.pages[ui.current]
+        if not (page and page.fsRange > 0) then return end
+        local _, y = GetCursorPosition()
+        startY, startScroll = y / self:GetEffectiveScale(), page:GetVerticalScroll()
+        self:SetScript("OnUpdate", function()
+            local _, now = GetCursorPosition()
+            local travel = VIEW_H - self:GetHeight()
+            if not startY or travel <= 0 then return end
+            SetScroll(page, startScroll + (startY - now / self:GetEffectiveScale()) * page.fsRange / travel)
+        end)
+    end)
+    thumb:SetScript("OnMouseUp", StopDrag)
+    thumb:SetScript("OnHide", StopDrag)
+    bar:Hide()
+    ui.bar = bar
 end
 
 local function NewRow(content, o)
@@ -582,6 +709,13 @@ function UI.Slider(content, o)
     track:SetScript("OnMouseUp", StopDrag)
     track:SetScript("OnHide", StopDrag)
     track:SetScript("OnMouseWheel", function(self, delta)
+        -- On a page that scrolls the wheel scrolls it, so passing over a slider never changes a setting by accident;
+        -- hold Shift to adjust the slider.
+        local page = content.fsScrollPage
+        if page and (page.fsRange or 0) > 0 and not ShiftHeld() then
+            ScrollBy(page, delta)
+            return
+        end
         if not self:IsEnabled() or not (hi > lo) then return end
         local value = Refresh() + (delta > 0 and step or -step)
         Commit(SliderValue(lo, hi, step, (value - lo) / (hi - lo)))
@@ -898,13 +1032,15 @@ local function Select(key)
     for k, page in pairs(ui.pages) do page:SetShown(k == key) end
     local page = ui.pages[key]
     if not page then
-        page = CreateFrame("Frame", nil, ui.content)
-        page:SetAllPoints(ui.content)
+        page = NewPage(key)
         ui.pages[key] = page
-        local ok, err = pcall(cat.build, page)
+        local ok, err = pcall(cat.build, page.fsHolder)
         if not ok then Forward(err) end
     end
+    MeasurePage(page)
     page:Show()
+    SetScroll(page, 0)
+    UpdateBar()
     ui.category:SetText("CATEGORY |cff22e0ff/ " .. cat.label:upper() .. "|r")
     SetSelected(key)
     CW.RefreshAll()
@@ -954,6 +1090,7 @@ local function BuildChrome(frame)
     ui.content = CreateFrame("Frame", nil, well)
     ui.content:SetPoint("TOPLEFT", well, "TOPLEFT", 14, -10)
     ui.content:SetPoint("BOTTOMRIGHT", well, "BOTTOMRIGHT", -22, 8)
+    BuildScrollbar(well)
 
     local rule = frame:CreateTexture(nil, "ARTWORK")
     rule:SetColorTexture(C.violet[1], C.violet[2], C.violet[3], 0.30)
