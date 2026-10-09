@@ -4,7 +4,8 @@
 -- Modules register under "debuffsH", "debuffsV", "class" or "classSoon" (the class module is chosen by class token)
 -- and are built on first use. "classSoon" is the fallback for "class": the area shows it when the player's class has
 -- no class module, so a class that later registers one stops showing it with no further change. A Target Debuffs
--- host follows FS.TargetTakesDots; a class host stays up without a target.
+-- host follows FS.TargetTakesDots, the coming soon plate follows FS.HasTarget (it sits on the target side, so it hides
+-- with the target box and cast bar); a real class host stays up without a target and gates itself if it needs one.
 
 local _, FS = ...
 
@@ -20,6 +21,7 @@ local ui, Point = Gunsight.ui, Gunsight.Point
 local PREFIX = "|cffff4488Forever STUwave|r: gunsight areas: "
 local MODULE_IDS = { debuffsH = true, debuffsV = true, class = true, classSoon = true }
 local GATED = { debuffsH = true, debuffsV = true }     -- hidden while FS.TargetTakesDots() is false
+local NEEDS_TARGET = { classSoon = true }                -- hidden while FS.HasTarget() is false
 local AREA_NAMES = { "upper", "lower" }
 
 local records = {}        -- id -> record, for debuffsH, debuffsV and classSoon
@@ -92,6 +94,13 @@ local function TakesTarget()
     return not ok or want ~= false
 end
 
+-- FS.HasTarget reads a secret or unreadable UnitExists as "has one", so a guess never hides the plate.
+local function HasTarget()
+    if type(FS.HasTarget) ~= "function" then return true end
+    local ok, has = pcall(FS.HasTarget)
+    return not ok or has ~= false
+end
+
 local function SeatHost(area)
     local rect = rects[area]
     Point(hosts[area], "TOPLEFT", rect.x, rect.y)
@@ -112,7 +121,7 @@ end
 local function ApplyHosts()
     for _, area in ipairs(AREA_NAMES) do
         local record = occupant[area]
-        local want = record ~= nil and (not GATED[record.id] or TakesTarget())
+        local want = record ~= nil and (not GATED[record.id] or TakesTarget()) and (not NEEDS_TARGET[record.id] or HasTarget())
         if hostOn[area] ~= want then
             hostOn[area] = want
             if want then hosts[area]:Show() else hosts[area]:Hide() end

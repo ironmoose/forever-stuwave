@@ -80,6 +80,7 @@ local function boot(opts)
     CLASS = opts.class or "WARLOCK"
     TARGET = true
     function FS.TargetTakesDots() return TARGET end
+    function FS.HasTarget() return TARGET end
     loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
     loadAddonFile(CONFIG_SRC, "Core/Config.lua")
     loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
@@ -481,6 +482,59 @@ Gs.SetArea("upper", "empty")
 check(got >= 1, "the second listener still runs")
 """)
 
+
+case("the_coming_soon_plate_hides_with_no_target_and_returns_with_one")(r"""
+-- the plate sits in a target side area, so it follows FS.HasTarget like the target box and tape; the real class host does not
+local soon = module("soon")
+local Gs, Areas = boot({ class = "MAGE", before = function() FS.GunsightAreas.RegisterModule("classSoon", soon.spec) end })
+local lo = Areas.Host("lower")
+check(lo:IsShown(), "the plate host shows with a target")
+local hides = #soon.hides
+TARGET = false
+fire("PLAYER_TARGET_CHANGED")
+check(not lo:IsShown(), "no target hides the plate host")
+check(Areas.AreaOf("classSoon") == "lower", "AreaOf still reports the area, like the debuffs gate")
+check(#soon.hides == hides, "the gate is not onHide")
+TARGET = true
+fire("PLAYER_TARGET_CHANGED")
+check(lo:IsShown(), "acquiring a target brings the plate back")
+TARGET = false
+fire("PLAYER_TARGET_CHANGED")
+check(not lo:IsShown(), "losing the target hides it again")
+TARGET = true
+fire("PLAYER_ENTERING_WORLD")
+check(lo:IsShown(), "entering the world re-reads the rule")
+-- an area set to Empty is unaffected: nothing to gate
+Gs.SetArea("lower", "empty")
+TARGET = false
+fire("PLAYER_TARGET_CHANGED")
+check(not lo:IsShown() and Areas.AreaOf("classSoon") == nil, "Empty stays empty")
+TARGET = true
+fire("PLAYER_TARGET_CHANGED")
+check(not lo:IsShown(), "and a target does not conjure a plate into an Empty area")
+Gs.SetArea("lower", "class")
+check(lo:IsShown(), "back to the Class Module with a target shows the plate")
+""")
+
+case("the_coming_soon_plate_follows_the_target_in_combat")(r"""
+local soon = module("soon")
+IN_COMBAT = true
+TARGET = false
+local Gs, Areas = boot({ class = "MAGE", before = function() FS.GunsightAreas.RegisterModule("classSoon", soon.spec) end })
+IN_COMBAT = true
+TARGET = false
+fire("PLAYER_TARGET_CHANGED")
+local lo = Areas.Host("lower")
+check(InCombatLockdown() == true, "the case runs in combat")
+check(not lo:IsShown(), "no target in combat: the plate host is hidden")
+TARGET = true
+fire("PLAYER_TARGET_CHANGED")
+check(lo:IsShown(), "target acquired in combat: shown")
+TARGET = false
+fire("PLAYER_TARGET_CHANGED")
+check(not lo:IsShown(), "target lost in combat: hidden")
+check(#BLOCKED == 0, "nothing protected was touched in combat: " .. table.concat(BLOCKED, ","))
+""")
 
 case("the_coming_soon_plate_shows_swaps_and_hides_in_combat")(r"""
 -- a class with no module (MAGE), so the plate really is the occupant; the plate is a plain frame and nothing gates it on combat
