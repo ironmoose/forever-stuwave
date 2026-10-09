@@ -25,8 +25,9 @@ local CLASS_DEBUFFS = {
 -- Seconds a debuff lasts when the player casts it, so the FIRST cast in combat is timed before any snapshot has
 -- taught the session. `apply` is the top rank (or the only length); `byRank` maps a cast rank id to its length for a
 -- spell whose length follows the rank. Verified against Wowhead / ForeverDB (Forever): Rend 9/12/15/18/21 s,
--- Thunder Clap 10/14/18/22/26/30 s (rank ids 6343 and 11556 were read there, the rest are classic rank ids),
--- Sunder Armor 30 s, Hamstring 15 s, Demoralizing Shout 45 s (30 s in classic). Deep Wounds has no cast, so no entry.
+-- Thunder Clap 10/14/18/22/26/30 s (rank 1 id 6343 was read there, the rest are classic rank ids),
+-- Sunder Armor 30 s, Hamstring 15 s, Demoralizing Shout 45 s (30 s in classic; all five ranks, checked
+-- 2026-10-08 at https://foreverdb.net/spell/11556 and https://www.wowhead.com/forever/guide/classes/warrior/arms/dps-abilities). Deep Wounds has no cast, so no entry.
 -- Only Warrior is filled so far; every other class is timed from its first readable snapshot (learned below).
 local SPELL_SECONDS = {
     ["Rend"] = { apply = 21, byRank = { [772] = 9, [6546] = 12, [6547] = 15, [6548] = 18, [11572] = 21, [11573] = 21, [11574] = 21 } },
@@ -112,13 +113,17 @@ end
 
 -- Seconds a cast of `spellID` lasts, best source first: what a snapshot measured for this exact id, the rank table
 -- for this exact id, what a snapshot measured for the name (another rank, the player's talents), then the top rank.
+-- For a spell with a rank table, an id the table does not list is taken for a newer rank: the name's measurement
+-- (it may be a lower rank's, or lengthened by a talent) never goes below the top rank.
 local function DurationOf(name, spellID)
     if spellID and learnedById[spellID] then return learnedById[spellID] end
     local def, own = HudDef(name), SPELL_SECONDS[name]
     local byRank = spellID and (def and def.applyByRank and def.applyByRank[spellID] or own and own.byRank and own.byRank[spellID])
     if byRank then return byRank end
-    if learnedDuration[name] then return learnedDuration[name] end
-    return def and def.apply or own and own.apply or nil
+    local top = def and def.apply or own and own.apply or nil
+    local learned = learnedDuration[name]
+    if learned and top and ((def and def.applyByRank) or (own and own.byRank)) then return math.max(learned, top) end
+    return learned or top
 end
 
 local function Tracks(name)
@@ -207,7 +212,7 @@ end
 -- Source 1: the player's harmful auras on the target, read only while auras are readable.
 local function Report(label, err) LogOnce("read", tostring(label) .. ": " .. tostring(err)) end
 
-local function ScanInto(bucket)
+local function ScanInto(bucket, prevBucket)
     local read = FS.FrameHelpers and FS.FrameHelpers.ReadAuraSlot
     if not read then error("FrameHelpers.ReadAuraSlot is missing") end
     for i = 1, MAX_AURAS do
@@ -226,6 +231,18 @@ local function ScanInto(bucket)
                 if entry.id then learnedById[entry.id] = duration end
                 if expires and expires > 0 then entry.expires = expires end
             end
+            if not entry.duration then
+                -- no usable duration (zero or secret): keep what the ledger already believed, else the tables; an
+                -- aura that is up is not "?" when its length is known. A plain duration with a secret expiry stays
+                -- unknown (the expiry is the secret, not guessed).
+                local prev = prevBucket and prevBucket[name]
+                if prev and prev.expires and prev.expires > entry.at then
+                    entry.expires, entry.duration = prev.expires, prev.duration
+                else
+                    local d = DurationOf(name, entry.id)
+                    if d then entry.duration, entry.expires = d, entry.at + d end
+                end
+            end
             if count > (maxStack[name] or 0) then maxStack[name] = count end
             known[name] = true
             bucket[name] = entry
@@ -238,7 +255,7 @@ local function Scan()
     local key = TargetKey()
     if not key or not (FS.AurasReadable and FS.AurasReadable()) then return false end
     local bucket = {}
-    local ok, err = pcall(ScanInto, bucket)
+    local ok, err = pcall(ScanInto, bucket, ledger[key])
     if not ok then LogOnce("scan", err); return false end
     ledger[key] = bucket
     return true

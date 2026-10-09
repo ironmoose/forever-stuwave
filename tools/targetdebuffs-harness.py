@@ -191,7 +191,7 @@ local function boot(opts)
     SPELLS_BY_ID = {
         [11572] = { name = "Rend", icon = 1001 }, [772] = { name = "Rend", icon = 1001 }, [6548] = { name = "Rend", icon = 1001 },
         [9998] = { name = "Fireball", icon = 1009 }, [9997] = { name = "Fireball", icon = 1009 }, [11597] = { name = "Sunder Armor", icon = 1002 },
-        [6343] = { name = "Thunder Clap", icon = 1003 }, [8647] = { name = "Expose Armor", icon = 1004 },
+        [6343] = { name = "Thunder Clap", icon = 1003 }, [7777] = { name = "Thunder Clap", icon = 1003 }, [8647] = { name = "Expose Armor", icon = 1004 },
         [172] = { name = "Corruption", icon = 1005 }, [9999] = { name = "Heroic Strike", icon = 1006 },
         [20271] = { name = "Judgement", icon = 1007 }, [853] = { name = "Hammer of Justice", icon = 1008 },
     }
@@ -389,6 +389,49 @@ cast(6548, guid())
 near(byName(TD.Get(), "Rend").duration, 18, "rank 4 is not timed by the rank 1 snapshot")
 cast(772, guid())
 near(byName(TD.Get(), "Rend").duration, 9, "rank 1 keeps what was scanned for rank 1")
+""")
+
+case("an_unlisted_rank_id_never_takes_a_lower_ranks_learned_duration")(r"""
+local TD = boot({ class = "WARRIOR" })
+AURAS = { aura("Thunder Clap", NOW + 8, 10, 0, "player", 6343) }      -- a rank 1 Thunder Clap: 10 s
+TD.Subscribe(function() end)
+AURAS = {}; sync(TD)
+IN_COMBAT = true
+cast(7777, guid())                      -- a rank id the table does not list: at least the top rank, not 10 s
+local e = byName(TD.Get(), "Thunder Clap")
+check(e and e.duration == 30, "an unlisted Thunder Clap id is timed at the top rank, got " .. tostring(e and e.duration))
+near(e.expires, NOW + 30, "expires = cast + 30")
+cast(6343, guid())
+near(byName(TD.Get(), "Thunder Clap").duration, 10, "the listed rank 1 id keeps what was scanned for it")
+""")
+
+case("a_scanned_aura_without_a_duration_keeps_the_ledger_timing_or_the_table")(r"""
+local TD = boot({ class = "WARRIOR" })
+TD.Subscribe(function() end)
+-- a table-known spell scanned with no duration or expiry is timed from the table, not shown as "?"
+AURAS = { aura("Sunder Armor", 0, 0, 1, "player", 11597) }
+sync(TD)
+local e = byName(TD.Get(), "Sunder Armor")
+check(e and e.duration == 30 and e.expires, "table duration when the scan has none, got " .. tostring(e and e.duration))
+near(e.expires, NOW + 30, "expires = scan time + table duration")
+-- a cast timed in combat keeps its expiry when the next snapshot has no duration
+AURAS = {}; sync(TD)
+IN_COMBAT = true; fire("PLAYER_REGEN_DISABLED")
+cast(11597, guid())
+local castExpires = byName(TD.Get(), "Sunder Armor").expires
+near(castExpires, NOW + 30, "setup: cast timed by the table")
+NOW = NOW + 5
+IN_COMBAT = false
+AURAS = { aura("Sunder Armor", 0, 0, 1, "player", 11597) }
+fire("PLAYER_REGEN_ENABLED")
+local after = byName(TD.Get(), "Sunder Armor")
+check(after and after.expires, "the entry stays timed")
+near(after.expires, castExpires, "the ledger expiry survives a zero-duration snapshot")
+-- a spell nobody can time stays untimed
+AURAS = { aura("Mystery", 0, 0, 1, "player", 4242) }
+sync(TD)
+local m = byName(TD.Get(), "Mystery")
+check(m and m.expires == nil and m.duration == nil, "an unknown spell without a duration stays untimed")
 """)
 
 case("any_class_spell_seen_once_out_of_combat_is_timed_later_in_combat")(r"""
