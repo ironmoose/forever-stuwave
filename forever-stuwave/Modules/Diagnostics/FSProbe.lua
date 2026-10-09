@@ -2790,7 +2790,6 @@ PP.EVENTS = {
 PP.run = 0
 PP.live = nil         -- the running probe: { run, pending = { ooc, combat } }
 PP.frame = nil        -- the event frame (frames are never destroyed, so it is reused)
-PP.cleuFrame = nil
 PP.combat = false     -- InCombatLockdown at the start of the snapshot being taken
 PP.resolved = nil     -- the spell list with ids resolved, for the snapshot being taken
 PP.last = {}          -- log name -> GetTime of its previous entry
@@ -3116,22 +3115,9 @@ function PP.PartLossOfControl(sec)
     sec.first = PP.Stamp((InvokeTableKeep(PP.LOC_FIELDS, PP.LOC_KEEP, Api("C_LossOfControl", "GetActiveLossOfControlData"), 1)))
 end
 
--- COMBAT_LOG_EVENT_UNFILTERED is restricted: the registration is tried on a throwaway frame with no
--- script and undone at once, out of combat only. Returns the outcome as a string.
-function PP.CleuTrial()
-    -- Out of combat only: the trial must not touch a restricted event while the lockdown is on.
-    if PP.combat then return "skipped: in combat" end
-    if not PP.cleuFrame then
-        local ok, frame = pcall(CreateFrame, "Frame")
-        if not ok or type(frame) == "nil" then return "no frame: " .. ErrText(frame) end
-        PP.cleuFrame = frame
-    end
-    local frame = PP.cleuFrame
-    local ok, err = pcall(frame.RegisterEvent, frame, "COMBAT_LOG_EVENT_UNFILTERED")
-    pcall(frame.UnregisterEvent, frame, "COMBAT_LOG_EVENT_UNFILTERED")
-    if ok then return "registered without error" end
-    return ErrText(err)
-end
+-- Never register COMBAT_LOG_EVENT_UNFILTERED: it is protected on Forever, and the refusal
+-- (ADDON_ACTION_FORBIDDEN) goes through the global error handler, which pcall cannot catch.
+PP.CLEU_REGISTER = "forbidden (ADDON_ACTION_FORBIDDEN, measured on 16001 2026-10-09)"
 
 -- A readable player aura instance id, or nil (in combat the read may be refused: that is data).
 function PP.AuraInstance()
@@ -3166,7 +3152,7 @@ end
 
 function PP.PartMisc(sec)
     sec.combatLogRestricted = PP.Call(true, Api("C_CombatLog", "IsCombatLogRestricted"))
-    sec.cleuRegister = PP.CleuTrial()
+    sec.cleuRegister = PP.CLEU_REGISTER
     sec.items = { inCombat = PP.combat }
     for _, name in ipairs(PP.ITEMS) do
         sec.items[name] = PP.Call(true, Api("C_Item", "GetItemCount"), name)

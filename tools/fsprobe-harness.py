@@ -60,6 +60,7 @@ __acCreateThrows = false
 __frameThrows = false
 __unitEventThrows = false
 __registerThrows = false    -- plain RegisterEvent raises too (the fallback path fails as well)
+__cleuAttempts = 0          -- RegisterEvent calls naming COMBAT_LOG_EVENT_UNFILTERED (protected on Forever: must stay 0)
 __hasTotemSpell = false     -- the dump lists C_Secrets.ShouldTotemSpellBeSecret; the mock omits it
 
 -- Secret sentinels. type() still reports the pretended type, but every operation raises
@@ -143,10 +144,12 @@ end
 __FrameM = FrameM
 function FrameM.SetScript(self, k, fn) self._scripts[k] = fn end
 function FrameM.RegisterEvent(self, e)
+    if e == "COMBAT_LOG_EVENT_UNFILTERED" then __cleuAttempts = __cleuAttempts + 1 end
     if __registerThrows then error("boom: RegisterEvent " .. e) end
     self._events[e] = true
 end
 function FrameM.RegisterUnitEvent(self, e, ...)
+    if e == "COMBAT_LOG_EVENT_UNFILTERED" then __cleuAttempts = __cleuAttempts + 1 end
     if __unitEventThrows then error("boom: RegisterUnitEvent") end
     self._events[e] = "unit:" .. table.concat({ ... }, ",")
 end
@@ -2432,7 +2435,8 @@ for _, e in ipairs({ "PARTY_KILL", "UNIT_DIED", "PLAYER_TARGET_DIED", "LOSS_OF_C
 end
 check(f._events.UNIT_ABSORB_AMOUNT_CHANGED == "unit:player,party1" and f._events.UNIT_HEAL_PREDICTION == "unit:player,party1",
     "absorb and prediction events must be unit events for player and party1")
-check(o.misc.cleuRegister == "registered without error", "CLEU trial out of combat: " .. tostring(o.misc.cleuRegister))
+check(string.find(o.misc.cleuRegister, "forbidden (ADDON_ACTION_FORBIDDEN", 1, true), "CLEU snapshot records the forbidden result: " .. tostring(o.misc.cleuRegister))
+check(__cleuAttempts == 0, "COMBAT_LOG_EVENT_UNFILTERED must never be registered (protected on Forever): " .. tostring(__cleuAttempts))
 check(said("Run /fsprobe priest again"), "chat line must tell Parker to run the command again")
 noOnUpdate()
 check(said("priest"), "priest line missing")
@@ -2481,7 +2485,8 @@ __combat = true
 runCmd("priest")
 local p = ForeverSTUwaveDB.fsprobe.priest
 check(p.combat and p.combat.inCombat == true and p.ooc == nil, "in combat the first snapshot is the combat one")
-check(p.combat.misc.cleuRegister == "skipped: in combat", "the CLEU trial must not run in combat: " .. tostring(p.combat.misc.cleuRegister))
+check(string.find(p.combat.misc.cleuRegister, "forbidden (ADDON_ACTION_FORBIDDEN", 1, true), "combat snapshot records the same forbidden CLEU result: " .. tostring(p.combat.misc.cleuRegister))
+check(__cleuAttempts == 0, "COMBAT_LOG_EVENT_UNFILTERED must never be registered in combat either: " .. tostring(__cleuAttempts))
 __combat = false
 pfire("PLAYER_REGEN_ENABLED")
 advance(2)
@@ -3023,6 +3028,75 @@ def raw_arg_violations(priest: str) -> list[str]:
     return found
 
 
+CLEU_SOURCE_DIR = Path(__file__).resolve().parent.parent / "forever-stuwave"
+CLEU_NAME = "COMBAT_LOG_EVENT_UNFILTERED"
+CLEU_LITERAL_RE = re.compile(r"""(["'])\s*""" + CLEU_NAME + r"""\s*\1""")
+# Each form must be caught (the quoted literal is the signal, so split lines and variables count);
+# a comment mentioning the event name must not be.
+CLEU_MUST_CATCH = {
+    "method call": 'f:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")',
+    "function call": 'RegisterEvent(f, "COMBAT_LOG_EVENT_UNFILTERED")',
+    "pcall form": 'pcall(frame.RegisterEvent, frame, "COMBAT_LOG_EVENT_UNFILTERED")',
+    "unit event": 'f:RegisterUnitEvent("COMBAT_LOG_EVENT_UNFILTERED", "player")',
+    "split across lines": 'f:RegisterEvent(\n    "COMBAT_LOG_EVENT_UNFILTERED"\n)',
+    "local variable": 'local E = "COMBAT_LOG_EVENT_UNFILTERED"\nf:RegisterEvent(E)',
+    "event table": 'local events = { \'COMBAT_LOG_EVENT_UNFILTERED\' }',
+    "after a comment line": '-- note\nf:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")',
+}
+CLEU_MUST_PASS = {
+    "line comment": "-- COMBAT_LOG_EVENT_UNFILTERED is protected",
+    "trailing comment": "local x = 1 -- COMBAT_LOG_EVENT_UNFILTERED",
+    "block comment": "--[[\nCOMBAT_LOG_EVENT_UNFILTERED\n]]\nlocal x = 1",
+}
+
+
+def strip_lua_comments(text: str) -> str:
+    """Blank out Lua comments (line and block), keeping string literals and line numbers."""
+    out, i, n, quote = [], 0, len(text), None
+    while i < n:
+        c = text[i]
+        if quote:
+            out.append(c)
+            if c == "\\" and i + 1 < n:
+                out.append(text[i + 1]); i += 2; continue
+            if c == quote or c == "\n":
+                quote = None
+            i += 1
+        elif c in "\"'":
+            quote = c; out.append(c); i += 1
+        elif text.startswith("--", i):
+            m = re.match(r"--\[(=*)\[", text[i:])
+            end = text.find("]" + m.group(1) + "]", i) + len(m.group(1)) + 2 if m else -1
+            if m and end >= i + 2:
+                out.append("".join("\n" if ch == "\n" else " " for ch in text[i:end])); i = end
+            else:
+                j = text.find("\n", i)
+                i = n if j < 0 else j
+        else:
+            out.append(c); i += 1
+    return "".join(out)
+
+
+def cleu_register_violations(files: dict[str, str]) -> list[str]:
+    """file:line of every quoted COMBAT_LOG_EVENT_UNFILTERED in non-comment code (protected on Forever)."""
+    return [f"{name}:{n}" for name, text in files.items()
+            for n, line in enumerate(strip_lua_comments(text).splitlines(), 1) if CLEU_LITERAL_RE.search(line)]
+
+
+def cleu_register_check(root: Path) -> int:
+    files = {str(p.relative_to(root)): p.read_text(encoding="utf-8", errors="replace") for p in root.rglob("*.lua")}
+    bad = cleu_register_violations(files)
+    missed = [k for k, v in CLEU_MUST_CATCH.items() if not cleu_register_violations({"x.lua": v})]
+    noisy = [k for k, v in CLEU_MUST_PASS.items() if cleu_register_violations({"x.lua": v})]
+    if bad or missed or noisy or not files:
+        print(f"FAIL  static: COMBAT_LOG_EVENT_UNFILTERED appears as a string literal in code (protected on Forever): {bad}; "
+              f"forms NOT caught {missed}; comment forms wrongly flagged {noisy}; lua files scanned: {len(files)}")
+        return 1
+    print(f"ok    static: no quoted COMBAT_LOG_EVENT_UNFILTERED in non-comment code across {len(files)} Lua files "
+          f"({len(CLEU_MUST_CATCH)} forms caught, {len(CLEU_MUST_PASS)} comment forms pass)")
+    return 0
+
+
 def static_checks(source: str) -> int:
     failures = 0
     priest = priest_section(source)
@@ -3037,12 +3111,12 @@ def static_checks(source: str) -> int:
         print(f"ok    static: no raw event argument or API return is compared or truth-tested in the priest section "
               f"({len(RAW_INJECTIONS)} injected forms are caught, {len(RAW_LEGAL)} legal forms pass)")
     leaked = [n for n in PRIEST_FORBIDDEN if n in priest]
-    if leaked or priest.count("COMBAT_LOG_EVENT_UNFILTERED") != 2:
+    if leaked:
         failures += 1
-        print(f"FAIL  static: the priest section uses a forbidden aura/log API: {leaked} "
-              f"(CLEU mentions {priest.count('COMBAT_LOG_EVENT_UNFILTERED')}, expected the 2 in the trial)")
+        print(f"FAIL  static: the priest section uses a forbidden aura/log API: {leaked}")
     else:
-        print("ok    static: the priest section reads no aura by index or slot and tries the combat log in one place")
+        print("ok    static: the priest section reads no aura by index or slot")
+    failures += cleu_register_check(CLEU_SOURCE_DIR)
     hot = hot_section(source)
     leaked = [n for n in HOT_FORBIDDEN if n in hot]
     if leaked:
