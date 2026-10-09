@@ -360,6 +360,7 @@ end
 local SETTLE_STEPS = 3
 local RunSettleStep
 local function RefitLater(line, step)
+    if line.ownSettle then return end   -- a text line outside the boxes whose owner re-decides the text itself
     line.settleStep = step or 1
     NextFrame(line, function() RunSettleStep(line) end)
 end
@@ -429,6 +430,14 @@ local function WriteLine(line, text)
     for _, fs in ipairs(line.fonts) do fs:SetText(text) end
     FitLine(line, text)
 end
+
+-- The same fit for a text line outside the boxes (GunsightTags' target of target label): a line over `fonts`, its
+-- base size and floor in image px, wmax set by the caller in UI units. Write puts the text in and fits; Refit
+-- re-runs the fit for the text held (after a rescale or a new wmax). A secret is written, never measured. Set
+-- `line.ownSettle = true` when the owner settles a late font itself (it re-decides the text, not just the size).
+GunsightBoxes.NewTextLine = NewLine
+GunsightBoxes.WriteTextLine = WriteLine
+GunsightBoxes.RefitTextLine = RefitLine
 
 -------------------------------------------------------------------------------
 -- Build pieces

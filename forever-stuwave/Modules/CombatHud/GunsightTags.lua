@@ -22,6 +22,7 @@ local C = {
     HEALTH = { dx = 4, w = 32 }, TOT = { dx = 41, w = 69 },
     RISE = 8, OVERLAP = 7,
     MIN_FONT = 6, TOT_PAD = 3,
+    TOT_FLOOR = 8,   -- the target of target name shrinks no further than this (image px) before the first names shorten to initials
     FRAME_LEVEL = 6,   -- the level and health tags' frame level above the box: over the edge strokes (+1) and the bars (+1 to +3)
     -- Level icons by UnitClassification, square sizes in image px (tools/assets/generate_level_icons.py). tex and tint name
     -- Theme tokens; tint = false draws the texture untinted (rare elite has its gold and silver baked in). A world boss
@@ -256,6 +257,8 @@ end
 -- Target of target: a secure button, so only SetAlpha, text and (out of combat) Show / Hide / EnableMouse
 -------------------------------------------------------------------------------
 
+local SyncTot
+
 -- The seat and the button's size are the only geometry; both wait for the end of combat.
 local function SeatTot()
     local seat, button = Tags.seat, Tags.tot
@@ -269,13 +272,91 @@ local function SeatTot()
     seat:ClearAllPoints()
     seat:SetPoint("TOPLEFT", Gunsight.anchors.boxR, "BOTTOMLEFT", C.TOT.dx * k, C.OVERLAP * k)
     seat:SetSize(C.TOT.w * k, C.H * k)
-    FS.Theme.ApplyMono(button.label, FontSize(), Tags.colors.white)
-    button.label:SetWidth((C.TOT.w - 2 * C.TOT_PAD) * k)
+    local wmax = (C.TOT.w - 2 * C.TOT_PAD) * k
+    button.label:SetWidth(wmax)
+    Tags.totLine.wmax = wmax
+    Tags.totName = nil
+    SyncTot()   -- fits the name again at the new width; the font is only set when the fit changes the size
 end
 
--- The name goes from UnitName straight to SetText. Visibility is alpha and text only; out of combat the button is shown
+-- "Bartholomew Oldlight" -> "B. Oldlight": every word but the last becomes its first character (a whole UTF-8
+-- character) and a dot. nil for a single word. Plain strings only; a secret is never abbreviated.
+local function AbbreviateName(name)
+    local words = {}
+    for word in name:gmatch("%S+") do words[#words + 1] = word end
+    if #words < 2 then return nil end
+    for i = 1, #words - 1 do
+        words[i] = (words[i]:match("^[%z\1-\127\194-\244][\128-\191]*") or words[i]) .. "."
+    end
+    return table.concat(words, " ")
+end
+
+-- Fits a plain name to the label with the box name's own fit (GunsightBoxes' text line: shrinks step by step to
+-- C.TOT_FLOOR, SetFont only when the size changes). The decision to shorten the first names to initials is made from
+-- the FULL name measured before any size change, scaled to the floor size (width follows the font size): a name that
+-- would not fit even at the floor is written abbreviated, everything else is written whole and shrunk. What is still
+-- too wide at the floor is left to the FontString's ellipsis.
+local function FitTotName(full)
+    local line, label = Tags.totLine, Tags.tot.label
+    local text = full
+    label:SetText(full)
+    local w = PlainWidth(label)
+    if w and line.size and line.size > 0 then
+        local floor = math.min(FontSize(), math.max(C.MIN_FONT, math.floor(ui(C.TOT_FLOOR) + 0.5)))
+        if w * floor / line.size > line.wmax + 1e-6 then text = AbbreviateName(full) or full end
+    end
+    FS.GunsightBoxes.WriteTextLine(line, text)
+end
+
+-- A client may apply SetFont a frame late, and then the width measured right after a size change is the old font's.
+-- A write that changed the size re-runs the decision from the full name on the next frame, at most three times
+-- (the shown text may be the abbreviated one; only the full name is decided from).
+local RefitTotLater
+local function RunTotRefit(step)
+    local full = Tags.totName
+    if not full then return end
+    local before = Tags.totLine.size
+    FitTotName(full)
+    if Tags.totLine.size ~= before and step < 3 then RefitTotLater(step + 1) end
+end
+function RefitTotLater(step)
+    Tags.totStep = step
+    if Tags.totRefitPending or type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then return end
+    Tags.totRefitPending = true
+    C_Timer.After(0, function()
+        Tags.totRefitPending = false
+        Guard(RunTotRefit, Tags.totStep)
+    end)
+end
+
+-- Writes the name into the label. A secret name goes straight to SetText: it is never measured, compared or
+-- abbreviated. The same plain name as last time is already fitted, and writing it again would set the font to the
+-- base size and back every event; `Tags.totName` (the full plain name, not the shown text) records it after a
+-- successful write, a secret or empty write clears it, and a rescale clears it too.
+local function WriteTotName(name)
+    local line = Tags.totLine
+    if IsSecret(name) then
+        Tags.totName = nil
+        FS.GunsightBoxes.WriteTextLine(line, name)
+        return
+    end
+    if name == Tags.totName then return end
+    Tags.totName = nil
+    if name == "" then
+        FS.GunsightBoxes.WriteTextLine(line, "")
+        return
+    end
+    local before = line.size
+    FitTotName(name)
+    Tags.totName = name
+    if line.size ~= before then RefitTotLater(1) end
+end
+
+-- The name (first + surname: UnitName alone drops the surname on this server) goes to the label from
+-- FS.GetFullUnitName (UnitFrames.lua, loaded earlier, read at call time) else UnitName. Visibility is alpha and text
+-- only; out of combat the button is shown
 -- with its mouse on while the toggle and the tgt piece are on, so a target of target that appears in combat is clickable.
-local function SyncTot()
+function SyncTot()
     local button = Tags.tot
     if not button then return end
     local on = Setting(SETTINGS.tot) and Gunsight.IsPieceOn("tgt")
@@ -285,11 +366,17 @@ local function SyncTot()
         has = IsSecret(exists) or exists == true
     end
     local name
-    if has then name = UnitName("targettarget") end
+    if has then
+        if type(FS.GetFullUnitName) == "function" then
+            name = FS.GetFullUnitName("targettarget")
+        else
+            name = UnitName("targettarget")
+        end
+    end
     if has and (IsSecret(name) or type(name) == "string") then
-        button.label:SetText(name)
+        WriteTotName(name)
     else
-        button.label:SetText("")
+        WriteTotName("")
     end
     button:SetAlpha(has and 1 or 0)
     if InCombat() then return end
@@ -309,6 +396,11 @@ local function BuildTot()
     local button = NewTag(holder, "Button", "ForeverSTUwaveGunsightTargetOfTarget", "SecureUnitButtonTemplate")
     button.label:SetJustifyH("CENTER")
     button.label:SetWordWrap(false)
+    -- The name fits through GunsightBoxes' text line; the font NewTag set is the line's current size (no second SetFont).
+    local line = FS.GunsightBoxes.NewTextLine({ button.label }, C.TEXT_SIZE, nil, C.TOT_FLOOR)
+    line.colors[1], line.size = Tags.colors.white, FontSize()
+    line.ownSettle = true   -- RefitTotLater re-decides from the full name; the line's own size-only settle would race it
+    Tags.totLine = line
     button:SetAttribute("type1", "target")
     button:SetAttribute("unit", "targettarget")
     button:RegisterForClicks("AnyUp")

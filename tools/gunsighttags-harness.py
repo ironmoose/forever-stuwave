@@ -925,6 +925,272 @@ function T.a_target_of_target_that_appears_after_combat_starts_is_visible_and_cl
     W.clean(); noFails()
 end
 
+-- Forever characters have a surname: UnitName gives the first name only, GetUnitName(unit, true) gives "First Surname".
+-- The REAL resolver (FS.GetFullUnitName in UnitFrames.lua, loaded before CombatHud) is installed from its source here.
+local function withFullNames(extra)
+    return function()
+        UnitName = function(u) return __units[u].name end
+        GetUnitName = function(u, withRealm)
+            assert(withRealm == true, "the surname only comes through with the realm flag")
+            return __units[u].full
+        end
+        local sys = function(v) return FS.IsSecret and FS.IsSecret(v) end
+        local chunk = assert(load("local FS, IsSecret = ...\nlocal HAS_GET_UNIT_NAME = type(GetUnitName) == 'function'\n" ..
+            __fullNameSrc, "@GetFullUnitName"))
+        chunk(FS, sys)
+        if extra then extra() end
+    end
+end
+
+function T.the_target_of_target_shows_the_first_name_and_surname()
+    local W = world({ beforeLoad = withFullNames() })
+    target("Kurak")
+    __units.targettarget = { exists = true, name = "Father", full = "Father Stu" }
+    fireTot()
+    eq(Tg().tot.label._text, "Father Stu", "GetUnitName(unit, true) carries the surname UnitName drops")
+    __units.targettarget = { exists = true, name = "Father", full = "Father Stu-" }
+    fireTot()
+    eq(Tg().tot.label._text, "Father Stu", "a stray trailing separator is stripped")
+    __units.targettarget = { exists = true, name = "Father", full = nil }
+    fireTot()
+    eq(Tg().tot.label._text, "Father", "no full name: falls back to UnitName")
+    __units.targettarget = { exists = true, name = __SECRET_NAME, full = __SECRET_NAME }
+    fireTot()
+    ok(rawequal(Tg().tot.label._text, __SECRET_NAME), "a secret full name goes straight to SetText")
+    W.clean(); noFails("a secret was compared inside a pcall")
+end
+
+-- The label is 63 image px wide (geometry locked): a longer full name shrinks to the floor, then the first names
+-- shorten to initials, and only what still does not fit is left to the FontString's ellipsis.
+function T.a_long_target_of_target_name_shrinks_then_abbreviates_to_fit_the_label()
+    local W = world({ beforeLoad = withFullNames() })
+    target("Kurak")
+    local label = Tg().tot.label
+    local wmax = (Tg().C.TOT.w - 2 * Tg().C.TOT_PAD) * K()
+    local base = label._fontSize
+    __units.targettarget = { exists = true, name = "Father", full = "Father Stu" }
+    fireTot()
+    eq(label._text, "Father Stu"); eq(label._fontSize, base, "a name that fits keeps the base size")
+    __units.targettarget = { exists = true, name = "Father", full = "Father Stuart" }
+    fireTot()
+    eq(label._text, "Father Stuart", "a slightly long name shrinks first, not abbreviated")
+    ok(label._fontSize < base, "smaller than the base size")
+    ok(label:GetUnboundedStringWidth() <= wmax + 1e-6, "and fits the 63 px label")
+    __units.targettarget = { exists = true, name = "Bartholomew", full = "Bartholomew Oldlight" }
+    fireTot()
+    eq(label._text, "B. Oldlight", "too long even at the floor: the first name shortens to an initial")
+    ok(label:GetUnboundedStringWidth() <= wmax + 1e-6, "and fits the 63 px label")
+    eq(label:GetWidth(), wmax, "the label's width is untouched")
+    __units.targettarget = { exists = true, name = "Father", full = "Father Stu" }
+    fireTot()
+    eq(label._text, "Father Stu", "the next name is not stuck abbreviated"); eq(label._fontSize, base, "and grows back")
+    W.clean(); noFails()
+end
+
+function T.a_rescale_fits_the_target_of_target_name_again_at_the_new_size()
+    local W = world({ beforeLoad = withFullNames() })
+    target("Kurak")
+    __units.targettarget = { exists = true, name = "Bartholomew", full = "Bartholomew Oldlight" }
+    fireTot()
+    local label = Tg().tot.label
+    UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
+    __fireEvent("UI_SCALE_CHANGED")
+    local wmax = (Tg().C.TOT.w - 2 * Tg().C.TOT_PAD) * K()
+    eq(label:GetWidth(), wmax, "the new width")
+    eq(label._text, "B. Oldlight")
+    ok(label:GetUnboundedStringWidth() <= wmax + 1e-6, "fits at the new size")
+    W.clean(); noFails()
+end
+
+function T.a_secret_target_of_target_name_between_two_plain_ones_does_not_stick_in_the_cache()
+    local W = world({ beforeLoad = withFullNames() })
+    target("Kurak")
+    local label = Tg().tot.label
+    __units.targettarget = { exists = true, name = "Father", full = "Father Stu" }
+    fireTot()
+    eq(label._text, "Father Stu")
+    __units.targettarget = { exists = true, name = __SECRET_NAME, full = __SECRET_NAME }
+    fireTot()
+    ok(rawequal(label._text, __SECRET_NAME), "the secret replaced it")
+    __units.targettarget = { exists = true, name = "Father", full = "Father Stu" }
+    fireTot()
+    eq(label._text, "Father Stu", "the same plain name after a secret is written again, not taken for cached")
+    W.clean(); noFails()
+end
+
+-- The real client errors on ANY comparison of a secret string; the mock's __eq only runs between two tables of the
+-- same metamethod. So the previous plain name is a table sharing the secret's erroring __eq (it reports itself a
+-- string and prints as "Father"): a comparison against the secret then throws, and the cache must not make one.
+function T.the_target_of_target_cache_never_compares_a_secret_name()
+    local plain = setmetatable({}, { __eq = getmetatable(__SECRET_NAME).__eq, __tostring = function() return "Father" end })
+    local realType = type
+    type = function(v) if rawequal(v, plain) then return "string" end return realType(v) end
+    local W = world({ beforeLoad = withFullNames(function() FS.GetFullUnitName = function(u) return __units[u].full end end) })
+    target("Kurak")
+    __units.targettarget = { exists = true, name = "Father", full = plain }
+    fireTot()
+    eq(tostring(Tg().tot.label._text), "Father", "the stand in plain name was written")
+    __units.targettarget = { exists = true, name = __SECRET_NAME, full = __SECRET_NAME }
+    fireTot()
+    type = realType
+    ok(rawequal(Tg().tot.label._text, __SECRET_NAME), "the secret reached SetText")
+    W.clean(); noFails("a secret name was compared against the cached name")
+end
+
+function T.a_target_of_target_name_on_a_client_that_applies_the_font_late_is_decided_from_the_full_name()
+    local W = world({ beforeLoad = withFullNames() })
+    target("Kurak")
+    local label = Tg().tot.label
+    local wmax = (Tg().C.TOT.w - 2 * Tg().C.TOT_PAD) * K()
+    local base = label._fontSize
+    __fontLag = true
+    __units.targettarget = { exists = true, name = "Father", full = "Father Stuart" }
+    fireTot()
+    -- a second name before the first font landed: its width is measured at a font that is not the one asked for
+    __units.targettarget = { exists = true, name = "Father", full = "Father Stu" }
+    fireTot()
+    for _ = 1, 3 do __flushTimers() end
+    eq(label._text, "Father Stu"); eq(label._fontSize, base, "back at the base size once the font landed")
+    __units.targettarget = { exists = true, name = "Bartholomew", full = "Bartholomew Oldlight" }
+    fireTot()
+    for _ = 1, 3 do __flushTimers() end
+    eq(label._text, "B. Oldlight")
+    ok(label:GetUnboundedStringWidth() <= wmax + 1e-6, "fits at the landed font")
+    __units.targettarget = { exists = true, name = "Father", full = "Father Stuart" }
+    fireTot()
+    for _ = 1, 3 do __flushTimers() end
+    eq(label._text, "Father Stuart", "an abbreviated name is not stuck: the full name is decided again")
+    ok(label:GetUnboundedStringWidth() <= wmax + 1e-6)
+    W.clean(); noFails()
+end
+
+function T.a_target_of_target_name_written_before_the_late_font_landed_is_decided_again_from_the_full_name()
+    local W = world({ beforeLoad = withFullNames() })
+    target("Kurak")
+    local label = Tg().tot.label
+    __fontLag = true
+    __units.targettarget = { exists = true, name = "Bartholomew", full = "Bartholomew Oldlight" }
+    fireTot()
+    -- the next name arrives before the font of the last one landed: it is measured at the wrong font and abbreviated
+    __units.targettarget = { exists = true, name = "Father", full = "Father Stuart" }
+    fireTot()
+    for _ = 1, 3 do __flushTimers() end
+    eq(label._text, "Father Stuart", "the abbreviated stand in is replaced once the font landed")
+    eq(label._fontSize, 11, "at the size that fits it")
+    ok(label:GetUnboundedStringWidth() <= (Tg().C.TOT.w - 2 * Tg().C.TOT_PAD) * K() + 1e-6)
+    W.clean(); noFails()
+end
+
+function T.each_late_font_write_in_its_own_frame_gets_its_own_re_decision()
+    local W = world({ beforeLoad = withFullNames() })
+    target("Kurak")
+    local label = Tg().tot.label
+    __fontLag = true
+    local function settle() for _ = 1, 3 do __flushTimers() end end
+    local function pair(first, second, want, size)
+        __units.targettarget = { exists = true, name = "x", full = first }
+        fireTot()
+        __units.targettarget = { exists = true, name = "x", full = second }
+        fireTot()
+        settle()
+        eq(label._text, want, "after " .. first .. " then " .. second)
+        eq(label._fontSize, size)
+    end
+    pair("Bartholomew Oldlight", "Father Stuart", "Father Stuart", 11)
+    pair("Father Stu", "Father Stu", "Father Stu", 14)
+    -- the first write's refit has run; a later write in a later frame needs its own
+    pair("Bartholomew Oldlight", "Father Stuart", "Father Stuart", 11)
+    W.clean(); noFails()
+end
+
+function T.a_late_font_that_keeps_changing_the_fit_is_re_decided_a_bounded_number_of_times()
+    local W = world({ beforeLoad = withFullNames() })
+    target("Kurak")
+    local label = Tg().tot.label
+    -- the label measures wide, then narrow, then wide again, frame after frame: every re-decision changes the size
+    __wfactor = 1
+    local R = getmetatable(UIParent)
+    local realWidth = R.GetUnboundedStringWidth
+    R.GetUnboundedStringWidth = function(self) return realWidth(self) * (self == label and __wfactor or 1) end
+    __fontLag = true
+    __units.targettarget = { exists = true, name = "x", full = "Father Stuart" }
+    fireTot()
+    local function frame(n) for _ = 1, n do __wfactor = (__wfactor == 1) and 0.4 or 1; __flushTimers() end end
+    frame(4)
+    local calls = __applyMonoCalls
+    frame(40)
+    eq(__applyMonoCalls, calls, "after the third step nothing is scheduled: no more SetFont, however many frames pass")
+    W.clean(); noFails()
+end
+
+function T.a_name_whose_fit_throws_is_not_left_cached_as_fitted()
+    local W = world({ beforeLoad = withFullNames() })
+    target("Kurak")
+    local label = Tg().tot.label
+    __units.targettarget = { exists = true, name = "x", full = "Father Stu" }
+    fireTot()
+    eq(label._text, "Father Stu")
+    local R = getmetatable(UIParent)
+    local realSetText = R.SetText
+    __boom = true
+    R.SetText = function(self, t)
+        if __boom and self == label and t == "Another Name" then error("SetText refused") end
+        return realSetText(self, t)
+    end
+    __units.targettarget = { exists = true, name = "x", full = "Another Name" }
+    fireTot()
+    eq(label._text, "Father Stu", "the failed write changed nothing")
+    __pcallFails = {}
+    __boom = false
+    fireTot()
+    eq(label._text, "Another Name", "the same name is fitted again, not skipped as already done")
+    W.clean(); noFails()
+end
+
+function T.the_target_of_target_label_is_built_with_one_font_and_a_fitting_name_sets_no_more()
+    local per = {}
+    local W = world({ beforeLoad = withFullNames(function()
+        local real = FS.Theme.ApplyMono
+        FS.Theme.ApplyMono = function(fs, ...) per[fs] = (per[fs] or 0) + 1; return real(fs, ...) end
+    end) })
+    target("Kurak")
+    local label = Tg().tot.label
+    __units.targettarget = { exists = true, name = "Father", full = "Father Stu" }
+    fireTot()
+    eq(per[label], 1, "NewTag's font only: the fit starts from the size the label was built at")
+    W.clean(); noFails()
+end
+
+function T.target_of_target_name_fit_does_not_set_the_font_per_event()
+    local W = world({ beforeLoad = withFullNames() })
+    target("Kurak")
+    __units.targettarget = { exists = true, name = "Bartholomew", full = "Bartholomew Oldlight" }
+    fireTot()
+    local calls = __applyMonoCalls
+    for _ = 1, 10 do fireTot() end
+    eq(__applyMonoCalls, calls, "ten identical events: no SetFont")
+    W.clean(); noFails()
+end
+
+function T.a_secret_target_of_target_name_is_not_measured_or_abbreviated()
+    local W = world({ beforeLoad = withFullNames() })
+    target("Kurak")
+    __units.targettarget = { exists = true, name = __SECRET_NAME, full = __SECRET_NAME }
+    fireTot()
+    ok(rawequal(Tg().tot.label._text, __SECRET_NAME), "SetText took it untouched")
+    W.clean(); noFails("a secret was measured or compared")
+end
+
+function T.the_target_of_target_falls_back_to_unit_name_without_the_shared_resolver()
+    local W = world()
+    target("Kurak")
+    FS.GetFullUnitName = nil
+    __units.targettarget = { exists = true, name = "Zed" }
+    fireTot()
+    eq(Tg().tot.label._text, "Zed", "UnitFrames.lua not loaded: UnitName")
+    W.clean(); noFails()
+end
+
 function T.a_secret_target_of_target_name_goes_straight_to_set_text()
     local W = world()
     target("Kurak")
@@ -1120,6 +1386,7 @@ def run_case(name: str, mu: dict, mb: dict, mt: dict) -> str | None:
     g.__gunsightSrc = TH.GUNSIGHT.read_text(encoding="utf-8")
     g.__tapeSrc = TH.TAPE.read_text(encoding="utf-8")
     g.__boxSrc = BH.BOXES.read_text(encoding="utf-8")
+    g.__fullNameSrc = full_name_source()
     g.__tagsSrc = TAGS.read_text(encoding="utf-8") if TAGS.exists() else "error('GunsightTags.lua is missing')"
     lua.execute("MU = " + TH.lua_value(mu))
     lua.execute("MB = " + TH.lua_value(mb))
@@ -1130,6 +1397,14 @@ def run_case(name: str, mu: dict, mb: dict, mt: dict) -> str | None:
     except LuaError as e:
         return str(e)
     return None
+
+
+def full_name_source() -> str:
+    """The real FS.GetFullUnitName block of UnitFrames.lua (the shared resolver), cut out so the tags run against it."""
+    text = (ADDON / "Modules/UnitFrames/UnitFrames.lua").read_text(encoding="utf-8")
+    m = _m(r"(?s)local function GetFullUnitName\(unit\)\n.*?\nend\nFS\.GetFullUnitName = GetFullUnitName\n", text,
+           "the GetFullUnitName resolver in UnitFrames.lua")
+    return m.group(0)
 
 
 def checks_source() -> str:
