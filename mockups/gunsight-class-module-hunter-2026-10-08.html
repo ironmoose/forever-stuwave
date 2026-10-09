@@ -1,0 +1,616 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1560">
+<title>Gunsight Class Module Hunter</title>
+<style>
+@font-face{font-family:'Mononoki';src:url(../forever-stuwave/Media/Fonts/MononokiNerdFontMono-Bold.ttf) format('truetype');font-weight:100 900;font-style:normal;font-display:block}
+:root{
+  color-scheme:dark;
+  --bg:#0d0620; --fg:#e9e2ff; --muted:#9d93c4; --white:#f3fbff; --text:#e2e8f0;
+  --violet:#a855f7; --cyan:#22e0ff; --pink:#ff2e97; --amber:#ffb648; --green:#39ff14;
+  --hunter:#abd473;
+  --track:#0a0416; --line:#3a2168;
+  --edge:rgba(168,85,247,.35);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg)}
+body{width:1560px;padding:28px 28px 40px;color:var(--fg);font-family:'Mononoki',ui-monospace,monospace;font-weight:700;line-height:1.45}
+h1{margin:0;font-size:30px;letter-spacing:.08em;color:var(--white);text-shadow:0 0 18px var(--violet);font-weight:700}
+.ref{display:inline-block;margin:10px 0 0;padding:2px 10px;font-size:13px;letter-spacing:.12em;color:var(--amber);border:1px solid rgba(255,182,72,.5);background:rgba(255,182,72,.06)}
+.sub{margin:10px 0 22px;color:var(--muted);font-size:15px;max-width:1450px}
+.sub b{color:var(--white);font-weight:700}
+h2{margin:34px 0 10px;font-size:20px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 14px var(--violet);font-weight:700}
+h2 i{font-style:normal;color:var(--pink)}
+.cols{display:grid;grid-template-columns:repeat(3,488px);gap:20px}
+.vt{font-size:22px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 14px var(--violet);margin:0 0 4px}
+.vt i{font-style:normal;color:var(--pink)}
+.vt .tagx{display:inline-block;margin-left:8px;padding:0 8px;font-size:11px;letter-spacing:.12em;vertical-align:middle;border:1px solid}
+.vt .win{color:var(--hunter);border-color:var(--hunter)}
+.vt .alt{color:var(--cyan);border-color:var(--cyan)}
+.vt .drop{color:var(--pink);border-color:var(--pink)}
+.cap{font-size:13px;line-height:1.5;color:var(--muted);margin:0 0 10px;min-height:118px}
+.cap b{color:var(--white);font-weight:700}
+.scene{position:relative;width:488px;height:568px;border:1px solid var(--edge);overflow:hidden;margin-bottom:12px}
+.scene svg{display:block}
+.state{position:absolute;left:8px;bottom:6px;z-index:2;font-size:11px;letter-spacing:.14em;color:var(--muted);padding:2px 8px;background:rgba(13,6,32,.7);border:1px solid rgba(168,85,247,.3)}
+.state b{color:var(--cyan);font-weight:700}
+.wide{position:relative;width:1000px;height:450px;border:1px solid var(--edge);overflow:hidden;flex:none}
+.wide svg{display:block}
+.row{display:flex;gap:26px;align-items:flex-start}
+.strip{display:grid;grid-template-columns:repeat(6,224px);gap:14px 8px;align-items:start}
+.sh{font-size:11px;letter-spacing:.1em;color:var(--cyan);line-height:1.3;margin-bottom:4px;min-height:30px}
+.sh small{display:block;color:var(--muted);font-size:10px;letter-spacing:.02em;margin-top:1px}
+.cell{width:224px;height:142px;border:1px solid var(--edge);background:rgba(13,6,32,.6)}
+.cell svg{display:block}
+.zoom{border:1px solid var(--edge);background:rgba(13,6,32,.6);width:606px;height:384px}
+.zoom svg{display:block}
+.zl{font-size:12px;letter-spacing:.1em;color:var(--cyan);margin:0 0 4px}
+.panel{position:relative;margin-top:14px;background:rgba(26,16,37,.96);border:1px solid var(--violet);padding:12px 18px 14px;clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px)}
+.panel h3{margin:0 0 6px;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--violet);font-weight:700}
+.panel p,.panel li{font-size:13px;line-height:1.5;color:var(--text);margin:0 0 6px}
+.panel ul,.panel ol{margin:0;padding-left:20px}
+.panel b{color:var(--white);font-weight:700}
+.panel .m{color:var(--muted)}
+.crit{margin-top:0}
+.crit p{margin:0 0 5px}
+.crit .v{margin-top:6px;padding-top:6px;border-top:1px solid rgba(168,85,247,.3)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th{font-weight:700;text-align:left;color:var(--violet);font-size:11px;letter-spacing:.08em;text-transform:uppercase;padding:4px 8px;border-bottom:1px solid rgba(168,85,247,.4)}
+td{padding:5px 8px;border-bottom:1px solid rgba(58,33,104,.5);vertical-align:top;color:var(--text);line-height:1.4}
+td.k{color:var(--white);white-space:nowrap}
+.ok{color:var(--green)} .est{color:var(--amber)} .no{color:var(--pink)} .unv{color:var(--cyan)}
+a{color:var(--cyan);text-decoration:none}
+.src{font-size:11px;color:var(--muted);word-break:break-all}
+</style>
+</head>
+<body>
+<h1>GUNSIGHT CLASS MODULE, HUNTER</h1>
+<div class="ref">Design reference, 2026-10-08, Hunter</div>
+<div class="sub">The Hunter <b>Class Module</b> does not copy the Paladin Seal shape. Three divergent concepts were drawn from what a Forever Hunter really does: <b>stand still for the last half second of every Auto Shot, stay out of the dead zone, keep your shots and stings rolling</b>. Each is drawn in-situ on the approved v7 target side (here in the lower area, Target Debuffs Horizontal above). One concept is dropped, one is pushed further, and the best idea from each of the others is folded into the pick. Research: adze doc <b>01M4F7MDKTAA2F3CX1GB8J4RH9</b>.</div>
+<div id="root"></div>
+
+<div id="notes">
+<h2><i>5</i> NOTES</h2>
+<div class="two">
+<div class="panel"><h3>Why DRAW and not the other two</h3>
+<ul>
+<li><b>It is the only concept whose picture IS the mechanic.</b> A Forever Auto Shot is a draw: the timer runs, then you stop for the last 0.5 s, then it releases. The string pulling back, the amber full draw and the release are the Auto Shot cycle, not a gauge that happens to be about it.</li>
+<li><b>It carries the whole Hunter problem in one silhouette.</b> Bow = shot timing. Bullseye sliding along the flight lane = melee / dead zone / shot range. Venom ring and mark ticks on the bullseye = Serpent Sting and Hunter's Mark. Two quiver tiles = the two real cooldown groups (Aimed + Multi, Arcane + Hawk) and ammo.</li>
+<li><b>Nothing else in the HUD is a bow.</b> The Paladin is a drain bar, the Warlock shards, the Rogue pips. LOCK reads as a radial cooldown with a crosshair, which every shooter HUD has.</li>
+<li><b>Taken from LOCK:</b> the blind dead zone (red hatch) is now the red hatch in the flight lane and the red bow. <b>Taken from PACK:</b> for a Beast Mastery Hunter the ARC tile turns into HWK with two hawk pips (Summon Hawk shares Arcane Shot's cooldown, max two hawks).</li>
+</ul>
+</div>
+<div class="panel"><h3>Open questions</h3>
+<ol>
+<li>Is the 0.5 s wind-up in the live build? Blizzard says the near zero wind-up is a bug (2026-09-23) and the Oct 1 and Oct 8 notes do not list a fix. If it ships as is, HOLD collapses to nothing and the module is a pure "AIM NOW" cue. Is that acceptable, or should HOLD stay as a 0.5 s hint anyway?</li>
+<li>AIM NOW assumes Aimed Shot (2.0 s cast) started with less than 2.0 s to the next shot delays Auto Shot, as in Classic. <span class="unv">UNVERIFIED on Forever.</span> If Forever lets Auto Shot fire during the cast (early beta reports say so), the AIM zone should become "any time".</li>
+<li>Melee swings reset the ranged timer (Wrath rule, Blizzard says intended, another post says bug). The module cannot see a melee swing in combat, so the draw will be wrong until the next shot resyncs it. Show nothing special, or fade the bow for 1 s after a melee ability?</li>
+<li>The caption chooses between AIM NOW, ARC READY and DRAWING. Is that too close to a rotation prompt for the module, which today only reports state?</li>
+<li>Config: one Class Module, no option? A "show dead zone lane" toggle for Survival players who live in melee?</li>
+</ol>
+</div>
+</div>
+
+<div class="panel"><h3>Data source per element, and feasibility under secrecy</h3>
+<p class="m">Legend: <span class="ok">OK</span> plain and usable, <span class="est">EST</span> estimate from the addon's own casts, <span class="no">NO</span> not obtainable in combat, <span class="unv">PROBE</span> needs a client check before it is built. Known client facts: target auras and health are secret in combat, player mana is secret even out of combat, cooldown ready state and usability are plain, seconds are secret (estimate from own cast), SPELL_ACTIVATION_OVERLAY_GLOW_SHOW/HIDE and UNIT_SPELLCAST_SUCCEEDED carry plain spell ids, own debuffs come from the own-cast ledger (TargetDebuffs.lua).</p>
+<table>
+<tr><th>Element</th><th>Data path</th><th>Under secrecy</th></tr>
+<tr><td class="k">Draw position, time to next shot</td><td>Stamp <code>shotAt</code> on UNIT_SPELLCAST_SUCCEEDED for the player with the Auto Shot spell id (75 in Classic; match by name too, as HudLogic does). Period from <code>UnitRangedDamage("player")</code> first return (ranged speed, already hasted). Remaining = shotAt + period - GetTime(), clamped. Resync on every shot. Alternative: read Blizzard's native ranged swing timer if it is a frame or API (the two Forever timer addons overlay it).</td><td><span class="unv">PROBE</span> that the event fires for Auto Shot and carries a plain id; that UnitRangedDamage is plain in combat. Between shots it is <span class="est">EST</span>: a melee swing, a failed attempt or a haste proc moves the true time and is only corrected at the next shot.</td></tr>
+<tr><td class="k">HOLD (last 0.5 s)</td><td>Constant 0.5 s divided by the same haste multiplier as the period. Collapses to zero width if the wind-up is not in the build (decided by a one time observation: does UNIT_SPELLCAST_START fire for Auto Shot, or how long after START_AUTOREPEAT_SPELL does the first shot land).</td><td><span class="unv">PROBE</span> whether the wind-up exists in the live build. Pure arithmetic once known.</td></tr>
+<tr><td class="k">AIM NOW zone</td><td>Remaining time at least Aimed Shot's cast time (read at build from C_Spell.GetSpellInfo castTime, 2.0 s) AND the Aimed/Multi group ready. Group readiness from the shared cooldown: HudLogic CooldownState (isActive is plain in combat; seconds secret), plus a ledger that stamps both spells when either is cast.</td><td><span class="est">EST</span> The GCD ambiguity HudLogic already documents applies (isActive during the GCD is untested). Clip behavior itself is <span class="unv">PROBE</span>.</td></tr>
+<tr><td class="k">ARC tile / HWK tile</td><td>Arcane Shot group (shares with Summon Hawk, 6 s): same cooldown path. Hawk pips: own-cast ledger, +1 per Summon Hawk cast, each expires after 18 s, max 2.</td><td><span class="est">EST</span> a hawk that dies early is invisible.</td></tr>
+<tr><td class="k">Range lane (melee / dead / shot / far)</td><td>C_Spell.IsSpellInRange(Raptor Strike, "target") true = melee; IsSpellInRange(Auto Shot) true = shot; both false: CheckInteractDistance("target", 3) (about 10 yd) true = dead zone, else far. If dead and far cannot be told apart, collapse to one NO SHOT state.</td><td><span class="unv">PROBE</span> that these return plain booleans in combat on a hostile target. The two Forever timer addons show a red/green range state, so some range answer is readable.</td></tr>
+<tr><td class="k">Serpent Sting ring</td><td>FS.TargetDebuffs entry "Serpent Sting" (needs a HUNTER row in CLASS_DEBUFFS: Hunter's Mark, Serpent Sting, Wing Clip, Concussive Shot, Scorpid Sting). Duration 15 s assumed from Classic, learned from the last readable snapshot.</td><td><span class="est">EST</span> in combat (a resisted cast counts as up). Exact out of combat. Duration on Forever <span class="unv">UNVERIFIED</span>.</td></tr>
+<tr><td class="k">Hunter's Mark ticks</td><td>Same ledger, "Hunter's Mark". Long duration, so only present or absent is drawn, no time.</td><td><span class="est">EST</span>. Mark cast by another Hunter is not seen in combat (shared aura).</td></tr>
+<tr><td class="k">Ammo count</td><td>GetInventoryItemCount("player", ammo slot) (the quiver and pouch are a bag slot in Forever), refreshed on BAG_UPDATE / UNIT_INVENTORY_CHANGED. LOW under 40, NO AMMO at 0 (the bow will not draw).</td><td><span class="unv">PROBE</span> that the ammo slot and count are plain; ammo slot index on Forever.</td></tr>
+<tr><td class="k">Auto Shot on / off</td><td>START_AUTOREPEAT_SPELL / STOP_AUTOREPEAT_SPELL events and IsAutoRepeatSpell, so a stopped Auto Shot reads AUTO SHOT OFF instead of a frozen draw.</td><td><span class="unv">PROBE</span> that the events fire for Auto Shot on this client.</td></tr>
+<tr><td class="k">Haste proc tag</td><td>No aura read: the period from UnitRangedDamage shrinks, so the rail rescales and the HASTE tag shows when period < 0.85 x base. Rapid Fire and Deadly Aspects look the same.</td><td><span class="est">EST</span> only noticed at the next read.</td></tr>
+<tr><td class="k">Aspect of the Hawk missing</td><td>Not in the module. It rides My buffs and the reminder chip under the cast bar (as Battle Shout does for the Warrior): player aura snapshot out of combat, own-cast ledger in combat.</td><td><span class="est">EST</span> a cancelled aspect mid fight is not seen until auras read again.</td></tr>
+<tr><td class="k">Pet</td><td>Not in the module. The Gunsight pet component owns pet health and state.</td><td><span class="ok">OK</span></td></tr>
+<tr><td class="k">Spec flavor (HWK label)</td><td>IsPlayerSpell(Summon Hawk) at build; the Sniper Shot and Lone Wolf variants do not change the module.</td><td><span class="ok">OK</span></td></tr>
+</table>
+</div>
+
+<div class="panel"><h3>Spell and mechanic verification, WoW Forever, level 30 or below</h3>
+<p class="m">Checked 2026-10-08 (beta build 1.60.1.70205, Oct 1 and Oct 8 notes). Wowhead Forever guide pages returned guide text; spell numbers rest on the Forever sources below. Not read in game.</p>
+<table>
+<tr><th>Item</th><th>Status</th><th>What is confirmed</th><th>Source</th></tr>
+<tr><td class="k">Auto Shot wind-up</td><td class="est">DESIGN CONFIRMED, BUILD NOT</td><td>0.5 s cast before each shot, must stand still; the shorter cast in the beta is a bug, fix "upcoming" (not in the Oct 1 or Oct 8 notes). Cooldown after the shot lets you move.</td><td class="src"><a href="https://us.forums.blizzard.com/en/wow/t/auto-shoot-bug-and-fix-incoming/2359185">us.forums.blizzard.com/.../auto-shoot-bug-and-fix-incoming/2359185</a><br><a href="https://www.icy-veins.com/wow-forever/news/class-and-item-tuning-many-fixes-new-dungeon-xp-buffs-wow-forever-beta-update-notes-october-8th/">icy-veins.com/wow-forever/news/...october-8th</a></td></tr>
+<tr><td class="k">Native swing timer</td><td class="ok">VERIFIED</td><td>Forever has a ranged swing timer (Advanced options, Swing Timers). Two addons add a 500 ms stop-moving marker and a melee / dead zone / ranged colour on top, so players do watch it.</td><td class="src"><a href="https://www.curseforge.com/wow/addons/improved-auto-shot-timer">curseforge.com/wow/addons/improved-auto-shot-timer</a><br><a href="https://www.curseforge.com/wow/addons/hunter-autoshot-forever">curseforge.com/wow/addons/hunter-autoshot-forever</a></td></tr>
+<tr><td class="k">Linked melee / ranged timers</td><td class="est">CONFLICTING</td><td>Blizzard post: a melee swing resets the ranged timer and Auto Shot resets melee, intended, matches 3.3.5; abilities do not. A podcast reply calls the melee delay a bug. Melee weaving is mostly dead either way.</td><td class="src"><a href="https://us.forums.blizzard.com/en/wow/t/auto-shoot-bug-and-fix-incoming/2359185?page=4">...auto-shoot-bug-and-fix-incoming/2359185?page=4</a></td></tr>
+<tr><td class="k">Dead zone</td><td class="ok">VERIFIED (present)</td><td>Minimum ranged distance 8 yd to the target center (about 11 yd on a player sized target), melee about 5 yd. Still there per the podcast and players. Ranged / melee do not auto swap.</td><td class="src"><a href="https://wowclassicforever.info/classes/hunter/">wowclassicforever.info/classes/hunter</a><br><a href="https://github-wiki-see.page/m/classic-hunter/forever-hunter/wiki/Shot-Mechanics">classic-hunter/forever-hunter wiki, Shot Mechanics (written for Classic)</a></td></tr>
+<tr><td class="k">Aimed Shot</td><td class="ok">VERIFIED</td><td>Trainer ability at 20 for all Hunters, 2 s cast, 6 s cooldown shared with Multi-Shot. Arcane Shot is independent.</td><td class="src"><a href="https://classicwow.gg/forever/guides/hunter">classicwow.gg/forever/guides/hunter</a><br><a href="https://classicwowforever.com/class-guide/hunter/">classicwowforever.com/class-guide/hunter</a></td></tr>
+<tr><td class="k">Multi-Shot</td><td class="ok">VERIFIED</td><td>Level 18, one rank, 0.5 s cast, 6 s cooldown, 13.9 percent of base mana.</td><td class="src"><a href="https://wowclassicforever.info/classes/hunter/">wowclassicforever.info/classes/hunter</a></td></tr>
+<tr><td class="k">Summon Hawk</td><td class="ok">VERIFIED</td><td>BM talent, 80 mana, instant, 6 s cooldown shared with Arcane Shot, 18 s hawk, max two hawks. Available by level 25.</td><td class="src"><a href="https://www.wowhead.com/forever/guide/classes/hunter/beast-mastery/level-30-dps-overview">wowhead.com/forever/guide/.../beast-mastery/level-30-dps-overview</a></td></tr>
+<tr><td class="k">Serpent Sting / Hunter's Mark</td><td class="est">LEVELS VERIFIED, DURATION NOT</td><td>Serpent Sting level 4 (8 ranks), Hunter's Mark level 6 (4 ranks). Wowhead rotation: Mark if you have time, Sting and refresh when needed. Durations on Forever were not found; 15 s assumed for the Sting.</td><td class="src"><a href="https://wowclassicforever.info/classes/hunter/">wowclassicforever.info/classes/hunter</a></td></tr>
+<tr><td class="k">Haste</td><td class="ok">VERIFIED</td><td>Deadly Aspects: under Aspect of the Hawk, Auto Shot has up to 10 percent chance (5 ranks) of +30 percent ranged speed for 12 s. Rapid Fire at 26 speeds both cast and cooldown.</td><td class="src"><a href="https://classicwow.gg/forever/guides/hunter">classicwow.gg/forever/guides/hunter</a></td></tr>
+<tr><td class="k">Ammo</td><td class="ok">VERIFIED</td><td>Quiver or ammo pouch still takes a bag slot; ammo consumption was fixed in build 70009.</td><td class="src"><a href="https://www.wowhead.com/forever/guide/classes/hunter/beast-mastery/overview-pve-dps">wowhead.com/forever/guide/.../beast-mastery/overview-pve-dps</a><br><a href="https://theforeverera.com/en/guides/classes/hunter/">theforeverera.com/en/guides/classes/hunter</a></td></tr>
+<tr><td class="k">Spell ids, aura names</td><td class="unv">UNVERIFIED</td><td>Auto Shot 75, English aura names "Serpent Sting", "Hunter's Mark" are Classic values, not read from the client. Match by name, as HudLogic does.</td><td class="src">in game check</td></tr>
+</table>
+</div>
+</div>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <filter id="gl" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.1" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="gls" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b0716"/><stop offset=".62" stop-color="#150d28"/><stop offset="1" stop-color="#1c1030"/></linearGradient>
+    <radialGradient id="glowL" cx="22%" cy="108%" r="55%"><stop offset="0" stop-color="#3a2160"/><stop offset="1" stop-color="#3a2160" stop-opacity="0"/></radialGradient>
+    <radialGradient id="glowR" cx="85%" cy="0%" r="60%"><stop offset="0" stop-color="#1d1840"/><stop offset="1" stop-color="#1d1840" stop-opacity="0"/></radialGradient>
+    <linearGradient id="streak" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ffffff" stop-opacity=".95"/><stop offset="1" stop-color="#22e0ff" stop-opacity="0"/></linearGradient>
+  </defs>
+</svg>
+<script>
+(function(){
+var C={cyan:'#22e0ff',pink:'#ff2e97',violet:'#a855f7',green:'#39ff14',amber:'#ffb648',white:'#f3fbff',muted:'#9d93c4',fg:'#e9e2ff',bg:'#0d0620',gold:'#ffd23f'};
+function hex(h){h=h.replace('#','');return [parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)];}
+function mix(a,b,t){var x=hex(a),y=hex(b);return '#'+[0,1,2].map(function(i){return ('0'+Math.round(x[i]+(y[i]-x[i])*t).toString(16)).slice(-2);}).join('');}
+function ch(x,y,w,h,c){return (x+c)+','+y+' '+(x+w)+','+y+' '+(x+w)+','+(y+h-c)+' '+(x+w-c)+','+(y+h)+' '+x+','+(y+h)+' '+x+','+(y+c);}
+function txt(x,y,s,size,fill,o){o=o||{};
+  return '<text x="'+x+'" y="'+y+'" font-size="'+size+'" fill="'+fill+'" text-anchor="'+(o.a||'start')+'"'+(o.op?' opacity="'+o.op+'"':'')+(o.rot?' transform="rotate('+o.rot+' '+x+' '+y+')"':'')+
+    ' stroke="rgba(13,6,32,.92)" stroke-width="2.6" paint-order="stroke" stroke-linejoin="round">'+s+'</text>';}
+function line(x1,y1,x2,y2,col,op,w,dash){return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="'+(w||1)+'"'+(dash?' stroke-dasharray="'+dash+'"':'')+'/>';}
+function chevPath(cx,ay,hw,d,t){return cx+','+ay+' '+(cx+hw)+','+(ay+d)+' '+(cx+hw)+','+(ay+d+t)+' '+cx+','+(ay+t)+' '+(cx-hw)+','+(ay+d+t)+' '+(cx-hw)+','+(ay+d);}
+function rect(x,y,w,h,fill,op){return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" fill="'+fill+'"'+(op!=null?' fill-opacity="'+op+'"':'')+'/>';}
+var TOP=508,TBOT=752,PITCH=(TBOT-TOP)/10,N=20,CP=(TBOT-TOP)/N;
+var HZ=630;
+
+function chipIcon(x,y,s,d,absent){
+  var c=Math.max(2,Math.round(s/6)),o='';
+  if(absent){
+    return '<polygon points="'+ch(x,y,s,s,c)+'" fill="rgba(13,6,32,.7)" stroke="'+mix(C.muted,'#ffffff',.25)+'" stroke-opacity=".9" stroke-width="1.2"/>'+
+      '<text x="'+(x+s/2)+'" y="'+(y+s/2+s*.18)+'" font-size="'+Math.round(s*.5)+'" fill="'+mix(C.muted,'#ffffff',.25)+'" fill-opacity=".8" text-anchor="middle">'+d.ab+'</text>';
+  }
+  o+='<polygon points="'+ch(x,y,s,s,c)+'" fill="'+mix(d.c,C.bg,.35)+'"/>';
+  o+='<polygon points="'+ch(x,y,s,s*.45,c)+'" fill="'+mix(d.c,'#ffffff',.35)+'" opacity=".3"/>';
+  o+='<polygon points="'+ch(x,y,s,s,c)+'" fill="none" stroke="'+mix(d.c,'#ffffff',.3)+'" stroke-width="1.2"/>';
+  o+='<text x="'+(x+s/2)+'" y="'+(y+s/2+s*.18)+'" font-size="'+Math.round(s*.5)+'" fill="'+C.white+'" text-anchor="middle">'+d.ab+'</text>';
+  return o;
+}
+/* ---------- the shared v7 composition ---------- */
+function bar(x0,x1,col,p,out,caretCol){
+  var o='',cx=(x0+x1)/2,k,i;
+  o+='<polygon points="'+ch(x0,500,x1-x0,260,8)+'" fill="rgba(13,6,32,.55)" fill-opacity=".45"/>';
+  o+='<polygon points="'+ch(x0,500,x1-x0,260,8)+'" fill="none" stroke="'+col+'" stroke-width="1.3" filter="url(#gls)"/>';
+  var ex=out<0?x0:x1;
+  for(k=0;k<=10;k++){var ty=TBOT-k*PITCH;o+=line(ex,ty,ex+out*(k===5?10:5),ty,col,.75,1.2);}
+  for(i=0;i<N;i++){
+    var ay=TBOT-(i+1)*CP,lit=(i+1)/N<=p;
+    o+='<polygon points="'+chevPath(cx,ay,10,8,5.5)+'" fill="'+col+'" fill-opacity="'+(lit?1:.2)+'"'+(lit?' filter="url(#gls)"':'')+'/>';
+  }
+  var fy=TBOT-p*(TBOT-TOP);
+  o+='<polygon points="'+chevPath(cx,fy-17,13,9,7)+'" fill="none" stroke="'+caretCol+'" stroke-width="1.8" stroke-linejoin="miter"/>';
+  return o;
+}
+function box(x,y,w,h,col){
+  return '<polygon points="'+ch(x,y,w,h,8)+'" fill="rgba(13,6,32,.85)"/>'+
+    '<polygon points="'+ch(x,y,w,h,8)+'" fill="none" stroke="'+col+'" stroke-width="1.4" filter="url(#gl)"/>';
+}
+function brackets(x,y,w,h,col,op,a){
+  a=a||12;var s='';
+  [[x,y+a,x,y,x+a,y],[x+w-a,y,x+w,y,x+w,y+a],[x,y+h-a,x,y+h,x+a,y+h],[x+w-a,y+h,x+w,y+h,x+w,y+h-a]].forEach(function(q){
+    s+='<polyline points="'+q[0]+','+q[1]+' '+q[2]+','+q[3]+' '+q[4]+','+q[5]+'" fill="none" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="1.6"/>';});
+  return s;
+}
+function party(){
+  var o='',x=606,y=506,w=180,h=230;
+  o+=brackets(x,y,w,h,C.cyan,.6,12);
+  var rows=[['Parker',.82,C.green],['Thalia',.55,C.green],['Brogan',.18,'#ff3b4e'],['Mira',.95,C.green],['Jex',.70,C.green]];
+  var rh=(h-16)/5;
+  rows.forEach(function(r,i){
+    var ry=y+8+i*rh;
+    if(i>0)o+=line(x+8,ry,x+w-8,ry,C.violet,.2,1);
+    o+=txt(x+12,ry+14,r[0],11,i===0?C.cyan:C.white);
+    o+=rect(x+12,ry+20,w-24,5,r[2],.18)+rect(x+12,ry+20,(w-24)*r[1],5,r[2],1);
+    o+=rect(x+12,ry+27,w-24,3,'#4aa8ff',.18)+rect(x+12,ry+27,(w-24)*.7,3,'#4aa8ff',1);
+  });
+  o+='<polygon points="'+ch(578,y+8+2*rh+8,22,22,4)+'" fill="'+mix('#a05030',C.bg,.35)+'" stroke="'+C.amber+'" stroke-width="1.2"/><text x="589" y="'+(y+8+2*rh+8+16)+'" font-size="12" fill="'+C.white+'" text-anchor="middle">P</text>';
+  return o;
+}
+function tag(x,y,w,html,col){
+  return '<polygon points="'+ch(x,y,w,15,5)+'" fill="rgba(13,6,32,.95)" stroke="'+C.pink+'" stroke-width="1.3" filter="url(#gls)"/>'+
+    '<text x="'+(x+w/2)+'" y="'+(y+11)+'" font-size="11" fill="'+col+'" text-anchor="middle">'+html+'</text>';
+}
+function base(S){
+  var o='',X=480,Y=380,W=1000,H=450;
+  o+=rect(X,Y,W,H,'url(#sky)')+rect(X,Y,W,H,'url(#glowL)')+rect(X,Y,W,H,'url(#glowR)');
+  o+='<g fill="rgba(120,96,190,.16)" stroke="'+C.violet+'" stroke-opacity=".35" stroke-dasharray="4 4" stroke-width="1">'+
+     '<circle cx="995" cy="540" r="24"/><rect x="953" y="570" width="84" height="100" rx="20"/>'+
+     '<rect x="962" y="664" width="30" height="88" rx="8"/><rect x="998" y="664" width="30" height="88" rx="8"/>'+
+     '<rect x="926" y="576" width="24" height="86" rx="10"/><rect x="1040" y="576" width="24" height="86" rx="10"/></g>';
+  o+='<ellipse cx="995" cy="752" rx="112" ry="26" fill="rgba(80,70,230,.12)" stroke="#5b57e8" stroke-opacity=".6" stroke-width="2"/>';
+  o+=line(838,HZ,1150,HZ,C.violet,.3,1,'6 6');
+  o+=party();
+  /* your side: the Hunter is mid Aimed Shot */
+  o+=bar(796,826,C.cyan,.55,-1,C.white);
+  o+=box(724,424,114,56,C.cyan);
+  o+=txt(731,447,'AIMED SHOT',13,C.white)+txt(731,469,'1.1 / 2.0',18,C.cyan);
+  o+='<polygon points="'+ch(844,438,28,28,5)+'" fill="rgba(13,6,32,.9)" stroke="'+C.cyan+'" stroke-width="1.3"/><text x="858" y="457" font-size="13" fill="'+C.cyan+'" text-anchor="middle">AS</text>';
+  if(S.next!==false){o+='<polygon points="'+ch(672,430,44,44,6)+'" fill="rgba(13,6,32,.85)" stroke="'+C.cyan+'" stroke-opacity=".8" stroke-width="1.2"/><text x="694" y="458" font-size="13" fill="'+C.cyan+'" text-anchor="middle">NX</text>';}
+  /* target side: a level 22 beast, no ToT prefix */
+  o+=bar(1164,1194,C.pink,.45,1,C.pink);
+  o+=box(1152,416,114,64,C.pink);
+  o+=txt(1159,436,'Dire Wolf',14,C.white);
+  o+=rect(1159,440,100,3,'#39ff14',.2)+rect(1159,440,62,3,'#39ff14')+rect(1159,445,100,2,'#4aa8ff',.2)+rect(1159,445,70,2,'#4aa8ff');
+  o+=line(1159,453,1259,453,C.pink,.4,1.2)+txt(1159,469,'Enrage',14,C.pink);
+  o+=tag(1226,408,36,'KICK',C.pink);
+  o+='<polygon points="'+ch(1118,438,28,28,5)+'" fill="rgba(13,6,32,.9)" stroke="'+C.pink+'" stroke-width="1.3"/><text x="1132" y="457" font-size="13" fill="'+C.pink+'" text-anchor="middle">DW</text>';
+  return o;
+}
+function tags(){
+  var o='';
+  o+=tag(1153,408,36,'L22',C.white);
+  o+=tag(1156,473,32,'62%',C.green);
+  o+=tag(1193,473,69,'<tspan fill="'+C.cyan+'">BRUTUS</tspan>',C.white);
+  return o;
+}
+var BUFFS_HU=[
+  {k:'AH',c:'#c9a227',t:'ASP'},          /* Aspect of the Hawk, no timer */
+  {k:'WF',c:'#d9a521',t:'38m'},
+  {k:'AI',c:'#4aa8ff',t:'47m',party:true},
+  {k:'MW',c:'#5fb04a',t:'52m',party:true}
+];
+function buffs(noAspect){
+  var o='',x0=498,w=164;
+  o+='<polygon points="'+ch(x0,424,w,56,6)+'" fill="rgba(13,6,32,.7)"/><polygon points="'+ch(x0,424,w,56,6)+'" fill="none" stroke="'+C.cyan+'" stroke-opacity=".75" stroke-width="1.2" filter="url(#gls)"/>';
+  BUFFS_HU.forEach(function(d,i){
+    if(noAspect&&i===0)return;
+    var j=noAspect?i-1:i,x=x0+6+j*38;
+    o+='<g>'+chipIcon(x+4,430,24,{ab:d.k,c:d.c},false)+'</g>';
+    if(d.party)o+='<circle cx="'+(x+28)+'" cy="432" r="3.2" fill="'+C.cyan+'" stroke="'+C.bg+'" stroke-width="1"/>';
+    o+=txt(x+16,470,d.t,12,C.white,{a:'middle'});
+  });
+  return o;
+}
+function slotDivider(x1){return line(1204,HZ,1227,HZ,C.violet,.85,1.2)+line(1227,HZ,x1,HZ,C.violet,.4,1);}
+function dotsH(list,lower){
+  var o='',k,ytop=lower?HZ:TOP,k0=lower?0:5,k1=lower?4:10;
+  for(k=k0;k<=k1;k++){var ty=TBOT-k*PITCH;
+    if(k<10)o+=line(1204,ty,1213,ty,C.pink,.45,1);
+    o+=line(1213,ty,1344,ty,C.violet,k===5?.55:.12,1);}
+  list.forEach(function(d,j){
+    var cy=ytop+PITCH*(j+.5),abs=d.rem<=0,band=!abs&&d.rem<=3,col=band?C.amber:mix(d.c,'#ffffff',.25);
+    o+=chipIcon(1220,cy-10,20,d,abs);
+    if(abs){o+=txt(1246,cy+4.5,'--',13,C.muted,{op:.7});o+=rect(1274,cy-2,52,4,C.muted,.18);}
+    else{
+      o+=txt(1246,cy+4.5,(d.rem<3?d.rem.toFixed(1):Math.round(d.rem))+'s',13,band?C.amber:C.white);
+      o+=rect(1274,cy-2,52,4,col,.2)+rect(1274,cy-2,52*d.rem/30,4,col);
+    }
+  });
+  return o;
+}
+/* Serpent Sting and Hunter's Mark live in the module, so Target Debuffs hides them (as it hides Judgement for the Paladin) */
+var HDEB=[
+  {ab:'WC',c:'#7fa0c4',rem:7},     /* Wing Clip */
+  {ab:'CS',c:'#4a9de0',rem:2.4},   /* Concussive Shot */
+  {ab:'SC',c:'#c4a52a',rem:17}     /* Scorpid Sting */
+];
+
+/* ======================================================================
+   HUNTER CLASS MODULES. Everything below is new; everything above is v7.
+   Module origin x=1220, y0 = area top (500 upper, 632 lower), 188 wide.
+   ====================================================================== */
+var HG='#abd473', RED='#ff3b4e', BLUE='#4aa8ff', STG='#6fe05a';
+var X0=1220, W0=188;
+function nm(n){return n.toFixed(1)+'s';}
+
+/* ---- A: DRAW. A bow whose string draws back as the Auto Shot cycle runs; the bullseye slides along the flight lane with range. ---- */
+function qtile(x,y,lab,ready,cd,pips,extra){
+  var p=ch(x,y,30,22,4),o='';
+  if(ready){
+    o+='<polygon points="'+p+'" fill="'+mix(C.bg,HG,.28)+'"/>';
+    o+='<polygon points="'+p+'" fill="none" stroke="'+HG+'" stroke-width="1.4" filter="url(#gls)"/>';
+    o+=txt(x+15,y+14.5,lab,10,C.white,{a:'middle'});
+  }else{
+    o+='<polygon points="'+p+'" fill="rgba(13,6,32,.7)"/>';
+    o+='<polygon points="'+p+'" fill="none" stroke="'+mix(C.muted,'#ffffff',.2)+'" stroke-opacity=".8" stroke-width="1.1" stroke-dasharray="3 2"/>';
+    o+=txt(x+15,y+14.5,lab,10,C.muted,{a:'middle',op:.9});
+    if(cd>0)o+=rect(x+3,y+17.5,24*cd,2,HG,.75);
+  }
+  for(var k=0;k<(pips||0);k++)o+='<circle cx="'+(x+22-k*8)+'" cy="'+(y-3.5)+'" r="2.3" fill="'+HG+'" stroke="'+C.bg+'" stroke-width=".8"/>';
+  return o;
+}
+function bullseye(cx,cy,s,zone){
+  var o='',far=zone==='far';
+  if(!s.tgt){
+    return '<circle cx="'+cx+'" cy="'+cy+'" r="8" fill="none" stroke="'+C.muted+'" stroke-opacity=".4" stroke-dasharray="3 3"/>'+
+           '<circle cx="'+cx+'" cy="'+cy+'" r="3.5" fill="none" stroke="'+C.muted+'" stroke-opacity=".3"/>';
+  }
+  var R=14.5,circ=2*Math.PI*R,sec=s.sting||0;
+  /* sting ring, 15 s */
+  if(sec>0){
+    var col=sec<=3?C.amber:STG,len=Math.min(1,sec/15)*circ;
+    o+='<circle cx="'+cx+'" cy="'+cy+'" r="'+R+'" fill="none" stroke="'+col+'" stroke-opacity=".16" stroke-width="2.6"/>';
+    o+='<circle cx="'+cx+'" cy="'+cy+'" r="'+R+'" fill="none" stroke="'+col+'" stroke-width="2.6" stroke-dasharray="'+len.toFixed(1)+' '+circ.toFixed(1)+'" transform="rotate(-90 '+cx+' '+cy+')"'+(sec<=3?' filter="url(#gls)"':'')+'/>';
+  }else{
+    o+='<circle cx="'+cx+'" cy="'+cy+'" r="'+R+'" fill="none" stroke="'+C.muted+'" stroke-opacity=".55" stroke-width="1.1" stroke-dasharray="2 3"/>';
+  }
+  /* mark ticks */
+  [[0,-1],[1,0],[0,1],[-1,0]].forEach(function(d){
+    var x1=cx+d[0]*9,y1=cy+d[1]*9,x2=cx+d[0]*12.2,y2=cy+d[1]*12.2;
+    o+=s.mark?line(x1,y1,x2,y2,C.pink,1,1.8):line(x1,y1,x2,y2,C.muted,.5,1.2,'1.5 1.5');
+  });
+  o+='<circle cx="'+cx+'" cy="'+cy+'" r="7" fill="rgba(255,46,151,.1)" stroke="'+C.pink+'" stroke-width="1.5" stroke-opacity="'+(far?.55:1)+'"'+(far?' stroke-dasharray="3 2"':'')+'/>';
+  o+='<circle cx="'+cx+'" cy="'+cy+'" r="3.4" fill="none" stroke="'+C.pink+'" stroke-opacity=".7" stroke-width="1.1"/>';
+  o+='<circle cx="'+cx+'" cy="'+cy+'" r="1.6" fill="'+C.pink+'"/>';
+  return o;
+}
+function bowMod(y0,s){
+  var o='',S=s.S||2.7,r=s.r,i,zone=s.zone||'shot';
+  var tm=(r!=null)&&!s.off&&s.ammo!==0;
+  var blocked=zone!=='shot';
+  var HW=s.nohold?0:0.5;
+  var hold=tm&&!blocked&&r<=HW;
+  var aimok=tm&&!blocked&&r>=2.0&&S>2.0&&s.aim;
+  var dim=!tm||zone==='melee';
+  var f=tm?1-r/S:0;
+  var bc=hold?C.amber:(zone==='dead'?RED:(zone==='far'?mix(C.muted,'#ffffff',.2):HG));
+  /* the caption: the one thing to do now */
+  var word,wcol=C.white;
+  if(s.ammo===0){word='NO AMMO';wcol=RED;}
+  else if(s.off){word='AUTO SHOT OFF';wcol=C.muted;}
+  else if(!s.tgt){word='NO TARGET';wcol=C.muted;}
+  else if(zone==='melee'){word='IN MELEE';wcol=BLUE;}
+  else if(zone==='dead'){word='TOO CLOSE';wcol=RED;}
+  else if(zone==='far'){word='OUT OF RANGE';wcol=C.muted;}
+  else if(r==null){word='TIMER ?';wcol=C.muted;}
+  else if(hold){word='STAND STILL';wcol=C.amber;}
+  else if(aimok){word='AIM NOW';wcol=HG;}
+  else if(s.arc){word=s.hawks!=null?'HAWK READY':'ARC READY';wcol=HG;}
+  else{word='DRAWING';}
+  o+=txt(X0,y0+17,word,12,wcol);
+  if(s.haste)o+=txt(X0,y0+30,'HASTE +30%',9,C.cyan);
+  var tstr=tm?nm(r):'--';
+  o+=txt(X0+W0,y0+22,tstr,20,hold?C.amber:(zone==='dead'?RED:(dim?C.muted:C.white)),{a:'end'});
+  if(s.ammo!=null){
+    var lowA=s.ammo>0&&s.ammo<40;
+    o+=txt(X0+W0,y0+36,(s.ammo===0?'x0':(lowA?'LOW x'+s.ammo:'x'+s.ammo)),10,s.ammo===0?RED:(lowA?C.amber:C.muted),{a:'end',op:s.ammo>0&&!lowA?.9:1});
+  }
+  /* the bow */
+  var cy=y0+62,top=cy-34,bot=cy+34,tx=1308-7*f,bulge=18+7*f,cX=tx+2*bulge,nx=1308-88*f;
+  o+='<g opacity="'+(dim?.4:1)+'">';
+  var lp='M'+tx.toFixed(1)+','+top+' Q'+cX.toFixed(1)+','+cy+' '+tx.toFixed(1)+','+bot;
+  o+='<path d="'+lp+'" fill="none" stroke="'+bc+'" stroke-opacity=".28" stroke-width="6" stroke-linecap="round"/>';
+  o+='<path d="'+lp+'" fill="none" stroke="'+bc+'" stroke-width="2.4" stroke-linecap="round" filter="url(#'+(hold?'gl':'gls')+')"/>';
+  o+='<polygon points="'+ch(1323,cy-9,6,18,2)+'" fill="'+mix(bc,C.bg,.25)+'" stroke="'+mix(bc,'#ffffff',.3)+'" stroke-width="1"/>';
+  o+='<circle cx="'+tx.toFixed(1)+'" cy="'+top+'" r="2.4" fill="'+bc+'"/><circle cx="'+tx.toFixed(1)+'" cy="'+bot+'" r="2.4" fill="'+bc+'"/>';
+  if(s.fired){ /* just released: ghost strings and a streak toward the target */
+    [-4,4].forEach(function(d){o+='<polyline points="'+(tx+d).toFixed(1)+','+top+' '+(1308+d*1.6)+','+cy+' '+(tx+d).toFixed(1)+','+bot+'" fill="none" stroke="'+HG+'" stroke-opacity=".3" stroke-width="1"/>';});
+    o+='<rect x="1338" y="'+(cy-1)+'" width="46" height="2" fill="url(#streak)"/>';
+    o+='<rect x="1338" y="'+(cy-4)+'" width="30" height="1" fill="url(#streak)" opacity=".5"/><rect x="1338" y="'+(cy+3)+'" width="30" height="1" fill="url(#streak)" opacity=".5"/>';
+    o+='<circle cx="1337" cy="'+cy+'" r="4" fill="#ffffff" fill-opacity=".9" filter="url(#gls)"/>';
+  }
+  o+='<polyline points="'+tx.toFixed(1)+','+top+' '+nx.toFixed(1)+','+cy+' '+tx.toFixed(1)+','+bot+'" fill="none" stroke="'+(hold?'#ffe3b0':'#e9fbd0')+'" stroke-opacity=".95" stroke-width="1.2"/>';
+  if(tm&&!s.fired){
+    var ac=hold?C.amber:(zone==='dead'?RED:'#f3fbff');
+    o+=line(nx+1,cy,1330,cy,ac,1,2);
+    o+='<polygon points="1337,'+cy+' 1329,'+(cy-3.8)+' 1329,'+(cy+3.8)+'" fill="'+ac+'"/>';
+    o+=line(nx+2,cy,nx+9,cy-4,ac,.85,1.2)+line(nx+2,cy,nx+9,cy+4,ac,.85,1.2)+line(nx+6,cy,nx+13,cy-4,ac,.6,1.1)+line(nx+6,cy,nx+13,cy+4,ac,.6,1.1);
+  }
+  o+='</g>';
+  /* the draw rail under the bow: 0 s at full draw (left) to the whole period at rest (right) */
+  var ry=y0+104;
+  function rx(rem){return 1220+88*rem/S;}
+  o+='<g opacity="'+(dim?.45:1)+'">';
+  o+=line(1220,ry,1308,ry,C.violet,.55,1);
+  if(HW>0)o+=rect(1220,ry-3,rx(HW)-1220,6,C.amber,.6);
+  if(S>2.0)o+=rect(rx(2.0),ry-3,1308-rx(2.0),6,HG,.55);
+  for(var t=0;t<=S+0.001;t+=0.5)o+=line(rx(t),ry+3,rx(t),ry+(Math.round(t*2)%2===0?6:4),C.violet,.7,1);
+  if(HW>0)o+=txt(1220,ry+16,'HOLD',10,C.amber,{op:.9});
+  if(S>2.0)o+=txt((rx(2.0)+1308)/2,ry+16,'AIM',10,HG,{a:'middle',op:.9});
+  if(tm){
+    var px=rx(r);
+    o+='<polygon points="'+px.toFixed(1)+','+(ry-4)+' '+(px-4.5).toFixed(1)+','+(ry-11)+' '+(px+4.5).toFixed(1)+','+(ry-11)+'" fill="'+(hold?C.amber:C.white)+'" stroke="'+C.bg+'" stroke-width=".8"/>';
+    o+=line(px,cy+8,px,ry-12,hold?C.amber:C.violet,.5,1,'2 3');
+  }
+  o+='</g>';
+  /* the flight lane: where the target stands, in the same zones the game uses */
+  var ly=y0+84,act=zone;
+  o+=rect(1340,ly,16,4,BLUE,act==='melee'?.85:.28);
+  o+=rect(1356,ly,22,4,RED,act==='dead'?.5:.16);
+  for(i=0;i<5;i++)o+=line(1358+i*4.6,ly+4,1362+i*4.6,ly,RED,act==='dead'?.95:.4,1);
+  o+=rect(1378,ly,30,4,HG,(act==='shot'||act==='far')?(act==='shot'?.75:.3):.28);
+  o+=line(1356,ly-2,1356,ly+6,C.violet,.7,1)+line(1378,ly-2,1378,ly+6,C.violet,.7,1);
+  if(s.tgt&&zone==='shot'&&tm)o+=line(1339,cy,1376,cy,C.pink,.35,1,'2 3');
+  var bxm={melee:1350,dead:1367,shot:1393,far:1393}[zone];
+  o+=bullseye(bxm,cy,s,zone);
+  if(zone==='far')o+=txt(1404,cy+4,'&gt;',12,C.muted,{a:'end',op:.8});
+  /* the quiver: the two real cooldown groups */
+  var hk=s.hawks!=null;
+  o+=qtile(1340,y0+94,'AIM',!!s.aim,s.aimCd||0,0);
+  o+=qtile(1374,y0+94,hk?'HWK':'ARC',!!s.arc,s.arcCd||0,hk?s.hawks:0);
+  return o;
+}
+
+/* ---- B: LOCK. A scope. The bezel ticks are the Auto Shot cycle, closing clockwise; at the last half second the arms converge. ---- */
+function lamp(cx,cy,lab,ready,cd){
+  var o='';
+  if(ready){
+    o+='<circle cx="'+cx+'" cy="'+cy+'" r="11" fill="'+mix(C.bg,HG,.28)+'" stroke="'+HG+'" stroke-width="1.4" filter="url(#gls)"/>';
+    o+=txt(cx,cy+3.5,lab,10,C.white,{a:'middle'});
+  }else{
+    o+='<circle cx="'+cx+'" cy="'+cy+'" r="11" fill="rgba(13,6,32,.7)" stroke="'+C.muted+'" stroke-opacity=".7" stroke-dasharray="3 2"/>';
+    o+=txt(cx,cy+3.5,lab,10,C.muted,{a:'middle',op:.9});
+    if(cd>0)o+='<circle cx="'+cx+'" cy="'+cy+'" r="11" fill="none" stroke="'+HG+'" stroke-width="1.6" stroke-dasharray="'+(cd*69.1).toFixed(1)+' 80" transform="rotate(-90 '+cx+' '+cy+')"/>';
+  }
+  return o;
+}
+function scopeMod(y0,s){
+  var o='',S=s.S||2.7,r=s.r,zone=s.zone||'shot',i;
+  var tm=(r!=null)&&!s.off&&s.ammo!==0,blocked=zone!=='shot';
+  var hold=tm&&!blocked&&r<=0.5,aimok=tm&&!blocked&&r>=2.0&&s.aim;
+  var f=tm?1-r/S:0,cx=1274,cy=y0+60,R=50;
+  var ac=hold?C.amber:(zone==='dead'?RED:HG);
+  /* dead zone: the lens goes blind */
+  if(zone==='dead'){
+    o+='<circle cx="'+cx+'" cy="'+cy+'" r="36" fill="rgba(255,59,78,.14)"/>';
+    for(i=-3;i<=3;i++)o+='<line x1="'+(cx+i*10-12)+'" y1="'+(cy+24)+'" x2="'+(cx+i*10+12)+'" y2="'+(cy-24)+'" stroke="'+RED+'" stroke-opacity=".28" stroke-width="1.2"/>';
+  }
+  o+='<circle cx="'+cx+'" cy="'+cy+'" r="'+(R+2)+'" fill="none" stroke="'+ac+'" stroke-opacity=".5" stroke-width="1.2" filter="url(#gls)"/>';
+  o+='<circle cx="'+cx+'" cy="'+cy+'" r="'+(R-9)+'" fill="none" stroke="'+C.violet+'" stroke-opacity=".35"/>';
+  for(i=0;i<60;i++){
+    var a=(i*6-90)*Math.PI/180,rem=S*(1-(i+.5)/60),lit=tm&&((i+.5)/60<=f);
+    var col=rem<=0.5?C.amber:(rem>=2.0&&S>2.0?HG:C.cyan);
+    if(zone==='dead'&&lit)col=RED;
+    var r1=R-(i%5===0?10:6);
+    o+=line((cx+Math.cos(a)*r1).toFixed(1),(cy+Math.sin(a)*r1).toFixed(1),(cx+Math.cos(a)*R).toFixed(1),(cy+Math.sin(a)*R).toFixed(1),col,lit?1:.22,i%5===0?1.8:1.2);
+  }
+  if(tm){
+    var an=(f*360-90)*Math.PI/180;
+    o+=line((cx+Math.cos(an)*(R-14)).toFixed(1),(cy+Math.sin(an)*(R-14)).toFixed(1),(cx+Math.cos(an)*(R+4)).toFixed(1),(cy+Math.sin(an)*(R+4)).toFixed(1),'#ffffff',.95,2.2);
+  }
+  /* sting ring and crosshair */
+  var R2=27,circ=2*Math.PI*R2,sec=s.sting||0;
+  if(s.tgt){
+    if(sec>0){var sc=sec<=3?C.amber:STG;
+      o+='<circle cx="'+cx+'" cy="'+cy+'" r="'+R2+'" fill="none" stroke="'+sc+'" stroke-opacity=".16" stroke-width="2.4"/><circle cx="'+cx+'" cy="'+cy+'" r="'+R2+'" fill="none" stroke="'+sc+'" stroke-width="2.4" stroke-dasharray="'+(Math.min(1,sec/15)*circ).toFixed(1)+' '+circ.toFixed(1)+'" transform="rotate(-90 '+cx+' '+cy+')"/>';}
+    else o+='<circle cx="'+cx+'" cy="'+cy+'" r="'+R2+'" fill="none" stroke="'+C.muted+'" stroke-opacity=".5" stroke-dasharray="2 3"/>';
+  }
+  var gap=hold?7:16,len=hold?18:21,xc=s.mark?C.pink:C.muted;
+  [[0,-1],[1,0],[0,1],[-1,0]].forEach(function(d){o+=line(cx+d[0]*gap,cy+d[1]*gap,cx+d[0]*(gap+len),cy+d[1]*(gap+len),hold?C.amber:xc,hold?1:.9,hold?2.2:1.6);});
+  o+='<circle cx="'+cx+'" cy="'+cy+'" r="1.8" fill="'+(hold?C.amber:xc)+'"/>';
+  /* right column */
+  var word,wcol=C.white;
+  if(s.ammo===0){word='NO AMMO';wcol=RED;}else if(s.off){word='SHOT OFF';wcol=C.muted;}
+  else if(zone==='melee'){word='IN MELEE';wcol=BLUE;}else if(zone==='dead'){word='TOO CLOSE';wcol=RED;}
+  else if(r==null){word='TIMER ?';wcol=C.muted;}else if(hold){word='STAND STILL';wcol=C.amber;}
+  else if(aimok){word='AIM NOW';wcol=HG;}else{word='DRAWING';}
+  o+=txt(X0+W0,y0+30,tm?nm(r):'--',24,hold?C.amber:C.white,{a:'end'});
+  o+=txt(X0+W0,y0+46,word,10,wcol,{a:'end'});
+  if(s.ammo!=null)o+=txt(X0+W0,y0+60,'x'+s.ammo,10,s.ammo===0?RED:C.muted,{a:'end',op:.9});
+  o+=lamp(1352,y0+88,'AIM',!!s.aim,s.aimCd||0)+lamp(1388,y0+88,'ARC',!!s.arc,s.arcCd||0);
+  return o;
+}
+
+/* ---- C: PACK. Hunter, pet and hawks as linked nodes. ---- */
+function hexn(cx,cy,r,col,fillA,dash){
+  var p=[],k;for(k=0;k<6;k++){var a=(60*k-90)*Math.PI/180;p.push((cx+Math.cos(a)*r).toFixed(1)+','+(cy+Math.sin(a)*r).toFixed(1));}
+  return '<polygon points="'+p.join(' ')+'" fill="'+mix(C.bg,col,fillA)+'" stroke="'+col+'" stroke-width="1.4"'+(dash?' stroke-dasharray="3 2"':' filter="url(#gls)"')+'/>';
+}
+function packMod(y0,s){
+  var o='',cy=y0+44;
+  /* leash */
+  var taut=s.leash==='far';
+  o+='<path d="M1253,'+cy+' Q1275,'+(cy+(taut?0:16))+' 1297,'+cy+'" fill="none" stroke="'+(taut?C.amber:C.violet)+'" stroke-width="1.6" '+(taut?'stroke-dasharray="4 3"':'')+'/>';
+  o+=hexn(1236,cy,16,HG,.25)+txt(1236,cy+4,'AH',12,C.white,{a:'middle'});
+  var dead=s.pet==='dead',pc=dead?RED:HG;
+  o+=hexn(1314,cy,16,pc,dead?.12:.25,dead)+txt(1314,cy+4,dead?'X':'PET',dead?14:10,dead?RED:C.white,{a:'middle'});
+  /* happiness pips under the pet and its stance */
+  for(var i=0;i<3;i++)o+='<polygon points="'+(1300+i*14)+','+(cy+24)+' '+(1304+i*14)+','+(cy+28)+' '+(1300+i*14)+','+(cy+32)+' '+(1296+i*14)+','+(cy+28)+'" fill="'+HG+'" fill-opacity="'+(i<(s.mood==null?3:s.mood)?.9:.1)+'" stroke="'+HG+'" stroke-opacity=".5"/>';
+  o+=txt(1314,cy+46,'AGGRESSIVE',9,C.muted,{a:'middle'});
+  /* hawks */
+  [1352,1390].forEach(function(hx,k){
+    var rem=s.hawkT&&s.hawkT[k]!=null?s.hawkT[k]:0,circ=2*Math.PI*14;
+    o+='<polygon points="'+chevPath(hx,cy-10,11,9,6)+'" fill="'+(rem>0?mix(C.bg,HG,.3):'rgba(13,6,32,.6)')+'" stroke="'+(rem>0?HG:C.muted)+'" stroke-width="1.3"'+(rem>0?'':' stroke-dasharray="3 2"')+'/>';
+    if(rem>0){o+='<circle cx="'+hx+'" cy="'+cy+'" r="17" fill="none" stroke="'+HG+'" stroke-width="2" stroke-dasharray="'+(rem/18*2*Math.PI*17).toFixed(1)+' 120" transform="rotate(-90 '+hx+' '+cy+')"/>';o+=txt(hx,cy+36,Math.round(rem)+'s',10,C.white,{a:'middle'});}
+    else o+=txt(hx,cy+36,'--',10,C.muted,{a:'middle',op:.8});
+  });
+  o+=line(1332,cy,1340,cy,C.violet,.6,1.2);
+  o+=txt(X0,y0+12,'YOUR PACK',10,C.violet,{op:.85});
+  o+=txt(X0+W0,y0+12,s.arc?'HAWK READY':'HAWK 4s',10,s.arc?HG:C.muted,{a:'end'});
+  return o;
+}
+var MODS={A:bowMod,B:scopeMod,C:packMod};
+
+/* ---------- scenes ---------- */
+var DEF={S:2.7,r:2.3,zone:'shot',tgt:1,sting:11,mark:1,aim:1,arc:1,aimCd:1,arcCd:1,ammo:412};
+function sc(b,over){var o={},k;for(k in b)o[k]=b[k];for(k in over)o[k]=over[k];return o;}
+function crop(v,area,s,label){
+  var o=base({next:true}),y0=area==='upper'?500:632;
+  o+=slotDivider(1410);
+  if(area==='upper'){o+=MODS[v](500,s);o+=dotsH(HDEB,true);}
+  else{o+=dotsH(HDEB,false);o+=MODS[v](632,s);}
+  o+=tags();o+=buffs();
+  return '<div class="scene"><div class="state"><b>'+area.toUpperCase()+' AREA</b>, '+label+'</div>'+
+    '<svg width="488" height="568" viewBox="1105 396 330 384" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg></div>';
+}
+function cell(v,s){
+  var o='<rect x="1213" y="0" width="202" height="128" fill="rgba(168,85,247,.04)" stroke="'+C.violet+'" stroke-opacity=".4" stroke-dasharray="6 4"/>';
+  o+=MODS[v](0,s);
+  return '<div class="cell"><svg width="224" height="142" viewBox="1213 0 202 128" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg></div>';
+}
+function zoom(v,s,label){
+  var o='<rect x="1213" y="0" width="202" height="128" fill="rgba(168,85,247,.04)" stroke="'+C.violet+'" stroke-opacity=".4" stroke-dasharray="6 4"/>';
+  o+=MODS[v](0,s);
+  return '<div><div class="zl">'+label+'</div><div class="zoom"><svg width="604" height="382" viewBox="1213 0 202 128" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg></div></div>';
+}
+
+var VT={
+ A:['DRAW','win','PICK','<b>The Auto Shot cycle is a bow being drawn.</b> The string pulls back as the timer runs, the nock lines up with a rail below (green AIM zone, amber HOLD zone), and at full draw the whole bow goes amber: stand still. The arrow flies at a bullseye that slides along a flight lane with range (melee, dead zone, shot). The bullseye wears the venom ring (Serpent Sting) and mark ticks (Hunter\'s Mark). Two quiver tiles are the real shared cooldown groups.',
+    '<p><b>Cool?</b> Yes. It moves like the thing it measures, and the release is an event you feel.</p><p><b>Hunter?</b> Unmistakable, no other class draws a bow.</p><p><b>When to act?</b> The caption names it: AIM NOW, STAND STILL, TOO CLOSE.</p><p class="v"><b>Risk:</b> busiest of the three, the venom ring is small (about 29 px), and it only comes alive in motion.</p>'],
+ B:['LOCK','alt','ALTERNATIVE','<b>A sniper scope.</b> 60 bezel ticks close clockwise as the shot cycle runs, the green sector is the Aimed Shot window, the amber sector the last 0.5 s. At HOLD the crosshair arms converge and turn amber. Dead zone blinds the lens with a red hatch. The Serpent Sting is the inner ring, the mark colours the crosshair, AIM and ARC are lamps.',
+    '<p><b>Cool?</b> Good looking, but it is the expected answer: a radial cooldown with a crosshair.</p><p><b>Hunter?</b> Yes, but sniper, not Forever Hunter. Nothing about the dead zone or the quiver.</p><p><b>When to act?</b> Clear. The converging arms are a strong lock-on cue.</p><p class="v"><b>Verdict:</b> kept as the alternative (a safe, rounder shape if the bow proves too busy). Its blind lens is folded into the pick.</p>'],
+ C:['PACK','drop','DROPPED','<b>Hunter, pet and hawks as a linked group.</b> A hunter node, a pet node on a leash (happiness pips, stance), and two hawk nodes that drain over 18 s. Rooted in the Beast Mastery fantasy of fighting beside your companions.',
+    '<p><b>Cool?</b> Pleasant, but it is a row of nodes with timers.</p><p><b>Hunter?</b> Yes, but only Beast Mastery, and the pet already has its own component.</p><p><b>When to act?</b> Barely. Two hawk timers is the "list of timers" the user rejected, and leash, happiness and stance are mostly unreadable data here.</p><p class="v"><b>Verdict:</b> dropped. The hawk idea survives as the HWK tile with two pips.</p>']
+};
+var STATES=[
+ ['JUST FIRED','shot released, AIM ready',sc(DEF,{r:2.65,fired:1})],
+ ['AIM NOW','2.3 s to the next shot',DEF],
+ ['ARC READY','Aimed on cooldown, Arcane up',sc(DEF,{r:1.6,aim:0,aimCd:.5})],
+ ['DRAWING','nothing ready, wait',sc(DEF,{r:1.4,aim:0,arc:0,aimCd:.6,arcCd:.3})],
+ ['STAND STILL','last 0.5 s, bow glows amber',sc(DEF,{r:.3,aim:0,aimCd:.8})],
+ ['HASTE PROC','period 1.9 s, no AIM zone',sc(DEF,{S:1.9,r:1.1,haste:1,aim:0,aimCd:.7})],
+ ['TOO CLOSE','dead zone, draw frozen',sc(DEF,{r:0,zone:'dead',aim:0,aimCd:.8})],
+ ['IN MELEE','bow dimmed, bullseye in blue',sc(DEF,{zone:'melee',r:1.9})],
+ ['OUT OF RANGE','bullseye dashed, no shot',sc(DEF,{zone:'far',r:0})],
+ ['AUTO SHOT OFF','no draw, quiver still live',sc(DEF,{off:1})],
+ ['TIMER UNREADABLE','probe failed, graceful',sc(DEF,{r:null})],
+ ['NO AMMO','the bow will not draw',sc(DEF,{ammo:0})],
+ ['LOW AMMO','under 40, amber',sc(DEF,{ammo:23,r:1.8,aim:0,aimCd:.4})],
+ ['STING LOW','ring turns amber at 3 s',sc(DEF,{sting:2.4})],
+ ['NO STING, NO MARK','dashed ring, dashed ticks',sc(DEF,{sting:0,mark:0})],
+ ['NO TARGET','bullseye hollow, bow keeps drawing',sc(DEF,{tgt:0,sting:0,mark:0})],
+ ['BEAST MASTERY','ARC becomes HWK, 2 hawks',sc(DEF,{hawks:2,r:1.7})],
+ ['HAWK READY','one hawk out, slot free',sc(DEF,{hawks:1,aim:0,aimCd:.6,r:1.5})]
+];
+var SS=[
+ ['LOCK, AIM NOW','2.3 s to the next shot',DEF],
+ ['LOCK, STAND STILL','arms converge, amber',sc(DEF,{r:.3,aim:0,aimCd:.8})],
+ ['LOCK, TOO CLOSE','blind lens, red hatch',sc(DEF,{r:0,zone:'dead',aim:0})],
+ ['LOCK, AUTO SHOT OFF','',sc(DEF,{off:1})]
+];
+
+var html='<h2><i>1</i> THREE CONCEPTS, IN SITU, LOWER AREA</h2><div class="cols">';
+['A','B','C'].forEach(function(v){
+  var st=v==='C'?{leash:'near',pet:'ok',mood:3,hawkT:[12,5],arc:0}:DEF;
+  html+='<div><div class="vt"><i>'+v+'</i> '+VT[v][0]+'<span class="tagx '+VT[v][1]+'">'+VT[v][2]+'</span></div><div class="cap">'+VT[v][3]+'</div>'+crop(v,'lower',st,'CLASS MODULE')+'<div class="panel crit">'+VT[v][4]+'</div></div>';
+});
+html+='</div>';
+
+html+='<h2><i>2</i> THE PICK, DRAW, PUSHED FURTHER</h2>';
+html+='<div class="row">'+crop('A','upper',DEF,'CLASS MODULE')+crop('A','lower',sc(DEF,{r:.3,aim:0,aimCd:.8}),'CLASS MODULE')+
+  '<div style="width:500px"><div class="panel" style="margin-top:0"><h3>How to read it</h3><ul>'+
+  '<li><b>Bow and string:</b> the nock is the Auto Shot cycle. It starts at rest right after a shot and reaches full draw when the next shot is due.</li>'+
+  '<li><b>Rail under it:</b> green AIM is where an Aimed Shot (2.0 s cast) fits before the next shot, amber HOLD is the last 0.5 s of stand-still. The white pip under the nock is the same position on the rail.</li>'+
+  '<li><b>Caption, top left:</b> AIM NOW, ARC READY, DRAWING, STAND STILL, or a blocker (TOO CLOSE, IN MELEE, OUT OF RANGE, NO AMMO).</li>'+
+  '<li><b>Time, top right:</b> seconds to the next shot, ammo under it.</li>'+
+  '<li><b>Bullseye:</b> the target. Its position on the lane is the range zone (blue melee, red hatched dead zone, green shot). Green ring drains over the Serpent Sting (amber at 3 s), pink ticks mean Hunter\'s Mark is on.</li>'+
+  '<li><b>Quiver tiles:</b> AIM is Aimed Shot / Multi-Shot, ARC is Arcane Shot (HWK for Beast Mastery). Lit when the group is ready, otherwise hollow with an estimated progress line.</li></ul>'+
+  '<p class="m">Left crop: AIM NOW, in the upper area. Right crop: STAND STILL, in the lower area. Serpent Sting and Hunter\'s Mark are owned by the module, so Target Debuffs lists only Wing Clip, Concussive Shot and Scorpid Sting.</p></div></div></div>';
+
+html+='<h2><i>3</i> THE PICK, LARGE</h2><div class="row">'+zoom('A',DEF,'AIM NOW, 3x')+zoom('A',sc(DEF,{r:.3,aim:0,aimCd:.8}),'STAND STILL, 3x')+'</div>';
+html+='<div class="row" style="margin-top:20px">'+zoom('A',sc(DEF,{r:0,zone:'dead',aim:0,aimCd:.8}),'TOO CLOSE, 3x')+zoom('A',sc(DEF,{hawks:2,r:1.7}),'BEAST MASTERY, 3x')+'</div>';
+
+html+='<h2><i>4</i> FULL HUD AND STATES</h2>';
+var full=base({next:true});
+full+=slotDivider(1410)+dotsH(HDEB,false)+bowMod(632,sc(DEF,{r:.3,aim:0,aimCd:.8}));
+full+=tags()+buffs(true);
+full+='<rect x="560" y="772" width="212" height="48" fill="rgba(255,182,72,.05)" stroke="'+C.amber+'" stroke-opacity=".5"/>'+txt(568,785,'REMINDER CHIP, ASPECT DOWN',10,C.muted,{op:.9})+'<polygon points="'+ch(568,792,22,22,4)+'" fill="'+mix(C.bg,C.amber,.3)+'" stroke="'+C.amber+'" stroke-width="1.4" filter="url(#gl)"/><text x="579" y="807" font-size="12" fill="'+C.white+'" text-anchor="middle">AH</text>'+txt(598,808,'HAWK ASPECT MISSING',11,C.amber);
+html+='<div class="row"><div class="wide"><div class="state" style="top:8px;bottom:auto"><b>STAND STILL</b>, LOWER AREA, ASPECT DOWN</div><svg width="1000" height="450" viewBox="480 380 1000 450" font-family="Mononoki, monospace" font-weight="700">'+full+'</svg></div>'+
+  '<div style="width:480px"><div class="panel" style="margin-top:0"><h3>In the whole HUD</h3><p>Same v7 scene: a level 22 Dire Wolf, tags L22, 62 percent and the pet name as target of target with no prefix. The Hunter is mid Aimed Shot on the cast bar while the module says the next Auto Shot is 0.3 s away. Aspect of the Hawk is missing, so My buffs lost its tile and the reminder chip lights under the cast bar, exactly the Battle Shout pattern.</p><p class="m">Pet health stays in the Gunsight pet component. The module never draws it.</p></div></div></div>';
+
+html+='<div class="strip" style="margin-top:20px">';
+STATES.forEach(function(S){html+='<div><div class="sh">'+S[0]+'<small>'+S[1]+'</small></div>'+cell('A',S[2])+'</div>';});
+html+='</div>';
+
+html+='<h2><i>4b</i> ALTERNATIVE, LOCK, STATES</h2><div class="strip">';
+SS.forEach(function(S){html+='<div><div class="sh">'+S[0]+'<small>'+S[1]+'</small></div>'+cell('B',S[2])+'</div>';});
+html+='</div>';
+document.getElementById('root').innerHTML=html;
+})();
+</script>
+</body>
+</html>
