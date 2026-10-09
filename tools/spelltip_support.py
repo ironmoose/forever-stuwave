@@ -1,6 +1,7 @@
 """Shared Lua for the harnesses that check a spell tooltip on an icon.
 
-The real tooltip helpers (HoverOnly, SetTipSpell, SpellIDForName, AttachSpellTooltip, RefreshSpellTooltip) are
+The real tooltip helpers (HoverOnly, SetTipSpell, SpellIDForName, SpellCacheEpoch, AttachSpellTooltip,
+RefreshSpellTooltip, ReleaseSpellTip, ReleaseGatedTips, ShowAuraTooltip) are
 loaded from Core/FrameHelpers.lua into a throwaway namespace and copied onto the harness's own FS.FrameHelpers
 stub, so a case drives the real code: hover(frame) runs the OnEnter hooks, tip() reads what GameTooltip was told.
 
@@ -46,10 +47,11 @@ function loadSpellTips(src)
         AurasReadable = function() return AURAS_READABLE end }
     local nFrames = FRAMES and #FRAMES or 0
     assert(loadstring(src, "@Core/FrameHelpers.lua"))("forever-stuwave", X)
-    -- the file builds one event frame at load; a harness that counts frames must not see it
+    -- (the event frame is made lazily, on the first name lookup, so it can show up in a harness's FRAMES then)
     if FRAMES then for i = #FRAMES, nFrames + 1, -1 do FRAMES[i] = nil end end
     FS.FrameHelpers = FS.FrameHelpers or {}
-    for _, k in ipairs({ "HoverOnly", "SetTipSpell", "SpellIDForName", "AttachSpellTooltip", "RefreshSpellTooltip" }) do
+    for _, k in ipairs({ "HoverOnly", "SetTipSpell", "SpellIDForName", "SpellCacheEpoch", "AttachSpellTooltip",
+            "RefreshSpellTooltip", "ReleaseSpellTip", "ReleaseGatedTips", "ShowAuraTooltip" }) do
         FS.FrameHelpers[k] = X.FrameHelpers[k]
     end
     tipReset()

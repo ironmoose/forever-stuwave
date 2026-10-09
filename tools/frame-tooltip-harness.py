@@ -10,8 +10,9 @@ lifecycle) and the combat branch of ShowAuraTooltip. The checks pin:
     EnableMouse(true) is never called;
   * SetTipSpell stores only a plain positive number and a plain non-empty string (a secret, nil, zero or the
     wrong type clears the field), and refreshes an open tooltip when the id or name changed;
-  * SpellIDForName caches hits, caches misses only out of combat (SPELLS_CHANGED drops the misses, out of
-    combat only, and keeps the hits), never touches a secret name or a secret result;
+  * SpellIDForName caches hits and out-of-combat misses (SPELLS_CHANGED wipes both, at PLAYER_REGEN_ENABLED when
+    it fired in combat), looks a combat miss up once per combat, never touches a secret name or a secret result;
+  * ReleaseSpellTip / ReleaseGatedTips take down a tip whose owner's gate now says no;
   * the secret stand-ins report type() "number" / "string" and throw on arithmetic, comparison, concat and
     indexing, so stripping an IsSecret guard fails a check (== against a plain string cannot be trapped in Lua);
   * a hovered frame that hides or loses the mouse leaves no tooltip behind; opts.gate = false shows nothing;
@@ -166,7 +167,7 @@ H.SetTipSpell(f, nil, "")
 check(f.fsSpellID == nil and f.fsName == nil, "nil id and empty name clear")
 """)
 
-case("spell_id_for_name_caches_hits_and_misses_out_of_combat_only")(r"""
+case("spell_id_for_name_caches_hits_and_misses")(r"""
 local H = boot()
 SPELL_INFO["Fireball"] = 133
 check(H.SpellIDForName("Fireball") == 133 and H.SpellIDForName("Fireball") == 133, "resolves")
@@ -175,9 +176,9 @@ check(H.SpellIDForName("Nope") == nil and H.SpellIDForName("Nope") == nil, "miss
 check(SPELL_CALLS == 2, "a miss out of combat is cached, got " .. SPELL_CALLS)
 IN_COMBAT = true
 H.SpellIDForName("Later"); H.SpellIDForName("Later")
-check(SPELL_CALLS == 4, "a miss in combat is not cached (could be transient), got " .. SPELL_CALLS)
+check(SPELL_CALLS == 3, "a miss in combat is looked up once per combat, got " .. SPELL_CALLS)
 check(H.SpellIDForName(SECRET_STR) == nil and H.SpellIDForName(nil) == nil and H.SpellIDForName("") == nil, "bad names are nil")
-check(SPELL_CALLS == 4, "bad names never reach the API")
+check(SPELL_CALLS == 3, "bad names never reach the API")
 C_Spell = nil
 GetSpellInfo = function(name) SPELL_CALLS = SPELL_CALLS + 1; return name, nil, nil, 0, 0, 0, 77 end
 check(H.SpellIDForName("Global") == 77, "falls back to the global GetSpellInfo when C_Spell is missing")
@@ -312,21 +313,82 @@ SPELL_RAW["Bad"] = { spellID = -1 }
 check(H.SpellIDForName("Bad") == nil, "a non-positive spellID is a miss")
 """)
 
-case("spells_changed_wipes_cached_misses_but_keeps_hits")(r"""
+case("spells_changed_wipes_hits_and_misses_out_of_combat")(r"""
 local H = boot()
-SPELL_INFO["Fireball"] = 133
-check(H.SpellIDForName("Fireball") == 133 and H.SpellIDForName("Later") == nil, "setup: a hit and a miss cached")
-check(SPELL_CALLS == 2, "setup calls")
+SPELL_INFO["Rank"] = 100
+check(H.SpellIDForName("Rank") == 100 and H.SpellIDForName("Later") == nil, "setup: a hit and a miss cached")
+local e0 = H.SpellCacheEpoch()
+SPELL_INFO["Rank"] = 200                   -- a new rank trained
 SPELL_INFO["Later"] = 999                  -- learned since
-check(H.SpellIDForName("Later") == nil, "the miss is still cached")
+check(H.SpellIDForName("Rank") == 100 and H.SpellIDForName("Later") == nil, "both still cached before the event")
+fireEvent("SPELLS_CHANGED")
+check(H.SpellIDForName("Rank") == 200, "the hit follows the new rank")
+check(H.SpellIDForName("Later") == 999, "the miss is retried")
+check(H.SpellCacheEpoch() ~= e0, "the epoch moves with the wipe")
+""")
+
+case("spells_changed_in_combat_wipes_at_regen_enabled")(r"""
+local H = boot()
+SPELL_INFO["Rank"] = 100
+check(H.SpellIDForName("Rank") == 100, "setup")
 IN_COMBAT = true
+SPELL_INFO["Rank"] = 200
 fireEvent("SPELLS_CHANGED")
+check(H.SpellIDForName("Rank") == 100, "no wipe in combat: the hit stays")
 IN_COMBAT = false
-check(H.SpellIDForName("Later") == nil, "no wipe in combat")
+fireEvent("PLAYER_REGEN_ENABLED")
+check(H.SpellIDForName("Rank") == 200, "wiped when combat ends")
+local calls = SPELL_CALLS
+fireEvent("PLAYER_REGEN_ENABLED")
+check(H.SpellIDForName("Rank") == 200 and SPELL_CALLS == calls, "a second regen with nothing dirty wipes nothing")
+""")
+
+case("combat_miss_is_looked_up_once_per_combat")(r"""
+local H = boot()
+IN_COMBAT = true
+for _ = 1, 5 do check(H.SpellIDForName("Later") == nil, "miss") end
+check(SPELL_CALLS == 1, "one lookup for five renders, got " .. SPELL_CALLS)
+SPELL_INFO["Later"] = 999
+check(H.SpellIDForName("Later") == nil and SPELL_CALLS == 1, "still not retried mid combat")
+IN_COMBAT = false
+fireEvent("PLAYER_REGEN_ENABLED")
+check(H.SpellIDForName("Later") == 999, "retried after combat")
+IN_COMBAT = true
+check(H.SpellIDForName("Gone") == nil, "setup: another miss")
+local calls = SPELL_CALLS
+SPELL_INFO["Gone"] = 5
 fireEvent("SPELLS_CHANGED")
-check(H.SpellIDForName("Later") == 999, "the miss is retried after SPELLS_CHANGED")
-local before = SPELL_CALLS
-check(H.SpellIDForName("Fireball") == 133 and SPELL_CALLS == before, "the hit survives the wipe")
+check(H.SpellIDForName("Gone") == 5 and SPELL_CALLS == calls + 1, "SPELLS_CHANGED clears the combat misses")
+""")
+
+case("release_spell_tip_is_public_and_gated_release_follows_the_gate")(r"""
+local H = boot()
+local on = true
+local f, g = newFrame(), newFrame()
+H.AttachSpellTooltip(f, { gate = function() return on end })
+H.AttachSpellTooltip(g, {})
+H.SetTipSpell(f, 133, "Fireball"); H.SetTipSpell(g, 134, "Frostbolt")
+f:Run("OnEnter")
+check(GameTooltip.shown and GameTooltip.owner == f, "setup: tip up")
+H.ReleaseGatedTips()
+check(GameTooltip.shown and f.fsHover, "gate still open: nothing released")
+on = false
+H.ReleaseGatedTips()
+check(not GameTooltip.shown and f.fsHover == nil, "gate closed: tip down, hover cleared")
+g:Run("OnEnter")
+H.ReleaseGatedTips()
+check(GameTooltip.shown and GameTooltip.owner == g, "an ungated tip is left alone")
+local other = newFrame()
+GameTooltip:SetOwner(other, "ANCHOR_TOP"); GameTooltip:Show()
+H.ReleaseGatedTips()
+check(GameTooltip.shown and GameTooltip.owner == other, "a tooltip owned by an unrelated frame is left alone")
+on = true
+f:Run("OnEnter")
+check(GameTooltip.shown and GameTooltip.owner == f, "setup: f owns the tip")
+H.ReleaseSpellTip(g)
+check(GameTooltip.shown and GameTooltip.owner == f, "releasing a frame that is not the owner leaves the owner's tip")
+H.ReleaseSpellTip(f)
+check(not GameTooltip.shown and f.fsHover == nil, "ReleaseSpellTip hides the owner's tip")
 """)
 
 case("stale_aura_slot_falls_through_to_the_cached_spell")(r"""
