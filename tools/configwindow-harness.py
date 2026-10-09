@@ -19,7 +19,8 @@ The window is a plain themed frame with a category nav and a content well. These
   * the Profiles page calls the Config API (switch, new, copy, rename, delete, reset), asks before
     anything destructive, and keeps Delete off for Default and the active profile;
   * every page is a clipped ScrollFrame: content taller than the panel gets a scroll range, the wheel and a
-    slim thumb move it within [0, range], switching category resets it, a page that fits has no bar;
+    slim thumb move it within [0, range], clicking the rail jumps the thumb, switching category resets it
+    (reselecting keeps the place), scrolling closes an open dropdown menu, a page that fits has no bar;
   * read-only Config disables every control; no player-facing string says "tape"; explanations
     live in ? tooltips, never inline; no Blizzard Settings panel or StaticPopup is used.
 
@@ -146,6 +147,8 @@ function Obj:SetAllPoints(rel) self.points = { { point = "ALL", rel = rel or sel
 function Obj:GetParent() return self.parent end
 -- Geometry the mock does not lay out: a check sets .left on a frame and __cursorX for the mouse.
 function Obj:GetLeft() return self.left end
+function Obj:GetTop() return self.top end
+function Obj:SetHitRectInsets(l, r, t, b) self.hitInsets = { l, r, t, b } end
 function Obj:GetEffectiveScale() return 1 end
 function GetCursorPosition() return __cursorX or 0, __cursorY or 0 end
 -- ScrollFrame: the scroll child's height past the frame's own is the range; the mock never lays out
@@ -1998,6 +2001,11 @@ local function bar()
     for _, o in ipairs(ALL) do if o.fsScrollbar then return o end end
 end
 local function wheel(sf, delta) sf.scripts.OnMouseWheel(sf, delta) end
+-- The scroll range worked out from the frames themselves: the bottom of the page's last row past the viewport.
+local function expectedRange(lastLabel)
+    local last = row(lastLabel)
+    return -last.points[1].y + last:GetHeight() - VIEW_H
+end
 
 function T.content_taller_than_the_panel_gets_a_clipped_scroll_range()
     tallDemo()
@@ -2011,9 +2019,32 @@ function T.content_taller_than_the_panel_gets_a_clipped_scroll_range()
     yes(sf.fsRange > 0, "overflows")
     local holder = sf.fsHolder
     eq(sf.fsRange, holder:GetHeight() - VIEW_H, "range = content height past the viewport")
+    eq(sf.fsRange, expectedRange("Row 30"), "and it matches where the last row really ends")
+    -- The real client sizes a scroll child only from what it is told: width = content + side padding, height = holder + padding.
+    eq(child.w, 550 + 2 * 8, "the scroll child has an explicit width")
+    eq(child.h, holder:GetHeight() + 6 + 4, "and an explicit height that follows the holder")
+    eq(holder.w, 550, "the holder has the content width")
     -- every row of the page lives under the clipped scroll child
     local rowFrame = row("Row 30")
     yes(under(child, rowFrame), "the last row is inside the scroll child")
+end
+
+function T.the_viewport_height_the_range_math_uses_matches_the_frames_chrome_anchors()
+    tallDemo()
+    local sf = scrollOf("tall")
+    local content = sf.parent
+    local well = content.parent
+    local function pointY(frame, point)
+        for _, p in ipairs(frame.points) do if p.point == point then return p.y end end
+    end
+    -- the content area runs from the well's top inset to its bottom inset; the window is 560 tall
+    local contentH = 560 - (-pointY(well, "TOPLEFT")) - pointY(well, "BOTTOMRIGHT")
+        - (-pointY(content, "TOPLEFT")) - pointY(content, "BOTTOMRIGHT")
+    eq(contentH, VIEW_H, "VIEW_H is the height the content frame really has")
+    eq(content.parent, well)
+    local b = bar()
+    eq(pointY(b, "TOPRIGHT"), pointY(content, "TOPLEFT"), "the bar starts where the content starts")
+    eq(pointY(b, "BOTTOMRIGHT"), pointY(content, "BOTTOMRIGHT"), "and ends where it ends")
 end
 
 function T.the_wheel_scrolls_within_zero_and_the_range()
@@ -2024,7 +2055,7 @@ function T.the_wheel_scrolls_within_zero_and_the_range()
     wheel(sf, -1); eq(sf:GetVerticalScroll(), STEP, "wheel down scrolls down")
     wheel(sf, 1); wheel(sf, 1); eq(sf:GetVerticalScroll(), 0, "not above the top")
     for _ = 1, 100 do wheel(sf, -1) end
-    eq(sf:GetVerticalScroll(), sf.fsRange, "not past the end")
+    eq(sf:GetVerticalScroll(), expectedRange("Row 30"), "not past the end of the last row")
 end
 
 function T.switching_category_resets_the_scroll_to_the_top()
@@ -2085,7 +2116,7 @@ function T.dragging_the_thumb_scrolls_and_release_stops()
     yes(thumb.scripts.OnUpdate, "dragging")
     __cursorY = 1000 - (VIEW_H - thumb.h)        -- the whole travel of the thumb, downward
     thumb.scripts.OnUpdate(thumb)
-    eq(sf:GetVerticalScroll(), sf.fsRange)
+    eq(sf:GetVerticalScroll(), expectedRange("Row 30"))
     __cursorY = 5000
     thumb.scripts.OnUpdate(thumb)
     eq(sf:GetVerticalScroll(), 0, "clamped at the top")
@@ -2146,13 +2177,134 @@ function T.the_wheel_over_a_slider_scrolls_a_scrollable_page_and_shift_adjusts_t
     eq(sf:GetVerticalScroll(), STEP, "and leaves the page alone")
 end
 
-function T.scrolling_creates_no_frames()
-    tallDemo()
+function T.reselecting_the_current_category_or_reopening_the_window_keeps_the_scroll_place()
+    local W = tallDemo()
     local sf = scrollOf("tall")
-    local before = #ALL
-    wheel(sf, -1); wheel(sf, 1); bar().fsThumb.scripts.OnMouseDown(bar().fsThumb, "LeftButton")
-    bar().fsThumb.scripts.OnMouseUp(bar().fsThumb, "LeftButton")
-    eq(#ALL, before)
+    wheel(sf, -1); wheel(sf, -1)
+    eq(sf:GetVerticalScroll(), 2 * STEP)
+    W.Open("tall")
+    eq(sf:GetVerticalScroll(), 2 * STEP, "Open on the current category")
+    W.Close()
+    W.Open()
+    eq(sf:GetVerticalScroll(), 2 * STEP, "close and reopen")
+    local b = bar().fsThumb
+    eq(b.points[1].y, -math.floor((VIEW_H - b.h) * 2 * STEP / sf.fsRange + 0.5), "the thumb still marks the place")
+    W.Open("short"); W.Open("tall")
+    eq(sf:GetVerticalScroll(), 0, "a real category change still starts at the top")
+end
+
+function T.scrolling_closes_an_open_dropdown_menu_and_the_catcher_swallows_the_wheel()
+    local W, state = tallDemo()
+    local sf = scrollOf("tall")
+    local b = row("Pick").control
+    b.scripts.OnClick(b)
+    local catcher = menu().parent
+    yes(catcher:IsShown(), "the menu is open")
+    yes(catcher.mouseWheel, "the full screen catcher takes the wheel")
+    yes(catcher.scripts.OnMouseWheel, "with a handler")
+    catcher.scripts.OnMouseWheel(catcher, -1)
+    eq(sf:GetVerticalScroll(), 0, "the catcher's wheel scrolls nothing")
+    yes(catcher:IsShown(), "and leaves the menu open")
+    wheel(sf, -1)                                  -- a scroll that gets through anyway (thumb, bar)
+    eq(sf:GetVerticalScroll(), STEP)
+    no(catcher:IsShown(), "the menu closed when the page moved")
+    eq(state.picked, "a", "no pick was made")
+    -- a scroll that changes nothing leaves a reopened menu alone
+    for _ = 1, 100 do wheel(sf, 1) end
+    b = row("Pick").control
+    b.scripts.OnClick(b)
+    wheel(sf, 1)
+    yes(catcher:IsShown(), "already at the top: nothing moved, nothing closed")
+end
+
+function T.a_scroll_with_a_menu_open_changes_no_slider()
+    local W = boot()
+    W.RegisterCategory({ key = "sl", label = "Sl", order = 3, build = function(p)
+        W.UI.Dropdown(p, { label = "Pick", get = function() return "a" end,
+            items = function() return { { value = "a", text = "A" } } end, set = function() end })
+        W.UI.Slider(p, { label = "Level", get = function() return __lvl end, set = function(v) __lvl = v end,
+            min = 0, max = 10, step = 1 })
+        for i = 1, 30 do W.UI.Toggle(p, { label = "R" .. i, get = function() return false end, set = function() end }) end
+    end })
+    __lvl = 5
+    W.Open("sl")
+    local b = row("Pick").control
+    b.scripts.OnClick(b)
+    local catcher = menu().parent
+    IsShiftKeyDown = function() return true end    -- shift would adjust a slider under the cursor
+    catcher.scripts.OnMouseWheel(catcher, -1)
+    IsShiftKeyDown = nil
+    eq(__lvl, 5, "the slider behind the menu is unchanged")
+    wheel(scrollOf("sl"), -1)
+    eq(__lvl, 5)
+    no(catcher:IsShown())
+end
+
+function T.refreshscroll_and_showing_the_window_remeasure_a_page_whose_rows_changed()
+    local W = tallDemo()
+    local sf = scrollOf("tall")
+    local before = sf.fsRange
+    local function addRow(label)
+        W.UI.Toggle(sf.fsHolder, { label = label, get = function() return false end, set = function() end })
+    end
+    addRow("Extra 1"); addRow("Extra 2")
+    eq(sf.fsRange, before, "nothing re-measured yet")
+    W.RefreshScroll()
+    eq(sf.fsRange, expectedRange("Extra 2"), "the range follows the new last row")
+    eq(sf.fsRange, before + 2 * 28)
+    eq(sf._scrollChild.h, sf.fsHolder:GetHeight() + 6 + 4, "the scroll child grew with it")
+    yes(bar():IsShown())
+    W.Close()
+    addRow("Extra 3")
+    win():Show()
+    eq(sf.fsRange, expectedRange("Extra 3"), "showing the window re-measures")
+    eq(sf.fsRange, before + 3 * 28)
+end
+
+function T.clicking_the_rail_jumps_the_thumb_to_the_click_and_the_hit_areas_are_wider_than_the_look()
+    tallDemo()
+    local sf, b = scrollOf("tall"), bar()
+    local thumb = b.fsThumb
+    yes(b.mouse, "the rail takes clicks")
+    eq(thumb.w, 4, "the visible thumb stays 4 wide"); eq(b.w, 4, "and so does the rail")
+    yes(thumb.hitInsets and thumb.hitInsets[1] < 0 and thumb.hitInsets[2] < 0, "the thumb's hit area is widened")
+    yes(b.hitInsets and b.hitInsets[1] < 0 and b.hitInsets[2] < 0, "and so is the rail's")
+    b.top = 1000
+    local travel = VIEW_H - thumb.h
+    -- the middle of the track puts the thumb's middle there: halfway through the range
+    __cursorY = 1000 - VIEW_H / 2
+    b.scripts.OnMouseDown(b, "LeftButton")
+    eq(sf:GetVerticalScroll(), sf.fsRange / 2, "clicking mid track jumps to the middle")
+    -- the bottom of the track is the end of the range, the top is the start; a click past either is clamped
+    __cursorY = 1000 - VIEW_H
+    b.scripts.OnMouseDown(b, "LeftButton")
+    eq(sf:GetVerticalScroll(), expectedRange("Row 30"))
+    __cursorY = 1000 + 50
+    b.scripts.OnMouseDown(b, "LeftButton")
+    eq(sf:GetVerticalScroll(), 0)
+    b.scripts.OnMouseDown(b, "RightButton")
+    eq(sf:GetVerticalScroll(), 0, "only the left button")
+    eq(thumb.points[1].y, 0)
+    __cursorY = 0
+end
+
+function T.a_slider_in_a_sub_frame_still_scrolls_its_page_with_the_wheel()
+    local W = boot()
+    W.RegisterCategory({ key = "sl", label = "Sl", order = 3, build = function(p)
+        local sub = CreateFrame("Frame", nil, p)
+        sub:SetHeight(28)
+        W.UI.Stack(p, sub)
+        W.UI.Slider(sub, { label = "Level", get = function() return __lvl end, set = function(v) __lvl = v end,
+            min = 0, max = 10, step = 1 })
+        for i = 1, 30 do W.UI.Toggle(p, { label = "R" .. i, get = function() return false end, set = function() end }) end
+    end })
+    __lvl = 5
+    W.Open("sl")
+    local t = row("Level").control
+    local sf = scrollOf("sl")
+    t.scripts.OnMouseWheel(t, -1)
+    eq(__lvl, 5, "the slider is left alone")
+    eq(sf:GetVerticalScroll(), STEP, "the page above its sub-frame scrolled")
 end
 
 __checks = T
