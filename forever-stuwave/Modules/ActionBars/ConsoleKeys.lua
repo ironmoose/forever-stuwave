@@ -64,15 +64,23 @@
 -- PARTY PIECE. Nothing else registers piece `party`, and PartyFrames.lua loads before Gunsight.lua, so
 -- this file registers the party frame container (FS.partyContainer, a plain frame that parents the
 -- secure rows, so Gunsight treats it as protected: alpha only in combat, the rest on regen) as piece
--- `party`, only when the Gunsight is enabled, so a disabled Gunsight never touches the party frames.
+-- `party`, only when the Gunsight HUD is built and active, so a Gunsight that is off never drives the party
+-- frames (see WHAT EXISTS IS READ ONCE, THE SWITCH IS LIVE for the live case).
 -- The container can be missing when the client logs in during combat and this file's
 -- PLAYER_REGEN_ENABLED handler runs before PartyFrames' own, so a nil container at regen schedules ONE
 -- retry on the next frame, and the party key registers it lazily on its first click.
 --
--- ENABLED IS READ ONCE. The Gunsight enabled flag is captured at login (Gunsight.OnReady, the moment
--- the Gunsight's own init has decided what to build) and `/fsgun on|off` afterwards is ignored here
--- until a reload, like the rest of the HUD: a runtime flip must not hide the keys over live pieces, nor
--- build keys and register `party` over a HUD that was never built.
+-- WHAT EXISTS IS READ ONCE, THE SWITCH IS LIVE. Whether the keys are BUILT is captured at login
+-- (Gunsight.OnReady, the moment the Gunsight's own init has decided what to build): a Gunsight that was off then
+-- builds no keys and registers no `party`, and `/fsgun on` afterwards builds nothing until a reload. A Gunsight
+-- that was on follows Gunsight.OnActiveChanged, because the keys live on Console.tab and not under the Gunsight
+-- root, so hiding the root does not hide them. Inactive: the key host is hidden (a plain frame, so also in
+-- combat), the tab goes back to its full width and the `party` piece is RELEASED (Gunsight.ReleasePiece: the
+-- party frames show whatever the piece says, as on a Gunsight-off login, and a Gunsight-off piece change or
+-- profile switch does not hide them). Active again: the host shows, the layout is re-seated for the shown set
+-- and the party piece is resumed. The tab resize and any re-seat wait for PLAYER_REGEN_ENABLED in combat
+-- like every other re-seat here; the party container is protected, so ReleasePiece / ResumePiece give it alpha
+-- only in combat and the Show or Hide at regen.
 --
 -- SCALE AND COMBAT. Built once. Re-seated (visibility, slots, positions, sizes, art scale, and the
 -- tab's size through Console.SetKeyCount) from the Console's geometry callback, FS.Layout.OnRescale
@@ -96,6 +104,7 @@ end
 
 if not (Console and Console.KeyRect and Console.KEY and Console.SetKeyCount and FS.ActionBars and FS.ActionBars.OnGeometry
         and FS.Gunsight and FS.Gunsight.OnReady and FS.Gunsight.OnPieceChanged
+        and FS.Gunsight.OnActiveChanged and FS.Gunsight.ReleasePiece and FS.Gunsight.ResumePiece
         and Theme and Theme.AddSliceTexture and Theme.ApplyNineSlice) then
     Degrade("load", "needs Console.lua, ActionBars.lua, Gunsight.lua and Theme.lua first, no keys")
     return
@@ -208,6 +217,8 @@ local seatedSig            -- shown-set signature of the last applied layout ("1
 local shownCount = 0
 local partyRegistered = false
 local partyRetried = false   -- the one next-frame retry has been spent
+local inactive = false       -- the Gunsight is switched off (or waiting to come back): keys hidden, party released
+local partyReleased = false  -- the party piece is stood down for an inactive Gunsight
 local RegisterParty        -- defined below the build code, called from a key click
 
 local function Scale()
@@ -517,6 +528,13 @@ end
 -- hides. Out of combat only (Reseat checks). The hit areas grow half a gap to each side, so they
 -- tile the even pitch.
 local function ApplyLayout()
+    if inactive then
+        -- The Gunsight is off: draw nothing and size the tab as a Gunsight-off login does (the full set, no keys).
+        host:Hide()
+        Console.SetKeyCount(Console.KEY.COUNT)
+        seatedSig = nil
+        return
+    end
     local sig = ShownSignature()
     local slot = 0
     for i, k in ipairs(keys) do
@@ -561,16 +579,17 @@ end
 -- The cheap check the visibility hooks run.
 local function Refresh()
     if not built then return end
+    if inactive and not pendingSeat then return end
     if pendingSeat or ShownSignature() ~= seatedSig then Reseat() end
 end
 
 local gunsightReady = false
-local loginEnabled = false   -- Gunsight.IsEnabled() as of login, never re-read (see ENABLED IS READ ONCE)
+local loginEnabled = false   -- Gunsight.IsEnabled() as of login, never re-read (see WHAT EXISTS IS READ ONCE)
 
 -- The party frame container is the `party` piece. Registered once, when it exists (a login in
 -- combat builds it after combat) and the Gunsight was enabled at login.
 function RegisterParty()
-    if partyRegistered or not gunsightReady or not loginEnabled then return end
+    if partyRegistered or not gunsightReady or not loginEnabled or inactive then return end
     if not (FS.partyContainer and Gunsight.RegisterPiece) then return end
     partyRegistered = true
     local ok, err = pcall(Gunsight.RegisterPiece, "party", { frame = FS.partyContainer })
@@ -593,6 +612,7 @@ local function Ensure()
             byPiece[def.key] = k
         end
         built = true
+        if inactive then host:Hide() end
         Reseat()
         for _, k in ipairs(keys) do SetState(k, Gunsight.IsPieceOn(k.key), true) end
     end)
@@ -609,6 +629,39 @@ end
 Gunsight.OnPieceChanged(function(piece, on)
     local k = byPiece[piece]
     if k then SetState(k, on and true or false, false) end
+end)
+
+-- The master switch, live (see WHAT EXISTS IS READ ONCE, THE SWITCH IS LIVE). Only fires for a Gunsight that was built.
+Gunsight.OnActiveChanged(function(active)
+    inactive = not active
+    if built then
+        if inactive then
+            -- A hovered key under a host that hides gets no OnLeave of its own to count on: clear it here.
+            for _, k in ipairs(keys) do
+                k.hover, k.down = false, false
+                Look(k)
+                HideTip(k)
+            end
+            host:Hide()
+        else
+            host:Show()
+        end
+        Reseat()
+    end
+    if inactive then
+        if partyRegistered and not partyReleased then
+            partyReleased = true
+            local ok, err = pcall(Gunsight.ReleasePiece, "party")
+            if not ok then Degrade("party_release", err) end
+        end
+    else
+        if partyReleased then
+            partyReleased = false
+            local ok, err = pcall(Gunsight.ResumePiece, "party")
+            if not ok then Degrade("party_resume", err) end
+        end
+        RegisterParty()
+    end
 end)
 
 Gunsight.OnReady(function()

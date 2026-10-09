@@ -462,6 +462,29 @@ local function EnsureOverlay()
     return overlay
 end
 
+-- Shows a handle for every movable frame that has one and hides the rest. Returns true when the chat is
+-- applied but skipped (minimised or maximised). Safe to run again while editing.
+local function ShowHandles()
+    local chatSkipped = false
+    for _, def in ipairs(MOVABLE) do
+        if HasHandle(def.id) then
+            handles[def.id] = handles[def.id] or NewHandle(def)
+            Paint(handles[def.id], def.id == selected)
+            SyncHandle(def.id)
+            handles[def.id]:Show()
+        else
+            if handles[def.id] then handles[def.id]:Hide() end
+            if selected == def.id then selected = nil end
+            if dragging == def.id then
+                handles[def.id]:StopMovingOrSizing()
+                dragging = nil
+            end
+            if def.id == "chat" and AppliedFrame("chat") then chatSkipped = true end
+        end
+    end
+    return chatSkipped
+end
+
 local function RefuseInCombat()
     if not InCombatLockdown() then return false end
     Say("can't edit the layout in combat")
@@ -483,17 +506,7 @@ function LayoutEdit.Enter()
     local ok, err = pcall(function()
         EnsureOverlay()
         donePanel = donePanel or NewDonePanel()
-        for _, def in ipairs(MOVABLE) do
-            if HasHandle(def.id) then
-                handles[def.id] = handles[def.id] or NewHandle(def)
-                Paint(handles[def.id], false)
-                SyncHandle(def.id)
-                handles[def.id]:Show()
-            else
-                if handles[def.id] then handles[def.id]:Hide() end
-                if def.id == "chat" and AppliedFrame("chat") then chatSkipped = true end
-            end
-        end
+        chatSkipped = ShowHandles()
         overlay:Show()
         overlay:EnableKeyboard(true)
         donePanel:Show()
@@ -636,6 +649,17 @@ end
 
 HookBlizzardEditMode()
 RegisterPage()
+
+-- The Gunsight switch can flip while /fsedit is open (the editor stays open through the config window's
+-- toggle): Stack A's cast bars gain or lose their handles with it. GunsightTape.lua loads before this file, so
+-- its callback has already handed the casts over (IsStackActive is current) when this one runs.
+if type(FS.Gunsight) == "table" and type(FS.Gunsight.OnActiveChanged) == "function" then
+    FS.Gunsight.OnActiveChanged(function()
+        if not editing then return end
+        local ok, err = pcall(ShowHandles)
+        if not ok then FS.Layout.ForwardError(err) end
+    end)
+end
 
 local watcher = CreateFrame("Frame")
 watcher:RegisterEvent("PLAYER_LOGIN")

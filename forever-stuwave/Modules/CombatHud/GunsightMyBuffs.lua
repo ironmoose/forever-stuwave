@@ -101,8 +101,10 @@ local function ShowTip(self)
     if not pcall(helpers.ShowAuraTooltip, self) then GameTooltip:Hide() end
 end
 
+-- The tiles are live mouse frames. A Gunsight switched off in combat only fades its root (a Hide is owed to the end of combat), so
+-- the invisible tiles would still answer a hover: nothing shows while the HUD is not the display.
 local function TileEnter(self)
-    if not Gunsight.IsPieceOn("mybuffs") then return end
+    if not Gunsight.IsActive() or not Gunsight.IsPieceOn("mybuffs") then return end
     self.fsHover = true
     ShowTip(self)
 end
@@ -306,6 +308,9 @@ local function Build()
         Guard(Refresh)
     end)
 
+    Gunsight.OnActiveChanged(function(active)
+        if not active then ReleaseAllTips() end   -- a tooltip already up when the switch went off
+    end)
     Gunsight.RegisterPiece("mybuffs", {
         frame = plate,
         onShow = function() Guard(Refresh) end,

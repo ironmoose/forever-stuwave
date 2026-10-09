@@ -1710,6 +1710,35 @@ local function lockRoot()
     return state
 end
 
+function T.a_build_that_fails_after_the_view_was_taken_hands_the_casts_back_to_stack_a()
+    local W = world({ noLogin = true })
+    local Region = getmetatable(UIParent)
+    local setScript = Region.SetScript
+    function Region:SetScript(k, fn)
+        if k == "OnEvent" and self._events and self._events.PLAYER_TARGET_CHANGED
+            and self._parent and self._parent._name == "ForeverSTUwaveGunsightTape_tgt" then
+            error("SetScript failed")                        -- after SetView took the casts
+        end
+        return setScript(self, k, fn)
+    end
+    __fireEvent("ADDON_LOADED", "forever-stuwave")
+    __fireEvent("PLAYER_LOGIN")
+    Region.SetScript = setScript
+    eq(FS.GunsightTape.tgt, nil, "the build failed as a whole")
+    eq(FS.CastBars.IsStackActive(), true, "the view went back: Stack A is the display")
+    ok(wired(W.P) and wired(W.G), "Stack A listens again")
+    W.cast("player", "Shadow Bolt", "C1", 100, 2.5)
+    W.fire(W.P, "UNIT_SPELLCAST_START")
+    eq(W.P.mode, "run", "a cast shows on Stack A, not on a hidden tape")
+    -- the master switch has no tapes to hand over: flipping it leaves Stack A alone and throws nothing
+    W.Gun.SetPiece("you", true, true)
+    FS.Config.Set("gunsight.enabled", false)
+    FS.Config.Set("gunsight.enabled", true)
+    eq(FS.CastBars.IsStackActive(), true)
+    eq(W.P.mode, "run", "and the cast goes on")
+    W.clean()
+end
+
 function T.master_off_live_hands_the_casts_back_to_stack_a()
     local W = world()
     W.cast("player", "Shadow Bolt", "C1", 100, 2.5)

@@ -401,6 +401,41 @@ function T.the_stack_a_cast_bars_are_movable_only_while_they_are_the_display()
     FS.CastBars = nil
 end
 
+function T.the_cast_bar_handles_follow_the_gunsight_switch_while_the_editor_is_open()
+    local active, notify = false, nil
+    FS.Gunsight = { OnActiveChanged = function(fn) notify = fn end }
+    FS.CastBars = { IsStackActive = function() return not active end }
+    seat("pcast"); seat("tcast")
+    edit()
+    eq(notify ~= nil, true, "LayoutEdit listens for the switch")
+    FS.LayoutEdit.Enter()
+    eq(FS.LayoutEdit.GetHandle("pcast") ~= nil, true, "Stack A is the display: movable")
+    FS.LayoutEdit.Select("pcast")
+    active = true                                  -- the Gunsight HUD takes the casts while /fsedit is open
+    notify(true)
+    eq(FS.LayoutEdit.GetHandle("pcast"), nil, "the tapes are up: nothing to move, the handle goes")
+    eq(FS.LayoutEdit.GetHandle("tcast"), nil)
+    eq(FS.LayoutEdit.IsEditing(), true, "the editor itself stays open")
+    FS.LayoutEdit.Nudge(1, 0)                      -- nothing selected any more: no throw, no write
+    eq(override("pcast"), nil, "a nudge writes nothing for the gone handle")
+    active = false
+    notify(false)
+    eq(FS.LayoutEdit.GetHandle("pcast") ~= nil, true, "Stack A back: the handle returns")
+    eq(FS.LayoutEdit.GetHandle("tcast") ~= nil, true)
+    eq(#FS.LayoutEdit.GetHandle("pcast")._points > 0, true, "and it is seated")
+end
+
+function T.the_gunsight_switch_does_nothing_to_the_handles_when_the_editor_is_closed()
+    local active, notify = false, nil
+    FS.Gunsight = { OnActiveChanged = function(fn) notify = fn end }
+    FS.CastBars = { IsStackActive = function() return not active end }
+    seat("pcast")
+    edit()
+    notify(false)
+    eq(FS.LayoutEdit.GetHandle("pcast"), nil, "no handle is made while the editor is closed")
+    eq(FS.LayoutEdit.IsEditing(), false)
+end
+
 function T.a_handle_is_an_insecure_fullscreen_dialog_frame_on_uiparent_never_anchored_to_the_frame()
     edit()
     local f = seat("stance", true)
