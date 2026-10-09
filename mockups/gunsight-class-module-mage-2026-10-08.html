@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1600">
+<title>Gunsight Class Module Mage</title>
+<style>
+@font-face{font-family:'Mononoki';src:url(../forever-stuwave/Media/Fonts/MononokiNerdFontMono-Bold.ttf) format('truetype');font-weight:100 900;font-style:normal;font-display:block}
+:root{
+  color-scheme:dark;
+  --bg:#0d0620; --fg:#e9e2ff; --muted:#9d93c4; --white:#f3fbff; --text:#e2e8f0;
+  --violet:#a855f7; --cyan:#22e0ff; --pink:#ff2e97; --amber:#ffb648; --green:#39ff14;
+  --track:#0a0416; --line:#3a2168;
+  --edge:rgba(168,85,247,.35);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg)}
+body{width:1600px;padding:28px 30px 48px;color:var(--fg);font-family:'Mononoki',ui-monospace,monospace;font-weight:700;line-height:1.45;overflow-x:hidden}
+h1{margin:0;font-size:30px;letter-spacing:.08em;color:var(--white);text-shadow:0 0 18px var(--violet);font-weight:700}
+h2{margin:34px 0 10px;font-size:22px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 14px var(--violet);font-weight:700}
+h2 i{font-style:normal;color:var(--pink)}
+.sub{margin:6px 0 10px;color:var(--muted);font-size:14px;max-width:1500px}
+.sub b,.cap b,.note b{color:var(--white);font-weight:700}
+.row{display:flex;gap:26px;margin-bottom:20px;align-items:flex-start}
+.scene{position:relative;width:1000px;height:450px;border:1px solid var(--edge);overflow:hidden;flex:none}
+.scene svg{display:block}
+.state{position:absolute;left:10px;top:8px;z-index:2;font-size:12px;letter-spacing:.14em;color:var(--muted);padding:2px 8px;background:rgba(13,6,32,.7);border:1px solid rgba(168,85,247,.3)}
+.state b{color:var(--cyan);font-weight:700}
+.side{width:514px}
+.side .t{font-size:20px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 14px var(--violet);margin:0 0 8px}
+.side .t i{font-style:normal;color:var(--pink)}
+.cap{font-size:13.5px;line-height:1.5;color:var(--muted);margin:0 0 12px}
+.cards{display:flex;gap:16px;align-items:flex-start}
+.card{flex:1;border:1px solid var(--edge);background:rgba(26,16,37,.55);padding:12px 14px 12px;position:relative;min-width:0}
+.card .nm{font-size:16px;color:var(--white);letter-spacing:.08em;margin:0 0 2px}
+.card .nm i{font-style:normal;color:var(--pink)}
+.card .st{font-size:11px;color:var(--muted);margin:0 0 8px;letter-spacing:.04em}
+.card .art{display:flex;justify-content:center;margin:2px 0 10px}
+.card p{margin:0 0 6px;font-size:12px;line-height:1.45;color:var(--text)}
+.card p em{font-style:normal;color:var(--cyan)}
+.card p u{text-decoration:none;color:var(--amber)}
+.verdict{display:inline-block;padding:1px 9px;font-size:11px;letter-spacing:.14em;margin:0 0 8px;border:1px solid}
+.v-keep{color:var(--green);border-color:var(--green)}
+.v-alt{color:var(--cyan);border-color:var(--cyan)}
+.v-drop{color:var(--pink);border-color:var(--pink)}
+.card.dropped .art{opacity:.55}
+.panel{border:1px solid var(--edge);background:rgba(13,6,32,.7);padding:6px;flex:none}
+.panel svg{display:block}
+table{border-collapse:collapse;width:100%;font-size:11.5px;line-height:1.4}
+th{font-weight:700;text-align:left;color:var(--violet);letter-spacing:.08em;font-size:10.5px;padding:4px 8px;border-bottom:1px solid var(--edge)}
+td{padding:5px 8px;border-bottom:1px solid rgba(58,33,104,.5);vertical-align:top;color:var(--text)}
+td:first-child{color:var(--white);white-space:nowrap}
+.pn{display:inline-block;width:17px;height:17px;border-radius:50%;border:1px solid var(--amber);color:var(--amber);text-align:center;line-height:15px;font-size:10px;margin-right:6px}
+.tag{font-size:10px;letter-spacing:.06em;padding:0 5px;border:1px solid;margin-right:4px}
+.t-plain{color:var(--green);border-color:var(--green)}
+.t-est{color:var(--amber);border-color:var(--amber)}
+.t-probe{color:var(--pink);border-color:var(--pink)}
+.strip{display:grid;grid-template-columns:repeat(4,357px);gap:16px 14px}
+.cell .panel{width:357px}
+.cell .n{font-size:13px;color:var(--white);letter-spacing:.08em;margin:6px 0 2px}
+.cell .n i{font-style:normal;color:var(--pink)}
+.cell .c{font-size:11.5px;color:var(--muted);line-height:1.4}
+.cell .c b{color:var(--text)}
+ul.pl{margin:6px 0 0 16px;padding:0;font-size:12.5px;line-height:1.5;color:var(--text)}
+ul.pl li{margin-bottom:4px}
+ul.pl b{color:var(--white)}
+.note{font-size:12.5px;color:var(--muted);line-height:1.5;max-width:1500px}
+.sec-sub{font-size:13px;color:var(--muted);margin:-4px 0 12px;max-width:1500px}
+</style>
+</head>
+<body>
+<h1>Design reference, 2026-10-08, Mage</h1>
+<div class="sub">Gunsight Class Module for the Mage. Research: adze doc 01M4F7MRN1RF5D01QX5S4AAPS8. Frost is what players level as at 10 to 30, and its whole fight is one cycle: the mob walks up, Frost Nova freezes it, Ice Lance shatters it, step back, wait for the Nova to come back. Three divergent concepts below, then the pick, pushed further.</div>
+<div id="root"></div>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <filter id="gl" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.1" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="gls" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b0716"/><stop offset=".62" stop-color="#150d28"/><stop offset="1" stop-color="#1c1030"/></linearGradient>
+    <radialGradient id="glowL" cx="22%" cy="108%" r="55%"><stop offset="0" stop-color="#3a2160"/><stop offset="1" stop-color="#3a2160" stop-opacity="0"/></radialGradient>
+    <radialGradient id="glowR" cx="85%" cy="0%" r="60%"><stop offset="0" stop-color="#1d1840"/><stop offset="1" stop-color="#1d1840" stop-opacity="0"/></radialGradient>
+  </defs>
+</svg>
+<script>
+(function(){
+var C={cyan:'#22e0ff',pink:'#ff2e97',violet:'#a855f7',green:'#39ff14',amber:'#ffb648',white:'#f3fbff',muted:'#9d93c4',fg:'#e9e2ff',bg:'#0d0620',gold:'#ffd23f'};
+function hex(h){h=h.replace('#','');return [parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)];}
+function mix(a,b,t){var x=hex(a),y=hex(b);return '#'+[0,1,2].map(function(i){return ('0'+Math.round(x[i]+(y[i]-x[i])*t).toString(16)).slice(-2);}).join('');}
+function ch(x,y,w,h,c){return (x+c)+','+y+' '+(x+w)+','+y+' '+(x+w)+','+(y+h-c)+' '+(x+w-c)+','+(y+h)+' '+x+','+(y+h)+' '+x+','+(y+c);}
+function txt(x,y,s,size,fill,o){o=o||{};
+  return '<text x="'+x+'" y="'+y+'" font-size="'+size+'" fill="'+fill+'" text-anchor="'+(o.a||'start')+'"'+(o.op?' opacity="'+o.op+'"':'')+(o.rot?' transform="rotate('+o.rot+' '+x+' '+y+')"':'')+
+    ' stroke="rgba(13,6,32,.92)" stroke-width="2.6" paint-order="stroke" stroke-linejoin="round">'+s+'</text>';}
+function line(x1,y1,x2,y2,col,op,w,dash){return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="'+(w||1)+'"'+(dash?' stroke-dasharray="'+dash+'"':'')+'/>';}
+function chevPath(cx,ay,hw,d,t){return cx+','+ay+' '+(cx+hw)+','+(ay+d)+' '+(cx+hw)+','+(ay+d+t)+' '+cx+','+(ay+t)+' '+(cx-hw)+','+(ay+d+t)+' '+(cx-hw)+','+(ay+d);}
+function rect(x,y,w,h,fill,op){return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" fill="'+fill+'"'+(op!=null?' fill-opacity="'+op+'"':'')+'/>';}
+
+var TOP=508,TBOT=752,PITCH=(TBOT-TOP)/10,N=20,CP=(TBOT-TOP)/N;
+var DOT_AX=1239,LANE=[1283,1312,1341,1370];
+var HZ=630;
+function chipIcon(x,y,s,d,absent){
+  var c=Math.max(2,Math.round(s/6)),o='';
+  if(absent){
+    return '<polygon points="'+ch(x,y,s,s,c)+'" fill="rgba(13,6,32,.7)" stroke="'+mix(C.muted,'#ffffff',.25)+'" stroke-opacity=".9" stroke-width="1.2"/>'+
+      '<text x="'+(x+s/2)+'" y="'+(y+s/2+s*.18)+'" font-size="'+Math.round(s*.5)+'" fill="'+mix(C.muted,'#ffffff',.25)+'" fill-opacity=".8" text-anchor="middle">'+d.ab+'</text>';
+  }
+  o+='<polygon points="'+ch(x,y,s,s,c)+'" fill="'+mix(d.c,C.bg,.35)+'"/>';
+  o+='<polygon points="'+ch(x,y,s,s*.45,c)+'" fill="'+mix(d.c,'#ffffff',.35)+'" opacity=".3"/>';
+  o+='<polygon points="'+ch(x,y,s,s,c)+'" fill="none" stroke="'+mix(d.c,'#ffffff',.3)+'" stroke-width="1.2"/>';
+  o+='<text x="'+(x+s/2)+'" y="'+(y+s/2+s*.18)+'" font-size="'+Math.round(s*.5)+'" fill="'+C.white+'" text-anchor="middle">'+d.ab+'</text>';
+  return o;
+}
+/* ---------- the shared composition ---------- */
+function bar(x0,x1,col,p,out,caretCol){
+  var o='',cx=(x0+x1)/2,k,i;
+  o+='<polygon points="'+ch(x0,500,x1-x0,260,8)+'" fill="rgba(13,6,32,.55)" fill-opacity=".45"/>';
+  o+='<polygon points="'+ch(x0,500,x1-x0,260,8)+'" fill="none" stroke="'+col+'" stroke-width="1.3" filter="url(#gls)"/>';
+  var ex=out<0?x0:x1;
+  for(k=0;k<=10;k++){var ty=TBOT-k*PITCH;o+=line(ex,ty,ex+out*(k===5?10:5),ty,col,.75,1.2);}
+  for(i=0;i<N;i++){
+    var ay=TBOT-(i+1)*CP,lit=(i+1)/N<=p;
+    o+='<polygon points="'+chevPath(cx,ay,10,8,5.5)+'" fill="'+col+'" fill-opacity="'+(lit?1:.2)+'"'+(lit?' filter="url(#gls)"':'')+'/>';
+  }
+  var fy=TBOT-p*(TBOT-TOP);
+  o+='<polygon points="'+chevPath(cx,fy-17,13,9,7)+'" fill="none" stroke="'+caretCol+'" stroke-width="1.8" stroke-linejoin="miter"/>';
+  return o;
+}
+function box(x,y,w,h,col){
+  return '<polygon points="'+ch(x,y,w,h,8)+'" fill="rgba(13,6,32,.85)"/>'+
+    '<polygon points="'+ch(x,y,w,h,8)+'" fill="none" stroke="'+col+'" stroke-width="1.4" filter="url(#gl)"/>';
+}
+function brackets(x,y,w,h,col,op,a){
+  a=a||12;var s='';
+  [[x,y+a,x,y,x+a,y],[x+w-a,y,x+w,y,x+w,y+a],[x,y+h-a,x,y+h,x+a,y+h],[x+w-a,y+h,x+w,y+h,x+w,y+h-a]].forEach(function(q){
+    s+='<polyline points="'+q[0]+','+q[1]+' '+q[2]+','+q[3]+' '+q[4]+','+q[5]+'" fill="none" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="1.6"/>';});
+  return s;
+}
+function party(){
+  var o='',x=606,y=506,w=180,h=230;
+  o+=brackets(x,y,w,h,C.cyan,.6,12);
+  var rows=[['Parker',.82,C.green],['Thalia',.55,C.green],['Brogan',.18,'#ff3b4e'],['Mira',.95,C.green],['Jex',.70,C.green]];
+  var rh=(h-16)/5;
+  rows.forEach(function(r,i){
+    var ry=y+8+i*rh;
+    if(i>0)o+=line(x+8,ry,x+w-8,ry,C.violet,.2,1);
+    o+=txt(x+12,ry+14,r[0],11,i===0?C.cyan:C.white);
+    o+=rect(x+12,ry+20,w-24,5,r[2],.18)+rect(x+12,ry+20,(w-24)*r[1],5,r[2],1);
+    o+=rect(x+12,ry+27,w-24,3,'#4aa8ff',.18)+rect(x+12,ry+27,(w-24)*.7,3,'#4aa8ff',1);
+  });
+  o+='<polygon points="'+ch(578,y+8+2*rh+8,22,22,4)+'" fill="'+mix('#a05030',C.bg,.35)+'" stroke="'+C.amber+'" stroke-width="1.2"/><text x="589" y="'+(y+8+2*rh+8+16)+'" font-size="12" fill="'+C.white+'" text-anchor="middle">P</text>';
+  return o;
+}
+function shard(x,y,w,h,col,filled){
+  var cx=x+w/2;
+  return '<polygon points="'+cx+','+y+' '+(x+w)+','+(y+h*.35)+' '+cx+','+(y+h)+' '+x+','+(y+h*.35)+'" fill="'+col+'" fill-opacity="'+(filled?.28:.06)+'" stroke="'+col+'" stroke-opacity="'+(filled?1:.4)+'" stroke-width="1.2"'+(filled?' filter="url(#gls)"':'')+'/>'+
+    '<line x1="'+cx+'" y1="'+y+'" x2="'+cx+'" y2="'+(y+h)+'" stroke="'+col+'" stroke-opacity="'+(filled?.5:.2)+'"/>';
+}
+function tag(x,y,w,html,col){
+  return '<polygon points="'+ch(x,y,w,15,5)+'" fill="rgba(13,6,32,.95)" stroke="'+C.pink+'" stroke-width="1.3" filter="url(#gls)"/>'+
+    '<text x="'+(x+w/2)+'" y="'+(y+11)+'" font-size="11" fill="'+col+'" text-anchor="middle">'+html+'</text>';
+}
+
+/* ================= Mage module drawing: design px, module origin at 0,0 ================= */
+function polar(cx,cy,r,deg){var a=deg*Math.PI/180;return [cx+r*Math.cos(a),cy+r*Math.sin(a)];}
+function f1(n){return Math.round(n*10)/10;}
+function pts(a){return a.map(function(p){return f1(p[0])+','+f1(p[1]);}).join(' ');}
+function hexPts(cx,cy,r){var a=[],k;for(k=0;k<6;k++)a.push(polar(cx,cy,r,-90+60*k));return pts(a);}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+function sln(x1,y1,x2,y2,col,op,w,filt){
+  /* glow is a wider faint twin, not a filter: an SVG filter on a perfectly vertical or horizontal line has a zero-size box and draws nothing */
+  var a='x1="'+f1(x1)+'" y1="'+f1(y1)+'" x2="'+f1(x2)+'" y2="'+f1(y2)+'" stroke="'+col+'" stroke-linecap="round"';
+  return (filt?'<line '+a+' stroke-opacity="'+(op*.28)+'" stroke-width="'+(w+3.2)+'"/>':'')+'<line '+a+' stroke-opacity="'+op+'" stroke-width="'+w+'"/>';
+}
+function arcS(cx,cy,r,f,col,op,w,filt,startDeg){
+  if(f<=0)return '';
+  if(f>=.999)return '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="'+w+'"'+(filt?' filter="url(#gls)"':'')+'/>';
+  startDeg=startDeg==null?-90:startDeg;
+  var p0=polar(cx,cy,r,startDeg),p1=polar(cx,cy,r,startDeg+360*f);
+  return '<path d="M'+f1(p0[0])+','+f1(p0[1])+' A'+r+','+r+' 0 '+(f>.5?1:0)+' 1 '+f1(p1[0])+','+f1(p1[1])+'" fill="none" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="'+w+'" stroke-linecap="round"'+(filt?' filter="url(#gls)"':'')+'/>';
+}
+function diamond(cx,cy,r,fill,fop,stroke,sop,sw,filt){
+  return '<polygon points="'+cx+','+(cy-r)+' '+(cx+r*.75)+','+cy+' '+cx+','+(cy+r)+' '+(cx-r*.75)+','+cy+'" fill="'+fill+'" fill-opacity="'+fop+'" stroke="'+stroke+'" stroke-opacity="'+sop+'" stroke-width="'+sw+'"'+(filt?' filter="url(#gls)"':'')+'/>';
+}
+
+/* the Frost Nova cycle: 21 s with Improved Frost Nova 2/2 (25 s base), up to 8 s frozen, 6 arms of 3.5 s */
+var CD=21,FZ=8,ARM=CD/6;
+
+/* the ice core: the hexagon the target is "held" in. Solid and bright while the freeze is up, one crack per own Ice Lance */
+function core(cx,cy,r,st){
+  var o='',j,ready=!!st.ready,t=ready?CD:st.t,frozen=!ready&&t<FZ,noMana=!!st.noMana,n=st.lances||0;
+  if(frozen){
+    o+='<polygon points="'+hexPts(cx,cy,r)+'" fill="'+C.cyan+'" fill-opacity=".5" stroke="'+C.white+'" stroke-width="1.7" filter="url(#gls)"/>';
+    [1,3,5].forEach(function(k){var p=polar(cx,cy,r,-90+60*k);o+=sln(cx,cy,p[0],p[1],C.white,.4,1);});
+    for(j=0;j<n;j++){
+      var a=-60+j*73,q=[polar(cx,cy,2.4,a),polar(cx,cy,4.6,a+17),polar(cx,cy,6.6,a-9),polar(cx,cy,r-.6,a+7)];
+      o+='<polyline points="'+pts(q)+'" fill="none" stroke="'+C.bg+'" stroke-width="2.6" stroke-linejoin="round"/><polyline points="'+pts(q)+'" fill="none" stroke="'+C.white+'" stroke-width="1.1" stroke-linejoin="round"/>';
+    }
+  }else if(ready){
+    var col=noMana?C.muted:C.amber;
+    o+='<polygon points="'+hexPts(cx,cy,r)+'" fill="'+col+'" fill-opacity="'+(noMana?.12:.38)+'" stroke="'+col+'" stroke-width="1.6"'+(noMana?'':' filter="url(#gls)"')+'/>';
+    o+=diamond(cx,cy,r*.5,col,noMana?.2:.9,col,1,1);
+  }else{
+    o+='<polygon points="'+hexPts(cx,cy,r)+'" fill="'+C.bg+'" fill-opacity=".8" stroke="'+C.violet+'" stroke-opacity=".7" stroke-width="1.2"/>';
+    for(j=0;j<n;j++){var a2=-60+j*73,p2=polar(cx,cy,r*.8,a2);o+=sln(cx,cy,p2[0],p2[1],C.violet,.35,1);}
+  }
+  return o;
+}
+
+/* one snowflake arm: spine plus two pairs of barbs, drawn up to `frac` of its length */
+function armLines(cx,cy,R,k,frac){
+  var ang=-90+60*k,r0=R*.36,rc=r0+(R-r0)*frac,L=[],p0=polar(cx,cy,r0,ang),p1=polar(cx,cy,rc,ang);
+  L.push([p0[0],p0[1],p1[0],p1[1],2.5]);
+  [[.58,.2],[.82,.15]].forEach(function(bb){
+    var rb=R*bb[0];if(rc<rb)return;
+    var sc=Math.min(1,(rc-rb)/(R*.12)),base=polar(cx,cy,rb,ang);
+    [-58,58].forEach(function(d){var e=polar(base[0],base[1],R*bb[1]*sc,ang+d);L.push([base[0],base[1],e[0],e[1],1.9]);});
+  });
+  return L;
+}
+/* concept A: RIME. A snowflake that regrows arm by arm while Frost Nova recharges, with the ice core in the middle */
+function flake(cx,cy,R,st){
+  var o='',k,L,i,ready=!!st.ready,t=ready?CD:st.t,noMana=!!st.noMana,amberOn=ready&&!noMana,frozen=!ready&&t<FZ;
+  var armCol=ready?mix(C.cyan,'#ffffff',.55):C.cyan;if(noMana)armCol=mix(C.cyan,C.muted,.6);
+  o+='<polygon points="'+hexPts(cx,cy,R+4)+'" fill="'+(amberOn?'rgba(255,182,72,.08)':'rgba(13,6,32,.55)')+'" stroke="'+(amberOn?C.amber:(ready?C.muted:C.violet))+'" stroke-opacity="'+(ready?.95:.4)+'" stroke-width="'+(amberOn?1.7:1.1)+'"'+(noMana?' stroke-dasharray="4 3"':'')+(amberOn?' filter="url(#gls)"':'')+'/>';
+  for(k=0;k<6;k++){armLines(cx,cy,R,k,1).forEach(function(l){o+=sln(l[0],l[1],l[2],l[3],C.violet,.22,l[4]*.8);});}
+  for(k=0;k<6;k++){
+    var frac=ready?1:clamp((t-ARM*k)/ARM,0,1);if(frac<=0)continue;
+    var growing=frac<1,col=(k===5&&growing)?C.amber:armCol;
+    armLines(cx,cy,R,k,frac).forEach(function(l){o+=sln(l[0],l[1],l[2],l[3],col,.96,l[4],true);});
+    var ang=-90+60*k;
+    if(growing){var tp=polar(cx,cy,R*.36+(R-R*.36)*frac,ang);o+='<circle cx="'+f1(tp[0])+'" cy="'+f1(tp[1])+'" r="2.4" fill="#ffffff" filter="url(#gls)"/>';}
+    else{var d=polar(cx,cy,R+1,ang);o+=diamond(f1(d[0]),f1(d[1]),3.3,amberOn?C.amber:col,.95,amberOn?C.amber:col,1,.8,true);}
+  }
+  if(!ready&&t<FZ){
+    o+=arcS(cx,cy,R*.36-2.6,1,C.violet,.25,1.1,false);
+    o+=arcS(cx,cy,R*.36-2.6,(FZ-t)/FZ,C.cyan,1,1.8,true);
+  }
+  o+=core(cx,cy,R*.2,st);
+  return o;
+}
+function shardGem(x,y,w,h,col,filled){return shard(x,y,w,h,col,filled);}
+function coneIcon(x,y,on){
+  var col=on?C.cyan:C.muted,o='';
+  o+='<polygon points="'+x+','+(y+9)+' '+(x+22)+','+y+' '+(x+22)+','+(y+18)+'" fill="'+col+'" fill-opacity="'+(on?.28:.05)+'" stroke="'+col+'" stroke-opacity="'+(on?1:.4)+'" stroke-width="1.2"'+(on?' filter="url(#gls)"':'')+'/>';
+  o+=sln(x+8,y+9,x+22,y+9,col,on?.7:.25,1);
+  return o;
+}
+/* the right column of the Rime module: what the flake is doing, in words and a number */
+function rimeText(st,x0){
+  var o='',ready=!!st.ready,t=st.t,noMana=!!st.noMana,frozen=!ready&&t<FZ,lvl=st.lvl==null?30:st.lvl,rem=CD-t;
+  var word,sub,subCol,big,bigCol;
+  if(ready){word='NOVA';sub=noMana?'NO MANA':'READY';subCol=C.amber;big=noMana?'--':'NOW';bigCol=noMana?C.muted:C.amber;}
+  else if(frozen){word='FROZEN';sub=lvl>=20?'LANCE':'BACK AWAY';subCol=C.cyan;big='~'+Math.ceil(FZ-t)+'s';bigCol=C.cyan;}
+  else if(rem<=ARM){word='NOVA';sub='SOON';subCol=C.amber;big='~'+Math.ceil(rem)+'s';bigCol=C.amber;}
+  else{word='NOVA';sub='RECHARGE';subCol=C.muted;big='~'+Math.ceil(rem)+'s';bigCol=C.white;}
+  o+=txt(x0,19,word,12,C.white);
+  o+=txt(x0,31,sub,10,subCol);
+  o+=txt(x0,57,big,22,bigCol);
+  var fk=st.fofKnown!==false&&lvl>=30,ck=lvl>=26;
+  if(lvl>=20&&(fk||ck))o+=line(x0,68,x0+72,68,C.violet,.3,1);
+  if(fk){
+    var f=st.fof||{rem:0,ch:0},on=f.ch>0;
+    if(on)o+='<polygon points="'+ch(x0-5,72,46,40,5)+'" fill="rgba(34,224,255,.08)" stroke="'+C.cyan+'" stroke-opacity=".9" stroke-width="1.2" filter="url(#gls)"/>';
+    o+=txt(x0,83,on?'LANCE':'FINGERS',9,on?C.cyan:C.violet,{op:on?1:.85});
+    o+=shardGem(x0,88,9,19,C.cyan,f.ch>=1)+shardGem(x0+11,88,9,19,C.cyan,f.ch>=2);
+    o+=txt(x0+24,104,on?Math.ceil(f.rem)+'s':'--',10,on?C.white:C.muted,{op:on?1:.7});
+  }
+  if(ck){
+    var cx0=x0+48,cOn=st.cone!==false;
+    o+=txt(cx0,83,'CONE',9,cOn?C.cyan:C.violet,{op:cOn?1:.7});
+    o+=coneIcon(cx0,88,cOn);
+  }
+  return o;
+}
+function rime(st){return '<g>'+flake(54,57,46,st)+rimeText(st,112)+'</g>';}
+
+/* ================= concept B: ARCANE CIRCLE, both areas (202 x 260) ================= */
+var RUNES=['M0,-6 L0,6 M0,-2 L4,-5 M0,2 L4,-1','M-3,-6 L3,-6 L-3,6 L3,6','M0,-6 L0,6 M-3,-3 L3,3','M-3,-6 L-3,6 M-3,-6 L3,-1 L-3,3','M-3,6 L0,-6 L3,6 M-2,1 L2,1'];
+function rune(cx,cy,r,i,n,col,op){
+  var a=-90+i*360/n,p=polar(cx,cy,r,a);
+  return '<path d="'+RUNES[i%5]+'" transform="translate('+f1(p[0])+','+f1(p[1])+') rotate('+f1(a+90)+')" fill="none" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"'+(op>.6?' filter="url(#gls)"':'')+'/>';
+}
+function circleMod(st){
+  var o='',cx=101,cy=112,i,n=21,ready=!!st.ready,t=ready?CD:st.t,noMana=!!st.noMana,amberOn=ready&&!noMana,frozen=!ready&&t<FZ;
+  o+='<circle cx="'+cx+'" cy="'+cy+'" r="100" fill="rgba(13,6,32,.55)" stroke="'+(amberOn?C.amber:C.violet)+'" stroke-opacity="'+(amberOn?.95:.4)+'" stroke-width="'+(amberOn?1.6:1.1)+'"'+(amberOn?' filter="url(#gls)"':'')+(noMana?' stroke-dasharray="4 3"':'')+'/>';
+  o+='<circle cx="'+cx+'" cy="'+cy+'" r="76" fill="none" stroke="'+C.violet+'" stroke-opacity=".3"/>';
+  for(i=0;i<n;i++){
+    var lit=ready||t>=i+1,part=!ready&&!lit&&t>i,col=i>=n-3?C.amber:(ready?mix(C.cyan,'#ffffff',.5):C.cyan);
+    if(noMana&&ready)col=C.muted;
+    o+=rune(cx,cy,88,i,n,lit?col:(part?col:C.violet),lit?.95:(part?.5:.22));
+  }
+  /* hexagram sigil, the ice window */
+  var a1=[],a2=[],k;for(k=0;k<3;k++){a1.push(polar(cx,cy,50,-90+120*k));a2.push(polar(cx,cy,50,-30+120*k));}
+  var hc=frozen?C.cyan:(amberOn?C.amber:C.violet),hop=frozen?.85:(amberOn?.7:.28);
+  o+='<polygon points="'+pts(a1)+'" fill="none" stroke="'+hc+'" stroke-opacity="'+hop+'" stroke-width="1.3"'+(hop>.6?' filter="url(#gls)"':'')+'/>';
+  o+='<polygon points="'+pts(a2)+'" fill="none" stroke="'+hc+'" stroke-opacity="'+hop+'" stroke-width="1.3"'+(hop>.6?' filter="url(#gls)"':'')+'/>';
+  if(frozen){o+=arcS(cx,cy,60,1,C.violet,.25,1.1,false)+arcS(cx,cy,60,(FZ-t)/FZ,C.cyan,1,2,true);}
+  o+=core(cx,cy,15,st);
+  /* spec nodes on the 60 ring */
+  var spec=st.spec||'frost';
+  if(spec==='frost'){
+    var f=st.fof||{ch:0};
+    [62,118].forEach(function(a,j){var p=polar(cx,cy,60,a),on=f.ch>j;o+=diamond(f1(p[0]),f1(p[1]),7,C.cyan,on?.4:.05,C.cyan,on?1:.4,1.2,on);});
+    var pc=polar(cx,cy,60,0);if((st.lvl==null?30:st.lvl)>=26)o+=coneIcon(f1(pc[0])-4,f1(pc[1])-9,st.cone!==false).replace(/<line[^>]*>/,'');
+  }
+  if(spec==='arcane'){
+    var s=st.ab||0;
+    [225,315,45,135].forEach(function(a,j){var p=polar(cx,cy,60,a),on=s>j,hot=on&&j>=2;
+      o+='<polygon points="'+hexPts(f1(p[0]),f1(p[1]),7)+'" fill="'+(hot?C.amber:C.violet)+'" fill-opacity="'+(on?.5:.06)+'" stroke="'+(hot?C.amber:C.violet)+'" stroke-opacity="'+(on?1:.4)+'" stroke-width="1.2"'+(on?' filter="url(#gls)"':'')+'/>';});
+    if(st.barrage)o+='<circle cx="'+cx+'" cy="'+cy+'" r="22" fill="none" stroke="#ffffff" stroke-opacity=".9" stroke-width="1.6" filter="url(#gl)"/>';
+  }
+  if(spec==='fire'){
+    var pp=polar(cx,cy,60,-90),on2=!!st.pyro;
+    o+=diamond(f1(pp[0]),f1(pp[1]),8,'#ff7a30',on2?.55:.06,'#ff9b50',on2?1:.4,1.3,on2);
+  }
+  return o;
+}
+function circleText(st){
+  var o='',ready=!!st.ready,t=st.t,noMana=!!st.noMana,frozen=!ready&&t<FZ,rem=CD-t,spec=st.spec||'frost',word,big,bigCol;
+  if(ready){word=noMana?'NOVA UP, NO MANA':'NOVA READY';big=noMana?'--':'NOW';bigCol=noMana?C.muted:C.amber;}
+  else if(frozen){word=spec==='frost'?'FROZEN, LANCE':'FROZEN, BACK AWAY';big='~'+Math.ceil(FZ-t)+'s';bigCol=C.cyan;}
+  else{word=rem<=ARM?'NOVA SOON':'NOVA RECHARGE';big='~'+Math.ceil(rem)+'s';bigCol=rem<=ARM?C.amber:C.white;}
+  if(spec==='frost'&&st.fof&&st.fof.ch>0)word='LANCE, FINGERS';
+  if(spec==='arcane'&&st.barrage)word='MISSILES, FREE';
+  if(spec==='arcane'&&!st.barrage&&st.ab>=3)word='STOP, SPEND STACKS';
+  if(spec==='fire'&&st.pyro)word='PYROBLAST, FAST';
+  o+=txt(101,226,word,12,(spec==='frost'&&st.fof&&st.fof.ch>0)?C.cyan:C.white,{a:'middle'});
+  o+=txt(101,252,big,24,bigCol,{a:'middle'});
+  return o;
+}
+function circle(st){return '<g>'+circleMod(st)+circleText(st)+'</g>';}
+
+/* ================= concept C: KITE SONAR (dropped), distance bands from spell range checks ================= */
+function sector(cx,cy,r0,r1,a0,a1){
+  var p=[polar(cx,cy,r1,a0),polar(cx,cy,r1,a1),polar(cx,cy,r0,a1),polar(cx,cy,r0,a0)];
+  return 'M'+f1(p[0][0])+','+f1(p[0][1])+' A'+r1+','+r1+' 0 0 1 '+f1(p[1][0])+','+f1(p[1][1])+' L'+f1(p[2][0])+','+f1(p[2][1])+' A'+r0+','+r0+' 0 0 0 '+f1(p[3][0])+','+f1(p[3][1])+' Z';
+}
+function sonar(st){
+  var o='',cx=18,cy=57,B=[[0,20,'10'],[20,44,'20'],[44,88,'36']],i,band=st.band;
+  B.forEach(function(b,i){
+    var on=(i===band),col=(i===0&&on&&st.ready)?C.amber:(on?C.cyan:C.violet);
+    o+='<path d="'+sector(cx,cy,b[0]+1,b[1],-36,36)+'" fill="'+col+'" fill-opacity="'+(on?.28:.06)+'" stroke="'+col+'" stroke-opacity="'+(on?1:.4)+'" stroke-width="1.2"'+(on?' filter="url(#gls)"':'')+'/>';
+    var lp=polar(cx,cy,b[1]-3,-30);o+=txt(f1(lp[0])+2,f1(lp[1]),b[2],9,C.muted,{op:.9});
+  });
+  o+=diamond(cx,cy,5,C.cyan,.4,C.cyan,1,1.2);
+  var br=(B[band][0]+B[band][1])/2,bp=polar(cx,cy,br,0);
+  o+='<polygon points="'+f1(bp[0])+','+f1(bp[1]-5)+' '+f1(bp[0]+5)+','+f1(bp[1])+' '+f1(bp[0])+','+f1(bp[1]+5)+' '+f1(bp[0]-5)+','+f1(bp[1])+'" fill="'+C.pink+'" stroke="'+C.white+'" stroke-width="1" filter="url(#gls)"/>';
+  o+=txt(116,19,band===0?'IN NOVA':(band===1?'IN BLAST':'IN BOLT'),12,C.white);
+  o+=txt(116,31,st.ready&&band===0?'NOVA NOW':'RANGE ONLY',10,st.ready&&band===0?C.amber:C.muted);
+  o+=txt(116,57,band===0?'&lt;10 yd':(band===1?'&lt;20 yd':'&lt;36 yd'),16,band===0?C.amber:C.white);
+  return '<g>'+o+'</g>';
+}
+
+/* ================= scene ================= */
+function base(S){
+  var o='',X=480,Y=380,W=1000,H=450;
+  var CS=['FROSTBOLT',13,'FB','1.1 / 2.0',18];
+  o+=rect(X,Y,W,H,'url(#sky)')+rect(X,Y,W,H,'url(#glowL)')+rect(X,Y,W,H,'url(#glowR)');
+  o+='<g fill="rgba(120,96,190,.16)" stroke="'+C.violet+'" stroke-opacity=".35" stroke-dasharray="4 4" stroke-width="1">'+
+     '<circle cx="995" cy="540" r="24"/><rect x="953" y="570" width="84" height="100" rx="20"/>'+
+     '<rect x="962" y="664" width="30" height="88" rx="8"/><rect x="998" y="664" width="30" height="88" rx="8"/>'+
+     '<rect x="926" y="576" width="24" height="86" rx="10"/><rect x="1040" y="576" width="24" height="86" rx="10"/></g>';
+  o+='<ellipse cx="995" cy="752" rx="112" ry="26" fill="rgba(80,70,230,.12)" stroke="#5b57e8" stroke-opacity=".6" stroke-width="2"/>';
+  o+=line(838,HZ,1150,HZ,C.violet,.3,1,'6 6');
+  o+=party();
+  o+=bar(796,826,C.cyan,.58,-1,C.white);
+  o+=box(724,424,114,56,C.cyan);
+  o+=txt(731,447,CS[0],CS[1],C.white)+txt(731,469,CS[3],CS[4],C.cyan);
+  o+='<polygon points="'+ch(844,438,28,28,5)+'" fill="rgba(13,6,32,.9)" stroke="'+C.cyan+'" stroke-width="1.3"/><text x="858" y="457" font-size="13" fill="'+C.cyan+'" text-anchor="middle">'+CS[2]+'</text>';
+  var fofOn=S.fofOn;
+  o+='<polygon points="'+ch(672,430,44,44,6)+'" fill="rgba(13,6,32,.85)" stroke="'+(fofOn?C.cyan:C.cyan)+'" stroke-opacity="'+(fofOn?1:.8)+'" stroke-width="'+(fofOn?1.8:1.2)+'"'+(fofOn?' filter="url(#gls)"':'')+'/><text x="694" y="458" font-size="13" fill="'+C.cyan+'" text-anchor="middle">'+(fofOn?'IL':'NX')+'</text>';
+  o+=bar(1164,1194,C.pink,.45,1,C.pink);
+  o+=box(1152,416,114,64,C.pink);
+  o+=txt(1159,436,'Gnoll Brute',14,C.white);
+  o+=rect(1159,440,100,3,'#39ff14',.2)+rect(1159,440,62,3,'#39ff14')+rect(1159,445,100,2,'#4aa8ff',.2)+rect(1159,445,70,2,'#4aa8ff');
+  o+=line(1159,453,1259,453,C.pink,.4,1.2)+txt(1159,469,'Riverpaw',14,C.pink);
+  o+='<polygon points="'+ch(1118,438,28,28,5)+'" fill="rgba(13,6,32,.9)" stroke="'+C.pink+'" stroke-width="1.3"/><text x="1132" y="457" font-size="13" fill="'+C.pink+'" text-anchor="middle">PK</text>';
+  o+=tag(1153,408,32,'L26',C.white);
+  o+=tag(1156,473,32,'62%',C.green);
+  o+=tag(1193,473,69,'<tspan fill="'+C.cyan+'">PARKER</tspan>',C.white);
+  return o;
+}
+var BUFFS_MG=[{k:'IA',c:'#3fb8d8',t:'29m'},{k:'AI',c:'#4aa8ff',t:'58m'},{k:'WF',c:'#d9a521',t:'38m'},{k:'CF',c:'#c4803a',t:'52m'}];
+function buffs(){
+  var o='',L=BUFFS_MG,x0=498,w=164;
+  o+='<polygon points="'+ch(x0,424,w,56,6)+'" fill="rgba(13,6,32,.7)"/><polygon points="'+ch(x0,424,w,56,6)+'" fill="none" stroke="'+C.cyan+'" stroke-opacity=".75" stroke-width="1.2" filter="url(#gls)"/>';
+  L.forEach(function(d,i){var x=x0+6+i*38;o+='<g>'+chipIcon(x+4,430,24,{ab:d.k,c:d.c},false)+'</g>';o+=txt(x+16,470,d.t,12,C.white,{a:'middle'});});
+  return o;
+}
+function slotDivider(x1){return line(1204,HZ,1227,HZ,C.violet,.85,1.2)+line(1227,HZ,x1,HZ,C.violet,.4,1);}
+function emptySlot(y,h,label){
+  return '<rect x="1213" y="'+y+'" width="202" height="'+h+'" fill="rgba(168,85,247,.04)" stroke="'+C.violet+'" stroke-opacity=".5" stroke-dasharray="6 4"/>'+
+    txt(1314,y+h/2+4,label,11,C.muted,{a:'middle',op:.8});
+}
+
+function party2(){return party();}
+function sceneHtml(S){
+  var o=base(S)+buffs()+slotDivider(1410);
+  if(S.kind==='rime'){o+=emptySlot(500,128,'UPPER AREA, EMPTY')+'<g transform="translate(1220,634)">'+rime(S.st)+'</g>';}
+  else{o+='<g transform="translate(1213,500)">'+circle(S.st)+'</g>';o+=txt(1415,497,'ARCANE CIRCLE',10,C.violet,{a:'end',op:.9});}
+  return '<div class="scene"><div class="state">'+S.state+'</div><svg width="1000" height="450" viewBox="480 380 1000 450" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg></div>';
+}
+/* a zoomed module panel */
+function zoom(inner,w,h,k,pinsHtml){
+  return '<div class="panel"><svg width="'+Math.round(w*k)+'" height="'+Math.round(h*k)+'" viewBox="0 0 '+w+' '+h+'" font-family="Mononoki, monospace" font-weight="700"><rect x="0.5" y="0.5" width="'+(w-1)+'" height="'+(h-1)+'" fill="rgba(168,85,247,.04)" stroke="'+C.violet+'" stroke-opacity=".4" stroke-dasharray="4 3"/>'+inner+(pinsHtml||'')+'</svg></div>';
+}
+function pin(n,tx,ty,px,py){
+  return sln(tx,ty,px,py,C.amber,.9,.8)+'<circle cx="'+px+'" cy="'+py+'" r="5.2" fill="'+C.bg+'" stroke="'+C.amber+'" stroke-width="1"/>'+'<text x="'+px+'" y="'+(py+3)+'" font-size="8" fill="'+C.amber+'" text-anchor="middle">'+n+'</text>';
+}
+
+/* ================= states ================= */
+var FOFN={rem:0,ch:0};
+var ST={
+  main:{t:6.2,lances:2,fof:{rem:11,ch:1},cone:true,lvl:30},
+  ready:{ready:1,fof:FOFN,cone:true,lvl:30},
+  just:{t:.8,lances:0,fof:FOFN,cone:true,lvl:30},
+  lancing:{t:4.6,lances:2,fof:FOFN,cone:true,lvl:30},
+  recharge:{t:11.4,lances:3,fof:FOFN,cone:false,lvl:30},
+  fof:{t:13.2,lances:3,fof:{rem:11,ch:2},cone:true,lvl:30},
+  soon:{t:19.2,lances:3,fof:FOFN,cone:true,lvl:30},
+  nomana:{ready:1,noMana:1,fof:FOFN,cone:true,lvl:30},
+  pre20:{t:2.5,lances:0,lvl:14,fofKnown:false}
+};
+var STRIP=[
+ ['READY','mob walking at you','Flake complete, amber frame. Nova is up. <b>Cast it when the mob arrives.</b> Source: cooldown ready boolean.','ready'],
+ ['NOVA LANDED','freeze starts','Core goes solid ice, the cyan ring is the freeze (~8 s), the first arm starts growing. <b>Lance now.</b> Ring is an estimate from your own cast.','just'],
+ ['LANCING','two Lances in','Each own Ice Lance cast cracks the core. Ring says ~3 s of freeze left. <b>Damage can break the freeze early</b>, so the cracks are the honest part.','lancing'],
+ ['RECHARGE','freeze over, kiting','Core hollow again, arms 1 to 3 grown, the 4th growing. Cone is dim (down). <b>Step back, Frostbolt, wand.</b>','recharge'],
+ ['FINGERS PROC','instant Lance','Overlay glow lights the FINGERS block and the next-cast tile. <b>Spend it on Ice Lance, even on the move.</b> Gems = est. charges, 15 s drain.','fof'],
+ ['NOVA SOON','last arm amber','The sixth arm is the amber band: Nova is ~2 s out. <b>Keep the mob at range for two more seconds.</b>','soon'],
+ ['NO MANA','usable = false','Cooldown done but not castable: dashed grey frame, no amber. <b>Wand it, then drink.</b> Mana itself is never drawn.','nomana'],
+ ['LEVEL 14','no Ice Lance yet','Same flake, but the freeze word is BACK AWAY and the FINGERS and CONE blocks are not drawn until known. <b>Walk, Frostbolt.</b>','pre20']
+];
+
+/* ================= page ================= */
+var html='';
+/* 1. the three concepts */
+html+='<h2><i>1</i> THREE CONCEPTS, THREE METAPHORS</h2>';
+html+='<div class="sec-sub">Not three layouts of one gauge. Each is a different picture of the same Frost cycle (and the other Mage specs), judged on: would a player say that is cool, is it obviously a Mage, can it be fed without secret data.</div>';
+html+='<div class="cards">';
+html+='<div class="card"><div class="nm"><i>A</i> RIME</div><div class="st">crystal growth, one area, 190 x 114</div><span class="verdict v-keep">KEEP, PUSHED FURTHER</span>'+
+  '<div class="art">'+zoom(rime(ST.fof),188,114,1.9)+'</div>'+
+  '<p>A snowflake that <em>regrows one arm every 3.5 s</em> after Frost Nova. Complete it and the frame goes amber: Nova is up. The ice core in the middle is solid while the freeze lasts and cracks with every Ice Lance you throw.</p>'+
+  '<p><em>Cool?</em> Yes, the arms tip sparks as they grow and the cracking core is the Shatter fantasy. <em>Mage?</em> Frost Mage on sight; Fire and Arcane still get a true Nova cycle. <u>Weakness:</u> six arms are coarse, so the exact seconds are the big number.</p></div>';
+html+='<div class="card"><div class="nm"><i>B</i> ARCANE CIRCLE</div><div class="st">spell circle, both areas, 202 x 260</div><span class="verdict v-alt">KEEP AS THE ALTERNATIVE</span>'+
+  '<div class="art">'+zoom(circle(ST.fof),202,260,1.25)+'</div>'+
+  '<p>A rune circle that <em>inscribes itself</em>, one rune a second, and closes in amber when Nova is back. The hexagram is the ice window. A ring of spec nodes in the middle swaps per spec: Fingers gems, Arcane Blast stacks, a Pyroblast flare.</p>'+
+  '<p><em>Cool?</em> Most dramatic. <em>Mage?</em> Instantly, for every spec. <u>Weakness:</u> takes both areas, and the rune ring is still a radial timer, so on Frost it says less than A.</p></div>';
+html+='<div class="card dropped"><div class="nm"><i>C</i> KITE SONAR</div><div class="st">distance bands, one area</div><span class="verdict v-drop">DROPPED</span>'+
+  '<div class="art">'+zoom(sonar({band:0,ready:true}),188,114,1.9)+'</div>'+
+  '<p>A fan of range bands from spell range checks (Nova 10 yd, Fire Blast 20, Frostbolt 36), a blip for the mob. "Mob in the Nova band and Nova ready" is the truest decision of all.</p>'+
+  '<p><em>Cool?</em> Okay. <em>Mage?</em> No, a Hunter could wear it. <u>Dropped</u> because it hangs on whether range checks on an enemy are readable in combat (probe), and it only knows the band, not the direction. The idea survives as a possible thin in-range pip on A once probed.</p></div>';
+html+='</div>';
+
+/* 2. winner */
+html+='<h2><i>A</i> RIME, IN SITU</h2>';
+html+='<div class="row">'+sceneHtml({kind:'rime',st:ST.main,state:'<b>MAGE</b>, RIME, LOWER AREA'})+
+  '<div class="side"><div class="t"><i>A</i> RIME, PUSHED FURTHER</div>'+
+  '<div class="cap"><b>Level 30 Frost Mage, six seconds after a Frost Nova.</b> The core is solid ice with two cracks (two Ice Lances thrown), the cyan ring has about two seconds of freeze left, the second arm is mid growth, and a Fingers of Frost proc is lit with one charge. The next-cast tile has turned into Ice Lance. Cone of Cold is ready.</div>'+
+  '<div class="cap"><b>What was added after the critique:</b> (1) the final arm grows amber, so the "act soon" band is part of the crystal; (2) the Cone of Cold wedge, the second panic button when Nova is down; (3) FINGERS becomes the word LANCE when it procs, so the block names the action; (4) ghost arms stay faintly drawn so the shape always reads as a snowflake, even at zero.</div>'+
+  '<div class="cap"><b>Not drawn, by design:</b> mana, target health, the target debuff "Frozen" or Frostbite. All secret in combat.</div></div></div>';
+
+/* anatomy */
+html+='<div class="row">'+
+  '<div style="flex:none">'+zoom(rime(ST.main),188,114,2.6,
+    pin(1,62,22,40,8)+pin(2,54,57,84,8)+pin(3,54,36,6,26)+pin(4,54,57+30,8,104)+pin(5,150,50,176,8)+pin(6,126,98,100,108)+pin(7,168,98,180,108))+'</div>'+
+  '<div style="flex:1;min-width:0"><table><tr><th>PIN</th><th>ELEMENT</th><th>SOURCE ON THIS CLIENT</th><th>KIND</th></tr>'+
+  '<tr><td><span class="pn">1</span>Arms</td><td>One per 3.5 s of the 21 s cycle (25 s base, minus Improved Frost Nova). Sixth arm amber.</td><td>Own Frost Nova cast time (UNIT_SPELLCAST_SUCCEEDED); the cooldown seconds are secret.</td><td><span class="tag t-est">EST</span></td></tr>'+
+  '<tr><td><span class="pn">2</span>Ice core</td><td>Solid while frozen, hollow after, amber when ready.</td><td>Cast time plus the 8 s ceiling. Damage may break the freeze, the target aura is secret.</td><td><span class="tag t-est">EST</span><span class="tag t-probe">PROBE</span></td></tr>'+
+  '<tr><td><span class="pn">3</span>Freeze ring</td><td>Cyan arc of the ~8 s freeze left.</td><td>Same estimate as the core.</td><td><span class="tag t-est">EST</span></td></tr>'+
+  '<tr><td><span class="pn">4</span>Frame</td><td>Amber and complete when Nova is castable; dashed grey if not usable.</td><td>Cooldown ready boolean (CooldownState) and IsSpellUsable notEnoughMana. Plain.</td><td><span class="tag t-plain">PLAIN</span><span class="tag t-probe">PROBE</span></td></tr>'+
+  '<tr><td><span class="pn">5</span>Word and time</td><td>FROZEN, NOVA, SOON, READY, NO MANA and a ~seconds number.</td><td>Derived from 1 to 4. The number is always prefixed with ~.</td><td><span class="tag t-est">EST</span></td></tr>'+
+  '<tr><td><span class="pn">6</span>Fingers</td><td>Gems = charges, 15 s drain, word LANCE.</td><td>SPELL_ACTIVATION_OVERLAY_GLOW_SHOW/HIDE on Ice Lance. The buff is a hidden aura, so the glow may never fire.</td><td><span class="tag t-probe">PROBE</span></td></tr>'+
+  '<tr><td><span class="pn">7</span>Cone</td><td>Lit wedge when Cone of Cold is ready (level 26+).</td><td>Cooldown ready boolean, 10 s cooldown.</td><td><span class="tag t-plain">PLAIN</span></td></tr>'+
+  '<tr><td>Cracks</td><td>One per own Ice Lance since the Nova.</td><td>Own casts via the existing cast ledger (UNIT_SPELLCAST_SUCCEEDED).</td><td><span class="tag t-plain">PLAIN</span></td></tr>'+
+  '</table></div></div>';
+
+/* states strip */
+html+='<h2><i>A</i> THE KEY MOMENTS</h2>';
+html+='<div class="sec-sub">Same module, eight moments, at 1.9x. Gate: the FINGERS block draws from level 30 (the talent), CONE from 26, nothing for Lance below 20.</div>';
+html+='<div class="strip">';
+STRIP.forEach(function(s,i){
+  html+='<div class="cell">'+zoom(rime(ST[s[3]]),188,114,1.9)+'<div class="n"><i>'+(i+1)+'</i> '+s[0]+', '+s[1]+'</div><div class="c">'+s[2]+'</div></div>';
+});
+html+='</div>';
+
+/* 3. alternative */
+html+='<h2><i>B</i> ARCANE CIRCLE, IN SITU</h2>';
+html+='<div class="row">'+sceneHtml({kind:'circle',fofOn:true,st:{t:13.2,lances:3,fof:{rem:11,ch:2},cone:true,lvl:30,spec:'frost'},state:'<b>MAGE</b>, ARCANE CIRCLE, BOTH AREAS'})+
+  '<div class="side"><div class="t"><i>B</i> ARCANE CIRCLE</div>'+
+  '<div class="cap"><b>Thirteen seconds after a Nova, a Fingers proc is lit.</b> Thirteen of 21 runes are inscribed, the last three are the amber band, the hexagram is dark because the freeze is over, and the two gems on the lower arc are the Fingers charges. Cone sits at three o\'clock.</div>'+
+  '<div class="cap"><b>Why it is the alternative, not the pick:</b> it needs both areas, and it is a Mage-wide module only if the middle ring is wired per spec. The three spec cores are below.</div></div></div>';
+html+='<div class="cards" style="margin-top:6px">';
+[['FROST','Frost core: Fingers gems and the Cone wedge, as above. Hexagram lights cyan with an arc while frozen.',{t:6.2,lances:2,fof:{rem:11,ch:1},cone:true,lvl:30,spec:'frost'}],
+ ['ARCANE','Arcane core: four hexes are Arcane Blast stacks from your own casts (8 s window, a reset on any other damage spell). Stacks three and four turn amber: stop and spend. A white ring around the core is a Missile Barrage glow, the word becomes MISSILES, FREE. Cooldown Manager cannot track Arcane Blast yet, so this is a real gap to fill.',{t:11.4,lances:3,cone:false,lvl:30,spec:'arcane',ab:3,barrage:true}],
+ ['FIRE','Fire core: one flare node at the top, lit only when the Pyroblast overlay glow says Heating Up has made it fast (the stack count needs crit info, which is secret). The word becomes PYROBLAST, FAST.',{t:3.0,lances:0,cone:true,lvl:30,spec:'fire',pyro:true}]].forEach(function(v){
+  html+='<div class="card"><div class="nm">'+v[0]+' CORE</div><div class="art">'+zoom(circle(v[2]),202,260,1.1)+'</div><p>'+v[1]+'</p></div>';
+});
+html+='</div>';
+
+/* probes */
+html+='<h2><i>!</i> WHAT NEEDS A CLIENT PROBE</h2>';
+html+='<ul class="pl">'+
+ '<li><b>Fingers of Frost overlay glow.</b> Wowhead lists the buff as a hidden aura. Does SPELL_ACTIVATION_OVERLAY_GLOW_SHOW fire for Ice Lance when it procs, and does IsSpellOverlayed report it in combat? If not, the FINGERS block cannot exist and A loses nothing else.</li>'+
+ '<li><b>Frost Nova ready boolean in combat</b> through the existing cooldown-ready path, plus IsSpellUsable notEnoughMana as a plain boolean for the NO MANA frame (Nova and Cone, by key; ranks resolve by name).</li>'+
+ '<li><b>The numbers behind the estimate:</b> the real Nova cooldown with Improved Frost Nova ranks 0 to 2 (guides say 25 s minus 2 s per rank), the freeze length, and whether your own Ice Lance breaks it. The module shows only ~seconds and never claims the target is frozen.</li>'+
+ '<li><b>Talent reads:</b> whether Ice Lance and Fingers of Frost register as known spells (IsPlayerSpell) so the blocks can be gated by what the player has.</li>'+
+ '<li><b>Only for the dropped concept C:</b> C_Spell.IsSpellInRange on an enemy target in combat.</li>'+
+ '</ul>';
+html+='<div class="note" style="margin-top:12px"><b>Already in the code:</b> the overlay-glow proc path (HudProfiles procs with overlaySpell), the cooldown-ready check, the own-cast ledger, and Gunsight area module registration by class token. <b>New:</b> HudSpells keys (frost_nova, ice_lance, cone_of_cold, frostbolt), a MAGE profile, and the module itself. Nothing about the Mage exists in HudSpells.lua or HudProfiles.lua yet. Source facts and links are in the adze research doc.</div>';
+
+document.getElementById('root').innerHTML=html;
+})();
+</script>
+</body>
+</html>
