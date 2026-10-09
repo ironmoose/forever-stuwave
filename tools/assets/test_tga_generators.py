@@ -149,6 +149,14 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     # generate_hud_tile.py writes the square tile and its two-corner cut twin.
     "hud_tile": {"hud_tile": (64, 64), "hud_tile_cut2": (64, 64)},
     "icon_chrome": {"icon_chat": (32, 32), "icon_channel": (32, 32)},
+    # generate_level_icons.py: the Gunsight level tag icons (crown elite, star rare, crown
+    # with a baked-colour star rare elite, skull world boss).
+    "level_icons": {
+        "level_crown": (32, 32),
+        "level_star": (32, 32),
+        "level_crown_star": (32, 32),
+        "level_skull": (32, 32),
+    },
     "icon_jump": (32, 32),
     "icon_social": (32, 32),
     "icon_window": {"icon_minimize": (32, 32), "icon_maximize": (32, 32)},
