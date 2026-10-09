@@ -21,9 +21,11 @@ FS.PlayerAuras (Buffs.lua is not loaded). It pins:
   * combat: the snapshot is frozen, so the time left is extrapolated from the stored expiry, a buff that ran out is
     dropped, and no aura API is read;
   * piece: the "mybuffs" piece toggle hides the plate and its ticker, and the plate hides its body with no buffs;
-  * tooltip: only the tiles take the mouse (never the plate or body); hovering one shows the standard aura tooltip for
+  * tooltip: only the tiles take the mouse, hover only (clicks pass through to the world; never the plate or body);
+    hovering one shows the standard aura tooltip for
     its snapshot slot (the real FrameHelpers.ShowAuraTooltip), in combat the cached name only, a secret or a throwing
-    setter shows nothing and never errors, and the tooltip goes when the tile, the body or the piece does.
+    setter shows nothing and never errors, the tooltip follows its tile when the slot or buff changes, and it goes when the tile, the body or the piece does
+    (a hover during the piece's fade out shows nothing).
 
 The mock is strict and is NOT the real client.
 
@@ -105,6 +107,16 @@ C_UnitAuras = { GetAuraDataByIndex = function() __auraReads = __auraReads + 1 en
 function UnitIsUnit(a, b) return a == b or (__alias and __alias[a] == b) or false end
 -- The aura read gate the real FrameHelpers.ShowAuraTooltip asks.
 function FS.AurasReadable() return not InCombatLockdown() end
+-- Hover-only mouse: a widget takes hover (OnEnter/OnLeave) and clicks separately. EnableMouse(v) sets both, as in the client.
+do
+    local Region = getmetatable(UIParent)
+    local enable = Region.EnableMouse
+    function Region:EnableMouse(v) enable(self, v); self._motion = v and true or false; self._click = v and true or false end
+    function Region:SetMouseMotionEnabled(v) self._motion = v and true or false end
+    function Region:SetMouseClickEnabled(v) self._click = v and true or false end
+    function Region:IsMouseMotionEnabled() return self._motion == true end
+    function Region:IsMouseClickEnabled() return self._click == true end
+end
 -- GameTooltip as the tooltip dispatch uses it. SetUnitAura is an aura read: refused in combat, and __tipThrows makes it throw.
 -- The setters record what they were handed; a tooltip is shown by SetUnitAura or Show, as in the client.
 __tip = { owner = nil, shown = false, lines = {}, aura = nil, auraCalls = 0 }
@@ -391,15 +403,29 @@ end
 local function enter(i) local f = My().tiles[i].frame; f._scripts.OnEnter(f) end
 local function leave(i) local f = My().tiles[i].frame; f._scripts.OnLeave(f) end
 
-function T.only_the_tiles_take_the_mouse_never_the_plate_or_the_body()
+function T.only_the_tiles_take_hover_and_no_clicks_so_the_world_gets_them()
     local W = world()
-    eq(My().plate:IsMouseEnabled(), false, "the plate lets clicks through to the world")
-    eq(My().body:IsMouseEnabled(), false)
+    for _, f in ipairs({ My().plate, My().body }) do
+        eq(f:IsMouseEnabled(), false, "the plate and body let everything through")
+        eq(f:IsMouseMotionEnabled(), false); eq(f:IsMouseClickEnabled(), false)
+    end
     for i, t in ipairs(My().tiles) do
-        eq(t.frame:IsMouseEnabled(), true, "tile " .. i .. " takes the mouse for its tooltip")
+        eq(t.frame:IsMouseMotionEnabled(), true, "tile " .. i .. " takes hover for its tooltip")
+        eq(t.frame:IsMouseClickEnabled(), false, "tile " .. i .. " takes no click: mouselook and targeting start over it")
         ok(t.frame._scripts.OnEnter and t.frame._scripts.OnLeave, "tile " .. i .. " has hover scripts")
     end
     eq(My().plate._scripts.OnEnter, nil); eq(My().body._scripts.OnEnter, nil)
+    W.clean(); noFails()
+end
+
+function T.a_client_without_the_split_mouse_calls_gets_no_mouse_on_the_tiles_rather_than_click_eating_ones()
+    local Region = getmetatable(UIParent)
+    Region.SetMouseMotionEnabled = nil; Region.SetMouseClickEnabled = nil
+    local W = world()
+    for i, t in ipairs(My().tiles) do
+        eq(t.frame:IsMouseEnabled(), false, "tile " .. i .. ": no tooltip beats eating clicks")
+        eq(t.frame:IsMouseClickEnabled(), false)
+    end
     W.clean(); noFails()
 end
 
@@ -473,6 +499,74 @@ function T.the_tooltip_goes_with_its_tile_the_body_and_the_piece()
     enter(1)
     W.Gun.SetPiece("mybuffs", false, true)
     eq(__tip.shown, false, "piece off hides the tooltip")
+    W.clean(); noFails()
+end
+
+function T.a_hovered_tooltip_follows_its_tile_when_the_slot_or_the_buff_changes_and_only_then()
+    local W = world()
+    snapshot(aura(1, 600), aura(2, 600))
+    refresh()
+    enter(1)
+    eq(__tip.aura[2], 1)
+    local calls = __tip.auraCalls
+    refresh()
+    eq(__tip.auraCalls, calls, "an unchanged repaint does not rebuild the tooltip")
+    -- Same buff, new slot: an earlier buff ran out and dropped from the plate, so the snapshot position moved.
+    snapshot(aura(9, 600), aura(1, 600), aura(2, 600))
+    __snapshot.buffs[1].expirationTime = __now - 5
+    refresh()
+    eq(My().tiles[1].icon._texture, 1, "the tile still shows buff 1")
+    eq(__tip.aura[2], 2, "and the open tooltip moved to its new slot")
+    eq(__tip.owner, My().tiles[1].frame)
+    -- Different buff under the cursor.
+    snapshot(aura(5, 600), aura(1, 600))
+    refresh()
+    eq(My().tiles[1].icon._texture, 5)
+    eq(__tip.aura[2], 1, "the tooltip asks for the buff the tile shows now")
+    -- Left the tile: a later change must not pop a tooltip up.
+    leave(1)
+    snapshot(aura(6, 600))
+    refresh()
+    eq(__tip.shown, false, "not hovered, no tooltip")
+    W.clean(); noFails()
+end
+
+function T.in_combat_a_hovered_tooltip_follows_a_changed_cached_name()
+    local W = world()
+    snapshot(aura(1, 600, nil, "Old"))
+    refresh()
+    __combat = true
+    enter(1)
+    eq(__tip.lines[1], "Old")
+    snapshot(aura(1, 600, nil, "New"))
+    refresh()
+    eq(__tip.lines[1], "New")
+    eq(__tip.shown, true)
+    W.clean(); noFails()
+end
+
+function T.a_tooltip_cannot_outlive_a_fading_or_hidden_piece()
+    local W = world()
+    snapshot(aura(1, 600), aura(2, 600))
+    refresh()
+    enter(1)
+    eq(__tip.shown, true)
+    for _, f in ipairs({ My().body, My().plate }) do
+        ok(f._scripts.OnHide, "the body and the plate release the tooltip when they hide")
+        enter(1)
+        eq(__tip.shown, true)
+        f._scripts.OnHide(f)
+        eq(__tip.shown, false, "hiding releases the tile's tooltip")
+    end
+    -- A fade runs 0.25 s with the frame still shown: the tile can be hovered in that window.
+    enter(2)
+    W.Gun.SetPiece("mybuffs", false)
+    eq(__tip.shown, false, "piece off releases the tooltip at once")
+    enter(2)
+    eq(__tip.shown, false, "and a hover during the fade shows nothing")
+    W.Gun.SetPiece("mybuffs", true, true)
+    enter(2)
+    eq(__tip.shown, true, "back on, hover works again")
     W.clean(); noFails()
 end
 
