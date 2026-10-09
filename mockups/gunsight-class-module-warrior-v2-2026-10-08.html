@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1560">
+<title>Gunsight Class Module Warrior v2</title>
+<style>
+@font-face{font-family:'Mononoki';src:url(../forever-stuwave/Media/Fonts/MononokiNerdFontMono-Bold.ttf) format('truetype');font-weight:100 900;font-style:normal;font-display:block}
+:root{
+  color-scheme:dark;
+  --bg:#0d0620; --fg:#e9e2ff; --muted:#9d93c4; --white:#f3fbff; --text:#e2e8f0;
+  --violet:#a855f7; --cyan:#22e0ff; --pink:#ff2e97; --amber:#ffb648; --green:#39ff14;
+  --track:#0a0416; --line:#3a2168;
+  --edge:rgba(168,85,247,.35);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg)}
+body{width:1560px;padding:28px 28px 40px;color:var(--fg);font-family:'Mononoki',ui-monospace,monospace;font-weight:700;line-height:1.45}
+h1{margin:0;font-size:30px;letter-spacing:.08em;color:var(--white);text-shadow:0 0 18px var(--violet);font-weight:700}
+.ref{display:inline-block;margin:10px 0 0;padding:2px 10px;font-size:13px;letter-spacing:.12em;color:var(--amber);border:1px solid rgba(255,182,72,.5);background:rgba(255,182,72,.06)}
+.sub{margin:10px 0 22px;color:var(--muted);font-size:15px;max-width:1450px}
+.sub b{color:var(--white);font-weight:700}
+h2{margin:34px 0 10px;font-size:20px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 14px var(--violet);font-weight:700}
+h2 i{font-style:normal;color:var(--pink)}
+.row{display:flex;gap:26px;align-items:flex-start}
+.scene{position:relative;width:1000px;height:450px;border:1px solid var(--edge);overflow:hidden;flex:none}
+.scene svg{display:block}
+.state{position:absolute;left:10px;top:8px;z-index:2;font-size:12px;letter-spacing:.14em;color:var(--muted);padding:2px 8px;background:rgba(13,6,32,.7);border:1px solid rgba(168,85,247,.3)}
+.state b{color:var(--cyan);font-weight:700}
+.side{width:478px}
+.side .t{font-size:22px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 14px var(--violet);margin:0 0 8px}
+.side .t i{font-style:normal;color:var(--pink)}
+.side .cap{font-size:14px;line-height:1.5;color:var(--muted);margin:0 0 12px}
+.side .cap b{color:var(--white);font-weight:700}
+.crop{border:1px solid var(--edge);background:rgba(13,6,32,.6);display:block}
+.crop-l{font-size:11px;letter-spacing:.1em;color:var(--cyan);margin:10px 0 4px}
+.sheet{display:grid;grid-template-columns:repeat(3,480px);gap:32px}
+.sheet .c{width:480px;border:1px solid var(--edge);background:rgba(13,6,32,.6)}
+.sheet .c svg{display:block}
+.sheet .n{font-size:18px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 12px var(--violet);margin:8px 0 2px}
+.sheet .n i{font-style:normal;color:var(--pink)}
+.sheet .th{font-size:13px;line-height:1.45;color:var(--muted);margin:0 0 8px}
+.sheet .th b{color:var(--white);font-weight:700}
+.sheet .cr{font-size:12px;line-height:1.45;color:var(--text);margin:0}
+.sheet .cr span{display:block;margin-bottom:2px}
+.verdict{display:inline-block;margin-top:6px;padding:1px 8px;font-size:11px;letter-spacing:.12em;border:1px solid}
+.v-keep{color:var(--green);border-color:rgba(57,255,20,.5)}
+.v-alt{color:var(--cyan);border-color:rgba(34,224,255,.5)}
+.v-drop{color:var(--pink);border-color:rgba(255,46,151,.5)}
+.anat{display:flex;gap:16px;align-items:flex-start}
+.anat .z{flex:none;border:1px solid var(--edge);background:rgba(13,6,32,.6)}
+.anat .z svg{display:block}
+.strip{display:grid;grid-template-columns:repeat(5,292px);gap:18px 11px}
+.cell .c{width:292px;height:200px;border:1px solid var(--edge);background:rgba(13,6,32,.6)}
+.cell .c svg{display:block}
+.cell .n{font-size:11px;letter-spacing:.08em;color:var(--cyan);margin:6px 0 2px}
+.cell .n i{font-style:normal;color:var(--pink)}
+.cell .d{font-size:11.5px;line-height:1.4;color:var(--muted);min-height:78px}
+.cell .d b{color:var(--white);font-weight:700}
+.panel{position:relative;background:rgba(26,16,37,.96);border:1px solid var(--violet);padding:12px 18px 14px;clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px)}
+.panel h3{margin:0 0 6px;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--violet);font-weight:700}
+.panel p,.panel li{font-size:13px;line-height:1.5;color:var(--text);margin:0 0 6px}
+.panel ul,.panel ol{margin:0;padding-left:20px}
+.panel b{color:var(--white);font-weight:700}
+.panel .m{color:var(--muted)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th{font-weight:700;text-align:left;color:var(--violet);font-size:11px;letter-spacing:.08em;text-transform:uppercase;padding:4px 8px;border-bottom:1px solid rgba(168,85,247,.4)}
+td{padding:5px 8px;border-bottom:1px solid rgba(58,33,104,.5);vertical-align:top;color:var(--text);line-height:1.4}
+td.k{color:var(--white)}
+td.num{color:var(--pink);width:24px}
+.ok{color:var(--green)} .est{color:var(--amber)} .no{color:var(--pink)} .unv{color:var(--cyan)}
+code{color:var(--cyan)}
+</style>
+</head>
+<body>
+<h1>GUNSIGHT CLASS MODULE, WARRIOR v2</h1>
+<div class="ref">Design reference, 2026-10-08, Warrior v2</div>
+<div class="sub">Round 1 was a list of timers; the first take of v2 copied the Paladin shape (gauge, band, lane). Both are out. The Paladin module is the <b>quality bar</b>, not the layout, and each class module has to look like its own class. This sheet explores <b>three divergent Warrior concepts</b> with their own form factor and motif, self-critiques them, <b>drops the weakest</b> and pushes the best (a faceted greatsword) all the way through: in-situ scene, anatomy, states, data path. The second best (a war drum) is kept as the alternative. All drawn on the v7 target side, one area (202 x 128), Target Debuffs in the other.</div>
+
+<div id="root"></div>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <filter id="gl" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.1" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="gls" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b0716"/><stop offset=".62" stop-color="#150d28"/><stop offset="1" stop-color="#1c1030"/></linearGradient>
+    <radialGradient id="glowL" cx="22%" cy="108%" r="55%"><stop offset="0" stop-color="#3a2160"/><stop offset="1" stop-color="#3a2160" stop-opacity="0"/></radialGradient>
+    <radialGradient id="glowR" cx="85%" cy="0%" r="60%"><stop offset="0" stop-color="#1d1840"/><stop offset="1" stop-color="#1d1840" stop-opacity="0"/></radialGradient>
+    <radialGradient id="headG" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#2a1550"/><stop offset="1" stop-color="#0a0416"/></radialGradient>
+  </defs>
+</svg>
+
+<script>
+(function(){
+var C={cyan:'#22e0ff',pink:'#ff2e97',violet:'#a855f7',green:'#39ff14',amber:'#ffb648',white:'#f3fbff',muted:'#9d93c4',fg:'#e9e2ff',bg:'#0d0620',gold:'#ffd23f'};
+function hex(h){h=h.replace('#','');return [parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)];}
+function mix(a,b,t){var x=hex(a),y=hex(b);return '#'+[0,1,2].map(function(i){return ('0'+Math.round(x[i]+(y[i]-x[i])*t).toString(16)).slice(-2);}).join('');}
+function ch(x,y,w,h,c){return (x+c)+','+y+' '+(x+w)+','+y+' '+(x+w)+','+(y+h-c)+' '+(x+w-c)+','+(y+h)+' '+x+','+(y+h)+' '+x+','+(y+c);}
+function txt(x,y,s,size,fill,o){o=o||{};
+  return '<text x="'+x+'" y="'+y+'" font-size="'+size+'" fill="'+fill+'" text-anchor="'+(o.a||'start')+'"'+(o.op?' opacity="'+o.op+'"':'')+
+    ' stroke="rgba(13,6,32,.92)" stroke-width="2.6" paint-order="stroke" stroke-linejoin="round">'+s+'</text>';}
+function line(x1,y1,x2,y2,col,op,w,dash){return '<line x1="'+x1.toFixed(1)+'" y1="'+y1.toFixed(1)+'" x2="'+x2.toFixed(1)+'" y2="'+y2.toFixed(1)+'" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="'+(w||1)+'"'+(dash?' stroke-dasharray="'+dash+'"':'')+'/>';}
+function chevPath(cx,ay,hw,d,t){return cx+','+ay+' '+(cx+hw)+','+(ay+d)+' '+(cx+hw)+','+(ay+d+t)+' '+cx+','+(ay+t)+' '+(cx-hw)+','+(ay+d+t)+' '+(cx-hw)+','+(ay+d);}
+function rect(x,y,w,h,fill,op){return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" fill="'+fill+'"'+(op!=null?' fill-opacity="'+op+'"':'')+'/>';}
+function pstr(pts){return pts.map(function(p){return p[0].toFixed(1)+','+p[1].toFixed(1);}).join(' ');}
+function poly(pts,fill,fop,stroke,sop,sw,filt){return '<polygon points="'+pstr(pts)+'" fill="'+fill+'" fill-opacity="'+fop+'"'+(stroke?' stroke="'+stroke+'" stroke-opacity="'+sop+'" stroke-width="'+(sw||1)+'" stroke-linejoin="round"':' stroke="none"')+(filt?' filter="url(#'+filt+')"':'')+'/>';}
+
+/* ---------- geometry (image px, from Gunsight.lua) ---------- */
+var TOP=508,TBOT=752,PITCH=(TBOT-TOP)/10,N=20,CP=(TBOT-TOP)/N;
+var HZ=630;
+
+function chipIcon(x,y,s,d){
+  var c=Math.max(2,Math.round(s/6)),o='';
+  o+='<polygon points="'+ch(x,y,s,s,c)+'" fill="'+mix(d.c,C.bg,.35)+'"/>';
+  o+='<polygon points="'+ch(x,y,s,s*.45,c)+'" fill="'+mix(d.c,'#ffffff',.35)+'" opacity=".3"/>';
+  o+='<polygon points="'+ch(x,y,s,s,c)+'" fill="none" stroke="'+mix(d.c,'#ffffff',.3)+'" stroke-width="1.2"/>';
+  o+='<text x="'+(x+s/2)+'" y="'+(y+s/2+s*.18)+'" font-size="'+Math.round(s*.5)+'" fill="'+C.white+'" text-anchor="middle">'+d.ab+'</text>';
+  return o;
+}
+
+/* ---------- v7 target side, trimmed ---------- */
+function bar(x0,x1,col,p,out,caretCol){
+  var o='',cx=(x0+x1)/2,k,i;
+  o+='<polygon points="'+ch(x0,500,x1-x0,260,8)+'" fill="rgba(13,6,32,.55)" fill-opacity=".45"/>';
+  o+='<polygon points="'+ch(x0,500,x1-x0,260,8)+'" fill="none" stroke="'+col+'" stroke-width="1.3" filter="url(#gls)"/>';
+  var ex=out<0?x0:x1;
+  for(k=0;k<=10;k++){var ty=TBOT-k*PITCH;o+=line(ex,ty,ex+out*(k===5?10:5),ty,col,.75,1.2);}
+  for(i=0;i<N;i++){
+    var ay=TBOT-(i+1)*CP,lit=(i+1)/N<=p;
+    o+='<polygon points="'+chevPath(cx,ay,10,8,5.5)+'" fill="'+col+'" fill-opacity="'+(lit?1:.2)+'"'+(lit?' filter="url(#gls)"':'')+'/>';
+  }
+  var fy=TBOT-p*(TBOT-TOP);
+  o+='<polygon points="'+chevPath(cx,fy-17,13,9,7)+'" fill="none" stroke="'+caretCol+'" stroke-width="1.8" stroke-linejoin="miter"/>';
+  return o;
+}
+function box(x,y,w,h,col){
+  return '<polygon points="'+ch(x,y,w,h,8)+'" fill="rgba(13,6,32,.85)"/>'+
+    '<polygon points="'+ch(x,y,w,h,8)+'" fill="none" stroke="'+col+'" stroke-width="1.4" filter="url(#gl)"/>';
+}
+function brackets(x,y,w,h,col,op,a){
+  a=a||12;var s='';
+  [[x,y+a,x,y,x+a,y],[x+w-a,y,x+w,y,x+w,y+a],[x,y+h-a,x,y+h,x+a,y+h],[x+w-a,y+h,x+w,y+h,x+w,y+h-a]].forEach(function(q){
+    s+='<polyline points="'+q[0]+','+q[1]+' '+q[2]+','+q[3]+' '+q[4]+','+q[5]+'" fill="none" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="1.6"/>';});
+  return s;
+}
+function party(){
+  var o='',x=606,y=506,w=180,h=230;
+  o+=brackets(x,y,w,h,C.cyan,.6,12);
+  var rows=[['Parker',.82,C.green],['Thalia',.55,C.green],['Brogan',.18,'#ff3b4e'],['Mira',.95,C.green],['Jex',.70,C.green]];
+  var rh=(h-16)/5;
+  rows.forEach(function(r,i){
+    var ry=y+8+i*rh;
+    if(i>0)o+=line(x+8,ry,x+w-8,ry,C.violet,.2,1);
+    o+=txt(x+12,ry+14,r[0],11,i===0?C.cyan:C.white);
+    o+=rect(x+12,ry+20,w-24,5,r[2],.18)+rect(x+12,ry+20,(w-24)*r[1],5,r[2],1);
+    o+=rect(x+12,ry+27,w-24,3,'#4aa8ff',.18)+rect(x+12,ry+27,(w-24)*.7,3,'#4aa8ff',1);
+  });
+  o+='<polygon points="'+ch(578,y+8+2*rh+8,22,22,4)+'" fill="'+mix('#a05030',C.bg,.35)+'" stroke="'+C.amber+'" stroke-width="1.2"/><text x="589" y="'+(y+8+2*rh+8+16)+'" font-size="12" fill="'+C.white+'" text-anchor="middle">P</text>';
+  return o;
+}
+function tag(x,y,w,html,col){
+  return '<polygon points="'+ch(x,y,w,15,5)+'" fill="rgba(13,6,32,.95)" stroke="'+C.pink+'" stroke-width="1.3" filter="url(#gls)"/>'+
+    '<text x="'+(x+w/2)+'" y="'+(y+11)+'" font-size="11" fill="'+col+'" text-anchor="middle">'+html+'</text>';
+}
+function base(){
+  var o='',X=480,Y=380,W=1000,H=450;
+  o+=rect(X,Y,W,H,'url(#sky)')+rect(X,Y,W,H,'url(#glowL)')+rect(X,Y,W,H,'url(#glowR)');
+  o+='<g fill="rgba(120,96,190,.16)" stroke="'+C.violet+'" stroke-opacity=".35" stroke-dasharray="4 4" stroke-width="1">'+
+     '<circle cx="995" cy="540" r="24"/><rect x="953" y="570" width="84" height="100" rx="20"/>'+
+     '<rect x="962" y="664" width="30" height="88" rx="8"/><rect x="998" y="664" width="30" height="88" rx="8"/>'+
+     '<rect x="926" y="576" width="24" height="86" rx="10"/><rect x="1040" y="576" width="24" height="86" rx="10"/></g>';
+  o+='<ellipse cx="995" cy="752" rx="112" ry="26" fill="rgba(80,70,230,.12)" stroke="#5b57e8" stroke-opacity=".6" stroke-width="2"/>';
+  o+=line(838,HZ,1150,HZ,C.violet,.3,1,'6 6');
+  o+=party();
+  o+=bar(796,826,C.cyan,.58,-1,C.white);
+  o+=box(724,424,114,56,C.cyan);
+  o+=txt(731,447,'HEROIC STRIKE',12,C.white)+txt(731,469,'NEXT SWING',14,C.cyan);
+  o+='<polygon points="'+ch(844,438,28,28,5)+'" fill="rgba(13,6,32,.9)" stroke="'+C.cyan+'" stroke-width="1.3"/><text x="858" y="457" font-size="13" fill="'+C.cyan+'" text-anchor="middle">HS</text>';
+  o+='<polygon points="'+ch(672,430,44,44,6)+'" fill="rgba(13,6,32,.85)" stroke="'+C.cyan+'" stroke-opacity=".8" stroke-width="1.2"/><text x="694" y="458" font-size="13" fill="'+C.cyan+'" text-anchor="middle">NX</text>';
+  o+=bar(1164,1194,C.pink,.45,1,C.pink);
+  o+=box(1152,416,114,64,C.pink);
+  o+=txt(1159,436,'Gnoll Brute',14,C.white);
+  o+=rect(1159,440,100,3,'#39ff14',.2)+rect(1159,440,62,3,'#39ff14')+rect(1159,445,100,2,'#4aa8ff',.2)+rect(1159,445,70,2,'#4aa8ff');
+  o+=line(1159,453,1259,453,C.pink,.4,1.2)+txt(1159,469,'Frenzy',14,C.pink);
+  o+=tag(1226,408,36,'KICK',C.pink);
+  o+='<polygon points="'+ch(1118,438,28,28,5)+'" fill="rgba(13,6,32,.9)" stroke="'+C.pink+'" stroke-width="1.3"/><text x="1132" y="457" font-size="13" fill="'+C.pink+'" text-anchor="middle">GN</text>';
+  o+=tag(1153,408,34,'L26',C.white);
+  o+=tag(1156,473,32,'62%',C.green);
+  o+=tag(1222,473,40,'KERRA',C.white);
+  return o;
+}
+var BUFFS_WR=[{k:'BS',c:'#c4423b',t:'1m'},{k:'WF',c:'#d9a521',t:'38m'},{k:'AI',c:'#4aa8ff',t:'47m',party:true},{k:'MW',c:'#5fb04a',t:'52m',party:true}];
+function buffs(){
+  var o='',x0=498,w=164;
+  o+='<polygon points="'+ch(x0,424,w,56,6)+'" fill="rgba(13,6,32,.7)"/><polygon points="'+ch(x0,424,w,56,6)+'" fill="none" stroke="'+C.cyan+'" stroke-opacity=".75" stroke-width="1.2" filter="url(#gls)"/>';
+  BUFFS_WR.forEach(function(d,i){
+    var x=x0+6+i*38;
+    o+='<g>'+chipIcon(x+4,430,24,{ab:d.k,c:d.c})+'</g>';
+    if(d.party)o+='<circle cx="'+(x+28)+'" cy="432" r="3.2" fill="'+C.cyan+'" stroke="'+C.bg+'" stroke-width="1"/>';
+    o+=txt(x+16,470,d.t,12,C.white,{a:'middle'});
+  });
+  return o;
+}
+function slotDivider(x1){return line(1204,HZ,1227,HZ,C.violet,.85,1.2)+line(1227,HZ,x1,HZ,C.violet,.4,1);}
+var WDEB=[{ab:'RN',c:'#c4423b',rem:9},{ab:'DW',c:'#a02030',rem:12},{ab:'TC',c:'#4a9de0',rem:2.8},{ab:'SA',c:'#9a9aa8',rem:22,n:5},{ab:'DS',c:'#e0902a',rem:26}];
+function dotsH(list){
+  var o='',k;
+  for(k=5;k<=10;k++){var ty=TBOT-k*PITCH;
+    if(k<10)o+=line(1204,ty,1213,ty,C.pink,.45,1);
+    o+=line(1213,ty,1344,ty,C.violet,k===5?.55:.12,1);}
+  list.forEach(function(d,j){
+    var cy=TOP+PITCH*(j+.5),band=d.rem<=3,col=band?C.amber:mix(d.c,'#ffffff',.25);
+    o+=chipIcon(1220,cy-10,20,d);
+    if(d.n>1)o+=txt(1332,cy+4,'x'+d.n,11,C.white);
+    o+=txt(1246,cy+4.5,(d.rem<3?d.rem.toFixed(1):Math.round(d.rem))+'s',13,band?C.amber:C.white);
+    o+=rect(1274,cy-2,52,4,col,.2)+rect(1274,cy-2,52*d.rem/30,4,col);
+  });
+  return o;
+}
+
+/* =====================================================================
+   shared Warrior data
+   ===================================================================== */
+var STANCE={BT:['BT','BATTLE','#c4423b'],DF:['DF','DEFENSIVE','#4a9de0'],BZ:['BZ','BERSERKER','#e0702a']};
+/* reactive windows: len seconds, amber = last seconds, need = the stance the move needs */
+var WIN={OP:{ab:'OP',nm:'OVERPOWER',len:6,amber:1.5,need:'BT'},RV:{ab:'RV',nm:'REVENGE',len:5,amber:1.5,need:'DF'},EX:{ab:'EX',nm:'EXECUTE',len:0,amber:0,need:null},VR:{ab:'VR',nm:'RUSH',len:20,amber:5,need:null}};
+function zoneOf(r){return r<20?['HOLD',C.violet]:(r<60?['SPEND',C.cyan]:['DUMP',C.amber]);}
+function zoneCol(i){return i<4?C.violet:(i<12?C.cyan:C.amber);}   /* facet or lug index: 5 rage each */
+
+/* =====================================================================
+   CONCEPT 1 (PUSHED): THE GREATSWORD. A faceted blade slashes up the area.
+   Below the blade is what you HAVE (rage). Above it is what is OPEN (windows).
+   P: rage, stance, a {k,rem}|null (OP, RV, EX), b {rem}|null (VR), ooc, starved, ladder {lit,word,num}
+   ===================================================================== */
+var TH=-24*Math.PI/180,DX=Math.cos(TH),DY=Math.sin(TH),NX=-DY,NY=DX;
+var U0=3,LB=147,UT=U0+LB;
+function hw(u){return u>=UT-16?7*Math.max(0,(UT-u)/16):9-2*(u-U0)/(LB-16);}
+function uOf(rage){return U0+LB*rage/100;}
+function slivPts(pt,u0,Ls,vc,wmax,s0,s1){
+  var top=[],bot=[],n=Math.max(2,Math.round((s1-s0)*16)),k;
+  for(k=0;k<=n;k++){var s=s0+(s1-s0)*k/n,w=Math.max(.8,wmax*Math.pow(Math.sin(Math.PI*Math.min(.98,Math.max(.02,s))),.55)),u=u0+s*Ls;
+    top.push(pt(u,vc-w/2));bot.unshift(pt(u,vc+w/2));}
+  return top.concat(bot);
+}
+function swordModule(y0,P){
+  var o='',O=[1255,y0+92],r=P.rage,ooc=!!P.ooc,lad=P.ladder,i;
+  function pt(u,v){return [O[0]+u*DX+v*NX,O[1]+u*DY+v*NY];}
+  var Z=zoneOf(r);if(lad)Z=[lad.word,lad.word==='HOLD'?C.violet:(lad.word==='SPEND'?C.cyan:C.amber)];
+  var word=ooc?'BANKED':Z[0],zc=ooc?C.muted:Z[1],ST=STANCE[P.stance];
+  var dim=ooc?.45:1;
+  /* ---- the blade: 20 facets of 5 rage (or 5 runes in the fallback) ---- */
+  var nF=lad?5:20,lit=lad?lad.lit:Math.round(r/5);
+  var litG='',unlitG='';
+  for(i=0;i<nF;i++){
+    var ua=U0+i*LB/nF+.45,ub=U0+(i+1)*LB/nF-.45,pts;
+    if(i===nF-1)pts=[pt(ua,-hw(ua)),pt(UT-.3,0),pt(ua,hw(ua))];
+    else pts=[pt(ua,-hw(ua)),pt(ub,-hw(ub)),pt(ub,hw(ub)),pt(ua,hw(ua))];
+    var col=lad?(i<3?C.violet:C.cyan):zoneCol(i),on=i<lit;
+    var free=(!lad&&i<2);
+    if(on)litG+=poly(pts,col,.92*dim);
+    else{
+      unlitG+=poly(pts,free?C.pink:col,free?(P.starved?.42:.2):.13,col,.3,.8);
+    }
+  }
+  o+=unlitG+'<g filter="url(#gls)">'+litG+'</g>';
+  /* fuller: a spine line down the blade */
+  o+=line.apply(null,pt(U0+2,0).concat(pt(UT-14,0),['#ffffff',.22*dim,1]));
+  /* the leading edge of the fill */
+  if(!lad&&r>0&&r<100){var ue=U0+LB*lit/20-.4;var a1=pt(ue,-hw(ue)-3),a2=pt(ue,hw(ue)+3);o+=line(a1[0],a1[1],a2[0],a2[1],'#ffffff',.95*dim,2);}
+  /* blade silhouette */
+  var sil=[pt(U0,-9),pt(UT-16,-7),pt(UT,0),pt(UT-16,7),pt(U0,9)];
+  o+=poly(sil,'none',0,C.violet,.55,1);
+  /* zone marks across the blade: 10 swap floor, 20, 60 dump */
+  if(!lad){
+    var m10=uOf(10),m20=uOf(20),m60=uOf(60);
+    var p1=pt(m10,-hw(m10)-5),p2=pt(m10,hw(m10)+5);o+=line(p1[0],p1[1],p2[0],p2[1],C.pink,.95,1.5);
+    var q1=pt(m10,-hw(m10)-6),q2=pt(m10,-hw(m10)-11),q3=pt(m10+3.2,-hw(m10)-11),q4=pt(m10-3.2,-hw(m10)-11);
+    o+=poly([pt(m10,-hw(m10)-5),pt(m10+3.4,-hw(m10)-10),pt(m10-3.4,-hw(m10)-10)],C.pink,.95);
+    var s1=pt(m20,-hw(m20)-3),s2=pt(m20,hw(m20)+3);o+=line(s1[0],s1[1],s2[0],s2[1],C.cyan,.6,1);
+    var t1=pt(m60,-hw(m60)-5),t2=pt(m60,hw(m60)+5);o+=line(t1[0],t1[1],t2[0],t2[1],C.amber,.9,1.2,'3 2');
+    /* ticks on the lower edge and the numerals */
+    for(i=0;i<=10;i++){var tu=uOf(i*10),b1=pt(tu,hw(tu)+1),b2=pt(tu,hw(tu)+(i%2===0?5:3));o+=line(b1[0],b1[1],b2[0],b2[1],C.violet,.7,1);}
+    var L10=pt(m10,hw(m10)+16),L20=pt(m20,hw(m20)+16),L60=pt(m60,hw(m60)+16),L100=pt(uOf(100)-6,hw(uOf(100)-6)+16);
+    o+=txt(L10[0],L10[1],'10',10,C.pink,{a:'middle',op:.95})+txt(L20[0]+2,L20[1]+2,'20',10,C.fg,{a:'middle',op:.85})+txt(L60[0],L60[1],'60',10,C.amber,{a:'middle',op:.95})+txt(L100[0]+2,L100[1]+1,'100',10,C.fg,{a:'middle',op:.85});
+  }else{
+    var names=['OP','RN','HS','TC','SS'];
+    names.forEach(function(nm,k){var um=U0+(k+.5)*LB/5,pp=pt(um,hw(um)+14);o+=txt(pp[0],pp[1]+3,nm,10,k<lit?C.fg:C.muted,{a:'middle',op:.95});});
+  }
+  /* dump flare at the tip */
+  if(!lad&&r>=60&&!ooc){
+    var tp=pt(UT-3,0),big=r>=90;
+    o+='<circle cx="'+tp[0].toFixed(1)+'" cy="'+tp[1].toFixed(1)+'" r="'+(big?13:9)+'" fill="'+C.amber+'" fill-opacity="'+(big?.3:.2)+'" filter="url(#gl)"/>';
+    [[-10,-3],[-6,-9],[3,-10],[7,-6]].forEach(function(d){var e=pt(UT-3+d[0]*1.1,d[1]*1.3);o+=line(tp[0],tp[1],tp[0]+(e[0]-tp[0])*1.5,tp[1]+(e[1]-tp[1])*1.5,C.amber,.7,1.2);});
+  }
+  /* grip, pommel, crossguard (the stance) */
+  var g1=pt(-24,0),g2=pt(0,0);o+=line(g1[0],g1[1],g2[0],g2[1],'#5b4a8a',1,4);
+  var pm=pt(-28,0);o+='<circle cx="'+pm[0].toFixed(1)+'" cy="'+pm[1].toFixed(1)+'" r="5" fill="'+mix(C.bg,ST[2],.5)+'" stroke="'+mix(ST[2],'#ffffff',.3)+'" stroke-width="1.2"/>';
+  var gcol=mix(ST[2],'#ffffff',.25),gfill=mix(C.bg,ST[2],.5),guard;
+  if(P.stance==='BT')guard=[pt(-2,-17),pt(3,-17),pt(3,17),pt(-2,17)];
+  else if(P.stance==='DF')guard=[pt(3,-18),pt(3,18),pt(-3,18),pt(-3,8),pt(-13,5),pt(-17,0),pt(-13,-5),pt(-3,-8),pt(-3,-18)];
+  else guard=[pt(3,-3),pt(2,-14),pt(-9,-22),pt(-4,-10),pt(-2,0),pt(-4,10),pt(-9,22),pt(2,14),pt(3,3)];
+  o+=poly(guard,gfill,1,gcol,1,1.4,'gls');
+  o+=txt(1222,y0+124,ooc?'OUT OF COMBAT':ST[1]+' STANCE',10,C.muted);
+  /* ---- below the blade: what you have ---- */
+  o+=txt(1408,y0+99,word,13,zc,{a:'end'});
+  o+=txt(1408,y0+121,lad?lad.num:String(r),22,ooc?C.muted:C.white,{a:'end'});
+  /* ---- above the blade: what is open. Two slivers, two readouts ---- */
+  var Ls=96,U1=54,cA=-31,cB=-17,A=P.a,B=P.b;
+  function sliver(vc,win,k,live,rem){
+    var d=WIN[k],full=slivPts(pt,U1,Ls,vc,6,0,1),res='';
+    res+=poly(full,live?C.cyan:C.muted,.05,live?C.cyan:C.muted,.45,.9);
+    if(!live)return res;
+    var col=C.cyan,frac=1;
+    if(d.len>0){frac=Math.max(0,Math.min(1,rem/d.len));
+      var af=d.amber/d.len;
+      res+=poly(slivPts(pt,U1,Ls,vc,6,0,af),C.amber,.3);
+      var late=rem<=d.amber;col=late?C.amber:C.cyan;
+      res+='<g filter="url(#gls)">'+poly(slivPts(pt,U1,Ls,vc,6,0,Math.max(.03,frac)),col,.92)+'</g>';
+      var hp=pt(U1+Ls*frac,vc);res+=line(hp[0]-NX*5,hp[1]-NY*5,hp[0]+NX*5,hp[1]+NY*5,'#ffffff',.95,1.6);
+    }else{col=C.pink;res+='<g filter="url(#gls)">'+poly(full,C.pink,.9)+'</g>';}
+    return res;
+  }
+  function chipAt(vc,k,live,hot){
+    var c=pt(26,vc),s=12;
+    return '<polygon points="'+ch(c[0]-s/2,c[1]-s/2,s,s,2)+'" fill="'+(live?mix(C.bg,hot,.4):'rgba(13,6,32,.7)')+'" stroke="'+(live?hot:mix(C.muted,'#ffffff',.2))+'" stroke-opacity="'+(live?1:.6)+'" stroke-width="1.1"'+(live?' filter="url(#gls)"':'')+'/>'+
+      '<text x="'+c[0].toFixed(1)+'" y="'+(c[1]+2.8).toFixed(1)+'" font-size="7.5" fill="'+(live?C.white:C.muted)+'" text-anchor="middle">'+WIN[k].ab+'</text>';
+  }
+  var ak=A?A.k:'OP';
+  o+=sliver(cA,WIN[ak],ak,!!A,A?A.rem:0)+chipAt(cA,ak,!!A,A&&A.k==='EX'?C.pink:C.cyan);
+  o+=sliver(cB,WIN.VR,'VR',!!B,B?B.rem:0)+chipAt(cB,'VR',!!B,C.cyan);
+  /* readouts, time first */
+  function readout(y,k,w,live){
+    var d=WIN[k],late=live&&d.len>0&&w.rem<=d.amber,tc=late?C.amber:C.white,s,nx=1264;
+    if(!live)return txt(1221,y,'--',15,C.muted,{op:.6})+txt(1264,y,d.nm,10,C.muted,{op:.7});
+    if(k==='EX')s=txt(1221,y,'NOW',15,C.pink);
+    else if(d.need&&P.stance!==d.need){var pl={BT:'TO BATTLE',DF:'TO DEFEND',BZ:'TO BERSERK'}[d.need],pw=pl.length*5.6+10;nx=1221+pw+8;
+      s='<polygon points="'+ch(1221,y-12,pw,15,4)+'" fill="'+mix(C.bg,C.pink,.3)+'" stroke="'+C.pink+'" stroke-width="1.2" filter="url(#gls)"/><text x="'+(1221+pw/2)+'" y="'+(y-1.2)+'" font-size="9" fill="'+C.white+'" text-anchor="middle">'+pl+'</text>';}
+    else s=txt(1221,y,(d.len>=10?Math.round(w.rem):w.rem.toFixed(1))+'s',15,tc);
+    return s+(nx===1264?txt(nx,y,d.nm,10,C.white):'');
+  }
+  o+=readout(y0+17,ak,A,!!A)+readout(y0+36,'VR',B,!!B);
+  return o;
+}
+
+/* =====================================================================
+   CONCEPT 2 (ALTERNATIVE): THE WAR DRUM. The rim is the rage, the head is struck.
+   ===================================================================== */
+function drumModule(y0,P){
+  var o='',cx=1276,cy=y0+67,r=P.rage,ooc=!!P.ooc,ST=STANCE[P.stance],i;
+  var Z=zoneOf(r),zc=ooc?C.muted:Z[1],word=ooc?'BANKED':Z[0],dim=ooc?.45:1;
+  function ar(a,rad){var t=a*Math.PI/180;return [cx+rad*Math.cos(t),cy+rad*Math.sin(t)];}
+  function sector(a1,a2,r1,r2){var p=[],k;for(k=0;k<=3;k++)p.push(ar(a1+(a2-a1)*k/3,r2));for(k=3;k>=0;k--)p.push(ar(a1+(a2-a1)*k/3,r1));return p;}
+  /* outer halo: Victory Rush, a 20 s countdown ring starting at 12 o'clock */
+  var HR=59,circ=2*Math.PI*HR,B=P.b;
+  o+='<circle cx="'+cx+'" cy="'+cy+'" r="'+HR+'" fill="none" stroke="'+C.violet+'" stroke-opacity=".3" stroke-width="1.2"/>';
+  if(B){
+    var fr=B.rem/20,late=B.rem<=5,hc=late?C.amber:C.cyan;
+    o+='<circle cx="'+cx+'" cy="'+cy+'" r="'+HR+'" fill="none" stroke="'+C.amber+'" stroke-opacity=".3" stroke-width="3.5" stroke-dasharray="'+(circ*.25).toFixed(1)+' '+circ.toFixed(1)+'" transform="rotate(-90 '+cx+' '+cy+')"/>';
+    o+='<circle cx="'+cx+'" cy="'+cy+'" r="'+HR+'" fill="none" stroke="'+hc+'" stroke-width="3.5" stroke-dasharray="'+(circ*fr).toFixed(1)+' '+circ.toFixed(1)+'" transform="rotate(-90 '+cx+' '+cy+')" filter="url(#gls)"/>';
+  }
+  /* rim lugs: 20 x 5 rage, clockwise from lower left over the top, a gap at the bottom */
+  var lit=Math.round(r/5),A0=120;
+  for(i=0;i<20;i++){
+    var a1=A0+i*15+1.6,a2=a1+11.8,col=zoneCol(i),on=i<lit,free=i<2,pts=sector(a1,a2,46,54);
+    if(on)o+='<g filter="url(#gls)">'+poly(pts,col,.92*dim)+'</g>';
+    else o+=poly(pts,free?C.pink:col,free?(P.starved?.45:.2):.13,col,.3,.8);
+  }
+  var n1=ar(A0+30,44),n2=ar(A0+30,58);o+=line(n1[0],n1[1],n2[0],n2[1],C.pink,.95,1.6);
+  var d1=ar(A0+180,44),d2=ar(A0+180,58);o+=line(d1[0],d1[1],d2[0],d2[1],C.amber,.9,1.3,'3 2');
+  /* the head */
+  var HRD=40;
+  o+='<circle cx="'+cx+'" cy="'+cy+'" r="'+HRD+'" fill="url(#headG)"/><circle cx="'+cx+'" cy="'+cy+'" r="'+HRD+'" fill="none" stroke="'+C.violet+'" stroke-opacity=".55" stroke-width="1.2"/>';
+  o+='<circle cx="'+cx+'" cy="'+cy+'" r="36" fill="none" stroke="'+C.violet+'" stroke-opacity=".22" stroke-dasharray="2 4"/>';
+  var A=P.a,AW=A?WIN[A.k]:null;
+  o+='<circle cx="'+cx+'" cy="'+cy+'" r="35" fill="none" stroke="'+C.amber+'" stroke-opacity="'+(A&&A.k!=='EX'?.2:.08)+'" stroke-width="10"/>';
+  if(A){
+    if(A.k==='EX'){
+      o+='<circle cx="'+cx+'" cy="'+cy+'" r="30" fill="none" stroke="'+C.pink+'" stroke-width="2.2" filter="url(#gl)"/><circle cx="'+cx+'" cy="'+cy+'" r="22" fill="none" stroke="'+C.pink+'" stroke-opacity=".4" stroke-width="1.4"/>';
+    }else{
+      var wrong=AW.need&&P.stance!==AW.need,e=1-A.rem/AW.len,rr=11+29*e,late=A.rem<=AW.amber,rc=wrong?C.pink:(late?C.amber:C.cyan);
+      o+='<circle cx="'+cx+'" cy="'+cy+'" r="'+rr.toFixed(1)+'" fill="'+rc+'" fill-opacity=".1"/>';
+      [14,7].forEach(function(dd,k){if(rr-dd>11)o+='<circle cx="'+cx+'" cy="'+cy+'" r="'+(rr-dd).toFixed(1)+'" fill="none" stroke="'+rc+'" stroke-opacity="'+(k?.2:.4)+'" stroke-width="1.2"/>';});
+      o+='<circle cx="'+cx+'" cy="'+cy+'" r="'+rr.toFixed(1)+'" fill="none" stroke="'+rc+'" stroke-width="2.4" filter="url(#gl)"/>';
+    }
+  }
+  o+='<circle cx="'+cx+'" cy="'+cy+'" r="11" fill="'+mix(C.bg,ST[2],.45)+'" stroke="'+mix(ST[2],'#ffffff',.3)+'" stroke-width="1.4" filter="url(#gls)"/>'+txt(cx,cy+3.6,ST[0],10,C.white,{a:'middle'});
+  if(B)o+='<polygon points="'+ch(cx-7,cy-HR-6,14,12,2)+'" fill="'+mix(C.bg,C.cyan,.45)+'" stroke="'+C.cyan+'" stroke-width="1.1"/>'+txt(cx,cy-HR+3,'VR',7.5,C.white,{a:'middle'});
+  else o+='<polygon points="'+ch(cx-7,cy-HR-6,14,12,2)+'" fill="'+C.bg+'" stroke="'+C.muted+'" stroke-opacity=".6" stroke-width="1.1"/>'+txt(cx,cy-HR+3,'VR',7.5,C.muted,{a:'middle',op:.7});
+  /* right column */
+  var X0=1346;
+  o+=txt(X0,y0+14,ooc?'IDLE':ST[1],10,C.muted);
+  o+=txt(X0,y0+32,word,13,zc);
+  o+=txt(1408,y0+58,String(r),22,ooc?C.muted:C.white,{a:'end'});
+  o+=line(X0,y0+70,1408,y0+70,C.violet,.3,1);
+  function row(y,k,w,live){
+    var d=WIN[k],c=live?(k==='EX'?C.pink:C.cyan):C.muted,s='';
+    s+='<polygon points="'+ch(X0,y-11,14,14,2)+'" fill="'+(live?mix(C.bg,c,.4):'rgba(13,6,32,.7)')+'" stroke="'+c+'" stroke-opacity="'+(live?1:.6)+'" stroke-width="1.1"'+(live?' filter="url(#gls)"':'')+'/><text x="'+(X0+7)+'" y="'+(y-1)+'" font-size="7.5" fill="'+(live?C.white:C.muted)+'" text-anchor="middle">'+d.ab+'</text>';
+    if(!live)return s+txt(1408,y,'--',14,C.muted,{a:'end',op:.6});
+    var late=d.len>0&&w.rem<=d.amber;
+    if(k==='EX')return s+txt(1408,y,'NOW',14,C.pink,{a:'end'});
+    if(d.need&&P.stance!==d.need)return s+'<polygon points="'+ch(1362,y-11,46,14,4)+'" fill="'+mix(C.bg,C.pink,.3)+'" stroke="'+C.pink+'" stroke-width="1.1"/><text x="1385" y="'+(y-1)+'" font-size="8.5" fill="'+C.white+'" text-anchor="middle">TO '+STANCE[d.need][0]+'</text>';
+    return s+txt(1408,y,(d.len>=10?Math.round(w.rem):w.rem.toFixed(1))+'s',14,late?C.amber:C.white,{a:'end'});
+  }
+  o+=row(y0+90,A?A.k:'OP',A,!!A)+row(y0+112,'VR',B,!!B);
+  return o;
+}
+
+/* =====================================================================
+   CONCEPT 3 (DROPPED): THE FORGE. Furnace on the left is the rage,
+   the ingot on the anvil is the window: strike while the iron is hot.
+   ===================================================================== */
+function forgeModule(y0,P){
+  var o='',r=P.rage,i,ST=STANCE[P.stance],a=P.a;
+  /* furnace: an arch with 10 glowing slats, bottom up */
+  var fx=1222,fy=y0+10,fw=70,fh=100,lit=Math.round(r/10);
+  o+='<polygon points="'+fx+','+(fy+fh)+' '+fx+','+(fy+24)+' '+(fx+10)+','+(fy+8)+' '+(fx+fw-10)+','+(fy+8)+' '+(fx+fw)+','+(fy+24)+' '+(fx+fw)+','+(fy+fh)+'" fill="rgba(13,6,32,.8)" stroke="'+C.violet+'" stroke-opacity=".7" stroke-width="1.3"/>';
+  for(i=0;i<10;i++){
+    var sy=fy+fh-8-(i+1)*8.4,on=i<lit,col=i<2?C.violet:(i<6?C.cyan:C.amber);
+    o+='<rect x="'+(fx+9)+'" y="'+sy.toFixed(1)+'" width="'+(fw-18)+'" height="6" fill="'+col+'" fill-opacity="'+(on?.9:.12)+'"'+(on?' filter="url(#gls)"':'')+'/>';
+  }
+  o+=txt(fx+fw/2,fy+fh+12,String(r),14,C.white,{a:'middle'})+txt(fx+fw/2,fy+3,zoneOf(r)[0],10,zoneOf(r)[1],{a:'middle'});
+  /* anvil */
+  var ax=1306,ay=y0+60;
+  o+='<polygon points="'+ax+','+(ay+8)+' '+(ax+20)+','+(ay+2)+' '+(ax+98)+','+(ay+2)+' '+(ax+98)+','+(ay+16)+' '+(ax+70)+','+(ay+16)+' '+(ax+76)+','+(ay+38)+' '+(ax+92)+','+(ay+38)+' '+(ax+92)+','+(ay+52)+' '+(ax+22)+','+(ay+52)+' '+(ax+22)+','+(ay+38)+' '+(ax+38)+','+(ay+38)+' '+(ax+44)+','+(ay+16)+' '+(ax+20)+','+(ay+16)+'" fill="'+mix(C.bg,C.violet,.3)+'" stroke="'+C.violet+'" stroke-width="1.3"/>';
+  var heat=a?Math.max(0,Math.min(1,a.rem/(WIN[a.k].len||6))):0,ic=heat>.66?'#fff6d8':(heat>.33?C.amber:'#e0507a');
+  if(a){o+='<polygon points="'+(ax+30)+','+(ay+2)+' '+(ax+34)+','+(ay-12)+' '+(ax+80)+','+(ay-12)+' '+(ax+84)+','+(ay+2)+'" fill="'+ic+'" filter="url(#gl)"/>';
+    o+=txt(ax+57,ay-16,WIN[a.k].ab+' '+a.rem.toFixed(1)+'s',11,C.white,{a:'middle'});
+    [[20,-18,-8],[34,-24,-6],[70,-20,6]].forEach(function(s){o+=line(ax+s[0],ay+s[1],ax+s[0]+s[2],ay+s[1]-4,C.amber,.8,1.2);});}
+  else o+='<polygon points="'+(ax+30)+','+(ay+2)+' '+(ax+34)+','+(ay-12)+' '+(ax+80)+','+(ay-12)+' '+(ax+84)+','+(ay+2)+'" fill="none" stroke="'+C.muted+'" stroke-opacity=".5" stroke-dasharray="3 3"/>';
+  o+=txt(1306,y0+14,ST[1],10,C.muted);
+  return o;
+}
+
+/* ---------- scene and crops ---------- */
+function sceneHTML(label,modFn,P){
+  var o=base()+slotDivider(1410)+dotsH(WDEB)+modFn(632,P)+buffs();
+  return '<div class="scene"><div class="state">'+label+'</div>'+
+    '<svg width="1000" height="450" viewBox="480 380 1000 450" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg></div>';
+}
+function cropHTML(modFn,P,wpx,cls){
+  var o=modFn(632,P),h=Math.round(wpx*138/202);
+  return '<svg class="'+(cls||'')+'" width="'+wpx+'" height="'+h+'" viewBox="1213 626 202 138" font-family="Mononoki, monospace" font-weight="700">'+
+    '<rect x="1213" y="626" width="202" height="138" fill="#0d0620"/>'+
+    '<rect x="1213.5" y="632.5" width="201" height="127" fill="rgba(168,85,247,.04)" stroke="'+C.violet+'" stroke-opacity=".4" stroke-dasharray="6 4"/>'+o+'</svg>';
+}
+function mk(n,cx,cy){return '<circle cx="'+cx+'" cy="'+cy+'" r="4.8" fill="'+C.bg+'" stroke="'+C.pink+'" stroke-width="1"/><text x="'+cx+'" y="'+(cy+2.7)+'" font-size="7" fill="'+C.pink+'" text-anchor="middle">'+n+'</text>';}
+function anatomy(P,marks){
+  var o=rect(1196,622,232,140,'#0d0620')+'<rect x="1213.5" y="632.5" width="201" height="127" fill="rgba(168,85,247,.04)" stroke="'+C.violet+'" stroke-opacity=".4" stroke-dasharray="6 4"/>'+swordModule(632,P);
+  marks.forEach(function(m){o+=mk(m[0],m[1],m[2]);});
+  return '<div class="z"><svg width="560" height="'+Math.round(560*140/232)+'" viewBox="1196 622 232 140" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg></div>';
+}
+
+/* ---------- build the page ---------- */
+var html='';
+var SW={rage:66,stance:'BT',a:{k:'OP',rem:3.4},b:{rem:13}};
+
+/* 1: concept sheet */
+html+='<h2><i>1</i> THREE CONCEPTS, THEN A CUT</h2><div class="sheet">';
+html+='<div><div class="c">'+cropHTML(swordModule,SW,478)+'</div><div class="n"><i>1</i> THE GREATSWORD</div>'+
+ '<p class="th"><b>Form: a diagonal blade slashing up the area.</b> Rage fills the blade facet by facet from the hilt, the crossguard is your stance, and the sword splits the area in two: <b>below it is what you have (rage), above it is what is open (strike windows).</b> Windows are slash trails that burn off toward the hilt.</p>'+
+ '<p class="cr"><span><b>Cool?</b> Yes. A neon blade is an icon, the dump flare at the tip is a payoff, the diagonal is the most synthwave thing on the HUD.</span><span><b>Obviously a Warrior?</b> Yes, nothing else would use it. The guard shapes (bar, shield plate, swept wings) are the three stances.</span><span><b>Risk:</b> a diagonal fill cannot be one StatusBar, so it is 20 facets each with its own alpha twin.</span></p>'+
+ '<span class="verdict v-keep">KEPT, PUSHED FURTHER (SECTIONS 2 TO 4)</span></div>';
+html+='<div><div class="c">'+cropHTML(drumModule,{rage:66,stance:'BT',a:{k:'OP',rem:3.4},b:{rem:13}},478)+'</div><div class="n"><i>2</i> THE WAR DRUM</div>'+
+ '<p class="th"><b>Form: concentric rings.</b> The rim is the rage (20 lugs), the drumhead is struck when an opening appears and a shockwave ripples out to the rim (the deadline), and an outer halo counts down Victory Rush. Three timers on three radii.</p>'+
+ '<p class="cr"><span><b>Cool?</b> Yes, the ripple is the best animation of the three. Neon rings are very synthwave.</span><span><b>Obviously a Warrior?</b> Half. A drum reads Horde and war, not the class, and a 360 degree rim is slower to read than a line.</span><span><b>Risk:</b> a radial fill is less precise than a blade, the 10 and 60 marks are tiny.</span></p>'+
+ '<span class="verdict v-alt">KEPT AS THE ALTERNATIVE (SECTION 5)</span></div>';
+html+='<div><div class="c">'+cropHTML(forgeModule,{rage:66,stance:'BT',a:{k:'OP',rem:3.4}},478)+'</div><div class="n"><i>3</i> THE FORGE</div>'+
+ '<p class="th"><b>Form: a furnace and an anvil.</b> Rage is the furnace heat in ten slats, the window is a glowing ingot on the anvil that cools from white to red: strike while the iron is hot.</p>'+
+ '<p class="cr"><span><b>Cool?</b> The cooling ingot is the cleverest window metaphor of the three.</span><span><b>Obviously a Warrior?</b> No, it reads blacksmith. And it is illustration, which falls apart at 202 x 128: the anvil is a blob, the furnace is a bar in disguise.</span><span><b>Harvested:</b> the idea of a window that cools. The sword trail goes white hot to cyan to amber.</span></p>'+
+ '<span class="verdict v-drop">DROPPED</span></div>';
+html+='</div>';
+
+/* 2: primary in situ */
+html+='<h2><i>2</i> PRIMARY, THE GREATSWORD IN SITU</h2>';
+html+='<div class="row">'+sceneHTML('<b>WARRIOR</b>, GREATSWORD, LOWER AREA',swordModule,SW)+
+  '<div class="side"><div class="t"><i>A</i> LOOK DOWN FOR RAGE, UP FOR OPENINGS</div>'+
+  '<div class="cap"><b>The blade is 66 rage, past the amber 60 line, so the tip flares and the word reads DUMP.</b> The cast bar already shows Heroic Strike queued for the next swing.<br><br>'+
+  'Above the blade the top trail is <b>Overpower, 3.4 s left</b> of its window; the lower trail is <b>Victory Rush, 13 s</b>. Each trail is a lit sliver that burns off toward the hilt and turns amber for its last seconds.<br><br>'+
+  'The guard is the stance: a straight bar for Battle, a shield plate for Defensive, swept wings for Berserker. 190 x 114 in one area, Target Debuffs in the other.</div>'+
+  '<div class="crop-l">THE MODULE AT 1:1</div>'+cropHTML(swordModule,SW,202,'crop')+'</div></div>';
+
+/* 3: anatomy */
+html+='<h2><i>3</i> ANATOMY AND DATA PATH</h2>';
+var T=[
+ ['1','Crossguard and stance label','Which stance you are in. Straight bar Battle, shield plate Defensive, swept wings Berserker. Matters because Overpower, Rend and Charge are Battle only and a swap keeps 10 rage.','<code>GetShapeshiftForm()</code>, already pcalled in HudLogic.','<span class="ok">PLAIN</span> <span class="unv">P6</span>'],
+ ['2','Blade facets (20 x 5 rage)','The gauge. Violet 0 to 20, cyan 20 to 60, amber 60 to 100, so the colour of the lit edge is the advice.','Per facet a texture whose alpha comes from <code>UnitPowerPercent("player", Rage, false, stepCurve_i)</code>: 20 precomputed Step curves, the LOW HP twin trick in GunsightBoxes, no secret compared. A diagonal cannot be a StatusBar, hence facets.','<span class="est">SECRET SAFE</span> <span class="unv">P2</span>'],
+ ['3','White leading edge','Where the fill ends right now.','Each facet carries an edge texture drawn under the next facet, so only the last lit facet shows it. Draw order, no compare.','<span class="est">SECRET SAFE</span>'],
+ ['4','Pink 0 to 10 strip and pennant','Free swap zone. A swap keeps 10 rage (Tactical Mastery, L14), so under 10 a stance swap loses nothing. 25 with Improved Tactical Mastery 5/5.','Static art; floor from a setting or the talent rank.','<span class="ok">STATIC</span> <span class="unv">P9</span>'],
+ ['5','Amber 60 line and tip flare','Past this Heroic Strike or Cleave is free (a queued strike cancels that swing\'s rage). The tip flares amber at 60+, bigger at 90+.','Static line; flare is one more alpha twin on a glow texture. Threshold 60 is a heuristic, a per spec table, tune in play.','<span class="est">HEURISTIC</span> <span class="unv">P2</span>'],
+ ['6','Word HOLD / SPEND / DUMP and number','The one word to read, and the exact rage.','Three FontStrings with alpha twins for the word; the number goes to <code>SetFormattedText</code> from <code>UnitPower</code>, which accepts a secret.','<span class="est">SECRET SAFE</span> <span class="unv">P1 P3</span>'],
+ ['7','Top trail and readout: Overpower, Revenge, Execute','The strike that is open now. Trail drains to the hilt, amber in the last 1.5 s. Execute has no clock, the trail stays full pink and reads NOW.','<code>SPELL_ACTIVATION_OVERLAY_GLOW_SHOW/HIDE</code> (existing handlers in HudLogic) starts and ends it; length is a constant (6, 5). Fallback: the <code>IsSpellUsable</code> false to true edge. Execute: usable plus glow, no target health read.','<span class="est">ESTIMATED CLOCK</span> <span class="unv">P4 P5 P7</span>'],
+ ['8','Lower trail: Victory Rush','20 s after a kill, amber in the last 5. Shown alone after a kill when the target is gone.','Same glow or usable edge, 20 s constant [V]. Health is secret, so "skip above 90% HP" cannot be automatic.','<span class="est">ESTIMATED CLOCK</span> <span class="unv">P4 P5</span>'],
+ ['9','TO BATTLE pill','The window is open but the stance is wrong (Overpower needs Battle). Replaces the time so the module says what to fix.','Window state plus <code>GetShapeshiftForm()</code>.','<span class="ok">PLAIN</span> <span class="unv">P5 P6</span>']
+];
+html+='<div class="anat">'+anatomy({rage:66,stance:'BZ',a:{k:'OP',rem:3.4},b:{rem:13}},[[1,1237,712],[2,1312,717],[3,1355,692],[4,1233,697],[5,1405,665],[6,1368,727],[7,1341,638],[8,1231,677],[9,1261,634]])+'<div style="flex:1"><table><tr><th>#</th><th>Element</th><th>What it tells you</th><th>Data path</th><th>Status</th></tr>';
+T.forEach(function(r){html+='<tr><td class="num">'+r[0]+'</td><td class="k">'+r[1]+'</td><td>'+r[2]+'</td><td>'+r[3]+'</td><td>'+r[4]+'</td></tr>';});
+html+='</table></div></div>';
+
+/* 4: states strip */
+html+='<h2><i>4</i> STATES</h2><div class="strip">';
+var ST=[
+ ['A','PULL START',{rage:0,stance:'BT'},'<b>Rage 0, HOLD.</b> A pull starts empty by design; Charge (+9) and the first swings light the first facets. Both trails are hollow outlines, nothing flashes.'],
+ ['B','RAGE STARVED',{rage:8,stance:'BT',starved:true},'<b>Under 10, HOLD, the swap strip glows pink.</b> The Warrior complaint made visible. It also says a swap into Battle for Overpower is free right now.'],
+ ['C','EXCESS, DUMP',{rage:82,stance:'BT'},'<b>Amber facets, flare at the tip, DUMP.</b> Queue Heroic Strike or Cleave. At 90+ the flare doubles: rage is about to be wasted.'],
+ ['D','OVERPOWER OPEN',{rage:34,stance:'BT',a:{k:'OP',rem:3.4}},'<b>The top trail lights and burns off.</b> Rage 34 is SPEND, so Overpower (5) and a Thunder Clap (20) are both affordable.'],
+ ['E','VICTORY RUSH AFTER A KILL',{rage:22,stance:'BT',b:{rem:13}},'<b>The lower trail alone, 13 s.</b> The target died, so the trail is the whole message. HP is secret, the rule "skip above 90%" stays with the player.'],
+ ['F','NO TARGET, OUT OF COMBAT',{rage:31,stance:'BT',ooc:true},'<b>Dimmed, BANKED.</b> Rage is yours so the class host never hides on no target. The label swap rides the regen edge, it is not a rage read.'],
+ ['G','OPEN, WRONG STANCE',{rage:41,stance:'BZ',a:{k:'OP',rem:4.1}},'<b>Wings on the guard, TO BATTLE pill.</b> Overpower is unusable in Berserker, so the module says why the button is grey and what to do.'],
+ ['H','EXECUTE READY',{rage:44,stance:'BT',a:{k:'EX'}},'<b>Top trail full pink, NOW.</b> No clock: Execute stays until the target dies. Driven by usable plus glow, never by target health (secret).'],
+ ['I','TWO WINDOWS, BOTH LATE',{rage:52,stance:'BT',a:{k:'OP',rem:1.2},b:{rem:4}},'<b>Both trails amber.</b> Overpower 1.2 s, Rush 4 s. Overpower is the cheaper and shorter one, press it first.'],
+ ['J','FALLBACK, RAGE UNREADABLE',{rage:0,stance:'BT',ladder:{lit:4,num:'20+',word:'SPEND'}},'<b>If P1 to P3 fail,</b> the blade becomes five runes lit by <code>IsSpellUsable</code>: Overpower 5, Rend 10, Heroic Strike 15, Thunder Clap 20, Sweeping Strikes 30. Coarser, no dump band, still answers "may I spend".']
+];
+ST.forEach(function(s){
+  html+='<div class="cell"><div class="c">'+cropHTML(swordModule,s[2],290)+'</div><div class="n"><i>'+s[0]+'</i> '+s[1]+'</div><div class="d">'+s[3]+'</div></div>';
+});
+html+='</div>';
+
+/* 5: alternative */
+html+='<h2><i>5</i> ALTERNATIVE, THE WAR DRUM</h2>';
+var DR={rage:66,stance:'BT',a:{k:'OP',rem:3.4},b:{rem:13}};
+html+='<div class="row">'+sceneHTML('<b>WARRIOR</b>, WAR DRUM, LOWER AREA',drumModule,DR)+
+  '<div class="side"><div class="t"><i>B</i> STRIKE THE HEAD</div>'+
+  '<div class="cap"><b>Three radii, three jobs.</b> Rim lugs are rage (20 lugs of 5, pink notch at 10, amber dashed at 60). The drumhead holds the stance plate and, when Overpower or Revenge opens, a shockwave that ripples from the plate to the rim: the rim is the deadline, the outer fifth is amber. The halo is Victory Rush, a clock face counting down from 12 o\'clock.<br><br>'+
+  'Same data as the sword, different skin. Choose it if you want the most animated module; choose the sword for the sharper read and the stronger class identity.</div>'+
+  '<div class="crop-l">THE MODULE AT 1:1</div>'+cropHTML(drumModule,DR,202,'crop')+'</div></div>';
+var DST=[
+ ['PULL START, STARVED',{rage:6,stance:'BT',starved:true},'Rim nearly dark, pink lugs glow: swap is free.'],
+ ['OVERPOWER RIPPLE',{rage:34,stance:'BT',a:{k:'OP',rem:4.2}},'Ring expands from the plate; the rim is the deadline.'],
+ ['DUMP + RUSH, WRONG STANCE',{rage:84,stance:'BZ',a:{k:'OP',rem:2.0},b:{rem:4}},'Amber rim, amber halo, pink ripple and TO BT.'],
+ ['NO TARGET, BANKED',{rage:30,stance:'BT',ooc:true},'Out of combat: dim, rage 30 banked, windows idle.']
+];
+html+='<div class="strip" style="margin-top:12px">';
+DST.forEach(function(s,i){
+  html+='<div class="cell"><div class="c">'+cropHTML(drumModule,s[1],290)+'</div><div class="n"><i>'+String.fromCharCode(65+i)+'</i> '+s[0]+'</div><div class="d">'+s[2]+'</div></div>';
+});
+html+='<div class="cell"><div class="c">'+cropHTML(drumModule,{rage:44,stance:'BT',a:{k:'EX'}},290)+'</div><div class="n"><i>E</i> EXECUTE READY</div><div class="d">Steady pink ring on the head, no expansion, NOW.</div></div>';
+html+='</div>';
+
+/* 6: notes */
+html+='<h2><i>6</i> NOTES</h2><div class="two">'+
+'<div class="panel"><h3>Why rage, why these zones</h3><ul>'+
+'<li><b>Starvation is the Warrior complaint on Forever.</b> Rage is normalized (per landed swing, crits double, a 2H gives about 14 to 17 a swing). The question is rarely "is the bar full", it is "may I spend yet".</li>'+
+'<li><b>HOLD under 20</b>: you cannot buy Thunder Clap, anything you press is a trade. <b>SPEND 20 to 60</b>: Thunder Clap, Rend, Overpower, Slam are affordable. <b>DUMP 60+</b>: the only time Heroic Strike or Cleave is free.</li>'+
+'<li><b>Pink 0 to 10</b> is the stance swap floor: a swap keeps 10 rage, so under it a swap is free and above it you burn the difference.</li>'+
+'<li>20 and 60 are heuristics to tune in play, kept in a per spec table.</li></ul>'+
+'<p class="m">Deliberately not here: Sunder stacks, Rend, Thunder Clap, Demoralizing Shout timers (Target Debuffs lists them, target auras are secret in combat), Battle Shout (a buff on you, lives in My buffs), swing timer, Slam.</p></div>'+
+'<div class="panel"><h3>Reuse, new, and the open question</h3><ul>'+
+'<li><b>Reuse:</b> the overlay glow handlers in HudLogic, <code>C_Spell.IsSpellUsable</code> (plain), <code>GetShapeshiftForm</code>, the alpha-twin pattern from GunsightBoxes (<code>UnitPowerPercent</code> with a Step curve), <code>GunsightAreas.RegisterModule("class", { classes = { "WARRIOR" } })</code>, the stock next cast tile that already shows Heroic Strike NEXT SWING.</li>'+
+'<li><b>New:</b> a WARRIOR profile and spell keys (none exist in HudSpells and HudProfiles today), the facet and glow textures, the window clock. No Lua in this task.</li>'+
+'<li>The module never hides on no target: rage is yours, the class host is not target gated.</li>'+
+'<li><b>Open:</b> the sword is one area; should a Warrior get a taller two area variant (blade vertical, Target Debuffs moved) later? Not needed now.</li></ul></div></div>'+
+'<div class="panel" style="margin-top:20px"><h3>Client probes needed before building (in game)</h3><ol>'+
+'<li><b>P1</b> Is <code>UnitPower("player", Rage)</code> secret in combat (assume yes, mana is secret even out of combat)? Raw scale 0 to 100?</li>'+
+'<li><b>P2</b> Does <code>UnitPowerPercent("player", Rage, false, curve)</code> accept a Step curve and return a usable number to <code>SetAlpha</code>? (GunsightBoxes marks UnitPowerPercent UNVERIFIED.) This drives facets, word and flare.</li>'+
+'<li><b>P3</b> <code>SetFormattedText</code> with the secret rage works in combat (the number). If P1 to P3 fail, state J (usable runes) ships.</li>'+
+'<li><b>P4</b> Does the stock overlay glow fire for Overpower, Revenge, Victory Rush, Execute on Forever? No source says so, Classic warrior auras all key off "action usable". Log GLOW_SHOW/HIDE and ids.</li>'+
+'<li><b>P5</b> Do <code>IsSpellUsable</code> flips line up with the window opening, and does Overpower stay unusable outside Battle Stance while the window is open? Is player aura 1282733 (the dodge window, per the sim author) readable?</li>'+
+'<li><b>P6</b> <code>GetShapeshiftForm</code> index order on Forever, and whether a swap triggers the GCD (a report says yes).</li>'+
+'<li><b>P7</b> Window lengths: dodge Overpower (about 5 s, Classic), Bloodthrill 6 s, Revenge (about 5 s), Victory Rush 20 s [V].</li>'+
+'<li><b>P8</b> Rage costs in the Forever client (Overpower 5, Rend 10, Heroic Strike 15, Revenge 5 are Classic Era values). Only the fallback runes use them.</li>'+
+'<li><b>P9</b> Is the Improved Tactical Mastery rank readable? Otherwise the swap floor is a setting defaulting to 10.</li></ol></div>'+
+'<div class="sub" style="margin-top:18px;font-size:12px">Research basis: adze doc 01M4F2A8CGJ93FDQDR25EF0J0G (Warrior on WoW Forever), Wowhead Forever level 30 Arms and Protection guides, Blizzard beta notes 1 and 2 Oct, ForeverDB client data. [V] verified in Forever data, [G] guide claim, [C] Classic Era carried over.</div>';
+
+document.getElementById('root').innerHTML=html;
+})();
+</script>
+</body>
+</html>
