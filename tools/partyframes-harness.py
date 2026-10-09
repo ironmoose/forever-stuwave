@@ -91,7 +91,21 @@ function Region:SetFormattedText(fmt,...)
     end
     self.text=string.format(fmt,unpack(args))
 end
-function Region:GetStringWidth() return #(self.text or '')*6 end
+-- Text width: 6 per character at size 10.5, scaling with the size the font DRAWS at (drawSize; under
+-- __fontLag a new size lands only when __frame runs, like the client's late SetFont). Every call is
+-- counted in __measures. GetStringWidth is BOUNDED by the width of a two-point-anchored FontString (the
+-- text is drawn truncated); only GetUnboundedStringWidth reports what the whole text would take.
+__measures=0
+function Region:GetUnboundedStringWidth()
+    __measures=__measures+1
+    local size=self.drawSize or (self.mono and self.mono.size) or 10.5
+    return #(self.text or '')*6*size/10.5
+end
+function Region:GetStringWidth()
+    local w=self:GetUnboundedStringWidth()
+    if self.points.LEFT and self.points.RIGHT then w=math.min(w,self:GetWidth()) end
+    return w
+end
 function Region:SetTextColor(...) self.textColor={...} end
 function Region:SetColorTexture(...) self.color={...} end
 function Region:SetVertexColor(...)
@@ -318,7 +332,11 @@ for _,k in ipairs({'ApplyFontGeneric','ApplyMono','AddOuterGlow','AddRoundedFill
     'AddGradientBorder'}) do t[k]=function() end end
 -- ApplyMono records what it was asked for, so a check can tell the font was set (and before
 -- any SetText, via Region:SetText's textBeforeFont flag).
-t.ApplyMono=function(fontString,size,color) fontString.mono={size=size,color=color} end
+t.ApplyMono=function(fontString,size,color)
+    fontString.mono={size=size,color=color}
+    if __fontLag then __lagged[#__lagged+1]=fontString else fontString.drawSize=size end
+end
+__lagged={}
 -- Theme.SkinButton's contract for the alert ring: button.fsSkin.glow and .border.ring are the
 -- two regions a caller retints (idempotent, like the real one).
 t.SkinButton=function(button,opts)
@@ -2134,7 +2152,7 @@ def _check_header_level_and_low_tag() -> None:
     """'LV n' is right-aligned at the rail's right edge + 1 (mono 8.5, muted at .9) and hidden at
     max level. The 25 x 12 LOW tag sits 2 below the row top with its right edge 2 left of the
     rail edge + 1, plus the 36 level reserve (the mockup's tw) while the level shows; the name's
-    right edge is anchored 3 left of it. Every header FontString has its font before any SetText."""
+    right edge is 6 left of the level text. Every header FontString has its font before any SetText."""
     rt = _runtime()
     g = rt.globals()
     row = g.FS.partyRows[1]
@@ -2147,15 +2165,16 @@ def _check_header_level_and_low_tag() -> None:
     assert (low.w, low.h) == (25, 12) and low.roundedRadius == 4, "LOW tag is a 25 x 12 chamfer 4 cut tag"
     assert rel(low)[1] == 2 and rel(low)[2] == inner + 1 - 2, f"max level LOW tag at {rel(low)}"
     name_right = row.name.points.RIGHT
-    assert _same(rt, name_right.rel, low) and name_right.rp == "LEFT" and name_right.x == -3, \
-        "name RIGHT anchors to the LOW tag's LEFT, 3 left"
+    assert _same(rt, name_right.rel, row.nameRow) and name_right.rp == "RIGHT" and name_right.x == 1 - 6, \
+        "no level: name RIGHT is the rail edge + 1, 6 in (see _check_name_uses_whole_row)"
     g.__level, g.__role = 45, "HEALER"
     _fire(row, "UNIT_NAME_UPDATE")
     assert row.levelText.shown and row.levelText.text == "LV 45", row.levelText.text
     assert rel(row.levelText)[2] == inner + 1, "LV text right edge is the rail edge + 1"
     assert row.levelText.mono.size == 8.5 and _close(_rgba(row.levelText.mono.color), (*muted, .9))
     assert rel(low)[2] == inner + 1 - 36 - 2, f"LOW tag with a level at {rel(low)}"
-    assert rel(row.name)[2] == rel(low)[0] - 3, "the name edge follows the re-seated LOW tag"
+    level_w = row.levelText.GetUnboundedStringWidth(row.levelText)
+    assert math.isclose(rel(row.name)[2], inner + 1 - level_w - 6), "the name edge is 6 left of the level text"
     assert _close(_rgba(low.roundedColor), (.051, .024, .125, .95 * .95)), "LOW tag fill: .95 x .95"
     for font_string in (row.roleLetter, row.levelText, row.lowText, row.name):
         assert font_string.text is not None and not font_string.textBeforeFont, \
@@ -2163,6 +2182,159 @@ def _check_header_level_and_low_tag() -> None:
     assert row.lowText.text == "LOW" and row.lowText.mono.size == 8, "LOW label is mono 8"
     assert _close(_rgba(row.lowText.mono.color), _theme_color("COLOR_RED")), "LOW label red"
     assert _close(_rgba(low.fsSkin.border.ring.color), (*RED, 1)), "LOW stroke red"
+    _assert_quiet(rt)
+
+
+NAME_LEFT = 35  # class plate 16 + tag gap 3 + role tag 13 + name gap 3
+NAME_GAP_RIGHT = 6  # the air between the name and what sits to its right
+NAME_FLOOR = 9
+
+
+def _name_room(rt, row) -> float:
+    """The width the name may take: the header row up to the level text's left edge (or the rail edge + 1
+    with no level), minus the 6 gap, minus the name's left offset."""
+    header = _head(rt, row)(row.nameRow)
+    level = row.levelText.GetUnboundedStringWidth(row.levelText) if row.levelText.shown else 0
+    return header[2] + 1 - NAME_GAP_RIGHT - level - NAME_LEFT
+
+
+def _name_fits(rt, row, room: float) -> bool:
+    return row.name.GetUnboundedStringWidth(row.name) <= room + 1e-6
+
+
+def _set_name(rt, row, name: str) -> None:
+    rt.globals().__unitName = name
+    _fire(row, "UNIT_NAME_UPDATE")
+
+
+def _check_name_uses_whole_row() -> None:
+    """The name runs right up to the level text's left edge minus 6 (the rail edge + 1 minus 6 with no
+    level): a name that fits there shows in full at the normal size, though it is wider than the old
+    room left of the LOW tag."""
+    rt = _runtime()
+    g = rt.globals()
+    row = g.FS.partyRows[1]
+    rel = _head(rt, row)
+    room = _name_room(rt, row)
+    chars = int(room // 6)
+    assert chars * 6 > room - 24, "the room must exceed the old LOW tag limit by about 24"
+    _set_name(rt, row, "w" * chars)
+    assert row.name.text == "W" * chars, "a name that fits shows in full"
+    assert row.name.mono.size == 10.5, f"a fitting name keeps size 10.5, got {row.name.mono.size}"
+    assert rel(row.name)[2] == rel(row.nameRow)[2] + 1 - NAME_GAP_RIGHT, "name edge: rail edge + 1, minus 6"
+    assert _name_fits(rt, row, room)
+    _assert_quiet(rt)
+
+
+def _check_long_name_shrinks_then_ellipsizes() -> None:
+    """A name wider than the room shrinks (in half steps) until its whole text fits, never below the
+    floor; past the floor the text stays whole and the FontString's own width truncates it."""
+    rt = _runtime()
+    g = rt.globals()
+    row = g.FS.partyRows[1]
+    room = _name_room(rt, row)
+    chars = int(room // 6) + 3
+    _set_name(rt, row, "w" * chars)
+    size = row.name.mono.size
+    assert NAME_FLOOR < size < 10.5, f"a slightly long name shrinks, got size {size}"
+    assert (size * 2) % 1 == 0, "half pixel steps"
+    assert _name_fits(rt, row, room), "the shrunk name fits the room"
+    assert row.name.GetUnboundedStringWidth(row.name) > room - 6 * size / 10.5 * 2, "and no smaller than needed"
+    _set_name(rt, row, "w" * 40)
+    assert row.name.mono.size == NAME_FLOOR, f"floor {NAME_FLOOR}, got {row.name.mono.size}"
+    assert row.name.text == "W" * 40, "the text is never cut in Lua"
+    assert not _name_fits(rt, row, room), "past the floor the engine's own ellipsis shows"
+    _set_name(rt, row, "Short")
+    assert row.name.mono.size == 10.5, "a short name goes back to the full size"
+    _assert_quiet(rt)
+
+
+def _check_level_width_refits_name() -> None:
+    """The level text takes room right of the name: showing it, and a wider level, each pull the name's
+    edge in and refit it; max level gives the room back."""
+    rt = _runtime()
+    g = rt.globals()
+    row = g.FS.partyRows[1]
+    rel = _head(rt, row)
+    g.__unitName = "w" * (int(_name_room(rt, row) // 6) - 2)  # fits at max level, not beside a level
+    sizes = {}
+    for level in (60, 4, 30, 60):
+        g.__level = level
+        _fire(row, "UNIT_NAME_UPDATE")
+        level_w = row.levelText.GetUnboundedStringWidth(row.levelText) if level != 60 else 0
+        assert math.isclose(rel(row.name)[2], rel(row.nameRow)[2] + 1 - NAME_GAP_RIGHT - level_w), \
+            f"level {level}: name edge {rel(row.name)[2]}"
+        assert _name_fits(rt, row, _name_room(rt, row)), f"level {level}: the name must fit its room"
+        sizes[level] = row.name.mono.size
+    assert sizes[60] == 10.5, "max level: the full size"
+    assert NAME_FLOOR <= sizes[30] < sizes[4] < 10.5, f"a wider level shrinks the name more: {sizes}"
+    _assert_quiet(rt)
+
+
+def _check_secret_name_is_never_measured() -> None:
+    """A secret name is handed to SetText and nothing else: no width read, no string op, the size back at
+    the normal one (the engine truncates it at the FontString's width)."""
+    rt = _runtime()
+    g = rt.globals()
+    row = g.FS.partyRows[1]
+    _set_name(rt, row, "w" * 40)
+    assert row.name.mono.size == NAME_FLOOR
+    g.__measures = 0
+    g.__unitName = g.__secret
+    _fire(row, "UNIT_NAME_UPDATE")
+    assert _same(rt, row.name.text, g.__secret), "a secret name must reach SetText untouched"
+    assert g.__measures == 0, f"a secret name was measured {g.__measures} times"
+    assert row.name.mono.size == 10.5, "a secret name takes the normal size"
+    _fire(row, "UNIT_NAME_UPDATE")
+    assert g.__measures == 0
+    _assert_quiet(rt)
+
+
+FONT_LAG = """__fontLag=true
+__timers={}
+C_Timer={After=function(_,fn) __timers[#__timers+1]=fn end}
+function __frame()
+    for _,fs in ipairs(__lagged) do fs.drawSize=fs.mono.size end
+    __lagged={}
+    local due=__timers __timers={}
+    for _,fn in ipairs(due) do fn() end
+end"""
+
+
+def _check_name_refits_next_frame() -> None:
+    """A new font size lands one frame late: the fit reads the width at the size now drawn, so a repeat
+    write in the same frame never compounds, the next frame re-measures and settles, and a settled name
+    schedules nothing more."""
+    rt = _runtime(before_load=FONT_LAG)
+    g = rt.globals()
+    row = g.FS.partyRows[1]
+    room = _name_room(rt, row)
+    _set_name(rt, row, "w" * (int(room // 6) + 4))
+    first = row.name.mono.size
+    assert first < 10.5, "shrunk at once"
+    _fire(row, "UNIT_NAME_UPDATE")
+    assert row.name.mono.size == first, "the same frame must not fit against the stale width"
+    g.__frame()
+    assert _name_fits(rt, row, room), "after the font lands the name fits"
+    settled = row.name.mono.size
+    assert settled >= first, f"settled {settled} vs first {first}"
+    g.__frame()
+    assert row.name.mono.size == settled and len(list(g.__timers.values())) == 0, "settled: nothing more"
+    _fire(row, "UNIT_NAME_UPDATE")
+    g.__frame()
+    assert row.name.mono.size == settled
+    _assert_quiet(rt)
+
+
+def _check_unchanged_name_not_remeasured() -> None:
+    """A repeat event for an unchanged name and level does no new measuring (refit only on a change)."""
+    rt = _runtime()
+    g = rt.globals()
+    row = g.FS.partyRows[1]
+    _set_name(rt, row, "w" * 20)
+    g.__measures = 0
+    _fire(row, "UNIT_NAME_UPDATE")
+    assert g.__measures == 0, f"an unchanged name re-measured {g.__measures} times"
     _assert_quiet(rt)
 
 
@@ -3180,6 +3352,12 @@ def main() -> int:
         ("header name: mono class colour, upper-cased unless secret", _check_header_name),
         ("header name falls back to UnitName: nil and secret safe", _check_name_without_get_unit_name),
         ("header LV text and LOW tag placement, name anchor", _check_header_level_and_low_tag),
+        ("name uses the whole row up to the level text", _check_name_uses_whole_row),
+        ("long name shrinks to the floor then the engine ellipsizes", _check_long_name_shrinks_then_ellipsizes),
+        ("level width change refits the name", _check_level_width_refits_name),
+        ("secret name is never measured", _check_secret_name_is_never_measured),
+        ("name refit waits out the late font", _check_name_refits_next_frame),
+        ("unchanged name is not re-measured", _check_unchanged_name_not_remeasured),
         ("LOW tag alpha follows the red low-HP layer", _check_low_tag_follows_red_layer),
         ("dead row dims the header pieces", _check_header_dims_when_down),
         ("buff alert: missing shows the spell icon red (C_UnitAuras)", _check_buff_missing),
