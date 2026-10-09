@@ -23,11 +23,15 @@ DECK_DEFS, keyX, the `.cdeck.bm` key rules, the Rings block). The checks pin:
     outage takes 1.0 s and keeps the lit look until it ends, the ring then eases out over 0.4 s, and
     nothing is left running at rest; reduced motion, a hidden key and a missing Fx snap instead;
   * a rescale re-seats and creates nothing, in combat it waits for regen;
-  * the keys follow the Console (hidden with /fsconsole off) and the Gunsight state read ONCE at
-    login (not built, party piece not registered, when it was disabled then; /fsgun on|off at
-    runtime changes nothing until a reload); the party frame container becomes piece `party`
-    (alpha only in combat while it is protected), with one next-frame retry when it is missing at
-    regen and a lazy register on the first click.
+  * the keys follow the Console (hidden with /fsconsole off) and what the Gunsight BUILT at login (not
+    built, party piece not registered, when it was disabled then; `/fsgun on` after that builds nothing
+    until a reload); the party frame container becomes piece `party` (alpha only in combat while it is
+    protected), with one next-frame retry when it is missing at regen and a lazy register on the first
+    click;
+  * the master switch is live for a Gunsight that was built: switched off, the keys are hidden (also in
+    combat), the tab returns to its full width (at regen in combat) and the party piece is released so
+    the party frames show as on a Gunsight-off login; switched on, they come back and the party piece
+    follows its state again.
 
 The mock is strict (a widget method it does not define fails as a nil call) and is NOT the real client.
 
@@ -866,19 +870,6 @@ check(FS.partyContainer:IsShown() and FS.partyContainer:GetAlpha() == 1, "the pa
 for _, f in ipairs(FRAMES) do check(not (f.name and f.name:find("^FSConsoleKey")), "a key frame exists: " .. tostring(f.name)) end
 """)
 
-case("fsgun_toggle_at_runtime_waits_for_a_reload")(r"""
-local CK, G = boot({ party = true })
-SlashCmdList["FSGUN"]("off")
-FS.ActionBars.Publish()
-fire("PLAYER_REGEN_ENABLED")
-check(CK.keys[1].btn:IsVisible(), "keys hid on /fsgun off: the Gunsight pieces stay up until a reload, so the keys must too")
-click(keyOf(CK, "you"))
-check(not G.IsPieceOn("you"), "a key still works after /fsgun off")
-SlashCmdList["FSGUN"]("on")
-FS.ActionBars.Publish()
-check(CK.keys[1].btn:IsVisible(), "keys changed on /fsgun on")
-""")
-
 case("fsgun_on_after_a_disabled_login_builds_nothing_until_a_reload")(r"""
 local CK, G = boot({ party = true, db = { gunsight = { enabled = false, pieces = {} } } })
 check(not CK.IsBuilt(), "keys built with the Gunsight disabled at login")
@@ -1203,6 +1194,94 @@ local vis = {}
 for _, k in ipairs(CK.keys) do if k.btn:IsVisible() then vis[#vis + 1] = k.key end end
 eq(joined(vis), "you,next,buff,tgt,dot,party", "only the shown keys come back")
 checkFits(CK, 6, "priest after the console came back")
+""")
+
+
+# ---------------------------------------------------------------------------------------
+# The master switch is live: the keys and the party piece follow it
+# ---------------------------------------------------------------------------------------
+
+case("fsgun_off_at_runtime_hides_the_keys_and_on_brings_them_back")(SHOWN_HELPERS + r"""
+local CK, G = boot({ party = true, profile = "PRIEST" })
+checkFits(CK, 6, "priest before")
+SlashCmdList["FSGUN"]("off")
+FS.ActionBars.Publish()
+fire("PLAYER_REGEN_ENABLED")
+for _, k in ipairs(CK.keys) do check(not k.btn:IsVisible(), k.key .. " is still drawn with the Gunsight off") end
+eq(FS.Console.GetKeyCount(), FS.Console.KEY.COUNT, "the tab is back at the full width, as on a Gunsight-off login")
+FS.ActionBars.Publish()
+fire("PLAYER_ENTERING_WORLD")
+for _, k in ipairs(CK.keys) do check(not k.btn:IsVisible(), k.key .. " came back on a hook while the Gunsight is off") end
+eq(FS.Console.GetKeyCount(), FS.Console.KEY.COUNT, "hooks leave the full width alone")
+SlashCmdList["FSGUN"]("on")
+checkFits(CK, 6, "priest after on")
+for _, k in ipairs(CK.keys) do if k.shown then check(k.btn:IsVisible(), k.key .. " not back") end end
+click(keyOf(CK, "you"))
+check(not G.IsPieceOn("you"), "a key works again")
+""")
+
+case("a_state_change_while_the_keys_are_hidden_is_right_when_they_return")(r"""
+local CK, G = boot({ party = true })
+SlashCmdList["FSGUN"]("off")
+G.SetPiece("shard", false, true)
+SlashCmdList["FSGUN"]("on")
+check(keyOf(CK, "shard").phase == "off", "the key shows the piece's state")
+check(not keyOf(CK, "shard").ringShown, "and no ring plays for a change made while it was hidden")
+""")
+
+case("fsgun_off_at_runtime_releases_the_party_frames_like_a_gunsight_off_login")(r"""
+local CK, G = boot({ party = true })
+click(keyOf(CK, "party"))
+finishAnims()
+check(not FS.partyContainer:IsShown(), "party piece off hides the party frames")
+SlashCmdList["FSGUN"]("off")
+check(FS.partyContainer:IsShown() and FS.partyContainer:GetAlpha() == 1, "master off: the party frames show, as when the Gunsight is off at login")
+G.SetPiece("party", true, true)
+G.SetPiece("party", false, true)
+check(FS.partyContainer:IsShown() and FS.partyContainer:GetAlpha() == 1, "and a party piece change does not hide them while the Gunsight is off")
+SlashCmdList["FSGUN"]("on")
+check(not FS.partyContainer:IsShown(), "master on: the party frames follow the piece state again (off)")
+G.SetPiece("party", true, true)
+check(FS.partyContainer:IsShown() and FS.partyContainer:GetAlpha() == 1, "and the piece drives them")
+""")
+
+case("a_party_container_that_appears_while_the_gunsight_is_off_is_left_alone_until_it_is_on")(r"""
+local CK, G = boot({})
+SlashCmdList["FSGUN"]("off")
+FS.partyContainer = CreateFrame("Frame", "ForeverSTUwavePartyContainer", UIParent)
+G.SetPiece("party", false, true)
+fire("PLAYER_REGEN_ENABLED")
+check(FS.partyContainer:IsShown() and FS.partyContainer:GetAlpha() == 1, "not registered while the Gunsight is off")
+SlashCmdList["FSGUN"]("on")
+fire("PLAYER_REGEN_ENABLED")
+check(not FS.partyContainer:IsShown(), "registered once it is on again, and it follows the off piece")
+""")
+
+case("fsgun_off_and_on_in_combat_touches_nothing_protected_and_settles_after")(SHOWN_HELPERS + r"""
+local CK, G = boot({ party = true, partyProtected = true, profile = "PRIEST" })
+G.root.protected = true
+click(keyOf(CK, "party"))                       -- party piece off, out of combat
+finishAnims()
+check(not FS.partyContainer:IsShown(), "party off")
+IN_COMBAT = true
+SlashCmdList["FSGUN"]("off")
+for _, k in ipairs(CK.keys) do check(not k.btn:IsVisible(), k.key .. " still drawn in combat after master off") end
+eq(FS.Console.GetKeyCount(), 6, "the Console is not resized in combat")
+near(FS.partyContainer:GetAlpha(), 1, "the party frames show by alpha in combat")
+check(#BLOCKED == 0, "a protected action was attempted in combat: " .. table.concat(BLOCKED, ","))
+IN_COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+eq(FS.Console.GetKeyCount(), FS.Console.KEY.COUNT, "full width after combat")
+check(FS.partyContainer:IsShown() and FS.partyContainer:GetAlpha() == 1, "party frames shown for real after combat")
+IN_COMBAT = true
+SlashCmdList["FSGUN"]("on")
+check(G.IsActive() == false, "a hidden root cannot come back in combat")
+for _, k in ipairs(CK.keys) do check(not k.btn:IsVisible(), k.key .. " drawn while the Gunsight is still inactive") end
+IN_COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+checkFits(CK, 6, "priest after combat")
+check(not FS.partyContainer:IsShown(), "party follows its off piece again")
+check(#BLOCKED == 0, "nothing protected in combat")
 """)
 
 

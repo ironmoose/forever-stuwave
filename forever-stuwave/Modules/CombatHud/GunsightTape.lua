@@ -21,7 +21,8 @@
 -- SetView takes them again and the tapes are laid out afresh (a rescale while the root was hidden had no
 -- rects). The tape frames are built once and reused, so toggling adds no frame and no event registration.
 -- The HUD is only ever active with its root really shown (in combat a switch-on waits for the Show), so
--- there is never a moment with no cast display or with two.
+-- there is never a moment with no cast display or with two. A build that throws after SetView calls ClearView
+-- in its failure handler, so Stack A keeps the casts and no later switch tries to hand over tapes that are gone.
 --
 -- A TAPE (BuildTape), all of it children of one piece frame that fills the anchor:
 --   plate     the chamfered fill, rgba(13,6,32,.55) under A(.3)
@@ -886,6 +887,13 @@ Gunsight.OnReady(function()
     if not ok then
         HideBuilt()
         GunsightTape.you, GunsightTape.tgt = nil, nil
+        -- A throw after SetView left the casts on tapes nobody can see (and OnActiveChanged has no tapes to
+        -- hand them back with): give them to Stack A. False and harmless when the view was never taken.
+        local castBars = FS.CastBars
+        if type(castBars) == "table" and type(castBars.ClearView) == "function" then
+            pcall(castBars.ClearView)
+        end
+        view = nil
         LogOnce("build", "build failed: " .. tostring(err))
     end
 end)

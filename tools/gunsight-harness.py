@@ -1141,6 +1141,75 @@ check(Gs.root:IsShown(), "and the deferred hide was cancelled")
 check(Gs.root.calls.Hide == nil, "Hide was never called")
 """)
 
+case("master_off_on_off_in_combat_ends_hidden_after_combat_with_no_blocked_action")(r"""
+local Gs = boot({ height = 1440, db = {} })
+Gs.root.protected = true
+local seen = {}
+Gs.OnActiveChanged(function(active) seen[#seen + 1] = tostring(active) end)
+Gs.root.calls = {}
+IN_COMBAT = true
+FS.Config.Set("gunsight.enabled", false)
+near(Gs.root:GetAlpha(), 0, "off: invisible by alpha")
+FS.Config.Set("gunsight.enabled", true)
+near(Gs.root:GetAlpha(), 1, "on: visible again by alpha")
+check(Gs.IsActive() == true, "on: active, the root never left the screen")
+FS.Config.Set("gunsight.enabled", false)
+near(Gs.root:GetAlpha(), 0, "off again: invisible")
+check(Gs.IsActive() == false, "off again: inactive")
+check(Gs.root:IsShown(), "still shown for real until combat ends")
+check(Gs.root.calls.Hide == nil and Gs.root.calls.Show == nil, "no Show or Hide in combat")
+IN_COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+check(not Gs.root:IsShown(), "hidden for real once combat ends")
+near(Gs.root:GetAlpha(), 1, "alpha reset for the next Show")
+check(Gs.IsActive() == false, "and stays inactive")
+check(table.concat(seen, ",") == "false,true,false", "announced per flip: " .. table.concat(seen, ","))
+check(#BLOCKED == 0, "nothing protected was attempted in combat")
+""")
+
+case("a_released_piece_is_shown_and_left_alone_until_it_is_resumed")(r"""
+local Gs = boot({ height = 1440, db = {} })
+local f = CreateFrame("Frame", nil, Gs.root)
+local log = {}
+Gs.RegisterPiece("party", { frame = f, onShow = function() log[#log + 1] = "show" end, onHide = function() log[#log + 1] = "hide" end })
+Gs.SetPiece("party", false, true)
+check(not f:IsShown(), "off: hidden")
+log = {}
+check(Gs.ReleasePiece("party") == true, "release answers true")
+check(f:IsShown() and f:GetAlpha() == 1, "released: shown whatever its saved state")
+Gs.SetPiece("party", true, true)
+Gs.SetPiece("party", false)
+check(f:IsShown() and f:GetAlpha() == 1, "a state change while released does not touch the frame")
+check(Gs.IsPieceOn("party") == false, "but the state is still kept")
+check(#log == 0, "and runs no hook: " .. table.concat(log, ","))
+check(Gs.ResumePiece("party") == true, "resume answers true")
+check(not f:IsShown(), "resumed: the frame follows the saved state again (off)")
+check(table.concat(log, ",") == "hide", "the state's hook runs on resume: " .. table.concat(log, ","))
+check(Gs.ReleasePiece("nope") == false and Gs.ResumePiece("nope") == false, "an unregistered piece is refused")
+""")
+
+case("releasing_a_protected_piece_in_combat_is_alpha_only_then_shown_after_combat")(r"""
+local Gs = boot({ height = 1440, db = {} })
+local f = CreateFrame("Frame", nil, Gs.root)
+f.protected = true
+Gs.RegisterPiece("party", { frame = f })
+Gs.SetPiece("party", false, true)
+check(not f:IsShown(), "off out of combat")
+IN_COMBAT = true
+Gs.ReleasePiece("party")
+near(f:GetAlpha(), 1, "visible by alpha in combat")
+IN_COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+check(f:IsShown() and f:GetAlpha() == 1, "shown for real after combat, not hidden by the saved state")
+IN_COMBAT = true
+Gs.ResumePiece("party")
+near(f:GetAlpha(), 0, "resumed in combat: off by alpha")
+IN_COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+check(not f:IsShown(), "hidden for real after combat")
+check(#BLOCKED == 0, "nothing protected was attempted in combat")
+""")
+
 case("a_gunsight_off_at_load_cannot_be_switched_on_live")(r"""
 local Gs = boot({ height = 1440, db = { gunsight = { enabled = false } } })
 check(Gs.IsEnabled() == false and Gs.IsActive() == false, "nothing built, nothing active")

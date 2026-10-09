@@ -778,17 +778,23 @@ function T.the_master_toggle_applies_live_and_prompts_a_reload_only_for_what_can
     local W = boot()
     W.Open("gunsight")
     no(hasText(win(), "Reload to"), "no prompt while the HUD matches what was built")
+    eq(findText("Reload", win()), nil, "and no Reload button")
     local reloads = 0
     ReloadUI = function() reloads = reloads + 1 end
     press("Gunsight HUD")
     eq(FS.Gunsight.IsActive(), false, "applied at once")
     eq(FS.Gunsight.root:IsShown(), false, "the HUD is hidden without a reload")
-    yes(hasText(win(), "Reload to"), "the classic combat HUD needs a reload: a prompt on the row")
+    yes(findText("Reload to restore the classic HUD", win()), "the classic combat HUD needs a reload: this exact prompt on the row")
+    local label = findText("Reload", win())
+    yes(label, "the Reload button exists and is visible")
+    yes(owner(label).enabled ~= false, "and is enabled")
     yes(click("Reload", win()), "the prompt's button works")
-    eq(reloads, 1, "and reloads the UI")
+    eq(reloads, 1, "and calls ReloadUI exactly once")
     press("Gunsight HUD")
     eq(FS.Gunsight.IsActive(), true)
     no(hasText(win(), "Reload to"), "back to the built state: the prompt goes")
+    eq(findText("Reload", win()), nil, "and so does the button")
+    eq(reloads, 1, "nothing reloaded by the toggle itself")
 end
 
 function T.a_gunsight_off_at_login_prompts_a_reload_to_build_it()
@@ -797,7 +803,12 @@ function T.a_gunsight_off_at_login_prompts_a_reload_to_build_it()
     no(hasText(win(), "Reload to"), "nothing owed at login")
     press("Gunsight HUD")
     eq(FS.Gunsight.IsActive(), false, "the pieces were never built")
-    yes(hasText(win(), "Reload to build the Gunsight HUD"), "so a reload is the way")
+    yes(findText("Reload to build the Gunsight HUD", win()), "so a reload is the way: this exact prompt")
+    yes(findText("Reload", win()), "with its Reload button")
+    local reloads = 0
+    ReloadUI = function() reloads = reloads + 1 end
+    yes(click("Reload", win()))
+    eq(reloads, 1, "which calls ReloadUI")
 end
 
 function T.the_master_toggle_explains_the_reload_in_a_tooltip()

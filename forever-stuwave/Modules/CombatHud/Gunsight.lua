@@ -36,9 +36,17 @@
 -- login) and what was never drawn (the classic combat HUD of a Gunsight that was on) cannot be made live:
 -- NeedsReload() names that, for the config row's prompt.
 --
+-- INERT, NOT JUST INVISIBLE. A HUD switched off in combat is faded, not hidden (the Hide is owed to
+-- PLAYER_REGEN_ENABLED), so its mouse-enabled children stay live until then. The one secure child, the target of
+-- target button, cannot be changed in combat: for the rest of that fight it stays clickable (an accepted gap; its
+-- alpha is 0 with the root, and the real Hide at regen takes its mouse). Every INSECURE handler under the root must
+-- do nothing while IsActive() is false (GunsightMyBuffs' tooltip does; a new OnEnter, OnClick or tooltip under the
+-- root must too). A frame the Gunsight drives but does not own (the party frames) is handed back with ReleasePiece
+-- while the HUD is off, and taken again with ResumePiece.
+--
 -- Slash: /fsgun [on | off | seat <dx> <dy> | piece <key> on|off | debug]. Public surface (all
 -- FS.Gunsight.*): ui, Point, root, anchors, G, RegisterPiece, SetPiece, IsPieceOn, OnPieceChanged,
--- OnReady, IsEnabled, IsActive, OnActiveChanged, NeedsReload, SetSeat, Reseat, CONFIG_ENABLED,
+-- OnReady, IsEnabled, IsActive, OnActiveChanged, NeedsReload, ReleasePiece, ResumePiece, SetSeat, Reseat, CONFIG_ENABLED,
 -- PieceConfigKey, AREA_IDS, AreaFamily, GetArea, SetArea, OnAreaChanged.
 
 local addonName, FS = ...
@@ -292,6 +300,11 @@ local function IsProtectedFrame(frame)
     return ok and value == true
 end
 
+-- What a piece's frame should look like: its saved state, or on while the piece is released (see ReleasePiece).
+local function Wanted(piece)
+    return piece.released == true or pieceState[piece.key] == true
+end
+
 local function RunHook(piece, name)
     local fn = piece[name]
     if not fn then return end
@@ -333,7 +346,7 @@ local function FadeGroup(piece)
     if anim.SetSmoothing then anim:SetSmoothing("IN_OUT") end
     if group.SetToFinalAlpha then group:SetToFinalAlpha(true) end
     group:SetScript("OnFinished", function()
-        ApplyFrame(piece, pieceState[piece.key] == true)
+        ApplyFrame(piece, Wanted(piece))
     end)
     piece.group, piece.anim = group, anim
     return group, anim
@@ -364,6 +377,7 @@ local function Fade(piece, on)
 end
 
 local function ApplyAndHook(piece, on, instant)
+    if piece.released then return end   -- stood down: the state is kept, the frame is not driven (ReleasePiece)
     if instant or not piece.frame:IsVisible() and not on then
         ApplyFrame(piece, on)
     elseif IsProtectedFrame(piece.frame) and InCombatLockdown() then
@@ -380,6 +394,33 @@ Gunsight.PieceConfigKey = PieceKey
 
 function Gunsight.IsPieceOn(key)
     return pieceState[key] == true
+end
+
+-- Stands a registered piece down: its frame is shown and opaque whatever its saved state, and the registry stops
+-- driving it (SetPiece and profile switches still keep the state and announce it, but touch no frame and run no
+-- hook). For a frame that is not the Gunsight's own while the Gunsight is switched off, like the party frames, which
+-- a Gunsight that is off at login never touches. A protected frame in combat takes alpha only and the Show waits
+-- for PLAYER_REGEN_ENABLED. False for a piece nothing registered.
+function Gunsight.ReleasePiece(key)
+    local piece = pieces[key]
+    if not piece then return false end
+    piece.released = true
+    if piece.group then piece.group:Stop() end
+    ApplyFrame(piece, true)
+    return true
+end
+
+-- Undoes ReleasePiece: the frame follows the saved state again (and its hook runs, as on a registration).
+function Gunsight.ResumePiece(key)
+    local piece = pieces[key]
+    if not piece then return false end
+    piece.released = nil
+    if inited then
+        local on = pieceState[key] == true
+        ApplyFrame(piece, on)
+        RunHook(piece, on and "onShow" or "onHide")
+    end
+    return true
 end
 
 function Gunsight.RegisterPiece(key, spec)
@@ -611,7 +652,7 @@ local function SetActive(now)
         -- redraws from its onShow hook, as when its own piece is switched on. Pieces that are off stay quiet.
         for _, key in ipairs(PIECE_KEYS) do
             local piece = pieces[key]
-            if piece and pieceState[key] then RunHook(piece, "onShow") end
+            if piece and pieceState[key] and not piece.released then RunHook(piece, "onShow") end
         end
     end
     active = now
@@ -665,7 +706,7 @@ local function Reconcile()
     if masterOwed then ApplyMaster() end
     for _, key in ipairs(PIECE_KEYS) do
         local piece = pieces[key]
-        if piece and piece.deferred then ApplyFrame(piece, pieceState[key] == true) end
+        if piece and piece.deferred then ApplyFrame(piece, Wanted(piece)) end
     end
 end
 

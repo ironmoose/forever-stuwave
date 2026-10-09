@@ -611,6 +611,29 @@ function T.in_combat_the_tooltip_is_the_cached_name_and_no_aura_is_read_for_it()
     W.clean(); noFails()
 end
 
+function T.a_hidden_hud_shows_no_tooltip_even_in_combat_when_only_its_alpha_went()
+    local W = world()
+    snapshot(aura(1, 600, nil, "Mark of the Wild"))
+    refresh()
+    enter(1)
+    eq(__tip.shown, true, "hovering while the Gunsight is on shows it")
+    FS.Config.Set("gunsight.enabled", false)
+    eq(__tip.shown, false, "switching the HUD off takes a tooltip that is up down")
+    eq(My().tiles[1].frame.fsHover, nil)
+    enter(1)
+    eq(__tip.shown, false, "and a hover while it is off shows nothing")
+    FS.Config.Set("gunsight.enabled", true)
+    leave(1)
+    __combat = true
+    FS.Config.Set("gunsight.enabled", false)   -- in combat the root only fades: the tiles are still live frames
+    eq(W.Gun.IsActive(), false)
+    enter(1)
+    eq(__tip.shown, false, "a hover on the invisible HUD shows nothing in combat either")
+    eq(My().tiles[1].frame.fsHover, nil, "and marks no hover")
+    __combat = false
+    W.clean(); noFails()
+end
+
 function T.a_secret_aura_name_or_a_throwing_tooltip_shows_nothing_and_never_errors()
     local W = world()
     snapshot(aura(1, 600, nil, __SECRET_NAME), aura(2, 600, nil, "Fine"))
