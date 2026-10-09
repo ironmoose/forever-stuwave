@@ -535,6 +535,13 @@ def check_a_warriors_stances_stay_on_the_spell_type():
         assert btn._attrs["spell"] == sb.form_id(lua, WARRIOR_STANCES[i - 1])
 
 
+def check_a_death_knight_presence_stays_on_the_spell_type():
+    lua = other("DEATHKNIGHT", forms=["Blood Presence"])
+    btn = stance(lua, 1)
+    assert btn._attrs["type"] == "spell" and btn._attrs["macrotext"] is None
+    assert btn._attrs["spell"] == sb.form_id(lua, "Blood Presence")
+
+
 def check_a_form_change_in_combat_rebuilds_the_macro_at_regen():
     lua = other("ROGUE", forms=[("Stealth", False)])
     before = dict(stance(lua, 1)._attrs)
@@ -596,6 +603,7 @@ CHECKS = [
     check_a_rogue_stealth_button_cancels_the_form_when_it_is_the_active_one,
     check_a_druid_form_button_uses_its_own_form_index,
     check_a_warriors_stances_stay_on_the_spell_type,
+    check_a_death_knight_presence_stays_on_the_spell_type,
     check_a_form_change_in_combat_rebuilds_the_macro_at_regen,
     check_a_form_name_that_cannot_be_read_falls_back_to_the_spell_type,
     check_the_name_arriving_later_switches_the_button_to_the_macro,
