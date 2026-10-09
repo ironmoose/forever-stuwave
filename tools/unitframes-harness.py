@@ -100,7 +100,17 @@ function InCombatLockdown() return __combat end
 __exists = {}
 function UnitExists(unit) return __exists[unit] == true end
 __tooltips = 0
-GameTooltip = { SetOwner = function() end, Hide = function() end }
+-- Records what the tooltip was asked to show (the real-tooltip checks read _spell / _text / _lines).
+GameTooltip = {
+    SetOwner = function(self, o) self._owner, self._spell, self._text, self._lines = o, nil, nil, {} end,
+    GetOwner = function(self) return self._owner end,
+    Hide = function() end,
+    Show = function() end,
+    SetText = function(self, t) self._text = t end,
+    AddLine = function(self, t) self._lines[#self._lines + 1] = t end,
+    SetSpellByID = function(self, id) self._spell = id end,
+}
+__SECRET = {}
 function UnitGUID() return __guid end
 function UnitName() return "Bob" end
 function GetRealmName() return "Realm" end
@@ -128,7 +138,8 @@ function(unitFramesSrc, configSrc, targetAurasSrc, opts)
     __exists, __tooltips = opts.exists or {}, 0
     ForeverSTUwaveDB = opts.db
     FS = {}
-    FS.IsSecret = function() return false end
+    FS.IsSecret = function(v) return v ~= nil and rawequal(v, __SECRET) end
+    __unreadable, __aura = false, opts.aura or { name = "Rend", icon = "i" }
     FS.LogDegradeOnce = function() end
     FS.GetFullUnitName = function() return "Bob" end
     FS.Layout = {
@@ -150,7 +161,7 @@ function(unitFramesSrc, configSrc, targetAurasSrc, opts)
     Theme.FONT_ORBITRON, Theme.FLAT_TEXTURE, Theme.HATCH_TEXTURE = "f", "flat", "hatch"
     Theme.SkinButton = function() end
     FS.Theme = Theme
-    FS.AurasReadable = function() return true end
+    FS.AurasReadable = function() return not __unreadable end
     FS.OnAurasReadable = function() end
     FS.FrameHelpers = {
         DimBlizzardFrame = function() end,
@@ -159,9 +170,12 @@ function(unitFramesSrc, configSrc, targetAurasSrc, opts)
         SeatAuraTile = function() end,
         SafeRegisterUnitEvent = function() end,
         ReadAuraSlot = function(unit, slot, filter)
-            if slot == 1 and filter == "HARMFUL" then return { name = "Rend", icon = "i" } end
+            if slot == 1 and filter == "HARMFUL" then
+                return { name = __aura.name, icon = __aura.icon, spellId = __aura.spellId }
+            end
         end,
         ShowAuraTooltip = function() __tooltips = __tooltips + 1 end,
+        SetTipSpell = function(frame, id, name) frame.fsSpellID, frame.fsName = id, name end,
         UpdateCaretFull = function() end,
         CreateCaret = any,
         CreateLevelChip = function(parent) local chip = newFrame("Frame", nil, parent); chip.text = any(); return chip end,
@@ -171,6 +185,13 @@ function(unitFramesSrc, configSrc, targetAurasSrc, opts)
             return pill
         end,
     }
+    if opts.realTips then
+        -- The real tooltip helpers, so a hover is judged by what the tooltip is asked to show.
+        local real = { IsSecret = FS.IsSecret, AurasReadable = FS.AurasReadable, Theme = {} }
+        assert(load(__helpersSrc, "@FrameHelpers.lua"))("forever-stuwave", real)
+        FS.FrameHelpers.ShowAuraTooltip = real.FrameHelpers.ShowAuraTooltip
+        FS.FrameHelpers.SetTipSpell = real.FrameHelpers.SetTipSpell
+    end
     assert(load(configSrc, "@Config.lua"))("forever-stuwave", FS)
     assert(load(unitFramesSrc, "@UnitFrames.lua"))("forever-stuwave", FS)
     assert(load(targetAurasSrc, "@TargetAuras.lua"))("forever-stuwave", FS)
@@ -422,6 +443,26 @@ function T.a_target_aura_button_keeps_showing_tooltips_until_a_combat_hide_appli
     eq(__tooltips, 1, "hidden after combat: no tooltip")
 end
 
+-- In combat the aura slot cannot be read, so the tooltip is only as good as what the painter cached.
+function T.a_target_aura_shows_its_spell_in_combat_from_the_cached_id()
+    boot({ exists = { target = true }, realTips = true, aura = { name = "Rend", icon = "i", spellId = 772 } })
+    local button = auraButton()
+    __combat, __unreadable = true, true
+    button._scripts.OnEnter(button)
+    eq(GameTooltip._spell, 772, "the spell tooltip, not the bare name")
+end
+
+function T.a_target_aura_slot_reused_by_another_aura_shows_no_stale_spell()
+    boot({ exists = { target = true }, realTips = true, aura = { name = "Rend", icon = "i", spellId = 772 } })
+    local button = auraButton()
+    __aura = { name = "Corruption", icon = "j", spellId = __SECRET }
+    Fire("PLAYER_TARGET_CHANGED")
+    __combat, __unreadable = true, true
+    button._scripts.OnEnter(button)
+    eq(GameTooltip._spell, nil, "Rend's id must not survive onto Corruption")
+    eq(GameTooltip._text, "Corruption", "the new aura's name instead")
+end
+
 __checks = T
 """
 
@@ -433,6 +474,7 @@ def boot() -> "LuaRuntime":
     lua.globals().__unitFramesSrc = UNITFRAMES_FILE.read_text(encoding="utf-8")
     lua.globals().__configSrc = CONFIG_FILE.read_text(encoding="utf-8")
     lua.globals().__targetAurasSrc = TARGETAURAS_FILE.read_text(encoding="utf-8")
+    lua.globals().__helpersSrc = (ADDON / "Core/FrameHelpers.lua").read_text(encoding="utf-8")
     lua.execute(CHECKS)
     return lua
 

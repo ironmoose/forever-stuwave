@@ -16,6 +16,7 @@ local _, FS = ...
 local ApplyMono = FS.Theme.ApplyMono
 local SkinButton = FS.Theme.SkinButton
 local SetAuraLabel = FS.FrameHelpers.SetAuraLabel
+local SetTipSpell = FS.FrameHelpers.SetTipSpell
 local COLOR_BORDER = FS.Theme.COLOR_BORDER
 
 -- Own-cast debuff tint. Not a canonical design token (mirrors Buffs.lua's own
@@ -153,7 +154,7 @@ local function CreateAuraButton(parent)
     button.unit = nil
     button.filter = nil
     button.auraIndex = nil
-    button.fsName = nil
+    button.fsName, button.fsSpellID = nil, nil
 
     button:Hide()
     return button
@@ -266,7 +267,9 @@ local function ApplyAuraData(button, aura, unit, filter, index, isDebuff)
     button.unit = unit
     button.filter = filter
     button.auraIndex = index
-    button.fsName = aura.name
+    -- Caches the spell id and name for the in-combat tooltip, where the slot cannot be read.
+    -- A secret or missing id clears the previous aura's id, so a reused slot never shows a stale spell.
+    SetTipSpell(button, aura.spellId, aura.name)
 
     local remaining = SecondsRemaining(aura)
     if remaining and remaining > 0 then

@@ -39,6 +39,7 @@ local IsSecret = FS.IsSecret
 -- (Enum.EditModeUnitFrameSystemIndices.Party), so Hide()+HookScript would
 -- taint them the same way it did BuffFrame/DebuffFrame (see Buffs.lua).
 local DimBlizzardFrame = FS.FrameHelpers.DimBlizzardFrame
+local SetTipSpell = FS.FrameHelpers.SetTipSpell
 
 -- The laser rail builder and its retint/desaturate/gradient helpers live in
 -- FrameHelpers.lua (shared with other modules); the party-specific sizes and
@@ -693,6 +694,7 @@ local function ReadAuraSlot(unit, index, filter)
         name = data.name,
         icon = data.icon,
         dispelType = data.dispelType,
+        spellId = data.spellId,  -- may be secret; SetTipSpell drops it
         index = index,
         filter = filter,
     }
@@ -827,9 +829,9 @@ local function BuffSpellState(buff)
     local known = false
     if id then
         known = IsKnownSpellId(id)
-        if known == nil then return { known = false, icon = icon } end  -- unreadable: ask again
+        if known == nil then return { known = false, icon = icon, id = id } end  -- unreadable: ask again
     end
-    local state = { known = known, icon = icon }
+    local state = { known = known, icon = icon, id = id }
     buffSpellCache[buff.key] = state
     return state
 end
@@ -1149,10 +1151,16 @@ local function CreateAlertIcon(parent)
     -- also covers the HELPFUL/SetUnitBuff branch this file's own OnEnter was
     -- missing (see FrameHelpers.lua's CORRECTNESS FIX note).
     icon:SetScript("OnEnter", function(self)
-        -- A missing party buff has no aura to look up: name the spell instead.
+        -- A missing party buff has no aura to look up: show the spell by its cached id (SetTipSpell),
+        -- with the missing line under it; without one, just the "Missing: X" line.
         if self.missingText then
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:SetText(self.missingText)
+            if self.fsSpellID and type(GameTooltip.SetSpellByID) == "function"
+                and pcall(GameTooltip.SetSpellByID, GameTooltip, self.fsSpellID) then
+                GameTooltip:AddLine(self.missingText, 1, 0.3, 0.3)
+            else
+                GameTooltip:SetText(self.missingText)
+            end
             GameTooltip:Show()
             return
         end
@@ -1866,6 +1874,7 @@ local function UpdateRowAlerts(frame)
             auraIndex = aura.index,
             filter = aura.filter,
             name = aura.name,
+            spellId = aura.spellId,
         }
     end
 
@@ -1887,6 +1896,7 @@ local function UpdateRowAlerts(frame)
                 ringAlpha = ALERT_RING_ALPHA_MISSING,
                 glowAlpha = ALERT_GLOW_ALPHA_MISSING,
                 name = entry.buff.spell,
+                spellId = entry.state.id,
                 missingText = "Missing: " .. entry.buff.spell,
             }
         end
@@ -1917,7 +1927,9 @@ local function UpdateRowAlerts(frame)
             icon.unit = alert.unit
             icon.auraIndex = alert.auraIndex
             icon.filter = alert.filter
-            icon.fsName = alert.name
+            -- The spell id and name for the in-combat tooltip; a missing or secret id clears the previous
+            -- alert's, so a pooled tile never shows a stale spell.
+            SetTipSpell(icon, alert.spellId, alert.name)
             icon.missingText = alert.missingText
             icon:Show()
         else

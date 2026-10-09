@@ -33,6 +33,7 @@ local COLOR_BORDER = FS.Theme.COLOR_BORDER
 local COLOR_TEXT_WHITE = FS.Theme.COLOR_TEXT_WHITE
 local DimBlizzardFrame = FS.FrameHelpers.DimBlizzardFrame
 local SetAuraLabel = FS.FrameHelpers.SetAuraLabel
+local SetTipSpell = FS.FrameHelpers.SetTipSpell
 
 -- Component-specific logic color, not a canonical design token (mirrors how
 -- UnitFrames.lua keeps its reaction/caret colors local rather than in Theme).
@@ -242,6 +243,13 @@ local function CleanIcon(v)
     return nil
 end
 
+-- A spell id only when it is a plain positive number (the combat tooltip's SetSpellByID input).
+local function CleanSpellId(v)
+    if FS.IsSecret(v) then return nil end
+    if type(v) == "number" and v > 0 then return v end
+    return nil
+end
+
 local function CleanNumber(v)
     if FS.IsSecret(v) then return 0 end
     if type(v) == "number" then return v end
@@ -264,6 +272,7 @@ local function ScanAuras(filter, maxSlots)
             duration = CleanNumber(data.duration),
             expirationTime = CleanNumber(data.expirationTime),
             sourceUnit = CleanText(data.caster),
+            spellId = CleanSpellId(data.spellId),
         }
     end
     if readFailed then return nil end
@@ -693,8 +702,9 @@ local function ApplyAuraData(button, aura, unit, filter, index)
 
     button.fsExpiration = aura.expirationTime
     button.fsHasCountdown = (aura.duration or 0) > 0
-    -- Kept for the lockdown tooltip below. A plain value: the snapshot holds nothing else.
-    button.fsName = aura.name
+    -- Kept for the lockdown tooltip below (plain values: the snapshot holds nothing else). A missing id
+    -- clears the previous aura's, so a reused tile never shows a stale spell.
+    SetTipSpell(button, aura.spellId, aura.name)
 
     -- Tooltip lookup fields: `index` is the aura's position in the snapshot, which is its slot
     -- (ScanAuras stops at the first missing slot, so it never skips one), matching what

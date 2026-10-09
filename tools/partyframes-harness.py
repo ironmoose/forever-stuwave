@@ -206,6 +206,8 @@ function UnitPowerMax() return 100 end
 -- the RAID pre-filter keeps only what a Priest dispels.
 __debuffs={}
 __buffs={}
+-- __debuffIds: dispel type -> the spellId its harmful aura reports (nil: none; may be __secret).
+__debuffIds={}
 -- __raid: the dispel types the RAID pre-filter keeps (default: what a Priest dispels).
 __raid={Magic=true,Disease=true}
 local function auraAt(unit,index,filter)
@@ -225,7 +227,7 @@ local function auraAt(unit,index,filter)
     local d=kept[index]
     if d then
         return {name='Debuff '..d,icon='icon',applications=1,dispelName=d,duration=0,
-            expirationTime=0,sourceUnit='target'}
+            expirationTime=0,sourceUnit='target',spellId=__debuffIds[d]}
     end
 end
 C_UnitAuras={GetAuraDataByIndex=function(unit,index,filter) return auraAt(unit,index,filter) end}
@@ -2624,6 +2626,61 @@ def _check_buff_tooltip_and_report() -> None:
     assert "known" in text and "off" in text and "on" in text
 
 
+def _tip_rt() -> LuaRuntime:
+    """A buff runtime whose GameTooltip records the spell it was asked for (__tip.spell), the name
+    (__tip.text) and its extra lines."""
+    rt = _buff_rt(known=(FORT,))
+    rt.execute("""
+        GameTooltip={SetOwner=function(_,o) __tip={owner=o,lines={}} end,
+            SetText=function(_,t) __tip.text=t end,AddLine=function(_,t) table.insert(__tip.lines,t) end,
+            SetSpellByID=function(_,id) __tip.spell=id end,
+            Show=function() __tip.shown=true end,Hide=function() __tip.shown=false end}
+    """)
+    return rt
+
+
+def _hover_in_combat(rt, icon) -> None:
+    """Hover the tile with aura reads refused, the way mid-fight hovering is."""
+    rt.execute("FS.AurasReadable=function() return false end")
+    icon.scripts.OnEnter(icon)
+    rt.execute("FS.AurasReadable=function() return true end")
+
+
+def _check_cleanse_tooltip_in_combat() -> None:
+    rt = _tip_rt()
+    g = rt.globals()
+    row = _party1(rt)
+    rt.execute("__debuffIds={Magic=2001} __debuffs={'Magic'}")
+    _fire(row, "UNIT_AURA")
+    icon = row.alertIcons[1]
+    _hover_in_combat(rt, icon)
+    assert g.__tip.spell == 2001, f"a cleanse tile hovered in combat must show its spell: {g.__tip.spell}"
+    # The tile is reused for another debuff whose id is secret: the old spell must not follow.
+    rt.execute("__debuffIds={Disease=__secret} __debuffs={'Disease'}")
+    _fire(row, "UNIT_AURA")
+    _hover_in_combat(rt, icon)
+    assert g.__tip.spell is None, f"a reused tile kept the previous spell: {g.__tip.spell}"
+    assert g.__tip.text == "Debuff Disease", f"the new aura's name instead: {g.__tip.text}"
+    _assert_quiet(rt)
+
+
+def _check_missing_tooltip_shows_spell() -> None:
+    rt = _tip_rt()
+    g = rt.globals()
+    row = _party1(rt)
+    _fire(row, "UNIT_AURA")
+    icon = row.alertIcons[1]
+    assert icon.missingText == f"Missing: {FORT}"
+    icon.scripts.OnEnter(icon)
+    assert g.__tip.spell == SPELL_IDS[FORT], f"the Missing tile must show the spell: {g.__tip.spell}"
+    assert f"Missing: {FORT}" in list(g.__tip.lines.values()), "the Missing line is kept under the spell"
+    # A client without SetSpellByID still names the spell.
+    rt.execute("GameTooltip.SetSpellByID=nil")
+    icon.scripts.OnEnter(icon)
+    assert g.__tip.text == f"Missing: {FORT}", f"fallback text {g.__tip.text}"
+    _assert_quiet(rt)
+
+
 def _check_buff_down_members() -> None:
     rt = _runtime(
         before_load=(
@@ -3127,6 +3184,9 @@ def main() -> int:
         ("dead row dims the header pieces", _check_header_dims_when_down),
         ("buff alert: missing shows the spell icon red (C_UnitAuras)", _check_buff_missing),
         ("buff alert: missing shows the spell icon red (UnitAura)", lambda: _check_buff_missing(False)),
+        ("cleanse alert: hovered in combat it shows its spell, and a reused tile keeps no stale one",
+         _check_cleanse_tooltip_in_combat),
+        ("buff alert: the Missing tooltip shows the spell", _check_missing_tooltip_shows_spell),
         ("buff alert: other caster and group buff satisfy", _check_buff_other_caster_and_group),
         ("buff alert: a present buff never alerts, however little time is left",
          _check_buff_present_never_alerts),

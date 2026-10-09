@@ -299,12 +299,18 @@ FS.FrameHelpers = {
         if not data then return nil end
         return { name = data.name, icon = data.icon, count = data.applications or 0,
             dispelType = data.dispelName, duration = data.duration or 0,
-            expirationTime = data.expirationTime or 0, caster = data.sourceUnit }
+            expirationTime = data.expirationTime or 0, caster = data.sourceUnit, spellId = data.spellId }
     end,
     SeatAuraTile = function(button)
         __seated[#__seated + 1] = { button = button, hadLabels = button.count ~= nil or button.duration ~= nil }
     end,
     ShowAuraTooltip = function() end,
+    -- Same contract as FrameHelpers.SetTipSpell: a plain positive id and a plain non-empty name, else cleared.
+    SetTipSpell = function(frame, id, name)
+        local okId = not FS.IsSecret(id) and __realType(id) == "number" and id > 0
+        local okName = not FS.IsSecret(name) and __realType(name) == "string" and name ~= ""
+        frame.fsSpellID, frame.fsName = okId and id or nil, okName and name or nil
+    end,
 }
 function __setClient()
     if __noApi then C_Secrets = nil
@@ -344,7 +350,8 @@ end
 function aura(name, opts)
     opts = opts or {}
     return { name = name, icon = "icon-" .. name, applications = opts.count or 1, dispelName = opts.dispel,
-        duration = opts.duration or 60, expirationTime = opts.expires or (__now + 60), sourceUnit = opts.source }
+        duration = opts.duration or 60, expirationTime = opts.expires or (__now + 60), sourceUnit = opts.source,
+        spellId = opts.spellId }
 end
 function degraded(key)
     local n = 0
@@ -692,6 +699,24 @@ __combat = false
 fire("PLAYER_REGEN_ENABLED")
 check(#visibleTiles(FS.buffsContainer) == 0, "fallback row not refreshed at regen")
 check(degraded("buffs_aura_container") == 1, "degrade logged again")
+"""),
+    ("fallback row: a tile caches its aura's spell id for the combat tooltip, and a reused slot never keeps another aura's", "__template = false", r"""
+boot()
+__auras.HELPFUL = { aura("Fortitude", { spellId = 1243 }), aura("Mark") }
+fire("UNIT_AURA")
+local tiles = visibleTiles(FS.buffsContainer)
+check(#tiles == 2, "tiles " .. #tiles)
+check(tiles[1].fsSpellID == 1243 and tiles[1].fsName == "Fortitude", "id not cached: " .. tostring(tiles[1].fsSpellID))
+check(tiles[2].fsSpellID == nil, "an aura without an id got one")
+-- slot 1 now holds another aura whose id is secret: the old id must go
+__auras.HELPFUL = { { name = "Inner Fire", icon = "icon-Inner Fire", applications = 1, duration = 60,
+    expirationTime = __now + 60, spellId = __secret() } }
+fire("UNIT_AURA")
+tiles = visibleTiles(FS.buffsContainer)
+check(#tiles == 1 and tiles[1].fsSpellID == nil and tiles[1].fsName == "Inner Fire",
+    "a reused slot kept the previous spell: " .. tostring(tiles[1].fsSpellID))
+-- the snapshot itself holds only plain ids
+check(FS.PlayerAuras.Get().buffs[1].spellId == nil, "a secret id entered the snapshot")
 """),
     ("AuraContainer creation throwing falls back the same way", "__acThrows = true", r"""
 boot()
