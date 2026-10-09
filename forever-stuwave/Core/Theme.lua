@@ -250,6 +250,8 @@ Theme.LEVEL_CROWN_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures
 Theme.LEVEL_STAR_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\level_star.tga"
 Theme.LEVEL_CROWN_STAR_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\level_crown_star.tga"
 Theme.LEVEL_SKULL_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\level_skull.tga"
+-- The ring of the target of target plate's reticle (tools/assets/generate_reticle_ring.py): white, the shape in alpha, tinted with SetVertexColor.
+Theme.RETICLE_RING_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\reticle_ring.tga"
 
 -- NINE-SLICE chrome. One texture per element, corners drawn from it at native
 -- texel resolution by the engine, straight runs stretched.

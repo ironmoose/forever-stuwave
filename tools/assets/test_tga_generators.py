@@ -158,6 +158,8 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "level_skull": (32, 32),
     },
     "icon_jump": (32, 32),
+    # generate_reticle_ring.py: the ring of the target of target plate's reticle, a 6 x 6 glyph unit square on a 16 texel canvas.
+    "reticle_ring": (16, 16),
     "icon_social": (32, 32),
     "icon_window": {"icon_minimize": (32, 32), "icon_maximize": (32, 32)},
     "mask_minimap": (64, 64),

@@ -19,7 +19,18 @@ local IsSecret = FS.IsSecret or function() return false end
 local C = {
     H = 15, CHAMFER = 5, FILL_A = 0.95, TEXT_SIZE = 11,
     LEVEL = { dx = 1, pad = 5, gap = 3, minW = 15, advance = 575 / 1024 },   -- no fixed width: pad, [icon, gap], digits, pad; advance is Mononoki's digit width in em
-    HEALTH = { dx = 4, w = 32 }, TOT = { dx = 41, w = 69 },
+    -- The target of target plate is 89 wide: the target box grew 20 image px to the right (mockups/gunsight-target-wider-2026-10-09.html)
+    -- and the plate with it, still 4 short of the box's right edge. It holds the ping reticle, then the name.
+    HEALTH = { dx = 4, w = 32 }, TOT = { dx = 41, w = 89 },
+    -- Reticle A (mockups/gunsight-tot-icon-2026-10-09.html): a 9 x 9 glyph at (x, y) inside the plate's left pad, then a gap, then the
+    -- label, which takes the rest: 89 - 3 - 3 - 11 = 72 image px. Parts are { x, y, w, h } in the glyph box, image px: a ring (radius 2.5,
+    -- stroke 1, so a 6 square from 1.5, a texture), four 1 px ticks and a 1 px centre dot (solid textures).
+    RETICLE = {
+        size = 9, gap = 2, x = 3, y = 3,
+        ring = { 1.5, 1.5, 6, 6 },
+        top = { 4, 0, 1, 2 }, bottom = { 4, 7, 1, 2 }, left = { 0, 4, 2, 1 }, right = { 7, 4, 2, 1 },
+        dot = { 4, 4, 1, 1 },
+    },
     RISE = 8, OVERLAP = 7,
     MIN_FONT = 6, TOT_PAD = 3,
     TOT_FLOOR = 8,   -- the target of target name shrinks no further than this (image px) before the first names shorten to initials
@@ -35,6 +46,7 @@ local C = {
     },
 }
 GunsightTags.C = C
+local RETICLE_PARTS = { "ring", "top", "bottom", "left", "right", "dot" }
 
 local KEY = "gunsight.tags."
 local SETTINGS = {
@@ -75,7 +87,48 @@ end
 -- the plate must mask the edge line behind the text (the mockup draws them after the box): a plain tag takes its own
 -- frame level above everything the box holds, since sibling frames of equal level have no promised draw order.
 -- The secure button is left at its holder's level (a protected frame's level is not ours to set in combat).
-local function NewTag(parent, kind, name, template)
+-- Thin pieces sit on the pixel grid so a 1 px tick or the ring is not smeared across two screen rows.
+local function Crisp(tex)
+    if tex.SetSnapToPixelGrid then pcall(tex.SetSnapToPixelGrid, tex, true) end
+    if tex.SetTexelSnappingBias then pcall(tex.SetTexelSnappingBias, tex, 0) end
+end
+
+-- The reticle in one tone frame: plain textures in the frame's own colour, over the outline and under the label. They
+-- carry no alpha or flag of their own, so the frame's alpha and visibility (the flag lists, the verdict) tint them with
+-- the outline. SeatReticle sizes and seats them.
+local function AddReticle(tone, color)
+    local Theme = FS.Theme
+    local parts = {}
+    for _, name in ipairs(RETICLE_PARTS) do
+        local part = tone:CreateTexture(nil, "ARTWORK")
+        if name == "ring" then
+            part:SetTexture(Theme.RETICLE_RING_TEXTURE)
+            part:SetVertexColor(color[1], color[2], color[3], color[4] or 1)
+        else
+            part:SetColorTexture(color[1], color[2], color[3], color[4] or 1)
+        end
+        Crisp(part)
+        parts[name] = part
+    end
+    tone.reticle = parts
+end
+
+-- Seats the reticle parts of every tone frame of the plate in the glyph's place (image px from the plate's top left).
+local function SeatReticle(frame)
+    local R, k = C.RETICLE, ui(1)
+    for _, tone in pairs(frame.tones) do
+        for _, name in ipairs(RETICLE_PARTS) do
+            local part, rect = tone.reticle and tone.reticle[name], R[name]
+            if part then
+                part:ClearAllPoints()
+                part:SetPoint("TOPLEFT", tone, "TOPLEFT", (R.x + rect[1]) * k, -(R.y + rect[2]) * k)
+                part:SetSize(rect[3] * k, rect[4] * k)
+            end
+        end
+    end
+end
+
+local function NewTag(parent, kind, name, template, withReticle)
     local Theme, colors = FS.Theme, Tags.colors
     local frame = CreateFrame(kind, name, parent, template)
     if not template then frame:SetFrameLevel(parent:GetFrameLevel() + C.FRAME_LEVEL) end
@@ -86,8 +139,10 @@ local function NewTag(parent, kind, name, template)
     -- the one flag write that tints the box edge tints this outline; this file never sees the flag. They are plain
     -- child frames, so the shield and the verdict drive them in combat, on the secure button's too. The fill and the
     -- label stay on the tag; the label colours carry data (level, health, names) and are not toned.
+    -- A plate with a reticle draws it in the same three tone frames, so it is in the same flag lists as the outline, once.
     frame.tones = FS.GunsightBoxes.NewChrome(Tags.box, frame, function(tone, color)
         Theme.AddCut2Texture(tone, Theme.SLICE_CUT2_OUTLINE_TEXTURE, color, "BORDER")
+        if withReticle then AddReticle(tone, color) end
     end)
     local label = frame:CreateFontString(nil, "OVERLAY")
     Theme.ApplyMono(label, FontSize(), colors.white)
@@ -292,8 +347,14 @@ local function SeatTot()
     seat:ClearAllPoints()
     seat:SetPoint("TOPLEFT", Gunsight.anchors.boxR, "BOTTOMLEFT", C.TOT.dx * k, C.OVERLAP * k)
     seat:SetSize(C.TOT.w * k, C.H * k)
-    local wmax = (C.TOT.w - 2 * C.TOT_PAD) * k
+    -- The label takes what is right of the reticle: a pad, the glyph and its gap in, a pad at the right edge, and is centred there.
+    local lead = C.RETICLE.size + C.RETICLE.gap
+    local labelW = C.TOT.w - 2 * C.TOT_PAD - lead
+    local wmax = labelW * k
+    button.label:ClearAllPoints()
+    button.label:SetPoint("CENTER", button, "LEFT", (C.TOT_PAD + lead + labelW / 2) * k, 0)
     button.label:SetWidth(wmax)
+    SeatReticle(button)
     Tags.totLine.wmax = wmax
     SetProbeSize(TotFloorSize())
     Tags.totName = nil
@@ -442,7 +503,7 @@ local function BuildTot()
     holder:SetPoint("CENTER", Gunsight.root, "CENTER", 0, 0)
     holder:SetFrameLevel(box.frame:GetFrameLevel() + 4)
     local seat = CreateFrame("Frame", nil, holder)
-    local button = NewTag(holder, "Button", "ForeverSTUwaveGunsightTargetOfTarget", "SecureUnitButtonTemplate")
+    local button = NewTag(holder, "Button", "ForeverSTUwaveGunsightTargetOfTarget", "SecureUnitButtonTemplate", true)
     button.label:SetJustifyH("CENTER")
     button.label:SetWordWrap(false)
     -- The name fits through GunsightBoxes' text line; the font NewTag set is the line's current size (no second SetFont).

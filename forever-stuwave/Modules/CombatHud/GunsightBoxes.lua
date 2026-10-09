@@ -2,7 +2,7 @@
 --
 -- The two info boxes of the Gunsight HUD (mockups/gunsight-hud-v2-2026-10-02/
 -- gunsight-hud-v2-2026-10-02.html, infoBox and castIcon, drawn by drawYour on BOXL and drawTarget on
--- BOXR): a 114 x 56 chamfered plate above each tape with a small caps header, two lines of text and a
+-- BOXR): a chamfered plate above each tape (114 x 56 yours, 134 x 56 the target's) with a small caps header, two lines of text and a
 -- 28 square spell icon tile on its inner side.
 --
 --   yours   header the character name (cyan, YOU as the fallback); line 1 the spell name (white, 14 image px,

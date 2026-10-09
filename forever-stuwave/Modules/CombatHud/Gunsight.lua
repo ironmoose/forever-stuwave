@@ -66,7 +66,9 @@ local TOP, BOT, FR_T, FR_B = 508, 752, 500, 760     -- TOP, BOT (scale), FR_T, F
 local TL = { x0 = 796, x1 = 826 }                   -- TL: your tape
 local TR = { x0 = 1164, x1 = 1194 }                 -- TR: target tape
 local BOXL = { x = 724, y = 424, w = 114, h = 56 }  -- BOXL: your info box
-local BOXR = { x = 1152, y = 424, w = 114, h = 56 } -- BOXR: target info box
+-- BOXR: target info box. The v2 mockup draws it 114 wide; it is 20 image px wider to the right (approved 2026-10-09,
+-- mockups/gunsight-target-wider-2026-10-09.html): the left edge, the tape and the cast tile stay put. BOXL is unchanged.
+local BOXR = { x = 1152, y = 424, w = 134, h = 56 }
 local LBRK = 836                                    -- LBRK: left proc post x
 local RBRK = 2 * CX - LBRK                          -- RBRK: right proc post x
 local DOT_AX, DOT_END = 1239, 1387                  -- DOT_AX: DoT axis, DOT_END: lane end

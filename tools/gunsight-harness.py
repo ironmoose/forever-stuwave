@@ -53,6 +53,9 @@ THEME = Path(os.environ.get("THEME_LUA") or ADDON / "Core/Theme.lua")
 TOC = ADDON / "forever-stuwave.toc"
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
 MOCKUP_V7 = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-modules-concepts-v7-2026-10-08.html"
+# The target info box is drawn this many image px wider than the v2 mockup's BOXR (left edge, tape and cast tile stay
+# put; your box is unchanged). Approved 2026-10-09, mockups/gunsight-target-wider-2026-10-09.html: 114 -> 134.
+TARGET_WIDEN = 20
 
 
 # ---------------------------------------------------------------------------------------
@@ -105,7 +108,7 @@ def mockup_constants() -> dict:
     return dict(
         W=W, H=H, CX=CX, CY=CY, TOP=TOP, BOT=BOT, FR_T=FR_T, FR_B=FR_B,
         TL=dict(x0=tl0, x1=tl1), TR=dict(x0=tr0, x1=tr1),
-        BOXL=dict(x=b[0], y=b[1], w=b[2], h=b[3]), BOXR=dict(x=b[4], y=b[5], w=b[6], h=b[7]),
+        BOXL=dict(x=b[0], y=b[1], w=b[2], h=b[3]), BOXR=dict(x=b[4], y=b[5], w=b[6] + TARGET_WIDEN, h=b[7]),
         LBRK=lbrk, RBRK=2 * CX - lbrk,
         DOT_AX=int(dot_ax), DOT_END=int(dot_end), LANE=[int(v) for v in lanes.split(",")],
         NXT_S=nxt_s, NXT_PAD=nxt_pad,

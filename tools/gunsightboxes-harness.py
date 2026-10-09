@@ -768,12 +768,12 @@ function T.a_long_target_name_shrinks_to_fit_the_box_width_above_the_floor()
     local W = world()
     local C = FS.GunsightBoxes.C
     local l1 = W.tgt.box.l1
-    target("Murloc Tidehunt")                      -- 15 characters: over the box at full size, inside it above the floor
+    target("Murloc Tidehunters")              -- 18 characters: over the box at full size, inside it above the floor
     local size = l1._fontSize
     ok(size < fontFor(C.L1_SIZE), "shrunk below full size: " .. tostring(size))
     ok(size >= fontFor(C.NAME_FLOOR), "but not under the floor: " .. tostring(size))
     ok(l1:GetUnboundedStringWidth() <= tgtWmax() + 1e-6, "and the whole text fits the box: " .. l1:GetUnboundedStringWidth() .. " <= " .. tgtWmax())
-    eq(l1._text, "MURLOC TIDEHUNT", "upper-cased, not truncated by us")
+    eq(l1._text, "MURLOC TIDEHUNTERS", "upper-cased, not truncated by us")
     target("Kurak")
     eq(l1._fontSize, fontFor(C.L1_SIZE), "the next short name is back at full size")
     W.clean(); noFails()
@@ -797,7 +797,7 @@ function T.the_target_name_fit_does_not_trust_the_bounded_width()
     local W = world()
     local C = FS.GunsightBoxes.C
     local l1 = W.tgt.box.l1
-    target("Baine Bloodhoof")
+    target("Baine Bloodhoof Stormhorn")
     ok(l1:GetStringWidth() <= tgtWmax() + 1e-6, "the bounded width never shows an overflow")
     ok(l1._fontSize < fontFor(C.L1_SIZE), "yet the name shrank: the fit reads the unbounded width: " .. tostring(l1._fontSize))
     W.clean(); noFails()
@@ -875,13 +875,13 @@ function T.a_lagging_font_is_refitted_next_frame_and_the_rails_are_re_seated_for
 end
 
 function T.a_font_refit_that_is_itself_a_frame_late_settles_and_a_new_name_mid_settle_gets_its_own_refit()
-    -- A name only a little too wide: the first fit overshoots (stale font) down to the floor, and the refit that
+    -- A name a little too wide (about 11% over the box at the base size): the first fit overshoots (stale font) down to the floor, and the refit that
     -- raises the size is itself a frame late, so the name is measured and the rails seated once more after it
     -- (the settle runs up to three frames, then stops).
     local W = world()
     local box, l1 = W.tgt.box, W.tgt.box.l1
-    local first, second = "ABCDEFGHIJKLMN", "ABCDEFGHIJKLMO"
-    __charW = 5.8                                       -- the 14 letter names are 4% wider than the box at the base size
+    local first, second = "ABCDEFGHIJKLMNOPQR", "ABCDEFGHIJKLMNOPQS"
+    __charW = 5.8                                       -- the 18 letter names are 132.9 px at the base size, ~10.7% over the 120 px box
     local function settled(name, lag)
         target("KURAK"); settle()
         __fontLag = lag
@@ -917,7 +917,7 @@ function T.a_same_size_write_while_a_late_settle_step_waits_restarts_the_settle(
     -- pending step 3 (re-seat only) in charge: the new name was never measured again after its own write.
     local W = world()
     local line = W.tgt.box.lineOne
-    local first, second = "ABCDEFGHIJKLMN", "ABCDEFGHIJKLMO"
+    local first, second = "ABCDEFGHIJKLMNOPQR", "ABCDEFGHIJKLMNOPQS"
     __charW = 5.8
     target("KURAK"); settle()
     target(second); settle()
@@ -2411,9 +2411,12 @@ function T.large_plain_numbers_read_compactly_and_small_ones_stay_in_full()
     target("Kurak")
     local b, u = bars(W), __units.target
     numbersOn("both")
-    u.hp, u.hpMax = 2084, 2084
+    u.hp, u.hpMax = 2084, 1234567
     allBarEvents()
-    eq(textOf(b.hpText), "2.1k/2.1k", "a four digit pair that does not fit in full goes compact")
+    eq(textOf(b.hpText), "2.1k/1.2M", "a pair that does not fit in full goes compact, with one decimal under ten thousand (the 120 px half takes a 4 digit pair in full)")
+    u.hp, u.hpMax = 20840, 20840
+    allBarEvents()
+    eq(textOf(b.hpText), "20k/20k", "a five digit pair that does not fit in full goes compact")
     u.hp, u.hpMax = 1234567, 1234567
     allBarEvents()
     eq(textOf(b.hpText), "1.2M/1.2M")

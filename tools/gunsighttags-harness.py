@@ -71,6 +71,20 @@ def _m(pattern: str, text: str, what: str) -> re.Match:
     return m
 
 
+# The target of target plate grows with the box (+20 image px, mockups/gunsight-target-wider-2026-10-09.html) and wears the
+# ping reticle (mockups/gunsight-tot-icon-2026-10-09.html, concept A) inside its left pad. Both mockups are disposable, so
+# the numbers are pinned here. Rects are x, y, w, h in image px inside the 9 x 9 reticle box; the ring is a circle of radius
+# 2.5 and stroke 1 about (4.5, 4.5), so its bounding square is 6 wide from 1.5. The ticks are the path M4.5 0V2 M4.5 7V9
+# M0 4.5H2 M7 4.5H9 (stroke 1, butt caps) and the dot is the 1 x 1 rect at (4, 4).
+TOT_WIDEN = 20
+RETICLE_A = dict(
+    size=9, gap=2, x=3, y=3,
+    ring=(1.5, 1.5, 6, 6),
+    ticks=dict(top=(4, 0, 1, 2), bottom=(4, 7, 1, 2), left=(0, 4, 2, 1), right=(7, 4, 2, 1)),
+    dot=(4, 4, 1, 1),
+)
+
+
 def mockup_tags() -> dict:
     """Everything tag() and tags() own in the v7 mockup."""
     src = MOCKUP.read_text(encoding="utf-8")
@@ -85,7 +99,8 @@ def mockup_tags() -> dict:
         H=int(h), CHAMFER=int(chamfer), FILL_A=float(fill_a), TEXT_Y=int(text_y), TEXT_SIZE=int(size),
         LEVEL=dict(x=int(level[0]), y=int(level[1]), w=int(level[2])),
         HEALTH=dict(x=int(health[0]), y=int(health[1]), w=int(health[2])),
-        TOT=dict(x=int(tot[0]), y=int(tot[1]), w=int(tot[2])),
+        TOT=dict(x=int(tot[0]), y=int(tot[1]), w=int(tot[2]) + TOT_WIDEN),
+        RETICLE=RETICLE_A,
         LT=LEVEL_TAG,
         BOXR=boxes["base"]["BOXR"], TB_GROW=boxes["TB_GROW"],
     )
@@ -191,6 +206,11 @@ end
 CHECKS_BODY = r"""
 local function rgb(c) return string.format("%02x%02x%02x", math.floor(c[1] * 255 + 0.5), math.floor(c[2] * 255 + 0.5), math.floor(c[3] * 255 + 0.5)) end
 local function K() return 1.28 * FS.Layout.Scale() end
+-- The target of target label's width in screen px: the plate less a pad each side and the reticle with its gap (89 - 3 - 3 - 11 = 72 image px).
+local function totLabelW()
+    local C = FS.GunsightTags.C
+    return (C.TOT.w - 2 * C.TOT_PAD - C.RETICLE.size - C.RETICLE.gap) * K()
+end
 local function target(name) __units.target.name = name; __fireEvent("PLAYER_TARGET_CHANGED") end
 local function noFails(msg)
     if #__pcallFails > 0 then error((msg or "a pcall failed") .. ": " .. __pcallFails[1], 2) end
@@ -249,7 +269,11 @@ function T.constants_match_the_mockup()
     eq(C.LEVEL.pad, MT.LT.PAD); eq(C.LEVEL.gap, MT.LT.GAP); eq(C.LEVEL.minW, MT.LT.MINW); near(C.LEVEL.advance, MT.LT.ADV, 1e-9)
     eq(C.LEVEL.w, nil, "the level plate has no fixed width")
     eq(C.HEALTH.dx, MT.HEALTH.x - MT.BOXR.x); eq(C.HEALTH.w, MT.HEALTH.w)
-    eq(C.TOT.dx, MT.TOT.x - MT.BOXR.x); eq(C.TOT.w, MT.TOT.w)
+    eq(C.TOT.dx, MT.TOT.x - MT.BOXR.x); eq(C.TOT.w, MT.TOT.w); eq(C.TOT.w, 89, "the plate is 89 px wide")
+    eq(MT.BOXR.w - (C.TOT.dx + C.TOT.w), 4, "the plate still ends 4 px short of the (wider) box's right edge")
+    eq(C.RETICLE.size, MT.RETICLE.size); eq(C.RETICLE.gap, MT.RETICLE.gap)
+    eq(C.RETICLE.x, MT.RETICLE.x); eq(C.RETICLE.y, MT.RETICLE.y)
+    eq(C.TOT.w - 2 * C.TOT_PAD - C.RETICLE.size - C.RETICLE.gap, 72, "the label is 72 px")
     eq(C.RISE, MT.BOXR.y - MT.TB_GROW - MT.LEVEL.y, "the level tag stands this far above the grown box top")
     eq(C.OVERLAP, MT.BOXR.y + MT.BOXR.h - MT.HEALTH.y, "the bottom tags reach this far above the box bottom")
     eq(MT.HEALTH.y, MT.TOT.y, "both bottom tags share a row")
@@ -269,6 +293,68 @@ function T.the_tags_are_kick_style_plates_with_a_tone_framed_outline()
         local outline = textureWith(frame.tones.pink, function(r) return r._cutOutline == true end)
         ok(outline, "a pink outline in the pink tone frame"); eq(rgb(outline._vc), pink, "in pink")
         eq(frame.label._fontSize, math.max(6, math.floor(C.TEXT_SIZE * K() + 0.5)), "the KICK text size")
+    end
+    W.clean(); noFails()
+end
+
+-- ---- the reticle on the target of target plate -------------------------------------------
+
+local RETICLE_PARTS = { "ring", "top", "bottom", "left", "right", "dot" }
+-- The six textures of the reticle on one tone frame, by name, and whether the frame owns each (a region of it).
+local function reticleOf(tone)
+    local r = tone.reticle
+    ok(r, "the tone frame holds a reticle")
+    for _, name in ipairs(RETICLE_PARTS) do
+        ok(r[name], "reticle part " .. name)
+        ok(textureWith(tone, function(t) return t == r[name] end), name .. " is a texture of the tone frame itself")
+    end
+    return r
+end
+-- A part's colour as hex, whatever way it was coloured (a solid texture, or a white ring tinted).
+local function partRgb(t)
+    local c = t._colorTexture or t._vc
+    return rgb(c)
+end
+
+function T.the_target_of_target_plate_wears_reticle_a_in_the_outline_tone_of_each_tone_frame()
+    local W = world()
+    local C = Tg().C
+    local colors = FS.GunsightBoxes.colors
+    local tot = Tg().tot
+    for key, want in pairs({ pink = colors.pink, steel = colors.steel, red = colors.red }) do
+        local r = reticleOf(tot.tones[key])
+        for _, name in ipairs(RETICLE_PARTS) do eq(partRgb(r[name]), rgb(want), key .. " " .. name .. " is the tone colour") end
+        eq(r.ring._texture, FS.Theme.RETICLE_RING_TEXTURE, "the ring is the ring texture")
+        ok(__fileExists(r.ring._texture), "and the ring file exists")
+        eq(r.dot._texture, nil, "the dot is a solid colour")
+    end
+    -- Not on the level or health plates.
+    for _, f in ipairs({ Tg().level, Tg().health }) do
+        for key, tone in pairs(f.tones) do eq(tone.reticle, nil, key .. ": no reticle on a plain tag") end
+    end
+    W.clean(); noFails()
+end
+
+function T.reticle_a_sits_in_the_left_pad_at_the_mockup_geometry_at_two_heights()
+    local W = world()
+    local R = MT.RETICLE
+    for _, h in ipairs({ 1440, 1080 }) do
+        UIParent._h = h; UIParent._w = h * 16 / 9
+        __fireEvent("UI_SCALE_CHANGED")
+        local k = K()
+        local rects = { ring = R.ring, top = R.ticks.top, bottom = R.ticks.bottom, left = R.ticks.left, right = R.ticks.right, dot = R.dot }
+        for key, tone in pairs(Tg().tot.tones) do
+            local r = reticleOf(tone)
+            for name, rect in pairs(rects) do
+                local part = r[name]
+                local pt = part._points.TOPLEFT
+                eq(pt.rel, tone, key .. " " .. name .. " hangs from its tone frame"); eq(pt.relPoint, "TOPLEFT")
+                near(pt.x, (R.x + rect[1]) * k, 1e-6, key .. " " .. name .. " x at " .. h)
+                near(pt.y, -(R.y + rect[2]) * k, 1e-6, key .. " " .. name .. " y at " .. h)
+                near(part._w, rect[3] * k, 1e-6, key .. " " .. name .. " w"); near(part._h, rect[4] * k, 1e-6, key .. " " .. name .. " h")
+                eq(part._layer, "ARTWORK", name .. " draws over the outline and under the label")
+            end
+        end
     end
     W.clean(); noFails()
 end
@@ -329,6 +415,12 @@ function T.the_tags_sit_at_the_mockup_seats_at_two_heights()
         eq(sp.rel, boxR, "the target of target seat hangs from the box anchor"); eq(sp.relPoint, "BOTTOMLEFT")
         near(sp.x, (MT.TOT.x - MT.BOXR.x) * k, 1e-6); near(sp.y, C.OVERLAP * k, 1e-6)
         near(Tg().seat._w, MT.TOT.w * k, 1e-6); near(Tg().seat._h, MT.H * k, 1e-6)
+        -- The label is centred in what is right of the reticle: 3 pad + 11 reticle and gap in, 72 px wide, so its centre is at 50.
+        local lab = Tg().tot.label
+        near(lab._w, 72 * k, 1e-6, "the label is 72 px wide")
+        local lp2 = lab._points.CENTER
+        eq(lp2.rel, Tg().tot); eq(lp2.relPoint, "LEFT")
+        near(lp2.x, (C.TOT_PAD + C.RETICLE.size + C.RETICLE.gap + 72 / 2) * k, 1e-6, "centred right of the reticle"); near(lp2.y, 0, 1e-6)
         eq(Tg().level:GetParent(), box.frame, "children of the box: they go with the target and the piece")
         eq(Tg().health:GetParent(), box.frame)
     end
@@ -960,13 +1052,13 @@ function T.the_target_of_target_shows_the_first_name_and_surname()
     W.clean(); noFails("a secret was compared inside a pcall")
 end
 
--- The label is 63 image px wide (geometry locked): a longer full name shrinks to the floor, then the first names
+-- The label is 72 image px wide (geometry locked): a longer full name shrinks to the floor, then the first names
 -- shorten to initials, and only what still does not fit is left to the FontString's ellipsis.
 function T.a_long_target_of_target_name_shrinks_then_abbreviates_to_fit_the_label()
     local W = world({ beforeLoad = withFullNames() })
     target("Kurak")
     local label = Tg().tot.label
-    local wmax = (Tg().C.TOT.w - 2 * Tg().C.TOT_PAD) * K()
+    local wmax = totLabelW()
     local base = label._fontSize
     __units.targettarget = { exists = true, name = "Father", full = "Father Stu" }
     fireTot()
@@ -975,11 +1067,11 @@ function T.a_long_target_of_target_name_shrinks_then_abbreviates_to_fit_the_labe
     fireTot()
     eq(label._text, "Father Stuart", "a slightly long name shrinks first, not abbreviated")
     ok(label._fontSize < base, "smaller than the base size")
-    ok(label:GetUnboundedStringWidth() <= wmax + 1e-6, "and fits the 63 px label")
+    ok(label:GetUnboundedStringWidth() <= wmax + 1e-6, "and fits the 72 px label")
     __units.targettarget = { exists = true, name = "Bartholomew", full = "Bartholomew Oldlight" }
     fireTot()
     eq(label._text, "B. Oldlight", "too long even at the floor: the first name shortens to an initial")
-    ok(label:GetUnboundedStringWidth() <= wmax + 1e-6, "and fits the 63 px label")
+    ok(label:GetUnboundedStringWidth() <= wmax + 1e-6, "and fits the 72 px label")
     eq(label:GetWidth(), wmax, "the label's width is untouched")
     __units.targettarget = { exists = true, name = "Father", full = "Father Stu" }
     fireTot()
@@ -995,7 +1087,7 @@ function T.a_rescale_fits_the_target_of_target_name_again_at_the_new_size()
     local label = Tg().tot.label
     UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
     __fireEvent("UI_SCALE_CHANGED")
-    local wmax = (Tg().C.TOT.w - 2 * Tg().C.TOT_PAD) * K()
+    local wmax = totLabelW()
     eq(label:GetWidth(), wmax, "the new width")
     eq(label._text, "B. Oldlight")
     ok(label:GetUnboundedStringWidth() <= wmax + 1e-6, "fits at the new size")
@@ -1041,7 +1133,7 @@ function T.a_target_of_target_name_on_a_client_that_applies_the_font_late_is_dec
     local W = world({ beforeLoad = withFullNames() })
     target("Kurak")
     local label = Tg().tot.label
-    local wmax = (Tg().C.TOT.w - 2 * Tg().C.TOT_PAD) * K()
+    local wmax = totLabelW()
     local base = label._fontSize
     __fontLag = true
     __units.targettarget = { exists = true, name = "Father", full = "Father Stuart" }
@@ -1072,12 +1164,12 @@ function T.a_target_of_target_name_written_before_the_late_font_landed_is_decide
     __units.targettarget = { exists = true, name = "Bartholomew", full = "Bartholomew Oldlight" }
     fireTot()
     -- the next name arrives before the font of the last one landed: it is measured at the wrong font and abbreviated
-    __units.targettarget = { exists = true, name = "Father", full = "Father Stuart" }
+    __units.targettarget = { exists = true, name = "Father", full = "Father Stuarts" }
     fireTot()
     for _ = 1, 3 do __flushTimers() end
-    eq(label._text, "Father Stuart", "the abbreviated stand in is replaced once the font landed")
-    eq(label._fontSize, 11, "at the size that fits it")
-    ok(label:GetUnboundedStringWidth() <= (Tg().C.TOT.w - 2 * Tg().C.TOT_PAD) * K() + 1e-6)
+    eq(label._text, "Father Stuarts", "the abbreviated stand in is replaced once the font landed")
+    eq(label._fontSize, 12, "at the size that fits it (between the floor 10 and the base 14)")
+    ok(label:GetUnboundedStringWidth() <= totLabelW() + 1e-6)
     W.clean(); noFails()
 end
 
@@ -1096,10 +1188,10 @@ function T.each_late_font_write_in_its_own_frame_gets_its_own_re_decision()
         eq(label._text, want, "after " .. first .. " then " .. second)
         eq(label._fontSize, size)
     end
-    pair("Bartholomew Oldlight", "Father Stuart", "Father Stuart", 11)
+    pair("Bartholomew Oldlight", "Father Stuarts", "Father Stuarts", 12)
     pair("Father Stu", "Father Stu", "Father Stu", 14)
     -- the first write's refit has run; a later write in a later frame needs its own
-    pair("Bartholomew Oldlight", "Father Stuart", "Father Stuart", 11)
+    pair("Bartholomew Oldlight", "Father Stuarts", "Father Stuarts", 12)
     W.clean(); noFails()
 end
 
@@ -1127,7 +1219,7 @@ end
 -- at the floor size (so it fits there, shrunk to exactly the floor) and more than the label at the base size.
 -- Returns wmax, floor, base.
 local function calibrateSneaky(label)
-    local wmax = (Tg().C.TOT.w - 2 * Tg().C.TOT_PAD) * K()
+    local wmax = totLabelW()
     local floor = math.max(Tg().C.MIN_FONT, math.floor(FS.Gunsight.ui(Tg().C.TOT_FLOOR) + 0.5))
     __charW = 0.98 * wmax * 11 / (12 * floor)
     return wmax, floor, label._fontSize
@@ -1184,7 +1276,7 @@ function T.a_target_of_target_name_too_long_at_the_floor_stays_abbreviated_and_t
     local W = world({ beforeLoad = withFullNames() })
     target("Kurak")
     local label = Tg().tot.label
-    local wmax = (Tg().C.TOT.w - 2 * Tg().C.TOT_PAD) * K()
+    local wmax = totLabelW()
     __units.targettarget = { exists = true, name = "x", full = "Bartholomew Oldlight" }
     fireTot()
     eq(label._text, "B. Oldlight")
@@ -1213,7 +1305,7 @@ local function nonLinearWidths(label, perCharFloor, perCharBase)
         local t = (base > floor) and (size - floor) / (base - floor) or 0
         return #tostring(self._text) * (perCharFloor + (perCharBase - perCharFloor) * t)
     end
-    return (Tg().C.TOT.w - 2 * Tg().C.TOT_PAD) * K(), floor, base
+    return totLabelW(), floor, base
 end
 
 local function recordWrites(label)
@@ -1254,6 +1346,27 @@ function T.a_target_of_target_name_that_fits_at_the_floor_is_shown_whole_on_the_
     eq(writes[1], "Sneaky Toots", "and the first write was the whole name")
     eq(label._fontSize, floor, "shrunk to the floor")
     ok(label:GetUnboundedStringWidth() <= wmax + 1e-6, "and fits the label")
+    W.clean(); noFails()
+end
+
+function T.sneaky_toots_measured_live_fits_the_72_px_label_whole_where_the_old_63_px_label_cut_it_to_initials()
+    -- Live numbers (k = 1.0667, a 1200 high UI): 70.0 px at the floor size 9, 80.83 px at the base size 12. The label is
+    -- 72 * k = 76.8, so the full name stays; the old 63 * k = 67.2 would have written "S. Toots".
+    local W = world({ beforeLoad = withFullNames() })
+    UIParent._h = 1200; UIParent._w = 1200 * 16 / 9
+    __fireEvent("UI_SCALE_CHANGED")
+    target("Kurak")
+    local label = Tg().tot.label
+    near(K(), 1.0667, 1e-3, "the live scale")
+    local wmax, floor = nonLinearWidths(label, 70 / 12, 80.83 / 12)
+    near(wmax, 76.8, 0.01, "the label is 76.8 px")
+    eq(floor, 9, "the floor size")
+    __units.targettarget = { exists = true, name = "x", full = "Sneaky Toots" }
+    fireTot()
+    eq(label._text, "Sneaky Toots", "the whole name, not initials")
+    ok(label:GetUnboundedStringWidth() <= wmax + 1e-6, "and it fits")
+    for _ = 1, 4 do __flushTimers() end
+    eq(label._text, "Sneaky Toots", "still whole after the refits")
     W.clean(); noFails()
 end
 
@@ -1608,6 +1721,17 @@ local function assertEachToneOnce(W, msg)
             eq(onceIn(W.tgt.fb[key], f.tones[key]), 1, name .. " " .. key .. " once in the tape's list " .. msg)
             eq(onceIn(W.tgt.box.fb[key], f.tones.red) + onceIn(W.tgt.fb[key], f.tones.red), 0, name .. " red is not flag driven (" .. key .. " lists) " .. msg)
         end
+        -- The reticle (the target of target plate's only) is drawn INSIDE the same three tone frames, so the lists above are
+        -- its lists: each part is a texture of exactly the listed frame, and no part (nor a red frame's child) is listed itself.
+        if f.tones.pink.reticle then
+            for _, key in ipairs({ "pink", "steel", "red" }) do
+                for _, part in pairs(f.tones[key].reticle) do
+                    eq(onceIn(f.tones[key]._regions, part), 1, name .. " " .. key .. " reticle part is in its tone frame once " .. msg)
+                    eq(onceIn(W.tgt.box.fb.pink, part) + onceIn(W.tgt.box.fb.steel, part) + onceIn(W.tgt.fb.pink, part) + onceIn(W.tgt.fb.steel, part), 0,
+                        name .. " " .. key .. " reticle part is not itself a list entry " .. msg)
+                end
+            end
+        end
     end
 end
 
@@ -1641,6 +1765,27 @@ function T.the_target_of_target_outline_follows_the_flag_and_the_verdict_in_comb
     W.endCast("target"); W.fire(W.tgt.S, "UNIT_SPELLCAST_INTERRUPTED", "T1")
     eq(lit(Tg().tot), "red", "red in combat: only plain child frames of the protected button are shown or hidden")
     eq(#__blocked, 0, "nothing protected was touched")
+    W.clean(); noFails()
+end
+
+function T.the_reticle_follows_the_cast_tone_with_the_outline_pink_steel_and_red()
+    local W = world()
+    local pink, steel, red = rgb(FS.GunsightBoxes.colors.pink), rgb(FS.GunsightBoxes.colors.steel), rgb(FS.GunsightBoxes.colors.red)
+    local function shownTone()
+        local k = lit(Tg().tot)
+        local r = Tg().tot.tones[k].reticle
+        return k, partRgb(r.ring), partRgb(r.dot)
+    end
+    local k, ring, dot = shownTone(); eq(k, "steel"); eq(ring, steel); eq(dot, steel)
+    startCast(W, false)
+    k, ring, dot = shownTone(); eq(k, "pink", "kickable"); eq(ring, pink); eq(dot, pink)
+    W.endCast("target"); W.fire(W.tgt.S, "UNIT_SPELLCAST_STOP", "T1")
+    startCast(W, true)
+    k, ring = shownTone(); eq(k, "steel", "unkickable"); eq(ring, steel)
+    W.endCast("target"); W.fire(W.tgt.S, "UNIT_SPELLCAST_STOP", "T1")
+    startCast(W, false)
+    W.endCast("target"); W.fire(W.tgt.S, "UNIT_SPELLCAST_INTERRUPTED", "T1")
+    k, ring, dot = shownTone(); eq(k, "red", "INTERRUPTED"); eq(ring, red); eq(dot, red)
     W.clean(); noFails()
 end
 
@@ -1760,7 +1905,8 @@ def run_case(name: str, mu: dict, mb: dict, mt: dict) -> str | None:
     theme_src = (ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
     consts = [CHEV._extract_theme_constant(theme_src, n) for n in
               TH.THEME_CONSTANTS + ("COLOR_CARET_HEALTH", "COLOR_HEAL", "COLOR_GOLD", "COLOR_SILVER", "COLOR_RED", "FLAT_TEXTURE",
-                                  "LEVEL_CROWN_TEXTURE", "LEVEL_STAR_TEXTURE", "LEVEL_CROWN_STAR_TEXTURE", "LEVEL_SKULL_TEXTURE")]
+                                  "LEVEL_CROWN_TEXTURE", "LEVEL_STAR_TEXTURE", "LEVEL_CROWN_STAR_TEXTURE", "LEVEL_SKULL_TEXTURE",
+                                  "RETICLE_RING_TEXTURE")]
     lua.eval("__load_theme_constants")(lua.table_from(consts))
     lua.execute(CB.WIRE)
     lua.execute(TH.MOCK)
