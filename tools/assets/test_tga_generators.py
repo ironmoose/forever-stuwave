@@ -92,7 +92,7 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
             "glyph_talents", "glyph_legacy", "glyph_questlog", "glyph_guild",
             "glyph_lfd", "glyph_collections", "glyph_help", "glyph_store",
             "glyph_mainmenu", "glyph_achievement", "glyph_ej", "glyph_pvp",
-            "glyph_socials", "glyph_worldmap", "glyph_housing",
+            "glyph_socials", "glyph_worldmap", "glyph_housing", "glyph_backpack",
         )
     },
     # generate_cut_corner_outline.py writes the four-corner chamfered nine-slice

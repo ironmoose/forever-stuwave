@@ -62,8 +62,7 @@ local DEFAULT_SIZE = 26 -- design px; FS.Deck.BAG_SIZE overrides
 local DEFAULT_GAP = 4   -- design px; FS.Deck.BAG_GAP overrides
 
 local LED_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\deck_led.tga"
-local BACKPACK_ATLAS = "bag-main" -- what MainMenuBarBackpackMixin:GetSlotAtlases paints
-local BACKPACK_ICON = "Interface\\Buttons\\Button-Backpack-Up" -- file fallback, no atlas
+local BACKPACK_GLYPH = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\glyph_backpack.tga"
 local KEYRING_ICON = "Interface\\Icons\\INV_Misc_Key_03"
 local EMPTY_BAG_ICON = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Bag"
 local ICON_L, ICON_R = 0.08, 0.92
@@ -142,24 +141,14 @@ local function LogDegrade(key, message)
     if type(FS.LogDegradeOnce) == "function" then FS.LogDegradeOnce(key, message) end
 end
 
--- Paints the backpack: Blizzard's atlas when this client has it, else the file texture.
--- SetAtlas resets the texcoords to the atlas rect, so the ICON_L..ICON_R crop is
--- re-applied inside that rect (a plain SetTexCoord would address the whole sheet).
--- Returns false only when the file texture also reads back nil.
-local function ApplyBackpackIcon(icon)
-    local info = Call(C_Texture and C_Texture.GetAtlasInfo, BACKPACK_ATLAS)
-    if type(info) == "table" then
-        icon:SetAtlas(BACKPACK_ATLAS, false)
-        local l, r, t, b = info.leftTexCoord, info.rightTexCoord, info.topTexCoord, info.bottomTexCoord
-        local function Num(v) return type(v) == "number" and not IsSecret(v) end
-        if Num(l) and Num(r) and Num(t) and Num(b) then
-            local w, h = r - l, b - t
-            icon:SetTexCoord(l + w * ICON_L, l + w * ICON_R, t + h * ICON_L, t + h * ICON_R)
-        end
-        return true
-    end
-    icon:SetTexture(BACKPACK_ICON)
-    icon:SetTexCoord(ICON_L, ICON_R, ICON_L, ICON_R)
+-- Paints the backpack with our own glyph (white alpha shape from generate_deck_glyphs.py)
+-- tinted in the slot accent, full texcoords. It is deliberately not Blizzard's bag art:
+-- Blizzard's art can change between builds, ours cannot.
+-- Returns false only when the texture reads back nil.
+local function ApplyBackpackIcon(icon, accent)
+    icon:SetTexture(BACKPACK_GLYPH)
+    icon:SetTexCoord(0, 1, 0, 1)
+    icon:SetVertexColor(accent[1], accent[2], accent[3], 1)
     return icon:GetTexture() ~= nil
 end
 
@@ -596,7 +585,7 @@ local function BuildSlot(def)
     slot.icon:SetTexCoord(ICON_L, ICON_R, ICON_L, ICON_R)
     local hasArt = true
     if def.kind == "backpack" then
-        hasArt = ApplyBackpackIcon(slot.icon)
+        hasArt = ApplyBackpackIcon(slot.icon, def.accent)
     elseif def.kind == "keyring" then
         slot.icon:SetTexture(KEYRING_ICON)
         hasArt = slot.icon:GetTexture() ~= nil
