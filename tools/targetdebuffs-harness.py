@@ -189,7 +189,8 @@ local function boot(opts)
     loadAddonFile(SPELLS_SRC, "Modules/CombatHud/HudSpells.lua")
     loadAddonFile(PROFILES_SRC, "Modules/CombatHud/HudProfiles.lua")
     SPELLS_BY_ID = {
-        [11572] = { name = "Rend", icon = 1001 }, [11597] = { name = "Sunder Armor", icon = 1002 },
+        [11572] = { name = "Rend", icon = 1001 }, [772] = { name = "Rend", icon = 1001 }, [6548] = { name = "Rend", icon = 1001 },
+        [9998] = { name = "Fireball", icon = 1009 }, [9997] = { name = "Fireball", icon = 1009 }, [11597] = { name = "Sunder Armor", icon = 1002 },
         [6343] = { name = "Thunder Clap", icon = 1003 }, [8647] = { name = "Expose Armor", icon = 1004 },
         [172] = { name = "Corruption", icon = 1005 }, [9999] = { name = "Heroic Strike", icon = 1006 },
         [20271] = { name = "Judgement", icon = 1007 }, [853] = { name = "Hammer of Justice", icon = 1008 },
@@ -347,16 +348,69 @@ check(next(ForeverSTUwaveDB or {}) == nil, "the learned durations stay in the se
 """)
 
 case("an_unknown_duration_is_an_entry_with_no_expiry")(r"""
-local TD = boot({ class = "WARRIOR" })
+local TD = boot({ class = "ROGUE" })
 TD.Subscribe(function() end)
 IN_COMBAT = true
-cast(6343, guid())                    -- Thunder Clap: a Warrior debuff nobody has scanned yet
-local e = byName(TD.Get(), "Thunder Clap")
+cast(8647, guid())                    -- Expose Armor: a Rogue debuff with no table duration, nobody has scanned it yet
+local e = byName(TD.Get(), "Expose Armor")
 check(e, "a class debuff name is tracked from its first cast")
 check(e.expires == nil and e.duration == nil, "no duration is known: expires and duration are nil")
 check(e.count == 1, "one stack")
 cast(9999, guid())                    -- Heroic Strike is not a debuff
 check(#TD.Get() == 1, "a spell that is not a known debuff is ignored, got " .. names(TD.Get()))
+""")
+
+case("a_warrior_debuff_is_timed_from_its_first_cast_by_rank")(r"""
+local TD = boot({ class = "WARRIOR" })
+TD.Subscribe(function() end)
+IN_COMBAT = true
+NOW = NOW + 1
+cast(772, guid())                       -- Rend rank 1: 9 s on Forever, nothing scanned yet
+local e = byName(TD.Get(), "Rend")
+check(e and e.duration == 9 and e.expires, "rank 1 Rend is timed at 9 s, got " .. tostring(e and e.duration))
+near(e.expires, NOW + 9, "expires = cast + 9")
+cast(6548, guid())                      -- rank 4: 18 s
+near(byName(TD.Get(), "Rend").duration, 18, "rank 4 Rend is 18 s")
+cast(11572, guid())                     -- rank 5: 21 s
+near(byName(TD.Get(), "Rend").duration, 21, "rank 5 Rend is 21 s")
+cast(6343, guid())
+near(byName(TD.Get(), "Thunder Clap").duration, 10, "Thunder Clap rank 1 is 10 s")
+cast(11597, guid())
+near(byName(TD.Get(), "Sunder Armor").duration, 30, "Sunder Armor is 30 s")
+""")
+
+case("a_learned_duration_is_kept_per_spell_id_and_beats_another_ranks_table")(r"""
+local TD = boot({ class = "WARRIOR" })
+AURAS = { aura("Rend", NOW + 7, 9, 0, "player", 772) }
+TD.Subscribe(function() end)
+AURAS = {}; sync(TD)
+IN_COMBAT = true
+cast(6548, guid())
+near(byName(TD.Get(), "Rend").duration, 18, "rank 4 is not timed by the rank 1 snapshot")
+cast(772, guid())
+near(byName(TD.Get(), "Rend").duration, 9, "rank 1 keeps what was scanned for rank 1")
+""")
+
+case("any_class_spell_seen_once_out_of_combat_is_timed_later_in_combat")(r"""
+local TD = boot({ class = "MAGE" })
+AURAS = { aura("Fireball", NOW + 6, 8, 0, "player", 9998) }
+TD.Subscribe(function() end)
+check(byName(TD.Get(), "Fireball"), "setup: the snapshot lists it")
+AURAS = {}; sync(TD)
+IN_COMBAT = true
+NOW = NOW + 2
+cast(9997, guid())                      -- another rank id of the same name: the name's duration serves
+local e = byName(TD.Get(), "Fireball")
+check(e and e.duration == 8 and e.expires, "timed from the learned name duration")
+near(e.expires, NOW + 8, "expires")
+""")
+
+case("a_secret_duration_in_the_scan_is_ignored_and_never_compared")(r"""
+local TD = boot({ class = "MAGE" })
+AURAS = { aura("Fireball", SECRET, SECRET, 0, "player", 9998) }
+TD.Subscribe(function() end)
+local e = byName(TD.Get(), "Fireball")
+check(e and e.expires == nil and e.duration == nil, "a secret duration leaves the entry untimed, no error")
 """)
 
 case("a_duration_from_hudspells_is_used_when_nothing_was_learned")(r"""
@@ -613,10 +667,10 @@ check(byName(TD.Get(), "Corruption") ~= nil, "the next push brings the new targe
 """)
 
 case("ledger_entries_with_no_expiry_are_pruned_by_age")(r"""
-local TD = boot({ class = "WARRIOR" })
+local TD = boot({ class = "ROGUE" })
 TD.Subscribe(function() end)
 IN_COMBAT = true
-cast(6343, guid())                      -- Thunder Clap, no known duration, on Creature-A
+cast(8647, guid())                      -- Expose Armor, no known duration, on Creature-A
 check(#TD.Get() == 1, "setup")
 retarget("Creature-B")
 NOW = NOW + 60
