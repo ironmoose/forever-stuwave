@@ -1091,9 +1091,9 @@ end
 --     PLAYER_REGEN_ENABLED (no allocation or churn mid fight);
 --   * a miss IN combat is not trusted (the lookup may fail transiently, a secret or withheld result), so it
 --     is not kept as a miss for good; it is remembered for the rest of that combat only, so a render per tick
---     does not repeat the lookup (a pcall and a result table each time). Cleared at PLAYER_REGEN_ENABLED and
---     on SPELLS_CHANGED.
--- SpellCacheEpoch() moves on every wipe, so a caller that caches what these return can tell it went stale.
+--     does not repeat the lookup (a pcall and a result table each time). Cleared at PLAYER_REGEN_ENABLED (and
+--     PLAYER_ENTERING_WORLD out of combat, should a regen be missed) and on SPELLS_CHANGED.
+-- SpellCacheEpoch() moves on every wipe, and when combat ends with misses held, so a caller that caches what these return can tell it went stale.
 local spellIDByName = {}
 local combatMisses = {}
 local cacheDirty = false
@@ -1111,7 +1111,11 @@ local function WatchSpellsChanged()
     spellsEvents = CreateFrame("Frame")
     pcall(spellsEvents.RegisterEvent, spellsEvents, "SPELLS_CHANGED")
     pcall(spellsEvents.RegisterEvent, spellsEvents, "PLAYER_REGEN_ENABLED")
+    pcall(spellsEvents.RegisterEvent, spellsEvents, "PLAYER_ENTERING_WORLD")
     spellsEvents:SetScript("OnEvent", function(_, event)
+        -- A loading screen can land mid fight; the wipe waits for the fight to end.
+        if event == "PLAYER_ENTERING_WORLD" and InCombatLockdown() then return end
+        local hadMisses = next(combatMisses) ~= nil
         ClearTable(combatMisses)
         if event == "SPELLS_CHANGED" then
             if InCombatLockdown() then
@@ -1119,6 +1123,9 @@ local function WatchSpellsChanged()
                 return
             end
         elseif not cacheDirty then
+            -- Nothing to wipe, but a caller that settled on a fallback for a name that missed in combat
+            -- (the second name of a tile, say) must look again now the lookups can be trusted.
+            if hadMisses then cacheEpoch = cacheEpoch + 1 end
             return
         end
         ClearTable(spellIDByName)

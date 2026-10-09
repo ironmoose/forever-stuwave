@@ -343,6 +343,37 @@ fireEvent("PLAYER_REGEN_ENABLED")
 check(H.SpellIDForName("Rank") == 200 and SPELL_CALLS == calls, "a second regen with nothing dirty wipes nothing")
 """)
 
+case("entering_world_out_of_combat_settles_what_regen_missed")(r"""
+local H = boot()
+SPELL_INFO["Rank"] = 100
+check(H.SpellIDForName("Rank") == 100, "setup")
+IN_COMBAT = true
+SPELL_INFO["Rank"] = 200
+fireEvent("SPELLS_CHANGED")                        -- dirty; the regen that would wipe never arrives
+check(H.SpellIDForName("Gone") == nil, "setup: a combat miss")
+fireEvent("PLAYER_ENTERING_WORLD")
+check(H.SpellIDForName("Rank") == 100, "entering the world in combat wipes nothing")
+IN_COMBAT = false
+local e0 = H.SpellCacheEpoch()
+SPELL_INFO["Gone"] = 7
+fireEvent("PLAYER_ENTERING_WORLD")
+check(H.SpellIDForName("Rank") == 200 and H.SpellIDForName("Gone") == 7, "out of combat the dirty cache is wiped")
+check(H.SpellCacheEpoch() ~= e0, "and the epoch moved")
+""")
+
+case("combat_misses_move_the_epoch_when_combat_ends")(r"""
+local H = boot()
+IN_COMBAT = true
+check(H.SpellIDForName("Later") == nil, "setup: a combat miss")
+local e0 = H.SpellCacheEpoch()
+IN_COMBAT = false
+fireEvent("PLAYER_REGEN_ENABLED")
+check(H.SpellCacheEpoch() ~= e0, "callers that cached a fallback for it re-resolve")
+local e1 = H.SpellCacheEpoch()
+fireEvent("PLAYER_REGEN_ENABLED")
+check(H.SpellCacheEpoch() == e1, "a regen with no misses and nothing dirty moves nothing")
+""")
+
 case("combat_miss_is_looked_up_once_per_combat")(r"""
 local H = boot()
 IN_COMBAT = true

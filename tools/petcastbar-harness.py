@@ -68,6 +68,8 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import spelltip_support as tips  # noqa: E402
 ADDON = HERE.parent / "forever-stuwave"
 
 
@@ -375,7 +377,7 @@ function UnitChannelDuration(u) return duration(__unit.chan) end
 """
 
 # Stubs for what PetCastBar.lua reads off FS, then the two real files.
-WIRE = r"""
+WIRE = tips.COPY_LUA + r"""
 local Theme = FS.Theme
 Theme.ApplyMono = function(fs, size, color) fs._fontSize = size; fs._color = color; fs._fontApplies = (fs._fontApplies or 0) + 1 end
 Theme.ApplyNineSlice = function(tex, margin) tex._sliceMargin = margin; return true end
@@ -414,9 +416,7 @@ do
     local real = {}
     local scratch = { Theme = FS.Theme, IsSecret = FS.IsSecret, AurasReadable = function() return not InCombatLockdown() end, FrameHelpers = real }
     assert(loadstring(__helpers_source, "@Core/FrameHelpers.lua"))("forever-stuwave", scratch)
-    for _, k in ipairs({ "HoverOnly", "SetTipSpell", "SpellIDForName", "AttachSpellTooltip", "RefreshSpellTooltip" }) do
-        FS.FrameHelpers[k] = real[k]
-    end
+    copyTipHelpers(FS.FrameHelpers, real)
 end
 local container = CreateFrame("Frame", "FSPetContainer", UIParent)
 local castSlot = CreateFrame("Frame", nil, container)
