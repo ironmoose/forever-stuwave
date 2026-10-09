@@ -17,6 +17,9 @@ FS.PlayerAuras (Buffs.lua is not loaded). It pins:
     at the derived offsets at two UI heights, and a rescale re-seats in place;
   * content: at most four tiles in the snapshot's own order (the Buffs.lua slot order, not by time left), the
     spell icon, the time left as 47m / 14s / 2h, nothing for a buff with no expiry;
+  * time labels: each is a child of its own tile and hangs on it by real anchors (a pitch wide, centred on the tile), so it
+    is centred under that tile for one to four tiles, at two UI heights and at other tile sizes; a tile that hides takes its
+    time with it (no stale time under an empty slot); the widest time (three characters) fits its pitch;
   * pip: a party or raid unit other than the player; a missing, secret, player, pet or target source has none;
   * combat: the snapshot is frozen, so the time left is extrapolated from the stored expiry, a buff that ran out is
     dropped, and no aura API is read;
@@ -153,6 +156,29 @@ local function refresh() My().Refresh() end
 local function tick() My().plate._scripts.OnUpdate(My().plate, 0.5) end
 local function shown() local n = 0; for _, t in ipairs(My().tiles) do if t.frame:IsShown() then n = n + 1 end end; return n end
 
+-- A horizontal solver over the anchors the mock recorded: a region's left and right edge in px from the body's left edge, from the
+-- REAL anchor targets, points and offsets (never the numbers the module keeps), so a label hung on the wrong target or the wrong
+-- offset moves. A region with two side points spans them; one point seats its stored width around or from that point.
+local function hfrac(name) if name:find("LEFT") then return 0 elseif name:find("RIGHT") then return 1 end return 0.5 end
+local function edges(r)
+    if r == My().body then return 0, My().anchor._w end
+    local left, right, mid
+    for name, p in pairs(r._points) do
+        local rl, rr = edges(p.rel)
+        local x = rl + hfrac(p.relPoint) * (rr - rl) + p.x
+        if name:find("LEFT") then left = x elseif name:find("RIGHT") then right = x else mid = x end
+    end
+    if left and right then return left, right end
+    ok(r._w, "a region seated by one point needs a width")
+    if left then return left, left + r._w end
+    if right then return right - r._w, right end
+    return mid - r._w / 2, mid + r._w / 2
+end
+local function centre(r) local l, rt = edges(r); return (l + rt) / 2 end
+-- Mononoki Bold's advance is 0.6 em: the widest a string of n characters can be at a type size.
+local function textWidth(label) return #label._text * 0.6 * label._fontSize end
+local function visibleText(label) return label:IsVisible() and label._text ~= "" end
+
 -- ---- constants ---------------------------------------------------------------------
 
 function T.constants_match_the_mockup_and_the_size_is_one_tunable_smaller_than_the_mockups()
@@ -175,7 +201,7 @@ function T.constants_match_the_mockup_and_the_size_is_one_tunable_smaller_than_t
     near(M.x + M.w, MY.X + MY.W, 1e-9, "still ends where the mockup ends, short of the next cast tile")
     near(M.y + M.h / 2, MY.Y + MY.H / 2, 1e-9, "still centred on the mockup's band, with the info boxes and the next tile")
     ok(C.TEXT_SIZE >= MY.DOTS_TIME, "the time is no smaller than the Target Debuffs time")
-    eq(C.TEXT_DX, C.TILE / 2, "the time is centred under its tile"); eq(C.PIP_DX, C.TILE, "the pip sits on the tile's right edge")
+    eq(C.PIP_DX, C.TILE, "the pip sits on the tile's right edge")
     ok(C.TEXT_Y > C.TILE_DY + C.TILE and C.TEXT_Y + C.TEXT_SIZE * C.DESCENT <= C.H, "the time fits inside the plate under the tile")
     W.clean(); noFails()
 end
@@ -232,10 +258,14 @@ function T.tiles_time_text_and_pips_sit_at_the_mockup_offsets_at_two_heights()
             eq(tp.rel, My().body); eq(tp.relPoint, "TOPLEFT")
             near(tp.x, left * k, 1e-6, "tile " .. i .. " x"); near(tp.y, -C.TILE_DY * k, 1e-6, "tile y")
             near(t.frame._w, C.TILE * k, 1e-6); near(t.frame._h, C.TILE * k, 1e-6)
-            local lp = t.label._points.BOTTOM
-            eq(lp.rel, My().body); eq(lp.relPoint, "TOPLEFT")
-            near(lp.x, (left + C.TEXT_DX) * k, 1e-6, "time centred under the tile")
-            near(lp.y, -(C.TEXT_Y + C.TEXT_SIZE * C.DESCENT) * k, 1e-6, "time baseline")
+            near(centre(t.label), centre(t.frame), 1e-6, "time centred under its own tile " .. i)
+            for name, lp in pairs(t.label._points) do
+                eq(lp.rel, t.frame, "the time hangs on its own tile (" .. name .. ")"); eq(lp.relPoint, name)
+                near(lp.y, -(C.TEXT_Y + C.TEXT_SIZE * C.DESCENT - C.TILE_DY - C.TILE) * k, 1e-6, "time baseline")
+            end
+            local l, r = edges(t.label)
+            near(r - l, C.PITCH * k, 1e-6, "the time's room is one pitch, centred on the tile")
+            eq(t.label._justifyH, "CENTER")
             eq(t.label._fontSize, math.max(6, math.floor(C.TEXT_SIZE * k + 0.5)), "time type size")
             local pp = t.pip.dot._points.CENTER
             eq(pp.rel, t.frame); eq(pp.relPoint, "TOPLEFT")
@@ -306,6 +336,126 @@ function T.the_body_hides_with_no_buffs_and_a_missing_snapshot_is_not_an_error()
     FS.PlayerAuras = nil
     refresh(); tick()
     eq(My().body:IsShown(), false, "no Buffs module: nothing to draw")
+    W.clean(); noFails()
+end
+
+-- ---- time labels ------------------------------------------------------------------
+
+local function timed(n) local t = {}; for i = 1, n do t[i] = aura(i, 3500 + i * 60) end; return t end
+
+function T.each_time_is_centred_under_its_own_tile_for_one_to_four_tiles_at_two_heights()
+    local W = world()
+    for _, h in ipairs({ 1440, 1080 }) do
+        UIParent._h = h; UIParent._w = h * 16 / 9
+        __fireEvent("UI_SCALE_CHANGED")
+        for n = 1, 4 do
+            __snapshot = { buffs = timed(n), debuffs = {} }
+            refresh()
+            eq(shown(), n)
+            for i = 1, n do
+                local t = My().tiles[i]
+                ok(visibleText(t.label), "tile " .. i .. " of " .. n .. " shows its time")
+                near(centre(t.label), centre(t.frame), 1e-6, "tile " .. i .. " of " .. n .. " at " .. h)
+            end
+            for i = 1, 3 do
+                near(centre(My().tiles[i + 1].label) - centre(My().tiles[i].label), My().C.PITCH * K(), 1e-6, "labels step by the pitch")
+            end
+        end
+    end
+    W.clean(); noFails()
+end
+
+function T.a_time_hangs_on_its_own_tile_so_it_hides_and_moves_with_it()
+    local W = world()
+    snapshot(aura(1, 3500), aura(2, 3560))
+    refresh()
+    for i, t in ipairs(My().tiles) do
+        eq(t.label:GetParent(), t.frame, "time " .. i .. " is a child of its tile")
+        for _, p in pairs(t.label._points) do eq(p.rel, t.frame) end
+    end
+    local before = centre(My().tiles[1].label)
+    My().tiles[1].frame._points.TOPLEFT.x = My().tiles[1].frame._points.TOPLEFT.x + 50
+    near(centre(My().tiles[1].label), before + 50, 1e-6, "move the tile, the time follows")
+    W.clean(); noFails()
+end
+
+function T.a_tile_that_hides_takes_its_time_with_it_and_a_returning_tile_shows_the_right_one()
+    local W = world()
+    snapshot(aura(1, 3500), aura(2, 3560), aura(3, 3590))
+    refresh()
+    eq(My().tiles[3].label._text, "59m")
+    snapshot(aura(1, 3500), aura(2, 3560))
+    refresh()
+    eq(visibleText(My().tiles[3].label), false, "the third buff is gone: no stale 59m left under an empty slot")
+    eq(My().tiles[3].label._text, "", "and the text is cleared, not only hidden")
+    snapshot()
+    refresh()
+    for i = 1, 4 do eq(visibleText(My().tiles[i].label), false, "no buffs, no times: " .. i) end
+    snapshot(aura(1, 3500), aura(2, 3560), aura(3, 3590))
+    refresh()
+    eq(visibleText(My().tiles[3].label), true, "a buff back in the slot shows its time again")
+    eq(My().tiles[3].label._text, "59m")
+    W.clean(); noFails()
+end
+
+function T.a_buff_with_no_time_leaves_a_gap_and_the_next_time_stays_under_its_own_tile()
+    local W = world()
+    snapshot(aura(1, nil), aura(2, 3500))
+    refresh()
+    eq(visibleText(My().tiles[1].label), false, "no expiry: nothing under tile 1")
+    ok(visibleText(My().tiles[2].label))
+    near(centre(My().tiles[2].label), centre(My().tiles[2].frame), 1e-6, "58m is under the second icon, not the first")
+    W.clean(); noFails()
+end
+
+function T.the_widest_time_fits_its_pitch_so_neighbours_never_overlap()
+    local W = world()
+    local widest, longest = 0, ""
+    local samples = { 0.5, 1, 9, 10, 59, 60, 599, 600, 3599, 3600, 7199, 7200, 35999, 36000, 86399, 86400, 8639999, 30 * 86400, 99 * 86400, 365 * 86400 }
+    for _, h in ipairs({ 1440, 1080 }) do
+        UIParent._h = h; UIParent._w = h * 16 / 9
+        __fireEvent("UI_SCALE_CHANGED")
+        for _, secs in ipairs(samples) do
+            snapshot(aura(1, secs), aura(2, secs))
+            refresh()
+            local a, b = My().tiles[1].label, My().tiles[2].label
+            ok(#a._text >= 2 and #a._text <= 3, secs .. " reads as " .. a._text .. ": two or three characters")
+            local l, r = edges(a)
+            ok(textWidth(a) <= r - l, a._text .. " fits its own room")
+            ok(centre(b) - centre(a) >= textWidth(a) - 1e-6, a._text .. " and " .. b._text .. " do not overlap")
+            if #a._text > #longest then longest = a._text end
+        end
+    end
+    eq(#longest, 3, "the sweep reached a three character time")
+    W.clean(); noFails()
+end
+
+local function alignmentAt(tile)
+    __gunsightSrc = __gunsightSrc:gsub("local MYB_TILE = %d+", "local MYB_TILE = " .. tile)
+    local W = world()
+    eq(W.Gun.G.MYBUFFS.tile, tile)
+    for n = 1, 4 do
+        __snapshot = { buffs = timed(n), debuffs = {} }
+        refresh()
+        for i = 1, n do
+            local t = My().tiles[i]
+            near(centre(t.label), centre(t.frame), 1e-6, "tile " .. tile .. ", " .. n .. " buffs, label " .. i)
+        end
+    end
+    snapshot(aura(1, 3500), aura(2, 3500))
+    refresh()
+    local a, b = My().tiles[1].label, My().tiles[2].label
+    return W, centre(b) - centre(a) >= textWidth(a)
+end
+
+function T.time_alignment_holds_when_the_one_tunable_shrinks()
+    local W = alignmentAt(16)
+    W.clean(); noFails()
+end
+
+function T.time_alignment_and_fit_hold_when_the_one_tunable_grows()
+    local W, fits = alignmentAt(26)
+    ok(fits, "58m and 58m do not overlap")
     W.clean(); noFails()
 end
 
