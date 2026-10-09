@@ -12,11 +12,13 @@
 -- the Clean Up button, a bag icon) is hidden while no controller is connected:
 -- on a client with the GamePadEnable CVar on and nothing plugged in it drew over
 -- the Clean Up (broom) button. C_GamePad missing, C_GamePad.IsEnabled() false or
--- an empty C_GamePad.GetAllDeviceIDs() all count as "no controller". It is
+-- an empty C_GamePad.GetAllDeviceIDs() all count as "no controller"; an API that
+-- errors counts as a controller. It is
 -- re-hidden whenever Blizzard shows it again (post-hooks on Show/SetShown and
 -- OnShow, no method replaced), re-evaluated on GAME_PAD_CONNECTED/
--- DISCONNECTED/ACTIVE_CHANGED and PLAYER_ENTERING_WORLD, left alone (and shown
--- again if we hid it) once a controller is present, and deferred out of combat.
+-- DISCONNECTED/ACTIVE_CHANGED and PLAYER_ENTERING_WORLD, and left alone once a
+-- controller is present (never forced back on: Blizzard shows it on its next
+-- update). The bar is unprotected, so this works in combat too.
 -- The GamePadEnable CVar and the sort button are never touched.
 -- UNVALIDATED in-game: no /fstack or visual check done yet.
 
@@ -529,22 +531,23 @@ end
 -- client with the GamePadEnable CVar on and no controller still shows it, on top
 -- of BagItemAutoSortButton. Read through _G (not in .luacheckrc's globals) and
 -- feature-detected: neither it nor C_GamePad exists on every build.
-local gamepadHiddenByUs = false -- we hid it, so a controller appearing puts it back
-local gamepadPending = false    -- a combat-deferred sync is already queued
+local gamepadHiddenByUs = false -- we hid it; cleared when a controller appears (Blizzard shows it then)
 
 -- "No controller" is C_GamePad missing, gamepads disabled, or no device IDs. An
--- API that is there but errors or lacks a call is not proof either way, so it
--- counts as a controller (Blizzard stays in charge).
+-- API that is there but errors is not proof either way, so any error counts as a
+-- controller (Blizzard stays in charge).
 local function HasController()
     local api = _G["C_GamePad"]
     if type(api) ~= "table" then return false end
     if type(api.IsEnabled) == "function" then
         local ok, enabled = pcall(api.IsEnabled)
-        if ok and not enabled then return false end
+        if not ok then return true end
+        if not enabled then return false end
     end
     if type(api.GetAllDeviceIDs) == "function" then
         local ok, ids = pcall(api.GetAllDeviceIDs)
-        if ok and type(ids) == "table" and #ids == 0 then return false end
+        if not ok then return true end
+        if type(ids) == "table" and #ids == 0 then return false end
     end
     return true
 end
@@ -568,17 +571,6 @@ SyncGamepadBagBar = function()
     if type(bar) ~= "table" or type(bar.Hide) ~= "function" or type(bar.Show) ~= "function" then return end
     HookGamepadBagBar(bar)
 
-    if InCombatLockdown() then
-        if not gamepadPending then
-            gamepadPending = true
-            FS.PanelSkins.DeferCombat(function()
-                gamepadPending = false
-                SyncGamepadBagBar()
-            end)
-        end
-        return
-    end
-
     if not HasController() then
         local shown = true
         if type(bar.IsShown) == "function" then
@@ -589,9 +581,8 @@ SyncGamepadBagBar = function()
             gamepadHiddenByUs = true
             pcall(bar.Hide, bar)
         end
-    elseif gamepadHiddenByUs then
+    else
         gamepadHiddenByUs = false
-        pcall(bar.Show, bar)
     end
 end
 
