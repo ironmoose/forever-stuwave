@@ -13,8 +13,7 @@ unit APIs the tags read. It pins:
   * geometry: the seats, sizes, chamfer, fill and text size are parsed back out of the mockup, at two UI heights,
     and the tags ride the box top (so the numbers' growth moves them with KICK);
   * level tag: the digits alone (no "L", no classification word: the icon is a later concept), "??" for level
-    below 1, the plate sized to the text (5 pad, [icon, 3 gap], digits, 5 pad, 15 minimum, from the level-tag
-    mockup), growing right from the same seat; a secret level goes only through SetFormattedText and reserves two
+    below 1, the plate sized to the text (5 pad, [icon, 3 gap], digits, 5 pad, 15 minimum, pinned in LEVEL_TAG), growing right from the same seat; a secret level goes only through SetFormattedText and reserves two
     digits without measuring; the width follows a target change and a font that lands a frame late;
   * health: the percent goes through the box's own WritePercent (the engine's percent, a secret never divided) and
     follows UNIT_HEALTH, and nothing is written with the tag off;
@@ -48,7 +47,10 @@ ADDON = HERE.parent / "forever-stuwave"
 TAGS = Path(os.environ.get("GUNSIGHTTAGS_LUA") or ADDON / "Modules/CombatHud/GunsightTags.lua")
 TOC = ADDON / "forever-stuwave.toc"
 MOCKUP = HERE.parent / "mockups" / "gunsight-modules-concepts-v7-2026-10-08.html"
-LEVEL_MOCKUP = HERE.parent / "mockups" / "gunsight-level-tag-2026-10-08.html"
+# The level plate's geometry, pinned here: pad 5, icon gap 3, minimum width 15, Mononoki's digit advance 575/1024 em.
+# These came from mockups/gunsight-level-tag-2026-10-08.html (var PAD, GAP, MINW, ADV); the mockup is disposable,
+# so the harness no longer reads it.
+LEVEL_TAG = dict(ADV=575 / 1024, PAD=5, GAP=3, MINW=15)
 
 
 def _load(name: str, file: str):
@@ -69,13 +71,6 @@ def _m(pattern: str, text: str, what: str) -> re.Match:
     return m
 
 
-def mockup_level_tag() -> dict:
-    """The proposed level-tag geometry: var H=15,CH=5,FS=11,ADV=FS*575/1024,PAD=5,GAP=3,MINW=15."""
-    src = LEVEL_MOCKUP.read_text(encoding="utf-8")
-    m = _m(r"ADV=FS\*(\d+)/(\d+),PAD=(\d+),GAP=(\d+),MINW=(\d+)", src, "level tag geometry")
-    return dict(ADV=int(m.group(1)) / int(m.group(2)), PAD=int(m.group(3)), GAP=int(m.group(4)), MINW=int(m.group(5)))
-
-
 def mockup_tags() -> dict:
     """Everything tag() and tags() own in the v7 mockup."""
     src = MOCKUP.read_text(encoding="utf-8")
@@ -91,7 +86,7 @@ def mockup_tags() -> dict:
         LEVEL=dict(x=int(level[0]), y=int(level[1]), w=int(level[2])),
         HEALTH=dict(x=int(health[0]), y=int(health[1]), w=int(health[2])),
         TOT=dict(x=int(tot[0]), y=int(tot[1]), w=int(tot[2])),
-        LT=mockup_level_tag(),
+        LT=LEVEL_TAG,
         BOXR=boxes["base"]["BOXR"], TB_GROW=boxes["TB_GROW"],
     )
 
@@ -205,11 +200,13 @@ local function setTag(name, value) FS.Config.Set(Tg().SETTINGS[name].key, value)
 local function flush() FS.GunsightBoxes.Flush() end
 -- Plate width in image px for n digits, from the level-tag mockup (digit advance 6.2 px at size 11), at the
 -- font size the tag is drawn at: 2 * pad + digits, rounded up, never under the minimum.
+local function digitsW(n)
+    local fs = math.max(Tg().C.MIN_FONT, math.floor(FS.Gunsight.ui(Tg().C.TEXT_SIZE) + 0.5))
+    return n * 6.2 * fs / 11 / K()   -- the mock's 6.2 px a digit at size 11, scaled with the font, in image px
+end
 local function wantW(n, icon)
     local L = Tg().C.LEVEL
-    local fs = math.max(Tg().C.MIN_FONT, math.floor(FS.Gunsight.ui(Tg().C.TEXT_SIZE) + 0.5))
-    local tw = n * 6.2 * fs / 11   -- the mock's 6.2 px a digit at size 11, scaled with the font
-    return math.max(L.minW, math.ceil(2 * L.pad + (icon or 0) + tw / K() - 1e-6))
+    return math.max(L.minW, math.ceil(2 * L.pad + (icon or 0) + digitsW(n) - 1e-6))
 end
 local function levelW() return Tg().level._w / K() end
 
@@ -443,9 +440,10 @@ function T.the_level_plate_grows_to_the_right_from_the_same_seat()
     target("Kurak")
     setUnit(9, "normal")
     local p = Tg().level._points.TOPLEFT
-    local x, y, rel = p.x, p.y, p.rel
+    local x, y, rel, w = p.x, p.y, p.rel, Tg().level._w
     setUnit(30, "normal")
     local q = Tg().level._points.TOPLEFT
+    ok(Tg().level._w > w + 1e-6, "the plate got wider")
     eq(q.rel, rel); near(q.x, x, 1e-9, "the left edge stays"); near(q.y, y, 1e-9, "and the top")
     local count = 0
     for _ in pairs(Tg().level._points) do count = count + 1 end
@@ -519,6 +517,53 @@ function T.the_level_icon_slot_is_empty_and_costs_no_width()
     near(levelW(), wantW(2, 8 + Tg().C.LEVEL.gap), 1e-6, "an 8 px icon adds itself and a 3 px gap")
     Tg().SetLevelIcon(0)
     near(levelW(), wantW(2), 1e-6, "and removing it gives the width back")
+    W.clean(); noFails()
+end
+
+function T.the_label_and_icon_sit_in_the_plate_content_pad_icon_gap_digits_pad()
+    local W = world()
+    __charW = 6.2
+    target("Kurak")
+    setUnit(62, "elite")
+    local L, k = Tg().C.LEVEL, K()
+    local tw = digitsW(2)
+    Tg().SetLevelIcon(8, 6)
+    local icon, label = Tg().level.icon, Tg().level.label
+    local lead = 8 + L.gap
+    local w = levelW()
+    local ip, lp = icon._points.LEFT, label._points.CENTER
+    eq(ip.rel, Tg().level); eq(ip.relPoint, "LEFT")
+    near(ip.x, (w - (lead + tw)) / 2 * k, 1e-6, "the icon starts where the centred content starts")
+    ok(ip.x > 1e-6, "inside the plate, not on its edge")
+    near(icon._w, 8 * k, 1e-6, "icon width"); near(icon._h, 6 * k, 1e-6, "icon height")
+    eq(icon:IsShown(), true)
+    eq(lp.rel, Tg().level); eq(lp.relPoint, "CENTER")
+    near(lp.x, lead / 2 * k, 1e-6, "the digits are pushed right by half the icon and gap")
+    Tg().SetLevelIcon(0)
+    lp = label._points.CENTER
+    near(lp.x, 0, 1e-9, "no icon: the digits are centred")
+    eq(icon:IsShown(), false)
+    near(icon._w, 0, 1e-9)
+    W.clean(); noFails()
+end
+
+function T.a_new_target_empties_the_icon_slot_but_a_level_or_class_event_on_the_same_target_keeps_it()
+    local W = world()
+    __charW = 6.2
+    target("Kurak")
+    setUnit(62, "elite")
+    Tg().SetLevelIcon(8)
+    setUnit(63, "elite")
+    __fireUnit("UNIT_CLASSIFICATION_CHANGED", "target")
+    eq(Tg().level.icon:IsShown(), true, "same target: the icon stays")
+    near(levelW(), wantW(2, 8 + Tg().C.LEVEL.gap), 1e-6)
+    target("Other")
+    eq(Tg().level.icon:IsShown(), false, "a new target starts with no icon")
+    near(levelW(), wantW(2), 1e-6, "and no width for one")
+    near(Tg().level.label._points.CENTER.x, 0, 1e-9, "digits centred again")
+    Tg().SetLevelIcon(8)
+    __fireEvent("PLAYER_ENTERING_WORLD")
+    eq(Tg().level.icon:IsShown(), false, "a world load resets it too")
     W.clean(); noFails()
 end
 
