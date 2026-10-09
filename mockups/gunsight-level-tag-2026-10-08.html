@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1920">
+<title>Gunsight Level Tag</title>
+<style>
+@font-face{font-family:'Mononoki';src:url(../forever-stuwave/Media/Fonts/MononokiNerdFontMono-Bold.ttf) format('truetype');font-weight:100 900;font-style:normal;font-display:block}
+:root{
+  color-scheme:dark;
+  --bg:#0d0620; --fg:#e9e2ff; --muted:#9d93c4; --white:#f3fbff; --text:#e2e8f0;
+  --violet:#a855f7; --cyan:#22e0ff; --pink:#ff2e97; --amber:#ffb648; --green:#39ff14;
+  --gold:#ffd23f; --steel:#8d93a6; --red:#ff3b4e;
+  --edge:rgba(168,85,247,.35);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg)}
+body{width:100%;max-width:1920px;padding:28px 30px 44px;color:var(--fg);font-family:'Mononoki',ui-monospace,monospace;font-weight:700;line-height:1.45}
+h1{margin:0;font-size:30px;letter-spacing:.08em;color:var(--white);text-shadow:0 0 18px var(--violet);font-weight:700}
+.ref{display:inline-block;margin:10px 0 0;padding:2px 10px;font-size:13px;letter-spacing:.12em;color:var(--amber);border:1px solid rgba(255,182,72,.5);background:rgba(255,182,72,.06)}
+.sub{margin:10px 0 18px;color:var(--muted);font-size:15px;max-width:1500px}
+.sub b,.lede b{color:var(--white)}
+h2{margin:34px 0 10px;font-size:22px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 12px var(--violet);font-weight:700}
+h2 i{font-style:normal;color:var(--pink)}
+.lede{color:var(--muted);font-size:13px;max-width:1500px;margin:-2px 0 14px}
+.panel{border:1px solid var(--edge);background:rgba(26,16,37,.7);padding:12px 16px 14px;font-size:12px;line-height:1.5;color:var(--text)}
+.panel h3{margin:0 0 6px;font-size:13px;letter-spacing:.12em;color:var(--violet);font-weight:700;text-transform:uppercase}
+.panel p{margin:0 0 8px}
+.panel b{color:var(--white)}
+.panel ul{margin:0;padding-left:18px}
+.panel li{margin-bottom:5px}
+.mu{color:var(--muted)}
+.row{display:flex;gap:22px;align-items:flex-start;margin-bottom:18px}
+.scene{border:1px solid var(--edge);background:linear-gradient(#0b0716,#1c1030);flex:none}
+.scene svg{display:block}
+.cap{font-size:11px;color:var(--muted);margin:5px 0 0}
+.cap b{color:var(--cyan)}
+table.m{border-collapse:collapse;width:100%;font-size:12px}
+table.m th{text-align:left;color:var(--violet);font-weight:700;letter-spacing:.08em;padding:5px 8px;border-bottom:1px solid rgba(168,85,247,.5);font-size:11px;text-transform:uppercase}
+table.m td{padding:8px 8px;vertical-align:middle;border-top:1px solid rgba(168,85,247,.2);color:var(--text)}
+table.m td.st{width:230px;color:var(--white)}
+table.m td.st small{display:block;color:var(--muted);font-weight:400;font-size:11px}
+.cell{display:flex;gap:18px;align-items:center}
+.cell .x1{background:linear-gradient(#0b0716,#1c1030);padding:8px 6px;border:1px solid rgba(168,85,247,.25)}
+.cell .x3{background:linear-gradient(#0b0716,#1c1030);padding:4px 4px;border:1px solid rgba(168,85,247,.25)}
+.cell svg{display:block}
+.cell .w{font-size:11px;color:var(--muted);min-width:44px}
+.cell .w b{color:var(--cyan)}
+.cards{display:flex;gap:18px;align-items:stretch}
+.card{flex:1;border:1px solid var(--edge);background:rgba(26,16,37,.45);padding:14px 16px 12px}
+.chead{display:flex;align-items:baseline;gap:12px;margin-bottom:4px}
+.cid{font-size:26px;color:var(--pink)}
+.cname{font-size:18px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 12px var(--violet)}
+.pill{display:inline-block;padding:0 6px;font-size:10px;letter-spacing:.06em;border:1px solid;line-height:15px;white-space:nowrap;margin-left:auto}
+.pill.ok{color:var(--green);border-color:rgba(57,255,20,.5)}
+.pill.est{color:var(--amber);border-color:rgba(255,182,72,.6)}
+.pill.der{color:var(--cyan);border-color:rgba(34,224,255,.55)}
+.card p{margin:0 0 7px;font-size:12px;color:var(--text)}
+.card b{color:var(--white)}
+.card .crit{border-top:1px solid rgba(168,85,247,.25);padding-top:7px;margin-top:6px}
+.card .crit b{color:var(--amber)}
+.sheet{display:flex;gap:10px;margin:8px 0 10px;flex-wrap:wrap}
+.sheet div{background:#120a22;border:1px solid rgba(168,85,247,.35);padding:8px 10px 4px;text-align:center;font-size:10px;color:var(--muted)}
+.sheet svg,.sheet canvas{display:block;margin:0 auto 4px}
+.loupe{display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 4px}
+.loupe div{font-size:10px;color:var(--muted);text-align:center}
+.loupe canvas{display:block;image-rendering:pixelated;border:1px solid rgba(168,85,247,.3);background:#120a22;margin-bottom:3px}
+table.dp{border-collapse:collapse;width:100%;font-size:12px}
+table.dp th{text-align:left;color:var(--violet);font-weight:700;letter-spacing:.08em;padding:3px 6px;border-bottom:1px solid rgba(168,85,247,.4);font-size:10px;text-transform:uppercase}
+table.dp td{padding:5px 6px;vertical-align:top;border-top:1px solid rgba(168,85,247,.2);color:var(--text);line-height:1.4}
+table.dp td.a{width:300px;color:#fff;white-space:nowrap}
+table.dp td.v{width:150px;white-space:nowrap}
+.verdict{border:1px solid rgba(255,182,72,.5);background:rgba(255,182,72,.06);padding:10px 16px;font-size:13px;margin:0 0 6px;color:var(--text)}
+.verdict b{color:var(--white)}
+code{color:var(--cyan);font-weight:700}
+</style>
+</head>
+<body>
+<h1>GUNSIGHT LEVEL TAG</h1>
+<div class="ref">Design reference, 2026-10-08, level tag: digits only, elite and rare icons</div>
+<div class="sub">Bug from play: the level tag is <b>too wide</b> and reads <b>L9</b> where only the number is needed; elites and rares need an <b>icon</b>, and the tag should <b>size to its content</b>. Everything below is drawn from the real code (<code>GunsightTags.lua</code>: plate 68 x 15, chamfer 5, Mononoki Bold 11, pink outline, white text, gold classification word) and the shipped palette. Three icon concepts, all at <b>true scale (1x)</b> and <b>3x</b>, plus a pixel loupe of each at the size the game draws them.</div>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <filter id="gls" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+</svg>
+
+<h2><i>01</i> WHERE IT SITS</h2>
+<div class="lede">The tag is seated on the target box's top-left corner, its top <b>8 px above the box</b> (RISE), 1 px in from the left edge. It grows to the right only, so it never reaches the KICK tag. Left, today's plate (fixed 68 wide, "L9"). Right, the proposal (digits only, plate hugs the text). Both at 1x and 3x.</div>
+<div class="row" id="ctx"></div>
+
+<h2><i>02</i> STATES, ALL THREE CONCEPTS</h2>
+<div class="lede">Rows are the target's classification and level. <b>TODAY</b> is what the code draws now. A, B and C are the three icon concepts. Each cell shows the tag at 1x (left, the real size) and 3x. The cyan number is the plate width in px. Plate width = 5 pad + icon + 3 gap + digits + 5 pad, digits 6.2 px each (Mononoki advance 575/1024 em at 11 px), minimum 15 (the plate height, so the chamfers never collapse).</div>
+<table class="m" id="matrix"></table>
+
+<h2><i>03</i> THE THREE ICON CONCEPTS</h2>
+<div class="lede">Reference meaning from Blizzard: gold dragon = elite, silver dragon = rare, silver dragon in the gold frame = rare elite. Kept here as a colour rule, reinterpreted as shapes. <b>Gold part = elite, silver part = rare</b>, so a rare elite carries both. Silver is the shipped steel <code>#8d93a6</code> mixed 55% to white (<code>#cccfd7</code>); steel itself is too dim at 11 px on the dark plate, so a silver token would be new. World boss and skull-level mobs get a red skull.</div>
+<div class="cards" id="cards"></div>
+
+<h2><i>04</i> API FACTS</h2>
+<div class="lede">Checked against the client dump <code>reference/wow-api-dump-16001</code> (FSRecon report, client 1.60.1 build 69913, interface 16001, taken after PLAYER_ENTERING_WORLD on 2026-09-19, so <b>out of combat</b>) and against the shipped code.</div>
+<div class="panel"><table class="dp">
+<tr><th>Fact</th><th>Status</th><th>Source and note</th></tr>
+<tr><td class="a">UnitClassification("target") exists, returns a string</td><td class="v"><span class="pill ok">VERIFIED</span></td><td>globals.txt line 51174 (function); secretAudit.txt: <code>UnitClassification target ok=true string secret=false</code>.</td></tr>
+<tr><td class="a">Return values: normal, elite, rare, rareelite, worldboss, trivial, minus</td><td class="v"><span class="pill est">DOCUMENTED</span></td><td>From Blizzard's API documentation, not from the dump (the audit records types, never values). The code already maps worldboss, elite, rare and rareelite (<code>WORDS</code>); trivial, minus and normal fall through to "no icon". The audit cannot confirm the exact strings; the in-game probe below can.</td></tr>
+<tr><td class="a">UnitLevel("target") returns a number, -1 for skull level</td><td class="v"><span class="pill ok">VERIFIED</span> <span class="pill est">-1 DOCUMENTED</span></td><td>secretAudit.txt: <code>UnitLevel target ok=true number secret=false comparable=true</code>. The -1 for skull-level mobs and world bosses is documented behaviour; the code already treats level below 1 as "??". UnitEffectiveLevel also exists (secretAudit, same result) but is not used.</td></tr>
+<tr><td class="a">Secret in combat?</td><td class="v"><span class="pill der">NEEDS IN-GAME PROBE</span></td><td>The dump was taken out of combat. No repo note records UnitClassification or UnitLevel in combat. The code is already safe either way (<code>IsSecret</code> guards, <code>SetFormattedText</code> for the level). Design consequence if secret: the level can still be drawn (it goes to a format string) but the <b>icon cannot be chosen</b> (a string compare) and the <b>plate width cannot be measured</b> from a secret. Plan: if either is secret, keep the last known icon and reserve two digits of width.</td></tr>
+<tr><td class="a">FontString:GetStringWidth() on a secret-formatted string</td><td class="v"><span class="pill der">NEEDS IN-GAME PROBE</span></td><td>Unknown. Dynamic width depends on it. Fallback is the fixed two-digit reserve above.</td></tr>
+<tr><td class="a">Events to refresh the tag</td><td class="v"><span class="pill ok">IN CODE</span></td><td>UNIT_LEVEL and UNIT_CLASSIFICATION_CHANGED (unit "target") and PLAYER_TARGET_CHANGED are already registered in <code>GunsightTags.lua</code>.</td></tr>
+<tr><td class="a">Does today's code colour the level by difficulty?</td><td class="v"><span class="pill ok">NO</span></td><td>The level is always the white <code>#f3fbff</code> (<code>SeatPlain(..., Tags.colors.white)</code>); only the classification word is gold. Nothing in the repo calls GetCreatureDifficultyColor or GetQuestDifficultyColor (both exist in the dump, globals.txt). So no difficulty colouring is drawn here; adding it is a separate decision, and it would compare the level, which needs the same secret guard.</td></tr>
+<tr><td class="a">Outline colour</td><td class="v"><span class="pill est">NOTE</span></td><td>Code strokes the plate in pink (<code>colors.pink</code>), as drawn here. The bug screenshot reads violet and cyan, so the live tone may differ from this code; the mockup follows the code.</td></tr>
+</table></div>
+
+<h2><i>05</i> RECOMMENDATION</h2>
+<div class="verdict" id="verdict"></div>
+
+<script>
+(function(){
+var C={cyan:'#22e0ff',pink:'#ff2e97',violet:'#a855f7',green:'#39ff14',amber:'#ffb648',white:'#f3fbff',muted:'#9d93c4',bg:'#0d0620',gold:'#ffd23f',steel:'#8d93a6',red:'#ff3b4e'};
+function hex(h){h=h.replace('#','');return [parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)];}
+function mix(a,b,t){var x=hex(a),y=hex(b);return '#'+[0,1,2].map(function(i){return ('0'+Math.round(x[i]+(y[i]-x[i])*t).toString(16)).slice(-2);}).join('');}
+var COL={gold:C.gold,silver:mix(C.steel,'#ffffff',.55),red:C.red};
+function chpts(x,y,w,h,c){return (x+c)+','+y+' '+(x+w)+','+y+' '+(x+w)+','+(y+h-c)+' '+(x+w-c)+','+(y+h)+' '+x+','+(y+h)+' '+x+','+(y+c);}
+function chd(x,y,w,h,c){var p=chpts(x,y,w,h,c).split(' ');return 'M'+p.join(' L')+'Z';}
+
+/* ---------- tag geometry (GunsightTags.lua C table, plus the proposed dynamic width) ---------- */
+var H=15,CH=5,FS=11,ADV=FS*575/1024,PAD=5,GAP=3,MINW=15,RISE=8;
+
+/* ---------- icons: shape = SVG path in the icon's own box, colour = role (gold elite, silver rare, red skull) ---------- */
+function chev(dy){return 'M0,'+(4.4+dy)+' L5,'+dy+' L10,'+(4.4+dy)+' L10,'+(6.9+dy)+' L5,'+(2.5+dy)+' L0,'+(6.9+dy)+'Z';}
+var DIAMOND='M3.5,0 L7,4.5 L3.5,9 L0,4.5Z';
+var SKULL='M5,0.2 C7.9,0.2 9.8,2.1 9.8,4.5 C9.8,6.1 9,7 8.2,7.5 L8.2,9.8 L6.8,9.8 L6.8,8.6 L5.6,8.6 L5.6,9.8 L4.4,9.8 L4.4,8.6 L3.2,8.6 L3.2,9.8 L1.8,9.8 L1.8,7.5 C1,7 0.2,6.1 0.2,4.5 C0.2,2.1 2.1,0.2 5,0.2Z M2.1,4.6 a1.35,1.35 0 1,0 2.7,0 a1.35,1.35 0 1,0 -2.7,0Z M5.2,4.6 a1.35,1.35 0 1,0 2.7,0 a1.35,1.35 0 1,0 -2.7,0Z M5,5.9 L4.4,7 L5.6,7Z';
+var CROWN_BODY='M0.7,6.5 L0,1.4 L3.2,4.4 L5.5,0 L7.8,4.4 L11,1.4 L10.3,6.5Z';
+var CROWN_BASE='M0.9,7.7 H10.1 V9 H0.9Z';
+var GLINT='M4.5,0 L5.5,3.5 L9,4.5 L5.5,5.5 L4.5,9 L3.5,5.5 L0,4.5 L3.5,3.5Z';
+function sm(){ /* the glint scaled to 6 x 6, placed at the icon's top-right */
+  return 'M3,0 L3.65,2.35 L6,3 L3.65,3.65 L3,6 L2.35,3.65 L0,3 L2.35,2.35Z';
+}
+function shift(d,dx,dy){ /* translate an absolute path made only of M/L/H/V/C/Z, numbers in pairs */
+  return d.replace(/([MLHVCAa])([^MLHVCAaZ]*)/g,function(_,c,args){
+    var n=args.trim().split(/[ ,]+/).filter(Boolean).map(Number);
+    if(c==='H')return 'H'+(n[0]+dx);
+    if(c==='V')return 'V'+(n[0]+dy);
+    if(c==='a'||c==='A')return c+args;
+    var out=[];for(var i=0;i<n.length;i+=2)out.push((n[i]+dx)+','+(n[i+1]+dy));
+    return c+out.join(' ');
+  });
+}
+var ICON={
+ A:{
+  elite:{w:10,h:11,parts:[{d:chev(0),c:'gold'},{d:chev(4),c:'gold'}]},
+  rare:{w:7,h:9,parts:[{d:DIAMOND,c:'silver'}]},
+  rareelite:{w:10,h:11,parts:[{d:'M0,4 L5,0 L10,4 L10,6.2 L5,2.2 L0,6.2Z',c:'gold'},{d:'M5,5.6 L8.4,8.3 L5,11 L1.6,8.3Z',c:'silver'}]},
+  skull:{w:10,h:10,parts:[{d:SKULL,c:'red',eo:true}]}
+ },
+ B:{
+  elite:{w:11,h:9,parts:[{d:CROWN_BODY,c:'gold'},{d:CROWN_BASE,c:'gold'}]},
+  rare:{w:9,h:9,parts:[{d:GLINT,c:'silver'}]},
+  rareelite:{w:13,h:10,parts:[{d:shift(CROWN_BODY,0,1),c:'gold'},{d:shift(CROWN_BASE,0,1),c:'gold'},{d:shift(sm(),7,0),c:'silver',halo:true}]},
+  skull:{w:10,h:10,parts:[{d:SKULL,c:'red',eo:true}]}
+ }
+};
+/* concept C: Nerd Font glyphs set in the same FontString as the digits (codepoints present in the shipped Mononoki Nerd Font Mono Bold) */
+var CP={crown:0xEDEB,star:0xF005,skull:0xEE15};
+var GL={
+  elite:[{cp:CP.crown,c:'gold'}],
+  rare:[{cp:CP.star,c:'silver'}],
+  rareelite:[{cp:CP.crown,c:'gold'},{cp:CP.star,c:'silver'}],
+  skull:[{cp:CP.skull,c:'red'}]
+};
+var KIND={elite:'elite',rare:'rare',rareelite:'rareelite',worldboss:'skull'};
+var WORD={worldboss:'BOSS',elite:'ELITE',rare:'RARE',rareelite:'RARE'};
+
+var STATES=[
+ {k:'n9',  t:'Normal, level 9',        s:'UnitClassification "normal"',   lvl:9,  cls:'normal'},
+ {k:'n30', t:'Normal, level 30',       s:'two digits, plate grows',       lvl:30, cls:'normal'},
+ {k:'e9',  t:'Elite, level 9',         s:'the narrowest plate with an icon', lvl:9, cls:'elite'},
+ {k:'e30', t:'Elite, level 30',        s:'"elite"',                       lvl:30, cls:'elite'},
+ {k:'r30', t:'Rare, level 30',         s:'"rare"',                        lvl:30, cls:'rare'},
+ {k:'re30',t:'Rare elite, level 30',   s:'"rareelite"',                   lvl:30, cls:'rareelite'},
+ {k:'wb',  t:'World boss',             s:'"worldboss", UnitLevel -1: skull, no digits', lvl:-1, cls:'worldboss'},
+ {k:'unk', t:'Unknown level, plain mob',s:'"normal" with UnitLevel -1: ??', lvl:-1, cls:'normal'}
+];
+
+/* ---------- layout: the same function drives the SVG and the canvas loupe ---------- */
+function layout(k,st){
+  var kind=KIND[st.cls]||null;
+  var digits=(kind==='skull')?'':(st.lvl>=1?String(st.lvl):'??');
+  var icon=null,iw=0;
+  if(kind){
+    if(k==='C'){icon={glyphs:GL[kind]};iw=GL[kind].length*ADV;}
+    else{icon=ICON[k][kind];iw=icon.w;}
+  }
+  var tw=digits.length*ADV;
+  var content=iw+((iw&&tw)?GAP:0)+tw;
+  var w=Math.max(MINW,Math.ceil(PAD*2+content));
+  var x0=(w-content)/2;if(w>MINW)x0=PAD;
+  return {w:w,digits:digits,icon:icon,iw:iw,tw:tw,x0:x0,kind:kind};
+}
+
+/* ---------- SVG tag (v7 tag() look: chamfered plate, 1.3 pink stroke with glow) ---------- */
+function gtext(x,y,str,fill,anchor){return '<text x="'+x+'" y="'+y+'" font-size="'+FS+'" fill="'+fill+'" text-anchor="'+(anchor||'start')+'">'+str+'</text>';}
+function tagToday(x,y,st){
+  var txt=(st.lvl>=1?'L'+st.lvl:'??'),w=68,word=WORD[st.cls];
+  var o='<polygon points="'+chpts(x,y,w,H,CH)+'" fill="rgba(13,6,32,.95)" stroke="'+C.pink+'" stroke-width="1.3" filter="url(#gls)"/>';
+  o+='<text x="'+(x+w/2)+'" y="'+(y+11)+'" font-size="'+FS+'" fill="'+C.white+'" text-anchor="middle">'+txt+(word?' <tspan fill="'+C.gold+'">'+word+'</tspan>':'')+'</text>';
+  return {svg:o,w:w};
+}
+function tagNew(k,x,y,st){
+  var L=layout(k,st),w=L.w;
+  var o='<polygon points="'+chpts(x,y,w,H,CH)+'" fill="rgba(13,6,32,.95)" stroke="'+C.pink+'" stroke-width="1.3" filter="url(#gls)"/>';
+  var cx=x+L.x0;
+  if(L.icon){
+    if(k==='C'){
+      var gx=cx;
+      L.icon.glyphs.forEach(function(g){o+=gtext(gx,y+11,String.fromCodePoint(g.cp),COL[g.c]);gx+=ADV;});
+    }else{
+      var oy=y+(H-L.icon.h)/2;
+      L.icon.parts.forEach(function(p){
+        o+='<path d="'+p.d+'" transform="translate('+cx+' '+oy+')" fill="'+COL[p.c]+'"'+(p.eo?' fill-rule="evenodd"':'')+
+           (p.halo?' stroke="rgba(13,6,32,.95)" stroke-width="1.3" paint-order="stroke" stroke-linejoin="round"':'')+'/>';
+      });
+    }
+    cx+=L.iw+(L.digits?GAP:0);
+  }
+  if(L.digits)o+=gtext(cx,y+11,L.digits,C.white);
+  return {svg:o,w:w};
+}
+function tagAny(k,x,y,st){return k==='T'?tagToday(x,y,st):tagNew(k,x,y,st);}
+function tagSvg(k,st,scale){
+  var t=tagAny(k,0,0,st),pad=3,W=t.w+pad*2,Hh=H+pad*2;
+  return {w:t.w,html:'<svg xmlns="http://www.w3.org/2000/svg" width="'+(W*scale)+'" height="'+(Hh*scale)+'" viewBox="'+(-pad)+' '+(-pad)+' '+W+' '+Hh+'" font-family="Mononoki,monospace" font-weight="700">'+t.svg+'</svg>'};
+}
+
+/* ---------- section 01: the plate seated on a target box ---------- */
+function sceneSvg(k,st,scale){
+  var bx=14,by=22,bw=190,bh=64,W=bx+bw+12,Hh=by+bh+14;
+  var o='<polygon points="'+chpts(bx,by,bw,bh,8)+'" fill="rgba(13,6,32,.6)" stroke="'+C.pink+'" stroke-width="1.3" filter="url(#gls)"/>';
+  o+='<text x="'+(bx+10)+'" y="'+(by+22)+'" font-size="14" fill="'+C.white+'">ELDER PL...</text>';
+  o+='<rect x="'+(bx+10)+'" y="'+(by+31)+'" width="'+(bw-20)+'" height="7" fill="#0a0416"/><rect x="'+(bx+10)+'" y="'+(by+31)+'" width="'+(bw-20)+'" height="7" fill="'+C.green+'" fill-opacity=".85"/>';
+  o+='<text x="'+(bx+10)+'" y="'+(by+50)+'" font-size="11" fill="'+C.white+'">180 /...</text><text x="'+(bx+bw-10)+'" y="'+(by+50)+'" font-size="11" fill="'+C.cyan+'" text-anchor="end">0 / 0</text>';
+    o+='<polygon points="'+chpts(bx+4,by+bh-7,32,H,CH)+'" fill="rgba(13,6,32,.95)" stroke="'+C.pink+'" stroke-width="1.3" filter="url(#gls)"/><text x="'+(bx+4+16)+'" y="'+(by+bh-7+11)+'" font-size="11" fill="'+C.green+'" text-anchor="middle">100%</text>';
+  var t=tagAny(k,bx+1,by-RISE,st);
+  o+=t.svg;
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="'+(W*scale)+'" height="'+(Hh*scale)+'" viewBox="0 0 '+W+' '+Hh+'" font-family="Mononoki,monospace" font-weight="700">'+o+'</svg>';
+}
+(function(){
+  var ctx=document.getElementById('ctx'),st={lvl:9,cls:'normal'},h='';
+  function blk(title,k,sc,note){return '<div><div class="scene">'+sceneSvg(k,st,sc)+'</div><div class="cap"><b>'+title+'</b> '+note+'</div></div>';}
+  h+='<div style="display:flex;gap:22px;margin-bottom:18px">'+blk('TODAY 1x','T',1,'plate 68 wide, "L9"')+blk('PROPOSED 1x','B',1,'plate 17 wide, "9"')+'</div>';
+  h+='<div style="display:flex;gap:22px">'+blk('TODAY 3x','T',3,'')+blk('PROPOSED 3x','B',3,'')+'</div>';
+  ctx.innerHTML=h;
+  ctx.style.display='block';
+})();
+
+/* ---------- section 02: the state matrix ---------- */
+(function(){
+  var cols=[['T','TODAY (in code)'],['A','A  CHEVRON RANK'],['B','B  CROWN AND GLINT'],['C','C  FONT GLYPHS']];
+  var h='<tr><th>State</th>'+cols.map(function(c){return '<th>'+c[1]+'</th>';}).join('')+'</tr>';
+  STATES.forEach(function(st){
+    h+='<tr><td class="st">'+st.t+'<small>'+st.s+'</small></td>';
+    cols.forEach(function(c){
+      var a=tagSvg(c[0],st,1),b=tagSvg(c[0],st,3);
+      h+='<td><div class="cell"><div class="x1">'+a.html+'</div><div class="x3">'+b.html+'</div><div class="w"><b>'+a.w+'</b> px</div></div></td>';
+    });
+    h+='</tr>';
+  });
+  document.getElementById('matrix').innerHTML=h;
+})();
+
+/* ---------- section 03: concept cards, icon sheets, pixel loupes ---------- */
+function iconSvg(k,kind,scale){
+  var bg='<rect x="-2" y="-2" width="100%" height="100%" fill="none"/>';
+  if(k==='C'){
+    var gs=GL[kind],w=gs.length*ADV+2,o='';
+    gs.forEach(function(g,i){o+='<text x="'+(1+i*ADV)+'" y="11" font-size="'+FS+'" fill="'+COL[g.c]+'">'+String.fromCodePoint(g.cp)+'</text>';});
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="'+(w*scale)+'" height="'+(14*scale)+'" viewBox="0 0 '+w+' 14" font-family="Mononoki,monospace" font-weight="700">'+o+'</svg>';
+  }
+  var ic=ICON[k][kind],o='';
+  ic.parts.forEach(function(p){o+='<path d="'+p.d+'" transform="translate(1 1)" fill="'+COL[p.c]+'"'+(p.eo?' fill-rule="evenodd"':'')+(p.halo?' stroke="#120a22" stroke-width="1.3" paint-order="stroke" stroke-linejoin="round"':'')+'/>';});
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="'+((ic.w+2)*scale)+'" height="'+((ic.h+2)*scale)+'" viewBox="0 0 '+(ic.w+2)+' '+(ic.h+2)+'">'+o+'</svg>';
+}
+var CARDS=[
+ {k:'A',name:'CHEVRON RANK',pill:['ok','EXISTING TEXTURES'],
+  idea:'<b>Elite</b> is two stacked gold up-chevrons, the rank insignia read of Blizzard\'s gold dragon frame. <b>Rare</b> is a single silver diamond. <b>Rare elite</b> sets the silver diamond inside one gold chevron. Skull for world boss.',
+  build:'<b>Needs no new art for elite, rare and rare elite.</b> <code>cast_chevron_up_fill.tga</code> (solid up-chevron, 64 x 32) stretched to about 10 x 5 and <code>hud_diamond.tga</code> (solid rhombus) stretched to about 7 x 9, both with <code>SetVertexColor</code> (gold <code>#ffd23f</code>, silver, red). Two or three Texture regions on the level tag frame. The <b>skull is the one new texture</b> (<code>level_skull.tga</code>); until it exists, world boss falls back to a red "??" with the elite chevrons.',
+  crit:'<b>Readable at 11 px?</b> The chevrons are two 2.5 px strokes with a 1.5 px gap, so they read as a clear zig-zag in the loupe but sit close to merging. The diamond is a clean solid. <b>Elite vs rare?</b> Instantly, shape and colour both differ. Weak spots: the diamond is the Soul Shard glyph elsewhere in the HUD, and a gold chevron pair reads "rank up" more than "dangerous". Rare elite is the busiest icon and the nested diamond is only 3 px wide.'},
+ {k:'B',name:'CROWN AND GLINT',pill:['est','3 NEW TEXTURES'],
+  idea:'<b>Elite</b> is a gold three-spike crown on a base bar: the one shape everybody already reads as "elite". <b>Rare</b> is a silver four-point glint, the sparkle a rare spawn gets. <b>Rare elite</b> is the gold crown with a small silver glint on its right shoulder, haloed in the plate colour so it does not smear into the spike.',
+  build:'<b>Needs new textures:</b> <code>level_crown.tga</code>, <code>level_glint.tga</code>, <code>level_skull.tga</code> (white shape in alpha, 32 x 32, tinted with <code>SetVertexColor</code>). Pipeline: add <code>tools/assets/generate_level_icons.py</code> in the stdlib supersampled style of <code>generate_hud_diamond.py</code> (the SVG paths here are the source of truth), add its entry to <code>EXPECTED_DIMS</code> in <code>tools/assets/test_tga_generators.py</code>, run it so the TGAs land in <code>forever-stuwave/Media/Textures</code>, commit them, then repackage (packaging reads committed HEAD). Rare elite reuses crown and glint (two regions).',
+  crit:'<b>Readable at 11 px?</b> The crown survives well: three points and a base bar still read at 11 x 9. The glint is a 9 px star that becomes a soft plus sign at 1x, fine as "shiny", not crisp. The small rare-elite glint (6 px) is the weakest part: at 1x it is a silver dot beside the spike. <b>Elite vs rare?</b> Instantly, crown against sparkle; gold against silver as the second cue. The most symbolic of the three, at the cost of three textures.'},
+ {k:'C',name:'FONT GLYPHS',pill:['der','ZERO ASSETS, PROBE FIRST'],
+  idea:'The icon is a character in the same FontString as the digits: Nerd Font crown for elite, star for rare, crown plus star for rare elite, skull for world boss, each wrapped in a colour escape. Nothing extra to build, size or lay out: the plate width is just the string width.',
+  build:'<b>No texture, no generator.</b> The codepoints (fa-crown U+EDEB, fa-star U+F005, fa-skull U+EE15) are in the shipped <code>MononokiNerdFontMono-Bold.ttf</code>, found by glyph name in its cmap and rendered to confirm the shapes (U+F521, the old crown slot, is a strikethrough in this font build). All three are below U+FFFF, so no 4 byte UTF-8. <b>Needs in-game probe:</b> whether the client renders private use area glyphs from this TTF at all. The repo has no precedent for a PUA glyph in a FontString.',
+  crit:'<b>Readable at 11 px?</b> No. A Nerd Font Mono glyph is squeezed into one 6 px cell, so the crown is a 6 x 7 blob and the star a 6 px asterisk; the loupe shows it. <b>Elite vs rare?</b> By colour mostly, the shapes are too small to carry it alone. Good as the free stand-in while the real textures are made; not a final answer.'}
+];
+(function(){
+  var h='';
+  CARDS.forEach(function(c){
+    var kinds=['elite','rare','rareelite','skull'],names={elite:'ELITE',rare:'RARE',rareelite:'RARE ELITE',skull:'WORLD BOSS'};
+    var sheet='<div class="sheet">'+kinds.map(function(kd){return '<div>'+iconSvg(c.k,kd,5)+names[kd]+'</div>';}).join('')+'</div>';
+    h+='<div class="card"><div class="chead"><span class="cid">'+c.k+'</span><span class="cname">'+c.name+'</span><span class="pill '+c.pill[0]+'">'+c.pill[1]+'</span></div>'+
+       '<p>'+c.idea+'</p>'+sheet+
+       '<div class="mu" style="font-size:10px;margin:0 0 3px">PIXEL LOUPE: the whole tag drawn at 1x on a canvas, then enlarged 6x with no smoothing, the closest this page gets to the in-game raster</div>'+
+       '<div class="loupe" id="lp'+c.k+'"></div>'+
+       '<p><b>Build:</b> '+c.build+'</p><div class="crit"><p>'+c.crit+'</p></div></div>';
+  });
+  document.getElementById('cards').innerHTML=h;
+})();
+
+/* canvas loupe: same layout() and the same icon paths as the SVG */
+function drawTag(ctx,k,st){
+  var L=layout(k,st),w=L.w,x=2,y=2;
+  var plate=new Path2D(chd(x,y,w,H,CH));
+  ctx.fillStyle='rgba(13,6,32,.95)';ctx.fill(plate);
+  ctx.lineWidth=1;ctx.strokeStyle=C.pink;ctx.stroke(new Path2D(chd(x+.5,y+.5,w-1,H-1,CH)));
+  ctx.textBaseline='alphabetic';ctx.font='700 '+FS+'px Mononoki';
+  var cx=x+L.x0;
+  if(L.icon){
+    if(k==='C'){
+      L.icon.glyphs.forEach(function(g){ctx.fillStyle=COL[g.c];ctx.fillText(String.fromCodePoint(g.cp),cx,y+11);cx+=ADV;});
+      cx=x+L.x0+L.iw;
+    }else{
+      var oy=y+(H-L.icon.h)/2;
+      L.icon.parts.forEach(function(p){
+        ctx.save();ctx.translate(Math.round(cx),Math.round(oy));
+        var path=new Path2D(p.d);
+        if(p.halo){ctx.lineWidth=1.3;ctx.lineJoin='round';ctx.strokeStyle='rgba(13,6,32,.95)';ctx.stroke(path);}
+        ctx.fillStyle=COL[p.c];ctx.fill(path,p.eo?'evenodd':'nonzero');
+        ctx.restore();
+      });
+      cx+=L.iw;
+    }
+    if(L.digits)cx+=GAP;
+  }
+  if(L.digits){ctx.fillStyle=C.white;ctx.fillText(L.digits,cx,y+11);}
+  return {w:w+4,h:H+4};
+}
+function loupe(){
+  var Z=6,list=[['Elite 30',{lvl:30,cls:'elite'}],['Rare 30',{lvl:30,cls:'rare'}],['Rare elite 30',{lvl:30,cls:'rareelite'}],['World boss',{lvl:-1,cls:'worldboss'}]];
+  ['A','B','C'].forEach(function(k){
+    var host=document.getElementById('lp'+k);if(!host)return;host.innerHTML='';
+    list.forEach(function(it){
+      var size=layout(k,it[1]).w+4,off=document.createElement('canvas');off.width=size;off.height=H+4;
+      var octx=off.getContext('2d');octx.fillStyle='#120a22';octx.fillRect(0,0,off.width,off.height);
+      drawTag(octx,k,it[1]);
+      var vis=document.createElement('canvas');vis.width=off.width*Z;vis.height=off.height*Z;
+      var vctx=vis.getContext('2d');vctx.imageSmoothingEnabled=false;vctx.drawImage(off,0,0,vis.width,vis.height);
+      var d=document.createElement('div');d.appendChild(vis);d.appendChild(document.createTextNode(it[0]));host.appendChild(d);
+    });
+  });
+}
+try{(document.fonts&&document.fonts.load?document.fonts.load('700 11px Mononoki'):Promise.resolve()).then(loupe,loupe);}catch(e){loupe();}
+
+/* ---------- verdict ---------- */
+document.getElementById('verdict').innerHTML=
+ '<b>Ship the tag change now, pick B for the icons.</b> '+
+ '(1) <b>Digits only and dynamic width are independent of the icon choice</b> and fix the reported bug on their own: "9" is a 17 px plate and "30" a 23 px plate against 68 today, grown to the right from the same seat, 5 px pad, 15 px minimum so the chamfers hold. '+
+ '(2) For the icons, <b>B (crown and glint)</b> reads fastest at 11 px and is the clearest elite against rare; it costs three small stdlib-generated textures through a pipeline the repo already has. '+
+ '(3) <b>A</b> is the no-new-art fallback for elite, rare and rare elite (only the skull is new), and is the right first drop if textures are not wanted this pass. '+
+ '(4) <b>C</b> is not recommended: the 6 px mono cell makes the glyphs unreadable. '+
+ '(5) Before building: <b>in-game probe</b> UnitClassification, UnitLevel and GetStringWidth on a target acquired in combat, to learn whether the icon and width must fall back to "last known icon, two digit reserve". Level stays white as in code; difficulty colouring is not drawn because the code does not do it.';
+})();
+</script>
+</body>
+</html>
