@@ -28,9 +28,11 @@
 -- MainActionBar's "actionpage" attribute live (bonus, temp shapeshift, and the
 -- unskinned vehicle and override bars) with its own secure code. SKINNED vehicle
 -- and override bars go through OverrideActionBar's own "actionpage" instead
--- (ActionBarController_UpdateAll), so out of combat `button.bar` is moved to
--- OverrideActionBar while that state is live (ApplyPage). The click resolves the
--- live page at click time, in combat too, and we write no attribute. Live test 2026-10-09
+-- (ActionBarController_UpdateAll), so `button.bar` is moved to OverrideActionBar
+-- while that state is live (ApplyPage), in combat too: it is a plain Lua field, not
+-- an attribute, and an insecure write of it was honoured by the combat click (live
+-- test 2026-10-09). The click resolves the live page at click time, in combat too,
+-- and we write no attribute. Another live test 2026-10-09
 -- (stealthed Rogue, out of combat): GetActionBarPage() = 1 while
 -- MainActionBar:GetAttribute("actionpage") = 7; after breaking stealth into
 -- combat a click on the first button fired page-1 slot 1 (Attack), i.e. the
@@ -978,26 +980,25 @@ local function RefreshFlyouts()
     end
 end
 
--- Points button.action (the field the draw code reads) at the current page. On
--- the live path that is all but the click host: the click already follows the page.
--- Without MainActionBar the fixed "action" attribute is re-pointed too, which is
--- illegal in combat, so a page change mid-fight is remembered and applied on regen.
--- Returns whether any slot moved.
+-- Points button.action (the field the draw code reads) at the current page, and
+-- `button.bar` at the host whose page that is. On the live path that is all: the
+-- click already follows the page. `button.bar` is a plain Lua field, not an attribute,
+-- so moving it is legal in combat and carries the same taint as the build-time write
+-- (live test 2026-10-09: `.bar` set from /run, insecure, and the click still resolved
+-- through it in combat). The host therefore swaps at once when a skinned vehicle or
+-- override bar starts or ends, and the drawn page, the HUD's LivePage() and the click
+-- all agree. Without MainActionBar the fixed "action" attribute is re-pointed too,
+-- which is illegal in combat, so a page change mid-fight is remembered and applied on
+-- regen. Returns whether any slot moved.
 local pendingPage = false
 
 local function ApplyPage(onlyIfChanged)
     local changed = false
     local wanted = ActiveHost()
-    local canSwap = not InCombatLockdown()
-    local swapWaits = false
+    local canRefreshFlyouts = not InCombatLockdown()
     for _, button in ipairs(allButtons) do
         if button.paged then
-            -- Moving the click host is out of combat only. In combat the click still
-            -- resolves through the old host, so the visual reads THAT host's page
-            -- (what is drawn is what fires) and the swap is replayed on regen.
-            if wanted and button.bar ~= wanted then
-                if canSwap then button.bar = wanted else swapWaits = true end
-            end
+            if wanted and button.bar ~= wanted then button.bar = wanted end
             local page = LivePage(wanted and button.bar)
             local slot = (page - 1) * BUTTONS_PER_BAR + button.index
             if button.action ~= slot then
@@ -1008,9 +1009,8 @@ local function ApplyPage(onlyIfChanged)
         end
     end
     if pagedHost then
-        pendingPage = swapWaits
         if changed then pendingFlyout = true end
-        if pendingFlyout and canSwap then RefreshFlyouts() end
+        if pendingFlyout and canRefreshFlyouts then RefreshFlyouts() end
     end
     if changed or not onlyIfChanged then UpdateAll() end
     return changed

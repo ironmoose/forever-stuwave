@@ -1331,32 +1331,57 @@ function T.skinned_vehicle_or_override_bar_moves_the_click_host_to_overrideactio
     eq(__calcAction(__button(1, 2)), __button(1, 2).action)
 end
 
-function T.skinned_override_entered_in_combat_keeps_the_click_host_until_regen()
-    -- The host swap is out of combat only. Until then the click resolves through MainActionBar, so
-    -- the visuals read MainActionBar's page too (what is drawn is what fires); regen replays it.
+function T.skinned_override_entered_in_combat_swaps_the_click_host_at_once()
+    -- `.bar` is a plain Lua field, not an attribute, so moving it is legal in combat (live test
+    -- 2026-10-09: an insecure write of it was honoured by the combat click). The visual and the
+    -- click follow the override bar's page immediately, with no attribute or ID write.
     MainActionBar:SetAttribute("actionpage", 1)
     __combat = true
     __attrWrites = 0
     OverrideActionBar:SetAttribute("actionpage", 12)
     __barState = LE_ACTIONBAR_STATE_OVERRIDE
     __fire_event("UPDATE_VEHICLE_ACTIONBAR")
-    __flushTimers()
     for i = 1, 12 do
         local b = __button(1, i)
-        eq(b.bar, MainActionBar, "no swap in combat " .. i)
-        eq(b.action, liveSlot(1, i), "draws what the click resolves " .. i)
+        eq(b.bar, OverrideActionBar, "swapped in combat " .. i)
+        eq(b.action, liveSlot(12, i), "draws the override page " .. i)
         eq(__calcAction(b), b.action, "click agrees " .. i)
+        eq(b:GetID(), i, "id untouched " .. i)
     end
-    eq(__attrWrites, 0)
+    eq(__attrWrites, 0, "no SetAttribute or SetID in combat")
     eq(__blocked, 0)
+    -- a late re-read changes nothing, and regen has nothing left to replay
+    __flushTimers()
     __combat = false
     __fire_event("PLAYER_REGEN_ENABLED")
     for i = 1, 12 do
         local b = __button(1, i)
-        eq(b.bar, OverrideActionBar, "swapped at regen " .. i)
-        eq(b.action, liveSlot(12, i), "visual at regen " .. i)
-        eq(__calcAction(b), b.action, "click agrees at regen " .. i)
+        eq(b.bar, OverrideActionBar, "still the override host after regen " .. i)
+        eq(b.action, liveSlot(12, i), "visual after regen " .. i)
+        eq(__calcAction(b), b.action, "click agrees after regen " .. i)
     end
+    eq(__attrWrites, 0, "regen writes nothing either")
+end
+
+function T.skinned_override_left_in_combat_swaps_the_click_host_back_at_once()
+    MainActionBar:SetAttribute("actionpage", 1)
+    OverrideActionBar:SetAttribute("actionpage", 12)
+    __barState = LE_ACTIONBAR_STATE_OVERRIDE
+    __fire_event("UPDATE_VEHICLE_ACTIONBAR")
+    eq(__button(1, 1).bar, OverrideActionBar, "fixture: on the override bar")
+    __combat = true
+    __attrWrites = 0
+    __barState = LE_ACTIONBAR_STATE_MAIN
+    __fire_event("UPDATE_OVERRIDE_ACTIONBAR")
+    for i = 1, 12 do
+        local b = __button(1, i)
+        eq(b.bar, MainActionBar, "back on the main bar in combat " .. i)
+        eq(b.action, liveSlot(1, i), "draws MainActionBar's page " .. i)
+        eq(__calcAction(b), b.action, "click agrees " .. i)
+        eq(b:GetID(), i, "id untouched " .. i)
+    end
+    eq(__attrWrites, 0, "no SetAttribute or SetID in combat")
+    eq(__blocked, 0)
 end
 
 function T.entering_world_reads_the_live_page()
@@ -3031,7 +3056,8 @@ VARIANTS = {
     "paged_click_resolves_to_the_live_page_in_combat": LIVE_BAR,
     "paged_page_falls_back_to_the_clients_page_like_calculateaction_when_the_attribute_is_unset": LIVE_BAR,
     "skinned_vehicle_or_override_bar_moves_the_click_host_to_overrideactionbar": LIVE_BAR,
-    "skinned_override_entered_in_combat_keeps_the_click_host_until_regen": LIVE_BAR,
+    "skinned_override_entered_in_combat_swaps_the_click_host_at_once": LIVE_BAR,
+    "skinned_override_left_in_combat_swaps_the_click_host_back_at_once": LIVE_BAR,
     "entering_world_reads_the_live_page": LIVE_BAR,
     "paged_slot_change_refreshes_the_flyout_out_of_combat_and_at_regen": LIVE_BAR,
     "bar6_first_slot_follows_the_clients_multibar5_page": "MULTIBAR_5_ACTIONBAR_PAGE = 15",
