@@ -30,8 +30,12 @@ FS.Layout = FS.Layout or {
     party       = { point = "CENTER", relPoint = "CENTER", x = -389,  y = -75,  w = 231,  h = 294 },
     raid        = { point = "CENTER", relPoint = "CENTER", x = -1076, y = 25,   w = 360,  h = 190 },
     boss        = { point = "CENTER", relPoint = "CENTER", x = 728,   y = 152,  w = 210,  h = 210 },
-    pcast       = { point = "CENTER", relPoint = "CENTER", x = 0,     y = -300, w = 340,  h = 30  },
-    tcast       = { point = "CENTER", relPoint = "CENTER", x = 0,     y = -334, w = 270,  h = 26  },
+    -- Stack A's two cast bars (CastBars.lua), the cast display while the Gunsight HUD is off. UI units,
+    -- not scaled (the bars have always sat on a fixed seat in UIParent units), and noSize: the bar fits its
+    -- own width to whole chevrons (268 at pixel scale 1) and is 22 high. Centres: the old seat's gap centre
+    -- (0, -317) less / plus half the 18 gap and half a bar (22 / 2): player -337, target -297.
+    pcast       = { point = "CENTER", relPoint = "CENTER", x = 0,     y = -337, w = 268,  h = 22, unscaled = true, noSize = true },
+    tcast       = { point = "CENTER", relPoint = "CENTER", x = 0,     y = -297, w = 268,  h = 22, unscaled = true, noSize = true },
     action      = { point = "CENTER", relPoint = "CENTER", x = -7,    y = -540, w = 1089, h = 178 },
     multibar    = { point = "CENTER", relPoint = "CENTER", x = 1253,  y = 97,   w = 50,   h = 320 },
     stance      = { point = "CENTER", relPoint = "CENTER", x = 0,     y = -427, w = 320,  h = 38  },

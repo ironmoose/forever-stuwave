@@ -26,10 +26,20 @@
 -- TARGET SIDE. Two areas (upper, lower) beside the target cast bar each hold one module id; the choice
 -- is FS.Config (gunsight.target.upper / .lower) and GunsightAreas.lua draws it.
 --
+-- MASTER SWITCH (gunsight.enabled) APPLIES LIVE to what is built. IsEnabled() is what the builders saw at
+-- login (what exists); the switch itself is read again on every change (the config window, /fsgun, a
+-- profile switch). Off hides the whole HUD (the root, which every piece hangs from) and announces
+-- IsActive() == false, so GunsightTape hands the casts back to Stack A; on shows it again and announces
+-- true. The root is the parent of a protected button (the target of target tag), so in combat only its
+-- alpha moves and the Show or Hide is owed to PLAYER_REGEN_ENABLED; a switch-on that cannot show the root
+-- yet stays inactive (Stack A keeps casting) until it can. What was never built (a Gunsight that was off at
+-- login) and what was never drawn (the classic combat HUD of a Gunsight that was on) cannot be made live:
+-- NeedsReload() names that, for the config row's prompt.
+--
 -- Slash: /fsgun [on | off | seat <dx> <dy> | piece <key> on|off | debug]. Public surface (all
 -- FS.Gunsight.*): ui, Point, root, anchors, G, RegisterPiece, SetPiece, IsPieceOn, OnPieceChanged,
--- OnReady, IsEnabled, SetSeat, Reseat, CONFIG_ENABLED, PieceConfigKey, AREA_IDS, AreaFamily, GetArea,
--- SetArea, OnAreaChanged.
+-- OnReady, IsEnabled, IsActive, OnActiveChanged, NeedsReload, SetSeat, Reseat, CONFIG_ENABLED,
+-- PieceConfigKey, AREA_IDS, AreaFamily, GetArea, SetArea, OnAreaChanged.
 
 local addonName, FS = ...
 
@@ -133,7 +143,11 @@ local readyCallbacks = {}
 local logged = {}
 local seat = { dx = 0, dy = 0 }
 local pendingSeat                -- a SetSeat made before Init; Init applies it over the saved seat
-local enabled = true
+local enabled = true        -- gunsight.enabled as the builders saw it at login: what was BUILT (never changes)
+local masterOn = true       -- gunsight.enabled now (follows every change)
+local active = false        -- built, on, and the root really shown: the Gunsight is the display
+local masterOwed = false    -- the root's Show or Hide waits for PLAYER_REGEN_ENABLED
+local activeCallbacks = {}
 local inited, loggedIn, ready, debugOn = false, false, false, false
 local root
 local anchors = {}
@@ -437,8 +451,28 @@ function Gunsight.OnReady(fn)
     end
 end
 
+-- What was built at login: true when the Gunsight HUD exists in this session. Builders read it once.
 function Gunsight.IsEnabled()
     return enabled
+end
+
+-- True while the Gunsight HUD is the display: built, switched on, and its root really shown. False the
+-- moment it is switched off (even in combat) and while a switch-on waits for combat to end.
+function Gunsight.IsActive()
+    return active
+end
+
+-- fn(active) runs when IsActive() changes after init (not for the state Init restores).
+function Gunsight.OnActiveChanged(fn)
+    if type(fn) == "function" then activeCallbacks[#activeCallbacks + 1] = fn end
+end
+
+-- nil when the switch matches what was built; otherwise the one line the config row shows next to its
+-- Reload button: what only a reload can do.
+function Gunsight.NeedsReload()
+    if not inited or masterOn == enabled then return nil end
+    if masterOn then return "Reload to build the Gunsight HUD" end
+    return "Reload to restore the classic HUD"
 end
 
 function Gunsight.SetSeat(dx, dy)
@@ -461,6 +495,7 @@ local function Init()
     for key, on in pairs(earlySaves) do FS.Config.Set(PieceKey(key), on) end
     earlySaves = {}
     enabled = FS.Config.Get(CFG_ENABLED) == true
+    masterOn, active = enabled, enabled
     seat.dx, seat.dy = db.seat.dx, db.seat.dy
     if pendingSeat then
         seat.dx, seat.dy = pendingSeat.dx, pendingSeat.dy
@@ -479,7 +514,7 @@ local function Init()
 end
 
 -- A profile switch, reset or copy changes piece settings behind SetPiece's back; follow them like a
--- SetPiece. The master switch is read at load (builders choose their view then), so it waits for a reload.
+-- SetPiece. The master switch is followed live too (ApplyMaster, below).
 for _, key in ipairs(PIECE_KEYS) do
     FS.Config.OnChange(PieceKey(key), function(new)
         local on = new == true
@@ -565,8 +600,69 @@ for which, key in pairs(AREA_KEYS) do
     end)
 end
 
+-------------------------------------------------------------------------------
+-- Master switch, live
+-------------------------------------------------------------------------------
+
+local function SetActive(now)
+    if active == now then return end
+    if now then
+        -- The root was hidden: a piece that draws with an animation (a pulse) may have been stopped by it and
+        -- redraws from its onShow hook, as when its own piece is switched on. Pieces that are off stay quiet.
+        for _, key in ipairs(PIECE_KEYS) do
+            local piece = pieces[key]
+            if piece and pieceState[key] then RunHook(piece, "onShow") end
+        end
+    end
+    active = now
+    for _, fn in ipairs(activeCallbacks) do
+        local ok, err = pcall(fn, now)
+        if not ok then LogOnce("active_callback", "an OnActiveChanged callback failed: " .. tostring(err)) end
+    end
+end
+
+-- Puts the root (so the whole HUD) in the master switch's state. In combat the root, a parent of the
+-- protected target of target button, takes ALPHA ONLY: a hide is owed to PLAYER_REGEN_ENABLED, and a show
+-- that needs a real Show waits for it too (inactive meanwhile, so the casts stay on Stack A rather than on
+-- tapes nobody can see). A root still shown from an earlier off-in-combat comes straight back by alpha.
+local function ApplyMaster()
+    if not inited then return end
+    masterOwed = false
+    if not enabled then return end      -- nothing was built: nothing to show or hide
+    local combat = type(InCombatLockdown) == "function" and InCombatLockdown()
+    if masterOn then
+        if root:IsShown() then
+            root:SetAlpha(1)
+            SetActive(true)
+        elseif combat then
+            masterOwed = true
+            SetActive(false)
+        else
+            root:SetAlpha(1)
+            root:Show()
+            SetActive(true)
+        end
+    else
+        if combat then
+            root:SetAlpha(0)
+            masterOwed = root:IsShown()
+        else
+            root:Hide()
+            root:SetAlpha(1)
+        end
+        SetActive(false)
+    end
+end
+
+FS.Config.OnChange(CFG_ENABLED, function(new)
+    if not inited then return end
+    masterOn = new == true
+    ApplyMaster()
+end)
+
 -- Out of combat again: finish whatever a protected frame could not do under lockdown.
 local function Reconcile()
+    if masterOwed then ApplyMaster() end
     for _, key in ipairs(PIECE_KEYS) do
         local piece = pieces[key]
         if piece and piece.deferred then ApplyFrame(piece, pieceState[key] == true) end
@@ -668,7 +764,12 @@ local function SetEnabled(on)
         Say("settings are read-only this session.")
         return
     end
-    Say((on and "enabled" or "disabled") .. "; /reload for it to take effect.")
+    local note = Gunsight.NeedsReload()
+    if note then
+        Say((on and "enabled" or "disabled") .. "; " .. note:sub(1, 1):lower() .. note:sub(2) .. " (/reload).")
+    else
+        Say((on and "enabled" or "disabled") .. ".")
+    end
 end
 
 SLASH_FSGUN1 = "/fsgun"

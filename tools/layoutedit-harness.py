@@ -387,6 +387,20 @@ function T.the_tooltip_anchor_gets_a_handle_labelled_tooltip_and_resets_with_the
     eq(override("tooltip"), nil, "reset all covers it")
 end
 
+function T.the_stack_a_cast_bars_are_movable_only_while_they_are_the_display()
+    edit()
+    seat("pcast"); seat("tcast")
+    FS.LayoutEdit.Enter()
+    eq(FS.LayoutEdit.GetHandle("pcast").label._text, "Player cast bar")
+    eq(FS.LayoutEdit.GetHandle("tcast").label._text, "Target cast bar")
+    FS.LayoutEdit.Exit()
+    FS.CastBars = { IsStackActive = function() return false end }
+    FS.LayoutEdit.Enter()
+    eq(FS.LayoutEdit.GetHandle("pcast"), nil, "Gunsight tapes up: Stack A is hidden, so no handle")
+    eq(FS.LayoutEdit.GetHandle("tcast"), nil)
+    FS.CastBars = nil
+end
+
 function T.a_handle_is_an_insecure_fullscreen_dialog_frame_on_uiparent_never_anchored_to_the_frame()
     edit()
     local f = seat("stance", true)

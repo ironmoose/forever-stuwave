@@ -568,7 +568,9 @@ local function PaintToggle(b, on)
     b.fsKnob:SetPoint(on and "RIGHT" or "LEFT", b, on and "RIGHT" or "LEFT", on and -4 or 4, 0)
 end
 
--- {label, key, get, set, tip, half, master}: bound to FS.Config.Get/Set(key), or to get()/set(v).
+-- {label, key, get, set, tip, half, master, reload}: bound to FS.Config.Get/Set(key), or to get()/set(v).
+-- `reload` (master rows) is a function returning the line to show beside a Reload button, or nil for none: the
+-- part of a change that only a /reload can apply, so the row never silently does nothing.
 function UI.Toggle(content, o)
     local master = o.master == true
     local row = NewRow(content, {
@@ -591,9 +593,28 @@ function UI.Toggle(content, o)
         WriteValue(o, not (ReadValue(o) == true))
         CW.RefreshAll()
     end)
+    local note, reloadButton
+    if o.reload and state then
+        reloadButton = BuildButton(row, {
+            text = "Reload", warn = true,
+            onClick = function()
+                local fn = _G.ReloadUI
+                if type(fn) == "function" then fn() end
+            end,
+        })
+        reloadButton:SetPoint("RIGHT", state, "LEFT", -12, 0)
+        note = Label(row, "", 10, C.pink)
+        note:SetPoint("RIGHT", reloadButton, "LEFT", -8, 0)
+    end
     Track(function()
         local on = ReadValue(o) == true
         PaintToggle(b, on)
+        if note then
+            local line = o.reload()
+            note:SetText(line or "")
+            note:SetShown(line ~= nil)
+            reloadButton:SetShown(line ~= nil)
+        end
         if state then
             state:SetText(on and "ON" or "OFF")
             Theme.ApplyMono(state, 9, on and C.cyan or C.line)
@@ -1347,7 +1368,9 @@ if FS.Gunsight and FS.Gunsight.PIECES then
         local Gunsight = FS.Gunsight
         UI.Toggle(page, {
             label = "Gunsight HUD", key = Gunsight.CONFIG_ENABLED, master = true,
-            tip = "Master switch for the whole HUD. Takes effect after /reload.",
+            reload = Gunsight.NeedsReload,
+            tip = "Master switch for the whole HUD. Off hands the cast bars back to the standard ones at once. "
+                .. "A Gunsight that was off at login, or the classic combat HUD, needs /reload.",
         })
         TargetSideGroups(page)
         UI.Header(page, "Pieces")

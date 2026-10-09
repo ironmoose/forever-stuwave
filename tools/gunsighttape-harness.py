@@ -1678,6 +1678,261 @@ function T.piece_frames_hold_no_tape_state_the_core_would_clobber()
     W.clean()
 end
 
+-- ---- the master switch, live ---------------------------------------------------
+
+local function setMaster(on) FS.Config.Set("gunsight.enabled", on) end
+local function wired(S) return S.events._scripts.OnEvent ~= nil end
+-- Event registrations that something would answer: a frame with a handler, one count per event.
+local function countRegs()
+    local n = 0
+    for _, f in ipairs(__all) do
+        if f._scripts and f._scripts.OnEvent then
+            for _ in pairs(f._events or {}) do n = n + 1 end
+            for _ in pairs(f._unitEvents or {}) do n = n + 1 end
+        end
+    end
+    return n
+end
+-- Makes the Gunsight root behave like a protected frame under lockdown: Show and Hide raise and are counted.
+local function lockRoot()
+    local root = FS.Gunsight.root
+    local state = { combat = false, blocked = 0 }
+    local hide, show = root.Hide, root.Show
+    function root:Hide(...)
+        if state.combat then state.blocked = state.blocked + 1; error("ADDON_ACTION_BLOCKED Hide") end
+        return hide(self, ...)
+    end
+    function root:Show(...)
+        if state.combat then state.blocked = state.blocked + 1; error("ADDON_ACTION_BLOCKED Show") end
+        return show(self, ...)
+    end
+    InCombatLockdown = function() return state.combat end
+    return state
+end
+
+function T.master_off_live_hands_the_casts_back_to_stack_a()
+    local W = world()
+    W.cast("player", "Shadow Bolt", "C1", 100, 2.5)
+    W.fire(W.you.S, "UNIT_SPELLCAST_START")
+    W.secretCast("target")
+    W.fire(W.tgt.S, "UNIT_SPELLCAST_START")
+    eq(W.you.S.mode, "run"); eq(W.tgt.S.mode, "strip")
+    __now = 101
+    setMaster(false)
+    eq(FS.Gunsight.root._shown, false, "the whole Gunsight HUD is hidden")
+    -- the tapes stand down completely
+    for _, t in ipairs({ W.you, W.tgt }) do
+        ok(not wired(t.S), t.key .. ": the tape no longer listens")
+        eq(next(t.S.events._events), nil, t.key .. ": no plain events"); eq(next(t.S.events._unitEvents), nil, t.key .. ": no unit events")
+        eq(t.S.mode, nil, t.key .. ": nothing cast on the tape"); eq(t.run:GetPhase(), "idle")
+        eq(t.castFrame._shown, false, t.key .. ": nothing cast-only left up")
+        for _, st in ipairs(t.strips) do eq(st._shown, false, "strip hidden") end
+    end
+    -- Stack A takes over and picks up the cast already in progress
+    ok(wired(W.P) and wired(W.G), "Stack A listens again")
+    eq(W.P.retired, false)
+    eq(W.P.mode, "run", "the player's cast in progress shows on Stack A"); eq(W.P.frame._shown, true)
+    eq(W.G.mode, "strip", "and the target's (secret) cast too"); eq(W.G.frame._shown, true)
+    eq(W.P.alwaysIdle, nil)
+    -- its verdicts work
+    W.endCast("player")
+    W.fire(W.P, "UNIT_SPELLCAST_STOP", "C1")
+    eq(W.P.run:GetPhase(), "hold", "Stack A plays the lock-in")
+    -- a new cast after the swap draws on Stack A only
+    W.cast("player", "Fear", "C3", 110, 1.5)
+    W.fire(W.P, "UNIT_SPELLCAST_START")
+    eq(W.P.mode, "run"); eq(W.you.S.mode, nil)
+    W.clean()
+end
+
+function T.master_on_live_gives_the_casts_back_to_the_tapes()
+    local W = world()
+    setMaster(false)
+    W.cast("player", "Shadow Bolt", "C1", 100, 2.5)
+    W.fire(W.P, "UNIT_SPELLCAST_START")
+    W.secretCast("target")
+    W.fire(W.G, "UNIT_SPELLCAST_START")
+    eq(W.P.mode, "run")
+    __now = 101
+    setMaster(true)
+    eq(FS.Gunsight.root._shown, true, "the HUD is back")
+    ok(wired(W.you.S) and wired(W.tgt.S), "the tapes listen")
+    ok(not wired(W.P) and not wired(W.G), "Stack A is silent again: never two player cast bars")
+    eq(next(W.P.events._events), nil, "no event registrations left on Stack A")
+    eq(W.P.frame._shown, false); eq(W.G.frame._shown, false); eq(W.P.mode, nil)
+    eq(W.P.run:GetPhase(), "idle")
+    eq(W.you.S.mode, "run", "the cast in progress is picked up by the tape")
+    eq(W.you.run:GetPhase(), "cast")
+    eq(W.tgt.S.mode, "strip", "and the target's secret one")
+    W.endCast("player")
+    W.fire(W.you.S, "UNIT_SPELLCAST_STOP", "C1")
+    eq(W.you.run:GetPhase(), "hold", "the tape plays its lock-in")
+    W.clean()
+end
+
+function T.master_on_with_no_cast_leaves_the_tapes_on_their_idle_row()
+    local W = world()
+    setMaster(false); setMaster(true)
+    for _, t in ipairs({ W.you, W.tgt }) do
+        eq(t.run:GetPhase(), "idle"); eq(t.host._shown, true)
+        eq(t.run.frame._shown, true, t.key .. ": the idle row of dim chevrons is back")
+        near(t.run.segs[1].dim._vc[4], MU.DIM, 1e-9)
+    end
+    W.clean()
+end
+
+function T.toggling_repeatedly_leaks_no_frames_and_no_events()
+    local W = world()
+    local frames, regs = countFrames(), countRegs()
+    local updates = __countOnUpdates()
+    for _ = 1, 6 do
+        setMaster(false)
+        setMaster(true)
+    end
+    eq(countFrames(), frames, "no frame was built by a toggle")
+    eq(countRegs(), regs, "no event registered twice")
+    eq(__countOnUpdates(), updates, "no OnUpdate left behind")
+    -- and the cycle ends on the tapes alone
+    ok(wired(W.you.S) and not wired(W.P))
+    setMaster(false)
+    setMaster(false)
+    eq(countFrames(), frames)
+    W.clean()
+end
+
+function T.a_tape_stood_down_mid_cast_leaves_no_ticker_running()
+    local W = world()
+    W.cast("player", "Shadow Bolt", "C1", 100, 2.5)
+    W.fire(W.you.S, "UNIT_SPELLCAST_START")
+    ok(W.you.S.ticker.frame._scripts.OnUpdate ~= nil, "the tape ticker runs while casting")
+    setMaster(false)
+    eq(W.you.S.ticker.frame._scripts.OnUpdate, nil, "stood down: its ticker is cleared")
+    W.clean()
+end
+
+function T.master_toggled_in_combat_defers_only_the_protected_root()
+    local W = world()
+    local lock = lockRoot()
+    W.cast("player", "Shadow Bolt", "C1", 100, 2.5)
+    W.fire(W.you.S, "UNIT_SPELLCAST_START")
+    __now = 101
+    lock.combat = true
+    setMaster(false)
+    eq(lock.blocked, 0, "no Show or Hide on the root in combat")
+    near(FS.Gunsight.root._alpha, 0, 1e-9, "the HUD is gone by alpha")
+    ok(wired(W.P) and not wired(W.you.S), "the cast bars were swapped at once (plain frames)")
+    eq(W.P.mode, "run", "mid-cast pickup in combat")
+    -- back on in combat: the root never left, so the tapes are back at once
+    setMaster(true)
+    eq(lock.blocked, 0)
+    near(FS.Gunsight.root._alpha, 1, 1e-9)
+    ok(wired(W.you.S) and not wired(W.P), "tapes again")
+    eq(W.you.S.mode, "run")
+    -- off in combat, then out of combat: the hide lands
+    setMaster(false)
+    lock.combat = false
+    __fireEvent("PLAYER_REGEN_ENABLED")
+    eq(FS.Gunsight.root._shown, false, "hidden for real after combat")
+    ok(wired(W.P) and not wired(W.you.S))
+    eq(lock.blocked, 0)
+    W.clean()
+end
+
+function T.master_on_in_combat_with_a_hidden_root_keeps_stack_a_until_the_show_can_happen()
+    local W = world()
+    local lock = lockRoot()
+    setMaster(false)
+    eq(FS.Gunsight.root._shown, false)
+    W.cast("player", "Shadow Bolt", "C1", 100, 2.5)
+    W.fire(W.P, "UNIT_SPELLCAST_START")
+    lock.combat = true
+    setMaster(true)
+    eq(lock.blocked, 0, "no Show in combat")
+    eq(FS.Gunsight.root._shown, false)
+    ok(wired(W.P) and not wired(W.you.S), "the tapes would be invisible: Stack A keeps casting, never zero bars")
+    eq(W.P.mode, "run")
+    lock.combat = false
+    __now = 101
+    __fireEvent("PLAYER_REGEN_ENABLED")
+    eq(FS.Gunsight.root._shown, true, "shown after combat")
+    ok(wired(W.you.S) and not wired(W.P), "and the tapes take the cast over then")
+    eq(W.you.S.mode, "run")
+    eq(lock.blocked, 0)
+    W.clean()
+end
+
+function T.a_gunsight_off_at_load_stays_on_stack_a_when_switched_on_live()
+    local W = world({ db = { gunsight = { enabled = false } } })
+    local frames, regs = countFrames(), countRegs()
+    setMaster(true)
+    eq(W.Gun.IsActive(), false, "the pieces were never built")
+    eq(W.you, nil)
+    eq(FS.GunsightTape.you, nil, "nothing was built lazily")
+    ok(wired(W.P) and wired(W.G), "Stack A keeps the casts")
+    eq(countFrames(), frames); eq(countRegs(), regs)
+    ok(type(W.Gun.NeedsReload()) == "string", "the config row will prompt for a reload")
+    setMaster(false)
+    eq(W.Gun.NeedsReload(), nil)
+    W.clean()
+end
+
+-- ---- the view seam, reversible ---------------------------------------------------
+
+function T.the_view_seam_can_be_handed_back_and_taken_again_but_never_doubled()
+    local W = world()
+    local CB = FS.CastBars
+    local view = { player = W.you.S, target = W.tgt.S }
+    eq(CB.SetView(view), false, "a view is already active")
+    eq(CB.ClearView(), true)
+    eq(CB.ClearView(), false, "nothing left to hand back")
+    ok(wired(W.P) and not wired(W.you.S))
+    eq(CB.SetView({ player = W.you.S, target = W.you.S }), false, "an unusable view is still refused")
+    eq(CB.SetView(view), true, "the same view can be taken again")
+    ok(wired(W.you.S) and not wired(W.P))
+    eq(CB.IsStackActive(), false)
+    CB.ClearView()
+    eq(CB.IsStackActive(), true)
+end
+
+function T.the_idle_row_api_drives_stack_a_again_after_the_hand_back()
+    local W = world()
+    setMaster(false)
+    FS.CastBars.SetIdleVisible(true)
+    eq(W.P.frame._shown, true, "Stack A is live again: the idle row shows")
+    setMaster(true)
+    eq(W.P.frame._shown, false, "and is retired with the view back")
+    W.clean()
+end
+
+-- ---- Stack A on the layout entries -------------------------------------------------
+
+function T.stack_a_sits_on_the_pcast_and_tcast_layout_entries_where_it_always_did()
+    local W = world()
+    local L = FS.Layout
+    eq(L.pcast.x, 0); eq(L.pcast.y, -337, "the player bar's centre: the seat (-317) less the half gap and half bar")
+    eq(L.tcast.x, 0); eq(L.tcast.y, -297)
+    ok(L.pcast.unscaled and L.tcast.unscaled, "UI units, like the old fixed seat")
+    ok(L.pcast.noSize and L.tcast.noSize, "the bar keeps its fitted size")
+    eq(L._applied[W.P.frame].id, "pcast"); eq(L._applied[W.G.frame].id, "tcast")
+    local p, g = W.P.frame._points.CENTER, W.G.frame._points.CENTER
+    near(p.x, 0, 2, "player x"); near(p.y, -337, 2, "player y")
+    near(g.x, 0, 2, "target x"); near(g.y, -297, 2, "target y")
+    near(g.y - p.y, 40, 1e-6, "a 22 high bar and the 18 gap keep the stack exactly where it was")
+end
+
+function T.moving_the_layout_entries_moves_the_bars()
+    local W = world()
+    local L = FS.Layout
+    ok(L.SetOverride("pcast", 120, -250), "saved")
+    L.Reseat("pcast")
+    local p = W.P.frame._points.CENTER
+    near(p.x, 120, 2, "x follows the override"); near(p.y, -250, 2, "y follows the override")
+    local g = W.G.frame._points.CENTER
+    near(g.y, -297, 2, "the target bar has its own entry and stays")
+    L.ClearOverride("pcast"); L.Reseat("pcast")
+    near(W.P.frame._points.CENTER.y, -337, 2, "reset puts it back")
+end
+
 __checks = T
 """
 

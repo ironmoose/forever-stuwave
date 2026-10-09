@@ -33,6 +33,8 @@ local MOVABLE = {
     { id = "professions",  label = "Professions" },
     { id = "petcontainer", label = "Pet" },
     { id = "tooltip",      label = "Tooltip" },
+    { id = "tcast",        label = "Target cast bar" },
+    { id = "pcast",        label = "Player cast bar" },
 }
 
 local ARROWS = { UP = { 0, 1 }, DOWN = { 0, -1 }, LEFT = { -1, 0 }, RIGHT = { 1, 0 } }
@@ -114,8 +116,18 @@ local function AppliedFrame(id)
     return found
 end
 
+-- Stack A's cast bars only draw while the Gunsight HUD is off; with its tapes up there is nothing to move.
+local STACK_A = { pcast = true, tcast = true }
+
+local function StackAIdle(id)
+    if not STACK_A[id] then return false end
+    local castBars = FS.CastBars
+    return type(castBars) == "table" and type(castBars.IsStackActive) == "function" and castBars.IsStackActive() == false
+end
+
 local function HasHandle(id)
     local L = FS.Layout[id]
+    if StackAIdle(id) then return false end
     if type(L) ~= "table" or type(L.x) ~= "number" or type(L.y) ~= "number" then return false end
     if id == "chat" and not ChatIsNormal() then return false end
     return AppliedFrame(id) ~= nil
