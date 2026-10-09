@@ -425,6 +425,32 @@ function T.the_cast_bar_handles_follow_the_gunsight_switch_while_the_editor_is_o
     eq(#FS.LayoutEdit.GetHandle("pcast")._points > 0, true, "and it is seated")
 end
 
+function T.the_gunsight_switch_mid_drag_stops_the_drag_and_drops_the_selection()
+    for _, id in ipairs({ "pcast", "tcast" }) do
+        local active, notify = false, nil
+        FS.Gunsight = { OnActiveChanged = function(fn) notify = fn end }
+        FS.CastBars = { IsStackActive = function() return not active end }
+        seat("pcast"); seat("tcast")
+        edit()
+        FS.LayoutEdit.Enter()
+        local h = FS.LayoutEdit.GetHandle(id)
+        h._scripts.OnDragStart(h)
+        eq(h._moving, true, id .. " is being dragged")
+        active = true
+        notify(true)                               -- the Gunsight takes the casts mid drag
+        eq(h._moving, false, id .. ": the drag is stopped when its handle goes")
+        eq(FS.LayoutEdit.GetHandle(id), nil)
+        active = false
+        notify(false)                              -- Stack A back, the handle returns
+        h:ClearAllPoints(); h:SetPoint("CENTER", UIParent, "CENTER", 200, 200)
+        h._scripts.OnDragStop(h)
+        eq(override(id), nil, id .. ": the stale drop saves nothing (dragging was cleared)")
+        FS.LayoutEdit.Nudge(1, 0)
+        eq(override(id), nil, id .. ": and nothing is selected any more")
+        FS.LayoutEdit.Exit()
+    end
+end
+
 function T.the_gunsight_switch_does_nothing_to_the_handles_when_the_editor_is_closed()
     local active, notify = false, nil
     FS.Gunsight = { OnActiveChanged = function(fn) notify = fn end }
