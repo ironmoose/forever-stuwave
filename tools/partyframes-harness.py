@@ -2326,6 +2326,84 @@ def _check_name_refits_next_frame() -> None:
     _assert_quiet(rt)
 
 
+NONLINEAR_WIDTH = """
+local fs=__nameFS
+local base=fs.GetUnboundedStringWidth
+fs.GetUnboundedStringWidth=function(self)
+    local w=base(self)
+    if (self.drawSize or self.mono.size)>=10.5 then w=w*1.2 end
+    return w
+end
+__afters=0
+local after=C_Timer.After
+C_Timer.After=function(d,fn) __afters=__afters+1 return after(d,fn) end"""
+
+
+def _check_name_confirm_once_per_change() -> None:
+    """A width that is not linear in the font size (hinting) would make the confirm fit alternate
+    between two sizes forever, one SetFont and one timer per frame. Each text change gets exactly one
+    confirm: the timers stay bounded and the size stops moving."""
+    rt = _runtime(before_load=FONT_LAG)
+    g = rt.globals()
+    row = g.FS.partyRows[1]
+    g.__nameFS = row.name
+    rt.execute(NONLINEAR_WIDTH)
+    _set_name(rt, row, "w" * int(_name_room(rt, row) // 6))
+    sizes = []
+    for _ in range(8):
+        g.__frame()
+        sizes.append(row.name.mono.size)
+    assert g.__afters == 1, f"one confirm timer per text change, got {g.__afters}"
+    assert len(set(sizes[2:])) == 1, f"the size must stop moving, got {sizes}"
+    assert len(list(g.__timers.values())) == 0, "nothing left pending"
+    _set_name(rt, row, "w" * (int(_name_room(rt, row) // 6) - 1))
+    for _ in range(8):
+        g.__frame()
+    assert g.__afters <= 2, f"a second text change gets its own single confirm, got {g.__afters}"
+    _assert_quiet(rt)
+
+
+def _check_name_change_while_settling() -> None:
+    """A name that changes before the font of the previous fit has landed still gets its own fit once
+    it has: measured at the size then drawn, and the fit settles."""
+    rt = _runtime(before_load=FONT_LAG)
+    g = rt.globals()
+    row = g.FS.partyRows[1]
+    room = _name_room(rt, row)
+    _set_name(rt, row, "w" * (int(room // 6) + 1))
+    _set_name(rt, row, "w" * (int(room // 6) + 4))  # the first fit's font has not landed yet
+    for _ in range(4):
+        g.__frame()
+    size = row.name.mono.size
+    assert NAME_FLOOR <= size < 10.5, f"the longer name shrinks more, got {size}"
+    assert row.name.text == "W" * (int(room // 6) + 4)
+    assert _name_fits(rt, row, room), "the new name fits"
+    g.__frame()
+    assert row.name.mono.size == size and len(list(g.__timers.values())) == 0, "settled"
+    _assert_quiet(rt)
+
+
+def _check_level_width_remeasured_next_frame() -> None:
+    """A level text measured before its font landed (or one that could not be measured) keeps a wrong
+    width for good if it is never read again: the next frame re-measures it and refits the name."""
+    rt = _runtime(before_load=FONT_LAG)
+    g = rt.globals()
+    row = g.FS.partyRows[1]
+    rel = _head(rt, row)
+    g.__unitName = "w" * (int(_name_room(rt, row) // 6) - 2)
+    row.levelText.drawSize = 21  # still drawn at the old, double size when first measured
+    g.__level = 30
+    _fire(row, "UNIT_NAME_UPDATE")
+    row.levelText.drawSize = None  # the font has landed
+    g.__frame()
+    g.__frame()
+    level_w = row.levelText.GetUnboundedStringWidth(row.levelText)
+    assert math.isclose(rel(row.name)[2], rel(row.nameRow)[2] + 1 - NAME_GAP_RIGHT - level_w), \
+        f"name edge {rel(row.name)[2]} must follow the re-measured level width {level_w}"
+    assert _name_fits(rt, row, _name_room(rt, row)), "the name fits the corrected room"
+    _assert_quiet(rt)
+
+
 def _check_unchanged_name_not_remeasured() -> None:
     """A repeat event for an unchanged name and level does no new measuring (refit only on a change)."""
     rt = _runtime()
@@ -3357,6 +3435,9 @@ def main() -> int:
         ("level width change refits the name", _check_level_width_refits_name),
         ("secret name is never measured", _check_secret_name_is_never_measured),
         ("name refit waits out the late font", _check_name_refits_next_frame),
+        ("name fit confirms once per text change", _check_name_confirm_once_per_change),
+        ("name change while the font settles still fits", _check_name_change_while_settling),
+        ("level width is re-measured next frame", _check_level_width_remeasured_next_frame),
         ("unchanged name is not re-measured", _check_unchanged_name_not_remeasured),
         ("LOW tag alpha follows the red low-HP layer", _check_low_tag_follows_red_layer),
         ("dead row dims the header pieces", _check_header_dims_when_down),

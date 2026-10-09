@@ -1333,20 +1333,36 @@ local function PlainTextWidth(fs)
     return nil
 end
 
+-- One refit on the next frame, once the font and the widths read by the last fit have landed.
+local function ScheduleNameRefit(frame)
+    if frame.nameSettling then return end
+    if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+        frame.nameSettling = true
+        C_Timer.After(0, frame.nameRefit)
+    end
+end
+
 -- Fits the name to the room up to the level text: seats its right edge, then picks the size. A plain
 -- name is measured at the size now drawn, scaled back to NAME_SIZE, and shrunk (never under
 -- NAME_FLOOR) so the whole text fits; past the floor the FontString's width truncates it. A secret
 -- name is never measured: it takes NAME_SIZE and the engine truncates it. A new size lands a frame
 -- late on this client, so no measuring happens until the next frame has run (`nameSettling`), then
--- one more fit confirms the size. Numbers only, no allocation; unchanged inputs do nothing.
+-- one more fit confirms the size. That confirm happens once per change of text or level width
+-- (`nameConfirmed`): a width that is not linear in the font size would otherwise bounce between two
+-- sizes, one SetFont and one timer per frame. Numbers only, no allocation; unchanged inputs do
+-- nothing.
 function FitRowName(frame, force)
-    if frame.nameSettling then return end
+    if frame.nameSettling then
+        frame.nameStale = true -- text or level changed under a pending refit: its size is not the last word
+        return
+    end
     local H = HEADER
     local name = frame.name
     local right = H.RIGHT_EDGE - H.NAME_RIGHT_GAP - (frame.levelWidth or 0)
     local text = frame.nameText
     if not force and right == frame.nameRight and text == frame.nameFitText then return end
     frame.nameFitText = text
+    if not force then frame.nameConfirmed = false end
     if right ~= frame.nameRight then
         frame.nameRight = right
         name:SetPoint("RIGHT", frame.nameRow, "RIGHT", right, 0)
@@ -1368,10 +1384,7 @@ function FitRowName(frame, force)
     ApplyMono(name, size, COLOR_BORDER)
     local c = frame.classRailColor
     if c then name:SetTextColor(c[1], c[2], c[3], H.NAME_ALPHA) end
-    if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
-        frame.nameSettling = true
-        C_Timer.After(0, frame.nameRefit)
-    end
+    if not frame.nameConfirmed then ScheduleNameRefit(frame) end
 end
 
 local function BuildRowHeader(f, nameRow)
@@ -1446,6 +1459,18 @@ local function BuildRowHeader(f, nameRow)
     f.nameSize, f.nameRight = H.NAME_SIZE, H.RIGHT_EDGE - H.NAME_RIGHT_GAP
     f.nameRefit = function()
         f.nameSettling = false
+        -- A change that arrived while this was pending has not been fitted at a landed size yet, so
+        -- this pass is not its confirm: the next one is.
+        f.nameConfirmed = not f.nameStale
+        f.nameStale = false
+        -- The level text may have been measured before its font landed: read it once more.
+        if f.levelKey then
+            local w = PlainTextWidth(f.levelText)
+            if w and w ~= f.levelWidth then
+                f.levelWidth = w
+                f.nameConfirmed = false
+            end
+        end
         FitRowName(f, true)
     end
 end
@@ -1842,6 +1867,7 @@ local function UpdateRowLevel(frame)
     -- The level's measured width is the room it takes from the name, which is fitted again.
     frame.levelWidth = show and (PlainTextWidth(frame.levelText) or HEADER.LEVEL_RESERVE) or 0
     FitRowName(frame)
+    if show then ScheduleNameRefit(frame) end -- re-measures the level width next frame
 end
 
 -- Resolves the unit's class color (player row included) and stores it on
