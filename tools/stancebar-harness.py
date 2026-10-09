@@ -508,6 +508,63 @@ def check_the_stances_follow_the_shoulder_whatever_order_regen_reaches_them():
     assert blocked(lua) == 0
 
 
+def check_a_rogue_stealth_button_cancels_the_form_when_it_is_the_active_one():
+    # No "shapeshift" secure type exists, and casting Stealth by id while stealthed does not cancel it: the
+    # click-time conditional does (cancel when in the form, cast when not), with no attribute change on a click.
+    lua = other("ROGUE", forms=[("Stealth", False)])
+    btn = stance(lua, 1)
+    assert btn._attrs["type"] == "macro", f"type is {btn._attrs['type']}"
+    text = btn._attrs["macrotext"]
+    assert "/cancelform [form:1]" in text and "/cast [noform:1] Stealth" in text, text
+    assert text.index("/cancelform") < text.index("/cast"), "the cancel line must come first"
+
+
+def check_a_druid_form_button_uses_its_own_form_index():
+    lua = other("DRUID", forms=["Bear Form", "Aquatic Form", "Cat Form"])
+    for i, name in ((1, "Bear Form"), (2, "Aquatic Form"), (3, "Cat Form")):
+        text = stance(lua, i)._attrs["macrotext"]
+        assert f"/cancelform [form:{i}]" in text and f"/cast [noform:{i}] {name}" in text, text
+
+
+def check_a_warriors_stances_stay_on_the_spell_type():
+    # /cancelform does nothing to a stance (the stock bar's active stance does nothing when clicked either)
+    lua = warrior()
+    for i in (1, 2, 3):
+        btn = stance(lua, i)
+        assert btn._attrs["type"] == "spell" and btn._attrs["macrotext"] is None, f"stance {i}"
+        assert btn._attrs["spell"] == sb.form_id(lua, WARRIOR_STANCES[i - 1])
+
+
+def check_a_form_change_in_combat_rebuilds_the_macro_at_regen():
+    lua = other("ROGUE", forms=[("Stealth", False)])
+    before = dict(stance(lua, 1)._attrs)
+    set_combat(lua, True)
+    sb.set_forms(lua, [("Shadowmeld", False)])
+    fire(lua, "UPDATE_SHAPESHIFT_FORM")
+    assert blocked(lua) == 0, "a secure attribute was written in combat"
+    assert stance(lua, 1)._attrs["macrotext"] == before["macrotext"] and stance(lua, 1)._attrs["spell"] == before["spell"]
+    set_combat(lua, False)
+    fire(lua, "PLAYER_REGEN_ENABLED")
+    now = stance(lua, 1)._attrs
+    assert "/cast [noform:1] Shadowmeld" in now["macrotext"] and "Stealth" not in now["macrotext"], now["macrotext"]
+    assert now["spell"] == sb.form_id(lua, "Shadowmeld") and blocked(lua) == 0
+
+
+def check_a_form_name_that_cannot_be_read_falls_back_to_the_spell_type():
+    for mode in ("throw", "secret"):
+        lua = other("ROGUE", forms=[("Stealth", False)], pre_login=f'__infoMode = "{mode}"')
+        btn = stance(lua, 1)
+        assert btn._attrs["type"] == "spell" and btn._attrs["spell"] == sb.form_id(lua, "Stealth"), mode
+        assert btn._attrs["macrotext"] is None, mode
+
+
+def check_the_name_arriving_later_switches_the_button_to_the_macro():
+    lua = other("ROGUE", forms=[("Stealth", False)], pre_login='__infoMode = "throw"')
+    g(lua).__infoMode = None
+    fire(lua, "UPDATE_SHAPESHIFT_FORM")
+    assert stance(lua, 1)._attrs["type"] == "macro", "a later readable name never reached the button"
+
+
 def check_no_em_dashes_in_the_new_files():
     for path in (csh.ADDON / "Modules/ActionBars/StanceBar.lua", Path(__file__)):
         assert chr(0x2014) not in path.read_text(encoding="utf-8"), f"{path.name} has an em dash"
@@ -536,6 +593,12 @@ CHECKS = [
     check_a_shouldered_warrior_stance_wears_the_seal_buttons_hotkey_plate_and_others_do_not,
     check_a_shoulder_that_answers_no_slot_hides_the_button_and_the_build_goes_on,
     check_the_stances_follow_the_shoulder_whatever_order_regen_reaches_them,
+    check_a_rogue_stealth_button_cancels_the_form_when_it_is_the_active_one,
+    check_a_druid_form_button_uses_its_own_form_index,
+    check_a_warriors_stances_stay_on_the_spell_type,
+    check_a_form_change_in_combat_rebuilds_the_macro_at_regen,
+    check_a_form_name_that_cannot_be_read_falls_back_to_the_spell_type,
+    check_the_name_arriving_later_switches_the_button_to_the_macro,
     check_no_em_dashes_in_the_new_files,
 ]
 SCALED_CHECKS = [
