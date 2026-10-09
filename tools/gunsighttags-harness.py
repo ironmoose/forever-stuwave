@@ -1123,6 +1123,82 @@ function T.a_late_font_that_keeps_changing_the_fit_is_re_decided_a_bounded_numbe
     W.clean(); noFails()
 end
 
+-- The calibration for the "Sneaky Toots" cases: a character width that makes a 12 character name take 0.98 of the label
+-- at the floor size (so it fits there, shrunk to exactly the floor) and more than the label at the base size.
+-- Returns wmax, floor, base.
+local function calibrateSneaky(label)
+    local wmax = (Tg().C.TOT.w - 2 * Tg().C.TOT_PAD) * K()
+    local floor = math.max(Tg().C.MIN_FONT, math.floor(FS.Gunsight.ui(Tg().C.TOT_FLOOR) + 0.5))
+    __charW = 0.98 * wmax * 11 / (12 * floor)
+    return wmax, floor, label._fontSize
+end
+
+function T.a_target_of_target_name_is_measured_against_the_font_the_label_really_has()
+    local W = world({ beforeLoad = withFullNames() })
+    target("Kurak")
+    local label = Tg().tot.label
+    label.GetFont = function(self) return "mono", self._fontSize, "" end
+    local wmax, floor, base = calibrateSneaky(label)
+    __units.targettarget = { exists = true, name = "x", full = "Sneaky Toots" }
+    fireTot()
+    eq(label._text, "Sneaky Toots"); eq(label._fontSize, floor, "the first name shrank to the floor")
+    -- a font retry puts the base size back on the label alone; the line still believes in the floor size
+    label._fontSize = base
+    ok(label:GetUnboundedStringWidth() > wmax, "at the base size the next name is wider than the label")
+    __units.targettarget = { exists = true, name = "x", full = "Sleepy Toots" }
+    fireTot()
+    for _ = 1, 3 do __flushTimers() end
+    eq(label._text, "Sleepy Toots", "the whole name fits once shrunk: not shortened")
+    ok(label._fontSize >= floor, "and not under the floor")
+    ok(label:GetUnboundedStringWidth() <= wmax + 1e-6, "at a size that fits the label")
+    W.clean(); noFails()
+end
+
+function T.an_abbreviated_target_of_target_name_is_decided_again_from_the_full_name_on_the_next_frame()
+    local W = world({ beforeLoad = withFullNames() })
+    target("Kurak")
+    local label = Tg().tot.label
+    local wmax, floor = calibrateSneaky(label)
+    -- the first measurement is wrong (a font not applied yet reads wide); the next frame measures the real font
+    __wfactor = 2
+    local R = getmetatable(UIParent)
+    local realWidth = R.GetUnboundedStringWidth
+    R.GetUnboundedStringWidth = function(self)
+        local f = (self == label) and __wfactor or 1
+        if self == label then __wfactor = 1 end   -- only the first measurement (the decision) is wrong
+        return realWidth(self) * f
+    end
+    __units.targettarget = { exists = true, name = "x", full = "Sneaky Toots" }
+    fireTot()
+    eq(label._text, "S. Toots", "the wrong first measurement abbreviated it")
+    for _ = 1, 3 do __flushTimers() end
+    eq(label._text, "Sneaky Toots", "the next frame decided again from the full name")
+    ok(label:GetUnboundedStringWidth() <= wmax + 1e-6, "and it fits the label")
+    ok(label._fontSize >= floor)
+    W.clean(); noFails()
+end
+
+function T.a_target_of_target_name_too_long_at_the_floor_stays_abbreviated_and_the_re_decision_is_bounded()
+    local W = world({ beforeLoad = withFullNames() })
+    target("Kurak")
+    local label = Tg().tot.label
+    local wmax = (Tg().C.TOT.w - 2 * Tg().C.TOT_PAD) * K()
+    __units.targettarget = { exists = true, name = "x", full = "Bartholomew Oldlight" }
+    fireTot()
+    eq(label._text, "B. Oldlight")
+    for _ = 1, 3 do __flushTimers() end
+    eq(label._text, "B. Oldlight", "decided again from the full name, still too long at the floor")
+    ok(label:GetUnboundedStringWidth() <= wmax + 1e-6)
+    local R = getmetatable(UIParent)
+    local realSet, sets = R.SetText, 0
+    R.SetText = function(self, t) if self == label then sets = sets + 1 end return realSet(self, t) end
+    local calls = __applyMonoCalls
+    for _ = 1, 40 do __flushTimers() end
+    eq(sets, 0, "after the third step nothing is scheduled: the label is not written again")
+    eq(__applyMonoCalls, calls, "and no SetFont")
+    W.clean(); noFails()
+end
+
 function T.a_name_whose_fit_throws_is_not_left_cached_as_fitted()
     local W = world({ beforeLoad = withFullNames() })
     target("Kurak")
@@ -1423,6 +1499,7 @@ local function assertEachToneOnce(W, msg)
         for _, key in ipairs({ "pink", "steel" }) do
             eq(onceIn(W.tgt.box.fb[key], f.tones[key]), 1, name .. " " .. key .. " once in the box's list " .. msg)
             eq(onceIn(W.tgt.fb[key], f.tones[key]), 1, name .. " " .. key .. " once in the tape's list " .. msg)
+            eq(onceIn(W.tgt.box.fb[key], f.tones.red) + onceIn(W.tgt.fb[key], f.tones.red), 0, name .. " red is not flag driven (" .. key .. " lists) " .. msg)
         end
     end
 end

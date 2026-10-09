@@ -283,6 +283,7 @@ local function SeatTot()
     button.label:SetWidth(wmax)
     Tags.totLine.wmax = wmax
     Tags.totName = nil
+    Tags.totShort = false
     SyncTot()   -- fits the name again at the new width; the font is only set when the fit changes the size
 end
 
@@ -298,33 +299,49 @@ local function AbbreviateName(name)
     return table.concat(words, " ")
 end
 
+-- The size the label is really drawn at, read back from the client; fallback when it cannot be read.
+local function LabelFontSize(label, fallback)
+    if type(label.GetFont) ~= "function" then return fallback end
+    local ok, _, size = pcall(label.GetFont, label)
+    if ok and type(size) == "number" and not IsSecret(size) and size > 0 then return size end
+    return fallback
+end
+
 -- Fits a plain name to the label with the box name's own fit (GunsightBoxes' text line: shrinks step by step to
 -- C.TOT_FLOOR, SetFont only when the size changes). The decision to shorten the first names to initials is made from
 -- the FULL name measured before any size change, scaled to the floor size (width follows the font size): a name that
 -- would not fit even at the floor is written abbreviated, everything else is written whole and shrunk. What is still
--- too wide at the floor is left to the FontString's ellipsis.
+-- too wide at the floor is left to the FontString's ellipsis. The width is measured at the font the label HAS, so it
+-- is scaled by that size (read back), and the line's size is set to it first: a font reapplied behind the line's back
+-- (the cold-start retry puts the base size back) would otherwise scale every width wrong and leave the fit's SetFont
+-- skipped as "unchanged". Tags.totShort records that the shown text is the abbreviated one.
 local function FitTotName(full)
     local line, label = Tags.totLine, Tags.tot.label
     local text = full
     label:SetText(full)
+    local size = LabelFontSize(label, line.size)
+    line.size = size
     local w = PlainWidth(label)
-    if w and line.size and line.size > 0 then
+    if w and size and size > 0 then
         local floor = math.min(FontSize(), math.max(C.MIN_FONT, math.floor(ui(C.TOT_FLOOR) + 0.5)))
-        if w * floor / line.size > line.wmax + 1e-6 then text = AbbreviateName(full) or full end
+        if w * floor / size > line.wmax + 1e-6 then text = AbbreviateName(full) or full end
     end
+    Tags.totShort = text ~= full
     FS.GunsightBoxes.WriteTextLine(line, text)
 end
 
 -- A client may apply SetFont a frame late, and then the width measured right after a size change is the old font's.
--- A write that changed the size re-runs the decision from the full name on the next frame, at most three times
--- (the shown text may be the abbreviated one; only the full name is decided from).
+-- A write that changed the size, or that shows the abbreviated name (its decision may have come from a wrong
+-- measurement, and the abbreviated text fits at the current size, so no size change would ever call for a second
+-- look), re-runs the decision from the full name on the next frame, at most three times (the shown text may be the
+-- abbreviated one; only the full name is decided from).
 local RefitTotLater
 local function RunTotRefit(step)
     local full = Tags.totName
     if not full then return end
     local before = Tags.totLine.size
     FitTotName(full)
-    if Tags.totLine.size ~= before and step < 3 then RefitTotLater(step + 1) end
+    if (Tags.totLine.size ~= before or Tags.totShort) and step < 3 then RefitTotLater(step + 1) end
 end
 function RefitTotLater(step)
     Tags.totStep = step
@@ -344,19 +361,21 @@ local function WriteTotName(name)
     local line = Tags.totLine
     if IsSecret(name) then
         Tags.totName = nil
+        Tags.totShort = false
         FS.GunsightBoxes.WriteTextLine(line, name)
         return
     end
     if name == Tags.totName then return end
     Tags.totName = nil
     if name == "" then
+        Tags.totShort = false
         FS.GunsightBoxes.WriteTextLine(line, "")
         return
     end
     local before = line.size
     FitTotName(name)
     Tags.totName = name
-    if line.size ~= before then RefitTotLater(1) end
+    if line.size ~= before or Tags.totShort then RefitTotLater(1) end
 end
 
 -- The name (first + surname: UnitName alone drops the surname on this server) goes to the label from
