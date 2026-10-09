@@ -178,7 +178,7 @@ function M:SetAtlas(a) self.atlas = a end
 function M:SetColorTexture() end
 function M:SetVertexColor(r, g, b, a) self.vertex = { r, g, b, a } end
 function M:SetBlendMode() end
-function M:SetTexCoord() end
+function M:SetTexCoord(l, r, t, b) self.texcoord = { l, r, t, b } end
 function M:SetDesaturated(v) self.desat = v end
 
 -- Secure template attributes: a protected button refuses SetAttribute in combat.
@@ -237,6 +237,12 @@ function GetInventoryItemTexture(_, inv) if EQUIPPED[inv] then return "bagtex" .
 function IsInventoryItemLocked(inv) return LOCKED[inv] == true end
 KEYRING_CONTAINER = -2
 C_Container = { ContainerIDToInventoryID = function(id) return 19 + id end }   -- bag N -> inventory slot 19 + N (stock GetID)
+-- The Blizzard atlas lookup the backpack used to paint from: any call is recorded, so a test can prove it is gone.
+ATLAS_CALLS = {}
+C_Texture = { GetAtlasInfo = function(name)
+    ATLAS_CALLS[#ATLAS_CALLS + 1] = name
+    return { leftTexCoord = 0.25, rightTexCoord = 0.5, topTexCoord = 0.25, bottomTexCoord = 0.5 }
+end }
 C_ActionBar = { ShouldShowKeyring = function() return KEYRING_ON end }
 Enum = { BagIndex = { Bag_1 = 1, Bag_2 = 2, Bag_3 = 3, Bag_4 = 4, ReagentBag = 5, Keyring = -2 },
     ItemClass = { Container = 1, Quiver = 11 } }
@@ -754,6 +760,26 @@ count.SetText = function(self, t) TEXTS = TEXTS + 1; return realSet(self, t) end
     check("free.an_unreadable_free_count_blanks_the_text", w.lua.eval("h_backpack().count.text") == "")
 
 
+def check_backpack_glyph() -> None:
+    """The backpack slot is our own glyph in the slot accent, never Blizzard's bag art (which a client patch can swap)."""
+    w = World()
+    w.lua.execute("function h_bp() for _, x in ipairs(FS.BagBar.slots) do if x.kind == 'backpack' then return x end end end")
+    tex = w.lua.eval("h_bp().icon.tex")
+    check("backpack.paints_our_glyph_texture", tex == "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\glyph_backpack.tga", f"{tex}")
+    tint = py(w.lua.eval("h_bp().icon.vertex"))
+    check("backpack.glyph_is_tinted_with_the_cyan_accent", tint is not None and tint[:3] == [0.133, 0.878, 1], f"{tint}")
+    coords = py(w.lua.eval("h_bp().icon.texcoord"))
+    check("backpack.glyph_uses_full_texcoords_no_crop", coords == [0, 1, 0, 1], f"{coords}")
+    check("backpack.no_atlas_is_set_or_looked_up", w.lua.eval("h_bp().icon.atlas") is None and w.lua.eval("#ATLAS_CALLS") == 0,
+          f"{w.lua.eval('h_bp().icon.atlas')} {w.lua.eval('#ATLAS_CALLS')}")
+    w.g.h_fire("BAG_UPDATE")
+    w.g.h_fire("PLAYER_ENTERING_WORLD")
+    check("backpack.refreshes_keep_the_glyph_and_never_ask_for_an_atlas",
+          w.lua.eval("h_bp().icon.tex") == tex and w.lua.eval("#ATLAS_CALLS") == 0 and w.lua.eval("h_bp().glyph") is None)
+    keyring = py(w.lua.eval("(function() for _, x in ipairs(FS.BagBar.slots) do if x.kind == 'keyring' then return x.icon.vertex end end end)()"))
+    check("backpack.other_slots_icons_stay_untinted", keyring is None, f"{keyring}")
+
+
 def main() -> int:
     check_build()
     check_clicks()
@@ -767,6 +793,7 @@ def main() -> int:
     check_events()
     check_quality_border()
     check_free_count_text()
+    check_backpack_glyph()
     check_source()
     print(f"\n{len(FAILS)} failed" if FAILS else "\nall checks passed")
     return len(FAILS)

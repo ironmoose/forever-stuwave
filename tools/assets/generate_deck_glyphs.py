@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generates the eighteen 32x32 micro-menu glyphs for the synthwave control deck.
+"""Generates the nineteen 32x32 deck glyphs (the micro-menu glyphs and the bag bar backpack).
 
 Files written (in forever-stuwave/Media/Textures):
 
@@ -21,6 +21,7 @@ Files written (in forever-stuwave/Media/Textures):
     glyph_socials.tga      speech bubble with a tail and three dots
     glyph_worldmap.tga     folded map, three zig-zag panels
     glyph_housing.tga      house: roof, walls and a solid door
+    glyph_backpack.tga     backpack: top handle, domed body, flap line and a solid buckle
 
 Style: clean neon LINE icons. Stroke 2.2px at 32px with round caps and joins,
 about 4px of padding, drawn upright. They have to stay readable at 16 to 20px
@@ -327,6 +328,26 @@ def glyph_housing():
     ]
 
 
+def glyph_backpack():
+    # Bag bar backpack slot (19px on screen). A domed rucksack body, a top carry
+    # handle, a flap line and a solid buckle on it; the buckle is filled because
+    # an outlined one muddies at that size. The flap and buckle sit high so the
+    # free-slot count, drawn bottom-right over the icon, lands on the empty
+    # pocket area instead of on the buckle.
+    body = [(6.5, 24.0), (6.5, 13.0)]
+    body += arc_points(16.0, 13.0, 9.5, 180, 360, ry=5.8)
+    body += [(25.5, 24.0)]
+    body += arc_points(22.5, 24.0, 3.0, 0, 90, steps=4)
+    body += arc_points(9.5, 24.0, 3.0, 90, 180, steps=4)
+    handle = arc_points(16.0, 6.8, 3.8, 180, 360, ry=3.4)
+    return [
+        stroke(body, closed=True),
+        stroke(handle),
+        stroke([(6.5, 15.0), (16.0, 17.8), (25.5, 15.0)]),
+        fill([(13.0, 14.0), (19.0, 14.0), (19.0, 19.4), (13.0, 19.4)]),
+    ]
+
+
 GLYPHS = {
     "glyph_character": glyph_character,
     "glyph_professions": glyph_professions,
@@ -346,6 +367,7 @@ GLYPHS = {
     "glyph_socials": glyph_socials,
     "glyph_worldmap": glyph_worldmap,
     "glyph_housing": glyph_housing,
+    "glyph_backpack": glyph_backpack,
 }
 
 
