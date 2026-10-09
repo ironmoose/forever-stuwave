@@ -18,6 +18,8 @@ The window is a plain themed frame with a category nav and a content well. These
     Background grid toggle (actionbars.grid);
   * the Profiles page calls the Config API (switch, new, copy, rename, delete, reset), asks before
     anything destructive, and keeps Delete off for Default and the active profile;
+  * every page is a clipped ScrollFrame: content taller than the panel gets a scroll range, the wheel and a
+    slim thumb move it within [0, range], switching category resets it, a page that fits has no bar;
   * read-only Config disables every control; no player-facing string says "tape"; explanations
     live in ? tooltips, never inline; no Blizzard Settings panel or StaticPopup is used.
 
@@ -145,7 +147,13 @@ function Obj:GetParent() return self.parent end
 -- Geometry the mock does not lay out: a check sets .left on a frame and __cursorX for the mouse.
 function Obj:GetLeft() return self.left end
 function Obj:GetEffectiveScale() return 1 end
-function GetCursorPosition() return __cursorX or 0, 0 end
+function GetCursorPosition() return __cursorX or 0, __cursorY or 0 end
+-- ScrollFrame: the scroll child's height past the frame's own is the range; the mock never lays out
+-- anchors, so a check reads fsViewH off the frame it built (the real client derives it from the anchors).
+function Obj:SetScrollChild(c) self._scrollChild = c end
+function Obj:GetVerticalScroll() return self._vscroll or 0 end
+function Obj:SetVerticalScroll(v) self._vscroll = v end
+function Obj:SetClipsChildren(v) self.clips = v and true or false end
 function Obj:SetAlpha(a) self.alpha = a end
 function Obj:GetAlpha() return self.alpha end
 function Obj:SetScript(k, fn) self.scripts[k] = fn end
@@ -657,7 +665,7 @@ function T.no_page_has_inline_help_text()
         W.Open(key)
         local page
         for _, o in ipairs(ALL) do
-            if o.kind == "Frame" and o:IsVisible() and o.points[1] and o.points[1].point == "ALL" and o.parent and o.parent.parent and o.parent.parent.parent == win() then page = o end
+            if o.kind == "ScrollFrame" and o:IsVisible() and o.fsPageKey == key then page = o end
         end
         yes(page, key .. ": the page frame was found")
         local seen = 0
@@ -1956,6 +1964,195 @@ function T.open_close_and_profile_switches_leak_nothing()
     W.RefreshAll()
     eq(#ALL, frames, "no frame or region was created")
     eq(registered, 1, "no extra registration")
+end
+
+-------------------------------------------------------------------------------
+-- Scrolling pages
+-------------------------------------------------------------------------------
+
+-- Page heights: 28 per row, 12 viewport rows' worth is 432 (the content area), so 30 rows overflow and 3 fit.
+local VIEW_H, STEP = 432, 42
+local function tallDemo()
+    local W = boot()
+    local state = { v = false, picked = "a" }
+    W.RegisterCategory({ key = "tall", label = "Tall", order = 3, build = function(p)
+        W.UI.Header(p, "Long page")
+        W.UI.Dropdown(p, { label = "Pick", get = function() return state.picked end,
+            items = function() return { { value = "a", text = "A" }, { value = "b", text = "B" } } end,
+            set = function(v) state.picked = v end })
+        for i = 1, 30 do
+            W.UI.Toggle(p, { label = "Row " .. i, get = function() return state.v end, set = function(v) state.v = v end,
+                tip = i == 1 and "first tip" or nil })
+        end
+    end })
+    W.RegisterCategory({ key = "short", label = "Short", order = 4, build = function(p)
+        W.UI.Toggle(p, { label = "Only", get = function() return state.v end, set = function(v) state.v = v end })
+    end })
+    W.Open("tall")
+    return W, state
+end
+local function scrollOf(key)
+    for _, o in ipairs(ALL) do if o.kind == "ScrollFrame" and o.fsPageKey == key then return o end end
+end
+local function bar()
+    for _, o in ipairs(ALL) do if o.fsScrollbar then return o end end
+end
+local function wheel(sf, delta) sf.scripts.OnMouseWheel(sf, delta) end
+
+function T.content_taller_than_the_panel_gets_a_clipped_scroll_range()
+    tallDemo()
+    local sf = scrollOf("tall")
+    yes(sf, "the page is a ScrollFrame")
+    yes(sf.clips, "clips its children")
+    no(sf:IsProtected()); eq(sf.template, nil, "no Blizzard template")
+    yes(under(win(), sf), "inside the config window")
+    local child = sf._scrollChild
+    yes(child and child.parent == sf, "a scroll child inside the frame")
+    yes(sf.fsRange > 0, "overflows")
+    local holder = sf.fsHolder
+    eq(sf.fsRange, holder:GetHeight() - VIEW_H, "range = content height past the viewport")
+    -- every row of the page lives under the clipped scroll child
+    local rowFrame = row("Row 30")
+    yes(under(child, rowFrame), "the last row is inside the scroll child")
+end
+
+function T.the_wheel_scrolls_within_zero_and_the_range()
+    tallDemo()
+    local sf = scrollOf("tall")
+    yes(sf.mouseWheel, "takes the wheel")
+    eq(sf:GetVerticalScroll(), 0)
+    wheel(sf, -1); eq(sf:GetVerticalScroll(), STEP, "wheel down scrolls down")
+    wheel(sf, 1); wheel(sf, 1); eq(sf:GetVerticalScroll(), 0, "not above the top")
+    for _ = 1, 100 do wheel(sf, -1) end
+    eq(sf:GetVerticalScroll(), sf.fsRange, "not past the end")
+end
+
+function T.switching_category_resets_the_scroll_to_the_top()
+    local W = tallDemo()
+    local sf = scrollOf("tall")
+    wheel(sf, -1); wheel(sf, -1)
+    yes(sf:GetVerticalScroll() > 0)
+    W.Open("short")
+    W.Open("tall")
+    eq(sf:GetVerticalScroll(), 0)
+end
+
+function T.a_page_that_fits_has_no_scroll_range_and_no_scrollbar()
+    local W = tallDemo()
+    yes(bar():IsShown(), "the tall page shows the bar")
+    W.Open("short")
+    local sf = scrollOf("short")
+    eq(sf.fsRange, 0)
+    no(bar():IsShown(), "no bar when it fits")
+    wheel(sf, -1)
+    eq(sf:GetVerticalScroll(), 0, "nothing to scroll")
+    W.Open("unitframes")
+    eq(scrollOf("unitframes").fsRange, 0, "the Unit Frames page fits")
+    no(bar():IsShown())
+end
+
+function T.the_gunsight_page_that_bled_past_the_panel_now_scrolls_to_its_last_row()
+    local W = boot()
+    W.Open("gunsight")
+    local sf = scrollOf("gunsight")
+    yes(sf.fsRange > 0, "the Gunsight HUD page is taller than the panel")
+    local last = row("Number format")
+    yes(last, "the last row exists")
+    local bottom = -last.points[1].y + last:GetHeight()
+    eq(bottom, sf.fsHolder:GetHeight(), "the holder ends at the last row")
+    for _ = 1, 100 do wheel(sf, -1) end
+    eq(sf:GetVerticalScroll(), sf.fsRange, "scrolled to the end, the last row's bottom meets the panel bottom")
+    eq(sf.fsHolder:GetHeight() - sf:GetVerticalScroll(), VIEW_H)
+end
+
+function T.the_scrollbar_thumb_tracks_the_offset()
+    tallDemo()
+    local sf, b = scrollOf("tall"), bar()
+    local thumb = b.fsThumb
+    yes(thumb.h >= 24 and thumb.h < VIEW_H, "thumb is a fraction of the track")
+    eq(thumb.points[1].y, 0, "at the top")
+    for _ = 1, 100 do wheel(sf, -1) end
+    eq(thumb.points[1].y, -(VIEW_H - thumb.h), "at the bottom of the track")
+    eq(#thumb.points, 1, "re-anchored, not stacked")
+end
+
+function T.dragging_the_thumb_scrolls_and_release_stops()
+    tallDemo()
+    local sf, b = scrollOf("tall"), bar()
+    local thumb = b.fsThumb
+    __cursorY = 1000
+    thumb.scripts.OnMouseDown(thumb, "LeftButton")
+    yes(thumb.scripts.OnUpdate, "dragging")
+    __cursorY = 1000 - (VIEW_H - thumb.h)        -- the whole travel of the thumb, downward
+    thumb.scripts.OnUpdate(thumb)
+    eq(sf:GetVerticalScroll(), sf.fsRange)
+    __cursorY = 5000
+    thumb.scripts.OnUpdate(thumb)
+    eq(sf:GetVerticalScroll(), 0, "clamped at the top")
+    thumb.scripts.OnMouseUp(thumb, "LeftButton")
+    eq(thumb.scripts.OnUpdate, nil)
+    __cursorY = 0
+end
+
+function T.controls_still_work_after_scrolling_and_a_scroll_hides_a_stale_tooltip()
+    local W, state = tallDemo()
+    local sf = scrollOf("tall")
+    local icon = findText("Row 1"):GetParent().fsHelp
+    icon.scripts.OnEnter(icon)
+    eq(TOOLTIP.text, "first tip"); yes(TOOLTIP.shown)
+    wheel(sf, -1)
+    no(TOOLTIP.shown, "the tooltip of a row that moved is dropped")
+    for _ = 1, 100 do wheel(sf, -1) end
+    yes(press("Row 30")); eq(state.v, true, "a toggle still responds")
+    icon.scripts.OnEnter(icon)
+    eq(TOOLTIP.text, "first tip", "the ? icon tooltip still works")
+end
+
+function T.a_dropdown_menu_lives_outside_the_clip_and_anchors_to_its_button()
+    local W = tallDemo()
+    local sf = scrollOf("tall")
+    wheel(sf, -1)
+    local b = row("Pick").control
+    b.scripts.OnClick(b)
+    local m = menu()
+    eq(m.points[1].rel, b, "anchored to the scrolled button")
+    local o = m
+    while o do
+        no(o.kind == "ScrollFrame", "the menu is not inside a ScrollFrame")
+        o = o.parent
+    end
+    eq(m.parent.parent, UIParent, "parented through the full screen catcher")
+end
+
+function T.the_wheel_over_a_slider_scrolls_a_scrollable_page_and_shift_adjusts_the_slider()
+    local W = boot()
+    W.RegisterCategory({ key = "sl", label = "Sl", order = 3, build = function(p)
+        W.UI.Header(p, "H")
+        W.UI.Slider(p, { label = "Level", get = function() return __lvl end, set = function(v) __lvl = v end,
+            min = 0, max = 10, step = 1 })
+        for i = 1, 30 do W.UI.Toggle(p, { label = "R" .. i, get = function() return false end, set = function() end }) end
+    end })
+    __lvl = 5
+    W.Open("sl")
+    local t = row("Level").control
+    local sf = scrollOf("sl")
+    t.scripts.OnMouseWheel(t, -1)
+    eq(__lvl, 5, "the slider is left alone")
+    eq(sf:GetVerticalScroll(), STEP, "the page scrolled instead")
+    IsShiftKeyDown = function() return true end
+    t.scripts.OnMouseWheel(t, 1)
+    IsShiftKeyDown = nil
+    eq(__lvl, 6, "shift adjusts the slider")
+    eq(sf:GetVerticalScroll(), STEP, "and leaves the page alone")
+end
+
+function T.scrolling_creates_no_frames()
+    tallDemo()
+    local sf = scrollOf("tall")
+    local before = #ALL
+    wheel(sf, -1); wheel(sf, 1); bar().fsThumb.scripts.OnMouseDown(bar().fsThumb, "LeftButton")
+    bar().fsThumb.scripts.OnMouseUp(bar().fsThumb, "LeftButton")
+    eq(#ALL, before)
 end
 
 __checks = T
