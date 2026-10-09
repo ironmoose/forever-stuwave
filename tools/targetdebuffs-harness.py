@@ -190,7 +190,7 @@ local function boot(opts)
     loadAddonFile(PROFILES_SRC, "Modules/CombatHud/HudProfiles.lua")
     SPELLS_BY_ID = {
         [11572] = { name = "Rend", icon = 1001 }, [772] = { name = "Rend", icon = 1001 }, [6548] = { name = "Rend", icon = 1001 },
-        [9998] = { name = "Fireball", icon = 1009 }, [9997] = { name = "Fireball", icon = 1009 }, [11597] = { name = "Sunder Armor", icon = 1002 },
+        [9998] = { name = "Fireball", icon = 1009 }, [9997] = { name = "Fireball", icon = 1009 }, [11597] = { name = "Sunder Armor", icon = 1002 }, [11598] = { name = "Sunder Armor", icon = 1002 },
         [6343] = { name = "Thunder Clap", icon = 1003 }, [7777] = { name = "Thunder Clap", icon = 1003 }, [8647] = { name = "Expose Armor", icon = 1004 },
         [172] = { name = "Corruption", icon = 1005 }, [9999] = { name = "Heroic Strike", icon = 1006 },
         [20271] = { name = "Judgement", icon = 1007 }, [853] = { name = "Hammer of Justice", icon = 1008 },
@@ -432,6 +432,41 @@ AURAS = { aura("Mystery", 0, 0, 1, "player", 4242) }
 sync(TD)
 local m = byName(TD.Get(), "Mystery")
 check(m and m.expires == nil and m.duration == nil, "an unknown spell without a duration stays untimed")
+""")
+
+case("a_learned_duration_above_the_top_rank_wins_for_an_unlisted_rank_id")(r"""
+local TD = boot({ class = "WARRIOR" })
+AURAS = { aura("Thunder Clap", NOW + 30, 40, 0, "player", 6343) }     -- a talent lengthens it past the top rank's 30 s
+TD.Subscribe(function() end)
+AURAS = {}; sync(TD)
+IN_COMBAT = true
+cast(7777, guid())
+local e = byName(TD.Get(), "Thunder Clap")
+check(e and e.duration == 40, "the learned 40 s beats the top rank, got " .. tostring(e and e.duration))
+""")
+
+case("a_learned_duration_is_used_for_a_spell_with_no_rank_table")(r"""
+local TD = boot({ class = "WARRIOR" })
+AURAS = { aura("Sunder Armor", NOW + 15, 20, 0, "player", 11597) }    -- 20 s learned, table says 30 s and has no ranks
+TD.Subscribe(function() end)
+AURAS = {}; sync(TD)
+IN_COMBAT = true
+cast(11598, guid())                     -- another id of the same name: the name's measurement serves
+local e = byName(TD.Get(), "Sunder Armor")
+check(e and e.duration == 20, "the learned 20 s is used, got " .. tostring(e and e.duration))
+""")
+
+case("an_expired_ledger_entry_with_the_aura_still_up_stays_untimed")(r"""
+local TD = boot({ class = "WARRIOR" })
+TD.Subscribe(function() end)
+IN_COMBAT = true; fire("PLAYER_REGEN_DISABLED")
+cast(11597, guid())                     -- timed by the table: expires NOW + 30
+NOW = NOW + 40                          -- the ledger expiry is past, then an untracked refresh keeps the aura up
+IN_COMBAT = false
+AURAS = { aura("Sunder Armor", 0, 0, 1, "player", 11597) }
+fire("PLAYER_REGEN_ENABLED")
+local e = byName(TD.Get(), "Sunder Armor")
+check(e and e.expires == nil and e.duration == nil, "no fresh full-length timer from an expired entry, got " .. tostring(e and e.expires))
 """)
 
 case("any_class_spell_seen_once_out_of_combat_is_timed_later_in_combat")(r"""
