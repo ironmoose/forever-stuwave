@@ -1,7 +1,7 @@
 -- Forever STUwave: Gunsight "mybuffs" piece, a flank plate of up to four of the player's buffs outboard of the next cast tile, the time left under each and a cyan pip on a buff cast by a party or raid member.
 -- It reads only the FS.PlayerAuras snapshot (plain values, frozen in combat), so in combat the time left is extrapolated from the stored expiry.
 -- Hovering a tile shows the standard buff tooltip through FrameHelpers.ShowAuraTooltip (the snapshot slot, the cached name in combat);
--- only the tiles take the mouse, never the plate. The plate's size is Gunsight.lua's MYBUFFS (one tunable, the tile edge).
+-- only the tiles take the mouse, and only hover (clicks pass through, so mouselook and targeting start over a tile as anywhere else). The plate's size is Gunsight.lua's MYBUFFS (one tunable, the tile edge).
 -- Tiles keep the snapshot's slot order; sorting by time left would shuffle them as the clocks tick.
 
 local _, FS = ...
@@ -82,28 +82,44 @@ end
 
 -- Mouseover: the standard aura tooltip. ShowAuraTooltip asks the client to render it from the slot (SetUnitAura), or in combat, where
 -- that is an aura read the client refuses, shows the cached name and a "Details unavailable in combat." line. Any throw hides it.
-local function TileEnter(self)
+-- A tile is "hovered" from its OnEnter to its OnLeave (frame.fsHover), so a repaint under the cursor can refresh the tooltip.
+-- Nothing shows while the piece is off: a fade out keeps the frames shown for a moment and a hover then would strand the tooltip.
+local function ShowTip(self)
     local helpers = FS.FrameHelpers
     if not (GameTooltip and helpers and helpers.ShowAuraTooltip) then return end
     GameTooltip:SetOwner(self, "ANCHOR_TOP")
     if not pcall(helpers.ShowAuraTooltip, self) then GameTooltip:Hide() end
 end
 
+local function TileEnter(self)
+    if not Gunsight.IsPieceOn("mybuffs") then return end
+    self.fsHover = true
+    ShowTip(self)
+end
+
 local function TileLeave(self)
+    self.fsHover = nil
     if GameTooltip then GameTooltip:Hide() end
 end
 
 -- A tile that hides (or whose plate does) under the cursor gets no OnLeave, so its tooltip is taken down here.
 local function ReleaseTip(frame)
+    frame.fsHover = nil
     if GameTooltip and GameTooltip.GetOwner and GameTooltip:GetOwner() == frame then GameTooltip:Hide() end
+end
+
+local function ReleaseAllTips()
+    for _, tile in ipairs(state.tiles) do ReleaseTip(tile.frame) end
 end
 
 -- The fields FrameHelpers.ShowAuraTooltip reads off a tile: the player's HELPFUL slot (the snapshot position is the slot) and the
 -- cached name for combat. A secret or odd name is dropped, so the combat tooltip shows nothing rather than a value it may not touch.
 local function PaintTile(tile, aura, remaining, slot)
-    tile.frame.auraIndex = slot
+    local frame = tile.frame
+    local oldSlot, oldName, oldIcon = frame.auraIndex, frame.fsName, tile.iconKey
+    frame.auraIndex = slot
     local name = aura.name
-    tile.frame.fsName = (not IsSecret(name) and type(name) == "string") and name or nil
+    frame.fsName = (not IsSecret(name) and type(name) == "string") and name or nil
     if tile.iconKey ~= aura.icon then
         tile.iconKey = aura.icon
         tile.icon:SetTexture(aura.icon)
@@ -115,7 +131,9 @@ local function PaintTile(tile, aura, remaining, slot)
     end
     tile.pip.dot:SetShown(FromGroupMember(aura))
     tile.pip.ring:SetShown(FromGroupMember(aura))
-    tile.frame:Show()
+    frame:Show()
+    -- The cursor is still on this tile but it now shows another buff (or the same one in another slot): the tooltip follows it.
+    if frame.fsHover and (oldSlot ~= slot or oldName ~= frame.fsName or oldIcon ~= aura.icon) then ShowTip(frame) end
 end
 
 -- Slot order, first four that have not run out. An expiry of 0 means no expiry.
@@ -171,11 +189,20 @@ local function Layout()
     end
 end
 
+-- Hover, no clicks: the tile is near screen centre, and a click-taking frame there would block right-click-drag mouselook and
+-- left-click targeting that start over it. Feature-detected like CombatHud.lua and Nameplates.lua do (each call on its own);
+-- where the client lacks either call there is no mouse at all (no tooltip) rather than a click-eating tile.
+local function HoverOnly(frame)
+    if type(frame.SetMouseMotionEnabled) ~= "function" or type(frame.SetMouseClickEnabled) ~= "function" then return end
+    pcall(frame.SetMouseClickEnabled, frame, false)
+    pcall(frame.SetMouseMotionEnabled, frame, true)
+end
+
 local function BuildTile(body)
     local tile = {}
     local frame = CreateFrame("Frame", nil, body)
     frame.unit, frame.filter = "player", "HELPFUL"
-    frame:EnableMouse(true)
+    HoverOnly(frame)
     frame:SetScript("OnEnter", TileEnter)
     frame:SetScript("OnLeave", TileLeave)
     Theme.AddCut2Texture(frame, Theme.SLICE_CUT2_FILL_TEXTURE,
@@ -235,6 +262,9 @@ local function Build()
     GunsightMyBuffs.tiles = state.tiles
     body:Hide()
     Layout()
+    -- The piece's onHide fires when a fade out starts; these fire when the frames actually hide.
+    plate:SetScript("OnHide", ReleaseAllTips)
+    body:SetScript("OnHide", ReleaseAllTips)
 
     local elapsed = 0
     plate:SetScript("OnUpdate", function(_, dt)
@@ -256,7 +286,7 @@ local function Build()
     Gunsight.RegisterPiece("mybuffs", {
         frame = plate,
         onShow = function() Guard(Refresh) end,
-        onHide = function() for _, tile in ipairs(state.tiles) do ReleaseTip(tile.frame) end end,
+        onHide = ReleaseAllTips,
     })
     Guard(Refresh)
     if FS.Layout and FS.Layout.OnRescale then
