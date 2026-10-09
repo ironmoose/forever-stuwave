@@ -158,6 +158,7 @@ function Region:SetHeight(h) self._h = h end
 function Region:SetScale(s) self._scale = s end
 function Region:GetScale() return self._scale or 1 end
 function Region:RegisterEvent(e) self._events[e] = true end
+function Region:UnregisterAllEvents() self._events = {}; self._unitEvents = {} end
 function Region:UnregisterEvent(e) self._events[e] = nil end
 function Region:RegisterUnitEvent(e, u) self._unitEvents[e] = u end
 function Region:SetStatusBarTexture(path)
@@ -318,7 +319,7 @@ if __helpers_source then
     local real = {}
     local scratch = { Theme = FS.Theme, IsSecret = FS.IsSecret, AurasReadable = function() return not InCombatLockdown() end, FrameHelpers = real }
     assert(loadstring(__helpers_source, "@Core/FrameHelpers.lua"))("forever-stuwave", scratch)
-    for _, k in ipairs({ "HoverOnly", "SetTipSpell", "SpellIDForName", "AttachSpellTooltip", "RefreshSpellTooltip" }) do
+    for _, k in ipairs({ "HoverOnly", "SetTipSpell", "SpellIDForName", "AttachSpellTooltip", "RefreshSpellTooltip", "ReleaseSpellTip" }) do
         FS.FrameHelpers[k] = real[k]
     end
 end
@@ -1407,6 +1408,27 @@ function T.the_stack_a_cast_icon_shows_the_casting_spell_on_hover()
     ok(h.fsSpellID == nil and h.fsName == nil, "and no id is kept")
     -- the target's icon too
     ok(W.G.iconHover, "the target bar has one")
+end
+
+function T.a_gunsight_taking_over_releases_a_tip_open_on_the_stack_a_icon()
+    local W = world()
+    local h = W.P.iconHover
+    W.cast("player", "Shadow Bolt", "C1", 100, 2.5); __units.player.cast.spellID = 686
+    W.fire(W.P, "UNIT_SPELLCAST_START")
+    hover(h)
+    ok(TT.owner == h and TT.shown, "a tip is open on the Stack A icon")
+    -- Hiding the retired frame does not reach the hover frame in this stub (as nothing promises the client does for an
+    -- open tooltip), so the retire itself has to take the tip down.
+    local function viewBar()
+        local function sink() return setmetatable({}, { __index = function() return function() end end }) end
+        return { frame = CreateFrame("Frame"), run = sink(), strip = sink(), icon = sink(), shield = sink(),
+            timer = sink(), tab = sink(), tabName = sink(), tabTicks = sink() }
+    end
+    ok(FS.CastBars.SetView({ player = viewBar(), target = viewBar() }), "the Gunsight takes the casts")
+    ok(not TT.shown and TT.owner == nil, "the tip is down")
+    eq(h._shown, false, "the hover frame is hidden with the retired bar")
+    ok(h.fsHover == nil and h.fsSpellID == nil and h.fsName == nil, "and keeps no hover flag or spell")
+    W.clean()
 end
 
 function T.a_secret_target_spell_shows_no_stale_stack_a_tip()
