@@ -19,15 +19,15 @@ local IsSecret = FS.IsSecret or function() return false end
 
 -- Image px. The size comes from Gunsight.lua's MYBUFFS (M): the plate rect, the tile edge, the pitch, the padding, the time's
 -- size and baseline. The rest is the mockup's buffs() (gunsight-modules-concepts-v7): cut, fill, stroke, pip.
--- TILE_DX / TILE_DY seat a tile from the plate's top left, TEXT_DX is the time text's centre from the tile's left, PIP_DX / PIP_DY
--- the pip's centre from the tile's top left (the tile's right edge, just under its top).
+-- TILE_DX / TILE_DY seat a tile from the plate's top left, PIP_DX / PIP_DY the pip's centre from the tile's top left (the tile's
+-- right edge, just under its top). A time hangs on its own tile (see Layout), so it needs no x of its own.
 local C = {
     X = M.x, Y = M.y, W = M.w, H = M.h, CHAMFER = 6,
     FILL = { 13 / 255, 6 / 255, 32 / 255, 0.7 }, STROKE_A = 0.75,
     MAX = M.max, TILE = M.tile, PITCH = M.pitch, TILE_DX = M.padX, TILE_DY = M.padY,
     TILE_FILL_A = 0.9, TILE_INSET = 2, ICON_CROP = 0.08,
     PIP_DX = M.tile, PIP_DY = 2, PIP_R = 3.2, PIP_RING = 1,
-    TEXT_DX = M.tile / 2, TEXT_Y = M.textY, TEXT_SIZE = M.textSize, DESCENT = 0.22,
+    TEXT_Y = M.textY, TEXT_SIZE = M.textSize, DESCENT = 0.22,
     TICK = 0.5, MIN_FONT = 6,
 }
 GunsightMyBuffs.C = C
@@ -56,7 +56,9 @@ local function FontSize()
     return math.max(C.MIN_FONT, math.floor(ui(C.TEXT_SIZE) + 0.5))
 end
 
+-- At most three characters ("59m", "23h", "99d"), the most that fits under a tile at the time's size.
 local function FormatTime(remaining)
+    if remaining >= 86400 then return string.format("%dd", math.min(99, math.floor(remaining / 86400))) end
     if remaining >= 3600 then return string.format("%dh", math.floor(remaining / 3600)) end
     if remaining >= 60 then return string.format("%dm", math.floor(remaining / 60)) end
     return string.format("%ds", math.floor(remaining))
@@ -136,6 +138,17 @@ local function PaintTile(tile, aura, remaining, slot)
     if frame.fsHover and (oldSlot ~= slot or oldName ~= frame.fsName or oldIcon ~= aura.icon) then ShowTip(frame) end
 end
 
+-- An empty slot's tile hides, and its time with it (the time is the tile's child); the text is cleared too, so the next buff
+-- that takes the slot repaints it from scratch.
+local function ClearTile(tile)
+    ReleaseTip(tile.frame)
+    tile.frame:Hide()
+    if tile.text ~= "" then
+        tile.text = ""
+        tile.label:SetText("")
+    end
+end
+
 -- Slot order, first four that have not run out. An expiry of 0 means no expiry.
 local function Refresh()
     local body = state.body
@@ -158,10 +171,7 @@ local function Refresh()
             end
         end
     end
-    for i = shown + 1, C.MAX do
-        ReleaseTip(state.tiles[i].frame)
-        state.tiles[i].frame:Hide()
-    end
+    for i = shown + 1, C.MAX do ClearTile(state.tiles[i]) end
     body:SetShown(shown > 0)
 end
 
@@ -169,6 +179,8 @@ local function Layout()
     local body = state.body
     local k = ui(1)
     local fontSize = FontSize()
+    local side = (C.PITCH - C.TILE) / 2
+    local drop = C.TEXT_Y + C.TEXT_SIZE * C.DESCENT - (C.TILE_DY + C.TILE)
     for i, tile in ipairs(state.tiles) do
         local left = C.TILE_DX + (i - 1) * C.PITCH
         tile.frame:ClearAllPoints()
@@ -178,9 +190,11 @@ local function Layout()
         tile.icon:SetPoint("TOPLEFT", tile.frame, "TOPLEFT", C.TILE_INSET * k, -C.TILE_INSET * k)
         tile.icon:SetPoint("BOTTOMRIGHT", tile.frame, "BOTTOMRIGHT", -C.TILE_INSET * k, C.TILE_INSET * k)
         FS.Theme.ApplyMono(tile.label, fontSize, colors.white)
+        -- The time hangs on its own tile: its bottom edge on the tile's, a pitch wide and centred on the tile (two side points, no
+        -- width of its own to disagree with), dropped to the time's baseline. It moves, hides and fades with the tile.
         tile.label:ClearAllPoints()
-        tile.label:SetPoint("BOTTOM", body, "TOPLEFT", (left + C.TEXT_DX) * k, -(C.TEXT_Y + C.TEXT_SIZE * C.DESCENT) * k)
-        tile.label:SetWidth(C.PITCH * k)
+        tile.label:SetPoint("BOTTOMLEFT", tile.frame, "BOTTOMLEFT", -side * k, -drop * k)
+        tile.label:SetPoint("BOTTOMRIGHT", tile.frame, "BOTTOMRIGHT", side * k, -drop * k)
         for _, part in ipairs({ { tile.pip.ring, C.PIP_R + C.PIP_RING }, { tile.pip.dot, C.PIP_R } }) do
             part[1]:ClearAllPoints()
             part[1]:SetPoint("CENTER", tile.frame, "TOPLEFT", C.PIP_DX * k, -C.PIP_DY * k)
@@ -217,10 +231,11 @@ local function BuildTile(body)
     ring:Hide()
     dot:Hide()
     tile.pip = { ring = ring, dot = dot }
-    tile.label = body:CreateFontString(nil, "OVERLAY")
+    tile.label = frame:CreateFontString(nil, "OVERLAY")
     Theme.ApplyMono(tile.label, FontSize(), colors.white)
     tile.label:SetJustifyH("CENTER")
     tile.label:SetText("")
+    tile.text = ""
     frame:Hide()
     tile.frame = frame
     return tile
