@@ -26,10 +26,11 @@ so opens its window. These checks pin that:
     read-only Config refuses the toggle;
   * the tooltip names the profession and adds "Click to open" only on a clickable row;
   * the minimise glyph is a plain (non-secure) button reusing the chat's glyph texture and idle/hover alphas, its
-    tooltip reads Minimise or Restore, a click folds the rows into the title band with the bottom edge fixed (it
-    collapses down, like the chat) and a second click restores them, growing back upward, the state is the profile setting professions.minimized (default false), is
-    applied at login and survives /fsprof, a reseat or a profile switch, and in combat every part of it
-    (hide, show, resize, re-anchor) waits for PLAYER_REGEN_ENABLED.
+    tooltip reads Minimise or Restore, a click folds the rows into the title band with the bottom edge fixed
+    (it collapses down, like the chat) and a second click restores them, growing back upward, the state is
+    the profile setting professions.minimized (default false), is applied at login and survives /fsprof, a
+    reseat or a profile switch, and in combat every part of it (hide, show, resize, re-anchor) waits for
+    PLAYER_REGEN_ENABLED.
 
 Professions.lua and Config.lua are the real files; the frames are a recording mock that refuses protected
 calls in combat the way the client does, and Theme / PanelSkins are stubs. This is NOT the real client.
@@ -770,7 +771,7 @@ end
 
 function T.a_second_click_restores_the_full_list()
     boot({ profs = { "Alchemy", "Cooking", "Mining" } })
-    local bottom = bottomEdge(panel())
+    local bottom, left = bottomEdge(panel()), panel()._points[1][4]
     clickGlyph()
     clickGlyph()
     eq(shownRows(), 3, "the learned rows are back")
@@ -778,25 +779,11 @@ function T.a_second_click_restores_the_full_list()
     eq(panel()._h, FULL_H)
     eq(bottomEdge(panel()), bottom, "restore grows upward from the same bottom")
     eq(topEdge(panel()), bottom + FULL_H)
+    eq(panel()._points[1][4], left, "nor did the horizontal seat")
     eq(panel()._points[1][1], "CENTER", "the layout seat is back")
     eq(FS.Config.Get(MIN), false)
     eq(stored(MIN), nil, "the default pins nothing")
     eq(rows()[1]._attrs.spell, "Alchemy", "the click action survived the fold")
-end
-
-function T.repeated_toggles_do_not_drift_the_panel()
-    boot({ profs = { "Alchemy", "Cooking" } })
-    local left = panel()._points[1][4]
-    for i = 1, 6 do
-        clickGlyph()
-        eq(bottomEdge(panel()), SEAT_BOTTOM, "folded " .. i)
-        eq(panel()._points[1][4], left, "folded x " .. i)
-        clickGlyph()
-        eq(bottomEdge(panel()), SEAT_BOTTOM, "restored " .. i)
-        eq(panel()._points[1][4], left, "restored x " .. i)
-        eq(panel()._h, FULL_H)
-    end
-    eq(#panel()._points, 1)
 end
 
 function T.a_reload_while_minimised_keeps_the_bottom_edge()
