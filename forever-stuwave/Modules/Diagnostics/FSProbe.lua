@@ -32,6 +32,15 @@
 --                  turns amber at 3, a pandemic overlay). Stored in ForeverSTUwaveDB.fsprobe.hot;
 --                  survives a re-arm like gunsight (see HP below).
 --
+--   priest         `/fsprobe priest` (any time) / `/fsprobe priest off`: what a priest's pain points can
+--                  read on this client. An ooc and a combat snapshot (mana and regen, absorbs and heal
+--                  prediction, auras by spell id, cooldowns, range, threat, loss of control, secrecy of
+--                  every spell involved), each record tagged inCombat true/false, plus bounded ring
+--                  buffers of power ticks, casts with their mana cost, auras, kills, absorbs and loss of
+--                  control events. The main run adds the snapshot part to its own ooc and combat
+--                  snapshots when the class is PRIEST. Stored in ForeverSTUwaveDB.fsprobe.priest;
+--                  survives a re-arm like gunsight (see PP below).
+--
 -- Read it after /reload or logout: WTF/Account/<id>/SavedVariables/forever-stuwave.lua
 -- (ForeverSTUwaveDB.fsprobe).
 --
@@ -191,6 +200,7 @@ local USAGE = {
     "fsprobe: /fsprobe (out of combat) = snapshot now, then record your next pull, 10 casts, and a 30s aura row above screen centre",
     "fsprobe: /fsprobe again = status | /fsprobe reset = clear and stop | after \"done\", /reload to save",
     "fsprobe: /fsprobe gunsight = gunsight HUD feature probes (works any time; the cast and combat parts wait for your next cast and pull)",
+    "fsprobe: /fsprobe priest = priest probe: snapshot now, the other (ooc/combat) one on the next pull or fight end, plus 20 min of bounded power/cast/aura/kill logs | /fsprobe priest off = stop",
     "fsprobe: /fsprobe hot = party row HoT probe: an engine aura container per party token (icon, short buffs, HoT timer bar) for 120s (out of combat to start) | /fsprobe hot off = remove it",
 }
 
@@ -233,6 +243,10 @@ local state = {
     gsObjs = {},
     gsAc = nil,
 }
+
+-- The priest probe (/fsprobe priest). Declared here so the snapshot section list can name it;
+-- the code is in the PP block further down.
+local PP = {}
 
 -------------------------------------------------------------------------------
 -- Secret-safe primitives
@@ -711,6 +725,17 @@ local function SectionPet(sec)
     sec.unitExists = Invoke(true, Api("UnitExists"), "pet")
 end
 
+-- Only a PRIEST gets the priest snapshot in the main run; /fsprobe priest runs it for any class.
+local function SectionPriest(sec)
+    local token = PP.ClassToken()
+    sec.classToken = token or "unknown"
+    if token ~= "PRIEST" then
+        sec.skipped = "not a priest"
+        return
+    end
+    PP.Snapshot(sec)
+end
+
 local SECTIONS = {
     { "env", SectionEnv },
     { "secrets", SectionSecrets },
@@ -726,6 +751,7 @@ local SECTIONS = {
     { "whitelist", SectionWhitelist },
     { "gcd", SectionGcd },
     { "pet", SectionPet },
+    { "priest", SectionPriest },
 }
 
 local function TakeSnapshot(kind)
@@ -2624,6 +2650,911 @@ function GS.Start()
 end
 
 -------------------------------------------------------------------------------
+-- /fsprobe priest: what each priest pain point can read on this client
+-------------------------------------------------------------------------------
+-- `/fsprobe priest` (any time, any class; the main run adds the same section only for a PRIEST)
+-- answers, per API a priest UI would lean on: does it exist, is its return secret, and what is the
+-- plain value when it is not. Every record is tagged inCombat true/false, so the out-of-combat and
+-- in-combat runs sit side by side:
+--   priest.ooc / priest.combat   the snapshots (taken now; the other one follows the next pull or
+--                                the end of the fight), parts: env, secrets, spells, mana, shield,
+--                                auras, cooldowns, triage, lossOfControl, misc, apis;
+--   priest.logs.<name>           bounded ring buffers (PP.LOG_CAP entries, oldest dropped; `total`
+--                                and `dropped` count what went by): power (UNIT_POWER_UPDATE, the
+--                                mana tick clock), powerFrequent, cast (with the mana cost, so the
+--                                five second rule can be read off sinceManaCast on a power entry),
+--                                aura (player and target UNIT_AURA payload secrecy), shield (absorb
+--                                and heal prediction events on player and party), kill (PARTY_KILL,
+--                                PLAYER_TARGET_DIED), died (UNIT_DIED), loc (loss of control).
+-- Logging stops after PP.LOG_SECONDS, on `/fsprobe priest off`, or on `/fsprobe reset`.
+-- The per-spell tables (spells, auras, cooldowns) hold ONE compact string per read:
+-- "type/plain=value", "type/secret", "absent", "error: ...", "nil/plain" (nothing there).
+-- A secret is described, never compared, concatenated, indexed or stored; a GUID is compared
+-- only when both sides are plain. Spell ids not taken from this repo are Classic Era ids and
+-- unverified on Forever; every spell is also resolved by NAME (english), and the rank the client
+-- reports for the name is probed too. API names and signatures: Gethe/wow-ui-source, branch
+-- `forever` (the generated API documentation), 1.60.1.
+-- Results: ForeverSTUwaveDB.fsprobe.priest.
+
+PP.COMBAT_DELAY = 4
+PP.OOC_DELAY = 2
+PP.LOG_CAP = 50
+PP.LOG_SECONDS = 1200
+PP.MANA = 0                   -- Enum.PowerType.Mana
+PP.INSANITY = 13              -- Enum.PowerType.Insanity
+-- Friendly spells tried in order for the range read (by name: no id guess); the first one that
+-- answers for the player is used and recorded.
+PP.RANGE_NAMES = { "Lesser Heal", "Heal", "Flash Heal", "Renew", "Power Word: Shield" }
+PP.AURA_UNITS = { "player", "party1", "target" }
+PP.COST_IDS = { 585, 2050, 5019 }
+PP.ITEMS = { "Holy Candle", "Sacred Candle", "Devout Candle", "Refreshing Spring Water" }
+PP.PLAYER_SET = { player = true }
+PP.AURA_SET = { player = true, target = true }
+PP.SHIELD_SET = { player = true, party1 = true }
+
+-- { key, english name, { ids }, read auras }. Ids from this repo: 17, 21562, 1243, 588, 589, 585,
+-- 5019, 15473, 8092, 586, 401977. The rest are Classic Era ids [UNVERIFIED on Forever]; the names
+-- carry the load (the client resolves a name to the rank the player knows).
+PP.SPELLS = {
+    { "pw_shield", "Power Word: Shield", { 17 }, true },
+    { "weakened_soul", "Weakened Soul", { 6788 }, true },
+    { "renew", "Renew", { 139 }, true },
+    { "pom", "Prayer of Mending", {}, true },
+    { "inner_fire", "Inner Fire", { 588 }, true },
+    { "fort", "Power Word: Fortitude", { 1243, 21562 }, true },
+    { "divine_spirit", "Divine Spirit", { 14752 }, true },
+    { "shadow_prot", "Shadow Protection", { 976 }, true },
+    { "fear_ward", "Fear Ward", { 6346 }, true },
+    { "inner_focus", "Inner Focus", { 14751 }, true },
+    { "psychic_scream", "Psychic Scream", { 8122 }, false },
+    { "fade", "Fade", { 586 }, false },
+    { "penance", "Penance", {}, false },
+    { "divine_grace", "Divine Grace", {}, false },
+    { "binding_heal", "Binding Heal", {}, false },
+    { "shadowform", "Shadowform", { 15473 }, true },
+    { "sw_pain", "Shadow Word: Pain", { 589 }, true },
+    { "dplague", "Devouring Plague", {}, true },
+    { "ve", "Vampiric Embrace", { 15286 }, true },
+    { "spirit_tap", "Spirit Tap", { 15338 }, true },
+    { "shadow_weaving", "Shadow Weaving", {}, true },
+    { "shadowfiend", "Shadowfiend", { 401977 }, false },
+    { "mind_blast", "Mind Blast", { 8092 }, false },
+    { "shoot", "Shoot", { 5019 }, false },
+    { "dispel_magic", "Dispel Magic", { 527 }, false },
+    { "abolish_disease", "Abolish Disease", { 552 }, false },
+    { "lesser_heal", "Lesser Heal", { 2050 }, false },
+    { "smite", "Smite", { 585 }, false },
+}
+
+-- C_Secrets calls with their documented arguments (SecretPredicateAPIDocumentation).
+PP.PREDICATES = {
+    { "HasSecretRestrictions" },
+    { "ShouldAurasBeSecret" },
+    { "ShouldCooldownsBeSecret" },
+    { "ShouldUnitStatsBeSecret" },
+    { "GetPowerTypeSecrecy", 0 },
+    { "GetPowerTypeSecrecy", 13 },
+    { "ShouldUnitPowerBeSecret", "player", 0 },
+    { "ShouldUnitPowerBeSecret", "party1", 0 },
+    { "ShouldUnitPowerBeSecret", "target", 0 },
+    { "ShouldUnitPowerMaxBeSecret", "player", 0 },
+    { "ShouldUnitPowerMaxBeSecret", "party1", 0 },
+    { "ShouldUnitHealthMaxBeSecret", "party1" },
+    { "ShouldUnitSpellCastingBeSecret", "player" },
+    { "ShouldUnitThreatStateBeSecret", "player", "target" },
+    { "ShouldUnitThreatStateBeSecret", "party1", "target" },
+    { "ShouldUnitThreatValuesBeSecret", "player", "target" },
+    { "ShouldUnitThreatValuesBeSecret", "party1", "target" },
+    { "ShouldUnitIdentityBeSecret", "party1" },
+    { "CanCompareUnitTokens", "player", "party1" },
+}
+
+PP.CD_FIELDS = { "startTime", "duration", "isEnabled", "isActive", "modRate", "isOnGCD" }
+PP.CHARGE_FIELDS = { "currentCharges", "maxCharges", "cooldownStartTime", "cooldownDuration", "chargeModRate", "isActive" }
+PP.CD_KEEP = { duration = true, isEnabled = true, isActive = true, isOnGCD = true }
+PP.CHARGE_KEEP = { currentCharges = true, maxCharges = true, isActive = true }
+PP.COST_FIELDS = { "type", "name", "cost", "minCost", "costPercent", "costPerSec" }
+PP.COST_KEEP = { type = true, name = true, cost = true, minCost = true, costPercent = true, costPerSec = true }
+PP.LOC_FIELDS = { "locType", "spellID", "displayText", "startTime", "timeRemaining", "duration", "lockoutSchool", "priority", "displayType" }
+PP.LOC_KEEP = { locType = true, spellID = true, displayText = true, priority = true, displayType = true, duration = true }
+
+-- Presence only: { namespace-or-global, name }.
+PP.API_LIST = {
+    { "UnitPowerPercent" }, { "UnitGetTotalAbsorbs" }, { "UnitGetIncomingHeals" },
+    { "CreateUnitHealPredictionCalculator" }, { "UnitGetDetailedHealPrediction" },
+    { "GetPowerRegen" }, { "GetPowerRegenForPowerType" }, { "UnitCastingInfo" }, { "UnitChannelInfo" },
+    { "UnitInRange" }, { "UnitThreatSituation" }, { "UnitDetailedThreatSituation" },
+    { "C_StringUtil", "TruncateWhenZero" }, { "C_CurveUtil", "CreateCurve" }, { "C_CurveUtil", "CreateColorCurve" },
+    { "C_Spell", "GetSpellCooldownDuration" }, { "C_Spell", "GetSpellCharges" }, { "C_Spell", "GetSpellPowerCost" },
+    { "C_UnitAuras", "GetAuraDuration" }, { "C_UnitAuras", "GetAuraApplicationDisplayCount" },
+    { "C_UnitAuras", "GetAuraDispelTypeColor" }, { "C_UnitAuras", "IsAuraFilteredOutByInstanceID" },
+    { "C_UnitAuras", "GetUnitAuraInstanceIDs" },
+    { "C_LossOfControl", "GetActiveLossOfControlData" }, { "C_LossOfControl", "GetActiveLossOfControlDataCount" },
+    { "C_CombatLog", "IsCombatLogRestricted" }, { "C_Item", "GetItemCount" },
+}
+
+-- { event, unit filter for RegisterUnitEvent (none = the event has no unit) }. RegisterUnitEvent
+-- takes at most two units, so absorb and prediction cover player + party1; the handler drops any
+-- other unit a plain RegisterEvent fallback would deliver.
+PP.EVENTS = {
+    { "UNIT_POWER_UPDATE", "player" }, { "UNIT_POWER_FREQUENT", "player" },
+    { "UNIT_SPELLCAST_SUCCEEDED", "player" }, { "UNIT_SPELLCAST_START", "player" },
+    { "UNIT_SPELLCAST_CHANNEL_START", "player" }, { "UNIT_SPELLCAST_CHANNEL_STOP", "player" },
+    { "UNIT_AURA", "player", "target" },
+    { "UNIT_ABSORB_AMOUNT_CHANGED", "player", "party1" }, { "UNIT_HEAL_PREDICTION", "player", "party1" },
+    { "PARTY_KILL" }, { "UNIT_DIED" }, { "PLAYER_TARGET_DIED" },
+    { "LOSS_OF_CONTROL_ADDED" }, { "LOSS_OF_CONTROL_UPDATE" },
+    { "PLAYER_CONTROL_LOST" }, { "PLAYER_CONTROL_GAINED" },
+}
+
+PP.run = 0
+PP.live = nil         -- the running probe: { run, pending = { ooc, combat } }
+PP.frame = nil        -- the event frame (frames are never destroyed, so it is reused)
+PP.cleuFrame = nil
+PP.combat = false     -- InCombatLockdown at the start of the snapshot being taken
+PP.resolved = nil     -- the spell list with ids resolved, for the snapshot being taken
+PP.last = {}          -- log name -> GetTime of its previous entry
+PP.lastCast = nil     -- GetTime of the last player cast that finished
+PP.lastManaCast = nil -- ... of the last one that cost mana (the five second rule clock)
+PP.manaClockUnknown = false -- a cast whose cost could not be read has gone by since lastManaCast
+
+-- Snapshot helpers ---------------------------------------------------------------------------
+
+function PP.Round(x)
+    return math.floor(x * 1000 + 0.5) / 1000
+end
+
+-- The plain class token of the player, or nil (a secret or failing read fails closed).
+function PP.ClassToken()
+    local ok, _, token = pcall(Api("UnitClass"), "player")
+    if ok and type(token) == "string" and not IsSecret(token) then return string.sub(token, 1, MAX_STR) end
+    return nil
+end
+
+function PP.Stamp(rec)
+    rec.inCombat = PP.combat
+    return rec
+end
+
+-- Invoke, tagged. Drops the raw first return: callers that need it call Invoke themselves.
+function PP.Call(keep, fn, ...)
+    return PP.Stamp((Invoke(keep, fn, ...)))
+end
+
+-- One description of a returned value: "type/plain=value" or "type/secret".
+function PP.DescText(d)
+    if type(d) ~= "table" then return "?" end
+    local text = tostring(d.type) .. (d.isSecret and "/secret" or "/plain")
+    if d.value ~= nil then text = text .. "=" .. tostring(d.value) end
+    return text
+end
+
+-- An Invoke record as one string.
+function PP.Brief(rec)
+    if rec.exists == false then return "absent" end
+    if rec.ok ~= true then return "error: " .. tostring(rec.err) end
+    if (rec.n or 0) < 1 then return "no returns" end
+    local parts = {}
+    for i = 1, math.min(rec.n, MAX_RETURNS) do parts[i] = PP.DescText(rec["r" .. i]) end
+    return table.concat(parts, ",")
+end
+
+-- Invoke(keep) then Brief, for the per-spell cells.
+function PP.B(fn, ...)
+    return PP.Brief((Invoke(true, fn, ...)))
+end
+
+-- Brief plus the described fields of a returned table, sorted.
+function PP.FieldsBrief(rec)
+    local text = PP.Brief(rec)
+    if rec.issecrettable ~= nil then text = text .. " issecrettable=" .. tostring(rec.issecrettable) end
+    if type(rec.fields) == "table" then
+        local keys = {}
+        for k in pairs(rec.fields) do keys[#keys + 1] = k end
+        table.sort(keys)
+        local parts = {}
+        for i, k in ipairs(keys) do
+            local d = rec.fields[k]
+            parts[i] = k .. "=" .. ((type(d) == "table" and d.err) and "error" or PP.DescText(d))
+        end
+        text = text .. " {" .. table.concat(parts, ",") .. "}"
+    end
+    return text
+end
+
+-- A method call on an object that came back from the API, never on a secret one.
+function PP.Method(obj, name)
+    if type(obj) == "nil" or IsSecret(obj) then return nil end
+    return GS.Method(obj, name)
+end
+
+-- The spell list with its ids: the listed ones plus the rank the client resolves the name to.
+function PP.Resolve()
+    local out = {}
+    for _, s in ipairs(PP.SPELLS) do
+        local ids, seen = {}, {}
+        local function add(id)
+            if type(id) == "number" and not seen[id] then
+                seen[id] = true
+                ids[#ids + 1] = id
+            end
+        end
+        for _, id in ipairs(s[3]) do add(id) end
+        local known = KnownRankID(s[2])
+        add(known)
+        out[#out + 1] = { key = s[1], name = s[2], ids = ids, known = known, aura = s[4] }
+    end
+    return out
+end
+
+-- Ids of a resolved spell the player has not been refused: only an answer of exactly false drops one.
+function PP.KnownIds(s, isPlayerSpell)
+    local out = {}
+    for _, id in ipairs(s.ids) do
+        if KeptBool((Invoke(true, isPlayerSpell, id))) ~= false then out[#out + 1] = id end
+    end
+    return out
+end
+
+function PP.Curve()
+    local ok, curve = pcall(function() return _G.CurveConstants.ScaleTo100 end)
+    if ok and type(curve) ~= "nil" then return curve end
+    return nil
+end
+
+function PP.EnumValue(enumName, field)
+    local ok, v = pcall(function() return _G.Enum[enumName][field] end)
+    if ok and type(v) == "number" and not IsSecret(v) then return v end
+    return nil
+end
+
+-- Snapshot parts (each gets its own table, tagged, and is pcall'd by Section) ------------------
+
+function PP.PartSecrets(sec)
+    sec.calls = {}
+    for _, call in ipairs(PP.PREDICATES) do
+        local args = {}
+        for i = 2, #call do args[#args + 1] = tostring(call[i]) end
+        local label = call[1]
+        if #args > 0 then label = label .. "(" .. table.concat(args, ",") .. ")" end
+        sec.calls[label] = PP.Call(true, Api("C_Secrets", call[1]), unpack(call, 2))
+    end
+end
+
+function PP.PartSpells(sec)
+    local isPlayerSpell = Api("IsPlayerSpell")
+    local auraSecrecy = Api("C_Secrets", "GetSpellAuraSecrecy")
+    local cdSecrecy = Api("C_Secrets", "GetSpellCooldownSecrecy")
+    local castSecrecy = Api("C_Secrets", "GetSpellCastSecrecy")
+    local auraSecret = Api("C_Secrets", "ShouldSpellAuraBeSecret")
+    local cdSecret = Api("C_Secrets", "ShouldSpellCooldownBeSecret")
+    for _, s in ipairs(PP.resolved) do
+        local entry = { name = s.name, knownRankID = s.known, inCombat = PP.combat }
+        sec[s.key] = entry
+        local ok, err = pcall(function()
+            for _, id in ipairs(s.ids) do
+                entry["s" .. id] = {
+                    isPlayerSpell = PP.B(isPlayerSpell, id),
+                    aura = PP.B(auraSecrecy, id),
+                    cooldown = PP.B(cdSecrecy, id),
+                    cast = PP.B(castSecrecy, id),
+                    shouldAuraBeSecret = PP.B(auraSecret, id),
+                    shouldCooldownBeSecret = PP.B(cdSecret, id),
+                }
+            end
+        end)
+        if not ok then entry.entryError = ErrText(err) end
+    end
+end
+
+-- The mana cost of a spell id: the record, with the first cost entry described.
+function PP.CostRec(id)
+    local rec, v = Invoke(false, Api("C_Spell", "GetSpellPowerCost"), id)
+    PP.Stamp(rec)
+    if rec.ok and IsPlainTable(v) then
+        local okc, n = pcall(function() return #v end)
+        if okc and type(n) == "number" and not IsSecret(n) then rec.count = n end
+        local okf, first = pcall(function() return v[1] end)
+        if okf and IsPlainTable(first) then
+            local holder = {}
+            ReadFields(holder, first, PP.COST_FIELDS, PP.COST_KEEP)
+            rec.first = holder.fields
+        end
+    end
+    return rec
+end
+
+function PP.PartMana(sec)
+    local curve = PP.Curve()
+    for _, unit in ipairs({ "player", "party1" }) do
+        sec[unit .. "Power"] = PP.Call(true, Api("UnitPower"), unit, PP.MANA)
+        sec[unit .. "PowerMax"] = PP.Call(true, Api("UnitPowerMax"), unit, PP.MANA)
+        sec[unit .. "PowerPercent"] = PP.Call(true, Api("UnitPowerPercent"), unit, PP.MANA, false)
+        if type(curve) ~= "nil" then
+            sec[unit .. "PowerPercentCurve"] = PP.Call(true, Api("UnitPowerPercent"), unit, PP.MANA, false, curve)
+        else
+            sec[unit .. "PowerPercentCurve"] = { skipped = "CurveConstants.ScaleTo100 absent", inCombat = PP.combat }
+        end
+    end
+    sec.regen = PP.Call(true, Api("GetPowerRegen"))
+    sec.regenForMana = PP.Call(true, Api("GetPowerRegenForPowerType"), PP.MANA)
+    sec.casting = PP.Call(true, Api("UnitCastingInfo"), "player")
+    sec.channeling = PP.Call(true, Api("UnitChannelInfo"), "player")
+    sec.cost = { inCombat = PP.combat }
+    for _, id in ipairs(PP.COST_IDS) do sec.cost["s" .. id] = PP.CostRec(id) end
+end
+
+function PP.ShieldFor(unit)
+    local out = { inCombat = PP.combat }
+    out.exists = PP.Call(true, Api("UnitExists"), unit)
+    local arec, absorbs = Invoke(true, Api("UnitGetTotalAbsorbs"), unit)
+    out.totalAbsorbs = PP.Stamp(arec)
+    out.incomingHeals = PP.Call(true, Api("UnitGetIncomingHeals"), unit)
+    -- A secret number handed to TruncateWhenZero is the sanctioned way to turn "is there any shield"
+    -- into text; only the call's secrecy is read here, Parker judges what it draws.
+    if arec.ok and (arec.n or 0) >= 1 then
+        out.truncateWhenZero = PP.Call(true, Api("C_StringUtil", "TruncateWhenZero"), absorbs)
+    else
+        out.truncateWhenZero = { skipped = "no absorb value to pass", inCombat = PP.combat }
+    end
+    local crec, calc = Invoke(false, Api("CreateUnitHealPredictionCalculator"))
+    out.calculator = PP.Stamp(crec)
+    if crec.ok and type(calc) ~= "nil" and not IsSecret(calc) then
+        out.fill = PP.Call(true, Api("UnitGetDetailedHealPrediction"), unit, "player", calc)
+        for _, name in ipairs({ "GetDamageAbsorbs", "GetIncomingHeals", "GetHealAbsorbs" }) do
+            out[name] = PP.Call(true, PP.Method(calc, name), calc)
+        end
+    end
+    return out
+end
+
+function PP.PartShield(sec)
+    for _, unit in ipairs({ "player", "party1" }) do sec[unit] = PP.ShieldFor(unit) end
+end
+
+function PP.PartAuras(sec)
+    local byPlayer = Api("C_UnitAuras", "GetPlayerAuraBySpellID")
+    local byUnit = Api("C_UnitAuras", "GetUnitAuraBySpellID")
+    local byName = Api("C_UnitAuras", "GetAuraDataBySpellName")
+    for _, s in ipairs(PP.resolved) do
+        if s.aura then
+            local entry = { name = s.name, inCombat = PP.combat }
+            sec[s.key] = entry
+            local ok, err = pcall(function()
+                entry.byName = PP.FieldsBrief((AuraCall(byName, "player", s.name, HELPFUL)))
+                for _, id in ipairs(s.ids) do
+                    local cell = { playerByID = PP.FieldsBrief((AuraCall(byPlayer, id))) }
+                    entry["s" .. id] = cell
+                    for _, unit in ipairs(PP.AURA_UNITS) do
+                        cell[unit] = PP.FieldsBrief((AuraCall(byUnit, unit, id)))
+                    end
+                end
+            end)
+            if not ok then entry.entryError = ErrText(err) end
+        end
+    end
+end
+
+-- SetCooldownFromDurationObject on a hidden Cooldown: records whether the call is accepted.
+function PP.Sweep(dur)
+    local ok, cd = pcall(GS.Obj, "ppCooldown", function(host)
+        local c = CreateFrame("Cooldown", nil, host, "CooldownFrameTemplate")
+        c:Hide()
+        return c
+    end)
+    if not ok or type(cd) == "nil" then return "no frame: " .. ErrText(cd) end
+    local result = GS.Step(cd, "SetCooldownFromDurationObject", dur, true)
+    GS.Hide(cd)
+    return result
+end
+
+function PP.PartCooldowns(sec)
+    local isPlayerSpell = Api("IsPlayerSpell")
+    local getCooldown = Api("C_Spell", "GetSpellCooldown")
+    local getDuration = Api("C_Spell", "GetSpellCooldownDuration")
+    local getCharges = Api("C_Spell", "GetSpellCharges")
+    for _, s in ipairs(PP.resolved) do
+        local entry = { name = s.name, inCombat = PP.combat }
+        sec[s.key] = entry
+        local ok, err = pcall(function()
+            if #s.ids == 0 then
+                entry.skipped = "no id"
+                return
+            end
+            local ids = PP.KnownIds(s, isPlayerSpell)
+            if #ids == 0 then
+                entry.skipped = "not known"
+                return
+            end
+            for _, id in ipairs(ids) do
+                local cell = {}
+                entry["s" .. id] = cell
+                cell.cooldown = PP.FieldsBrief((InvokeTableKeep(PP.CD_FIELDS, PP.CD_KEEP, getCooldown, id)))
+                local drec, dur = Invoke(false, getDuration, id)
+                cell.durationObject = PP.Brief(drec)
+                if drec.ok and type(dur) ~= "nil" and not IsSecret(dur) then
+                    cell.durationIsZero = PP.B(PP.Method(dur, "IsZero"), dur)
+                    cell.durationRemaining = PP.B(PP.Method(dur, "GetRemainingDuration"), dur)
+                    cell.sweep = PP.Sweep(dur)
+                end
+                cell.charges = PP.FieldsBrief((InvokeTableKeep(PP.CHARGE_FIELDS, PP.CHARGE_KEEP, getCharges, id)))
+            end
+        end)
+        if not ok then entry.entryError = ErrText(err) end
+    end
+end
+
+function PP.PartTriage(sec)
+    local inRange = Api("C_Spell", "IsSpellInRange")
+    -- The first friendly spell that answers for the player (a spell the player lacks answers nil).
+    local used
+    local tried = {}
+    for _, name in ipairs(PP.RANGE_NAMES) do
+        tried[#tried + 1] = name
+        local rec = Invoke(false, inRange, name, "player")
+        if rec.ok and rec.r1 and rec.r1.type ~= "nil" then
+            used = name
+            break
+        end
+    end
+    sec.rangeTried = table.concat(tried, ",")
+    sec.rangeSpell = used or "none answered"
+    local rangeName = used or PP.RANGE_NAMES[1]
+    sec.party1InRangeOfHeal = PP.Call(true, inRange, rangeName, "party1")
+    sec.targetInRangeOfHeal = PP.Call(true, inRange, rangeName, "target")
+    sec.unitInRangeParty1 = PP.Call(true, Api("UnitInRange"), "party1")
+    sec.party1Exists = PP.Call(true, Api("UnitExists"), "party1")
+    sec.party1IsDeadOrGhost = PP.Call(true, Api("UnitIsDeadOrGhost"), "party1")
+    sec.party1IsConnected = PP.Call(true, Api("UnitIsConnected"), "party1")
+    sec.threatPlayer = PP.Call(true, Api("UnitThreatSituation"), "player", "target")
+    sec.threatParty1 = PP.Call(true, Api("UnitThreatSituation"), "party1", "target")
+    sec.detailedThreatPlayer = PP.Call(true, Api("UnitDetailedThreatSituation"), "player", "target")
+end
+
+function PP.PartLossOfControl(sec)
+    sec.count = PP.Call(true, Api("C_LossOfControl", "GetActiveLossOfControlDataCount"))
+    sec.first = PP.Stamp((InvokeTableKeep(PP.LOC_FIELDS, PP.LOC_KEEP, Api("C_LossOfControl", "GetActiveLossOfControlData"), 1)))
+end
+
+-- COMBAT_LOG_EVENT_UNFILTERED is restricted: the registration is tried on a throwaway frame with no
+-- script and undone at once, out of combat only. Returns the outcome as a string.
+function PP.CleuTrial()
+    -- Out of combat only: the trial must not touch a restricted event while the lockdown is on.
+    if PP.combat then return "skipped: in combat" end
+    if not PP.cleuFrame then
+        local ok, frame = pcall(CreateFrame, "Frame")
+        if not ok or type(frame) == "nil" then return "no frame: " .. ErrText(frame) end
+        PP.cleuFrame = frame
+    end
+    local frame = PP.cleuFrame
+    local ok, err = pcall(frame.RegisterEvent, frame, "COMBAT_LOG_EVENT_UNFILTERED")
+    pcall(frame.UnregisterEvent, frame, "COMBAT_LOG_EVENT_UNFILTERED")
+    if ok then return "registered without error" end
+    return ErrText(err)
+end
+
+-- A readable player aura instance id, or nil (in combat the read may be refused: that is data).
+function PP.AuraInstance()
+    local rec, v = Invoke(false, Api("C_UnitAuras", "GetUnitAuraInstanceIDs"), "player", "HELPFUL", 1)
+    if rec.ok and IsPlainTable(v) then
+        local ok, id = pcall(function() return v[1] end)
+        if ok and type(id) == "number" and not IsSecret(id) then return id end
+    end
+    return nil
+end
+
+-- Can a duration object be asked "less than 3 s left?" with a step curve, and is the answer plain?
+function PP.DurationTrial(sec)
+    local id = PP.AuraInstance()
+    sec.instance = id and "found" or "none"
+    if not id then return end
+    local rec, dur = Invoke(false, Api("C_UnitAuras", "GetAuraDuration"), "player", id)
+    sec.object = PP.Stamp(rec)
+    if not (rec.ok and type(dur) ~= "nil" and not IsSecret(dur)) then return end
+    for _, name in ipairs({ "GetRemainingDuration", "IsZero", "HasExpired", "IsActive" }) do
+        sec[name] = PP.Call(true, PP.Method(dur, name), dur)
+    end
+    local crec, curve = Invoke(false, Api("C_CurveUtil", "CreateCurve"))
+    sec.curve = PP.Stamp(crec)
+    if crec.ok and type(curve) ~= "nil" and not IsSecret(curve) then
+        sec.setType = GS.Step(curve, "SetType", PP.EnumValue("LuaCurveType", "Step") or 1)
+        sec.addPoint = GS.Step(curve, "AddPoint", 0, 1)
+        sec.addPoint2 = GS.Step(curve, "AddPoint", 3.001, 0)
+        sec.evaluateRemaining = PP.Call(true, PP.Method(dur, "EvaluateRemainingDuration"), dur, curve)
+    end
+end
+
+function PP.PartMisc(sec)
+    sec.combatLogRestricted = PP.Call(true, Api("C_CombatLog", "IsCombatLogRestricted"))
+    sec.cleuRegister = PP.CleuTrial()
+    sec.items = { inCombat = PP.combat }
+    for _, name in ipairs(PP.ITEMS) do
+        sec.items[name] = PP.Call(true, Api("C_Item", "GetItemCount"), name)
+    end
+    sec.durationObject = { inCombat = PP.combat }
+    local ok, err = pcall(PP.DurationTrial, sec.durationObject)
+    if not ok then sec.durationObject.trialError = ErrText(err) end
+end
+
+function PP.PartApis(sec)
+    for _, entry in ipairs(PP.API_LIST) do
+        local label = entry[2] and (entry[1] .. "." .. entry[2]) or entry[1]
+        sec[label] = Api(entry[1], entry[2]) and "present" or "absent"
+    end
+    sec["CurveConstants.ScaleTo100"] = PP.Curve() and "present" or "absent"
+end
+
+PP.PARTS = {
+    { "env", SectionEnv },
+    { "secrets", PP.PartSecrets },
+    { "spells", PP.PartSpells },
+    { "mana", PP.PartMana },
+    { "shield", PP.PartShield },
+    { "auras", PP.PartAuras },
+    { "cooldowns", PP.PartCooldowns },
+    { "triage", PP.PartTriage },
+    { "lossOfControl", PP.PartLossOfControl },
+    { "misc", PP.PartMisc },
+    { "apis", PP.PartApis },
+}
+
+-- Fills `snap` (a main-run section or a priest.ooc/combat table).
+function PP.Snapshot(snap)
+    PP.combat = LockedDown(false)
+    snap.inCombat = PP.combat
+    local ok, resolved = pcall(PP.Resolve)
+    PP.resolved = ok and resolved or {}
+    snap.time = PP.Call(true, Api("GetTime"))
+    for _, part in ipairs(PP.PARTS) do
+        Section(snap, part[1], function(sec)
+            sec.inCombat = PP.combat
+            part[2](sec)
+        end)
+    end
+    PP.resolved = nil
+end
+
+-- Storage, logs -------------------------------------------------------------------------------
+
+function PP.Rec()
+    local db = DB()
+    if type(db.priest) ~= "table" then db.priest = {} end
+    return db.priest
+end
+
+function PP.Meta()
+    local rec = PP.Rec()
+    if type(rec.meta) ~= "table" then rec.meta = {} end
+    return rec.meta
+end
+
+-- The saved record without creating it (a stop after a reset must not bring it back).
+function PP.Saved()
+    local root = _G.ForeverSTUwaveDB
+    local db = type(root) == "table" and root[KEY] or nil
+    if type(db) == "table" and type(db.priest) == "table" then return db.priest end
+    return nil
+end
+
+function PP.Log(name)
+    local rec = PP.Rec()
+    if type(rec.logs) ~= "table" then rec.logs = {} end
+    local log = rec.logs[name]
+    if type(log) ~= "table" then
+        log = { cap = PP.LOG_CAP, total = 0, dropped = 0, entries = {} }
+        rec.logs[name] = log
+    end
+    return log
+end
+
+-- Appends to a ring buffer: the oldest entries go once there are PP.LOG_CAP.
+function PP.Push(name, entry)
+    local log = PP.Log(name)
+    log.entries[#log.entries + 1] = entry
+    log.total = log.total + 1
+    while #log.entries > log.cap do
+        table.remove(log.entries, 1)
+        log.dropped = log.dropped + 1
+    end
+    if type(entry.t) == "number" then PP.last[name] = entry.t end
+end
+
+-- Tags an entry: in combat or not, GetTime, the gap to the log's previous entry and, with `clock`,
+-- the time since the last cast and the last cast that cost mana. Plain numbers only: a secret
+-- GetTime is not used (noTime).
+function PP.Mark(e, name, clock)
+    e.inCombat = LockedDown(false)
+    local now = PlainTime()
+    if now == nil then
+        e.noTime = true
+        return e
+    end
+    e.t = now
+    local last = PP.last[name]
+    if last then e.gap = PP.Round(now - last) end
+    if clock then
+        -- An unreadable cost since lastManaCast makes that clock stale: say so instead of a number.
+        if PP.manaClockUnknown then
+            e.sinceManaCastUnknown = true
+        elseif PP.lastManaCast then
+            e.sinceManaCast = PP.Round(now - PP.lastManaCast)
+        end
+        if PP.lastCast then e.sinceCast = PP.Round(now - PP.lastCast) end
+    end
+    return e
+end
+
+-- True for a plain unit token outside the set: a plain RegisterEvent fallback delivers every unit.
+-- A secret unit is kept and described.
+function PP.ForeignUnit(unit, set)
+    if IsSecret(unit) then return false end
+    return not set[unit]
+end
+
+-- Total mana cost of a spell id from C_Spell.GetSpellPowerCost, or nil when unreadable. An entry
+-- whose type or cost is secret (or missing) makes the whole answer nil: skipping it would read as a
+-- free cast.
+function PP.ManaCost(id)
+    local ok, v = pcall(Api("C_Spell", "GetSpellPowerCost"), id)
+    if not ok or not IsPlainTable(v) then return nil end
+    local okc, n = pcall(function() return #v end)
+    if not okc or type(n) ~= "number" or IsSecret(n) then return nil end
+    local total = 0
+    for i = 1, n do
+        local okf, entry = pcall(function() return v[i] end)
+        if not okf or not IsPlainTable(entry) then return nil end
+        local costType = PlainNumberField(entry, "type")
+        local cost = PlainNumberField(entry, "cost")
+        if costType == nil or cost == nil then return nil end
+        if costType == PP.MANA then total = total + cost end
+    end
+    return total
+end
+
+-- true/false when both GUIDs are plain, nil otherwise (a secret GUID is never compared).
+function PP.SameGuid(guid, unit)
+    if IsSecret(guid) or type(guid) ~= "string" then return nil end
+    local rec, mine = Invoke(false, Api("UnitGUID"), unit)
+    if not rec.ok or IsSecret(mine) or type(mine) ~= "string" then return nil end
+    return guid == mine
+end
+
+function PP.LogPower(name, event, unit, powerType)
+    if PP.ForeignUnit(unit, PP.PLAYER_SET) then return end
+    local e = { event = event, unit = Desc(unit, true), powerType = Desc(powerType, true) }
+    local pt = e.powerType
+    -- Only mana matters here; a power type that is secret is kept and described.
+    if pt.isSecret == false and pt.type == "string" and pt.value ~= nil and pt.value ~= "MANA" then return end
+    PP.Push(name, PP.Mark(e, name, true))
+end
+
+function PP.LogCast(event, unit, castGUID, spellID)
+    if PP.ForeignUnit(unit, PP.PLAYER_SET) then return end
+    local e = { event = event, unit = Desc(unit, true), castGUID = Desc(castGUID), spellID = Desc(spellID, true) }
+    PP.Mark(e, "cast")
+    if event == "UNIT_SPELLCAST_SUCCEEDED" then
+        PP.lastCast = e.t
+        local id = PlainSpellID(unit, castGUID, spellID)
+        local cost = id and PP.ManaCost(id) or nil
+        if id then e.manaCost = cost end
+        if cost == nil then
+            -- A secret spell id or an unreadable cost: this cast may have restarted the five second rule.
+            PP.manaClockUnknown = true
+        elseif cost > 0 then
+            PP.lastManaCast = e.t
+            PP.manaClockUnknown = e.t == nil
+        end
+    end
+    PP.Push("cast", e)
+end
+
+function PP.LogAura(event, unit, info)
+    if PP.ForeignUnit(unit, PP.AURA_SET) then return end
+    PP.Push("aura", PP.Mark(RecordAura(event, unit, info), "aura"))
+end
+
+function PP.LogShield(event, unit)
+    if PP.ForeignUnit(unit, PP.SHIELD_SET) then return end
+    PP.Push("shield", PP.Mark({ event = event, unit = Desc(unit, true) }, "shield"))
+end
+
+function PP.LogKill(event, attacker, target)
+    local e = { event = event, arg1 = Desc(attacker), arg2 = Desc(target) }
+    if event == "PARTY_KILL" then
+        e.attackerIsPlayer = PP.SameGuid(attacker, "player")
+        e.targetIsTarget = PP.SameGuid(target, "target")
+    end
+    PP.Push("kill", PP.Mark(e, "kill"))
+end
+
+function PP.LogDied(event, guid)
+    local e = { event = event, arg1 = Desc(guid) }
+    e.isTarget = PP.SameGuid(guid, "target")
+    e.isPlayer = PP.SameGuid(guid, "player")
+    PP.Push("died", PP.Mark(e, "died"))
+end
+
+function PP.LogLoc(event, ...)
+    local e = { event = event, argCount = select("#", ...) }
+    for i = 1, math.min(e.argCount, 3) do e["arg" .. i] = Desc((select(i, ...)), true) end
+    PP.Push("loc", PP.Mark(e, "loc"))
+end
+
+-- Snapshot timing and events ------------------------------------------------------------------
+
+-- kind "ooc" / "combat". Assigned before it is filled, so a failure part-way still saves what ran.
+function PP.TakeSnapshot(kind)
+    local snap = { kind = kind, when = SafeDate(), classToken = PP.ClassToken() or "unknown" }
+    PP.Rec()[kind] = snap
+    local ok, err = pcall(PP.Snapshot, snap)
+    if not ok then snap.snapshotError = ErrText(err) end
+    Say("priest: " .. kind .. " snapshot saved")
+    return snap
+end
+
+-- The event that asked for `kind` is dropped once that snapshot exists.
+function PP.Satisfied(kind)
+    CallOn(PP.frame, "UnregisterEvent", kind == "combat" and "PLAYER_REGEN_DISABLED" or "PLAYER_REGEN_ENABLED")
+end
+
+function PP.Due(run, kind)
+    local live = PP.live
+    if not live or live.run ~= run then return end
+    live.pending[kind] = nil
+    -- A pull that ended inside the delay (or a fight that restarted) is not worth recording: stay armed.
+    if LockedDown(kind == "combat") ~= (kind == "combat") then return end
+    local ok, err = pcall(PP.TakeSnapshot, kind)
+    if not ok then pcall(function() PP.Meta().snapshotError = ErrText(err) end) end
+    PP.Satisfied(kind)
+end
+
+function PP.Schedule(kind, delay)
+    local live = PP.live
+    if not live or live.pending[kind] then return end
+    live.pending[kind] = true
+    local run = live.run
+    if not GS.Timer(delay, function()
+        local ok, err = pcall(PP.Due, run, kind)
+        if not ok then pcall(function() PP.Meta().timerError = ErrText(err) end) end
+    end) then
+        -- No timer: take the snapshot now rather than never.
+        live.pending[kind] = nil
+        pcall(function() PP.Meta().delay = "none (C_Timer.After unavailable)" end)
+        PP.Due(run, kind)
+    end
+end
+
+PP.HANDLERS = {
+    UNIT_POWER_UPDATE = function(event, ...) PP.LogPower("power", event, ...) end,
+    UNIT_POWER_FREQUENT = function(event, ...) PP.LogPower("powerFrequent", event, ...) end,
+    UNIT_SPELLCAST_SUCCEEDED = function(event, ...) PP.LogCast(event, ...) end,
+    UNIT_SPELLCAST_START = function(event, ...) PP.LogCast(event, ...) end,
+    UNIT_SPELLCAST_CHANNEL_START = function(event, ...) PP.LogCast(event, ...) end,
+    UNIT_SPELLCAST_CHANNEL_STOP = function(event, ...) PP.LogCast(event, ...) end,
+    UNIT_AURA = function(event, ...) PP.LogAura(event, ...) end,
+    UNIT_ABSORB_AMOUNT_CHANGED = function(event, ...) PP.LogShield(event, ...) end,
+    UNIT_HEAL_PREDICTION = function(event, ...) PP.LogShield(event, ...) end,
+    PARTY_KILL = function(event, ...) PP.LogKill(event, ...) end,
+    PLAYER_TARGET_DIED = function(event, ...) PP.LogKill(event, ...) end,
+    UNIT_DIED = function(event, ...) PP.LogDied(event, ...) end,
+    LOSS_OF_CONTROL_ADDED = function(event, ...) PP.LogLoc(event, ...) end,
+    LOSS_OF_CONTROL_UPDATE = function(event, ...) PP.LogLoc(event, ...) end,
+    PLAYER_CONTROL_LOST = function(event, ...) PP.LogLoc(event, ...) end,
+    PLAYER_CONTROL_GAINED = function(event, ...) PP.LogLoc(event, ...) end,
+    PLAYER_REGEN_DISABLED = function()
+        if PP.Rec().combat == nil then PP.Schedule("combat", PP.COMBAT_DELAY) end
+    end,
+    PLAYER_REGEN_ENABLED = function()
+        if PP.Rec().ooc == nil then PP.Schedule("ooc", PP.OOC_DELAY) end
+    end,
+}
+
+function PP.OnEvent(_, event, ...)
+    if not PP.live then return end
+    local fn = PP.HANDLERS[event]
+    if not fn then return end
+    local ok, err = pcall(fn, event, ...)
+    if not ok then
+        pcall(function() PP.Meta().lastError = ErrText(err) end)
+    end
+end
+
+function PP.EnsureFrame()
+    if PP.frame then return true end
+    local ok, frame = pcall(CreateFrame, "Frame")
+    if not ok or type(frame) == "nil" then
+        pcall(function() PP.Meta().frameError = ErrText(frame) end)
+        return false
+    end
+    PP.frame = frame
+    return (pcall(frame.SetScript, frame, "OnEvent", PP.OnEvent))
+end
+
+-- Every failed registration is kept (appended, capped).
+function PP.NoteRegisterError(event, err)
+    pcall(function()
+        local meta = PP.Meta()
+        local text = event .. ": " .. ErrText(err)
+        if type(meta.registerError) == "string" and meta.registerError ~= "" then
+            text = meta.registerError .. " | " .. text
+        end
+        meta.registerError = string.sub(text, 1, MAX_REGISTER_ERR)
+    end)
+end
+
+function PP.Register(event, ...)
+    local frame = PP.frame
+    if select("#", ...) > 0 and pcall(frame.RegisterUnitEvent, frame, event, ...) then return end
+    local ok, err = pcall(frame.RegisterEvent, frame, event)
+    if not ok then PP.NoteRegisterError(event, err) end
+end
+
+-- status: what meta.status says afterwards. quiet: the explicit reset path, which prints its own line.
+function PP.Stop(status, quiet)
+    local live = PP.live
+    PP.live = nil
+    PP.run = PP.run + 1   -- every pending timer of the old run is now stale
+    CallOn(PP.frame, "UnregisterAllEvents")
+    GS.Hide(state.gsObjs.ppCooldown)
+    if live then
+        local rec = PP.Saved()
+        if rec and type(rec.meta) == "table" then rec.meta.status = status end
+    end
+    if quiet then return end
+    if live then
+        Say("priest: logging stopped (" .. status .. "), /reload or log out to save")
+    else
+        Say("priest: not running")
+    end
+end
+
+function PP.Start()
+    state.canTest = Invoke(false, Api("issecretvalue"), 0).ok == true
+    local kind = LockedDown(false) and "combat" or "ooc"
+    if PP.live then
+        PP.TakeSnapshot(kind)
+        Say("priest: logs keep running; /fsprobe priest off stops them")
+        return
+    end
+    PP.run = PP.run + 1
+    PP.last, PP.lastCast, PP.lastManaCast, PP.manaClockUnknown = {}, nil, nil, false
+    local run = PP.run
+    local meta = {
+        started = SafeDate(), run = run, status = "logging", logCap = PP.LOG_CAP, logSeconds = PP.LOG_SECONDS,
+        issecretvalueAvailable = type(_G.issecretvalue) == "function",
+    }
+    if PP.Saved() then Say("priest: replacing the saved priest record") end
+    DB().priest = { meta = meta, logs = {} }
+    PP.TakeSnapshot(kind)
+    if not PP.EnsureFrame() then
+        meta.status = "no frame"
+        Say("priest: " .. kind .. " snapshot saved but the event frame could not be created; nothing armed")
+        return
+    end
+    -- Live only once the snapshot is in and the frame exists: a failed start leaves nothing half armed.
+    PP.live = { run = run, pending = {} }
+    for _, entry in ipairs(PP.EVENTS) do PP.Register(unpack(entry)) end
+    -- The snapshot of the other state follows the next change: a pull (4 s in) or the end of the fight.
+    if kind == "ooc" then
+        PP.Register("PLAYER_REGEN_DISABLED")
+    else
+        PP.Register("PLAYER_REGEN_ENABLED")
+    end
+    if not GS.Timer(PP.LOG_SECONDS, function()
+        if not (PP.live and PP.live.run == run) then return end
+        local ok, err = pcall(PP.Stop, "timeout")
+        if not ok then pcall(function() PP.Meta().timerError = ErrText(err) end) end
+    end) then
+        meta.timerError = "C_Timer.After unavailable; logging runs until /fsprobe priest off"
+    end
+    Say("priest: " .. kind .. " snapshot saved. Logging " .. PP.LOG_SECONDS .. "s: power ticks, casts, auras, kills, absorbs. "
+        .. (kind == "ooc" and "Pull a mob: the combat snapshot follows " .. PP.COMBAT_DELAY .. "s in. "
+            or "Leave combat: the ooc snapshot follows. ")
+        .. "Cast, wand, drink, shield yourself and a party member. Run /fsprobe priest again to re-snapshot, "
+        .. "/fsprobe priest off to stop, /reload to save")
+end
+
+-------------------------------------------------------------------------------
 -- /fsprobe hot: can an engine AuraContainer per party row show the player's own Renew?
 -------------------------------------------------------------------------------
 -- `/fsprobe hot` (out of combat only) builds one CustomAuraContainerTemplate per token that
@@ -3343,8 +4274,8 @@ end
 -- /fsprobe
 -------------------------------------------------------------------------------
 
--- keepGunsight: the main run re-arming must not wipe a saved `/fsprobe gunsight` or `/fsprobe hot`
--- result or disarm their pending parts; only an explicit `/fsprobe reset` clears those.
+-- keepGunsight: the main run re-arming must not wipe a saved `/fsprobe gunsight`, `/fsprobe hot` or
+-- `/fsprobe priest` result or disarm their pending parts; only an explicit `/fsprobe reset` clears those.
 local function Reset(keepGunsight)
     state.runId = state.runId + 1
     state.armed = false
@@ -3373,17 +4304,21 @@ local function Reset(keepGunsight)
     if state.label then pcall(function() state.label:Hide() end) end
     local root = _G.ForeverSTUwaveDB
     if type(root) == "table" then
-        local kept, keptHot = nil, nil
+        local kept, keptHot, keptPriest = nil, nil, nil
         if keepGunsight and type(root[KEY]) == "table" then
             kept = root[KEY].gunsight
             keptHot = root[KEY].hot
+            keptPriest = root[KEY].priest
         end
         root[KEY] = nil
-        if type(kept) == "table" or type(keptHot) == "table" then
-            root[KEY] = { gunsight = kept, hot = keptHot }
+        if type(kept) == "table" or type(keptHot) == "table" or type(keptPriest) == "table" then
+            root[KEY] = { gunsight = kept, hot = keptHot, priest = keptPriest }
         end
     end
     if not keepGunsight then
+        -- First, and on its own: a failure in the gunsight or hot teardown must not leave the priest
+        -- probe's events registered.
+        PP.Stop("reset", true)
         GS.Disarm()
         HP.Off(true)
     end
@@ -3442,6 +4377,10 @@ local function Command(msg)
         Say("results cleared, nothing armed")
     elseif arg == "gunsight" then
         GS.Start()
+    elseif arg == "priest" then
+        PP.Start()
+    elseif arg == "priest off" then
+        PP.Stop("stopped")
     elseif arg == "hot" then
         HP.Start()
     elseif arg == "hot off" then

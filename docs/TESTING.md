@@ -37,6 +37,17 @@ The log is account wide: if another character already logged in with this build,
 
 Optional developer diagnostics: `/fsprobe` records what this client exposes in and out of combat.
 
+### Priest probe (developer diagnostic)
+
+Log in on a priest. This records what a priest UI could read on this client, out of combat and in combat, side by side. It only reads; it casts and clicks nothing.
+
+1. Out of combat, type `/fsprobe priest`. It saves an out-of-combat snapshot and starts logging.
+2. Play normally for a few minutes: pull a mob (the in-combat snapshot saves about 4 seconds into the fight), cast and wand, drink, shield yourself and a party member if you have one, and kill a mob or two. Typing `/fsprobe priest` again re-snapshots the state you are in, and keeps the logs. If you start it in combat, the out-of-combat snapshot follows when the fight ends.
+3. `/fsprobe priest off` stops the logging (it stops by itself after 20 minutes). Then `/reload` or log out to save.
+4. Send the `fsprobe.priest` table from `ForeverSTUwaveDB` in `WTF/Account/<id>/SavedVariables/forever-stuwave.lua`. It holds the account's settings too: strip those first.
+
+The plain `/fsprobe` run adds the same snapshot part to its own out-of-combat and in-combat snapshots when the character is a priest. `/fsprobe reset` clears all of it.
+
 ## Paladin: seals, auras, Seal module, chat font
 
 Use a Paladin that has learned at least one seal. Step 6 works on any class.

@@ -26,6 +26,7 @@ Exit 0 = every check passed.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -555,6 +556,83 @@ function hotMock(groupButtons)
         end
         self._groupKids = groupButtons
     end
+end
+-- `/fsprobe priest`: the extra APIs the priest section reads (the default mock lacks them, which is itself a
+-- test: a missing API must record "absent"). Plain mode answers like a healthy client, secret mode with
+-- sentinels, throw mode raises. The player knows Power Word: Shield, Smite and Shoot only.
+function priestMock()
+    local function obj(methods)
+        return setmetatable({}, { __index = function(_, k)
+            local m = methods[k]
+            if not m then return nil end
+            return function(self, ...)
+                if __mode == "throw" then error("boom: method " .. k) end
+                return m(...)
+            end
+        end })
+    end
+    IsPlayerSpell = function(id) return id == 17 or id == 585 or id == 5019 end
+    C_SpellBook.IsSpellKnown = IsPlayerSpell
+    def("GetPowerRegen", function() return 8, 4 end, function() return SN, SN end)
+    def("GetPowerRegenForPowerType", function() return 8, 4 end, function() return SN, SN end)
+    def("UnitCastingInfo", function() return nil end, function() return SS, SS, SN, SN, SN, SB, SS, SB, SN, SN end)
+    def("C_Spell.GetSpellPowerCost", function(id)
+        if id == 5019 then return {} end
+        return { { type = 0, name = "MANA", cost = 150, minCost = 150, costPercent = 0 } }
+    end, function() return ST end)
+    def("C_Spell.GetSpellCharges", function() return { currentCharges = 1, maxCharges = 2, cooldownStartTime = 0, cooldownDuration = 0, chargeModRate = 1, isActive = false } end,
+        function() return { currentCharges = SN, maxCharges = 2, cooldownStartTime = SN, cooldownDuration = SN, chargeModRate = SN, isActive = SB } end)
+    def("C_Spell.GetSpellCooldownDuration", function()
+        return obj({ IsZero = function() return true end, GetRemainingDuration = function() return 0 end })
+    end, function() return ST end)
+    def("UnitGetTotalAbsorbs", function() return 0 end, function() return SN end)
+    def("UnitGetIncomingHeals", function() return 0 end, function() return SN end)
+    def("CreateUnitHealPredictionCalculator", function()
+        return obj({
+            GetDamageAbsorbs = function() if __mode == "secret" then return SN, SB end return 120, false end,
+            GetIncomingHeals = function() if __mode == "secret" then return SN, SN, SN, SB end return 300, 200, 100, false end,
+            GetHealAbsorbs = function() if __mode == "secret" then return SN, SB end return 0, false end,
+        })
+    end)
+    def("UnitGetDetailedHealPrediction", function() end)
+    def("C_StringUtil.TruncateWhenZero", function() return "" end, function() return SS end)
+    CurveConstants = { ScaleTo100 = { kind = "curve" } }
+    def("UnitInRange", function() return true, true end, function() return SB, SB end)
+    def("UnitIsDeadOrGhost", function() return false end)
+    def("UnitIsConnected", function() return true end)
+    def("UnitThreatSituation", function() return 1 end, function() return SN end)
+    def("UnitDetailedThreatSituation", function() return false, 0, 10, 10, 10 end, function() return SB, SN, SN, SN, SN end)
+    def("C_LossOfControl.GetActiveLossOfControlDataCount", function() return 1 end)
+    def("C_LossOfControl.GetActiveLossOfControlData", function()
+        return { locType = "FEAR", spellID = 8122, displayText = "Feared", priority = 5, displayType = 1, startTime = 1, duration = 8 }
+    end, function() return ST end)
+    def("C_CombatLog.IsCombatLogRestricted", function() return true end)
+    def("C_UnitAuras.GetUnitAuraInstanceIDs", function() return { 77 } end, function() return ST end)
+    def("C_UnitAuras.GetAuraDuration", function()
+        return obj({
+            GetRemainingDuration = function() return 12.5 end, IsZero = function() return false end,
+            HasExpired = function() return false end, IsActive = function() return true end,
+            EvaluateRemainingDuration = function() return 1 end,
+        })
+    end, function() return ST end)
+    Enum = Enum or {}
+    Enum.LuaCurveType = { Linear = 0, Step = 1 }
+    C_CurveUtil = C_CurveUtil or {}
+    C_CurveUtil.CreateCurve = function()
+        return { SetType = function() end, AddPoint = function() end }
+    end
+end
+-- The priest probe's own event frame: the one that registered UNIT_POWER_UPDATE.
+function pframe()
+    for _, f in ipairs(__frames) do
+        if f._scripts.OnEvent and f._events.UNIT_POWER_UPDATE then return f end
+    end
+end
+function pfire(event, ...)
+    local f = pframe()
+    check(f, "no priest event frame")
+    local ok, err = pcall(f._scripts.OnEvent, f, event, ...)
+    check(ok, "priest handler threw on " .. event .. ": " .. tostring(err))
 end
 function pull(dt)
     __combat = true
@@ -2263,6 +2341,545 @@ scan(ForeverSTUwaveDB.fsprobe)
 )
 
 
+# --- /fsprobe priest -----------------------------------------------------------------------------
+
+case("priest_main_run_section_is_class_gated")(
+    r"""
+runCmd("")
+local db = ForeverSTUwaveDB.fsprobe
+check(db.ooc.priest and db.ooc.priest.classToken == "PRIEST", "a priest gets the section")
+check(db.ooc.priest.inCombat == false and db.ooc.priest.mana, "ooc priest section must be tagged and filled")
+__combat = true
+fire("PLAYER_REGEN_DISABLED")
+advance(4)
+check(db.combat.priest.inCombat == true and db.combat.priest.mana, "combat priest section must be tagged true")
+scan(db)
+"""
+)
+
+case("priest_main_run_section_skips_other_classes")(
+    r"""
+UnitClass = function() return "Warrior", "WARRIOR", 1 end
+runCmd("")
+local sec = ForeverSTUwaveDB.fsprobe.ooc.priest
+check(sec.skipped == "not a priest" and sec.classToken == "WARRIOR", "other class must skip: " .. tostring(sec.skipped))
+check(sec.mana == nil and sec.spells == nil, "a skipped section must hold no probe data")
+"""
+)
+
+case("priest_main_run_section_skips_when_the_class_is_secret", "secret")(
+    r"""
+runCmd("")
+local sec = ForeverSTUwaveDB.fsprobe.ooc.priest
+check(sec.skipped == "not a priest" and sec.classToken == "unknown", "secret class must fail closed")
+scan(ForeverSTUwaveDB.fsprobe)
+"""
+)
+
+case("priest_command_snapshot_covers_the_checklist")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+check(p and p.ooc and p.ooc.kind == "ooc" and p.ooc.inCombat == false, "ooc snapshot tagged false")
+check(p.meta.status == "logging", "status: " .. tostring(p.meta.status))
+local o = p.ooc
+-- A: secrecy map and predicates
+check(o.spells.pw_shield.s17.aura == "number/plain=0", "spell secrecy cell: " .. tostring(o.spells.pw_shield.s17.aura))
+check(o.spells.pw_shield.s17.isPlayerSpell == "boolean/plain=true", "isPlayerSpell cell")
+check(o.spells.sw_pain.s594, "a rank resolved by name must be probed too")
+check(o.secrets.calls["GetPowerTypeSecrecy(0)"].r1.type == "number", "power secrecy recorded")
+check(o.secrets.calls["ShouldUnitPowerBeSecret(party1,0)"].inCombat == false, "predicate records are tagged")
+-- B: mana
+check(o.mana.playerPower.r1.value == 100 and o.mana.playerPower.inCombat == false, "UnitPower sample")
+check(o.mana.playerPowerPercentCurve.exists and o.mana.playerPowerPercentCurve.ok, "percent with a curve")
+check(o.mana.regen.r1.value == 8 and o.mana.regenForMana.r2.value == 4, "regen reads")
+check(o.mana.casting.exists and o.mana.channeling.exists, "cast info reads")
+check(o.mana.cost.s585.count == 1 and o.mana.cost.s585.first.cost.value == 150, "mana cost read")
+check(o.mana.cost.s5019.count == 0, "wand has no cost")
+-- C: shield
+check(o.shield.player.totalAbsorbs.exists and o.shield.player.truncateWhenZero.ok, "absorb reads")
+check(o.shield.player.GetDamageAbsorbs.r1.value == 120 and o.shield.player.GetDamageAbsorbs.r2.value == false, "calculator reads")
+check(o.shield.party1.GetIncomingHeals.n == 4, "incoming heals return count")
+-- D: auras by spell
+check(string.find(o.auras.inner_fire.s588.playerByID, "spellId=number/plain", 1, true), "aura cell: " .. tostring(o.auras.inner_fire.s588.playerByID))
+check(o.auras.pw_shield.s17.party1 == "no returns" or o.auras.pw_shield.s17.party1 == "nil/plain", "no aura reads nothing: " .. tostring(o.auras.pw_shield.s17.party1))
+-- F: cooldowns
+local cd = o.cooldowns.pw_shield.s17
+check(string.find(cd.cooldown, "isActive=boolean/plain=false", 1, true), "cooldown cell: " .. tostring(cd.cooldown))
+check(cd.durationObject and cd.durationIsZero == "boolean/plain=true", "duration object IsZero")
+check(string.find(cd.charges, "maxCharges=number/plain=2", 1, true) and string.find(cd.charges, "currentCharges=number/plain=1", 1, true),
+    "charges keep the plain counts: " .. tostring(cd.charges))
+check(o.cooldowns.fade.skipped == "not known", "unknown spells are not read")
+-- G: triage
+check(o.triage.party1InRangeOfHeal.exists and o.triage.rangeSpell == "Lesser Heal", "heal range read: " .. tostring(o.triage.rangeSpell))
+check(o.triage.unitInRangeParty1.r1.type == "boolean", "UnitInRange read")
+check(o.triage.threatPlayer.r1.value == 1, "threat read")
+-- H: loss of control
+check(o.lossOfControl.count.r1.value == 1 and o.lossOfControl.first.fields.locType.value == "FEAR", "loss of control")
+-- I: misc
+check(o.misc.combatLogRestricted.r1.value == true, "combat log restricted flag")
+check(type(o.misc.cleuRegister) == "string", "CLEU registration result recorded")
+check(o.misc.durationObject.evaluateRemaining.r1.value == 1 and o.misc.durationObject.instance == "found", "duration trial")
+check(o.misc.items["Holy Candle"].exists, "item count read")
+check(o.apis.UnitPowerPercent == "present" and o.apis["C_Spell.GetSpellCharges"] == "present", "api presence map")
+-- events: unit filtered where one or two units do
+local f = pframe()
+check(f._events.UNIT_POWER_UPDATE == "unit:player" and f._events.UNIT_POWER_FREQUENT == "unit:player", "power events")
+check(f._events.UNIT_AURA == "unit:player,target", "aura event units")
+for _, e in ipairs({ "PARTY_KILL", "UNIT_DIED", "PLAYER_TARGET_DIED", "LOSS_OF_CONTROL_ADDED", "PLAYER_REGEN_DISABLED" }) do
+    check(f._events[e] == true, e .. " not registered")
+end
+check(f._events.UNIT_ABSORB_AMOUNT_CHANGED == "unit:player,party1" and f._events.UNIT_HEAL_PREDICTION == "unit:player,party1",
+    "absorb and prediction events must be unit events for player and party1")
+check(o.misc.cleuRegister == "registered without error", "CLEU trial out of combat: " .. tostring(o.misc.cleuRegister))
+check(said("Run /fsprobe priest again"), "chat line must tell Parker to run the command again")
+noOnUpdate()
+check(said("priest"), "priest line missing")
+scan(p)
+"""
+)
+
+case("priest_combat_snapshot_follows_the_pull_and_sits_beside_the_ooc_one")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+local f = pframe()
+__combat = true
+pfire("PLAYER_REGEN_DISABLED")
+check(p.combat == nil, "combat snapshot taken before the delay")
+advance(3)
+check(p.combat == nil, "combat snapshot taken early")
+advance(1)
+check(p.combat and p.combat.kind == "combat" and p.combat.inCombat == true, "combat snapshot tagged true")
+check(p.ooc.inCombat == false and p.combat.mana.playerPower.inCombat == true, "both runs side by side")
+check(f._events.PLAYER_REGEN_DISABLED == nil, "REGEN_DISABLED still registered after the combat snapshot")
+check(said("priest: combat snapshot"), "combat line missing")
+scan(p)
+"""
+)
+
+case("priest_pull_that_ends_before_the_delay_takes_no_combat_snapshot")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+__combat = true
+pfire("PLAYER_REGEN_DISABLED")
+__combat = false
+advance(4)
+check(p.combat == nil, "snapshot taken after combat already ended")
+check(pframe()._events.PLAYER_REGEN_DISABLED == true, "must stay armed for the next pull")
+"""
+)
+
+case("priest_command_in_combat_takes_the_combat_snapshot_then_ooc_after_the_fight")(
+    r"""
+priestMock()
+__combat = true
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+check(p.combat and p.combat.inCombat == true and p.ooc == nil, "in combat the first snapshot is the combat one")
+check(p.combat.misc.cleuRegister == "skipped: in combat", "the CLEU trial must not run in combat: " .. tostring(p.combat.misc.cleuRegister))
+__combat = false
+pfire("PLAYER_REGEN_ENABLED")
+advance(2)
+check(p.ooc and p.ooc.inCombat == false, "ooc snapshot follows once the fight ends")
+scan(p)
+"""
+)
+
+case("priest_event_logs_are_capped_ring_buffers")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+local feeds = {
+    { "power", "UNIT_POWER_UPDATE", { "player", "MANA" } },
+    { "powerFrequent", "UNIT_POWER_FREQUENT", { "player", "MANA" } },
+    { "cast", "UNIT_SPELLCAST_SUCCEEDED", { "player", "Cast-1", 585 } },
+    { "aura", "UNIT_AURA", { "target", { isFullUpdate = false, addedAuras = {}, updatedAuraInstanceIDs = {}, removedAuraInstanceIDs = {} } } },
+    { "shield", "UNIT_ABSORB_AMOUNT_CHANGED", { "party1" } },
+    { "kill", "PARTY_KILL", { "Player-1-1", "Creature-1-1" } },
+    { "died", "UNIT_DIED", { "Creature-1-1" } },
+    { "loc", "LOSS_OF_CONTROL_ADDED", { "player", 1 } },
+}
+for _, feed in ipairs(feeds) do
+    for _ = 1, 80 do
+        __now = __now + 0.1
+        pfire(feed[2], unpack(feed[3]))
+    end
+    local log = p.logs[feed[1]]
+    check(log, feed[1] .. " log missing")
+    check(log.cap == 50 and #log.entries == 50, feed[1] .. " must hold exactly 50: " .. tostring(#log.entries))
+    check(log.total == 80 and log.dropped == 30, feed[1] .. " counts: " .. tostring(log.total) .. "/" .. tostring(log.dropped))
+    local first, last = log.entries[1], log.entries[50]
+    check(type(first.t) == "number" and first.t < last.t, feed[1] .. " entries must be oldest first with GetTime stamps")
+    check(first.inCombat == false and first.event == feed[2], feed[1] .. " entry tag")
+end
+-- the oldest entries went: what is left is the newest 50
+check(p.logs.power.entries[50].t - p.logs.power.entries[1].t > 4.8, "ring kept the wrong end")
+scan(p)
+"""
+)
+
+case("priest_power_log_filters_and_times_the_five_second_rule")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+pfire("UNIT_POWER_UPDATE", "player", "RAGE")
+pfire("UNIT_POWER_UPDATE", "party1", "MANA")
+check(p.logs.power == nil or p.logs.power.total == 0, "a non-mana or foreign power event was logged")
+pfire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 585)
+__now = __now + 2
+pfire("UNIT_POWER_UPDATE", "player", "MANA")
+__now = __now + 2
+pfire("UNIT_POWER_UPDATE", "player", "MANA")
+local e = p.logs.power.entries
+check(#e == 2 and math.abs(e[1].sinceManaCast - 2) < 0.001 and math.abs(e[2].sinceManaCast - 4) < 0.001, "sinceManaCast")
+check(math.abs(e[2].gap - 2) < 0.001, "gap between ticks")
+local c = p.logs.cast.entries[1]
+check(c.manaCost == 150 and c.spellID.value == 585 and c.spellID.isSecret == false, "cast entry carries the mana cost")
+-- a free cast (wand) must not restart the clock
+pfire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-2", 5019)
+check(p.logs.cast.entries[2].manaCost == 0, "wand costs no mana")
+__now = __now + 1
+pfire("UNIT_POWER_UPDATE", "player", "MANA")
+check(math.abs(e[3].sinceManaCast - 5) < 0.001, "a free cast restarted the five second clock")
+-- foreign units that a plain RegisterEvent fallback would deliver are dropped
+pfire("UNIT_ABSORB_AMOUNT_CHANGED", "nameplate3")
+check(p.logs.shield == nil or p.logs.shield.total == 0, "a nameplate absorb event was logged")
+scan(p)
+"""
+)
+
+case("priest_kill_log_compares_guids_only_when_both_are_plain")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+UnitGUID = function(unit) if unit == "player" then return "Player-1-1" end return "Creature-1-1" end
+pfire("PARTY_KILL", "Player-1-1", "Creature-1-1")
+pfire("PARTY_KILL", "Player-9-9", "Creature-1-1")
+pfire("PLAYER_TARGET_DIED")
+local k = p.logs.kill.entries
+check(k[1].attackerIsPlayer == true and k[2].attackerIsPlayer == false, "attacker identity")
+check(k[1].arg1.value == nil, "guids must not be stored")
+check(k[3].event == "PLAYER_TARGET_DIED", "target died logged")
+scan(p)
+"""
+)
+
+case("priest_log_entries_never_touch_secret_payloads", "secret")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+pfire("UNIT_POWER_UPDATE", SS, SS)
+pfire("UNIT_POWER_FREQUENT", SS, SS)
+pfire("UNIT_SPELLCAST_SUCCEEDED", SS, SS, SN)
+pfire("UNIT_AURA", SS, ST)
+pfire("UNIT_AURA", SS, STT)
+pfire("UNIT_ABSORB_AMOUNT_CHANGED", SS)
+pfire("UNIT_HEAL_PREDICTION", SS)
+pfire("PARTY_KILL", SS, SS)
+pfire("UNIT_DIED", SS)
+pfire("LOSS_OF_CONTROL_ADDED", SS, SN)
+for _, name in ipairs({ "power", "powerFrequent", "cast", "aura", "shield", "kill", "died", "loc" }) do
+    check(p.logs[name] and p.logs[name].total >= 1, name .. " log must record a secret payload")
+end
+check(p.logs.power.entries[1].unit.isSecret == true and p.logs.power.entries[1].powerType.value == nil, "secret power payload")
+check(p.logs.cast.entries[1].spellID.isSecret == true and p.logs.cast.entries[1].manaCost == nil, "secret spell id has no cost")
+check(p.logs.kill.entries[1].arg1.isSecret == true and p.logs.kill.entries[1].attackerIsPlayer == nil, "secret guid not compared")
+scan(p)
+"""
+)
+
+case("priest_snapshot_with_secret_values_stores_only_plain_data", "secret")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+check(p.ooc.mana.playerPower.r1.isSecret == true and p.ooc.mana.playerPower.r1.value == nil, "secret mana stored as a flag")
+check(p.ooc.shield.player.GetDamageAbsorbs.r1.isSecret == true, "secret absorb flagged")
+local cd = p.ooc.cooldowns.pw_shield.s17
+check(cd and cd.cooldown and string.find(cd.cooldown, "startTime=number/secret", 1, true), "secret cooldown cell: " .. tostring(cd and cd.cooldown))
+local st = scan(p)
+check(st.secretTrue > 10, "expected many secret flags, got " .. tostring(st.secretTrue))
+__combat = true
+runCmd("priest")
+check(p.combat.inCombat == true, "second command in combat")
+scan(p)
+"""
+)
+
+case("priest_missing_apis_record_absent_and_the_rest_still_runs")(
+    r"""
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+local o = p.ooc
+check(o.mana.regen.exists == false and o.mana.regenForMana.exists == false, "a missing API must record exists=false")
+check(o.mana.playerPower.exists and o.mana.playerPower.ok, "present APIs still read")
+check(o.shield.player.calculator.exists == false and o.shield.player.totalAbsorbs.exists == false, "shield APIs absent")
+check(o.apis.CreateUnitHealPredictionCalculator == "absent" and o.apis.UnitPowerPercent == "present", "presence map")
+for name, sec in pairs(o) do
+    if type(sec) == "table" then check(sec.sectionError == nil, name .. " section errored: " .. tostring(sec.sectionError)) end
+end
+-- one API removed from a fuller client
+priestMock()
+GetPowerRegen = nil
+runCmd("priest off")
+runCmd("priest")
+check(ForeverSTUwaveDB.fsprobe.priest.ooc.mana.regen.exists == false and ForeverSTUwaveDB.fsprobe.priest.ooc.mana.regenForMana.ok, "siblings of a missing API")
+scan(ForeverSTUwaveDB.fsprobe.priest)
+"""
+)
+
+case("priest_every_api_throws", "throw")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+check(p and p.ooc, "snapshot must still be saved")
+check(type(p.ooc.mana.playerPower.err) == "string" and p.ooc.mana.playerPower.ok == false, "error stored as a string")
+check(p.ooc.mana.playerPower.inCombat == false, "error records are tagged too")
+pfire("UNIT_SPELLCAST_SUCCEEDED", "player", "x", 585)
+pfire("UNIT_AURA", "player", { isFullUpdate = true })
+pfire("PARTY_KILL", "a", "b")
+check(p.logs.cast.total == 1 and p.logs.aura.total == 1 and p.logs.kill.total == 1, "events still logged under throwing APIs")
+check(p.logs.cast.entries[1].manaCost == nil, "no cost when the cost API throws")
+advance(5)
+scan(p)
+"""
+)
+
+case("priest_even_createframe_throws", "throw")(
+    r"""
+priestMock()
+__frameThrows = true
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+check(p.ooc, "snapshot should still be saved")
+check(type(p.meta.frameError) == "string" and said("nothing armed"), "frame failure must be recorded and said")
+runCmd("priest off")
+runCmd("reset")
+"""
+)
+
+case("priest_second_command_snapshots_again_without_clearing_the_logs")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+pfire("UNIT_POWER_UPDATE", "player", "MANA")
+local first = p.ooc
+runCmd("priest")
+check(ForeverSTUwaveDB.fsprobe.priest == p, "second command must keep the record")
+check(p.ooc ~= first and p.ooc.kind == "ooc" and p.ooc.mana, "second command must replace the snapshot with a fresh one")
+check(ForeverSTUwaveDB.fsprobe.priest.logs.power.total == 1, "logs must survive a second command")
+check(#__timers >= 1 and pendingTimers() == 1, "exactly one stop timer: " .. pendingTimers())
+"""
+)
+
+case("priest_off_timeout_reset_and_rearm")(
+    r"""
+priestMock()
+runCmd("priest")
+local f = pframe()
+runCmd("priest off")
+check(nevents(f) == 0 and ForeverSTUwaveDB.fsprobe.priest.meta.status == "stopped", "off must unregister")
+pcall(f._scripts.OnEvent, f, "UNIT_POWER_UPDATE", "player", "MANA")
+check((ForeverSTUwaveDB.fsprobe.priest.logs.power or { total = 0 }).total == 0, "an event after off was logged")
+-- a fresh start replaces the record; the 20 minute timer unregisters
+runCmd("priest")
+check(nevents(f) > 0, "restart must register again")
+advance(1199)
+check(nevents(f) > 0, "stopped early")
+advance(2)
+check(nevents(f) == 0 and ForeverSTUwaveDB.fsprobe.priest.meta.status == "timeout", "timeout must unregister")
+-- the old run's timer must not stop a newer run: run A's stop timer is due at +1200, run B starts at +600
+runCmd("priest")
+runCmd("priest off")
+advance(600)
+runCmd("priest")
+advance(601)
+check(nevents(f) > 0 and ForeverSTUwaveDB.fsprobe.priest.meta.status == "logging", "a stale timer stopped the newer run")
+-- the main run keeps a running priest probe and its result
+runCmd("")
+check(ForeverSTUwaveDB.fsprobe.priest and nevents(f) > 0, "main arm wiped or stopped the priest probe")
+-- reset clears everything and stops it
+runCmd("reset")
+check(ForeverSTUwaveDB.fsprobe == nil and nevents(f) == 0, "reset left priest data or events")
+advance(5000)
+check(ForeverSTUwaveDB.fsprobe == nil, "a stale timer wrote after reset")
+noOnUpdate()
+"""
+)
+
+case("priest_five_second_clock_goes_unknown_when_a_cast_cost_is_unreadable")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+pfire("UNIT_SPELLCAST_SUCCEEDED", "player", "c1", 585)
+__now = __now + 2
+pfire("UNIT_POWER_UPDATE", "player", "MANA")
+local e = p.logs.power.entries
+check(e[1].sinceManaCast and e[1].sinceManaCastUnknown == nil, "readable cost keeps the clock")
+-- a secret spell id: the cast may have cost mana, the clock is stale
+pfire("UNIT_SPELLCAST_SUCCEEDED", "player", "c2", SN)
+__now = __now + 1
+pfire("UNIT_POWER_UPDATE", "player", "MANA")
+check(e[2].sinceManaCast == nil and e[2].sinceManaCastUnknown == true, "secret spell id must mark the clock unknown")
+-- a readable costed cast restarts the clock and clears the flag
+pfire("UNIT_SPELLCAST_SUCCEEDED", "player", "c3", 585)
+__now = __now + 1
+pfire("UNIT_POWER_UPDATE", "player", "MANA")
+check(e[3].sinceManaCast and math.abs(e[3].sinceManaCast - 1) < 0.001 and e[3].sinceManaCastUnknown == nil, "clock must recover")
+-- an unreadable cost table (spell id plain) is unknown too
+C_Spell.GetSpellPowerCost = function() return ST end
+pfire("UNIT_SPELLCAST_SUCCEEDED", "player", "c4", 585)
+pfire("UNIT_POWER_UPDATE", "player", "MANA")
+check(e[4].sinceManaCast == nil and e[4].sinceManaCastUnknown == true, "unreadable cost must mark the clock unknown")
+check(p.logs.cast.entries[4].manaCost == nil, "no cost recorded")
+scan(p)
+"""
+)
+
+case("priest_cost_table_with_secret_fields_marks_the_five_second_clock_unknown")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+pfire("UNIT_SPELLCAST_SUCCEEDED", "player", "c1", 585)
+-- a plain cost table whose type or cost field is secret: not a free cast, an unreadable one
+C_Spell.GetSpellPowerCost = function() return { { type = SN, cost = SN } } end
+pfire("UNIT_SPELLCAST_SUCCEEDED", "player", "c2", 585)
+__now = __now + 1
+pfire("UNIT_POWER_UPDATE", "player", "MANA")
+local e = p.logs.power.entries[1]
+check(e.sinceManaCast == nil and e.sinceManaCastUnknown == true, "secret cost fields must mark the clock unknown")
+check(p.logs.cast.entries[2].manaCost == nil, "an unreadable cost must not be recorded as 0")
+-- a secret cost field on an entry of another power type is unreadable too
+C_Spell.GetSpellPowerCost = function() return { { type = 0, cost = 100 }, { type = SN, cost = 5 } } end
+pfire("UNIT_SPELLCAST_SUCCEEDED", "player", "c3", 585)
+check(p.logs.cast.entries[3].manaCost == nil, "any unreadable entry makes the whole cost unknown")
+scan(p)
+"""
+)
+
+case("priest_timeout_stop_failure_is_recorded_not_thrown")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+local f = pframe()
+local real = print
+print = function() error("boom: print") end
+advance(1201)
+print = real
+check(string.find(p.meta.timerError or "", "boom: print", 1, true), "timeout failure not recorded: " .. tostring(p.meta.timerError))
+check(nevents(f) == 0 and p.meta.status == "timeout", "events must be unregistered before the failure")
+"""
+)
+
+case("priest_failed_start_leaves_nothing_live")(
+    r"""
+priestMock()
+__frameThrows = true
+runCmd("priest")
+check(pframe() == nil, "no frame, no armed events")
+__frameThrows = false
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+check(pframe() and nevents(pframe()) > 0 and p.meta.status == "logging", "a retry after a failed start must start fresh")
+check(p.meta.frameError == nil, "fresh record after the retry")
+"""
+)
+
+case("priest_cooldown_trial_frame_is_hidden_afterwards")(
+    r"""
+priestMock()
+__FrameM.SetCooldownFromDurationObject = function(self) self._shown = true end
+runCmd("priest")
+local cds = {}
+for _, f in ipairs(__frames) do if f._kind == "Cooldown" then cds[#cds + 1] = f end end
+check(#cds == 1, "expected one trial Cooldown frame, got " .. #cds)
+check(cds[1]._shown == false, "trial Cooldown frame left shown after the trial")
+cds[1]._shown = true
+runCmd("priest off")
+check(cds[1]._shown == false, "stop must hide the trial frame")
+"""
+)
+
+case("priest_replacing_a_saved_record_says_so")(
+    r"""
+priestMock()
+runCmd("priest")
+check(not said("replacing the saved priest record"), "nothing to replace on the first run")
+runCmd("priest off")
+runCmd("priest")
+check(said("replacing the saved priest record"), "a fresh start over a saved record must say so")
+"""
+)
+
+case("priest_range_read_falls_back_through_the_spell_list")(
+    r"""
+priestMock()
+C_Spell.IsSpellInRange = function(name) if name == "Flash Heal" then return true end end
+runCmd("priest")
+local t = ForeverSTUwaveDB.fsprobe.priest.ooc.triage
+check(t.rangeSpell == "Flash Heal" and t.rangeTried == "Lesser Heal,Heal,Flash Heal", "fallback: " .. tostring(t.rangeSpell) .. " / " .. tostring(t.rangeTried))
+check(t.party1InRangeOfHeal.r1.type == "nil" or t.party1InRangeOfHeal.r1.value == true, "party read uses the chosen spell")
+runCmd("priest off")
+C_Spell.IsSpellInRange = function() end
+runCmd("priest")
+t = ForeverSTUwaveDB.fsprobe.priest.ooc.triage
+check(t.rangeSpell == "none answered" and t.rangeTried == "Lesser Heal,Heal,Flash Heal,Renew,Power Word: Shield", "none answered: " .. tostring(t.rangeSpell))
+"""
+)
+
+case("priest_without_c_timer_snapshots_at_once_and_says_why")(
+    r"""
+priestMock()
+C_Timer.After = nil
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+check(type(p.meta.timerError) == "string", "missing stop timer must be recorded")
+__combat = true
+pfire("PLAYER_REGEN_DISABLED")
+check(p.combat and p.combat.inCombat == true, "no timer: the combat snapshot is taken at once")
+check(type(p.meta.delay) == "string", "the missing delay timer must be recorded")
+scan(p)
+"""
+)
+
+case("priest_secret_gettime_marks_entries_notime")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+pfire("UNIT_POWER_UPDATE", "player", "MANA")
+GetTime = function() return SN end
+pfire("UNIT_POWER_UPDATE", "player", "MANA")
+pfire("UNIT_SPELLCAST_SUCCEEDED", "player", "c", 585)
+local e = p.logs.power.entries
+check(e[1].t and e[2].noTime == true and e[2].t == nil and e[2].gap == nil, "a secret GetTime must give noTime and no arithmetic")
+check(p.logs.cast.entries[1].noTime == true, "cast entry noTime")
+scan(p)
+"""
+)
+
+case("priest_usage_lists_the_command")(
+    r"""
+runCmd("help")
+check(said("/fsprobe priest"), "usage must list /fsprobe priest")
+"""
+)
+
+
 def run_case(name: str, mode: str, body: str, source: str) -> str | None:
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.execute(MOCK)
@@ -2300,8 +2917,132 @@ def hot_section(source: str) -> str:
     return "\n".join(lines)
 
 
+# The priest section reads auras only by spell id or name and registers the restricted combat log
+# event in exactly one place (the throwaway-frame trial). Comments are stripped like the hot section.
+PRIEST_FORBIDDEN = (
+    "OnUpdate", "UnitBuff", "UnitDebuff", "UnitAura(", "GetAuraDataByIndex", "GetAuraDataBySlot",
+    "CombatLogGetCurrentEventInfo", "GetUnitAuras",
+)
+
+
+def priest_section(source: str) -> str:
+    start = source.index("-- /fsprobe priest: what each priest pain point")
+    end = source.index("-- /fsprobe hot: can an engine AuraContainer")
+    lines = [ln for ln in source[start:end].splitlines() if not ln.lstrip().startswith("--")]
+    return "\n".join(lines)
+
+
+# The sentinel mock cannot fault on ==, ~= or a truth test of a secret (LuaJIT only calls __eq between
+# two tables and never __index for them), so the secret-mode cases cannot catch those. Pinned by text
+# instead, in the priest section: a name that holds a raw event argument or a raw API return must not
+# be compared, ordered, truth-tested or used as an and/or operand, bare or in grouping parentheses;
+# the same for `...` and `select(n, ...)`. The right test for such a value is type(x) or IsSecret(x)
+# (a call, so never flagged). Allowlist: (exact line, guard text that must appear in the four lines
+# before it). String literals are blanked first, so the unit token "target" is not the argument `target`.
+# `select("#", ...)` counts the arguments and is not a value.
+RAW_NAMES = (
+    "unit|guid|attacker|target|castGUID|spellID|info|powerType"       # event arguments
+    "|dur|calc|curve|mine|absorbs|v|first|token|frame|cd|obj"          # raw API returns
+)
+RAW_ARG = rf"(?<![\w.])(?:{RAW_NAMES})(?![\w])"
+CMP = r"(?:==|~=|<=|>=|<|>)"
+KEYWORD = r"\b(?:not|if|while|elseif|and|or)\s+"
+# a grouping parenthesis, not the call parenthesis of f(x)
+GROUP = r"(?<![\w)\]])\(+\s*"
+SELECT = r'select\((?!\s*"")[^()]*\.\.\.\)'
+RAW_PATTERNS = [
+    rf"{RAW_ARG}\s*{CMP}",
+    rf"{CMP}\s*\(*\s*{RAW_ARG}",
+    rf"{KEYWORD}\(*\s*{RAW_ARG}",
+    rf"{RAW_ARG}\s+(?:and|or|then)\b",
+    rf"{GROUP}{RAW_ARG}\s*\)+\s*(?:{CMP}|and\b|or\b|then\b)",
+    # varargs
+    rf"\.\.\.\s*{CMP}",
+    rf"{CMP}\s*\(*\s*\.\.\.",
+    rf"{KEYWORD}\(*\s*\.\.\.",
+    rf"\.\.\.\s+(?:and|or)\b",
+    rf"{GROUP}\.\.\.\s*\)+\s*(?:{CMP}|and\b|or\b|then\b)",
+    # select(n, ...)
+    rf"{SELECT}\s*{CMP}",
+    rf"{CMP}\s*\(*\s*{SELECT}",
+    rf"{KEYWORD}\(*\s*{SELECT}",
+    rf"{SELECT}\s+(?:and|or|then)\b",
+    rf"{GROUP}{SELECT}\s*\)+\s*(?:{CMP}|and\b|or\b|then\b)",
+]
+RAW_ALLOW = {"return guid == mine": "if IsSecret(guid) or type(guid)"}
+
+# Each of these, added to the clean section, must be caught exactly once.
+RAW_INJECTIONS = (
+    'if unit == "player" then return end',
+    "if unit ~= nil then return end",
+    "if (unit) then return end",
+    "if not (info) then return end",
+    "if not info then return end",
+    'if (guid) == "x" then return end',
+    "if ( castGUID ) and 1 then return end",
+    "local x = spellID and 1 or 2",
+    "if dur then return end",
+    "if calc == nil then return end",
+    "if not curve then return end",
+    'if mine ~= "x" then return end',
+    "if v then return end",
+    "if not absorbs then return end",
+    "if not frame then return end",
+    "if cd and 1 then return end",
+    "if ... == 1 then return end",
+    "if (...) then return end",
+    "if not ... then return end",
+    "local x = ... or 1",
+    "if select(2, ...) == 1 then return end",
+    "if not select(1, ...) then return end",
+    "if (select(2, ...)) then return end",
+    "local x = select(2, ...) or 1",
+    "if select(2, ...) then return end",
+)
+# ... and these are the legal forms, which must stay quiet.
+RAW_LEGAL = (
+    'if type(unit) ~= "string" then return end',
+    "if IsSecret(guid) then return end",
+    'if select("#", ...) > 0 then return end',
+    "local x = Desc((select(2, ...)), true)",
+    'if type(dur) ~= "nil" and not IsSecret(dur) then return end',
+)
+
+
+def raw_arg_violations(priest: str) -> list[str]:
+    lines = priest.splitlines()
+    found = []
+    for i, line in enumerate(lines):
+        text = re.sub(r'"[^"]*"', '""', line).strip()
+        if not any(re.search(pat, text) for pat in RAW_PATTERNS):
+            continue
+        guard = RAW_ALLOW.get(text)
+        if guard and any(guard in prev for prev in lines[max(0, i - 4):i]):
+            continue
+        found.append(text)
+    return found
+
+
 def static_checks(source: str) -> int:
     failures = 0
+    priest = priest_section(source)
+    bad = raw_arg_violations(priest)
+    missed = [inj for inj in RAW_INJECTIONS if len(raw_arg_violations(priest + "\n    " + inj)) != 1]
+    noisy = [leg for leg in RAW_LEGAL if raw_arg_violations(priest + "\n    " + leg)]
+    if bad or missed or noisy:
+        failures += 1
+        print(f"FAIL  static: raw values in the priest section: compared or truth-tested {bad}; "
+              f"injections NOT caught {missed}; legal forms wrongly flagged {noisy}")
+    else:
+        print(f"ok    static: no raw event argument or API return is compared or truth-tested in the priest section "
+              f"({len(RAW_INJECTIONS)} injected forms are caught, {len(RAW_LEGAL)} legal forms pass)")
+    leaked = [n for n in PRIEST_FORBIDDEN if n in priest]
+    if leaked or priest.count("COMBAT_LOG_EVENT_UNFILTERED") != 2:
+        failures += 1
+        print(f"FAIL  static: the priest section uses a forbidden aura/log API: {leaked} "
+              f"(CLEU mentions {priest.count('COMBAT_LOG_EVENT_UNFILTERED')}, expected the 2 in the trial)")
+    else:
+        print("ok    static: the priest section reads no aura by index or slot and tries the combat log in one place")
     hot = hot_section(source)
     leaked = [n for n in HOT_FORBIDDEN if n in hot]
     if leaked:
@@ -2309,6 +3050,12 @@ def static_checks(source: str) -> int:
         print(f"FAIL  static: the hot section calls an aura or value read API: {leaked}")
     else:
         print("ok    static: the hot section calls no aura, duration, bar value or text read API")
+    reset = source[source.index("local function Reset(keepGunsight)"):source.index("local function SavedResults()")]
+    if 0 <= reset.find('PP.Stop("reset", true)') < reset.find("GS.Disarm()"):
+        print("ok    static: /fsprobe reset stops the priest probe before the gunsight and hot teardown")
+    else:
+        failures += 1
+        print("FAIL  static: Reset must call PP.Stop before GS.Disarm / HP.Off")
     for needle in FORBIDDEN_TEXT:
         if needle in source:
             failures += 1
@@ -2328,7 +3075,7 @@ def main() -> int:
         else:
             failures += 1
             print(f"FAIL  {name}\n      {error}")
-    total = len(CASES) + 2
+    total = len(CASES) + 4
     print(f"{total - failures}/{total} checks passed")
     return 1 if failures else 0
 
