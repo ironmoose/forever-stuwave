@@ -1,4 +1,4 @@
--- Forever STUwave: KICK style tags on the target box, level and class on the top edge and health percent and target of target on the bottom edge, each with an FS.Config toggle.
+-- Forever STUwave: KICK style tags on the target box, the level on the top edge and health percent and target of target on the bottom edge, each with an FS.Config toggle.
 -- The target of target tag is a SecureUnitButtonTemplate button that targets that unit on a click; in combat it only takes SetAlpha and text.
 -- Unit values go straight to SetFormattedText / SetText and are never compared, since they may be secret.
 
@@ -18,7 +18,8 @@ local IsSecret = FS.IsSecret or function() return false end
 -- RISE is how far the level tag's top stands above the box top, OVERLAP how far the bottom tags reach above the box bottom.
 local C = {
     H = 15, CHAMFER = 5, FILL_A = 0.95, TEXT_SIZE = 11,
-    LEVEL = { dx = 1, w = 68 }, HEALTH = { dx = 4, w = 32 }, TOT = { dx = 41, w = 69 },
+    LEVEL = { dx = 1, pad = 5, gap = 3, minW = 15, advance = 575 / 1024 },   -- no fixed width: pad, [icon, gap], digits, pad; advance is Mononoki's digit width in em
+    HEALTH = { dx = 4, w = 32 }, TOT = { dx = 41, w = 69 },
     RISE = 8, OVERLAP = 7,
     MIN_FONT = 6, TOT_PAD = 3,
     FRAME_LEVEL = 6,   -- the level and health tags' frame level above the box: over the edge strokes (+1) and the bars (+1 to +3)
@@ -34,9 +35,8 @@ local SETTINGS = {
 GunsightTags.SETTINGS = SETTINGS
 for _, def in pairs(SETTINGS) do Config.RegisterDefault(def.key, def.default) end
 
-local WORDS = { worldboss = "BOSS", elite = "ELITE", rare = "RARE", rareelite = "RARE" }
-
-local Tags = { colors = nil, box = nil, events = nil, pendingTot = false, pendingSeat = false }
+local Tags = { colors = nil, box = nil, events = nil, pendingTot = false, pendingSeat = false,
+    levelState = "none", levelChars = 0, iconW = 0, iconH = 0 }
 
 local function InCombat()
     return type(InCombatLockdown) == "function" and InCombatLockdown() == true
@@ -84,7 +84,7 @@ local function SeatPlain(frame, relPoint, spec, dy, color)
     local k = ui(1)
     frame:ClearAllPoints()
     frame:SetPoint("TOPLEFT", Tags.box.frame, relPoint, spec.dx * k, dy * k)
-    frame:SetSize(spec.w * k, C.H * k)
+    if spec.w then frame:SetSize(spec.w * k, C.H * k) end
     FS.Theme.ApplyMono(frame.label, FontSize(), color)
 end
 
@@ -92,32 +92,90 @@ end
 -- Level and class
 -------------------------------------------------------------------------------
 
--- "L62" in white, the classification word in gold. The level goes to SetFormattedText as an argument (it may be
--- secret); a secret classification leaves the word out; level -1 reads "??".
+-- The level number alone, in white, on a plate sized to it: pad, [icon, gap], digits, pad, never under minW (mockups/
+-- gunsight-level-tag-2026-10-08.html). The plate keeps its seat and grows to the right. The level goes to
+-- SetFormattedText as an argument (it may be secret); a level below 1 reads "??". The classification has no text here:
+-- an icon will take its place in the icon slot (SetLevelIcon), which costs no width until it is filled.
+
+-- What the plain text in the label takes on one line, in screen px (GetUnboundedStringWidth: GetStringWidth is bounded
+-- by the FontString's own width); nil when the client cannot measure. Never called on a secret.
+local function PlainWidth(fs)
+    local fn = fs.GetUnboundedStringWidth or fs.GetStringWidth
+    local ok, w = pcall(fn, fs)
+    if ok and type(w) == "number" and not IsSecret(w) and w > 0 then return w end
+    return nil
+end
+
+-- Sizes the plate to what the label holds. A secret level is never measured: two digits are reserved, which is also
+-- what a plain two digit level takes. A font that lands a frame late measures the old size, so a rescale re-runs this
+-- next frame (RefitLevelLater).
+local function FitLevel()
+    local frame = Tags.level
+    if not frame then return end
+    local L, k = C.LEVEL, ui(1)
+    local digits = L.advance * C.TEXT_SIZE
+    local tw = 0
+    if Tags.levelState == "secret" then
+        tw = 2 * digits
+    elseif Tags.levelState == "plain" then
+        local m = PlainWidth(frame.label)
+        tw = m and m / k or Tags.levelChars * digits
+    end
+    local lead = (Tags.iconW > 0) and (Tags.iconW + (tw > 0 and L.gap or 0)) or 0
+    local content = lead + tw
+    local w = math.max(L.minW, math.ceil(2 * L.pad + content - 1e-6))
+    frame:SetSize(w * k, C.H * k)
+    frame.label:ClearAllPoints()
+    frame.label:SetPoint("CENTER", frame, "CENTER", lead / 2 * k, 0)
+    local icon = frame.icon
+    icon:ClearAllPoints()
+    icon:SetPoint("LEFT", frame, "LEFT", (w - content) / 2 * k, 0)
+    icon:SetSize(Tags.iconW * k, Tags.iconH * k)
+    icon:SetShown(Tags.iconW > 0)
+end
+
+local function RefitLevelLater()
+    if Tags.levelRefit or type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then return end
+    Tags.levelRefit = true
+    C_Timer.After(0, function()
+        Tags.levelRefit = false
+        Guard(FitLevel)
+    end)
+end
+
+-- The icon slot: its width (and height, square by default) in image px; 0 empties it. The follow-up that picks the
+-- elite and rare icons sets the texture on `GunsightTags.level.icon` and calls this.
+function GunsightTags.SetLevelIcon(width, height)
+    Tags.iconW = math.max(0, tonumber(width) or 0)
+    Tags.iconH = Tags.iconW > 0 and (tonumber(height) or Tags.iconW) or 0
+    Guard(FitLevel)
+end
+
 local function WriteLevel()
     local label = Tags.level and Tags.level.label
     if not label then return end
+    Tags.levelState, Tags.levelChars = "none", 0
     if not FS.HasTarget() then
         label:SetText("")
-        return
+        return FitLevel()
     end
     local level = UnitLevel("target")
-    local class
-    if type(UnitClassification) == "function" then class = UnitClassification("target") end
-    local word
-    if not IsSecret(class) and type(class) == "string" then word = WORDS[class] end
-    local head, useLevel
     if IsSecret(level) then
-        head, useLevel = "L%d", true
+        Tags.levelState = "secret"
+        label:SetFormattedText("%d", level)
     elseif type(level) == "number" then
-        if level >= 1 then head, useLevel = "L%d", true else head = "??" end
+        Tags.levelState = "plain"
+        if level >= 1 then
+            Tags.levelChars = #tostring(math.floor(level))
+            label:SetFormattedText("%d", level)
+        else
+            Tags.levelChars = 2
+            label:SetText("??")
+        end
     else
         label:SetText("")
-        return
     end
-    local fmt = head
-    if word then fmt = head .. " " .. Tags.gold .. word .. "|r" end
-    if useLevel then label:SetFormattedText(fmt, level) else label:SetFormattedText(fmt) end
+    FitLevel()
 end
 
 local function ApplyLevel()
@@ -226,6 +284,8 @@ end
 
 local function Layout()
     SeatPlain(Tags.level, "TOPLEFT", C.LEVEL, C.RISE, Tags.colors.white)
+    FitLevel()
+    RefitLevelLater()
     SeatPlain(Tags.health, "BOTTOMLEFT", C.HEALTH, C.OVERLAP, Tags.colors.green)
     if Tags.tot then SeatTot() end
 end
@@ -241,10 +301,10 @@ local function Build()
     end
     local colors = Boxes.colors
     Tags.box, Tags.colors = box, colors
-    Tags.gold = string.format("|cff%02x%02x%02x", math.floor(colors.gold[1] * 255 + 0.5),
-        math.floor(colors.gold[2] * 255 + 0.5), math.floor(colors.gold[3] * 255 + 0.5))
 
     local level = NewTag(box.frame, "Frame")
+    level.icon = level:CreateTexture(nil, "OVERLAY")
+    level.icon:Hide()
     local health = NewTag(box.frame, "Frame")
     Tags.level, Tags.health = level, health
     GunsightTags.level, GunsightTags.health = level, health
