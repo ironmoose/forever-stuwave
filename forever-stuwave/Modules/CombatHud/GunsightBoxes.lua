@@ -1231,6 +1231,12 @@ local function ShowVerdict(box)
     end
 end
 
+-- Caches the cast's spell on the tile for its tooltip (FrameHelpers.SetTipSpell; absent helper = no tip).
+local function SetTip(tile, spellID, name)
+    local helpers = FS.FrameHelpers
+    if type(helpers) == "table" and type(helpers.SetTipSpell) == "function" then helpers.SetTipSpell(tile, spellID, name) end
+end
+
 -- The members CastBars writes to (see the header).
 local function BuildMembers(box)
     local members = {}
@@ -1286,7 +1292,17 @@ local function BuildMembers(box)
     function icon.SetTexture(_, tex)
         if box.retired then return end                   -- a stale bar table can still write the sink
         box.icon:SetTexture(tex)
-        SetTileLive(box, type(tex) ~= "nil")
+        local live = type(tex) ~= "nil"
+        SetTileLive(box, live)
+        -- the idle write also forgets the spell (the next cast hands its own over right after its texture)
+        if not live then SetTip(box.tile, nil, nil) end
+    end
+    -- The tile's tooltip: CastBars hands over the cast's spell id and name with each cast. SetTipSpell caches a
+    -- plain value and CLEARS the field for a secret one (the target's in combat), so a previous cast's spell never
+    -- lingers; a secret id with a plain name still shows the name.
+    function icon.SetSpell(_, spellID, name)
+        if box.retired then return end
+        SetTip(box.tile, spellID, name)
     end
     members.icon = icon
 
@@ -1481,6 +1497,10 @@ local function BuildBox(spec)
     -- The icon tile (shared plate and icon, then one edge frame per colour).
     local tile = CreateFrame("Frame", nil, frame)
     box.tile = tile
+    -- Hover only (a tile must pass clicks through); the root only fades in combat, so no tip while the Gunsight is off.
+    if type(FS.FrameHelpers.AttachSpellTooltip) == "function" then
+        FS.FrameHelpers.AttachSpellTooltip(tile, { gate = function() return Gunsight.IsActive() == true end })
+    end
     Theme.AddCut2Texture(tile, Theme.SLICE_CUT2_FILL_TEXTURE, WithAlpha(BG, C.CI_FILL_A), "BACKGROUND", 0)
     box.icon = tile:CreateTexture(nil, "ARTWORK")
     box.icon:SetTexCoord(C.ICON_CROP, 1 - C.ICON_CROP, C.ICON_CROP, 1 - C.ICON_CROP)

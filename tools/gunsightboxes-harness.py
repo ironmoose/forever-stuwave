@@ -623,6 +623,64 @@ function T.without_alpha_from_boolean_the_target_box_stays_neutral_steel()
     for _, r in ipairs(b.fb.pink) do eq(r._alpha, 0) end
 end
 
+-- ---- tooltips -----------------------------------------------------------------------
+-- A skill that shows up has a tooltip: the cast tile is a hover-only frame whose spell CastBars hands over with the
+-- cast (the icon sink's SetSpell), cached on the tile; a secret id is never stored, so no stale spell shows.
+
+function T.the_player_cast_tile_shows_the_casting_spell_on_hover()
+    local W = world()
+    local b, S = W.you.box, W.you.S
+    ok(b.tile.fsSpellTip, "the tile has a spell tooltip")
+    ok(b.tile._mouseMotion == true and b.tile._mouseClick == false and b.tile._mouse == nil,
+        "hover only: motion on, clicks off, EnableMouse never called")
+    W.cast("player", "Shadow Bolt", "C1", 100, 2.5); __units.player.cast.spellID = 686
+    W.fire(S, "UNIT_SPELLCAST_START")
+    hover(b.tile)
+    ok(TT.owner == b.tile and TT.spellID == 686, "the cast's spell: " .. tostring(TT.spellID))
+    -- the next cast replaces it while the cursor stays put
+    W.cast("player", "Fear", "C2", 101, 1.5); __units.player.cast.spellID = 5782
+    W.fire(S, "UNIT_SPELLCAST_START")
+    ok(TT.owner == b.tile and TT.spellID == 5782, "the open tip follows the new cast: " .. tostring(TT.spellID))
+    -- the Gunsight switched off: the root only fades in combat, so the tile must not tip
+    local real = FS.Gunsight.IsActive
+    FS.Gunsight.IsActive = function() return false end
+    hover(b.tile)
+    ok(not TT.shown, "no tip while the Gunsight is off")
+    FS.Gunsight.IsActive = real
+    -- the cast ends: the box hides and the id goes with it
+    W.endCast("player"); W.fire(S, "UNIT_SPELLCAST_STOP", "C2")
+    W.stepTo(S, 101, 104)
+    ok(not TT.shown, "no tip once the cast is over")
+    eq(b.tile.fsSpellID, nil, "and no id is kept")
+    W.clean()
+end
+
+function T.a_target_cast_with_a_secret_spell_shows_no_stale_tip()
+    local W = world()
+    local b, S = W.tgt.box, W.tgt.S
+    ok(b.tile.fsSpellTip and b.tile._mouse == nil, "the target tile is hover only too")
+    W.cast("target", "Fear", "T1", 100, 1.5); __units.target.cast.spellID = 5782
+    W.fire(S, "UNIT_SPELLCAST_START")
+    hover(b.tile)
+    ok(TT.owner == b.tile and TT.spellID == 5782, "out of combat the spell shows: " .. tostring(TT.spellID))
+    W.secretCast("target"); __units.target.cast.spellID = __SECRET_ID
+    ok(pcall(W.fire, S, "UNIT_SPELLCAST_START"), "no throw on a secret spell id")
+    ok(TT.spellID ~= 5782, "the previous cast's spell is not shown for the secret one")
+    eq(b.tile.fsSpellID, nil, "a secret id is never stored")
+    eq(b.tile.fsName, nil, "nor a secret name")
+    ok(not TT.shown, "nothing known, nothing shown")
+    -- a plain name with a secret id: the name, no details in combat
+    InCombatLockdown = function() return true end
+    W.cast("target", "Fear", "T2", 100, 1.5); __units.target.cast.spellID = __SECRET_ID
+    W.fire(S, "UNIT_SPELLCAST_START")
+    hover(b.tile)
+    ok(TT.shown and TT.text == "Fear" and TT.spellID == nil, "the plain name is what is left: " .. tostring(TT.text))
+    InCombatLockdown = function() return false end
+    W.endCast("target"); W.fire(S, "UNIT_SPELLCAST_STOP", "T2")
+    ok(not TT.shown, "the tile hides with the cast and takes the tip with it")
+    eq(b.tile.fsName, nil)
+end
+
 -- ---- secrets --------------------------------------------------------------------------
 
 function T.a_secret_target_cast_reaches_only_sinks()
@@ -2945,6 +3003,7 @@ def run_case(name: str, mu: dict, mb: dict) -> str | None:
     consts = [CHEV._extract_theme_constant(theme_src, n) for n in
               TH.THEME_CONSTANTS + ("COLOR_CARET_HEALTH", "COLOR_HEAL", "COLOR_GOLD", "FLAT_TEXTURE")]
     lua.eval("__load_theme_constants")(lua.table_from(consts))
+    lua.globals()["__helpers_source"] = (ADDON / "Core/FrameHelpers.lua").read_text(encoding="utf-8")   # the real spell tooltip helpers
     lua.execute(CB.WIRE)
     lua.execute(TH.MOCK)
     lua.execute(TH.GS.theme_has_target_lua())   # the real shared rule (FS.HasTarget), Theme being stubbed here
