@@ -320,7 +320,7 @@ function T.the_tags_sit_at_the_mockup_seats_at_two_heights()
         eq(lp.rel, box.frame, "the level tag rides the box top"); eq(lp.relPoint, "TOPLEFT")
         near(lp.x, (MT.LEVEL.x - MT.BOXR.x) * k, 1e-6, "x")
         near(lp.y, C.RISE * k, 1e-6, "y: above the box top")
-        near(Tg().level._w, wantW(#levelText()) * k, 1e-6, "the plate fits the text at every height"); near(Tg().level._h, MT.H * k, 1e-6)
+        near(Tg().level._w, wantW(#levelText(), 11 + C.LEVEL.gap) * k, 1e-6, "the plate fits the crown and the text at every height"); near(Tg().level._h, MT.H * k, 1e-6)
         local hp = Tg().health._points.TOPLEFT
         eq(hp.rel, box.frame); eq(hp.relPoint, "BOTTOMLEFT")
         near(hp.x, (MT.HEALTH.x - MT.BOXR.x) * k, 1e-6); near(hp.y, C.OVERLAP * k, 1e-6, "its top is above the box bottom")
@@ -401,7 +401,7 @@ function T.the_level_tag_shows_the_digits_alone_and_the_plate_fits_them()
         near(levelW(), row[3], 1e-6, "level " .. row[1] .. " plate width in image px")
         near(levelW(), wantW(#row[2]), 1e-6, "and it is the mockup formula")
     end
-    for _, class in ipairs({ "normal", "elite", "rare", "rareelite", "worldboss", "trivial", "minus" }) do
+    for _, class in ipairs({ "normal", "elite", "rare", "rareelite", "trivial", "minus" }) do
         setUnit(62, class)
         eq(levelText(), "62", class .. ": no word and no L")
         ok(Tg().level.label._fmt == nil or Tg().level.label._fmt == "%d", class .. ": the format is the bare number")
@@ -415,7 +415,7 @@ function T.a_level_below_one_reads_two_question_marks()
     __charW = 6.2
     target("Kurak")
     for _, level in ipairs({ -1, 0 }) do
-        setUnit(level, "worldboss")
+        setUnit(level, "normal")
         eq(levelText(), "??", "level " .. level)
         near(levelW(), wantW(2), 1e-6, "two characters wide")
     end
@@ -464,7 +464,7 @@ function T.a_secret_level_reserves_two_digits_without_measuring()
     end
     target("Kurak")
     measured = 0
-    setUnit(__SECRET, "elite")
+    setUnit(__SECRET, "normal")
     local label = Tg().level.label
     eq(label._secretText, true, "the secret level reached SetFormattedText")
     ok(rawequal(label._args[1], __SECRET), "untouched")
@@ -506,13 +506,13 @@ function T.the_level_icon_slot_is_empty_and_costs_no_width()
     local W = world()
     __charW = 6.2
     target("Kurak")
-    setUnit(62, "elite")
+    setUnit(62, "normal")
     local icon = Tg().level.icon
     ok(icon ~= nil, "the slot exists")
     eq(icon:IsShown(), false, "hidden with no icon")
     near(icon._w or 0, 0, 1e-9, "zero wide")
-    near(levelW(), wantW(2), 1e-6, "elite costs no width until an icon is chosen")
-    -- the follow-up fills the slot: its width and one gap join the content
+    near(levelW(), wantW(2), 1e-6, "a normal mob costs no width")
+    -- the seam: its width and one gap join the content
     Tg().SetLevelIcon(8)
     near(levelW(), wantW(2, 8 + Tg().C.LEVEL.gap), 1e-6, "an 8 px icon adds itself and a 3 px gap")
     Tg().SetLevelIcon(0)
@@ -547,23 +547,174 @@ function T.the_label_and_icon_sit_in_the_plate_content_pad_icon_gap_digits_pad()
     W.clean(); noFails()
 end
 
-function T.a_new_target_empties_the_icon_slot_but_a_level_or_class_event_on_the_same_target_keeps_it()
+local ICONS = {
+    elite     = { tex = "LEVEL_CROWN_TEXTURE",      size = 11, tint = "COLOR_GOLD" },
+    rare      = { tex = "LEVEL_STAR_TEXTURE",       size = 10, tint = "COLOR_SILVER" },
+    rareelite = { tex = "LEVEL_CROWN_STAR_TEXTURE", size = 14, tint = false },   -- colours baked in: untinted
+    worldboss = { tex = "LEVEL_SKULL_TEXTURE",      size = 11, tint = "COLOR_RED" },
+}
+local function vc(r) local v = r._vc; return v and { v[1], v[2], v[3], v[4] } end
+
+function T.each_classification_draws_its_texture_at_its_size_in_its_tint()
+    local W = world()
+    __charW = 6.2
+    local k = K()
+    for class, spec in pairs(ICONS) do
+        target("Kurak")
+        setUnit(30, class)
+        local icon = Tg().level.icon
+        eq(icon:IsShown(), true, class .. ": shown")
+        eq(icon._texture, FS.Theme[spec.tex], class .. ": texture")
+        near(icon._w, spec.size * k, 1e-6, class .. ": width"); near(icon._h, spec.size * k, 1e-6, class .. ": height")
+        local want = spec.tint and FS.Theme[spec.tint] or { 1, 1, 1, 1 }
+        local got = vc(icon)
+        ok(got ~= nil, class .. ": tinted")
+        for n = 1, 4 do near(got[n], want[n], 1e-6, class .. ": tint channel " .. n) end
+    end
+    eq(FS.Theme.LEVEL_CROWN_TEXTURE:match("[^\\]+$"), "level_crown.tga")
+    eq(FS.Theme.LEVEL_STAR_TEXTURE:match("[^\\]+$"), "level_star.tga")
+    eq(FS.Theme.LEVEL_CROWN_STAR_TEXTURE:match("[^\\]+$"), "level_crown_star.tga")
+    eq(FS.Theme.LEVEL_SKULL_TEXTURE:match("[^\\]+$"), "level_skull.tga")
+    W.clean(); noFails()
+end
+
+function T.the_plate_grows_by_the_icon_width_and_a_three_px_gap()
+    local W = world()
+    __charW = 6.2
+    local gap = Tg().C.LEVEL.gap
+    eq(gap, 3)
+    for _, class in ipairs({ "elite", "rare", "rareelite" }) do
+        target("Kurak")
+        setUnit(62, class)
+        near(levelW(), wantW(2, ICONS[class].size + gap), 1e-6, class .. ": icon + 3 + digits")
+        eq(levelText(), "62", class .. ": the digits stay")
+        local lp = Tg().level.label._points.CENTER
+        near(lp.x, (ICONS[class].size + gap) / 2 * K(), 1e-6, class .. ": the digits are shifted right")
+    end
+    W.clean(); noFails()
+end
+
+function T.normal_trivial_and_minus_draw_no_icon_and_clear_one()
     local W = world()
     __charW = 6.2
     target("Kurak")
     setUnit(62, "elite")
-    Tg().SetLevelIcon(8)
-    setUnit(63, "elite")
+    eq(Tg().level.icon:IsShown(), true)
+    for _, class in ipairs({ "normal", "trivial", "minus" }) do
+        setUnit(62, "elite")
+        setUnit(62, class)
+        eq(Tg().level.icon:IsShown(), false, class .. ": no icon on the same target")
+        near(levelW(), wantW(2), 1e-6, class .. ": no width for one")
+        near(Tg().level.label._points.CENTER.x, 0, 1e-9, class .. ": digits centred")
+    end
+    setUnit(62, "elite")
+    __units.target.class = "somethingnew"
     __fireUnit("UNIT_CLASSIFICATION_CHANGED", "target")
+    eq(Tg().level.icon:IsShown(), false, "an unknown word draws nothing")
+    __units.target.class = nil
+    __fireUnit("UNIT_CLASSIFICATION_CHANGED", "target")
+    eq(Tg().level.icon:IsShown(), false, "and so does no value")
+    W.clean(); noFails()
+end
+
+function T.a_world_boss_is_a_skull_with_no_digits_like_the_mockup()
+    local W = world()
+    __charW = 6.2
+    local L = Tg().C.LEVEL
+    target("Kurak")
+    setUnit(-1, "worldboss")
+    eq(levelText(), "", "the mockup draws the skull alone: no digits, not even ??")
+    eq(Tg().level.icon:IsShown(), true)
+    near(levelW(), math.max(L.minW, 2 * L.pad + 11), 1e-6, "pad, skull, pad: no gap without digits")
+    setUnit(__SECRET, "worldboss")
+    eq(levelText(), "", "a secret level is not written beside a skull")
+    setUnit(63, "worldboss")
+    eq(levelText(), "", "nor a plain one")
+    W.clean(); noFails()
+end
+
+function T.an_unknown_level_keeps_its_question_marks_next_to_a_classification_icon()
+    local W = world()
+    __charW = 6.2
+    target("Kurak")
+    setUnit(-1, "elite")
+    eq(levelText(), "??")
+    eq(Tg().level.icon._texture, FS.Theme.LEVEL_CROWN_TEXTURE)
+    near(levelW(), wantW(2, 11 + Tg().C.LEVEL.gap), 1e-6, "crown, gap, two characters")
+    setUnit(-1, "normal")
+    eq(levelText(), "??"); eq(Tg().level.icon:IsShown(), false, "a plain mob of unknown level: ?? and no icon")
+    W.clean(); noFails()
+end
+
+function T.a_secret_classification_keeps_the_icon_on_the_same_target_and_shows_none_on_a_new_one()
+    local W = world()
+    __charW = 6.2
+    target("Kurak")
+    setUnit(30, "rare")
+    local before = levelW()
+    setUnit(30, __SECRET_NAME)
     eq(Tg().level.icon:IsShown(), true, "same target: the icon stays")
-    near(levelW(), wantW(2, 8 + Tg().C.LEVEL.gap), 1e-6)
+    eq(Tg().level.icon._texture, FS.Theme.LEVEL_STAR_TEXTURE)
+    near(levelW(), before, 1e-6)
+    __fireUnit("UNIT_CLASSIFICATION_CHANGED", "target")
+    eq(Tg().level.icon:IsShown(), true, "a classification event with a secret value keeps it too")
+    -- a skull stays a skull (digits stay hidden) while the classification is unreadable
+    setUnit(-1, "worldboss")
+    setUnit(-1, __SECRET_NAME)
+    eq(Tg().level.icon._texture, FS.Theme.LEVEL_SKULL_TEXTURE); eq(levelText(), "")
+    -- a new target starts empty and a secret classification leaves it empty
     target("Other")
-    eq(Tg().level.icon:IsShown(), false, "a new target starts with no icon")
-    near(levelW(), wantW(2), 1e-6, "and no width for one")
-    near(Tg().level.label._points.CENTER.x, 0, 1e-9, "digits centred again")
-    Tg().SetLevelIcon(8)
+    eq(Tg().level.icon:IsShown(), false, "a new target: no icon")
+    near(levelW(), wantW(#levelText()), 1e-6)
     __fireEvent("PLAYER_ENTERING_WORLD")
-    eq(Tg().level.icon:IsShown(), false, "a world load resets it too")
+    eq(Tg().level.icon:IsShown(), false, "a world load too")
+    -- and a plain one on the new target fills it
+    setUnit(30, "elite")
+    eq(Tg().level.icon:IsShown(), true)
+    W.clean(); noFails("a secret classification was compared or indexed inside a pcall")
+end
+
+function T.a_classification_event_repaints_the_icon()
+    local W = world()
+    __charW = 6.2
+    target("Kurak")
+    setUnit(30, "normal")
+    eq(Tg().level.icon:IsShown(), false)
+    __units.target.class = "elite"
+    __fireUnit("UNIT_CLASSIFICATION_CHANGED", "target")
+    eq(Tg().level.icon:IsShown(), true, "gained")
+    eq(Tg().level.icon._texture, FS.Theme.LEVEL_CROWN_TEXTURE)
+    near(levelW(), wantW(2, 11 + Tg().C.LEVEL.gap), 1e-6)
+    __units.target.class = "rareelite"
+    __fireUnit("UNIT_CLASSIFICATION_CHANGED", "target")
+    eq(Tg().level.icon._texture, FS.Theme.LEVEL_CROWN_STAR_TEXTURE, "changed")
+    __fireUnit("UNIT_CLASSIFICATION_CHANGED", "player")
+    __units.target.class = "normal"
+    __fireUnit("UNIT_CLASSIFICATION_CHANGED", "player")
+    eq(Tg().level.icon:IsShown(), true, "another unit's event is ignored")
+    __fireUnit("UNIT_CLASSIFICATION_CHANGED", "target")
+    eq(Tg().level.icon:IsShown(), false, "lost")
+    -- a target change reads the classification at once
+    __units.target.class = "worldboss"
+    target("Boss")
+    eq(Tg().level.icon._texture, FS.Theme.LEVEL_SKULL_TEXTURE)
+    -- no target: nothing
+    __units.target.exists = false
+    __fireEvent("PLAYER_TARGET_CHANGED")
+    eq(Tg().level.icon:IsShown(), false)
+    W.clean(); noFails()
+end
+
+function T.the_icon_repaints_in_combat_because_the_level_tag_is_a_plain_frame()
+    local W = world()
+    __charW = 6.2
+    target("Kurak")
+    setUnit(30, "normal")
+    __combat = true
+    setUnit(30, "elite")
+    eq(Tg().level.icon:IsShown(), true)
+    eq(#__blocked, 0)
+    __combat = false
     W.clean(); noFails()
 end
 
@@ -909,7 +1060,8 @@ def run_case(name: str, mu: dict, mb: dict, mt: dict) -> str | None:
     lua.execute(CB.MOCK)
     theme_src = (ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
     consts = [CHEV._extract_theme_constant(theme_src, n) for n in
-              TH.THEME_CONSTANTS + ("COLOR_CARET_HEALTH", "COLOR_HEAL", "COLOR_GOLD", "FLAT_TEXTURE")]
+              TH.THEME_CONSTANTS + ("COLOR_CARET_HEALTH", "COLOR_HEAL", "COLOR_GOLD", "COLOR_SILVER", "COLOR_RED", "FLAT_TEXTURE",
+                                  "LEVEL_CROWN_TEXTURE", "LEVEL_STAR_TEXTURE", "LEVEL_CROWN_STAR_TEXTURE", "LEVEL_SKULL_TEXTURE")]
     lua.eval("__load_theme_constants")(lua.table_from(consts))
     lua.execute(CB.WIRE)
     lua.execute(TH.MOCK)

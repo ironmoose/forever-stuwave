@@ -65,6 +65,7 @@ Theme.COLOR_MENU_TEXT = Theme.COLOR_POWER
 -- gold/warm fallbacks carry the same triples and defer to these when present.
 Theme.COLOR_GOLD  = { 1, 0.8235, 0.2471, 1 }           -- #ffd23f --gold
 Theme.COLOR_STEEL = { 0.5529, 0.5765, 0.6510, 1 }      -- #8d93a6 --steel
+Theme.COLOR_SILVER = { 0.8, 0.8078, 0.8431, 1 }         -- #ccced7 steel mixed 55% to white (the rare level icon tint; mockups/gunsight-level-tag-2026-10-08.html)
 Theme.COLOR_AMBER = { 1, 0.7137, 0.2824, 1 }           -- #ffb648 --amber
 Theme.COLOR_WARM  = { 1, 0.2392, 0.1216, 1 }           -- #ff3d1f --warm
 Theme.COLOR_RED   = { 1, 0.2314, 0.3059, 1 }           -- #ff3b4e --red
@@ -221,6 +222,12 @@ Theme.BORDER_CORNER_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textur
 -- Tiled 45-degree diagonal-stripe hatch (light gray/white on transparent),
 -- UnitFrames.lua's absorb/shield overlay fill. See media/generate_hatch.py.
 Theme.HATCH_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\hatch.tga"
+-- Gunsight level tag icons (tools/assets/generate_level_icons.py). Crown, star and skull are white with the shape in alpha:
+-- tint with SetVertexColor (COLOR_GOLD, COLOR_SILVER, COLOR_RED). The rare elite file has its colours baked in: draw it untinted.
+Theme.LEVEL_CROWN_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\level_crown.tga"
+Theme.LEVEL_STAR_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\level_star.tga"
+Theme.LEVEL_CROWN_STAR_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\level_crown_star.tga"
+Theme.LEVEL_SKULL_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\level_skull.tga"
 
 -- NINE-SLICE chrome. One texture per element, corners drawn from it at native
 -- texel resolution by the engine, straight runs stretched.
