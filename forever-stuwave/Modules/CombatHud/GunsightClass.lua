@@ -34,7 +34,10 @@ local SHARD_TEX = {
     fill = MEDIA .. "hud_shard_fill.tga", facet = MEDIA .. "hud_shard_facet.tga",
 }
 local PIP_FILL_TEX, PIP_RING_TEX = MEDIA .. "hud_diamond.tga", MEDIA .. "glyph_hud_diamond.tga"
-local COMBO_EVENTS = { "PLAYER_COMBO_POINTS", "PLAYER_TARGET_CHANGED" }
+-- This client has no PLAYER_COMBO_POINTS (registering it throws); the points are the player's COMBO_POINTS power, as
+-- Blizzard's own Rogue and Druid bars read it (UnitPower with Enum.PowerType.ComboPoints, UNIT_POWER_* and UNIT_MAXPOWER).
+local COMBO_POWER = (Enum and Enum.PowerType and Enum.PowerType.ComboPoints) or 4
+local POWER_EVENTS = { UNIT_POWER_UPDATE = true, UNIT_POWER_FREQUENT = true, UNIT_MAXPOWER = true }
 local DRUID_EVENTS = { "UPDATE_SHAPESHIFT_FORM" }
 
 local logged = {}
@@ -71,6 +74,7 @@ local rect                    -- the corner of the area's image px rect, copied 
 local frame, box, label, number
 local glyph, pips = {}, {}
 local lastKey                 -- what is painted now: a count, "secret" or "off"; nil forces a repaint
+local pipCount                -- how many pips are shown (UnitPowerMax, at most MAX_PIPS); nil forces a re-apply
 
 local function Theme() return FS.Theme end
 
@@ -182,6 +186,23 @@ end
 -- Combo points
 -------------------------------------------------------------------------------
 
+-- A pip is its resting diamond and outline (the unlit look) with a StatusBar of each over them: the bar for pip i
+-- spans i - 1 to i and is fed the point count, so the ENGINE fills it when the count reaches i and Lua never
+-- compares a count (it may be secret). The bar alpha is the one that composites with the resting alpha to the lit look.
+local function LitOverRest(look) return (look.lit - look.off) / (1 - look.off) end
+
+local function NewPipBar(i, tex, look, level)
+    local y = M.YELLOW
+    local bar = CreateFrame("StatusBar", nil, box)
+    bar:SetFrameLevel(box:GetFrameLevel() + level)
+    bar:SetStatusBarTexture(tex)
+    bar:SetStatusBarColor(y[1], y[2], y[3], LitOverRest(look))
+    bar:SetOrientation("HORIZONTAL")
+    bar:SetMinMaxValues(i - 1, i)
+    bar:SetValue(0)
+    return bar
+end
+
 local function BuildCombo()
     local y = M.YELLOW
     for i = 1, M.MAX_PIPS do
@@ -191,27 +212,38 @@ local function BuildCombo()
         local ring = box:CreateTexture(nil, "ARTWORK", nil, 1)
         ring:SetTexture(PIP_RING_TEX)
         ring:SetVertexColor(y[1], y[2], y[3], M.PIP_RING.off)
-        pips[i] = { fill = fill, ring = ring }
+        pips[i] = {
+            fill = fill, ring = ring,
+            fillBar = NewPipBar(i, PIP_FILL_TEX, M.PIP_FILL, 1), ringBar = NewPipBar(i, PIP_RING_TEX, M.PIP_RING, 2),
+        }
     end
     caption = "COMBO POINTS"
 end
 
-local function SetPips(n)
-    local y = M.YELLOW
-    for i, pip in ipairs(pips) do
-        local state = i <= n and "lit" or "off"
-        pip.fill:SetVertexColor(y[1], y[2], y[3], M.PIP_FILL[state])
-        pip.ring:SetVertexColor(y[1], y[2], y[3], M.PIP_RING[state])
-        pip.fill:Show()
-        pip.ring:Show()
+-- Feeds the count (a plain number or a secret) to every pip's bars, which are the only thing that reads it.
+local function SetPips(points)
+    for _, pip in ipairs(pips) do
+        pip.fillBar:SetValue(points)
+        pip.ringBar:SetValue(points)
     end
 end
 
-local function HidePips()
-    for _, pip in ipairs(pips) do
-        pip.fill:Hide()
-        pip.ring:Hide()
+-- Shows the first `count` pips and hides the rest.
+local function ShowPips(count)
+    if count == pipCount then return end
+    pipCount = count
+    for i, pip in ipairs(pips) do
+        for _, region in pairs(pip) do region:SetShown(i <= count) end
     end
+end
+
+-- How many pips the player has: UnitPowerMax when it is a plain count (at most the plate's MAX_PIPS), else all of them.
+local function PipCount()
+    if type(UnitPowerMax) ~= "function" then return M.MAX_PIPS end
+    local ok, max = pcall(UnitPowerMax, "player", COMBO_POWER)
+    local n = ok and PlainCount(max) or nil
+    if not n or n < 1 then return M.MAX_PIPS end
+    return math.min(n, M.MAX_PIPS)
 end
 
 -- Whether the Druid is in cat form: energy is its power type there (mana, rage and the other forms differ).
@@ -237,17 +269,18 @@ end
 
 local function RefreshCombo()
     if not built or mode ~= "combo" or not shown then return end
-    if type(GetComboPoints) ~= "function" or not ComboActive() then
+    if type(UnitPower) ~= "function" or not ComboActive() then
         Paint("off")
         return
     end
-    local ok, value = pcall(GetComboPoints, "player", "target")
+    local ok, value = pcall(UnitPower, "player", COMBO_POWER)
     if not ok then
         Paint("off")
         return
     end
+    ShowPips(PipCount())
     if IsSecret(value) then
-        HidePips()
+        SetPips(value)
         SetNumberColor(true)
         SetNumber(value)
         lastKey = nil
@@ -269,12 +302,15 @@ local function RefreshCombo()
 end
 
 local function OnComboEvent(_, event, unit, token)
-    if event == "UNIT_POWER_UPDATE" and not IsSecret(token) and token ~= nil and token ~= "COMBO_POINTS" then return end
+    local ofUnit = event ~= "PLAYER_TARGET_CHANGED" and event ~= "UPDATE_SHAPESHIFT_FORM"
+    if ofUnit and not IsSecret(unit) and unit ~= "player" then return end
+    if POWER_EVENTS[event] and not IsSecret(token) and token ~= nil and token ~= "COMBO_POINTS" then return end
     RefreshCombo()
 end
 
 local function SetComboEvents(on)
-    local function reg(event, unitOnly)
+    -- optional: a refusal is not worth a chat line (another registered event covers it)
+    local function reg(event, unitOnly, optional)
         if on then
             local ok, err
             if unitOnly then
@@ -282,13 +318,15 @@ local function SetComboEvents(on)
             else
                 ok, err = pcall(frame.RegisterEvent, frame, event)
             end
-            if not ok then LogOnce("event_" .. event, event .. " cannot be registered on this client (" .. tostring(err) .. ")") end
+            if not ok and not optional then LogOnce("event_" .. event, event .. " cannot be registered on this client (" .. tostring(err) .. ")") end
         else
             pcall(frame.UnregisterEvent, frame, event)
         end
     end
-    for _, e in ipairs(COMBO_EVENTS) do reg(e) end
+    reg("PLAYER_TARGET_CHANGED")
     reg("UNIT_POWER_UPDATE", true)
+    reg("UNIT_POWER_FREQUENT", true, true)
+    reg("UNIT_MAXPOWER", true)
     if class == "DRUID" then
         for _, e in ipairs(DRUID_EVENTS) do reg(e) end
         reg("UNIT_DISPLAYPOWER", true)

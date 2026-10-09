@@ -11,8 +11,10 @@ with the same API as the real one (its own harness covers it). The checks pin:
     count and the label at the mockup's offsets inside the area rect, a dim glyph and a muted 0 at zero shards,
     nothing drawn for an unknown or secret count, a Hud subscription only while the module is shown;
   * the combo module: five diamond pips (yellow, the lit ones bright) and the count, the label COMBO POINTS,
-    the events that refresh it, a secret count reaching the number only through SetFormattedText with the pips
-    hidden, a Druid outside cat form (or one whose form cannot be read) drawing nothing;
+    the player's UnitPower COMBO_POINTS events that refresh it (no event this client lacks, such as the classic
+    PLAYER_COMBO_POINTS; other units and power types ignored), a secret count filling the pips through their
+    StatusBars and reaching the number only through SetFormattedText (no Lua comparison), a Druid outside cat
+    form (or one whose form cannot be read) drawing nothing;
   * the "classSoon" plate (the fallback for a class with no module): CLASS MODULE header in the TARGET DEBUFFS style,
     COMING SOON, the class name when readable, compact and inside the area, re-seated on a rescale;
   * any other class (a Mage) draws nothing, a secret class token draws nothing, a rescale re-seats in place.
@@ -161,6 +163,54 @@ function push(state)
     STATE = state
     for _, fn in ipairs({ unpack(SUBS) }) do fn(state) end
 end
+-- A StatusBar, as far as the module uses one: an engine-side fill. SetValue takes anything (a secret too, no
+-- Lua comparison); the fill is a child texture the cases tell apart from the module's own (barFill).
+-- engineLit(bar) is what the ENGINE would draw: it alone resolves a secret, through ENGINE_SECRET.
+ENGINE_SECRET = 0
+do
+    local plainCreate = CreateFrame
+    function CreateFrame(kind, name, parent, template)
+        if kind ~= "StatusBar" then return plainCreate(kind, name, parent, template) end
+        local f = plainCreate("Frame", name, parent, template)
+        f.isBar, f.min, f.max, f.value = true, 0, 1, 0
+        function f:SetMinMaxValues(a, b) self.min, self.max = a, b end
+        function f:SetValue(v) self.value = v end
+        function f:SetOrientation() end
+        function f:SetStatusBarTexture(path)
+            local t = self:CreateTexture(nil, "ARTWORK")
+            t:SetTexture(path)
+            t.barFill = true
+            self.fillTex = t
+        end
+        function f:GetStatusBarTexture() return self.fillTex end
+        function f:SetStatusBarColor(r, g, b, a) self.fillTex:SetVertexColor(r, g, b, a) end
+        return f
+    end
+    function engineLit(bar)
+        local v = bar.value
+        if v == SECRET then v = ENGINE_SECRET end
+        return v >= bar.max
+    end
+end
+-- The client refuses an event it does not know: Frame:RegisterEvent() throws. Once a case mounts the module
+-- (STRICT_EVENTS), only KNOWN_EVENTS register; PLAYER_COMBO_POINTS is the classic one this client does not have.
+STRICT_EVENTS = false
+KNOWN_EVENTS = {}
+function resetKnownEvents()
+    KNOWN_EVENTS = {}
+    for e in ([[PLAYER_TARGET_CHANGED PLAYER_ENTERING_WORLD PLAYER_REGEN_DISABLED PLAYER_REGEN_ENABLED UNIT_POWER_UPDATE UNIT_POWER_FREQUENT UNIT_MAXPOWER UNIT_DISPLAYPOWER UPDATE_SHAPESHIFT_FORM]]):gmatch("%S+") do KNOWN_EVENTS[e] = true end
+end
+resetKnownEvents()
+do
+    local FrameMT = getmetatable(UIParent).__index
+    for _, m in ipairs({ "RegisterEvent", "RegisterUnitEvent" }) do
+        local orig = FrameMT[m]
+        FrameMT[m] = function(self, e, ...)
+            if STRICT_EVENTS and not KNOWN_EVENTS[e] then error("Attempt to register unknown event \"" .. tostring(e) .. "\"", 2) end
+            return orig(self, e, ...)
+        end
+    end
+end
 -- SetFormattedText is a SINK: a secret reaches it (recorded), a plain value formats as usual.
 do
     local FrameMT = getmetatable(UIParent).__index
@@ -195,10 +245,12 @@ local function fakeAreas()
     }
 end
 
-COMBO, FORM_POWER = 0, { 3, "ENERGY" }
+COMBO, COMBO_MAX, FORM_POWER = 0, 5, { 3, "ENERGY" }
 COMBO_ARGS = {}
 local function boot(opts)
     opts = opts or {}
+    STRICT_EVENTS = false
+    resetKnownEvents()
     resetWorld()
     SetScreen(opts.height or 1440)
     ForeverSTUwaveDB = opts.db
@@ -223,10 +275,14 @@ local function boot(opts)
     fakeAreas()
     local class = opts.class or "WARLOCK"
     UnitClass = function() return "Class", opts.classToken ~= nil and opts.classToken or class end
-    COMBO, FORM_POWER, COMBO_ARGS = opts.combo or 0, opts.form or { 3, "ENERGY" }, {}
-    GetComboPoints = function(unit, target) COMBO_ARGS[#COMBO_ARGS + 1] = { unit, target }; return COMBO end
+    COMBO, COMBO_MAX, FORM_POWER, COMBO_ARGS = opts.combo or 0, opts.max or 5, opts.form or { 3, "ENERGY" }, {}
+    Enum = { PowerType = { ComboPoints = 4 } }
+    -- the classic call: it exists on this client but is target based and secret under restriction; the module must not use it
+    GetComboPoints = function() error("GetComboPoints is not the combo API on this client") end
+    UnitPower = function(unit, powerType) COMBO_ARGS[#COMBO_ARGS + 1] = { unit, powerType }; return COMBO end
+    UnitPowerMax = function() return COMBO_MAX end
     UnitPowerType = function(unit) return FORM_POWER[1], FORM_POWER[2] end
-    if opts.noCombo then GetComboPoints = nil end
+    if opts.noCombo then UnitPower = nil end
     if opts.noPowerType then UnitPowerType = nil end
     STATE = opts.state
     if opts.dots then
@@ -245,6 +301,7 @@ end
 
 -- Mounts the registered module the way the area host does: build(host), seat(rect), onShow(area).
 local function mount(area, id)
+    STRICT_EVENTS = true
     local spec = MODS[id or "class"]
     check(spec, "no " .. (id or "class") .. " module registered")
     local host = CreateFrame("Frame", nil, FS.Gunsight.root)
@@ -270,8 +327,21 @@ end
 local function texWith(host, name)
     local out = {}
     local tex = drawn(host)
-    for _, t in ipairs(tex) do if t.path and t.path:find(name, 1, true) then out[#out + 1] = t end end
+    for _, t in ipairs(tex) do if t.path and not t.barFill and t.path:find(name, 1, true) then out[#out + 1] = t end end
     return out
+end
+-- the pips' StatusBars (the lit fill) in pip order, diamond fills then outlines; litCount = pips the engine fills
+local function barsWith(host, name)
+    local out = {}
+    for _, f in ipairs(FRAMES) do
+        if f.isBar and under(f, host) and f.fillTex.path:find(name, 1, true) then out[#out + 1] = f end
+    end
+    return out
+end
+local function litCount(host, name)
+    local n = 0
+    for _, b in ipairs(barsWith(host, name or "\\hud_diamond.tga")) do if isVisible(b) and engineLit(b) then n = n + 1 end end
+    return n
 end
 local function textOf(host, str)
     local _, txt = drawn(host)
@@ -449,6 +519,8 @@ local fills = texWith(host, "\\hud_diamond.tga")
 local rings = texWith(host, "glyph_hud_diamond.tga")
 check(#fills == 5 and #rings == 5, "five pips: " .. #fills .. " fills and " .. #rings .. " outlines")
 local k = K * FS.Layout.Scale()
+local bars, rbars = barsWith(host, "\\hud_diamond.tga"), barsWith(host, "glyph_hud_diamond.tga")
+check(#bars == 5 and #rbars == 5, "each pip has an engine fill for the diamond and one for the outline")
 local lit = 0
 for i = 1, 5 do
     local f = fills[i]
@@ -457,15 +529,21 @@ for i = 1, 5 do
     near3(y, MU.PIP_Y, "pip " .. i .. " y")
     near3(f.w, 2 * MU.PIP_R * k, "pip width is the mockup's diagonal")
     colorIs(f.vertex, MU.YELLOW, "pip " .. i .. " is yellow")
-    if i <= 4 then
-        near3(f.vertex[4], MU.PIP_FILL_LIT, "lit pip " .. i .. " fill alpha"); lit = lit + 1
-        near3(rings[i].vertex[4], MU.PIP_STROKE_LIT, "lit pip " .. i .. " outline alpha")
-    else
-        near3(f.vertex[4], MU.PIP_FILL_OFF, "unlit pip fill alpha")
-        near3(rings[i].vertex[4], MU.PIP_STROKE_OFF, "unlit pip outline alpha")
-    end
+    near3(f.vertex[4], MU.PIP_FILL_OFF, "pip " .. i .. " rests at the unlit fill alpha")
+    near3(rings[i].vertex[4], MU.PIP_STROKE_OFF, "pip " .. i .. " rests at the unlit outline alpha")
+    -- the lit look is the engine fill over the resting one: it must composite to the mockup's lit alpha
+    local bx, by = cx(bars[i])
+    near3(bx, MU.PIP_X0 + (i - 1) * MU.PIP_STEP, "pip " .. i .. " fill bar x")
+    near3(by, MU.PIP_Y, "pip " .. i .. " fill bar y")
+    near3(bars[i].w, 2 * MU.PIP_R * k, "pip " .. i .. " fill bar width")
+    colorIs(bars[i].fillTex.vertex, MU.YELLOW, "pip " .. i .. " lit fill is yellow")
+    local a, ra = bars[i].fillTex.vertex[4], rbars[i].fillTex.vertex[4]
+    near3(f.vertex[4] + a * (1 - f.vertex[4]), MU.PIP_FILL_LIT, "pip " .. i .. " lit fill composites to the mockup alpha")
+    near3(rings[i].vertex[4] + ra * (1 - rings[i].vertex[4]), MU.PIP_STROKE_LIT, "pip " .. i .. " lit outline composites to the mockup alpha")
+    check(bars[i].min == i - 1 and bars[i].max == i and rbars[i].min == i - 1 and rbars[i].max == i, "pip " .. i .. " fills over " .. (i - 1) .. " to " .. i)
+    if engineLit(bars[i]) and engineLit(rbars[i]) then lit = lit + 1 end
 end
-check(lit == 4, "four lit pips")
+check(lit == 4, "four lit pips, got " .. lit)
 local num = textOf(host, "4")
 check(num, "the count 4 is not drawn")
 local nx, ny = cx(num)
@@ -478,53 +556,72 @@ near3(clx, MU.COMBO_LABEL_X, "label x")
 near3(cly, MU.COMBO_LABEL_Y - TEXT_MID * MU.LABEL_PX, "label y")
 near3(ny, MU.COMBO_NUM_BASE - TEXT_MID * MU.COMBO_NUM_PX, "count centre above its baseline")
 check(#texWith(host, "hud_shard") == 0, "no shard glyph in the combo module")
-check(COMBO_ARGS[1] and COMBO_ARGS[1][1] == "player" and COMBO_ARGS[1][2] == "target", "GetComboPoints is asked for player and target")
+check(COMBO_ARGS[1] and COMBO_ARGS[1][1] == "player" and COMBO_ARGS[1][2] == 4, "UnitPower is asked for the player's combo points")
 """)
 
-case("combo_module_follows_its_events_and_dims_at_zero")(r"""
+case("combo_module_follows_the_power_events_and_dims_at_zero")(r"""
 boot({ class = "ROGUE", combo = 0 })
 local spec, host = mount("lower")
-local fills = texWith(host, "\\hud_diamond.tga")
-for i = 1, 5 do near3(fills[i].vertex[4], MU.PIP_FILL_OFF, "all pips unlit at zero") end
+check(litCount(host) == 0, "all pips unlit at zero")
 local zero = textOf(host, "0")
 check(zero, "the count 0 is drawn")
 colorIs(zero.textColor, FS.Theme.COLOR_MUTED, "a zero count is muted")
-for _, ev in ipairs({ { "PLAYER_COMBO_POINTS" }, { "UNIT_POWER_UPDATE", "player", "COMBO_POINTS" }, { "PLAYER_TARGET_CHANGED" } }) do
+for _, ev in ipairs({ { "UNIT_POWER_FREQUENT", "player", "COMBO_POINTS" }, { "UNIT_POWER_UPDATE", "player", "COMBO_POINTS" }, { "PLAYER_TARGET_CHANGED" } }) do
     COMBO = COMBO + 1
     fire(unpack(ev))
     check(textOf(host, tostring(COMBO)), ev[1] .. " must refresh the count to " .. COMBO)
-    local lit = 0
-    for _, f in ipairs(texWith(host, "\\hud_diamond.tga")) do if f.vertex[4] > 0.5 then lit = lit + 1 end end
-    check(lit == COMBO, ev[1] .. ": " .. lit .. " lit pips, want " .. COMBO)
+    check(litCount(host) == COMBO and litCount(host, "glyph_hud_diamond.tga") == COMBO, ev[1] .. ": " .. litCount(host) .. " lit pips, want " .. COMBO)
 end
 COMBO = 5
-fire("UNIT_POWER_UPDATE", "player", "ENERGY")
+fire("UNIT_POWER_FREQUENT", "player", "ENERGY")
 check(not textOf(host, "5"), "an energy power update does not read the combo points")
-fire("UNIT_POWER_UPDATE", "player", "COMBO_POINTS")
-check(textOf(host, "5"), "five combo points")
+fire("UNIT_POWER_FREQUENT", "target", "COMBO_POINTS")
+check(not textOf(host, "5"), "another unit's power update is ignored")
+for _, f in ipairs(FRAMES) do
+    if f.scripts.OnEvent and f.events.UNIT_POWER_FREQUENT then f.scripts.OnEvent(f, "UNIT_POWER_FREQUENT", "target", "COMBO_POINTS") end
+end
+check(not textOf(host, "5"), "the handler itself ignores another unit, not only the registration")
+fire("UNIT_POWER_FREQUENT", "player", "COMBO_POINTS")
+check(textOf(host, "5") and litCount(host) == 5, "five combo points")
 colorIs(textOf(host, "5").textColor, FS.Theme.COLOR_TEXT_WHITE, "a held count is white")
+COMBO = 2
+fire("UNIT_MAXPOWER", "player", "COMBO_POINTS")
+check(textOf(host, "2") and litCount(host) == 2, "a max power change repaints")
 """)
 
-case("a_combo_event_the_client_refuses_is_logged_once_and_the_power_update_still_works")(r"""
+case("combo_module_registers_only_events_this_client_has_and_logs_nothing")(r"""
 boot({ class = "ROGUE", combo = 1 })
-local FrameMT = getmetatable(UIParent).__index
-local register = FrameMT.RegisterEvent
-function FrameMT:RegisterEvent(e)
-    if e == "PLAYER_COMBO_POINTS" then error("Attempt to register unknown event \"" .. e .. "\"", 2) end
-    return register(self, e)
-end
 local spec, host = mount("lower")
-check(DEGRADED["gunsightclass_event_PLAYER_COMBO_POINTS"], "the refused event is logged through the degrade path")
-check(textOf(host, "1"), "the module still draws")
+check(next(DEGRADED) == nil, "an event was refused: " .. tostring(next(DEGRADED)))
+check(PRINTED[1] == nil, "nothing is printed to chat")
+local seen
+for _, f in ipairs(FRAMES) do if f.events.UNIT_POWER_UPDATE then seen = true end end
+check(seen, "the power update is registered")
+for _, f in ipairs(FRAMES) do check(not f.events.PLAYER_COMBO_POINTS, "PLAYER_COMBO_POINTS must not be registered") end
+boot({ class = "DRUID", combo = 1 })
+spec, host = mount("lower")
+check(next(DEGRADED) == nil, "a Druid event was refused: " .. tostring(next(DEGRADED)))
+""")
+
+case("a_refused_power_event_is_logged_once_and_the_other_still_works_the_spare_one_is_silent")(r"""
+boot({ class = "ROGUE", combo = 1 })
+KNOWN_EVENTS.UNIT_POWER_FREQUENT = nil
+local spec, host = mount("lower")
+check(next(DEGRADED) == nil, "the spare UNIT_POWER_FREQUENT is optional, nothing is logged: " .. tostring(next(DEGRADED)))
 COMBO = 4
 fire("UNIT_POWER_UPDATE", "player", "COMBO_POINTS")
-check(textOf(host, "4"), "UNIT_POWER_UPDATE for the player alone updates the count")
-local lit = 0
-for _, f in ipairs(texWith(host, "\\hud_diamond.tga")) do if f.vertex[4] > 0.5 then lit = lit + 1 end end
-check(lit == 4, "and the pips: " .. lit .. " lit")
-DEGRADED["gunsightclass_event_PLAYER_COMBO_POINTS"] = nil
+check(textOf(host, "4") and litCount(host) == 4, "UNIT_POWER_UPDATE still updates the pips and count")
+boot({ class = "ROGUE", combo = 1 })
+KNOWN_EVENTS.UNIT_POWER_UPDATE = nil
+spec, host = mount("lower")
+check(DEGRADED["gunsightclass_event_UNIT_POWER_UPDATE"], "the refused event is logged through the degrade path")
+check(textOf(host, "1"), "the module still draws")
+COMBO = 3
+fire("UNIT_POWER_FREQUENT", "player", "COMBO_POINTS")
+check(textOf(host, "3") and litCount(host) == 3, "UNIT_POWER_FREQUENT still updates the pips and count")
+DEGRADED["gunsightclass_event_UNIT_POWER_UPDATE"] = nil
 spec.onHide("lower"); spec.onShow("lower")
-check(DEGRADED["gunsightclass_event_PLAYER_COMBO_POINTS"] == nil, "a second show does not log it again")
+check(DEGRADED["gunsightclass_event_UNIT_POWER_UPDATE"] == nil, "a second show does not log it again")
 check(PRINTED[1] == nil, "nothing is printed to chat")
 """)
 
@@ -534,7 +631,7 @@ local spec, host, frame = mount("lower")
 local function listening()
     local n = 0
     for _, f in ipairs(FRAMES) do
-        if f.events.PLAYER_COMBO_POINTS or f.events.PLAYER_TARGET_CHANGED or f.events.UNIT_POWER_UPDATE then n = n + 1 end
+        if f.events.PLAYER_TARGET_CHANGED or f.events.UNIT_POWER_UPDATE or f.events.UNIT_POWER_FREQUENT or f.events.UNIT_MAXPOWER then n = n + 1 end
     end
     return n
 end
@@ -542,33 +639,57 @@ check(listening() >= 1, "listens while shown")
 spec.onHide("lower")
 check(listening() == 0, "no event stays registered after onHide, got " .. listening())
 COMBO = 3
-fire("PLAYER_COMBO_POINTS")
+fire("UNIT_POWER_UPDATE", "player", "COMBO_POINTS")
 check(not textOf(host, "3"), "a hidden module does not repaint")
 spec.onShow("lower")
 check(textOf(host, "3"), "showing again repaints from the live count")
 """)
 
-case("combo_module_secret_count_goes_only_to_the_number_sink_and_hides_the_pips")(r"""
+case("combo_module_secret_count_fills_the_pips_in_the_engine_with_no_lua_comparison")(r"""
 boot({ class = "ROGUE", combo = 3 })
 local spec, host = mount("lower")
 COMBO = SECRET
-fire("PLAYER_COMBO_POINTS")
+ENGINE_SECRET = 3
+fire("UNIT_POWER_FREQUENT", "player", "COMBO_POINTS")   -- any comparison or arithmetic on SECRET throws and fails this case
 local _, txt = drawn(host)
 local fed
 for _, s in ipairs(txt) do if s.secretFed then fed = s end end
 check(fed, "a secret count must reach a number string through SetFormattedText")
-check(#texWith(host, "\\hud_diamond.tga") == 0 and #texWith(host, "glyph_hud_diamond.tga") == 0, "the pips hide when the count is secret")
+check(#texWith(host, "\\hud_diamond.tga") == 5 and #texWith(host, "glyph_hud_diamond.tga") == 5, "the pips stay drawn when the count is secret")
+for _, b in ipairs(barsWith(host, "diamond.tga")) do check(b.value == SECRET, "the secret goes to the bar's SetValue as is") end
+check(litCount(host) == 3 and litCount(host, "glyph_hud_diamond.tga") == 3, "the engine fills the first three pips: " .. litCount(host))
+ENGINE_SECRET = 5
+fire("UNIT_POWER_UPDATE", "player", "COMBO_POINTS")
+check(litCount(host) == 5, "and follows the next secret value in the engine")
 COMBO = 2
-fire("PLAYER_COMBO_POINTS")
-check(textOf(host, "2"), "a plain count draws again")
-check(#texWith(host, "\\hud_diamond.tga") == 5, "the pips come back with a plain count")
+fire("UNIT_POWER_UPDATE", "player", "COMBO_POINTS")
+check(textOf(host, "2") and litCount(host) == 2, "a plain count draws again")
 """)
 
-case("combo_module_draws_nothing_without_the_combo_api")(r"""
+case("combo_module_secret_max_defaults_to_five_pips_and_a_small_max_hides_the_rest")(r"""
+boot({ class = "ROGUE", combo = 2 })
+UnitPowerMax = function() return SECRET end
+local spec, host = mount("lower")
+local vis = 0
+for _, f in ipairs(texWith(host, "\\hud_diamond.tga")) do if isVisible(f) then vis = vis + 1 end end
+check(vis == 5, "a secret max still draws five pips, got " .. vis)
+UnitPowerMax = function() return 3 end
+fire("UNIT_MAXPOWER", "player", "COMBO_POINTS")
+vis = 0
+for _, f in ipairs(texWith(host, "\\hud_diamond.tga")) do if isVisible(f) then vis = vis + 1 end end
+check(vis == 3, "a plain max of three draws three pips, got " .. vis)
+UnitPowerMax = function() return 7 end
+fire("UNIT_MAXPOWER", "player", "COMBO_POINTS")
+vis = 0
+for _, f in ipairs(texWith(host, "\\hud_diamond.tga")) do if isVisible(f) then vis = vis + 1 end end
+check(vis == 5, "a larger max is capped at the five pips the plate has, got " .. vis)
+""")
+
+case("combo_module_draws_nothing_without_the_power_api")(r"""
 boot({ class = "ROGUE", noCombo = true })
 local spec, host = mount("lower")
 local tex, txt = drawn(host)
-check(#tex == 0 and #txt == 0, "no GetComboPoints: nothing drawn, got " .. #tex .. " textures and " .. #txt .. " strings")
+check(#tex == 0 and #txt == 0, "no UnitPower: nothing drawn, got " .. #tex .. " textures and " .. #txt .. " strings")
 """)
 
 case("combo_module_draws_nothing_without_a_hostile_live_target_but_shards_do")(r"""
@@ -599,18 +720,21 @@ check(textOf(host2, "3") and #texWith(host2, "hud_shard_line.tga") == 1, "shards
 case("druid_draws_combo_points_in_cat_form_only")(r"""
 boot({ class = "DRUID", combo = 2, form = { 3, "ENERGY" } })
 local spec, host = mount("lower")
-check(#texWith(host, "\\hud_diamond.tga") == 5 and textOf(host, "2"), "cat form draws the pips and the count")
+check(#texWith(host, "\\hud_diamond.tga") == 5 and textOf(host, "2") and litCount(host) == 2, "cat form draws the pips and the count")
 FORM_POWER = { 0, "MANA" }
 fire("UNIT_DISPLAYPOWER", "player")
 local tex, txt = drawn(host)
 check(#tex == 0 and #txt == 0, "caster form draws nothing, got " .. #tex .. " textures and " .. #txt .. " strings")
+fire("UNIT_POWER_FREQUENT", "player", "COMBO_POINTS")
+tex, txt = drawn(host)
+check(#tex == 0 and #txt == 0, "and a combo point update in caster form does not bring it back")
 FORM_POWER = { 1, "RAGE" }
 fire("UPDATE_SHAPESHIFT_FORM")
 tex, txt = drawn(host)
 check(#tex == 0 and #txt == 0, "bear form draws nothing")
 FORM_POWER = { 3, "ENERGY" }
 fire("UPDATE_SHAPESHIFT_FORM")
-check(#texWith(host, "\\hud_diamond.tga") == 5, "back in cat form")
+check(#texWith(host, "\\hud_diamond.tga") == 5 and litCount(host) == 2, "back in cat form")
 """)
 
 case("druid_with_an_unreadable_form_draws_nothing")(r"""
