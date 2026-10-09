@@ -25,9 +25,13 @@ local CLASS_DEBUFFS = {
 -- Seconds a debuff lasts when the player casts it, so the FIRST cast in combat is timed before any snapshot has
 -- taught the session. `apply` is the top rank (or the only length); `byRank` maps a cast rank id to its length for a
 -- spell whose length follows the rank. Verified against Wowhead / ForeverDB (Forever): Rend 9/12/15/18/21 s,
--- Thunder Clap 10/14/18/22/26/30 s (rank 1 id 6343 was read there, the rest are classic rank ids),
--- Sunder Armor 30 s, Hamstring 15 s, Demoralizing Shout 45 s (30 s in classic; all five ranks, checked
--- 2026-10-08 at https://foreverdb.net/spell/11556 and https://www.wowhead.com/forever/guide/classes/warrior/arms/dps-abilities). Deep Wounds has no cast, so no entry.
+-- Thunder Clap 10/14/18/22/26/30 s (rank ids 6343, 8198, 8204, 8205, 11580, 11581), Sunder Armor 30 s,
+-- Hamstring 15 s, Demoralizing Shout 45 s (30 s in classic; all five ranks). Sources, checked 2026-10-08:
+-- Thunder Clap rank pages, 10/14/18/22/26/30 s; the Wowhead guide's 26 s is rank 5:
+--   https://foreverdb.net/spell/6343, /8198, /8204, /8205, /11580, /11581
+-- Demoralizing Shout, 45 s on all ranks:
+--   https://foreverdb.net/spell/11556
+-- Deep Wounds has no cast, so no entry.
 -- Only Warrior is filled so far; every other class is timed from its first readable snapshot (learned below).
 local SPELL_SECONDS = {
     ["Rend"] = { apply = 21, byRank = { [772] = 9, [6546] = 12, [6547] = 15, [6548] = 18, [11572] = 21, [11573] = 21, [11574] = 21 } },
@@ -232,12 +236,15 @@ local function ScanInto(bucket, prevBucket)
                 if expires and expires > 0 then entry.expires = expires end
             end
             if not entry.duration then
-                -- no usable duration (zero or secret): keep what the ledger already believed, else the tables; an
-                -- aura that is up is not "?" when its length is known. A plain duration with a secret expiry stays
-                -- unknown (the expiry is the secret, not guessed).
+                -- no usable duration (zero or secret): keep what the ledger believed while it still holds, and the tables
+                -- only when the ledger never saw this aura. An expired ledger entry with the aura still up means an
+                -- untracked refresh, so it stays unknown ("?") rather than getting a fresh full-length timer. A plain
+                -- duration with a secret expiry stays unknown too (the expiry is the secret, not guessed).
                 local prev = prevBucket and prevBucket[name]
-                if prev and prev.expires and prev.expires > entry.at then
-                    entry.expires, entry.duration = prev.expires, prev.duration
+                if prev then
+                    if prev.expires and prev.expires > entry.at then
+                        entry.expires, entry.duration = prev.expires, prev.duration
+                    end
                 else
                     local d = DurationOf(name, entry.id)
                     if d then entry.duration, entry.expires = d, entry.at + d end
