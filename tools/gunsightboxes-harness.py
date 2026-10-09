@@ -912,6 +912,28 @@ function T.a_font_refit_that_is_itself_a_frame_late_settles_and_a_new_name_mid_s
     W.clean(); noFails()
 end
 
+function T.a_same_size_write_while_a_late_settle_step_waits_restarts_the_settle()
+    -- RefitLater only runs when a write CHANGES the size, so a write at the size already shown used to leave a
+    -- pending step 3 (re-seat only) in charge: the new name was never measured again after its own write.
+    local W = world()
+    local line = W.tgt.box.lineOne
+    local first, second = "ABCDEFGHIJKLMN", "ABCDEFGHIJKLMO"
+    __charW = 5.8
+    target("KURAK"); settle()
+    __fontLag = true
+    target(first)
+    ok(line.nextFramePending, "a settle callback is pending")
+    line.settleStep = 3                                 -- the state two late fonts in a row leave: only the re-seat is owed
+    local sizeNow = line.size
+    target(second)
+    eq(line.size, sizeNow, "the new name lands at the size already shown (a same-size write)")
+    eq(line.settleStep, 1, "and restarts the settle from the full refit")
+    settle()
+    __fontLag = false
+    __charW = nil
+    W.clean(); noFails()
+end
+
 -- ---- lifecycle ----------------------------------------------------------------------------
 
 function T.a_rescale_reseats_in_place_and_builds_nothing()

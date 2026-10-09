@@ -406,7 +406,12 @@ function FitLine(line, text, deferred)
             size = size - 1
             ApplySize(line, size)
         end
-        if not deferred and line.size ~= before then RefitLater(line) end
+        if not deferred then
+            -- A write at the size already shown schedules nothing, but it must still take a waiting later step
+            -- back to the full refit, or that step (re-seat only) would run for a name it never measured.
+            line.settleStep = 1
+            if line.size ~= before then RefitLater(line) end
+        end
     end
 end
 
