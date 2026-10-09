@@ -1285,6 +1285,26 @@ check(#BLOCKED == 0, "nothing protected in combat")
 """)
 
 
+case("fsgun_off_then_on_in_one_fight_settles_on_the_saved_state_after_combat")(SHOWN_HELPERS + r"""
+local CK, G = boot({ party = true, partyProtected = true, profile = "PRIEST" })
+G.root.protected = true
+click(keyOf(CK, "party"))                       -- party piece saved off, out of combat
+finishAnims()
+check(not FS.partyContainer:IsShown(), "party off")
+IN_COMBAT = true
+SlashCmdList["FSGUN"]("off")
+near(FS.partyContainer:GetAlpha(), 1, "master off in combat: the party frames show by alpha")
+SlashCmdList["FSGUN"]("on")                     -- back on in the same fight, before any regen
+check(G.IsActive() == true, "the root never left the screen: active again")
+IN_COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+check(not FS.partyContainer:IsShown(), "the party frames settle on the saved piece state (off), not the stale master-off look")
+checkFits(CK, 6, "the keys settle on the on state after combat")
+for _, k in ipairs(CK.keys) do if k.shown then check(k.btn:IsVisible(), k.key .. " not drawn after off then on in one fight") end end
+check(#BLOCKED == 0, "nothing protected in combat")
+""")
+
+
 def static_checks(mu: dict) -> list[tuple[str, str | None]]:
     out: list[tuple[str, str | None]] = []
     toc = [ln.strip() for ln in TOC.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")]
