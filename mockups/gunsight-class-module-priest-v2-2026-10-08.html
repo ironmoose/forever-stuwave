@@ -43,7 +43,7 @@ table.dp{border-collapse:collapse;width:100%;font-size:12px}
 table.dp th{text-align:left;color:var(--violet);font-weight:700;letter-spacing:.08em;padding:3px 6px;border-bottom:1px solid rgba(168,85,247,.4);font-size:10px}
 table.dp td{padding:4px 6px;vertical-align:top;border-top:1px solid rgba(168,85,247,.2);color:var(--text);line-height:1.35}
 table.dp td.n{width:26px;color:var(--cyan)}
-table.dp td.e{width:150px;color:#fff}
+table.dp td.e{width:200px;color:#fff}
 table.dp td.v{width:96px;white-space:nowrap}
 table.dp td.s{color:var(--muted)}
 .pill{display:inline-block;padding:0 5px;font-size:9px;letter-spacing:.06em;border:1px solid;line-height:14px;white-space:nowrap}
@@ -57,12 +57,37 @@ table.dp td.s{color:var(--muted)}
 .tile .tc b{color:var(--cyan);display:block;font-size:11px;letter-spacing:.06em}
 .tile .tc em{font-style:normal;color:var(--white)}
 .notes{display:flex;gap:22px;align-items:flex-start}
+.cbox{border:1px solid var(--edge);background:rgba(26,16,37,.45);padding:14px 16px 6px;margin:0 0 22px}
+.chead{display:flex;align-items:baseline;gap:14px;margin-bottom:6px}
+.cid{font-size:26px;color:var(--pink)}
+.cname{font-size:22px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 12px var(--violet)}
+.cform{font-size:12px;color:var(--muted);letter-spacing:.06em}
+.cmeta{display:flex;gap:26px;font-size:12px;color:var(--text);line-height:1.5;margin-bottom:10px}
+.cmeta p{margin:0;flex:1}
+.cmeta b{color:var(--white)}
+.crit{font-size:12px;line-height:1.5;color:var(--text);border-top:1px solid rgba(168,85,247,.25);padding:8px 0 10px}
+.crit b{color:var(--amber)}
+.crit .drop{color:var(--pink)}
+.crit .keep{color:var(--green)}
+.pl{animation:pl 1.2s ease-in-out infinite}
+@keyframes pl{0%,100%{opacity:.5}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.pl{animation:none}}
+.tk{transform-box:fill-box;transform-origin:center;animation:tk 3s ease-out infinite}
+@keyframes tk{0%{transform:scale(1);opacity:.45}100%{transform:scale(.5);opacity:0}}
+@media (prefers-reduced-motion:reduce){.tk{animation:none;opacity:0}}
+.verdict{border:1px solid rgba(255,182,72,.5);background:rgba(255,182,72,.06);padding:8px 14px;font-size:13px;margin:0 0 18px;color:var(--text)}
+.verdict b{color:var(--white)}
+.drop{color:var(--pink)}
+.keep{color:var(--green)}
+.cbox.dropped{opacity:.72}
+.stamp{margin-left:auto;border:1px solid var(--pink);color:var(--pink);padding:0 10px;font-size:12px;letter-spacing:.14em}
+.mu2{color:var(--muted);font-weight:400}
 </style>
 </head>
 <body>
 <h1>GUNSIGHT CLASS MODULE, PRIEST V2</h1>
 <div class="ref">Design reference, 2026-10-08, Priest v2</div>
-<div class="sub">Round 2. Round 1 was a list of timers. This is the Paladin Seal grammar applied to how this Priest actually plays: <b>one gauge, one supporting lane, one word that says what to press.</b> The gauge is Shadow Word: Pain on the target, draining 18 s to 0 with an amber REAPPLY band. The lane is Mind Blast, an 8 s cooldown that lights cyan when ready. The word is MIND BLAST, then SW:P, then WAND. Same 190 x 114 half height area, same chrome, same type as v7 <b>sealModule</b>. Level 30 cap; Shadowform and Shadow Word: Death are above it and not drawn.</div>
+<div class="sub">Round 2, second pass. The Paladin module is the quality bar, not the shape. Three divergent Priest concepts, each with its own form factor and its own visual motif, all in the STUwave palette and the v7 chrome. Content is grounded in how this Priest plays: Mind Blast, then Shadow Word: Pain, then wand. Level 30 cap; Shadowform and Shadow Word: Death are above it and not drawn.</div>
 <div id="root"></div>
 
 <svg width="0" height="0" style="position:absolute">
@@ -222,189 +247,354 @@ function dotsH(list,lower){
 }
 
 
-/* ================= PRIEST V2: the SW:P gauge, the Mind Blast lane, the phase cue ================= */
-var SPW='#b565ff',MBC='#7a6cff',MAXS=18,BANDS=3,MBMAX=8;
+/* ================= PRIEST V2, ROUND 2B: three divergent concepts ================= */
+var SPW='#b565ff',MBC='#7a6cff',MAXS=18,BANDS=3,MBMAX=8,UID=0;
 PRDEB=[{ab:'DP',c:'#7a3fa0',rem:19}];
+var PI=Math.PI/180;
 
-/* st = { tgt:boolean, swp:seconds of SW:P left on the target (0 = not on it), mb:seconds of Mind Blast cooldown left (0 = ready), est:false hides the ~ }
-   the cue is a pure function of the two timers: MIND BLAST (ready) > SW:P (missing or inside the band) > WAND */
+/* the cue is a pure function of the two timers: MIND BLAST (ready) > SW:P (missing or in the band) > WAND.
+   Nothing draws it as a word here: each concept says it in its own language. */
 function cueOf(st){
   if(!st.tgt)return null;
   if(st.mb<=0)return 'MIND BLAST';
   if(st.swp<=BANDS)return 'SW:P';
   return 'WAND';
 }
-function cueCol(cue){return cue==='MIND BLAST'?C.cyan:cue==='SW:P'?C.amber:mix(C.muted,'#ffffff',.4);}
+function derive(st){
+  var tgt=st.tgt!==false,has=tgt&&st.swp>0,miss=tgt&&st.swp<=0,band=has&&st.swp<=BANDS,ready=st.mb<=0;
+  return {tgt:tgt,has:has,miss:miss,band:band,ready:ready,swp:st.swp,mb:st.mb,est:st.est!==false,
+    cue:cueOf({tgt:tgt,swp:st.swp,mb:st.mb}),chg:ready?1:1-st.mb/MBMAX};
+}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+function arcP(cx,cy,r,a0,a1){
+  var x0=cx+r*Math.cos(a0*PI),y0=cy+r*Math.sin(a0*PI),x1=cx+r*Math.cos(a1*PI),y1=cy+r*Math.sin(a1*PI);
+  return 'M'+x0.toFixed(2)+','+y0.toFixed(2)+' A'+r+','+r+' 0 '+((a1-a0)>180?1:0)+' 1 '+x1.toFixed(2)+','+y1.toFixed(2);
+}
+function arcS(cx,cy,r,a0,a1,col,op,w,glow,dash){
+  return '<path d="'+arcP(cx,cy,r,a0,a1)+'" fill="none" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="'+w+'"'+(dash?' stroke-dasharray="'+dash+'"':'')+(glow?' filter="url(#gls)"':'')+'/>';
+}
+function circ(cx,cy,r,fill,stroke,sw,op,glow){
+  return '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="'+(fill||'none')+'"'+(stroke?' stroke="'+stroke+'" stroke-width="'+sw+'"':'')+(op!=null?' opacity="'+op+'"':'')+(glow?' filter="url(#gls)"':'')+'/>';
+}
+function pul(c){return '<g class="pl">'+c+'</g>';}
+function seconds(d,x,y,size,col,anchor){
+  var o='';
+  if(d.has){
+    var s=d.swp+'s';
+    if(d.est)o+=txt(x-(anchor==='end'?s.length*size*.6+3:0),y,'~',Math.round(size*.6),C.muted,{a:anchor==='end'?'end':'start'});
+    o+=txt(x,y,s,size,col,{a:anchor||'start'});
+  }else o+=txt(x,y,'--',size,C.muted,{a:anchor||'start',op:.7});
+  return o;
+}
+function mbText(d,x,y,size){
+  if(d.ready)return txt(x,y,'READY',size-1,C.cyan,{a:'end'});
+  return txt(x,y,(d.est?'~':'')+d.mb+'s',size,C.white,{a:'end'});
+}
 
-/* v = 'A' steady pill under the name, 'B' the cue word takes the name slot at 18 px.
-   y0 is the area top (500 upper, 632 lower). 190 x 114, x = 1220, w = 188, exactly the v7 sealModule frame. */
-function priestModule(y0,st,v,an){
-  var o='',x=1220,w=188,col=SPW,i,note=function(n,cx,cy){if(an)an.push([n,cx,cy]);};
-  var tgt=st.tgt!==false,has=tgt&&st.swp>0,miss=tgt&&st.swp<=0,band=has&&st.swp<=BANDS;
-  var cue=cueOf({tgt:tgt,swp:st.swp,mb:st.mb}),ccol=cue?cueCol(cue):C.muted,fc=band?C.amber:col;
-  var est=st.est!==false;
-  var tileStroke=has?col:(miss?C.amber:mix(C.muted,'#ffffff',.25));
-
-  /* row 1: SW:P tile, name, cue, the time left */
-  if(has){
-    o+='<polygon points="'+ch(x,y0+6,28,28,5)+'" fill="'+mix(C.bg,col,.3)+'"/><polygon points="'+ch(x,y0+6,28,28,5)+'" fill="none" stroke="'+col+'" stroke-width="1.4" filter="url(#gls)"/>';
-    o+=txt(x+14,y0+25,'SP',12,C.white,{a:'middle'});
-  }else{
-    o+='<polygon points="'+ch(x,y0+6,28,28,5)+'" fill="rgba(13,6,32,.7)" stroke="'+tileStroke+'" stroke-opacity="'+(miss?.95:.8)+'" stroke-width="1.4"'+(miss?' filter="url(#gls)"':'')+'/>';
-    o+=txt(x+14,y0+25,'SP',12,miss?C.amber:mix(C.muted,'#ffffff',.25),{a:'middle',op:.9});
-  }
-  note(1,1203,y0+20);
-  if(v==='A'){
-    o+=txt(x+36,y0+19,'SHADOW PAIN',12,has?C.white:C.muted);
-    if(cue){
-      var pw=Math.round(16+cue.length*6.6+8),px=x+36,py=y0+22;
-      o+='<polygon points="'+ch(px,py,pw,15,5)+'" fill="'+(cue==='WAND'?'rgba(13,6,32,.95)':mix(C.bg,ccol,.2))+'" stroke="'+ccol+'" stroke-opacity="'+(cue==='WAND'?.7:1)+'" stroke-width="1.3"'+(cue==='WAND'?'':' filter="url(#gls)"')+'/>';
-      o+='<polygon points="'+(px+6)+','+(py+4)+' '+(px+11)+','+(py+7.5)+' '+(px+6)+','+(py+11)+'" fill="'+ccol+'"/>';
-      o+=txt(px+16,py+11,cue,11,ccol);
-      note(3,px+pw+10,py+8);
+/* =====================================================================
+   CONCEPT 1, THE VOID EYE. One area, 190 x 114. Radial.
+   The ring is Shadow Word: Pain as six tick segments (3 s each). The eyelid is Mind Blast: it opens as the cooldown
+   charges and snaps fully open, iris cyan, pupil a slit, spokes lit, at READY. The eye is the cue.
+   ===================================================================== */
+function eyeModule(y0,st,an){
+  var d=derive(st),o='',cx=1274,cy=y0+57,R=47,k,i,a=34;
+  var note=function(n,x,y){if(an)an.push([n,x,y]);};
+  var rc=d.band?C.amber:SPW;
+  /* ring: six tick segments, lit clockwise from 12 o'clock for swp/18 of the turn */
+  var L=-90+360*(d.has?d.swp/MAXS:0);
+  for(k=0;k<6;k++){
+    var a0=-90+60*k+3.5,a1=-90+60*(k+1)-3.5;
+    if(d.miss){
+      o+=arcS(cx,cy,R,a0,a1,C.amber,k===0?.55:.0,7);
+      o+=arcS(cx,cy,R,a0,a1,C.amber,k===0?.95:.55,1.4);
     }else{
-      o+=txt(x+36,y0+31,'NO TARGET',10,C.muted);
+      o+=arcS(cx,cy,R,a0,a1,(k===0&&d.tgt)?C.amber:SPW,(k===0&&d.tgt)?.3:.15,7);
     }
-  }else{
-    var big=cue||'NO TARGET';
-    o+=txt(x+36,y0+22,big,18,cue?ccol:C.muted,{op:cue?1:.7});
-    o+=txt(x+36,y0+33,!tgt?'SHADOW PAIN':(miss?'NOT ON TARGET':(band?'REAPPLY':'SHADOW PAIN')),10,band||miss?C.amber:C.muted);
-    note(3,x+36+Math.round(big.length*10.8)+10,y0+14);
+    if(d.has&&L>a0){var lit=arcS(cx,cy,R,a0,Math.min(a1,L),rc,.95,7,true);o+=(d.band?pul(lit):lit);}
+    var ta=(-90+60*k)*PI;
+    o+=line(cx+(R+5.5)*Math.cos(ta),cy+(R+5.5)*Math.sin(ta),cx+(R+9)*Math.cos(ta),cy+(R+9)*Math.sin(ta),C.violet,.6,1);
   }
-  if(has){
-    if(est)o+=txt(x+w-(st.swp+'s').length*12-3,y0+27,'~',12,C.muted,{a:'end'});
-    o+=txt(x+w,y0+27,st.swp+'s',20,fc,{a:'end'});
-  }else{
-    o+=txt(x+w,y0+27,'--',20,C.muted,{a:'end',op:.7});
-  }
-  note(2,1416,y0+22);
+  if(d.has)o+=circ(cx+R*Math.cos(L*PI),cy+R*Math.sin(L*PI),2.6,'#ffffff',null,0,.95);
+  if(d.has)o+='<circle class="tk" cx="'+cx+'" cy="'+cy+'" r="42" fill="none" stroke="'+rc+'" stroke-width="1.4"/>';
+  /* ready: twelve spokes inside the ring */
+  var ic=d.ready?C.cyan:(d.cue==='SW:P'?C.amber:(d.tgt?SPW:mix(C.muted,'#ffffff',.2)));
+  if(d.ready){o+=circ(cx,cy,34,C.cyan,null,0,.07);var sp='';for(i=0;i<12;i++){var sa=(i*30+15)*PI;sp+=line(cx+36*Math.cos(sa),cy+36*Math.sin(sa),cx+41.5*Math.cos(sa),cy+41.5*Math.sin(sa),C.cyan,.9,1.6);}o+=pul(sp);}
+  /* the lids: openness is the Mind Blast charge */
+  var hu=1.5+d.chg*21,hl=1+d.chg*12;
+  var ap='M'+(cx-a)+','+cy+' Q'+cx+','+(cy-2*hu)+' '+(cx+a)+','+cy+' Q'+cx+','+(cy+2*hl)+' '+(cx-a)+','+cy+'Z';
+  var id='eye'+(UID++);
+  o+='<clipPath id="'+id+'"><path d="'+ap+'"/></clipPath><path d="'+ap+'" fill="#06020f" fill-opacity=".95"/><g clip-path="url(#'+id+')">';
+  o+=circ(cx,cy,16,mix(C.bg,ic,.5));
+  for(i=0;i<14;i++){var ia=i*(360/14)*PI;o+=line(cx+7*Math.cos(ia),cy+7*Math.sin(ia),cx+15*Math.cos(ia),cy+15*Math.sin(ia),ic,.4,1);}
+  o+=circ(cx,cy,16,null,ic,1.6);
+  if(d.ready)o+='<ellipse cx="'+cx+'" cy="'+cy+'" rx="2.6" ry="12" fill="#03000a"/>'+circ(cx-5,cy-5,2.2,'#ffffff',null,0,.85);
+  else if(d.cue==='SW:P')o+=circ(cx,cy,9,'#03000a')+pul(circ(cx,cy,11.5,null,C.amber,1.2,.9));
+  else if(d.tgt)o+='<ellipse cx="'+cx+'" cy="'+cy+'" rx="5" ry="8" fill="#03000a"/>';
+  else o+=circ(cx,cy,4,'#03000a');
+  o+='</g><path d="'+ap+'" fill="none" stroke="'+ic+'" stroke-width="1.6" stroke-linejoin="round" filter="url(#gls)"/>';
+  note(1,1206,y0+22);note(2,1206,y0+57);note(3,1206,y0+92);
+  /* right column: the numbers, secondary to the picture */
+  var rx=1336,rw=72,fc=d.band?C.amber:C.white;
+  o+=txt(rx,y0+22,'PAIN',10,SPW,{op:.9});
+  o+=seconds(d,rx+rw,y0+44,20,fc,'end');
+  o+=line(rx,y0+56,rx+rw,y0+56,C.violet,.35,1);
+  o+=txt(rx,y0+72,'BLAST',10,C.cyan,{op:d.ready?.95:.6});
+  o+=mbText(d,rx+rw,y0+93,16);
+  note(4,1418,y0+36);note(5,1418,y0+86);
+  return o;
+}
 
-  /* row 2: drain bar, 0 to 18 s left to right, amber REAPPLY band on the 0 to 3 s end, one tick mark per DoT tick */
-  var by=y0+44,bh=12,bw=w*(MAXS/MAXS),bx=x,bg=tgt?1:.5;
-  o+='<g opacity="'+bg+'">';
-  o+=rect(bx,by,bw,bh,'#0a0416',.9);
-  o+=rect(bx,by,bw*BANDS/MAXS,bh,C.amber,miss?.5:.28);
-  if(has){
-    o+=rect(bx,by,bw*st.swp/MAXS,bh,fc,.9);
-    o+=rect(bx+bw*st.swp/MAXS-2,by-2,2,bh+4,'#ffffff',.95);
+/* =====================================================================
+   CONCEPT 2, THE LANCET WINDOW. Both areas, 164 x 260. Vertical, architectural, holy glass with shadow in it.
+   Six panes are Shadow Word: Pain, one per tick, draining from the top, the lowest pane is the REAPPLY pane.
+   The rose at the apex is Mind Blast: eight petals, one per second of cooldown; ready, it blazes and light falls through the panes.
+   ===================================================================== */
+function windowModule(y0,st,an){
+  var d=derive(st),o='',cx=1321,i,m,j;
+  var note=function(n,x,y){if(an)an.push([n,x,y]);};
+  var oc=d.ready?C.cyan:(d.cue==='SW:P'?C.amber:SPW);
+  var pane=function(m){return {yb:y0+248-m*24.8};};
+  if(d.ready){
+    var g='win'+(UID++);
+    o+='<linearGradient id="'+g+'" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="'+C.cyan+'" stop-opacity=".30"/><stop offset="1" stop-color="'+C.cyan+'" stop-opacity=".02"/></linearGradient>';
+    o+='<polygon points="'+(cx-12)+','+(y0+90)+' '+(cx+12)+','+(y0+90)+' '+(cx+44)+','+(y0+250)+' '+(cx-44)+','+(y0+250)+'" fill="url(#'+g+')"/>';
+    o+=line(cx-8,y0+90,cx-30,y0+250,C.cyan,.35,1)+line(cx+8,y0+90,cx+30,y0+250,C.cyan,.35,1)+line(cx,y0+90,cx,y0+250,C.cyan,.25,1);
   }
-  o+='<rect x="'+bx+'" y="'+by+'" width="'+bw+'" height="'+bh+'" fill="none" stroke="'+(miss?C.amber:col)+'" stroke-opacity="'+(miss?.9:.6)+'"/>';
-  o+=line(bx+bw*BANDS/MAXS,by-3,bx+bw*BANDS/MAXS,by+bh+3,C.amber,.85,1,'3 2');
-  for(i=0;i<=6;i++){var tx=bx+bw*i/6;o+=line(tx,by+bh,tx,by+bh+(i%3===0?5:3),C.violet,.7,1);}
-  [0,9,18].forEach(function(vv){o+=txt(bx+bw*vv/MAXS,by+bh+16,String(vv),10,C.fg,{a:vv===0?'start':vv===18?'end':'middle',op:.85});});
-  o+=txt(bx+bw*BANDS/MAXS+30,by+bh+16,'REAPPLY',10,C.amber,{a:'middle',op:.9});
-  o+='</g>';
-  note(4,1203,y0+50);
+  var sy=y0+88,R2=92,apx=sy-R2*Math.sin(Math.acos(46/R2));
+  var wp='M'+(cx-46)+','+(y0+254)+' L'+(cx-46)+','+sy+' A'+R2+','+R2+' 0 0 1 '+cx+','+apx.toFixed(1)+' A'+R2+','+R2+' 0 0 1 '+(cx+46)+','+sy+' L'+(cx+46)+','+(y0+254)+' L'+(cx+42)+','+(y0+258)+' L'+(cx-42)+','+(y0+258)+' Z';
+  o+='<path d="'+wp+'" fill="rgba(13,6,32,.7)"/><path d="'+wp+'" fill="none" stroke="'+oc+'" stroke-width="1.5" stroke-linejoin="round" filter="url(#gls)"/>';
+  /* rose, eight petals */
+  var rcx=cx,rcy=y0+62,ch8=d.chg*8;
+  for(j=0;j<8;j++){
+    var f=clamp(ch8-j,0,1),a0=-90+45*j+2.5,a1=-90+45*(j+1)-2.5;
+    o+=arcS(rcx,rcy,14,a0,a1,d.ready?C.cyan:MBC,f>=1?.95:(f>0?.25+.5*f:.12),14,f>=1&&d.ready);
+  }
+  o+=circ(rcx,rcy,22.5,null,oc,1,.55)+circ(rcx,rcy,5,d.ready?'#ffffff':mix(C.bg,MBC,.5),d.ready?C.cyan:MBC,1.2,null,d.ready);
+  note(1,1206,y0+62);
+  /* six panes, bottom pane m=0 is the last 3 s */
+  for(m=5;m>=0;m--){
+    var yb=pane(m).yb,fr=d.has?clamp((d.swp-3*m)/3,0,1):0,pc=(m===0&&d.band)?C.amber:SPW,x=cx-36,w=72,h=22;
+    o+='<polygon points="'+ch(x,yb-h,w,h,4)+'" fill="'+mix(C.bg,SPW,.14)+'"/>';
+    if(m===0)o+='<polygon points="'+ch(x,yb-h,w,h,4)+'" fill="'+C.amber+'" fill-opacity="'+(d.miss?.4:.22)+'"/>';
+    if(fr>=.999)o+='<polygon points="'+ch(x,yb-h,w,h,4)+'" fill="'+pc+'" fill-opacity=".85"/>';
+    else if(fr>0)o+=rect(x+1,yb-h*fr,w-2,h*fr-.5,pc,.85);
+    o+=line(cx,yb-h+1,cx,yb-1,C.bg,.7,1.2);
+    o+='<polygon points="'+ch(x,yb-h,w,h,4)+'" fill="none" stroke="'+((m===0&&d.miss)?C.amber:SPW)+'" stroke-opacity="'+((m===0&&d.miss)?.95:.45)+'" stroke-width="1"/>';
+  }
+  if(d.miss)o+=pul('<polygon points="'+ch(cx-36,y0+226,72,22,4)+'" fill="none" stroke="'+C.amber+'" stroke-width="2" filter="url(#gls)"/>');
+  note(2,1206,y0+170);
+  /* the seconds ride the draining edge on the left */
+  if(d.has){
+    var mm=Math.min(5,Math.ceil(d.swp/3)-1),yT=pane(mm).yb-22*clamp((d.swp-3*mm)/3,0,1);
+    o+=line(cx-46,yT,cx-54,yT,d.band?C.amber:C.white,.95,1.4);
+    o+=seconds(d,cx-58,yT+6,18,d.band?C.amber:C.white,'end');
+  }else o+=txt(cx-58,y0+244,'--',18,C.muted,{a:'end',op:.7});
+  note(3,1206,y0+238);
+  /* Mind Blast readout beside the rose */
+  o+=txt(cx+52,y0+52,'BLAST',10,C.cyan,{op:d.ready?.95:.6});
+  o+=txt(cx+52,y0+72,d.ready?'READY':(d.est?'~':'')+d.mb+'s',d.ready?12:15,d.ready?C.cyan:C.white);
+  note(4,1418,y0+66);
+  o+=txt(1221,y0+256,'PAIN',10,SPW,{op:.9});
+  return o;
+}
 
-  /* row 3: the Mind Blast lane, a chip and a 0 to 8 s cooldown drain; ready lights cyan */
-  var jy=y0+90,ready=st.mb<=0,lc=ready?C.cyan:MBC,lw=w-72;
-  o+='<polygon points="'+ch(x,jy,20,20,4)+'" fill="'+mix(C.bg,lc,ready?.25:.4)+'" stroke="'+lc+'" stroke-width="'+(ready?1.4:1.2)+'"'+(ready?' filter="url(#gls)"':'')+'/>';
-  o+='<text x="'+(x+10)+'" y="'+(jy+14)+'" font-size="10" fill="'+C.white+'" text-anchor="middle">MB</text>';
-  o+=rect(x+30,jy+7,lw,5,lc,.2);
-  if(ready){
-    o+='<rect x="'+(x+30)+'" y="'+(jy+7)+'" width="'+lw+'" height="5" fill="'+C.cyan+'" filter="url(#gls)"/>';
-    o+=txt(x+w,jy+15,'READY',12,C.cyan,{a:'end'});
-  }else{
-    o+=rect(x+30,jy+7,lw*st.mb/MBMAX,5,lc);
-    o+=txt(x+w,jy+15,(est?'~':'')+st.mb+'s',13,C.white,{a:'end'});
+/* =====================================================================
+   CONCEPT 3, THE ROSARY. One area, 190 x 114. A necklace.
+   Six beads on a thread are Shadow Word: Pain, one per tick; beads go dark left to right, the last bead is the REAPPLY bead.
+   The pendant is Mind Blast: a crystal that fills from the bottom as the cooldown charges and flares with sparks at READY.
+   ===================================================================== */
+function rosaryModule(y0,st,an){
+  var d=derive(st),o='',k,i;
+  var note=function(n,x,y){if(an)an.push([n,x,y]);};
+  var CX=1314,YA=y0+12,SAG=40,U=88;
+  var py=function(x){var u=(x-CX)/U;return YA+SAG*(1-u*u);};
+  var thr='';
+  for(i=0;i<=44;i++){var xx=CX-U+i*(2*U/44);thr+=(i?' ':'')+xx.toFixed(1)+','+py(xx).toFixed(1);}
+  o+='<polyline points="'+thr+'" fill="none" stroke="'+SPW+'" stroke-opacity="'+(d.tgt?.55:.25)+'" stroke-width="1.5"/>';
+  o+=circ(CX-U,YA,3,C.bg,SPW,1.2)+circ(CX+U,YA,3,C.bg,SPW,1.2);
+  var cy2=py(CX);
+  /* beads, left to right; bead k carries the time slice [3(5-k), 3(6-k)] */
+  for(k=0;k<6;k++){
+    var bx=CX+(k-2.5)*29,by=py(bx),fr=d.has?clamp((d.swp-3*(5-k))/3,0,1):0,last=(k===5),bc=(last&&d.band)?C.amber:SPW,r=8.5;
+    var id='bd'+(UID++);
+    o+=circ(bx,by,r,'#0a0416',null,0,.95);
+    if(last)o+=circ(bx,by,r,C.amber,null,0,d.miss?.4:.22);
+    if(fr>0){
+      o+='<clipPath id="'+id+'"><rect x="'+(bx-r)+'" y="'+(by+r-2*r*fr)+'" width="'+(2*r)+'" height="'+(2*r*fr)+'"/></clipPath>';
+      o+='<g clip-path="url(#'+id+')">'+circ(bx,by,r,bc,null,0,.92,true)+'</g>';
+      o+=circ(bx-2.6,by-2.8,1.8,'#ffffff',null,0,.5*fr);
+    }
+    o+=circ(bx,by,r,null,(last&&d.miss)?C.amber:SPW,1.2,(last&&d.miss)?1:(fr>0?.9:.5));
+    if(last&&(d.band||d.miss))o+=circ(bx,by,r+5,null,C.amber,1.2,.85,true);
   }
-  note(5,1203,y0+100);note(6,1416,y0+100);
+  note(1,1203,y0+30);
+  /* the stem and the pendant crystal */
+  o+=line(CX,cy2,CX,y0+64,SPW,.55,1.5);
+  var px=CX,pc=y0+86,hw=13,hh=22,pts=px+','+(pc-hh)+' '+(px+hw)+','+pc+' '+px+','+(pc+hh)+' '+(px-hw)+','+pc;
+  var cid='pd'+(UID++),lvl=pc+hh-2*hh*d.chg;
+  var lc=d.ready?C.cyan:MBC;
+  o+='<polygon points="'+pts+'" fill="#0a0416" fill-opacity=".95"/>';
+  o+='<clipPath id="'+cid+'"><rect x="'+(px-hw)+'" y="'+lvl+'" width="'+(2*hw)+'" height="'+(pc+hh-lvl+.5)+'"/></clipPath>';
+  o+='<g clip-path="url(#'+cid+')"><polygon points="'+pts+'" fill="'+lc+'" fill-opacity="'+(d.ready?.95:.7)+'"'+(d.ready?' filter="url(#gls)"':'')+'/></g>';
+  o+=line(px,pc-hh,px,pc+hh,'#ffffff',.2,1)+line(px-hw,pc,px+hw,pc,'#ffffff',.18,1);
+  o+='<polygon points="'+pts+'" fill="none" stroke="'+lc+'" stroke-width="1.5" filter="url(#gls)"/>';
+  if(d.ready){
+    [[-22,-14],[22,-14],[-26,8],[26,8],[0,-31]].forEach(function(s){o+=line(px+s[0]*.7,pc+s[1]*.7,px+s[0],pc+s[1],C.cyan,.9,1.5);});
+    o+=circ(px,pc,30,null,C.cyan,1,.3);
+  }
+  note(2,1203,y0+86);
+  /* numbers */
+  o+=seconds(d,CX+14,y0+34,20,d.band?C.amber:C.white,'middle');
+  note(3,1418,y0+30);
+  o+=txt(CX-24,y0+84,'BLAST',10,C.cyan,{a:'end',op:d.ready?.95:.6});
+  o+=mbText(d,CX+60,y0+96,16);
+  note(4,1418,y0+92);
   return o;
 }
 
 /* ---------- the seven states of one pull ---------- */
 var ST=[
-  {t:'FRESH PULL',d:'Mind Blast ready, no SW:P yet. The word says MIND BLAST.',s:{swp:0,mb:0}},
-  {t:'AFTER MIND BLAST',d:'Blast is cooling, SW:P not down. The word flips to SW:P, call in amber.',s:{swp:0,mb:8}},
-  {t:'WAND PHASE',d:'SW:P 12 s, Mind Blast 5 s. Both handled, the word says WAND.',s:{swp:12,mb:5}},
-  {t:'REAPPLY BAND',d:'SW:P under 3 s: fill, time and bar go amber. Press SW:P.',s:{swp:2,mb:3}},
-  {t:'MIND BLAST READY',d:'Off cooldown mid wand. The lane lights cyan, Blast comes first.',s:{swp:8,mb:0}},
-  {t:'TARGET SWITCHED',d:'The new mob has no SW:P. Gauge reads empty, amber call.',s:{swp:0,mb:6}},
-  {t:'NO TARGET',d:'Gauge dims, no cue. The lane keeps counting the cooldown.',s:{tgt:false,swp:0,mb:4}}
+  {t:'FRESH PULL',d:'Mind Blast ready, no SW:P yet. Cue: blast.',s:{swp:0,mb:0}},
+  {t:'AFTER MIND BLAST',d:'Blast is cooling, SW:P not down. Cue: Pain.',s:{swp:0,mb:8}},
+  {t:'WAND PHASE',d:'SW:P 12 s, Mind Blast 5 s. Both handled. Cue: wand.',s:{swp:12,mb:5}},
+  {t:'REAPPLY BAND',d:'SW:P under 3 s. Cue: Pain, in amber.',s:{swp:2,mb:3}},
+  {t:'MIND BLAST READY',d:'Off cooldown mid wand. Cue: blast.',s:{swp:8,mb:0}},
+  {t:'TARGET SWITCHED',d:'The new mob has no SW:P. Cue: Pain.',s:{swp:0,mb:6}},
+  {t:'NO TARGET',d:'No cue. The blast charge keeps counting.',s:{tgt:false,swp:0,mb:4}}
 ];
-var ZOOM={swp:2,mb:0};   /* priority demo: SW:P in the band AND Mind Blast ready, the word says MIND BLAST */
+var CONCEPTS={
+  eye:{id:'1',name:'THE VOID EYE',fn:eyeModule,both:false,w:202,h:128,vy:632,
+    metaphor:'A shadow orb that feeds on your Pain. The ring is Shadow Word: Pain as six tick segments. The eyelid is Mind Blast: it opens as the cooldown charges.',
+    cue:'Cue, in the eye\'s own language: <b>wide cyan stare, slit pupil, spokes lit</b> = Mind Blast. <b>Amber iris, dilated pupil, empty or amber ring</b> = Shadow Word: Pain. <b>Half lidded violet eye, small pupil</b> = wand.',
+    form:'One area, 190 x 114, radial.'},
+  window:{id:'2',name:'THE LANCET WINDOW',fn:windowModule,both:true,w:202,h:262,vy:500,
+    metaphor:'Holy glass with shadow in it. Six panes are Shadow Word: Pain, one per tick. The rose at the apex is Mind Blast, eight petals for eight seconds.',
+    cue:'Cue: <b>the rose blazes and light falls down the glass</b> = Mind Blast. <b>The lowest pane glows amber and pulses, lit or empty</b> = Shadow Word: Pain. <b>Calm violet glass, rose dim</b> = wand.',
+    form:'Both areas, 164 x 260, vertical.'},
+  rosary:{id:'3',name:'THE ROSARY',fn:rosaryModule,both:false,w:202,h:128,vy:632,
+    metaphor:'A necklace across the area. Six beads on a thread are Shadow Word: Pain, one per tick. The pendant crystal is Mind Blast and fills from the bottom.',
+    cue:'Cue: <b>the pendant flares with sparks</b> = Mind Blast. <b>The last bead burns amber with a halo, or all beads hollow</b> = Shadow Word: Pain. <b>Beads steady, pendant dim</b> = wand.',
+    form:'One area, 190 x 114, an arc.'}
+};
 
-/* ---------- scene builders ---------- */
-function sceneSvg(st,v,area,vb){
-  var o=base();
-  var y0=area==='upper'?500:632;
+/* ---------- builders ---------- */
+function sceneSvg(C0,st,area,vb){
+  var o=base(),y0;
   o+=slotDivider(1410);
-  var mod=priestModule(y0,st,v,null);
-  if(area==='upper'){o+=mod;o+=dotsH(PRDEB,true);}else{o+=dotsH(PRDEB,false);o+=mod;}
+  if(C0.both){o+=C0.fn(500,st,null);}
+  else{
+    y0=area==='upper'?500:632;
+    var mod=C0.fn(y0,st,null);
+    if(area==='upper'){o+=mod;o+=dotsH(PRDEB,true);}else{o+=dotsH(PRDEB,false);o+=mod;}
+  }
   o+=tags();
   if(vb.w===1000)o+=buffs();
   return '<svg width="'+vb.w+'" height="450" viewBox="'+vb.x+' 380 '+vb.w+' 450" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg>';
 }
-function scene(st,v,area,label){
+function scene(C0,st,area,label){
   var full=area==='lower';
-  return '<div class="scene'+(full?'':' crop')+'"><div class="state">'+label+'</div>'+sceneSvg(st,v,area,full?{x:480,w:1000}:{x:1040,w:440})+'</div>';
+  return '<div class="scene'+(full?'':' crop')+'"><div class="state">'+label+'</div>'+sceneSvg(C0,st,area,full?{x:480,w:1000}:{x:1040,w:440})+'</div>';
 }
-function zoom(st,v){
-  var an=[],y0=632,m=priestModule(y0,st,v,an),o='';
-  o+='<rect x="1194" y="'+(y0-6)+'" width="232" height="122" fill="#120a22"/>';
-  o+='<rect x="1213" y="'+y0+'" width="202" height="128" fill="rgba(168,85,247,.04)" stroke="'+C.violet+'" stroke-opacity=".5" stroke-dasharray="6 4"/>';
+function zoom(C0,st){
+  var an=[],y0=C0.both?500:632,m=C0.fn(y0,st,an),o='',hgt=C0.both?262:128;
+  o+='<rect x="1194" y="'+(y0-6)+'" width="232" height="'+(hgt+6)+'" fill="#120a22"/>';
+  o+='<rect x="1213" y="'+y0+'" width="202" height="'+(C0.both?260:128)+'" fill="rgba(168,85,247,.04)" stroke="'+C.violet+'" stroke-opacity=".5" stroke-dasharray="6 4"/>';
   o+=m;
   an.forEach(function(a){
     o+='<circle cx="'+a[1]+'" cy="'+a[2]+'" r="6" fill="#0d0620" stroke="'+C.cyan+'" stroke-width="1.2"/><text x="'+a[1]+'" y="'+(a[2]+3.4)+'" font-size="9" fill="'+C.cyan+'" text-anchor="middle">'+a[0]+'</text>';
   });
-  return '<div class="zoom"><svg width="696" height="366" viewBox="1194 '+(y0-6)+' 232 122" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg></div>';
+  var sc=C0.both?2.2:3;
+  return '<div class="zoom" style="width:'+Math.round(232*sc)+'px"><svg width="'+Math.round(232*sc)+'" height="'+Math.round((hgt+6)*sc)+'" viewBox="1194 '+(y0-6)+' 232 '+(hgt+6)+'" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg></div>';
 }
-function strip(v,long){
+function strip(C0,idx,long){
   var h='<div class="strip">';
-  ST.forEach(function(S,i){
-    var o='<rect x="1213" y="632" width="202" height="128" fill="#120a22"/>'+priestModule(632,S.s,v,null);
-    h+='<div class="tile"><svg width="202" height="128" viewBox="1213 632 202 128" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg><div class="tc"><b>'+(i+1)+'. '+S.t+'</b>'+(long?S.d:'')+'</div></div>';
+  idx.forEach(function(i){
+    var S=ST[i];
+    var o='<rect x="1213" y="'+C0.vy+'" width="202" height="'+C0.h+'" fill="#120a22"/>'+C0.fn(C0.vy,S.s,null);
+    h+='<div class="tile"><svg width="202" height="'+C0.h+'" viewBox="1213 '+C0.vy+' 202 '+C0.h+'" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg><div class="tc"><b>'+(i+1)+'. '+S.t+'</b>'+(long?S.d:'')+'</div></div>';
   });
   return h+'</div>';
 }
 
-/* ---------- data path table ---------- */
-var ROWS=[
-  [1,'SW:P tile and name','Static spell icon. The tile lights when the ledger has SW:P on this target, dims when it does not.','der','DERIVED'],
-  [2,'Seconds left (the large number)','FS.TargetDebuffs entry for the current target GUID: out of combat the aura snapshot (expires minus GetTime, exact). In combat the own cast ledger, started by UNIT_SPELLCAST_SUCCEEDED for Shadow Word: Pain (ids 589, 10894), 18 s from HudSpells. A resisted or missed cast still counts, so it can over-count; the next readable snapshot corrects it. The ~ marks the estimate.','est','ESTIMATE IN COMBAT'],
-  [3,'The cue word','No new read. A pure function of items 2 and 6: MIND BLAST when the lane is ready, else SW:P when item 2 is empty or 3 s or less, else WAND. WAND is the fallback, not a detected wand state.','der','DERIVED'],
-  [4,'Drain bar, REAPPLY band, ticks','Same number as item 2, drawn. Scale max is the learned duration (18 s base; the last snapshot of the spell overrides it if a talent stretches it). Target auras are secret in combat, so nothing here reads the aura. Switching targets swaps to that GUID\'s ledger entry (kept 30 s), so tabbing back restores the old gauge.','est','ESTIMATE IN COMBAT'],
-  [5,'Mind Blast chip and drain','Cooldown seconds are secret in combat, so the drain is a ledger estimate: 8 s from the UNIT_SPELLCAST_SUCCEEDED of Mind Blast (ids 8092, 10947). The 1.5 s cast delays the start of the cooldown, so the ledger starts it on success, not on press.','est','ESTIMATE IN COMBAT'],
-  [6,'READY (cyan)','Cooldown isActive via C_Spell.GetSpellCooldown, plain in combat (HudLogic CooldownState, with the 1.6 s global cooldown heuristic). This flips the lane lit, so item 5 can never stay stuck: the estimate re-syncs to the real flag every time.','ok','PLAIN IN COMBAT']
-];
-function table(){
+/* ---------- data path table (shared statements, per concept element names) ---------- */
+var DP={
+  pain:'FS.TargetDebuffs entry for the current target GUID. Out of combat the aura snapshot (exact). In combat the own cast ledger, started by UNIT_SPELLCAST_SUCCEEDED for Shadow Word: Pain (ids 589, 10894), 18 s from HudSpells. A resist or miss still counts, so it can over-count until the next readable snapshot corrects it. Switching targets swaps to that GUID\'s entry (kept 30 s).',
+  mbsec:'Cooldown seconds are secret in combat, so the charge is a ledger estimate: 8 s from the UNIT_SPELLCAST_SUCCEEDED of Mind Blast (ids 8092, 10947), started on cast success, not on press.',
+  ready:'Cooldown isActive via C_Spell.GetSpellCooldown, plain in combat (HudLogic CooldownState, with the 1.6 s global cooldown heuristic). Re-syncs the estimate to the real flag every time, so READY cannot get stuck.',
+  cue:'No new read. A pure function of the two above: Mind Blast ready beats Shadow Word: Pain missing or at 3 s or less beats wand. Wand is the fallback, not a detected wand state.'
+};
+var ROWS={
+  eye:[[1,'Outer ring, six segments','Shadow Word: Pain, 3 s per segment, drained clockwise from 12. Segment 1 is the REAPPLY band.',DP.pain,'est','ESTIMATE IN COMBAT'],
+       [2,'Eyelid opening','Mind Blast charge, 0 to 8 s. Fully open exactly when the lane is ready.',DP.mbsec+' '+DP.ready,'est','ESTIMATE, FLAG PLAIN'],
+       [3,'Iris, pupil, spokes','The cue.',DP.cue,'der','DERIVED'],
+       [4,'PAIN seconds','The same number as the ring.','Same ledger entry as item 1; the ~ marks it as an estimate in combat.','est','ESTIMATE IN COMBAT'],
+       [5,'BLAST READY / seconds','READY is the flag, the seconds are the estimate.','The flag is item 2\'s cooldown isActive (plain in combat); the seconds are item 2\'s ledger estimate.','ok','PLAIN IN COMBAT']],
+  window:[[1,'Rose, eight petals','Mind Blast, one petal per second of charge; blazing at ready.','Same paths as the Void Eye item 2: 8 s ledger estimate from the cast, READY from the plain cooldown flag.','est','ESTIMATE, FLAG PLAIN'],
+       [2,'Six panes','Shadow Word: Pain, one pane per tick, draining from the top. The lowest pane is the REAPPLY band.','Same ledger entry as the Void Eye item 1 (FS.TargetDebuffs, own cast ledger in combat, snapshot out of it).','est','ESTIMATE IN COMBAT'],
+       [3,'Seconds on the edge','Rides the draining edge of the glass.','Same number as item 2.','est','ESTIMATE IN COMBAT'],
+       [4,'BLAST readout','READY is the flag, the seconds are the estimate.','Same as item 1.','ok','PLAIN IN COMBAT']],
+  rosary:[[1,'Six beads','Shadow Word: Pain, one bead per tick, dark left to right. The last bead is the REAPPLY bead.',DP.pain,'est','ESTIMATE IN COMBAT'],
+       [2,'Pendant crystal','Mind Blast charge, filling from the bottom; flares at ready.',DP.mbsec+' '+DP.ready,'est','ESTIMATE, FLAG PLAIN'],
+       [3,'PAIN seconds','The same number as the beads.',DP.pain,'est','ESTIMATE IN COMBAT'],
+       [4,'BLAST readout','READY is the flag, the seconds are the estimate.',DP.ready,'ok','PLAIN IN COMBAT']]
+};
+function table(key){
   var h='<table class="dp"><tr><th></th><th>ELEMENT</th><th>SOURCE</th><th>DATA PATH</th></tr>';
-  ROWS.forEach(function(r){h+='<tr><td class="n">'+r[0]+'</td><td class="e">'+r[1]+'</td><td class="v"><span class="pill '+r[3]+'">'+r[4]+'</span></td><td class="s">'+r[2]+'</td></tr>';});
+  ROWS[key].forEach(function(r){h+='<tr><td class="n">'+r[0]+'</td><td class="e">'+r[1]+'<br><span class="mu2">'+r[2]+'</span></td><td class="v"><span class="pill '+r[4]+'">'+r[5]+'</span></td><td class="s">'+r[3]+'</td></tr>';});
   return h+'</table>';
 }
 
 /* ---------- the page ---------- */
 var html='';
-html+='<h2><i>A</i> PRIMARY, PAIN GAUGE + MIND BLAST LANE + PHASE CUE</h2>';
-html+='<div class="lede">Left, the default seat (lower area) in the wand phase: SW:P 12 s, Mind Blast 5 s, the word says <b>WAND</b>. Right, the same module in the upper area (target side crop) the moment Mind Blast comes off cooldown mid wand: the word says <b>MIND BLAST</b>. The other area holds Target Debuffs, which no longer needs a Shadow Word: Pain row because this gauge owns it.</div>';
-html+='<div class="row">'+scene(ST[2].s,'A','lower','<b>A</b>, PRIEST CLASS MODULE, LOWER AREA, WAND PHASE')+scene(ST[4].s,'A','upper','<b>A</b>, UPPER AREA, MIND BLAST READY')+'</div>';
-html+='<div class="row">'+zoom(ZOOM,'A')+'<div class="panel" style="flex:1;min-width:0"><h3>Data path per element, 3x view at left</h3>'+table()+'<p class="mu" style="margin-top:8px">The 3x view shows the priority rule: SW:P is inside the REAPPLY band (amber gauge) and Mind Blast is also ready, so the word says MIND BLAST. Mana is secret and is not shown.</p></div></div>';
-html+='<h2><i>//</i> A, THE SEVEN STATES OF ONE PULL</h2>';
-html+='<div class="lede">Each tile is the module alone in a 202 x 128 area. Dashed area outlines never draw in game. The ~ in front of a number marks a combat ledger estimate; READY is the one exact flag.</div>';
-html+=strip('A',true);
+html+='<h2><i>//</i> THREE CONCEPTS, THREE FORM FACTORS</h2>';
+html+='<div class="lede">Round 1 was a list of timers; the first v2 pass copied the Seal template. Both rejected. These three share only the content: <b>Shadow Word: Pain 18 s on the target, Mind Blast on an 8 s cooldown, wand fills the rest.</b> Each says the cue (blast, then Pain, then wand) in its own picture, not in a word. Strips show the module alone: 1 fresh pull, 2 after Mind Blast, 3 wand phase, 4 reapply band, 5 Mind Blast ready mid wand, 6 target switched. A ~ marks a combat ledger estimate.</div>';
+html+='<div class="verdict"><b>Verdict.</b> <span class="drop">Dropped: 3, The Rosary.</span> <span class="keep">Pushed further: 1, The Void Eye</span> (own section below, in situ, with data paths). <span class="keep">Kept as the tall option: 2, The Lancet Window.</span></div>';
+var CRIT={
+ eye:'<b>Would a player say that is cool?</b> Yes, it is the only one that looks alive. A wide cyan stare with lit spokes and a slit pupil is a different image from the half lidded violet eye, and it reads in peripheral vision before any number does. The ring gives the Pain time as six tick segments, so you count segments, not digits. <b>Obviously a Priest thing?</b> It reads as shadow and mind (void, Mind Blast), not holy, which is right for this Shadow-light Priest; a Holy or Discipline module would want another motif. <b>Weak spots:</b> the lid means two things (charging, and shut because Pain is missing); the ring needs one glance to learn; at 102 px the lids are small, so the cue also rides on colour and pupil shape. <span class="keep">KEEP, and push.</span>',
+ window:'<b>Would a player say that is cool?</b> Yes, at READY: the rose blazes and light falls down the glass. That is the best single moment of the three. But it spends both areas, so Target Debuffs has nowhere to live, and the six panes read as a gauge once you know them. <b>Obviously a Priest thing?</b> The most obviously Priest of the three: a church window with shadow in the glass is the holy and shadow duality in one picture. <b>Weak spots:</b> big, the rose petals are 7 px wide, and the cue is split between the top (rose) and the bottom (amber pane). <span class="keep">KEEP as the tall option.</span>',
+ rosary:'<b>Would a player say that is cool?</b> Cute, not cool. At 17 px a bead is too small to carry a state, and the curve fights the HUD\'s cut corner geometry. <b>Obviously a Priest thing?</b> Yes, maybe too literally, and it reads as jewellery. <b>Weak spots:</b> the cue lives in two places, the last bead at the top right and the pendant at the bottom, so the eye has to travel; there is no single place to look. <span class="drop">DROP.</span>'
+};
+['eye','window','rosary'].forEach(function(key){
+  var C0=CONCEPTS[key],idx=key==='rosary'?[0,2,3,4]:[0,1,2,3,4,5];
+  html+='<div class="cbox'+(key==='rosary'?' dropped':'')+'"><div class="chead"><span class="cid">'+C0.id+'</span><span class="cname">'+C0.name+'</span><span class="cform">'+C0.form+'</span>'+(key==='rosary'?'<span class="stamp">DROPPED</span>':'')+'</div>';
+  html+='<div class="cmeta"><p>'+C0.metaphor+'</p><p>'+C0.cue+'</p></div>';
+  html+=strip(C0,idx,false);
+  html+='<div class="crit">'+CRIT[key]+'</div></div>';
+});
 
-html+='<h2><i>B</i> ALTERNATIVE, THE CUE IS THE HEADLINE</h2>';
-html+='<div class="lede">Same gauge, same lane, same data. The only change: the cue word takes the name slot at 18 px, and the module name drops to a 10 px caption (REAPPLY, NOT ON TARGET). Louder at a glance, but the large word and the large seconds number now compete for the same row, and the SHADOW PAIN label is no longer the first thing the eye reads.</div>';
-html+='<div class="row">'+scene(ST[4].s,'B','upper','<b>B</b>, UPPER AREA, MIND BLAST READY')+zoom(ST[3].s,'B')+'</div>';
-html+=strip('B',false);
-
-html+='<h2><i>//</i> NOTES</h2><div class="notes">';
-html+='<div class="panel" style="flex:1"><h3>REAPPLY band: the last 3 s</h3><ul>'+
- '<li><b>Three seconds is one DoT tick.</b> Shadow Word: Pain ticks every 3 s, and the scale has a tick mark every 3 s, so the band is exactly the last tick. Recasting inside it loses at most that one tick; recasting earlier throws away ticks you already paid for.</li>'+
- '<li><b>It is wide enough to act in.</b> A Mind Blast started at 3.5 s lands at 2 s, and SW:P is instant, so the band fits one full Blast and still leaves a recast before the DoT drops.</li>'+
- '<li><b>It hides the ledger error.</b> A combat estimate can be a second off. A 3 s band is large enough that the amber call arrives early, not late.</li>'+
- '<li>It matches the Seal module\'s 3 s RESEAL band, so the two class modules share one grammar.</li></ul></div>';
-html+='<div class="panel" style="flex:1"><h3>The cue and why it is one word</h3><ul>'+
- '<li><b>Priority:</b> MIND BLAST (ready) beats SW:P (missing or in the band) beats WAND. It follows how this Priest plays: Blast on cooldown, Pain up, wand everything else.</li>'+
- '<li><b>No third timer.</b> The word sits where the eye already is, next to the gauge name. Colour matches the lane (cyan) and the band (amber); WAND is muted because nothing needs doing.</li>'+
- '<li><b>A or B.</b> A keeps the Seal layout exactly and adds a pill. B is for a player who wants to read one huge word and ignore the rest. Recommendation: A.</li></ul></div>';
+/* ---------- 1, the Void Eye, developed ---------- */
+var E=CONCEPTS.eye;
+html+='<h2><i>1</i> THE VOID EYE, DEVELOPED</h2>';
+html+='<div class="lede">Left, the default seat (lower area) in the wand phase: Pain 12 s, the eye half lidded and violet, the ring three quarters full. Right, the upper area the moment Mind Blast comes off cooldown mid wand: the eye snaps wide open and turns cyan. The other area holds Target Debuffs, which no longer needs a Shadow Word: Pain row because the ring owns it.</div>';
+html+='<div class="row">'+scene(E,ST[2].s,'lower','<b>1</b>, VOID EYE, LOWER AREA, WAND PHASE')+scene(E,ST[4].s,'upper','<b>1</b>, UPPER AREA, MIND BLAST READY')+'</div>';
+html+='<div class="row">'+zoom(E,{swp:2,mb:0})+'<div class="panel" style="flex:1;min-width:0"><h3>Data path per element, 3x view at left</h3>'+table('eye')+'<p class="mu" style="margin-top:8px">The 3x view is the priority demo: Pain is inside the REAPPLY band (the first ring segment is amber) while Mind Blast is also ready, so the eye is open and cyan. Read it as: blast first, Pain next. Mana is secret and is not shown.</p></div></div>';
+html+='<h2><i>//</i> THE SEVEN STATES OF ONE PULL</h2>';
+html+='<div class="lede">Each tile is the module alone in a 202 x 128 area. Dashed area outlines never draw in game.</div>';
+html+=strip(E,[0,1,2,3,4,5,6],true);
+html+='<div class="notes">';
+html+='<div class="panel" style="flex:1"><h3>How to read the eye</h3><ul>'+
+ '<li><b>Mind Blast:</b> eye wide open, iris cyan, pupil a slit, twelve spokes lit and pulsing.</li>'+
+ '<li><b>Shadow Word: Pain:</b> iris amber, pupil dilated with a pulsing amber rim; the ring is empty (thin amber outline, first segment lit amber) or its first segment is amber and pulsing.</li>'+
+ '<li><b>Wand:</b> eye half lidded, iris violet, small pupil, ring violet and steady. Nothing is asking for you.</li>'+
+ '<li>Priority is the order of that list. When both are due, the eye is cyan and the ring is amber: blast first, Pain next.</li></ul></div>';
+html+='<div class="panel" style="flex:1"><h3>Behaviour and motion</h3><ul>'+
+ '<li><b>The lid is a gauge.</b> Closed at the cast, it opens one eighth per second and is fully open exactly when the cooldown flag goes plain.</li>'+
+ '<li><b>The ring drains clockwise from 12.</b> Six segments, 3 s each, the same as the DoT ticks. The first segment is the REAPPLY band: it always shows a faint amber track, so you learn where it is before you need it.</li>'+
+ '<li><b>The eye is fed.</b> Every 3 s a faint pulse runs from the ring inward, the tick landing. It is cosmetic, timed from the cast ledger.</li>'+
+ '<li>Reduced motion holds every pulse steady; the lid, ring and numbers still move.</li>'+
+ '<li><b>REAPPLY band, 3 s:</b> one tick. Recasting inside it loses at most that tick, a 1.5 s Mind Blast still fits before it, and it absorbs about a second of ledger error.</li></ul></div>';
 html+='<div class="panel" style="flex:1"><h3>Not drawn, and why</h3><ul>'+
  '<li>Mana: secret in and out of combat.</li>'+
- '<li>Devouring Plague, Inner Fire, Fortitude, Shield: not part of the Mind Blast, SW:P, wand loop. Target Debuffs keeps Devouring Plague.</li>'+
- '<li>Spirit Tap window and the five second rule: real decisions, but not what this player watches. A later variant, not this one.</li>'+
+ '<li>Devouring Plague, Inner Fire, Fortitude, Shield: not part of the Mind Blast, Pain, wand loop. Target Debuffs keeps Devouring Plague.</li>'+
+ '<li>Spirit Tap window and the five second rule: real decisions, not what this player watches. A later variant.</li>'+
  '<li>Shadowform (31 point talent) and Shadow Word: Death (level 32): above the cap.</li>'+
- '<li>Dying-mob logic: target health is secret, so the cue cannot know a recast is wasted. It calls SW:P and the player decides.</li></ul></div>';
-html+='</div>';
+ '<li>Dying mob logic: target health is secret, so the eye cannot know a recast is wasted. It calls Pain; the player decides.</li></ul></div></div>';
+
+/* ---------- 2, the Lancet Window, the tall option ---------- */
+var W=CONCEPTS.window;
+html+='<h2><i>2</i> THE LANCET WINDOW, THE TALL OPTION</h2>';
+html+='<div class="lede">For a player who would rather give the whole target side to the Priest. In situ, both areas, Mind Blast ready and Pain at 8 s; the 2.2x view shows the priority demo (Pain in the band, blast ready).</div>';
+html+='<div class="row">'+scene(W,ST[4].s,'upper','<b>2</b>, WINDOW, BOTH AREAS, MIND BLAST READY')+zoom(W,{swp:2,mb:0})+'<div class="panel" style="flex:1;min-width:0"><h3>Data path</h3>'+table('window')+'</div></div>';
 document.getElementById('root').innerHTML=html;
 })();
 </script>
