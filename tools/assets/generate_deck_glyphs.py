@@ -7,7 +7,7 @@ Files written (in forever-stuwave/Media/Textures):
     glyph_professions.tga  hammer
     glyph_spellbook.tga    open book
     glyph_talents.tga      three nodes linked (a small tree)
-    glyph_legacy.tga       hourglass
+    glyph_legacy.tga       three-point crown over a heater shield, right half solid
     glyph_questlog.tga     scroll with an exclamation mark
     glyph_guild.tga        banner
     glyph_lfd.tga          eye
@@ -165,14 +165,22 @@ def glyph_talents():
 
 
 def glyph_legacy():
-    left = [(9, 5.5), (9, 10.5), (16, 16), (9, 21.5), (9, 26.5)]
-    right = [(23, 5.5), (23, 10.5), (16, 16), (23, 21.5), (23, 26.5)]
+    # Blizzard's Legacy icon: a crowned heater shield with a light/dark split
+    # down the middle. Here the left half is outline and the right half solid,
+    # and the crown is solid, so both survive 16px.
+    top = 14.2
+    left_side = bezier((7.5, top), (7.5, 24.0), (16.0, 28.2))
+    right_side = bezier((24.5, top), (24.5, 24.0), (16.0, 28.2))
+    outline = [(16.0, top), (7.5, top)] + left_side + right_side[::-1] + [(24.5, top)]
+    solid = [(16.0, top), (24.5, top)] + right_side + [(16.0, 28.2)]
+    # Crown is a plain fill (no stroke), so its points stay sharp at 16px.
+    crown = [(9.6, 10.6), (9.6, 4.0), (13.0, 7.6), (16.0, 3.0),
+             (19.0, 7.6), (22.4, 4.0), (22.4, 10.6)]
     return [
-        stroke([(6.5, 5.5), (25.5, 5.5)]),
-        stroke([(6.5, 26.5), (25.5, 26.5)]),
-        stroke(left),
-        stroke(right),
-        fill([(16, 19.5), (12.2, 24.4), (19.8, 24.4)]),
+        stroke(outline, closed=True),
+        fill(solid),
+        stroke([(16.0, top), (16.0, 28.2)]),
+        fill(crown),
     ]
 
 
