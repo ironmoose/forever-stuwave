@@ -208,8 +208,8 @@ Not yet checked in game. `/fsprof` shows or hides the panel and the choice survi
 4. In combat, type `/fsprof`. It prints that the change applies after combat, the panel stays as it is, and it flips when combat ends. Learn or drop a profession in combat (if you can) and the rows catch up after combat.
 5. `/reload` with the panel hidden: it stays hidden. A click opens the window once (it does not open and immediately close), with the action-button "on key down" option both on and off.
 6. Open `/fsconfig`, Unit Frames: "Professions panel" shows the same state as the panel. Flip it, and `/fsprof` flips it back. In combat it waits until combat ends, like `/fsprof`.
-7. Click the small pink glyph at the right end of the panel's title bar (hover: "Minimise"). The rows fold up into the bar and the bar's top edge stays put. Hover again: "Restore"; click it and the full list returns. `/fsprof` twice keeps the panel minimised. `/reload` keeps it minimised, and each profile keeps its own state.
-8. In combat, click the glyph. It prints that the change applies after combat, the panel stays as it is, and it folds or unfolds when combat ends. Drag the panel in `/fsedit` while minimised: its top edge follows the drag and it stays minimised after Done.
+7. Click the small pink glyph at the right end of the panel's title bar (hover: "Minimise"). The rows fold away and the panel collapses down: the title bar ends up where the panel's bottom edge was, like the chat's minimise. Hover again: "Restore"; click it and the full list grows back upward from the same bottom edge. `/fsprof` twice keeps the panel minimised. `/reload` keeps it minimised, and each profile keeps its own state.
+8. In combat, click the glyph. It prints that the change applies after combat, the panel stays as it is, and it folds or unfolds when combat ends. Drag the panel in `/fsedit` while minimised: its bottom edge follows the drag and it stays minimised after Done.
 
 ## Nameplate quest icon
 
