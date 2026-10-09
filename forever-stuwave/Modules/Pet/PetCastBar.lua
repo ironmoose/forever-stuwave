@@ -307,6 +307,7 @@ local CAST_EVENTS = {
 
 local castPanel, barFrame, runColumn, run, stripBar
 local iconTexture, shieldOverlay, glowBurst, holdGlow, timerText, timerSmall
+local iconHover        -- the hover-only frame over the icon box: the casting spell's tooltip
 local plate, outline, iconEdges
 local ghosts, ghostOn
 local nameText
@@ -430,6 +431,7 @@ end
 -- has none of it.
 local function SetIconBox(on)
     if iconTexture then iconTexture:SetShown(on) end
+    if iconHover then iconHover:SetShown(on) end
     if iconEdges then
         for _, edge in ipairs(iconEdges) do edge.tex:SetShown(on) end
     end
@@ -515,19 +517,19 @@ end
 -- opaque values and only converted through PlainSeconds; the castID is only ever stored
 -- and handed to run:MatchesCast, which never compares a secret.
 local function GetCastInfo(unit)
-    local name, _, texture, startMS, endMS, _, castID, notInterruptible = UnitCastingInfo(unit)
+    local name, _, texture, startMS, endMS, _, castID, notInterruptible, spellID = UnitCastingInfo(unit)
     if Present(name) then
         return {
             name = name, texture = texture, channeling = false, notInterruptible = notInterruptible,
-            startMS = startMS, endMS = endMS, castID = castID,
+            startMS = startMS, endMS = endMS, castID = castID, spellID = spellID,
         }
     end
 
-    name, _, texture, startMS, endMS, _, notInterruptible = UnitChannelInfo(unit)
+    name, _, texture, startMS, endMS, _, notInterruptible, spellID = UnitChannelInfo(unit)
     if Present(name) then
         return {
             name = name, texture = texture, channeling = true, notInterruptible = notInterruptible,
-            startMS = startMS, endMS = endMS,
+            startMS = startMS, endMS = endMS, spellID = spellID,
         }
     end
 
@@ -746,6 +748,7 @@ local function GoIdle()
     if stripBar then stripBar:Hide() end
     if iconTexture then iconTexture:SetTexture(nil) end
     if shieldOverlay then shieldOverlay:SetAlpha(0) end
+    if iconHover then FS.FrameHelpers.SetTipSpell(iconHover, nil, nil) end
     SetIconBox(false)
     if plate then plate:SetAlpha(PLATE_IDLE_ALPHA) end
     if outline then outline:SetAlpha(OUTLINE_IDLE_ALPHA) end
@@ -794,6 +797,9 @@ local function BeginCast(info)
     SyncGhosts()
     SetIconBox(true)
     iconTexture:SetTexture(info.texture)
+    -- the id and name go through SetTipSpell untouched: it stores a plain value and CLEARS the field for a
+    -- secret one, so the previous cast's spell never lingers under a cast whose id cannot be read
+    FS.FrameHelpers.SetTipSpell(iconHover, info.spellID, info.name)
     ApplyCastInterruptible(info.notInterruptible)
     plate:SetAlpha(PLATE_CAST_ALPHA)
     outline:SetAlpha(OUTLINE_CAST_ALPHA)
@@ -1082,6 +1088,11 @@ local function Build()
     iconTexture:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     iconTexture:SetTexture(nil)
     BuildIconEdges()
+    -- Hover only (the centre HUD passes clicks through); shown with the icon box, so an idle bar has none.
+    iconHover = CreateFrame("Frame", nil, barFrame)
+    iconHover:SetAllPoints(iconTexture)
+    FS.FrameHelpers.AttachSpellTooltip(iconHover)
+    iconHover:Hide()
 
     -- Shield overlay (optional interruptible tint, implemented): a single
     -- steel-grey overlay on the icon box, alpha driven only through
