@@ -1159,13 +1159,15 @@ function T.an_abbreviated_target_of_target_name_is_decided_again_from_the_full_n
     target("Kurak")
     local label = Tg().tot.label
     local wmax, floor = calibrateSneaky(label)
-    -- the first measurement is wrong (a font not applied yet reads wide); the next frame measures the real font
+    -- the decision is measured on the probe: its first measurement is wrong (a font not applied yet reads wide); the
+    -- next frame measures the real font
+    local probe = Tg().totProbe
     __wfactor = 2
     local R = getmetatable(UIParent)
     local realWidth = R.GetUnboundedStringWidth
     R.GetUnboundedStringWidth = function(self)
-        local f = (self == label) and __wfactor or 1
-        if self == label then __wfactor = 1 end   -- only the first measurement (the decision) is wrong
+        local f = (self == probe) and __wfactor or 1
+        if self == probe then __wfactor = 1 end   -- only the first measurement (the decision) is wrong
         return realWidth(self) * f
     end
     __units.targettarget = { exists = true, name = "x", full = "Sneaky Toots" }
@@ -1196,6 +1198,111 @@ function T.a_target_of_target_name_too_long_at_the_floor_stays_abbreviated_and_t
     for _ = 1, 40 do __flushTimers() end
     eq(sets, 0, "after the third step nothing is scheduled: the label is not written again")
     eq(__applyMonoCalls, calls, "and no SetFont")
+    W.clean(); noFails()
+end
+
+-- A monospace font at small sizes does not scale linearly (live: "Sneaky Toots" = 80.83 px at size 12, 70.0 at size 9,
+-- where linear scaling predicts 60.6). Every FontString here measures #text * perChar(size), perChar interpolated
+-- between the floor and the base size. Returns wmax, floor, base.
+local function nonLinearWidths(label, perCharFloor, perCharBase)
+    local floor = math.max(Tg().C.MIN_FONT, math.floor(FS.Gunsight.ui(Tg().C.TOT_FLOOR) + 0.5))
+    local base = label._fontSize
+    local R = getmetatable(UIParent)
+    R.GetUnboundedStringWidth = function(self)
+        local size = self._fontSize or base
+        local t = (base > floor) and (size - floor) / (base - floor) or 0
+        return #tostring(self._text) * (perCharFloor + (perCharBase - perCharFloor) * t)
+    end
+    return (Tg().C.TOT.w - 2 * Tg().C.TOT_PAD) * K(), floor, base
+end
+
+local function recordWrites(label)
+    local R = getmetatable(UIParent)
+    local realSet, writes = R.SetText, {}
+    R.SetText = function(self, t) if self == label then writes[#writes + 1] = t end return realSet(self, t) end
+    return writes
+end
+
+function T.a_target_of_target_name_too_wide_at_the_floor_is_abbreviated_on_the_first_write_whatever_linear_scaling_says()
+    local W = world({ beforeLoad = withFullNames() })
+    target("Kurak")
+    local label = Tg().tot.label
+    local wmax, floor, base = nonLinearWidths(label, 0, 0)
+    -- 12 characters: wider than the label at the floor (1.04), yet linear scaling from the base size says it fits (0.99)
+    nonLinearWidths(label, 1.04 * wmax / 12, 0.99 * wmax * base / (12 * floor))
+    local writes = recordWrites(label)
+    __units.targettarget = { exists = true, name = "x", full = "Sneaky Toots" }
+    fireTot()
+    eq(label._text, "S. Toots", "abbreviated with no timer flushed")
+    ok(#writes > 0 and writes[1] == "S. Toots", "the label was never written full first: " .. tostring(writes[1]))
+    for _, t in ipairs(writes) do ok(t ~= "Sneaky Toots", "the full name reached the label") end
+    ok(label:GetUnboundedStringWidth() <= wmax + 1e-6, "and fits the label")
+    W.clean(); noFails()
+end
+
+function T.a_target_of_target_name_that_fits_at_the_floor_is_shown_whole_on_the_first_write_whatever_linear_scaling_says()
+    local W = world({ beforeLoad = withFullNames() })
+    target("Kurak")
+    local label = Tg().tot.label
+    local wmax, floor, base = nonLinearWidths(label, 0, 0)
+    -- fits the label at the floor (0.97), yet linear scaling from the base size says it does not (1.1)
+    nonLinearWidths(label, 0.97 * wmax / 12, 1.1 * wmax * base / (12 * floor))
+    local writes = recordWrites(label)
+    __units.targettarget = { exists = true, name = "x", full = "Sneaky Toots" }
+    fireTot()
+    eq(label._text, "Sneaky Toots", "shown whole with no timer flushed")
+    eq(writes[1], "Sneaky Toots", "and the first write was the whole name")
+    eq(label._fontSize, floor, "shrunk to the floor")
+    ok(label:GetUnboundedStringWidth() <= wmax + 1e-6, "and fits the label")
+    W.clean(); noFails()
+end
+
+function T.a_target_of_target_probe_that_cannot_measure_falls_back_to_the_label_width_scaled_to_the_floor()
+    local W = world({ beforeLoad = withFullNames() })
+    target("Kurak")
+    local label, probe = Tg().tot.label, Tg().totProbe
+    local wmax, floor, base = nonLinearWidths(label, 0, 0)
+    -- the label at its own size scaled to the floor is 1.1 of the label width: too wide, so abbreviated
+    local perChar = 1.1 * wmax * base / (12 * floor)
+    nonLinearWidths(label, perChar, perChar)
+    local measure = getmetatable(UIParent).GetUnboundedStringWidth
+    getmetatable(UIParent).GetUnboundedStringWidth = function(self)
+        if self == probe then return nil end
+        return measure(self)
+    end
+    __units.targettarget = { exists = true, name = "x", full = "Sneaky Toots" }
+    fireTot()
+    eq(label._text, "S. Toots", "the label's own width decided it, as the probe measured nothing")
+    W.clean(); noFails()
+end
+
+function T.a_rescale_sets_the_target_of_target_measuring_font_once_and_a_name_write_never_does()
+    local per = {}
+    local W = world({ beforeLoad = withFullNames(function()
+        local real = FS.Theme.ApplyMono
+        FS.Theme.ApplyMono = function(fs, ...) per[fs] = (per[fs] or 0) + 1; return real(fs, ...) end
+    end) })
+    target("Kurak")
+    local probe = Tg().totProbe
+    ok(probe, "the target of target owns a measuring FontString")
+    eq(probe:IsShown(), false, "never shown")
+    local floor0 = math.max(Tg().C.MIN_FONT, math.floor(FS.Gunsight.ui(Tg().C.TOT_FLOOR) + 0.5))
+    eq(probe._fontSize, floor0, "set to the floor size")
+    local built = per[probe]
+    for _, full in ipairs({ "Sneaky Toots", "Father Stu", "Bartholomew Oldlight", "Zed" }) do
+        __units.targettarget = { exists = true, name = "x", full = full }
+        fireTot()
+    end
+    eq(per[probe], built, "no SetFont on the probe per name write")
+    UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
+    __fireEvent("UI_SCALE_CHANGED")
+    local floor1 = math.max(Tg().C.MIN_FONT, math.floor(FS.Gunsight.ui(Tg().C.TOT_FLOOR) + 0.5))
+    ok(floor1 ~= floor0, "the rescale moves the floor size")
+    eq(probe._fontSize, floor1, "the probe follows the new floor")
+    eq(per[probe], built + 1, "one SetFont for the rescale")
+    __units.targettarget = { exists = true, name = "x", full = "Another Name" }
+    fireTot()
+    eq(per[probe], built + 1, "and none after it")
     W.clean(); noFails()
 end
 

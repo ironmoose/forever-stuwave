@@ -266,6 +266,19 @@ end
 
 local SyncTot
 
+-- The size the target of target name is shrunk to at most: the line's floor, never over the base size.
+local function TotFloorSize()
+    return math.min(FontSize(), math.max(C.MIN_FONT, math.floor(ui(C.TOT_FLOOR) + 0.5)))
+end
+
+-- The measuring FontString is given the floor size here, and only when the floor size changes (a rescale).
+local function SetProbeSize(size)
+    local probe = Tags.totProbe
+    if not probe or Tags.probeSize == size then return end
+    Tags.probeSize = size
+    FS.Theme.ApplyMono(probe, size, Tags.colors.white)
+end
+
 -- The seat and the button's size are the only geometry; both wait for the end of combat.
 local function SeatTot()
     local seat, button = Tags.seat, Tags.tot
@@ -282,6 +295,7 @@ local function SeatTot()
     local wmax = (C.TOT.w - 2 * C.TOT_PAD) * k
     button.label:SetWidth(wmax)
     Tags.totLine.wmax = wmax
+    SetProbeSize(TotFloorSize())
     Tags.totName = nil
     Tags.totShort = false
     SyncTot()   -- fits the name again at the new width; the font is only set when the fit changes the size
@@ -308,24 +322,33 @@ local function LabelFontSize(label, fallback)
 end
 
 -- Fits a plain name to the label with the box name's own fit (GunsightBoxes' text line: shrinks step by step to
--- C.TOT_FLOOR, SetFont only when the size changes). The decision to shorten the first names to initials is made from
--- the FULL name measured before any size change, scaled to the floor size (width follows the font size): a name that
--- would not fit even at the floor is written abbreviated, everything else is written whole and shrunk. What is still
--- too wide at the floor is left to the FontString's ellipsis. The width is measured at the font the label HAS, so it
--- is scaled by that size (read back), and the line's size is set to it first: a font reapplied behind the line's back
--- (the cold-start retry puts the base size back) would otherwise scale every width wrong and leave the fit's SetFont
--- skipped as "unchanged". Tags.totShort records that the shown text is the abbreviated one.
+-- C.TOT_FLOOR, SetFont only when the size changes). The decision to shorten the first names to initials is MEASURED AT
+-- THE FLOOR SIZE, on a hidden FontString of the ToT (Tags.totProbe) that holds the floor font and the full name: the
+-- name is abbreviated only when it is still wider than the label there (width does not scale linearly with the font
+-- size, so a width scaled from another size would decide wrongly). A name that fits at the floor is written whole
+-- and shrunk; what is still too wide after the abbreviation is left to the FontString's ellipsis. The label never
+-- holds the full name of an abbreviated one. A probe that cannot measure falls back to the label's own width at the
+-- size it HAS, scaled linearly to the floor. The line's size is set to the label's real font size first: a font
+-- reapplied behind the line's back (the cold-start retry puts the base size back) would otherwise leave the fit's
+-- SetFont skipped as "unchanged". Tags.totShort records that the shown text is the abbreviated one.
 local function FitTotName(full)
-    local line, label = Tags.totLine, Tags.tot.label
-    local text = full
-    label:SetText(full)
+    local line, label, probe = Tags.totLine, Tags.tot.label, Tags.totProbe
     local size = LabelFontSize(label, line.size)
     line.size = size
-    local w = PlainWidth(label)
-    if w and size and size > 0 then
-        local floor = math.min(FontSize(), math.max(C.MIN_FONT, math.floor(ui(C.TOT_FLOOR) + 0.5)))
-        if w * floor / size > line.wmax + 1e-6 then text = AbbreviateName(full) or full end
+    local text = full
+    local wide
+    if probe then
+        if pcall(probe.SetText, probe, full) then
+            local pw = PlainWidth(probe)
+            if pw then wide = pw > line.wmax + 1e-6 end
+        end
     end
+    if wide == nil then
+        label:SetText(full)
+        local w = PlainWidth(label)
+        if w and size and size > 0 then wide = w * TotFloorSize() / size > line.wmax + 1e-6 end
+    end
+    if wide then text = AbbreviateName(full) or full end
     Tags.totShort = text ~= full
     FS.GunsightBoxes.WriteTextLine(line, text)
 end
@@ -424,6 +447,13 @@ local function BuildTot()
     button.label:SetWordWrap(false)
     -- The name fits through GunsightBoxes' text line; the font NewTag set is the line's current size (no second SetFont).
     local line = FS.GunsightBoxes.NewTextLine({ button.label }, C.TEXT_SIZE, nil, C.TOT_FLOOR)
+    -- The hidden measuring FontString (a plain one: no combat restriction) holds the floor font from the start (a
+    -- FontString with no font throws on SetText); SeatTot sets it again only when a rescale moves the floor.
+    local probe = holder:CreateFontString(nil, "OVERLAY")
+    probe:Hide()
+    Tags.totProbe, Tags.probeSize = probe, nil
+    GunsightTags.totProbe = probe
+    SetProbeSize(TotFloorSize())
     line.colors[1], line.size = Tags.colors.white, FontSize()
     line.ownSettle = true   -- RefitTotLater re-decides from the full name; the line's own size-only settle would race it
     Tags.totLine = line
