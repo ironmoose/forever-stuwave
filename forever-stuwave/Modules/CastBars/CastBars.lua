@@ -1273,6 +1273,14 @@ local function RetireBar(S)
     ClearReadout(S)
     S.run:Stop()
     S.strip:Hide()
+    -- The hover frame goes down with its own tip: hiding the parent is not promised to fire the child's OnHide for
+    -- a tooltip that is already open, and a cached spell must not outlive the bar that showed it.
+    if S.iconHover then
+        local release = FS.FrameHelpers.ReleaseSpellTip
+        if release then release(S.iconHover) end
+        S.iconHover:Hide()
+        TipCast(S, nil, nil)
+    end
     S.frame:Hide()
     S.mode = nil
 end

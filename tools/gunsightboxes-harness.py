@@ -920,6 +920,9 @@ function T.a_same_size_write_while_a_late_settle_step_waits_restarts_the_settle(
     local first, second = "ABCDEFGHIJKLMN", "ABCDEFGHIJKLMO"
     __charW = 5.8
     target("KURAK"); settle()
+    target(second); settle()
+    local instantSize = line.size                       -- what the second name measures to when the font is not late
+    target("KURAK"); settle()
     __fontLag = true
     target(first)
     ok(line.nextFramePending, "a settle callback is pending")
@@ -931,6 +934,8 @@ function T.a_same_size_write_while_a_late_settle_step_waits_restarts_the_settle(
     settle()
     __fontLag = false
     __charW = nil
+    eq(line.size, instantSize, "the settle re-measured the second name: it ends at the size an instant font gives")
+    ok(instantSize ~= sizeNow, "(and that is not the size the late font left it at)")
     W.clean(); noFails()
 end
 
