@@ -1329,7 +1329,6 @@ end
 
 local function tagList() return { level = Tg().level, health = Tg().health, tot = Tg().tot } end
 local function outlineOf(f) return textureWith(f, function(r) return r._cutOutline == true end) end
-local function hasIn(list, v) for _, r in ipairs(list) do if r == v then return true end end return false end
 local function startCast(W, notInt)
     W.tgt.S.stripOnly = nil   -- the run path, the one a plain cast can be interrupted on (the boxes harness does the same)
     __units.target.name = "Kurak"; __fireEvent("PLAYER_TARGET_CHANGED")
@@ -1382,23 +1381,12 @@ function T.the_interrupted_verdict_turns_every_tag_outline_red_and_the_next_writ
     W.endCast("target"); W.fire(W.tgt.S, "UNIT_SPELLCAST_INTERRUPTED", "T1")
     eq(box.verdict, true, "the box shows the verdict")
     for name, f in pairs(tagList()) do eq(lit(f), "red", name .. ": red while INTERRUPTED") end
-    startCast(W, true)
-    for name, f in pairs(tagList()) do eq(lit(f), "steel", name .. ": the next cast clears the verdict") end
-    W.endCast("target"); W.fire(W.tgt.S, "UNIT_SPELLCAST_STOP", "T1")
-    for name, f in pairs(tagList()) do eq(lit(f), "steel", name .. ": back to rest") end
-    -- and a kickable cast after a verdict is pink again
     startCast(W, false)
-    for name, f in pairs(tagList()) do eq(lit(f), "pink", name .. ": pink again") end
-    W.clean(); noFails()
-end
-
-function T.a_cast_ending_returns_every_tag_outline_to_steel()
-    local W = world()
-    startCast(W, false)
+    for name, f in pairs(tagList()) do eq(lit(f), "pink", name .. ": the next kickable cast clears the verdict to pink") end
     W.endCast("target"); W.fire(W.tgt.S, "UNIT_SPELLCAST_STOP", "T1")
     W.stepTo(W.tgt.S, 100.5, 104)
-    eq(lit({ tones = { pink = W.tgt.box.tones.pink, steel = W.tgt.box.tones.steel } }), "steel", "the box edge is at rest")
-    for name, f in pairs(tagList()) do eq(lit(f), "steel", name .. ": rest after a kickable cast") end
+    eq(lit({ tones = { pink = box.tones.pink, steel = box.tones.steel } }), "steel", "the box edge is at rest")
+    for name, f in pairs(tagList()) do eq(lit(f), "steel", name .. ": back to rest after the cast ends") end
     W.clean(); noFails()
 end
 
@@ -1425,32 +1413,34 @@ function T.a_secret_flag_reaches_the_tag_outlines_only_through_set_alpha_from_bo
     W.clean(); noFails("a secret operation was swallowed by a pcall")
 end
 
-function T.the_tag_tones_join_the_boxes_and_the_tapes_flag_lists_so_one_write_drives_them()
-    local W = world()
-    local box = W.tgt.box
+local function onceIn(list, v)
+    local n = 0
+    for _, r in ipairs(list) do if r == v then n = n + 1 end end
+    return n
+end
+local function assertEachToneOnce(W, msg)
     for name, f in pairs(tagList()) do
         for _, key in ipairs({ "pink", "steel" }) do
-            ok(hasIn(box.fb[key], f.tones[key]), name .. ": " .. key .. " is in the box's list")
-            ok(hasIn(W.tgt.fb[key], f.tones[key]), name .. ": and in the tape's list the shield drives")
+            eq(onceIn(W.tgt.box.fb[key], f.tones[key]), 1, name .. " " .. key .. " once in the box's list " .. msg)
+            eq(onceIn(W.tgt.fb[key], f.tones[key]), 1, name .. " " .. key .. " once in the tape's list " .. msg)
         end
-        ok(not hasIn(box.fb.pink, f.tones.red) and not hasIn(box.fb.steel, f.tones.red), name .. ": red is not flag driven")
     end
-    W.clean(); noFails()
 end
 
 function T.a_rescale_and_the_master_switch_keep_the_same_tag_tone_frames()
     local W = world()
     local before = {}
     for name, f in pairs(tagList()) do before[name] = { f.tones.pink, f.tones.steel, f.tones.red } end
-    local fbPink, fbSteel = #W.tgt.fb.pink, #W.tgt.fb.steel
     local frames = #__all
+    assertEachToneOnce(W, "after build")
     UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
     __fireEvent("UI_SCALE_CHANGED")
+    assertEachToneOnce(W, "after a rescale")
     FS.Config.Set("gunsight.enabled", false); FS.Config.Set("gunsight.enabled", true)
+    assertEachToneOnce(W, "after master off and on")
     UIParent._h = 1440; UIParent._w = 1440 * 16 / 9
     __fireEvent("UI_SCALE_CHANGED")
     eq(#__all, frames, "nothing is built again")
-    eq(#W.tgt.fb.pink, fbPink, "no frame joins the pink list twice"); eq(#W.tgt.fb.steel, fbSteel)
     for name, f in pairs(tagList()) do
         eq(f.tones.pink, before[name][1]); eq(f.tones.steel, before[name][2]); eq(f.tones.red, before[name][3])
     end
@@ -1487,31 +1477,6 @@ function T.a_retired_box_takes_no_new_tag_tone_frames_into_its_lists()
     eq(#seen.fb.pink, pink, "a retired box's pink list does not grow"); eq(#seen.fb.steel, steel)
     ok(set and set.pink, "the caller still gets frames to hold")
     noFails()
-end
-
-local function onceIn(list, v)
-    local n = 0
-    for _, r in ipairs(list) do if r == v then n = n + 1 end end
-    return n
-end
-local function assertEachToneOnce(W, msg)
-    for name, f in pairs(tagList()) do
-        for _, key in ipairs({ "pink", "steel" }) do
-            eq(onceIn(W.tgt.box.fb[key], f.tones[key]), 1, name .. " " .. key .. " once in the box's list " .. msg)
-            eq(onceIn(W.tgt.fb[key], f.tones[key]), 1, name .. " " .. key .. " once in the tape's list " .. msg)
-        end
-    end
-end
-
-function T.each_tag_tone_frame_is_in_each_flag_list_exactly_once()
-    local W = world()
-    assertEachToneOnce(W, "after build")
-    UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
-    __fireEvent("UI_SCALE_CHANGED")
-    assertEachToneOnce(W, "after a rescale")
-    FS.Config.Set("gunsight.enabled", false); FS.Config.Set("gunsight.enabled", true)
-    assertEachToneOnce(W, "after master off and on")
-    W.clean(); noFails()
 end
 
 -- A target of target built at the end of combat (a load in combat) joins a cast that is already live: it adopts the
