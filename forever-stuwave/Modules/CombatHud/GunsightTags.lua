@@ -23,6 +23,15 @@ local C = {
     RISE = 8, OVERLAP = 7,
     MIN_FONT = 6, TOT_PAD = 3,
     FRAME_LEVEL = 6,   -- the level and health tags' frame level above the box: over the edge strokes (+1) and the bars (+1 to +3)
+    -- Level icons by UnitClassification, square sizes in image px (tools/assets/generate_level_icons.py). tex and tint name
+    -- Theme tokens; tint = false draws the texture untinted (rare elite has its gold and silver baked in). A world boss
+    -- is the skull alone: the mockup draws no digits beside it. normal, trivial and minus are absent: no icon.
+    ICONS = {
+        elite = { tex = "LEVEL_CROWN_TEXTURE", size = 11, tint = "COLOR_GOLD" },
+        rare = { tex = "LEVEL_STAR_TEXTURE", size = 10, tint = "COLOR_SILVER" },
+        rareelite = { tex = "LEVEL_CROWN_STAR_TEXTURE", size = 14, tint = false },
+        worldboss = { tex = "LEVEL_SKULL_TEXTURE", size = 11, tint = "COLOR_RED", bare = true },
+    },
 }
 GunsightTags.C = C
 
@@ -36,7 +45,7 @@ GunsightTags.SETTINGS = SETTINGS
 for _, def in pairs(SETTINGS) do Config.RegisterDefault(def.key, def.default) end
 
 local Tags = { colors = nil, box = nil, events = nil, pendingTot = false, pendingSeat = false,
-    levelState = "none", levelChars = 0, iconW = 0, iconH = 0 }
+    levelState = "none", levelChars = 0, iconW = 0, iconH = 0, iconKind = nil }
 
 local function InCombat()
     return type(InCombatLockdown) == "function" and InCombatLockdown() == true
@@ -92,10 +101,11 @@ end
 -- Level and class
 -------------------------------------------------------------------------------
 
--- The level number alone, in white, on a plate sized to it: pad, [icon, gap], digits, pad, never under minW (mockups/
+-- The level number in white, on a plate sized to it: pad, [icon, gap], digits, pad, never under minW (mockups/
 -- gunsight-level-tag-2026-10-08.html). The plate keeps its seat and grows to the right. The level goes to
--- SetFormattedText as an argument (it may be secret); a level below 1 reads "??". The classification has no text here:
--- an icon will take its place in the icon slot (SetLevelIcon), which costs no width until it is filled.
+-- SetFormattedText as an argument (it may be secret); a level below 1 reads "??". The classification has no text: its
+-- icon (C.ICONS) fills the icon slot (SetLevelIcon), which costs no width while it is empty. A world boss shows the
+-- skull alone, no digits, as the mockup does.
 
 -- What the plain text in the label takes on one line, in screen px (GetUnboundedStringWidth: GetStringWidth is bounded
 -- by the FontString's own width); nil when the client cannot measure. Never called on a secret.
@@ -143,12 +153,36 @@ local function RefitLevelLater()
     end)
 end
 
--- The icon slot: its width (and height, square by default) in image px; 0 empties it. The follow-up that picks the
--- elite and rare icons sets the texture on `GunsightTags.level.icon` and calls this.
+-- The icon slot: its width (and height, square by default) in image px; 0 empties it. PaintIcon sets the texture on
+-- `GunsightTags.level.icon` and sizes it through this.
 function GunsightTags.SetLevelIcon(width, height)
     Tags.iconW = math.max(0, tonumber(width) or 0)
     Tags.iconH = Tags.iconW > 0 and (tonumber(height) or Tags.iconW) or 0
     Guard(FitLevel)
+end
+
+-- The classification word of the target: its C.ICONS key, nil for no icon. A secret word (combat is unverified) keeps the
+-- kind drawn now, which is nothing on a new target; it is checked before anything else touches it and never compared.
+local function ClassificationKind()
+    local class = UnitClassification("target")
+    if IsSecret(class) then return Tags.iconKind end
+    if type(class) == "string" and C.ICONS[class] then return class end
+    return nil
+end
+
+-- Sets the icon texture, tint and size for `kind` (nil empties the slot); the caller fits the plate.
+local function PaintIcon(kind)
+    Tags.iconKind = kind
+    local spec = kind and C.ICONS[kind]
+    local Theme, icon = FS.Theme, Tags.level.icon
+    if not (spec and Theme and Theme[spec.tex]) then
+        Tags.iconW, Tags.iconH = 0, 0
+        return
+    end
+    icon:SetTexture(Theme[spec.tex])
+    local tint = spec.tint and Theme[spec.tint] or { 1, 1, 1, 1 }
+    icon:SetVertexColor(tint[1], tint[2], tint[3], tint[4] or 1)
+    Tags.iconW, Tags.iconH = spec.size, spec.size
 end
 
 local function WriteLevel()
@@ -156,6 +190,13 @@ local function WriteLevel()
     if not label then return end
     Tags.levelState, Tags.levelChars = "none", 0
     if not FS.HasTarget() then
+        label:SetText("")
+        PaintIcon(nil)
+        return FitLevel()
+    end
+    local kind = ClassificationKind()
+    PaintIcon(kind)
+    if kind and C.ICONS[kind].bare then
         label:SetText("")
         return FitLevel()
     end
@@ -178,9 +219,9 @@ local function WriteLevel()
     FitLevel()
 end
 
--- A new target (or a world load) starts with an empty icon slot; the classification follow-up fills it after this.
+-- A new target (or a world load) starts with an empty icon slot; WriteLevel fills it from a readable classification.
 local function WriteLevelForNewTarget()
-    Tags.iconW, Tags.iconH = 0, 0
+    Tags.iconKind = nil
     WriteLevel()
 end
 
