@@ -128,7 +128,10 @@ function Region:SetAttribute(k, v)
 end
 function Region:GetAttribute(k) return self._attrs[k] end
 -- The numeric id a paged button carries (SecureActionButtonMixin:CalculateAction reads it); 0 when unset.
-function Region:SetID(id) self._id = id end
+function Region:SetID(id)
+    if self._secure and __combat then __blocked = __blocked + 1; return end
+    self._id = id
+end
 function Region:GetID() return self._id or 0 end
 function Region:RegisterForClicks(...) self._clicks = { ... } end
 function Region:RegisterForDrag() end
@@ -1187,6 +1190,9 @@ function T.paged_buttons_carry_an_id_and_follow_mainactionbars_page_by_attribute
         eq(b.bar, MainActionBar, "bar is MainActionBar " .. i)
         eq(b:GetAttribute("type"), "action", "still an action button " .. i)
         eq(b.action, liveSlot(1, i), "visual slot " .. i)
+        -- ActionButton.lua:1612 reads this attribute before self.bar:GetSpellFlyoutDirection(),
+        -- so the popup direction does not depend on where Blizzard's hidden host sits.
+        eq(b:GetAttribute("flyoutDirection"), "UP", "flyout direction ignores the host " .. i)
     end
     eq(__blocked, 0)
 end
@@ -1216,7 +1222,7 @@ function T.paged_bonus_page_change_in_combat_writes_nothing_and_the_visuals_foll
     __combat = true
     __attrWrites = 0
     for n, event in ipairs({ "UPDATE_BONUS_ACTIONBAR", "ACTIONBAR_PAGE_CHANGED", "UPDATE_SHAPESHIFT_FORM",
-        "UPDATE_VEHICLE_ACTIONBAR", "UPDATE_OVERRIDE_ACTIONBAR", "UPDATE_POSSESS_BAR" }) do
+        "UPDATE_VEHICLE_ACTIONBAR", "UPDATE_OVERRIDE_ACTIONBAR" }) do
         local page = 6 + n          -- a different page each time
         MainActionBar:SetAttribute("actionpage", page)
         __fire_event(event)
@@ -1230,15 +1236,16 @@ function T.paged_bonus_page_change_in_combat_writes_nothing_and_the_visuals_foll
     eq(__blocked, 0, "nothing was refused")
     -- the same slot feeds the tooltip
     __button(1, 3).Fire(__button(1, 3), "OnEnter")
-    eq(seen[#seen], liveSlot(12, 3), "tooltip reads the live slot")
+    eq(seen[#seen], liveSlot(11, 3), "tooltip reads the live slot")
     -- and combat ending changes neither the slots nor the attribute count
     __combat = false
     __fire_event("PLAYER_REGEN_ENABLED")
-    eq(__button(1, 1).action, liveSlot(12, 1), "held after combat")
+    eq(__button(1, 1).action, liveSlot(11, 1), "held after combat")
     eq(__attrWrites, 0, "regen writes nothing either")
 end
 
 function T.paged_page_is_read_again_on_the_next_frame_without_stacking()
+    function GetActionTexture(slot) return "tex" .. slot end
     -- Blizzard may write MainActionBar's attribute after our event handler ran in the same frame.
     __fire_event("UPDATE_BONUS_ACTIONBAR")
     __fire_event("ACTIONBAR_PAGE_CHANGED")
@@ -1248,7 +1255,7 @@ function T.paged_page_is_read_again_on_the_next_frame_without_stacking()
     eq(__button(1, 2).action, liveSlot(1, 2), "not yet seen")
     __flushTimers()
     eq(__button(1, 2).action, liveSlot(7, 2), "caught on the next frame")
-    eq(__button(1, 2).icon._texture, "tex", "repainted")
+    eq(__button(1, 2).icon._texture, "tex" .. liveSlot(7, 2), "repainted from the new slot")
     eq(#__timers, 0)
     __fire_event("UPDATE_BONUS_ACTIONBAR")
     eq(#__timers, 1, "a later event can queue again")
@@ -1283,13 +1290,104 @@ function T.paged_click_resolves_to_the_live_page_in_combat()
     eq(__button(1, 1):GetAttribute("action"), nil)
 end
 
-function T.paged_page_falls_back_to_the_clients_page_calls_when_the_attribute_is_unset()
-    -- MainActionBar exists but Blizzard has not written "actionpage" yet.
+function T.paged_page_falls_back_to_the_clients_page_like_calculateaction_when_the_attribute_is_unset()
+    -- MainActionBar exists but Blizzard has not written "actionpage": CalculateAction uses
+    -- C_ActionBar.GetActionBarPage() (bonus and the other special pages are not consulted), so the
+    -- visual has to as well or a click fires a different slot than the one drawn.
     eq(MainActionBar:GetAttribute("actionpage"), nil, "fixture: no attribute")
     function HasBonusActionBar() return true end
     function GetBonusBarIndex() return 7 end
+    C_ActionBar.GetActionBarPage = function() return 3 end
     __fire_event("UPDATE_BONUS_ACTIONBAR")
+    eq(__button(1, 1).action, liveSlot(3, 1), "fallback is the client's page")
+    eq(__calcAction(__button(1, 1)), __button(1, 1).action, "click agrees")
+end
+
+function T.skinned_vehicle_or_override_bar_moves_the_click_host_to_overrideactionbar()
+    -- Skinned vehicle / override: the controller sets OverrideActionBar's own "actionpage" and the
+    -- OVERRIDE state; MainActionBar keeps its stale page.
+    MainActionBar:SetAttribute("actionpage", 1)
+    OverrideActionBar:SetAttribute("actionpage", 12)
+    __barState = LE_ACTIONBAR_STATE_OVERRIDE
+    __attrWrites = 0
+    __fire_event("UPDATE_VEHICLE_ACTIONBAR")
+    for i = 1, 12 do
+        local b = __button(1, i)
+        eq(b.bar, OverrideActionBar, "click host " .. i)
+        eq(b.action, liveSlot(12, i), "visual " .. i)
+        eq(__calcAction(b), b.action, "click agrees " .. i)
+    end
+    eq(__button(1, 1):GetID(), 1, "id kept")
+    eq(__attrWrites, 0, "bar and ids are not rewritten, only the bar field")
+    -- a page change on the override bar is followed
+    OverrideActionBar:SetAttribute("actionpage", 14)
+    __fire_event("UPDATE_OVERRIDE_ACTIONBAR")
+    eq(__button(1, 2).action, liveSlot(14, 2))
+    -- and leaving it goes back to MainActionBar's page
+    __barState = LE_ACTIONBAR_STATE_MAIN
+    __fire_event("UPDATE_OVERRIDE_ACTIONBAR")
+    eq(__button(1, 2).bar, MainActionBar)
+    eq(__button(1, 2).action, liveSlot(1, 2))
+    eq(__calcAction(__button(1, 2)), __button(1, 2).action)
+end
+
+function T.skinned_override_entered_in_combat_keeps_the_click_host_until_regen()
+    -- The host swap is out of combat only. Until then the click resolves through MainActionBar, so
+    -- the visuals read MainActionBar's page too (what is drawn is what fires); regen replays it.
+    MainActionBar:SetAttribute("actionpage", 1)
+    __combat = true
+    __attrWrites = 0
+    OverrideActionBar:SetAttribute("actionpage", 12)
+    __barState = LE_ACTIONBAR_STATE_OVERRIDE
+    __fire_event("UPDATE_VEHICLE_ACTIONBAR")
+    __flushTimers()
+    for i = 1, 12 do
+        local b = __button(1, i)
+        eq(b.bar, MainActionBar, "no swap in combat " .. i)
+        eq(b.action, liveSlot(1, i), "draws what the click resolves " .. i)
+        eq(__calcAction(b), b.action, "click agrees " .. i)
+    end
+    eq(__attrWrites, 0)
+    eq(__blocked, 0)
+    __combat = false
+    __fire_event("PLAYER_REGEN_ENABLED")
+    for i = 1, 12 do
+        local b = __button(1, i)
+        eq(b.bar, OverrideActionBar, "swapped at regen " .. i)
+        eq(b.action, liveSlot(12, i), "visual at regen " .. i)
+        eq(__calcAction(b), b.action, "click agrees at regen " .. i)
+    end
+end
+
+function T.entering_world_reads_the_live_page()
+    -- Blizzard first writes the attribute at PLAYER_ENTERING_WORLD; Apply runs at PLAYER_LOGIN.
+    MainActionBar:SetAttribute("actionpage", 7)
+    __fire_event("PLAYER_ENTERING_WORLD")
     eq(__button(1, 1).action, liveSlot(7, 1))
+    eq(__calcAction(__button(1, 1)), __button(1, 1).action)
+end
+
+function T.paged_slot_change_refreshes_the_flyout_out_of_combat_and_at_regen()
+    -- The page no longer flips through SetAttribute("action"), so the stock OnAttributeChanged
+    -- UpdateFlyout does not run; we ask for it, outside combat only.
+    local function flyouts(bar, i) return __button(bar, i)._flyouts or 0 end
+    local before = flyouts(1, 3)
+    MainActionBar:SetAttribute("actionpage", 7)
+    __fire_event("UPDATE_BONUS_ACTIONBAR")
+    eq(flyouts(1, 3), before + 1, "paged button refreshed")
+    eq(flyouts(3, 3), 0, "fixed bar untouched")
+    __flushTimers()
+    eq(flyouts(1, 3), before + 1, "an unchanged re-read does not refresh again")
+    __combat = true
+    MainActionBar:SetAttribute("actionpage", 8)
+    __fire_event("UPDATE_BONUS_ACTIONBAR")
+    eq(__button(1, 3).action, liveSlot(8, 3))
+    eq(flyouts(1, 3), before + 1, "queued, not run, in combat")
+    eq(__flyoutInCombat, 0)
+    __combat = false
+    __fire_event("PLAYER_REGEN_ENABLED")
+    eq(flyouts(1, 3), before + 2, "refreshed at regen")
+    eq(flyouts(1, 12), before + 2, "every paged button")
 end
 
 function T.paged_buttons_keep_the_attribute_path_when_mainactionbar_is_missing()
@@ -2879,7 +2977,26 @@ do
         return real(self, k, v)
     end
 end
+do
+    local realSetID = __Region.SetID
+    function __Region:SetID(id)
+        if self._secure then __attrWrites = __attrWrites + 1 end
+        return realSetID(self, id)
+    end
+end
 C_ActionBar.GetActionBarPage = function() return 1 end
+-- The skinned vehicle / override surface: the controller gives OverrideActionBar its own
+-- "actionpage" and reports LE_ACTIONBAR_STATE_OVERRIDE (ActionBarController.lua:149-157).
+OverrideActionBar = CreateFrame("Frame", "OverrideActionBar", UIParent)
+LE_ACTIONBAR_STATE_MAIN, LE_ACTIONBAR_STATE_OVERRIDE = 1, 2
+__barState = LE_ACTIONBAR_STATE_MAIN
+function ActionBarController_GetCurrentActionBarState() return __barState end
+-- BaseActionButtonMixin:UpdateFlyout stand-in: counts calls, and those made in combat.
+__flyoutInCombat = 0
+function __Region:UpdateFlyout()
+    if __combat then __flyoutInCombat = __flyoutInCombat + 1 end
+    self._flyouts = (self._flyouts or 0) + 1
+end
 __timers = {}
 C_Timer = { After = function(_, fn) __timers[#__timers + 1] = fn end }
 function __flushTimers()
@@ -2912,7 +3029,11 @@ VARIANTS = {
     "paged_page_is_read_again_on_the_next_frame_without_stacking": LIVE_BAR,
     "paged_next_frame_reread_in_combat_writes_nothing": LIVE_BAR,
     "paged_click_resolves_to_the_live_page_in_combat": LIVE_BAR,
-    "paged_page_falls_back_to_the_clients_page_calls_when_the_attribute_is_unset": LIVE_BAR,
+    "paged_page_falls_back_to_the_clients_page_like_calculateaction_when_the_attribute_is_unset": LIVE_BAR,
+    "skinned_vehicle_or_override_bar_moves_the_click_host_to_overrideactionbar": LIVE_BAR,
+    "skinned_override_entered_in_combat_keeps_the_click_host_until_regen": LIVE_BAR,
+    "entering_world_reads_the_live_page": LIVE_BAR,
+    "paged_slot_change_refreshes_the_flyout_out_of_combat_and_at_regen": LIVE_BAR,
     "bar6_first_slot_follows_the_clients_multibar5_page": "MULTIBAR_5_ACTIONBAR_PAGE = 15",
     "gcd_swipe_is_asked_for_with_the_gcd_included_and_applied": """
         __gcdSeen = {}

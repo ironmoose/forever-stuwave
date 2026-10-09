@@ -25,9 +25,12 @@
 -- MainActionBar. SecureActionButtonMixin:CalculateAction (SecureTemplates.lua)
 -- then reads the page through SecureButton_GetModifiedAttribute, which follows
 -- useparent-actionpage to frame.bar, and Blizzard's ActionBarController keeps
--- MainActionBar's "actionpage" attribute live (bonus, vehicle, override, temp
--- shapeshift) with its own secure code. The click resolves the live page at
--- click time, in combat too, and we write nothing. Live test 2026-10-09
+-- MainActionBar's "actionpage" attribute live (bonus, temp shapeshift, and the
+-- unskinned vehicle and override bars) with its own secure code. SKINNED vehicle
+-- and override bars go through OverrideActionBar's own "actionpage" instead
+-- (ActionBarController_UpdateAll), so out of combat `button.bar` is moved to
+-- OverrideActionBar while that state is live (ApplyPage). The click resolves the
+-- live page at click time, in combat too, and we write no attribute. Live test 2026-10-09
 -- (stealthed Rogue, out of combat): GetActionBarPage() = 1 while
 -- MainActionBar:GetAttribute("actionpage") = 7; after breaking stealth into
 -- combat a click on the first button fired page-1 slot 1 (Attack), i.e. the
@@ -906,18 +909,54 @@ local function UpdateAllState()
     end
 end
 
--- The paged bar's page. With MainActionBar present the buttons ride its live
--- "actionpage" attribute (see the header), so the visuals read the same attribute
--- the click resolves; before Blizzard has written it, or without MainActionBar,
--- ask the client directly.
-local pagedHost    -- MainActionBar when the paged buttons ride its live page, else nil
+-- The paged bar's page. With MainActionBar present the buttons ride a live
+-- "actionpage" attribute (see the header), so the visuals read the same
+-- attribute the click resolves.
+local pagedHost    -- MainActionBar when the paged buttons ride a live page, else nil
 
-local function LivePage()
-    local host = pagedHost
+-- OverrideActionBar while Blizzard's controller is in the OVERRIDE state (a skinned
+-- vehicle or override bar, ActionBarController_UpdateAll); nil otherwise. Every
+-- global is feature-detected: a client without them is simply never overridden.
+local function OverrideHost()
+    local getState = _G.ActionBarController_GetCurrentActionBarState
+    local override = _G.LE_ACTIONBAR_STATE_OVERRIDE
+    local bar = _G.OverrideActionBar
+    if type(getState) ~= "function" or override == nil then return nil end
+    if type(bar) ~= "table" or type(bar.GetAttribute) ~= "function" then return nil end
+    local ok, state = pcall(getState)
+    if ok and state == override then return bar end
+    return nil
+end
+
+-- The host whose page the buttons should ride now.
+local function ActiveHost()
+    if not pagedHost then return nil end
+    return OverrideHost() or pagedHost
+end
+
+-- What SecureActionButtonMixin:CalculateAction falls back to when the host has no
+-- usable "actionpage" (SecureTemplates.lua:670-686): the client's current page.
+local function FallbackPage()
+    local page
+    if C_ActionBar and C_ActionBar.GetActionBarPage then
+        page = C_ActionBar.GetActionBarPage()
+    elseif GetActionBarPage then
+        page = GetActionBarPage()
+    end
+    if type(page) == "number" and page >= 1 then return page end
+    return 1
+end
+
+-- The page a click through `host` resolves to, or the CurrentPage switch when the
+-- paged bar does not ride a host at all (no MainActionBar).
+local function LivePage(host)
+    if not pagedHost then return CurrentPage() end
+    host = host or ActiveHost()
     local page = host and host:GetAttribute("actionpage")
     if type(page) == "number" and page >= 1 then return page end
-    return CurrentPage()
+    return FallbackPage()
 end
+ActionBars.LivePage = function() return LivePage() end
 
 local function FindPagedHost()
     local bar = _G.MainActionBar
@@ -925,18 +964,41 @@ local function FindPagedHost()
     return nil
 end
 
+-- Flyout popups are refreshed by the stock OnAttributeChanged when the "action"
+-- attribute moves; a page flip no longer writes it, so ask for it ourselves. Out of
+-- combat only (it re-points the popup), queued for regen otherwise.
+local pendingFlyout = false
+
+local function RefreshFlyouts()
+    pendingFlyout = false
+    for _, button in ipairs(allButtons) do
+        if button.paged and type(button.UpdateFlyout) == "function" then
+            pcall(button.UpdateFlyout, button)
+        end
+    end
+end
+
 -- Points button.action (the field the draw code reads) at the current page. On
--- the live path that is all: the click already follows the page. Without
--- MainActionBar the fixed "action" attribute is re-pointed too, which is illegal
--- in combat, so a page change mid-fight is remembered and applied on regen.
+-- the live path that is all but the click host: the click already follows the page.
+-- Without MainActionBar the fixed "action" attribute is re-pointed too, which is
+-- illegal in combat, so a page change mid-fight is remembered and applied on regen.
 -- Returns whether any slot moved.
 local pendingPage = false
 
 local function ApplyPage(onlyIfChanged)
-    local page = LivePage()
     local changed = false
+    local wanted = ActiveHost()
+    local canSwap = not InCombatLockdown()
+    local swapWaits = false
     for _, button in ipairs(allButtons) do
         if button.paged then
+            -- Moving the click host is out of combat only. In combat the click still
+            -- resolves through the old host, so the visual reads THAT host's page
+            -- (what is drawn is what fires) and the swap is replayed on regen.
+            if wanted and button.bar ~= wanted then
+                if canSwap then button.bar = wanted else swapWaits = true end
+            end
+            local page = LivePage(wanted and button.bar)
             local slot = (page - 1) * BUTTONS_PER_BAR + button.index
             if button.action ~= slot then
                 button.action = slot
@@ -944,6 +1006,11 @@ local function ApplyPage(onlyIfChanged)
                 if not pagedHost then button:SetAttribute("action", slot) end
             end
         end
+    end
+    if pagedHost then
+        pendingPage = swapWaits
+        if changed then pendingFlyout = true end
+        if pendingFlyout and canSwap then RefreshFlyouts() end
     end
     if changed or not onlyIfChanged then UpdateAll() end
     return changed
@@ -1290,6 +1357,10 @@ local function BuildBar(spec, geo, parent)
             button:SetID(i)
             button:SetAttribute("action", nil)
             button:SetAttribute("useparent-actionpage", true)
+            -- UpdateFlyout (ActionButton.lua:1612-1632) reads this attribute before
+            -- self.bar:GetSpellFlyoutDirection(), so the popup opens up whatever
+            -- Blizzard's hidden host bar is doing. "UP" is the template default.
+            button:SetAttribute("flyoutDirection", "UP")
             button.bar = pagedHost
         else
             button:SetAttribute("action", button.action)
@@ -1602,9 +1673,12 @@ local function OnEvent(_, event, arg1)
         or event == "UPDATE_BONUS_ACTIONBAR"
         or event == "UPDATE_VEHICLE_ACTIONBAR"
         or event == "UPDATE_OVERRIDE_ACTIONBAR"
-        or event == "UPDATE_POSSESS_BAR"
         or event == "UPDATE_SHAPESHIFT_FORM" then
         RequestPage()
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        -- Blizzard first writes the page attribute here; Apply ran at PLAYER_LOGIN.
+        RequestPage()
+        UpdateAll()
     elseif event == "CURRENT_SPELL_CAST_CHANGED"
         or event == "START_AUTOREPEAT_SPELL"
         or event == "STOP_AUTOREPEAT_SPELL"
@@ -1634,7 +1708,6 @@ local function RegisterEvents()
         "UPDATE_VEHICLE_ACTIONBAR",
         "UPDATE_OVERRIDE_ACTIONBAR",
         "UPDATE_SHAPESHIFT_FORM",
-        "UPDATE_POSSESS_BAR",
         "SPELL_UPDATE_COOLDOWN",
         "SPELL_UPDATE_USABLE",
         "PLAYER_TARGET_CHANGED",

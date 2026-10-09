@@ -1775,6 +1775,30 @@ for _, p in ipairs(pages) do
 end
 """)
 
+case("the_main_bar_page_comes_from_actionbars_live_page_when_it_is_loaded")(r"""
+standard()
+local sb = idOf("shadow_bolt")
+C_ActionBar = { FindSpellActionButtons = function(id) return __actionSlots[id] end }
+GetBindingKey = function(cmd) return __binds[cmd] end
+GetBindingText = function(key) return key end
+__state = mkState({ inCombat = true, row = lockRow(), next = { key = "shadow_bolt" } })
+__actionSlots = { [sb] = { 3 } }; __binds = { ACTIONBUTTON3 = "5" }
+login()
+local n = FS.CombatHud.ui.nextTile
+local live = 7
+FS.ActionBars = { LivePage = function() return live end }
+fire("UPDATE_BINDINGS"); check(n.key:GetText() == "", "live page 7: slot 3 is not ACTIONBUTTON3")
+live = 1
+_G.HasBonusActionBar = function() return true end        -- the mirrored switch would say page 7
+fire("UPDATE_BINDINGS"); check(n.key:GetText() == "5", "live page 1 wins over the mirrored switch")
+live = SN
+fire("UPDATE_BINDINGS"); check(n.key:GetText() == "", "a secret live page falls back to the mirrored switch (bonus 7)")
+FS.ActionBars.LivePage = function() error("boom") end
+fire("UPDATE_BINDINGS"); check(n.key:GetText() == "", "a throwing live page falls back too")
+_G.HasBonusActionBar = nil
+FS.ActionBars = nil
+""")
+
 case("a_has_bar_check_that_returns_a_plain_number_counts_as_active")(r"""
 standard()
 local sb = idOf("shadow_bolt")
