@@ -12,8 +12,10 @@ unit APIs the tags read. It pins:
   * settings: the three FS.Config keys default on and pin nothing, a change applies live (profile switch too);
   * geometry: the seats, sizes, chamfer, fill and text size are parsed back out of the mockup, at two UI heights,
     and the tags ride the box top (so the numbers' growth moves them with KICK);
-  * level text: L62 with ELITE / RARE / BOSS in gold, nothing for a normal mob, ?? for level -1, a secret level
-    only through SetFormattedText, a secret classification leaves the word out;
+  * level tag: the digits alone (no "L", no classification word: the icon is a later concept), "??" for level
+    below 1, the plate sized to the text (5 pad, [icon, 3 gap], digits, 5 pad, 15 minimum, from the level-tag
+    mockup), growing right from the same seat; a secret level goes only through SetFormattedText and reserves two
+    digits without measuring; the width follows a target change and a font that lands a frame late;
   * health: the percent goes through the box's own WritePercent (the engine's percent, a secret never divided) and
     follows UNIT_HEALTH, and nothing is written with the tag off;
   * target of target: a SecureUnitButtonTemplate button with type1 = target and unit = targettarget set from plain
@@ -46,6 +48,7 @@ ADDON = HERE.parent / "forever-stuwave"
 TAGS = Path(os.environ.get("GUNSIGHTTAGS_LUA") or ADDON / "Modules/CombatHud/GunsightTags.lua")
 TOC = ADDON / "forever-stuwave.toc"
 MOCKUP = HERE.parent / "mockups" / "gunsight-modules-concepts-v7-2026-10-08.html"
+LEVEL_MOCKUP = HERE.parent / "mockups" / "gunsight-level-tag-2026-10-08.html"
 
 
 def _load(name: str, file: str):
@@ -66,6 +69,13 @@ def _m(pattern: str, text: str, what: str) -> re.Match:
     return m
 
 
+def mockup_level_tag() -> dict:
+    """The proposed level-tag geometry: var H=15,CH=5,FS=11,ADV=FS*575/1024,PAD=5,GAP=3,MINW=15."""
+    src = LEVEL_MOCKUP.read_text(encoding="utf-8")
+    m = _m(r"ADV=FS\*(\d+)/(\d+),PAD=(\d+),GAP=(\d+),MINW=(\d+)", src, "level tag geometry")
+    return dict(ADV=int(m.group(1)) / int(m.group(2)), PAD=int(m.group(3)), GAP=int(m.group(4)), MINW=int(m.group(5)))
+
+
 def mockup_tags() -> dict:
     """Everything tag() and tags() own in the v7 mockup."""
     src = MOCKUP.read_text(encoding="utf-8")
@@ -81,6 +91,7 @@ def mockup_tags() -> dict:
         LEVEL=dict(x=int(level[0]), y=int(level[1]), w=int(level[2])),
         HEALTH=dict(x=int(health[0]), y=int(health[1]), w=int(health[2])),
         TOT=dict(x=int(tot[0]), y=int(tot[1]), w=int(tot[2])),
+        LT=mockup_level_tag(),
         BOXR=boxes["base"]["BOXR"], TB_GROW=boxes["TB_GROW"],
     )
 
@@ -192,7 +203,16 @@ end
 local function Tg() return FS.GunsightTags end
 local function setTag(name, value) FS.Config.Set(Tg().SETTINGS[name].key, value) end
 local function flush() FS.GunsightBoxes.Flush() end
-local function gold() return "|cff" .. rgb(FS.GunsightBoxes.colors.gold) end
+-- Plate width in image px for n digits, from the level-tag mockup (digit advance 6.2 px at size 11), at the
+-- font size the tag is drawn at: 2 * pad + digits, rounded up, never under the minimum.
+local function wantW(n, icon)
+    local L = Tg().C.LEVEL
+    local fs = math.max(Tg().C.MIN_FONT, math.floor(FS.Gunsight.ui(Tg().C.TEXT_SIZE) + 0.5))
+    local tw = n * 6.2 * fs / 11   -- the mock's 6.2 px a digit at size 11, scaled with the font
+    return math.max(L.minW, math.ceil(2 * L.pad + (icon or 0) + tw / K() - 1e-6))
+end
+local function levelW() return Tg().level._w / K() end
+
 local function levelText() return Tg().level.label._text end
 local function setUnit(level, class)
     __units.target.level, __units.target.class = level, class
@@ -228,7 +248,9 @@ function T.constants_match_the_mockup()
     local C = Tg().C
     eq(C.H, MT.H); eq(C.CHAMFER, MT.CHAMFER); near(C.FILL_A, MT.FILL_A, 1e-9)
     eq(C.TEXT_SIZE, MT.TEXT_SIZE)
-    eq(C.LEVEL.dx, MT.LEVEL.x - MT.BOXR.x, "level tag x from the box"); eq(C.LEVEL.w, MT.LEVEL.w)
+    eq(C.LEVEL.dx, MT.LEVEL.x - MT.BOXR.x, "level tag x from the box")
+    eq(C.LEVEL.pad, MT.LT.PAD); eq(C.LEVEL.gap, MT.LT.GAP); eq(C.LEVEL.minW, MT.LT.MINW); near(C.LEVEL.advance, MT.LT.ADV, 1e-9)
+    eq(C.LEVEL.w, nil, "the level plate has no fixed width")
     eq(C.HEALTH.dx, MT.HEALTH.x - MT.BOXR.x); eq(C.HEALTH.w, MT.HEALTH.w)
     eq(C.TOT.dx, MT.TOT.x - MT.BOXR.x); eq(C.TOT.w, MT.TOT.w)
     eq(C.RISE, MT.BOXR.y - MT.TB_GROW - MT.LEVEL.y, "the level tag stands this far above the grown box top")
@@ -289,6 +311,7 @@ end
 
 function T.the_tags_sit_at_the_mockup_seats_at_two_heights()
     local W = world()
+    __charW = 6.2
     local C = Tg().C
     local box = W.tgt.box
     local boxR = W.Gun.anchors.boxR
@@ -300,7 +323,7 @@ function T.the_tags_sit_at_the_mockup_seats_at_two_heights()
         eq(lp.rel, box.frame, "the level tag rides the box top"); eq(lp.relPoint, "TOPLEFT")
         near(lp.x, (MT.LEVEL.x - MT.BOXR.x) * k, 1e-6, "x")
         near(lp.y, C.RISE * k, 1e-6, "y: above the box top")
-        near(Tg().level._w, MT.LEVEL.w * k, 1e-6); near(Tg().level._h, MT.H * k, 1e-6)
+        near(Tg().level._w, wantW(#levelText()) * k, 1e-6, "the plate fits the text at every height"); near(Tg().level._h, MT.H * k, 1e-6)
         local hp = Tg().health._points.TOPLEFT
         eq(hp.rel, box.frame); eq(hp.relPoint, "BOTTOMLEFT")
         near(hp.x, (MT.HEALTH.x - MT.BOXR.x) * k, 1e-6); near(hp.y, C.OVERLAP * k, 1e-6, "its top is above the box bottom")
@@ -371,57 +394,160 @@ end
 
 -- ---- level and class -------------------------------------------------------------------
 
-function T.the_level_tag_reads_level_and_classification()
+function T.the_level_tag_shows_the_digits_alone_and_the_plate_fits_them()
     local W = world()
+    __charW = 6.2
     target("Kurak")
-    local function check(level, class, want, msg)
-        setUnit(level, class)
-        eq(levelText(), want, msg)
+    for _, row in ipairs({ { 9, "9", 17 }, { 30, "30", 23 }, { 62, "62", 23 } }) do
+        setUnit(row[1], "normal")
+        eq(levelText(), row[2], "level " .. row[1] .. " reads its digits")
+        near(levelW(), row[3], 1e-6, "level " .. row[1] .. " plate width in image px")
+        near(levelW(), wantW(#row[2]), 1e-6, "and it is the mockup formula")
     end
-    check(62, "normal", "L62", "a normal mob: no word")
-    check(62, "elite", "L62 " .. gold() .. "ELITE|r", "elite")
-    check(62, "rare", "L62 " .. gold() .. "RARE|r", "rare")
-    check(62, "rareelite", "L62 " .. gold() .. "RARE|r", "a rare elite reads as the rarer")
-    check(-1, "worldboss", "?? " .. gold() .. "BOSS|r", "a boss of unknown level")
-    check(63, "worldboss", "L63 " .. gold() .. "BOSS|r", "a boss with a level")
-    check(-1, "normal", "??", "level -1 shows ??")
-    check(5, "trivial", "L5", "trivial: no word")
-    check(5, "minus", "L5", "minus: no word")
-    check(nil, nil, "", "no level, no text")
+    for _, class in ipairs({ "normal", "elite", "rare", "rareelite", "worldboss", "trivial", "minus" }) do
+        setUnit(62, class)
+        eq(levelText(), "62", class .. ": no word and no L")
+        ok(Tg().level.label._fmt == nil or Tg().level.label._fmt == "%d", class .. ": the format is the bare number")
+    end
     eq(Tg().level.label._monoColor ~= nil and rgb(Tg().level.label._monoColor), rgb(FS.GunsightBoxes.colors.white), "the level is white")
     W.clean(); noFails()
 end
 
-function T.a_secret_level_goes_only_through_set_formatted_text_and_a_secret_class_loses_its_word()
+function T.a_level_below_one_reads_two_question_marks()
     local W = world()
+    __charW = 6.2
     target("Kurak")
+    for _, level in ipairs({ -1, 0 }) do
+        setUnit(level, "worldboss")
+        eq(levelText(), "??", "level " .. level)
+        near(levelW(), wantW(2), 1e-6, "two characters wide")
+    end
+    setUnit(nil, nil)
+    eq(levelText(), "", "no level, no text")
+    W.clean(); noFails()
+end
+
+function T.the_level_plate_never_shrinks_under_the_minimum()
+    local W = world()
+    __charW = 0.5
+    target("Kurak")
+    setUnit(9, "normal")
+    near(levelW(), Tg().C.LEVEL.minW, 1e-6, "a hair of text still gets the 15 px plate")
+    near(Tg().level._h / K(), Tg().C.H, 1e-6)
+    W.clean(); noFails()
+end
+
+function T.the_level_plate_grows_to_the_right_from_the_same_seat()
+    local W = world()
+    __charW = 6.2
+    target("Kurak")
+    setUnit(9, "normal")
+    local p = Tg().level._points.TOPLEFT
+    local x, y, rel = p.x, p.y, p.rel
+    setUnit(30, "normal")
+    local q = Tg().level._points.TOPLEFT
+    eq(q.rel, rel); near(q.x, x, 1e-9, "the left edge stays"); near(q.y, y, 1e-9, "and the top")
+    local count = 0
+    for _ in pairs(Tg().level._points) do count = count + 1 end
+    eq(count, 1, "one point only: the width is a size, not a second anchor")
+    W.clean(); noFails()
+end
+
+function T.a_secret_level_reserves_two_digits_without_measuring()
+    local W = world()
+    __charW = 6.2
+    local measured = 0
+    for _, name in ipairs({ "GetStringWidth", "GetUnboundedStringWidth" }) do
+        local real = getmetatable(UIParent)[name]
+        getmetatable(UIParent)[name] = function(self, ...)
+            if self == Tg().level.label then measured = measured + 1 end
+            return real(self, ...)
+        end
+    end
+    target("Kurak")
+    measured = 0
     setUnit(__SECRET, "elite")
     local label = Tg().level.label
     eq(label._secretText, true, "the secret level reached SetFormattedText")
     ok(rawequal(label._args[1], __SECRET), "untouched")
-    ok(label._fmt:find("ELITE", 1, true), "the plain word rides the format")
-    ok(label._fmt:find("L%d", 1, true), "the level is a %d argument")
-    setUnit(62, __SECRET_NAME)
-    eq(levelText(), "L62", "a secret classification: the word is left out")
+    eq(label._fmt, "%d", "the level is the only thing in the format: no L, no word")
+    eq(measured, 0, "a secret string is never measured")
+    near(levelW(), math.ceil(2 * Tg().C.LEVEL.pad + 2 * Tg().C.LEVEL.advance * Tg().C.TEXT_SIZE - 1e-6), 1e-6, "two digits reserved")
+    near(levelW(), 23, 1e-6)
     setUnit(__SECRET, __SECRET_NAME)
-    eq(label._secretText, true); ok(not label._fmt:find("ELITE", 1, true) and not label._fmt:find("BOSS", 1, true))
-    W.clean(); noFails("a secret was compared, formatted or tested inside a pcall")
+    eq(measured, 0); near(levelW(), 23, 1e-6, "a secret classification changes nothing")
+    setUnit(9, "normal")
+    near(levelW(), 17, 1e-6, "a plain level afterwards measures again")
+    setUnit(__SECRET, "normal")
+    near(levelW(), 23, 1e-6, "and a secret one widens it back")
+    W.clean(); noFails("a secret was compared, formatted or measured inside a pcall")
 end
 
-function T.the_level_tag_follows_the_target_and_level_events()
+function T.the_level_width_follows_the_target_and_level_events()
     local W = world()
-    __units.target.level, __units.target.class = 61, "normal"
+    __charW = 6.2
+    __units.target.level, __units.target.class = 9, "normal"
     target("Kurak")
-    eq(levelText(), "L61", "read on a target change")
-    __units.target.level = 62
+    eq(levelText(), "9", "read on a target change"); near(levelW(), 17, 1e-6)
+    __units.target.level = 30
+    __fireEvent("PLAYER_TARGET_CHANGED")
+    eq(levelText(), "30"); near(levelW(), 23, 1e-6, "a new target widens the plate")
+    __units.target.level = 8
     __fireUnit("UNIT_LEVEL", "target")
-    eq(levelText(), "L62", "and on UNIT_LEVEL")
-    __units.target.class = "elite"
-    __fireUnit("UNIT_CLASSIFICATION_CHANGED", "target")
-    eq(levelText(), "L62 " .. gold() .. "ELITE|r", "and on a classification change")
+    eq(levelText(), "8"); near(levelW(), 17, 1e-6, "and a level event narrows it")
     __units.target.level = 70
     __fireUnit("UNIT_LEVEL", "player")
-    eq(levelText(), "L62 " .. gold() .. "ELITE|r", "another unit's level is ignored")
+    eq(levelText(), "8", "another unit's level is ignored"); near(levelW(), 17, 1e-6)
+    __units.target.level, __units.target.class = 8, "elite"
+    __fireUnit("UNIT_CLASSIFICATION_CHANGED", "target")
+    eq(levelText(), "8", "a classification change leaves the digits alone")
+    W.clean(); noFails()
+end
+
+function T.the_level_icon_slot_is_empty_and_costs_no_width()
+    local W = world()
+    __charW = 6.2
+    target("Kurak")
+    setUnit(62, "elite")
+    local icon = Tg().level.icon
+    ok(icon ~= nil, "the slot exists")
+    eq(icon:IsShown(), false, "hidden with no icon")
+    near(icon._w or 0, 0, 1e-9, "zero wide")
+    near(levelW(), wantW(2), 1e-6, "elite costs no width until an icon is chosen")
+    -- the follow-up fills the slot: its width and one gap join the content
+    Tg().SetLevelIcon(8)
+    near(levelW(), wantW(2, 8 + Tg().C.LEVEL.gap), 1e-6, "an 8 px icon adds itself and a 3 px gap")
+    Tg().SetLevelIcon(0)
+    near(levelW(), wantW(2), 1e-6, "and removing it gives the width back")
+    W.clean(); noFails()
+end
+
+function T.the_level_plate_is_re_measured_a_frame_after_a_rescale_when_the_font_lands_late()
+    local W = world()
+    __charW = 6.2
+    target("Kurak")
+    setUnit(30, "normal")
+    __fontLag = true
+    UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
+    __fireEvent("UI_SCALE_CHANGED")
+    __flushTimers()
+    near(levelW(), wantW(2), 1e-6, "measured at the new font, not the stale one")
+    eq(Tg().level._h > 0, true)
+    W.clean(); noFails()
+end
+
+function T.the_level_plate_resizes_in_combat_because_it_is_a_plain_frame()
+    local W = world()
+    __charW = 6.2
+    target("Kurak")
+    setUnit(9, "normal")
+    eq(Tg().level:IsProtected(), false)
+    eq(__restricted(Tg().level), false, "nothing protected hangs from it")
+    __combat = true
+    setUnit(30, "normal")
+    near(levelW(), 23, 1e-6, "the width follows the target in combat")
+    eq(#__blocked, 0)
+    __combat = false
     W.clean(); noFails()
 end
 
@@ -634,7 +760,8 @@ function T.a_rescale_in_combat_waits_for_the_seat_and_the_button()
     ok(k ~= oldK, "the scale changed")
     eq(boxR._w, anchorW, "Gunsight's anchor waits for the end of combat: the button hangs from it")
     eq(root._points.CENTER.x, rootX, "and so does its root")
-    near(Tg().level._w, MT.LEVEL.w * k, 1e-6, "the plain tags resized at once")
+    near(Tg().level._h, MT.H * k, 1e-6, "the plain tags resized at once")
+    ok(Tg().level._w >= MT.LT.MINW * k - 1e-6, "and the level plate kept its fitted width")
     near(seat._w, oldW, 1e-9, "the seat waits")
     eq(#__blocked, 0)
     regen()
