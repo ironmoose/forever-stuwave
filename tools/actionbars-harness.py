@@ -127,6 +127,9 @@ function Region:SetAttribute(k, v)
     self._attrs[k] = v
 end
 function Region:GetAttribute(k) return self._attrs[k] end
+-- The numeric id a paged button carries (SecureActionButtonMixin:CalculateAction reads it); 0 when unset.
+function Region:SetID(id) self._id = id end
+function Region:GetID() return self._id or 0 end
 function Region:RegisterForClicks(...) self._clicks = { ... } end
 function Region:RegisterForDrag() end
 function Region:RegisterEvent(e) self._registered[e] = true end
@@ -1166,6 +1169,154 @@ function T.slot_change_to_an_empty_slot_clears_its_cooldown()
     HasAction = function(s) return s ~= slot end
     __fire_event("ACTIONBAR_SLOT_CHANGED", slot)
     eq(b.cooldown._cdObj, nil, "slot change to empty cleared the swipe")
+end
+
+-- ---- the paged main bar rides MainActionBar's live page -------------------------------------
+-- Live test 2026-10-09: stealthed, out of combat, GetActionBarPage() = 1 while MainActionBar's
+-- "actionpage" attribute read 7. A button with an ID, no "action" attribute and
+-- useparent-actionpage resolves a click to the LIVE page through SecureButton_GetModifiedAttribute
+-- (follows frame.bar), including after stealth breaks into combat, with no write from us.
+local function liveSlot(page, i) return (page - 1) * 12 + i end
+
+function T.paged_buttons_carry_an_id_and_follow_mainactionbars_page_by_attribute()
+    for i = 1, 12 do
+        local b = __button(1, i)
+        eq(b:GetID(), i, "id " .. i)
+        eq(b:GetAttribute("action"), nil, "no fixed action attribute " .. i)
+        eq(b:GetAttribute("useparent-actionpage"), true, "follows the parent's page " .. i)
+        eq(b.bar, MainActionBar, "bar is MainActionBar " .. i)
+        eq(b:GetAttribute("type"), "action", "still an action button " .. i)
+        eq(b.action, liveSlot(1, i), "visual slot " .. i)
+    end
+    eq(__blocked, 0)
+end
+
+function T.fixed_bars_keep_their_attribute_slots()
+    for bar = 2, 6 do
+        for i = 1, 12 do
+            local b = __button(bar, i)
+            eq(b:GetID(), 0, ("bar %d id"):format(bar))
+            eq(b:GetAttribute("action"), b.action, ("bar %d attribute is its slot"):format(bar))
+            eq(b:GetAttribute("useparent-actionpage"), nil, ("bar %d has no page parent"):format(bar))
+            eq(b.bar, nil, ("bar %d has no bar field"):format(bar))
+        end
+    end
+    -- and a page change never touches them, in or out of combat
+    local before = __button(3, 4).action
+    MainActionBar:SetAttribute("actionpage", 7)
+    __fire_event("UPDATE_BONUS_ACTIONBAR")
+    eq(__button(3, 4).action, before)
+    eq(__button(3, 4):GetAttribute("action"), before)
+end
+
+function T.paged_bonus_page_change_in_combat_writes_nothing_and_the_visuals_follow()
+    local seen = {}
+    function GetActionTexture(slot) return "tex" .. slot end
+    function GameTooltip:SetAction(slot) seen[#seen + 1] = slot end
+    __combat = true
+    __attrWrites = 0
+    for n, event in ipairs({ "UPDATE_BONUS_ACTIONBAR", "ACTIONBAR_PAGE_CHANGED", "UPDATE_SHAPESHIFT_FORM",
+        "UPDATE_VEHICLE_ACTIONBAR", "UPDATE_OVERRIDE_ACTIONBAR", "UPDATE_POSSESS_BAR" }) do
+        local page = 6 + n          -- a different page each time
+        MainActionBar:SetAttribute("actionpage", page)
+        __fire_event(event)
+        for _, i in ipairs({ 1, 6, 12 }) do
+            local b = __button(1, i)
+            eq(b.action, liveSlot(page, i), event .. " slot " .. i)
+            eq(b.icon._texture, "tex" .. liveSlot(page, i), event .. " icon " .. i)
+        end
+    end
+    eq(__attrWrites, 0, "no SetAttribute on any secure button in combat")
+    eq(__blocked, 0, "nothing was refused")
+    -- the same slot feeds the tooltip
+    __button(1, 3).Fire(__button(1, 3), "OnEnter")
+    eq(seen[#seen], liveSlot(12, 3), "tooltip reads the live slot")
+    -- and combat ending changes neither the slots nor the attribute count
+    __combat = false
+    __fire_event("PLAYER_REGEN_ENABLED")
+    eq(__button(1, 1).action, liveSlot(12, 1), "held after combat")
+    eq(__attrWrites, 0, "regen writes nothing either")
+end
+
+function T.paged_page_is_read_again_on_the_next_frame_without_stacking()
+    -- Blizzard may write MainActionBar's attribute after our event handler ran in the same frame.
+    __fire_event("UPDATE_BONUS_ACTIONBAR")
+    __fire_event("ACTIONBAR_PAGE_CHANGED")
+    __fire_event("UPDATE_SHAPESHIFT_FORM")
+    eq(#__timers, 1, "one pending re-read, not one per event")
+    MainActionBar:SetAttribute("actionpage", 7)     -- the controller's late write
+    eq(__button(1, 2).action, liveSlot(1, 2), "not yet seen")
+    __flushTimers()
+    eq(__button(1, 2).action, liveSlot(7, 2), "caught on the next frame")
+    eq(__button(1, 2).icon._texture, "tex", "repainted")
+    eq(#__timers, 0)
+    __fire_event("UPDATE_BONUS_ACTIONBAR")
+    eq(#__timers, 1, "a later event can queue again")
+end
+
+function T.paged_next_frame_reread_in_combat_writes_nothing()
+    __combat = true
+    __attrWrites = 0
+    __fire_event("UPDATE_BONUS_ACTIONBAR")
+    MainActionBar:SetAttribute("actionpage", 8)
+    __flushTimers()
+    eq(__button(1, 5).action, liveSlot(8, 5))
+    eq(__attrWrites, 0)
+end
+
+function T.paged_click_resolves_to_the_live_page_in_combat()
+    -- __calcAction is SecureActionButtonMixin:CalculateAction (SecureTemplates.lua:670-686) over
+    -- SecureButton_GetModifiedAttribute's useparent-<name> / frame.bar walk.
+    __combat = true
+    for _, page in ipairs({ 1, 7, 9, 12 }) do
+        MainActionBar:SetAttribute("actionpage", page)
+        __fire_event("UPDATE_BONUS_ACTIONBAR")
+        for i = 1, 12 do
+            local b = __button(1, i)
+            eq(__calcAction(b), liveSlot(page, i), ("click page %d slot %d"):format(page, i))
+            eq(__calcAction(b), b.action, "what is drawn is what the click fires")
+        end
+    end
+    -- a fixed bar still resolves from its attribute
+    eq(__calcAction(__button(3, 4)), __button(3, 4).action)
+    -- and with the attribute path gone no stale slot can be fired from the old page
+    eq(__button(1, 1):GetAttribute("action"), nil)
+end
+
+function T.paged_page_falls_back_to_the_clients_page_calls_when_the_attribute_is_unset()
+    -- MainActionBar exists but Blizzard has not written "actionpage" yet.
+    eq(MainActionBar:GetAttribute("actionpage"), nil, "fixture: no attribute")
+    function HasBonusActionBar() return true end
+    function GetBonusBarIndex() return 7 end
+    __fire_event("UPDATE_BONUS_ACTIONBAR")
+    eq(__button(1, 1).action, liveSlot(7, 1))
+end
+
+function T.paged_buttons_keep_the_attribute_path_when_mainactionbar_is_missing()
+    eq(MainActionBar, nil, "fixture: no MainActionBar")
+    for i = 1, 12 do
+        local b = __button(1, i)
+        eq(b:GetID(), 0, "no id")
+        eq(b:GetAttribute("useparent-actionpage"), nil)
+        eq(b.bar, nil)
+        eq(b:GetAttribute("action"), liveSlot(1, i), "fixed attribute as before")
+    end
+    function HasBonusActionBar() return true end
+    function GetBonusBarIndex() return 7 end
+    -- out of combat the attribute is re-pointed
+    __fire_event("UPDATE_BONUS_ACTIONBAR")
+    eq(__button(1, 4):GetAttribute("action"), liveSlot(7, 4))
+    eq(__button(1, 4).action, liveSlot(7, 4))
+    -- in combat it is deferred, and caught up when combat ends
+    function GetBonusBarIndex() return 8 end
+    __combat = true
+    __fire_event("UPDATE_BONUS_ACTIONBAR")
+    eq(__blocked, 0, "no refused write")
+    eq(__button(1, 4):GetAttribute("action"), liveSlot(7, 4), "held through the fight")
+    __combat = false
+    __fire_event("PLAYER_REGEN_ENABLED")
+    eq(__button(1, 4):GetAttribute("action"), liveSlot(8, 4), "caught up at regen")
+    eq(__button(1, 4).action, liveSlot(8, 4))
 end
 
 -- ---- Quick Keybind ------------------------------------------------------
@@ -2713,7 +2864,55 @@ COUNT_APIS = """
     GetBindingKey = function(action) __keyAsked = __keyAsked + 1; return realGetBindingKey(action) end
 """
 
+# A live MainActionBar, as Blizzard builds it: an insecure bar whose "actionpage" attribute the
+# ActionBarController rewrites. __attrWrites counts every SetAttribute our secure buttons receive;
+# __calcAction is SecureActionButtonMixin:CalculateAction (SecureTemplates.lua:670-686) with the
+# useparent-<name> / frame.bar walk of SecureButton_GetModifiedAttribute (:127-132); C_Timer.After
+# queues until __flushTimers (the next frame).
+LIVE_BAR = """
+MainActionBar = CreateFrame("Frame", "MainActionBar", UIParent)
+__attrWrites = 0
+do
+    local real = __Region.SetAttribute
+    function __Region:SetAttribute(k, v)
+        if self._secure then __attrWrites = __attrWrites + 1 end
+        return real(self, k, v)
+    end
+end
+C_ActionBar.GetActionBarPage = function() return 1 end
+__timers = {}
+C_Timer = { After = function(_, fn) __timers[#__timers + 1] = fn end }
+function __flushTimers()
+    local run = __timers
+    __timers = {}
+    for _, fn in ipairs(run) do fn() end
+end
+local function modifiedAttribute(frame, name)
+    local value = frame:GetAttribute(name)
+    if value == nil and frame:GetAttribute("useparent-" .. name) then
+        local parent = frame.bar or frame:GetParent()
+        if parent then value = modifiedAttribute(parent, name) end
+    end
+    return value
+end
+function __calcAction(self)
+    if self:GetID() > 0 then
+        local page = modifiedAttribute(self, "actionpage")
+        if not page then page = C_ActionBar.GetActionBarPage() end
+        return self:GetID() + (page - 1) * 12
+    end
+    return modifiedAttribute(self, "action") or 1
+end
+"""
+
 VARIANTS = {
+    "paged_buttons_carry_an_id_and_follow_mainactionbars_page_by_attribute": LIVE_BAR,
+    "fixed_bars_keep_their_attribute_slots": LIVE_BAR,
+    "paged_bonus_page_change_in_combat_writes_nothing_and_the_visuals_follow": LIVE_BAR,
+    "paged_page_is_read_again_on_the_next_frame_without_stacking": LIVE_BAR,
+    "paged_next_frame_reread_in_combat_writes_nothing": LIVE_BAR,
+    "paged_click_resolves_to_the_live_page_in_combat": LIVE_BAR,
+    "paged_page_falls_back_to_the_clients_page_calls_when_the_attribute_is_unset": LIVE_BAR,
     "bar6_first_slot_follows_the_clients_multibar5_page": "MULTIBAR_5_ACTIONBAR_PAGE = 15",
     "gcd_swipe_is_asked_for_with_the_gcd_included_and_applied": """
         __gcdSeen = {}

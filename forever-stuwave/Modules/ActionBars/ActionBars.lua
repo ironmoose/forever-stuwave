@@ -18,9 +18,24 @@
 -- whose attributes are set from plain Lua. Click handling is C-side, so no
 -- restricted closure is in the path at all.
 --
--- The cost is paging. Without a secure state driver the page can only be
--- re-pointed OUT of combat, so a mid-fight stance dance will not re-page until
--- combat ends. Bars 2-6 are fixed slot ranges and are unaffected.
+-- Paging, bar 1. Re-pointing a button's "action" attribute is blocked in combat,
+-- and there is no secure state driver to do it for us, so the paged buttons do
+-- not carry a fixed "action" at all. Each has an ID (its position, 1-12), no
+-- "action" attribute, "useparent-actionpage" set and `button.bar` pointing at
+-- MainActionBar. SecureActionButtonMixin:CalculateAction (SecureTemplates.lua)
+-- then reads the page through SecureButton_GetModifiedAttribute, which follows
+-- useparent-actionpage to frame.bar, and Blizzard's ActionBarController keeps
+-- MainActionBar's "actionpage" attribute live (bonus, vehicle, override, temp
+-- shapeshift) with its own secure code. The click resolves the live page at
+-- click time, in combat too, and we write nothing. Live test 2026-10-09
+-- (stealthed Rogue, out of combat): GetActionBarPage() = 1 while
+-- MainActionBar:GetAttribute("actionpage") = 7; after breaking stealth into
+-- combat a click on the first button fired page-1 slot 1 (Attack), i.e. the
+-- live page. `button.action` is only the plain Lua field our icon, cooldown,
+-- usable and tooltip code reads, and it follows the same attribute in and out
+-- of combat (ApplyPage). If MainActionBar is missing the old attribute path
+-- stays: it can only re-point out of combat. Bars 2-6 are fixed slot ranges and
+-- are unaffected.
 --
 -- Layout is the mockup, not an approximation -- mockups/full-ui-layout.html,
 -- role "actionbars":
@@ -891,32 +906,70 @@ local function UpdateAllState()
     end
 end
 
--- Re-points the paged bar at the current page. Attribute writes are illegal in
--- combat, so a page change mid-fight is remembered and applied on regen -- the
--- one real cost of having no secure state driver.
+-- The paged bar's page. With MainActionBar present the buttons ride its live
+-- "actionpage" attribute (see the header), so the visuals read the same attribute
+-- the click resolves; before Blizzard has written it, or without MainActionBar,
+-- ask the client directly.
+local pagedHost    -- MainActionBar when the paged buttons ride its live page, else nil
+
+local function LivePage()
+    local host = pagedHost
+    local page = host and host:GetAttribute("actionpage")
+    if type(page) == "number" and page >= 1 then return page end
+    return CurrentPage()
+end
+
+local function FindPagedHost()
+    local bar = _G.MainActionBar
+    if type(bar) == "table" and type(bar.GetAttribute) == "function" then return bar end
+    return nil
+end
+
+-- Points button.action (the field the draw code reads) at the current page. On
+-- the live path that is all: the click already follows the page. Without
+-- MainActionBar the fixed "action" attribute is re-pointed too, which is illegal
+-- in combat, so a page change mid-fight is remembered and applied on regen.
+-- Returns whether any slot moved.
 local pendingPage = false
 
-local function ApplyPage()
-    local page = CurrentPage()
+local function ApplyPage(onlyIfChanged)
+    local page = LivePage()
+    local changed = false
     for _, button in ipairs(allButtons) do
         if button.paged then
             local slot = (page - 1) * BUTTONS_PER_BAR + button.index
             if button.action ~= slot then
                 button.action = slot
-                button:SetAttribute("action", slot)
+                changed = true
+                if not pagedHost then button:SetAttribute("action", slot) end
             end
         end
     end
-    UpdateAll()
+    if changed or not onlyIfChanged then UpdateAll() end
+    return changed
 end
 
+local rereadQueued = false
+
 local function RequestPage()
-    if InCombatLockdown() then
-        pendingPage = true
+    if not pagedHost then
+        if InCombatLockdown() then
+            pendingPage = true
+            return
+        end
+        pendingPage = false
+        ApplyPage()
         return
     end
-    pendingPage = false
     ApplyPage()
+    -- Blizzard may write MainActionBar's attribute after our event ran, in the same frame.
+    if not rereadQueued and C_Timer and C_Timer.After then
+        rereadQueued = true
+        C_Timer.After(0, function()
+            rereadQueued = false
+            ApplyPage(true)
+        end)
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -1214,8 +1267,9 @@ local function BuildBar(spec, geo, parent)
 
         button.index = i
         button.paged = spec.paged
+        if spec.paged and pagedHost == nil then pagedHost = FindPagedHost() end
         button.action = spec.paged
-            and ((CurrentPage() - 1) * BUTTONS_PER_BAR + i)
+            and ((LivePage() - 1) * BUTTONS_PER_BAR + i)
             or (spec.firstAction + i - 1)
 
         -- The canonical binding name for this slot. Note it follows the BAR
@@ -1226,11 +1280,20 @@ local function BuildBar(spec, geo, parent)
 
         SetupDrag(button)
 
-        -- The whole design, in two lines. No snippet, no state driver: the
+        -- The whole design, in a few lines. No snippet, no state driver: the
         -- client resolves these C-side on click. Verified in game 2026-09-20
-        -- with a single test button before any of this was built.
+        -- with a single test button before any of this was built. A paged
+        -- button has no fixed slot: an ID and the live page of MainActionBar
+        -- instead (see the header, live test 2026-10-09).
         button:SetAttribute("type", "action")
-        button:SetAttribute("action", button.action)
+        if spec.paged and pagedHost then
+            button:SetID(i)
+            button:SetAttribute("action", nil)
+            button:SetAttribute("useparent-actionpage", true)
+            button.bar = pagedHost
+        else
+            button:SetAttribute("action", button.action)
+        end
 
         -- Mouseover / self / focus casting. SecureButton_GetModifiedUnit (retail
         -- 12.1 SecureTemplates.lua) honours the enableMouseoverCast CVar and the
@@ -1520,7 +1583,11 @@ local function OnEvent(_, event, arg1)
             pendingSeat = true
         end
         if pendingSeat then RequestSeat() end
-        if pendingPage then RequestPage() end
+        if pendingPage then
+            RequestPage()
+        elseif pagedHost then
+            ApplyPage(true)     -- held through the fight, so normally unchanged; a missed event is caught here
+        end
         UpdateAll()
     elseif event == "ACTIONBAR_SLOT_CHANGED" then
         -- arg1 is the changed slot, or 0 meaning "all of them".
@@ -1535,6 +1602,7 @@ local function OnEvent(_, event, arg1)
         or event == "UPDATE_BONUS_ACTIONBAR"
         or event == "UPDATE_VEHICLE_ACTIONBAR"
         or event == "UPDATE_OVERRIDE_ACTIONBAR"
+        or event == "UPDATE_POSSESS_BAR"
         or event == "UPDATE_SHAPESHIFT_FORM" then
         RequestPage()
     elseif event == "CURRENT_SPELL_CAST_CHANGED"
@@ -1566,6 +1634,7 @@ local function RegisterEvents()
         "UPDATE_VEHICLE_ACTIONBAR",
         "UPDATE_OVERRIDE_ACTIONBAR",
         "UPDATE_SHAPESHIFT_FORM",
+        "UPDATE_POSSESS_BAR",
         "SPELL_UPDATE_COOLDOWN",
         "SPELL_UPDATE_USABLE",
         "PLAYER_TARGET_CHANGED",
