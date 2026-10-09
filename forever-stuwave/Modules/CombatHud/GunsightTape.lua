@@ -12,8 +12,16 @@
 --
 -- NO STATE MACHINE HERE. CastBars.lua owns every cast rule (events, verdicts, secrets, the strip
 -- fallback); this file builds two bar tables with the members that state machine drives and hands them
--- over through FS.CastBars.SetView (the VIEW SEAM in CastBars.lua). With the Gunsight off none of this
--- is built and Stack A runs untouched; `/fsgun off` is the fallback.
+-- over through FS.CastBars.SetView (the VIEW SEAM in CastBars.lua). With the Gunsight off at login none
+-- of this is built and Stack A runs untouched; `/fsgun off` is the fallback.
+--
+-- THE MASTER SWITCH IS LIVE. Gunsight.OnActiveChanged tells this file when the HUD stops or starts being the
+-- display (the config window's toggle, /fsgun, a profile switch): inactive -> FS.CastBars.ClearView hands the
+-- casts back to Stack A (player and target bars, a cast in progress picked up from the units), active ->
+-- SetView takes them again and the tapes are laid out afresh (a rescale while the root was hidden had no
+-- rects). The tape frames are built once and reused, so toggling adds no frame and no event registration.
+-- The HUD is only ever active with its root really shown (in combat a switch-on waits for the Show), so
+-- there is never a moment with no cast display or with two.
 --
 -- A TAPE (BuildTape), all of it children of one piece frame that fills the anchor:
 --   plate     the chamfered fill, rgba(13,6,32,.55) under A(.3)
@@ -811,6 +819,8 @@ local function HideBuilt()
     end
 end
 
+local view   -- the { player, target } bar tables handed to CastBars, the same pair every time
+
 local function Build()
     if not Gunsight.IsEnabled() then return end
     local you = BuildTape("you", Gunsight.anchors.tapeL, false)
@@ -821,8 +831,9 @@ local function Build()
 
     -- The state machine: CastBars drives these two bar tables instead of Stack A.
     local castBars = FS.CastBars
+    view = { player = you.S, target = tgt.S }
     if type(castBars) == "table" and type(castBars.SetView) == "function" then
-        if not castBars.SetView({ player = you.S, target = tgt.S }) then
+        if not castBars.SetView(view) then
             LogOnce("viewrefused", "FS.CastBars.SetView refused the view; Stack A keeps drawing the casts.")
         end
     else
@@ -852,6 +863,23 @@ local function Build()
         end)
     end
 end
+
+-- The master switch followed live: the tapes are the cast display exactly while the Gunsight is active.
+Gunsight.OnActiveChanged(function(active)
+    local you, tgt = GunsightTape.you, GunsightTape.tgt
+    local castBars = FS.CastBars
+    if not (you and tgt and view and type(castBars) == "table") then return end
+    if active then
+        if type(castBars.SetView) ~= "function" then return end
+        -- The root was hidden, so a rescale since had no rects to snap the chevrons to.
+        LayoutTape(you)
+        tgt.dirty = true
+        RelayoutIfDirty(tgt)
+        castBars.SetView(view)
+    elseif type(castBars.ClearView) == "function" then
+        castBars.ClearView()
+    end
+end)
 
 Gunsight.OnReady(function()
     local ok, err = pcall(Build)

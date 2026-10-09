@@ -774,6 +774,32 @@ function T.the_master_toggle_writes_config_and_waits_for_a_reload()
     no(row("Gunsight HUD").control.fsChecked)
 end
 
+function T.the_master_toggle_applies_live_and_prompts_a_reload_only_for_what_cannot_be_live()
+    local W = boot()
+    W.Open("gunsight")
+    no(hasText(win(), "Reload to"), "no prompt while the HUD matches what was built")
+    local reloads = 0
+    ReloadUI = function() reloads = reloads + 1 end
+    press("Gunsight HUD")
+    eq(FS.Gunsight.IsActive(), false, "applied at once")
+    eq(FS.Gunsight.root:IsShown(), false, "the HUD is hidden without a reload")
+    yes(hasText(win(), "Reload to"), "the classic combat HUD needs a reload: a prompt on the row")
+    yes(click("Reload", win()), "the prompt's button works")
+    eq(reloads, 1, "and reloads the UI")
+    press("Gunsight HUD")
+    eq(FS.Gunsight.IsActive(), true)
+    no(hasText(win(), "Reload to"), "back to the built state: the prompt goes")
+end
+
+function T.a_gunsight_off_at_login_prompts_a_reload_to_build_it()
+    local W = boot({ db = { gunsight = { enabled = false } } })
+    W.Open("gunsight")
+    no(hasText(win(), "Reload to"), "nothing owed at login")
+    press("Gunsight HUD")
+    eq(FS.Gunsight.IsActive(), false, "the pieces were never built")
+    yes(hasText(win(), "Reload to build the Gunsight HUD"), "so a reload is the way")
+end
+
 function T.the_master_toggle_explains_the_reload_in_a_tooltip()
     local W = boot()
     W.Open("gunsight")

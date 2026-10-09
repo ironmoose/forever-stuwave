@@ -1056,6 +1056,103 @@ Gs.SetPiece("you", false, true)
 check(not f:IsShown(), "an unprotected frame hides normally in combat")
 """)
 
+case("master_switch_applies_live_to_the_root_and_tells_listeners")(r"""
+local Gs = boot({ height = 1440, db = {} })
+check(Gs.IsActive() == true, "a Gunsight enabled at load is active")
+check(Gs.IsEnabled() == true and Gs.NeedsReload() == nil, "nothing to reload at load")
+local seen = {}
+Gs.OnActiveChanged(function(active) seen[#seen + 1] = tostring(active) end)
+FS.Config.Set("gunsight.enabled", false)
+check(not Gs.root:IsShown(), "master off hides the whole HUD (the root)")
+check(Gs.IsActive() == false, "and it is no longer active")
+check(Gs.IsEnabled() == true, "IsEnabled stays what was BUILT at load")
+check(type(Gs.NeedsReload()) == "string" and Gs.NeedsReload():lower():find("reload", 1, true), "the classic combat HUD was never built: a reload prompt")
+FS.Config.Set("gunsight.enabled", true)
+check(Gs.root:IsShown(), "master on shows it again")
+near(Gs.root:GetAlpha(), 1, "alpha")
+check(Gs.IsActive() == true and Gs.NeedsReload() == nil, "active again, no prompt")
+FS.Config.Set("gunsight.enabled", true)
+check(table.concat(seen, ",") == "false,true", "each flip is announced once, a repeat not at all: " .. table.concat(seen, ","))
+""")
+
+case("showing_the_root_again_redraws_the_pieces_that_are_on")(r"""
+local Gs = boot({ height = 1440, db = {} })
+local log = {}
+local function piece(key)
+    local f = CreateFrame("Frame", nil, Gs.root)
+    Gs.RegisterPiece(key, { frame = f, onShow = function() log[#log + 1] = key end })
+end
+piece("buff"); piece("shard")
+Gs.SetPiece("shard", false, true)
+log = {}
+FS.Config.Set("gunsight.enabled", false)
+check(#log == 0, "hiding the root runs no hook")
+FS.Config.Set("gunsight.enabled", true)
+check(table.concat(log, ",") == "buff", "only the piece that is on redraws (its pulse may have stopped): " .. table.concat(log, ","))
+""")
+
+case("master_off_in_combat_fades_now_and_hides_after_combat")(r"""
+local Gs = boot({ height = 1440, db = {} })
+Gs.root.protected = true          -- a parent of the protected target of target button
+local seen = {}
+Gs.OnActiveChanged(function(active) seen[#seen + 1] = tostring(active) end)
+Gs.root.calls = {}
+IN_COMBAT = true
+FS.Config.Set("gunsight.enabled", false)
+check(Gs.root.calls.Hide == nil and Gs.root.calls.Show == nil, "no Show or Hide on a protected root in combat")
+near(Gs.root:GetAlpha(), 0, "the HUD disappears by alpha")
+check(Gs.IsActive() == false and table.concat(seen, ",") == "false", "inactive at once: " .. table.concat(seen, ","))
+IN_COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+check(not Gs.root:IsShown(), "hidden for real once combat ends")
+check(table.concat(seen, ",") == "false", "no second announcement")
+check(#BLOCKED == 0, "nothing protected was attempted in combat")
+""")
+
+case("master_on_in_combat_waits_for_the_end_of_combat_when_the_root_is_hidden")(r"""
+local Gs = boot({ height = 1440, db = {} })
+Gs.root.protected = true
+FS.Config.Set("gunsight.enabled", false)
+check(not Gs.root:IsShown(), "hidden out of combat")
+local seen = {}
+Gs.OnActiveChanged(function(active) seen[#seen + 1] = tostring(active) end)
+IN_COMBAT = true
+FS.Config.Set("gunsight.enabled", true)
+check(not Gs.root:IsShown() and Gs.IsActive() == false, "cannot show a protected root in combat: not active yet")
+check(#seen == 0, "no announcement until it really shows")
+IN_COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+check(Gs.root:IsShown() and Gs.IsActive() == true and table.concat(seen, ",") == "true", "shown and announced after combat")
+check(#BLOCKED == 0, "nothing protected was attempted in combat")
+""")
+
+case("master_toggled_back_on_in_combat_cancels_the_pending_hide")(r"""
+local Gs = boot({ height = 1440, db = {} })
+Gs.root.protected = true
+IN_COMBAT = true
+FS.Config.Set("gunsight.enabled", false)
+Gs.root.calls = {}
+FS.Config.Set("gunsight.enabled", true)
+near(Gs.root:GetAlpha(), 1, "visible again by alpha")
+check(Gs.IsActive() == true, "active at once: the root never left the screen")
+IN_COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+check(Gs.root:IsShown(), "and the deferred hide was cancelled")
+check(Gs.root.calls.Hide == nil, "Hide was never called")
+""")
+
+case("a_gunsight_off_at_load_cannot_be_switched_on_live")(r"""
+local Gs = boot({ height = 1440, db = { gunsight = { enabled = false } } })
+check(Gs.IsEnabled() == false and Gs.IsActive() == false, "nothing built, nothing active")
+local seen = {}
+Gs.OnActiveChanged(function(active) seen[#seen + 1] = tostring(active) end)
+FS.Config.Set("gunsight.enabled", true)
+check(Gs.IsActive() == false and #seen == 0, "the pieces were never built: still inactive, no announcement")
+check(type(Gs.NeedsReload()) == "string" and Gs.NeedsReload():lower():find("reload", 1, true), "a reload prompt")
+FS.Config.Set("gunsight.enabled", false)
+check(Gs.NeedsReload() == nil, "back to the loaded state: no prompt")
+""")
+
 case("register_piece_rejects_bad_input")(r"""
 local Gs = boot({ height = 1440, db = {} })
 local f = CreateFrame("Frame", nil, Gs.root)
@@ -1092,7 +1189,8 @@ check(table.concat(PRINTED, "\n"):lower():find("reload", 1, true), "off must say
 PRINTED = {}
 slash("on")
 check(FS.Config.Get("gunsight.enabled") == true, "on did not save")
-check(table.concat(PRINTED, "\n"):lower():find("reload", 1, true), "on must say a reload is needed")
+check(not table.concat(PRINTED, "\n"):lower():find("reload", 1, true), "on again matches what was built: applied live, no reload")
+check(table.concat(PRINTED, "\n"):find("enabled", 1, true), "on says it is enabled")
 slash("seat 12 -7")
 check(ForeverSTUwaveDB.gunsight.seat.dx == 12 and ForeverSTUwaveDB.gunsight.seat.dy == -7, "seat not saved")
 near(select(4, Gs.root:GetPoint(1)), -6.4 + 12, "seat re-seats live")

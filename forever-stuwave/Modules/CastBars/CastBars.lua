@@ -41,12 +41,16 @@
 -- schedule (the start/end it was handed), never from an event payload or a secret.
 --
 -- STACK PLACEMENT (PlaceStack). Everything is in UIParent units (the bars are UIParent
--- children at scale 1). INTERIM layout until the new centre console design lands: a FIXED seat,
--- the gap centre at (0, -317) from UIParent's CENTER (the middle of the old bars' seats, -300
--- player and -334 target), with GAP (18, the gap of the approved off-state mockup
--- mockups/off-state-and-bridge-2026-10-02.html) between the two frames:
+-- children at scale 1). Each bar sits on its own FS.Layout entry, `tcast` and `pcast` (CENTER offsets
+-- from UIParent's CENTER in UI units: unscaled, noSize, so /fsedit can move them like any component
+-- and the fitted bar width stays). The defaults are the old fixed seat: the gap centre at (0, -317)
+-- with GAP (18, the gap of the approved off-state mockup mockups/off-state-and-bridge-2026-10-02.html)
+-- between the two frames, i.e. tcast y -297 and pcast y -337:
 --     target frame CENTER = (SEAT_X, SEAT_Y + GAP / 2 + FRAME_H / 2)
 --     player frame CENTER = (SEAT_X, SEAT_Y - GAP / 2 - FRAME_H / 2)
+-- Those two formulas are the fallback when FS.Layout (or an entry) is missing. The bars are registered
+-- with FS.Layout.Apply at build, so a layout re-seat (/fsedit drop, reset, rescale) puts them back on
+-- the entry; the snapped placement below then re-runs from Layout.OnRescale.
 -- Nothing here reads `_G.ForeverDebugBridgeFrame`: the dev strip moved into the data bar, and a
 -- stack that centred on it would follow it to the bottom of the screen. Each frame's offsets are
 -- snapped so its left and bottom edges sit on whole physical pixels (SnapOffset, one pixel = the
@@ -109,8 +113,13 @@
 -- readout froze and before the engine's outage starts; Stack A bars have none, so Stack A is untouched.
 -- The view bar's readout ticker is a table with Show / Hide that installs its
 -- OnUpdate only while shown, so nothing runs between casts. SetView is one shot and returns false,
--- touching nothing, for a view that is incomplete or a second call. With no view set none of this
--- is read: Stack A runs exactly as it always did (`/fsgun off` is that state).
+-- touching nothing, for a view that is incomplete or while another view is active. The seam is
+-- REVERSIBLE: FS.CastBars.ClearView() stands the view bars down (events off, engine stopped, readout
+-- ended; the frames are theirs to hide) and brings Stack A back (events wired again, re-read from the
+-- units, so a cast in progress shows on whichever display takes over); SetView can then take the same
+-- bars again. Nothing is built twice: the event frames and view tickers are made once and reused, so
+-- repeated hand-offs add no frame and no registration. FS.CastBars.IsStackActive() says whether Stack A
+-- is the display. With no view set none of this is read: Stack A runs exactly as it always did.
 --
 -- Exported as FS.playerCastBar / FS.targetCastBar (the bar tables: .frame, .run, ...) and
 -- FS.CastBars (the idle row API, SetView).
@@ -441,7 +450,15 @@ local function SeatBar(S, x, y, px, ux, uy)
     return moved
 end
 
--- Seats both bars on the fixed seat. Returns true when either bar moved.
+-- The CENTER offsets of one bar: its FS.Layout entry (`tcast` / `pcast`, UI units), or the old fixed
+-- seat when Layout or the entry is missing or unusable.
+local function StackSeat(id, fallbackY)
+    local L = FS.Layout and FS.Layout[id]
+    if type(L) == "table" and IsNum(L.x) and IsNum(L.y) then return L.x, L.y end
+    return SEAT_X, fallbackY
+end
+
+-- Seats both bars on their layout entries. Returns true when either bar moved.
 local function PlaceStack()
     local player, target = bars.player, bars.target
     if not (player and target) then return false end
@@ -454,8 +471,10 @@ local function PlaceStack()
     if not (IsNum(px) and px > 0 and IsNum(ux) and IsNum(uy)) then px = nil end
 
     local half = GAP / 2 + FRAME_H / 2
-    local movedTarget = SeatBar(target, SEAT_X, SEAT_Y + half, px, ux, uy)
-    local movedPlayer = SeatBar(player, SEAT_X, SEAT_Y - half, px, ux, uy)
+    local tx, ty = StackSeat("tcast", SEAT_Y + half)
+    local pX, pY = StackSeat("pcast", SEAT_Y - half)
+    local movedTarget = SeatBar(target, tx, ty, px, ux, uy)
+    local movedPlayer = SeatBar(player, pX, pY, px, ux, uy)
     return movedTarget or movedPlayer
 end
 
@@ -1100,8 +1119,16 @@ end
 -- Events
 -------------------------------------------------------------------------------
 
+-- Idempotent: the event frame is made once per bar and reused (a hand-off between displays calls this
+-- again), so repeated hand-offs add neither a frame nor a second registration.
 local function WireEvents(S)
-    local events = CreateFrame("Frame")
+    local events = S.events
+    if events then
+        events:UnregisterAllEvents()
+    else
+        events = CreateFrame("Frame")
+        S.events = events
+    end
     for _, event in ipairs(CAST_EVENTS) do
         SafeRegisterUnitEvent(events, event, S.unit)
     end
@@ -1113,11 +1140,11 @@ local function WireEvents(S)
 
     -- One closure per bar, built here: the step is pcall'd directly (no per-event closure the way
     -- TryStep would take one), and a failure is reported under the event's name like TryStep does.
-    events:SetScript("OnEvent", function(_, event, _, castID, _, interruptedBy)
+    S.onEvent = S.onEvent or function(_, event, _, castID, _, interruptedBy)
         local stepOk, stepErr = pcall(HandleEvent, S, event, castID, interruptedBy)
         if not stepOk then print(DescribeCastBarStep(event) .. " failed: " .. tostring(stepErr)) end
-    end)
-    S.events = events
+    end
+    events:SetScript("OnEvent", S.onEvent)
 end
 
 -- Re-places the stack when the scale or display changes (and at login and on entering the world).
@@ -1129,6 +1156,21 @@ local function WirePlacement()
     watcher:SetScript("OnEvent", function()
         pcall(PlaceAndRefit)
     end)
+    -- A layout re-seat (an /fsedit drop or reset, a rescale) puts each bar back on its entry unsnapped;
+    -- the snapped placement runs again from here.
+    if FS.Layout and FS.Layout.OnRescale then
+        FS.Layout.OnRescale(function() pcall(PlaceAndRefit) end)
+    end
+end
+
+-- Registers the two bars with FS.Layout so /fsedit and the layout re-seat know them. Apply seats the bar
+-- on its entry once (noSize keeps the fitted width); PlaceStack then snaps it.
+local function RegisterLayout(player, target)
+    if not (FS.Layout and type(FS.Layout.Apply) == "function") then return end
+    for _, pair in ipairs({ { player, "pcast" }, { target, "tcast" } }) do
+        local ok, err = pcall(FS.Layout.Apply, pair[1].frame, pair[2])
+        if not ok then FS.LogDegradeOnce("castbar_layout_" .. pair[2], "cast bar layout entry failed: " .. tostring(err)) end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -1195,15 +1237,27 @@ end
 
 -- Stack A stops listening and drawing: events cleared, engine stopped, readout ended, frames
 -- hidden. The tables stay (FS.playerCastBar / FS.targetCastBar, PlaceStack).
-local function RetireBar(S)
-    S.retired = true
+local function SilenceEvents(S)
     S.events:SetScript("OnEvent", nil)
     S.events:UnregisterAllEvents()      -- the frame is silent for good, not merely handler-less
+end
+
+local function RetireBar(S)
+    S.retired = true
+    SilenceEvents(S)
     ClearReadout(S)
     S.run:Stop()
     S.strip:Hide()
     S.frame:Hide()
     S.mode = nil
+end
+
+-- A view bar stands down: back to its resting look (readout ended, icon, shield and name cleared, strips
+-- hidden, the engine on its idle row; the frame itself is the view's, never hidden here), then silent.
+local function StandDownViewBar(S)
+    GoIdle(S)
+    SilenceEvents(S)
+    S.retired = true
 end
 
 -- The readout ticker of a view bar: Show installs the OnUpdate and shows the frame, Hide clears
@@ -1224,19 +1278,21 @@ local function BuildViewTicker(S)
     return ticker
 end
 
-local viewSet = false
+local activeView = nil
 
--- Hands the cast state machine to another display. True when the view was taken.
+-- Hands the cast state machine to another display. True when the view was taken; false for an unusable
+-- view or while a view is already active (ClearView first).
 function CastBarsAPI.SetView(view)
-    if viewSet or not ViewIsUsable(view) then return false end
-    viewSet = true
+    if activeView or not ViewIsUsable(view) then return false end
+    activeView = view
     for _, unit in ipairs({ "player", "target" }) do
         local S = view[unit]
         S.unit, S.isTarget, S.mode, S.channeling = unit, unit == "target", nil, false
+        S.retired = nil
         S.tickerElapsed = 0
-        S.ticker = BuildViewTicker(S)
+        S.ticker = S.ticker or BuildViewTicker(S)
         S.run.onFinished = function() GoIdle(S) end
-        if bars[unit] then RetireBar(bars[unit]) end
+        if bars[unit] and not bars[unit].retired then RetireBar(bars[unit]) end
     end
     -- Wired once both Stack A bars are silent: only one display ever draws a cast.
     for _, unit in ipairs({ "player", "target" }) do
@@ -1245,6 +1301,30 @@ function CastBarsAPI.SetView(view)
         TryStep(S, "refresh", ResetFromUnit)
     end
     return true
+end
+
+-- Takes the view back and gives the casts to Stack A. A cast in progress is re-read from the units, so
+-- it shows on Stack A at once. False when no view is active.
+function CastBarsAPI.ClearView()
+    local view = activeView
+    if not view then return false end
+    activeView = nil
+    for _, unit in ipairs({ "player", "target" }) do StandDownViewBar(view[unit]) end
+    -- Wired once both view bars are silent: only one display ever draws a cast.
+    for _, unit in ipairs({ "player", "target" }) do
+        local S = bars[unit]
+        if S then
+            S.retired = false
+            WireEvents(S)
+            TryStep(S, "refresh", ResetFromUnit)
+        end
+    end
+    return true
+end
+
+-- True while Stack A is the display (no view active): its frames are the ones that show casts.
+function CastBarsAPI.IsStackActive()
+    return activeView == nil
 end
 
 FS.CastBars = CastBarsAPI
@@ -1271,6 +1351,7 @@ local function Init()
     DimBlizzardFrame(TargetFrameSpellBar)
     -- pcall'd like every other caller: a throw here must not skip the event wiring below and leave
     -- Blizzard's bars dimmed with nothing of ours listening.
+    RegisterLayout(player, target)
     local placed, placeErr = pcall(PlaceAndRefit)
     if not placed then
         FS.LogDegradeOnce("castbar_place", "cast bar placement failed at build: " .. tostring(placeErr))
