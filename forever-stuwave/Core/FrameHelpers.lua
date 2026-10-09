@@ -1084,36 +1084,58 @@ function Helpers.SetTipSpell(frame, spellID, name)
     if changed and frame.fsHover then Helpers.RefreshSpellTooltip(frame) end
 end
 
--- Spell id for a spell name, cached for the session. C_Spell.GetSpellInfo(name) resolves
--- names in combat; the global GetSpellInfo is the fallback on a client without C_Spell.
--- A hit is cached for good. A miss is cached only OUT of combat: in combat the same
--- lookup may fail transiently (a secret or withheld result), and caching that would
--- blank the icon's tooltip for the whole session. Cost of that rule: a name that
--- misses out of combat stays missed until SPELLS_CHANGED (e.g. a spell learned later),
--- which drops the cached misses and keeps the hits.
+-- Spell id for a spell name. C_Spell.GetSpellInfo(name) resolves names in combat; the global
+-- GetSpellInfo is the fallback on a client without C_Spell. Three caches, all dropped together:
+--   * a hit (name -> id) and a miss out of combat (name -> false) are kept until SPELLS_CHANGED, which
+--     wipes the lot (a new rank trained or a spell learned shows up). Fired in combat, the wipe is owed to
+--     PLAYER_REGEN_ENABLED (no allocation or churn mid fight);
+--   * a miss IN combat is not trusted (the lookup may fail transiently, a secret or withheld result), so it
+--     is not kept as a miss for good; it is remembered for the rest of that combat only, so a render per tick
+--     does not repeat the lookup (a pcall and a result table each time). Cleared at PLAYER_REGEN_ENABLED and
+--     on SPELLS_CHANGED.
+-- SpellCacheEpoch() moves on every wipe, so a caller that caches what these return can tell it went stale.
 local spellIDByName = {}
+local combatMisses = {}
+local cacheDirty = false
+local cacheEpoch = 0
 
--- Made on the first cached miss, not at load: nothing to wipe until then, and a frame
--- registered for SPELLS_CHANGED at load would sit ahead of every module's own.
+local function ClearTable(t)
+    for k in pairs(t) do t[k] = nil end
+end
+
+-- Made on the first cached lookup, not at load: nothing to wipe until then, and a frame registered at load
+-- would sit ahead of every module's own SPELLS_CHANGED listener.
 local spellsEvents
 local function WatchSpellsChanged()
     if spellsEvents then return end
     spellsEvents = CreateFrame("Frame")
-    if pcall(spellsEvents.RegisterEvent, spellsEvents, "SPELLS_CHANGED") then
-        spellsEvents:SetScript("OnEvent", function()
-            if InCombatLockdown() then return end
-            for name, id in pairs(spellIDByName) do
-                if id == false then spellIDByName[name] = nil end
+    pcall(spellsEvents.RegisterEvent, spellsEvents, "SPELLS_CHANGED")
+    pcall(spellsEvents.RegisterEvent, spellsEvents, "PLAYER_REGEN_ENABLED")
+    spellsEvents:SetScript("OnEvent", function(_, event)
+        ClearTable(combatMisses)
+        if event == "SPELLS_CHANGED" then
+            if InCombatLockdown() then
+                cacheDirty = true
+                return
             end
-        end)
-    end
+        elseif not cacheDirty then
+            return
+        end
+        ClearTable(spellIDByName)
+        cacheDirty = false
+        cacheEpoch = cacheEpoch + 1
+    end)
+end
+
+function Helpers.SpellCacheEpoch()
+    return cacheEpoch
 end
 
 function Helpers.SpellIDForName(name)
     if not ValidName(name) then return nil end
     local cached = spellIDByName[name]
     if cached then return cached end
-    if cached == false then return nil end
+    if cached == false or combatMisses[name] then return nil end
     local id
     if type(C_Spell) == "table" and type(C_Spell.GetSpellInfo) == "function" then
         local ok, info = pcall(C_Spell.GetSpellInfo, name)
@@ -1122,13 +1144,15 @@ function Helpers.SpellIDForName(name)
         local ok, _, _, _, _, _, _, spellID = pcall(GetSpellInfo, name)
         if ok then id = spellID end
     end
+    WatchSpellsChanged()
     if ValidSpellID(id) then
         spellIDByName[name] = id
         return id
     end
-    if not InCombatLockdown() then
+    if InCombatLockdown() then
+        combatMisses[name] = true
+    else
         spellIDByName[name] = false
-        WatchSpellsChanged()
     end
     return nil
 end
@@ -1139,10 +1163,24 @@ local function OwnsTooltip(frame)
     return type(GameTooltip.GetOwner) == "function" and GameTooltip:GetOwner() == frame
 end
 
--- Takes the tooltip down if this frame has it; clears the hover flag.
+-- Takes the tooltip down if this frame has it; clears the hover flag. Public: a frame that hides or
+-- is gated off under the cursor gets no OnLeave of its own.
 local function ReleaseSpellTip(frame)
     frame.fsHover = nil
     if OwnsTooltip(frame) then GameTooltip:Hide() end
+end
+Helpers.ReleaseSpellTip = ReleaseSpellTip
+
+-- Takes the tooltip down when its owner is an AttachSpellTooltip frame whose gate now says no. For the
+-- listener of a switch that hides icons without an OnLeave (the Gunsight master switch, off in combat:
+-- the root only fades, so the icon stays "hovered" under an invisible plate).
+function Helpers.ReleaseGatedTips()
+    if type(GameTooltip) ~= "table" or type(GameTooltip.GetOwner) ~= "function" then return end
+    local owner = GameTooltip:GetOwner()
+    local opts = type(owner) == "table" and owner.fsSpellTip
+    if type(opts) ~= "table" or type(opts.gate) ~= "function" then return end
+    local ok, open = pcall(opts.gate, owner)
+    if not ok or not open then ReleaseSpellTip(owner) end
 end
 
 -- The OnEnter body (also the refresh): the first branch that applies wins.
