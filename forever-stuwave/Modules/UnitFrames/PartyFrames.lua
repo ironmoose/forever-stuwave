@@ -240,7 +240,17 @@ local HEADER = {
     -- the rail edge + 1 with no level, and a further LEVEL_RESERVE (the mockup's fixed 36, room for
     -- "LV 59" with air) left of that while the level shows, so the tag never jumps between levels.
     RIGHT_EDGE = 1, LOW_W = 25, LOW_GAP = 2, LEVEL_RESERVE = 36,
+    -- The name runs up to the level text's left edge (the rail edge + 1 with no level) less
+    -- NAME_RIGHT_GAP. A name too wide for that shrinks from NAME_SIZE to NAME_FLOOR in half pixel steps,
+    -- then the FontString's own width truncates it.
+    NAME_RIGHT_GAP = 6, NAME_SIZE = 10.5, NAME_FLOOR = 9,
 }
+
+-- The header row's width (a row is MEMBER_WIDTH wide, the row inset PAD_X each side) and where the
+-- name starts in it: after the class plate, the role tag and the gaps.
+local NAME_ROW_WIDTH = MEMBER_WIDTH - 2 * PAD_X
+local NAME_LEFT = HEADER.TILE + HEADER.TAG_GAP + HEADER.TAG_W + HEADER.NAME_GAP
+local FitRowName
 
 local ROW_DEFS = {
     { unit = "player", petUnit = "pet" },
@@ -1313,6 +1323,57 @@ local function SeatLowTag(nameRow, lowTag, levelShown)
         H.RIGHT_EDGE - H.LOW_GAP - (levelShown and H.LEVEL_RESERVE or 0), -H.TAG_TOP)
 end
 
+-- What the PLAIN text in `fs` would take on one line: GetStringWidth of a FontString with a width is
+-- bounded by that width (the text is drawn truncated), so a fit built on it always sees "fits".
+-- Never called on a secret. nil when the client cannot measure.
+local function PlainTextWidth(fs)
+    local measure = fs.GetUnboundedStringWidth or fs.GetStringWidth
+    local ok, w = pcall(measure, fs)
+    if ok and type(w) == "number" and not IsSecret(w) and w > 0 then return w end
+    return nil
+end
+
+-- Fits the name to the room up to the level text: seats its right edge, then picks the size. A plain
+-- name is measured at the size now drawn, scaled back to NAME_SIZE, and shrunk (never under
+-- NAME_FLOOR) so the whole text fits; past the floor the FontString's width truncates it. A secret
+-- name is never measured: it takes NAME_SIZE and the engine truncates it. A new size lands a frame
+-- late on this client, so no measuring happens until the next frame has run (`nameSettling`), then
+-- one more fit confirms the size. Numbers only, no allocation; unchanged inputs do nothing.
+function FitRowName(frame, force)
+    if frame.nameSettling then return end
+    local H = HEADER
+    local name = frame.name
+    local right = H.RIGHT_EDGE - H.NAME_RIGHT_GAP - (frame.levelWidth or 0)
+    local text = frame.nameText
+    if not force and right == frame.nameRight and text == frame.nameFitText then return end
+    frame.nameFitText = text
+    if right ~= frame.nameRight then
+        frame.nameRight = right
+        name:SetPoint("RIGHT", frame.nameRow, "RIGHT", right, 0)
+    end
+
+    local size = H.NAME_SIZE
+    if text then
+        local w = PlainTextWidth(name)
+        local room = NAME_ROW_WIDTH + right - NAME_LEFT
+        if w and frame.nameSize > 0 then
+            local atBase = w * H.NAME_SIZE / frame.nameSize
+            if atBase > room then
+                size = math.max(H.NAME_FLOOR, math.floor(H.NAME_SIZE * room / atBase * 2) / 2)
+            end
+        end
+    end
+    if size == frame.nameSize then return end
+    frame.nameSize = size
+    ApplyMono(name, size, COLOR_BORDER)
+    local c = frame.classRailColor
+    if c then name:SetTextColor(c[1], c[2], c[3], H.NAME_ALPHA) end
+    if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+        frame.nameSettling = true
+        C_Timer.After(0, frame.nameRefit)
+    end
+end
+
 local function BuildRowHeader(f, nameRow)
     local H = HEADER
 
@@ -1361,13 +1422,13 @@ local function BuildRowHeader(f, nameRow)
     lowTag:SetAlpha(0)
     f.lowHealthTargets[#f.lowHealthTargets + 1] = lowTag
 
-    -- Name: mono, class colour (UpdateRowClassColor), one line. Its right edge is anchored 3 left
-    -- of the LOW tag. FontStrings have no ellipsis and overflow rather than truncate, so how an
-    -- overlong name behaves here is unverified in game (it may spill toward the LV text).
+    -- Name: mono, class colour (UpdateRowClassColor), one line. Its right edge sits NAME_RIGHT_GAP
+    -- left of the level text (FitRowName seats it, and shrinks the font for a long name); the
+    -- FontString's own width truncates what still does not fit.
     local name = nameRow:CreateFontString(nil, "OVERLAY")
-    ApplyMono(name, 10.5, COLOR_BORDER)
-    name:SetPoint("LEFT", nameRow, "LEFT", H.TILE + H.TAG_GAP + H.TAG_W + H.NAME_GAP, 0)
-    name:SetPoint("RIGHT", lowTag, "LEFT", -H.NAME_GAP, 0)
+    ApplyMono(name, H.NAME_SIZE, COLOR_BORDER)
+    name:SetPoint("LEFT", nameRow, "LEFT", NAME_LEFT, 0)
+    name:SetPoint("RIGHT", nameRow, "RIGHT", H.RIGHT_EDGE - H.NAME_RIGHT_GAP, 0)
     name:SetJustifyH("LEFT")
     -- Same fix as UnitFrames.lua's name FontString: a space-separated name
     -- otherwise wraps at the space onto a second line hidden below this
@@ -1382,6 +1443,11 @@ local function BuildRowHeader(f, nameRow)
     f.roleTag, f.roleLetter = roleTag, roleLetter
     f.name, f.levelText = name, levelText
     f.lowTag, f.lowText = lowTag, lowText
+    f.nameSize, f.nameRight = H.NAME_SIZE, H.RIGHT_EDGE - H.NAME_RIGHT_GAP
+    f.nameRefit = function()
+        f.nameSettling = false
+        FitRowName(f, true)
+    end
 end
 
 -- One member row: secure click surface (attributes set explicitly, mirroring
@@ -1751,18 +1817,31 @@ end
 -- goes to SetText untouched.
 local function UpdateRowName(frame)
     local full = GetFullUnitName(frame.unit)
-    if not IsSecret(full) and type(full) == "string" then full = full:upper() end
+    local plain = nil
+    if not IsSecret(full) and type(full) == "string" then
+        full = full:upper()
+        if full ~= "" then plain = full end
+    end
     frame.name:SetText(full)
+    frame.nameText = plain -- nil for a secret or empty name: never measured
+    FitRowName(frame)
 end
 
 -- "LV n" below MAX_PLAYER_LEVEL, hidden at it (a max level party is the common case and the text
 -- would just be noise). The LOW tag's seat depends on whether the text takes room, so re-seat it.
+-- Only a change of level does any work.
 local function UpdateRowLevel(frame)
     local lvl = UnitLevel(frame.unit)
     local show = (lvl and lvl > 0 and lvl ~= MAX_PLAYER_LEVEL) and true or false
+    local key = show and lvl or false
+    if frame.levelKey == key then return end
+    frame.levelKey = key
     frame.levelText:SetShown(show)
     if show then frame.levelText:SetText("LV " .. lvl) end
     SeatLowTag(frame.nameRow, frame.lowTag, show)
+    -- The level's measured width is the room it takes from the name, which is fitted again.
+    frame.levelWidth = show and (PlainTextWidth(frame.levelText) or HEADER.LEVEL_RESERVE) or 0
+    FitRowName(frame)
 end
 
 -- Resolves the unit's class color (player row included) and stores it on
