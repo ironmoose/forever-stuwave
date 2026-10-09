@@ -442,6 +442,22 @@ end
 function FrameM:RegisterUnitEvent(e) self._events[e] = true end
 function FrameM:UnregisterEvent(e) self._events[e] = nil end
 function FrameM:EnableMouse(v) self._mouse = v end
+-- Hover-only mouse (FrameHelpers.HoverOnly) and script hooks (AttachSpellTooltip): the calls are counted so a
+-- case can show the mouse state is never touched after the build.
+__mouseCalls = 0
+function FrameM:SetMouseMotionEnabled(v) __mouseCalls = __mouseCalls + 1; self._mouseMotion = v end
+function FrameM:SetMouseClickEnabled(v) __mouseCalls = __mouseCalls + 1; self._mouseClick = v end
+function FrameM:HookScript(k, fn)
+    self._hooks = self._hooks or {}
+    self._hooks[k] = self._hooks[k] or {}
+    table.insert(self._hooks[k], fn)
+end
+-- The client fires OnHide when a shown frame hides (Hide and SetShown(false) alike).
+function FrameM:Hide() local was = self._shown; self._shown = false; if was then runHooks(self, "OnHide") end end
+function FrameM:SetShown(v) if v then self._shown = true else FrameM.Hide(self) end end
+function runHooks(f, k) for _, fn in ipairs(f._hooks and f._hooks[k] or {}) do fn(f) end end
+function hover(f) runHooks(f, "OnEnter") end
+function unhover(f) runHooks(f, "OnLeave") end
 function FrameM:SetParent(p) self._parent = p end
 function FrameM:CreateTexture(name, layer, tmpl, sub)
     local t = __new("Texture", self, name)
@@ -569,8 +585,6 @@ function ACM:AddAuraSlot(key, filter, opts)
     local frame = __new("AuraFrame", self, nil)
     frame._order, frame._icon, frame._durationText = {}, nil, nil
     setmetatable(frame, { __index = function(t, k)
-        local m = FrameM[k]
-        if m then return m end
         local f = ({
             SetMouseMotionEnabled = function(me, v) me._order[#me._order + 1] = "SetMouseMotionEnabled"; me._mouseMotion = v end,
             SetMouseClickEnabled = function(me, v) me._order[#me._order + 1] = "SetMouseClickEnabled"; me._mouseClick = v end,
@@ -580,7 +594,7 @@ function ACM:AddAuraSlot(key, filter, opts)
             SetDurationCooldown = function(me, cd) me._order[#me._order + 1] = "SetDurationCooldown" end,
             SetApplicationCount = function(me, fs) me._order[#me._order + 1] = "SetApplicationCount" end,
         })[k]
-        return f
+        return f or FrameM[k]
     end })
     self._slots[key] = { filter = filter, ids = ids, frame = frame, opts = opts }
     self._slotOrder[#self._slotOrder + 1] = key
@@ -642,6 +656,19 @@ C_Spell = { GetSpellInfo = function(x)
     return info
 end }
 
+-- The tooltip records the owner and what it was asked to show (the real FrameHelpers draws into it).
+TT = {}
+GameTooltip = TT
+function TT:Reset() self.owner, self.shown, self.spellID, self.text, self.lines = nil, false, nil, nil, {} end
+function TT:SetOwner(o) self:Reset(); self.owner = o end
+function TT:GetOwner() return self.owner end
+function TT:SetText(t) self.text = t end
+function TT:AddLine(t) self.lines[#self.lines + 1] = t end
+function TT:Show() self.shown = true end
+function TT:Hide() self.shown = false; self.owner = nil end
+function TT:SetSpellByID(id) self.spellID = id; self.shown = true end
+TT:Reset()
+
 __class = "WARLOCK"
 function UnitClass() return "Class", __class end
 
@@ -665,6 +692,7 @@ function __setupWorld(class)
     __class = class
     FS = {
         IsSecret = function(v) return SENT[v] ~= nil end,
+        AurasReadable = function() return not __combat end,
         LogDegradeOnce = function(key, msg) __degrade[#__degrade + 1] = key end,
         Theme = {},
     }
@@ -863,6 +891,7 @@ def build_runtime(cls: str, gunsight: bool = False):
     consts += [_extract_theme_function(theme_src, n) for n in THEME_FUNCTIONS]
     lua.eval("__loadThemeConstants")(lua.table_from(consts))
     loader = lua.eval("__load")
+    loader("Core/FrameHelpers.lua", (ADDON / "Core/FrameHelpers.lua").read_text(encoding="utf-8"))
     for fname in ("Modules/CombatHud/HudSpells.lua", "Modules/CombatHud/HudProfiles.lua"):
         loader(fname, (ADDON / fname).read_text(encoding="utf-8"))
     lua.execute("__setupSpells(); __setupHud()")
@@ -3336,6 +3365,78 @@ check(tile and size(tile.abbr) == 8, "Stack A buff abbreviation size 8")
 # ---------------------------------------------------------------------------------------
 # Files
 # ---------------------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------------------
+# Tooltips: a skill that shows up has a tooltip (hover only, the spell id cached on paint)
+# ---------------------------------------------------------------------------------------
+
+case("tooltips_next_tile_shows_the_spell_on_hover_and_follows_a_change")(r"""
+standard()
+__state = mkState({ inCombat = true, row = lockRow(), next = { key = "shadow_bolt", icon = iconOf("shadow_bolt") } })
+login()
+local n = FS.CombatHud.ui.nextTile
+hover(n.holder)
+check(TT.owner == n.holder and TT.shown and TT.spellID == idOf("shadow_bolt"), "the NEXT tile shows its spell: " .. tostring(TT.spellID))
+push(mkState({ inCombat = true, row = lockRow(), next = { key = "corruption" } }))
+check(TT.owner == n.holder and TT.spellID == idOf("corruption"), "the open tip follows the next spell: " .. tostring(TT.spellID))
+push(mkState({ inCombat = true, row = lockRow() }))
+check(not TT.shown, "no next, the tile hides and takes the tip with it")
+""")
+
+case("tooltips_reminder_tile_shows_what_to_recast")(r"""
+standard()
+__state = mkState({ inCombat = false, row = lockRow(), buffsMissing = { { key = "demon_armor", icon = iconOf("demon_armor") } } })
+login()
+local t = FS.CombatHud.ui.buffTiles.demon_armor
+hover(t.holder)
+check(TT.owner == t.holder and TT.spellID == idOf("demon_armor"), "the reminder shows the spell to recast: " .. tostring(TT.spellID))
+unhover(t.holder)
+check(not TT.shown, "leaving takes the tip down")
+""")
+
+case("tooltips_stack_a_row_tile_shows_its_spell")(r"""
+standard()
+__state = mkState({ inCombat = true, row = lockRow() })
+login()
+local t = FS.CombatHud.ui.tiles.corruption
+hover(t.holder)
+check(TT.owner == t.holder and TT.spellID == idOf("corruption"), "the row tile shows its spell: " .. tostring(TT.spellID))
+""")
+
+case("tooltips_tiles_are_hover_only_and_the_mouse_is_never_touched_in_combat")(r"""
+standard()
+__state = mkState({ inCombat = false, row = lockRow(), next = { key = "shadow_bolt" },
+    buffsMissing = { { key = "demon_armor", icon = iconOf("demon_armor") } } })
+login()
+local ui = FS.CombatHud.ui
+local frames = { ui.nextTile.holder, ui.buffTiles.demon_armor.holder, ui.tiles.corruption.holder }
+for i, f in ipairs(frames) do
+    check(f._mouseMotion == true and f._mouseClick == false, "tile " .. i .. " takes motion only, clicks pass through")
+    check(f._mouse == nil, "tile " .. i .. " never gets EnableMouse")
+end
+local calls = __mouseCalls
+__combat = true
+push(mkState({ inCombat = true, row = lockRow(), next = { key = "corruption" },
+    buffsMissing = { { key = "demon_armor", icon = iconOf("demon_armor") } } }))
+push(mkState({ inCombat = false, row = lockRow() }))
+check(__mouseCalls == calls, "painting through a fight never toggles mouse state: " .. (__mouseCalls - calls) .. " calls")
+""")
+
+gcase("tooltips_gunsight_next_and_reminder_tiles_show_the_spell_only_while_the_gunsight_is_active", r"""
+local ui, gs = gsBoot({ state = nextState({ inCombat = true }) })
+local n, t = ui.nextTile, ui.buffTiles.demon_armor
+check(n.holder._mouseMotion == true and n.holder._mouseClick == false, "next tile: hover only")
+check(t.holder._mouseMotion == true and t.holder._mouseClick == false, "reminder tile: hover only")
+hover(n.holder)
+check(TT.owner == n.holder and TT.spellID == idOf("shadow_bolt"), "NEXT shows its spell")
+unhover(n.holder)
+hover(t.holder)
+check(TT.owner == t.holder and TT.spellID == idOf("demon_armor"), "the reminder shows its spell")
+unhover(t.holder)
+gs.IsActive = function() return false end            -- switched off in combat: the root only fades
+hover(n.holder); check(not TT.shown, "an inactive Gunsight shows no NEXT tip")
+hover(t.holder); check(not TT.shown, "an inactive Gunsight shows no reminder tip")
+""")
 
 FILE_CASES = {}
 

@@ -178,6 +178,31 @@ function print(...)
     __printed[#__printed + 1] = table.concat(t, " ")
 end
 
+-- Hover-only mouse (FrameHelpers.HoverOnly), the tooltip the real spell-tooltip helpers draw into, and OnHide
+-- hooks: the client fires OnHide when a shown frame hides.
+function Region:SetMouseMotionEnabled(v) self._mouseMotion = v end
+function Region:SetMouseClickEnabled(v) self._mouseClick = v end
+function Region:EnableMouse(v) self._mouse = v end
+local origHide, origSetShown = Region.Hide, Region.SetShown
+local function fireHide(self, was)
+    if was then for _, fn in ipairs(self._hooks and self._hooks.OnHide or {}) do fn(self) end end
+end
+function Region:Hide() local was = self._shown; origHide(self); fireHide(self, was) end
+function Region:SetShown(v) local was = self._shown; origSetShown(self, v); if not v then fireHide(self, was) end end
+function hover(f) for _, fn in ipairs(f._hooks and f._hooks.OnEnter or {}) do fn(f) end end
+TT = {}
+GameTooltip = TT
+function TT:Reset() self.owner, self.shown, self.spellID, self.text, self.lines = nil, false, nil, nil, {} end
+function TT:SetOwner(o) self:Reset(); self.owner = o end
+function TT:GetOwner() return self.owner end
+function TT:SetText(t) self.text = t end
+function TT:AddLine(t) self.lines[#self.lines + 1] = t end
+function TT:Show() self.shown = true end
+function TT:Hide() self.shown = false; self.owner = nil end
+function TT:SetSpellByID(id) self.spellID = id; self.shown = true end
+TT:Reset()
+function InCombatLockdown() return __inCombat == true end
+
 local origCreateFrame = CreateFrame
 function CreateFrame(kind, name, parent, tmpl)
     local f = origCreateFrame(kind, name, parent)
@@ -258,12 +283,12 @@ function UnitGUID(u) return __unit.guid end
 function UnitCastingInfo(u)
     local c = __unit.cast
     if not c then return nil end
-    return c.name, "", c.tex, c.startMS, c.endMS, false, c.castID, c.notInt, 1
+    return c.name, "", c.tex, c.startMS, c.endMS, false, c.castID, c.notInt, c.spellID or 1
 end
 function UnitChannelInfo(u)
     local c = __unit.chan
     if not c then return nil end
-    return c.name, "", c.tex, c.startMS, c.endMS, false, c.notInt, 1
+    return c.name, "", c.tex, c.startMS, c.endMS, false, c.notInt, c.spellID or 1
 end
 -- The curve API the secret-timing crossfade uses (C_CurveUtil.CreateCurve, Curve:SetType/AddPoint, the
 -- Step type), with the engine's evaluation modelled: a Step curve returns the y of the last point whose x
@@ -384,6 +409,15 @@ FS.FrameHelpers = {
     -- The old leading-edge caret. Its return shape is only here so the old file boots.
     CreateCaret = function() __caretCalls = __caretCalls + 1; return { host = CreateFrame("Frame", nil, UIParent) } end,
 }
+-- The real spell tooltip helpers (hover-only, cached id), loaded into a scratch FS and lent to the stub.
+do
+    local real = {}
+    local scratch = { Theme = FS.Theme, IsSecret = FS.IsSecret, AurasReadable = function() return not InCombatLockdown() end, FrameHelpers = real }
+    assert(loadstring(__helpers_source, "@Core/FrameHelpers.lua"))("forever-stuwave", scratch)
+    for _, k in ipairs({ "HoverOnly", "SetTipSpell", "SpellIDForName", "AttachSpellTooltip", "RefreshSpellTooltip" }) do
+        FS.FrameHelpers[k] = real[k]
+    end
+end
 local container = CreateFrame("Frame", "FSPetContainer", UIParent)
 local castSlot = CreateFrame("Frame", nil, container)
 castSlot:SetSize(198, 26)   -- the console-dock cast slot: 198 wide, the top row 26 high
@@ -413,6 +447,7 @@ def boot() -> "LuaRuntime":
     theme_src = (ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
     consts = [CHEV._extract_theme_constant(theme_src, n) for n in THEME_CONSTANTS]
     lua.eval("__load_theme_constants")(lua.table_from(consts))
+    lua.globals()["__helpers_source"] = (ADDON / "Core/FrameHelpers.lua").read_text(encoding="utf-8")
     lua.execute(WIRE)
     lua.globals()["__mock"] = lua.table_from({k: float(v) for k, v in MOCKUP.items() if isinstance(v, float)})
     chevron = (ADDON / "Core/ChevronCastBar.lua").read_text(encoding="utf-8")
@@ -482,6 +517,7 @@ local function world(before)
     W.plate = find(function(o) return o._cut2 and o._parent == W.bar and o._layer == "BACKGROUND" and o._texture == FS.Theme.SLICE_CUT2_FILL_TEXTURE end)
     W.outline = find(function(o) return o._cut2 and o._parent == W.bar and o._texture == FS.Theme.SLICE_CUT2_OUTLINE_TEXTURE end)
     W.iconTexture = find(function(o) return o._kind == "Texture" and o._parent == W.bar and o._layer == "ARTWORK" end)
+    W.iconHover = find(function(o) return o._hooks and o._hooks.OnEnter ~= nil and o._parent == W.bar end)
     W.ticker = find(function(o) return o._scripts and o._scripts.OnUpdate ~= nil and o ~= (W.run and W.run.frame) end)
     -- The icon box: the icon, its four 1px stroke edges and the shield overlay (everything on the
     -- bar that is anchored to the icon).
@@ -896,6 +932,49 @@ function T.a_secret_spell_name_reaches_set_text_untouched_and_unmeasured()
     eq(W.nameText._measured, nil)
 end
 
+-- Tooltips: the icon is a hover-only frame over the icon box; the spell id comes from the cast and is cached on
+-- the frame, a secret id is never stored.
+function T.the_pet_cast_icon_shows_the_casting_spell_on_hover()
+    local W = world()
+    ok(W.iconHover, "the icon has a hover frame")
+    ok(W.iconHover._mouseMotion == true and W.iconHover._mouseClick == false and W.iconHover._mouse == nil,
+        "hover only: motion on, clicks off, EnableMouse never called")
+    W.cast("C1"); __unit.cast.spellID = 3110
+    W.fire("UNIT_SPELLCAST_START")
+    hover(W.iconHover)
+    ok(TT.owner == W.iconHover and TT.spellID == 3110, "the cast's spell: " .. tostring(TT.spellID))
+    -- the next cast replaces it while the cursor stays put
+    W.cast("C2"); __unit.cast.spellID = 5676
+    W.fire("UNIT_SPELLCAST_START")
+    ok(TT.owner == W.iconHover and TT.spellID == 5676, "the open tip follows the new cast: " .. tostring(TT.spellID))
+    -- a channel reads its id from UnitChannelInfo
+    W.channel(); __unit.chan.spellID = 689
+    W.fire("UNIT_SPELLCAST_CHANNEL_START")
+    ok(TT.owner == W.iconHover and TT.spellID == 689, "a channel's spell: " .. tostring(TT.spellID))
+    -- the cast ends: the icon box goes and takes the tip with it
+    __unit.chan = nil
+    W.fire("UNIT_SPELLCAST_CHANNEL_STOP")
+    ok(not TT.shown, "no tip once the cast is gone")
+    ok(W.iconHover.fsSpellID == nil, "and no id is kept")
+end
+
+function T.a_secret_spell_id_shows_no_stale_tip()
+    local W = world()
+    W.cast("C1"); __unit.cast.spellID = 3110
+    W.fire("UNIT_SPELLCAST_START")
+    hover(W.iconHover)
+    ok(TT.spellID == 3110, "the plain cast shows")
+    W.cast("C2"); __unit.cast.spellID = __SECRET
+    ok(pcall(W.fire, "UNIT_SPELLCAST_START"), "no throw on a secret spell id")
+    ok(TT.spellID ~= 3110, "the previous cast's spell is not shown for the secret one")
+    ok(W.iconHover.fsSpellID == nil, "a secret id is never stored")
+    ok(TT.text == "Firebolt", "the plain name is what is left")
+    W.cast("C3"); __unit.cast.spellID = __SECRET; __unit.cast.name = __SECRET
+    ok(pcall(W.fire, "UNIT_SPELLCAST_START"), "no throw on a secret id and name")
+    ok(not TT.shown, "nothing known, nothing shown")
+    ok(W.iconHover.fsName == nil, "a secret name is never stored")
+end
+
 function T.the_spell_name_is_never_measured_or_compared_in_the_source()
     -- A secret name cannot be compared (Lua cannot trap `secret ~= nil`, and a behavioral check cannot
     -- see a truth test), so pin the source: the name reaches the FontString by one SetText and
@@ -911,11 +990,13 @@ function T.the_spell_name_is_never_measured_or_compared_in_the_source()
         end
         if line:find("info.name", 1, true) then
             names = names + 1
-            ok(line:find("ShowName(info.name)", 1, true), "info.name goes only to ShowName: " .. line)
+            -- ShowName, and SetTipSpell (it stores a plain name and clears a secret one, FrameHelpers' contract)
+            ok(line:find("ShowName(info.name)", 1, true) or line:find("SetTipSpell(iconHover, info.spellID, info.name)", 1, true),
+                "info.name goes only to ShowName and SetTipSpell: " .. line)
         end
     end
     ok(uses >= 5, "the name FontString is built and seated")
-    eq(names, 1, "info.name appears on exactly one code line")
+    eq(names, 2, "info.name appears on exactly two code lines")
     -- Nothing in the file measures text at all: the column is a constant.
     for _, word in ipairs({ "GetStringWidth", "GetUnboundedStringWidth", "GetWidth", "MeasureTextColumn", "TRACK_SLACK" }) do
         ok(not code:find(word, 1, true), "PetCastBar.lua still uses " .. word)

@@ -387,6 +387,33 @@ local ui = { tiles = {}, buffTiles = {}, diamonds = {} }
 CombatHud.ui = ui
 local containers = {}
 CombatHud.containers = containers
+
+-- Tooltips for the tiles that show a HudSpells spell (a skill that shows up has a tooltip). Hover only:
+-- the centre HUD must pass clicks through, and the mouse state is set once, when the tile is built, never in
+-- combat. Under the Gunsight a tip is suppressed while it is switched off (the root only fades in combat).
+-- Fields of CombatHud, not file-scope locals (this file is near the parse-gate ceiling).
+function CombatHud.AttachTip(frame)
+    local helpers = FS.FrameHelpers
+    if type(helpers) ~= "table" then return end
+    local gate = nil
+    if ui.gunsight then
+        gate = function()
+            local gs = FS.Gunsight
+            return type(gs) == "table" and type(gs.IsActive) == "function" and gs.IsActive() == true
+        end
+    end
+    helpers.AttachSpellTooltip(frame, { gate = gate })
+end
+
+-- Paint side: caches the spell id and name of HudSpells `key` on the frame (SetTipSpell), so the tip works
+-- in combat, and redraws an open tip when the spell changed. Allocation-free: a table read and two cached
+-- lookups. A key with no spell name clears the tip.
+function CombatHud.SetTip(frame, key)
+    local helpers = FS.FrameHelpers
+    if type(helpers) ~= "table" then return end
+    local name = SpellName(key)
+    helpers.SetTipSpell(frame, helpers.SpellIDForName(name), name)
+end
 CombatHud.stats = { cdTicks = 0 }
 
 -------------------------------------------------------------------------------
@@ -907,6 +934,7 @@ end
 local function NewTile(key)
     local holder = CreateFrame("Frame", nil, ui.row)
     holder:SetSize(G.TILE, G.TILE)
+    CombatHud.AttachTip(holder)
     -- the part the dim state fades (the mockup's .tile); the ring and the seconds stay lit
     local face = CreateFrame("Frame", nil, holder)
     face:SetAllPoints(holder)
@@ -1171,6 +1199,7 @@ local function RenderRow(state, profile, ooc, procFor)
         local cd = PlainNumber(e.cdRemaining)
         local isNext = PlainBool(e.isNext) == true
         SetIconOf(tile, PlainIcon(e.icon) or IconFor(key), key)
+        CombatHud.SetTip(tile.holder, key)
         -- mockup order: a DoT that is up wins, then a cooldown, then a missing DoT. The ooc look
         -- (no combat, no next cast) is every tile plain "ready": no dim, no ring (even on a proc or
         -- the next spell), no seconds, no slot timer.
@@ -1269,6 +1298,7 @@ local function NewNextTile()
     abbr:SetPoint("CENTER", holder, "CENTER", 0, 0)
     local key = text:CreateFontString(nil, "OVERLAY")
     local lbl = text:CreateFontString(nil, "OVERLAY")
+    CombatHud.AttachTip(holder)
     holder:Hide()
     key:Hide()
     local n = { holder = holder, bg = bg, icon = icon, abbr = abbr, key = key, lbl = lbl, rings = {} }
@@ -1419,6 +1449,7 @@ local function RenderNext(state, procFor)
         n.shownKey, n.hadIcon = key, icon ~= nil
         n.abbr:SetText(icon ~= nil and "" or Abbrev(key))
     end
+    CombatHud.SetTip(n.holder, key)
     local bind = KeybindFor(key)
     if n.bindText ~= bind then
         n.bindText = bind
@@ -1599,6 +1630,7 @@ local function NewBuffTile(key)
     local k = K()
     local holder = CreateFrame("Frame", nil, ui.buffs)
     holder:SetSize(G.BUFF * k, G.BUFF * k)
+    CombatHud.AttachTip(holder)
     local bg = holder:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints(holder)
     PaintTileFill(bg)
@@ -1807,6 +1839,7 @@ local function RenderBuffs(state, profile, inCombat, shardsShown)
             tile.icon:Hide()
             tile.abbr:SetText(Abbrev(e.key))
         end
+        CombatHud.SetTip(tile.holder, e.key)
         tile.holder:Show()
         SetPulse(tile.pulse, true)
         SetPulse(tile.glowPulse, true)
