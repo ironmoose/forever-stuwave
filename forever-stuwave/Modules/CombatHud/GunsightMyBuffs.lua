@@ -6,6 +6,14 @@
 
 local _, FS = ...
 
+-- RELEASE FLAG. Deferred to the next release (2026-10-08 playtest: the plate had too many problems to ship). While FS.Features.myBuffs
+-- is false the plate is never built or shown and ConfigWindow.lua draws no "My buffs" row; the saved gunsight.pieces.mybuffs value
+-- stays in the database untouched and harmless. To ship it: set the default below to true. A test or a local build can set
+-- FS.Features.myBuffs = true before this file loads.
+FS.Features = FS.Features or {}
+if FS.Features.myBuffs == nil then FS.Features.myBuffs = false end
+if FS.Features.myBuffs ~= true then return end
+
 local Gunsight = FS.Gunsight
 if type(Gunsight) ~= "table" or type(Gunsight.OnReady) ~= "function" then return end
 local M = Gunsight.G and Gunsight.G.MYBUFFS

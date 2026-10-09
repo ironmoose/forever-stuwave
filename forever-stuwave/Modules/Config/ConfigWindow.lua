@@ -1333,9 +1333,12 @@ local function TargetSideGroups(page)
             if setting and setting.key then UI.Toggle(page, { label = tag[1], key = setting.key }) end
         end
     end
+    -- My buffs is deferred to the next release behind FS.Features.myBuffs (set in GunsightMyBuffs.lua); off, it has no row.
+    local myBuffs = FS.Features and FS.Features.myBuffs == true
     UI.Header(page, "Player side",
-        "My buffs is the plate left of the next cast tile. Next cast is the tile for your next spell.")
-    UI.Toggle(page, { label = "My buffs", key = Gunsight.PieceConfigKey("mybuffs") })
+        myBuffs and "My buffs is the plate left of the next cast tile. Next cast is the tile for your next spell."
+            or "Next cast is the tile for your next spell.")
+    if myBuffs then UI.Toggle(page, { label = "My buffs", key = Gunsight.PieceConfigKey("mybuffs") }) end
     UI.Toggle(page, { label = "Next cast", key = Gunsight.PieceConfigKey("next") })
 end
 
