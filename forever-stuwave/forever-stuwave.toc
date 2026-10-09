@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: Forever STUwave
 ## Notes: Custom UI for WoW Forever.
-## Version: 0.1.0-alpha.1
+## Version: 0.1.0-alpha.2
 ## Author: parker
 ## SavedVariables: ForeverSTUwaveDB, ForeverSTUwaveErrorLog
 

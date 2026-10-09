@@ -207,7 +207,7 @@ __guid = "Player-1-AAAA"
 function UnitGUID() return __guid end
 function UnitName() return "Bob" end
 function GetRealmName() return "Realm" end
-function GetAddOnMetadata(addon, field) if field == "Version" then return "0.1.0-alpha.1" end end
+function GetAddOnMetadata(addon, field) if field == "Version" then return "0.1.0-alpha.2" end end
 
 function Fire(event, ...)
     local list = {}
@@ -557,7 +557,7 @@ function T.chrome_title_subtitle_footer_and_close()
     W.Open()
     local f = win()
     yes(findText("FOREVER |cffff2e97STU|rWAVE", f), "title with STU in pink")
-    yes(hasText(f, "0.1.0-alpha.1"), "version from the toc")
+    yes(hasText(f, "0.1.0-alpha.2"), "version from the toc")
     yes(hasText(f, "/fsconfig"), "slash in the subtitle and footer")
     yes(findText("Changes apply instantly", f))
     yes(findText("open with", f))
