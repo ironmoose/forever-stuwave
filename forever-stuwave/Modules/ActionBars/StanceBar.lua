@@ -18,8 +18,8 @@
 --
 -- Casting the spell is not enough for a form you can leave: CastShapeshiftForm on the ACTIVE
 -- form toggles it off (the stock bar's unstealth, Druid back to caster form), but casting the
--- Stealth spell while stealthed does not cancel it. So every class but the Warrior gets
--- type="macro" with a click-time conditional (macro text is expanded C-side at the click, no
+-- Stealth spell while stealthed does not cancel it. So every class but the Warrior and
+-- the Death Knight gets type="macro" with a click-time conditional (macro text is expanded C-side at the click, no
 -- snippet and no attribute change, so it is right even when Stealth or a form flips in combat):
 --     /cancelform [form:N]
 --     /cast [noform:N] <the form's spell name>
@@ -27,7 +27,8 @@
 -- spell name comes from the id; a name that cannot be read (nil, secret, a throw) leaves the
 -- button on type="spell" + spell=<id>, which casts but cannot cancel. The WARRIOR stays on
 -- type="spell": a stance cannot be cancelled (the stock bar's active stance does nothing when
--- clicked), so the macro would add a path that can only do what the spell already does. A
+-- clicked), so the macro would add a path that can only do what the spell already does. The
+-- DEATHKNIGHT's presences are the same case (/cancelform is a no-op for them). A
 -- Paladin's auras never come here (SealBar.lua draws them). The spell id and the macro text are
 -- protected attribute writes: set out of combat only (SyncCastSpell) and caught up at
 -- PLAYER_REGEN_ENABLED. A bound key never reaches these buttons: SHAPESHIFTBUTTONn runs
@@ -148,6 +149,7 @@ local function WatchForSpellId(button)
 end
 
 local isWarrior = false      -- set at Apply; the Warrior's stances stay on type="spell" (see the header)
+local spellOnly = false      -- set at Apply; Warrior and Death Knight stay on type="spell" (see the header)
 
 -- The name of a spell id, a plain string or nil (SealBar.lua keeps its own).
 local function SpellName(id)
@@ -168,7 +170,7 @@ end
 -- The macro that leaves the form when it is the active one and casts it otherwise (see the header),
 -- or nil when this button stays on type="spell".
 local function FormMacro(button, spellID)
-    if isWarrior then return nil end
+    if spellOnly then return nil end
     local name = SpellName(spellID)
     if not name then return nil end
     local n = button.index
@@ -191,9 +193,10 @@ local function SyncCastSpell(button, spellID)
         pendingSync = true
         return
     end
-    button:SetAttribute("spell", spellID)
-    button:SetAttribute("macrotext", macro)
+    -- type first, so the button is never briefly a macro button with no macrotext or the reverse
     button:SetAttribute("type", macro and "macro" or "spell")
+    button:SetAttribute("macrotext", macro)
+    button:SetAttribute("spell", spellID)
     button.fsCastSpell = spellID
     button.fsCastMacro = macro
 end
@@ -509,9 +512,9 @@ local buttons = {}      -- built buttons by form index; only ever grows, never r
 local pendingBuild = false
 local ownsShoulder = false
 
-local function PlayerIsWarrior()
+local function PlayerClassToken()
     local ok, _, token = pcall(UnitClass, "player")
-    return ok and not IsSecret(token) and token == "WARRIOR"
+    if ok and not IsSecret(token) then return token end
 end
 
 -- The shoulder slot (1..3) of each form 1..numForms: the mockup order by the form's spell name, and a form
@@ -725,7 +728,9 @@ end
 local function Apply()
     if not (FS.Layout and FS.Layout.Apply and FS.Layout.stance) then return end
 
-    isWarrior = PlayerIsWarrior()
+    local class = PlayerClassToken()
+    isWarrior = class == "WARRIOR"
+    spellOnly = isWarrior or class == "DEATHKNIGHT"
     container = CreateFrame("Frame", "FSStanceBar", UIParent)
     container:SetFrameStrata("LOW")
     FS.Layout.Apply(container, "stance")
