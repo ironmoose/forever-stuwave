@@ -616,16 +616,16 @@ end
 -- castID (UnitCastingInfo's 7th return; a channel has none) and notInterruptible. All carried
 -- as opaque values: a secret is never compared here.
 local function GetCastInfo(unit)
-    local name, _, texture, startMS, endMS, _, castID, notInterruptible = UnitCastingInfo(unit)
+    -- The cast's 9th return is its spell id, a channel's 8th. Plain for our own casts; secret for the target's in
+    -- combat, so it is only carried (the tick spec and the icon tooltip both IsSecret-check it).
+    local name, _, texture, startMS, endMS, _, castID, notInterruptible, spellID = UnitCastingInfo(unit)
     if Present(name) then
         return {
             name = name, texture = texture, channeling = false, notInterruptible = notInterruptible,
-            startMS = startMS, endMS = endMS, castID = castID,
+            startMS = startMS, endMS = endMS, castID = castID, spellID = spellID,
         }
     end
 
-    -- A channel's 8th return is its spell id (plain for our own channels, which is all it is used for).
-    local spellID
     name, _, texture, startMS, endMS, _, notInterruptible, spellID = UnitChannelInfo(unit)
     if Present(name) then
         return {
@@ -645,6 +645,17 @@ local function CastIsGone(S)
     local name = UnitCastingInfo(S.unit)
     if IsSecret(name) then return false end
     return name == nil
+end
+
+-- The icon's tooltip. Stack A has a hover-only frame over the icon box (S.iconHover); a view bar's icon sink may
+-- take the spell too (S.icon.SetSpell, the Gunsight info box's tile). The id and name go through SetTipSpell
+-- untouched: it caches a plain value and CLEARS the field for a secret one, so a previous cast's spell never
+-- lingers under a cast whose id cannot be read. Allocation-free.
+local function TipCast(S, spellID, name)
+    local setTip = FS.FrameHelpers.SetTipSpell
+    if S.iconHover and setTip then setTip(S.iconHover, spellID, name) end
+    local sink = S.icon.SetSpell
+    if type(sink) == "function" then sink(S.icon, spellID, name) end
 end
 
 -- Shield tint: the ONLY sanctioned secret-boolean consumer is SetAlphaFromBoolean, so the flag
@@ -741,6 +752,10 @@ function GoIdle(S)
     ClearReadout(S)
     S.strip:Hide()
     S.icon:SetTexture(nil)
+    if S.iconHover then
+        TipCast(S, nil, nil)
+        S.iconHover:Hide()
+    end
     S.shield:SetAlpha(0)
     S.tabName:SetText("")
     if idleVisible or S.alwaysIdle then ShowIdleRow(S) else HideIdleRow(S) end
@@ -794,6 +809,8 @@ local function BeginCast(S, info)
     ClearRest(S)
     S.strip:Hide()
     S.icon:SetTexture(info.texture)
+    if S.iconHover then S.iconHover:Show() end
+    TipCast(S, info.spellID, info.name)
     ApplyCastInterruptible(S, info.notInterruptible)
     S.frame:Show()
 
@@ -1051,6 +1068,14 @@ local function BuildBar(unit, frameName)
         IconEdge("TOPLEFT", "TOPRIGHT", true), IconEdge("BOTTOMLEFT", "BOTTOMRIGHT", true),
         IconEdge("TOPLEFT", "BOTTOMLEFT", false), IconEdge("TOPRIGHT", "BOTTOMRIGHT", false),
     }
+    -- Hover only (a cast bar passes clicks through), shown with the icon, so an idle bar has none.
+    if FS.FrameHelpers.AttachSpellTooltip then
+        local hoverFrame = CreateFrame("Frame", nil, f)
+        hoverFrame:SetAllPoints(icon)
+        FS.FrameHelpers.AttachSpellTooltip(hoverFrame)
+        hoverFrame:Hide()
+        S.iconHover = hoverFrame
+    end
     local shield = f:CreateTexture(nil, "OVERLAY")
     shield:SetAllPoints(icon)
     shield:SetColorTexture(1, 1, 1, 1)

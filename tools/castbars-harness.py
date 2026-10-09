@@ -217,7 +217,7 @@ function UnitExists(u) return __units[u].exists end
 function UnitCastingInfo(u)
     local c = __units[u].cast
     if not c then return nil end
-    return c.name, "", c.tex, c.startMS, c.endMS, false, c.castID, c.notInt, 1
+    return c.name, "", c.tex, c.startMS, c.endMS, false, c.castID, c.notInt, c.spellID or 1
 end
 function UnitChannelInfo(u)
     local c = __units[u].chan
@@ -243,6 +243,33 @@ local function duration(c)
 end
 function UnitCastingDuration(u) return duration(__units[u].cast) end
 function UnitChannelDuration(u) return duration(__units[u].chan) end
+
+-- Hover-only mouse (FrameHelpers.HoverOnly), the tooltip the real spell tooltip helpers draw into, and OnHide
+-- hooks (the client fires OnHide when a shown frame hides).
+function Region:SetMouseMotionEnabled(v) self._mouseMotion = v end
+function Region:SetMouseClickEnabled(v) self._mouseClick = v end
+function Region:EnableMouse(v) self._mouse = v end
+do
+    local origHide, origSetShown = Region.Hide, Region.SetShown
+    local function fireHide(self, was)
+        if was then for _, fn in ipairs(self._hooks and self._hooks.OnHide or {}) do fn(self) end end
+    end
+    function Region:Hide() local was = self._shown; origHide(self); fireHide(self, was) end
+    function Region:SetShown(v) local was = self._shown; origSetShown(self, v); if not v then fireHide(self, was) end end
+end
+function hover(f) for _, fn in ipairs(f._hooks and f._hooks.OnEnter or {}) do fn(f) end end
+TT = {}
+GameTooltip = TT
+function TT:Reset() self.owner, self.shown, self.spellID, self.text, self.lines = nil, false, nil, nil, {} end
+function TT:SetOwner(o) self:Reset(); self.owner = o end
+function TT:GetOwner() return self.owner end
+function TT:SetText(t) self.text = t end
+function TT:AddLine(t) self.lines[#self.lines + 1] = t end
+function TT:Show() self.shown = true end
+function TT:Hide() self.shown = false; self.owner = nil end
+function TT:SetSpellByID(id) self.spellID = id; self.shown = true end
+TT:Reset()
+InCombatLockdown = InCombatLockdown or function() return false end
 """
 
 # Stubs for what CastBars.lua reads off FS, then the engine; CastBars.lua itself loads inside
@@ -286,6 +313,15 @@ FS.FrameHelpers = {
     end,
     DimBlizzardFrame = function(frame) __dimmed[#__dimmed + 1] = frame end,
 }
+-- The real spell tooltip helpers (hover-only, cached id), lent to the stub when a harness hands over the source.
+if __helpers_source then
+    local real = {}
+    local scratch = { Theme = FS.Theme, IsSecret = FS.IsSecret, AurasReadable = function() return not InCombatLockdown() end, FrameHelpers = real }
+    assert(loadstring(__helpers_source, "@Core/FrameHelpers.lua"))("forever-stuwave", scratch)
+    for _, k in ipairs({ "HoverOnly", "SetTipSpell", "SpellIDForName", "AttachSpellTooltip", "RefreshSpellTooltip" }) do
+        FS.FrameHelpers[k] = real[k]
+    end
+end
 
 -- Capture every engine run the cast bars build, with the options they passed.
 __runs = {}
@@ -338,6 +374,7 @@ def boot() -> "LuaRuntime":
     theme_src = (ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
     consts = [CHEV._extract_theme_constant(theme_src, n) for n in THEME_CONSTANTS]
     lua.eval("__load_theme_constants")(lua.table_from(consts))
+    lua.globals()["__helpers_source"] = (ADDON / "Core/FrameHelpers.lua").read_text(encoding="utf-8")
     lua.execute(WIRE)
     chevron = (ADDON / "Core/ChevronCastBar.lua").read_text(encoding="utf-8")
     lua.eval("__loadChevron")("Core/ChevronCastBar.lua", chevron)
@@ -1343,6 +1380,49 @@ function T.an_event_allocates_no_closure_and_a_failure_still_reports()
     UnitCastingInfo = real
     ok(__printed[1] and __printed[1]:find("UNIT_SPELLCAST_START", 1, true) and __printed[1]:find("boom", 1, true),
         "a failing step is still reported: " .. tostring(__printed[1]))
+end
+
+-- Tooltips: a skill that shows up has a tooltip. The Stack A icon is a hover-only frame over the icon box,
+-- shown with the cast; the id comes from the cast and is cached on the frame, a secret id is never stored.
+function T.the_stack_a_cast_icon_shows_the_casting_spell_on_hover()
+    local W = world()
+    local h = W.P.iconHover
+    ok(h, "the player bar has an icon hover frame")
+    ok(h._mouseMotion == true and h._mouseClick == false and h._mouse == nil,
+        "hover only: motion on, clicks off, EnableMouse never called")
+    eq(h._shown, false, "an idle bar has no hover frame up")
+    W.cast("player", "Shadow Bolt", "C1", 100, 2.5); __units.player.cast.spellID = 686
+    W.fire(W.P, "UNIT_SPELLCAST_START")
+    eq(h._shown, true, "shown with the cast")
+    hover(h)
+    ok(TT.owner == h and TT.spellID == 686, "the cast's spell: " .. tostring(TT.spellID))
+    W.channel("player", "Drain Life", 100, 3, 689)
+    W.fire(W.P, "UNIT_SPELLCAST_CHANNEL_START")
+    ok(TT.owner == h and TT.spellID == 689, "a channel's spell, redrawn under the cursor: " .. tostring(TT.spellID))
+    __units.player.chan = nil
+    W.fire(W.P, "UNIT_SPELLCAST_CHANNEL_STOP")
+    W.stepTo(W.P, 100, 104)
+    eq(h._shown, false, "gone with the cast")
+    ok(not TT.shown, "no tip once the cast is over")
+    ok(h.fsSpellID == nil and h.fsName == nil, "and no id is kept")
+    -- the target's icon too
+    ok(W.G.iconHover, "the target bar has one")
+end
+
+function T.a_secret_target_spell_shows_no_stale_stack_a_tip()
+    local W = world()
+    local h = W.G.iconHover
+    W.cast("target", "Fear", "T1", 100, 1.5); __units.target.cast.spellID = 5782
+    W.fire(W.G, "UNIT_SPELLCAST_START")
+    hover(h)
+    ok(TT.spellID == 5782, "the plain cast shows")
+    W.secretCast("target")
+    __units.target.cast.spellID = __SECRET_ID
+    ok(pcall(W.fire, W.G, "UNIT_SPELLCAST_START"), "no throw on a secret spell id")
+    ok(TT.spellID ~= 5782, "the previous cast's spell is not shown for the secret one")
+    ok(h.fsSpellID == nil and h.fsName == nil, "a secret id and name are never stored")
+    ok(not TT.shown, "nothing known, nothing shown")
+    W.clean()
 end
 
 function T.channel_ticks_are_keyed_by_spell_id_then_by_name()
