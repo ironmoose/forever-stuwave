@@ -178,6 +178,12 @@ local function WriteLevel()
     FitLevel()
 end
 
+-- A new target (or a world load) starts with an empty icon slot; the classification follow-up fills it after this.
+local function WriteLevelForNewTarget()
+    Tags.iconW, Tags.iconH = 0, 0
+    WriteLevel()
+end
+
 local function ApplyLevel()
     local frame = Tags.level
     if not frame then return end
@@ -324,7 +330,11 @@ local function Build()
     for _, event in ipairs({ "UNIT_LEVEL", "UNIT_CLASSIFICATION_CHANGED", "UNIT_TARGET" }) do Register(events, event, "target") end
     events:SetScript("OnEvent", function(_, event, unit)
         if not IsSecret(unit) and type(unit) == "string" and unit ~= "target" then return end
-        if event ~= "UNIT_TARGET" then Guard(WriteLevel) end
+        if event == "PLAYER_TARGET_CHANGED" or event == "PLAYER_ENTERING_WORLD" then
+            Guard(WriteLevelForNewTarget)
+        elseif event ~= "UNIT_TARGET" then
+            Guard(WriteLevel)
+        end
         if event ~= "UNIT_LEVEL" and event ~= "UNIT_CLASSIFICATION_CHANGED" then Guard(SyncTot) end
     end)
 
