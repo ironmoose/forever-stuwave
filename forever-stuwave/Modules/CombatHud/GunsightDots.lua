@@ -42,7 +42,7 @@ local K = {
 
 -- Shared by both views. The default rect is the upper area, used until seat() hands over the real one.
 local D = {
-    MAX_S = 30,                -- the drain and the axis run 0 to 30 s
+    MAX_S = 30,                -- the vertical axis runs 0 to 30 s (the H drain bar is scaled on each debuff's own length)
     BAND_S = 3,                -- amber at 3 s or less
     POP_S = 0.35, POP_A = 0.8, -- pop: 0.35 s, white at .8 fading out
     COLORS = K,
@@ -389,10 +389,12 @@ local function SetTime(row, s)
     end
 end
 
--- Seats the time text and the drain fill for `rem` seconds left.
+-- Seats the time text and the drain fill for `rem` seconds left. The bar is rem / row.span, the debuff's own length
+-- (100% when applied, 0 at expiry), not a share of the 0 to 30 s axis: a 12 s debuff on that axis started at 40%.
 local function PaintH(row, rem)
     SetTime(row, FormatTime(rem))
-    local w = H.BAR_W * math.min(rem, D.MAX_S) / D.MAX_S
+    local span = row.span
+    local w = H.BAR_W * ((span and span > 0) and math.min(rem / span, 1) or 0)
     if not row.fill or math.abs(row.fill - w) >= 0.02 then
         row.fill = w
         row.fillTex:SetWidth(ui(w))
@@ -657,7 +659,7 @@ local function StartTicking(m)
 end
 
 local function ToAbsent(m, row)
-    row.mode, row.expires, row.band = "absent", nil, false
+    row.mode, row.expires, row.band, row.span = "absent", nil, false, nil
     if m.kind == "H" then
         ParkH(row)
         LookH(row)
@@ -704,7 +706,7 @@ end
 
 local function ClearRow(m, row)
     row.mode, row.key, row.iconId, row.expires, row.band, row.count = "off", nil, nil, nil, false, nil
-    row.fill, row.timeText = nil, nil
+    row.fill, row.timeText, row.span = nil, nil, nil
     HidePop(row.chip)
     if m.kind == "V" then HideRail(row); row.railColor = nil end
     row.frame:Hide()
@@ -751,8 +753,23 @@ local function UpdateRow(m, row, e, now, newTarget)
     row.mode, row.expires = mode, expires
     row.band = mode == "live" and expires - now <= D.BAND_S
     if mode == "live" then
+        -- The bar's full length: the entry's own duration when it has one. Without one (nil, or a secret in combat)
+        -- the span the row already held is kept while it is the same debuff on the same target, and a restart takes
+        -- the time left, so the bar starts full. A restart is: a first sight (the key changed or the row was not
+        -- live), a target switch, or an expiry that moved by more than REAPPLY_EPS in either direction. The expiry
+        -- is absolute, so a drain never moves it; later is a refresh, earlier is a refresh to a shorter length or a
+        -- ledger estimate corrected by a snapshot. (No other signal is legal here: a secret duration and aura
+        -- instance cannot be compared, and a ledger entry's `at` changes on every scan.) Time left beyond the span
+        -- means the span was an underestimate: the bar never overfills.
+        local duration = Num(e.duration)
+        local restart = newTarget or prevMode ~= "live" or not prevExpires or math.abs(expires - prevExpires) > REAPPLY_EPS
+        if duration and duration > 0 then
+            row.span = duration
+        elseif restart then
+            row.span = expires - now
+        end
+        if row.span < expires - now then row.span = expires - now end
         if newTarget then
-            local duration = Num(e.duration)
             if duration and expires - now >= duration - FRESH_EPS then
                 StartPop(row.chip, now)                  -- applied within the last half second: a genuine apply
             else
@@ -807,7 +824,7 @@ local function Gather(m, list)
 end
 
 local function DropRow(m, row)
-    row.mode, row.key, row.iconId, row.expires = "off", nil, nil, nil
+    row.mode, row.key, row.iconId, row.expires, row.span = "off", nil, nil, nil, nil
     pcall(row.frame.Hide, row.frame)
 end
 

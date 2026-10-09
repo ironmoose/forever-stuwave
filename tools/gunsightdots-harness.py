@@ -704,7 +704,7 @@ for j = 1, 5 do
     near3(bl, MU.BAR_X, "row " .. j .. " bar x"); near3(bw, MU.BAR_W, "row " .. j .. " bar width")
     near3(bt + bh / 2, cy, "row " .. j .. " bar y"); near3(bh, MU.BAR_H, "row " .. j .. " bar height")
     local fl, ft, fw = imgRect(row.fillTex)
-    near3(fl, MU.BAR_X, "row " .. j .. " fill x"); near3(fw, MU.BAR_W * rem[j] / MU.BAR_SECS, "row " .. j .. " fill width")
+    near3(fl, MU.BAR_X, "row " .. j .. " fill x"); near3(fw, MU.BAR_W * math.min(rem[j] / 18, 1), "row " .. j .. " fill width (rem over the entry's 18 s)")
     near3(row.barBg.color[4], MU.BAR_BG_A, "row " .. j .. " bar background alpha")
 end
 check(m.rows[4].stack.text == "x5", "the stack count reads x5, got " .. tostring(m.rows[4].stack.text))
@@ -755,13 +755,13 @@ check(textFor(45) == "45s", "45 reads 45s, got " .. textFor(45))
 check(textFor(130) == "2m", "130 reads 2m, got " .. textFor(130))
 """)
 
-case("the_drain_bar_runs_zero_to_thirty_seconds_and_turns_amber_at_three")(r"""
+case("the_drain_bar_is_a_share_of_the_entry_duration_and_turns_amber_at_three")(r"""
 local D = boot()
 local C = D.D.COLORS
 local m = mount("debuffsH", "upper")
-local function fillW(rem) pushList({ ent("Rend", rem) }); local _, _, w = imgRect(m.rows[1].fillTex); return w end
-near3(fillW(15), MU.BAR_W / 2, "15 s is half the bar")
-near3(fillW(45), MU.BAR_W, "past 30 s the bar is full")
+local function fillW(rem) pushList({ ent("Rend", rem, { duration = 30 }) }); local _, _, w = imgRect(m.rows[1].fillTex); return w end
+near3(fillW(15), MU.BAR_W / 2, "15 s of 30 is half the bar")
+near3(fillW(45), MU.BAR_W, "time left past the duration caps at full")
 near3(fillW(3), MU.BAR_W * 3 / 30, "3 s")
 local row = m.rows[1]
 pushList({ ent("Rend", 3) })
@@ -770,6 +770,111 @@ colorIs(row.barBg.color, C.amber, "bar background at 3 s"); colorIs(row.chip.fra
 pushList({ ent("Rend", 3.5) })
 colorIs(row.time.textColor, C.white, "time above 3 s"); colorIs(row.fillTex.color, mix(C.violet, { 1, 1, 1 }, 0.25), "fill above 3 s")
 colorIs(row.chip.frame.fsSkin.border.ring.vertex, C.violet, "ring above 3 s")
+""")
+
+case("the_drain_bar_starts_full_at_application_and_drains_over_the_debuffs_own_duration")(r"""
+-- Regression (Rogue playtest): the bar was scaled on a fixed 0 to 30 s axis, so a 12 s Rupture or Rend was only 40%
+-- full the moment it landed. The bar is rem / the debuff's own duration: 100% at application, 0 at expiry.
+boot()
+local m = mount("debuffsH", "upper")
+local row = m.rows[1]
+local function fill() local _, _, w = imgRect(row.fillTex); return w end
+for _, d in ipairs({ 6, 12, 21, 30, 45 }) do
+    pushList({ ent("Rupture", d, { duration = d }) })
+    near3(fill(), MU.BAR_W, "a " .. d .. " s debuff is full when applied")
+end
+pushList({ ent("Rupture", 12, { duration = 12 }) })
+tick(3)
+near3(fill(), MU.BAR_W * 9 / 12, "3 s into a 12 s debuff, three quarters")
+tick(6)
+near3(fill(), MU.BAR_W * 3 / 12, "9 s in, a quarter")
+-- a reapply (longer expiry) is full again, against the new length
+pushList({ ent("Rupture", 20, { duration = 20 }) })
+near3(fill(), MU.BAR_W, "a refresh to a 20 s length is full again")
+tick(10)
+near3(fill(), MU.BAR_W / 2, "and drains against 20 s")
+-- a switch to a target already part way through the debuff shows what is left of the real length
+pushList({ ent("Rupture", 4, { duration = 12 }) }, 2)
+near3(fill(), MU.BAR_W * 4 / 12, "a debuff found part way through is not full")
+-- a table length shorter than the time left cannot overfill the bar
+pushList({ ent("Rupture", 26, { duration = 18 }) })
+near3(fill(), MU.BAR_W, "time left beyond the believed length caps at full")
+-- no usable length (nil or secret): the first sight of the debuff is full, then it drains from there
+local function noLength(dur)
+    pushList({}, 3)
+    pushList({ ent("Garrote", 18, { duration = 18 }) })
+    local e = ent("Garrote", 18); e.duration = dur
+    pushList({ e }, 4)
+    near3(fill(), MU.BAR_W, "no known length: full when first seen")
+    tick(9)
+    near3(fill(), MU.BAR_W / 2, "no known length: drains from that sight")
+    local e2 = ent("Garrote", 9); e2.duration = dur
+    pushList({ e2 })
+    near3(fill(), MU.BAR_W / 2, "an unchanged expiry keeps the same span")
+end
+noLength(nil)
+noLength(SECRETV)
+""")
+
+case("a_row_without_a_readable_length_restarts_its_bar_on_every_real_reapply")(r"""
+-- The length is secret (or missing) in combat, so the only signals are the key, the target epoch and the expiry. The
+-- expiry is absolute: a drain never moves it, so a move of more than REAPPLY_EPS either way is a refresh or a
+-- correction, and the bar restarts against the time left.
+boot()
+local m = mount("debuffsH", "upper")
+local row = m.rows[1]
+local function fill() local _, _, w = imgRect(row.fillTex); return w end
+local function hidden(name, rem, epoch)
+    local e = ent(name, rem); e.duration = SECRETV
+    pushList({ e }, epoch)
+end
+-- first sight: the row still holds a 30 s span from another debuff, so a clamp alone would leave this one at 12/30
+pushList({ ent("Rupture", 30, { duration = 30 }) })
+hidden("Garrote", 12)
+near3(fill(), MU.BAR_W, "first sight of a debuff with a hidden length is full, not 12/30 of the last row's span")
+tick(6)
+hidden("Garrote", 6)
+near3(fill(), MU.BAR_W / 2, "same expiry: it drains against the span it started with")
+-- refresh to a LONGER length
+hidden("Garrote", 20)
+near3(fill(), MU.BAR_W, "a refresh to a longer length is full again")
+tick(8)
+hidden("Garrote", 12)
+near3(fill(), MU.BAR_W * 12 / 20, "and drains against the new span")
+-- refresh to a SHORTER length (the old span is 20)
+hidden("Garrote", 6)
+near3(fill(), MU.BAR_W, "a refresh to a shorter length is full, not 6/20")
+tick(3)
+hidden("Garrote", 3)
+near3(fill(), MU.BAR_W / 2, "and drains against the shorter span")
+-- refresh LATER but still shorter than the held span (20): the clamp cannot make this full, only the restart can
+hidden("Garrote", 20)
+tick(16)
+hidden("Garrote", 4)
+near3(fill(), MU.BAR_W * 4 / 20, "4 s left of a 20 s span")
+hidden("Garrote", 12)
+near3(fill(), MU.BAR_W, "a refresh to 12 s left (expiry later, below the old span) is full, not 12/20")
+""")
+
+case("a_hidden_length_does_not_follow_the_debuff_to_another_target")(r"""
+-- Same debuff name, new target, expiry inside the reapply window of the old one: only the epoch tells them apart.
+boot()
+local m = mount("debuffsH", "upper")
+local row = m.rows[1]
+local function fill() local _, _, w = imgRect(row.fillTex); return w end
+pushList({ ent("Rend", 24, { duration = 24 }) }, 1)
+tick(18)
+near3(fill(), MU.BAR_W * 6 / 24, "target A: 6 s left of 24")
+local e = ent("Rend", 6.2); e.duration = SECRETV
+pushList({ e }, 2)
+near3(fill(), MU.BAR_W, "target B's Rend with a hidden length starts full, not 6.2/24")
+tick(3.1)
+e = ent("Rend", 3.1); e.duration = SECRETV
+pushList({ e }, 2)
+near3(fill(), MU.BAR_W / 2, "and drains against its own span")
+-- a known length on the new target is used as given
+pushList({ ent("Rend", 6, { duration = 24 }) }, 3)
+near3(fill(), MU.BAR_W * 6 / 24, "a known length on the new target is not replaced by the time left")
 """)
 
 case("an_absent_row_is_dim_with_dashes_and_no_fill")(r"""
@@ -845,7 +950,7 @@ check(onUpdateFrames() == 1 and frame.scripts.OnUpdate, "one OnUpdate, on the mo
 tick(1.0)
 check(m.rows[1].time.text == "8s" and m.rows[2].time.text == "11s", "times follow GetTime, got " .. m.rows[1].time.text .. " " .. m.rows[2].time.text)
 local _, _, w = imgRect(m.rows[1].fillTex)
-near3(w, MU.BAR_W * 8 / 30, "the fill drains")
+near3(w, MU.BAR_W * 8 / 18, "the fill drains")
 local writes = m.rows[1].fillTex.setPointCalls
 tick(0.001)
 check(m.rows[1].fillTex.setPointCalls == writes, "a steady frame re-anchors nothing")
@@ -1176,7 +1281,7 @@ near3(m.rows[1].chip.frame:GetWidth(), 20 * K * 1200 / 1440, "chip size at 1200"
 local cx, cy = imgCenter(m.rows[1].chip.frame)
 near3(cx, MU.CHIP_X + MU.CHIP / 2, "chip x after the rescale"); near3(cy, rowCenterY(MU.TOP, 1), "chip y after the rescale")
 local _, _, w = imgRect(m.rows[1].fillTex)
-near3(w, MU.BAR_W * 15 / 30, "the drain keeps its width in image px")
+near3(w, MU.BAR_W * 15 / 18, "the drain keeps its width in image px")
 check(m.rows[1].time.monoSize and math.abs(m.rows[1].time.monoSize - MU.TIME_SIZE * K * 1200 / 1440) < 1e-6, "text restyled")
 -- the vertical one too
 SetScreen(1440)
