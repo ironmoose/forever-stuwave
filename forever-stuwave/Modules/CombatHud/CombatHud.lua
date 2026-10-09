@@ -1378,10 +1378,12 @@ local function PlainCall(fn, ...)
     return r
 end
 
--- The page the main bar shows, the same switch as ActionBars.lua's CurrentPage (a file local there,
--- so mirrored here with the same order and the same fallback indexes): vehicle, then override,
--- then temp shapeshift, then bonus, then the paged bar. Each check is plain-or-nothing, so a
--- missing, throwing or secret one reads as "not active"; an unreadable page is nil.
+-- The page the main bar shows. ActionBars.lua owns the answer (FS.ActionBars.LivePage: the page
+-- attribute of the host the paged buttons click through, with the client's page as the fallback);
+-- it loads before this file. Without it (the module failed, or a harness) the same switch is
+-- mirrored here: vehicle, then override, then temp shapeshift, then bonus, then the paged bar.
+-- Each read is plain-or-nothing, so a missing, throwing or secret one reads as "not active"; an
+-- unreadable page is nil.
 local SPECIAL_PAGES = {
     { has = "HasVehicleActionBar", index = "GetVehicleBarIndex", default = 12 },
     { has = "HasOverrideActionBar", index = "GetOverrideBarIndex", default = 14 },
@@ -1390,6 +1392,8 @@ local SPECIAL_PAGES = {
 }
 
 local function MainBarPage()
+    local live = PlainNumber(PlainCall(FS.ActionBars and FS.ActionBars.LivePage))
+    if live ~= nil then return live end
     for _, p in ipairs(SPECIAL_PAGES) do
         if PlainCall(_G[p.has]) then return PlainNumber(PlainCall(_G[p.index])) or p.default end
     end
