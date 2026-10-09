@@ -8,18 +8,30 @@
 -- Class-agnostic: GetNumShapeshiftForms() returns 0 for classes with no forms
 -- (mage, warlock, ...), in which case the container is never shown.
 --
--- Secure attributes: type="spell" + spell=<the form's spell id>, the 4th return of
--- GetShapeshiftFormInfo(index). There is NO "shapeshift" secure action type (the
--- engine's list is SECURE_ACTIONS in Blizzard_FrameXML/SecureTemplates.lua: action,
--- pet, spell, macro, item, ... no shapeshift), so a button typed that way does
--- nothing when clicked. Blizzard's own StanceButton cannot be copied either: it
--- calls CastShapeshiftForm from an insecure OnClick, which is only legal inside
--- Blizzard's untainted code, and an addon calling it is refused. A form is cast by
--- its spell like any other, so `spell` resolves C-side through CastSpellByID with
--- no snippet involved -- the same no-snippet mechanism as type="action" on the
--- main bars. The id is a protected attribute write: it is set out of combat only
--- (SyncCastSpell) and caught up at PLAYER_REGEN_ENABLED. A bound key never reaches
--- these buttons: SHAPESHIFTBUTTONn runs StanceBar:Select(n) in Blizzard's own code.
+-- Secure attributes. There is NO "shapeshift" secure action type (the engine's list is
+-- SECURE_ACTIONS in Blizzard_FrameXML/SecureTemplates.lua: action, pet, spell, macro, item, ...
+-- no shapeshift), so a button typed that way does nothing when clicked. Blizzard's own
+-- StanceButton cannot be copied either: it calls CastShapeshiftForm from an insecure OnClick,
+-- which is only legal inside Blizzard's untainted code, and an addon calling it is refused.
+-- A form is cast by its spell like any other, with the spell id from the 4th return of
+-- GetShapeshiftFormInfo(index).
+--
+-- Casting the spell is not enough for a form you can leave: CastShapeshiftForm on the ACTIVE
+-- form toggles it off (the stock bar's unstealth, Druid back to caster form), but casting the
+-- Stealth spell while stealthed does not cancel it. So every class but the Warrior gets
+-- type="macro" with a click-time conditional (macro text is expanded C-side at the click, no
+-- snippet and no attribute change, so it is right even when Stealth or a form flips in combat):
+--     /cancelform [form:N]
+--     /cast [noform:N] <the form's spell name>
+-- N is the button's index, the same index GetShapeshiftFormInfo takes and [form:N] tests. The
+-- spell name comes from the id; a name that cannot be read (nil, secret, a throw) leaves the
+-- button on type="spell" + spell=<id>, which casts but cannot cancel. The WARRIOR stays on
+-- type="spell": a stance cannot be cancelled (the stock bar's active stance does nothing when
+-- clicked), so the macro would add a path that can only do what the spell already does. A
+-- Paladin's auras never come here (SealBar.lua draws them). The spell id and the macro text are
+-- protected attribute writes: set out of combat only (SyncCastSpell) and caught up at
+-- PLAYER_REGEN_ENABLED. A bound key never reaches these buttons: SHAPESHIFTBUTTONn runs
+-- StanceBar:Select(n) in Blizzard's own code.
 --
 -- The buttons are built ONCE per form index and re-seated on every rebuild (form
 -- count changes show or hide them), never re-created: a named secure frame cannot
@@ -135,9 +147,37 @@ local function WatchForSpellId(button)
     end)
 end
 
--- Points the button's click at its form's spell. The id is a plain number from the
--- form info; a secret or non-number answer leaves the attribute as it was (a button
--- that never had one is watched, see WatchForSpellId).
+local isWarrior = false      -- set at Apply; the Warrior's stances stay on type="spell" (see the header)
+
+-- The name of a spell id, a plain string or nil (SealBar.lua keeps its own).
+local function SpellName(id)
+    if IsSecret(id) or type(id) ~= "number" then return nil end
+    local ok, name
+    if C_Spell and C_Spell.GetSpellInfo then
+        local info
+        ok, info = pcall(C_Spell.GetSpellInfo, id)
+        name = ok and not IsSecret(info) and type(info) == "table" and info.name or nil
+    elseif GetSpellInfo then
+        ok, name = pcall(GetSpellInfo, id)
+        if not ok then name = nil end
+    end
+    if IsSecret(name) or type(name) ~= "string" then return nil end
+    return name
+end
+
+-- The macro that leaves the form when it is the active one and casts it otherwise (see the header),
+-- or nil when this button stays on type="spell".
+local function FormMacro(button, spellID)
+    if isWarrior then return nil end
+    local name = SpellName(spellID)
+    if not name then return nil end
+    local n = button.index
+    return "/cancelform [form:" .. n .. "]\n/cast [noform:" .. n .. "] " .. name
+end
+
+-- Points the button's click at its form's spell: the macro above where it applies, the plain spell
+-- otherwise. The id is a plain number from the form info; a secret or non-number answer leaves the
+-- attributes as they were (a button that never had one is watched, see WatchForSpellId).
 local function SyncCastSpell(button, spellID)
     if IsSecret(spellID) or type(spellID) ~= "number" then
         if button.fsCastSpell == nil and not IsSecret(spellID) then
@@ -145,13 +185,17 @@ local function SyncCastSpell(button, spellID)
         end
         return
     end
-    if button.fsCastSpell == spellID then return end
+    local macro = FormMacro(button, spellID)
+    if button.fsCastSpell == spellID and button.fsCastMacro == macro then return end
     if InCombatLockdown() then
         pendingSync = true
         return
     end
     button:SetAttribute("spell", spellID)
+    button:SetAttribute("macrotext", macro)
+    button:SetAttribute("type", macro and "macro" or "spell")
     button.fsCastSpell = spellID
+    button.fsCastMacro = macro
 end
 
 -- Keybind text, top-right of the button; same shape as PetActionBar.lua's.
@@ -402,8 +446,8 @@ local function BuildButton(container, index)
 
     button.index = index
 
-    -- Engine-resolved C-side at click time (CastSpellByID), no snippet anywhere
-    -- in the path. RegisterForClicks AnyUp+AnyDown is load-bearing, see the
+    -- Engine-resolved C-side at click time (CastSpellByID, or the macro text
+    -- SyncCastSpell writes), no snippet anywhere in the path. RegisterForClicks AnyUp+AnyDown is load-bearing, see the
     -- Quick Keybind section of FrameHelpers.
     button:SetAttribute("type", "spell")
     button:RegisterForClicks("AnyUp", "AnyDown")
@@ -463,28 +507,11 @@ end
 local container
 local buttons = {}      -- built buttons by form index; only ever grows, never re-created
 local pendingBuild = false
-local isWarrior = false
 local ownsShoulder = false
 
 local function PlayerIsWarrior()
     local ok, _, token = pcall(UnitClass, "player")
     return ok and not IsSecret(token) and token == "WARRIOR"
-end
-
--- The English name of a spell id, a plain string or nil (SealBar.lua's, which keeps its own).
-local function SpellName(id)
-    if IsSecret(id) or type(id) ~= "number" then return nil end
-    local ok, name
-    if C_Spell and C_Spell.GetSpellInfo then
-        local info
-        ok, info = pcall(C_Spell.GetSpellInfo, id)
-        name = ok and not IsSecret(info) and type(info) == "table" and info.name or nil
-    elseif GetSpellInfo then
-        ok, name = pcall(GetSpellInfo, id)
-        if not ok then name = nil end
-    end
-    if IsSecret(name) or type(name) ~= "string" then return nil end
-    return name
 end
 
 -- The shoulder slot (1..3) of each form 1..numForms: the mockup order by the form's spell name, and a form
