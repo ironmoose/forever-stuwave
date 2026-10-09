@@ -125,7 +125,11 @@ end
 __tip = { owner = nil, shown = false, lines = {}, aura = nil, auraCalls = 0 }
 __tipThrows = false
 GameTooltip = {
-    SetOwner = function(self, owner, anchor) __tip.owner, __tip.anchor, __tip.shown, __tip.lines, __tip.aura = owner, anchor, false, {}, nil end,
+    SetOwner = function(self, owner, anchor)
+        __tip.owner, __tip.anchor, __tip.shown, __tip.lines, __tip.aura, __tip.spellID = owner, anchor, false, {}, nil, nil
+        __tip.owners = (__tip.owners or 0) + 1
+    end,
+    SetSpellByID = function(self, id) __tip.spellID = id; __tip.shown = true end,
     GetOwner = function() return __tip.owner end,
     SetUnitAura = function(self, unit, index, filter)
         __tip.auraCalls = __tip.auraCalls + 1
@@ -147,8 +151,8 @@ local function noFails(msg)
     if #__pcallFails > 0 then error((msg or "a pcall failed") .. ": " .. __pcallFails[1], 2) end
 end
 local function My() return FS.GunsightMyBuffs end
-local function aura(icon, remaining, source, name)
-    return { name = name or ("Buff" .. tostring(icon)), icon = icon, count = 0, dispelType = nil,
+local function aura(icon, remaining, source, name, spellId)
+    return { name = name or ("Buff" .. tostring(icon)), icon = icon, count = 0, dispelType = nil, spellId = spellId,
              duration = remaining and 1800 or 0, expirationTime = remaining and (__now + remaining) or 0, sourceUnit = source }
 end
 local function snapshot(...) __snapshot = { buffs = { ... }, debuffs = {} } end
@@ -550,8 +554,10 @@ end
 
 -- ---- tooltip ---------------------------------------------------------------------
 
-local function enter(i) local f = My().tiles[i].frame; f._scripts.OnEnter(f) end
-local function leave(i) local f = My().tiles[i].frame; f._scripts.OnLeave(f) end
+-- The tiles take their hover through the shared HookScript hooks (AttachSpellTooltip), not a SetScript of their own.
+local function run(f, name) for _, fn in ipairs(f._hooks and f._hooks[name] or {}) do fn(f) end end
+local function enter(i) run(My().tiles[i].frame, "OnEnter") end
+local function leave(i) run(My().tiles[i].frame, "OnLeave") end
 
 function T.only_the_tiles_take_hover_and_no_clicks_so_the_world_gets_them()
     local W = world()
@@ -562,7 +568,8 @@ function T.only_the_tiles_take_hover_and_no_clicks_so_the_world_gets_them()
     for i, t in ipairs(My().tiles) do
         eq(t.frame:IsMouseMotionEnabled(), true, "tile " .. i .. " takes hover for its tooltip")
         eq(t.frame:IsMouseClickEnabled(), false, "tile " .. i .. " takes no click: mouselook and targeting start over it")
-        ok(t.frame._scripts.OnEnter and t.frame._scripts.OnLeave, "tile " .. i .. " has hover scripts")
+        ok(t.frame._hooks and t.frame._hooks.OnEnter and t.frame._hooks.OnLeave, "tile " .. i .. " has hover hooks")
+        eq(t.frame._scripts.OnEnter, nil, "and no handler of its own: one tooltip path")
     end
     eq(My().plate._scripts.OnEnter, nil); eq(My().body._scripts.OnEnter, nil)
     W.clean(); noFails()
@@ -629,7 +636,6 @@ function T.a_hidden_hud_shows_no_tooltip_even_in_combat_when_only_its_alpha_went
     eq(W.Gun.IsActive(), false)
     enter(1)
     eq(__tip.shown, false, "a hover on the invisible HUD shows nothing in combat either")
-    eq(My().tiles[1].frame.fsHover, nil, "and marks no hover")
     __combat = false
     W.clean(); noFails()
 end
@@ -647,7 +653,7 @@ function T.a_secret_aura_name_or_a_throwing_tooltip_shows_nothing_and_never_erro
     __tipThrows = true
     enter(2)
     eq(__tip.auraCalls, 1, "the setter was tried")
-    eq(__tip.shown, false, "a refused setter shows nothing")
+    eq(__tip.lines[1], "Fine", "a refused slot falls through to the cached name (the shared tooltip's rule)")
     __tipThrows = false
     W.clean()
     eq(#__degrades, 0, "and nothing was logged")
@@ -701,6 +707,23 @@ function T.a_hovered_tooltip_follows_its_tile_when_the_slot_or_the_buff_changes_
     snapshot(aura(6, 600))
     refresh()
     eq(__tip.shown, false, "not hovered, no tooltip")
+    W.clean(); noFails()
+end
+
+function T.a_hover_shows_one_tooltip_and_in_combat_the_spell_itself_when_the_id_is_plain()
+    local W = world()
+    snapshot(aura(1, 600, nil, "Mark of the Wild", 1126), aura(2, 600, nil, "Fine", __SECRET_ID))
+    refresh()
+    enter(1)
+    eq(__tip.owners, 1, "one SetOwner a hover: a double hook would show twice")
+    __combat = true
+    enter(1)
+    eq(__tip.spellID, 1126, "in combat the cached spell id shows the spell's own tooltip")
+    eq(__tip.auraCalls, 1, "and no aura was read for it")
+    enter(2)
+    eq(__tip.spellID, nil, "a secret id is never stored or used")
+    eq(__tip.lines[1], "Fine", "it falls back to the name")
+    __combat = false
     W.clean(); noFails()
 end
 

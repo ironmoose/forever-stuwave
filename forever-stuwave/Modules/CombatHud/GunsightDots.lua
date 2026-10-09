@@ -240,12 +240,18 @@ local function HidePop(chip)
     chip.pop:Hide()
 end
 
+-- A chip's tooltip shows only while the Gunsight is the display: in combat a switched-off HUD only fades, and its hidden chips
+-- would still answer a hover.
+local function TipGate() return Gunsight.IsActive() end
+
 local function BuildChip(m, parent, size, level)
     local Theme, FH = FS.Theme, FS.FrameHelpers
     local chip = {}
     local f = CreateFrame("Frame", nil, parent)
     f:SetFrameLevel(level)
     f:EnableMouse(false)
+    -- Hover only (clicks pass through the centre HUD); the spell comes from UpdateRow.
+    if FH and FH.AttachSpellTooltip then FH.AttachSpellTooltip(f, { gate = TipGate }) end
     f:SetSize(ui(size), ui(size))          -- sized first: the chamfer comes from the height
     local icon = f:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints(f)
@@ -714,6 +720,8 @@ local function UpdateRow(m, row, e, now, newTarget)
         row.key, row.iconId = name, e.icon
         SetChipIcon(row.chip, e)
     end
+    -- Every push, not only on a new debuff: the id is a plain number or nothing (a secret falls back to the name).
+    if FS.FrameHelpers and FS.FrameHelpers.SetTipSpell then FS.FrameHelpers.SetTipSpell(row.chip.frame, e.id, name) end
 
     local raw = e.expires
     local mode, expires

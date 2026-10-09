@@ -152,6 +152,10 @@ function FHSTUB.ReadAuraSlot(unit, index, filter, report)
     return a
 end
 
+-- SpellIDForName stub: the real one is covered by frame-tooltip-harness.py; here a name table stands in for the client.
+NAME_IDS = { Corruption = 172, ["Bane of Agony"] = 980 }
+function FHSTUB.SpellIDForName(name) return NAME_IDS[name] end
+
 function resetWorld()
     for i = #FRAMES, 1, -1 do FRAMES[i] = nil end
     for i = #TIMERS, 1, -1 do TIMERS[i] = nil end
@@ -649,6 +653,7 @@ local list = TD.Get()
 check(list[1].name == "Corruption" and list[2].name == "Bane of Agony", "profile order first, got " .. names(list))
 near(list[1].expires, NOW + 10, "the Hud's timer wins over the scan's"); near(list[1].duration, 18, "duration")
 check(list[1].icon == 7001, "icon from the Hud row")
+check(list[1].id == 172 and list[2].id == 980, "a Hud row carries the spell id its name resolves to, got " .. tostring(list[1].id) .. ", " .. tostring(list[2].id))
 check(list[2].expires <= NOW, "an absent DoT is an entry with an expiry in the past (the recast cue)")
 check(not byName(list, "Immolate"), "an unknown DoT draws nothing")
 check(byName(list, "Curse of Weakness"), "a player debuff outside the profile still shows, after the profile rows")

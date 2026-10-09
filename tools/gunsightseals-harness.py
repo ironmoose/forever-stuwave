@@ -62,6 +62,8 @@ def _load(name: str, file: str):
     return mod
 
 
+import spelltip_support as tips  # noqa: E402
+
 DOTS_H = _load("gunsightdots_harness", "gunsightdots-harness.py")
 lua_value = DOTS_H.lua_value
 
@@ -269,7 +271,7 @@ local function stubGunsight_()
     root:SetSize(1, 1)
     root:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     function root:GetEffectiveScale() return 1 end
-    local Gs = { G = { GRID = GEO.GRID, CX = GEO.CX, CY = GEO.CY }, root = root }
+    local Gs = { G = { GRID = GEO.GRID, CX = GEO.CX, CY = GEO.CY }, root = root, IsActive = function() return true end }
     function Gs.ui(px) return px * GEO.GRID * FS.Layout.Scale() end
     function Gs.Point(frame, point, x, y)
         local k = GEO.GRID * FS.Layout.Scale()
@@ -300,8 +302,9 @@ local function boot(opts)
     FS.Layout = { Scale = function() return SCALE end }
     UnitGUID = function() return "Creature-0-0-0-0-1-0000000001" end
     UnitIsDead = function() return DEAD end
-    FS.HudSpells = { jd = { ids = { 20271 } } }
+    FS.HudSpells = { jd = { names = { "Judgement" }, ids = { 20271 } }, sor = { names = { "Seal of Righteousness" } } }
     stubGunsight_()
+    loadSpellTips(HELPERS_SRC)
     if not opts.noTheme then stubTheme2_() end
     if not opts.noHud then
         stubHud_()
@@ -667,6 +670,41 @@ check(icon.path == 135000 + 20375 and isVisible(icon), "a new seal reads its own
 push(noneState(false)); check(not isVisible(icon), "NO SEAL: no icon"); check(isVisible(P.ab) and P.ab.text == "--", "NO SEAL keeps its dashes")
 push(unknownState()); check(not isVisible(icon) and not isVisible(P.ab), "unknown: no icon, no letters")
 """)
+
+case("the_seal_tile_and_the_judgement_chip_show_their_spell_on_hover")(r"""
+STATE = sealAt("sor", 20)
+local Seals = mount("upper")
+local P = Seals.parts
+for _, f in ipairs({ P.tile, P.chip }) do
+    check(hoverOnly(f) and f.mouse == false, "a plate is motion only and never click enabled")
+end
+hover(P.tile)
+check(tip() and tip().spellID == 21084 and GameTooltip.setOwner == 1, "the tile shows the seal's spell once, got " .. tostring(tip() and tip().spellID))
+unhover(P.tile)
+check(tip() == nil, "leave takes it down")
+hover(P.chip)
+check(tip() and tip().spellID == 20271, "the chip shows Judgement")
+unhover(P.chip)
+-- a new seal under the cursor redraws it
+hover(P.tile)
+local st = sealAt("sotc", 20); st.seal.id = 20375; push(st)
+check(tip() and tip().spellID == 20375, "the open tooltip follows the new seal")
+-- NO SEAL has no spell to show
+push(noneState(false))
+check(tip() == nil, "NO SEAL: nothing to show")
+""")
+
+case("a_secret_seal_id_falls_back_to_the_seal_name_and_the_gate_holds")(r"""
+STATE = sealAt("sor", 20); STATE.seal.id = SECRET
+local Seals = mount("upper")
+hover(Seals.parts.tile)
+check(tip() and tip().spellID == nil and tip().text == "Seal of Righteousness", "a secret id shows the name, got " .. tostring(tip() and tip().text))
+unhover(Seals.parts.tile)
+FS.Gunsight.IsActive = function() return false end
+hover(Seals.parts.chip)
+check(tip() == nil, "an inactive Gunsight shows no Judgement tooltip")
+""")
+
 
 case("the_tile_falls_back_to_the_letters_for_every_unreadable_icon")(r"""
 local answers = {
@@ -1299,6 +1337,7 @@ def static_checks() -> list[tuple[str, str | None]]:
 def run_case(name: str, body: str, mu: dict) -> str | None:
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.globals().SEALS_SRC = SEALS.read_text(encoding="utf-8")
+    lua.globals().HELPERS_SRC = tips.HELPERS.read_text(encoding="utf-8")
     lua.execute("MU = " + lua_value(mu))
     try:
         lua.execute(PRELUDE + "\n" + body)

@@ -37,6 +37,8 @@ import re
 import sys
 from pathlib import Path
 
+import spelltip_support as tips
+
 try:
     from lupa.luajit21 import LuaError, LuaRuntime
 except ImportError:
@@ -258,7 +260,7 @@ end
 function Frame:UnregisterEvent(e) self.events[e] = nil end
 function Frame:SetScript(name, fn) self.scripts[name] = fn end
 function Frame:GetScript(name) return self.scripts[name] end
-function Frame:HookScript() error("HookScript is not mocked") end
+__HOOKMOCK__
 
 function Frame:CreateTexture(name, layer, template, sublevel)
     local t = newRegion("Texture", self)
@@ -502,6 +504,9 @@ function stubTheme_()
 end
 """
 
+# The frame hooks and the spell tooltip mock (also used by the harnesses that import this MOCK).
+MOCK = MOCK.replace("__HOOKMOCK__", tips.HOOK_MOCK.format(cls="Frame")) + tips.LUA
+
 # ---------------------------------------------------------------------------------------
 # Cases
 # ---------------------------------------------------------------------------------------
@@ -549,6 +554,7 @@ local function boot(opts)
     ForeverSTUwaveDB = opts.db or {}
     FS.IsSecret = function(v) return SECRET_FN(v) end
     stubTheme_()
+    loadSpellTips(HELPERS_SRC)
     if opts.realareas then assert(loadstring(HAS_TARGET_SRC, "@Theme.lua"))() end
     loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
     loadAddonFile(CONFIG_SRC, "Core/Config.lua")
@@ -594,7 +600,7 @@ local nid = 0
 local function ent(name, rem, o)
     o = o or {}
     nid = nid + 1
-    local e = { name = name, icon = (not o.noicon) and (9000 + nid) or nil, count = o.count or 1, order = nid, duration = o.duration or 18 }
+    local e = { name = name, id = o.id, icon = (not o.noicon) and (9000 + nid) or nil, count = o.count or 1, order = nid, duration = o.duration or 18 }
     if rem == nil then e.expires = nil elseif rem <= 0 then e.expires = 0 else e.expires = NOW + rem end
     return e
 end
@@ -1290,6 +1296,64 @@ near3(ly, rowCenterY(MU.HZ, 1), "and its rows start at the horizon there")
 check(next(DEGRADED) == nil, "no degrade: " .. tostring(next(DEGRADED)))
 """)
 
+case("a_chip_hover_shows_the_spell_on_both_views")(r"""
+boot()
+check(FS.Gunsight.IsActive(), "the harness Gunsight is active")
+local mh = mount("debuffsH", "upper")
+local mv = mount("debuffsV", "lower")
+pushList({ ent("Rend", 9, { id = 772 }), ent("Deep Wounds", 12, { id = 12868 }) })
+for _, pair in ipairs({ { mh, "H" }, { mv, "V" } }) do
+    local m, kind = pair[1], pair[2]
+    tipReset()
+    hover(m.rows[1].chip.frame)
+    check(tip() and tip().spellID == 772, kind .. " chip 1 hover shows spell 772, got " .. tostring(tip() and tip().spellID))
+    unhover(m.rows[1].chip.frame)
+    check(tip() == nil, kind .. " leave takes the tooltip down")
+    hover(m.rows[2].chip.frame)
+    check(tip().spellID == 12868, kind .. " chip 2 shows its own spell")
+    check(GameTooltip.setOwner == 2, kind .. ": one SetOwner a hover, got " .. GameTooltip.setOwner)
+end
+""")
+
+case("a_chip_is_hover_only_and_never_click_enabled")(r"""
+boot()
+local mh = mount("debuffsH", "upper")
+local mv = mount("debuffsV", "lower")
+for _, m in ipairs({ mh, mv }) do
+    for i, row in ipairs(m.rows) do
+        check(hoverOnly(row.chip.frame), m.id .. " chip " .. i .. " is motion only")
+        check(row.chip.frame.mouse == false, m.id .. " chip " .. i .. " never EnableMouse(true)")
+    end
+end
+for i, row in ipairs(mh.rows) do check(row.frame.mouse == false, "the H row frame " .. i .. " stays click through") end
+""")
+
+case("a_secret_id_falls_back_to_the_name_and_the_tip_follows_the_chip")(r"""
+boot()
+local m = mount("debuffsH", "upper")
+pushList({ ent("Rend", 9, { id = SECRETV }) })
+hover(m.rows[1].chip.frame)
+check(tip() and tip().spellID == nil and tip().text == "Rend", "a secret id shows the name, got " .. tostring(tip() and tip().text))
+pushList({ ent("Rend", 9, { id = 772 }) })
+check(tip() and tip().spellID == 772, "a plain id arriving under the cursor redraws the open tooltip")
+pushList({ ent("Rend", 9) })
+check(tip() and tip().spellID == nil and tip().text == "Rend", "no id at all: the name")
+""")
+
+case("a_chip_tooltip_is_gated_on_the_gunsight_being_active")(r"""
+boot()
+local m = mount("debuffsH", "upper")
+pushList({ ent("Rend", 9, { id = 772 }) })
+hover(m.rows[1].chip.frame)
+check(tip() and tip().spellID == 772, "active: the tooltip shows")
+unhover(m.rows[1].chip.frame)
+local real = FS.Gunsight.IsActive
+FS.Gunsight.IsActive = function() return false end
+hover(m.rows[1].chip.frame)
+check(tip() == nil, "an inactive Gunsight (faded root in combat) shows no tooltip")
+FS.Gunsight.IsActive = real
+""")
+
 
 def static_checks() -> list[tuple[str, str | None]]:
     out: list[tuple[str, str | None]] = []
@@ -1314,6 +1378,7 @@ def static_checks() -> list[tuple[str, str | None]]:
 def run_case(name: str, body: str, mu: dict) -> str | None:
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.execute(MOCK)
+    lua.globals().HELPERS_SRC = tips.HELPERS.read_text(encoding="utf-8")
     lua.globals().LAYOUT_SRC = LAYOUT.read_text(encoding="utf-8")
     lua.globals().CONFIG_SRC = CONFIG.read_text(encoding="utf-8")
     lua.globals().GUNSIGHT_SRC = GUNSIGHT.read_text(encoding="utf-8")
