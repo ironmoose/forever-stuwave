@@ -173,7 +173,7 @@ function M:CreateFontString()
 end
 function M:SetText(s) self.text = s end
 function M:SetTexture(p) self.tex = p end
-function M:GetTexture() return self.tex end
+function M:GetTexture() if NO_ART then return nil end return self.tex end   -- NO_ART: a texture that reads back nil (missing file)
 function M:SetAtlas(a) self.atlas = a end
 function M:SetColorTexture() end
 function M:SetVertexColor(r, g, b, a) self.vertex = { r, g, b, a } end
@@ -398,13 +398,14 @@ def py(v):
 class World:
     def __init__(self, scale: float = 1.0, missing: str | None = None, combat_at_load: bool = False,
                  late_xp: bool = False, login_in_combat: bool = False, xp_after_login: bool = False,
-                 timers: bool = False):
+                 timers: bool = False, no_art: bool = False):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
         self.lua.execute(MOCK)
         g = self.lua.globals()
         g.DECK_SRC = DECK_LUA.read_text(encoding="utf-8")
         g.BAGBAR_SRC = BAGBAR_LUA.read_text(encoding="utf-8")
         g.SCALE = scale
+        g.NO_ART = no_art
         self.g = g
         # xp_after_login: the XP bar does not exist at PLAYER_LOGIN either, so Deck schedules its C_Timer retry (needs
         # timers=True); the test builds the XP bar itself (h_makeXP) before flushing the timers.
@@ -780,6 +781,19 @@ def check_backpack_glyph() -> None:
     check("backpack.other_slots_icons_stay_untinted", keyring is None, f"{keyring}")
 
 
+def check_backpack_letter_fallback() -> None:
+    """When the glyph texture reads back nil the backpack falls back to a "B" letter; with the art present it never does."""
+    w = World()
+    w.lua.execute("function h_bp() for _, x in ipairs(FS.BagBar.slots) do if x.kind == 'backpack' then return x end end end")
+    check("backpack.with_art_no_letter_glyph_is_created", w.lua.eval("h_bp().glyph") is None and w.lua.eval("h_bp().glyphOnly") is None)
+    w = World(no_art=True)
+    w.lua.execute("function h_bp() for _, x in ipairs(FS.BagBar.slots) do if x.kind == 'backpack' then return x end end end")
+    w.g.h_fire("BAG_UPDATE")
+    check("backpack.missing_art_falls_back_to_a_B_letter",
+          w.lua.eval("h_bp().glyphOnly") is True and w.lua.eval("h_bp().glyph.text") == "B", f"{w.lua.eval('h_bp().glyph and h_bp().glyph.text')}")
+    check("backpack.missing_art_letter_is_shown", w.lua.eval("h_bp().glyph and h_bp().glyph.shown") is True)
+
+
 def main() -> int:
     check_build()
     check_clicks()
@@ -794,6 +808,7 @@ def main() -> int:
     check_quality_border()
     check_free_count_text()
     check_backpack_glyph()
+    check_backpack_letter_fallback()
     check_source()
     print(f"\n{len(FAILS)} failed" if FAILS else "\nall checks passed")
     return len(FAILS)
