@@ -761,28 +761,35 @@ count.SetText = function(self, t) TEXTS = TEXTS + 1; return realSet(self, t) end
     check("free.an_unreadable_free_count_blanks_the_text", w.lua.eval("h_backpack().count.text") == "")
 
 
-def check_backpack_glyph() -> None:
-    """The backpack slot is our own glyph in the slot accent, never Blizzard's bag art (which a client patch can swap)."""
+def check_backpack_icon() -> None:
+    """The backpack slot paints the classic backpack item icon like the real bag slots do: same crop, no tint, no atlas."""
     w = World()
     w.lua.execute("function h_bp() for _, x in ipairs(FS.BagBar.slots) do if x.kind == 'backpack' then return x end end end")
+    w.lua.execute("function h_bag1() for _, x in ipairs(FS.BagBar.slots) do if x.key == 'bag1' then return x end end end")
     tex = w.lua.eval("h_bp().icon.tex")
-    check("backpack.paints_our_glyph_texture", tex == "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\glyph_backpack.tga", f"{tex}")
-    tint = py(w.lua.eval("h_bp().icon.vertex"))
-    check("backpack.glyph_is_tinted_with_the_cyan_accent", tint is not None and tint[:3] == [0.133, 0.878, 1], f"{tint}")
+    check("backpack.paints_the_classic_backpack_icon", tex == "Interface\\Icons\\INV_Misc_Bag_08", f"{tex}")
     coords = py(w.lua.eval("h_bp().icon.texcoord"))
-    check("backpack.glyph_uses_full_texcoords_no_crop", coords == [0, 1, 0, 1], f"{coords}")
+    bag_coords = py(w.lua.eval("h_bag1().icon.texcoord"))
+    check("backpack.icon_is_cropped_like_the_bag_slots", coords == bag_coords == [0.08, 0.92, 0.08, 0.92], f"{coords} vs {bag_coords}")
+    check("backpack.icon_is_untinted", w.lua.eval("h_bp().icon.vertex") is None, f"{py(w.lua.eval('h_bp().icon.vertex'))}")
+    check("backpack.icon_is_shown_full_colour_and_opaque",
+          w.lua.eval("h_bp().icon.shown") is not False and w.lua.eval("h_bp().icon.desat") is False
+          and w.lua.eval("h_bp().icon.alpha") == 1,
+          f"{w.lua.eval('h_bp().icon.shown')} {w.lua.eval('h_bp().icon.desat')} {w.lua.eval('h_bp().icon.alpha')}")
     check("backpack.no_atlas_is_set_or_looked_up", w.lua.eval("h_bp().icon.atlas") is None and w.lua.eval("#ATLAS_CALLS") == 0,
           f"{w.lua.eval('h_bp().icon.atlas')} {w.lua.eval('#ATLAS_CALLS')}")
     w.g.h_fire("BAG_UPDATE")
     w.g.h_fire("PLAYER_ENTERING_WORLD")
-    check("backpack.refreshes_keep_the_glyph_and_never_ask_for_an_atlas",
-          w.lua.eval("h_bp().icon.tex") == tex and w.lua.eval("#ATLAS_CALLS") == 0 and w.lua.eval("h_bp().glyph") is None)
+    check("backpack.refreshes_keep_the_icon_untinted_and_never_ask_for_an_atlas",
+          w.lua.eval("h_bp().icon.tex") == tex and w.lua.eval("h_bp().icon.vertex") is None
+          and py(w.lua.eval("h_bp().icon.texcoord")) == coords
+          and w.lua.eval("#ATLAS_CALLS") == 0 and w.lua.eval("h_bp().glyph") is None)
     keyring = py(w.lua.eval("(function() for _, x in ipairs(FS.BagBar.slots) do if x.kind == 'keyring' then return x.icon.vertex end end end)()"))
     check("backpack.other_slots_icons_stay_untinted", keyring is None, f"{keyring}")
 
 
 def check_backpack_letter_fallback() -> None:
-    """When the glyph texture reads back nil the backpack falls back to a "B" letter; with the art present it never does."""
+    """When the icon texture reads back nil the backpack falls back to a "B" letter; with the art present it never does."""
     w = World()
     w.lua.execute("function h_bp() for _, x in ipairs(FS.BagBar.slots) do if x.kind == 'backpack' then return x end end end")
     check("backpack.with_art_no_letter_glyph_is_created", w.lua.eval("h_bp().glyph") is None and w.lua.eval("h_bp().glyphOnly") is None)
@@ -807,7 +814,7 @@ def main() -> int:
     check_events()
     check_quality_border()
     check_free_count_text()
-    check_backpack_glyph()
+    check_backpack_icon()
     check_backpack_letter_fallback()
     check_source()
     print(f"\n{len(FAILS)} failed" if FAILS else "\nall checks passed")
