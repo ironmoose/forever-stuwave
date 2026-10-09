@@ -1016,6 +1016,24 @@ end
 -- self.auraIndex (Buffs' weapon-enchant icons, which have no aura index and
 -- fall through to GameTooltip:SetInventoryItem instead); PartyFrames has no
 -- such icons and passes nil.
+-- The live-slot half of ShowAuraTooltip: true when a tooltip was filled, false when the slot
+-- is gone or refused (a stale index) or no setter exists. Never hides the tooltip itself.
+local function TryAuraSlot(self, enchantFallback)
+    local shown = false
+    if self.auraIndex and self.unit then
+        if HAS_TOOLTIP_SETUNITAURA then
+            shown = pcall(GameTooltip.SetUnitAura, GameTooltip, self.unit, self.auraIndex, self.filter)
+        elseif self.filter == "HARMFUL" and HAS_TOOLTIP_SETUNITDEBUFF then
+            shown = pcall(GameTooltip.SetUnitDebuff, GameTooltip, self.unit, self.auraIndex)
+        elseif self.filter == "HELPFUL" and HAS_TOOLTIP_SETUNITBUFF then
+            shown = pcall(GameTooltip.SetUnitBuff, GameTooltip, self.unit, self.auraIndex)
+        end
+    elseif enchantFallback then
+        shown = enchantFallback(self)
+    end
+    return shown
+end
+
 function Helpers.ShowAuraTooltip(self, enchantFallback)
     if self.auraIndex and not FS.AurasReadable() then
         -- Cached spell id first (SetTipSpell): the spell's real tooltip, no aura read.
@@ -1030,19 +1048,7 @@ function Helpers.ShowAuraTooltip(self, enchantFallback)
         return
     end
 
-    local shown = false
-    if self.auraIndex and self.unit then
-        if HAS_TOOLTIP_SETUNITAURA then
-            shown = pcall(GameTooltip.SetUnitAura, GameTooltip, self.unit, self.auraIndex, self.filter)
-        elseif self.filter == "HARMFUL" and HAS_TOOLTIP_SETUNITDEBUFF then
-            shown = pcall(GameTooltip.SetUnitDebuff, GameTooltip, self.unit, self.auraIndex)
-        elseif self.filter == "HELPFUL" and HAS_TOOLTIP_SETUNITBUFF then
-            shown = pcall(GameTooltip.SetUnitBuff, GameTooltip, self.unit, self.auraIndex)
-        end
-    elseif enchantFallback then
-        shown = enchantFallback(self)
-    end
-    if not shown then GameTooltip:Hide() end
+    if not TryAuraSlot(self, enchantFallback) then GameTooltip:Hide() end
 end
 
 -------------------------------------------------------------------------------
@@ -1065,6 +1071,9 @@ end
 -- (a plain non-empty string). Anything else, secret included, CLEARS that field, so a
 -- secret is never stored. Allocation-free: safe to call every tick. When the frame is
 -- hovered and the id or name changed, the open tooltip is redrawn.
+-- WARNING: SealBar.lua uses button.fsSpellID as its own business data (cooldown and
+-- tooltip source), and SetTipSpell would clear it. Never attach this helper to SealBar
+-- buttons.
 function Helpers.SetTipSpell(frame, spellID, name)
     local id = ValidSpellID(spellID) and spellID or nil
     local nm = ValidName(name) and name or nil
@@ -1080,8 +1089,25 @@ end
 -- A hit is cached for good. A miss is cached only OUT of combat: in combat the same
 -- lookup may fail transiently (a secret or withheld result), and caching that would
 -- blank the icon's tooltip for the whole session. Cost of that rule: a name that
--- misses out of combat stays missed until /reload (e.g. a spell learned later).
+-- misses out of combat stays missed until SPELLS_CHANGED (e.g. a spell learned later),
+-- which drops the cached misses and keeps the hits.
 local spellIDByName = {}
+
+-- Made on the first cached miss, not at load: nothing to wipe until then, and a frame
+-- registered for SPELLS_CHANGED at load would sit ahead of every module's own.
+local spellsEvents
+local function WatchSpellsChanged()
+    if spellsEvents then return end
+    spellsEvents = CreateFrame("Frame")
+    if pcall(spellsEvents.RegisterEvent, spellsEvents, "SPELLS_CHANGED") then
+        spellsEvents:SetScript("OnEvent", function()
+            if InCombatLockdown() then return end
+            for name, id in pairs(spellIDByName) do
+                if id == false then spellIDByName[name] = nil end
+            end
+        end)
+    end
+end
 
 function Helpers.SpellIDForName(name)
     if not ValidName(name) then return nil end
@@ -1100,12 +1126,17 @@ function Helpers.SpellIDForName(name)
         spellIDByName[name] = id
         return id
     end
-    if not InCombatLockdown() then spellIDByName[name] = false end
+    if not InCombatLockdown() then
+        spellIDByName[name] = false
+        WatchSpellsChanged()
+    end
     return nil
 end
 
 local function OwnsTooltip(frame)
-    return type(GameTooltip) == "table" and type(GameTooltip.GetOwner) == "function" and GameTooltip:GetOwner() == frame
+    if type(GameTooltip) ~= "table" then return false end
+    if type(GameTooltip.IsOwned) == "function" then return GameTooltip:IsOwned(frame) and true or false end
+    return type(GameTooltip.GetOwner) == "function" and GameTooltip:GetOwner() == frame
 end
 
 -- Takes the tooltip down if this frame has it; clears the hover flag.
@@ -1122,10 +1153,11 @@ local function ShowSpellTip(frame, opts)
         return
     end
     GameTooltip:SetOwner(frame, opts.anchor or "ANCHOR_TOP")
-    -- a. a live aura slot, while the client lets us read it.
+    -- a. a live aura slot, while the client lets us read it. A stale or refused slot falls
+    -- through to the cached spell rather than hiding a tooltip we can still draw.
     if frame.unit and frame.auraIndex and frame.filter and FS.AurasReadable() then
-        if not pcall(Helpers.ShowAuraTooltip, frame) then GameTooltip:Hide() end
-        return
+        local ok, shown = pcall(TryAuraSlot, frame)
+        if ok and shown then return end
     end
     -- b. the spell's own tooltip from the cached id.
     if ValidSpellID(frame.fsSpellID) and ShowSpellByID(frame.fsSpellID) then return end
