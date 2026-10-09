@@ -62,7 +62,7 @@ local DEFAULT_SIZE = 26 -- design px; FS.Deck.BAG_SIZE overrides
 local DEFAULT_GAP = 4   -- design px; FS.Deck.BAG_GAP overrides
 
 local LED_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\deck_led.tga"
-local BACKPACK_GLYPH = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\glyph_backpack.tga"
+local BACKPACK_ICON = "Interface\\Icons\\INV_Misc_Bag_08"
 local KEYRING_ICON = "Interface\\Icons\\INV_Misc_Key_03"
 local EMPTY_BAG_ICON = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Bag"
 local ICON_L, ICON_R = 0.08, 0.92
@@ -139,17 +139,6 @@ local function LogDegrade(key, message)
     if degradeLogged[key] then return end
     degradeLogged[key] = true
     if type(FS.LogDegradeOnce) == "function" then FS.LogDegradeOnce(key, message) end
-end
-
--- Paints the backpack with our own glyph (white alpha shape from generate_deck_glyphs.py)
--- tinted in the slot accent, full texcoords. It is deliberately not Blizzard's bag art:
--- Blizzard's art can change between builds, ours cannot.
--- Returns false only when the texture reads back nil.
-local function ApplyBackpackIcon(icon, accent)
-    icon:SetTexture(BACKPACK_GLYPH)
-    icon:SetTexCoord(0, 1, 0, 1)
-    icon:SetVertexColor(accent[1], accent[2], accent[3], 1)
-    return icon:GetTexture() ~= nil
 end
 
 local function KeyringBagID()
@@ -584,10 +573,9 @@ local function BuildSlot(def)
     slot.icon = button:CreateTexture(nil, "ARTWORK", nil, 1)
     slot.icon:SetTexCoord(ICON_L, ICON_R, ICON_L, ICON_R)
     local hasArt = true
-    if def.kind == "backpack" then
-        hasArt = ApplyBackpackIcon(slot.icon, def.accent)
-    elseif def.kind == "keyring" then
-        slot.icon:SetTexture(KEYRING_ICON)
+    -- Painted like the real bag slots: the shared crop above, no vertex tint.
+    if def.kind == "backpack" or def.kind == "keyring" then
+        slot.icon:SetTexture(def.kind == "backpack" and BACKPACK_ICON or KEYRING_ICON)
         hasArt = slot.icon:GetTexture() ~= nil
     end
     if not hasArt then
