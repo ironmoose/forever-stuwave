@@ -258,7 +258,7 @@ function T.constants_match_the_mockup()
     W.clean(); noFails()
 end
 
-function T.the_tags_are_kick_style_plates_with_a_pink_outline()
+function T.the_tags_are_kick_style_plates_with_a_tone_framed_outline()
     local W = world()
     local C = Tg().C
     local pink = rgb(FS.GunsightBoxes.colors.pink)
@@ -266,8 +266,8 @@ function T.the_tags_are_kick_style_plates_with_a_pink_outline()
         local fill = textureWith(frame, function(r) return r._cutOutline == nil and r._texture ~= nil and r._vc[4] == C.FILL_A end)
         ok(fill, "a 0.95 fill")
         eq(rgb(fill._vc), "0d0620", "in the plate colour")
-        local outline = textureWith(frame, function(r) return r._cutOutline == true end)
-        ok(outline, "an outline"); eq(rgb(outline._vc), pink, "in pink")
+        local outline = textureWith(frame.tones.pink, function(r) return r._cutOutline == true end)
+        ok(outline, "a pink outline in the pink tone frame"); eq(rgb(outline._vc), pink, "in pink")
         eq(frame.label._fontSize, math.max(6, math.floor(C.TEXT_SIZE * K() + 0.5)), "the KICK text size")
     end
     W.clean(); noFails()
@@ -1323,6 +1323,244 @@ function T.with_the_gunsight_off_nothing_is_built_logged_or_listened_for()
     noFails()
 end
 
+-- ---- the tags' outlines follow the box's kick state ------------------------------------------
+-- The box edge is steel at rest and while the cast cannot be kicked, pink while it can, red for INTERRUPTED. The three
+-- tags wear the same tone frames (GunsightBoxes.NewChrome), so the one flag write that tints the box tints them.
+
+local function tagList() return { level = Tg().level, health = Tg().health, tot = Tg().tot } end
+local function outlineOf(f) return textureWith(f, function(r) return r._cutOutline == true end) end
+local function hasIn(list, v) for _, r in ipairs(list) do if r == v then return true end end return false end
+local function startCast(W, notInt)
+    W.tgt.S.stripOnly = nil   -- the run path, the one a plain cast can be interrupted on (the boxes harness does the same)
+    __units.target.name = "Kurak"; __fireEvent("PLAYER_TARGET_CHANGED")
+    W.cast("target", "Fear", "T1", 100, 2, notInt)
+    W.fire(W.tgt.S, "UNIT_SPELLCAST_START")
+    W.stepTo(W.tgt.S, 100, 100.5)
+end
+-- Which outline a viewer sees: the tone frames shown whose alpha is up (a plain flag resolves in the mock).
+local function lit(f)
+    local out = {}
+    for key, tone in pairs(f.tones) do
+        if tone._shown and tone._alpha ~= 0 then out[#out + 1] = key end
+    end
+    table.sort(out)
+    return table.concat(out, ",")
+end
+
+function T.at_rest_the_tag_outlines_are_steel()
+    local W = world()
+    local colors = FS.GunsightBoxes.colors
+    for name, f in pairs(tagList()) do
+        eq(outlineOf(f), nil, name .. ": no outline of its own, only the tone frames carry one")
+        eq(lit(f), "steel", name .. ": steel at rest")
+        for _, key in ipairs({ "pink", "steel", "red" }) do
+            eq(f.tones[key]:GetParent(), f, name .. ": " .. key .. " tone is a child of the tag")
+            eq(rgb(outlineOf(f.tones[key])._vc), rgb(colors[key]), name .. ": " .. key .. " outline colour")
+        end
+    end
+    W.clean(); noFails()
+end
+
+function T.an_interruptible_cast_turns_every_tag_outline_pink()
+    local W = world()
+    startCast(W, false)
+    for name, f in pairs(tagList()) do eq(lit(f), "pink", name .. ": kickable is pink") end
+    W.clean(); noFails()
+end
+
+function T.a_cast_that_cannot_be_interrupted_keeps_every_tag_outline_steel()
+    local W = world()
+    startCast(W, true)
+    for name, f in pairs(tagList()) do eq(lit(f), "steel", name .. ": not kickable is steel") end
+    W.clean(); noFails()
+end
+
+function T.the_interrupted_verdict_turns_every_tag_outline_red_and_the_next_write_clears_it()
+    local W = world()
+    local box = W.tgt.box
+    startCast(W, false)
+    W.endCast("target"); W.fire(W.tgt.S, "UNIT_SPELLCAST_INTERRUPTED", "T1")
+    eq(box.verdict, true, "the box shows the verdict")
+    for name, f in pairs(tagList()) do eq(lit(f), "red", name .. ": red while INTERRUPTED") end
+    startCast(W, true)
+    for name, f in pairs(tagList()) do eq(lit(f), "steel", name .. ": the next cast clears the verdict") end
+    W.endCast("target"); W.fire(W.tgt.S, "UNIT_SPELLCAST_STOP", "T1")
+    for name, f in pairs(tagList()) do eq(lit(f), "steel", name .. ": back to rest") end
+    -- and a kickable cast after a verdict is pink again
+    startCast(W, false)
+    for name, f in pairs(tagList()) do eq(lit(f), "pink", name .. ": pink again") end
+    W.clean(); noFails()
+end
+
+function T.a_cast_ending_returns_every_tag_outline_to_steel()
+    local W = world()
+    startCast(W, false)
+    W.endCast("target"); W.fire(W.tgt.S, "UNIT_SPELLCAST_STOP", "T1")
+    W.stepTo(W.tgt.S, 100.5, 104)
+    eq(lit({ tones = { pink = W.tgt.box.tones.pink, steel = W.tgt.box.tones.steel } }), "steel", "the box edge is at rest")
+    for name, f in pairs(tagList()) do eq(lit(f), "steel", name .. ": rest after a kickable cast") end
+    W.clean(); noFails()
+end
+
+function T.a_secret_flag_reaches_the_tag_outlines_only_through_set_alpha_from_boolean()
+    local W = world()
+    -- Anything but the whitelisted setter that touches the flag must fail loudly.
+    local mt = getmetatable(__SECRET_BOOL)
+    for _, ev in ipairs({ "__lt", "__le", "__concat", "__unm", "__len", "__call" }) do
+        mt[ev] = function() error("secret flag used in " .. ev, 2) end
+    end
+    __units.target.name = "Kurak"; __fireEvent("PLAYER_TARGET_CHANGED")
+    W.tgt.S.stripOnly = nil
+    W.secretCast("target")
+    W.fire(W.tgt.S, "UNIT_SPELLCAST_START")
+    for name, f in pairs(tagList()) do
+        ok(rawequal(f.tones.steel._fromBool, __SECRET_BOOL), name .. ": steel got the flag untouched")
+        eq(f.tones.steel._fromT, 1); eq(f.tones.steel._fromF, 0)
+        ok(rawequal(f.tones.pink._fromBool, __SECRET_BOOL), name .. ": pink got the same flag")
+        eq(f.tones.pink._fromT, 0); eq(f.tones.pink._fromF, 1)
+    end
+    W.at(W.tgt.S, __now + 0.3)
+    for name, f in pairs(tagList()) do eq(f.tones.red._shown, false, name .. ": no red without a verdict") end
+    W.endCast("target"); W.fire(W.tgt.S, "UNIT_SPELLCAST_STOP", __SECRET_ID)
+    W.clean(); noFails("a secret operation was swallowed by a pcall")
+end
+
+function T.the_tag_tones_join_the_boxes_and_the_tapes_flag_lists_so_one_write_drives_them()
+    local W = world()
+    local box = W.tgt.box
+    for name, f in pairs(tagList()) do
+        for _, key in ipairs({ "pink", "steel" }) do
+            ok(hasIn(box.fb[key], f.tones[key]), name .. ": " .. key .. " is in the box's list")
+            ok(hasIn(W.tgt.fb[key], f.tones[key]), name .. ": and in the tape's list the shield drives")
+        end
+        ok(not hasIn(box.fb.pink, f.tones.red) and not hasIn(box.fb.steel, f.tones.red), name .. ": red is not flag driven")
+    end
+    W.clean(); noFails()
+end
+
+function T.a_rescale_and_the_master_switch_keep_the_same_tag_tone_frames()
+    local W = world()
+    local before = {}
+    for name, f in pairs(tagList()) do before[name] = { f.tones.pink, f.tones.steel, f.tones.red } end
+    local fbPink, fbSteel = #W.tgt.fb.pink, #W.tgt.fb.steel
+    local frames = #__all
+    UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
+    __fireEvent("UI_SCALE_CHANGED")
+    FS.Config.Set("gunsight.enabled", false); FS.Config.Set("gunsight.enabled", true)
+    UIParent._h = 1440; UIParent._w = 1440 * 16 / 9
+    __fireEvent("UI_SCALE_CHANGED")
+    eq(#__all, frames, "nothing is built again")
+    eq(#W.tgt.fb.pink, fbPink, "no frame joins the pink list twice"); eq(#W.tgt.fb.steel, fbSteel)
+    for name, f in pairs(tagList()) do
+        eq(f.tones.pink, before[name][1]); eq(f.tones.steel, before[name][2]); eq(f.tones.red, before[name][3])
+    end
+    startCast(W, false)
+    for name, f in pairs(tagList()) do eq(lit(f), "pink", name .. ": still driven after both") end
+    W.clean(); noFails()
+end
+
+function T.the_target_of_target_outline_follows_the_flag_and_the_verdict_in_combat()
+    local W = world()
+    __combat = true
+    startCast(W, false)
+    eq(lit(Tg().tot), "pink", "pink in combat")
+    W.endCast("target"); W.fire(W.tgt.S, "UNIT_SPELLCAST_INTERRUPTED", "T1")
+    eq(lit(Tg().tot), "red", "red in combat: only plain child frames of the protected button are shown or hidden")
+    eq(#__blocked, 0, "nothing protected was touched")
+    W.clean(); noFails()
+end
+
+function T.a_retired_box_takes_no_new_tag_tone_frames_into_its_lists()
+    local W = world({ noLogin = true })
+    local seen
+    local build = FS.GunsightBoxes.Build
+    FS.GunsightBoxes.Build = function(spec)
+        local box, err = build(spec)
+        if box and spec.isTarget then seen = box end
+        return box, err
+    end
+    __fireEvent("ADDON_LOADED", "forever-stuwave"); __fireEvent("PLAYER_LOGIN")
+    ok(seen, "the target box was built")
+    local pink, steel = #seen.fb.pink, #seen.fb.steel
+    FS.GunsightBoxes.Retire(seen)
+    local set = FS.GunsightBoxes.NewChrome(seen, seen.frame, function() end)
+    eq(#seen.fb.pink, pink, "a retired box's pink list does not grow"); eq(#seen.fb.steel, steel)
+    ok(set and set.pink, "the caller still gets frames to hold")
+    noFails()
+end
+
+local function onceIn(list, v)
+    local n = 0
+    for _, r in ipairs(list) do if r == v then n = n + 1 end end
+    return n
+end
+local function assertEachToneOnce(W, msg)
+    for name, f in pairs(tagList()) do
+        for _, key in ipairs({ "pink", "steel" }) do
+            eq(onceIn(W.tgt.box.fb[key], f.tones[key]), 1, name .. " " .. key .. " once in the box's list " .. msg)
+            eq(onceIn(W.tgt.fb[key], f.tones[key]), 1, name .. " " .. key .. " once in the tape's list " .. msg)
+        end
+    end
+end
+
+function T.each_tag_tone_frame_is_in_each_flag_list_exactly_once()
+    local W = world()
+    assertEachToneOnce(W, "after build")
+    UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
+    __fireEvent("UI_SCALE_CHANGED")
+    assertEachToneOnce(W, "after a rescale")
+    FS.Config.Set("gunsight.enabled", false); FS.Config.Set("gunsight.enabled", true)
+    assertEachToneOnce(W, "after master off and on")
+    W.clean(); noFails()
+end
+
+-- A target of target built at the end of combat (a load in combat) joins a cast that is already live: it adopts the
+-- tape's last flag write, handed on to SetAlphaFromBoolean untouched, instead of the neutral steel seed.
+local function lateTot(castFn)
+    local W = world({ beforeLoad = function() __combat = true end })
+    __units.target.name = "Kurak"; __fireEvent("PLAYER_TARGET_CHANGED")
+    W.tgt.S.stripOnly = nil
+    castFn(W)
+    W.fire(W.tgt.S, "UNIT_SPELLCAST_START")
+    eq(Tg().tot, nil, "not built yet")
+    regen()
+    ok(Tg().tot, "built when combat ends")
+    return W
+end
+
+function T.a_target_of_target_built_after_combat_joins_a_live_kickable_cast_as_pink()
+    local W = lateTot(function(W) W.cast("target", "Fear", "T1", 100, 2, false) end)
+    eq(lit(Tg().tot), "pink", "pink, as the level tag built earlier")
+    eq(lit(Tg().level), "pink")
+    W.clean(); noFails()
+end
+
+function T.a_target_of_target_built_after_combat_joins_a_live_unkickable_cast_as_steel()
+    local W = lateTot(function(W) W.cast("target", "Fear", "T1", 100, 2, true) end)
+    eq(lit(Tg().tot), "steel")
+    W.clean(); noFails()
+end
+
+function T.a_target_of_target_built_after_combat_takes_a_secret_flag_untouched()
+    local W = lateTot(function(W) W.secretCast("target") end)
+    local f = Tg().tot
+    ok(rawequal(f.tones.steel._fromBool, __SECRET_BOOL), "steel got the live flag"); eq(f.tones.steel._fromT, 1); eq(f.tones.steel._fromF, 0)
+    ok(rawequal(f.tones.pink._fromBool, __SECRET_BOOL), "pink got it too"); eq(f.tones.pink._fromT, 0); eq(f.tones.pink._fromF, 1)
+    assertEachToneOnce(W, "with the late button")
+    W.clean(); noFails("a secret operation was swallowed by a pcall")
+end
+
+function T.a_target_of_target_built_after_the_cast_ended_starts_at_rest()
+    local W2 = world({ beforeLoad = function() __combat = true end })
+    __units.target.name = "Kurak"; __fireEvent("PLAYER_TARGET_CHANGED")
+    W2.tgt.S.stripOnly = nil
+    W2.cast("target", "Fear", "T1", 100, 2, false); W2.fire(W2.tgt.S, "UNIT_SPELLCAST_START")
+    W2.endCast("target"); W2.fire(W2.tgt.S, "UNIT_SPELLCAST_STOP", "T1"); W2.stepTo(W2.tgt.S, 100.5, 104)
+    regen()
+    eq(lit(Tg().tot), "steel", "the last write was the neutral one")
+    W2.clean(); noFails()
+end
+
 __checks = T
 """
 
@@ -1347,6 +1585,9 @@ def static_checks() -> list[tuple[str, str | None]]:
     strings = re.findall(r'"([^"\n]*)"', code)
     out.append(("tags_player_text_never_says_tape", None if not any("tape" in s.lower() for s in strings) else
                 "player text says cast bar, never tape"))
+    out.append(("tags_never_see_the_interruptible_flag",
+                None if not re.search(r"notInterruptible|SetAlphaFromBoolean|UnitCastingInfo|UnitChannelInfo|notInt", code) else
+                "the interruptible flag may be secret; the tags take their tone from GunsightBoxes.NewChrome and never touch it"))
     out.append(("tags_have_no_em_dash", None if "—" not in src else "no em dashes"))
     out.append(("tags_never_branch_on_a_unit_value_directly",
                 None if not re.search(r"\bif\s+(not\s+)?(name|level|class|classification)\s+(then|and|or)\b", code) else

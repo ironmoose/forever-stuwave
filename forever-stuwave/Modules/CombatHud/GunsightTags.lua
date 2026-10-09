@@ -1,4 +1,4 @@
--- Forever STUwave: KICK style tags on the target box, the level on the top edge and health percent and target of target on the bottom edge, each with an FS.Config toggle.
+-- Forever STUwave: KICK style tags on the target box (outlines in the box's own tone: steel, pink while kickable, red for INTERRUPTED), the level on the top edge and health percent and target of target on the bottom edge, each with an FS.Config toggle.
 -- The target of target tag is a SecureUnitButtonTemplate button that targets that unit on a click; in combat it only takes SetAlpha and text.
 -- Unit values go straight to SetFormattedText / SetText and are never compared, since they may be secret.
 
@@ -71,7 +71,7 @@ local function Setting(def)
     return Config.Get(def.key) == true
 end
 
--- The KICK tag's look: a chamfered plate, a pink outline and one centred label. The tags straddle the box edge, so
+-- The KICK tag's look: a chamfered plate, an outline in the box's tone (see below) and one centred label. The tags straddle the box edge, so
 -- the plate must mask the edge line behind the text (the mockup draws them after the box): a plain tag takes its own
 -- frame level above everything the box holds, since sibling frames of equal level have no promised draw order.
 -- The secure button is left at its holder's level (a protected frame's level is not ours to set in combat).
@@ -81,7 +81,14 @@ local function NewTag(parent, kind, name, template)
     if not template then frame:SetFrameLevel(parent:GetFrameLevel() + C.FRAME_LEVEL) end
     local bg = colors.bg
     Theme.AddCut2Texture(frame, Theme.SLICE_CUT2_FILL_TEXTURE, { bg[1], bg[2], bg[3], C.FILL_A }, "BACKGROUND", 0)
-    Theme.AddCut2Texture(frame, Theme.SLICE_CUT2_OUTLINE_TEXTURE, colors.pink, "BORDER")
+    -- The outline is the box's own tone, not a colour of the tag's: steel at rest and while the cast cannot be kicked,
+    -- pink while it can, red for INTERRUPTED. The tone frames join the box's flag lists (GunsightBoxes.NewChrome), so
+    -- the one flag write that tints the box edge tints this outline; this file never sees the flag. They are plain
+    -- child frames, so the shield and the verdict drive them in combat, on the secure button's too. The fill and the
+    -- label stay on the tag; the label colours carry data (level, health, names) and are not toned.
+    frame.tones = FS.GunsightBoxes.NewChrome(Tags.box, frame, function(tone, color)
+        Theme.AddCut2Texture(tone, Theme.SLICE_CUT2_OUTLINE_TEXTURE, color, "BORDER")
+    end)
     local label = frame:CreateFontString(nil, "OVERLAY")
     Theme.ApplyMono(label, FontSize(), colors.white)
     label:SetPoint("CENTER", frame, "CENTER", 0, 0)

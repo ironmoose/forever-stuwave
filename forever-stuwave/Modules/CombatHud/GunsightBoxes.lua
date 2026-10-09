@@ -32,6 +32,8 @@
 -- SetAlphaFromBoolean: it is type-checked (legal) and never compared, concatenated, measured or
 -- upper-cased. The flag colouring needs no member of its own: the box adds its two colour frames
 -- (box.fb.pink / box.fb.steel) to the lists the tape's shield stand-in drives.
+-- Modules seated on the box (GunsightTags' plates) join the same lists through GunsightBoxes.NewChrome, so their
+-- outlines are steel / pink / red with the box edge; see MODULE CHROME below.
 --
 -- VISIBILITY. YOUR box exists only while you cast: it is built hidden, a plain empty write through the name
 -- sink (CastBars' GoIdle) hides the WHOLE box (plate, header, both lines, tile, tick counter), any other
@@ -1226,6 +1228,9 @@ local function ClearVerdict(box)
     if box.flicker then box.flicker:Stop() end
     for key, tone in pairs(box.tones) do tone:SetShown(key ~= "red") end
     for key, tone in pairs(box.tileTones) do tone:SetShown(key ~= "red") end
+    for _, set in ipairs(box.chrome) do
+        for key, tone in pairs(set) do tone:SetShown(key ~= "red") end
+    end
     SetLineColor(box.lineOne, 1, box.nameLive and colors.white or colors.muted)
     if box.isTarget then RefreshTargetName(box) end      -- line one is the unit name again
 end
@@ -1236,6 +1241,9 @@ local function ShowVerdict(box)
     if not box.isTarget then SetBoxShown(box, true) end   -- the look is shown even over a hidden idle box
     for key, tone in pairs(box.tones) do tone:SetShown(key == "red") end
     for key, tone in pairs(box.tileTones) do tone:SetShown(key == "red") end
+    for _, set in ipairs(box.chrome) do
+        for key, tone in pairs(set) do tone:SetShown(key == "red") end
+    end
     WriteLine(box.lineOne, "INTERRUPTED")
     SetLineColor(box.lineOne, 1, colors.red)
     if not box.isTarget then SetTileLive(box, false) end  -- the mockup dims the icon of an interrupted cast
@@ -1365,6 +1373,39 @@ local function BuildTileTone(box, key, color)
     return tone
 end
 
+-- MODULE CHROME. A module seated on the box (GunsightTags' level, health and target of target plates) wears the
+-- box's own tones instead of a colour of its own: NewChrome builds one child frame per tone of the box (pink, steel,
+-- red on the target's; base, red on yours) over `parent`, calls paint(tone, color, key) to put the module's art in
+-- it, and returns { [key] = frame }. The pink and steel frames join box.fb (and the tape's lists, box.flagLists, which
+-- the tape copied from box.fb before any module existed), so the ONE SetAlphaFromBoolean / SetAlpha the shield makes
+-- tints the box and its modules together; the module never sees the flag. Each takes the tape's current look (box.seedFlag: the
+-- last flag write handed on untouched, else steel up and pink down), so a module built mid-cast joins it. The red frame is shown only by the verdict (ShowVerdict / ClearVerdict switch every
+-- registered set), and a set built while the verdict is up starts red. A retired box takes no new frame into any list,
+-- so a module built on a dropped box cannot leak into the lists of a live tape.
+function GunsightBoxes.NewChrome(box, parent, paint)
+    local set = {}
+    for _, key in ipairs(box.toneKeys) do
+        local tone = CreateFrame("Frame", nil, parent)
+        FillParent(tone, parent)
+        paint(tone, box.toneColors[key], key)
+        set[key] = tone
+        if key == "pink" or key == "steel" then
+            if box.seedFlag then
+                box.seedFlag(tone, key)           -- the tape's current look (a live cast's flag, untouched, or neutral)
+            else
+                tone:SetAlpha(key == "steel" and 1 or 0)
+            end
+            if not box.retired then
+                local lists = { box.fb[key], box.flagLists and box.flagLists[key] or nil }
+                for _, list in ipairs(lists) do list[#list + 1] = tone end
+            end
+        end
+        tone:SetShown((key == "red") == (box.verdict == true))
+    end
+    box.chrome[#box.chrome + 1] = set
+    return set
+end
+
 -------------------------------------------------------------------------------
 -- Layout (build and every rescale: re-seats and re-sizes, creates nothing)
 -------------------------------------------------------------------------------
@@ -1486,7 +1527,7 @@ local function BuildBox(spec)
         key = spec.key, anchor = spec.anchor, isTarget = isTarget,
         geom = isTarget and G.BOXR or G.BOXL,
         tones = {}, tileTones = {}, stroke = {}, head = {}, l2 = {}, divider = {},
-        toneColors = {}, fb = { pink = {}, steel = {} }, headFonts = {},
+        toneColors = {}, toneKeys = {}, chrome = {}, fb = { pink = {}, steel = {} }, headFonts = {},
         grow = isTarget and C.TGT_GROW or 0, l2Size = isTarget and C.TGT_L2_SIZE or C.L2_SIZE,
     }
 
@@ -1525,6 +1566,7 @@ local function BuildBox(spec)
     for _, t in ipairs(tones) do
         local key, color = t[1], t[2]
         box.toneColors[key] = color
+        box.toneKeys[#box.toneKeys + 1] = key
         local tone = BuildTone(box, key, color)
         local tileTone = BuildTileTone(box, key, color)
         if key == "pink" or key == "steel" then

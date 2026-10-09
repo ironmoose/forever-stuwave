@@ -373,7 +373,9 @@ end
 -- detection reads it right.
 local function BuildShield(fb)
     local shield = {}
+    local last   -- the last flag write { flag, whenTrue, whenFalse }, kept only to hand on to a frame that joins later; nil = neutral
     local function neutral()
+        last = nil
         for _, r in ipairs(fb.steel) do r:SetAlpha(1) end
         for _, r in ipairs(fb.pink) do r:SetAlpha(0) end
     end
@@ -386,8 +388,19 @@ local function BuildShield(fb)
     end
     if canBool then
         function shield.SetAlphaFromBoolean(_, flag, whenTrue, whenFalse)
+            last = { flag, whenTrue, whenFalse }   -- stored, never read or compared (it may be secret)
             for _, r in ipairs(fb.steel) do r:SetAlphaFromBoolean(flag, whenTrue, whenFalse) end
             for _, r in ipairs(fb.pink) do r:SetAlphaFromBoolean(flag, whenFalse, whenTrue) end
+        end
+    end
+    -- A frame that joins the lists after the tape is live (GunsightBoxes.NewChrome) takes the current look: the last
+    -- flag write passed to the frame's own SetAlphaFromBoolean untouched, or the neutral steel look.
+    function shield.Seed(region, side)
+        if last then
+            local steel = side == "steel"
+            region:SetAlphaFromBoolean(last[1], steel and last[2] or last[3], steel and last[3] or last[2])
+        else
+            region:SetAlpha(side == "steel" and 1 or 0)
         end
     end
     neutral()
@@ -648,6 +661,7 @@ local function BuildMembers(t, piece, host)
     for _, side in ipairs({ "pink", "steel" }) do
         for _, region in ipairs(box.fb[side]) do t.fb[side][#t.fb[side] + 1] = region end
     end
+    box.flagLists = t.fb       -- a module seated on the box later (GunsightBoxes.NewChrome) joins these lists too
     return box.members
 end
 
@@ -776,6 +790,7 @@ local function BuildTape(key, anchor, isTarget)
         t.fb.pink[#t.fb.pink + 1] = t.kick
         t.fb.steel[#t.fb.steel + 1] = t.padlock
         shield, canBool = BuildShield(t.fb)
+        if t.box then t.box.seedFlag = shield.Seed end
         if not canBool then
             LogOnce("nobool", "SetAlphaFromBoolean is missing; the target tape stays steel and shows no KICK tag.")
             t.kick:Hide()

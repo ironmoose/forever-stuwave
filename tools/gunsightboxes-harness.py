@@ -1623,6 +1623,72 @@ function T.a_rescale_to_a_larger_scale_grows_a_shrunk_name_back_to_the_new_base(
     W.clean(); noFails()
 end
 
+-- ---- module chrome: a module on the box wears the box's tone frames (NewChrome) ---------------------------
+
+local function plainPaint(tone, color, key) tone._paintedKey, tone._paintedColor = key, color end
+
+function T.module_chrome_joins_the_flag_lists_of_the_box_and_the_tape_and_starts_neutral()
+    local W = world()
+    local b = W.tgt.box
+    local host = CreateFrame("Frame", nil, b.frame)
+    local set = FS.GunsightBoxes.NewChrome(b, host, plainPaint)
+    for _, key in ipairs({ "pink", "steel", "red" }) do
+        ok(set[key], key .. " tone"); eq(set[key]:GetParent(), host); eq(set[key]._paintedKey, key)
+        eq(set[key]._paintedColor, FS.GunsightBoxes.colors[key], "painted in the box's own colour")
+    end
+    for _, key in ipairs({ "pink", "steel" }) do
+        ok(has(b.fb[key], set[key]), key .. " is in the box's list")
+        ok(has(W.tgt.fb[key], set[key]), key .. " is in the tape's list too (it copied the box's before this was built)")
+    end
+    local function once(list, v) local n = 0; for _, r in ipairs(list) do if r == v then n = n + 1 end end; return n end
+    for _, key in ipairs({ "pink", "steel" }) do
+        eq(once(b.fb[key], set[key]), 1, key .. " once in the box's list"); eq(once(W.tgt.fb[key], set[key]), 1, key .. " once in the tape's list")
+    end
+    ok(not has(b.fb.pink, set.red) and not has(b.fb.steel, set.red) and not has(W.tgt.fb.pink, set.red), "red is in no flag list")
+    eq(set.steel._alpha, 1, "neutral steel"); eq(set.pink._alpha, 0)
+    eq(set.red._shown, false, "no red at rest"); eq(set.steel._shown, true); eq(set.pink._shown, true)
+    -- one flag write drives the box and the module together
+    W.tgt.S.stripOnly = nil
+    __units.target.name = "Kurak"; __fireEvent("PLAYER_TARGET_CHANGED")
+    W.cast("target", "Mending", "T2", 100, 2, false)
+    W.fire(W.tgt.S, "UNIT_SPELLCAST_START")
+    eq(set.pink._alpha, 1, "pink while kickable"); eq(set.steel._alpha, 0)
+    eq(b.tones.pink._alpha, 1, "as the box edge")
+    W.clean(); noFails()
+end
+
+function T.module_chrome_follows_the_verdict_and_one_built_during_it_starts_red()
+    local W = world()
+    local b, S = W.tgt.box, W.tgt.S
+    local host = CreateFrame("Frame", nil, b.frame)
+    local set = FS.GunsightBoxes.NewChrome(b, host, plainPaint)
+    target("Kurak"); S.stripOnly = nil
+    W.cast("target", "Fear", "T1", 100, 1.5); W.fire(S, "UNIT_SPELLCAST_START"); W.stepTo(S, 100, 100.5)
+    W.endCast("target"); W.fire(S, "UNIT_SPELLCAST_INTERRUPTED", "T1")
+    eq(b.verdict, true)
+    eq(set.red._shown, true); eq(set.pink._shown, false); eq(set.steel._shown, false)
+    local late = FS.GunsightBoxes.NewChrome(b, CreateFrame("Frame", nil, b.frame), plainPaint)
+    eq(late.red._shown, true, "built during the verdict: red"); eq(late.pink._shown, false); eq(late.steel._shown, false)
+    W.stepTo(S, 100.5, 103)
+    target("Kurak")
+    eq(b.verdict, false, "cleared")
+    for _, x in ipairs({ set, late }) do
+        eq(x.red._shown, false); eq(x.pink._shown, true); eq(x.steel._shown, true)
+    end
+    W.clean(); noFails()
+end
+
+function T.module_chrome_on_the_players_box_has_base_and_red_and_no_flag_lists()
+    local W = world()
+    local b = W.you.box
+    local before = #W.you.fb.pink
+    local set = FS.GunsightBoxes.NewChrome(b, CreateFrame("Frame", nil, b.frame), plainPaint)
+    ok(set.base and set.red and not set.pink and not set.steel, "cyan base and red, like the box")
+    eq(set.red._shown, false); eq(set.base._shown, true)
+    eq(#W.you.fb.pink, before, "nothing joins a flag list on a box the flag does not drive")
+    W.clean(); noFails()
+end
+
 -- ---- the target's HP and power rules (mockup option B, "Underline") ---------------------------------
 
 local function bars(W) return W.tgt.box.bars end
