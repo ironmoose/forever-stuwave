@@ -35,6 +35,11 @@ What it pins:
     texture and size, text font size and dot to text gap, all read from DataBar.lua, never retyped; the
     Blizzard coin atlas stays hidden through the update path, a recreated texture and a font object swap; in
     colorblind mode (letters instead of coins, no coin gap) the dots are hidden and come back when it is off;
+  * the gamepad bag bar (Blizzard's GamepadBagBar, a child of the combined bags that covers the Clean Up button)
+    is hidden while no controller is connected (C_GamePad missing, disabled, or GetAllDeviceIDs empty), stays
+    hidden when Blizzard shows it again (Show, SetShown, OnShow), is put back only if we hid it and a controller
+    appears, is left alone while one is connected, waits out combat, and nothing errors when C_GamePad,
+    GamepadBagBar or one of the events is absent;
   * nothing errors when a region, a method or Theme.AddCut2Texture is absent.
 
     python3 tools/bags-harness.py
@@ -193,6 +198,26 @@ function Class:SetNormalFontObject(fo)           -- the engine re-applies the fo
 end
 function Class:GetFontString() return self.Text end
 function Class:SetEnabled() end
+
+-- events: RegisterEvent throws on a name the client does not know, like the engine; OnEvent scripts are driven by FireEvent
+KNOWN_EVENTS = { GAME_PAD_CONNECTED = true, GAME_PAD_DISCONNECTED = true, GAME_PAD_ACTIVE_CHANGED = true, PLAYER_ENTERING_WORLD = true }
+EVENT_FRAMES = {}
+function Class:RegisterEvent(ev)
+    if not KNOWN_EVENTS[ev] then error("Frame:RegisterEvent(): Attempt to register unknown event \"" .. tostring(ev) .. "\"") end
+    self._events = self._events or {}
+    self._events[ev] = true
+    EVENT_FRAMES[#EVENT_FRAMES + 1] = self
+end
+function Class:SetScript(which, fn) self._set = self._set or {}; self._set[which] = fn end
+function FireEvent(ev)
+    for _, f in ipairs(EVENT_FRAMES) do
+        if f._events[ev] and f._set and f._set.OnEvent then f._set.OnEvent(f, ev) end
+    end
+end
+-- combat: DeferCombat queues while INCOMBAT, like the real wrapper waiting for PLAYER_REGEN_ENABLED
+INCOMBAT, DEFERRED = false, {}
+function InCombatLockdown() return INCOMBAT end
+function EndCombat() INCOMBAT = false; local q = DEFERRED; DEFERRED = {}; for _, fn in ipairs(q) do fn() end end
 
 function CreateFrame(kind, name, parent)
     local f = new(kind, parent)
@@ -368,7 +393,7 @@ FS = {
     LogDegradeOnce = function(key, msg) DEGRADE[#DEGRADE + 1] = key end,
     PanelSkins = {
         RequireExport = function(fn) return fn ~= nil end,
-        DeferCombat = function(fn) fn() end,
+        DeferCombat = function(fn) if INCOMBAT then DEFERRED[#DEFERRED + 1] = fn else fn() end end,
         TryStyleMoney = function(frame) CALLS[#CALLS + 1] = { "TryStyleMoney", frame } end,
         RegisterRecon = function() end,
     },
@@ -757,6 +782,79 @@ def check_absent() -> None:
     check("absent.container_without_money_frame_swallows_nothing", w2.swallowed() == "", w2.swallowed())
 
 
+# Blizzard's GamepadBagBar: a Frame under the combined bags, shown by default. Show() fires OnShow when it was hidden.
+BAR = """
+    comb.GamepadBagBar = CreateFrame("Frame", "GamepadBagBar", comb)
+    local bar = GamepadBagBar
+    bar.Show = function(self) if not self._shown then self._shown = true; for _, fn in ipairs(self._scripts.OnShow or {}) do fn(self) end end end
+"""
+NO_PAD = "C_GamePad = { IsEnabled = function() return true end, GetAllDeviceIDs = function() return {} end }"
+PAD = "C_GamePad = { IsEnabled = function() return true end, GetAllDeviceIDs = function() return { 5 } end }"
+
+
+def check_gamepad_bar() -> None:
+    # no controller: hidden at skin time, and hidden again every way Blizzard can show it
+    w = World(pre=BAR + NO_PAD)
+    check("gamepad.no_device_hides_the_bar", w.ev("not GamepadBagBar:IsShown()"))
+    w.run("GamepadBagBar:Show()")
+    check("gamepad.no_device_rehides_after_Show", w.ev("not GamepadBagBar:IsShown()"))
+    w.run("GamepadBagBar:SetShown(true)")
+    check("gamepad.no_device_rehides_after_SetShown", w.ev("not GamepadBagBar:IsShown()"))
+    w.run("GamepadBagBar._shown = true; for _, fn in ipairs(GamepadBagBar._scripts.OnShow or {}) do fn(GamepadBagBar) end")
+    check("gamepad.no_device_rehides_in_OnShow", w.ev("not GamepadBagBar:IsShown()"))
+    check("gamepad.no_device_nothing_swallowed", w.swallowed() == "", w.swallowed())
+
+    # the same when the API says gamepads are off, or the namespace is missing altogether
+    w = World(pre=BAR + "C_GamePad = { IsEnabled = function() return false end, GetAllDeviceIDs = function() return { 5 } end }")
+    check("gamepad.disabled_hides_the_bar", w.ev("not GamepadBagBar:IsShown()"))
+    w = World(pre=BAR + "C_GamePad = nil")
+    check("gamepad.no_api_hides_the_bar", w.ev("not GamepadBagBar:IsShown()") and w.swallowed() == "", w.swallowed())
+
+    # a controller: Blizzard stays in charge, even of a bar it hid itself
+    w = World(pre=BAR + PAD)
+    check("gamepad.device_leaves_the_bar_shown", w.ev("GamepadBagBar:IsShown()"))
+    w.run("GamepadBagBar:Hide(); GamepadBagBar:Show()")
+    check("gamepad.device_lets_blizzard_show_it", w.ev("GamepadBagBar:IsShown()"))
+    w.run("GamepadBagBar:Hide(); FireEvent('GAME_PAD_ACTIVE_CHANGED')")
+    check("gamepad.device_never_shows_a_bar_we_did_not_hide", w.ev("not GamepadBagBar:IsShown()"))
+
+    # connect / disconnect on the events
+    w = World(pre=BAR + NO_PAD)
+    w.run("C_GamePad.GetAllDeviceIDs = function() return { 5 } end; FireEvent('GAME_PAD_CONNECTED')")
+    check("gamepad.connect_puts_the_bar_back", w.ev("GamepadBagBar:IsShown()"))
+    w.run("C_GamePad.GetAllDeviceIDs = function() return {} end; FireEvent('GAME_PAD_DISCONNECTED')")
+    check("gamepad.disconnect_hides_it_again", w.ev("not GamepadBagBar:IsShown()"))
+    w.run("C_GamePad.GetAllDeviceIDs = function() return { 5 } end; FireEvent('GAME_PAD_ACTIVE_CHANGED')")
+    check("gamepad.active_changed_reevaluates", w.ev("GamepadBagBar:IsShown()"))
+    check("gamepad.events_nothing_swallowed", w.swallowed() == "", w.swallowed())
+
+    # a bar that does not exist yet at load time is caught on PLAYER_ENTERING_WORLD
+    w = World(pre=NO_PAD)
+    check("gamepad.absent_bar_does_not_throw", w.swallowed() == "", w.swallowed())
+    w.run(BAR + "FireEvent('PLAYER_ENTERING_WORLD')")
+    check("gamepad.late_bar_hidden_on_entering_world", w.ev("not GamepadBagBar:IsShown()"))
+    w.run("GamepadBagBar:Show()")
+    check("gamepad.late_bar_rehidden_after_Show", w.ev("not GamepadBagBar:IsShown()"))
+
+    # an event this client does not know is skipped, the rest still work
+    w = World(pre=BAR + NO_PAD + "; KNOWN_EVENTS.GAME_PAD_ACTIVE_CHANGED = nil")
+    check("gamepad.unknown_event_still_hides", w.ev("not GamepadBagBar:IsShown()"))
+    w.run("C_GamePad.GetAllDeviceIDs = function() return { 5 } end; FireEvent('GAME_PAD_CONNECTED')")
+    check("gamepad.unknown_event_others_still_work", w.ev("GamepadBagBar:IsShown()"))
+
+    # combat: untouched until the defer wrapper releases it
+    w = World(pre=BAR + NO_PAD + "; INCOMBAT = true")
+    check("gamepad.combat_defers_the_hide", w.ev("GamepadBagBar:IsShown()"))
+    w.run("GamepadBagBar:Hide(); GamepadBagBar:Show()")
+    check("gamepad.combat_still_untouched_after_Show", w.ev("GamepadBagBar:IsShown()"))
+    w.run("EndCombat()")
+    check("gamepad.hidden_once_combat_ends", w.ev("not GamepadBagBar:IsShown()") and w.swallowed() == "", w.swallowed())
+
+    # nothing but the bar is touched: the sort button, its art and the CVar stay as Blizzard left them
+    w = World(pre=BAR + NO_PAD + "; comb.sort = CreateFrame('Button', 'BagItemAutoSortButton', comb); CVARS.GamePadEnable = '1'")
+    check("gamepad.sort_button_and_cvar_untouched", w.ev("BagItemAutoSortButton:IsShown() and CVARS.GamePadEnable == '1' and #BagItemAutoSortButton._pts == 0"))
+
+
 def main() -> int:
     db = databar_money()
     check_art()
@@ -766,6 +864,7 @@ def main() -> int:
     check_money(db)
     check_colorblind()
     check_absent()
+    check_gamepad_bar()
     print(f"\n{CHECKS} checks, {len(FAILS)} failed" if FAILS else f"\nall {CHECKS} checks passed")
     return len(FAILS)
 
