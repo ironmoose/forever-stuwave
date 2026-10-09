@@ -20,19 +20,24 @@ local Config = FS.Config
 local FRAME_NAME = "ForeverSTUwaveConfig"
 local WIN_W, WIN_H = 780, 560
 local NAV_W, NAV_ITEM_H, NAV_GAP = 150, 28, 3
-local WELL_W = WIN_W - 2 * 17 - NAV_W - 10
-local CONTENT_W = WELL_W - 14 - 22
+-- Window geometry shared by the sizes below and by BuildChrome's anchors, so the scroll range cannot drift from the frames.
+local WIN_PAD, WELL_GAP = 17, 10                    -- window edge to nav, nav to well
+local WELL_TOP, WELL_BOTTOM = 74, 36                -- well inset from the window's top and bottom
+local CONTENT_L, CONTENT_R, CONTENT_T, CONTENT_B = 14, 22, 10, 8   -- content area inset inside the well
+local BAR_INSET = 11                                -- scrollbar inset from the well's right edge
+local WELL_W = WIN_W - WIN_PAD - (WIN_PAD + NAV_W + WELL_GAP)
+local CONTENT_W = WELL_W - CONTENT_L - CONTENT_R
 local HALF_GAP = 28
 local HALF_W = (CONTENT_W - HALF_GAP) / 2
 local ROW_H, GROUP_GAP, SUB_INSET = 28, 12, 16
 local SLIDER_W, SLIDER_H, THUMB_W, READOUT_W = 150, 12, 8, 34
--- The content area is WELL_H less its 10 top and 8 bottom insets. Each page scrolls inside a ScrollFrame
+-- The content area is WELL_H less its top and bottom insets. Each page scrolls inside a ScrollFrame
 -- that reaches PAD_X to the sides and PAD_TOP / PAD_BOT beyond it, so a button glow is not clipped.
-local WELL_H = WIN_H - 74 - 36
-local VIEW_H = WELL_H - 10 - 8
+local WELL_H = WIN_H - WELL_TOP - WELL_BOTTOM
+local VIEW_H = WELL_H - CONTENT_T - CONTENT_B
 local PAD_X, PAD_TOP, PAD_BOT = 8, 6, 4
 local WHEEL_STEP = 42
-local BAR_W, THUMB_MIN_H = 4, 24
+local BAR_W, THUMB_MIN_H, BAR_HIT = 4, 24, 4     -- BAR_HIT: invisible hit area added to each side of the bar and thumb
 
 local C = {
     text = { 0.886, 0.910, 0.941, 1 },
@@ -53,6 +58,7 @@ local ui = { pages = {}, nav = {} }
 local controls = {}          -- refresh functions of every control built
 local cursors = setmetatable({}, { __mode = "k" })
 local menuState, dialogState = {}, {}
+local CloseMenu                  -- defined with the popup menu; scrolling closes an open menu
 
 -------------------------------------------------------------------------------
 -- Small helpers
@@ -201,6 +207,14 @@ local function ShiftHeld()
     return type(IsShiftKeyDown) == "function" and IsShiftKeyDown() == true
 end
 
+-- The nearest scroll page at or above `frame` (a builder's content may be a sub-frame of the page holder).
+local function FindScrollPage(frame)
+    while frame do
+        if frame.fsScrollPage then return frame.fsScrollPage end
+        frame = frame:GetParent()
+    end
+end
+
 -- Sizes the page to what its builders stacked: a taller holder gives a scroll range, a page that fits has none.
 local function MeasurePage(page)
     local c = Cursor(page.fsHolder)
@@ -233,6 +247,8 @@ local function SetScroll(page, value)
     value = math.min(page.fsRange or 0, math.max(0, value))
     if value == page:GetVerticalScroll() then return end
     page:SetVerticalScroll(value)
+    -- An open dropdown menu follows its button, which just moved; close it rather than let it hang off the panel.
+    CloseMenu()
     -- A tooltip owned by a row that just moved would hang over the wrong place.
     local owner = GameTooltip:GetOwner()
     while owner and owner ~= page do owner = owner:GetParent() end
@@ -242,6 +258,19 @@ end
 
 local function ScrollBy(page, delta)
     SetScroll(page, page:GetVerticalScroll() - delta * WHEEL_STEP)
+end
+
+-- Re-measures the page after its rows changed height or the window came back: a new range, the offset kept inside it.
+local function Remeasure(page)
+    MeasurePage(page)
+    SetScroll(page, page:GetVerticalScroll())
+    if ui.pages[ui.current] == page then UpdateBar() end
+end
+
+-- Call after a builder adds or removes rows on a page that is already built.
+function CW.RefreshScroll()
+    local page = ui.current and ui.pages[ui.current]
+    if page then Remeasure(page) end
 end
 
 -- One ScrollFrame per page; builders stack into `fsHolder`, a frame inset by PAD_X inside the scroll child.
@@ -268,8 +297,22 @@ local function BuildScrollbar(well)
     local bar = CreateFrame("Frame", nil, well)
     bar.fsScrollbar = true
     bar:SetWidth(BAR_W)
-    bar:SetPoint("TOPRIGHT", well, "TOPRIGHT", -11, -10)
-    bar:SetPoint("BOTTOMRIGHT", well, "BOTTOMRIGHT", -11, 8)
+    bar:SetPoint("TOPRIGHT", well, "TOPRIGHT", -BAR_INSET, -CONTENT_T)
+    bar:SetPoint("BOTTOMRIGHT", well, "BOTTOMRIGHT", -BAR_INSET, CONTENT_B)
+    -- A click on the rail jumps the thumb under the cursor (a click on the thumb itself starts a drag instead).
+    bar:EnableMouse(true)
+    bar:SetHitRectInsets(-BAR_HIT, -BAR_HIT, 0, 0)
+    bar:SetScript("OnMouseDown", function(self, button)
+        if button ~= "LeftButton" then return end
+        local page = ui.current and ui.pages[ui.current]
+        local top = self:GetTop()
+        if not (page and (page.fsRange or 0) > 0 and top) then return end
+        local _, y = GetCursorPosition()
+        local travel = VIEW_H - self.fsThumb:GetHeight()
+        if travel <= 0 then return end
+        local thumbTop = (top - y / self:GetEffectiveScale()) - self.fsThumb:GetHeight() / 2
+        SetScroll(page, thumbTop / travel * page.fsRange)
+    end)
     bar:EnableMouseWheel(true)
     bar:SetScript("OnMouseWheel", function(_, delta)
         local page = ui.current and ui.pages[ui.current]
@@ -284,6 +327,7 @@ local function BuildScrollbar(well)
     thumb:SetSize(BAR_W, THUMB_MIN_H)
     thumb:SetPoint("TOP", bar, "TOP", 0, 0)
     thumb:EnableMouse(true)
+    thumb:SetHitRectInsets(-BAR_HIT, -BAR_HIT, 0, 0)
     local fill = thumb:CreateTexture(nil, "ARTWORK")
     fill:SetColorTexture(C.cyan[1], C.cyan[2], C.cyan[3], 0.85)
     fill:SetAllPoints(thumb)
@@ -711,7 +755,7 @@ function UI.Slider(content, o)
     track:SetScript("OnMouseWheel", function(self, delta)
         -- On a page that scrolls the wheel scrolls it, so passing over a slider never changes a setting by accident;
         -- hold Shift to adjust the slider.
-        local page = content.fsScrollPage
+        local page = FindScrollPage(content)
         if page and (page.fsRange or 0) > 0 and not ShiftHeld() then
             ScrollBy(page, delta)
             return
@@ -751,7 +795,7 @@ end
 
 local MENU_ITEM_H = 24
 
-local function CloseMenu()
+function CloseMenu()
     if menuState.catcher then menuState.catcher:Hide() end
 end
 
@@ -763,6 +807,9 @@ local function EnsureMenu()
     catcher:EnableMouse(true)
     catcher:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     catcher:SetScript("OnClick", CloseMenu)
+    -- The wheel stops here: it must not reach a page or a slider behind the open menu.
+    catcher:EnableMouseWheel(true)
+    catcher:SetScript("OnMouseWheel", function() end)
     CloseOnEscape(catcher, CloseMenu)
     catcher:Hide()
     local frame = CreateFrame("Frame", "ForeverSTUwaveConfigMenu", catcher)
@@ -1028,7 +1075,8 @@ end
 local function Select(key)
     local cat = categories[key]
     if not cat then return end
-    ui.current = key
+    local changed = ui.selected ~= key
+    ui.current, ui.selected = key, key
     for k, page in pairs(ui.pages) do page:SetShown(k == key) end
     local page = ui.pages[key]
     if not page then
@@ -1037,10 +1085,9 @@ local function Select(key)
         local ok, err = pcall(cat.build, page.fsHolder)
         if not ok then Forward(err) end
     end
-    MeasurePage(page)
     page:Show()
-    SetScroll(page, 0)
-    UpdateBar()
+    if changed then SetScroll(page, 0) end         -- reselecting the page you are on keeps your place
+    Remeasure(page)
     ui.category:SetText("CATEGORY |cff22e0ff/ " .. cat.label:upper() .. "|r")
     SetSelected(key)
     CW.RefreshAll()
@@ -1081,15 +1128,15 @@ local function BuildChrome(frame)
     navCommands:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 19, 42)
 
     local well = CreateFrame("Frame", nil, frame)
-    well:SetPoint("TOPLEFT", frame, "TOPLEFT", 17 + NAV_W + 10, -74)
-    well:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -17, 36)
+    well:SetPoint("TOPLEFT", frame, "TOPLEFT", WIN_PAD + NAV_W + WELL_GAP, -WELL_TOP)
+    well:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -WIN_PAD, WELL_BOTTOM)
     local fill = well:CreateTexture(nil, "BACKGROUND")
     fill:SetColorTexture(C.track[1], C.track[2], C.track[3], 0.95)
     fill:SetAllPoints(well)
     Outline(well, C.line, 1)
     ui.content = CreateFrame("Frame", nil, well)
-    ui.content:SetPoint("TOPLEFT", well, "TOPLEFT", 14, -10)
-    ui.content:SetPoint("BOTTOMRIGHT", well, "BOTTOMRIGHT", -22, 8)
+    ui.content:SetPoint("TOPLEFT", well, "TOPLEFT", CONTENT_L, -CONTENT_T)
+    ui.content:SetPoint("BOTTOMRIGHT", well, "BOTTOMRIGHT", -CONTENT_R, CONTENT_B)
     BuildScrollbar(well)
 
     local rule = frame:CreateTexture(nil, "ARTWORK")
@@ -1129,6 +1176,7 @@ local function BuildWindow()
     frame:RegisterForDrag("LeftButton")
     frame:SetScript("OnDragStart", frame.StartMoving)
     frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+    frame:SetScript("OnShow", function() CW.RefreshScroll() end)
     frame:SetScript("OnHide", function(self)
         CloseMenu()
         CloseDialog()
