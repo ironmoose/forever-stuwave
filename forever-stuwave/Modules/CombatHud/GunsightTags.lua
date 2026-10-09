@@ -170,15 +170,17 @@ local function ClassificationKind()
     return nil
 end
 
--- Sets the icon texture, tint and size for `kind` (nil empties the slot); the caller fits the plate.
+-- Sets the icon texture, tint and size for `kind` (nil empties the slot); the caller fits the plate. A kind whose
+-- texture token is missing from Theme counts as no icon (iconKind cleared), so a skull's bare plate shows digits.
 local function PaintIcon(kind)
-    Tags.iconKind = kind
     local spec = kind and C.ICONS[kind]
     local Theme, icon = FS.Theme, Tags.level.icon
     if not (spec and Theme and Theme[spec.tex]) then
+        Tags.iconKind = nil
         Tags.iconW, Tags.iconH = 0, 0
         return
     end
+    Tags.iconKind = kind
     icon:SetTexture(Theme[spec.tex])
     local tint = spec.tint and Theme[spec.tint] or { 1, 1, 1, 1 }
     icon:SetVertexColor(tint[1], tint[2], tint[3], tint[4] or 1)
@@ -194,8 +196,8 @@ local function WriteLevel()
         PaintIcon(nil)
         return FitLevel()
     end
-    local kind = ClassificationKind()
-    PaintIcon(kind)
+    PaintIcon(ClassificationKind())
+    local kind = Tags.iconKind
     if kind and C.ICONS[kind].bare then
         label:SetText("")
         return FitLevel()

@@ -547,19 +547,15 @@ function T.the_label_and_icon_sit_in_the_plate_content_pad_icon_gap_digits_pad()
     W.clean(); noFails()
 end
 
-local ICONS = {
-    elite     = { tex = "LEVEL_CROWN_TEXTURE",      size = 11, tint = "COLOR_GOLD" },
-    rare      = { tex = "LEVEL_STAR_TEXTURE",       size = 10, tint = "COLOR_SILVER" },
-    rareelite = { tex = "LEVEL_CROWN_STAR_TEXTURE", size = 14, tint = false },   -- colours baked in: untinted
-    worldboss = { tex = "LEVEL_SKULL_TEXTURE",      size = 11, tint = "COLOR_RED" },
-}
+-- The production table: the harness reads it, so a size or token change there is not copied here by hand.
+local function ICONS() return Tg().C.ICONS end
 local function vc(r) local v = r._vc; return v and { v[1], v[2], v[3], v[4] } end
 
 function T.each_classification_draws_its_texture_at_its_size_in_its_tint()
     local W = world()
     __charW = 6.2
     local k = K()
-    for class, spec in pairs(ICONS) do
+    for class, spec in pairs(ICONS()) do
         target("Kurak")
         setUnit(30, class)
         local icon = Tg().level.icon
@@ -578,6 +574,32 @@ function T.each_classification_draws_its_texture_at_its_size_in_its_tint()
     W.clean(); noFails()
 end
 
+function T.every_icon_texture_resolves_to_a_file_in_the_media_folder()
+    local W = world()
+    local n = 0
+    for class, spec in pairs(ICONS()) do
+        n = n + 1
+        local path = FS.Theme[spec.tex]
+        ok(type(path) == "string", class .. ": " .. spec.tex .. " is a Theme token")
+        ok(__fileExists(path), class .. ": " .. tostring(path) .. " is a file under forever-stuwave/Media/Textures/")
+        if spec.tint then ok(type(FS.Theme[spec.tint]) == "table", class .. ": " .. spec.tint .. " is a Theme colour") end
+    end
+    ok(n >= 4, "the table was walked")
+    W.clean(); noFails()
+end
+
+function T.a_classification_whose_texture_token_is_missing_falls_back_to_the_digits()
+    local W = world()
+    __charW = 6.2
+    target("Kurak")
+    FS.Theme.LEVEL_SKULL_TEXTURE = nil
+    setUnit(-1, "worldboss")
+    eq(Tg().level.icon:IsShown(), false, "no texture: no icon")
+    eq(levelText(), "??", "the digits show instead of a blank plate")
+    near(levelW(), wantW(2), 1e-6, "and the plate fits them")
+    W.clean(); noFails()
+end
+
 function T.the_plate_grows_by_the_icon_width_and_a_three_px_gap()
     local W = world()
     __charW = 6.2
@@ -586,10 +608,10 @@ function T.the_plate_grows_by_the_icon_width_and_a_three_px_gap()
     for _, class in ipairs({ "elite", "rare", "rareelite" }) do
         target("Kurak")
         setUnit(62, class)
-        near(levelW(), wantW(2, ICONS[class].size + gap), 1e-6, class .. ": icon + 3 + digits")
+        near(levelW(), wantW(2, ICONS()[class].size + gap), 1e-6, class .. ": icon + 3 + digits")
         eq(levelText(), "62", class .. ": the digits stay")
         local lp = Tg().level.label._points.CENTER
-        near(lp.x, (ICONS[class].size + gap) / 2 * K(), 1e-6, class .. ": the digits are shifted right")
+        near(lp.x, (ICONS()[class].size + gap) / 2 * K(), 1e-6, class .. ": the digits are shifted right")
     end
     W.clean(); noFails()
 end
@@ -702,6 +724,18 @@ function T.a_classification_event_repaints_the_icon()
     __units.target.exists = false
     __fireEvent("PLAYER_TARGET_CHANGED")
     eq(Tg().level.icon:IsShown(), false)
+    W.clean(); noFails()
+end
+
+function T.a_level_event_for_another_unit_leaves_the_icon_and_digits_alone()
+    local W = world()
+    __charW = 6.2
+    target("Kurak")
+    setUnit(30, "elite")
+    __units.target.level, __units.target.class = 8, "normal"
+    __fireUnit("UNIT_LEVEL", "player")
+    eq(levelText(), "30", "the digits stay"); eq(Tg().level.icon:IsShown(), true, "the icon stays")
+    eq(Tg().level.icon._texture, FS.Theme.LEVEL_CROWN_TEXTURE)
     W.clean(); noFails()
 end
 
@@ -1054,6 +1088,15 @@ def static_checks() -> list[tuple[str, str | None]]:
     return out
 
 
+def texture_exists(path: str) -> bool:
+    """A WoW texture path ("Interface\\AddOns\\forever-stuwave\\Media\\Textures\\x.tga") names a real file in the addon (case sensitive here)."""
+    prefix = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
+    if not isinstance(path, str) or not path.startswith(prefix):
+        return False
+    name = path[len(prefix):]
+    return "\\" not in name and name in os.listdir(ADDON / "Media" / "Textures")
+
+
 def run_case(name: str, mu: dict, mb: dict, mt: dict) -> str | None:
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.execute(CHEV.MOCK)
@@ -1070,6 +1113,7 @@ def run_case(name: str, mu: dict, mb: dict, mt: dict) -> str | None:
     lua.execute(TAGS_MOCK)
     lua.eval("__loadChevron")("Core/ChevronCastBar.lua", (ADDON / "Core/ChevronCastBar.lua").read_text(encoding="utf-8"))
     g = lua.globals()
+    g.__fileExists = texture_exists
     g.__castSrc = TH.CASTBARS.read_text(encoding="utf-8")
     g.__layoutSrc = TH.LAYOUT.read_text(encoding="utf-8")
     g.__configSrc = TH.CONFIG.read_text(encoding="utf-8")
