@@ -74,8 +74,12 @@
 -- With them on the box grows UP (box.grow, Bars.Extra) so one row fits under the rails: health at its left end, resource at the right
 -- end, half the row each; the divider, line 2 and the tile keep their screen seats, and box.onGrow tells the tape.
 -- A PLAIN value is fitted to its half: "62 / 100", else compact ("2.1k/2.1k"), else a smaller size down to C.NUM_MIN, then
--- the FontString clips. A SECRET value is never measured: AbbreviateNumbers (secret in, secret string out) feeds
--- SetFormattedText as "%s/%s" at the fixed C.NUM_SECRET_SIZE. UNVERIFIED IN GAME: the secret path's width (the length of
+-- the FontString clips (when the width cannot be measured the readable text stays at the base size). The fit is kept
+-- per value, so a stream of identical health events writes and sets nothing, and a seat at a new size or width fits
+-- the numbers again at once, with a one-shot next-frame refit in case the client applies SetFont late (as the name
+-- fit does). A SECRET value is never measured: AbbreviateNumbers (secret in, secret string out) feeds
+-- SetFormattedText as "%s/%s" at the fixed C.NUM_SECRET_SIZE. The first AbbreviateNumbers failure latches it off
+-- for the session (the raw "%d / %d" is written instead). UNVERIFIED IN GAME: the secret path's width (the length of
 -- AbbreviateNumbers' text is the engine's), and UnitPowerPercent with the ScaleTo100 curve.
 --
 -- NAME FIT. The target's name (line 1) shrinks step by step to the box width and stops at C.NAME_FLOOR (11 image px, the
@@ -333,11 +337,30 @@ end
 -- width fixed so it clips instead of overflowing. A client may apply SetFont a frame late, so a size change
 -- schedules ONE refit for the next frame (`deferred` marks that call, which schedules nothing).
 local FitLine
-local function RefitLater(line)
+
+-- Runs fn on the next frame, once: `owner.nextFramePending` holds a second request off until the first has run
+-- (a burst of writes in one frame schedules one callback, not one each). No timer API, no refit.
+local function NextFrame(owner, fn)
+    if owner.nextFramePending then return end
     if type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then return end
+    owner.nextFramePending = true
     C_Timer.After(0, function()
+        owner.nextFramePending = false
+        fn()
+    end)
+end
+
+-- The next-frame refit of a line. What hangs off the line's width (line.onRefit: the rails' width and seat) is
+-- measured again after it, and once more a frame later when the refit itself changed the size (that font lags
+-- too), so the rails never keep the width of a stale font. Bounded: two frames, no loop.
+local function RefitLater(line)
+    NextFrame(line, function()
         if line.secretNow or not line.text then return end
+        local before = line.size
         FitLine(line, line.text, true)
+        if not line.onRefit then return end
+        line.onRefit()
+        if line.size ~= before then NextFrame(line, line.onRefit) end
     end)
 end
 
@@ -567,6 +590,13 @@ function Bars.NewStep(at, from, to)
     return curve
 end
 
+-- Puts a number FontString at `size` (one SetFont, none when it is there already).
+function Bars.SetNumSize(b, fs, size)
+    if b.numSize[fs] == size then return end
+    b.numSize[fs] = size
+    FS.Theme.ApplyMono(fs, size, colors.white)
+end
+
 -- Built with the box, before the listeners. The red twin starts at alpha 0 and the green rail at 1.
 function Bars.Build(box)
     local b = {}
@@ -576,7 +606,9 @@ function Bars.Build(box)
     b.hp.red.host:SetAlpha(0)
     b.power = Bars.NewRail(b.frame, colors.cyan)
     b.powerShown = true
-    b.numSize, b.numW = {}, {}                                  -- per number FontString: the size now applied, the width it may take
+    -- per number FontString: the size now applied, the width it may take, the base size it was seated for, the
+    -- last plain value written (and whether its fit still holds)
+    b.numSize, b.numW, b.numBase, b.numLast = {}, {}, {}, {}
     b.hpText = NewFont(b.frame, C.NUM_SIZE, colors.white)       -- the value numbers, off until a player asks
     b.powerText = NewFont(b.frame, C.NUM_SIZE, colors.white)
     b.powerText:SetJustifyH("RIGHT")                            -- health reads from the left end, the resource from the right
@@ -628,8 +660,15 @@ end
 -- and a value too long even then clips.
 function Bars.SeatText(box, fs, point, x, base, width)
     local k = ui(1)
-    FS.Theme.ApplyMono(fs, FontSize(C.NUM_SIZE), colors.white)
-    box.bars.numSize[fs], box.bars.numW[fs] = FontSize(C.NUM_SIZE), width
+    local b = box.bars
+    -- A new base size or width (a rescale, the first seat) puts the font back to the base and drops the fit: the
+    -- numbers are fitted again by Bars.RefitNumbers. The same size and width keep the font as fitted.
+    if b.numBase[fs] ~= FontSize(C.NUM_SIZE) or b.numW[fs] ~= width then
+        b.numBase[fs], b.numW[fs] = FontSize(C.NUM_SIZE), width
+        b.numSize[fs] = nil
+        Bars.SetNumSize(b, fs, FontSize(C.NUM_SIZE))
+        if b.numLast[fs] then b.numLast[fs].fitted = false end
+    end
     fs:ClearAllPoints()
     fs:SetPoint(point, box.frame, "TOPLEFT", x, -(base + C.NUM_SIZE * C.DESCENT) * k)
     fs:SetWidth(width)
@@ -660,6 +699,7 @@ function Bars.Seat(box)
     local base = C.TB_HP_Y + hpH + C.TB_GAP + pwH + C.NUM_PAD + C.NUM_SIZE
     Bars.SeatText(box, b.hpText, "BOTTOMLEFT", C.TB_X * k, base, wmax / 2)
     Bars.SeatText(box, b.powerText, "BOTTOMRIGHT", C.TB_X * k + wmax, base, wmax / 2)
+    Bars.RefitNumbers(b)
 end
 
 -- Image px the box rises above the option B box so a row of numbers fits between the power rail and the divider
@@ -769,18 +809,14 @@ function Bars.Compact(n)
     end
 end
 
-local function SetNumSize(b, fs, size)
-    if b.numSize[fs] == size then return end
-    b.numSize[fs] = size
-    FS.Theme.ApplyMono(fs, size, colors.white)
-end
-
--- A PLAIN value: the readable text first, then the compact one, each measured whole (the unbounded width) against
--- the half-row the FontString may take; when even the compact text is too wide the size steps down to
--- C.NUM_MIN, and past that the FontString clips. False when SetFormattedText refused.
-function Bars.WritePlain(b, fs, mode, cur, max)
+-- Fits a PLAIN value into its half of the row and returns false when SetFormattedText refused. The readable text
+-- first, then the compact one, each measured whole (the unbounded width, scaled from the size now applied back to
+-- the base) against the half-row the FontString may take; when even the compact text is too wide the size steps down
+-- to C.NUM_MIN, and past that the FontString clips. When the width cannot be measured at all the readable text stays
+-- at the base size (nothing says it does not fit). The size changes only when the fit does: a SetFont per event
+-- would be a per-event cost.
+function Bars.FitPlain(b, fs, mode, cur, max)
     local base = FontSize(C.NUM_SIZE)
-    SetNumSize(b, fs, base)
     local candidates
     if mode == "current" then
         candidates = { { "%d", cur }, { "%s", Bars.Compact(cur) } }
@@ -788,37 +824,85 @@ function Bars.WritePlain(b, fs, mode, cur, max)
         candidates = { { "%d / %d", cur, max }, { "%s/%s", Bars.Compact(cur), Bars.Compact(max) } }
     end
     local avail = b.numW[fs]
+    local at = b.numSize[fs] or base
     local w
     for i, cand in ipairs(candidates) do
         if not pcall(fs.SetFormattedText, fs, unpack(cand)) then return false end
         w = PlainWidth(fs)
-        if i == #candidates or (w and (not avail or w <= avail + 1e-6)) then break end
+        if not w then break end                        -- cannot measure: keep this (the readable) text
+        w = w * base / at
+        if i == #candidates or not avail or w <= avail + 1e-6 then break end
     end
-    if w and avail and w > avail + 1e-6 then
-        local size = math.max(C.NUM_MIN, math.floor(base * avail / w))
-        SetNumSize(b, fs, size)
-        while size > C.NUM_MIN do
-            local now = PlainWidth(fs)
-            if not now or now <= avail + 1e-6 then break end
-            size = size - 1
-            SetNumSize(b, fs, size)
-        end
+    if not w then
+        Bars.SetNumSize(b, fs, base)
+        return true
+    end
+    local size = base
+    if avail and w > avail + 1e-6 then size = math.max(C.NUM_MIN, math.floor(base * avail / w)) end
+    Bars.SetNumSize(b, fs, size)
+    while avail and size > C.NUM_MIN do
+        local now = PlainWidth(fs)
+        if not now or now <= avail + 1e-6 then break end
+        size = size - 1
+        Bars.SetNumSize(b, fs, size)
     end
     return true
 end
 
+-- A PLAIN value, once per distinct value: b.numLast[fs] holds the last value written and whether its fit still
+-- holds (a seat at a new size or width drops it), so a stream of identical health events touches neither the text
+-- nor the font. A size change is measured again on the next frame in case the client applies SetFont late.
+function Bars.WritePlain(b, fs, mode, cur, max)
+    if mode == "current" then max = nil end              -- max may be secret here and is never read
+    local last = b.numLast[fs]
+    if last and last.fitted and last.mode == mode and last.cur == cur and (mode == "current" or last.max == max) then
+        return true
+    end
+    if not last then
+        last = {}
+        b.numLast[fs] = last
+    end
+    last.mode, last.cur, last.max, last.fitted = mode, cur, max, false
+    local before = b.numSize[fs]
+    if not Bars.FitPlain(b, fs, mode, cur, max) then return false end
+    last.fitted = true
+    if b.numSize[fs] ~= before then
+        NextFrame(last, function()
+            local now = b.numLast[fs]
+            if Bars.textBroken or not now or not now.mode then return end
+            Bars.FitPlain(b, fs, now.mode, now.cur, now.max)
+        end)
+    end
+    return true
+end
+
+-- After a seat: every number whose fit was dropped is fitted again with the value it holds, at once.
+function Bars.RefitNumbers(b)
+    if Bars.textBroken or not b.numbers then return end
+    for _, fs in ipairs({ b.hpText, b.powerText }) do
+        local last = b.numLast[fs]
+        if last and last.mode and not last.fitted then Bars.WritePlain(b, fs, last.mode, last.cur, last.max) end
+    end
+end
+
 -- A SECRET value cannot be measured or compared: the engine abbreviates it (AbbreviateNumbers takes a secret and
 -- hands back a secret string), the pair goes to SetFormattedText as two %s arguments, at a smaller fixed size.
--- A client without AbbreviateNumbers, or one that refuses it, gets the raw value in the plain format instead.
+-- A client without AbbreviateNumbers, or one that refuses it, gets the raw value in the plain format instead; the
+-- first refusal latches AbbreviateNumbers off for the session (logged once) so it does not throw on every event.
 function Bars.WriteSecret(b, fs, mode, cur, max)
-    SetNumSize(b, fs, FontSize(C.NUM_SECRET_SIZE))
-    if type(AbbreviateNumbers) == "function" then
+    Bars.SetNumSize(b, fs, FontSize(C.NUM_SECRET_SIZE))
+    if type(AbbreviateNumbers) == "function" and not Bars.abbreviateBroken then
         local okCur, short = pcall(AbbreviateNumbers, cur)
-        if okCur and mode == "current" then
+        local okMax, shortMax = okCur, nil
+        if okCur and mode ~= "current" then okMax, shortMax = pcall(AbbreviateNumbers, max) end
+        if not (okCur and okMax) then
+            Bars.abbreviateBroken = true
+            Logged("gunsightboxes_target_abbreviate",
+                "|cffff4488Forever STUwave|r: AbbreviateNumbers refused a target bar value, writing the raw numbers")
+        elseif mode == "current" then
             if pcall(fs.SetFormattedText, fs, "%s", short) then return true end
-        elseif okCur then
-            local okMax, shortMax = pcall(AbbreviateNumbers, max)
-            if okMax and pcall(fs.SetFormattedText, fs, "%s/%s", short, shortMax) then return true end
+        elseif pcall(fs.SetFormattedText, fs, "%s/%s", short, shortMax) then
+            return true
         end
     end
     if mode == "current" then return (pcall(fs.SetFormattedText, fs, "%d", cur)) end
@@ -832,16 +916,19 @@ function Bars.WriteValue(b, fs, kind, cur, max)
     if Bars.textBroken then return end
     local mode = b.mode
     if type(cur) ~= "number" or (mode ~= "current" and type(max) ~= "number") then
+        b.numLast[fs] = nil
         fs:SetText("")
         return
     end
     if mode == "percent" then
-        SetNumSize(b, fs, FontSize(C.NUM_SIZE))
+        b.numLast[fs] = nil
+        Bars.SetNumSize(b, fs, FontSize(C.NUM_SIZE))
         Bars.WritePercent(fs, kind, cur, max)
         return
     end
     local ok
     if IsSecret(cur) or (mode ~= "current" and IsSecret(max)) then
+        b.numLast[fs] = nil
         ok = Bars.WriteSecret(b, fs, mode, cur, max)
     else
         ok = Bars.WritePlain(b, fs, mode, cur, max)
@@ -962,6 +1049,7 @@ function Bars.ApplyConfig(box)
     b.hpText:SetShown(b.numbers)
     b.powerText:SetShown(b.numbers and b.powerShown)
     if not b.numbers then
+        b.numLast = {}
         b.hpText:SetText("")
         b.powerText:SetText("")
     end
@@ -1389,6 +1477,11 @@ local function BuildBox(spec)
     -- a cast, line 2 in its colour (the player's timer flips between cyan and muted).
     box.lineOne = NewLine({ box.l1 }, C.L1_SIZE, isTarget and C.NAME_SECRET_SIZE or nil, isTarget and C.NAME_FLOOR or nil)
     box.lineOne.colors[1] = colors.muted
+    box.lineOne.onRefit = function()                 -- the rails follow the name's settled width (target box only has them)
+        if box.retired or not box.bars then return end
+        Bars.Measure(box)
+        Bars.Seat(box)
+    end
     local twoFonts, i = {}, 0
     for _, t in ipairs(tones) do
         i = i + 1

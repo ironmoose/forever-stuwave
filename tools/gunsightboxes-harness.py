@@ -200,6 +200,30 @@ function AbbreviateNumbers(n)
     if n >= 1e3 then return string.format("%.1fk", n / 1e3) end
     return string.format("%d", n)
 end
+-- Font lag (opt-in, __fontLag = true): a client may apply SetFont a frame late. ApplyMono then only records the
+-- size it was asked for; the font (what the width is measured at) changes on the next __flushTimers, before the
+-- timer callbacks run, like the next frame. __applyMonoCalls counts every ApplyMono (SetFont) call.
+__fontLag, __applyMonoCalls, __lagged = false, 0, {}
+do
+    local realApplyMono = FS.Theme.ApplyMono
+    FS.Theme.ApplyMono = function(fs, size, color)
+        __applyMonoCalls = __applyMonoCalls + 1
+        if __fontLag and fs._fontSize ~= nil then
+            __lagged[fs] = size
+            fs._monoColor, fs._hasFont = color, true
+        else
+            __lagged[fs] = nil
+            realApplyMono(fs, size, color)
+        end
+    end
+    local realFlush = __flushTimers
+    function __flushTimers()
+        local pending = __lagged
+        __lagged = {}
+        for fs, size in pairs(pending) do fs._fontSize = size end
+        realFlush()
+    end
+end
 function Region:SetJustifyV(j) self._justifyV = j end
 function Region:SetMaxLines(n) self._maxLines = n end
 function Region:SetNonSpaceWrap(v) self._nonSpaceWrap = v end
@@ -734,6 +758,15 @@ function T.a_secret_target_name_is_never_measured_and_takes_the_fixed_size()
     W.clean(); noFails("a secret operation was swallowed by a pcall")
 end
 
+-- Runs the next frame until nothing is pending (at least once, so a lagging font lands), bounded.
+local function settle()
+    __flushTimers()
+    for _ = 1, 4 do
+        if #__timers == 0 and next(__lagged) == nil then break end
+        __flushTimers()
+    end
+end
+
 function T.the_name_fit_measures_again_after_the_next_frame_in_case_the_font_lags()
     -- A client may apply SetFont a frame late: the one deferred refit settles the size from a measure taken
     -- after the font is surely there, and it never loops.
@@ -746,6 +779,63 @@ function T.the_name_fit_measures_again_after_the_next_frame_in_case_the_font_lag
     __flushTimers()
     eq(l1._fontSize, size, "the refit lands on the same size")
     eq(#__timers, 0, "and schedules nothing more")
+    W.clean(); noFails()
+end
+
+function T.a_lagging_font_is_refitted_next_frame_and_the_rails_are_re_seated_for_it()
+    local W = world()
+    local C = FS.GunsightBoxes.C
+    local box, l1 = W.tgt.box, W.tgt.box.l1
+    -- What an instant font settles at, for the same name.
+    target("Baine Bloodhoof")
+    local wantSize, wantRail = l1._fontSize, box.bars.hp.green.host._w
+    target("Kurak")
+    settle()
+    ok(wantSize > fontFor(C.NAME_FLOOR), "the reference name settles above the floor: " .. wantSize)
+    __timers = {}
+    __fontLag = true
+    target("Baine Bloodhoof")
+    ok(#__timers <= 1, "one deferred refit per write: " .. #__timers)
+    settle()
+    __fontLag = false
+    eq(l1._fontSize, wantSize, "the refit lands on the size an instant font gives")
+    near(box.bars.hp.green.host._w, wantRail, 1e-6, "and the rails are re-seated for the settled name, not the stale one")
+    near(box.bars.power.host._w, wantRail, 1e-6, "both rules")
+    eq(#__timers, 0, "nothing more is pending")
+    -- The other way: a shrunk name replaced by a short one that fits at the base size. The font is still the small
+    -- one when the rails first measure it, so they come out too narrow until the refit measures again.
+    local function railsAfterShortName(lag)
+        target("Baine Bloodhoof"); settle()
+        __fontLag = lag
+        target("KURAK WIND"); settle()
+        __fontLag = false
+        return box.bars.hp.green.host._w
+    end
+    local instant = railsAfterShortName(false)
+    near(railsAfterShortName(true), instant, 1e-6, "a short name after a shrunk one: the rails follow the name once the font lands")
+    W.clean(); noFails()
+end
+
+function T.a_font_refit_that_is_itself_a_frame_late_re_seats_the_rails_once_more()
+    -- A name only a little too wide: the first fit overshoots (stale font) down to the floor, whose rails are
+    -- narrower than the box, and the refit that raises the size is itself a frame late, so the rails are measured
+    -- once more after it.
+    local W = world()
+    local box, l1 = W.tgt.box, W.tgt.box.l1
+    __charW = 5.8                                       -- the 14 letter name is 4% wider than the box at the base size
+    local function run(lag)
+        target("KURAK"); settle()
+        __fontLag = lag
+        target("ABCDEFGHIJKLMN"); settle()
+        __fontLag = false
+        return box.bars.hp.green.host._w, l1._fontSize
+    end
+    local wantW, wantS = run(false)
+    local gotW, gotS = run(true)
+    __charW = nil
+    ok(wantS > fontFor(FS.GunsightBoxes.C.NAME_FLOOR), "the name settles above the floor: " .. wantS)
+    eq(gotS, wantS, "the narrow overshoot settles at the instant size")
+    near(gotW, wantW, 1e-6, "and its rails are the settled name's, not the floor font's")
     W.clean(); noFails()
 end
 
@@ -2225,6 +2315,112 @@ function T.secret_numbers_fall_back_to_a_raw_write_when_abbreviate_numbers_is_mi
         AbbreviateNumbers, __abbrevThrows = saved, nil
         W.clean(); __pcallFails = {}
     end
+end
+
+function T.the_abbreviate_numbers_failure_latches_once_so_it_does_not_throw_on_every_event()
+    local W = world()
+    target("Kurak")
+    local b, u = bars(W), __units.target
+    u.hp, u.hpMax, u.pw, u.pwMax = __SECRET, __SECRET, __SECRET, __SECRET
+    __abbrevThrows = true
+    __abbrevCalls, __pcallFails = {}, {}
+    numbersOn("both")
+    for _ = 1, 5 do allBarEvents() end
+    eq(#__abbrevCalls, 1, "AbbreviateNumbers is not called again after it threw")
+    eq(#__pcallFails, 1, "so only that one throw happened")
+    eq(b.hpText._fmt, "%d / %d", "the raw fallback still writes")
+    eq(b.hpText._secretText, true)
+    eq(countKey("gunsightboxes_target_numbers"), 0, "and the numbers are not latched off")
+    __abbrevThrows = nil
+    __pcallFails = {}
+    W.clean()
+end
+
+function T.a_steady_stream_of_identical_health_events_does_not_call_setfont_again()
+    local W = world()
+    local C = FS.GunsightBoxes.C
+    target("Kurak")
+    local b, u = bars(W), __units.target
+    numbersOn("both")
+    __charW = 14                                        -- compact text overflows too: the size is stepped down
+    u.hp, u.hpMax, u.pw, u.pwMax = 1234567, 1234567, 1234567, 1234567
+    allBarEvents()
+    ok(b.hpText._fontSize < fontFor(C.NUM_SIZE), "the numbers stepped down: " .. tostring(b.hpText._fontSize))
+    local calls, size = __applyMonoCalls, b.hpText._fontSize
+    for _ = 1, 10 do allBarEvents() end
+    eq(__applyMonoCalls, calls, "ten identical events: no SetFont")
+    u.hp, u.hpMax = 1234566, 1234567                    -- a new value at the same width: the size stays
+    allBarEvents()
+    eq(__applyMonoCalls, calls, "a new value of the same width does not touch the font either")
+    eq(b.hpText._fontSize, size)
+    __charW = nil
+    W.clean(); noFails()
+end
+
+function T.a_rescale_refits_the_numbers_at_once_and_a_lagging_font_settles_next_frame()
+    local W = world()
+    local C = FS.GunsightBoxes.C
+    target("Kurak")
+    local b, u = bars(W), __units.target
+    numbersOn("both")
+    __charW = 7
+    u.hp, u.hpMax, u.pw, u.pwMax = 123456, 123456, 123456, 123456
+    allBarEvents()
+    local function fits(msg)
+        for _, fs in ipairs({ b.hpText, b.powerText }) do
+            ok(fs:GetUnboundedStringWidth() <= numHalf() + 1e-6, msg .. ": '" .. tostring(fs._text) .. "' is " .. fs:GetUnboundedStringWidth() .. ", half is " .. numHalf())
+        end
+    end
+    fits("before")
+    UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
+    __fireEvent("UI_SCALE_CHANGED")                     -- no health event after it
+    fits("a rescale refits the numbers without waiting for an event")
+    UIParent._h = 1440; UIParent._w = 1440 * 16 / 9
+    __fireEvent("UI_SCALE_CHANGED")
+    fits("and back")
+    -- A lagging font: the seat's refit is measured on a stale font, so the next frame refits once more and lands
+    -- on the size an instant font gives.
+    local function rescaleTo(h, lag)
+        __fontLag = lag
+        UIParent._h = h; UIParent._w = h * 16 / 9
+        __fireEvent("UI_SCALE_CHANGED")
+        settle()
+        __fontLag = false
+        return b.hpText._fontSize, b.powerText._fontSize
+    end
+    local wantHp, wantPw = rescaleTo(1080, false)
+    rescaleTo(1440, false)
+    __timers = {}
+    __fontLag = true
+    UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
+    __fireEvent("UI_SCALE_CHANGED")
+    ok(#__timers <= 2, "at most one pending refit per number: " .. #__timers)
+    settle()
+    __fontLag = false
+    fits("a lagging font settles next frame")
+    eq(b.hpText._fontSize, wantHp, "health lands on the instant size")
+    eq(b.powerText._fontSize, wantPw, "and so does the resource")
+    eq(#__timers, 0, "and nothing more is pending")
+    __charW = nil
+    W.clean(); noFails()
+end
+
+function T.numbers_with_a_width_that_cannot_be_measured_keep_the_full_text_at_the_base_size()
+    local W = world()
+    local C = FS.GunsightBoxes.C
+    target("Kurak")
+    local b, u = bars(W), __units.target
+    numbersOn("both")
+    __charW = "throw"
+    u.hp, u.hpMax, u.pw, u.pwMax = 2084, 2084, 2084, 2084
+    allBarEvents()
+    eq(textOf(b.hpText), "2084 / 2084", "not forced to the compact text when nothing can be measured")
+    eq(b.hpText._fontSize, fontFor(C.NUM_SIZE), "at the base size")
+    setting("numberFormat", "current")
+    eq(textOf(b.hpText), "2084")
+    __charW = nil
+    __pcallFails = {}
+    W.clean()
 end
 
 function T.numbers_on_grow_the_box_up_and_the_divider_line_two_and_tile_keep_their_screen_seats()
