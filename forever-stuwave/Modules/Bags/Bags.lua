@@ -8,6 +8,16 @@
 -- Item slots wear OUR plate only (the two-corner cut plate of the deck bag
 -- slots and action buttons, plus its cut border); Blizzard's own slot art is
 -- hidden and held hidden. The money line wears the data bar's GOLD look.
+-- Blizzard's GamepadBagBar (a child of the combined bags, same frame level as
+-- the Clean Up button, a bag icon) is hidden while no controller is connected:
+-- on a client with the GamePadEnable CVar on and nothing plugged in it drew over
+-- the Clean Up (broom) button. C_GamePad missing, C_GamePad.IsEnabled() false or
+-- an empty C_GamePad.GetAllDeviceIDs() all count as "no controller". It is
+-- re-hidden whenever Blizzard shows it again (post-hooks on Show/SetShown and
+-- OnShow, no method replaced), re-evaluated on GAME_PAD_CONNECTED/
+-- DISCONNECTED/ACTIVE_CHANGED and PLAYER_ENTERING_WORLD, left alone (and shown
+-- again if we hid it) once a controller is present, and deferred out of combat.
+-- The GamePadEnable CVar and the sort button are never touched.
 -- UNVALIDATED in-game: no /fstack or visual check done yet.
 
 local _, FS = ...
@@ -512,6 +522,87 @@ local function ApplyBank()
 end
 
 -------------------------------------------------------------------------------
+-- Gamepad bag bar (covers the Clean Up button when no controller is connected)
+-------------------------------------------------------------------------------
+
+-- GamepadBagBar is a plain (unprotected) frame parented to the combined bags. A
+-- client with the GamePadEnable CVar on and no controller still shows it, on top
+-- of BagItemAutoSortButton. Read through _G (not in .luacheckrc's globals) and
+-- feature-detected: neither it nor C_GamePad exists on every build.
+local gamepadHiddenByUs = false -- we hid it, so a controller appearing puts it back
+local gamepadPending = false    -- a combat-deferred sync is already queued
+
+-- "No controller" is C_GamePad missing, gamepads disabled, or no device IDs. An
+-- API that is there but errors or lacks a call is not proof either way, so it
+-- counts as a controller (Blizzard stays in charge).
+local function HasController()
+    local api = _G["C_GamePad"]
+    if type(api) ~= "table" then return false end
+    if type(api.IsEnabled) == "function" then
+        local ok, enabled = pcall(api.IsEnabled)
+        if ok and not enabled then return false end
+    end
+    if type(api.GetAllDeviceIDs) == "function" then
+        local ok, ids = pcall(api.GetAllDeviceIDs)
+        if ok and type(ids) == "table" and #ids == 0 then return false end
+    end
+    return true
+end
+
+local SyncGamepadBagBar
+
+-- Post-hooks only, installed once per bar object: Blizzard's own Show/SetShown/
+-- OnShow run untouched, then we re-hide if there is still no controller.
+local function HookGamepadBagBar(bar)
+    if bar.fsGamepadHooked then return end
+    bar.fsGamepadHooked = true
+    if type(hooksecurefunc) == "function" then
+        if type(bar.Show) == "function" then pcall(hooksecurefunc, bar, "Show", SyncGamepadBagBar) end
+        if type(bar.SetShown) == "function" then pcall(hooksecurefunc, bar, "SetShown", SyncGamepadBagBar) end
+    end
+    if type(bar.HookScript) == "function" then pcall(bar.HookScript, bar, "OnShow", SyncGamepadBagBar) end
+end
+
+SyncGamepadBagBar = function()
+    local bar = _G["GamepadBagBar"]
+    if type(bar) ~= "table" or type(bar.Hide) ~= "function" or type(bar.Show) ~= "function" then return end
+    HookGamepadBagBar(bar)
+
+    if InCombatLockdown() then
+        if not gamepadPending then
+            gamepadPending = true
+            FS.PanelSkins.DeferCombat(function()
+                gamepadPending = false
+                SyncGamepadBagBar()
+            end)
+        end
+        return
+    end
+
+    if not HasController() then
+        local shown = true
+        if type(bar.IsShown) == "function" then
+            local ok, value = pcall(bar.IsShown, bar)
+            shown = not ok or value
+        end
+        if shown then
+            gamepadHiddenByUs = true
+            pcall(bar.Hide, bar)
+        end
+    elseif gamepadHiddenByUs then
+        gamepadHiddenByUs = false
+        pcall(bar.Show, bar)
+    end
+end
+
+-- RegisterEvent throws on a name the client does not know, so each is its own pcall.
+local gamepadEvents = CreateFrame("Frame")
+for _, event in ipairs({ "GAME_PAD_CONNECTED", "GAME_PAD_DISCONNECTED", "GAME_PAD_ACTIVE_CHANGED", "PLAYER_ENTERING_WORLD" }) do
+    pcall(gamepadEvents.RegisterEvent, gamepadEvents, event)
+end
+gamepadEvents:SetScript("OnEvent", SyncGamepadBagBar)
+
+-------------------------------------------------------------------------------
 -- Init
 -------------------------------------------------------------------------------
 
@@ -522,6 +613,7 @@ local function Apply()
     ApplyContainers()
     ApplyCombinedBags()
     ApplyBank()
+    SyncGamepadBagBar()
 end
 
 -- Verifies every numbered container, the combined-bag frame, and the bank
