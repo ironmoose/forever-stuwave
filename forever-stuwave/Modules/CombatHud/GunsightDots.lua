@@ -244,6 +244,16 @@ end
 -- would still answer a hover.
 local function TipGate() return Gunsight.IsActive() end
 
+
+-- A Gunsight switched off in combat only fades its root, so a chip under the cursor gets no OnLeave: its open
+-- tooltip is taken down here (the gate then shows no new one).
+if type(Gunsight.OnActiveChanged) == "function" then
+    Gunsight.OnActiveChanged(function(active)
+        local FH = FS.FrameHelpers
+        if not active and FH and FH.ReleaseGatedTips then FH.ReleaseGatedTips() end
+    end)
+end
+
 local function BuildChip(m, parent, size, level)
     local Theme, FH = FS.Theme, FS.FrameHelpers
     local chip = {}

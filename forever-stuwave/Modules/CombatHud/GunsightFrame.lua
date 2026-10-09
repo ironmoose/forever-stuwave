@@ -703,6 +703,15 @@ local function Layout()
 end
 GunsightFrame.Layout = Layout
 
+-- A Gunsight switched off in combat only fades its root, so a rung icon under the cursor gets no OnLeave: its
+-- open tooltip is taken down here (the icon's gate then shows no new one).
+if type(Gunsight.OnActiveChanged) == "function" then
+    Gunsight.OnActiveChanged(function(active)
+        local FH = FS.FrameHelpers
+        if not active and FH and FH.ReleaseGatedTips then FH.ReleaseGatedTips() end
+    end)
+end
+
 local function Build()
     if built or not Gunsight.IsEnabled() then return end
     root = Gunsight.root

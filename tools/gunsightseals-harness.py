@@ -272,6 +272,8 @@ local function stubGunsight_()
     root:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     function root:GetEffectiveScale() return 1 end
     local Gs = { G = { GRID = GEO.GRID, CX = GEO.CX, CY = GEO.CY }, root = root, IsActive = function() return true end }
+    ACTIVE_LISTENERS = {}
+    function Gs.OnActiveChanged(fn) ACTIVE_LISTENERS[#ACTIVE_LISTENERS + 1] = fn end
     function Gs.ui(px) return px * GEO.GRID * FS.Layout.Scale() end
     function Gs.Point(frame, point, x, y)
         local k = GEO.GRID * FS.Layout.Scale()
@@ -692,6 +694,20 @@ check(tip() and tip().spellID == 20375, "the open tooltip follows the new seal")
 -- NO SEAL has no spell to show
 push(noneState(false))
 check(tip() == nil, "NO SEAL: nothing to show")
+""")
+
+case("a_seal_tooltip_already_up_comes_down_when_the_master_switch_goes_off")(r"""
+STATE = sealAt("sor", 20)
+local Seals = mount("upper")
+local P = Seals.parts
+for _, f in ipairs({ P.tile, P.chip }) do
+    FS.Gunsight.IsActive = function() return true end
+    hover(f)
+    check(tip(), "setup: the tip is up")
+    FS.Gunsight.IsActive = function() return false end     -- in combat the root only fades: no OnLeave
+    for _, fn in ipairs(ACTIVE_LISTENERS) do fn(false) end
+    check(tip() == nil and f.fsHover == nil, "the open tooltip comes down with the switch")
+end
 """)
 
 case("a_secret_seal_id_falls_back_to_the_seal_name_and_the_gate_holds")(r"""

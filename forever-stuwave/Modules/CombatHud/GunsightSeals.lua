@@ -250,6 +250,16 @@ end
 -- The tile and the Judgement chip show a tooltip only while the Gunsight is the display and the module is on an area.
 local function TipGate() return Gunsight.IsActive() and subscribed end
 
+
+-- A Gunsight switched off in combat only fades its root, so the seal tile or the Judgement chip under the cursor gets no OnLeave: its open
+-- tooltip is taken down here (the gate then shows no new one).
+if type(Gunsight.OnActiveChanged) == "function" then
+    Gunsight.OnActiveChanged(function(active)
+        local FH = FS.FrameHelpers
+        if not active and FH and FH.ReleaseGatedTips then FH.ReleaseGatedTips() end
+    end)
+end
+
 -- A chamfered plate on its own small frame: fill and outline slices (and the tile's soft glow) over a square of `size` image px,
 -- with a hidden icon inside the cut.
 local function Plate(x, y, size, cut, fillPath, outlinePath, withGlow)

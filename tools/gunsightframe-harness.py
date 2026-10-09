@@ -801,6 +801,17 @@ check(tip() == nil, "a hidden rung gives no tooltip")
 """)
 
 
+case("a_proc_rung_tooltip_already_up_comes_down_when_the_master_switch_goes_off_in_combat")(r"""
+local GF = boot({ profile = "WARLOCK", state = function(p) return StateFor(p, {}) end })
+Push(StateFor(FS.Hud.profile, { shadow_trance = true }))
+local rung = GF.rungs[FS.Hud.profile.procs.shadow_trance.side]
+hover(rung.icon.frame)
+check(tip() and tip().spellID == 17941, "setup: the tip is up")
+FS.Config.Set("gunsight.enabled", false)
+check(FS.Gunsight.IsActive() == false and tip() == nil, "the open tooltip comes down with the switch")
+""")
+
+
 case("rungs_are_hidden_with_no_hud_at_all")(r"""
 local GF = boot({ noHud = true })
 check(not GF.rungs.left.frame:IsShown() and not GF.rungs.right.frame:IsShown(), "no FS.Hud: no rungs")

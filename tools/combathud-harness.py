@@ -3394,6 +3394,40 @@ unhover(t.holder)
 check(not TT.shown, "leaving takes the tip down")
 """)
 
+case("tooltips_tile_names_the_spell_its_icon_shows")(r"""
+standard()
+-- a warlock under 20 knows only Demon Skin: the icon is Demon Skin's, so the tooltip must be too
+__spellInfo["Demon Armor"] = nil
+__spellInfo["Demon Skin"].spellID = 687
+__state = mkState({ inCombat = false, row = lockRow(), buffsMissing = { { key = "demon_armor" } } })
+login()
+local t = FS.CombatHud.ui.buffTiles.demon_armor
+check(t.icon._texture == __spellInfo["Demon Skin"].iconID, "setup: the tile shows Demon Skin's icon")
+hover(t.holder)
+check(TT.owner == t.holder and TT.spellID == 687, "the tip is Demon Skin's: " .. tostring(TT.spellID))
+unhover(t.holder)
+-- nothing resolves by name: the dictionary id stands in, under the first name
+__spellInfo["Demon Skin"] = nil
+fire("SPELLS_CHANGED")
+push(mkState({ inCombat = false, row = lockRow(), buffsMissing = { { key = "demon_armor" } } }))
+hover(t.holder)
+check(TT.spellID == FS.HudSpells.demon_armor.ids[1], "no name resolves: ids[1] is used: " .. tostring(TT.spellID))
+""")
+
+case("tooltips_follow_a_newly_trained_rank")(r"""
+standard()
+__state = mkState({ inCombat = false, row = lockRow(), next = { key = "shadow_bolt" } })
+login()
+local n = FS.CombatHud.ui.nextTile
+hover(n.holder)
+local old = idOf("shadow_bolt")
+check(TT.spellID == old, "setup: rank one")
+__spellInfo["Shadow Bolt"].spellID = old + 5000
+fire("SPELLS_CHANGED")
+push(mkState({ inCombat = false, row = lockRow(), next = { key = "shadow_bolt" }, shards = 1 }))
+check(TT.spellID == old + 5000, "the open tip follows the new rank: " .. tostring(TT.spellID))
+""")
+
 case("tooltips_stack_a_row_tile_shows_its_spell")(r"""
 standard()
 __state = mkState({ inCombat = true, row = lockRow() })

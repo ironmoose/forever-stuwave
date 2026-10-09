@@ -1,6 +1,6 @@
 -- Forever STUwave: Gunsight "mybuffs" piece, a flank plate of up to four of the player's buffs outboard of the next cast tile, the time left under each and a cyan pip on a buff cast by a party or raid member.
 -- It reads only the FS.PlayerAuras snapshot (plain values, frozen in combat), so in combat the time left is extrapolated from the stored expiry.
--- Hovering a tile shows the standard buff tooltip through FrameHelpers.ShowAuraTooltip (the snapshot slot, the cached name in combat);
+-- Hovering a tile shows the shared spell tooltip (FrameHelpers.AttachSpellTooltip: the snapshot slot out of combat, the cached spell id or name in combat);
 -- only the tiles take the mouse, and only hover (clicks pass through, so mouselook and targeting start over a tile as anywhere else). The plate's size is Gunsight.lua's MYBUFFS (one tunable, the tile edge).
 -- Tiles keep the snapshot's slot order; sorting by time left would shuffle them as the clocks tick.
 
@@ -101,13 +101,8 @@ local function TipGate()
 end
 
 -- A tile that hides (or whose plate does) under the cursor gets no OnLeave, so its tooltip is taken down here.
-local function ReleaseTip(frame)
-    frame.fsHover = nil
-    if GameTooltip and GameTooltip.GetOwner and GameTooltip:GetOwner() == frame then GameTooltip:Hide() end
-end
-
 local function ReleaseAllTips()
-    for _, tile in ipairs(state.tiles) do ReleaseTip(tile.frame) end
+    for _, tile in ipairs(state.tiles) do FS.FrameHelpers.ReleaseSpellTip(tile.frame) end
 end
 
 -- The fields the tooltip reads off a tile: the player's HELPFUL slot (the snapshot position is the slot) and, for combat, the
@@ -139,7 +134,7 @@ end
 -- An empty slot's tile hides, and its time with it (the time is the tile's child); the text is cleared too, so the next buff
 -- that takes the slot repaints it from scratch.
 local function ClearTile(tile)
-    ReleaseTip(tile.frame)
+    FS.FrameHelpers.ReleaseSpellTip(tile.frame)
     tile.frame:Hide()
     if tile.text ~= "" then
         tile.text = ""
