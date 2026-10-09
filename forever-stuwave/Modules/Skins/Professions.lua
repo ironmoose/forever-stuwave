@@ -357,15 +357,18 @@ local function BuildGlyph(p, band)
     return button
 end
 
--- Folds a seated panel to the title band, keeping its top edge where the full seat has it. The seat is
--- CENTER on CENTER, so the top sits h/2 above the seat's centre; another anchor only gets the height.
+-- Folds a seated panel to the title band, keeping its BOTTOM edge where the full seat has it, so it
+-- collapses downward like the chat and the strip sits where the panel's foot was. The seat is CENTER on
+-- CENTER, so the bottom sits h/2 below the seat's centre; another anchor only gets the height. The
+-- anchor is derived from the layout entry each time, never read back off the frame, so repeated folds
+-- and restores cannot drift.
 local function CollapseToBand(p)
     local L = FS.Layout.professions
     p:SetHeight(COLLAPSED_H)
     if not (L and L.point == "CENTER" and L.relPoint == "CENTER") then return end
     local scale = L.unscaled and 1 or FS.Layout.Scale()
     p:ClearAllPoints()
-    p:SetPoint("TOP", UIParent, L.relPoint, L.x * scale, (L.y + L.h / 2) * scale)
+    p:SetPoint("BOTTOM", UIParent, L.relPoint, L.x * scale, (L.y - L.h / 2) * scale)
 end
 
 local function SeatPanel(p)

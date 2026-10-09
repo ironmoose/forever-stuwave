@@ -26,8 +26,8 @@ so opens its window. These checks pin that:
     read-only Config refuses the toggle;
   * the tooltip names the profession and adds "Click to open" only on a clickable row;
   * the minimise glyph is a plain (non-secure) button reusing the chat's glyph texture and idle/hover alphas, its
-    tooltip reads Minimise or Restore, a click folds the rows into the title band with the top edge fixed and
-    a second click restores them, the state is the profile setting professions.minimized (default false), is
+    tooltip reads Minimise or Restore, a click folds the rows into the title band with the bottom edge fixed (it
+    collapses down, like the chat) and a second click restores them, growing back upward, the state is the profile setting professions.minimized (default false), is
     applied at login and survives /fsprof, a reseat or a profile switch, and in combat every part of it
     (hide, show, resize, re-anchor) waits for PLAYER_REGEN_ENABLED.
 
@@ -258,13 +258,15 @@ local function glyph()
 end
 local MIN = "professions.minimized"
 local FULL_H, BAND_H = 105, 27   -- the scaled seat height (210 * 0.5); band 3 + 20 + 1 rule + 3
--- Screen y of the panel's top edge, from its one anchor and height (the stub UIParent is the origin).
-local function topEdge(p)
+-- Screen y of the panel's bottom edge, from its one anchor and height (the stub UIParent is the origin).
+local function bottomEdge(p)
     local pt = p._points[1]
-    if pt[1] == "TOP" then return pt[5] end
-    if pt[1] == "CENTER" then return pt[5] + p._h / 2 end
+    if pt[1] == "BOTTOM" then return pt[5] end
+    if pt[1] == "CENTER" then return pt[5] - p._h / 2 end
     error("unexpected anchor " .. tostring(pt[1]))
 end
+local function topEdge(p) return bottomEdge(p) + p._h end
+local SEAT_BOTTOM = (-450 - 105) * 0.5   -- the full seat's bottom edge: (y - h / 2) * scale
 local function pinned(value)
     return { profiles = { Default = { settings = { [MIN] = value }, layout = { v = 1, frames = {} } } },
         profileKeys = {}, profilesVersion = 1 }
@@ -748,13 +750,16 @@ function T.minimised_defaults_to_false_and_pins_nothing()
     eq(shownRows(), 2)
 end
 
-function T.a_click_folds_the_rows_into_the_band_and_keeps_the_top_edge()
+function T.a_click_folds_the_rows_into_the_band_and_keeps_the_bottom_edge()
     boot({ profs = { "Alchemy", "Cooking", "Mining" } })
-    local top, left = topEdge(panel()), panel()._points[1][4]
+    local bottom, left = bottomEdge(panel()), panel()._points[1][4]
+    eq(bottom, SEAT_BOTTOM, "the full seat bottom")
     clickGlyph()
     eq(shownRows(), 0, "every row hidden")
     eq(panel()._h, BAND_H, "height is the title band")
-    eq(topEdge(panel()), top, "top edge did not move")
+    eq(panel()._points[1][1], "BOTTOM", "seated by the bottom edge")
+    eq(bottomEdge(panel()), bottom, "bottom edge did not move")
+    eq(topEdge(panel()), bottom + BAND_H, "the strip sits on the old bottom edge")
     eq(panel()._points[1][4], left, "nor did the horizontal seat")
     eq(#panel()._points, 1, "one anchor")
     eq(panel()._shown, true, "the band itself stays up")
@@ -765,17 +770,45 @@ end
 
 function T.a_second_click_restores_the_full_list()
     boot({ profs = { "Alchemy", "Cooking", "Mining" } })
-    local top = topEdge(panel())
+    local bottom = bottomEdge(panel())
     clickGlyph()
     clickGlyph()
     eq(shownRows(), 3, "the learned rows are back")
     eq(rows()[4]._shown, false, "unlearned rows stay hidden")
     eq(panel()._h, FULL_H)
-    eq(topEdge(panel()), top)
+    eq(bottomEdge(panel()), bottom, "restore grows upward from the same bottom")
+    eq(topEdge(panel()), bottom + FULL_H)
     eq(panel()._points[1][1], "CENTER", "the layout seat is back")
     eq(FS.Config.Get(MIN), false)
     eq(stored(MIN), nil, "the default pins nothing")
     eq(rows()[1]._attrs.spell, "Alchemy", "the click action survived the fold")
+end
+
+function T.repeated_toggles_do_not_drift_the_panel()
+    boot({ profs = { "Alchemy", "Cooking" } })
+    local left = panel()._points[1][4]
+    for i = 1, 6 do
+        clickGlyph()
+        eq(bottomEdge(panel()), SEAT_BOTTOM, "folded " .. i)
+        eq(panel()._points[1][4], left, "folded x " .. i)
+        clickGlyph()
+        eq(bottomEdge(panel()), SEAT_BOTTOM, "restored " .. i)
+        eq(panel()._points[1][4], left, "restored x " .. i)
+        eq(panel()._h, FULL_H)
+    end
+    eq(#panel()._points, 1)
+end
+
+function T.a_reload_while_minimised_keeps_the_bottom_edge()
+    boot({ profs = { "Alchemy" } })
+    clickGlyph()
+    boot({ db = ForeverSTUwaveDB, profs = { "Alchemy" } })
+    eq(panel()._h, BAND_H)
+    eq(bottomEdge(panel()), SEAT_BOTTOM, "same bottom after the reload")
+    eq(panel()._points[1][4], 923 * 0.5, "same x")
+    clickGlyph()
+    eq(bottomEdge(panel()), SEAT_BOTTOM, "and the restore grows up from it")
+    eq(topEdge(panel()), SEAT_BOTTOM + FULL_H)
 end
 
 function T.the_stored_state_is_applied_on_load()
@@ -848,7 +881,8 @@ function T.a_click_in_combat_defers_everything_and_says_so()
     endCombat()
     eq(shownRows(), 0, "folded when combat ends")
     eq(panel()._h, BAND_H)
-    eq(panel()._points[1][1], "TOP")
+    eq(panel()._points[1][1], "BOTTOM")
+    eq(bottomEdge(panel()), SEAT_BOTTOM)
     eq(#__violations, 0, table.concat(__violations, ","))
 end
 
@@ -886,15 +920,15 @@ function T.a_login_in_combat_builds_minimised_after_combat()
     eq(#__violations, 0, table.concat(__violations, ","))
 end
 
-function T.a_reseat_keeps_a_minimised_panel_folded_on_its_top_edge()
+function T.a_reseat_keeps_a_minimised_panel_folded_on_its_bottom_edge()
     boot({ profs = { "Alchemy" } })
-    local top = topEdge(panel())
+    local bottom = bottomEdge(panel())
     clickGlyph()
     FS.Layout.Apply(panel(), "professions")   -- what the rescale watcher and /fsedit do first
     eq(panel()._h, FULL_H, "the reseat alone restores the seat height")
     for _, fn in ipairs(__rescale) do fn() end
     eq(panel()._h, BAND_H, "the rescale callback folds it again")
-    eq(topEdge(panel()), top)
+    eq(bottomEdge(panel()), bottom)
 end
 
 function T.a_reseat_after_dragging_moves_the_folded_panel_with_its_seat()
@@ -903,9 +937,9 @@ function T.a_reseat_after_dragging_moves_the_folded_panel_with_its_seat()
     FS.Layout.professions.y = FS.Layout.professions.y + 40
     FS.Layout.Apply(panel(), "professions")
     for _, fn in ipairs(__rescale) do fn() end
-    eq(panel()._points[1][1], "TOP")
+    eq(panel()._points[1][1], "BOTTOM")
     eq(panel()._points[1][4], (923 - 100) * 0.5)
-    eq(topEdge(panel()), (-450 + 40 + 105) * 0.5, "top of the full seat, not its centre")
+    eq(bottomEdge(panel()), (-450 + 40 - 105) * 0.5, "bottom of the full seat, not its centre")
 end
 
 function T.a_rescale_in_combat_touches_nothing_and_the_regen_refolds()
@@ -921,7 +955,7 @@ function T.a_rescale_in_combat_touches_nothing_and_the_regen_refolds()
     FS.Layout.Apply(panel(), "professions")   -- the watcher's own regen pass, then the callbacks
     for _, fn in ipairs(__rescale) do fn() end
     eq(panel()._h, BAND_H)
-    eq(topEdge(panel()), (-450 + 105) * 0.5, "top of the full seat")
+    eq(bottomEdge(panel()), SEAT_BOTTOM, "bottom of the full seat")
     eq(#__violations, 0, table.concat(__violations, ","))
 end
 
