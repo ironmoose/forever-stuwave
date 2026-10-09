@@ -351,12 +351,14 @@ local function LookH(row)
         bg, tc, ta = K.muted, K.muted, H.ABSENT_TEXT_A
         row.fillTex:Hide()
         row.barBg:SetColorTexture(bg[1], bg[2], bg[3], H.ABSENT_BAR_A)
+        row.barBg:Show()
     else
         if band then bg, fg, tc = K.amber, K.amber, K.amber end
         if mode == "unknown" then tc = K.fg end
         row.barBg:SetColorTexture(bg[1], bg[2], bg[3], H.BAR_BG_A)
         row.fillTex:SetColorTexture(fg[1], fg[2], fg[3], 1)
         row.fillTex:SetShown(mode == "live")
+        row.barBg:SetShown(mode == "live")
     end
     row.time:SetTextColor(tc[1], tc[2], tc[3], ta)
     if mode == "live" or mode == "unknown" then
@@ -381,9 +383,10 @@ local function PaintH(row, rem)
     end
 end
 
--- An absent row and one with no known duration both read "--" and draw no fill.
+-- An absent row reads "--" over its dim track; a row whose duration nobody knows reads "?" with no track at all
+-- (an empty bar would claim a drained debuff).
 local function ParkH(row)
-    SetTime(row, "--")
+    SetTime(row, row.mode == "unknown" and "?" or "--")
     row.fill = nil
 end
 

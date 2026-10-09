@@ -1,8 +1,8 @@
 -- Forever STUwave: data service for the player's own debuffs on the target (FS.TargetDebuffs).
 -- Entries are { id, name, icon, expires, duration, count, order }: an aura snapshot out of combat, an own-cast
 -- ledger in combat. IN COMBAT it is an estimate: a resisted cast still counts, refreshes that are not casts (poison
--- procs, Deep Wounds, talents) are invisible, and a duration or stack cap is only the last snapshot of that spell
--- name; out of combat the snapshot is exact.
+-- procs, Deep Wounds, talents) are invisible, and a cast is timed from the last snapshot of that spell id or name,
+-- else the SPELL_SECONDS / HudSpells tables (an unknown one has no expiry); out of combat the snapshot is exact.
 
 local _, FS = ...
 
@@ -22,6 +22,20 @@ local CLASS_DEBUFFS = {
     DRUID = { "Rake", "Rip" },
 }
 
+-- Seconds a debuff lasts when the player casts it, so the FIRST cast in combat is timed before any snapshot has
+-- taught the session. `apply` is the top rank (or the only length); `byRank` maps a cast rank id to its length for a
+-- spell whose length follows the rank. Verified against Wowhead / ForeverDB (Forever): Rend 9/12/15/18/21 s,
+-- Thunder Clap 10/14/18/22/26/30 s (rank ids 6343 and 11556 were read there, the rest are classic rank ids),
+-- Sunder Armor 30 s, Hamstring 15 s, Demoralizing Shout 45 s (30 s in classic). Deep Wounds has no cast, so no entry.
+-- Only Warrior is filled so far; every other class is timed from its first readable snapshot (learned below).
+local SPELL_SECONDS = {
+    ["Rend"] = { apply = 21, byRank = { [772] = 9, [6546] = 12, [6547] = 15, [6548] = 18, [11572] = 21, [11573] = 21, [11574] = 21 } },
+    ["Thunder Clap"] = { apply = 30, byRank = { [6343] = 10, [8198] = 14, [8204] = 18, [8205] = 22, [11580] = 26, [11581] = 30 } },
+    ["Sunder Armor"] = { apply = 30 },
+    ["Hamstring"] = { apply = 15 },
+    ["Demoralizing Shout"] = { apply = 45 },
+}
+
 local EMPTY = {}
 local list = EMPTY                  -- the current entries, sorted; replaced (never edited) by Rebuild
 local subs, subCount = {}, 0
@@ -32,6 +46,7 @@ local ledger = {}                   -- target key -> { [name] = entry }
 local pending = {}                  -- castGUID -> { key, at }
 local hudEntries, hudNames          -- the Hud's DoT rows as entries, and every name those DoTs go by
 local learnedDuration, maxStack, known, seenOrder, seenCount = {}, {}, {}, {}, 0
+local learnedById = {}                  -- spell id -> seconds, from a readable snapshot (session only)
 local hudSeconds                    -- name -> HudSpells def, built on first use
 local classToken, classSet, classOrder
 local plainFrame, targetFrame, playerFrame
@@ -95,16 +110,20 @@ local function HudDef(name)
     return hudSeconds[name]
 end
 
+-- Seconds a cast of `spellID` lasts, best source first: what a snapshot measured for this exact id, the rank table
+-- for this exact id, what a snapshot measured for the name (another rank, the player's talents), then the top rank.
 local function DurationOf(name, spellID)
+    if spellID and learnedById[spellID] then return learnedById[spellID] end
+    local def, own = HudDef(name), SPELL_SECONDS[name]
+    local byRank = spellID and (def and def.applyByRank and def.applyByRank[spellID] or own and own.byRank and own.byRank[spellID])
+    if byRank then return byRank end
     if learnedDuration[name] then return learnedDuration[name] end
-    local def = HudDef(name)
-    if not def then return nil end
-    return def.applyByRank and def.applyByRank[spellID] or def.apply
+    return def and def.apply or own and own.apply or nil
 end
 
 local function Tracks(name)
     Class()
-    return known[name] or (classSet and classSet[name]) or HudDef(name) ~= nil
+    return known[name] or (classSet and classSet[name]) or SPELL_SECONDS[name] ~= nil or HudDef(name) ~= nil
 end
 
 -- name, icon of a spell id; plain values only.
@@ -204,6 +223,7 @@ local function ScanInto(bucket)
             if duration and duration > 0 then
                 entry.duration = duration
                 learnedDuration[name] = duration
+                if entry.id then learnedById[entry.id] = duration end
                 if expires and expires > 0 then entry.expires = expires end
             end
             if count > (maxStack[name] or 0) then maxStack[name] = count end
