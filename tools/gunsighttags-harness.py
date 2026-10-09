@@ -254,6 +254,39 @@ function T.the_tags_are_kick_style_plates_with_a_pink_outline()
     W.clean(); noFails()
 end
 
+function T.the_level_and_health_tags_draw_above_every_piece_of_the_box_so_the_border_cannot_cross_their_text()
+    -- The tags straddle the box edge on purpose (the mockup draws them after the box, so their .95 plate masks
+    -- the edge line). On the client frames of equal level have no promised order, so the tags carry their own
+    -- level, above the box's tone frames (the edge strokes, level +1) and the bars' deepest StatusBar (+3).
+    local W = world()
+    local C = Tg().C
+    local box = W.tgt.box
+    ok(C.FRAME_LEVEL > 3, "the offset clears the bars' nesting (bars +1, rail host +2, StatusBar +3)")
+    for _, frame in ipairs({ Tg().level, Tg().health }) do
+        eq(frame:GetParent(), box.frame, "still a child of the box")
+        eq(frame:GetFrameLevel(), box.frame:GetFrameLevel() + C.FRAME_LEVEL)
+        for key, tone in pairs(box.tones) do
+            ok(frame:GetFrameLevel() > tone:GetFrameLevel() + 3, "above the " .. key .. " edge stroke frame")
+        end
+        ok(frame:GetFrameLevel() > box.bars.frame:GetFrameLevel() + 2, "above the bars (rail host +1, StatusBar +2 inside their frame)")
+        local fill = textureWith(frame, function(r) return r._cutOutline == nil and r._texture ~= nil and r._vc[4] == C.FILL_A end)
+        ok(fill and fill._layer == "BACKGROUND", "the plate is in the tag's own frame, under its text")
+        eq(frame.label._layer, "OVERLAY", "and the text is over the plate")
+    end
+    W.clean(); noFails()
+end
+
+function T.the_tag_level_survives_a_rescale_and_the_target_of_target_button_is_left_alone()
+    local W = world()
+    local C = Tg().C
+    local box = W.tgt.box
+    UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
+    __fireEvent("UI_SCALE_CHANGED")
+    eq(Tg().level:GetFrameLevel(), box.frame:GetFrameLevel() + C.FRAME_LEVEL, "a rescale keeps it")
+    ok(Tg().holder:GetFrameLevel() > box.bars.frame:GetFrameLevel() + 2, "the target of target holder already clears the bars (rail host +1, StatusBar +2)")
+    W.clean(); noFails()
+end
+
 function T.the_tags_sit_at_the_mockup_seats_at_two_heights()
     local W = world()
     local C = Tg().C

@@ -166,11 +166,39 @@ function pcall(f, ...)
     return unpack(r, 1, r.n)
 end
 local Region = getmetatable(UIParent)
--- Text width scales with the font size, like the client's: 6 units a character at size 11.
-function Region:GetStringWidth()
-    if rawequal(self._text, __SECRET_NAME) then error("measured a secret string") end
+-- Text width scales with the font size, like the client's: 6 units a character at size 11. As on the client,
+-- GetStringWidth of a FontString with an explicit width and no wrap is BOUNDED by that width (the text is drawn
+-- truncated with an ellipsis); only GetUnboundedStringWidth returns what the whole text would take.
+local function textWidth(self)
+    if rawequal(self._text, __SECRET_NAME) or self._secretText then error("measured a secret string") end
     if __charW == "throw" then error("cannot measure") end
     return #tostring(self._text) * (__charW or 6) * ((self._fontSize or 11) / 11)
+end
+function Region:GetUnboundedStringWidth() return textWidth(self) end
+function Region:GetStringWidth()
+    local w = textWidth(self)
+    if self._w and self._wordWrap == false and w > self._w then return self._w end
+    return w
+end
+-- A plain SetText ends a secret SetFormattedText (the mock keeps the flag on the region); SetFormattedText
+-- remembers its format string.
+do
+    local realFormatted = Region.SetFormattedText
+    function Region:SetFormattedText(fmt, ...) self._fmt = fmt; return realFormatted(self, fmt, ...) end
+    local realSetText = Region.SetText
+    function Region:SetText(s) self._secretText = false; return realSetText(self, s) end
+end
+-- AbbreviateNumbers takes a secret and hands back a secret string (the engine's resultSecret = true); a plain
+-- number reads "208", "2.1k", "12k", "1.2M". __noAbbrev removes it, __abbrevThrows makes it refuse.
+__abbrevCalls = {}
+function AbbreviateNumbers(n)
+    __abbrevCalls[#__abbrevCalls + 1] = n
+    if __abbrevThrows then error("AbbreviateNumbers refused") end
+    if rawequal(n, __SECRET) then return __SECRET_NAME end
+    if n >= 1e6 then return string.format("%.1fM", n / 1e6) end
+    if n >= 1e4 then return string.format("%dk", math.floor(n / 1e3)) end
+    if n >= 1e3 then return string.format("%.1fk", n / 1e3) end
+    return string.format("%d", n)
 end
 function Region:SetJustifyV(j) self._justifyV = j end
 function Region:SetMaxLines(n) self._maxLines = n end
@@ -626,9 +654,98 @@ function T.a_long_plain_name_shrinks_to_fit_and_a_short_one_keeps_the_mockups_si
     W.cast("player", "Summon Felhunter", "C2", 100, 6); W.fire(S, "UNIT_SPELLCAST_START")
     ok(b.l1._fontSize < base and b.l1._fontSize >= 6, "a long name shrinks: " .. tostring(b.l1._fontSize))
     local wmax = (MB.base.BOXL.w - 2 * FS.GunsightBoxes.C.PAD) * K()
-    ok(b.l1:GetStringWidth() <= wmax + 1e-6, "and now fits the box: " .. b.l1:GetStringWidth() .. " <= " .. wmax)
+    ok(b.l1:GetUnboundedStringWidth() <= wmax + 1e-6, "and now fits the box: " .. b.l1:GetUnboundedStringWidth() .. " <= " .. wmax)
     W.cast("player", "Fear", "C3", 100, 1.5); W.fire(S, "UNIT_SPELLCAST_START")
     eq(b.l1._fontSize, base, "the next short name is back at full size")
+    W.clean(); noFails()
+end
+
+
+-- The target's name is the box's headline: it shrinks step by step to the box width, stops at the 11 image px
+-- floor (approved v7: "long names stop at an ~11px floor, then an ellipsis") and only then the FontString's own
+-- truncation ellipsizes it. A secret name is never measured: a fixed size, the FontString clips.
+local function tgtWmax() return (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * K() end
+
+function T.the_target_name_floor_is_eleven_image_px()
+    local W = world()
+    local C = FS.GunsightBoxes.C
+    eq(C.NAME_FLOOR, 11, "the approved floor")
+    ok(C.NAME_SECRET_SIZE >= C.NAME_FLOOR and C.NAME_SECRET_SIZE <= C.L1_SIZE, "the secret size sits between the floor and full size")
+    W.clean(); noFails()
+end
+
+function T.a_short_target_name_keeps_full_size()
+    local W = world()
+    local C = FS.GunsightBoxes.C
+    target("Kurak")
+    eq(W.tgt.box.l1._fontSize, fontFor(C.L1_SIZE), "5 characters: the mockup's 14 image px")
+    W.clean(); noFails()
+end
+
+function T.a_long_target_name_shrinks_to_fit_the_box_width_above_the_floor()
+    local W = world()
+    local C = FS.GunsightBoxes.C
+    local l1 = W.tgt.box.l1
+    target("Murloc Tidehunt")                      -- 15 characters: over the box at full size, inside it above the floor
+    local size = l1._fontSize
+    ok(size < fontFor(C.L1_SIZE), "shrunk below full size: " .. tostring(size))
+    ok(size >= fontFor(C.NAME_FLOOR), "but not under the floor: " .. tostring(size))
+    ok(l1:GetUnboundedStringWidth() <= tgtWmax() + 1e-6, "and the whole text fits the box: " .. l1:GetUnboundedStringWidth() .. " <= " .. tgtWmax())
+    eq(l1._text, "MURLOC TIDEHUNT", "upper-cased, not truncated by us")
+    target("Kurak")
+    eq(l1._fontSize, fontFor(C.L1_SIZE), "the next short name is back at full size")
+    W.clean(); noFails()
+end
+
+function T.a_target_name_too_long_for_the_floor_stops_at_the_floor_and_is_left_to_the_ellipsis()
+    local W = world()
+    local C = FS.GunsightBoxes.C
+    local l1 = W.tgt.box.l1
+    target("Baine Bloodhoof the Unforgiving Chieftain")
+    eq(l1._fontSize, fontFor(C.NAME_FLOOR), "stops at the 11 image px floor")
+    ok(l1:GetUnboundedStringWidth() > tgtWmax(), "still wider than the box: the FontString's own ellipsis shows")
+    ok(l1:GetStringWidth() <= tgtWmax() + 1e-6, "which the client bounds to the explicit width")
+    eq(l1._w, tgtWmax(), "the FontString keeps its fixed width so it can truncate")
+    eq(l1._wordWrap, false)
+    W.clean(); noFails()
+end
+
+function T.the_target_name_fit_does_not_trust_the_bounded_width()
+    -- GetStringWidth is bounded by the FontString's width: a name measured through it always "fits".
+    local W = world()
+    local C = FS.GunsightBoxes.C
+    local l1 = W.tgt.box.l1
+    target("Baine Bloodhoof")
+    ok(l1:GetStringWidth() <= tgtWmax() + 1e-6, "the bounded width never shows an overflow")
+    ok(l1._fontSize < fontFor(C.L1_SIZE), "yet the name shrank: the fit reads the unbounded width: " .. tostring(l1._fontSize))
+    W.clean(); noFails()
+end
+
+function T.a_secret_target_name_is_never_measured_and_takes_the_fixed_size()
+    local W = world()
+    local C = FS.GunsightBoxes.C
+    local l1 = W.tgt.box.l1
+    target(__SECRET_NAME)
+    ok(rawequal(l1._text, __SECRET_NAME), "the secret reached SetText untouched")
+    eq(l1._fontSize, fontFor(C.NAME_SECRET_SIZE), "the safe fixed size")
+    eq(l1._w, tgtWmax(), "at the fixed width, so the FontString truncates it")
+    target("Kurak")
+    eq(l1._fontSize, fontFor(C.L1_SIZE), "a plain name after it is full size again")
+    W.clean(); noFails("a secret operation was swallowed by a pcall")
+end
+
+function T.the_name_fit_measures_again_after_the_next_frame_in_case_the_font_lags()
+    -- A client may apply SetFont a frame late: the one deferred refit settles the size from a measure taken
+    -- after the font is surely there, and it never loops.
+    local W = world()
+    local l1 = W.tgt.box.l1
+    __timers = {}
+    target("Baine Bloodhoof")
+    local size = l1._fontSize
+    ok(#__timers <= 1, "at most one deferred refit per write: " .. #__timers)
+    __flushTimers()
+    eq(l1._fontSize, size, "the refit lands on the same size")
+    eq(#__timers, 0, "and schedules nothing more")
     W.clean(); noFails()
 end
 
@@ -909,10 +1026,10 @@ function T.a_rescale_refits_a_long_plain_name_at_once()
     local wmax = (MB.base.BOXL.w - 2 * FS.GunsightBoxes.C.PAD) * K()
     local base = fontFor(FS.GunsightBoxes.C.L1_SIZE)
     ok(b.l1._fontSize < base, "still shrunk after the rescale (base " .. base .. ", got " .. tostring(b.l1._fontSize) .. ")")
-    ok(b.l1:GetStringWidth() <= wmax + 1e-6, "and it fits the new box width: " .. b.l1:GetStringWidth() .. " <= " .. wmax)
+    ok(b.l1:GetUnboundedStringWidth() <= wmax + 1e-6, "and it fits the new box width: " .. b.l1:GetUnboundedStringWidth() .. " <= " .. wmax)
     UIParent._h = 1440; UIParent._w = 1440 * 16 / 9
     __fireEvent("UI_SCALE_CHANGED")
-    ok(b.l1:GetStringWidth() <= (MB.base.BOXL.w - 2 * FS.GunsightBoxes.C.PAD) * K() + 1e-6, "and back up")
+    ok(b.l1:GetUnboundedStringWidth() <= (MB.base.BOXL.w - 2 * FS.GunsightBoxes.C.PAD) * K() + 1e-6, "and back up")
     W.clean(); noFails()
 end
 
@@ -1025,7 +1142,7 @@ function T.the_header_is_the_full_name_with_the_surname_and_fits_the_box()
     local b = W.you.box
     eq(b.head.base._text, "HAMMERED STU", "first name and surname, upper-cased"); eq(b.head.red._text, "HAMMERED STU")
     local line = b.headLine
-    ok(line.wmax > 0 and b.head.base:GetStringWidth() <= line.wmax + 1e-6, "and it fits the header width")
+    ok(line.wmax > 0 and b.head.base:GetUnboundedStringWidth() <= line.wmax + 1e-6, "and it fits the header width")
     -- a secret full name falls back to YOU without being measured; a long one shrinks instead of overflowing
     FS.GetFullUnitName = function() return __SECRET_NAME end
     __fireEvent("PLAYER_ENTERING_WORLD")
@@ -1033,7 +1150,7 @@ function T.the_header_is_the_full_name_with_the_surname_and_fits_the_box()
     FS.GetFullUnitName = function() return "Alexandria Thegreat" end
     __fireEvent("PLAYER_ENTERING_WORLD")
     ok(b.head.base._fontSize < fontFor(FS.GunsightBoxes.C.HEAD_SIZE), "a long full name shrinks")
-    ok(b.head.base:GetStringWidth() <= b.headLine.wmax + 1e-6, "to the box minus the tick counter's reserve")
+    ok(b.head.base:GetUnboundedStringWidth() <= b.headLine.wmax + 1e-6, "to the box minus the tick counter's reserve")
     W.clean(); noFails("a secret name was measured")
 end
 
@@ -1042,7 +1159,7 @@ function T.a_long_character_name_shrinks_to_the_box_and_a_short_one_keeps_the_he
     local b = W.you.box
     local C = FS.GunsightBoxes.C
     local avail = (MB.base.BOXL.w - C.HEAD_RESERVE) * K()
-    ok(b.head.base:GetStringWidth() <= avail + 1e-6, "the long name fits the header width")
+    ok(b.head.base:GetUnboundedStringWidth() <= avail + 1e-6, "the long name fits the header width")
     ok(b.head.base._fontSize < fontFor(C.HEAD_SIZE), "so it shrank")
     ok(b.head.base._fontSize >= C.MIN_FONT, "never under the minimum size")
     eq(b.head.red._fontSize, b.head.base._fontSize, "the red copy fits the same")
@@ -1051,7 +1168,7 @@ function T.a_long_character_name_shrinks_to_the_box_and_a_short_one_keeps_the_he
     -- a rescale re-fits the held name
     __units.player.name = "Alexandriathegreat"; __fireEvent("PLAYER_ENTERING_WORLD")
     UIParent._h = 1080; UIParent._w = 1080 * 16 / 9; __fireEvent("UI_SCALE_CHANGED")
-    ok(b.head.base:GetStringWidth() <= (MB.base.BOXL.w - C.HEAD_RESERVE) * K() + 1e-6, "still fits after a rescale")
+    ok(b.head.base:GetUnboundedStringWidth() <= (MB.base.BOXL.w - C.HEAD_RESERVE) * K() + 1e-6, "still fits after a rescale")
     __units.player.name = nil
 end
 
@@ -1312,7 +1429,7 @@ function T.a_rescale_to_a_larger_scale_grows_a_shrunk_name_back_to_the_new_base(
     __fireEvent("UI_SCALE_CHANGED")
     eq(b.l1._fontSize, fontFor(C.L1_SIZE), "a larger scale: the shrunk name is back at the new base size")
     eq(b.l1._text, "SEARING PAINS")
-    ok(b.l1:GetStringWidth() <= (MB.base.BOXL.w - 2 * C.PAD) * K() + 1e-6, "and it fits")
+    ok(b.l1:GetUnboundedStringWidth() <= (MB.base.BOXL.w - 2 * C.PAD) * K() + 1e-6, "and it fits")
     W.clean(); noFails()
 end
 
@@ -1346,7 +1463,7 @@ function T.the_target_bars_sit_under_line_one_at_the_option_b_offsets_at_two_hei
         local box, b = W.tgt.box, bars(W)
         ok(b, "the target box carries its bars")
         local wmax = (MB.base.BOXR.w - 2 * MB.PAD) * k
-        local want = math.min(wmax, math.max(MB.TB_MIN_W * k, box.l1:GetStringWidth()) * OLD_WIDTH_120)
+        local want = math.min(wmax, math.max(MB.TB_MIN_W * k, box.l1:GetUnboundedStringWidth()) * OLD_WIDTH_120)
         for _, r in ipairs({ b.hp.green, b.hp.red }) do
             local p = r.host._points.TOPLEFT
             eq(p.rel, box.frame); eq(p.relPoint, "TOPLEFT")
@@ -1574,17 +1691,17 @@ function T.the_bar_width_is_the_name_width_and_the_full_text_width_for_a_secret_
     local k = K()
     local wmax = (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * k
     target("Kurak")
-    near(b.hp.green.host._w, box.l1:GetStringWidth() * OLD_WIDTH_120, 1e-6, "a plain name: its measured width, scaled")
-    near(b.power.host._w, box.l1:GetStringWidth() * OLD_WIDTH_120, 1e-6, "for both rules")
+    near(b.hp.green.host._w, box.l1:GetUnboundedStringWidth() * OLD_WIDTH_120, 1e-6, "a plain name: its measured width, scaled")
+    near(b.power.host._w, box.l1:GetUnboundedStringWidth() * OLD_WIDTH_120, 1e-6, "for both rules")
     target("Al")
     near(b.hp.green.host._w, MB.TB_MIN_W * k * OLD_WIDTH_120, 1e-6, "a short name: the 24 image px floor, scaled")
     target("Archmage Antonidas the Great")
     ok(b.hp.green.host._w <= wmax + 1e-6, "a long name is fitted, and so is the bar")
-    near(b.hp.green.host._w, math.min(wmax, box.l1:GetStringWidth() * OLD_WIDTH_120), 1e-6)
+    near(b.hp.green.host._w, math.min(wmax, box.l1:GetUnboundedStringWidth() * OLD_WIDTH_120), 1e-6)
     target("Kurak")
     UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
     __fireEvent("UI_SCALE_CHANGED")
-    near(b.hp.green.host._w, box.l1:GetStringWidth() * OLD_WIDTH_120, 1e-6, "a rescale measures it again")
+    near(b.hp.green.host._w, box.l1:GetUnboundedStringWidth() * OLD_WIDTH_120, 1e-6, "a rescale measures it again")
     ok(b.hp.green.host._w < 49 * OLD_WIDTH_120, "at the smaller type")
     secretUnit(); __fireEvent("PLAYER_TARGET_CHANGED")
     near(b.hp.green.host._w, (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * K(), 1e-6, "a secret name: the full text width")
@@ -1671,7 +1788,7 @@ end
 local function pctWidth(W, pct)       -- the rule width a width setting should give, from the name width (100% is the old 120%)
     local k = K()
     local wmax = (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * k
-    return math.min(wmax, W.tgt.box.l1:GetStringWidth() * pct / 100 * OLD_WIDTH_120)
+    return math.min(wmax, W.tgt.box.l1:GetUnboundedStringWidth() * pct / 100 * OLD_WIDTH_120)
 end
 
 function T.the_settings_default_to_11_4_and_100_and_draw_the_taller_rails()
@@ -1810,7 +1927,7 @@ function T.the_default_width_draws_what_the_old_120_percent_drew_and_still_clamp
     target("Kurak")
     local b = bars(W)
     local wmax = (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * k
-    local name = W.tgt.box.l1:GetStringWidth()
+    local name = W.tgt.box.l1:GetUnboundedStringWidth()
     ok(name * OLD_WIDTH_120 < wmax, "the short name leaves room, so the clamp is not what is measured")
     near(b.hp.green.host._w, name * 1.2, 1e-6, "nothing stored: 100% is the old 120%")
     near(b.power.host._w, name * 1.2, 1e-6, "on the power rule too")
@@ -1850,7 +1967,7 @@ for _, c in ipairs({ { 120, nil }, { 150, 125 }, { 90, 75 }, { 100, 85 }, { 50, 
         eq(db.profiles.Default.settings[MIGRATED_KEY], true, "the profile is marked converted")
         if c[1] == 150 then                          -- old 150 drew 1.5 x the name; the converted 125 draws 1.25 x 1.2
             target("Kurak")
-            near(bars(W).hp.green.host._w, W.tgt.box.l1:GetStringWidth() * 1.5, 1e-6, "same rail width as the old 150%")
+            near(bars(W).hp.green.host._w, W.tgt.box.l1:GetUnboundedStringWidth() * 1.5, 1e-6, "same rail width as the old 150%")
         end
         W.clean(); noFails()
     end
@@ -2000,6 +2117,114 @@ function T.numbers_sit_inside_the_grown_box_under_the_rails_health_left_resource
     near(b.hpText._points.BOTTOMLEFT.x, C.TB_X * k, 1e-6)
     near(b.powerText._w, (MB.base.BOXR.w - 2 * C.PAD) * k / 2, 1e-6, "and the row's width")
     W.clean(); noFails()
+end
+
+
+-- ---- numbers never clip -------------------------------------------------------------------
+
+local function numHalf() return (MB.base.BOXR.w - 2 * FS.GunsightBoxes.C.PAD) * K() / 2 end
+
+function T.plain_numbers_up_to_seven_digits_never_exceed_their_half_of_the_row()
+    local W = world()
+    local C = FS.GunsightBoxes.C
+    target("Kurak")
+    local b, u = bars(W), __units.target
+    numbersOn("both")
+    for _, v in ipairs({ 208, 2084, 12345, 123456, 1234567, 9999999 }) do
+        u.hp, u.hpMax, u.pw, u.pwMax = v, v, v, v
+        allBarEvents()
+        for _, fs in ipairs({ b.hpText, b.powerText }) do
+            ok(fs:GetUnboundedStringWidth() <= numHalf() + 1e-6,
+                v .. " both: '" .. tostring(fs._text) .. "' is " .. fs:GetUnboundedStringWidth() .. ", half is " .. numHalf())
+            ok(tostring(fs._text):find("%d"), v .. ": still readable")
+        end
+    end
+    setting("numberFormat", "current")
+    for _, v in ipairs({ 208, 123456, 9999999 }) do
+        u.hp, u.pw = v, v
+        allBarEvents()
+        for _, fs in ipairs({ b.hpText, b.powerText }) do
+            ok(fs:GetUnboundedStringWidth() <= numHalf() + 1e-6, v .. " current: '" .. tostring(fs._text) .. "'")
+        end
+    end
+    W.clean(); noFails()
+end
+
+function T.large_plain_numbers_read_compactly_and_small_ones_stay_in_full()
+    local W = world()
+    target("Kurak")
+    local b, u = bars(W), __units.target
+    numbersOn("both")
+    u.hp, u.hpMax = 2084, 2084
+    allBarEvents()
+    eq(textOf(b.hpText), "2.1k/2.1k", "a four digit pair that does not fit in full goes compact")
+    u.hp, u.hpMax = 1234567, 1234567
+    allBarEvents()
+    eq(textOf(b.hpText), "1.2M/1.2M")
+    u.hp, u.hpMax = 62, 100
+    allBarEvents()
+    eq(textOf(b.hpText), "62 / 100", "a pair that fits keeps the spaced full text")
+    eq(b.hpText._fontSize, fontFor(FS.GunsightBoxes.C.NUM_SIZE), "at the normal number size")
+    W.clean(); noFails()
+end
+
+function T.a_number_that_still_overflows_shrinks_to_a_floor_and_never_below_it()
+    local W = world()
+    local C = FS.GunsightBoxes.C
+    target("Kurak")
+    local b, u = bars(W), __units.target
+    numbersOn("both")
+    __charW = 14                                        -- an absurdly wide font: even compact text overflows
+    u.hp, u.hpMax = 1234567, 1234567
+    allBarEvents()
+    local size = b.hpText._fontSize
+    ok(size < fontFor(C.NUM_SIZE), "shrunk: " .. tostring(size))
+    ok(size >= C.NUM_MIN, "not under the floor: " .. tostring(size))
+    __charW = nil
+    u.hp, u.hpMax = 62, 100
+    allBarEvents()
+    eq(b.hpText._fontSize, fontFor(C.NUM_SIZE), "back at the normal size for a short value")
+    eq(textOf(b.hpText), "62 / 100")
+    W.clean(); noFails()
+end
+
+function T.secret_numbers_go_through_abbreviate_numbers_at_a_smaller_fixed_size()
+    local W = world()
+    local C = FS.GunsightBoxes.C
+    target("Kurak")
+    local b, u = bars(W), __units.target
+    u.hp, u.hpMax, u.pw, u.pwMax = __SECRET, __SECRET, __SECRET, __SECRET
+    __abbrevCalls = {}
+    numbersOn("both")
+    eq(b.hpText._secretText, true, "the abbreviated secret reached SetFormattedText")
+    eq(b.hpText._fmt, "%s/%s", "as a compact pair")
+    ok(#__abbrevCalls > 0 and rawequal(__abbrevCalls[1], __SECRET), "AbbreviateNumbers took the secret as it was")
+    eq(b.hpText._fontSize, fontFor(C.NUM_SECRET_SIZE), "at the fixed size: a secret is never measured")
+    ok(C.NUM_SECRET_SIZE < C.NUM_SIZE)
+    setting("numberFormat", "current")
+    eq(b.hpText._fmt, "%s")
+    u.hp, u.hpMax, u.pw, u.pwMax = 62, 100, 70, 100
+    allBarEvents()
+    eq(b.hpText._fontSize, fontFor(C.NUM_SIZE), "a plain value is back at the normal size")
+    eq(textOf(b.hpText), "62")
+    W.clean(); noFails("a secret operation was swallowed by a pcall")
+end
+
+function T.secret_numbers_fall_back_to_a_raw_write_when_abbreviate_numbers_is_missing_or_refuses()
+    for _, mode in ipairs({ "missing", "refuses" }) do
+        local W = world()
+        target("Kurak")
+        local b, u = bars(W), __units.target
+        u.hp, u.hpMax, u.pw, u.pwMax = __SECRET, __SECRET, __SECRET, __SECRET
+        local saved = AbbreviateNumbers
+        if mode == "missing" then AbbreviateNumbers = nil else __abbrevThrows = true end
+        numbersOn("both")
+        eq(b.hpText._secretText, true, mode .. ": the raw secret pair still reached SetFormattedText")
+        eq(b.hpText._fmt, "%d / %d", mode .. ": in the plain format")
+        eq(countKey("gunsightboxes_target_numbers"), 0, mode .. ": not a latch")
+        AbbreviateNumbers, __abbrevThrows = saved, nil
+        W.clean(); __pcallFails = {}
+    end
 end
 
 function T.numbers_on_grow_the_box_up_and_the_divider_line_two_and_tile_keep_their_screen_seats()
@@ -2447,7 +2672,7 @@ def static_checks() -> list[tuple[str, str | None]]:
                 "GunsightBoxes.lua may only set and clear the one-shot setting flusher's OnUpdate"))
     out.append(("boxes_measure_text_in_three_places_only",
                 None if len(re.findall(r"GetStringWidth", code)) <= 4 else
-                "GetStringWidth appears outside FitLine (plain text only), the name sink's forward for CastBars and the bar width measure"))
+                "GetStringWidth appears outside PlainWidth (plain text only, the unbounded width first), the name sink's forward for CastBars"))
     return out
 
 

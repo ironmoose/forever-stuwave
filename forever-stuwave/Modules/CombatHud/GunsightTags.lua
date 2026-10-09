@@ -21,6 +21,7 @@ local C = {
     LEVEL = { dx = 1, w = 68 }, HEALTH = { dx = 4, w = 32 }, TOT = { dx = 41, w = 69 },
     RISE = 8, OVERLAP = 7,
     MIN_FONT = 6, TOT_PAD = 3,
+    FRAME_LEVEL = 6,   -- the level and health tags' frame level above the box: over the edge strokes (+1) and the bars (+1 to +3)
 }
 GunsightTags.C = C
 
@@ -60,10 +61,14 @@ local function Setting(def)
     return Config.Get(def.key) == true
 end
 
--- The KICK tag's look: a chamfered plate, a pink outline and one centred label.
+-- The KICK tag's look: a chamfered plate, a pink outline and one centred label. The tags straddle the box edge, so
+-- the plate must mask the edge line behind the text (the mockup draws them after the box): a plain tag takes its own
+-- frame level above everything the box holds, since sibling frames of equal level have no promised draw order.
+-- The secure button is left at its holder's level (a protected frame's level is not ours to set in combat).
 local function NewTag(parent, kind, name, template)
     local Theme, colors = FS.Theme, Tags.colors
     local frame = CreateFrame(kind, name, parent, template)
+    if not template then frame:SetFrameLevel(parent:GetFrameLevel() + C.FRAME_LEVEL) end
     local bg = colors.bg
     Theme.AddCut2Texture(frame, Theme.SLICE_CUT2_FILL_TEXTURE, { bg[1], bg[2], bg[3], C.FILL_A }, "BACKGROUND", 0)
     Theme.AddCut2Texture(frame, Theme.SLICE_CUT2_OUTLINE_TEXTURE, colors.pink, "BORDER")
