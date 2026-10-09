@@ -10,10 +10,13 @@ lifecycle) and the combat branch of ShowAuraTooltip. The checks pin:
     EnableMouse(true) is never called;
   * SetTipSpell stores only a plain positive number and a plain non-empty string (a secret, nil, zero or the
     wrong type clears the field), and refreshes an open tooltip when the id or name changed;
-  * SpellIDForName caches hits, caches misses only out of combat, never touches a secret or nil name;
+  * SpellIDForName caches hits, caches misses only out of combat (SPELLS_CHANGED drops the misses, out of
+    combat only, and keeps the hits), never touches a secret name or a secret result;
+  * the secret stand-ins report type() "number" / "string" and throw on arithmetic, comparison, concat and
+    indexing, so stripping an IsSecret guard fails a check (== against a plain string cannot be trapped in Lua);
   * a hovered frame that hides or loses the mouse leaves no tooltip behind; opts.gate = false shows nothing;
-  * the tooltip prefers the live aura slot, then SetSpellByID, then the cached name, and a missing or throwing
-    SetSpellByID falls back to the name;
+  * the tooltip prefers the live aura slot, then SetSpellByID, then the cached name; a stale aura slot, a
+    missing or a throwing SetSpellByID each fall through to the next;
   * ShowAuraTooltip in combat uses the cached spell id when it has one.
 
 Core/Theme.lua is NOT loaded: FS.IsSecret and FS.AurasReadable are stubs with the same contract.
@@ -43,14 +46,29 @@ IN_COMBAT = false
 READABLE = true
 SPELL_CALLS = 0
 SPELL_INFO = {}       -- name -> spellID, for C_Spell.GetSpellInfo
+SPELL_RAW = {}        -- name -> the exact value GetSpellInfo returns (overrides SPELL_INFO)
 
 function check(c, msg) if not c then error(msg or "check failed", 2) end end
 function InCombatLockdown() return IN_COMBAT end
 
--- A secret value: errors on anything but being passed along.
+-- Secret values: errors on anything but being passed along. type() is shadowed so a secret reports the
+-- type of the thing it stands in for ("number" / "string"), as in the client, where only IsSecret tells
+-- them apart. SECRET_INFO stands in for a secret table (type() says "table"; indexing it throws).
+-- Lua cannot trap == against a plain string or use as a table key; those are the two touches the mock misses.
 local function boom() error("secret value touched", 2) end
-SECRET = setmetatable({}, { __lt = boom, __le = boom, __add = boom, __sub = boom, __mul = boom, __div = boom,
-    __concat = boom, __len = boom, __unm = boom, __index = boom, __call = boom, __eq = boom })
+local function secret()
+    return setmetatable({}, { __lt = boom, __le = boom, __add = boom, __sub = boom, __mul = boom, __div = boom,
+        __mod = boom, __pow = boom, __concat = boom, __len = boom, __unm = boom, __index = boom,
+        __newindex = boom, __call = boom, __eq = boom })
+end
+SECRET_NUM, SECRET_STR, SECRET_INFO = secret(), secret(), secret()
+local realtype = type
+function type(v)
+    if rawequal(v, SECRET_NUM) then return "number" end
+    if rawequal(v, SECRET_STR) then return "string" end
+    return realtype(v)
+end
+function isSecretValue(v) return rawequal(v, SECRET_NUM) or rawequal(v, SECRET_STR) or rawequal(v, SECRET_INFO) end
 
 -- The tooltip records what it was asked to show. owner/shown/spellID/text/lines describe the current state.
 local TT = {}
@@ -58,11 +76,14 @@ GameTooltip = TT
 function TT:Reset() self.owner, self.anchor, self.shown, self.spellID, self.text, self.lines, self.aura = nil, nil, false, nil, nil, {}, nil end
 function TT:SetOwner(o, anchor) self:Reset(); self.owner, self.anchor = o, anchor end
 function TT:GetOwner() return self.owner end
+function TT:IsOwned(f) return self.owner == f end
 function TT:SetText(t) self.text = t end
 function TT:AddLine(t) self.lines[#self.lines + 1] = t end
 function TT:Show() self.shown = true end
 function TT:Hide() self.shown = false; self.owner = nil end
-function TT:SetUnitAura(unit, index, filter) self.aura = unit .. ":" .. index .. ":" .. filter; self.shown = true end
+function TT:SetUnitAura(unit, index, filter)
+    if self.auraThrows then error("stale aura slot") end
+    self.aura = unit .. ":" .. index .. ":" .. filter; self.shown = true end
 function TT:SetSpellByID(id)
     if self.throws then error("SetSpellByID refused") end
     self.spellID = id; self.shown = true
@@ -78,21 +99,25 @@ function Frame:Hide() self.hidden = true; self:Run("OnHide") end
 function Frame:EnableMouse(on) if on then error("EnableMouse(true) on a pass-through frame") end end
 function Frame:SetMouseMotionEnabled(on) self.motion = on end
 function Frame:SetMouseClickEnabled(on) self.click = on end
-function Frame:RegisterEvent() end
-function CreateFrame() return newFrame() end    -- FrameHelpers.lua makes one event frame at load
-function newFrame() return setmetatable({ hooks = {}, scripts = {} }, Frame) end
+function Frame:RegisterEvent(e) self.events[e] = true end
+CREATED = {}
+function CreateFrame() local f = newFrame(); CREATED[#CREATED + 1] = f; return f end   -- event frames made at load
+function fireEvent(e) for _, f in ipairs(CREATED) do if f.events[e] and f.scripts.OnEvent then f.scripts.OnEvent(f, e) end end end
+function newFrame() return setmetatable({ hooks = {}, scripts = {}, events = {} }, Frame) end
 """
 
 PRELUDE = r"""
 local function boot()
-    IN_COMBAT, READABLE, SPELL_CALLS, SPELL_INFO = false, true, 0, {}
-    GameTooltip.throws = nil
+    IN_COMBAT, READABLE, SPELL_CALLS, SPELL_INFO, SPELL_RAW, CREATED = false, true, 0, {}, {}, {}
+    GameTooltip.throws, GameTooltip.auraThrows = nil, nil
     GameTooltip:Reset()
     FS = { Theme = {} }
-    FS.IsSecret = function(v) return rawequal(v, SECRET) end
+    FS.IsSecret = isSecretValue
     FS.AurasReadable = function() return READABLE and not IN_COMBAT end
     C_Spell = { GetSpellInfo = function(name)
         SPELL_CALLS = SPELL_CALLS + 1
+        if isSecretValue(name) then error("secret name reached the API") end
+        if SPELL_RAW[name] ~= nil then return SPELL_RAW[name] end
         local id = SPELL_INFO[name]
         if id == nil then return nil end
         return { name = name, spellID = id }
@@ -129,7 +154,7 @@ local H = boot()
 local f = newFrame()
 H.SetTipSpell(f, 133, "Fireball")
 check(f.fsSpellID == 133 and f.fsName == "Fireball", "valid pair is written")
-H.SetTipSpell(f, SECRET, SECRET)
+H.SetTipSpell(f, SECRET_NUM, SECRET_STR)
 check(f.fsSpellID == nil and f.fsName == nil, "secret id and name clear both fields, never stored")
 H.SetTipSpell(f, 133, "Fireball")
 for _, bad in ipairs({ 0, -4, "133", {} }) do
@@ -151,7 +176,7 @@ check(SPELL_CALLS == 2, "a miss out of combat is cached, got " .. SPELL_CALLS)
 IN_COMBAT = true
 H.SpellIDForName("Later"); H.SpellIDForName("Later")
 check(SPELL_CALLS == 4, "a miss in combat is not cached (could be transient), got " .. SPELL_CALLS)
-check(H.SpellIDForName(SECRET) == nil and H.SpellIDForName(nil) == nil and H.SpellIDForName("") == nil, "bad names are nil")
+check(H.SpellIDForName(SECRET_STR) == nil and H.SpellIDForName(nil) == nil and H.SpellIDForName("") == nil, "bad names are nil")
 check(SPELL_CALLS == 4, "bad names never reach the API")
 C_Spell = nil
 GetSpellInfo = function(name) SPELL_CALLS = SPELL_CALLS + 1; return name, nil, nil, 0, 0, 0, 77 end
@@ -253,6 +278,90 @@ check(GameTooltip.spellID == 133, "hovered and changed: refreshed")
 GameTooltip.spellID = nil
 H.SetTipSpell(f, 133, "Fireball")
 check(GameTooltip.spellID == nil, "hovered and unchanged: left alone")
+""")
+
+case("set_tip_spell_secret_id_or_name_alone_clears_only_that_field")(r"""
+local H = boot()
+local f = newFrame()
+H.SetTipSpell(f, 133, "Fireball")
+H.SetTipSpell(f, SECRET_NUM, "Fireball")
+check(f.fsSpellID == nil and f.fsName == "Fireball", "secret id clears the id only")
+H.SetTipSpell(f, 133, SECRET_STR)
+check(f.fsSpellID == 133 and f.fsName == nil, "secret name clears the name only")
+""")
+
+case("set_tip_spell_over_a_secret_old_name_counts_as_changed")(r"""
+local H = boot()
+local f = newFrame()
+H.AttachSpellTooltip(f, {})
+H.SetTipSpell(f, 133, "Fireball")
+f:Run("OnEnter")
+f.fsName = SECRET_STR                      -- written by other code
+GameTooltip.spellID = nil
+H.SetTipSpell(f, 133, "Fireball")          -- must not compare the secret, must redraw
+check(f.fsName == "Fireball" and GameTooltip.spellID == 133, "secret old name is replaced and the open tooltip redrawn")
+""")
+
+case("spell_id_for_name_never_touches_a_secret_result")(r"""
+local H = boot()
+SPELL_RAW["Whole"] = SECRET_INFO
+check(H.SpellIDForName("Whole") == nil, "a secret info table is a miss, never indexed")
+SPELL_RAW["Field"] = { spellID = SECRET_NUM }
+check(H.SpellIDForName("Field") == nil, "a secret spellID is a miss, never compared")
+SPELL_RAW["Bad"] = { spellID = -1 }
+check(H.SpellIDForName("Bad") == nil, "a non-positive spellID is a miss")
+""")
+
+case("spells_changed_wipes_cached_misses_but_keeps_hits")(r"""
+local H = boot()
+SPELL_INFO["Fireball"] = 133
+check(H.SpellIDForName("Fireball") == 133 and H.SpellIDForName("Later") == nil, "setup: a hit and a miss cached")
+check(SPELL_CALLS == 2, "setup calls")
+SPELL_INFO["Later"] = 999                  -- learned since
+check(H.SpellIDForName("Later") == nil, "the miss is still cached")
+IN_COMBAT = true
+fireEvent("SPELLS_CHANGED")
+IN_COMBAT = false
+check(H.SpellIDForName("Later") == nil, "no wipe in combat")
+fireEvent("SPELLS_CHANGED")
+check(H.SpellIDForName("Later") == 999, "the miss is retried after SPELLS_CHANGED")
+local before = SPELL_CALLS
+check(H.SpellIDForName("Fireball") == 133 and SPELL_CALLS == before, "the hit survives the wipe")
+""")
+
+case("stale_aura_slot_falls_through_to_the_cached_spell")(r"""
+local H = boot()
+local f = newFrame()
+f.unit, f.auraIndex, f.filter = "player", 3, "HELPFUL"
+H.AttachSpellTooltip(f, {})
+H.SetTipSpell(f, 133, "Fireball")
+GameTooltip.auraThrows = true              -- the slot no longer holds this aura
+f:Run("OnEnter")
+check(GameTooltip.spellID == 133 and GameTooltip.shown, "falls through to the cached spell id")
+f:Run("OnLeave")
+H.SetTipSpell(f, nil, "Fireball")
+f:Run("OnEnter")
+check(GameTooltip.text == "Fireball" and GameTooltip.shown, "then to the cached name")
+f:Run("OnLeave")
+H.SetTipSpell(f, nil, nil)
+f:Run("OnEnter")
+check(not GameTooltip.shown, "nothing cached: hidden")
+""")
+
+case("refresh_leaves_a_tooltip_owned_by_another_frame_alone")(r"""
+local H = boot()
+local f, other = newFrame(), newFrame()
+H.AttachSpellTooltip(f, {})
+H.SetTipSpell(f, 133, "Fireball")
+f:Run("OnEnter")
+GameTooltip:SetOwner(other, "ANCHOR_TOP"); GameTooltip:Show()
+H.SetTipSpell(f, 134, "Frostbolt")         -- changed and hovered, but not the owner
+check(GameTooltip.owner == other and GameTooltip.spellID == nil, "no redraw over another owner")
+GameTooltip.IsOwned = nil                  -- a client without IsOwned falls back to GetOwner
+H.SetTipSpell(f, 135, "Pyroblast")
+check(GameTooltip.owner == other and GameTooltip.spellID == nil, "GetOwner fallback agrees")
+f:Run("OnLeave")
+check(GameTooltip.shown and GameTooltip.owner == other, "leave leaves it alone too")
 """)
 
 case("show_aura_tooltip_combat_branch_uses_the_cached_spell_id")(r"""
