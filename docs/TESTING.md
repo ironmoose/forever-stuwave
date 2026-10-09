@@ -149,8 +149,8 @@ Out of combat for the editing; the tooltip itself follows in combat too.
 Safe in combat. Esc, the X, or `/fsconfig` again closes it; with a menu or confirm box open, Esc closes only that. `/fsconfig profiles` opens a page directly.
 
 1. Unit Frames: turn "Hide player frame" on. The player frame goes invisible and click-through at once (in combat it waits until combat ends). Turn it off again, then do the same for the target frame.
-2. Gunsight HUD: switch "Your cast bar" off, then on. The piece fades with the console key light following. Check each piece the same way: Your cast bar, Target cast bar, Target side areas, Soul shards, Proc posts, Buff reminders, Party frames, and under Player side My buffs and Next cast. `/fsgun piece shard off` must flip the same switch while the window is open.
-3. Gunsight HUD master switch: turn it off, `/reload`, and no Gunsight piece builds. Turn it back on and `/reload`.
+2. Gunsight HUD: switch "Your cast bar" off, then on. The piece fades with the console key light following. Check each piece the same way: Your cast bar, Target cast bar, Target side areas, Soul shards, Proc posts, Buff reminders, Party frames, and under Player side Next cast. `/fsgun piece shard off` must flip the same switch while the window is open.
+3. Gunsight HUD master switch (not yet checked in game; mocked checks only): turn it off with a spell cast in progress. The whole Gunsight HUD disappears at once and the standard player and target cast bars (the pair below the character) take over, showing that cast. A "Reload to restore the classic HUD" line with a Reload button appears on the row; the classic combat HUD itself only returns after `/reload`. Turn it on: the HUD and its cast bars return and the standard pair goes quiet. Never two player cast bars, never none. Repeat the toggle several times, and once during combat: in combat the HUD fades by alpha and the final hide lands when combat ends. Log in with the master switch off and turn it on: the row asks for a `/reload` to build the HUD. `/fsedit` lists "Player cast bar" and "Target cast bar" handles only while the Gunsight is off.
 4. Profiles: type a name under "New profile". It is created and switched to. Switch between profiles with "Profile in use": every switch in the other pages and every Gunsight piece follows. "This character" shows your name and realm.
 5. Rename and Delete: Rename is off on Default. Delete lists only profiles that are neither Default nor the active one, and asks before deleting. "Copy from..." and "Reset profile" also ask first.
 6. Hover each small ? icon: the explanation shows in the addon's tooltip. No settings text mentions the word "tape".
@@ -172,9 +172,9 @@ Not yet checked in game. Mocked checks cover the sizes, the secret-safe numbers 
 
 Not yet checked in game. Mocked checks cover which module sits in which area, the swap rule and the combat rules, not how it looks. Beside the target cast bar the horizon line splits two areas: upper (Target Debuffs Horizontal by default) and lower (Class Module by default). The design is `mockups/gunsight-modules-concepts-v7-2026-10-08.html`.
 
-1. Open /fsconfig, Gunsight HUD. The page starts with Target side (Upper area, Lower area), then Target box tags, then Player side (My buffs, Next cast). Each group header has a ? icon; Target side's says Target debuffs shows only the debuffs you applied and the Class Module shows your class's own resource.
+1. Open /fsconfig, Gunsight HUD. The page starts with Target side (Upper area, Lower area), then Target box tags, then Player side (Next cast only; My buffs is deferred to the next release). Each group header has a ? icon; Target side's says Target debuffs shows only the debuffs you applied and the Class Module shows your class's own resource.
 2. Each area dropdown offers Target Debuffs Horizontal, Target Debuffs Vertical, Class Module, Empty, in that order. Pick Class Module for the upper area: the lower area takes Target Debuffs Horizontal at once (the swap), and both modules move on screen. Pick Target Debuffs Vertical for the lower area while the upper holds the Class Module: no swap, the lower area changes style.
-3. Pick Empty for an area: nothing draws there, no outline either (only `/fsgun debug` outlines the areas). Both areas Empty with the tags and My buffs off should look like the box did before this change.
+3. Pick Empty for an area: nothing draws there, no outline either (only `/fsgun debug` outlines the areas). Both areas Empty with the tags off should look like the box did before this change.
 4. Switch "Target side areas" in the Pieces list off, or press the Console's key 6: both areas hide together. The key now shows for every class, including one with no class module yet (a Mage shows Target debuffs only).
 5. With no target, or a friendly or dead one, the Target Debuffs area is hidden; the Class Module stays. Retarget a hostile mob and it returns.
 6. Switch profile, then `/reload`: both dropdowns and the modules in the areas hold per profile. Do it once in combat: the areas are plain frames and nothing is blocked.
@@ -288,7 +288,9 @@ Not yet checked in game. With numbers off the target box is exactly as before.
 3. Check "Current / max" with a large health pool: a long value is cut at the half row, not run into the other number. Say if it overlaps or looks too tight.
 4. Toggle numbers during combat: the box grows at once and nothing is blocked.
 
-## My buffs: /fsconfig, Gunsight HUD page
+## My buffs: DEFERRED to the next release, skip these steps
+
+The plate is hidden behind `FS.Features.myBuffs` (false by default, set at the top of `GunsightMyBuffs.lua`), and the My buffs row is not in /fsconfig. Do not test it this release; the steps stay for when the flag goes on. Nothing of it shows in game, and a saved "on" setting does nothing.
 
 Not yet checked in game. Mocked checks cover the seats, the order, the pip rule and the combat rule, not how it looks. The plate sits outboard of the Next cast tile; the switch is My buffs under Player side. A buff you gave yourself has no pip; a buff cast by a party or raid member has a cyan pip.
 

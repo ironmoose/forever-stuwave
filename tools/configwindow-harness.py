@@ -725,7 +725,11 @@ function T.every_gunsight_piece_has_a_label_and_a_row()
     eq(#FS.Gunsight.PIECES, 9)
     for _, key in ipairs(FS.Gunsight.PIECES) do
         yes(PIECE_LABELS[key], "no label for piece " .. key)
-        yes(row(PIECE_LABELS[key]), "no row for " .. key)
+        if key == "mybuffs" then
+            no(row(PIECE_LABELS[key]), "My buffs is deferred: no row in a release build")
+        else
+            yes(row(PIECE_LABELS[key]), "no row for " .. key)
+        end
     end
     yes(row("Gunsight HUD"), "master toggle")
     yes(hasText(win(), "PIECES"), "section header")
@@ -902,6 +906,8 @@ local function withTags()
     } }
     for _, key in pairs(TAG_KEYS) do FS.Config.RegisterDefault(key, true) end
 end
+-- My buffs ships behind FS.Features.myBuffs (false in a release build: no row). Cases about the row switch it on before the window builds.
+local function withTagsAndMyBuffs() withTags(); FS.Features = { myBuffs = true } end
 local function yOf(label) return -row(label).points[1].y end
 local function headerY(text)
     for _, o in ipairs(ALL) do
@@ -927,7 +933,7 @@ local function menuTexts()
 end
 
 function T.the_gunsight_page_has_the_three_target_and_player_groups_in_the_mockups_order()
-    local W = boot({ preWindow = withTags })
+    local W = boot({ preWindow = withTagsAndMyBuffs })
     W.Open("gunsight")
     local order = {
         headerY("TARGET SIDE"), yOf("Upper area"), yOf("Lower area"),
@@ -937,6 +943,17 @@ function T.the_gunsight_page_has_the_three_target_and_player_groups_in_the_mocku
     for i = 1, #order do yes(order[i], "missing row or header number " .. i) end
     for i = 2, #order do yes(order[i] > order[i - 1], "order broken at item " .. i) end
     yes(headerY("PIECES") > order[#order], "the pieces list follows the new groups")
+end
+
+function T.in_a_release_build_my_buffs_has_no_row_and_player_side_keeps_next_cast()
+    local W = boot({ preWindow = withTags })
+    eq(FS.Features and FS.Features.myBuffs, nil, "the flag is not switched on")
+    W.Open("gunsight")
+    no(row("My buffs"), "no My buffs row")
+    no(hasText(win(), "My buffs"), "no My buffs text anywhere on the page")
+    yes(headerY("PLAYER SIDE") and yOf("Next cast") > headerY("PLAYER SIDE"), "Player side still holds Next cast")
+    yes(row("Next cast").control.fsChecked, "Next cast defaults on")
+    eq(FS.Gunsight.IsPieceOn("mybuffs"), true, "a saved true setting is harmless")
 end
 
 function T.next_cast_moved_out_of_the_pieces_list()
@@ -951,7 +968,7 @@ function T.next_cast_moved_out_of_the_pieces_list()
 end
 
 function T.player_side_toggles_write_their_piece_keys()
-    local W = boot({ preWindow = withTags })
+    local W = boot({ preWindow = withTagsAndMyBuffs })
     W.Open("gunsight")
     yes(row("My buffs").control.fsChecked and row("Next cast").control.fsChecked, "both default on")
     press("My buffs")
@@ -979,7 +996,7 @@ function T.the_tags_group_is_absent_without_the_tags_module()
     W.Open("gunsight")
     no(row("Level and class"), "no tag rows without FS.GunsightTags")
     no(hasText(win(), "TARGET BOX TAGS"), "no tags header")
-    yes(row("Upper area") and row("My buffs"), "the other groups still build")
+    yes(row("Upper area") and row("Next cast"), "the other groups still build")
 end
 
 function T.the_area_dropdowns_show_the_default_labels_and_list_the_four_modules_in_order()

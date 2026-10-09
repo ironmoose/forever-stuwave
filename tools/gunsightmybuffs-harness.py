@@ -750,6 +750,25 @@ function T.a_rescale_reseats_in_place_and_builds_nothing()
     W.clean(); noFails()
 end
 
+function T.in_a_release_build_the_deferred_plate_is_never_built_shown_or_logged()
+    __myBuffsFlag = "release"
+    local W = world()
+    eq(FS.Features.myBuffs, false, "the release default is off")
+    eq(W.Gun.IsEnabled(), true, "the rest of the Gunsight is up")
+    eq(My(), nil, "the module did not install")
+    snapshot(aura(1, 60))
+    W.clean()
+    eq(#__degrades, 0, "no log")
+    eq(#__printed, 0, "no chat line")
+    eq(find(function(o) return o._name == "ForeverSTUwaveGunsightMyBuffs" end), nil, "no plate frame")
+    eq(__countOnUpdates(), 0, "no ticker")
+    eq(W.Gun.IsPieceOn("mybuffs"), true, "a saved true setting stays harmless")
+    W.Gun.SetPiece("mybuffs", false, true)
+    W.Gun.SetPiece("mybuffs", true, true)
+    __myBuffsFlag = nil
+    noFails()
+end
+
 function T.with_the_gunsight_off_nothing_is_built_logged_or_ticking()
     local W = world({ db = { gunsight = { enabled = false } } })
     eq(W.Gun.IsEnabled(), false)
@@ -788,6 +807,8 @@ def static_checks() -> list[tuple[str, str | None]]:
     except ValueError as e:
         out.append(("toc_order", f"{e}"))
     src = MYBUFFS.read_text(encoding="utf-8") if MYBUFFS.exists() else ""
+    out.append(("release_flag_defaults_off", None if "if FS.Features.myBuffs == nil then FS.Features.myBuffs = false end" in src else
+                "GunsightMyBuffs.lua must default FS.Features.myBuffs to false for this release"))
     code = "\n".join(ln.split("--", 1)[0] for ln in src.splitlines())
     reads = [n for n in ("UnitAura", "UnitBuff", "C_UnitAuras", "GetPlayerAuraBySpellID") if n in code]
     out.append(("mybuffs_never_reads_auras_itself", None if not reads else
@@ -843,6 +864,10 @@ def checks_source() -> str:
         needle,
         '__load("Modules/CombatHud/GunsightBoxes.lua", __boxSrc)\n    ' + needle +
         '\n    __load("Core/FrameHelpers.lua", __helpersSrc)' +
+        # The plate ships behind FS.Features.myBuffs (false by default); this harness forces it on so the code does not rot,
+        # except where a case sets __myBuffsFlag = "release" to load the file as a release build does.
+        '\n    FS.Features = FS.Features or {}' +
+        '\n    if __myBuffsFlag ~= "release" then FS.Features.myBuffs = true end' +
         '\n    __load("Modules/CombatHud/GunsightMyBuffs.lua", __myBuffsSrc)')
     return patched + CHECKS_BODY
 
