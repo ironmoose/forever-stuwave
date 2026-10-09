@@ -189,6 +189,8 @@ end
 -- A pip is its resting diamond and outline (the unlit look) with a StatusBar of each over them: the bar for pip i
 -- spans i - 1 to i and is fed the point count, so the ENGINE fills it when the count reaches i and Lua never
 -- compares a count (it may be secret). The bar alpha is the one that composites with the resting alpha to the lit look.
+-- The plate has five slots by design: a count above 5 displays as 5 (RefreshCombo clamps a plain count to MAX_PIPS,
+-- and no pip bar reaches past slot 5 for a secret one).
 local function LitOverRest(look) return (look.lit - look.off) / (1 - look.off) end
 
 local function NewPipBar(i, tex, look, level)
@@ -301,11 +303,24 @@ local function RefreshCombo()
     Paint(n)
 end
 
+-- A target switch fires before UnitPower reflects the new target's points (they are per target), so the count is read
+-- once more a frame later; one pending re-read at most.
+local rereadQueued = false
+local function RereadNextFrame()
+    if rereadQueued or not (C_Timer and C_Timer.After) then return end
+    rereadQueued = true
+    C_Timer.After(0, function()
+        rereadQueued = false
+        RefreshCombo()
+    end)
+end
+
 local function OnComboEvent(_, event, unit, token)
     local ofUnit = event ~= "PLAYER_TARGET_CHANGED" and event ~= "UPDATE_SHAPESHIFT_FORM"
     if ofUnit and not IsSecret(unit) and unit ~= "player" then return end
     if POWER_EVENTS[event] and not IsSecret(token) and token ~= nil and token ~= "COMBO_POINTS" then return end
     RefreshCombo()
+    if event == "PLAYER_TARGET_CHANGED" then RereadNextFrame() end
 end
 
 local function SetComboEvents(on)

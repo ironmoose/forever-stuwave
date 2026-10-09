@@ -189,7 +189,10 @@ do
     function engineLit(bar)
         local v = bar.value
         if v == SECRET then v = ENGINE_SECRET end
-        return v >= bar.max
+        -- the engine draws (v - min) / (max - min) of the bar: a pip is lit or empty, never a sliver
+        local frac = math.max(0, math.min(1, (v - bar.min) / (bar.max - bar.min)))
+        if frac > 0 and frac < 1 then error("a pip bar is part filled (" .. frac .. "): min " .. bar.min .. " max " .. bar.max .. " value " .. v, 2) end
+        return frac >= 1
     end
 end
 -- The client refuses an event it does not know: Frame:RegisterEvent() throws. Once a case mounts the module
@@ -247,9 +250,18 @@ end
 
 COMBO, COMBO_MAX, FORM_POWER = 0, 5, { 3, "ENERGY" }
 COMBO_ARGS = {}
+-- C_Timer.After callbacks wait for flushTimers (the next frame), so a test can change the world in between.
+TIMERS = {}
+C_Timer = { After = function(_, fn) TIMERS[#TIMERS + 1] = fn end }
+function flushTimers()
+    local q = TIMERS
+    TIMERS = {}
+    for _, fn in ipairs(q) do fn() end
+end
 local function boot(opts)
     opts = opts or {}
     STRICT_EVENTS = false
+    TIMERS = {}
     resetKnownEvents()
     resetWorld()
     SetScreen(opts.height or 1440)
@@ -540,6 +552,9 @@ for i = 1, 5 do
     local a, ra = bars[i].fillTex.vertex[4], rbars[i].fillTex.vertex[4]
     near3(f.vertex[4] + a * (1 - f.vertex[4]), MU.PIP_FILL_LIT, "pip " .. i .. " lit fill composites to the mockup alpha")
     near3(rings[i].vertex[4] + ra * (1 - rings[i].vertex[4]), MU.PIP_STROKE_LIT, "pip " .. i .. " lit outline composites to the mockup alpha")
+    near3(f.vertex[4] + a * (1 - f.vertex[4]), 0.9, "pip " .. i .. " lit fill composites to 0.9")
+    near3(rings[i].vertex[4] + ra * (1 - rings[i].vertex[4]), 1, "pip " .. i .. " lit outline composites to 1.0")
+    near3(ra, 1, "pip " .. i .. " outline bar is fully opaque")
     check(bars[i].min == i - 1 and bars[i].max == i and rbars[i].min == i - 1 and rbars[i].max == i, "pip " .. i .. " fills over " .. (i - 1) .. " to " .. i)
     if engineLit(bars[i]) and engineLit(rbars[i]) then lit = lit + 1 end
 end
@@ -587,6 +602,32 @@ colorIs(textOf(host, "5").textColor, FS.Theme.COLOR_TEXT_WHITE, "a held count is
 COMBO = 2
 fire("UNIT_MAXPOWER", "player", "COMBO_POINTS")
 check(textOf(host, "2") and litCount(host) == 2, "a max power change repaints")
+""")
+
+case("combo_module_rereads_a_frame_after_a_target_switch")(r"""
+boot({ class = "ROGUE", combo = 4 })
+local spec, host = mount("lower")
+check(litCount(host) == 4, "four points on the old target")
+-- the switch to a fresh mob: UnitPower still holds the old target's 4 when the event fires, 0 a frame later
+fire("PLAYER_TARGET_CHANGED")
+check(litCount(host) == 4, "the event itself still reads the stale 4")
+check(#TIMERS == 1, "one re-read queued, got " .. #TIMERS)
+fire("PLAYER_TARGET_CHANGED")
+check(#TIMERS == 1, "a second switch in the same frame does not stack a re-read, got " .. #TIMERS)
+COMBO = 0
+flushTimers()
+check(litCount(host) == 0 and textOf(host, "0"), "a frame later the fresh mob shows 0, got " .. litCount(host) .. " lit")
+fire("PLAYER_TARGET_CHANGED")
+check(#TIMERS == 1, "a later switch queues again, got " .. #TIMERS)
+spec.onHide("lower")
+COMBO = 3
+flushTimers()
+check(textOf(host, "3") == nil, "a re-read after the module hid draws nothing")
+-- counts above the plate's five slots display as five
+spec.onShow("lower")
+COMBO = 7
+fire("UNIT_POWER_UPDATE", "player", "COMBO_POINTS")
+check(litCount(host) == 5 and textOf(host, "5"), "seven points show as five, got " .. litCount(host))
 """)
 
 case("combo_module_registers_only_events_this_client_has_and_logs_nothing")(r"""
