@@ -1,11 +1,15 @@
 -- Forever STUwave: Gunsight "mybuffs" piece, a flank plate of up to four of the player's buffs outboard of the next cast tile, the time left under each and a cyan pip on a buff cast by a party or raid member.
 -- It reads only the FS.PlayerAuras snapshot (plain values, frozen in combat), so in combat the time left is extrapolated from the stored expiry.
+-- Hovering a tile shows the standard buff tooltip through FrameHelpers.ShowAuraTooltip (the snapshot slot, the cached name in combat);
+-- only the tiles take the mouse, never the plate. The plate's size is Gunsight.lua's MYBUFFS (one tunable, the tile edge).
 -- Tiles keep the snapshot's slot order; sorting by time left would shuffle them as the clocks tick.
 
 local _, FS = ...
 
 local Gunsight = FS.Gunsight
 if type(Gunsight) ~= "table" or type(Gunsight.OnReady) ~= "function" then return end
+local M = Gunsight.G and Gunsight.G.MYBUFFS
+if type(M) ~= "table" then return end
 
 local GunsightMyBuffs = {}
 FS.GunsightMyBuffs = GunsightMyBuffs
@@ -13,15 +17,17 @@ FS.GunsightMyBuffs = GunsightMyBuffs
 local ui = Gunsight.ui
 local IsSecret = FS.IsSecret or function() return false end
 
--- Mockup buffs() (gunsight-modules-concepts-v7): image px. TILE_DX / TILE_DY seat a tile from the plate's top left,
--- TEXT_DX is the time text's centre from the tile's left, PIP_DX / PIP_DY the pip's centre from the tile's top left.
+-- Image px. The size comes from Gunsight.lua's MYBUFFS (M): the plate rect, the tile edge, the pitch, the padding, the time's
+-- size and baseline. The rest is the mockup's buffs() (gunsight-modules-concepts-v7): cut, fill, stroke, pip.
+-- TILE_DX / TILE_DY seat a tile from the plate's top left, TEXT_DX is the time text's centre from the tile's left, PIP_DX / PIP_DY
+-- the pip's centre from the tile's top left (the tile's right edge, just under its top).
 local C = {
-    X = 498, Y = 424, W = 164, H = 56, CHAMFER = 6,
+    X = M.x, Y = M.y, W = M.w, H = M.h, CHAMFER = 6,
     FILL = { 13 / 255, 6 / 255, 32 / 255, 0.7 }, STROKE_A = 0.75,
-    MAX = 4, TILE = 24, PITCH = 38, TILE_DX = 10, TILE_DY = 6,
+    MAX = M.max, TILE = M.tile, PITCH = M.pitch, TILE_DX = M.padX, TILE_DY = M.padY,
     TILE_FILL_A = 0.9, TILE_INSET = 2, ICON_CROP = 0.08,
-    PIP_DX = 24, PIP_DY = 2, PIP_R = 3.2, PIP_RING = 1,
-    TEXT_DX = 12, TEXT_Y = 46, TEXT_SIZE = 12, DESCENT = 0.22,
+    PIP_DX = M.tile, PIP_DY = 2, PIP_R = 3.2, PIP_RING = 1,
+    TEXT_DX = M.tile / 2, TEXT_Y = M.textY, TEXT_SIZE = M.textSize, DESCENT = 0.22,
     TICK = 0.5, MIN_FONT = 6,
 }
 GunsightMyBuffs.C = C
@@ -74,7 +80,30 @@ local function FromGroupMember(aura)
     return result
 end
 
-local function PaintTile(tile, aura, remaining)
+-- Mouseover: the standard aura tooltip. ShowAuraTooltip asks the client to render it from the slot (SetUnitAura), or in combat, where
+-- that is an aura read the client refuses, shows the cached name and a "Details unavailable in combat." line. Any throw hides it.
+local function TileEnter(self)
+    local helpers = FS.FrameHelpers
+    if not (GameTooltip and helpers and helpers.ShowAuraTooltip) then return end
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    if not pcall(helpers.ShowAuraTooltip, self) then GameTooltip:Hide() end
+end
+
+local function TileLeave(self)
+    if GameTooltip then GameTooltip:Hide() end
+end
+
+-- A tile that hides (or whose plate does) under the cursor gets no OnLeave, so its tooltip is taken down here.
+local function ReleaseTip(frame)
+    if GameTooltip and GameTooltip.GetOwner and GameTooltip:GetOwner() == frame then GameTooltip:Hide() end
+end
+
+-- The fields FrameHelpers.ShowAuraTooltip reads off a tile: the player's HELPFUL slot (the snapshot position is the slot) and the
+-- cached name for combat. A secret or odd name is dropped, so the combat tooltip shows nothing rather than a value it may not touch.
+local function PaintTile(tile, aura, remaining, slot)
+    tile.frame.auraIndex = slot
+    local name = aura.name
+    tile.frame.fsName = (not IsSecret(name) and type(name) == "string") and name or nil
     if tile.iconKey ~= aura.icon then
         tile.iconKey = aura.icon
         tile.icon:SetTexture(aura.icon)
@@ -106,12 +135,15 @@ local function Refresh()
             if type(expires) == "number" and expires > 0 then remaining = expires - now end
             if remaining == nil or remaining > 0 then
                 shown = shown + 1
-                PaintTile(state.tiles[shown], aura, remaining)
+                PaintTile(state.tiles[shown], aura, remaining, i)
                 if shown == C.MAX then break end
             end
         end
     end
-    for i = shown + 1, C.MAX do state.tiles[i].frame:Hide() end
+    for i = shown + 1, C.MAX do
+        ReleaseTip(state.tiles[i].frame)
+        state.tiles[i].frame:Hide()
+    end
     body:SetShown(shown > 0)
 end
 
@@ -142,6 +174,10 @@ end
 local function BuildTile(body)
     local tile = {}
     local frame = CreateFrame("Frame", nil, body)
+    frame.unit, frame.filter = "player", "HELPFUL"
+    frame:EnableMouse(true)
+    frame:SetScript("OnEnter", TileEnter)
+    frame:SetScript("OnLeave", TileLeave)
     Theme.AddCut2Texture(frame, Theme.SLICE_CUT2_FILL_TEXTURE,
         { colors.bg[1], colors.bg[2], colors.bg[3], C.TILE_FILL_A }, "BACKGROUND", 0)
     tile.icon = frame:CreateTexture(nil, "ARTWORK")
@@ -217,7 +253,11 @@ local function Build()
         Guard(Refresh)
     end)
 
-    Gunsight.RegisterPiece("mybuffs", { frame = plate, onShow = function() Guard(Refresh) end })
+    Gunsight.RegisterPiece("mybuffs", {
+        frame = plate,
+        onShow = function() Guard(Refresh) end,
+        onHide = function() for _, tile in ipairs(state.tiles) do ReleaseTip(tile.frame) end end,
+    })
     Guard(Refresh)
     if FS.Layout and FS.Layout.OnRescale then
         FS.Layout.OnRescale(function()

@@ -148,6 +148,8 @@ def expected_rects(mu: dict) -> dict:
         "horizon": (tl["x1"] + mu["HZ_PAD_L"], mu["CY"], (mu["DOT_AX"] - mu["HZ_PAD_R"]) - (tl["x1"] + mu["HZ_PAD_L"]), 0),
         "areaU": (mu["AREA_X"], mu["AREA_UY"], mu["AREA_W"], mu["AREA_H"]),
         "areaL": (mu["AREA_X"], mu["AREA_LY"], mu["AREA_W"], mu["AREA_H"]),
+        # The My buffs plate is sized from one tunable (MYBUFFS.tile), not from the mockup's 164 x 56; the anchor test
+        # reads the rect off G.MYBUFFS and pin_mybuffs_plate_stays_inside_the_mockups checks it against the mockup.
         "mybuffs": (mu["MYB_X"], mu["MYB_Y"], mu["MYB_W"], mu["MYB_H"]),
     }
 
@@ -505,8 +507,13 @@ eq(G.HZ_PAD_L, MU.HZ_PAD_L, "horizon left pad"); eq(G.HZ_PAD_R, MU.HZ_PAD_R, "ho
 eq(G.PROC_BASE, MU.PROC_BASE, "proc half base"); eq(G.PROC_GROW, MU.PROC_GROW, "proc half growth"); eq(G.PROC_TICK, MU.PROC_TICK, "proc tick")
 eq(G.AREA.x, MU.AREA_X, "area x"); eq(G.AREA.w, MU.AREA_W, "area width"); eq(G.AREA.h, MU.AREA_H, "area height")
 eq(G.AREA.upperY, MU.AREA_UY, "upper area y"); eq(G.AREA.lowerY, MU.AREA_LY, "lower area y")
-eq(G.MYBUFFS.x, MU.MYB_X, "My buffs plate x"); eq(G.MYBUFFS.y, MU.MYB_Y, "My buffs plate y")
-eq(G.MYBUFFS.w, MU.MYB_W, "My buffs plate width"); eq(G.MYBUFFS.h, MU.MYB_H, "My buffs plate height")
+-- My buffs: the plate is smaller than the mockup's (playtest 2026-10-08), sized from MYBUFFS.tile; it keeps the
+-- mockup's right edge (the gap short of the next cast tile) and its vertical centre (the info boxes' band).
+local MB = G.MYBUFFS
+check(MB.w < MU.MYB_W and MB.h < MU.MYB_H, "My buffs plate is smaller than the mockup's " .. MU.MYB_W .. " x " .. MU.MYB_H)
+near(MB.x + MB.w, MU.MYB_X + MU.MYB_W, "My buffs plate right edge")
+near(MB.y + MB.h / 2, MU.MYB_Y + MU.MYB_H / 2, "My buffs plate vertical centre")
+check(MB.tile > 0 and MB.tile < MB.pitch, "My buffs tile and pitch")
 eq(MU.W * G.GRID, FS.Layout.DESIGN_W, "image width * 1.28 is the design width")
 eq(MU.H * G.GRID, FS.Layout.DESIGN_H, "image height * 1.28 is the design height")
 """)
@@ -650,6 +657,7 @@ local bad = {}
 for name, e in pairs(EXPECT) do
     local a = Gs.anchors[name]
     check(a, "anchor " .. name .. " is missing")
+    if name == "mybuffs" then local M = Gs.G.MYBUFFS; e = { M.x, M.y, M.w, M.h } end
     -- Straight from the mockup arithmetic: image px from the canvas centre, no root involved.
     local el = (e[1] - MU.W / 2) * gridUi
     local et = -(e[2] - MU.H / 2) * gridUi

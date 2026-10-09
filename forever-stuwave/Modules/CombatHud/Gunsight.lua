@@ -61,7 +61,24 @@ local HZ_PAD_L, HZ_PAD_R = 2, 12                    -- horizon: TL.x1 + 2 ... DO
 local PROC_BASE, PROC_GROW, PROC_TICK = 16, 54, 7   -- drawProc: half = 16 + q*54, tick 7 long
 
 local AREA = { x = 1213, w = 202, h = 128, upperY = 500, lowerY = 632 }   -- emptySlot(500|632, 128): the two target side areas
-local MYBUFFS = { x = 498, y = 424, w = 164, h = 56 }                       -- buffs(): x0 = 498, w = 164, plate 424 + 56
+-- My buffs flank plate. The mockup's buffs() draws it 164 x 56 with 24 px tiles (x0 = 498, y = 424); playtest on 2026-10-08
+-- found that large. It is now sized from ONE tunable, MYB_TILE: the Target Debuffs row chip (dotsH chipIcon, 20 px). The width,
+-- height, pitch, padding and time baseline all follow from it. The plate keeps the mockup's right edge (the gap short of the
+-- next cast tile) and its vertical centre (the info boxes' band, where the next tile sits). Time text is the Target Debuffs
+-- time size (dotsH txt, 13).
+local MYB_FULL = { x = 498, y = 424, w = 164, h = 56 }                       -- buffs(): x0 = 498, w = 164, plate 424 + 56
+local MYB_TILE = 20                                                          -- THE tunable: tile edge in image px
+local MYB_MAX, MYB_GAP, MYB_PAD_X, MYB_PAD_Y = 4, 8, 6, 4                    -- tiles, gap between tiles, side and top padding
+local MYB_LABEL_GAP, MYB_TEXT, MYB_CAP, MYB_PAD_BOTTOM = 3, 13, 0.72, 5      -- tile to time, time size, digit height / size, below the digits
+local MYB_PITCH = MYB_TILE + MYB_GAP
+local MYB_W = 2 * MYB_PAD_X + (MYB_MAX - 1) * MYB_PITCH + MYB_TILE
+local MYB_TEXT_Y = MYB_PAD_Y + MYB_TILE + MYB_LABEL_GAP + MYB_CAP * MYB_TEXT  -- the time's baseline from the plate top
+local MYB_H = MYB_TEXT_Y + MYB_PAD_BOTTOM
+local MYBUFFS = {
+    x = MYB_FULL.x + MYB_FULL.w - MYB_W, y = MYB_FULL.y + (MYB_FULL.h - MYB_H) / 2, w = MYB_W, h = MYB_H,
+    tile = MYB_TILE, max = MYB_MAX, pitch = MYB_PITCH, padX = MYB_PAD_X, padY = MYB_PAD_Y,
+    textSize = MYB_TEXT, textY = MYB_TEXT_Y,
+}
 
 local PIECE_KEYS = { "you", "next", "shard", "buff", "tgt", "dot", "prc", "party", "mybuffs" }
 local FADE_SECONDS = 0.25
