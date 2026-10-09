@@ -2,22 +2,28 @@
 """Runs the real GunsightMyBuffs.lua (the My buffs flank plate of the Gunsight HUD) headless against a mock WoW API.
 
 GunsightMyBuffs.lua draws the concept B plate of mockups/gunsight-modules-concepts-v7-2026-10-08.html (buffs()): a
-164 x 56 plate outboard of the next cast tile with up to four of the player's buffs as 24 px cut tiles, the time
-left under each and a cyan pip when a party or raid member cast the buff. This harness reuses the gunsighttags
+plate outboard of the next cast tile with up to four of the player's buffs as cut tiles, the time left under each and
+a cyan pip when a party or raid member cast the buff. The mockup draws it 164 x 56 with 24 px tiles; playtest found
+that large, so the plate is sized from ONE tunable (Gunsight.lua's MYBUFFS tile, the Target Debuffs row chip) and
+only has to stay no larger than the mockup. This harness reuses the gunsighttags
 world (REAL CastBars.lua, ChevronCastBar.lua, Layout.lua, Config.lua, Gunsight.lua, GunsightBoxes.lua and
 GunsightTape.lua, plus the secure frame mock) and adds the real GunsightMyBuffs.lua over a stand-in
 FS.PlayerAuras (Buffs.lua is not loaded). It pins:
 
-  * constants: plate rect and cut, fill and stroke alpha, tile size, pitch and offsets, the pip and the time text,
-    all parsed back out of the mockup;
-  * seats: the plate fills the "mybuffs" anchor (the numbers of the mockup when Gunsight has none), tiles, time
-    text and pips sit at the mockup offsets at two UI heights, and a rescale re-seats in place;
+  * constants: cut, fill and stroke alpha, the pip and the colours parsed back out of the mockup; the tile is the
+    Target Debuffs chip, the time text no smaller than the Target Debuffs time, the plate smaller than the mockup's
+    and on its right edge and vertical centre, all derived from the single tunable;
+  * seats: the plate fills the "mybuffs" anchor (Gunsight's rect when it has none), tiles, time text and pips sit
+    at the derived offsets at two UI heights, and a rescale re-seats in place;
   * content: at most four tiles in the snapshot's own order (the Buffs.lua slot order, not by time left), the
     spell icon, the time left as 47m / 14s / 2h, nothing for a buff with no expiry;
   * pip: a party or raid unit other than the player; a missing, secret, player, pet or target source has none;
   * combat: the snapshot is frozen, so the time left is extrapolated from the stored expiry, a buff that ran out is
     dropped, and no aura API is read;
-  * piece: the "mybuffs" piece toggle hides the plate and its ticker, and the plate hides its body with no buffs.
+  * piece: the "mybuffs" piece toggle hides the plate and its ticker, and the plate hides its body with no buffs;
+  * tooltip: only the tiles take the mouse (never the plate or body); hovering one shows the standard aura tooltip for
+    its snapshot slot (the real FrameHelpers.ShowAuraTooltip), in combat the cached name only, a secret or a throwing
+    setter shows nothing and never errors, and the tooltip goes when the tile, the body or the piece does.
 
 The mock is strict and is NOT the real client.
 
@@ -75,12 +81,15 @@ def mockup_buffs() -> dict:
     tile_dx, tile_y, size = _m(r"o\+='<g>'\+chipIcon\(x\+(\d+),(\d+),(\d+),", src, "tile").groups()
     pip_dx, pip_y, pip_r = _m(r"cx=\"'\+\(x\+(\d+)\)\+'\" cy=\"(\d+)\" r=\"([\d.]+)\"", src, "pip").groups()
     text_dx, text_y, text_size = _m(r"txt\(x\+(\d+),(\d+),d\.t,(\d+),", src, "time text").groups()
+    dots_chip = _m(r"o\+=chipIcon\(1220,cy-10,(\d+),d,abs\)", src, "the Target Debuffs row chip").group(1)
+    dots_time = _m(r"txt\(1246,cy\+4\.5,\(d\.rem<3\?d\.rem\.toFixed\(1\):Math\.round\(d\.rem\)\)\+'s',(\d+),", src, "the Target Debuffs time").group(1)
     count = len(re.findall(r"\{k:'", _m(r"(?s)var BUFFS_WL=\[(.*?)\];", src, "a buff list").group(1)))
     return dict(
         X=int(x0), W=int(w), Y=int(y), H=int(h), CHAMFER=int(chamfer), FILL_A=float(fill_a), STROKE_A=float(stroke_a),
         TILE_DX=int(inset) + int(tile_dx), TILE_DY=int(tile_y) - int(y), TILE=int(size), PITCH=int(pitch),
         PIP_DX=int(pip_dx) - int(tile_dx), PIP_DY=int(pip_y) - int(tile_y), PIP_R=float(pip_r),
         TEXT_DX=int(text_dx) - int(tile_dx), TEXT_Y=int(text_y) - int(y), TEXT_SIZE=int(text_size), MAX=count,
+        DOTS_CHIP=int(dots_chip), DOTS_TIME=int(dots_time),
     )
 
 
@@ -94,6 +103,26 @@ __auraReads = 0
 function UnitAura() __auraReads = __auraReads + 1 end
 C_UnitAuras = { GetAuraDataByIndex = function() __auraReads = __auraReads + 1 end }
 function UnitIsUnit(a, b) return a == b or (__alias and __alias[a] == b) or false end
+-- The aura read gate the real FrameHelpers.ShowAuraTooltip asks.
+function FS.AurasReadable() return not InCombatLockdown() end
+-- GameTooltip as the tooltip dispatch uses it. SetUnitAura is an aura read: refused in combat, and __tipThrows makes it throw.
+-- The setters record what they were handed; a tooltip is shown by SetUnitAura or Show, as in the client.
+__tip = { owner = nil, shown = false, lines = {}, aura = nil, auraCalls = 0 }
+__tipThrows = false
+GameTooltip = {
+    SetOwner = function(self, owner, anchor) __tip.owner, __tip.anchor, __tip.shown, __tip.lines, __tip.aura = owner, anchor, false, {}, nil end,
+    GetOwner = function() return __tip.owner end,
+    SetUnitAura = function(self, unit, index, filter)
+        __tip.auraCalls = __tip.auraCalls + 1
+        if __combat or __tipThrows then error("SetUnitAura refused") end
+        __tip.aura = { unit, index, filter }; __tip.shown = true
+    end,
+    SetText = function(self, text) __tip.lines[#__tip.lines + 1] = text end,
+    AddLine = function(self, text) __tip.lines[#__tip.lines + 1] = text end,
+    Show = function() __tip.shown = true end,
+    Hide = function() __tip.shown = false end,
+    IsShown = function() return __tip.shown end,
+}
 """
 
 CHECKS_BODY = r"""
@@ -114,16 +143,45 @@ local function shown() local n = 0; for _, t in ipairs(My().tiles) do if t.frame
 
 -- ---- constants ---------------------------------------------------------------------
 
-function T.constants_match_the_mockup()
+function T.constants_match_the_mockup_and_the_size_is_one_tunable_smaller_than_the_mockups()
     local W = world()
     local C = My().C
-    eq(C.X, MY.X); eq(C.Y, MY.Y); eq(C.W, MY.W); eq(C.H, MY.H); eq(C.CHAMFER, MY.CHAMFER, "the plate cut")
+    local M = W.Gun.G.MYBUFFS
+    eq(C.CHAMFER, MY.CHAMFER, "the plate cut")
     near(C.FILL[4], MY.FILL_A, 1e-9); near(C.STROKE_A, MY.STROKE_A, 1e-9)
     eq(rgb(C.FILL), "0d0620", "the plate colour")
-    eq(C.TILE_DX, MY.TILE_DX); eq(C.TILE_DY, MY.TILE_DY); eq(C.TILE, MY.TILE); eq(C.PITCH, MY.PITCH)
-    eq(C.PIP_DX, MY.PIP_DX); eq(C.PIP_DY, MY.PIP_DY); near(C.PIP_R, MY.PIP_R, 1e-9)
-    eq(C.TEXT_DX, MY.TEXT_DX, "the time is centred under its tile"); eq(C.TEXT_Y, MY.TEXT_Y); eq(C.TEXT_SIZE, MY.TEXT_SIZE)
+    near(C.PIP_R, MY.PIP_R, 1e-9); eq(C.PIP_DY, MY.PIP_DY)
     eq(C.MAX, MY.MAX, "four tiles, as the mockup draws")
+    -- Size: Gunsight.lua's MYBUFFS tile is the one tunable, the plate and everything in it read from it.
+    eq(M.tile, MY.DOTS_CHIP, "the tile is the Target Debuffs row chip")
+    ok(M.tile <= MY.TILE, "no bigger than the mockup's tile")
+    eq(C.TILE, M.tile); eq(C.PITCH, M.pitch); eq(C.TILE_DX, M.padX); eq(C.TILE_DY, M.padY); eq(C.MAX, M.max)
+    eq(C.X, M.x); eq(C.Y, M.y); eq(C.W, M.w); eq(C.H, M.h)
+    near(M.w, 2 * M.padX + (M.max - 1) * M.pitch + M.tile, 1e-9, "the width follows from the tile and pitch")
+    ok(M.pitch > M.tile, "tiles do not touch")
+    ok(M.w < MY.W and M.h < MY.H, "smaller than the mockup's 164 x 56")
+    near(M.x + M.w, MY.X + MY.W, 1e-9, "still ends where the mockup ends, short of the next cast tile")
+    near(M.y + M.h / 2, MY.Y + MY.H / 2, 1e-9, "still centred on the mockup's band, with the info boxes and the next tile")
+    ok(C.TEXT_SIZE >= MY.DOTS_TIME, "the time is no smaller than the Target Debuffs time")
+    eq(C.TEXT_DX, C.TILE / 2, "the time is centred under its tile"); eq(C.PIP_DX, C.TILE, "the pip sits on the tile's right edge")
+    ok(C.TEXT_Y > C.TILE_DY + C.TILE and C.TEXT_Y + C.TEXT_SIZE * C.DESCENT <= C.H, "the time fits inside the plate under the tile")
+    W.clean(); noFails()
+end
+
+function T.changing_the_one_tunable_resizes_the_plate_and_its_tiles()
+    local tile0 = tonumber(__gunsightSrc:match("local MYB_TILE = (%d+)"))
+    ok(tile0, "the tunable is one `local MYB_TILE = <px>` in Gunsight.lua")
+    local src, n = __gunsightSrc:gsub("local MYB_TILE = %d+", "local MYB_TILE = 16")
+    eq(n, 1)
+    __gunsightSrc = src
+    local W = world()
+    local M = W.Gun.G.MYBUFFS
+    ok(16 < tile0, "the probe is smaller than the shipped tile")
+    eq(M.tile, 16)
+    near(M.w, 2 * M.padX + (M.max - 1) * M.pitch + 16, 1e-9, "the width follows the tile")
+    eq(My().C.TILE, 16); eq(My().C.W, M.w); eq(My().C.H, M.h)
+    near(My().tiles[1].frame._w, 16 * K(), 1e-6, "the tile frame")
+    near((W.Gun.anchors.mybuffs or My().anchor)._w, M.w * K(), 1e-6, "and the anchor the plate fills")
     W.clean(); noFails()
 end
 
@@ -328,6 +386,96 @@ function T.the_ticker_throttles_and_aura_events_refresh_at_once()
     W.clean(); noFails()
 end
 
+-- ---- tooltip ---------------------------------------------------------------------
+
+local function enter(i) local f = My().tiles[i].frame; f._scripts.OnEnter(f) end
+local function leave(i) local f = My().tiles[i].frame; f._scripts.OnLeave(f) end
+
+function T.only_the_tiles_take_the_mouse_never_the_plate_or_the_body()
+    local W = world()
+    eq(My().plate:IsMouseEnabled(), false, "the plate lets clicks through to the world")
+    eq(My().body:IsMouseEnabled(), false)
+    for i, t in ipairs(My().tiles) do
+        eq(t.frame:IsMouseEnabled(), true, "tile " .. i .. " takes the mouse for its tooltip")
+        ok(t.frame._scripts.OnEnter and t.frame._scripts.OnLeave, "tile " .. i .. " has hover scripts")
+    end
+    eq(My().plate._scripts.OnEnter, nil); eq(My().body._scripts.OnEnter, nil)
+    W.clean(); noFails()
+end
+
+function T.hovering_a_tile_shows_the_aura_tooltip_for_its_snapshot_slot_and_leaving_hides_it()
+    local W = world()
+    snapshot(aura(1, 600), aura(2, 600), aura(3, 600), aura(4, nil))
+    __snapshot.buffs[2].expirationTime = __now - 5   -- ran out: dropped from the plate, but it still holds slot 2
+    refresh()
+    eq(shown(), 3, "slot 2 is not drawn")
+    enter(2)
+    eq(__tip.owner, My().tiles[2].frame, "the tooltip belongs to the hovered tile")
+    eq(__tip.shown, true)
+    eq(__tip.aura[1], "player"); eq(__tip.aura[2], 3, "the tile shows the buff in slot 3, so the tooltip asks for slot 3")
+    eq(__tip.aura[3], "HELPFUL")
+    leave(2)
+    eq(__tip.shown, false, "leaving hides it")
+    enter(1)
+    eq(__tip.aura[2], 1)
+    W.clean(); noFails()
+end
+
+function T.in_combat_the_tooltip_is_the_cached_name_and_no_aura_is_read_for_it()
+    local W = world()
+    snapshot(aura(1, 600, nil, "Mark of the Wild"))
+    refresh()
+    __combat = true
+    enter(1)
+    eq(__tip.auraCalls, 0, "the tooltip setters are aura reads: not asked in combat")
+    eq(__tip.lines[1], "Mark of the Wild")
+    eq(__tip.shown, true)
+    leave(1)
+    eq(__tip.shown, false)
+    W.clean(); noFails()
+end
+
+function T.a_secret_aura_name_or_a_throwing_tooltip_shows_nothing_and_never_errors()
+    local W = world()
+    snapshot(aura(1, 600, nil, __SECRET_NAME), aura(2, 600, nil, "Fine"))
+    refresh()
+    __combat = true
+    enter(1)
+    eq(__tip.shown, false, "a secret name is not shown, compared or kept")
+    eq(#__tip.lines, 0)
+    noFails("a secret was compared inside a pcall")
+    __combat = false
+    __tipThrows = true
+    enter(2)
+    eq(__tip.auraCalls, 1, "the setter was tried")
+    eq(__tip.shown, false, "a refused setter shows nothing")
+    __tipThrows = false
+    W.clean()
+    eq(#__degrades, 0, "and nothing was logged")
+end
+
+function T.the_tooltip_goes_with_its_tile_the_body_and_the_piece()
+    local W = world()
+    snapshot(aura(1, 600), aura(2, 600))
+    refresh()
+    enter(2)
+    eq(__tip.shown, true)
+    snapshot(aura(1, 600))
+    refresh()
+    eq(__tip.shown, false, "the hovered tile hid: its tooltip does not stay")
+    enter(1)
+    eq(__tip.shown, true)
+    snapshot()
+    refresh()
+    eq(__tip.shown, false, "no buffs left: the body hides and the tooltip with it")
+    snapshot(aura(1, 600))
+    refresh()
+    enter(1)
+    W.Gun.SetPiece("mybuffs", false, true)
+    eq(__tip.shown, false, "piece off hides the tooltip")
+    W.clean(); noFails()
+end
+
 -- ---- piece ------------------------------------------------------------------------
 
 function T.the_mybuffs_piece_toggle_hides_the_plate_and_its_ticker()
@@ -429,6 +577,7 @@ def run_case(name: str, mu: dict, mb: dict, mm: dict) -> str | None:
     g.__gunsightSrc = gunsight_source()
     g.__tapeSrc = TH.TAPE.read_text(encoding="utf-8")
     g.__boxSrc = BH.BOXES.read_text(encoding="utf-8")
+    g.__helpersSrc = (ADDON / "Core/FrameHelpers.lua").read_text(encoding="utf-8")
     g.__myBuffsSrc = MYBUFFS.read_text(encoding="utf-8") if MYBUFFS.exists() else "error('GunsightMyBuffs.lua is missing')"
     lua.execute("MU = " + TH.lua_value(mu))
     lua.execute("MB = " + TH.lua_value(mb))
@@ -449,6 +598,7 @@ def checks_source() -> str:
     patched = prefix.replace(
         needle,
         '__load("Modules/CombatHud/GunsightBoxes.lua", __boxSrc)\n    ' + needle +
+        '\n    __load("Core/FrameHelpers.lua", __helpersSrc)' +
         '\n    __load("Modules/CombatHud/GunsightMyBuffs.lua", __myBuffsSrc)')
     return patched + CHECKS_BODY
 
