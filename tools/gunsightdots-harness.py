@@ -1355,6 +1355,23 @@ FS.Gunsight.IsActive = real
 """)
 
 
+case("a_chip_tooltip_already_up_comes_down_when_the_master_switch_goes_off_in_combat")(r"""
+boot()
+local mh = mount("debuffsH", "upper")
+local mv = mount("debuffsV", "lower")
+pushList({ ent("Rend", 9, { id = 772 }) })
+for _, pair in ipairs({ { mh, "H" }, { mv, "V" } }) do
+    local chip = pair[1].rows[1].chip.frame
+    FS.Config.Set("gunsight.enabled", true)
+    hover(chip)
+    check(tip() and tip().spellID == 772, pair[2] .. ": setup, the tip is up")
+    FS.Config.Set("gunsight.enabled", false)       -- in combat the root only fades; the chip gets no OnLeave
+    check(FS.Gunsight.IsActive() == false and tip() == nil, pair[2] .. ": the open tooltip comes down with the switch")
+    check(chip.fsHover == nil, pair[2] .. ": and the hover flag is cleared")
+end
+""")
+
+
 def static_checks() -> list[tuple[str, str | None]]:
     out: list[tuple[str, str | None]] = []
     toc = [ln.strip() for ln in TOC.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")]

@@ -49,6 +49,7 @@ ADDON = HERE.parent / "forever-stuwave"
 # BUFFS_LUA / THEME_LUA point the run at a mutant copy (the other harnesses do the same).
 SOURCE = Path(os.environ.get("BUFFS_LUA", ADDON / "Modules/Auras/Buffs.lua"))
 THEME = Path(os.environ.get("THEME_LUA", ADDON / "Core/Theme.lua"))
+HELPERS = ADDON / "Core/FrameHelpers.lua"
 
 
 def theme_readiness_lua() -> str:
@@ -305,13 +306,13 @@ FS.FrameHelpers = {
         __seated[#__seated + 1] = { button = button, hadLabels = button.count ~= nil or button.duration ~= nil }
     end,
     ShowAuraTooltip = function() end,
-    -- Same contract as FrameHelpers.SetTipSpell: a plain positive id and a plain non-empty name, else cleared.
-    SetTipSpell = function(frame, id, name)
-        local okId = not FS.IsSecret(id) and __realType(id) == "number" and id > 0
-        local okName = not FS.IsSecret(name) and __realType(name) == "string" and name ~= ""
-        frame.fsSpellID, frame.fsName = okId and id or nil, okName and name or nil
-    end,
 }
+-- SetTipSpell is the REAL one (Core/FrameHelpers.lua loaded into a throwaway namespace), not a copy of its contract.
+do
+    local X = { Theme = {}, IsSecret = FS.IsSecret, AurasReadable = function() return false end }
+    assert(loadstring(__HELPERS_SRC, "@Core/FrameHelpers.lua"))("forever-stuwave", X)
+    FS.FrameHelpers.SetTipSpell = X.FrameHelpers.SetTipSpell
+end
 function __setClient()
     if __noApi then C_Secrets = nil
     else C_Secrets = { ShouldAurasBeSecret = function() return __aurasSecret() end } end
@@ -964,6 +965,7 @@ check(#visibleTiles(FS.buffsContainer) == 2, "both enchants should be polled")
 
 def run_case(name: str, setup: str, body: str, source: str, readable: str) -> str | None:
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
+    lua.globals().__HELPERS_SRC = HELPERS.read_text(encoding="utf-8")
     lua.execute(MOCK)
     lua.globals().__SRC = source
     lua.globals().__READABLE_SRC = readable

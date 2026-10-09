@@ -389,8 +389,9 @@ local containers = {}
 CombatHud.containers = containers
 
 -- Tooltips for the tiles that show a HudSpells spell (a skill that shows up has a tooltip). Hover only:
--- the centre HUD must pass clicks through, and the mouse state is set once, when the tile is built, never in
--- combat. Under the Gunsight a tip is suppressed while it is switched off (the root only fades in combat).
+-- the centre HUD must pass clicks through, and the mouse state is set once, when the tile is built (a buff
+-- tile can be built in combat; that is safe, a new plain frame with the calls pcall'd), never toggled by
+-- painting. Under the Gunsight a tip is suppressed while it is switched off (the root only fades in combat).
 -- Fields of CombatHud, not file-scope locals (this file is near the parse-gate ceiling).
 function CombatHud.AttachTip(frame)
     local helpers = FS.FrameHelpers
@@ -406,13 +407,44 @@ function CombatHud.AttachTip(frame)
 end
 
 -- Paint side: caches the spell id and name of HudSpells `key` on the frame (SetTipSpell), so the tip works
--- in combat, and redraws an open tip when the spell changed. Allocation-free: a table read and two cached
--- lookups. A key with no spell name clears the tip.
+-- in combat, and redraws an open tip when the spell changed. The spell is the one the tile's icon shows:
+-- the first of def.names that resolves (IconFor walks the same order), so a warlock who knows only Demon
+-- Skin gets Demon Skin's tooltip under Demon Skin's icon. No name resolving: def.ids[1] under names[1].
+-- The resolved (id, name) per key is kept until the helper's name cache is wiped (SpellCacheEpoch moves on
+-- a new rank or spell). Allocation-free once warm: table reads and the helper's cached lookups. A key with
+-- no spell name clears the tip. Fields of CombatHud, not file-scope locals (near the parse-gate ceiling).
+CombatHud.tipIds, CombatHud.tipNames = {}, {}
 function CombatHud.SetTip(frame, key)
     local helpers = FS.FrameHelpers
     if type(helpers) ~= "table" then return end
-    local name = SpellName(key)
-    helpers.SetTipSpell(frame, helpers.SpellIDForName(name), name)
+    local ids, names = CombatHud.tipIds, CombatHud.tipNames
+    local epoch = helpers.SpellCacheEpoch and helpers.SpellCacheEpoch() or 0
+    if CombatHud.tipEpoch ~= epoch then
+        for k in pairs(ids) do ids[k] = nil; names[k] = nil end
+        CombatHud.tipEpoch = epoch
+    end
+    local id, name = ids[key], names[key]
+    if not id then
+        local def = Def(key)
+        local list = def and def.names
+        if not list then
+            helpers.SetTipSpell(frame, nil, nil)
+            return
+        end
+        for _, candidate in ipairs(list) do
+            local resolved = helpers.SpellIDForName(candidate)
+            if resolved then
+                id, name = resolved, candidate
+                ids[key], names[key] = id, name
+                break
+            end
+        end
+        if not id then
+            name = list[1]
+            id = def.ids and def.ids[1] or nil
+        end
+    end
+    helpers.SetTipSpell(frame, id, name)
 end
 CombatHud.stats = { cdTicks = 0 }
 
