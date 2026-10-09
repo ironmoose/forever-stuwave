@@ -247,6 +247,9 @@ end
 -- Build
 -------------------------------------------------------------------------------
 
+-- The tile and the Judgement chip show a tooltip only while the Gunsight is the display and the module is on an area.
+local function TipGate() return Gunsight.IsActive() and subscribed end
+
 -- A chamfered plate on its own small frame: fill and outline slices (and the tile's soft glow) over a square of `size` image px,
 -- with a hidden icon inside the cut.
 local function Plate(x, y, size, cut, fillPath, outlinePath, withGlow)
@@ -254,6 +257,8 @@ local function Plate(x, y, size, cut, fillPath, outlinePath, withGlow)
     local f = CreateFrame("Frame", nil, mod)
     f:SetFrameLevel(mod:GetFrameLevel() + 1)
     f:EnableMouse(false)
+    -- Hover only (clicks pass through the centre HUD); Apply sets the spell each push.
+    if FS.FrameHelpers and FS.FrameHelpers.AttachSpellTooltip then FS.FrameHelpers.AttachSpellTooltip(f, { gate = TipGate }) end
     Seat(function()
         At(f, "TOPLEFT", x, y)
         f:SetSize(ui(size), ui(size))
@@ -821,6 +826,14 @@ local function JudgeSpellId()
     return type(ids) == "table" and ids[1] or nil
 end
 
+-- The first name of a HudSpells entry (the spell's own name, for the tooltip's combat fallback), or nil.
+local function SpellName(key)
+    local spells = FS.HudSpells
+    local def = type(spells) == "table" and spells[key]
+    local names = type(def) == "table" and def.names
+    return type(names) == "table" and names[1] or nil
+end
+
 -- A plate wears its spell icon and hides its letters, or shows the letters when no icon is readable. Applies only on a push, so a
 -- late client answer replaces the letters at the next one.
 local function WearIcon(plate, letters, tex)
@@ -855,6 +868,12 @@ local function Apply(state)
     LaneLook(L.jExp and L.col or nil)
     if newMode == "seal" and not L.sealIcon then L.sealIcon = WearIcon(P.tile, P.ab, SpellIcon(Plain(seal.id))) end
     if not L.jIcon then L.jIcon = WearIcon(P.chip, P.jLetter, SpellIcon(JudgeSpellId())) end
+    local FH = FS.FrameHelpers
+    if FH and FH.SetTipSpell then
+        -- Plain id or nothing (a secret falls back to the HudSpells name); NO SEAL and unknown have no spell to show.
+        if newMode == "seal" then FH.SetTipSpell(P.tile, seal.id, SpellName(seal.key)) else FH.SetTipSpell(P.tile, nil, nil) end
+        FH.SetTipSpell(P.chip, JudgeSpellId(), SpellName("jd"))
+    end
     Live(GetTime())
     Sync()
 end

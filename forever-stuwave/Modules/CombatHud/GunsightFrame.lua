@@ -502,6 +502,11 @@ local function BuildRung(side, parent)
         local ok, plate = pcall(Theme.AddCut2Texture, icon.frame, Theme.SLICE_CUT2_FILL_TEXTURE, PLATE, "BACKGROUND")
         if ok then icon.plate = plate end
     end
+    -- Hover only (clicks pass through the centre HUD); BindRung sets the spell. Nothing while the Gunsight is not the display
+    -- or the rung is dark (a fade out keeps the frames, and a hover would strand the tooltip).
+    if FS.FrameHelpers and FS.FrameHelpers.AttachSpellTooltip then
+        FS.FrameHelpers.AttachSpellTooltip(icon.frame, { gate = function() return Gunsight.IsActive() and frame:IsShown() end })
+    end
     icon.tex = icon.frame:CreateTexture(nil, "ARTWORK")
     icon.tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     icon.fallback = icon.frame:CreateFontString(nil, "OVERLAY")
@@ -616,6 +621,17 @@ local function SeatIconTexture(rung, spec, stateIcon)
     rung.hasTexture = tex ~= nil
 end
 
+-- The proc's spell for its tooltip: an aura proc is its aura's spell id; a `ready` proc is a HudSpells key, resolved by the
+-- spell's name. A plain id (or nil) and a plain name (or nil).
+local function ProcSpell(spec)
+    if type(spec.aura) == "number" then return spec.aura, nil end
+    local spells = FS.HudSpells
+    local def = type(spec.ready) == "string" and type(spells) == "table" and spells[spec.ready] or nil
+    local name = type(def) == "table" and type(def.names) == "table" and def.names[1] or nil
+    local FH = FS.FrameHelpers
+    return FH and FH.SpellIDForName and FH.SpellIDForName(name) or nil, name
+end
+
 local function BindRung(rung, key, spec, stateIcon)
     if rung.key ~= key then
         rung.key = key
@@ -625,6 +641,7 @@ local function BindRung(rung, key, spec, stateIcon)
         rung.laidOut = false
     end
     if not rung.hasTexture then SeatIconTexture(rung, spec, stateIcon) end
+    if FS.FrameHelpers and FS.FrameHelpers.SetTipSpell then FS.FrameHelpers.SetTipSpell(rung.icon.frame, ProcSpell(spec)) end
     if not rung.laidOut then
         rung.laidOut = true
         LayoutRung(rung, rung.T or ui(1), rung.Tl or ui(C.LIT_K))

@@ -389,8 +389,11 @@ local function OnHud(state)
                 if not expires and remaining > 0 then expires = now + remaining end
                 local live = expires ~= nil and expires > now
                 local def = FS.HudSpells and FS.HudSpells[key]
+                local name = def and def.names and def.names[1] or key
+                local FH = FS.FrameHelpers
                 hudEntries[#hudEntries + 1] = {
-                    name = def and def.names and def.names[1] or key,
+                    name = name,
+                    id = FH and FH.SpellIDForName and FH.SpellIDForName(name) or nil,   -- plain: the dot's tooltip spell
                     icon = PlainOf(e.icon, "number") or PlainOf(e.icon, "string"),
                     expires = live and expires or 0, duration = live and PlainOf(e.duration, "number") or nil,
                     count = 1, order = #hudEntries + 1,

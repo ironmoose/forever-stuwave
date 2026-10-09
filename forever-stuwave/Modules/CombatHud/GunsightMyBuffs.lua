@@ -90,28 +90,14 @@ local function FromGroupMember(aura)
     return result
 end
 
--- Mouseover: the standard aura tooltip. ShowAuraTooltip asks the client to render it from the slot (SetUnitAura), or in combat, where
--- that is an aura read the client refuses, shows the cached name and a "Details unavailable in combat." line. Any throw hides it.
+-- Mouseover: the shared spell tooltip (FrameHelpers.AttachSpellTooltip, installed at build). Out of combat it is the standard
+-- aura tooltip for the tile's snapshot slot; in combat, where that is an aura read the client refuses, the spell's own tooltip
+-- from the cached spell id, else the cached name and a "Details unavailable in combat." line. Any throw hides it.
 -- A tile is "hovered" from its OnEnter to its OnLeave (frame.fsHover), so a repaint under the cursor can refresh the tooltip.
--- Nothing shows while the piece is off: a fade out keeps the frames shown for a moment and a hover then would strand the tooltip.
-local function ShowTip(self)
-    local helpers = FS.FrameHelpers
-    if not (GameTooltip and helpers and helpers.ShowAuraTooltip) then return end
-    GameTooltip:SetOwner(self, "ANCHOR_TOP")
-    if not pcall(helpers.ShowAuraTooltip, self) then GameTooltip:Hide() end
-end
-
 -- The tiles are live mouse frames. A Gunsight switched off in combat only fades its root (a Hide is owed to the end of combat), so
--- the invisible tiles would still answer a hover: nothing shows while the HUD is not the display.
-local function TileEnter(self)
-    if not Gunsight.IsActive() or not Gunsight.IsPieceOn("mybuffs") then return end
-    self.fsHover = true
-    ShowTip(self)
-end
-
-local function TileLeave(self)
-    self.fsHover = nil
-    if GameTooltip then GameTooltip:Hide() end
+-- the invisible tiles would still answer a hover: nothing shows while the HUD is not the display or the piece is off.
+local function TipGate()
+    return Gunsight.IsActive() and Gunsight.IsPieceOn("mybuffs")
 end
 
 -- A tile that hides (or whose plate does) under the cursor gets no OnLeave, so its tooltip is taken down here.
@@ -124,14 +110,13 @@ local function ReleaseAllTips()
     for _, tile in ipairs(state.tiles) do ReleaseTip(tile.frame) end
 end
 
--- The fields FrameHelpers.ShowAuraTooltip reads off a tile: the player's HELPFUL slot (the snapshot position is the slot) and the
--- cached name for combat. A secret or odd name is dropped, so the combat tooltip shows nothing rather than a value it may not touch.
+-- The fields the tooltip reads off a tile: the player's HELPFUL slot (the snapshot position is the slot) and, for combat, the
+-- cached spell id and name (SetTipSpell keeps only a plain id and a plain name, so a secret one shows nothing it may not touch).
 local function PaintTile(tile, aura, remaining, slot)
-    local frame = tile.frame
-    local oldSlot, oldName, oldIcon = frame.auraIndex, frame.fsName, tile.iconKey
+    local frame, FH = tile.frame, FS.FrameHelpers
+    local oldSlot, oldIcon, oldId, oldName = frame.auraIndex, tile.iconKey, frame.fsSpellID, frame.fsName
     frame.auraIndex = slot
-    local name = aura.name
-    frame.fsName = (not IsSecret(name) and type(name) == "string") and name or nil
+    FH.SetTipSpell(frame, aura.spellId, aura.name)
     if tile.iconKey ~= aura.icon then
         tile.iconKey = aura.icon
         tile.icon:SetTexture(aura.icon)
@@ -145,7 +130,10 @@ local function PaintTile(tile, aura, remaining, slot)
     tile.pip.ring:SetShown(FromGroupMember(aura))
     frame:Show()
     -- The cursor is still on this tile but it now shows another buff (or the same one in another slot): the tooltip follows it.
-    if frame.fsHover and (oldSlot ~= slot or oldName ~= frame.fsName or oldIcon ~= aura.icon) then ShowTip(frame) end
+    -- SetTipSpell already redrew it for a new id or name.
+    if (oldSlot ~= slot or oldIcon ~= aura.icon) and oldId == frame.fsSpellID and oldName == frame.fsName then
+        FH.RefreshSpellTooltip(frame)
+    end
 end
 
 -- An empty slot's tile hides, and its time with it (the time is the tile's child); the text is cleared too, so the next buff
@@ -213,22 +201,12 @@ local function Layout()
     end
 end
 
--- Hover, no clicks: the tile is near screen centre, and a click-taking frame there would block right-click-drag mouselook and
--- left-click targeting that start over it. Feature-detected like CombatHud.lua and Nameplates.lua do (each call on its own);
--- where the client lacks either call there is no mouse at all (no tooltip) rather than a click-eating tile.
-local function HoverOnly(frame)
-    if type(frame.SetMouseMotionEnabled) ~= "function" or type(frame.SetMouseClickEnabled) ~= "function" then return end
-    pcall(frame.SetMouseClickEnabled, frame, false)
-    pcall(frame.SetMouseMotionEnabled, frame, true)
-end
-
 local function BuildTile(body)
     local tile = {}
     local frame = CreateFrame("Frame", nil, body)
     frame.unit, frame.filter = "player", "HELPFUL"
-    HoverOnly(frame)
-    frame:SetScript("OnEnter", TileEnter)
-    frame:SetScript("OnLeave", TileLeave)
+    -- Hover, no clicks (the tile is near screen centre); the one tooltip path, no handler of its own.
+    FS.FrameHelpers.AttachSpellTooltip(frame, { gate = TipGate })
     Theme.AddCut2Texture(frame, Theme.SLICE_CUT2_FILL_TEXTURE,
         { colors.bg[1], colors.bg[2], colors.bg[3], C.TILE_FILL_A }, "BACKGROUND", 0)
     tile.icon = frame:CreateTexture(nil, "ARTWORK")

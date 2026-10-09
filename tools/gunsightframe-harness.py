@@ -46,6 +46,8 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import spelltip_support as tips  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("gunsight_harness", HERE / "gunsight-harness.py")
 gh = importlib.util.module_from_spec(_spec)
@@ -105,6 +107,7 @@ def frame_constants() -> dict:
 
 EXTRA = r"""
 local FrameMT = getmetatable(UIParent)
+__HOOKMOCK__
 function FrameMT:GetEffectiveScale() return 1 end
 -- RegisterUnitEvent: the client only delivers the event for the listed units, so fire() filters by arg 1.
 function FrameMT:RegisterUnitEvent(e, ...)
@@ -265,6 +268,8 @@ function FramesNamed(prefix)
 end
 """
 
+EXTRA = EXTRA.replace("__HOOKMOCK__", tips.HOOK_MOCK.format(cls="FrameMT")) + tips.LUA
+
 PRELUDE = r"""
 local function boot(opts)
     opts = opts or {}
@@ -280,6 +285,7 @@ local function boot(opts)
     if opts.noTheme then FS.Theme = nil else FS.Theme = MakeTheme() end
     if opts.themeHook and FS.Theme then opts.themeHook(FS.Theme) end
     FS.IsSecret = function(v) return v == SECRET end
+    loadSpellTips(HELPERS_SRC)
     assert(loadstring(HAS_TARGET_SRC, "@Theme.lua"))()      -- the real FS.HasTarget / FS.TargetTakesDots out of Theme.lua
     loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
     loadAddonFile(CONFIG_SRC, "Core/Config.lua")
@@ -765,6 +771,35 @@ check(GF2.rungs.right.icon.fallback:IsShown() and GF2.rungs.right.icon.fallback:
 Push({ active = true, row = {}, buffsMissing = {}, procs = { { key = "jd", glow = "gold", active = true, icon = 135959 } } })
 check(not GF2.rungs.left.frame:IsShown(), "an unknown spell sends no entry, so its rung hides")
 """)
+
+case("a_proc_rung_icon_shows_its_spell_on_hover")(r"""
+-- Shadow Trance is an aura proc (spec.aura is the spell id); Judgement is a `ready` proc (the id comes from its name).
+local GF = boot({ profile = "WARLOCK", state = function(p) return StateFor(p, {}) end })
+Push(StateFor(FS.Hud.profile, { shadow_trance = true }))
+local rung = GF.rungs[FS.Hud.profile.procs.shadow_trance.side]
+check(hoverOnly(rung.icon.frame), "the icon is motion only and never click enabled")
+hover(rung.icon.frame)
+check(tip() and tip().spellID == 17941 and GameTooltip.setOwner == 1, "the aura proc shows spell 17941 once, got " .. tostring(tip() and tip().spellID))
+unhover(rung.icon.frame)
+FS.Gunsight.IsActive = function() return false end
+hover(rung.icon.frame)
+check(tip() == nil, "an inactive Gunsight shows no tooltip")
+
+local GF2 = boot({ profile = "PALADIN", state = function(p) return StateFor(p, {}) end })
+FS.HudSpells = { hs = { names = { "Holy Strike" } }, jd = { names = { "Judgement" } } }
+C_Spell.GetSpellInfo = function(n) return { spellID = ({ ["Holy Strike"] = 20473, Judgement = 20271 })[n] } end
+Push({ active = true, row = {}, buffsMissing = {}, procs = {
+    { key = "hs", glow = "gold", active = false, icon = 135971 }, { key = "jd", glow = "gold", active = true, icon = 135959 } } })
+local L, R = GF2.rungs.left, GF2.rungs.right
+hover(R.icon.frame)
+check(tip() and tip().spellID == 20271, "a ready proc resolves its spell by name: " .. tostring(tip() and tip().spellID))
+unhover(R.icon.frame)
+check(not L.frame:IsShown(), "setup: the dark rung is hidden")
+FS.Gunsight.IsActive = function() return true end
+hover(L.icon.frame)
+check(tip() == nil, "a hidden rung gives no tooltip")
+""")
+
 
 case("rungs_are_hidden_with_no_hud_at_all")(r"""
 local GF = boot({ noHud = true })
@@ -1302,6 +1337,7 @@ def run_case(body: str, mu: dict, fc: dict, expect: dict, srcs: dict) -> str | N
     g.GUNSIGHT_SRC = srcs["gunsight"]
     g.PROFILES_SRC = srcs["profiles"]
     g.FRAME_SRC = srcs["frame"]
+    g.HELPERS_SRC = tips.HELPERS.read_text(encoding="utf-8")
     g.HAS_TARGET_SRC = gh.theme_target_rule_lua()
     runner = lua.eval("function(src) local f, e = loadstring(src, '=case'); if not f then return false, e end; local ok, err = pcall(f); if ok then return true, '' end; return false, tostring(err) end")
     ok, err = runner(PRELUDE + "\n" + body)
