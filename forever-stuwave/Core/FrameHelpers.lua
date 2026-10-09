@@ -976,11 +976,32 @@ local HAS_TOOLTIP_SETUNITAURA = type(GameTooltip) == "table" and type(GameToolti
 local HAS_TOOLTIP_SETUNITDEBUFF = type(GameTooltip) == "table" and type(GameTooltip.SetUnitDebuff) == "function"
 local HAS_TOOLTIP_SETUNITBUFF = type(GameTooltip) == "table" and type(GameTooltip.SetUnitBuff) == "function"
 
+-- Plain-value validators for the cached tooltip fields. IsSecret first: nothing
+-- else may touch a secret (type() is the only call that never throws on one).
+local function ValidSpellID(v)
+    return not IsSecret(v) and type(v) == "number" and v > 0
+end
+
+local function ValidName(v)
+    return not IsSecret(v) and type(v) == "string" and v ~= ""
+end
+
+-- Fills GameTooltip with the spell's own tooltip. SetSpellByID is not an aura
+-- read, so it should work in combat, but that is unverified on this client:
+-- feature-detected at call time and pcall'd, and false tells the caller to fall
+-- back to the cached name.
+local function ShowSpellByID(spellID)
+    if type(GameTooltip) ~= "table" or type(GameTooltip.SetSpellByID) ~= "function" then return false end
+    if not pcall(GameTooltip.SetSpellByID, GameTooltip, spellID) then return false end
+    GameTooltip:Show()
+    return true
+end
+
 -- Shared OnEnter body for an aura icon showing (self.unit, self.auraIndex,
 -- self.filter): the normal tooltip dispatch (SetUnitAura, falling back to
 -- the filter-specific SetUnitDebuff/SetUnitBuff setter), or the cached
--- self.fsName plus a "Details unavailable in combat" line when aura reads
--- are refused. The tooltip setters ARE aura reads wearing a different hat,
+-- self.fsSpellID's spell tooltip (else self.fsName plus a "Details unavailable
+-- in combat" line) when aura reads are refused. The tooltip setters ARE aura reads wearing a different hat,
 -- so they refuse identically under combat lockdown -- see Buffs.lua's
 -- original AuraButton_OnEnter comment for the exact error this avoids.
 --
@@ -997,6 +1018,8 @@ local HAS_TOOLTIP_SETUNITBUFF = type(GameTooltip) == "table" and type(GameToolti
 -- such icons and passes nil.
 function Helpers.ShowAuraTooltip(self, enchantFallback)
     if self.auraIndex and not FS.AurasReadable() then
+        -- Cached spell id first (SetTipSpell): the spell's real tooltip, no aura read.
+        if ValidSpellID(self.fsSpellID) and ShowSpellByID(self.fsSpellID) then return end
         if self.fsName then
             GameTooltip:SetText(self.fsName)
             GameTooltip:AddLine("Details unavailable in combat.", 0.6, 0.6, 0.6)
@@ -1020,6 +1043,127 @@ function Helpers.ShowAuraTooltip(self, enchantFallback)
         shown = enchantFallback(self)
     end
     if not shown then GameTooltip:Hide() end
+end
+
+-------------------------------------------------------------------------------
+-- Spell tooltips for icon surfaces (hover-only, cached, combat-safe)
+-------------------------------------------------------------------------------
+
+-- Hover, no clicks: a centre-HUD icon must pass clicks through (a click-taking frame
+-- there would block right-click-drag mouselook and left-click targeting that start
+-- over it), so this is motion-only and never EnableMouse(true). Each call is
+-- feature-detected and pcall'd; where the client lacks either call there is no mouse
+-- at all (no tooltip) rather than a click-eating icon. Call at BUILD time only: the
+-- mouse state is never toggled in combat (the Gunsight root parents a protected button).
+function Helpers.HoverOnly(frame)
+    if type(frame.SetMouseMotionEnabled) ~= "function" or type(frame.SetMouseClickEnabled) ~= "function" then return end
+    pcall(frame.SetMouseClickEnabled, frame, false)
+    pcall(frame.SetMouseMotionEnabled, frame, true)
+end
+
+-- Caches what the tooltip needs on the frame: fsSpellID (a plain number > 0) and fsName
+-- (a plain non-empty string). Anything else, secret included, CLEARS that field, so a
+-- secret is never stored. Allocation-free: safe to call every tick. When the frame is
+-- hovered and the id or name changed, the open tooltip is redrawn.
+function Helpers.SetTipSpell(frame, spellID, name)
+    local id = ValidSpellID(spellID) and spellID or nil
+    local nm = ValidName(name) and name or nil
+    local oldName = frame.fsName
+    -- A secret fsName written by other code cannot be compared; it counts as changed.
+    local changed = frame.fsSpellID ~= id or IsSecret(oldName) or oldName ~= nm
+    frame.fsSpellID, frame.fsName = id, nm
+    if changed and frame.fsHover then Helpers.RefreshSpellTooltip(frame) end
+end
+
+-- Spell id for a spell name, cached for the session. C_Spell.GetSpellInfo(name) resolves
+-- names in combat; the global GetSpellInfo is the fallback on a client without C_Spell.
+-- A hit is cached for good. A miss is cached only OUT of combat: in combat the same
+-- lookup may fail transiently (a secret or withheld result), and caching that would
+-- blank the icon's tooltip for the whole session. Cost of that rule: a name that
+-- misses out of combat stays missed until /reload (e.g. a spell learned later).
+local spellIDByName = {}
+
+function Helpers.SpellIDForName(name)
+    if not ValidName(name) then return nil end
+    local cached = spellIDByName[name]
+    if cached then return cached end
+    if cached == false then return nil end
+    local id
+    if type(C_Spell) == "table" and type(C_Spell.GetSpellInfo) == "function" then
+        local ok, info = pcall(C_Spell.GetSpellInfo, name)
+        if ok and type(info) == "table" and not IsSecret(info) then id = info.spellID end
+    elseif type(GetSpellInfo) == "function" then
+        local ok, _, _, _, _, _, _, spellID = pcall(GetSpellInfo, name)
+        if ok then id = spellID end
+    end
+    if ValidSpellID(id) then
+        spellIDByName[name] = id
+        return id
+    end
+    if not InCombatLockdown() then spellIDByName[name] = false end
+    return nil
+end
+
+local function OwnsTooltip(frame)
+    return type(GameTooltip) == "table" and type(GameTooltip.GetOwner) == "function" and GameTooltip:GetOwner() == frame
+end
+
+-- Takes the tooltip down if this frame has it; clears the hover flag.
+local function ReleaseSpellTip(frame)
+    frame.fsHover = nil
+    if OwnsTooltip(frame) then GameTooltip:Hide() end
+end
+
+-- The OnEnter body (also the refresh): the first branch that applies wins.
+local function ShowSpellTip(frame, opts)
+    if type(GameTooltip) ~= "table" then return end
+    if opts.gate and not opts.gate(frame) then
+        if OwnsTooltip(frame) then GameTooltip:Hide() end
+        return
+    end
+    GameTooltip:SetOwner(frame, opts.anchor or "ANCHOR_TOP")
+    -- a. a live aura slot, while the client lets us read it.
+    if frame.unit and frame.auraIndex and frame.filter and FS.AurasReadable() then
+        if not pcall(Helpers.ShowAuraTooltip, frame) then GameTooltip:Hide() end
+        return
+    end
+    -- b. the spell's own tooltip from the cached id.
+    if ValidSpellID(frame.fsSpellID) and ShowSpellByID(frame.fsSpellID) then return end
+    -- c. the cached name; in combat, say why there is no more.
+    if ValidName(frame.fsName) then
+        GameTooltip:SetText(frame.fsName)
+        if InCombatLockdown() then GameTooltip:AddLine("Details unavailable in combat.", 0.6, 0.6, 0.6) end
+        GameTooltip:Show()
+        return
+    end
+    -- d. nothing to show.
+    GameTooltip:Hide()
+end
+
+-- Gives `frame` a tooltip from what SetTipSpell cached (or, out of combat, its aura slot).
+-- Installs once per frame (HookScript, so the frame's own handlers are untouched).
+--   opts.anchor  tooltip anchor, default "ANCHOR_TOP"
+--   opts.clicks  true if the frame takes clicks and the caller owns its mouse state
+--   opts.gate    function(frame); returning false suppresses the tooltip
+function Helpers.AttachSpellTooltip(frame, opts)
+    if frame.fsSpellTip then return end
+    opts = opts or {}
+    frame.fsSpellTip = opts
+    if not opts.clicks then Helpers.HoverOnly(frame) end
+    frame:HookScript("OnEnter", function(self)
+        self.fsHover = true
+        ShowSpellTip(self, opts)
+    end)
+    frame:HookScript("OnLeave", ReleaseSpellTip)
+    frame:HookScript("OnHide", ReleaseSpellTip)
+end
+
+-- Redraws the tooltip if the frame is hovered and still owns it (the cursor stays put
+-- while the icon underneath changes).
+function Helpers.RefreshSpellTooltip(frame)
+    local opts = frame.fsSpellTip
+    if not (opts and frame.fsHover and OwnsTooltip(frame)) then return end
+    ShowSpellTip(frame, opts)
 end
 
 -------------------------------------------------------------------------------
