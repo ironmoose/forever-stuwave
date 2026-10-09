@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1600">
+<title>Gunsight Class Module Shaman</title>
+<style>
+@font-face{font-family:'Mononoki';src:url(../forever-stuwave/Media/Fonts/MononokiNerdFontMono-Bold.ttf) format('truetype');font-weight:100 900;font-style:normal;font-display:block}
+:root{
+  color-scheme:dark;
+  --bg:#0d0620; --fg:#e9e2ff; --muted:#9d93c4; --white:#f3fbff; --text:#e2e8f0;
+  --violet:#a855f7; --cyan:#22e0ff; --pink:#ff2e97; --amber:#ffb648; --green:#39ff14;
+  --track:#0a0416; --line:#3a2168;
+  --edge:rgba(168,85,247,.35);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg)}
+body{width:100%;max-width:1600px;padding:28px 30px 40px;color:var(--fg);font-family:'Mononoki',ui-monospace,monospace;font-weight:700;line-height:1.45;overflow-x:hidden}
+h1{margin:0;font-size:30px;letter-spacing:.08em;color:var(--white);text-shadow:0 0 18px var(--violet);font-weight:700}
+.ref{display:inline-block;margin:10px 0 0;padding:2px 10px;font-size:13px;letter-spacing:.12em;color:var(--amber);border:1px solid rgba(255,182,72,.5);background:rgba(255,182,72,.06)}
+.sub{margin:10px 0 24px;color:var(--muted);font-size:15px;max-width:1500px}
+.sub b{color:var(--white);font-weight:700}
+.row{display:flex;flex-wrap:wrap;gap:26px;margin-bottom:26px;align-items:flex-start}
+.scene{position:relative;width:1000px;height:450px;border:1px solid var(--edge);overflow:hidden;flex:none}
+.scene.crop{width:440px}
+.scene svg{display:block}
+.state{position:absolute;left:10px;top:8px;z-index:2;font-size:12px;letter-spacing:.14em;color:var(--muted);padding:2px 8px;background:rgba(13,6,32,.7);border:1px solid rgba(168,85,247,.3)}
+.state b{color:var(--cyan);font-weight:700}
+.side{width:348px;flex:none}
+.side .t{font-size:24px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 14px var(--violet);margin:0 0 6px}
+.side .t i{font-style:normal;color:var(--pink)}
+.side .cap{font-size:13px;line-height:1.45;color:var(--muted);margin:0 0 10px}
+.side .cap b{color:var(--white);font-weight:700}
+.zoom{border:1px solid var(--edge);background:#120a22;margin:0 0 8px;width:348px}
+.zoom svg{display:block}
+.tw{width:1074px;flex:none}
+table.dp{border-collapse:collapse;width:100%;font-size:12px}
+table.dp td.e{width:210px;color:#fff}
+table.dp td.v{width:150px;white-space:nowrap}
+table.dp td{padding:3px 4px;vertical-align:top;border-top:1px solid rgba(168,85,247,.2);color:var(--text);line-height:1.35}
+table.dp td.n{width:20px;color:var(--cyan)}
+table.dp td.s{color:var(--muted)}
+.pill{display:inline-block;padding:0 5px;font-size:9px;letter-spacing:.06em;border:1px solid;line-height:14px;white-space:nowrap}
+.pill.ok{color:var(--green);border-color:rgba(57,255,20,.5)}
+.pill.est{color:var(--amber);border-color:rgba(255,182,72,.6)}
+.pill.ooc{color:var(--pink);border-color:rgba(255,46,151,.6)}
+.pill.probe{color:var(--violet);border-color:rgba(168,85,247,.7)}
+h2{margin:34px 0 10px;font-size:22px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 12px var(--violet);font-weight:700}
+h2 i{font-style:normal;color:var(--pink)}
+.strip{margin:0 0 22px}
+.strip .lead{font-size:18px;color:var(--white);letter-spacing:.08em;text-shadow:0 0 12px var(--violet);margin:0 0 8px}
+.strip .lead i{font-style:normal;color:var(--pink)}
+.strip .lead small{font-size:12px;color:var(--muted);letter-spacing:0;text-shadow:none;margin-left:10px}
+.tiles{display:flex;flex-wrap:wrap;gap:14px}
+.tile{width:202px;flex:none}
+.tile svg{display:block;border:1px solid rgba(168,85,247,.45);background:#120a22}
+.tile .tc{margin-top:5px;font-size:11px;line-height:1.35;color:var(--muted)}
+.tile .tc b{color:var(--cyan);display:block;font-size:11px;letter-spacing:.06em}
+.notes{display:flex;flex-wrap:wrap;gap:26px;align-items:flex-start}
+.panel{border:1px solid var(--edge);background:rgba(26,16,37,.7);padding:12px 16px 14px;font-size:12px;line-height:1.5;color:var(--text)}
+.panel h3{margin:0 0 6px;font-size:13px;letter-spacing:.12em;color:var(--violet);font-weight:700;text-transform:uppercase}
+.panel p{margin:0 0 8px}
+.panel b{color:var(--white);font-weight:700}
+.panel ul{margin:0;padding-left:18px}
+.panel li{margin-bottom:5px}
+.panel .mu{color:var(--muted)}
+table.sp{border-collapse:collapse;width:100%;font-size:11px}
+table.sp th{text-align:left;color:var(--violet);font-weight:700;letter-spacing:.08em;padding:3px 6px;border-bottom:1px solid rgba(168,85,247,.4);font-size:10px}
+table.sp td{padding:3px 6px;border-top:1px solid rgba(168,85,247,.15);vertical-align:top;line-height:1.35}
+table.sp td.u{color:var(--muted);word-break:break-all}
+.crit{display:flex;flex-wrap:wrap;gap:16px}
+.crit .cc{width:488px;flex:none;border:1px solid var(--edge);background:rgba(26,16,37,.7);padding:10px 14px;font-size:12px;line-height:1.5}
+.crit .cc h4{margin:0 0 4px;font-size:14px;letter-spacing:.1em;color:var(--white);font-weight:700}
+.crit .cc h4 i{font-style:normal;color:var(--pink)}
+.crit .cc .q{color:var(--cyan)}
+.crit .cc .v{color:var(--amber)}
+</style>
+</head>
+<body>
+<h1>GUNSIGHT CLASS MODULE, SHAMAN</h1>
+<div class="ref">Design reference, 2026-10-08, Shaman</div>
+<div class="sub">The Class Module area for a Shaman at the beta level cap of 30, in the approved v7 chrome. The Paladin Seal module is the <b>quality bar</b> (instantly readable, tells you when to act), not the shape. Three concepts were drawn to differ in form and metaphor: <b>A, Totem Poles</b> (pillars that sink into a ground line, shock charging along the ground), <b>B, Totem Field</b> (a top down range radar around your placed totems) and <b>C, Spirit Compass</b> (an elemental ring, <b>dropped</b>, sketch at the bottom). Research: adze doc 01M4F7SSQXMHHEM15VDF26FA06. Target Debuffs keeps Flame Shock on the target (own cast ledger), so it is not repeated here.</div>
+<div id="root"></div>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <filter id="gl" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.1" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="gls" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b0716"/><stop offset=".62" stop-color="#150d28"/><stop offset="1" stop-color="#1c1030"/></linearGradient>
+    <radialGradient id="glowL" cx="22%" cy="108%" r="55%"><stop offset="0" stop-color="#3a2160"/><stop offset="1" stop-color="#3a2160" stop-opacity="0"/></radialGradient>
+    <radialGradient id="glowR" cx="85%" cy="0%" r="60%"><stop offset="0" stop-color="#1d1840"/><stop offset="1" stop-color="#1d1840" stop-opacity="0"/></radialGradient>
+  </defs>
+</svg>
+
+<script>
+(function(){
+var C={cyan:'#22e0ff',pink:'#ff2e97',violet:'#a855f7',green:'#39ff14',amber:'#ffb648',white:'#f3fbff',muted:'#9d93c4',fg:'#e9e2ff',bg:'#0d0620',gold:'#ffd23f'};
+/* element colours: fire red orange, earth lime, water blue, air pale lavender. Amber stays the action colour. */
+var EL={
+  fire:{c:'#ff5a3c',nm:'FIRE'},
+  earth:{c:'#a8e063',nm:'EARTH'},
+  water:{c:'#4aa8ff',nm:'WATER'},
+  air:{c:'#e2d4ff',nm:'AIR'}
+};
+var ORDER=['fire','earth','water','air'];
+var uid=0;
+function hex(h){h=h.replace('#','');return [parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)];}
+function mix(a,b,t){var x=hex(a),y=hex(b);return '#'+[0,1,2].map(function(i){return ('0'+Math.round(x[i]+(y[i]-x[i])*t).toString(16)).slice(-2);}).join('');}
+function ch(x,y,w,h,c){return (x+c)+','+y+' '+(x+w)+','+y+' '+(x+w)+','+(y+h-c)+' '+(x+w-c)+','+(y+h)+' '+x+','+(y+h)+' '+x+','+(y+c);}
+function txt(x,y,s,size,fill,o){o=o||{};
+  return '<text x="'+x+'" y="'+y+'" font-size="'+size+'" fill="'+fill+'" text-anchor="'+(o.a||'start')+'"'+(o.op?' opacity="'+o.op+'"':'')+(o.rot?' transform="rotate('+o.rot+' '+x+' '+y+')"':'')+
+    ' stroke="rgba(13,6,32,.92)" stroke-width="2.6" paint-order="stroke" stroke-linejoin="round">'+s+'</text>';}
+function line(x1,y1,x2,y2,col,op,w,dash){return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="'+(w||1)+'"'+(dash?' stroke-dasharray="'+dash+'"':'')+'/>';}
+function chevPath(cx,ay,hw,d,t){return cx+','+ay+' '+(cx+hw)+','+(ay+d)+' '+(cx+hw)+','+(ay+d+t)+' '+cx+','+(ay+t)+' '+(cx-hw)+','+(ay+d+t)+' '+(cx-hw)+','+(ay+d);}
+function rect(x,y,w,h,fill,op){return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" fill="'+fill+'"'+(op!=null?' fill-opacity="'+op+'"':'')+'/>';}
+function circ(x,y,r,fill,stroke,sop,sw,dash,filt){return '<circle cx="'+x+'" cy="'+y+'" r="'+r+'" fill="'+(fill||'none')+'"'+(stroke?' stroke="'+stroke+'" stroke-opacity="'+(sop==null?1:sop)+'" stroke-width="'+(sw||1)+'"':'')+(dash?' stroke-dasharray="'+dash+'"':'')+(filt?' filter="url(#gls)"':'')+'/>';}
+function pt(cx,cy,r,a){var t=a*Math.PI/180;return [cx+r*Math.sin(t),cy-r*Math.cos(t)];}
+function arcP(cx,cy,r,a0,a1){var p0=pt(cx,cy,r,a0),p1=pt(cx,cy,r,a1);return 'M'+p0[0].toFixed(2)+','+p0[1].toFixed(2)+' A'+r+','+r+' 0 '+((a1-a0)>180?1:0)+' 1 '+p1[0].toFixed(2)+','+p1[1].toFixed(2);}
+function arc(cx,cy,r,a0,a1,col,op,w,filt){return '<path d="'+arcP(cx,cy,r,a0,a1)+'" fill="none" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="'+w+'"'+(filt?' filter="url(#gls)"':'')+'/>';}
+function fmt(s){return s<3?s.toFixed(1)+'s':Math.round(s)+'s';}
+function bolt(x,y,k,fill,stroke,sw,filt){
+  var P=[[3,0],[-6,14],[-1,14],[-4,27],[7,9],[1,9],[6,0]].map(function(p){return (x+p[0]*k).toFixed(1)+','+(y+p[1]*k).toFixed(1);}).join(' ');
+  return '<polygon points="'+P+'" fill="'+fill+'" stroke="'+stroke+'" stroke-width="'+sw+'" stroke-linejoin="round"'+(filt?' filter="url(#gls)"':'')+'/>';
+}
+
+/* ---------- geometry (image px, from Gunsight.lua) and the shared composition (copied from v7) ---------- */
+var TOP=508,TBOT=752,PITCH=(TBOT-TOP)/10,N=20,CP=(TBOT-TOP)/N;
+var HZ=630;
+
+function chipIcon(x,y,s,d,absent){
+  var c=Math.max(2,Math.round(s/6)),o='';
+  if(absent){
+    return '<polygon points="'+ch(x,y,s,s,c)+'" fill="rgba(13,6,32,.7)" stroke="'+mix(C.muted,'#ffffff',.25)+'" stroke-opacity=".9" stroke-width="1.2"/>'+
+      '<text x="'+(x+s/2)+'" y="'+(y+s/2+s*.18)+'" font-size="'+Math.round(s*.5)+'" fill="'+mix(C.muted,'#ffffff',.25)+'" fill-opacity=".8" text-anchor="middle">'+d.ab+'</text>';
+  }
+  o+='<polygon points="'+ch(x,y,s,s,c)+'" fill="'+mix(d.c,C.bg,.35)+'"/>';
+  o+='<polygon points="'+ch(x,y,s,s*.45,c)+'" fill="'+mix(d.c,'#ffffff',.35)+'" opacity=".3"/>';
+  o+='<polygon points="'+ch(x,y,s,s,c)+'" fill="none" stroke="'+mix(d.c,'#ffffff',.3)+'" stroke-width="1.2"/>';
+  o+='<text x="'+(x+s/2)+'" y="'+(y+s/2+s*.18)+'" font-size="'+Math.round(s*.5)+'" fill="'+C.white+'" text-anchor="middle">'+d.ab+'</text>';
+  return o;
+}
+function bar(x0,x1,col,p,out,caretCol){
+  var o='',cx=(x0+x1)/2,k,i;
+  o+='<polygon points="'+ch(x0,500,x1-x0,260,8)+'" fill="rgba(13,6,32,.55)" fill-opacity=".45"/>';
+  o+='<polygon points="'+ch(x0,500,x1-x0,260,8)+'" fill="none" stroke="'+col+'" stroke-width="1.3" filter="url(#gls)"/>';
+  var ex=out<0?x0:x1;
+  for(k=0;k<=10;k++){var ty=TBOT-k*PITCH;o+=line(ex,ty,ex+out*(k===5?10:5),ty,col,.75,1.2);}
+  for(i=0;i<N;i++){
+    var ay=TBOT-(i+1)*CP,lit=(i+1)/N<=p;
+    o+='<polygon points="'+chevPath(cx,ay,10,8,5.5)+'" fill="'+col+'" fill-opacity="'+(lit?1:.2)+'"'+(lit?' filter="url(#gls)"':'')+'/>';
+  }
+  var fy=TBOT-p*(TBOT-TOP);
+  o+='<polygon points="'+chevPath(cx,fy-17,13,9,7)+'" fill="none" stroke="'+caretCol+'" stroke-width="1.8" stroke-linejoin="miter"/>';
+  return o;
+}
+function box(x,y,w,h,col){
+  return '<polygon points="'+ch(x,y,w,h,8)+'" fill="rgba(13,6,32,.85)"/>'+
+    '<polygon points="'+ch(x,y,w,h,8)+'" fill="none" stroke="'+col+'" stroke-width="1.4" filter="url(#gl)"/>';
+}
+function brackets(x,y,w,h,col,op,a){
+  a=a||12;var s='';
+  [[x,y+a,x,y,x+a,y],[x+w-a,y,x+w,y,x+w,y+a],[x,y+h-a,x,y+h,x+a,y+h],[x+w-a,y+h,x+w,y+h,x+w,y+h-a]].forEach(function(q){
+    s+='<polyline points="'+q[0]+','+q[1]+' '+q[2]+','+q[3]+' '+q[4]+','+q[5]+'" fill="none" stroke="'+col+'" stroke-opacity="'+op+'" stroke-width="1.6"/>';});
+  return s;
+}
+function party(){
+  var o='',x=606,y=506,w=180,h=230;
+  o+=brackets(x,y,w,h,C.cyan,.6,12);
+  var rows=[['Parker',.82,C.green],['Thalia',.55,C.green],['Brogan',.18,'#ff3b4e'],['Mira',.95,C.green],['Jex',.70,C.green]];
+  var rh=(h-16)/5;
+  rows.forEach(function(r,i){
+    var ry=y+8+i*rh;
+    if(i>0)o+=line(x+8,ry,x+w-8,ry,C.violet,.2,1);
+    o+=txt(x+12,ry+14,r[0],11,i===0?C.cyan:C.white);
+    o+=rect(x+12,ry+20,w-24,5,r[2],.18)+rect(x+12,ry+20,(w-24)*r[1],5,r[2],1);
+    o+=rect(x+12,ry+27,w-24,3,'#4aa8ff',.18)+rect(x+12,ry+27,(w-24)*.7,3,'#4aa8ff',1);
+  });
+  return o;
+}
+function tag(x,y,w,html,col){
+  return '<polygon points="'+ch(x,y,w,15,5)+'" fill="rgba(13,6,32,.95)" stroke="'+C.pink+'" stroke-width="1.3" filter="url(#gls)"/>'+
+    '<text x="'+(x+w/2)+'" y="'+(y+11)+'" font-size="11" fill="'+col+'" text-anchor="middle">'+html+'</text>';
+}
+/* the in situ scene: a Shaman mid pull, healing between swings; the target mystic is casting, so KICK (Earth Shock) shows */
+function base(){
+  var o='',X=480,Y=380,W=1000,H=450;
+  var CS=['HEALING WAVE',13,'HW','1.1 / 2.5',18];
+  o+=rect(X,Y,W,H,'url(#sky)')+rect(X,Y,W,H,'url(#glowL)')+rect(X,Y,W,H,'url(#glowR)');
+  o+='<g fill="rgba(120,96,190,.16)" stroke="'+C.violet+'" stroke-opacity=".35" stroke-dasharray="4 4" stroke-width="1">'+
+     '<circle cx="995" cy="540" r="24"/><rect x="953" y="570" width="84" height="100" rx="20"/>'+
+     '<rect x="962" y="664" width="30" height="88" rx="8"/><rect x="998" y="664" width="30" height="88" rx="8"/>'+
+     '<rect x="926" y="576" width="24" height="86" rx="10"/><rect x="1040" y="576" width="24" height="86" rx="10"/></g>';
+  o+='<ellipse cx="995" cy="752" rx="112" ry="26" fill="rgba(80,70,230,.12)" stroke="#5b57e8" stroke-opacity=".6" stroke-width="2"/>';
+  o+=line(838,HZ,1150,HZ,C.violet,.3,1,'6 6');
+  o+=party();
+  o+=bar(796,826,C.cyan,.58,-1,C.white);
+  o+=box(724,424,114,56,C.cyan);
+  o+=txt(731,447,CS[0],CS[1],C.white)+txt(731,469,CS[3],CS[4],C.cyan);
+  o+='<polygon points="'+ch(844,438,28,28,5)+'" fill="rgba(13,6,32,.9)" stroke="'+C.cyan+'" stroke-width="1.3"/><text x="858" y="457" font-size="13" fill="'+C.cyan+'" text-anchor="middle">'+CS[2]+'</text>';
+  o+='<polygon points="'+ch(672,430,44,44,6)+'" fill="rgba(13,6,32,.85)" stroke="'+C.cyan+'" stroke-opacity=".8" stroke-width="1.2"/><text x="694" y="458" font-size="13" fill="'+C.cyan+'" text-anchor="middle">FS</text>';
+  o+=bar(1164,1194,C.pink,.45,1,C.pink);
+  o+=box(1152,416,114,64,C.pink);
+  o+=txt(1159,436,'Gorge Mystic',14,C.white);
+  o+=rect(1159,440,100,3,'#39ff14',.2)+rect(1159,440,62,3,'#39ff14')+rect(1159,445,100,2,'#4aa8ff',.2)+rect(1159,445,70,2,'#4aa8ff');
+  o+=line(1159,453,1259,453,C.pink,.4,1.2)+txt(1159,469,'Frostbolt',14,C.pink);
+  o+=tag(1226,408,36,'KICK',C.pink);
+  o+='<polygon points="'+ch(1118,438,28,28,5)+'" fill="rgba(13,6,32,.9)" stroke="'+C.pink+'" stroke-width="1.3"/><text x="1132" y="457" font-size="13" fill="'+C.pink+'" text-anchor="middle">ES</text>';
+  return o;
+}
+function tags(){
+  var o='';
+  o+=tag(1153,408,68,'L27 <tspan fill="'+C.gold+'">ELITE</tspan>',C.white);
+  o+=tag(1156,473,32,'62%',C.green);
+  o+=tag(1193,473,69,'<tspan fill="'+C.cyan+'">KERRA</tspan>',C.white);
+  return o;
+}
+/* my buffs plate: what is on you right now. The module only adds the missing cue and what the plate cannot show. */
+var BUFFS_SH=[
+  {k:'WF',c:'#d9a521',t:'52m'},
+  {k:'LS',c:'#d9a521',t:'8m'},
+  {k:'SE',c:'#d9a521',t:'4m',party:true},
+  {k:'MS',c:'#d9a521',t:'3m',party:true}
+];
+function buffs(){
+  var o='',L=BUFFS_SH,x0=498,w=164;
+  o+='<polygon points="'+ch(x0,424,w,56,6)+'" fill="rgba(13,6,32,.7)"/><polygon points="'+ch(x0,424,w,56,6)+'" fill="none" stroke="'+C.cyan+'" stroke-opacity=".75" stroke-width="1.2" filter="url(#gls)"/>';
+  L.forEach(function(d,i){
+    var x=x0+6+i*38;
+    o+='<g>'+chipIcon(x+4,430,24,{ab:d.k,c:d.c},false)+'</g>';
+    if(d.party)o+='<circle cx="'+(x+28)+'" cy="432" r="3.2" fill="'+C.cyan+'" stroke="'+C.bg+'" stroke-width="1"/>';
+    o+=txt(x+16,470,d.t,12,C.white,{a:'middle'});
+  });
+  return o;
+}
+function slotDivider(x1){return line(1204,HZ,1227,HZ,C.violet,.85,1.2)+line(1227,HZ,x1,HZ,C.violet,.4,1);}
+var SHDEB=[{ab:'FS',c:'#ff5a3c',rem:9}];
+function dotsH(list,lower){
+  var o='',k,ytop=lower?HZ:TOP,k0=lower?0:5,k1=lower?4:10;
+  for(k=k0;k<=k1;k++){var ty=TBOT-k*PITCH;
+    if(k<10)o+=line(1204,ty,1213,ty,C.pink,.45,1);
+    o+=line(1213,ty,1344,ty,C.violet,k===5?.55:.12,1);}
+  list.forEach(function(d,j){
+    var cy=ytop+PITCH*(j+.5),abs=d.rem<=0,band=!abs&&d.rem<=3,col=band?C.amber:mix(d.c,'#ffffff',.25);
+    o+=chipIcon(1220,cy-10,20,d,abs);
+    o+=txt(1246,cy+4.5,(d.rem<3?d.rem.toFixed(1):Math.round(d.rem))+'s',13,band?C.amber:C.white);
+    o+=rect(1274,cy-2,52,4,col,.2)+rect(1274,cy-2,52*d.rem/30,4,col);
+  });
+  return o;
+}
+
+/* a 14 px footer chip: on (class colour), hollow (unknown) or warn (amber reminder) */
+function mchip(x,y,ab,col,mode){
+  var o='';
+  if(mode==='warn'||mode==='hollow'){
+    var sc=mode==='warn'?C.amber:mix(C.muted,'#ffffff',.25);
+    o+='<polygon points="'+ch(x,y,14,14,3)+'" fill="'+(mode==='warn'?mix(C.bg,C.amber,.22):'rgba(13,6,32,.7)')+'" stroke="'+sc+'" stroke-width="1.2"'+(mode==='warn'?' filter="url(#gls)"':'')+'/>';
+    o+='<text x="'+(x+7)+'" y="'+(y+10.5)+'" font-size="9" fill="'+sc+'" text-anchor="middle">'+ab+'</text>';
+    return o;
+  }
+  o+='<polygon points="'+ch(x,y,14,14,3)+'" fill="'+mix(C.bg,col,.3)+'" stroke="'+col+'" stroke-width="1.2" filter="url(#gls)"/>';
+  o+='<text x="'+(x+7)+'" y="'+(y+10.5)+'" font-size="9" fill="'+C.white+'" text-anchor="middle">'+ab+'</text>';
+  return o;
+}
+var UPK='#d9a521';
+/* the two self reminders: weapon imbue (60 min) and Lightning Shield (10 min, 3 orbs). Quiet when fine. */
+function reminders(xi,xl,y,st,vertical){
+  var o='',I=st.imbue,L=st.ls,ty=vertical?y+23:y+10.5;
+  function one(x,ab,r,word,okTxt){
+    var m=r.s==='missing'?'warn':r.s==='unknown'?'hollow':'on',tx=vertical?x+7:x+18,a=vertical?'middle':'start';
+    var s=r.s==='missing'?word:r.s==='unknown'?'?':okTxt;
+    var fill=r.s==='missing'?C.amber:r.s==='unknown'?C.muted:C.fg;
+    return mchip(x,y,ab,UPK,m)+txt(tx,ty,s,10,fill,{a:a,op:r.s==='up'?.85:1});
+  }
+  o+=one(xi,'WF',I,'IMBUE',I.t);
+  o+=one(xl,'LS',L,'SHIELD','3');
+  return o;
+}
+
+/* ================= CONCEPT A: TOTEM POLES ================= */
+/* each totem is a carved pole of 8 blocks standing on a ground line. The blocks go away from the top as time drains,
+   so the carved head sinks toward the ground. The last block is amber: re-drop. The ground itself is the shock gauge. */
+var PX={fire:[1220,50],earth:[1274,32],water:[1310,32],air:[1346,32]};
+var NB=8,BP=6,BH=5;
+function litOf(s){return s.st==='down'||s.st==='locked'?0:Math.max(1,Math.ceil(s.f*NB));}
+function crown(el,cx,ty,c){
+  var f=' fill="'+c+'" fill-opacity=".95"';
+  if(el==='fire')return '<polygon points="'+(cx-5)+','+(ty+6)+' '+(cx-3)+','+(ty+3)+' '+(cx-1)+','+(ty+4.5)+' '+cx+','+ty+' '+(cx+1)+','+(ty+4.5)+' '+(cx+3)+','+(ty+3)+' '+(cx+5)+','+(ty+6)+'"'+f+'/>';
+  if(el==='earth')return '<polygon points="'+(cx-5)+','+(ty+6)+' '+(cx-5)+','+(ty+2)+' '+(cx-2)+','+(ty+2)+' '+(cx-2)+','+ty+' '+(cx+2)+','+ty+' '+(cx+2)+','+(ty+2)+' '+(cx+5)+','+(ty+2)+' '+(cx+5)+','+(ty+6)+'"'+f+'/>';
+  if(el==='water')return '<path d="M'+(cx-6)+','+(ty+5)+' q1.5,-5 3,0 t3,0 t3,0 t3,0" fill="none" stroke="'+c+'" stroke-width="1.8"/>';
+  return '<polyline points="'+(cx-6)+','+(ty+5)+' '+(cx-3)+','+(ty+1)+' '+cx+','+(ty+5)+'" fill="none" stroke="'+c+'" stroke-width="1.6"/><polyline points="'+cx+','+(ty+5)+' '+(cx+3)+','+(ty+1)+' '+(cx+6)+','+(ty+5)+'" fill="none" stroke="'+c+'" stroke-width="1.6"/>';
+}
+function head(el,cx,ty,w,c,mode){
+  var o='',hx=cx-w/2,hy=ty+6,hero=w>40;
+  if(mode==='down'){
+    o+='<polygon points="'+ch(hx,hy,w,9,2)+'" fill="'+mix(C.bg,C.amber,.12)+'" stroke="'+C.amber+'" stroke-width="1.3" stroke-dasharray="3 2" filter="url(#gls)"/>';
+    o+=txt(cx,hy+8,'+',10,C.amber,{a:'middle'});
+    return o;
+  }
+  var sc=mode==='far'?C.amber:c;
+  o+='<polygon points="'+ch(hx,hy,w,9,2)+'" fill="'+mix(C.bg,c,.42)+'" stroke="'+sc+'" stroke-width="1.3"'+(mode==='far'?' stroke-dasharray="3 2"':' filter="url(#gls)"')+'/>';
+  o+=rect(cx-(hero?9:6),hy+3,hero?5:3,3,'#0a0416',.9)+rect(cx+(hero?4:3),hy+3,hero?5:3,3,'#0a0416',.9);
+  o+=crown(el,cx,ty,mode==='far'?mix(c,C.bg,.35):c);
+  return o;
+}
+function pole(k,s,gy,st,an){
+  var x=PX[k][0],w=PX[k][1],c=EL[k].c,hero=k==='fire',ins=hero?5:3,cx=x+w/2,o='',i;
+  if(s.st==='locked'){
+    o+='<rect x="'+(x+ins)+'" y="'+(gy-NB*BP)+'" width="'+(w-2*ins)+'" height="'+(NB*BP-1)+'" fill="none" stroke="'+C.violet+'" stroke-opacity=".28" stroke-dasharray="2 3"/>';
+    o+=txt(cx,gy-NB*BP/2-2,'L'+s.lv,11,C.muted,{a:'middle',op:.8});
+    o+=txt(cx,gy-NB*BP/2+11,EL[k].nm.charAt(0)+EL[k].nm.slice(1).toLowerCase(),9,C.muted,{a:'middle',op:.55});
+    return o;
+  }
+  var lit=litOf(s),amber=lit===1&&s.st!=='down',op=s.st==='far'?.42:(s.st==='est'?.72:.95);
+  /* the mold: full height outline so the scale is always visible */
+  o+='<rect x="'+(x+ins)+'" y="'+(gy-NB*BP)+'" width="'+(w-2*ins)+'" height="'+(NB*BP-1)+'" fill="'+c+'" fill-opacity=".05" stroke="'+C.violet+'" stroke-opacity=".22" stroke-dasharray="2 3"/>';
+  for(i=0;i<lit;i++){
+    var by=gy-(i+1)*BP,col=(i===lit-1&&amber)?C.amber:c;
+    o+=rect(x+ins,by,w-2*ins,BH,col,op);
+    o+=rect(x+ins+3,by+2,w-2*ins-6,1,'#0a0416',.45);
+  }
+  var ty=gy-lit*BP-15,mode=s.st==='down'?'down':s.st==='far'?'far':'on';
+  o+=head(k,cx,ty,w-2,c,mode);
+  /* label under the ground */
+  var lab,lc=C.white,fs=hero?15:12;
+  if(s.st==='down'){lab='DROP';lc=C.amber;}
+  else if(s.st==='far'){lab='FAR';lc=C.amber;}
+  else{lab=(s.st==='est'?'~':'')+s.t;lc=amber?C.amber:C.white;}
+  o+=txt(cx,gy+19,lab,fs,lc,{a:'middle'});
+  if(an&&hero){an.cap={x:cx,y:ty+9};}
+  return o;
+}
+function poleMod(y0,st,an){
+  var o='',gy=y0+78,x0=1220,x1=1378,m={};
+  /* the re-drop zone: the last block row, across all poles */
+  o+=rect(x0,gy-BP,x1-x0,BP,C.amber,.11)+line(x0,gy-BP-1,x1,gy-BP-1,C.amber,.55,1,'4 3');
+  o+=line(x0,gy,1408,gy,C.violet,.75,1.4);
+  ORDER.forEach(function(k){o+=pole(k,st.slots[k],gy,st,m);});
+  var F=st.slots.fire;
+  /* Fire Nova ring: bursts around the fire totem, so it is drawn around the fire head while ready */
+  var fireUp=F.st==='up'||F.st==='est';
+  if(fireUp&&st.nova==='ready'&&m.cap){
+    o+=circ(m.cap.x,m.cap.y,14,null,C.cyan,.95,1.4,'3 3',true)+circ(m.cap.x,m.cap.y,18,null,C.cyan,.35,1);
+  }
+  /* shock: the ground charges left to right along a lightning trace; the bolt at the end is the terminal */
+  var sx=x0,ex=1382,zy=gy+5,pts=[],px,k2=0;
+  for(px=sx;px<=ex;px+=8){pts.push([px,zy+((k2++%2)?2.5:-2.5)]);}
+  pts[pts.length-1][0]=ex;
+  var S=st.shock,ready=!S.unk&&S.cd<=0,p=S.unk?0:ready?1:Math.max(0,Math.min(1,(6-S.cd)/6));
+  var all=pts.map(function(q){return q[0]+','+q[1];}).join(' ');
+  o+='<polyline points="'+all+'" fill="none" stroke="'+C.violet+'" stroke-opacity=".4" stroke-width="1.4"/>';
+  if(p>0){
+    var cut=sx+(ex-sx)*p,part=[],j;
+    for(j=0;j<pts.length;j++){
+      if(pts[j][0]<=cut)part.push(pts[j][0]+','+pts[j][1]);
+      else{var a=pts[j-1],b=pts[j],t=(cut-a[0])/(b[0]-a[0]);part.push(cut.toFixed(1)+','+(a[1]+(b[1]-a[1])*t).toFixed(1));break;}
+    }
+    o+='<polyline points="'+part.join(' ')+'" fill="none" stroke="'+C.cyan+'" stroke-width="'+(ready?2:1.8)+'" stroke-linejoin="miter"'+(ready?' filter="url(#gl)"':' filter="url(#gls)"')+'/>';
+  }
+  var bcol=S.unk?C.muted:C.cyan;
+  o+=bolt(1396,gy-30,.95,ready?bcol:'rgba(13,6,32,.7)',bcol,1.3,ready);
+  var sl=S.unk?'?':ready?'RDY':fmt(S.cd);
+  o+=txt(1396,gy+19,(S.est&&!ready?'~':'')+sl,12,S.unk?C.muted:ready?C.cyan:C.white,{a:'middle'});
+  /* footer: nova state, then the two reminders */
+  var fy=gy+22;
+  if(fireUp){
+    if(st.nova==='ready'){o+=circ(1224,fy+7,4,null,C.cyan,1,1.2,'2 2',true)+txt(1232,fy+11,'NOVA',10,C.cyan);}
+    else o+=circ(1224,fy+7,4,null,C.muted,.8,1.2,'2 2')+txt(1232,fy+11,'NOVA',10,C.muted,{op:.75});
+  }
+  o+=reminders(1286,1342,fy,st,false);
+  if(an){
+    var capY=m.cap?m.cap.y:gy-30;
+    an.push({n:1,x:1208,y:gy-36});
+    an.push({n:2,x:1208,y:gy-4});
+    an.push({n:3,x:1208,y:gy+29});
+    an.push({n:5,x:1208,y:gy+14});
+    an.push({n:4,x:1415,y:gy-17});
+    an.push({n:6,x:1415,y:gy+29});
+  }
+  return o;
+}
+
+/* ================= CONCEPT B: TOTEM FIELD ================= */
+/* a top down radar around you, player up. The totems are a small cluster of pegs with drain rings; the range rings
+   (10 yd Fire Nova, 20 yd Searing, 30 yd buffs) are centred on the TOTEMS, so walking out of them is visible. */
+function fieldMod(y0,st,an){
+  var o='',cx=1314,cy=y0+57,R=54,K=1.8,id='fc'+(uid++),site=st.site,S=st.slots,F=S.fire;
+  o+=circ(cx,cy,R,'rgba(13,6,32,.82)',C.violet,.55,1.2);
+  o+='<clipPath id="'+id+'"><circle cx="'+cx+'" cy="'+cy+'" r="'+(R-.5)+'"/></clipPath><g clip-path="url(#'+id+')">';
+  o+=line(cx-R,cy,cx+R,cy,C.violet,.14,1)+line(cx,cy-R,cx,cy+R,C.violet,.14,1)+circ(cx,cy,27,null,C.violet,.14,1,'2 4');
+  var sx=0,sy=0,d=0,pinned=false,dyd=0;
+  if(site){
+    sx=cx+site.dx*K;sy=cy+site.dy*K;
+    dyd=Math.sqrt(site.dx*site.dx+site.dy*site.dy);
+    var fireOut=dyd>20,buffOut=dyd>30;
+    o+=circ(sx,sy,54,'rgba(226,212,255,.035)',buffOut?C.amber:C.fg,buffOut?.8:.5,1.1);
+    o+=circ(sx,sy,36,mix(C.bg,EL.fire.c,.1),fireOut?C.amber:EL.fire.c,.7,1.1,'4 3');
+    var nv=(st.nova==='ready'&&(F.st==='up'||F.st==='est'));
+    o+=circ(sx,sy,18,nv?'rgba(34,224,255,.08)':null,nv?C.cyan:C.violet,nv?1:.35,nv?1.6:1,nv?null:'2 3',nv);
+  }
+  o+='</g>';
+  /* player */
+  o+='<polygon points="'+cx+','+(cy-8)+' '+(cx+6)+','+(cy+6)+' '+cx+','+(cy+3)+' '+(cx-6)+','+(cy+6)+'" fill="'+C.cyan+'" stroke="'+C.white+'" stroke-width="1" filter="url(#gls)"/>';
+  /* pegs */
+  if(site){
+    var px=sx,py=sy;
+    d=Math.sqrt((sx-cx)*(sx-cx)+(sy-cy)*(sy-cy));
+    if(d>R-14){var f=(R-14)/d;px=cx+(sx-cx)*f;py=cy+(sy-cy)*f;pinned=true;}
+    var offs={fire:[9,0,6],earth:[-5,11,4],water:[-13,-3,4],air:[3,-13,4]};
+    ORDER.forEach(function(k){
+      var s=S[k],o2=offs[k],X=px+o2[0],Y=py+o2[1],r=o2[2],c=EL[k].c;
+      if(s.st==='locked')return;
+      if(s.st==='down'){o+=circ(X,Y,r+1,null,C.amber,1,1.3,'2 2',true);return;}
+      var lit=litOf(s),amb=lit===1,col=amb?C.amber:c,op=(s.st==='far'||pinned)?.5:1;
+      o+=circ(X,Y,r,mix(C.bg,c,.5),c,op,1.2);
+      o+=circ(X,Y,r+3,null,c,.2,2);
+      o+=arc(X,Y,r+3,0,Math.max(8,Math.min(359,s.f*360)),col,op,2,!pinned&&k==='fire');
+    });
+    if(pinned){
+      var ang=Math.atan2(sx-cx,-(sy-cy))*180/Math.PI,ap=pt(cx,cy,R+3,ang);
+      var ar=pt(cx,cy,R+9,ang-8),al=pt(cx,cy,R+9,ang+8);
+      o+='<polygon points="'+ap[0].toFixed(1)+','+ap[1].toFixed(1)+' '+ar[0].toFixed(1)+','+ar[1].toFixed(1)+' '+al[0].toFixed(1)+','+al[1].toFixed(1)+'" fill="'+C.amber+'" filter="url(#gls)"/>';
+      o+=txt(cx,cy+R+14,Math.round(dyd)+' yd',11,C.amber,{a:'middle'});
+    }
+  }
+  /* left column: shock ring, imbue */
+  var Sk=st.shock,ready=!Sk.unk&&Sk.cd<=0,p=Sk.unk?0:ready?1:Math.max(0,(6-Sk.cd)/6),scx=1238,scy=y0+24;
+  o+=circ(scx,scy,13,null,C.violet,.3,2.2);
+  if(p>0)o+=(p>=1?circ(scx,scy,13,null,C.cyan,1,2.2,null,true):arc(scx,scy,13,0,p*360,C.cyan,1,2.2,true));
+  o+=bolt(scx-.5,scy-8,.58,ready?C.cyan:(Sk.unk?C.muted:mix(C.bg,C.cyan,.35)),Sk.unk?C.muted:C.cyan,.8,false);
+  o+=txt(scx,y0+51,(Sk.est&&!ready?'~':'')+(Sk.unk?'?':ready?'RDY':fmt(Sk.cd)),11,Sk.unk?C.muted:ready?C.cyan:C.white,{a:'middle'});
+  /* right column: the Fire totem readout, the Nova tag */
+  var rcx=1388,rd,rc=C.white,rs=18;
+  if(F.st==='down'){rd='DROP';rc=C.amber;rs=13;}
+  else if(F.st==='far'){rd='FAR';rc=C.amber;rs=15;}
+  else{rd=(F.st==='est'?'~':'')+F.t;rc=litOf(F)===1?C.amber:C.white;}
+  if(F.st!=='locked'){
+    o+=txt(rcx,y0+22,rd,rs,rc,{a:'middle'});
+    o+=txt(rcx,y0+34,'SEARING',9,C.muted,{a:'middle',op:.8});
+  }
+  var nvr=st.nova==='ready'&&(F.st==='up'||F.st==='est');
+  if(F.st==='up'||F.st==='est'||F.st==='far'){
+    o+=circ(rcx,y0+51,5,null,nvr?C.cyan:C.muted,nvr?1:.8,1.2,'2 2',nvr);
+    o+=txt(rcx,y0+68,'NOVA',10,nvr?C.cyan:C.muted,{a:'middle',op:nvr?1:.75});
+  }
+  /* bottom corners: the two reminders, stacked chip over word */
+  var I=st.imbue,L=st.ls;
+  function rem(x,ab,r,word,okTxt){
+    var m=r.s==='missing'?'warn':r.s==='unknown'?'hollow':'on',s=r.s==='missing'?word:r.s==='unknown'?'?':okTxt;
+    return mchip(x-7,y0+80,ab,UPK,m)+txt(x,y0+109,s,10,r.s==='missing'?C.amber:r.s==='unknown'?C.muted:C.fg,{a:'middle',op:r.s==='up'?.85:1});
+  }
+  o+=rem(1238,'WF',I,'IMBUE',I.t)+rem(1388,'LS',L,'SHIELD','3');
+  if(an){
+    an.push({n:4,x:1238,y:y0-1});
+    an.push({n:2,x:1314,y:y0-3});
+    an.push({n:3,x:1314,y:y0+117});
+    an.push({n:5,x:1415,y:y0+8});
+    an.push({n:6,x:1415,y:y0+51});
+    an.push({n:7,x:1208,y:y0+86});
+  }
+  return o;
+}
+
+/* ================= CONCEPT C (dropped): SPIRIT COMPASS ================= */
+function compassMod(y0,st,an){
+  var o='',cx=1314,cy=y0+57,R=47,i,spans={fire:[4,86],earth:[94,176],water:[184,266],air:[274,356]};
+  ORDER.forEach(function(k){
+    var s=st.slots[k],sp=spans[k],c=EL[k].c;
+    o+=arc(cx,cy,R,sp[0],sp[1],c,.2,9);
+    if(s.st==='locked'||s.st==='down')return;
+    o+=arc(cx,cy,R,sp[0],sp[0]+(sp[1]-sp[0])*s.f,litOf(s)===1?C.amber:c,.95,9);
+  });
+  var Sk=st.shock,p=Sk.cd<=0?1:(6-Sk.cd)/6;
+  o+=circ(cx,cy,35,null,C.violet,.3,3);
+  o+=p>=1?circ(cx,cy,35,null,C.cyan,1,3,null,true):arc(cx,cy,35,0,p*360,C.cyan,1,3,true);
+  o+=txt(cx,cy+5,st.slots.fire.t,20,C.white,{a:'middle'});
+  o+=txt(cx,cy+19,'SEARING',9,C.muted,{a:'middle'});
+  o+=txt(cx+30,cy-33,'F',9,EL.fire.c,{a:'middle'})+txt(cx+32,cy+43,'E',9,EL.earth.c,{a:'middle'})+txt(cx-32,cy+43,'W',9,EL.water.c,{a:'middle'})+txt(cx-30,cy-33,'A',9,EL.air.c,{a:'middle'});
+  return o;
+}
+
+/* ---------- state defaults and the per concept strips ---------- */
+var DEF={
+  slots:{fire:{st:'up',f:.63,t:'22s'},earth:{st:'up',f:.8,t:'4m'},water:{st:'up',f:.55,t:'3m'},air:{st:'up',f:.9,t:'4m'}},
+  nova:'ready',shock:{cd:3.1},imbue:{s:'up',t:'52m'},ls:{s:'up'},site:{dx:13,dy:-9}
+};
+function S(o){var r={slots:{},nova:DEF.nova,shock:DEF.shock,imbue:DEF.imbue,ls:DEF.ls,site:DEF.site},k;
+  ORDER.forEach(function(e){r.slots[e]=DEF.slots[e];});
+  for(k in o){if(k==='slots'){for(var e in o.slots)r.slots[e]=o.slots[e];}else r[k]=o[k];}
+  return r;}
+var EST={slots:{fire:{st:'est',f:.63,t:'22s'},earth:{st:'est',f:.8,t:'4m'},water:{st:'est',f:.55,t:'3m'},air:{st:'est',f:.9,t:'4m'}},shock:{cd:3.1,est:true},imbue:{s:'unknown'},ls:{s:'unknown'}};
+
+var V=[
+ {id:'a',name:'TOTEM POLES',mod:poleMod,
+  head:'<b>Four carved totem poles stand on a ground line and sink into it as they run out.</b> Each pole is 8 blocks of its own lifetime; blocks leave from the top, so the carved head drops toward the ground and the last block turns amber: re-drop. Fire is the wide hero pole because Searing is the only totem with a real clock in a fight. The ground itself is the shock gauge: a lightning trace charges left to right in 6 s and the bolt at the end lights when a shock is ready. A cyan ring around the Fire head is Fire Nova ready.',
+  state:S({}),
+  strip:[
+   ['IN THE FIGHT','Searing 22 s, buff totems 3 to 4 min, Nova ring up, shock charging 3 s from ready.',S({})],
+   ['RE-DROP','One block of Searing left, 3 s: amber block, amber time, amber band. Shock bolt lit.',S({slots:{fire:{st:'up',f:.1,t:'3s'}},shock:{cd:0}})],
+   ['FIRE TOTEM GONE','Expired or killed: a hollow amber head on the ground says DROP, and the Nova ring and tag leave.',S({slots:{fire:{st:'down'}},nova:'none'})],
+   ['LEFT BEHIND','You pulled more than 20 yd from the totem: ghost pole, dashed amber head, FAR. Re-drop or Totemic Projection.',S({slots:{fire:{st:'far',f:.55,t:'FAR'}},nova:'cd'})],
+   ['LEVEL 14','Only Earth (4) and Fire (10) are learned: Water (20) and Air (30) show dotted empty molds with their level.',S({slots:{water:{st:'locked',lv:20},air:{st:'locked',lv:30}}})],
+   ['SELF REMINDERS','Imbue and Lightning Shield gone: two amber hollow chips with the word. They stay quiet while up.',S({imbue:{s:'missing'},ls:{s:'missing'}})],
+   ['IN COMBAT, ESTIMATED','Totem data unreadable: poles run on the cast ledger, times get a ~, imbue and shield fall back to ?.',S(EST)]
+  ],
+  rows:[
+   [1,'Pole, blocks, carved head','GetTotemInfo(slot) returns haveTotem, name, startTime, duration, icon. A third party Forever addon reports these can turn SECRET in combat and that the first return can mean reagent ownership, so detect a live totem by name or positive time. Block count = ceil(remaining / duration x 8). Fallback: UNIT_SPELLCAST_SUCCEEDED ledger with HudSpells durations (Searing 30 s r1, 35 s r2; buff totems 300 s), PLAYER_TOTEM_UPDATE for a destroyed totem. Slot to element order must be probed (Classic: fire, earth, water, air; Forever bar: earth, fire, water, air).','probe','PROBE FIRST'],
+   [2,'Amber last block, band','Same data. Zone is the last 1/8 of the totem life: about 4 s of Searing, about 37 s of a 5 minute buff. A cast of Call of the Elements drops four totems in one event, so the ledger alone cannot tell which four; read the slots after PLAYER_TOTEM_UPDATE.','probe','PROBE FIRST'],
+   [3,'Fire Nova ring and NOVA tag','Ready flag is C_Spell.GetSpellCooldown(Fire Nova).isActive, plain in combat (probe verified for cooldowns). Nova is a 10 s spell that needs a Fire totem, so the ring shows only while the Fire pole is up. Whether IsSpellUsable itself goes false with no Fire totem is unknown (probe). Seconds are secret; the tag shows ready or not ready.','ok','READY PLAIN'],
+   [4,'Ground trace and bolt (shock)','Earth, Flame and Frost Shock share one 6 s cooldown. Ready from the plain cooldown isActive of any shock; the charge position is an estimate from our own last shock cast (UNIT_SPELLCAST_SUCCEEDED) plus 6 s. Same method the Judgement lane uses.','ok','READY PLAIN, TRACE EST'],
+   [5,'Time under each pole','Same source as 1. Fire reads in seconds, buff totems in minutes. Blizzard already shows a totem tracker in Forever, so the labels are secondary; the blocks and amber are the point.','probe','PROBE FIRST'],
+   [6,'Imbue and Lightning Shield chips','GetWeaponEnchantInfo() gives hasMainHandEnchant and expiration in ms; not yet probed for secrecy in combat. Imbues last 60 min so an out of combat check is enough. Lightning Shield (10 min, 3 orbs): player aura by spell, out of combat only; the orb count cannot be read in combat, so the chip shows up or missing, never a count.','ooc','OOC ONLY'],
+   [7,'Locked molds (level gating)','Element slots open at Earth 4, Fire 10, Water 20, Air 30 via the element quests. IsPlayerSpell on a representative spell of each element decides locked or empty. Pure client knowledge, plain.','ok','PLAIN']
+  ]},
+ {id:'b',name:'TOTEM FIELD',mod:fieldMod,
+  head:'<b>A small radar around you with your totems on it.</b> You are the cyan chevron, player up. The totems are a cluster of four pegs, each wrapped in a drain ring. The rings around the cluster are the real ranges: 10 yd is Fire Nova (it bursts around the totem), 20 yd is Searing, 30 yd is the buff totems. Walk out of a ring and it turns amber; walk too far and the cluster pins to the rim with an arrow and a distance. Position is the one thing Blizzard\'s own totem tracker does not show.',
+  state:S({}),
+  strip:[
+   ['IN RANGE','Cluster 15 yd ahead and right: inside all three rings, Nova ring lit.',S({})],
+   ['RE-DROP','Fire peg ring down to its last eighth: amber arc and amber 3s.',S({slots:{fire:{st:'up',f:.1,t:'3s'}}})],
+   ['OUT OF SEARING','24 yd away: the 20 yd ring goes amber, you are still inside the 30 yd buff ring.',S({site:{dx:-18,dy:16}})],
+   ['TOO FAR','Beyond the radar: cluster pins to the rim with an arrow and 41 yd. Both rings are amber.',S({site:{dx:-30,dy:26},slots:{fire:{st:'far',f:.55,t:'FAR'}}})],
+   ['FIRE TOTEM GONE','Hollow amber ring where the fire peg was, DROP in the readout, no Nova.',S({slots:{fire:{st:'down'}},nova:'none'})]
+  ],
+  rows:[
+   [1,'Player chevron, radar frame','UnitPosition("player") and GetPlayerFacing() are needed to rotate the field. Both may return nil or secret in instances and under secrecy rules; not probed. If unreadable the whole concept degrades to the readouts only.','probe','PROBE FIRST'],
+   [2,'Range rings (10 / 20 / 30 yd)','Centred on the totem position. Totem position is not exposed by GetTotemInfo, so it is our own position at the cast event (UNIT_SPELLCAST_SUCCEEDED plus UnitPosition). Totemic Projection moves them up to 30 yd without a normal cast, so after it the position is stale (an estimate we can only correct by re-reading).','probe','PROBE FIRST'],
+   [3,'Pegs and drain rings','Totem times as in concept A (GetTotemInfo or the cast ledger). The cluster assumes Call of the Elements drops all four at your feet.','probe','PROBE FIRST'],
+   [4,'Shock ring (left)','Shared 6 s shock cooldown. Ready from the plain cooldown isActive; the ring position is a cast ledger estimate.','ok','READY PLAIN, RING EST'],
+   [5,'Searing readout','Seconds left on the Fire totem; same source as the pegs.','probe','PROBE FIRST'],
+   [6,'NOVA tag','Plain cooldown isActive for Fire Nova, shown only while a Fire totem is up. It hits enemies within 10 yd of the totem, which no addon can read (enemy positions are not available), so the ring is advice, not a guarantee.','ok','READY PLAIN'],
+   [7,'Imbue and shield chips','As in A: GetWeaponEnchantInfo (probe) and the Lightning Shield aura, out of combat.','ooc','OOC ONLY']
+  ]}
+];
+
+/* ---------- scene builders ---------- */
+function sceneSvg(V0,area,vb){
+  var o=base();
+  var y0=area==='upper'?500:632;
+  o+=slotDivider(1410);
+  var mod=V0.mod(y0,V0.state,null);
+  if(area==='upper'){o+=mod;o+=dotsH(SHDEB,true);}else{o+=dotsH(SHDEB,false);o+=mod;}
+  o+=tags();
+  if(vb.w===1000)o+=buffs();
+  return '<svg width="'+vb.w+'" height="450" viewBox="'+vb.x+' 380 '+vb.w+' 450" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg>';
+}
+function scene(V0,area){
+  var full=area==='lower';
+  var lab=full?'<b>'+V0.id.toUpperCase()+'</b>, SHAMAN CLASS MODULE, LOWER AREA':'<b>'+V0.id.toUpperCase()+'</b>, UPPER AREA';
+  return '<div class="scene'+(full?'':' crop')+'"><div class="state">'+lab+'</div>'+sceneSvg(V0,area,full?{x:480,w:1000}:{x:1040,w:440})+'</div>';
+}
+function zoom(V0){
+  var an=[],y0=632,m=V0.mod(y0,V0.state,an),o='';
+  o+='<rect x="1196" y="'+(y0-6)+'" width="226" height="140" fill="#120a22"/>';
+  o+='<rect x="1213" y="'+y0+'" width="202" height="114" fill="rgba(168,85,247,.04)" stroke="'+C.violet+'" stroke-opacity=".5" stroke-dasharray="6 4"/>';
+  o+=m;
+  an.forEach(function(a){
+    o+='<circle cx="'+a.x+'" cy="'+a.y+'" r="6" fill="#0d0620" stroke="'+C.cyan+'" stroke-width="1.2"/><text x="'+a.x+'" y="'+(a.y+3.4)+'" font-size="9" fill="'+C.cyan+'" text-anchor="middle">'+a.n+'</text>';
+  });
+  return '<div class="zoom"><svg width="339" height="210" viewBox="1196 '+(y0-6)+' 226 140" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg></div>';
+}
+function table(V0){
+  var h='<table class="dp">';
+  V0.rows.forEach(function(r){h+='<tr><td class="n">'+r[0]+'</td><td class="e">'+r[1]+'</td><td class="v"><span class="pill '+r[3]+'">'+r[4]+'</span></td><td class="s">'+r[2]+'</td></tr>';});
+  return h+'</table>';
+}
+function strip(V0){
+  var h='<div class="strip"><div class="lead"><i>'+V0.id.toUpperCase()+'</i> '+V0.name+' STATES<small>module alone in a 202 x 128 area</small></div><div class="tiles">';
+  V0.strip.forEach(function(s){
+    var o='<rect x="1213" y="632" width="202" height="128" fill="#120a22"/>'+V0.mod(632,s[2],null);
+    h+='<div class="tile"><svg width="202" height="128" viewBox="1213 632 202 128" font-family="Mononoki, monospace" font-weight="700">'+o+'</svg><div class="tc"><b>'+s[0]+'</b>'+s[1]+'</div></div>';
+  });
+  return h+'</div></div>';
+}
+
+var html='';
+V.forEach(function(v){
+  html+='<h2><i>'+v.id.toUpperCase()+' //</i> '+v.name+(v.id==='a'?' (PRIMARY)':' (ALTERNATIVE)')+'</h2>';
+  html+='<div class="row">'+scene(v,'lower')+'<div class="side"><div class="t"><i>'+v.id.toUpperCase()+'</i> '+v.name+'</div><div class="cap">'+v.head+'</div>'+zoom(v)+'</div></div>';
+  html+='<div class="row">'+scene(v,'upper')+'<div class="tw">'+table(v)+'</div></div>';
+  html+=strip(v);
+});
+
+/* the dropped concept, one tile */
+var CS0=S({});
+var cTile='<div class="tile"><svg width="202" height="128" viewBox="1213 632 202 128" font-family="Mononoki, monospace" font-weight="700"><rect x="1213" y="632" width="202" height="128" fill="#120a22"/>'+compassMod(632,CS0,null)+'</svg><div class="tc"><b>SPIRIT COMPASS (DROPPED)</b>Four arcs for four elements, an inner cyan ring for the shock.</div></div>';
+html+='<h2><i>C //</i> SPIRIT COMPASS (DROPPED)</h2><div class="row" style="align-items:flex-start">'+cTile+
+ '<div class="panel" style="width:1300px"><h3>Why it was dropped</h3><p>An elemental ring: Fire, Earth, Water, Air as four quarter arcs that drain, a cyan inner ring that sweeps the 6 s shock. It is tidy and it is the most obviously compact, but a ring of arcs is how every cooldown rim in every UI looks, it needs a legend to tell which arc is which, and arcs are much harder to compare than a column of blocks. It also has no place for the amber moment. If A or B proves too costly, C is the cheapest fallback: same data as A, no extra probes.</p></div></div>';
+
+html+='<h2><i>//</i> SELF CRITIQUE, THREE CONCEPTS</h2><div class="crit">'+
+ '<div class="cc"><h4><i>A</i> TOTEM POLES, kept, pushed furthest</h4><p><span class="q">Would a player say that is cool?</span> Yes: you watch your own totems sink into the ground, and the shock charge crackles along the ground they stand on. It reads at a glance (tall is fine, one block left is act). <span class="q">Obviously Shaman?</span> Totem poles with carved heads and elemental crowns cannot belong to any other class. <span class="v">Verdict: primary. Risk is the totem data being secret in combat, which has a ledger fallback.</span></p></div>'+
+ '<div class="cc"><h4><i>B</i> TOTEM FIELD, kept as the alternative</h4><p><span class="q">Cool?</span> Yes, it is a tiny tactical map and it shows the one thing Blizzard\'s tracker does not: whether you are standing inside your totem ranges. <span class="q">Obviously Shaman?</span> Yes, ranged placed objects are a Shaman problem. <span class="v">Verdict: alternative. Heavy on probes (position, facing) and the Nova ring cannot know where enemies are, so it ships second.</span></p></div>'+
+ '<div class="cc"><h4><i>C</i> SPIRIT COMPASS, dropped</h4><p><span class="q">Cool?</span> Pretty but generic: a ring of arcs looks like any cooldown rim. <span class="q">Obviously Shaman?</span> Only after you read the letters. <span class="v">Verdict: dropped, kept as the cheap fallback.</span></p></div>'+
+ '</div>';
+
+html+='<h2><i>//</i> NOTES</h2><div class="notes">';
+html+='<div class="panel" style="width:560px;flex:none"><h3>How the Shaman plays at 10 to 30</h3><ul>'+
+ '<li><b>Spec.</b> Enhancement with a slow two hander is how everyone levels (melee costs no mana); Elemental is mana hungry and mobs reach you first until the mid 20s. Alliance can play it: Dwarf is the only Alliance Shaman race.</li>'+
+ '<li><b>Loop.</b> Lightning Shield and an imbue on, drop Searing as the mob closes, Flame Shock, melee; Earth Shock only to kick; Fire Nova on cooldown into packs; Stormstrike from 25. Mana is the limiter, so spells are frontloaded and the swings carry the fight.</li>'+
+ '<li><b>Totems.</b> Imbues last 60 min, Lightning Shield 10 min, buff totems 5 min, so the only real clock is Searing (30 s, 35 s at rank 2) and Magma (20 s). Fire Nova is a spell that bursts around your Fire totem, so it only works with that totem up and the mob next to it. Blizzard added its own totem tracker, so the HUD adds the act moment and range, not another countdown.</li>'+
+ '<li><b>Shocks.</b> Earth, Flame and Frost Shock share one 6 s cooldown; Windfury Weapon arrives at 30 (20% for two extra swings).</li>'+
+ '</ul><h3 style="margin-top:12px">Not drawn, and why</h3><p class="mu">Stormstrike (25, 8 s) and Magma Totem (26, 20 s) are real but a second lane would tip the module into a list; Magma simply uses the Fire pole with its own 20 s scale. Flurry, Windfury procs and Improved Stormstrike are self buffs that are likely secret in combat. Grounding Totem (45 s, reactive) fits the Air pole. Maelstrom Weapon needs level 35 and Rage of the Farseer 40, above the cap.</p>'+
+ '<h3 style="margin-top:12px">Open questions</h3><ul>'+
+ '<li>Is GetTotemInfo readable in combat on this client, and what is the slot to element order?</li>'+
+ '<li>Does Blizzard\'s built in totem tracker overlap enough that the pole labels should be hidden?</li>'+
+ '<li>Searing Totem rank 3 duration at level 30 is not confirmed (rank 2 is 35 s; read the live duration).</li>'+
+ '<li>Does Fire Nova report unusable with no Fire totem down?</li>'+
+ '<li>Do Forever totem spells require the element totem item in the bag (reported by ForeverDB, not seen in the Blizzard text)?</li>'+
+ '<li>Concept B: are UnitPosition and GetPlayerFacing readable?</li>'+
+ '</ul></div>';
+html+='<div class="panel" style="flex:1;min-width:880px"><h3>Spell research, Forever sources first</h3><table class="sp"><tr><th>SPELL</th><th>FOUND</th><th>STATUS</th><th>SOURCE</th></tr>'+
+ [
+  ['Searing Totem','Level 10. 30 s rank 1, 35 s rank 2, rank 3 not confirmed. Attacks an enemy within 20 yd. Needs the Fire totem item.','Verified r1 r2','wowhead.com/forever/spell=3599/searing-totem ; wowfwiki.com/wiki/Shaman_spellbook'],
+  ['Fire Nova','Level 12. 95 mana, 10 s cooldown, instant. Fire damage to enemies within 10 yd of your active Fire totem. Goes off at the totem, you hold threat.','Verified','wowhead.com/forever/spell=408341/fire-nova'],
+  ['Earth / Flame / Frost Shock','Share one 6 s cooldown, 20 yd. Earth Shock 4 (interrupt, 2 s lockout), Flame Shock 10 (12 s DoT), Frost Shock 20 (50% slow, 8 s).','Verified','foreverdb.net/guide/leveling-shaman'],
+  ['Stormstrike','Talent, level 25, 8 s cooldown, 125 mana. Next Lightning Bolt, Chain Lightning or Earth Shock hits 20% harder.','Reported','classicwowforever.com/class-guides/shaman/enhancement ; wowclassicforever.info/classes/shaman'],
+  ['Strength of Earth / buff totems','Strength of Earth 10, Healing Stream 20, Mana Spring 26, Nature Resistance 30: 5 min. Persistent buff totems lasting 5 min is the Oct 7 change.','Verified','foreverdb.net/guide/leveling-shaman ; wowhandbook.com/classes/shaman'],
+  ['Magma Totem','Level 26. 20 s, 8 yd, damage every 2 s. Counts as a Fire totem for Fire Nova.','Verified','foreverdb.net/guide/leveling-shaman ; foreverchanges.pro/spellbook/shaman'],
+  ['Grounding Totem','Level 30. 45 s, redirects one harmful spell per 10 s.','Verified','foreverdb.net/guide/leveling-shaman'],
+  ['Call of the Elements','Level 20. 3 s cast, drops the 4 totems of your Totem Bar, mana is their sum. Call of the Ancestors at 30 in the client.','Verified','news.blizzard.com Oct 7 deep dive via wowforeverguides.com/classes/shaman'],
+  ['Totemic Recall / Projection','Recall (20) destroys all totems, 25% mana back (beta bug). Projection (22) moves all totems up to 30 yd, 1 min cooldown.','Verified','wowhandbook.com/classes/shaman'],
+  ['Totem tracker UI','Blizzard UI that shows active totems and remaining time, right click to dismiss. Totem global cooldown 1.0 s.','Verified','wowforeverguides.com/classes/shaman'],
+  ['Weapon imbues','Rockbiter 1, Flametongue 10, Frostbrand 20, Windfury Weapon 30; all 60 min. Windfury Weapon: 20% to grant 2 extra attacks.','Verified','wowhandbook.com/classes/shaman'],
+  ['Lightning Shield','Level 8. 3 orbs, 10 min, one spent per hit on you.','Verified','wowhandbook.com/classes/shaman'],
+  ['GetTotemInfo secrecy','A Forever addon reports slot values can be secret in combat and uses PLAYER_TOTEM_UPDATE and a cast estimate.','Reported, unprobed','github.com/tomqwu/wow_forever_classmate/blob/main/docs/shaman-module.md']
+ ].map(function(r){return '<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td>'+r[2]+'</td><td class="u">'+r[3]+'</td></tr>';}).join('')+
+ '</table><p class="mu" style="margin-top:8px">Data constraints come from the 2026-10-01 probe: target auras and health are secret in combat, player power is secret, cooldown isActive and IsSpellUsable stay plain, cooldown seconds are secret, cast events carry the rank id. Own debuffs come from the cast ledger in TargetDebuffs.lua.</p></div>';
+html+='</div>';
+document.getElementById('root').innerHTML=html;
+})();
+</script>
+</body>
+</html>
