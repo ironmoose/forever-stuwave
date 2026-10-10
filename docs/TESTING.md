@@ -49,6 +49,19 @@ Log in on a priest. This records what a priest UI could read on this client, out
 
 The plain `/fsprobe` run adds the same snapshot part to its own out-of-combat and in-combat snapshots when the character is a priest. `/fsprobe reset` clears all of it.
 
+### Shaman probe (developer diagnostic)
+
+Make a fresh Shaman and level it a little. This records what a Shaman totem bar could read and do on this client. Do it at level 4 or higher, once the first Earth totem (Stoneskin) is learned; the other elements and Call of the Elements / Totemic Recall come later, so run it again as you learn them. Whatever cannot be checked yet because a spell is not known is listed by name in the chat and in `checks.notRun`; it is skipped, not failed. The snapshot and the logs only read. The test strip below and `setslot` / `destroy` are the only things that click or call anything, and only when you type or click them.
+
+1. Out of combat, drop an Earth totem (keep the totem in the bags), then type `/fsprobe shaman`. It saves an out-of-combat snapshot (including a live totem), prints which spells it knows and which checks could not run, and starts 30 minutes of logging.
+2. Fight a mob with the totem down (the in-combat snapshot saves about 4 seconds into the pull; the totem must still be up). Drop and let expire or dismiss a totem a couple of times; each `PLAYER_TOTEM_UPDATE` is logged with a readout. Typing `/fsprobe shaman` again re-snapshots the state you are in and keeps the logs. If the native totem bar is on screen at your level, leave it there.
+3. Out of combat, type `/fsprobe shaman buttons`. A small purple "FSPROBE SHAMAN TEST STRIP (temporary)" appears below screen centre with three buttons: dismiss (left-click slot 1, right-click slot 2, shift-left-click slot 3, shift-right-click slot 4), a castsequence through your first two known totems (click it repeatedly), and Totemic Recall once known. With a totem down click the dismiss button for the slot it sits in (Earth should be slot 2, but that is one of the things this records), and click the castsequence button. Do it out of combat, then again in a fight (the strip stays clickable in combat; it cannot be built or changed there). Each click is logged with the totem state before and after and the events that followed. `/fsprobe shaman buttons off` hides it, out of combat.
+4. If the native totem bar shows at your level, run `/fsprobe shaman setslot` yourself in combat (it picks another known totem for the Earth slot, then puts the old one back). The chat line prints first. If the client prints ADDON_ACTION_BLOCKED, that is the result; note it. `/fsprobe shaman destroy` (optionally with a slot 1 to 4) calls `DestroyTotem` from addon code with a totem down; try it out of combat and once in combat the same way.
+5. `/fsprobe shaman off` stops the logging (it stops by itself after 30 minutes and hides the strip). Then `/reload` or log out to save.
+6. Send the `fsprobe.shaman` table from `ForeverSTUwaveDB` in `WTF/Account/<id>/SavedVariables/forever-stuwave.lua`. It holds the account's settings too: strip those first.
+
+`/fsprobe reset` clears it too.
+
 ## Paladin: seals, auras, Seal module, chat font
 
 Use a Paladin that has learned at least one seal. Step 6 works on any class.

@@ -41,6 +41,14 @@
 --                  snapshots when the class is PRIEST. Stored in ForeverSTUwaveDB.fsprobe.priest;
 --                  survives a re-arm like gunsight (see PP below).
 --
+--   shaman         `/fsprobe shaman` (any time) / `/fsprobe shaman off`: what a Shaman totem bar can read and do
+--                  on 16001, built for a fresh low level character (spells not known yet are skipped and
+--                  NAMED). Same shape as priest: ooc and combat snapshots, bounded logs. Plus three explicit
+--                  subcommands that are never run automatically: `buttons` (a temporary strip of secure test
+--                  buttons, out of combat only), `setslot` (SetMultiCastSpell, to be run in combat) and
+--                  `destroy` (DestroyTotem from addon code). Stored in ForeverSTUwaveDB.fsprobe.shaman;
+--                  survives a re-arm like gunsight (see the SH block below).
+--
 -- Read it after /reload or logout: WTF/Account/<id>/SavedVariables/forever-stuwave.lua
 -- (ForeverSTUwaveDB.fsprobe).
 --
@@ -51,6 +59,8 @@
 --     the results; nothing is ever thrown into the session.
 --   * Read-only. No protected call, no SetAttribute, no secure template. The one
 --     visible thing is an AuraContainer built from the same template Plater uses.
+--     The one exception is the opt-in `/fsprobe shaman` subcommands (see the SH block): the test strip
+--     of secure buttons and the two calls that may be protected, each typed by Parker, never automatic.
 --   * A secret value is never compared, concatenated, truth-tested, indexed or
 --     tostring'd, and never stored. Only its type and the boolean "isSecret" are
 --     recorded. A plain value is stored only where a field is marked `keep`, and
@@ -201,6 +211,8 @@ local USAGE = {
     "fsprobe: /fsprobe again = status | /fsprobe reset = clear and stop | after \"done\", /reload to save",
     "fsprobe: /fsprobe gunsight = gunsight HUD feature probes (works any time; the cast and combat parts wait for your next cast and pull)",
     "fsprobe: /fsprobe priest = priest probe: snapshot now, the other (ooc/combat) one on the next pull or fight end, plus 20 min of bounded power/cast/aura/kill logs | /fsprobe priest off = stop",
+    "fsprobe: /fsprobe shaman = shaman totem probe: snapshot now, the other (ooc/combat) one on the next pull or fight end, plus 30 min of bounded totem/cast/click logs, and a list of the checks that could not run (spell not known yet) | /fsprobe shaman off = stop",
+    "fsprobe: /fsprobe shaman buttons = temporary secure test strip (dismiss slots 1-4, castsequence, Totemic Recall; out of combat) | /fsprobe shaman buttons off = hide it | /fsprobe shaman setslot = SetMultiCastSpell from addon code, run it IN COMBAT yourself | /fsprobe shaman destroy [slot] = DestroyTotem from addon code",
     "fsprobe: /fsprobe hot = party row HoT probe: an engine aura container per party token (icon, short buffs, HoT timer bar) for 120s (out of combat to start) | /fsprobe hot off = remove it",
 }
 
@@ -2650,6 +2662,501 @@ function GS.Start()
 end
 
 -------------------------------------------------------------------------------
+-- Class probes: the machinery /fsprobe priest and /fsprobe shaman share
+-------------------------------------------------------------------------------
+-- CP.Install(P, cfg) turns an empty table into a class probe: a saved record
+-- ForeverSTUwaveDB.fsprobe.<cfg.key> with `meta`, an `ooc` and a `combat` snapshot and bounded `logs`;
+-- the snapshot timing (one now, the other state on the next pull, 4 s in, or at the fight's end);
+-- the event frame and its registration; start, stop and the timeout. The class supplies:
+--   P.PARTS      the snapshot parts, { name, fn(sec) } (each pcall'd by Section, each record tagged inCombat)
+--   P.SPELLS     { key, english name, { ids }, reads auras } for the generic spells / cooldowns parts
+--   P.PREDICATES C_Secrets calls with their arguments for the generic secrets part
+--   P.EVENTS     { event, unit filters... } registered at start
+--   P.HANDLERS   event -> function(event, ...)
+--   optional hooks: P.ResetState(), P.MetaFields(meta), P.Clock(entry, now), P.OnStop(status),
+--                   P.Finish(snap, sec) (an extra `checks` part), P.AfterSnapshot(snap, kind)
+-- cfg: key, label (chat prefix and command word), logCap, logCaps, logSeconds, combatDelay, oocDelay,
+--      sweepKey (the cached cooldown frame of the duration object trial), logsText, todo (chat text).
+
+local CP = {}
+
+CP.CD_FIELDS = { "startTime", "duration", "isEnabled", "isActive", "modRate", "isOnGCD" }
+CP.CHARGE_FIELDS = { "currentCharges", "maxCharges", "cooldownStartTime", "cooldownDuration", "chargeModRate", "isActive" }
+CP.CD_KEEP = { duration = true, isEnabled = true, isActive = true, isOnGCD = true }
+CP.CHARGE_KEEP = { currentCharges = true, maxCharges = true, isActive = true }
+
+function CP.Round(x)
+    return math.floor(x * 1000 + 0.5) / 1000
+end
+
+-- The plain class token of the player, or nil (a secret or failing read fails closed).
+function CP.ClassToken()
+    local ok, _, token = pcall(Api("UnitClass"), "player")
+    if ok and type(token) == "string" and not IsSecret(token) then return string.sub(token, 1, MAX_STR) end
+    return nil
+end
+
+-- One description of a returned value: "type/plain=value" or "type/secret".
+function CP.DescText(d)
+    if type(d) ~= "table" then return "?" end
+    local text = tostring(d.type) .. (d.isSecret and "/secret" or "/plain")
+    if d.value ~= nil then text = text .. "=" .. tostring(d.value) end
+    return text
+end
+
+-- An Invoke record as one string.
+function CP.Brief(rec)
+    if rec.exists == false then return "absent" end
+    if rec.ok ~= true then return "error: " .. tostring(rec.err) end
+    if (rec.n or 0) < 1 then return "no returns" end
+    local parts = {}
+    for i = 1, math.min(rec.n, MAX_RETURNS) do parts[i] = CP.DescText(rec["r" .. i]) end
+    return table.concat(parts, ",")
+end
+
+-- Invoke(keep) then Brief, for the per-spell cells.
+function CP.B(fn, ...)
+    return CP.Brief((Invoke(true, fn, ...)))
+end
+
+-- Brief plus the described fields of a returned table, sorted.
+function CP.FieldsBrief(rec)
+    local text = CP.Brief(rec)
+    if rec.issecrettable ~= nil then text = text .. " issecrettable=" .. tostring(rec.issecrettable) end
+    if type(rec.fields) == "table" then
+        local keys = {}
+        for k in pairs(rec.fields) do keys[#keys + 1] = k end
+        table.sort(keys)
+        local parts = {}
+        for i, k in ipairs(keys) do
+            local d = rec.fields[k]
+            parts[i] = k .. "=" .. ((type(d) == "table" and d.err) and "error" or CP.DescText(d))
+        end
+        text = text .. " {" .. table.concat(parts, ",") .. "}"
+    end
+    return text
+end
+
+-- A method call on an object that came back from the API, never on a secret one.
+function CP.Method(obj, name)
+    if type(obj) == "nil" or IsSecret(obj) then return nil end
+    return GS.Method(obj, name)
+end
+
+-- True for a plain unit token outside the set: a plain RegisterEvent fallback delivers every unit.
+-- A secret unit is kept and described.
+function CP.ForeignUnit(unit, set)
+    if IsSecret(unit) then return false end
+    return not set[unit]
+end
+
+function CP.Install(P, cfg)
+    for _, name in ipairs({ "Round", "ClassToken", "DescText", "Brief", "B", "FieldsBrief", "Method", "ForeignUnit" }) do
+        P[name] = CP[name]
+    end
+    P.cfg = cfg
+    P.run = 0
+    P.live = nil         -- the running probe: { run, pending = { ooc, combat } }
+    P.frame = nil        -- the event frame (frames are never destroyed, so it is reused)
+    P.combat = false     -- InCombatLockdown at the start of the snapshot being taken
+    P.resolved = nil     -- the spell list with ids resolved, for the snapshot being taken
+    P.last = {}          -- log name -> GetTime of its previous entry
+    P.sample = {}        -- sampled log name -> { key, t, skipped } of its previous kept entry
+    P.names = nil        -- spell id -> resolved name, for the snapshot being taken
+
+    -- Snapshot helpers ---------------------------------------------------------------------------
+
+    function P.Stamp(rec)
+        rec.inCombat = P.combat
+        return rec
+    end
+
+    -- Invoke, tagged. Drops the raw first return: callers that need it call Invoke themselves.
+    function P.Call(keep, fn, ...)
+        return P.Stamp((Invoke(keep, fn, ...)))
+    end
+
+    -- The name the client resolves a spell id to ("unresolved" when it cannot be read as plain). Cached
+    -- for the snapshot being taken.
+    function P.IdName(id)
+        local cache = P.names
+        if cache and cache[id] then return cache[id] end
+        local ok, name = pcall(SpellName, id)
+        local text = (ok and type(name) == "string") and string.sub(name, 1, MAX_STR) or "unresolved"
+        if cache then cache[id] = text end
+        return text
+    end
+
+    -- The spell list with its ids: the listed ones plus the rank the client resolves the name to.
+    function P.Resolve()
+        local out = {}
+        for _, s in ipairs(P.SPELLS) do
+            local ids, seen = {}, {}
+            local function add(id)
+                if type(id) == "number" and not seen[id] then
+                    seen[id] = true
+                    ids[#ids + 1] = id
+                end
+            end
+            for _, id in ipairs(s[3]) do add(id) end
+            local known = KnownRankID(s[2])
+            add(known)
+            out[#out + 1] = { key = s[1], name = s[2], ids = ids, known = known, aura = s[4] }
+        end
+        return out
+    end
+
+    -- Ids of a resolved spell the player has not been refused: only an answer of exactly false drops one.
+    function P.KnownIds(s, isPlayerSpell)
+        local out = {}
+        for _, id in ipairs(s.ids) do
+            if KeptBool((Invoke(true, isPlayerSpell, id))) ~= false then out[#out + 1] = id end
+        end
+        return out
+    end
+
+    -- Generic snapshot parts ---------------------------------------------------------------------
+
+    function P.PartSecrets(sec)
+        sec.calls = {}
+        for _, call in ipairs(P.PREDICATES) do
+            local args = {}
+            for i = 2, #call do args[#args + 1] = tostring(call[i]) end
+            local label = call[1]
+            if #args > 0 then label = label .. "(" .. table.concat(args, ",") .. ")" end
+            sec.calls[label] = P.Call(true, Api("C_Secrets", call[1]), unpack(call, 2))
+        end
+    end
+
+    function P.PartSpells(sec)
+        local isPlayerSpell = Api("IsPlayerSpell")
+        local auraSecrecy = Api("C_Secrets", "GetSpellAuraSecrecy")
+        local cdSecrecy = Api("C_Secrets", "GetSpellCooldownSecrecy")
+        local castSecrecy = Api("C_Secrets", "GetSpellCastSecrecy")
+        local auraSecret = Api("C_Secrets", "ShouldSpellAuraBeSecret")
+        local cdSecret = Api("C_Secrets", "ShouldSpellCooldownBeSecret")
+        for _, s in ipairs(P.resolved) do
+            local entry = { name = s.name, knownRankID = s.known, inCombat = P.combat }
+            sec[s.key] = entry
+            local ok, err = pcall(function()
+                for _, id in ipairs(s.ids) do
+                    entry["s" .. id] = {
+                        spellName = P.IdName(id),
+                        isPlayerSpell = P.B(isPlayerSpell, id),
+                        aura = P.B(auraSecrecy, id),
+                        cooldown = P.B(cdSecrecy, id),
+                        cast = P.B(castSecrecy, id),
+                        shouldAuraBeSecret = P.B(auraSecret, id),
+                        shouldCooldownBeSecret = P.B(cdSecret, id),
+                    }
+                end
+            end)
+            if not ok then entry.entryError = ErrText(err) end
+        end
+    end
+
+    -- A duration object handed to a hidden Cooldown frame (the call is a protected function on a protected
+    -- frame; this one is a plain throwaway). Returns "ok", "absent" or the error text.
+    function P.Sweep(dur)
+        local ok, cd = pcall(GS.Obj, cfg.sweepKey, function(host)
+            local c = CreateFrame("Cooldown", nil, host, "CooldownFrameTemplate")
+            c:Hide()
+            return c
+        end)
+        if not ok or type(cd) == "nil" then return "no frame: " .. ErrText(cd) end
+        local result = GS.Step(cd, "SetCooldownFromDurationObject", dur, true)
+        GS.Hide(cd)
+        return result
+    end
+
+    function P.PartCooldowns(sec)
+        local isPlayerSpell = Api("IsPlayerSpell")
+        local getCooldown = Api("C_Spell", "GetSpellCooldown")
+        local getDuration = Api("C_Spell", "GetSpellCooldownDuration")
+        local getCharges = Api("C_Spell", "GetSpellCharges")
+        for _, s in ipairs(P.resolved) do
+            local entry = { name = s.name, inCombat = P.combat }
+            sec[s.key] = entry
+            local ok, err = pcall(function()
+                if #s.ids == 0 then
+                    entry.skipped = "no id"
+                    return
+                end
+                local ids = P.KnownIds(s, isPlayerSpell)
+                if #ids == 0 then
+                    entry.skipped = "not known"
+                    return
+                end
+                for _, id in ipairs(ids) do
+                    local cell = { spellName = P.IdName(id) }
+                    entry["s" .. id] = cell
+                    cell.cooldown = P.FieldsBrief((InvokeTableKeep(CP.CD_FIELDS, CP.CD_KEEP, getCooldown, id)))
+                    local drec, dur = Invoke(false, getDuration, id)
+                    cell.durationObject = P.Brief(drec)
+                    if drec.ok and type(dur) ~= "nil" and not IsSecret(dur) then
+                        cell.durationIsZero = P.B(P.Method(dur, "IsZero"), dur)
+                        cell.durationRemaining = P.B(P.Method(dur, "GetRemainingDuration"), dur)
+                        cell.sweep = P.Sweep(dur)
+                    end
+                    cell.charges = P.FieldsBrief((InvokeTableKeep(CP.CHARGE_FIELDS, CP.CHARGE_KEEP, getCharges, id)))
+                end
+            end)
+            if not ok then entry.entryError = ErrText(err) end
+        end
+    end
+
+    -- Fills `snap` (a main-run section or a <key>.ooc/combat table).
+    function P.Snapshot(snap)
+        P.combat = LockedDown(false)
+        snap.inCombat = P.combat
+        local ok, resolved = pcall(P.Resolve)
+        P.resolved = ok and resolved or {}
+        P.names = {}
+        snap.time = P.Call(true, Api("GetTime"))
+        for _, part in ipairs(P.PARTS) do
+            Section(snap, part[1], function(sec)
+                sec.inCombat = P.combat
+                part[2](sec)
+            end)
+        end
+        if P.Finish then
+            Section(snap, "checks", function(sec)
+                sec.inCombat = P.combat
+                P.Finish(snap, sec)
+            end)
+        end
+        P.resolved = nil
+        P.names = nil
+    end
+
+    -- Storage, logs ------------------------------------------------------------------------------
+
+    function P.Rec()
+        local db = DB()
+        if type(db[cfg.key]) ~= "table" then db[cfg.key] = {} end
+        return db[cfg.key]
+    end
+
+    function P.Meta()
+        local rec = P.Rec()
+        if type(rec.meta) ~= "table" then rec.meta = {} end
+        return rec.meta
+    end
+
+    -- The saved record without creating it (a stop after a reset must not bring it back).
+    function P.Saved()
+        local root = _G.ForeverSTUwaveDB
+        local db = type(root) == "table" and root[KEY] or nil
+        if type(db) == "table" and type(db[cfg.key]) == "table" then return db[cfg.key] end
+        return nil
+    end
+
+    function P.Log(name)
+        local rec = P.Rec()
+        if type(rec.logs) ~= "table" then rec.logs = {} end
+        local log = rec.logs[name]
+        if type(log) ~= "table" then
+            log = { cap = cfg.logCaps[name] or cfg.logCap, total = 0, dropped = 0, entries = {} }
+            rec.logs[name] = log
+        end
+        return log
+    end
+
+    -- Appends to a ring buffer: the oldest entries go once there are log.cap (cfg.logCap, or cfg.logCaps for the long logs).
+    function P.Push(name, entry)
+        local log = P.Log(name)
+        log.entries[#log.entries + 1] = entry
+        log.total = log.total + 1
+        while #log.entries > log.cap do
+            table.remove(log.entries, 1)
+            log.dropped = log.dropped + 1
+        end
+        if type(entry.t) == "number" then P.last[name] = entry.t end
+    end
+
+    -- Tags an entry: in combat or not, GetTime, the gap to the log's previous entry and, with `clock`,
+    -- whatever the class keeps (P.Clock). Plain numbers only: a secret GetTime is not used (noTime).
+    function P.Mark(e, name, clock)
+        e.inCombat = LockedDown(false)
+        local now = PlainTime()
+        if now == nil then
+            e.noTime = true
+            return e
+        end
+        e.t = now
+        local last = P.last[name]
+        if last then e.gap = P.Round(now - last) end
+        if clock and P.Clock then P.Clock(e, now) end
+        return e
+    end
+
+    -- Snapshot timing and events -----------------------------------------------------------------
+
+    -- kind "ooc" / "combat". Assigned before it is filled, so a failure part-way still saves what ran.
+    function P.TakeSnapshot(kind)
+        local snap = { kind = kind, when = SafeDate(), classToken = P.ClassToken() or "unknown" }
+        P.Rec()[kind] = snap
+        local ok, err = pcall(P.Snapshot, snap)
+        if not ok then snap.snapshotError = ErrText(err) end
+        Say(cfg.label .. ": " .. kind .. " snapshot saved")
+        if P.AfterSnapshot then
+            local okAfter, errAfter = pcall(P.AfterSnapshot, snap, kind)
+            if not okAfter then snap.afterError = ErrText(errAfter) end
+        end
+        return snap
+    end
+
+    -- The event that asked for `kind` is dropped once that snapshot exists.
+    function P.Satisfied(kind)
+        CallOn(P.frame, "UnregisterEvent", kind == "combat" and "PLAYER_REGEN_DISABLED" or "PLAYER_REGEN_ENABLED")
+    end
+
+    function P.Due(run, kind)
+        local live = P.live
+        if not live or live.run ~= run then return end
+        live.pending[kind] = nil
+        -- A pull that ended inside the delay (or a fight that restarted) is not worth recording: stay armed.
+        if LockedDown(kind == "combat") ~= (kind == "combat") then return end
+        local ok, err = pcall(P.TakeSnapshot, kind)
+        if not ok then pcall(function() P.Meta().snapshotError = ErrText(err) end) end
+        P.Satisfied(kind)
+    end
+
+    function P.Schedule(kind, delay)
+        local live = P.live
+        if not live or live.pending[kind] then return end
+        live.pending[kind] = true
+        local run = live.run
+        if not GS.Timer(delay, function()
+            local ok, err = pcall(P.Due, run, kind)
+            if not ok then pcall(function() P.Meta().timerError = ErrText(err) end) end
+        end) then
+            -- No timer: take the snapshot now rather than never.
+            live.pending[kind] = nil
+            pcall(function() P.Meta().delay = "none (C_Timer.After unavailable)" end)
+            P.Due(run, kind)
+        end
+    end
+
+    P.CORE_HANDLERS = {
+        PLAYER_REGEN_DISABLED = function()
+            if P.Rec().combat == nil then P.Schedule("combat", cfg.combatDelay) end
+        end,
+        PLAYER_REGEN_ENABLED = function()
+            if P.Rec().ooc == nil then P.Schedule("ooc", cfg.oocDelay) end
+        end,
+    }
+
+    function P.OnEvent(_, event, ...)
+        if not P.live then return end
+        local fn = P.HANDLERS[event] or P.CORE_HANDLERS[event]
+        if not fn then return end
+        local ok, err = pcall(fn, event, ...)
+        if not ok then
+            pcall(function() P.Meta().lastError = ErrText(err) end)
+        end
+    end
+
+    function P.EnsureFrame()
+        if P.frame then return true end
+        local ok, frame = pcall(CreateFrame, "Frame")
+        if not ok or type(frame) == "nil" then
+            pcall(function() P.Meta().frameError = ErrText(frame) end)
+            return false
+        end
+        P.frame = frame
+        return (pcall(frame.SetScript, frame, "OnEvent", P.OnEvent))
+    end
+
+    -- Every failed registration is kept (appended, capped).
+    function P.NoteRegisterError(event, err)
+        pcall(function()
+            local meta = P.Meta()
+            local text = event .. ": " .. ErrText(err)
+            if type(meta.registerError) == "string" and meta.registerError ~= "" then
+                text = meta.registerError .. " | " .. text
+            end
+            meta.registerError = string.sub(text, 1, MAX_REGISTER_ERR)
+        end)
+    end
+
+    function P.Register(event, ...)
+        local frame = P.frame
+        if select("#", ...) > 0 and pcall(frame.RegisterUnitEvent, frame, event, ...) then return end
+        local ok, err = pcall(frame.RegisterEvent, frame, event)
+        if not ok then P.NoteRegisterError(event, err) end
+    end
+
+    -- status: what meta.status says afterwards. quiet: the explicit reset path, which prints its own line.
+    function P.Stop(status, quiet)
+        local live = P.live
+        P.live = nil
+        P.run = P.run + 1   -- every pending timer of the old run is now stale
+        CallOn(P.frame, "UnregisterAllEvents")
+        GS.Hide(state.gsObjs[cfg.sweepKey])
+        if P.OnStop then pcall(P.OnStop, status) end
+        if live then
+            local rec = P.Saved()
+            if rec and type(rec.meta) == "table" then rec.meta.status = status end
+        end
+        if quiet then return end
+        if live then
+            Say(cfg.label .. ": logging stopped (" .. status .. "), /reload or log out to save")
+        else
+            Say(cfg.label .. ": not running")
+        end
+    end
+
+    function P.Start()
+        state.canTest = Invoke(false, Api("issecretvalue"), 0).ok == true
+        local kind = LockedDown(false) and "combat" or "ooc"
+        if P.live then
+            P.TakeSnapshot(kind)
+            Say(cfg.label .. ": logs keep running; /fsprobe " .. cfg.label .. " off stops them")
+            return
+        end
+        P.run = P.run + 1
+        P.last, P.sample = {}, {}
+        if P.ResetState then P.ResetState() end
+        local run = P.run
+        local meta = {
+            started = SafeDate(), run = run, status = "logging", logCap = cfg.logCap, logCaps = cfg.logCaps, logSeconds = cfg.logSeconds,
+            issecretvalueAvailable = type(_G.issecretvalue) == "function",
+        }
+        if P.MetaFields then P.MetaFields(meta) end
+        if P.Saved() then Say(cfg.label .. ": replacing the saved " .. cfg.label .. " record") end
+        DB()[cfg.key] = { meta = meta, logs = {} }
+        P.TakeSnapshot(kind)
+        if not P.EnsureFrame() then
+            meta.status = "no frame"
+            Say(cfg.label .. ": " .. kind .. " snapshot saved but the event frame could not be created; nothing armed")
+            return
+        end
+        -- Live only once the snapshot is in and the frame exists: a failed start leaves nothing half armed.
+        P.live = { run = run, pending = {} }
+        for _, entry in ipairs(P.EVENTS) do P.Register(unpack(entry)) end
+        -- The snapshot of the other state follows the next change: a pull (4 s in) or the end of the fight.
+        if kind == "ooc" then
+            P.Register("PLAYER_REGEN_DISABLED")
+        else
+            P.Register("PLAYER_REGEN_ENABLED")
+        end
+        if not GS.Timer(cfg.logSeconds, function()
+            if not (P.live and P.live.run == run) then return end
+            local ok, err = pcall(P.Stop, "timeout")
+            if not ok then pcall(function() P.Meta().timerError = ErrText(err) end) end
+        end) then
+            meta.timerError = "C_Timer.After unavailable; logging runs until /fsprobe " .. cfg.label .. " off"
+        end
+        Say(cfg.label .. ": " .. kind .. " snapshot saved. Logging " .. cfg.logSeconds .. "s: " .. cfg.logsText .. ". "
+            .. (kind == "ooc" and "Pull a mob: the combat snapshot follows " .. cfg.combatDelay .. "s in. "
+                or "Leave combat: the ooc snapshot follows. ")
+            .. cfg.todo .. " Run /fsprobe " .. cfg.label .. " again to re-snapshot, "
+            .. "/fsprobe " .. cfg.label .. " off to stop, /reload to save")
+    end
+end
+
+-------------------------------------------------------------------------------
 -- /fsprobe priest: what each priest pain point can read on this client
 -------------------------------------------------------------------------------
 -- `/fsprobe priest` (any time, any class; the main run adds the same section only for a PRIEST)
@@ -2659,7 +3166,7 @@ end
 --   priest.ooc / priest.combat   the snapshots (taken now; the other one follows the next pull or
 --                                the end of the fight), parts: env, secrets, spells, mana, shield,
 --                                auras, cooldowns, triage, lossOfControl, misc, apis;
---   priest.logs.<name>           bounded ring buffers (PP.LOG_CAP entries, 300 for the power logs; oldest dropped; `total`
+--   priest.logs.<name>           bounded ring buffers (50 entries, 300 for the power logs; oldest dropped; `total`
 --                                and `dropped` count what went by): power (UNIT_POWER_UPDATE, the
 --                                mana tick clock; each entry also reads UnitPower for its power
 --                                type, plain or secret), powerFrequent (UNIT_POWER_FREQUENT, sampled:
@@ -2673,7 +3180,7 @@ end
 --                                aura (player and target UNIT_AURA payload secrecy), shield (absorb
 --                                and heal prediction events on player and party), kill (PARTY_KILL,
 --                                PLAYER_TARGET_DIED), died (UNIT_DIED), loc (loss of control).
--- Logging stops after PP.LOG_SECONDS, on `/fsprobe priest off`, or on `/fsprobe reset`.
+-- Logging stops after 1200 s, on `/fsprobe priest off`, or on `/fsprobe reset`.
 -- The per-spell tables (spells, auras, cooldowns) hold ONE compact string per read:
 -- "type/plain=value", "type/secret", "absent", "error: ...", "nil/plain" (nothing there).
 -- A secret is described, never compared, concatenated, indexed or stored; a GUID is compared
@@ -2686,15 +3193,8 @@ end
 -- (classification, level, effective level, plus-mob flag, creature type), plain or secret.
 -- Results: ForeverSTUwaveDB.fsprobe.priest.
 
-PP.COMBAT_DELAY = 4
-PP.OOC_DELAY = 2
-PP.LOG_CAP = 50
--- The power logs hold more: sampled to about one entry a second, 50 would cover under a minute and
--- push the idle window after a mana cast out. Still bounded.
-PP.LOG_CAPS = { power = 300, powerFrequent = 300, powerOther = 300 }
 PP.FREQUENT_COUNT = 10        -- with no plain clock, keep 1 in this many sampled events
 PP.COST_ASSUMPTION = "nil or empty = free"   -- a spell power cost call that returns nothing is read as a free spell
-PP.LOG_SECONDS = 1200
 PP.MANA = 0                   -- Enum.PowerType.Mana
 PP.INSANITY = 13              -- Enum.PowerType.Insanity
 -- Friendly spells tried in order for the range read (by name: no id guess); the first one that
@@ -2767,10 +3267,6 @@ PP.PREDICATES = {
     { "CanCompareUnitTokens", "player", "party1" },
 }
 
-PP.CD_FIELDS = { "startTime", "duration", "isEnabled", "isActive", "modRate", "isOnGCD" }
-PP.CHARGE_FIELDS = { "currentCharges", "maxCharges", "cooldownStartTime", "cooldownDuration", "chargeModRate", "isActive" }
-PP.CD_KEEP = { duration = true, isEnabled = true, isActive = true, isOnGCD = true }
-PP.CHARGE_KEEP = { currentCharges = true, maxCharges = true, isActive = true }
 PP.COST_FIELDS = { "type", "name", "cost", "minCost", "costPercent", "costPerSec" }
 PP.COST_KEEP = { type = true, name = true, cost = true, minCost = true, costPercent = true, costPerSec = true }
 PP.LOC_FIELDS = { "locType", "spellID", "displayText", "startTime", "timeRemaining", "duration", "lockoutSchool", "priority", "displayType" }
@@ -2806,126 +3302,41 @@ PP.EVENTS = {
     { "PLAYER_CONTROL_LOST" }, { "PLAYER_CONTROL_GAINED" },
 }
 
-PP.run = 0
-PP.live = nil         -- the running probe: { run, pending = { ooc, combat } }
-PP.frame = nil        -- the event frame (frames are never destroyed, so it is reused)
-PP.combat = false     -- InCombatLockdown at the start of the snapshot being taken
-PP.resolved = nil     -- the spell list with ids resolved, for the snapshot being taken
-PP.last = {}          -- log name -> GetTime of its previous entry
-PP.sample = {}        -- sampled log name -> { key, t, skipped } of its previous kept entry
-PP.names = nil        -- spell id -> resolved name, for the snapshot being taken
 PP.lastCast = nil     -- GetTime of the last player cast that finished
 PP.lastManaCast = nil -- ... of the last one that cost mana (the five second rule clock)
 PP.manaClockUnknown = false -- a cast whose cost could not be read has gone by since lastManaCast
 
+CP.Install(PP, {
+    key = "priest", label = "priest",
+    logCap = 50,
+    -- The power logs hold more: sampled to about one entry a second, 50 would cover under a minute and
+    -- push the idle window after a mana cast out. Still bounded.
+    logCaps = { power = 300, powerFrequent = 300, powerOther = 300 },
+    logSeconds = 1200, combatDelay = 4, oocDelay = 2, sweepKey = "ppCooldown",
+    logsText = "power ticks, casts, auras, kills, absorbs",
+    todo = "Cast, wand, drink, shield yourself and a party member.",
+})
+
+function PP.ResetState()
+    PP.lastCast, PP.lastManaCast, PP.manaClockUnknown = nil, nil, false
+end
+
+function PP.MetaFields(meta)
+    meta.costAssumption = PP.COST_ASSUMPTION
+end
+
+-- The five second rule clock of a power or cast entry. An unreadable cost since lastManaCast makes it
+-- stale: say so instead of a number.
+function PP.Clock(e, now)
+    if PP.manaClockUnknown then
+        e.sinceManaCastUnknown = true
+    elseif PP.lastManaCast then
+        e.sinceManaCast = PP.Round(now - PP.lastManaCast)
+    end
+    if PP.lastCast then e.sinceCast = PP.Round(now - PP.lastCast) end
+end
+
 -- Snapshot helpers ---------------------------------------------------------------------------
-
-function PP.Round(x)
-    return math.floor(x * 1000 + 0.5) / 1000
-end
-
--- The plain class token of the player, or nil (a secret or failing read fails closed).
-function PP.ClassToken()
-    local ok, _, token = pcall(Api("UnitClass"), "player")
-    if ok and type(token) == "string" and not IsSecret(token) then return string.sub(token, 1, MAX_STR) end
-    return nil
-end
-
-function PP.Stamp(rec)
-    rec.inCombat = PP.combat
-    return rec
-end
-
--- Invoke, tagged. Drops the raw first return: callers that need it call Invoke themselves.
-function PP.Call(keep, fn, ...)
-    return PP.Stamp((Invoke(keep, fn, ...)))
-end
-
--- One description of a returned value: "type/plain=value" or "type/secret".
-function PP.DescText(d)
-    if type(d) ~= "table" then return "?" end
-    local text = tostring(d.type) .. (d.isSecret and "/secret" or "/plain")
-    if d.value ~= nil then text = text .. "=" .. tostring(d.value) end
-    return text
-end
-
--- An Invoke record as one string.
-function PP.Brief(rec)
-    if rec.exists == false then return "absent" end
-    if rec.ok ~= true then return "error: " .. tostring(rec.err) end
-    if (rec.n or 0) < 1 then return "no returns" end
-    local parts = {}
-    for i = 1, math.min(rec.n, MAX_RETURNS) do parts[i] = PP.DescText(rec["r" .. i]) end
-    return table.concat(parts, ",")
-end
-
--- Invoke(keep) then Brief, for the per-spell cells.
-function PP.B(fn, ...)
-    return PP.Brief((Invoke(true, fn, ...)))
-end
-
--- Brief plus the described fields of a returned table, sorted.
-function PP.FieldsBrief(rec)
-    local text = PP.Brief(rec)
-    if rec.issecrettable ~= nil then text = text .. " issecrettable=" .. tostring(rec.issecrettable) end
-    if type(rec.fields) == "table" then
-        local keys = {}
-        for k in pairs(rec.fields) do keys[#keys + 1] = k end
-        table.sort(keys)
-        local parts = {}
-        for i, k in ipairs(keys) do
-            local d = rec.fields[k]
-            parts[i] = k .. "=" .. ((type(d) == "table" and d.err) and "error" or PP.DescText(d))
-        end
-        text = text .. " {" .. table.concat(parts, ",") .. "}"
-    end
-    return text
-end
-
--- A method call on an object that came back from the API, never on a secret one.
-function PP.Method(obj, name)
-    if type(obj) == "nil" or IsSecret(obj) then return nil end
-    return GS.Method(obj, name)
-end
-
--- The name the client resolves a spell id to ("unresolved" when it cannot be read as plain). Cached
--- for the snapshot being taken.
-function PP.IdName(id)
-    local cache = PP.names
-    if cache and cache[id] then return cache[id] end
-    local ok, name = pcall(SpellName, id)
-    local text = (ok and type(name) == "string") and string.sub(name, 1, MAX_STR) or "unresolved"
-    if cache then cache[id] = text end
-    return text
-end
-
--- The spell list with its ids: the listed ones plus the rank the client resolves the name to.
-function PP.Resolve()
-    local out = {}
-    for _, s in ipairs(PP.SPELLS) do
-        local ids, seen = {}, {}
-        local function add(id)
-            if type(id) == "number" and not seen[id] then
-                seen[id] = true
-                ids[#ids + 1] = id
-            end
-        end
-        for _, id in ipairs(s[3]) do add(id) end
-        local known = KnownRankID(s[2])
-        add(known)
-        out[#out + 1] = { key = s[1], name = s[2], ids = ids, known = known, aura = s[4] }
-    end
-    return out
-end
-
--- Ids of a resolved spell the player has not been refused: only an answer of exactly false drops one.
-function PP.KnownIds(s, isPlayerSpell)
-    local out = {}
-    for _, id in ipairs(s.ids) do
-        if KeptBool((Invoke(true, isPlayerSpell, id))) ~= false then out[#out + 1] = id end
-    end
-    return out
-end
 
 function PP.Curve()
     local ok, curve = pcall(function() return _G.CurveConstants.ScaleTo100 end)
@@ -2940,44 +3351,6 @@ function PP.EnumValue(enumName, field)
 end
 
 -- Snapshot parts (each gets its own table, tagged, and is pcall'd by Section) ------------------
-
-function PP.PartSecrets(sec)
-    sec.calls = {}
-    for _, call in ipairs(PP.PREDICATES) do
-        local args = {}
-        for i = 2, #call do args[#args + 1] = tostring(call[i]) end
-        local label = call[1]
-        if #args > 0 then label = label .. "(" .. table.concat(args, ",") .. ")" end
-        sec.calls[label] = PP.Call(true, Api("C_Secrets", call[1]), unpack(call, 2))
-    end
-end
-
-function PP.PartSpells(sec)
-    local isPlayerSpell = Api("IsPlayerSpell")
-    local auraSecrecy = Api("C_Secrets", "GetSpellAuraSecrecy")
-    local cdSecrecy = Api("C_Secrets", "GetSpellCooldownSecrecy")
-    local castSecrecy = Api("C_Secrets", "GetSpellCastSecrecy")
-    local auraSecret = Api("C_Secrets", "ShouldSpellAuraBeSecret")
-    local cdSecret = Api("C_Secrets", "ShouldSpellCooldownBeSecret")
-    for _, s in ipairs(PP.resolved) do
-        local entry = { name = s.name, knownRankID = s.known, inCombat = PP.combat }
-        sec[s.key] = entry
-        local ok, err = pcall(function()
-            for _, id in ipairs(s.ids) do
-                entry["s" .. id] = {
-                    spellName = PP.IdName(id),
-                    isPlayerSpell = PP.B(isPlayerSpell, id),
-                    aura = PP.B(auraSecrecy, id),
-                    cooldown = PP.B(cdSecrecy, id),
-                    cast = PP.B(castSecrecy, id),
-                    shouldAuraBeSecret = PP.B(auraSecret, id),
-                    shouldCooldownBeSecret = PP.B(cdSecret, id),
-                }
-            end
-        end)
-        if not ok then entry.entryError = ErrText(err) end
-    end
-end
 
 -- The mana cost of a spell id: the record, with the first cost entry described.
 function PP.CostRec(id)
@@ -3066,55 +3439,6 @@ function PP.PartAuras(sec)
             end)
             if not ok then entry.entryError = ErrText(err) end
         end
-    end
-end
-
--- SetCooldownFromDurationObject on a hidden Cooldown: records whether the call is accepted.
-function PP.Sweep(dur)
-    local ok, cd = pcall(GS.Obj, "ppCooldown", function(host)
-        local c = CreateFrame("Cooldown", nil, host, "CooldownFrameTemplate")
-        c:Hide()
-        return c
-    end)
-    if not ok or type(cd) == "nil" then return "no frame: " .. ErrText(cd) end
-    local result = GS.Step(cd, "SetCooldownFromDurationObject", dur, true)
-    GS.Hide(cd)
-    return result
-end
-
-function PP.PartCooldowns(sec)
-    local isPlayerSpell = Api("IsPlayerSpell")
-    local getCooldown = Api("C_Spell", "GetSpellCooldown")
-    local getDuration = Api("C_Spell", "GetSpellCooldownDuration")
-    local getCharges = Api("C_Spell", "GetSpellCharges")
-    for _, s in ipairs(PP.resolved) do
-        local entry = { name = s.name, inCombat = PP.combat }
-        sec[s.key] = entry
-        local ok, err = pcall(function()
-            if #s.ids == 0 then
-                entry.skipped = "no id"
-                return
-            end
-            local ids = PP.KnownIds(s, isPlayerSpell)
-            if #ids == 0 then
-                entry.skipped = "not known"
-                return
-            end
-            for _, id in ipairs(ids) do
-                local cell = { spellName = PP.IdName(id) }
-                entry["s" .. id] = cell
-                cell.cooldown = PP.FieldsBrief((InvokeTableKeep(PP.CD_FIELDS, PP.CD_KEEP, getCooldown, id)))
-                local drec, dur = Invoke(false, getDuration, id)
-                cell.durationObject = PP.Brief(drec)
-                if drec.ok and type(dur) ~= "nil" and not IsSecret(dur) then
-                    cell.durationIsZero = PP.B(PP.Method(dur, "IsZero"), dur)
-                    cell.durationRemaining = PP.B(PP.Method(dur, "GetRemainingDuration"), dur)
-                    cell.sweep = PP.Sweep(dur)
-                end
-                cell.charges = PP.FieldsBrief((InvokeTableKeep(PP.CHARGE_FIELDS, PP.CHARGE_KEEP, getCharges, id)))
-            end
-        end)
-        if not ok then entry.entryError = ErrText(err) end
     end
 end
 
@@ -3231,100 +3555,7 @@ PP.PARTS = {
     { "apis", PP.PartApis },
 }
 
--- Fills `snap` (a main-run section or a priest.ooc/combat table).
-function PP.Snapshot(snap)
-    PP.combat = LockedDown(false)
-    snap.inCombat = PP.combat
-    local ok, resolved = pcall(PP.Resolve)
-    PP.resolved = ok and resolved or {}
-    PP.names = {}
-    snap.time = PP.Call(true, Api("GetTime"))
-    for _, part in ipairs(PP.PARTS) do
-        Section(snap, part[1], function(sec)
-            sec.inCombat = PP.combat
-            part[2](sec)
-        end)
-    end
-    PP.resolved = nil
-    PP.names = nil
-end
-
 -- Storage, logs -------------------------------------------------------------------------------
-
-function PP.Rec()
-    local db = DB()
-    if type(db.priest) ~= "table" then db.priest = {} end
-    return db.priest
-end
-
-function PP.Meta()
-    local rec = PP.Rec()
-    if type(rec.meta) ~= "table" then rec.meta = {} end
-    return rec.meta
-end
-
--- The saved record without creating it (a stop after a reset must not bring it back).
-function PP.Saved()
-    local root = _G.ForeverSTUwaveDB
-    local db = type(root) == "table" and root[KEY] or nil
-    if type(db) == "table" and type(db.priest) == "table" then return db.priest end
-    return nil
-end
-
-function PP.Log(name)
-    local rec = PP.Rec()
-    if type(rec.logs) ~= "table" then rec.logs = {} end
-    local log = rec.logs[name]
-    if type(log) ~= "table" then
-        log = { cap = PP.LOG_CAPS[name] or PP.LOG_CAP, total = 0, dropped = 0, entries = {} }
-        rec.logs[name] = log
-    end
-    return log
-end
-
--- Appends to a ring buffer: the oldest entries go once there are log.cap (PP.LOG_CAP, or PP.LOG_CAPS for the power logs).
-function PP.Push(name, entry)
-    local log = PP.Log(name)
-    log.entries[#log.entries + 1] = entry
-    log.total = log.total + 1
-    while #log.entries > log.cap do
-        table.remove(log.entries, 1)
-        log.dropped = log.dropped + 1
-    end
-    if type(entry.t) == "number" then PP.last[name] = entry.t end
-end
-
--- Tags an entry: in combat or not, GetTime, the gap to the log's previous entry and, with `clock`,
--- the time since the last cast and the last cast that cost mana. Plain numbers only: a secret
--- GetTime is not used (noTime).
-function PP.Mark(e, name, clock)
-    e.inCombat = LockedDown(false)
-    local now = PlainTime()
-    if now == nil then
-        e.noTime = true
-        return e
-    end
-    e.t = now
-    local last = PP.last[name]
-    if last then e.gap = PP.Round(now - last) end
-    if clock then
-        -- An unreadable cost since lastManaCast makes that clock stale: say so instead of a number.
-        if PP.manaClockUnknown then
-            e.sinceManaCastUnknown = true
-        elseif PP.lastManaCast then
-            e.sinceManaCast = PP.Round(now - PP.lastManaCast)
-        end
-        if PP.lastCast then e.sinceCast = PP.Round(now - PP.lastCast) end
-    end
-    return e
-end
-
--- True for a plain unit token outside the set: a plain RegisterEvent fallback delivers every unit.
--- A secret unit is kept and described.
-function PP.ForeignUnit(unit, set)
-    if IsSecret(unit) then return false end
-    return not set[unit]
-end
 
 -- Total mana cost of a spell id from C_Spell.GetSpellPowerCost, or nil when unreadable. A call that
 -- succeeds and returns nothing (Shoot) or an empty plain table is a FREE spell: cost 0. An entry
@@ -3496,48 +3727,6 @@ end
 
 -- Snapshot timing and events ------------------------------------------------------------------
 
--- kind "ooc" / "combat". Assigned before it is filled, so a failure part-way still saves what ran.
-function PP.TakeSnapshot(kind)
-    local snap = { kind = kind, when = SafeDate(), classToken = PP.ClassToken() or "unknown" }
-    PP.Rec()[kind] = snap
-    local ok, err = pcall(PP.Snapshot, snap)
-    if not ok then snap.snapshotError = ErrText(err) end
-    Say("priest: " .. kind .. " snapshot saved")
-    return snap
-end
-
--- The event that asked for `kind` is dropped once that snapshot exists.
-function PP.Satisfied(kind)
-    CallOn(PP.frame, "UnregisterEvent", kind == "combat" and "PLAYER_REGEN_DISABLED" or "PLAYER_REGEN_ENABLED")
-end
-
-function PP.Due(run, kind)
-    local live = PP.live
-    if not live or live.run ~= run then return end
-    live.pending[kind] = nil
-    -- A pull that ended inside the delay (or a fight that restarted) is not worth recording: stay armed.
-    if LockedDown(kind == "combat") ~= (kind == "combat") then return end
-    local ok, err = pcall(PP.TakeSnapshot, kind)
-    if not ok then pcall(function() PP.Meta().snapshotError = ErrText(err) end) end
-    PP.Satisfied(kind)
-end
-
-function PP.Schedule(kind, delay)
-    local live = PP.live
-    if not live or live.pending[kind] then return end
-    live.pending[kind] = true
-    local run = live.run
-    if not GS.Timer(delay, function()
-        local ok, err = pcall(PP.Due, run, kind)
-        if not ok then pcall(function() PP.Meta().timerError = ErrText(err) end) end
-    end) then
-        -- No timer: take the snapshot now rather than never.
-        live.pending[kind] = nil
-        pcall(function() PP.Meta().delay = "none (C_Timer.After unavailable)" end)
-        PP.Due(run, kind)
-    end
-end
-
 PP.HANDLERS = {
     UNIT_POWER_UPDATE = function(event, ...) PP.LogPower("power", event, ...) end,
     UNIT_POWER_FREQUENT = function(event, ...) PP.LogPower("powerFrequent", event, ...) end,
@@ -3555,117 +3744,917 @@ PP.HANDLERS = {
     LOSS_OF_CONTROL_UPDATE = function(event, ...) PP.LogLoc(event, ...) end,
     PLAYER_CONTROL_LOST = function(event, ...) PP.LogLoc(event, ...) end,
     PLAYER_CONTROL_GAINED = function(event, ...) PP.LogLoc(event, ...) end,
-    PLAYER_REGEN_DISABLED = function()
-        if PP.Rec().combat == nil then PP.Schedule("combat", PP.COMBAT_DELAY) end
-    end,
-    PLAYER_REGEN_ENABLED = function()
-        if PP.Rec().ooc == nil then PP.Schedule("ooc", PP.OOC_DELAY) end
-    end,
 }
 
-function PP.OnEvent(_, event, ...)
-    if not PP.live then return end
-    local fn = PP.HANDLERS[event]
-    if not fn then return end
-    local ok, err = pcall(fn, event, ...)
-    if not ok then
-        pcall(function() PP.Meta().lastError = ErrText(err) end)
-    end
+-------------------------------------------------------------------------------
+-- /fsprobe shaman: what a totem bar can read and do on this client
+-------------------------------------------------------------------------------
+-- Built for a fresh low level Shaman on WoW Forever (16001): the first Earth totem comes at level 4, the
+-- other elements and the Call of the Elements / Totemic Recall spells later, so every check that needs a
+-- spell the player does not know yet is SKIPPED and NAMED (checks.notRun, and a chat line), never failed.
+-- Same machinery as `/fsprobe priest` (CP above): `/fsprobe shaman` (any time, any class) takes an ooc and
+-- a combat snapshot (the other one follows the next pull, 4 s in, or the end of the fight) and logs for
+-- 30 minutes. Results: ForeverSTUwaveDB.fsprobe.shaman.
+--   shaman.ooc / shaman.combat   parts, each record tagged inCombat true/false:
+--     player     class, level, GetNumTotemSlots, the slot constants (FIRE_TOTEM_SLOT ...) and
+--                SHAMAN_TOTEM_PRIORITIES;
+--     secrets    C_Secrets predicates, ShouldTotemSlotBeSecret(1..4), ShouldTotemSpellBeSecret per known spell;
+--     totems     per slot s1..s4: GetTotemInfo with ALL returns (plain value or secret, per field; `brief` is
+--                the same as one string; `looksBlank` flags the known 1.60.1 report of a live totem that
+--                answers with no name), GetTotemTimeLeft, GetTotemCannotDismiss, C_TooltipInfo.GetTotem and
+--                the NEWER duration API: GetTotemDuration(slot) returns a duration object (that is what
+--                ElvUI's "new API blizzard provided" is: it stays readable when the numbers are secret);
+--                its methods are read plain or secret, handed to a hidden Cooldown frame
+--                (SetCooldownFromDurationObject) and to a hidden StatusBar (SetTimerDuration);
+--     multicast  the native bar's data: C_ActionBar.GetMultiCastBarIndex, HasMultiCastActionBar / Page,
+--                GetMultiCastTotemSpells per action id 1..12 (spell ids with names), and for 3 sets x 4 slots
+--                the action id (barIndex - 1) * 12 + (set - 1) * 4 + slot with HasAction / GetActionInfo /
+--                GetActionTexture on it, plus Blizzard's own MultiCastActionButtonN ids when they exist;
+--     frames     MultiCastActionBarFrame, MultiCastSlotButton1-4, MultiCastSummonSpellButton,
+--                MultiCastRecallSpellButton, MultiCastFlyoutFrame, MultiCastActionButton1, TotemFrame: exists,
+--                shown, alpha, scale, rect, size, anchors; and whether the native bar's rect overlaps our
+--                action bar group (FSActionBarStack, FSConsole). READ ONLY: these frames are never changed;
+--     spells / cooldowns   Call of the Elements 66842, Call of the Ancestors 66843, Totemic Recall 36936 and
+--                every totem by name (the client resolves a name to the rank the player knows): ids,
+--                names, IsPlayerSpell, secrecy, cooldown plain/secret, duration object;
+--     misc / apis   totem items, constants, presence of every API used;
+--     checks     notRun (what could not run and why), notRunCount, spellsKnown, spellsNotKnown.
+--   shaman.logs.<name>  bounded ring buffers: totem (PLAYER_TOTEM_UPDATE: slot argument plain or secret and a
+--                GetTotemInfo readout for it per event), cast (the player's start / succeeded / failed /
+--                interrupted), multicast (UPDATE_MULTI_CAST_ACTIONBAR with HasMultiCastActionBar), click (the
+--                test strip: each click with the totem state before and after, and the events that followed
+--                it within 3 s).
+-- Nothing protected runs by itself. These run ONLY when Parker types them:
+--   /fsprobe shaman buttons        a small labelled TEMPORARY strip of 3 SecureActionButtonTemplate buttons:
+--                                  dismiss (left slot 1, right slot 2, shift-left 3, shift-right 4 through
+--                                  the secure `destroytotem` action), a `/castsequence` through two known
+--                                  totems and Totemic Recall (each only when known). Built and shown out of
+--                                  combat only; in combat the command refuses and `buttons off` only fades it.
+--   /fsprobe shaman buttons off    hides it (out of combat).
+--   /fsprobe shaman setslot        P1: SetMultiCastSpell on the earth (or first) slot from addon code, run it
+--                                  IN COMBAT yourself. The chat line comes first because a blocked call
+--                                  prints ADDON_ACTION_BLOCKED, which pcall cannot catch. Restores the pick.
+--   /fsprobe shaman destroy [n]    DestroyTotem(n) from addon code (default: the first live totem).
+-- Rules this section keeps: never register the combat log event (protected on Forever); a secret is described,
+-- never compared, branched on or stored; Blizzard's totem frames and buttons are only read.
+
+local SH = {}
+
+SH.SLOT_COUNT = 4
+SH.PAGES = 3
+SH.PAGE_SIZE = 4
+SH.BAR_SIZE = 12              -- NUM_ACTIONBAR_BUTTONS: action ids per bar
+SH.BAR_FALLBACK = 12          -- the bar index assumed when the call cannot be read
+SH.SLOT_PICK_ORDER = { 2, 1, 3, 4 }   -- SHAMAN_TOTEM_PRIORITIES: earth first, the first totem a shaman gets
+SH.FOLLOW_SECONDS = 3
+SH.FOLLOW_CAP = 8
+SH.NOTRUN_CAP = 40
+SH.RUN_CAP = 6
+SH.STRIP_NAME = "FSProbeShamanStrip"
+SH.BUTTON_PREFIX = "FSProbeShamanBtn"
+SH.PLAYER_SET = { player = true }
+SH.CONSTANTS = { "FIRE_TOTEM_SLOT", "EARTH_TOTEM_SLOT", "WATER_TOTEM_SLOT", "AIR_TOTEM_SLOT", "MAX_TOTEMS" }
+SH.DURATION_METHODS = {
+    "GetRemainingDuration", "GetElapsedDuration", "GetTotalDuration", "IsZero", "HasExpired", "HasStarted",
+    "IsActive", "HasSecretValues",
+}
+
+-- { element, english name, level of the first rank } up to the level 30 cap and a little above (research
+-- 2026-10-10: foreverdb / talentsforever tooltips). A name the client does not resolve is simply not known yet.
+SH.TOTEMS = {
+    { "earth", "Stoneskin Totem", 4 }, { "earth", "Earthbind Totem", 6 }, { "earth", "Stoneclaw Totem", 8 },
+    { "earth", "Strength of Earth Totem", 10 }, { "earth", "Tremor Totem", 18 },
+    { "fire", "Searing Totem", 10 }, { "fire", "Frost Resistance Totem", 24 }, { "fire", "Magma Totem", 26 },
+    { "fire", "Flametongue Totem", 28 },
+    { "water", "Healing Stream Totem", 20 }, { "water", "Poison Cleansing Totem", 22 },
+    { "water", "Disease Cleansing Totem", 22 }, { "water", "Mana Spring Totem", 26 },
+    { "water", "Fire Resistance Totem", 28 }, { "water", "Mana Tide Totem", 25 },
+    { "air", "Grounding Totem", 30 }, { "air", "Nature Resistance Totem", 30 }, { "air", "Windfury Totem", 32 },
+    { "air", "Sentry Totem", 34 }, { "air", "Windwall Totem", 36 }, { "air", "Grace of Air Totem", 42 },
+}
+
+-- { key, english name, { ids }, reads auras, level }. Ids: 66842, 66843, 66844 and 36936 are the client's own
+-- TOTEM_MULTI_CAST_SUMMON_SPELLS / RECALL_SPELLS; Fire Nova is a spell on Forever (research 2026-10-10).
+-- Totems have no id here: the name resolves to the rank the player knows.
+SH.SPELLS = {
+    { "coe", "Call of the Elements", { 66842 }, false, 20 },
+    { "coa", "Call of the Ancestors", { 66843 }, false, 30 },
+    { "cos", "Call of the Spirits", { 66844 }, false, 40 },
+    { "recall", "Totemic Recall", { 36936 }, false, 20 },
+    { "projection", "Totemic Projection", {}, false, 22 },
+    { "fire_nova", "Fire Nova", { 408341 }, false, 12 },
+}
+for _, t in ipairs(SH.TOTEMS) do
+    local key = string.lower((string.gsub((string.gsub(t[2], " Totem$", "")), "%s+", "_")))
+    SH.SPELLS[#SH.SPELLS + 1] = { key, t[2], {}, false, t[3] }
 end
 
-function PP.EnsureFrame()
-    if PP.frame then return true end
-    local ok, frame = pcall(CreateFrame, "Frame")
-    if not ok or type(frame) == "nil" then
-        pcall(function() PP.Meta().frameError = ErrText(frame) end)
-        return false
-    end
-    PP.frame = frame
-    return (pcall(frame.SetScript, frame, "OnEvent", PP.OnEvent))
+-- The totem items a cast needs in the bags (Classic Era ids, UNVERIFIED on Forever).
+SH.ITEMS = { { "earth", 5175 }, { "fire", 5176 }, { "water", 5177 }, { "air", 5178 } }
+
+SH.PREDICATES = {
+    { "HasSecretRestrictions" }, { "ShouldCooldownsBeSecret" }, { "ShouldAurasBeSecret" },
+    { "ShouldTotemSlotBeSecret", 1 }, { "ShouldTotemSlotBeSecret", 2 },
+    { "ShouldTotemSlotBeSecret", 3 }, { "ShouldTotemSlotBeSecret", 4 },
+    { "ShouldUnitSpellCastingBeSecret", "player" },
+}
+
+-- Blizzard's totem frames (read only) and our own action bar group (the overlap target).
+SH.FRAMES = {
+    "MultiCastActionBarFrame", "MultiCastSlotButton1", "MultiCastSlotButton2", "MultiCastSlotButton3",
+    "MultiCastSlotButton4", "MultiCastSummonSpellButton", "MultiCastRecallSpellButton", "MultiCastFlyoutFrame",
+    "MultiCastActionButton1", "TotemFrame",
+}
+SH.OURS = { "FSActionBarStack", "FSConsole" }
+
+-- Presence only: { namespace-or-global, name }.
+SH.API_LIST = {
+    { "GetTotemInfo" }, { "GetTotemTimeLeft" }, { "GetTotemDuration" }, { "GetNumTotemSlots" },
+    { "GetTotemCannotDismiss" }, { "DestroyTotem" }, { "SetMultiCastSpell" }, { "GetMultiCastTotemSpells" },
+    { "HasMultiCastActionBar" }, { "HasMultiCastActionPage" }, { "ChangeMultiCastActionPage" },
+    { "GetMultiCastBarIndex" }, { "C_ActionBar", "GetMultiCastBarIndex" },
+    { "C_Secrets", "ShouldTotemSlotBeSecret" }, { "C_Secrets", "ShouldTotemSpellBeSecret" },
+    { "C_TooltipInfo", "GetTotem" }, { "C_Spell", "GetSpellCooldownDuration" },
+    { "HasAction" }, { "GetActionInfo" }, { "GetActionTexture" }, { "C_Item", "GetItemCount" }, { "UnitLevel" },
+}
+
+-- { event, unit filter }: the combat log event is never among them.
+SH.EVENTS = {
+    { "PLAYER_TOTEM_UPDATE" }, { "UPDATE_MULTI_CAST_ACTIONBAR" },
+    { "UNIT_SPELLCAST_START", "player" }, { "UNIT_SPELLCAST_SUCCEEDED", "player" },
+    { "UNIT_SPELLCAST_FAILED", "player" }, { "UNIT_SPELLCAST_INTERRUPTED", "player" },
+}
+
+SH.lastClick = nil    -- the click entry still collecting the events that follow it
+SH.strip = nil        -- { host, buttons }: the test strip frames (frames are never destroyed, so they are reused)
+
+CP.Install(SH, {
+    key = "shaman", label = "shaman",
+    logCap = 50, logCaps = { totem = 100 },
+    logSeconds = 1800, combatDelay = 4, oocDelay = 2, sweepKey = "shCooldown",
+    logsText = "PLAYER_TOTEM_UPDATE readouts, casts, native bar updates, test strip clicks",
+    todo = "Drop a totem, dismiss it, cast a few spells. /fsprobe shaman buttons (out of combat) shows the test strip; "
+        .. "/fsprobe shaman setslot is the combat test, run it yourself in a fight.",
+})
+
+SH.PartGenericSecrets = SH.PartSecrets   -- the installed one; SH.PartSecrets below adds the totem spell predicates
+
+function SH.ResetState()
+    SH.lastClick = nil
 end
 
--- Every failed registration is kept (appended, capped).
-function PP.NoteRegisterError(event, err)
-    pcall(function()
-        local meta = PP.Meta()
-        local text = event .. ": " .. ErrText(err)
-        if type(meta.registerError) == "string" and meta.registerError ~= "" then
-            text = meta.registerError .. " | " .. text
+function SH.MetaFields(meta)
+    meta.slotNote = "slot numbers are the GetTotemInfo / DestroyTotem indices; the constants in player.constants say which element each is"
+    meta.followSeconds = SH.FOLLOW_SECONDS
+end
+
+function SH.OnStop(_)
+    SH.lastClick = nil
+    SH.HideStrip(true)
+end
+
+-- Helpers --------------------------------------------------------------------------------------
+
+-- The plain value of return i of an Invoke record made with keep, or nil (secret, absent or not kept).
+function SH.Kept(rec, i)
+    local d = rec and rec["r" .. i]
+    if type(d) == "table" and d.isSecret == false then return d.value end
+    return nil
+end
+
+-- The first return of widget:method(), when it is a plain number.
+function SH.Number(widget, method)
+    local exists, ok, res = GS.Call(widget, method)
+    if not (exists and ok) then return nil end
+    local got = res[2]
+    if type(got) == "number" and not IsSecret(got) then return got end
+    return nil
+end
+
+-- A related widget by method (GetParent): its name, "nil" for an anonymous one, or a plain description.
+function SH.Related(widget, method)
+    local exists, ok, res = GS.Call(widget, method)
+    if not exists then return "absent" end
+    if not ok then return "error: " .. res end
+    local got = res[2]
+    if type(got) == "table" and not IsSecret(got) then return GS.Read(got, "GetName") end
+    return GS.Plain(got)
+end
+
+-- The screen rect of a widget in effective-scale units, or nil when any edge is not a plain number.
+function SH.Rect(widget)
+    local left, bottom = SH.Number(widget, "GetLeft"), SH.Number(widget, "GetBottom")
+    local right, top = SH.Number(widget, "GetRight"), SH.Number(widget, "GetTop")
+    if not (left and bottom and right and top) then return nil end
+    local scale = SH.Number(widget, "GetEffectiveScale") or 1
+    return { l = left * scale, b = bottom * scale, r = right * scale, t = top * scale }
+end
+
+-- One frame by global name: what a UI author needs to place a bar next to it.
+function SH.FrameRec(name)
+    local widget = _G[name]
+    if type(widget) ~= "table" or IsSecret(widget) then return { exists = false } end
+    local rec = { exists = true }
+    rec.shown = GS.Read(widget, "IsShown")
+    rec.visible = GS.Read(widget, "IsVisible")
+    rec.alpha = GS.Read(widget, "GetAlpha")
+    rec.effectiveAlpha = GS.Read(widget, "GetEffectiveAlpha")
+    rec.scale = GS.Read(widget, "GetScale")
+    rec.effectiveScale = GS.Read(widget, "GetEffectiveScale")
+    rec.rect = (GS.ReadList(widget, "GetRect"))
+    rec.size = (GS.ReadList(widget, "GetSize"))
+    rec.strata = GS.Read(widget, "GetFrameStrata")
+    rec.parent = SH.Related(widget, "GetParent")
+    rec.protected = (GS.ReadList(widget, "IsProtected"))
+    rec.children = GS.Read(widget, "GetNumChildren")
+    local count = GS.Read(widget, "GetNumPoints")
+    rec.numPoints = count
+    rec.points = {}
+    if type(count) == "number" then
+        for i = 1, math.min(count, 4) do
+            local exists, ok, res = GS.Call(widget, "GetPoint", i)
+            if exists and ok then
+                local relative = res[3]
+                local relName = "nil"
+                if type(relative) == "table" and not IsSecret(relative) then relName = GS.Read(relative, "GetName") end
+                rec.points["p" .. i] = {
+                    point = GS.Plain(res[2]), relativeTo = relName, relativePoint = GS.Plain(res[4]),
+                    x = GS.Plain(res[5]), y = GS.Plain(res[6]),
+                }
+            end
         end
-        meta.registerError = string.sub(text, 1, MAX_REGISTER_ERR)
+    end
+    return rec
+end
+
+-- "overlaps" / "clear" for two rects (hidden native frames say so), or why it is unknown.
+function SH.Overlap(nativeName, ourName)
+    local lhs, rhs = _G[nativeName], _G[ourName]
+    if type(lhs) ~= "table" or IsSecret(lhs) then return "unknown: " .. nativeName .. " absent" end
+    if type(rhs) ~= "table" or IsSecret(rhs) then return "unknown: " .. ourName .. " absent" end
+    local a, b = SH.Rect(lhs), SH.Rect(rhs)
+    if not (a and b) then return "unknown: rect unreadable or secret" end
+    local hit = a.l < b.r and b.l < a.r and a.b < b.t and b.b < a.t
+    local text = hit and "overlaps" or "clear"
+    if GS.Read(lhs, "IsShown") ~= true then text = text .. " (native frame not shown)" end
+    return text
+end
+
+-- Every GetTotemInfo slot as one string each (the state around a click or an event).
+function SH.Slots()
+    local out = {}
+    for slot = 1, SH.SLOT_COUNT do out["s" .. slot] = SH.B(Api("GetTotemInfo"), slot) end
+    return out
+end
+
+-- Snapshot parts ---------------------------------------------------------------------------------
+
+function SH.PartPlayer(sec)
+    sec.classToken = SH.ClassToken() or "unknown"
+    if sec.classToken ~= "SHAMAN" then sec.notShaman = true end
+    sec.level = SH.Call(true, Api("UnitLevel"), "player")
+    sec.numTotemSlots = SH.Call(true, Api("GetNumTotemSlots"))
+    sec.constants = {}
+    for _, name in ipairs(SH.CONSTANTS) do sec.constants[name] = GS.Plain(_G[name]) end
+    local ok, text = pcall(function()
+        local list = _G.SHAMAN_TOTEM_PRIORITIES
+        if type(list) ~= "table" then return "absent" end
+        local parts = {}
+        for i = 1, 8 do
+            if list[i] == nil then break end
+            parts[#parts + 1] = tostring(GS.Plain(list[i]))
+        end
+        return table.concat(parts, ",")
     end)
+    sec.priorities = ok and text or ("error: " .. ErrText(text))
 end
 
-function PP.Register(event, ...)
-    local frame = PP.frame
-    if select("#", ...) > 0 and pcall(frame.RegisterUnitEvent, frame, event, ...) then return end
-    local ok, err = pcall(frame.RegisterEvent, frame, event)
-    if not ok then PP.NoteRegisterError(event, err) end
-end
-
--- status: what meta.status says afterwards. quiet: the explicit reset path, which prints its own line.
-function PP.Stop(status, quiet)
-    local live = PP.live
-    PP.live = nil
-    PP.run = PP.run + 1   -- every pending timer of the old run is now stale
-    CallOn(PP.frame, "UnregisterAllEvents")
-    GS.Hide(state.gsObjs.ppCooldown)
-    if live then
-        local rec = PP.Saved()
-        if rec and type(rec.meta) == "table" then rec.meta.status = status end
+function SH.PartSecrets(sec)
+    SH.PartGenericSecrets(sec)
+    sec.totemSpells = {}
+    local secret = Api("C_Secrets", "ShouldTotemSpellBeSecret")
+    local isPlayerSpell = Api("IsPlayerSpell")
+    for _, s in ipairs(SH.resolved) do
+        local ids = SH.KnownIds(s, isPlayerSpell)
+        for n, id in ipairs(ids) do
+            sec.totemSpells[n == 1 and s.name or (s.name .. " " .. id)] = SH.B(secret, id)
+        end
     end
-    if quiet then return end
-    if live then
-        Say("priest: logging stopped (" .. status .. "), /reload or log out to save")
+end
+
+-- A duration object on a hidden StatusBar: does SetTimerDuration take it, and what does the bar read?
+function SH.BarTrial(dur)
+    local out = {}
+    local ok, bar = pcall(GS.Bar, "shBar")
+    if not ok or type(bar) == "nil" then
+        out.error = "no bar: " .. ErrText(bar)
+        return out
+    end
+    out.setTimerDuration = GS.Step(bar, "SetTimerDuration", dur)
+    out.value = GS.Read(bar, "GetValue")
+    GS.Hide(bar)
+    return out
+end
+
+-- Everything one slot can say, into `cell`.
+function SH.ReadSlot(cell, slot)
+    local rec = Invoke(true, Api("GetTotemInfo"), slot)
+    cell.info = SH.Stamp(rec)
+    cell.brief = SH.Brief(rec)
+    local have, name = SH.Kept(rec, 1), SH.Kept(rec, 2)
+    cell.live = have == true
+    if type(have) ~= "boolean" then
+        cell.looksBlank = "unknown"
+    elseif have == false then
+        cell.looksBlank = false
+    elseif type(name) == "string" then
+        cell.looksBlank = name == ""
     else
-        Say("priest: not running")
+        cell.looksBlank = "unknown"
+    end
+    cell.timeLeft = SH.Call(true, Api("GetTotemTimeLeft"), slot)
+    cell.cannotDismiss = SH.Call(true, Api("GetTotemCannotDismiss"), slot)
+    cell.tooltip = SH.FieldsBrief((InvokeTableKeep({ "type", "id" }, { type = true, id = true }, Api("C_TooltipInfo", "GetTotem"), slot)))
+    local drec, dur = Invoke(false, Api("GetTotemDuration"), slot)
+    local d = { object = SH.Brief(drec) }
+    cell.duration = SH.Stamp(d)
+    if drec.ok and type(dur) ~= "nil" and not IsSecret(dur) then
+        for _, method in ipairs(SH.DURATION_METHODS) do d[method] = SH.Call(true, SH.Method(dur, method), dur) end
+        d.sweep = SH.Sweep(dur)
+        d.statusBar = SH.BarTrial(dur)
     end
 end
 
-function PP.Start()
-    state.canTest = Invoke(false, Api("issecretvalue"), 0).ok == true
-    local kind = LockedDown(false) and "combat" or "ooc"
-    if PP.live then
-        PP.TakeSnapshot(kind)
-        Say("priest: logs keep running; /fsprobe priest off stops them")
-        return
+function SH.PartTotems(sec)
+    sec.slots = {}
+    sec.active = 0
+    for slot = 1, SH.SLOT_COUNT do
+        local cell = { slot = slot }
+        sec.slots["s" .. slot] = cell
+        local ok, err = pcall(SH.ReadSlot, cell, slot)
+        if not ok then cell.slotError = ErrText(err) end
+        if cell.live then sec.active = sec.active + 1 end
     end
-    PP.run = PP.run + 1
-    PP.last, PP.sample, PP.lastCast, PP.lastManaCast, PP.manaClockUnknown = {}, {}, nil, nil, false
-    local run = PP.run
-    local meta = {
-        started = SafeDate(), run = run, status = "logging", logCap = PP.LOG_CAP, logCaps = PP.LOG_CAPS, costAssumption = PP.COST_ASSUMPTION, logSeconds = PP.LOG_SECONDS,
-        issecretvalueAvailable = type(_G.issecretvalue) == "function",
+end
+
+-- GetMultiCastTotemSpells(id): the count and every return as "type/plain=id Name".
+function SH.SpellsOf(id)
+    local out = { count = 0, entries = {} }
+    local fn = Api("GetMultiCastTotemSpells")
+    if not fn then
+        out.absent = true
+        return out
+    end
+    local n, t = Pack(pcall(fn, id))
+    if t[1] ~= true then
+        out.err = ErrText(t[2])
+        return out
+    end
+    out.count = n - 1
+    for i = 1, math.min(out.count, MAX_RETURNS + 2) do
+        local d = Desc(t[i + 1], true)
+        local text = SH.DescText(d)
+        if d.type == "number" and d.isSecret == false and type(d.value) == "number" then
+            text = text .. " " .. SH.IdName(d.value)
+        end
+        out.entries[i] = text
+    end
+    return out
+end
+
+-- The plain spell ids GetMultiCastTotemSpells(id) answers (secret ones are dropped).
+function SH.PlainSpellIds(id)
+    local out = {}
+    local fn = Api("GetMultiCastTotemSpells")
+    if not fn then return out end
+    local n, t = Pack(pcall(fn, id))
+    if t[1] ~= true then return out end
+    for i = 2, n do
+        local got = t[i]
+        if type(got) == "number" and not IsSecret(got) then out[#out + 1] = got end
+    end
+    return out
+end
+
+function SH.ActionState(id)
+    return {
+        hasAction = SH.B(Api("HasAction"), id),
+        info = SH.B(Api("GetActionInfo"), id),
+        texture = SH.B(Api("GetActionTexture"), id),
     }
-    if PP.Saved() then Say("priest: replacing the saved priest record") end
-    DB().priest = { meta = meta, logs = {} }
-    PP.TakeSnapshot(kind)
-    if not PP.EnsureFrame() then
-        meta.status = "no frame"
-        Say("priest: " .. kind .. " snapshot saved but the event frame could not be created; nothing armed")
+end
+
+function SH.PartMulticast(sec)
+    sec.barIndex = SH.Call(true, Api("C_ActionBar", "GetMultiCastBarIndex"))
+    sec.barIndexLegacy = SH.B(Api("GetMultiCastBarIndex"))
+    sec.hasBar = SH.Call(true, Api("HasMultiCastActionBar"))
+    sec.pages = {}
+    for page = 1, SH.PAGES do sec.pages["p" .. page] = SH.B(Api("HasMultiCastActionPage"), page) end
+    sec.spellsByAction = {}
+    for id = 1, SH.PAGES * SH.PAGE_SIZE do sec.spellsByAction["a" .. id] = SH.SpellsOf(id) end
+    local bar = SH.Kept(sec.barIndex, 1)
+    if type(bar) ~= "number" then
+        sec.barIndexNote = "unreadable: the action ids below assume bar " .. SH.BAR_FALLBACK
+        bar = SH.BAR_FALLBACK
+    end
+    sec.actionBar = bar
+    sec.actions = {}
+    for set = 1, SH.PAGES do
+        for slot = 1, SH.PAGE_SIZE do
+            local id = (bar - 1) * SH.BAR_SIZE + (set - 1) * SH.PAGE_SIZE + slot
+            local cell = SH.ActionState(id)
+            cell.id = id
+            sec.actions["set" .. set .. "slot" .. slot] = cell
+        end
+    end
+    sec.nativeButtons = {}
+    for i = 1, SH.PAGES * SH.PAGE_SIZE do
+        local widget = _G["MultiCastActionButton" .. i]
+        if type(widget) == "table" and not IsSecret(widget) then
+            sec.nativeButtons["b" .. i] = { id = GS.Read(widget, "GetID"), calculateAction = GS.Read(widget, "CalculateAction") }
+        end
+    end
+end
+
+function SH.PartFrames(sec)
+    sec.list = {}
+    for _, name in ipairs(SH.FRAMES) do sec.list[name] = SH.FrameRec(name) end
+    -- P5: are the tracker's buttons addressable by a global name (the forum macro `/click TotemFrameTotem1` failed)?
+    sec.trackerButtons = {}
+    for i = 1, SH.SLOT_COUNT do sec.trackerButtons["TotemFrameTotem" .. i] = type(_G["TotemFrameTotem" .. i]) end
+    sec.ours = {}
+    for _, name in ipairs(SH.OURS) do sec.ours[name] = SH.FrameRec(name) end
+    sec.overlap = {}
+    for _, name in ipairs(SH.OURS) do
+        sec.overlap["MultiCastActionBarFrame/" .. name] = SH.Overlap("MultiCastActionBarFrame", name)
+    end
+end
+
+function SH.PartMisc(sec)
+    sec.combatLogRestricted = SH.Call(true, Api("C_CombatLog", "IsCombatLogRestricted"))
+    sec.errSpellFailedTotems = GS.Plain(_G.ERR_SPELL_FAILED_TOTEMS)
+    sec.items = { inCombat = SH.combat, note = "Classic Era item ids, unverified on Forever" }
+    for _, item in ipairs(SH.ITEMS) do
+        sec.items[item[1]] = { id = item[2], count = SH.Call(true, Api("C_Item", "GetItemCount"), item[2]) }
+    end
+end
+
+function SH.PartApis(sec)
+    for _, entry in ipairs(SH.API_LIST) do
+        local label = entry[2] and (entry[1] .. "." .. entry[2]) or entry[1]
+        sec[label] = Api(entry[1], entry[2]) and "present" or "absent"
+    end
+end
+
+SH.PARTS = {
+    { "player", SH.PartPlayer },
+    { "secrets", SH.PartSecrets },
+    { "totems", SH.PartTotems },
+    { "multicast", SH.PartMulticast },
+    { "frames", SH.PartFrames },
+    { "spells", SH.PartSpells },
+    { "cooldowns", SH.PartCooldowns },
+    { "misc", SH.PartMisc },
+    { "apis", SH.PartApis },
+}
+
+-- What could not run. Built from the parts already in `snap`.
+function SH.Finish(snap, sec)
+    local notRun = {}
+    local function note(text)
+        if #notRun < SH.NOTRUN_CAP then notRun[#notRun + 1] = text end
+    end
+    local known, unknown = {}, {}
+    local cooldowns = type(snap.cooldowns) == "table" and snap.cooldowns or {}
+    for _, s in ipairs(SH.SPELLS) do
+        local entry = cooldowns[s[1]]
+        if type(entry) == "table" and entry.skipped == nil then
+            local ids = {}
+            for k in pairs(entry) do
+                local id = type(k) == "string" and string.match(k, "^s(%d+)$") or nil
+                if id then ids[#ids + 1] = tonumber(id) end
+            end
+            table.sort(ids)
+            known[#known + 1] = s[2] .. (#ids > 0 and (" (" .. table.concat(ids, ",") .. ")") or "")
+        else
+            unknown[#unknown + 1] = s[2]
+            local level = s[5] and (" (first rank at level " .. s[5] .. ")") or ""
+            if #unknown <= 12 then
+                note(s[2] .. ": spell not known" .. level .. ", its cooldown, secrecy and duration reads were skipped")
+            end
+        end
+    end
+    if #unknown > 12 then note((#unknown - 12) .. " more spells not known, see spellsNotKnown") end
+    sec.spellsKnown = table.concat(known, ", ")
+    sec.spellsNotKnown = table.concat(unknown, ", ")
+    local totems = type(snap.totems) == "table" and snap.totems or {}
+    sec.activeTotems = totems.active
+    if totems.active == 0 then
+        note("no totem was down: GetTotemInfo, GetTotemTimeLeft and GetTotemDuration were read on empty slots only; "
+            .. "drop one and run /fsprobe shaman again (also in combat) to read a live totem")
+    end
+    local frames = type(snap.frames) == "table" and snap.frames.list or {}
+    local bar = frames.MultiCastActionBarFrame
+    if type(bar) == "table" and bar.exists == false then
+        note("MultiCastActionBarFrame is absent on this client: its position and overlap with our bars were not read")
+    elseif type(bar) == "table" and bar.shown ~= true then
+        note("the native totem bar (MultiCastActionBarFrame) is not shown yet: its overlap with our action bars means nothing until it shows")
+    end
+    local multicast = type(snap.multicast) == "table" and snap.multicast or {}
+    local anySpells, anyAction = false, false
+    for _, cell in pairs(multicast.spellsByAction or {}) do
+        if type(cell) == "table" and (cell.count or 0) > 0 then anySpells = true end
+    end
+    for _, cell in pairs(multicast.actions or {}) do
+        if type(cell) == "table" and cell.hasAction == "boolean/plain=true" then anyAction = true end
+    end
+    if not anySpells then
+        note("GetMultiCastTotemSpells answered no spells for any slot: no totem is learned yet, or the multicast bar is not set up")
+    end
+    if not anyAction then
+        note("no multicast action id holds a spell yet (HasAction false on all 12), so the action based element buttons could not be checked")
+    end
+    for label, state in pairs(type(snap.apis) == "table" and snap.apis or {}) do
+        if state == "absent" then note("api absent on this client: " .. label) end
+    end
+    note("manual only: /fsprobe shaman setslot (SetMultiCastSpell in combat), /fsprobe shaman destroy [slot] "
+        .. "(DestroyTotem from addon code), /fsprobe shaman buttons (secure dismiss, castsequence and Totemic Recall clicks)")
+    sec.notRun = notRun
+    sec.notRunCount = #notRun
+end
+
+function SH.AfterSnapshot(snap, kind)
+    local checks = snap.checks
+    if type(checks) ~= "table" or type(checks.notRun) ~= "table" then return end
+    Say("shaman: " .. kind .. ": spells known: " .. (checks.spellsKnown ~= "" and checks.spellsKnown or "none"))
+    Say("shaman: " .. kind .. ": " .. checks.notRunCount .. " checks could not run (shaman." .. kind
+        .. ".checks.notRun lists them). First: " .. tostring(checks.notRun[1]))
+    if checks.notRun[2] then Say("shaman: also: " .. checks.notRun[2]) end
+end
+
+-- Logs -----------------------------------------------------------------------------------------------
+
+-- The slot argument of PLAYER_TOTEM_UPDATE when it is a plain number.
+function SH.PlainSlot(...)
+    if select("#", ...) < 1 then return nil end
+    local got = select(1, ...)
+    if type(got) == "number" and not IsSecret(got) then return got end
+    return nil
+end
+
+-- A log entry that lands within SH.FOLLOW_SECONDS of the last click is copied into that click.
+function SH.Follow(e, what)
+    local click = SH.lastClick
+    if type(click) ~= "table" or type(click.t) ~= "number" or type(e.t) ~= "number" then return end
+    local dt = e.t - click.t
+    if dt < 0 or dt > SH.FOLLOW_SECONDS then return end
+    if #click.follow >= SH.FOLLOW_CAP then return end
+    click.follow[#click.follow + 1] = { event = e.event, dt = SH.Round(dt), what = what }
+end
+
+function SH.LogTotem(event, ...)
+    local e = { event = event, argCount = select("#", ...), slot = Desc((select(1, ...)), true) }
+    local at = SH.PlainSlot(...)
+    if at then
+        e.info = SH.B(Api("GetTotemInfo"), at)
+        e.timeLeft = SH.B(Api("GetTotemTimeLeft"), at)
+        e.cannotDismiss = SH.B(Api("GetTotemCannotDismiss"), at)
+    else
+        e.all = SH.Slots()
+    end
+    SH.Mark(e, "totem")
+    SH.Follow(e, e.info or "slot not readable")
+    SH.Push("totem", e)
+end
+
+function SH.LogCast(event, unit, castGUID, spellID)
+    if SH.ForeignUnit(unit, SH.PLAYER_SET) then return end
+    local e = { event = event, unit = Desc(unit, true), castGUID = Desc(castGUID), spellID = Desc(spellID, true) }
+    local id = PlainSpellID(unit, castGUID, spellID)
+    if id then e.spellName = SH.IdName(id) end
+    SH.Mark(e, "cast")
+    SH.Follow(e, e.spellName or "spell not readable")
+    SH.Push("cast", e)
+end
+
+function SH.LogMulticast(event)
+    local e = { event = event, hasBar = SH.B(Api("HasMultiCastActionBar")) }
+    local bar = _G.MultiCastActionBarFrame
+    if type(bar) == "table" and not IsSecret(bar) then
+        e.barShown = GS.Read(bar, "IsShown")
+    else
+        e.barShown = "absent"
+    end
+    SH.Push("multicast", SH.Mark(e, "multicast"))
+end
+
+SH.HANDLERS = {
+    PLAYER_TOTEM_UPDATE = function(event, ...) SH.LogTotem(event, ...) end,
+    UPDATE_MULTI_CAST_ACTIONBAR = function(event) SH.LogMulticast(event) end,
+    UNIT_SPELLCAST_START = function(event, ...) SH.LogCast(event, ...) end,
+    UNIT_SPELLCAST_SUCCEEDED = function(event, ...) SH.LogCast(event, ...) end,
+    UNIT_SPELLCAST_FAILED = function(event, ...) SH.LogCast(event, ...) end,
+    UNIT_SPELLCAST_INTERRUPTED = function(event, ...) SH.LogCast(event, ...) end,
+}
+
+-- The explicit protected-risk calls (typed by Parker, never automatic) ---------------------------------
+
+-- Appends one run to shaman.<name>.runs (bounded) and returns it.
+function SH.NewRun(name)
+    local rec = SH.Rec()
+    if type(rec[name]) ~= "table" then rec[name] = { runs = {} } end
+    local runs = rec[name].runs
+    local run = { inCombat = LockedDown(false), when = SafeDate() }
+    runs[#runs + 1] = run
+    while #runs > SH.RUN_CAP do table.remove(runs, 1) end
+    SH.combat = run.inCombat
+    return run
+end
+
+-- P1. SetMultiCastSpell from addon code. The chat line is printed BEFORE the call: if the client blocks
+-- it, ADDON_ACTION_BLOCKED goes through the global error handler, which pcall cannot catch.
+function SH.SetSlot()
+    state.canTest = Invoke(false, Api("issecretvalue"), 0).ok == true
+    local run = SH.NewRun("setslot")
+    local fn = Api("SetMultiCastSpell")
+    if not fn then
+        run.skipped = "SetMultiCastSpell is absent on this client"
+        Say("shaman setslot: " .. run.skipped)
         return
     end
-    -- Live only once the snapshot is in and the frame exists: a failed start leaves nothing half armed.
-    PP.live = { run = run, pending = {} }
-    for _, entry in ipairs(PP.EVENTS) do PP.Register(unpack(entry)) end
-    -- The snapshot of the other state follows the next change: a pull (4 s in) or the end of the fight.
-    if kind == "ooc" then
-        PP.Register("PLAYER_REGEN_DISABLED")
+    local bar = SH.Kept(Invoke(true, Api("C_ActionBar", "GetMultiCastBarIndex")), 1)
+    if type(bar) ~= "number" then
+        run.barIndexFallback = SH.BAR_FALLBACK
+        bar = SH.BAR_FALLBACK
+    end
+    local slot, ids
+    for _, candidate in ipairs(SH.SLOT_PICK_ORDER) do
+        local list = SH.PlainSpellIds(candidate)
+        if #list > 0 then
+            slot, ids = candidate, list
+            break
+        end
+    end
+    if not slot then
+        run.skipped = "no totem spells: GetMultiCastTotemSpells answered nothing readable for any slot (no totem learned yet, or the bar is not set up)"
+        Say("shaman setslot: " .. run.skipped)
+        return
+    end
+    local actionId = (bar - 1) * SH.BAR_SIZE + slot
+    run.slot, run.actionId = slot, actionId
+    run.before = SH.ActionState(actionId)
+    local previous = SH.Kept(Invoke(true, Api("GetActionInfo"), actionId), 2)
+    if type(previous) ~= "number" then previous = nil end
+    local pick = ids[1]
+    for _, id in ipairs(ids) do
+        if id ~= previous then
+            pick = id
+            break
+        end
+    end
+    run.spellId, run.previousSpellId = pick, previous
+    Say("shaman setslot: calling SetMultiCastSpell(" .. actionId .. ", " .. pick .. ") now, in combat: "
+        .. tostring(run.inCombat) .. ". If the client prints ADDON_ACTION_BLOCKED, that is the answer. /reload to save.")
+    run.call = (Invoke(true, fn, actionId, pick))
+    run.after = SH.ActionState(actionId)
+    local now = SH.Kept(Invoke(true, Api("GetActionInfo"), actionId), 2)
+    if type(now) == "number" and previous then
+        run.changed = now ~= previous
     else
-        PP.Register("PLAYER_REGEN_ENABLED")
+        run.changed = "unknown"
     end
-    if not GS.Timer(PP.LOG_SECONDS, function()
-        if not (PP.live and PP.live.run == run) then return end
-        local ok, err = pcall(PP.Stop, "timeout")
-        if not ok then pcall(function() PP.Meta().timerError = ErrText(err) end) end
-    end) then
-        meta.timerError = "C_Timer.After unavailable; logging runs until /fsprobe priest off"
+    if run.changed == true then
+        run.restore = { call = (Invoke(true, fn, actionId, previous)) }
+        run.restore.after = SH.ActionState(actionId)
+    else
+        run.restore = { skipped = "the pick did not visibly change, or the previous pick was unreadable" }
     end
-    Say("priest: " .. kind .. " snapshot saved. Logging " .. PP.LOG_SECONDS .. "s: power ticks, casts, auras, kills, absorbs. "
-        .. (kind == "ooc" and "Pull a mob: the combat snapshot follows " .. PP.COMBAT_DELAY .. "s in. "
-            or "Leave combat: the ooc snapshot follows. ")
-        .. "Cast, wand, drink, shield yourself and a party member. Run /fsprobe priest again to re-snapshot, "
-        .. "/fsprobe priest off to stop, /reload to save")
+    Say("shaman setslot: call " .. (run.call.ok and "returned" or ("failed: " .. tostring(run.call.err)))
+        .. "; slot changed: " .. tostring(run.changed) .. ". Record: shaman.setslot.runs[" .. #SH.Rec().setslot.runs .. "]")
+end
+
+-- The first slot GetTotemInfo says holds a live totem, or nil.
+function SH.LiveSlot()
+    for slot = 1, SH.SLOT_COUNT do
+        if KeptBool((Invoke(true, Api("GetTotemInfo"), slot))) == true then return slot end
+    end
+    return nil
+end
+
+-- P11. DestroyTotem from addon code (the secure route is the test strip).
+function SH.Destroy(arg)
+    state.canTest = Invoke(false, Api("issecretvalue"), 0).ok == true
+    local slot = tonumber(arg)
+    if arg ~= nil and not (slot and slot >= 1 and slot <= SH.SLOT_COUNT and slot == math.floor(slot)) then
+        Say("shaman destroy: the slot must be 1 to " .. SH.SLOT_COUNT)
+        return
+    end
+    local run = SH.NewRun("destroy")
+    local fn = Api("DestroyTotem")
+    if not fn then
+        run.skipped = "DestroyTotem is absent on this client"
+        Say("shaman destroy: " .. run.skipped)
+        return
+    end
+    if not slot then
+        slot = SH.LiveSlot()
+        if not slot then
+            slot = 2
+            run.slotNote = "no live totem seen: slot 2 (earth per the constants)"
+        end
+    end
+    run.slot = slot
+    run.before = SH.B(Api("GetTotemInfo"), slot)
+    Say("shaman destroy: calling DestroyTotem(" .. slot .. ") from addon code now, in combat: " .. tostring(run.inCombat)
+        .. ". If the client prints ADDON_ACTION_BLOCKED, that is the answer. /reload to save.")
+    run.call = (Invoke(true, fn, slot))
+    run.after = SH.B(Api("GetTotemInfo"), slot)
+    Say("shaman destroy: call " .. (run.call.ok and "returned" or ("failed: " .. tostring(run.call.err)))
+        .. ". Record: shaman.destroy.runs[" .. #SH.Rec().destroy.runs .. "]")
+end
+
+-- The temporary test strip: secure buttons, out of combat only ------------------------------------------
+
+-- True when the player knows the spell: the name resolves to an id and nothing refuses it.
+function SH.IsKnown(name)
+    local id = KnownRankID(name)
+    return id ~= nil and KeptBool((Invoke(true, Api("IsPlayerSpell"), id))) ~= false
+end
+
+function SH.KnownTotems()
+    local out = {}
+    for _, t in ipairs(SH.TOTEMS) do
+        if SH.IsKnown(t[2]) then out[#out + 1] = t[2] end
+    end
+    return out
+end
+
+-- Click 1: dismiss. Left = slot 1, right = slot 2, shift-left = slot 3, shift-right = slot 4, through the
+-- secure `destroytotem` action (the slot is read from the modified attribute `totem-slot`).
+function SH.SyncDismiss(button, entry)
+    for _, spec in ipairs({ { "", "1", 1 }, { "", "2", 2 }, { "shift-", "1", 3 }, { "shift-", "2", 4 } }) do
+        button:SetAttribute(spec[1] .. "type" .. spec[2], "destroytotem")
+        button:SetAttribute(spec[1] .. "totem-slot" .. spec[2], spec[3])
+    end
+    entry.label = "dismiss: L1 R2 shift-L3 shift-R4"
+    entry.attributes = "type1/type2/shift-type1/shift-type2 = destroytotem, totem-slot = 1/2/3/4"
+end
+
+-- Click 2: castsequence through two known totems (the same one twice when only one is known).
+function SH.SyncCastSequence(button, entry)
+    local names = SH.KnownTotems()
+    if #names == 0 then
+        button:SetAttribute("type", nil)
+        button:SetAttribute("macrotext", nil)
+        entry.skipped = "no totem known (the first Earth totem comes at level 4)"
+        entry.label = "castsequence: (no totem known)"
+        return
+    end
+    local macro = "/castsequence reset=combat/15 " .. names[1] .. ", " .. (names[2] or names[1])
+    button:SetAttribute("type", "macro")
+    button:SetAttribute("macrotext", macro)
+    entry.macrotext = macro
+    entry.label = "castsequence: " .. names[1] .. " > " .. (names[2] or names[1])
+end
+
+-- Click 3: Totemic Recall.
+function SH.SyncRecall(button, entry)
+    if not SH.IsKnown("Totemic Recall") then
+        button:SetAttribute("type", nil)
+        button:SetAttribute("spell", nil)
+        entry.skipped = "Totemic Recall not known (level 20)"
+        entry.label = "recall: (not known)"
+        return
+    end
+    button:SetAttribute("type", "spell")
+    button:SetAttribute("spell", "Totemic Recall")
+    entry.spell = "Totemic Recall"
+    entry.label = "recall: Totemic Recall"
+end
+
+SH.BUTTONS = {
+    { key = "dismiss", sync = SH.SyncDismiss },
+    { key = "castsequence", sync = SH.SyncCastSequence },
+    { key = "recall", sync = SH.SyncRecall },
+}
+
+function SH.PreClick(index, mouse, down)
+    if not SH.live then return end
+    local e = { event = "PreClick", button = SH.BUTTONS[index].key, mouse = Desc(mouse, true), down = Desc(down, true),
+        follow = {}, totemsBefore = SH.Slots() }
+    SH.lastClick = SH.Mark(e, "click")
+    SH.Push("click", e)
+end
+
+function SH.PostClick(index)
+    if not SH.live then return end
+    local click = SH.lastClick
+    if type(click) == "table" then
+        click.post = SH.Mark({ event = "PostClick", totems = SH.Slots() }, "clickPost")
+    end
+end
+
+-- Builds the host and the buttons once (a named secure frame cannot be destroyed). Out of combat only.
+function SH.BuildStrip()
+    if SH.strip then return SH.strip end
+    -- A frame an earlier, half finished build already made is reused (a named frame cannot be destroyed).
+    local host = _G[SH.STRIP_NAME]
+    if type(host) ~= "table" then
+        host = CreateFrame("Frame", SH.STRIP_NAME, UIParent)
+        host:SetSize(224, 22 + #SH.BUTTONS * 30)
+        host:SetPoint("CENTER", UIParent, "CENTER", 0, -240)
+        host:SetFrameStrata("DIALOG")
+        local ground = host:CreateTexture(nil, "BACKGROUND")
+        ground:SetAllPoints(host)
+        ground:SetColorTexture(0.1, 0.02, 0.18, 0.85)
+        local title = host:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        title:SetPoint("TOP", host, "TOP", 0, -5)
+        title:SetText("FSPROBE SHAMAN TEST STRIP (temporary)")
+    end
+    local strip = { host = host, buttons = {} }
+    for i = 1, #SH.BUTTONS do
+        local name = SH.BUTTON_PREFIX .. i
+        local button = _G[name]
+        if type(button) ~= "table" then
+            button = CreateFrame("Button", name, host, "SecureActionButtonTemplate")
+            button:SetSize(208, 24)
+            button:SetPoint("TOP", host, "TOP", 0, -20 - (i - 1) * 30)
+            local face = button:CreateTexture(nil, "BACKGROUND")
+            face:SetAllPoints(button)
+            face:SetColorTexture(0.35, 0.1, 0.5, 0.9)
+            button.fsText = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            button.fsText:SetPoint("CENTER", button, "CENTER", 0, 0)
+            button:RegisterForClicks("AnyUp")
+            button:HookScript("PreClick", function(_, mouse, down) pcall(SH.PreClick, i, mouse, down) end)
+            button:HookScript("PostClick", function() pcall(SH.PostClick, i) end)
+        end
+        strip.buttons[i] = button
+    end
+    SH.strip = strip
+    return strip
+end
+
+-- Writes the protected attributes and shows the strip. Called from SH.ButtonsOn, which has refused combat.
+function SH.SyncStrip()
+    local strip = SH.BuildStrip()
+    local rec = { shown = true, buttons = {} }
+    for i, def in ipairs(SH.BUTTONS) do
+        local entry = {}
+        rec.buttons[def.key] = entry
+        local ok, err = pcall(def.sync, strip.buttons[i], entry)
+        if not ok then entry.error = ErrText(err) end
+        pcall(function() strip.buttons[i].fsText:SetText(entry.label or def.key) end)
+    end
+    strip.host:SetAlpha(1)
+    strip.host:Show()
+    SH.Rec().strip = rec
+end
+
+function SH.ButtonsOn()
+    if LockedDown(false) then
+        Say("shaman buttons: leave combat first (the strip is secure buttons: not built, changed or shown in combat)")
+        return
+    end
+    if not SH.live then SH.Start() end
+    local ok, err = pcall(SH.SyncStrip)
+    if not ok then
+        pcall(function() SH.Rec().strip = { error = ErrText(err) } end)
+        Say("shaman buttons: could not build the strip: " .. ErrText(err))
+        return
+    end
+    Say("shaman: TEST STRIP (temporary) is below screen centre: dismiss (left slot 1, right slot 2, shift-left 3, shift-right 4), "
+        .. "castsequence, recall. Click each out of combat and in combat. Clicks are logged in shaman.logs.click. "
+        .. "/fsprobe shaman buttons off hides it (out of combat)")
+end
+
+-- Hides the strip out of combat; in combat it can only be faded (hiding a secure button is protected).
+function SH.HideStrip(quiet)
+    local strip = SH.strip
+    if not strip then return end
+    local saved = SH.Saved()
+    local rec = saved and type(saved.strip) == "table" and saved.strip or nil
+    if LockedDown(false) then
+        pcall(strip.host.SetAlpha, strip.host, 0)
+        if rec then rec.faded = true end
+        if not quiet then
+            Say("shaman buttons off: in combat the strip is only faded (alpha 0); run it again out of combat to hide it")
+        end
+        return
+    end
+    pcall(strip.host.Hide, strip.host)
+    if rec then
+        rec.shown = false
+        rec.faded = nil
+    end
+    if not quiet then Say("shaman buttons off: strip hidden") end
+end
+
+function SH.ButtonsOff()
+    if not SH.strip then
+        Say("shaman buttons off: there is no strip")
+        return
+    end
+    SH.HideStrip(false)
 end
 
 -------------------------------------------------------------------------------
@@ -4388,8 +5377,8 @@ end
 -- /fsprobe
 -------------------------------------------------------------------------------
 
--- keepGunsight: the main run re-arming must not wipe a saved `/fsprobe gunsight`, `/fsprobe hot` or
--- `/fsprobe priest` result or disarm their pending parts; only an explicit `/fsprobe reset` clears those.
+-- keepGunsight: the main run re-arming must not wipe a saved `/fsprobe gunsight`, `/fsprobe hot`,
+-- `/fsprobe priest` or `/fsprobe shaman` result or disarm their pending parts; only an explicit `/fsprobe reset` clears those.
 local function Reset(keepGunsight)
     state.runId = state.runId + 1
     state.armed = false
@@ -4418,21 +5407,23 @@ local function Reset(keepGunsight)
     if state.label then pcall(function() state.label:Hide() end) end
     local root = _G.ForeverSTUwaveDB
     if type(root) == "table" then
-        local kept, keptHot, keptPriest = nil, nil, nil
+        local kept, keptHot, keptPriest, keptShaman = nil, nil, nil, nil
         if keepGunsight and type(root[KEY]) == "table" then
             kept = root[KEY].gunsight
             keptHot = root[KEY].hot
             keptPriest = root[KEY].priest
+            keptShaman = root[KEY].shaman
         end
         root[KEY] = nil
-        if type(kept) == "table" or type(keptHot) == "table" or type(keptPriest) == "table" then
-            root[KEY] = { gunsight = kept, hot = keptHot, priest = keptPriest }
+        if type(kept) == "table" or type(keptHot) == "table" or type(keptPriest) == "table" or type(keptShaman) == "table" then
+            root[KEY] = { gunsight = kept, hot = keptHot, priest = keptPriest, shaman = keptShaman }
         end
     end
     if not keepGunsight then
         -- First, and on its own: a failure in the gunsight or hot teardown must not leave the priest
         -- probe's events registered.
         PP.Stop("reset", true)
+        SH.Stop("reset", true)
         GS.Disarm()
         HP.Off(true)
     end
@@ -4495,6 +5486,20 @@ local function Command(msg)
         PP.Start()
     elseif arg == "priest off" then
         PP.Stop("stopped")
+    elseif arg == "shaman" then
+        SH.Start()
+    elseif arg == "shaman off" then
+        SH.Stop("stopped")
+    elseif arg == "shaman buttons" then
+        SH.ButtonsOn()
+    elseif arg == "shaman buttons off" then
+        SH.ButtonsOff()
+    elseif arg == "shaman setslot" then
+        SH.SetSlot()
+    elseif arg == "shaman destroy" then
+        SH.Destroy(nil)
+    elseif string.match(arg, "^shaman destroy %S+$") then
+        SH.Destroy(string.match(arg, "^shaman destroy (%S+)$"))
     elseif arg == "hot" then
         HP.Start()
     elseif arg == "hot off" then

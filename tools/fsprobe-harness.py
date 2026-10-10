@@ -15,7 +15,11 @@ session, so the things worth pinning are the safety properties, not the data it 
     the saved error strings);
   * every event is unregistered when the parts finish, no frame runs OnUpdate;
   * the combat snapshot waits for the delay and re-checks InCombatLockdown, the cast
-    recorder stops at 10, the AuraContainer test builds, shows for 30s and hides.
+    recorder stops at 10, the AuraContainer test builds, shows for 30s and hides;
+  * the class probes (priest, shaman; one shared core) keep the same properties, and the shaman probe
+    additionally runs nothing protected by itself: SetMultiCastSpell, DestroyTotem and the secure test
+    strip exist only behind their explicit subcommands (pinned by text and by call counters), and
+    Blizzard's own totem frames are only read.
 
 The mock is NOT the real client. Run:
 
@@ -26,6 +30,8 @@ Exit 0 = every check passed.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import re
 import sys
 from pathlib import Path
@@ -132,7 +138,7 @@ FrameMT.__index = function(self, k)
 end
 function __newFrame(kind, name, parent, tmpl)
     local f = setmetatable({ _kind = kind, _name = name, _events = {}, _scripts = {}, _calls = {},
-        _args = {}, _at = {}, _shown = false }, FrameMT)
+        _args = {}, _at = {}, _shown = false, _tmpl = tmpl, _attrs = {}, _hookScripts = {} }, FrameMT)
     -- CreateFontString(name, layer, template) arrives here as (name, layer, template): the template is `tmpl`.
     -- (_hasFont is read with rawget: an absent field on this mock answers with the catch-all function.)
     if kind == "CreateFontString" and realType(tmpl) == "string" then f._hasFont = true end
@@ -158,6 +164,15 @@ function FrameM.UnregisterAllEvents(self) self._events = {} end
 function FrameM.Show(self) self._shown = true; self._calls.Show = (self._calls.Show or 0) + 1 end
 function FrameM.Hide(self) self._shown = false; self._calls.Hide = (self._calls.Hide or 0) + 1 end
 function FrameM.IsShown(self) return self._shown end
+function FrameM.SetAttribute(self, k, v)
+    self._calls.SetAttribute = (self._calls.SetAttribute or 0) + 1
+    self._attrs[k] = v
+end
+function FrameM.GetAttribute(self, k) return self._attrs[k] end
+function FrameM.HookScript(self, k, fn)
+    self._calls.HookScript = (self._calls.HookScript or 0) + 1
+    self._hookScripts[k] = fn
+end
 
 -- AuraContainer: strict, only the methods the probe is allowed to call.
 local ACM = {}
@@ -645,6 +660,151 @@ function pull(dt)
     __combat = true
     fire("PLAYER_REGEN_DISABLED")
     advance(dt or 2)
+end
+
+-- `/fsprobe shaman`. __totem[slot] = { haveTotem, name, startTime, duration, icon, modRate, spellID } is a live
+-- totem; an empty slot answers false and zeros. The player knows the ids in SHKNOWN (default: Stoneskin Totem
+-- only, a level 4 shaman). __mcSpells[slot] is what GetMultiCastTotemSpells answers, __actions[id] the spell
+-- slotted on a multicast action id; SetMultiCastSpell and DestroyTotem are recorded in __setCalls / __destroyCalls
+-- and change that state, so the probe can be shown to call them only when told to.
+SHNAMES = { [8071] = "Stoneskin Totem", [2484] = "Earthbind Totem", [3599] = "Searing Totem", [5394] = "Healing Stream Totem",
+    [66842] = "Call of the Elements", [66843] = "Call of the Ancestors", [36936] = "Totemic Recall" }
+local function durObj(left)
+    local methods = {
+        GetRemainingDuration = function() return left end, GetElapsedDuration = function() return 50 end,
+        GetTotalDuration = function() return 300 end, IsZero = function() return false end,
+        HasExpired = function() return false end, HasStarted = function() return true end,
+        IsActive = function() return true end, HasSecretValues = function() return false end,
+    }
+    return setmetatable({}, { __index = function(_, k)
+        local m = methods[k]
+        if not m then return nil end
+        return function(self, ...)
+            if __mode == "throw" then error("boom: method " .. k) end
+            return m(...)
+        end
+    end })
+end
+function nativeFrame(name, l, b, w, h, shown)
+    local f = __newFrame("Frame", name)
+    f._shown = shown
+    f.GetLeft = function() return l end
+    f.GetBottom = function() return b end
+    f.GetRight = function() return l + w end
+    f.GetTop = function() return b + h end
+    f.GetRect = function() return l, b, w, h end
+    f.GetWidth = function() return w end
+    f.GetHeight = function() return h end
+    f.GetSize = function() return w, h end
+    f.GetScale = function() return 1 end
+    f.GetEffectiveScale = function() return 1 end
+    f.GetAlpha = function() return 1 end
+    f.GetEffectiveAlpha = function() return 1 end
+    f.GetNumPoints = function() return 1 end
+    f.GetPoint = function() return "BOTTOM", UIParent, "BOTTOM", 0, 12 end
+    f.GetParent = function() return UIParent end
+    f.GetName = function() return name end
+    return f
+end
+-- Blizzard's totem frames. Whatever the probe does to them (any call that changes a frame) is counted.
+SH_BLIZZ = { "MultiCastActionBarFrame", "MultiCastSlotButton1", "MultiCastSlotButton2", "MultiCastSummonSpellButton",
+    "MultiCastFlyoutFrame", "TotemFrame" }
+function shamanFrames(overlap)
+    nativeFrame("MultiCastActionBarFrame", 500, 100, 300, 50, true)
+    nativeFrame("MultiCastSlotButton1", 510, 105, 30, 30, true)
+    nativeFrame("MultiCastSlotButton2", 550, 105, 30, 30, true)
+    nativeFrame("MultiCastSummonSpellButton", 470, 105, 30, 30, false)
+    nativeFrame("MultiCastFlyoutFrame", 510, 135, 30, 120, false)
+    nativeFrame("TotemFrame", 20, 400, 100, 40, false)
+    -- our action bar group: over the native bar, or well clear of it
+    if overlap then nativeFrame("FSActionBarStack", 400, 50, 600, 120, true)
+    else nativeFrame("FSActionBarStack", 400, 500, 600, 120, true) end
+end
+-- Any call that could change a frame (a read such as GetPoint or IsShown is fine).
+local MUTATORS = { "^Set", "^Show", "^Hide", "^Enable", "^Disable", "^Clear", "^Register", "^Unregister", "^Hook",
+    "^Create", "^Click", "^Lock", "^Start", "^Stop", "^Raise", "^Lower", "^Toggle", "^Execute", "^Add", "^Remove" }
+function blizzTouched()
+    local n, names = 0, {}
+    for _, name in ipairs(SH_BLIZZ) do
+        local f = _G[name]
+        if f then
+            for k, v in pairs(f._calls) do
+                for _, pat in ipairs(MUTATORS) do
+                    if string.find(k, pat) then n = n + v; names[#names + 1] = name .. ":" .. k break end
+                end
+            end
+        end
+    end
+    return n, table.concat(names, ",")
+end
+function shamanMock(known)
+    SHKNOWN = known or { [8071] = true }
+    __totem, __mcSpells, __actions, __setCalls, __destroyCalls = {}, { [2] = { 8071 } }, { [134] = 8071 }, {}, {}
+    def("UnitClass", function() return "Shaman", "SHAMAN", 7 end, function() return SS, SS, SN end)
+    def("UnitLevel", function() return 4 end, function() return SN end)
+    def("IsPlayerSpell", function(id) return SHKNOWN[id] == true end, function() return SB end)
+    C_SpellBook.IsSpellKnown = IsPlayerSpell
+    def("C_Spell.GetSpellName", function(id) return SHNAMES[id] end)
+    def("C_Spell.GetSpellInfo", function(a)
+        if realType(a) == "string" then
+            for id, n in pairs(SHNAMES) do
+                if n == a and SHKNOWN[id] then return { name = n, spellID = id, castTime = 0 } end
+            end
+            return nil
+        end
+        local n = SHNAMES[a]
+        if not n then return nil end
+        return { name = n, spellID = a, castTime = 0 }
+    end, function(a)
+        if realType(a) == "string" then return { name = a, spellID = SN, castTime = SN } end
+        return { name = SS, spellID = a, castTime = SN }
+    end)
+    def("C_Spell.GetSpellCooldownDuration", function() return durObj(0) end, function() return ST end)
+    def("GetNumTotemSlots", function() return 4 end, function() return SN end)
+    def("GetTotemInfo", function(slot)
+        local t = __totem[slot]
+        if t then return unpack(t) end
+        return false, "", 0, 0, 0, 0, 0
+    end, function() return SB, SS, SN, SN, SN, SN, SN end)
+    def("GetTotemTimeLeft", function(slot) if __totem[slot] then return 250 end return 0 end, function() return SN end)
+    def("GetTotemCannotDismiss", function() return false end, function() return SB end)
+    def("GetTotemDuration", function(slot) return durObj(250) end, function() return ST end)
+    def("C_TooltipInfo.GetTotem", function(slot) if __totem[slot] then return { type = 1, id = __totem[slot][7] } end end, function() return ST end)
+    def("C_Secrets.ShouldTotemSpellBeSecret", function() return false end, function() return SB end)
+    def("C_ActionBar.GetMultiCastBarIndex", function() return 12 end, function() return SN end)
+    def("HasMultiCastActionBar", function() return false end, function() return SB end)
+    def("HasMultiCastActionPage", function(p) return p == 1 end, function() return SB end)
+    def("GetMultiCastTotemSpells", function(id)
+        local list = __mcSpells[((id - 1) % 4) + 1]
+        if list then return unpack(list) end
+    end, function() return SN end)
+    def("HasAction", function(id) return __actions[id] ~= nil end, function() return SB end)
+    def("GetActionInfo", function(id) if __actions[id] then return "spell", __actions[id], "spell" end end,
+        function() return SS, SN, SS end)
+    def("GetActionTexture", function(id) if __actions[id] then return 136098 end end, function() return SN end)
+    def("SetMultiCastSpell", function(id, spell)
+        __setCalls[#__setCalls + 1] = { id, spell, __combat }
+        __actions[id] = spell
+    end, function() end)
+    def("DestroyTotem", function(slot)
+        __destroyCalls[#__destroyCalls + 1] = { slot, __combat }
+        __totem[slot] = nil
+    end, function() end)
+    FIRE_TOTEM_SLOT, EARTH_TOTEM_SLOT, WATER_TOTEM_SLOT, AIR_TOTEM_SLOT, MAX_TOTEMS = 1, 2, 3, 4, 4
+    SHAMAN_TOTEM_PRIORITIES = { 2, 1, 3, 4 }
+    ERR_SPELL_FAILED_TOTEMS = "Requires a totem."
+end
+-- The shaman probe's own event frame: the one that registered PLAYER_TOTEM_UPDATE.
+function sframe()
+    for _, f in ipairs(__frames) do
+        if f._scripts.OnEvent and f._events.PLAYER_TOTEM_UPDATE then return f end
+    end
+end
+function sfire(event, ...)
+    local f = sframe()
+    check(f, "no shaman event frame")
+    local ok, err = pcall(f._scripts.OnEvent, f, event, ...)
+    check(ok, "shaman handler threw on " .. event .. ": " .. tostring(err))
 end
 
 -- Walks the saved tree. Only plain strings, numbers and booleans may be stored; no
@@ -3095,6 +3255,479 @@ check(said("/fsprobe priest"), "usage must list /fsprobe priest")
 """
 )
 
+# --- /fsprobe shaman -----------------------------------------------------------------------------
+
+case("shaman_usage_lists_the_command")(
+    r"""
+runCmd("help")
+check(said("/fsprobe shaman"), "usage must list /fsprobe shaman")
+check(said("shaman buttons") and said("shaman setslot") and said("shaman destroy"), "usage must list the explicit subcommands")
+"""
+)
+
+case("shaman_command_snapshot_covers_the_checklist")(
+    r"""
+shamanMock({ [8071] = true, [36936] = true })
+shamanFrames(true)
+__totem[2] = { true, "Stoneskin Totem", 990, 300, 136098, 1, 8071 }
+runCmd("shaman")
+local s = ForeverSTUwaveDB.fsprobe.shaman
+check(s and s.ooc and s.ooc.kind == "ooc" and s.ooc.inCombat == false, "ooc snapshot tagged false")
+check(s.meta.status == "logging", "status: " .. tostring(s.meta.status))
+local o = s.ooc
+-- player
+check(o.classToken == "SHAMAN" and o.player.classToken == "SHAMAN" and o.player.level.r1.value == 4, "class and level")
+check(o.player.numTotemSlots.r1.value == 4, "GetNumTotemSlots")
+check(o.player.constants.FIRE_TOTEM_SLOT == 1 and o.player.constants.EARTH_TOTEM_SLOT == 2
+    and o.player.constants.WATER_TOTEM_SLOT == 3 and o.player.constants.AIR_TOTEM_SLOT == 4, "slot constants")
+check(o.player.priorities == "2,1,3,4", "SHAMAN_TOTEM_PRIORITIES: " .. tostring(o.player.priorities))
+-- totem state: every return of GetTotemInfo, plain or secret per field
+local e = o.totems.slots.s2
+check(e.info.r1.value == true and e.info.r2.value == "Stoneskin Totem" and e.info.r3.value == 990
+    and e.info.r4.value == 300 and e.info.r5.value == 136098 and e.info.r6.value == 1 and e.info.r7.value == 8071
+    and e.info.inCombat == false, "GetTotemInfo, all seven returns")
+check(string.find(e.brief, "string/plain=Stoneskin Totem", 1, true), "brief: " .. tostring(e.brief))
+check(e.timeLeft.r1.value == 250 and e.cannotDismiss.exists, "GetTotemTimeLeft and GetTotemCannotDismiss")
+check(e.duration.object == "table/plain" and e.duration.GetRemainingDuration.r1.value == 250
+    and e.duration.IsZero.r1.value == false and e.duration.GetTotalDuration.r1.value == 300, "GetTotemDuration object: " .. tostring(e.duration.object))
+check(e.duration.sweep == "ok" and e.duration.statusBar.setTimerDuration == "ok", "duration object into a Cooldown and a StatusBar")
+check(e.tooltip and string.find(e.tooltip, "id=number/plain=8071", 1, true), "C_TooltipInfo.GetTotem: " .. tostring(e.tooltip))
+check(o.totems.slots.s1.info.r1.value == false and o.totems.active == 1 and o.totems.slots.s4.slot == 4, "empty slots and the live count")
+-- secrecy predicates
+check(o.secrets.calls["ShouldTotemSlotBeSecret(2)"].r1.type == "boolean", "slot predicate")
+check(o.secrets.totemSpells["Stoneskin Totem"] == "boolean/plain=false", "spell predicate: " .. tostring(o.secrets.totemSpells["Stoneskin Totem"]))
+-- native bar (P2, P10)
+local m = o.multicast
+check(m.barIndex.r1.value == 12 and m.hasBar.r1.value == false, "bar index and HasMultiCastActionBar")
+check(m.pages.p1 == "boolean/plain=true" and m.pages.p2 == "boolean/plain=false", "HasMultiCastActionPage")
+check(m.spellsByAction.a2.count == 1 and string.find(m.spellsByAction.a2.entries[1], "8071 Stoneskin Totem", 1, true), "GetMultiCastTotemSpells(2)")
+check(m.spellsByAction.a1.count == 0, "GetMultiCastTotemSpells(1) answers nothing at level 4")
+check(m.actions.set1slot2.id == 134 and m.actions.set1slot2.hasAction == "boolean/plain=true"
+    and string.find(m.actions.set1slot2.info, "string/plain=spell,number/plain=8071", 1, true), "action id (12-1)*12+2 is slotted")
+check(m.actions.set1slot1.hasAction == "boolean/plain=false" and m.actions.set3slot4.id == 144, "action ids for 3 sets x 4 slots")
+-- frames (P10), rects and the overlap with our action bar group
+local fr = o.frames.list
+check(fr.MultiCastActionBarFrame.exists and fr.MultiCastActionBarFrame.shown == true, "bar frame shown")
+check(fr.MultiCastActionBarFrame.rect == "500,100,300,50" and fr.MultiCastActionBarFrame.size == "300,50", "bar rect: " .. tostring(fr.MultiCastActionBarFrame.rect))
+check(fr.MultiCastActionBarFrame.scale == 1 and fr.MultiCastActionBarFrame.points.p1.point == "BOTTOM", "scale and anchor")
+check(fr.MultiCastSlotButton1.exists and fr.MultiCastSummonSpellButton.shown == false, "slot and summon buttons")
+check(fr.MultiCastRecallSpellButton.exists == false and fr.TotemFrame.exists, "an absent frame is recorded absent")
+check(o.frames.overlap["MultiCastActionBarFrame/FSActionBarStack"] == "overlaps", "overlap: " .. tostring(o.frames.overlap["MultiCastActionBarFrame/FSActionBarStack"]))
+-- spells: names and ids, known or not
+check(o.spells.stoneskin.s8071.isPlayerSpell == "boolean/plain=true" and o.spells.recall.s36936.spellName == "Totemic Recall", "spell ids and names")
+check(o.cooldowns.stoneskin.s8071.durationObject and o.cooldowns.recall.s36936.cooldown, "cooldown reads for a known spell")
+check(o.cooldowns.coe.skipped == "not known", "an unknown spell is not read")
+-- what could not run
+local c = o.checks
+check(c.notRunCount > 0 and #c.notRun == c.notRunCount, "notRun list")
+check(string.find(c.spellsKnown, "Stoneskin Totem", 1, true) and string.find(c.spellsNotKnown, "Call of the Elements", 1, true), "known and unknown spell lists")
+check(string.find(table.concat(c.notRun, "|"), "Call of the Elements", 1, true), "an unknown set spell is named")
+check(said("could not run"), "chat must say which checks could not run")
+-- events
+local f = sframe()
+check(f._events.PLAYER_TOTEM_UPDATE == true and f._events.UPDATE_MULTI_CAST_ACTIONBAR == true and f._events.PLAYER_REGEN_DISABLED == true, "events")
+check(f._events.UNIT_SPELLCAST_SUCCEEDED == "unit:player" and f._events.UNIT_SPELLCAST_FAILED == "unit:player", "cast events are unit events")
+check(__cleuAttempts == 0, "COMBAT_LOG_EVENT_UNFILTERED must never be registered (protected on Forever): " .. tostring(__cleuAttempts))
+check(said("/fsprobe shaman setslot") and said("/fsprobe shaman buttons"), "short usage printed at start")
+noOnUpdate()
+scan(s)
+"""
+)
+
+case("shaman_blank_gettotem_info_is_recorded_exactly")(
+    r"""
+shamanMock()
+__totem[2] = { true, "", 0, 0, 0, 1, 0 }
+runCmd("shaman")
+local e = ForeverSTUwaveDB.fsprobe.shaman.ooc.totems.slots.s2
+check(e.info.r1.value == true and e.info.r2.value == "" and e.info.r2.isSecret == false, "blank name recorded as a plain empty string")
+check(e.brief == "boolean/plain=true,string/plain=,number/plain=0,number/plain=0,number/plain=0,number/plain=1,number/plain=0", "brief: " .. tostring(e.brief))
+check(e.looksBlank == true, "a live totem with no name is flagged")
+check(ForeverSTUwaveDB.fsprobe.shaman.ooc.totems.slots.s1.looksBlank == false, "an empty slot is not a blank report")
+"""
+)
+
+case("shaman_low_level_names_what_could_not_run")(
+    r"""
+shamanMock()
+runCmd("shaman")
+local c = ForeverSTUwaveDB.fsprobe.shaman.ooc.checks
+local text = table.concat(c.notRun, "|")
+for _, name in ipairs({ "Totemic Recall", "Call of the Elements", "Searing Totem", "Fire Nova" }) do
+    check(string.find(c.spellsNotKnown, name, 1, true), name .. " must be listed as not known: " .. c.spellsNotKnown)
+end
+check(c.spellsKnown == "Stoneskin Totem (8071)", "known list: " .. tostring(c.spellsKnown))
+check(string.find(text, "no totem was down", 1, true), "no live totem must be said: " .. text)
+check(string.find(text, "MultiCastActionBarFrame", 1, true), "an absent native bar frame must be said")
+check(string.find(text, "bar", 1, true) and string.find(text, "not shown", 1, true) or string.find(text, "absent", 1, true), "bar state")
+check(ForeverSTUwaveDB.fsprobe.shaman.ooc.cooldowns.searing.skipped == "no id", "a totem whose name does not resolve is not read")
+check(said("checks could not run"), "chat line")
+scan(ForeverSTUwaveDB.fsprobe.shaman)
+"""
+)
+
+case("shaman_combat_snapshot_follows_the_pull_and_sits_beside_the_ooc_one")(
+    r"""
+shamanMock()
+__totem[2] = { true, "Stoneskin Totem", 990, 300, 136098, 1, 8071 }
+runCmd("shaman")
+local s = ForeverSTUwaveDB.fsprobe.shaman
+__combat = true
+sfire("PLAYER_REGEN_DISABLED")
+advance(2)
+check(s.combat == nil, "combat snapshot taken before the delay")
+advance(2.1)
+check(s.combat and s.combat.kind == "combat" and s.combat.inCombat == true, "combat snapshot tagged true")
+check(s.combat.totems.slots.s2.info.inCombat == true and s.ooc.totems.slots.s2.info.inCombat == false, "both runs side by side")
+check(sframe()._events.PLAYER_REGEN_DISABLED == nil, "REGEN_DISABLED still registered after the combat snapshot")
+check(said("shaman: combat snapshot"), "combat line missing")
+scan(s)
+"""
+)
+
+case("shaman_totem_update_logs_a_readout_per_event")(
+    r"""
+shamanMock()
+runCmd("shaman")
+__totem[2] = { true, "Stoneskin Totem", 990, 300, 136098, 1, 8071 }
+sfire("PLAYER_TOTEM_UPDATE", 2)
+__totem[2] = nil
+advance(1)
+sfire("PLAYER_TOTEM_UPDATE", 2)
+local log = ForeverSTUwaveDB.fsprobe.shaman.logs.totem
+check(log.total == 2 and #log.entries == 2, "two events logged")
+local a, b = log.entries[1], log.entries[2]
+check(a.event == "PLAYER_TOTEM_UPDATE" and a.argCount == 1 and a.slot.type == "number" and a.slot.isSecret == false and a.slot.value == 2, "slot argument plain")
+check(string.find(a.info, "string/plain=Stoneskin Totem", 1, true) and string.find(a.timeLeft, "number/plain=250", 1, true), "readout of the totem")
+check(string.find(b.info, "boolean/plain=false", 1, true) and b.inCombat == false and b.gap == 1, "the dismissal reads empty: " .. tostring(b.info))
+check(a.all == nil, "a plain slot reads that slot only")
+"""
+)
+
+case("shaman_totem_update_with_a_secret_slot_reads_every_slot", "secret")(
+    r"""
+shamanMock()
+runCmd("shaman")
+sfire("PLAYER_TOTEM_UPDATE", SN)
+local e = ForeverSTUwaveDB.fsprobe.shaman.logs.totem.entries[1]
+check(e.slot.isSecret == true and e.slot.value == nil, "a secret slot is described, not stored")
+check(e.info == nil and e.all.s1 and e.all.s4, "every slot is read instead")
+scan(ForeverSTUwaveDB.fsprobe.shaman)
+"""
+)
+
+case("shaman_cast_and_multicast_logs")(
+    r"""
+shamanMock()
+runCmd("shaman")
+sfire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 8071)
+sfire("UNIT_SPELLCAST_SUCCEEDED", "party1", "Cast-2", 8071)
+sfire("UNIT_SPELLCAST_FAILED", "player", "Cast-3", 2484)
+sfire("UPDATE_MULTI_CAST_ACTIONBAR")
+local logs = ForeverSTUwaveDB.fsprobe.shaman.logs
+check(logs.cast.total == 2 and logs.cast.entries[1].spellName == "Stoneskin Totem" and logs.cast.entries[2].event == "UNIT_SPELLCAST_FAILED", "player casts only, with the spell name")
+check(logs.cast.entries[1].spellID.value == 8071 and logs.cast.entries[1].inCombat == false, "cast entry")
+check(logs.multicast.total == 1 and string.find(logs.multicast.entries[1].hasBar, "boolean/plain=false", 1, true), "multicast update logged with a readout")
+"""
+)
+
+case("shaman_logs_are_capped_ring_buffers")(
+    r"""
+shamanMock()
+runCmd("shaman")
+for i = 1, 130 do sfire("PLAYER_TOTEM_UPDATE", 2) end
+for i = 1, 70 do sfire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-" .. i, 8071) end
+local logs = ForeverSTUwaveDB.fsprobe.shaman.logs
+check(#logs.totem.entries == logs.totem.cap and logs.totem.cap == 100 and logs.totem.total == 130 and logs.totem.dropped == 30, "totem log capped at 100")
+check(#logs.cast.entries == 50 and logs.cast.total == 70 and logs.cast.dropped == 20, "cast log capped at 50")
+"""
+)
+
+case("shaman_snapshot_with_secret_values_stores_only_plain_data", "secret")(
+    r"""
+shamanMock()
+shamanFrames(true)
+runCmd("shaman")
+local s = ForeverSTUwaveDB.fsprobe.shaman
+check(s.ooc.classToken == "unknown", "a secret class fails closed")
+check(s.ooc.totems.slots.s2.info.r1.isSecret == true and s.ooc.totems.slots.s2.info.r1.value == nil, "secret totem info is described only")
+check(s.ooc.totems.slots.s2.looksBlank == nil or s.ooc.totems.slots.s2.looksBlank == "unknown", "no verdict on a secret read")
+sfire("UNIT_SPELLCAST_SUCCEEDED", SS, SS, SN)
+sfire("UNIT_SPELLCAST_FAILED", SS, SS, SN)
+sfire("PLAYER_TOTEM_UPDATE", SN)
+sfire("UPDATE_MULTI_CAST_ACTIONBAR")
+__combat = true
+sfire("PLAYER_REGEN_DISABLED")
+advance(4)
+check(s.combat and s.combat.totems, "combat snapshot taken")
+runCmd("shaman setslot")
+runCmd("shaman destroy")
+scan(s)
+"""
+)
+
+case("shaman_every_api_throws", "throw")(
+    r"""
+shamanMock()
+shamanFrames(true)
+runCmd("shaman")
+local s = ForeverSTUwaveDB.fsprobe.shaman
+check(s and s.ooc and s.meta.status == "logging", "snapshot saved despite every API throwing")
+sfire("PLAYER_TOTEM_UPDATE", 2)
+sfire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 8071)
+sfire("UPDATE_MULTI_CAST_ACTIONBAR")
+runCmd("shaman setslot")
+runCmd("shaman destroy")
+runCmd("shaman buttons")
+runCmd("shaman buttons off")
+local f = sframe()
+runCmd("shaman off")
+check(nevents(f) == 0, "off unregisters")
+scan(s)
+"""
+)
+
+case("shaman_even_createframe_throws", "throw")(
+    r"""
+__frameThrows = true
+shamanMock()
+runCmd("shaman")
+local s = ForeverSTUwaveDB.fsprobe.shaman
+check(s.ooc and s.meta.status == "no frame", "snapshot saved, nothing armed: " .. tostring(s.meta.status))
+runCmd("shaman buttons")
+runCmd("shaman buttons off")
+scan(s)
+"""
+)
+
+case("shaman_nothing_protected_or_blocked_runs_automatically")(
+    r"""
+shamanMock({ [8071] = true, [2484] = true, [36936] = true })
+shamanFrames(true)
+__mcSpells[2] = { 8071, 2484 }
+__totem[2] = { true, "Stoneskin Totem", 990, 300, 136098, 1, 8071 }
+runCmd("shaman")
+__combat = true
+sfire("PLAYER_REGEN_DISABLED")
+advance(4)
+sfire("PLAYER_TOTEM_UPDATE", 2)
+sfire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 8071)
+sfire("UPDATE_MULTI_CAST_ACTIONBAR")
+__combat = false
+sfire("PLAYER_REGEN_ENABLED")
+advance(2)
+runCmd("shaman")
+check(#__setCalls == 0, "SetMultiCastSpell must only run from /fsprobe shaman setslot: " .. #__setCalls)
+check(#__destroyCalls == 0, "DestroyTotem must only run from /fsprobe shaman destroy: " .. #__destroyCalls)
+check(blizzTouched() == 0, "Blizzard's totem frames must never be changed: " .. select(2, blizzTouched()))
+check(FSProbeShamanBtn1 == nil and FSProbeShamanStrip == nil, "no test strip unless asked")
+"""
+)
+
+case("shaman_setslot_is_explicit_and_records_the_result")(
+    r"""
+shamanMock({ [8071] = true, [2484] = true })
+__mcSpells[2] = { 8071, 2484 }
+runCmd("shaman")
+__combat = true
+runCmd("shaman setslot")
+check(#__setCalls == 2, "one pick and one restore: " .. #__setCalls)
+check(__setCalls[1][1] == 134 and __setCalls[1][2] == 2484 and __setCalls[1][3] == true, "picks the other known totem on the earth slot, in combat")
+check(__setCalls[2][1] == 134 and __setCalls[2][2] == 8071, "restores the previous pick")
+local r = ForeverSTUwaveDB.fsprobe.shaman.setslot.runs[1]
+check(r.inCombat == true and r.actionId == 134 and r.slot == 2 and r.spellId == 2484 and r.previousSpellId == 8071, "run record")
+check(r.call.ok == true and r.changed == true and r.restore.call.ok == true, "call results")
+check(string.find(r.before.info, "number/plain=8071", 1, true) and string.find(r.after.info, "number/plain=2484", 1, true), "before and after readouts")
+check(said("SetMultiCastSpell(134, 2484)") and said("ADDON_ACTION_BLOCKED"), "the chat line comes before the call and names the risk")
+scan(ForeverSTUwaveDB.fsprobe.shaman)
+"""
+)
+
+case("shaman_setslot_with_nothing_to_pick_calls_nothing")(
+    r"""
+shamanMock()
+__mcSpells = {}
+runCmd("shaman setslot")
+check(#__setCalls == 0, "no spell list, no call")
+local r = ForeverSTUwaveDB.fsprobe.shaman.setslot.runs[1]
+check(type(r.skipped) == "string" and string.find(r.skipped, "no totem spells", 1, true), "skip reason recorded: " .. tostring(r.skipped))
+check(said("setslot"), "chat line")
+"""
+)
+
+case("shaman_destroy_is_explicit_and_records_before_and_after")(
+    r"""
+shamanMock()
+__totem[2] = { true, "Stoneskin Totem", 990, 300, 136098, 1, 8071 }
+runCmd("shaman destroy")
+check(#__destroyCalls == 1 and __destroyCalls[1][1] == 2, "the first live slot is dismissed")
+local r = ForeverSTUwaveDB.fsprobe.shaman.destroy.runs[1]
+check(r.slot == 2 and r.call.ok == true and string.find(r.before, "boolean/plain=true", 1, true) and string.find(r.after, "boolean/plain=false", 1, true), "before and after")
+runCmd("shaman destroy 3")
+check(#__destroyCalls == 2 and __destroyCalls[2][1] == 3, "an explicit slot")
+runCmd("shaman destroy 9")
+check(#__destroyCalls == 2, "a bad slot is refused")
+"""
+)
+
+case("shaman_buttons_strip_is_built_out_of_combat_with_the_right_attributes")(
+    r"""
+shamanMock({ [8071] = true, [2484] = true, [36936] = true })
+runCmd("shaman buttons")
+local b1, b2, b3 = FSProbeShamanBtn1, FSProbeShamanBtn2, FSProbeShamanBtn3
+check(b1 and b2 and b3, "three buttons")
+check(b1._tmpl == "SecureActionButtonTemplate" and b2._tmpl == "SecureActionButtonTemplate" and b3._tmpl == "SecureActionButtonTemplate", "secure templates")
+check(b1._attrs.type1 == "destroytotem" and b1._attrs["totem-slot1"] == 1 and b1._attrs.type2 == "destroytotem" and b1._attrs["totem-slot2"] == 2, "dismiss slots 1 and 2")
+check(b1._attrs["shift-type1"] == "destroytotem" and b1._attrs["shift-totem-slot1"] == 3 and b1._attrs["shift-totem-slot2"] == 4, "dismiss slots 3 and 4 on shift")
+check(b2._attrs.type == "macro" and b2._attrs.macrotext == "/castsequence reset=combat/15 Stoneskin Totem, Earthbind Totem", "castsequence: " .. tostring(b2._attrs.macrotext))
+check(b3._attrs.type == "spell" and b3._attrs.spell == "Totemic Recall", "recall")
+check(FSProbeShamanStrip._shown == true and FSProbeShamanStrip._parent == UIParent, "strip shown on UIParent")
+check(ForeverSTUwaveDB.fsprobe.shaman.meta.status == "logging", "logging starts with the strip")
+check(said("TEST STRIP") and said("buttons off"), "usage line")
+local st = ForeverSTUwaveDB.fsprobe.shaman.strip
+check(st.shown == true and st.buttons.castsequence.macrotext == b2._attrs.macrotext and st.buttons.recall.spell == "Totemic Recall", "strip recorded")
+runCmd("shaman buttons off")
+check(FSProbeShamanStrip._shown == false and ForeverSTUwaveDB.fsprobe.shaman.strip.shown == false, "hidden by buttons off")
+runCmd("shaman buttons")
+check(FSProbeShamanStrip._shown == true, "shown again")
+check(FSProbeShamanBtn1 == b1 and b1._calls.HookScript == 2, "the buttons are built once and hooked once")
+scan(ForeverSTUwaveDB.fsprobe.shaman)
+"""
+)
+
+case("shaman_buttons_skip_what_is_not_known")(
+    r"""
+shamanMock()
+runCmd("shaman buttons")
+local b2, b3 = FSProbeShamanBtn2, FSProbeShamanBtn3
+check(b2._attrs.macrotext == "/castsequence reset=combat/15 Stoneskin Totem, Stoneskin Totem", "one known totem repeats: " .. tostring(b2._attrs.macrotext))
+check(b3._attrs.type == nil and b3._attrs.spell == nil, "an unknown recall button carries no attribute")
+local st = ForeverSTUwaveDB.fsprobe.shaman.strip.buttons
+check(string.find(st.recall.skipped, "Totemic Recall not known", 1, true), "reason: " .. tostring(st.recall.skipped))
+shamanMock({})
+runCmd("shaman buttons")
+check(FSProbeShamanBtn2._attrs.macrotext == nil and string.find(ForeverSTUwaveDB.fsprobe.shaman.strip.buttons.castsequence.skipped, "no totem known", 1, true), "no totem known")
+"""
+)
+
+case("shaman_buttons_never_change_secure_frames_in_combat")(
+    r"""
+shamanMock()
+__combat = true
+runCmd("shaman buttons")
+check(FSProbeShamanBtn1 == nil and FSProbeShamanStrip == nil, "nothing is built in combat")
+check(said("leave combat"), "refusal line")
+__combat = false
+runCmd("shaman buttons")
+local b = FSProbeShamanBtn1
+local before = { b._calls.SetAttribute, b._calls.Show, b._calls.Hide, FSProbeShamanStrip._calls.Hide, FSProbeShamanStrip._calls.Show, FSProbeShamanStrip._calls.SetPoint }
+__combat = true
+runCmd("shaman buttons")
+runCmd("shaman buttons off")
+local after = { b._calls.SetAttribute, b._calls.Show, b._calls.Hide, FSProbeShamanStrip._calls.Hide, FSProbeShamanStrip._calls.Show, FSProbeShamanStrip._calls.SetPoint }
+for i = 1, 6 do check(before[i] == after[i], "a secure frame call ran in combat, index " .. i) end
+check(FSProbeShamanStrip._args.SetAlpha[1] == 0 and said("alpha 0"), "in combat the strip is only faded")
+__combat = false
+runCmd("shaman buttons off")
+check(FSProbeShamanStrip._shown == false, "hidden once out of combat")
+"""
+)
+
+case("shaman_click_outcomes_are_logged_with_what_followed")(
+    r"""
+shamanMock({ [8071] = true, [2484] = true })
+runCmd("shaman buttons")
+local b = FSProbeShamanBtn1
+check(type(b._hookScripts.PreClick) == "function" and type(b._hookScripts.PostClick) == "function", "click hooks")
+__totem[2] = { true, "Stoneskin Totem", 990, 300, 136098, 1, 8071 }
+b._hookScripts.PreClick(b, "RightButton", false)
+__totem[2] = nil
+sfire("PLAYER_TOTEM_UPDATE", 2)
+b._hookScripts.PostClick(b, "RightButton", false)
+advance(0.5)
+sfire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 8071)
+advance(4)
+sfire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-2", 8071)
+local click = ForeverSTUwaveDB.fsprobe.shaman.logs.click.entries[1]
+check(click.event == "PreClick" and click.button == "dismiss" and click.mouse.value == "RightButton" and click.down.value == false, "click entry: " .. tostring(click.button))
+check(string.find(click.totemsBefore.s2, "boolean/plain=true", 1, true) and string.find(click.post.totems.s2, "boolean/plain=false", 1, true), "state before and after the click")
+check(type(click.post.t) == "number" and click.post.event == "PostClick", "post stamp")
+check(#click.follow == 2 and click.follow[1].event == "PLAYER_TOTEM_UPDATE" and click.follow[2].event == "UNIT_SPELLCAST_SUCCEEDED" and click.follow[2].dt == 0.5,
+    "events within 3 s follow the click, later ones do not: " .. #click.follow)
+check(string.find(click.follow[2].what, "Stoneskin Totem", 1, true), "what followed")
+scan(ForeverSTUwaveDB.fsprobe.shaman)
+"""
+)
+
+case("shaman_a_full_session_never_touches_blizzards_totem_frames")(
+    r"""
+shamanMock({ [8071] = true, [2484] = true, [36936] = true })
+shamanFrames(true)
+__mcSpells[2] = { 8071, 2484 }
+runCmd("shaman")
+runCmd("shaman buttons")
+local b = FSProbeShamanBtn1
+b._hookScripts.PreClick(b, "LeftButton", true)
+sfire("PLAYER_TOTEM_UPDATE", 2)
+b._hookScripts.PostClick(b, "LeftButton", true)
+runCmd("shaman setslot")
+runCmd("shaman destroy 2")
+__combat = true
+sfire("PLAYER_REGEN_DISABLED")
+advance(4)
+runCmd("shaman buttons off")
+__combat = false
+runCmd("shaman buttons off")
+runCmd("shaman off")
+runCmd("reset")
+check(blizzTouched() == 0, "Blizzard's totem frames were changed: " .. select(2, blizzTouched()))
+"""
+)
+
+case("shaman_off_timeout_reset_and_rearm")(
+    r"""
+shamanMock()
+runCmd("shaman")
+local f = sframe()
+runCmd("shaman off")
+check(nevents(f) == 0 and ForeverSTUwaveDB.fsprobe.shaman.meta.status == "stopped", "off must unregister")
+pcall(f._scripts.OnEvent, f, "PLAYER_TOTEM_UPDATE", 2)
+check((ForeverSTUwaveDB.fsprobe.shaman.logs.totem or { total = 0 }).total == 0, "an event after off was logged")
+runCmd("shaman")
+check(nevents(f) > 0, "restart must register again")
+advance(1799)
+check(nevents(f) > 0, "stopped early")
+advance(2)
+check(nevents(f) == 0 and ForeverSTUwaveDB.fsprobe.shaman.meta.status == "timeout", "timeout must unregister")
+runCmd("shaman")
+runCmd("shaman off")
+advance(600)
+runCmd("shaman")
+advance(1201)
+check(nevents(f) > 0 and ForeverSTUwaveDB.fsprobe.shaman.meta.status == "logging", "a stale timer stopped the newer run")
+runCmd("")
+check(ForeverSTUwaveDB.fsprobe.shaman and nevents(f) > 0, "main arm wiped or stopped the shaman probe")
+runCmd("shaman buttons")
+runCmd("reset")
+check(ForeverSTUwaveDB.fsprobe == nil and nevents(f) == 0, "reset left shaman data or events")
+check(FSProbeShamanStrip._shown == false, "reset hides the strip")
+advance(5000)
+check(ForeverSTUwaveDB.fsprobe == nil, "a stale timer wrote after reset")
+noOnUpdate()
+"""
+)
+
+case("shaman_replacing_a_saved_record_says_so")(
+    r"""
+shamanMock()
+runCmd("shaman")
+check(not said("replacing the saved shaman record"), "nothing to replace on the first run")
+runCmd("shaman off")
+runCmd("shaman")
+check(said("replacing the saved shaman record"), "a fresh start over a saved record must say so")
+"""
+)
+
 
 def run_case(name: str, mode: str, body: str, source: str) -> str | None:
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
@@ -3142,7 +3775,7 @@ PRIEST_FORBIDDEN = (
 
 
 def priest_section(source: str) -> str:
-    start = source.index("-- /fsprobe priest: what each priest pain point")
+    start = source.index("-- Class probes: the machinery /fsprobe priest")
     end = source.index("-- /fsprobe hot: can an engine AuraContainer")
     lines = [ln for ln in source[start:end].splitlines() if not ln.lstrip().startswith("--")]
     return "\n".join(lines)
@@ -3308,6 +3941,140 @@ def cleu_register_check(root: Path) -> int:
     return 0
 
 
+# --- the shaman probe: protected calls only where Parker types them -------------------------------------------
+# /fsprobe shaman must never call a protected or blocked API by itself: SetMultiCastSpell and DestroyTotem run only
+# inside the two subcommand functions, the secure attributes of the test strip are written only inside the three
+# sync functions (reached from SH.SyncStrip, which SH.ButtonsOn calls after refusing combat), and Blizzard's totem
+# frames are only read. Pinned by text, because the mock cannot tell a protected call from a plain one.
+SHAMAN_START = "-- /fsprobe shaman: what a totem bar can read and do"
+EXPLICIT_CALLS = {
+    "SetMultiCastSpell": ("SH.SetSlot",),
+    "DestroyTotem": ("SH.Destroy",),
+    "ChangeMultiCastActionPage": (),
+    "TargetTotem": (),
+    "CastSpellByID": (),
+    "RunScript": (),
+}
+STRIP_SYNC = ("SH.SyncDismiss", "SH.SyncCastSequence", "SH.SyncRecall")
+BLIZZARD_TOTEM_NAMES = ("MultiCast", "TotemFrame")
+BLIZZARD_MUTATORS = (":Set", ":Show", ":Hide", ":Enable", ":Disable", ":Register", ":Unregister", ":Hook", ":Clear",
+                     "hooksecurefunc", ".SetScript", ".HookScript")
+
+
+def shaman_section(source: str) -> str:
+    start = source.index(SHAMAN_START)
+    end = source.index("-- /fsprobe hot: can an engine AuraContainer")
+    return strip_lua_comments(source[start:end])
+
+
+def lua_functions(text: str) -> tuple[dict[str, str], str]:
+    """Top-level `function NAME(...)` ... `end` blocks of comment-free Lua, by name, and the lines outside them."""
+    out: dict[str, str] = {}
+    outside = []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        m = re.match(r"function ([\w.:]+)\(", lines[i])
+        if not m:
+            outside.append(lines[i])
+            i += 1
+            continue
+        j = i
+        while j < len(lines) and lines[j] != "end":
+            j += 1
+        out[m.group(1)] = "\n".join(lines[i : j + 1])
+        i = j + 1
+    return out, "\n".join(outside)
+
+
+def _calls_in(call: str, body: str) -> bool:
+    """A lookup Api("call") or a bare reference outside string literals (a chat line may name the API)."""
+    blanked = "\n".join(re.sub(r'"[^"]*"', '""', ln) for ln in body.splitlines())
+    return bool(re.search(rf'Api\("{call}"\)', body) or re.search(rf"(?<![\w.]){call}(?![\w])|_G\.{call}\b", blanked))
+
+
+def shaman_violations(text: str) -> list[str]:
+    """Calls the shaman section makes where it must not (text is comment-free Lua of the section)."""
+    bad = []
+    funcs, outside = lua_functions(text)
+    for call, allowed in EXPLICIT_CALLS.items():
+        for name, body in funcs.items():
+            if _calls_in(call, body) and name not in allowed:
+                bad.append(f"{call} used in {name}")
+        if _calls_in(call, outside):
+            bad.append(f"{call} used outside a function")
+    for name, body in funcs.items():
+        if ":SetAttribute(" in body and name not in STRIP_SYNC:
+            bad.append(f"SetAttribute in {name}")
+    for line in text.splitlines():
+        if any(n in line for n in BLIZZARD_TOTEM_NAMES) and any(m in line for m in BLIZZARD_MUTATORS):
+            bad.append(f"Blizzard totem frame changed: {line.strip()}")
+    if "hooksecurefunc" in text:
+        bad.append("hooksecurefunc in the shaman section")
+    return bad
+
+
+def shaman_gate_problems(text: str) -> list[str]:
+    """The strip is reached only through SH.ButtonsOn, after it refuses combat; hiding checks combat first."""
+    funcs, _ = lua_functions(text)
+    bad = []
+    on = funcs.get("SH.ButtonsOn", "")
+    if not on or "LockedDown(false)" not in on or on.find("LockedDown(false)") > on.find("SH.SyncStrip"):
+        bad.append("SH.ButtonsOn must refuse combat before SH.SyncStrip")
+    for name, body in funcs.items():
+        if name != "SH.ButtonsOn" and "SH.SyncStrip" in body and name != "SH.SyncStrip":
+            bad.append(f"SH.SyncStrip reached from {name}")
+        if "SH.BuildStrip(" in body and name not in ("SH.SyncStrip", "SH.BuildStrip"):
+            bad.append(f"SH.BuildStrip reached from {name}")
+    hide = funcs.get("SH.HideStrip", "")
+    if not hide or hide.find("LockedDown(false)") < 0 or hide.find("LockedDown(false)") > hide.find("strip.host.Hide"):
+        bad.append("SH.HideStrip must check combat before hiding")
+    for call, allowed in EXPLICIT_CALLS.items():
+        for name in allowed:
+            if f'Api("{call}")' not in funcs.get(name, ""):
+                bad.append(f"{name} must hold the only {call} lookup")
+    return bad
+
+
+SHAMAN_MUST_CATCH = {
+    "set slot from a handler": 'function SH.LogTotem(event)\n    local fn = Api("SetMultiCastSpell")\nend',
+    "bare destroy": "function SH.Follow(e)\n    DestroyTotem(2)\nend",
+    "destroy lookup in the snapshot": 'function SH.PartTotems(sec)\n    sec.x = Api("DestroyTotem")\nend',
+    "attribute outside the sync functions": "function SH.LogCast(event)\n    button:SetAttribute(\"type\", nil)\nend",
+    "blizzard frame shown": "function SH.PartFrames(sec)\n    MultiCastActionBarFrame:Show()\nend",
+    "blizzard frame hooked": "function SH.PartFrames(sec)\n    hooksecurefunc(MultiCastActionBarFrame, \"Show\", f)\nend",
+    "target totem": 'function SH.PartTotems(sec)\n    pcall(TargetTotem, 1)\nend',
+}
+SHAMAN_MUST_PASS = {
+    "set slot in its own function": 'function SH.SetSlot()\n    local fn = Api("SetMultiCastSpell")\nend',
+    "destroy in its own function": 'function SH.Destroy(arg)\n    local fn = Api("DestroyTotem")\nend',
+    "attribute in a sync function": "function SH.SyncRecall(button)\n    button:SetAttribute(\"type\", nil)\nend",
+    "presence list entry": 'SH.API_LIST = {\n    { "DestroyTotem" }, { "SetMultiCastSpell" },\n}',
+    "reading a blizzard frame": 'function SH.PartFrames(sec)\n    local rec = GS.Read(MultiCastActionBarFrame, "IsShown")\nend',
+}
+
+
+def shaman_static_checks(source: str) -> int:
+    text = shaman_section(source)
+    failures = 0
+    bad = shaman_violations(text)
+    missed = [k for k, v in SHAMAN_MUST_CATCH.items() if not shaman_violations(text + "\n" + v)]
+    noisy = [k for k, v in SHAMAN_MUST_PASS.items() if shaman_violations(v)]
+    if bad or missed or noisy:
+        failures += 1
+        print(f"FAIL  static: shaman section: {bad}; forms NOT caught {missed}; legal forms wrongly flagged {noisy}")
+    else:
+        print(f"ok    static: SetMultiCastSpell / DestroyTotem run only in their subcommands, SetAttribute only in the strip sync, "
+              f"Blizzard's totem frames are never changed ({len(SHAMAN_MUST_CATCH)} forms caught, {len(SHAMAN_MUST_PASS)} legal forms pass)")
+    problems = shaman_gate_problems(text)
+    if problems:
+        failures += 1
+        print(f"FAIL  static: shaman gates: {problems}")
+    else:
+        print("ok    static: the test strip is built and shown only after SH.ButtonsOn refuses combat, and hiding checks combat first")
+    return failures
+
+
 def static_checks(source: str) -> int:
     failures = 0
     priest = priest_section(source)
@@ -3316,18 +4083,19 @@ def static_checks(source: str) -> int:
     noisy = [leg for leg in RAW_LEGAL if raw_arg_violations(priest + "\n    " + leg)]
     if bad or missed or noisy:
         failures += 1
-        print(f"FAIL  static: raw values in the priest section: compared or truth-tested {bad}; "
+        print(f"FAIL  static: raw values in the class probe sections (core, priest, shaman): compared or truth-tested {bad}; "
               f"injections NOT caught {missed}; legal forms wrongly flagged {noisy}")
     else:
-        print(f"ok    static: no raw event argument or API return is compared or truth-tested in the priest section "
+        print(f"ok    static: no raw event argument or API return is compared or truth-tested in the class probe sections (core, priest, shaman) "
               f"({len(RAW_INJECTIONS)} injected forms are caught, {len(RAW_LEGAL)} legal forms pass)")
     leaked = [n for n in PRIEST_FORBIDDEN if n in priest]
     if leaked:
         failures += 1
-        print(f"FAIL  static: the priest section uses a forbidden aura/log API: {leaked}")
+        print(f"FAIL  static: a class probe section uses a forbidden aura/log API: {leaked}")
     else:
-        print("ok    static: the priest section reads no aura by index or slot")
+        print("ok    static: the class probe sections read no aura by index or slot")
     failures += cleu_register_check(CLEU_SOURCE_DIR)
+    failures += shaman_static_checks(source)
     hot = hot_section(source)
     leaked = [n for n in HOT_FORBIDDEN if n in hot]
     if leaked:
@@ -3352,7 +4120,11 @@ def static_checks(source: str) -> int:
 
 def main() -> int:
     source = SOURCE.read_text(encoding="utf-8")
-    failures = static_checks(source)
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        failures = static_checks(source)
+    print(captured.getvalue(), end="")
+    static_total = sum(1 for ln in captured.getvalue().splitlines() if ln.startswith(("ok    static:", "FAIL  static:")))
     for name, mode, body in CASES:
         error = run_case(name, mode, body, source)
         if error is None:
@@ -3360,7 +4132,7 @@ def main() -> int:
         else:
             failures += 1
             print(f"FAIL  {name}\n      {error}")
-    total = len(CASES) + 4
+    total = len(CASES) + static_total
     print(f"{total - failures}/{total} checks passed")
     return 1 if failures else 0
 
