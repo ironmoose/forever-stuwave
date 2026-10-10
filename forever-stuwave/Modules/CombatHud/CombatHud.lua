@@ -46,7 +46,10 @@
 -- border) is seated, and an AuraContainer slot for that buff on unit "player" (filter HELPFUL,
 -- includeSpellIDs = the buff's rank ids) is stacked ON TOP of it, same rect, higher frame
 -- level, opaque icon. While the buff is up its aura icon covers the warning; when it falls
--- off, the slot draws nothing and the warning shows through. No Lua ever learns which. That
+-- off, the slot draws nothing and the warning shows through. No Lua ever learns which.
+-- CORRECTION (live, 16001): the cover did NOT reliably hide the tile of a present buff, so in
+-- combat the tile is drawn only for a buff whose HELD out of combat verdict is "missing" (see
+-- BuffEntries); the cover is now only a bonus that hides it after a recast. That
 -- container is VISIBLE only in combat (out of combat the Hud's own reads are exact and its
 -- buffsMissing drives the tiles, and a live slot would draw a stray icon over a hidden tile).
 -- Form and pet checks (Shadowform, the pet) are plain in combat, so they come from
@@ -383,7 +386,7 @@ end
 -- Frame building blocks
 -------------------------------------------------------------------------------
 
-local ui = { tiles = {}, buffTiles = {}, diamonds = {} }
+local ui = { tiles = {}, buffTiles = {}, diamonds = {}, heldMissing = {}, castCleared = {} }
 CombatHud.ui = ui
 local containers = {}
 CombatHud.containers = containers
@@ -1776,16 +1779,52 @@ local function EnsureBuffSlots(profile)
 end
 
 -- The tiles to show: out of combat (and whenever no occlusion is available) exactly what the Hud
--- reports missing; in combat every tracked aura buff that has a slot (its warning sits behind
--- the slot) plus the plain checks (form, pet) the Hud still reports.
+-- reports missing; in combat the plain checks (form, pet) the Hud still reports, plus every
+-- tracked aura buff with a slot whose HELD verdict is "missing".
+--
+-- THE HELD VERDICT (ui.heldMissing[key]). Aura reads are refused in combat, and an unreadable
+-- answer is UNKNOWN, never "missing". So an aura buff is only warned about in combat when the last
+-- READABLE out of combat look (state.aurasKnown) said it was absent. The verdict is written only
+-- out of combat and only when the Hud really read the auras; combat never writes it, except that
+-- a successful cast of that buff's own spell clears it (ClearHeldOnCast). Only an ABSENT buff is
+-- held: a buff that was present but inside its warnBelow window (Fortitude, 60 s) is an out of
+-- combat refresh nag and is never held, or a buff up with 50 s left at the pull would warn all fight.
+-- Buffs marked oocOnly in the profile are the exception to "out of combat only" on purpose: a buff
+-- missing at the pull keeps its tile in combat.
+-- The engine cover slot (the occlusion trick above) is NOT relied on to hide the tile: live on 16001
+-- it did not, so the tile is simply not drawn unless the verdict is "missing". Known limits: a buff
+-- that drops mid fight cannot warn (its aura is unreadable in combat); a login or reload into combat
+-- starts with no verdict, which is the safe direction (no tile); casting the spell on someone else
+-- also clears the verdict (the cast event does not say on whom), again the safe direction.
 local function BuffEntries(state, profile, inCombat)
     local missing, order = {}, {}
     for _, b in ipairs(state.buffsMissing or {}) do
         if type(b) == "table" then
             local key = PlainString(b.key)
             if key and not missing[key] then
-                missing[key] = { icon = PlainIcon(b.icon) }
+                missing[key] = { icon = PlainIcon(b.icon), expiring = PlainBool(b.expiring) == true }
                 order[#order + 1] = key
+            end
+        end
+    end
+    -- Hold the out of combat verdict per aura buff: true = absent, false = up (or only expiring). Written
+    -- only from a read that really happened (aurasKnown); an unreadable look leaves the old verdict alone.
+    local held = ui.heldMissing
+    if not inCombat and PlainBool(state.aurasKnown) == true then
+        for _, sb in ipairs(profile.selfBuffs or {}) do
+            local key = sb.spell
+            if type(key) == "string" and sb.kind == nil then
+                local m = missing[key]
+                local absent = m ~= nil and not m.expiring
+                -- A cast of this buff landed since the last fight began (ClearHeldOnCast), but the state
+                -- being drawn can still be the stale one that says "missing" (the Hud pushes about every
+                -- 0.2 s): that replay must not undo the cast. Once a read says it is up, or the fight is
+                -- over (PLAYER_REGEN_ENABLED), the flag is dropped and reads are authoritative again.
+                if ui.castCleared[key] then
+                    if not absent then ui.castCleared[key] = nil; held[key] = false end
+                else
+                    held[key] = absent
+                end
             end
         end
     end
@@ -1805,7 +1844,7 @@ local function BuffEntries(state, profile, inCombat)
             if type(key) == "string" then
                 if sb.kind == nil then
                     local t = ui.buffTiles[key]
-                    if t and t.slot and SpellKnown(key) == true then add(key, nil) end
+                    if t and t.slot and held[key] == true and SpellKnown(key) == true then add(key, nil) end
                 elseif missing[key] then
                     add(key, missing[key].icon)
                 end
@@ -1978,6 +2017,8 @@ local lastState
 
 local function HideAll()
     lastOoc = false
+    for k in pairs(ui.heldMissing) do ui.heldMissing[k] = nil end    -- no stale verdict across /fshud off and on
+    for k in pairs(ui.castCleared) do ui.castCleared[k] = nil end
     if ui.row then ui.row:Hide() end            -- no row in the Gunsight view
     ui.rowSig = nil
     ui.nextTile.holder:Hide()
@@ -2213,6 +2254,8 @@ end
 function CombatHud.Disable()
     if not enabled then return end
     enabled = false
+    for k in pairs(ui.heldMissing) do ui.heldMissing[k] = nil end
+    for k in pairs(ui.castCleared) do ui.castCleared[k] = nil end
     local Hud = FS.Hud
     if type(Hud) == "table" and type(Hud.Unsubscribe) == "function" then pcall(Hud.Unsubscribe, OnState) end
     StopTicker()
@@ -2335,6 +2378,8 @@ for _, e in ipairs({ "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENAB
     -- LEARNED_SPELL_IN_TAB) should skip, not abort the whole file.
     pcall(events.RegisterEvent, events, e)
 end
+-- Our own successful casts only (the held buff verdict, ClearHeldOnCast).
+pcall(events.RegisterUnitEvent, events, "UNIT_SPELLCAST_SUCCEEDED", "player")
 
 local function BuildPending()
     if not enabled or InCombatSafe() then return end
@@ -2375,6 +2420,7 @@ local function FlushDeferred()
     if redraw then Rerender() end
 end
 function handlers.PLAYER_REGEN_ENABLED()
+    for k in pairs(ui.castCleared) do ui.castCleared[k] = nil end     -- the next read after the fight is authoritative
     -- the covers go dark on the event itself, not on the next Hud push; alpha is always allowed
     if ui.gunsight then SetCover(containers.player, false) end
     BuildPending()
@@ -2413,6 +2459,26 @@ end
 handlers.UPDATE_BINDINGS = RefreshKeybinds
 handlers.ACTIONBAR_SLOT_CHANGED = RefreshKeybinds
 handlers.ACTIONBAR_PAGE_CHANGED = RefreshKeybinds
+
+-- The player cast a spell that is one of the held-missing aura buffs (any rank): that verdict is stale,
+-- so drop it and redraw. The unit and the spell id are checked plain first; a secret or odd value
+-- changes nothing.
+function handlers.UNIT_SPELLCAST_SUCCEEDED(unit, _, spellID)
+    if PlainString(unit) ~= "player" then return end
+    local id = PlainNumber(spellID)
+    if not id then return end
+    local profile = Profile()
+    if not profile then return end
+    local cleared = false
+    for _, sb in ipairs(profile.selfBuffs or {}) do
+        local key = sb.spell
+        if type(key) == "string" and sb.kind == nil and ui.heldMissing[key] == true then
+            local ids = IdSet(key)
+            if ids[id] then ui.heldMissing[key] = false; ui.castCleared[key] = true; cleared = true end
+        end
+    end
+    if cleared then Rerender() end
+end
 
 events:SetScript("OnEvent", function(_, event, ...)
     local fn = handlers[event]

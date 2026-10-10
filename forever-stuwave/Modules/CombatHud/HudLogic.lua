@@ -7,7 +7,8 @@
 --                            row = { { key, icon, missing, remaining, expiresAt, duration,
 --                                      onCd, cdRemaining, proc, isNext }, ... },
 --                            next = { key, icon, glow } | nil,
---                            buffsMissing = { { key, icon }, ... },
+--                            buffsMissing = { { key, icon, expiring }, ... },
+--                            aurasKnown = true | false,
 --                            procs = { { key, glow, active }, ... },
 --                            shards = n | nil,
 --                            channel = { key, done, ticks, cut } | nil,
@@ -911,9 +912,10 @@ local function ItemCount()
     return PlainOf(n, "number")
 end
 
--- missing? true / false / nil. `auras` is the player's aura list (PlayerAuras(); nil =
--- unreadable) and is only read for an aura-kind entry. The caller fetches it ONCE: a nil
--- here means unknown and must never trigger a second scan.
+-- missing? true / false / nil, then `expiring`: true when the buff is present but inside its
+-- warnBelow window (so "missing" is only a refresh warning, not an absent buff). `auras` is the
+-- player's aura list (PlayerAuras(); nil = unreadable) and is only read for an aura-kind entry.
+-- The caller fetches it ONCE: a nil here means unknown and must never trigger a second scan.
 local function BuffMissing(entry, auras)
     local r = ResolveSpell(entry.spell)
     if not r or r.known ~= true then return nil end
@@ -934,7 +936,8 @@ local function BuffMissing(entry, auras)
         if AuraKey(a) == entry.spell then
             if entry.warnBelow and a.expires and a.expires > 0 then
                 if not now then return nil end
-                return (a.expires - now) < entry.warnBelow
+                local low = (a.expires - now) < entry.warnBelow
+                return low, low
             end
             return false
         end
@@ -1079,7 +1082,8 @@ Prims.buffMissing = function(key)
     if not entry then return nil end
     local auras = nil
     if entry.kind == nil then auras = PlayerAuras() end
-    return BuffMissing(entry, auras)
+    local missing = BuffMissing(entry, auras)
+    return missing
 end
 Prims.resourceBelow = function(percent)
     local f = PowerFraction("player")
@@ -1286,6 +1290,7 @@ local function FillState(buf)
     state.class, state.next, state.shards, state.channel = nil, nil, nil, nil
     state.seal, state.judgeAt, state.judged = nil, nil, nil
     local row, buffsMissing, procs = state.row, state.buffsMissing, state.procs
+    state.aurasKnown = false
     if not profile then
         Trim(row, 0); Trim(buffsMissing, 0); Trim(procs, 0)
         return state
@@ -1328,15 +1333,20 @@ local function FillState(buf)
             fetched = true
             auras = PlayerAuras()
         end
-        if BuffMissing(entry, auras) == true then
+        local missing, expiring = BuffMissing(entry, auras)
+        if missing == true then
             local r = ResolveSpell(entry.spell)
             nBuff = nBuff + 1
             local b = Entry(buf.buffs, nBuff)
-            b.key, b.icon = entry.spell, r and r.icon
+            b.key, b.icon, b.expiring = entry.spell, r and r.icon, expiring and true or false
             buffsMissing[nBuff] = b
         end
     end
     Trim(buffsMissing, nBuff)
+    -- true only when the player's aura list was actually read this tick (readable AND the scan
+    -- succeeded): a buff absent from buffsMissing then really is up. False = the aura buffs are
+    -- UNKNOWN, so a consumer holding a last verdict must leave it alone.
+    state.aurasKnown = auras ~= nil
 
     local nKeys = 0
     for key in pairs(profile.procs or EMPTY) do nKeys = nKeys + 1; procKeys[nKeys] = key end
@@ -1468,7 +1478,8 @@ local function SigFill(state, buf)
     n = Put(buf, n, nx and nx.icon)
     local buffs = state.buffsMissing
     n = Put(buf, n, #buffs)
-    for i = 1, #buffs do n = Put(buf, n, buffs[i].key) end
+    for i = 1, #buffs do n = Put(buf, n, buffs[i].key); n = Put(buf, n, buffs[i].expiring) end
+    n = Put(buf, n, state.aurasKnown)
     local procs = state.procs
     n = Put(buf, n, #procs)
     for i = 1, #procs do

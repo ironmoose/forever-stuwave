@@ -674,8 +674,10 @@ W.pet = true
 W.auras.player = { { name = "Demon Armor", spellId = 13787, expirationTime = W.now + 1000, duration = 1800 } }
 fire("UNIT_AURA", "player")
 check(next(keysOf(S().buffsMissing)) == nil, "both up: no reminders")
+check(S().aurasKnown == true, "the aura list was read: aurasKnown")
 W.auras.player = {}; W.pet = false; W.combat = true
 check(next(keysOf(S().buffsMissing)) == nil, "oocOnly reminders are silent in combat")
+check(S().aurasKnown == false, "unreadable in combat: aurasKnown is false, so 'not missing' is not 'up'")
 check(FS.Hud.Primitives.buffMissing("demon_armor") == nil, "aura scan is nil in combat, not missing")
 """)
 
@@ -684,7 +686,16 @@ W.auras.player = { { name = "Power Word: Fortitude", spellId = 10938, expiration
                    { name = "Inner Fire", spellId = 10952, expirationTime = W.now + 500, duration = 600 } }
 fire("UNIT_AURA", "player")
 check(keysOf(S().buffsMissing).fort == true, "30s left of Fortitude is under warnBelow")
+local fortEntry; for _, e in ipairs(S().buffsMissing) do if e.key == "fort" then fortEntry = e end end
+check(fortEntry and fortEntry.expiring == true, "a buff inside warnBelow is flagged expiring, not absent")
 check(keysOf(S().buffsMissing).inner_fire == nil, "Inner Fire is fine")
+W.auras.player = { { name = "Inner Fire", spellId = 10952, expirationTime = W.now + 500, duration = 600 } }
+fire("UNIT_AURA", "player")
+fortEntry = nil; for _, e in ipairs(S().buffsMissing) do if e.key == "fort" then fortEntry = e end end
+check(fortEntry and fortEntry.expiring == false, "an absent buff is not flagged expiring")
+W.auras.player = { { name = "Power Word: Fortitude", spellId = 10938, expirationTime = W.now + 30, duration = 3600 },
+                   { name = "Inner Fire", spellId = 10952, expirationTime = W.now + 500, duration = 600 } }
+fire("UNIT_AURA", "player")
 W.auras.player[1].expirationTime = W.now + 3000
 fire("UNIT_AURA", "player")
 check(keysOf(S().buffsMissing).fort == nil, "plenty of time left")

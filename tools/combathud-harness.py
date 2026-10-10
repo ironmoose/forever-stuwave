@@ -439,7 +439,11 @@ function FrameM:RegisterEvent(e)
     if UNKNOWN_EVENTS[e] then error("Frame:RegisterEvent(): Attempt to register unknown event \"" .. e .. "\"", 2) end
     self._events[e] = true
 end
-function FrameM:RegisterUnitEvent(e) self._events[e] = true end
+function FrameM:RegisterUnitEvent(e, ...)
+    self._events[e] = true
+    self._unitEvents = self._unitEvents or {}
+    self._unitEvents[e] = { ... }
+end
 function FrameM:UnregisterEvent(e) self._events[e] = nil end
 function FrameM:EnableMouse(v) self._mouse = v end
 -- Hover-only mouse (FrameHelpers.HoverOnly) and script hooks (AttachSpellTooltip): the calls are counted so a
@@ -795,6 +799,8 @@ end
 function mkState(over)
     local s = { active = true, class = __class, inCombat = false, row = {}, buffsMissing = {}, procs = {} }
     for k, v in pairs(over or {}) do s[k] = v end
+    -- the real Hud reads the player's auras out of combat and cannot in combat; a test says otherwise explicitly
+    if s.aurasKnown == nil then s.aurasKnown = not s.inCombat end
     return s
 end
 function rowEntry(key, o)
@@ -2202,11 +2208,12 @@ check(p._unit == "player", "on unit player")
 check(p._enabled == false and p._shown == false, "disabled and hidden out of combat")
 """)
 
-case("in_combat_every_tracked_buff_gets_a_warning_tile_behind_a_player_aura_slot")(r"""
+case("in_combat_a_buff_missing_at_the_pull_has_its_warning_tile_over_a_player_aura_slot")(r"""
 standard()
-__state = mkState({ inCombat = false, row = lockRow() })
+__state = mkState({ inCombat = false, row = lockRow(), buffsMissing = { { key = "demon_armor" } } })
 login()
-push(mkState({ inCombat = true, row = lockRow() }))     -- the Hud reports nothing missing: auras are unreadable
+push(mkState({ inCombat = false, row = lockRow(), buffsMissing = { { key = "demon_armor" } } }))     -- readable: Demon Armor is missing at the pull
+push(mkState({ inCombat = true, row = lockRow() }))     -- the Hud reports nothing in combat: auras are unreadable, the last readable verdict holds
 local ui = FS.CombatHud.ui
 local p = FS.CombatHud.containers.player
 check(p._enabled == true and p._shown == true, "the player container is live in combat")
@@ -2247,6 +2254,174 @@ check(slot.frame._order[1] == "SetMouseMotionEnabled", "mouse off first on the b
 check(slot.frame:GetFrameLevel() > ui.buffs:GetFrameLevel(), "slot above the buff row")
 """)
 
+case("in_combat_a_buff_that_was_up_out_of_combat_shows_no_warning_when_reads_are_refused")(r"""
+standard()
+-- out of combat the Hud read the auras and the player HAS Demon Armor: it reports nothing missing
+__state = mkState({ inCombat = false, row = lockRow(), buffsMissing = {} })
+login()
+local ui = FS.CombatHud.ui
+push(mkState({ inCombat = false, row = lockRow(), buffsMissing = {} }))
+-- combat: aura reads are refused, the Hud reports nothing. Unreadable is UNKNOWN, never missing: the cover
+-- slot exists but the warning stays down (it is not an alarm unless the last readable verdict said missing)
+push(mkState({ inCombat = true, row = lockRow(), buffsMissing = {} }))
+local t = ui.buffTiles.demon_armor
+check(t and t.slot, "the tile and its cover slot exist (built out of combat), so the checks below are not vacuous")
+check(not t.holder:IsShown(), "no warning for a buff the last readable verdict said was up")
+check(not ui.buffs:IsShown(), "no buff row at all")
+-- the verdict holds for the whole fight, however many pushes
+push(mkState({ inCombat = true, row = lockRow(), buffsMissing = {} }))
+check(not t.holder:IsShown(), "still no warning on a later combat push")
+""")
+
+case("in_combat_with_no_readable_verdict_there_is_no_warning")(r"""
+standard()
+-- the player logs in (or reloads) already in combat: nothing was ever read, so nothing is known
+__combat = true
+__state = mkState({ inCombat = true, row = lockRow() })
+login()
+push(mkState({ inCombat = true, row = lockRow() }))
+local t = FS.CombatHud.ui.buffTiles.demon_armor
+check(t == nil or not t.holder:IsShown(), "no verdict, no tile")
+check(not FS.CombatHud.ui.buffs:IsShown(), "and no buff row")
+check(next(FS.CombatHud.ui.heldMissing) == nil, "nothing is held")
+""")
+
+case("an_unreadable_out_of_combat_look_does_not_overwrite_the_held_verdict")(r"""
+standard()
+__state = mkState({ inCombat = false, row = lockRow(), buffsMissing = { { key = "demon_armor" } } })
+login()
+local ui = FS.CombatHud.ui
+push(mkState({ inCombat = false, row = lockRow(), buffsMissing = { { key = "demon_armor" } } }))
+check(ui.heldMissing.demon_armor == true, "a readable look that found it absent is held")
+-- right after combat: lockdown is off but the aura read still fails (aurasKnown false), the Hud omits the buff
+push(mkState({ inCombat = false, row = lockRow(), buffsMissing = {}, aurasKnown = false }))
+check(ui.heldMissing.demon_armor == true, "an unreadable look is not 'up': the verdict is left alone")
+-- and it never invents one either
+ui.heldMissing.demon_armor = nil
+push(mkState({ inCombat = false, row = lockRow(), buffsMissing = {}, aurasKnown = false }))
+check(ui.heldMissing.demon_armor == nil, "no verdict is written from an unreadable look")
+push(mkState({ inCombat = true, row = lockRow(), buffsMissing = {} }))
+check(not ui.buffTiles.demon_armor.holder:IsShown(), "so combat shows nothing")
+-- a readable look later does write it
+push(mkState({ inCombat = false, row = lockRow(), buffsMissing = {} }))
+check(ui.heldMissing.demon_armor == false, "a readable look that finds it up holds 'up'")
+""")
+
+case("in_combat_a_buff_missing_at_the_pull_keeps_its_warning_and_the_next_fight_starts_fresh")(r"""
+standard()
+__state = mkState({ inCombat = false, row = lockRow(), buffsMissing = { { key = "demon_armor" } } })
+login()
+local ui = FS.CombatHud.ui
+push(mkState({ inCombat = false, row = lockRow(), buffsMissing = { { key = "demon_armor" } } }))
+push(mkState({ inCombat = true, row = lockRow(), buffsMissing = {} }))
+check(ui.buffTiles.demon_armor.holder:IsShown(), "missing at the pull: the warning holds in combat")
+-- out of combat the buff is back: the held verdict is replaced, so the next fight starts with no warning
+push(mkState({ inCombat = false, row = lockRow(), buffsMissing = {} }))
+push(mkState({ inCombat = true, row = lockRow(), buffsMissing = {} }))
+check(not ui.buffTiles.demon_armor.holder:IsShown(), "next fight: the buff was up out of combat, no warning")
+""")
+
+case("in_combat_recasting_the_missing_buff_clears_its_warning")(r"""
+standard()
+__state = mkState({ inCombat = false, row = lockRow(), buffsMissing = { { key = "demon_armor" } } })
+login()
+local ui = FS.CombatHud.ui
+push(mkState({ inCombat = false, row = lockRow(), buffsMissing = { { key = "demon_armor" } } }))
+__combat = true
+push(mkState({ inCombat = true, row = lockRow(), buffsMissing = {} }))
+local t = ui.buffTiles.demon_armor
+check(t.holder:IsShown(), "missing at the pull: the tile is up")
+-- somebody else's cast, another spell, a secret unit and a secret spell id change nothing
+fire("UNIT_SPELLCAST_SUCCEEDED", "party1", "g", 696)
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", idOf("shadow_bolt"))
+fire("UNIT_SPELLCAST_SUCCEEDED", SS, "g", 696)
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", SN)
+check(t.holder:IsShown() and ui.heldMissing.demon_armor == true, "unrelated or unreadable casts leave the tile")
+-- our own cast of Demon Armor (any rank) lands mid fight
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 696)
+check(not t.holder:IsShown(), "recast in combat: the tile is gone")
+check(ui.heldMissing.demon_armor == false and not ui.buffs:IsShown(), "and the verdict is cleared")
+push(mkState({ inCombat = true, row = lockRow(), buffsMissing = {} }))
+check(not t.holder:IsShown(), "it stays gone on the next push")
+check(__hudPushErrors == nil, "no error")
+""")
+
+case("the_cast_handler_is_registered_for_the_player_unit_only")(r"""
+standard()
+__state = mkState({ inCombat = false, row = lockRow() })
+login()
+local found
+for _, f in ipairs(__frames) do
+    if f._unitEvents and f._unitEvents.UNIT_SPELLCAST_SUCCEEDED then found = f end
+end
+check(found, "UNIT_SPELLCAST_SUCCEEDED is registered through RegisterUnitEvent")
+local units = found._unitEvents.UNIT_SPELLCAST_SUCCEEDED
+check(#units == 1 and units[1] == "player", "for the player unit only, got " .. #units .. " unit(s)")
+""")
+
+case("a_cast_at_the_pull_is_not_undone_by_the_stale_out_of_combat_state")(r"""
+standard()
+local missingOoc = function() return mkState({ inCombat = false, row = lockRow(), buffsMissing = { { key = "demon_armor" } } }) end
+__state = missingOoc()
+login()
+local ui = FS.CombatHud.ui
+push(missingOoc())
+check(ui.heldMissing.demon_armor == true, "missing at the last readable look")
+-- the cast lands while lastState is still the out of combat state that says missing (the Hud pushes ~every 0.2 s)
+__combat = true
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 696)
+check(ui.heldMissing.demon_armor == false, "the cast cleared the verdict (and the redraw of the stale state did not restore it)")
+-- another replay of that stale state (e.g. a piece show) must not restore it either
+push(missingOoc())
+check(ui.heldMissing.demon_armor == false, "a replayed stale state does not undo the cast")
+-- then the combat state arrives with the auras unreadable
+push(mkState({ inCombat = true, row = lockRow(), buffsMissing = {}, aurasKnown = false }))
+check(not ui.buffTiles.demon_armor.holder:IsShown(), "no tile for a buff just cast")
+-- the fight ends: the next readable look is authoritative again, a buff really missing is held
+__combat = false
+fire("PLAYER_REGEN_ENABLED")
+push(missingOoc())
+check(ui.heldMissing.demon_armor == true, "after the fight a readable 'missing' is held again")
+""")
+
+case("an_expiring_buff_is_never_held_into_combat_but_an_absent_one_is", "PRIEST")(r"""
+learnAll(); useCastBars(0, -317)
+local row = { rowEntry("sw_pain", { missing = false }) }
+-- Fortitude is up with 50 s left (warnBelow 60: an out of combat refresh nag); Inner Fire is absent
+local ooc = { { key = "fort", expiring = true }, { key = "inner_fire" } }
+__state = mkState({ inCombat = false, row = row, buffsMissing = ooc })
+login()
+local ui = FS.CombatHud.ui
+push(mkState({ inCombat = false, row = row, buffsMissing = ooc }))
+check(ui.buffTiles.fort.holder:IsShown() and ui.buffTiles.inner_fire.holder:IsShown(), "out of combat both nag")
+push(mkState({ inCombat = true, row = row, buffsMissing = {} }))
+check(ui.buffTiles.fort.slot and ui.buffTiles.inner_fire.slot, "both have slots")
+check(not ui.buffTiles.fort.holder:IsShown(), "the expiring Fortitude does not warn all fight")
+check(ui.buffTiles.inner_fire.holder:IsShown(), "the absent Inner Fire does")
+""")
+
+case("disabling_the_hud_drops_the_held_verdicts")(r"""
+standard()
+__state = mkState({ inCombat = false, row = lockRow(), buffsMissing = { { key = "demon_armor" } } })
+login()
+local ui = FS.CombatHud.ui
+push(mkState({ inCombat = false, row = lockRow(), buffsMissing = { { key = "demon_armor" } } }))
+check(ui.heldMissing.demon_armor == true, "held")
+FS.CombatHud.Disable()
+check(next(ui.heldMissing) == nil, "/fshud off forgets the verdict")
+__combat = true
+__state = mkState({ inCombat = true, row = lockRow(), buffsMissing = {} })   -- what the Hud says now: auras unreadable
+FS.CombatHud.Enable()
+push(__state)
+check(not ui.buffTiles.demon_armor.holder:IsShown(), "on again in combat: unknown, no tile")
+-- an inactive state (HideAll) drops it too
+__combat = false
+push(mkState({ inCombat = false, row = lockRow(), buffsMissing = { { key = "demon_armor" } } }))
+check(ui.heldMissing.demon_armor == true, "held again")
+push(mkState({ active = false }))
+check(next(ui.heldMissing) == nil, "HideAll forgets the verdict")
+""")
+
 case("in_combat_unknown_spells_are_not_tracked")(r"""
 standard()
 forget("demon_armor")
@@ -2260,9 +2435,11 @@ check(t == nil or not t.holder:IsShown(), "and no false 'missing' warning for it
 
 case("in_combat_form_and_pet_checks_come_from_buffsmissing_without_a_slot", "PRIEST")(r"""
 learnAll(); useCastBars(0, -317)
-__state = mkState({ inCombat = false, row = { rowEntry("sw_pain", { missing = false }) } })
+local oocMissing = { { key = "fort" }, { key = "inner_fire" } }
+__state = mkState({ inCombat = false, row = { rowEntry("sw_pain", { missing = false }) }, buffsMissing = oocMissing })
 login()
--- Shadowform is a form check (plain in combat): the Hud reports it; fortitude and inner fire are auras
+push(mkState({ inCombat = false, row = { rowEntry("sw_pain", { missing = false }) }, buffsMissing = oocMissing }))
+-- Shadowform is a form check (plain in combat): the Hud reports it; fortitude and inner fire are auras (missing at the pull)
 push(mkState({ inCombat = true, row = { rowEntry("sw_pain", { missing = false }) }, buffsMissing = { { key = "shadowform", icon = iconOf("shadowform") } } }))
 local ui = FS.CombatHud.ui
 local p = FS.CombatHud.containers.player
@@ -3181,7 +3358,7 @@ local e1, s1, h1 = calls()
 check(e1 == e0 and s1 == s0 and h1 == h0, "no SetEnabled, Show or Hide on the container in combat")
 -- combat ends: alpha 0, nothing replayed (no stale enable), the container is simply left armed
 __combat = false; __acProtected = false; __acRefuse = false
-push(nextState({ inCombat = false, buffsMissing = {} }))
+push(nextState({ inCombat = false }))   -- Demon Armor still missing out of combat
 fire("PLAYER_REGEN_ENABLED")
 check(c._alpha == 0, "alpha 0 again once combat is over")
 check(c._enabled == true and c._shown == true, "the container is left armed, not toggled")
@@ -3194,7 +3371,7 @@ check(c._alpha == 1 and not effectivelyShown(c), "the buff piece off: own alpha 
 gs.SetPiece("buff", true, true)
 check(c._alpha == 1 and effectivelyShown(c), "the buff piece on: alpha 1, visible")
 __combat = false
-push(nextState({ inCombat = false, buffsMissing = {} }))
+push(nextState({ inCombat = false }))   -- Demon Armor still missing out of combat
 -- something left it off: the end of combat arms it again, alpha untouched
 c._enabled, c._shown = false, false
 fire("PLAYER_REGEN_ENABLED")
