@@ -2674,7 +2674,11 @@ end
 --   P.EVENTS     { event, unit filters... } registered at start
 --   P.HANDLERS   event -> function(event, ...)
 --   optional hooks: P.ResetState(), P.MetaFields(meta), P.Clock(entry, now), P.OnStop(status),
---                   P.Finish(snap, sec) (an extra `checks` part), P.AfterSnapshot(snap, kind)
+--                   P.Finish(snap, sec) (an extra `checks` part), P.AfterSnapshot(snap, kind),
+--                   P.CarryOver(old, fresh) (a start that replaces the saved record moves what must survive into
+--                   the new one; a class without it replaces everything, as before)
+--   P.Start(resume): resume = true re-arms the logging over an existing saved record WITHOUT replacing it or
+--                   taking a snapshot (a class's side commands use it); with no saved record it starts normally.
 -- cfg: key, label (chat prefix and command word), logCap, logCaps, logSeconds, combatDelay, oocDelay,
 --      sweepKey (the cached cooldown frame of the duration object trial), logsText, todo (chat text).
 
@@ -3107,10 +3111,11 @@ function CP.Install(P, cfg)
         end
     end
 
-    function P.Start()
+    function P.Start(resume)
         state.canTest = Invoke(false, Api("issecretvalue"), 0).ok == true
         local kind = LockedDown(false) and "combat" or "ooc"
         if P.live then
+            if resume then return end
             P.TakeSnapshot(kind)
             Say(cfg.label .. ": logs keep running; /fsprobe " .. cfg.label .. " off stops them")
             return
@@ -3124,19 +3129,41 @@ function CP.Install(P, cfg)
             issecretvalueAvailable = type(_G.issecretvalue) == "function",
         }
         if P.MetaFields then P.MetaFields(meta) end
-        if P.Saved() then Say(cfg.label .. ": replacing the saved " .. cfg.label .. " record") end
-        DB()[cfg.key] = { meta = meta, logs = {} }
-        P.TakeSnapshot(kind)
+        local old = P.Saved()
+        local kept = resume and old ~= nil and (old.ooc ~= nil or old.combat ~= nil)
+        if kept then
+            -- Re-arm over what is saved: snapshots, logs and runs stay; only the meta is renewed.
+            local before = type(old.meta) == "table" and old.meta or {}
+            meta.resumed = (type(before.resumed) == "number" and before.resumed or 0) + 1
+            meta.firstStarted = before.firstStarted or before.started
+            old.meta = meta
+            if type(old.logs) ~= "table" then old.logs = {} end
+        else
+            if old then Say(cfg.label .. ": replacing the saved " .. cfg.label .. " record") end
+            local fresh = { meta = meta, logs = {} }
+            if old and P.CarryOver then pcall(P.CarryOver, old, fresh) end
+            DB()[cfg.key] = fresh
+            P.TakeSnapshot(kind)
+        end
         if not P.EnsureFrame() then
             meta.status = "no frame"
-            Say(cfg.label .. ": " .. kind .. " snapshot saved but the event frame could not be created; nothing armed")
+            if kept then
+                Say(cfg.label .. ": the event frame could not be created; nothing armed (the saved record is kept)")
+            else
+                Say(cfg.label .. ": " .. kind .. " snapshot saved but the event frame could not be created; nothing armed")
+            end
             return
         end
         -- Live only once the snapshot is in and the frame exists: a failed start leaves nothing half armed.
         P.live = { run = run, pending = {} }
         for _, entry in ipairs(P.EVENTS) do P.Register(unpack(entry)) end
         -- The snapshot of the other state follows the next change: a pull (4 s in) or the end of the fight.
-        if kind == "ooc" then
+        -- A kept record asks only for the one it lacks.
+        if kept then
+            local rec = P.Rec()
+            if rec.combat == nil then P.Register("PLAYER_REGEN_DISABLED") end
+            if rec.ooc == nil then P.Register("PLAYER_REGEN_ENABLED") end
+        elseif kind == "ooc" then
             P.Register("PLAYER_REGEN_DISABLED")
         else
             P.Register("PLAYER_REGEN_ENABLED")
@@ -3147,6 +3174,12 @@ function CP.Install(P, cfg)
             if not ok then pcall(function() P.Meta().timerError = ErrText(err) end) end
         end) then
             meta.timerError = "C_Timer.After unavailable; logging runs until /fsprobe " .. cfg.label .. " off"
+        end
+        if kept then
+            Say(cfg.label .. ": logging re-armed over the saved record (nothing replaced, no new snapshot). Logging " .. cfg.logSeconds
+                .. "s: " .. cfg.logsText .. ". Run /fsprobe " .. cfg.label .. " to take a new snapshot (it replaces the saved snapshot and keeps the logs), "
+                .. "/fsprobe " .. cfg.label .. " off to stop, /reload to save")
+            return
         end
         Say(cfg.label .. ": " .. kind .. " snapshot saved. Logging " .. cfg.logSeconds .. "s: " .. cfg.logsText .. ". "
             .. (kind == "ooc" and "Pull a mob: the combat snapshot follows " .. cfg.combatDelay .. "s in. "
@@ -3789,11 +3822,19 @@ PP.HANDLERS = {
 --                                  dismiss (left slot 1, right slot 2, shift-left 3, shift-right 4 through
 --                                  the secure `destroytotem` action), a `/castsequence` through two known
 --                                  totems and Totemic Recall (each only when known). Built and shown out of
---                                  combat only; in combat the command refuses and `buttons off` only fades it.
---   /fsprobe shaman buttons off    hides it (out of combat).
+--                                  combat only; in combat the command refuses. When the probe is not logging it
+--                                  re-arms the logging over the saved record and never replaces it.
+--   /fsprobe shaman buttons off    hides it (out of combat). In combat (also `shaman off`, the 30 minute timeout
+--                                  and `reset` in combat) it only sets alpha 0: the buttons stay clickable,
+--                                  invisible, until combat ends, then a PLAYER_REGEN_ENABLED wait finishes
+--                                  the hide (Hide, EnableMouse false) out of combat.
 --   /fsprobe shaman setslot        P1: SetMultiCastSpell on the earth (or first) slot from addon code, run it
 --                                  IN COMBAT yourself. The chat line comes first because a blocked call
---                                  prints ADDON_ACTION_BLOCKED, which pcall cannot catch. Restores the pick.
+--                                  prints ADDON_ACTION_BLOCKED, which pcall cannot catch. The action id is the
+--                                  native MultiCastActionButtonN:CalculateAction() when it exists, else
+--                                  (bar - 1) * 12 + slot (run.actionSource says which). It puts the old pick
+--                                  back only when the slot held a plain spell; otherwise the chat line says
+--                                  the slot stays changed and to set it back by hand.
 --   /fsprobe shaman destroy [n]    DestroyTotem(n) from addon code (default: the first live totem).
 -- Rules this section keeps: never register the combat log event (protected on Forever); a secret is described,
 -- never compared, branched on or stored; Blizzard's totem frames and buttons are only read.
@@ -3811,6 +3852,7 @@ SH.FOLLOW_CAP = 8
 SH.NOTRUN_CAP = 40
 SH.RUN_CAP = 6
 SH.STRIP_NAME = "FSProbeShamanStrip"
+SH.STRIP_Y = -190             -- centre y from the screen centre: the strip must stay above Layout.lua's tcast (top -286)
 SH.BUTTON_PREFIX = "FSProbeShamanBtn"
 SH.PLAYER_SET = { player = true }
 SH.CONSTANTS = { "FIRE_TOTEM_SLOT", "EARTH_TOTEM_SLOT", "WATER_TOTEM_SLOT", "AIR_TOTEM_SLOT", "MAX_TOTEMS" }
@@ -3887,6 +3929,9 @@ SH.EVENTS = {
 
 SH.lastClick = nil    -- the click entry still collecting the events that follow it
 SH.strip = nil        -- { host, buttons }: the test strip frames (frames are never destroyed, so they are reused)
+SH.stripShown = false -- the strip is up (shown, or only faded in combat) and not yet really hidden
+SH.hidePending = false -- a real hide waits for PLAYER_REGEN_ENABLED
+SH.regenFrame = nil   -- the plain frame that waits for it (apart from the probe's event frame, which stop unregisters)
 
 CP.Install(SH, {
     key = "shaman", label = "shaman",
@@ -3901,6 +3946,26 @@ SH.PartGenericSecrets = SH.PartSecrets   -- the installed one; SH.PartSecrets be
 
 function SH.ResetState()
     SH.lastClick = nil
+end
+
+-- A start that replaces the saved record keeps the manual runs (setslot, destroy) and the strip record: they are
+-- written without starting the probe, and a fresh snapshot of the totems says nothing about them. Merged (old
+-- runs first, then any the fresh record already holds) and capped.
+function SH.CarryOver(old, fresh)
+    for _, name in ipairs({ "setslot", "destroy" }) do
+        local was, now = old[name], fresh[name]
+        local runs = {}
+        for _, list in ipairs({ type(was) == "table" and was.runs or {}, type(now) == "table" and now.runs or {} }) do
+            if type(list) == "table" then
+                for _, run in ipairs(list) do runs[#runs + 1] = run end
+            end
+        end
+        if #runs > 0 then
+            while #runs > SH.RUN_CAP do table.remove(runs, 1) end
+            fresh[name] = { runs = runs }
+        end
+    end
+    if type(old.strip) == "table" and fresh.strip == nil then fresh.strip = old.strip end
 end
 
 function SH.MetaFields(meta)
@@ -4063,6 +4128,14 @@ function SH.ReadSlot(cell, slot)
     cell.brief = SH.Brief(rec)
     local have, name = SH.Kept(rec, 1), SH.Kept(rec, 2)
     cell.live = have == true
+    -- live / empty / unknown: a secret answer is NOT an empty slot.
+    if type(have) ~= "boolean" then
+        cell.state = "unknown"
+    elseif have then
+        cell.state = "live"
+    else
+        cell.state = "empty"
+    end
     if type(have) ~= "boolean" then
         cell.looksBlank = "unknown"
     elseif have == false then
@@ -4087,13 +4160,19 @@ end
 
 function SH.PartTotems(sec)
     sec.slots = {}
-    sec.active = 0
+    sec.active, sec.empty, sec.unreadable = 0, 0, 0
     for slot = 1, SH.SLOT_COUNT do
         local cell = { slot = slot }
         sec.slots["s" .. slot] = cell
         local ok, err = pcall(SH.ReadSlot, cell, slot)
         if not ok then cell.slotError = ErrText(err) end
-        if cell.live then sec.active = sec.active + 1 end
+        if cell.state == "live" then
+            sec.active = sec.active + 1
+        elseif cell.state == "empty" then
+            sec.empty = sec.empty + 1
+        else
+            sec.unreadable = sec.unreadable + 1
+        end
     end
 end
 
@@ -4224,6 +4303,17 @@ function SH.Finish(snap, sec)
     local function note(text)
         if #notRun < SH.NOTRUN_CAP then notRun[#notRun + 1] = text end
     end
+    local totems = type(snap.totems) == "table" and snap.totems or {}
+    sec.activeTotems = totems.active
+    local unreadable = type(totems.unreadable) == "number" and totems.unreadable or 0
+    if unreadable > 0 then
+        note(unreadable .. " of " .. SH.SLOT_COUNT .. " totem slots unreadable (secret): GetTotemInfo answered a secret value there, "
+            .. "so whether a totem was down in them is unknown (" .. tostring(totems.active) .. " live, " .. tostring(totems.empty)
+            .. " plain empty); the duration object and the other reads on those slots are described, not judged")
+    elseif totems.active == 0 then
+        note("no totem was down: GetTotemInfo, GetTotemTimeLeft and GetTotemDuration were read on empty slots only; "
+            .. "drop one and run /fsprobe shaman again (also in combat) to read a live totem")
+    end
     local known, unknown = {}, {}
     local cooldowns = type(snap.cooldowns) == "table" and snap.cooldowns or {}
     for _, s in ipairs(SH.SPELLS) do
@@ -4247,12 +4337,6 @@ function SH.Finish(snap, sec)
     if #unknown > 12 then note((#unknown - 12) .. " more spells not known, see spellsNotKnown") end
     sec.spellsKnown = table.concat(known, ", ")
     sec.spellsNotKnown = table.concat(unknown, ", ")
-    local totems = type(snap.totems) == "table" and snap.totems or {}
-    sec.activeTotems = totems.active
-    if totems.active == 0 then
-        note("no totem was down: GetTotemInfo, GetTotemTimeLeft and GetTotemDuration were read on empty slots only; "
-            .. "drop one and run /fsprobe shaman again (also in combat) to read a live totem")
-    end
     local frames = type(snap.frames) == "table" and snap.frames.list or {}
     local bar = frames.MultiCastActionBarFrame
     if type(bar) == "table" and bar.exists == false then
@@ -4371,6 +4455,16 @@ function SH.NewRun(name)
     return run
 end
 
+-- The action id Blizzard's own multicast button for `slot` reports (MultiCastActionBarFrame passes
+-- actionButton:CalculateAction() to SetMultiCastSpell), or nil when the button or the answer is not usable.
+function SH.NativeActionId(slot)
+    local widget = _G["MultiCastActionButton" .. slot]
+    if type(widget) ~= "table" or IsSecret(widget) then return nil end
+    local got = SH.Number(widget, "CalculateAction")
+    if type(got) == "number" and got >= 1 and got == math.floor(got) then return got end
+    return nil
+end
+
 -- P1. SetMultiCastSpell from addon code. The chat line is printed BEFORE the call: if the client blocks
 -- it, ADDON_ACTION_BLOCKED goes through the global error handler, which pcall cannot catch.
 function SH.SetSlot()
@@ -4400,11 +4494,23 @@ function SH.SetSlot()
         Say("shaman setslot: " .. run.skipped)
         return
     end
-    local actionId = (bar - 1) * SH.BAR_SIZE + slot
+    local computed = (bar - 1) * SH.BAR_SIZE + slot
+    local native = SH.NativeActionId(slot)
+    local actionId = native or computed
     run.slot, run.actionId = slot, actionId
+    if native then
+        run.actionSource = "native CalculateAction"
+        run.computedActionId = computed
+    else
+        run.actionSource = "computed (bar-1)*12+slot"
+    end
     run.before = SH.ActionState(actionId)
-    local previous = SH.Kept(Invoke(true, Api("GetActionInfo"), actionId), 2)
-    if type(previous) ~= "number" then previous = nil end
+    -- The previous pick is only trusted when the slot holds a plain spell: an empty slot, a macro or a secret
+    -- answer leaves nothing to put back.
+    local infoRec = Invoke(true, Api("GetActionInfo"), actionId)
+    local previousType, previous = SH.Kept(infoRec, 1), SH.Kept(infoRec, 2)
+    if type(previousType) == "string" then run.previousType = previousType end
+    if not (previousType == "spell" and type(previous) == "number") then previous = nil end
     local pick = ids[1]
     for _, id in ipairs(ids) do
         if id ~= previous then
@@ -4413,24 +4519,50 @@ function SH.SetSlot()
         end
     end
     run.spellId, run.previousSpellId = pick, previous
+    if previous ~= nil and pick == previous then run.noop = true end
+    local pickName = SH.IdName(pick)
     Say("shaman setslot: calling SetMultiCastSpell(" .. actionId .. ", " .. pick .. ") now, in combat: "
-        .. tostring(run.inCombat) .. ". If the client prints ADDON_ACTION_BLOCKED, that is the answer. /reload to save.")
+        .. tostring(run.inCombat) .. " (action id from " .. run.actionSource .. "). "
+        .. "If the client prints ADDON_ACTION_BLOCKED, that is the answer. /reload to save.")
+    if run.noop then
+        Say("shaman setslot: the pick (" .. pickName .. ") is the slot's current pick (only one totem is known for it), "
+            .. "so this call is a no-op for the bar: it only shows whether the call is blocked")
+    end
     run.call = (Invoke(true, fn, actionId, pick))
     run.after = SH.ActionState(actionId)
-    local now = SH.Kept(Invoke(true, Api("GetActionInfo"), actionId), 2)
-    if type(now) == "number" and previous then
+    local afterRec = Invoke(true, Api("GetActionInfo"), actionId)
+    local nowType, now = SH.Kept(afterRec, 1), SH.Kept(afterRec, 2)
+    local nowPlain = nowType == "spell" and type(now) == "number"
+    if nowPlain and previous then
         run.changed = now ~= previous
     else
         run.changed = "unknown"
     end
+    local note
     if run.changed == true then
         run.restore = { call = (Invoke(true, fn, actionId, previous)) }
         run.restore.after = SH.ActionState(actionId)
+    elseif run.noop then
+        run.restore = { skipped = "no-op: the pick was the slot's current pick, nothing to restore" }
+    elseif previous == nil then
+        -- There is no plain previous spell to put back.
+        if nowPlain and now == pick then
+            run.restore = { skipped = "the slot held no plain spell before (empty, another type or unreadable), so there is nothing to restore",
+                leftChanged = true }
+            note = "slot left changed to " .. pickName .. " (it held no plain spell before); set it back by hand"
+        else
+            run.restore = { skipped = "the slot held no plain spell before, and its state after the call could not be read" }
+            note = "the slot's state after the call is unreadable and it held no plain spell before; check the bar and set it back by hand if it changed"
+        end
+    elseif run.changed == "unknown" then
+        run.restore = { skipped = "the slot could not be read after the call, so a restore was not attempted" }
+        note = "the slot is unreadable after the call; if it changed, set it back to " .. SH.IdName(previous) .. " by hand"
     else
-        run.restore = { skipped = "the pick did not visibly change, or the previous pick was unreadable" }
+        run.restore = { skipped = "the pick did not visibly change (the call was probably blocked), nothing to restore" }
     end
     Say("shaman setslot: call " .. (run.call.ok and "returned" or ("failed: " .. tostring(run.call.err)))
         .. "; slot changed: " .. tostring(run.changed) .. ". Record: shaman.setslot.runs[" .. #SH.Rec().setslot.runs .. "]")
+    if note then Say("shaman setslot: " .. note) end
 end
 
 -- The first slot GetTotemInfo says holds a live totem, or nil.
@@ -4562,7 +4694,8 @@ function SH.BuildStrip()
     if type(host) ~= "table" then
         host = CreateFrame("Frame", SH.STRIP_NAME, UIParent)
         host:SetSize(224, 22 + #SH.BUTTONS * 30)
-        host:SetPoint("CENTER", UIParent, "CENTER", 0, -240)
+        -- Centre y -190: the strip spans -134 to -246, clear of our target cast bar (Layout.lua tcast, -286 to -308).
+        host:SetPoint("CENTER", UIParent, "CENTER", 0, SH.STRIP_Y)
         host:SetFrameStrata("DIALOG")
         local ground = host:CreateTexture(nil, "BACKGROUND")
         ground:SetAllPoints(host)
@@ -4605,17 +4738,21 @@ function SH.SyncStrip()
         if not ok then entry.error = ErrText(err) end
         pcall(function() strip.buttons[i].fsText:SetText(entry.label or def.key) end)
     end
+    SH.CancelPendingHide()
+    for i = 1, #SH.BUTTONS do pcall(strip.buttons[i].EnableMouse, strip.buttons[i], true) end
     strip.host:SetAlpha(1)
     strip.host:Show()
+    SH.stripShown = true
     SH.Rec().strip = rec
 end
 
 function SH.ButtonsOn()
-    if LockedDown(false) then
+    if LockedDown(true) then
         Say("shaman buttons: leave combat first (the strip is secure buttons: not built, changed or shown in combat)")
         return
     end
-    if not SH.live then SH.Start() end
+    -- Never replaces a saved record: after `off` or the timeout the logging is re-armed over what is saved.
+    if not SH.live then SH.Start(true) end
     local ok, err = pcall(SH.SyncStrip)
     if not ok then
         pcall(function() SH.Rec().strip = { error = ErrText(err) } end)
@@ -4627,31 +4764,89 @@ function SH.ButtonsOn()
         .. "/fsprobe shaman buttons off hides it (out of combat)")
 end
 
--- Hides the strip out of combat; in combat it can only be faded (hiding a secure button is protected).
-function SH.HideStrip(quiet)
+-- The real hide: host hidden and the secure buttons' mouse off. Out of combat only (both are protected in combat);
+-- fails closed, so a combat check that cannot be read counts as combat. Returns true when the strip is hidden.
+function SH.RealHide()
+    if LockedDown(true) then return false end
     local strip = SH.strip
-    if not strip then return end
+    if strip then
+        pcall(strip.host.Hide, strip.host)
+        for i = 1, #strip.buttons do pcall(strip.buttons[i].EnableMouse, strip.buttons[i], false) end
+    end
+    SH.stripShown = false
+    SH.CancelPendingHide()
     local saved = SH.Saved()
     local rec = saved and type(saved.strip) == "table" and saved.strip or nil
-    if LockedDown(false) then
-        pcall(strip.host.SetAlpha, strip.host, 0)
-        if rec then rec.faded = true end
-        if not quiet then
-            Say("shaman buttons off: in combat the strip is only faded (alpha 0); run it again out of combat to hide it")
-        end
-        return
-    end
-    pcall(strip.host.Hide, strip.host)
     if rec then
         rec.shown = false
         rec.faded = nil
+        rec.hidePending = nil
     end
+    return true
+end
+
+-- PLAYER_REGEN_ENABLED while a hide is queued: finish it (still in combat by the check: keep waiting).
+function SH.OnRegen()
+    if not SH.hidePending then
+        CallOn(SH.regenFrame, "UnregisterEvent", "PLAYER_REGEN_ENABLED")
+        return
+    end
+    SH.RealHide()
+end
+
+function SH.CancelPendingHide()
+    SH.hidePending = false
+    CallOn(SH.regenFrame, "UnregisterEvent", "PLAYER_REGEN_ENABLED")
+end
+
+-- Queues the real hide for the end of combat. Own plain frame: the probe's event frame is unregistered by stop.
+-- Returns false when the wait could not be set up.
+function SH.QueueHide()
+    if not SH.regenFrame then
+        local made, frame = pcall(CreateFrame, "Frame")
+        if not made or type(frame) == "nil" then return false end
+        -- pcall'd: nothing is ever thrown into the session from a script handler.
+        if not pcall(frame.SetScript, frame, "OnEvent", function() pcall(SH.OnRegen) end) then return false end
+        SH.regenFrame = frame
+    end
+    SH.hidePending = true
+    if pcall(SH.regenFrame.RegisterEvent, SH.regenFrame, "PLAYER_REGEN_ENABLED") then return true end
+    SH.hidePending = false
+    return false
+end
+
+-- Hides the strip out of combat. In combat nothing secure may change, so it is only faded (alpha 0): the buttons
+-- stay clickable, invisible, until combat ends, and the real hide is queued for PLAYER_REGEN_ENABLED.
+-- Said even when `quiet` (stop, timeout, reset): invisible clickable buttons must never be a surprise.
+function SH.HideStrip(quiet)
+    local strip = SH.strip
+    if not strip then return end
+    if LockedDown(true) then
+        if not SH.stripShown then return end
+        pcall(strip.host.SetAlpha, strip.host, 0)
+        local queued = SH.QueueHide()
+        local saved = SH.Saved()
+        local rec = saved and type(saved.strip) == "table" and saved.strip or nil
+        if rec then
+            rec.faded = true
+            rec.hidePending = queued or nil
+        end
+        Say("shaman buttons off: in combat the strip is only faded (alpha 0). The buttons stay clickable, invisible, until combat ends; "
+            .. (queued and "then they hide by themselves."
+                or "then run /fsprobe shaman buttons off to hide them (the automatic hide could not be set up)."))
+        return
+    end
+    SH.RealHide()
     if not quiet then Say("shaman buttons off: strip hidden") end
 end
 
 function SH.ButtonsOff()
     if not SH.strip then
         Say("shaman buttons off: there is no strip")
+        return
+    end
+    if not SH.stripShown then
+        Say("shaman buttons off: the strip is already hidden")
         return
     end
     SH.HideStrip(false)

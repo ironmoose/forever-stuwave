@@ -43,6 +43,18 @@ except ImportError:
 
 HERE = Path(__file__).resolve().parent
 SOURCE = HERE.parent / "forever-stuwave" / "Modules/Diagnostics/FSProbe.lua"
+LAYOUT = HERE.parent / "forever-stuwave" / "Core" / "Layout.lua"
+
+
+def tcast_top() -> float:
+    """Top edge (UI units from screen centre) of our target cast bar, from Layout.lua: its centre y plus half its height."""
+    m = re.search(r"^\s*tcast\s*=\s*\{[^}]*\by\s*=\s*(-?\d+)[^}]*\bh\s*=\s*(\d+)", LAYOUT.read_text(encoding="utf-8"), re.M)
+    if not m:
+        raise SystemExit("Layout.lua: no tcast entry to place the shaman test strip against")
+    return int(m.group(1)) + int(m.group(2)) / 2
+
+
+TCAST_TOP = tcast_top()
 
 MOCK = r"""
 __realType = type
@@ -779,11 +791,16 @@ function shamanMock(known)
         if list then return unpack(list) end
     end, function() return SN end)
     def("HasAction", function(id) return __actions[id] ~= nil end, function() return SB end)
-    def("GetActionInfo", function(id) if __actions[id] then return "spell", __actions[id], "spell" end end,
-        function() return SS, SN, SS end)
+    __actionRaw = {}   -- id -> { type, id, subType }: a slot holding something that is not a plain spell (a macro ...)
+    def("GetActionInfo", function(id)
+        local raw = __actionRaw[id]
+        if raw then return unpack(raw) end
+        if __actions[id] then return "spell", __actions[id], "spell" end
+    end, function() return SS, SN, SS end)
     def("GetActionTexture", function(id) if __actions[id] then return 136098 end end, function() return SN end)
     def("SetMultiCastSpell", function(id, spell)
         __setCalls[#__setCalls + 1] = { id, spell, __combat }
+        __actionRaw[id] = nil
         __actions[id] = spell
     end, function() end)
     def("DestroyTotem", function(slot)
@@ -805,6 +822,34 @@ function sfire(event, ...)
     check(f, "no shaman event frame")
     local ok, err = pcall(f._scripts.OnEvent, f, event, ...)
     check(ok, "shaman handler threw on " .. event .. ": " .. tostring(err))
+end
+-- The frame that waits for PLAYER_REGEN_ENABLED to finish hiding the test strip (not the probe's own event frame).
+function regenFrame()
+    for _, f in ipairs(__frames) do
+        if f._scripts.OnEvent and f._events.PLAYER_REGEN_ENABLED and not f._events.PLAYER_TOTEM_UPDATE then return f end
+    end
+end
+function fireRegen()
+    local f = regenFrame()
+    check(f, "no frame is waiting for PLAYER_REGEN_ENABLED")
+    local ok, err = pcall(f._scripts.OnEvent, f, "PLAYER_REGEN_ENABLED")
+    check(ok, "regen handler threw: " .. tostring(err))
+end
+-- Counts of every call that could change the test strip or its secure buttons, and which ones moved between two reads.
+local STRIP_KEYS = { "Show", "Hide", "SetPoint", "EnableMouse", "SetAttribute", "SetSize", "RegisterForClicks", "SetAlpha", "SetParent" }
+function stripCalls()
+    local out = {}
+    local list = { FSProbeShamanStrip, FSProbeShamanBtn1, FSProbeShamanBtn2, FSProbeShamanBtn3 }
+    for i = 1, 4 do
+        for _, k in ipairs(STRIP_KEYS) do out[(i - 1) .. ":" .. k] = list[i] and list[i]._calls[k] or 0 end
+    end
+    return out
+end
+function callsMoved(a, b)
+    local moved = {}
+    for k, v in pairs(b) do if a[k] ~= v then moved[#moved + 1] = k end end
+    table.sort(moved)
+    return table.concat(moved, ",")
 end
 
 -- Walks the saved tree. Only plain strings, numbers and booleans may be stored; no
@@ -3728,11 +3773,340 @@ check(said("replacing the saved shaman record"), "a fresh start over a saved rec
 """
 )
 
+# --- shaman review fixes: records survive, setslot restore, unreadable slots, combat hide, strip seat -------------
+
+case("shaman_buttons_after_off_keeps_the_saved_record")(
+    r"""
+shamanMock({ [8071] = true, [2484] = true })
+__mcSpells[2] = { 8071, 2484 }
+__totem[2] = { true, "Stoneskin Totem", 990, 300, 136098, 1, 8071 }
+runCmd("shaman")
+sfire("PLAYER_TOTEM_UPDATE", 2)
+runCmd("shaman setslot")
+runCmd("shaman destroy 2")
+runCmd("shaman buttons")
+local s = ForeverSTUwaveDB.fsprobe.shaman
+local ooc, total, setRuns, destroyRuns = s.ooc, s.logs.totem.total, #s.setslot.runs, #s.destroy.runs
+check(ooc and total >= 1 and setRuns == 1 and destroyRuns == 1, "setup")
+runCmd("shaman off")
+check(s.meta.status == "stopped", "stopped")
+runCmd("shaman buttons")
+local now = ForeverSTUwaveDB.fsprobe.shaman
+check(now == s and now.ooc == ooc, "buttons after off replaced the record")
+check(now.logs.totem.total == total and #now.setslot.runs == setRuns and #now.destroy.runs == destroyRuns, "buttons after off lost logs or runs")
+check(now.meta.status == "logging" and nevents(sframe()) > 0, "logging must be re-armed: " .. tostring(now.meta.status))
+check(now.strip and now.strip.shown == true, "the strip is shown again")
+check(not said("replacing the saved shaman record"), "buttons must not replace a record")
+sfire("PLAYER_TOTEM_UPDATE", 2)
+check(now.logs.totem.total == total + 1, "the kept log keeps growing")
+scan(now)
+"""
+)
+
+case("shaman_buttons_after_the_timeout_keeps_the_saved_record")(
+    r"""
+shamanMock()
+runCmd("shaman")
+sfire("PLAYER_TOTEM_UPDATE", 2)
+runCmd("shaman setslot")
+local s = ForeverSTUwaveDB.fsprobe.shaman
+local ooc = s.ooc
+advance(1801)
+check(s.meta.status == "timeout", "timed out")
+runCmd("shaman buttons")
+local now = ForeverSTUwaveDB.fsprobe.shaman
+check(now == s and now.ooc == ooc and now.logs.totem.total == 1 and now.setslot.runs[1], "the timeout then buttons wiped the record")
+check(now.meta.status == "logging" and now.meta.resumed == 1, "re-armed and counted: " .. tostring(now.meta.resumed))
+advance(1801)
+check(now.meta.status == "timeout", "the re-armed run times out too")
+"""
+)
+
+case("shaman_buttons_after_a_runs_only_record_takes_a_fresh_snapshot_and_keeps_the_runs")(
+    r"""
+shamanMock()
+runCmd("shaman setslot")
+local before = ForeverSTUwaveDB.fsprobe.shaman
+check(before and before.setslot and #before.setslot.runs == 1 and before.ooc == nil and before.meta == nil, "setup: a runs-only record")
+runCmd("shaman buttons")
+local now = ForeverSTUwaveDB.fsprobe.shaman
+check(now.ooc and now.ooc.kind == "ooc", "an ooc snapshot is taken at once, not left waiting for a regen event")
+check(now.meta and now.meta.status == "logging", "a fresh meta is written")
+check(now.setslot and #now.setslot.runs == 1, "the setslot run is carried over")
+"""
+)
+
+case("shaman_buttons_with_no_record_starts_a_normal_probe")(
+    r"""
+shamanMock()
+runCmd("shaman buttons")
+local s = ForeverSTUwaveDB.fsprobe.shaman
+check(s.ooc and s.ooc.kind == "ooc" and s.meta.status == "logging", "no record: buttons starts the probe as before")
+"""
+)
+
+case("shaman_start_keeps_the_explicit_runs_and_the_strip")(
+    r"""
+shamanMock({ [8071] = true, [2484] = true })
+__mcSpells[2] = { 8071, 2484 }
+runCmd("shaman setslot")
+runCmd("shaman destroy 2")
+check(ForeverSTUwaveDB.fsprobe.shaman.meta == nil, "explicit runs write without starting")
+runCmd("shaman")
+local s = ForeverSTUwaveDB.fsprobe.shaman
+check(s.ooc and s.meta.status == "logging", "started")
+check(s.setslot and #s.setslot.runs == 1 and s.destroy and #s.destroy.runs == 1, "a later /fsprobe shaman erased the earlier runs")
+for i = 1, 8 do runCmd("shaman setslot") end
+check(#ForeverSTUwaveDB.fsprobe.shaman.setslot.runs == 6, "runs stay capped: " .. #ForeverSTUwaveDB.fsprobe.shaman.setslot.runs)
+runCmd("shaman buttons")
+sfire("PLAYER_TOTEM_UPDATE", 2)
+runCmd("shaman off")
+runCmd("shaman")
+s = ForeverSTUwaveDB.fsprobe.shaman
+check(#s.setslot.runs == 6 and #s.destroy.runs == 1, "restart kept the runs")
+check(s.strip and s.strip.shown == false and s.strip.buttons.dismiss, "restart kept the strip record")
+check(s.logs.totem == nil or s.logs.totem.total == 0, "logs are reset for the new run")
+check(s.ooc and s.combat == nil, "snapshots are reset for the new run")
+runCmd("shaman setslot")
+runCmd("shaman off")
+runCmd("shaman")
+check(#ForeverSTUwaveDB.fsprobe.shaman.setslot.runs == 6, "merged and capped across restarts")
+scan(ForeverSTUwaveDB.fsprobe.shaman)
+"""
+)
+
+case("shaman_setslot_prefers_the_native_buttons_action_id")(
+    r"""
+shamanMock({ [8071] = true, [2484] = true })
+__mcSpells[2] = { 8071, 2484 }
+__actions[137] = 8071
+nativeFrame("MultiCastActionButton2", 0, 0, 30, 30, true)
+MultiCastActionButton2.CalculateAction = function() return 137 end
+runCmd("shaman setslot")
+check(#__setCalls == 2 and __setCalls[1][1] == 137 and __setCalls[2][1] == 137 and __setCalls[2][2] == 8071, "the native button's id is used for the pick and the restore")
+local r = ForeverSTUwaveDB.fsprobe.shaman.setslot.runs[1]
+check(r.actionId == 137 and r.actionSource == "native CalculateAction" and r.computedActionId == 134, "source recorded: " .. tostring(r.actionSource))
+check(r.changed == true and r.previousSpellId == 8071, "ran against the native id")
+check(blizzTouched() == 0, "the native button was only read")
+scan(ForeverSTUwaveDB.fsprobe.shaman)
+"""
+)
+
+case("shaman_setslot_falls_back_to_the_computed_action_id")(
+    r"""
+shamanMock({ [8071] = true, [2484] = true })
+__mcSpells[2] = { 8071, 2484 }
+runCmd("shaman setslot")
+local r = ForeverSTUwaveDB.fsprobe.shaman.setslot.runs[1]
+check(r.actionId == 134 and r.actionSource == "computed (bar-1)*12+slot" and r.computedActionId == nil, "no native button: " .. tostring(r.actionSource))
+shamanMock({ [8071] = true, [2484] = true })
+__mcSpells[2] = { 8071, 2484 }
+nativeFrame("MultiCastActionButton2", 0, 0, 30, 30, true)
+MultiCastActionButton2.CalculateAction = function() return "x" end
+runCmd("shaman setslot")
+local r2 = ForeverSTUwaveDB.fsprobe.shaman.setslot.runs[2]
+check(r2.actionId == 134 and r2.actionSource == "computed (bar-1)*12+slot", "an unusable CalculateAction falls back")
+"""
+)
+
+case("shaman_setslot_on_an_empty_slot_says_it_cannot_restore")(
+    r"""
+shamanMock({ [8071] = true, [2484] = true })
+__mcSpells[2] = { 8071, 2484 }
+__actions[134] = nil
+runCmd("shaman setslot")
+check(#__setCalls == 1, "no previous pick, no restore call: " .. #__setCalls)
+local r = ForeverSTUwaveDB.fsprobe.shaman.setslot.runs[1]
+check(r.previousSpellId == nil and r.changed == "unknown", "run record")
+check(type(r.restore.skipped) == "string" and r.restore.leftChanged == true, "restore skipped and the bar flagged: " .. tostring(r.restore.skipped))
+check(said("slot left changed to") and said("Stoneskin Totem") and said("by hand"), "the chat line says the slot stays changed")
+scan(ForeverSTUwaveDB.fsprobe.shaman)
+"""
+)
+
+case("shaman_setslot_does_not_restore_a_slot_that_is_not_a_plain_spell")(
+    r"""
+shamanMock({ [8071] = true, [2484] = true })
+__mcSpells[2] = { 8071, 2484 }
+__actions[134] = nil
+__actionRaw[134] = { "macro", 8071, "" }
+runCmd("shaman setslot")
+check(#__setCalls == 1, "a macro's id is not a spell id to restore: " .. #__setCalls)
+local r = ForeverSTUwaveDB.fsprobe.shaman.setslot.runs[1]
+check(r.previousSpellId == nil and r.previousType == "macro", "previous type recorded: " .. tostring(r.previousType))
+check(said("by hand"), "told to set it back by hand")
+"""
+)
+
+case("shaman_setslot_with_unreadable_action_info_says_it_cannot_restore")(
+    r"""
+shamanMock({ [8071] = true, [2484] = true })
+__mcSpells[2] = { 8071, 2484 }
+GetActionInfo = function() return SS, SN, SS end
+runCmd("shaman setslot")
+check(#__setCalls == 1, "an unreadable slot is never restored")
+local r = ForeverSTUwaveDB.fsprobe.shaman.setslot.runs[1]
+check(type(r.restore.skipped) == "string" and r.restore.leftChanged == nil, "restore skipped")
+check(said("by hand") and said("unreadable"), "told to check and set it back by hand")
+scan(ForeverSTUwaveDB.fsprobe.shaman)
+"""
+)
+
+case("shaman_setslot_with_only_one_totem_known_is_a_noop")(
+    r"""
+shamanMock()
+__mcSpells[2] = { 8071 }
+runCmd("shaman setslot")
+local r = ForeverSTUwaveDB.fsprobe.shaman.setslot.runs[1]
+check(r.noop == true and r.spellId == 8071 and r.previousSpellId == 8071, "pick equals the current pick")
+check(#__setCalls == 1 and r.changed == false, "one call, nothing changed")
+check(string.find(r.restore.skipped, "no-op", 1, true), "restore skipped as a no-op: " .. tostring(r.restore.skipped))
+check(said("no-op"), "chat says it was a no-op")
+check(not said("by hand"), "nothing to put back")
+"""
+)
+
+case("shaman_secret_totem_info_is_not_reported_as_no_totem", "secret")(
+    r"""
+shamanMock()
+runCmd("shaman")
+local s = ForeverSTUwaveDB.fsprobe.shaman
+local t = s.ooc.totems
+check(t.unreadable == 4 and t.active == 0 and t.empty == 0, "counts: " .. tostring(t.unreadable) .. "/" .. tostring(t.active) .. "/" .. tostring(t.empty))
+check(t.slots.s2.state == "unknown" and t.slots.s2.live == false, "a secret slot is unknown, not empty")
+local text = table.concat(s.ooc.checks.notRun, "|")
+check(not string.find(text, "no totem was down", 1, true), "a secret read is not an empty slot: " .. text)
+check(string.find(text, "4 of 4 totem slots unreadable (secret)", 1, true), "unreadable slots are counted: " .. text)
+check(said("unreadable (secret)"), "the chat line says it")
+__combat = true
+sfire("PLAYER_REGEN_DISABLED")
+advance(4)
+local ctext = table.concat(s.combat.checks.notRun, "|")
+check(not string.find(ctext, "no totem was down", 1, true) and string.find(ctext, "unreadable (secret)", 1, true), "combat snapshot: " .. ctext)
+scan(s)
+"""
+)
+
+case("shaman_live_empty_and_unreadable_slots_are_counted_apart")(
+    r"""
+shamanMock()
+__totem[2] = { true, "Stoneskin Totem", 990, 300, 136098, 1, 8071 }
+runCmd("shaman")
+local t = ForeverSTUwaveDB.fsprobe.shaman.ooc.totems
+check(t.active == 1 and t.empty == 3 and t.unreadable == 0, "counts")
+check(t.slots.s2.state == "live" and t.slots.s1.state == "empty", "slot states")
+local text = table.concat(ForeverSTUwaveDB.fsprobe.shaman.ooc.checks.notRun, "|")
+check(not string.find(text, "no totem was down", 1, true) and not string.find(text, "unreadable", 1, true), "a live totem and plain empties need no note: " .. text)
+"""
+)
+
+case("shaman_off_in_combat_fades_then_hides_on_regen")(
+    r"""
+shamanMock()
+runCmd("shaman buttons")
+local host, b1, b3 = FSProbeShamanStrip, FSProbeShamanBtn1, FSProbeShamanBtn3
+local before = stripCalls()
+__combat = true
+runCmd("shaman buttons off")
+check(callsMoved(before, stripCalls()) == "0:SetAlpha", "only SetAlpha may run in combat: " .. callsMoved(before, stripCalls()))
+check(host._args.SetAlpha[1] == 0 and host._shown == true, "faded, not hidden")
+check(said("stay clickable") and said("until combat ends"), "the chat line says the buttons stay clickable")
+check(regenFrame() ~= nil, "a real hide is queued for PLAYER_REGEN_ENABLED")
+fireRegen()
+check(host._shown == true and callsMoved(before, stripCalls()) == "0:SetAlpha", "a regen event that still reads combat hides nothing")
+__combat = false
+fireRegen()
+check(host._shown == false and host._calls.Hide == 1, "hidden on regen")
+check(b1._args.EnableMouse[1] == false and b3._args.EnableMouse[1] == false, "mouse off on the secure buttons")
+check(regenFrame() == nil, "the regen wait ends")
+local st = ForeverSTUwaveDB.fsprobe.shaman.strip
+check(st.shown == false and st.faded == nil and st.hidePending == nil, "record says hidden")
+"""
+)
+
+case("shaman_stop_off_in_combat_fades_then_hides_on_regen")(
+    r"""
+shamanMock()
+runCmd("shaman buttons")
+local host = FSProbeShamanStrip
+local before = stripCalls()
+__combat = true
+runCmd("shaman off")
+check(callsMoved(before, stripCalls()) == "0:SetAlpha", "shaman off in combat: only SetAlpha: " .. callsMoved(before, stripCalls()))
+check(said("stay clickable"), "shaman off in combat says the buttons stay clickable")
+__combat = false
+fireRegen()
+check(host._shown == false and FSProbeShamanBtn2._args.EnableMouse[1] == false, "hidden on regen")
+"""
+)
+
+case("shaman_timeout_in_combat_fades_then_hides_on_regen")(
+    r"""
+shamanMock()
+runCmd("shaman buttons")
+local host = FSProbeShamanStrip
+local before = stripCalls()
+__combat = true
+advance(1801)
+check(ForeverSTUwaveDB.fsprobe.shaman.meta.status == "timeout", "timed out")
+check(callsMoved(before, stripCalls()) == "0:SetAlpha", "the timeout in combat: only SetAlpha: " .. callsMoved(before, stripCalls()))
+check(host._shown == true and said("stay clickable"), "still shown and said so")
+__combat = false
+fireRegen()
+check(host._shown == false and FSProbeShamanBtn1._args.EnableMouse[1] == false, "hidden on regen")
+"""
+)
+
+case("shaman_reset_in_combat_fades_then_hides_on_regen")(
+    r"""
+shamanMock()
+runCmd("shaman buttons")
+local host = FSProbeShamanStrip
+local before = stripCalls()
+__combat = true
+runCmd("reset")
+check(callsMoved(before, stripCalls()) == "0:SetAlpha", "reset in combat: only SetAlpha: " .. callsMoved(before, stripCalls()))
+check(said("stay clickable"), "reset in combat says the buttons stay clickable")
+__combat = false
+fireRegen()
+check(host._shown == false and FSProbeShamanBtn3._args.EnableMouse[1] == false, "hidden on regen")
+check(ForeverSTUwaveDB.fsprobe == nil, "the late hide does not bring the record back")
+"""
+)
+
+case("shaman_buttons_again_cancels_the_queued_hide")(
+    r"""
+shamanMock()
+runCmd("shaman buttons")
+local host = FSProbeShamanStrip
+__combat = true
+runCmd("shaman buttons off")
+__combat = false
+runCmd("shaman buttons")
+check(host._shown == true and host._args.SetAlpha[1] == 1, "shown and opaque again")
+check(regenFrame() == nil, "the queued hide is cancelled")
+"""
+)
+
+case("shaman_strip_clears_the_target_cast_bar")(
+    r"""
+shamanMock()
+runCmd("shaman buttons")
+local host = FSProbeShamanStrip
+local p = host._args.SetPoint
+local size = host._args.SetSize
+check(p[1] == "CENTER" and p[3] == "CENTER" and p[4] == 0, "centred on UIParent")
+local bottom = p[5] - size[2] / 2
+check(bottom >= __tcastTop + 30, "strip bottom " .. bottom .. " must clear the target cast bar top " .. __tcastTop .. " with a margin")
+"""
+)
+
 
 def run_case(name: str, mode: str, body: str, source: str) -> str | None:
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.execute(MOCK)
     lua.execute(f'__mode = "{mode}"')
+    lua.execute(f"__tcastTop = {TCAST_TOP}")
     try:
         lua.eval("function(src) local fn = assert(loadstring(src, '@FSProbe.lua')); return fn('forever-stuwave', {}) end")(source)
     except LuaError as err:
@@ -3961,6 +4335,48 @@ BLIZZARD_MUTATORS = (":Set", ":Show", ":Hide", ":Enable", ":Disable", ":Register
                      "hooksecurefunc", ".SetScript", ".HookScript")
 
 
+# Calls that are protected on the strip's frames or that hand a duration object to a widget: each lives in ONE function.
+# STEP_CALLS are reached through GS.Step(widget, "Name", ...) so the name is a string; they are scanned over the whole class
+# probe region (core, priest, shaman), where P.Sweep (the hidden Cooldown) and SH.BarTrial (the hidden StatusBar) use them.
+STEP_CALLS = {
+    "SetCooldownFromDurationObject": ("P.Sweep",),
+    "SetTimerDuration": ("SH.BarTrial",),
+}
+CLASS_PROBE_START = "-- Class probes: the machinery /fsprobe priest and /fsprobe shaman share"
+# Show / SetPoint / EnableMouse on the strip happen only in these (BuildStrip and SyncStrip are reached only after
+# SH.ButtonsOn refuses combat; RealHide checks combat itself).
+STRIP_MUTATORS = ("Show", "SetPoint", "EnableMouse")
+STRIP_MUTATOR_HOMES = ("SH.BuildStrip", "SH.SyncStrip", "SH.RealHide")
+# Ways to reach a protected call without naming it as a call: a bracket lookup of its name, a dot reference (as in
+# pcall(btn.SetAttribute, ...)), a string loader.
+_PROTECTED_NAMES = "|".join([*EXPLICIT_CALLS, "SetAttribute"])
+BANNED_FORMS = (
+    (re.compile(rf"\[\s*[\"']({_PROTECTED_NAMES})[\"']\s*\]"), "bracket lookup of a protected call"),
+    (re.compile(r"[\w\)\]]\.SetAttribute\b"), "SetAttribute as a dot reference"),
+    (re.compile(r"\b(loadstring|getglobal|setfenv)\b|rawget\s*\(\s*_G"), "string loader or raw global lookup"),
+)
+
+
+def class_probe_section(source: str) -> str:
+    start = source.index(CLASS_PROBE_START)
+    end = source.index("-- /fsprobe hot: can an engine AuraContainer")
+    return strip_lua_comments(source[start:end])
+
+
+def step_call_violations(text: str) -> list[str]:
+    """Lines naming a duration-object call outside the one reader that may use it (text is comment-free Lua)."""
+    bad = []
+    current = "(outside a function)"
+    for line in text.splitlines():
+        m = re.match(r"\s*function ([\w.:]+)\(", line)
+        if m:
+            current = m.group(1)
+        for call, allowed in STEP_CALLS.items():
+            if re.search(rf"\b{call}\b", line) and current not in allowed:
+                bad.append(f"{call} used in {current}")
+    return bad
+
+
 def shaman_section(source: str) -> str:
     start = source.index(SHAMAN_START)
     end = source.index("-- /fsprobe hot: can an engine AuraContainer")
@@ -4004,8 +4420,19 @@ def shaman_violations(text: str) -> list[str]:
         if _calls_in(call, outside):
             bad.append(f"{call} used outside a function")
     for name, body in funcs.items():
-        if ":SetAttribute(" in body and name not in STRIP_SYNC:
+        if re.search(r"\bSetAttribute\b", body) and name not in STRIP_SYNC:
             bad.append(f"SetAttribute in {name}")
+        for method in STRIP_MUTATORS:
+            if re.search(rf"[:.]{method}\b", body) and name not in STRIP_MUTATOR_HOMES:
+                bad.append(f"{method} in {name}")
+        if re.search(r"strip\.host[.:]Hide\b|\bhost[.:]Hide\b", body) and name != "SH.RealHide":
+            bad.append(f"strip hidden in {name}")
+    for method in STRIP_MUTATORS:
+        if re.search(rf"[:.]{method}\b", outside):
+            bad.append(f"{method} used outside a function")
+    for pattern, what in BANNED_FORMS:
+        if pattern.search(text):
+            bad.append(what)
     for line in text.splitlines():
         if any(n in line for n in BLIZZARD_TOTEM_NAMES) and any(m in line for m in BLIZZARD_MUTATORS):
             bad.append(f"Blizzard totem frame changed: {line.strip()}")
@@ -4019,16 +4446,27 @@ def shaman_gate_problems(text: str) -> list[str]:
     funcs, _ = lua_functions(text)
     bad = []
     on = funcs.get("SH.ButtonsOn", "")
-    if not on or "LockedDown(false)" not in on or on.find("LockedDown(false)") > on.find("SH.SyncStrip"):
+    if not on or "LockedDown(true)" not in on or on.find("LockedDown(true)") > on.find("SH.SyncStrip"):
         bad.append("SH.ButtonsOn must refuse combat before SH.SyncStrip")
     for name, body in funcs.items():
         if name != "SH.ButtonsOn" and "SH.SyncStrip" in body and name != "SH.SyncStrip":
             bad.append(f"SH.SyncStrip reached from {name}")
         if "SH.BuildStrip(" in body and name not in ("SH.SyncStrip", "SH.BuildStrip"):
             bad.append(f"SH.BuildStrip reached from {name}")
+    gate = r"LockedDown\(true\)"
+    real = funcs.get("SH.RealHide", "")
+    first_gate = re.search(gate, real)
+    first_hide = re.search(r"strip\.host\.Hide|EnableMouse", real)
+    if not real or not first_gate or not first_hide or first_gate.start() > first_hide.start():
+        bad.append("SH.RealHide must check combat before hiding or switching the mouse off")
     hide = funcs.get("SH.HideStrip", "")
-    if not hide or hide.find("LockedDown(false)") < 0 or hide.find("LockedDown(false)") > hide.find("strip.host.Hide"):
-        bad.append("SH.HideStrip must check combat before hiding")
+    if not hide or not re.search(gate, hide) or "SH.RealHide()" not in hide or re.search(r"strip\.host\.Hide|EnableMouse", hide):
+        bad.append("SH.HideStrip must check combat and leave the real hide to SH.RealHide")
+    elif hide.find("SH.RealHide()") < re.search(gate, hide).start():
+        bad.append("SH.HideStrip must check combat before SH.RealHide")
+    for name, body in funcs.items():
+        if "SH.RealHide(" in body and name not in ("SH.HideStrip", "SH.OnRegen", "SH.RealHide"):
+            bad.append(f"SH.RealHide reached from {name}")
     for call, allowed in EXPLICIT_CALLS.items():
         for name in allowed:
             if f'Api("{call}")' not in funcs.get(name, ""):
@@ -4044,6 +4482,16 @@ SHAMAN_MUST_CATCH = {
     "blizzard frame shown": "function SH.PartFrames(sec)\n    MultiCastActionBarFrame:Show()\nend",
     "blizzard frame hooked": "function SH.PartFrames(sec)\n    hooksecurefunc(MultiCastActionBarFrame, \"Show\", f)\nend",
     "target totem": 'function SH.PartTotems(sec)\n    pcall(TargetTotem, 1)\nend',
+    "destroy through _G brackets": 'function SH.Follow(e)\n    _G["DestroyTotem"](2)\nend',
+    "set slot through _G dot": 'function SH.Follow(e)\n    _G.SetMultiCastSpell(1, 2)\nend',
+    "attribute by bracket lookup": 'function SH.LogCast(event)\n    btn["SetAttribute"](btn, "type", nil)\nend',
+    "attribute through pcall": 'function SH.LogCast(event)\n    pcall(btn.SetAttribute, btn, "type", nil)\nend',
+    "attribute outside a function": 'local set = button.SetAttribute',
+    "string loader": 'function SH.Follow(e)\n    loadstring("DestroyTotem(1)")()\nend',
+    "strip shown from a handler": 'function SH.LogCast(event)\n    SH.strip.host:Show()\nend',
+    "strip moved from a handler": 'function SH.LogCast(event)\n    SH.strip.host:SetPoint("CENTER")\nend',
+    "mouse switched from a handler": 'function SH.LogCast(event)\n    SH.strip.buttons[1]:EnableMouse(true)\nend',
+    "strip hidden from the fade": 'function SH.HideStrip(quiet)\n    pcall(strip.host.Hide, strip.host)\nend',
 }
 SHAMAN_MUST_PASS = {
     "set slot in its own function": 'function SH.SetSlot()\n    local fn = Api("SetMultiCastSpell")\nend',
@@ -4051,6 +4499,22 @@ SHAMAN_MUST_PASS = {
     "attribute in a sync function": "function SH.SyncRecall(button)\n    button:SetAttribute(\"type\", nil)\nend",
     "presence list entry": 'SH.API_LIST = {\n    { "DestroyTotem" }, { "SetMultiCastSpell" },\n}',
     "reading a blizzard frame": 'function SH.PartFrames(sec)\n    local rec = GS.Read(MultiCastActionBarFrame, "IsShown")\nend',
+    "strip shown in the sync": 'function SH.SyncStrip()\n    strip.host:Show()\nend',
+    "strip built in its function": 'function SH.BuildStrip()\n    host:SetPoint("CENTER")\nend',
+    "strip really hidden": 'function SH.RealHide()\n    pcall(strip.host.Hide, strip.host)\n    pcall(b.EnableMouse, b, false)\nend',
+    "global lookup by a computed name": 'function SH.PartFrames(sec)\n    local w = _G["MultiCastActionButton" .. i]\nend',
+}
+
+
+STEP_MUST_CATCH = {
+    "cooldown fed from a handler": 'function SH.LogCast(event)\n    GS.Step(cd, "SetCooldownFromDurationObject", dur)\nend',
+    "bar fed from the snapshot part": 'function SH.PartTotems(sec)\n    GS.Step(bar, "SetTimerDuration", dur)\nend',
+    "bar fed from the cooldown reader": 'function P.Sweep(dur)\n    GS.Step(bar, "SetTimerDuration", dur)\nend',
+    "direct method call": 'function SH.Follow(e)\n    bar:SetTimerDuration(dur)\nend',
+}
+STEP_MUST_PASS = {
+    "the hidden cooldown": 'function P.Sweep(dur)\n    GS.Step(cd, "SetCooldownFromDurationObject", dur, true)\nend',
+    "the hidden status bar": 'function SH.BarTrial(dur)\n    out.setTimerDuration = GS.Step(bar, "SetTimerDuration", dur)\nend',
 }
 
 
@@ -4071,7 +4535,19 @@ def shaman_static_checks(source: str) -> int:
         failures += 1
         print(f"FAIL  static: shaman gates: {problems}")
     else:
-        print("ok    static: the test strip is built and shown only after SH.ButtonsOn refuses combat, and hiding checks combat first")
+        print("ok    static: the test strip is built, shown, moved and un-muted only after SH.ButtonsOn refuses combat, "
+              "and the real hide (Hide, EnableMouse false) checks combat itself and is reached only from HideStrip and the regen handler")
+    cls = class_probe_section(source)
+    bad = step_call_violations(cls)
+    vacuous = [c for c in STEP_CALLS if not re.search(rf"\b{c}\b", cls)]
+    missed = [k for k, v in STEP_MUST_CATCH.items() if not step_call_violations(cls + "\n" + v)]
+    noisy = [k for k, v in STEP_MUST_PASS.items() if step_call_violations(v)]
+    if bad or vacuous or missed or noisy:
+        failures += 1
+        print(f"FAIL  static: duration-object calls: {bad}; not found at all {vacuous}; forms NOT caught {missed}; legal forms wrongly flagged {noisy}")
+    else:
+        print(f"ok    static: SetCooldownFromDurationObject and SetTimerDuration are called only in the snapshot readers P.Sweep and "
+              f"SH.BarTrial ({len(STEP_MUST_CATCH)} forms caught, {len(STEP_MUST_PASS)} legal forms pass)")
     return failures
 
 
