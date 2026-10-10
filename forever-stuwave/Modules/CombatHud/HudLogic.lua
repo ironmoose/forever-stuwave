@@ -94,10 +94,13 @@
 --      start + duration - now. Such a read also LEARNS two things: the spell's cooldown length (so a
 --      talent like Improved Mind Blast is the client's number, not the dictionary's; skipped when the
 --      cooldown did not start at our own cast, e.g. a lockout) and the cooldown's end (kept for combat).
---   3. In combat (VERIFIED on 1.60.1, priest probe 2026-10-09) startTime and duration are secret
---      while isActive is a plain true for EVERY spell, even one with no cooldown and no GCD running.
---      isActive therefore says nothing there and is ignored; the CAST LEDGER decides. The player's own
---      spell ids and cast times are plain (UNIT_SPELLCAST_SUCCEEDED, lastCastOf). A spell is ready
+--   3. In combat (VERIFIED on 1.60.1, priest probe 2026-10-09, two runs) startTime and duration are
+--      secret while isActive stays plain. Run 1 saw a plain true for every spell (taken between wand
+--      shots, unexplained); run 2 saw a plain FALSE for 16 of 18 spells and a true only for the Mind
+--      Blast just cast. So a plain false is trustworthy evidence of "ready" (step 1, whatever the ledger
+--      says), while a plain true is not (it may be stuck, or only the global cooldown): with a plain true
+--      the CAST LEDGER decides. A secret isActive is unreadable (nil), never guessed from the ledger.
+--      The player's own spell ids and cast times are plain (UNIT_SPELLCAST_SUCCEEDED, lastCastOf). A spell is ready
 --      unless now is before the later of (our last cast + its cooldown length) and any end learned in
 --      a plain read; the remaining time is that difference. The length is the learned one, else the
 --      dictionary `cooldown`, else 0 (a spell with no cooldown of its own is always ready). The global
@@ -609,9 +612,228 @@ end
 
 local function DotSpec(key) return profile and profile.dots and profile.dots[key] or nil end
 
--- Seconds a cast of `key` lasts: by the rank actually cast when the dictionary knows it.
-local function ApplySeconds(def, spellID)
-    return def.applyByRank and def.applyByRank[spellID] or def.apply
+-- Talent ranks -------------------------------------------------------------------------------
+-- A DoT whose dictionary entry has `applyTalent` (Improved Shadow Word: Pain) lasts apply + perRank * rank.
+-- The rank is read OUT OF COMBAT only (in combat the answer is not trusted and the read waits for
+-- PLAYER_REGEN_ENABLED) and by talent NAME, never by a guessed id, from a plain answer of:
+--   1. the trait system, which is what Forever's own talent frame reads (Blizzard_SharedTalentUI on the
+--      Gethe/wow-ui-source `forever` branch): C_ClassTalents.GetActiveConfigID -> C_Traits.GetConfigInfo
+--      (treeIDs) -> GetTreeNodes -> GetNodeInfo (activeRank) -> GetEntryInfo (definitionID) ->
+--      GetDefinitionInfo (spellID / overrideName) -> the spell's name;
+--   2. else C_SpecializationInfo.GetTalentInfo({ specializationIndex, talentIndex }), the Classic style
+--      per tab scan, which carries name and rank directly (it is in the 16001 API dump).
+-- UNVERIFIED on the live client: neither route has been run there (the API shapes come from the Forever UI
+-- source and the dump). A scan that read every node (or every tab to its end) and did not find the talent
+-- means rank 0, but a rank 0 is believed only when a SECOND read agrees (a talent frame that has not loaded
+-- can answer all zeros, and a believed 0 would block the re-read); the first one retries after
+-- TALENT_RETRY seconds. A read that finds every wanted talent above rank 0 is done at once, whatever else
+-- in the tree was unreadable. Anything unreadable (secret, missing API, an error, a tree longer than
+-- MAX_TREES / MAX_NODES) leaves the last good rank, or none: a respec to rank 0 that is only ever read
+-- incompletely keeps the old rank until a complete read agrees.
+-- A plain out of combat aura duration for the DoT (learnedApply, kept when it lies within what the talent
+-- allows) is the ground truth where the rank cannot be: it stands in while the rank is unknown, and it
+-- overrides a rank that gives a shorter time (a localized client names the talent differently and reads 0).
+-- Reads are deferred to the 0.2 s tick, so a burst of events costs one walk.
+local talentRank = {}            -- talent name -> rank
+local zeroSeen = {}              -- talent name -> true after one complete read that did not find it
+local learnedApply = {}          -- key -> seconds seen on a plain target aura
+local talentWanted               -- talent name -> true, for the profile's talent timed DoTs; nil when none
+local talentDirty, talentTries, talentNextAt = false, 0, 0
+local TALENT_RETRY = 5           -- seconds between tries of a read that failed
+local TALENT_MAX_TRIES = 4       -- tries per request; a later event asks again
+local MAX_TREES, MAX_NODES, MAX_TABS, MAX_TALENTS = 4, 200, 3, 60
+
+local function PlainTable(fn, ...)
+    local ok, v = pcall(fn, ...)
+    if ok and Plain(v) and type(v) == "table" then return v end
+    return nil
+end
+
+local function TraitName(def)
+    local name = PlainOf(def.overrideName, "string")
+    if name and name ~= "" then return name end
+    local id = PlainOf(def.spellID, "number")
+    if not id then return nil end
+    local fn = C_Spell and C_Spell.GetSpellName
+    if fn then
+        local ok, n = pcall(fn, id)
+        if ok then return PlainOf(n, "string") end
+        return nil
+    end
+    return (SpellInfo(id))
+end
+
+-- Route 1. nil = this route cannot answer; true = every node was read; false = some were not.
+-- Fills found[name] = rank for the wanted names that have a rank above 0.
+local function ReadTraitRanks(want, found)
+    local cfgFn = C_ClassTalents and C_ClassTalents.GetActiveConfigID
+    local T = C_Traits
+    if not (cfgFn and T and T.GetConfigInfo and T.GetTreeNodes and T.GetNodeInfo and T.GetEntryInfo
+            and T.GetDefinitionInfo) then
+        return nil
+    end
+    local ok, cfg = pcall(cfgFn)
+    cfg = ok and PlainOf(cfg, "number") or nil
+    if not cfg then return nil end
+    local info = PlainTable(T.GetConfigInfo, cfg)
+    local trees = info and Plain(info.treeIDs) and type(info.treeIDs) == "table" and info.treeIDs or nil
+    if not trees then return nil end
+    local seen, complete = 0, #trees <= MAX_TREES
+    for ti = 1, math.min(#trees, MAX_TREES) do
+        local treeID = PlainOf(trees[ti], "number")
+        local nodes = treeID and PlainTable(T.GetTreeNodes, treeID)
+        if not nodes then
+            complete = false
+        else
+            if #nodes > MAX_NODES then complete = false end
+            for ni = 1, math.min(#nodes, MAX_NODES) do
+                local nodeID = PlainOf(nodes[ni], "number")
+                local node = nodeID and PlainTable(T.GetNodeInfo, cfg, nodeID)
+                local rank = node and (PlainOf(node.activeRank, "number") or PlainOf(node.currentRank, "number")
+                    or PlainOf(node.ranksPurchased, "number"))
+                if not rank then
+                    complete = false
+                else
+                    seen = seen + 1
+                    if rank > 0 then
+                        local active = node.activeEntry
+                        local entryID = Plain(active) and type(active) == "table" and PlainOf(active.entryID, "number")
+                        if not entryID and Plain(node.entryIDs) and type(node.entryIDs) == "table" then
+                            entryID = PlainOf(node.entryIDs[1], "number")
+                        end
+                        local entry = entryID and PlainTable(T.GetEntryInfo, cfg, entryID)
+                        local defID = entry and PlainOf(entry.definitionID, "number")
+                        local def = defID and PlainTable(T.GetDefinitionInfo, defID)
+                        local name = def and TraitName(def)
+                        if not name then
+                            complete = false
+                        elseif want[name] then
+                            found[name] = rank
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if seen == 0 then return nil end
+    return complete
+end
+
+-- Route 2, same contract.
+local function ReadSpecRanks(want, found)
+    local fn = C_SpecializationInfo and C_SpecializationInfo.GetTalentInfo
+    if not fn then return nil end
+    local seen, complete = 0, true
+    for tab = 1, MAX_TABS do
+        local ended = false
+        for index = 1, MAX_TALENTS do
+            local ok, t = pcall(fn, { specializationIndex = tab, talentIndex = index, isInspect = false, isPet = false })
+            if not ok or not Plain(t) then break end
+            if t == nil then ended = true; break end
+            if type(t) ~= "table" then break end
+            seen = seen + 1
+            local name, rank = PlainOf(t.name, "string"), PlainOf(t.rank, "number")
+            if not (name and rank) then
+                complete = false
+            elseif want[name] then
+                found[name] = rank
+            end
+        end
+        if not ended then complete = false end
+    end
+    if seen == 0 then return nil end
+    return complete
+end
+
+-- A believed rank. A change from an earlier believed rank drops the aura durations learned under it.
+local function SetTalentRank(name, rank)
+    local before = talentRank[name]
+    if before ~= nil and before ~= rank then
+        for key in pairs(learnedApply) do
+            local t = Spells[key] and Spells[key].applyTalent
+            if t and t.name == name then learnedApply[key] = nil end
+        end
+    end
+    talentRank[name] = rank
+end
+
+-- One read of every wanted talent. true when nothing more is needed from it: every wanted talent is
+-- found above rank 0, or confirmed at rank 0 by a second complete read that did not find it.
+local function ReadTalents()
+    local found = {}
+    local complete = ReadTraitRanks(talentWanted, found)
+    if complete == nil then complete = ReadSpecRanks(talentWanted, found) end
+    if complete == nil then return false end
+    local done = true
+    for name in pairs(talentWanted) do
+        local rank = found[name]
+        if rank ~= nil and rank > 0 then
+            zeroSeen[name] = nil
+            SetTalentRank(name, rank)
+        elseif complete then
+            if zeroSeen[name] or talentRank[name] == 0 then
+                SetTalentRank(name, 0)
+            else
+                zeroSeen[name] = true
+                done = false
+            end
+        else
+            done = false
+        end
+    end
+    return done
+end
+
+-- Runs a pending read when out of combat and not waiting between tries.
+local function TalentTick()
+    if not talentDirty or InCombat() then return end
+    local now = Now()
+    if not now or now < talentNextAt then return end
+    if ReadTalents() then
+        talentDirty = false
+        return
+    end
+    talentTries = talentTries + 1
+    talentNextAt = now + TALENT_RETRY
+    if talentTries >= TALENT_MAX_TRIES then talentDirty = false end
+end
+
+-- A talent, spellbook or level event: read again at the next tick that is out of combat. Only marks the
+-- read pending, so a burst of events (SPELLS_CHANGED comes in bursts) costs one walk of the tree.
+local function RequestTalentRead()
+    if not talentWanted then return end
+    talentDirty, talentTries, talentNextAt = true, 0, 0
+end
+
+local function TalentsUnknown()
+    if not talentWanted then return false end
+    for name in pairs(talentWanted) do
+        if talentRank[name] == nil then return true end
+    end
+    return false
+end
+
+-- Seconds a talent timed DoT lasts: the read rank (a longer plain aura duration wins), else the aura, else the base.
+local function TalentSeconds(key, def)
+    local t = def.applyTalent
+    local rank = talentRank[t.name]
+    local learned = learnedApply[key]
+    if rank then
+        if rank > t.maxRank then rank = t.maxRank end
+        local seconds = def.apply + t.perRank * rank
+        if learned and learned > seconds then return learned end
+        return seconds
+    end
+    return learned or def.apply
+end
+
+-- Seconds a cast of `key` lasts: by the rank actually cast when the dictionary knows it, else the talent
+-- adjusted length, else `apply`. spellID may be nil (an aura found out of combat).
+local function ApplySeconds(def, spellID, key)
+    local byRank = def.applyByRank and def.applyByRank[spellID]
+    if byRank then return byRank end
+    if def.applyTalent and def.apply then return TalentSeconds(key, def) end
+    return def.apply
 end
 
 -- A tracked spell was cast on the target `ctx` describes.
@@ -625,7 +847,7 @@ local function OnOwnCast(key, spellID, ctx)
             SetEntryAt(ctx, dotKey, false)
         end
     end
-    local seconds = spec and def and ApplySeconds(def, spellID)
+    local seconds = spec and def and ApplySeconds(def, spellID, key)
     if seconds then
         local now = Now()
         if now then SetEntryAt(ctx, key, { expires = now + seconds, duration = seconds }) end
@@ -709,8 +931,13 @@ local function Reconcile()
         if def and def.apply and r and r.known == true then
             local a = found[key]
             if a then
-                local expires = (a.expires and a.expires > 0) and a.expires or (now + def.apply)
-                local duration = (a.duration and a.duration > 0) and a.duration or def.apply
+                local t = def.applyTalent
+                if t and a.duration and a.duration >= def.apply and a.duration <= def.apply + t.perRank * t.maxRank then
+                    learnedApply[key] = a.duration
+                end
+                local base = ApplySeconds(def, nil, key)
+                local expires = (a.expires and a.expires > 0) and a.expires or (now + base)
+                local duration = (a.duration and a.duration > 0) and a.duration or base
                 SetEntryAt(ctx, key, { expires = expires, duration = duration })
             else
                 SetEntryAt(ctx, key, false)
@@ -744,7 +971,7 @@ local function DotMissing(key)
     if spec.pandemic then
         local now = Now()
         if not now then return nil end
-        return (e.expires - now) <= spec.pandemic * def.apply
+        return (e.expires - now) <= spec.pandemic * (e.duration or def.apply)
     end
     return false
 end
@@ -833,9 +1060,9 @@ local function CooldownState(key)
         if remaining <= 0 then return true end
         return false, remaining
     end
-    -- Timing unreadable (in combat startTime and duration are secret while isActive stays a plain
-    -- true for EVERY spell, even one with no cooldown): isActive says nothing, so the cast ledger
-    -- decides. Ready unless our own last cast, or a cooldown end seen in a plain read, is still ahead.
+    -- Timing unreadable (in combat startTime and duration are secret while isActive stays plain). A plain
+    -- false returned above (ready); a plain true may be stuck or only the global cooldown, so the cast
+    -- ledger decides. Ready unless our own last cast, or a cooldown end seen in a plain read, is still ahead.
     if not now then return nil end
     local ends = plainEnd[key]
     local last = lastCastOf[key]
@@ -1582,6 +1809,7 @@ end
 function Hud.Tick()
     if not profile then return end
     local now = Now()
+    if talentDirty then TalentTick() end
     TryReconcile()
     if now and now >= pruneAt then
         Prune(now)
@@ -1701,6 +1929,7 @@ function handlers.PLAYER_REGEN_ENABLED()
     dirty = true
     playerDirty = true
     Seal.dirty = true
+    TalentTick()
     TryReconcile()
 end
 
@@ -1714,12 +1943,18 @@ end
 local function ForgetLearnedCooldowns()
     for k in pairs(learnedCd) do learnedCd[k] = nil end
 end
-function handlers.SPELLS_CHANGED() Relearn(); ForgetLearnedCooldowns() end
+function handlers.SPELLS_CHANGED() Relearn(); ForgetLearnedCooldowns(); RequestTalentRead() end
 handlers.PLAYER_LEVEL_UP = handlers.SPELLS_CHANGED
 handlers.LEARNED_SPELL_IN_TAB = handlers.SPELLS_CHANGED
+-- Talent changes (only with a talent timed DoT in the profile): the rank is read again out of combat.
+function handlers.PLAYER_TALENT_UPDATE() RequestTalentRead() end
+handlers.CHARACTER_POINTS_CHANGED = handlers.PLAYER_TALENT_UPDATE
+handlers.TRAIT_CONFIG_UPDATED = handlers.PLAYER_TALENT_UPDATE
+handlers.ACTIVE_TALENT_GROUP_CHANGED = handlers.PLAYER_TALENT_UPDATE
 
 function handlers.PLAYER_ENTERING_WORLD()
     Relearn()
+    if TalentsUnknown() then RequestTalentRead() end
     channel = nil
     overlayGlow = {}
     ResetLedger()
@@ -1736,6 +1971,9 @@ local PLAIN_EVENTS = {
     "PLAYER_TARGET_CHANGED", "PLAYER_REGEN_ENABLED", "PLAYER_ENTERING_WORLD", "SPELLS_CHANGED",
     "PLAYER_LEVEL_UP", "LEARNED_SPELL_IN_TAB", "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW",
     "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE", "PLAYER_DEAD",
+}
+local TALENT_EVENTS = {
+    "PLAYER_TALENT_UPDATE", "CHARACTER_POINTS_CHANGED", "TRAIT_CONFIG_UPDATED", "ACTIVE_TALENT_GROUP_CHANGED",
 }
 local PLAYER_EVENTS = {
     "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_SUCCEEDED",
@@ -1757,6 +1995,16 @@ local function Setup()
     if not profile then return end
 
     for _, e in ipairs(PLAIN_EVENTS) do pcall(eventFrame.RegisterEvent, eventFrame, e) end
+    for key in pairs(profile.dots or EMPTY) do
+        local t = Spells[key] and Spells[key].applyTalent
+        if t then
+            talentWanted = talentWanted or {}
+            talentWanted[t.name] = true
+        end
+    end
+    if talentWanted then
+        for _, e in ipairs(TALENT_EVENTS) do pcall(eventFrame.RegisterEvent, eventFrame, e) end
+    end
     for _, e in ipairs(PLAYER_EVENTS) do
         pcall(eventFrame.RegisterUnitEvent, eventFrame, e, "player")
     end
@@ -1777,6 +2025,7 @@ local function Setup()
     dirty = true
     playerDirty = true
     Seal.ledger, Seal.dirty = nil, true
+    RequestTalentRead()
 end
 
 eventFrame:SetScript("OnEvent", function(_, event, ...)

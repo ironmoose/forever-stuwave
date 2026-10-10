@@ -144,6 +144,12 @@ function resetWorld(class)
         thealth = 100, thealthMax = 100, shards = 0, form = 0, pet = true, wand = false, targetDead = false,
         usable = {}, noMana = {}, range = {},
         secret = false, sec = {}, overlay = {}, channelEnd = nil,
+        -- talents: the nodes of the (one) mock tree, and which API answers: "traits" (C_ClassTalents +
+        -- C_Traits, what Forever's own talent frame reads), "spec" (C_SpecializationInfo.GetTalentInfo) or
+        -- "none". talentReads counts the reads of the active config id.
+        talentApi = "traits", talentReads = 0,
+        talentNodes = { { name = "Wand Specialization", rank = 2 }, { name = "Improved Shadow Word: Pain", rank = 0 },
+                        { name = "Improved Mind Blast", rank = 3 } },
     }
     for n in pairs(NAME_ID) do W.known[n] = true end
 end
@@ -257,7 +263,66 @@ function C_UnitAuras.GetAuraDataByIndex(unit, i)
     return W.auras[unit][i]
 end
 
+
+-- Talents. The mock has no real ids: each node i is node 100+i, entry 1100+i, definition 2100+i and
+-- spell 30000+i, and C_Spell.GetSpellName(30000+i) is the talent's name.
+function setTalent(name, rank)
+    for _, n in ipairs(W.talentNodes) do
+        if n.name == name then n.rank = rank; return end
+    end
+    W.talentNodes[#W.talentNodes + 1] = { name = name, rank = rank }
+end
+local function nodeAt(nodeId) return W.talentNodes[nodeId - 100] end
+C_ClassTalents = {}
+function C_ClassTalents.GetActiveConfigID()
+    if W.talentApi ~= "traits" then return nil end
+    W.talentReads = W.talentReads + 1
+    if S_("talent") then return SN end
+    return 77
+end
+C_Traits = {}
+function C_Traits.GetConfigInfo(cfg)
+    local ids = {}
+    for i = 1, W.talentTrees or 1 do ids[i] = 4 + i end
+    return { ID = cfg, treeIDs = ids }
+end
+function C_Traits.GetTreeNodes()
+    local t = {}
+    for i = 1, #W.talentNodes do t[i] = 100 + i end
+    return t
+end
+function C_Traits.GetNodeInfo(cfg, nodeId)
+    local n = nodeAt(nodeId)
+    if not n then return nil end
+    local rank = n.rank
+    if S_("talentRank") then rank = SN end
+    return { ID = nodeId, activeRank = rank, currentRank = rank, ranksPurchased = rank, maxRanks = 2,
+             activeEntry = n.rank > 0 and { entryID = nodeId + 1000, rank = rank } or nil,
+             entryIDs = { nodeId + 1000 } }
+end
+function C_Traits.GetEntryInfo(cfg, entryId) return { definitionID = entryId + 1000 } end
+function C_Traits.GetDefinitionInfo(defId) return { spellID = 30000 + (defId - 2100) } end
+function C_Spell.GetSpellName(id)
+    if realType(id) == "number" and id > 30000 and id < 31000 then
+        local n = W.talentNodes[id - 30000]
+        return n and not n.unnamed and n.name or nil
+    end
+    return ID_NAME[id]
+end
+C_SpecializationInfo = {}
+function C_SpecializationInfo.GetTalentInfo(q)
+    if W.talentApi ~= "spec" then return nil end
+    if q.specializationIndex ~= 1 then return nil end
+    local n = W.talentNodes[q.talentIndex]
+    if not n then return nil end
+    local rank = n.rank
+    if S_("talentRank") then rank = SN end
+    return { talentID = q.talentIndex, name = n.name, rank = rank, maxRank = 2 }
+end
+
 -- Test helpers ------------------------------------------------------------------------
+-- A talent read is deferred to the tick, and a first rank 0 is believed only after a second read 5s later.
+function settleTalents() for _ = 1, 4 do tick(5.5) end end
 function check(c, msg) if not c then error("CHECK FAILED: " .. msg, 2) end end
 function evframe()
     for _, f in ipairs(__frames) do if f._scripts.OnEvent then return f end end
@@ -348,6 +413,10 @@ FS.HudProfiles.TESTPRIEST = {
     },
 }
 """
+
+# Lua to run after the world is built and before the addon files load, by case name (a world that is already
+# broken when the addon first looks at it).
+PRELOGIN: dict[str, str] = {}
 
 # Each case: (name, class, lua body). The mock is booted fresh per case and the files loaded.
 CASES: list[tuple[str, str, str]] = []
@@ -1104,6 +1173,40 @@ at(8)
 check(P.cooldownReady("mind_blast") == true, "6s after the cast: ready under the learned 5.5s (static 8 would say no)")
 """)
 
+case("combat_cooldown_plain_false_is_ready_even_when_the_ledger_says_down", "TESTPRIEST")(r"""
+local P = FS.Hud.Primitives
+-- probe run 2: in combat isActive is a plain false for a spell that is not on cooldown
+W.cdTimingSecret = true; W.combat = true
+at(0); cast("Mind Blast")
+W.cd[10947] = { isActive = true }
+at(2)
+check(P.cooldownReady("mind_blast") == false, "plain true, our cast 2s ago: the ledger holds it down")
+W.cd[10947] = { isActive = false }
+check(P.cooldownReady("mind_blast") == true, "plain false: ready, whatever the ledger says")
+""")
+
+case("combat_cooldown_plain_true_is_decided_by_the_ledger", "TESTPRIEST")(r"""
+local P = FS.Hud.Primitives
+W.cdTimingSecret = true; W.combat = true
+at(0); cast("Mind Blast")
+W.cd[10947] = { isActive = true }
+at(9)
+check(P.cooldownReady("mind_blast") == true, "plain true, the ledger's 8s have elapsed: ready")
+at(9.5); cast("Mind Blast"); at(10)
+check(P.cooldownReady("mind_blast") == false, "plain true, cast 0.5s ago: not ready")
+""")
+
+case("combat_cooldown_secret_is_active_stays_unreadable", "TESTPRIEST")(r"""
+local P = FS.Hud.Primitives
+-- a secret isActive is not evidence of anything (run 2 never saw one): nil, never a guess from the ledger
+W.combat = true
+at(0); cast("Mind Blast")
+W.cd[10947] = { isActive = true }
+W.cdSecretIds = { [10947] = true }
+at(20)
+check(P.cooldownReady("mind_blast") == nil, "secret isActive: unreadable, even though the ledger would say ready")
+""")
+
 case("combat_cooldown_plain_end_survives_into_combat", "TESTPRIEST")(r"""
 local P = FS.Hud.Primitives
 -- a cooldown seen running out of combat (cast before the addon loaded) is remembered into combat
@@ -1312,14 +1415,14 @@ check(b.fort and b.inner_fire, "Fortitude and Inner Fire reminders out of combat
 check(b.pw_shield == nil, "Power Word: Shield is not a maintained buff")
 at(2)
 check(nxt() == "shoot", "a young fight: no Plague, no Death, the wand, got " .. tostring(nxt()))
-at(6.5)
-check(nxt() == "dplague", "after 6s: Devouring Plague, got " .. tostring(nxt()))
+at(7.9)
+check(nxt() == "shoot", "Parker chose 8s: still no Plague (or Death) at 7.9s, got " .. tostring(nxt()))
+at(8.1)
+check(nxt() == "dplague", "after 8s: Devouring Plague, got " .. tostring(nxt()))
 cast("Devouring Plague")
-at(7.5)
-check(nxt() == "shoot", "Plague up, Death still gated, got " .. tostring(nxt()))
-at(7.6); cast("Mind Blast")      -- the opener's 8s cooldown has run out by now: recast it
-at(8.5)
-check(nxt() == "swd", "after 8s: Shadow Word: Death, got " .. tostring(nxt()))
+check(nxt() == "mind_blast", "Plague up, Mind Blast has run its 8s: next, got " .. tostring(nxt()))
+cast("Mind Blast")
+check(nxt() == "swd", "Death keeps its own 8s gate: Shadow Word: Death, got " .. tostring(nxt()))
 cast("Shadow Word: Death"); W.cd[1309636] = { isActive = true }
 at(10.5)
 check(nxt() == "shoot", "Death on cooldown, got " .. tostring(nxt()))
@@ -1332,6 +1435,326 @@ check(nxt() == "mind_flay", "no wand: Mind Flay, got " .. tostring(nxt()))
 forget("Mind Flay")
 check(nxt() == "smite", "no Mind Flay either: Smite, got " .. tostring(nxt()))
 """)
+
+# Improved Shadow Word: Pain (+3 s a rank, 2 ranks). The rank is read out of combat; the cast ledger then times
+# the DoT with 18 + 3 * rank. The real PRIEST profile refreshes at 15% remaining.
+SWP_RANKS = [(0, 18), (1, 21), (2, 24)]
+for rank, dur in SWP_RANKS:
+    case(f"sw_pain_lasts_{dur}s_with_talent_rank_{rank}", "PRIEST")(f"""
+local P = FS.Hud.Primitives
+setTalent("Improved Shadow Word: Pain", {rank})
+fire("PLAYER_TALENT_UPDATE")
+settleTalents()
+W.combat = true                          -- the cast and every read below happen in combat
+at(0); cast("Shadow Word: Pain", 594)   -- the client reports the rank id actually cast
+at(1)
+check(P.dotRemaining("sw_pain") == {dur - 1}, "{dur}s DoT, 1s in: {dur - 1}s left, got " .. tostring(P.dotRemaining("sw_pain")))
+local refreshAt = {dur} * 0.85
+at(refreshAt - 0.5)
+check(P.dotMissing("sw_pain") == false, "still up just before the 15% window")
+at(refreshAt + 0.5)
+check(P.dotMissing("sw_pain") == true, "inside the 15% window: refresh")
+""")
+
+case("real_priest_refresh_is_suggested_later_with_the_talent", "PRIEST")(r"""
+-- the same fight at t = 16s with the talent at rank 0 and at rank 2: only the 18s DoT is due
+local function run(rank)
+    resetWorld("PRIEST"); W.form = 1; W.wand = true; W.cdTimingSecret = true
+    setTalent("Improved Shadow Word: Pain", rank)
+    fire("PLAYER_TALENT_UPDATE")
+    forget("Shadow Word: Death")
+    settleTalents()
+    W.combat = true
+    at(0); cast("Mind Blast"); cast("Shadow Word: Pain"); cast("Devouring Plague")
+    W.cd[10947] = { isActive = true }
+    at(15.5); cast("Mind Blast")
+    at(16)
+    return nxt()
+end
+check(run(0) == "sw_pain", "18s DoT, 16s in: refresh it, got " .. tostring(run(0)))
+check(run(2) == "shoot", "24s DoT, 16s in: not due yet, the wand, got " .. tostring(run(2)))
+""")
+
+case("sw_pain_rank_is_read_again_on_a_talent_change", "PRIEST")(r"""
+local P = FS.Hud.Primitives
+local f = evframe()
+local events = { "PLAYER_TALENT_UPDATE", "SPELLS_CHANGED", "CHARACTER_POINTS_CHANGED", "PLAYER_LEVEL_UP",
+                 "TRAIT_CONFIG_UPDATED", "ACTIVE_TALENT_GROUP_CHANGED" }
+local t = 0
+for i, ev in ipairs(events) do
+    check(f._events[ev], ev .. " is registered")
+    local rank = i % 3                    -- 1, 2, 0, 1, 2, 0
+    setTalent("Improved Shadow Word: Pain", rank)
+    fire(ev)
+    settleTalents()
+    t = t + 100
+    at(t); cast("Shadow Word: Pain"); at(t + 1)
+    check(P.dotRemaining("sw_pain") == 18 + 3 * rank - 1, ev .. ": rank " .. rank .. " read again, got " .. tostring(P.dotRemaining("sw_pain")))
+end
+""")
+
+case("sw_pain_rank_is_read_at_login_and_not_every_tick", "PRIEST")(r"""
+setTalent("Improved Shadow Word: Pain", 2)
+check(W.talentReads == 0, "the read waits for the tick, got " .. W.talentReads)
+tick(0.25)
+check(W.talentReads == 1, "one read at login, got " .. W.talentReads)
+for _ = 1, 20 do tick(0.25) end
+fire("PLAYER_TARGET_CHANGED"); fire("PLAYER_REGEN_ENABLED")
+tick(0.25)
+check(W.talentReads == 1, "ticks, target and combat events do not re-read a good answer, got " .. W.talentReads)
+fire("PLAYER_ENTERING_WORLD"); tick(0.25)
+check(W.talentReads == 1, "a loading screen changes no talent, got " .. W.talentReads)
+""")
+
+case("sw_pain_a_burst_of_spell_events_costs_one_walk", "PRIEST")(r"""
+setTalent("Improved Shadow Word: Pain", 2)
+settleTalents()
+local reads = W.talentReads
+for _ = 1, 5 do fire("SPELLS_CHANGED") end
+fire("PLAYER_LEVEL_UP"); fire("LEARNED_SPELL_IN_TAB"); fire("PLAYER_TALENT_UPDATE"); fire("CHARACTER_POINTS_CHANGED")
+check(W.talentReads == reads, "events only mark the read pending, got " .. (W.talentReads - reads))
+tick(0.25); tick(0.25); tick(0.25)
+check(W.talentReads == reads + 1, "one walk for the whole burst, got " .. (W.talentReads - reads))
+""")
+
+case("sw_pain_rank_0_is_believed_only_after_a_second_read", "PRIEST")(r"""
+local P = FS.Hud.Primitives
+-- the talent frame answers all zeros at login, then the real ranks load; nothing fires an event
+for _, n in ipairs(W.talentNodes) do n.rank = 0 end
+fire("PLAYER_TALENT_UPDATE"); tick(0.25)
+local reads = W.talentReads
+setTalent("Improved Shadow Word: Pain", 2)      -- loaded after the first read
+tick(5.5)
+check(W.talentReads == reads + 1, "the first zero asked for a second read, got " .. (W.talentReads - reads))
+W.combat = true
+at(0); cast("Shadow Word: Pain"); at(1)
+check(P.dotRemaining("sw_pain") == 23, "the real rank 2 won: 24s, got " .. tostring(P.dotRemaining("sw_pain")))
+""")
+
+case("sw_pain_confirmed_rank_0_is_not_read_again_by_the_loading_screen", "PRIEST")(r"""
+settleTalents()
+local reads = W.talentReads
+check(reads == 2, "rank 0 read twice, got " .. reads)
+fire("PLAYER_ENTERING_WORLD"); settleTalents()
+check(W.talentReads == reads, "a believed rank 0 is not re-read on a loading screen, got " .. (W.talentReads - reads))
+""")
+
+case("sw_pain_longer_aura_overrides_a_rank_0_pin", "PRIEST")(r"""
+local P = FS.Hud.Primitives
+settleTalents()                          -- rank 0 is believed now
+at(0)
+W.auras.target = { { name = "Shadow Word: Pain", spellId = 10894, expirationTime = W.now + 15, duration = 24 } }
+retarget("Creature-B")
+W.combat = true
+retarget("Creature-C")
+at(10); cast("Shadow Word: Pain"); at(11)
+check(P.dotRemaining("sw_pain") == 23, "a 24s aura beats rank 0: 24s, got " .. tostring(P.dotRemaining("sw_pain")))
+""")
+
+PRELOGIN["sw_pain_localized_talent_name_falls_back_to_the_aura"] = 'W.talentNodes[2].name = "Verbessertes Schattenwort: Schmerz"; W.talentNodes[2].rank = 2'
+case("sw_pain_localized_talent_name_falls_back_to_the_aura", "PRIEST")(r"""
+local P = FS.Hud.Primitives
+settleTalents()                          -- the English name is not in the tree: a believed rank 0
+W.combat = true
+at(0); cast("Shadow Word: Pain"); at(1)
+check(P.dotRemaining("sw_pain") == 17, "no aura seen yet: the base 18s, got " .. tostring(P.dotRemaining("sw_pain")))
+W.combat = false
+at(5)
+W.auras.target = { { name = "Shadow Word: Pain", spellId = 10894, expirationTime = W.now + 15, duration = 24 } }
+retarget("Creature-B")
+W.combat = true
+retarget("Creature-C")
+at(10); cast("Shadow Word: Pain"); at(11)
+check(P.dotRemaining("sw_pain") == 23, "the plain 24s aura wins: 24s, got " .. tostring(P.dotRemaining("sw_pain")))
+""")
+
+case("sw_pain_a_truncated_tree_never_pins_rank_0", "PRIEST")(r"""
+-- 250 nodes: the talent sits past the 200 node limit, so the scan is incomplete
+for i = 1, 250 do W.talentNodes[#W.talentNodes + 1] = { name = "Filler " .. i, rank = 0 } end
+setTalent("Improved Shadow Word: Pain", 0)
+W.talentNodes[#W.talentNodes + 1] = { name = "Improved Shadow Word: Pain", rank = 2 }
+fire("PLAYER_TALENT_UPDATE"); settleTalents()
+local reads = W.talentReads
+fire("PLAYER_ENTERING_WORLD"); settleTalents()
+check(W.talentReads > reads, "the rank is still unknown: a loading screen asks again, got " .. (W.talentReads - reads))
+""")
+
+case("sw_pain_more_trees_than_the_limit_never_pins_rank_0", "PRIEST")(r"""
+W.talentTrees = 5                        -- the limit is 4 trees
+fire("PLAYER_TALENT_UPDATE"); settleTalents()
+local reads = W.talentReads
+fire("PLAYER_ENTERING_WORLD"); settleTalents()
+check(W.talentReads > reads, "an incomplete scan leaves the rank unknown, got " .. (W.talentReads - reads))
+""")
+
+case("sw_pain_a_complete_tree_is_not_truncated", "PRIEST")(r"""
+-- exactly 200 nodes read in full: the absent talent is a believed rank 0
+for i = 1, 200 - #W.talentNodes do W.talentNodes[#W.talentNodes + 1] = { name = "Filler " .. i, rank = 0 } end
+check(#W.talentNodes == 200, "200 nodes")
+fire("PLAYER_TALENT_UPDATE"); settleTalents()
+local reads = W.talentReads
+fire("PLAYER_ENTERING_WORLD"); settleTalents()
+check(W.talentReads == reads, "rank 0 believed from a full 200 node read, got " .. (W.talentReads - reads))
+""")
+
+case("sw_pain_found_talent_is_done_even_when_other_nodes_are_unnamed", "PRIEST")(r"""
+setTalent("Improved Shadow Word: Pain", 2)
+W.talentNodes[#W.talentNodes + 1] = { name = "Mystery", rank = 1, unnamed = true }
+fire("PLAYER_TALENT_UPDATE")
+local reads = W.talentReads
+for _ = 1, 60 do tick(1) end
+check(W.talentReads - reads == 1, "one walk, no pointless retries, got " .. (W.talentReads - reads))
+""")
+
+case("sw_pain_respec_to_0_with_only_an_incomplete_read_keeps_the_old_rank", "PRIEST")(r"""
+local P = FS.Hud.Primitives
+setTalent("Improved Shadow Word: Pain", 2)
+settleTalents()
+setTalent("Improved Shadow Word: Pain", 0)
+W.talentNodes[#W.talentNodes + 1] = { name = "Mystery", rank = 1, unnamed = true }
+fire("PLAYER_TALENT_UPDATE")
+for _ = 1, 40 do tick(5.5) end
+W.combat = true
+at(0); cast("Shadow Word: Pain"); at(1)
+check(P.dotRemaining("sw_pain") == 23, "documented: an incomplete read keeps the last good rank, got " .. tostring(P.dotRemaining("sw_pain")))
+""")
+
+case("sw_pain_respec_down_drops_the_learned_aura_duration", "PRIEST")(r"""
+local P = FS.Hud.Primitives
+setTalent("Improved Shadow Word: Pain", 2)
+settleTalents()
+at(0)
+W.auras.target = { { name = "Shadow Word: Pain", spellId = 10894, expirationTime = W.now + 15, duration = 24 } }
+retarget("Creature-B")
+setTalent("Improved Shadow Word: Pain", 0)
+fire("PLAYER_TALENT_UPDATE"); settleTalents()
+W.combat = true
+retarget("Creature-C")
+at(10); cast("Shadow Word: Pain"); at(11)
+check(P.dotRemaining("sw_pain") == 17, "respecced to 0: the old 24s aura reading is dropped, got " .. tostring(P.dotRemaining("sw_pain")))
+""")
+
+case("sw_pain_rank_is_never_read_in_combat", "PRIEST")(r"""
+local P = FS.Hud.Primitives
+setTalent("Improved Shadow Word: Pain", 1)
+settleTalents()
+local reads = W.talentReads
+W.combat = true
+setTalent("Improved Shadow Word: Pain", 2)
+fire("PLAYER_TALENT_UPDATE")
+for _ = 1, 10 do tick(0.25) end
+check(W.talentReads == reads, "no talent read in combat, got " .. (W.talentReads - reads))
+at(0); cast("Shadow Word: Pain"); at(1)
+check(P.dotRemaining("sw_pain") == 20, "unread change: the last read rank 1, 21s, got " .. tostring(P.dotRemaining("sw_pain")))
+-- the fight ends: the pending read runs
+W.combat = false
+fire("PLAYER_REGEN_ENABLED")
+check(W.talentReads == reads + 1, "read on leaving combat, got " .. (W.talentReads - reads))
+W.combat = true
+at(100); cast("Shadow Word: Pain"); at(101)
+check(P.dotRemaining("sw_pain") == 23, "rank 2 now: 24s, got " .. tostring(P.dotRemaining("sw_pain")))
+""")
+
+PRELOGIN["sw_pain_secret_talent_read_keeps_18"] = 'W.sec.talent = true'
+case("sw_pain_secret_talent_read_keeps_18", "PRIEST")(r"""
+local P = FS.Hud.Primitives
+setTalent("Improved Shadow Word: Pain", 2)
+W.sec.talent = true                      -- the config id is a secret
+fire("PLAYER_TALENT_UPDATE")
+for _ = 1, 40 do tick(5) end
+W.sec.talent = nil
+W.sec.talentRank = true                  -- ... or a node rank is
+fire("PLAYER_TALENT_UPDATE")
+for _ = 1, 40 do tick(5) end
+W.combat = true
+at(0); cast("Shadow Word: Pain"); at(1)
+check(P.dotRemaining("sw_pain") == 17, "a secret talent read keeps the 18s base, got " .. tostring(P.dotRemaining("sw_pain")))
+""")
+
+case("sw_pain_retries_a_failed_talent_read_a_few_times_then_stops", "PRIEST")(r"""
+local P = FS.Hud.Primitives
+setTalent("Improved Shadow Word: Pain", 2)
+W.sec.talent = true
+fire("PLAYER_TALENT_UPDATE")
+local before = W.talentReads
+for _ = 1, 400 do tick(1) end
+check(W.talentReads - before == 4, "exactly four tries, then it stops, got " .. (W.talentReads - before))
+-- the talents finish loading and the client says so
+W.sec.talent = nil
+fire("PLAYER_TALENT_UPDATE")
+settleTalents()
+W.combat = true
+at(0); cast("Shadow Word: Pain"); at(1)
+check(P.dotRemaining("sw_pain") == 23, "read once it is readable, got " .. tostring(P.dotRemaining("sw_pain")))
+""")
+
+case("sw_pain_talent_read_falls_back_to_the_spec_api", "PRIEST")(r"""
+local P = FS.Hud.Primitives
+W.talentApi = "spec"
+setTalent("Improved Shadow Word: Pain", 1)
+fire("PLAYER_TALENT_UPDATE")
+settleTalents()
+W.combat = true
+at(0); cast("Shadow Word: Pain"); at(1)
+check(P.dotRemaining("sw_pain") == 20, "rank 1 through C_SpecializationInfo.GetTalentInfo: 21s, got " .. tostring(P.dotRemaining("sw_pain")))
+""")
+
+PRELOGIN["sw_pain_no_talent_api_keeps_18"] = 'C_ClassTalents, C_Traits, C_SpecializationInfo = nil, nil, nil'
+case("sw_pain_no_talent_api_keeps_18", "PRIEST")(r"""
+local P = FS.Hud.Primitives
+setTalent("Improved Shadow Word: Pain", 2)
+fire("PLAYER_TALENT_UPDATE")
+for _ = 1, 40 do tick(5) end
+W.combat = true
+at(0); cast("Shadow Word: Pain"); at(1)
+check(P.dotRemaining("sw_pain") == 17, "no talent API at all: 18s, got " .. tostring(P.dotRemaining("sw_pain")))
+""")
+
+PRELOGIN["sw_pain_duration_is_learned_from_a_plain_aura_when_the_talent_is_unreadable"] = 'W.talentApi = "none"'
+case("sw_pain_duration_is_learned_from_a_plain_aura_when_the_talent_is_unreadable", "PRIEST")(r"""
+local P = FS.Hud.Primitives
+at(0)
+-- the target already carries our Shadow Word: Pain, 21s long: a plain out of combat read
+W.auras.target = { { name = "Shadow Word: Pain", spellId = 10894, expirationTime = W.now + 15, duration = 21 } }
+retarget("Creature-B")
+W.combat = true
+retarget("Creature-C")
+at(10); cast("Shadow Word: Pain"); at(11)
+check(P.dotRemaining("sw_pain") == 20, "21s learned from the aura, got " .. tostring(P.dotRemaining("sw_pain")))
+-- a duration the talent cannot explain is not believed
+W.combat = false
+W.auras.target = { { name = "Shadow Word: Pain", spellId = 10894, expirationTime = W.now + 15, duration = 99 } }
+retarget("Creature-D")
+W.combat = true
+at(20); cast("Shadow Word: Pain"); at(21)
+check(P.dotRemaining("sw_pain") == 20, "99s is ignored, the learned 21s stays, got " .. tostring(P.dotRemaining("sw_pain")))
+""")
+
+case("sw_pain_talent_rank_beats_the_aura_and_a_dot_without_a_talent_is_unchanged", "PRIEST")(r"""
+local P = FS.Hud.Primitives
+setTalent("Improved Shadow Word: Pain", 2)
+fire("PLAYER_TALENT_UPDATE")
+settleTalents()
+at(0)
+W.auras.target = { { name = "Shadow Word: Pain", spellId = 10894, expirationTime = W.now + 15, duration = 21 } }
+retarget("Creature-B")
+W.combat = true
+retarget("Creature-C")
+at(10); cast("Shadow Word: Pain"); at(11)
+check(P.dotRemaining("sw_pain") == 23, "a readable rank wins: 24s, got " .. tostring(P.dotRemaining("sw_pain")))
+-- Devouring Plague has no talent entry: still its 24s
+cast("Devouring Plague"); at(12)
+check(P.dotRemaining("dplague") == 23, "Devouring Plague is untouched, got " .. tostring(P.dotRemaining("dplague")))
+""")
+
+case("warlock_dots_ignore_the_priest_talent", "WARLOCK")(r"""
+local P = FS.Hud.Primitives
+check(W.talentReads == 0, "a class with no talent timed DoT never reads talents, got " .. W.talentReads)
+W.combat = true
+at(0); cast("Corruption", 25311); at(1)
+check(P.dotRemaining("corruption") == 17, "Corruption keeps its rank table, got " .. tostring(P.dotRemaining("corruption")))
+""")
+
 
 case("real_warlock_opener_wand_first_and_life_tap", "WARLOCK")(r"""
 -- a level 20 warlock: no Wrack, Soul Fire, Incinerate, Conflagrate, Shadowburn, Siphon Life or Doom
@@ -2524,6 +2947,8 @@ def run_case(name: str, cls: str, body: str) -> str | None:
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.execute(MOCK)
     lua.execute(f'resetWorld("{cls}"); FS = {{}}')
+    if name in PRELOGIN:    # before the files load: HudLogic sets itself up as it loads
+        lua.execute(PRELOGIN[name])
     lua.execute("FS.LogDegradeOnce = function(k, m) __errors[#__errors + 1] = k .. ': ' .. tostring(m) end")
     loader = lua.eval("function(src, name) local fn = assert(loadstring(src, '@' .. name)); return fn('forever-stuwave', FS) end")
     for fname in FILES:

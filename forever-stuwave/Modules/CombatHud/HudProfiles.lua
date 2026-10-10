@@ -121,9 +121,10 @@ FS.HudProfiles.PRIEST = {
                                         { "orUnknown", { "inRange", "mind_blast" } } } },
         { cast = "sw_pain", when = { { "dotMissing", "sw_pain" } } },
         -- Devouring Plague: 60 s cooldown, 24 s, big mana. Only on a target that has lived
-        -- a while. [HEURISTIC]
+        -- a while. [HEURISTIC] Parker chose 8 s on 2026-10-09 (not sourced; the research
+        -- lists give no number).
         { cast = "dplague", when = { { "dotMissing", "dplague" }, { "cooldownReady", "dplague" },
-                                     { "engagedFor", 6 } } },
+                                     { "engagedFor", 8 } } },
         -- Mind Blast on cooldown (8 s, 5.5 s with Improved Mind Blast): guides say it
         -- replaces Smite whenever it is off cooldown.
         { cast = "mind_blast", when = { { "cooldownReady", "mind_blast" } } },

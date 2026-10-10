@@ -16,6 +16,11 @@
 --             on Forever unless a comment says otherwise.
 --   applyByRank  cast spell id -> seconds, for a spell whose duration depends on the rank
 --             actually cast (Corruption); any other id uses `apply` (the top rank).
+--   applyTalent  { name = talent name, perRank = seconds, maxRank = n }: a talent that lengthens `apply`
+--             (Improved Shadow Word: Pain, +3 s a rank). HudLogic reads the rank out of combat by NAME
+--             (never an id) and the ledger then uses apply + perRank * rank. While the rank is unreadable
+--             it uses a plain out-of-combat aura duration between apply and apply + perRank * maxRank, else
+--             `apply`. Improved Mind Blast needs no entry: the cooldown is learned from a plain read.
 --   cooldown  the spell's own cooldown in seconds. HudLogic's cast ledger uses it as the
 --             cooldown length in combat, where the client's timing is secret, until a plain
 --             out-of-combat read teaches it the real one (talents); a spell without it is
@@ -43,7 +48,8 @@ local _, FS = ...
 
 FS.HudSpells = {
     -- Priest -----------------------------------------------------------------------------
-    sw_pain    = { names = { "Shadow Word: Pain" }, ids = { 10894, 589 }, apply = 18 },
+    sw_pain    = { names = { "Shadow Word: Pain" }, ids = { 10894, 589 }, apply = 18,
+                   applyTalent = { name = "Improved Shadow Word: Pain", perRank = 3, maxRank = 2 } },
     dplague    = { names = { "Devouring Plague" }, apply = 24, cooldown = 60 },
     mind_blast = { names = { "Mind Blast" }, ids = { 10947, 8092 }, cast = 1.5, cooldown = 8 },
     swd        = { names = { "Shadow Word: Death" },
