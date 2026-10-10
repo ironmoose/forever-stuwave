@@ -2659,10 +2659,17 @@ end
 --   priest.ooc / priest.combat   the snapshots (taken now; the other one follows the next pull or
 --                                the end of the fight), parts: env, secrets, spells, mana, shield,
 --                                auras, cooldowns, triage, lossOfControl, misc, apis;
---   priest.logs.<name>           bounded ring buffers (PP.LOG_CAP entries, oldest dropped; `total`
+--   priest.logs.<name>           bounded ring buffers (PP.LOG_CAP entries, 300 for the power logs; oldest dropped; `total`
 --                                and `dropped` count what went by): power (UNIT_POWER_UPDATE, the
---                                mana tick clock), powerFrequent, cast (with the mana cost, so the
---                                five second rule can be read off sinceManaCast on a power entry),
+--                                mana tick clock; each entry also reads UnitPower for its power
+--                                type, plain or secret), powerFrequent (UNIT_POWER_FREQUENT, sampled:
+--                                `total` is the raw count, an entry is kept when the unit or power
+--                                type shape changes or after `minGap` seconds, `sampledOut` is what
+--                                was skipped, `skippedBefore` on an entry says how many it stands
+--                                for), powerOther (any non-mana power event, same sampling, so a
+--                                5 s series on another power type shows up), cast (with the mana cost, so the
+--                                five second rule can be read off sinceManaCast on a power entry;
+--                                a spell with no cost table at all is free, cost 0),
 --                                aura (player and target UNIT_AURA payload secrecy), shield (absorb
 --                                and heal prediction events on player and party), kill (PARTY_KILL,
 --                                PLAYER_TARGET_DIED), died (UNIT_DIED), loc (loss of control).
@@ -2674,11 +2681,19 @@ end
 -- unverified on Forever; every spell is also resolved by NAME (english), and the rank the client
 -- reports for the name is probed too. API names and signatures: Gethe/wow-ui-source, branch
 -- `forever` (the generated API documentation), 1.60.1.
+-- Every probed spell id also records the name the client resolves it to (spellName), so an id taken
+-- from Classic Era can be checked. The `target` part records how durable the target is
+-- (classification, level, effective level, plus-mob flag, creature type), plain or secret.
 -- Results: ForeverSTUwaveDB.fsprobe.priest.
 
 PP.COMBAT_DELAY = 4
 PP.OOC_DELAY = 2
 PP.LOG_CAP = 50
+-- The power logs hold more: sampled to about one entry a second, 50 would cover under a minute and
+-- push the idle window after a mana cast out. Still bounded.
+PP.LOG_CAPS = { power = 300, powerFrequent = 300, powerOther = 300 }
+PP.FREQUENT_COUNT = 10        -- with no plain clock, keep 1 in this many sampled events
+PP.COST_ASSUMPTION = "nil or empty = free"   -- a spell power cost call that returns nothing is read as a free spell
 PP.LOG_SECONDS = 1200
 PP.MANA = 0                   -- Enum.PowerType.Mana
 PP.INSANITY = 13              -- Enum.PowerType.Insanity
@@ -2687,21 +2702,24 @@ PP.INSANITY = 13              -- Enum.PowerType.Insanity
 PP.RANGE_NAMES = { "Lesser Heal", "Heal", "Flash Heal", "Renew", "Power Word: Shield" }
 PP.AURA_UNITS = { "player", "party1", "target" }
 PP.COST_IDS = { 585, 2050, 5019 }
+PP.FREQUENT_GAP = 1           -- seconds between kept UNIT_POWER_FREQUENT entries of an unchanged shape
 PP.ITEMS = { "Holy Candle", "Sacred Candle", "Devout Candle", "Refreshing Spring Water" }
 PP.PLAYER_SET = { player = true }
 PP.AURA_SET = { player = true, target = true }
 PP.SHIELD_SET = { player = true, party1 = true }
 
--- { key, english name, { ids }, read auras }. Ids from this repo: 17, 21562, 1243, 588, 589, 585,
--- 5019, 15473, 8092, 586, 401977. The rest are Classic Era ids [UNVERIFIED on Forever]; the names
--- carry the load (the client resolves a name to the rank the player knows).
+-- { key, english name, { ids }, read auras }. Ids from this repo: 17, 1243, 588, 589, 585,
+-- 5019, 15473, 8092, 586, 401977. The rest are Classic Era ids [UNVERIFIED on Forever]; each
+-- snapshot records the name the client resolves every id to (spellName), and the names carry the
+-- load (the client resolves a name to the rank the player knows). Retail Fortitude 21562 is not a
+-- Forever spell (the buff is the rank id, 1244).
 PP.SPELLS = {
     { "pw_shield", "Power Word: Shield", { 17 }, true },
     { "weakened_soul", "Weakened Soul", { 6788 }, true },
     { "renew", "Renew", { 139 }, true },
     { "pom", "Prayer of Mending", {}, true },
     { "inner_fire", "Inner Fire", { 588 }, true },
-    { "fort", "Power Word: Fortitude", { 1243, 21562 }, true },
+    { "fort", "Power Word: Fortitude", { 1243, 1244 }, true },
     { "divine_spirit", "Divine Spirit", { 14752 }, true },
     { "shadow_prot", "Shadow Protection", { 976 }, true },
     { "fear_ward", "Fear Ward", { 6346 }, true },
@@ -2771,6 +2789,7 @@ PP.API_LIST = {
     { "C_UnitAuras", "GetUnitAuraInstanceIDs" },
     { "C_LossOfControl", "GetActiveLossOfControlData" }, { "C_LossOfControl", "GetActiveLossOfControlDataCount" },
     { "C_CombatLog", "IsCombatLogRestricted" }, { "C_Item", "GetItemCount" },
+    { "UnitLevel" }, { "UnitExists" }, { "UnitClassification" }, { "UnitEffectiveLevel" }, { "UnitIsPlusMob" }, { "UnitCreatureType" },
 }
 
 -- { event, unit filter for RegisterUnitEvent (none = the event has no unit) }. RegisterUnitEvent
@@ -2793,6 +2812,8 @@ PP.frame = nil        -- the event frame (frames are never destroyed, so it is r
 PP.combat = false     -- InCombatLockdown at the start of the snapshot being taken
 PP.resolved = nil     -- the spell list with ids resolved, for the snapshot being taken
 PP.last = {}          -- log name -> GetTime of its previous entry
+PP.sample = {}        -- sampled log name -> { key, t, skipped } of its previous kept entry
+PP.names = nil        -- spell id -> resolved name, for the snapshot being taken
 PP.lastCast = nil     -- GetTime of the last player cast that finished
 PP.lastManaCast = nil -- ... of the last one that cost mana (the five second rule clock)
 PP.manaClockUnknown = false -- a cast whose cost could not be read has gone by since lastManaCast
@@ -2867,6 +2888,17 @@ function PP.Method(obj, name)
     return GS.Method(obj, name)
 end
 
+-- The name the client resolves a spell id to ("unresolved" when it cannot be read as plain). Cached
+-- for the snapshot being taken.
+function PP.IdName(id)
+    local cache = PP.names
+    if cache and cache[id] then return cache[id] end
+    local ok, name = pcall(SpellName, id)
+    local text = (ok and type(name) == "string") and string.sub(name, 1, MAX_STR) or "unresolved"
+    if cache then cache[id] = text end
+    return text
+end
+
 -- The spell list with its ids: the listed ones plus the rank the client resolves the name to.
 function PP.Resolve()
     local out = {}
@@ -2933,6 +2965,7 @@ function PP.PartSpells(sec)
         local ok, err = pcall(function()
             for _, id in ipairs(s.ids) do
                 entry["s" .. id] = {
+                    spellName = PP.IdName(id),
                     isPlayerSpell = PP.B(isPlayerSpell, id),
                     aura = PP.B(auraSecrecy, id),
                     cooldown = PP.B(cdSecrecy, id),
@@ -2950,6 +2983,7 @@ end
 function PP.CostRec(id)
     local rec, v = Invoke(false, Api("C_Spell", "GetSpellPowerCost"), id)
     PP.Stamp(rec)
+    rec.spellName = PP.IdName(id)
     if rec.ok and IsPlainTable(v) then
         local okc, n = pcall(function() return #v end)
         if okc and type(n) == "number" and not IsSecret(n) then rec.count = n end
@@ -2979,6 +3013,7 @@ function PP.PartMana(sec)
     sec.regenForMana = PP.Call(true, Api("GetPowerRegenForPowerType"), PP.MANA)
     sec.casting = PP.Call(true, Api("UnitCastingInfo"), "player")
     sec.channeling = PP.Call(true, Api("UnitChannelInfo"), "player")
+    sec.costAssumption = PP.COST_ASSUMPTION
     sec.cost = { inCombat = PP.combat }
     for _, id in ipairs(PP.COST_IDS) do sec.cost["s" .. id] = PP.CostRec(id) end
 end
@@ -3022,7 +3057,7 @@ function PP.PartAuras(sec)
             local ok, err = pcall(function()
                 entry.byName = PP.FieldsBrief((AuraCall(byName, "player", s.name, HELPFUL)))
                 for _, id in ipairs(s.ids) do
-                    local cell = { playerByID = PP.FieldsBrief((AuraCall(byPlayer, id))) }
+                    local cell = { spellName = PP.IdName(id), playerByID = PP.FieldsBrief((AuraCall(byPlayer, id))) }
                     entry["s" .. id] = cell
                     for _, unit in ipairs(PP.AURA_UNITS) do
                         cell[unit] = PP.FieldsBrief((AuraCall(byUnit, unit, id)))
@@ -3066,7 +3101,7 @@ function PP.PartCooldowns(sec)
                 return
             end
             for _, id in ipairs(ids) do
-                local cell = {}
+                local cell = { spellName = PP.IdName(id) }
                 entry["s" .. id] = cell
                 cell.cooldown = PP.FieldsBrief((InvokeTableKeep(PP.CD_FIELDS, PP.CD_KEEP, getCooldown, id)))
                 local drec, dur = Invoke(false, getDuration, id)
@@ -3108,6 +3143,17 @@ function PP.PartTriage(sec)
     sec.threatPlayer = PP.Call(true, Api("UnitThreatSituation"), "player", "target")
     sec.threatParty1 = PP.Call(true, Api("UnitThreatSituation"), "party1", "target")
     sec.detailedThreatPlayer = PP.Call(true, Api("UnitDetailedThreatSituation"), "player", "target")
+end
+
+-- How durable the target is: the reads a fight-length estimate would lean on. Each is plain or
+-- secret per read; an API this client lacks is recorded absent.
+function PP.PartTarget(sec)
+    sec.exists = PP.Call(true, Api("UnitExists"), "target")
+    sec.classification = PP.Call(true, Api("UnitClassification"), "target")
+    sec.level = PP.Call(true, Api("UnitLevel"), "target")
+    sec.effectiveLevel = PP.Call(true, Api("UnitEffectiveLevel"), "target")
+    sec.isPlusMob = PP.Call(true, Api("UnitIsPlusMob"), "target")
+    sec.creatureType = PP.Call(true, Api("UnitCreatureType"), "target")
 end
 
 function PP.PartLossOfControl(sec)
@@ -3179,6 +3225,7 @@ PP.PARTS = {
     { "auras", PP.PartAuras },
     { "cooldowns", PP.PartCooldowns },
     { "triage", PP.PartTriage },
+    { "target", PP.PartTarget },
     { "lossOfControl", PP.PartLossOfControl },
     { "misc", PP.PartMisc },
     { "apis", PP.PartApis },
@@ -3190,6 +3237,7 @@ function PP.Snapshot(snap)
     snap.inCombat = PP.combat
     local ok, resolved = pcall(PP.Resolve)
     PP.resolved = ok and resolved or {}
+    PP.names = {}
     snap.time = PP.Call(true, Api("GetTime"))
     for _, part in ipairs(PP.PARTS) do
         Section(snap, part[1], function(sec)
@@ -3198,6 +3246,7 @@ function PP.Snapshot(snap)
         end)
     end
     PP.resolved = nil
+    PP.names = nil
 end
 
 -- Storage, logs -------------------------------------------------------------------------------
@@ -3227,13 +3276,13 @@ function PP.Log(name)
     if type(rec.logs) ~= "table" then rec.logs = {} end
     local log = rec.logs[name]
     if type(log) ~= "table" then
-        log = { cap = PP.LOG_CAP, total = 0, dropped = 0, entries = {} }
+        log = { cap = PP.LOG_CAPS[name] or PP.LOG_CAP, total = 0, dropped = 0, entries = {} }
         rec.logs[name] = log
     end
     return log
 end
 
--- Appends to a ring buffer: the oldest entries go once there are PP.LOG_CAP.
+-- Appends to a ring buffer: the oldest entries go once there are log.cap (PP.LOG_CAP, or PP.LOG_CAPS for the power logs).
 function PP.Push(name, entry)
     local log = PP.Log(name)
     log.entries[#log.entries + 1] = entry
@@ -3277,12 +3326,15 @@ function PP.ForeignUnit(unit, set)
     return not set[unit]
 end
 
--- Total mana cost of a spell id from C_Spell.GetSpellPowerCost, or nil when unreadable. An entry
+-- Total mana cost of a spell id from C_Spell.GetSpellPowerCost, or nil when unreadable. A call that
+-- succeeds and returns nothing (Shoot) or an empty plain table is a FREE spell: cost 0. An entry
 -- whose type or cost is secret (or missing) makes the whole answer nil: skipping it would read as a
--- free cast.
+-- free cast. So does a throwing call or a secret return.
 function PP.ManaCost(id)
     local ok, v = pcall(Api("C_Spell", "GetSpellPowerCost"), id)
-    if not ok or not IsPlainTable(v) then return nil end
+    if not ok then return nil end
+    if type(v) == "nil" then return 0 end
+    if not IsPlainTable(v) then return nil end
     local okc, n = pcall(function() return #v end)
     if not okc or type(n) ~= "number" or IsSecret(n) then return nil end
     local total = 0
@@ -3305,13 +3357,89 @@ function PP.SameGuid(guid, unit)
     return guid == mine
 end
 
+-- One Desc as a short shape word: "secret" or "<type>:<value>". The shape of an event is what the
+-- sampler compares, never a raw argument.
+function PP.Shape(desc)
+    if desc.isSecret ~= false then return "secret" end
+    return tostring(desc.type) .. ":" .. tostring(desc.value)
+end
+
+-- Enum.PowerType by event token ("MANA" -> 0, "RUNIC_POWER" -> 6), built once from the client's own enum.
+function PP.PowerEnum(token)
+    if type(PP.powerTokens) ~= "table" then
+        local map = {}
+        pcall(function()
+            for key, num in pairs(_G.Enum.PowerType) do
+                if type(key) == "string" and type(num) == "number" and not IsSecret(num) then
+                    map[string.upper((string.gsub(key, "(%l)(%u)", "%1_%2")))] = num
+                end
+            end
+        end)
+        PP.powerTokens = map
+    end
+    return PP.powerTokens[token]
+end
+
+-- UnitPower("player", <the event's power type>) as a plain/secret word, or nil when the unit or the
+-- power type of the event is not a plain value (a secret argument is never passed on).
+function PP.PowerReadout(udesc, pdesc)
+    if udesc.isSecret ~= false or udesc.value ~= "player" then return nil end
+    if pdesc.isSecret ~= false or pdesc.type ~= "string" or pdesc.value == nil then return nil end
+    return PP.B(Api("UnitPower"), "player", PP.PowerEnum(pdesc.value) or pdesc.value)
+end
+
+-- The sampler for a high-rate stream. An event is kept when its shape (event, unit, power type; plain
+-- or secret) differs from the previous event of the stream, or PP.FREQUENT_GAP seconds have passed
+-- since the last kept one. A skipped event still counts in the log's total and sampledOut, so the raw
+-- rate stays visible. Returns keep, and how many events the kept entry stands for.
+function PP.Sample(stream, logName, e)
+    local key = tostring(e.event) .. "|" .. PP.Shape(e.unit) .. "|" .. PP.Shape(e.powerType)
+    local now = PlainTime()
+    local st = PP.sample[stream]
+    if type(st) ~= "table" then
+        st = { skipped = 0 }
+        PP.sample[stream] = st
+    end
+    local same = st.key == key
+    st.key = key
+    local log = PP.Log(logName)
+    log.minGap = PP.FREQUENT_GAP
+    local skip = false
+    if same and now ~= nil and st.t ~= nil then
+        skip = now - st.t < PP.FREQUENT_GAP
+    elseif same and now == nil then
+        -- No plain clock: sample by count instead, and say so.
+        st.count = (st.count or 0) + 1
+        skip = st.count < PP.FREQUENT_COUNT
+        log.countSampling = PP.FREQUENT_COUNT
+    end
+    if skip then
+        st.skipped = st.skipped + 1
+        log.total = log.total + 1
+        log.sampledOut = (log.sampledOut or 0) + 1
+        return false, 0
+    end
+    local skipped = same and st.skipped or 0
+    st.skipped, st.t, st.count = 0, now, 0
+    return true, skipped
+end
+
 function PP.LogPower(name, event, unit, powerType)
     if PP.ForeignUnit(unit, PP.PLAYER_SET) then return end
     local e = { event = event, unit = Desc(unit, true), powerType = Desc(powerType, true) }
     local pt = e.powerType
-    -- Only mana matters here; a power type that is secret is kept and described.
-    if pt.isSecret == false and pt.type == "string" and pt.value ~= nil and pt.value ~= "MANA" then return end
-    PP.Push(name, PP.Mark(e, name, true))
+    -- Mana is the log's subject; a plain power type that is not mana goes to powerOther (so a periodic
+    -- tick on another power type shows up); a secret one is kept and described.
+    local other = pt.isSecret == false and pt.type == "string" and pt.value ~= nil and pt.value ~= "MANA"
+    local log = other and "powerOther" or name
+    local stream = (name == "powerFrequent" and (other and "frequentOther" or "frequent")) or (other and "updateOther") or nil
+    if stream then
+        local keep, skipped = PP.Sample(stream, log, e)
+        if not keep then return end
+        if skipped > 0 then e.skippedBefore = skipped end
+    end
+    e.unitPower = PP.PowerReadout(e.unit, pt)
+    PP.Push(log, PP.Mark(e, log, true))
 end
 
 function PP.LogCast(event, unit, castGUID, spellID)
@@ -3503,10 +3631,10 @@ function PP.Start()
         return
     end
     PP.run = PP.run + 1
-    PP.last, PP.lastCast, PP.lastManaCast, PP.manaClockUnknown = {}, nil, nil, false
+    PP.last, PP.sample, PP.lastCast, PP.lastManaCast, PP.manaClockUnknown = {}, {}, nil, nil, false
     local run = PP.run
     local meta = {
-        started = SafeDate(), run = run, status = "logging", logCap = PP.LOG_CAP, logSeconds = PP.LOG_SECONDS,
+        started = SafeDate(), run = run, status = "logging", logCap = PP.LOG_CAP, logCaps = PP.LOG_CAPS, costAssumption = PP.COST_ASSUMPTION, logSeconds = PP.LOG_SECONDS,
         issecretvalueAvailable = type(_G.issecretvalue) == "function",
     }
     if PP.Saved() then Say("priest: replacing the saved priest record") end

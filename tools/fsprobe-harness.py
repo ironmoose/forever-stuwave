@@ -580,7 +580,8 @@ function priestMock()
     def("GetPowerRegenForPowerType", function() return 8, 4 end, function() return SN, SN end)
     def("UnitCastingInfo", function() return nil end, function() return SS, SS, SN, SN, SN, SB, SS, SB, SN, SN end)
     def("C_Spell.GetSpellPowerCost", function(id)
-        if id == 5019 then return {} end
+        if id == 5019 then return end   -- the real client: no table at all for a free spell
+        if id == 2050 then return {} end
         return { { type = 0, name = "MANA", cost = 150, minCost = 150, costPercent = 0 } }
     end, function() return ST end)
     def("C_Spell.GetSpellCharges", function() return { currentCharges = 1, maxCharges = 2, cooldownStartTime = 0, cooldownDuration = 0, chargeModRate = 1, isActive = false } end,
@@ -600,6 +601,9 @@ function priestMock()
     def("UnitGetDetailedHealPrediction", function() end)
     def("C_StringUtil.TruncateWhenZero", function() return "" end, function() return SS end)
     CurveConstants = { ScaleTo100 = { kind = "curve" } }
+    def("UnitClassification", function() return "elite" end, function() return SS end)
+    def("UnitEffectiveLevel", function() return 20 end, function() return SN end)
+    def("UnitCreatureType", function() return "Beast", 1 end, function() return SS, SN end)
     def("UnitInRange", function() return true, true end, function() return SB, SB end)
     def("UnitIsDeadOrGhost", function() return false end)
     def("UnitIsConnected", function() return true end)
@@ -2399,7 +2403,23 @@ check(o.mana.playerPowerPercentCurve.exists and o.mana.playerPowerPercentCurve.o
 check(o.mana.regen.r1.value == 8 and o.mana.regenForMana.r2.value == 4, "regen reads")
 check(o.mana.casting.exists and o.mana.channeling.exists, "cast info reads")
 check(o.mana.cost.s585.count == 1 and o.mana.cost.s585.first.cost.value == 150, "mana cost read")
-check(o.mana.cost.s5019.count == 0, "wand has no cost")
+check(o.mana.cost.s5019.ok and o.mana.cost.s5019.n == 0 and o.mana.cost.s5019.count == nil, "wand returns nothing")
+check(o.mana.cost.s2050.count == 0, "an empty cost table is recorded as count 0")
+-- item 3: the resolved name sits next to every probed id; unresolved ids say so
+check(o.spells.pw_shield.s17.spellName == "Power Word: Shield", "spell name beside the id: " .. tostring(o.spells.pw_shield.s17.spellName))
+check(o.spells.weakened_soul.s6788.spellName == "unresolved", "an id the client cannot name is marked unresolved")
+check(o.spells.fort.s1244 and not o.spells.fort.s21562, "retail Fortitude 21562 must not be probed by the priest list")
+check(o.mana.cost.s585.spellName == "Smite", "cost record carries the spell name")
+check(o.cooldowns.pw_shield.s17.spellName == "Power Word: Shield" and o.auras.pw_shield.s17.spellName == "Power Word: Shield",
+    "cooldown and aura cells carry the spell name")
+-- item 5: target durability, plain/secret per read; absent APIs are recorded
+local t = o.target
+check(t.classification.r1.value == "elite" and t.level.r1.value == 12 and t.effectiveLevel.r1.value == 20, "target reads")
+check(t.creatureType.r1.value == "Beast" and t.creatureType.r2.value == 1, "creature type and id")
+check(t.isPlusMob.exists == false, "UnitIsPlusMob is absent in the mock and must be recorded absent")
+check(t.inCombat == false and t.exists.r1.value == true, "target part is tagged and records existence")
+check(o.apis.UnitClassification == "present" and o.apis.UnitIsPlusMob == "absent" and o.apis.UnitLevel == "present" and o.apis.UnitExists == "present",
+    "api presence covers the target reads")
 -- C: shield
 check(o.shield.player.totalAbsorbs.exists and o.shield.player.truncateWhenZero.ok, "absorb reads")
 check(o.shield.player.GetDamageAbsorbs.r1.value == 120 and o.shield.player.GetDamageAbsorbs.r2.value == false, "calculator reads")
@@ -2501,8 +2521,6 @@ priestMock()
 runCmd("priest")
 local p = ForeverSTUwaveDB.fsprobe.priest
 local feeds = {
-    { "power", "UNIT_POWER_UPDATE", { "player", "MANA" } },
-    { "powerFrequent", "UNIT_POWER_FREQUENT", { "player", "MANA" } },
     { "cast", "UNIT_SPELLCAST_SUCCEEDED", { "player", "Cast-1", 585 } },
     { "aura", "UNIT_AURA", { "target", { isFullUpdate = false, addedAuras = {}, updatedAuraInstanceIDs = {}, removedAuraInstanceIDs = {} } } },
     { "shield", "UNIT_ABSORB_AMOUNT_CHANGED", { "party1" } },
@@ -2524,7 +2542,7 @@ for _, feed in ipairs(feeds) do
     check(first.inCombat == false and first.event == feed[2], feed[1] .. " entry tag")
 end
 -- the oldest entries went: what is left is the newest 50
-check(p.logs.power.entries[50].t - p.logs.power.entries[1].t > 4.8, "ring kept the wrong end")
+check(p.logs.cast.entries[50].t - p.logs.cast.entries[1].t > 4.8, "ring kept the wrong end")
 scan(p)
 """
 )
@@ -2549,14 +2567,207 @@ local c = p.logs.cast.entries[1]
 check(c.manaCost == 150 and c.spellID.value == 585 and c.spellID.isSecret == false, "cast entry carries the mana cost")
 -- a free cast (wand) must not restart the clock
 pfire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-2", 5019)
-check(p.logs.cast.entries[2].manaCost == 0, "wand costs no mana")
+check(p.logs.cast.entries[2].manaCost == 0, "wand costs no mana (GetSpellPowerCost returns nothing)")
 __now = __now + 1
 pfire("UNIT_POWER_UPDATE", "player", "MANA")
-check(math.abs(e[3].sinceManaCast - 5) < 0.001, "a free cast restarted the five second clock")
+check(math.abs(e[3].sinceManaCast - 5) < 0.001 and e[3].sinceManaCastUnknown == nil,
+    "a free cast restarted or invalidated the five second clock")
+-- an empty plain table is free too (Lesser Heal is an empty table in the mock)
+pfire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-3", 2050)
+check(p.logs.cast.entries[3].manaCost == 0, "an empty cost table is free")
+__now = __now + 1
+pfire("UNIT_POWER_UPDATE", "player", "MANA")
+check(e[4].sinceManaCastUnknown == nil and math.abs(e[4].sinceManaCast - 6) < 0.001, "an empty cost table must not mark the clock unknown")
 -- foreign units that a plain RegisterEvent fallback would deliver are dropped
 pfire("UNIT_ABSORB_AMOUNT_CHANGED", "nameplate3")
 check(p.logs.shield == nil or p.logs.shield.total == 0, "a nameplate absorb event was logged")
 scan(p)
+"""
+)
+
+case("priest_unreadable_cost_still_marks_the_five_second_clock_unknown")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+-- a plain table whose cost field is secret stays unknown (never treated as free)
+C_Spell.GetSpellPowerCost = function() return { { type = 0, name = "MANA", cost = SN } } end
+pfire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 585)
+check(p.logs.cast.entries[1].manaCost == nil, "a secret cost field must not read as a cost")
+__now = __now + 1
+pfire("UNIT_POWER_UPDATE", "player", "MANA")
+check(p.logs.power.entries[1].sinceManaCastUnknown == true, "an unreadable cost must mark the clock unknown")
+-- an error from the cost call is unreadable too
+C_Spell.GetSpellPowerCost = function() error("boom") end
+pfire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-2", 5019)
+check(p.logs.cast.entries[2].manaCost == nil, "a throwing cost call is not free")
+scan(p)
+"""
+)
+
+case("priest_power_frequent_is_sampled_and_keeps_the_raw_count")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+for _ = 1, 100 do
+    __now = __now + 0.1
+    pfire("UNIT_POWER_FREQUENT", "player", "MANA")
+end
+local log = p.logs.powerFrequent
+check(log.total == 100, "total keeps counting every raw event: " .. tostring(log.total))
+check(#log.entries >= 8 and #log.entries <= 12, "a 10 Hz stream is sampled to about 1 Hz: " .. tostring(#log.entries))
+check(log.dropped == 0 and log.sampledOut == 100 - #log.entries, "sampledOut counts what was skipped: " .. tostring(log.sampledOut))
+check(log.minGap == 1, "the sampling gap is recorded")
+check(log.entries[2].skippedBefore >= 8 and log.entries[2].skippedBefore <= 10, "an entry says how many events it stands for: " .. tostring(log.entries[2].skippedBefore))
+-- a non-mana type is logged at once (its own stream), without disturbing the mana sampler
+local before = #log.entries
+pfire("UNIT_POWER_FREQUENT", "player", "RAGE")
+check(p.logs.powerOther.entries[1].powerType.value == "RAGE", "other power types go to powerOther")
+pfire("UNIT_POWER_FREQUENT", "player", "MANA")
+check(#log.entries == before, "mana and other power types sample on separate streams: an interleaved RAGE must not reopen the mana stream")
+scan(p)
+"""
+)
+
+case("priest_power_frequent_logs_a_secret_shape_change_at_once", "secret")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+__now = __now + 1
+pfire("UNIT_POWER_FREQUENT", "player", "MANA")
+local log = p.logs.powerFrequent
+local n = #log.entries
+__now = __now + 0.1
+pfire("UNIT_POWER_FREQUENT", "player", "MANA")
+check(#log.entries == n, "the same shape inside the gap must be sampled out")
+__now = __now + 0.1
+pfire("UNIT_POWER_FREQUENT", "player", SS)
+check(#log.entries == n + 1 and log.entries[n + 1].powerType.isSecret == true, "plain to secret powerType must be logged")
+scan(p)
+"""
+)
+
+case("priest_power_entries_carry_unit_power_type_and_a_power_readout")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+pfire("UNIT_POWER_UPDATE", "player", "MANA")
+local e = p.logs.power.entries[1]
+check(e.unit.value == "player" and e.powerType.value == "MANA", "unit and power type")
+check(e.unitPower == "number/plain=100", "UnitPower readout: " .. tostring(e.unitPower))
+-- the decoy hunt: a non-mana power type is kept, in its own log, with its own readout
+__now = __now + 1
+pfire("UNIT_POWER_UPDATE", "player", "ENERGY")
+check(p.logs.power.total == 1, "a non-mana event must not enter the mana log")
+local o = p.logs.powerOther.entries[1]
+check(o.event == "UNIT_POWER_UPDATE" and o.powerType.value == "ENERGY" and o.unitPower, "powerOther entry: " .. tostring(o.unitPower))
+scan(p)
+"""
+)
+
+case("priest_power_readout_is_secret_safe", "secret")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+pfire("UNIT_POWER_UPDATE", "player", "MANA")
+check(p.logs.power.entries[1].unitPower == "number/secret", "secret UnitPower is described, not stored: " .. tostring(p.logs.power.entries[1].unitPower))
+pfire("UNIT_POWER_UPDATE", SS, SS)
+local e = p.logs.power.entries[2]
+check(e.unit.isSecret == true and e.powerType.isSecret == true, "the secret event was logged")
+check(e.unitPower == nil, "no UnitPower read for a secret unit and power type: " .. tostring(e.unitPower))
+pfire("UNIT_POWER_UPDATE", "player", SS)
+check(p.logs.power.entries[3].unitPower == nil, "no UnitPower read for a secret power type alone")
+scan(p)
+"""
+)
+
+case("priest_sampled_and_power_logs_hold_a_longer_window_and_stay_bounded")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+check(p.meta.logCaps and p.meta.logCaps.power == 300 and p.meta.logCaps.powerFrequent == 300 and p.meta.logCaps.powerOther == 300,
+    "the larger caps are recorded in meta")
+for _ = 1, 320 do
+    __now = __now + 0.1
+    pfire("UNIT_POWER_UPDATE", "player", "MANA")
+end
+check(p.logs.power.cap == 300 and #p.logs.power.entries == 300 and p.logs.power.total == 320 and p.logs.power.dropped == 20, "power log cap")
+-- powerOther: one entry a second for 400 s (the sampler's gap), capped at 300
+for _ = 1, 400 do
+    __now = __now + 1.1
+    pfire("UNIT_POWER_FREQUENT", "player", "ENERGY")
+end
+local o = p.logs.powerOther
+check(o.cap == 300 and #o.entries == 300 and o.total == 400 and o.dropped == 100, "powerOther cap: " .. tostring(#o.entries) .. "/" .. tostring(o.dropped))
+-- powerFrequent: the same
+for _ = 1, 350 do
+    __now = __now + 1.1
+    pfire("UNIT_POWER_FREQUENT", "player", "MANA")
+end
+check(p.logs.powerFrequent.cap == 300 and #p.logs.powerFrequent.entries == 300, "powerFrequent cap")
+-- the other logs keep 50
+pfire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 585)
+check(p.logs.cast.cap == 50, "other logs stay at 50")
+scan(p)
+"""
+)
+
+case("priest_alternating_mana_and_other_frequent_events_still_sample")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+for i = 1, 100 do
+    __now = __now + 0.05
+    pfire("UNIT_POWER_FREQUENT", "player", i % 2 == 0 and "MANA" or "ENERGY")
+end
+check(p.logs.powerFrequent.total == 50 and p.logs.powerOther.total == 50, "raw counts per log")
+check(#p.logs.powerFrequent.entries <= 6 and #p.logs.powerOther.entries <= 6,
+    "alternation defeated sampling: " .. tostring(#p.logs.powerFrequent.entries) .. "/" .. tostring(#p.logs.powerOther.entries))
+scan(p)
+"""
+)
+
+case("priest_secret_gettime_samples_frequent_by_count", "secret")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+GetTime = function() return SN end
+for _ = 1, 100 do pfire("UNIT_POWER_FREQUENT", "player", "MANA") end
+local log = p.logs.powerFrequent
+check(log.total == 100, "raw count")
+check(#log.entries >= 9 and #log.entries <= 12, "without a plain clock, about 1 in 10 is kept: " .. tostring(#log.entries))
+check(log.countSampling == 10 and log.sampledOut == 100 - #log.entries, "count sampling is recorded in the log")
+check(log.entries[2].skippedBefore == 9, "an entry stands for the skipped ones")
+scan(p)
+"""
+)
+
+case("priest_cost_assumption_is_recorded")(
+    r"""
+priestMock()
+runCmd("priest")
+local p = ForeverSTUwaveDB.fsprobe.priest
+check(p.meta.costAssumption == "nil or empty = free", "meta assumption: " .. tostring(p.meta.costAssumption))
+check(p.ooc.mana.costAssumption == "nil or empty = free", "snapshot assumption")
+"""
+)
+
+case("priest_target_part_records_secret_and_missing_reads", "secret")(
+    r"""
+priestMock()
+runCmd("priest")
+local t = ForeverSTUwaveDB.fsprobe.priest.ooc.target
+check(t.classification.r1.isSecret == true and t.classification.r1.value == nil, "secret classification flagged")
+check(t.creatureType.r1.isSecret == true and t.creatureType.r2.isSecret == true, "secret creature type flagged")
+check(t.effectiveLevel.r1.isSecret == true, "secret effective level flagged")
+scan(ForeverSTUwaveDB.fsprobe.priest)
 """
 )
 
