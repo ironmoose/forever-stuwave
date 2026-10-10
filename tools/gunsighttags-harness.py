@@ -20,7 +20,11 @@ unit APIs the tags read. It pins:
   * target of target: a SecureUnitButtonTemplate button with type1 = target and unit = targettarget set from plain
     Lua, the name alone (a secret name goes straight to SetText), a leaf seat of its own anchored to the box
     anchor (never to the box frame), only SetAlpha in combat, the deferred pieces applied at PLAYER_REGEN_ENABLED,
-    and a build in combat that waits for the end of it.
+    and a build in combat that waits for the end of it;
+  * target menu: a second SecureUnitButtonTemplate button (unit target, *type2 togglemenu, registered for RightButtonUp
+    only, the unit watch hiding it with no target) covering the box exactly from the box anchor, with left and middle
+    clicks passed through and the wheel untouched, built and reseated out of combat only, never shown or hidden by us,
+    mouse on only while the tgt piece is, and left off (logged once) when pass-through is missing or does not read back.
 
 The mock is strict and is NOT the real client.
 
@@ -122,6 +126,16 @@ function Region:EnableMouse(v) self._mouse = v and true or false end
 function Region:IsMouseEnabled() return self._mouse == true end
 function Region:RegisterForClicks(...) self._clicks = { ... } end
 function Region:IsProtected() return self._protected == true end
+-- The mouse routing the target menu button relies on (all three are in the 16001 widget dump): which buttons fall through to
+-- the frame behind, a read back of that, and the wheel. RegisterUnitWatch is the client's own show / hide by unit.
+function Region:SetPassThroughButtons(...) self._pass = { ... } end
+function Region:ShouldButtonPassThrough(b)
+    for _, v in ipairs(self._pass or {}) do if v == b then return true end end
+    return false
+end
+function Region:EnableMouseWheel(v) self._wheel = v and true or false end
+__watched = {}
+function RegisterUnitWatch(f) __watched[f] = true end
 do
     local real = Region.SetFormattedText
     function Region:SetFormattedText(fmt, ...)
@@ -190,9 +204,12 @@ end
 local hides = { Show = true, Hide = true, SetShown = true }
 __blocked = {}
 for _, name in ipairs({ "Show", "Hide", "SetShown", "SetPoint", "ClearAllPoints", "SetSize", "SetWidth", "SetHeight",
-                        "SetAttribute", "EnableMouse" }) do
+                        "SetAttribute", "EnableMouse", "SetPassThroughButtons", "EnableMouseWheel", "SetFrameLevel" }) do
     local real = Region[name]
     Region[name] = function(self, ...)
+        if hides[name] and __watched[self] then
+            error("a unit-watched frame is shown or hidden by the addon: " .. name, 2)
+        end
         if __combat and self._kind ~= "FontString" and self._kind ~= "Texture"
             and (__restricted(self) or (hides[name] and __parentsProtected(self))) then
             __blocked[#__blocked + 1] = name
@@ -1528,7 +1545,7 @@ end
 function T.in_combat_the_box_still_grows_and_the_tags_move_because_only_the_seat_is_restricted()
     local W = world()
     target("Kurak")
-    ok(Tg().tot and #__secure == 1, "the secure button exists, so a restricted family exists")
+    ok(Tg().tot and #__secure == 2, "the secure buttons exist, so a restricted family exists")
     __combat = true
     FS.Config.Set(FS.GunsightBoxes.SETTINGS.numbers.key, true); flush()
     local box = W.tgt.box
@@ -1855,6 +1872,168 @@ function T.a_target_of_target_built_after_the_cast_ended_starts_at_rest()
     W2.clean(); noFails()
 end
 
+
+-- ---- the target menu button: right click on the target box opens the unit menu -----------------
+
+local function menuB() return Tg().menu end
+
+function T.the_target_menu_is_a_secure_unit_button_that_toggles_the_menu_on_a_right_click_only()
+    local W = world()
+    local b = menuB()
+    ok(b, "the button was built")
+    eq(b._template, "SecureUnitButtonTemplate"); eq(b._kind, "Button"); eq(b:IsProtected(), true)
+    eq(b._name, "ForeverSTUwaveGunsightTargetMenu")
+    eq(b:GetAttribute("unit"), "target"); eq(b:GetAttribute("*type2"), "togglemenu", "the attributes UnitFrames' target frame uses")
+    eq(b:GetAttribute("type1"), nil, "no left click action"); eq(b:GetAttribute("*type1"), nil)
+    eq(#b._clicks, 1, "one registration"); eq(b._clicks[1], "RightButtonUp", "right button up and nothing else")
+    eq(b:GetParent(), Tg().holder, "under the always-shown holder, like the target of target")
+    eq(__watched[b], true, "the client's unit watch hides it while there is no target")
+    for _, o in ipairs(__all) do ok(not (o._attrs and o._attrs._onattributechanged), "no secure snippet: they do not run on this client") end
+    W.clean(); noFails()
+end
+
+function T.left_and_middle_clicks_fall_through_and_the_wheel_is_left_alone()
+    local W = world()
+    local b = menuB()
+    eq(b:ShouldButtonPassThrough("LeftButton"), true, "left clicks and left drags reach what is behind the box")
+    eq(b:ShouldButtonPassThrough("MiddleButton"), true)
+    eq(b:ShouldButtonPassThrough("RightButton"), false, "only the right button is taken")
+    ok(b._wheel ~= true, "the wheel is never enabled on it")
+    eq(b:IsMouseEnabled(), true, "and the mouse is on")
+    W.clean(); noFails()
+end
+
+function T.the_target_menu_is_invisible_and_has_no_regions_or_children()
+    local W = world()
+    local b = menuB()
+    eq(#(b._regions or {}), 0, "no texture and no text")
+    for _, o in ipairs(__all) do ok(o._parent ~= b, "no child frame") end
+    eq(b._normalTexture, nil); eq(b._highlightTexture, nil)
+    eq(b._scripts and b._scripts.OnEnter, nil, "no tooltip, no hover script")
+    W.clean(); noFails()
+end
+
+function T.the_target_menu_covers_the_target_box_exactly_at_every_height_and_after_the_box_grows()
+    local W = world()
+    local box, b, boxR = W.tgt.box, menuB(), W.Gun.anchors.boxR
+    local function covers(what)
+        local tl, br, ftl, fbr = b._points.TOPLEFT, b._points.BOTTOMRIGHT, box.frame._points.TOPLEFT, box.frame._points.BOTTOMRIGHT
+        ok(tl and br and ftl and fbr, what .. ": both corners")
+        eq(tl.rel, boxR, what .. ": hangs from the box anchor, never the box frame"); eq(br.rel, boxR)
+        eq(tl.point, ftl.point); eq(tl.relPoint, ftl.relPoint); eq(br.point, fbr.point); eq(br.relPoint, fbr.relPoint)
+        near(tl.x, ftl.x, 1e-6, what .. " left"); near(tl.y, ftl.y, 1e-6, what .. " top"); near(br.x, fbr.x, 1e-6, what .. " right"); near(br.y, fbr.y, 1e-6, what .. " bottom")
+    end
+    covers("at build")
+    for _, h in ipairs({ 1080, 1440 }) do
+        UIParent._h = h; UIParent._w = h * 16 / 9
+        __fireEvent("UI_SCALE_CHANGED")
+        covers("at " .. h)
+    end
+    local before = box.grow
+    FS.Config.Set(FS.GunsightBoxes.SETTINGS.numbers.key, true); flush()
+    ok(box.grow > before, "the numbers row grew the box up")
+    covers("after the box grew")
+    for _, f in ipairs(__family(b)) do ok(f ~= box.frame, "the box frame is not in the button's anchor family") end
+    W.clean(); noFails()
+end
+
+function T.the_target_menu_sits_under_the_box_content_and_the_target_of_target()
+    local W = world()
+    local box, b, tot = W.tgt.box, menuB(), Tg().tot
+    eq(b:GetFrameLevel(), box.frame:GetFrameLevel(), "the box's own level, under the box's hover-only tile, which keeps its tooltip")
+    ok(b:GetFrameLevel() < tot:GetFrameLevel(), "under the target of target, which keeps its own clicks")
+    W.clean(); noFails()
+end
+
+function T.the_target_menu_is_built_after_combat_and_never_touched_in_combat()
+    local W = world({ beforeLoad = function() __combat = true end })
+    eq(menuB(), nil, "no secure frame is made in combat"); eq(#__secure, 0)
+    __units.target.name = "Kurak"
+    regen()
+    local b = menuB()
+    ok(b, "built when combat ends")
+    eq(b:GetAttribute("unit"), "target"); eq(b:GetAttribute("*type2"), "togglemenu")
+    eq(b:IsMouseEnabled(), true); eq(b:ShouldButtonPassThrough("LeftButton"), true)
+    eq(#__blocked, 0)
+    W.clean(); noFails()
+end
+
+function T.in_combat_the_target_menu_is_not_shown_hidden_resized_or_reseated_until_the_fight_ends()
+    local W = world()
+    target("Kurak")
+    local b, box = menuB(), W.tgt.box
+    eq(__watched[b], true, "the unit watch is the only thing that shows or hides it (the mock throws on any Show or Hide of a watched frame)")
+    local y0, oldK = b._points.TOPLEFT.y, K()
+    __combat = true
+    target("Other"); __units.target.exists = false; __fireEvent("PLAYER_TARGET_CHANGED")
+    __units.target.exists = true; __fireEvent("PLAYER_TARGET_CHANGED")
+    W.Gun.SetPiece("tgt", false, true); W.Gun.SetPiece("tgt", true, true)
+    FS.Config.Set(FS.GunsightBoxes.SETTINGS.numbers.key, true); flush()
+    UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
+    __fireEvent("UI_SCALE_CHANGED")
+    eq(#__blocked, 0, "no protected call was attempted")
+    eq(b._points.TOPLEFT.y, y0, "not reseated in combat")
+    regen()
+    near(b._points.TOPLEFT.y, box.frame._points.TOPLEFT.y, 1e-6, "the grown box is covered once the fight ends")
+    ok(K() ~= oldK and box.frame._points.TOPLEFT.y ~= y0, "the geometry really changed meanwhile")
+    eq(#__blocked, 0); W.clean(); noFails()
+end
+
+function T.the_target_menu_takes_the_mouse_only_while_the_target_piece_is_on_and_only_out_of_combat()
+    local W = world()
+    local b = menuB()
+    eq(b:IsMouseEnabled(), true)
+    W.Gun.SetPiece("tgt", false, true)
+    eq(b:IsMouseEnabled(), false, "target piece off: it does not eat clicks over an invisible box")
+    W.Gun.SetPiece("tgt", true, true)
+    eq(b:IsMouseEnabled(), true)
+    __combat = true
+    W.Gun.SetPiece("tgt", false, true)
+    eq(b:IsMouseEnabled(), true, "mouse state is not changed in combat")
+    eq(#__blocked, 0)
+    regen()
+    eq(b:IsMouseEnabled(), false, "the end of combat reconciles it")
+    -- The other direction: off at the start of the fight stays off through it (a piece turned on in combat waits too).
+    __combat = true
+    W.Gun.SetPiece("tgt", true, true)
+    eq(b:IsMouseEnabled(), false, "mouse state is not changed in combat, the other way round")
+    eq(#__blocked, 0)
+    regen()
+    eq(b:IsMouseEnabled(), true, "and the end of combat reconciles that too")
+    W.clean(); noFails()
+end
+
+function T.without_pass_through_the_target_menu_never_takes_the_mouse_and_logs_once()
+    local W = world({ beforeLoad = function() getmetatable(UIParent).SetPassThroughButtons = nil end })
+    local b = menuB()
+    ok(b, "the button still exists")
+    eq(b:IsMouseEnabled(), false, "no pass-through means no mouse: it would swallow the left click and drag")
+    ok(degraded("gunsighttags_menu"), "logged once")
+    ok(Tg().tot, "the target of target is unaffected")
+    W.Gun.SetPiece("tgt", false, true); W.Gun.SetPiece("tgt", true, true)
+    eq(b:IsMouseEnabled(), false, "and a piece change does not turn it on")
+    W.clean(); noFails()
+end
+
+function T.a_pass_through_that_does_not_read_back_leaves_the_target_menu_off()
+    local W = world({ beforeLoad = function() getmetatable(UIParent).ShouldButtonPassThrough = function() return false end end })
+    eq(menuB():IsMouseEnabled(), false, "a set that did not take is treated as unavailable")
+    ok(degraded("gunsighttags_menu"))
+    W.clean(); noFails()
+end
+
+function T.a_failing_target_menu_build_does_not_take_the_target_of_target_down()
+    -- RegisterUnitWatch throws in BuildMenu itself, outside PassClicksThrough's own pcall: only the Guard around BuildMenu catches it.
+    local W = world({ beforeLoad = function() RegisterUnitWatch = function() error("boom") end end })
+    ok(Tg().tot, "the target of target was built")
+    eq(Tg().tot:GetAttribute("type1"), "target")
+    eq(menuB():IsMouseEnabled(), false, "the half built menu button never got its mouse")
+    eq(#__pcallFails, 1, "the throw was caught once")
+    ok(__pcallFails[1]:find("boom", 1, true), "and it was this one")
+    ok(degraded("gunsighttags_update"), "logged once through the tags' guard")
+    W.clean()
+end
+
 __checks = T
 """
 
@@ -1877,6 +2056,9 @@ def static_checks() -> list[tuple[str, str | None]]:
     out.append(("tags_use_no_secure_snippet", None if not re.search(r"SetAttribute\(\s*[\"']_on", code) and "WrapScript" not in code and
                 "SecureHandler" not in code else "secure snippets do not run on this client; set attributes from plain Lua"))
     strings = re.findall(r'"([^"\n]*)"', code)
+    out.append(("tags_menu_never_propagates_every_click",
+                None if "SetPropagateMouseClicks" not in code else
+                "SetPropagateMouseClicks passes the right click on too; the target menu button uses SetPassThroughButtons for the others"))
     out.append(("tags_player_text_never_says_tape", None if not any("tape" in s.lower() for s in strings) else
                 "player text says cast bar, never tape"))
     out.append(("tags_never_see_the_interruptible_flag",

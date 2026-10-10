@@ -1,5 +1,6 @@
 -- Forever STUwave: KICK style tags on the target box (outlines in the box's own tone: steel, pink while kickable, red for INTERRUPTED), the level on the top edge and health percent and target of target on the bottom edge, each with an FS.Config toggle.
 -- The target of target tag is a SecureUnitButtonTemplate button that targets that unit on a click; in combat it only takes SetAlpha and text.
+-- A second secure button, the target menu, covers the whole target box and opens the unit context menu (Invite, Inspect, Whisper...) on a right click.
 -- Unit values go straight to SetFormattedText / SetText and are never compared, since they may be secret.
 
 local _, FS = ...
@@ -57,7 +58,7 @@ local SETTINGS = {
 GunsightTags.SETTINGS = SETTINGS
 for _, def in pairs(SETTINGS) do Config.RegisterDefault(def.key, def.default) end
 
-local Tags = { colors = nil, box = nil, events = nil, pendingTot = false, pendingSeat = false,
+local Tags = { colors = nil, box = nil, events = nil, pendingTot = false, pendingSeat = false, pendingMenu = false,
     levelState = "none", levelChars = 0, iconW = 0, iconH = 0, iconKind = nil }
 
 local function InCombat()
@@ -320,6 +321,7 @@ end
 -------------------------------------------------------------------------------
 
 local SyncTot
+local SeatMenu, SyncMenu   -- the target menu button's reseat and mouse state, defined with BuildMenu
 
 -- The size the target of target name is shrunk to at most: the line's floor, never over the base size.
 local function TotFloorSize()
@@ -494,6 +496,76 @@ function SyncTot()
     button:EnableMouse(on)
 end
 
+-------------------------------------------------------------------------------
+-- The target menu: a right click on the target box opens the unit context menu
+-------------------------------------------------------------------------------
+
+-- An invisible SecureUnitButtonTemplate button over the target box, set up like UnitFrames' target frame (unit, "*type2" =
+-- "togglemenu": click handling is C side, so no snippet is involved) but registered for RightButtonUp alone.
+--   * Left clicks and left drags (targeting, click to move, camera turns) and middle clicks must still reach what is behind the box,
+--     so they are passed through with SetPassThroughButtons. That call, and the read back (ShouldButtonPassThrough), are in the 16001
+--     widget dump but UNVERIFIED in game; if either is missing or does not take, the button never gets its mouse (it would swallow
+--     the left click) and one chat line says so. The mouse wheel is never enabled on it.
+--   * No target: RegisterUnitWatch (the client's own show and hide, as on the unit frames) keeps the button hidden, so it takes no
+--     click. If the client's unit watch does not run, the button stays shown and a right click opens nothing (togglemenu opens no
+--     menu for a unit that does not exist). We never call Show or Hide on it.
+--   * Mouse on: out of combat only, while the tgt piece is on (a piece changed in combat is alpha only, like the target of target).
+--   * Right-drag camera turns that start over the box are taken by the menu while there is a target (left and middle pass through).
+-- The button hangs from the box ANCHOR with the box frame's own offsets (the box frame itself moves and resizes in combat and so must
+-- stay out of the button's anchor family) and so is reseated out of combat only: build, a rescale, and the box growing up for the
+-- numbers row (box.onGrow). A reseat that falls in combat waits for PLAYER_REGEN_ENABLED. Its frame level is the box's own, under the
+-- hover-only icon tile (which keeps its tooltip, its clicks pass through) and under the target of target (which keeps its clicks).
+-- No texture, no region, no child, no script: nothing is drawn and no tooltip is added.
+function SeatMenu()
+    local button, box = Tags.menu, Tags.box
+    if not button or not box then return end
+    if InCombat() then
+        Tags.pendingMenu = true
+        return
+    end
+    Tags.pendingMenu = false
+    local anchor = Gunsight.anchors.boxR
+    button:ClearAllPoints()
+    button:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0, (box.grow or 0) * ui(1))
+    button:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", 0, 0)
+end
+
+-- Accepted limit: EnableMouse on a secure frame is blocked in combat, so a tgt piece turned off mid fight leaves the invisible box
+-- taking right clicks until PLAYER_REGEN_ENABLED (and one turned on mid fight waits the same way).
+function SyncMenu()
+    local button = Tags.menu
+    if not button or InCombat() then return end
+    button:EnableMouse(Tags.menuReady == true and Gunsight.IsPieceOn("tgt") == true)
+end
+
+-- Left and middle fall through; true only when the client says they now do.
+local function PassClicksThrough(button)
+    if type(button.SetPassThroughButtons) ~= "function" or type(button.ShouldButtonPassThrough) ~= "function" then return false end
+    if not pcall(button.SetPassThroughButtons, button, "LeftButton", "MiddleButton") then return false end
+    local ok, left = pcall(button.ShouldButtonPassThrough, button, "LeftButton")
+    return ok and left == true
+end
+
+-- Out of combat only (BuildTot's caller guarantees it).
+local function BuildMenu(holder)
+    local box = Tags.box
+    local button = CreateFrame("Button", "ForeverSTUwaveGunsightTargetMenu", holder, "SecureUnitButtonTemplate")
+    button:SetFrameLevel(box.frame:GetFrameLevel())
+    button:SetAttribute("unit", "target")
+    button:SetAttribute("*type2", "togglemenu")
+    button:RegisterForClicks("RightButtonUp")
+    button:EnableMouse(false)
+    Tags.menuReady = PassClicksThrough(button)
+    if not Tags.menuReady then
+        Logged("gunsighttags_menu", "|cffff4488Forever STUwave|r: the target box right click menu is off: this client cannot pass left clicks through the button.")
+    end
+    Tags.menu = button
+    GunsightTags.menu = button
+    RegisterUnitWatch(button)
+    SeatMenu()
+    SyncMenu()
+end
+
 -- Out of combat only: SecureUnitButtonTemplate attributes are set from plain Lua (secure snippets do not run here).
 -- The holder is never shown or hidden, so no parent of the protected button is hidden in combat (the box, piece and gate are).
 local function BuildTot()
@@ -502,6 +574,7 @@ local function BuildTot()
     holder:SetSize(1, 1)
     holder:SetPoint("CENTER", Gunsight.root, "CENTER", 0, 0)
     holder:SetFrameLevel(box.frame:GetFrameLevel() + 4)
+    Guard(BuildMenu, holder)   -- first, so the target of target is built over it; a failure here leaves the target of target alone
     local seat = CreateFrame("Frame", nil, holder)
     local button = NewTag(holder, "Button", "ForeverSTUwaveGunsightTargetOfTarget", "SecureUnitButtonTemplate", true)
     button.label:SetJustifyH("CENTER")
@@ -546,6 +619,7 @@ local function Layout()
     RefitLevelLater()
     SeatPlain(Tags.health, "BOTTOMLEFT", C.HEALTH, C.OVERLAP, Tags.colors.green)
     if Tags.tot then SeatTot() end
+    if Tags.menu then SeatMenu() end
 end
 
 local function Build()
@@ -569,6 +643,12 @@ local function Build()
     Layout()
     ApplyLevel()
     ApplyHealth()
+    -- The numbers row grows the box up; the tape's own hook (set when the box was built) keeps running, then the button follows.
+    local grown = box.onGrow
+    box.onGrow = function(b)
+        if grown then grown(b) end
+        Guard(SeatMenu)
+    end
 
     if InCombat() then
         Tags.pendingTot = true
@@ -598,12 +678,19 @@ local function Build()
             Guard(BuildTot)
         end
         if Tags.pendingSeat then Guard(SeatTot) end
+        if Tags.pendingMenu then Guard(SeatMenu) end
         Guard(SyncTot)
+        Guard(SyncMenu)
     end)
 
     if FS.Layout and FS.Layout.OnRescale then FS.Layout.OnRescale(function() Guard(Layout) end) end
     if type(Gunsight.OnPieceChanged) == "function" then
-        Gunsight.OnPieceChanged(function(key) if key == "tgt" then Guard(SyncTot) end end)
+        Gunsight.OnPieceChanged(function(key)
+            if key == "tgt" then
+                Guard(SyncTot)
+                Guard(SyncMenu)
+            end
+        end)
     end
 end
 
