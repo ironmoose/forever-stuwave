@@ -41,6 +41,12 @@ What it pins:
     stops us re-hiding it), is left alone while one is connected (an erroring C_GamePad counts as one), is hidden in combat
     too, and nothing errors when C_GamePad,
     GamepadBagBar or one of the events is absent;
+  * the bag bar hover (FS.BagHighlight.Set / Clear, called by BagBar.lua): the item slots of the hovered bag, in the
+    individual windows or the combined one, get a cut2 ring and glow in the hover colour (Theme.COLOR_HEALTH) and no
+    other slot does; Clear removes them; a closed window shows nothing and no error; closing a window while hovering
+    clears it and reopening lights it again; a pooled button re-used for another bag follows its new bag on the next
+    UpdateItems; in combat the item buttons (protected) get no Show/Hide/SetAttribute/SetPoint/SetSize/SetParent, only
+    our regions change; a secret or missing GetBagID, a missing Theme piece and the bank are harmless;
   * nothing errors when a region, a method or Theme.AddCut2Texture is absent.
 
     python3 tools/bags-harness.py
@@ -239,9 +245,18 @@ end
 
 -- An ItemButton as ItemButtonTemplate.xml + ContainerFrameItemButtonTemplate build it.
 -- `kind` is "container" or "bank". Instance functions mimic the mixin, which is copied onto the frame.
+PROTECTED_CALLS = {}
 function MkItemButton(parent, kind)
     local b = new("Button", parent)
     b._kind = "Button"
+    -- Item buttons are secure: in combat the engine refuses these on them (recorded, never our business).
+    for _, method in ipairs({ "Show", "Hide", "SetShown", "SetPoint", "ClearAllPoints", "SetSize", "SetWidth", "SetHeight", "SetParent", "SetAttribute" }) do
+        b[method] = function(self, ...)
+            if INCOMBAT then PROTECTED_CALLS[#PROTECTED_CALLS + 1] = method; return end
+            if Class[method] then return Class[method](self, ...) end
+        end
+    end
+    b.GetBagID = function(self) return self._bagID end
     b.emptyBackgroundAtlas = "bags-item-slot64"
     b.icon = tex(b, "icon", { file = "ICON-PLACEHOLDER" })
     b.icon._texture = nil
@@ -346,11 +361,11 @@ function MkMoneyFrame(parent, name)
     return m
 end
 
-function MkContainer(name, nButtons, combined)
+function MkContainer(name, nButtons, combined, bag)
     local c = CreateFrame("Frame", name, UIParent)
     c.isCombined = combined or false
     c.Items = {}
-    for i = 1, nButtons do c.Items[i] = MkItemButton(c, "container") end
+    for i = 1, nButtons do c.Items[i] = MkItemButton(c, "container"); c.Items[i]._bagID = bag end
     c.infos = {}
     c.MoneyFrame = MkMoneyFrame(c)
     c.EnumerateValidItems = function(self)
@@ -390,7 +405,9 @@ local function themeTex(frame, path, layer, sub, tag)
     t:SetTexture(path)
     return t
 end
+SECRET_IDS = false
 FS = {
+    IsSecret = function(v) return SECRET_IDS end,
     LogDegradeOnce = function(key, msg) DEGRADE[#DEGRADE + 1] = key end,
     PanelSkins = {
         RequireExport = function(fn) return fn ~= nil end,
@@ -400,6 +417,9 @@ FS = {
     },
     Theme = {
         FONT_MONO = "mono", SLICE_CUT2_BUTTON_TEXTURE = "slice_cut2_button.tga", SLICE_CUT_MARGIN = 6,
+        SLICE_CUT2_OUTLINE_TEXTURE = "slice_cut2_outline.tga", SLICE_CUT2_GLOW_TEXTURE = "slice_cut2_glow.tga",
+        SLICE_CUT2_GLOW_PAD = 4, SLICE_CUT2_GLOW_MARGIN = 10, COLOR_HEALTH = { 1, 0.18, 0.592, 1 },
+        ApplyNineSlice = function(t, margin) t._slice = margin end,
         SkinPanel = function(frame) CALLS[#CALLS + 1] = { "SkinPanel", frame } end,
         ApplyMono = function(fs, size, color)
             CALLS[#CALLS + 1] = { "ApplyMono", fs, size, color }
@@ -409,7 +429,9 @@ FS = {
         end,
         AddCut2Texture = function(frame, path, color, layer, sub)
             CALLS[#CALLS + 1] = { "AddCut2Texture", frame, path, layer, sub }
-            return themeTex(frame, path, layer, sub, "plate")
+            local t = themeTex(frame, path, layer, sub, layer == "BACKGROUND" and "plate" or "cut2")
+            if color then t:SetVertexColor(color[1], color[2], color[3], color[4] or 1) end
+            return t
         end,
     },
 }
@@ -451,6 +473,32 @@ function Count(name, button)
     local n = 0
     for _, c in ipairs(CALLS) do if c[1] == name and (button == nil or c[2] == button) then n = n + 1 end end
     return n
+end
+function CloseWindow(c)           -- Hide plus the OnHide scripts, the way the engine runs them
+    c:Hide()
+    for _, fn in ipairs(c._scripts.OnHide or {}) do fn(c) end
+end
+function OpenWindow(c)            -- Show, then the repopulation Blizzard does on show
+    c:Show()
+    c:UpdateItems()
+end
+function OpenWindowRefreshFirst(c)  -- UpdateItems while still hidden, then Show (OnShow scripts run, like the engine)
+    c:UpdateItems()
+    c:Show()
+    for _, fn in ipairs(c._scripts.OnShow or {}) do fn(c) end
+end
+function Lit(b)                   -- ring and glow both shown on this item button
+    local hl = b.fsBagHighlight
+    return hl ~= nil and hl.ring._shown and hl.glow._shown
+end
+function AnyLit(b)
+    local hl = b.fsBagHighlight
+    return hl ~= nil and (hl.ring._shown or hl.glow._shown)
+end
+function LitSet(c)                -- "1,3" = the item indexes lit in a container
+    local out = {}
+    for i, b in ipairs(c.Items) do if Lit(b) then out[#out + 1] = i end end
+    return table.concat(out, ",")
 end
 function RegionCount(b, tag)
     local n = 0
@@ -508,11 +556,12 @@ class World:
         self.rt.eval("function(src) assert(loadstring(src))() end")(MOCK)
         self.run("""
             local EMPTY, AXE = nil, { icon = 135, quality = { 0.1, 0.9, 0.2 } }
-            c1 = MkContainer("ContainerFrame1", 4)
+            c1 = MkContainer("ContainerFrame1", 4, false, 1)
             c1.infos = { AXE, nil, AXE, nil }
             c1:UpdateItems()
-            c2 = MkContainer("ContainerFrame2", 2)
+            c2 = MkContainer("ContainerFrame2", 2, false, 2)
             comb = MkContainer("ContainerFrameCombinedBags", 3, true)
+            comb.Items[1]._bagID, comb.Items[2]._bagID, comb.Items[3]._bagID = 0, 1, 1
             comb.infos = { AXE, nil, AXE }
             bank = MkBank(3)
             bank.infos = { AXE, nil, nil }
@@ -876,6 +925,130 @@ def check_gamepad_bar() -> None:
     check("gamepad.sort_button_and_cvar_untouched", w.ev("BagItemAutoSortButton:IsShown() and CVARS.GamePadEnable == '1' and #BagItemAutoSortButton._pts == 0"))
 
 
+def lit(w: World, expr: str) -> str:
+    return str(w.ev(f"LitSet({expr})"))
+
+
+def check_bag_highlight() -> None:
+    w = World()
+    w.run("c1:UpdateItems(); c2:UpdateItems(); comb:UpdateItems()")
+
+    # individual windows: hovering bag 2 lights bag 2's slots and nothing else
+    w.run("FS.BagHighlight.Set(2)")
+    check("hover.bag2_lights_only_bag2_slots", lit(w, "c2") == "1,2" and lit(w, "c1") == "" and lit(w, "comb") == "",
+          f"c1={lit(w, 'c1')} c2={lit(w, 'c2')} comb={lit(w, 'comb')}")
+    w.run("FS.BagHighlight.Clear()")
+    check("hover.leave_clears_every_slot", lit(w, "c1") == "" and lit(w, "c2") == "" and lit(w, "comb") == "")
+    w.run("FS.BagHighlight.Set(1)")
+    check("hover.bag1_lights_bag1_slots", lit(w, "c1") == "1,2,3,4" and lit(w, "c2") == "", f"{lit(w, 'c1')} {lit(w, 'c2')}")
+
+    # the combined window mixes bags: backpack is bag 0
+    w.run("FS.BagHighlight.Clear(); FS.BagHighlight.Set(0)")
+    check("hover.backpack_lights_bag0_slots_in_the_combined_window", lit(w, "comb") == "1" and lit(w, "c1") == "", lit(w, "comb"))
+    w.run("FS.BagHighlight.Set(1)")
+    check("hover.moving_to_another_bag_swaps_the_lit_slots", lit(w, "comb") == "2,3" and lit(w, "c1") == "1,2,3,4", lit(w, "comb"))
+    w.run("FS.BagHighlight.Set(5)")
+    check("hover.reagent_bag_5_lights_only_its_own_slots", lit(w, "comb") == "" and lit(w, "c1") == "" and lit(w, "c2") == "")
+    w.run("FS.BagHighlight.Set(2); FS.BagHighlight.Set(nil)")
+    check("hover.a_non_number_clears", lit(w, "c2") == "")
+
+    # the look: the slot's own cut2 set, the hover colour, nothing else restyled
+    w.run("FS.BagHighlight.Set(2)")
+    hl = w.ev("(function() local h = c2.Items[1].fsBagHighlight; local r, g, b, a = h.glow:GetVertexColor(); local rr, rg, rb = h.ring:GetVertexColor(); "
+              "return { ring = h.ring._texture, glow = h.glow._texture, blend = h.glow._blend, ringLayer = h.ring._layer, ringSub = h.ring._sub, "
+              "glowLayer = h.glow._layer, glowSub = h.glow._sub, slice = h.glow._slice, r = r, g = g, b = b, a = a, rr = rr, rg = rg, rb = rb, "
+              "pts = #h.glow._pts } end)()")
+    hl = {k: v for k, v in hl.items()}
+    check("hover.ring_is_the_cut2_outline_and_glow_the_cut2_glow", hl["ring"] == "slice_cut2_outline.tga" and hl["glow"] == "slice_cut2_glow.tga", str(hl))
+    check("hover.glow_is_additive_and_pad_anchored", hl["blend"] == "ADD" and hl["pts"] == 2 and hl["slice"] == 10, str(hl))
+    check("hover.drawn_above_the_icon_on_overlay", hl["ringLayer"] == "OVERLAY" and hl["glowLayer"] == "OVERLAY" and hl["ringSub"] == 3 and hl["glowSub"] == 2, str(hl))
+    check("hover.colour_is_the_theme_hover_colour", near(hl["r"], 1) and near(hl["g"], 0.18) and near(hl["b"], 0.592) and near(hl["a"], 0.9)
+          and near(hl["rr"], 1) and near(hl["rg"], 0.18) and near(hl["rb"], 0.592), str(hl))
+    check("hover.other_slots_are_not_restyled", w.ev("not AnyLit(c1.Items[1]) and RegionCount(c1.Items[1], 'plate') == 1 and RegionCount(c1.Items[1], 'ring') == 1"))
+    check("hover.slot_plate_and_art_untouched_on_the_lit_slot",
+          w.ev("RegionCount(c2.Items[1], 'ring') == 1 and not Visible(c2.Items[1].NormalTexture) and c2.Items[1].icon:GetAlpha() == 1 and c2.Items[1]:GetAlpha() == 1"))
+    for _ in range(3):
+        w.run("c2:UpdateItems(); FS.BagHighlight.Set(2)")
+    check("hover.regions_are_made_once_per_button", w.ev("(function() local n = 0; for _, r in ipairs(c2.Items[1]._regions) do if r._texture == 'slice_cut2_glow.tga' then n = n + 1 end end return n end)()") == 1)
+    w.run("FS.BagHighlight.Clear()")
+
+    # closed window: nothing lit, no error; closing while hovering clears; reopening while still hovering lights again
+    w.run("CloseWindow(c1); FS.BagHighlight.Set(1)")
+    check("hover.closed_window_shows_nothing", lit(w, "c1") == "", lit(w, "c1"))
+    w.run("OpenWindow(c1)")
+    check("hover.opening_the_window_while_hovering_lights_it", lit(w, "c1") == "1,2,3,4", lit(w, "c1"))
+    w.run("CloseWindow(c1)")
+    check("hover.closing_the_window_while_hovering_clears_it", lit(w, "c1") == "", lit(w, "c1"))
+    w.run("OpenWindow(c1); FS.BagHighlight.Clear(); CloseWindow(c1); OpenWindow(c1)")
+    check("hover.leave_then_reopen_stays_dark", lit(w, "c1") == "", lit(w, "c1"))
+    w.run("CloseWindow(c1); CloseWindow(c2); CloseWindow(comb); FS.BagHighlight.Set(2); FS.BagHighlight.Clear()")
+    check("hover.every_window_closed_is_no_error", w.swallowed() == "", w.swallowed())
+    w.run("OpenWindow(c1); OpenWindow(c2); OpenWindow(comb)")
+
+    w.run("FS.BagHighlight.Set(1); CloseWindow(c1); OpenWindowRefreshFirst(c1)")
+    check("hover.refresh_while_hidden_then_show_still_lights_via_OnShow", lit(w, "c1") == "1,2,3,4", lit(w, "c1"))
+    w.run("FS.BagHighlight.Clear(); OpenWindow(c1)")
+
+    # a pooled button re-used for another bag follows its new bag on the next UpdateItems
+    w.run("FS.BagHighlight.Set(2)")
+    w.run("c2.Items[1]._bagID = 1; c2:UpdateItems()")
+    check("hover.a_reused_button_stops_lighting_for_the_old_bag", lit(w, "c2") == "2", lit(w, "c2"))
+    w.run("c1.Items[2]._bagID = 2; c1:UpdateItems()")
+    check("hover.a_reused_button_lights_for_the_new_bag", lit(w, "c1") == "2", lit(w, "c1"))
+    w.run("c2.Items[1]._bagID = 2; c1.Items[2]._bagID = 1; FS.BagHighlight.Clear()")
+
+    # the bank is not a bag-bar bag
+    w.run("FS.BagHighlight.Set(0); FS.BagHighlight.Set(1)")
+    check("hover.bank_slots_never_light", w.ev("bank.pool[1].fsBagHighlight == nil and bank.pool[2].fsBagHighlight == nil"))
+    w.run("FS.BagHighlight.Clear()")
+    check("hover.nothing_swallowed", w.swallowed() == "", w.swallowed())
+    check("hover.no_degrade_logs", w.degrade() == "", w.degrade())
+
+    # combat: item buttons are protected; only our regions change
+    w = World()
+    w.run("c2:UpdateItems(); comb:UpdateItems(); INCOMBAT = true; PROTECTED_CALLS = {}")
+    w.run("FS.BagHighlight.Set(2); comb:UpdateItems(); FS.BagHighlight.Set(1); FS.BagHighlight.Clear(); FS.BagHighlight.Set(2); CloseWindow(c2); OpenWindow(c2)")
+    check("combat.hover_lights_in_combat", lit(w, "c2") == "1,2", lit(w, "c2"))
+    prot = str(w.ev("table.concat(PROTECTED_CALLS, ',')"))
+    check("combat.highlight_calls_no_protected_method_on_an_item_button", prot == "", prot)
+    check("combat.nothing_swallowed", w.swallowed() == "", w.swallowed())
+
+    # one container that throws does not stop the others, and is logged once however often it is hovered
+    w = World()
+    w.run("c1:UpdateItems(); c2:UpdateItems(); c1.EnumerateValidItems = function() error('boom') end; __clearSwallowed()")
+    for _ in range(3):
+        w.run("FS.BagHighlight.Set(2)")
+    check("hover.a_throwing_container_does_not_skip_the_others", lit(w, "c2") == "1,2", lit(w, "c2"))
+    check("hover.a_throwing_container_is_logged_once", w.degrade() == "bags_hover_sync", w.degrade())
+
+    # a throw while building the regions leaves nothing visible behind
+    for broken in ("SetBlendMode", "SetVertexColor", "SetTexture"):
+        w = World()
+        w.run(f"c2:UpdateItems(); __clearSwallowed(); local mk = c2.Items[1].CreateTexture; "
+              f"c2.Items[1].CreateTexture = function(self, ...) local t = mk(self, ...); t.{broken} = function() error('boom') end; return t end; "
+              "FS.BagHighlight.Set(2)")
+        check(f"hover.{broken.lower()}_throwing_leaves_no_visible_orphan",
+              w.ev("(function() for _, r in ipairs(c2.Items[1]._regions) do if r._tag == 'created' and r._shown then return false end end return true end)()")
+              and w.ev("c2.Items[1].fsBagHighlight == nil") and w.degrade() == "bags_hover_highlight", f"{w.degrade()}")
+
+    # a bag button hovered before its slots were ever skinned (a button the first pass never saw) is skinned and lit
+    w = World()
+    w.run("c1.Items[1].fsBagItemSkinned = nil; c1.Items[1].fsBagHighlight = nil; FS.BagHighlight.Set(1)")
+    check("hover.a_fresh_button_gets_its_regions_on_the_first_hover", w.ev("Lit(c1.Items[1])"))
+
+    # defensive paths: GetBagID missing, erroring or secret; Theme pieces missing
+    w = World()
+    w.run("c1.Items[1].GetBagID = nil; c1.Items[2].GetBagID = function() error('boom') end; FS.BagHighlight.Set(1)")
+    check("hover.a_button_without_a_usable_GetBagID_is_skipped", lit(w, "c1") == "3,4", lit(w, "c1"))
+    w.run("FS.BagHighlight.Clear(); SECRET_IDS = true; FS.BagHighlight.Set(1)")
+    check("hover.a_secret_bag_id_lights_nothing", lit(w, "c1") == "" and lit(w, "c2") == "")
+    w.run("SECRET_IDS = false; FS.BagHighlight.Clear(); __clearSwallowed()")
+    w.run("FS.Theme.ApplyNineSlice = nil; FS.BagHighlight.Set(1); FS.BagHighlight.Set(2)")
+    check("hover.missing_theme_helper_degrades_quietly_and_once",
+          lit(w, "c1") == "" and w.degrade() == "bags_hover_highlight" and "ApplyNineSlice" in w.swallowed(), f"{w.degrade()} / {w.swallowed()}")
+    check("hover.slots_keep_their_plate_when_the_highlight_cannot_be_built", w.ev("RegionCount(c1.Items[1], 'plate') == 1"))
+
+
 def main() -> int:
     db = databar_money()
     check_art()
@@ -886,6 +1059,7 @@ def main() -> int:
     check_colorblind()
     check_absent()
     check_gamepad_bar()
+    check_bag_highlight()
     print(f"\n{CHECKS} checks, {len(FAILS)} failed" if FAILS else f"\nall {CHECKS} checks passed")
     return len(FAILS)
 

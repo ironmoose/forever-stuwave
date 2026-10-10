@@ -239,7 +239,8 @@ local function SkinItemButton(button)
     end
 end
 
--- Skins every currently-valid item button on a container/combined-bag frame.
+-- Calls fn(itemButton) for every currently-valid item button of a container or
+-- the combined-bag frame.
 -- `EnumerateValidItems` (BaseContainerFrameMixin, confirmed via
 -- Blizzard_UIPanels_Game/ContainerFrame.lua: returns `index, itemButton` for
 -- slots 1..GetBagSize(), reading `container.Items[index]`) is shared by
@@ -250,18 +251,153 @@ end
 -- and the combined-bag frame. Not itself a widget, so not in the 16001 dump;
 -- `container.Items` (the same field the enumerator reads) is the fallback
 -- for a client where the method itself is missing.
-local function SkinContainerItems(container)
+local function EachContainerItem(container, fn)
     if not container then return end
 
     if type(container.EnumerateValidItems) == "function" then
         for _, itemButton in container:EnumerateValidItems() do
-            SkinItemButton(itemButton)
+            fn(itemButton)
         end
     elseif type(container.Items) == "table" then
         for _, itemButton in ipairs(container.Items) do
-            SkinItemButton(itemButton)
+            fn(itemButton)
         end
     end
+end
+
+-------------------------------------------------------------------------------
+-- Bag bar hover: light up the slots a bag covers
+-------------------------------------------------------------------------------
+
+-- Hovering a bag button in OUR bag bar (BagBar.lua) calls FS.BagHighlight.Set(bagID); the
+-- item slots of that bag, in whichever bag window is open (the combined window or the
+-- individual ones), wear a thin ring and glow in the hover colour. Leaving calls Clear.
+--
+-- Why this is not Blizzard's own highlight: the stock one is EventRegistry
+-- "BagSlot.OnEnter", which only the STOCK bag buttons trigger (BaseBagSlotButtonMixin:
+-- BagSlotOnEnter) and BagBar.lua dims those with mouse off, so it never fires; its
+-- listener (ContainerFrameCombinedBagsMixin) exists in the combined window only, bails out
+-- unless the stock bar is "expanded", and shows a Blizzard store-art texture (BagIndicator,
+-- Interface\Store\store-item-highlight). Faking the event from addon code would run
+-- Blizzard's callbacks under our taint. So this is our own pair of regions.
+--
+-- Only OUR regions on the item buttons are shown or hidden (a ring and a glow, made like
+-- the cut border the slots already wear): no attribute, anchor, size, parent or Show/Hide
+-- on an item button, which is secure. Texture show/hide is legal in combat.
+--
+-- The state is the bag ID, not a per-button flag: pooled item buttons are re-used for other
+-- bags and (re)built while the window opens, so every UpdateItems pass re-applies it
+-- (SyncItemHighlight from SkinContainerItems), and closing the window clears its slots.
+local HIGHLIGHT_ALPHA_GLOW = 0.9
+local highlightBag = nil              -- the bag ID being hovered, nil = none
+local highlightFailed = false         -- Theme could not build the regions; logged once
+
+local function BagIDOf(itemButton)
+    if type(itemButton.GetBagID) ~= "function" then return nil end
+    local ok, id = pcall(itemButton.GetBagID, itemButton)
+    if not ok or type(id) ~= "number" or (FS.IsSecret and FS.IsSecret(id)) then return nil end
+    return id
+end
+
+-- The two regions, made once per button. Same cut2 set as the slot's border (chamfer 6):
+-- the outline ring on top, the cut2 glow (ADD, hollow inside, hangs out by its pad) under it.
+local function EnsureHighlight(itemButton)
+    local hl = itemButton.fsBagHighlight
+    if hl or highlightFailed then return hl end
+    local Theme = FS.Theme
+    local color = Theme.COLOR_HEALTH or { 1, 0.18, 0.592 }
+    -- Each region is hidden the moment it exists, so a step that throws after it cannot leave a
+    -- visible orphan on the slot. The ring is built here (what Theme.AddCut2Texture does) for the same reason.
+    local ok, result = pcall(function()
+        local pad = Theme.SLICE_CUT2_GLOW_PAD
+        local glow = itemButton:CreateTexture(nil, "OVERLAY", nil, 2)
+        glow:Hide()
+        glow:SetTexture(Theme.SLICE_CUT2_GLOW_TEXTURE)
+        Theme.ApplyNineSlice(glow, Theme.SLICE_CUT2_GLOW_MARGIN)
+        glow:SetPoint("TOPLEFT", itemButton, "TOPLEFT", -pad, pad)
+        glow:SetPoint("BOTTOMRIGHT", itemButton, "BOTTOMRIGHT", pad, -pad)
+        glow:SetBlendMode("ADD")
+        glow:SetVertexColor(color[1], color[2], color[3], HIGHLIGHT_ALPHA_GLOW)
+        local ring = itemButton:CreateTexture(nil, "OVERLAY", nil, 3)
+        ring:Hide()
+        ring:SetTexture(Theme.SLICE_CUT2_OUTLINE_TEXTURE)
+        Theme.ApplyNineSlice(ring, Theme.SLICE_CUT_MARGIN)
+        ring:SetPoint("TOPLEFT", itemButton, "TOPLEFT", 0, 0)
+        ring:SetPoint("BOTTOMRIGHT", itemButton, "BOTTOMRIGHT", 0, 0)
+        ring:SetVertexColor(color[1], color[2], color[3], color[4] or 1)
+        return { glow = glow, ring = ring }
+    end)
+    if ok then
+        itemButton.fsBagHighlight = result
+        return result
+    end
+    highlightFailed = true
+    FS.LogDegradeOnce("bags_hover_highlight", "Bags.lua: bag hover highlight unavailable: " .. tostring(result))
+    return nil
+end
+
+-- Brings one item button in line with the hovered bag. `shown` is the owning window's state:
+-- a closed window shows nothing. A button that never lit stays untouched while nothing is hovered.
+local function SyncItemHighlight(itemButton, shown)
+    if not itemButton then return end
+    local hl = itemButton.fsBagHighlight
+    if not hl and highlightBag == nil then return end
+    local want = shown and highlightBag ~= nil and BagIDOf(itemButton) == highlightBag
+    if want and not hl then hl = EnsureHighlight(itemButton) end
+    if not hl then return end
+    hl.ring:SetShown(want and true or false)
+    hl.glow:SetShown(want and true or false)
+end
+
+local function ContainerShown(container)
+    if type(container.IsShown) ~= "function" then return false end
+    local ok, shown = pcall(container.IsShown, container)
+    return ok and shown and true or false
+end
+
+local function SyncContainerHighlight(container)
+    if not container then return end
+    local shown = ContainerShown(container)
+    EachContainerItem(container, function(itemButton) SyncItemHighlight(itemButton, shown) end)
+end
+
+-- One container that throws (a broken EnumerateValidItems) must not skip the others; logged once.
+local syncFailureLogged = false
+local function SafeSyncContainer(container)
+    local ok, err = pcall(SyncContainerHighlight, container)
+    if not ok and not syncFailureLogged then
+        syncFailureLogged = true
+        FS.LogDegradeOnce("bags_hover_sync", "Bags.lua: bag hover highlight sync failed: " .. tostring(err))
+    end
+end
+
+local function SyncAllHighlights()
+    for i = 1, MAX_CONTAINERS do
+        SafeSyncContainer(_G["ContainerFrame" .. i])
+    end
+    SafeSyncContainer(_G["ContainerFrameCombinedBags"])
+end
+
+FS.BagHighlight = {
+    -- bagID: Enum.BagIndex value of the hovered bag; anything that is not a number clears.
+    Set = function(bagID)
+        highlightBag = type(bagID) == "number" and bagID or nil
+        SyncAllHighlights()
+    end,
+    Clear = function()
+        highlightBag = nil
+        SyncAllHighlights()
+    end,
+}
+
+-- Skins every currently-valid item button on a container/combined-bag frame, and re-applies
+-- the hover highlight to it (the window just opened or repopulated).
+local function SkinContainerItems(container)
+    local shown = container and ContainerShown(container) or false
+    EachContainerItem(container, function(itemButton)
+        SkinItemButton(itemButton)
+        SyncItemHighlight(itemButton, shown)
+    end)
 end
 
 -- Skins every currently-active item button on the bank panel. BankPanelMixin's
@@ -458,6 +594,18 @@ local function HookContainerShow(frame)
     frame.fsBagShowHooked = true
 end
 
+-- A window that closes while a bag is hovered drops its highlights (it is hidden, so
+-- ContainerShown reads false); the hover state itself stays, so reopening it while the
+-- mouse is still on the bag button lights the slots again. OnShow covers a window whose
+-- UpdateItems ran while it was still hidden (the refresh then saw "closed"). HookScript,
+-- nothing replaced.
+local function HookContainerHide(frame)
+    if not frame or frame.fsBagHideHooked then return end
+    frame:HookScript("OnHide", SyncContainerHighlight)
+    frame:HookScript("OnShow", SyncContainerHighlight)
+    frame.fsBagHideHooked = true
+end
+
 -- Item-slot skinning is wired per container (not just ContainerFrame1): each
 -- one gets its own immediate SkinContainerItems pass (covers a container
 -- that's already open/populated when this file's Init runs) plus a
@@ -471,6 +619,7 @@ local function ApplyContainers()
         if frame then
             SkinBagFrame(frame)
             HookContainerShow(frame)
+            HookContainerHide(frame)
             SkinContainerItems(frame)
             HookItemRefresh(frame, "UpdateItems", SkinContainerItems)
         end
@@ -487,6 +636,7 @@ local function ApplyCombinedBags()
 
     SkinBagFrame(frame)
     HookContainerShow(frame)
+    HookContainerHide(frame)
     SkinContainerItems(frame)
     HookItemRefresh(frame, "UpdateItems", SkinContainerItems)
 end

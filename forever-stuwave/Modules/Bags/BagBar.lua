@@ -35,7 +35,9 @@
 --                     functions (no FrameXML definition, unprotected, no container Lua)
 --     drag            ours: PickupBagFromSlot (C) for bags 1-4 and reagent; the backpack and
 --                     keyring cannot move
---     hover           tooltip above the slot (the deck sits at the screen bottom)
+--     hover           tooltip above the slot (the deck sits at the screen bottom), and the
+--                     slots that bag covers light up in the open bag window (FS.BagHighlight,
+--                     Bags.lua: regions of ours on the item buttons, legal in combat)
 --
 -- Look: two-corner cut keycaps (slice_cut2_*, TOP-LEFT and BOTTOM-RIGHT only) on a dark glass plate, a neon edge in the
 -- slot's accent (backpack cyan, bags violet, reagent green, keyring amber), the
@@ -543,6 +545,19 @@ local function HideTooltip(slot)
     if tip and tip.GetOwner and tip:GetOwner() == slot.button then tip:Hide() end
 end
 
+-- Lights the item slots this bag covers in the open bag window (Bags.lua owns the regions).
+-- Backpack and bags 1-4 and the reagent bag carry a container ID; the keyring has none and
+-- lights nothing. Leaving (or hiding) clears. Region show/hide only, so it runs in combat.
+local function HighlightCovered(slot, on)
+    local api = FS.BagHighlight
+    if not api then return end
+    if on and type(slot.bagID) == "number" then
+        api.Set(slot.bagID)
+    else
+        api.Clear()
+    end
+end
+
 -------------------------------------------------------------------------------
 -- Build
 -------------------------------------------------------------------------------
@@ -611,12 +626,14 @@ local function BuildSlot(def)
         slot.hover = true
         ApplySlotState(slot)
         ShowTooltip(slot)
+        HighlightCovered(slot, true)
     end)
     button:SetScript("OnLeave", function()
         slot.hover = false
         slot.pressed = false
         ApplySlotState(slot)
         HideTooltip(slot)
+        HighlightCovered(slot, false)
     end)
     button:SetScript("OnMouseDown", function()
         slot.pressed = true
@@ -627,7 +644,9 @@ local function BuildSlot(def)
         ApplySlotState(slot)
     end)
     button:SetScript("OnHide", function()
+        local wasHovered = slot.hover
         slot.hover, slot.pressed = false, false
+        if wasHovered then HighlightCovered(slot, false) end
     end)
 
     return slot

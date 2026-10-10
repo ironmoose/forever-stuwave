@@ -38,6 +38,9 @@ What it pins:
     including its PLAYER_LOGIN seat (a login in combat seats at regen, not at login) and the C_Timer retry of that seat
     (combat starting between the login and the retry defers it to regen); PLAYER_ENTERING_WORLD in combat does only the
     non-restricted refresh;
+  * hover: entering a bag slot asks Bags.lua (FS.BagHighlight) to light that bag's item slots (backpack 0, bags 1-4,
+    reagent 5), leaving or hiding the hovered slot clears, the keyring (no container ID) lights nothing, it works in
+    combat without touching a protected frame, and a missing FS.BagHighlight is no error;
   * the restriction chain: the XP bar and the data bar become restricted once the chassis is anchored to the XP bar.
 
     python3 tools/bagbar-harness.py
@@ -692,6 +695,51 @@ def check_login_retry_in_combat() -> None:
     check("login_retry.no_xp_bar_logs_the_anchor_degrade_exactly_once", len(anchor_logs) == 1, w.logs())
 
 
+def check_hover_highlight() -> None:
+    rec = """
+        HL = {}
+        FS.BagHighlight = { Set = function(id) HL[#HL + 1] = "set:" .. tostring(id) end,
+                            Clear = function() HL[#HL + 1] = "clear" end }
+        function h_hl() local t = HL; HL = {}; return table.concat(t, ",") end
+    """
+    w = World()
+    w.lua.execute(rec)
+    want = {"backpack": 0, "bag1": 1, "bag2": 2, "bag3": 3, "bag4": 4, "reagent": 5}
+    for key, bag in want.items():
+        w.call("h_script", key, "OnEnter")
+        check(f"hover.{key}_lights_bag_{bag}", w.g.h_hl() == f"set:{bag}", w.g.h_hl())
+        w.call("h_script", key, "OnLeave")
+        check(f"hover.{key}_leave_clears", w.g.h_hl() == "clear", w.g.h_hl())
+    w.call("h_script", "keyring", "OnEnter")
+    check("hover.keyring_has_no_container_id_and_lights_nothing", w.g.h_hl() == "clear", w.g.h_hl())
+
+    # hiding the slot under the mouse clears; hiding one that is not hovered does not clear someone else's
+    w.call("h_script", "bag2", "OnEnter")
+    w.g.h_hl()
+    w.call("h_script", "bag3", "OnHide")
+    check("hover.hiding_another_slot_leaves_the_highlight", w.g.h_hl() == "", w.g.h_hl())
+    w.call("h_script", "bag2", "OnHide")
+    check("hover.hiding_the_hovered_slot_clears", w.g.h_hl() == "clear", w.g.h_hl())
+
+    # combat: the secure buttons are protected. BagHighlight is a recorder here, so this pins that the BAR's handlers
+    # make no protected call; the item-button side (our regions only) is pinned in bags-harness.py.
+    w = World()
+    w.lua.execute(rec)
+    w.combat(True)
+    w.call("h_script", "bag4", "OnEnter")
+    got = w.g.h_hl()
+    w.call("h_script", "bag4", "OnLeave")
+    check("hover.combat_enter_and_leave_still_drive_the_highlight", got == "set:4" and w.g.h_hl() == "clear", got)
+    check("hover.combat_bar_handlers_make_no_protected_calls", w.blocked() == "", w.blocked())
+
+    # Bags.lua absent: hover still paints the slot, nothing throws
+    w = World()
+    w.lua.execute("FS.BagHighlight = nil")
+    ok = w.call("h_script", "bag1", "OnEnter") and w.call("h_script", "bag1", "OnLeave") and w.call("h_script", "bag1", "OnHide")
+    check("hover.missing_bag_highlight_api_is_no_error", ok is True and w.slots()["bag1"]["glowShown"] is False)
+    check("hover.no_degrade_logs", w.logs() == "", w.logs())
+
+
 def check_source() -> None:
     """No call to container-opening Blizzard Lua anywhere in BagBar.lua (comments and strings do not count)."""
     pattern = re.compile(r"\b(ToggleBackpack\w*|ToggleBag\w*|ToggleAllBags|OpenBag|CloseBag|OpenAllBags|CloseAllBags|ToggleKeyRing)\s*\(")
@@ -812,6 +860,7 @@ def main() -> int:
     check_entering_world_in_combat()
     check_login_retry_in_combat()
     check_events()
+    check_hover_highlight()
     check_quality_border()
     check_free_count_text()
     check_backpack_icon()
