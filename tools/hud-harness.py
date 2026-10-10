@@ -372,8 +372,8 @@ check(s.next.icon ~= nil and s.next.icon == row.corruption.icon, "next icon")
 """)
 
 case("midfight_dots_up_picks_the_filler")(r"""
-at(0); cast("Corruption"); cast("Bane of Agony"); cast("Immolate"); cast("Siphon Life")
-at(2)    -- past the global cooldown window, so isActive is believed
+at(0); cast("Conflagrate"); cast("Corruption"); cast("Bane of Agony"); cast("Immolate"); cast("Siphon Life")
+at(2)    -- our Conflagrate cast is on its 10s cooldown (the ledger decides, not isActive)
 W.cd[1293817] = { isActive = true }
 check(nxt() == "shadow_bolt", "dots up, conflagrate on cooldown -> filler, got " .. tostring(nxt()))
 local row = rowOf(S())
@@ -392,7 +392,7 @@ check(P.resourceBelow(30) == nil and P.targetHealthBelow(25) == nil and P.player
 """)
 
 case("wand_filler_after_higher_priority_spells")(r"""
-at(0); cast("Corruption"); cast("Bane of Agony"); cast("Siphon Life")
+at(0); cast("Conflagrate"); cast("Corruption"); cast("Bane of Agony"); cast("Siphon Life")
 at(2)
 W.cd[1293817] = { isActive = true }
 W.wand = true
@@ -405,7 +405,7 @@ check(nxt() == "shadow_bolt", "no wand: spell fallback, got " .. tostring(nxt())
 """)
 
 case("unreadable_wand_skips_the_shoot_rule")(r"""
-at(0); cast("Corruption"); cast("Bane of Agony"); cast("Siphon Life"); cast("Immolate")
+at(0); cast("Conflagrate"); cast("Corruption"); cast("Bane of Agony"); cast("Siphon Life"); cast("Immolate")
 at(2)
 W.cd[1293817] = { isActive = true }
 W.wand = true; W.sec.wand = true
@@ -780,22 +780,26 @@ W.targetGhost = false
 check(nxt() == "corruption", "a live target again: the suggestion is back")
 """)
 
-case("gcd_window_heuristic_without_isongcd")(r"""
+case("cooldown_ledger_ignores_the_gcd_window")(r"""
 local P = FS.Hud.Primitives
--- isActive reads true during the GCD and the mock has no isOnGCD field (the probe saw none)
+-- isActive reads true for every spell and the mock has no readable timing: the ledger decides
 W.cd[25307] = { isActive = true }      -- Shadow Bolt: no cooldown of its own
 W.cd[1293817] = { isActive = true }    -- Conflagrate: a real 10s cooldown we never cast
 at(0); cast("Corruption")
 at(0.5)
-check(P.cooldownReady("shadow_bolt") == true, "no-cooldown spell inside the GCD window is ready")
-check(P.cooldownReady("conflagrate") == true, "a real cooldown we never cast, inside the window: ready")
+check(P.cooldownReady("shadow_bolt") == true, "no-cooldown spell inside the GCD is ready")
+check(P.cooldownReady("conflagrate") == true, "a real cooldown we never cast: ready")
 at(2.0)
-check(P.cooldownReady("shadow_bolt") == false, "outside the window isActive is believed")
-check(P.cooldownReady("conflagrate") == false, "outside the window isActive is believed")
+check(P.cooldownReady("shadow_bolt") == true, "no-cooldown spell outside the GCD is ready too")
+check(P.cooldownReady("conflagrate") == true, "never cast: still ready outside the GCD")
 at(3); cast("Conflagrate"); at(3.5)
-check(P.cooldownReady("conflagrate") == false, "our own cast of it is still on cooldown inside the window")
+check(P.cooldownReady("conflagrate") == false, "our own cast of it is on cooldown")
 at(5); cast("Corruption"); at(5.5)
 check(P.cooldownReady("conflagrate") == false, "another spell's GCD does not free a cooldown we cast")
+at(12.9)
+check(P.cooldownReady("conflagrate") == false, "9.9s after the cast: down")
+at(13.1)
+check(P.cooldownReady("conflagrate") == true, "10.1s after the cast: ready")
 """)
 
 case("affordability_is_implicit_in_every_rule")(r"""
@@ -992,16 +996,15 @@ prof.fillerOrder = "spell"
 check(nxt() == "mind_flay", "fillerOrder = spell swaps Mind Flay ahead of the wand, got " .. tostring(nxt()))
 """)
 
-case("wand_shot_does_not_open_the_gcd_window", "TESTPRIEST")(r"""
+case("wand_shot_does_not_free_a_cooldown", "TESTPRIEST")(r"""
 local P = FS.Hud.Primitives
--- Mind Blast went on cooldown before the addon loaded: no ledger entry, isActive true
 W.cd[10947] = { isActive = true }
+at(0); cast("Mind Blast")
 at(0.7); cast("Shoot")
 at(1.0)
-check(P.cooldownReady("mind_blast") == false, "a wand shot is off the GCD: no window, isActive is believed")
--- control: a spell that does start the GCD opens it (the documented cost of the heuristic)
-cast("Smite"); at(1.3)
-check(P.cooldownReady("mind_blast") == true, "a real GCD opens the window")
+check(P.cooldownReady("mind_blast") == false, "a wand shot does not free Mind Blast")
+at(8.2); cast("Smite"); at(8.4)
+check(P.cooldownReady("mind_blast") == true, "elapsed cooldown stays ready through another spell's GCD")
 """)
 
 case("wand_shot_does_not_engage_the_target", "TESTPRIEST")(r"""
@@ -1032,13 +1035,13 @@ at(1.0)
 check(P.cooldownReady("mind_blast") == false, "our Mind Blast cast is still remembered")
 """)
 
-case("plain_cooldown_timing_beats_the_heuristic", "TESTPRIEST")(r"""
+case("plain_cooldown_timing_is_exact", "TESTPRIEST")(r"""
 local P = FS.Hud.Primitives
-at(0); cast("Smite")                 -- opens the GCD window
+at(0); cast("Smite")
 at(0.5)
 -- Mind Blast was cast 5s ago before the addon loaded: plain timing says 3s left
 W.cd[10947] = { isActive = true, startTime = W.now - 5, duration = 8 }
-check(P.cooldownReady("mind_blast") == false, "plain timing: still on cooldown inside the window")
+check(P.cooldownReady("mind_blast") == false, "plain timing: still on cooldown")
 local e = rowOf(S()).mind_blast
 check(e.onCd == true and math.abs(e.cdRemaining - 3) < 0.01, "remaining from the plain timing")
 W.cd[10947] = { isActive = true, startTime = W.now - 9, duration = 8 }
@@ -1046,27 +1049,159 @@ check(P.cooldownReady("mind_blast") == true, "plain timing: the cooldown is over
 -- a cooldown no longer than the GCD is the GCD, whatever the ledger says
 at(3)
 W.cd[25364] = { isActive = true, startTime = W.now - 0.2, duration = 1.5 }
-check(P.cooldownReady("smite") == true, "a GCD-length cooldown reads ready outside the window")
--- in combat the timing is secret: never touched, the heuristic answers
+check(P.cooldownReady("smite") == true, "a GCD-length cooldown reads ready")
+-- in combat the timing is secret: the ledger answers, not isActive
 W.cdTimingSecret = true
-check(P.cooldownReady("smite") == false, "secret timing outside the window: isActive is believed")
-at(3.5); cast("Smite"); at(4.0)
-check(P.cooldownReady("smite") == true, "secret timing inside the window: the heuristic")
-at(6)
-local e2 = rowOf(S()).mind_blast
-check(e2.onCd == true and e2.cdRemaining == nil, "secret timing: on cooldown, no remaining time")
+check(P.cooldownReady("smite") == true, "secret timing: no cooldown of its own, ready")
+""")
+
+case("combat_cooldown_ledger_secret_timing", "TESTPRIEST")(r"""
+local P = FS.Hud.Primitives
+-- in combat isActive stays a plain true for every spell while startTime/duration are secret
+W.cdTimingSecret = true
+W.cd[10947] = { isActive = true }; W.cd[1309636] = { isActive = true }
+at(0); cast("Mind Blast")
+at(3)
+check(P.cooldownReady("mind_blast") == false, "cast 3s ago, 8s cooldown: not ready")
+local e = rowOf(S()).mind_blast
+check(e.onCd == true and math.abs(e.cdRemaining - 5) < 0.01, "remaining from the ledger, got " .. tostring(e.cdRemaining))
+at(9)
+check(P.cooldownReady("mind_blast") == true, "cast 9s ago, 8s cooldown: ready though isActive is true")
+check(rowOf(S()).mind_blast.onCd == false, "the row agrees")
+-- Mind Blast is the next cast again, above the wand and Smite
+cast("Shadow Word: Pain"); at(9.1)
+W.cd[10947] = { isActive = true }
+W.wand = true
+check(nxt() == "mind_blast", "off cooldown in combat: Mind Blast is next, got " .. tostring(nxt()))
+-- a spell we never cast this session reads ready (a miss only fails toward suggesting it)
+check(P.cooldownReady("swd") == true, "never cast: ready")
+-- a spell with no cooldown of its own is always ready in combat, GCD window or not
+check(P.cooldownReady("smite") == true, "no cooldown of its own: ready")
+-- inside the GCD of another cast, an elapsed cooldown stays ready and a running one stays down
+cast("Smite"); at(9.5)
+check(P.cooldownReady("mind_blast") == true, "elapsed cooldown stays ready through the GCD")
+at(9.6); cast("Mind Blast"); at(10.2)
+check(P.cooldownReady("mind_blast") == false, "just recast: down")
+""")
+
+case("combat_cooldown_ledger_learns_duration", "TESTPRIEST")(r"""
+local P = FS.Hud.Primitives
+-- out of combat a plain read of Mind Blast shows 5.5s (a talent): learned, no guessing 8
+at(0); cast("Mind Blast")
+W.cd[10947] = { isActive = true, startTime = W.now, duration = 5.5 }
+at(1)
+check(P.cooldownReady("mind_blast") == false, "plain timing, 4.5s left")
+-- a GCD-length read never counts as a cooldown length
+W.cd[25364] = { isActive = true, startTime = W.now, duration = 1.5 }
+check(P.cooldownReady("smite") == true, "GCD only")
+-- combat starts: timing is secret; cast again, 6s later the learned 5.5s has elapsed
+W.cdTimingSecret = true
+W.cd[10947] = { isActive = true }
+at(2); cast("Mind Blast")
+at(7)
+check(P.cooldownReady("mind_blast") == false, "5s after the cast: still down under the learned 5.5s")
+at(8)
+check(P.cooldownReady("mind_blast") == true, "6s after the cast: ready under the learned 5.5s (static 8 would say no)")
+""")
+
+case("combat_cooldown_plain_end_survives_into_combat", "TESTPRIEST")(r"""
+local P = FS.Hud.Primitives
+-- a cooldown seen running out of combat (cast before the addon loaded) is remembered into combat
+W.cd[10947] = { isActive = true, startTime = W.now, duration = 8 }
+at(1)
+check(P.cooldownReady("mind_blast") == false, "plain: 7s left")
+W.cdTimingSecret = true
+at(5)
+check(P.cooldownReady("mind_blast") == false, "combat, remembered end at 8s")
+at(8.5)
+check(P.cooldownReady("mind_blast") == true, "combat, past the remembered end")
+""")
+
+case("combat_cooldown_gcd_only_read_clears_the_remembered_end", "TESTPRIEST")(r"""
+local P = FS.Hud.Primitives
+W.cd[10947] = { isActive = true, startTime = W.now, duration = 8 }
+check(P.cooldownReady("mind_blast") == false, "plain: running")
+at(1)
+W.cd[10947] = { isActive = true, startTime = W.now, duration = 1.5 }   -- only the GCD now (a reset)
+check(P.cooldownReady("mind_blast") == true, "GCD-length read: ready")
+W.cdTimingSecret = true
+at(2)
+check(P.cooldownReady("mind_blast") == true, "the old end is forgotten in combat")
+""")
+
+case("learned_cooldown_length_is_forgotten_on_spells_changed", "TESTPRIEST")(r"""
+local P = FS.Hud.Primitives
+at(0); cast("Mind Blast")
+W.cd[10947] = { isActive = true, startTime = W.now, duration = 5.5 }
+check(P.cooldownReady("mind_blast") == false, "learned 5.5 from a plain read")
+fire("SPELLS_CHANGED")                  -- a respec: the old length may be wrong
+W.cdTimingSecret = true
+W.cd[10947] = { isActive = true }
+at(7); cast("Mind Blast")
+at(13)
+check(P.cooldownReady("mind_blast") == false, "back to the static 8s: 6s after the cast is still down")
+at(15.5)
+check(P.cooldownReady("mind_blast") == true, "8.5s after the cast: ready")
+""")
+
+case("cooldown_length_is_only_learned_from_our_own_cast", "TESTPRIEST")(r"""
+local P = FS.Hud.Primitives
+-- a plain cooldown that did not start at our cast of this spell (a shared cooldown, a lockout)
+at(0); cast("Mind Blast")
+at(3)
+W.cd[10947] = { isActive = true, startTime = W.now, duration = 5.5 }
+check(P.cooldownReady("mind_blast") == false, "the plain read still answers")
+-- and a plain cooldown with no cast of ours at all teaches nothing either
+W.cd[1309636] = { isActive = true, startTime = W.now, duration = 5 }
+check(P.cooldownReady("swd") == false, "plain: running")
+W.cdTimingSecret = true
+W.cd[10947] = { isActive = true }; W.cd[1309636] = { isActive = true }
+at(20); cast("Mind Blast"); cast("Shadow Word: Death")
+at(26.5)
+check(P.cooldownReady("mind_blast") == false, "6.5s after the cast: the static 8s, not a 5.5s lesson")
+check(P.cooldownReady("swd") == false, "6.5s after the cast: the static 15s, not a 5s lesson")
+at(28.5)
+check(P.cooldownReady("mind_blast") == true, "8.5s after the cast: ready")
+""")
+
+case("a_cast_without_a_clock_keeps_the_last_cast_time", "TESTPRIEST")(r"""
+local P = FS.Hud.Primitives
+W.cdTimingSecret = true
+W.cd[10947] = { isActive = true }
+at(0); cast("Mind Blast")
+local t = W.now; W.now = nil; cast("Mind Blast"); W.now = t + 3
+check(P.cooldownReady("mind_blast") == false, "a cast seen with no clock does not erase the earlier one")
+""")
+
+case("combat_cooldown_next_cast_real_priest", "PRIEST")(r"""
+W.form = 1; W.wand = true; W.cdTimingSecret = true
+W.combat = true
+at(0); cast("Mind Blast"); cast("Shadow Word: Pain"); cast("Devouring Plague")
+W.cd[10947] = { isActive = true }
+at(3)
+check(nxt() == "shoot", "Mind Blast down: the wand, got " .. tostring(nxt()))
+at(9)
+check(nxt() == "mind_blast", "Mind Blast off cooldown in combat: next again, got " .. tostring(nxt()))
 """)
 
 case("plain_isongcd_means_ready")(r"""
 local P = FS.Hud.Primitives
-W.cd[25307] = { isActive = true, isOnGCD = true }          -- no ledger, no window
+W.cd[25307] = { isActive = true, isOnGCD = true }
 check(P.cooldownReady("shadow_bolt") == true, "a plain isOnGCD is honoured")
+at(0); cast("Conflagrate"); at(1)
 W.cd[1293817] = { isActive = true, isOnGCD = true }        -- a real cooldown spell: only the GCD
-check(P.cooldownReady("conflagrate") == true, "isOnGCD on a spell with a real cooldown")
+check(P.cooldownReady("conflagrate") == true, "isOnGCD true on a spell with a real cooldown: ready")
+-- isOnGCD false says nothing about readiness (the probe saw false on idle spells): the ledger decides
 W.cd[1293817] = { isActive = true, isOnGCD = false }
-check(P.cooldownReady("conflagrate") == false, "isOnGCD false: the cooldown is real")
+check(P.cooldownReady("conflagrate") == false, "our cast 1s ago: down")
+at(12)
+check(P.cooldownReady("conflagrate") == true, "11s later: ready despite isActive and isOnGCD false")
+-- a secret isOnGCD is never trusted as "only the GCD": the ledger still holds a fresh cast down
+cast("Conflagrate"); at(13)
 W.cd[1293817] = { isActive = true, isOnGCD = SB }
-check(P.cooldownReady("conflagrate") == false, "a secret isOnGCD is not trusted")
+check(P.cooldownReady("conflagrate") == false, "secret isOnGCD, our cast 1s ago: still down")
+at(23.5)
+check(P.cooldownReady("conflagrate") == true, "secret isOnGCD, 10.5s later: ready")
 """)
 
 case("channel_update_end_is_bounded", "TESTPRIEST")(r"""
@@ -1142,7 +1277,7 @@ check(n == 3, "a changed icon republishes, n = " .. n)
 
 case("filler_order_spell_keeps_the_wand_ahead_of_the_last_spell", "TESTPRIEST")(r"""
 local prof = FS.Hud.GetProfile()
-at(0); cast("Mind Blast"); cast("Shadow Word: Pain")
+at(0); cast("Mind Blast"); cast("Shadow Word: Pain"); cast("Shadow Word: Death")
 W.cd[10947] = { isActive = true }; W.cd[1309636] = { isActive = true }
 at(2); W.wand = true
 check(nxt() == "shoot", "default: the wand leads")
@@ -1182,6 +1317,7 @@ check(nxt() == "dplague", "after 6s: Devouring Plague, got " .. tostring(nxt()))
 cast("Devouring Plague")
 at(7.5)
 check(nxt() == "shoot", "Plague up, Death still gated, got " .. tostring(nxt()))
+at(7.6); cast("Mind Blast")      -- the opener's 8s cooldown has run out by now: recast it
 at(8.5)
 check(nxt() == "swd", "after 8s: Shadow Word: Death, got " .. tostring(nxt()))
 cast("Shadow Word: Death"); W.cd[1309636] = { isActive = true }
@@ -1259,7 +1395,9 @@ check(nxt() == "immolate", "got " .. tostring(nxt()))
 cast("Immolate"); cast("Corruption"); cast("Bane of Agony"); cast("Siphon Life")
 check(nxt() == "conflagrate", "Immolate up and Conflagrate ready, got " .. tostring(nxt()))
 W.cd[1293817] = { isActive = true }
-at(22)
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "cg-conf", 1293817)
+cast("Immolate")     -- Conflagrate consumed it; the cooldown ledger is what this case needs
+at(21)
 check(nxt() == "incinerate", "Conflagrate on cooldown, a young fight: Incinerate, got " .. tostring(nxt()))
 """)
 
@@ -1402,14 +1540,15 @@ check(nxt() == "jd", "Holy Strike on cooldown, Judgement ready: NEXT is Judgemen
 W.cd[JD] = { isActive = false }
 at(6); check(lit("hs") == false, "still dark mid cooldown")
 -- an own cast of another spell opens a GCD with isActive true for Holy Strike, but Holy Strike's own
--- 10 s window (last cast at 3) still running beats the GCD heuristic: still dark, not lit
+-- 10 s window (last cast at 3) still running: still dark, not lit
 cast("Smite"); at(6.5); W.cd[HS] = { isActive = true }
 check(lit("hs") == false, "another cast's GCD does not relight Holy Strike inside its own 10 s")
 at(12.9); check(lit("hs") == false, "cooldown timing: still dark at 12.9 s, before the 10 s are up")
 at(13.2); W.cd[HS] = { isActive = false }
 check(lit("hs") == true, "lit again after 10 s")
 check(nxt() == "jd", "Judgement still leads Holy Strike, got " .. tostring(nxt()))
-W.cd[JD] = { isActive = true }        -- Judgement down (outside the GCD window): Holy Strike is NEXT
+cast("Judgement"); at(13.4)           -- our Judgement cast is down for its 10 s: Holy Strike is NEXT
+W.cd[JD] = { isActive = true }
 check(lit("jd") == false and nxt() == "hs" and S().next.glow == "gold", "Holy Strike is NEXT and gold again, got " .. tostring(nxt()))
 """)
 
@@ -2188,6 +2327,7 @@ at(0)
 W.combat = true      -- no aura read, nothing cast: the seal is unknown
 check(S().seal == nil, "unknown")
 check(nxt() == "jd" and S().next.glow == "gold", "the nil primitive skips the seal rule, never guessed, got " .. tostring(nxt()))
+cast("Judgement")      -- Judgement is down for its 10 s (the cast ledger, not isActive)
 W.cd[NAME_ID["Judgement"]] = { isActive = true }
 at(5)
 check(nxt() == "hs", "and on to Holy Strike, got " .. tostring(nxt()))

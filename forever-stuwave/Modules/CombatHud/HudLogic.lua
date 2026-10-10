@@ -87,21 +87,26 @@
 --   * Ranks: casts report the rank id actually cast, so everything is matched by spell NAME
 --     (or any dictionary id), never by one pinned rank id.
 --
--- COOLDOWNS AND THE GLOBAL COOLDOWN. Whether GetSpellCooldown.isActive reads true during the
--- global cooldown on 1.60.1 is UNTESTED (an in-game probe will tell), and there is no
--- isOnGCD field. Three sources, in order:
---   1. A plain isOnGCD true is honoured when a client has one.
---   2. Plain startTime and duration (out of combat) are exact: a duration of at most
---      GCD_WINDOW is the global cooldown alone (ready), a longer one is a real cooldown
---      whose remaining time is start + duration - now. The ledger is not consulted.
---   3. In combat they are secret, so the ledger stands in: for GCD_WINDOW (1.6 s) after the
---      player's last own cast (a wand shot does not count, it is off the global cooldown), a
---      spell with no cooldown of its own (dictionary cooldown absent) reads ready even when
---      isActive is true. A spell with a real cooldown (Mind Blast 8 s) keeps isActive, except
---      that inside that window it reads ready unless OUR ledger says its own last cast was
---      less than its cooldown ago. The cost: in combat, a real cooldown that started before
---      the addon loaded reads ready for up to one GCD after another cast. Our cast times
---      survive a loading screen (GetTime is monotonic), so only a /reload loses them.
+-- COOLDOWNS. Sources, in order (CooldownState):
+--   1. A plain isActive of false is trusted: ready. A plain isOnGCD true is honoured: ready.
+--   2. Plain startTime and duration (out of combat) are exact: a duration of at most GCD_WINDOW is
+--      the global cooldown alone (ready), a longer one is a real cooldown whose remaining time is
+--      start + duration - now. Such a read also LEARNS two things: the spell's cooldown length (so a
+--      talent like Improved Mind Blast is the client's number, not the dictionary's; skipped when the
+--      cooldown did not start at our own cast, e.g. a lockout) and the cooldown's end (kept for combat).
+--   3. In combat (VERIFIED on 1.60.1, priest probe 2026-10-09) startTime and duration are secret
+--      while isActive is a plain true for EVERY spell, even one with no cooldown and no GCD running.
+--      isActive therefore says nothing there and is ignored; the CAST LEDGER decides. The player's own
+--      spell ids and cast times are plain (UNIT_SPELLCAST_SUCCEEDED, lastCastOf). A spell is ready
+--      unless now is before the later of (our last cast + its cooldown length) and any end learned in
+--      a plain read; the remaining time is that difference. The length is the learned one, else the
+--      dictionary `cooldown`, else 0 (a spell with no cooldown of its own is always ready). The global
+--      cooldown needs no special case: the ledger says "elapsed", so such a spell stays ready through
+--      the GCD of another cast, and a wand shot or a different spell never frees one we cast.
+--      The cost: a cast the ledger did not see (a /reload mid-fight, a cooldown started before the
+--      addon loaded and never seen in a plain read, an item or macro effect that resets it) reads
+--      READY. That fails toward suggesting the spell; if it is really down the cast simply does not
+--      go off. Our cast times survive a loading screen (GetTime is monotonic), only a /reload loses them.
 --
 -- SEALS (Paladin, a profile with `seals`). The active seal is a LEDGER of our own casts, because
 -- aura reads are blocked in combat: UNIT_SPELLCAST_SUCCEEDED for the player carries a plain spell id
@@ -147,8 +152,8 @@
 -- the in-game probe; a plain false from the overlay API is trusted in combat, but out of
 -- combat a plain aura read overrides it.
 -- A proc with `ready = key` is a cooldown tracker instead (Paladin Holy Strike / Judgement): it
--- reads CooldownState, so the heuristic above keeps it lit through the global cooldown. UNVERIFIED
--- in game: isActive during the GCD on 1.60.1, and Hammer of the Righteous sharing Holy Strike's
+-- reads CooldownState, so the cast ledger above keeps it lit through the global cooldown. UNVERIFIED
+-- in game: Hammer of the Righteous sharing Holy Strike's
 -- cooldown (not in the ledger, so casting it does not darken the rung).
 
 local _, FS = ...
@@ -164,7 +169,7 @@ local PRUNE_EVERY = 10       -- seconds between sweeps of expired ledger entries
 local MAX_AURAS = 40         -- aura index scan limit
 local CHANNEL_GRACE = 0.5    -- a channel with no STOP event expires this long after its end
 local MAX_CHANNEL = 60       -- a re-read channel end further out than this is not believed
-local GCD_WINDOW = 1.6       -- seconds after our own cast in which isActive may be the GCD
+local GCD_WINDOW = 1.6       -- a cooldown no longer than this is the global cooldown alone
 local PENDING_TTL = 60       -- seconds a cast's captured target is kept without a verdict
 
 local EMPTY = {}    -- read-only stand-in for an absent list, so the tick never builds one
@@ -515,9 +520,9 @@ local engaged = {}
 -- STARTED, so a retarget before SUCCEEDED cannot move the cast onto the new target.
 local pendingCast = {}
 local targetEpoch = 0      -- bumped on every PLAYER_TARGET_CHANGED
--- Own cast times for the global cooldown heuristic (CooldownState). Not part of the ledger
+-- Own cast times per spell key, the cooldown ledger (CooldownState). Not part of the DoT ledger
 -- reset: GetTime is monotonic across a loading screen, so a cooldown we started stays known.
-local lastCastAt, lastCastOf = nil, {}
+local lastCastOf = {}
 
 local function ResetLedger()
     byGuid = {}
@@ -784,8 +789,17 @@ local function CooldownInfo(fn, id)
     return cd or nil
 end
 
--- ready (true/false/nil), remaining seconds (nil unless plain). See the GLOBAL COOLDOWN
--- HEURISTIC in the file header for the isActive-during-GCD handling below.
+-- Cooldown lengths learned from plain reads (key -> seconds) and cooldown ends seen in a plain read
+-- (key -> GetTime). Both are written only out of combat, when the client answers plain.
+local learnedCd, plainEnd = {}, {}
+
+-- The length of a spell's own cooldown: what a plain out-of-combat read showed (so a talent such as
+-- Improved Mind Blast is captured as the client reports it), else the static dictionary value, else 0.
+local function CooldownLength(key)
+    return learnedCd[key] or (Spells[key] or {}).cooldown or 0
+end
+
+-- ready (true/false/nil), remaining seconds (nil when unknown). See COOLDOWNS in the file header.
 local function CooldownState(key)
     local r = ResolveSpell(key)
     if not r or r.known == nil then return nil end
@@ -796,24 +810,41 @@ local function CooldownState(key)
     if not cd then return nil end
     local active = PlainOf(cd.isActive, "boolean")
     if active == nil then return nil end
-    if not active then return true end
+    if not active then
+        plainEnd[key] = nil
+        return true
+    end
     -- A plain isOnGCD, when the client provides one, says the cooldown is only the GCD.
     if PlainOf(cd.isOnGCD, "boolean") == true then return true end
     local start, dur, now = PlainOf(cd.startTime, "number"), PlainOf(cd.duration, "number"), Now()
-    -- Plain timing (out of combat) is exact and needs no heuristic. A duration of zero says
-    -- nothing, so it falls through.
+    -- Plain timing (out of combat) is exact. A duration of zero says nothing, so it falls through.
     if start and dur and now and dur > 0 then
-        if dur <= GCD_WINDOW then return true end    -- only the global cooldown
+        if dur <= GCD_WINDOW then    -- only the global cooldown: no cooldown of its own is running
+            plainEnd[key] = nil
+            return true
+        end
+        -- Learn the length only from a cooldown that started at our own cast of this spell. Any other
+        -- (a lockout, a cooldown shared with another spell, one begun before we saw a cast) says
+        -- nothing about this spell's own length.
+        local last = lastCastOf[key]
+        if last and math.abs(start - last) <= GCD_WINDOW then learnedCd[key] = dur end
+        plainEnd[key] = start + dur
         local remaining = math.max(0, start + dur - now)
         if remaining <= 0 then return true end
         return false, remaining
     end
-    if now and lastCastAt and now - lastCastAt >= 0 and now - lastCastAt < GCD_WINDOW then
-        local own = (Spells[key] or {}).cooldown or 0
-        local last = lastCastOf[key]
-        if not (last and now - last < own) then return true end
+    -- Timing unreadable (in combat startTime and duration are secret while isActive stays a plain
+    -- true for EVERY spell, even one with no cooldown): isActive says nothing, so the cast ledger
+    -- decides. Ready unless our own last cast, or a cooldown end seen in a plain read, is still ahead.
+    if not now then return nil end
+    local ends = plainEnd[key]
+    local last = lastCastOf[key]
+    if last and now >= last then
+        local e = last + CooldownLength(key)
+        if not ends or e > ends then ends = e end
     end
-    return false
+    if ends and now < ends then return false, ends - now end
+    return true
 end
 
 -- Spell-activation-overlay glow by spell key, from GLOW_SHOW (true) and GLOW_HIDE (false).
@@ -1593,10 +1624,8 @@ function handlers.UNIT_SPELLCAST_SUCCEEDED(unit, castGUID, spellID)
     if not OnPlayer(unit) then return end
     local key = KeyForSpellID(spellID)
     local now = Now()
-    -- any own cast may start the GCD, except the wand
-    if now and not (key and Spells[key].offGcd) then lastCastAt = now end
     if not key then return end
-    lastCastOf[key] = now
+    if now then lastCastOf[key] = now end    -- no clock: keep the earlier cast time, never erase it
     -- a seal is a self cast too, but it is also the active seal: record it before the early return
     if Spells[key].seal then Seal.OnCast(key, spellID) end
     -- Judgement: stamp it now (even with no target); the debuff is recorded once the target is known
@@ -1678,9 +1707,16 @@ end
 local function Relearn()
     spellCache = {}
 end
-handlers.SPELLS_CHANGED = Relearn
-handlers.PLAYER_LEVEL_UP = Relearn
-handlers.LEARNED_SPELL_IN_TAB = Relearn
+
+-- A respec or a new rank can change a cooldown's length: forget the lengths learned from plain reads
+-- (the static dictionary value answers until the next plain read). Not done on PLAYER_ENTERING_WORLD,
+-- a loading screen changes nothing about the talents.
+local function ForgetLearnedCooldowns()
+    for k in pairs(learnedCd) do learnedCd[k] = nil end
+end
+function handlers.SPELLS_CHANGED() Relearn(); ForgetLearnedCooldowns() end
+handlers.PLAYER_LEVEL_UP = handlers.SPELLS_CHANGED
+handlers.LEARNED_SPELL_IN_TAB = handlers.SPELLS_CHANGED
 
 function handlers.PLAYER_ENTERING_WORLD()
     Relearn()

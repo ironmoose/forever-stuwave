@@ -16,8 +16,10 @@
 --             on Forever unless a comment says otherwise.
 --   applyByRank  cast spell id -> seconds, for a spell whose duration depends on the rank
 --             actually cast (Corruption); any other id uses `apply` (the top rank).
---   cooldown  the spell's own cooldown in seconds. HudLogic uses it only to tell a real
---             cooldown from the global cooldown (see CooldownState in HudLogic.lua).
+--   cooldown  the spell's own cooldown in seconds. HudLogic's cast ledger uses it as the
+--             cooldown length in combat, where the client's timing is secret, until a plain
+--             out-of-combat read teaches it the real one (talents); a spell without it is
+--             never held down by the ledger (see CooldownState in HudLogic.lua).
 --   cast      cast time in seconds (informational, the display may show it).
 --   period, ticks  channel data: seconds between ticks and tick count. The single source
 --             for it: a profile's `channels` entry names the key and adds only `clipAfter`.

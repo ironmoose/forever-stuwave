@@ -21,9 +21,9 @@
 --              text above its tape; a proc with no side is not drawn there, and a profile
 --              with no procs (priest) gets no rungs.
 --              A proc with `ready = key` (a dictionary spell) is a COOLDOWN tracker instead:
---              it is active while that spell is off cooldown (CooldownState, so the global
---              cooldown does not darken it), false when the spell is unknown, nil when the
---              cooldown is unreadable; it has no aura or overlay source. Its icon is the
+--              it is active while that spell is off cooldown (CooldownState: in combat the
+--              cast ledger decides, which by its nature ignores the global cooldown), false when the spell is
+--              unknown, nil when the cooldown is unreadable; it has no aura or overlay source. Its icon is the
 --              spell's own.
 --              `needsTarget = true` on a `ready` proc keeps it dark unless the target is attackable (Judgement).
 --              overlaySpell is the spell whose action-bar glow marks the proc (Shadow Trance
