@@ -1633,10 +1633,6 @@ def test_shoulder_glow_does_not_overwrite_existing_textures(shoulder_glow_output
     assert {p.stem for p in shoulder_glow_outputs.glob("*.tga")} == {"shoulder_glow"}
 
 
-if __name__ == "__main__":
-    sys.exit(pytest.main([str(Path(__file__).resolve()), "-v"]))
-
-
 # --- Shaman totem tab glyphs ------------------------------------------------
 
 TOTEM_GENERATOR = GENERATOR_DIR / "generate_totem_glyphs.py"
@@ -1702,3 +1698,7 @@ def test_committed_totem_glyphs_match_their_generator(totem_outputs: Path) -> No
     assert len(outs) == 7
     for out in outs:
         assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
+
+
+if __name__ == "__main__":
+    sys.exit(pytest.main([str(Path(__file__).resolve()), "-v"]))

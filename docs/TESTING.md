@@ -162,8 +162,11 @@ restart, not /reload. If your Shaman has the Call of the Elements spell
 3. Change totem: click the small arrow above the button, or Alt-click the
    button (Alt-click must NOT drop a totem). A list of the totems you know for
    that element appears. Click one: the button now shows it and drops it. Try
-   it in combat too. Note down whether a pick made in combat works right away
-   or only after the fight ends (both are fine; we need to know which).
+   it in combat too: a pick made in combat is applied when the fight ends, and
+   the button keeps showing the old totem until then. Alt-modified keybinds on
+   the totem buttons (Alt, Alt+Shift, Alt+Ctrl) open this list instead of
+   dropping a totem. Note if a pick ever does not stick (the button switching
+   back, or a chat line saying the slot did not take the pick).
 4. Log out and in: each element remembers its totem. If you also use the
    stock Totem Bar, a pick made there shows up on the tab.
 5. Set drop (Call of the Elements, level 20): drops your set. At level 30,
