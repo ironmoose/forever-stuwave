@@ -185,11 +185,13 @@ restart, not /reload. If your Shaman has the Call of the Elements spell
 Use a Shaman who knows Rockbiter Weapon and, from level 8, Lightning Shield. The Gunsight Class Module shows two small chips at its bottom edge: IMBUE on the left and SHIELD on the right. They live in the Class Module area beside the target cast bar (the lower area by default; `/fsconfig`, Gunsight HUD, picks it). Only the chips are drawn so far: the totem poles come later. This adds a new file, so do a FULL client restart, not /reload.
 
 1. With no imbue on your weapon the left chip is amber and says IMBUE. With no Lightning Shield the right chip is amber and says SHIELD. A spell you have not learned yet shows no chip at all, not an amber one.
-2. Cast Rockbiter Weapon on your weapon. The chip turns quiet gold, shows RB and the minutes left, for example 59m. Flametongue shows FT, Frostbrand FB and Windfury Weapon WF. Report any imbue that shows IM or the wrong letters.
+2. Cast Rockbiter Weapon on your weapon. The chip turns quiet gold, shows RB and the minutes left, for example 59m. Flametongue shows FT, Frostbrand FB and Windfury Weapon WF. The addon learns which letters go with which weapon enchant from your own casts, so after a restart an imbue you did not cast this session may show IM (or the one imbue you know) until you cast it once. Report any imbue that shows the wrong letters.
 3. Cast Lightning Shield. The right chip turns quiet gold, shows LS and the number of orbs left. Get hit: the number should go down, and the chip should go amber when the last orb is gone.
 4. Under five minutes left on the imbue, the chip and its time turn pink (the same pink as a buff about to expire). Under one minute the time counts in seconds. Let it run out: the chip turns amber and says IMBUE again.
-5. In combat: the imbue time should keep counting down and never show a wrong value. The shield count may show a "~" in front (an estimate, because the game hides auras in combat); it should be right again once the fight ends. A "?" means the chip has nothing to go on yet. Cast an imbue or the shield in the middle of a fight and check the chip updates at once.
-6. Type `/reload` out of combat: the chips should come back with the right time. Report with `/fsbug` if a chip is wrong, and say what was on your weapon.
+5. In combat: the imbue time should keep counting down and never show a wrong value. The shield count may show a "~" in front (an estimate, because the game hides auras in combat); it should be right again once the fight ends. A "?" means the chip has nothing to go on yet. Cast an imbue or the shield in the middle of a fight and check the chip updates at once. A shield cast in combat stops showing after its ten minutes if nothing confirms it, and the chip then asks for the shield again.
+6. Dual wield (two weapons): with imbues on both, the chip shows the one with less time left. With an imbue on only one weapon while the other hand holds a weapon, the chip is amber IMBUE until both are imbued. A shield or an empty off hand never triggers it.
+7. With a Water Shield up instead of Lightning Shield, the right chip is not drawn (it does not nag).
+8. Type `/reload` out of combat: the chips should come back with the right time. Report with `/fsbug` if a chip is wrong, and say what was on your weapon.
 
 ## Layout editor: /fsedit
 

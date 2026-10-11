@@ -14,7 +14,15 @@ The checks pin:
     the mockup does not draw), missing (amber, the word), unknown (hollow, "?");
   * the imbue's time and secrets: a plain read stores the expiry, a secret read in combat keeps counting down from
     it, and with nothing stored the chip says "?"; the imbue is named by the enchant id, else by our own cast;
-  * the shield: the orb count from the player aura snapshot, a frozen snapshot in combat read as a cached estimate;
+  * dual wield: both hands are read, the chip shows the least time, and a bare second weapon is asked for (a shield, an
+    empty hand, a two hander or a frill never is);
+  * identity: an enchant id names an imbue only after a cast of ours confirmed it (the Classic id table is unverified
+    and unused); a pending cast outlasts FRESH_S, an id seen behind a cast is not taught, a zero id is no id;
+  * the shield: the orb count from the player aura snapshot, a frozen snapshot in combat read as a cached estimate that
+    is believed for at most ten minutes, and a Water Shield hides the chip;
+  * secrets: a secret boolean and a secret number report their real type(), so only IsSecret keeps them out; the checks
+    prove each guard by the state a missed one would change (a Lua table is always truthy, so a boolean test cannot raise);
+  * the spell book is asked about an unlearned spell once, not at every tick;
   * a spell the player has not learned draws no chip at all (no nagging "missing").
 
 The mock is strict (a widget method it does not define fails as a nil call, an aura API read fails the case); Layout.lua,
@@ -136,7 +144,25 @@ MOCK = CLASS_HARNESS.MOCK
 PRELUDE = r"""
 local AREA_X, AREA_H = MU.AREA_X, MU.AREA_H
 RECTS = { upper = { x = AREA_X, y = MU.UPPER_Y, w = 202, h = AREA_H }, lower = { x = AREA_X, y = MU.LOWER_Y, w = 202, h = AREA_H } }
-SECRET_FN = function(v) return v == SECRET end
+-- Secrets that report their REAL kind through type(), as the client's do: a secret boolean says "boolean" and a secret
+-- number says "number", so a `type(v) == "number"` check alone lets them through and only IsSecret keeps them out. Any
+-- arithmetic, comparison, concatenation or length of one raises. A Lua table is always truthy, so a boolean test of a
+-- secret boolean cannot raise here: the guard on one is pinned by the state a missed guard would change.
+local realType = type
+local function secretOf()
+    local function boom(what) return function() error("SECRET_OP: " .. what, 2) end end
+    return setmetatable({}, { __lt = boom("compare"), __le = boom("compare"), __add = boom("arith"), __sub = boom("arith"),
+        __mul = boom("arith"), __div = boom("arith"), __mod = boom("arith"), __pow = boom("arith"), __unm = boom("arith"),
+        __concat = boom("concat"), __len = boom("len") })
+end
+SBOOL, SNUM = secretOf(), secretOf()
+function type(v)
+    if rawequal(v, SBOOL) then return "boolean" end
+    if rawequal(v, SNUM) then return "number" end
+    return realType(v)
+end
+SECRET_FN = function(v) return v == SECRET or rawequal(v, SBOOL) or rawequal(v, SNUM) end
+LEAKED = {}            -- API calls a secret reached: none may
 K = 1.28
 TEXT_MID = 0.35        -- a line's visual centre sits this fraction of its size above the baseline (the Class module's TEXT_MID)
 
@@ -153,22 +179,32 @@ end
 SPELL_NAMES = {
     [8017] = "Rockbiter Weapon", [10399] = "Rockbiter Weapon",
     [8024] = "Flametongue Weapon", [8033] = "Frostbrand Weapon", [8232] = "Windfury Weapon",
-    [324] = "Lightning Shield", [10432] = "Lightning Shield", [403] = "Lightning Bolt",
+    [324] = "Lightning Shield", [10432] = "Lightning Shield", [403] = "Lightning Bolt", [24398] = "Water Shield",
 }
 BASE_ID = { ["Rockbiter Weapon"] = 8017, ["Flametongue Weapon"] = 8024, ["Frostbrand Weapon"] = 8033,
     ["Windfury Weapon"] = 8232, ["Lightning Shield"] = 324, ["Lightning Bolt"] = 403 }
 KNOWN = {}             -- spell name -> true once learned
+BOOK_CALLS, INFO_CALLS = 0, 0   -- spellbook and spell info questions asked
+EQUIP, LOC_OF = {}, {}          -- slot -> item id, item id -> equip location
 WEAPON, WEAPON_CALLS = nil, 0
 SNAP, FROZEN = { buffs = {} }, false
 function learn(...) for _, n in ipairs({ ... }) do KNOWN[n] = true end end
 function setWeapon(has, ms, id, charges)
     WEAPON = { has, ms or 0, charges or 0, id or 0, false, 0, 0, 0 }
 end
+-- main / off: nil for no enchant, else { ms, enchantId }
+function setHands(main, off)
+    WEAPON = { main ~= nil, main and main[1] or 0, 0, main and main[2] or 0, off ~= nil, off and off[1] or 0, 0, off and off[2] or 0 }
+end
+function equip(slot, loc) ITEMS_N = (ITEMS_N or 0) + 1; EQUIP[slot] = 100 + ITEMS_N; LOC_OF[EQUIP[slot]] = loc end
 function secretWeapon() WEAPON = { SECRET, SECRET, SECRET, SECRET, SECRET, SECRET, SECRET, SECRET } end
 function setShield(count, expires)
     SNAP = { buffs = { { name = "Lightning Shield", count = count, expirationTime = expires or (NOW + 600), spellId = 324 } } }
 end
 function noShield() SNAP = { buffs = { { name = "Mark of the Wild", count = 0, expirationTime = 0 } } } end
+function waterShield(nameless)
+    SNAP = { buffs = { { name = (not nameless) and "Water Shield" or nil, count = 3, expirationTime = NOW + 600, spellId = 24398 } } }
+end
 function enterCombat() IN_COMBAT = true; FROZEN = true end
 function leaveCombat() IN_COMBAT = false; FROZEN = false end
 
@@ -177,7 +213,7 @@ local function boot(opts)
     STRICT_EVENTS = false
     TIMERS = {}
     resetKnownEvents()
-    for e in ([[UNIT_AURA UNIT_INVENTORY_CHANGED PLAYER_EQUIPMENT_CHANGED UNIT_SPELLCAST_SUCCEEDED SPELLS_CHANGED PLAYER_LEVEL_UP LEARNED_SPELL_IN_SKILL_LINE]]):gmatch("%S+") do KNOWN_EVENTS[e] = true end
+    for e in ([[UNIT_AURA UNIT_INVENTORY_CHANGED PLAYER_EQUIPMENT_CHANGED UNIT_SPELLCAST_SUCCEEDED SPELLS_CHANGED PLAYER_LEVEL_UP LEARNED_SPELL_IN_SKILL_LINE LEARNED_SPELL_IN_TAB]]):gmatch("%S+") do KNOWN_EVENTS[e] = true end
     resetWorld()
     SetScreen(opts.height or 1440)
     ForeverSTUwaveDB = opts.db
@@ -203,13 +239,16 @@ local function boot(opts)
     loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
     fakeAreas()
     UnitClass = function() return "Shaman", opts.classToken ~= nil and opts.classToken or (opts.class or "SHAMAN") end
-    KNOWN, WEAPON_CALLS, SNAP, FROZEN = {}, 0, { buffs = {} }, false
+    KNOWN, WEAPON_CALLS, SNAP, FROZEN, BOOK_CALLS, INFO_CALLS, LEAKED = {}, 0, { buffs = {} }, false, 0, 0, {}
+    EQUIP, LOC_OF = {}, {}
     if opts.learn ~= false then learn("Rockbiter Weapon", "Lightning Shield") end
     for _, n in ipairs(opts.learned or {}) do learn(n) end
     if opts.unlearn then for _, n in ipairs(opts.unlearn) do KNOWN[n] = nil end end
     setWeapon(false)
     C_Spell = {
         GetSpellInfo = function(x)
+            INFO_CALLS = INFO_CALLS + 1
+            if SECRET_FN(x) then LEAKED[#LEAKED + 1] = "GetSpellInfo" end
             if type(x) == "number" then
                 local n = SPELL_NAMES[x]
                 return n and { name = n, spellID = x, iconID = 100 } or nil
@@ -218,7 +257,12 @@ local function boot(opts)
             return nil
         end,
     }
-    IsPlayerSpell = function(id) return SPELL_NAMES[id] ~= nil and KNOWN[SPELL_NAMES[id]] == true end
+    IsPlayerSpell = function(id)
+        BOOK_CALLS = BOOK_CALLS + 1
+        return SPELL_NAMES[id] ~= nil and KNOWN[SPELL_NAMES[id]] == true
+    end
+    GetInventoryItemID = function(_, slot) return EQUIP[slot] end
+    C_Item = { GetItemInfoInstant = function(id) return id, "Weapon", "Sword", LOC_OF[id], 1 end }
     IsSpellKnown, GetSpellInfo = nil, nil
     if not opts.noWeaponApi then
         GetWeaponEnchantInfo = function()
@@ -308,6 +352,9 @@ local function up(opts)
 end
 -- Rank ids the client reports on a cast: the cast event carries the rank id.
 local function cast(spellId) fire("UNIT_SPELLCAST_SUCCEEDED", "player", "guid", spellId) end
+local function codeOf(host) return imbueChip(host).code.text end
+local function wordOf(host) return imbueChip(host).word.text end
+local function noDegrade() check(next(DEGRADED) == nil, "a degrade was logged: " .. tostring(next(DEGRADED))) end
 local MIN = 60
 """
 
@@ -549,12 +596,16 @@ check(imbueChip(host2).word.text == "?", "a client with no GetWeaponEnchantInfo 
 
 # --------------------------------------------------------------------------------- imbue identity
 
-case("imbue_is_named_by_the_enchant_id")(r"""
-local spec, host = up({ learned = { "Flametongue Weapon", "Frostbrand Weapon", "Windfury Weapon" } })
-for _, w in ipairs({ { 29, "RB" }, { 503, "RB" }, { 5, "FT" }, { 523, "FT" }, { 2, "FB" }, { 524, "FB" }, { 283, "WF" }, { 525, "WF" } }) do
-    setWeapon(true, 50 * MIN * 1000, w[1])
+case("an_enchant_id_is_never_named_from_an_unverified_table")(r"""
+local spec, host = up({})
+setWeapon(true, 50 * MIN * 1000, 5)       -- 5 is Flametongue in the Classic data, unverified on Forever
+tick(1.5)
+check(codeOf(host) == "RB", "with one imbue known the guess is that imbue, not the table's Flametongue, got " .. codeOf(host))
+local spec2, host2 = up({ learned = { "Flametongue Weapon", "Frostbrand Weapon", "Windfury Weapon" } })
+for _, id in ipairs({ 29, 503, 5, 523, 2, 524, 283, 525 }) do
+    setWeapon(true, 50 * MIN * 1000, id)
     tick(1.5)
-    check(imbueChip(host).code.text == w[2], "enchant " .. w[1] .. " is " .. w[2] .. ", got " .. tostring(imbueChip(host).code.text))
+    check(codeOf(host2) == "IM", "enchant " .. id .. " is not named before a cast confirmed it, got " .. codeOf(host2))
 end
 """)
 
@@ -568,15 +619,80 @@ secretWeapon(); enterCombat(); tick(1.5)
 check(imbueChip(host).code.text == "FT", "and still does when the id turns secret in combat")
 """)
 
-case("a_cast_beats_the_table_and_teaches_the_id")(r"""
+case("a_cast_teaches_the_id_it_produced")(r"""
 local spec, host = up({ learned = { "Frostbrand Weapon" } })
-setWeapon(true, 59 * MIN * 1000, 5)       -- 5 is in our table as Flametongue
+setWeapon(true, 59 * MIN * 1000, 5)
 cast(8033)
 tick(1.5)
-check(imbueChip(host).code.text == "FB", "what you just cast is what you have, got " .. tostring(imbueChip(host).code.text))
+check(codeOf(host) == "FB", "what you just cast is what you have, got " .. codeOf(host))
 setWeapon(true, 58 * MIN * 1000, 5)
 tick(1.5)
-check(imbueChip(host).code.text == "FB", "and enchant 5 stays learned as Frostbrand")
+check(codeOf(host) == "FB", "and enchant 5 stays learned as Frostbrand")
+setWeapon(false); tick(3)
+setWeapon(true, 30 * MIN * 1000, 5); tick(1.5)
+check(codeOf(host) == "FB", "even after it fell off and the same id came back with no cast, got " .. codeOf(host))
+""")
+
+case("a_cast_stands_past_fresh_seconds_until_the_id_shows_and_then_teaches_it")(r"""
+local spec, host = up({ learned = { "Flametongue Weapon" } })
+secretWeapon(); enterCombat()
+cast(8024)
+tick(15)                                  -- far past FRESH_S with no readable id
+check(codeOf(host) == "FT", "the cast still names it, got " .. codeOf(host))
+leaveCombat(); setWeapon(true, 50 * MIN * 1000, 29)
+tick(1.5)
+check(codeOf(host) == "FT", "the first plain id after the cast is the cast's imbue, got " .. codeOf(host))
+setWeapon(false); tick(3)
+setWeapon(true, 40 * MIN * 1000, 29); tick(1.5)
+check(codeOf(host) == "FT", "and it is taught, got " .. codeOf(host))
+""")
+
+case("a_confirmed_different_id_beats_a_pending_cast")(r"""
+local spec, host = up({ learned = { "Flametongue Weapon", "Frostbrand Weapon" } })
+setWeapon(true, 59 * MIN * 1000, 8); cast(8033)      -- 8 = Frostbrand
+setWeapon(true, 58 * MIN * 1000, 7); cast(8017)      -- 7 = Rockbiter
+tick(1.5)
+check(codeOf(host) == "RB", "taught: " .. codeOf(host))
+cast(8024)                                           -- Flametongue is cast, the weapon still says 7
+tick(1.5)
+check(codeOf(host) == "FT", "behind the cast the cast names it, got " .. codeOf(host))
+setWeapon(true, 3599 * 1000, 8); tick(1.5)           -- but it now shows 8, already known as Frostbrand
+check(codeOf(host) == "FB", "a different confirmed id wins over the cast, got " .. codeOf(host))
+""")
+
+case("an_id_seen_behind_a_cast_is_not_taught_as_the_cast")(r"""
+local spec, host = up({ learned = { "Flametongue Weapon" } })
+setWeapon(true, 59 * MIN * 1000, 29); cast(8017)     -- Rockbiter, id 29
+setWeapon(true, 58 * MIN * 1000, 29); cast(8024)     -- Flametongue over it; the weapon still shows 29
+tick(0.5)
+check(codeOf(host) == "FT", "named by the cast while behind it")
+setWeapon(true, 3599 * 1000, 5); tick(1.5)
+check(codeOf(host) == "FT", "named when 5 shows")
+setWeapon(false); tick(3)
+setWeapon(true, 40 * MIN * 1000, 29); tick(1.5)      -- Rockbiter again, no cast seen
+check(codeOf(host) == "RB", "29 was never taught as Flametongue, got " .. codeOf(host))
+""")
+
+case("a_zero_enchant_id_is_no_id_and_teaches_nothing")(r"""
+local spec, host = up({ learned = { "Flametongue Weapon" } })
+setWeapon(true, 59 * MIN * 1000, 0); cast(8024); tick(1.5)
+check(codeOf(host) == "FT", "named by the cast")
+setWeapon(false); tick(3)
+setWeapon(true, 40 * MIN * 1000, 0); tick(1.5)
+check(codeOf(host) == "IM", "an enchant with no id and no cast is not Flametongue, got " .. codeOf(host))
+""")
+
+case("a_cast_over_an_imbue_keeps_the_sixty_minutes_until_the_weapon_catches_up")(r"""
+local spec, host = up({ learned = { "Flametongue Weapon" } })
+setWeapon(true, 20 * MIN * 1000, 29); tick(1.5)
+check(wordOf(host) == "20m", "read first")
+cast(8024)                                  -- the immediate read still shows the OLD enchant: 20 minutes, id 29
+check(wordOf(host) == "60m", "the cast's sixty minutes survive the old enchant's read, got " .. wordOf(host))
+tick(0.5)
+check(wordOf(host) == "60m", "and the next one, got " .. wordOf(host))
+setWeapon(true, 3599 * 1000, 5)
+fire("UNIT_INVENTORY_CHANGED", "player")
+check(wordOf(host) == "59m", "then the new enchant's own time takes over, got " .. wordOf(host))
 """)
 
 case("imbue_with_no_name_to_be_had_is_the_generic_code")(r"""
@@ -617,6 +733,20 @@ tick(2)
 check(imbueChip(host).word.text == "IMBUE", "a weapon that really lost it is missing once the grace is over")
 """)
 
+case("the_weapons_own_read_ends_the_cast_grace_so_a_real_loss_shows_at_once")(r"""
+local spec, host = up({})
+setWeapon(false); tick(1.5)
+cast(10399)
+tick(0.3)
+setWeapon(true, 3599 * 1000, 0)
+fire("UNIT_INVENTORY_CHANGED", "player")
+check(wordOf(host) == "59m", "the weapon caught up")
+setWeapon(false)
+tick(0.3)                                   -- 0.6 s after the cast, inside its 1.5 s grace
+fire("UNIT_INVENTORY_CHANGED", "player")
+check(wordOf(host) == "IMBUE", "a weapon that has shown the enchant and lost it is missing now, got " .. wordOf(host))
+""")
+
 case("an_imbue_that_is_gone_is_forgotten_and_the_next_one_is_named_afresh")(r"""
 local spec, host = up({ learned = { "Flametongue Weapon" } })
 cast(8024); setWeapon(true, 3600 * 1000, 5); tick(1.5)
@@ -632,6 +762,123 @@ local spec, host = up({})
 WEAPON = { false, 0, 0, 0, true, 30 * MIN * 1000, 0, 29 }
 tick(1.5)
 check(imbueChip(host).word.text == "30m", "the off hand's imbue is shown, got " .. tostring(imbueChip(host).word.text))
+""")
+
+case("with_both_hands_enchanted_the_chip_shows_the_one_with_the_least_time")(r"""
+local spec, host = up({})
+setHands({ 50 * MIN * 1000, 0 }, { 20 * MIN * 1000, 0 }); tick(1.5)
+check(wordOf(host) == "20m", "off hand has less: " .. wordOf(host))
+setHands({ 12 * MIN * 1000, 0 }, { 20 * MIN * 1000, 0 }); tick(1.5)
+check(wordOf(host) == "12m", "main hand has less: " .. wordOf(host))
+check(imbueChip(host).outline.vertex[1] == MU.UPK[1], "both are quiet above five minutes")
+setHands({ 4 * MIN * 1000, 0 }, { 50 * MIN * 1000, 0 }); tick(1.5)
+check(wordOf(host) == "4m", "and the expiring colour follows the least")
+secretWeapon(); enterCombat(); tick(2 * MIN)
+check(wordOf(host) == "2m", "in combat it counts down from that one, got " .. wordOf(host))
+""")
+
+case("the_imbue_named_is_the_one_of_the_hand_with_the_least_time")(r"""
+local spec, host = up({ learned = { "Windfury Weapon", "Flametongue Weapon" } })
+setHands({ 59 * MIN * 1000, 7 }, nil); cast(8232)                    -- Windfury on the main hand: id 7
+setHands({ 58 * MIN * 1000, 7 }, { 59 * MIN * 1000, 9 }); cast(8024)  -- Flametongue on the off hand: id 9
+tick(1.5)
+check(codeOf(host) == "WF" and wordOf(host) == "58m", "main hand is the least: " .. codeOf(host) .. " " .. wordOf(host))
+setHands({ 58 * MIN * 1000, 7 }, { 20 * MIN * 1000, 9 }); tick(1.5)
+check(codeOf(host) == "FT" and wordOf(host) == "20m", "off hand is the least: " .. codeOf(host) .. " " .. wordOf(host))
+""")
+
+case("a_dual_wielder_with_one_bare_weapon_is_asked_for_the_other_imbue")(r"""
+local spec, host = up({})
+equip(16, "INVTYPE_WEAPONMAINHAND"); equip(17, "INVTYPE_WEAPONOFFHAND")
+setHands({ 50 * MIN * 1000, 0 }, nil); tick(1.5)
+check(wordOf(host) == "IMBUE", "off hand holds a weapon with no imbue: " .. wordOf(host))
+colorIs(imbueChip(host).outline.vertex, MU.AMBER, "amber")
+setHands({ 50 * MIN * 1000, 0 }, { 40 * MIN * 1000, 0 }); tick(1.5)
+check(wordOf(host) == "40m", "imbued on both hands is quiet again: " .. wordOf(host))
+setHands(nil, { 40 * MIN * 1000, 0 }); tick(1.5)
+check(wordOf(host) == "IMBUE", "a bare main hand weapon is asked for too: " .. wordOf(host))
+secretWeapon(); enterCombat(); tick(1.5)
+check(wordOf(host) == "IMBUE", "a secret read in combat keeps what the last plain one said")
+""")
+
+case("a_shield_or_an_empty_or_two_handed_off_hand_is_not_a_missing_imbue")(r"""
+local spec, host = up({})
+equip(16, "INVTYPE_WEAPONMAINHAND"); equip(17, "INVTYPE_SHIELD")
+setHands({ 50 * MIN * 1000, 0 }, nil); tick(1.5)
+check(wordOf(host) == "50m", "a shield: " .. wordOf(host))
+EQUIP[17] = nil; tick(1.5)
+check(wordOf(host) == "50m", "nothing in the off hand: " .. wordOf(host))
+equip(16, "INVTYPE_2HWEAPON"); tick(1.5)
+check(wordOf(host) == "50m", "a two hander: " .. wordOf(host))
+equip(17, "INVTYPE_HOLDABLE"); tick(1.5)
+check(wordOf(host) == "50m", "a held in off hand frill: " .. wordOf(host))
+GetInventoryItemID = function() error("refused") end
+tick(1.5)
+check(wordOf(host) == "50m", "an item API that raises asks for nothing: " .. wordOf(host))
+noDegrade()
+""")
+
+case("a_bare_second_weapon_asks_nothing_of_a_shaman_who_knows_no_imbue")(r"""
+local spec, host = up({ unlearn = { "Rockbiter Weapon" } })
+equip(16, "INVTYPE_WEAPONMAINHAND"); equip(17, "INVTYPE_WEAPONOFFHAND")
+setHands({ 50 * MIN * 1000, 0 }, nil); tick(1.5)
+check(wordOf(host) == "50m", "an oil on one weapon, no imbue known: " .. wordOf(host))
+""")
+
+case("a_cast_answers_the_missing_hand_reminder_until_the_weapon_says_otherwise")(r"""
+local spec, host = up({})
+equip(16, "INVTYPE_WEAPONMAINHAND"); equip(17, "INVTYPE_WEAPONOFFHAND")
+setHands({ 50 * MIN * 1000, 29 }, nil); tick(1.5)
+check(wordOf(host) == "IMBUE", "asked first")
+cast(10399)
+check(wordOf(host) == "60m", "the cast clears the ask at once, got " .. wordOf(host))
+setHands({ 50 * MIN * 1000, 29 }, { 3599 * 1000, 31 }); fire("UNIT_INVENTORY_CHANGED", "player")
+check(wordOf(host) == "50m", "and both hands are now imbued, got " .. wordOf(host))
+""")
+
+# --------------------------------------------------------------------------------- secrets that say what they are
+
+case("a_secret_main_flag_is_unreadable_and_changes_nothing")(r"""
+local spec, host = up({})
+setWeapon(false); tick(1.5)
+check(wordOf(host) == "IMBUE", "missing first")
+WEAPON = { SBOOL, SNUM, SNUM, SNUM, SBOOL, SNUM, SNUM, SNUM }
+tick(1.5)
+check(wordOf(host) == "IMBUE", "a secret flag is not a read, got " .. wordOf(host))
+noDegrade()
+""")
+
+case("a_secret_off_hand_flag_with_no_main_enchant_is_unreadable")(r"""
+local spec, host = up({})
+setWeapon(false); tick(1.5)
+WEAPON = { false, 0, 0, 0, SBOOL, SNUM, SNUM, SNUM }
+tick(1.5)
+check(wordOf(host) == "IMBUE", "a secret off hand flag is not an enchant, got " .. wordOf(host))
+noDegrade()
+""")
+
+case("a_plain_enchant_with_a_secret_time_and_id_is_used_without_touching_them")(r"""
+local spec, host = up({})
+setWeapon(true, 20 * MIN * 1000, 0); tick(1.5)
+WEAPON = { true, SNUM, 0, SNUM, false, 0, 0, 0 }
+tick(5 * MIN)
+check(wordOf(host) == "15m", "the stored expiry counts down, got " .. wordOf(host))
+WEAPON = { true, SNUM, 0, SNUM, SBOOL, SNUM, 0, SNUM }
+tick(1)
+check(wordOf(host) == "14m", "a secret off hand beside it changes nothing, got " .. wordOf(host))
+WEAPON = { true, 10 * MIN * 1000, 0, 5, true, SNUM, 0, SNUM }
+tick(1)
+check(wordOf(host) == "10m", "one readable time of two is used, got " .. wordOf(host))
+noDegrade()
+""")
+
+case("a_secret_spell_id_on_a_cast_asks_the_spell_book_nothing")(r"""
+local spec, host = up({})
+setWeapon(false); tick(1.5)
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "guid", SNUM)
+check(#LEAKED == 0, "a secret spell id reached " .. tostring(LEAKED[1]))
+check(wordOf(host) == "IMBUE", "and nothing changed")
+noDegrade()
 """)
 
 # --------------------------------------------------------------------------------- events and throttle
@@ -658,7 +905,9 @@ local n = WEAPON_CALLS
 cast(403)
 fire("UNIT_SPELLCAST_SUCCEEDED", "target", "guid", 8017)
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "guid", SECRET)
+check(WEAPON_CALLS == n, "none of them read the weapon, got " .. (WEAPON_CALLS - n))
 check(imbueChip(host).word.text == "IMBUE", "still missing")
+check(shieldChip(host).word.text == "SHIELD", "and the shield is not claimed to be cast")
 """)
 
 case("events_and_the_tick_stop_while_hidden_and_return_when_shown")(r"""
@@ -674,7 +923,7 @@ check(WEAPON_CALLS > n, "showing it reads at once")
 local m = WEAPON_CALLS
 spec.onShow("lower")
 fire("UNIT_INVENTORY_CHANGED", "player")
-check(WEAPON_CALLS == m + 2 or WEAPON_CALLS == m + 1, "a second onShow does not double the events, got " .. (WEAPON_CALLS - m))
+check(WEAPON_CALLS == m + 2, "a second onShow reads once and does not double the events, got " .. (WEAPON_CALLS - m))
 """)
 
 # --------------------------------------------------------------------------------- shield chip
@@ -729,6 +978,65 @@ leaveCombat(); setShield(3); tick(1.5)
 check(shieldChip(host).word.text == "3", "and the real count when combat ends")
 """)
 
+case("a_shield_cast_in_combat_is_believed_for_ten_minutes_and_no_longer")(r"""
+local spec, host = up({})
+noShield(); tick(1.5)
+enterCombat(); tick(1.5)
+cast(10432)
+check(shieldChip(host).word.text == "~3", "cast in combat")
+tick(9 * MIN)
+check(shieldChip(host).word.text == "~3", "still believed at nine minutes, got " .. shieldChip(host).word.text)
+tick(2 * MIN)
+check(shieldChip(host).word.text == "SHIELD", "gone after its ten minutes, got " .. shieldChip(host).word.text)
+colorIs(shieldChip(host).outline.vertex, MU.AMBER, "amber")
+cast(10432)
+check(shieldChip(host).word.text == "~3", "and a new cast is believed again")
+""")
+
+case("a_shield_cast_over_an_older_one_in_combat_outlives_the_older_expiry")(r"""
+local spec, host = up({})
+setShield(3, NOW + 120); tick(1.5)
+enterCombat(); tick(100)
+check(shieldChip(host).word.text == "~3", "the old shield is still there")
+cast(324)
+tick(300)
+check(shieldChip(host).word.text == "~3", "the recast shield is not judged by the old expiry, got " .. shieldChip(host).word.text)
+""")
+
+case("a_shield_seen_before_combat_with_no_expiry_is_believed_for_ten_minutes_from_the_last_read")(r"""
+local spec, host = up({})
+setShield(3, 0); tick(1.5)
+check(shieldChip(host).word.text == "3", "up with no expiry the aura told")
+enterCombat(); tick(1.5)
+check(shieldChip(host).word.text == "~3", "estimate in combat")
+tick(8 * MIN)
+check(shieldChip(host).word.text == "~3", "still believed, got " .. shieldChip(host).word.text)
+tick(2 * MIN)
+check(shieldChip(host).word.text == "SHIELD", "not forever: it lasts ten minutes, got " .. shieldChip(host).word.text)
+""")
+
+case("a_water_shield_up_hides_the_shield_chip_instead_of_nagging")(r"""
+local spec, host = up({})
+waterShield(); tick(1.5)
+check(not shown(shieldChip(host)), "a Water Shield is not a missing Lightning Shield")
+check(shown(imbueChip(host)), "the imbue chip stays")
+waterShield(true); fire("UNIT_AURA", "player")
+check(not shown(shieldChip(host)), "found by spell id when the aura has no name")
+enterCombat(); tick(1.5)
+check(not shown(shieldChip(host)), "and in combat from the last live read")
+cast(324)
+check(shown(shieldChip(host)) and shieldChip(host).word.text == "~3", "a Lightning Shield cast in combat shows")
+leaveCombat(); noShield(); tick(2)
+check(shieldChip(host).word.text == "SHIELD", "with neither up it asks again, got " .. tostring(shieldChip(host).word.text))
+""")
+
+case("lightning_shield_up_beside_nothing_else_is_unaffected_by_the_water_shield_rule")(r"""
+local spec, host = up({})
+SNAP = { buffs = { { name = "Lightning Shield", count = 2, expirationTime = NOW + 600, spellId = 324 } } }
+tick(1.5)
+check(shieldChip(host).word.text == "2", "unchanged")
+""")
+
 case("shield_with_nothing_ever_read_is_a_question_mark")(r"""
 local spec, host = up({ noAuras = true })
 tick(1.5)
@@ -742,6 +1050,32 @@ check(shieldChip(host2).word.text == "?", "frozen on the first read with no cach
 """)
 
 # --------------------------------------------------------------------------------- not learned
+
+case("an_unlearned_spell_is_asked_about_once_until_the_spellbook_changes")(r"""
+local spec, host = up({ unlearn = { "Lightning Shield" } })
+tick(1.5)
+local book, info = BOOK_CALLS, INFO_CALLS
+for _ = 1, 5 do tick(1.5) end
+check(BOOK_CALLS == book and INFO_CALLS == info, "five ticks asked the spell book " .. (BOOK_CALLS - book) .. " and spell info " .. (INFO_CALLS - info) .. " times")
+fire("UNIT_INVENTORY_CHANGED", "player"); fire("UNIT_AURA", "player")
+check(BOOK_CALLS == book and INFO_CALLS == info, "and so did the events")
+learn("Lightning Shield"); fire("LEARNED_SPELL_IN_TAB")
+check(shown(shieldChip(host)), "LEARNED_SPELL_IN_TAB asks again")
+local spec2, host2 = up({ unlearn = { "Lightning Shield" } })
+learn("Lightning Shield"); fire("PLAYER_LEVEL_UP", 9)
+check(shown(shieldChip(host2)), "PLAYER_LEVEL_UP asks again")
+""")
+
+case("showing_the_module_again_asks_the_spell_book_again")(r"""
+local spec, host = up({ unlearn = { "Lightning Shield" } })
+tick(1.5)
+check(not shown(shieldChip(host)), "not learned")
+learn("Lightning Shield")
+tick(1.5)
+check(not shown(shieldChip(host)), "a tick alone does not ask")
+spec.onHide("lower"); spec.onShow("lower")
+check(shown(shieldChip(host)), "a show does")
+""")
 
 case("a_shield_you_have_not_learned_draws_no_chip")(r"""
 local spec, host = up({ unlearn = { "Lightning Shield" } })

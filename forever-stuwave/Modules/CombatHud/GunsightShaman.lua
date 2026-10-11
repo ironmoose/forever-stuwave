@@ -6,12 +6,17 @@
 -- Nova ring are not drawn yet; they get their own sections below the chips. Offsets are image px from the area rect's
 -- corner; gunsightshaman-harness.py parses them back out of the mockup.
 --
--- IMBUE: weapon imbue and its time left. GetWeaponEnchantInfo gives the time in ms and (maybe) the enchant id. Imbues
--- last 60 minutes, so the expiry is stored from every plain read and in combat, where the read may be secret, the chip
--- keeps counting down from it. Which imbue it is comes from the enchant id, else from our own UNIT_SPELLCAST_SUCCEEDED
--- (a cast beats the table and teaches the id), else the one imbue the Shaman knows, else IM.
+-- IMBUE: weapon imbue and its time left. GetWeaponEnchantInfo gives the time in ms and (maybe) the enchant id of BOTH
+-- hands, read every time. Imbues last 60 minutes, so the expiry is stored from every plain read and in combat, where
+-- the read may be secret, the chip keeps counting down from it. The chip shows the enchanted hand with the LEAST time
+-- left. Dual wield rule: when exactly one hand is enchanted and the other holds a weapon (not a shield or a held-in-off-
+-- hand frill) and the Shaman knows an imbue, the chip is amber IMBUE until that hand has one too.
+-- Which imbue it is: the enchant ids are NOT known on Forever (the Classic ids are listed in IMBUES only as a reference),
+-- so an id names an imbue only after our own UNIT_SPELLCAST_SUCCEEDED confirmed it (a cast teaches the id it produced),
+-- else the one imbue the Shaman knows, else IM.
 -- SHIELD: Lightning Shield and its orb count, from the FS.PlayerAuras snapshot Buffs.lua keeps (plain values, frozen in
--- combat), so no aura API is read here. In combat the last live answer is an estimate (a "~" before the count).
+-- combat), so no aura API is read here. In combat the last live answer is an estimate (a "~" before the count) that
+-- is believed for at most the shield's ten minutes. A Water Shield on the Shaman hides the chip (it is not missing).
 -- A spell the Shaman has not learned draws no chip, so there is no nagging "missing".
 
 local _, FS = ...
@@ -33,6 +38,7 @@ local M = {
     TEXT_MID = 0.35,                            -- a line's centre sits this fraction of its size above the baseline
     TICK = 1,                                   -- seconds between reads: the 1 s tick is plenty for hour long imbues
     IMBUE_S = 3600, SHIELD_ORBS = 3,            -- a fresh imbue, a fresh Lightning Shield
+    SHIELD_S = 600,                             -- Lightning Shield lasts ten minutes: no estimate is believed longer
     EXPIRING_S = 300,                           -- an imbue at five minutes or less turns to the expiring colour
     CAST_GRACE = 1.5, FRESH_S = 10,             -- seconds a cast stands before the weapon or the aura has caught up
     UPK = { 0xd9 / 255, 0xa5 / 255, 0x21 / 255 },       -- #d9a521 the chip gold
@@ -44,20 +50,20 @@ local M = {
 
 local MEDIA = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
 
--- The four imbues, in the order they are learned. `base` is a rank id used only to read the spell's localized name;
--- `enchants` are the Classic era weapon enchant ids by rank, from the Classic data and NOT verified on Forever: a cast
--- names the imbue first and teaches its id, and the one known imbue is the last guess, so a wrong id only costs a code.
+-- The four imbues, in the order they are learned. `base` is a rank id used only to read the spell's localized name.
+-- The Classic era weapon enchant ids by rank, for reference only (NOT verified on Forever, so never used to name an
+-- imbue; a cast teaches the real ones): Rockbiter 29 6 1 503 1663 683 1664, Flametongue 5 4 3 523 1665 1666,
+-- Frostbrand 2 12 524 1667 1668, Windfury 283 284 525 1669 2636.
 local IMBUES = {
-    { code = "RB", name = "Rockbiter Weapon", base = 8017, enchants = { 29, 6, 1, 503, 1663, 683, 1664 } },
-    { code = "FT", name = "Flametongue Weapon", base = 8024, enchants = { 5, 4, 3, 523, 1665, 1666 } },
-    { code = "FB", name = "Frostbrand Weapon", base = 8033, enchants = { 2, 12, 524, 1667, 1668 } },
-    { code = "WF", name = "Windfury Weapon", base = 8232, enchants = { 283, 284, 525, 1669, 2636 } },
+    { code = "RB", name = "Rockbiter Weapon", base = 8017 },
+    { code = "FT", name = "Flametongue Weapon", base = 8024 },
+    { code = "FB", name = "Frostbrand Weapon", base = 8033 },
+    { code = "WF", name = "Windfury Weapon", base = 8232 },
 }
 local SHIELD = { name = "Lightning Shield", base = 324 }
-local ENCHANT_CODE = {}
-for _, def in ipairs(IMBUES) do
-    for _, id in ipairs(def.enchants) do ENCHANT_CODE[id] = def.code end
-end
+local WATER = { name = "Water Shield", base = 24398 }   -- hides the SHIELD chip; harmless where the spell does not exist
+-- Item equip locations that are a weapon (a shield is INVTYPE_SHIELD, a held-in-off-hand frill INVTYPE_HOLDABLE).
+local WEAPON_LOC = { INVTYPE_WEAPON = true, INVTYPE_WEAPONMAINHAND = true, INVTYPE_WEAPONOFFHAND = true, INVTYPE_2HWEAPON = true }
 
 local logged = {}
 local function LogOnce(key, msg)
@@ -104,20 +110,21 @@ local function SpellInfo(x)
     return nil
 end
 
--- true when the player knows this spell id, asking every spellbook API the client has (TotemBar's IsKnownSpellId). An
--- API that raises or answers secret counts as "no" and is asked again at the next read; with none present it is true.
+-- One spellbook API's answer: asked, yes. A missing API is not asked; one that raises or answers secret says no.
+local function Ask(fn, id)
+    if not fn then return false, false end
+    local ok, answer = pcall(fn, id)
+    return true, (ok and not IsSecret(answer) and answer) and true or false
+end
+
+-- true when the player knows this spell id, asking every spellbook API the client has (TotemBar's IsKnownSpellId); with
+-- none present it is true. No table is built: this runs only when a negative answer is asked again.
 local function IsKnownSpellId(id)
-    local fns = { IsPlayerSpell, IsSpellKnown, C_SpellBook and C_SpellBook.IsSpellKnown }
-    local asked = false
-    for i = 1, 3 do
-        local fn = fns[i]
-        if fn then
-            asked = true
-            local ok, answer = pcall(fn, id)
-            if ok and not IsSecret(answer) and answer then return true end
-        end
-    end
-    return not asked
+    local a1, y1 = Ask(IsPlayerSpell, id)
+    local a2, y2 = Ask(IsSpellKnown, id)
+    local a3, y3 = Ask(C_SpellBook and C_SpellBook.IsSpellKnown, id)
+    if y1 or y2 or y3 then return true end
+    return not (a1 or a2 or a3)
 end
 
 local nameById = {}
@@ -141,13 +148,14 @@ local function SpellKnown(def)
     return def.base ~= id and IsKnownSpellId(def.base) or false
 end
 
--- Learned spells: a positive answer sticks until the spellbook changes, a negative one is asked again at each read.
+-- Learned spells: an answer, yes or no, sticks until the spellbook changes (SPELLBOOK_EVENTS and each show drop it), so
+-- an unlearned spell is not asked about at every tick.
 local known = {}
 local function RefreshKnown()
     for _, def in ipairs(IMBUES) do
-        if not known[def.code] then known[def.code] = SpellKnown(def) end
+        if known[def.code] == nil then known[def.code] = SpellKnown(def) end
     end
-    if not known.shield then known.shield = SpellKnown(SHIELD) end
+    if known.shield == nil then known.shield = SpellKnown(SHIELD) end
 end
 
 local function KnownImbues()
@@ -171,64 +179,116 @@ end
 
 local imbue = {
     present = nil,        -- true (an enchant is on a weapon), false (none), nil (never read)
-    expiry = nil,         -- GetTime() when it falls off, from the last plain read or a cast
-    code = nil,           -- the code of the enchant that is on now
+    expiry = nil,         -- GetTime() when it falls off (the hand with the least time), from the last plain read or a cast
+    code = nil,           -- the code of the enchant that is on now, when a cast or a taught id says so (not a guess)
     lastCode = nil,       -- the last code ever named, kept for the missing chip
-    id = nil,             -- the last plain enchant id read
-    fresh = nil,          -- { code, prevId, expires } from a cast, until a different enchant id is read
-    learned = {},         -- enchant id -> code, taught by casts
+    idMain = nil, idOff = nil,  -- the last plain enchant id of each hand
+    cast = nil,           -- { code, prevMain, prevOff, at } of an imbue cast whose enchant id has not shown up yet
+    learned = {},         -- enchant id -> code, taught by casts: the only thing that names an imbue by its id
+    handMissing = false,  -- one hand is enchanted and the other holds a weapon with no enchant
     graceUntil = 0,       -- a cast stands against a "no enchant" read until then
 }
 
--- "has", ms, id when an enchant is on a hand; "none"; "unreadable" for a missing API, a throw or a secret answer.
+local weaponLoc = {}      -- item id -> true when it is a weapon, false when it is not (shield, frill)
+
+-- true when the item in this equipment slot is a weapon. Guarded: any refusal or secret answer says no.
+local function HandHoldsWeapon(slot)
+    if type(GetInventoryItemID) ~= "function" then return false end
+    local ok, itemId = pcall(GetInventoryItemID, "player", slot)
+    itemId = ok and PlainOf(itemId, "number") or nil
+    if not itemId then return false end
+    local isWeapon = weaponLoc[itemId]
+    if isWeapon == nil then
+        local info = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+        if type(info) ~= "function" then return false end
+        local ok2, _, _, _, equipLoc = pcall(info, itemId)
+        equipLoc = ok2 and PlainOf(equipLoc, "string") or nil
+        if not equipLoc then return false end
+        isWeapon = WEAPON_LOC[equipLoc] or false
+        weaponLoc[itemId] = isWeapon
+    end
+    return isWeapon
+end
+
+-- Both hands, every time. "has", ms, pickId, mainId, offId, handMissing when an enchant is on a hand: ms and pickId are
+-- those of the enchanted hand with the LEAST time left; handMissing when the other hand holds a weapon with none.
+-- "none"; "unreadable" for a missing API, a throw or a secret answer (a secret flag is never tested, only IsSecret'd).
 local function ReadWeapon()
     if type(GetWeaponEnchantInfo) ~= "function" then return "unreadable" end
     local ok, hasMain, msMain, _, idMain, hasOff, msOff, _, idOff = pcall(GetWeaponEnchantInfo)
     if not ok or IsSecret(hasMain) then return "unreadable" end
-    local ms, id
-    if hasMain then
-        ms, id = PlainOf(msMain, "number"), PlainOf(idMain, "number")
+    local offSecret = IsSecret(hasOff)
+    if not hasMain and offSecret then return "unreadable" end
+    local mainOn = hasMain and true or false
+    local offOn = (not offSecret and hasOff) and true or false
+    if not (mainOn or offOn) then return "none" end
+    local mMs, mId, oMs, oId
+    if mainOn then mMs, mId = PlainOf(msMain, "number"), PlainOf(idMain, "number") end
+    if offOn then oMs, oId = PlainOf(msOff, "number"), PlainOf(idOff, "number") end
+    if mId and mId <= 0 then mId = nil end
+    if oId and oId <= 0 then oId = nil end
+    local ms, pick
+    if mMs and oMs then
+        if oMs < mMs then ms, pick = oMs, oId else ms, pick = mMs, mId end
+    elseif mMs or oMs then
+        if mMs then ms, pick = mMs, mId else ms, pick = oMs, oId end
     else
-        if IsSecret(hasOff) then return "unreadable" end
-        if not hasOff then return "none" end
-        ms, id = PlainOf(msOff, "number"), PlainOf(idOff, "number")
+        pick = mId or oId
     end
-    if id and id <= 0 then id = nil end
-    return "has", ms, id
+    local missing = false
+    if mainOn and not offOn and not offSecret then missing = HandHoldsWeapon(17)
+    elseif offOn and not mainOn then missing = HandHoldsWeapon(16) end
+    return "has", ms, pick, mId, oId, missing
 end
 
--- Names the enchant that is on the weapon: a fresh cast, an id we were taught, the table, what we already called it,
--- the only imbue the Shaman knows. nil when there is no honest guess (the chip then says IM).
-local function Identify(id, now)
-    local fresh = imbue.fresh
-    if fresh and now > fresh.expires then fresh = nil; imbue.fresh = nil end
-    if id then
-        if fresh and id ~= fresh.prevId then
-            imbue.learned[id] = fresh.code
-            imbue.fresh = nil
+-- Names the enchant that is on the weapon and says whether the weapon is still BEHIND a cast we made (it reports only
+-- the enchants it had before, so its time is the old one's). A cast is believed until a hand shows an enchant id that
+-- was not there before it: that id is taught as the cast's code (unless it is already known as a different imbue, which
+-- then wins), or until the weapon never changed past FRESH_S (a recast of the same imbue). Two new ids at once cannot
+-- be told apart and teach nothing. An id names an imbue only through `learned`; with no id readable the last name stays.
+local function Identify(pick, mId, oId, now)
+    local cast, behind = imbue.cast, false
+    if cast then
+        local newId, newCount = nil, 0
+        if mId and mId ~= cast.prevMain and mId ~= cast.prevOff then newId, newCount = mId, newCount + 1 end
+        if oId and oId ~= cast.prevMain and oId ~= cast.prevOff then newId, newCount = oId, newCount + 1 end
+        if newCount == 1 then
+            if not imbue.learned[newId] then imbue.learned[newId] = cast.code end
+            imbue.cast = nil
+        elseif newCount > 1 then
+            imbue.cast = nil
+        elseif (mId or oId) and now > cast.at + M.FRESH_S then
+            imbue.cast = nil
+        else
+            behind = (mId or oId) ~= nil
         end
-        imbue.id = id
     end
-    local code = (fresh and fresh.code) or (id and (imbue.learned[id] or ENCHANT_CODE[id])) or imbue.code
-    if not code then
-        local n, only = KnownImbues()
-        if n == 1 then code = only end
-    end
+    local code
+    if imbue.cast then code = imbue.cast.code
+    elseif pick then code = imbue.learned[pick]
+    else code = imbue.code end
     imbue.code = code
     if code then imbue.lastCode = code end
+    return behind
 end
 
 local function ReadImbue()
-    local status, ms, id = ReadWeapon()
+    local status, ms, pick, mId, oId, missing = ReadWeapon()
     local now = GetTime()
     if status == "has" then
         imbue.present = true
         imbue.graceUntil = 0
-        if ms then imbue.expiry = now + ms / 1000 end
-        Identify(id, now)
+        local behind = Identify(pick, mId, oId, now)
+        imbue.idMain, imbue.idOff = mId, oId
+        -- a weapon still behind a cast reports the OLD enchants (their time, their missing hand): keep what the cast said
+        if not behind then
+            imbue.handMissing = missing
+            if ms then imbue.expiry = now + ms / 1000 end
+        end
     elseif status == "none" then
         if now < imbue.graceUntil then return end
-        imbue.present, imbue.expiry, imbue.code, imbue.id, imbue.fresh = false, nil, nil, nil, nil
+        imbue.present, imbue.expiry, imbue.code, imbue.cast, imbue.handMissing = false, nil, nil, nil, false
+        imbue.idMain, imbue.idOff = nil, nil
     end
 end
 
@@ -239,7 +299,8 @@ local function OnImbueCast(def)
     imbue.graceUntil = now + M.CAST_GRACE
     imbue.code = def.code
     imbue.lastCode = def.code
-    imbue.fresh = { code = def.code, prevId = imbue.id, expires = now + M.FRESH_S }
+    imbue.handMissing = false           -- the cast answers the reminder; the next read says whether it did
+    imbue.cast = { code = def.code, prevMain = imbue.idMain, prevOff = imbue.idOff, at = now }
 end
 
 -------------------------------------------------------------------------------
@@ -250,15 +311,17 @@ local shield = {
     seen = nil,           -- the last live answer: "up", "missing" or nil (none yet)
     count = nil,          -- its orb count
     expiry = nil,         -- when it falls off, if the aura told
+    readAt = nil,         -- GetTime() of the last live read that found it up (its ten minutes count from there)
     castAt = nil,         -- a cast the snapshot has not confirmed yet
+    other = false,        -- the last live read found a Water Shield (the chip is not about to be missing)
     frozen = false,       -- the snapshot cannot refresh (combat)
     available = false,    -- FS.PlayerAuras exists
 }
 
-local function AuraIsShield(aura)
+local function AuraIs(aura, def)
     if type(aura) ~= "table" then return false end
-    if NameIs(aura.name, SHIELD) then return true end
-    if aura.name == nil and type(aura.spellId) == "number" then return NameIs(SpellNameById(aura.spellId), SHIELD) end
+    if NameIs(aura.name, def) then return true end
+    if aura.name == nil and type(aura.spellId) == "number" then return NameIs(SpellNameById(aura.spellId), def) end
     return false
 end
 
@@ -280,19 +343,23 @@ local function ReadShield()
     local list = ok and type(snap) == "table" and snap.buffs or nil
     if type(list) ~= "table" then return end
     local now = GetTime()
+    local other = false
     for i = 1, #list do
         local aura = list[i]
-        if AuraIsShield(aura) then
+        if AuraIs(aura, SHIELD) then
             shield.seen = "up"
             shield.count = PlainOf(aura.count, "number")
             local expires = PlainOf(aura.expirationTime, "number")
             shield.expiry = expires and expires > 0 and expires or nil
-            shield.castAt = nil
+            shield.readAt, shield.castAt, shield.other = now, nil, false
             return
+        elseif AuraIs(aura, WATER) then
+            other = true
         end
     end
+    shield.other = other
     if shield.castAt and now < shield.castAt + M.CAST_GRACE then return end
-    shield.seen, shield.count, shield.expiry, shield.castAt = "missing", nil, nil, nil
+    shield.seen, shield.count, shield.expiry, shield.readAt, shield.castAt = "missing", nil, nil, nil, nil
 end
 
 local function OnShieldCast()
@@ -424,9 +491,9 @@ end
 
 local function PaintImbue(now)
     local chip = chips.imbue
-    local anyKnown = KnownImbues() > 0
+    local nKnown, onlyKnown = KnownImbues()
     local present = imbue.present
-    if not (anyKnown or present == true) then
+    if not (nKnown > 0 or present == true) then
         PaintChip(chip, false)
         return
     end
@@ -436,14 +503,18 @@ local function PaintImbue(now)
         mode, text = "hollow", "?"
     else
         local remaining = present and imbue.expiry - now or 0
-        if remaining <= 0 then
+        if remaining <= 0 or (imbue.handMissing and nKnown > 0) then
             mode, text = "warn", "IMBUE"
         else
             mode = remaining <= M.EXPIRING_S and "expiring" or "on"
             text = FormatTime(remaining)
         end
     end
-    if mode == "warn" or mode == "hollow" then code = code or imbue.lastCode or BestKnownImbue() end
+    if mode == "warn" or mode == "hollow" then
+        code = code or imbue.lastCode or BestKnownImbue()
+    elseif not code and nKnown == 1 then
+        code = onlyKnown                    -- the one imbue the Shaman knows is the honest guess
+    end
     PaintChip(chip, true, mode, code or "IM", text)
 end
 
@@ -456,11 +527,17 @@ local function PaintShield(now)
     local count = shield.count
     local up = shield.seen == "up"
     local estimate
-    if shield.castAt and (shield.frozen or now < shield.castAt + M.CAST_GRACE) then
+    local at = shield.castAt
+    if at and (now < at + M.CAST_GRACE or (shield.frozen and now < at + M.SHIELD_S)) then
         up, estimate, count = true, true, M.SHIELD_ORBS
     elseif shield.frozen and up then
         estimate = true
-        if shield.expiry and shield.expiry <= now then up = false end
+        local ends = shield.expiry or (shield.readAt and shield.readAt + M.SHIELD_S)
+        if ends and ends <= now then up = false end
+    end
+    if not up and shield.other then          -- a Water Shield instead: nothing to remind about
+        PaintChip(chip, false)
+        return
     end
     local mode, text
     if not shield.available and shield.seen == nil then
@@ -520,7 +597,9 @@ local function OnCast(spellId)
     end
 end
 
-local SPELLBOOK_EVENTS = { SPELLS_CHANGED = true, PLAYER_LEVEL_UP = true, LEARNED_SPELL_IN_SKILL_LINE = true }
+local SPELLBOOK_EVENTS = {
+    SPELLS_CHANGED = true, PLAYER_LEVEL_UP = true, LEARNED_SPELL_IN_SKILL_LINE = true, LEARNED_SPELL_IN_TAB = true,
+}
 
 local function OnEvent(_, event, unit, _, spellId)
     if (event == "UNIT_INVENTORY_CHANGED" or event == "UNIT_AURA" or event == "UNIT_SPELLCAST_SUCCEEDED")
@@ -599,6 +678,7 @@ end
 local function OnShow()
     if not built then return end
     SetEvents(true)
+    known = {}                              -- the spellbook may have changed while hidden
     elapsed = 0
     frame:SetScript("OnUpdate", function(_, dt)
         elapsed = elapsed + dt
