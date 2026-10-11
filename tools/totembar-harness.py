@@ -21,6 +21,13 @@ combat only (no secure snippet, no state driver), cooldown swipes fed from durat
     counts as landed only when the slot reads the pick back; the button shows what the slot really holds, a pick
     that never lands (blocked call, slot that never updates) drops the element to spell mode, and a slot that is
     empty or not yet filled never leaves a dead action button;
+  * ACTION mode also needs the multi-cast bar to exist (HasMultiCastActionBar, else Call of the Elements known):
+    below that the tab is SPELL mode with no SetMultiCastSpell call and no warning. An empty or foreign slot is
+    filled only at the id the native multi-cast button reported (a formula id is adopted, never written; a slot
+    holding another element's totem is a mapping error). A call that raises twice, or a fill the slot never
+    takes, gives the element up to SPELL mode until a learn event (PLAYER_LEVEL_UP, a changed known set) allows
+    one fresh try; the tab's own default fill is never saved as the user's pick;
+  * totems are found by rank 1 spell id (their localized name finds the highest rank known), not by English name;
   * the picker is a plain frame on UIParent that nothing secure is a child of or anchored to; it opens from the
     arrow tab or an Alt-click (which never drops the totem), lists the known totems, and a click stores the pick
     per character;
@@ -84,6 +91,15 @@ TOTEMS = {
     "water": ["Healing Stream Totem", "Poison Cleansing Totem", "Mana Spring Totem", "Fire Resistance Totem"],
     "air": ["Grounding Totem", "Nature Resistance Totem"],
 }
+# the rank 1 spell ids TotemBar.lua carries (the mock names them, so the addon finds the localized name by id)
+TOTEM_IDS = {
+    "Searing Totem": 3599, "Frost Resistance Totem": 8181, "Magma Totem": 8190, "Flametongue Totem": 8227,
+    "Stoneskin Totem": 8071, "Earthbind Totem": 2484, "Stoneclaw Totem": 5730, "Strength of Earth Totem": 8075,
+    "Tremor Totem": 8143,
+    "Healing Stream Totem": 5394, "Poison Cleansing Totem": 8166, "Mana Spring Totem": 5675,
+    "Fire Resistance Totem": 8184,
+    "Grounding Totem": 8177, "Nature Resistance Totem": 10595,
+}
 CALL, ANCESTORS, RECALL = 66842, 66843, 36936
 BAR = 12          # what GetMultiCastBarIndex answers in the mock
 GUID = "Player-1-0000ABCD"
@@ -117,13 +133,19 @@ end
 function __unlearn(name) local id = __spells[name]; __learned[id] = nil end
 __ids = {}
 do
-    local n = 1000
-    local function reg(list) for _, name in ipairs(list) do n = n + 1; __ids[name] = n; __spell(name, n, false) end end
-    reg(%(all)s)
+    for name, id in pairs(%(all)s) do __ids[name] = id; __spell(name, id, false) end
 end
 function __know(name) __learned[__ids[name]] = true end
 -- the multi-cast bar: C_ActionBar.GetMultiCastBarIndex, GetMultiCastTotemSpells(slot), SetMultiCastSpell(action, spell)
-__mc = { bar = %(bar)d, lists = {}, slots = {}, calls = {}, refuse = false, barMode = nil, listMode = nil, noApi = false }
+__mc = { bar = %(bar)d, lists = {}, slots = {}, calls = {}, refuse = false, barMode = nil, listMode = nil, noApi = false,
+         hasBar = true }
+-- HasMultiCastActionBar: true once the client has the bar (Call of the Elements known); a test sets __mc.hasBar
+function HasMultiCastActionBar()
+    if __mc.hasBarMode == "throw" then error("HasMultiCastActionBar blew up") end
+    if __mc.hasBarMode == "secret" then return __SECRET end
+    if __mc.hasBarMode == "number" then return __mc.hasBar and 1 or 0 end
+    return __mc.hasBar
+end
 C_ActionBar.GetMultiCastBarIndex = function()
     if __mc.barMode == "throw" then error("GetMultiCastBarIndex blew up") end
     if __mc.barMode == "secret" then return __SECRET end
@@ -145,6 +167,9 @@ function SetMultiCastSpell(action, spell)
     if __mc.throws then error("SetMultiCastSpell blew up") end
     -- a blocked call from tainted code does nothing at all (here it is a plain no-op)
     if __mc.blocked or (__combat and __mc.refuse) then return end
+    -- an event the call raises synchronously (ACTIONBAR_SLOT_CHANGED), once, before the slot has changed
+    local ev = __mc.reenter
+    if ev then __mc.reenter = nil; __fire_event(ev) end
     -- a slot that updates later: the call is accepted, GetActionInfo shows it only after __mc_flush()
     if __mc.delay then __mc.queued[action] = spell; return end
     __mc.slots[action] = spell
@@ -169,6 +194,15 @@ function __native(base)
     SHAMAN_TOTEM_PRIORITIES = { 2, 1, 3, 4 }
     for i = 1, 4 do
         _G["MultiCastActionButton" .. i] = { CalculateAction = function() return base + i end }
+    end
+end
+-- the same buttons, answering the id the formula gives for their totem slot (the default world: the native bar and
+-- the formula agree, and a test that wants the formula alone boots with native=False)
+function __nativeFormula()
+    SHAMAN_TOTEM_PRIORITIES = { 2, 1, 3, 4 }
+    for i = 1, 4 do
+        local slot = SHAMAN_TOTEM_PRIORITIES[i]
+        _G["MultiCastActionButton" .. i] = { CalculateAction = function() return (%(bar)d - 1) * 12 + slot end }
     end
 end
 function GetActionInfo(action)
@@ -196,12 +230,14 @@ end
 """
 
 def boot(scale: float = 1.0, *, klass: str = "SHAMAN", learned=(), lists=None, spells=(), combat: bool = False,
-         bar_mode=None, list_mode=None, console: bool = True, pre_login: str = ""):
+         bar_mode=None, list_mode=None, console: bool = True, pre_login: str = "", native: bool = True):
     """A Shaman world. `learned`: totem names the spellbook knows; `lists`: {slot: [names]} the multi-cast
-    API reports; `spells`: other spell names to know (Call of the Elements etc., by id through __spell)."""
-    all_names = [n for names in TOTEMS.values() for n in names]
-    mocks = MOCKS % dict(guid=GUID, bar=BAR, all="{" + ",".join(f'"{n}"' for n in all_names) + "}")
-    setup = [f'__know("{n}")' for n in learned]
+    API reports; `spells`: other spell names to know (Call of the Elements etc., by id through __spell).
+    `native`: install Blizzard's multi-cast buttons answering the formula's ids (False: the formula is all there is)."""
+    all_ids = "{" + ",".join(f'["{n}"]={i}' for n, i in TOTEM_IDS.items()) + "}"
+    mocks = MOCKS % dict(guid=GUID, bar=BAR, all=all_ids)
+    setup = ["__nativeFormula()"] if native else []
+    setup += [f'__know("{n}")' for n in learned]
     for slot, names in (lists or {}).items():
         setup.append(f"__mc_list({slot}, {{" + ",".join(f'"{n}"' for n in names) + "})")
     for name, sid in (("Call of the Elements", CALL), ("Call of the Ancestors", ANCESTORS),
@@ -378,8 +414,7 @@ def check_locked_buttons_carry_nothing_castable_and_dim_by_alpha():
         b = btn(lua, i)
         assert b.fsLocked, f"button {i} should be locked"
         for name in ("type", "type1", "type2", "action1", "spell", "spell1", "totem-slot2", "alt-type1",
-                     "alt-shift-type1", "alt-ctrl-type1", "alt-ctrl-shift-type1", "ctrl-alt-type1",
-                     "ctrl-alt-shift-type1", "shift-type1", "shift-spell1"):
+                     "alt-shift-type1", "alt-ctrl-type1", "alt-ctrl-shift-type1", "shift-type1", "shift-spell1"):
             assert attr(b, name) is None, f"locked button {i} carries {name}={attr(b, name)!r}"
         assert b._alpha < 1, f"locked button {i} is not dimmed"
         assert shown(b), f"locked button {i} was hidden, a locked button is dimmed by alpha"
@@ -433,7 +468,7 @@ def check_default_pick_is_the_first_known_totem_and_a_stale_pick_falls_back():
     assert attr(by_key(lua, "earth"), "spell1") == "Earthbind Totem"
     # a stored pick that is known is kept
     lua = boot(learned=["Earthbind Totem", "Tremor Totem"], pre_login=(
-        f'ForeverSTUwaveDB = {{ totemPicks = {{ [{GUID!r}] = {{ earth = {{ id = 1009, name = "Tremor Totem" }} }} }} }}'))
+        f'ForeverSTUwaveDB = {{ totemPicks = {{ [{GUID!r}] = {{ earth = {{ id = {TOTEM_IDS["Tremor Totem"]}, name = "Tremor Totem" }} }} }} }}'))
     assert attr(by_key(lua, "earth"), "spell1") == "Tremor Totem"
 
 
@@ -575,14 +610,17 @@ def check_the_action_id_comes_from_the_native_multicast_button_when_it_exists():
     assert attr(fire_b, "action1") == 202, f"fire action1 {attr(fire_b, 'action1')} (native button 2 = 202)"
     assert sorted(c[0] for c in mc_calls(lua)) == [201, 202], mc_calls(lua)
     assert attr(earth, "action1") != action_id(2), "the formula was used with a native button present"
-    # a native button that answers nothing usable falls back to the formula
+    # a native button that answers nothing usable falls back to the formula, which may ADOPT a slot that already
+    # holds one of the element's totems (and never fills one: see the clobber check)
+    held = f'__mc.slots[{action_id(2)}] = __ids["Stoneskin Totem"]'
     for broken in ("function() error('boom') end", "function() return __SECRET end", "function() return 'x' end"):
         lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"),
-                   pre_login=f"__native(200); MultiCastActionButton1.CalculateAction = {broken}")
+                   pre_login=f"__native(200); MultiCastActionButton1.CalculateAction = {broken}; {held}")
         assert attr(by_key(lua, "earth"), "action1") == action_id(2), broken
+        assert mc_calls(lua) == [], broken
     # no priorities: the mapping cannot be told, formula
     lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"),
-               pre_login="__native(200); SHAMAN_TOTEM_PRIORITIES = nil")
+               pre_login=f"__native(200); SHAMAN_TOTEM_PRIORITIES = nil; {held}")
     assert attr(by_key(lua, "earth"), "action1") == action_id(2)
 
 
@@ -847,9 +885,11 @@ def check_plain_zero_totem_times_in_combat_are_unknown_not_no_totem():
 def check_alt_modified_clicks_carry_an_empty_type_and_open_the_picker():
     lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"))
     b = by_key(lua, "earth")
-    for name in ("alt-type1", "alt-shift-type1", "alt-ctrl-type1", "alt-ctrl-shift-type1", "ctrl-alt-type1",
-                 "ctrl-alt-shift-type1"):
+    for name in ("alt-type1", "alt-shift-type1", "alt-ctrl-type1", "alt-ctrl-shift-type1"):
         assert name in b._attrs and attr(b, name) == "", f"{name} = {attr(b, name)!r}: that click would drop"
+    # Blizzard's SecureTemplates builds alt-ctrl-shift- only; a ctrl-alt spelling can never match
+    for name in b._attrs:
+        assert not str(name).startswith("ctrl-alt"), f"useless attribute {name}"
     # spell mode carries the same empties
     lua = boot(learned=TOTEMS["earth"])
     for name in ("alt-type1", "alt-shift-type1", "alt-ctrl-type1", "alt-ctrl-shift-type1"):
@@ -1052,6 +1092,227 @@ def check_no_bar_field_and_no_useparent_attributes_on_any_button():
     assert "useparent" not in text, "TotemBar.lua mentions a useparent attribute"
 
 
+def warnings(lua) -> int:
+    return int(g(lua).__degradeCount)
+
+
+def check_a_delayed_fill_is_never_saved_as_the_users_pick():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"), pre_login="__mc.delay = true")
+    b = by_key(lua, "earth")
+    assert b.fsMode == "spell" and picks(lua) is None, f"{b.fsMode} {picks(lua)}"
+    lua.eval("__mc_flush")()
+    fire(lua, "ACTIONBAR_SLOT_CHANGED")
+    assert b.fsMode == "action" and attr(b, "action1") == action_id(2)
+    assert picks(lua) is None, f"the tab's own default fill was saved as the user's pick: {picks(lua)}"
+    fire(lua, "SPELLS_CHANGED")
+    assert picks(lua) is None, f"a later sync saved the default fill: {picks(lua)}"
+    # the user's own pick is saved, and a native change adopted after it
+    tb(lua).Pick("earth", tid(lua, "Tremor Totem"))
+    lua.eval("__mc_flush")()
+    fire(lua, "ACTIONBAR_SLOT_CHANGED")
+    assert picks(lua).earth.name == "Tremor Totem"
+
+
+def check_a_persistently_raising_setmulticastspell_gives_up_after_two_tries_with_one_warning():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"), pre_login="__mc.throws = true")
+    b = by_key(lua, "earth")
+    # the login syncs twice, so both attempts (the limit) are spent before any timer runs
+    assert b.fsMode == "spell" and len(mc_calls(lua)) == 2, f"{b.fsMode} {len(mc_calls(lua))}"
+    assert warnings(lua) == 1, f"{warnings(lua)} warnings after giving up"
+    advance(lua, 1.5)
+    for _ in range(4):
+        fire(lua, "SPELLS_CHANGED")
+        fire(lua, "ACTIONBAR_SLOT_CHANGED")
+        fire(lua, "PLAYER_REGEN_ENABLED")
+        advance(lua, 2.0)
+    assert len(mc_calls(lua)) == 2, f"retried a raising call forever: {len(mc_calls(lua))} calls"
+    assert warnings(lua) == 1 and b.fsMode == "spell" and attr(b, "spell1") == "Stoneskin Totem"
+    # a pick whose send raised twice is resolved: spell mode with the pick saved, not pending forever
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"))
+    b = by_key(lua, "earth")
+    lua.execute("__mc.throws = true")
+    tb(lua).Pick("earth", tid(lua, "Tremor Totem"))
+    assert b.fsMode == "action" and len(mc_calls(lua)) == 2, "the first failure is retried once"
+    advance(lua, 1.5)
+    assert len(mc_calls(lua)) == 3, f"{len(mc_calls(lua))} calls"
+    assert b.fsMode == "spell" and attr(b, "spell1") == "Tremor Totem", f"{b.fsMode} {attr(b, 'spell1')!r}"
+    assert picks(lua).earth.name == "Tremor Totem" and warnings(lua) == 1
+    for _ in range(3):
+        fire(lua, "PLAYER_REGEN_ENABLED")
+        fire(lua, "SPELLS_CHANGED")
+        advance(lua, 2.0)
+    assert len(mc_calls(lua)) == 3, "a resolved pick was sent again"
+
+
+def check_below_the_multicast_bar_the_tab_uses_spell_mode_without_trying_or_warning():
+    lua = boot(learned=["Stoneskin Totem"], lists=lists_for("earth"), pre_login="__mc.hasBar = false")
+    b = by_key(lua, "earth")
+    assert b.fsMode == "spell" and attr(b, "type1") == "spell" and attr(b, "spell1") == "Stoneskin Totem"
+    for _ in range(3):
+        fire(lua, "SPELLS_CHANGED")
+        fire(lua, "ACTIONBAR_SLOT_CHANGED")
+        advance(lua, 2.0)
+    assert mc_calls(lua) == [], f"SetMultiCastSpell called below the bar: {mc_calls(lua)}"
+    assert warnings(lua) == 0, "warned about a bar that does not exist yet"
+    # the picker and a pick are spell mode too
+    tb(lua).Pick("earth", tid(lua, "Stoneskin Totem"))
+    assert mc_calls(lua) == [] and warnings(lua) == 0
+    # learning Call of the Elements brings the bar: one action mode attempt
+    lua.execute("__mc.hasBar = true; __learned[66842] = true")
+    fire(lua, "SPELLS_CHANGED")
+    assert b.fsMode == "action" and attr(b, "action1") == action_id(2) and len(mc_calls(lua)) == 1, (
+        f"{b.fsMode} {len(mc_calls(lua))} calls: one fill of the empty slot")
+    # without HasMultiCastActionBar (or with a useless answer) the Call of the Elements decides
+    for label, setup in (("missing", "HasMultiCastActionBar = nil"), ("throws", '__mc.hasBarMode = "throw"'),
+                         ("secret", '__mc.hasBarMode = "secret"')):
+        lua = boot(learned=["Stoneskin Totem"], lists=lists_for("earth"), pre_login=setup)
+        assert by_key(lua, "earth").fsMode == "spell" and mc_calls(lua) == [], f"{label}: no Call, no bar"
+        assert warnings(lua) == 0, label
+        lua.execute("__learned[66842] = true")
+        fire(lua, "SPELLS_CHANGED")
+        assert by_key(lua, "earth").fsMode == "action", f"{label}: Call known, bar expected"
+    lua = boot(learned=["Stoneskin Totem"], lists=lists_for("earth"), spells=("Call of the Elements",),
+               pre_login='__mc.hasBarMode = "number"; __mc.hasBar = false')
+    assert by_key(lua, "earth").fsMode == "spell" and mc_calls(lua) == [], "a numeric 0 answer means no bar"
+
+
+def check_a_learn_event_allows_one_fresh_multicast_attempt_after_a_give_up():
+    # the slot never takes the fill: spell mode for good, until something is learned
+    lua = boot(learned=TOTEMS["earth"][:1], lists={2: TOTEMS["earth"][:1]}, pre_login="__mc.blocked = true")
+    b = by_key(lua, "earth")
+    advance(lua, 2.0)
+    fire(lua, "SPELLS_CHANGED")
+    assert len(mc_calls(lua)) == 1 and b.fsMode == "spell" and warnings(lua) == 1
+    for _ in range(3):
+        fire(lua, "SPELLS_CHANGED")
+        advance(lua, 2.0)
+    assert len(mc_calls(lua)) == 1, "retried without a learn event"
+    # a level up: one fresh attempt, which now works
+    lua.execute("__mc.blocked = false")
+    fire(lua, "PLAYER_LEVEL_UP")
+    assert len(mc_calls(lua)) == 2 and b.fsMode == "action", f"{len(mc_calls(lua))} calls, {b.fsMode}"
+    # a new totem learned: the known set changed, one fresh attempt
+    lua = boot(learned=TOTEMS["earth"][:1], lists={2: TOTEMS["earth"][:1]}, pre_login="__mc.blocked = true")
+    b = by_key(lua, "earth")
+    advance(lua, 2.0)
+    fire(lua, "SPELLS_CHANGED")
+    assert len(mc_calls(lua)) == 1 and b.fsMode == "spell"
+    lua.execute('__mc.blocked = false; __know("Earthbind Totem"); __mc_list(2, {"Stoneskin Totem", "Earthbind Totem"})')
+    fire(lua, "SPELLS_CHANGED")
+    assert len(mc_calls(lua)) == 2 and b.fsMode == "action", f"{len(mc_calls(lua))} calls, {b.fsMode}"
+    # an unrelated event with nothing new does not retry
+    lua = boot(learned=TOTEMS["earth"][:1], lists={2: TOTEMS["earth"][:1]}, pre_login="__mc.blocked = true")
+    advance(lua, 2.0)
+    fire(lua, "SPELLS_CHANGED")
+    fire(lua, "PLAYER_ENTERING_WORLD")
+    assert len(mc_calls(lua)) == 1
+
+
+def check_a_formula_action_id_is_adopted_never_filled_and_another_elements_totem_is_a_mapping_error():
+    # formula only (no native multi-cast button): an empty slot is not ours to write
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"), native=False)
+    b = by_key(lua, "earth")
+    assert b.fsMode == "spell" and mc_calls(lua) == [], f"{b.fsMode} {mc_calls(lua)}"
+    assert warnings(lua) == 0
+    # ... but it adopts a slot that already holds the element's own totem
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"), native=False,
+               pre_login=f'__mc.slots[{action_id(2)}] = __ids["Earthbind Totem"]')
+    b = by_key(lua, "earth")
+    assert b.fsMode == "action" and attr(b, "action1") == action_id(2) and mc_calls(lua) == []
+    assert picks(lua).earth.name == "Earthbind Totem"
+    # a slot holding ANOTHER element's totem (Searing, listed for Fire): no write, spell mode, one warning
+    for native in (False, True):
+        lua = boot(learned=TOTEMS["earth"] + TOTEMS["fire"], lists=lists_for("earth", "fire"), native=native,
+                   pre_login=f'__mc.slots[{action_id(2)}] = __ids["Searing Totem"]')
+        b = by_key(lua, "earth")
+        assert b.fsMode == "spell" and attr(b, "spell1") == "Stoneskin Totem", f"native={native}: {b.fsMode}"
+        assert int(g(lua).__mc.slots[action_id(2)]) == tid(lua, "Searing Totem"), f"native={native}: slot rewritten"
+        assert action_id(2) not in [c[0] for c in mc_calls(lua)], f"native={native}: wrote the foreign slot"
+        assert warnings(lua) == 1, f"native={native}: {warnings(lua)} warnings"
+    # the other element's totem is told from the static table too, with no multi-cast list for that element
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"), native=False,
+               pre_login=f'__mc.slots[{action_id(2)}] = __ids["Searing Totem"]')
+    assert by_key(lua, "earth").fsMode == "spell" and mc_calls(lua) == []
+    assert int(g(lua).__mc.slots[action_id(2)]) == tid(lua, "Searing Totem")
+
+
+def check_a_slot_event_inside_the_call_does_not_send_the_fill_again():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"),
+               pre_login="__mc.reenter = 'ACTIONBAR_SLOT_CHANGED'")
+    assert len(mc_calls(lua)) == 1, f"the fill was sent {len(mc_calls(lua))} times"
+    assert by_key(lua, "earth").fsMode == "action"
+    # the same for a pick
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"))
+    lua.execute("__mc.reenter = 'ACTIONBAR_SLOT_CHANGED'")
+    tb(lua).Pick("earth", tid(lua, "Tremor Totem"))
+    assert len(mc_calls(lua)) == 2, f"the pick was sent {len(mc_calls(lua)) - 1} times"
+    assert by_key(lua, "earth").icon._texture == 9000 + tid(lua, "Tremor Totem")
+
+
+def check_a_native_slot_change_beats_a_queued_pick():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"))
+    b = by_key(lua, "earth")
+    n = len(mc_calls(lua))
+    set_combat(lua, True)
+    tb(lua).Pick("earth", tid(lua, "Tremor Totem"))
+    # the slot still reads what it held: nothing to do
+    fire(lua, "ACTIONBAR_SLOT_CHANGED")
+    # the native bar sets another totem, then combat ends: our queued pick must not overwrite it
+    lua.execute(f'__mc.slots[{action_id(2)}] = __ids["Earthbind Totem"]')
+    fire(lua, "ACTIONBAR_SLOT_CHANGED")
+    assert picks(lua).earth.name == "Earthbind Totem", f"pick {picks(lua).earth.name}"
+    assert b.icon._texture == 9000 + tid(lua, "Earthbind Totem")
+    set_combat(lua, False)
+    fire(lua, "PLAYER_REGEN_ENABLED")
+    assert len(mc_calls(lua)) == n, f"the queued pick overwrote the native choice: {mc_calls(lua)[n:]}"
+    assert int(g(lua).__mc.slots[action_id(2)]) == tid(lua, "Earthbind Totem")
+
+
+def check_a_plain_false_totem_info_clears_the_sweep_before_the_duration_object_is_asked():
+    lua = all_known_with_lists()
+    b = by_key(lua, "earth")
+    lua.execute('__tot[2] = { "Stoneskin Totem", 500, 300 }')
+    fire(lua, "PLAYER_TOTEM_UPDATE")
+    assert sweep_of(b) == ("times", 500, 300)
+    # no totem stands, yet the duration object still answers (a stale object): the sweep clears
+    lua.execute('__tot[2] = nil; GetTotemDuration = function() return { totemFor = 2 } end')
+    fire(lua, "PLAYER_TOTEM_UPDATE")
+    assert sweep_of(b) is None, f"a stale duration object kept the sweep alive: {sweep_of(b)}"
+    # a secret duration object next to an unreadable GetTotemInfo is left alone
+    lua.execute('__tot[2] = { "Stoneskin Totem", 500, 300 }; __totMode = "secret"; GetTotemDuration = function() return { totemFor = 2 } end')
+    fire(lua, "PLAYER_TOTEM_UPDATE")
+    assert sweep_of(b) == ("obj", 2)
+    lua.execute('GetTotemDuration = function() return __SECRET end')
+    fire(lua, "PLAYER_TOTEM_UPDATE")
+    assert sweep_of(b) == ("obj", 2), f"a secret duration object cleared the sweep: {sweep_of(b)}"
+
+
+def check_totems_are_looked_up_by_spell_id_not_by_english_name():
+    # a localized client: the English name resolves to nothing, the id and the localized name do
+    loc = "Totem de Peau de Pierre"
+    sid = TOTEM_IDS["Stoneskin Totem"]
+    setup = f'__spells["Stoneskin Totem"] = nil; __spells["{loc}"] = {sid}; __idNames[{sid}] = "{loc}"'
+    lua = boot(learned=["Stoneskin Totem"], pre_login=setup)
+    b = by_key(lua, "earth")
+    assert not b.fsLocked, "a known totem stayed locked because its English name does not resolve"
+    assert attr(b, "spell1") == loc, f"spell1 {attr(b, 'spell1')!r}"
+    assert int(b.fsPick.id) == sid
+    # a higher rank is known, rank 1 is not (any rank counts); the pick is that rank under the same localized name
+    rank2 = 99001
+    setup = (f'__spells["Stoneskin Totem"] = nil; __spells["{loc}"] = {rank2}; __idNames[{sid}] = "{loc}"; '
+             f'__idNames[{rank2}] = "{loc}"; __learned[{sid}] = nil; __learned[{rank2}] = true')
+    lua = boot(learned=[], pre_login=setup)
+    b = by_key(lua, "earth")
+    assert not b.fsLocked and attr(b, "spell1") == loc and int(b.fsPick.id) == rank2, (
+        f"{b.fsLocked} {attr(b, 'spell1')!r} {b.fsPick and b.fsPick.id}")
+    # an unknown totem stays locked, whatever the names do
+    lua = boot(learned=[], pre_login=f'__spells["Stoneskin Totem"] = nil; __idNames[{sid}] = "{loc}"')
+    assert by_key(lua, "earth").fsLocked
+    # the static table is spell ids
+    text = TOTEMBAR.read_text(encoding="utf-8")
+    assert "ResolveSpell(name)" in text and re.search(r"\{ 8071, \"Stoneskin Totem\" \}", text), "no static id table"
+
+
 def check_a_throwing_secret_or_missing_api_never_breaks_a_sync():
     for mode in ("throw", "secret"):
         lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"),
@@ -1077,7 +1338,8 @@ def check_picks_are_kept_per_character():
     tb(lua).Pick("earth", tid(lua, "Tremor Totem"))
     db = g(lua).ForeverSTUwaveDB
     assert db.totemPicks[GUID] is not None
-    lua.execute('ForeverSTUwaveDB.totemPicks["Player-9-OTHER"] = { earth = { id = 1001, name = "Stoneskin Totem" } }')
+    lua.execute('ForeverSTUwaveDB.totemPicks["Player-9-OTHER"] = '
+                f'{{ earth = {{ id = {TOTEM_IDS["Stoneskin Totem"]}, name = "Stoneskin Totem" }} }}')
     fire(lua, "SPELLS_CHANGED")
     assert attr(by_key(lua, "earth"), "spell1") == "Tremor Totem", "another character's pick leaked in"
 
@@ -1150,6 +1412,15 @@ CHECKS = [
     check_the_tab_follows_the_console_on_and_off,
     check_a_rescale_resizes_and_reseats_out_of_combat,
     check_no_bar_field_and_no_useparent_attributes_on_any_button,
+    check_a_delayed_fill_is_never_saved_as_the_users_pick,
+    check_a_persistently_raising_setmulticastspell_gives_up_after_two_tries_with_one_warning,
+    check_below_the_multicast_bar_the_tab_uses_spell_mode_without_trying_or_warning,
+    check_a_learn_event_allows_one_fresh_multicast_attempt_after_a_give_up,
+    check_a_formula_action_id_is_adopted_never_filled_and_another_elements_totem_is_a_mapping_error,
+    check_a_slot_event_inside_the_call_does_not_send_the_fill_again,
+    check_a_native_slot_change_beats_a_queued_pick,
+    check_a_plain_false_totem_info_clears_the_sweep_before_the_duration_object_is_asked,
+    check_totems_are_looked_up_by_spell_id_not_by_english_name,
     check_a_throwing_secret_or_missing_api_never_breaks_a_sync,
     check_picks_are_kept_per_character,
     check_the_file_uses_no_snippets_and_no_state_drivers,

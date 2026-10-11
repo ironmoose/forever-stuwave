@@ -13,25 +13,30 @@
 --     dismisses the totem through the secure "destroytotem" type (type2, totem-slot2 = the element's totem slot:
 --     FIRE 1, EARTH 2, WATER 3, AIR 4). LEFT click drops the picked totem, in one of two modes decided at sync
 --     time, per element:
---       ACTION mode: the multi-cast bar is usable (C_ActionBar.GetMultiCastBarIndex answers a plain number and
---       GetMultiCastTotemSpells lists totems for the slot) AND the element's multi-cast slot plainly holds one of
---       its totems (GetActionInfo reads it back). type1 = "action" on that slot's action id: the native
---       MultiCastActionButton's own CalculateAction() when the frame exists (Wrath orders those buttons by
---       SHAMAN_TOTEM_PRIORITIES, Earth first, so button n is not totem slot n), else the formula
---       (bar - 1) * 12 + (set - 1) * 4 + slot, set 1. The slot holds the pick, so a pick needs no attribute write,
---       and the native Call of the Elements drops the same set.
+--       ACTION mode: the multi-cast bar exists (HasMultiCastActionBar, else Call of the Elements known: below
+--       that there are no slots, so nothing is attempted and nothing is warned), is usable
+--       (C_ActionBar.GetMultiCastBarIndex answers a plain number and GetMultiCastTotemSpells lists totems for the
+--       slot) AND the element's multi-cast slot plainly holds one of its totems (GetActionInfo reads it back).
+--       type1 = "action" on that slot's action id: the native MultiCastActionButton's own CalculateAction() when the
+--       frame exists (Wrath orders those buttons by SHAMAN_TOTEM_PRIORITIES, Earth first, so button n is not totem
+--       slot n), else the formula (bar - 1) * 12 + (set - 1) * 4 + slot, set 1. The slot holds the pick, so a pick
+--       needs no attribute write, and the native Call of the Elements drops the same set. An empty or foreign slot
+--       is filled with the pick ONLY at the native button's id; a formula id is adopted when it already holds one of
+--       the element's totems and is never written to, and a slot that holds a totem of another element is a mapping
+--       error (SPELL mode, no write, one chat line).
 --       SPELL mode: anything else, including every moment a multi-cast slot does not (yet) hold a totem of the
 --       element. type1 = "spell" with the picked totem's localized NAME, written out of combat, so a pick made in
---       combat waits for PLAYER_REGEN_ENABLED. An element whose slot never took a SetMultiCastSpell pick stays in
---       SPELL mode for the rest of the session (TB.spellOnly).
+--       combat waits for PLAYER_REGEN_ENABLED. An element whose slot never took a SetMultiCastSpell pick (or whose
+--       call raised twice) stays in SPELL mode until a learn event (PLAYER_LEVEL_UP, or a changed set of known
+--       totems or bar at a sync) allows one fresh try (TB.spellOnly).
 --     Which one is live is a question to the client at sync time (every call pcall'd and secret-guarded); neither
 --     the action id formula nor the behaviour of SetMultiCastSpell is verified in game.
 --   * SetMultiCastSpell is treated as PROTECTED (the secure action table has a "multispell" type): a blocked call
 --     from addon code goes through the global error handler (ADDON_ACTION_BLOCKED), which pcall cannot catch, and
 --     is not a silent no-op. So it is NEVER called in combat; a pick made in combat is queued and sent at
 --     PLAYER_REGEN_ENABLED. Out of combat a call counts as landed only when GetActionInfo reads the pick back
---     from the slot (SendPick); a pick that has not shown in the slot a second later is abandoned and its element
---     falls back to SPELL mode. The button icon and tooltip always show what the slot (or the spell attribute)
+--     from the slot (SendPick); a pick that has not shown in the slot a second later, or whose call raised twice, is
+--     abandoned and its element falls back to SPELL mode. The button icon and tooltip always show what the slot (or the spell attribute)
 --     will really drop, never a pick that did not land.
 --   * SET DROP is Call of the Elements (66842), with Call of the Ancestors (66843) on shift once known. RECALL is
 --     Totemic Recall (36936). Both are plain type "spell" and locked until known.
@@ -93,26 +98,29 @@ local TB = {
         { key = "recall", title = "Recall", color = "ffb648", unlock = 20, glyph = "totem_recall",
           label = "Totemic Recall", spells = { { 36936, "Totemic Recall" } } },
     },
-    -- the totems of each element up to level 30, by English spell name: only the source of the spell ids (the
-    -- first known one is the default pick) when the multi-cast API does not list them. Every name shown or
-    -- written to an attribute is the localized name of that id.
+    -- the totems of each element up to level 30, in the default pick order, as { rank 1 spell id, English name }.
+    -- The id is the identity (the localized name of that id is what is shown and written to a spell attribute, and
+    -- looking that name up finds the highest rank the player knows); the English name is only the display
+    -- fallback for an id the client cannot name. The ids are the Classic rank 1 ids; the multi-cast API's own
+    -- lists carry whatever ids Forever uses.
     TOTEMS = {
-        fire = { "Searing Totem", "Frost Resistance Totem", "Magma Totem", "Flametongue Totem" },
-        earth = { "Stoneskin Totem", "Earthbind Totem", "Stoneclaw Totem", "Strength of Earth Totem",
-            "Tremor Totem" },
-        water = { "Healing Stream Totem", "Poison Cleansing Totem", "Mana Spring Totem", "Fire Resistance Totem" },
-        air = { "Grounding Totem", "Nature Resistance Totem" },
+        fire = { { 3599, "Searing Totem" }, { 8181, "Frost Resistance Totem" }, { 8190, "Magma Totem" },
+            { 8227, "Flametongue Totem" } },
+        earth = { { 8071, "Stoneskin Totem" }, { 2484, "Earthbind Totem" }, { 5730, "Stoneclaw Totem" },
+            { 8075, "Strength of Earth Totem" }, { 8143, "Tremor Totem" } },
+        water = { { 5394, "Healing Stream Totem" }, { 8166, "Poison Cleansing Totem" },
+            { 5675, "Mana Spring Totem" }, { 8184, "Fire Resistance Totem" } },
+        air = { { 8177, "Grounding Totem" }, { 10595, "Nature Resistance Totem" } },
     },
+    CALL_ID = 66842,            -- Call of the Elements: the spell that brings the multi-cast bar
     -- Alt-modified left clicks: an empty type1 (ATTRIBUTE_NOOP) for each, so they open the picker without
-    -- dropping. Blizzard builds the prefix as alt-ctrl-shift-; the ctrl-alt spellings are kept as well in case a
-    -- client orders it the other way round.
-    ALT_NOOPS = { "alt-type1", "alt-shift-type1", "alt-ctrl-type1", "alt-ctrl-shift-type1",
-        "ctrl-alt-type1", "ctrl-alt-shift-type1" },
+    -- dropping. Blizzard's SecureTemplates builds the modifier prefix only in the order alt-ctrl-shift-.
+    ALT_NOOPS = { "alt-type1", "alt-shift-type1", "alt-ctrl-type1", "alt-ctrl-shift-type1" },
     SETTLE = 1.0,               -- seconds a SetMultiCastSpell call gets to show in the slot before it is given up
+    MAX_ATTEMPTS = 2,           -- SetMultiCastSpell calls that may raise before the element falls back to SPELL mode
     -- every attribute this tab writes, cleared together when a button locks
     ATTRS = { "type", "spell", "type1", "action1", "spell1", "type2", "totem-slot2", "alt-type1",
-        "alt-shift-type1", "alt-ctrl-type1", "alt-ctrl-shift-type1", "ctrl-alt-type1", "ctrl-alt-shift-type1",
-        "shift-type1", "shift-spell1" },
+        "alt-shift-type1", "alt-ctrl-type1", "alt-ctrl-shift-type1", "shift-type1", "shift-spell1" },
     EVENTS = { "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD" },
     -- state-only events: texture and Cooldown writes, legal in combat
     LIVE_EVENTS = { "SPELL_UPDATE_COOLDOWN", "PLAYER_TOTEM_UPDATE", "ACTIONBAR_SLOT_CHANGED" },
@@ -122,10 +130,13 @@ local TB = {
     list = {},          -- the six buttons, by index
     byKey = {},         -- and by key
     picker = nil,
-    pending = {},       -- key -> { id, at }: a multi-cast pick not in the slot yet (at = when it was sent, nil if not)
+    pending = {},       -- key -> { id, sent, at, ignore }: a multi-cast pick not in the slot yet (sent = the call ran,
+                        -- at = when; ignore = slot contents that are not a native change)
     ownFill = {},       -- key -> spell id the tab itself put in an empty slot (a default, not an adopted choice)
-    fills = {},         -- key -> { tag, at }: a fill of an empty or foreign slot that has not shown up yet
-    spellOnly = {},     -- key -> true: this element's slot never took a pick; SPELL mode from now on
+    fills = {},         -- key -> { tag, sent, at }: a fill of an empty or foreign slot that has not shown up yet
+    attempts = {},      -- key -> SetMultiCastSpell calls that raised since the last one that ran
+    spellOnly = {},     -- key -> true: this element's slot never took a pick; SPELL mode until a learn event
+    signature = nil,    -- what the player knew at the last sync (totems, multi-cast bar): a change allows a new try
     needsResync = false,
     verifyQueued = false,
     built = false,
@@ -177,7 +188,8 @@ end
 -- Spells
 -------------------------------------------------------------------------------
 
--- spellID, iconID of a spell by name, plain values only; nil when the name does not resolve.
+-- spellID, iconID of a spell by (localized) name, plain values only; nil when the name does not resolve. For a
+-- spell the player knows this answers the highest rank.
 local function ResolveSpell(name)
     local modern = C_Spell and C_Spell.GetSpellInfo
     if modern then
@@ -213,8 +225,9 @@ end
 
 -- true when the player knows this spell id, asking every spellbook API the client has (SealBar's
 -- IsKnownSpellId). An API that raises or answers secret counts as "no" and is asked again at the next event.
--- With none of them present the id already resolved, which in this spellbook API means known.
-local function IsKnownSpellId(id)
+-- With none of them present the answer is `fallback` (default true: the id already resolved, which in this
+-- spellbook API means known).
+local function IsKnownSpellId(id, fallback)
     local fns = { IsPlayerSpell, IsSpellKnown, C_SpellBook and C_SpellBook.IsSpellKnown }
     local asked = false
     for i = 1, 3 do
@@ -225,7 +238,8 @@ local function IsKnownSpellId(id)
             if ok and not IsSecret(answer) and answer then return true end
         end
     end
-    return not asked
+    if asked then return false end
+    return fallback ~= false
 end
 
 -------------------------------------------------------------------------------
@@ -291,17 +305,43 @@ local function MultiCastTotems(slot)
     return out
 end
 
--- The known totems of an element from the spellbook, in the table's order.
+-- The known totems of an element from the spellbook, in the table's order. Each static entry is a rank 1 id: its
+-- localized name (the display name, and the spell attribute) is looked up for the highest rank the player knows, and
+-- the entry is known when either that rank or the static id is. With no spellbook API at all, only a name that
+-- resolves counts.
 local function BookTotems(def)
     local out = {}
-    for _, name in ipairs(TB.TOTEMS[def.key] or {}) do
-        local id, icon = ResolveSpell(name)
-        if id and IsKnownSpellId(id) then
-            local localized, localizedIcon = SpellById(id)
-            out[#out + 1] = { id = id, name = localized or name, icon = localizedIcon or icon }
+    for _, totem in ipairs(TB.TOTEMS[def.key] or {}) do
+        local baseId, englishName = totem[1], totem[2]
+        local name, icon = SpellById(baseId)
+        local topId, topIcon
+        if name then topId, topIcon = ResolveSpell(name) end
+        local id
+        if topId and IsKnownSpellId(topId, true) then
+            id = topId
+        elseif IsKnownSpellId(baseId, false) then
+            id = baseId
+        end
+        if id then
+            local shown, shownIcon = SpellById(id)
+            out[#out + 1] = { id = id, name = shown or name or englishName,
+                icon = shownIcon or icon or topIcon }
         end
     end
     return out
+end
+
+-- true when the client's multi-cast bar exists: HasMultiCastActionBar answers a plain flag, else Call of the Elements
+-- is known (it is what brings the bar). Below that the slots do not exist, so no fill is ever attempted.
+local function MultiCastBarActive()
+    if HasMultiCastActionBar then
+        local ok, has = pcall(HasMultiCastActionBar)
+        if ok and not IsSecret(has) then
+            if type(has) == "boolean" then return has end
+            if type(has) == "number" then return has ~= 0 end
+        end
+    end
+    return IsKnownSpellId(TB.CALL_ID, false)
 end
 
 -- What the slot holds: (spell id or nil, readable). Readable and nil means the slot is plainly empty.
@@ -343,11 +383,28 @@ end
 -- catchable by pcall, so it is never made in combat). Returns landed, called. `landed` is true only when the slot
 -- reads back as the pick right now. `called` is true when the call ran without raising; the slot may still update a
 -- moment later (ACTIONBAR_SLOT_CHANGED), so a call that did not land is judged again after TB.SETTLE seconds.
+-- `raised` is true when the call was made and threw (not when it was refused for combat or a missing function).
 local function SendPick(actionId, spellId)
-    if not SetMultiCastSpell or InCombatLockdown() then return false, false end
-    if not pcall(SetMultiCastSpell, actionId, spellId) then return false, false end
+    if not SetMultiCastSpell or InCombatLockdown() then return false, false, false end
+    if not pcall(SetMultiCastSpell, actionId, spellId) then return false, false, true end
     local got, readable = ReadSlot(actionId)
-    return readable and got == spellId, true
+    return readable and got == spellId, true, false
+end
+
+-- A SetMultiCastSpell call raised: the element's attempt count, and true once TB.MAX_ATTEMPTS is reached.
+local function CountFailure(key)
+    local n = (TB.attempts[key] or 0) + 1
+    TB.attempts[key] = n
+    return n >= TB.MAX_ATTEMPTS
+end
+
+-- The multi-cast slot is no good for this element (it did not take a pick, or the call keeps raising): SPELL mode
+-- until a learn event allows a fresh try. The saved pick stays; the spell attribute follows it at the next sync.
+local function GiveUp(key, title, why)
+    TB.pending[key], TB.fills[key], TB.ownFill[key], TB.attempts[key] = nil, nil, nil, nil
+    TB.spellOnly[key] = true
+    TB.needsResync = true
+    WarnOnce("totembar_pick_" .. key, title .. " totem: " .. why .. ", using the spell instead")
 end
 
 -------------------------------------------------------------------------------
@@ -412,30 +469,55 @@ local function SpellList(def, multi)
     return named
 end
 
--- What an element button should be right now: { list, mode, actionId, pick, landed, adopted }. `mode` is nil when
--- no totem of the element is known (the button locks). Reads only; writes nothing.
---   ACTION mode needs a readable multi-cast slot. `landed` is true when the slot holds one of the element's totems
---   (that is `pick`, and `adopted` says it was there already); false when the slot is empty or holds something
---   else, and then `pick` is the totem to fill it with. SPELL mode: the saved pick, else the first known totem.
+-- true when a spell id is a totem of ANOTHER element: in that element's multi-cast list, or in the static table.
+-- A slot that holds one means the slot mapping is wrong for this element.
+local function HoldsOtherElement(def, held)
+    for _, other in ipairs(TB.BUTTONS) do
+        if other.slot and other.key ~= def.key then
+            if EntryById(MultiCastTotems(other.slot) or {}, held) then return true end
+            for _, totem in ipairs(TB.TOTEMS[other.key] or {}) do
+                if totem[1] == held then return true end
+            end
+        end
+    end
+    return false
+end
+
+-- What an element button should be right now: { list, mode, actionId, pick, landed, adopted, mapError }. `mode` is
+-- nil when no totem of the element is known (the button locks). Reads only; writes nothing.
+--   ACTION mode needs the multi-cast bar to exist (MultiCastBarActive) and a readable multi-cast slot. `landed` is
+--   true when the slot holds one of the element's totems (that is `pick`, and `adopted` says it was there already);
+--   false when the slot is empty or holds something else, and then `pick` is the totem to fill it with. A fill is
+--   offered ONLY for an action id the native multi-cast button reported: an id from the formula can name another
+--   element's slot, so it may be adopted but never written. A slot that holds a totem of ANOTHER element is a
+--   mapping error (`mapError`): SPELL mode, no write.
+--   SPELL mode: the saved pick, else the first known totem.
 -- `forceSpell` skips ACTION mode (the caller found the slot unusable).
 local function Evaluate(def, forceSpell)
     local multi = MultiCastTotems(def.slot)
     local bar = multi and not forceSpell and not TB.spellOnly[def.key] and MultiCastBar() or nil
+    if bar and not MultiCastBarActive() then bar = nil end
+    local mapError = false
     if bar then
-        local actionId = NativeActionId(def.slot) or ActionId(bar, def.slot)
+        local native = NativeActionId(def.slot)
+        local actionId = native or ActionId(bar, def.slot)
         local held, readable = ReadSlot(actionId)
         if readable then
             local entry = held and EntryById(multi, held)
             if entry then
                 return { list = multi, mode = "action", actionId = actionId, pick = entry, landed = true, adopted = true }
             end
-            local pick = Matching(multi, ReadPick(def.key)) or multi[1]
-            return { list = multi, mode = "action", actionId = actionId, pick = pick, landed = false }
+            if held and HoldsOtherElement(def, held) then
+                mapError = true
+            elseif native then
+                local pick = Matching(multi, ReadPick(def.key)) or multi[1]
+                return { list = multi, mode = "action", actionId = actionId, pick = pick, landed = false }
+            end
         end
     end
     local list = SpellList(def, multi)
-    if #list == 0 then return { list = list } end
-    return { list = list, mode = "spell", pick = Matching(list, ReadPick(def.key)) or list[1] }
+    if #list == 0 then return { list = list, mapError = mapError } end
+    return { list = list, mode = "spell", pick = Matching(list, ReadPick(def.key)) or list[1], mapError = mapError }
 end
 
 -------------------------------------------------------------------------------
@@ -717,10 +799,11 @@ local function UpdateCooldown(button)
     end
 end
 
--- The live totem sweep. GetTotemInfo's start and duration when both are plain and non zero; a plain zero answer is
--- NOT "no totem" (a standing totem can read true, "", 0, 0, 0 in combat), so the GetTotemDuration object is asked
--- next. The sweep is cleared only when no totem stands: GetTotemInfo plainly says none, or it says nothing readable
--- and the duration object is plainly nil. Anything else leaves the sweep as it was.
+-- The live totem sweep. A plain false from GetTotemInfo is "no totem" and clears the sweep first. Otherwise its start
+-- and duration when both are plain and non zero; a plain zero answer is NOT "no totem" (a standing totem can read
+-- true, "", 0, 0, 0 in combat), so the GetTotemDuration object is asked next (a secret answer is checked before
+-- anything else is done with it). With GetTotemInfo unreadable the sweep is cleared only when the duration object
+-- is plainly nil. Anything else leaves the sweep as it was.
 local function UpdateTotemSweep(button)
     local sweep, slot = button.totemCooldown, button.fsDef.slot
     if not (sweep and slot) then return end
@@ -734,6 +817,12 @@ local function UpdateTotemSweep(button)
         local ok, haveTotem, _, start, duration = pcall(GetTotemInfo, slot)
         if ok then
             have = PlainValue(haveTotem, "boolean")
+            if have == false then
+                -- GetTotemInfo plainly says no totem stands: nothing a duration object says can override that
+                sweep:Clear()
+                sweep:Hide()
+                return
+            end
             start, duration = PlainValue(start, "number"), PlainValue(duration, "number")
             if start and duration and start > 0 and duration > 0 then
                 sweep:SetCooldown(start, duration)
@@ -745,10 +834,10 @@ local function UpdateTotemSweep(button)
     local objNil = false
     if GetTotemDuration then
         local ok, obj = pcall(GetTotemDuration, slot)
-        if ok then
+        if ok and not IsSecret(obj) then
             if obj == nil then
                 objNil = true
-            elseif not IsSecret(obj) then
+            else
                 sweep:SetCooldownFromDurationObject(obj)
                 sweep:Show()
                 return
@@ -756,7 +845,7 @@ local function UpdateTotemSweep(button)
         end
     end
     if have == true then return end
-    if have == false or objNil then
+    if objNil then
         sweep:Clear()
         sweep:Hide()
     end
@@ -828,32 +917,42 @@ local function ShowPick(button, pick)
     UpdateCooldown(button)
 end
 
--- An empty or foreign multi-cast slot gets the pick once per (slot, pick). The slot is then judged by what it
--- reads back: a fill that shows up (now, or on ACTIONBAR_SLOT_CHANGED within TB.SETTLE seconds) makes the element
--- ACTION mode; until then the button is SPELL mode, so it never points at an empty slot. A fill that has not shown
--- after TB.SETTLE seconds is given up and the element stays SPELL mode for the session. Out of combat only.
+-- An empty or foreign multi-cast slot (one the native multi-cast button named) gets the pick once per (slot, pick).
+-- The slot is then judged by what it reads back: a fill that shows up (now, or on ACTIONBAR_SLOT_CHANGED within
+-- TB.SETTLE seconds) makes the element ACTION mode; until then the button is SPELL mode, so it never points at an
+-- empty slot. A fill that has not shown after TB.SETTLE seconds is given up and the element stays SPELL mode until a
+-- learn event; so does one whose call keeps raising (TB.MAX_ATTEMPTS). The fill is marked sent BEFORE the call, so
+-- an event the call raises synchronously cannot send it again, and the pick is marked as the tab's own default as
+-- soon as the call runs, so a slot that updates late is not saved as the user's choice. Out of combat only.
 local function Settle(def, st)
     local key = def.key
     local tag = tostring(st.actionId) .. ":" .. tostring(st.pick.id)
     local rec = TB.fills[key]
-    if rec and rec.tag == tag and rec.at then
+    if rec and rec.tag == tag and rec.sent then
         if Settled(rec.at) then
-            TB.fills[key] = nil
-            TB.spellOnly[key] = true
-            WarnOnce("totembar_fill_" .. key, def.title .. " totem: the multi-cast slot did not take the pick, "
-                .. "using the spell instead")
+            GiveUp(key, def.title, "the multi-cast slot did not take the pick")
         else
             ScheduleVerify()
         end
         return Evaluate(def, true)
     end
-    rec = { tag = tag }
+    rec = { tag = tag, sent = true, at = Now() }
     TB.fills[key] = rec
-    local landed, called = SendPick(st.actionId, st.pick.id)
-    if called then rec.at = Now() end
+    local landed, called, raised = SendPick(st.actionId, st.pick.id)
+    if not called then rec.sent, rec.at = nil, nil end
+    if called then
+        TB.attempts[key] = nil
+        TB.ownFill[key] = st.pick.id
+    elseif raised then
+        if CountFailure(key) then
+            GiveUp(key, def.title, "the multi-cast call keeps failing")
+        else
+            ScheduleVerify()
+        end
+        return Evaluate(def, true)
+    end
     if landed then
         TB.fills[key] = nil
-        TB.ownFill[key] = st.pick.id
         local now = Evaluate(def)
         if now.landed then
             now.adopted = false      -- our own fill, not something the slot already held
@@ -871,6 +970,10 @@ local function ApplyElement(button, def)
         st = Settle(def, st)
     else
         TB.fills[def.key] = nil      -- landed, or no longer in play: nothing to wait for
+    end
+    if st.mapError then
+        WarnOnce("totembar_map_" .. def.key, def.title .. " totem: the multi-cast slot holds another element's "
+            .. "totem, using the spell instead")
     end
     if not st.pick then
         Lock(button)
@@ -932,7 +1035,8 @@ end
 
 -- A pick the native bar made (or one we sent) moved the multi-cast slot: show it. Texture state and a saved
 -- variable write, so it may run in combat. Never touches an attribute, except through a parked Sync: an element
--- waiting on a fill is re-judged once its slot changes.
+-- waiting on a fill is re-judged once its slot changes. A queued pick of ours is dropped when the slot shows a
+-- totem that is neither the pick nor something the slot held when it was queued (the native bar changed it).
 local function RefreshPicks()
     for _, button in ipairs(TB.list) do
         if button.fsMode == "action" and button.fsList and not button.fsLocked then
@@ -942,6 +1046,13 @@ local function RefreshPicks()
             if queued then
                 if entry and entry.id == queued.id then
                     TB.pending[button.fsKey] = nil
+                    ShowPick(button, entry)
+                elseif entry and not (queued.ignore and queued.ignore[entry.id]) then
+                    -- the native bar chose another totem since this pick was queued: that is the newer choice, and
+                    -- resending ours at regen would overwrite it
+                    TB.pending[button.fsKey] = nil
+                    TB.ownFill[button.fsKey] = nil
+                    WritePick(button.fsKey, entry)
                     ShowPick(button, entry)
                 end
             elseif entry and (not button.fsPick or entry.id ~= button.fsPick.id) then
@@ -1031,7 +1142,8 @@ end
 
 -- Sends the multi-cast picks queued in combat and judges the ones sent but not seen in the slot yet. Out of combat
 -- only (SendPick refuses combat). A pick whose slot reads it back is done; one sent more than TB.SETTLE seconds ago
--- that never showed is abandoned and its element falls back to SPELL mode (needsResync).
+-- that never showed is abandoned and its element falls back to SPELL mode (needsResync), and so is one whose call
+-- raised TB.MAX_ATTEMPTS times. The saved pick stays either way.
 local function ReplayPicks()
     for key, rec in pairs(TB.pending) do
         local button = TB.byKey[key]
@@ -1043,26 +1155,54 @@ local function ReplayPicks()
             if readable and held == rec.id then
                 TB.pending[key] = nil
                 if entry then ShowPick(button, entry) end
-            elseif rec.at and Settled(rec.at) then
-                TB.pending[key] = nil
-                TB.spellOnly[key] = true
-                TB.needsResync = true
-                WarnOnce("totembar_pick_" .. key, button.fsDef.title .. " totem: the multi-cast slot did not take "
-                    .. "the pick, using the spell instead")
-            elseif rec.at then
+            elseif rec.sent and Settled(rec.at) then
+                GiveUp(key, button.fsDef.title, "the multi-cast slot did not take the pick")
+            elseif rec.sent then
                 ScheduleVerify()
             else
-                local landed, called = SendPick(button.fsActionId, rec.id)
+                rec.sent, rec.at = true, Now()
+                local landed, called, raised = SendPick(button.fsActionId, rec.id)
                 if landed then
                     TB.pending[key] = nil
+                    TB.attempts[key] = nil
                     if entry then ShowPick(button, entry) end
                 elseif called then
-                    rec.at = Now()
+                    TB.attempts[key] = nil
                     ScheduleVerify()
+                else
+                    rec.sent, rec.at = nil, nil
+                    if raised then
+                        if CountFailure(key) then
+                            GiveUp(key, button.fsDef.title, "the multi-cast call keeps failing")
+                        else
+                            ScheduleVerify()
+                        end
+                    end
                 end
             end
         end
     end
+end
+
+-- What the player knows that decides the modes: the bar's existence and every totem the spellbook or the multi-cast
+-- lists name. A change between two syncs is a learn event.
+local function KnownSignature()
+    local parts = { MultiCastBarActive() and "bar" or "nobar" }
+    for _, def in ipairs(TB.BUTTONS) do
+        if def.slot then
+            local ids = {}
+            for _, entry in ipairs(BookTotems(def)) do ids[#ids + 1] = tostring(entry.id) end
+            for _, entry in ipairs(MultiCastTotems(def.slot) or {}) do ids[#ids + 1] = "m" .. tostring(entry.id) end
+            parts[#parts + 1] = def.key .. "=" .. table.concat(ids, ",")
+        end
+    end
+    return table.concat(parts, ";")
+end
+
+-- A learn event (a level, or a changed set of known totems or bar): every element that gave up on its multi-cast
+-- slot, and every fill still waiting, gets one fresh try.
+local function ForgetFailures()
+    TB.spellOnly, TB.fills, TB.attempts = {}, {}, {}
 end
 
 -- Every protected step in one place; combat parks it for PLAYER_REGEN_ENABLED. Each step is its own pcall so one
@@ -1075,6 +1215,11 @@ local function Sync()
     end
     TB.pendingSync = false
     TB.needsResync = false
+    local okSig, signature = pcall(KnownSignature)
+    if okSig then
+        if TB.signature ~= nil and TB.signature ~= signature then ForgetFailures() end
+        TB.signature = signature
+    end
     for _, step in ipairs({ ReplayPicks, SeatButtons, ApplyButtons, SeatHost }) do
         local ok, err = pcall(step)
         if not ok then WarnOnce("totembar_sync", "totem tab update failed (" .. tostring(err) .. ")") end
@@ -1243,18 +1388,31 @@ function TotemBar.Pick(key, spellId)
         entry = { id = spellId, name = name or "", icon = icon }
     end
     WritePick(key, entry)
+    TB.ownFill[key] = nil       -- an explicit pick is the user's, never the tab's default
     if button.fsMode == "action" and button.fsActionId then
-        TB.pending[key] = nil
-        if InCombatLockdown() then
-            TB.pending[key] = { id = spellId }
-            return
-        end
-        local landed, called = SendPick(button.fsActionId, spellId)
+        local previous = TB.pending[key]
+        TB.pending[key], TB.attempts[key] = nil, nil
+        -- what the slot may still read while this pick is on its way: the totem shown now, the one queued before it
+        local ignore = {}
+        if button.fsPick then ignore[button.fsPick.id] = true end
+        if previous then ignore[previous.id] = true end
+        local rec = { id = spellId, ignore = ignore }
+        TB.pending[key] = rec
+        if InCombatLockdown() then return end
+        rec.sent, rec.at = true, Now()
+        local landed, called, raised = SendPick(button.fsActionId, spellId)
         if landed then
+            TB.pending[key] = nil
             ShowPick(button, entry)
+        elseif called then
+            ScheduleVerify()
         else
-            TB.pending[key] = { id = spellId, at = called and Now() or nil }
-            if called then ScheduleVerify() end
+            rec.sent, rec.at = nil, nil
+            if raised then
+                -- queued for one more try (the next sync, or regen); ReplayPicks gives up on a second failure
+                CountFailure(key)
+                ScheduleVerify()
+            end
         end
     else
         Sync()
@@ -1298,6 +1456,9 @@ local function OnEvent(_, event)
         UpdateAllSweeps()
     elseif event == "ACTIONBAR_SLOT_CHANGED" or event == "UPDATE_MULTI_CAST_ACTIONBAR" then
         RefreshPicks()
+    elseif event == "PLAYER_LEVEL_UP" then
+        ForgetFailures()
+        Sync()
     else
         Sync()
     end
