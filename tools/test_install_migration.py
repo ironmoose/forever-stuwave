@@ -26,7 +26,7 @@ LOAD_ORDER = (
     "HudSpells.lua", "HudProfiles.lua", "HudLogic.lua", "Gunsight.lua", "GunsightAreas.lua", "TargetDebuffs.lua", "GunsightDots.lua",
     "GunsightSeals.lua", "GunsightFrame.lua", "GunsightBoxes.lua", "GunsightTape.lua",
     "GunsightTags.lua", "GunsightMyBuffs.lua",
-    "ConsoleKeys.lua", "ClassShoulder.lua", "SealBar.lua", "TotemBar.lua", "CombatHud.lua", "GunsightClass.lua", "FSProbe.lua",
+    "ConsoleKeys.lua", "ClassShoulder.lua", "SealBar.lua", "TotemBar.lua", "CombatHud.lua", "GunsightClass.lua", "GunsightShaman.lua", "FSProbe.lua",
     "BugReport.lua", "ConfigWindow.lua", "LayoutEdit.lua",
 )
 
@@ -80,7 +80,7 @@ def test_module_manifest_preserves_dependency_order_and_loads_every_runtime_modu
     modules = [Path(entry) for entry in entries if entry.endswith(".lua")]
 
     assert tuple(path.name for path in modules) == LOAD_ORDER
-    assert len(set(modules)) == 70
+    assert len(set(modules)) == 71
     assert all((RUNTIME / entry).is_file() for entry in entries)
     assert all(path.parts[0] in {"Core", "Modules"} for path in modules)
     assert not list(RUNTIME.glob("*.lua"))

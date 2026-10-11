@@ -71,6 +71,7 @@ Modules/ActionBars/SealBar.lua
 Modules/ActionBars/TotemBar.lua
 Modules/CombatHud/CombatHud.lua
 Modules/CombatHud/GunsightClass.lua
+Modules/CombatHud/GunsightShaman.lua
 Modules/Diagnostics/FSProbe.lua
 Modules/Diagnostics/BugReport.lua
 Modules/Config/ConfigWindow.lua
