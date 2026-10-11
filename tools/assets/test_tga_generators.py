@@ -69,6 +69,11 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         f"glyph_hud_{name}": (32, 32)
         for name in ("chev", "play", "diamond", "shield", "cross", "clock", "bolt", "group")
     },
+    # generate_totem_glyphs.py: the Shaman totem tab's six glyphs and the locked button's dotted mold.
+    "totem_glyphs": {
+        **{f"totem_{name}": (32, 32) for name in ("fire", "earth", "water", "air", "set", "recall")},
+        "totem_mold": (64, 64),
+    },
     # generate_hud_key_ring.py: sixteen arc segments of the toggle key ring.
     "hud_key_ring": {f"hud_key_ring_{i:02d}": (128, 64) for i in range(16)},
     # generate_console_chrome.py: Console panel chassis (cut 14) and the 45 degree tab foot.
@@ -1630,3 +1635,70 @@ def test_shoulder_glow_does_not_overwrite_existing_textures(shoulder_glow_output
 
 if __name__ == "__main__":
     sys.exit(pytest.main([str(Path(__file__).resolve()), "-v"]))
+
+
+# --- Shaman totem tab glyphs ------------------------------------------------
+
+TOTEM_GENERATOR = GENERATOR_DIR / "generate_totem_glyphs.py"
+TOTEM_GLYPHS = ("fire", "earth", "water", "air", "set", "recall")
+
+
+@pytest.fixture(scope="module")
+def totem_outputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    work = tmp_path_factory.mktemp("totem_glyphs")
+    _run_generator(TOTEM_GENERATOR, work)
+    return work
+
+
+@pytest.mark.parametrize("name", TOTEM_GLYPHS)
+def test_totem_glyph_is_white_ink_with_padding(totem_outputs: Path, name: str) -> None:
+    path = totem_outputs / f"totem_{name}.tga"
+    assert _is_white(path)
+    flat = [a for row in _alpha_grid(path) for a in row]
+    assert max(flat) == 255 and min(flat) == 0
+    assert 0.04 < sum(1 for a in flat if a > 0) / len(flat) < 0.5
+    grid = _alpha_grid(path)
+    edge = grid[0] + grid[-1] + [row[0] for row in grid] + [row[-1] for row in grid]
+    assert max(edge) <= 170, "ink reaches the texture edge and would clip"
+
+
+@pytest.mark.parametrize("name", ["fire", "earth", "water", "air"])
+def test_totem_crowns_are_mirror_symmetric_about_the_pole(totem_outputs: Path, name: str) -> None:
+    # Fire, earth and air are mirror images about the pole. The wave of four half waves is not
+    # (it is point symmetric), so water is held to the same ink either side instead.
+    grid = _alpha_grid(totem_outputs / f"totem_{name}.tga")
+    if name == "water":
+        left = sum(grid[y][x] for y in range(32) for x in range(16))
+        right = sum(grid[y][x] for y in range(32) for x in range(16, 32))
+        assert abs(left - right) <= 0.1 * (left + right)
+        return
+    for y in range(32):
+        for x in range(32):
+            assert abs(grid[y][x] - grid[y][31 - x]) <= 24, (name, x, y)
+
+
+def test_totem_set_holds_one_crown_per_quadrant(totem_outputs: Path) -> None:
+    grid = _alpha_grid(totem_outputs / "totem_set.tga")
+    for y0, x0 in ((0, 0), (0, 16), (16, 0), (16, 16)):
+        ink = sum(1 for y in range(y0, y0 + 16) for x in range(x0, x0 + 16) if grid[y][x] > 0)
+        assert ink > 20, f"quadrant ({x0},{y0}) is empty"
+
+
+def test_totem_mold_is_dotted_with_two_chamfers(totem_outputs: Path) -> None:
+    grid = _alpha_grid(totem_outputs / "totem_mold.tga")
+    assert max(a for row in grid for a in row) == 255
+    # nothing inside, nothing at the sharp top right / bottom left corners beyond the dots on the edges
+    assert all(grid[y][x] == 0 for y in range(20, 44) for x in range(20, 44)), "the middle must be empty"
+    # the top left and bottom right corners are cut: no ink at the very corner texels
+    for x, y in ((3, 3), (4, 4), (60, 60), (59, 59)):
+        assert grid[y][x] == 0, (x, y)
+    # dotted, not a continuous line: along the top edge there are gaps
+    top = [max(grid[y][x] for y in range(0, 8)) for x in range(14, 62)]
+    assert any(v == 0 for v in top) and any(v == 255 for v in top)
+
+
+def test_committed_totem_glyphs_match_their_generator(totem_outputs: Path) -> None:
+    outs = sorted(totem_outputs.glob("*.tga"))
+    assert len(outs) == 7
+    for out in outs:
+        assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
