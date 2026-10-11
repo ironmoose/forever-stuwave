@@ -1,8 +1,9 @@
--- Forever STUwave: the class shoulder CHROME (Paladin, Warrior)
+-- Forever STUwave: the class shoulder CHROME (Paladin, Warrior, Shaman)
 --
 -- The approved Gunsight mockup draws a shoulder block on the Console chassis' top edge, behind the Paladin's
 -- seal and aura buttons (`LS_*`: 306.8 x 91.8 design px, 36 in from the chassis left) and behind the Warrior's
--- three stances (`{id:'st',n:3,rows:1}`: 135.6 x 49). In the mockup's default
+-- three stances (`{id:'st',n:3,rows:1}`: 135.6 x 49). The Shaman's totem tab (TotemBar.lua) takes the same
+-- chrome as a 6 x 1 block (264 x 49). In the mockup's default
 -- Console style (`PS === 'cn'`) it is NOT the pet panel's recipe (`lsLive` runs only for the other styles):
 -- `cnTrace` carries the shoulders, so `cnBake` strokes it with the chassis outline (A(.72)), halos it with
 -- the very halo the chassis gets and fills it with the chassis gradient, whose top stop is all a shoulder
@@ -12,7 +13,8 @@
 -- Console's top gap while it stands. The halo is therefore the Console's own profile by construction (the
 -- mockup's stepped composite of four nested strokes: .546 at the edge, stepping down to nothing by 10 px).
 --
--- It builds ONLY for a class in OWNERS (a Paladin whose SealBar owns the forms, a Warrior whose StanceBar does),
+-- It builds ONLY for a class in OWNERS (a Paladin whose SealBar owns the forms, a Warrior whose StanceBar does, a
+-- Shaman whose TotemBar is built; the Shaman's forms stay on the stance bar),
 -- ONLY while the Console is drawn, ONLY out of combat. Every other class gets none.
 -- The art is a plain non-secure child of the Console root. The owner's host (protected, it parents the secure
 -- buttons) is its own frame anchored to the Console root, NEVER to this art: nothing secure may be anchored to
@@ -26,7 +28,7 @@
 -- of it; the Console's glow ends where they begin).
 -- When the shoulder goes (Console off) the gap is closed and handed back (ReclaimGap).
 --
--- Loads after PetDock.lua and ConsoleKeys.lua, before SealBar.lua. Nothing here is verified in game.
+-- Loads after PetDock.lua and ConsoleKeys.lua, before SealBar.lua and TotemBar.lua. Nothing here is verified in game.
 
 local _, FS = ...
 
@@ -69,6 +71,17 @@ local OWNERS = {
         -- the shoulder came or went: the stances re-seat whatever order the regen handlers ran in
         changed = function()
             if FS.StanceBar and FS.StanceBar.Rebuild then FS.StanceBar.Rebuild() end
+        end,
+    },
+    SHAMAN = {
+        key = "shaman", cols = 6, rows = 1,
+        wants = function()
+            local totems = FS.TotemBar
+            return totems and totems.OwnsShoulder and totems.OwnsShoulder()
+        end,
+        -- the shoulder came or went: the totem tab re-seats (it does nothing in combat and replays at regen)
+        changed = function()
+            if FS.TotemBar and FS.TotemBar.Sync then FS.TotemBar.Sync() end
         end,
     },
 }

@@ -6,4 +6,10 @@
     <Binding name="CLICK FSSealButton5:LeftButton" category="ADDONS"/>
     <Binding name="CLICK FSSealButton6:LeftButton" category="ADDONS"/>
     <Binding name="CLICK FSSealButton7:LeftButton" category="ADDONS"/>
+    <Binding name="CLICK FSTotemButton1:LeftButton" category="ADDONS"/>
+    <Binding name="CLICK FSTotemButton2:LeftButton" category="ADDONS"/>
+    <Binding name="CLICK FSTotemButton3:LeftButton" category="ADDONS"/>
+    <Binding name="CLICK FSTotemButton4:LeftButton" category="ADDONS"/>
+    <Binding name="CLICK FSTotemButton5:LeftButton" category="ADDONS"/>
+    <Binding name="CLICK FSTotemButton6:LeftButton" category="ADDONS"/>
 </Bindings>

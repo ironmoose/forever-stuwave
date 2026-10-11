@@ -144,6 +144,39 @@ slots stay empty until learned. Do a FULL client restart, not /reload.
    on its own row.
 5. Other classes keep their stance bar as before (Druid forms, Rogue stealth).
 
+## Shaman: totem tab
+
+Use a Shaman who knows at least one totem (Stoneskin is level 4). This adds
+new files (an addon file, key bindings and textures), so do a FULL client
+restart, not /reload. If your Shaman has the Call of the Elements spell
+(level 20), check the set drop too.
+
+1. The tab: with the Console on, six buttons stand on the Console's top-left
+   shoulder, the same place as the Paladin's seals: Fire, Earth, Water, Air,
+   Set drop, Recall. Totems you cannot use yet show a dotted outline with the
+   level they open at (Earth 4, Fire 10, Water 20, Air 30, Set drop and Recall
+   20) and are dimmed. The tab should look like part of the Console, with no
+   seam. Ghost Wolf is still on the stance bar.
+2. Left click an element button: it drops the totem shown on the button. Right
+   click it: the totem goes away at once. Hover for the reminder text.
+3. Change totem: click the small arrow above the button, or Alt-click the
+   button (Alt-click must NOT drop a totem). A list of the totems you know for
+   that element appears. Click one: the button now shows it and drops it. Try
+   it in combat too. Note down whether a pick made in combat works right away
+   or only after the fight ends (both are fine; we need to know which).
+4. Log out and in: each element remembers its totem. If you also use the
+   stock Totem Bar, a pick made there shows up on the tab.
+5. Set drop (Call of the Elements, level 20): drops your set. At level 30,
+   Shift-click drops the Call of the Ancestors set. Recall (level 20) takes
+   your totems back.
+6. Totem timer: with a totem down, its button fills with the element colour
+   and drains. The cooldown swipe runs on the button after a drop. Report it
+   with `/fsbug` if the timer never shows in combat.
+7. Quick Keybind (Esc > Options > Keybindings) binds each of the six buttons.
+   Bound keys show as the button's key label.
+8. `/fsconsole off`: the tab goes back to sit above the stance bar, and
+   `/fsconsole on` returns it to the shoulder. Other classes see no tab.
+
 ## Layout editor: /fsedit
 
 Out of combat only. Close Blizzard Edit Mode first.

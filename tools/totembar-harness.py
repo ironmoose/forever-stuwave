@@ -1,0 +1,938 @@
+#!/usr/bin/env python3
+"""Runs the real TotemBar.lua (the Shaman totem tab) headless, in classshoulder-harness's world: the actionbars
+mock, FrameHelpers.lua, ActionBars.lua, Console.lua, StanceBar.lua, PetActionBar.lua, PetDock.lua and
+ClassShoulder.lua.
+
+The tab is a Shaman shoulder on the Console chassis, 6 columns x 1 row (264 x 49 design px), built like the Paladin
+seal bar: plain SecureActionButtonTemplate buttons on a separate protected host, attributes written from Lua out of
+combat only (no secure snippet, no state driver), cooldown swipes fed from duration objects. Checked here:
+
+  * six named secure buttons FSTotemButton1..6 in the fixed, append only keybind order Fire, Earth, Water, Air,
+    Set drop, Recall, built once; the same six CLICK commands in Bindings.xml with a binding label each;
+  * an element button's LEFT click is decided at sync time. ACTION mode when the multi-cast bar is usable
+    (C_ActionBar.GetMultiCastBarIndex answers a plain number and GetMultiCastTotemSpells lists totems for the
+    slot): type1 "action" on action id (bar - 1) * 12 + (set - 1) * 4 + slot, so a pick made in combat needs no
+    attribute write. Otherwise SPELL mode: type1 "spell" with the picked totem's NAME. Right click is the secure
+    "destroytotem" type on the element's totem slot (FIRE 1, EARTH 2, WATER 3, AIR 4);
+  * Set drop is Call of the Elements (shift: Call of the Ancestors once known), Recall is Totemic Recall, both
+    locked until known; a locked button carries no castable attribute and is dimmed by alpha, never hidden;
+  * every protected write waits out combat and replays at PLAYER_REGEN_ENABLED; a pick made in combat is tried at
+    once in action mode, kept for regen when it did not land, and queued for regen in spell mode;
+  * the picker is a plain frame on UIParent that nothing secure is a child of or anchored to; it opens from the
+    arrow tab or an Alt-click (which never drops the totem), lists the known totems, and a click stores the pick
+    per character;
+  * the Shaman shoulder, the Ghost Wolf stance bar staying where it was, no `.bar` field and no `useparent-`
+    attribute on any button (Blizzard's secure code reads both during a click).
+
+The mock is strict and is NOT the real client. TOTEMBAR_LUA, BINDINGS_XML and TOC_FILE point the harness at mutant
+copies (a check must fail on a broken one).
+
+    python3 tools/totembar-harness.py
+
+Exit 0 = every check passed.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import os
+import re
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+try:
+    from lupa.luajit21 import LuaError
+except ImportError:
+    sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
+
+HERE = Path(__file__).resolve().parent
+ADDON = HERE.parent / "forever-stuwave"
+TOTEMBAR = Path(os.environ.get("TOTEMBAR_LUA", ADDON / "Modules/ActionBars/TotemBar.lua"))
+BINDINGS = Path(os.environ.get("BINDINGS_XML", ADDON / "Bindings.xml"))
+TOC = Path(os.environ.get("TOC_FILE", ADDON / "forever-stuwave.toc"))
+
+
+def _load(name: str, filename: str):
+    spec = importlib.util.spec_from_file_location(name, HERE / filename)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+csh = _load("classshoulder_harness", "classshoulder-harness.py")
+sb = csh.sb
+MU = sb.MU
+g = sb.g
+fire = sb.fire
+approx = sb.approx
+set_combat = sb.set_combat
+blocked = sb.blocked
+SCALES = csh.SCALES
+PITCH = MU["BTN"] + MU["BG"]
+
+# The fixed order (it is the saved keybind order): button N is always this element or spell.
+ORDER = ["fire", "earth", "water", "air", "set", "recall"]
+SLOT = {"fire": 1, "earth": 2, "water": 3, "air": 4}
+LABELS = ["Fire totem", "Earth totem", "Water totem", "Air totem", "Totem set drop", "Totemic Recall"]
+TOTEMS = {
+    "fire": ["Searing Totem", "Frost Resistance Totem", "Magma Totem", "Flametongue Totem"],
+    "earth": ["Stoneskin Totem", "Earthbind Totem", "Stoneclaw Totem", "Strength of Earth Totem", "Tremor Totem"],
+    "water": ["Healing Stream Totem", "Poison Cleansing Totem", "Mana Spring Totem", "Fire Resistance Totem"],
+    "air": ["Grounding Totem", "Nature Resistance Totem"],
+}
+CALL, ANCESTORS, RECALL = 66842, 66843, 36936
+BAR = 12          # what GetMultiCastBarIndex answers in the mock
+GUID = "Player-1-0000ABCD"
+
+MOCKS = r"""
+FS.Theme.COLOR_AMBER = FS.Theme.COLOR_AMBER or { 1, 0.7137, 0.2824, 1 }
+FS.Theme.COLOR_MUTED = FS.Theme.COLOR_MUTED or { 0.6157, 0.5765, 0.7686, 1 }
+-- the host parents secure buttons, so it is restricted in combat like the Console root
+do
+    local create = CreateFrame
+    function CreateFrame(kind, name, ...)
+        local f = create(kind, name, ...)
+        if name == "FSTotemBar" then f._protected = true end
+        return f
+    end
+end
+__Region.SetReverse = function(self, v) self._reverse = v end
+function GameTooltip:SetOwner(owner) self._lines = {}; self._owner = owner end
+function GameTooltip:ClearLines() self._lines = {} end
+function GameTooltip:SetText(t) self._lines = { t } end
+UISpecialFrames = {}
+__alt = false
+function IsAltKeyDown() return __alt end
+function UnitGUID() return %(guid)r end
+-- spells by id: name <-> id, learned or not (the sealbar mock's __spells / __idNames / __learned)
+function __spell(name, id, known)
+    __spells[name] = id
+    __idNames[id] = name
+    if known ~= false then __learned[id] = true else __learned[id] = nil end
+end
+function __unlearn(name) local id = __spells[name]; __learned[id] = nil end
+__ids = {}
+do
+    local n = 1000
+    local function reg(list) for _, name in ipairs(list) do n = n + 1; __ids[name] = n; __spell(name, n, false) end end
+    reg(%(all)s)
+end
+function __know(name) __learned[__ids[name]] = true end
+-- the multi-cast bar: C_ActionBar.GetMultiCastBarIndex, GetMultiCastTotemSpells(slot), SetMultiCastSpell(action, spell)
+__mc = { bar = %(bar)d, lists = {}, slots = {}, calls = {}, refuse = false, barMode = nil, listMode = nil, noApi = false }
+C_ActionBar.GetMultiCastBarIndex = function()
+    if __mc.barMode == "throw" then error("GetMultiCastBarIndex blew up") end
+    if __mc.barMode == "secret" then return __SECRET end
+    return __mc.bar
+end
+function __mc_list(slot, names)
+    local ids = {}
+    for _, name in ipairs(names) do ids[#ids + 1] = __ids[name] end
+    __mc.lists[slot] = ids
+end
+function GetMultiCastTotemSpells(slot)
+    if __mc.listMode == "throw" then error("GetMultiCastTotemSpells blew up") end
+    if __mc.listMode == "secret" then return __SECRET end
+    return unpack(__mc.lists[slot] or {})
+end
+function SetMultiCastSpell(action, spell)
+    __mc.calls[#__mc.calls + 1] = { action, spell, combat = __combat }
+    if __mc.throws then error("SetMultiCastSpell blew up") end
+    -- the client silently drops a protected call from tainted code in combat; it does not raise
+    if __combat and __mc.refuse then return end
+    __mc.slots[action] = spell
+end
+function GetActionInfo(action)
+    if __mc.infoMode == "throw" then error("GetActionInfo blew up") end
+    if __mc.infoMode == "secret" then return __SECRET end
+    local s = __mc.slots[action]
+    if s then return "spell", s end
+end
+-- totems standing: slot -> { name, start, duration }; GetTotemInfo and the duration object
+__tot, __totMode = {}, nil
+function GetTotemInfo(slot)
+    if __totMode == "throw" then error("GetTotemInfo blew up") end
+    if __totMode == "secret" then return __SECRET, __SECRET, __SECRET, __SECRET end
+    local t = __tot[slot]
+    if t then return true, t[1], t[2], t[3], 136000 end
+    return false, "", 0, 0, 0
+end
+function GetTotemDuration(slot)
+    if __totMode == "objthrow" then error("GetTotemDuration blew up") end
+    local t = __tot[slot]
+    if t then return { totemFor = slot } end
+end
+"""
+
+def boot(scale: float = 1.0, *, klass: str = "SHAMAN", learned=(), lists=None, spells=(), combat: bool = False,
+         bar_mode=None, list_mode=None, console: bool = True, pre_login: str = ""):
+    """A Shaman world. `learned`: totem names the spellbook knows; `lists`: {slot: [names]} the multi-cast
+    API reports; `spells`: other spell names to know (Call of the Elements etc., by id through __spell)."""
+    all_names = [n for names in TOTEMS.values() for n in names]
+    mocks = MOCKS % dict(guid=GUID, bar=BAR, all="{" + ",".join(f'"{n}"' for n in all_names) + "}")
+    setup = [f'__know("{n}")' for n in learned]
+    for slot, names in (lists or {}).items():
+        setup.append(f"__mc_list({slot}, {{" + ",".join(f'"{n}"' for n in names) + "})")
+    for name, sid in (("Call of the Elements", CALL), ("Call of the Ancestors", ANCESTORS),
+                      ("Totemic Recall", RECALL)):
+        setup.append(f'__spell("{name}", {sid}, {"true" if name in spells else "false"})')
+    if bar_mode:
+        setup.append(f'__mc.barMode = "{bar_mode}"')
+    if list_mode:
+        setup.append(f'__mc.listMode = "{list_mode}"')
+    return sb.boot(scale, klass=klass, known=[], combat=combat, console=console,
+                   extra_lua=csh.PATCH + mocks + "\n" + "\n".join(setup),
+                   extra_files=(csh.PETDOCK, csh.CLASSSHOULDER, TOTEMBAR),
+                   pre_login=pre_login)
+
+
+def btn(lua, i):
+    return g(lua)[f"FSTotemButton{i}"]
+
+
+def by_key(lua, key):
+    return btn(lua, ORDER.index(key) + 1)
+
+
+def attr(b, name):
+    return b._attrs[name]
+
+
+def shown(b) -> bool:
+    return bool(b._shown)
+
+
+def tb(lua):
+    return g(lua).FS.TotemBar
+
+
+def click(lua, b, button="LeftButton", down=False):
+    lua.eval("__Region.Fire")(b, "OnClick", button, down)
+
+
+def seq(table) -> list:
+    return csh.seq(table)
+
+
+def mc_calls(lua) -> list:
+    return [(int(c[1]), int(c[2]), bool(c.combat)) for c in seq(g(lua).__mc.calls)]
+
+
+def tid(lua, name) -> int:
+    return int(g(lua).__ids[name])
+
+
+def action_id(slot, bar=BAR, mc_set=1) -> int:
+    return (bar - 1) * 12 + (mc_set - 1) * 4 + slot
+
+
+def picks(lua):
+    db = g(lua).ForeverSTUwaveDB
+    return db.totemPicks[GUID] if db and db.totemPicks else None
+
+
+def lists_for(*elements):
+    return {SLOT[e]: TOTEMS[e] for e in elements}
+
+
+def all_known(**kw):
+    names = [n for e in ("fire", "earth", "water", "air") for n in TOTEMS[e]]
+    return boot(learned=names, spells=("Call of the Elements", "Call of the Ancestors", "Totemic Recall"), **kw)
+
+
+# ---------------------------------------------------------------------------------------------
+# Checks
+# ---------------------------------------------------------------------------------------------
+
+
+def check_six_named_secure_buttons_in_the_fixed_order_built_once():
+    lua = all_known()
+    for i in range(1, 7):
+        b = btn(lua, i)
+        assert b is not None, f"FSTotemButton{i} was not built"
+        assert b._secure, f"FSTotemButton{i} is not a secure template button"
+        assert b.fsKey == ORDER[i - 1], f"button {i} is {b.fsKey!r}, want {ORDER[i - 1]!r}"
+        clicks = [b._clicks[k] for k in range(1, len(b._clicks) + 1)]
+        assert clicks == ["AnyUp", "AnyDown"], f"button {i} clicks {clicks}"
+    for event in ("SPELLS_CHANGED", "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENABLED", "UPDATE_BINDINGS",
+                  "PLAYER_TOTEM_UPDATE", "SPELL_UPDATE_COOLDOWN"):
+        fire(lua, event)
+    frames = [f for f in g(lua).__frames.values() if f._name and re.match(r"FSTotemButton\d$", f._name)]
+    assert len(frames) == 6, f"{len(frames)} named totem buttons, expected exactly 6"
+
+
+def check_only_a_shaman_gets_a_tab():
+    for klass in ("PALADIN", "WARRIOR", "PRIEST", "MAGE", "DRUID"):
+        lua = boot(klass=klass)
+        assert btn(lua, 1) is None, f"{klass} got a totem button"
+        assert g(lua).FSTotemBar is None, f"{klass} got a totem host"
+        assert not tb(lua).OwnsShoulder(), f"{klass}: the totem tab claims the shoulder"
+        assert not csh.cs(lua).IsShown() or klass in ("PALADIN", "WARRIOR"), f"{klass}: a shoulder stands"
+
+
+def check_action_mode_when_the_multicast_bar_is_usable():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"))
+    b = by_key(lua, "earth")
+    assert b.fsMode == "action", f"mode {b.fsMode!r}"
+    assert attr(b, "type1") == "action"
+    assert attr(b, "action1") == action_id(2), f"action1 {attr(b, 'action1')} (bar {BAR}, set 1, slot 2)"
+    assert attr(b, "spell1") is None, "action mode kept a spell attribute"
+    assert attr(b, "type2") == "destroytotem" and attr(b, "totem-slot2") == 2
+    assert attr(b, "alt-type1") == "", "Alt-click would drop the totem as well as open the picker"
+    # an action id per slot: FIRE 1, EARTH 2, WATER 3, AIR 4
+    lua = all_known_with_lists()
+    for key, slot in SLOT.items():
+        bb = by_key(lua, key)
+        assert attr(bb, "action1") == action_id(slot), f"{key}: action1 {attr(bb, 'action1')}"
+        assert attr(bb, "totem-slot2") == slot, f"{key}: totem-slot2 {attr(bb, 'totem-slot2')}"
+        assert attr(bb, "type2") == "destroytotem"
+
+
+def all_known_with_lists(**kw):
+    names = [n for e in ("fire", "earth", "water", "air") for n in TOTEMS[e]]
+    return boot(learned=names, lists=lists_for("fire", "earth", "water", "air"),
+                spells=("Call of the Elements", "Call of the Ancestors", "Totemic Recall"), **kw)
+
+
+def check_spell_mode_when_there_is_no_usable_multicast_bar():
+    cases = {
+        "no lists": dict(),
+        "bar index throws": dict(bar_mode="throw", lists=lists_for("earth")),
+        "bar index secret": dict(bar_mode="secret", lists=lists_for("earth")),
+        "list throws": dict(list_mode="throw", lists=lists_for("earth")),
+        "list secret": dict(list_mode="secret", lists=lists_for("earth")),
+    }
+    for label, kw in cases.items():
+        lua = boot(learned=TOTEMS["earth"], **kw)
+        b = by_key(lua, "earth")
+        assert b.fsMode == "spell", f"{label}: mode {b.fsMode!r}"
+        assert attr(b, "type1") == "spell" and attr(b, "spell1") == "Stoneskin Totem", (
+            f"{label}: {attr(b, 'type1')!r} {attr(b, 'spell1')!r}")
+        assert attr(b, "action1") is None, f"{label}: an action attribute in spell mode"
+        assert attr(b, "type2") == "destroytotem" and attr(b, "totem-slot2") == 2, label
+    # the mode is per element: a list for earth only leaves fire in spell mode
+    lua = boot(learned=TOTEMS["earth"] + TOTEMS["fire"], lists=lists_for("earth"))
+    assert by_key(lua, "earth").fsMode == "action" and by_key(lua, "fire").fsMode == "spell"
+
+
+def check_no_multicast_api_at_all_degrades_to_spell_mode():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"),
+               pre_login="C_ActionBar.GetMultiCastBarIndex = nil; GetMultiCastTotemSpells = nil")
+    # the mode was decided before the strip above at the first sync, so force a fresh one
+    fire(lua, "SPELLS_CHANGED")
+    b = by_key(lua, "earth")
+    assert b.fsMode == "spell" and attr(b, "spell1") == "Stoneskin Totem", f"{b.fsMode} {attr(b, 'spell1')}"
+    assert attr(b, "action1") is None
+
+
+def check_a_mode_change_rewrites_the_attributes_cleanly():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"))
+    b = by_key(lua, "earth")
+    assert b.fsMode == "action"
+    lua.execute("__mc.lists[2] = nil")
+    fire(lua, "SPELLS_CHANGED")
+    assert b.fsMode == "spell" and attr(b, "type1") == "spell" and attr(b, "action1") is None
+    lua.execute('__mc_list(2, {"Stoneskin Totem"})')
+    fire(lua, "SPELLS_CHANGED")
+    assert b.fsMode == "action" and attr(b, "spell1") is None and attr(b, "action1") == action_id(2)
+
+
+def check_locked_buttons_carry_nothing_castable_and_dim_by_alpha():
+    lua = boot()      # nothing known: a level 1 Shaman
+    for i in range(1, 7):
+        b = btn(lua, i)
+        assert b.fsLocked, f"button {i} should be locked"
+        for name in ("type", "type1", "type2", "action1", "spell", "spell1", "totem-slot2", "alt-type1",
+                     "shift-type1", "shift-spell1"):
+            assert attr(b, name) is None, f"locked button {i} carries {name}={attr(b, name)!r}"
+        assert b._alpha < 1, f"locked button {i} is not dimmed"
+        assert shown(b), f"locked button {i} was hidden, a locked button is dimmed by alpha"
+        assert shown(b.fsMold), f"locked button {i} shows no dotted mold"
+    assert by_key(lua, "earth").fsLockText._text == "L4"
+    assert by_key(lua, "fire").fsLockText._text == "L10"
+    assert by_key(lua, "water").fsLockText._text == "L20"
+    assert by_key(lua, "air").fsLockText._text == "L30"
+    assert by_key(lua, "set").fsLockText._text == "L20" and by_key(lua, "recall").fsLockText._text == "L20"
+
+
+def check_learning_a_totem_unlocks_just_that_element():
+    lua = boot()
+    set_combat(lua, False)
+    lua.execute('__know("Stoneskin Totem")')
+    fire(lua, "LEARNED_SPELL_IN_TAB")
+    earth, fire_b = by_key(lua, "earth"), by_key(lua, "fire")
+    assert not earth.fsLocked and earth._alpha == 1 and attr(earth, "type1") == "spell"
+    assert not shown(earth.fsMold)
+    assert fire_b.fsLocked and attr(fire_b, "type1") is None
+    lua.execute('__know("Searing Totem")')
+    fire(lua, "PLAYER_LEVEL_UP")
+    assert not fire_b.fsLocked and attr(fire_b, "spell1") == "Searing Totem"
+
+
+def check_set_and_recall_buttons():
+    lua = boot(learned=TOTEMS["earth"], spells=("Call of the Elements", "Totemic Recall"))
+    s, r = by_key(lua, "set"), by_key(lua, "recall")
+    assert not s.fsLocked and attr(s, "type") == "spell" and attr(s, "spell") == "Call of the Elements"
+    assert attr(s, "shift-type1") is None and attr(s, "shift-spell1") is None, "Ancestors is not known yet"
+    assert not r.fsLocked and attr(r, "type") == "spell" and attr(r, "spell") == "Totemic Recall"
+    lua = boot(spells=("Call of the Elements", "Call of the Ancestors", "Totemic Recall"))
+    s = by_key(lua, "set")
+    assert attr(s, "shift-type1") == "spell" and attr(s, "shift-spell1") == "Call of the Ancestors"
+    # unknown: locked, no attribute
+    lua = boot(spells=("Totemic Recall",))
+    assert by_key(lua, "set").fsLocked and attr(by_key(lua, "set"), "spell") is None
+    assert not by_key(lua, "recall").fsLocked
+    # neither carries an element totem attribute
+    for key in ("set", "recall"):
+        assert attr(by_key(lua, key), "type2") is None and attr(by_key(lua, key), "totem-slot2") is None
+
+
+def check_default_pick_is_the_first_known_totem_and_a_stale_pick_falls_back():
+    lua = boot(learned=["Earthbind Totem", "Tremor Totem"])
+    b = by_key(lua, "earth")
+    assert attr(b, "spell1") == "Earthbind Totem", f"default pick {attr(b, 'spell1')!r}"
+    # a stored pick of a totem that is not known any more falls back to the first known
+    lua = boot(learned=["Earthbind Totem", "Tremor Totem"], pre_login=(
+        f'ForeverSTUwaveDB = {{ totemPicks = {{ [{GUID!r}] = {{ earth = {{ id = 9999, name = "Gone Totem" }} }} }} }}'))
+    assert attr(by_key(lua, "earth"), "spell1") == "Earthbind Totem"
+    # a stored pick that is known is kept
+    lua = boot(learned=["Earthbind Totem", "Tremor Totem"], pre_login=(
+        f'ForeverSTUwaveDB = {{ totemPicks = {{ [{GUID!r}] = {{ earth = {{ id = 1009, name = "Tremor Totem" }} }} }} }}'))
+    assert attr(by_key(lua, "earth"), "spell1") == "Tremor Totem"
+
+
+def check_spell_mode_pick_out_of_combat_writes_at_once_and_stores_it():
+    lua = boot(learned=TOTEMS["earth"])
+    tb(lua).Pick("earth", tid(lua, "Tremor Totem"))
+    b = by_key(lua, "earth")
+    assert attr(b, "spell1") == "Tremor Totem", f"spell1 {attr(b, 'spell1')!r}"
+    saved = picks(lua)
+    assert saved is not None and saved.earth.id == tid(lua, "Tremor Totem") and saved.earth.name == "Tremor Totem"
+    assert b.icon._texture == 9000 + tid(lua, "Tremor Totem"), f"icon {b.icon._texture}"
+    assert mc_calls(lua) == [], "spell mode must not touch the multi-cast slot"
+
+
+def check_spell_mode_pick_in_combat_waits_for_regen():
+    lua = boot(learned=TOTEMS["earth"])
+    b = by_key(lua, "earth")
+    set_combat(lua, True)
+    before = blocked(lua)
+    tb(lua).Pick("earth", tid(lua, "Tremor Totem"))
+    assert blocked(lua) == before, "a protected write was tried in combat"
+    assert attr(b, "spell1") == "Stoneskin Totem", "the attribute changed in combat"
+    assert picks(lua).earth.name == "Tremor Totem", "the pick must be stored at once"
+    set_combat(lua, False)
+    fire(lua, "PLAYER_REGEN_ENABLED")
+    assert attr(b, "spell1") == "Tremor Totem", f"regen replay left {attr(b, 'spell1')!r}"
+
+
+def check_action_mode_pick_calls_setmulticastspell_and_stores_it():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"))
+    b = by_key(lua, "earth")
+    tb(lua).Pick("earth", tid(lua, "Tremor Totem"))
+    assert mc_calls(lua)[-1] == (action_id(2), tid(lua, "Tremor Totem"), False), mc_calls(lua)
+    assert picks(lua).earth.id == tid(lua, "Tremor Totem")
+    assert attr(b, "action1") == action_id(2), "the pick must not need an attribute write"
+    assert b.icon._texture == 9000 + tid(lua, "Tremor Totem")
+
+
+def check_action_mode_pick_in_combat_needs_no_attribute_write_and_lands():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"))
+    set_combat(lua, True)
+    before = blocked(lua)
+    tb(lua).Pick("earth", tid(lua, "Tremor Totem"))
+    assert blocked(lua) == before, "an attribute write was tried in combat"
+    calls = mc_calls(lua)
+    assert calls and calls[-1] == (action_id(2), tid(lua, "Tremor Totem"), True), calls
+    n = len(calls)
+    set_combat(lua, False)
+    fire(lua, "PLAYER_REGEN_ENABLED")
+    assert len(mc_calls(lua)) == n, "a pick that landed in combat was sent again at regen"
+
+
+def check_action_mode_pick_refused_in_combat_is_replayed_at_regen():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"), pre_login="__mc.refuse = true")
+    set_combat(lua, True)
+    tb(lua).Pick("earth", tid(lua, "Tremor Totem"))
+    assert int(g(lua).__mc.slots[action_id(2)]) == tid(lua, "Stoneskin Totem"), (
+        "setup: the client should have dropped the call")
+    assert picks(lua).earth.name == "Tremor Totem"
+    set_combat(lua, False)
+    fire(lua, "PLAYER_REGEN_ENABLED")
+    assert int(g(lua).__mc.slots[action_id(2)]) == tid(lua, "Tremor Totem"), "the refused pick was not replayed"
+
+
+def check_a_throwing_setmulticastspell_is_queued_not_raised():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"), pre_login="__mc.throws = true")
+    tb(lua).Pick("earth", tid(lua, "Tremor Totem"))      # must not raise
+    lua.execute("__mc.throws = false")
+    fire(lua, "PLAYER_REGEN_ENABLED")
+    assert int(g(lua).__mc.slots[action_id(2)]) == tid(lua, "Tremor Totem"), "the failed pick was not retried at regen"
+
+
+def check_an_empty_multicast_slot_is_filled_with_the_pick_and_a_filled_one_is_adopted():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"))
+    assert int(g(lua).__mc.slots[action_id(2)]) == tid(lua, "Stoneskin Totem"), "an empty slot was left empty"
+    # a slot the native bar already filled wins: the tab shows it and does not overwrite it
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"),
+               pre_login=f'__mc.slots[{action_id(2)}] = __ids["Tremor Totem"]')
+    assert mc_calls(lua) == [], f"overwrote the native bar's pick: {mc_calls(lua)}"
+    b = by_key(lua, "earth")
+    assert b.icon._texture == 9000 + tid(lua, "Tremor Totem")
+    assert picks(lua).earth.name == "Tremor Totem"
+
+
+def check_the_arrow_and_alt_click_open_the_picker_and_alt_does_not_drop():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"))
+    b = by_key(lua, "earth")
+    assert b.fsArrow is not None and b.fsArrow._kind == "Button"
+    assert tb(lua).Picker() is None or not shown(tb(lua).Picker())
+    click(lua, b.fsArrow)
+    picker = tb(lua).Picker()
+    assert picker is not None and shown(picker), "the arrow did not open the picker"
+    click(lua, b.fsArrow)
+    assert not shown(picker), "the arrow did not close the open picker"
+    lua.execute("__alt = true")
+    click(lua, b, "LeftButton", True)
+    assert not shown(picker), "the key DOWN of an Alt-click opened the picker (take only the release)"
+    click(lua, b, "LeftButton", False)
+    assert shown(picker), "Alt-click did not open the picker"
+    lua.execute("__alt = false")
+    tb(lua).ClosePicker()
+    click(lua, b, "LeftButton", False)
+    assert not shown(picker), "a plain click opened the picker"
+    click(lua, b, "RightButton", False)
+    assert not shown(picker), "a right click opened the picker"
+    # locked elements have no arrow to open
+    lua = boot()
+    assert not by_key(lua, "fire").fsArrow._mouse, "a locked element's arrow takes the mouse"
+
+
+def check_the_picker_lists_the_known_totems_and_a_click_picks_and_closes():
+    lua = boot(learned=TOTEMS["earth"][:3], lists={2: TOTEMS["earth"][:3]})
+    b = by_key(lua, "earth")
+    tb(lua).OpenPicker("earth")
+    picker = tb(lua).Picker()
+    entries = [e for e in seq(picker.fsEntries) if shown(e)]
+    ids = [int(e.fsSpellID) for e in entries]
+    assert ids == [tid(lua, n) for n in TOTEMS["earth"][:3]], f"entries {ids}"
+    click(lua, entries[1])
+    assert not shown(picker), "a pick left the picker open"
+    assert picks(lua).earth.name == "Earthbind Totem"
+    assert mc_calls(lua)[-1][:2] == (action_id(2), tid(lua, "Earthbind Totem"))
+    assert b.icon._texture == 9000 + tid(lua, "Earthbind Totem")
+
+
+def check_the_picker_lists_known_spells_in_spell_mode_too():
+    lua = boot(learned=["Earthbind Totem", "Tremor Totem"])
+    tb(lua).OpenPicker("earth")
+    entries = [e for e in seq(tb(lua).Picker().fsEntries) if shown(e)]
+    assert [int(e.fsSpellID) for e in entries] == [tid(lua, "Earthbind Totem"), tid(lua, "Tremor Totem")]
+
+
+def check_the_picker_is_plain_and_nothing_secure_depends_on_it():
+    lua = all_known_with_lists()
+    tb(lua).OpenPicker("earth")
+    picker = tb(lua).Picker()
+    assert picker._parent._name == "UIParent", f"picker parent {picker._parent._name}"
+    assert not picker._secure and not picker._protected
+    host = g(lua).FSTotemBar
+
+    def descend(f, target):
+        for r in seq(f._regions):
+            if sb.same(lua, r, target) or descend(r, target):
+                return True
+        return False
+    assert not descend(host, picker), "the picker is a descendant of the secure host"
+    for f in g(lua).__frames.values():
+        if f._secure or sb.same(lua, f, host):
+            for p in seq(f._points):
+                assert not sb.same(lua, p.rel, picker), f"{f._name} is anchored to the picker"
+        assert not (f._secure and f._parent is not None and sb.same(lua, f._parent, picker)), "a secure frame under the picker"
+    secure_under = [f for f in g(lua).__frames.values() if f._secure and descend(picker, f)]
+    assert not secure_under, "a secure button inside the picker"
+
+
+def check_the_picker_opens_and_picks_in_combat_without_a_protected_touch():
+    lua = all_known_with_lists()
+    set_combat(lua, True)
+    before, touch = blocked(lua), int(g(lua).__protectedTouch)
+    tb(lua).OpenPicker("water")
+    picker = tb(lua).Picker()
+    assert shown(picker), "the picker did not open in combat"
+    entries = [e for e in seq(picker.fsEntries) if shown(e)]
+    click(lua, entries[1])
+    tb(lua).OpenPicker("fire")
+    tb(lua).ClosePicker()
+    assert blocked(lua) == before, "the picker caused a refused protected call"
+    assert int(g(lua).__protectedTouch) == touch, "the picker touched a frame under a protected parent in combat"
+
+
+def check_the_picker_follows_the_element_and_closes_when_the_mouse_leaves():
+    lua = all_known_with_lists()
+    tb(lua).OpenPicker("air")
+    picker = tb(lua).Picker()
+    entries = [e for e in seq(picker.fsEntries) if shown(e)]
+    assert [int(e.fsSpellID) for e in entries] == [tid(lua, n) for n in TOTEMS["air"]]
+    assert sb.same(lua, picker.fsOwner, by_key(lua, "air")), "the picker is not owned by the air button"
+    tb(lua).OpenPicker("fire")
+    entries = [e for e in seq(picker.fsEntries) if shown(e)]
+    assert [int(e.fsSpellID) for e in entries] == [tid(lua, n) for n in TOTEMS["fire"]], "stale entries"
+    # the mouse is nowhere near: the idle timer closes it
+    onupdate = picker._scripts.OnUpdate
+    assert onupdate is not None, "no idle close"
+    for _ in range(40):
+        onupdate(picker, 0.1)
+    assert not shown(picker), "the picker stayed open with the mouse away"
+    tb(lua).OpenPicker("fire")
+    picker._mouseOver = True
+    for _ in range(40):
+        picker._scripts.OnUpdate(picker, 0.1)
+    assert shown(picker), "the picker closed under the mouse"
+
+
+def check_attribute_writes_wait_out_combat_and_replay_at_regen():
+    lua = boot(learned=[])
+    set_combat(lua, True)
+    before = blocked(lua)
+    lua.execute('__know("Stoneskin Totem"); __spell("Totemic Recall", 36936, true)')
+    for event in ("SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD"):
+        fire(lua, event)
+    assert blocked(lua) == before, "a protected write was tried in combat"
+    assert by_key(lua, "earth").fsLocked and attr(by_key(lua, "earth"), "type1") is None
+    set_combat(lua, False)
+    fire(lua, "PLAYER_REGEN_ENABLED")
+    assert attr(by_key(lua, "earth"), "spell1") == "Stoneskin Totem" and not by_key(lua, "recall").fsLocked
+
+
+def check_a_login_in_combat_builds_at_regen():
+    lua = boot(learned=TOTEMS["earth"], combat=True)
+    assert btn(lua, 1) is None, "built a secure frame in combat"
+    set_combat(lua, False)
+    fire(lua, "PLAYER_REGEN_ENABLED")
+    assert btn(lua, 1) is not None and attr(by_key(lua, "earth"), "spell1") == "Stoneskin Totem"
+
+
+def check_combat_never_creates_moves_resizes_shows_or_hides_a_secure_frame():
+    lua = all_known_with_lists()
+    host = g(lua).FSTotemBar
+    snap = [(b._w, b._h, len(b._points), bool(b._shown)) for b in [btn(lua, i) for i in range(1, 7)]]
+    set_combat(lua, True)
+    before, touch = blocked(lua), int(g(lua).__protectedTouch)
+    n_frames = len(g(lua).__frames)
+    for event in ("SPELLS_CHANGED", "PLAYER_TOTEM_UPDATE", "SPELL_UPDATE_COOLDOWN", "UPDATE_BINDINGS",
+                  "ACTIONBAR_SLOT_CHANGED", "PLAYER_LEVEL_UP"):
+        fire(lua, event)
+    lua.eval("__rescale")(1.0)
+    csh.console(lua).SetActive(False)
+    csh.console(lua).SetActive(True)
+    assert blocked(lua) == before, "a protected call was tried in combat"
+    assert int(g(lua).__protectedTouch) == touch, "a frame under a protected parent was touched in combat"
+    assert [(b._w, b._h, len(b._points), bool(b._shown)) for b in [btn(lua, i) for i in range(1, 7)]] == snap
+    assert host._shown
+
+
+def check_cooldown_swipes_follow_the_picked_totem_by_duration_object():
+    lua = all_known_with_lists()
+    b = by_key(lua, "earth")
+    assert b.cooldown is not None and b.totemCooldown is not None and not sb.same(lua, b.totemCooldown, b.cooldown)
+    sid = tid(lua, "Stoneskin Totem")
+    sb.set_cd(lua, sid, 100, 1)
+    fire(lua, "SPELL_UPDATE_COOLDOWN")
+    assert sb.cd_of(b) == ("obj", sid), f"swipe {sb.cd_of(b)}"
+    s = by_key(lua, "set")
+    sb.set_cd(lua, CALL, 100, 3)
+    fire(lua, "SPELL_UPDATE_COOLDOWN")
+    assert sb.cd_of(s) == ("obj", CALL), f"set swipe {sb.cd_of(s)}"
+    set_combat(lua, True)
+    before = blocked(lua)
+    fire(lua, "SPELL_UPDATE_COOLDOWN")
+    assert blocked(lua) == before
+
+
+def check_the_live_totem_sweep_reads_the_totem_when_plain_and_skips_it_when_secret():
+    lua = all_known_with_lists()
+    b = by_key(lua, "earth")
+    lua.execute('__tot[2] = { "Stoneskin Totem", 500, 300 }')
+    fire(lua, "PLAYER_TOTEM_UPDATE")
+    assert b.totemCooldown._cd is not None and tuple(b.totemCooldown._cd[i] for i in (1, 2)) == (500, 300), (
+        b.totemCooldown._cd)
+    lua.execute("__tot[2] = nil")
+    fire(lua, "PLAYER_TOTEM_UPDATE")
+    assert b.totemCooldown._cd is None and b.totemCooldown._cdObj is None, "stale sweep"
+    # secret in combat: nothing thrown, nothing compared, the sweep is left alone
+    lua.execute('__tot[2] = { "Stoneskin Totem", 500, 300 }; __totMode = "secret"')
+    set_combat(lua, True)
+    fire(lua, "PLAYER_TOTEM_UPDATE")
+    fire(lua, "SPELL_UPDATE_COOLDOWN")
+    lua.execute('__totMode = "throw"')
+    fire(lua, "PLAYER_TOTEM_UPDATE")
+    # an unreadable GetTotemInfo falls through to the duration object
+    lua.execute('__totMode = nil; GetTotemInfo = function() return __SECRET, __SECRET, __SECRET, __SECRET end')
+    fire(lua, "PLAYER_TOTEM_UPDATE")
+    assert b.totemCooldown._cdObj is not None and b.totemCooldown._cdObj.totemFor == 2, "duration object path"
+
+
+def check_tooltip_text_and_the_unlock_hint():
+    lua = all_known_with_lists()
+    b = by_key(lua, "earth")
+    lua.eval("__Region.Fire")(b, "OnEnter")
+    lines = [str(x) for x in seq(g(lua).GameTooltip._lines)]
+    text = " | ".join(lines)
+    assert "Stoneskin Totem" in text, text
+    assert "Left click: drop Stoneskin Totem. Right click: dismiss. Alt-click or arrow: change totem." in text, text
+    lua.eval("__Region.Fire")(b, "OnLeave")
+    assert not shown(g(lua).GameTooltip)
+    lua = boot()
+    f = by_key(lua, "fire")
+    lua.eval("__Region.Fire")(f, "OnEnter")
+    text = " | ".join(str(x) for x in seq(g(lua).GameTooltip._lines))
+    assert "level 10" in text, text
+
+
+def check_hotkey_text_and_quick_keybind_commands():
+    lua = all_known_with_lists()
+    for i in range(1, 7):
+        b = btn(lua, i)
+        assert b.commandName == f"CLICK FSTotemButton{i}:LeftButton", f"{i}: {b.commandName!r}"
+        assert b.fsQuickKeybindOverlay is not None
+        for script in ("OnClick", "OnShow", "OnHide"):
+            assert len([h for h in seq(b._hooks[script])]) >= 1
+    g(lua).__bindings["CLICK FSTotemButton3:LeftButton"] = "SHIFT-F"
+    fire(lua, "UPDATE_BINDINGS")
+    b = btn(lua, 3)
+    assert shown(b.HotKey) and b.HotKey._text == "SHIFT-F", f"hotkey {b.HotKey._text!r}"
+    g(lua).__bindings["CLICK FSTotemButton3:LeftButton"] = None
+    lua.eval("__trigger")("KeybindListener.RebindSuccess")
+    assert not shown(b.HotKey)
+
+
+def check_bindings_xml_declares_six_totem_commands_after_the_seals():
+    root = ET.parse(BINDINGS).getroot()
+    names = [b.get("name") for b in root.findall("Binding")]
+    want = [f"CLICK FSSealButton{i}:LeftButton" for i in range(1, 8)] + [
+        f"CLICK FSTotemButton{i}:LeftButton" for i in range(1, 7)]
+    assert names == want, f"binding names {names}"
+    items = root.findall("Binding")
+    assert all(b.get("category") == "ADDONS" for b in items)
+    assert [b.get("header") for b in items if b.get("header")] == ["FOREVERSTUWAVE"], "only the first has a header"
+
+
+def check_binding_labels_exist_for_every_class():
+    for klass in ("SHAMAN", "PALADIN", "WARRIOR"):
+        lua = boot(klass=klass)
+        for i, label in enumerate(LABELS, 1):
+            text = g(lua)[f"BINDING_NAME_CLICK FSTotemButton{i}:LeftButton"]
+            assert text == label, f"{klass}: label {i} is {text!r}, want {label!r}"
+
+
+def check_the_shoulder_is_the_six_by_one_block_and_the_buttons_sit_inside_it(scale):
+    lua = boot(scale, learned=TOTEMS["earth"])
+    s = csh.shoulder(lua)
+    assert s is not None and csh.cs(lua).IsShown(), "no Shaman shoulder stands"
+    w = 2 * MU["PAD"] + 6 * MU["BTN"] + 5 * MU["BG"]
+    h = MU["PT"] + MU["BTN"] + MU["PB"]
+    approx(w, 264.0, "block width"), approx(h, 49.0, "block height")
+    d = csh.D(lua, s.art)
+    approx(d["w"], w, "art width in design px", 0.01), approx(d["h"], h, "art height in design px", 0.01)
+    approx(d["x"], MU["DX"], "art left", 0.5)
+    bw, bh, edge = csh.cs(lua).BlockSize()
+    approx(bw, w * scale, "BlockSize width"), approx(bh, h * scale, "BlockSize height")
+    host = g(lua).FSTotemBar
+    p = host._points[1]
+    assert (p.point, p.rel._name, p.relPoint) == ("BOTTOMLEFT", "FSConsole", "TOPLEFT")
+    approx(p.x, MU["DX"] * scale, "host x", 0.5 * scale), approx(p.y, 0, "host y")
+    for col in range(1, 7):
+        b = btn(lua, col)
+        q = b._points[1]
+        assert sb.same(lua, q.rel, host) and (q.point, q.relPoint) == ("BOTTOMLEFT", "BOTTOMLEFT")
+        approx(q.x, (MU["PAD"] + (col - 1) * PITCH) * scale, f"button {col} x")
+        approx(q.y, MU["PB"] * scale, f"button {col} y")
+        approx(b._w, MU["BTN"] * scale, f"button {col} width"), approx(b._h, MU["BTN"] * scale, f"button {col} height")
+    assert host._level > sb.top_level(g(lua).FSConsole), "the buttons must draw above the chassis"
+    assert host._shown
+
+
+def check_no_secure_frame_is_anchored_to_the_shoulder_art():
+    lua = boot(learned=TOTEMS["earth"])
+    art = csh.shoulder(lua).art
+    for f in g(lua).__frames.values():
+        if f._secure or f._name == "FSTotemBar":
+            for p in seq(f._points):
+                assert not sb.same(lua, p.rel, art), f"{f._name} is anchored to the art"
+            assert f._parent is None or not sb.same(lua, f._parent, art)
+
+
+def check_the_stance_bar_keeps_ghost_wolf_and_the_tab_takes_no_forms():
+    lua = boot(learned=TOTEMS["earth"])
+    assert not g(lua).FS.SealBar.OwnsForms()
+    assert g(lua).FSStanceBar._shown and g(lua).FSStanceButton1._shown, "a Shaman lost its stance bar"
+    assert not g(lua).FS.StanceBar.OwnsShoulder()
+    assert csh.cs(lua).IsShown(), "the totem tab wants the shoulder"
+    # a Shaman with no forms: the tab still stands
+    lua = boot(learned=TOTEMS["earth"], pre_login="GetNumShapeshiftForms = function() return 0 end")
+    assert csh.cs(lua).IsShown()
+
+
+def check_the_tab_follows_the_console_on_and_off():
+    lua = boot(learned=TOTEMS["earth"])
+    host = g(lua).FSTotemBar
+    csh.console(lua).SetActive(False)
+    assert not csh.cs(lua).IsShown()
+    p = host._points[1]
+    assert p.rel._name == "FSStanceBar" and p.relPoint == "TOPLEFT", f"Console off: {p.rel._name}"
+    assert host._shown and shown(btn(lua, 1))
+    csh.console(lua).SetActive(True)
+    assert csh.cs(lua).IsShown() and host._points[1].rel._name == "FSConsole"
+    # no Console at all: still a seat, no crash
+    lua = boot(learned=TOTEMS["earth"], console=False)
+    assert g(lua).FSTotemBar._shown
+
+
+def check_a_rescale_resizes_and_reseats_out_of_combat():
+    lua = boot(1.0, learned=TOTEMS["earth"])
+    lua.eval("__rescale")(1 / 1.2)
+    s = 1 / 1.2
+    approx(btn(lua, 2)._w, MU["BTN"] * s, "button width after a rescale")
+    q = btn(lua, 2)._points[1]
+    approx(q.x, (MU["PAD"] + PITCH) * s, "button 2 x after a rescale")
+
+
+def check_no_bar_field_and_no_useparent_attributes_on_any_button():
+    # Blizzard's SecureButton_GetModifiedAttribute reads frame.bar and the useparent-* attributes during a
+    # secure click; an addon written value there taints the click. Every button carries explicit attributes.
+    lua = all_known_with_lists()
+    for i in range(1, 7):
+        b = btn(lua, i)
+        assert b.bar is None, f"button {i} carries a .bar field"
+        for name, value in b._attrs.items():
+            assert not str(name).startswith("useparent"), f"button {i} carries {name}"
+    tb(lua).Pick("earth", tid(lua, "Tremor Totem"))
+    for i in range(1, 7):
+        assert btn(lua, i).bar is None
+    text = TOTEMBAR.read_text(encoding="utf-8")
+    assert not re.search(r"\.bar\s*=", text), "TotemBar.lua writes a .bar field"
+    assert "useparent" not in text, "TotemBar.lua mentions a useparent attribute"
+
+
+def check_a_throwing_secret_or_missing_api_never_breaks_a_sync():
+    for mode in ("throw", "secret"):
+        lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"),
+                   pre_login=f'__mc.infoMode = "{mode}"; __totMode = "{mode}"')
+        fire(lua, "SPELLS_CHANGED")
+        fire(lua, "PLAYER_TOTEM_UPDATE")
+        assert by_key(lua, "earth").fsMode == "action"
+    lua = boot(learned=TOTEMS["earth"], pre_login="IsPlayerSpell = nil")
+    assert not by_key(lua, "earth").fsLocked      # a name that resolves counts as known with no spellbook API
+    lua = boot(learned=TOTEMS["earth"], pre_login='GetTotemInfo = nil; GetTotemDuration = nil')
+    fire(lua, "PLAYER_TOTEM_UPDATE")
+    lua = boot(learned=TOTEMS["earth"], pre_login="UnitGUID = function() error('boom') end")
+    assert attr(by_key(lua, "earth"), "spell1") == "Stoneskin Totem", "no GUID: the default pick must still work"
+
+
+def check_picks_are_kept_per_character():
+    lua = boot(learned=TOTEMS["earth"])
+    tb(lua).Pick("earth", tid(lua, "Tremor Totem"))
+    db = g(lua).ForeverSTUwaveDB
+    assert db.totemPicks[GUID] is not None
+    lua.execute('ForeverSTUwaveDB.totemPicks["Player-9-OTHER"] = { earth = { id = 1001, name = "Stoneskin Totem" } }')
+    fire(lua, "SPELLS_CHANGED")
+    assert attr(by_key(lua, "earth"), "spell1") == "Tremor Totem", "another character's pick leaked in"
+
+
+def check_the_file_uses_no_snippets_and_no_state_drivers():
+    text = TOTEMBAR.read_text(encoding="utf-8")
+    for needle in ("RegisterStateDriver", "SecureHandler", "WrapScript", ":Execute(", "SetFrameRef"):
+        assert needle not in text, f"TotemBar.lua mentions {needle}"
+
+
+def check_toc_lists_the_totem_bar_after_the_seal_bar():
+    lines = [ln.strip() for ln in TOC.read_text(encoding="utf-8").splitlines()]
+    mods = [ln for ln in lines if ln.endswith(".lua")]
+    t = "Modules/ActionBars/TotemBar.lua"
+    assert t in mods, "TotemBar.lua is not in the .toc"
+    for dep in ("Modules/ActionBars/StanceBar.lua", "Modules/ActionBars/ClassShoulder.lua",
+                "Modules/ActionBars/SealBar.lua", "Modules/Pet/PetDock.lua", "Core/FrameHelpers.lua"):
+        assert mods.index(dep) < mods.index(t), f"{dep} must load before TotemBar.lua"
+
+
+def check_no_em_dashes_in_the_new_files():
+    for path in (TOTEMBAR, Path(__file__), HERE / "assets" / "generate_totem_glyphs.py"):
+        assert path.exists(), f"{path} is missing"
+        assert chr(0x2014) not in path.read_text(encoding="utf-8"), f"{path.name} has an em dash"
+
+
+CHECKS = [
+    check_six_named_secure_buttons_in_the_fixed_order_built_once,
+    check_only_a_shaman_gets_a_tab,
+    check_action_mode_when_the_multicast_bar_is_usable,
+    check_spell_mode_when_there_is_no_usable_multicast_bar,
+    check_no_multicast_api_at_all_degrades_to_spell_mode,
+    check_a_mode_change_rewrites_the_attributes_cleanly,
+    check_locked_buttons_carry_nothing_castable_and_dim_by_alpha,
+    check_learning_a_totem_unlocks_just_that_element,
+    check_set_and_recall_buttons,
+    check_default_pick_is_the_first_known_totem_and_a_stale_pick_falls_back,
+    check_spell_mode_pick_out_of_combat_writes_at_once_and_stores_it,
+    check_spell_mode_pick_in_combat_waits_for_regen,
+    check_action_mode_pick_calls_setmulticastspell_and_stores_it,
+    check_action_mode_pick_in_combat_needs_no_attribute_write_and_lands,
+    check_action_mode_pick_refused_in_combat_is_replayed_at_regen,
+    check_a_throwing_setmulticastspell_is_queued_not_raised,
+    check_an_empty_multicast_slot_is_filled_with_the_pick_and_a_filled_one_is_adopted,
+    check_the_arrow_and_alt_click_open_the_picker_and_alt_does_not_drop,
+    check_the_picker_lists_the_known_totems_and_a_click_picks_and_closes,
+    check_the_picker_lists_known_spells_in_spell_mode_too,
+    check_the_picker_is_plain_and_nothing_secure_depends_on_it,
+    check_the_picker_opens_and_picks_in_combat_without_a_protected_touch,
+    check_the_picker_follows_the_element_and_closes_when_the_mouse_leaves,
+    check_attribute_writes_wait_out_combat_and_replay_at_regen,
+    check_a_login_in_combat_builds_at_regen,
+    check_combat_never_creates_moves_resizes_shows_or_hides_a_secure_frame,
+    check_cooldown_swipes_follow_the_picked_totem_by_duration_object,
+    check_the_live_totem_sweep_reads_the_totem_when_plain_and_skips_it_when_secret,
+    check_tooltip_text_and_the_unlock_hint,
+    check_hotkey_text_and_quick_keybind_commands,
+    check_bindings_xml_declares_six_totem_commands_after_the_seals,
+    check_binding_labels_exist_for_every_class,
+    check_no_secure_frame_is_anchored_to_the_shoulder_art,
+    check_the_stance_bar_keeps_ghost_wolf_and_the_tab_takes_no_forms,
+    check_the_tab_follows_the_console_on_and_off,
+    check_a_rescale_resizes_and_reseats_out_of_combat,
+    check_no_bar_field_and_no_useparent_attributes_on_any_button,
+    check_a_throwing_secret_or_missing_api_never_breaks_a_sync,
+    check_picks_are_kept_per_character,
+    check_the_file_uses_no_snippets_and_no_state_drivers,
+    check_toc_lists_the_totem_bar_after_the_seal_bar,
+    check_no_em_dashes_in_the_new_files,
+]
+SCALED_CHECKS = [
+    check_the_shoulder_is_the_six_by_one_block_and_the_buttons_sit_inside_it,
+]
+
+
+def main() -> int:
+    failed = total = 0
+
+    def run(label, fn, *args):
+        nonlocal failed, total
+        total += 1
+        try:
+            fn(*args)
+            print(f"ok    {label}")
+        except (AssertionError, LuaError, FileNotFoundError, AttributeError, TypeError, KeyError, IndexError) as err:
+            failed += 1
+            print(f"FAIL  {label}\n      " + f"{type(err).__name__}: {err}".replace("\n", "\n      "))
+
+    for fn in CHECKS:
+        run(fn.__name__, fn)
+    for fn in SCALED_CHECKS:
+        for scale in SCALES:
+            run(f"{fn.__name__} @scale={scale:.4f}", fn, scale)
+    print(f"{total - failed}/{total} checks passed")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
