@@ -1381,8 +1381,8 @@ local function PlainCall(fn, ...)
     return r
 end
 
--- The page the main bar shows. ActionBars.lua owns the answer (FS.ActionBars.LivePage: the page
--- attribute of the host the paged buttons click through, with the client's page as the fallback);
+-- The page the main bar shows. ActionBars.lua owns the answer (FS.ActionBars.LivePage: the "actionpage"
+-- attribute of the bar header (FSActionBar1) the paged buttons click through, with the client's page as the fallback);
 -- it loads before this file. Without it (the module failed, or a harness) the same switch is
 -- mirrored here: vehicle, then override, then temp shapeshift, then bonus, then the paged bar.
 -- Each read is plain-or-nothing, so a missing, throwing or secret one reads as "not active"; an

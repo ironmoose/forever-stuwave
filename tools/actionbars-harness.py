@@ -125,8 +125,21 @@ function Region:SetClipsChildren() end
 function Region:SetAttribute(k, v)
     if self._secure and __combat then __blocked = __blocked + 1; return end
     self._attrs[k] = v
+    Region.Fire(self, "OnAttributeChanged", k, v)
 end
 function Region:GetAttribute(k) return self._attrs[k] end
+-- SecureStateDriver.lua's RegisterAttributeDriver, as the page driver sees it: the manager resolves
+-- the macro conditional at once and again on its own OnUpdate tick, and writes the result with a
+-- plain frame:SetAttribute (an insecure header, so legal in combat). The mock records the call and
+-- resolves to the conditional's final `1` clause; a check moves the page with __driveTo, which is
+-- that same SetAttribute landing at some later tick. `__driverResolves = false` is a driver that has
+-- not written anything yet.
+__drivers = {}
+function RegisterAttributeDriver(frame, attribute, values)
+    __drivers[#__drivers + 1] = { frame = frame, attribute = attribute, values = values }
+    if __driverResolves ~= false then frame:SetAttribute(attribute, 1) end
+end
+function __driveTo(page) _G.FSActionBar1:SetAttribute("actionpage", page) end
 -- The numeric id a paged button carries (SecureActionButtonMixin:CalculateAction reads it); 0 when unset.
 function Region:SetID(id)
     if self._secure and __combat then __blocked = __blocked + 1; return end
@@ -1174,27 +1187,86 @@ function T.slot_change_to_an_empty_slot_clears_its_cooldown()
     eq(b.cooldown._cdObj, nil, "slot change to empty cleared the swipe")
 end
 
--- ---- the paged main bar rides MainActionBar's live page -------------------------------------
--- Live test 2026-10-09: stealthed, out of combat, GetActionBarPage() = 1 while MainActionBar's
--- "actionpage" attribute read 7. A button with an ID, no "action" attribute and
--- useparent-actionpage resolves a click to the LIVE page through SecureButton_GetModifiedAttribute
--- (follows frame.bar), including after stealth breaks into combat, with no write from us.
+-- ---- the paged main bar rides an attribute driver on its own header --------------------------
+-- A click resolves through SecureButton_GetModifiedAttribute, which does `frame.bar or GetParent(frame)`.
+-- Reading a Lua field our addon wrote taints that secure path and UseAction is forbidden
+-- (ADDON_ACTION_FORBIDDEN on every bar 1 click, 2026-10-12), so a paged button never carries a `bar`
+-- field: it has an ID, no "action" attribute and useparent-actionpage, so the walk falls to its parent,
+-- the bar header, whose "actionpage" attribute RegisterAttributeDriver keeps live. Live test
+-- 2026-10-09: stealthed, out of combat, GetActionBarPage() = 1 while the bonus page read 7, and a
+-- combat click fired the LIVE page's slot; the page reaches the click by attribute, never by a field.
 local function liveSlot(page, i) return (page - 1) * 12 + i end
 
-function T.paged_buttons_carry_an_id_and_follow_mainactionbars_page_by_attribute()
+-- No button on any bar carries a `bar` field of ours (rawget: a metatable cannot hide one).
+local function noBarField(label)
+    for bar = 1, 6 do
+        for i = 1, 12 do
+            eq(rawget(__button(bar, i), "bar"), nil, ("%s: bar %d button %d has a bar field"):format(label, bar, i))
+        end
+    end
+end
+
+-- The conditional the driver is registered with, from the index functions a client provides.
+local FULL_CONDITIONAL = "[vehicleui][possessbar] 12; [overridebar] 14; [shapeshift] 13; "
+    .. "[bar:2] 2; [bar:3] 3; [bar:4] 4; [bar:5] 5; [bar:6] 6; "
+    .. "[bonusbar:5] 11; [bonusbar:1] 7; [bonusbar:2] 8; [bonusbar:3] 9; [bonusbar:4] 10; 1"
+
+function T.paged_buttons_carry_an_id_and_follow_their_headers_page_by_attribute()
     for i = 1, 12 do
         local b = __button(1, i)
         eq(b:GetID(), i, "id " .. i)
         eq(b:GetAttribute("action"), nil, "no fixed action attribute " .. i)
         eq(b:GetAttribute("useparent-actionpage"), true, "follows the parent's page " .. i)
-        eq(b.bar, MainActionBar, "bar is MainActionBar " .. i)
+        eq(b:GetParent(), FSActionBar1, "the walk falls to the bar header " .. i)
         eq(b:GetAttribute("type"), "action", "still an action button " .. i)
         eq(b.action, liveSlot(1, i), "visual slot " .. i)
         -- ActionButton.lua:1612 reads this attribute before self.bar:GetSpellFlyoutDirection(),
-        -- so the popup direction does not depend on where Blizzard's hidden host sits.
-        eq(b:GetAttribute("flyoutDirection"), "UP", "flyout direction ignores the host " .. i)
+        -- so the popup direction does not depend on a bar field.
+        eq(b:GetAttribute("flyoutDirection"), "UP", "flyout direction attribute " .. i)
     end
+    noBarField("after build")
     eq(__blocked, 0)
+end
+
+function T.the_header_is_driven_by_a_registered_actionpage_conditional()
+    eq(#__drivers, 1, "one driver, for the paged bar only")
+    eq(__drivers[1].frame, FSActionBar1)
+    eq(__drivers[1].attribute, "actionpage")
+    eq(__drivers[1].values, FULL_CONDITIONAL)
+    -- the plain attribute driver, not a restricted snippet
+    for k in pairs(FSActionBar1._attrs) do
+        eq(k:sub(1, 3) ~= "_on", true, "no snippet attribute " .. k)
+    end
+    eq(FSActionBar1._scripts.OnAttributeChanged, nil, "the page hook is a HookScript")
+    eq(#FSActionBar1._hooks.OnAttributeChanged, 1)
+end
+
+function T.the_conditional_skips_a_clause_whose_index_function_is_missing()
+    eq(__drivers[1].values, "[bar:2] 2; [bar:3] 3; [bar:4] 4; [bar:5] 5; [bar:6] 6; "
+        .. "[bonusbar:5] 11; [bonusbar:1] 7; [bonusbar:2] 8; [bonusbar:3] 9; [bonusbar:4] 10; 1")
+end
+
+function T.the_conditional_orders_a_chosen_page_before_bonus_pages_and_vehicle_before_override()
+    -- ActionBarController_UpdateAll only uses the bonus page while the client's page is 1, so a
+    -- shift-scrolled page must outrank every bonus clause, and the vehicle bar outranks override.
+    local text = __drivers[1].values
+    local lastBar, firstBonus = 0, math.huge
+    for pos, clause in text:gmatch("()(%[[^%]]*%])") do
+        if clause:find("^%[bar:") then lastBar = math.max(lastBar, pos) end
+        if clause:find("^%[bonusbar:") then firstBonus = math.min(firstBonus, pos) end
+    end
+    eq(lastBar > 0 and firstBonus < math.huge, true, "fixture: both families present")
+    eq(lastBar < firstBonus, true, "every [bar:N] clause precedes every [bonusbar:] clause")
+    eq(text:find("[vehicleui]", 1, true) < text:find("[overridebar]", 1, true), true, "vehicle before override")
+end
+
+function T.livepage_reads_the_header_attribute_the_click_resolves()
+    eq(FS.ActionBars.LivePage(), 1)
+    for _, page in ipairs({ 7, 12, 14, 3 }) do
+        __driveTo(page)
+        eq(FS.ActionBars.LivePage(), page, "LivePage follows the header " .. page)
+        eq(__calcAction(__button(1, 4)), liveSlot(page, 4), "the click resolves the same page")
+    end
 end
 
 function T.fixed_bars_keep_their_attribute_slots()
@@ -1204,36 +1276,36 @@ function T.fixed_bars_keep_their_attribute_slots()
             eq(b:GetID(), 0, ("bar %d id"):format(bar))
             eq(b:GetAttribute("action"), b.action, ("bar %d attribute is its slot"):format(bar))
             eq(b:GetAttribute("useparent-actionpage"), nil, ("bar %d has no page parent"):format(bar))
-            eq(b.bar, nil, ("bar %d has no bar field"):format(bar))
         end
     end
+    noBarField("fixed bars")
     -- and a page change never touches them, in or out of combat
     local before = __button(3, 4).action
-    MainActionBar:SetAttribute("actionpage", 7)
+    __driveTo(7)
     __fire_event("UPDATE_BONUS_ACTIONBAR")
     eq(__button(3, 4).action, before)
     eq(__button(3, 4):GetAttribute("action"), before)
 end
 
-function T.paged_bonus_page_change_in_combat_writes_nothing_and_the_visuals_follow()
+function T.paged_page_change_in_combat_writes_nothing_and_the_visuals_follow()
     local seen = {}
     function GetActionTexture(slot) return "tex" .. slot end
     function GameTooltip:SetAction(slot) seen[#seen + 1] = slot end
     __combat = true
     __attrWrites = 0
-    for n, event in ipairs({ "UPDATE_BONUS_ACTIONBAR", "ACTIONBAR_PAGE_CHANGED", "UPDATE_SHAPESHIFT_FORM",
-        "UPDATE_VEHICLE_ACTIONBAR", "UPDATE_OVERRIDE_ACTIONBAR" }) do
+    -- the driver's own write is the only signal some of these ever get, so no event is fired
+    for n = 1, 5 do
         local page = 6 + n          -- a different page each time
-        MainActionBar:SetAttribute("actionpage", page)
-        __fire_event(event)
+        __driveTo(page)
         for _, i in ipairs({ 1, 6, 12 }) do
             local b = __button(1, i)
-            eq(b.action, liveSlot(page, i), event .. " slot " .. i)
-            eq(b.icon._texture, "tex" .. liveSlot(page, i), event .. " icon " .. i)
+            eq(b.action, liveSlot(page, i), "page " .. page .. " slot " .. i)
+            eq(b.icon._texture, "tex" .. liveSlot(page, i), "page " .. page .. " icon " .. i)
         end
     end
     eq(__attrWrites, 0, "no SetAttribute on any secure button in combat")
     eq(__blocked, 0, "nothing was refused")
+    noBarField("in combat")
     -- the same slot feeds the tooltip
     __button(1, 3).Fire(__button(1, 3), "OnEnter")
     eq(seen[#seen], liveSlot(11, 3), "tooltip reads the live slot")
@@ -1244,40 +1316,34 @@ function T.paged_bonus_page_change_in_combat_writes_nothing_and_the_visuals_foll
     eq(__attrWrites, 0, "regen writes nothing either")
 end
 
-function T.paged_page_is_read_again_on_the_next_frame_without_stacking()
+function T.page_events_alone_leave_the_page_to_the_driver()
+    -- Blizzard's events can run before the driver's tick: they redraw the page the header still
+    -- has, and the driver's late write is what moves it.
     function GetActionTexture(slot) return "tex" .. slot end
-    -- Blizzard may write MainActionBar's attribute after our event handler ran in the same frame.
     __fire_event("UPDATE_BONUS_ACTIONBAR")
     __fire_event("ACTIONBAR_PAGE_CHANGED")
     __fire_event("UPDATE_SHAPESHIFT_FORM")
-    eq(#__timers, 1, "one pending re-read, not one per event")
-    MainActionBar:SetAttribute("actionpage", 7)     -- the controller's late write
-    eq(__button(1, 2).action, liveSlot(1, 2), "not yet seen")
-    __flushTimers()
-    eq(__button(1, 2).action, liveSlot(7, 2), "caught on the next frame")
+    eq(__button(1, 2).action, liveSlot(1, 2), "event before the driver: unchanged")
+    __driveTo(7)
+    eq(__button(1, 2).action, liveSlot(7, 2), "caught when the driver lands")
     eq(__button(1, 2).icon._texture, "tex" .. liveSlot(7, 2), "repainted from the new slot")
-    eq(#__timers, 0)
-    __fire_event("UPDATE_BONUS_ACTIONBAR")
-    eq(#__timers, 1, "a later event can queue again")
+    noBarField("after events")
 end
 
-function T.paged_next_frame_reread_in_combat_writes_nothing()
-    __combat = true
-    __attrWrites = 0
-    __fire_event("UPDATE_BONUS_ACTIONBAR")
-    MainActionBar:SetAttribute("actionpage", 8)
-    __flushTimers()
-    eq(__button(1, 5).action, liveSlot(8, 5))
-    eq(__attrWrites, 0)
+function T.the_page_hook_ignores_other_attributes_of_the_header()
+    local before = __button(1, 1)._flyouts or 0
+    FSActionBar1:SetAttribute("statehidden", true)
+    FSActionBar1:SetAttribute("somethingelse", 9)
+    eq(__button(1, 1)._flyouts or 0, before)
+    eq(__button(1, 1).action, liveSlot(1, 1))
 end
 
 function T.paged_click_resolves_to_the_live_page_in_combat()
     -- __calcAction is SecureActionButtonMixin:CalculateAction (SecureTemplates.lua:670-686) over
-    -- SecureButton_GetModifiedAttribute's useparent-<name> / frame.bar walk.
+    -- SecureButton_GetModifiedAttribute's useparent-<name> walk, which reads `frame.bar or GetParent`.
     __combat = true
     for _, page in ipairs({ 1, 7, 9, 12 }) do
-        MainActionBar:SetAttribute("actionpage", page)
-        __fire_event("UPDATE_BONUS_ACTIONBAR")
+        __driveTo(page)
         for i = 1, 12 do
             local b = __button(1, i)
             eq(__calcAction(b), liveSlot(page, i), ("click page %d slot %d"):format(page, i))
@@ -1291,102 +1357,51 @@ function T.paged_click_resolves_to_the_live_page_in_combat()
 end
 
 function T.paged_page_falls_back_to_the_clients_page_like_calculateaction_when_the_attribute_is_unset()
-    -- MainActionBar exists but Blizzard has not written "actionpage": CalculateAction uses
-    -- C_ActionBar.GetActionBarPage() (bonus and the other special pages are not consulted), so the
-    -- visual has to as well or a click fires a different slot than the one drawn.
-    eq(MainActionBar:GetAttribute("actionpage"), nil, "fixture: no attribute")
-    function HasBonusActionBar() return true end
-    function GetBonusBarIndex() return 7 end
+    -- The driver has not written "actionpage" yet: CalculateAction uses C_ActionBar.GetActionBarPage()
+    -- (bonus and the other special pages are not consulted), so the visual has to as well or a click
+    -- fires a different slot than the one drawn.
+    eq(FSActionBar1:GetAttribute("actionpage"), nil, "fixture: no attribute")
     C_ActionBar.GetActionBarPage = function() return 3 end
+    eq(FS.ActionBars.LivePage(), 3, "fallback is the client's page")
     __fire_event("UPDATE_BONUS_ACTIONBAR")
-    eq(__button(1, 1).action, liveSlot(3, 1), "fallback is the client's page")
+    eq(__button(1, 1).action, liveSlot(3, 1), "drawn from the client's page")
     eq(__calcAction(__button(1, 1)), __button(1, 1).action, "click agrees")
 end
 
-function T.skinned_vehicle_or_override_bar_moves_the_click_host_to_overrideactionbar()
-    -- Skinned vehicle / override: the controller sets OverrideActionBar's own "actionpage" and the
-    -- OVERRIDE state; MainActionBar keeps its stale page.
-    MainActionBar:SetAttribute("actionpage", 1)
-    OverrideActionBar:SetAttribute("actionpage", 12)
-    __barState = LE_ACTIONBAR_STATE_OVERRIDE
+function T.override_and_vehicle_pages_come_from_the_driver_and_never_write_a_bar_field()
+    -- A skinned vehicle or override bar is just another value of the header's "actionpage"
+    -- (the [overridebar] and [vehicleui] clauses); there is no second host to swap to.
     __attrWrites = 0
+    __driveTo(12)
     __fire_event("UPDATE_VEHICLE_ACTIONBAR")
     for i = 1, 12 do
         local b = __button(1, i)
-        eq(b.bar, OverrideActionBar, "click host " .. i)
         eq(b.action, liveSlot(12, i), "visual " .. i)
         eq(__calcAction(b), b.action, "click agrees " .. i)
+        eq(b:GetID(), i, "id kept " .. i)
     end
-    eq(__button(1, 1):GetID(), 1, "id kept")
-    eq(__attrWrites, 0, "bar and ids are not rewritten, only the bar field")
-    -- a page change on the override bar is followed
-    OverrideActionBar:SetAttribute("actionpage", 14)
+    noBarField("vehicle")
+    __driveTo(14)
     __fire_event("UPDATE_OVERRIDE_ACTIONBAR")
     eq(__button(1, 2).action, liveSlot(14, 2))
-    -- and leaving it goes back to MainActionBar's page
-    __barState = LE_ACTIONBAR_STATE_MAIN
-    __fire_event("UPDATE_OVERRIDE_ACTIONBAR")
-    eq(__button(1, 2).bar, MainActionBar)
-    eq(__button(1, 2).action, liveSlot(1, 2))
-    eq(__calcAction(__button(1, 2)), __button(1, 2).action)
-end
-
-function T.skinned_override_entered_in_combat_swaps_the_click_host_at_once()
-    -- `.bar` is a plain Lua field, not an attribute, so moving it is legal in combat (live test
-    -- 2026-10-09: an insecure write of it was honoured by the combat click). The visual and the
-    -- click follow the override bar's page immediately, with no attribute or ID write.
-    MainActionBar:SetAttribute("actionpage", 1)
+    eq(__calcAction(__button(1, 2)), liveSlot(14, 2))
+    noBarField("override")
+    -- entering and leaving it in combat is the same attribute landing
     __combat = true
-    __attrWrites = 0
-    OverrideActionBar:SetAttribute("actionpage", 12)
-    __barState = LE_ACTIONBAR_STATE_OVERRIDE
-    __fire_event("UPDATE_VEHICLE_ACTIONBAR")
-    for i = 1, 12 do
-        local b = __button(1, i)
-        eq(b.bar, OverrideActionBar, "swapped in combat " .. i)
-        eq(b.action, liveSlot(12, i), "draws the override page " .. i)
-        eq(__calcAction(b), b.action, "click agrees " .. i)
-        eq(b:GetID(), i, "id untouched " .. i)
-    end
-    eq(__attrWrites, 0, "no SetAttribute or SetID in combat")
-    eq(__blocked, 0)
-    -- a late re-read changes nothing, and regen has nothing left to replay
-    __flushTimers()
+    __driveTo(12)
+    eq(__calcAction(__button(1, 5)), liveSlot(12, 5), "entered in combat")
+    __driveTo(1)
+    eq(__button(1, 5).action, liveSlot(1, 5), "left in combat")
+    eq(__calcAction(__button(1, 5)), __button(1, 5).action)
     __combat = false
     __fire_event("PLAYER_REGEN_ENABLED")
-    for i = 1, 12 do
-        local b = __button(1, i)
-        eq(b.bar, OverrideActionBar, "still the override host after regen " .. i)
-        eq(b.action, liveSlot(12, i), "visual after regen " .. i)
-        eq(__calcAction(b), b.action, "click agrees after regen " .. i)
-    end
-    eq(__attrWrites, 0, "regen writes nothing either")
-end
-
-function T.skinned_override_left_in_combat_swaps_the_click_host_back_at_once()
-    MainActionBar:SetAttribute("actionpage", 1)
-    OverrideActionBar:SetAttribute("actionpage", 12)
-    __barState = LE_ACTIONBAR_STATE_OVERRIDE
-    __fire_event("UPDATE_VEHICLE_ACTIONBAR")
-    eq(__button(1, 1).bar, OverrideActionBar, "fixture: on the override bar")
-    __combat = true
-    __attrWrites = 0
-    __barState = LE_ACTIONBAR_STATE_MAIN
-    __fire_event("UPDATE_OVERRIDE_ACTIONBAR")
-    for i = 1, 12 do
-        local b = __button(1, i)
-        eq(b.bar, MainActionBar, "back on the main bar in combat " .. i)
-        eq(b.action, liveSlot(1, i), "draws MainActionBar's page " .. i)
-        eq(__calcAction(b), b.action, "click agrees " .. i)
-        eq(b:GetID(), i, "id untouched " .. i)
-    end
-    eq(__attrWrites, 0, "no SetAttribute or SetID in combat")
+    noBarField("after regen")
+    eq(__attrWrites, 0, "no SetAttribute or SetID on a secure button")
     eq(__blocked, 0)
 end
 
 function T.entering_world_reads_the_live_page()
-    -- Blizzard first writes the attribute at PLAYER_ENTERING_WORLD; Apply runs at PLAYER_LOGIN.
-    MainActionBar:SetAttribute("actionpage", 7)
+    __driveTo(7)
     __fire_event("PLAYER_ENTERING_WORLD")
     eq(__button(1, 1).action, liveSlot(7, 1))
     eq(__calcAction(__button(1, 1)), __button(1, 1).action)
@@ -1397,15 +1412,13 @@ function T.paged_slot_change_refreshes_the_flyout_out_of_combat_and_at_regen()
     -- UpdateFlyout does not run; we ask for it, outside combat only.
     local function flyouts(bar, i) return __button(bar, i)._flyouts or 0 end
     local before = flyouts(1, 3)
-    MainActionBar:SetAttribute("actionpage", 7)
-    __fire_event("UPDATE_BONUS_ACTIONBAR")
+    __driveTo(7)
     eq(flyouts(1, 3), before + 1, "paged button refreshed")
     eq(flyouts(3, 3), 0, "fixed bar untouched")
-    __flushTimers()
-    eq(flyouts(1, 3), before + 1, "an unchanged re-read does not refresh again")
-    __combat = true
-    MainActionBar:SetAttribute("actionpage", 8)
     __fire_event("UPDATE_BONUS_ACTIONBAR")
+    eq(flyouts(1, 3), before + 1, "an unchanged page does not refresh again")
+    __combat = true
+    __driveTo(8)
     eq(__button(1, 3).action, liveSlot(8, 3))
     eq(flyouts(1, 3), before + 1, "queued, not run, in combat")
     eq(__flyoutInCombat, 0)
@@ -1415,15 +1428,15 @@ function T.paged_slot_change_refreshes_the_flyout_out_of_combat_and_at_regen()
     eq(flyouts(1, 12), before + 2, "every paged button")
 end
 
-function T.paged_buttons_keep_the_attribute_path_when_mainactionbar_is_missing()
-    eq(MainActionBar, nil, "fixture: no MainActionBar")
+function T.paged_buttons_keep_the_attribute_path_when_no_attribute_driver_exists()
+    eq(RegisterAttributeDriver, nil, "fixture: no driver API")
     for i = 1, 12 do
         local b = __button(1, i)
         eq(b:GetID(), 0, "no id")
         eq(b:GetAttribute("useparent-actionpage"), nil)
-        eq(b.bar, nil)
         eq(b:GetAttribute("action"), liveSlot(1, i), "fixed attribute as before")
     end
+    noBarField("no driver")
     function HasBonusActionBar() return true end
     function GetBonusBarIndex() return 7 end
     -- out of combat the attribute is re-pointed
@@ -2987,13 +3000,12 @@ COUNT_APIS = """
     GetBindingKey = function(action) __keyAsked = __keyAsked + 1; return realGetBindingKey(action) end
 """
 
-# A live MainActionBar, as Blizzard builds it: an insecure bar whose "actionpage" attribute the
-# ActionBarController rewrites. __attrWrites counts every SetAttribute our secure buttons receive;
+# The paged bar's driver surface. __attrWrites counts every SetAttribute / SetID our secure buttons
+# receive (the header is an insecure Frame, so the driver's writes to it are not counted);
 # __calcAction is SecureActionButtonMixin:CalculateAction (SecureTemplates.lua:670-686) with the
-# useparent-<name> / frame.bar walk of SecureButton_GetModifiedAttribute (:127-132); C_Timer.After
-# queues until __flushTimers (the next frame).
+# useparent-<name> walk of SecureButton_GetModifiedAttribute (:127-132), including its
+# `frame.bar or GetParent(frame)` step, so a `bar` field of ours would send it somewhere else.
 LIVE_BAR = """
-MainActionBar = CreateFrame("Frame", "MainActionBar", UIParent)
 __attrWrites = 0
 do
     local real = __Region.SetAttribute
@@ -3010,24 +3022,11 @@ do
     end
 end
 C_ActionBar.GetActionBarPage = function() return 1 end
--- The skinned vehicle / override surface: the controller gives OverrideActionBar its own
--- "actionpage" and reports LE_ACTIONBAR_STATE_OVERRIDE (ActionBarController.lua:149-157).
-OverrideActionBar = CreateFrame("Frame", "OverrideActionBar", UIParent)
-LE_ACTIONBAR_STATE_MAIN, LE_ACTIONBAR_STATE_OVERRIDE = 1, 2
-__barState = LE_ACTIONBAR_STATE_MAIN
-function ActionBarController_GetCurrentActionBarState() return __barState end
 -- BaseActionButtonMixin:UpdateFlyout stand-in: counts calls, and those made in combat.
 __flyoutInCombat = 0
 function __Region:UpdateFlyout()
     if __combat then __flyoutInCombat = __flyoutInCombat + 1 end
     self._flyouts = (self._flyouts or 0) + 1
-end
-__timers = {}
-C_Timer = { After = function(_, fn) __timers[#__timers + 1] = fn end }
-function __flushTimers()
-    local run = __timers
-    __timers = {}
-    for _, fn in ipairs(run) do fn() end
 end
 local function modifiedAttribute(frame, name)
     local value = frame:GetAttribute(name)
@@ -3047,19 +3046,28 @@ function __calcAction(self)
 end
 """
 
+# A client that provides the special-bar index functions (C_ActionBar, as ActionBarController.lua uses).
+BAR_INDEXES = """
+C_ActionBar.GetOverrideBarIndex = function() return 14 end
+C_ActionBar.GetVehicleBarIndex = function() return 12 end
+C_ActionBar.GetTempShapeshiftBarIndex = function() return 13 end
+"""
+
 VARIANTS = {
-    "paged_buttons_carry_an_id_and_follow_mainactionbars_page_by_attribute": LIVE_BAR,
+    "paged_buttons_carry_an_id_and_follow_their_headers_page_by_attribute": LIVE_BAR,
+    "the_header_is_driven_by_a_registered_actionpage_conditional": BAR_INDEXES,
+    "the_conditional_orders_a_chosen_page_before_bonus_pages_and_vehicle_before_override": BAR_INDEXES,
+    "livepage_reads_the_header_attribute_the_click_resolves": LIVE_BAR,
     "fixed_bars_keep_their_attribute_slots": LIVE_BAR,
-    "paged_bonus_page_change_in_combat_writes_nothing_and_the_visuals_follow": LIVE_BAR,
-    "paged_page_is_read_again_on_the_next_frame_without_stacking": LIVE_BAR,
-    "paged_next_frame_reread_in_combat_writes_nothing": LIVE_BAR,
+    "paged_page_change_in_combat_writes_nothing_and_the_visuals_follow": LIVE_BAR,
+    "page_events_alone_leave_the_page_to_the_driver": LIVE_BAR,
     "paged_click_resolves_to_the_live_page_in_combat": LIVE_BAR,
-    "paged_page_falls_back_to_the_clients_page_like_calculateaction_when_the_attribute_is_unset": LIVE_BAR,
-    "skinned_vehicle_or_override_bar_moves_the_click_host_to_overrideactionbar": LIVE_BAR,
-    "skinned_override_entered_in_combat_swaps_the_click_host_at_once": LIVE_BAR,
-    "skinned_override_left_in_combat_swaps_the_click_host_back_at_once": LIVE_BAR,
+    "paged_page_falls_back_to_the_clients_page_like_calculateaction_when_the_attribute_is_unset":
+        LIVE_BAR + "__driverResolves = false",
+    "override_and_vehicle_pages_come_from_the_driver_and_never_write_a_bar_field": LIVE_BAR + BAR_INDEXES,
     "entering_world_reads_the_live_page": LIVE_BAR,
     "paged_slot_change_refreshes_the_flyout_out_of_combat_and_at_regen": LIVE_BAR,
+    "paged_buttons_keep_the_attribute_path_when_no_attribute_driver_exists": "RegisterAttributeDriver = nil",
     "bar6_first_slot_follows_the_clients_multibar5_page": "MULTIBAR_5_ACTIONBAR_PAGE = 15",
     "gcd_swipe_is_asked_for_with_the_gcd_included_and_applied": """
         __gcdSeen = {}

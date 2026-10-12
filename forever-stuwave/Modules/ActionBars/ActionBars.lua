@@ -18,29 +18,27 @@
 -- whose attributes are set from plain Lua. Click handling is C-side, so no
 -- restricted closure is in the path at all.
 --
--- Paging, bar 1. Re-pointing a button's "action" attribute is blocked in combat,
--- and there is no secure state driver to do it for us, so the paged buttons do
--- not carry a fixed "action" at all. Each has an ID (its position, 1-12), no
--- "action" attribute, "useparent-actionpage" set and `button.bar` pointing at
--- MainActionBar. SecureActionButtonMixin:CalculateAction (SecureTemplates.lua)
--- then reads the page through SecureButton_GetModifiedAttribute, which follows
--- useparent-actionpage to frame.bar, and Blizzard's ActionBarController keeps
--- MainActionBar's "actionpage" attribute live (bonus, temp shapeshift, and the
--- unskinned vehicle and override bars) with its own secure code. SKINNED vehicle
--- and override bars go through OverrideActionBar's own "actionpage" instead
--- (ActionBarController_UpdateAll), so `button.bar` is moved to OverrideActionBar
--- while that state is live (ApplyPage), in combat too: it is a plain Lua field, not
--- an attribute, and an insecure write of it was honoured by the combat click (live
--- test 2026-10-09). The click resolves the live page at click time, in combat too,
--- and we write no attribute. Another live test 2026-10-09
--- (stealthed Rogue, out of combat): GetActionBarPage() = 1 while
--- MainActionBar:GetAttribute("actionpage") = 7; after breaking stealth into
--- combat a click on the first button fired page-1 slot 1 (Attack), i.e. the
--- live page. `button.action` is only the plain Lua field our icon, cooldown,
--- usable and tooltip code reads, and it follows the same attribute in and out
--- of combat (ApplyPage). If MainActionBar is missing the old attribute path
--- stays: it can only re-point out of combat. Bars 2-6 are fixed slot ranges and
--- are unaffected.
+-- Paging, bar 1. Re-pointing a button's "action" attribute is blocked in combat, so the
+-- paged buttons do not carry a fixed "action" at all. Each has an ID (its position, 1-12),
+-- no "action" attribute and "useparent-actionpage" set, so SecureActionButtonMixin:
+-- CalculateAction (SecureTemplates.lua) reads the page off the button's PARENT, the bar
+-- header, through SecureButton_GetModifiedAttribute. The header's "actionpage" attribute is
+-- kept live by RegisterAttributeDriver with a macro conditional (BuildBar): Blizzard's
+-- SecureStateDriver manager evaluates it and calls SetAttribute itself, so no restricted
+-- snippet is involved (the snippet limits above do not apply) and the click resolves the
+-- live page at click time, in combat too. `button.action` is only the plain Lua field our
+-- icon, cooldown, usable and tooltip code reads; ApplyPage keeps it on the header's page
+-- (a HookScript on the header's OnAttributeChanged, plus the page events).
+--
+-- THE RULE: never write a Lua field Blizzard's secure click path reads off our buttons
+-- (`.bar`, `.isExtra`, `.buttonType`, a replaced CalculateAction or other method). Reading
+-- an addon-written field taints that secure execution and UseAction is then forbidden
+-- (ADDON_ACTION_FORBIDDEN on every bar 1 click, 2026-10-12). SecureButton_GetModifiedAttribute
+-- does `frame.bar or GetParent(frame)`, so a `.bar` of ours is exactly such a field; the
+-- earlier "live test" of it was a keybind press, which never reaches our button. Paging comes
+-- from an attribute driver on the parent header, never from a field on the button. Bars 2-6
+-- are fixed slot ranges and are unaffected. Without RegisterAttributeDriver the old attribute
+-- path stays: it can only re-point out of combat.
 --
 -- Layout is the mockup, not an approximation -- mockups/full-ui-layout.html,
 -- role "actionbars":
@@ -911,32 +909,11 @@ local function UpdateAllState()
     end
 end
 
--- The paged bar's page. With MainActionBar present the buttons ride a live
--- "actionpage" attribute (see the header), so the visuals read the same
--- attribute the click resolves.
-local pagedHost    -- MainActionBar when the paged buttons ride a live page, else nil
+-- The paged bar's header, once its "actionpage" attribute is driven (BuildBar), else nil.
+-- The visuals read the same attribute the click resolves (see the header).
+local pagedHeader
 
--- OverrideActionBar while Blizzard's controller is in the OVERRIDE state (a skinned
--- vehicle or override bar, ActionBarController_UpdateAll); nil otherwise. Every
--- global is feature-detected: a client without them is simply never overridden.
-local function OverrideHost()
-    local getState = _G.ActionBarController_GetCurrentActionBarState
-    local override = _G.LE_ACTIONBAR_STATE_OVERRIDE
-    local bar = _G.OverrideActionBar
-    if type(getState) ~= "function" or override == nil then return nil end
-    if type(bar) ~= "table" or type(bar.GetAttribute) ~= "function" then return nil end
-    local ok, state = pcall(getState)
-    if ok and state == override then return bar end
-    return nil
-end
-
--- The host whose page the buttons should ride now.
-local function ActiveHost()
-    if not pagedHost then return nil end
-    return OverrideHost() or pagedHost
-end
-
--- What SecureActionButtonMixin:CalculateAction falls back to when the host has no
+-- What SecureActionButtonMixin:CalculateAction falls back to when the header has no
 -- usable "actionpage" (SecureTemplates.lua:670-686): the client's current page.
 local function FallbackPage()
     local page
@@ -949,23 +926,56 @@ local function FallbackPage()
     return 1
 end
 
--- The page a click through `host` resolves to, or the CurrentPage switch when the
--- paged bar does not ride a host at all (no MainActionBar).
-local function LivePage(host)
-    if not pagedHost then return CurrentPage() end
-    host = host or ActiveHost()
-    local page = host and host:GetAttribute("actionpage")
+-- The page a click on the paged bar resolves to: the header's "actionpage" attribute, or the
+-- CurrentPage switch when the bar is not driven at all (no RegisterAttributeDriver).
+local function LivePage()
+    if not pagedHeader then return CurrentPage() end
+    local page = pagedHeader:GetAttribute("actionpage")
     if type(page) == "number" and page >= 1 then return page end
     return FallbackPage()
 end
-ActionBars.LivePage = function() return LivePage() end
+ActionBars.LivePage = LivePage
 
-local function FindPagedHost()
-    local bar = _G.MainActionBar
-    if type(bar) == "table" and type(bar.GetAttribute) == "function" then return bar end
+-- A special bar's page index, or nil when this client does not provide the function.
+local function BarIndex(name)
+    local fn = C_ActionBar and C_ActionBar[name]
+    if type(fn) ~= "function" then fn = _G[name] end
+    if type(fn) ~= "function" then return nil end
+    local ok, index = pcall(fn)
+    if ok and type(index) == "number" then return index end
     return nil
 end
 
+-- The macro conditional the header's "actionpage" follows, in Blizzard's order
+-- (ActionBarController_UpdateAll): the vehicle bar, the skinned override bar, the temp
+-- shapeshift bar, then the player's own page (shift-scroll or bar:N), which beats the bonus
+-- bars (stance, stealth, form) because the controller only uses a bonus page while the
+-- client's page is 1, else page 1. A clause whose index function is missing is skipped.
+-- SecureCmdOptionParse picks the first clause that holds.
+local STATIC_PAGE_CLAUSES = "[bar:2] 2; [bar:3] 3; [bar:4] 4; [bar:5] 5; [bar:6] 6; "
+    .. "[bonusbar:5] 11; [bonusbar:1] 7; [bonusbar:2] 8; [bonusbar:3] 9; [bonusbar:4] 10; 1"
+
+local function PageConditional()
+    local clauses = {}
+    local function add(condition, name)
+        local index = BarIndex(name)
+        if index then clauses[#clauses + 1] = ("%s %d"):format(condition, index) end
+    end
+    add("[vehicleui][possessbar]", "GetVehicleBarIndex")
+    add("[overridebar]", "GetOverrideBarIndex")
+    add("[shapeshift]", "GetTempShapeshiftBarIndex")
+    clauses[#clauses + 1] = STATIC_PAGE_CLAUSES
+    return table.concat(clauses, "; ")
+end
+
+-- Hands the header's "actionpage" to Blizzard's attribute driver; returns the header when that
+-- took, nil otherwise. Out of combat only (it writes SecureStateDriverManager's protected
+-- attributes), which BuildBar's callers guarantee.
+local function DrivePage(header)
+    if type(RegisterAttributeDriver) ~= "function" then return nil end
+    if not pcall(RegisterAttributeDriver, header, "actionpage", PageConditional()) then return nil end
+    return header
+end
 -- Flyout popups are refreshed by the stock OnAttributeChanged when the "action"
 -- attribute moves; a page flip no longer writes it, so ask for it ourselves. Out of
 -- combat only (it re-points the popup), queued for regen otherwise.
@@ -980,35 +990,28 @@ local function RefreshFlyouts()
     end
 end
 
--- Points button.action (the field the draw code reads) at the current page, and
--- `button.bar` at the host whose page that is. On the live path that is all: the
--- click already follows the page. `button.bar` is a plain Lua field, not an attribute,
--- so moving it is legal in combat and carries the same taint as the build-time write
--- (live test 2026-10-09: `.bar` set from /run, insecure, and the click still resolved
--- through it in combat). The host therefore swaps at once when a skinned vehicle or
--- override bar starts or ends, and the drawn page, the HUD's LivePage() and the click
--- all agree. Without MainActionBar the fixed "action" attribute is re-pointed too,
--- which is illegal in combat, so a page change mid-fight is remembered and applied on
--- regen. Returns whether any slot moved.
+-- Points button.action (the field the draw code reads) at the header's current page. On the
+-- driven path that is all: the click already follows the header's attribute, and we write
+-- nothing a secure path reads, in or out of combat (see the header). Without a driver the
+-- fixed "action" attribute is re-pointed too, which is illegal in combat, so a page change
+-- mid-fight is remembered and applied on regen. Returns whether any slot moved.
 local pendingPage = false
 
 local function ApplyPage(onlyIfChanged)
     local changed = false
-    local wanted = ActiveHost()
+    local page = LivePage()
     local canRefreshFlyouts = not InCombatLockdown()
     for _, button in ipairs(allButtons) do
         if button.paged then
-            if wanted and button.bar ~= wanted then button.bar = wanted end
-            local page = LivePage(wanted and button.bar)
             local slot = (page - 1) * BUTTONS_PER_BAR + button.index
             if button.action ~= slot then
                 button.action = slot
                 changed = true
-                if not pagedHost then button:SetAttribute("action", slot) end
+                if not pagedHeader then button:SetAttribute("action", slot) end
             end
         end
     end
-    if pagedHost then
+    if pagedHeader then
         if changed then pendingFlyout = true end
         if pendingFlyout and canRefreshFlyouts then RefreshFlyouts() end
     end
@@ -1016,27 +1019,16 @@ local function ApplyPage(onlyIfChanged)
     return changed
 end
 
-local rereadQueued = false
-
+-- A page event: Blizzard's events can run before the driver's own tick, so on the driven path
+-- this only redraws what the header has now; the header's OnAttributeChanged hook (BuildBar)
+-- is what catches the driver's write whenever it lands.
 local function RequestPage()
-    if not pagedHost then
-        if InCombatLockdown() then
-            pendingPage = true
-            return
-        end
-        pendingPage = false
-        ApplyPage()
+    if not pagedHeader and InCombatLockdown() then
+        pendingPage = true
         return
     end
+    pendingPage = false
     ApplyPage()
-    -- Blizzard may write MainActionBar's attribute after our event ran, in the same frame.
-    if not rereadQueued and C_Timer and C_Timer.After then
-        rereadQueued = true
-        C_Timer.After(0, function()
-            rereadQueued = false
-            ApplyPage(true)
-        end)
-    end
 end
 
 -------------------------------------------------------------------------------
@@ -1324,6 +1316,10 @@ local function BuildBar(spec, geo, parent)
         AddOuterGlow(chrome, COLOR_HEALTH[1], COLOR_HEALTH[2], COLOR_HEALTH[3], 8, 0.45, BAR_RADIUS)
     end
 
+    -- Bar 1 pages by attribute driver on this header (see the file header). Done before the
+    -- buttons so their first draw reads the live page.
+    if spec.paged then pagedHeader = DrivePage(header) end
+
     local buttons = {}
     local previous
     for i = 1, BUTTONS_PER_BAR do
@@ -1334,7 +1330,6 @@ local function BuildBar(spec, geo, parent)
 
         button.index = i
         button.paged = spec.paged
-        if spec.paged and pagedHost == nil then pagedHost = FindPagedHost() end
         button.action = spec.paged
             and ((LivePage() - 1) * BUTTONS_PER_BAR + i)
             or (spec.firstAction + i - 1)
@@ -1350,18 +1345,17 @@ local function BuildBar(spec, geo, parent)
         -- The whole design, in a few lines. No snippet, no state driver: the
         -- client resolves these C-side on click. Verified in game 2026-09-20
         -- with a single test button before any of this was built. A paged
-        -- button has no fixed slot: an ID and the live page of MainActionBar
-        -- instead (see the header, live test 2026-10-09).
+        -- button has no fixed slot: an ID and the live page of its header
+        -- instead (see the header). Never a `.bar` field.
         button:SetAttribute("type", "action")
-        if spec.paged and pagedHost then
+        if spec.paged and pagedHeader then
             button:SetID(i)
             button:SetAttribute("action", nil)
             button:SetAttribute("useparent-actionpage", true)
             -- UpdateFlyout (ActionButton.lua:1612-1632) reads this attribute before
-            -- self.bar:GetSpellFlyoutDirection(), so the popup opens up whatever
-            -- Blizzard's hidden host bar is doing. "UP" is the template default.
+            -- it would ask self.bar for a direction, so the popup opens up with no
+            -- bar field at all. "UP" is the template default.
             button:SetAttribute("flyoutDirection", "UP")
-            button.bar = pagedHost
         else
             button:SetAttribute("action", button.action)
         end
@@ -1443,6 +1437,14 @@ local function BuildBar(spec, geo, parent)
         if ApplyMono then ApplyMono(tag, 8, COLOR_HEALTH) end
         tag:SetText(spec.label)
         tag:SetPoint("BOTTOMLEFT", header, "TOPLEFT", 3, -2)
+    end
+
+    -- The driver's write lands on its own tick, possibly after our page events: follow the
+    -- attribute itself. An insecure read of it and plain-field writes only, so combat is fine.
+    if spec.paged and pagedHeader then
+        header:HookScript("OnAttributeChanged", function(_, name)
+            if name == "actionpage" then ApplyPage(true) end
+        end)
     end
 
     header.buttons = buttons
@@ -1656,7 +1658,7 @@ local function OnEvent(_, event, arg1)
         if pendingSeat then RequestSeat() end
         if pendingPage then
             RequestPage()
-        elseif pagedHost then
+        elseif pagedHeader then
             ApplyPage(true)     -- held through the fight, so normally unchanged; a missed event is caught here
         end
         UpdateAll()
