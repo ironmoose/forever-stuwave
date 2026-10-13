@@ -648,8 +648,8 @@ end
 --
 -- So: run a snippet whose ONLY job is to leave a value behind, then read that
 -- value back. If it comes back, snippets compile. If not, they do not.
-ForeverSTUwaveSnippet = ForeverSTUwaveSnippet or {}
-
+-- The result is stored in ForeverSTUwaveDB.snippet, which reaches disk with the rest of the account-wide
+-- store (a bare global would not: only the names declared in the .toc are saved).
 local function Check()
     local result = {
         when = date("%Y-%m-%d %H:%M:%S"),
@@ -688,7 +688,8 @@ local function Check()
     end)
     result.executeRepeatOk = tostring(ok3)
 
-    ForeverSTUwaveSnippet = result
+    ForeverSTUwaveDB = ForeverSTUwaveDB or {}
+    ForeverSTUwaveDB.snippet = result
 end
 
 local checkFrame = CreateFrame("Frame")

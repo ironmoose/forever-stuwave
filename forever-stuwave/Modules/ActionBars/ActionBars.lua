@@ -6,7 +6,7 @@
 -- Why not LibActionButton, after vendoring it: secure snippet bodies do not
 -- execute on this client. Measured 2026-09-20 with the check in ErrorLog.lua --
 -- both Execute() and RegisterStateDriver() return without error and NEITHER
--- side effect lands (see the ForeverSTUwaveSnippet block in SavedVariables).
+-- side effect lands (see ForeverSTUwaveDB.snippet in SavedVariables).
 -- Blizzard's own UI is unaffected because its snippets compiled at load while
 -- loadstring_untainted still existed and are cached in the closure factory;
 -- anything an addon defines afterwards silently no-ops. LibActionButton assigns

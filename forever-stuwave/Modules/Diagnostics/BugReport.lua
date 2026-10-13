@@ -55,7 +55,7 @@ BR.LIMITS = LIMITS
 -- ForeverSTUwaveDB keys that are bulky logs or checks, or the reports themselves.
 BR.EXCLUDE = {
     bugreports = true, bugreportSeq = true, inspect = true, inspectSkins = true, inspectPos = true,
-    fscheck = true, fontCheck = true, labelsAtApply = true,
+    fscheck = true, fontCheck = true, labelsAtApply = true, snippet = true,
     -- Reported in their own `chatSeat` section (ChatSeat below), not through the generic copy.
     chatSeatLog = true, chatSeatLogPrev = true,
     -- Likewise reported in their own `minimapSeat` section (MinimapSeat below).

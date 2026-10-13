@@ -894,14 +894,6 @@ def read_log() -> None:
         print("  undeclared global is never written, so this reads as 'no")
         print("  errors' forever.")
 
-    snippet = re.search(r"ForeverSTUwaveSnippet = \{(.*?)\n\}", text, re.S)
-    if snippet:
-        print("\n=== SNIPPET ===")
-        for line in snippet.group(1).splitlines():
-            line = line.strip().rstrip(",")
-            if line:
-                print("  " + line)
-
     # ForeverSTUwaveDB carries whatever the in-addon probes last wrote
     # (/fsfont, /fschat levels). Those probes live in the addon rather than in
     # a long --run line because the chat box truncates at 255 characters, and
