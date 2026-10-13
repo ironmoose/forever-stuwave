@@ -3,7 +3,7 @@
 
 CastBars.lua puts the PLAYER and TARGET cast bars on the shared chevron engine, laid out as
 the locked "Stack A": two bars of one width (268 at pixel scale 1), the target on top and
-the player below, 18 units apart on a fixed seat (gap centre at (0, -317)); the ForeverDebugBridge
+the player below, 18 units apart on a fixed seat (gap centre at (0, -317)); the ForeverStatusStrip
 frame is not read at all. The parse gate proves it compiles; these checks pin the WIRING with mocked spellcast events, a stepped
 clock and a stubbed screen:
 
@@ -14,7 +14,7 @@ clock and a stubbed screen:
     column measured from the font (and the fallback of 56 when it cannot be);
   * placement: the fixed seat (target and player CENTER at -317 +- (9 + 11), x 0), also at a UI
     scale of 0.64, every frame edge on a whole physical pixel and the gap 18 (within a pixel of
-    snapping), a ForeverDebugBridge frame anywhere on screen never moves the bars and is never read, the
+    snapping), a ForeverStatusStrip frame anywhere on screen never moves the bars and is never read, the
     engine is re-laid out once per move (no loop), and a UI scale change re-places the stack and
     refits the bars;
   * casts: start, succeed and lock-in (timer "0.9 / 1.5" style, " / total" muted), a natural
@@ -407,16 +407,16 @@ local function txt(fs)
     return s
 end
 
--- A stand-in for ForeverDebugBridgeFrame as ForeverDebugBridge builds it: a 1 x 1 frame at the screen
+-- A stand-in for ForeverStatusStripFrame as ForeverStatusStrip builds it: a 1 x 1 frame at the screen
 -- centre whose effective scale is held at 1 (SetScale(1 / UIParent's scale)), with the lattice
 -- of cell textures hanging off it. The lattice is w x h SCREEN units, centred (dx, dy) from the
 -- screen centre; two corner cells are enough for a union. Own units = screen units.
 -- w, h, dx, dy are screen units. Only the CastBars checks that it must not matter use it.
 local function mkBridge(w, h, dx, dy)
-    local b = CreateFrame("Frame", "ForeverDebugBridgeFrame", UIParent)
+    local b = CreateFrame("Frame", "ForeverStatusStripFrame", UIParent)
     b:SetSize(1, 1)
     b.cells = { b:CreateTexture(nil, "OVERLAY"), b:CreateTexture(nil, "OVERLAY") }
-    local e = 1                                   -- ForeverDebugBridge pins its scale so a unit is a pixel
+    local e = 1                                   -- ForeverStatusStrip pins its scale so a unit is a pixel
     b:SetScale(e / UIParent._scale)
     b._cx, b._cy = 683 / e, 384 / e                -- the 1 x 1 anchor: at the screen centre
     b._l, b._r, b._b, b._t = (683 - 0.5) / e, (683 + 0.5) / e, (384 - 0.5) / e, (384 + 0.5) / e
@@ -424,18 +424,18 @@ local function mkBridge(w, h, dx, dy)
     local tl, br = b.cells[1], b.cells[2]
     tl._l, tl._r, tl._t, tl._b = l / e, (l + 8) / e, t / e, (t - 8) / e
     br._l, br._r, br._t, br._b = (l + w - 8) / e, (l + w) / e, (t - h + 8) / e, (t - h) / e
-    _G.ForeverDebugBridgeFrame = b
+    _G.ForeverStatusStripFrame = b
     return b
 end
 
--- Loads CastBars.lua on a screen at UI scale `opts.scale`, with an optional ForeverDebugBridgeFrame
+-- Loads CastBars.lua on a screen at UI scale `opts.scale`, with an optional ForeverStatusStripFrame
 -- (which must NOT matter), and hands back
 -- the pieces the checks poke.
 local function world(opts)
     opts = opts or {}
     __now = 100
     __ui(opts.scale or 1)
-    _G.ForeverDebugBridgeFrame = nil
+    _G.ForeverStatusStripFrame = nil
     PlayerCastingBarFrame, TargetFrameSpellBar = CreateFrame("Frame"), CreateFrame("Frame")
     local W = { bridge = opts.bridge and mkBridge(opts.bridge[1], opts.bridge[2], opts.bridge[3], opts.bridge[4]) }
     if opts.beforeLoad then opts.beforeLoad() end
@@ -1287,7 +1287,7 @@ end
 
 -- The pixel bridge now lives in the data bar: the cast bars must not read it, at build, on a
 -- scale event or from the engine's onLayout, wherever the frame is.
-function T.a_foreverdebugbridge_frame_never_moves_the_bars_and_is_never_read()
+function T.a_foreverstatusstrip_frame_never_moves_the_bars_and_is_never_read()
     local ref = world()
     local want = {}
     for _, bar in ipairs({ ref.P, ref.G }) do want[bar.unit] = { bar.frame._points.CENTER.x, bar.frame._points.CENTER.y } end
@@ -1304,7 +1304,7 @@ function T.a_foreverdebugbridge_frame_never_moves_the_bars_and_is_never_read()
         -- and from here on every read of the frame is counted (CastBars wraps its placement in
         -- pcall, so a throwing getter alone would be swallowed; the count is what must stay 0)
         local hits = 0
-        local function boom() hits = hits + 1; error("the cast bars read ForeverDebugBridgeFrame") end
+        local function boom() hits = hits + 1; error("the cast bars read ForeverStatusStripFrame") end
         for _, m in ipairs({ "GetRegions", "GetLeft", "GetRight", "GetTop", "GetBottom", "GetEffectiveScale", "GetCenter" }) do
             W.bridge[m] = boom
         end
@@ -1312,7 +1312,7 @@ function T.a_foreverdebugbridge_frame_never_moves_the_bars_and_is_never_read()
         W.P.run:RefreshPixels()
         sameSeat(W, what .. " after events")
         W.clean()
-        eq(hits, 0, what .. ": ForeverDebugBridgeFrame was never read")
+        eq(hits, 0, what .. ": ForeverStatusStripFrame was never read")
         eq(#__degrades, 0, what .. ": no degrade logs")
     end
 end

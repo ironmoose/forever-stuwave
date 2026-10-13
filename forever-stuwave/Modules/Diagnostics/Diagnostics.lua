@@ -25,7 +25,7 @@ local MINIMAP_BOUNDS_PALETTE = {
 -- Orbitron-VF.ttf went weeks as a silent FRIZQT fallback.
 --
 -- This writes the same readback into ForeverSTUwaveDB, where it survives the
--- unload and fsdev.py can read it, instead of into a chat line nobody is
+-- unload and the dev tooling can read it, instead of into a chat line nobody is
 -- looking at. Probe lives in the addon rather than in a long /run for the same
 -- reason /fsreload does: the chat box truncates at 255 characters.
 SLASH_FSFONT1 = "/fsfont"

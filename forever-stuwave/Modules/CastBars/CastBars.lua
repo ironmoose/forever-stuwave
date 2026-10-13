@@ -4,7 +4,7 @@
 -- as the user's locked "Stack A" (mockups/castbar-v2-compare.html, the "Full combat HUD" card
 -- and the player card, variant H): two chamfered bars of the SAME width, the target bar on
 -- top and the player bar below, 18 units apart on a FIXED seat (see STACK PLACEMENT; the
--- optional ForeverDebugBridge dev strip used to sit in that gap and now lives in the data bar, decision
+-- optional ForeverStatusStrip dev strip used to sit in that gap and now lives in the data bar, decision
 -- doc design record, so nothing here reads it). PlayerCastingBarFrame is the
 -- correct player cast bar on this client (CastingBarFrame is nil); TargetFrameSpellBar is
 -- the target one. Both Blizzard bars are dimmed, not hidden (DimBlizzardFrame); both of ours
@@ -51,7 +51,7 @@
 -- Those two formulas are the fallback when FS.Layout (or an entry) is missing. The bars are registered
 -- with FS.Layout.Apply at build, so a layout re-seat (/fsedit drop, reset, rescale) puts them back on
 -- the entry; the snapped placement below then re-runs from Layout.OnRescale.
--- Nothing here reads `_G.ForeverDebugBridgeFrame`: the dev strip moved into the data bar, and a
+-- Nothing here reads `_G.ForeverStatusStripFrame`: the dev strip moved into the data bar, and a
 -- stack that centred on it would follow it to the bottom of the screen. Each frame's offsets are
 -- snapped so its left and bottom edges sit on whole physical pixels (SnapOffset, one pixel = the
 -- engine's run.px): the engine nudges its run's origin onto a pixel from the frame's GetLeft,

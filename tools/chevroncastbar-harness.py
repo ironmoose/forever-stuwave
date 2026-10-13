@@ -753,7 +753,7 @@ function T.pixel_size_falls_back_without_pixelutil_then_without_either()
     near(c.px, 1 / 0.71, 1e-12, "neither: whole UI units")
     ok(isWhole(c.segs[1].lit._w / c.px) and isWhole(pitchOf(c) / c.px), "still snapped to that grid")
     c:Layout(160, 18); mk({ width = 150, height = 18 })
-    eq(#__degrades, 1, "the degrade is logged once"); eq(__degrades[1], "chevron_no_pixel_api")
+    eq(#__degrades, 1, "the degrade is logged once"); eq(__degrades[1], "chevron_no_scale_api")
 end
 
 function T.layout_recycles_textures()

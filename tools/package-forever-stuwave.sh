@@ -53,6 +53,17 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 done < "$STAGE/forever-stuwave.toc"
 (( missing == 0 )) || { echo "ERROR: $missing .toc entries missing; no zip built." >&2; exit 1; }
 
+# The shipped files carry no comments: strip them from the staged copy, prove each .lua compiles to the
+# same code as the committed source, and scan the remaining strings and identifiers for developer-tool
+# vocabulary. Runs before the gates below, so they check exactly what ships. Never skippable.
+echo "== strip comments, verify, scan =="
+if ! "$PYTHON" -c 'import lupa.luajit21' 2>/dev/null; then
+  echo "ERROR: $PYTHON cannot import lupa.luajit21; comments cannot be stripped and verified, so no zip." >&2
+  exit 1
+fi
+"$PYTHON" "$SCRIPT_DIR/stage_runtime.py" "$STAGE" \
+  || { echo "ERROR: staged runtime failed strip verification or the vocabulary scan; no zip built." >&2; exit 1; }
+
 # Parse gate (Lua 5.1 via lupa) over the exact files being shipped, libs included,
 # then lint (HIGH only) on the top-level addon files, libs/ excluded (third party).
 # Fails closed: no lupa means no gates, so no zip unless FS_SKIP_GATES=1.

@@ -5,9 +5,13 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import stage_runtime  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 RUNTIME = REPO / "forever-stuwave"
@@ -43,7 +47,7 @@ def _install(client: Path, installer: Path = INSTALLER) -> subprocess.CompletedP
     return subprocess.run(
         ["bash", str(installer)], cwd=installer.parent.parent,
         env=os.environ | {"WOW_ROOT": str(client.parent), "WOW_FLAVOR": client.name,
-                          "FS_SKIP_GATES": "1"},
+                          "FS_SKIP_GATES": "1", "PYTHON": sys.executable},
         capture_output=True, text=True, check=False,
     )
 
@@ -63,7 +67,9 @@ def _snapshot(root: Path) -> dict[str, bytes]:
 def _runtime_snapshot(root: Path, directory: str) -> dict[str, bytes]:
     files = _snapshot(root / directory)
     if directory in {"Core", "Modules"}:
-        return {name: contents for name, contents in files.items() if name.endswith(".lua")}
+        # The installer ships comment-stripped Lua (stage_runtime.py); the expected bytes are the stripped source.
+        return {name: stage_runtime.strip_lua(contents.decode("latin-1"))[0].encode("latin-1")
+                for name, contents in files.items() if name.endswith(".lua")}
     return {
         name: contents for name, contents in files.items()
         if name.endswith((".tga", ".ttf"))
@@ -118,6 +124,7 @@ def test_install_excludes_development_files_and_python_cache_from_runtime_payloa
     installer = checkout / "tools" / INSTALLER.name
     installer.parent.mkdir(parents=True)
     shutil.copyfile(INSTALLER, installer)
+    shutil.copyfile(INSTALLER.with_name("stage_runtime.py"), installer.with_name("stage_runtime.py"))
     runtime = checkout / "forever-stuwave"
     payload = {
         "Core/Theme.lua": b"local theme = {}\n",

@@ -459,7 +459,7 @@ SlashCmdList["FSCHAT"] = function(msg)
 
     -- Also recorded into ForeverSTUwaveDB, not just printed. A chat line is
     -- readable by whoever is sitting at the client; the saved variable is
-    -- readable by fsdev.py, which is what turns "the tabs are behind the bg"
+    -- readable by the dev tooling, which is what turns "the tabs are behind the bg"
     -- into numbers someone can act on without a screenshot round trip.
     ForeverSTUwaveDB = ForeverSTUwaveDB or {}
     local report = { when = date("%Y-%m-%d %H:%M:%S") }

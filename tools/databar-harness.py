@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Headless check of DataBar.lua's DEBUG segment (the ForeverDebugBridge lattice drawn inside the bar).
+"""Headless check of DataBar.lua's STATUS segment (the ForeverStatusStrip lattice drawn inside the bar).
 
 Runs the real addons/forever-stuwave/DataBar.lua under lupa against a small mock WoW API (a
 layout harness: widgets record size, anchors, shown state and HookScript lists; every other
 widget method is a no-op). It pins the behaviour the bar promises:
 
-  * no ForeverDebugBridgeFrame, or one that is hidden: the segments share the full width equally,
-    no gap, DEBUG hidden (the bar lays out exactly as it did before DEBUG existed);
-  * bridge shown: DEBUG sits between BAGS and TIME, takes the label + the bridge's PHYSICAL
+  * no ForeverStatusStripFrame, or one that is hidden: the segments share the full width equally,
+    no gap, STATUS hidden (the bar lays out exactly as it did before STATUS existed);
+  * bridge shown: STATUS sits between BAGS and TIME, takes the label + the bridge's PHYSICAL
     footprint converted to bar units at the bar's effective scale, and the other segments share
-    the remainder equally; /fdebug hide|show (the bridge's OnHide/OnShow) flips it live;
+    the remainder equally; /fsstrip hide|show (the bridge's OnHide/OnShow) flips it live;
   * the width follows a UI scale change, and a bar too short for the lattice logs once;
   * COMBAT: the bar is restricted (the XP bar is anchored to it, the control deck chassis to the XP bar, and the deck
-    hosts secure buttons), so a rescale or a /fdebug show|hide in combat resizes, re-anchors, shows and hides nothing,
+    hosts secure buttons), so a rescale or a /fsstrip show|hide in combat resizes, re-anchors, shows and hides nothing,
     and PLAYER_REGEN_ENABLED replays it from the state current then.
 
     python3 tools/databar-harness.py
@@ -34,7 +34,7 @@ except ImportError:
 ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
 DATABAR = Path(os.environ.get("DATABAR_LUA", ADDON / "Modules/DataBars/DataBar.lua"))   # DATABAR_LUA: a mutated scratch copy
 SCREEN_W, PHYS_H = 2560, 1440
-LABEL_W = 32.5          # the mock's GetStringWidth for "DEBUG"
+LABEL_W = 39.0          # the mock's GetStringWidth for "STATUS"
 PAD_X, LABEL_GAP, LINK_END_PAD_PX, RECESS_PAD_PX = 8, 6, 4, 4
 
 MOCK = r"""
@@ -82,7 +82,7 @@ function Region:GetEffectiveScale() return self.scale * (self.parent and self.pa
 function Region:CreateTexture() return new("texture", self) end
 function Region:CreateFontString() return new("fontstring", self) end
 function Region:SetText(t) self.text = t end
-function Region:GetStringWidth() return #(self.text or "") * 6.5 end   -- "DEBUG" = 32.5
+function Region:GetStringWidth() return #(self.text or "") * 6.5 end   -- "STATUS" = 39
 function Region:GetStatusBarTexture() return new("texture", self) end
 
 UIParent = new("frame", nil, "UIParent")
@@ -148,12 +148,12 @@ function __children()
     end
     return out
 end
--- The DEBUG slot's own parts: its label, its recess, and where each is anchored.
+-- The STATUS slot's own parts: its label, its recess, and where each is anchored.
 function __linkParts()
-    local link = _G.ForeverSTUwaveDataBarLink
+    local link = _G.ForeverSTUwaveDataBarStatus
     local label, recess
     for _, f in ipairs(__frames) do
-        if f.parent == link and f.kind == "fontstring" and f.text == "DEBUG" then label = f end
+        if f.parent == link and f.kind == "fontstring" and f.text == "STATUS" then label = f end
         if f.parent == link and f.kind == "Frame" then recess = f end
     end
     return { link = link, label = label, recess = recess,
@@ -163,7 +163,7 @@ function __linkParts()
                  and recess.pt.x == 6 and recess.pt.y == 0 }
 end
 function __makeBridge(shown, footprint)
-    local b = CreateFrame("Frame", "ForeverDebugBridgeFrame", UIParent)
+    local b = CreateFrame("Frame", "ForeverStatusStripFrame", UIParent)
     b.shown = shown
     b.footprint = footprint
     return b
@@ -200,13 +200,13 @@ class Bar:
         """Bar children left to right as {key, x, w}; key is 'link' or the segment's SEGMENT_DEFS order."""
         kids = [dict(x=c["x"], w=c["w"], name=c["name"], shown=c["shown"])
                 for c in self.rt.eval("__children()").values()]
-        segs = [k for k in kids if k["name"] != "ForeverSTUwaveDataBarLink"]
+        segs = [k for k in kids if k["name"] != "ForeverSTUwaveDataBarStatus"]
         for key, k in zip(("fps", "bags", "time", "gold"), segs):
             k["key"] = key
         for k in kids:
-            if k["name"] == "ForeverSTUwaveDataBarLink":
+            if k["name"] == "ForeverSTUwaveDataBarStatus":
                 k["key"] = "link"
-        return sorted((k for k in kids if k["name"] != "ForeverSTUwaveDataBarLink" or k["shown"]),
+        return sorted((k for k in kids if k["name"] != "ForeverSTUwaveDataBarStatus" or k["shown"]),
                       key=lambda k: k["x"])
 
     def theme_calls(self) -> list[dict]:
@@ -241,23 +241,23 @@ def test_equal_without_bridge() -> None:
     b = Bar()
     b.login()
     lay = b.layout()
-    check(keys(lay) == ["fps", "bags", "time", "gold"], "no bridge: four segments, no DEBUG", str(keys(lay)))
+    check(keys(lay) == ["fps", "bags", "time", "gold"], "no bridge: four segments, no STATUS", str(keys(lay)))
     check(all(abs(k["w"] - SCREEN_W / 4) < 1e-6 for k in lay) and contiguous(lay),
           "no bridge: equal widths filling the bar with no gap", str([(k["key"], k["w"]) for k in lay]))
     seg_w = SCREEN_W / 4
     check(all(k["x"] == i * seg_w for i, k in enumerate(lay)),
           "no bridge: segment i sits at exactly (i - 1) * segWidth (no tolerance, the original formula)",
           str([(k["key"], k["x"]) for k in lay]))
-    check(b.rt.eval("ForeverSTUwaveDataBar.linkSlot == ForeverSTUwaveDataBarLink")
-          and not b.rt.eval("ForeverSTUwaveDataBarLink:IsShown()"), "DEBUG slot is built but hidden, exported as linkSlot")
+    check(b.rt.eval("ForeverSTUwaveDataBar.linkSlot == ForeverSTUwaveDataBarStatus")
+          and not b.rt.eval("ForeverSTUwaveDataBarStatus:IsShown()"), "STATUS slot is built but hidden, exported as linkSlot")
 
     b.run("__makeBridge(false)")
     b.rt.execute('__event("PLAYER_ENTERING_WORLD")')
-    check(keys(b.layout()) == ["fps", "bags", "time", "gold"], "bridge present but hidden: still no DEBUG")
+    check(keys(b.layout()) == ["fps", "bags", "time", "gold"], "bridge present but hidden: still no STATUS")
 
 
 def test_link_between_bags_and_time() -> None:
-    print("\n== bridge shown: DEBUG between BAGS and TIME, then back with /fdebug hide|show")
+    print("\n== bridge shown: STATUS between BAGS and TIME, then back with /fsstrip hide|show")
     for ui, phys_h in ((0.5333, 1440), (0.64, 1440), (1.1, 1080)):
         ppu = ui * phys_h / 768
         tag = f"ui {ui} at {phys_h} high (px per unit {ppu:.3f})"
@@ -265,9 +265,9 @@ def test_link_between_bags_and_time() -> None:
         b.run("__makeBridge(true)")          # exists before the bar is built, as when both addons load
         b.login()
         lay = b.layout()
-        check(keys(lay) == ["fps", "bags", "link", "time", "gold"], f"{tag}: DEBUG between BAGS and TIME", str(keys(lay)))
+        check(keys(lay) == ["fps", "bags", "link", "time", "gold"], f"{tag}: STATUS between BAGS and TIME", str(keys(lay)))
         link = next(k for k in lay if k["key"] == "link")
-        check(abs(link["w"] - link_width(ppu)) < 1e-6, f"{tag}: DEBUG width is label + recess + pads from physical pixels",
+        check(abs(link["w"] - link_width(ppu)) < 1e-6, f"{tag}: STATUS width is label + recess + pads from physical pixels",
               f"{link['w']} want {link_width(ppu)}")
         others = [k for k in lay if k["key"] != "link"]
         want = (SCREEN_W - link["w"]) / 4
@@ -278,17 +278,17 @@ def test_link_between_bags_and_time() -> None:
     b.login()                                  # bar first, bridge appears later
     b.run("__makeBridge(true)")
     b.rt.execute('__event("PLAYER_ENTERING_WORLD")')
-    check("link" in keys(b.layout()), "bridge created after login: DEBUG appears on PLAYER_ENTERING_WORLD")
-    b.run("ForeverDebugBridgeFrame:Hide()")
+    check("link" in keys(b.layout()), "bridge created after login: STATUS appears on PLAYER_ENTERING_WORLD")
+    b.run("ForeverStatusStripFrame:Hide()")
     lay = b.layout()
     check(keys(lay) == ["fps", "bags", "time", "gold"] and all(abs(k["w"] - SCREEN_W / 4) < 1e-6 for k in lay),
           "bridge hidden (OnHide): equal segments again", str(keys(lay)))
-    b.run("ForeverDebugBridgeFrame:Show()")
-    check(keys(b.layout()) == ["fps", "bags", "link", "time", "gold"], "bridge shown again (OnShow): DEBUG back")
+    b.run("ForeverStatusStripFrame:Show()")
+    check(keys(b.layout()) == ["fps", "bags", "link", "time", "gold"], "bridge shown again (OnShow): STATUS back")
 
 
 def test_recess_geometry() -> None:
-    print("\n== DEBUG recess: anchored after the label, sized footprint + 4 px each side, so the cells centre in it")
+    print("\n== STATUS recess: anchored after the label, sized footprint + 4 px each side, so the cells centre in it")
     for ui, phys_h in ((0.5333, 1440), (0.64, 1440), (1.1, 1080)):
         ppu = ui * phys_h / 768
         tag = f"ui {ui} at {phys_h} high"
@@ -317,7 +317,7 @@ def test_hooks_installed_once() -> None:
     b.login()
     for _ in range(3):
         b.rt.execute('__event("PLAYER_ENTERING_WORLD")')
-    n = b.rt.eval("function() local h = ForeverDebugBridgeFrame.hooks; return { #(h.OnShow or {}), #(h.OnHide or {}) } end")()
+    n = b.rt.eval("function() local h = ForeverStatusStripFrame.hooks; return { #(h.OnShow or {}), #(h.OnHide or {}) } end")()
     check((n[1], n[2]) == (1, 1), "OnShow and OnHide hooked once across login and repeated PLAYER_ENTERING_WORLD",
           f"OnShow {n[1]}, OnHide {n[2]}")
 
@@ -328,11 +328,11 @@ def test_rescale_and_footprint() -> None:
     b.run("__makeBridge(true, { w = 300, h = 18 })")
     b.login()
     link = next(k for k in b.layout() if k["key"] == "link")
-    check(abs(link["w"] - link_width(0.64 * PHYS_H / 768, 300)) < 1e-6, "DEBUG uses the footprint the bridge publishes",
+    check(abs(link["w"] - link_width(0.64 * PHYS_H / 768, 300)) < 1e-6, "STATUS uses the footprint the bridge publishes",
           str(link["w"]))
     b.run("__setUiScale(0.5333333333); for _, fn in ipairs(__rescale) do fn() end")
     link = next(k for k in b.layout() if k["key"] == "link")
-    check(abs(link["w"] - link_width(0.5333333333 * PHYS_H / 768, 300)) < 1e-6, "UI scale change: DEBUG width recomputed on rescale",
+    check(abs(link["w"] - link_width(0.5333333333 * PHYS_H / 768, 300)) < 1e-6, "UI scale change: STATUS width recomputed on rescale",
           str(link["w"]))
     check(b.logs() == [], "a bar tall enough for the lattice logs nothing")
 
@@ -340,7 +340,7 @@ def test_rescale_and_footprint() -> None:
     b.run("__makeBridge(true)")
     b.login()
     b.run("for _, fn in ipairs(__rescale) do fn() end")
-    check("link" in keys(b.layout()), "short bar: DEBUG is still placed (it may overhang)")
+    check("link" in keys(b.layout()), "short bar: STATUS is still placed (it may overhang)")
     check(b.logs() == ["databar_link_short"], "short bar: logged once under databar_link_short", str(b.logs()))
 
 
@@ -385,19 +385,19 @@ def test_combat() -> None:
     b.login()
     b.run("ForeverSTUwaveDataBar.restricted = true")     # the XP bar -> deck chassis -> secure bag buttons chain
     before = b.layout()
-    check(keys(before) == ["fps", "bags", "link", "time", "gold"], "combat: set up with DEBUG shown", str(keys(before)))
+    check(keys(before) == ["fps", "bags", "link", "time", "gold"], "combat: set up with STATUS shown", str(keys(before)))
     width = b.rt.eval("ForeverSTUwaveDataBar.w")
 
     b.run("__combat = true")
     b.run("UIParent.w = 1920; __setUiScale(0.64); for _, fn in ipairs(__rescale) do fn() end")
-    b.run("ForeverDebugBridgeFrame:Hide()")           # /fdebug hide in combat: the OnHide hook runs Rescale
+    b.run("ForeverStatusStripFrame:Hide()")           # /fsstrip hide in combat: the OnHide hook runs Rescale
     b.rt.execute('__event("PLAYER_ENTERING_WORLD")')   # a zone change in combat: Rescale again
-    check(b.rt.eval("#__blocked") == 0, "combat: a rescale, a /fdebug hide and a zone change block nothing",
+    check(b.rt.eval("#__blocked") == 0, "combat: a rescale, a /fsstrip hide and a zone change block nothing",
           str(list(b.rt.eval("__blocked").values())))
     check(b.rt.eval("ForeverSTUwaveDataBar.w") == width, "combat: the bar keeps its width", str(b.rt.eval("ForeverSTUwaveDataBar.w")))
     after = b.layout()
     check([(k["key"], k["x"], k["w"]) for k in after] == [(k["key"], k["x"], k["w"]) for k in before],
-          "combat: the segments (and DEBUG) keep their seats and widths", str([(k["key"], k["x"]) for k in after]))
+          "combat: the segments (and STATUS) keep their seats and widths", str([(k["key"], k["x"]) for k in after]))
 
     b.run("__combat = false")
     b.rt.execute('__event("PLAYER_REGEN_ENABLED")')
@@ -405,7 +405,7 @@ def test_combat() -> None:
     check(b.rt.eval("ForeverSTUwaveDataBar.w") == 1920, "regen: the bar takes the screen width current now",
           str(b.rt.eval("ForeverSTUwaveDataBar.w")))
     lay = b.layout()
-    check(keys(lay) == ["fps", "bags", "time", "gold"], "regen: the bridge hidden in combat takes DEBUG away", str(keys(lay)))
+    check(keys(lay) == ["fps", "bags", "time", "gold"], "regen: the bridge hidden in combat takes STATUS away", str(keys(lay)))
     check(all(abs(k["w"] - 1920 / 4) < 1e-6 for k in lay) and abs(lay[-1]["x"] + lay[-1]["w"] - 1920) < 1e-6,
           "regen: the segments share the new width equally", str([(k["key"], round(k["w"], 2)) for k in lay]))
 

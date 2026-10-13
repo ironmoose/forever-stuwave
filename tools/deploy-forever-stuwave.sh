@@ -35,6 +35,14 @@ done < <(find "$SRC/Core" "$SRC/Modules" -type f -name '*.lua' -print0;
   find "$SRC/Media/Fonts" -type f \( -name '*.ttf' -o -name 'OFL*.txt' -o -name 'LICENSE*.txt' -o -name 'COPYING*.txt' \) -print0)
 cp "$SRC/forever-stuwave.toc" "$SRC/Bindings.xml" "$REPO/LICENSE" "$STAGE/"
 
+# The installed copy carries no comments: stage_runtime.py rewrites the staged files (newlines kept),
+# proves each .lua compiles to the same code as its source, and scans the remaining strings and
+# identifiers for developer-tool vocabulary. A failure aborts here, before anything is installed.
+# This runs even with FS_SKIP_GATES=1, and needs a python with lupa (uv run supplies one).
+echo "== strip comments, verify, scan =="
+"$PYTHON" "$SCRIPT_DIR/stage_runtime.py" "$STAGE" \
+  || { echo "ERROR: staged runtime failed strip verification or the vocabulary scan; nothing installed." >&2; exit 1; }
+
 # Legacy source settings are retained; a newer destination always wins.
 if [[ -d "$CLIENT/WTF/Account" ]]; then
   while IFS= read -r -d '' saved; do

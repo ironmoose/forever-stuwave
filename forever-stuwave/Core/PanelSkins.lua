@@ -771,9 +771,9 @@ SlashCmdList["FSRECON"] = function(msg)
             end
         end
 
-        -- A chat print scrolls away and never reaches a headless driver, so
+        -- A chat print scrolls away and never reaches the dev tooling, so
         -- this also writes into ForeverSTUwaveDB -- same idiom as the
-        -- skins readback below -- for fsdev.py to read after /fsreload.
+        -- skins readback below -- for the dev tooling to read after /fsreload.
         local line = ("|cff22e0ffstuwave://pos|r %s  BOTTOMLEFT x=%.1f y=%.1f  (size %.0fx%.0f)  " ..
             "frac x=%.4f y=%.4f  UIParent %.0fx%.0f @ %.3f"):format(
             id, l, b, w, h, xf, yf, uw, uh, s)
@@ -792,9 +792,9 @@ SlashCmdList["FSRECON"] = function(msg)
 
     ForeverSTUwaveDB = ForeverSTUwaveDB or {}
 
-    -- A chat print scrolls away and never reaches a headless driver, so this
+    -- A chat print scrolls away and never reaches the dev tooling, so this
     -- also writes a compact readback into ForeverSTUwaveDB -- same idiom as
-    -- Diagnostics.lua's /fsfont -> fontProbe -- for fsdev.py to read after
+    -- Diagnostics.lua's /fsfont -> fontProbe -- for the dev tooling to read after
     -- /fsreload.
     local groupSummaries = {}
     local presentUnskinned = {}

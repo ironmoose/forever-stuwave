@@ -527,8 +527,8 @@ local function pixelSize(frame)
         factor = 1
         if not degradeLogged and FS.LogDegradeOnce then
             degradeLogged = true
-            FS.LogDegradeOnce("chevron_no_pixel_api",
-                "ForeverSTUwave: ChevronCastBar found no PixelUtil / GetPhysicalScreenSize; chevrons snap to whole UI units")
+            FS.LogDegradeOnce("chevron_no_scale_api",
+                "ForeverSTUwave: ChevronCastBar found no UI scale API; chevrons snap to whole UI units")
         end
     end
     local scale = frame:GetEffectiveScale()

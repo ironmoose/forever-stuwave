@@ -536,7 +536,7 @@ end
 -- /fsreload -- reload, but only when it is safe to steal the keyboard.
 --
 -- Parker's idea ("we should make a macro for your check so you are not typing
--- it every time"). fsdev.py drives reloads by typing into the chat box, and
+-- it every time"). the dev tooling drives reloads by typing into the chat box, and
 -- the guarded form of that was a long /run one-liner -- noisy, and close to
 -- the chat box's 255-character limit. This is nine characters.
 --
@@ -545,7 +545,7 @@ end
 -- one mid-run is its own problem. The client is the only thing that actually
 -- knows, so the client decides.
 --
--- fsdev.py falls back to the inline /run if this command is missing, which
+-- the dev tooling falls back to the inline /run if this command is missing, which
 -- matters: if the addon ever fails to load, this would not exist, and without
 -- that fallback there would be no way to reload in order to FIX it.
 SLASH_FSRELOAD1 = "/fsreload"
