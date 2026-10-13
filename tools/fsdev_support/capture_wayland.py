@@ -977,7 +977,9 @@ class _GstFrameReader:
             # that fd number, so the reader could end up on an unrelated file.
             # Trade-off: if a grandchild holds the write end open the drain
             # thread never sees EOF, so that stderr fd stays open until the
-            # process exits (one leaked fd per such restart).
+            # grandchild closes its write end (then the drain thread sees EOF
+            # and the stream is garbage-collected): one leaked fd per such
+            # restart until then.
             pipes = [("stdout", proc.stdout)]
             if drain_done:
                 pipes.append(("stderr", proc.stderr))

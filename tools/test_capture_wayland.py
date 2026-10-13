@@ -563,15 +563,18 @@ def test_stop_before_the_drain_thread_runs_leaves_stderr_for_it(
     monkeypatch.setattr(threading, "excepthook", errors.append)
     reader = cw._GstFrameReader(0, 1, 2, 2)
 
-    reader.start()
-    thread = reader._stderr_thread
-    assert thread is not None
-    began = time.monotonic()
-    reader.stop()  # the drain thread has not executed a single line yet
-    elapsed = time.monotonic() - began
-    stderr_open_after_stop = not proc.stderr.closed
-    gate.set()
-    thread.join(timeout=5.0)
+    try:
+        reader.start()
+        thread = reader._stderr_thread
+        assert thread is not None
+        began = time.monotonic()
+        reader.stop()  # the drain thread has not executed a single line yet
+        elapsed = time.monotonic() - began
+        stderr_open_after_stop = not proc.stderr.closed
+        gate.set()
+        thread.join(timeout=5.0)
+    finally:
+        gate.set()
 
     assert elapsed < 5.0  # stop() is bounded by the 1s join cap
     assert stderr_open_after_stop  # the drain thread still owns its stream
