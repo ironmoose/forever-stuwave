@@ -46,6 +46,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from typing import IO
 
 import numpy as np
 
@@ -840,21 +841,28 @@ class _GstFrameReader:
         )
         # Drain stderr in the background so a slow PipeWire warning doesn't
         # eventually fill the pipe and stall the child.
+        # The stream is handed over as an argument (not read back from
+        # self._proc) so a stop() that runs before the thread starts cannot
+        # make it dereference a cleared proc.
         self._stderr_thread = threading.Thread(
-            target=self._drain_stderr, name="gst-stderr-drain", daemon=True
+            target=self._drain_stderr,
+            args=(self._proc.stderr,),
+            name="gst-stderr-drain",
+            daemon=True,
         )
         self._stderr_thread.start()
 
-    def _drain_stderr(self) -> None:
-        assert self._proc is not None and self._proc.stderr is not None
+    def _drain_stderr(self, stream: IO[bytes] | None) -> None:
+        if stream is None:
+            return
         try:
-            for raw in self._proc.stderr:
+            for raw in stream:
                 line = raw.decode("utf-8", errors="replace").rstrip()
                 self._stderr_lines.append(line)
                 logger.debug("gst stderr: %s", line)
                 if len(self._stderr_lines) > 200:
                     self._stderr_lines = self._stderr_lines[-200:]
-        except Exception as exc:
+        except Exception as exc:  # includes ValueError on a stream stop() already closed
             logger.debug("gst stderr drain ended: %s", exc)
 
     def _read_one_frame(self, stdout_fd: int, deadline: float, timeout: float) -> bytes:
@@ -909,6 +917,9 @@ class _GstFrameReader:
         Returns a numpy array of shape ``(height, width, 4)`` dtype
         ``uint8``.  Raises ``RuntimeError`` on timeout, EOF, or short read.
         """
+        # Callers (see _current_frame) must hold the capturer's _lock around
+        # read_frame and close: read_frame uses the raw stdout fd number, and
+        # stop() closes that fd, which the OS may immediately reuse.
         if self._proc is None or self._proc.stdout is None:
             raise RuntimeError("GStreamer reader not started")
         if self._proc.poll() is not None:
@@ -952,16 +963,26 @@ class _GstFrameReader:
             logger.warning("Error stopping gst-launch: %s", exc)
         finally:
             proc, self._proc = self._proc, None
-            if self._stderr_thread is not None:
-                self._stderr_thread.join(timeout=1.0)
-                self._stderr_thread = None
+            thread, self._stderr_thread = self._stderr_thread, None
+            if thread is not None:
+                thread.join(timeout=1.0)
+            drain_done = thread is None or not thread.is_alive()
             # Release the pipe fds so repeated failed starts do not leak them.
-            for pipe in (proc.stdout, proc.stderr):
+            # Nothing reads stdout from a thread, so it is always safe to close.
+            # stderr is closed only once the drain thread has exited: closing a
+            # BufferedReader blocks on its buffer lock while another thread is
+            # inside readline (e.g. a grandchild holds the write end open).
+            pipes = [("stdout", proc.stdout)]
+            if drain_done:
+                pipes.append(("stderr", proc.stderr))
+            else:
+                logger.debug("gst stderr drain thread still alive; leaving stderr to GC")
+            for name, pipe in pipes:
                 if pipe is not None:
                     try:
                         pipe.close()
                     except Exception as exc:
-                        logger.debug("Error closing gst-launch pipe: %s", exc)
+                        logger.debug("Error closing gst-launch %s: %s", name, exc)
 
 
 # ---------------------------------------------------------------------------

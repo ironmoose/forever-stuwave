@@ -10,6 +10,7 @@ import importlib.util
 import io
 import os
 import sys
+import threading
 import types
 from pathlib import Path
 
@@ -411,7 +412,15 @@ def test_release_resources_swallows_fd_close_errors(
     def bad_close(fd: int) -> None:
         raise OSError("EBADF")
 
-    monkeypatch.setattr(cw.os, "close", bad_close)
+    class _OsWithBadClose:
+        """Delegate to the real os module but fail close(); scoped to cw only."""
+
+        close = staticmethod(bad_close)
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(os, name)
+
+    monkeypatch.setattr(cw, "os", _OsWithBadClose())
     cast._pw_fd = 999
     cast._portal = portal
     cast._session_handle = "/session/1"
@@ -450,3 +459,79 @@ def test_reader_stop_closes_the_subprocess_pipes(cw: types.ModuleType) -> None:
 
     assert proc.stdout.closed and proc.stderr.closed
     assert reader._proc is None
+
+
+class _StuckThread:
+    """A drain thread that is still blocked in readline after the capped join."""
+
+    def join(self, timeout: float | None = None) -> None:
+        pass
+
+    def is_alive(self) -> bool:
+        return True
+
+
+class _CloseMustNotBeCalled:
+    """Stands in for a stderr BufferedReader whose close() would block on the buffer lock."""
+
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+        raise AssertionError("close() would block on the drain thread's buffer lock")
+
+
+def test_reader_stop_leaves_stderr_open_while_the_drain_thread_is_alive(
+    cw: types.ModuleType,
+) -> None:
+    reader = cw._GstFrameReader(0, 1, 2, 2)
+    stderr = _CloseMustNotBeCalled()
+    proc = types.SimpleNamespace(
+        stdout=io.BytesIO(),
+        stderr=stderr,
+        terminate=lambda: None,
+        wait=lambda timeout=None: 0,
+    )
+    reader._proc = proc
+    reader._stderr_thread = _StuckThread()
+
+    reader.stop()  # must return without touching stderr.close()
+
+    assert stderr.close_calls == 0
+    assert proc.stdout.closed  # nothing reads stdout, so it is always safe to close
+    assert reader._proc is None and reader._stderr_thread is None
+
+
+def test_drain_stderr_on_a_closed_stream_does_not_raise(cw: types.ModuleType) -> None:
+    reader = cw._GstFrameReader(0, 1, 2, 2)
+    stream = io.BytesIO(b"warning\n")
+    stream.close()
+
+    reader._drain_stderr(stream)  # stop() may close the pipe before the thread first reads
+
+    assert reader._stderr_lines == []
+
+
+def test_stop_right_after_start_leaves_no_thread_exception(
+    cw: types.ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    proc = types.SimpleNamespace(
+        stdout=io.BytesIO(),
+        stderr=io.BytesIO(b"warning\n"),
+        terminate=lambda: None,
+        wait=lambda timeout=None: 0,
+    )
+    monkeypatch.setattr(cw.subprocess, "Popen", lambda *a, **k: proc)
+    errors: list[threading.ExceptHookArgs] = []
+    monkeypatch.setattr(threading, "excepthook", errors.append)
+    reader = cw._GstFrameReader(0, 1, 2, 2)
+
+    reader.start()
+    thread = reader._stderr_thread
+    reader.stop()  # may run before the drain thread executes a single line
+    assert thread is not None
+    thread.join(timeout=5.0)
+
+    assert not thread.is_alive()
+    assert errors == []
