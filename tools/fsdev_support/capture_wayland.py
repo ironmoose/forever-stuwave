@@ -586,7 +586,14 @@ class _PortalClient:
         self._add_match(match_rule)
         try:
             msg = new_method_call(self._screencast_addr(), method, signature, body)
-            reply = self._conn.send_and_get_reply(msg)
+            try:
+                reply = self._conn.send_and_get_reply(msg)
+            except Exception:
+                # The call may have reached the portal before the reply failed
+                # (timeout, dropped connection); close the predicted Request so
+                # a consent dialog it opened cannot linger.
+                self.close_request(request_path, step_name)
+                raise
             if reply.header.message_type == MessageType.error:
                 raise RuntimeError(
                     f"{step_name}: D-Bus error: {reply.header.fields.get(4)} {reply.body}"
@@ -1045,9 +1052,11 @@ class WaylandScreenCast:
             self._start_session()
         except BaseException:
             # A failed or denied start must not leave the portal session (and
-            # its consent dialog) open. No automatic retry: the caller sees
-            # the error and decides.
-            self._teardown_portal()
+            # its consent dialog), the PipeWire fd or a half-built reader
+            # behind: a non-None reader would make the next call return early
+            # against a closed portal. No automatic retry: the caller sees the
+            # error and decides.
+            self._release_resources()
             raise
 
     def _start_session(self) -> None:
@@ -1188,21 +1197,25 @@ class WaylandScreenCast:
 
     def close(self) -> None:
         with self._lock:
-            if self._reader is not None:
-                try:
-                    self._reader.stop()
-                except Exception as exc:
-                    logger.warning("Error stopping GStreamer reader: %s", exc)
-                self._reader = None
-            if self._pw_fd is not None:
-                try:
-                    os.close(self._pw_fd)
-                except OSError as exc:
-                    logger.debug("Error closing PipeWire fd %d: %s", self._pw_fd, exc)
-                self._pw_fd = None
-            self._teardown_portal()
-            self._cached_frame = None
-            self._cached_at = 0.0
+            self._release_resources()
+
+    def _release_resources(self) -> None:
+        """Stop the reader, close the PipeWire fd and portal; every step is best-effort."""
+        if self._reader is not None:
+            try:
+                self._reader.stop()
+            except Exception as exc:
+                logger.warning("Error stopping GStreamer reader: %s", exc)
+            self._reader = None
+        if self._pw_fd is not None:
+            try:
+                os.close(self._pw_fd)
+            except OSError as exc:
+                logger.debug("Error closing PipeWire fd %d: %s", self._pw_fd, exc)
+            self._pw_fd = None
+        self._teardown_portal()
+        self._cached_frame = None
+        self._cached_at = 0.0
 
     def _teardown_portal(self) -> None:
         """Close the portal session and D-Bus connection; log and continue on failure."""

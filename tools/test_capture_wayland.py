@@ -7,6 +7,7 @@ connection and the portal client are replaced with fakes.
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 import types
 from pathlib import Path
@@ -68,31 +69,45 @@ def test_legacy_shared_token_is_never_read_or_overwritten(
 
 
 class FakeReply:
-    def __init__(self, body: tuple = (), error: bool = False) -> None:
+    def __init__(self, body: tuple = (), message_type: object = "method_return") -> None:
         self.body = body
-        self.header = types.SimpleNamespace(
-            message_type="error" if error else "method_return", fields={4: "err"}
-        )
+        self.header = types.SimpleNamespace(message_type=message_type, fields={4: "err"})
 
 
 class FakeConn:
-    """Stand-in for a jeepney connection; records every method call by member."""
+    """Stand-in for a jeepney connection; records every method call."""
 
-    def __init__(self, cw: types.ModuleType, receive: object, close_raises: bool = False) -> None:
+    def __init__(
+        self,
+        cw: types.ModuleType,
+        receive: object,
+        close_raises: bool = False,
+        close_error_reply: bool = False,
+        returned_path: str = "/req/path",
+        send_raises: str = "",
+    ) -> None:
+        self._cw = cw
         self._receive = receive
         self._close_raises = close_raises
-        self.calls: list[tuple[str, str]] = []  # (member, object path)
+        self._close_error_reply = close_error_reply
+        self._returned_path = returned_path
+        self._send_raises = send_raises  # member whose call raises (e.g. "Start")
+        self.calls: list[tuple[str, str, str]] = []  # (member, object path, interface)
 
     def send_and_get_reply(self, msg: object, timeout: float | None = None) -> FakeReply:
         fields = msg.header.fields  # type: ignore[attr-defined]
         member = fields[HeaderFields.member]
         path = fields[HeaderFields.path]
-        self.calls.append((member, path))
+        self.calls.append((member, path, fields[HeaderFields.interface]))
         if member == "Close" and self._close_raises:
             raise OSError("bus gone")
+        if member == "Close" and self._close_error_reply:
+            return FakeReply(message_type=self._cw.MessageType.error)
+        if member == self._send_raises:
+            raise TimeoutError("no reply")
         if member in {"AddMatch", "RemoveMatch", "Close"}:
             return FakeReply()
-        return FakeReply(body=("/req/path",))
+        return FakeReply(body=(self._returned_path,))
 
     def receive(self, timeout: float | None = None) -> object:
         if isinstance(self._receive, Exception):
@@ -109,7 +124,12 @@ def _client(cw: types.ModuleType, conn: FakeConn) -> object:
 
 
 def _members(conn: FakeConn) -> list[str]:
-    return [m for m, _ in conn.calls]
+    return [m for m, _, _ in conn.calls]
+
+
+def _closes(conn: FakeConn) -> list[tuple[str, str]]:
+    """(object path, interface) of every Close call."""
+    return [(p, i) for m, p, i in conn.calls if m == "Close"]
 
 
 def test_response_timeout_closes_the_pending_request(cw: types.ModuleType) -> None:
@@ -119,7 +139,29 @@ def test_response_timeout_closes_the_pending_request(cw: types.ModuleType) -> No
     with pytest.raises(cw._PortalTimeoutError):
         client._call_and_wait("Start", "o", ("/s",), "/req/path", "Start")
 
-    assert [c for c in conn.calls if c[0] == "Close"] == [("Close", "/req/path")]
+    assert _closes(conn) == [("/req/path", "org.freedesktop.portal.Request")]
+
+
+def test_timeout_closes_the_returned_path_when_it_differs_from_the_predicted_one(
+    cw: types.ModuleType,
+) -> None:
+    conn = FakeConn(cw, TimeoutError(), returned_path="/req/actual")
+    client = _client(cw, conn)
+
+    with pytest.raises(cw._PortalTimeoutError):
+        client._call_and_wait("Start", "o", ("/s",), "/req/predicted", "Start")
+
+    assert _closes(conn) == [("/req/actual", "org.freedesktop.portal.Request")]
+
+
+def test_failed_send_closes_the_predicted_request(cw: types.ModuleType) -> None:
+    conn = FakeConn(cw, TimeoutError(), send_raises="Start")
+    client = _client(cw, conn)
+
+    with pytest.raises(TimeoutError, match="no reply"):  # the send error, not the close
+        client._call_and_wait("Start", "o", ("/s",), "/req/predicted", "Start")
+
+    assert _closes(conn) == [("/req/predicted", "org.freedesktop.portal.Request")]
 
 
 def test_denied_response_raises_without_closing_a_finished_request(cw: types.ModuleType) -> None:
@@ -158,8 +200,26 @@ def test_close_failures_are_logged_and_swallowed(
     assert "Session.Close failed" in caplog.text
 
 
+def test_close_error_reply_is_logged_and_swallowed(
+    cw: types.ModuleType, caplog: pytest.LogCaptureFixture
+) -> None:
+    conn = FakeConn(cw, TimeoutError(), close_error_reply=True)
+    client = _client(cw, conn)
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(cw._PortalTimeoutError):
+            client._call_and_wait("Start", "o", ("/s",), "/req/path", "Start")
+
+    assert "Request.Close returned an error" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Session lifecycle
+# ---------------------------------------------------------------------------
+
+
 class FakePortal:
-    """_PortalClient replacement whose Start times out."""
+    """_PortalClient replacement; subclasses override the failing step."""
 
     instances: list[FakePortal] = []
 
@@ -174,7 +234,7 @@ class FakePortal:
     def select_sources(self, session_handle: str, restore_token: str = "") -> None:
         self.events.append(f"select:{restore_token}")
 
-    def start(self, session_handle: str) -> None:
+    def start(self, session_handle: str) -> object:
         self.events.append("start")
         raise RuntimeError("Start: timed out waiting for portal Response")
 
@@ -185,14 +245,18 @@ class FakePortal:
         self.events.append("close")
 
 
+def _cast(cw: types.ModuleType, monkeypatch: pytest.MonkeyPatch, portal_cls: type) -> object:
+    FakePortal.instances = []
+    monkeypatch.setattr(cw, "_PortalClient", portal_cls)
+    monkeypatch.setattr(cw, "_check_gst_launch_available", lambda: None)
+    monkeypatch.setattr(cw, "_spawn_consent_autoaccept", lambda: None)
+    return cw.WaylandScreenCast()
+
+
 def test_failed_start_closes_session_and_does_not_retry(
     cw: types.ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    FakePortal.instances = []
-    monkeypatch.setattr(cw, "_PortalClient", FakePortal)
-    monkeypatch.setattr(cw, "_check_gst_launch_available", lambda: None)
-    monkeypatch.setattr(cw, "_spawn_consent_autoaccept", lambda: None)
-    cast = cw.WaylandScreenCast()
+    cast = _cast(cw, monkeypatch, FakePortal)
 
     with pytest.raises(RuntimeError, match="timed out"):
         cast.capture_full_screen_to_array()
@@ -202,3 +266,101 @@ def test_failed_start_closes_session_and_does_not_retry(
     assert events.count("start") == 1
     assert events[-2:] == ["close_session", "close"]
     assert cast._portal is None and cast._session_handle is None
+
+
+class StaleTokenPortal(FakePortal):
+    """SelectSources rejects any non-empty restore_token with a code-2 failure."""
+
+    def select_sources(self, session_handle: str, restore_token: str = "") -> None:
+        super().select_sources(session_handle, restore_token)
+        if restore_token:
+            raise RuntimeError("SelectSources: portal returned code 2")
+
+
+def test_stale_token_is_unlinked_and_retried_once_without_it(
+    cw: types.ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cw._save_restore_token("stale")
+    cast = _cast(cw, monkeypatch, StaleTokenPortal)
+
+    with pytest.raises(RuntimeError, match="timed out"):  # Start still fails afterwards
+        cast.capture_full_screen_to_array()
+
+    events = FakePortal.instances[0].events
+    assert [e for e in events if e.startswith("select")] == ["select:stale", "select:"]
+    assert not cw._RESTORE_TOKEN_PATH.exists()
+    assert events[-2:] == ["close_session", "close"]
+
+
+class AlwaysRejectingPortal(FakePortal):
+    """SelectSources fails with code 2 even without a token."""
+
+    def select_sources(self, session_handle: str, restore_token: str = "") -> None:
+        super().select_sources(session_handle, restore_token)
+        raise RuntimeError("SelectSources: portal returned code 2")
+
+
+def test_failing_token_retry_tears_the_session_down(
+    cw: types.ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cw._save_restore_token("stale")
+    cast = _cast(cw, monkeypatch, AlwaysRejectingPortal)
+
+    with pytest.raises(RuntimeError, match="code 2"):
+        cast.capture_full_screen_to_array()
+
+    events = FakePortal.instances[0].events
+    assert [e for e in events if e.startswith("select")] == ["select:stale", "select:"]
+    assert "start" not in events
+    assert events[-2:] == ["close_session", "close"]
+    assert cast._portal is None
+
+
+class StartedPortal(FakePortal):
+    """Start succeeds and hands back a real fd, so a later failure has one to leak."""
+
+    fds: list[int] = []
+
+    def start(self, session_handle: str) -> object:
+        self.events.append("start")
+        return [(7, {"size": (4, 4)})], ""
+
+    def open_pipewire_remote(self, session_handle: str) -> int:
+        read_fd, write_fd = os.pipe()
+        os.close(write_fd)
+        StartedPortal.fds.append(read_fd)
+        return read_fd
+
+
+class ExplodingReader:
+    def __init__(self, *args: object) -> None:
+        pass
+
+    def start(self, **kwargs: object) -> None:
+        raise RuntimeError("gst-launch died")
+
+    def stop(self) -> None:
+        pass
+
+
+def test_failure_after_start_releases_everything_and_next_call_restarts(
+    cw: types.ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    StartedPortal.fds = []
+    cast = _cast(cw, monkeypatch, StartedPortal)
+    monkeypatch.setattr(cw, "_GstFrameReader", ExplodingReader)
+
+    with pytest.raises(RuntimeError, match="gst-launch died"):
+        cast.capture_full_screen_to_array()
+
+    (fd,) = StartedPortal.fds
+    with pytest.raises(OSError):  # EBADF: the PipeWire fd was closed
+        os.fstat(fd)
+    assert cast._reader is None and cast._pw_fd is None
+    assert cast._portal is None and cast._session_handle is None
+    assert FakePortal.instances[0].events[-2:] == ["close_session", "close"]
+
+    with pytest.raises(RuntimeError, match="gst-launch died"):
+        cast.capture_full_screen_to_array()
+
+    assert len(FakePortal.instances) == 2  # the second call started a fresh session
