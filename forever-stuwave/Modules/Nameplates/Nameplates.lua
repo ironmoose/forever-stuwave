@@ -153,15 +153,20 @@ local FONT_FLAGS = "OUTLINE"
 -- Target Mark (opt-in, default OFF; `/stu targetmark`, Config key below). An optional high-contrast mark above
 -- the current target's nameplate: three flat blocks side by side, yellow, blue, yellow, drawn above everything
 -- else the plate carries. The colors are pure and flat (SetColorTexture, alpha 1, no mask, no vertex color, no
--- theming) so they stay exact on any background. Magenta and cyan are reserved by another addon, so they are
--- never used here. Off, nothing is created beyond three hidden textures per pooled plate, and the plate looks
--- as it always did.
+-- theming) so the mark reads clearly on any background. The blocks sit on a small child frame of the plate
+-- (TARGET_MARK_LEVEL_BOOST above the plate, over the bars and the aura container) that ignores its parents'
+-- alpha, so the engine's plate fades (occlusion, distance) cannot dim or tint them. Each block is a fixed
+-- TARGET_MARK_BLOCK_W x TARGET_MARK_BLOCK_H in SCREEN pixels: the size is recomputed from the plate's effective
+-- scale while the mark is up, so the engine's selected/distance plate scaling does not resize it. Off, nothing
+-- is created beyond one hidden frame and three textures per pooled plate, and the plate looks as it always did.
 local TARGET_MARK_KEY = "nameplates.targetMark"
 local TARGET_MARK_BLOCK_W = 6
 local TARGET_MARK_BLOCK_H = 4
 local TARGET_MARK_COLORS = { { 1, 1, 0 }, { 0, 0, 1 }, { 1, 1, 0 } }
--- Highest sublevel of the OVERLAY layer, so no other region of the plate draws over a block.
+-- Highest sublevel of the OVERLAY layer inside the mark's own frame.
 local TARGET_MARK_SUBLEVEL = 7
+-- Frame level of the mark's frame relative to the plate; AURA_LEVEL_BOOST is the highest sibling above it.
+local TARGET_MARK_LEVEL_BOOST = AURA_LEVEL_BOOST + 15
 -- Above both stacks that rise from the health bar: the name row with the raid marker over it, and the two-row
 -- aura flow. Each is measured from the constants that size it, so a change there moves the strip with it.
 local TARGET_MARK_Y = math.max(
@@ -943,20 +948,28 @@ local function CreatePlateFrame()
     questIcon:Hide()
     root.questIcon = questIcon
 
-    -- Target Mark: three flat blocks centered on the health bar, TARGET_MARK_Y above it. Built hidden for
-    -- every pooled plate; UpdateTargetMark shows it on the target plate only, and only while the setting is on.
+    -- Target Mark: three flat blocks centered on the health bar, TARGET_MARK_Y above it, on their own child
+    -- frame. Built hidden for every pooled plate; UpdateTargetMark shows the frame on the target plate only, and
+    -- only while the setting is on. The frame ignores its parents' alpha (feature-detected) and sits well above
+    -- the plate's bars and aura container, so nothing dims, tints or covers the blocks.
+    local markHost = CreateFrame("Frame", nil, root)
+    markHost:SetFrameLevel(root:GetFrameLevel() + TARGET_MARK_LEVEL_BOOST)
+    if type(markHost.SetIgnoreParentAlpha) == "function" then markHost:SetIgnoreParentAlpha(true) end
+    markHost:Hide()
     local targetMark = {}
     for i, rgb in ipairs(TARGET_MARK_COLORS) do
-        local block = root:CreateTexture(nil, "OVERLAY", nil, TARGET_MARK_SUBLEVEL)
+        local block = markHost:CreateTexture(nil, "OVERLAY", nil, TARGET_MARK_SUBLEVEL)
         block:SetSize(TARGET_MARK_BLOCK_W, TARGET_MARK_BLOCK_H)
         block:SetColorTexture(rgb[1], rgb[2], rgb[3], 1)
-        block:Hide()
+        if type(block.SetIgnoreParentAlpha) == "function" then block:SetIgnoreParentAlpha(true) end
         targetMark[i] = block
     end
     targetMark[2]:SetPoint("BOTTOM", healthBar, "TOP", 0, TARGET_MARK_Y)
     targetMark[1]:SetPoint("BOTTOMRIGHT", targetMark[2], "BOTTOMLEFT", 0, 0)
     targetMark[3]:SetPoint("BOTTOMLEFT", targetMark[2], "BOTTOMRIGHT", 0, 0)
     root.targetMark = targetMark
+    root.targetMarkHost = markHost
+    root.targetMarkShown = false
 
     -- Fallback aura dots (EnsureAuraIcons): only without the container path. A
     -- plate built before the container path was given up gets its row lazily.
@@ -1446,7 +1459,11 @@ local function ReleaseFrame(unit)
     -- occupant's marker before UpdateQuestIcon resolves the new unit.
     frame.questIcon:Hide()
     -- Reset the target mark so a pooled plate never carries it to its next unit.
-    for _, block in ipairs(frame.targetMark) do block:Hide() end
+    if frame.targetMarkShown then
+        frame.targetMarkShown = false
+        frame.targetMarkHost:Hide()
+        frame.targetMarkHost:SetScript("OnUpdate", nil)
+    end
     -- Fallback row only: reset the aura dots so a reused plate can't show the
     -- previous occupant's auras before UpdateAuraIcons resolves the new unit.
     if frame.auraIcons then
@@ -1663,21 +1680,49 @@ local function RefreshEngineDimCache()
     engineDimsNonTarget = alpha ~= nil and alpha < 1
 end
 
--- Whether the Target Mark is switched on. FS.Config loads after this file, so it is read at call time;
--- before it exists (or when the key was never set) the answer is off.
+-- Whether the Target Mark is switched on, cached: UpdateTargetMark runs for every plate on every glow pass, so
+-- it must not read the config each time. FS.Config loads after this file (it is not there yet at load), so the
+-- cache starts off and is refreshed from the change callback (RegisterTargetMarkConfig).
+local targetMarkOn = false
+-- The saved setting itself (not the cache); for the slash command, which is not a hot path.
 local function TargetMarkEnabled()
     local config = FS.Config
     return config ~= nil and type(config.Get) == "function" and config.Get(TARGET_MARK_KEY) == true
 end
+local function ReadTargetMarkSetting()
+    targetMarkOn = TargetMarkEnabled()
+end
 
--- Shows the three mark blocks on the target's plate only, and only while the setting is on. Only Show/Hide
--- on this file's own textures, so it is safe in combat. A secret isTarget counts as "not the target" (the
--- markers hide) rather than being truth-tested.
-local function UpdateTargetMark(root, isTarget)
-    local show = false
-    if TargetMarkEnabled() and not FS.IsSecret(isTarget) and isTarget == true then show = true end
+-- Sizes the three blocks to TARGET_MARK_BLOCK_W x TARGET_MARK_BLOCK_H physical pixels, whatever scale the engine
+-- has put on the plate, and only when that size changed. Without a readable pixel size the blocks keep their
+-- built size in plate units.
+local function SizeTargetMark(root)
+    local px = PlatePixelSize(root)
+    if not px or px == root.targetMarkPx then return end
+    root.targetMarkPx = px
     for _, block in ipairs(root.targetMark) do
-        if show then block:Show() else block:Hide() end
+        block:SetSize(TARGET_MARK_BLOCK_W * px, TARGET_MARK_BLOCK_H * px)
+    end
+end
+
+-- Shows the mark on the target's plate only, and only while the setting is on. Only Show/Hide/SetSize/SetScript
+-- on this file's own frame and textures, so it is safe in combat. A secret isTarget counts as "not the target"
+-- (the mark hides) rather than being truth-tested. Does nothing when the plate's mark is already in the wanted
+-- state, so the off setting costs a field read per plate.
+local function UpdateTargetMark(root, isTarget)
+    local show = targetMarkOn and not FS.IsSecret(isTarget) and isTarget == true
+    if show == root.targetMarkShown then return end
+    root.targetMarkShown = show
+    local host = root.targetMarkHost
+    if show then
+        host:SetFrameLevel(root:GetFrameLevel() + TARGET_MARK_LEVEL_BOOST)
+        root.targetMarkPx = nil
+        SizeTargetMark(root)
+        host:SetScript("OnUpdate", function() SizeTargetMark(root) end)
+        host:Show()
+    else
+        host:Hide()
+        host:SetScript("OnUpdate", nil)
     end
 end
 
@@ -1742,7 +1787,11 @@ local function RegisterTargetMarkConfig()
     if not config or type(config.RegisterDefault) ~= "function" or type(config.OnChange) ~= "function" then return end
     targetMarkConfigRegistered = true
     config.RegisterDefault(TARGET_MARK_KEY, false)
-    config.OnChange(TARGET_MARK_KEY, RefreshTargetMarks)
+    ReadTargetMarkSetting()
+    config.OnChange(TARGET_MARK_KEY, function()
+        ReadTargetMarkSetting()
+        RefreshTargetMarks()
+    end)
 end
 
 -- Level prefix for the nameplate name, coloured by difficulty so an out-of-depth
@@ -2478,10 +2527,10 @@ SlashCmdList["FSPLATE"] = function(msg)
     end
     local function line(label, root)
         local pixel, factor, eff = PlatePixelSize(root)
-        -- unitPx is screen pixels per plate unit; deltaAt1pxTexel is the bar inset (1 unit) in slice
+        -- unitPx is screen pixels per plate unit; deltaAt1Texel is the bar inset (1 unit) in slice
         -- texels IF one texel were one pixel. The real texel size is not readable from Lua (measure it
         -- off a screenshot); the root-anchored erase does not depend on it, this is for the record.
-        print(string.format("stuwave://plate %s effScale=%s pxFactor=%s unitsPerPixel=%s strokeChamferUnits=%s unitPx=%s deltaAt1pxTexel=%s erase=%s",
+        print(string.format("stuwave://plate %s effScale=%s scaleFactor=%s unitStep=%s strokeChamferUnits=%s unitPx=%s deltaAt1Texel=%s erase=%s",
             label, num(eff), num(factor), num(pixel),
             pixel and num(theme.SLICE_MARGIN * pixel) or "n/a",
             pixel and num(1 / pixel) or "n/a", pixel and num(theme.BAR_FILL_INSET / pixel) or "n/a",

@@ -1305,7 +1305,7 @@ check(text:find("other nameplate1", 1, true), "no non-target plate line:\n" .. t
 check(text:find("effScale=0.766", 1, true), "effective scale missing:\n" .. text)
 check(text:find("strokeChamferUnits=4.1", 1, true), "stroke chamfer in units missing:\n" .. text)
 check(text:find("unitPx=1.437", 1, true), "pixels per unit missing:\n" .. text)
-check(text:find("deltaAt1pxTexel=1.437", 1, true), "bar inset in texels (at one pixel per texel) missing:\n" .. text)
+check(text:find("deltaAt1Texel=1.437", 1, true), "bar inset in texels (at one pixel per texel) missing:\n" .. text)
 check(text:find("erase=nineslice", 1, true), "erase mode missing:\n" .. text)
 check(not text:find("wedge=", 1, true), "the retired wedge readout is still printed:\n" .. text)
 """),
@@ -1532,7 +1532,7 @@ check(defaults["nameplates.targetMark"] == false, "default not registered as fal
 UnitIsUnit = function(u, t) return u == "nameplate1" and t == "target" end
 addPlate("nameplate1"); addPlate("nameplate2")
 local r1, r2 = FS.framesByUnit.nameplate1, FS.framesByUnit.nameplate2
-local function shown(root) local n = 0 for _, b in ipairs(root.targetMark) do if b._shown then n = n + 1 end end return n end
+local function shown(root) if root.targetMarkHost._shown then return #root.targetMark end return 0 end
 check(shown(r1) == 0 and shown(r2) == 0, "marks shown with the setting off")
 -- exact spec on the blocks
 local want = { { 1, 1, 0 }, { 0, 0, 1 }, { 1, 1, 0 } }
@@ -1565,6 +1565,65 @@ removePlate("nameplate1")
 check(shown(r1) == 0, "released plate kept its mark")
 """),
 
+    ("target mark: screen-pixel size, ignores parent alpha, own high frame, no per-plate work when off", "true", r"""
+local store, cbs, defaults = {}, {}, {}
+FS.Config = {
+    RegisterDefault = function(k, v) defaults[k] = v end,
+    Get = function(k) if store[k] ~= nil then return store[k] end return defaults[k] end,
+    Set = function(k, v) store[k] = v; for _, f in ipairs(cbs[k] or {}) do f(v) end return true end,
+    OnChange = function(k, f) cbs[k] = cbs[k] or {}; table.insert(cbs[k], f) end,
+}
+local FACTOR = 768 / 1440
+PixelUtil = { GetPixelToUIUnitFactor = function() return FACTOR end }
+__effScale = FACTOR * 1.437            -- the selected-plate scale the engine applies
+boot()
+fire("PLAYER_ENTERING_WORLD"); drain()
+UnitIsUnit = function(u, t) return u == "nameplate1" and t == "target" end
+addPlate("nameplate1"); addPlate("nameplate2")
+local r1, r2 = FS.framesByUnit.nameplate1, FS.framesByUnit.nameplate2
+local host = r1.targetMarkHost
+-- structure: blocks on their own child frame, frame above every sibling that rises from the plate
+check(host._parent == r1 and host._kind == "Frame", "mark frame is not a child frame of the plate")
+for i, b in ipairs(r1.targetMark) do
+    check(b._parent == host, "block " .. i .. " is not on the mark frame")
+    check(b._calls.SetIgnoreParentAlpha == 1 and b._args.SetIgnoreParentAlpha[1] == true, "block " .. i .. " follows its parent's alpha")
+end
+check(host._calls.SetIgnoreParentAlpha == 1 and host._args.SetIgnoreParentAlpha[1] == true, "mark frame follows its parent's alpha")
+check(host._level > r1.healthBar:GetFrameLevel() and host._level > r1.powerBar:GetFrameLevel()
+    and host._level > r1.castBar:GetFrameLevel(), "mark frame is not above the bars")
+if r1.auraContainer then check(host._level > r1.auraContainer._level, "mark frame is not above the aura container") end
+-- off: repeated passes do no per-plate work
+for _ = 1, 5 do fire("PLAYER_TARGET_CHANGED") end
+check(host._calls.Hide == nil and host._calls.Show == nil and host._calls.SetScript == nil,
+    "setting off still touches the plate's mark: " .. tostring(host._calls.Hide) .. "/" .. tostring(host._calls.SetScript))
+-- on: each block is 6 x 4 SCREEN pixels at the plate's current scale
+FS.Config.Set("nameplates.targetMark", true)
+local function px() return FACTOR / __effScale end
+local function sized(root, label)
+    for i, b in ipairs(root.targetMark) do
+        local a = b._args.SetSize
+        check(math.abs(a[1] - 6 * px()) < 1e-9 and math.abs(a[2] - 4 * px()) < 1e-9,
+            label .. ": block " .. i .. " is " .. a[1] .. " x " .. a[2] .. ", want " .. 6 * px() .. " x " .. 4 * px())
+    end
+end
+check(host._shown, "target plate lacks the mark")
+sized(r1, "selected scale")
+-- the engine rescales the plate while the mark is up: the OnUpdate re-measures
+__effScale = FACTOR * 0.8
+check(host._scripts.OnUpdate ~= nil, "no re-measure while the mark is up")
+host._scripts.OnUpdate(host)
+sized(r1, "distance scale")
+-- stopping the mark stops the re-measure
+UnitIsUnit = function(u, t) return u == "nameplate2" and t == "target" end
+fire("PLAYER_TARGET_CHANGED")
+check(not host._shown and host._scripts.OnUpdate == nil, "mark frame still running after the target moved")
+check(r2.targetMarkHost._shown and r2.targetMarkHost._scripts.OnUpdate ~= nil, "new target plate lacks the mark")
+-- no readable pixel size: the built units are kept
+PixelUtil = nil
+FS.Config.Set("nameplates.targetMark", false); FS.Config.Set("nameplates.targetMark", true)
+check(r2.targetMarkHost._shown, "mark missing without a pixel size")
+"""),
+
     ("target mark: a secret target answer hides the mark, never errors", "true", r"""
 local SECRET = setmetatable({}, { __eq = function() error("compared a secret") end })
 FS.Config = { RegisterDefault = function() end, Get = function() return true end, OnChange = function() end,
@@ -1575,7 +1634,7 @@ UnitIsUnit = function() return SECRET end
 UnitCanAttack = function() return false end
 fire("PLAYER_ENTERING_WORLD"); drain()
 addPlate("nameplate1")
-for _, b in ipairs(FS.framesByUnit.nameplate1.targetMark) do check(not b._shown, "mark shown for a secret answer") end
+check(not FS.framesByUnit.nameplate1.targetMarkHost._shown, "mark shown for a secret answer")
 """),
 
     ("target mark: /stu targetmark toggles, takes on|off, and /fsplate targetmark is the same", "true", r"""
