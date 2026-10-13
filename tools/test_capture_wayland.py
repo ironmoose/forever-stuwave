@@ -7,6 +7,7 @@ connection and the portal client are replaced with fakes.
 from __future__ import annotations
 
 import importlib.util
+import io
 import os
 import sys
 import types
@@ -162,6 +163,16 @@ def test_failed_send_closes_the_predicted_request(cw: types.ModuleType) -> None:
         client._call_and_wait("Start", "o", ("/s",), "/req/predicted", "Start")
 
     assert _closes(conn) == [("/req/predicted", "org.freedesktop.portal.Request")]
+
+
+def test_failed_send_of_a_dialogless_step_does_not_close_a_request(cw: types.ModuleType) -> None:
+    conn = FakeConn(cw, TimeoutError(), send_raises="SelectSources")
+    client = _client(cw, conn)
+
+    with pytest.raises(TimeoutError, match="no reply"):
+        client._call_and_wait("SelectSources", "o", ("/s",), "/req/path", "SelectSources")
+
+    assert "Close" not in _members(conn)
 
 
 def test_denied_response_raises_without_closing_a_finished_request(cw: types.ModuleType) -> None:
@@ -364,3 +375,78 @@ def test_failure_after_start_releases_everything_and_next_call_restarts(
         cast.capture_full_screen_to_array()
 
     assert len(FakePortal.instances) == 2  # the second call started a fresh session
+
+
+class RaisingStopReader:
+    def stop(self) -> None:
+        raise RuntimeError("stop failed")
+
+
+def test_release_resources_is_best_effort(
+    cw: types.ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cast = _cast(cw, monkeypatch, FakePortal)
+    portal = FakePortal()
+    read_fd, write_fd = os.pipe()
+    os.close(write_fd)
+    cast._reader = RaisingStopReader()
+    cast._pw_fd = read_fd
+    cast._portal = portal
+    cast._session_handle = "/session/1"
+
+    cast.close()  # the reader error must not stop the fd close or portal teardown
+
+    with pytest.raises(OSError):
+        os.fstat(read_fd)
+    assert portal.events == ["close_session", "close"]
+    assert cast._reader is None and cast._pw_fd is None and cast._portal is None
+
+
+def test_release_resources_swallows_fd_close_errors(
+    cw: types.ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cast = _cast(cw, monkeypatch, FakePortal)
+    portal = FakePortal()
+
+    def bad_close(fd: int) -> None:
+        raise OSError("EBADF")
+
+    monkeypatch.setattr(cw.os, "close", bad_close)
+    cast._pw_fd = 999
+    cast._portal = portal
+    cast._session_handle = "/session/1"
+
+    cast.close()
+
+    assert cast._pw_fd is None
+    assert portal.events == ["close_session", "close"]
+
+
+def test_close_after_a_failed_start_is_a_noop(
+    cw: types.ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cast = _cast(cw, monkeypatch, FakePortal)
+    with pytest.raises(RuntimeError, match="timed out"):
+        cast.capture_full_screen_to_array()
+    events_before = list(FakePortal.instances[0].events)
+
+    cast.close()
+
+    assert FakePortal.instances[0].events == events_before
+    assert cast._portal is None and cast._pw_fd is None and cast._reader is None
+
+
+def test_reader_stop_closes_the_subprocess_pipes(cw: types.ModuleType) -> None:
+    reader = cw._GstFrameReader(0, 1, 2, 2)
+    proc = types.SimpleNamespace(
+        stdout=io.BytesIO(),
+        stderr=io.BytesIO(),
+        terminate=lambda: None,
+        wait=lambda timeout=None: 0,
+    )
+    reader._proc = proc
+
+    reader.stop()
+
+    assert proc.stdout.closed and proc.stderr.closed
+    assert reader._proc is None

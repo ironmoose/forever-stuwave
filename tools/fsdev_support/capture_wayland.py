@@ -589,10 +589,13 @@ class _PortalClient:
             try:
                 reply = self._conn.send_and_get_reply(msg)
             except Exception:
-                # The call may have reached the portal before the reply failed
-                # (timeout, dropped connection); close the predicted Request so
-                # a consent dialog it opened cannot linger.
-                self.close_request(request_path, step_name)
+                # Only Start can show a consent dialog. If its call reached the
+                # portal before the reply failed (timeout, dropped connection),
+                # close the predicted Request so the dialog cannot linger.
+                # CreateSession/SelectSources never show one, so closing there
+                # would only add warnings or a wait on a dead bus.
+                if method == "Start":
+                    self.close_request(request_path, step_name)
                 raise
             if reply.header.message_type == MessageType.error:
                 raise RuntimeError(
@@ -948,7 +951,17 @@ class _GstFrameReader:
         except Exception as exc:
             logger.warning("Error stopping gst-launch: %s", exc)
         finally:
-            self._proc = None
+            proc, self._proc = self._proc, None
+            if self._stderr_thread is not None:
+                self._stderr_thread.join(timeout=1.0)
+                self._stderr_thread = None
+            # Release the pipe fds so repeated failed starts do not leak them.
+            for pipe in (proc.stdout, proc.stderr):
+                if pipe is not None:
+                    try:
+                        pipe.close()
+                    except Exception as exc:
+                        logger.debug("Error closing gst-launch pipe: %s", exc)
 
 
 # ---------------------------------------------------------------------------
