@@ -2158,6 +2158,12 @@ local function Rerender()
     if enabled and lastState then OnState(lastState) end
 end
 
+-- The shard count under the cast bar is the only thing a target gate edge changes here, and only a Warlock has it.
+local function PlayerIsWarlock()
+    local ok, _, token = pcall(UnitClass, "player")
+    return ok and PlainString(token) == "WARLOCK"
+end
+
 -- Hands the three piece frames to the Gunsight registry. Called through FS.Gunsight.OnReady (after
 -- login and the first seat). The aura covers are children of the buff piece frame, so the piece's fade and
 -- hide carry them with no re-render. Only the buff piece has a hook, onShow (never onHide): a hidden frame
@@ -2176,7 +2182,11 @@ local function RegisterPieces()
     -- the shard seat follows the Class Module: it hides while an area shows the count, and returns when it leaves
     local areas = FS.GunsightAreas
     if type(areas) == "table" and type(areas.OnAreaChanged) == "function" then
-        local ok, err = pcall(areas.OnAreaChanged, Rerender)
+        -- a gate edge (the Class Module's host hiding or showing with the target) only matters to the Warlock shard count
+        local ok, err = pcall(areas.OnAreaChanged, function(reason)
+            if reason == "gate" and not PlayerIsWarlock() then return end
+            Rerender()
+        end)
         if not ok then LogOnce("area_listener", "FS.GunsightAreas.OnAreaChanged failed (" .. tostring(err) .. ").") end
     end
 end

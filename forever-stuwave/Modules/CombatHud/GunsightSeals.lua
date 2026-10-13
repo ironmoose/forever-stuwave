@@ -907,6 +907,7 @@ local function ReadTarget(now)
 end
 
 local function TargetMoved(event)
+    if not subscribed then return end          -- a stale event after the module was hidden
     local now = GetTime()
     local changed, dead = false, nil
     if event == "PLAYER_TARGET_CHANGED" then

@@ -620,6 +620,20 @@ W.Subscribe(function() end)
 check(#W.Get() == 1, "only a Paladin drops Judgement")
 """)
 
+case("a_gate_only_area_edge_does_not_rebuild_but_a_real_area_change_does")(r"""
+local TD = boot({ class = "PALADIN" })
+AURAS = { aura("Judgement of Light", NOW + 10, 10, 0, "player", 20185), aura("Hammer of Justice", NOW + 4, 6, 0, "player", 853) }
+local pushes = 0
+TD.Subscribe(function() pushes = pushes + 1 end)
+local before = pushes
+for _, fn in ipairs(AREACB) do fn("gate") end
+check(pushes == before, "a gate edge (the Class Module host hid or showed with the target) pushes nothing, got " .. (pushes - before))
+AREA["class"] = "upper"
+for _, fn in ipairs(AREACB) do fn() end
+check(pushes == before + 1, "a real area change (no reason) rebuilds once, got " .. (pushes - before))
+check(names(TD.Get()) == "Hammer of Justice", "and Judgement is carried by the Seal module now, got " .. names(TD.Get()))
+""")
+
 case("friendly_and_dead_targets_show_nothing")(r"""
 local TD = boot({ class = "WARRIOR" })
 AURAS = { aura("Rend", NOW + 12, 21, 0, "player", 11572) }

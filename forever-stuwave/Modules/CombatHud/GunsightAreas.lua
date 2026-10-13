@@ -211,9 +211,12 @@ local function Refresh(force)
     end
     local flipped = ApplyHosts()
     local snapshot = Snapshot()
-    if force or flipped or snapshot ~= lastSnapshot then
+    local moved = snapshot ~= lastSnapshot
+    if force or flipped or moved then
         lastSnapshot = snapshot
-        for _, fn in ipairs(changedCallbacks) do Safe("OnAreaChanged callback", fn) end
+        -- a gate edge alone (no assignment moved) says "gate", so a listener that only cares about assignments can skip it
+        local reason = (flipped and not force and not moved) and "gate" or nil
+        for _, fn in ipairs(changedCallbacks) do Safe("OnAreaChanged callback", fn, reason) end
     end
 end
 
@@ -266,7 +269,8 @@ function Areas.AreaOf(id, live)
     return area
 end
 
--- fn() runs after an area assignment, a registration, the dot piece, or a class host's target gate changes what an area shows.
+-- fn(reason) runs after an area assignment, a registration, the dot piece, or a class host's target gate changes what an area
+-- shows. reason is "gate" when only a class host's target gate flipped (no area assignment moved), else nil.
 function Areas.OnAreaChanged(fn)
     if type(fn) == "function" then changedCallbacks[#changedCallbacks + 1] = fn end
 end
@@ -280,7 +284,7 @@ Gunsight.OnAreaChanged(function() Refresh(true) end)
 -- A gate edge of a class host tells the listeners; Refresh does the same itself, so it calls ApplyHosts directly.
 local function OnTargetEvent()
     if ApplyHosts() then
-        for _, fn in ipairs(changedCallbacks) do Safe("OnAreaChanged callback", fn) end
+        for _, fn in ipairs(changedCallbacks) do Safe("OnAreaChanged callback", fn, "gate") end
     end
 end
 

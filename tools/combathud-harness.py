@@ -2917,7 +2917,7 @@ function setClassArea(area)
 end
 function setAreaGate(gated)
     AREA_GATED = gated
-    for _, fn in ipairs(AREA_CBS) do fn() end
+    for _, fn in ipairs(AREA_CBS) do fn("gate") end   -- the registry's gate edge says so
 end
 function sameRect(a, b, msg)
     local q = rect(b)
@@ -3133,6 +3133,23 @@ check(ui.shards._shown and ui.shardNum._text == "5", "and follows new counts whi
 setAreaGate(false)
 check(not ui.shards._shown, "a target again: the module shows the count and the home seat hides")
 check(degraded("combathud_render") == 0, "no render failure")
+""")
+
+gcase("gunsight_gate_edge_rerenders_only_for_a_warlock", r"""
+local ui = gsBoot({ state = nextState({ shards = 3 }), area = "lower" })
+local before = AREA_CALLS.areaOf
+setAreaGate(true)
+check(AREA_CALLS.areaOf > before, "a Warlock re-reads the Class Module area on a gate edge")
+check(ui.shards._shown, "and the home seat takes the count")
+setAreaGate(false)
+-- the listener reads the player's class at the edge; the profile (and its shard row) stays the Warlock's
+UnitClass = function() return "Class", "PRIEST" end
+before = AREA_CALLS.areaOf
+setAreaGate(true)
+check(AREA_CALLS.areaOf == before, "a non-Warlock does not re-render on a gate edge, got " .. (AREA_CALLS.areaOf - before) .. " AreaOf calls")
+check(not ui.shards._shown, "so the home seat stays as the last render left it")
+setClassArea(nil)
+check(AREA_CALLS.areaOf > before, "a real area change (no gate reason) still re-renders for any class")
 """)
 
 gcase("gunsight_home_seat_follows_the_shard_piece", r"""

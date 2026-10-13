@@ -1084,6 +1084,26 @@ DEAD = false; fire("UNIT_HEALTH", "target"); rowIs(P, 9, col, "resurrected")
 push(judgedState("sotc", 30)); DEAD = true; push(judgedState("sotc", 30)); rowEmpty(P, "NOT JUDGED", "a push for a dead target")
 """)
 
+case("a_stale_target_event_after_the_module_was_hidden_does_nothing")(r"""
+STATE = judgedState("sotc", 30)
+local Seals, frame, spec = mount("upper")
+local P = Seals.parts
+local reads = 0
+JUDGE_ANSWER = { key = "sotc", remaining = 12 }
+local handler = P.events.scripts.OnEvent
+spec.onHide("upper")
+-- an event already queued when the frame stopped listening: the handler must not read or paint
+local textBefore = P.name.text
+UnitGUID = function() reads = reads + 1; return "Creature-0-0-0-0-1-0000000001" end
+handler(P.events, "PLAYER_TARGET_CHANGED")
+handler(P.events, "UNIT_HEALTH", "target")
+check(reads == 0, "a stale target event does not read the target, got " .. reads .. " reads")
+check(P.name.text == textBefore, "and paints nothing")
+spec.onShow("upper")
+handler(P.events, "PLAYER_TARGET_CHANGED")
+check(reads > 0, "the same event is handled once the module is shown again")
+""")
+
 case("the_module_follows_the_hud_only_while_its_area_shows_it")(r"""
 STATE = sealAt("sor", 20)
 local Seals, frame, spec = mount("upper", { hidden = true })

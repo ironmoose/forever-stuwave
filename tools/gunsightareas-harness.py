@@ -574,6 +574,22 @@ fire("PLAYER_TARGET_CHANGED")
 check(calls == 2 and Areas.AreaOf("class", true) == "lower", "a target notifies again and the live answer returns")
 """)
 
+case("a_gate_edge_tells_listeners_gate_and_an_assignment_change_tells_them_nothing")(r"""
+local cl = module("cl")
+cl.spec.classes = { "WARLOCK" }
+local Gs, Areas = boot({ before = function() FS.GunsightAreas.RegisterModule("class", cl.spec) end })
+local reasons = {}
+Areas.OnAreaChanged(function(reason) reasons[#reasons + 1] = reason or "none" end)
+TARGET = false
+fire("PLAYER_TARGET_CHANGED")
+check(#reasons == 1 and reasons[1] == "gate", "losing the target says gate, got " .. table.concat(reasons, ","))
+TARGET = true
+fire("PLAYER_TARGET_CHANGED")
+check(#reasons == 2 and reasons[2] == "gate", "gaining one says gate, got " .. table.concat(reasons, ","))
+Gs.SetArea("lower", "empty")
+check(#reasons >= 3 and reasons[#reasons] == "none", "an assignment change carries no reason, got " .. table.concat(reasons, ","))
+""")
+
 case("the_coming_soon_plate_hides_with_no_target_and_returns_with_one")(r"""
 -- the plate sits in a target side area, so it follows FS.HasTarget like the target box and tape, as does the real class host
 local soon = module("soon")

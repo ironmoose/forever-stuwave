@@ -497,7 +497,8 @@ local function Enable()
     local areas = FS.GunsightAreas
     if not areaHooked and areas and areas.OnAreaChanged then
         areaHooked = true
-        areas.OnAreaChanged(function() if enabled then Rebuild() end end)
+        -- a "gate" edge (a class host hid or showed with the target) changes no assignment, and the target handler rescans anyway
+        areas.OnAreaChanged(function(reason) if enabled and reason ~= "gate" then Rebuild() end end)
     end
     suppress = true
     SyncHud()
