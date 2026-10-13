@@ -11,6 +11,7 @@ import io
 import os
 import sys
 import threading
+import time
 import types
 from pathlib import Path
 
@@ -464,6 +465,8 @@ def test_reader_stop_closes_the_subprocess_pipes(cw: types.ModuleType) -> None:
 class _StuckThread:
     """A drain thread that is still blocked in readline after the capped join."""
 
+    ident = 1  # started, so stop() joins it
+
     def join(self, timeout: float | None = None) -> None:
         pass
 
@@ -472,14 +475,18 @@ class _StuckThread:
 
 
 class _CloseMustNotBeCalled:
-    """Stands in for a stderr BufferedReader whose close() would block on the buffer lock."""
+    """A stderr stream that fails if closed while the drain thread may still read it.
+
+    Closing an fd another thread is blocked reading lets the OS reuse the fd
+    number under that reader.
+    """
 
     def __init__(self) -> None:
         self.close_calls = 0
 
     def close(self) -> None:
         self.close_calls += 1
-        raise AssertionError("close() would block on the drain thread's buffer lock")
+        raise AssertionError("closed stderr while the drain thread is alive")
 
 
 def test_reader_stop_leaves_stderr_open_while_the_drain_thread_is_alive(
@@ -513,9 +520,37 @@ def test_drain_stderr_on_a_closed_stream_does_not_raise(cw: types.ModuleType) ->
     assert reader._stderr_lines == []
 
 
-def test_stop_right_after_start_leaves_no_thread_exception(
+def test_reader_stop_skips_join_for_a_thread_that_was_never_started(
+    cw: types.ModuleType,
+) -> None:
+    reader = cw._GstFrameReader(0, 1, 2, 2)
+    proc = types.SimpleNamespace(
+        stdout=io.BytesIO(),
+        stderr=io.BytesIO(),
+        terminate=lambda: None,
+        wait=lambda timeout=None: 0,
+    )
+    reader._proc = proc
+    reader._stderr_thread = threading.Thread(target=lambda: None)  # start() never ran
+
+    reader.stop()  # join() on an unstarted thread would raise RuntimeError
+
+    assert proc.stdout.closed and proc.stderr.closed
+    assert reader._proc is None and reader._stderr_thread is None
+
+
+def test_stop_before_the_drain_thread_runs_leaves_stderr_for_it(
     cw: types.ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    gate = threading.Event()
+
+    class GatedThread(threading.Thread):
+        """Started, but holds its body until the test releases the gate."""
+
+        def run(self) -> None:
+            gate.wait(timeout=10.0)
+            super().run()
+
     proc = types.SimpleNamespace(
         stdout=io.BytesIO(),
         stderr=io.BytesIO(b"warning\n"),
@@ -523,15 +558,23 @@ def test_stop_right_after_start_leaves_no_thread_exception(
         wait=lambda timeout=None: 0,
     )
     monkeypatch.setattr(cw.subprocess, "Popen", lambda *a, **k: proc)
+    monkeypatch.setattr(cw.threading, "Thread", GatedThread)
     errors: list[threading.ExceptHookArgs] = []
     monkeypatch.setattr(threading, "excepthook", errors.append)
     reader = cw._GstFrameReader(0, 1, 2, 2)
 
     reader.start()
     thread = reader._stderr_thread
-    reader.stop()  # may run before the drain thread executes a single line
     assert thread is not None
+    began = time.monotonic()
+    reader.stop()  # the drain thread has not executed a single line yet
+    elapsed = time.monotonic() - began
+    stderr_open_after_stop = not proc.stderr.closed
+    gate.set()
     thread.join(timeout=5.0)
 
+    assert elapsed < 5.0  # stop() is bounded by the 1s join cap
+    assert stderr_open_after_stop  # the drain thread still owns its stream
     assert not thread.is_alive()
     assert errors == []
+    assert reader._stderr_lines == ["warning"]

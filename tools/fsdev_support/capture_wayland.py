@@ -964,19 +964,25 @@ class _GstFrameReader:
         finally:
             proc, self._proc = self._proc, None
             thread, self._stderr_thread = self._stderr_thread, None
-            if thread is not None:
+            # A thread whose start() failed was never started; join() on it
+            # would raise RuntimeError here, outside any try, and skip the
+            # pipe cleanup below.
+            if thread is not None and thread.ident is not None:
                 thread.join(timeout=1.0)
             drain_done = thread is None or not thread.is_alive()
             # Release the pipe fds so repeated failed starts do not leak them.
             # Nothing reads stdout from a thread, so it is always safe to close.
-            # stderr is closed only once the drain thread has exited: closing a
-            # BufferedReader blocks on its buffer lock while another thread is
-            # inside readline (e.g. a grandchild holds the write end open).
+            # stderr is closed only once the drain thread has exited: closing an
+            # fd while another thread is blocked reading it lets the OS reuse
+            # that fd number, so the reader could end up on an unrelated file.
+            # Trade-off: if a grandchild holds the write end open the drain
+            # thread never sees EOF, so that stderr fd stays open until the
+            # process exits (one leaked fd per such restart).
             pipes = [("stdout", proc.stdout)]
             if drain_done:
                 pipes.append(("stderr", proc.stderr))
             else:
-                logger.debug("gst stderr drain thread still alive; leaving stderr to GC")
+                logger.debug("gst stderr drain thread still alive; leaving stderr open")
             for name, pipe in pipes:
                 if pipe is not None:
                     try:
