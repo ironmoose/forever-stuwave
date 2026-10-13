@@ -126,7 +126,7 @@ local WINDOW_FRAMES = {
 
 -- Micro buttons, left to right, shown or not. Filled in place by DeriveMicroOrder
 -- on first Apply from MicroMenu's own children (Blizzard's game-rule filter and
--- order); one table identity, because the recon list is refilled from it. Which
+-- order); one table identity, because the inspect list is refilled from it. Which
 -- of them are laid out is decided per reseat by IsShown, since Blizzard shows and
 -- hides some (Help, Talent, Housing) after the list is built.
 local MICRO_ORDER = {}
@@ -184,12 +184,12 @@ end
 -- Derived list
 -------------------------------------------------------------------------------
 
-local microRecon = {}
+local microInspect = {}
 
-local function SyncRecon(names)
-    for i = #microRecon, 1, -1 do microRecon[i] = nil end
+local function SyncInspect(names)
+    for i = #microInspect, 1, -1 do microInspect[i] = nil end
     for _, name in ipairs(names) do
-        microRecon[#microRecon + 1] = { name = name, guard = "fsMicroKey" }
+        microInspect[#microInspect + 1] = { name = name, guard = "fsMicroKey" }
     end
 end
 
@@ -241,7 +241,7 @@ local function DeriveMicroOrder()
         Degrade("list-fallback", "MicroMenu children unavailable, micro bar using Blizzard's default button order")
     end
 
-    SyncRecon(MICRO_ORDER)
+    SyncInspect(MICRO_ORDER)
 end
 
 -------------------------------------------------------------------------------
@@ -817,7 +817,7 @@ local function EnsureKey(button, index)
 
     keys[button] = key
     keyList[#keyList + 1] = key
-    -- /fsrecon skins guard; the only field this file assigns on a Blizzard frame.
+    -- /fsinspect skins guard; the only field this file assigns on a Blizzard frame.
     -- hooksecurefunc on a method (SetButtonState, EvaluateTooltipVisibility, the
     -- eye's UpdatePosition), on Show/Hide/SetShown, on the art setters (TameButtonArt)
     -- and on an art region's SetAlpha also leaves a wrapper in that field, which the
@@ -1386,4 +1386,4 @@ FS.MicroBars = {
 
 -- Verifies the micro buttons actually landed in the deck and picked up their
 -- key overlay. Entries fill in at Apply.
-FS.PanelSkins.RegisterRecon("MicroMenu", microRecon)
+FS.PanelSkins.RegisterInspect("MicroMenu", microInspect)

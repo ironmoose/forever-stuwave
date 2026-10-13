@@ -632,7 +632,7 @@ SlashCmdList["FSMEM"] = function()
 end
 
 -------------------------------------------------------------------------------
--- Secure-snippet probe
+-- Secure-snippet check
 -------------------------------------------------------------------------------
 
 -- Settles, with observable evidence rather than inference, whether this client
@@ -648,53 +648,53 @@ end
 --
 -- So: run a snippet whose ONLY job is to leave a value behind, then read that
 -- value back. If it comes back, snippets compile. If not, they do not.
-ForeverSTUwaveProbe = ForeverSTUwaveProbe or {}
+ForeverSTUwaveSnippet = ForeverSTUwaveSnippet or {}
 
-local function Probe()
+local function Check()
     local result = {
         when = date("%Y-%m-%d %H:%M:%S"),
         loadstringUntainted = type(loadstring_untainted),
         loadstring = type(loadstring),
     }
 
-    local frame = CreateFrame("Frame", "FSProbeHeader", UIParent, "SecureHandlerStateTemplate")
+    local frame = CreateFrame("Frame", "ForeverSTUwaveSnippetHeader", UIParent, "SecureHandlerStateTemplate")
     result.isProtected = tostring(frame:IsProtected())
     result.explicitlyProtected = tostring(select(2, frame:IsProtected()))
 
     -- 1. Does a brand-new Execute body compile and actually run?
     local ok, err = pcall(function()
-        frame:Execute([[ self:SetAttribute("fsprobe", "ran") ]])
+        frame:Execute([[ self:SetAttribute("fscheck", "ran") ]])
     end)
     result.executeCallOk = tostring(ok)
     result.executeError = ok and "" or tostring(err)
-    result.executeSideEffect = tostring(frame:GetAttribute("fsprobe"))
+    result.executeSideEffect = tostring(frame:GetAttribute("fscheck"))
 
     -- 2. Does a state driver install without throwing? This is the exact call
     --    that fails in ActionBars.lua, reduced to the smallest possible body.
     local ok2, err2 = pcall(function()
-        frame:SetAttribute("_onstate-probe", [[ self:SetAttribute("fsprobe2", "ran") ]])
-        RegisterStateDriver(frame, "probe", "1")
+        frame:SetAttribute("_onstate-check", [[ self:SetAttribute("fscheck2", "ran") ]])
+        RegisterStateDriver(frame, "check", "1")
     end)
     result.stateDriverOk = tostring(ok2)
     result.stateDriverError = ok2 and "" or tostring(err2)
-    result.stateDriverSideEffect = tostring(frame:GetAttribute("fsprobe2"))
+    result.stateDriverSideEffect = tostring(frame:GetAttribute("fscheck2"))
 
     -- 3. Does re-running a body Blizzard ALREADY compiled work? If a previously
     --    seen body succeeds while a new one fails, the factory cache is warm
     --    from load and the compiler itself is unavailable now -- which would
     --    explain why Blizzard's own UI works and ours does not.
     local ok3 = pcall(function()
-        frame:Execute([[ self:SetAttribute("fsprobe", "ran") ]])
+        frame:Execute([[ self:SetAttribute("fscheck", "ran") ]])
     end)
     result.executeRepeatOk = tostring(ok3)
 
-    ForeverSTUwaveProbe = result
+    ForeverSTUwaveSnippet = result
 end
 
-local probeFrame = CreateFrame("Frame")
-probeFrame:RegisterEvent("ADDON_LOADED")
-probeFrame:RegisterEvent("PLAYER_LOGIN")
-probeFrame:SetScript("OnEvent", function(self, event, loadedAddon)
+local checkFrame = CreateFrame("Frame")
+checkFrame:RegisterEvent("ADDON_LOADED")
+checkFrame:RegisterEvent("PLAYER_LOGIN")
+checkFrame:SetScript("OnEvent", function(self, event, loadedAddon)
     if event == "ADDON_LOADED" then
         if loadedAddon ~= addonName then return end
         self:UnregisterEvent("ADDON_LOADED")
@@ -736,15 +736,15 @@ probeFrame:SetScript("OnEvent", function(self, event, loadedAddon)
     }
 end)
 
--- The probe answered its question on 2026-09-20 (snippets do not execute here)
+-- The check answered its question on 2026-09-20 (snippets do not execute here)
 -- and its two deliberate failures were popping the error frame on every login,
 -- so it no longer runs automatically. /fssnippet re-runs it if the client ever
--- changes and the answer needs re-checking. It was /fsprobe until FSProbe.lua
--- (the secret-value probe) took that name; this one is /fssnippet now.
+-- changes and the answer needs re-checking. It had another slash name until FSCheck.lua
+-- (the in-game check) took /fscheck; this one is /fssnippet now.
 SLASH_FSSNIPPET1 = "/fssnippet"
 SlashCmdList["FSSNIPPET"] = function()
-    pcall(Probe)
-    print("|cff22e0ffForever STUwave|r: probe run; /reload to flush it to SavedVariables.")
+    pcall(Check)
+    print("|cff22e0ffForever STUwave|r: check run; /reload to flush it to SavedVariables.")
 end
 
 -------------------------------------------------------------------------------
@@ -754,7 +754,7 @@ end
 -- The smallest possible test of the ONLY remaining action-bar design, before
 -- anything gets built on top of it.
 --
--- The probe above proved secure SNIPPETS never execute on this client, which
+-- The check above proved secure SNIPPETS never execute on this client, which
 -- rules out LibActionButton: its buttons receive their type/action attributes
 -- inside the UpdateState snippet, so they would stay permanently empty.
 --

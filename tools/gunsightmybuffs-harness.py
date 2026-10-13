@@ -218,7 +218,7 @@ function T.changing_the_one_tunable_resizes_the_plate_and_its_tiles()
     __gunsightSrc = src
     local W = world()
     local M = W.Gun.G.MYBUFFS
-    ok(16 < tile0, "the probe is smaller than the shipped tile")
+    ok(16 < tile0, "the check is smaller than the shipped tile")
     eq(M.tile, 16)
     near(M.w, 2 * M.padX + (M.max - 1) * M.pitch + 16, 1e-9, "the width follows the tile")
     eq(My().C.TILE, 16); eq(My().C.W, M.w); eq(My().C.H, M.h)

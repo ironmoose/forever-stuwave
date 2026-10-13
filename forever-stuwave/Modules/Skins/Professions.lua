@@ -591,10 +591,10 @@ FS.Layout.OnRescale(function()
 end)
 
 -------------------------------------------------------------------------------
--- Recon
+-- Inspect
 -------------------------------------------------------------------------------
 
-FS.PanelSkins.RegisterRecon("Professions", {
+FS.PanelSkins.RegisterInspect("Professions", {
     { name = "ForeverSTUwaveProfessions", guard = "fsBuilt" },
 })
 

@@ -44,7 +44,7 @@
 -- root must too). A frame the Gunsight drives but does not own (the party frames) is handed back with ReleasePiece
 -- while the HUD is off, and taken again with ResumePiece.
 --
--- Slash: /fsgun [on | off | seat <dx> <dy> | piece <key> on|off | debug]. Public surface (all
+-- Slash: /fsgun [on | off | seat <dx> <dy> | piece <key> on|off | outlines]. Public surface (all
 -- FS.Gunsight.*): ui, Point, root, anchors, G, RegisterPiece, SetPiece, IsPieceOn, OnPieceChanged,
 -- OnReady, IsEnabled, IsActive, OnActiveChanged, NeedsReload, ReleasePiece, ResumePiece, SetSeat, Reseat, CONFIG_ENABLED,
 -- PieceConfigKey, AREA_IDS, AreaFamily, GetArea, SetArea, OnAreaChanged.
@@ -158,7 +158,7 @@ local masterOn = true       -- gunsight.enabled now (follows every change)
 local active = false        -- built, on, and the root really shown: the Gunsight is the display
 local masterOwed = false    -- the root's Show or Hide waits for PLAYER_REGEN_ENABLED
 local activeCallbacks = {}
-local inited, loggedIn, ready, debugOn = false, false, false, false
+local inited, loggedIn, ready, outlinesOn = false, false, false, false
 local root
 local anchors = {}
 local outlines = {}
@@ -713,10 +713,10 @@ local function Reconcile()
 end
 
 -------------------------------------------------------------------------------
--- Debug outlines
+-- Outlines
 -------------------------------------------------------------------------------
 
-local DEBUG_COLORS = {
+local OUTLINE_COLORS = {
     { 1, 0.18, 0.59 }, { 0.13, 0.88, 1 }, { 0.66, 0.33, 0.97 }, { 1, 0.82, 0.25 }, { 0.22, 1, 0.08 }, { 1, 0.71, 0.28 },
 }
 
@@ -746,14 +746,14 @@ local function BuildOutline(name, frame, color)
     return edges
 end
 
-local function SetDebug(on)
-    debugOn = on
+local function SetOutlines(on)
+    outlinesOn = on
     local i = 0
     for _, spec in ipairs(ANCHOR_SPECS) do
         i = i + 1
         local name = spec[1]
         if on and not outlines[name] then
-            outlines[name] = BuildOutline(name, anchors[name], DEBUG_COLORS[(i - 1) % #DEBUG_COLORS + 1])
+            outlines[name] = BuildOutline(name, anchors[name], OUTLINE_COLORS[(i - 1) % #OUTLINE_COLORS + 1])
         end
         for _, region in ipairs(outlines[name] or {}) do
             if on then region:Show() else region:Hide() end
@@ -796,10 +796,10 @@ local function PrintStatus()
     for _, key in ipairs(PIECE_KEYS) do
         parts[#parts + 1] = key .. " " .. (pieceState[key] and "on" or "off")
     end
-    Say((FS.Config.Get(CFG_ENABLED) == true and "enabled" or "disabled") .. ", seat " .. seat.dx .. ", " .. seat.dy .. " (design px), debug "
-        .. (debugOn and "on" or "off"))
+    Say((FS.Config.Get(CFG_ENABLED) == true and "enabled" or "disabled") .. ", seat " .. seat.dx .. ", " .. seat.dy .. " (design px), outlines "
+        .. (outlinesOn and "on" or "off"))
     Say("pieces: " .. table.concat(parts, ", "))
-    Say("/fsgun on | off | seat <dx> <dy> | piece <key> on|off | debug")
+    Say("/fsgun on | off | seat <dx> <dy> | piece <key> on|off | outlines")
 end
 
 local function SetEnabled(on)
@@ -842,10 +842,10 @@ SlashCmdList["FSGUN"] = function(msg)
                 Say("settings are read-only this session.")
             end
         end
-    elseif cmd == "debug" then
-        SetDebug(not debugOn)
-        Say("debug outlines " .. (debugOn and "on" or "off") .. ".")
+    elseif cmd == "outlines" then
+        SetOutlines(not outlinesOn)
+        Say("outlines " .. (outlinesOn and "on" or "off") .. ".")
     else
-        Say("/fsgun on | off | seat <dx> <dy> | piece <key> on|off | debug")
+        Say("/fsgun on | off | seat <dx> <dy> | piece <key> on|off | outlines")
     end
 end

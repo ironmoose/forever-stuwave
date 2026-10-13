@@ -1,7 +1,7 @@
--- Forever STUwave: /fsprobe -- opt-in, read-only secret-value probe
+-- Forever STUwave: /fscheck -- opt-in, read-only secret-value check
 --
--- Parker types /fsprobe ONCE before a play session. It records into
--- ForeverSTUwaveDB.fsprobe what this client lets an addon READ, in and out of
+-- Parker types /fscheck ONCE before a play session. It records into
+-- ForeverSTUwaveDB.fscheck what this client lets an addon READ, in and out of
 -- combat, so the 12.1 secret-value rules are measured instead of guessed:
 --
 --   ooc            snapshot taken the moment the command runs (normally out of combat)
@@ -16,50 +16,50 @@
 --   shoot          wand Shoot (5019) SUCCEEDED and channel events, kept out of casts/channel
 --   whitelist, gcd, pet   extra snapshot sections (spell secrecy enums, GCD cooldown
 --                  fields, UnitExists("pet")); casts[i].gcd and gcdStart[i].gcd are a GCD
---                  sample taken right after each SUCCEEDED / at each START (see GcdProbe)
+--                  sample taken right after each SUCCEEDED / at each START (see GcdCheck)
 --
---   gunsight       `/fsprobe gunsight`: a SEPARATE one-shot feature probe for the gunsight HUD
+--   gunsight       `/fscheck gunsight`: a SEPARATE one-shot feature check for the gunsight HUD
 --                  (8-arg SetTexCoord, SetVertexColorFromBoolean, a vertical StatusBar fed a
 --                  duration object, CreateLine, C_UnitAuras instance ids and aura durations in
 --                  combat, an engine-drawn AuraContainer, SetAlphaFromBoolean). Stored in
---                  ForeverSTUwaveDB.fsprobe.gunsight; it never touches the main run's armed
+--                  ForeverSTUwaveDB.fscheck.gunsight; it never touches the main run's armed
 --                  state and survives a re-arm; re-running it replaces the result.
 --
---   hot            `/fsprobe hot` (out of combat) / `/fsprobe hot off`: does an engine AuraContainer
+--   hot            `/fscheck hot` (out of combat) / `/fscheck hot off`: does an engine AuraContainer
 --                  per party token (player, party1..4) draw the player's own Renew, and do its
 --                  buttons stay up and tick in combat? Plain widget queries only. Also builds the
 --                  HoT TIMER BAR shape (a StatusBar the engine drives, a bare-number countdown that
---                  turns amber at 3, a pandemic overlay). Stored in ForeverSTUwaveDB.fsprobe.hot;
+--                  turns amber at 3, a pandemic overlay). Stored in ForeverSTUwaveDB.fscheck.hot;
 --                  survives a re-arm like gunsight (see HP below).
 --
---   priest         `/fsprobe priest` (any time) / `/fsprobe priest off`: what a priest's pain points can
+--   priest         `/fscheck priest` (any time) / `/fscheck priest off`: what a priest's pain points can
 --                  read on this client. An ooc and a combat snapshot (mana and regen, absorbs and heal
 --                  prediction, auras by spell id, cooldowns, range, threat, loss of control, secrecy of
 --                  every spell involved), each record tagged inCombat true/false, plus bounded ring
 --                  buffers of power ticks, casts with their mana cost, auras, kills, absorbs and loss of
 --                  control events. The main run adds the snapshot part to its own ooc and combat
---                  snapshots when the class is PRIEST. Stored in ForeverSTUwaveDB.fsprobe.priest;
+--                  snapshots when the class is PRIEST. Stored in ForeverSTUwaveDB.fscheck.priest;
 --                  survives a re-arm like gunsight (see PP below).
 --
---   shaman         `/fsprobe shaman` (any time) / `/fsprobe shaman off`: what a Shaman totem bar can read and do
+--   shaman         `/fscheck shaman` (any time) / `/fscheck shaman off`: what a Shaman totem bar can read and do
 --                  on 16001, built for a fresh low level character (spells not known yet are skipped and
 --                  NAMED). Same shape as priest: ooc and combat snapshots, bounded logs. Plus three explicit
 --                  subcommands that are never run automatically: `buttons` (a temporary strip of secure test
 --                  buttons, out of combat only), `setslot` (SetMultiCastSpell, to be run in combat) and
---                  `destroy` (DestroyTotem from addon code). Stored in ForeverSTUwaveDB.fsprobe.shaman;
+--                  `destroy` (DestroyTotem from addon code). Stored in ForeverSTUwaveDB.fscheck.shaman;
 --                  survives a re-arm like gunsight (see the SH block below).
 --
 -- Read it after /reload or logout: WTF/Account/<id>/SavedVariables/forever-stuwave.lua
--- (ForeverSTUwaveDB.fsprobe).
+-- (ForeverSTUwaveDB.fscheck).
 --
 -- Rules this file keeps, because it runs in the middle of a play session:
 --   * Nothing runs at load. The only side effect of loading is the slash command.
---     The event frame, the events and the timers all start inside /fsprobe.
+--     The event frame, the events and the timers all start inside /fscheck.
 --   * Every API call, handler and timer is pcall'd. An error becomes a string in
 --     the results; nothing is ever thrown into the session.
 --   * Read-only. No protected call, no SetAttribute, no secure template. The one
 --     visible thing is an AuraContainer built from the same template Plater uses.
---     The one exception is the opt-in `/fsprobe shaman` subcommands (see the SH block): the test strip
+--     The one exception is the opt-in `/fscheck shaman` subcommands (see the SH block): the totem button row
 --     of secure buttons and the two calls that may be protected, each typed by Parker, never automatic.
 --   * A secret value is never compared, concatenated, truth-tested, indexed or
 --     tostring'd, and never stored. Only its type and the boolean "isSecret" are
@@ -68,7 +68,7 @@
 --     called, the answer fails closed ("secret") and no value is stored.
 --   * Every event is unregistered as its part finishes, and nothing uses OnUpdate.
 
-local KEY = "fsprobe"
+local KEY = "fscheck"
 local COMBAT_DELAY = 4
 local CAST_TARGET = 10
 local CHANNEL_CAP = 30
@@ -99,13 +99,13 @@ local WHITELIST_IDS = {
     17941, 15473, 706, 1243, 589, 594, 980, 172, 348, 18265, 687, 5019,
 }
 
--- GCD: spells whose cooldown table is read in each snapshot. GCD_PROBE_SPELLS are the
+-- GCD: spells whose cooldown table is read in each snapshot. GCD_CHECK_SPELLS are the
 -- candidates read for isActive in a cast sample: only spells with NO cooldown of their own
 -- (Mind Blast has an 8s one, so it would read active with no GCD running), and never the
 -- spell that was just cast. 61304 is the global cooldown marker, read as the control.
 local GCD_MARKER = 61304
 local GCD_SECTION_SPELLS = { GCD_MARKER, 686, 585 }
-local GCD_PROBE_SPELLS = { 585, 686, 172 }
+local GCD_CHECK_SPELLS = { 585, 686, 172 }
 local GCD_KEEP = { startTime = true, duration = true, isActive = true, isOnGCD = true }
 local GCD_CONTROL_KEYS = { "startTime", "duration", "isActive" }
 
@@ -207,17 +207,17 @@ local PROC_EVENTS = {
 }
 
 local USAGE = {
-    "fsprobe: /fsprobe (out of combat) = snapshot now, then record your next pull, 10 casts, and a 30s aura row above screen centre",
-    "fsprobe: /fsprobe again = status | /fsprobe reset = clear and stop | after \"done\", /reload to save",
-    "fsprobe: /fsprobe gunsight = gunsight HUD feature probes (works any time; the cast and combat parts wait for your next cast and pull)",
-    "fsprobe: /fsprobe priest = priest probe: snapshot now, the other (ooc/combat) one on the next pull or fight end, plus 20 min of bounded power/cast/aura/kill logs | /fsprobe priest off = stop",
-    "fsprobe: /fsprobe shaman = shaman totem probe: snapshot now, the other (ooc/combat) one on the next pull or fight end, plus 30 min of bounded totem/cast/click logs, and a list of the checks that could not run (spell not known yet) | /fsprobe shaman off = stop",
-    "fsprobe: /fsprobe shaman buttons = temporary secure test strip (dismiss slots 1-4, castsequence, Totemic Recall; out of combat) | /fsprobe shaman buttons off = hide it | /fsprobe shaman setslot = SetMultiCastSpell from addon code, run it IN COMBAT yourself | /fsprobe shaman destroy [slot] = DestroyTotem from addon code",
-    "fsprobe: /fsprobe hot = party row HoT probe: an engine aura container per party token (icon, short buffs, HoT timer bar) for 120s (out of combat to start) | /fsprobe hot off = remove it",
+    "fscheck: /fscheck (out of combat) = snapshot now, then record your next pull, 10 casts, and a 30s aura row above screen centre",
+    "fscheck: /fscheck again = status | /fscheck reset = clear and stop | after \"done\", /reload to save",
+    "fscheck: /fscheck gunsight = gunsight HUD feature checks (works any time; the cast and combat parts wait for your next cast and pull)",
+    "fscheck: /fscheck priest = priest check: snapshot now, the other (ooc/combat) one on the next pull or fight end, plus 20 min of bounded power/cast/aura/kill logs | /fscheck priest off = stop",
+    "fscheck: /fscheck shaman = shaman totem check: snapshot now, the other (ooc/combat) one on the next pull or fight end, plus 30 min of bounded totem/cast/click logs, and a list of the checks that could not run (spell not known yet) | /fscheck shaman off = stop",
+    "fscheck: /fscheck shaman buttons = temporary totem button row (dismiss slots 1-4, castsequence, Totemic Recall; out of combat) | /fscheck shaman buttons off = hide it | /fscheck shaman setslot = SetMultiCastSpell from addon code, run it IN COMBAT yourself | /fscheck shaman destroy [slot] = DestroyTotem from addon code",
+    "fscheck: /fscheck hot = party row HoT check: an engine aura container per party token (icon, short buffs, HoT timer bar) for 120s (out of combat to start) | /fscheck hot off = remove it",
 }
 
 -------------------------------------------------------------------------------
--- State (all of it dormant until /fsprobe runs)
+-- State (all of it dormant until /fscheck runs)
 -------------------------------------------------------------------------------
 
 local state = {
@@ -256,7 +256,7 @@ local state = {
     gsAc = nil,
 }
 
--- The priest probe (/fsprobe priest). Declared here so the snapshot section list can name it;
+-- The priest check (/fscheck priest). Declared here so the snapshot section list can name it;
 -- the code is in the PP block further down.
 local PP = {}
 
@@ -737,7 +737,7 @@ local function SectionPet(sec)
     sec.unitExists = Invoke(true, Api("UnitExists"), "pet")
 end
 
--- Only a PRIEST gets the priest snapshot in the main run; /fsprobe priest runs it for any class.
+-- Only a PRIEST gets the priest snapshot in the main run; /fscheck priest runs it for any class.
 local function SectionPriest(sec)
     local token = PP.ClassToken()
     sec.classToken = token or "unknown"
@@ -795,7 +795,7 @@ local function Meta()
 end
 
 local function Say(text)
-    print("fsprobe: " .. text)
+    print("fscheck: " .. text)
 end
 
 local function PartLine(done, label)
@@ -949,9 +949,9 @@ local function BuildContainer()
         return false
     end
 
-    local frame = _G.FSProbeAuraContainer
+    local frame = _G.FSCheckAuraContainer
     if frame == nil then
-        local ok, result = pcall(CreateFrame, "AuraContainer", "FSProbeAuraContainer", UIParent, TEMPLATE)
+        local ok, result = pcall(CreateFrame, "AuraContainer", "FSCheckAuraContainer", UIParent, TEMPLATE)
         ac.steps.createFrame = ok and "ok" or ErrText(result)
         if not ok then
             ac.status = "create failed"
@@ -1003,14 +1003,14 @@ local function BuildContainer()
     end
 
     Step("label", function()
-        local holder = _G.FSProbeAuraLabel
+        local holder = _G.FSCheckAuraLabel
         if holder == nil then
-            holder = CreateFrame("Frame", "FSProbeAuraLabel", UIParent)
+            holder = CreateFrame("Frame", "FSCheckAuraLabel", UIParent)
             holder:SetSize(120, 12)
             holder:SetPoint("BOTTOMLEFT", UIParent, "CENTER", -100, 206)
             local text = holder:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
             text:SetPoint("LEFT")
-            text:SetText("fsprobe auras")
+            text:SetText("aura preview")
         end
         holder:Hide()
         state.label = holder
@@ -1168,13 +1168,13 @@ local function PlainTime()
     return nil
 end
 
--- The known spells of GCD_PROBE_SPELLS, in order (a non-empty result is cached per run).
+-- The known spells of GCD_CHECK_SPELLS, in order (a non-empty result is cached per run).
 local function GcdKnown()
     if state.gcdKnown then return state.gcdKnown end
     local isPlayerSpell = Api("IsPlayerSpell")
     local isKnown = Api("C_SpellBook", "IsSpellKnown")
     local known = {}
-    for _, id in ipairs(GCD_PROBE_SPELLS) do
+    for _, id in ipairs(GCD_CHECK_SPELLS) do
         if KeptBool(Invoke(true, isPlayerSpell, id)) == true or KeptBool(Invoke(true, isKnown, id)) == true then
             known[#known + 1] = id
         end
@@ -1184,8 +1184,8 @@ local function GcdKnown()
     return known
 end
 
--- The first known probe spell whose NAME differs from the just-cast spell's (a plain
--- compare, after SpellName's IsSecret checks), or nil. A probe id equal to the plain
+-- The first known check spell whose NAME differs from the just-cast spell's (a plain
+-- compare, after SpellName's IsSecret checks), or nil. A check id equal to the plain
 -- castID is always skipped, so a cast spell whose name cannot be read is still excluded.
 local function GcdSpell(castID, castName)
     for _, id in ipairs(GcdKnown()) do
@@ -1226,7 +1226,7 @@ end
 -- as the control, plus GetTime, plus the cast spell's castTime. A cast-time spell reads its
 -- GCD as already over after SUCCEEDED, so the START sample is the one where the GCD is
 -- certainly running. A secret table is never indexed.
-local function GcdProbe(castID, elapsed)
+local function GcdCheck(castID, elapsed)
     local out = {}
     local ok, err = pcall(function()
         local getCooldown = Api("C_Spell", "GetSpellCooldown")
@@ -1285,13 +1285,13 @@ end
 local function RecordSucceeded(event, ...)
     local rec = RecordCast(event, ...)
     local castID = PlainSpellID(...)
-    rec.gcd = GcdProbe(castID, TakeCastElapsed(castID))
+    rec.gcd = GcdCheck(castID, TakeCastElapsed(castID))
     return rec
 end
 
 local function RecordStart(event, ...)
     local rec = RecordCast(event, ...)
-    rec.gcd = GcdProbe(PlainSpellID(...))
+    rec.gcd = GcdCheck(PlainSpellID(...))
     return rec
 end
 
@@ -1381,7 +1381,7 @@ end
 local function Handle(event, ...)
     if event == AURA_EVENT then
         -- Two budgets, so out-of-combat churn (buff upkeep, target swaps) cannot spend the
-        -- in-combat samples this probe exists for. A failed lockdown check counts as out.
+        -- in-combat samples this check exists for. A failed lockdown check counts as out.
         local inCombat = LockedDown(false)
         if WrongAuraUnit((...)) then return end
         if inCombat then
@@ -1546,12 +1546,12 @@ local function RegisterUnit(event)
 end
 
 -------------------------------------------------------------------------------
--- /fsprobe gunsight: feature probes for the gunsight HUD
+-- /fscheck gunsight: feature checks for the gunsight HUD
 -------------------------------------------------------------------------------
--- One slash call runs the immediate probes and arms the two that need a live event: the
+-- One slash call runs the immediate checks and arms the two that need a live event: the
 -- vertical bar fed a real cast duration (next UNIT_SPELLCAST_START for "player") and the
 -- C_UnitAuras reads on a target in combat (next PLAYER_REGEN_DISABLED). Everything is stored
--- in ForeverSTUwaveDB.fsprobe.gunsight[<probe>]. Only booleans, plain numbers and short
+-- in ForeverSTUwaveDB.fscheck.gunsight[<check>]. Only booleans, plain numbers and short
 -- plain strings are stored; a secret becomes the string "secret", an error its (capped) text.
 -- Every helper hangs off the one table GS: this file is near Lua 5.1's limit of 200 locals
 -- per chunk, and the gunsight code is the part that keeps growing.
@@ -1595,7 +1595,7 @@ function GS.Section(key)
     return gs[key]
 end
 
--- Stores the one-line summary beside the probe and prints it.
+-- Stores the one-line summary beside the check and prints it.
 function GS.Report(key, text)
     pcall(function() GS.Section(key).summary = text end)
     Say("gunsight " .. key .. ": " .. text)
@@ -1661,8 +1661,8 @@ function GS.Timer(delay, fn)
     return (pcall(after, delay, fn))
 end
 
--- The probe's test objects are built once and cached on `state`, so re-running the probe
--- never grows the frame count (a frame or texture cannot be destroyed). Each probe hides its
+-- The check's test objects are built once and cached on `state`, so re-running the check
+-- never grows the frame count (a frame or texture cannot be destroyed). Each check hides its
 -- object when it is done, and GS.HideObjects (every Disarm) hides whatever is left.
 function GS.Obj(key, make)
     local obj = state.gsObjs[key]
@@ -1713,7 +1713,7 @@ end
 
 -- 1. 8-argument SetTexCoord ------------------------------------------------------------------
 
-function GS.ProbeTexCoord(rec, _host)
+function GS.CheckTexCoord(rec, _host)
     local tex = GS.Tex("texcoord")
     local exists, ok, res = GS.Call(tex, "SetTexCoord", unpack(GS.ROT90))
     rec.exists = exists
@@ -1766,7 +1766,7 @@ function GS.ColorTrial(tex, makeA, makeB)
     return out
 end
 
-function GS.ProbeVertexColor(rec, _host)
+function GS.CheckVertexColor(rec, _host)
     local tex = GS.Tex("vertexColor")
     rec.exists = GS.Method(tex, "SetVertexColorFromBoolean") ~= nil
     if not rec.exists then
@@ -1836,7 +1836,7 @@ function GS.BarSummary(label, rec)
         .. tostring(rec.valueAt0) .. " -> " .. tostring(rec.valueAt05) .. " (moved " .. tostring(rec.moved) .. ")"
 end
 
-function GS.ProbeBarManual(rec, _host, run)
+function GS.CheckBarManual(rec, _host, run)
     local bar = GS.Bar("manualBar")
     rec.hasSetOrientation = GS.Method(bar, "SetOrientation") ~= nil
     rec.hasSetTimerDuration = GS.Method(bar, "SetTimerDuration") ~= nil
@@ -1871,7 +1871,7 @@ function GS.ProbeBarManual(rec, _host, run)
     end)
 end
 
-function GS.ProbeBarCast(run)
+function GS.CheckBarCast(run)
     local rec = GS.Section("verticalBarTimer")
     local cast = {}
     rec.cast = cast
@@ -1896,7 +1896,7 @@ end
 
 -- 4. CreateLine ------------------------------------------------------------------------------
 
-function GS.ProbeLine(rec, host)
+function GS.CheckLine(rec, host)
     rec.exists = GS.Method(host, "CreateLine") ~= nil
     if not rec.exists then
         rec.verdict = "Frame:CreateLine absent"
@@ -2033,7 +2033,7 @@ function GS.AuraSummary(label, rec)
             or "not called")))
 end
 
-function GS.ProbeAuraApi(rec)
+function GS.CheckAuraApi(rec)
     local ns = _G.C_UnitAuras
     rec.namespace = type(ns) == "table"
     rec.getUnitAuraInstanceIDs = Api("C_UnitAuras", "GetUnitAuraInstanceIDs") ~= nil
@@ -2132,7 +2132,7 @@ function GS.AlphaTrial(obj)
     return out
 end
 
-function GS.ProbeAlpha(rec, _host)
+function GS.CheckAlpha(rec, _host)
     local tex = GS.Tex("alphaTex")
     rec.texture = GS.AlphaTrial(tex)
     local frame = GS.Obj("alphaFrame", function(h) return CreateFrame("Frame", nil, h) end)
@@ -2170,7 +2170,7 @@ end
 -- bar fed the duration the engine passed to our bar hook, and a bar fed
 -- button:GetAuraDuration() (a private-mixin method, so it may well refuse).
 
-GS.AC_NAME = "FSProbeGsAuraContainer"
+GS.AC_NAME = "FSCheckGsAuraContainer"
 GS.AC_GROUP = "mine"
 GS.AC_MAX_BUTTONS = 8
 GS.AC_MAX_BARS = 12
@@ -2282,9 +2282,9 @@ function GS.AcInitButton(button)
     S("barHook", function() hooksecurefunc(bar, "SetTimerDuration", GS.AcHookBar) end)
 end
 
--- Out of combat, run by /fsprobe gunsight: build the container once (cached on `state`),
+-- Out of combat, run by /fscheck gunsight: build the container once (cached on `state`),
 -- add the group once, point it at the target, leave it hidden and disabled.
-function GS.ProbeAuraContainer(rec, _host)
+function GS.CheckAuraContainer(rec, _host)
     local ac = GS.AcState()
     rec.combatPart = "waits for the next PLAYER_REGEN_DISABLED with a HARMFUL|PLAYER aura on the target"
     local getTemplate = Api("C_XMLUtil", "GetTemplateInfo")
@@ -2577,7 +2577,7 @@ function GS.Handle(event, ...)
         if not state.gsCastArmed or WrongUnit((...)) then return end
         state.gsCastArmed = false
         CallOn(state.gsFrame, "UnregisterEvent", "UNIT_SPELLCAST_START")
-        GS.ProbeBarCast(state.gsRun)
+        GS.CheckBarCast(state.gsRun)
     end
 end
 
@@ -2596,13 +2596,13 @@ function GS.EnsureFrame()
     return (pcall(frame.SetScript, frame, "OnEvent", GS.OnEvent))
 end
 
--- Runs one probe under pcall so a failure is recorded and the next probe still runs.
+-- Runs one check under pcall so a failure is recorded and the next check still runs.
 function GS.Run(key, fn, ...)
     local rec = GS.Section(key)
     local ok, err = pcall(fn, rec, ...)
     if not ok then
-        rec.probeError = ErrText(err)
-        GS.Report(key, "probe error: " .. rec.probeError)
+        rec.checkError = ErrText(err)
+        GS.Report(key, "check error: " .. rec.checkError)
     end
 end
 
@@ -2632,13 +2632,13 @@ function GS.Start()
         return
     end
 
-    GS.Run("texcoord8", GS.ProbeTexCoord, host)
-    GS.Run("vertexColorFromBoolean", GS.ProbeVertexColor, host)
-    GS.Run("verticalBarTimer", GS.ProbeBarManual, host, run)
-    GS.Run("line", GS.ProbeLine, host)
-    GS.Run("auraApi", GS.ProbeAuraApi)
-    GS.Run("auraContainer", GS.ProbeAuraContainer)
-    GS.Run("alphaFromBoolean", GS.ProbeAlpha, host)
+    GS.Run("texcoord8", GS.CheckTexCoord, host)
+    GS.Run("vertexColorFromBoolean", GS.CheckVertexColor, host)
+    GS.Run("verticalBarTimer", GS.CheckBarManual, host, run)
+    GS.Run("line", GS.CheckLine, host)
+    GS.Run("auraApi", GS.CheckAuraApi)
+    GS.Run("auraContainer", GS.CheckAuraContainer)
+    GS.Run("alphaFromBoolean", GS.CheckAlpha, host)
 
     if GS.EnsureFrame() then
         state.gsCastArmed = true
@@ -2657,15 +2657,15 @@ function GS.Start()
         meta.frameError = "event frame could not be created, cast and combat parts skipped"
         Say("gunsight: " .. meta.frameError)
     end
-    Say("gunsight results: ForeverSTUwaveDB.fsprobe.gunsight, /reload or log out to save to "
+    Say("gunsight results: ForeverSTUwaveDB.fscheck.gunsight, /reload or log out to save to "
         .. "WTF/Account/<id>/SavedVariables/forever-stuwave.lua (late results print as they finish)")
 end
 
 -------------------------------------------------------------------------------
--- Class probes: the machinery /fsprobe priest and /fsprobe shaman share
+-- Class checks: the machinery /fscheck priest and /fscheck shaman share
 -------------------------------------------------------------------------------
--- CP.Install(P, cfg) turns an empty table into a class probe: a saved record
--- ForeverSTUwaveDB.fsprobe.<cfg.key> with `meta`, an `ooc` and a `combat` snapshot and bounded `logs`;
+-- CP.Install(P, cfg) turns an empty table into a class check: a saved record
+-- ForeverSTUwaveDB.fscheck.<cfg.key> with `meta`, an `ooc` and a `combat` snapshot and bounded `logs`;
 -- the snapshot timing (one now, the other state on the next pull, 4 s in, or at the fight's end);
 -- the event frame and its registration; start, stop and the timeout. The class supplies:
 --   P.PARTS      the snapshot parts, { name, fn(sec) } (each pcall'd by Section, each record tagged inCombat)
@@ -2760,7 +2760,7 @@ function CP.Install(P, cfg)
     end
     P.cfg = cfg
     P.run = 0
-    P.live = nil         -- the running probe: { run, pending = { ooc, combat } }
+    P.live = nil         -- the running check: { run, pending = { ooc, combat } }
     P.frame = nil        -- the event frame (frames are never destroyed, so it is reused)
     P.combat = false     -- InCombatLockdown at the start of the snapshot being taken
     P.resolved = nil     -- the spell list with ids resolved, for the snapshot being taken
@@ -3117,7 +3117,7 @@ function CP.Install(P, cfg)
         if P.live then
             if resume then return end
             P.TakeSnapshot(kind)
-            Say(cfg.label .. ": logs keep running; /fsprobe " .. cfg.label .. " off stops them")
+            Say(cfg.label .. ": logs keep running; /fscheck " .. cfg.label .. " off stops them")
             return
         end
         P.run = P.run + 1
@@ -3173,26 +3173,26 @@ function CP.Install(P, cfg)
             local ok, err = pcall(P.Stop, "timeout")
             if not ok then pcall(function() P.Meta().timerError = ErrText(err) end) end
         end) then
-            meta.timerError = "C_Timer.After unavailable; logging runs until /fsprobe " .. cfg.label .. " off"
+            meta.timerError = "C_Timer.After unavailable; logging runs until /fscheck " .. cfg.label .. " off"
         end
         if kept then
             Say(cfg.label .. ": logging re-armed over the saved record (nothing replaced, no new snapshot). Logging " .. cfg.logSeconds
-                .. "s: " .. cfg.logsText .. ". Run /fsprobe " .. cfg.label .. " to take a new snapshot (it replaces the saved snapshot and keeps the logs), "
-                .. "/fsprobe " .. cfg.label .. " off to stop, /reload to save")
+                .. "s: " .. cfg.logsText .. ". Run /fscheck " .. cfg.label .. " to take a new snapshot (it replaces the saved snapshot and keeps the logs), "
+                .. "/fscheck " .. cfg.label .. " off to stop, /reload to save")
             return
         end
         Say(cfg.label .. ": " .. kind .. " snapshot saved. Logging " .. cfg.logSeconds .. "s: " .. cfg.logsText .. ". "
             .. (kind == "ooc" and "Pull a mob: the combat snapshot follows " .. cfg.combatDelay .. "s in. "
                 or "Leave combat: the ooc snapshot follows. ")
-            .. cfg.todo .. " Run /fsprobe " .. cfg.label .. " again to re-snapshot, "
-            .. "/fsprobe " .. cfg.label .. " off to stop, /reload to save")
+            .. cfg.todo .. " Run /fscheck " .. cfg.label .. " again to re-snapshot, "
+            .. "/fscheck " .. cfg.label .. " off to stop, /reload to save")
     end
 end
 
 -------------------------------------------------------------------------------
--- /fsprobe priest: what each priest pain point can read on this client
+-- /fscheck priest: what each priest pain point can read on this client
 -------------------------------------------------------------------------------
--- `/fsprobe priest` (any time, any class; the main run adds the same section only for a PRIEST)
+-- `/fscheck priest` (any time, any class; the main run adds the same section only for a PRIEST)
 -- answers, per API a priest UI would lean on: does it exist, is its return secret, and what is the
 -- plain value when it is not. Every record is tagged inCombat true/false, so the out-of-combat and
 -- in-combat runs sit side by side:
@@ -3213,18 +3213,18 @@ end
 --                                aura (player and target UNIT_AURA payload secrecy), shield (absorb
 --                                and heal prediction events on player and party), kill (PARTY_KILL,
 --                                PLAYER_TARGET_DIED), died (UNIT_DIED), loc (loss of control).
--- Logging stops after 1200 s, on `/fsprobe priest off`, or on `/fsprobe reset`.
+-- Logging stops after 1200 s, on `/fscheck priest off`, or on `/fscheck reset`.
 -- The per-spell tables (spells, auras, cooldowns) hold ONE compact string per read:
 -- "type/plain=value", "type/secret", "absent", "error: ...", "nil/plain" (nothing there).
 -- A secret is described, never compared, concatenated, indexed or stored; a GUID is compared
 -- only when both sides are plain. Spell ids not taken from this repo are Classic Era ids and
 -- unverified on Forever; every spell is also resolved by NAME (english), and the rank the client
--- reports for the name is probed too. API names and signatures: Gethe/wow-ui-source, branch
+-- reports for the name is checked too. API names and signatures: Gethe/wow-ui-source, branch
 -- `forever` (the generated API documentation), 1.60.1.
--- Every probed spell id also records the name the client resolves it to (spellName), so an id taken
+-- Every checked spell id also records the name the client resolves it to (spellName), so an id taken
 -- from Classic Era can be checked. The `target` part records how durable the target is
 -- (classification, level, effective level, plus-mob flag, creature type), plain or secret.
--- Results: ForeverSTUwaveDB.fsprobe.priest.
+-- Results: ForeverSTUwaveDB.fscheck.priest.
 
 PP.FREQUENT_COUNT = 10        -- with no plain clock, keep 1 in this many sampled events
 PP.COST_ASSUMPTION = "nil or empty = free"   -- a spell power cost call that returns nothing is read as a free spell
@@ -3780,14 +3780,14 @@ PP.HANDLERS = {
 }
 
 -------------------------------------------------------------------------------
--- /fsprobe shaman: what a totem bar can read and do on this client
+-- /fscheck shaman: what a totem bar can read and do on this client
 -------------------------------------------------------------------------------
 -- Built for a fresh low level Shaman on WoW Forever (16001): the first Earth totem comes at level 4, the
 -- other elements and the Call of the Elements / Totemic Recall spells later, so every check that needs a
 -- spell the player does not know yet is SKIPPED and NAMED (checks.notRun, and a chat line), never failed.
--- Same machinery as `/fsprobe priest` (CP above): `/fsprobe shaman` (any time, any class) takes an ooc and
+-- Same machinery as `/fscheck priest` (CP above): `/fscheck shaman` (any time, any class) takes an ooc and
 -- a combat snapshot (the other one follows the next pull, 4 s in, or the end of the fight) and logs for
--- 30 minutes. Results: ForeverSTUwaveDB.fsprobe.shaman.
+-- 30 minutes. Results: ForeverSTUwaveDB.fscheck.shaman.
 --   shaman.ooc / shaman.combat   parts, each record tagged inCombat true/false:
 --     player     class, level, GetNumTotemSlots, the slot constants (FIRE_TOTEM_SLOT ...) and
 --                SHAMAN_TOTEM_PRIORITIES;
@@ -3815,27 +3815,27 @@ PP.HANDLERS = {
 --   shaman.logs.<name>  bounded ring buffers: totem (PLAYER_TOTEM_UPDATE: slot argument plain or secret and a
 --                GetTotemInfo readout for it per event), cast (the player's start / succeeded / failed /
 --                interrupted), multicast (UPDATE_MULTI_CAST_ACTIONBAR with HasMultiCastActionBar), click (the
---                test strip: each click with the totem state before and after, and the events that followed
+--                totem button row: each click with the totem state before and after, and the events that followed
 --                it within 3 s).
 -- Nothing protected runs by itself. These run ONLY when Parker types them:
---   /fsprobe shaman buttons        a small labelled TEMPORARY strip of 3 SecureActionButtonTemplate buttons:
+--   /fscheck shaman buttons        a small labelled TEMPORARY strip of 3 SecureActionButtonTemplate buttons:
 --                                  dismiss (left slot 1, right slot 2, shift-left 3, shift-right 4 through
 --                                  the secure `destroytotem` action), a `/castsequence` through two known
 --                                  totems and Totemic Recall (each only when known). Built and shown out of
---                                  combat only; in combat the command refuses. When the probe is not logging it
+--                                  combat only; in combat the command refuses. When the check is not logging it
 --                                  re-arms the logging over the saved record and never replaces it.
---   /fsprobe shaman buttons off    hides it (out of combat). In combat (also `shaman off`, the 30 minute timeout
+--   /fscheck shaman buttons off    hides it (out of combat). In combat (also `shaman off`, the 30 minute timeout
 --                                  and `reset` in combat) it only sets alpha 0: the buttons stay clickable,
 --                                  invisible, until combat ends, then a PLAYER_REGEN_ENABLED wait finishes
 --                                  the hide (Hide, EnableMouse false) out of combat.
---   /fsprobe shaman setslot        P1: SetMultiCastSpell on the earth (or first) slot from addon code, run it
+--   /fscheck shaman setslot        P1: SetMultiCastSpell on the earth (or first) slot from addon code, run it
 --                                  IN COMBAT yourself. The chat line comes first because a blocked call
 --                                  prints ADDON_ACTION_BLOCKED, which pcall cannot catch. The action id is the
 --                                  native MultiCastActionButtonN:CalculateAction() when it exists, else
 --                                  (bar - 1) * 12 + slot (run.actionSource says which). It puts the old pick
 --                                  back only when the slot held a plain spell; otherwise the chat line says
 --                                  the slot stays changed and to set it back by hand.
---   /fsprobe shaman destroy [n]    DestroyTotem(n) from addon code (default: the first live totem).
+--   /fscheck shaman destroy [n]    DestroyTotem(n) from addon code (default: the first live totem).
 -- Rules this section keeps: never register the combat log event (protected on Forever); a secret is described,
 -- never compared, branched on or stored; Blizzard's totem frames and buttons are only read.
 
@@ -3851,9 +3851,9 @@ SH.FOLLOW_SECONDS = 3
 SH.FOLLOW_CAP = 8
 SH.NOTRUN_CAP = 40
 SH.RUN_CAP = 6
-SH.STRIP_NAME = "FSProbeShamanStrip"
+SH.STRIP_NAME = "FSCheckShamanStrip"
 SH.STRIP_Y = -190             -- centre y from the screen centre: the strip must stay above Layout.lua's tcast (top -286)
-SH.BUTTON_PREFIX = "FSProbeShamanBtn"
+SH.BUTTON_PREFIX = "FSCheckShamanBtn"
 SH.PLAYER_SET = { player = true }
 SH.CONSTANTS = { "FIRE_TOTEM_SLOT", "EARTH_TOTEM_SLOT", "WATER_TOTEM_SLOT", "AIR_TOTEM_SLOT", "MAX_TOTEMS" }
 SH.DURATION_METHODS = {
@@ -3928,18 +3928,18 @@ SH.EVENTS = {
 }
 
 SH.lastClick = nil    -- the click entry still collecting the events that follow it
-SH.strip = nil        -- { host, buttons }: the test strip frames (frames are never destroyed, so they are reused)
+SH.strip = nil        -- { host, buttons }: the totem button row frames (frames are never destroyed, so they are reused)
 SH.stripShown = false -- the strip is up (shown, or only faded in combat) and not yet really hidden
 SH.hidePending = false -- a real hide waits for PLAYER_REGEN_ENABLED
-SH.regenFrame = nil   -- the plain frame that waits for it (apart from the probe's event frame, which stop unregisters)
+SH.regenFrame = nil   -- the plain frame that waits for it (apart from the check's event frame, which stop unregisters)
 
 CP.Install(SH, {
     key = "shaman", label = "shaman",
     logCap = 50, logCaps = { totem = 100 },
     logSeconds = 1800, combatDelay = 4, oocDelay = 2, sweepKey = "shCooldown",
-    logsText = "PLAYER_TOTEM_UPDATE readouts, casts, native bar updates, test strip clicks",
-    todo = "Drop a totem, dismiss it, cast a few spells. /fsprobe shaman buttons (out of combat) shows the test strip; "
-        .. "/fsprobe shaman setslot is the combat test, run it yourself in a fight.",
+    logsText = "PLAYER_TOTEM_UPDATE readouts, casts, native bar updates, totem button clicks",
+    todo = "Drop a totem, dismiss it, cast a few spells. /fscheck shaman buttons (out of combat) shows the totem buttons; "
+        .. "/fscheck shaman setslot is the combat test, run it yourself in a fight.",
 })
 
 SH.PartGenericSecrets = SH.PartSecrets   -- the installed one; SH.PartSecrets below adds the totem spell predicates
@@ -3949,7 +3949,7 @@ function SH.ResetState()
 end
 
 -- A start that replaces the saved record keeps the manual runs (setslot, destroy) and the strip record: they are
--- written without starting the probe, and a fresh snapshot of the totems says nothing about them. Merged (old
+-- written without starting the check, and a fresh snapshot of the totems says nothing about them. Merged (old
 -- runs first, then any the fresh record already holds) and capped.
 function SH.CarryOver(old, fresh)
     for _, name in ipairs({ "setslot", "destroy" }) do
@@ -4307,12 +4307,12 @@ function SH.Finish(snap, sec)
     sec.activeTotems = totems.active
     local unreadable = type(totems.unreadable) == "number" and totems.unreadable or 0
     if unreadable > 0 then
-        note(unreadable .. " of " .. SH.SLOT_COUNT .. " totem slots unreadable (secret): GetTotemInfo answered a secret value there, "
+        note(unreadable .. " of " .. SH.SLOT_COUNT .. " totem slots unreadable (secret): GetTotemInfo gave no readable value there, "
             .. "so whether a totem was down in them is unknown (" .. tostring(totems.active) .. " live, " .. tostring(totems.empty)
             .. " plain empty); the duration object and the other reads on those slots are described, not judged")
     elseif totems.active == 0 then
         note("no totem was down: GetTotemInfo, GetTotemTimeLeft and GetTotemDuration were read on empty slots only; "
-            .. "drop one and run /fsprobe shaman again (also in combat) to read a live totem")
+            .. "drop one and run /fscheck shaman again (also in combat) to read a live totem")
     end
     local known, unknown = {}, {}
     local cooldowns = type(snap.cooldowns) == "table" and snap.cooldowns or {}
@@ -4361,8 +4361,8 @@ function SH.Finish(snap, sec)
     for label, state in pairs(type(snap.apis) == "table" and snap.apis or {}) do
         if state == "absent" then note("api absent on this client: " .. label) end
     end
-    note("manual only: /fsprobe shaman setslot (SetMultiCastSpell in combat), /fsprobe shaman destroy [slot] "
-        .. "(DestroyTotem from addon code), /fsprobe shaman buttons (secure dismiss, castsequence and Totemic Recall clicks)")
+    note("manual only: /fscheck shaman setslot (SetMultiCastSpell in combat), /fscheck shaman destroy [slot] "
+        .. "(DestroyTotem from addon code), /fscheck shaman buttons (secure dismiss, castsequence and Totemic Recall clicks)")
     sec.notRun = notRun
     sec.notRunCount = #notRun
 end
@@ -4573,7 +4573,7 @@ function SH.LiveSlot()
     return nil
 end
 
--- P11. DestroyTotem from addon code (the secure route is the test strip).
+-- P11. DestroyTotem from addon code (the secure route is the totem button row).
 function SH.Destroy(arg)
     state.canTest = Invoke(false, Api("issecretvalue"), 0).ok == true
     local slot = tonumber(arg)
@@ -4605,7 +4605,7 @@ function SH.Destroy(arg)
         .. ". Record: shaman.destroy.runs[" .. #SH.Rec().destroy.runs .. "]")
 end
 
--- The temporary test strip: secure buttons, out of combat only ------------------------------------------
+-- The temporary totem button row: secure buttons, out of combat only ------------------------------------------
 
 -- True when the player knows the spell: the name resolves to an id and nothing refuses it.
 function SH.IsKnown(name)
@@ -4702,7 +4702,7 @@ function SH.BuildStrip()
         ground:SetColorTexture(0.1, 0.02, 0.18, 0.85)
         local title = host:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         title:SetPoint("TOP", host, "TOP", 0, -5)
-        title:SetText("FSPROBE SHAMAN TEST STRIP (temporary)")
+        title:SetText("SHAMAN TOTEM BUTTONS (temporary)")
     end
     local strip = { host = host, buttons = {} }
     for i = 1, #SH.BUTTONS do
@@ -4759,9 +4759,9 @@ function SH.ButtonsOn()
         Say("shaman buttons: could not build the strip: " .. ErrText(err))
         return
     end
-    Say("shaman: TEST STRIP (temporary) is below screen centre: dismiss (left slot 1, right slot 2, shift-left 3, shift-right 4), "
+    Say("shaman: TOTEM BUTTONS (temporary) are below screen centre: dismiss (left slot 1, right slot 2, shift-left 3, shift-right 4), "
         .. "castsequence, recall. Click each out of combat and in combat. Clicks are logged in shaman.logs.click. "
-        .. "/fsprobe shaman buttons off hides it (out of combat)")
+        .. "/fscheck shaman buttons off hides it (out of combat)")
 end
 
 -- The real hide: host hidden and the secure buttons' mouse off. Out of combat only (both are protected in combat);
@@ -4799,7 +4799,7 @@ function SH.CancelPendingHide()
     CallOn(SH.regenFrame, "UnregisterEvent", "PLAYER_REGEN_ENABLED")
 end
 
--- Queues the real hide for the end of combat. Own plain frame: the probe's event frame is unregistered by stop.
+-- Queues the real hide for the end of combat. Own plain frame: the check's event frame is unregistered by stop.
 -- Returns false when the wait could not be set up.
 function SH.QueueHide()
     if not SH.regenFrame then
@@ -4833,7 +4833,7 @@ function SH.HideStrip(quiet)
         end
         Say("shaman buttons off: in combat the strip is only faded (alpha 0). The buttons stay clickable, invisible, until combat ends; "
             .. (queued and "then they hide by themselves."
-                or "then run /fsprobe shaman buttons off to hide them (the automatic hide could not be set up)."))
+                or "then run /fscheck shaman buttons off to hide them (the automatic hide could not be set up)."))
         return
     end
     SH.RealHide()
@@ -4853,9 +4853,9 @@ function SH.ButtonsOff()
 end
 
 -------------------------------------------------------------------------------
--- /fsprobe hot: can an engine AuraContainer per party row show the player's own Renew?
+-- /fscheck hot: can an engine AuraContainer per party row show the player's own Renew?
 -------------------------------------------------------------------------------
--- `/fsprobe hot` (out of combat only) builds one CustomAuraContainerTemplate per token that
+-- `/fscheck hot` (out of combat only) builds one CustomAuraContainerTemplate per token that
 -- exists (player, party1..party4) and lays them out as a labelled debug strip above screen
 -- centre. Each container has the three shapes a party-row HoT timer could use:
 --   slot   AddAuraSlot "HELPFUL|PLAYER", candidateFilters.includeSpellIDs = the Renew rank ids
@@ -4894,12 +4894,12 @@ end
 -- ones: FrameCreationBatchSize = 10 pre-creates 10 group buttons at once (so initCalls.group is
 -- 10 in game, not 4). Only `shown` and `unk` are signal.
 -- Nothing is built, enabled, shown or hidden in combat (those calls are protected there);
--- `/fsprobe hot off` in combat only sets alpha 0 on the containers and hides the plain holder
+-- `/fscheck hot off` in combat only sets alpha 0 on the containers and hides the plain holder
 -- (the unprotected frame), then says to repeat it later.
 -- Source for the option names: Blizzard_CustomAuraContainer.lua (ValidateCandidateFilters:
 -- includeSpellIDs is a set and "only permitted for helpful buffs on assistable units";
 -- maxDuration is derived from the aura's MAX duration and hides permanent auras).
--- Results: ForeverSTUwaveDB.fsprobe.hot (see HP.NewRow for the shape).
+-- Results: ForeverSTUwaveDB.fscheck.hot (see HP.NewRow for the shape).
 
 local HP = {}
 
@@ -5275,7 +5275,7 @@ function HP.BuildToken(token, index, ids, row)
     GS.Step(c.holder, "Show")
     local container = c.container
     if container == nil then
-        local ok, result = pcall(CreateFrame, "AuraContainer", "FSProbeHot_" .. token, UIParent, TEMPLATE)
+        local ok, result = pcall(CreateFrame, "AuraContainer", "FSCheckHot_" .. token, UIParent, TEMPLATE)
         row.steps.createFrame = ok and "ok" or ErrText(result)
         if not ok then
             row.status = "create failed"
@@ -5456,7 +5456,7 @@ function HP.Finish(live, reason)
     live.rec.meta.samples = live.n
     live.rec.summary = HP.Summary(live)
     Say("hot " .. reason .. " (" .. live.n .. " samples): " .. live.rec.summary
-        .. ". /reload to save; /fsprobe hot off removes the strip")
+        .. ". /reload to save; /fscheck hot off removes the strip")
 end
 
 function HP.Tick(run)
@@ -5481,7 +5481,7 @@ function HP.Start()
     end
     local old = HP.live
     if old and old.sampling then
-        Say("hot: already sampling (" .. old.n .. " of " .. (HP.SECONDS / HP.PERIOD + 1) .. "); /fsprobe hot off stops it")
+        Say("hot: already sampling (" .. old.n .. " of " .. (HP.SECONDS / HP.PERIOD + 1) .. "); /fscheck hot off stops it")
         return
     end
     HP.run = HP.run + 1
@@ -5531,7 +5531,7 @@ function HP.Start()
     end
     meta.status = "built " .. built
     if built == 0 then
-        Say("hot: no container built, see ForeverSTUwaveDB.fsprobe.hot (/reload to save)")
+        Say("hot: no container built, see ForeverSTUwaveDB.fscheck.hot (/reload to save)")
         return
     end
     live.sampling = true
@@ -5544,7 +5544,7 @@ function HP.Start()
     HP.Tick(HP.run)
 end
 
--- quiet: the explicit /fsprobe reset path, which prints its own line.
+-- quiet: the explicit /fscheck reset path, which prints its own line.
 function HP.Off(quiet)
     local live = HP.live
     if live and live.sampling then HP.Finish(live, "stopped") end
@@ -5562,18 +5562,18 @@ function HP.Off(quiet)
     end
     if quiet then return end
     if combat then
-        Say("hot off: alpha 0 on the containers, plain holder hidden; the containers stay enabled until you run /fsprobe hot off out of combat")
+        Say("hot off: alpha 0 on the containers, plain holder hidden; the containers stay enabled until you run /fscheck hot off out of combat")
     else
         Say("hot off: strip removed")
     end
 end
 
 -------------------------------------------------------------------------------
--- /fsprobe
+-- /fscheck
 -------------------------------------------------------------------------------
 
--- keepGunsight: the main run re-arming must not wipe a saved `/fsprobe gunsight`, `/fsprobe hot`,
--- `/fsprobe priest` or `/fsprobe shaman` result or disarm their pending parts; only an explicit `/fsprobe reset` clears those.
+-- keepGunsight: the main run re-arming must not wipe a saved `/fscheck gunsight`, `/fscheck hot`,
+-- `/fscheck priest` or `/fscheck shaman` result or disarm their pending parts; only an explicit `/fscheck reset` clears those.
 local function Reset(keepGunsight)
     state.runId = state.runId + 1
     state.armed = false
@@ -5616,7 +5616,7 @@ local function Reset(keepGunsight)
     end
     if not keepGunsight then
         -- First, and on its own: a failure in the gunsight or hot teardown must not leave the priest
-        -- probe's events registered.
+        -- check's events registered.
         PP.Stop("reset", true)
         SH.Stop("reset", true)
         GS.Disarm()
@@ -5706,7 +5706,7 @@ local function Command(msg)
     elseif state.armed then
         Say(StatusLine())
     elseif SavedResults() then
-        Say("results exist, /reload to save or /fsprobe reset first")
+        Say("results exist, /reload to save or /fscheck reset first")
     elseif LockedDown(false) then
         -- The ooc snapshot would be taken in combat and mislabelled. If the check
         -- itself fails, arm anyway: the errors are data.
@@ -5716,10 +5716,10 @@ local function Command(msg)
     end
 end
 
-SLASH_FSPROBE1 = "/fsprobe"
-SlashCmdList["FSPROBE"] = function(msg)
+SLASH_FSCHECK1 = "/fscheck"
+SlashCmdList["FSCHECK"] = function(msg)
     local ok, err = pcall(Command, msg)
     if not ok then
-        pcall(print, "fsprobe: error (not fatal): " .. ErrText(err))
+        pcall(print, "fscheck: error (not fatal): " .. ErrText(err))
     end
 end

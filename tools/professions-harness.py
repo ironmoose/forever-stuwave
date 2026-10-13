@@ -214,7 +214,7 @@ function(src, opts, configSrc)
     if opts.chatPlace then
         FS.Chat = { PlaceTermBarTooltip = function(button) __placed = button end }
     end
-    FS.PanelSkins = { RegisterRecon = function() end }
+    FS.PanelSkins = { RegisterInspect = function() end }
     local Theme = {}
     for _, name in ipairs({ "ApplyMono", "AddOuterGlow", "AddRoundedFill", "AddGradientBorder" }) do
         Theme[name] = function() end

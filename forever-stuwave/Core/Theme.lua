@@ -383,7 +383,7 @@ Theme.SCANLINE_ALPHA = 0.25   -- lower than the chat terminal's .4: a panel is
 Theme.PANEL_HEADER_H = 18     -- terminal title band, sized to the mono 10pt label
 
 -- Both methods were confirmed present on this client (interface 16001) by live
--- probe, along with Enum.UITextureSliceMode.Stretched == 0 -- feature-detected
+-- check, along with Enum.UITextureSliceMode.Stretched == 0 -- feature-detected
 -- anyway, so a client without them degrades to a plain stretched rounded rect
 -- (slightly soft corners) rather than erroring.
 --

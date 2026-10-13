@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Runs the real FSProbe.lua headless against a mock WoW API.
+"""Runs the real FSCheck.lua headless against a mock WoW API.
 
-FSProbe.lua is the opt-in `/fsprobe` secret-value probe. It runs in the middle of a play
+FSCheck.lua is the opt-in `/fscheck` secret-value check. It runs in the middle of a play
 session, so the things worth pinning are the safety properties, not the data it collects:
 
   * nothing runs before the command: loading the file calls no API, creates no frame,
@@ -16,14 +16,14 @@ session, so the things worth pinning are the safety properties, not the data it 
   * every event is unregistered when the parts finish, no frame runs OnUpdate;
   * the combat snapshot waits for the delay and re-checks InCombatLockdown, the cast
     recorder stops at 10, the AuraContainer test builds, shows for 30s and hides;
-  * the class probes (priest, shaman; one shared core) keep the same properties, and the shaman probe
+  * the class checks (priest, shaman; one shared core) keep the same properties, and the shaman check
     additionally runs nothing protected by itself: SetMultiCastSpell, DestroyTotem and the secure test
     strip exist only behind their explicit subcommands (pinned by text and by call counters), and
     Blizzard's own totem frames are only read.
 
 The mock is NOT the real client. Run:
 
-    python3 tools/fsprobe-harness.py
+    python3 tools/fscheck-harness.py
 
 Exit 0 = every check passed.
 """
@@ -42,7 +42,7 @@ except ImportError:
     sys.exit("lupa is missing; see parse-gate.py for the venv recipe.")
 
 HERE = Path(__file__).resolve().parent
-SOURCE = HERE.parent / "forever-stuwave" / "Modules/Diagnostics/FSProbe.lua"
+SOURCE = HERE.parent / "forever-stuwave" / "Modules/Diagnostics/FSCheck.lua"
 LAYOUT = HERE.parent / "forever-stuwave" / "Core" / "Layout.lua"
 
 
@@ -50,7 +50,7 @@ def tcast_top() -> float:
     """Top edge (UI units from screen centre) of our target cast bar, from Layout.lua: its centre y plus half its height."""
     m = re.search(r"^\s*tcast\s*=\s*\{[^}]*\by\s*=\s*(-?\d+)[^}]*\bh\s*=\s*(\d+)", LAYOUT.read_text(encoding="utf-8"), re.M)
     if not m:
-        raise SystemExit("Layout.lua: no tcast entry to place the shaman test strip against")
+        raise SystemExit("Layout.lua: no tcast entry to place the shaman totem button row against")
     return int(m.group(1)) + int(m.group(2)) / 2
 
 
@@ -125,7 +125,7 @@ end
 function date() return "2026-10-01 12:00:00" end
 SlashCmdList = {}
 
--- Frames: a catch-all that records calls, plus the few methods the probe depends on.
+-- Frames: a catch-all that records calls, plus the few methods the check depends on.
 local FrameM = {}
 local FrameMT = {}
 FrameMT.__index = function(self, k)
@@ -186,7 +186,7 @@ function FrameM.HookScript(self, k, fn)
     self._hookScripts[k] = fn
 end
 
--- AuraContainer: strict, only the methods the probe is allowed to call.
+-- AuraContainer: strict, only the methods the check is allowed to call.
 local ACM = {}
 for _, n in ipairs({ "SetSize", "SetPoint", "SetAuraGroupLayout", "SetFlowLayoutAnchorPoint",
                      "SetFlowLayoutGrowthDirection", "SetUnit", "SetEnabled", "Show", "Hide", "AddAuraGroup",
@@ -364,7 +364,7 @@ function said(sub)
     return false
 end
 function runCmd(arg)
-    local ok, err = pcall(SlashCmdList.FSPROBE, arg)
+    local ok, err = pcall(SlashCmdList.FSCHECK, arg)
     check(ok, "slash command threw: " .. tostring(err))
 end
 function fire(event, ...)
@@ -410,7 +410,7 @@ function complete()
     advance(4)
     casts(10)
     advance(30)
-    check(ForeverSTUwaveDB.fsprobe.meta.status == "done", "run did not finish")
+    check(ForeverSTUwaveDB.fscheck.meta.status == "done", "run did not finish")
     __combat = false
 end
 function KNOWN_ONLY(id)
@@ -421,15 +421,15 @@ function noOnUpdate()
     for _, f in ipairs(__frames) do check(f._scripts.OnUpdate == nil, "an OnUpdate is set") end
 end
 -- Every frame, texture and line the mock handed out is hidden (the host stays shown but is
--- never explicitly shown, so a leftover Show is a probe test object left on screen).
+-- never explicitly shown, so a leftover Show is a check test object left on screen).
 function allHidden()
     for _, f in ipairs(__allFrames) do
-        -- Buttons are the engine's own (it shows them); everything else is a probe test object.
+        -- Buttons are the engine's own (it shows them); everything else is a check test object.
         if f ~= UIParent and f._kind ~= "Button" then check(not f._shown, "a " .. tostring(f._kind) .. " test object is still shown") end
     end
 end
 -- A container whose AddAuraGroup builds `n` buttons through the group's initializeFrame (as the
--- engine does), with the few extra methods the AuraContainer probe reads. Returns the buttons.
+-- engine does), with the few extra methods the AuraContainer check reads. Returns the buttons.
 function gsMockContainer(n)
     local buttons = {}
     local dur = { kind = "buttonDuration" }
@@ -473,7 +473,7 @@ function engineCalls(duration)
     end
     return cooldowns, bars
 end
--- `/fsprobe hot`: AddAuraSlot / AddAuraGroup build buttons through initializeFrame as the engine does,
+-- `/fscheck hot`: AddAuraSlot / AddAuraGroup build buttons through initializeFrame as the engine does,
 -- GetChildren lists the slot button and the group buttons. Only party1 and the player exist.
 function hotMock(groupButtons)
     UnitExists = function(token) return token == "player" or token == "party1" end
@@ -587,7 +587,7 @@ function hotMock(groupButtons)
         self._groupKids = groupButtons
     end
 end
--- `/fsprobe priest`: the extra APIs the priest section reads (the default mock lacks them, which is itself a
+-- `/fscheck priest`: the extra APIs the priest section reads (the default mock lacks them, which is itself a
 -- test: a missing API must record "absent"). Plain mode answers like a healthy client, secret mode with
 -- sentinels, throw mode raises. The player knows Power Word: Shield, Smite and Shoot only.
 function priestMock()
@@ -656,7 +656,7 @@ function priestMock()
         return { SetType = function() end, AddPoint = function() end }
     end
 end
--- The priest probe's own event frame: the one that registered UNIT_POWER_UPDATE.
+-- The priest check's own event frame: the one that registered UNIT_POWER_UPDATE.
 function pframe()
     for _, f in ipairs(__frames) do
         if f._scripts.OnEvent and f._events.UNIT_POWER_UPDATE then return f end
@@ -674,11 +674,11 @@ function pull(dt)
     advance(dt or 2)
 end
 
--- `/fsprobe shaman`. __totem[slot] = { haveTotem, name, startTime, duration, icon, modRate, spellID } is a live
+-- `/fscheck shaman`. __totem[slot] = { haveTotem, name, startTime, duration, icon, modRate, spellID } is a live
 -- totem; an empty slot answers false and zeros. The player knows the ids in SHKNOWN (default: Stoneskin Totem
 -- only, a level 4 shaman). __mcSpells[slot] is what GetMultiCastTotemSpells answers, __actions[id] the spell
 -- slotted on a multicast action id; SetMultiCastSpell and DestroyTotem are recorded in __setCalls / __destroyCalls
--- and change that state, so the probe can be shown to call them only when told to.
+-- and change that state, so the check can be shown to call them only when told to.
 SHNAMES = { [8071] = "Stoneskin Totem", [2484] = "Earthbind Totem", [3599] = "Searing Totem", [5394] = "Healing Stream Totem",
     [66842] = "Call of the Elements", [66843] = "Call of the Ancestors", [36936] = "Totemic Recall" }
 local function durObj(left)
@@ -718,7 +718,7 @@ function nativeFrame(name, l, b, w, h, shown)
     f.GetName = function() return name end
     return f
 end
--- Blizzard's totem frames. Whatever the probe does to them (any call that changes a frame) is counted.
+-- Blizzard's totem frames. Whatever the check does to them (any call that changes a frame) is counted.
 SH_BLIZZ = { "MultiCastActionBarFrame", "MultiCastSlotButton1", "MultiCastSlotButton2", "MultiCastSummonSpellButton",
     "MultiCastFlyoutFrame", "TotemFrame" }
 function shamanFrames(overlap)
@@ -811,7 +811,7 @@ function shamanMock(known)
     SHAMAN_TOTEM_PRIORITIES = { 2, 1, 3, 4 }
     ERR_SPELL_FAILED_TOTEMS = "Requires a totem."
 end
--- The shaman probe's own event frame: the one that registered PLAYER_TOTEM_UPDATE.
+-- The shaman check's own event frame: the one that registered PLAYER_TOTEM_UPDATE.
 function sframe()
     for _, f in ipairs(__frames) do
         if f._scripts.OnEvent and f._events.PLAYER_TOTEM_UPDATE then return f end
@@ -823,7 +823,7 @@ function sfire(event, ...)
     local ok, err = pcall(f._scripts.OnEvent, f, event, ...)
     check(ok, "shaman handler threw on " .. event .. ": " .. tostring(err))
 end
--- The frame that waits for PLAYER_REGEN_ENABLED to finish hiding the test strip (not the probe's own event frame).
+-- The frame that waits for PLAYER_REGEN_ENABLED to finish hiding the totem button row (not the check's own event frame).
 function regenFrame()
     for _, f in ipairs(__frames) do
         if f._scripts.OnEvent and f._events.PLAYER_REGEN_ENABLED and not f._events.PLAYER_TOTEM_UPDATE then return f end
@@ -835,11 +835,11 @@ function fireRegen()
     local ok, err = pcall(f._scripts.OnEvent, f, "PLAYER_REGEN_ENABLED")
     check(ok, "regen handler threw: " .. tostring(err))
 end
--- Counts of every call that could change the test strip or its secure buttons, and which ones moved between two reads.
+-- Counts of every call that could change the totem button row or its secure buttons, and which ones moved between two reads.
 local STRIP_KEYS = { "Show", "Hide", "SetPoint", "EnableMouse", "SetAttribute", "SetSize", "RegisterForClicks", "SetAlpha", "SetParent" }
 function stripCalls()
     local out = {}
-    local list = { FSProbeShamanStrip, FSProbeShamanBtn1, FSProbeShamanBtn2, FSProbeShamanBtn3 }
+    local list = { FSCheckShamanStrip, FSCheckShamanBtn1, FSCheckShamanBtn2, FSCheckShamanBtn3 }
     for i = 1, 4 do
         for _, k in ipairs(STRIP_KEYS) do out[(i - 1) .. ":" .. k] = list[i] and list[i]._calls[k] or 0 end
     end
@@ -882,12 +882,12 @@ function scan(root)
             check(rawget(t, "value") == nil, "value stored beside isSecret=true at " .. path)
         end
     end
-    visit(root, "fsprobe")
+    visit(root, "fscheck")
     return stats
 end
 """
 
-# Each case: (name, mode, lua body). The mock is booted fresh per case and FSProbe.lua loaded.
+# Each case: (name, mode, lua body). The mock is booted fresh per case and FSCheck.lua loaded.
 CASES: list[tuple[str, str, str]] = []
 
 
@@ -904,18 +904,18 @@ check(__apiCalls == 0, "an API was called at load: " .. __apiCalls)
 check(#__frames == 0, "a frame was created at load")
 check(#__timers == 0, "a timer was scheduled at load")
 check(ForeverSTUwaveDB == nil, "SavedVariables touched at load")
-check(SLASH_FSPROBE1 == "/fsprobe", "slash command not registered")
-check(type(SlashCmdList.FSPROBE) == "function", "slash handler missing")
+check(SLASH_FSCHECK1 == "/fscheck", "slash command not registered")
+check(type(SlashCmdList.FSCHECK) == "function", "slash handler missing")
 -- help and a bad argument must not arm anything either
 runCmd("help")
 runCmd("nonsense")
 check(__apiCalls == 0 and #__frames == 0 and #__timers == 0, "help armed something")
-check(said("/fsprobe reset"), "usage text missing")
+check(said("/fscheck reset"), "usage text missing")
 """)
 
 case("full_run_in_plain_mode")(r"""
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 check(db and db.ooc, "ooc snapshot missing")
 check(said("snapshot saved (ooc)"), "arm line missing")
 local f = evframe()
@@ -974,7 +974,7 @@ check(db.auracontainer.initCalls == 1 and db.auracontainer.initError == nil, "in
 local calls = __apiCalls
 runCmd("")
 check(said("armed."), "status line missing")
-check(__apiCalls == calls, "status re-ran the probe")
+check(__apiCalls == calls, "status re-ran the check")
 
 -- combat: the snapshot waits 4s and re-checks the lockdown
 __combat = true
@@ -996,7 +996,7 @@ check(said("combat snapshot saved"), "combat line missing")
 check(f._events.PLAYER_REGEN_DISABLED == nil, "REGEN still registered")
 check(ac._shown == true and ac._args.SetUnit[1] == "target" and ac._args.SetEnabled[1] == true, "container not shown on target")
 local labels = 0
-for _, fr in ipairs(__frames) do if fr._name == "FSProbeAuraLabel" and fr._shown then labels = labels + 1 end end
+for _, fr in ipairs(__frames) do if fr._name == "FSCheckAuraLabel" and fr._shown then labels = labels + 1 end end
 check(labels == 1, "label not shown")
 
 -- channel + casts
@@ -1031,7 +1031,7 @@ scan(db)
 
 -- reset clears results and disarms
 runCmd("reset")
-check(ForeverSTUwaveDB.fsprobe == nil, "reset left results")
+check(ForeverSTUwaveDB.fscheck == nil, "reset left results")
 check(nevents(f) == 0, "reset left events")
 """)
 
@@ -1041,14 +1041,14 @@ __combat = true
 fire("PLAYER_REGEN_DISABLED")
 runCmd("reset")
 advance(60)
-check(ForeverSTUwaveDB.fsprobe == nil, "a stale timer wrote after reset")
+check(ForeverSTUwaveDB.fscheck == nil, "a stale timer wrote after reset")
 check(nevents(evframe()) == 0, "events registered after reset")
 """)
 
 case("every_api_throws", "throw")(r"""
 __issecretThrows = true
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 check(db.ooc, "ooc snapshot missing")
 check(type(db.ooc.env.inCombatLockdown.err) == "string", "error not stored as a string")
 check(db.ooc.env.canTestSecret == false, "canTestSecret should be false")
@@ -1069,7 +1069,7 @@ scan(db)
 case("every_api_throws_but_issecretvalue_works", "throw")(r"""
 __issecretThrows = false
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 local err = db.ooc.env.inCombatLockdown.err
 check(type(err) == "string" and string.find(err, "boom: InCombatLockdown", 1, true), "error text lost: " .. tostring(err))
 __combat = true
@@ -1083,7 +1083,7 @@ scan(db)
 case("even_createframe_throws", "throw")(r"""
 __frameThrows = true
 runCmd("")
-check(ForeverSTUwaveDB.fsprobe.ooc, "ooc snapshot should still be saved")
+check(ForeverSTUwaveDB.fscheck.ooc, "ooc snapshot should still be saved")
 check(said("nothing armed"), "should say nothing is armed")
 runCmd("")  -- not armed, so this is a fresh attempt, still no throw
 runCmd("reset")
@@ -1091,7 +1091,7 @@ runCmd("reset")
 
 case("secret_values_are_never_stored", "secret")(r"""
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 __combat = true
 fire("PLAYER_REGEN_DISABLED")
 advance(4)
@@ -1121,7 +1121,7 @@ check(db.ooc.env.unitClass.r1.isSecret == true and db.ooc.env.unitClass.r1.value
 case("template_absent_is_recorded_and_skipped")(r"""
 __template = false
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 check(db.auracontainer.status == "absent: CustomAuraContainerTemplate", "status " .. tostring(db.auracontainer.status))
 for _, f in ipairs(__frames) do check(f._kind ~= "AuraContainer", "AuraContainer created without the template") end
 __combat = true
@@ -1135,7 +1135,7 @@ check(nevents(evframe()) == 0, "events left registered")
 case("container_creation_failure_is_recorded")(r"""
 __acCreateThrows = true
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 check(db.auracontainer.status == "create failed", "status " .. tostring(db.auracontainer.status))
 check(type(db.auracontainer.steps.createFrame) == "string" and db.auracontainer.steps.createFrame ~= "ok", "create error missing")
 __combat = true
@@ -1151,9 +1151,9 @@ runCmd("")
 local f = evframe()
 check(f._events.UNIT_SPELLCAST_SUCCEEDED == true, "fallback RegisterEvent not used")
 fire("UNIT_SPELLCAST_SUCCEEDED", "party1", "c", 5)
-check(ForeverSTUwaveDB.fsprobe.casts == nil, "a foreign unit was recorded")
+check(ForeverSTUwaveDB.fscheck.casts == nil, "a foreign unit was recorded")
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "c", 5)
-check(#ForeverSTUwaveDB.fsprobe.casts == 1, "player cast not recorded")
+check(#ForeverSTUwaveDB.fscheck.casts == 1, "player cast not recorded")
 """)
 
 
@@ -1199,7 +1199,7 @@ check(b1._calls.SetMouseMotionEnabled == 1 and b1._calls.SetMouseClickEnabled ==
 local b2 = variant(nil, "SetMouseClickEnabled")
 check(b2._calls.SetIcon == 1 and b2._calls.SetDurationCooldown == 1 and b2._calls.SetDurationText == 1, "init stopped at a throwing SetMouseClickEnabled")
 check(b2._calls.SetMouseMotionEnabled == 1 and b2._calls.SetHideTooltipInCombat == 1, "a throwing call stopped the next one")
-local rec = ForeverSTUwaveDB.fsprobe.auracontainer
+local rec = ForeverSTUwaveDB.fscheck.auracontainer
 check(rec.initError == nil and rec.initCalls == 2, "the swallowed failures leaked into initError: " .. tostring(rec.initError))
 """)
 
@@ -1210,7 +1210,7 @@ fire("PLAYER_REGEN_DISABLED")
 check(pendingTimers() == 1, "4s timer not scheduled")
 __lockThrows = true
 advance(4)
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 check(db.combat, "combat snapshot skipped because InCombatLockdown threw (must fail closed)")
 check((db.combat.combatSkips or 0) == 0, "a failed lockdown check was counted as a skip")
 check(type(db.combat.env.inCombatLockdown.err) == "string", "the lockdown error was not recorded in the snapshot")
@@ -1225,34 +1225,34 @@ check(ForeverSTUwaveDB == nil, "an ooc snapshot was taken in combat")
 check(evframe() == nil and #__timers == 0, "armed in combat")
 __combat = false
 runCmd("")
-check(ForeverSTUwaveDB.fsprobe.ooc, "could not arm once out of combat")
+check(ForeverSTUwaveDB.fscheck.ooc, "could not arm once out of combat")
 """)
 
 case("rerun_after_done_keeps_results")(r"""
 complete()
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 runCmd("")
-check(said("results exist, /reload to save or /fsprobe reset first"), "no results-exist line")
-check(ForeverSTUwaveDB.fsprobe == db and db.combat and #db.casts == 10, "results were wiped")
+check(said("results exist, /reload to save or /fscheck reset first"), "no results-exist line")
+check(ForeverSTUwaveDB.fscheck == db and db.combat and #db.casts == 10, "results were wiped")
 check(nevents(evframe()) == 0, "re-armed over finished results")
 """)
 
 case("saved_results_from_an_earlier_session_are_kept")(r"""
-ForeverSTUwaveDB = { fsprobe = { combat = { marker = true } } }
+ForeverSTUwaveDB = { fscheck = { combat = { marker = true } } }
 runCmd("")
-check(said("results exist, /reload to save or /fsprobe reset first"), "no results-exist line")
-check(ForeverSTUwaveDB.fsprobe.combat.marker == true, "saved combat results were wiped")
+check(said("results exist, /reload to save or /fscheck reset first"), "no results-exist line")
+check(ForeverSTUwaveDB.fscheck.combat.marker == true, "saved combat results were wiped")
 check(evframe() == nil, "armed over saved results")
 runCmd("reset")
 runCmd("")
-check(ForeverSTUwaveDB.fsprobe.ooc, "could not re-arm after reset")
+check(ForeverSTUwaveDB.fscheck.ooc, "could not re-arm after reset")
 """)
 
 case("saved_channel_results_alone_are_kept")(r"""
-ForeverSTUwaveDB = { fsprobe = { channel = { { event = "marker" } } } }
+ForeverSTUwaveDB = { fscheck = { channel = { { event = "marker" } } } }
 runCmd("")
-check(said("results exist, /reload to save or /fsprobe reset first"), "a saved channel table was not counted as results")
-check(ForeverSTUwaveDB.fsprobe.channel[1].event == "marker", "saved channel results were wiped")
+check(said("results exist, /reload to save or /fscheck reset first"), "a saved channel table was not counted as results")
+check(ForeverSTUwaveDB.fscheck.channel[1].event == "marker", "saved channel results were wiped")
 check(evframe() == nil, "armed over saved channel results")
 """)
 
@@ -1262,7 +1262,7 @@ local ac
 for _, fr in ipairs(__frames) do if fr._kind == "AuraContainer" then ac = fr end end
 check((ac._calls.Hide or 0) >= 1 and ac._shown == false, "container not hidden at build")
 check(ac._args.SetPoint[1] == "TOPLEFT" and ac._args.SetPoint[4] == -100 and ac._args.SetPoint[5] == 200, "container not anchored TOPLEFT")
-local label = _G.FSProbeAuraLabel
+local label = _G.FSCheckAuraLabel
 check(label and (label._calls.Hide or 0) >= 1 and label._shown == false, "label not hidden at build")
 """)
 
@@ -1278,17 +1278,17 @@ case("rearm_reuses_container_and_label")(r"""
 runCmd("")
 runCmd("reset")
 runCmd("")
-check(ForeverSTUwaveDB.fsprobe.auracontainer.steps.createFrame == "reused", "container not reused")
+check(ForeverSTUwaveDB.fscheck.auracontainer.steps.createFrame == "reused", "container not reused")
 local containers, labels = 0, 0
 for _, fr in ipairs(__frames) do
     if fr._kind == "AuraContainer" then containers = containers + 1 end
-    if fr._name == "FSProbeAuraLabel" then labels = labels + 1 end
+    if fr._name == "FSCheckAuraLabel" then labels = labels + 1 end
 end
 check(containers == 1, "containers built: " .. containers)
 local ac
 for _, fr in ipairs(__frames) do if fr._kind == "AuraContainer" then ac = fr end end
 check(ac._calls.AddAuraGroup == 1, "AddAuraGroup called " .. tostring(ac._calls.AddAuraGroup) .. " times across reset + re-arm")
-check(ForeverSTUwaveDB.fsprobe.auracontainer.steps.addAuraGroup == "reused", "re-arm did not record the group as reused")
+check(ForeverSTUwaveDB.fscheck.auracontainer.steps.addAuraGroup == "reused", "re-arm did not record the group as reused")
 check(labels == 1, "labels built: " .. labels)
 check(nevents(evframe()) == 9, "re-arm did not re-register (REGEN, SUCCEEDED, START, 3 cast ends, 3 channel)")
 """)
@@ -1316,15 +1316,15 @@ local saved = __ACM.UpdateAllAuras
 __ACM.UpdateAllAuras = nil
 fire("PLAYER_TARGET_CHANGED")
 check(ac._calls.SetUnit == 3 and ac._calls.UpdateAllAuras == 1, "retarget without UpdateAllAuras misbehaved")
-check(ForeverSTUwaveDB.fsprobe.meta.lastError == nil and ForeverSTUwaveDB.fsprobe.auracontainer.retargetErrors == nil, "missing UpdateAllAuras was recorded as an error")
+check(ForeverSTUwaveDB.fscheck.meta.lastError == nil and ForeverSTUwaveDB.fscheck.auracontainer.retargetErrors == nil, "missing UpdateAllAuras was recorded as an error")
 __ACM.UpdateAllAuras = saved
 -- a present UpdateAllAuras that throws must not escape the handler, but is counted
 __ACM.UpdateAllAuras = function() error("boom") end
 fire("PLAYER_TARGET_CHANGED")
 check(ac._calls.SetUnit == 4, "retarget handler did not complete when UpdateAllAuras threw")
-check(ForeverSTUwaveDB.fsprobe.meta.lastError == nil, "a throwing UpdateAllAuras leaked into lastError")
-check(ForeverSTUwaveDB.fsprobe.auracontainer.retargets == 3, "retarget not recorded when UpdateAllAuras threw")
-check(ForeverSTUwaveDB.fsprobe.auracontainer.retargetErrors == 1, "a throwing UpdateAllAuras was not counted in retargetErrors")
+check(ForeverSTUwaveDB.fscheck.meta.lastError == nil, "a throwing UpdateAllAuras leaked into lastError")
+check(ForeverSTUwaveDB.fscheck.auracontainer.retargets == 3, "retarget not recorded when UpdateAllAuras threw")
+check(ForeverSTUwaveDB.fscheck.auracontainer.retargetErrors == 1, "a throwing UpdateAllAuras was not counted in retargetErrors")
 __ACM.UpdateAllAuras = saved
 advance(30)
 check(f._events.PLAYER_TARGET_CHANGED == nil, "target event left registered after the row ended")
@@ -1355,7 +1355,7 @@ local function checkWl(wl, label)
     end
 end
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 checkWl(db.ooc.whitelist, "ooc")
 __combat = true
 fire("PLAYER_REGEN_DISABLED")
@@ -1366,7 +1366,7 @@ runCmd("reset")
 __combat = false
 C_Secrets.GetSpellCastSecrecy = nil
 runCmd("")
-local wl = ForeverSTUwaveDB.fsprobe.ooc.whitelist
+local wl = ForeverSTUwaveDB.fscheck.ooc.whitelist
 check(wl.s21562.cast.exists == false and wl.s21562.aura.r1.value == 0, "absent cast secrecy not recorded as absent")
 """
 )
@@ -1377,7 +1377,7 @@ local IDS = """
     + WL_IDS
     + r"""
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 __combat = true
 fire("PLAYER_REGEN_DISABLED")
 advance(4)
@@ -1404,7 +1404,7 @@ fire("UNIT_AURA", "player", info)
 __combat = false
 fire("UNIT_AURA", "target", { isFullUpdate = true })
 fire("UNIT_AURA", "party1", info)
-local a = ForeverSTUwaveDB.fsprobe.unitAura
+local a = ForeverSTUwaveDB.fscheck.unitAura
 check(a and #a == 2, "foreign unit recorded or events missing: " .. tostring(a and #a))
 local r1 = a[1]
 check(r1.event == "UNIT_AURA" and r1.unit.value == "player" and r1.unit.isSecret == false, "unit arg")
@@ -1430,7 +1430,7 @@ advance(4)
 casts(10)
 advance(30)
 check(nevents(x) == 0, "extra frame events left registered after done")
-scan(ForeverSTUwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fscheck)
 """
 )
 
@@ -1439,7 +1439,7 @@ case("a2_ooc_events_cannot_spend_the_combat_budget")(
 runCmd("")
 local x = xframe()
 for i = 1, 40 do fire("UNIT_AURA", "player", { isFullUpdate = false }) end
-local a = ForeverSTUwaveDB.fsprobe.unitAura
+local a = ForeverSTUwaveDB.fscheck.unitAura
 check(#a == 5, "ooc events recorded: " .. #a)
 __combat = true
 fire("UNIT_AURA", "target", { isFullUpdate = false })
@@ -1452,7 +1452,7 @@ check(#a == 15, "total cap: " .. #a)
 case("a2_table_secret_by_issecrettable_only_is_never_indexed")(
     r"""
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 -- issecretvalue says plain, issecrettable says secret: indexing it would raise SECRET_OP.
 check(issecretvalue(STT) == false and issecrettable(STT) == true, "mock sentinel is wrong")
 fire("UNIT_AURA", "player", STT)
@@ -1467,7 +1467,7 @@ scan(db)
 case("a2_secret_payload_table_is_never_indexed", "secret")(
     r"""
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 -- Every operation on ST raises SECRET_OP, and a swallowed one would leave that text in the saved errors.
 fire("UNIT_AURA", SS, ST)
 fire("UNIT_AURA", "player", ST)
@@ -1495,7 +1495,7 @@ local x = xframe()
 local SHOW, HIDE = "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW", "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE"
 check(x._events[SHOW] == true and x._events[HIDE] == true, "glow events not registered")
 for i = 1, 25 do fire(i % 2 == 1 and SHOW or HIDE, 17941) end
-local pg = ForeverSTUwaveDB.fsprobe.procGlow
+local pg = ForeverSTUwaveDB.fscheck.procGlow
 check(#pg == 20, "event cap: " .. #pg)
 check(pg[1].event == SHOW and pg[2].event == HIDE, "event names")
 check(pg[1].spellID.value == 17941 and pg[1].spellID.isSecret == false, "plain spellID kept")
@@ -1505,7 +1505,7 @@ check(x._events[SHOW] == nil and x._events[HIDE] == nil, "glow events left regis
 __combat = true
 fire("PLAYER_REGEN_DISABLED")
 advance(4)
-local o = ForeverSTUwaveDB.fsprobe.combat.spellOverlay
+local o = ForeverSTUwaveDB.fscheck.combat.spellOverlay
 check(o.shadowTranceOverlayed.r1.type == "boolean" and o.shadowTranceOverlayed.r1.value == false, "17941 overlay not in the combat snapshot")
 check(o.shadowBoltOverlayed.r1.type == "boolean", "686 overlay missing")
 """
@@ -1515,9 +1515,9 @@ case("p1_secret_glow_spellid_is_not_stored", "secret")(
     r"""
 runCmd("")
 fire("SPELL_ACTIVATION_OVERLAY_GLOW_SHOW", SN)
-local pg = ForeverSTUwaveDB.fsprobe.procGlow
+local pg = ForeverSTUwaveDB.fscheck.procGlow
 check(#pg == 1 and pg[1].spellID.isSecret == true and pg[1].spellID.type == "number" and pg[1].spellID.value == nil, "secret spellID stored")
-scan(ForeverSTUwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fscheck)
 """
 )
 
@@ -1530,7 +1530,7 @@ runCmd("")
 __combat = true
 fire("PLAYER_REGEN_DISABLED")
 advance(4)
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 for _, id in ipairs({ 61304, 686, 585 }) do
     local e = db.combat.gcd["s" .. id]
     check(e and e.cooldown.fields.isActive.type == "boolean" and e.cooldown.fields.startTime.isSecret == false, "gcd fields " .. id)
@@ -1541,53 +1541,53 @@ for _, id in ipairs({ 61304, 686, 585 }) do
         "gcd section stored no values for " .. id)
     check(f.modRate.value == nil and f.isEnabled.value == nil, "gcd section kept a field it should not")
 end
--- 585 and 686 are known in the mock, in that order. A probe never reads the spell just cast
--- (its own cooldown would pollute the read), so a Shadow Bolt cast probes Smite ...
+-- 585 and 686 are known in the mock, in that order. A check never reads the spell just cast
+-- (its own cooldown would pollute the read), so a Shadow Bolt cast checks Smite ...
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 686)
 local g = db.casts[1].gcd
-check(g.spellId == 585, "probe spell: " .. tostring(g.spellId))
+check(g.spellId == 585, "check spell: " .. tostring(g.spellId))
 check(g.isActive.value == true and g.isActive.isSecret == false and g.isOnGCD.value == true, "isActive not captured after the cast")
--- ... and a Smite cast probes Shadow Bolt
+-- ... and a Smite cast checks Shadow Bolt
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-2", 585)
-check(db.casts[2].gcd.spellId == 686 and db.casts[2].gcd.isActive.value == true, "second cast not probed with the other spell")
+check(db.casts[2].gcd.spellId == 686 and db.casts[2].gcd.isActive.value == true, "second cast not checked with the other spell")
 -- the control read of the GCD marker (61304) rides in the same sample
 local c = g.control
 check(c and c.isActive.value == true and c.startTime.value == 1 and c.duration.value == 1.5, "control read missing")
 check(c.time.r1.type == "number" and c.time.r1.value == __now, "control GetTime missing")
 -- castTime comes from GetSpellInfo while it is plain
 check(g.castTime.source == "spellinfo" and g.castTime.value == 2500, "castTime from spell info")
--- a probe spell is never the cast spell, even when it is the only one known
+-- a check spell is never the cast spell, even when it is the only one known
 runCmd("reset")
 __combat = false
 KNOWN_ONLY(686)
 runCmd("")
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-3", 686)
-local g3 = ForeverSTUwaveDB.fsprobe.casts[1].gcd
+local g3 = ForeverSTUwaveDB.fscheck.casts[1].gcd
 check(g3.spellId == nil and g3.skipped ~= nil and g3.control and g3.control.isActive.value == true,
-    "the cast spell was probed, or the control read was lost")
+    "the cast spell was checked, or the control read was lost")
 """
 )
 
-case("gcd_probe_skips_a_spell_that_has_its_own_cooldown")(
+case("gcd_check_skips_a_spell_that_has_its_own_cooldown")(
     r"""
--- Mind Blast (8092) has an 8s cooldown of its own, so it is not a GCD probe candidate
+-- Mind Blast (8092) has an 8s cooldown of its own, so it is not a GCD check candidate
 IsPlayerSpell = function() return true end
 C_SpellBook.IsSpellKnown = IsPlayerSpell
 runCmd("")
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 172)
-check(ForeverSTUwaveDB.fsprobe.casts[1].gcd.spellId == 585, "first candidate: " .. tostring(ForeverSTUwaveDB.fsprobe.casts[1].gcd.spellId))
+check(ForeverSTUwaveDB.fscheck.casts[1].gcd.spellId == 585, "first candidate: " .. tostring(ForeverSTUwaveDB.fscheck.casts[1].gcd.spellId))
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-2", 585)
-check(ForeverSTUwaveDB.fsprobe.casts[2].gcd.spellId == 686, "after a Smite: " .. tostring(ForeverSTUwaveDB.fsprobe.casts[2].gcd.spellId))
+check(ForeverSTUwaveDB.fscheck.casts[2].gcd.spellId == 686, "after a Smite: " .. tostring(ForeverSTUwaveDB.fscheck.casts[2].gcd.spellId))
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-3", 8092)
-local id = ForeverSTUwaveDB.fsprobe.casts[3].gcd.spellId
-check(id == 585, "Mind Blast cast probed " .. tostring(id))
+local id = ForeverSTUwaveDB.fscheck.casts[3].gcd.spellId
+check(id == 585, "Mind Blast cast checked " .. tostring(id))
 """
 )
 
 case("gcd_is_also_sampled_when_a_cast_starts")(
     r"""
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 fire("UNIT_SPELLCAST_START", "party1", "Cast-x", 686)
 check(db.gcdStart == nil, "a foreign unit START was recorded")
 fire("UNIT_SPELLCAST_START", "player", "Cast-1", 686)
@@ -1608,7 +1608,7 @@ case("gcd_cast_time_falls_back_to_start_to_succeeded_elapsed")(
 -- spell info castTime is secret, so the elapsed time between START and SUCCEEDED stands in
 C_Spell.GetSpellInfo = function(a) return { name = "Shadow Bolt", spellID = 686, castTime = SN } end
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 fire("UNIT_SPELLCAST_START", "player", "Cast-1", 686)
 advance(2.5)
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 686)
@@ -1629,7 +1629,7 @@ scan(db)
 case("aura_nested_count_is_not_taken_from_a_table_issecrettable_calls_secret")(
     r"""
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 -- the info table is plain; its nested fields are tables issecretvalue clears but issecrettable
 -- does not (Lua 5.1 ignores __len on a table, so # would silently report 0 instead of raising)
 fire("UNIT_AURA", "player", { isFullUpdate = false, addedAuras = STT, updatedAuraInstanceIDs = STT, removedAuraInstanceIDs = STT })
@@ -1650,7 +1650,7 @@ case("stale_start_does_not_produce_a_bogus_elapsed_cast_time")(
     r"""
 C_Spell.GetSpellInfo = function(a) return { name = "Shadow Bolt", spellID = 686, castTime = SN } end
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 local f = evframe()
 for _, e in ipairs({ "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED" }) do
     check(f._events[e] == "unit:player", e .. " not registered as a player unit event")
@@ -1684,14 +1684,14 @@ scan(db)
 case("note_table_fails_closed_when_issecrettable_throws")(
     r"""
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 __issecrettableThrows = true
 -- the aura info table is plain to issecretvalue, but the secrecy check blew up: count it as secret
 fire("UNIT_AURA", "player", { isFullUpdate = false })
 local r = db.unitAura[1]
 check(r.info.issecrettable == true, "a throwing issecrettable was not recorded as secret")
 check(r.fields == nil, "a table whose secrecy check threw was indexed")
--- the same rule for the cooldown tables of the GCD probe
+-- the same rule for the cooldown tables of the GCD check
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 686)
 local g = db.casts[1].gcd
 check(g.isActive == nil and g.control.isActive == nil, "a cooldown table whose secrecy check threw was indexed")
@@ -1705,7 +1705,7 @@ case("note_table_treats_a_missing_issecrettable_as_plain")(
     r"""
 issecrettable = nil
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 fire("UNIT_AURA", "player", { isFullUpdate = false, addedAuras = { {} } })
 local r = db.unitAura[1]
 check(r.info.issecrettable == nil, "issecrettable recorded without the API")
@@ -1720,7 +1720,7 @@ case("gcd_known_list_is_retried_after_an_empty_result")(
 IsPlayerSpell = function() return false end
 C_SpellBook.IsSpellKnown = IsPlayerSpell
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 686)
 check(db.casts[1].gcd.skipped == "no known spell", "nothing was known yet")
 -- the spellbook loads later: the empty list must not have been cached
@@ -1731,28 +1731,28 @@ scan(db)
 """
 )
 
-case("gcd_probe_skips_the_cast_spell_when_its_name_is_unavailable")(
+case("gcd_check_skips_the_cast_spell_when_its_name_is_unavailable")(
     r"""
 -- the cast spell's own name cannot be read, so the name compare alone would pick it
 local oldName, oldInfo = C_Spell.GetSpellName, C_Spell.GetSpellInfo
 C_Spell.GetSpellName = function(id) if id == 585 then return nil end return oldName(id) end
 C_Spell.GetSpellInfo = function(id) if id == 585 then return nil end return oldInfo(id) end
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 585)
-check(db.casts[1].gcd.spellId == 686, "probed the cast spell itself: " .. tostring(db.casts[1].gcd.spellId))
+check(db.casts[1].gcd.spellId == 686, "checked the cast spell itself: " .. tostring(db.casts[1].gcd.spellId))
 scan(db)
 """
 )
 
-case("gcd_probe_with_a_secret_cooldown_table_stores_nothing", "plain")(
+case("gcd_check_with_a_secret_cooldown_table_stores_nothing", "plain")(
     r"""
 C_Spell.GetSpellCooldown = function() return ST end
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 686)
 local g = db.casts[1].gcd
-check(g.spellId == 585 and g.call.r1.isSecret == true, "probe call not recorded as secret")
+check(g.spellId == 585 and g.call.r1.isSecret == true, "check call not recorded as secret")
 check(g.isActive == nil and g.isOnGCD == nil, "a secret cooldown table was read")
 check(g.control.call.r1.isSecret == true and g.control.isActive == nil and g.control.startTime == nil, "control read indexed a secret table")
 local sec = db.ooc.gcd.s61304.cooldown
@@ -1766,7 +1766,7 @@ case("gcd_cooldown_table_secret_by_issecrettable_only_is_not_indexed")(
     r"""
 C_Spell.GetSpellCooldown = function() return STT end
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 686)
 local g = db.casts[1].gcd
 check(g.isActive == nil and g.control.isActive == nil, "indexed a table issecrettable calls secret")
@@ -1777,14 +1777,14 @@ scan(db)
 case("gcd_isactive_unknown_or_secret_is_not_stored", "secret")(
     r"""
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 686)
-check(db.casts[1].gcd.skipped == "no known spell", "unknown spells should skip the probe")
+check(db.casts[1].gcd.skipped == "no known spell", "unknown spells should skip the check")
 check(db.casts[1].gcd.control and db.casts[1].gcd.control.isActive.isSecret == true, "control read should still be taken")
 runCmd("reset")
 IsPlayerSpell = function() return true end
 runCmd("")
-db = ForeverSTUwaveDB.fsprobe
+db = ForeverSTUwaveDB.fscheck
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 686)
 local g = db.casts[1].gcd
 check(g.spellId == 585, "first candidate should win: " .. tostring(g.spellId))
@@ -1800,7 +1800,7 @@ scan(db)
 case("pet_exists_is_recorded_with_its_secrecy")(
     r"""
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 check(db.ooc.pet.unitExists.r1.value == true and db.ooc.pet.unitExists.r1.isSecret == false, "pet exists")
 __combat = true
 fire("PLAYER_REGEN_DISABLED")
@@ -1810,7 +1810,7 @@ runCmd("reset")
 __combat = false
 UnitExists = function() return SB end
 runCmd("")
-local r = ForeverSTUwaveDB.fsprobe.ooc.pet.unitExists.r1
+local r = ForeverSTUwaveDB.fscheck.ooc.pet.unitExists.r1
 check(r.isSecret == true and r.type == "boolean" and r.value == nil, "secret pet existence stored")
 """
 )
@@ -1818,7 +1818,7 @@ check(r.isSecret == true and r.type == "boolean" and r.value == nil, "secret pet
 case("shoot_events_go_to_their_own_capped_list")(
     r"""
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 for i = 1, 3 do fire("UNIT_SPELLCAST_SUCCEEDED", "player", "s" .. i, 5019) end
 fire("UNIT_SPELLCAST_CHANNEL_START", "player", "c1", 5019)
 fire("UNIT_SPELLCAST_CHANNEL_UPDATE", "player", "c1", 5019)
@@ -1827,7 +1827,7 @@ check(db.casts == nil and db.channel == nil, "Shoot was counted as a cast or cha
 check(#db.shoot == 6, "shoot events: " .. #db.shoot)
 check(db.shoot[4].event == "UNIT_SPELLCAST_CHANNEL_START" and db.shoot[4].arg3.value == 5019, "shoot channel record")
 check(db.shoot[4].time.r1.type == "number" and db.shoot[1].time.r1.type == "number", "shoot time")
-for i = 1, 6 do check(db.shoot[i].gcd == nil, "Shoot event " .. i .. " got a GCD probe") end
+for i = 1, 6 do check(db.shoot[i].gcd == nil, "Shoot event " .. i .. " got a GCD check") end
 for i = 1, 20 do fire("UNIT_SPELLCAST_SUCCEEDED", "player", "m" .. i, 5019) end
 check(#db.shoot == 12, "shoot cap: " .. #db.shoot)
 casts(10)
@@ -1838,7 +1838,7 @@ check(#db.casts == 10 and said("cast recorder saved"), "casts should still reach
 case("channel_start_update_stop_record_secrecy_and_time")(
     r"""
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 fire("UNIT_SPELLCAST_CHANNEL_START", "player", "c", 15407)
 fire("UNIT_SPELLCAST_CHANNEL_UPDATE", "player", "c", 15407)
 fire("UNIT_SPELLCAST_CHANNEL_STOP", "player", "c", 15407)
@@ -1863,7 +1863,7 @@ local function flood()
 end
 runCmd("")
 flood()
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 check(#db.unitAura == 5 and #db.procGlow == 20 and #db.shoot == 12, "first run caps: " .. #db.unitAura .. "/" .. #db.procGlow .. "/" .. #db.shoot)
 __combat = true
 for i = 1, 20 do fire("UNIT_AURA", "player", { isFullUpdate = false }) end
@@ -1874,7 +1874,7 @@ runCmd("")
 local x = xframe()
 check(x._events.UNIT_AURA == "unit:player,target" and x._events[SHOW] == true, "extra events not re-registered")
 flood()
-db = ForeverSTUwaveDB.fsprobe
+db = ForeverSTUwaveDB.fscheck
 check(#db.unitAura == 5, "aura counter not reset: " .. #db.unitAura)
 check(#db.procGlow == 20, "proc counter not reset: " .. #db.procGlow)
 check(#db.shoot == 12, "shoot counter not reset: " .. #db.shoot)
@@ -1890,31 +1890,31 @@ case("register_errors_are_all_kept", "plain")(
 __unitEventThrows = true
 __registerThrows = true
 runCmd("")
-local e = ForeverSTUwaveDB.fsprobe.meta.registerError
+local e = ForeverSTUwaveDB.fscheck.meta.registerError
 check(type(e) == "string", "no registerError recorded")
 -- first and last failing registrations are both in the text, not just the last one
 check(string.find(e, "UNIT_SPELLCAST_SUCCEEDED", 1, true), "first register error overwritten: " .. e)
 check(string.find(e, "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE", 1, true), "last register error missing: " .. e)
 check(#e < 1200, "registerError grew without a cap: " .. #e)
-check(ForeverSTUwaveDB.fsprobe.meta.lastError == nil, "arming threw: " .. tostring(ForeverSTUwaveDB.fsprobe.meta.lastError))
+check(ForeverSTUwaveDB.fscheck.meta.lastError == nil, "arming threw: " .. tostring(ForeverSTUwaveDB.fscheck.meta.lastError))
 """
 )
 
 
-case("gunsight_plain_run_stores_every_probe_with_plain_values")(
+case("gunsight_plain_run_stores_every_check_with_plain_values")(
     r"""
 runCmd("gunsight")
-local gs = ForeverSTUwaveDB.fsprobe.gunsight
+local gs = ForeverSTUwaveDB.fscheck.gunsight
 for _, k in ipairs({ "meta", "texcoord8", "vertexColorFromBoolean", "verticalBarTimer", "line", "auraApi",
                      "auraContainer", "alphaFromBoolean" }) do
-    check(type(gs[k]) == "table", "missing probe " .. k)
+    check(type(gs[k]) == "table", "missing check " .. k)
 end
 check(gs.meta.buildVersion == "12.1.0" and gs.meta.buildNumber == "65000", "build info is not the plain version pair")
-check(gs.meta.probeError == nil and gs.auraContainer.probeError == nil, "a probe threw")
+check(gs.meta.checkError == nil and gs.auraContainer.checkError == nil, "a check threw")
 check(type(gs.auraContainer.summary) == "string" and said("gunsight auraContainer:"), "no one-line summary")
 check(gs.auraContainer.frameType == "ok" and gs.auraContainer.templateAccepted == true, "container not built")
 check(gs.auraContainer.addAuraGroup == "ok" and gs.auraContainer.setUnit == "ok", "group or unit refused")
-scan(ForeverSTUwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fscheck)
 noOnUpdate()
 """
 )
@@ -1933,8 +1933,8 @@ for _ = 1, 3 do
 end
 check(__created == created, "re-running created " .. (__created - created) .. " new frames or textures")
 check(#__frames == frames, "re-running created " .. (#__frames - frames) .. " new CreateFrame frames")
-check(FSProbeGsAuraContainer._calls.AddAuraGroup == 1, "the group was added again on a re-run")
-check(ForeverSTUwaveDB.fsprobe.gunsight.auraContainer.addAuraGroup == "reused", "re-run did not reuse the group")
+check(FSCheckGsAuraContainer._calls.AddAuraGroup == 1, "the group was added again on a re-run")
+check(ForeverSTUwaveDB.fscheck.gunsight.auraContainer.addAuraGroup == "reused", "re-run did not reuse the group")
 allHidden()
 """
 )
@@ -1943,7 +1943,7 @@ case("gunsight_hides_the_bar_when_there_is_no_create_duration")(
     r"""
 runCmd("gunsight")
 allHidden()
-check(ForeverSTUwaveDB.fsprobe.gunsight.verticalBarTimer.manual.skipped ~= nil, "no skip recorded")
+check(ForeverSTUwaveDB.fscheck.gunsight.verticalBarTimer.manual.skipped ~= nil, "no skip recorded")
 """
 )
 
@@ -1952,7 +1952,7 @@ case("gunsight_hides_the_bar_when_create_duration_throws")(
 C_DurationUtil = { CreateDuration = function() error("boom: CreateDuration") end }
 runCmd("gunsight")
 allHidden()
-check(string.find(ForeverSTUwaveDB.fsprobe.gunsight.verticalBarTimer.manual.skipped, "threw", 1, true), "throw not recorded")
+check(string.find(ForeverSTUwaveDB.fscheck.gunsight.verticalBarTimer.manual.skipped, "threw", 1, true), "throw not recorded")
 """
 )
 
@@ -1963,7 +1963,7 @@ runCmd("gunsight")
 runCmd("gunsight")   -- before the first run's 0.5s sample: its timer is now stale
 advance(1)
 allHidden()
-local m = ForeverSTUwaveDB.fsprobe.gunsight.verticalBarTimer.manual
+local m = ForeverSTUwaveDB.fscheck.gunsight.verticalBarTimer.manual
 check(m.valueAt05 ~= nil, "the live run was not sampled (a stale timer hid or consumed its bar)")
 """
 )
@@ -1976,7 +1976,7 @@ check(evframe()._events.UNIT_SPELLCAST_START == "unit:player", "cast not armed")
 fire("UNIT_SPELLCAST_START", "player", "Cast-1", 686)
 advance(1)
 allHidden()
-check(ForeverSTUwaveDB.fsprobe.gunsight.verticalBarTimer.cast.setTimerDuration == "ok", "cast duration not fed to the bar")
+check(ForeverSTUwaveDB.fscheck.gunsight.verticalBarTimer.cast.setTimerDuration == "ok", "cast duration not fed to the bar")
 """
 )
 
@@ -1989,12 +1989,12 @@ C_UnitAuras.GetAuraDuration = function(_, id)
     return { kind = "duration" }
 end
 runCmd("gunsight")
-local ids = ForeverSTUwaveDB.fsprobe.gunsight.auraApi.ooc.ids
+local ids = ForeverSTUwaveDB.fscheck.gunsight.auraApi.ooc.ids
 check(ids.firstIdSecret == true and ids.firstIdType == "number" and ids.firstId == "secret",
     "first id: " .. tostring(ids.firstIdSecret) .. " " .. tostring(ids.firstIdType) .. " " .. tostring(ids.firstId))
 check(gotSecretId, "the secret id was not passed on to GetAuraDuration")
-check(ForeverSTUwaveDB.fsprobe.gunsight.auraApi.ooc.durationOk == true, "duration read skipped for a secret id")
-scan(ForeverSTUwaveDB.fsprobe)
+check(ForeverSTUwaveDB.fscheck.gunsight.auraApi.ooc.durationOk == true, "duration read skipped for a secret id")
+scan(ForeverSTUwaveDB.fscheck)
 """
 )
 
@@ -2004,7 +2004,7 @@ UnitExists = function() return false end
 runCmd("gunsight")
 pull(2)
 for _ = 1, 10 do advance(2) end
-local c = ForeverSTUwaveDB.fsprobe.gunsight.auraApi.combat
+local c = ForeverSTUwaveDB.fscheck.gunsight.auraApi.combat
 check(c and c.targetExists == false, "targetExists: " .. tostring(c and c.targetExists))
 check(c.gaveUp == true, "did not give up after the attempts")
 """
@@ -2015,19 +2015,19 @@ case("gunsight_aura_container_engine_window_records_types_forwards_and_hides")(
 gsMockContainer(3)
 local SECRET_DURATION = ST
 runCmd("gunsight")
-local rec = ForeverSTUwaveDB.fsprobe.gunsight.auraContainer
+local rec = ForeverSTUwaveDB.fscheck.gunsight.auraContainer
 check(rec.initCalls == 3, "init callbacks: " .. tostring(rec.initCalls))
 for _, step in ipairs({ "icon", "cooldown", "cooldownHook", "durationText", "applicationCount", "durationBar", "barHook" }) do
     check(rec.initSteps[step] == "ok", "init step " .. step .. ": " .. tostring(rec.initSteps[step]))
 end
 pull(2)
-local container = FSProbeGsAuraContainer
+local container = FSCheckGsAuraContainer
 check(container._shown == true and container._unit == "target", "container not pointed at the target and shown")
 local cooldowns, bars = engineCalls(SECRET_DURATION)
 check(cooldowns == 3 and bars == 3, "mock engine calls: " .. cooldowns .. " " .. bars)
 advance(0.5)
 advance(0.5)
-local c = ForeverSTUwaveDB.fsprobe.gunsight.auraContainer.combat
+local c = ForeverSTUwaveDB.fscheck.gunsight.auraContainer.combat
 check(c.sampleError == nil and c.heightError == nil, "sample failed: " .. tostring(c.sampleError or c.heightError))
 check(c.buttons.shown == 3 and c.buttons.children == 3 and c.allocated == 3, "button counts")
 check(c.cooldownHook.calls == 3 and c.cooldownHook.args == "table:secret,boolean:plain", "cooldown hook: " .. tostring(c.cooldownHook.args))
@@ -2039,7 +2039,7 @@ check(c.fed.hook.height == 7 and c.fed.get.height == 7, "forwarded bar heights")
 check(container._shown == false, "container left shown")
 allHidden()
 check(said("gunsight auraContainer: combat: 3 of 3 children shown"), "combat summary line missing")
-scan(ForeverSTUwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fscheck)
 """
 )
 
@@ -2054,13 +2054,13 @@ engineCalls(ST)
 for _, b in ipairs(buttons) do b.GetAuraDuration = function() return ST end end
 advance(0.5)
 advance(0.5)
-local c = ForeverSTUwaveDB.fsprobe.gunsight.auraContainer.combat
+local c = ForeverSTUwaveDB.fscheck.gunsight.auraContainer.combat
 check(c.sampleError == nil and c.heightError == nil, "sample failed: " .. tostring(c.sampleError or c.heightError))
 check(c.buttons.shown == 2 and c.buttons.unknown == 1, "a secret IsShown must count as unknown")
 check(c.buttonDuration.secret == true and c.buttonDuration.type == "table", "secret duration not described")
 check(c.engineBars.secret == 3 and c.engineBars.maxHeight == nil, "secret heights must not be stored")
 check(c.fed.hook.height == "secret" and c.fed.get.height == "secret", "fed heights: " .. tostring(c.fed.hook.height))
-scan(ForeverSTUwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fscheck)
 """
 )
 
@@ -2070,10 +2070,10 @@ gsMockContainer(2)
 UnitExists = function() return false end
 runCmd("gunsight")
 pull(2)
-check(FSProbeGsAuraContainer._shown == true, "container not shown on the pull")
+check(FSCheckGsAuraContainer._shown == true, "container not shown on the pull")
 __combat = false
 advance(2)
-check(FSProbeGsAuraContainer._shown == false, "container left shown after combat ended")
+check(FSCheckGsAuraContainer._shown == false, "container left shown after combat ended")
 allHidden()
 """
 )
@@ -2085,7 +2085,7 @@ UnitExists = function() return false end
 runCmd("gunsight")
 pull(2)
 runCmd("reset")
-check(FSProbeGsAuraContainer._shown == false, "reset left the container shown")
+check(FSCheckGsAuraContainer._shown == false, "reset left the container shown")
 allHidden()
 """
 )
@@ -2094,9 +2094,9 @@ case("gunsight_container_refusals_are_recorded")(
     r"""
 __acCreateThrows = true
 runCmd("gunsight")
-local rec = ForeverSTUwaveDB.fsprobe.gunsight.auraContainer
+local rec = ForeverSTUwaveDB.fscheck.gunsight.auraContainer
 check(string.find(rec.status, "frame type refused", 1, true), "create refusal: " .. tostring(rec.status))
-check(ForeverSTUwaveDB.fsprobe.gunsight.alphaFromBoolean.texture ~= nil, "later probes did not run")
+check(ForeverSTUwaveDB.fscheck.gunsight.alphaFromBoolean.texture ~= nil, "later checks did not run")
 """
 )
 
@@ -2104,7 +2104,7 @@ case("gunsight_missing_template_is_recorded")(
     r"""
 __template = false
 runCmd("gunsight")
-check(string.find(ForeverSTUwaveDB.fsprobe.gunsight.auraContainer.status, "template absent", 1, true), "template status")
+check(string.find(ForeverSTUwaveDB.fscheck.gunsight.auraContainer.status, "template absent", 1, true), "template status")
 pull(2)
 advance(1)
 allHidden()
@@ -2118,7 +2118,7 @@ runCmd("gunsight")
 pull(2)
 advance(2)
 advance(1)
-scan(ForeverSTUwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fscheck)
 allHidden()
 """
 )
@@ -2127,7 +2127,7 @@ case("gunsight_survives_a_failing_create_frame", "throw")(
     r"""
 __frameThrows = true
 runCmd("gunsight")
-check(ForeverSTUwaveDB.fsprobe.gunsight.meta.hostError ~= nil, "host failure not recorded")
+check(ForeverSTUwaveDB.fscheck.gunsight.meta.hostError ~= nil, "host failure not recorded")
 """
 )
 
@@ -2135,15 +2135,15 @@ case("hot_builds_samples_in_and_out_of_combat_and_tears_down")(
     r"""
 hotMock(2)
 runCmd("hot")
-local player, party1 = FSProbeHot_player, FSProbeHot_party1
+local player, party1 = FSCheckHot_player, FSCheckHot_party1
 check(player and party1, "a container is missing for an existing token")
-check(FSProbeHot_party2 == nil and FSProbeHot_party4 == nil, "a container was built for a token that does not exist")
+check(FSCheckHot_party2 == nil and FSCheckHot_party4 == nil, "a container was built for a token that does not exist")
 check(player._unit == "player" and party1._unit == "party1", "containers not pointed at their token")
 check(player._shown == true and player._args.SetEnabled[1] == true, "container not enabled and shown")
 check(player._slotOpts.candidateFilters.includeSpellIDs[139] == true, "Renew rank 1 missing from includeSpellIDs")
 check(player._slotOpts.candidateFilters.includeSpellIDs[9999] == true, "runtime rank missing from includeSpellIDs")
 check(player._groupOpts.candidateFilters.maxDuration == 60, "group maxDuration")
-local rec = ForeverSTUwaveDB.fsprobe.hot
+local rec = ForeverSTUwaveDB.fscheck.hot
 check(rec.meta.idsUnverified == nil and rec.meta.runtimeRank == 9999, "id bookkeeping")
 check(type(rec.meta.idsSource) == "string" and string.find(rec.meta.idsSource, "ElvUI", 1, true), "ids source must cite ElvUI: " .. tostring(rec.meta.idsSource))
 local row = rec.tokens.player
@@ -2181,7 +2181,7 @@ check(player._shown == false and party1._shown == false, "hot off left a contain
 check(player._args.SetEnabled[1] == false, "hot off did not disable")
 allHidden()
 noOnUpdate()
-scan(ForeverSTUwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fscheck)
 """
 )
 
@@ -2191,8 +2191,8 @@ hotMock(1)
 __combat = true
 runCmd("hot")
 check(said("leave combat first"), "no refusal line")
-check(FSProbeHot_player == nil and #__frames == 0, "a frame was built in combat")
-check(ForeverSTUwaveDB == nil or ForeverSTUwaveDB.fsprobe == nil, "a result was written in combat")
+check(FSCheckHot_player == nil and #__frames == 0, "a frame was built in combat")
+check(ForeverSTUwaveDB == nil or ForeverSTUwaveDB.fscheck == nil, "a result was written in combat")
 check(pendingTimers() == 0, "a timer was scheduled in combat")
 """
 )
@@ -2201,7 +2201,7 @@ case("hot_off_in_combat_only_drops_alpha_and_a_second_off_finishes_it")(
     r"""
 hotMock(1)
 runCmd("hot")
-local player = FSProbeHot_player
+local player = FSCheckHot_player
 __combat = true
 runCmd("hot off")
 check(player._args.SetAlpha[1] == 0, "alpha not dropped")
@@ -2215,7 +2215,7 @@ runCmd("hot off")
 check(player._shown == false and player._args.SetEnabled[1] == false, "second off did not finish the teardown")
 -- a re-run reuses the container instead of adding the groups twice
 runCmd("hot")
-check(ForeverSTUwaveDB.fsprobe.hot.tokens.player.steps.addAuraSlot == "reused", "re-run did not reuse the container")
+check(ForeverSTUwaveDB.fscheck.hot.tokens.player.steps.addAuraSlot == "reused", "re-run did not reuse the container")
 check(player._shown == true and player._args.SetAlpha[1] == 1, "re-run did not bring the strip back")
 runCmd("reset")
 check(player._shown == false, "reset left the strip up")
@@ -2227,16 +2227,16 @@ case("hot_survives_a_refused_container_and_secret_buttons", "secret")(
     r"""
 hotMock(2)
 runCmd("hot")
-local player = FSProbeHot_player
+local player = FSCheckHot_player
 player._groupBtns[1].IsShown = function() return SB end
 player._groupBtns[2]._shown = true
 advance(1)
-local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
+local row = ForeverSTUwaveDB.fscheck.hot.tokens.player
 check(row.sampleErrors == nil, "sample failed: " .. tostring(row.firstSampleError))
 check(string.find(row.samples[2], "unk=1", 1, true), "a secret IsShown must count as unknown: " .. tostring(row.samples[2]))
 check(row.stats.ooc.unknown == 1 and row.stats.combat.unknown == 0, "unknown must be counted per bucket")
 check(row.stats.ooc.withShown == 0 and row.stats.transitions == 0, "an unknown sample must not feed withShown or transitions")
-scan(ForeverSTUwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fscheck)
 """
 )
 
@@ -2247,8 +2247,8 @@ case("hot_secret_buttons_in_combat_are_unknown_not_lost", "secret")(
     r"""
 hotMock(1)
 runCmd("hot")
-local player = FSProbeHot_player
-local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
+local player = FSCheckHot_player
+local row = ForeverSTUwaveDB.fscheck.hot.tokens.player
 player._slotBtn._shown = true
 advance(1)
 check(row.stats.ooc.withShown == 1 and row.stats.transitions == 1, "setup: out of combat shown sample")
@@ -2271,9 +2271,9 @@ check(row.stats.combat.withShown == 1 and row.stats.combat.unknown == 2, "known 
 -- the summary line carries the unknown and slot secret counts
 __combat = false
 runCmd("hot off")
-local summary = ForeverSTUwaveDB.fsprobe.hot.summary
+local summary = ForeverSTUwaveDB.fscheck.hot.summary
 check(summary and string.find(summary, "unk 2", 1, true) and string.find(summary, "slotsecret 2", 1, true), "summary: " .. tostring(summary))
-scan(ForeverSTUwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fscheck)
 """
 )
 
@@ -2282,8 +2282,8 @@ case("hot_a_button_hidden_out_of_combat_is_a_transition_not_a_loss")(
     r"""
 hotMock(1)
 runCmd("hot")
-local player = FSProbeHot_player
-local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
+local player = FSCheckHot_player
+local row = ForeverSTUwaveDB.fscheck.hot.tokens.player
 player._slotBtn._shown = true
 advance(1)
 player._slotBtn._shown = false
@@ -2305,7 +2305,7 @@ case("hot_records_a_refused_create_frame")(
 hotMock(1)
 __acCreateThrows = true
 runCmd("hot")
-local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
+local row = ForeverSTUwaveDB.fscheck.hot.tokens.player
 check(row.status == "create failed" and string.find(row.steps.createFrame, "boom", 1, true), "refusal not recorded")
 check(said("no container built"), "no summary")
 check(pendingTimers() == 0, "sampler started without a container")
@@ -2317,7 +2317,7 @@ case("hot_result_survives_a_main_run_rearm")(
 hotMock(1)
 runCmd("hot")
 runCmd("")
-check(ForeverSTUwaveDB.fsprobe.hot ~= nil and ForeverSTUwaveDB.fsprobe.ooc ~= nil, "re-arm wiped the hot result")
+check(ForeverSTUwaveDB.fscheck.hot ~= nil and ForeverSTUwaveDB.fscheck.ooc ~= nil, "re-arm wiped the hot result")
 """
 )
 
@@ -2329,12 +2329,12 @@ case("hot_bar_slot_builds_the_timer_bar_and_records_every_step")(
     r"""
 hotMock(1)
 runCmd("hot")
-local player = FSProbeHot_player
+local player = FSCheckHot_player
 local btn = player._barBtn
 check(btn, "no renewbar slot was added")
 check(player._barOpts.candidateFilters.includeSpellIDs[139] == true and player._barOpts.candidateFilters.includeSpellIDs[9999] == true,
     "bar slot must use the same Renew id set")
-local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
+local row = ForeverSTUwaveDB.fscheck.hot.tokens.player
 check(row.steps.addBarSlot == "ok", "addBarSlot: " .. tostring(row.steps.addBarSlot))
 check(row.initCalls.bar == 1, "bar init count")
 local bs = row.barSteps
@@ -2398,7 +2398,7 @@ check(lv and #lv == 1 and lv[1] == 4, "bar button frame level raise: " .. tostri
 check(btn._args.SetMouseClickEnabled and btn._args.SetMouseClickEnabled[1] == false, "HP.Preamble did not run for the bar button")
 -- nothing was read
 check(__auraRead == false, "an aura, duration, bar value or text was read")
-scan(ForeverSTUwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fscheck)
 """
 )
 
@@ -2407,15 +2407,15 @@ case("hot_missing_bar_api_is_recorded_as_absent_and_nothing_throws")(
 hotMock(1)
 __missing = { SetDurationBar = true, AddPandemicRegion = true }
 runCmd("hot")
-local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
+local row = ForeverSTUwaveDB.fscheck.hot.tokens.player
 local bs = row.barSteps
 check(bs.api.SetDurationBar == "nil" and bs.api.AddPandemicRegion == "nil" and bs.api.SetDurationText == "function", "types recorded")
 check(bs.setDurationBar == "absent" and bs.addPandemicRegion == "absent", "missing methods must read absent: " .. tostring(bs.setDurationBar))
 check(bs.bar == "ok" and bs.text == "ok" and bs.textMode == "custom" and bs.pandemicTexture == "ok", "the other steps must still run")
-check(row.status == "built" and pendingTimers() == 1, "the probe must still build and sample")
+check(row.status == "built" and pendingTimers() == 1, "the check must still build and sample")
 advance(1)
 check(row.sampleErrors == nil, "sample failed: " .. tostring(row.firstSampleError))
-scan(ForeverSTUwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fscheck)
 """
 )
 
@@ -2425,7 +2425,7 @@ hotMock(1)
 __missing = { SetDurationBar = true, SetDurationText = true, AddPandemicRegion = true }
 Enum, C_StringUtil, C_CurveUtil, CreateColor = nil, nil, nil, nil
 runCmd("hot")
-local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
+local row = ForeverSTUwaveDB.fscheck.hot.tokens.player
 local bs = row.barSteps
 check(row.built == true and bs, "the container must still build with a bar record")
 check(bs.api.SetDurationBar == "nil" and bs.api["Enum.StatusBarTimerDirection"] == "nil", "enum absence")
@@ -2435,7 +2435,7 @@ check(bs.setDurationBar == "absent" and bs.textDefault == "absent" and bs.textMo
 check(string.find(bs.textCustom, "absent", 1, true), "custom text error must name what is absent: " .. tostring(bs.textCustom))
 advance(1)
 check(row.sampleErrors == nil, "sample failed: " .. tostring(row.firstSampleError))
-scan(ForeverSTUwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fscheck)
 """
 )
 
@@ -2445,11 +2445,11 @@ hotMock(1)
 __FrameM.SetDurationBar = function() error("refused: SetDurationBar") end
 __FrameM.SetReverseFill = function() error("refused: SetReverseFill") end
 runCmd("hot")
-local bs = ForeverSTUwaveDB.fsprobe.hot.tokens.player.barSteps
+local bs = ForeverSTUwaveDB.fscheck.hot.tokens.player.barSteps
 check(string.find(bs.setDurationBar, "refused: SetDurationBar", 1, true), "error text recorded: " .. tostring(bs.setDurationBar))
 check(string.find(bs.barReverse, "refused: SetReverseFill", 1, true), "reverse fill error recorded: " .. tostring(bs.barReverse))
 check(bs.barTrack == "ok" and bs.text == "ok" and bs.textMode == "custom" and bs.addPandemicRegion == "ok", "later steps still ran")
-scan(ForeverSTUwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fscheck)
 """
 )
 
@@ -2462,14 +2462,14 @@ __FrameM.SetDurationText = function(self, fs, opts)
     if next(opts) ~= nil then error("bad textFormat") end
 end
 runCmd("hot")
-local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
+local row = ForeverSTUwaveDB.fscheck.hot.tokens.player
 local bs = row.barSteps
 check(string.find(bs.textCustom, "bad textFormat", 1, true), "custom failure not recorded: " .. tostring(bs.textCustom))
 check(bs.textDefault == "ok" and bs.textMode == "default", "default retry not recorded: " .. tostring(bs.textMode))
-local btn = FSProbeHot_player._barBtn
+local btn = FSCheckHot_player._barBtn
 check(btn._calls.SetDurationText == 2 and next(btn._args.SetDurationText[2]) == nil, "the retry must pass default options")
 check(bs.addPandemicRegion == "ok", "the next step must still run")
-scan(ForeverSTUwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fscheck)
 """
 )
 
@@ -2478,7 +2478,7 @@ case("hot_a_throwing_formatter_factory_also_falls_back")(
 hotMock(1)
 C_StringUtil.CreateNumericRuleFormatter = function() error("boom: factory") end
 runCmd("hot")
-local bs = ForeverSTUwaveDB.fsprobe.hot.tokens.player.barSteps
+local bs = ForeverSTUwaveDB.fscheck.hot.tokens.player.barSteps
 check(string.find(bs.textCustom, "boom: factory", 1, true), "factory error not recorded: " .. tostring(bs.textCustom))
 check(bs.textMode == "default" and bs.textDefault == "ok", "must fall back to default opts")
 """
@@ -2489,13 +2489,13 @@ case("hot_a_refused_bar_slot_does_not_stop_the_group")(
 hotMock(2)
 __slotThrows = { renewbar = "boom: AddAuraSlot renewbar" }
 runCmd("hot")
-local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
+local row = ForeverSTUwaveDB.fscheck.hot.tokens.player
 check(string.find(row.steps.addBarSlot, "boom: AddAuraSlot renewbar", 1, true), "bar slot refusal not recorded: " .. tostring(row.steps.addBarSlot))
 check(row.steps.addAuraSlot == "ok" and row.steps.addAuraGroup == "ok" and row.built == true, "slot and group must still build")
 advance(1)
 check(row.sampleErrors == nil, "sample failed: " .. tostring(row.firstSampleError))
 check(string.find(row.samples[2], "bar=none", 1, true), "no bar slot samples as none: " .. tostring(row.samples[2]))
-scan(ForeverSTUwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fscheck)
 """
 )
 
@@ -2503,8 +2503,8 @@ case("hot_pandemic_and_bar_visibility_are_counted_and_secrets_are_unknown", "sec
     r"""
 hotMock(1)
 runCmd("hot")
-local player = FSProbeHot_player
-local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
+local player = FSCheckHot_player
+local row = ForeverSTUwaveDB.fscheck.hot.tokens.player
 local btn = player._barBtn
 local pan = btn._args.AddPandemicRegion[1]
 check(string.find(row.samples[1], "bar=false", 1, true) and string.find(row.samples[1], "pan=false", 1, true), "first sample: " .. tostring(row.samples[1]))
@@ -2530,11 +2530,11 @@ check(row.stats.combat.panShown == 1 and row.stats.combat.barShown == 1, "readab
 check(row.sampleErrors == nil, "sample failed: " .. tostring(row.firstSampleError))
 __combat = false
 runCmd("hot off")
-local summary = ForeverSTUwaveDB.fsprobe.hot.summary
+local summary = ForeverSTUwaveDB.fscheck.hot.summary
 check(string.find(summary, "barshown 3 barunk 2", 1, true), "bar summary: " .. tostring(summary))
 check(string.find(summary, "pandemic 3 pandemicunk 2", 1, true), "pandemic summary: " .. tostring(summary))
 check(__auraRead == false, "an aura, duration, bar value or text was read")
-scan(ForeverSTUwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fscheck)
 """
 )
 
@@ -2545,20 +2545,20 @@ runCmd("hot")
 check(said("drain") and said("whole seconds") and said("amber") and said("pandemic"), "start line must say what to judge by eye")
 runCmd("hot off")
 runCmd("hot")
-local row = ForeverSTUwaveDB.fsprobe.hot.tokens.player
+local row = ForeverSTUwaveDB.fscheck.hot.tokens.player
 check(row.steps.addBarSlot == "reused", "re-run must reuse the bar slot: " .. tostring(row.steps.addBarSlot))
 check(row.barSteps and row.barSteps.bar == "ok" and row.barSteps.api, "re-run lost the bar record")
-scan(ForeverSTUwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fscheck)
 """
 )
 
 
-# --- /fsprobe priest -----------------------------------------------------------------------------
+# --- /fscheck priest -----------------------------------------------------------------------------
 
 case("priest_main_run_section_is_class_gated")(
     r"""
 runCmd("")
-local db = ForeverSTUwaveDB.fsprobe
+local db = ForeverSTUwaveDB.fscheck
 check(db.ooc.priest and db.ooc.priest.classToken == "PRIEST", "a priest gets the section")
 check(db.ooc.priest.inCombat == false and db.ooc.priest.mana, "ooc priest section must be tagged and filled")
 __combat = true
@@ -2573,18 +2573,18 @@ case("priest_main_run_section_skips_other_classes")(
     r"""
 UnitClass = function() return "Warrior", "WARRIOR", 1 end
 runCmd("")
-local sec = ForeverSTUwaveDB.fsprobe.ooc.priest
+local sec = ForeverSTUwaveDB.fscheck.ooc.priest
 check(sec.skipped == "not a priest" and sec.classToken == "WARRIOR", "other class must skip: " .. tostring(sec.skipped))
-check(sec.mana == nil and sec.spells == nil, "a skipped section must hold no probe data")
+check(sec.mana == nil and sec.spells == nil, "a skipped section must hold no check data")
 """
 )
 
 case("priest_main_run_section_skips_when_the_class_is_secret", "secret")(
     r"""
 runCmd("")
-local sec = ForeverSTUwaveDB.fsprobe.ooc.priest
+local sec = ForeverSTUwaveDB.fscheck.ooc.priest
 check(sec.skipped == "not a priest" and sec.classToken == "unknown", "secret class must fail closed")
-scan(ForeverSTUwaveDB.fsprobe)
+scan(ForeverSTUwaveDB.fscheck)
 """
 )
 
@@ -2592,14 +2592,14 @@ case("priest_command_snapshot_covers_the_checklist")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 check(p and p.ooc and p.ooc.kind == "ooc" and p.ooc.inCombat == false, "ooc snapshot tagged false")
 check(p.meta.status == "logging", "status: " .. tostring(p.meta.status))
 local o = p.ooc
 -- A: secrecy map and predicates
 check(o.spells.pw_shield.s17.aura == "number/plain=0", "spell secrecy cell: " .. tostring(o.spells.pw_shield.s17.aura))
 check(o.spells.pw_shield.s17.isPlayerSpell == "boolean/plain=true", "isPlayerSpell cell")
-check(o.spells.sw_pain.s594, "a rank resolved by name must be probed too")
+check(o.spells.sw_pain.s594, "a rank resolved by name must be checked too")
 check(o.secrets.calls["GetPowerTypeSecrecy(0)"].r1.type == "number", "power secrecy recorded")
 check(o.secrets.calls["ShouldUnitPowerBeSecret(party1,0)"].inCombat == false, "predicate records are tagged")
 -- B: mana
@@ -2610,10 +2610,10 @@ check(o.mana.casting.exists and o.mana.channeling.exists, "cast info reads")
 check(o.mana.cost.s585.count == 1 and o.mana.cost.s585.first.cost.value == 150, "mana cost read")
 check(o.mana.cost.s5019.ok and o.mana.cost.s5019.n == 0 and o.mana.cost.s5019.count == nil, "wand returns nothing")
 check(o.mana.cost.s2050.count == 0, "an empty cost table is recorded as count 0")
--- item 3: the resolved name sits next to every probed id; unresolved ids say so
+-- item 3: the resolved name sits next to every checked id; unresolved ids say so
 check(o.spells.pw_shield.s17.spellName == "Power Word: Shield", "spell name beside the id: " .. tostring(o.spells.pw_shield.s17.spellName))
 check(o.spells.weakened_soul.s6788.spellName == "unresolved", "an id the client cannot name is marked unresolved")
-check(o.spells.fort.s1244 and not o.spells.fort.s21562, "retail Fortitude 21562 must not be probed by the priest list")
+check(o.spells.fort.s1244 and not o.spells.fort.s21562, "retail Fortitude 21562 must not be checked by the priest list")
 check(o.mana.cost.s585.spellName == "Smite", "cost record carries the spell name")
 check(o.cooldowns.pw_shield.s17.spellName == "Power Word: Shield" and o.auras.pw_shield.s17.spellName == "Power Word: Shield",
     "cooldown and aura cells carry the spell name")
@@ -2662,7 +2662,7 @@ check(f._events.UNIT_ABSORB_AMOUNT_CHANGED == "unit:player,party1" and f._events
     "absorb and prediction events must be unit events for player and party1")
 check(string.find(o.misc.cleuRegister, "forbidden (ADDON_ACTION_FORBIDDEN", 1, true), "CLEU snapshot records the forbidden result: " .. tostring(o.misc.cleuRegister))
 check(__cleuAttempts == 0, "COMBAT_LOG_EVENT_UNFILTERED must never be registered (protected on Forever): " .. tostring(__cleuAttempts))
-check(said("Run /fsprobe priest again"), "chat line must tell Parker to run the command again")
+check(said("Run /fscheck priest again"), "chat line must tell Parker to run the command again")
 noOnUpdate()
 check(said("priest"), "priest line missing")
 scan(p)
@@ -2673,7 +2673,7 @@ case("priest_combat_snapshot_follows_the_pull_and_sits_beside_the_ooc_one")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 local f = pframe()
 __combat = true
 pfire("PLAYER_REGEN_DISABLED")
@@ -2693,7 +2693,7 @@ case("priest_pull_that_ends_before_the_delay_takes_no_combat_snapshot")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 __combat = true
 pfire("PLAYER_REGEN_DISABLED")
 __combat = false
@@ -2708,7 +2708,7 @@ case("priest_command_in_combat_takes_the_combat_snapshot_then_ooc_after_the_figh
 priestMock()
 __combat = true
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 check(p.combat and p.combat.inCombat == true and p.ooc == nil, "in combat the first snapshot is the combat one")
 check(string.find(p.combat.misc.cleuRegister, "forbidden (ADDON_ACTION_FORBIDDEN", 1, true), "combat snapshot records the same forbidden CLEU result: " .. tostring(p.combat.misc.cleuRegister))
 check(__cleuAttempts == 0, "COMBAT_LOG_EVENT_UNFILTERED must never be registered in combat either: " .. tostring(__cleuAttempts))
@@ -2724,7 +2724,7 @@ case("priest_event_logs_are_capped_ring_buffers")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 local feeds = {
     { "cast", "UNIT_SPELLCAST_SUCCEEDED", { "player", "Cast-1", 585 } },
     { "aura", "UNIT_AURA", { "target", { isFullUpdate = false, addedAuras = {}, updatedAuraInstanceIDs = {}, removedAuraInstanceIDs = {} } } },
@@ -2756,7 +2756,7 @@ case("priest_power_log_filters_and_times_the_five_second_rule")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 pfire("UNIT_POWER_UPDATE", "player", "RAGE")
 pfire("UNIT_POWER_UPDATE", "party1", "MANA")
 check(p.logs.power == nil or p.logs.power.total == 0, "a non-mana or foreign power event was logged")
@@ -2794,7 +2794,7 @@ case("priest_unreadable_cost_still_marks_the_five_second_clock_unknown")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 -- a plain table whose cost field is secret stays unknown (never treated as free)
 C_Spell.GetSpellPowerCost = function() return { { type = 0, name = "MANA", cost = SN } } end
 pfire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 585)
@@ -2814,7 +2814,7 @@ case("priest_power_frequent_is_sampled_and_keeps_the_raw_count")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 for _ = 1, 100 do
     __now = __now + 0.1
     pfire("UNIT_POWER_FREQUENT", "player", "MANA")
@@ -2839,7 +2839,7 @@ case("priest_power_frequent_logs_a_secret_shape_change_at_once", "secret")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 __now = __now + 1
 pfire("UNIT_POWER_FREQUENT", "player", "MANA")
 local log = p.logs.powerFrequent
@@ -2858,7 +2858,7 @@ case("priest_power_entries_carry_unit_power_type_and_a_power_readout")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 pfire("UNIT_POWER_UPDATE", "player", "MANA")
 local e = p.logs.power.entries[1]
 check(e.unit.value == "player" and e.powerType.value == "MANA", "unit and power type")
@@ -2877,7 +2877,7 @@ case("priest_power_readout_is_secret_safe", "secret")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 pfire("UNIT_POWER_UPDATE", "player", "MANA")
 check(p.logs.power.entries[1].unitPower == "number/secret", "secret UnitPower is described, not stored: " .. tostring(p.logs.power.entries[1].unitPower))
 pfire("UNIT_POWER_UPDATE", SS, SS)
@@ -2894,7 +2894,7 @@ case("priest_sampled_and_power_logs_hold_a_longer_window_and_stay_bounded")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 check(p.meta.logCaps and p.meta.logCaps.power == 300 and p.meta.logCaps.powerFrequent == 300 and p.meta.logCaps.powerOther == 300,
     "the larger caps are recorded in meta")
 for _ = 1, 320 do
@@ -2926,7 +2926,7 @@ case("priest_alternating_mana_and_other_frequent_events_still_sample")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 for i = 1, 100 do
     __now = __now + 0.05
     pfire("UNIT_POWER_FREQUENT", "player", i % 2 == 0 and "MANA" or "ENERGY")
@@ -2942,7 +2942,7 @@ case("priest_secret_gettime_samples_frequent_by_count", "secret")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 GetTime = function() return SN end
 for _ = 1, 100 do pfire("UNIT_POWER_FREQUENT", "player", "MANA") end
 local log = p.logs.powerFrequent
@@ -2958,7 +2958,7 @@ case("priest_cost_assumption_is_recorded")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 check(p.meta.costAssumption == "nil or empty = free", "meta assumption: " .. tostring(p.meta.costAssumption))
 check(p.ooc.mana.costAssumption == "nil or empty = free", "snapshot assumption")
 """
@@ -2968,11 +2968,11 @@ case("priest_target_part_records_secret_and_missing_reads", "secret")(
     r"""
 priestMock()
 runCmd("priest")
-local t = ForeverSTUwaveDB.fsprobe.priest.ooc.target
+local t = ForeverSTUwaveDB.fscheck.priest.ooc.target
 check(t.classification.r1.isSecret == true and t.classification.r1.value == nil, "secret classification flagged")
 check(t.creatureType.r1.isSecret == true and t.creatureType.r2.isSecret == true, "secret creature type flagged")
 check(t.effectiveLevel.r1.isSecret == true, "secret effective level flagged")
-scan(ForeverSTUwaveDB.fsprobe.priest)
+scan(ForeverSTUwaveDB.fscheck.priest)
 """
 )
 
@@ -2980,7 +2980,7 @@ case("priest_kill_log_compares_guids_only_when_both_are_plain")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 UnitGUID = function(unit) if unit == "player" then return "Player-1-1" end return "Creature-1-1" end
 pfire("PARTY_KILL", "Player-1-1", "Creature-1-1")
 pfire("PARTY_KILL", "Player-9-9", "Creature-1-1")
@@ -2997,7 +2997,7 @@ case("priest_log_entries_never_touch_secret_payloads", "secret")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 pfire("UNIT_POWER_UPDATE", SS, SS)
 pfire("UNIT_POWER_FREQUENT", SS, SS)
 pfire("UNIT_SPELLCAST_SUCCEEDED", SS, SS, SN)
@@ -3022,7 +3022,7 @@ case("priest_snapshot_with_secret_values_stores_only_plain_data", "secret")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 check(p.ooc.mana.playerPower.r1.isSecret == true and p.ooc.mana.playerPower.r1.value == nil, "secret mana stored as a flag")
 check(p.ooc.shield.player.GetDamageAbsorbs.r1.isSecret == true, "secret absorb flagged")
 local cd = p.ooc.cooldowns.pw_shield.s17
@@ -3039,7 +3039,7 @@ scan(p)
 case("priest_missing_apis_record_absent_and_the_rest_still_runs")(
     r"""
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 local o = p.ooc
 check(o.mana.regen.exists == false and o.mana.regenForMana.exists == false, "a missing API must record exists=false")
 check(o.mana.playerPower.exists and o.mana.playerPower.ok, "present APIs still read")
@@ -3053,8 +3053,8 @@ priestMock()
 GetPowerRegen = nil
 runCmd("priest off")
 runCmd("priest")
-check(ForeverSTUwaveDB.fsprobe.priest.ooc.mana.regen.exists == false and ForeverSTUwaveDB.fsprobe.priest.ooc.mana.regenForMana.ok, "siblings of a missing API")
-scan(ForeverSTUwaveDB.fsprobe.priest)
+check(ForeverSTUwaveDB.fscheck.priest.ooc.mana.regen.exists == false and ForeverSTUwaveDB.fscheck.priest.ooc.mana.regenForMana.ok, "siblings of a missing API")
+scan(ForeverSTUwaveDB.fscheck.priest)
 """
 )
 
@@ -3062,7 +3062,7 @@ case("priest_every_api_throws", "throw")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 check(p and p.ooc, "snapshot must still be saved")
 check(type(p.ooc.mana.playerPower.err) == "string" and p.ooc.mana.playerPower.ok == false, "error stored as a string")
 check(p.ooc.mana.playerPower.inCombat == false, "error records are tagged too")
@@ -3081,7 +3081,7 @@ case("priest_even_createframe_throws", "throw")(
 priestMock()
 __frameThrows = true
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 check(p.ooc, "snapshot should still be saved")
 check(type(p.meta.frameError) == "string" and said("nothing armed"), "frame failure must be recorded and said")
 runCmd("priest off")
@@ -3093,13 +3093,13 @@ case("priest_second_command_snapshots_again_without_clearing_the_logs")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 pfire("UNIT_POWER_UPDATE", "player", "MANA")
 local first = p.ooc
 runCmd("priest")
-check(ForeverSTUwaveDB.fsprobe.priest == p, "second command must keep the record")
+check(ForeverSTUwaveDB.fscheck.priest == p, "second command must keep the record")
 check(p.ooc ~= first and p.ooc.kind == "ooc" and p.ooc.mana, "second command must replace the snapshot with a fresh one")
-check(ForeverSTUwaveDB.fsprobe.priest.logs.power.total == 1, "logs must survive a second command")
+check(ForeverSTUwaveDB.fscheck.priest.logs.power.total == 1, "logs must survive a second command")
 check(#__timers >= 1 and pendingTimers() == 1, "exactly one stop timer: " .. pendingTimers())
 """
 )
@@ -3110,31 +3110,31 @@ priestMock()
 runCmd("priest")
 local f = pframe()
 runCmd("priest off")
-check(nevents(f) == 0 and ForeverSTUwaveDB.fsprobe.priest.meta.status == "stopped", "off must unregister")
+check(nevents(f) == 0 and ForeverSTUwaveDB.fscheck.priest.meta.status == "stopped", "off must unregister")
 pcall(f._scripts.OnEvent, f, "UNIT_POWER_UPDATE", "player", "MANA")
-check((ForeverSTUwaveDB.fsprobe.priest.logs.power or { total = 0 }).total == 0, "an event after off was logged")
+check((ForeverSTUwaveDB.fscheck.priest.logs.power or { total = 0 }).total == 0, "an event after off was logged")
 -- a fresh start replaces the record; the 20 minute timer unregisters
 runCmd("priest")
 check(nevents(f) > 0, "restart must register again")
 advance(1199)
 check(nevents(f) > 0, "stopped early")
 advance(2)
-check(nevents(f) == 0 and ForeverSTUwaveDB.fsprobe.priest.meta.status == "timeout", "timeout must unregister")
+check(nevents(f) == 0 and ForeverSTUwaveDB.fscheck.priest.meta.status == "timeout", "timeout must unregister")
 -- the old run's timer must not stop a newer run: run A's stop timer is due at +1200, run B starts at +600
 runCmd("priest")
 runCmd("priest off")
 advance(600)
 runCmd("priest")
 advance(601)
-check(nevents(f) > 0 and ForeverSTUwaveDB.fsprobe.priest.meta.status == "logging", "a stale timer stopped the newer run")
--- the main run keeps a running priest probe and its result
+check(nevents(f) > 0 and ForeverSTUwaveDB.fscheck.priest.meta.status == "logging", "a stale timer stopped the newer run")
+-- the main run keeps a running priest check and its result
 runCmd("")
-check(ForeverSTUwaveDB.fsprobe.priest and nevents(f) > 0, "main arm wiped or stopped the priest probe")
+check(ForeverSTUwaveDB.fscheck.priest and nevents(f) > 0, "main arm wiped or stopped the priest check")
 -- reset clears everything and stops it
 runCmd("reset")
-check(ForeverSTUwaveDB.fsprobe == nil and nevents(f) == 0, "reset left priest data or events")
+check(ForeverSTUwaveDB.fscheck == nil and nevents(f) == 0, "reset left priest data or events")
 advance(5000)
-check(ForeverSTUwaveDB.fsprobe == nil, "a stale timer wrote after reset")
+check(ForeverSTUwaveDB.fscheck == nil, "a stale timer wrote after reset")
 noOnUpdate()
 """
 )
@@ -3143,7 +3143,7 @@ case("priest_five_second_clock_goes_unknown_when_a_cast_cost_is_unreadable")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 pfire("UNIT_SPELLCAST_SUCCEEDED", "player", "c1", 585)
 __now = __now + 2
 pfire("UNIT_POWER_UPDATE", "player", "MANA")
@@ -3173,7 +3173,7 @@ case("priest_cost_table_with_secret_fields_marks_the_five_second_clock_unknown")
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 pfire("UNIT_SPELLCAST_SUCCEEDED", "player", "c1", 585)
 -- a plain cost table whose type or cost field is secret: not a free cast, an unreadable one
 C_Spell.GetSpellPowerCost = function() return { { type = SN, cost = SN } } end
@@ -3195,7 +3195,7 @@ case("priest_timeout_stop_failure_is_recorded_not_thrown")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 local f = pframe()
 local real = print
 print = function() error("boom: print") end
@@ -3214,7 +3214,7 @@ runCmd("priest")
 check(pframe() == nil, "no frame, no armed events")
 __frameThrows = false
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 check(pframe() and nevents(pframe()) > 0 and p.meta.status == "logging", "a retry after a failed start must start fresh")
 check(p.meta.frameError == nil, "fresh record after the retry")
 """
@@ -3251,13 +3251,13 @@ case("priest_range_read_falls_back_through_the_spell_list")(
 priestMock()
 C_Spell.IsSpellInRange = function(name) if name == "Flash Heal" then return true end end
 runCmd("priest")
-local t = ForeverSTUwaveDB.fsprobe.priest.ooc.triage
+local t = ForeverSTUwaveDB.fscheck.priest.ooc.triage
 check(t.rangeSpell == "Flash Heal" and t.rangeTried == "Lesser Heal,Heal,Flash Heal", "fallback: " .. tostring(t.rangeSpell) .. " / " .. tostring(t.rangeTried))
 check(t.party1InRangeOfHeal.r1.type == "nil" or t.party1InRangeOfHeal.r1.value == true, "party read uses the chosen spell")
 runCmd("priest off")
 C_Spell.IsSpellInRange = function() end
 runCmd("priest")
-t = ForeverSTUwaveDB.fsprobe.priest.ooc.triage
+t = ForeverSTUwaveDB.fscheck.priest.ooc.triage
 check(t.rangeSpell == "none answered" and t.rangeTried == "Lesser Heal,Heal,Flash Heal,Renew,Power Word: Shield", "none answered: " .. tostring(t.rangeSpell))
 """
 )
@@ -3267,7 +3267,7 @@ case("priest_without_c_timer_snapshots_at_once_and_says_why")(
 priestMock()
 C_Timer.After = nil
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 check(type(p.meta.timerError) == "string", "missing stop timer must be recorded")
 __combat = true
 pfire("PLAYER_REGEN_DISABLED")
@@ -3281,7 +3281,7 @@ case("priest_secret_gettime_marks_entries_notime")(
     r"""
 priestMock()
 runCmd("priest")
-local p = ForeverSTUwaveDB.fsprobe.priest
+local p = ForeverSTUwaveDB.fscheck.priest
 pfire("UNIT_POWER_UPDATE", "player", "MANA")
 GetTime = function() return SN end
 pfire("UNIT_POWER_UPDATE", "player", "MANA")
@@ -3296,16 +3296,16 @@ scan(p)
 case("priest_usage_lists_the_command")(
     r"""
 runCmd("help")
-check(said("/fsprobe priest"), "usage must list /fsprobe priest")
+check(said("/fscheck priest"), "usage must list /fscheck priest")
 """
 )
 
-# --- /fsprobe shaman -----------------------------------------------------------------------------
+# --- /fscheck shaman -----------------------------------------------------------------------------
 
 case("shaman_usage_lists_the_command")(
     r"""
 runCmd("help")
-check(said("/fsprobe shaman"), "usage must list /fsprobe shaman")
+check(said("/fscheck shaman"), "usage must list /fscheck shaman")
 check(said("shaman buttons") and said("shaman setslot") and said("shaman destroy"), "usage must list the explicit subcommands")
 """
 )
@@ -3316,7 +3316,7 @@ shamanMock({ [8071] = true, [36936] = true })
 shamanFrames(true)
 __totem[2] = { true, "Stoneskin Totem", 990, 300, 136098, 1, 8071 }
 runCmd("shaman")
-local s = ForeverSTUwaveDB.fsprobe.shaman
+local s = ForeverSTUwaveDB.fscheck.shaman
 check(s and s.ooc and s.ooc.kind == "ooc" and s.ooc.inCombat == false, "ooc snapshot tagged false")
 check(s.meta.status == "logging", "status: " .. tostring(s.meta.status))
 local o = s.ooc
@@ -3373,7 +3373,7 @@ local f = sframe()
 check(f._events.PLAYER_TOTEM_UPDATE == true and f._events.UPDATE_MULTI_CAST_ACTIONBAR == true and f._events.PLAYER_REGEN_DISABLED == true, "events")
 check(f._events.UNIT_SPELLCAST_SUCCEEDED == "unit:player" and f._events.UNIT_SPELLCAST_FAILED == "unit:player", "cast events are unit events")
 check(__cleuAttempts == 0, "COMBAT_LOG_EVENT_UNFILTERED must never be registered (protected on Forever): " .. tostring(__cleuAttempts))
-check(said("/fsprobe shaman setslot") and said("/fsprobe shaman buttons"), "short usage printed at start")
+check(said("/fscheck shaman setslot") and said("/fscheck shaman buttons"), "short usage printed at start")
 noOnUpdate()
 scan(s)
 """
@@ -3384,11 +3384,11 @@ case("shaman_blank_gettotem_info_is_recorded_exactly")(
 shamanMock()
 __totem[2] = { true, "", 0, 0, 0, 1, 0 }
 runCmd("shaman")
-local e = ForeverSTUwaveDB.fsprobe.shaman.ooc.totems.slots.s2
+local e = ForeverSTUwaveDB.fscheck.shaman.ooc.totems.slots.s2
 check(e.info.r1.value == true and e.info.r2.value == "" and e.info.r2.isSecret == false, "blank name recorded as a plain empty string")
 check(e.brief == "boolean/plain=true,string/plain=,number/plain=0,number/plain=0,number/plain=0,number/plain=1,number/plain=0", "brief: " .. tostring(e.brief))
 check(e.looksBlank == true, "a live totem with no name is flagged")
-check(ForeverSTUwaveDB.fsprobe.shaman.ooc.totems.slots.s1.looksBlank == false, "an empty slot is not a blank report")
+check(ForeverSTUwaveDB.fscheck.shaman.ooc.totems.slots.s1.looksBlank == false, "an empty slot is not a blank report")
 """
 )
 
@@ -3396,7 +3396,7 @@ case("shaman_low_level_names_what_could_not_run")(
     r"""
 shamanMock()
 runCmd("shaman")
-local c = ForeverSTUwaveDB.fsprobe.shaman.ooc.checks
+local c = ForeverSTUwaveDB.fscheck.shaman.ooc.checks
 local text = table.concat(c.notRun, "|")
 for _, name in ipairs({ "Totemic Recall", "Call of the Elements", "Searing Totem", "Fire Nova" }) do
     check(string.find(c.spellsNotKnown, name, 1, true), name .. " must be listed as not known: " .. c.spellsNotKnown)
@@ -3405,9 +3405,9 @@ check(c.spellsKnown == "Stoneskin Totem (8071)", "known list: " .. tostring(c.sp
 check(string.find(text, "no totem was down", 1, true), "no live totem must be said: " .. text)
 check(string.find(text, "MultiCastActionBarFrame", 1, true), "an absent native bar frame must be said")
 check(string.find(text, "bar", 1, true) and string.find(text, "not shown", 1, true) or string.find(text, "absent", 1, true), "bar state")
-check(ForeverSTUwaveDB.fsprobe.shaman.ooc.cooldowns.searing.skipped == "no id", "a totem whose name does not resolve is not read")
+check(ForeverSTUwaveDB.fscheck.shaman.ooc.cooldowns.searing.skipped == "no id", "a totem whose name does not resolve is not read")
 check(said("checks could not run"), "chat line")
-scan(ForeverSTUwaveDB.fsprobe.shaman)
+scan(ForeverSTUwaveDB.fscheck.shaman)
 """
 )
 
@@ -3416,7 +3416,7 @@ case("shaman_combat_snapshot_follows_the_pull_and_sits_beside_the_ooc_one")(
 shamanMock()
 __totem[2] = { true, "Stoneskin Totem", 990, 300, 136098, 1, 8071 }
 runCmd("shaman")
-local s = ForeverSTUwaveDB.fsprobe.shaman
+local s = ForeverSTUwaveDB.fscheck.shaman
 __combat = true
 sfire("PLAYER_REGEN_DISABLED")
 advance(2)
@@ -3439,7 +3439,7 @@ sfire("PLAYER_TOTEM_UPDATE", 2)
 __totem[2] = nil
 advance(1)
 sfire("PLAYER_TOTEM_UPDATE", 2)
-local log = ForeverSTUwaveDB.fsprobe.shaman.logs.totem
+local log = ForeverSTUwaveDB.fscheck.shaman.logs.totem
 check(log.total == 2 and #log.entries == 2, "two events logged")
 local a, b = log.entries[1], log.entries[2]
 check(a.event == "PLAYER_TOTEM_UPDATE" and a.argCount == 1 and a.slot.type == "number" and a.slot.isSecret == false and a.slot.value == 2, "slot argument plain")
@@ -3454,10 +3454,10 @@ case("shaman_totem_update_with_a_secret_slot_reads_every_slot", "secret")(
 shamanMock()
 runCmd("shaman")
 sfire("PLAYER_TOTEM_UPDATE", SN)
-local e = ForeverSTUwaveDB.fsprobe.shaman.logs.totem.entries[1]
+local e = ForeverSTUwaveDB.fscheck.shaman.logs.totem.entries[1]
 check(e.slot.isSecret == true and e.slot.value == nil, "a secret slot is described, not stored")
 check(e.info == nil and e.all.s1 and e.all.s4, "every slot is read instead")
-scan(ForeverSTUwaveDB.fsprobe.shaman)
+scan(ForeverSTUwaveDB.fscheck.shaman)
 """
 )
 
@@ -3469,7 +3469,7 @@ sfire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 8071)
 sfire("UNIT_SPELLCAST_SUCCEEDED", "party1", "Cast-2", 8071)
 sfire("UNIT_SPELLCAST_FAILED", "player", "Cast-3", 2484)
 sfire("UPDATE_MULTI_CAST_ACTIONBAR")
-local logs = ForeverSTUwaveDB.fsprobe.shaman.logs
+local logs = ForeverSTUwaveDB.fscheck.shaman.logs
 check(logs.cast.total == 2 and logs.cast.entries[1].spellName == "Stoneskin Totem" and logs.cast.entries[2].event == "UNIT_SPELLCAST_FAILED", "player casts only, with the spell name")
 check(logs.cast.entries[1].spellID.value == 8071 and logs.cast.entries[1].inCombat == false, "cast entry")
 check(logs.multicast.total == 1 and string.find(logs.multicast.entries[1].hasBar, "boolean/plain=false", 1, true), "multicast update logged with a readout")
@@ -3482,7 +3482,7 @@ shamanMock()
 runCmd("shaman")
 for i = 1, 130 do sfire("PLAYER_TOTEM_UPDATE", 2) end
 for i = 1, 70 do sfire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-" .. i, 8071) end
-local logs = ForeverSTUwaveDB.fsprobe.shaman.logs
+local logs = ForeverSTUwaveDB.fscheck.shaman.logs
 check(#logs.totem.entries == logs.totem.cap and logs.totem.cap == 100 and logs.totem.total == 130 and logs.totem.dropped == 30, "totem log capped at 100")
 check(#logs.cast.entries == 50 and logs.cast.total == 70 and logs.cast.dropped == 20, "cast log capped at 50")
 """
@@ -3493,7 +3493,7 @@ case("shaman_snapshot_with_secret_values_stores_only_plain_data", "secret")(
 shamanMock()
 shamanFrames(true)
 runCmd("shaman")
-local s = ForeverSTUwaveDB.fsprobe.shaman
+local s = ForeverSTUwaveDB.fscheck.shaman
 check(s.ooc.classToken == "unknown", "a secret class fails closed")
 check(s.ooc.totems.slots.s2.info.r1.isSecret == true and s.ooc.totems.slots.s2.info.r1.value == nil, "secret totem info is described only")
 check(s.ooc.totems.slots.s2.looksBlank == nil or s.ooc.totems.slots.s2.looksBlank == "unknown", "no verdict on a secret read")
@@ -3516,7 +3516,7 @@ case("shaman_every_api_throws", "throw")(
 shamanMock()
 shamanFrames(true)
 runCmd("shaman")
-local s = ForeverSTUwaveDB.fsprobe.shaman
+local s = ForeverSTUwaveDB.fscheck.shaman
 check(s and s.ooc and s.meta.status == "logging", "snapshot saved despite every API throwing")
 sfire("PLAYER_TOTEM_UPDATE", 2)
 sfire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 8071)
@@ -3537,7 +3537,7 @@ case("shaman_even_createframe_throws", "throw")(
 __frameThrows = true
 shamanMock()
 runCmd("shaman")
-local s = ForeverSTUwaveDB.fsprobe.shaman
+local s = ForeverSTUwaveDB.fscheck.shaman
 check(s.ooc and s.meta.status == "no frame", "snapshot saved, nothing armed: " .. tostring(s.meta.status))
 runCmd("shaman buttons")
 runCmd("shaman buttons off")
@@ -3562,10 +3562,10 @@ __combat = false
 sfire("PLAYER_REGEN_ENABLED")
 advance(2)
 runCmd("shaman")
-check(#__setCalls == 0, "SetMultiCastSpell must only run from /fsprobe shaman setslot: " .. #__setCalls)
-check(#__destroyCalls == 0, "DestroyTotem must only run from /fsprobe shaman destroy: " .. #__destroyCalls)
+check(#__setCalls == 0, "SetMultiCastSpell must only run from /fscheck shaman setslot: " .. #__setCalls)
+check(#__destroyCalls == 0, "DestroyTotem must only run from /fscheck shaman destroy: " .. #__destroyCalls)
 check(blizzTouched() == 0, "Blizzard's totem frames must never be changed: " .. select(2, blizzTouched()))
-check(FSProbeShamanBtn1 == nil and FSProbeShamanStrip == nil, "no test strip unless asked")
+check(FSCheckShamanBtn1 == nil and FSCheckShamanStrip == nil, "no totem button row unless asked")
 """
 )
 
@@ -3579,12 +3579,12 @@ runCmd("shaman setslot")
 check(#__setCalls == 2, "one pick and one restore: " .. #__setCalls)
 check(__setCalls[1][1] == 134 and __setCalls[1][2] == 2484 and __setCalls[1][3] == true, "picks the other known totem on the earth slot, in combat")
 check(__setCalls[2][1] == 134 and __setCalls[2][2] == 8071, "restores the previous pick")
-local r = ForeverSTUwaveDB.fsprobe.shaman.setslot.runs[1]
+local r = ForeverSTUwaveDB.fscheck.shaman.setslot.runs[1]
 check(r.inCombat == true and r.actionId == 134 and r.slot == 2 and r.spellId == 2484 and r.previousSpellId == 8071, "run record")
 check(r.call.ok == true and r.changed == true and r.restore.call.ok == true, "call results")
 check(string.find(r.before.info, "number/plain=8071", 1, true) and string.find(r.after.info, "number/plain=2484", 1, true), "before and after readouts")
 check(said("SetMultiCastSpell(134, 2484)") and said("ADDON_ACTION_BLOCKED"), "the chat line comes before the call and names the risk")
-scan(ForeverSTUwaveDB.fsprobe.shaman)
+scan(ForeverSTUwaveDB.fscheck.shaman)
 """
 )
 
@@ -3594,7 +3594,7 @@ shamanMock()
 __mcSpells = {}
 runCmd("shaman setslot")
 check(#__setCalls == 0, "no spell list, no call")
-local r = ForeverSTUwaveDB.fsprobe.shaman.setslot.runs[1]
+local r = ForeverSTUwaveDB.fscheck.shaman.setslot.runs[1]
 check(type(r.skipped) == "string" and string.find(r.skipped, "no totem spells", 1, true), "skip reason recorded: " .. tostring(r.skipped))
 check(said("setslot"), "chat line")
 """
@@ -3606,7 +3606,7 @@ shamanMock()
 __totem[2] = { true, "Stoneskin Totem", 990, 300, 136098, 1, 8071 }
 runCmd("shaman destroy")
 check(#__destroyCalls == 1 and __destroyCalls[1][1] == 2, "the first live slot is dismissed")
-local r = ForeverSTUwaveDB.fsprobe.shaman.destroy.runs[1]
+local r = ForeverSTUwaveDB.fscheck.shaman.destroy.runs[1]
 check(r.slot == 2 and r.call.ok == true and string.find(r.before, "boolean/plain=true", 1, true) and string.find(r.after, "boolean/plain=false", 1, true), "before and after")
 runCmd("shaman destroy 3")
 check(#__destroyCalls == 2 and __destroyCalls[2][1] == 3, "an explicit slot")
@@ -3619,24 +3619,24 @@ case("shaman_buttons_strip_is_built_out_of_combat_with_the_right_attributes")(
     r"""
 shamanMock({ [8071] = true, [2484] = true, [36936] = true })
 runCmd("shaman buttons")
-local b1, b2, b3 = FSProbeShamanBtn1, FSProbeShamanBtn2, FSProbeShamanBtn3
+local b1, b2, b3 = FSCheckShamanBtn1, FSCheckShamanBtn2, FSCheckShamanBtn3
 check(b1 and b2 and b3, "three buttons")
 check(b1._tmpl == "SecureActionButtonTemplate" and b2._tmpl == "SecureActionButtonTemplate" and b3._tmpl == "SecureActionButtonTemplate", "secure templates")
 check(b1._attrs.type1 == "destroytotem" and b1._attrs["totem-slot1"] == 1 and b1._attrs.type2 == "destroytotem" and b1._attrs["totem-slot2"] == 2, "dismiss slots 1 and 2")
 check(b1._attrs["shift-type1"] == "destroytotem" and b1._attrs["shift-totem-slot1"] == 3 and b1._attrs["shift-totem-slot2"] == 4, "dismiss slots 3 and 4 on shift")
 check(b2._attrs.type == "macro" and b2._attrs.macrotext == "/castsequence reset=combat/15 Stoneskin Totem, Earthbind Totem", "castsequence: " .. tostring(b2._attrs.macrotext))
 check(b3._attrs.type == "spell" and b3._attrs.spell == "Totemic Recall", "recall")
-check(FSProbeShamanStrip._shown == true and FSProbeShamanStrip._parent == UIParent, "strip shown on UIParent")
-check(ForeverSTUwaveDB.fsprobe.shaman.meta.status == "logging", "logging starts with the strip")
-check(said("TEST STRIP") and said("buttons off"), "usage line")
-local st = ForeverSTUwaveDB.fsprobe.shaman.strip
+check(FSCheckShamanStrip._shown == true and FSCheckShamanStrip._parent == UIParent, "strip shown on UIParent")
+check(ForeverSTUwaveDB.fscheck.shaman.meta.status == "logging", "logging starts with the strip")
+check(said("TOTEM BUTTONS") and said("buttons off"), "usage line")
+local st = ForeverSTUwaveDB.fscheck.shaman.strip
 check(st.shown == true and st.buttons.castsequence.macrotext == b2._attrs.macrotext and st.buttons.recall.spell == "Totemic Recall", "strip recorded")
 runCmd("shaman buttons off")
-check(FSProbeShamanStrip._shown == false and ForeverSTUwaveDB.fsprobe.shaman.strip.shown == false, "hidden by buttons off")
+check(FSCheckShamanStrip._shown == false and ForeverSTUwaveDB.fscheck.shaman.strip.shown == false, "hidden by buttons off")
 runCmd("shaman buttons")
-check(FSProbeShamanStrip._shown == true, "shown again")
-check(FSProbeShamanBtn1 == b1 and b1._calls.HookScript == 2, "the buttons are built once and hooked once")
-scan(ForeverSTUwaveDB.fsprobe.shaman)
+check(FSCheckShamanStrip._shown == true, "shown again")
+check(FSCheckShamanBtn1 == b1 and b1._calls.HookScript == 2, "the buttons are built once and hooked once")
+scan(ForeverSTUwaveDB.fscheck.shaman)
 """
 )
 
@@ -3644,14 +3644,14 @@ case("shaman_buttons_skip_what_is_not_known")(
     r"""
 shamanMock()
 runCmd("shaman buttons")
-local b2, b3 = FSProbeShamanBtn2, FSProbeShamanBtn3
+local b2, b3 = FSCheckShamanBtn2, FSCheckShamanBtn3
 check(b2._attrs.macrotext == "/castsequence reset=combat/15 Stoneskin Totem, Stoneskin Totem", "one known totem repeats: " .. tostring(b2._attrs.macrotext))
 check(b3._attrs.type == nil and b3._attrs.spell == nil, "an unknown recall button carries no attribute")
-local st = ForeverSTUwaveDB.fsprobe.shaman.strip.buttons
+local st = ForeverSTUwaveDB.fscheck.shaman.strip.buttons
 check(string.find(st.recall.skipped, "Totemic Recall not known", 1, true), "reason: " .. tostring(st.recall.skipped))
 shamanMock({})
 runCmd("shaman buttons")
-check(FSProbeShamanBtn2._attrs.macrotext == nil and string.find(ForeverSTUwaveDB.fsprobe.shaman.strip.buttons.castsequence.skipped, "no totem known", 1, true), "no totem known")
+check(FSCheckShamanBtn2._attrs.macrotext == nil and string.find(ForeverSTUwaveDB.fscheck.shaman.strip.buttons.castsequence.skipped, "no totem known", 1, true), "no totem known")
 """
 )
 
@@ -3660,21 +3660,21 @@ case("shaman_buttons_never_change_secure_frames_in_combat")(
 shamanMock()
 __combat = true
 runCmd("shaman buttons")
-check(FSProbeShamanBtn1 == nil and FSProbeShamanStrip == nil, "nothing is built in combat")
+check(FSCheckShamanBtn1 == nil and FSCheckShamanStrip == nil, "nothing is built in combat")
 check(said("leave combat"), "refusal line")
 __combat = false
 runCmd("shaman buttons")
-local b = FSProbeShamanBtn1
-local before = { b._calls.SetAttribute, b._calls.Show, b._calls.Hide, FSProbeShamanStrip._calls.Hide, FSProbeShamanStrip._calls.Show, FSProbeShamanStrip._calls.SetPoint }
+local b = FSCheckShamanBtn1
+local before = { b._calls.SetAttribute, b._calls.Show, b._calls.Hide, FSCheckShamanStrip._calls.Hide, FSCheckShamanStrip._calls.Show, FSCheckShamanStrip._calls.SetPoint }
 __combat = true
 runCmd("shaman buttons")
 runCmd("shaman buttons off")
-local after = { b._calls.SetAttribute, b._calls.Show, b._calls.Hide, FSProbeShamanStrip._calls.Hide, FSProbeShamanStrip._calls.Show, FSProbeShamanStrip._calls.SetPoint }
+local after = { b._calls.SetAttribute, b._calls.Show, b._calls.Hide, FSCheckShamanStrip._calls.Hide, FSCheckShamanStrip._calls.Show, FSCheckShamanStrip._calls.SetPoint }
 for i = 1, 6 do check(before[i] == after[i], "a secure frame call ran in combat, index " .. i) end
-check(FSProbeShamanStrip._args.SetAlpha[1] == 0 and said("alpha 0"), "in combat the strip is only faded")
+check(FSCheckShamanStrip._args.SetAlpha[1] == 0 and said("alpha 0"), "in combat the strip is only faded")
 __combat = false
 runCmd("shaman buttons off")
-check(FSProbeShamanStrip._shown == false, "hidden once out of combat")
+check(FSCheckShamanStrip._shown == false, "hidden once out of combat")
 """
 )
 
@@ -3682,7 +3682,7 @@ case("shaman_click_outcomes_are_logged_with_what_followed")(
     r"""
 shamanMock({ [8071] = true, [2484] = true })
 runCmd("shaman buttons")
-local b = FSProbeShamanBtn1
+local b = FSCheckShamanBtn1
 check(type(b._hookScripts.PreClick) == "function" and type(b._hookScripts.PostClick) == "function", "click hooks")
 __totem[2] = { true, "Stoneskin Totem", 990, 300, 136098, 1, 8071 }
 b._hookScripts.PreClick(b, "RightButton", false)
@@ -3693,14 +3693,14 @@ advance(0.5)
 sfire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-1", 8071)
 advance(4)
 sfire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-2", 8071)
-local click = ForeverSTUwaveDB.fsprobe.shaman.logs.click.entries[1]
+local click = ForeverSTUwaveDB.fscheck.shaman.logs.click.entries[1]
 check(click.event == "PreClick" and click.button == "dismiss" and click.mouse.value == "RightButton" and click.down.value == false, "click entry: " .. tostring(click.button))
 check(string.find(click.totemsBefore.s2, "boolean/plain=true", 1, true) and string.find(click.post.totems.s2, "boolean/plain=false", 1, true), "state before and after the click")
 check(type(click.post.t) == "number" and click.post.event == "PostClick", "post stamp")
 check(#click.follow == 2 and click.follow[1].event == "PLAYER_TOTEM_UPDATE" and click.follow[2].event == "UNIT_SPELLCAST_SUCCEEDED" and click.follow[2].dt == 0.5,
     "events within 3 s follow the click, later ones do not: " .. #click.follow)
 check(string.find(click.follow[2].what, "Stoneskin Totem", 1, true), "what followed")
-scan(ForeverSTUwaveDB.fsprobe.shaman)
+scan(ForeverSTUwaveDB.fscheck.shaman)
 """
 )
 
@@ -3711,7 +3711,7 @@ shamanFrames(true)
 __mcSpells[2] = { 8071, 2484 }
 runCmd("shaman")
 runCmd("shaman buttons")
-local b = FSProbeShamanBtn1
+local b = FSCheckShamanBtn1
 b._hookScripts.PreClick(b, "LeftButton", true)
 sfire("PLAYER_TOTEM_UPDATE", 2)
 b._hookScripts.PostClick(b, "LeftButton", true)
@@ -3735,29 +3735,29 @@ shamanMock()
 runCmd("shaman")
 local f = sframe()
 runCmd("shaman off")
-check(nevents(f) == 0 and ForeverSTUwaveDB.fsprobe.shaman.meta.status == "stopped", "off must unregister")
+check(nevents(f) == 0 and ForeverSTUwaveDB.fscheck.shaman.meta.status == "stopped", "off must unregister")
 pcall(f._scripts.OnEvent, f, "PLAYER_TOTEM_UPDATE", 2)
-check((ForeverSTUwaveDB.fsprobe.shaman.logs.totem or { total = 0 }).total == 0, "an event after off was logged")
+check((ForeverSTUwaveDB.fscheck.shaman.logs.totem or { total = 0 }).total == 0, "an event after off was logged")
 runCmd("shaman")
 check(nevents(f) > 0, "restart must register again")
 advance(1799)
 check(nevents(f) > 0, "stopped early")
 advance(2)
-check(nevents(f) == 0 and ForeverSTUwaveDB.fsprobe.shaman.meta.status == "timeout", "timeout must unregister")
+check(nevents(f) == 0 and ForeverSTUwaveDB.fscheck.shaman.meta.status == "timeout", "timeout must unregister")
 runCmd("shaman")
 runCmd("shaman off")
 advance(600)
 runCmd("shaman")
 advance(1201)
-check(nevents(f) > 0 and ForeverSTUwaveDB.fsprobe.shaman.meta.status == "logging", "a stale timer stopped the newer run")
+check(nevents(f) > 0 and ForeverSTUwaveDB.fscheck.shaman.meta.status == "logging", "a stale timer stopped the newer run")
 runCmd("")
-check(ForeverSTUwaveDB.fsprobe.shaman and nevents(f) > 0, "main arm wiped or stopped the shaman probe")
+check(ForeverSTUwaveDB.fscheck.shaman and nevents(f) > 0, "main arm wiped or stopped the shaman check")
 runCmd("shaman buttons")
 runCmd("reset")
-check(ForeverSTUwaveDB.fsprobe == nil and nevents(f) == 0, "reset left shaman data or events")
-check(FSProbeShamanStrip._shown == false, "reset hides the strip")
+check(ForeverSTUwaveDB.fscheck == nil and nevents(f) == 0, "reset left shaman data or events")
+check(FSCheckShamanStrip._shown == false, "reset hides the strip")
 advance(5000)
-check(ForeverSTUwaveDB.fsprobe == nil, "a stale timer wrote after reset")
+check(ForeverSTUwaveDB.fscheck == nil, "a stale timer wrote after reset")
 noOnUpdate()
 """
 )
@@ -3785,13 +3785,13 @@ sfire("PLAYER_TOTEM_UPDATE", 2)
 runCmd("shaman setslot")
 runCmd("shaman destroy 2")
 runCmd("shaman buttons")
-local s = ForeverSTUwaveDB.fsprobe.shaman
+local s = ForeverSTUwaveDB.fscheck.shaman
 local ooc, total, setRuns, destroyRuns = s.ooc, s.logs.totem.total, #s.setslot.runs, #s.destroy.runs
 check(ooc and total >= 1 and setRuns == 1 and destroyRuns == 1, "setup")
 runCmd("shaman off")
 check(s.meta.status == "stopped", "stopped")
 runCmd("shaman buttons")
-local now = ForeverSTUwaveDB.fsprobe.shaman
+local now = ForeverSTUwaveDB.fscheck.shaman
 check(now == s and now.ooc == ooc, "buttons after off replaced the record")
 check(now.logs.totem.total == total and #now.setslot.runs == setRuns and #now.destroy.runs == destroyRuns, "buttons after off lost logs or runs")
 check(now.meta.status == "logging" and nevents(sframe()) > 0, "logging must be re-armed: " .. tostring(now.meta.status))
@@ -3809,12 +3809,12 @@ shamanMock()
 runCmd("shaman")
 sfire("PLAYER_TOTEM_UPDATE", 2)
 runCmd("shaman setslot")
-local s = ForeverSTUwaveDB.fsprobe.shaman
+local s = ForeverSTUwaveDB.fscheck.shaman
 local ooc = s.ooc
 advance(1801)
 check(s.meta.status == "timeout", "timed out")
 runCmd("shaman buttons")
-local now = ForeverSTUwaveDB.fsprobe.shaman
+local now = ForeverSTUwaveDB.fscheck.shaman
 check(now == s and now.ooc == ooc and now.logs.totem.total == 1 and now.setslot.runs[1], "the timeout then buttons wiped the record")
 check(now.meta.status == "logging" and now.meta.resumed == 1, "re-armed and counted: " .. tostring(now.meta.resumed))
 advance(1801)
@@ -3826,22 +3826,22 @@ case("shaman_buttons_after_a_runs_only_record_takes_a_fresh_snapshot_and_keeps_t
     r"""
 shamanMock()
 runCmd("shaman setslot")
-local before = ForeverSTUwaveDB.fsprobe.shaman
+local before = ForeverSTUwaveDB.fscheck.shaman
 check(before and before.setslot and #before.setslot.runs == 1 and before.ooc == nil and before.meta == nil, "setup: a runs-only record")
 runCmd("shaman buttons")
-local now = ForeverSTUwaveDB.fsprobe.shaman
+local now = ForeverSTUwaveDB.fscheck.shaman
 check(now.ooc and now.ooc.kind == "ooc", "an ooc snapshot is taken at once, not left waiting for a regen event")
 check(now.meta and now.meta.status == "logging", "a fresh meta is written")
 check(now.setslot and #now.setslot.runs == 1, "the setslot run is carried over")
 """
 )
 
-case("shaman_buttons_with_no_record_starts_a_normal_probe")(
+case("shaman_buttons_with_no_record_starts_a_normal_check")(
     r"""
 shamanMock()
 runCmd("shaman buttons")
-local s = ForeverSTUwaveDB.fsprobe.shaman
-check(s.ooc and s.ooc.kind == "ooc" and s.meta.status == "logging", "no record: buttons starts the probe as before")
+local s = ForeverSTUwaveDB.fscheck.shaman
+check(s.ooc and s.ooc.kind == "ooc" and s.meta.status == "logging", "no record: buttons starts the check as before")
 """
 )
 
@@ -3851,18 +3851,18 @@ shamanMock({ [8071] = true, [2484] = true })
 __mcSpells[2] = { 8071, 2484 }
 runCmd("shaman setslot")
 runCmd("shaman destroy 2")
-check(ForeverSTUwaveDB.fsprobe.shaman.meta == nil, "explicit runs write without starting")
+check(ForeverSTUwaveDB.fscheck.shaman.meta == nil, "explicit runs write without starting")
 runCmd("shaman")
-local s = ForeverSTUwaveDB.fsprobe.shaman
+local s = ForeverSTUwaveDB.fscheck.shaman
 check(s.ooc and s.meta.status == "logging", "started")
-check(s.setslot and #s.setslot.runs == 1 and s.destroy and #s.destroy.runs == 1, "a later /fsprobe shaman erased the earlier runs")
+check(s.setslot and #s.setslot.runs == 1 and s.destroy and #s.destroy.runs == 1, "a later /fscheck shaman erased the earlier runs")
 for i = 1, 8 do runCmd("shaman setslot") end
-check(#ForeverSTUwaveDB.fsprobe.shaman.setslot.runs == 6, "runs stay capped: " .. #ForeverSTUwaveDB.fsprobe.shaman.setslot.runs)
+check(#ForeverSTUwaveDB.fscheck.shaman.setslot.runs == 6, "runs stay capped: " .. #ForeverSTUwaveDB.fscheck.shaman.setslot.runs)
 runCmd("shaman buttons")
 sfire("PLAYER_TOTEM_UPDATE", 2)
 runCmd("shaman off")
 runCmd("shaman")
-s = ForeverSTUwaveDB.fsprobe.shaman
+s = ForeverSTUwaveDB.fscheck.shaman
 check(#s.setslot.runs == 6 and #s.destroy.runs == 1, "restart kept the runs")
 check(s.strip and s.strip.shown == false and s.strip.buttons.dismiss, "restart kept the strip record")
 check(s.logs.totem == nil or s.logs.totem.total == 0, "logs are reset for the new run")
@@ -3870,8 +3870,8 @@ check(s.ooc and s.combat == nil, "snapshots are reset for the new run")
 runCmd("shaman setslot")
 runCmd("shaman off")
 runCmd("shaman")
-check(#ForeverSTUwaveDB.fsprobe.shaman.setslot.runs == 6, "merged and capped across restarts")
-scan(ForeverSTUwaveDB.fsprobe.shaman)
+check(#ForeverSTUwaveDB.fscheck.shaman.setslot.runs == 6, "merged and capped across restarts")
+scan(ForeverSTUwaveDB.fscheck.shaman)
 """
 )
 
@@ -3884,11 +3884,11 @@ nativeFrame("MultiCastActionButton2", 0, 0, 30, 30, true)
 MultiCastActionButton2.CalculateAction = function() return 137 end
 runCmd("shaman setslot")
 check(#__setCalls == 2 and __setCalls[1][1] == 137 and __setCalls[2][1] == 137 and __setCalls[2][2] == 8071, "the native button's id is used for the pick and the restore")
-local r = ForeverSTUwaveDB.fsprobe.shaman.setslot.runs[1]
+local r = ForeverSTUwaveDB.fscheck.shaman.setslot.runs[1]
 check(r.actionId == 137 and r.actionSource == "native CalculateAction" and r.computedActionId == 134, "source recorded: " .. tostring(r.actionSource))
 check(r.changed == true and r.previousSpellId == 8071, "ran against the native id")
 check(blizzTouched() == 0, "the native button was only read")
-scan(ForeverSTUwaveDB.fsprobe.shaman)
+scan(ForeverSTUwaveDB.fscheck.shaman)
 """
 )
 
@@ -3897,14 +3897,14 @@ case("shaman_setslot_falls_back_to_the_computed_action_id")(
 shamanMock({ [8071] = true, [2484] = true })
 __mcSpells[2] = { 8071, 2484 }
 runCmd("shaman setslot")
-local r = ForeverSTUwaveDB.fsprobe.shaman.setslot.runs[1]
+local r = ForeverSTUwaveDB.fscheck.shaman.setslot.runs[1]
 check(r.actionId == 134 and r.actionSource == "computed (bar-1)*12+slot" and r.computedActionId == nil, "no native button: " .. tostring(r.actionSource))
 shamanMock({ [8071] = true, [2484] = true })
 __mcSpells[2] = { 8071, 2484 }
 nativeFrame("MultiCastActionButton2", 0, 0, 30, 30, true)
 MultiCastActionButton2.CalculateAction = function() return "x" end
 runCmd("shaman setslot")
-local r2 = ForeverSTUwaveDB.fsprobe.shaman.setslot.runs[2]
+local r2 = ForeverSTUwaveDB.fscheck.shaman.setslot.runs[2]
 check(r2.actionId == 134 and r2.actionSource == "computed (bar-1)*12+slot", "an unusable CalculateAction falls back")
 """
 )
@@ -3916,11 +3916,11 @@ __mcSpells[2] = { 8071, 2484 }
 __actions[134] = nil
 runCmd("shaman setslot")
 check(#__setCalls == 1, "no previous pick, no restore call: " .. #__setCalls)
-local r = ForeverSTUwaveDB.fsprobe.shaman.setslot.runs[1]
+local r = ForeverSTUwaveDB.fscheck.shaman.setslot.runs[1]
 check(r.previousSpellId == nil and r.changed == "unknown", "run record")
 check(type(r.restore.skipped) == "string" and r.restore.leftChanged == true, "restore skipped and the bar flagged: " .. tostring(r.restore.skipped))
 check(said("slot left changed to") and said("Stoneskin Totem") and said("by hand"), "the chat line says the slot stays changed")
-scan(ForeverSTUwaveDB.fsprobe.shaman)
+scan(ForeverSTUwaveDB.fscheck.shaman)
 """
 )
 
@@ -3932,7 +3932,7 @@ __actions[134] = nil
 __actionRaw[134] = { "macro", 8071, "" }
 runCmd("shaman setslot")
 check(#__setCalls == 1, "a macro's id is not a spell id to restore: " .. #__setCalls)
-local r = ForeverSTUwaveDB.fsprobe.shaman.setslot.runs[1]
+local r = ForeverSTUwaveDB.fscheck.shaman.setslot.runs[1]
 check(r.previousSpellId == nil and r.previousType == "macro", "previous type recorded: " .. tostring(r.previousType))
 check(said("by hand"), "told to set it back by hand")
 """
@@ -3945,10 +3945,10 @@ __mcSpells[2] = { 8071, 2484 }
 GetActionInfo = function() return SS, SN, SS end
 runCmd("shaman setslot")
 check(#__setCalls == 1, "an unreadable slot is never restored")
-local r = ForeverSTUwaveDB.fsprobe.shaman.setslot.runs[1]
+local r = ForeverSTUwaveDB.fscheck.shaman.setslot.runs[1]
 check(type(r.restore.skipped) == "string" and r.restore.leftChanged == nil, "restore skipped")
 check(said("by hand") and said("unreadable"), "told to check and set it back by hand")
-scan(ForeverSTUwaveDB.fsprobe.shaman)
+scan(ForeverSTUwaveDB.fscheck.shaman)
 """
 )
 
@@ -3957,7 +3957,7 @@ case("shaman_setslot_with_only_one_totem_known_is_a_noop")(
 shamanMock()
 __mcSpells[2] = { 8071 }
 runCmd("shaman setslot")
-local r = ForeverSTUwaveDB.fsprobe.shaman.setslot.runs[1]
+local r = ForeverSTUwaveDB.fscheck.shaman.setslot.runs[1]
 check(r.noop == true and r.spellId == 8071 and r.previousSpellId == 8071, "pick equals the current pick")
 check(#__setCalls == 1 and r.changed == false, "one call, nothing changed")
 check(string.find(r.restore.skipped, "no-op", 1, true), "restore skipped as a no-op: " .. tostring(r.restore.skipped))
@@ -3970,7 +3970,7 @@ case("shaman_secret_totem_info_is_not_reported_as_no_totem", "secret")(
     r"""
 shamanMock()
 runCmd("shaman")
-local s = ForeverSTUwaveDB.fsprobe.shaman
+local s = ForeverSTUwaveDB.fscheck.shaman
 local t = s.ooc.totems
 check(t.unreadable == 4 and t.active == 0 and t.empty == 0, "counts: " .. tostring(t.unreadable) .. "/" .. tostring(t.active) .. "/" .. tostring(t.empty))
 check(t.slots.s2.state == "unknown" and t.slots.s2.live == false, "a secret slot is unknown, not empty")
@@ -3992,10 +3992,10 @@ case("shaman_live_empty_and_unreadable_slots_are_counted_apart")(
 shamanMock()
 __totem[2] = { true, "Stoneskin Totem", 990, 300, 136098, 1, 8071 }
 runCmd("shaman")
-local t = ForeverSTUwaveDB.fsprobe.shaman.ooc.totems
+local t = ForeverSTUwaveDB.fscheck.shaman.ooc.totems
 check(t.active == 1 and t.empty == 3 and t.unreadable == 0, "counts")
 check(t.slots.s2.state == "live" and t.slots.s1.state == "empty", "slot states")
-local text = table.concat(ForeverSTUwaveDB.fsprobe.shaman.ooc.checks.notRun, "|")
+local text = table.concat(ForeverSTUwaveDB.fscheck.shaman.ooc.checks.notRun, "|")
 check(not string.find(text, "no totem was down", 1, true) and not string.find(text, "unreadable", 1, true), "a live totem and plain empties need no note: " .. text)
 """
 )
@@ -4004,7 +4004,7 @@ case("shaman_off_in_combat_fades_then_hides_on_regen")(
     r"""
 shamanMock()
 runCmd("shaman buttons")
-local host, b1, b3 = FSProbeShamanStrip, FSProbeShamanBtn1, FSProbeShamanBtn3
+local host, b1, b3 = FSCheckShamanStrip, FSCheckShamanBtn1, FSCheckShamanBtn3
 local before = stripCalls()
 __combat = true
 runCmd("shaman buttons off")
@@ -4019,7 +4019,7 @@ fireRegen()
 check(host._shown == false and host._calls.Hide == 1, "hidden on regen")
 check(b1._args.EnableMouse[1] == false and b3._args.EnableMouse[1] == false, "mouse off on the secure buttons")
 check(regenFrame() == nil, "the regen wait ends")
-local st = ForeverSTUwaveDB.fsprobe.shaman.strip
+local st = ForeverSTUwaveDB.fscheck.shaman.strip
 check(st.shown == false and st.faded == nil and st.hidePending == nil, "record says hidden")
 """
 )
@@ -4028,7 +4028,7 @@ case("shaman_stop_off_in_combat_fades_then_hides_on_regen")(
     r"""
 shamanMock()
 runCmd("shaman buttons")
-local host = FSProbeShamanStrip
+local host = FSCheckShamanStrip
 local before = stripCalls()
 __combat = true
 runCmd("shaman off")
@@ -4036,7 +4036,7 @@ check(callsMoved(before, stripCalls()) == "0:SetAlpha", "shaman off in combat: o
 check(said("stay clickable"), "shaman off in combat says the buttons stay clickable")
 __combat = false
 fireRegen()
-check(host._shown == false and FSProbeShamanBtn2._args.EnableMouse[1] == false, "hidden on regen")
+check(host._shown == false and FSCheckShamanBtn2._args.EnableMouse[1] == false, "hidden on regen")
 """
 )
 
@@ -4044,16 +4044,16 @@ case("shaman_timeout_in_combat_fades_then_hides_on_regen")(
     r"""
 shamanMock()
 runCmd("shaman buttons")
-local host = FSProbeShamanStrip
+local host = FSCheckShamanStrip
 local before = stripCalls()
 __combat = true
 advance(1801)
-check(ForeverSTUwaveDB.fsprobe.shaman.meta.status == "timeout", "timed out")
+check(ForeverSTUwaveDB.fscheck.shaman.meta.status == "timeout", "timed out")
 check(callsMoved(before, stripCalls()) == "0:SetAlpha", "the timeout in combat: only SetAlpha: " .. callsMoved(before, stripCalls()))
 check(host._shown == true and said("stay clickable"), "still shown and said so")
 __combat = false
 fireRegen()
-check(host._shown == false and FSProbeShamanBtn1._args.EnableMouse[1] == false, "hidden on regen")
+check(host._shown == false and FSCheckShamanBtn1._args.EnableMouse[1] == false, "hidden on regen")
 """
 )
 
@@ -4061,7 +4061,7 @@ case("shaman_reset_in_combat_fades_then_hides_on_regen")(
     r"""
 shamanMock()
 runCmd("shaman buttons")
-local host = FSProbeShamanStrip
+local host = FSCheckShamanStrip
 local before = stripCalls()
 __combat = true
 runCmd("reset")
@@ -4069,8 +4069,8 @@ check(callsMoved(before, stripCalls()) == "0:SetAlpha", "reset in combat: only S
 check(said("stay clickable"), "reset in combat says the buttons stay clickable")
 __combat = false
 fireRegen()
-check(host._shown == false and FSProbeShamanBtn3._args.EnableMouse[1] == false, "hidden on regen")
-check(ForeverSTUwaveDB.fsprobe == nil, "the late hide does not bring the record back")
+check(host._shown == false and FSCheckShamanBtn3._args.EnableMouse[1] == false, "hidden on regen")
+check(ForeverSTUwaveDB.fscheck == nil, "the late hide does not bring the record back")
 """
 )
 
@@ -4078,7 +4078,7 @@ case("shaman_buttons_again_cancels_the_queued_hide")(
     r"""
 shamanMock()
 runCmd("shaman buttons")
-local host = FSProbeShamanStrip
+local host = FSCheckShamanStrip
 __combat = true
 runCmd("shaman buttons off")
 __combat = false
@@ -4092,7 +4092,7 @@ case("shaman_strip_clears_the_target_cast_bar")(
     r"""
 shamanMock()
 runCmd("shaman buttons")
-local host = FSProbeShamanStrip
+local host = FSCheckShamanStrip
 local p = host._args.SetPoint
 local size = host._args.SetSize
 check(p[1] == "CENTER" and p[3] == "CENTER" and p[4] == 0, "centred on UIParent")
@@ -4108,9 +4108,9 @@ def run_case(name: str, mode: str, body: str, source: str) -> str | None:
     lua.execute(f'__mode = "{mode}"')
     lua.execute(f"__tcastTop = {TCAST_TOP}")
     try:
-        lua.eval("function(src) local fn = assert(loadstring(src, '@FSProbe.lua')); return fn('forever-stuwave', {}) end")(source)
+        lua.eval("function(src) local fn = assert(loadstring(src, '@FSCheck.lua')); return fn('forever-stuwave', {}) end")(source)
     except LuaError as err:
-        return f"FSProbe.lua failed to load: {err}"
+        return f"FSCheck.lua failed to load: {err}"
     try:
         lua.execute(body)
     except LuaError as err:
@@ -4119,7 +4119,7 @@ def run_case(name: str, mode: str, body: str, source: str) -> str | None:
 
 
 # A secret may be neither compared nor truth-tested, and the sentinel mock cannot see
-# `x ~= nil` (Lua only calls __eq between two tables), so the one value this probe holds
+# `x ~= nil` (Lua only calls __eq between two tables), so the one value this check holds
 # raw is pinned by text: the first aura instance id must be tested with type().
 FORBIDDEN_TEXT = ("first ~= nil", "first == nil", "if first then", "not first")
 
@@ -4149,8 +4149,8 @@ PRIEST_FORBIDDEN = (
 
 
 def priest_section(source: str) -> str:
-    start = source.index("-- Class probes: the machinery /fsprobe priest")
-    end = source.index("-- /fsprobe hot: can an engine AuraContainer")
+    start = source.index("-- Class checks: the machinery /fscheck priest")
+    end = source.index("-- /fscheck hot: can an engine AuraContainer")
     lines = [ln for ln in source[start:end].splitlines() if not ln.lstrip().startswith("--")]
     return "\n".join(lines)
 
@@ -4315,12 +4315,12 @@ def cleu_register_check(root: Path) -> int:
     return 0
 
 
-# --- the shaman probe: protected calls only where Parker types them -------------------------------------------
-# /fsprobe shaman must never call a protected or blocked API by itself: SetMultiCastSpell and DestroyTotem run only
-# inside the two subcommand functions, the secure attributes of the test strip are written only inside the three
+# --- the shaman check: protected calls only where Parker types them -------------------------------------------
+# /fscheck shaman must never call a protected or blocked API by itself: SetMultiCastSpell and DestroyTotem run only
+# inside the two subcommand functions, the secure attributes of the totem button row are written only inside the three
 # sync functions (reached from SH.SyncStrip, which SH.ButtonsOn calls after refusing combat), and Blizzard's totem
 # frames are only read. Pinned by text, because the mock cannot tell a protected call from a plain one.
-SHAMAN_START = "-- /fsprobe shaman: what a totem bar can read and do"
+SHAMAN_START = "-- /fscheck shaman: what a totem bar can read and do"
 EXPLICIT_CALLS = {
     "SetMultiCastSpell": ("SH.SetSlot",),
     "DestroyTotem": ("SH.Destroy",),
@@ -4337,12 +4337,12 @@ BLIZZARD_MUTATORS = (":Set", ":Show", ":Hide", ":Enable", ":Disable", ":Register
 
 # Calls that are protected on the strip's frames or that hand a duration object to a widget: each lives in ONE function.
 # STEP_CALLS are reached through GS.Step(widget, "Name", ...) so the name is a string; they are scanned over the whole class
-# probe region (core, priest, shaman), where P.Sweep (the hidden Cooldown) and SH.BarTrial (the hidden StatusBar) use them.
+# check region (core, priest, shaman), where P.Sweep (the hidden Cooldown) and SH.BarTrial (the hidden StatusBar) use them.
 STEP_CALLS = {
     "SetCooldownFromDurationObject": ("P.Sweep",),
     "SetTimerDuration": ("SH.BarTrial",),
 }
-CLASS_PROBE_START = "-- Class probes: the machinery /fsprobe priest and /fsprobe shaman share"
+CLASS_CHECK_START = "-- Class checks: the machinery /fscheck priest and /fscheck shaman share"
 # Show / SetPoint / EnableMouse on the strip happen only in these (BuildStrip and SyncStrip are reached only after
 # SH.ButtonsOn refuses combat; RealHide checks combat itself).
 STRIP_MUTATORS = ("Show", "SetPoint", "EnableMouse")
@@ -4357,9 +4357,9 @@ BANNED_FORMS = (
 )
 
 
-def class_probe_section(source: str) -> str:
-    start = source.index(CLASS_PROBE_START)
-    end = source.index("-- /fsprobe hot: can an engine AuraContainer")
+def class_check_section(source: str) -> str:
+    start = source.index(CLASS_CHECK_START)
+    end = source.index("-- /fscheck hot: can an engine AuraContainer")
     return strip_lua_comments(source[start:end])
 
 
@@ -4379,7 +4379,7 @@ def step_call_violations(text: str) -> list[str]:
 
 def shaman_section(source: str) -> str:
     start = source.index(SHAMAN_START)
-    end = source.index("-- /fsprobe hot: can an engine AuraContainer")
+    end = source.index("-- /fscheck hot: can an engine AuraContainer")
     return strip_lua_comments(source[start:end])
 
 
@@ -4535,9 +4535,9 @@ def shaman_static_checks(source: str) -> int:
         failures += 1
         print(f"FAIL  static: shaman gates: {problems}")
     else:
-        print("ok    static: the test strip is built, shown, moved and un-muted only after SH.ButtonsOn refuses combat, "
+        print("ok    static: the totem button row is built, shown, moved and un-muted only after SH.ButtonsOn refuses combat, "
               "and the real hide (Hide, EnableMouse false) checks combat itself and is reached only from HideStrip and the regen handler")
-    cls = class_probe_section(source)
+    cls = class_check_section(source)
     bad = step_call_violations(cls)
     vacuous = [c for c in STEP_CALLS if not re.search(rf"\b{c}\b", cls)]
     missed = [k for k, v in STEP_MUST_CATCH.items() if not step_call_violations(cls + "\n" + v)]
@@ -4559,17 +4559,17 @@ def static_checks(source: str) -> int:
     noisy = [leg for leg in RAW_LEGAL if raw_arg_violations(priest + "\n    " + leg)]
     if bad or missed or noisy:
         failures += 1
-        print(f"FAIL  static: raw values in the class probe sections (core, priest, shaman): compared or truth-tested {bad}; "
+        print(f"FAIL  static: raw values in the class check sections (core, priest, shaman): compared or truth-tested {bad}; "
               f"injections NOT caught {missed}; legal forms wrongly flagged {noisy}")
     else:
-        print(f"ok    static: no raw event argument or API return is compared or truth-tested in the class probe sections (core, priest, shaman) "
+        print(f"ok    static: no raw event argument or API return is compared or truth-tested in the class check sections (core, priest, shaman) "
               f"({len(RAW_INJECTIONS)} injected forms are caught, {len(RAW_LEGAL)} legal forms pass)")
     leaked = [n for n in PRIEST_FORBIDDEN if n in priest]
     if leaked:
         failures += 1
-        print(f"FAIL  static: a class probe section uses a forbidden aura/log API: {leaked}")
+        print(f"FAIL  static: a class check section uses a forbidden aura/log API: {leaked}")
     else:
-        print("ok    static: the class probe sections read no aura by index or slot")
+        print("ok    static: the class check sections read no aura by index or slot")
     failures += cleu_register_check(CLEU_SOURCE_DIR)
     failures += shaman_static_checks(source)
     hot = hot_section(source)
@@ -4581,14 +4581,14 @@ def static_checks(source: str) -> int:
         print("ok    static: the hot section calls no aura, duration, bar value or text read API")
     reset = source[source.index("local function Reset(keepGunsight)"):source.index("local function SavedResults()")]
     if 0 <= reset.find('PP.Stop("reset", true)') < reset.find("GS.Disarm()"):
-        print("ok    static: /fsprobe reset stops the priest probe before the gunsight and hot teardown")
+        print("ok    static: /fscheck reset stops the priest check before the gunsight and hot teardown")
     else:
         failures += 1
         print("FAIL  static: Reset must call PP.Stop before GS.Disarm / HP.Off")
     for needle in FORBIDDEN_TEXT:
         if needle in source:
             failures += 1
-            print(f"FAIL  static: FSProbe.lua compares a possibly secret value: {needle!r}")
+            print(f"FAIL  static: FSCheck.lua compares a possibly secret value: {needle!r}")
     if failures == 0:
         print("ok    static: the raw aura id is never compared with nil")
     return failures

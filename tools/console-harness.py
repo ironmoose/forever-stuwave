@@ -1535,10 +1535,10 @@ def main() -> int:
         return 1
 
     # the check names are read from a scratch boot, so a missing module fails per check
-    probe = abh.boot(make_prelude(SCALES[0], ""), extra=("Modules/ActionBars/Console.lua",))
-    probe.globals().__M = probe.table_from(mu)
-    probe.execute(CHECKS)
-    names = sorted(k for k in probe.eval("__checks").keys())
+    check = abh.boot(make_prelude(SCALES[0], ""), extra=("Modules/ActionBars/Console.lua",))
+    check.globals().__M = check.table_from(mu)
+    check.execute(CHECKS)
+    names = sorted(k for k in check.eval("__checks").keys())
     for name in names:
         for scale in SCALES:
             total += 1

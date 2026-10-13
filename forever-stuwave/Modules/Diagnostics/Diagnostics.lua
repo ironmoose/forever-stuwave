@@ -26,21 +26,21 @@ local MINIMAP_BOUNDS_PALETTE = {
 --
 -- This writes the same readback into ForeverSTUwaveDB, where it survives the
 -- unload and the dev tooling can read it, instead of into a chat line nobody is
--- looking at. Probe lives in the addon rather than in a long /run for the same
+-- looking at. Check lives in the addon rather than in a long /run for the same
 -- reason /fsreload does: the chat box truncates at 255 characters.
 SLASH_FSFONT1 = "/fsfont"
 SlashCmdList["FSFONT"] = function()
     ForeverSTUwaveDB = ForeverSTUwaveDB or {}
 
-    local probe = UIParent:CreateFontString(nil, "ARTWORK")
+    local check = UIParent:CreateFontString(nil, "ARTWORK")
     local report = { when = date("%Y-%m-%d %H:%M:%S") }
 
     for label, path in pairs({
         mono = Theme.FONT_MONO,
         orbitron = Theme.FONT_ORBITRON,
     }) do
-        probe:SetFont(path, 12, "")
-        local got = probe:GetFont()
+        check:SetFont(path, 12, "")
+        local got = check:GetFont()
         -- GetFont echoes the path we asked for on success. Anything else is
         -- the engine's fallback, which is the failure we are hunting.
         report[label] = {
@@ -76,34 +76,34 @@ SlashCmdList["FSFONT"] = function()
         end
     end
 
-    ForeverSTUwaveDB.fontProbe = report
+    ForeverSTUwaveDB.fontCheck = report
     print("|cff22e0ffstuwave://font|r  written to ForeverSTUwaveDB; /fsreload to flush it")
 end
 
 -------------------------------------------------------------------------------
--- /fsrecon threat -- threat/role/reaction secret-value probe
+-- /fsinspect threat -- threat/role/reaction secret-value check
 -------------------------------------------------------------------------------
 
 -- The player has no group and no reliable in-combat access to threat tables,
 -- so this answers by MEASUREMENT whether UnitThreatSituation and friends hand
 -- back secrets while tainted, rather than guessing from the
--- 12.0 docs. Dispatched from PanelSkins.lua's `/fsrecon` (that file loads
+-- 12.0 docs. Dispatched from PanelSkins.lua's `/fsinspect` (that file loads
 -- before this one, so it reaches these through `FS.Diagnostics.*` at call
 -- time, never a captured local -- same rule as the Chat terminal's split).
 FS.Diagnostics = FS.Diagnostics or {}
 local Diagnostics = FS.Diagnostics
 
 -------------------------------------------------------------------------------
--- /fsrecon probe -- bounded target aura event capture during combat
+-- /fsinspect auras -- bounded target aura event capture during combat
 -------------------------------------------------------------------------------
 
-local PROBE_MAX_UPDATES = 8
-local PROBE_MAX_AURAS = 3
-local PROBE_AURA_FIELDS = { "sourceUnit", "spellId", "auraInstanceID" }
-local probeFrame
-local probeRun
+local CHECK_MAX_UPDATES = 8
+local CHECK_MAX_AURAS = 3
+local CHECK_AURA_FIELDS = { "sourceUnit", "spellId", "auraInstanceID" }
+local checkFrame
+local checkRun
 
-local function ProbeError(err)
+local function CheckError(err)
     if type(err) ~= "string" then return "other error" end
     local ok, refused = pcall(function()
         local message = err:lower()
@@ -116,15 +116,15 @@ local function ProbeError(err)
     return "other error"
 end
 
-local function ProbeValue(value)
+local function CheckValue(value)
     local row = { type = type(value) }
     local ok, secret = pcall(FS.IsSecret, value)
-    if not ok then row.err = ProbeError(secret); return row end
+    if not ok then row.err = CheckError(secret); return row end
     row.secret = secret and true or false
     if secret then return row end
     if type(canaccessvalue) == "function" then
         local accessOk, accessible = pcall(canaccessvalue, value)
-        if not accessOk then row.err = ProbeError(accessible); return row end
+        if not accessOk then row.err = CheckError(accessible); return row end
         row.access = accessible and true or false
         if not accessible then return row end
     end
@@ -137,36 +137,36 @@ local function ProbeValue(value)
     return row
 end
 
-local function ProbeTable(value)
-    local row = ProbeValue(value)
+local function CheckTable(value)
+    local row = CheckValue(value)
     if row.type ~= "table" or row.err or row.secret or row.access == false then return row, false end
     if type(issecrettable) ~= "function" or type(canaccesstable) ~= "function" then
         row.err = "table inspectors unavailable"
         return row, false
     end
     local secretOk, secret = pcall(issecrettable, value)
-    if not secretOk then row.err = ProbeError(secret); return row, false end
+    if not secretOk then row.err = CheckError(secret); return row, false end
     row.secretTable = secret and true or false
     if secret then return row, false end
     local accessOk, access = pcall(canaccesstable, value)
-    if not accessOk then row.err = ProbeError(access); return row, false end
+    if not accessOk then row.err = CheckError(access); return row, false end
     row.accessTable = access and true or false
     if not access then return row, false end
     return row, true
 end
 
-local function ProbeField(parent, key)
+local function CheckField(parent, key)
     local ok, value = pcall(function() return parent[key] end)
-    if not ok then return { err = ProbeError(value) }, nil, false end
-    return ProbeValue(value), value, true
+    if not ok then return { err = CheckError(value) }, nil, false end
+    return CheckValue(value), value, true
 end
 
-local function ProbeList(value)
-    local row, accessible = ProbeTable(value)
+local function CheckList(value)
+    local row, accessible = CheckTable(value)
     if not accessible then return row, false end
     local ok, count = pcall(function() return #value end)
-    if not ok then row.err = ProbeError(count); return row, false end
-    local countRow = ProbeValue(count)
+    if not ok then row.err = CheckError(count); return row, false end
+    local countRow = CheckValue(count)
     if countRow.err or countRow.secret or countRow.access == false or type(count) ~= "number" then
         row.countResult = countRow
         return row, false
@@ -175,12 +175,12 @@ local function ProbeList(value)
     return row, true
 end
 
-local function ProbeAuraRecord(value)
-    local row, accessible = ProbeTable(value)
+local function CheckAuraRecord(value)
+    local row, accessible = CheckTable(value)
     if not accessible then return row end
     row.fields = {}
-    for _, field in ipairs(PROBE_AURA_FIELDS) do
-        local fieldRow, fieldValue = ProbeField(value, field)
+    for _, field in ipairs(CHECK_AURA_FIELDS) do
+        local fieldRow, fieldValue = CheckField(value, field)
         if field == "sourceUnit" and not fieldRow.err and not fieldRow.secret
             and fieldRow.access ~= false and type(fieldValue) == "string" then
             fieldRow.value = fieldValue == "player" and "player" or "other unit token"
@@ -190,67 +190,67 @@ local function ProbeAuraRecord(value)
     return row
 end
 
-local function ProbeAuraList(value, inspect)
-    local row, accessible = ProbeList(value)
+local function CheckAuraList(value, inspect)
+    local row, accessible = CheckList(value)
     if not accessible then return row end
     if inspect then
         row.items = {}
-        for i = 1, math.min(row.count, PROBE_MAX_AURAS) do
+        for i = 1, math.min(row.count, CHECK_MAX_AURAS) do
             local ok, item = pcall(function() return value[i] end)
-            row.items[i] = ok and ProbeAuraRecord(item) or { err = ProbeError(item) }
+            row.items[i] = ok and CheckAuraRecord(item) or { err = CheckError(item) }
         end
     end
     return row
 end
 
-local function ProbeAuraAPI(name, ...)
+local function CheckAuraAPI(name, ...)
     local api = C_UnitAuras
     local fn = type(api) == "table" and api[name]
     if type(fn) ~= "function" then return { ok = false, err = "unavailable" } end
     local ok, value = pcall(fn, ...)
-    if not ok then return { ok = false, err = ProbeError(value) } end
-    return { ok = true, result = ProbeAuraList(value, name ~= "GetUnitAuraInstanceIDs") }
+    if not ok then return { ok = false, err = CheckError(value) } end
+    return { ok = true, result = CheckAuraList(value, name ~= "GetUnitAuraInstanceIDs") }
 end
 
-local function SaveProbe(reason)
-    if not probeRun then return end
-    probeRun.stop = reason
+local function SaveCheck(reason)
+    if not checkRun then return end
+    checkRun.stop = reason
     ForeverSTUwaveDB = ForeverSTUwaveDB or {}
-    ForeverSTUwaveDB.recon = ForeverSTUwaveDB.recon or {}
-    ForeverSTUwaveDB.recon.probe = probeRun
-    probeRun = nil
-    if probeFrame then probeFrame:UnregisterEvent("UNIT_AURA") end
-    print("|cff22e0ffForever STUwave|r: /fsrecon probe -- saved; /fsreload to flush")
+    ForeverSTUwaveDB.inspect = ForeverSTUwaveDB.inspect or {}
+    ForeverSTUwaveDB.inspect.check = checkRun
+    checkRun = nil
+    if checkFrame then checkFrame:UnregisterEvent("UNIT_AURA") end
+    print("|cff22e0ffForever STUwave|r: /fsinspect auras -- saved; /fsreload to flush")
 end
 
-local function CaptureProbeUpdate(updateInfo)
+local function CaptureCheckUpdate(updateInfo)
     local row = { inCombat = true }
-    local infoRow, infoAccessible = ProbeTable(updateInfo)
+    local infoRow, infoAccessible = CheckTable(updateInfo)
     row.updateInfo = infoRow
     local addedID
     if infoAccessible then
         row.fields = {}
         for _, field in ipairs({ "addedAuras", "updatedAuraInstanceIDs", "removedAuraInstanceIDs" }) do
-            local fieldRow, value, readable = ProbeField(updateInfo, field)
+            local fieldRow, value, readable = CheckField(updateInfo, field)
             if readable then
-                local listRow, listReadable = ProbeList(value)
+                local listRow, listReadable = CheckList(value)
                 fieldRow = listRow
                 if listReadable and field == "addedAuras" then
                     fieldRow.items = {}
-                    for i = 1, math.min(listRow.count, PROBE_MAX_AURAS) do
+                    for i = 1, math.min(listRow.count, CHECK_MAX_AURAS) do
                         local ok, aura = pcall(function() return value[i] end)
                         if ok then
-                            fieldRow.items[i] = ProbeAuraRecord(aura)
+                            fieldRow.items[i] = CheckAuraRecord(aura)
                             if not addedID then
-                                local _, auraReadable = ProbeTable(aura)
+                                local _, auraReadable = CheckTable(aura)
                                 if auraReadable then
-                                    local idRow, id = ProbeField(aura, "auraInstanceID")
+                                    local idRow, id = CheckField(aura, "auraInstanceID")
                                     if not idRow.err and not idRow.secret and idRow.access ~= false
                                         and type(id) == "number" then addedID = id end
                                 end
                             end
                         else
-                            fieldRow.items[i] = { err = ProbeError(aura) }
+                            fieldRow.items[i] = { err = CheckError(aura) }
                         end
                     end
                 end
@@ -258,8 +258,8 @@ local function CaptureProbeUpdate(updateInfo)
             row.fields[field] = fieldRow
         end
     end
-    row.getUnitAuras = ProbeAuraAPI("GetUnitAuras", "target", "HARMFUL", PROBE_MAX_AURAS)
-    row.getInstanceIDs = ProbeAuraAPI("GetUnitAuraInstanceIDs", "target", "HARMFUL")
+    row.getUnitAuras = CheckAuraAPI("GetUnitAuras", "target", "HARMFUL", CHECK_MAX_AURAS)
+    row.getInstanceIDs = CheckAuraAPI("GetUnitAuraInstanceIDs", "target", "HARMFUL")
     local api = C_UnitAuras
     local byID = type(api) == "table" and api.GetAuraDataByAuraInstanceID
     if type(byID) ~= "function" then
@@ -268,41 +268,41 @@ local function CaptureProbeUpdate(updateInfo)
         row.byAddedID = { ok = false, err = "no accessible added ID" }
     else
         local ok, value = pcall(byID, "target", addedID)
-        row.byAddedID = ok and { ok = true, result = ProbeAuraRecord(value) }
-            or { ok = false, err = ProbeError(value) }
+        row.byAddedID = ok and { ok = true, result = CheckAuraRecord(value) }
+            or { ok = false, err = CheckError(value) }
     end
     local byIndex = type(api) == "table" and api.GetAuraDataByIndex
     if type(byIndex) ~= "function" then
         row.byIndex = { ok = false, err = "unavailable" }
     else
         local ok, value = pcall(byIndex, "target", 1, "HARMFUL")
-        row.byIndex = ok and { ok = true, result = ProbeAuraRecord(value) }
-            or { ok = false, err = ProbeError(value) }
+        row.byIndex = ok and { ok = true, result = CheckAuraRecord(value) }
+            or { ok = false, err = CheckError(value) }
     end
     return row
 end
 
-function Diagnostics.ArmAuraProbe()
-    if probeRun then SaveProbe("rearmed") end
-    probeRun = { t = time(), updates = {} }
-    if not probeFrame then
-        probeFrame = CreateFrame("Frame")
-        probeFrame:SetScript("OnEvent", function(_, _, unit, updateInfo)
-            if not probeRun or unit ~= "target" then return end
+function Diagnostics.ArmAuraCheck()
+    if checkRun then SaveCheck("rearmed") end
+    checkRun = { t = time(), updates = {} }
+    if not checkFrame then
+        checkFrame = CreateFrame("Frame")
+        checkFrame:SetScript("OnEvent", function(_, _, unit, updateInfo)
+            if not checkRun or unit ~= "target" then return end
             local combatOk, inCombat = pcall(InCombatLockdown)
             if not combatOk or not inCombat then return end
-            local ok, row = pcall(CaptureProbeUpdate, updateInfo)
-            probeRun.updates[#probeRun.updates + 1] = ok and row or { err = ProbeError(row) }
-            if #probeRun.updates >= PROBE_MAX_UPDATES then SaveProbe("cap") end
+            local ok, row = pcall(CaptureCheckUpdate, updateInfo)
+            checkRun.updates[#checkRun.updates + 1] = ok and row or { err = CheckError(row) }
+            if #checkRun.updates >= CHECK_MAX_UPDATES then SaveCheck("cap") end
         end)
     end
-    probeFrame:RegisterEvent("UNIT_AURA")
-    print("|cff22e0ffForever STUwave|r: /fsrecon probe -- armed for eight target aura updates in combat")
+    checkFrame:RegisterEvent("UNIT_AURA")
+    print("|cff22e0ffForever STUwave|r: /fsinspect auras -- armed for eight target aura updates in combat")
 end
 
-function Diagnostics.StopAuraProbe()
-    if probeRun then SaveProbe("manual")
-    else print("|cff22e0ffForever STUwave|r: /fsrecon probe -- no active run") end
+function Diagnostics.StopAuraCheck()
+    if checkRun then SaveCheck("manual")
+    else print("|cff22e0ffForever STUwave|r: /fsinspect auras -- no active run") end
 end
 
 local HAS_CANACCESSVALUE = type(canaccessvalue) == "function"
@@ -311,7 +311,7 @@ local MAX_THREAT_RUNS = 10
 
 -- Only `type()` and the two secrecy inspectors ever touch `v` directly; the
 -- value itself is stored in a table (a legal operation on a secret) ONLY when
--- it is not secret, per this probe's own stricter rule for UnitName/UnitGUID.
+-- it is not secret, per this check's own stricter rule for UnitName/UnitGUID.
 local function RecordValue(v, noStoreValue)
     local secret = FS.IsSecret(v)
     local row = {
@@ -344,14 +344,14 @@ local function BuildCallResult(n, packed, noStoreValue)
     return { ok = true, n = n - 1, results = results }
 end
 
-local function ProbeCall(fn, ...)
+local function CheckCall(fn, ...)
     if type(fn) ~= "function" then
         return { ok = false, err = "unavailable" }
     end
     return BuildCallResult(Pack(pcall(fn, ...)))
 end
 
-local function ProbeCallNoStore(fn, ...)
+local function CheckCallNoStore(fn, ...)
     if type(fn) ~= "function" then
         return { ok = false, err = "unavailable" }
     end
@@ -363,19 +363,19 @@ local HAS_GET_AURA_DATA_BY_INDEX = type(C_UnitAuras) == "table" and type(C_UnitA
 local HAS_ISSECRETTABLE = type(issecrettable) == "function"
 local HAS_CANACCESSTABLE = type(canaccesstable) == "function"
 
-local AURA_PROBE_FIELDS = {
+local AURA_CHECK_FIELDS = {
     "name", "icon", "applications", "duration", "expirationTime",
     "sourceUnit", "spellId", "auraInstanceID", "isHarmful",
 }
 
 -- GetAuraDataByIndex returns a whole TABLE (or nil), not scalars, so
--- ProbeCall's select('#', ...) scalar path doesn't fit -- this is the
+-- CheckCall's select('#', ...) scalar path doesn't fit -- this is the
 -- dedicated recorder that shape needs. A plain (non-secret-VALUE) table can
 -- still be a secret TABLE, where indexing throws even though issecretvalue
 -- says false -- issecrettable/canaccesstable gate the field loop for that
 -- case, and each field read is its own pcall in case a stale client
 -- disagrees with what those two flags claimed.
-local function ProbeAuraCall(unit, filter)
+local function CheckAuraCall(unit, filter)
     if not HAS_GET_AURA_DATA_BY_INDEX then
         return { ok = false, err = "unavailable" }
     end
@@ -413,7 +413,7 @@ local function ProbeAuraCall(unit, filter)
     end
 
     row.fields = {}
-    for _, field in ipairs(AURA_PROBE_FIELDS) do
+    for _, field in ipairs(AURA_CHECK_FIELDS) do
         local readOk, v = pcall(function() return ret[field] end)
         if not readOk then
             row.fields[field] = { err = type(v) == "string" and v or "non-string error" }
@@ -433,53 +433,53 @@ local function ProbeAuraCall(unit, filter)
     return row
 end
 
-local function ProbeUnit(unit)
+local function CheckUnit(unit)
     return {
-        { api = "UnitThreatSituation('player', unit)", result = ProbeCall(UnitThreatSituation, "player", unit) },
-        { api = "UnitThreatSituation('pet', unit)", result = ProbeCall(UnitThreatSituation, "pet", unit) },
+        { api = "UnitThreatSituation('player', unit)", result = CheckCall(UnitThreatSituation, "player", unit) },
+        { api = "UnitThreatSituation('pet', unit)", result = CheckCall(UnitThreatSituation, "pet", unit) },
         { api = "UnitDetailedThreatSituation('player', unit)",
-          result = ProbeCall(UnitDetailedThreatSituation, "player", unit) },
+          result = CheckCall(UnitDetailedThreatSituation, "player", unit) },
         { api = "UnitDetailedThreatSituation('pet', unit)",
-          result = ProbeCall(UnitDetailedThreatSituation, "pet", unit) },
+          result = CheckCall(UnitDetailedThreatSituation, "pet", unit) },
         { api = "UnitThreatPercentageOfLead('player', unit)",
-          result = ProbeCall(UnitThreatPercentageOfLead, "player", unit) },
-        { api = "UnitReaction('player', unit)", result = ProbeCall(UnitReaction, "player", unit) },
-        { api = "UnitReaction(unit, 'player')", result = ProbeCall(UnitReaction, unit, "player") },
-        { api = "UnitCanAttack('player', unit)", result = ProbeCall(UnitCanAttack, "player", unit) },
-        { api = "UnitIsTapDenied(unit)", result = ProbeCall(UnitIsTapDenied, unit) },
-        { api = "UnitPowerType(unit)", result = ProbeCall(UnitPowerType, unit) },
+          result = CheckCall(UnitThreatPercentageOfLead, "player", unit) },
+        { api = "UnitReaction('player', unit)", result = CheckCall(UnitReaction, "player", unit) },
+        { api = "UnitReaction(unit, 'player')", result = CheckCall(UnitReaction, unit, "player") },
+        { api = "UnitCanAttack('player', unit)", result = CheckCall(UnitCanAttack, "player", unit) },
+        { api = "UnitIsTapDenied(unit)", result = CheckCall(UnitIsTapDenied, unit) },
+        { api = "UnitPowerType(unit)", result = CheckCall(UnitPowerType, unit) },
         -- Confirms the cast bar's notInterruptible return position (documented
         -- as #8/#7 but UNVERIFIED on 16001 -- see Nameplates.lua).
-        -- ProbeCall already records type/secret flags per index and only
+        -- CheckCall already records type/secret flags per index and only
         -- stores a value when it isn't secret, so this needs no special case.
-        { api = "UnitCastingInfo(unit)", result = ProbeCall(UnitCastingInfo, unit) },
-        { api = "UnitChannelInfo(unit)", result = ProbeCall(UnitChannelInfo, unit) },
-        { api = "UnitName(unit)", result = ProbeCallNoStore(UnitName, unit) },
-        { api = "UnitGUID(unit)", result = ProbeCallNoStore(UnitGUID, unit) },
+        { api = "UnitCastingInfo(unit)", result = CheckCall(UnitCastingInfo, unit) },
+        { api = "UnitChannelInfo(unit)", result = CheckCall(UnitChannelInfo, unit) },
+        { api = "UnitName(unit)", result = CheckCallNoStore(UnitName, unit) },
+        { api = "UnitGUID(unit)", result = CheckCallNoStore(UnitGUID, unit) },
         -- Deliberately NOT gated on FS.AurasReadable: the point of this pair
         -- is to measure whether enemy aura reads survive combat lockdown on
         -- 16001, and that's acceptable here (unlike Buffs.lua's ticker) since
         -- this only runs on demand or 2s into an armed pull, never a ticker.
         { api = "C_UnitAuras.GetAuraDataByIndex(unit, 1, 'HARMFUL|PLAYER')",
-          result = ProbeAuraCall(unit, "HARMFUL|PLAYER") },
+          result = CheckAuraCall(unit, "HARMFUL|PLAYER") },
         { api = "C_UnitAuras.GetAuraDataByIndex(unit, 1, 'HARMFUL')",
-          result = ProbeAuraCall(unit, "HARMFUL") },
+          result = CheckAuraCall(unit, "HARMFUL") },
     }
 end
 
-local function ProbeUnitFree()
+local function CheckUnitFree()
     return {
-        { api = "UnitGroupRolesAssigned('player')", result = ProbeCall(UnitGroupRolesAssigned, "player") },
-        { api = "GetShapeshiftFormID()", result = ProbeCall(GetShapeshiftFormID) },
-        { api = "IsInGroup()", result = ProbeCall(IsInGroup) },
-        { api = "InCombatLockdown()", result = ProbeCall(InCombatLockdown) },
-        { api = "UnitExists('pet')", result = ProbeCall(UnitExists, "pet") },
+        { api = "UnitGroupRolesAssigned('player')", result = CheckCall(UnitGroupRolesAssigned, "player") },
+        { api = "GetShapeshiftFormID()", result = CheckCall(GetShapeshiftFormID) },
+        { api = "IsInGroup()", result = CheckCall(IsInGroup) },
+        { api = "InCombatLockdown()", result = CheckCall(InCombatLockdown) },
+        { api = "UnitExists('pet')", result = CheckCall(UnitExists, "pet") },
     }
 end
 
 -- Feature-detects BOTH the modern plate.namePlateUnitToken field and the
 -- CompactUnitFrame-carried plate.UnitFrame.unit fallback, since which one a
--- given client populates is exactly the kind of thing this probe exists to
+-- given client populates is exactly the kind of thing this check exists to
 -- stop guessing about.
 local function CollectNameplateUnits()
     local units = {}
@@ -513,17 +513,17 @@ local function BuildThreatUnitList()
     return units
 end
 
-local function RunThreatProbeInner()
+local function RunThreatCheckInner()
     local run = {
         t = time(),
         inCombat = InCombatLockdown() and true or false,
-        rows = { { unit = "_global", calls = ProbeUnitFree() } },
+        rows = { { unit = "_global", calls = CheckUnitFree() } },
     }
 
     for _, unit in ipairs(BuildThreatUnitList()) do
         local existsOk, exists = pcall(UnitExists, unit)
         if existsOk and exists then
-            run.rows[#run.rows + 1] = { unit = unit, calls = ProbeUnit(unit) }
+            run.rows[#run.rows + 1] = { unit = unit, calls = CheckUnit(unit) }
         end
     end
 
@@ -532,10 +532,10 @@ end
 
 local function StoreThreatRun(run)
     ForeverSTUwaveDB = ForeverSTUwaveDB or {}
-    ForeverSTUwaveDB.recon = ForeverSTUwaveDB.recon or {}
-    ForeverSTUwaveDB.recon.threat = ForeverSTUwaveDB.recon.threat or {}
+    ForeverSTUwaveDB.inspect = ForeverSTUwaveDB.inspect or {}
+    ForeverSTUwaveDB.inspect.threat = ForeverSTUwaveDB.inspect.threat or {}
 
-    local runs = ForeverSTUwaveDB.recon.threat
+    local runs = ForeverSTUwaveDB.inspect.threat
     runs[#runs + 1] = run
     while #runs > MAX_THREAT_RUNS do
         table.remove(runs, 1)
@@ -558,31 +558,31 @@ local function CountSecretReturns(run)
     return count
 end
 
-local function DoThreatProbeRun()
-    local run = RunThreatProbeInner()
+local function DoThreatCheckRun()
+    local run = RunThreatCheckInner()
     StoreThreatRun(run)
 
-    print(("|cff22e0ffForever STUwave|r: /fsrecon threat -- %d run(s) stored, %d secret return(s) this run, %s")
-        :format(#ForeverSTUwaveDB.recon.threat, CountSecretReturns(run),
+    print(("|cff22e0ffForever STUwave|r: /fsinspect threat -- %d run(s) stored, %d secret return(s) this run, %s")
+        :format(#ForeverSTUwaveDB.inspect.threat, CountSecretReturns(run),
             run.inCombat and "IN COMBAT" or "out of combat"))
 end
 
--- The whole run is pcall'd, per this addon's isolation rule: a probe firing
+-- The whole run is pcall'd, per this addon's isolation rule: a check firing
 -- off a live PLAYER_REGEN_DISABLED event must never take the rest of the
 -- addon down with it.
-function Diagnostics.RunThreatProbe()
-    local ok, err = pcall(DoThreatProbeRun)
+function Diagnostics.RunThreatCheck()
+    local ok, err = pcall(DoThreatCheckRun)
     if not ok then
-        FS.LogDegradeOnce("fsrecon_threat_probe_error",
-            ("|cffff4488Forever STUwave|r: /fsrecon threat -- probe failed: %s"):format(tostring(err)))
+        FS.LogDegradeOnce("fsinspect_threat_check_error",
+            ("|cffff4488Forever STUwave|r: /fsinspect threat -- check failed: %s"):format(tostring(err)))
     end
 end
 
 function Diagnostics.ClearThreatRuns()
     ForeverSTUwaveDB = ForeverSTUwaveDB or {}
-    ForeverSTUwaveDB.recon = ForeverSTUwaveDB.recon or {}
-    ForeverSTUwaveDB.recon.threat = {}
-    print("|cff22e0ffForever STUwave|r: /fsrecon threat -- stored runs cleared.")
+    ForeverSTUwaveDB.inspect = ForeverSTUwaveDB.inspect or {}
+    ForeverSTUwaveDB.inspect.threat = {}
+    print("|cff22e0ffForever STUwave|r: /fsinspect threat -- stored runs cleared.")
 end
 
 local threatAutoFrame
@@ -601,12 +601,12 @@ local function OnThreatAutoCombatStart()
     if threatAutoRemaining <= 0 then return end
 
     if HAS_C_TIMER then
-        C_Timer.After(2, Diagnostics.RunThreatProbe)
+        C_Timer.After(2, Diagnostics.RunThreatCheck)
     else
-        FS.LogDegradeOnce("fsrecon_threat_noctimer",
-            "|cffff4488Forever STUwave|r: /fsrecon threat auto -- C_Timer unavailable, capturing immediately "
+        FS.LogDegradeOnce("fsinspect_threat_noctimer",
+            "|cffff4488Forever STUwave|r: /fsinspect threat auto -- C_Timer unavailable, capturing immediately "
                 .. "instead of the usual 2s in-combat delay.")
-        Diagnostics.RunThreatProbe()
+        Diagnostics.RunThreatCheck()
     end
 
     threatAutoRemaining = threatAutoRemaining - 1
@@ -627,20 +627,20 @@ function Diagnostics.ArmThreatAuto(n)
     end
     threatAutoFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 
-    print(("|cff22e0ffForever STUwave|r: /fsrecon threat auto -- armed for the next %d combat(s)."):format(n))
+    print(("|cff22e0ffForever STUwave|r: /fsinspect threat auto -- armed for the next %d combat(s)."):format(n))
 end
 
 -------------------------------------------------------------------------------
--- /fsrecon pet -- pet-addon Phase-0 secret-value + availability probe
+-- /fsinspect pet -- pet-addon Phase-0 secret-value + availability check
 -------------------------------------------------------------------------------
 
--- Same measurement-over-guessing rationale as /fsrecon threat above: the pet
+-- Same measurement-over-guessing rationale as /fsinspect threat above: the pet
 -- action bar/cast bar rebuild (Phase 1) hinges on seven open questions about
 -- what this client's pet APIs actually hand back -- particularly whether a
 -- pet's cast/channel timing is secret, which decides whether the pairing's
 -- triangle cast bar can ever read a numeric progress fraction. Reuses every
--- probe primitive the threat probe above already built (RecordValue/Pack/
--- ProbeCall/ProbeCallNoStore) rather than duplicating them.
+-- check primitive the threat check above already built (RecordValue/Pack/
+-- CheckCall/CheckCallNoStore) rather than duplicating them.
 
 local MAX_PET_RUNS = 10
 
@@ -651,9 +651,9 @@ local HAS_CAST_DURATION = type(UnitCastingDuration) == "function"
 local HAS_CHANNEL_DURATION = type(UnitChannelDuration) == "function"
 
 -- Q1: NUM_PET_ACTION_SLOTS is a plain global constant, not an API call, but
--- pcall'd anyway for defensive parity with every other probe in this file,
+-- pcall'd anyway for defensive parity with every other check in this file,
 -- even though a plain global index is very unlikely to throw.
-local function ProbePetActionSlotCount()
+local function CheckPetActionSlotCount()
     local ok, v = pcall(function() return NUM_PET_ACTION_SLOTS end)
     if not ok then
         return { ok = false, err = tostring(v) }
@@ -664,25 +664,25 @@ local function ProbePetActionSlotCount()
 end
 
 -- Q2: the dead-pet gate. All three are read live in combat, where they are
--- the ones actually at risk of turning secret -- ProbeCall's RecordValue
+-- the ones actually at risk of turning secret -- CheckCall's RecordValue
 -- already flags secrecy per this file's established pattern.
-local function ProbeDeadPetGate()
+local function CheckDeadPetGate()
     return {
-        { api = "UnitExists('pet')", result = ProbeCall(UnitExists, "pet") },
-        { api = "UnitIsDead('pet')", result = ProbeCall(UnitIsDead, "pet") },
-        { api = "UnitIsFeignDeath('pet')", result = ProbeCall(UnitIsFeignDeath, "pet") },
+        { api = "UnitExists('pet')", result = CheckCall(UnitExists, "pet") },
+        { api = "UnitIsDead('pet')", result = CheckCall(UnitIsDead, "pet") },
+        { api = "UnitIsFeignDeath('pet')", result = CheckCall(UnitIsFeignDeath, "pet") },
     }
 end
 
 -- Q3: autocast overlay availability -- existence only, never attached to a
--- live frame (attaching would create/parent a real widget just to probe it,
+-- live frame (attaching would create/parent a real widget just to check it,
 -- which this diagnostic has no business doing). AutoCastOverlayMixin is a
 -- plain Lua table global; AutoCastShineTemplate is an XML template, which
 -- typically has no Lua global of its own -- checked anyway since a global
 -- miss is itself informative and this stays cheap and non-attaching.
 -- C_XMLUtil.GetTemplateInfo is a belt-and-suspenders second check when this
 -- client has it (UNVERIFIED on 16001, hence the feature-detect).
-local function ProbeAutocastOverlay()
+local function CheckAutocastOverlay()
     local row = {}
 
     local mixinOk, mixinType = pcall(function() return type(AutoCastOverlayMixin) end)
@@ -703,14 +703,14 @@ local function ProbeAutocastOverlay()
     return row
 end
 
--- Q4 (THE gating probe): pet cast/channel timing secrecy. UnitCastingInfo/
--- UnitChannelInfo go through the exact same ProbeCall path the threat probe
+-- Q4 (THE gating check): pet cast/channel timing secrecy. UnitCastingInfo/
+-- UnitChannelInfo go through the exact same CheckCall path the threat check
 -- uses for 'unit' above, unit fixed to "pet". UnitCastingDuration/
 -- UnitChannelDuration are feature-detected separately and their return is a
 -- DURATION OBJECT, not a scalar -- unlike everything else in this file it is
 -- never stored (an object is not serializable into ForeverSTUwaveDB even
 -- when not secret), only its type and secrecy flag.
-local function ProbeDurationFn(fn, unit)
+local function CheckDurationFn(fn, unit)
     if type(fn) ~= "function" then
         return { ok = false, err = "unavailable" }
     end
@@ -721,32 +721,32 @@ local function ProbeDurationFn(fn, unit)
     return { ok = true, type = type(obj), secret = tostring(FS.IsSecret(obj)) }
 end
 
-local function ProbePetCastTiming()
+local function CheckPetCastTiming()
     return {
-        { api = "UnitCastingInfo('pet')", result = ProbeCall(UnitCastingInfo, "pet") },
-        { api = "UnitChannelInfo('pet')", result = ProbeCall(UnitChannelInfo, "pet") },
+        { api = "UnitCastingInfo('pet')", result = CheckCall(UnitCastingInfo, "pet") },
+        { api = "UnitChannelInfo('pet')", result = CheckCall(UnitChannelInfo, "pet") },
         { api = "UnitCastingDuration('pet')", available = HAS_CAST_DURATION,
-          result = ProbeDurationFn(UnitCastingDuration, "pet") },
+          result = CheckDurationFn(UnitCastingDuration, "pet") },
         { api = "UnitChannelDuration('pet')", available = HAS_CHANNEL_DURATION,
-          result = ProbeDurationFn(UnitChannelDuration, "pet") },
+          result = CheckDurationFn(UnitChannelDuration, "pet") },
     }
 end
 
 -- Q5: pet action cooldown secrecy, same multi-return shape as everything
--- else ProbeCall already handles.
-local function ProbePetCooldown()
-    return { api = "GetPetActionCooldown(1)", result = ProbeCall(GetPetActionCooldown, 1) }
+-- else CheckCall already handles.
+local function CheckPetCooldown()
+    return { api = "GetPetActionCooldown(1)", result = CheckCall(GetPetActionCooldown, 1) }
 end
 
 -- Q6: possess/vehicle bar. Feature-detect the two presence checks; capture
 -- whatever GetPetActionInfo(1) hands back at run time (it answers for
 -- whichever bar -- pet or vehicle override -- is actually active right now,
 -- there is no way to force one or the other from outside combat).
-local function ProbeVehicleState()
+local function CheckVehicleState()
     return {
         hasVehicleBarIndexApi = HAS_GET_VEHICLE_BAR_INDEX,
         hasOverrideActionBarApi = HAS_HAS_OVERRIDE_ACTION_BAR,
-        petActionInfo = ProbeCall(GetPetActionInfo, 1),
+        petActionInfo = CheckCall(GetPetActionInfo, 1),
     }
 end
 
@@ -754,7 +754,7 @@ end
 -- (and at what alpha) -- confirms whether a SetAlpha(0) on the pet bar
 -- itself actually reaches them, or whether they need their own suppression.
 -- Read-only: no alpha is ever set here.
-local function ProbeHotkeySuppression()
+local function CheckHotkeySuppression()
     local rows = {}
     for i = 1, 10 do
         local btn = _G["PetActionButton" .. i]
@@ -776,26 +776,26 @@ local function ProbeHotkeySuppression()
     return rows
 end
 
-local function RunPetProbeInner()
+local function RunPetCheckInner()
     return {
         t = time(),
         inCombat = InCombatLockdown() and true or false,
-        numPetActionSlots = ProbePetActionSlotCount(),
-        deadPetGate = ProbeDeadPetGate(),
-        autocastOverlay = ProbeAutocastOverlay(),
-        castTiming = ProbePetCastTiming(),
-        cooldown = ProbePetCooldown(),
-        vehicle = ProbeVehicleState(),
-        hotkeySuppression = ProbeHotkeySuppression(),
+        numPetActionSlots = CheckPetActionSlotCount(),
+        deadPetGate = CheckDeadPetGate(),
+        autocastOverlay = CheckAutocastOverlay(),
+        castTiming = CheckPetCastTiming(),
+        cooldown = CheckPetCooldown(),
+        vehicle = CheckVehicleState(),
+        hotkeySuppression = CheckHotkeySuppression(),
     }
 end
 
 local function StorePetRun(run)
     ForeverSTUwaveDB = ForeverSTUwaveDB or {}
-    ForeverSTUwaveDB.recon = ForeverSTUwaveDB.recon or {}
-    ForeverSTUwaveDB.recon.pet = ForeverSTUwaveDB.recon.pet or {}
+    ForeverSTUwaveDB.inspect = ForeverSTUwaveDB.inspect or {}
+    ForeverSTUwaveDB.inspect.pet = ForeverSTUwaveDB.inspect.pet or {}
 
-    local runs = ForeverSTUwaveDB.recon.pet
+    local runs = ForeverSTUwaveDB.inspect.pet
     runs[#runs + 1] = run
     while #runs > MAX_PET_RUNS do
         table.remove(runs, 1)
@@ -821,31 +821,31 @@ local function CountPetSecretFlags(node, count)
     return count
 end
 
-local function DoPetProbeRun()
-    local run = RunPetProbeInner()
+local function DoPetCheckRun()
+    local run = RunPetCheckInner()
     StorePetRun(run)
 
-    print(("|cff22e0ffForever STUwave|r: /fsrecon pet -- %d run(s) stored, %d secret return(s) this run, %s")
-        :format(#ForeverSTUwaveDB.recon.pet, CountPetSecretFlags(run),
+    print(("|cff22e0ffForever STUwave|r: /fsinspect pet -- %d run(s) stored, %d secret return(s) this run, %s")
+        :format(#ForeverSTUwaveDB.inspect.pet, CountPetSecretFlags(run),
             run.inCombat and "IN COMBAT" or "out of combat"))
 end
 
--- Same whole-run pcall isolation rule as RunThreatProbe: a probe firing off
+-- Same whole-run pcall isolation rule as RunThreatCheck: a check firing off
 -- a live PLAYER_REGEN_DISABLED event must never take the rest of the addon
 -- down with it.
-function Diagnostics.RunPetProbe()
-    local ok, err = pcall(DoPetProbeRun)
+function Diagnostics.RunPetCheck()
+    local ok, err = pcall(DoPetCheckRun)
     if not ok then
-        FS.LogDegradeOnce("fsrecon_pet_probe_error",
-            ("|cffff4488Forever STUwave|r: /fsrecon pet -- probe failed: %s"):format(tostring(err)))
+        FS.LogDegradeOnce("fsinspect_pet_check_error",
+            ("|cffff4488Forever STUwave|r: /fsinspect pet -- check failed: %s"):format(tostring(err)))
     end
 end
 
 function Diagnostics.ClearPetRuns()
     ForeverSTUwaveDB = ForeverSTUwaveDB or {}
-    ForeverSTUwaveDB.recon = ForeverSTUwaveDB.recon or {}
-    ForeverSTUwaveDB.recon.pet = {}
-    print("|cff22e0ffForever STUwave|r: /fsrecon pet -- stored runs cleared.")
+    ForeverSTUwaveDB.inspect = ForeverSTUwaveDB.inspect or {}
+    ForeverSTUwaveDB.inspect.pet = {}
+    print("|cff22e0ffForever STUwave|r: /fsinspect pet -- stored runs cleared.")
 end
 
 local petAutoFrame
@@ -859,18 +859,18 @@ local function DisarmPetAuto()
 end
 
 -- Event-driven only, no OnUpdate, same 2s-into-combat delay as
--- OnThreatAutoCombatStart -- captures probes 2, 4 and 5 (the combat-
+-- OnThreatAutoCombatStart -- captures checks 2, 4 and 5 (the combat-
 -- sensitive ones) after pet/cast state has had a moment to establish.
 local function OnPetAutoCombatStart()
     if petAutoRemaining <= 0 then return end
 
     if HAS_C_TIMER then
-        C_Timer.After(2, Diagnostics.RunPetProbe)
+        C_Timer.After(2, Diagnostics.RunPetCheck)
     else
-        FS.LogDegradeOnce("fsrecon_pet_noctimer",
-            "|cffff4488Forever STUwave|r: /fsrecon pet auto -- C_Timer unavailable, capturing immediately "
+        FS.LogDegradeOnce("fsinspect_pet_noctimer",
+            "|cffff4488Forever STUwave|r: /fsinspect pet auto -- C_Timer unavailable, capturing immediately "
                 .. "instead of the usual 2s in-combat delay.")
-        Diagnostics.RunPetProbe()
+        Diagnostics.RunPetCheck()
     end
 
     petAutoRemaining = petAutoRemaining - 1
@@ -891,25 +891,25 @@ function Diagnostics.ArmPetAuto(n)
     end
     petAutoFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 
-    print(("|cff22e0ffForever STUwave|r: /fsrecon pet auto -- armed for the next %d combat(s)."):format(n))
+    print(("|cff22e0ffForever STUwave|r: /fsinspect pet auto -- armed for the next %d combat(s)."):format(n))
 end
 
--- Shared by /fsrecon surname and /fsrecon minimap below: wraps a single
+-- Shared by /fsinspect surname and /fsinspect minimap below: wraps a single
 -- captured value as `{ok, secret, value}`, where `value` is always a
 -- tostring() (itself pcall'd -- a secret value's tostring() behavior is
--- unverified and must never throw out of a probe), never the raw value.
+-- unverified and must never throw out of a check), never the raw value.
 -- IsSecret is reported but never trusted for control flow here -- the only
 -- operation performed on `v` itself is that pcall'd tostring() (same "don't
 -- touch a possibly secret value directly" discipline as RecordValue above).
-local function WrapReconValue(v)
+local function WrapInspectValue(v)
     local secret = FS.IsSecret(v)
     local strOk, str = pcall(tostring, v)
     return { ok = true, secret = tostring(secret), value = strOk and str or "<tostring failed>" }
 end
 
 -- Shared call-and-wrap helper: pcalls a single-return getter and wraps the
--- result via WrapReconValue, or "<no API>" when the getter itself is absent.
-local function ProbeReconField(fn, ...)
+-- result via WrapInspectValue, or "<no API>" when the getter itself is absent.
+local function CheckInspectField(fn, ...)
     if type(fn) ~= "function" then
         return { ok = true, secret = "false", value = "<no API>" }
     end
@@ -917,73 +917,73 @@ local function ProbeReconField(fn, ...)
     if not ok then
         return { ok = false, err = type(ret) == "string" and ret or "non-string error" }
     end
-    return WrapReconValue(ret)
+    return WrapInspectValue(ret)
 end
 
--- /fsrecon surname -- one-shot probe over the name-API family (UnitName's two
+-- /fsinspect surname -- one-shot check over the name-API family (UnitName's two
 -- returns, GetUnitName's two boolean modes, UnitNameUnmodified if present,
 -- UnitGUID) for "player" and "target", dispatched from PanelSkins.lua's
--- /fsrecon like threat/pet above. Unlike those, this has no auto/clear and no
+-- /fsinspect like threat/pet above. Unlike those, this has no auto/clear and no
 -- run history -- it's a single lookup, so each run OVERWRITES
--- ForeverSTUwaveDB.recon.surname rather than appending.
-local function ProbeSurnameUnit(unit)
+-- ForeverSTUwaveDB.inspect.surname rather than appending.
+local function CheckSurnameUnit(unit)
     local row = { unit = unit, exists = UnitExists(unit) and true or false }
     if not row.exists then
         return row
     end
 
     -- UnitName returns two values (name, realm), so it needs its own pcall
-    -- rather than ProbeReconField's single-return shape.
+    -- rather than CheckInspectField's single-return shape.
     local nameOk, name1, name2 = pcall(UnitName, unit)
     if nameOk then
-        row.unitName_1 = WrapReconValue(name1)
-        row.unitName_2 = WrapReconValue(name2)
+        row.unitName_1 = WrapInspectValue(name1)
+        row.unitName_2 = WrapInspectValue(name2)
     else
         local err = { ok = false, err = type(name1) == "string" and name1 or "non-string error" }
         row.unitName_1, row.unitName_2 = err, err
     end
 
-    row.getUnitName_true = ProbeReconField(GetUnitName, unit, true)
-    row.getUnitName_false = ProbeReconField(GetUnitName, unit, false)
-    row.unitNameUnmodified = ProbeReconField(UnitNameUnmodified, unit)
-    row.guid = ProbeReconField(UnitGUID, unit)
+    row.getUnitName_true = CheckInspectField(GetUnitName, unit, true)
+    row.getUnitName_false = CheckInspectField(GetUnitName, unit, false)
+    row.unitNameUnmodified = CheckInspectField(UnitNameUnmodified, unit)
+    row.guid = CheckInspectField(UnitGUID, unit)
 
     return row
 end
 
 local SURNAME_UNITS = { "player", "target" }
 
-local function DoSurnameProbeRun()
+local function DoSurnameCheckRun()
     ForeverSTUwaveDB = ForeverSTUwaveDB or {}
-    ForeverSTUwaveDB.recon = ForeverSTUwaveDB.recon or {}
+    ForeverSTUwaveDB.inspect = ForeverSTUwaveDB.inspect or {}
 
     local captured = {}
     for _, unit in ipairs(SURNAME_UNITS) do
-        captured[unit] = ProbeSurnameUnit(unit)
+        captured[unit] = CheckSurnameUnit(unit)
     end
-    ForeverSTUwaveDB.recon.surname = captured
+    ForeverSTUwaveDB.inspect.surname = captured
 end
 
--- Same whole-run pcall isolation rule as RunThreatProbe/RunPetProbe: a probe
+-- Same whole-run pcall isolation rule as RunThreatCheck/RunPetCheck: a check
 -- fired from a slash command must never take the rest of the addon down. The
--- confirmation print lives here rather than in DoSurnameProbeRun itself so
--- /fsrecon all (below) can run the capture without it, for one combined line.
-function Diagnostics.RunSurnameProbe()
-    local ok, err = pcall(DoSurnameProbeRun)
+-- confirmation print lives here rather than in DoSurnameCheckRun itself so
+-- /fsinspect all (below) can run the capture without it, for one combined line.
+function Diagnostics.RunSurnameCheck()
+    local ok, err = pcall(DoSurnameCheckRun)
     if not ok then
-        FS.LogDegradeOnce("fsrecon_surname_probe_error",
-            ("|cffff4488Forever STUwave|r: /fsrecon surname -- probe failed: %s"):format(tostring(err)))
+        FS.LogDegradeOnce("fsinspect_surname_check_error",
+            ("|cffff4488Forever STUwave|r: /fsinspect surname -- check failed: %s"):format(tostring(err)))
         return
     end
-    print("|cff22e0ffForever STUwave|r: /fsrecon surname -- captured, /fsreload to flush")
+    print("|cff22e0ffForever STUwave|r: /fsinspect surname -- captured, /fsreload to flush")
 end
 
--- /fsrecon minimap -- one-shot probe over Minimap/MinimapCluster geometry
+-- /fsinspect minimap -- one-shot check over Minimap/MinimapCluster geometry
 -- (size, anchor point, scale, shape shim, fsPlaced marker), since a container
 -- can reserve space its hidden children don't give back -- see the
--- frame-recon note on MinimapCluster's header strip. Same one-shot-overwrite
--- shape as /fsrecon surname above: no auto/clear, no run history.
-local function ProbeMinimapSize(frame, wKey, hKey, row)
+-- frame-inspect note on MinimapCluster's header strip. Same one-shot-overwrite
+-- shape as /fsinspect surname above: no auto/clear, no run history.
+local function CheckMinimapSize(frame, wKey, hKey, row)
     if type(frame) ~= "table" or type(frame.GetSize) ~= "function" then
         row[wKey] = { ok = true, secret = "false", value = "<no API>" }
         row[hKey] = { ok = true, secret = "false", value = "<no API>" }
@@ -995,17 +995,17 @@ local function ProbeMinimapSize(frame, wKey, hKey, row)
         row[wKey], row[hKey] = err, err
         return
     end
-    row[wKey] = WrapReconValue(w)
-    row[hKey] = WrapReconValue(h)
+    row[wKey] = WrapInspectValue(w)
+    row[hKey] = WrapInspectValue(h)
 end
 
 -- GetPoint(1) hands back 5 values at once (point/relTo/relPoint/x/y), so it
--- gets its own composite row rather than fitting ProbeReconField's
+-- gets its own composite row rather than fitting CheckInspectField's
 -- single-return shape. relTo is a FRAME reference, not a scalar -- resolved
--- to its name (or a placeholder) before it ever reaches WrapReconValue, since
+-- to its name (or a placeholder) before it ever reaches WrapInspectValue, since
 -- tostring() on a frame object is a useless pointer string, not the name
 -- read back off disk.
-local function ProbeMinimapPoint(frame)
+local function CheckMinimapPoint(frame)
     if type(frame) ~= "table" or type(frame.GetPoint) ~= "function" then
         return { ok = true, secret = "false", value = "<no API>" }
     end
@@ -1023,7 +1023,7 @@ local function ProbeMinimapPoint(frame)
         -- would silently replace a genuine nil with the placeholder even
         -- when nameOk is true -- moot today (name is nil, not false, so the
         -- `or` still fires correctly), but kept explicit per this file's
-        -- established and/or-with-a-real-default rule (see ProbeAuraCall).
+        -- established and/or-with-a-real-default rule (see CheckAuraCall).
         if nameOk and name then
             relToName = name
         else
@@ -1033,39 +1033,39 @@ local function ProbeMinimapPoint(frame)
 
     return {
         ok = true,
-        point = WrapReconValue(point),
-        relTo = WrapReconValue(relToName),
-        relPoint = WrapReconValue(relPoint),
-        x = WrapReconValue(x),
-        y = WrapReconValue(y),
+        point = WrapInspectValue(point),
+        relTo = WrapInspectValue(relToName),
+        relPoint = WrapInspectValue(relPoint),
+        x = WrapInspectValue(x),
+        y = WrapInspectValue(y),
     }
 end
 
-local function DoMinimapProbeRun()
+local function DoMinimapCheckRun()
     ForeverSTUwaveDB = ForeverSTUwaveDB or {}
-    ForeverSTUwaveDB.recon = ForeverSTUwaveDB.recon or {}
+    ForeverSTUwaveDB.inspect = ForeverSTUwaveDB.inspect or {}
 
     local row = {}
-    ProbeMinimapSize(Minimap, "mw", "mh", row)
-    ProbeMinimapSize(MinimapCluster, "cw", "ch", row)
-    row.minimapPoint = ProbeMinimapPoint(Minimap)
-    row.clusterPoint = ProbeMinimapPoint(MinimapCluster)
+    CheckMinimapSize(Minimap, "mw", "mh", row)
+    CheckMinimapSize(MinimapCluster, "cw", "ch", row)
+    row.minimapPoint = CheckMinimapPoint(Minimap)
+    row.clusterPoint = CheckMinimapPoint(MinimapCluster)
 
     local fsPlaced = nil
     if type(Minimap) == "table" then
         fsPlaced = Minimap.fsPlaced
     end
-    row.fsPlaced = WrapReconValue(fsPlaced)
+    row.fsPlaced = WrapInspectValue(fsPlaced)
 
-    row.minimapScale = ProbeReconField(function() return Minimap:GetEffectiveScale() end)
-    row.clusterScale = ProbeReconField(function() return MinimapCluster:GetEffectiveScale() end)
-    row.minimapShape = ProbeReconField(function()
+    row.minimapScale = CheckInspectField(function() return Minimap:GetEffectiveScale() end)
+    row.clusterScale = CheckInspectField(function() return MinimapCluster:GetEffectiveScale() end)
+    row.minimapShape = CheckInspectField(function()
         if type(GetMinimapShape) ~= "function" then
             return "<no shim>"
         end
         return GetMinimapShape() or "<no shim>"
     end)
-    row.parent = ProbeReconField(function()
+    row.parent = CheckInspectField(function()
         local parent = Minimap:GetParent()
         if parent and type(parent.GetName) == "function" then
             return parent:GetName() or "<unnamed>"
@@ -1073,31 +1073,31 @@ local function DoMinimapProbeRun()
         return "<unnamed>"
     end)
 
-    ForeverSTUwaveDB.recon.minimap = row
+    ForeverSTUwaveDB.inspect.minimap = row
 end
 
--- Same whole-run pcall isolation rule as the other /fsrecon probes. The
--- confirmation print lives here rather than in DoMinimapProbeRun itself so
--- /fsrecon all (below) can run the capture without it, for one combined line.
-function Diagnostics.RunMinimapProbe()
-    local ok, err = pcall(DoMinimapProbeRun)
+-- Same whole-run pcall isolation rule as the other /fsinspect checks. The
+-- confirmation print lives here rather than in DoMinimapCheckRun itself so
+-- /fsinspect all (below) can run the capture without it, for one combined line.
+function Diagnostics.RunMinimapCheck()
+    local ok, err = pcall(DoMinimapCheckRun)
     if not ok then
-        FS.LogDegradeOnce("fsrecon_minimap_probe_error",
-            ("|cffff4488Forever STUwave|r: /fsrecon minimap -- probe failed: %s"):format(tostring(err)))
+        FS.LogDegradeOnce("fsinspect_minimap_check_error",
+            ("|cffff4488Forever STUwave|r: /fsinspect minimap -- check failed: %s"):format(tostring(err)))
         return
     end
-    print("|cff22e0ffForever STUwave|r: /fsrecon minimap -- captured, /fsreload to flush")
+    print("|cff22e0ffForever STUwave|r: /fsinspect minimap -- captured, /fsreload to flush")
 end
 
 -------------------------------------------------------------------------------
--- /fsrecon minimap paint|spill|clear -- read-only bounds and reserved space
+-- /fsinspect minimap paint|spill|clear -- read-only bounds and reserved space
 -------------------------------------------------------------------------------
 
 local minimapBoundsOverlay
 local minimapBoundsMarks = {}
 
 local function MinimapPlain(value, kind)
-    local info = ProbeValue(value)
+    local info = CheckValue(value)
     return not info.err and not info.secret and info.access ~= false and type(value) == kind
 end
 
@@ -1390,18 +1390,18 @@ function Diagnostics.RunMinimapBounds(mode)
         return
     end
     ForeverSTUwaveDB = ForeverSTUwaveDB or {}
-    ForeverSTUwaveDB.recon = ForeverSTUwaveDB.recon or {}
-    ForeverSTUwaveDB.recon.minimapBounds = run
+    ForeverSTUwaveDB.inspect = ForeverSTUwaveDB.inspect or {}
+    ForeverSTUwaveDB.inspect.minimapBounds = run
     local painted = pcall(PaintMinimapBounds, run, mode)
     if not painted then ClearMinimapBoundsMarks(); run.paintError = "overlay unavailable" end
     print(("|cff22e0ffForever STUwave|r: minimap bounds -- %d nodes, %d outside map, %d skips; " ..
         "grey hidden, amber unknown alpha, red visible spill (custom furniture identified in capture)")
         :format(run.visited, run.spills, #run.skips))
-    print("|cff22e0ffForever STUwave|r: stored recon.minimapBounds; /fsreload to flush, minimap clear removes outlines")
+    print("|cff22e0ffForever STUwave|r: stored inspect.minimapBounds; /fsreload to flush, minimap clear removes outlines")
 end
 
 -------------------------------------------------------------------------------
--- /fsrecon plateauras -- are Blizzard's own nameplate aura icons populated
+-- /fsinspect plateauras -- are Blizzard's own nameplate aura icons populated
 -- while our code hides the stock plate?
 -------------------------------------------------------------------------------
 
@@ -1417,7 +1417,7 @@ end
 -- returned value is FS.IsSecret-checked before it is stored or compared (a
 -- secret is stored as the string "<secret>"). Nothing is shown, hidden,
 -- reparented or modified, and no protected function is called, so it is safe
--- to run mid-fight. Results: ForeverSTUwaveDB.recon.plateauras.runs
+-- to run mid-fight. Results: ForeverSTUwaveDB.inspect.plateauras.runs
 -- (newest last, capped at PLATEAURAS_MAX_RUNS).
 
 local PLATEAURAS_MAX_RUNS = 4
@@ -1756,11 +1756,11 @@ local function CapturePlateAuras(reason)
     run.summary = PlateAurasSummary(run.plates)
 
     ForeverSTUwaveDB = ForeverSTUwaveDB or {}
-    ForeverSTUwaveDB.recon = ForeverSTUwaveDB.recon or {}
-    local store = ForeverSTUwaveDB.recon.plateauras
+    ForeverSTUwaveDB.inspect = ForeverSTUwaveDB.inspect or {}
+    local store = ForeverSTUwaveDB.inspect.plateauras
     if type(store) ~= "table" or type(store.runs) ~= "table" then
         store = { runs = {} }
-        ForeverSTUwaveDB.recon.plateauras = store
+        ForeverSTUwaveDB.inspect.plateauras = store
     end
     store.runs[#store.runs + 1] = run
     while #store.runs > PLATEAURAS_MAX_RUNS do table.remove(store.runs, 1) end
@@ -1770,17 +1770,17 @@ end
 local function DoPlateAurasRun(reason)
     local ok, run = pcall(CapturePlateAuras, reason)
     if not ok then
-        FS.LogDegradeOnce("fsrecon_plateauras_probe_error",
-            ("|cffff4488Forever STUwave|r: /fsrecon plateauras -- probe failed: %s"):format(tostring(run)))
+        FS.LogDegradeOnce("fsinspect_plateauras_check_error",
+            ("|cffff4488Forever STUwave|r: /fsinspect plateauras -- check failed: %s"):format(tostring(run)))
         return
     end
     local s = run.summary
-    print(("|cff22e0ffForever STUwave|r: /fsrecon plateauras -- %s, %d plate(s), aura textures shown %d / with texture %d / visible %d, %s; saved to recon.plateauras, /fsreload to flush")
+    print(("|cff22e0ffForever STUwave|r: /fsinspect plateauras -- %s, %d plate(s), aura textures shown %d / with texture %d / visible %d, %s; saved to inspect.plateauras, /fsreload to flush")
         :format(run.mode, #run.plates, s.auraTexturesShown, s.auraTexturesWithTexture, s.auraTexturesVisible,
             tostring(run.context.inCombatLockdown) == "true" and "IN COMBAT" or "out of combat"))
 end
 
-function Diagnostics.RunPlateAurasProbe()
+function Diagnostics.RunPlateAurasCheck()
     DoPlateAurasRun("manual")
 end
 
@@ -1821,9 +1821,9 @@ function Diagnostics.DisarmPlateAuras()
     local wasActive = plateAurasActive
     DisarmPlateAuras()
     if wasActive then
-        print("|cff22e0ffForever STUwave|r: /fsrecon plateauras off -- disarmed; any pending capture is cancelled")
+        print("|cff22e0ffForever STUwave|r: /fsinspect plateauras off -- disarmed; any pending capture is cancelled")
     else
-        print("|cff22e0ffForever STUwave|r: /fsrecon plateauras off -- nothing armed")
+        print("|cff22e0ffForever STUwave|r: /fsinspect plateauras off -- nothing armed")
     end
 end
 
@@ -1837,38 +1837,38 @@ function Diagnostics.ArmPlateAuras()
     end
     local ok, err = pcall(plateAurasArmFrame.RegisterUnitEvent, plateAurasArmFrame, "UNIT_AURA", "target")
     if not ok then
-        print(("|cffff4488Forever STUwave|r: /fsrecon plateauras arm -- could not register UNIT_AURA: %s"):format(tostring(err)))
+        print(("|cffff4488Forever STUwave|r: /fsinspect plateauras arm -- could not register UNIT_AURA: %s"):format(tostring(err)))
         return
     end
     plateAurasActive = true
-    print("|cff22e0ffForever STUwave|r: /fsrecon plateauras arm -- armed; will capture once, 1.5s after the first target aura change in combat")
+    print("|cff22e0ffForever STUwave|r: /fsinspect plateauras arm -- armed; will capture once, 1.5s after the first target aura change in combat")
 end
 
--- /fsrecon all -- runs every one-shot recon probe in a single command.
--- Each capture is pcall-isolated exactly like its own /fsrecon <name>
--- command (DoSurnameProbeRun/DoMinimapProbeRun, not the public
--- RunSurnameProbe/RunMinimapProbe wrappers, since those print their own
--- per-probe confirmation line and this command prints one combined line
--- instead), so one probe throwing can't block the other or skip its
+-- /fsinspect all -- runs every one-shot inspect check in a single command.
+-- Each capture is pcall-isolated exactly like its own /fsinspect <name>
+-- command (DoSurnameCheckRun/DoMinimapCheckRun, not the public
+-- RunSurnameCheck/RunMinimapCheck wrappers, since those print their own
+-- per-check confirmation line and this command prints one combined line
+-- instead), so one check throwing can't block the other or skip its
 -- ForeverSTUwaveDB write.
-function Diagnostics.RunAllRecon()
-    local surnameOk, surnameErr = pcall(DoSurnameProbeRun)
+function Diagnostics.RunAllInspect()
+    local surnameOk, surnameErr = pcall(DoSurnameCheckRun)
     if not surnameOk then
-        FS.LogDegradeOnce("fsrecon_surname_probe_error",
-            ("|cffff4488Forever STUwave|r: /fsrecon surname -- probe failed: %s"):format(tostring(surnameErr)))
+        FS.LogDegradeOnce("fsinspect_surname_check_error",
+            ("|cffff4488Forever STUwave|r: /fsinspect surname -- check failed: %s"):format(tostring(surnameErr)))
     end
 
-    local minimapOk, minimapErr = pcall(DoMinimapProbeRun)
+    local minimapOk, minimapErr = pcall(DoMinimapCheckRun)
     if not minimapOk then
-        FS.LogDegradeOnce("fsrecon_minimap_probe_error",
-            ("|cffff4488Forever STUwave|r: /fsrecon minimap -- probe failed: %s"):format(tostring(minimapErr)))
+        FS.LogDegradeOnce("fsinspect_minimap_check_error",
+            ("|cffff4488Forever STUwave|r: /fsinspect minimap -- check failed: %s"):format(tostring(minimapErr)))
     end
 
-    print(("|cff22e0ffForever STUwave|r: /fsrecon all -- surname %s, minimap %s, /fsreload to flush")
+    print(("|cff22e0ffForever STUwave|r: /fsinspect all -- surname %s, minimap %s, /fsreload to flush")
         :format(surnameOk and "captured" or "FAILED", minimapOk and "captured" or "FAILED"))
 end
 
--- /fsrecon microbags -- inventory of Blizzard-selected controls.
+-- /fsinspect microbags -- inventory of Blizzard-selected controls.
 local function MicroBagFrameName(frame, fallback)
     local ok, name = pcall(function() return frame:GetName() end)
     if ok and type(name) == "string" and name ~= "" then return name end
@@ -1944,7 +1944,7 @@ local function CaptureMicroBags()
                 }
             end
         end)
-        if not bagsOk then report.bagError = ProbeError(bagsErr) end
+        if not bagsOk then report.bagError = CheckError(bagsErr) end
     else
         report.bagError = manager and "enumerator unavailable" or "manager unavailable"
     end
@@ -1958,27 +1958,27 @@ local function CaptureMicroBags()
         if keyringOk then
             report.shouldShowKeyring = keyring
         else
-            report.shouldShowKeyring = ProbeError(keyring)
+            report.shouldShowKeyring = CheckError(keyring)
         end
     else
         report.shouldShowKeyring = "unavailable"
     end
 
     ForeverSTUwaveDB = ForeverSTUwaveDB or {}
-    ForeverSTUwaveDB.recon = ForeverSTUwaveDB.recon or {}
-    ForeverSTUwaveDB.recon.microBags = report
+    ForeverSTUwaveDB.inspect = ForeverSTUwaveDB.inspect or {}
+    ForeverSTUwaveDB.inspect.microBags = report
     return report
 end
 
-function Diagnostics.RunMicroBagsProbe(silent)
+function Diagnostics.RunMicroBagsCheck(silent)
     local ok, report = pcall(CaptureMicroBags)
     if not ok then
-        FS.LogDegradeOnce("fsrecon_microbags_probe_error",
-            ("|cffff4488Forever STUwave|r: /fsrecon microbags -- capture failed: %s"):format(ProbeError(report)))
+        FS.LogDegradeOnce("fsinspect_microbags_check_error",
+            ("|cffff4488Forever STUwave|r: /fsinspect microbags -- capture failed: %s"):format(CheckError(report)))
         return
     end
     if not silent then
-        print(("|cff22e0ffForever STUwave|r: /fsrecon microbags -- %d micro, %d bags; saved to recon.microBags, /fsreload to flush")
+        print(("|cff22e0ffForever STUwave|r: /fsinspect microbags -- %d micro, %d bags; saved to inspect.microBags, /fsreload to flush")
             :format(#report.micro, #report.bags))
     end
 end
@@ -1988,14 +1988,14 @@ microBagLogin:RegisterEvent("PLAYER_LOGIN")
 microBagLogin:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
     if C_Timer and type(C_Timer.After) == "function" then
-        C_Timer.After(0.25, function() Diagnostics.RunMicroBagsProbe(true) end)
+        C_Timer.After(0.25, function() Diagnostics.RunMicroBagsCheck(true) end)
     else
-        Diagnostics.RunMicroBagsProbe(true)
+        Diagnostics.RunMicroBagsCheck(true)
     end
 end)
 
 -------------------------------------------------------------------------------
--- /fsmo -- mouseover probe for testing mouseover casting
+-- /fsmo -- mouseover check for testing mouseover casting
 -------------------------------------------------------------------------------
 
 -- `/fsmo` toggles a watch on UPDATE_MOUSEOVER_UNIT. Each CHANGE of unit or frame prints one chat
@@ -2111,17 +2111,17 @@ SlashCmdList["FSMO"] = function()
 end
 
 -------------------------------------------------------------------------------
--- /fsrecon class -- class spell, form and aura recon
+-- /fsinspect class -- class spell, form and aura inspect
 -------------------------------------------------------------------------------
 
--- `/fsrecon class` records what a class really looks like on this client before class features
+-- `/fsinspect class` records what a class really looks like on this client before class features
 -- are built for it: the talent API that exists with the points per tab and the ranked talents
 -- (CR.Ranks), the shapeshift forms, the resolved id of every candidate spell name with IsPlayerSpell
 -- and the aura secrecy enum, the class's own HudProfile spell keys, the player's buffs, the player's
 -- debuffs on the target, and the player's buffs on party1 to party4. The tester runs it once (a seal
 -- and an aura up, a judged mob, a blessing on a party member), then `/fsbug`: the result is also kept
--- in ForeverSTUwaveDB.recon.class, stamped with the wall clock (`taken`). BugReport.lua copies the last run into the FIRST report after a
--- run (Diagnostics.GetClassRecon, then MarkClassReconReported); later reports get a small stub.
+-- in ForeverSTUwaveDB.inspect.class, stamped with the wall clock (`taken`). BugReport.lua copies the last run into the FIRST report after a
+-- run (Diagnostics.GetClassInspect, then MarkClassInspectReported); later reports get a small stub.
 --
 -- Every API read is pcall'd and every value goes through FS.IsSecret BEFORE anything compares,
 -- concatenates, indexes or tostring's it: a secret is stored as the word "secret", a throw as
@@ -2400,7 +2400,7 @@ do
     -- Talents, forms -----------------------------------------------------------
 
     -- A tab count the client gave, capped. A count that is not a number, or is below 1, is as good as
-    -- no answer (a client can report 0 before the talents load): the first three tabs get probed.
+    -- no answer (a client can report 0 before the talents load): the first three tabs get checked.
     function CR.Tabs(n)
         if type(n) ~= "number" or n < 1 then n = 3 end
         return math.min(n, CR.LIMITS.tabs)
@@ -2562,7 +2562,7 @@ do
         out.api.GetTalentTabInfo = tabFn and "ok" or "unavailable"
         out.tabSource = "GetTalentTabInfo"
         if tabFn then
-            -- A client without GetNumTalentTabs still gets its first three tabs probed.
+            -- A client without GetNumTalentTabs still gets its first three tabs checked.
             local n = CR.Tabs(CR.Get(CR.Call(CR.Api(nil, "GetNumTalentTabs")), 1))
             for i = 1, n do
                 local r = CR.Call(tabFn, i)
@@ -2902,37 +2902,37 @@ do
         return lines
     end
 
-    function Diagnostics.RunClassRecon()
+    function Diagnostics.RunClassInspect()
         local ok, data = pcall(CR.Capture)
         if not ok then
-            FS.LogDegradeOnce("fsrecon_class_probe_error",
-                "|cffff4488Forever STUwave|r: /fsrecon class -- capture failed")
+            FS.LogDegradeOnce("fsinspect_class_check_error",
+                "|cffff4488Forever STUwave|r: /fsinspect class -- capture failed")
             return
         end
         CR.last = data
         ForeverSTUwaveDB = ForeverSTUwaveDB or {}
-        ForeverSTUwaveDB.recon = ForeverSTUwaveDB.recon or {}
-        ForeverSTUwaveDB.recon.class = data
+        ForeverSTUwaveDB.inspect = ForeverSTUwaveDB.inspect or {}
+        ForeverSTUwaveDB.inspect.class = data
 
         local built, lines = pcall(CR.Lines, data)
         if not built then lines = { "output failed, the data is saved" } end
         for _, line in ipairs(lines) do pcall(print, CR.PREFIX .. line) end
-        pcall(print, CR.PREFIX .. "saved to recon.class, /fsbug includes it")
+        pcall(print, CR.PREFIX .. "saved to inspect.class, /fsbug includes it")
     end
 
     -- BugReport.lua calls this once /fsbug has attached the full run to a report AND shown it to the
-    -- tester, so later reports carry only a stub. The flag lives on the saved run, so the next /fsrecon class (a new table) clears it.
-    function Diagnostics.MarkClassReconReported()
-        local data = Diagnostics.GetClassRecon()
+    -- tester, so later reports carry only a stub. The flag lives on the saved run, so the next /fsinspect class (a new table) clears it.
+    function Diagnostics.MarkClassInspectReported()
+        local data = Diagnostics.GetClassInspect()
         if type(data) == "table" then data.reported = true end
     end
 
     -- The last run, for BugReport.lua. A run from an earlier session (the SavedVariables copy) counts
     -- until this session runs one.
-    function Diagnostics.GetClassRecon()
+    function Diagnostics.GetClassInspect()
         if CR.last ~= nil then return CR.last end
         local db = _G.ForeverSTUwaveDB
-        if type(db) == "table" and type(db.recon) == "table" then return db.recon.class end
+        if type(db) == "table" and type(db.inspect) == "table" then return db.inspect.class end
         return nil
     end
 end

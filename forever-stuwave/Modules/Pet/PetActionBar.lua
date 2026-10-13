@@ -361,7 +361,7 @@ local function UpdateAutoCast(button, name, autoCastAllowed, autoCastEnabled)
         if not warnedNoAutoCast then
             warnedNoAutoCast = true
             FS.LogDegradeOnce("petactionbar_autocastsecret",
-                "|cffff4488Forever STUwave|r: autocast fields returned a secret value, " ..
+                "|cffff4488Forever STUwave|r: autocast fields were not readable, " ..
                 "pet bar autocast ring keeps its last look for this button")
         end
         -- The slot was not read: forget its action so the next plain read snaps, never animates.
@@ -383,7 +383,7 @@ end
 -- Attack-active flash (locked slot-state visual)
 --
 -- IsPetAttackAction/IsPetAttackActive are feature-detected and pcall'd:
--- neither is confirmed present on this client (no probe result exists for
+-- neither is confirmed present on this client (no check result exists for
 -- them anywhere in this addon's Diagnostics.lua), so a missing/throwing API
 -- just means the flash never shows rather than an addon error. Built lazily,
 -- not in StyleButton -- only ever one button (the attack slot) will ever need

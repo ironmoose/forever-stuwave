@@ -67,14 +67,14 @@
 -- least sec seconds old (a fight-age proxy for "the mob is durable", since health is secret).
 -- A target found carrying our DoT out of combat counts from that aura's application time.
 --
--- SECRECY (probe-verified on 1.60.1):
+-- SECRECY (check-verified on 1.60.1):
 --   * issecretvalue is checked (pcall'd; a missing or throwing check counts as secret)
 --     before any API result is compared, indexed or used in arithmetic.
 --   * By-spell aura lookups return ZERO values in combat, and GetAuraDataByIndex throws, so
 --     the aura source of procActive and every aura scan (buffs, the DoT reconcile) are
 --     out-of-combat only and nil in combat. C_Secrets.ShouldAurasBeSecret() true also
 --     blocks them. A scan that returns zero values at index 1 is unreadable (nil), never
---     an empty list. UNPROBED: whether an EMPTY aura list reads as one nil or as zero
+--     an empty list. UNCHECKED: whether an EMPTY aura list reads as one nil or as zero
 --     values out of combat (see the open question in ScanAuras).
 --   * GetSpellCooldown.isActive is plain in combat. startTime and duration are secret in
 --     combat and plain out of it.
@@ -94,7 +94,7 @@
 --      start + duration - now. Such a read also LEARNS two things: the spell's cooldown length (so a
 --      talent like Improved Mind Blast is the client's number, not the dictionary's; skipped when the
 --      cooldown did not start at our own cast, e.g. a lockout) and the cooldown's end (kept for combat).
---   3. In combat (VERIFIED on 1.60.1, priest probe 2026-10-09, two runs) startTime and duration are
+--   3. In combat (VERIFIED on 1.60.1, priest check 2026-10-09, two runs) startTime and duration are
 --      secret while isActive stays plain. Run 1 saw a plain true for every spell (taken between wand
 --      shots, unexplained); run 2 saw a plain FALSE for 16 of 18 spells and a true only for the Mind
 --      Blast just cast. So a plain false is trustworthy evidence of "ready" (step 1, whatever the ledger
@@ -130,7 +130,7 @@
 -- and a /reload leave it unknown (nil) until the reconcile reads it.
 -- `sealMissing(sec)` is true with no seal or at most `sec` left, false with more left, nil when
 -- unknown (a rotation rule on it is then skipped, never guessed). VERIFIED in game for Seal of
--- Righteousness (live recon, level 7): the aura id equals the cast id 21084 and sourceUnit is "player".
+-- Righteousness (live inspect, level 7): the aura id equals the cast id 21084 and sourceUnit is "player".
 -- UNVERIFIED: the other seal names and ids.
 --
 -- JUDGEMENT (a dictionary spell with `judgement`). Judgement is a cast on the target, so it runs the
@@ -152,7 +152,7 @@
 -- SPELL_ACTIVATION_OVERLAY_GLOW_SHOW/HIDE events with a plain spell id, then
 -- C_SpellActivationOverlay.IsSpellOverlayed), then the out-of-combat aura read. A profile
 -- proc names the spell that glows in `overlaySpell`. The overlay data is UNVERIFIED until
--- the in-game probe; a plain false from the overlay API is trusted in combat, but out of
+-- the in-game check; a plain false from the overlay API is trusted in combat, but out of
 -- combat a plain aura read overrides it.
 -- A proc with `ready = key` is a cooldown tracker instead (Paladin Holy Strike / Judgement): it
 -- reads CooldownState, so the cast ledger above keeps it lit through the global cooldown. UNVERIFIED
@@ -356,14 +356,14 @@ end
 -- read. A scan whose first index returns ZERO values is unreadable (nil), not an empty list:
 -- an empty list would read every buff and DoT as missing.
 --
--- OPEN QUESTION (UNPROBED, needs a live /fsprobe check; behaviour left unchanged on purpose):
+-- OPEN QUESTION (UNCHECKED, needs a live /fscheck check; behaviour left unchanged on purpose):
 -- out of combat, on a unit with NO matching auras at all, does GetAuraDataByIndex(unit, 1,
 -- filter) return one nil or ZERO values? If it returns zero values, the `i == 1 and n == 0`
 -- rule below reads a clean list as unreadable, which would suppress the Fortitude / Inner
 -- Fire reminders on an unbuffed player (exactly when they matter) and skip the DoT
--- reconcile on a clean target. The probe: out of combat, strip the buffs or target a mob
+-- reconcile on a clean target. The check: out of combat, strip the buffs or target a mob
 -- with no debuffs of ours, then count the values returned at index 1.
--- The SEAL reconcile alone passes `zeroIsEmpty`: Parker's live /fsrecon class run (out of combat,
+-- The SEAL reconcile alone passes `zeroIsEmpty`: Parker's live /fsinspect class run (out of combat,
 -- level 7) showed the player HELPFUL read works, and a buffless paladin must read "no seal" so the
 -- seal rule can fire, so there zero values at index 1 are an EMPTY list. Every other caller keeps
 -- the unreadable reading above.
@@ -1078,7 +1078,7 @@ end
 local overlayGlow = {}
 
 -- true / false / nil from the overlay source: the last glow event for the proc's spell, else
--- IsSpellOverlayed. UNVERIFIED on Forever until the in-game probe has run.
+-- IsSpellOverlayed. UNVERIFIED on Forever until the in-game check has run.
 local function OverlayState(spec)
     local sk = spec.overlaySpell
     if not sk then return nil end
@@ -1096,7 +1096,7 @@ end
 -- true / false / nil from the player's aura. By-spell lookups return no values in combat on
 -- 1.60.1: that is unknown, not "absent". The `n == 0` check is NOT redundant behind
 -- AurasReadable: that gate only says the client allows the read, not what an absent aura
--- looks like out of combat (one nil or zero values, the same UNPROBED question as in
+-- looks like out of combat (one nil or zero values, the same UNCHECKED question as in
 -- ScanAuras), and zero values must never read as "the proc is absent".
 local function AuraProcState(spec)
     if not spec.aura or not AurasReadable() then return nil end

@@ -360,7 +360,7 @@ local function ApplyPowerFillColor(root, color)
 end
 
 -- UnitReaction(unit, "player")'s secrecy on this client is UNVERIFIED (the
--- recon audit call that would confirm it failed to run -- see Diagnostics.lua
+-- inspect audit call that would confirm it failed to run -- see Diagnostics.lua
 -- item 5). FS.IsSecret is checked BEFORE any nil/number check: per the
 -- secret-values skill, `r == nil` is itself an illegal comparison if `r`
 -- turns out to be a secret, so the secrecy test has to come first, not the
@@ -408,7 +408,7 @@ end
 -- secrecy on a nameplate unit token is UNVERIFIED on this client, so both are
 -- FS.IsSecret-guarded before any truth-test/nil-check, same secrecy-first-
 -- then-nil ordering as GetReactionColor's own comment above. Argument order
--- ("player", unit) matches Diagnostics.lua's /fsrecon threat probe.
+-- ("player", unit) matches Diagnostics.lua's /fsinspect threat check.
 -- reactionFn picks the fallback palette (defaults to GetReactionColor, the
 -- fill palette; UpdateName passes GetNameReactionColor so the name keeps its
 -- own white/yellow/red palette). The fallback is used when the unit is not
@@ -1030,8 +1030,8 @@ end
 -- The engine reads the auras and builds the icons, so no aura data ever enters
 -- addon Lua and the row works in combat, where every addon aura read is refused
 -- or returns secrets. Modelled on Plater_Auras.lua (createAuraContainers,
--- initAuraFrame, CreateOrUpdateAuraContainers) and FSProbe.lua's BuildContainer.
--- What was actually run on this client (WoW Forever 1.60.1): FSProbe built its
+-- initAuraFrame, CreateOrUpdateAuraContainers) and FSCheck.lua's BuildContainer.
+-- What was actually run on this client (WoW Forever 1.60.1): FSCheck built its
 -- container OUT of combat, and only SetUnit, SetEnabled(true), Show and a retarget
 -- ran in combat. UNVERIFIED in game: nameplate unit tokens, creating a container
 -- in combat, and SetParent / ClearAllPoints / SetPoint / SetFrameLevel on one.

@@ -49,7 +49,7 @@ local addonName, _ = ...
 -- written too, but ours is the one that is actually trusted to come back.
 -- Captured BEFORE we touch the global, so the log can say whether the client
 -- had already restored last session's table by the time this file ran. The
--- three probes (file scope / ADDON_LOADED / PLAYER_LOGIN) bracket every moment
+-- three checks (file scope / ADDON_LOADED / PLAYER_LOGIN) bracket every moment
 -- the value could go missing, which is the only way to tell "never restored"
 -- from "restored then clobbered".
 local xAtFileScope = type(ForeverSTUwaveIssueReporterPos) == "table"
@@ -79,7 +79,7 @@ ForeverSTUwaveIssueReporterPos = ForeverSTUwaveIssueReporterPos or {}
 
 -- Fallback, used ALWAYS in practice, not just until the first drag: the
 -- Forever beta client never restores SavedVariables on load (confirmed via
--- the boot-counter probe above; design notes), so `saved.x/saved.y` below
+-- the boot-counter check above; design notes), so `saved.x/saved.y` below
 -- can never survive a reload and this branch is the one that actually seats
 -- the frame every single time. A dragged position simply cannot persist
 -- until that client bug is fixed.

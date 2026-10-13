@@ -756,45 +756,45 @@ case("report_has_every_requested_field", """
 """)
 
 # ===========================================================================
-# The /fsrecon class section (Diagnostics.lua hands its last run over through GetClassRecon)
+# The /fsinspect class section (Diagnostics.lua hands its last run over through GetClassInspect)
 # ===========================================================================
 
-case("report_class_recon_section_carries_the_last_run", """
+case("report_class_inspect_section_carries_the_last_run", """
     local FS, BR = LoadBR()
-    FS.Diagnostics = { GetClassRecon = function()
+    FS.Diagnostics = { GetClassInspect = function()
         return { token = "PALADIN", level = 12, spells = { { name = "Holy Light", id = 635, known = true } },
                  buffs = { status = "ok", count = 1, list = { { name = "Seal of Righteousness", spellId = 21084 } } } }
     end }
     local r = BR.Build()
-    assert(r.classRecon.token == "PALADIN" and r.classRecon.spells[1].id == 635)
-    assert(r.classRecon.buffs.list[1].spellId == 21084)
+    assert(r.classInspect.token == "PALADIN" and r.classInspect.spells[1].id == 635)
+    assert(r.classInspect.buffs.list[1].spellId == 21084)
     assert(r.player.level == 70 and r.note == "", "other sections are untouched")
     local text = BR.Encode(r)
-    assert(Has(text, '"classRecon"') and Has(text, "Holy Light"))
+    assert(Has(text, '"classInspect"') and Has(text, "Holy Light"))
 """)
 
-case("report_class_recon_is_full_once_then_a_stub_until_the_next_run", """
+case("report_class_inspect_is_full_once_then_a_stub_until_the_next_run", """
     local FS, BR = LoadBR()
     local run, marks = nil, 0
     local function NewRun(taken)
         run = { token = "PALADIN", taken = taken, spells = { { name = "Holy Light", id = 635 } } }
     end
     FS.Diagnostics = {
-        GetClassRecon = function() return run end,
-        MarkClassReconReported = function() marks = marks + 1; run.reported = true end,
+        GetClassInspect = function() return run end,
+        MarkClassInspectReported = function() marks = marks + 1; run.reported = true end,
     }
     -- a report counts as sent only once /fsbug has shown it, so these go through the command
     local function Slash(note)
         SlashCmdList.FSBUG(note)
         local list = ForeverSTUwaveDB.bugreports
-        return list[#list].classRecon
+        return list[#list].classInspect
     end
     NewRun("2026-10-03 10:00:00")
-    assert(BR.Build().classRecon.token == "PALADIN" and BR.Build().classRecon.token == "PALADIN",
-        "Build alone never consumes the recon")
-    assert(BR.Capture("peek").classRecon.token == "PALADIN" and BR.Capture("peek").classRecon.token == "PALADIN"
+    assert(BR.Build().classInspect.token == "PALADIN" and BR.Build().classInspect.token == "PALADIN",
+        "Build alone never consumes the inspect")
+    assert(BR.Capture("peek").classInspect.token == "PALADIN" and BR.Capture("peek").classInspect.token == "PALADIN"
         and marks == 0, "neither does Capture")
-    assert(Slash("one").spells[1].id == 635, "first report carries the full recon")
+    assert(Slash("one").spells[1].id == 635, "first report carries the full inspect")
     assert(marks == 1 and run.reported == true)
     local stub = Slash("two")
     assert(stub.taken == "2026-10-03 10:00:00" and stub.note == "attached to an earlier report", stub.note)
@@ -808,16 +808,16 @@ case("report_class_recon_is_full_once_then_a_stub_until_the_next_run", """
     assert(Slash("six").taken == "unknown")
 """)
 
-case("report_class_recon_is_not_consumed_when_the_command_fails_before_the_tester_has_it", """
+case("report_class_inspect_is_not_consumed_when_the_command_fails_before_the_tester_has_it", """
     local FS, BR = LoadBR()
     local run, marks = { token = "PALADIN", taken = "2026-10-03 10:00:00", spells = { { name = "Holy Light", id = 635 } } }, 0
     FS.Diagnostics = {
-        GetClassRecon = function() return run end,
-        MarkClassReconReported = function() marks = marks + 1; run.reported = true end,
+        GetClassInspect = function() return run end,
+        MarkClassInspectReported = function() marks = marks + 1; run.reported = true end,
     }
     local function Last()
         local list = ForeverSTUwaveDB.bugreports
-        return list[#list].classRecon
+        return list[#list].classInspect
     end
     local store, show, fmt = BR.Store, BR.ShowFrame, string.format
     -- 1. Store throws: nothing was kept, nothing consumed, the tester is told
@@ -857,39 +857,39 @@ case("report_class_recon_is_not_consumed_when_the_command_fails_before_the_teste
     assert(Last().note == "attached to an earlier report" and Last().spells == nil, "later reports carry the stub")
 """)
 
-case("report_class_recon_not_run_and_unavailable_markers", """
+case("report_class_inspect_not_run_and_unavailable_markers", """
     local FS, BR = LoadBR()
-    assert(BR.Build().classRecon == "unavailable", "no Diagnostics table")
+    assert(BR.Build().classInspect == "unavailable", "no Diagnostics table")
     FS.Diagnostics = {}
-    assert(BR.Build().classRecon == "unavailable", "no provider function")
-    FS.Diagnostics = { GetClassRecon = function() return nil end }
-    assert(BR.Build().classRecon == "not run", "a provider with nothing recorded")
-    FS.Diagnostics = { GetClassRecon = function() return SS end }
-    assert(BR.Build().classRecon == "secret", "a secret as the whole answer")
+    assert(BR.Build().classInspect == "unavailable", "no provider function")
+    FS.Diagnostics = { GetClassInspect = function() return nil end }
+    assert(BR.Build().classInspect == "not run", "a provider with nothing recorded")
+    FS.Diagnostics = { GetClassInspect = function() return SS end }
+    assert(BR.Build().classInspect == "secret", "a secret as the whole answer")
 """)
 
-case("report_class_recon_provider_that_throws_costs_only_its_section", """
+case("report_class_inspect_provider_that_throws_costs_only_its_section", """
     local FS, BR = LoadBR()
-    FS.Diagnostics = { GetClassRecon = function() error("provider boom") end }
+    FS.Diagnostics = { GetClassInspect = function() error("provider boom") end }
     local r = BR.Build("n")
-    assert(r.classRecon == "error", tostring(r.classRecon))
+    assert(r.classInspect == "error", tostring(r.classInspect))
     assert(r.player.level == 70 and r.note == "n" and realType(r.frames) == "table")
     BR.Encode(r)
     FS.Diagnostics = setmetatable({}, { __index = function() error("namespace boom") end })
-    assert(BR.Build().classRecon == "error")
+    assert(BR.Build().classInspect == "error")
 """)
 
-case("report_class_recon_is_bounded_by_the_final_pass", """
+case("report_class_inspect_is_bounded_by_the_final_pass", """
     local FS, BR = LoadBR()
     local big = {}
     for i = 1, 500 do big[i] = { name = string.rep("n", 3000), spellId = i } end
-    FS.Diagnostics = { GetClassRecon = function() return { list = big } end }
+    FS.Diagnostics = { GetClassInspect = function() return { list = big } end }
     local r = BR.Build()
-    assert(#r.classRecon.list <= 201, #r.classRecon.list)
+    assert(#r.classInspect.list <= 201, #r.classInspect.list)
     assert(#BR.Encode(r) < 400000, #BR.Encode(r))
 """)
 
-case("report_class_recon_worst_case_payload_fits_the_report_without_truncation", """
+case("report_class_inspect_worst_case_payload_fits_the_report_without_truncation", """
     -- Checked on BR.Build()'s own output, which is what is stored and shown: BR.Encode runs a second,
     -- tighter pass (600 nodes) that the report never goes through.
     local FS, BR = LoadBR()
@@ -919,7 +919,7 @@ case("report_class_recon_worst_case_payload_fits_the_report_without_truncation",
         for i = 1, 20 do list[i] = { name = long("Blessing of Might ", i), spellId = 19740 + i } end
         party[u] = { status = "ok", count = 20, list = list, capped = true }
     end
-    local recon = {
+    local inspect = {
         schema = 1, class = long("Paladin", 1), token = "PALADIN", level = 12, inCombat = false, spec = long("Spec", 1),
         taken = "2026-10-03 10:00:00", time = 5000,
         talents = { api = { GetTalentTabInfo = "ok", C_SpecializationInfo = "ok", GetSpecialization = "ok" }, tabs = tabs,
@@ -933,9 +933,9 @@ case("report_class_recon_worst_case_payload_fits_the_report_without_truncation",
         debuffs = { status = "ok", count = 16, list = debuffs, capped = true },
         party = party,
     }
-    FS.Diagnostics = { GetClassRecon = function() return recon end }
+    FS.Diagnostics = { GetClassInspect = function() return inspect end }
     -- the other sections at their own caps too (ten errors at the message and stack caps, 80 addon names
-    -- at the name cap), so the whole report is what has to fit the final pass, not the recon alone
+    -- at the name cap), so the whole report is what has to fit the final pass, not the inspect alone
     ForeverSTUwaveErrorLog = {}
     for i = 1, 10 do
         ForeverSTUwaveErrorLog[i] = { message = (long("err", i) .. string.rep("m", 300)):sub(1, BR.LIMITS.errMsg),
@@ -956,15 +956,15 @@ case("report_class_recon_worst_case_payload_fits_the_report_without_truncation",
         end
     end
     local r = BR.Build()
-    local c = r.classRecon
+    local c = r.classInspect
     assert(realType(c) == "table", tostring(c))
-    Walk(c, "classRecon", {})
+    Walk(c, "classInspect", {})
     assert(#c.spells == 60 and #c.hud.keys == 40 and #c.talents.ranks.list == 60 and #c.buffs.list == 40, "a list lost entries")
     assert(#c.debuffs.list == 16 and #c.forms.list == 10 and #c.talents.tabs == 5)
     for _, u in ipairs({ "party1", "party2", "party3", "party4" }) do assert(#c.party[u].list == 20, u) end
     assert(c.spells[60].name == long("Greater Blessing of Sanctuary ", 60) and c.talents.ranks.list[60].name:sub(1, 5) == "Impro")
     assert(not ContainsSentinel(r))
-    -- and the rest of the report is not cut by the recon riding along
+    -- and the rest of the report is not cut by the inspect riding along
     Walk(r.frames, "frames", {})
     Walk(r.player, "player", {})
     assert(#r.errors == 10 and #r.addons == BR.LIMITS.addons, "errors or addons lost entries: " .. #r.errors .. " " .. #r.addons)
@@ -974,22 +974,22 @@ case("report_class_recon_worst_case_payload_fits_the_report_without_truncation",
     SlashCmdList.FSBUG("worst case")
     local text = BR.GetEditBox():GetText()
     for _, m in ipairs(MARKERS) do assert(not Has(text, m), "marker " .. m .. " in the copy box text") end
-    assert(Has(text, '"classRecon"') and Has(text, long("Greater Blessing of Sanctuary ", 60)))
+    assert(Has(text, '"classInspect"') and Has(text, long("Greater Blessing of Sanctuary ", 60)))
 """)
 
-def _class_recon_json(text: str) -> None:
-    section = json.loads(text).get("classRecon")
+def _class_inspect_json(text: str) -> None:
+    section = json.loads(text).get("classInspect")
     assert isinstance(section, dict), section
     assert section["token"] == "PALADIN" and section["spells"][0]["id"] == 20271, section
 
 
-case("report_class_recon_is_json_the_tester_can_send", """
+case("report_class_inspect_is_json_the_tester_can_send", """
     local FS, BR = LoadBR()
-    FS.Diagnostics = { GetClassRecon = function()
+    FS.Diagnostics = { GetClassInspect = function()
         return { token = "PALADIN", spells = { { name = "Judgement", id = 20271 } } }
     end }
     return BR.Encode(BR.Build("x"))
-""", _class_recon_json)
+""", _class_inspect_json)
 
 case("report_group_composition_by_class", """
     local FS, BR = LoadBR()
@@ -1062,12 +1062,12 @@ case("report_addon_list_is_capped", """
 case("report_settings_exclude_bulky_logs_and_reports", """
     local FS, BR = LoadBR()
     ForeverSTUwaveDB = {
-        petFrame = { x = 1 }, recon = { big = { 1, 2, 3 } }, reconSkins = {}, reconPos = {},
-        fsprobe = { a = 1 }, fontProbe = {}, bugreports = { { id = 1 } }, bugreportSeq = 4,
+        petFrame = { x = 1 }, inspect = { big = { 1, 2, 3 } }, inspectSkins = {}, inspectPos = {},
+        fscheck = { a = 1 }, fontCheck = {}, bugreports = { { id = 1 } }, bugreportSeq = 4,
         degradeLog = { k = { msg = "m" } },
     }
     local r = BR.Build()
-    for _, k in ipairs({ "recon", "reconSkins", "reconPos", "fsprobe", "fontProbe", "bugreports", "bugreportSeq" }) do
+    for _, k in ipairs({ "inspect", "inspectSkins", "inspectPos", "fscheck", "fontCheck", "bugreports", "bugreportSeq" }) do
         assert(r.settings[k] == nil, k .. " must not be copied")
     end
     assert(r.settings.petFrame.x == 1 and r.settings.degradeLog.k.msg == "m")
@@ -1366,17 +1366,17 @@ case("run_clear", """
     assert(Has(table.concat(Lines(), "\\n"), "cleared 2"))
 """)
 
-case("run_all_and_clear_leave_the_class_recon_unmarked", """
+case("run_all_and_clear_leave_the_class_inspect_unmarked", """
     -- Only /fsbug itself, once the tester has the report, consumes the run. Showing the stored reports or
-    -- deleting them is not "the tester has it", even when a stored report carries the full recon.
+    -- deleting them is not "the tester has it", even when a stored report carries the full inspect.
     local FS, BR = LoadBR()
     local run, marks = { token = "PALADIN", taken = "2026-10-03 10:00:00", spells = { { name = "Holy Light", id = 635 } } }, 0
     FS.Diagnostics = {
-        GetClassRecon = function() return run end,
-        MarkClassReconReported = function() marks = marks + 1; run.reported = true end,
+        GetClassInspect = function() return run end,
+        MarkClassInspectReported = function() marks = marks + 1; run.reported = true end,
     }
     BR.Capture("stored")
-    assert(ForeverSTUwaveDB.bugreports[1].classRecon.token == "PALADIN", "the stored report carries the full recon")
+    assert(ForeverSTUwaveDB.bugreports[1].classInspect.token == "PALADIN", "the stored report carries the full inspect")
     SlashCmdList.FSBUG("all")
     assert(BR.GetEditBox():GetText():find("Holy Light", 1, true), "all shows the stored report")
     assert(marks == 0 and run.reported == nil, "/fsbug all consumed the run")
@@ -1386,7 +1386,7 @@ case("run_all_and_clear_leave_the_class_recon_unmarked", """
     -- and the next /fsbug still carries it in full, then consumes it
     SlashCmdList.FSBUG("after")
     local list = ForeverSTUwaveDB.bugreports
-    assert(list[#list].classRecon.token == "PALADIN" and marks == 1 and run.reported == true)
+    assert(list[#list].classInspect.token == "PALADIN" and marks == 1 and run.reported == true)
 """)
 
 case("run_never_throws_when_everything_fails", """

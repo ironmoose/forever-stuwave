@@ -251,7 +251,7 @@ Enum = { BagIndex = { Bag_1 = 1, Bag_2 = 2, Bag_3 = 3, Bag_4 = 4, ReagentBag = 5
     ItemClass = { Container = 1, Quiver = 11 } }
 EQUIPPED, LOCKED = { [20] = true, [21] = true, [22] = true, [23] = true, [24] = true }, {}
 
-RECON = {}
+INSPECT = {}
 FS = {
     Layout = { Scale = function() return SCALE end, OnRescale = function(fn) RESCALE[#RESCALE + 1] = fn end,
         deck = { w = 572, h = 38, rightMargin = 92 } },

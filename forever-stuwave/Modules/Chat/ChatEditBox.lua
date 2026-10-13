@@ -259,9 +259,9 @@ function Chat.StyleEditBox(editBox)
     editBox.fsChatCaret, editBox.fsChatCaretGlow = AddPromptCaret(editBox)
 
     -- Records the z-order AT THE MOMENT THE BOX GOES INACTIVE, which is the
-    -- only state the ">" bug exists in and the one state no typed probe can
+    -- only state the ">" bug exists in and the one state no typed check can
     -- ever see: sending /fschat levels through the chat box ACTIVATES the box,
-    -- so the probe measures the good state and reports everything is fine.
+    -- so the check measures the good state and reports everything is fine.
     -- Hooked to the focus-lost event rather than deferred on a timer, because
     -- a timer races the dev tool's own keystrokes for the reload.
     editBox:HookScript("OnEditFocusLost", function(self)

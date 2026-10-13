@@ -129,11 +129,11 @@
 --                               units, UNVERIFIED in game.
 --   run:SupportsVerticalStrip() -> ok, caps
 --   FS.ChevronCastBar.SupportsVerticalStrip()
---                               what a probe StatusBar (built on first call, hidden) feature-detected:
+--                               what a check StatusBar (built on first call, hidden) feature-detected:
 --                               caps = { orientation = SetOrientation, vertTile = SetVertTile on the fill
 --                               texture, horizTile, timer = SetTimerDuration }, ok = orientation and
 --                               vertTile and timer. Method presence only: whether a VERTICAL bar really
---                               fills from SetTimerDuration is the in-game probe's answer (/fsprobe
+--                               fills from SetTimerDuration is the in-game check's answer (/fscheck
 --                               gunsight), and a consumer falls back when it fails.
 --   FS.ChevronCastBar.TEXTURES_UP  the up-pointing art set for opts.textures (fill, outline, glow, burst,
 --                               strip = media/cast_chevron_up_*.tga; cap is the same folder's filled caret, not
@@ -1805,7 +1805,7 @@ end
 -- Strip: the engine-timed StatusBar for a secret-timed cast
 -------------------------------------------------------------------------------
 
--- What the client's StatusBar can do, found once by a probe bar (built on the first ask, hidden, never
+-- What the client's StatusBar can do, found once by a check bar (built on the first ask, hidden, never
 -- destroyed) rather than at load. Method presence only; see SupportsVerticalStrip.
 local stripCaps
 local function stripSupport()
@@ -1826,7 +1826,7 @@ local function stripSupport()
         pcall(bar.Hide, bar)
     end
     caps.ok = caps.orientation and caps.vertTile and caps.timer
-    -- A probe that could not even be built is not an answer: ask again next time.
+    -- A check that could not even be built is not an answer: ask again next time.
     if built and bar then stripCaps = caps end
     return caps
 end

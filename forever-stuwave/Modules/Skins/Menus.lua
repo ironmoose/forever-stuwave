@@ -196,13 +196,13 @@ local function ApplyMenuChrome(frame)
         chromeByMenu[frame] = chromeFrame
         skinnedMenuCount = skinnedMenuCount + 1
 
-        -- Recon-only marker (see Init below / PanelSkins.RegisterRecon): a
+        -- Inspect-only marker (see Init below / PanelSkins.RegisterInspect): a
         -- plain field write on `frame` is silently discarded by the modern
         -- system's compositor `__newindex` (see the `chromeByMenu` comment
         -- above) -- a harmless no-op there -- but DOES stick on the legacy
         -- DropDownList1..N frames, which are real, non-compositor-managed
         -- frames (confirmed: not part of Menu.GetManager()'s pool), so
-        -- `/fsrecon skins` can still read it back for the legacy path. Not
+        -- `/fsinspect skins` can still read it back for the legacy path. Not
         -- read by any logic in this file, unlike the old `frame.fsMenuSkin`
         -- guard -- `chromeByMenu[frame]` above is the sole guard now.
         frame.fsMenuChromeBuilt = true
@@ -538,10 +538,10 @@ end
 -------------------------------------------------------------------------------
 
 -- Modern menu frames have no stable _G name (pooled, per Menu.lua ~2099/2116),
--- so they don't fit PanelSkins.RegisterRecon's `{ name, guard } -> _G[name]`
+-- so they don't fit PanelSkins.RegisterInspect's `{ name, guard } -> _G[name]`
 -- lookup shape the way the legacy DropDownList1..N entries below do -- that
 -- shape is built for a registry of NAMED globals, not an anonymous pool.
--- Rather than skip recon silently for the modern half of this file, it is
+-- Rather than skip inspect silently for the modern half of this file, it is
 -- exposed here instead: whether the modern hook installed at all, and a
 -- running count of pooled menu frames (both systems) this file has actually
 -- built chrome on so far.
@@ -580,7 +580,7 @@ local function Init()
     for i = 1, legacyCount do
         legacyEntries[i] = { name = "DropDownList" .. i, guard = "fsMenuChromeBuilt" }
     end
-    FS.PanelSkins.RegisterRecon("Menus", legacyEntries)
+    FS.PanelSkins.RegisterInspect("Menus", legacyEntries)
 end
 
 FS.PanelSkins.DeferCombat(Init)

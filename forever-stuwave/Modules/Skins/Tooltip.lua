@@ -89,6 +89,6 @@ local function Apply()
     HookStatusBar(GameTooltipStatusBar)
 end
 
-FS.PanelSkins.RegisterReconFromList("Tooltip", TOOLTIP_NAMES, "fsSkinCache")
+FS.PanelSkins.RegisterInspectFromList("Tooltip", TOOLTIP_NAMES, "fsSkinCache")
 
 FS.PanelSkins.DeferCombat(Apply)

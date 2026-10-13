@@ -162,7 +162,7 @@ local ScanAndSkin = FS.PanelSkins.CreateSkinDriver({
     afterScan = function() FS.PanelSkins.ApplyGuts(AH_ITEM_LIST_GUTS) end,
 })
 
-FS.PanelSkins.RegisterReconFromList("AuctionHouse", AH_FRAMES, "fsAHSkin")
+FS.PanelSkins.RegisterInspectFromList("AuctionHouse", AH_FRAMES, "fsAHSkin")
 
 -- Neither AH frame is secure, so none of this is combat-illegal; deferred
 -- anyway for consistency with the rest of the addon's Init pattern.

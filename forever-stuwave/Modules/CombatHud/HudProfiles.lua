@@ -30,7 +30,7 @@
 --              lights Shadow Bolt). Two sources, in order: the overlay glow (the
 --              SPELL_ACTIVATION_OVERLAY_GLOW_SHOW/HIDE events and
 --              C_SpellActivationOverlay.IsSpellOverlayed), then the out-of-combat aura read
---              of `aura`. Both are UNVERIFIED until the probe has run on Forever.
+--              of `aura`. Both are UNVERIFIED until the check has run on Forever.
 --   selfBuffs  { spell = key, kind = "form" | "pet" | nil (aura), warnBelow = seconds,
 --              oocOnly = true }. A buff whose spell the player does not know is not reported
 --              (a Holy priest never gets a Shadowform reminder).
@@ -60,7 +60,7 @@
 --              usable is plain false or notEnoughMana is plain true, so rules never need
 --              a { "usable", key } of their own.
 --
--- 1.60.1 secrecy facts these rules are written against (probe-verified):
+-- 1.60.1 secrecy facts these rules are written against (check-verified):
 --   * UnitPower/UnitHealth are secret even out of combat, so resourceBelow,
 --     playerHealthAbove and targetHealthBelow return nil and the rules that use them are
 --     skipped. The research rotations below do not use them: "cannot afford a Shadow Bolt"

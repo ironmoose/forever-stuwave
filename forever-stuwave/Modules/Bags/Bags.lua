@@ -760,12 +760,12 @@ end
 -- Verifies every numbered container, the combined-bag frame, and the bank
 -- frame picked up the panel skin. Unopened containers/bank correctly report
 -- as skipped (frame not loaded yet) rather than missing.
-local reconEntries = {}
+local inspectEntries = {}
 for i = 1, MAX_CONTAINERS do
-    reconEntries[#reconEntries + 1] = { name = "ContainerFrame" .. i, guard = "fsBagSkin" }
+    inspectEntries[#inspectEntries + 1] = { name = "ContainerFrame" .. i, guard = "fsBagSkin" }
 end
-reconEntries[#reconEntries + 1] = { name = "ContainerFrameCombinedBags", guard = "fsBagSkin" }
-reconEntries[#reconEntries + 1] = { name = "BankFrame", guard = "fsBagSkin" }
-FS.PanelSkins.RegisterRecon("Bags", reconEntries)
+inspectEntries[#inspectEntries + 1] = { name = "ContainerFrameCombinedBags", guard = "fsBagSkin" }
+inspectEntries[#inspectEntries + 1] = { name = "BankFrame", guard = "fsBagSkin" }
+FS.PanelSkins.RegisterInspect("Bags", inspectEntries)
 
 FS.PanelSkins.DeferCombat(Apply)

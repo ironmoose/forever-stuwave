@@ -94,7 +94,7 @@ local ScanAndSkin, _ = FS.PanelSkins.CreateSkinDriver({
     onWatch = function() ApplyAndHook() end,
 })
 
-FS.PanelSkins.RegisterReconFromList("Popups", POPUP_FRAMES, "fsPopupSkin", "name")
+FS.PanelSkins.RegisterInspectFromList("Popups", POPUP_FRAMES, "fsPopupSkin", "name")
 
 -- None of these frames are secure, so none of this is combat-illegal;
 -- deferred anyway for consistency with the rest of the addon's Init pattern.

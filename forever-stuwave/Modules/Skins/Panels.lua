@@ -652,8 +652,8 @@ local ScanAndSkin = FS.PanelSkins.CreateSkinDriver({
     end,
 })
 
-FS.PanelSkins.RegisterReconFromList("Panels", PANEL_FRAMES, "fsPanelSkin", "name")
-FS.PanelSkins.RegisterRecon("PanelGuts", {
+FS.PanelSkins.RegisterInspectFromList("Panels", PANEL_FRAMES, "fsPanelSkin", "name")
+FS.PanelSkins.RegisterInspect("PanelGuts", {
     { name = "ItemTextFrame", guard = "fsGutsApplied" },
     { name = "MailFrame", guard = "fsGutsApplied" },
     { name = "QuestFrame", guard = "fsGutsApplied" },

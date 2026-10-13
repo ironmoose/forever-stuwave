@@ -30,7 +30,7 @@ LOAD_ORDER = (
     "HudSpells.lua", "HudProfiles.lua", "HudLogic.lua", "Gunsight.lua", "GunsightAreas.lua", "TargetDebuffs.lua", "GunsightDots.lua",
     "GunsightSeals.lua", "GunsightFrame.lua", "GunsightBoxes.lua", "GunsightTape.lua",
     "GunsightTags.lua", "GunsightMyBuffs.lua",
-    "ConsoleKeys.lua", "ClassShoulder.lua", "SealBar.lua", "TotemBar.lua", "CombatHud.lua", "GunsightClass.lua", "GunsightShaman.lua", "FSProbe.lua",
+    "ConsoleKeys.lua", "ClassShoulder.lua", "SealBar.lua", "TotemBar.lua", "CombatHud.lua", "GunsightClass.lua", "GunsightShaman.lua", "FSCheck.lua",
     "BugReport.lua", "ConfigWindow.lua", "LayoutEdit.lua",
 )
 

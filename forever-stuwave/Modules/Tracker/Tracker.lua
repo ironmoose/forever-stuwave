@@ -299,7 +299,7 @@ local function Apply()
     StyleModuleHeaders()
 end
 
-FS.PanelSkins.RegisterRecon("Tracker", {
+FS.PanelSkins.RegisterInspect("Tracker", {
     { name = "ObjectiveTrackerFrame", guard = "fsTrackerChromeBuilt" },
 })
 

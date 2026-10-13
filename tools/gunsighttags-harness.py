@@ -1268,15 +1268,15 @@ function T.an_abbreviated_target_of_target_name_is_decided_again_from_the_full_n
     target("Kurak")
     local label = Tg().tot.label
     local wmax, floor = calibrateSneaky(label)
-    -- the decision is measured on the probe: its first measurement is wrong (a font not applied yet reads wide); the
+    -- the decision is measured on the check: its first measurement is wrong (a font not applied yet reads wide); the
     -- next frame measures the real font
-    local probe = Tg().totProbe
+    local check = Tg().totCheck
     __wfactor = 2
     local R = getmetatable(UIParent)
     local realWidth = R.GetUnboundedStringWidth
     R.GetUnboundedStringWidth = function(self)
-        local f = (self == probe) and __wfactor or 1
-        if self == probe then __wfactor = 1 end   -- only the first measurement (the decision) is wrong
+        local f = (self == check) and __wfactor or 1
+        if self == check then __wfactor = 1 end   -- only the first measurement (the decision) is wrong
         return realWidth(self) * f
     end
     __units.targettarget = { exists = true, name = "x", full = "Sneaky Toots" }
@@ -1387,22 +1387,22 @@ function T.sneaky_toots_measured_live_fits_the_72_px_label_whole_where_the_old_6
     W.clean(); noFails()
 end
 
-function T.a_target_of_target_probe_that_cannot_measure_falls_back_to_the_label_width_scaled_to_the_floor()
+function T.a_target_of_target_check_that_cannot_measure_falls_back_to_the_label_width_scaled_to_the_floor()
     local W = world({ beforeLoad = withFullNames() })
     target("Kurak")
-    local label, probe = Tg().tot.label, Tg().totProbe
+    local label, check = Tg().tot.label, Tg().totCheck
     local wmax, floor, base = nonLinearWidths(label, 0, 0)
     -- the label at its own size scaled to the floor is 1.1 of the label width: too wide, so abbreviated
     local perChar = 1.1 * wmax * base / (12 * floor)
     nonLinearWidths(label, perChar, perChar)
     local measure = getmetatable(UIParent).GetUnboundedStringWidth
     getmetatable(UIParent).GetUnboundedStringWidth = function(self)
-        if self == probe then return nil end
+        if self == check then return nil end
         return measure(self)
     end
     __units.targettarget = { exists = true, name = "x", full = "Sneaky Toots" }
     fireTot()
-    eq(label._text, "S. Toots", "the label's own width decided it, as the probe measured nothing")
+    eq(label._text, "S. Toots", "the label's own width decided it, as the check measured nothing")
     W.clean(); noFails()
 end
 
@@ -1413,26 +1413,26 @@ function T.a_rescale_sets_the_target_of_target_measuring_font_once_and_a_name_wr
         FS.Theme.ApplyMono = function(fs, ...) per[fs] = (per[fs] or 0) + 1; return real(fs, ...) end
     end) })
     target("Kurak")
-    local probe = Tg().totProbe
-    ok(probe, "the target of target owns a measuring FontString")
-    eq(probe:IsShown(), false, "never shown")
+    local check = Tg().totCheck
+    ok(check, "the target of target owns a measuring FontString")
+    eq(check:IsShown(), false, "never shown")
     local floor0 = math.max(Tg().C.MIN_FONT, math.floor(FS.Gunsight.ui(Tg().C.TOT_FLOOR) + 0.5))
-    eq(probe._fontSize, floor0, "set to the floor size")
-    local built = per[probe]
+    eq(check._fontSize, floor0, "set to the floor size")
+    local built = per[check]
     for _, full in ipairs({ "Sneaky Toots", "Father Stu", "Bartholomew Oldlight", "Zed" }) do
         __units.targettarget = { exists = true, name = "x", full = full }
         fireTot()
     end
-    eq(per[probe], built, "no SetFont on the probe per name write")
+    eq(per[check], built, "no SetFont on the check per name write")
     UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
     __fireEvent("UI_SCALE_CHANGED")
     local floor1 = math.max(Tg().C.MIN_FONT, math.floor(FS.Gunsight.ui(Tg().C.TOT_FLOOR) + 0.5))
     ok(floor1 ~= floor0, "the rescale moves the floor size")
-    eq(probe._fontSize, floor1, "the probe follows the new floor")
-    eq(per[probe], built + 1, "one SetFont for the rescale")
+    eq(check._fontSize, floor1, "the check follows the new floor")
+    eq(per[check], built + 1, "one SetFont for the rescale")
     __units.targettarget = { exists = true, name = "x", full = "Another Name" }
     fireTot()
-    eq(per[probe], built + 1, "and none after it")
+    eq(per[check], built + 1, "and none after it")
     W.clean(); noFails()
 end
 

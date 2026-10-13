@@ -413,7 +413,7 @@ FS = {
         RequireExport = function(fn) return fn ~= nil end,
         DeferCombat = function(fn) if INCOMBAT then DEFERRED[#DEFERRED + 1] = fn else fn() end end,
         TryStyleMoney = function(frame) CALLS[#CALLS + 1] = { "TryStyleMoney", frame } end,
-        RegisterRecon = function() end,
+        RegisterInspect = function() end,
     },
     Theme = {
         FONT_MONO = "mono", SLICE_CUT2_BUTTON_TEXTURE = "slice_cut2_button.tga", SLICE_CUT_MARGIN = 6,

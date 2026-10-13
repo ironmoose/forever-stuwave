@@ -52,10 +52,10 @@ local LIMITS = {
 }
 BR.LIMITS = LIMITS
 
--- ForeverSTUwaveDB keys that are bulky logs or probes, or the reports themselves.
+-- ForeverSTUwaveDB keys that are bulky logs or checks, or the reports themselves.
 BR.EXCLUDE = {
-    bugreports = true, bugreportSeq = true, recon = true, reconSkins = true, reconPos = true,
-    fsprobe = true, fontProbe = true, labelsAtApply = true,
+    bugreports = true, bugreportSeq = true, inspect = true, inspectSkins = true, inspectPos = true,
+    fscheck = true, fontCheck = true, labelsAtApply = true,
     -- Reported in their own `chatSeat` section (ChatSeat below), not through the generic copy.
     chatSeatLog = true, chatSeatLogPrev = true,
     -- Likewise reported in their own `minimapSeat` section (MinimapSeat below).
@@ -614,28 +614,28 @@ end
 
 BR.Errors = Errors
 
--- The last `/fsrecon class` run (Diagnostics.lua). Read through FS.Diagnostics at call time, since
--- that file loads after this one. The tester runs the recon once, then /fsbug; the final Sanitize
+-- The last `/fsinspect class` run (Diagnostics.lua). Read through FS.Diagnostics at call time, since
+-- that file loads after this one. The tester runs the inspect once, then /fsbug; the final Sanitize
 -- pass in BR.Build bounds and scrubs whatever it hands back.
--- The full run goes into the first report after the tester ran the recon; once /fsbug has shown that
+-- The full run goes into the first report after the tester ran the inspect; once /fsbug has shown that
 -- report (BR.MarkReported, last step of RunCapture) it is marked reported, and later reports (other
 -- characters included) carry a stub with the run's date instead. Build and Capture never mark, so a
 -- failure in the store, the serialiser or the copy box leaves the run for the next /fsbug.
--- There is ONE recon slot (Diagnostics keeps only the latest run, whichever character ran it), so the
+-- There is ONE inspect slot (Diagnostics keeps only the latest run, whichever character ran it), so the
 -- stub's `taken` stamp and the full run's `taken` and `token` are what tie a report to its run.
-local CLASS_RECON_STUB = "attached to an earlier report"
+local CLASS_INSPECT_STUB = "attached to an earlier report"
 
-local function ClassRecon()
+local function ClassInspect()
     local D = FS.Diagnostics
-    if type(D) ~= "table" or type(D.GetClassRecon) ~= "function" then return "unavailable" end
-    local data = D.GetClassRecon()
+    if type(D) ~= "table" or type(D.GetClassInspect) ~= "function" then return "unavailable" end
+    local data = D.GetClassInspect()
     if IsSecret(data) then return SECRET end
     if data == nil then return "not run" end
     local okFlag, reported = pcall(rawget, data, "reported")
     if okFlag and not IsSecret(reported) and reported == true then
         local okTaken, taken = pcall(rawget, data, "taken")
         if not okTaken or IsSecret(taken) or type(taken) ~= "string" then taken = "unknown" end
-        return { taken = taken, note = CLASS_RECON_STUB }
+        return { taken = taken, note = CLASS_INSPECT_STUB }
     end
     return data
 end
@@ -728,7 +728,7 @@ function BR.Build(note)
     report.settings = Guard(Settings)
     report.chatSeat = Guard(ChatSeat)
     report.minimapSeat = Guard(MinimapSeat)
-    report.classRecon = Guard(ClassRecon)
+    report.classInspect = Guard(ClassInspect)
 
     local errors, errorCount, otherCount = Guard(Errors)
     if errors == "error" then errorCount, otherCount = "error", "error" end
@@ -769,7 +769,7 @@ function BR.Store(report)
     return #list
 end
 
--- Builds and stores a report. It does NOT consume the class recon run: RunCapture does that once the
+-- Builds and stores a report. It does NOT consume the class inspect run: RunCapture does that once the
 -- tester has the report in front of them.
 function BR.Capture(note)
     local report = BR.Build(note)
@@ -777,15 +777,15 @@ function BR.Capture(note)
     return report
 end
 
--- Consumes the class recon run a report carries, so later reports get the stub. Never throws. A report
--- that holds only a stub (or no recon) leaves the run alone; marking is idempotent, so a stub needs no
+-- Consumes the class inspect run a report carries, so later reports get the stub. Never throws. A report
+-- that holds only a stub (or no inspect) leaves the run alone; marking is idempotent, so a stub needs no
 -- special case.
 function BR.MarkReported(report)
     pcall(function()
-        local recon = type(report) == "table" and report.classRecon or nil
+        local inspect = type(report) == "table" and report.classInspect or nil
         local D = FS.Diagnostics
-        if type(recon) == "table" and type(D) == "table" and type(D.MarkClassReconReported) == "function" then
-            D.MarkClassReconReported()
+        if type(inspect) == "table" and type(D) == "table" and type(D.MarkClassInspectReported) == "function" then
+            D.MarkClassInspectReported()
         end
     end)
 end

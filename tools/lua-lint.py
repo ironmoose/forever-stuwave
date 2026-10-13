@@ -97,7 +97,7 @@ KEYWORDS = {
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 # Globals the addon legitimately creates or that exist only at runtime.
-ADDON_OWNED = {"ForeverSTUwave", "ForeverSTUwaveDB", "FS", "AAAFSRecon"}
+ADDON_OWNED = {"ForeverSTUwave", "ForeverSTUwaveDB", "FS"}
 
 # Global WRITES that are intentional, not a missing `local`:
 #   SLASH_*        WoW's slash-command API only reads these from _G

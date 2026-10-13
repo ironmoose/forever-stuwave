@@ -894,10 +894,10 @@ def read_log() -> None:
         print("  undeclared global is never written, so this reads as 'no")
         print("  errors' forever.")
 
-    probe = re.search(r"ForeverSTUwaveProbe = \{(.*?)\n\}", text, re.S)
-    if probe:
-        print("\n=== PROBE ===")
-        for line in probe.group(1).splitlines():
+    snippet = re.search(r"ForeverSTUwaveSnippet = \{(.*?)\n\}", text, re.S)
+    if snippet:
+        print("\n=== SNIPPET ===")
+        for line in snippet.group(1).splitlines():
             line = line.strip().rstrip(",")
             if line:
                 print("  " + line)

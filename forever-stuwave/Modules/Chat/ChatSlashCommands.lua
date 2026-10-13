@@ -47,7 +47,7 @@ end
 -- deciding what is on top -- and "the tabs are behind the bg" is a draw-order
 -- report, not a position one. Reading it beats a 200-character /run line, which
 -- is also the answer to "don't you have /fsreload and not need to type all
--- that": the RELOAD is short, it was the ad-hoc probes that were long. Probes
+-- that": the RELOAD is short, it was the ad-hoc checks that were long. Checks
 -- belong in here.
 SLASH_FSCHAT1 = "/fschat"
 SLASH_FSCHAT2 = "/fstab"
@@ -301,7 +301,7 @@ SlashCmdList["FSCHAT"] = function(msg)
     end
 
     if msg == "parts" then
-        -- Recon for the pieces we do not own yet: the loose Blizzard buttons
+        -- Inspect for the pieces we do not own yet: the loose Blizzard buttons
         -- beside the terminal, the scroll widgets, and whether the message
         -- text is overflowing the panel. Dumped to ForeverSTUwaveDB rather
         -- than printed, because there is far too much of it to read in chat.
@@ -515,7 +515,7 @@ SlashCmdList["FSCHAT"] = function(msg)
     print("|cff22e0ffseat|r  " .. report.seatedVsSelected)
 
     -- The container first, because it is the single highest-value reading in
-    -- this whole probe. Everything else in the terminal takes its strata from
+    -- this whole check. Everything else in the terminal takes its strata from
     -- this one frame; if the max-state strata/level change never lands here,
     -- nothing downstream can be right either, and if it DOES land here the bug
     -- is somewhere in what is built on top of it, not in the container itself.
@@ -523,7 +523,7 @@ SlashCmdList["FSCHAT"] = function(msg)
     -- GeneralDockManager is reparented into the container (see the seating
     -- code above); ApplyDockState (ChatTabs.lua) DOES set its frame level on
     -- every pass, to the container's own level plus LEVEL_DOCK. That is no
-    -- longer an open question -- this probe just reports the level that
+    -- longer an open question -- this check just reports the level that
     -- gets assigned.
     describe("dockmgr", GeneralDockManager)
 

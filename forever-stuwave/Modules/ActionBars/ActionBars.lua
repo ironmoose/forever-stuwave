@@ -4,9 +4,9 @@
 -- type/action attributes set DIRECTLY from Lua.
 --
 -- Why not LibActionButton, after vendoring it: secure snippet bodies do not
--- execute on this client. Measured 2026-09-20 with the probe in ErrorLog.lua --
+-- execute on this client. Measured 2026-09-20 with the check in ErrorLog.lua --
 -- both Execute() and RegisterStateDriver() return without error and NEITHER
--- side effect lands (see the ForeverSTUwaveProbe block in SavedVariables).
+-- side effect lands (see the ForeverSTUwaveSnippet block in SavedVariables).
 -- Blizzard's own UI is unaffected because its snippets compiled at load while
 -- loadstring_untainted still existed and are cached in the closure factory;
 -- anything an addon defines afterwards silently no-ops. LibActionButton assigns
@@ -720,7 +720,7 @@ end
 --
 -- Our own wash + glow textures carry the look instead of the CheckButton's checked
 -- state, for the same reason UpdateUsable cannot use Blizzard's tints: both APIs may hand
--- back a SECRET boolean in combat (not in secretAudit, which only probes unit APIs, so
+-- back a SECRET boolean in combat (not in secretAudit, which only checks unit APIs, so
 -- assume they do), and SetChecked / `if flag then` cannot take one. SetAlphaFromBoolean
 -- is the sanctioned consumer, so a secret answer is routed straight into the textures'
 -- alpha. The CheckButton itself is pinned unchecked, so a click's own toggle never

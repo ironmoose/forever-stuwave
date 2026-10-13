@@ -292,7 +292,7 @@ local function SkinTitleButton(button, index, iconTexture, tooltip)
     --                           the glyph, so there is nothing to hide: the
     --                           box survives every tint.
     --
-    -- Probed for a bare atlas variant of the bubble and this client has none
+    -- Checked for a bare atlas variant of the bubble and this client has none
     -- (`chatframe-button-icon-` + chat / emote / menu / speech all fail to
     -- resolve), so the menu button had to be redrawn whatever we did. Redrawing
     -- only that one would leave a vector glyph beside atlas art at different

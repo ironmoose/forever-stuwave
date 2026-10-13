@@ -152,7 +152,7 @@ local function Apply()
     ApplyGroupLoot()
 end
 
-FS.PanelSkins.RegisterRecon("Loot", {
+FS.PanelSkins.RegisterInspect("Loot", {
     { name = "LootFrame", guard = "fsSkinCache" },
     { name = "GroupLootFrame1", guard = "fsSkinCache" },
     { name = "GroupLootFrame2", guard = "fsSkinCache" },

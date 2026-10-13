@@ -284,7 +284,7 @@ local function HideBlizzardBars()
                 frame:UnregisterAllEvents()
                 frame:Hide()
 
-                -- A one-shot Hide does NOT stick: a UIParent-children probe
+                -- A one-shot Hide does NOT stick: a UIParent-children check
                 -- showed StatusTrackingBarManager shown again (1192x17) after
                 -- we had hidden it, because Blizzard's own layout code calls
                 -- Show() on it later. Hook OnShow and put it straight back.

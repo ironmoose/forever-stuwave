@@ -951,7 +951,7 @@ local function HideBlizzardChrome()
     -- on MinimapCluster.MinimapContainer per Blizzard_Minimap/Mainline/
     -- Minimap.xml on the `forever` branch (MinimapContainer at line 186,
     -- PlayerCoords at 425); MinimapContainer is confirmed present in the
-    -- 2026-09-19 recon dump. TimeManagerClockButton is confirmed in the 16001
+    -- 2026-09-19 inspect dump. TimeManagerClockButton is confirmed in the 16001
     -- globals dump.
     --
     -- Hiding the frame rather than clearing the CVar (minimapShowPlayerCoords)
@@ -982,7 +982,7 @@ local function HideBlizzardChrome()
     -- indicator. It is a parentKey, NOT a global, which is why hiding
     -- GameTimeFrame by name did nothing. Identified by enumerating
     -- MinimapCluster's children: every one is anonymous, and the 41x42 entry
-    -- matches .DielFrame in the 2026-09-19 recon dump.
+    -- matches .DielFrame in the 2026-09-19 inspect dump.
     --
     -- Keep .Tracking, .InstanceDifficulty, and .ZoneTextButton available;
     -- only the native zone FontString is hidden above.

@@ -57,7 +57,7 @@ local StyleMoney = Theme.StyleMoney
 
 -- Warns once, but does NOT abort the chunk: only SkinPanelCached actually
 -- calls SkinPanel, and an early return here would also delete every
--- unrelated export below (TryStyleMoney, CreateSkinDriver, RegisterRecon,
+-- unrelated export below (TryStyleMoney, CreateSkinDriver, RegisterInspect,
 -- ...) for every consumer, including ones like Tracker.lua that have no
 -- SkinPanel dependency at all. SkinPanelCached carries its own direct guard.
 PanelSkins.RequireExport(SkinPanel, "PanelSkins.lua panel-cache disabled: FS.Theme.SkinPanel missing")
@@ -521,7 +521,7 @@ end
 --   retint = { { name = <_G name or "Frame.field" path>, opts = {...} } |
 --              { region = <resolved region>, opts = {...} }, ... } -> RetintDarkText
 --   rows   = { scrollBox = <path>, perRow = fn }         -> ApplyGutsRows
--- Guarded by `parent.fsGutsApplied` so /fsrecon skins can read this back like
+-- Guarded by `parent.fsGutsApplied` so /fsinspect skins can read this back like
 -- every other panel marker; the strip/hide/retint/rows helpers are each
 -- independently idempotent, so re-running them on an already-applied parent
 -- (e.g. Panels.lua's MAIL_INBOX_UPDATE re-scan) stays cheap and safe.
@@ -567,70 +567,70 @@ function PanelSkins.ApplyGuts(spec)
 end
 
 -------------------------------------------------------------------------------
--- /fsrecon skins | pos <frame> readback commands
+-- /fsinspect skins | pos <frame> readback commands
 -------------------------------------------------------------------------------
 
--- Read-only recon registry: each reskin file registers the surfaces it owns
--- so /fsrecon skins can report which ones resolved (frame exists, idempotency
+-- Read-only inspect registry: each reskin file registers the surfaces it owns
+-- so /fsinspect skins can report which ones resolved (frame exists, idempotency
 -- marker set) vs skipped (frame absent -- not yet loaded, load-on-demand) at
 -- call time, without this file needing to know each consumer's frame list.
-local reconGroups = {}
+local inspectGroups = {}
 
 -- `entries` is a list of { name = <_G frame name>, guard = <marker field> }.
-function PanelSkins.RegisterRecon(label, entries)
-    reconGroups[#reconGroups + 1] = { label = label, entries = entries }
+function PanelSkins.RegisterInspect(label, entries)
+    inspectGroups[#inspectGroups + 1] = { label = label, entries = entries }
 end
 
--- Convenience wrapper for the RegisterRecon(label, entries) call every
+-- Convenience wrapper for the RegisterInspect(label, entries) call every
 -- consumer used to build by hand: builds the { name, guard } entries list
 -- from `list` (each element either a bare string, or a table whose
 -- `nameField` key holds the frame name) and registers it under `label`.
-function PanelSkins.RegisterReconFromList(label, list, guard, nameField)
+function PanelSkins.RegisterInspectFromList(label, list, guard, nameField)
     local entries = {}
     for _, x in ipairs(list) do
         entries[#entries+1] = { name = nameField and x[nameField] or x, guard = guard }
     end
-    PanelSkins.RegisterRecon(label, entries)
+    PanelSkins.RegisterInspect(label, entries)
 end
 
--- A couple of obvious shorthands for /fsrecon pos; the identifier is always
+-- A couple of obvious shorthands for /fsinspect pos; the identifier is always
 -- tried verbatim against _G first (below), so any real global frame name
 -- works untouched without needing an entry here.
-local reconFrameAliases = {
+local inspectFrameAliases = {
     issuereporter = "PTR_IssueReporter",
     minimap = "Minimap",
 }
 
--- Usage line shared by the plain "/fsrecon" call and any unrecognised
+-- Usage line shared by the plain "/fsinspect" call and any unrecognised
 -- subcommand, so there is exactly one place naming all three.
-local function PrintReconUsage()
-    print("|cff22e0ffForever STUwave|r: /fsrecon skins | pos <frame> | threat [auto [N]|clear] | " ..
-        "pet [auto [N]|clear] | probe [stop] | surname | minimap [paint|spill|clear] | microbags | plateauras [arm|off] | class | all -- panel-skin idempotency readback | " ..
-        "frame position report | threat/role/reaction secret-value probe | pet Phase-0 probe | " ..
-        "name-API surname probe | Minimap/MinimapCluster geometry probe | " ..
-        "hidden native nameplate aura frame probe (not part of all; arm waits for combat, off disarms) | " ..
-        "class spell, form and aura recon (out of combat; not part of all; /fsbug includes it) | all -- run every probe")
+local function PrintInspectUsage()
+    print("|cff22e0ffForever STUwave|r: /fsinspect skins | pos <frame> | threat [auto [N]|clear] | " ..
+        "pet [auto [N]|clear] | auras [stop] | surname | minimap [paint|spill|clear] | microbags | plateauras [arm|off] | class | all -- panel skin readout | " ..
+        "frame position | threat and reaction readout | pet readout | " ..
+        "name readout | Minimap and MinimapCluster geometry | " ..
+        "native nameplate aura frames (not part of all; arm waits for combat, off disarms) | " ..
+        "class spells, forms and auras (out of combat; not part of all; /fsbug includes it) | all -- run every readout")
 end
 
-SLASH_FSRECON1 = "/fsrecon"
-SlashCmdList["FSRECON"] = function(msg)
-    if msg == "probe" then
-        FS.Diagnostics.ArmAuraProbe()
+SLASH_FSINSPECT1 = "/fsinspect"
+SlashCmdList["FSINSPECT"] = function(msg)
+    if msg == "auras" then
+        FS.Diagnostics.ArmAuraCheck()
         return
     end
-    if msg == "probe stop" then
-        FS.Diagnostics.StopAuraProbe()
+    if msg == "auras stop" then
+        FS.Diagnostics.StopAuraCheck()
         return
     end
     if msg == "threat" or msg:match("^threat%s") then
-        -- The probe logic lives in Diagnostics.lua (FS.Diagnostics), not here:
+        -- The check logic lives in Diagnostics.lua (FS.Diagnostics), not here:
         -- reached through the table at call time since that file loads AFTER
         -- this one, so a captured local would still be nil when this closure
         -- was built.
         local rest = msg:match("^threat%s*(.-)%s*$") or ""
 
         if rest == "" then
-            FS.Diagnostics.RunThreatProbe()
+            FS.Diagnostics.RunThreatCheck()
             return
         end
 
@@ -648,19 +648,19 @@ SlashCmdList["FSRECON"] = function(msg)
             return
         end
 
-        PrintReconUsage()
+        PrintInspectUsage()
         return
     end
 
     if msg == "pet" or msg:match("^pet%s") then
-        -- Same dispatch shape as the threat probe above: routed through
+        -- Same dispatch shape as the threat check above: routed through
         -- FS.Diagnostics at call time since Diagnostics.lua loads after this
-        -- file. See Diagnostics.lua's /fsrecon pet section for the probe
+        -- file. See Diagnostics.lua's /fsinspect pet section for the check
         -- logic itself.
         local rest = msg:match("^pet%s*(.-)%s*$") or ""
 
         if rest == "" then
-            FS.Diagnostics.RunPetProbe()
+            FS.Diagnostics.RunPetCheck()
             return
         end
 
@@ -675,42 +675,42 @@ SlashCmdList["FSRECON"] = function(msg)
             return
         end
 
-        PrintReconUsage()
+        PrintInspectUsage()
         return
     end
 
     if msg == "surname" or msg:match("^surname%s") then
         -- Routed through FS.Diagnostics at call time like threat/pet above,
         -- since Diagnostics.lua loads after this file. One-shot lookup, no
-        -- auto/clear -- see Diagnostics.lua's /fsrecon surname section.
-        FS.Diagnostics.RunSurnameProbe()
+        -- auto/clear -- see Diagnostics.lua's /fsinspect surname section.
+        FS.Diagnostics.RunSurnameCheck()
         return
     end
 
     if msg == "minimap" or msg:match("^minimap%s") then
         local rest = msg:match("^minimap%s*(.-)%s*$") or ""
         if rest == "" then
-            FS.Diagnostics.RunMinimapProbe()
+            FS.Diagnostics.RunMinimapCheck()
         elseif rest == "paint" or rest == "spill" or rest == "clear" or rest == "paintoff" then
             FS.Diagnostics.RunMinimapBounds(rest)
         else
-            PrintReconUsage()
+            PrintInspectUsage()
         end
         return
     end
 
     if msg == "microbags" then
-        FS.Diagnostics.RunMicroBagsProbe()
+        FS.Diagnostics.RunMicroBagsCheck()
         return
     end
 
     if msg == "plateauras" or msg == "plateauras arm" or msg == "plateauras off" then
-        -- Read-only probe of Blizzard's own (hidden) nameplate aura frames;
-        -- see Diagnostics.lua's /fsrecon plateauras section. `arm` waits for
+        -- Read-only check of Blizzard's own (hidden) nameplate aura frames;
+        -- see Diagnostics.lua's /fsinspect plateauras section. `arm` waits for
         -- the first in-combat target UNIT_AURA so nothing is typed mid-fight;
         -- `off` disarms it. Not part of `all`.
         if msg == "plateauras" then
-            FS.Diagnostics.RunPlateAurasProbe()
+            FS.Diagnostics.RunPlateAurasCheck()
         elseif msg == "plateauras arm" then
             FS.Diagnostics.ArmPlateAuras()
         else
@@ -720,17 +720,17 @@ SlashCmdList["FSRECON"] = function(msg)
     end
 
     if msg == "class" or msg:match("^class%s") then
-        -- Class spell/form/aura recon for building class features; see Diagnostics.lua's
-        -- /fsrecon class section. Not part of `all`: it reads auras, so it wants a quiet moment.
-        FS.Diagnostics.RunClassRecon()
+        -- Class spell/form/aura inspect for building class features; see Diagnostics.lua's
+        -- /fsinspect class section. Not part of `all`: it reads auras, so it wants a quiet moment.
+        FS.Diagnostics.RunClassInspect()
         return
     end
 
     if msg == "all" or msg:match("^all%s") then
-        -- Runs every one-shot recon probe in one command and prints one
-        -- combined confirmation line -- see Diagnostics.lua's /fsrecon all
+        -- Runs every one-shot inspect check in one command and prints one
+        -- combined confirmation line -- see Diagnostics.lua's /fsinspect all
         -- section.
-        FS.Diagnostics.RunAllRecon()
+        FS.Diagnostics.RunAllInspect()
         return
     end
 
@@ -739,15 +739,15 @@ SlashCmdList["FSRECON"] = function(msg)
         -- trailing %s*$ anchor eats leading/trailing whitespace in one match.
         local id = msg:match("^pos%s*(.-)%s*$") or ""
         if id == "" then
-            print("|cff22e0ffForever STUwave|r: /fsrecon pos <FrameName> -- reports a frame's position")
+            print("|cff22e0ffForever STUwave|r: /fsinspect pos <FrameName> -- reports a frame's position")
             return
         end
 
         -- Verbatim global first (any real frame name works untouched), then
         -- the small alias table keyed by lowercase.
-        local frame = _G[id] or _G[reconFrameAliases[id:lower()]]
+        local frame = _G[id] or _G[inspectFrameAliases[id:lower()]]
         if type(frame) ~= "table" or type(frame.GetRect) ~= "function" then
-            print(("|cffff4488Forever STUwave|r: /fsrecon pos -- frame '%s' not found or has no GetRect"):format(id))
+            print(("|cffff4488Forever STUwave|r: /fsinspect pos -- frame '%s' not found or has no GetRect"):format(id))
             return
         end
 
@@ -756,7 +756,7 @@ SlashCmdList["FSRECON"] = function(msg)
         -- guard before any arithmetic/formatting touches l/b/w/h.
         local l, b, w, h = frame:GetRect()
         if not l then
-            print(("|cffff4488Forever STUwave|r: /fsrecon pos -- frame '%s' has no resolved position " ..
+            print(("|cffff4488Forever STUwave|r: /fsinspect pos -- frame '%s' has no resolved position " ..
                 "(GetRect returned nil)"):format(id))
             return
         end
@@ -780,13 +780,13 @@ SlashCmdList["FSRECON"] = function(msg)
         print(line)
 
         ForeverSTUwaveDB = ForeverSTUwaveDB or {}
-        ForeverSTUwaveDB.reconPos = line
-        print("|cff22e0ffstuwave://recon|r  written to ForeverSTUwaveDB; /fsreload to flush it")
+        ForeverSTUwaveDB.inspectPos = line
+        print("|cff22e0ffstuwave://inspect|r  written to ForeverSTUwaveDB; /fsreload to flush it")
         return
     end
 
     if msg ~= "skins" then
-        PrintReconUsage()
+        PrintInspectUsage()
         return
     end
 
@@ -794,14 +794,14 @@ SlashCmdList["FSRECON"] = function(msg)
 
     -- A chat print scrolls away and never reaches the dev tooling, so this
     -- also writes a compact readback into ForeverSTUwaveDB -- same idiom as
-    -- Diagnostics.lua's /fsfont -> fontProbe -- for the dev tooling to read after
+    -- Diagnostics.lua's /fsfont -> fontCheck -- for the dev tooling to read after
     -- /fsreload.
     local groupSummaries = {}
     local presentUnskinned = {}
     local skippedCount = 0
 
-    print("|cff22e0ffForever STUwave|r: /fsrecon skins")
-    for _, group in ipairs(reconGroups) do
+    print("|cff22e0ffForever STUwave|r: /fsinspect skins")
+    for _, group in ipairs(inspectGroups) do
         local resolved = 0
         for _, entry in ipairs(group.entries) do
             local frame = _G[entry.name]
@@ -829,7 +829,7 @@ SlashCmdList["FSRECON"] = function(msg)
     if #presentUnskinned > 0 then
         unskinnedText = "PRESENT-UNSKINNED: " .. table.concat(presentUnskinned, ", ")
     end
-    ForeverSTUwaveDB.reconSkins = ("%s | %s | %d skipped (not loaded)"):format(
+    ForeverSTUwaveDB.inspectSkins = ("%s | %s | %d skipped (not loaded)"):format(
         table.concat(groupSummaries, " | "), unskinnedText, skippedCount)
-    print("|cff22e0ffstuwave://recon|r  written to ForeverSTUwaveDB; /fsreload to flush it")
+    print("|cff22e0ffstuwave://inspect|r  written to ForeverSTUwaveDB; /fsreload to flush it")
 end

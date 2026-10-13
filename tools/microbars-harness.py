@@ -252,12 +252,12 @@ UIParent = newObj("Frame", nil, "UIParent")
 newObj("Frame", UIParent, "ForeverSTUwaveXPBar")
 GameTooltip = newObj("Frame", nil, "GameTooltip")
 
-RECON = {}
+INSPECT = {}
 -- The one number the mock treats as a secret value (a secret is still type "number" in the client).
 SECRET_W = 100.5
 FS = {
     Layout = { Scale = function() return SCALE end, OnRescale = function(fn) RESCALE[#RESCALE + 1] = fn end },
-    PanelSkins = { RequireExport = function() return true end, RegisterRecon = function(group, list) RECON[group] = list end },
+    PanelSkins = { RequireExport = function() return true end, RegisterInspect = function(group, list) INSPECT[group] = list end },
     IsSecret = function(v) return v == SECRET_W end,
     LogDegradeOnce = function(key, msg) LOGS[#LOGS + 1] = key .. ": " .. msg end,
     Theme = { SCANLINE_TEXTURE = "scan", GLOW_EDGE_TEXTURE = "glow", SLICE_CUT_MARGIN = 6,
@@ -359,10 +359,10 @@ function h_storeTouched()
     local b = BUTTONS[STORE_IDX]
     return { newKids = #rawget(b, "kids") - b.kidsAtForbid, fsMicroKey = rawget(b, "fsMicroKey") ~= nil }
 end
--- The names MicroBars registered with PanelSkins.RegisterRecon, comma-joined.
-function h_reconNames()
+-- The names MicroBars registered with PanelSkins.RegisterInspect, comma-joined.
+function h_inspectNames()
     local out = {}
-    for i, e in ipairs(RECON.MicroMenu or {}) do out[i] = e.name end
+    for i, e in ipairs(INSPECT.MicroMenu or {}) do out[i] = e.name end
     return table.concat(out, ",")
 end
 function h_slotW() return (FS.Deck and FS.Deck.microSlot or _G.ForeverSTUwaveMicroBar):GetWidth() end
@@ -932,8 +932,8 @@ def check_forbidden_store(lean: float, gap: float) -> None:
     check("forbidden.button_gets_no_key_hooks_or_reparent",
           len(w.get("FS.MicroBars.keys")) == 11 and touched["newKids"] == 0 and not touched["fsMicroKey"] and w.logs() == "",
           f"keys {len(w.get('FS.MicroBars.keys'))} touched {touched}")
-    recon = w.call("h_reconNames").split(",")
-    check("forbidden.recon_list_excludes_it", len(recon) == 11 and "StoreMicroButton" not in recon, f"{recon}")
+    inspect = w.call("h_inspectNames").split(",")
+    check("forbidden.inspect_list_excludes_it", len(inspect) == 11 and "StoreMicroButton" not in inspect, f"{inspect}")
     check("forbidden.other_keys_nest_as_if_it_were_absent",
           len(ks) == 11 and all(near(s, pitch) for s in steps) and near(ks[-1]["x"] + ks[-1]["w"] / 2, slot_w / 2),
           f"{len(ks)} keys, steps {steps[:2]}")

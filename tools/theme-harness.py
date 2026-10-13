@@ -652,7 +652,7 @@ case("cutfillerase_without_nine_slice_support_is_nil_and_leaves_at_most_one_hidd
     local host, made, restore = Unsliceable()
     local handle = Theme.AddCutFillErase(host, NewFrame(), { 0, 0, 0, 1 })
     assert(handle == nil, "without SetTextureSliceMargins the stretched file would draw huge corners")
-    assert(#made == 1 and made[1].shown == false, "the unsliced probe texture was left shown")
+    assert(#made == 1 and made[1].shown == false, "the unsliced check texture was left shown")
     assert(host.children[1].shown == false, "the unsliced clip frame was left shown")
     -- the failure is latched: later bars create nothing at all
     local host2 = NewFrame()

@@ -19,7 +19,7 @@ locked design). The checks pin:
     alpha, a frame under a hidden ancestor snaps instead of fading, a piece registered after
     state was saved gets that state, a protected frame in combat gets alpha changes only (no
     Show/Hide/EnableMouse) and is reconciled on PLAYER_REGEN_ENABLED;
-  * persistence shape, the /fsgun slash command, the debug outlines, the .toc order and the
+  * persistence shape, the /fsgun slash command, the outlines, the .toc order and the
     Theme colour tokens.
 
 The mock is strict (a widget method it does not define fails as a nil call), Show/Hide/EnableMouse
@@ -1285,7 +1285,7 @@ slash("garbage")
 check(#PRINTED > 0, "unknown subcommands print usage")
 """)
 
-case("slash_debug_toggles_outlines_on_every_anchor")(r"""
+case("slash_outlines_toggles_outlines_on_every_anchor")(r"""
 local Gs = boot({ height = 1440, db = {} })
 local slash = SlashCmdList["FSGUN"]
 local function visibleEdges(a)
@@ -1295,21 +1295,21 @@ local function visibleEdges(a)
     end
     return n
 end
-for name, a in pairs(Gs.anchors) do check(visibleEdges(a) == 0, "anchor " .. name .. " has a visible outline before debug") end
-slash("debug")
-for name, a in pairs(Gs.anchors) do check(visibleEdges(a) >= 4, "anchor " .. name .. " has no outline after debug on") end
-slash("debug")
-for name, a in pairs(Gs.anchors) do check(visibleEdges(a) == 0, "anchor " .. name .. " keeps its outline after debug off") end
-check(not ForeverSTUwaveDB.gunsight.debug, "debug is a session toggle and must not be saved")
+for name, a in pairs(Gs.anchors) do check(visibleEdges(a) == 0, "anchor " .. name .. " has a visible outline before outlines") end
+slash("outlines")
+for name, a in pairs(Gs.anchors) do check(visibleEdges(a) >= 4, "anchor " .. name .. " has no outline after outlines on") end
+slash("outlines")
+for name, a in pairs(Gs.anchors) do check(visibleEdges(a) == 0, "anchor " .. name .. " keeps its outline after outlines off") end
+check(not ForeverSTUwaveDB.gunsight.outlines, "outlines is a session toggle and must not be saved")
 """)
 
-case("debug_outlines_survive_a_rescale")(r"""
+case("outlines_survive_a_rescale")(r"""
 local Gs = boot({ height = 1440, db = {} })
-SlashCmdList["FSGUN"]("debug")
+SlashCmdList["FSGUN"]("outlines")
 SetScreen(1200)
 fire("UI_SCALE_CHANGED")
 local _, _, w = rect(Gs.anchors.boxL)
-near(w, 114 * 1.28 * 1200 / 1440, "boxL resized with the debug outline up")
+near(w, 114 * 1.28 * 1200 / 1440, "boxL resized with the outline up")
 """)
 
 case("on_ready_runs_after_init")(r"""

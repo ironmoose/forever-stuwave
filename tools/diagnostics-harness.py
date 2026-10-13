@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Runs the real Diagnostics.lua headless against a mock WoW API, for the `/fsmo` and `/fsrecon class` probes.
+"""Runs the real Diagnostics.lua headless against a mock WoW API, for the `/fsmo` and `/fsinspect class` checks.
 
-`/fsrecon class` is the class spell and aura recon a tester runs once so a class's real spell ids,
+`/fsinspect class` is the class spell and aura inspect a tester runs once so a class's real spell ids,
 form data and aura shapes are known before class features are built. Its properties pinned here:
 it runs for PALADIN (the full candidate table) and WARLOCK (a small table plus the real HudProfile
 keys) and for a class with no table, secret values print "secret", throwing and missing APIs never
 error, aura reads are skipped in combat, the chat output has one fixed shape, list sizes are
-capped, and the result is handed to /fsbug through GetClassRecon (fsbug-harness.py pins the report
+capped, and the result is handed to /fsbug through GetClassInspect (fsbug-harness.py pins the report
 side). The routing of the subcommand lives in PanelSkins.lua; the real dispatcher is loaded and driven.
 
-`/fsmo` is the mouseover-cast probe Parker runs in game. The properties worth pinning are the
+`/fsmo` is the mouseover-cast check Parker runs in game. The properties worth pinning are the
 safety ones: the toggle registers and unregisters UPDATE_MOUSEOVER_UNIT, one compact line is
 printed per CHANGE of unit or frame (never per event), a secret name or flag prints the word
 "secret" without ever being compared or concatenated, the watch turns itself off after 120s (and
@@ -172,7 +172,7 @@ function On() SlashCmdList.FSMO("") end
 function Hover() Fire("UPDATE_MOUSEOVER_UNIT") end
 """
 
-# The class world for /fsrecon class. Appended to MOCK so it shares its `guard` and `sentinel`
+# The class world for /fsinspect class. Appended to MOCK so it shares its `guard` and `sentinel`
 # locals. ClassWorld() installs the APIs; every API reads CW at call time and can be made to throw
 # through THROW[key]. Mouseover cases never call it, so UnitExists stays the mouseover one for them.
 CLASS_MOCK = r"""
@@ -288,13 +288,13 @@ function LoadHud(FS)
     b("forever-stuwave", FS)
 end
 
--- Runs the recon and returns FS, the data and the printed lines (colour codes removed).
+-- Runs the inspect and returns FS, the data and the printed lines (colour codes removed).
 function RunClass(over, noHud)
     ClassWorld(over)
     local FS = LoadDiag()
     if not noHud then LoadHud(FS) end
-    FS.Diagnostics.RunClassRecon()
-    return FS, FS.Diagnostics.GetClassRecon(), Lines()
+    FS.Diagnostics.RunClassInspect()
+    return FS, FS.Diagnostics.GetClassInspect(), Lines()
 end
 
 function HasSentinel(v, seen)
@@ -587,7 +587,7 @@ case("secret_frame_name_prints_secret", """
 
 
 # ---------------------------------------------------------------------------
-# /fsrecon class
+# /fsinspect class
 # ---------------------------------------------------------------------------
 
 case("class_paladin_chat_shape", """
@@ -609,7 +609,7 @@ case("class_paladin_chat_shape", """
         P .. "buffs  2  Seal of Righteousness id=21084 dur=30 left=28.5 src=player dispel=nil; Devotion Aura id=465 dur=0 left=none src=player dispel=nil",
         P .. "target debuffs (mine)  1  Judgement of Light id=20185 dur=20",
         P .. "party buffs (mine)  party1: Blessing of Might id=19740; party2: absent; party3: absent; party4: absent",
-        P .. "saved to recon.class, /fsbug includes it",
+        P .. "saved to inspect.class, /fsbug includes it",
     }
     for i, w in ipairs(want) do assert(l[i] == w, "line " .. i .. ":\\n  got  " .. tostring(l[i]) .. "\\n  want " .. w) end
     assert(#l == #want, "extra lines: " .. #l)
@@ -647,32 +647,32 @@ case("class_paladin_data", """
 
 case("class_data_is_stored_stamped_and_marked_for_the_bug_report", """
     local FS = LoadDiag()
-    assert(type(FS.Diagnostics.RunClassRecon) == "function" and FS.Diagnostics.GetClassRecon() == nil)
-    FS.Diagnostics.MarkClassReconReported()    -- nothing recorded yet: harmless
+    assert(type(FS.Diagnostics.RunClassInspect) == "function" and FS.Diagnostics.GetClassInspect() == nil)
+    FS.Diagnostics.MarkClassInspectReported()    -- nothing recorded yet: harmless
     ClassWorld()
-    FS.Diagnostics.RunClassRecon()
-    local d = FS.Diagnostics.GetClassRecon()
-    assert(ForeverSTUwaveDB.recon.class == d, "stored where the other recon probes store")
+    FS.Diagnostics.RunClassInspect()
+    local d = FS.Diagnostics.GetClassInspect()
+    assert(ForeverSTUwaveDB.inspect.class == d, "stored where the other inspect checks store")
     assert(d.taken == "2026-10-03 10:00:00" and d.reported == nil)
-    FS.Diagnostics.MarkClassReconReported()
-    assert(d.reported == true and ForeverSTUwaveDB.recon.class.reported == true)
+    FS.Diagnostics.MarkClassInspectReported()
+    assert(d.reported == true and ForeverSTUwaveDB.inspect.class.reported == true)
     ClassWorld({ level = 13, date = "2026-10-03 11:30:00" })
-    FS.Diagnostics.RunClassRecon()
-    local d2 = FS.Diagnostics.GetClassRecon()
-    assert(d2 ~= d and d2.level == 13 and ForeverSTUwaveDB.recon.class == d2, "a rerun replaces, never accumulates")
+    FS.Diagnostics.RunClassInspect()
+    local d2 = FS.Diagnostics.GetClassInspect()
+    assert(d2 ~= d and d2.level == 13 and ForeverSTUwaveDB.inspect.class == d2, "a rerun replaces, never accumulates")
     assert(d2.reported == nil and d2.taken == "2026-10-03 11:30:00", "a rerun is fresh and unreported")
     -- the stamp is plain: a missing or throwing date is "unavailable", not an error
     for _, how in ipairs({ "missing", "throw" }) do
         ClassWorld()
         if how == "missing" then date = nil else THROW = { date = true } end
-        FS.Diagnostics.RunClassRecon()
-        assert(FS.Diagnostics.GetClassRecon().taken == "unavailable", how)
+        FS.Diagnostics.RunClassInspect()
+        assert(FS.Diagnostics.GetClassInspect().taken == "unavailable", how)
     end
     -- a run kept only in SavedVariables (a new session) can still be marked
-    ForeverSTUwaveDB = { recon = { class = { taken = "x" } } }
+    ForeverSTUwaveDB = { inspect = { class = { taken = "x" } } }
     local fresh = LoadDiag()
-    fresh.Diagnostics.MarkClassReconReported()
-    assert(ForeverSTUwaveDB.recon.class.reported == true)
+    fresh.Diagnostics.MarkClassInspectReported()
+    assert(ForeverSTUwaveDB.inspect.class.reported == true)
 """)
 
 case("class_warlock_runs_with_its_own_table_and_the_real_hud_keys", """
@@ -710,7 +710,7 @@ case("class_unknown_class_has_no_candidates_but_runs_the_generic_sections", """
     assert(Has(Join(l), "spells  0 candidates"), Join(l))
 """)
 
-case("class_talent_apis_are_all_probed_and_both_tab_layouts_read", """
+case("class_talent_apis_are_all_checked_and_both_tab_layouts_read", """
     -- Retail tab layout: id, name, description, icon, points. Plus both spec APIs.
     ClassWorld()
     local FS = LoadDiag()
@@ -722,8 +722,8 @@ case("class_talent_apis_are_all_probed_and_both_tab_layouts_read", """
     C_SpecializationInfo.GetSpecializationInfo = function(i) return 70, "Retribution", "desc", "icon", "DAMAGER", 1, i * 2 end
     GetSpecialization = function() return 2 end
     GetSpecializationInfo = function(i) return 66, "Protection" end
-    FS.Diagnostics.RunClassRecon()
-    local d = FS.Diagnostics.GetClassRecon()
+    FS.Diagnostics.RunClassInspect()
+    local d = FS.Diagnostics.GetClassInspect()
     assert(d.talents.tabs[3].name == "Retribution" and d.talents.tabs[3].points == 5, d.talents.tabs[3].name)
     assert(d.talents.api.C_SpecializationInfo == "ok" and d.talents.api.GetSpecialization == "ok")
     assert(d.talents.specIndex.C_SpecializationInfo == 3 and d.talents.specIndex.GetSpecialization == 2)
@@ -732,8 +732,8 @@ case("class_talent_apis_are_all_probed_and_both_tab_layouts_read", """
     -- This client has no GetTalentTabInfo at all: names and points come from GetSpecializationInfo
     -- (specId, name, description, icon, role, primaryStat, pointsSpent).
     GetTalentTabInfo = nil
-    FS.Diagnostics.RunClassRecon()
-    d = FS.Diagnostics.GetClassRecon()
+    FS.Diagnostics.RunClassInspect()
+    d = FS.Diagnostics.GetClassInspect()
     assert(d.talents.api.GetTalentTabInfo == "unavailable" and d.talents.tabSource == "C_SpecializationInfo.GetSpecializationInfo")
     assert(#d.talents.tabs == 3 and d.talents.tabs[3].name == "Retribution" and d.talents.tabs[3].points == 6)
 """)
@@ -743,8 +743,8 @@ case("class_talent_ranks_fall_back_to_traits_when_the_spec_api_has_nothing", """
         local FS = LoadDiag()
         ClassWorld({ traits = TRAITS })
         if how == "absent" then C_SpecializationInfo = nil else CW.talentInfo = {} end
-        FS.Diagnostics.RunClassRecon()
-        local rk = FS.Diagnostics.GetClassRecon().talents.ranks
+        FS.Diagnostics.RunClassInspect()
+        local rk = FS.Diagnostics.GetClassInspect().talents.ranks
         assert(rk.status == "ok" and rk.source == "C_Traits (C_ClassTalents.GetActiveConfigID)" and #rk.list == 2, how)
         assert(rk.list[1].node == 1001 and rk.list[1].rank == 2 and rk.list[1].maxRank == 5 and rk.list[1].spellId == 20271)
         assert(rk.list[2].node == 1003 and rk.list[2].spellId == 635, "an unspent node is left out")
@@ -754,8 +754,8 @@ case("class_talent_ranks_fall_back_to_traits_when_the_spec_api_has_nothing", """
     local FS = LoadDiag()
     ClassWorld()
     C_SpecializationInfo = nil
-    FS.Diagnostics.RunClassRecon()
-    local rk = FS.Diagnostics.GetClassRecon().talents.ranks
+    FS.Diagnostics.RunClassInspect()
+    local rk = FS.Diagnostics.GetClassInspect().talents.ranks
     assert(rk.status == "unavailable" and rk.reason == "GetTalentInfo=unavailable traits=unavailable" and #rk.list == 0, rk.reason)
     assert(Has(Join(Lines()), "ranks  unavailable  GetTalentInfo=unavailable traits=unavailable"))
 """)
@@ -775,8 +775,8 @@ case("class_traits_a_secret_or_missing_id_never_reaches_the_next_api", """
         entry = { [9003] = { definitionID = SN }, [9005] = { definitionID = 8005 } },
         def = { [8005] = { spellID = 635 } },
     } })
-    FS.Diagnostics.RunClassRecon()
-    local rk = FS.Diagnostics.GetClassRecon().talents.ranks
+    FS.Diagnostics.RunClassInspect()
+    local rk = FS.Diagnostics.GetClassInspect().talents.ranks
     assert(rk.status == "ok" and #rk.list == 4, rk.status .. " " .. #rk.list)
     assert(rk.skipped == 2, "the secret tree id and the secret node id are counted, not skipped silently: " .. tostring(rk.skipped))
     assert(__cfgArgs.n == 1 and __cfgArgs[1] == 77)
@@ -798,8 +798,8 @@ case("class_traits_an_unreadable_tree_is_counted_and_the_reason_says_why", """
             node = TRAITS.node, entry = TRAITS.entry, def = TRAITS.def } })
     end
     local function run()
-        FS.Diagnostics.RunClassRecon()
-        return FS.Diagnostics.GetClassRecon().talents.ranks
+        FS.Diagnostics.RunClassInspect()
+        return FS.Diagnostics.GetClassInspect().talents.ranks
     end
     -- a secret tree id and a secret GetTreeNodes table are unreadable trees, not empty ones
     world({ SN, 500 }, { [500] = ST })
@@ -808,7 +808,7 @@ case("class_traits_an_unreadable_tree_is_counted_and_the_reason_says_why", """
         tostring(rk.reason) .. " " .. tostring(rk.skipped))
     assert(__treeArgs.n == 1 and __treeArgs[1] == 500 and __nodeArgs.n == nil, "a secret id reached an API")
     assert(Has(Join(Lines()), "ranks  unavailable  GetTalentInfo=empty traits=secret"), Join(Lines()))
-    assert(not HasSentinel(FS.Diagnostics.GetClassRecon()))
+    assert(not HasSentinel(FS.Diagnostics.GetClassInspect()))
     -- GetTreeNodes throwing is an error state, kept (it used to be lost and read as empty)
     world({ 500 })
     THROW.GetTreeNodes = true
@@ -830,8 +830,8 @@ case("class_traits_a_plain_string_node_id_never_becomes_the_status", """
     local function run(nodes)
         ClassWorld({ talentInfo = {}, traits = { cfg = 77, trees = { 500 }, nodes = nodes, node = TRAITS.node,
             entry = TRAITS.entry, def = TRAITS.def } })
-        FS.Diagnostics.RunClassRecon()
-        return FS.Diagnostics.GetClassRecon().talents.ranks
+        FS.Diagnostics.RunClassInspect()
+        return FS.Diagnostics.GetClassInspect().talents.ranks
     end
     local rk = run({ "banana" })
     assert(rk.reason == "GetTalentInfo=empty traits=empty" and rk.skipped == nil, tostring(rk.reason))
@@ -845,8 +845,8 @@ case("class_traits_a_secret_config_id_stops_the_walk", """
         local FS = LoadDiag()
         ClassWorld({ talentInfo = {}, traits = { cfg = bad == "secret" and SN or nil, trees = { 500 }, nodes = { 1001 },
             node = TRAITS.node, entry = TRAITS.entry, def = TRAITS.def } })
-        FS.Diagnostics.RunClassRecon()
-        local rk = FS.Diagnostics.GetClassRecon().talents.ranks
+        FS.Diagnostics.RunClassInspect()
+        local rk = FS.Diagnostics.GetClassInspect().talents.ranks
         assert(__cfgArgs.n == nil and __treeArgs.n == nil and __nodeArgs.n == nil, bad .. ": the walk went on")
         assert(rk.status == "unavailable" and #rk.list == 0, bad .. " " .. tostring(rk.status))
         assert(rk.reason == "GetTalentInfo=empty traits=" .. (bad == "secret" and "secret" or "empty"), rk.reason)
@@ -858,8 +858,8 @@ case("class_traits_a_secret_tree_id_list_is_secret_not_empty", """
     local FS = LoadDiag()
     ClassWorld({ talentInfo = {}, traits = { cfg = 77, trees = ST, nodes = { 1001 },
         node = TRAITS.node, entry = TRAITS.entry, def = TRAITS.def } })
-    FS.Diagnostics.RunClassRecon()
-    local data = FS.Diagnostics.GetClassRecon()
+    FS.Diagnostics.RunClassInspect()
+    local data = FS.Diagnostics.GetClassInspect()
     local rk = data.talents.ranks
     assert(__cfgArgs.n == 1 and __treeArgs.n == nil and __nodeArgs.n == nil, "the walk went on past a secret tree list")
     assert(rk.status == "unavailable" and #rk.list == 0, tostring(rk.status))
@@ -870,14 +870,14 @@ case("class_traits_a_secret_tree_id_list_is_secret_not_empty", """
     for _, plain in ipairs({ "none", "banana", 5 }) do
         ClassWorld({ talentInfo = {}, traits = { cfg = 77, trees = plain ~= "none" and plain or nil, nodes = { 1001 },
             node = TRAITS.node, entry = TRAITS.entry, def = TRAITS.def } })
-        FS.Diagnostics.RunClassRecon()
-        rk = FS.Diagnostics.GetClassRecon().talents.ranks
+        FS.Diagnostics.RunClassInspect()
+        rk = FS.Diagnostics.GetClassInspect().talents.ranks
         assert(rk.reason == "GetTalentInfo=empty traits=empty" and rk.skipped == nil, tostring(plain) .. " " .. tostring(rk.reason))
     end
     -- a readable list still walks, and a skipped count stays off a clean walk
     ClassWorld({ talentInfo = {}, traits = TRAITS })
-    FS.Diagnostics.RunClassRecon()
-    rk = FS.Diagnostics.GetClassRecon().talents.ranks
+    FS.Diagnostics.RunClassInspect()
+    rk = FS.Diagnostics.GetClassInspect().talents.ranks
     assert(rk.status == "ok" and rk.skipped == nil, tostring(rk.status))
 """)
 
@@ -891,8 +891,8 @@ case("class_traits_a_plain_non_number_config_id_is_not_secret", """
     }) do
         ClassWorld({ talentInfo = {}, traits = { cfg = case[1], trees = { 500 }, nodes = { 1001 },
             node = TRAITS.node, entry = TRAITS.entry, def = TRAITS.def } })
-        FS.Diagnostics.RunClassRecon()
-        local data = FS.Diagnostics.GetClassRecon()
+        FS.Diagnostics.RunClassInspect()
+        local data = FS.Diagnostics.GetClassInspect()
         local rk = data.talents.ranks
         assert(__cfgArgs.n == nil and __treeArgs.n == nil and __nodeArgs.n == nil, "case " .. n .. ": the walk went on")
         assert(rk.reason == "GetTalentInfo=empty traits=" .. case[2], "case " .. n .. " " .. tostring(rk.reason))
@@ -907,19 +907,19 @@ case("class_traits_caps_hold", """
     for i = 1, 5 do treeNodes[i] = {} end
     ClassWorld({ talentInfo = {}, traits = { cfg = 77, trees = { 1, 2, 3, 4, 5 }, treeNodes = treeNodes, nodes = {},
         node = {}, entry = {}, def = {} } })
-    FS.Diagnostics.RunClassRecon()
+    FS.Diagnostics.RunClassInspect()
     assert(__treeArgs.n == 3, "tree cap: " .. tostring(__treeArgs.n))
     local nodes, info = {}, {}
     for i = 1, 450 do nodes[i] = i; info[i] = { activeRank = 0, maxRanks = 1 } end
     ClassWorld({ talentInfo = {}, traits = { cfg = 77, trees = { 500 }, nodes = nodes, node = info, entry = {}, def = {} } })
-    FS.Diagnostics.RunClassRecon()
+    FS.Diagnostics.RunClassInspect()
     assert(__nodeArgs.n == 400, "node cap: " .. tostring(__nodeArgs.n))
     -- more ranked nodes than the 60 entry cap: the list stops at 60 and says so
     local ranked, rinfo = {}, {}
     for i = 1, 100 do ranked[i] = i; rinfo[i] = { activeRank = 1, maxRanks = 1 } end
     ClassWorld({ talentInfo = {}, traits = { cfg = 77, trees = { 500 }, nodes = ranked, node = rinfo, entry = {}, def = {} } })
-    FS.Diagnostics.RunClassRecon()
-    local rk = FS.Diagnostics.GetClassRecon().talents.ranks
+    FS.Diagnostics.RunClassInspect()
+    local rk = FS.Diagnostics.GetClassInspect().talents.ranks
     assert(#rk.list == 60 and rk.capped == true and rk.status == "ok", #rk.list)
     assert(__nodeArgs.n == 61, "the scan stops at the first ranked node past the cap: " .. tostring(__nodeArgs.n))
     assert(Has(Join(Lines()), "(capped)"))
@@ -936,8 +936,8 @@ case("class_traits_lists_are_read_with_rawget_never_an_index", """
     ClassWorld({ talentInfo = {}, traits = {
         cfg = 77, trees = trapped(500, 501), treeNodes = { [500] = trapped(1001, 1003), [501] = {} },
         nodes = {}, node = TRAITS.node, entry = TRAITS.entry, def = TRAITS.def } })
-    FS.Diagnostics.RunClassRecon()
-    local rk = FS.Diagnostics.GetClassRecon().talents.ranks
+    FS.Diagnostics.RunClassInspect()
+    local rk = FS.Diagnostics.GetClassInspect().talents.ranks
     assert(rk.status == "ok" and #rk.list == 2, tostring(rk.status))
     assert(__treeArgs.n == 2 and __nodeArgs.n == 2, "the holes are skipped: " .. tostring(__treeArgs.n) .. " " .. tostring(__nodeArgs.n))
 """)
@@ -947,22 +947,22 @@ case("class_traits_unreadable_node_tables_are_counted", """
     ClassWorld({ talentInfo = {}, traits = { cfg = 77, trees = { 500 }, nodes = { 1001, 1002, 1003, 1004 },
         node = { [1001] = ST, [1002] = TRAITS.node[1001], [1003] = ST, [1004] = TRAITS.node[1003] },
         entry = TRAITS.entry, def = TRAITS.def } })
-    FS.Diagnostics.RunClassRecon()
-    local rk = FS.Diagnostics.GetClassRecon().talents.ranks
+    FS.Diagnostics.RunClassInspect()
+    local rk = FS.Diagnostics.GetClassInspect().talents.ranks
     assert(rk.status == "ok" and #rk.list == 2 and rk.skipped == 2, tostring(rk.skipped))
     assert(Has(Join(Lines()), "ranks  ok via C_Traits (C_ClassTalents.GetActiveConfigID)  2 (2 unreadable)  20271=2/5; 635=1/1"),
         Join(Lines()))
     -- every node secret: nothing was read, and the reason says why
     ClassWorld({ talentInfo = {}, traits = { cfg = 77, trees = { 500 }, nodes = { 1001, 1002 }, node = { [1001] = ST, [1002] = ST },
         entry = {}, def = {} } })
-    FS.Diagnostics.RunClassRecon()
-    rk = FS.Diagnostics.GetClassRecon().talents.ranks
+    FS.Diagnostics.RunClassInspect()
+    rk = FS.Diagnostics.GetClassInspect().talents.ranks
     assert(rk.status == "unavailable" and rk.reason == "GetTalentInfo=empty traits=secret" and rk.skipped == 2, tostring(rk.reason))
     -- a plain table with nothing in it is not "unreadable"
     ClassWorld({ talentInfo = {}, traits = { cfg = 77, trees = { 500 }, nodes = { 1001, 1002 }, node = { [1002] = TRAITS.node[1001] },
         entry = TRAITS.entry, def = TRAITS.def } })
-    FS.Diagnostics.RunClassRecon()
-    assert(FS.Diagnostics.GetClassRecon().talents.ranks.skipped == nil)
+    FS.Diagnostics.RunClassInspect()
+    assert(FS.Diagnostics.GetClassInspect().talents.ranks.skipped == nil)
 """)
 
 case("class_ranks_a_mid_scan_error_or_secret_keeps_the_partial_list", """
@@ -987,27 +987,27 @@ case("class_ranks_a_mid_scan_error_or_secret_keeps_the_partial_list", """
     for _, how in ipairs({ "error", "secret" }) do
         world(how)
         C_SpecializationInfo.GetTalentInfo = stopAt(2, 2, how)
-        FS.Diagnostics.RunClassRecon()
-        local rk = FS.Diagnostics.GetClassRecon().talents.ranks
+        FS.Diagnostics.RunClassInspect()
+        local rk = FS.Diagnostics.GetClassInspect().talents.ranks
         local want = "partial (" .. how .. " at tab 2 idx 2)"
         assert(rk.status == want and #rk.list == 2 and rk.list[2].name == "Gamma", how .. ": " .. tostring(rk.status))
         assert(rk.source == "C_SpecializationInfo.GetTalentInfo" and rk.stoppedAt == how .. " at tab 2 idx 2")
         assert(__cfgArgs.n == nil, "a non empty partial list does not fall back to the traits")
         assert(Has(Join(Lines()), "ranks  " .. want .. " via C_SpecializationInfo.GetTalentInfo  2  Alpha=2/5; Gamma=1/1"),
             Join(Lines()))
-        assert(not HasSentinel(FS.Diagnostics.GetClassRecon()))
+        assert(not HasSentinel(FS.Diagnostics.GetClassInspect()))
     end
     -- nothing read before the stop: the trait route still gets its turn
     world()
     C_SpecializationInfo.GetTalentInfo = stopAt(1, 1, "error")
-    FS.Diagnostics.RunClassRecon()
-    local rk = FS.Diagnostics.GetClassRecon().talents.ranks
+    FS.Diagnostics.RunClassInspect()
+    local rk = FS.Diagnostics.GetClassInspect().talents.ranks
     assert(rk.status == "ok" and rk.source == "C_Traits (C_ClassTalents.GetActiveConfigID)" and #rk.list == 2, tostring(rk.status))
     -- and with no trait route either, the stop is the status and the reason
     ClassWorld({ talentInfo = { {} } })
     C_SpecializationInfo.GetTalentInfo = stopAt(1, 1, "secret")
-    FS.Diagnostics.RunClassRecon()
-    rk = FS.Diagnostics.GetClassRecon().talents.ranks
+    FS.Diagnostics.RunClassInspect()
+    rk = FS.Diagnostics.GetClassInspect().talents.ranks
     assert(rk.status == "secret" and #rk.list == 0 and rk.reason == "GetTalentInfo=secret traits=unavailable", tostring(rk.reason))
     assert(rk.stoppedAt == "secret at tab 1 idx 1")
 """)
@@ -1023,8 +1023,8 @@ case("class_a_zero_or_missing_count_falls_back_to_three_tabs", """
             GetNumSpecializations = function() return count end
             GetNumTalentTabs = function() return count end
         end
-        FS.Diagnostics.RunClassRecon()
-        local d = FS.Diagnostics.GetClassRecon()
+        FS.Diagnostics.RunClassInspect()
+        local d = FS.Diagnostics.GetClassInspect()
         assert(#d.talents.tabs == 3 and d.talents.tabs[3].name == "Retribution", tostring(count) .. " tabs: " .. #d.talents.tabs)
         assert(d.talents.ranks.status == "ok" and #d.talents.ranks.list == 2, tostring(count) .. " ranks")
     end
@@ -1036,8 +1036,8 @@ case("class_a_zero_or_missing_count_falls_back_to_three_tabs", """
     C_SpecializationInfo.GetSpecializationInfo = function(i)
         if i <= 3 then return 70 + i, "Spec" .. i, "d", "i", "DAMAGER", 1, i end
     end
-    FS.Diagnostics.RunClassRecon()
-    local d = FS.Diagnostics.GetClassRecon()
+    FS.Diagnostics.RunClassInspect()
+    local d = FS.Diagnostics.GetClassInspect()
     assert(#d.talents.tabs == 3 and d.talents.tabs[3].name == "Spec3" and d.talents.tabs[3].points == 3, #d.talents.tabs)
 """)
 
@@ -1081,8 +1081,8 @@ case("class_secret_values_print_secret_and_are_never_touched", """
     CW.auras["target|HARMFUL|PLAYER"] = { { name = SS, spellId = SN, duration = SN } }
     CW.exists.target = SB
     CW.exists.party1 = SB
-    FS.Diagnostics.RunClassRecon()
-    local d = FS.Diagnostics.GetClassRecon()
+    FS.Diagnostics.RunClassInspect()
+    local d = FS.Diagnostics.GetClassInspect()
     assert(not HasSentinel(d), "a sentinel reached the stored data")
     assert(d.level == "secret")
     assert(passed == 0, "a secret id reached IsPlayerSpell or the secrecy API: " .. passed)
@@ -1110,8 +1110,8 @@ case("class_a_secret_check_that_answers_anything_but_false_fails_closed", """
         local FS = LoadDiag()
         ClassWorld()
         FS.IsSecret = function() if answer ~= "nil" then return answer end end
-        FS.Diagnostics.RunClassRecon()
-        local d = FS.Diagnostics.GetClassRecon()
+        FS.Diagnostics.RunClassInspect()
+        local d = FS.Diagnostics.GetClassInspect()
         assert(d.token == "secret" and d.level == "secret", tostring(answer) .. " read as plain: " .. tostring(d.level))
     end
 """)
@@ -1123,12 +1123,12 @@ case("class_a_table_that_issecrettable_flags_is_never_read", """
     local hidden = { name = "LEAKED", spellId = 1 }
     issecrettable = function(t) return t == hidden end
     CW.auras["player|HELPFUL"] = { hidden, { name = "Plain", spellId = 2, duration = 1 } }
-    FS.Diagnostics.RunClassRecon()
-    local d = FS.Diagnostics.GetClassRecon()
+    FS.Diagnostics.RunClassInspect()
+    local d = FS.Diagnostics.GetClassInspect()
     assert(d.buffs.list[1] == "secret" and d.buffs.list[2].name == "Plain", tostring(d.buffs.list[1]))
     issecrettable = function() error("boom") end
-    FS.Diagnostics.RunClassRecon()
-    assert(FS.Diagnostics.GetClassRecon().buffs.list[1] == "secret", "a throwing issecrettable is not plain")
+    FS.Diagnostics.RunClassInspect()
+    assert(FS.Diagnostics.GetClassInspect().buffs.list[1] == "secret", "a throwing issecrettable is not plain")
     issecrettable = nil
 """)
 
@@ -1145,9 +1145,9 @@ case("class_every_api_throwing_or_missing_degrades_to_markers", """
             local FS = LoadDiag()
             ClassWorld(world)
             THROW = { [k] = true }
-            local ok, err = pcall(FS.Diagnostics.RunClassRecon)
+            local ok, err = pcall(FS.Diagnostics.RunClassInspect)
             assert(ok, k .. ": " .. tostring(err))
-            local d = FS.Diagnostics.GetClassRecon()
+            local d = FS.Diagnostics.GetClassInspect()
             assert(d and not HasSentinel(d), k)
             assert(#Lines() >= 8, k .. " printed " .. #Lines())
         end
@@ -1157,8 +1157,8 @@ case("class_every_api_throwing_or_missing_degrades_to_markers", """
     ClassWorld({ forms = { { 1, true, true, 5 } } })
     THROW = { UnitLevel = true, GetSpellInfo = true, GetNumShapeshiftForms = true, GetAuraDataByIndex = true,
               GetTalentTabInfo = true, GetTalentInfo = true }
-    FS.Diagnostics.RunClassRecon()
-    local d = FS.Diagnostics.GetClassRecon()
+    FS.Diagnostics.RunClassInspect()
+    local d = FS.Diagnostics.GetClassInspect()
     assert(d.level == "error" and Spell(d, "Holy Light").id == "error" and d.forms.count == "error" and #d.forms.list == 0)
     assert(d.buffs.status == "error" and d.talents.api.GetTalentTabInfo == "error", d.buffs.status)
     assert(d.talents.ranks.status == "error" and d.talents.ranks.reason == "GetTalentInfo=error traits=unavailable")
@@ -1167,8 +1167,8 @@ case("class_every_api_throwing_or_missing_degrades_to_markers", """
     for _, k in ipairs(KEYS) do all[k] = true end
     ClassWorld({ forms = { { 1, true, true, 5 } } })
     THROW = all
-    assert(pcall(FS.Diagnostics.RunClassRecon))
-    d = FS.Diagnostics.GetClassRecon()
+    assert(pcall(FS.Diagnostics.RunClassInspect))
+    d = FS.Diagnostics.GetClassInspect()
     assert(d and d.token == "error" and d.level == "error" and d.inCombat == "unknown")
     -- 4. everything missing
     ClassWorld({ traits = TRAITS })
@@ -1177,9 +1177,9 @@ case("class_every_api_throwing_or_missing_degrades_to_markers", """
     GetNumShapeshiftForms, GetShapeshiftFormInfo, C_Spell, IsPlayerSpell, C_UnitAuras, UnitExists, date =
         nil, nil, nil, nil, nil, nil, nil
     C_SpecializationInfo, C_ClassTalents, C_Traits = nil, nil, nil
-    local ok, err = pcall(FS.Diagnostics.RunClassRecon)
+    local ok, err = pcall(FS.Diagnostics.RunClassInspect)
     assert(ok, tostring(err))
-    d = FS.Diagnostics.GetClassRecon()
+    d = FS.Diagnostics.GetClassInspect()
     assert(d.token == "unavailable" and d.level == "unavailable" and d.taken == "unavailable")
     assert(d.talents.api.GetTalentTabInfo == "unavailable" and d.forms.count == "unavailable")
     assert(d.talents.ranks.status == "unavailable" and #d.talents.ranks.list == 0)
@@ -1189,12 +1189,12 @@ case("class_every_api_throwing_or_missing_degrades_to_markers", """
 
 case("class_missing_issecretvalue_reads_plain_data", """
     -- Theme.lua's FS.IsSecret is false without issecretvalue, so nothing reads as secret and the
-    -- recon records the plain values.
+    -- inspect records the plain values.
     issecretvalue = nil
     local FS = LoadDiag()
     ClassWorld()
-    assert(pcall(FS.Diagnostics.RunClassRecon))
-    local d = FS.Diagnostics.GetClassRecon()
+    assert(pcall(FS.Diagnostics.RunClassInspect))
+    local d = FS.Diagnostics.GetClassInspect()
     assert(d.level == 12 and d.token == "PALADIN" and d.buffs.status == "ok", tostring(d.level))
 """)
 
@@ -1205,8 +1205,8 @@ case("class_aura_gate_reads_only_on_a_plain_false_from_both_checks", """
         C_Secrets = nil
         THROW = {}
         setup()
-        FS.Diagnostics.RunClassRecon()
-        return FS.Diagnostics.GetClassRecon()
+        FS.Diagnostics.RunClassInspect()
+        return FS.Diagnostics.GetClassInspect()
     end
     local COMBAT, SECRETS = "skipped (combat state unknown)", "skipped (auras secret)"
     local gate = {
@@ -1271,7 +1271,7 @@ case("class_aura_filters_are_the_requested_ones", """
         if i == 1 then seen[unit] = filter end
         return real(unit, i, filter)
     end
-    FS.Diagnostics.RunClassRecon()
+    FS.Diagnostics.RunClassInspect()
     assert(seen.player == "HELPFUL" and seen.target == "HARMFUL|PLAYER", tostring(seen.player) .. " " .. tostring(seen.target))
     assert(seen.party1 == "HELPFUL|PLAYER" and seen.party4 == nil, "party4 does not exist")
 """)
@@ -1284,15 +1284,15 @@ case("class_expiration_arithmetic_only_on_plain_numbers", """
         { name = "b", spellId = 2, duration = 10 },
         { name = "c", spellId = 3, duration = 10, expirationTime = 5001.04 },
     }
-    FS.Diagnostics.RunClassRecon()
-    local b = FS.Diagnostics.GetClassRecon().buffs.list
+    FS.Diagnostics.RunClassInspect()
+    local b = FS.Diagnostics.GetClassInspect().buffs.list
     assert(b[1].left == nil and b[2].left == nil and b[3].left == 1, tostring(b[3].left))
     ClassWorld()
     GetTime = nil
     CW.auras["player|HELPFUL"] = { { name = "a", spellId = 1, duration = 10, expirationTime = 5003 } }
     FS = LoadDiag()
-    FS.Diagnostics.RunClassRecon()
-    assert(FS.Diagnostics.GetClassRecon().buffs.list[1].left == nil, "no GetTime, no remaining time")
+    FS.Diagnostics.RunClassInspect()
+    assert(FS.Diagnostics.GetClassInspect().buffs.list[1].left == nil, "no GetTime, no remaining time")
 """)
 
 case("class_caps_hold", """
@@ -1314,8 +1314,8 @@ case("class_caps_hold", """
         CW.exists[u] = true
         CW.auras[u .. "|HELPFUL|PLAYER"] = party
     end
-    FS.Diagnostics.RunClassRecon()
-    local d = FS.Diagnostics.GetClassRecon()
+    FS.Diagnostics.RunClassInspect()
+    local d = FS.Diagnostics.GetClassInspect()
     assert(#d.buffs.list == 40 and d.buffs.capped == true and d.buffs.count == 40, #d.buffs.list)
     assert(#d.debuffs.list == 16 and d.debuffs.capped == true, #d.debuffs.list)
     for _, u in ipairs({ "party1", "party2", "party3", "party4" }) do
@@ -1330,7 +1330,7 @@ case("class_caps_hold", """
     local unranked = {}
     for i = 1, 100 do unranked[i] = { talentID = i, name = "U" .. i, rank = 0, maxRank = 5 } end
     ClassWorld({ talentInfo = { unranked, unranked, unranked } })
-    FS.Diagnostics.RunClassRecon()
+    FS.Diagnostics.RunClassInspect()
     assert(__talentCalls == 3 * 40, "scan cap per tab: " .. __talentCalls)
     local lines = Lines()
     assert(#lines < 60, "the chat output stays bounded: " .. #lines)
@@ -1343,8 +1343,8 @@ case("class_long_names_are_capped", """
     local FS = LoadDiag()
     CW.auras["player|HELPFUL"] = { { name = long, spellId = 1, duration = 1, sourceUnit = long, dispelName = long } }
     CW.tabs = { { long, "i", 1 } }
-    FS.Diagnostics.RunClassRecon()
-    local d = FS.Diagnostics.GetClassRecon()
+    FS.Diagnostics.RunClassInspect()
+    local d = FS.Diagnostics.GetClassInspect()
     assert(#d.buffs.list[1].name <= 60 and #d.buffs.list[1].sourceUnit <= 60 and #d.buffs.list[1].dispelName <= 60)
     assert(#d.talents.tabs[1].name <= 60)
 """)
@@ -1353,8 +1353,8 @@ case("class_other_non_plain_values_are_dropped", """
     local FS = LoadDiag()
     ClassWorld()
     CW.auras["player|HELPFUL"] = { { name = print, spellId = {}, duration = 0 / 0, expirationTime = 1 / 0 } }
-    FS.Diagnostics.RunClassRecon()
-    local b = FS.Diagnostics.GetClassRecon().buffs.list[1]
+    FS.Diagnostics.RunClassInspect()
+    local b = FS.Diagnostics.GetClassInspect().buffs.list[1]
     assert(b.name == nil and b.spellId == nil)
     assert(b.duration == "nan" and b.left == "nan", tostring(b.duration) .. " " .. tostring(b.left))
 """)
@@ -1365,14 +1365,14 @@ case("class_secrecy_api_falls_back_to_c_secrets_then_gives_up", """
     local fn = C_Spell.GetSpellAuraSecrecy
     C_Spell.GetSpellAuraSecrecy = nil
     C_Secrets = { GetSpellAuraSecrecy = fn }
-    FS.Diagnostics.RunClassRecon()
-    local d = FS.Diagnostics.GetClassRecon()
+    FS.Diagnostics.RunClassInspect()
+    local d = FS.Diagnostics.GetClassInspect()
     assert(d.spellApi.secrecy == "C_Secrets.GetSpellAuraSecrecy", d.spellApi.secrecy)
     assert(Spell(d, "Holy Light").secrecy == 0)
     C_Secrets = nil
     __printed = {}
-    FS.Diagnostics.RunClassRecon()
-    d = FS.Diagnostics.GetClassRecon()
+    FS.Diagnostics.RunClassInspect()
+    d = FS.Diagnostics.GetClassInspect()
     assert(d.spellApi.secrecy == "unavailable" and Spell(d, "Holy Light").secrecy == nil)
     assert(Has(Join(Lines()), "secrecy=unavailable"))
     for _, ln in ipairs(Lines()) do
@@ -1388,8 +1388,8 @@ case("class_spell_lookup_falls_back_to_the_legacy_getspellinfo", """
         local id = CW.spells[name]
         if id then return name, nil, 1, 0, 0, 0, id end
     end
-    FS.Diagnostics.RunClassRecon()
-    local d = FS.Diagnostics.GetClassRecon()
+    FS.Diagnostics.RunClassInspect()
+    local d = FS.Diagnostics.GetClassInspect()
     assert(d.spellApi.info == "GetSpellInfo", d.spellApi.info)
     assert(Spell(d, "Holy Light").id == 635 and Spell(d, "Holy Light").known == true)
     GetSpellInfo = nil
@@ -1399,24 +1399,24 @@ case("class_spell_lookup_falls_back_to_the_legacy_getspellinfo", """
 case("class_slash_is_routed_by_the_real_panelskins_dispatcher", """
     local FS = { Theme = {}, LogDegradeOnce = function() end }
     local called = 0
-    FS.Diagnostics = { RunClassRecon = function() called = called + 1 end }
+    FS.Diagnostics = { RunClassInspect = function() called = called + 1 end }
     local chunk = assert(loadstring(PANELSKINS_SRC, "@PanelSkins.lua"))
     chunk("forever-stuwave", FS)
-    assert(SLASH_FSRECON1 == "/fsrecon" and SlashCmdList.FSRECON)
-    SlashCmdList.FSRECON("class")
-    assert(called == 1, "plain class runs the recon")
-    SlashCmdList.FSRECON("class now")
+    assert(SLASH_FSINSPECT1 == "/fsinspect" and SlashCmdList.FSINSPECT)
+    SlashCmdList.FSINSPECT("class")
+    assert(called == 1, "plain class runs the inspect")
+    SlashCmdList.FSINSPECT("class now")
     assert(called == 2, "words after class are ignored like surname's")
-    SlashCmdList.FSRECON("classy")
+    SlashCmdList.FSINSPECT("classy")
     assert(called == 2, "a word merely starting with class is not the command")
     __printed = {}
-    SlashCmdList.FSRECON("nonsense")
-    local want = "Forever STUwave: /fsrecon skins | pos <frame> | threat [auto [N]|clear] | "
-        .. "pet [auto [N]|clear] | probe [stop] | surname | minimap [paint|spill|clear] | microbags | plateauras [arm|off] | class | all -- panel-skin idempotency readback | "
-        .. "frame position report | threat/role/reaction secret-value probe | pet Phase-0 probe | "
-        .. "name-API surname probe | Minimap/MinimapCluster geometry probe | "
-        .. "hidden native nameplate aura frame probe (not part of all; arm waits for combat, off disarms) | "
-        .. "class spell, form and aura recon (out of combat; not part of all; /fsbug includes it) | all -- run every probe"
+    SlashCmdList.FSINSPECT("nonsense")
+    local want = "Forever STUwave: /fsinspect skins | pos <frame> | threat [auto [N]|clear] | "
+        .. "pet [auto [N]|clear] | auras [stop] | surname | minimap [paint|spill|clear] | microbags | plateauras [arm|off] | class | all -- panel skin readout | "
+        .. "frame position | threat and reaction readout | pet readout | "
+        .. "name readout | Minimap and MinimapCluster geometry | "
+        .. "native nameplate aura frames (not part of all; arm waits for combat, off disarms) | "
+        .. "class spells, forms and auras (out of combat; not part of all; /fsbug includes it) | all -- run every readout"
     local got = Lines()
     assert(#got == 1 and got[1] == want, "usage text:\\n  got  " .. tostring(got[1]) .. "\\n  want " .. want)
 """)

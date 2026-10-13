@@ -233,7 +233,7 @@ function HasWandEquipped()
     if S_("wand") then return SB end
     return W.wand
 end
--- the probe saw IsSpellOverlayed answer a plain false
+-- the check saw IsSpellOverlayed answer a plain false
 C_SpellActivationOverlay = {}
 function C_SpellActivationOverlay.IsSpellOverlayed(id)
     if S_("overlay") then return SB end
@@ -1175,7 +1175,7 @@ check(P.cooldownReady("mind_blast") == true, "6s after the cast: ready under the
 
 case("combat_cooldown_plain_false_is_ready_even_when_the_ledger_says_down", "TESTPRIEST")(r"""
 local P = FS.Hud.Primitives
--- probe run 2: in combat isActive is a plain false for a spell that is not on cooldown
+-- check run 2: in combat isActive is a plain false for a spell that is not on cooldown
 W.cdTimingSecret = true; W.combat = true
 at(0); cast("Mind Blast")
 W.cd[10947] = { isActive = true }
@@ -1294,7 +1294,7 @@ check(P.cooldownReady("shadow_bolt") == true, "a plain isOnGCD is honoured")
 at(0); cast("Conflagrate"); at(1)
 W.cd[1293817] = { isActive = true, isOnGCD = true }        -- a real cooldown spell: only the GCD
 check(P.cooldownReady("conflagrate") == true, "isOnGCD true on a spell with a real cooldown: ready")
--- isOnGCD false says nothing about readiness (the probe saw false on idle spells): the ledger decides
+-- isOnGCD false says nothing about readiness (the check saw false on idle spells): the ledger decides
 W.cd[1293817] = { isActive = true, isOnGCD = false }
 check(P.cooldownReady("conflagrate") == false, "our cast 1s ago: down")
 at(12)
@@ -2244,7 +2244,7 @@ check(S().seal and S().seal.key == "sor", "a secret aura entry changes nothing")
 """)
 
 case("seal_zero_value_scan_reads_as_an_empty_list", "PALADIN")(r"""
--- Parker's live recon: a buffed player reads fine; a buffless one may return ZERO values at index 1,
+-- Parker's live inspect: a buffed player reads fine; a buffless one may return ZERO values at index 1,
 -- which for the seal (and only the seal) means 'no auras', so the seal rule can fire
 at(0)
 C_UnitAuras.GetAuraDataByIndex = function() end                    -- ZERO values, no throw
