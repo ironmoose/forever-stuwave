@@ -371,7 +371,8 @@ end
 -------------------------------------------------------------------------------
 
 local built, rect = false, nil
-local frame, box, events
+local frame, box, events, castEvents
+local active = false              -- shown (onShow ran, onHide has not): the full event set and the tick run
 local chips = {}
 local look                      -- mode -> colours, built once the theme exists
 local elapsed = 0
@@ -578,21 +579,33 @@ end
 -- Events
 -------------------------------------------------------------------------------
 
-local function OnCast(spellId)
+-- Records a cast of an imbue or of the shield in the data and says which it was ("imbue", "shield" or nil). It reads
+-- and paints nothing, so it is safe while the module is hidden.
+local function NoteCast(spellId)
     local id = PlainOf(spellId, "number")
-    if not id then return end
+    if not id then return nil end
     local name = SpellNameById(id)
-    if not name then return end
+    if not name then return nil end
     for _, def in ipairs(IMBUES) do
         if NameIs(name, def) then
             OnImbueCast(def)
-            ReadImbue()
-            Paint()
-            return
+            return "imbue"
         end
     end
     if NameIs(name, SHIELD) then
         OnShieldCast()
+        return "shield"
+    end
+    return nil
+end
+
+local function OnCast(spellId)
+    local kind = NoteCast(spellId)
+    if not active then return end           -- hidden: the next onShow reads the weapon and the auras fresh
+    if kind == "imbue" then
+        ReadImbue()
+        Paint()
+    elseif kind == "shield" then
         Paint()
     end
 end
@@ -601,16 +614,13 @@ local SPELLBOOK_EVENTS = {
     SPELLS_CHANGED = true, PLAYER_LEVEL_UP = true, LEARNED_SPELL_IN_SKILL_LINE = true, LEARNED_SPELL_IN_TAB = true,
 }
 
-local function OnEvent(_, event, unit, _, spellId)
-    if (event == "UNIT_INVENTORY_CHANGED" or event == "UNIT_AURA" or event == "UNIT_SPELLCAST_SUCCEEDED")
-        and not IsSecret(unit) and unit ~= "player" then
+local function OnEvent(_, event, unit)
+    if (event == "UNIT_INVENTORY_CHANGED" or event == "UNIT_AURA") and not IsSecret(unit) and unit ~= "player" then
         return
     end
     if event == "UNIT_AURA" then
         ReadShield()
         Paint()
-    elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
-        OnCast(spellId)
     elseif SPELLBOOK_EVENTS[event] then
         known = {}
         RefreshAll()
@@ -639,9 +649,22 @@ local function SetEvents(on)
     reg("UNIT_INVENTORY_CHANGED", true)
     reg("PLAYER_EQUIPMENT_CHANGED")
     reg("UNIT_AURA", true)
-    reg("UNIT_SPELLCAST_SUCCEEDED", true)
     for event in pairs(SPELLBOOK_EVENTS) do reg(event, false, true) end
     events:SetScript("OnEvent", on and function(...) Guard(OnEvent, ...) end or nil)
+end
+
+-- Casts are heard whether the module is shown or not: with no target the module is hidden, and an imbue or shield cast
+-- in that time is the normal flow. A missed cast would leave the imbue unnamed and the shield cast unknown.
+local function OnCastEvent(_, _, unit, _, spellId)
+    if not IsSecret(unit) and unit ~= "player" then return end
+    Guard(OnCast, spellId)
+end
+
+local function ListenForCasts()
+    castEvents = CreateFrame("Frame", nil, frame)
+    local ok, err = pcall(castEvents.RegisterUnitEvent, castEvents, "UNIT_SPELLCAST_SUCCEEDED", "player")
+    if not ok then LogOnce("event_cast", "UNIT_SPELLCAST_SUCCEEDED cannot be registered on this client (" .. tostring(err) .. ")") end
+    castEvents:SetScript("OnEvent", OnCastEvent)
 end
 
 -------------------------------------------------------------------------------
@@ -661,6 +684,7 @@ local function Build(host)
     if PlayerClass() ~= "SHAMAN" then return frame end
     box = CreateFrame("Frame", nil, frame)
     box:SetAllPoints(frame)
+    ListenForCasts()
     BuildLooks()
     chips.imbue, chips.shield = BuildChip("imbue"), BuildChip("shield")
     built = true
@@ -677,6 +701,7 @@ end
 
 local function OnShow()
     if not built then return end
+    active = true
     SetEvents(true)
     known = {}                              -- the spellbook may have changed while hidden
     elapsed = 0
@@ -691,6 +716,7 @@ end
 
 local function OnHide()
     if not built then return end
+    active = false
     SetEvents(false)
     frame:SetScript("OnUpdate", nil)
 end

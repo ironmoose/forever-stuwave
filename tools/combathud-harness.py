@@ -2886,12 +2886,13 @@ function gsBoot(o)
     __state = o.state
     -- The Class Module seam (FS.GunsightAreas, built in another lane): AreaOf("class") answers where the Class Module
     -- sits (nil: in neither area), OnAreaChanged keeps the callbacks. o.noAreas leaves the seam out entirely.
-    AREA_OF, AREA_CBS, AREA_CALLS = { class = o.area }, {}, { areaOf = 0 }
+    AREA_OF, AREA_CBS, AREA_CALLS, AREA_GATED = { class = o.area }, {}, { areaOf = 0 }, false
     if not o.noAreas then
         FS.GunsightAreas = {
-            AreaOf = function(id)
+            AreaOf = function(id, live)
                 AREA_CALLS.areaOf = AREA_CALLS.areaOf + 1
                 if o.areaThrows then error("boom: AreaOf") end
+                if live and AREA_GATED then return nil end   -- the real registry: nil while the target gate hides the host
                 return AREA_OF[id]
             end,
             OnAreaChanged = function(fn) AREA_CBS[#AREA_CBS + 1] = fn end,
@@ -2913,6 +2914,10 @@ end
 function setClassArea(area)
     AREA_OF.class = area
     for _, fn in ipairs(AREA_CBS) do fn("class", area) end
+end
+function setAreaGate(gated)
+    AREA_GATED = gated
+    for _, fn in ipairs(AREA_CBS) do fn() end
 end
 function sameRect(a, b, msg)
     local q = rect(b)
@@ -3113,6 +3118,20 @@ setClassArea("upper")
 check(not ui.shards._shown, "the module in an area hides the 0 as well")
 setClassArea(nil)
 check(ui.shards._shown and ui.shardNum._text == "0", "and it returns at 0 shards")
+check(degraded("combathud_render") == 0, "no render failure")
+""")
+
+gcase("gunsight_home_seat_returns_while_the_target_gate_hides_the_class_module", r"""
+-- No target hides the Class Module's host, so the count would be shown nowhere; the home seat takes it over for
+-- exactly that time and gives it back when the gate opens (the registry notifies on the gate edge).
+local ui = gsBoot({ state = nextState({ shards = 3 }), area = "lower" })
+check(not ui.shards._shown, "the module shows the count: the home seat is hidden")
+setAreaGate(true)
+check(ui.shards._shown and ui.shardNum._text == "3", "no target: the home seat shows the count")
+push(nextState({ shards = 5 }))
+check(ui.shards._shown and ui.shardNum._text == "5", "and follows new counts while gated")
+setAreaGate(false)
+check(not ui.shards._shown, "a target again: the module shows the count and the home seat hides")
 check(degraded("combathud_render") == 0, "no render failure")
 """)
 

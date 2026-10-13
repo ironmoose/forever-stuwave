@@ -186,16 +186,17 @@ restart, not /reload. If your Shaman has the Call of the Elements spell
 
 ## Shaman: imbue and shield chips
 
-Use a Shaman who knows Rockbiter Weapon and, from level 8, Lightning Shield. The Gunsight Class Module shows two small chips at its bottom edge: IMBUE on the left and SHIELD on the right. They live in the Class Module area beside the target cast bar (the lower area by default; `/fsconfig`, Gunsight HUD, picks it). Only the chips are drawn so far: the totem poles come later. This adds a new file, so do a FULL client restart, not /reload.
+Use a Shaman who knows Rockbiter Weapon and, from level 8, Lightning Shield. The Gunsight Class Module shows two small chips at its bottom edge: IMBUE on the left and SHIELD on the right. They live in the Class Module area beside the target cast bar (the lower area by default; `/fsconfig`, Gunsight HUD, picks it). Only the chips are drawn so far: the totem poles come later. Like the rest of the target side, the chips hide when you have no target, so target a hostile mob first for every step below (step 9 covers the no target case). This adds a new file, so do a FULL client restart, not /reload.
 
 1. With no imbue on your weapon the left chip is amber and says IMBUE. With no Lightning Shield the right chip is amber and says SHIELD. A spell you have not learned yet shows no chip at all, not an amber one.
-2. Cast Rockbiter Weapon on your weapon. The chip turns quiet gold, shows RB and the minutes left, for example 59m. Flametongue shows FT, Frostbrand FB and Windfury Weapon WF. The addon learns which letters go with which weapon enchant from your own casts, so after a restart an imbue you did not cast this session may show IM (or the one imbue you know) until you cast it once. Report any imbue that shows the wrong letters.
-3. Cast Lightning Shield. The right chip turns quiet gold, shows LS and the number of orbs left. Get hit: the number should go down, and the chip should go amber when the last orb is gone.
-4. Under five minutes left on the imbue, the chip and its time turn pink (the same pink as a buff about to expire). Under one minute the time counts in seconds. Let it run out: the chip turns amber and says IMBUE again.
-5. In combat: the imbue time should keep counting down and never show a wrong value. The shield count may show a "~" in front (an estimate, because the game hides auras in combat); it should be right again once the fight ends. A "?" means the chip has nothing to go on yet. Cast an imbue or the shield in the middle of a fight and check the chip updates at once. A shield cast in combat stops showing after its ten minutes if nothing confirms it, and the chip then asks for the shield again.
+2. With a hostile mob targeted, cast Rockbiter Weapon on your weapon. The chip turns quiet gold, shows RB and the minutes left, for example 59m. Flametongue shows FT, Frostbrand FB and Windfury Weapon WF. The addon learns which letters go with which weapon enchant from your own casts, so after a restart an imbue you did not cast this session may show IM (or the one imbue you know) until you cast it once. Report any imbue that shows the wrong letters.
+3. With a hostile mob targeted, cast Lightning Shield. The right chip turns quiet gold, shows LS and the number of orbs left. Get hit: the number should go down, and the chip should go amber when the last orb is gone.
+4. With a hostile mob targeted, under five minutes left on the imbue, the chip and its time turn pink (the same pink as a buff about to expire). Under one minute the time counts in seconds. Let it run out: the chip turns amber and says IMBUE again.
+5. In combat (with the mob targeted): the imbue time should keep counting down and never show a wrong value. The shield count may show a "~" in front (an estimate, because the game hides auras in combat); it should be right again once the fight ends. A "?" means the chip has nothing to go on yet. Cast an imbue or the shield in the middle of a fight and check the chip updates at once. A shield cast in combat stops showing after its ten minutes if nothing confirms it, and the chip then asks for the shield again.
 6. Dual wield (two weapons): with imbues on both, the chip shows the one with less time left. With an imbue on only one weapon while the other hand holds a weapon, the chip is amber IMBUE until both are imbued. A shield or an empty off hand never triggers it.
 7. With a Water Shield up instead of Lightning Shield, the right chip is not drawn (it does not nag).
-8. Type `/reload` out of combat: the chips should come back with the right time. Report with `/fsbug` if a chip is wrong, and say what was on your weapon.
+8. Type `/reload` out of combat, then target a hostile mob: the chips should come back with the right time. Report with `/fsbug` if a chip is wrong, and say what was on your weapon.
+9. No target: clear your target (Escape). Both chips disappear with the target box and cast bar; nothing is left floating beside your character. Now, with no target, cast Flametongue Weapon or Lightning Shield, then target a hostile mob: the chip should show FT (or LS) at once, not IMBUE or SHIELD, and the minutes should be right. Report it if a chip stays on screen with no target, or comes back wrong.
 
 ## Layout editor: /fsedit
 
@@ -254,7 +255,7 @@ Not yet checked in game. Mocked checks cover which module sits in which area, th
 2. Each area dropdown offers Target Debuffs Horizontal, Target Debuffs Vertical, Class Module, Empty, in that order. Pick Class Module for the upper area: the lower area takes Target Debuffs Horizontal at once (the swap), and both modules move on screen. Pick Target Debuffs Vertical for the lower area while the upper holds the Class Module: no swap, the lower area changes style.
 3. Pick Empty for an area: nothing draws there, no outline either (only `/fsgun outlines` outlines the areas). Both areas Empty with the tags off should look like the box did before this change.
 4. Switch "Target side areas" in the Pieces list off, or press the Console's key 6: both areas hide together. The key now shows for every class, including one with no class module yet (a Mage shows Target debuffs only).
-5. With no target, or a friendly or dead one, the Target Debuffs area is hidden; the Class Module stays. Retarget a hostile mob and it returns.
+5. With no target, or a friendly or dead one, the Target Debuffs area is hidden. With no target at all the Class Module hides too (its chips never float alone); a friendly or dead target keeps it. Retarget a hostile mob and everything returns.
 6. Switch profile, then `/reload`: both dropdowns and the modules in the areas hold per profile. Do it once in combat: the areas are plain frames and nothing is blocked.
 
 ### Target debuffs: rows, axis, time and stacks
@@ -270,8 +271,8 @@ Not yet checked in game. Mocked checks cover the layout, the time text, the comb
 
 Not yet checked in game. Mocked checks cover the layout and the events, not how it looks. Design: `mockups/gunsight-modules-concepts-v7-2026-10-08.html`, states A, B, D and F.
 
-1. Warlock: the Class Module area shows one shard glyph, the count and the caption SOUL SHARDS. At 0 shards the glyph is dim and the count reads 0. Create or delete a shard and the count follows.
-2. Warlock: with the Class Module in an area, the count under your cast bar is gone. Set both areas to Empty and the glyph and count return under your cast bar; at 0 shards they show a dim glyph and a muted 0.
+1. Warlock: target a hostile mob first (with no target the area hides and the shard count shows under your cast bar instead). The Class Module area then shows one shard glyph, the count and the caption SOUL SHARDS. At 0 shards the glyph is dim and the count reads 0. Create or delete a shard and the count follows.
+2. Warlock: with the Class Module in an area and a hostile mob targeted, the count under your cast bar is gone; clear your target and it comes back there. Set both areas to Empty and the glyph and count return under your cast bar; at 0 shards they show a dim glyph and a muted 0.
 3. Rogue: the Class Module area shows five yellow pips, the lit count and the caption COMBO POINTS. Build combo points on a hostile target and the pips and the count follow; with no target, or a friendly or dead one, the area stays empty. Report it if the pips never light (the combo events are unverified on this client).
 4. Druid: the same combo display appears in cat form only. Shift to caster or bear form and it clears; report it if it stays up or never appears in cat form (the form check reads the power type and is unverified on this client).
 5. Any other class: the Class Module draws nothing.

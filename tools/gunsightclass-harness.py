@@ -44,6 +44,7 @@ HERE = Path(__file__).resolve().parent
 ADDON = HERE.parent / "forever-stuwave"
 CLASS = Path(os.environ.get("GUNSIGHTCLASS_LUA") or ADDON / "Modules/CombatHud/GunsightClass.lua")
 GUNSIGHT = ADDON / "Modules/CombatHud/Gunsight.lua"
+AREAS = ADDON / "Modules/CombatHud/GunsightAreas.lua"
 COMBATHUD = ADDON / "Modules/CombatHud/CombatHud.lua"
 LAYOUT = ADDON / "Core/Layout.lua"
 CONFIG = ADDON / "Core/Config.lua"
@@ -214,6 +215,32 @@ do
         end
     end
 end
+-- The client stops delivering an event to a frame that unregistered it (or dropped its script) while the event is being
+-- dispatched; the shared mock builds its recipient list first. A module the registry hides from inside
+-- PLAYER_TARGET_CHANGED stops its own listener there, so skip a frame whose script is gone by its turn.
+do
+    function fire(event, ...)
+        local args, n = { ... }, select("#", ...)
+        local list = {}
+        for _, f in ipairs(FRAMES) do
+            local only = f.unitOnly and f.unitOnly[event]
+            local wanted = true
+            if only then
+                wanted = false
+                for _, u in ipairs(only) do if u == (...) then wanted = true end end
+            end
+            if wanted and f.events[event] and f.scripts.OnEvent then list[#list + 1] = f end
+        end
+        if event == "PLAYER_REGEN_DISABLED" then IN_REGEN_DISABLED = true end
+        local ok, err = pcall(function()
+            for _, f in ipairs(list) do
+                if f.events[event] and f.scripts.OnEvent then f.scripts.OnEvent(f, event, unpack(args, 1, n)) end
+            end
+        end)
+        IN_REGEN_DISABLED = false
+        if not ok then error(err, 0) end
+    end
+end
 -- SetFormattedText is a SINK: a secret reaches it (recorded), a plain value formats as usual.
 do
     local FrameMT = getmetatable(UIParent).__index
@@ -284,7 +311,13 @@ local function boot(opts)
     loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
     loadAddonFile(CONFIG_SRC, "Core/Config.lua")
     loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
-    fakeAreas()
+    if opts.realAreas then
+        -- the REAL registry, so the target side rules apply (no target hides the host and stops the module)
+        TARGET.exists = not opts.noTarget
+        loadAddonFile(AREAS_SRC, "Modules/CombatHud/GunsightAreas.lua")
+    else
+        fakeAreas()
+    end
     local class = opts.class or "WARLOCK"
     UnitClass = function() return "Class", opts.classToken ~= nil and opts.classToken or class end
     COMBO, COMBO_MAX, FORM_POWER, COMBO_ARGS = opts.combo or 0, opts.max or 5, opts.form or { 3, "ENERGY" }, {}
@@ -752,10 +785,66 @@ check(#tex == 0 and #txt == 0, "a dead target: nothing drawn")
 TARGET.dead = false
 fire("PLAYER_TARGET_CHANGED")
 check(textOf(host, "3") and #texWith(host, "\\hud_diamond.tga") == 5, "a hostile target again: drawn")
+-- the module itself does not gate on the target (the registry does, see the real areas cases below); it draws what the
+-- Hud says whenever it is mounted. CombatHud shows the count under the cast bar while the registry hides this module.
 boot({ class = "WARLOCK", state = shardState(3) })
 TARGET.exists = false
 local _, host2 = mount("lower")
-check(textOf(host2, "3") and #texWith(host2, "hud_shard_line.tga") == 1, "shards keep showing with no target")
+check(textOf(host2, "3") and #texWith(host2, "hud_shard_line.tga") == 1, "a mounted shard module draws the Hud's count")
+""")
+
+case("combo_module_rereads_a_frame_after_it_is_shown_by_a_target_change")(r"""
+-- The registry shows the module from inside the PLAYER_TARGET_CHANGED dispatch, when UnitPower still holds the old
+-- target's points; onShow reads once now and once more next frame.
+boot({ class = "ROGUE", combo = 0 })
+local spec, host = mount("lower")
+spec.onHide("lower")
+COMBO = 0                                  -- the stale answer during the dispatch
+spec.onShow("lower")
+check(not textOf(host, "4"), "the first read is the stale one")
+COMBO = 4                                  -- the new target's points arrive a frame later
+flushTimers()
+check(textOf(host, "4") and litCount(host) == 4, "the next frame's re-read draws them")
+""")
+
+case("real_areas_a_shard_module_hides_and_unsubscribes_with_no_target_and_returns_with_the_count")(r"""
+boot({ class = "WARLOCK", state = shardState(3), realAreas = true })
+local host = FS.GunsightAreas.Host("lower")
+local subs = #SUBS
+check(isVisible(host) and textOf(host, "3"), "with a target the count is drawn")
+TARGET.exists = false
+fire("PLAYER_TARGET_CHANGED")
+local tex, txt = drawn(host)
+check(not isVisible(host) and #tex == 0 and #txt == 0, "no target: nothing is visible")
+check(#SUBS == subs - 1, "and the module left the Hud subscription, got " .. #SUBS .. " from " .. subs)
+push(shardState(5))
+TARGET.exists = true
+fire("PLAYER_TARGET_CHANGED")
+check(isVisible(host) and textOf(host, "5") and not textOf(host, "3"), "a target: the current count, not the stale one")
+check(#SUBS == subs, "and it subscribes again")
+""")
+
+case("real_areas_a_combo_module_hides_with_no_target_and_rereads_when_it_returns")(r"""
+boot({ class = "ROGUE", combo = 3, realAreas = true })
+local host = FS.GunsightAreas.Host("lower")
+check(isVisible(host) and textOf(host, "3") and litCount(host) == 3, "with a target the pips are drawn")
+TARGET.exists = false
+fire("PLAYER_TARGET_CHANGED")
+local tex, txt = drawn(host)
+check(not isVisible(host) and #tex == 0 and #txt == 0, "no target: nothing is visible")
+local n = #COMBO_ARGS
+COMBO = 1
+fire("UNIT_POWER_UPDATE", "player", "COMBO_POINTS")
+check(#COMBO_ARGS == n, "a hidden module reads no power events")
+COMBO = 0
+TARGET.exists = true
+fire("PLAYER_TARGET_CHANGED")
+COMBO = 2                                  -- the new target's points land a frame later
+flushTimers()
+check(isVisible(host) and textOf(host, "2") and litCount(host) == 2, "a target again: the new target's count after the re-read")
+COMBO = 4
+fire("UNIT_POWER_UPDATE", "player", "COMBO_POINTS")
+check(textOf(host, "4"), "and the events follow again")
 """)
 
 case("druid_draws_combo_points_in_cat_form_only")(r"""
@@ -947,6 +1036,7 @@ def run_case(name: str, body: str, mu: dict, tn: dict) -> str | None:
     g.CONFIG_SRC = CONFIG.read_text(encoding="utf-8")
     g.GUNSIGHT_SRC = GUNSIGHT.read_text(encoding="utf-8")
     g.CLASS_SRC = CLASS.read_text(encoding="utf-8")
+    g.AREAS_SRC = AREAS.read_text(encoding="utf-8")
     g.DOTS_SRC = DOTS_HARNESS.DOTS.read_text(encoding="utf-8")
     g.HAS_TARGET_SRC = _load("gunsight-harness").theme_target_rule_lua()
     lua.execute("MU = " + lua_value(mu) + "\nTN = " + lua_value(tn))

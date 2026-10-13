@@ -1581,11 +1581,12 @@ local function SeatShardsGunsight(k)
 end
 
 -- True while the Class Module draws the count in an area; the seat under your cast bar then stays empty.
+-- The live answer: with no target the registry hides the Class Module's host, and the count comes back here.
 -- No seam, a failing or secret answer reads as "not in an area".
 local function ClassModuleShowsShards()
     local areas = FS.GunsightAreas
     if type(areas) ~= "table" or type(areas.AreaOf) ~= "function" then return false end
-    local ok, area = pcall(areas.AreaOf, "class")
+    local ok, area = pcall(areas.AreaOf, "class", true)
     return ok and not IsSecret(area) and type(area) == "string"
 end
 

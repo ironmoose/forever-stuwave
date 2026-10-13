@@ -397,6 +397,7 @@ local function OnShow()
     else
         SetComboEvents(true)
         RefreshCombo()
+        RereadNextFrame()           -- onShow runs inside the PLAYER_TARGET_CHANGED dispatch: UnitPower still holds the old target's points
     end
 end
 

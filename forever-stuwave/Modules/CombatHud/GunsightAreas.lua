@@ -4,8 +4,13 @@
 -- Modules register under "debuffsH", "debuffsV", "class" or "classSoon" (the class module is chosen by class token)
 -- and are built on first use. "classSoon" is the fallback for "class": the area shows it when the player's class has
 -- no class module, so a class that later registers one stops showing it with no further change. A Target Debuffs
--- host follows FS.TargetTakesDots, the coming soon plate follows FS.HasTarget (it sits on the target side, so it hides
--- with the target box and cast bar); a real class host stays up without a target and gates itself if it needs one.
+-- host follows FS.TargetTakesDots. VISIBILITY RULE: everything in these areas sits on the target side, so with no target
+-- it is hidden like the target box and cast bar. A class module (and the coming soon plate) follows FS.HasTarget: the
+-- host hides, and the module's onHide / onShow fire on that edge so it stops and restarts its events and OnUpdate (a
+-- hidden host alone would leave them running). FS.HasTarget reads a secret or unreadable answer as "has one". A Target
+-- Debuffs host hides on FS.TargetTakesDots with no hook, so the Hud ledger keeps running. A module that needs more
+-- (a combo module also wants a hostile target) gates itself inside its own frame. No module is exempt; there is no
+-- showWithoutTarget opt-in because no module has recorded approval to show with no target.
 
 local _, FS = ...
 
@@ -21,7 +26,7 @@ local ui, Point = Gunsight.ui, Gunsight.Point
 local PREFIX = "|cffff4488Forever STUwave|r: gunsight areas: "
 local MODULE_IDS = { debuffsH = true, debuffsV = true, class = true, classSoon = true }
 local GATED = { debuffsH = true, debuffsV = true }     -- hidden while FS.TargetTakesDots() is false
-local NEEDS_TARGET = { classSoon = true }                -- hidden while FS.HasTarget() is false
+local NEEDS_TARGET = { class = true, classSoon = true }  -- hidden while FS.HasTarget() is false; onShow / onHide fire on the edge
 local AREA_NAMES = { "upper", "lower" }
 
 local records = {}        -- id -> record, for debuffsH, debuffsV and classSoon
@@ -117,8 +122,17 @@ local function SeatAll()
     for _, record in ipairs(AllRecords()) do SeatRecord(record) end
 end
 
--- Runs on every target health event, so it allocates nothing.
+-- A target gated record's onShow / onHide follow the host (record.live), not the area: they fire when the host comes up
+-- or goes down, so a module with no target is stopped. Everything else fires them as it takes or leaves an area.
+local function RunHook(record, name, area)
+    local hook = record.spec[name]
+    if hook then Safe(name .. " " .. record.id, hook, area) end
+end
+
+-- Runs on every target health event, so it allocates nothing (until a hook fires). Returns true when a target gated
+-- record went up or down, so a listener that depends on "is the module on screen right now" can re-render.
 local function ApplyHosts()
+    local flipped = false
     for _, area in ipairs(AREA_NAMES) do
         local record = occupant[area]
         local want = record ~= nil and (not GATED[record.id] or TakesTarget()) and (not NEEDS_TARGET[record.id] or HasTarget())
@@ -126,7 +140,13 @@ local function ApplyHosts()
             hostOn[area] = want
             if want then hosts[area]:Show() else hosts[area]:Hide() end
         end
+        if record and NEEDS_TARGET[record.id] and record.live ~= want then
+            record.live = want
+            flipped = true
+            RunHook(record, want and "onShow" or "onHide", area)
+        end
     end
+    return flipped
 end
 
 local function HideRecord(record)
@@ -134,8 +154,8 @@ local function HideRecord(record)
     if not area then return end
     record.shown = nil
     occupant[area] = nil
-    local hook = record.spec.onHide
-    if hook then Safe("onHide " .. record.id, hook, area) end
+    if not NEEDS_TARGET[record.id] or record.live then RunHook(record, "onHide", area) end
+    record.live = nil
     if record.frame then record.frame:Hide() end
 end
 
@@ -155,8 +175,8 @@ local function ShowRecord(record, area)
     occupant[area] = record
     SeatRecord(record)
     record.frame:Show()
-    local hook = record.spec.onShow
-    if hook then Safe("onShow " .. record.id, hook, area) end
+    -- a target gated record starts from ApplyHosts, once its host is up
+    if NEEDS_TARGET[record.id] then record.live = false else RunHook(record, "onShow", area) end
 end
 
 -- Which module id each area shows. The lower area yields when both name one family (one frame per module).
@@ -189,9 +209,9 @@ local function Refresh(force)
     for _, record in ipairs(list) do
         if want[record] and record.shown ~= want[record] then ShowRecord(record, want[record]) end
     end
-    ApplyHosts()
+    local flipped = ApplyHosts()
     local snapshot = Snapshot()
-    if force or snapshot ~= lastSnapshot then
+    if force or flipped or snapshot ~= lastSnapshot then
         lastSnapshot = snapshot
         for _, fn in ipairs(changedCallbacks) do Safe("OnAreaChanged callback", fn) end
     end
@@ -236,14 +256,17 @@ function Areas.RegisterModule(id, spec)
 end
 
 -- "upper", "lower", or nil when the module is not shown (not in an area, the dot piece off, or no spec for
--- this class). A Target Debuffs host hidden for want of a target still reports its area.
-function Areas.AreaOf(id)
+-- this class). A host hidden for want of a target still reports its area, unless live is true: then the answer is nil
+-- while the host is hidden, for a caller that draws something else when the module is not on screen.
+function Areas.AreaOf(id, live)
     if not MODULE_IDS[id] then return nil end
     local record = RecordFor(id)
-    return record and record.shown or nil
+    local area = record and record.shown or nil
+    if live and area and not hostOn[area] then return nil end
+    return area
 end
 
--- fn() runs after an area assignment, a registration or the dot piece changes what an area shows.
+-- fn() runs after an area assignment, a registration, the dot piece, or a class host's target gate changes what an area shows.
 function Areas.OnAreaChanged(fn)
     if type(fn) == "function" then changedCallbacks[#changedCallbacks + 1] = fn end
 end
@@ -253,6 +276,13 @@ function Areas.Host(area)
 end
 
 Gunsight.OnAreaChanged(function() Refresh(true) end)
+
+-- A gate edge of a class host tells the listeners; Refresh does the same itself, so it calls ApplyHosts directly.
+local function OnTargetEvent()
+    if ApplyHosts() then
+        for _, fn in ipairs(changedCallbacks) do Safe("OnAreaChanged callback", fn) end
+    end
+end
 
 local function BuildFrames()
     pieceFrame = CreateFrame("Frame", "ForeverSTUwaveGunsightTargetSide", Gunsight.root)
@@ -269,12 +299,12 @@ local function BuildFrames()
     local events = CreateFrame("Frame", nil, pieceFrame)
     events:RegisterEvent("PLAYER_TARGET_CHANGED")
     events:RegisterEvent("PLAYER_ENTERING_WORLD")
-    events:SetScript("OnEvent", ApplyHosts)
+    events:SetScript("OnEvent", OnTargetEvent)
     local unitEvents = CreateFrame("Frame", nil, pieceFrame)
     for _, name in ipairs({ "UNIT_HEALTH", "UNIT_FLAGS", "UNIT_FACTION" }) do
         if unitEvents.RegisterUnitEvent then pcall(unitEvents.RegisterUnitEvent, unitEvents, name, "target") end
     end
-    unitEvents:SetScript("OnEvent", ApplyHosts)
+    unitEvents:SetScript("OnEvent", OnTargetEvent)
 end
 
 local function Build()

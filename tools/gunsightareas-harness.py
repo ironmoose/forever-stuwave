@@ -13,7 +13,8 @@ class modules plug into (mockups/gunsight-modules-concepts-v7-2026-10-08.html). 
     Empty draws nothing, the dot piece off hides both areas, two areas that name one family show it once;
   * the "classSoon" fallback: shown in an area set to the Class Module only when the player's class has no class
     module, retired by a later registration, never shown for an unreadable class token;
-  * the target gate: a Target Debuffs host follows FS.TargetTakesDots, the class host does not.
+  * the target gate: a Target Debuffs host follows FS.TargetTakesDots; a class module and the coming soon plate follow
+    FS.HasTarget (hidden with no target, onHide / onShow fired on each edge, all legal in combat).
 
 The mock is the Gunsight harness mock plus SetParent and RegisterUnitEvent. Theme is not loaded and
 FS.TargetTakesDots, UnitClass are stubs; the real Layout.lua, Config.lua, Gunsight.lua are loaded.
@@ -411,7 +412,7 @@ check(#dh.seated == n + 1 and #cl.seated >= 2, "seat is called again on a rescal
 check(dh.seated[#dh.seated].w == 202, "the rect stays in image px")
 """)
 
-case("the_debuffs_host_follows_the_target_gate_but_the_class_host_does_not")(r"""
+case("the_debuffs_host_and_the_class_host_both_follow_the_target_gate")(r"""
 local dh, cl = module("dh"), module("cl")
 cl.spec.classes = { "WARLOCK" }
 local Gs, Areas = boot({ before = function()
@@ -424,23 +425,26 @@ local hidesBefore = #dh.hides
 TARGET = false
 fire("PLAYER_TARGET_CHANGED")
 check(not up:IsShown(), "no attackable target hides the debuffs host")
-check(lo:IsShown(), "the class host is not gated by the target")
-check(Areas.AreaOf("debuffsH") == "upper", "AreaOf ignores the gate")
-check(#dh.hides == hidesBefore, "the gate is not onHide, so the Hud ledger keeps running")
+check(not lo:IsShown(), "no target hides the class host too")
+check(Areas.AreaOf("debuffsH") == "upper" and Areas.AreaOf("class") == "lower", "AreaOf ignores the gate")
+check(#dh.hides == hidesBefore, "the debuffs gate is not onHide, so the Hud ledger keeps running")
 TARGET = true
 fire("PLAYER_TARGET_CHANGED")
-check(up:IsShown(), "a target brings it back")
+check(up:IsShown() and lo:IsShown(), "a target brings both back")
 TARGET = false
 fire("UNIT_HEALTH", "target")
 check(not up:IsShown(), "a unit event for the target re-reads the gate")
 TARGET = true
 fire("PLAYER_ENTERING_WORLD")
 check(up:IsShown(), "entering the world re-reads the gate")
--- the gate follows the module, not the area: swap and the class host moves up, ungated
-TARGET = false
+-- the gate follows the module, not the area: swap, and with a target both hosts show again wherever they sit
+TARGET = true
 fire("PLAYER_TARGET_CHANGED")
 Gs.SetArea("upper", "class")
-check(up:IsShown() and not lo:IsShown(), "after a swap the gated host is the lower one")
+check(up:IsShown() and lo:IsShown() and Areas.AreaOf("class") == "upper", "after a swap both show with a target")
+TARGET = false
+fire("PLAYER_TARGET_CHANGED")
+check(not up:IsShown() and not lo:IsShown(), "and both hide again with none")
 """)
 
 case("the_dot_piece_registers_with_the_gunsight")(r"""
@@ -483,8 +487,95 @@ check(got >= 1, "the second listener still runs")
 """)
 
 
+case("a_class_module_hides_with_no_target_and_follows_it_with_its_hooks")(r"""
+-- the class area sits on the target side: no target hides the host AND the module (frame not visible), onHide stops its
+-- OnUpdate and events; a target brings it back and onShow restarts them. Legal in combat (plain frames).
+local cl = module("cl")
+cl.spec.classes = { "WARLOCK" }
+local Gs, Areas = boot({ before = function()
+    TARGET = false                                  -- boot starts with a target; this login has none
+    FS.GunsightAreas.RegisterModule("class", cl.spec)
+end })
+local lo = Areas.Host("lower")
+check(cl.built == 1, "the module is built")
+check(not lo:IsShown(), "no target at login: the class host is hidden")
+check(not cl.frame:IsVisible(), "and the module frame is not visible")
+check(#cl.shows == 0, "a module that never had a target never ran onShow, got " .. table.concat(cl.shows, ","))
+check(Areas.AreaOf("class") == "lower", "AreaOf ignores the gate")
+TARGET = true
+fire("PLAYER_TARGET_CHANGED")
+check(lo:IsShown() and cl.frame:IsVisible(), "a target shows host and module")
+check(table.concat(cl.shows, ",") == "lower" and #cl.hides == 0, "onShow(lower) once on the first target")
+fire("UNIT_HEALTH", "target")
+check(#cl.shows == 1, "a unit event with the same target does not re-fire onShow")
+TARGET = false
+fire("PLAYER_TARGET_CHANGED")
+check(not lo:IsShown() and not cl.frame:IsVisible(), "losing the target hides host and module")
+check(table.concat(cl.hides, ",") == "lower", "onHide(lower) fired on the edge")
+fire("UNIT_HEALTH", "target")
+check(#cl.hides == 1, "a unit event with no target does not re-fire onHide")
+-- same through the world and combat edges, and a move between areas while hidden
+IN_COMBAT = true
+TARGET = true
+fire("PLAYER_TARGET_CHANGED")
+check(lo:IsShown() and #cl.shows == 2, "target acquired in combat: shown, onShow again")
+TARGET = false
+fire("PLAYER_TARGET_CHANGED")
+check(not lo:IsShown() and #cl.hides == 2, "target lost in combat: hidden, onHide again")
+Gs.SetArea("upper", "class")
+check(Areas.AreaOf("class") == "upper" and not Areas.Host("upper"):IsShown() and #cl.hides == 2 and #cl.shows == 2,
+    "moved to the other area with no target: still hidden, no stray hooks")
+TARGET = true
+fire("PLAYER_TARGET_CHANGED")
+check(Areas.Host("upper"):IsShown() and cl.shows[#cl.shows] == "upper", "a target shows it in its new area")
+-- taking the module out of the area while it is up runs onHide once; while gated-hidden runs nothing more
+Gs.SetArea("upper", "empty")
+check(cl.hides[#cl.hides] == "upper" and #cl.hides == 3, "leaving the area while up fires onHide")
+check(#BLOCKED == 0, "nothing protected was touched in combat: " .. table.concat(BLOCKED, ","))
+IN_COMBAT = false
+""")
+
+case("a_class_module_taken_away_while_gated_hidden_runs_no_extra_onhide")(r"""
+local cl = module("cl")
+cl.spec.classes = { "WARLOCK" }
+local Gs, Areas = boot({ before = function() FS.GunsightAreas.RegisterModule("class", cl.spec) end })
+TARGET = false
+fire("PLAYER_TARGET_CHANGED")
+check(#cl.shows == 1 and #cl.hides == 1, "up once, down once")
+Gs.SetPiece("dot", false, true)
+check(#cl.hides == 1, "retiring a module that is already stopped does not stop it twice")
+Gs.SetPiece("dot", true, true)
+check(#cl.shows == 1 and not Areas.Host("lower"):IsShown(), "it returns hidden and not started while there is no target")
+TARGET = true
+fire("PLAYER_TARGET_CHANGED")
+check(#cl.shows == 2 and Areas.Host("lower"):IsShown(), "and starts when a target arrives")
+""")
+
+
+case("area_of_live_answers_nil_while_the_target_gate_hides_the_class_host_and_the_gate_edge_notifies")(r"""
+-- CombatHud keeps the Warlock cast bar shard count live with no target: it asks AreaOf("class", true), which is nil
+-- while the host is gated off, and it re-renders from OnAreaChanged, which must fire on the gate edge itself.
+local cl = module("cl")
+cl.spec.classes = { "WARLOCK" }
+local Gs, Areas = boot({ before = function() FS.GunsightAreas.RegisterModule("class", cl.spec) end })
+local calls = 0
+Areas.OnAreaChanged(function() calls = calls + 1 end)
+check(Areas.AreaOf("class", true) == "lower", "with a target the live answer is the area")
+TARGET = false
+fire("PLAYER_TARGET_CHANGED")
+check(calls == 1, "losing the target notifies the listeners once, got " .. calls)
+check(Areas.AreaOf("class") == "lower", "the plain answer ignores the gate")
+check(Areas.AreaOf("class", true) == nil, "the live answer is nil with no target")
+fire("UNIT_HEALTH", "target")
+fire("PLAYER_TARGET_CHANGED")
+check(calls == 1, "events that change nothing do not notify, got " .. calls)
+TARGET = true
+fire("PLAYER_TARGET_CHANGED")
+check(calls == 2 and Areas.AreaOf("class", true) == "lower", "a target notifies again and the live answer returns")
+""")
+
 case("the_coming_soon_plate_hides_with_no_target_and_returns_with_one")(r"""
--- the plate sits in a target side area, so it follows FS.HasTarget like the target box and tape; the real class host does not
+-- the plate sits in a target side area, so it follows FS.HasTarget like the target box and tape, as does the real class host
 local soon = module("soon")
 local Gs, Areas = boot({ class = "MAGE", before = function() FS.GunsightAreas.RegisterModule("classSoon", soon.spec) end })
 local lo = Areas.Host("lower")
@@ -494,7 +585,7 @@ TARGET = false
 fire("PLAYER_TARGET_CHANGED")
 check(not lo:IsShown(), "no target hides the plate host")
 check(Areas.AreaOf("classSoon") == "lower", "AreaOf still reports the area, like the debuffs gate")
-check(#soon.hides == hides, "the gate is not onHide")
+check(#soon.hides == hides + 1 and soon.hides[#soon.hides] == "lower", "the gate fires onHide for a target side plate too")
 TARGET = true
 fire("PLAYER_TARGET_CHANGED")
 check(lo:IsShown(), "acquiring a target brings the plate back")

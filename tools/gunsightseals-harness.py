@@ -53,6 +53,9 @@ TOC = ADDON / "forever-stuwave.toc"
 MOCKUP = ROOT / "mockups" / "gunsight-modules-concepts-v7-2026-10-08.html"
 MOCKUP_V2 = ROOT / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
 GUNSIGHT = ADDON / "Modules/CombatHud/Gunsight.lua"
+AREAS = ADDON / "Modules/CombatHud/GunsightAreas.lua"
+LAYOUT = ADDON / "Core/Layout.lua"
+CONFIG = ADDON / "Core/Config.lua"
 
 
 def _load(name: str, file: str):
@@ -319,6 +322,38 @@ local function boot(opts)
     return FS.GunsightSeals
 end
 
+-- The REAL Layout, Config, Gunsight and GunsightAreas around the real Seal module, for the target side rules
+-- (no target hides the host and stops the module). A target is the TARGET flag; the Hud is the stub.
+function bootReal()
+    resetWorld()
+    for i = #REGS, 1, -1 do REGS[i] = nil end
+    IN_COMBAT, AFFECTING, DEAD, HOST, CUR = false, nil, false, nil, "upper"
+    JUDGE_ANSWER = { remaining = 0 }
+    SECRET_FN = function(v) return rawequal(v, SECRET) end
+    SetScreen(1440)
+    ForeverSTUwaveDB = {}
+    FS.IsSecret = function(v) return SECRET_FN(v) end
+    UnitGUID = function() return "Creature-0-0-0-0-1-0000000001" end
+    UnitIsDead = function() return DEAD end
+    UnitClass = function() return "Paladin", "PALADIN" end
+    TARGET = true
+    function FS.HasTarget() return TARGET end
+    function FS.TargetTakesDots() return TARGET end
+    FS.HudSpells = { jd = { names = { "Judgement" }, ids = { 20271 } }, sor = { names = { "Seal of Righteousness" } } }
+    loadSpellTips(HELPERS_SRC)
+    stubTheme2_()
+    stubHud_()
+    FS.Hud.GetJudgement = function() return JUDGE_ANSWER end
+    for _, f in ipairs({ { LAYOUT_SRC, "Core/Layout.lua" }, { CONFIG_SRC, "Core/Config.lua" },
+        { GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua" }, { AREAS_SRC, "Modules/CombatHud/GunsightAreas.lua" } }) do
+        assert(loadstring(f[1], "@" .. f[2]))("forever-stuwave", FS)
+    end
+    assert(loadstring(SEALS_SRC, "@GunsightSeals.lua"))("forever-stuwave", FS)
+    fire("ADDON_LOADED", "forever-stuwave")
+    fire("PLAYER_LOGIN")
+    return FS.GunsightSeals, FS.GunsightAreas
+end
+
 -- What GunsightAreas does with a registered module: build into a host frame, seat in the area's rect, show.
 local function mount(area, opts)
     opts = opts or {}
@@ -474,6 +509,27 @@ for _, k in ipairs({ "build", "seat", "onShow", "onHide" }) do check(type(spec[k
 check(#FRAMES == 1 and FRAMES[1].name == "ForeverSTUwaveGunsight", "nothing is built at file load (only the Gunsight root exists)")
 check(#SUBS == 0, "nothing subscribed at file load")
 check(onUpdateFrames() == 0, "no ticker at file load")
+""")
+
+case("real_areas_the_seal_module_hides_and_unsubscribes_with_no_target_and_returns_current")(r"""
+-- Parker: "this happens every new module". The real registry gates the class host on the target; the Seal module must
+-- go quiet with it (no Hud subscription, no ticker, no target events) and come back painting the CURRENT state.
+local Seals, Areas = bootReal()
+STATE = sealAt("sor", 20)
+local host = Areas.Host("lower")
+check(Areas.AreaOf("class") == "lower", "the Paladin module sits in the lower area")
+check(host:IsShown() and #SUBS == 1, "with a target it is shown and subscribed")
+local P = Seals.parts
+check(isVisible(P.name), "and drawn")
+TARGET = false
+fire("PLAYER_TARGET_CHANGED")
+check(not isVisible(host) and not isVisible(P.name), "no target: host and module are not visible")
+check(#SUBS == 0 and onUpdateFrames() == 0, "and it left the Hud and stopped its ticker")
+push(sealAt("soc", 10))                      -- the seal changes while hidden: nobody is listening, nothing paints
+TARGET = true
+fire("PLAYER_TARGET_CHANGED")
+check(isVisible(host) and isVisible(P.name) and #SUBS == 1, "a target: shown and subscribed again")
+check(P.name.text == "COMMAND", "and it paints the current state, got " .. tostring(P.name.text))
 """)
 
 case("loads_silently_without_the_areas_registry")(r"""
@@ -1353,6 +1409,10 @@ def static_checks() -> list[tuple[str, str | None]]:
 def run_case(name: str, body: str, mu: dict) -> str | None:
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.globals().SEALS_SRC = SEALS.read_text(encoding="utf-8")
+    lua.globals().AREAS_SRC = AREAS.read_text(encoding="utf-8")
+    lua.globals().LAYOUT_SRC = LAYOUT.read_text(encoding="utf-8")
+    lua.globals().CONFIG_SRC = CONFIG.read_text(encoding="utf-8")
+    lua.globals().GUNSIGHT_SRC = GUNSIGHT.read_text(encoding="utf-8")
     lua.globals().HELPERS_SRC = tips.HELPERS.read_text(encoding="utf-8")
     lua.execute("MU = " + lua_value(mu))
     try:

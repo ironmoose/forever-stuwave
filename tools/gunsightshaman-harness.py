@@ -53,6 +53,7 @@ GUNSIGHT = ADDON / "Modules/CombatHud/Gunsight.lua"
 LAYOUT = ADDON / "Core/Layout.lua"
 CONFIG = ADDON / "Core/Config.lua"
 TOC = ADDON / "forever-stuwave.toc"
+AREAS = ADDON / "Modules/CombatHud/GunsightAreas.lua"
 MOCKUP = HERE.parent / "mockups" / "gunsight-class-module-shaman-2026-10-08.html"
 TEXTURES = ADDON / "Media" / "Textures"
 
@@ -237,7 +238,14 @@ local function boot(opts)
     loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
     loadAddonFile(CONFIG_SRC, "Core/Config.lua")
     loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
-    fakeAreas()
+    if opts.realAreas then
+        -- the REAL registry, so the target side rules apply: a target is a flag the case flips (UnitExists)
+        TARGET = { exists = not opts.noTarget }
+        UnitExists = function() return TARGET.exists end
+        loadAddonFile(AREAS_SRC, "Modules/CombatHud/GunsightAreas.lua")
+    else
+        fakeAreas()
+    end
     UnitClass = function() return "Shaman", opts.classToken ~= nil and opts.classToken or (opts.class or "SHAMAN") end
     KNOWN, WEAPON_CALLS, SNAP, FROZEN, BOOK_CALLS, INFO_CALLS, LEAKED = {}, 0, { buffs = {} }, false, 0, 0, {}
     EQUIP, LOC_OF = {}, {}
@@ -1127,6 +1135,79 @@ check(#tex == 0, "a secret class token draws nothing")
 """)
 
 
+# --------------------------------------------------------------------------------- the target side rule, with the real areas
+
+case("no_chip_is_drawn_with_no_target_and_the_module_stops_with_it")(r"""
+-- Parker, live: a Shaman with no target saw the IMBUE chip floating alone while the rest of the target side was hidden.
+-- The real GunsightAreas gates the class host on the target and calls onHide / onShow on that edge.
+boot({ realAreas = true })
+local Areas = FS.GunsightAreas
+local host = Areas.Host("lower")
+check(host ~= nil and Areas.AreaOf("class") == "lower", "the Shaman module sits in the lower area")
+local function chipsShown()
+    local n = 0
+    local tex, txt = drawn(host)
+    for _, t in ipairs(tex) do if t.path and t.path:find("slice_cut2_", 1, true) then n = n + 1 end end
+    return n + #txt
+end
+tick(1.5)
+check(chipsShown() > 0, "with a target the imbue chip is drawn")
+local reads = WEAPON_CALLS
+TARGET.exists = false
+fire("PLAYER_TARGET_CHANGED")
+check(not isVisible(host), "no target: the class host is not visible")
+check(chipsShown() == 0, "no target: no chip texture or text is visible, got " .. chipsShown())
+tick(5)
+fire("UNIT_INVENTORY_CHANGED", "player")
+check(WEAPON_CALLS == reads, "no target: the module stopped reading, got " .. (WEAPON_CALLS - reads) .. " reads")
+TARGET.exists = true
+fire("PLAYER_TARGET_CHANGED")
+check(isVisible(host) and chipsShown() > 0, "a target brings the chips back")
+check(WEAPON_CALLS > reads, "and the module reads again at once")
+noDegrade()
+""")
+
+case("an_imbue_cast_with_no_target_is_remembered_when_a_target_brings_the_chip_back")(r"""
+-- The normal flow: buff up before the pull. With no target the module is hidden and its full event set is off, but the
+-- cast is still heard, so the imbue is named by it (and taught) when the chip returns.
+boot({ realAreas = true, noTarget = true, learned = { "Flametongue Weapon" } })
+local host = FS.GunsightAreas.Host("lower")
+setWeapon(true, 59 * MIN * 1000, 33)       -- 33: an enchant id nobody taught yet
+local reads = WEAPON_CALLS
+cast(8024)                                 -- Flametongue, hidden
+cast(324)                                  -- and the shield
+check(WEAPON_CALLS == reads, "a hidden cast reads nothing, got " .. (WEAPON_CALLS - reads) .. " reads")
+TARGET.exists = true
+fire("PLAYER_TARGET_CHANGED")
+check(isVisible(host), "the target brings the host back")
+check(codeOf(host) == "FT", "the imbue cast with no target names it, got " .. codeOf(host))
+check(wordOf(host) ~= "IMBUE", "and it is not asked for again, got " .. wordOf(host))
+TARGET.exists = false
+fire("PLAYER_TARGET_CHANGED")
+setWeapon(false); tick(2)
+setWeapon(true, 40 * MIN * 1000, 33)       -- later, no cast seen: id 33 was taught as Flametongue
+TARGET.exists = true
+fire("PLAYER_TARGET_CHANGED")
+check(codeOf(host) == "FT", "the id was taught by the hidden cast, got " .. codeOf(host))
+noDegrade()
+""")
+
+case("the_shaman_chip_stays_hidden_when_it_is_built_with_no_target")(r"""
+boot({ realAreas = true, noTarget = true })
+local host = FS.GunsightAreas.Host("lower")
+tick(3)
+local tex, txt = drawn(host)
+check(#tex == 0 and #txt == 0, "nothing drawn with no target, got " .. #tex .. " textures and " .. #txt .. " strings")
+local reads = WEAPON_CALLS
+tick(5)
+check(WEAPON_CALLS == reads, "and the module never started reading")
+TARGET.exists = true
+fire("PLAYER_TARGET_CHANGED")
+tex, txt = drawn(host)
+check(#tex > 0 and #txt > 0, "a target brings the chips")
+""")
+
+
 def static_checks() -> list[tuple[str, str | None]]:
     out: list[tuple[str, str | None]] = []
     toc = [ln.strip() for ln in TOC.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")]
@@ -1154,6 +1235,7 @@ def run_case(name: str, body: str, mu: dict) -> str | None:
     g.CONFIG_SRC = CONFIG.read_text(encoding="utf-8")
     g.GUNSIGHT_SRC = GUNSIGHT.read_text(encoding="utf-8")
     g.SHAMAN_SRC = SHAMAN.read_text(encoding="utf-8")
+    g.AREAS_SRC = AREAS.read_text(encoding="utf-8")
     g.HAS_TARGET_SRC = _load("gunsight-harness").theme_target_rule_lua()
     lua.execute("MU = " + lua_value(mu))
     try:
