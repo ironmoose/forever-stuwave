@@ -242,7 +242,6 @@ globals = {
     "SlashCmdList",
     "ForeverSTUwaveDB",
     "ForeverSTUwaveErrorLog",
-    "ForeverSTUwaveSnippet",
     "ForeverSTUwaveMemDiag",
     "ForeverSTUwaveScaleDiag",
     "ForeverSTUwaveShownFrames",
