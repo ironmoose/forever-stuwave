@@ -38,12 +38,20 @@
 --     from the slot (SendPick); a pick that has not shown in the slot a second later, or whose call raised twice, is
 --     abandoned and its element falls back to SPELL mode. The button icon and tooltip always show what the slot (or the spell attribute)
 --     will really drop, never a pick that did not land.
+--   * SHIFT-RIGHT CLICK on an element dismisses ALL totems: shift-type2 = macro on the element button, whose macro
+--     text clicks FSTotemDestroy1..4, four hidden secure buttons (SecureActionButtonTemplate, type destroytotem,
+--     totem-slot 1..4) that carry no other attribute but useOnKeyDown = false (see Build). They are built with the tab and written once, out of combat.
+--     Modifier prefixes are read from the keys held (SecureButton_GetModifierPrefix), so the held Shift looks
+--     for shift-prefixed attributes on those buttons and falls back to the bare totem-slot. Not checked in game:
+--     that /click reaches buttons whose host is the (shown) tab and that the C side answers a bare attribute
+--     under Shift.
 --   * SET DROP is Call of the Elements (66842), with Call of the Ancestors (66843) on shift once known. RECALL is
 --     Totemic Recall (36936). Both are plain type "spell" and locked until known.
 --   * LOCKED: an element with no known totem, and a Set drop or Recall not yet learned, carry NO castable
 --     attribute, show the dotted mold and their unlock level, and dim by alpha. They are never hidden: Show and
 --     Hide on a secure button are refused in combat.
---   * PICKING: a small arrow tab on each element button, or an Alt-click, opens a plain frame (not secure, parented
+--   * PICKING: a small arrow tab on each element button (up only while the cursor is over the button or the arrow,
+--     inside the tab's outline, hit area the glyph plus a 6 px margin, 3 px into the face at most), or an Alt-click, opens a plain frame (not secure, parented
 --     to UIParent; nothing secure is its child or anchor target) listing the known totems. A click stores the
 --     pick per character (ForeverSTUwaveDB.totemPicks[guid]) and, in action mode, calls SetMultiCastSpell out of
 --     combat (queued for regen in combat). The saved pick is written ONLY by an explicit user pick or by adopting
@@ -81,6 +89,9 @@ local TB = {
     MC_SET = 1,                 -- the multi-cast page Call of the Elements drops
     MAX_ENTRIES = 6,            -- picker rows (an element holds at most 5 totems by level 30)
     ENTRY_W = 168, ENTRY_H = 24, PICKER_PAD = 4, PICKER_RISE = 8,
+    -- the arrow's hit area: the glyph plus 6 on each side, standing mostly in the tab's 6 px strip over the button
+    -- (its top is ARROW_RISE over the button face, 0.5 under the tab's top outline) and 3 into the face at most
+    ARROW_W = 28, ARROW_H = 8.5, ARROW_RISE = 5.5,
     PICKER_IDLE = 0.6,          -- seconds with the mouse away before the picker closes itself
     -- Append only, never reorder: the index is the saved keybind.
     BUTTONS = {
@@ -120,7 +131,12 @@ local TB = {
     MAX_ATTEMPTS = 2,           -- SetMultiCastSpell calls that may raise before the element falls back to SPELL mode
     -- every attribute this tab writes, cleared together when a button locks
     ATTRS = { "type", "spell", "type1", "action1", "spell1", "type2", "totem-slot2", "alt-type1",
-        "alt-shift-type1", "alt-ctrl-type1", "alt-ctrl-shift-type1", "shift-type1", "shift-spell1" },
+        "alt-shift-type1", "alt-ctrl-type1", "alt-ctrl-shift-type1", "shift-type1", "shift-spell1",
+        "shift-type2", "shift-macrotext2" },
+    -- Shift-right click on an element dismisses every totem: a macro that clicks four hidden secure buttons
+    -- (FSTotemDestroy1..4, type destroytotem, totem-slot 1..4). /click presses LeftButton, the buttons carry no
+    -- modifier-prefixed attribute and the bare totem-slot answers whatever modifier is held.
+    DESTROY_ALL = "/click FSTotemDestroy1\n/click FSTotemDestroy2\n/click FSTotemDestroy3\n/click FSTotemDestroy4",
     EVENTS = { "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD" },
     -- state-only events: texture and Cooldown writes, legal in combat
     LIVE_EVENTS = { "SPELL_UPDATE_COOLDOWN", "PLAYER_TOTEM_UPDATE", "ACTIONBAR_SLOT_CHANGED" },
@@ -129,6 +145,7 @@ local TB = {
     host = nil,
     list = {},          -- the six buttons, by index
     byKey = {},         -- and by key
+    destroy = {},       -- the four hidden dismiss buttons, by totem slot
     picker = nil,
     pending = {},       -- key -> { id, sent, at, ignore }: a multi-cast pick not in the slot yet (sent = the call ran,
                         -- at = when; ignore = slot contents that are not a native change)
@@ -489,7 +506,7 @@ local function ShowTooltip(self)
         local pick = self.fsPick
         local name = pick and pick.name ~= "" and pick.name or (def.title .. " totem")
         tip:AddLine(def.title .. " totem: " .. name, c[1], c[2], c[3])
-        tip:AddLine("Left click: drop " .. name .. ". Right click: dismiss. Alt-click or arrow: change totem.",
+        tip:AddLine("Left click: drop " .. name .. ". Right click: dismiss. Shift-right click: dismiss all. Alt-click or arrow: change totem.",
             1, 1, 1, true)
     else
         if self.fsSpellID and tip.SetSpellByID then
@@ -519,6 +536,32 @@ local function OnArrowClick(self)
     TotemBar.TogglePicker(self.fsKey)
 end
 
+-- The arrow is up only while the cursor is over its element button or over the arrow itself, like Blizzard's own
+-- flyout arrow. IsMouseOver is the cursor's position against each frame's rect, so crossing from the button onto
+-- the arrow (the button's OnLeave fires first) never drops it. The arrow is a plain frame: Show and Hide on it are
+-- legal in combat even though its parent is a secure button.
+local function ShowArrow(button)
+    local arrow = button.fsArrow
+    if arrow and not button.fsLocked then arrow:Show() end
+end
+
+local function HideArrowIfAway(button)
+    local arrow = button.fsArrow
+    if arrow and arrow:IsShown() and not (button:IsMouseOver() or arrow:IsMouseOver()) then arrow:Hide() end
+end
+
+local function OnButtonEnter(self)
+    ShowArrow(self)
+end
+
+local function OnButtonLeave(self)
+    HideArrowIfAway(self)
+end
+
+local function OnButtonHide(self)
+    if self.fsArrow then self.fsArrow:Hide() end
+end
+
 local function OnButtonClick(self, mouseButton, down)
     if down or mouseButton ~= "LeftButton" or not self.fsDef.slot then return end
     if IsAltKeyDown and IsAltKeyDown() then TotemBar.TogglePicker(self.fsKey) end
@@ -541,6 +584,9 @@ local function StyleButton(button, size, scale)
         button:HookScript("OnEnter", ShowTooltip)
         button:HookScript("OnLeave", HideTooltip)
         button:HookScript("OnClick", OnButtonClick)
+        button:HookScript("OnEnter", OnButtonEnter)
+        button:HookScript("OnLeave", OnButtonLeave)
+        button:HookScript("OnHide", OnButtonHide)
     end
 
     if not button.icon then
@@ -627,26 +673,39 @@ local function StyleButton(button, size, scale)
         button.fsLockText = text
     end
 
-    -- the arrow tab: a plain Button, so a click on it never reaches the secure action underneath
+    -- the arrow tab: a plain Button, so a click on it never reaches the secure action underneath. The Button is the
+    -- HIT AREA and it is small on purpose: 28 x 8.5 design px, the 16 x 8 chevron plus a 6 px margin each side,
+    -- standing in the tab's 6 px strip over the button and reaching 3 px into the face. Everything below that stays
+    -- the button's own (drop, dismiss, shift and its tooltip). Both stay inside the tab, 0.5 under its top outline.
     if def.slot and not button.fsArrow then
         local arrow = CreateFrame("Button", nil, button)
         arrow.fsKey = def.key
+        arrow.fsButton = button
         arrow:RegisterForClicks("LeftButtonUp")
         local tex = arrow:CreateTexture(nil, "OVERLAY")
         tex:SetTexture(MEDIA .. "cast_chevron_up_fill.tga")
         tex:SetVertexColor(button.fsColor[1], button.fsColor[2], button.fsColor[3], 0.85)
-        tex:SetAllPoints(arrow)
         arrow.fsTex = tex
         arrow:SetScript("OnClick", OnArrowClick)
         arrow:SetScript("OnEnter", function(self) self.fsTex:SetAlpha(1) end)
-        arrow:SetScript("OnLeave", function(self) self.fsTex:SetAlpha(0.85) end)
+        arrow:SetScript("OnLeave", function(self)
+            self.fsTex:SetAlpha(0.85)
+            HideArrowIfAway(self.fsButton)
+        end)
+        -- a missed OnLeave (the cursor warped, the frame hidden under it) must not leave the arrow standing
+        arrow:SetScript("OnUpdate", function(self) HideArrowIfAway(self.fsButton) end)
+        arrow:Hide()
         button.fsArrow = arrow
     end
     if button.fsArrow then
-        button.fsArrow:SetSize(16 * scale, 8 * scale)
-        button.fsArrow:ClearAllPoints()
-        button.fsArrow:SetPoint("BOTTOM", button, "TOP", 0, -1 * scale)
-        button.fsArrow:SetFrameLevel(textHost:GetFrameLevel() + 1)
+        local arrow = button.fsArrow
+        arrow:SetSize(TB.ARROW_W * scale, TB.ARROW_H * scale)
+        arrow:ClearAllPoints()
+        arrow:SetPoint("TOP", button, "TOP", 0, TB.ARROW_RISE * scale)
+        arrow:SetFrameLevel(textHost:GetFrameLevel() + 1)
+        arrow.fsTex:SetSize(16 * scale, 8 * scale)
+        arrow.fsTex:ClearAllPoints()
+        arrow.fsTex:SetPoint("CENTER", arrow, "CENTER", 0, 0)
     end
 end
 
@@ -798,7 +857,7 @@ local function Lock(button)
     if button.fsUnderline then button.fsUnderline:Hide() end
     if button.fsArrow then
         button.fsArrow:EnableMouse(false)
-        button.fsArrow:SetAlpha(0)
+        button.fsArrow:Hide()
     end
     UpdateCooldown(button)
     UpdateTotemSweep(button)
@@ -812,7 +871,8 @@ local function Unlock(button)
     if button.fsUnderline then button.fsUnderline:Show() end
     if button.fsArrow then
         button.fsArrow:EnableMouse(true)
-        button.fsArrow:SetAlpha(1)
+        -- up only if the cursor is already on the button when it unlocks
+        if button:IsMouseOver() then button.fsArrow:Show() end
     end
 end
 
@@ -901,6 +961,8 @@ local function ApplyElement(button, def)
         button:SetAttribute("spell1", mode == "spell" and pick.name or nil)
         button:SetAttribute("type2", "destroytotem")
         button:SetAttribute("totem-slot2", def.slot)
+        button:SetAttribute("shift-type2", "macro")
+        button:SetAttribute("shift-macrotext2", TB.DESTROY_ALL)
         -- Alt-click opens the picker; an empty type means it does not also drop the totem
         for _, name in ipairs(TB.ALT_NOOPS) do button:SetAttribute(name, ATTRIBUTE_NOOP) end
         button.fsAttrKey = key
@@ -1339,6 +1401,24 @@ local function Build()
     TB.host = CreateFrame("Frame", "FSTotemBar", UIParent)
     TB.host:SetFrameStrata("LOW")
     TB.host:Hide()
+    -- the four hidden buttons Shift-right click clicks: type and totem-slot, nothing else, written once here
+    -- (out of combat: Build never runs in combat), no mouse, 1 x 1, no regions
+    for slot = 1, 4 do
+        if not TB.destroy[slot] then
+            local hidden = CreateFrame("Button", "FSTotemDestroy" .. slot, TB.host, "SecureActionButtonTemplate")
+            hidden:RegisterForClicks("AnyUp", "AnyDown")
+            hidden:SetSize(1, 1)
+            hidden:SetPoint("BOTTOMLEFT", TB.host, "BOTTOMLEFT", 0, 0)
+            hidden:EnableMouse(false)
+            hidden:SetAttribute("type", "destroytotem")
+            hidden:SetAttribute("totem-slot", slot)
+            -- a macro /click sends down=false, and with the ActionButtonUseKeyDown CVar on
+            -- SecureActionButton_OnClick would ignore that up-click (clickAction = down and useOnKeyDown, or not
+            -- down and not useOnKeyDown). False here makes the up-click the one that counts, whatever the CVar says.
+            hidden:SetAttribute("useOnKeyDown", false)
+            TB.destroy[slot] = hidden
+        end
+    end
     for i, def in ipairs(TB.BUTTONS) do
         local button = TB.list[i]
         if not button then

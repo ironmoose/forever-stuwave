@@ -158,10 +158,17 @@ restart, not /reload. If your Shaman has the Call of the Elements spell
    20) and are dimmed. The tab should look like part of the Console, with no
    seam. Ghost Wolf is still on the stance bar.
 2. Left click an element button: it drops the totem shown on the button. Right
-   click it: the totem goes away at once. Hover for the reminder text.
-3. Change totem: click the small arrow above the button, or Alt-click the
-   button (Alt-click must NOT drop a totem). A list of the totems you know for
-   that element appears. Click one: the button now shows it and drops it. Try
+   click it: that element's totem goes away at once. Shift-right click any
+   element button: ALL your totems go away at once (try it in combat too).
+   Hover for the reminder text, which mentions this.
+3. Change totem: move the cursor onto an element button and a small arrow
+   appears at its top edge, fully inside the tab; it goes away when the cursor
+   leaves the button and the arrow (it must not flicker as you move from the
+   button onto it, and its click area is a little wider than the arrow).
+   Clicking anywhere lower on the button face must still drop, dismiss or show
+   the tooltip, never open the list. Click the arrow, or Alt-click the button
+   (Alt-click must NOT drop a totem). A list of the totems you know for that
+   element appears. Click one: the button now shows it and drops it. Try
    it in combat too: a pick made in combat is applied when the fight ends, and
    the button keeps showing the old totem until then. Alt-modified keybinds on
    the totem buttons (Alt, Alt+Shift, Alt+Ctrl) open this list instead of
@@ -171,8 +178,12 @@ restart, not /reload. If your Shaman has the Call of the Elements spell
    button casts the totem by name, a pick only takes effect out of combat, and
    no chat line is expected. Learning Call of the Elements, or a new totem,
    makes the tab try the totem bar once.
-4. Log out and in: each element remembers its totem. If you also use the
-   stock Totem Bar, a pick made there shows up on the tab.
+4. Log out and in: each element remembers its totem. Blizzard's own Totem Bar
+   no longer shows: no floating totem button over the Console's third row and
+   no yellow flyout arrow on hover, at level 4 or after learning Call of the
+   Elements or a level. A pick made by Blizzard's own logic (for example when
+   you learn a new totem) still reaches the tab. /fsbars blizz brings Blizzard's
+   bars back, /fsbars fs hides them again.
 5. Set drop (Call of the Elements, level 20): drops your set. At level 30,
    Shift-click drops the Call of the Ancestors set. Recall (level 20) takes
    your totems back.

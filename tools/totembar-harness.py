@@ -277,6 +277,21 @@ def click(lua, b, button="LeftButton", down=False):
     lua.eval("__Region.Fire")(b, "OnClick", button, down)
 
 
+def fire_script(lua, frame, script, *args):
+    lua.eval("__Region.Fire")(frame, script, *args)
+
+
+def over(frame, value: bool):
+    """Where the cursor is, as IsMouseOver answers it (the mock has no geometry of its own)."""
+    frame._mouseOver = value
+
+
+def enter(lua, b):
+    """The cursor moves onto an element button."""
+    over(b, True)
+    fire_script(lua, b, "OnEnter")
+
+
 def seq(table) -> list:
     return csh.seq(table)
 
@@ -651,6 +666,7 @@ def check_the_arrow_and_alt_click_open_the_picker_and_alt_does_not_drop():
     b = by_key(lua, "earth")
     assert b.fsArrow is not None and b.fsArrow._kind == "Button"
     assert tb(lua).Picker() is None or not shown(tb(lua).Picker())
+    enter(lua, b)
     click(lua, b.fsArrow)
     picker = tb(lua).Picker()
     assert picker is not None and shown(picker), "the arrow did not open the picker"
@@ -672,6 +688,171 @@ def check_the_arrow_and_alt_click_open_the_picker_and_alt_does_not_drop():
     assert not by_key(lua, "fire").fsArrow._mouse, "a locked element's arrow takes the mouse"
 
 
+def check_the_arrow_shows_only_while_the_cursor_is_over_the_button_or_the_arrow():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"))
+    b = by_key(lua, "earth")
+    a = b.fsArrow
+    assert not shown(a), "the arrow is up at rest"
+    enter(lua, b)
+    assert shown(a), "the arrow did not appear on mouse over"
+    # the cursor crosses onto the arrow: the button's OnLeave fires first, the arrow is already under the cursor
+    over(a, True)
+    fire_script(lua, b, "OnLeave")
+    assert shown(a), "the arrow flickered out crossing from the button onto it"
+    fire_script(lua, a, "OnEnter")
+    assert shown(a)
+    # and back onto the button face below the arrow
+    over(a, False)
+    fire_script(lua, a, "OnLeave")
+    assert shown(a), "the arrow left while the cursor was still over the button"
+    fire_script(lua, b, "OnEnter")
+    # off both: gone
+    over(b, False)
+    fire_script(lua, b, "OnLeave")
+    assert not shown(a), "the arrow stayed after the cursor left the button"
+    # off the arrow upwards (never over the button)
+    enter(lua, b)
+    over(a, True)
+    over(b, False)
+    fire_script(lua, b, "OnLeave")
+    assert shown(a)
+    over(a, False)
+    fire_script(lua, a, "OnLeave")
+    assert not shown(a), "the arrow stayed after the cursor left it"
+    # a missed OnLeave (the button hidden or the cursor warped) is caught by the arrow's own poll
+    enter(lua, b)
+    assert shown(a)
+    over(b, False)
+    fire_script(lua, a, "OnUpdate", 0.016)
+    assert not shown(a), "the poll did not hide an arrow with the cursor nowhere near"
+    enter(lua, b)
+    fire_script(lua, a, "OnUpdate", 0.016)
+    assert shown(a), "the poll hid an arrow with the cursor on the button"
+    # hiding the button takes the arrow with it
+    fire_script(lua, b, "OnHide")
+    assert not shown(a)
+
+
+def check_a_locked_button_never_shows_an_arrow():
+    lua = boot()
+    b = by_key(lua, "fire")
+    assert b.fsLocked
+    enter(lua, b)
+    assert not shown(b.fsArrow), "a locked element's arrow appeared"
+    # learning the totem unlocks it: still hidden until the cursor comes
+    lua2 = boot(learned=TOTEMS["fire"], lists=lists_for("fire"))
+    f2 = by_key(lua2, "fire")
+    assert not f2.fsLocked and not shown(f2.fsArrow) and f2.fsArrow._mouse
+    # a button that unlocks under a cursor already on it brings the arrow up at once
+    lua3 = boot()
+    f3 = by_key(lua3, "earth")
+    over(f3, True)
+    lua3.execute('__know("Stoneskin Totem")')
+    fire(lua3, "LEARNED_SPELL_IN_TAB")
+    assert not f3.fsLocked and shown(f3.fsArrow), "the unlocked button under the cursor has no arrow"
+
+
+def check_the_arrow_shows_and_hides_in_combat_without_a_protected_touch():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"))
+    b = by_key(lua, "earth")
+    a = b.fsArrow
+    assert not a._protected and not a._secure, "the arrow is a protected frame"
+    set_combat(lua, True)
+    before = (blocked(lua), int(lua.eval("__protectedTouch")))
+    enter(lua, b)
+    assert shown(a), "the arrow did not show in combat"
+    over(b, False)
+    fire_script(lua, b, "OnLeave")
+    assert not shown(a), "the arrow did not hide in combat"
+    enter(lua, b)
+    over(b, False)
+    fire_script(lua, a, "OnUpdate", 0.016)
+    assert not shown(a)
+    after = (blocked(lua), int(lua.eval("__protectedTouch")))
+    assert before == after, f"protected operations in combat: {before} -> {after}"
+
+
+def _rect(parent_rect, frame, rel_rect):
+    """Rect (l, b, r, t) of `frame`, anchored by one point to a rect, in the parent's coordinates."""
+    p = frame._points[1]
+    w, h = float(frame._w), float(frame._h)
+    rl, rb, rr, rt = rel_rect
+    fx = {"TOP": 0.5, "CENTER": 0.5, "BOTTOM": 0.5}[p.relPoint]
+    fy = {"TOP": 1.0, "CENTER": 0.5, "BOTTOM": 0.0}[p.relPoint]
+    ax = rl + (rr - rl) * fx + float(p.x)
+    ay = rb + (rt - rb) * fy + float(p.y)
+    gx = {"TOP": 0.5, "CENTER": 0.5, "BOTTOM": 0.5}[p.point]
+    gy = {"TOP": 1.0, "CENTER": 0.5, "BOTTOM": 0.0}[p.point]
+    left, bottom = ax - w * gx, ay - h * gy
+    return (left, bottom, left + w, bottom + h)
+
+
+def check_the_arrow_and_its_hit_area_sit_inside_the_tab_and_the_hit_area_is_bigger_than_the_glyph(scale):
+    lua = boot(scale, learned=TOTEMS["earth"], lists=lists_for("earth"))
+    host = g(lua).FSTotemBar
+    tab = (0.0, 0.0, float(host._w), float(host._h))
+    approx(tab[2], 264.0 * scale, "tab width", 0.01 * scale), approx(tab[3], 49.0 * scale, "tab height", 0.01 * scale)
+    for key in ("fire", "earth", "water", "air"):
+        b = by_key(lua, key)
+        q = b._points[1]
+        brect = (float(q.x), float(q.y), float(q.x) + float(b._w), float(q.y) + float(b._h))
+        a = b.fsArrow
+        assert len(seq(a._points)) == 1, "the arrow is anchored by more than one point"
+        arect = _rect(None, a, brect)
+        eps = 1e-6
+        for what, r in (("hit area", arect),):
+            assert r[0] >= tab[0] - eps and r[1] >= tab[1] - eps and r[2] <= tab[2] + eps and r[3] <= tab[3] + eps, \
+                f"{key} {what} {r} leaves the tab {tab}"
+        # clear of the tab's top outline (a stroke), not merely touching it
+        assert arect[3] <= tab[3] - 0.5 * scale + eps, f"{key} arrow touches the tab's top edge: {arect} vs {tab}"
+        glyph = a.fsTex
+        grect = _rect(None, glyph, arect)
+        assert grect[0] >= arect[0] - eps and grect[2] <= arect[2] + eps
+        assert grect[1] >= arect[1] - eps and grect[3] <= arect[3] + eps, f"{key} glyph leaves its hit area"
+        assert grect[3] <= tab[3] - 0.5 * scale + eps, f"{key} glyph overhangs the tab top"
+        # the approved glyph, unchanged: 16 x 8, the element colour, the same texture
+        approx(glyph._w, 16 * scale, "glyph width"), approx(glyph._h, 8 * scale, "glyph height")
+        assert glyph._texture.endswith("cast_chevron_up_fill.tga"), glyph._texture
+        # the hit area is clearly bigger than the glyph, both ways, and the arrow stays inside its button column
+        assert a._w >= 1.4 * glyph._w and a._h >= glyph._h, f"{key} hit area {a._w}x{a._h} vs glyph {glyph._w}x{glyph._h}"
+        # ... but only the glyph plus a small margin: at most 6 design px wider each side, and it reaches at most
+        # 3 design px into the button face, so the rest of the face (drop, dismiss, tooltip) stays the button's
+        assert a._w <= glyph._w + 12 * scale + eps, f"{key} hit area is {a._w} wide for a {glyph._w} glyph"
+        assert arect[1] >= brect[3] - 3.0 * scale - eps, f"{key} hit area reaches {brect[3] - arect[1]} into the face"
+        assert arect[0] >= brect[0] - eps and arect[2] <= brect[2] + eps, "the hit area overlaps the next button"
+
+
+def check_clicks_on_the_button_face_below_the_arrow_land_on_the_button_not_the_arrow(scale):
+    lua = boot(scale, learned=TOTEMS["earth"], lists=lists_for("earth"))
+    b = by_key(lua, "earth")
+    q = b._points[1]
+    brect = (float(q.x), float(q.y), float(q.x) + float(b._w), float(q.y) + float(b._h))
+    arect = _rect(None, b.fsArrow, brect)
+    top, left, right = brect[3], brect[0], brect[2]
+    cx = (left + right) / 2
+
+    def hits_arrow(x, y):
+        return arect[0] <= x <= arect[2] and arect[1] <= y <= arect[3]
+
+    # the whole top quarter of the face, scanned: below the arrow's reach, nothing is the arrow's
+    quarter = float(b._h) / 4
+    step = scale / 2
+    y = top
+    while y >= top - quarter:
+        x = left
+        while x <= right:
+            depth = (top - y) / scale
+            if depth > 3.0 + 1e-6:
+                assert not hits_arrow(x, y), f"the arrow eats a click {depth:.1f} px under the button top"
+            x += step
+        y -= step
+    # inside the 3 px strip, away from the glyph by more than the margin: also the button's
+    for dx in (-17 * scale, 17 * scale):
+        assert not hits_arrow(cx + dx, top - 1 * scale), "the arrow's hit area is wider than glyph plus margin"
+    # and the arrow is still there to be hit: the glyph centre, and just over the button's top edge
+    assert hits_arrow(cx, top + 2 * scale) and hits_arrow(cx, top - 1 * scale)
+
+
 def check_the_picker_lists_the_known_totems_and_a_click_picks_and_closes():
     lua = boot(learned=TOTEMS["earth"][:3], lists={2: TOTEMS["earth"][:3]})
     b = by_key(lua, "earth")
@@ -685,6 +866,104 @@ def check_the_picker_lists_the_known_totems_and_a_click_picks_and_closes():
     assert picks(lua).earth.name == "Earthbind Totem"
     assert mc_calls(lua)[-1][:2] == (action_id(2), tid(lua, "Earthbind Totem"))
     assert b.icon._texture == 9000 + tid(lua, "Earthbind Totem")
+
+
+DESTROY_ALL = "\n".join(f"/click FSTotemDestroy{n}" for n in range(1, 5))
+
+
+def destroy_buttons(lua):
+    return [g(lua)[f"FSTotemDestroy{n}"] for n in range(1, 5)]
+
+
+def check_shift_right_click_dismisses_all_four_totems_through_hidden_secure_buttons():
+    lua = all_known_with_lists()
+    hidden = destroy_buttons(lua)
+    host = g(lua).FSTotemBar
+    for n, h in enumerate(hidden, start=1):
+        assert h is not None and h._secure, f"FSTotemDestroy{n} is not a secure button"
+        assert sb.same(lua, h._parent, host), f"FSTotemDestroy{n} is not on the tab's host"
+        keys = sorted(str(k) for k in h._attrs.keys())
+        assert keys == ["totem-slot", "type", "useOnKeyDown"], f"FSTotemDestroy{n} carries {keys}"
+        assert attr(h, "useOnKeyDown") is False, "the up-click must count whatever the CVar says"
+        assert attr(h, "type") == "destroytotem" and int(attr(h, "totem-slot")) == n
+        # no field Blizzard's click path reads, no modifier prefix a held Shift could be redirected by
+        assert h.bar is None, "a .bar field on a secure button"
+        clicks = [h._clicks[k] for k in range(1, len(h._clicks) + 1)]
+        assert clicks == ["AnyUp", "AnyDown"], f"FSTotemDestroy{n} clicks {clicks}"
+        assert not h._mouse, f"FSTotemDestroy{n} takes the mouse"
+    for key in ("fire", "earth", "water", "air"):
+        b = by_key(lua, key)
+        assert attr(b, "type2") == "destroytotem" and int(attr(b, "totem-slot2")) == SLOT[key], key
+        assert attr(b, "shift-type2") == "macro", f"{key} shift-right click is {attr(b, 'shift-type2')!r}"
+        assert attr(b, "shift-macrotext2") == DESTROY_ALL, repr(attr(b, "shift-macrotext2"))
+    # set drop and recall are not totem elements
+    for key in ("set", "recall"):
+        assert attr(by_key(lua, key), "shift-type2") is None
+
+
+# SecureTemplates.lua, SecureActionButton_ShouldUseOnKeyDown and the clickAction line of SecureActionButton_OnClick,
+# for a click that is not a real mouse press (what /click sends): the attribute decides, the CVar only when it is unset.
+CLICK_MODEL = """
+__destroyed = {}
+function DestroyTotem(slot) __destroyed[#__destroyed + 1] = slot end
+function __secureClick(button, down)
+    local use = button._attrs["useOnKeyDown"]
+    if use == nil then use = __cvars.ActionButtonUseKeyDown == "1" end
+    local clickAction = (down and use) or (not down and not use)
+    if clickAction and button._attrs["type"] == "destroytotem" then DestroyTotem(button._attrs["totem-slot"]) end
+end
+"""
+
+
+def check_a_macro_click_with_the_use_key_down_cvar_on_still_destroys_the_totem():
+    lua = all_known_with_lists()
+    lua.execute(CLICK_MODEL)
+    lua.execute('__cvars = __cvars or {}; __cvars.ActionButtonUseKeyDown = "1"')
+    for n, h in enumerate(destroy_buttons(lua), start=1):
+        lua.eval("__secureClick")(h, False)          # /click: down=false
+        assert [int(x) for x in seq(g(lua).__destroyed)] == list(range(1, n + 1)), f"slot {n} was not destroyed"
+    # the model sees the failure it guards against: the same click on a button without the attribute does nothing
+    lua.execute("__destroyed = {}")
+    h = destroy_buttons(lua)[0]
+    lua.eval("function(b) b._attrs['useOnKeyDown'] = nil end")(h)
+    lua.eval("__secureClick")(h, False)
+    assert len(seq(g(lua).__destroyed)) == 0, "the model lets an up-click through with the CVar on"
+    # with the CVar off the click works either way
+    lua.execute('__cvars.ActionButtonUseKeyDown = "0"')
+    lua.eval("__secureClick")(h, False)
+    assert len(seq(g(lua).__destroyed)) == 1
+
+
+def check_the_dismiss_all_attributes_are_written_out_of_combat_only():
+    lua = boot(learned=[])
+    set_combat(lua, True)
+    before = blocked(lua)
+    lua.execute('__know("Stoneskin Totem")')
+    for event in ("SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP"):
+        fire(lua, event)
+    assert blocked(lua) == before, "a protected write was tried in combat"
+    assert attr(by_key(lua, "earth"), "shift-type2") is None, "written in combat"
+    set_combat(lua, False)
+    fire(lua, "PLAYER_REGEN_ENABLED")
+    assert attr(by_key(lua, "earth"), "shift-macrotext2") == DESTROY_ALL
+    # a login in combat builds nothing until regen, hidden buttons included
+    lua = boot(learned=TOTEMS["earth"], combat=True)
+    assert g(lua).FSTotemDestroy1 is None, "built a secure frame in combat"
+    set_combat(lua, False)
+    fire(lua, "PLAYER_REGEN_ENABLED")
+    assert all(h is not None for h in destroy_buttons(lua))
+    assert attr(by_key(lua, "earth"), "shift-type2") == "macro"
+    assert attr(destroy_buttons(lua)[1], "totem-slot") == 2
+
+
+def check_a_locked_element_carries_no_dismiss_all():
+    lua = boot()
+    for key in ("fire", "earth", "water", "air"):
+        b = by_key(lua, key)
+        assert b.fsLocked and attr(b, "shift-type2") is None and attr(b, "shift-macrotext2") is None, key
+    # the hidden buttons exist anyway (built once with the tab) and still carry only type and totem-slot
+    for h in destroy_buttons(lua):
+        assert sorted(str(k) for k in h._attrs.keys()) == ["totem-slot", "type", "useOnKeyDown"]
 
 
 def check_the_picker_lists_known_spells_in_spell_mode_too():
@@ -957,7 +1236,7 @@ def check_tooltip_text_and_the_unlock_hint():
     lines = [str(x) for x in seq(g(lua).GameTooltip._lines)]
     text = " | ".join(lines)
     assert "Stoneskin Totem" in text, text
-    assert "Left click: drop Stoneskin Totem. Right click: dismiss. Alt-click or arrow: change totem." in text, text
+    assert "Left click: drop Stoneskin Totem. Right click: dismiss. Shift-right click: dismiss all. Alt-click or arrow: change totem." in text, text
     lua.eval("__Region.Fire")(b, "OnLeave")
     assert not shown(g(lua).GameTooltip)
     lua = boot()
@@ -1389,6 +1668,13 @@ CHECKS = [
     check_a_throwing_setmulticastspell_is_queued_not_raised,
     check_an_empty_multicast_slot_is_filled_with_the_pick_and_a_filled_one_is_adopted,
     check_the_arrow_and_alt_click_open_the_picker_and_alt_does_not_drop,
+    check_the_arrow_shows_only_while_the_cursor_is_over_the_button_or_the_arrow,
+    check_a_locked_button_never_shows_an_arrow,
+    check_the_arrow_shows_and_hides_in_combat_without_a_protected_touch,
+    check_shift_right_click_dismisses_all_four_totems_through_hidden_secure_buttons,
+    check_a_macro_click_with_the_use_key_down_cvar_on_still_destroys_the_totem,
+    check_the_dismiss_all_attributes_are_written_out_of_combat_only,
+    check_a_locked_element_carries_no_dismiss_all,
     check_the_picker_lists_the_known_totems_and_a_click_picks_and_closes,
     check_the_picker_lists_known_spells_in_spell_mode_too,
     check_the_picker_is_plain_and_nothing_secure_depends_on_it,
@@ -1429,6 +1715,8 @@ CHECKS = [
     check_no_em_dashes_in_the_new_files,
 ]
 SCALED_CHECKS = [
+    check_clicks_on_the_button_face_below_the_arrow_land_on_the_button_not_the_arrow,
+    check_the_arrow_and_its_hit_area_sit_inside_the_tab_and_the_hit_area_is_bigger_than_the_glyph,
     check_the_shoulder_is_the_six_by_one_block_and_the_buttons_sit_inside_it,
 ]
 

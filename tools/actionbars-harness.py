@@ -2952,6 +2952,136 @@ function T.blizz_stance_rebuild_dims_stock_buttons_the_bar_gained_late()
     eq(__blizz.calls["StanceBar:HookScript"], nil)
 end
 
+-- ---- Blizzard's totem bar (Shaman, first totem at level 4) ----------------------------------------
+-- The stock bar draws a floating totem button over the Console and its yellow flyout arrow on hover.
+-- It gets the same dim as the action bars: alpha 0 and no mouse, no Hide / Show / SetParent / script.
+local function mcFrames()
+    local out = { __blizz.mc.bar, __blizz.mc.flyout }
+    for _, b in ipairs(__blizz.mc.buttons) do out[#out + 1] = b end
+    return out
+end
+
+-- What Blizzard does when it brings the bar back: its own alpha and mouse, and a button it just built.
+local function blizzardShowsTotemBarAgain()
+    for _, f in ipairs(mcFrames()) do f:SetAlpha(1); f:EnableMouse(true) end
+    local late = CreateFrame("CheckButton", "MultiCastLateButton", __blizz.mc.bar)
+    late:EnableMouse(true)
+    __blizz.calls = {}
+    return late
+end
+
+function T.blizz_totem_bar_is_dimmed_with_its_slot_buttons_and_flyout()
+    for _, f in ipairs(mcFrames()) do
+        eq(f._alpha, 0, (f._name or "?") .. " alpha")
+        eq(f._mouse, false, (f._name or "?") .. " mouse (the flyout arrow needs the cursor over a slot)")
+    end
+    eq(__blizz.mc.bar:IsShown(), true, "shown: Hide would run Blizzard's own code under our taint")
+    eq(__blizz.mc.bar:GetParent(), UIParent, "still where Blizzard put it")
+    for k, v in pairs(__blizz.calls) do error("Blizzard frame touched: " .. k .. " x" .. v) end
+end
+
+function T.blizz_totem_bar_stays_dimmed_when_blizzard_shows_it_again()
+    for _, event in ipairs({ "UPDATE_MULTI_CAST_ACTIONBAR", "PLAYER_LEVEL_UP", "SPELLS_CHANGED" }) do
+        local late = blizzardShowsTotemBarAgain()
+        __fire_event(event)
+        for _, f in ipairs(mcFrames()) do
+            eq(f._alpha, 0, event .. ": " .. (f._name or "?") .. " alpha")
+            eq(f._mouse, false, event .. ": " .. (f._name or "?") .. " mouse")
+        end
+        eq(late._alpha, 0, event .. ": a button Blizzard built late is dimmed")
+        eq(late._mouse, false, event .. ": and click-through")
+        for k, v in pairs(__blizz.calls) do error(event .. ": Blizzard frame touched: " .. k .. " x" .. v) end
+    end
+end
+
+function T.blizz_totem_bar_redim_waits_out_combat_then_runs_at_regen()
+    local late = blizzardShowsTotemBarAgain()
+    __combat = true
+    __fire_event("UPDATE_MULTI_CAST_ACTIONBAR")
+    eq(__blocked, 0, "nothing protected was attempted in combat")
+    eq(__blizz.mc.bar._alpha, 1, "untouched in combat")
+    eq(late._mouse, true, "mouse untouched in combat")
+    __combat = false
+    __fire_event("PLAYER_REGEN_ENABLED")
+    eq(__blizz.mc.bar._alpha, 0, "dimmed at regen")
+    eq(late._alpha, 0, "late button dimmed at regen")
+    eq(late._mouse, false)
+end
+
+function T.blizz_fsbars_blizz_restores_the_totem_bar_and_no_event_dims_it_again()
+    local late = blizzardShowsTotemBarAgain()
+    __fire_event("UPDATE_MULTI_CAST_ACTIONBAR")
+    SlashCmdList["FSBARS"]("blizz")
+    for _, f in ipairs(mcFrames()) do
+        eq(f._alpha, 1, (f._name or "?") .. " alpha restored")
+        eq(f._mouse, true, (f._name or "?") .. " mouse restored")
+    end
+    __fire_event("UPDATE_MULTI_CAST_ACTIONBAR")
+    eq(__blizz.mc.bar._alpha, 1, "Blizzard's bar stays up while the stock bars are asked for")
+    SlashCmdList["FSBARS"]("fs")
+    eq(__blizz.mc.bar._alpha, 0, "dimmed again with /fsbars fs")
+end
+
+-- Blizzard's yellow flyout arrow may hang off UIParent rather than the bar, so a bar sweep never reaches it.
+function T.blizz_the_flyout_arrow_buttons_are_dimmed_whatever_their_parent()
+    for _, name in ipairs({ "MultiCastFlyoutFrameOpenButton", "MultiCastFlyoutFrameCloseButton" }) do
+        local f = _G[name]
+        eq(f ~= nil, true, name .. " fixture")
+        eq(f._alpha, 0, name .. " alpha")
+        eq(f._mouse, false, name .. " mouse")
+        f:SetAlpha(1); f:EnableMouse(true)       -- Blizzard shows it again
+        __fire_event("UPDATE_MULTI_CAST_ACTIONBAR")
+        eq(f._alpha, 0, name .. " alpha after a re-show")
+        eq(f._mouse, false, name .. " mouse after a re-show")
+    end
+end
+
+-- A frame Blizzard builds after the addon first stashed (or that was absent at login) is stashed on the next
+-- totem event, out of combat, while the synthwave bars are in use.
+function T.blizz_a_totem_bar_built_after_login_is_stashed_on_the_next_event()
+    eq(_G.MultiCastActionBarFrame, nil, "absent at login")
+    local bar = CreateFrame("Frame", "MultiCastActionBarFrame", UIParent)
+    bar:EnableMouse(true)
+    local child = CreateFrame("CheckButton", nil, bar)
+    child:EnableMouse(true)
+    __combat = true
+    __fire_event("UPDATE_MULTI_CAST_ACTIONBAR")
+    eq(bar._alpha, 1, "not stashed in combat")
+    __combat = false
+    __fire_event("PLAYER_REGEN_ENABLED")
+    eq(bar._alpha, 0, "stashed at regen")
+    eq(bar._mouse, false)
+    eq(child._alpha, 0, "its button dimmed")
+    eq(child._mouse, false)
+    SlashCmdList["FSBARS"]("blizz")
+    eq(bar._alpha, 1, "restored by /fsbars blizz")
+    eq(child._mouse, true)
+    __fire_event("UPDATE_MULTI_CAST_ACTIONBAR")
+    eq(bar._alpha, 1, "and not stashed again while Blizzard's bars are asked for")
+end
+
+-- Every class gets SPELLS_CHANGED: the sweep is for Shamans, or for a client that actually shows the bar.
+function T.blizz_a_non_shaman_with_a_hidden_totem_bar_never_runs_the_redim()
+    local bar = _G.MultiCastActionBarFrame
+    bar:SetAlpha(1)
+    local late = CreateFrame("CheckButton", nil, bar)
+    late:EnableMouse(true)
+    __fire_event("SPELLS_CHANGED"); __fire_event("PLAYER_LEVEL_UP"); __fire_event("UPDATE_MULTI_CAST_ACTIONBAR")
+    eq(bar._alpha, 1, "no sweep for a non-Shaman whose bar is hidden")
+    eq(late._mouse, true)
+    bar._shown = true                             -- the client does show it
+    __fire_event("UPDATE_MULTI_CAST_ACTIONBAR")
+    eq(bar._alpha, 0, "swept once it is shown")
+    eq(late._mouse, false)
+end
+
+function T.blizz_a_client_without_the_totem_bar_is_left_alone()
+    __fire_event("UPDATE_MULTI_CAST_ACTIONBAR")
+    __fire_event("PLAYER_LEVEL_UP")
+    eq(_G.MultiCastActionBarFrame, nil, "fixture removed")
+    eq(MultiBarBottomLeft._alpha, 0, "the other bars are still dimmed")
+end
+
 function T.blizz_stance_bar_dim_runs_no_blizzard_script()
     eq(StanceBar:IsShown(), true, "not hidden (StanceBar is an Edit Mode system with a HideOverride)")
     eq(__blizz.calls["StanceBar:Hide"], nil, "Hide")
@@ -3144,6 +3274,7 @@ local function stockButton(parent, name)
     b:EnableMouse(true)
     return b
 end
+function UnitClass() return "Shaman", "SHAMAN", 7 end
 local names = { "MainActionBar", "MultiBarBottomLeft", "MultiBarBottomRight", "MultiBarRight",
     "MultiBarLeft", "MultiBar5", "MultiBar6", "MultiBar7", "OverrideActionBar", "StanceBar" }
 local all = {}
@@ -3174,6 +3305,36 @@ for _, name in ipairs(names) do
     end
     all[#all + 1] = { bar, name }
 end
+-- Blizzard's totem bar (Wrath-era MultiCastActionBarFrame, still shipped for the Shaman on this client): the bar
+-- holds the four slot buttons (each with its MultiCastActionButtonN child), the summon and recall buttons; the
+-- flyout frame is a sibling that Blizzard shows from a slot.
+do
+    local bar = CreateFrame("Frame", "MultiCastActionBarFrame", UIParent)
+    bar:RegisterEvent("UPDATE_MULTI_CAST_ACTIONBAR")
+    bar:EnableMouse(true)
+    __blizz.mc = { bar = bar, buttons = {} }
+    local function add(parent, name)
+        local b = stockButton(parent, name)
+        __blizz.mc.buttons[#__blizz.mc.buttons + 1] = b
+        all[#all + 1] = { b, name }
+        return b
+    end
+    for i = 1, 4 do
+        local slot = add(bar, "MultiCastSlotButton" .. i)
+        add(slot, "MultiCastActionButton" .. i)
+    end
+    add(bar, "MultiCastSummonSpellButton")
+    add(bar, "MultiCastRecallSpellButton")
+    local flyout = CreateFrame("Frame", "MultiCastFlyoutFrame", UIParent)
+    flyout:EnableMouse(true)
+    __blizz.mc.flyout = flyout
+    __blizz.mc.flyoutButton = add(flyout, "MultiCastFlyoutButton1")
+    -- Blizzard's yellow flyout arrow (open) and its close twin: possibly parented to UIParent, not to the bar
+    add(UIParent, "MultiCastFlyoutFrameOpenButton")
+    add(UIParent, "MultiCastFlyoutFrameCloseButton")
+    all[#all + 1] = { bar, "MultiCastActionBarFrame" }
+    all[#all + 1] = { flyout, "MultiCastFlyoutFrame" }
+end
 -- The dispatchers: events registered, `frames` is the table Blizzard iterates.
 for _, name in ipairs({ "ActionBarButtonEventsFrame", "ActionBarActionEventsFrame" }) do
     local f = CreateFrame("Frame", name, UIParent)
@@ -3200,6 +3361,17 @@ for _, pair in ipairs(all) do spy(pair[1], pair[2]) end
 BLIZZ_VARIANTS = {
     "blizz_saved_stash_is_still_honoured": 'ForeverSTUwaveDB = { barHideStrategy = "stash" }',
     "blizz_login_in_combat_leaves_blizzard_bars_alone": "__combat = true",
+    "blizz_a_client_without_the_totem_bar_is_left_alone":
+        "_G.MultiCastActionBarFrame = nil; _G.MultiCastFlyoutFrame = nil",
+    # a totem bar frame Blizzard builds only after login: absent when the addon first stashes
+    "blizz_a_totem_bar_built_after_login_is_stashed_on_the_next_event": """
+        _G.MultiCastActionBarFrame = nil; _G.MultiCastFlyoutFrame = nil
+        _G.MultiCastFlyoutFrameOpenButton = nil; _G.MultiCastFlyoutFrameCloseButton = nil
+    """,
+    "blizz_a_non_shaman_with_a_hidden_totem_bar_never_runs_the_redim": """
+        function UnitClass() return "Paladin", "PALADIN", 2 end
+        MultiCastActionBarFrame._shown = false
+    """,
 }
 BLIZZ_PREFIX = "blizz_"
 

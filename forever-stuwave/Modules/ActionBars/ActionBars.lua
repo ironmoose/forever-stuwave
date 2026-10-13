@@ -134,7 +134,19 @@ local BARS = {
     { id = 6, firstAction = MULTIBAR5_FIRST_ACTION, blizzard = "MultiBar5",           binding = "MULTIACTIONBAR5BUTTON" },
 }
 
-local EXTRA_BLIZZARD_BARS = { "MultiBar6", "MultiBar7", "OverrideActionBar" }
+-- MultiCastActionBarFrame is Blizzard's totem bar (the Shaman's, from the first totem at level 4: a floating slot
+-- button over the Console, and a yellow flyout arrow on hover). MultiCastFlyoutFrame is its flyout. Both are found
+-- by name and skipped when the client has none. TotemBar.lua reads nothing from them but the action id of
+-- MultiCastActionButtonN:CalculateAction(), which needs the button to exist, not to be shown or opaque.
+local EXTRA_BLIZZARD_BARS = { "MultiBar6", "MultiBar7", "OverrideActionBar", "MultiCastActionBarFrame",
+    "MultiCastFlyoutFrame", "MultiCastFlyoutFrameOpenButton", "MultiCastFlyoutFrameCloseButton" }
+-- Blizzard re-shows and refills the totem bar later (learning Call of the Elements, a level, the multi-cast
+-- update) and builds buttons the first sweep never saw; the dim is applied again out of combat on these. The two
+-- flyout buttons are Blizzard's yellow flyout arrow and its twin: they may hang off UIParent rather than the bar,
+-- so no sweep of the bar reaches them. A name the client does not have is skipped.
+local TOTEM_BARS = { "MultiCastActionBarFrame", "MultiCastFlyoutFrame", "MultiCastFlyoutFrameOpenButton",
+    "MultiCastFlyoutFrameCloseButton" }
+local TOTEM_REDIM_EVENTS = { "UPDATE_MULTI_CAST_ACTIONBAR", "PLAYER_LEVEL_UP", "SPELLS_CHANGED" }
 
 -- The page the main bar should show. This is the insecure equivalent of what
 -- Bartender4 resolves inside its _onstate-page snippet: a macro conditional
@@ -398,6 +410,72 @@ local function RestoreBlizzardBar(name)
         end
     end)
     stashed[name] = nil
+end
+
+-- The totem sweep exists for the Shaman's bar. SPELLS_CHANGED and PLAYER_LEVEL_UP reach every class, so the sweep
+-- runs only for a Shaman, or when the client actually shows the bar (a non-Shaman's stays hidden).
+local playerIsShaman
+local function PlayerIsShaman()
+    if playerIsShaman == nil then
+        if type(UnitClass) ~= "function" then return false end
+        local ok, _, token = pcall(UnitClass, "player")
+        if not ok or type(token) ~= "string" or (issecretvalue and issecretvalue(token)) then return false end
+        playerIsShaman = (token == "SHAMAN")
+    end
+    return playerIsShaman
+end
+
+-- Dims one frame the stock bar gained and records it in the stash. Module level and fed by upvalues so the sweep
+-- allocates no closure per frame per event.
+local redimStash, redimKnown = nil, {}
+local function RedimChild(frame)
+    if not redimKnown[frame] then
+        redimKnown[frame] = true
+        redimStash.children[#redimStash.children + 1] = {
+            frame = frame,
+            alpha = frame:GetAlpha(),
+            mouse = frame.IsMouseEnabled and frame:IsMouseEnabled(),
+        }
+    end
+    frame:SetAlpha(0)
+    if frame.EnableMouse then frame:EnableMouse(false) end
+end
+
+local function RedimBar(bar, stash)
+    bar:SetAlpha(0)
+    if bar.EnableMouse then bar:EnableMouse(false) end
+    stash.children = stash.children or {}
+    redimStash = stash
+    for _, saved in ipairs(stash.children) do redimKnown[saved.frame] = true end
+    for _, frame in ipairs(FS.FrameHelpers.CollectActionBarFrames(bar)) do pcall(RedimChild, frame) end
+end
+
+-- Re-applies the dim to a totem bar frame: its own alpha and mouse (Blizzard may have reset them) and any button it
+-- gained since, which join the stash so a later restore puts them back too. A frame that is not stashed yet (it did
+-- not exist at login, or the first sweep was skipped) is stashed first while the synthwave bars are in use. Plain
+-- SetAlpha and EnableMouse only, out of combat only. The reparent strategy needs nothing more: the bar stays under
+-- the hidden parent whatever Blizzard shows.
+local function RedimBlizzardBar(name)
+    if InCombatLockdown() then return end
+    local bar = _G[name]
+    if not bar then return end
+    local stash = stashed[name]
+    if not stash then
+        if usingFS then HideBlizzardBar(name) end
+        return
+    end
+    if stash.strategy ~= "dim" then return end
+    pcall(RedimBar, bar, stash)
+    redimStash = nil
+    for k in pairs(redimKnown) do redimKnown[k] = nil end
+end
+
+local function RedimTotemBars()
+    if not PlayerIsShaman() then
+        local bar = _G.MultiCastActionBarFrame
+        if not (bar and bar:IsShown()) then return end
+    end
+    for _, name in ipairs(TOTEM_BARS) do RedimBlizzardBar(name) end
 end
 
 local function ForEachBlizzardBar(fn)
@@ -1645,11 +1723,19 @@ end
 
 local events = CreateFrame("Frame")
 
+local TOTEM_REDIM_SET = {}
+for _, event in ipairs(TOTEM_REDIM_EVENTS) do TOTEM_REDIM_SET[event] = true end
+
 local function OnEvent(_, event, arg1)
     if event == "PLAYER_REGEN_ENABLED" or event == "UPDATE_BINDINGS" then
         ReleaseAllPresses()
     end
+    if TOTEM_REDIM_SET[event] then
+        RedimTotemBars()
+        return
+    end
     if event == "PLAYER_REGEN_ENABLED" then
+        RedimTotemBars()
         if pendingConsole ~= nil then
             consoleActive = pendingConsole
             pendingConsole = nil
@@ -1727,6 +1813,10 @@ local function RegisterEvents()
         -- too (stock buttons refresh their hotkeys from the same event); the
         -- mode's own RebindSuccess / close signals are wired in Apply as well.
         "UPDATE_BINDINGS",
+        -- Blizzard's totem bar comes back with these (see TOTEM_BARS); not on every client, pcall'd below.
+        "UPDATE_MULTI_CAST_ACTIONBAR",
+        "PLAYER_LEVEL_UP",
+        "SPELLS_CHANGED",
     }) do
         -- Individually guarded: a name absent on this client should skip, not
         -- abort the whole registration and leave the bars static.
