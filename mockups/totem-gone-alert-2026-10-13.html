@@ -21,6 +21,8 @@ h1{margin:0;font-size:30px;letter-spacing:.08em;color:var(--white);text-shadow:0
 .sub b,.cap b{color:var(--white);font-weight:700}
 h2{margin:44px 0 8px;font-size:22px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 12px var(--violet);font-weight:700}
 h2 i{font-style:normal;color:var(--pink)}
+.dec{display:inline-block;margin:0 0 8px;padding:1px 9px;font-size:12px;letter-spacing:.12em;color:var(--cyan);border:1px solid rgba(34,224,255,.5);background:rgba(34,224,255,.06)}
+.dec.no{color:var(--muted);border-color:rgba(157,147,196,.45);background:rgba(157,147,196,.06)}
 .cap{font-size:13px;line-height:1.5;color:var(--muted);margin:0 0 12px;max-width:1500px}
 .rowlab{font-size:15px;letter-spacing:.1em;color:var(--white);margin:20px 0 8px;text-shadow:0 0 10px var(--violet)}
 .rowlab i{font-style:normal;color:var(--pink)}
@@ -89,7 +91,7 @@ table.dp td.v{color:var(--muted)}
 <div id="out"></div>
 
 <h2><i>D //</i> SETTINGS ROW</h2>
-<p class="cap">Shaman settings, Totems group. <b>Remind me about</b> is ONE shared list (Fire, Earth, Water, Air) that drives <b>both</b> surfaces: the on screen <b>Alert</b> and the Gunsight <b>Next Cast</b> tile, which will suggest dropping a gone totem again. Below it each surface has its own on/off toggle, and the Alert has its own parts (sound, flash and glow) that switch off on their own. Everything is optional, nothing is forced. The Next Cast tile itself is not drawn here: it is out of scope for this mockup (a separate task, and there is no Shaman Next Cast profile yet). Explanations live in the circled <b>?</b> tooltip, there is no helper text under any row. Left: the example state, only Fire ticked, both surfaces on, tooltip open. Right: the Alert off while Next Cast stays on (its parts dim and keep their values).</p>
+<p class="cap">Shaman settings, Totems group. <b>Remind me about</b> is ONE shared list (Fire, Earth, Water, Air) that drives <b>both</b> surfaces: the on screen <b>Alert</b> and the Gunsight <b>Next Cast</b> tile, which will suggest dropping a gone totem again. Below it each surface has its own on/off toggle, and the Alert has its own parts (sound, flash and glow) that switch off on their own. Everything is optional, nothing is forced. The Next Cast tile itself is not drawn here: it is out of scope for this mockup (a separate task, and there is no Shaman Next Cast profile yet). Explanations live in the circled <b>?</b> tooltip, there is no helper text under any row. Under Alert the player chooses the form: <b>Centre callout</b> (concept A, on by default) and <b>Totem button flare</b> (concept B, off by default); they can be on together. Left: the default state, only Fire ticked, Alert on with Centre callout on and Totem button flare off, Next Cast on, tooltip open. Right: the Alert off while Next Cast stays on (all four Alert sub-rows dim and keep their values).</p>
 <div class="setwrap">
   <div class="set">
     <div class="hd"><b>SHAMAN</b> / TOTEMS</div>
@@ -100,6 +102,8 @@ table.dp td.v{color:var(--muted)}
     <div class="srow sm"><span class="tg"></span><span class="dot" style="background:#e2d4ff"></span><span>Air</span></div>
     <div class="sep"></div>
     <div class="srow"><span class="tg on"></span><span>Alert</span><span class="q">?</span></div>
+    <div class="srow sm"><span class="tg on"></span><span>Centre callout</span><span class="q">?</span></div>
+    <div class="srow sm"><span class="tg"></span><span>Totem button flare</span><span class="q">?</span></div>
     <div class="srow sm"><span class="tg on"></span><span>Play sound</span><span class="q">?</span></div>
     <div class="srow sm"><span class="tg on"></span><span>Flash and glow</span><span class="q">?</span></div>
     <div class="sep"></div>
@@ -118,6 +122,8 @@ table.dp td.v{color:var(--muted)}
     <div class="srow sm"><span class="tg"></span><span class="dot" style="background:#e2d4ff"></span><span>Air</span></div>
     <div class="sep"></div>
     <div class="srow"><span class="tg"></span><span>Alert</span><span class="q">?</span></div>
+    <div class="srow sm dim"><span class="tg on"></span><span>Centre callout</span><span class="q">?</span></div>
+    <div class="srow sm dim"><span class="tg"></span><span>Totem button flare</span><span class="q">?</span></div>
     <div class="srow sm dim"><span class="tg on"></span><span>Play sound</span><span class="q">?</span></div>
     <div class="srow sm dim"><span class="tg on"></span><span>Flash and glow</span><span class="q">?</span></div>
     <div class="sep"></div>
@@ -134,14 +140,14 @@ table.dp td.v{color:var(--muted)}
     <li><b>One shared list.</b> Remind me about (Fire, Earth, Water, Air) drives the Alert and the Next Cast tile together. An element left off gets no alert and no suggestion; the other elements still do.</li>
     <li><b>Per element slot.</b> Each element has one slot, so a new alert for an element replaces that element's older alert.</li>
     <li><b>Only totems that were up.</b> An element that was never dropped, or is not learned yet, never alerts.</li>
-    <li><b>Every part optional.</b> Alert on/off, Next Cast on/off, Play sound, Flash and glow, and each element in the list switch off on their own. With Flash and glow off: A loses its pulse rings, B stops blinking and keeps a steady border, C loses the edge glow and keeps the banner.</li>
+    <li><b>Every part optional.</b> Alert on/off, Centre callout, Totem button flare, Next Cast on/off, Play sound, Flash and glow, and each element in the list switch off on their own. With Flash and glow off: A loses its pulse rings, B stops blinking and keeps a steady border, C loses the edge glow and keeps the banner.</li>
     <li><b>Sound is optional.</b> If Play sound is on, one short Blizzard sound (PlaySound, a UI sound kit) plays when the alert first shows. Off means silent, nothing else changes.</li>
   </ul></div>
   <div class="panel"><h3>HOW THE THREE COMPARE</h3><table class="dp">
     <tr><td class="e">A callout</td><td class="v">Where she is already looking (above the player at the Gunsight), so it is the hardest to miss mid fight. It covers part of the view for about 6 s, and it is gone after that, so a missed one is lost.</td></tr>
     <tr><td class="e">B tab flare</td><td class="v">Costs no screen space and stays until she re-drops, so it can never be lost, but it sits at the bottom of the screen, the place she already misses it. Best as the persistent half of a pair.</td></tr>
     <tr><td class="e">C banner</td><td class="v">Loudest by area, with the edge glow reaching the corners of her vision. Most intrusive in a long fight with several totems running out, and the banner shape is new chrome.</td></tr>
-    <tr><td class="e">Pick</td><td class="v"><b>A as the alert, B as the free backup that stays.</b> C only if A turns out too small in real play.</td></tr>
+    <tr><td class="e">Decided</td><td class="v"><b>A and B are both built and the player picks; A is on by default, B off. C is not built.</b></td></tr>
   </table></div>
 </div>
 
@@ -344,6 +350,7 @@ var CU={
  B:{one:[64,206,240,80],two:[64,206,240,80]},
  C:{one:[70,0,340,48],two:[70,0,340,82]}
 };
+var DEC={A:['DECIDED: BUILT, ON BY DEFAULT',''],B:['DECIDED: BUILT, OFF BY DEFAULT',''],C:['DECIDED: NOT BUILT (drawings kept for reference)',' no']};
 var CON={
  A:{t:'CENTRE CALLOUT, a plate above the player',
   cap:'<b>Form and place:</b> a chamfered plate (cut 6, element coloured 1.9 px border, halo) that appears just above the player\'s head, in the Gunsight centre where her eyes already are while she casts. It names the totem ("MAGMA GONE"), shows the totem icon drawn as a dashed ghost (the pole is missing), and a small line with the element ("FIRE TOTEM"). Three rings pulse out of it in the first 1.5 s. <b>Two at once:</b> plates stack downward, each in its own element colour, newest at the bottom. <b>Life:</b> holds about 4 s, fades over 2 s, and re-dropping that element clears its plate at once. <b>Sound (optional):</b> one short Blizzard UI sound when it first shows. <b>All parts optional:</b> the whole Alert, each element, the sound and the pulse rings each switch off on their own (section D).'},
@@ -380,7 +387,7 @@ var CT={
 var out='';
 ['A','B','C'].forEach(function(k){
   var cp=CON[k],vb=VB[k];
-  out+='<h2><i>'+k+' //</i> '+cp.t+'</h2><p class="cap">'+cp.cap+'</p>';
+  out+='<h2><i>'+k+' //</i> '+cp.t+'</h2><div class="dec'+DEC[k][1]+'">'+DEC[k][0]+'</div><p class="cap">'+cp.cap+'</p>';
   out+='<div class="rowlab"><i>IN CONTEXT</i>, 1x<small>game strip: Gunsight centre with the player, cast bar ticks, party and target frames, and the top of the Console with the totem tab. Level 30 Shaman, all four totems learned.</small></div><div class="row">';
   [['one',ONE],['two',BOTH]].forEach(function(p){
     out+=cell(scene(k,p[1],PK,[0,0,SW,SH],1),SW,CT[p[0]][0],CT[p[0]][1],CT[p[0]][2]);
