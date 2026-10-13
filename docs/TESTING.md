@@ -294,6 +294,21 @@ Not yet checked in game. `/fsprof` shows or hides the panel and the choice survi
 1. Accept a quest with kill or collect objectives and find its mobs: the "!" shows beside their names, and goes when the objective is done or the quest is turned in.
 2. Collapse a zone header in the quest log; quest mobs under it should still show the !
 
+## Nameplate Target Mark: /stu targetmark
+
+Not yet checked in game. An optional high-contrast mark above your current target's nameplate. Off by default; with it off the plates are unchanged.
+
+Spec: three solid blocks side by side with no gaps, yellow (255,255,0), blue (0,0,255), yellow (255,255,0). Each block is 6 x 4 UI units, so the mark is 18 x 4, centered horizontally on the plate and sitting above the name, raid marker and debuff rows. The colors are flat: no glow, transparency or theme tint. It is drawn on the topmost level of the plate so nothing covers it. Only the plate of your current target shows it. The setting is saved per profile as `nameplates.targetMark`.
+
+Commands: `/stu targetmark` toggles it, `/stu targetmark on` and `/stu targetmark off` set it, each printing the new state. `/fsplate targetmark [on|off]` does the same.
+
+1. With the setting off, target a mob: no mark on any plate.
+2. `/stu targetmark`: chat says "Target Mark on" and the mark shows above the target's plate. A plate that is not your target shows none.
+3. Switch targets: the mark moves to the new target's plate. Clear the target: it goes.
+4. Pull a mob so you are in combat, then switch targets and toggle the command. The mark follows and the command works in combat.
+5. With a raid marker on the target and several debuffs on it, the mark stays clear of both, above them.
+6. `/stu targetmark off`: the mark goes at once. `/reload` after turning it on: it is still on.
+
 ## If the window does not open
 
 Every report is also saved in the SavedVariables file. It is written on

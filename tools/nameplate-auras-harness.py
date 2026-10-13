@@ -1517,6 +1517,94 @@ level = 12
 fire("UNIT_HEALTH", "nameplate1")
 check(t._calls.SetText == n + 2 and t._args.SetText[1]:find("12", 1, true), "the plain level after a secret one was not written")
 """),
+
+    ("target mark: off by default, on the target plate only when on, exact colors and size", "true", r"""
+local store, cbs, defaults = {}, {}, {}
+FS.Config = {
+    RegisterDefault = function(k, v) defaults[k] = v end,
+    Get = function(k) if store[k] ~= nil then return store[k] end return defaults[k] end,
+    Set = function(k, v) store[k] = v; for _, f in ipairs(cbs[k] or {}) do f(v) end return true end,
+    OnChange = function(k, f) cbs[k] = cbs[k] or {}; table.insert(cbs[k], f) end,
+}
+boot()
+fire("PLAYER_ENTERING_WORLD"); drain()
+check(defaults["nameplates.targetMark"] == false, "default not registered as false")
+UnitIsUnit = function(u, t) return u == "nameplate1" and t == "target" end
+addPlate("nameplate1"); addPlate("nameplate2")
+local r1, r2 = FS.framesByUnit.nameplate1, FS.framesByUnit.nameplate2
+local function shown(root) local n = 0 for _, b in ipairs(root.targetMark) do if b._shown then n = n + 1 end end return n end
+check(shown(r1) == 0 and shown(r2) == 0, "marks shown with the setting off")
+-- exact spec on the blocks
+local want = { { 1, 1, 0 }, { 0, 0, 1 }, { 1, 1, 0 } }
+check(#r1.targetMark == 3, "expected three blocks")
+for i, b in ipairs(r1.targetMark) do
+    local c = b._args.SetColorTexture
+    check(c[1] == want[i][1] and c[2] == want[i][2] and c[3] == want[i][3] and c[4] == 1, "block " .. i .. " color")
+    check(b._args.SetSize[1] == 6 and b._args.SetSize[2] == 4, "block " .. i .. " size")
+    check(b._args.CreateTexture == nil and b._calls.SetVertexColor == nil and b._calls.SetAlpha == nil
+        and b._calls.SetMask == nil and b._calls.AddMaskTexture == nil, "block " .. i .. " is themed or masked")
+end
+-- toggle on through the saved setting: only the target plate shows it
+FS.Config.Set("nameplates.targetMark", true)
+check(shown(r1) == 3, "target plate lacks the mark")
+check(shown(r2) == 0, "non-target plate shows the mark")
+-- retarget
+UnitIsUnit = function(u, t) return u == "nameplate2" and t == "target" end
+fire("PLAYER_TARGET_CHANGED")
+check(shown(r1) == 0 and shown(r2) == 3, "mark did not follow the target")
+-- in combat
+__combat = true
+UnitIsUnit = function(u, t) return u == "nameplate1" and t == "target" end
+fire("PLAYER_TARGET_CHANGED")
+check(shown(r1) == 3 and shown(r2) == 0, "mark did not follow the target in combat")
+-- off again, and a released plate carries nothing to its next unit
+FS.Config.Set("nameplates.targetMark", false)
+check(shown(r1) == 0, "mark stayed on after switching off")
+FS.Config.Set("nameplates.targetMark", true)
+removePlate("nameplate1")
+check(shown(r1) == 0, "released plate kept its mark")
+"""),
+
+    ("target mark: a secret target answer hides the mark, never errors", "true", r"""
+local SECRET = setmetatable({}, { __eq = function() error("compared a secret") end })
+FS.Config = { RegisterDefault = function() end, Get = function() return true end, OnChange = function() end,
+    Set = function() return true end }
+boot()
+FS.IsSecret = function(v) return rawequal(v, SECRET) end
+UnitIsUnit = function() return SECRET end
+UnitCanAttack = function() return false end
+fire("PLAYER_ENTERING_WORLD"); drain()
+addPlate("nameplate1")
+for _, b in ipairs(FS.framesByUnit.nameplate1.targetMark) do check(not b._shown, "mark shown for a secret answer") end
+"""),
+
+    ("target mark: /stu targetmark toggles, takes on|off, and /fsplate targetmark is the same", "true", r"""
+local store, defaults = {}, {}
+FS.Config = {
+    RegisterDefault = function(k, v) defaults[k] = v end,
+    Get = function(k) if store[k] ~= nil then return store[k] end return defaults[k] end,
+    Set = function(k, v) store[k] = v return true end,
+    OnChange = function() end,
+}
+boot()
+fire("PLAYER_ENTERING_WORLD"); drain()
+local key = "nameplates.targetMark"
+local function last() return __printed[#__printed] end
+SlashCmdList["FSSTU"]("targetmark")
+check(store[key] == true and last():find("Target Mark on", 1, true), "toggle did not turn it on: " .. tostring(last()))
+SlashCmdList["FSSTU"]("targetmark")
+check(store[key] == false and last():find("Target Mark off", 1, true), "toggle did not turn it off")
+SlashCmdList["FSSTU"]("targetmark on")
+check(store[key] == true, "on")
+SlashCmdList["FSSTU"]("TargetMark OFF")
+check(store[key] == false, "off")
+SlashCmdList["FSPLATE"]("targetmark on")
+check(store[key] == true, "/fsplate alias")
+SlashCmdList["FSSTU"]("targetmark maybe")
+check(store[key] == true and last():find("/stu targetmark", 1, true), "bad word changed the setting")
+SlashCmdList["FSSTU"]("")
+check(last():find("/stu targetmark", 1, true), "no usage line")
+"""),
 ]
 
 
