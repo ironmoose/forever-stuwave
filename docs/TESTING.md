@@ -378,7 +378,7 @@ Pick the class module for the upper or lower Gunsight area in the config window,
 
 ## Box tags: level and class, health percent, target of target
 
-Not yet checked in game. Mocked checks cover the seats, the secret-safe text and the combat rules, not how it looks. Design: `mockups/gunsight-modules-concepts-v7-2026-10-08.html`, states A to F. The three tags (Level and class, Health percent, Target of target) are switches on the Gunsight HUD page under Target box tags, all on by default.
+Not yet checked in game. Mocked checks cover the seats, the secret-safe text and the combat rules, not how it looks. Design: `mockups/gunsight-modules-concepts-v7-2026-10-08.html`, states A to F. The three tags (Level and rank, Health percent, Target of target) are switches on the Gunsight HUD page under Target box tags, all on by default.
 
 1. Target a hostile elite: a small tag on the top edge, left of KICK, reads L plus the level in white and ELITE in gold. A normal mob shows only the level, a rare shows RARE, a boss BOSS, a skull-level mob `??`. Switch target and the tag follows; level up on a target dummy of another level and it updates.
 2. A tag on the bottom edge, left, shows the target's health percent in green and follows hits and heals, in combat too (the value is hidden by the game there; say if it stays blank).

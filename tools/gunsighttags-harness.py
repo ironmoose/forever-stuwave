@@ -2218,6 +2218,37 @@ function T.the_class_is_read_again_next_frame_after_a_target_change()
     W.clean(); noFails()
 end
 
+function T.a_throwing_first_read_still_gets_the_next_frame_badge()
+    local W = world()
+    __flushTimers() -- the build's own reread is spent, so the target change has to queue its own
+    local real, threw = UnitClass, false
+    UnitClass = function(u)
+        if not threw then threw = true; error("boom") end
+        return real(u)
+    end
+    asPlayer("MAGE")
+    eq(threw, true, "the immediate read threw")
+    noBadge("after the throw, before the timer")
+    __flushTimers()
+    UnitClass = real
+    eq(badge():IsShown(), true, "the queued reread draws it")
+    sameTc(badgeIcon()._tc, tcOf("MAGE"), "mage")
+    eq(#__pcallFails, 1, "the throw was swallowed once")
+    W.clean()
+end
+
+function T.a_legacy_numeric_player_flag_draws_the_badge()
+    local W = world()
+    __units.target.isPlayer, __units.target.classFile = 1, "PALADIN"
+    target("Gravemaw")
+    eq(badge():IsShown(), true, "UnitIsPlayer returning 1")
+    sameTc(badgeIcon()._tc, tcOf("PALADIN"), "paladin")
+    __units.target.isPlayer = 0
+    target("Kurak")
+    noBadge("UnitIsPlayer returning 0")
+    W.clean(); noFails()
+end
+
 function T.the_class_icon_toggle_turns_the_badge_off_and_on_live_and_the_level_tag_follows()
     local W = world()
     asPlayer("PALADIN")

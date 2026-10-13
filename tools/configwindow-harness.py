@@ -975,7 +975,7 @@ function T.the_gunsight_page_has_the_three_target_and_player_groups_in_the_mocku
     W.Open("gunsight")
     local order = {
         headerY("TARGET SIDE"), yOf("Upper area"), yOf("Lower area"),
-        headerY("TARGET BOX TAGS"), yOf("Level and class"), yOf("Player class icon"), yOf("Health percent"), yOf("Target of target"),
+        headerY("TARGET BOX TAGS"), yOf("Level and rank"), yOf("Player class icon"), yOf("Health percent"), yOf("Target of target"),
         headerY("PLAYER SIDE"), yOf("My buffs"), yOf("Next cast"),
     }
     for i = 1, #order do yes(order[i], "missing row or header number " .. i) end
@@ -1021,7 +1021,7 @@ end
 function T.target_box_tag_toggles_write_the_gunsight_tags_settings_keys()
     local W = boot({ preWindow = withTags })
     W.Open("gunsight")
-    for label, key in pairs({ ["Level and class"] = TAG_KEYS.level, ["Health percent"] = TAG_KEYS.health, ["Target of target"] = TAG_KEYS.tot,
+    for label, key in pairs({ ["Level and rank"] = TAG_KEYS.level, ["Health percent"] = TAG_KEYS.health, ["Target of target"] = TAG_KEYS.tot,
                               ["Player class icon"] = TAG_KEYS.classIcon }) do
         yes(row(label).control.fsChecked, label .. " opens on")
         press(label)
@@ -1051,7 +1051,7 @@ end
 function T.the_tags_group_is_absent_without_the_tags_module()
     local W = boot()
     W.Open("gunsight")
-    no(row("Level and class"), "no tag rows without FS.GunsightTags")
+    no(row("Level and rank"), "no tag rows without FS.GunsightTags")
     no(hasText(win(), "TARGET BOX TAGS"), "no tags header")
     yes(row("Upper area") and row("Next cast"), "the other groups still build")
 end

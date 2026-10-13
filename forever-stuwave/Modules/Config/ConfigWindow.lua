@@ -1352,7 +1352,7 @@ local function TargetSideGroups(page)
         local CLASS_ICON_TIP = "Shows the target's class icon in a corner tile on the target box when the target is a player. "
             .. "Nothing is drawn for creatures, or when the game hides the class during combat."
         for _, tag in ipairs({
-            { "Level and class", "level" }, { "Player class icon", "classIcon", CLASS_ICON_TIP },
+            { "Level and rank", "level" }, { "Player class icon", "classIcon", CLASS_ICON_TIP },
             { "Health percent", "health" }, { "Target of target", "tot" },
         }) do
             local setting = S[tag[2]]

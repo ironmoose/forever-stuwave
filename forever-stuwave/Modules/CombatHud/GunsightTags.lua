@@ -325,7 +325,7 @@ local function ReadPlayerClassFile()
     if type(CLASS_ICON_TCOORDS) ~= "table" or type(UnitIsPlayer) ~= "function" or type(UnitClass) ~= "function" then return nil end
     if not FS.HasTarget() then return nil end
     local isPlayer = UnitIsPlayer("target")
-    if IsSecret(isPlayer) or isPlayer ~= true then return nil end
+    if IsSecret(isPlayer) or (isPlayer ~= true and isPlayer ~= 1) then return nil end -- the legacy form answers 1
     local _, file = UnitClass("target")
     if IsSecret(file) or type(file) ~= "string" then return nil end
     if type(CLASS_ICON_TCOORDS[file]) ~= "table" then return nil end
@@ -373,12 +373,14 @@ local function RereadBadge()
     Guard(WriteBadge)
 end
 
+-- The reread is queued before the immediate write: a throw in WriteBadge (swallowed by Guard) must not cost the next frame's read.
 local function WriteBadgeForNewTarget()
     ClearBadge()
+    if not Tags.badgeReread and type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+        Tags.badgeReread = true
+        C_Timer.After(0, RereadBadge)
+    end
     WriteBadge()
-    if Tags.badgeReread or type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then return end
-    Tags.badgeReread = true
-    C_Timer.After(0, RereadBadge)
 end
 
 local function SeatBadge()
