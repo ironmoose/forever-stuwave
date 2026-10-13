@@ -26,6 +26,11 @@ unit APIs the tags read. It pins:
     clicks passed through and the wheel untouched, built and reseated out of combat only, never shown or hidden by us,
     mouse on only while the tgt piece is, and left off (logged once) when pass-through is missing or does not read back.
 
+  * player class badge: a tone framed 26 px tile on the box's top left corner holding Blizzard's round class icon with the
+    CLASS_ICON_TCOORDS cut, for a player target only; the level tag slides to dx 17 while it shows; a secret or missing
+    UnitIsPlayer / UnitClass, a missing CLASS_ICON_TCOORDS or an unknown token draws nothing and leaves the tag at dx 1; cleared on
+    every target change, re-read next frame and at the end of combat; no mouse; nothing allocated after the build.
+
 The mock is strict and is NOT the real client.
 
     python3 tools/gunsighttags-harness.py
@@ -119,6 +124,19 @@ __units.targettarget = { exists = true, name = "Kerra" }
 __units.target.level, __units.target.class = 62, "elite"
 function UnitLevel(u) return __units[u].level end
 function UnitClassification(u) return __units[u].class end
+-- The player class badge reads UnitIsPlayer and UnitClass (the classFile token is the second return) and Blizzard's own
+-- CLASS_ICON_TCOORDS. A key that is secret must never index the table: its __index throws for any key it does not hold.
+function UnitIsPlayer(u) return __units[u].isPlayer end
+function UnitClass(u)
+    local file = __units[u].classFile
+    if file == nil then return nil end
+    return "Class", file
+end
+CLASS_ICON_TCOORDS = setmetatable({
+    WARRIOR = { 0, 0.25, 0, 0.25 }, MAGE = { 0.25, 0.5, 0, 0.25 }, ROGUE = { 0.5, 0.75, 0, 0.25 }, DRUID = { 0.75, 1, 0, 0.25 },
+    HUNTER = { 0, 0.25, 0.25, 0.5 }, SHAMAN = { 0.25, 0.5, 0.25, 0.5 }, PRIEST = { 0.5, 0.75, 0.25, 0.5 }, WARLOCK = { 0.75, 1, 0.25, 0.5 },
+    PALADIN = { 0, 0.25, 0.5, 0.75 },
+}, { __index = function(_, k) if FS.IsSecret(k) then error("CLASS_ICON_TCOORDS indexed with a secret") end end })
 -- Widget methods a secure unit button needs, and a record of what SetFormattedText was handed.
 function Region:SetAttribute(k, v) self._attrs = self._attrs or {}; self._attrs[k] = v end
 function Region:GetAttribute(k) return self._attrs and self._attrs[k] end
@@ -260,10 +278,11 @@ end
 
 -- ---- settings --------------------------------------------------------------------------
 
-function T.the_three_tag_settings_default_on_and_pin_nothing()
+function T.the_tag_settings_default_on_and_pin_nothing()
     local W = world()
     local s = Tg().SETTINGS
     eq(s.level.key, "gunsight.tags.level"); eq(s.health.key, "gunsight.tags.health"); eq(s.tot.key, "gunsight.tags.tot")
+    eq(s.classIcon.key, "gunsight.tags.classicon")
     local n = 0
     for name, def in pairs(s) do
         n = n + 1
@@ -271,7 +290,7 @@ function T.the_three_tag_settings_default_on_and_pin_nothing()
         eq(FS.Config.Get(def.key), true, name .. " reads on")
         ok(not FS.Config.IsStored(def.key), name .. " pins nothing")
     end
-    eq(n, 3, "exactly the three the config window builds its toggles from")
+    eq(n, 4, "exactly the four the config window builds its toggles from")
     W.clean(); noFails()
 end
 
@@ -1640,7 +1659,7 @@ end
 -- The box edge is steel at rest and while the cast cannot be kicked, pink while it can, red for INTERRUPTED. The three
 -- tags wear the same tone frames (GunsightBoxes.NewChrome), so the one flag write that tints the box tints them.
 
-local function tagList() return { level = Tg().level, health = Tg().health, tot = Tg().tot } end
+local function tagList() return { level = Tg().level, health = Tg().health, tot = Tg().tot, classBadge = Tg().classBadge } end
 local function outlineOf(f) return textureWith(f, function(r) return r._cutOutline == true end) end
 local function startCast(W, notInt)
     W.tgt.S.stripOnly = nil   -- the run path, the one a plain cast can be interrupted on (the boxes harness does the same)
@@ -2032,6 +2051,303 @@ function T.a_failing_target_menu_build_does_not_take_the_target_of_target_down()
     ok(__pcallFails[1]:find("boom", 1, true), "and it was this one")
     ok(degraded("gunsighttags_update"), "logged once through the tags' guard")
     W.clean()
+end
+
+-- ---- the player class badge ---------------------------------------------------------------
+-- mockups/gunsight-player-class-icon-2026-10-13.html concept B, with Blizzard's own round class icon in place of the drawn disc:
+-- a 26 px chamfered tile in the box's tone on the box's top left corner (11 px left of the box, 18 above its top), the level tag
+-- 17 px in instead of 1 for a player. The mockup is disposable, so its numbers are pinned here.
+
+local BADGE = { w = 26, dx = -11, rise = 18, icon = 20, levelDx = 17, tex = "Interface\\TargetingFrame\\UI-Classes-Circles" }
+local function badge() return Tg().classBadge end
+local function levelDxPx() return Tg().level._points.TOPLEFT.x / K() end
+local function asPlayer(file) __units.target.isPlayer, __units.target.classFile = true, file; target("Gravemaw") end
+local function asNpc() __units.target.isPlayer, __units.target.classFile = false, nil; target("Kurak") end
+local function badgeIcon() return badge().icon end
+local function tcOf(file) return CLASS_ICON_TCOORDS[file] end
+local function noBadge(msg)
+    eq(badge():IsShown(), false, msg .. ": no badge")
+    near(levelDxPx(), Tg().C.LEVEL.dx, 1e-6, msg .. ": the level tag at its normal seat")
+end
+local function sameTc(tc, want, msg)
+    for i = 1, 4 do near(tc[i], want[i], 1e-9, msg .. " coord " .. i) end
+end
+
+function T.the_class_badge_constants_are_pinned()
+    local W = world()
+    local B = Tg().C.CLASS
+    eq(B.size, BADGE.w); eq(B.dx, BADGE.dx); eq(B.rise, BADGE.rise); eq(B.icon, BADGE.icon); eq(B.levelDx, BADGE.levelDx)
+    eq(B.texture, BADGE.tex, "Blizzard's round class icons")
+    eq(B.dx + B.size + 2, B.levelDx, "the tile ends 2 px before the level tag")
+    ok(B.rise - B.size < Tg().C.RISE, "the tile's cut corner (its bottom) ends below the level tag top, over the name's side only")
+    W.clean(); noFails()
+end
+
+function T.a_player_target_shows_its_class_icon_with_the_right_tex_coords_for_every_class()
+    local W = world()
+    for _, file in ipairs({ "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "SHAMAN", "MAGE", "WARLOCK", "DRUID" }) do
+        asPlayer(file)
+        eq(badge():IsShown(), true, file .. ": shown")
+        eq(badge():IsVisible(), true, file .. ": and visible with the box")
+        eq(badgeIcon()._texture, BADGE.tex, file .. ": the game's round icon sheet")
+        sameTc(badgeIcon()._tc, tcOf(file), file)
+        near(levelDxPx(), BADGE.levelDx, 1e-6, file .. ": the level tag slid right")
+    end
+    W.clean(); noFails()
+end
+
+function T.the_class_badge_sits_on_the_box_top_left_corner_at_two_heights_and_rides_the_grown_box()
+    local W = world()
+    local box = W.tgt.box
+    asPlayer("MAGE")
+    for _, h in ipairs({ 1440, 1080 }) do
+        UIParent._h = h; UIParent._w = h * 16 / 9
+        __fireEvent("UI_SCALE_CHANGED")
+        local k = K()
+        local pt = badge()._points.TOPLEFT
+        eq(pt.rel, box.frame, "hangs from the box frame, like the level tag"); eq(pt.relPoint, "TOPLEFT")
+        near(pt.x, BADGE.dx * k, 1e-6, "x at " .. h); near(pt.y, BADGE.rise * k, 1e-6, "y at " .. h)
+        near(badge()._w, BADGE.w * k, 1e-6); near(badge()._h, BADGE.w * k, 1e-6)
+        local ip = badgeIcon()._points.CENTER
+        eq(ip.rel, badge(), "the icon is centred in the tile")
+        near(badgeIcon()._w, BADGE.icon * k, 1e-6); near(badgeIcon()._h, BADGE.icon * k, 1e-6)
+        near(Tg().level._points.TOPLEFT.x, BADGE.levelDx * k, 1e-6, "the level tag moved with the rescale")
+        eq(badge():GetParent(), box.frame, "a child of the box: it goes with the target and the piece")
+        eq(badge():GetFrameLevel(), box.frame:GetFrameLevel() + Tg().C.FRAME_LEVEL)
+    end
+    FS.Config.Set(FS.GunsightBoxes.SETTINGS.numbers.key, true); flush()
+    eq(badge()._points.TOPLEFT.rel, box.frame, "still from the box frame, so the numbers' growth moves it")
+    W.clean(); noFails()
+end
+
+function T.a_non_player_target_keeps_the_box_exactly_as_before()
+    local W = world()
+    __charW = 6.2
+    local pt = Tg().level._points.TOPLEFT
+    local x0, y0, w0 = pt.x, pt.y, Tg().level._w
+    for _, who in ipairs({ { false, nil }, { false, "WARRIOR" }, { nil, "PRIEST" } }) do
+        __units.target.isPlayer, __units.target.classFile = who[1], who[2]
+        target("Kurak")
+        noBadge("an NPC or pet (" .. tostring(who[1]) .. ", " .. tostring(who[2]) .. ")")
+        eq(Tg().level._points.TOPLEFT.x, x0); eq(Tg().level._points.TOPLEFT.y, y0)
+        eq(Tg().level._points.TOPLEFT.rel, W.tgt.box.frame)
+    end
+    setUnit(62, "elite")
+    near(levelW(), wantW(2, 11 + Tg().C.LEVEL.gap), 1e-6, "the crown plate is untouched")
+    W.clean(); noFails()
+end
+
+function T.an_unreadable_player_flag_or_class_draws_no_badge_and_puts_the_level_tag_back()
+    local W = world()
+    asPlayer("ROGUE")
+    near(levelDxPx(), BADGE.levelDx, 1e-6)
+    __units.target.isPlayer = __SECRET_BOOL
+    target("Veil")
+    noBadge("a secret UnitIsPlayer")
+    __units.target.isPlayer, __units.target.classFile = true, "ROGUE"
+    target("Veil")
+    eq(badge():IsShown(), true)
+    __units.target.classFile = __SECRET_NAME
+    target("Veil")
+    noBadge("a secret class")
+    __units.target.isPlayer, __units.target.classFile = __SECRET_BOOL, __SECRET_NAME
+    target("Veil")
+    noBadge("both secret")
+    __units.target.isPlayer, __units.target.classFile = true, nil
+    target("Veil")
+    noBadge("a player whose class returns nothing")
+    __units.target.classFile = "DEATHKNIGHT"
+    target("Veil")
+    noBadge("a token with no coords")
+    __units.target.classFile = 7
+    target("Veil")
+    noBadge("a class that is not a string")
+    W.clean(); noFails("a secret was compared, indexed or concatenated inside a pcall")
+end
+
+function T.a_class_that_is_secret_in_combat_is_read_again_when_the_fight_ends()
+    local W = world()
+    __combat = true
+    __units.target.isPlayer, __units.target.classFile = __SECRET_BOOL, __SECRET_NAME
+    target("Veil")
+    noBadge("in combat, unreadable")
+    __units.target.isPlayer, __units.target.classFile = true, "PRIEST"
+    regen()
+    eq(badge():IsShown(), true, "the end of combat re-reads it")
+    sameTc(badgeIcon()._tc, tcOf("PRIEST"), "priest")
+    eq(#__blocked, 0)
+    W.clean(); noFails()
+end
+
+function T.a_target_change_never_keeps_the_previous_targets_class()
+    local W = world()
+    asPlayer("WARLOCK")
+    sameTc(badgeIcon()._tc, tcOf("WARLOCK"), "warlock")
+    asPlayer("MAGE")
+    sameTc(badgeIcon()._tc, tcOf("MAGE"), "player to player")
+    asNpc()
+    noBadge("player to NPC")
+    asPlayer("DRUID")
+    eq(badge():IsShown(), true)
+    __units.target.isPlayer, __units.target.classFile = __SECRET_BOOL, __SECRET_NAME
+    target("Veil")
+    noBadge("player to an unreadable one")
+    asPlayer("DRUID")
+    __units.target.exists = false; __fireEvent("PLAYER_TARGET_CHANGED")
+    eq(badge():IsShown(), false, "no target: nothing is drawn")
+    eq(badge():IsVisible(), false)
+    near(levelDxPx(), Tg().C.LEVEL.dx, 1e-6, "and the level tag is at its seat for the next target")
+    __units.target.exists = true
+    W.clean(); noFails()
+end
+
+function T.the_class_is_read_again_next_frame_after_a_target_change()
+    local W = world()
+    asPlayer("HUNTER")
+    -- The new target's own data lands after the event handlers ran.
+    __units.target.classFile = "SHAMAN"
+    __flushTimers()
+    sameTc(badgeIcon()._tc, tcOf("SHAMAN"), "re-read on the next frame")
+    __units.target.isPlayer, __units.target.classFile = false, nil
+    __flushTimers()
+    __units.target.isPlayer, __units.target.classFile = true, "ROGUE"
+    __fireEvent("PLAYER_TARGET_CHANGED")
+    __fireEvent("PLAYER_TARGET_CHANGED")
+    __flushTimers()
+    sameTc(badgeIcon()._tc, tcOf("ROGUE"), "two events in one frame still read once more")
+    W.clean(); noFails()
+end
+
+function T.the_class_icon_toggle_turns_the_badge_off_and_on_live_and_the_level_tag_follows()
+    local W = world()
+    asPlayer("PALADIN")
+    eq(badge():IsShown(), true)
+    setTag("classIcon", false)
+    noBadge("toggled off")
+    eq(Tg().level:IsShown(), true, "the level tag is its own toggle")
+    asPlayer("PALADIN")
+    noBadge("a new player target with the toggle off")
+    setTag("classIcon", true)
+    eq(badge():IsShown(), true, "toggled back on: read at once")
+    near(levelDxPx(), BADGE.levelDx, 1e-6)
+    sameTc(badgeIcon()._tc, tcOf("PALADIN"), "paladin")
+    setTag("level", false)
+    eq(badge():IsShown(), true, "the level toggle does not take the badge")
+    W.clean(); noFails()
+end
+
+function T.a_profile_switch_applies_the_class_icon_toggle_live()
+    local W = world({ beforeLoad = function() UnitGUID = function() return "Player-1-AAAA" end end })
+    asPlayer("MAGE")
+    FS.Config.NewProfile("Raid")
+    ok(FS.Config.SetActiveProfile("Raid"))
+    setTag("classIcon", false)
+    noBadge("Raid has it off")
+    FS.Config.SetActiveProfile("Default")
+    eq(badge():IsShown(), true, "Default still has it on")
+    FS.Config.SetActiveProfile("Raid")
+    noBadge("and back")
+    W.clean(); noFails()
+end
+
+function T.the_class_badge_takes_no_mouse_and_no_secure_frame()
+    local W = world()
+    local secure = #__secure
+    asPlayer("PRIEST")
+    eq(badge()._mouse, false, "EnableMouse(false) was called on the tile")
+    eq(badge():IsMouseEnabled(), false)
+    eq(badge():IsProtected(), false)
+    eq(badge()._template, nil, "a plain frame")
+    for _, o in ipairs(__all) do
+        local p = o
+        while p and p ~= badge() do p = p._parent end
+        if p == badge() and o._kind == "Frame" then eq(o:IsMouseEnabled(), false, "no frame inside the tile takes the mouse") end
+    end
+    eq(#__secure, secure, "no secure frame was added")
+    -- Still true after a change in combat, and the secure menu keeps the box.
+    __combat = true
+    asPlayer("ROGUE")
+    eq(badge():IsMouseEnabled(), false)
+    eq(#__blocked, 0, "a plain frame: nothing protected is touched in combat")
+    eq(menuB():IsMouseEnabled(), true, "the right click menu button still covers the box")
+    W.clean(); noFails()
+end
+
+function T.the_class_badge_wears_the_box_tone_like_the_other_tags()
+    local W = world()
+    asPlayer("DRUID")
+    local f = badge()
+    eq(lit(f), "steel", "steel at rest")
+    for _, key in ipairs({ "pink", "steel", "red" }) do
+        eq(f.tones[key]:GetParent(), f, key .. " tone frame is a child of the tile")
+        eq(rgb(outlineOf(f.tones[key])._vc), rgb(FS.GunsightBoxes.colors[key]), key .. " outline in the box colour")
+    end
+    startCast(W, false)
+    eq(lit(f), "pink", "kickable")
+    W.endCast("target"); W.fire(W.tgt.S, "UNIT_SPELLCAST_INTERRUPTED", "T1")
+    eq(lit(f), "red", "INTERRUPTED")
+    W.clean(); noFails()
+end
+
+function T.the_class_badge_allocates_nothing_after_the_build()
+    local W = world()
+    asPlayer("MAGE"); asNpc()
+    __flushTimers()
+    local frames, textures = #__all, __textures
+    for i = 1, 30 do
+        asPlayer(({ "WARRIOR", "PRIEST", "DRUID" })[i % 3 + 1])
+        asNpc()
+        __units.target.isPlayer, __units.target.classFile = __SECRET_BOOL, __SECRET_NAME
+        target("Veil")
+        __flushTimers()
+    end
+    setTag("classIcon", false); setTag("classIcon", true)
+    UIParent._h = 1080; UIParent._w = 1080 * 16 / 9
+    __fireEvent("UI_SCALE_CHANGED")
+    eq(#__all, frames, "no frame, texture or font string after the first build")
+    eq(__textures, textures)
+    W.clean(); noFails()
+end
+
+function T.without_class_icon_coords_the_badge_draws_nothing_and_nothing_throws()
+    local W = world({ beforeLoad = function() CLASS_ICON_TCOORDS = nil end })
+    asPlayer("MAGE")
+    noBadge("no CLASS_ICON_TCOORDS on this client")
+    W.clean(); noFails()
+end
+
+function T.without_unit_is_player_the_badge_draws_nothing_and_nothing_throws()
+    local W = world({ beforeLoad = function() UnitIsPlayer = nil end })
+    asPlayer("MAGE")
+    noBadge("no UnitIsPlayer")
+    W.clean(); noFails()
+end
+
+function T.without_unit_class_the_badge_draws_nothing_and_nothing_throws()
+    local W = world({ beforeLoad = function() UnitClass = nil end })
+    asPlayer("MAGE")
+    noBadge("no UnitClass")
+    W.clean(); noFails()
+end
+
+function T.with_the_gunsight_off_no_class_badge_is_built()
+    local W = world({ db = { gunsight = { enabled = false } } })
+    eq(FS.GunsightTags.classBadge, nil)
+    eq(#__degrades, 0)
+    noFails()
+end
+
+function T.the_target_piece_off_hides_the_class_badge_with_the_box()
+    local W = world()
+    asPlayer("WARLOCK")
+    eq(badge():IsVisible(), true)
+    W.Gun.SetPiece("tgt", false, true)
+    eq(badge():IsVisible(), false, "the badge is under the box frame")
+    W.Gun.SetPiece("tgt", true, true)
+    eq(badge():IsVisible(), true)
+    FS.Config.Set("gunsight.enabled", false)
+    eq(badge():IsVisible(), false, "and under the Gunsight root")
+    W.clean(); noFails()
 end
 
 __checks = T

@@ -1,6 +1,7 @@
 -- Forever STUwave: KICK style tags on the target box (outlines in the box's own tone: steel, pink while kickable, red for INTERRUPTED), the level on the top edge and health percent and target of target on the bottom edge, each with an FS.Config toggle.
 -- The target of target tag is a SecureUnitButtonTemplate button that targets that unit on a click; in combat it only takes SetAlpha and text.
 -- A second secure button, the target menu, covers the whole target box and opens the unit context menu (Invite, Inspect, Whisper...) on a right click.
+-- A player target also wears its class icon (Blizzard's round class icons) in a tile on the box's top left corner (mockups/gunsight-player-class-icon-2026-10-13.html, concept B).
 -- Unit values go straight to SetFormattedText / SetText and are never compared, since they may be secret.
 
 local _, FS = ...
@@ -33,6 +34,10 @@ local C = {
         dot = { 4, 4, 1, 1 },
     },
     RISE = 8, OVERLAP = 7,
+    -- The player class badge (concept B): a chamfered tile, size x size image px, seated dx right of the box's left edge (negative: it
+    -- hangs out of the box) and rise above the box top, holding the game's round class icon `icon` px wide. For a player the level tag
+    -- slides to levelDx (the tile's right edge is 15, so 2 px clear). texture is Blizzard's sheet, cut by the global CLASS_ICON_TCOORDS.
+    CLASS = { size = 26, dx = -11, rise = 18, icon = 20, levelDx = 17, texture = "Interface\\TargetingFrame\\UI-Classes-Circles" },
     MIN_FONT = 6, TOT_PAD = 3,
     TOT_FLOOR = 8,   -- the target of target name shrinks no further than this (image px) before the first names shorten to initials
     FRAME_LEVEL = 6,   -- the level and health tags' frame level above the box: over the edge strokes (+1) and the bars (+1 to +3)
@@ -54,12 +59,15 @@ local SETTINGS = {
     level = { key = KEY .. "level", default = true },
     health = { key = KEY .. "health", default = true },
     tot = { key = KEY .. "tot", default = true },
+    classIcon = { key = KEY .. "classicon", default = true },
 }
 GunsightTags.SETTINGS = SETTINGS
 for _, def in pairs(SETTINGS) do Config.RegisterDefault(def.key, def.default) end
 
 local Tags = { colors = nil, box = nil, events = nil, pendingTot = false, pendingSeat = false, pendingMenu = false,
-    levelState = "none", levelChars = 0, iconW = 0, iconH = 0, iconKind = nil }
+    levelState = "none", levelChars = 0, iconW = 0, iconH = 0, iconKind = nil,
+    classBadge = nil, badgeOn = false, classFile = nil, badgeReread = false }
+local levelSpec = { dx = C.LEVEL.dx }   -- the level tag's seat: C.LEVEL.dx, or C.CLASS.levelDx beside the class badge (set in SeatLevel)
 
 local function InCombat()
     return type(InCombatLockdown) == "function" and InCombatLockdown() == true
@@ -297,6 +305,94 @@ local function ApplyLevel()
     local on = Setting(SETTINGS.level)
     frame:SetShown(on)
     if on then Guard(WriteLevel) end
+end
+
+-- The level tag's seat: its own dx, or further right while the class badge stands on the box corner. A plain frame, so this is
+-- legal in combat.
+local function SeatLevel()
+    levelSpec.dx = Tags.badgeOn and C.CLASS.levelDx or C.LEVEL.dx
+    SeatPlain(Tags.level, "TOPLEFT", levelSpec, C.RISE, Tags.colors.white)
+end
+
+-------------------------------------------------------------------------------
+-- Player class badge: the game's round class icon in a tone framed tile on the box's top left corner
+-------------------------------------------------------------------------------
+
+-- The classFile token of a PLAYER target, nil for anything else: an NPC, a pet, no target, an API this client lacks, or an answer
+-- that is secret (combat) or not a known token. Every answer goes to IsSecret before anything else touches it, so a secret
+-- UnitIsPlayer or UnitClass reads as "no badge" and is never compared, indexed or stored.
+local function ReadPlayerClassFile()
+    if type(CLASS_ICON_TCOORDS) ~= "table" or type(UnitIsPlayer) ~= "function" or type(UnitClass) ~= "function" then return nil end
+    if not FS.HasTarget() then return nil end
+    local isPlayer = UnitIsPlayer("target")
+    if IsSecret(isPlayer) or isPlayer ~= true then return nil end
+    local _, file = UnitClass("target")
+    if IsSecret(file) or type(file) ~= "string" then return nil end
+    if type(CLASS_ICON_TCOORDS[file]) ~= "table" then return nil end
+    return file
+end
+
+-- Draws the badge for the target as read now (nothing when unreadable) and moves the level tag to match. Allocates nothing.
+local function WriteBadge()
+    local badge = Tags.classBadge
+    if not badge then return end
+    local file = Setting(SETTINGS.classIcon) and ReadPlayerClassFile() or nil
+    if file then
+        if Tags.classFile ~= file then
+            local cut = CLASS_ICON_TCOORDS[file]
+            badge.icon:SetTexCoord(cut[1], cut[2], cut[3], cut[4])
+            Tags.classFile = file
+        end
+    else
+        Tags.classFile = nil
+    end
+    local on = file ~= nil
+    badge:SetShown(on)
+    if Tags.badgeOn ~= on then
+        Tags.badgeOn = on
+        SeatLevel()
+    end
+end
+
+-- A new target never inherits the last one's badge: it is cleared first, so a read that fails or finds nothing leaves it off.
+local function ClearBadge()
+    local badge = Tags.classBadge
+    if not badge then return end
+    Tags.classFile = nil
+    badge:Hide()
+    if Tags.badgeOn then
+        Tags.badgeOn = false
+        SeatLevel()
+    end
+end
+
+-- Per target reads inside the PLAYER_TARGET_CHANGED dispatch may not reflect the new target yet (CombatHud CLAUDE.md), so the
+-- badge reads once more next frame. One shared callback and a flag: a burst of events queues one timer.
+local function RereadBadge()
+    Tags.badgeReread = false
+    Guard(WriteBadge)
+end
+
+local function WriteBadgeForNewTarget()
+    ClearBadge()
+    WriteBadge()
+    if Tags.badgeReread or type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then return end
+    Tags.badgeReread = true
+    C_Timer.After(0, RereadBadge)
+end
+
+local function SeatBadge()
+    local badge = Tags.classBadge
+    if not badge then return end
+    local B, k = C.CLASS, ui(1)
+    badge:ClearAllPoints()
+    badge:SetPoint("TOPLEFT", Tags.box.frame, "TOPLEFT", B.dx * k, B.rise * k)
+    badge:SetSize(B.size * k, B.size * k)
+    badge.icon:SetSize(B.icon * k, B.icon * k)
+end
+
+local function ApplyBadge()
+    Guard(WriteBadge)
 end
 
 -------------------------------------------------------------------------------
@@ -614,7 +710,8 @@ local function Register(frame, event, unit)
 end
 
 local function Layout()
-    SeatPlain(Tags.level, "TOPLEFT", C.LEVEL, C.RISE, Tags.colors.white)
+    SeatLevel()
+    SeatBadge()
     FitLevel()
     RefitLevelLater()
     SeatPlain(Tags.health, "BOTTOMLEFT", C.HEALTH, C.OVERLAP, Tags.colors.green)
@@ -640,9 +737,19 @@ local function Build()
     local health = NewTag(box.frame, "Frame")
     Tags.level, Tags.health = level, health
     GunsightTags.level, GunsightTags.health = level, health
+    -- The class badge: a plain tile (never a secure frame, no mouse: the target menu button under it keeps the clicks) holding the icon.
+    local badge = NewTag(box.frame, "Frame")
+    badge:EnableMouse(false)
+    badge.icon = badge:CreateTexture(nil, "ARTWORK")
+    badge.icon:SetTexture(C.CLASS.texture)
+    badge.icon:SetPoint("CENTER", badge, "CENTER", 0, 0)
+    badge:Hide()
+    Tags.classBadge = badge
+    GunsightTags.classBadge = badge
     Layout()
     ApplyLevel()
     ApplyHealth()
+    Guard(WriteBadgeForNewTarget)
     -- The numbers row grows the box up; the tape's own hook (set when the box was built) keeps running, then the button follows.
     local grown = box.onGrow
     box.onGrow = function(b)
@@ -664,6 +771,7 @@ local function Build()
         if not IsSecret(unit) and type(unit) == "string" and unit ~= "target" then return end
         if event == "PLAYER_TARGET_CHANGED" or event == "PLAYER_ENTERING_WORLD" then
             Guard(WriteLevelForNewTarget)
+            Guard(WriteBadgeForNewTarget)
         elseif event ~= "UNIT_TARGET" then
             Guard(WriteLevel)
         end
@@ -679,6 +787,7 @@ local function Build()
         end
         if Tags.pendingSeat then Guard(SeatTot) end
         if Tags.pendingMenu then Guard(SeatMenu) end
+        Guard(WriteBadge)   -- a class that was secret in the fight may be readable now
         Guard(SyncTot)
         Guard(SyncMenu)
     end)
@@ -697,6 +806,7 @@ end
 Config.OnChange(SETTINGS.level.key, ApplyLevel)
 Config.OnChange(SETTINGS.health.key, ApplyHealth)
 Config.OnChange(SETTINGS.tot.key, SyncTot)
+Config.OnChange(SETTINGS.classIcon.key, ApplyBadge)
 
 Gunsight.OnReady(function()
     local ok, err = pcall(Build)

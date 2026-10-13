@@ -1349,9 +1349,14 @@ local function TargetSideGroups(page)
     if Tags and Tags.SETTINGS then
         local S = Tags.SETTINGS
         UI.Header(page, "Target box tags", "Small tags on the target info box.")
-        for _, tag in ipairs({ { "Level and class", "level" }, { "Health percent", "health" }, { "Target of target", "tot" } }) do
+        local CLASS_ICON_TIP = "Shows the target's class icon in a corner tile on the target box when the target is a player. "
+            .. "Nothing is drawn for creatures, or when the game hides the class during combat."
+        for _, tag in ipairs({
+            { "Level and class", "level" }, { "Player class icon", "classIcon", CLASS_ICON_TIP },
+            { "Health percent", "health" }, { "Target of target", "tot" },
+        }) do
             local setting = S[tag[2]]
-            if setting and setting.key then UI.Toggle(page, { label = tag[1], key = setting.key }) end
+            if setting and setting.key then UI.Toggle(page, { label = tag[1], key = setting.key, tip = tag[3] }) end
         end
     end
     -- My buffs is deferred to the next release behind FS.Features.myBuffs (set in GunsightMyBuffs.lua); off, it has no row.

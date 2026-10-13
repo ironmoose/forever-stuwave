@@ -397,6 +397,17 @@ Not yet checked in game. With numbers off the target box is exactly as before.
 3. Check "Current / max" with a large health pool: a long value is cut at the half row, not run into the other number. Say if it overlaps or looks too tight.
 4. Toggle numbers during combat: the box grows at once and nothing is blocked.
 
+## Gunsight: player class badge
+
+Not yet checked in game. Mocked checks cover the seat, the tex coords per class, the secret-safe reads and the combat rules, not how it looks. Design: `mockups/gunsight-player-class-icon-2026-10-13.html`, concept B, with the game's own round class icon instead of the mockup's drawn disc. A `/reload` applies it; no full restart is needed (no new file). Switch: "Player class icon" on the Gunsight HUD page under Target box tags, on by default.
+
+1. Target a player (a friendly one in town is enough): a small chamfered tile with the round class icon sits on the target box's top left corner, hanging out of the box, and the level tag is a little further right than usual. Try a few classes (a Priest, a Warlock, a Rogue, a Druid) and say if any icon is the wrong class or is cropped, stretched or square instead of round.
+2. Target an NPC, a pet and a totem: no tile, and the level tag is exactly where it always was. Switch from a player to an NPC and back: the tile goes and returns with the right class at once, never the previous target's class.
+3. The tile's outline follows the box: steel at rest, pink while the target casts something you can kick, red for INTERRUPTED, the same as the level tag. Judge whether its cut corner clears the target's name, with the box at both short and long names.
+4. Right click the box and the tile: the unit menu opens, and clicking or dragging over the tile does nothing of its own (it takes no mouse). Left click still targets and turns the camera.
+5. In combat: target a player after the pull starts (and a player who attacks you), then target a mob. Say whether the badge shows for a player in combat; the game may hide the class and the player flag there, and then no badge is the correct result (the level tag stays at its normal place). When the fight ends a hidden badge should appear within a moment. `/fsbug` should report no blocked action.
+6. Turn the switch off: the tile goes at once and the level tag returns to its normal seat. Turn the Target piece or the Gunsight HUD off: the tile goes with the box. Change the screen scale: the tile and the level tag re-seat.
+
 ## My buffs: DEFERRED to the next release, skip these steps
 
 The plate is hidden behind `FS.Features.myBuffs` (false by default, set at the top of `GunsightMyBuffs.lua`), and the My buffs row is not in /fsconfig. Do not test it this release; the steps stay for when the flag goes on. Nothing of it shows in game, and a saved "on" setting does nothing.
