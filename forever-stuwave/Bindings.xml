@@ -12,4 +12,6 @@
     <Binding name="CLICK FSTotemButton4:LeftButton" category="ADDONS"/>
     <Binding name="CLICK FSTotemButton5:LeftButton" category="ADDONS"/>
     <Binding name="CLICK FSTotemButton6:LeftButton" category="ADDONS"/>
+    <Binding name="CLICK FSBuffTabButton1:LeftButton" category="ADDONS"/>
+    <Binding name="CLICK FSBuffTabButton2:LeftButton" category="ADDONS"/>
 </Bindings>

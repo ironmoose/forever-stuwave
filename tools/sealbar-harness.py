@@ -1241,8 +1241,10 @@ def check_bindings_xml_declares_the_seven_seal_commands_only():
     assert BINDINGS.exists(), "Bindings.xml is missing"
     root = ET.parse(BINDINGS).getroot()
     items = root.findall("Binding")
-    # the totem tab's FSTotemButton commands follow (totembar-harness.py pins them); seals first, no aura
-    names = [b.get("name") for b in items if "FSTotemButton" not in b.get("name", "")]
+    # the totem tab's FSTotemButton and the buff tab's FSBuffTabButton commands follow (totembar-harness.py and
+    # buffbar-harness.py pin them); seals first, no aura
+    names = [b.get("name") for b in items
+             if "FSTotemButton" not in b.get("name", "") and "FSBuffTabButton" not in b.get("name", "")]
     want = [f"CLICK FSSealButton{i}:LeftButton" for i in range(1, 8)]
     assert names == want, f"binding names {names} (seals only: an aura key is Blizzard's SHAPESHIFTBUTTONi)"
     headers = [b.get("header") for b in items]

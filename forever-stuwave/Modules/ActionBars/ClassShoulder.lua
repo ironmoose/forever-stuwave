@@ -28,7 +28,17 @@
 -- of it; the Console's glow ends where they begin).
 -- When the shoulder goes (Console off) the gap is closed and handed back (ReclaimGap).
 --
--- Loads after PetDock.lua and ConsoleKeys.lua, before SealBar.lua and TotemBar.lua. Nothing here is verified in game.
+-- A class may own a SECOND shoulder (`also`): the Shaman's buff tab (BuffTab.lua, 2 x 1, 92.8 x 49) stands on the
+-- Console's top edge at 316 design px, 16 right of the totem tab's left edge plus its 264: the totem tab ends at 300
+-- and its flare reaches 310, so 6 px of chassis top line stay visible between the two. Each shoulder is its own art
+-- (NewShoulder has no resize) with its own `wants` and `changed`. The Console has ONE dock gap, so while several
+-- stand the gap is the union of their spans, and the stretch of top line that union opens between two shoulders is
+-- joined with a plain line texture of the Console's own colour (a hole the mockup does not have). Every function that
+-- answers a seat takes an optional `key` (default: the class's first shoulder, so the Paladin, Warrior and totem tab
+-- callers are unchanged).
+--
+-- Loads after PetDock.lua and ConsoleKeys.lua, before SealBar.lua, TotemBar.lua and BuffTab.lua. Nothing here is
+-- verified in game.
 
 local _, FS = ...
 
@@ -83,18 +93,43 @@ local OWNERS = {
         changed = function()
             if FS.TotemBar and FS.TotemBar.Sync then FS.TotemBar.Sync() end
         end,
+        -- the buff tab: IMBUE and SHIELD, right of the totem tab (mockup shaman-buff-tab-2026-10-12)
+        also = {
+            {
+                key = "shamanbuff", dx = 316, cols = 2, rows = 1,
+                wants = function()
+                    local tab = FS.BuffTab
+                    return tab and tab.OwnsShoulder and tab.OwnsShoulder()
+                end,
+                changed = function()
+                    if FS.BuffTab and FS.BuffTab.Sync then FS.BuffTab.Sync() end
+                end,
+            },
+        },
     },
 }
-for _, owner in pairs(OWNERS) do owner.w, owner.h = BlockSize(owner.cols, owner.rows) end
+-- every shoulder def, flat: the owner's first, then its `also` list
+local DEFS = {}
+for _, owner in pairs(OWNERS) do
+    owner.dx = owner.dx or C.DX
+    owner.w, owner.h = BlockSize(owner.cols, owner.rows)
+    DEFS[owner.key] = owner
+    for _, extra in ipairs(owner.also or {}) do
+        extra.dx = extra.dx or C.DX
+        extra.w, extra.h = BlockSize(extra.cols, extra.rows)
+        DEFS[extra.key] = extra
+    end
+end
 
-local shoulder
-local shoulders = {}      -- built once per owner, never resized (NewShoulder has no resize)
-local standing            -- the owner whose shoulder is `shoulder`
-local shown = false
+local stands = {}      -- key -> { shoulder, shown }: built once per def, never resized (NewShoulder has no resize)
+local primary             -- the def of the player's class's first shoulder (what the key-less calls answer)
 local holdsGap = false
+local gapKey              -- the span in force, so an unchanged gap is not asked for again
+local links = {}        -- plain line textures over the top line between two shoulders
 local pending = false
 local failed = false
 local warned = {}
+ClassShoulder.shoulder = nil     -- the first shoulder's art object while it stands
 
 local function Scale()
     return (FS.Layout and FS.Layout.Scale and FS.Layout.Scale()) or 1
@@ -119,14 +154,22 @@ local function PlayerClass()
     return token
 end
 
+-- The shoulders the player's class wants right now, in order (the Console drawn is the first condition), and the
+-- console.
 local function Wanted()
     local owner = OWNERS[PlayerClass()]
-    if not (owner and owner.wants()) then return nil end
+    primary = owner
     local console = Console()
-    if console and console.IsDrawn() then return console, owner end
+    if not (owner and console and console.IsDrawn()) then return console, {} end
+    local list = {}
+    if owner.wants() then list[#list + 1] = owner end
+    for _, extra in ipairs(owner.also or {}) do
+        if extra.wants() then list[#list + 1] = extra end
+    end
+    return console, list
 end
 
-local function Build(console, owner)
+local function Build(console, def)
     if failed then return nil end
     local dock = FS.PetDock
     if not (dock and dock.NewShoulder) then
@@ -142,7 +185,7 @@ local function Build(console, owner)
         WarnOnce("classshoulder_notokens", "the Console exports no chassis look, the class shoulder is not drawn")
         return nil
     end
-    local ok, made, why = pcall(dock.NewShoulder, console.root, owner.w, owner.h, {
+    local ok, made, why = pcall(dock.NewShoulder, console.root, def.w, def.h, {
         chassis = {
             fill = { top[1], top[2], top[3], top[4] },
             strokeAlpha = stroke,
@@ -158,89 +201,174 @@ local function Build(console, owner)
     return made
 end
 
--- Takes the Console's top gap (PetDock yields first), once per stretch the shoulder stands.
-local function TakeGap(console)
+local function Stand(key)
+    local def = key and DEFS[key] or primary
+    local st = def and stands[def.key]
+    if st and st.shown and st.shoulder then return st, def end
+end
+
+-- The Console gap for the shoulders standing: line x0, x1 and halo x0, x1, each the widest of every shoulder's own
+-- span (the spans of neighbours overlap or touch; the stretch of line a union opens between two is joined).
+local function UnionSpan(list)
+    local a, b, c, d
+    for _, item in ipairs(list) do
+        local x0, x1, h0, h1 = item.st.shoulder:GapSpan(item.def.dx)
+        if x0 then
+            a, c = math.min(a or x0, x0), math.min(c or h0, h0)
+            b, d = math.max(b or x1, x1), math.max(d or h1, h1)
+        end
+    end
+    return a, b, c, d
+end
+
+-- Plain line pieces over the Console's top line where the union of the gaps opened it between two shoulders
+-- (their own halo pieces already cover the glow there). One texture per such stretch, the Console's line colour.
+local function SeatLinks(console, list)
+    local used = 0
+    local art = console.art
+    local theme = FS.Theme
+    local colour = theme and theme.COLOR_BORDER
+    if art and colour and type(console.OUTLINE_ALPHA) == "number" then
+        local sorted = {}
+        for _, item in ipairs(list) do sorted[#sorted + 1] = item end
+        table.sort(sorted, function(l, r) return l.def.dx < r.def.dx end)
+        for i = 1, #sorted - 1 do
+            local _, endsAt = sorted[i].st.shoulder:GapSpan(sorted[i].def.dx)
+            local startsAt = sorted[i + 1].st.shoulder:GapSpan(sorted[i + 1].def.dx)
+            if endsAt and startsAt and startsAt > endsAt then
+                used = used + 1
+                local tex = links[used]
+                if not tex then
+                    tex = art:CreateTexture(nil, "BORDER", nil, 0)
+                    links[used] = tex
+                end
+                tex:SetColorTexture(colour[1], colour[2], colour[3], console.OUTLINE_ALPHA)
+                tex:ClearAllPoints()
+                tex:SetPoint("TOPLEFT", art, "TOPLEFT", endsAt, 0)
+                tex:SetSize(startsAt - endsAt, 1)
+                tex:Show()
+            end
+        end
+    end
+    for i = used + 1, #links do links[i]:Hide() end
+end
+
+-- Takes the Console's top gap (PetDock yields first) for the shoulders standing, and widens or narrows it when the
+-- set changes. Nothing is asked of the Console while the span is the one already in force.
+local function SyncGap(console, list)
     local dock = FS.PetDock
-    if holdsGap then return end
-    if not (dock and dock.YieldGap and dock.YieldGap(C.OWNER)) then
+    if #list == 0 then
+        SeatLinks(console, list)
+        if holdsGap then
+            holdsGap, gapKey = false, nil
+            if console.SetDockGap then console.SetDockGap(nil, nil) end
+            if dock and dock.ReclaimGap then dock.ReclaimGap(C.OWNER) end
+        end
+        return
+    end
+    if not holdsGap and not (dock and dock.YieldGap and dock.YieldGap(C.OWNER)) then
         WarnOnce("classshoulder_gap", "another module holds the Console's top gap, the class shoulder leaves it alone")
         return
     end
-    if console.SetDockGap(shoulder:GapSpan(C.DX)) then
-        holdsGap = true
+    local a, b, c, d = UnionSpan(list)
+    local key = tostring(a) .. ":" .. tostring(b) .. ":" .. tostring(c) .. ":" .. tostring(d)
+    if holdsGap and gapKey == key then
+        SeatLinks(console, list)
+        return
+    end
+    if console.SetDockGap(a, b, c, d) then
+        holdsGap, gapKey = true, key
+        SeatLinks(console, list)
     else
         pending = true
     end
 end
 
--- Tells the owner its seat appeared or went, once per change; its failure must not stop the shoulder.
-local function Notify()
-    if standing and standing.changed then pcall(standing.changed) end
-end
-
-local function Show(console, owner)
-    shoulders[owner.key] = shoulders[owner.key] or Build(console, owner)
-    shoulder, standing = shoulders[owner.key], owner
-    ClassShoulder.shoulder = shoulder
-    if not shoulder then return end
+-- Seats and shows one shoulder; true when it was not standing before.
+local function ShowOne(console, def)
+    local st = stands[def.key]
+    if not st then
+        st = {}
+        stands[def.key] = st
+    end
+    st.shoulder = st.shoulder or Build(console, def)
+    if not st.shoulder then return false end
     -- Seat first (the art stands on the chassis top edge), then the scale and level; the art shows only
     -- once it is where it belongs.
-    shoulder:Seat("BOTTOMLEFT", console.root, "TOPLEFT", C.DX, 0)
-    shoulder:Rescale()
-    shoulder.art:Show()
-    local was = shown
-    shown = true
-    TakeGap(console)
-    if not was then Notify() end
-end
-
-local function Hide()
-    local was = shown
-    if shoulder and shown then shoulder.art:Hide() end
-    shown = false
-    if holdsGap then
-        holdsGap = false
-        local console = FS.Console
-        if type(console) == "table" and console.SetDockGap then console.SetDockGap(nil, nil) end
-        if FS.PetDock and FS.PetDock.ReclaimGap then FS.PetDock.ReclaimGap(C.OWNER) end
-    end
-    if was then Notify() end
+    st.shoulder:Seat("BOTTOMLEFT", console.root, "TOPLEFT", def.dx, 0)
+    st.shoulder:Rescale()
+    st.shoulder.art:Show()
+    local was = st.shown
+    st.shown = true
+    return not was
 end
 
 -- The one entry: builds, seats, shows or hides to match the world. Out of combat only; a request in combat
--- waits for PLAYER_REGEN_ENABLED.
+-- waits for PLAYER_REGEN_ENABLED. The owners are told once per change, after the gap is settled.
 function ClassShoulder.Refresh()
     if InCombatLockdown() then
         pending = true
         return
     end
     pending = false
-    local console, owner = Wanted()
-    if console then Show(console, owner) else Hide() end
+    local console, wanted = Wanted()
+    local want, told = {}, {}
+    for _, def in ipairs(wanted) do want[def.key] = true end
+    for key, st in pairs(stands) do
+        if st.shown and not want[key] then
+            if st.shoulder then st.shoulder.art:Hide() end
+            st.shown = false
+            told[#told + 1] = DEFS[key]
+        end
+    end
+    local list = {}
+    for _, def in ipairs(wanted) do
+        if ShowOne(console, def) then told[#told + 1] = def end
+        local st = stands[def.key]
+        if st and st.shown then list[#list + 1] = { st = st, def = def } end
+    end
+    -- the first shoulder's art object stays reachable after it hides (it is built once)
+    local first = primary and stands[primary.key]
+    if first and first.shoulder then ClassShoulder.shoulder = first.shoulder end
+    if console then
+        SyncGap(console, list)
+    elseif holdsGap then
+        holdsGap, gapKey = false, nil
+        local bare = FS.Console
+        if type(bare) == "table" and bare.SetDockGap then bare.SetDockGap(nil, nil) end
+        if FS.PetDock and FS.PetDock.ReclaimGap then FS.PetDock.ReclaimGap(C.OWNER) end
+    end
+    for _, def in ipairs(told) do
+        if def.changed then pcall(def.changed) end
+    end
 end
 
-function ClassShoulder.IsShown()
-    return shown
+-- true while the shoulder (the class's first, or the one named by `key`) stands.
+function ClassShoulder.IsShown(key)
+    return Stand(key) ~= nil
 end
 
 -- The standing block's size and button edge in UI units (design px x the layout scale), or nil while no
 -- shoulder stands.
-function ClassShoulder.BlockSize()
-    if not (shown and shoulder) then return nil end
+function ClassShoulder.BlockSize(key)
+    local st, def = Stand(key)
+    if not st then return nil end
     local s = Scale()
-    return standing.w * s, standing.h * s, C.BTN * s
+    return def.w * s, def.h * s, C.BTN * s
 end
 
 -- The owner's seat, from the same numbers: nil while no shoulder stands (the owner then uses its own).
-function ClassShoulder.HostPoint()
-    if not (shown and shoulder) then return nil end
-    return "BOTTOMLEFT", shoulder.parent, "TOPLEFT", C.DX * Scale(), 0
+function ClassShoulder.HostPoint(key)
+    local st, def = Stand(key)
+    if not st then return nil end
+    return "BOTTOMLEFT", st.shoulder.parent, "TOPLEFT", def.dx * Scale(), 0
 end
 
-function ClassShoulder.SlotPoint(host, row, col)
-    if not (shown and shoulder) then return nil end
+function ClassShoulder.SlotPoint(host, row, col, key)
+    local st, def = Stand(key)
+    if not st then return nil end
     local s, pitch = Scale(), C.BTN + C.GAP
-    return "BOTTOMLEFT", host, "BOTTOMLEFT", (C.PAD + (col - 1) * pitch) * s, (C.PB + (standing.rows - row) * pitch) * s
+    return "BOTTOMLEFT", host, "BOTTOMLEFT", (C.PAD + (col - 1) * pitch) * s, (C.PB + (def.rows - row) * pitch) * s
 end
 
 -- The Console geometry callback and the rescale watcher register at file load, ahead of SealBar's own

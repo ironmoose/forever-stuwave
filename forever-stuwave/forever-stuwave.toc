@@ -69,6 +69,8 @@ Modules/ActionBars/ConsoleKeys.lua
 Modules/ActionBars/ClassShoulder.lua
 Modules/ActionBars/SealBar.lua
 Modules/ActionBars/TotemBar.lua
+Modules/ActionBars/ShamanBuffs.lua
+Modules/ActionBars/BuffTab.lua
 Modules/CombatHud/CombatHud.lua
 Modules/CombatHud/GunsightClass.lua
 Modules/CombatHud/GunsightShaman.lua

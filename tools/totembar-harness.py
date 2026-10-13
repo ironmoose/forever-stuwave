@@ -986,7 +986,8 @@ def check_hotkey_text_and_quick_keybind_commands():
 
 def check_bindings_xml_declares_six_totem_commands_after_the_seals():
     root = ET.parse(BINDINGS).getroot()
-    names = [b.get("name") for b in root.findall("Binding")]
+    # the buff tab's two commands follow (buffbar-harness.py pins them)
+    names = [b.get("name") for b in root.findall("Binding") if "FSBuffTabButton" not in b.get("name", "")]
     want = [f"CLICK FSSealButton{i}:LeftButton" for i in range(1, 8)] + [
         f"CLICK FSTotemButton{i}:LeftButton" for i in range(1, 7)]
     assert names == want, f"binding names {names}"

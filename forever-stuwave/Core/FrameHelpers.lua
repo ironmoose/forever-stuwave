@@ -1819,3 +1819,120 @@ end
 function Helpers.OnQuickKeybindChanged(fn)
     qkRefreshers[#qkRefreshers + 1] = fn
 end
+
+-------------------------------------------------------------------------------
+-- Class tab helpers (TotemBar.lua, BuffTab.lua): spells, hotkey label, tooltip anchor
+-------------------------------------------------------------------------------
+
+-- A value only when it is plain (not secret) and of the wanted type, else nil.
+function Helpers.PlainValue(v, kind)
+    if IsSecret(v) or v == nil or type(v) ~= kind then return nil end
+    return v
+end
+local PlainValue = Helpers.PlainValue
+
+-- spellID, iconID of a spell by (localized) name, plain values only; nil when the name does not resolve. For a
+-- spell the player knows this answers the highest rank.
+function Helpers.ResolveSpell(name)
+    local modern = C_Spell and C_Spell.GetSpellInfo
+    if modern then
+        local ok, info = pcall(modern, name)
+        if ok and not IsSecret(info) and type(info) == "table" then
+            return PlainValue(info.spellID, "number"), PlainValue(info.iconID, "number")
+        end
+        return nil
+    end
+    if GetSpellInfo then
+        local ok, _, _, icon, _, _, _, id = pcall(GetSpellInfo, name)
+        if ok then return PlainValue(id, "number"), PlainValue(icon, "number") end
+    end
+    return nil
+end
+
+-- name, iconID of a spell by id, plain values only.
+function Helpers.SpellById(id)
+    local modern = C_Spell and C_Spell.GetSpellInfo
+    if modern then
+        local ok, info = pcall(modern, id)
+        if ok and not IsSecret(info) and type(info) == "table" then
+            return PlainValue(info.name, "string"), PlainValue(info.iconID, "number")
+        end
+        return nil
+    end
+    if GetSpellInfo then
+        local ok, name, _, icon = pcall(GetSpellInfo, id)
+        if ok then return PlainValue(name, "string"), PlainValue(icon, "number") end
+    end
+    return nil
+end
+
+-- true when the player knows this spell id, asking every spellbook API the client has. An API that raises or
+-- answers secret counts as "no" and is asked again at the next event. With none of them present the answer is
+-- `fallback` (default true: the id already resolved, which in this spellbook API means known).
+function Helpers.IsKnownSpellId(id, fallback)
+    local fns = { IsPlayerSpell, IsSpellKnown, C_SpellBook and C_SpellBook.IsSpellKnown }
+    local asked = false
+    for i = 1, 3 do
+        local fn = fns[i]
+        if fn then
+            asked = true
+            local ok, answer = pcall(fn, id)
+            if ok and not IsSecret(answer) and answer then return true end
+        end
+    end
+    if asked then return false end
+    return fallback ~= false
+end
+
+-- The key label in a button's top right corner (button.HotKey, its plate button.fsHotkeyPlate and the command
+-- button.fsCommand), shown only while the command has a binding.
+function Helpers.UpdateButtonHotkey(button)
+    local hotkey = button.HotKey
+    if not hotkey then return end
+    local key = GetBindingKey(button.fsCommand)
+    local text = Helpers.FormatBindingText(key)
+    if text == "" then
+        hotkey:SetText("")
+        hotkey:Hide()
+        if button.fsHotkeyPlate then button.fsHotkeyPlate:Hide() end
+        return
+    end
+    hotkey:SetText(text)
+    hotkey:Show()
+    if button.fsHotkeyPlate then button.fsHotkeyPlate:Show() end
+end
+
+-- Builds (once) and seats the key label: button.HotKey on the text host SeatButtonText returns, top right, mono
+-- 10, with the dark plate behind it. `textHost` is that frame. Call again on every re-seat.
+function Helpers.SeatButtonHotkey(button, textHost)
+    if not button.HotKey then
+        button.HotKey = button:CreateFontString(nil, "OVERLAY")
+    end
+    local hotkey = button.HotKey
+    if hotkey:GetParent() ~= textHost then hotkey:SetParent(textHost) end
+    hotkey:ClearAllPoints()
+    hotkey:SetWidth(0)
+    hotkey:SetPoint("TOPRIGHT", button, "TOPRIGHT", -3, -2)
+    hotkey:SetJustifyH("RIGHT")
+    hotkey:SetDrawLayer("OVERLAY", 4)
+    Theme.ApplyMono(hotkey, 10, Theme.COLOR_TEXT_WHITE)
+    if not button.fsHotkeyPlate then
+        local plate = textHost:CreateTexture(nil, "OVERLAY", nil, 3)
+        plate:SetColorTexture(0.024, 0.012, 0.071, 0.78)
+        plate:SetPoint("TOPLEFT", hotkey, "TOPLEFT", -3, 2)
+        plate:SetPoint("BOTTOMRIGHT", hotkey, "BOTTOMRIGHT", 3, -2)
+        plate:Hide()
+        button.fsHotkeyPlate = plate
+    end
+    return hotkey
+end
+
+-- Puts GameTooltip on `owner` at the default anchor (the action bars' corner), else above the owner.
+function Helpers.AnchorTooltip(owner)
+    local tip = GameTooltip
+    if _G.GameTooltip_SetDefaultAnchor then
+        _G.GameTooltip_SetDefaultAnchor(tip, owner)
+    else
+        tip:SetOwner(owner, "ANCHOR_TOP")
+    end
+end
