@@ -69,3 +69,34 @@ def test_cli_fails_on_flagged_strings_and_identifiers_but_not_comments(tmp_path:
 def test_cli_fails_when_the_source_does_not_compile(tmp_path: Path) -> None:
     result = _run(tmp_path, "local = = 1\n")
     assert result.returncode == 1 and "compile" in result.stderr
+
+
+def test_cli_flags_probe_recon_secret_value_test_strip_and_monitor(tmp_path: Path) -> None:
+    for source in ('print("fsprobe: help")', 'local s = "/fsrecon skins"', 'local s = "secret-value readout"',
+                   'local s = "Secret value check"', 'local s = "TEST STRIP (temporary)"',
+                   'local s = "monitor the target"', 'local s = "probe run"', 'local s = "stuwave://recon"',
+                   'local s = "reconPos"', 'local s = "fontProbe"',
+                   "local probeCall = 1", "local function RunPetProbe() end", "local reconGroups = {}",
+                   "FSProbeHeader = 1", "local test_strip = 1", "local monitorFrame = 1"):
+        bad = _run(tmp_path, source + "\n")
+        assert bad.returncode == 1 and "A.lua:1" in bad.stderr, source
+
+
+def test_cli_does_not_flag_lookalike_words_or_blizzard_secret_apis(tmp_path: Path) -> None:
+    for source in ('local s = "reconcile the list"', "local reconcileLayout = 1", 'local s = "reconnect"',
+                   "local p = PixelUtil.GetNearestPixelSize(1, 1, 1)", "local a = issecretvalue(x)",
+                   "local b = canaccesssecrets", 'local s = "improbable"', "local protest = 1",
+                   'local s = "Contest stripe"', 'local m = "HasSecretValues"'):
+        ok = _run(tmp_path, source + "\n")
+        assert ok.returncode == 0, source + "\n" + ok.stderr
+
+
+def test_cli_flags_toc_text_and_shipped_file_names(tmp_path: Path) -> None:
+    (tmp_path / "A.lua").write_text("local a = 1\n")
+    (tmp_path / "x.toc").write_text("## Title: X\nModules/Diagnostics/FSProbe.lua\n")
+    bad = subprocess.run([sys.executable, str(TOOL), str(tmp_path)], capture_output=True, text=True, check=False)
+    assert bad.returncode == 1 and "x.toc:2" in bad.stderr
+    (tmp_path / "x.toc").write_text("## Title: X\nA.lua\n")
+    (tmp_path / "FSProbe.lua").write_text("local b = 1\n")
+    named = subprocess.run([sys.executable, str(TOOL), str(tmp_path)], capture_output=True, text=True, check=False)
+    assert named.returncode == 1 and "FSProbe.lua" in named.stderr

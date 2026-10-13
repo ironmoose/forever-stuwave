@@ -13,8 +13,10 @@ the compiled form of the original and of the rewrite (instructions, constants, n
 identical (LuaJIT through lupa, the same engine as tools/parse-gate.py), otherwise this exits non-zero and nothing should be installed.
 
 Finally the staged text is scanned: string literals (and .toc / .xml text) for developer-tool vocabulary,
-and identifiers for the same list minus "pixel" (PixelUtil is a Blizzard API). Any hit is printed with
-file and line and the exit status is non-zero.
+and identifiers for the same list minus "pixel" (PixelUtil is a Blizzard API) and the secret-value phrase
+(issecretvalue is one too). File names are scanned as well. Words such as probe, recon and monitor, and the
+phrase "test strip", are matched by whole word (camelCase and underscores split), so "reconcile" passes.
+Any hit is printed with file and line and the exit status is non-zero.
 """
 
 from __future__ import annotations
@@ -38,6 +40,24 @@ STRING_TERMS = {
 }
 CODE_TERMS = {k: v for k, v in STRING_TERMS.items() if k != "pixel"}
 
+# Developer-instrumentation vocabulary matched by WORD, not substring: text (and identifiers) are split
+# into words on punctuation, digits and camelCase humps, so "FSProbe", "probe_run" and "RunPetProbe" hit
+# "probe" while "reconcile", "improbable" and "issecretvalue" (a Blizzard API) do not.
+WORD_TERMS = {
+    "probe": {"probe", "probes", "probed", "probing", "fsprobe"},
+    "recon": {"recon", "fsrecon"},
+    "monitor": {"monitor", "monitors", "monitored", "monitoring"},
+}
+# Phrases. Text is matched with a separator between the words ("secret-value", "Secret value",
+# "test_strip"); a camelCase run such as the Blizzard method name HasSecretValues is not text. An
+# identifier is checked for the camelCase form of "test strip" only (issecretvalue and friends are
+# Blizzard APIs and stay legal).
+TEXT_PHRASES = {
+    "secret-value": r"(?<![a-z])secret[\s_-]+values?(?![a-z])",
+    "test strip": r"(?<![a-z])test[\s_-]+strip(?![a-z])",
+}
+
+_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
 _LONG_OPEN = re.compile(r"\[(=*)\[")
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -197,9 +217,24 @@ def _runtime():
     return LuaRuntime(encoding=None, register_eval=False).eval(_CANON)
 
 
+def word_hits(text: str, kind: str) -> list[str]:
+    """Names of the WORD_TERMS / phrases found in text (see the tables above)."""
+    words = [w.lower() for w in _WORD.findall(text)]
+    found = [name for name, forms in WORD_TERMS.items() if forms.intersection(words)]
+    if kind == "identifier":
+        if any(a == "test" and b == "strip" for a, b in zip(words, words[1:])):
+            found.append("test strip")
+    else:
+        found += [name for name, pattern in TEXT_PHRASES.items() if re.search(pattern, text, re.I)]
+    return found
+
+
 def scan(rel: str, kind: str, items: list[tuple[int, str]], terms: dict[str, str]) -> list[str]:
     hits = []
     for line, text in items:
+        for name in word_hits(text, kind):
+            shown = text if len(text) <= 90 else text[:87] + "..."
+            hits.append(f"{rel}:{line}: {kind} matches '{name}': {shown!r}")
         for name, pattern in terms.items():
             if kind == "identifier" and name == "bot" and text.isupper():
                 continue  # BOT / FILL_BOT are "bottom"
@@ -228,6 +263,9 @@ def main(argv: list[str]) -> int:
             continue
         rel = path.relative_to(stage).as_posix()
         suffix = path.suffix.lower()
+        for part in rel.rsplit(".", 1)[0].split("/"):
+            for name in word_hits(part, "file name"):
+                hits.append(f"{rel}: file name matches '{name}'")
         if suffix == ".lua":
             original = path.read_bytes().decode("latin-1")
             try:
