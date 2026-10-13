@@ -76,7 +76,7 @@ mkdir -p ~/.local/share/applications
 cp tools/fsdev_support/forever-stuwave.desktop ~/.local/share/applications/
 ```
 
-Registration does not grant screen-sharing consent. Approve any portal prompt yourself. Keep captured account details, chats, and SavedVariables out of public commits.
+Registration does not grant screen-sharing consent. Approve any portal prompt yourself. The ScreenCast restore token is kept per app in `~/.cache/wow-tbc-bots/screencast_restore_token.forever-stuwave` (other tools keep their own file, since portal tokens are bound to the app that received them). A capture that times out or is denied closes its portal session and request and does not retry. Keep captured account details, chats, and SavedVariables out of public commits.
 
 ## Runtime compatibility and client constraints
 

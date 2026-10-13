@@ -94,7 +94,16 @@ _FRAME_TIMEOUT_S = 1.0
 _FRAME_CACHE_MAX_AGE_S = 0.016  # ~60Hz; reuse cached frame within this window
 
 _CACHE_DIR = Path.home() / ".cache" / "wow-tbc-bots"
-_RESTORE_TOKEN_PATH = _CACHE_DIR / "screencast_restore_token"
+# One token file PER APP. Portal restore tokens are bound to the app_id that
+# received them, so sharing a file with another tool (the bot registers
+# "primal-farmer") makes each tool overwrite the other's grant and the loser
+# gets a fresh consent dialog on every run. The old shared, unsuffixed file is
+# deliberately never read.
+_RESTORE_TOKEN_PATH = _CACHE_DIR / f"screencast_restore_token.{_APP_ID}"
+
+# Bounded wait for a best-effort Close call, so a wedged portal cannot hang
+# the cleanup path that exists to get rid of a stuck consent dialog.
+_CLOSE_TIMEOUT_S = 5.0
 
 # Auto-accept the GNOME screencast consent dialog by tapping a key through the
 # uinput virtual keyboard while the dialog holds keyboard focus. On mutter 50
@@ -261,6 +270,10 @@ def _request_path_for(unique_name: str, handle_token: str) -> str:
     """
     sender_clean = unique_name.lstrip(":").replace(".", "_")
     return f"/org/freedesktop/portal/desktop/request/{sender_clean}/{handle_token}"
+
+
+class _PortalTimeoutError(RuntimeError):
+    """A portal Request got no Response in time (its dialog may still be open)."""
 
 
 def _new_handle_token(prefix: str) -> str:
@@ -522,11 +535,13 @@ class _PortalClient:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise RuntimeError(f"{step_name}: timed out waiting for portal Response")
+                raise _PortalTimeoutError(f"{step_name}: timed out waiting for portal Response")
             try:
                 msg = self._conn.receive(timeout=remaining)
             except TimeoutError as exc:
-                raise RuntimeError(f"{step_name}: timed out waiting for portal Response") from exc
+                raise _PortalTimeoutError(
+                    f"{step_name}: timed out waiting for portal Response"
+                ) from exc
             if msg is None:
                 continue
             if msg.header.message_type != MessageType.signal:
@@ -595,7 +610,15 @@ class _PortalClient:
                 )
                 self._add_match(match_rule)
                 request_path = returned_path
-            return self._wait_for_response(request_path, step_name)
+            try:
+                return self._wait_for_response(request_path, step_name)
+            except _PortalTimeoutError:
+                # No Response means the Request is still live and its consent
+                # dialog may still be on screen. Close it so it cannot linger.
+                # (After a denied/cancelled Response the Request is already
+                # finished, so there is nothing to close.)
+                self.close_request(request_path, step_name)
+                raise
         finally:
             self._remove_match(match_rule)
 
@@ -722,14 +745,29 @@ class _PortalClient:
         logger.info("OpenPipeWireRemote: got fd=%d", fd)
         return fd
 
-    def close_session(self, session_handle: str) -> None:
-        """Call Session.Close on the session handle."""
-        addr = DBusAddress(session_handle, bus_name=_PORTAL_BUS, interface=_SESSION_IFACE)
-        msg = new_method_call(addr, "Close")
+    def _best_effort_close(self, addr: DBusAddress, what: str) -> None:
+        """Send ``Close`` to ``addr``; log and continue on any failure."""
         try:
-            self._conn.send_and_get_reply(msg)
+            reply = self._conn.send_and_get_reply(
+                new_method_call(addr, "Close"), timeout=_CLOSE_TIMEOUT_S
+            )
         except Exception as exc:
-            logger.debug("Session.Close failed (ignored): %s", exc)
+            logger.warning("%s.Close failed (ignored): %s", what, exc)
+            return
+        if reply.header.message_type == MessageType.error:
+            logger.warning(
+                "%s.Close returned an error (ignored): %s", what, reply.header.fields.get(4)
+            )
+
+    def close_session(self, session_handle: str) -> None:
+        """Call Session.Close on the session handle (log-and-continue)."""
+        addr = DBusAddress(session_handle, bus_name=_PORTAL_BUS, interface=_SESSION_IFACE)
+        self._best_effort_close(addr, "Session")
+
+    def close_request(self, request_path: str, step_name: str = "") -> None:
+        """Call Request.Close so a pending portal dialog is dismissed (log-and-continue)."""
+        logger.warning("%s: closing portal Request %s", step_name or "portal call", request_path)
+        self._best_effort_close(self._request_addr(request_path), "Request")
 
 
 # ---------------------------------------------------------------------------
@@ -1003,6 +1041,16 @@ class WaylandScreenCast:
     def _ensure_started(self) -> None:
         if self._reader is not None:
             return
+        try:
+            self._start_session()
+        except BaseException:
+            # A failed or denied start must not leave the portal session (and
+            # its consent dialog) open. No automatic retry: the caller sees
+            # the error and decides.
+            self._teardown_portal()
+            raise
+
+    def _start_session(self) -> None:
         self._portal = _PortalClient()
         self._session_handle = self._portal.create_session()
 
@@ -1152,20 +1200,24 @@ class WaylandScreenCast:
                 except OSError as exc:
                     logger.debug("Error closing PipeWire fd %d: %s", self._pw_fd, exc)
                 self._pw_fd = None
-            if self._portal is not None:
-                if self._session_handle is not None:
-                    try:
-                        self._portal.close_session(self._session_handle)
-                    except Exception as exc:
-                        logger.debug("Error closing portal session: %s", exc)
-                try:
-                    self._portal.close()
-                except Exception as exc:
-                    logger.debug("Error closing portal client: %s", exc)
-                self._portal = None
-            self._session_handle = None
+            self._teardown_portal()
             self._cached_frame = None
             self._cached_at = 0.0
+
+    def _teardown_portal(self) -> None:
+        """Close the portal session and D-Bus connection; log and continue on failure."""
+        if self._portal is not None:
+            if self._session_handle is not None:
+                try:
+                    self._portal.close_session(self._session_handle)
+                except Exception as exc:
+                    logger.warning("Error closing portal session: %s", exc)
+            try:
+                self._portal.close()
+            except Exception as exc:
+                logger.warning("Error closing portal client: %s", exc)
+            self._portal = None
+        self._session_handle = None
 
     def __enter__(self) -> WaylandScreenCast:
         return self
@@ -1184,6 +1236,8 @@ _internal_test_hooks = {
     "_APP_ID": _APP_ID,
     "_REGISTRY_IFACE": _REGISTRY_IFACE,
     "_PortalClient": _PortalClient,
+    "_PortalTimeoutError": _PortalTimeoutError,
+    "_RESTORE_TOKEN_PATH": _RESTORE_TOKEN_PATH,
     "_GstFrameReader": _GstFrameReader,
     "_extract_stream_size": _extract_stream_size,
     "_request_path_for": _request_path_for,
