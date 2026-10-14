@@ -2714,6 +2714,34 @@ def check_a_chooser_reopened_after_the_refusal_cleared_has_live_tiles():
     assert not shown(chooser) and dict(PS(lua).Get(i).picks) != picks, "a reopened chooser tile did not take the click"
 
 
+def check_the_pixel_unit_falls_through_to_the_screen_height_when_pixelutil_gives_nothing_usable():
+    lua = boot()
+    unit = lambda: g(lua).FS.FrameHelpers.PixelUnit(g(lua).UIParent)
+    ees = "__ees = 0.64"
+    run(lua, f"{ees}; GetPhysicalScreenSize = function() return 2560, 1440 end")
+    want = 768 / 1440 / 0.64
+    for label, setup in (
+        ("PixelUtil throws", "PixelUtil = { GetPixelToUIUnitFactor = function() error('boom') end }"),
+        ("PixelUtil answers nil", "PixelUtil = { GetPixelToUIUnitFactor = function() return nil end }"),
+        ("PixelUtil answers NaN", "PixelUtil = { GetPixelToUIUnitFactor = function() return 0 / 0 end }"),
+        ("PixelUtil answers infinity", "PixelUtil = { GetPixelToUIUnitFactor = function() return math.huge end }"),
+        ("PixelUtil answers zero", "PixelUtil = { GetPixelToUIUnitFactor = function() return 0 end }"),
+        ("PixelUtil answers a string", "PixelUtil = { GetPixelToUIUnitFactor = function() return 'x' end }"),
+        ("no PixelUtil", "PixelUtil = nil"),
+    ):
+        run(lua, setup)
+        got = unit()
+        assert got is not None and abs(float(got) - want) < 1e-9, f"{label}: {got}, wanted {want}"
+    # PixelUtil that works wins over the screen height
+    run(lua, "PixelUtil = { GetPixelToUIUnitFactor = function() return 0.5 end }")
+    assert abs(float(unit()) - 0.5 / 0.64) < 1e-9
+    # nothing usable anywhere: nil, and PixelsPerUnit says 1
+    run(lua, "PixelUtil = nil; GetPhysicalScreenSize = function() error('boom') end")
+    assert unit() is None and float(g(lua).FS.FrameHelpers.PixelsPerUnit(g(lua).UIParent)) == 1.0
+    run(lua, "GetPhysicalScreenSize = function() return 2560, 0 end")
+    assert unit() is None
+
+
 CHECKS = [
     check_toc_lists_the_preset_files_after_the_totem_bar_and_bindings_declare_the_dial,
     check_the_settings_have_their_keys_defaults_tips_and_registered_defaults,
@@ -2808,6 +2836,7 @@ CHECKS = [
     check_the_name_box_drops_its_hover_look_when_the_card_hides,
     check_ticks_with_an_unchanged_refusal_never_refresh_the_open_card,
     check_a_chooser_reopened_after_the_refusal_cleared_has_live_tiles,
+    check_the_pixel_unit_falls_through_to_the_screen_height_when_pixelutil_gives_nothing_usable,
     check_leaving_a_pick_cell_with_the_button_down_drops_the_pressed_look,
     check_a_disabled_row_does_not_light_its_edge_and_every_editor_texture_is_pixel_snapped,
     check_the_files_use_no_snippets_no_state_drivers_and_no_flagged_words,

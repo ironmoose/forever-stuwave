@@ -1421,23 +1421,28 @@ local DEFAULT_CUT_CHAMFER = 6
 -- UI units per physical screen pixel at `frame`, or nil when the client will not say. GetEffectiveScale is NOT pixels per
 -- unit: Blizzard_SharedXML/PixelUtil.lua turns units into pixels as Round(units * es / (768 / physicalHeight)), so one
 -- unit is es * physicalHeight / 768 pixels, and a pixel is PixelUtil.GetPixelToUIUnitFactor() / es units (768 / physical
--- height without PixelUtil). Parker's display (effective scale 0.64, physical height 1440) has 1 unit = 1.2 px. Secret and
--- non-finite answers are refused.
+-- height when PixelUtil is missing, throws or answers nothing usable). Parker's display (effective scale 0.64, physical
+-- height 1440) has 1 unit = 1.2 px. Secret and non-finite answers are refused.
+local function Good(v)
+    return type(v) == "number" and not IsSecret(v) and v == v and v > 0 and v < math.huge
+end
+
 function Helpers.PixelUnit(frame)
     local factor
     local pixelUtil, physical = _G.PixelUtil, _G.GetPhysicalScreenSize
     if type(pixelUtil) == "table" and type(pixelUtil.GetPixelToUIUnitFactor) == "function" then
         local ok, v = pcall(pixelUtil.GetPixelToUIUnitFactor)
-        if ok then factor = v end
-    elseif type(physical) == "function" then
-        local ok, _, h = pcall(physical)
-        if ok and type(h) == "number" and not IsSecret(h) and h > 0 then factor = 768 / h end
+        if ok and Good(v) then factor = v end
     end
-    if type(factor) ~= "number" or IsSecret(factor) or factor ~= factor or factor <= 0 or factor == math.huge then return nil end
+    if not factor and type(physical) == "function" then
+        local ok, _, h = pcall(physical)
+        if ok and Good(h) then factor = 768 / h end
+    end
+    if not factor then return nil end
     local scale = 1
     if frame and frame.GetEffectiveScale then
         local ok, v = pcall(frame.GetEffectiveScale, frame)
-        if ok and type(v) == "number" and not IsSecret(v) and v > 0 and v < math.huge then scale = v end
+        if ok and Good(v) then scale = v end
     end
     return factor / scale
 end
