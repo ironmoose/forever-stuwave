@@ -331,10 +331,16 @@ local function ShiftDown()
     return IsShiftKeyDown and IsShiftKeyDown() and true or false
 end
 
+local function AltDown()
+    return IsAltKeyDown and IsAltKeyDown() and true or false
+end
+
 local function OnClick(self, mouseButton, down)
     local cell = self.fsKey
     local PS = Presets()
     if mouseButton == "LeftButton" then
+        -- an Alt click (alone or with Ctrl) is blanked in ApplyCell and drops nothing: no press, flash or sound for it
+        if AltDown() and not ShiftDown() then return end
         if ShiftDown() then
             if not down and cell == "dial" then Dial.EditActive() end
             if not down and cell == "gnarly" then Dial.EditGnarly() end

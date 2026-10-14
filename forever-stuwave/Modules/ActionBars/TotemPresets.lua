@@ -475,7 +475,13 @@ end
 -- One refusal reason for an edit, or nil when it may go ahead.
 local function Refusal()
     if InCombat() then return "editing waits for combat to end" end
-    if not PS.Writable() then return "the presets cannot be saved this session" end
+    if not PS.Writable() then
+        -- a character key that is only unreadable for now (the database and Config are fine) passes by itself
+        if CharKey() == nil and type(_G.ForeverSTUwaveDB) == "table" and not ConfigReadOnly() then
+            return "presets will be editable in a moment"
+        end
+        return "the presets cannot be saved this session"
+    end
 end
 PS.Refusal = Refusal
 

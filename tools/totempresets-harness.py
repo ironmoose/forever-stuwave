@@ -106,6 +106,8 @@ function __Region:SetFocus() self._focus = true end
 -- the keys and the CVar the click path reads
 __shift = false
 function IsShiftKeyDown() return __shift end
+__alt = false
+function IsAltKeyDown() return __alt end
 __cvars = { ActionButtonUseKeyDown = "0" }
 C_CVar = C_CVar or {}
 C_CVar.GetCVar = function(name) return __cvars[name] end
@@ -764,6 +766,15 @@ def check_a_press_counts_on_the_event_the_game_acts_on():
     click(lua, d, "LeftButton", False)
     assert int(t.presses) == 2, "an edit click was counted as a drop"
     run(lua, "__shift = false")
+    # an Alt click drops nothing: no press either, on either cell
+    run(lua, "__alt = true")
+    gt = PS(lua).Tracker("gnarly")
+    for cell_btn in (d, btn(lua, "gnarly")):
+        click(lua, cell_btn, "LeftButton", True)
+        click(lua, cell_btn, "LeftButton", False)
+    assert int(t.presses) == 2 and int(gt.presses) == 0, "an Alt click was counted as a drop"
+    assert PS(lua).PressAge("gnarly") is None, "an Alt click started the GNARLY press flash"
+    run(lua, "__alt = false")
     click(lua, d, "RightButton", False)
     assert int(t.presses) == 2
 
@@ -1373,6 +1384,7 @@ def check_a_character_key_that_cannot_be_read_never_saves_under_a_made_up_one():
         assert P.Count() == 0 and P.Writable() is False
         r = P.Create()
         assert not r or r[0] is None, "an edit went through with no character key"
+        assert "editable in a moment" in str(P.Refusal()), "the refusal blames the session instead of the moment"
         P.Select(1)
         db = g(lua).ForeverSTUwaveDB
         assert db.totemPresets is None, f"{unreadable}: presets were saved with no character key"
@@ -1397,10 +1409,12 @@ def check_the_known_totems_are_scanned_once_per_event_not_once_per_repaint():
         tick(lua, 0.1)
     scans = int(g(lua).__kl)
     assert 0 < scans <= 4, f"{scans} spellbook scans over twenty repaints of a waiting switch"
-    fire(lua, "SPELLS_CHANGED")
-    advance(lua, 0.1)
-    tick(lua, 0.1)
-    assert int(g(lua).__kl) > scans, "a learn event did not drop the cached list"
+    for event in ("SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD"):
+        scans = int(g(lua).__kl)
+        fire(lua, event)
+        advance(lua, 0.1)
+        tick(lua, 0.1)
+        assert int(g(lua).__kl) > scans, f"{event} did not drop the cached list"
     scans = int(g(lua).__kl)
     leave_combat(lua)
     assert int(g(lua).__kl) > scans, "regen did not drop the cached list"
