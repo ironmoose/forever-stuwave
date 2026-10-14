@@ -364,15 +364,44 @@ local function Tint(tex, c, a)
     tex:SetVertexColor(c[1], c[2], c[3], a or c[4] or 1)
 end
 
+-- The micro menu's icon style (the setting icons.microstyle): "gradient" restyles the game's own textures live (FS.IconStyle),
+-- "stock" shows them in their own colours, still cut to the key by the cover. Our own baked keys (Legacy, the person glyph)
+-- are not the game's and look the same in both.
+local STYLE_SETTING = {
+    key = "icons.microstyle", default = "gradient", label = "Micro menu icons",
+    tip = "Gradient draws the micro menu icons in the STUwave colours. Stock shows the game's own icons.",
+}
+local STYLES = { "gradient", "stock" }
+local WHITE = { 1, 1, 1, 1 }
+
+if FS.Config and FS.Config.RegisterDefault then
+    FS.Config.RegisterDefault(STYLE_SETTING.key, STYLE_SETTING.default)
+end
+
+-- "gradient" unless the setting says "stock"; any other value, or no Config, is the default.
+local function Style()
+    local config = FS.Config
+    local ok, value = pcall(function() return config and config.Get and config.Get(STYLE_SETTING.key) end)
+    if ok and value == "stock" then return "stock" end
+    return "gradient"
+end
+
 local function Paint(key, v)
     Tint(key.plate, v.plate)
     Tint(key.edge, v.edgeColor, v.edgeA)
-    Tint(key.glyph, v.glyph, v.glyphA)
-    if key.chain then
+    if key.chain and Style() == "stock" then
+        -- the game's own colours: untinted, grey only when the key is disabled (that is state, not style)
+        FS.IconStyle.Release(key.chain)
+        Tint(key.glyph, v.glyphDesat and v.glyph or WHITE, v.glyphA)
+        key.glyph:SetDesaturated(v.glyphDesat)
+    elseif key.chain then
+        Tint(key.glyph, v.glyph, v.glyphA)
         -- the game's texture wears a look: the base stays grey, the ramp supplies the colour (grey too when disabled)
+        if not key.chain.active then FS.IconStyle.Dress(key.chain, key.spec.file, key.spec.coords, key.spec) end
         key.glyph:SetDesaturated(true)
         FS.IconStyle.Sync(key.chain, { r = v.glyph[1], g = v.glyph[2], b = v.glyph[3], a = v.glyphA, desat = v.glyphDesat, shown = true })
     else
+        Tint(key.glyph, v.glyph, v.glyphA)
         key.glyph:SetDesaturated(v.glyphDesat)
     end
     Tint(key.hoverGlow, v.glowColor, v.glowA)
@@ -1471,8 +1500,16 @@ events:SetScript("OnEvent", function(self, event, arg1)
     end
 end)
 
--- Exported for the headless smoke test and /dump, not for other modules.
+-- A change of the style repaints every key: texture writes only, legal in combat.
+if FS.Config and FS.Config.OnChange then
+    FS.Config.OnChange(STYLE_SETTING.key, function()
+        for _, key in ipairs(keyList) do pcall(ApplyKeyState, key) end
+    end)
+end
+
+-- Exported for the headless smoke test, the settings page and /dump.
 FS.MicroBars = {
+    SETTING = STYLE_SETTING, STYLES = STYLES, Style = Style,
     keys = keyList, ComputeVisual = ComputeVisual, Apply = Apply,
     KeyLayout = KeyLayout, Pitch = Pitch, RowWidth = RowWidth,
     Glyphs = GLYPHS, GlyphGeneric = GLYPH_GENERIC, GlyphSpec = GlyphSpec,

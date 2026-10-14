@@ -265,12 +265,23 @@ newObj("Frame", UIParent, "ForeverSTUwaveXPBar")
 GameTooltip = newObj("Frame", nil, "GameTooltip")
 
 INSPECT = {}
+CONFIG, CALLBACKS = {}, {}
 -- The one number the mock treats as a secret value (a secret is still type "number" in the client).
 SECRET_W = 100.5
 FS = {
     Layout = { Scale = function() return SCALE end, OnRescale = function(fn) RESCALE[#RESCALE + 1] = fn end },
     PanelSkins = { RequireExport = function() return true end, RegisterInspect = function(group, list) INSPECT[group] = list end },
     IsSecret = function(v) return v == SECRET_W end,
+    Config = {
+        RegisterDefault = function(key, value) if CONFIG[key] == nil then CONFIG[key] = value end end,
+        Get = function(key) return CONFIG[key] end,
+        Set = function(key, value)
+            local old = CONFIG[key]
+            CONFIG[key] = value
+            if old ~= value then for _, fn in ipairs(CALLBACKS[key] or {}) do fn(value, old, key) end end
+        end,
+        OnChange = function(key, fn) CALLBACKS[key] = CALLBACKS[key] or {}; table.insert(CALLBACKS[key], fn) end,
+    },
     LogDegradeOnce = function(key, msg) LOGS[#LOGS + 1] = key .. ": " .. msg end,
     Theme = { SCANLINE_TEXTURE = "scan", GLOW_EDGE_TEXTURE = "glow", SLICE_CUT_MARGIN = 6,
         SLICE_CUT2_FILL_TEXTURE = "cut2_fill", SLICE_CUT2_OUTLINE_TEXTURE = "cut2_outline" },
@@ -437,6 +448,7 @@ function h_glyphInfo()
                 info.boostAnchor, info.modAnchor, info.liftAnchor = c.boost.allPoints == g, c.mod.allPoints == g, c.lift.allPoints == g
                 info.boostCoords = c.boost.coords
                 info.coverTex, info.coverSub, info.coverLayer = tostring(k.cover.tex), k.cover.sublevel, k.cover.layer
+                info.coverShown = k.cover.shown
                 info.cl, info.cr = k.cover.pts[1][4], -k.cover.pts[2][4]
             end
         end
@@ -1328,6 +1340,85 @@ def check_constants(lean: float, gap: float) -> None:
     check("constants.lean_matches_cell_slant_tga", abs(tga - lean) <= 1 / 32, f"tga {tga:.4f} vs {lean}")
 
 
+def check_microstyle() -> None:
+    """icons.microstyle: gradient (the default) restyles the game's textures, stock shows them in their own colours, still cut
+    to the key by the cover; our own baked keys (Legacy, the person glyph) do not change; every key repaints live."""
+    def plain(x):
+        return {k: plain(v) for k, v in x.items()} if hasattr(x, "items") else x
+
+    def infos(w: World) -> list[dict]:
+        return [plain(v) for _, v in w.call("h_glyphInfo").items()]
+
+    def runtime(w: World) -> list[int]:
+        return [i + 1 for i, k in enumerate(infos(w)) if k["kind"] == "runtime"]
+
+    w = World(12).login()
+    mb = w.get("FS.MicroBars")
+    cfg_set = w.get("FS.Config.Set")
+    setting = mb.SETTING
+    check("microstyle.the_setting_is_icons_microstyle_with_a_gradient_default_and_a_tip",
+          setting is not None and setting.key == "icons.microstyle" and setting.default == "gradient" and len(str(setting.tip)) > 20
+          and w.get("FS.Config.Get")("icons.microstyle") == "gradient", f"{setting}")
+    check("microstyle.the_styles_are_gradient_and_stock", [str(v) for _, v in mb.STYLES.items()] == ["gradient", "stock"])
+    rt = runtime(w)
+    check("microstyle.most_keys_draw_the_games_texture", len(rt) >= 10, f"{rt}")
+    grad = infos(w)
+    check("microstyle.gradient_greys_the_base_and_shows_the_chain",
+          all(grad[i - 1]["desat"] is True and grad[i - 1]["modShown"] and grad[i - 1]["liftShown"] for i in rt))
+
+    cfg_set("icons.microstyle", "stock")
+    stock = infos(w)
+    bad = [i for i in rt if stock[i - 1]["desat"] or list(stock[i - 1]["vertex"].values()) != [1, 1, 1, 1]]
+    check("microstyle.stock_shows_the_games_colours_untinted_and_not_desaturated", not bad, f"{bad}")
+    bad = [i for i in rt if stock[i - 1]["boostShown"] or stock[i - 1]["modShown"] or stock[i - 1]["liftShown"]]
+    check("microstyle.stock_hides_the_whole_gradient_chain", not bad, f"{bad}")
+    bad = [i for i in rt if not stock[i - 1]["coverShown"] or "iconcover" not in stock[i - 1]["coverTex"]
+           or stock[i - 1]["left"] != grad[i - 1]["left"] or stock[i - 1]["right"] != grad[i - 1]["right"]
+           or stock[i - 1]["tex"] != grad[i - 1]["tex"] or dict(stock[i - 1]["c"]) != dict(grad[i - 1]["c"])]
+    check("microstyle.stock_is_still_cut_to_the_key_by_the_cover_and_draws_the_same_texture_window", not bad, f"{bad}")
+    # no class known: the Character key falls back to our baked person glyph (Legacy is baked too, see the glyph checks)
+    wo = World(16, cls=None).login()
+    before = infos(wo)
+    wo.get("FS.Config.Set")("icons.microstyle", "stock")
+    after = infos(wo)
+    own = [i for i in range(len(before)) if before[i]["kind"] != "runtime"]
+    check("microstyle.own_art_keys_exist_and_do_not_change_with_the_style",
+          len(own) >= 1 and all(after[i] == before[i] for i in own), f"{own}")
+
+    w.call("h_script", 1, "OnEnter")
+    hov = infos(w)[0]
+    check("microstyle.a_hovered_stock_key_stays_plain", not hov["modShown"] and not hov["desat"] and list(hov["vertex"].values()) == [1, 1, 1, 1], f"{hov['vertex']}")
+    w.call("h_script", 1, "OnLeave")
+    w.call("h_enabled", 2, False)
+    dis = infos(w)[1]
+    check("microstyle.a_disabled_stock_key_is_dim_and_desaturated_with_no_chain", dis["desat"] is True and dis["vertex"][4] < 1 and not dis["modShown"], f"{dis['vertex']} {dis['desat']}")
+    cfg_set("icons.microstyle", "gradient")
+    back = infos(w)
+    check("microstyle.back_to_gradient_repaints_every_key_live_even_a_disabled_one",
+          all(back[i - 1]["modShown"] and back[i - 1]["desat"] is True for i in rt) and back[1]["modDesat"] is True and back[1]["vertex"][4] < 1, f"{back[1]['modDesat']}")
+    w.call("h_enabled", 2, True)
+    check("microstyle.the_round_trip_restores_the_gradient_look", infos(w) == grad)
+
+    cfg_set("icons.microstyle", "nonsense")
+    check("microstyle.an_unknown_value_is_the_gradient", all(infos(w)[i - 1]["modShown"] for i in rt))
+    cfg_set("icons.microstyle", "stock")
+    w.g.IN_COMBAT = True
+    cfg_set("icons.microstyle", "gradient")
+    check("microstyle.texture_writes_follow_the_style_in_combat_too", all(infos(w)[i - 1]["modShown"] for i in rt))
+    cfg_set("icons.microstyle", "stock")
+    check("microstyle.and_back_to_stock_in_combat", not any(infos(w)[i - 1]["modShown"] for i in rt))
+    w.g.IN_COMBAT = False
+
+    # a world that logs in with the setting already on stock paints stock from the start
+    ws = World(12)
+    ws.get("FS.Config.Set")("icons.microstyle", "stock")
+    ws.login()
+    si = infos(ws)
+    check("microstyle.a_key_built_under_stock_paints_stock_at_login",
+          all(not si[i - 1]["modShown"] and not si[i - 1]["desat"] for i in runtime(ws)), f"{[si[i-1]['modShown'] for i in runtime(ws)]}")
+    check("microstyle.no_degrade_logs", w.logs() == "" and ws.logs() == "", w.logs())
+
+
 def main() -> int:
     lean, gap = mockup_numbers()
     check_constants(lean, gap)
@@ -1337,6 +1428,7 @@ def main() -> int:
     check_fill()
     check_cover_geometry()
     check_glyph_tint()
+    check_microstyle()
     check_art()
     check_hit_rects(lean, gap)
     check_deck(lean, gap)

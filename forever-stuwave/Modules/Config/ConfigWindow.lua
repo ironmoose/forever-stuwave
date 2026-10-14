@@ -1359,25 +1359,33 @@ local function TotemPresetsGroup(page)
     end
 end
 
--- The spell icon style for the class tabs (SpellArt.lua): gradient or the game's own icons, repainted live. Left out until a
--- tab has drawn a spell icon (a class with none has nothing to style); its ? tip explains it.
-local function SpellIconGroup(page)
-    local art = FS.SpellArt
-    if not (art and art.SETTING and art.Applies and art.Applies()) then return end
-    local def = art.SETTING
+-- The icon style group: how the micro menu and the class tab spell icons are drawn, the STUwave gradient or the game's own
+-- icons (MicroBars.lua, SpellArt.lua), each repainted live and explained by its ? tip. A row is left out when its module is
+-- absent; the spell row also until a tab has drawn a spell icon (a class with none has nothing to style).
+local function IconStyleDropdown(page, mod)
+    local def = mod.SETTING
     local TEXT = { gradient = "Gradient", stock = "Stock" }
-    UI.Header(page, "Class tab icons")
     UI.Dropdown(page, {
         label = def.label, tip = def.tip,
-        get = function() return art.Style() end,
+        get = function() return mod.Style() end,
         text = function(value) return TEXT[value] or tostring(value) end,
         items = function()
             local items = {}
-            for i, value in ipairs(art.STYLES) do items[i] = { value = value, text = TEXT[value] } end
+            for i, value in ipairs(mod.STYLES) do items[i] = { value = value, text = TEXT[value] } end
             return items
         end,
         set = function(value) Config.Set(def.key, value) end,
     })
+end
+
+local function IconStyleGroup(page)
+    local mods = {}
+    local micro, art = FS.MicroBars, FS.SpellArt
+    if micro and micro.SETTING and micro.Style then mods[#mods + 1] = micro end
+    if art and art.SETTING and art.Applies and art.Applies() then mods[#mods + 1] = art end
+    if #mods == 0 then return end
+    UI.Header(page, "Icon style")
+    for _, mod in ipairs(mods) do IconStyleDropdown(page, mod) end
 end
 
 CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, build = function(page)
@@ -1390,7 +1398,7 @@ CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, buil
     FiveSecondGroup(page)
     BuffTabGroup(page)
     TotemPresetsGroup(page)
-    SpellIconGroup(page)
+    IconStyleGroup(page)
 end })
 
 local PIECE_ORDER = { "you", "tgt", "dot", "shard", "prc", "buff", "party" }
