@@ -1234,26 +1234,33 @@ function Dial.Refresh()
     PS.SaveState()
 end
 
+local function PaintCell(key)
+    local tb = Totems()
+    local button = tb and tb.Button(key)
+    if button and button.fsArcs and button:IsShown() then Paint(button) end
+end
+
+-- The ticker: only the cell that is waiting (the dial: a queued switch or the applied flash, which also marks the
+-- buttons) or flashing (GNARLY: the press flash) is painted, and once more when it stops.
 local function Tick(self, elapsed)
     self.fsAcc = (self.fsAcc or 0) + (elapsed or 0)
     if self.fsAcc < D.TICK then return end
     self.fsAcc = 0
     local PS = Presets()
     PS.Expire()
-    local tb = Totems()
     local pending = PS.Pending()
     local now = GetTime and GetTime() or 0
-    local flashing = PS.P.applied and PS.P.applied.at and now - PS.P.applied.at < PS.P.APPLIED_FLASH + D.TICK
+    local applied = PS.P.applied and PS.P.applied.at and now - PS.P.applied.at < PS.P.APPLIED_FLASH + D.TICK
     local age = PS.PressAge("gnarly")
-    if age and age < PS.P.PRESS_FLASH + D.TICK then flashing = true end
-    if pending or flashing or self.fsWas then
-        for _, def in ipairs(tb.Cells and tb.Cells() or {}) do
-            local button = tb.Button(def.key)
-            if button and button.fsArcs and button:IsShown() then Paint(button) end
-        end
+    local pressed = age and age < PS.P.PRESS_FLASH + D.TICK
+    local dialBusy = (pending or applied) and true or false
+    local gnarlyBusy = pressed and true or false
+    if dialBusy or self.fsWasDial then
+        PaintCell("dial")
         PaintMarks()
     end
-    self.fsWas = (pending or flashing) and true or false
+    if gnarlyBusy or self.fsWasGnarly then PaintCell("gnarly") end
+    self.fsWasDial, self.fsWasGnarly = dialBusy, gnarlyBusy
 end
 
 local function OnPresetEvent(what)

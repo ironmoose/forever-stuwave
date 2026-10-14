@@ -56,6 +56,7 @@ local P = {
     PRESS_FLASH = 0.25,         -- seconds the GNARLY cell flashes after a press
     PRESS_WINDOW = 2,           -- seconds after a press in which a matching cast is counted as that press's drop
     SET2_STEP = 4,              -- action ids from a set 1 slot to the same slot of set 2
+    SET2_ATTEMPTS = 3,          -- sends of one spell to one set 2 slot (each after TB.SETTLE seconds without it showing)
     ELEMENTS = { "fire", "earth", "water", "air" },
     DEFAULT_ORDER = { "earth", "fire", "water", "air" },    -- the order a new preset gets
     -- the character level each totem opens at (ForeverDB), by rank 1 spell id; an element's own opening level is the floor
@@ -111,7 +112,8 @@ local SETTINGS = {
     gnarly = {
         key = "totems.gnarly", default = true, label = "GNARLY button",
         tip = "Adds a second cell that always drops the preset you choose, one totem per press. It is never switched, "
-            .. "so it works in combat. It starts over after combat ends or a short pause.",
+            .. "so it works in combat. It starts over after combat ends or a short pause. Shift click edits its preset, "
+            .. "and so does a keybind that includes Shift (which drops no totem, so avoid Shift in its keybind).",
     },
     gnarlyFlash = {
         key = "totems.gnarlyFlash", default = true, label = "Press flash",
@@ -124,7 +126,7 @@ local SETTINGS = {
     gnarlySet2 = {
         key = "totems.gnarlySet2", default = true, label = "Also on Call of the Ancestors",
         tip = "Puts the GNARLY preset's totems on the Call of the Ancestors set (level 30), so that spell drops them too. "
-            .. "Only changes that set, only out of combat.",
+            .. "Only changes that set, only out of combat. Turning this off leaves set 2 as it is.",
     },
 }
 PS.SETTINGS = SETTINGS
@@ -329,9 +331,12 @@ function PS.Gnarly()
     return Store().gnarly
 end
 
+local entriesCache = {}      -- preset table -> its PS.Entries; dropped with the known lists and on every save
+
 local function Save(fn)
     local store, saved = Store()
     fn(store)
+    entriesCache = {}
     return saved
 end
 
@@ -345,6 +350,7 @@ end
 local knownCache = {}
 function PS.InvalidateKnown()
     knownCache = {}
+    entriesCache = {}
 end
 
 function PS.Known(element)
@@ -389,12 +395,15 @@ end
 
 -- The preset's totems in drop order: { entry... }, every one of them (locked ones carry known = false).
 function PS.Entries(preset)
-    local out = {}
-    if not preset then return out end
+    if not preset then return {} end
+    local out = entriesCache[preset]
+    if out then return out end
+    out = {}
     for _, element in ipairs(preset.order) do
         local entry = PS.Entry(element, preset.picks[element])
         if entry then out[#out + 1] = entry end
     end
+    entriesCache[preset] = out
     return out
 end
 
@@ -787,8 +796,12 @@ end
 
 -- state: nil (never looked), "off" (setting off, no preset or nothing to write), "wait" (no bar, set not known or in
 -- combat), "ok" (every wanted slot reads back), "partial" (some did not land), "dead" (given up for the session, with
--- `why`). set1Intact: false once a set 1 slot was seen to change under a set 2 write.
-local set2 = { tried = {}, results = {}, set1Intact = true }
+-- `why`). set1Intact: false once a set 1 slot was seen to change under a set 2 write. sent: per set 2 action id, the
+-- spell last sent, when, and how many times. check: which set 1 check the last pass ran ("none", "bracket" = set 1
+-- read before and after a write, "window" = set 1 against its reading before the sends not judged yet, or both).
+-- window: { at, before = { set 1 action id -> spell or false } } while a send is not judged. unproven: wanted
+-- slots that could not be judged (unreadable, or holding something that is not a totem of the element).
+local set2 = { sent = {}, results = {}, set1Intact = true, wrote = false, check = "none", unproven = 0 }
 PS.Set2 = set2
 
 local function Dead(why)
@@ -813,7 +826,38 @@ local function Set1Maps(tb, mc, element, slot, id1)
     return false
 end
 
--- Writes the GNARLY preset's known totems into set 2, once per element and spell for the session. Out of combat only.
+-- Does the spell id `held` name a totem of `element` (a known rank or the rank 1 id, or one of the same name)?
+local function IsElementTotem(tb, element, held)
+    local name = SpellById(held)
+    local function same(id, itemName)
+        return id == held or (name and itemName ~= "" and itemName == name)
+    end
+    for _, item in ipairs(PS.Known(element)) do
+        if same(item.id, item.name) then return true end
+    end
+    for _, totem in ipairs(tb.Static and tb.Static(element) or {}) do
+        if same(totem[1], SpellById(totem[1]) or "") then return true end
+    end
+    return false
+end
+
+-- A set 2 write can reach set 1 a moment after it returns (the slot updates when the game gets to it). For the
+-- window after a send (until the pass that judges it), a set 1 slot that reads other than it did before the send AND
+-- reads the spell that was sent to its set 2 twin is that bleed. The tab's own picks cannot say: it adopts whatever
+-- its slot holds as the pick, so a comparison with the pick sees nothing. Returns the work item and the old spell.
+local function Set1Bled(mc, work, window)
+    for _, w in ipairs(work) do
+        local was = window.before[w.id1]          -- false: the slot was empty
+        local rec = set2.sent[w.id2]
+        local now, readable = mc.ReadSlot(w.id1)
+        if was ~= nil and readable and now ~= (was or nil) and rec and now == rec.spell then return w, was or nil end
+    end
+end
+
+-- Writes the GNARLY preset's known totems into set 2. Out of combat only. A slot that does not read the wanted spell
+-- is sent it again once TB.SETTLE seconds have passed since the last send (at most P.SET2_ATTEMPTS sends of one spell
+-- to one slot), and a send that did not show at once schedules a re-look, as the picks do. A slot is written only when
+-- it reads back and holds nothing or a totem of its element; anything else is left alone and counted unproven.
 function PS.SyncSet2()
     if InCombat() or set2.state == "dead" then return end
     local tb = TotemBar()
@@ -834,9 +878,8 @@ function PS.SyncSet2()
         local slot = button and button.fsDef and button.fsDef.slot
         if slot then
             local id1 = mc.ActionId(bar, slot)
-            local key = entry.element .. ":" .. entry.id
             work[#work + 1] = { element = entry.element, spell = entry.id, slot = slot, id1 = id1,
-                id2 = id1 + P.SET2_STEP, key = key }
+                id2 = id1 + P.SET2_STEP }
         end
     end
     -- the mapping must be proven for every element before anything is written
@@ -846,7 +889,7 @@ function PS.SyncSet2()
             return
         end
     end
-    local before, wrote = {}, false
+    local before = {}
     for _, w in ipairs(work) do
         local held, readable = mc.ReadSlot(w.id1)
         if not readable then
@@ -855,27 +898,65 @@ function PS.SyncSet2()
         end
         before[w.id1] = held
     end
+    -- later passes, while a send is not judged yet: set 1 against what it read before the send (the bracket below
+    -- only sees one pass)
+    set2.check = "none"
+    local window = set2.window
+    if window then
+        set2.check = "window"
+        local bled, was = Set1Bled(mc, work, window)
+        if bled then
+            set2.set1Intact = false
+            if was then mc.SendPick(bled.id1, was) end
+            Dead("a set 1 slot changed after a set 2 write")
+            if tb.Sync then tb.Sync() end
+            return
+        end
+        if mc.Settled(window.at) then set2.window = nil end
+    end
+    local wrote, unproven = false, 0
     for _, w in ipairs(work) do
-        local key = w.key .. ":" .. w.id2
-        if not set2.tried[key] then
-            local held = mc.ReadSlot(w.id2)
-            set2.tried[key] = true
-            if held ~= w.spell then
+        local held, readable = mc.ReadSlot(w.id2)
+        if not readable or (held ~= nil and held ~= w.spell and not IsElementTotem(tb, w.element, held)) then
+            unproven = unproven + 1
+            set2.results[w.id2] = "unproven"
+        elseif held == w.spell then
+            set2.results[w.id2] = "landed"
+        else
+            local rec = set2.sent[w.id2]
+            if not rec or rec.spell ~= w.spell then
+                rec = { spell = w.spell, n = 0 }
+                set2.sent[w.id2] = rec
+            end
+            if rec.n >= P.SET2_ATTEMPTS then
+                set2.results[w.id2] = "gave up"
+            elseif rec.n == 0 or mc.Settled(rec.at) then
+                rec.n, rec.at = rec.n + 1, mc.Now()
                 local landed = mc.SendPick(w.id2, w.spell)
                 wrote = true
-                set2.results[key] = landed and "landed" or "sent"
-            else
-                set2.results[key] = "landed"
-            end
+                set2.results[w.id2] = landed and "landed" or "sent"
+                if not landed then mc.ScheduleVerify() end
+            end                         -- else the last send is still settling: its re-look is already scheduled
         end
     end
-    -- set 1 must read exactly as before
-    for _, w in ipairs(work) do
-        local now = select(1, mc.ReadSlot(w.id1))
-        if now ~= before[w.id1] then
-            set2.set1Intact = false
-            if before[w.id1] then mc.SendPick(w.id1, before[w.id1]) end
-            Dead("a set 1 slot changed under a set 2 write")
+    set2.unproven = unproven
+    if wrote then
+        set2.wrote = true
+        set2.check = set2.check == "window" and "window+bracket" or "bracket"
+        local win = set2.window or { before = {} }
+        win.at = mc.Now()
+        for id1, held in pairs(before) do
+            if win.before[id1] == nil then win.before[id1] = held or false end
+        end
+        set2.window = win
+        -- set 1 must read exactly as before
+        for _, w in ipairs(work) do
+            local now = select(1, mc.ReadSlot(w.id1))
+            if now ~= before[w.id1] then
+                set2.set1Intact = false
+                if before[w.id1] then mc.SendPick(w.id1, before[w.id1]) end
+                Dead("a set 1 slot changed under a set 2 write")
+            end
         end
     end
     if set2.state == "dead" then
@@ -922,7 +1003,8 @@ local function Write()
     if P.castIdsSecret then parts[#parts + 1] = "castids=secret" end
     local state = set2.state or "unseen"
     parts[#parts + 1] = "set2=" .. state .. (set2.total and (" " .. set2.landed .. "/" .. set2.total) or "")
-        .. (set2.why and (" (" .. set2.why .. ")") or "") .. " set1Intact=" .. tostring(set2.set1Intact)
+        .. (set2.why and (" (" .. set2.why .. ")") or "") .. (set2.unproven > 0 and (" unproven=" .. set2.unproven) or "")
+        .. " set1Intact=" .. tostring(set2.set1Intact) .. " set1Check=" .. set2.check
     local line = table.concat(parts, " | ")
     if line == lastLine and type(db.totemPresetState) == "table" then return end
     lastLine = line

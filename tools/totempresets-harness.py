@@ -1704,6 +1704,179 @@ def check_the_gnarly_preset_is_written_into_set_two_once_and_read_back():
     assert "set2=ok 3/3" in line and "set1Intact=true" in line, line
 
 
+def slot2(lua, element):
+    return g(lua).__mc.slots[tbh.action_id(tbh.SLOT[element], mc_set=2)]
+
+
+def check_a_spell_that_comes_back_is_written_to_set_two_again():
+    lua = boot()
+    P = PS(lua)
+    a, b = two_presets(lua)
+    P.SetGnarly(b)
+    assert int(slot2(lua, "fire")) == IDS["Magma Totem"]
+    P.SetTotem(b, "fire", IDS["Searing Totem"])
+    assert int(slot2(lua, "fire")) == IDS["Searing Totem"]
+    P.SetTotem(b, "fire", IDS["Magma Totem"])
+    assert int(slot2(lua, "fire")) == IDS["Magma Totem"], "Magma, Searing, Magma left the slot on Searing"
+    assert P.Set2.state == "ok"
+
+
+def check_a_set_two_send_that_has_not_shown_is_looked_at_again_and_sent_again_a_few_times():
+    lua = boot()
+    P = PS(lua)
+    a, b = two_presets(lua)
+    ids = set(set2_ids("earth", "fire", "water").values())
+
+    def sends():
+        return [int(c[1]) for c in seq(g(lua).__mc.calls) if int(c[1]) in ids]
+
+    run(lua, "__mc.delay = true")
+    P.SetGnarly(b)
+    assert P.Set2.state == "partial" and len(sends()) == 3
+    # the slot updates late: the scheduled look sees it with no Sync from outside
+    run(lua, "__mc_flush()")
+    advance(lua, 1.2)
+    assert P.Set2.state == "ok", "the late update was not noticed by the scheduled look"
+    assert "set2=ok 3/3" in str(g(lua).ForeverSTUwaveDB.totemPresetState.line)
+    # a slot that never takes the spell is sent again after each settle time, at most SET2_ATTEMPTS times
+    lua = boot()
+    P = PS(lua)
+    a, b = two_presets(lua)
+    run(lua, "__mc.delay = true")
+    P.SetGnarly(b)
+    first = len(sends())
+    TB(lua).Sync()
+    assert len(sends()) == first, "sent again before the settle time passed"
+    for _ in range(6):
+        advance(lua, 1.2)
+    assert len(sends()) == 3 * int(P.P.SET2_ATTEMPTS), f"{len(sends())} sends"
+    assert P.Set2.state == "partial"
+
+
+def check_set_one_is_watched_until_a_set_two_send_is_judged_and_the_line_says_which_check_ran():
+    def world():
+        lua = boot()
+        P = PS(lua)
+        a, b = two_presets(lua)
+        P.Select(a)                            # set 1 holds MELEE: Searing, Stoneskin, Healing Stream, Grounding
+        run(lua, "__mc.delay = true")
+        P.SetGnarly(b)                         # set 2 sends queue: Magma, Tremor, Mana Spring
+        return lua, P
+
+    id1 = tbh.action_id(tbh.SLOT["fire"])
+    # the late update also reaches set 1: caught by the look that judges the sends, put back, set 2 dead
+    lua, P = world()
+    assert "set1Check=bracket" in str(g(lua).ForeverSTUwaveDB.totemPresetState.line)
+    run(lua, f"__mc.slots[{id1}] = __ids['Magma Totem']; __mc_flush()")
+    advance(lua, 1.2)
+    assert P.Set2.state == "dead" and P.Set2.set1Intact is False and "set 1" in str(P.Set2.why)
+    run(lua, "__mc_flush()")
+    assert int(g(lua).__mc.slots[id1]) == IDS["Searing Totem"], "set 1 was not put back"
+    assert "set1Intact=false" in str(g(lua).ForeverSTUwaveDB.totemPresetState.line)
+    # a set 1 change that is not the spell sent to set 2 is the player's, not a bleed
+    lua, P = world()
+    run(lua, f"__mc.slots[{id1}] = __ids['Flametongue Totem']; __mc_flush()")
+    advance(lua, 1.2)
+    assert P.Set2.state == "ok" and P.Set2.set1Intact is True
+    # once judged, the window is closed: a later change to the same spell is not blamed
+    run(lua, f"__mc.slots[{id1}] = __ids['Magma Totem']")
+    TB(lua).Sync()
+    assert P.Set2.state != "dead" and P.Set2.check == "none"
+
+
+def check_a_set_two_slot_is_written_only_when_it_reads_back_holding_nothing_or_an_element_totem():
+    lua = boot()
+    P = PS(lua)
+    a, b = two_presets(lua)
+    earth2 = tbh.action_id(tbh.SLOT["earth"], mc_set=2)
+    fire2 = tbh.action_id(tbh.SLOT["fire"], mc_set=2)
+    run(lua, f"__mc.slots[{earth2}] = 999999")                 # not a totem of the element
+    run(lua, f"__mc.slots[{fire2}] = __ids['Searing Totem']")   # another totem of the element: replaced
+    P.SetGnarly(b)
+    assert int(g(lua).__mc.slots[earth2]) == 999999, "a slot holding something else was overwritten"
+    assert int(slot2(lua, "fire")) == IDS["Magma Totem"]
+    assert P.Set2.state == "partial" and int(P.Set2.unproven) == 1
+    assert "unproven=1" in str(g(lua).ForeverSTUwaveDB.totemPresetState.line)
+    # a set 2 slot that cannot be read is not written either
+    lua = boot()
+    P = PS(lua)
+    a, b = two_presets(lua)
+    run(lua, f"local base = GetActionInfo; GetActionInfo = function(id) if id == {earth2} then return __SECRET end "
+             "return base(id) end")
+    run(lua, "__mc.calls = {}")
+    P.SetGnarly(b)
+    assert earth2 not in [int(c[1]) for c in seq(g(lua).__mc.calls)], "an unreadable set 2 slot was written"
+    assert int(P.Set2.unproven) == 1 and P.Set2.state == "partial"
+
+
+def check_set_two_raising_inside_the_refresh_is_caught_and_the_state_is_still_saved():
+    lua = boot()
+    P = PS(lua)
+    a, b = two_presets(lua)
+    P.SetGnarly(b)
+    run(lua, "FS.TotemBar.MC.Bar = function() error('boom') end")
+    DL(lua).Refresh()
+    assert P.Set2.state == "dead" and "raised" in str(P.Set2.why)
+    assert "set2=dead" in str(g(lua).ForeverSTUwaveDB.totemPresetState.line), "the state was not saved after the raise"
+
+
+def check_a_press_is_used_up_by_the_cast_it_brought_and_a_reset_forgets_it():
+    lua = boot()
+    P = PS(lua)
+    make(lua)
+    cast_name(lua, "Stoneskin Totem")
+    assert P.Progress("dial")[0] == 1
+    cast_raw(lua, "Searing Totem")
+    assert P.Progress("dial")[0] == 1, "one press advanced the record twice"
+    # a reset (combat end) forgets a press that was still waiting for its cast
+    lua = boot()
+    P = PS(lua)
+    make(lua)
+    click(lua, dial(lua), "LeftButton", False)
+    enter_combat(lua)
+    leave_combat(lua)
+    cast_raw(lua, "Stoneskin Totem")
+    assert P.Progress("dial")[0] == 0, "a press from before the reset counted for a later cast"
+
+
+def check_the_ticker_repaints_only_the_cell_that_is_waiting_or_flashing():
+    lua = boot()
+    P = PS(lua)
+    a, b = two_presets(lua)
+    P.SetGnarly(b)
+    P.Select(a)
+    advance(lua, 3)                              # the applied flash is over
+    for _ in range(3):
+        tick(lua, 0.2)
+    run(lua, "__sp = { dial = 0, gnarly = 0 }; local f = FS.TotemDial.StateOf; "
+             "FS.TotemDial.StateOf = function(k, ...) __sp[k] = (__sp[k] or 0) + 1 return f(k, ...) end")
+
+    def painted():
+        return int(g(lua).__sp.dial), int(g(lua).__sp.gnarly)
+
+    for _ in range(5):
+        advance(lua, 0.1)
+        tick(lua, 0.1)
+    assert painted() == (0, 0), f"an idle tick repainted {painted()}"
+    enter_combat(lua)
+    P.Select(b)                                  # queued: the dial waits
+    run(lua, "__sp = { dial = 0, gnarly = 0 }")
+    for _ in range(5):
+        advance(lua, 0.1)
+        tick(lua, 0.1)
+    d, gn = painted()
+    assert d >= 5 and gn == 0, f"a waiting dial repainted dial={d} gnarly={gn}"
+    leave_combat(lua)
+    advance(lua, 5)
+    for _ in range(3):
+        tick(lua, 0.2)
+    click(lua, btn(lua, "gnarly"), "LeftButton", False)      # a press: the GNARLY cell flashes
+    run(lua, "__sp = { dial = 0, gnarly = 0 }")
+    tick(lua, 0.1)
+    d, gn = painted()
+    assert gn >= 1 and d == 0, f"a flashing GNARLY cell repainted dial={d} gnarly={gn}"
+
+
 def check_set_two_waits_for_what_it_needs_and_never_writes_in_combat():
     # setting off, no GNARLY, the cell off
     for how in ("gnarlySet2", "gnarly"):
@@ -1734,7 +1907,7 @@ def check_set_two_waits_for_what_it_needs_and_never_writes_in_combat():
     a, b = two_presets(lua)
     P.SetGnarly(b)
     run(lua, "__mc.calls = {}; __mc.slots = {}")
-    P.Set2.tried = {}
+    P.Set2.sent = {}
     set_combat(lua, True)
     P.SyncSet2()
     DL(lua).Refresh()
@@ -1937,6 +2110,13 @@ CHECKS = [
     check_the_gnarly_tooltip_and_the_unset_tooltip,
     check_use_as_gnarly_preset_in_the_editor_ties_and_unties_and_shift_click_edits_it,
     check_the_gnarly_preset_is_written_into_set_two_once_and_read_back,
+    check_a_spell_that_comes_back_is_written_to_set_two_again,
+    check_a_set_two_send_that_has_not_shown_is_looked_at_again_and_sent_again_a_few_times,
+    check_set_one_is_watched_until_a_set_two_send_is_judged_and_the_line_says_which_check_ran,
+    check_a_set_two_slot_is_written_only_when_it_reads_back_holding_nothing_or_an_element_totem,
+    check_set_two_raising_inside_the_refresh_is_caught_and_the_state_is_still_saved,
+    check_a_press_is_used_up_by_the_cast_it_brought_and_a_reset_forgets_it,
+    check_the_ticker_repaints_only_the_cell_that_is_waiting_or_flashing,
     check_set_two_waits_for_what_it_needs_and_never_writes_in_combat,
     check_set_two_is_given_up_when_the_set_one_slot_does_not_map_or_changes,
     check_a_set_two_call_that_raises_or_does_not_land_never_breaks_the_tab,

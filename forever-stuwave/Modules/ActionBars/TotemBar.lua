@@ -1700,6 +1700,12 @@ TotemBar.ELEMENTS = { "fire", "earth", "water", "air" }
 TotemBar.MC = {
     Bar = MultiCastBar, Active = MultiCastBarActive, ReadSlot = ReadSlot, SendPick = SendPick,
     NativeActionId = NativeActionId, ActionId = ActionId, SET = TB.MC_SET, ANCESTORS_ID = 66843,
+    -- the clock and the re-look the picks use: Now() (seconds or nil), Settled(at) (a send made at `at` has had
+    -- TB.SETTLE seconds), ScheduleVerify() (one more Sync a moment after a send that has not shown yet)
+    Now = Now, Settled = Settled, ScheduleVerify = ScheduleVerify,
+    -- a set 1 pick of the element is still on its way / the element uses its spell instead of its slot
+    Pending = function(key) return TB.pending[key] ~= nil end,
+    SpellOnly = function(key) return TB.spellOnly[key] == true end,
 }
 
 local function Build()
