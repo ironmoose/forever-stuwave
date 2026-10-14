@@ -181,6 +181,19 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     "icon_jump": (32, 32),
     # generate_reticle_ring.py: the ring of the target of target plate's reticle, a 6 x 6 glyph unit square on a 16 texel canvas.
     "reticle_ring": (16, 16),
+    # generate_shaman_shocks.py: the Shaman Gunsight shock trace (a zigzag over 162 x 20.25 image px, plus its glow with 8 px
+    # of margin), the shock bolt (fill, stroke, glow on one 32 px canvas), the Fire Nova ring and its glow (44 px canvas) and
+    # the footer's dashed Nova pip (10 px canvas).
+    "shaman_shocks": {
+        "shock_trace_line": (256, 32),
+        "shock_trace_glow": (256, 32),
+        "shock_bolt_fill": (64, 64),
+        "shock_bolt_line": (64, 64),
+        "shock_bolt_glow": (64, 64),
+        "nova_ring": (64, 64),
+        "nova_ring_glow": (64, 64),
+        "nova_pip": (16, 16),
+    },
     "icon_social": (32, 32),
     "icon_window": {"icon_minimize": (32, 32), "icon_maximize": (32, 32)},
     "mask_minimap": (64, 64),
