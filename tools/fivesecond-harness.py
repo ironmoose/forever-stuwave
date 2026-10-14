@@ -1580,6 +1580,9 @@ def check_the_chrome_is_the_buff_tabs_cut_plate_with_a_skinned_border():
     # no name label anywhere: the only strings are the rate and the chip code
     texts = [r for r in descendants(host(lua)) if r._kind == "FontString"]
     assert len(texts) == 2, [r._text for r in texts]
+    # the LED cells are the only way the countdown draws: both strings are the rate line and the chip code, none is a countdown
+    assert sorted(r._text for r in texts) == sorted([FT.rateText._text, FT.chip.code._text]), [r._text for r in texts]
+    assert not [r for r in descendants(FT.hero) if r._kind == "FontString"], "no plain text inside the hero tile"
     # the hover border is the cyan ring, like the buff tab's
     tile = cells_tile(lua)
     lua.eval("__Region.Fire")(tile, "OnEnter")
