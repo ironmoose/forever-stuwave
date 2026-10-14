@@ -183,6 +183,36 @@ check(ForeverSTUwaveDB.unknownEvents and ForeverSTUwaveDB.unknownEvents.LEARNED_
 check(ForeverSTUwaveDB.profiles ~= nil, "not replaced")
 """)
 
+case("an_event_that_registers_fine_clears_its_stale_record")(r"""
+local H = load()
+ForeverSTUwaveDB.unknownEvents = { SPELLS_CHANGED = { time = 5 }, OTHER_EVENT = { time = 6 } }
+check(H.RegisterEvent(frame(), "SPELLS_CHANGED") == true, "registered")
+check(ForeverSTUwaveDB.unknownEvents.SPELLS_CHANGED == nil, "the old refusal is dropped")
+check(ForeverSTUwaveDB.unknownEvents.OTHER_EVENT, "other records stay")
+H.RegisterEvent(frame(), "UNIT_SPELLCAST_SUCCEEDED", "player")
+check(ForeverSTUwaveDB.unknownEvents.OTHER_EVENT, "a unit event clears only its own record")
+ForeverSTUwaveDB.unknownEvents.UNIT_SPELLCAST_SUCCEEDED = { time = 7 }
+H.RegisterEvent(frame(), "UNIT_SPELLCAST_SUCCEEDED", "player")
+check(ForeverSTUwaveDB.unknownEvents.UNIT_SPELLCAST_SUCCEEDED == nil, "a unit registration clears it too")
+""")
+
+case("a_read_only_profile_keeps_a_stale_record_and_a_pending_one_is_dropped_on_success")(r"""
+READ_ONLY = true
+local H = load()
+ForeverSTUwaveDB.unknownEvents = { SPELLS_CHANGED = { time = 5 } }
+H.RegisterEvent(frame(), "SPELLS_CHANGED")
+check(ForeverSTUwaveDB.unknownEvents.SPELLS_CHANGED, "read only: nothing is written or removed")
+READ_ONLY = false
+ForeverSTUwaveDB = nil
+H.RegisterEvent(frame(), "LEARNED_SPELL_IN_TAB")
+KNOWN_EVENTS.LEARNED_SPELL_IN_TAB = true
+H.RegisterEvent(frame(), "LEARNED_SPELL_IN_TAB")
+ForeverSTUwaveDB = { profiles = {} }
+fire("PLAYER_ENTERING_WORLD")
+check(ForeverSTUwaveDB.unknownEvents == nil or ForeverSTUwaveDB.unknownEvents.LEARNED_SPELL_IN_TAB == nil,
+    "an event that registered fine is not written as refused")
+""")
+
 case("a_frame_without_the_method_or_a_nil_frame_is_not_an_error")(r"""
 local H = load()
 check(H.RegisterEvent(nil, "SPELLS_CHANGED") == false, "nil frame")
@@ -210,6 +240,12 @@ def static_checks() -> list[tuple[str, str | None]]:
                 chat.append(f"{path.relative_to(ADDON.parent)}:{n}")
     out.append(("no_module_words_a_refused_registration_for_the_chat_frame",
                 None if not chat else "a refused registration must go through FrameHelpers.RegisterEvent: " + ", ".join(chat)))
+    for rel, needle in (("Modules/CombatHud/GunsightShamanShocks.lua", "the cast ledger cannot listen"),
+                        ("Modules/CastBars/CastBars.lua", 'ReportRegisterFailure("PLAYER_ENTERING_WORLD"'),
+                        ("Modules/Pet/PetCastBar.lua", 'ReportRegisterFailure("PLAYER_ENTERING_WORLD"')):
+        text = (ADDON / rel).read_text(encoding="utf-8")
+        out.append((f"{Path(rel).stem}_does_not_print_a_refused_registration",
+                    None if needle not in text else f"{rel} still reports a refused registration: {needle}"))
     src = HELPERS.read_text(encoding="utf-8")
     code = re.sub(r"--.*", "", src)
     body = re.search(r"function Helpers\.RegisterEvent\b.*?\nend\n", code, re.S)

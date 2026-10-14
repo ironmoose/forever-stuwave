@@ -16,7 +16,7 @@ HELPERS = Path(__file__).resolve().parent.parent / "forever-stuwave" / "Core" / 
 # The helper keys a harness lends to its FS.FrameHelpers stub; the one list every harness shares.
 HELPER_KEYS = (
     "HoverOnly", "SetTipSpell", "SpellIDForName", "SpellCacheEpoch", "AttachSpellTooltip",
-    "RefreshSpellTooltip", "ReleaseSpellTip", "ReleaseGatedTips", "ShowAuraTooltip",
+    "RefreshSpellTooltip", "ReleaseSpellTip", "ReleaseGatedTips", "ShowAuraTooltip", "RegisterEvent", "RegisterEvents",
 )
 
 # Lua: copyTipHelpers(dst, src) lends HELPER_KEYS from the real helpers' table. For a harness that

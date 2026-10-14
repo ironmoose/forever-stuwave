@@ -1160,8 +1160,7 @@ local function WireEvents(S)
     if S.isTarget then
         events:RegisterEvent("PLAYER_TARGET_CHANGED")
     end
-    local registered, err = pcall(events.RegisterEvent, events, "PLAYER_ENTERING_WORLD")
-    if not registered then ReportRegisterFailure("PLAYER_ENTERING_WORLD", err) end
+    FS.FrameHelpers.RegisterEvent(events, "PLAYER_ENTERING_WORLD")
 
     -- One closure per bar, built here: the step is pcall'd directly (no per-event closure the way
     -- TryStep would take one), and a failure is reported under the event's name like TryStep does.

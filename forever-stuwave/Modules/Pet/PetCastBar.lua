@@ -1012,8 +1012,7 @@ local function RegisterEvents()
 
     -- Resets a cast stranded by a loading screen (see HandleEvent). Plain RegisterEvent:
     -- it is not a unit event.
-    local registered, err = pcall(events.RegisterEvent, events, "PLAYER_ENTERING_WORLD")
-    if not registered then ReportRegisterFailure("PLAYER_ENTERING_WORLD", err) end
+    FS.FrameHelpers.RegisterEvent(events, "PLAYER_ENTERING_WORLD")
 
     events:SetScript("OnEvent", function(_, event, unit, castID, _, interruptedBy)
         TryStep(runnerHost, event, function()

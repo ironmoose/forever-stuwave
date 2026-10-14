@@ -601,8 +601,7 @@ local function BuildSection(frame)
     s.events = ev
     local rec = CreateFrame("Frame", nil, holder)
     rec:SetScript("OnEvent", function(_, event, ...) OnOwnCast(s, event, ...) end)
-    local okReg, errReg = pcall(rec.RegisterUnitEvent, rec, "UNIT_SPELLCAST_SUCCEEDED", "player")
-    if not okReg then LogOnce("ledger", "the cast ledger cannot listen (" .. tostring(errReg) .. ")") end
+    FS.FrameHelpers.RegisterEvent(rec, "UNIT_SPELLCAST_SUCCEEDED", "player")     -- a refusal is recorded, never printed
     s.recorder = rec
 
     s.SetFire = function(up, headY)

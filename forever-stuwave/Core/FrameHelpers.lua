@@ -2003,18 +2003,23 @@ end
 -- Every spell and learn event list goes through here instead: an event the client calls
 -- invalid (C_EventUtils.IsEventValid when it exists, else the refusal itself, pcall'd) is
 -- skipped, never printed, and recorded once in ForeverSTUwaveDB.unknownEvents so a
--- reload shows which names this client turned down. The saved table is never created or
+-- reload (and /fsbug) shows which names this client turned down; a later successful
+-- registration of the same name removes its record. The saved table is never created or
 -- replaced here, and a read only profile is not written to. Files register some events
 -- before ADDON_LOADED has made the table, so a record with nowhere to go waits in
 -- `pendingUnknown` and is written on the first event after the table exists.
 local unknownSeen, pendingUnknown = {}, {}
 
+local function ReadOnlyProfile()
+    local readOnly = FS.Config and FS.Config.IsReadOnly
+    return readOnly and readOnly() or false
+end
+
 local function WriteUnknownEvents()
     if next(pendingUnknown) == nil then return end
     local db = _G.ForeverSTUwaveDB
     if type(db) ~= "table" then return end
-    local readOnly = FS.Config and FS.Config.IsReadOnly
-    if readOnly and readOnly() then
+    if ReadOnlyProfile() then
         pendingUnknown = {}
         return
     end
@@ -2031,6 +2036,15 @@ local function NoteUnknownEvent(event, why)
     unknownSeen[event] = true
     pendingUnknown[event] = { time = type(_G.time) == "function" and _G.time() or 0, why = why }
     WriteUnknownEvents()
+end
+
+-- A client that now knows an event drops the record an older session left for it.
+local function ForgetUnknownEvent(event)
+    pendingUnknown[event] = nil
+    local db = _G.ForeverSTUwaveDB
+    local saved = type(db) == "table" and db.unknownEvents
+    if type(saved) ~= "table" or saved[event] == nil or ReadOnlyProfile() then return end
+    saved[event] = nil
 end
 
 local function ClientCallsInvalid(event)
@@ -2056,7 +2070,7 @@ function Helpers.RegisterEvent(frame, event, ...)
         if type(frame.RegisterEvent) ~= "function" then return false end
         ok = pcall(frame.RegisterEvent, frame, event)
     end
-    if not ok then NoteUnknownEvent(event, "refused") end
+    if ok then ForgetUnknownEvent(event) else NoteUnknownEvent(event, "refused") end
     return ok
 end
 

@@ -604,6 +604,18 @@ for _, f in ipairs(FRAMES) do if f.events.SPELL_UPDATE_COOLDOWN then on = true e
 check(on, "the events the client has are still on")
 """)
 
+case("a_cast_ledger_the_client_refuses_is_recorded_quietly")(r"""
+boot({})
+KNOWN_EVENTS.UNIT_SPELLCAST_SUCCEEDED = nil
+local printed = {}
+print = function(...) printed[#printed + 1] = table.concat({ ... }, " ") end
+ForeverSTUwaveDB = {}
+mount("lower", { show = false })
+check(next(DEGRADED) == nil, "no chat line through the degrade path: " .. tostring(next(DEGRADED)))
+check(#printed == 0, "nothing printed")
+check(ForeverSTUwaveDB.unknownEvents and ForeverSTUwaveDB.unknownEvents.UNIT_SPELLCAST_SUCCEEDED, "recorded in the saved variables")
+""")
+
 case("OnHide_stops_the_ticker_and_every_view_event_but_the_ledger_stays")(r"""
 boot({})
 IN_COMBAT = true

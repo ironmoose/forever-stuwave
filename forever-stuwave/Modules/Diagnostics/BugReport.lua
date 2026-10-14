@@ -56,6 +56,8 @@ BR.LIMITS = LIMITS
 BR.EXCLUDE = {
     bugreports = true, bugreportSeq = true, inspect = true, inspectSkins = true, inspectPos = true,
     fscheck = true, fontCheck = true, labelsAtApply = true, snippet = true,
+    -- Reported by name in the `refusedEvents` section (RefusedEvents below).
+    unknownEvents = true,
     -- Reported in their own `chatSeat` section (ChatSeat below), not through the generic copy.
     chatSeatLog = true, chatSeatLogPrev = true,
     -- Likewise reported in their own `minimapSeat` section (MinimapSeat below).
@@ -537,6 +539,23 @@ local function Settings()
     return Sanitize(copy, st, 0, {}) or {}
 end
 
+-- The event names this client refused to register (FrameHelpers.RegisterEvent records them), sorted.
+local function RefusedEvents()
+    local db = _G.ForeverSTUwaveDB
+    if type(db) ~= "table" then return "unavailable" end
+    local saved = rawget(db, "unknownEvents")
+    local names = {}
+    if type(saved) == "table" then
+        local ok, keys = pcall(CollectKeys, saved)
+        if not ok then return "unavailable" end
+        for _, k in ipairs(keys) do
+            if type(k) == "string" and #names < 40 then names[#names + 1] = CapString(k, 64) end
+        end
+        table.sort(names)
+    end
+    return names
+end
+
 -- A seat log (this session and the last one, plus an optional third slot): what seated or moved a frame, in
 -- order, so a frame that sat wrong after a first login can be traced to the call that moved it. Its own
 -- section with its own small budget, so it neither crowds out the settings nor depends on them.
@@ -728,6 +747,7 @@ function BR.Build(note)
     report.settings = Guard(Settings)
     report.chatSeat = Guard(ChatSeat)
     report.minimapSeat = Guard(MinimapSeat)
+    report.refusedEvents = Guard(RefusedEvents)
     report.classInspect = Guard(ClassInspect)
 
     local errors, errorCount, otherCount = Guard(Errors)

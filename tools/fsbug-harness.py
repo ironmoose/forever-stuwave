@@ -1122,6 +1122,20 @@ case("report_carries_the_chat_seat_log_in_its_own_section", """
     assert(BR.Build().chatSeat == "unavailable", "no DB")
 """)
 
+case("report_lists_the_events_this_client_refused_in_its_own_section", """
+    local FS, BR = LoadBR()
+    ForeverSTUwaveDB = { petFrame = { x = 1 }, unknownEvents = { ZED_EVENT = { time = 2 }, ALPHA_EVENT = { time = 1, why = "refused" } } }
+    local r = BR.Build()
+    assert(r.settings.unknownEvents == nil, "the record must not ride in the generic settings copy")
+    assert(type(r.refusedEvents) == "table" and #r.refusedEvents == 2, "two refused events")
+    assert(r.refusedEvents[1] == "ALPHA_EVENT" and r.refusedEvents[2] == "ZED_EVENT", "sorted names")
+    ForeverSTUwaveDB = {}
+    local none = BR.Build().refusedEvents
+    assert(type(none) == "table" and #none == 0, "none refused")
+    ForeverSTUwaveDB = nil
+    assert(BR.Build().refusedEvents == "unavailable", "no DB")
+""")
+
 case("report_carries_the_minimap_seat_log_in_its_own_section", """
     local FS, BR = LoadBR()
     local function make(n, ev)
