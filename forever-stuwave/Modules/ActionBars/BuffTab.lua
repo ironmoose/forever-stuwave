@@ -1111,7 +1111,7 @@ local function WriteStatus()
     local db = ForeverSTUwaveDB
     if type(db) ~= "table" or (FS.Config and type(FS.Config.IsReadOnly) == "function" and FS.Config.IsReadOnly()) then return end
     local saved = db.buffTabEngine
-    if saved and saved.sig == sig and saved == EngineState.status then return end
+    if type(saved) == "table" and saved.sig == sig and saved == EngineState.status then return end   -- a corrupt value is replaced
     saved = { sig = sig, setting = on, armed = EngineState.armed, alpha = EngineState.alpha, rebuilds = EngineState.rebuilds,
         failures = EngineState.failures, retryAt = EngineState.retryAt, gaveUp = EngineState.gaveUp,
         combat = InCombatLockdown() and true or false, tiles = {}, unmappedIcons = unmappedIcons }

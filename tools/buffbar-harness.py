@@ -3063,6 +3063,22 @@ def check_the_unmapped_spell_icon_list_rides_in_the_saved_state_table():
     assert str(g(lua).ForeverSTUwaveDB.buffTabEngine.unmappedIcons) == "111, 222, 333", "a new unmapped icon was not rewritten"
 
 
+def check_a_corrupt_state_table_is_replaced_and_never_errors_each_tick():
+    for corrupt in ('"junk"', "42", "true"):
+        lua = engine_world()
+        run(lua, f"ForeverSTUwaveDB.buffTabEngine = {corrupt}")
+        tick(lua, 2)
+        saved = g(lua).ForeverSTUwaveDB.buffTabEngine
+        assert type(saved).__name__ == "_LuaTable" and "setting=" in str(saved.line), f"{corrupt}: not replaced"
+        assert not g(lua).FS.BuffTab.BT.warned.bufftab_status, f"{corrupt}: the write raised and was swallowed"
+    # a read-only Config leaves even a corrupt value alone, and still never raises
+    lua = engine_world()
+    run(lua, 'ForeverSTUwaveDB.buffTabEngine = "junk"; FS.Config.IsReadOnly = function() return true end')
+    tick(lua, 2)
+    assert g(lua).ForeverSTUwaveDB.buffTabEngine == "junk"
+    assert not g(lua).FS.BuffTab.BT.warned.bufftab_status
+
+
 def check_a_throwing_engine_tick_does_not_break_the_tick():
     lua = engine_world()
     shield_aura_up(lua)
@@ -3216,6 +3232,7 @@ CHECKS = [
     check_the_state_line_for_the_live_test_is_saved_and_quiet_ticks_allocate_nothing,
     check_the_state_line_tells_the_setting_and_unreadable_from_misplaced_and_a_refusing_db_never_throws,
     check_the_unmapped_spell_icon_list_rides_in_the_saved_state_table,
+    check_a_corrupt_state_table_is_replaced_and_never_errors_each_tick,
     check_a_throwing_engine_tick_does_not_break_the_tick,
     check_a_late_init_of_a_parked_containers_slot_is_not_attributed_to_the_new_container,
     check_the_chip_and_ring_chrome_numbers_are_pinned_by_value,
