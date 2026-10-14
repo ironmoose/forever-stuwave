@@ -361,6 +361,21 @@ local function NewText(parent, px, color)
     return fs
 end
 
+-- The tile's key label (and its plate) rides a frame of its own above the combat container, so the lit cover the slot
+-- draws (the slot is a child of the container) never hides it. Out of combat only: StyleButton and SeatHost call this.
+local function SeatHotkeyHost(button)
+    if not button.fsHotkeyHost then
+        local hh = CreateFrame("Frame", nil, button)
+        hh:SetAllPoints(button)
+        hh:EnableMouse(false)
+        button.fsHotkeyHost = hh
+    end
+    local hh = button.fsHotkeyHost
+    if BT.host then hh:SetFrameLevel(BT.host:GetFrameLevel() + BT.ENGINE_LEVEL + 1) end
+    if button.HotKey and button.HotKey:GetParent() ~= hh then button.HotKey:SetParent(hh) end
+    if button.fsHotkeyPlate and button.fsHotkeyPlate:GetParent() ~= hh then button.fsHotkeyPlate:SetParent(hh) end
+end
+
 -- Runs once per button, from Build and again on every re-seat. Everything that creates a region, hook or frame
 -- is guarded so a throw partway is finished by the next Build.
 local function StyleButton(button, size, scale)
@@ -398,6 +413,7 @@ local function StyleButton(button, size, scale)
 
     local textHost = FH.SeatButtonText(button)
     FH.SeatButtonHotkey(button, textHost)
+    SeatHotkeyHost(button)
 
     -- the face: chip, time and underline, hidden as one while the tile is locked
     if not button.fsFace then
@@ -739,8 +755,7 @@ end
 local function CoverSlot(tile, part)
     local slot, skin = part.slot, tile.fsSkin
     local L = BuildLooks()
-    local margin = skin and skin.chamfer
-    local function Layer(source, layer, sublevel, color)
+    local function Layer(source, layer, sublevel, color, margin)
         local path = source and source:GetTexture()
         if path == nil then return nil end
         local tex = slot:CreateTexture(nil, layer, nil, sublevel)
@@ -751,8 +766,11 @@ local function CoverSlot(tile, part)
         tex:SetVertexColor(color[1], color[2], color[3], 1)
         return tex
     end
-    part.coverPlate = Layer(tile.fsPlate, "BACKGROUND", -8, BG)
-    part.coverRing = Layer(skin and skin.border and skin.border.ring, "OVERLAY", 7, Mix(BG, L.on.ring, L.on.ringA))
+    -- the margins come from where the tile's own chrome takes them: the plate from AddCut2Texture (SLICE_CUT_MARGIN), the
+    -- ring from the skin's chamfer
+    part.coverPlate = Layer(tile.fsPlate, "BACKGROUND", -8, BG, FS.Theme.SLICE_CUT_MARGIN)
+    part.coverRing = Layer(skin and skin.border and skin.border.ring, "OVERLAY", 7, Mix(BG, L.on.ring, L.on.ringA),
+        skin and skin.chamfer)
 end
 
 -- The slot's frame, built by the engine (at AddAuraSlot, or later, when it first needs one): no mouse (the secure tile
@@ -1122,7 +1140,8 @@ local function WriteStatus()
             sig = (sig * 31 + #eng.parts * 7 + ok * 3 + (eng.bad and 1 or 0) + nils * 13 + (eng.seen and 17 or 0)) % 2147483647
             for _, part in ipairs(eng.parts) do
                 sig = (sig * 31 + (part.shownCode or 0) * 5 + (part.w or 0) * 3 + (part.h or 0)
-                    + (part.lit and part.lit:GetTexture() ~= nil and 11 or 0)) % 2147483647
+                    + (part.lit and part.lit:GetTexture() ~= nil and 11 or 0) + (part.coverPlate and 19 or 0)
+                    + (part.coverRing and 23 or 0)) % 2147483647
             end
         end
     end
@@ -1154,9 +1173,11 @@ local function WriteStatus()
             local detail = {}
             for n, part in ipairs(eng.parts) do
                 local code = part.shownCode or 0
-                detail[#detail + 1] = string.format("slot%d shown=%s %dx%d lit=%s", n,
+                local cover = (part.coverPlate and "plate" or "") .. (part.coverPlate and part.coverRing and "+" or "")
+                    .. (part.coverRing and "ring" or "")
+                detail[#detail + 1] = string.format("slot%d shown=%s %dx%d lit=%s cover=%s", n,
                     code == 2 and "true" or (code == 1 and "false" or "?"), part.w or 0, part.h or 0,
-                    part.lit and tostring(part.lit:GetTexture() ~= nil) or "n/a")
+                    part.lit and tostring(part.lit:GetTexture() ~= nil) or "n/a", cover ~= "" and cover or "none")
             end
             text[#text + 1] = string.format("%s declared=%d parts=%d ok=%d nils=%d bad=%s%s%s", button.fsKey, eng.declared,
                 #eng.parts, ok, nils, tostring(eng.bad and true or false), eng.item and (" seen=" .. tostring(eng.seen == true)) or "",
@@ -1412,6 +1433,7 @@ local function SeatHost()
     host:ClearAllPoints()
     host:SetPoint(point, rel, relPoint, x, y)
     if rel.GetFrameLevel then host:SetFrameLevel(rel:GetFrameLevel() + 5) end
+    for _, button in ipairs(BT.list) do SeatHotkeyHost(button) end
     host:Show()
 end
 

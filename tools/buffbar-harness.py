@@ -67,6 +67,7 @@ tbh = _load("totembar_harness", "totembar-harness.py")
 csh = tbh.csh
 sb = csh.sb
 g = sb.g
+seq = csh.seq
 
 
 def fire(lua, event, *args):
@@ -2430,6 +2431,15 @@ def check_the_slot_covers_the_whole_tile_with_the_lit_look_and_nothing_moves_in_
                 assert float(cv._vertex[4]) == 1.0, f"{name} is not opaque"
                 assert str(cv._layer) == layer, f"{name} is on {cv._layer}"
                 assert same(lua, cv._parent, part.slot), f"{name} is not a child of the slot"
+            # flush with the tile: both corners, no offset (an inset cover would leave a red rim of the tile showing)
+            for name in ("coverPlate", "coverRing"):
+                cv = getattr(part, name)
+                pts = [(str(pt.point), float(pt.x or 0), float(pt.y or 0)) for pt in seq(cv._points)]
+                assert pts == [("TOPLEFT", 0.0, 0.0), ("BOTTOMRIGHT", 0.0, 0.0)], f"{name} is not flush with the tile: {pts}"
+            # the plate's slice margin is the tile plate's own, the ring's the tile ring's own
+            assert seq(part.coverPlate._slice) == seq(b.fsPlate._slice), "the cover plate margin drifted from the tile plate"
+            assert float(part.coverPlate._slice[1]) == float(g(lua).FS.Theme.SLICE_CUT_MARGIN)
+            assert seq(part.coverRing._slice) == seq(b.fsSkin.border.ring._slice), "the cover ring margin drifted"
             assert str(part.coverPlate._texture) == str(b.fsPlate._texture)
             assert str(part.coverRing._texture) == str(b.fsSkin.border.ring._texture)
             close(rgb(part.coverRing._vertex), lit_ring, "the lit ring colour")
@@ -2510,13 +2520,43 @@ def check_the_state_line_reports_each_imbue_slot_for_the_live_test():
     line = str(g(lua).ForeverSTUwaveDB.buffTabEngine.line)
     assert "imbue declared=2 parts=2" in line and "seen=true" in line, line
     assert line.count("shown=true") == 3 and "lit=true" in line, line
-    assert re.search(r"slot1 shown=true \d+x\d+ lit=true; slot2 shown=true", line), line
+    assert re.search(r"slot1 shown=true \d+x\d+ lit=true cover=plate\+ring; slot2 shown=true", line), line
     assert "shield declared=1" in line and "slot1 shown=" in line.split("shield declared=1")[1], line
     for sl in (acs(lua)[0]._ench[1], acs(lua)[0]._ench[2]):
         sl.Hide(sl)
     tick(lua, 2)
     g(lua).FS.BuffTab.SaveStatus()
     assert str(g(lua).ForeverSTUwaveDB.buffTabEngine.line).count("shown=false") >= 2, "the line did not follow the slots"
+    # the cover each slot got (CoverSlot runs under a pcall: the next /reload must say whether it was built)
+    assert str(g(lua).ForeverSTUwaveDB.buffTabEngine.line).count("cover=plate+ring") == 3, line
+    run(lua, "for _, p in ipairs(FSBuffTabButton1.fsEngine.parts) do p.coverRing = nil end\n"
+             "for _, p in ipairs(FSBuffTabButton2.fsEngine.parts) do p.coverPlate, p.coverRing = nil, nil end")
+    tick(lua, 2)
+    g(lua).FS.BuffTab.SaveStatus()
+    line2 = str(g(lua).ForeverSTUwaveDB.buffTabEngine.line)
+    assert line2.count("cover=plate;") + line2.count("cover=plate]") == 2 and line2.count("cover=none") == 1, line2
+
+
+def check_the_key_label_rides_above_the_combat_cover_and_is_never_moved_in_combat():
+    lua = engine_world()
+    shield_aura_up(lua)
+    c = acs(lua)[0]
+    levels = {}
+    for i in (IMBUE, SHIELD):
+        b = btn(lua, i)
+        hh = b.fsHotkeyHost
+        assert hh is not None and same(lua, hh._parent, b), "the key label has no frame of its own on the tile"
+        assert same(lua, b.HotKey._parent, hh) and same(lua, b.fsHotkeyPlate._parent, hh), "the label or its plate stayed below"
+        assert float(hh._level) > float(c._level), "the key label frame is not above the container (the lit cover)"
+        assert not hh._mouse, "the key label frame takes the mouse"
+        levels[i] = float(hh._level)
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    tick(lua, 5)
+    leave_combat(lua)
+    set_combat(lua, True)
+    for i in (IMBUE, SHIELD):
+        assert float(btn(lua, i).fsHotkeyHost._level) == levels[i], "the key label frame level moved in combat"
 
 
 def check_the_missing_word_in_combat_keeps_its_out_of_combat_size():
@@ -3253,6 +3293,7 @@ CHECKS = [
     check_in_combat_the_tiles_wear_the_out_of_combat_missing_look_and_only_the_alpha_is_written,
     check_the_imbue_tile_goes_live_in_combat_only_after_a_slot_was_seen_shown_with_an_imbue_on,
     check_the_state_line_reports_each_imbue_slot_for_the_live_test,
+    check_the_key_label_rides_above_the_combat_cover_and_is_never_moved_in_combat,
     check_the_missing_word_in_combat_keeps_its_out_of_combat_size,
     check_regen_arms_a_container_that_reads_back_off_and_a_combat_login_builds_at_regen,
     check_nothing_is_built_in_combat_whoever_asks,
