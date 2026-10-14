@@ -196,14 +196,24 @@ do
         return { l = x - dx, t = y + dy, w = w, h = h }
     end
     function __Region:GetLeft()
-        if __noRect then return nil end
+        if __noRect or self._noRect then return nil end
         if self._forceLeft then return self._forceLeft end
         return box(self).l
     end
     function __Region:GetTop()
-        if __noRect then return nil end
+        if __noRect or self._noRect then return nil end
         if self._forceTop then return self._forceTop end
         return box(self).t
+    end
+    function __Region:GetRight()
+        if __noRect or self._noRect then return nil end
+        local b = box(self)
+        return (self._forceLeft or b.l) + b.w
+    end
+    function __Region:GetBottom()
+        if __noRect or self._noRect then return nil end
+        local b = box(self)
+        return (self._forceTop or b.t) - b.h
     end
 end
 
@@ -2759,6 +2769,7 @@ def check_flapping_shield_ids_rebuild_only_for_a_new_id_and_at_most_three_times(
         fire(lua, "SPELLS_CHANGED")
     assert int(engine_cap(lua).rebuilds) == 3 and len(acs(lua)) == 4, (int(engine_cap(lua).rebuilds), len(acs(lua)))
     assert len(engine_cap(lua).parked) == 3
+    assert g(lua).FS.BuffTab.BT.warned.bufftab_engine_cap, "past the cap a line says to /reload"
 
 
 def check_a_late_init_of_a_parked_containers_slot_is_not_attributed_to_the_new_container():
@@ -2777,6 +2788,119 @@ def check_a_late_init_of_a_parked_containers_slot_is_not_attributed_to_the_new_c
     assert len(parts_of(lua, SHIELD)) == 0, "the parked container's slot is not this tile's"
     assert btn(lua, SHIELD).fsSig == "proven", "a parked container's late frame did not touch the tile"
     assert new_eng.bad is False
+
+
+def check_one_misplaced_tile_hides_the_container_and_no_tile_claims_the_engine_state():
+    lua = engine_world()
+    shield_aura_up(lua)
+    # only the off hand slot (the imbue tile's) stands elsewhere
+    run(lua, "__acs[1]._ench[2]._forceLeft, __acs[1]._ench[2]._forceTop = 7, 9")
+    tick(lua, 1.1)
+    assert btn(lua, IMBUE).fsEngine.bad is True and btn(lua, SHIELD).fsEngine.bad is False
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    update(lua)
+    assert float(acs(lua)[0]._alpha) == 0, "the container is hidden"
+    assert not bt(lua).EngineLive("shield") and not bt(lua).EngineLive("imbue"), "a tile is live only if the container shows"
+    assert tile(lua, SHIELD)["text"] == "~3", "the shield shows its frozen state, not a dim base over a hidden container"
+    assert tile(lua, IMBUE)["text"] != ""
+    assert g(lua).FS.BuffTab.Engine.allProven() is False
+
+
+def check_an_unreadable_slot_is_logged_after_five_ticks_and_a_hidden_proven_one_keeps_its_proof():
+    lua = engine_world()
+    shield_aura_up(lua)
+    slot = "__acs[1]._slots.shield.frame"
+    run(lua, f"{slot}._noRect = true")
+    for n in range(4):
+        tick(lua, 1.1)
+    assert not g(lua).FS.BuffTab.BT.warned.bufftab_engine_unreadable
+    assert btn(lua, SHIELD).fsEngine.bad is True, "a shown slot that cannot be read is unproven"
+    tick(lua, 1.1)
+    assert g(lua).FS.BuffTab.BT.warned.bufftab_engine_unreadable, "logged after five ticks"
+    # a hidden slot (no aura) with no readable rect keeps the proof it had, and never logs
+    lua = engine_world(pre="__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end")
+    tick(lua, 1.1)
+    assert btn(lua, SHIELD).fsEngine.bad is False
+    run(lua, f"{slot}._noRect = true\n{slot}:Hide()")
+    for _ in range(12):
+        tick(lua, 1.1)
+    assert btn(lua, SHIELD).fsEngine.bad is False and not g(lua).FS.BuffTab.BT.warned.bufftab_engine_unreadable
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    assert bt(lua).EngineLive("shield") and float(acs(lua)[0]._alpha) == 1, "the next fight still has the engine state"
+    # a hidden slot whose rect IS readable is checked like any other
+    leave_combat(lua)
+    run(lua, f"{slot}._noRect = false\n{slot}._forceLeft, {slot}._forceTop = 7, 9")
+    tick(lua, 1.1)
+    assert btn(lua, SHIELD).fsEngine.bad is True
+    # a slot never proven and hidden with no rect stays unproven
+    lua = engine_world(pre="__acLazy = true")
+    run(lua, "__acFlush()")
+    run(lua, f"{slot}._noRect = true\n{slot}:Hide()")
+    tick(lua, 1.1)
+    assert btn(lua, SHIELD).fsEngine.bad is True
+
+
+def check_a_slot_with_the_right_corner_but_the_wrong_size_is_not_on_the_icon():
+    lua = engine_world()
+    tick(lua, 1.1)
+    assert btn(lua, SHIELD).fsEngine.bad is False
+    run(lua, """local f = __acs[1]._slots.shield.frame
+        f._points = { { point = 'TOPLEFT', rel = FS.BuffTab.BT.byKey.shield.icon, relPoint = 'TOPLEFT', x = 0, y = 0 } }
+        f._w, f._h = 10, 10""")
+    tick(lua, 1.1)
+    assert btn(lua, SHIELD).fsEngine.bad is True, "same top left, other size"
+
+
+def check_the_state_line_for_the_live_test_is_saved_and_quiet_ticks_allocate_nothing():
+    lua = engine_world()
+    tick(lua, 1.1)
+    line = str(g(lua).ForeverSTUwaveDB.buffTabEngine.line)
+    assert "armed=true" in line and "alpha=0" in line and "rebuilds=0" in line and "gaveUp=false" in line, line
+    assert "shield declared=1 parts=1 ok=1 bad=false" in line and "imbue declared=2 parts=2 ok=2 bad=false" in line, line
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    update(lua)
+    assert "alpha=1" in str(g(lua).ForeverSTUwaveDB.buffTabEngine.line) and "combat=true" in str(g(lua).ForeverSTUwaveDB.buffTabEngine.line)
+    leave_combat(lua)
+    run(lua, "__acs[1]._ench[2]._forceLeft, __acs[1]._ench[2]._forceTop = 7, 9")
+    tick(lua, 1.1)
+    line = str(g(lua).ForeverSTUwaveDB.buffTabEngine.line)
+    assert "imbue declared=2 parts=2 ok=1 bad=true" in line, line
+    for word in ("bot", "automat", "macro", "cheat", "hack", "probe", "monitor"):
+        assert word not in line.lower()
+    measure = """
+        if jit then jit.off() end
+        -- the mock resolves anchors by building tables per call; the client's getters allocate nothing
+        function __Region:GetLeft() return 5 end
+        function __Region:GetTop() return 9 end
+        function __Region:GetRight() return 25 end
+        function __Region:GetBottom() return -9 end
+        for i = 1, 50 do __tickAll(1.1) end
+        collectgarbage("collect"); collectgarbage("stop")
+        local before = collectgarbage("count")
+        for i = 1, 400 do __tickAll(1.1) end
+        __grew = (collectgarbage("count") - before) * 1024
+        collectgarbage("restart")
+    """
+    grew = {}
+    for name, world_ in (("plain", boot(tips={16: ["Rockbiter 1 (30 min)"]}, weapons={16: "INVTYPE_WEAPON"})),
+                         ("engine", engine_world())):
+        run(world_, measure)
+        grew[name] = float(g(world_).__grew)
+    # the rest is the mock's own tooltip and aura reads; the proof pass and the state line add nothing to it
+    assert grew["engine"] <= grew["plain"] * 1.1 + 2000, f"400 quiet ticks: {grew}"
+
+
+def check_a_throwing_engine_tick_does_not_break_the_tick():
+    lua = engine_world()
+    shield_aura_up(lua)
+    run(lua, "FS.BuffTab.BT.byKey.shield.fsEngine.parts = 5")
+    tick(lua, 1.1)                     # must not raise
+    assert g(lua).FS.BuffTab.BT.warned.bufftab_tick_engine, "logged"
+    run(lua, "FS.BuffTab.BT.byKey.shield.fsEngine.parts = {}")
+    tick(lua, 1.1)
 
 
 def check_the_chip_and_ring_chrome_numbers_are_pinned_by_value():
@@ -2914,6 +3038,11 @@ CHECKS = [
     check_a_slot_found_with_the_mouse_on_is_made_click_through_and_logged,
     check_a_changed_spellbook_rebuilds_the_container_with_the_new_shield_ids,
     check_flapping_shield_ids_rebuild_only_for_a_new_id_and_at_most_three_times,
+    check_one_misplaced_tile_hides_the_container_and_no_tile_claims_the_engine_state,
+    check_an_unreadable_slot_is_logged_after_five_ticks_and_a_hidden_proven_one_keeps_its_proof,
+    check_a_slot_with_the_right_corner_but_the_wrong_size_is_not_on_the_icon,
+    check_the_state_line_for_the_live_test_is_saved_and_quiet_ticks_allocate_nothing,
+    check_a_throwing_engine_tick_does_not_break_the_tick,
     check_a_late_init_of_a_parked_containers_slot_is_not_attributed_to_the_new_container,
     check_the_chip_and_ring_chrome_numbers_are_pinned_by_value,
     check_a_rescale_reseats_every_engine_text_out_of_combat_only,
