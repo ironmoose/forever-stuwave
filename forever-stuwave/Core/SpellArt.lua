@@ -62,17 +62,29 @@ function SpellArt.UnmappedCount()
     return #unmapped
 end
 
-local function NoteUnmapped(stock)
-    if type(stock) ~= "number" and type(stock) ~= "string" then return end
-    local key = tostring(stock)
-    if unmappedSeen[key] or #unmapped >= UNMAPPED_CAP then return end
-    unmappedSeen[key] = true
-    unmapped[#unmapped + 1] = key
+-- Written to the saved table whenever it can take it; an icon first seen while the database was read-only or not ready
+-- stays pending (it is already in the list) and goes out with the next sighting of any unmapped icon.
+local pending = false
+
+local function Flush()
     -- never create or replace the database (Config leaves a corrupt or newer one alone on purpose)
     local db = ForeverSTUwaveDB
     if type(db) ~= "table" or (FS.Config and type(FS.Config.IsReadOnly) == "function" and FS.Config.IsReadOnly()) then return end
     if db.buffTabEngine == nil then db.buffTabEngine = {} end
-    if type(db.buffTabEngine) == "table" then db.buffTabEngine.unmappedIcons = table.concat(unmapped, ", ") end
+    if type(db.buffTabEngine) ~= "table" then return end
+    db.buffTabEngine.unmappedIcons = table.concat(unmapped, ", ")
+    pending = false
+end
+
+local function NoteUnmapped(stock)
+    if type(stock) ~= "number" and type(stock) ~= "string" then return end
+    local key = tostring(stock)
+    if not unmappedSeen[key] and #unmapped < UNMAPPED_CAP then
+        unmappedSeen[key] = true
+        unmapped[#unmapped + 1] = key
+        pending = true
+    end
+    if pending then Flush() end
 end
 
 -- The texture to draw for the stock one the client gave: the baked file when the style is gradient and there is

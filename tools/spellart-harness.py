@@ -187,13 +187,16 @@ def check_set_never_throws() -> None:
     """Resolve runs inside Set's pcall: a secret, or a setting read that raises, can never throw out of a bind or a repaint."""
     lua = world()
     sa = lua.eval("FS.SpellArt")
+    # a MAPPED id, so Resolve reaches Style() (an unmapped one returns before it)
+    mapped = next(iter(table_items(lua.eval("FS.SpellArtData.byFile")).keys()))
     lua.execute("TrapSecretKeys()")
     ok = lua.eval("function(t) return (pcall(FS.SpellArt.Set, t, 100.5)) end")(lua.globals().NewTex())
     check("never_throws.a_secret_bind_does_not_throw", ok is True)
     lua.execute("FS.Config.Get = function() error('config exploded') end")
     tex = lua.globals().NewTex()
-    ok = lua.eval("function(t) return (pcall(FS.SpellArt.Set, t, 777)) end")(tex)
+    ok = lua.eval("function(t, id) return (pcall(FS.SpellArt.Set, t, id)) end")(tex, mapped)
     check("never_throws.a_raising_setting_read_does_not_throw_out_of_Set", ok is True)
+    check("never_throws.the_raising_read_really_reaches_Resolve", lua.eval("function() return (pcall(FS.SpellArt.Resolve, " + str(mapped) + ")) end")() is False)
     ok = lua.eval("function() return (pcall(FS.SpellArt.Repaint)) end")()
     check("never_throws.a_raising_setting_read_does_not_throw_out_of_Repaint", ok is True)
 
@@ -221,11 +224,35 @@ def check_unmapped_record() -> None:
     for n in range(100, 200):
         sa.Resolve(n)
     check("unmapped.the_list_is_capped", sa.UnmappedCount() == 40, f"{sa.UnmappedCount()}")
-    lua.execute("FS.Config.IsReadOnly = function() return true end; ForeverSTUwaveDB.buffTabEngine = nil; FS.SpellArt.Resolve(555555555)")
+
+
+def check_unmapped_database_guards() -> None:
+    """Each guard in its own fresh world (after the cap the recorder returns before the guards), and nothing seen while the database
+    could not take it is lost."""
+    # read-only: not written, then written once it is writable, from the next sighting of any unmapped icon
+    lua = world()
+    lua.execute("FS.Config.IsReadOnly = function() return true end; FS.SpellArt.Resolve(555555555)")
     check("unmapped.a_read_only_database_is_not_written", lua.eval("ForeverSTUwaveDB.buffTabEngine") is None)
-    lua.execute("FS.Config.IsReadOnly = nil; ForeverSTUwaveDB = 5")
+    check("unmapped.the_list_still_has_it_in_memory", str(lua.eval("FS.SpellArt.UnmappedLine()")) == "555555555")
+    lua.execute("FS.Config.IsReadOnly = function() return false end; FS.SpellArt.Resolve(555555555)")
+    check("unmapped.an_icon_seen_while_read_only_is_flushed_on_the_next_sighting",
+          str(lua.eval("(ForeverSTUwaveDB.buffTabEngine or {}).unmappedIcons")) == "555555555")
+    # not a table (the database is not ready): never throws, nothing lost
+    lua = world()
+    lua.execute("ForeverSTUwaveDB = nil")
+    ok = lua.eval("function() return (pcall(FS.SpellArt.Resolve, 666666666)) end")()
+    check("unmapped.a_missing_database_never_throws", ok is True)
+    lua.execute("ForeverSTUwaveDB = 5")
     ok = lua.eval("function() return (pcall(FS.SpellArt.Resolve, 666666666)) end")()
     check("unmapped.a_database_that_is_not_a_table_never_throws", ok is True)
+    lua.execute("ForeverSTUwaveDB = {}")
+    lua.execute("FS.SpellArt.Resolve(666666666)")
+    check("unmapped.an_icon_seen_before_the_database_was_ready_is_flushed_later",
+          str(lua.eval("(ForeverSTUwaveDB.buffTabEngine or {}).unmappedIcons")) == "666666666")
+    # a buffTabEngine that is not a table is left alone
+    lua = world()
+    lua.execute("ForeverSTUwaveDB = { buffTabEngine = 'x' }; FS.SpellArt.Resolve(777777777)")
+    check("unmapped.a_state_field_that_is_not_a_table_is_left_alone", str(lua.eval("ForeverSTUwaveDB.buffTabEngine")) == "x")
 
 
 def check_sources() -> None:
@@ -268,6 +295,7 @@ def main() -> int:
     check_set_and_repaint()
     check_set_never_throws()
     check_unmapped_record()
+    check_unmapped_database_guards()
     print(f"\n{len(FAILS)} failed" if FAILS else "\nall checks passed")
     return len(FAILS)
 
