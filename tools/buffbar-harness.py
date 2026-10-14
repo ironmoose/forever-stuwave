@@ -2632,6 +2632,14 @@ def check_the_host_moving_to_another_level_takes_the_key_label_frames_with_it():
         assert float(btn(lua, i).fsHotkeyHost._level) >= float(host._level) + 12 + 3, "the label frame stayed at the old host level"
 
 
+def check_the_host_seat_walks_the_container_once_for_every_tile():
+    lua = engine_world()
+    shield_aura_up(lua)
+    run(lua, "__walks = 0; local c = __acs[1]; local gc = c.GetChildren; c.GetChildren = function(me) __walks = __walks + 1; return gc(me) end")
+    g(lua).FS.BuffTab.SeatHost()
+    assert int(g(lua).__walks) == 1, f"{g(lua).__walks} walks under the container in one host seat (two tiles)"
+
+
 def check_the_key_label_rides_above_the_combat_cover_and_is_never_moved_in_combat():
     lua = engine_world()
     shield_aura_up(lua)
@@ -3586,6 +3594,7 @@ CHECKS = [
     check_the_combat_missing_look_equals_the_out_of_combat_one_and_no_band_point_or_size_is_written_in_combat,
     check_the_band_and_word_sit_on_the_face_frame_under_every_engine_slot,
     check_a_rescale_reseats_the_band_out_of_combat_only,
+    check_the_host_seat_walks_the_container_once_for_every_tile,
 ]
 SCALED_CHECKS = [
     check_the_slot_covers_the_whole_tile_with_the_lit_look_and_nothing_moves_in_combat,

@@ -387,13 +387,9 @@ function TopLevel(frame, depth)
     return top
 end
 
--- The tile's key label (and its plate) rides a frame of its own above the combat container, so the lit cover the slot
--- draws (the slot is a child of the container) never hides it. The client gives a created child its parent's level + 1,
--- so the slots sit at container + 1 and their children above that: the frame is put above the highest level found under
--- the container (floor: host + ENGINE_LEVEL + 3). Out of combat only: StyleButton, SeatHost and the engine passes call
--- this, and it writes a level only when it changed.
--- The level the key label frames sit at: the floor, or one over the highest frame under the container. One walk per pass;
--- the caller hands the result to every tile's SeatHotkeyHost.
+-- The level the key label frames sit at: the floor (host + ENGINE_LEVEL + 3), or one over the highest frame found under
+-- the container (the client gives a created child its parent's level + 1, so the slots sit at container + 1 and their
+-- children above that). One walk per pass; the caller hands the result to every tile's SeatHotkeyHost.
 local function HotkeyLevel()
     local level = (BT.host and BT.host:GetFrameLevel() or 0) + BT.ENGINE_LEVEL + 3
     local container = EngineState.container
@@ -401,8 +397,9 @@ local function HotkeyLevel()
     return level
 end
 
-local SeatBand
-
+-- The tile's key label (and its plate) rides a frame of its own above the combat container, so the lit cover the slot
+-- draws (the slot is a child of the container) never hides it. Out of combat only: StyleButton, SeatHost and the engine
+-- passes call this, and it writes a level only when it changed.
 local function SeatHotkeyHost(button, level)
     if InCombatLockdown() then return end
     if not button.fsHotkeyHost then
@@ -417,6 +414,8 @@ local function SeatHotkeyHost(button, level)
     if button.HotKey and button.HotKey:GetParent() ~= hh then button.HotKey:SetParent(hh) end
     if button.fsHotkeyPlate and button.fsHotkeyPlate:GetParent() ~= hh then button.fsHotkeyPlate:SetParent(hh) end
 end
+
+local SeatBand
 
 -- The tile's physical pixel count helpers: the band and its word sit on whole pixels at the frame's effective scale.
 local function EffectiveScale(frame)
@@ -1553,6 +1552,7 @@ local function SeatHost()
     for _, button in ipairs(BT.list) do SeatHotkeyHost(button, level) end
     host:Show()
 end
+BuffTab.SeatHost = SeatHost
 
 -- Every protected step in one place; combat parks it for PLAYER_REGEN_ENABLED. Each step is its own pcall so one
 -- failure cannot stop the next.
