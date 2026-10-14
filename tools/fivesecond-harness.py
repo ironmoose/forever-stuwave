@@ -129,6 +129,10 @@ C_Spell.GetSpellPowerCost = function(id)
     if __costMode == "throw" then error("GetSpellPowerCost blew up") end
     if __costMode == "secret" then return __SECRET end
     if __costMode == "secretentry" then return { { type = __SECRET, cost = 10 } } end
+    -- a plain mana entry next to one with a secret field: the secret one could hide a cost, so the answer is unreadable
+    if __costMode == "secretcost" then return { { type = 0, cost = __SECRET }, { type = 0, cost = 25 } } end
+    if __costMode == "secrettype" then return { { type = __SECRET, cost = 10 }, { type = 0, cost = 25 } } end
+    if __costMode == "secretper" then return { { type = 0, cost = 0, costPerSec = __SECRET }, { type = 0, cost = 25 } } end
     return __costs[id]
 end
 __costs[585] = { { type = 0, cost = 30, minCost = 30, name = "MANA" } }
@@ -372,7 +376,7 @@ def check_another_units_cast_and_unreadable_costs_start_nothing():
     fire(lua, "UNIT_SPELLCAST_SUCCEEDED", "target", "guid", MANA)
     fire(lua, "UNIT_SPELLCAST_SUCCEEDED", "party1", "guid", MANA)
     assert view(lua).phase == "idle"
-    for mode in ("throw", "secret", "secretentry"):
+    for mode in ("throw", "secret", "secretentry", "secretcost", "secrettype", "secretper"):
         lua = world()
         run(lua, f'__costMode = "{mode}"')
         cast(lua)
@@ -782,9 +786,12 @@ def check_a_tooltip_open_on_a_tile_follows_the_countdown():
     lua = world()
     cast(lua)
     tick(lua, 1.0)
+    run(lua, "__owners = 0; local so = GameTooltip.SetOwner; function GameTooltip:SetOwner(...) __owners = __owners + 1; return so(self, ...) end")
     first = tip_text(lua, cells_tile(lua))[1]
     run(lua, "function GameTooltip:GetOwner() return self._owner end")
+    assert int(g(lua).__owners) == 1, "one SetOwner on enter"
     tick(lua, 1.5)
+    assert int(g(lua).__owners) == 1, "the open tooltip was re-anchored on a tick (it would flicker)"
     now = [str(x) for x in seq(g(lua).GameTooltip._lines)][1]
     assert now != first, f"the open tooltip kept {first!r}"
     leave_tip(lua, cells_tile(lua))

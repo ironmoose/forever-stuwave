@@ -391,11 +391,17 @@ function Tab.TipLines(which)
     return lines
 end
 
-local function ShowTooltip(tile)
+-- `refresh`: the tile already owns the tooltip, so only its lines are rewritten (no new SetOwner, which would clear and
+-- re-place it every tick); a client without ClearLines anchors again.
+local function ShowTooltip(tile, refresh)
     local tip = GameTooltip
     if not tip then return end
     local lines = Tab.TipLines(tile.fsKey)
-    FH.AnchorTooltip(tile)
+    if refresh and type(tip.ClearLines) == "function" then
+        tip:ClearLines()
+    else
+        FH.AnchorTooltip(tile)
+    end
     for _, line in ipairs(lines) do
         local c = line[2]
         tip:AddLine(line[1], c[1], c[2], c[3], line[3])
@@ -578,7 +584,7 @@ function Tab.Paint()
     PaintCells(FT.cells)
     PaintRate(FT.rate)
     for _, tile in ipairs(FT.tiles) do
-        if TipIsOurs(tile) then ShowTooltip(tile) end
+        if TipIsOurs(tile) then ShowTooltip(tile, true) end
     end
 end
 
