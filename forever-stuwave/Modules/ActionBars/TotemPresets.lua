@@ -78,7 +78,7 @@ local SETTINGS = {
     dial = {
         key = "totems.dial", default = true, label = "Preset dial",
         tip = "A cell on the totem tab that holds your active totem preset. Click drops the next totem of it, one per "
-            .. "press. Shift click edits it. Off hides it.",
+            .. "press. Shift click edits it, and so does a keybind that includes Shift. Off hides it.",
     },
     dialPlate = {
         key = "totems.dialPlate", default = true, label = "Name plate",
@@ -195,7 +195,7 @@ local function CharKey()
         local ok, guid = pcall(UnitGUID, "player")
         if ok and not IsSecret(guid) and type(guid) == "string" and guid ~= "" then return guid end
     end
-    return "player"
+    return nil          -- not readable yet: no key to save under (Store keeps the presets in memory meanwhile)
 end
 
 local function ConfigReadOnly()
@@ -255,16 +255,17 @@ end
 local memory                -- the store of a session that cannot write the database
 local clean = {}            -- the character keys whose saved table has been sanitised this session
 
--- The character's store { list, active } and whether it is the saved one. A database that is not a table, or a
--- read-only Config, leaves the presets in memory for the session: readable, never written to disk.
+-- The character's store { list, active } and whether it is the saved one. A database that is not a table, a
+-- read-only Config, or a character key that cannot be read yet (never saved under a made up one) leaves the presets in
+-- memory: readable, never written to disk (every edit is refused there, so the memory store only ever holds a slot).
 local function Store()
     local db = _G.ForeverSTUwaveDB
-    if type(db) ~= "table" or ConfigReadOnly() then
+    local key = CharKey()
+    if type(db) ~= "table" or ConfigReadOnly() or not key then
         memory = memory or { list = {}, active = 1 }
         return memory, false
     end
     if type(db.totemPresets) ~= "table" then db.totemPresets = {} end
-    local key = CharKey()
     local store = db.totemPresets[key]
     if type(store) ~= "table" then
         store = { list = {}, active = 1 }
@@ -338,6 +339,23 @@ end
 -- A totem of a preset, against what the character knows
 -------------------------------------------------------------------------------
 
+-- The totems of `element` the character knows (TotemBar.KnownList), kept until something that can change it happens: a
+-- sync (Dial.Refresh), a learn event, regen. The dial repaints ten times a second while a switch waits and every paint
+-- asks for each preset totem, so an uncached spellbook scan per ask would run dozens of times a second.
+local knownCache = {}
+function PS.InvalidateKnown()
+    knownCache = {}
+end
+
+function PS.Known(element)
+    local list = knownCache[element]
+    if list then return list end
+    local tb = TotemBar()
+    list = tb and tb.KnownList and tb.KnownList(element) or {}
+    if tb and tb.KnownList then knownCache[element] = list end
+    return list
+end
+
 -- { element, base, name, id, icon, known, level } for the preset's totem of `element` (nil when it has none). `id` and
 -- `icon` are the rank the character knows (the id TotemBar.Pick takes); known is false for a totem not learned yet.
 function PS.Entry(element, base)
@@ -351,7 +369,7 @@ function PS.Entry(element, base)
     local entry = { element = element, base = base, name = name or "", icon = icon, known = false,
         level = math.max(P.LEVEL[base] or 0, P.ELEMENT_LEVEL[element] or 0) }
     local tb = TotemBar()
-    for _, item in ipairs(tb and tb.KnownList and tb.KnownList(element) or {}) do
+    for _, item in ipairs(PS.Known(element)) do
         if item.name ~= "" and item.name == entry.name then
             entry.known, entry.id, entry.icon = true, item.id, item.icon or icon
             break
@@ -485,6 +503,7 @@ end
 
 -- At PLAYER_REGEN_ENABLED: the queued switch applies, and every step starts over.
 function PS.OnRegen()
+    PS.InvalidateKnown()
     PS.ResetSteps()
     local index = P.pending
     if index then

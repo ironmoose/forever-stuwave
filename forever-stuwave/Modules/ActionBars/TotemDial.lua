@@ -743,10 +743,17 @@ end
 -- The cell's secure attributes (out of combat, from the totem tab's Sync)
 -------------------------------------------------------------------------------
 
+-- Every modifier click that edits instead of dropping: shift, alt, and each combination that holds one of them with
+-- another modifier (a combo with no attribute of its own falls back to the plain type1 and would drop a totem).
+-- Blizzard's SecureTemplates builds the prefix only in the order alt-ctrl-shift-.
+local EDIT_CLICKS = { "shift-type1", "alt-type1", "alt-shift-type1", "alt-ctrl-type1", "alt-ctrl-shift-type1",
+    "ctrl-shift-type1" }
+
 local function ClearAttributes(button)
-    for _, name in ipairs({ "type1", "macrotext1", "type2", "shift-type1", "alt-type1", "ctrl-type1" }) do
+    for _, name in ipairs({ "type1", "macrotext1", "type2", "ctrl-type1" }) do
         button:SetAttribute(name, nil)
     end
+    for _, name in ipairs(EDIT_CLICKS) do button:SetAttribute(name, nil) end
 end
 
 function Dial.ApplyCell(button, def)
@@ -761,9 +768,8 @@ function Dial.ApplyCell(button, def)
             button:SetAttribute("type1", "macro")
             button:SetAttribute("macrotext1", text)
         end
-        -- Shift and Alt clicks are ours (edit): an empty type means they never drop a totem
-        button:SetAttribute("shift-type1", "")
-        button:SetAttribute("alt-type1", "")
+        -- Shift and Alt clicks (alone or with another modifier) are ours (edit): an empty type means they never drop
+        for _, name in ipairs(EDIT_CLICKS) do button:SetAttribute(name, "") end
         button.fsAttrKey = key
     end
     button.fsColor = { (def.hot and PINK or CYAN)[1], (def.hot and PINK or CYAN)[2], (def.hot and PINK or CYAN)[3] }
@@ -1216,6 +1222,7 @@ end
 function Dial.Refresh()
     local tb = Totems()
     if not (tb and tb.Button) then return end
+    Presets().InvalidateKnown()
     for _, def in ipairs(tb.Cells and tb.Cells() or {}) do
         local button = tb.Button(def.key)
         if button and button.fsArcs and button:IsShown() then Paint(button) end
@@ -1268,6 +1275,8 @@ local function OnGameEvent(_, event, unit, _, spellId)
         if unit == "player" then PS.OnCast(spellId) end
     elseif event == "PLAYER_REGEN_DISABLED" then
         Dial.CloseEditor()
+    else
+        PS.InvalidateKnown()        -- a learn event: the known totems may have changed
     end
 end
 
@@ -1278,6 +1287,9 @@ local function Init()
     local events = CreateFrame("Frame")
     events:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
     events:RegisterEvent("PLAYER_REGEN_DISABLED")
+    for _, learn in ipairs({ "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD" }) do
+        events:RegisterEvent(learn)
+    end
     events:SetScript("OnEvent", OnGameEvent)
     local ticker = CreateFrame("Frame", "FSTotemDialTicker")
     ticker:SetScript("OnUpdate", Tick)

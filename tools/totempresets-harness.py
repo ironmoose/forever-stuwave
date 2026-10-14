@@ -120,7 +120,7 @@ function GameTooltip:AddLine(t) self._lines = self._lines or {}; self._lines[#se
 
 
 def boot(scale: float = 1.0, *, learned=None, combat: bool = False, pre_login: str = "", console: bool = True,
-         tabs: bool = False, klass: str = "SHAMAN"):
+         tabs: bool = False, klass: str = "SHAMAN", early: str = ""):
     """A Shaman world with every totem learned (or the `learned` names) and the preset files loaded last. `tabs`: the
     buff tab and the five second rule tab too (the seat checks)."""
     names = learned if learned is not None else [n for e in ("fire", "earth", "water", "air") for n in TOTEMS[e]]
@@ -133,10 +133,10 @@ def boot(scale: float = 1.0, *, learned=None, combat: bool = False, pre_login: s
                       ("Totemic Recall", tbh.RECALL)):
         setup.append(f'__spell("{name}", {sid}, true)')
     files = [csh.PETDOCK, csh.CLASSSHOULDER, tbh.TOTEMPIECE, tbh.TOTEMBAR]
-    extra = mocks + "\n" + MOCKS + "\n" + "\n".join(setup)
+    extra = mocks + "\n" + MOCKS + "\n" + "\n".join(setup) + "\n" + early
     if tabs:
         files += [bbh.SHAMANBUFFS, bbh.BUFFTAB]
-        extra = mocks + "\n" + bbh.MOCKS + "\n" + fsh.MOCKS + "\n" + MOCKS + "\n" + "\n".join(setup)
+        extra = mocks + "\n" + bbh.MOCKS + "\n" + fsh.MOCKS + "\n" + MOCKS + "\n" + "\n".join(setup) + "\n" + early
         files.append(fsh.FSTAB)
     files += [PRESETS, DIAL]
     return sb.boot(scale, klass=klass, known=[], combat=combat, console=console, extra_lua=csh.PATCH + extra,
@@ -670,6 +670,32 @@ def check_a_slot_that_vanished_while_a_switch_waited_is_dropped_at_regen():
 # ---------------------------------------------------------------------------------------------
 # Checks: the step
 # ---------------------------------------------------------------------------------------------
+
+
+NUM_SECRET = (
+    "local __o = FS.IsSecret; FS.IsSecret = function(v) return __o(v) or (__numSecret ~= nil and v == __numSecret) end\n"
+)
+
+
+def check_a_secret_number_from_the_wheel_or_the_clock_is_ignored():
+    # the mock secret is a table, which the type tests would catch anyway: a secret NUMBER is what the guards are for
+    lua = boot(early=NUM_SECRET)
+    P = PS(lua)
+    two_presets(lua)
+    d = dial(lua)
+    P.Select(1)
+    run(lua, "__numSecret = 5")
+    script(lua, d, "OnMouseWheel", 5)
+    assert P.Active() == 1, "a secret wheel step turned the dial"
+    script(lua, d, "OnMouseWheel", 1)
+    assert P.Active() == 2, "a plain wheel step still turns it"
+    run(lua, "__numSecret = nil; local get = GetTime; __getTime = get; GetTime = function() return 123.5 end; __numSecret = 123.5")
+    click(lua, d)
+    assert P.PressAge("dial") is None, "a secret clock was stored as a press time"
+    run(lua, "__numSecret = nil")
+    click(lua, d)
+    assert P.PressAge("dial") == 0, "a plain clock stores the press"
+    run(lua, "GetTime = __getTime")
 
 
 def check_the_script_behind_the_click_is_a_cast_sequence_that_restarts_with_combat_and_idle():
@@ -1302,6 +1328,106 @@ def check_the_tab_grows_by_one_cell_and_the_buff_and_five_second_tabs_follow(sca
     approx(float(bw), w8 * scale, "BlockSize width", 0.5)
 
 
+def same_obj(lua, a, b) -> bool:
+    return bool(lua.eval("function(a, b) return a == b end")(a, b))
+
+
+def check_a_resize_hides_the_art_of_the_old_width():
+    lua = boot()
+    cs = g(lua).FS.ClassShoulder
+    wide = cs.Shoulder().art
+    assert shown(wide)
+    conf(lua, "totems.gnarly", False)
+    narrow = cs.Shoulder().art
+    assert not same_obj(lua, wide, narrow), "the art for the new width was not built"
+    assert shown(narrow) and not shown(wide), "the old width's art stayed on screen"
+    conf(lua, "totems.gnarly", True)
+    assert shown(cs.Shoulder().art) and not shown(narrow), "going back left the narrow art up"
+
+
+def check_edit_clicks_in_every_modifier_combination_never_drop_a_totem():
+    lua = boot()
+    make(lua)
+    for key in ("dial", "gnarly"):
+        b = btn(lua, key)
+        for name in ("shift-type1", "alt-type1", "alt-shift-type1", "alt-ctrl-type1", "alt-ctrl-shift-type1",
+                     "ctrl-shift-type1"):
+            assert b._attrs[name] == "", f"{key}: {name} would fall back to the plain click and drop a totem"
+    d = dial(lua)
+    assert d._attrs["type1"] == "macro" and d._attrs["ctrl-type1"] is None, "a plain ctrl click keeps dropping"
+    # a script change keeps the blanks; clearing the preset's totems clears the script but not the blanks
+    PS(lua).SetTotem(1, "fire", None)
+    assert d._attrs["alt-ctrl-shift-type1"] == ""
+
+
+def check_the_dial_tip_says_a_shift_keybind_edits():
+    lua = boot()
+    assert "keybind that includes Shift" in str(PS(lua).SETTINGS.dial.tip)
+
+
+def check_a_character_key_that_cannot_be_read_never_saves_under_a_made_up_one():
+    for unreadable in ("nil", "__SECRET", '""'):
+        lua = boot()
+        run(lua, f"ForeverSTUwaveDB.totemPresets = nil; __guid = UnitGUID; UnitGUID = function() return {unreadable} end")
+        P = PS(lua)
+        assert P.Count() == 0 and P.Writable() is False
+        r = P.Create()
+        assert not r or r[0] is None, "an edit went through with no character key"
+        P.Select(1)
+        db = g(lua).ForeverSTUwaveDB
+        assert db.totemPresets is None, f"{unreadable}: presets were saved with no character key"
+        run(lua, "UnitGUID = __guid")
+        assert P.Writable() is True and P.Count() == 0
+        assert P.Create(), "creating works once the key reads"
+        assert saved(lua) is not None and g(lua).ForeverSTUwaveDB.totemPresets["player"] is None
+
+
+def check_the_known_totems_are_scanned_once_per_event_not_once_per_repaint():
+    lua = boot()
+    P = PS(lua)
+    two_presets(lua)
+    P.Select(1)
+    enter_combat(lua)
+    P.Select(2)
+    assert P.Pending() == 2
+    run(lua, "__kl = 0; local k = FS.TotemBar.KnownList; FS.TotemBar.KnownList = function(...) __kl = __kl + 1 return k(...) end")
+    fire(lua, "SPELLS_CHANGED")                    # a cold cache
+    for _ in range(20):
+        advance(lua, 0.1)
+        tick(lua, 0.1)
+    scans = int(g(lua).__kl)
+    assert 0 < scans <= 4, f"{scans} spellbook scans over twenty repaints of a waiting switch"
+    fire(lua, "SPELLS_CHANGED")
+    advance(lua, 0.1)
+    tick(lua, 0.1)
+    assert int(g(lua).__kl) > scans, "a learn event did not drop the cached list"
+    scans = int(g(lua).__kl)
+    leave_combat(lua)
+    assert int(g(lua).__kl) > scans, "regen did not drop the cached list"
+    scans = int(g(lua).__kl)
+    TB(lua).Sync()
+    assert int(g(lua).__kl) > scans, "a sync did not drop the cached list"
+
+
+def check_a_totem_learned_during_the_fight_is_picked_by_the_switch_that_waited():
+    lua = boot(learned=[n for n in TOTEMS["earth"] + TOTEMS["fire"]])
+    P = PS(lua)
+    a = make(lua)
+    b = make(lua, picks={"water": "Healing Stream Totem"})
+    P.Select(a)
+    enter_combat(lua)
+    assert P.Select(b) == "queued"
+    for _ in range(3):
+        advance(lua, 0.1)
+        tick(lua, 0.1)                      # paints, so the list of known totems is cached as it was
+    assert P.Entry("water", IDS["Healing Stream Totem"]).known is False
+    run(lua, '__know("Healing Stream Totem")')   # learned mid fight, no event reached the preset code
+    set_combat(lua, False)
+    P.OnRegen()
+    changed = [str(x) for x in seq(P.P.applied.elements)] if P.P.applied else []
+    assert "water" in changed, f"the waiting switch used a stale list: {changed}"
+
+
 def check_the_dial_switch_pressed_in_combat_waits_for_regen():
     lua = boot(tabs=True)
     d = dial(lua)
@@ -1771,6 +1897,7 @@ CHECKS = [
     check_a_failing_preset_hook_never_stops_the_totem_tab_from_catching_up_at_regen,
     check_a_slot_that_vanished_while_a_switch_waited_is_dropped_at_regen,
     check_the_script_behind_the_click_is_a_cast_sequence_that_restarts_with_combat_and_idle,
+    check_a_secret_number_from_the_wheel_or_the_clock_is_ignored,
     check_the_dial_carries_the_script_as_secure_attributes_written_out_of_combat_only,
     check_a_press_counts_on_the_event_the_game_acts_on,
     check_the_record_advances_on_the_next_totem_cast_and_ignores_the_rest,
@@ -1794,6 +1921,12 @@ CHECKS = [
     check_the_card_closes_on_escape_and_combat_and_hangs_on_the_last_cell,
     check_no_secure_frame_is_anchored_to_the_card_or_its_pieces,
     check_the_dial_switch_pressed_in_combat_waits_for_regen,
+    check_a_resize_hides_the_art_of_the_old_width,
+    check_edit_clicks_in_every_modifier_combination_never_drop_a_totem,
+    check_the_dial_tip_says_a_shift_keybind_edits,
+    check_a_character_key_that_cannot_be_read_never_saves_under_a_made_up_one,
+    check_the_known_totems_are_scanned_once_per_event_not_once_per_repaint,
+    check_a_totem_learned_during_the_fight_is_picked_by_the_switch_that_waited,
     check_the_cells_stand_right_of_the_six_and_the_buttons_keep_their_slots,
     check_a_rescale_resizes_and_reseats_the_face,
     check_the_gnarly_cell_carries_its_own_preset_whatever_the_dial_is_doing,
