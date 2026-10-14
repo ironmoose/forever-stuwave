@@ -604,7 +604,7 @@ Motion = function(now)
     end
     local flare = 0
     if on.master and v.pulse > 0 then flare = math.sin(math.pi * (1 - v.pulse)) end
-    local shown = FT.host ~= nil and FT.host:IsShown()
+    local shown = FT.host ~= nil and FT.host:IsVisible()   -- not IsShown: hiding the whole interface stops it too
     local breathing = shown and on.breath and v.phase == "idle"
     local glitchA, glitchDx, glitchSoon = 1, 0, false
     if on.glitch and not susp and pp >= 1 and (v.cached or v.base == nil) then
@@ -731,8 +731,14 @@ local function SetText(fs, px, text)
 end
 
 -- The idle glow: two looping Alpha AnimationGroups, one on the rim's ring and one on its glow, so the client moves them and the
--- addon spends nothing per frame. The paint leaves each at its brightest alpha; the region alpha swings between `lo` and 1,
--- which is the mockup's ring 0.3 to 0.6 and glow 0 to 0.45 over BREATH_TIME (IN_OUT smoothing standing for its cosine).
+-- addon spends nothing per frame. SetFromAlpha / SetToAlpha take a normalized alpha in the space of the region's own alpha
+-- (SetAlpha / GetAlpha), not a multiplier of it: Blizzard_NamePlateUnitFrame.lua:455-471 and Blizzard_ClassPowerBar
+-- (Mainline/ClassPowerBar.lua:104-126) fade "from the current alpha value" with SetFromAlpha(region:GetAlpha()), and
+-- Blizzard_NamePlates.xml:374-378 states them as plain 0 and 1 (SimpleAnimAlphaAPIDocumentation.lua:20-58 types them
+-- normalizedAlpha). The region alpha is never set here (it stays 1), and the vertex colour alpha multiplies it as usual, so the
+-- paint leaves each region at its brightest vertex alpha and the animation swings the region alpha between `lo` and 1: the
+-- mockup's ring 0.3 to 0.6 (vertex 0.6, lo 0.5), glow 0 to 0.45 (vertex 0.45, lo 0) and gauge 0.24 to 0.38 over BREATH_TIME.
+-- The two steps meet end to end (lo to 1, 1 to lo), so the REPEAT loop has no jump; IN_OUT smoothing stands for its cosine.
 local function BreathGroup(region, lo)
     if not region.CreateAnimationGroup then return nil end
     local group = region:CreateAnimationGroup()
@@ -758,9 +764,17 @@ end
 local function BuildBreath()
     local hero, gauge = FT.hero, FT.gauge
     local skin = hero and hero.fsSkin
-    if FT.breath or not (skin and skin.border and skin.border.ring and skin.glow and gauge) then return end
+    if FT.breath then return end
+    if not (skin and skin.border and skin.border.ring and skin.glow and gauge) then
+        WarnOnce("fivesecond_breath", "five second rule tab idle glow unavailable (the rim or the gauge is missing)")
+        return
+    end
     local C = FT.CHROME
     local B = { ring = skin.border.ring, glow = skin.glow, groups = {}, gauge = {}, on = false, gaugeOn = false }
+    if not (B.ring.CreateAnimationGroup and B.glow.CreateAnimationGroup) then
+        WarnOnce("fivesecond_breath", "five second rule tab idle glow unavailable (no animation groups)")
+        return
+    end
     B.groups[1] = BreathGroup(B.ring, C.breathRing / (C.breathRing + C.breathRingSwing))
     B.groups[2] = BreathGroup(B.glow, 0)
     for i = 1, FT.GAUGE_N do
@@ -1438,11 +1452,10 @@ function Tab.HostPoint()
     return nil
 end
 
--- Shows or hides the host. The ticker frame follows it (a hidden frame gets no OnUpdate) and the idle glow stops with it.
+-- Shows or hides the host. The ticker frame is its child (a hidden frame gets no OnUpdate) and the idle glow stops with it.
 local function ShowHost(want)
     local host = FT.host
     host:SetShown(want)
-    if FT.ticker then FT.ticker:SetShown(want) end
     if not want then
         SetBreath(false, false)
         FT.sigCells.on = nil
@@ -1522,7 +1535,7 @@ local function Refresh()
 end
 
 -- One pass every frame while the count runs or a flash dies, at TICK_AMBIENT while a short slow motion plays, every half second
--- otherwise; the frame is hidden with the tab. A plain frame, nothing protected.
+-- otherwise; the frame is a child of the tab, hidden with it. A plain frame, nothing protected.
 local function Tick(self, dt)
     self.fsElapsed = (self.fsElapsed or 0) + dt
     local every = FT.fast and 0 or (FT.ambient and FT.TICK_AMBIENT or FT.TICK_SLOW)
@@ -1595,9 +1608,9 @@ local function Apply()
     end
     events:SetScript("OnEvent", OnEvent)
 
-    local ticker = CreateFrame("Frame", "FSFiveSecondTicker")
+    -- a child of the host, so a hidden tab or a hidden interface (Alt+Z) is a hidden ticker: no OnUpdate at all
+    local ticker = CreateFrame("Frame", "FSFiveSecondTicker", FT.host)
     ticker:SetScript("OnUpdate", Tick)
-    ticker:SetShown(FT.host:IsShown())
     FT.ticker = ticker
 
     if FS.Config and FS.Config.OnChange then

@@ -276,12 +276,23 @@ do
         return region._alpha or 1
     end
 end
--- a hidden frame runs no OnUpdate in the client
+-- a frame is visible when it and every parent are shown, and a frame that is not runs no OnUpdate in the client
+do
+    local R = __Region
+    function R:IsVisible()
+        local f = self
+        while f do
+            if f._shown == false then return false end
+            f = f._parent
+        end
+        return true
+    end
+end
 function __tickAll(dt)
     __advance(dt)
     local list = {}
     for _, f in ipairs(__frames) do
-        if f._scripts.OnUpdate and f._shown ~= false then list[#list + 1] = f end
+        if f._scripts.OnUpdate and f:IsVisible() then list[#list + 1] = f end
     end
     for _, f in ipairs(list) do f._scripts.OnUpdate(f, dt) end
 end
@@ -2230,6 +2241,10 @@ def check_every_switch_stops_its_own_effect_and_only_that_one():
     assert not any(got.values()), f"the master is off but these run: {[k for k, v in got.items() if v]}"
 
 
+def visible(lua, region) -> bool:
+    return bool(lua.eval("function(f) return f:IsVisible() end")(region))
+
+
 def ticker(lua):
     return g(lua).FSFiveSecondTicker
 
@@ -2262,12 +2277,12 @@ def check_a_hidden_tab_runs_no_ticker_at_all():
     lua = world()
     FT = ft(lua).FT
     refresh(lua)
-    assert shown(ticker(lua)), "a shown tab ticks"
+    assert visible(lua, ticker(lua)), "a shown tab ticks"
     cast(lua)
     tick(lua, 0.2)
     assert bool(FT.fast)
     conf(lua, "fivesecond.enabled", False)
-    assert not shown(ticker(lua)), "the ticker frame is hidden with the tab, so it gets no OnUpdate"
+    assert not visible(lua, ticker(lua)), "the ticker frame is hidden with the tab, so it gets no OnUpdate"
     cast(lua)
     refresh(lua)
     assert not bool(FT.fast) and not bool(FT.ambient), "a hidden tab asks for no ticker"
@@ -2275,14 +2290,66 @@ def check_a_hidden_tab_runs_no_ticker_at_all():
     refresh(lua)
     assert str(view(lua).phase) == "res" and not bool(FT.fast) and not bool(FT.ambient), "nor in the regen hold"
     conf(lua, "fivesecond.enabled", True)
-    assert shown(ticker(lua)), "and it ticks again when the tab comes back"
+    assert visible(lua, ticker(lua)), "and it ticks again when the tab comes back"
     # a Druid out of mana form hides the tab the same way
     lua = world(klass="DRUID")
     refresh(lua)
-    assert shown(ticker(lua))
+    assert visible(lua, ticker(lua))
     run(lua, "__powerType = { 3, 'ENERGY' }")
     lua.eval("__fire_event")("UNIT_DISPLAYPOWER", "player")
-    assert not shown(ticker(lua)), "a Druid in a form without mana has no ticker"
+    assert not visible(lua, ticker(lua)), "a Druid in a form without mana has no ticker"
+
+
+def check_hiding_the_whole_ui_stops_the_ticker_and_the_idle_glow():
+    lua = world()
+    FT = ft(lua).FT
+    refresh(lua)
+    assert bool(FT.breath.on) and visible(lua, ticker(lua))
+    run(lua, "UIParent:Hide()")
+    assert not visible(lua, ticker(lua)), "Alt+Z: the ticker frame is no longer visible, so it gets no OnUpdate"
+    cast(lua)
+    refresh(lua)
+    assert not bool(FT.fast) and not bool(FT.ambient), "and the tab asks for no fast pass"
+    assert not bool(FT.breath.on) and not bool(FT.breath.gaugeOn), "the idle glow stops with the interface hidden"
+    run(lua, "UIParent:Show()")
+    run(lua, "__advance(10)")
+    refresh(lua)
+    assert str(view(lua).phase) == "idle" and bool(FT.breath.on), "and plays again when it comes back"
+
+
+def check_the_idle_glow_loops_without_a_jump():
+    k = MK["k"]
+    lua = world()
+    refresh(lua)
+    for group in list(seq(ft(lua).FT.breath.groups)) + list(seq(ft(lua).FT.breath.gauge)):
+        anims = sorted(seq(group.anims), key=lambda a: int(a.order))
+        for a, b in zip(anims, anims[1:] + anims[:1]):
+            approx(float(a.to), float(getattr(b, "from")), "each step ends where the next begins, and the last where the first begins", 1e-9)
+    ring = ft(lua).FT.breath.ring
+    steps = play(lua, 2 * k["breath_time"], lambda l: cells_look(l)["ring_a"])
+    worst = max(abs(a - b) for a, b in zip(steps, steps[1:]))
+    assert worst < 0.02, f"the ring jumps {worst:.3f} between frames"
+
+
+def check_the_idle_glow_says_so_when_a_piece_of_the_rim_is_missing():
+    lua = world()
+    assert ft(lua).FT.breath is not None, "the groups exist after a normal build"
+    assert len(seq(ft(lua).FT.breath.groups)) == 2 and len(seq(ft(lua).FT.breath.gauge)) == 10
+    pre = """__logs, __logText = 0, nil
+FS.LogDegradeOnce = function(key, text) __logs = __logs + 1; __logText = text end
+local skin = FS.Theme.SkinCutButton
+FS.Theme.SkinCutButton = function(button, opts)
+    local r = skin(button, opts)
+    if button.fsSkin then button.fsSkin.glow = nil end
+    return r
+end"""
+    lua = world(pre_login=pre)
+    assert ft(lua).FT.breath is None, "no groups without the glow texture"
+    assert int(g(lua).__logs) == 1 and "idle glow" in plain_text(g(lua).__logText), "the quiet log says why, once"
+    refresh(lua)
+    cast(lua)
+    tick(lua, 8.0)
+    assert int(g(lua).__logs) == 1, "once, not on every pass"
 
 
 def check_the_stutter_asks_for_the_ambient_ticker_only_around_its_window():
@@ -2414,6 +2481,9 @@ CHECKS = [
     check_every_switch_stops_its_own_effect_and_only_that_one,
     check_the_ticker_runs_every_frame_only_while_something_quick_moves,
     check_a_hidden_tab_runs_no_ticker_at_all,
+    check_hiding_the_whole_ui_stops_the_ticker_and_the_idle_glow,
+    check_the_idle_glow_loops_without_a_jump,
+    check_the_idle_glow_says_so_when_a_piece_of_the_rim_is_missing,
     check_the_stutter_asks_for_the_ambient_ticker_only_around_its_window,
     check_the_pulse_cannot_run_the_every_frame_ticker_with_motion_off,
     check_no_pulse_is_counted_while_motion_is_off,
