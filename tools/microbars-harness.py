@@ -206,7 +206,7 @@ function M:SetTexture(p) self.tex = p end
 function M:SetColorTexture(r, g, b, a) self.color = { r, g, b, a } end
 function M:SetVertexColor(r, g, b, a) self.vertex = { r, g, b, a } end
 function M:SetBlendMode(mode) self.blend = mode end
-function M:SetTexCoord(l, r, t, b) self.coords = { l, r, t, b } end
+function M:SetTexCoord(...) self.coords = { ... } end
 -- A MaskTexture does not clip on this client (Theme.lua): the mock raises on one so no key quietly relies on it.
 function M:CreateMaskTexture() error("CreateMaskTexture: masks do not clip on this client") end
 function M:SetHorizTile() end
@@ -437,6 +437,7 @@ function h_glyphInfo()
             local g = k.glyph
             info.kind, info.tex, info.layer, info.sub, info.c = k.spec.kind, tostring(g.tex), g.layer, g.sublevel, g.coords
             info.w, info.h = g.w, g.h
+            info.window = k.spec.window
             info.vertex, info.desat = g.vertex, g.desat
             if #g.pts == 2 then   -- a rectangle between two corners of the key
                 info.left, info.right, info.top, info.bottom = g.pts[1][4], -g.pts[2][4], g.pts[1][5], -g.pts[2][5]
@@ -450,22 +451,16 @@ function h_glyphInfo()
                 info.boostVertex, info.liftVertex, info.modDesat = c.boost.vertex, c.lift.vertex, c.mod.desat
                 info.boostShown, info.modShown, info.liftShown = c.boost.shown, c.mod.shown, c.lift.shown
                 info.boostAnchor = c.boost.allPoints == g
-                info.modAnchor, info.liftAnchor = c.mod.allPoints == k.fill, c.lift.allPoints == k.fill
+                info.modAnchor, info.liftAnchor = c.mod.allPoints == k.cover, c.lift.allPoints == k.cover
                 info.boostCoords = c.boost.coords
                 info.coverTex, info.coverSub, info.coverLayer = tostring(k.cover.tex), k.cover.sublevel, k.cover.layer
                 info.coverShown = k.cover.shown
                 info.cl, info.cr = k.cover.pts[1][4], -k.cover.pts[2][4]
-                f, fb = k.fill, k.fillBoost
-                info.fillShown, info.fillTex, info.fillCoords, info.fillDesat = f.shown, tostring(f.tex), f.coords, f.desat
-                info.fillVertex, info.fillSub = f.vertex, f.sublevel
-                info.fillBoostShown, info.fillBoostVertex, info.fillBoostSub = fb.shown, fb.vertex, fb.sublevel
-                info.fillBoostBlend, info.fillBoostAnchor, info.fillBoostTex, info.fillBoostDesat = fb.blend, fb.allPoints == f, tostring(fb.tex), fb.desat
-                info.fl, info.fr = f.pts[1][4], -f.pts[2][4]
                 if #g.pts == 2 then
-                    info.vert = { g = { g.pts[1][5], -g.pts[2][5] }, f = { f.pts[1][5], -f.pts[2][5] }, c = { k.cover.pts[1][5], -k.cover.pts[2][5] } }
+                    info.vert = { g = { g.pts[1][5], -g.pts[2][5] }, c = { k.cover.pts[1][5], -k.cover.pts[2][5] } }
                 end
-                info.snaps = { g.snap, f.snap, fb.snap, k.cover.snap, c.boost.snap, c.mod.snap, c.lift.snap }
-                info.biases = { g.bias, f.bias, fb.bias, k.cover.bias, c.boost.bias, c.mod.bias, c.lift.bias }
+                info.snaps = { g.snap, k.cover.snap, c.boost.snap, c.mod.snap, c.lift.snap }
+                info.biases = { g.bias, k.cover.bias, c.boost.bias, c.mod.bias, c.lift.bias }
             end
         end
         out[i] = info
@@ -540,7 +535,7 @@ function h_glyphCounts()
                     while p and p ~= b do p = p.parent end
                     if p == b then
                         n = n + 1
-                        local same = o == k.glyph or o.allPoints == k.glyph or (k.fill ~= nil and (o == k.fill or o.allPoints == k.fill))
+                        local same = o == k.glyph or o.allPoints == k.glyph
                         if not same then strays = strays + 1 end
                     end
                 end
@@ -671,7 +666,7 @@ class World:
     def __init__(self, n: int = 12, scale: float = 1.0, hidden: tuple[int, ...] = (), layout_cfg: bool = True,
                  store: str | None = None, nolayout: bool = False, deck: bool = True, cls: str | None = "SHAMAN",
                  faction: str | None = "Horde", class_error: bool = False, pixel_factor: float | None = None,
-                 effective_scale: float = 1.0):
+                 effective_scale: float = 1.0, style: str | None = None):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
         self.lua.execute(MOCK)
         g = self.lua.globals()
@@ -689,6 +684,8 @@ class World:
         g.COLOR_SCRIM = self.lua.table_from(list(theme_color_scrim()))
         self.g = g
         g.h_setup(n, ",".join(str(h) for h in hidden), layout_deck_w() if layout_cfg else None)
+        if style is not None:   # the icon style setting before the keys are built (the default is stock)
+            self.lua.eval("FS.Config.Set")("icons.microstyle", style)
 
     def login(self) -> "World":
         self.g.h_fire("PLAYER_LOGIN")
@@ -777,7 +774,7 @@ def check_overlay() -> None:
     w = World(12).login()
     check("overlay.no_opaque_rect_under_the_plate", w.call("h_opaqueFills") == 0, f"{w.call('h_opaqueFills')} opaque fills")
     counts = [dict(c.items()) for _, c in w.call("h_glyphCounts").items()]
-    check("overlay.glyph_and_its_copies_and_fill_only_per_key", all(c["n"] <= 4 and c["strays"] == 0 for c in counts), f"{counts[:2]}")
+    check("overlay.glyph_and_its_copy_only_per_key", all(c["n"] <= 2 and c["strays"] == 0 for c in counts), f"{counts[:2]}")
 
 
 def tga_header(path: Path) -> tuple[int, int, int, int, int, int]:
@@ -796,8 +793,8 @@ OWN_BAKED = ["glyphart_character.tga", "glyphart_legacy.tga"]
 def spec_dict(spec) -> dict:
     out = {str(k): v for k, v in spec.items()}
     if "coords" in out:
-        out["coords"] = [spec.coords[i] for i in (1, 2, 3, 4)]
-    out["fill"] = [spec.fill[i] for i in (1, 2, 3, 4)] if spec.fill is not None else None
+        out["coords"] = [spec.coords[i] for i in range(1, len(spec.coords) + 1)]
+    out["window"] = [spec.window[i] for i in (1, 2, 3, 4)] if spec.window is not None else None
     return out
 
 
@@ -815,7 +812,6 @@ def check_glyph_files() -> None:
     stems = sorted({str(v) for _, v in mb.Glyphs.items()} | {str(mb.GlyphGeneric)})
     own = {"character", "legacy"}
     ramps = {str(k) for k, _ in data.ramps.items()}
-    rects = {str(k) for k, _ in data.rects.items()}
     bad: list[str] = []
     n_runtime = 0
     for stem in stems:
@@ -826,11 +822,14 @@ def check_glyph_files() -> None:
                     bad.append(f"{stem}/{faction} baked {spec['file']}")
                 continue
             n_runtime += 1
-            c = spec["coords"]
-            ok = (isinstance(spec["file"], (int, str)) and all(0 <= v <= 1 for v in c) and c[0] < c[1] and c[2] < c[3]
-                  and spec["rect"] in rects and str(spec["fam"]) in ramps and 0 <= spec["boost"] <= 1
-                  and (spec["rect"] == "k") == (spec.get("fill") is None)
-                  and (spec.get("fill") is None or (all(0 <= v <= 1 for v in spec["fill"]) and spec["fill"][0] < spec["fill"][1] and spec["fill"][2] < spec["fill"][3])))
+            c, win = spec["coords"], spec["window"]
+            if stem == "character":   # a class icon: full bleed, four values
+                shape = len(c) == 4 and win is None and all(0 <= v <= 1 for v in c) and c[0] < c[1] and c[2] < c[3]
+            else:                      # a leaning glyph: the eight corners, and the window they were made from
+                shape = (len(c) == 8 and win is not None and all(0 <= v <= 1 for v in win) and win[0] < win[1] and win[2] < win[3]
+                         and c[1] == c[5] == win[2] and c[3] == c[7] == win[3]            # rows run top to bottom over the window
+                         and c[0] < c[4] and c[2] < c[6] and c[0] < c[2] and c[4] < c[6])  # leaning / : the top row samples left of the bottom
+            ok = (isinstance(spec["file"], (int, str)) and shape and str(spec["fam"]) in ramps and 0 <= spec["boost"] <= 1)
             if not ok:
                 bad.append(f"{stem}/{faction} {spec}")
     check("glyphs.every_name_and_faction_resolves_to_a_sound_spec", len(stems) >= 18 and "character" in stems and "legacy" in stems
@@ -842,8 +841,8 @@ def check_glyph_files() -> None:
     # all nine classes: the class icon path is the client's own Interface\Icons\ClassIcon_<Class>
     got = {t: spec_dict(mb.GlyphSpec("character", None, t)) for t in CLASS_NAMES}
     check("glyphs.all_nine_classes_wear_their_own_class_icon",
-          all(g["kind"] == "runtime" and g["file"] == f"Interface\\Icons\\ClassIcon_{CLASS_NAMES[t]}" and g["rect"] == "k" and g["fill"] is None
-              and g["coords"][:2] == [0.07, 0.93] and near(g["coords"][3] - g["coords"][2], 0.86 * 26 / 30, 1e-3)
+          all(g["kind"] == "runtime" and g["file"] == f"Interface\\Icons\\ClassIcon_{CLASS_NAMES[t]}" and g["window"] is None
+              and g["coords"][:2] == [0.07, 0.93] and near(g["coords"][3] - g["coords"][2], 0.86 * 26 / 32, 1e-3)
               and near(g["coords"][2] + g["coords"][3], 1.0, 1e-3) for t, g in got.items()), f"{got}")
     check("glyphs.the_nine_class_icons_are_nine_different_files", len({g["file"] for g in got.values()}) == 9)
     fallback = [str(v) for _, v in w.call("h_oddClasses").items()]
@@ -874,7 +873,7 @@ def check_glyph_files() -> None:
     check("glyphs.baked_art_is_64x64_bgra_tga_of_exact_size", not bad, f"bad {bad}")
     missing = [str(r.file) for _, r in data.ramps.items() if not (media / str(r.file)).exists()]
     missing += [str(data.cover.file)] if not (media / str(data.cover.file)).exists() else []
-    check("glyphs.every_ramp_and_the_cover_is_shipped", not missing and len(ramps) == 9 and rects == {"a", "b", "k"}, f"{missing}")
+    check("glyphs.every_ramp_and_the_cover_is_shipped", not missing and len(ramps) == 9, f"{missing}")
     odd_sizes = [str(r.file) for _, r in data.ramps.items() if tga_header(media / str(r.file))[:4] != (2, 8, 8, 32)]
     odd_sizes += [str(data.cover.file)] if tga_header(media / str(data.cover.file))[:4] != (2, 128, 128, 32) else []
     check("glyphs.ramps_are_8x8_and_the_cover_128x128_bgra", not odd_sizes, f"{odd_sizes}")
@@ -955,6 +954,17 @@ def check_cover_geometry() -> None:
             if leak > 0.08 or under > 0.2:
                 bad[(count, px, i)] = (round(leak, 2), round(under, 2))
     check("cover.hides_everything_outside_the_plate_and_nothing_inside_it_at_every_key_count", not bad, f"{len(bad)} bad, first {list(bad.items())[:3]}")
+    # and it meets the ring: along the ring's soft inner edge (its alpha falling from 0.15 to 0.04, the first design px inside
+    # the line) the cover is clear, so no band of plate colour is left between the ring and the art
+    info = dict(World(12).login().call("h_glyphInfo")[1].items())
+    px = 8
+    plate, ring, kw, kh = _plate_and_ring(info, px)
+    left, right = round(info["cl"] * px), round(info["cr"] * px)
+    cover_im = Image.open(media / "iconcover_key.tga").convert("RGBA").getchannel("A")
+    cover = np.asarray(cover_im.resize((kw - left - right, kh), Image.BILINEAR), dtype=float) / 255
+    edge = ((plate >= 0.9) & (ring >= 0.04) & (ring <= 0.15))[:, left:kw - right]
+    band = float(cover[edge].max()) if edge.any() else 1.0
+    check("cover.is_clear_right_up_to_the_rings_inner_edge", edge.sum() > 200 and band < 0.35, f"{int(edge.sum())} edge pixels, cover up to {band:.2f}")
 
 
 def check_slant_direction() -> None:
@@ -985,11 +995,38 @@ def check_slant_direction() -> None:
     check("slant.the_cover_is_clear_wherever_the_plate_is_well_inside", float(cov_at_key[inside_in_cover].max()) < 0.2)
 
 
+def _sampled_window(info: dict) -> tuple[list[float], tuple[float, float, float, float]]:
+    """(the glyph's texcoord args, the window of its texture the art may show): a plain 4 value glyph shows its whole window; a
+    leaning one (8 value corners) also carries the window it was sheared from."""
+    n = len(info["c"])
+    coords = [float(info["c"][k]) for k in range(1, n + 1)]
+    if n == 4:
+        return coords, (coords[0], coords[1], coords[2], coords[3])
+    win = info["window"]
+    return coords, tuple(float(win[k]) for k in (1, 2, 3, 4))
+
+
+def _texcoords_at(coords: list[float], fx: np.ndarray, fy: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The texture point the client draws at fractions (fx, fy) of the glyph rectangle: SetTexCoord's four values stretch the
+    window over it, its eight values (UL, LL, UR, LR corners, x then y) interpolate between the corners."""
+    if len(coords) == 4:
+        l, r, t, b = coords
+        return l + (r - l) * fx, t + (b - t) * fy
+    ulx, uly, llx, lly, urx, ury, lrx, lry = coords
+    u = (1 - fx) * (1 - fy) * ulx + (1 - fx) * fy * llx + fx * (1 - fy) * urx + fx * fy * lrx
+    v = (1 - fx) * (1 - fy) * uly + (1 - fx) * fy * lly + fx * (1 - fy) * ury + fx * fy * lry
+    return u, v
+
+
 def check_no_empty_wedge() -> None:
-    """Every pixel inside the key's ring is covered by the icon's art: the glyph rectangle, or for a narrow glyph the fill
-    spread over the key's inside (a lean-slash key leaves a wedge at the bottom left and the top right of a narrow rectangle)."""
+    """The art meets the ring: every pixel inside the key's ring is drawn from the glyph's own window of the game's texture.
+    The glyph rectangle spans the key's inside and the key leans /, so a glyph drawn upright leaves a wedge with no art (the
+    plate shows) at two corners and loses the other two to the cover; one drawn leaning with the key (sampled along the
+    plate's slant) has art at every pixel up to the ring. Checked per key against the real plate and ring, at every key count
+    and at 3 and 1 screen px per design px."""
     bad = {}
     seen = set()
+    tol = 0.004  # texture fractions, a quarter texel of a 64 texel texture
     for count, px in ((c, k) for c in (12, 16) for k in (3, 1)):
         w = World(count).login()
         for i, info in enumerate((dict(v.items()) for _, v in w.call("h_glyphInfo").items())):
@@ -997,39 +1034,47 @@ def check_no_empty_wedge() -> None:
                 continue
             plate, ring, kw, kh = _plate_and_ring(info, px)
             inner = _inside(plate, ring, px)
-            art = np.zeros(inner.shape, dtype=bool)
-            gl, gr = round(info["left"] * px), round(info["right"] * px)
-            art[:, gl:kw - gr] = True
-            if info["fillShown"]:
-                fl, fr = round(info["fl"] * px), round(info["fr"] * px)
-                art[:, fl:kw - fr] = True
+            gl, gr = round(info["left"] * px), kw - round(info["right"] * px)
+            coords, (wl, wr, wt, wb) = _sampled_window(info)
+            ys, xs = np.nonzero(inner)
+            fx, fy = (xs + 0.5 - gl) / (gr - gl), (ys + 0.5) / kh
+            u, v = _texcoords_at(coords, fx, fy)
+            miss = (fx < 0) | (fx > 1) | (u < wl - tol) | (u > wr + tol) | (v < wt - tol) | (v > wb + tol)
             seen.add(count)
-            gap = int((inner & ~art).sum())
-            if gap:
-                bad[(count, px, i)] = gap
-    check("wedge.no_plate_pixel_inside_the_ring_is_left_without_art_at_every_key_count", seen == {12, 16} and not bad, f"{len(bad)} keys, first {list(bad.items())[:3]}")
-    # and the data keeps its promise: a glyph narrower than the key's inside always has a fill, a full one never does
+            if miss.any():
+                bad[(count, px, i)] = int(miss.sum())
+    check("wedge.every_pixel_inside_the_ring_is_drawn_from_the_glyphs_own_window_at_every_key_count", seen == {12, 16} and not bad,
+          f"{len(bad)} keys, first {list(bad.items())[:3]}")
+    # the world only builds a few keys (the rest wear the generic glyph), so every entry of the data is walked too: the micro
+    # buttons, the faction emblems and the nine class icons, in the rectangle SizeKey gives them
     w = World(12).login()
-    infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
-    cov = w.get("FS.IconStyleData.cover")
-    rects = w.get("FS.IconStyleData.rects")
-    kinds = []
-    for k, info in zip(w.get("FS.MicroBars.keys").values(), infos):
-        if info["kind"] != "runtime":
-            continue
-        full = abs(rects[str(k.spec.rect)].x0 - cov.x0) < 1e-6 and abs(rects[str(k.spec.rect)].x1 - cov.x1) < 1e-6
-        kinds.append((full, bool(info["fillShown"])))
-    check("wedge.a_narrow_glyph_has_a_fill_and_a_full_one_does_not", kinds and all(f != fill for f, fill in kinds), f"{kinds}")
-    check("wedge.the_keys_include_full_and_narrow_glyphs_so_both_paths_are_pinned", any(f for f, _ in kinds) and any(not f for f, _ in kinds), f"{kinds}")
+    data = w.get("FS.IconStyleData")
+    info = dict(w.call("h_glyphInfo")[1].items())
+    entries = [(f"micro.{k}", e) for k, e in data.micro.items()] + [(f"pvp.{k}", e) for k, e in data.pvp.items()] + [(f"class.{k}", e) for k, e in data["class"].items()]
+    bad = {}
+    for px in (3, 1):
+        plate, ring, kw, kh = _plate_and_ring(info, px)
+        inner = _inside(plate, ring, px)
+        gl, gr = round(data.cover.x0 * kw), round(data.cover.x1 * kw)
+        ys, xs = np.nonzero(inner)
+        fx, fy = (xs + 0.5 - gl) / (gr - gl), (ys + 0.5) / kh
+        for name, e in entries:
+            coords = [float(e.coords[k]) for k in range(1, len(e.coords) + 1)]
+            wl, wr, wt, wb = (coords[0], coords[1], coords[2], coords[3]) if len(coords) == 4 else tuple(float(e.window[k]) for k in (1, 2, 3, 4))
+            u, v = _texcoords_at(coords, fx, fy)
+            miss = (fx < 0) | (fx > 1) | (u < wl - tol) | (u > wr + tol) | (v < wt - tol) | (v > wb + tol)
+            if miss.any():
+                bad[(px, name)] = int(miss.sum())
+    check("wedge.every_entry_of_the_data_draws_every_pixel_inside_the_ring_from_its_own_window", len(entries) == 15 + 3 + 9 and not bad,
+          f"{len(entries)} entries, {len(bad)} bad, first {list(bad.items())[:3]}")
 
 
 def check_fill() -> None:
-    """The game's textures get a plain rectangle (the glyph's rect, plus a fill over the key's inside for a narrow one) with the
-    cover over it, in a fixed order under the ring (no mask: it would not clip); our own baked art covers its key, cropped to a
-    FIXED band so the baked slant matches the plate at any key width."""
+    """The game's textures get a plain rectangle over the key's inside (the cover's columns, full height) with the cover over it,
+    in a fixed order under the ring (no mask: it would not clip); our own baked art covers its key, cropped to a FIXED band so
+    the baked slant matches the plate at any key width."""
     baked_pad = (1 - 26 / 34) / 2  # the baked shape's rows (tools/assets/synthwave_icons.py KEY_W, KEY_H)
     data = World(12).login().get("FS.IconStyleData")
-    rect_of = {str(k): (r.x0, r.x1) for k, r in data.rects.items()}
     cover_cols = (data.cover.x0, data.cover.x1)
     for count, scale in ((12, 1.0), (12, 0.64), (14, 1.0), (16, 1.0)):
         w = World(count, scale=scale).login()
@@ -1037,39 +1082,30 @@ def check_fill() -> None:
         keys = list(w.get("FS.MicroBars.keys").values())
         tag = f"keys_{count}_scale_{scale}"
         check(f"fill.{tag}.every_key_has_a_glyph", len(infos) == count and all(i["kind"] == "runtime" for i in infos), f"{len(infos)}")
-        # the glyph sits in its own rect's columns, the cover and the fill in the cover's, all whole pixels
-        glyph_ok = [abs(i["left"] - rect_of[str(k.spec.rect)][0] * i["bw"]) <= 0.5 and abs(i["right"] - (1 - rect_of[str(k.spec.rect)][1]) * i["bw"]) <= 0.5
-                    and i["left"] == int(i["left"]) and i["right"] == int(i["right"]) for k, i in zip(keys, infos)]
-        check(f"fill.{tag}.the_glyph_sits_in_its_rects_columns_in_whole_pixels", all(glyph_ok), f"{[(i['left'], i['right']) for i in infos][:3]}")
-        cover_ok = [i["cl"] == i["fl"] and i["cr"] == i["fr"] and i["cl"] == int(i["cl"]) and i["cr"] == int(i["cr"])
-                    and abs(i["cl"] - cover_cols[0] * i["bw"]) <= 0.5 and abs(i["cr"] - (1 - cover_cols[1]) * i["bw"]) <= 0.5 for i in infos]
-        check(f"fill.{tag}.the_cover_and_the_fill_share_the_cover_columns_in_whole_pixels", all(cover_ok), f"{[(i['cl'], i['cr'], i['fl'], i['fr']) for i in infos][:3]}")
-        # full height: within half a UI unit (the height is rounded to whole pixels, see check_crisp), all three pieces alike
+        # the glyph and the cover span the cover's columns, in whole pixels
+        glyph_ok = [abs(i["left"] - cover_cols[0] * i["bw"]) <= 0.5 and abs(i["right"] - (1 - cover_cols[1]) * i["bw"]) <= 0.5
+                    and i["left"] == int(i["left"]) and i["right"] == int(i["right"]) for i in infos]
+        check(f"fill.{tag}.the_glyph_sits_in_the_covers_columns_in_whole_pixels", all(glyph_ok), f"{[(i['left'], i['right']) for i in infos][:3]}")
+        cover_ok = [i["cl"] == i["left"] and i["cr"] == i["right"] for i in infos]
+        check(f"fill.{tag}.the_cover_and_the_glyph_share_the_same_columns", all(cover_ok), f"{[(i['cl'], i['cr'], i['left'], i['right']) for i in infos][:3]}")
+        # full height: within half a UI unit (the height is rounded to whole pixels, see check_crisp), both pieces alike
         check(f"fill.{tag}.the_rectangles_are_the_keys_full_height",
-              all(i["top"] == 0 and abs(i["bottom"]) <= 0.5 + EPS and tuple(i["vert"]["g"].values()) == tuple(i["vert"]["f"].values()) == tuple(i["vert"]["c"].values()) for i in infos),
+              all(i["top"] == 0 and abs(i["bottom"]) <= 0.5 + EPS and tuple(i["vert"]["g"].values()) == tuple(i["vert"]["c"].values()) for i in infos),
               f"{[(i['top'], i['bottom']) for i in infos][:2]}")
-        check(f"fill.{tag}.the_boost_follows_the_glyph_and_the_ramp_and_lift_follow_the_fill", all(i["boostAnchor"] and i["modAnchor"] and i["liftAnchor"] and i["fillBoostAnchor"] for i in infos))
-        order = [(i["fillSub"], i["fillBoostSub"], i["sub"], i["boostSub"], i["modSub"], i["liftSub"], i["coverSub"], i["edgeSub"]) for i in infos]
-        check(f"fill.{tag}.fill_fillboost_glyph_boost_ramp_lift_cover_then_the_ring_in_that_order",
+        check(f"fill.{tag}.the_boost_follows_the_glyph_and_the_ramp_and_lift_follow_the_cover", all(i["boostAnchor"] and i["modAnchor"] and i["liftAnchor"] for i in infos))
+        order = [(i["sub"], i["boostSub"], i["modSub"], i["liftSub"], i["coverSub"], i["edgeSub"]) for i in infos]
+        check(f"fill.{tag}.glyph_boost_ramp_lift_cover_then_the_ring_in_that_order",
               all(all(x < y for x, y in zip(o, o[1:])) and i["layer"] == i["edgeLayer"] == i["coverLayer"] == "ARTWORK" for o, i in zip(order, infos)), f"{order[:1]}")
         check(f"fill.{tag}.the_lowest_piece_is_inside_the_engines_sublevel_range", all(-8 <= o[0] and o[-1] <= 7 for o in order), f"{order[:1]}")
-        check(f"fill.{tag}.blend_modes_are_ADD_MOD_ADD", all((i["boostBlend"], i["modBlend"], i["liftBlend"], i["fillBoostBlend"]) == ("ADD", "MOD", "ADD", "ADD") for i in infos))
-        check(f"fill.{tag}.the_boost_copy_and_the_glyph_show_the_same_window",
-              all(i["boostTex"] == i["tex"] and [i["boostCoords"][k] for k in (1, 2, 3, 4)] == [i["c"][k] for k in (1, 2, 3, 4)] for i in infos),
-              f"{infos[0]['boostCoords']} {infos[0]['c']}")
-        fill_ok = []
-        for k, i in zip(keys, infos):
-            if k.spec.fill is None:
-                fill_ok.append(not i["fillShown"] and not i["fillBoostShown"])
-            else:
-                want = [k.spec.fill[n] for n in (1, 2, 3, 4)]
-                fill_ok.append(i["fillShown"] and i["fillTex"] == i["tex"] and i["fillBoostTex"] == i["tex"]
-                               and [i["fillCoords"][n] for n in (1, 2, 3, 4)] == want and i["fillDesat"] is True and i["fillBoostDesat"] is True)
-        check(f"fill.{tag}.a_fill_shows_its_flat_patch_of_the_same_texture_and_a_full_glyph_has_none", all(fill_ok), f"{fill_ok}")
-        check(f"fill.{tag}.the_fill_wears_the_glyphs_tint", all(list(i["fillVertex"].values()) == list(i["vertex"].values()) for k, i in zip(keys, infos) if k.spec.fill is not None))
-        check(f"fill.{tag}.the_fill_boost_matches_the_glyph_boost_so_no_seam_shows",
-              all(near(i["fillBoostVertex"][1], i["boostVertex"][1]) and near(i["fillBoostVertex"][4], i["boostVertex"][4]) and i["fillBoostShown"] == i["boostShown"]
-                  for k, i in zip(keys, infos) if k.spec.fill is not None))
+        check(f"fill.{tag}.blend_modes_are_ADD_MOD_ADD", all((i["boostBlend"], i["modBlend"], i["liftBlend"]) == ("ADD", "MOD", "ADD") for i in infos))
+        check(f"fill.{tag}.the_boost_copy_and_the_glyph_show_the_same_corners",
+              all(i["boostTex"] == i["tex"] and i.get("boostCoords") is not None and len(i["boostCoords"]) == len(i["c"])
+                  and [i["boostCoords"][k] for k in range(1, len(i["c"]) + 1)] == [i["c"][k] for k in range(1, len(i["c"]) + 1)] for i in infos),
+              f"{infos[0].get('boostCoords')} {infos[0]['c']}")
+        want = [[k.spec.coords[n] for n in range(1, len(k.spec.coords) + 1)] for k in keys]
+        check(f"fill.{tag}.the_glyph_draws_the_specs_coords_four_values_for_the_class_icon_and_eight_for_the_rest",
+              all([i["c"][n] for n in range(1, len(i["c"]) + 1)] == c for i, c in zip(infos, want))
+              and [len(c) for c in want] == [4] + [8] * (count - 1), f"{[len(c) for c in want]}")
         check(f"fill.{tag}.no_degrade_logs", w.logs() == "", w.logs())
     # a key without a class (our own baked art): the whole key, the fixed band
     for count, scale in ((12, 1.0), (14, 1.0)):
@@ -1091,15 +1127,16 @@ def check_crisp() -> None:
         w = World(12, scale=scale, pixel_factor=factor, effective_scale=eff).login()
         px = factor / eff
         infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
-        offs = [(i["left"], i["right"], i["cl"], i["cr"], i["fl"], i["fr"]) for i in infos]
+        offs = [(i["left"], i["right"], i["cl"], i["cr"]) for i in infos]
         whole = all(abs(v / px - round(v / px)) < 1e-6 for o in offs for v in o)
         check(f"crisp.every_edge_is_a_whole_number_of_physical_pixels.factor_{factor:.3f}_scale_{scale}", whole, f"px {px:.4f} {offs[:2]}")
+        cover_x0 = w.get("FS.IconStyleData.cover.x0")
         check(f"crisp.no_piece_is_more_than_half_a_pixel_off_its_design_place.scale_{scale}",
-              all(abs(i["cl"] - 0.0588 * i["bw"]) <= px / 2 + 1e-6 for i in infos), f"{[(i['cl'], 0.0588 * i['bw']) for i in infos][:2]}")
+              all(abs(i["cl"] - cover_x0 * i["bw"]) <= px / 2 + 1e-6 for i in infos), f"{[(i['cl'], cover_x0 * i['bw']) for i in infos][:2]}")
         check(f"crisp.pieces_have_engine_snapping_on_and_bias_0.scale_{scale}",
               all(all(v is True for v in i["snaps"].values()) and all(v == 0 for v in i["biases"].values()) for i in infos), f"{infos[0]['snaps']} {infos[0]['biases']}")
-        # top and bottom edges: the key height lands on whole physical pixels too, all three pieces alike
-        heights = [(i["bh"] + i["vert"][p][2] - i["vert"][p][1]) for i in infos for p in ("g", "f", "c")]
+        # top and bottom edges: the key height lands on whole physical pixels too, both pieces alike
+        heights = [(i["bh"] + i["vert"][p][2] - i["vert"][p][1]) for i in infos for p in ("g", "c")]
         check(f"crisp.the_key_height_is_a_whole_number_of_physical_pixels.factor_{factor:.3f}_scale_{scale}",
               all(abs(v / px - round(v / px)) < 1e-6 for v in heights) and all(abs(v - infos[0]["bh"]) <= px / 2 + 1e-6 for v in heights), f"px {px:.4f} {heights[:3]} bh {infos[0]['bh']}")
     # no PixelUtil: whole UI units, as before
@@ -1111,7 +1148,7 @@ def check_crisp() -> None:
 def check_late_class() -> None:
     """UnitClass answering nothing at build (the client is still loading the player): the Character key wears the person glyph,
     and at PLAYER_ENTERING_WORLD, out of combat, it is dressed with the class icon; PvP follows a faction learned late."""
-    w = World(12, cls=None, faction=None).login()
+    w = World(12, cls=None, faction=None, style="gradient").login()
     first = dict(w.call("h_glyphInfo")[1].items())
     check("late.the_character_key_starts_on_the_person_glyph", first["kind"] == "baked" and str(first["tex"]).endswith("glyphart_character.tga"), f"{first['tex']}")
     w.g.CLASS_TOKEN = "PRIEST"
@@ -1138,7 +1175,7 @@ def check_late_class() -> None:
 
 def check_glyph_tint() -> None:
     """The glyph is full colour: idle is a touch calm, hover, active and pressed are the glyph as styled, disabled is desaturated and dim."""
-    w = World(12).login()
+    w = World(12, style="gradient").login()
     mb = w.get("FS.MicroBars")
     tint = {}
     for name, flags in (("idle", {}), ("hover", {"hover": True}), ("active", {"active": True}), ("pressed", {"pressed": True}), ("disabled", {"disabled": True})):
@@ -1519,8 +1556,9 @@ def check_constants(lean: float, gap: float) -> None:
 
 
 def check_microstyle() -> None:
-    """icons.microstyle: gradient (the default) restyles the game's textures, stock shows them in their own colours, still cut
-    to the key by the cover; our own baked keys (Legacy, the person glyph) do not change; every key repaints live."""
+    """icons.microstyle: stock (the default) shows the game's textures in their own colours, leaning with the key and cut to
+    it by the cover; gradient restyles them; our own baked keys (Legacy, the person glyph) do not change; every key repaints
+    live."""
     def plain(x):
         return {k: plain(v) for k, v in x.items()} if hasattr(x, "items") else x
 
@@ -1534,41 +1572,43 @@ def check_microstyle() -> None:
     mb = w.get("FS.MicroBars")
     cfg_set = w.get("FS.Config.Set")
     setting = mb.SETTING
-    check("microstyle.the_setting_is_icons_microstyle_with_a_gradient_default_and_a_tip",
-          setting is not None and setting.key == "icons.microstyle" and setting.default == "gradient" and len(str(setting.tip)) > 20
-          and w.get("FS.Config.Get")("icons.microstyle") == "gradient", f"{setting}")
+    check("microstyle.the_setting_is_icons_microstyle_with_a_stock_default_and_a_tip",
+          setting is not None and setting.key == "icons.microstyle" and setting.default == "stock" and len(str(setting.tip)) > 20
+          and w.get("FS.Config.Get")("icons.microstyle") == "stock", f"{setting}")
     check("microstyle.the_label_is_micro_menu_icons", str(setting.label) == "Micro menu icons", f"{setting.label}")
     # the style is read from Config once at load and again on a change, never per paint
     w.lua.execute("GETS = 0; REAL_GET = FS.Config.Get; FS.Config.Get = function(k) GETS = GETS + 1; return REAL_GET(k) end")
     w.call("h_script", 1, "OnEnter"); w.call("h_script", 1, "OnLeave"); w.call("h_enabled", 2, False); w.call("h_enabled", 2, True)
     check("microstyle.painting_never_reads_the_config", w.get("GETS") == 0, f"{w.get('GETS')} reads")
     w.lua.execute("FS.Config.Get = REAL_GET")
-    check("microstyle.the_styles_are_gradient_and_stock", [str(v) for _, v in mb.STYLES.items()] == ["gradient", "stock"])
+    check("microstyle.the_styles_are_stock_and_gradient", [str(v) for _, v in mb.STYLES.items()] == ["stock", "gradient"])
     rt = runtime(w)
     check("microstyle.most_keys_draw_the_games_texture", len(rt) >= 10, f"{rt}")
-    grad = infos(w)
-    check("microstyle.gradient_greys_the_base_and_shows_the_chain",
-          all(grad[i - 1]["desat"] is True and grad[i - 1]["modShown"] and grad[i - 1]["liftShown"] for i in rt))
-
-    cfg_set("icons.microstyle", "stock")
     stock = infos(w)
     bad = [i for i in rt if stock[i - 1]["desat"] or list(stock[i - 1]["vertex"].values()) != [1, 1, 1, 1]]
     check("microstyle.stock_shows_the_games_colours_untinted_and_not_desaturated", not bad, f"{bad}")
     bad = [i for i in rt if stock[i - 1]["boostShown"] or stock[i - 1]["modShown"] or stock[i - 1]["liftShown"]]
     check("microstyle.stock_hides_the_whole_gradient_chain", not bad, f"{bad}")
-    bad = [i for i in rt if not stock[i - 1]["coverShown"] or "iconcover" not in stock[i - 1]["coverTex"]
-           or stock[i - 1]["left"] != grad[i - 1]["left"] or stock[i - 1]["right"] != grad[i - 1]["right"]
+    bad = [i for i in rt if not stock[i - 1]["coverShown"] or "iconcover" not in stock[i - 1]["coverTex"]]
+    check("microstyle.stock_is_still_cut_to_the_key_by_the_cover", not bad, f"{bad}")
+
+    cfg_set("icons.microstyle", "gradient")
+    grad = infos(w)
+    check("microstyle.gradient_greys_the_base_and_shows_the_chain",
+          all(grad[i - 1]["desat"] is True and grad[i - 1]["modShown"] and grad[i - 1]["liftShown"] for i in rt))
+    bad = [i for i in rt if stock[i - 1]["left"] != grad[i - 1]["left"] or stock[i - 1]["right"] != grad[i - 1]["right"]
            or stock[i - 1]["tex"] != grad[i - 1]["tex"] or dict(stock[i - 1]["c"]) != dict(grad[i - 1]["c"])]
-    check("microstyle.stock_is_still_cut_to_the_key_by_the_cover_and_draws_the_same_texture_window", not bad, f"{bad}")
+    check("microstyle.both_styles_draw_the_same_texture_with_the_same_corners_in_the_same_place", not bad, f"{bad}")
     # no class known: the Character key falls back to our baked person glyph (Legacy is baked too, see the glyph checks)
     wo = World(16, cls=None).login()
     before = infos(wo)
-    wo.get("FS.Config.Set")("icons.microstyle", "stock")
+    wo.get("FS.Config.Set")("icons.microstyle", "gradient")
     after = infos(wo)
     own = [i for i in range(len(before)) if before[i]["kind"] != "runtime"]
     check("microstyle.own_art_keys_exist_and_do_not_change_with_the_style",
           len(own) >= 1 and all(after[i] == before[i] for i in own), f"{own}")
 
+    cfg_set("icons.microstyle", "stock")
     w.call("h_script", 1, "OnEnter")
     hov = infos(w)[0]
     check("microstyle.a_hovered_stock_key_stays_plain", not hov["modShown"] and not hov["desat"] and list(hov["vertex"].values()) == [1, 1, 1, 1], f"{hov['vertex']}")
@@ -1578,15 +1618,17 @@ def check_microstyle() -> None:
     check("microstyle.a_disabled_stock_key_is_dim_and_desaturated_with_no_chain", dis["desat"] is True and dis["vertex"][4] < 1 and not dis["modShown"], f"{dis['vertex']} {dis['desat']}")
     cfg_set("icons.microstyle", "gradient")
     back = infos(w)
-    check("microstyle.back_to_gradient_repaints_every_key_live_even_a_disabled_one",
+    check("microstyle.gradient_repaints_every_key_live_even_a_disabled_one",
           all(back[i - 1]["modShown"] and back[i - 1]["desat"] is True for i in rt if i != 2)
           and back[1]["modShown"] is False and back[1]["desat"] is True and back[1]["vertex"][4] < 1, f"{back[1]['modShown']}")
-    w.call("h_enabled", 2, True)
-    check("microstyle.the_round_trip_restores_the_gradient_look", infos(w) == grad)
-
-    cfg_set("icons.microstyle", "nonsense")
-    check("microstyle.an_unknown_value_is_the_gradient", all(infos(w)[i - 1]["modShown"] for i in rt))
     cfg_set("icons.microstyle", "stock")
+    w.call("h_enabled", 2, True)
+    shown = ("desat", "vertex", "boostShown", "modShown", "liftShown", "coverShown", "left", "right", "tex", "c")
+    check("microstyle.the_round_trip_restores_the_stock_look", [{k: i.get(k) for k in shown} for i in infos(w)] == [{k: i.get(k) for k in shown} for i in stock])
+
+    cfg_set("icons.microstyle", "gradient")
+    cfg_set("icons.microstyle", "nonsense")
+    check("microstyle.an_unknown_value_is_stock", not any(infos(w)[i - 1]["modShown"] for i in rt))
     w.g.IN_COMBAT = True
     cfg_set("icons.microstyle", "gradient")
     check("microstyle.texture_writes_follow_the_style_in_combat_too", all(infos(w)[i - 1]["modShown"] for i in rt))
@@ -1594,19 +1636,19 @@ def check_microstyle() -> None:
     check("microstyle.and_back_to_stock_in_combat", not any(infos(w)[i - 1]["modShown"] for i in rt))
     w.g.IN_COMBAT = False
 
-    # a world that logs in with the setting already on stock paints stock from the start
+    # a world that logs in with the setting already on gradient paints gradient from the start
     ws = World(12)
-    ws.get("FS.Config.Set")("icons.microstyle", "stock")
+    ws.get("FS.Config.Set")("icons.microstyle", "gradient")
     ws.login()
     si = infos(ws)
-    check("microstyle.a_key_built_under_stock_paints_stock_at_login",
-          all(not si[i - 1]["modShown"] and not si[i - 1]["desat"] for i in runtime(ws)), f"{[si[i-1]['modShown'] for i in runtime(ws)]}")
+    check("microstyle.a_key_built_under_gradient_paints_gradient_at_login",
+          all(si[i - 1]["modShown"] and si[i - 1]["desat"] for i in runtime(ws)), f"{[si[i-1]['modShown'] for i in runtime(ws)]}")
     # a saved value the Config already holds when the player logs in (no change event fires for it) is read at login
     wl = World(12)
-    wl.lua.execute('CONFIG["icons.microstyle"] = "stock"')
+    wl.lua.execute('CONFIG["icons.microstyle"] = "gradient"')
     wl.login()
     li = infos(wl)
-    check("microstyle.a_saved_stock_value_is_read_at_login", all(not li[i - 1]["modShown"] and not li[i - 1]["desat"] for i in runtime(wl)), f"{[li[i-1]['modShown'] for i in runtime(wl)]}")
+    check("microstyle.a_saved_gradient_value_is_read_at_login", all(li[i - 1]["modShown"] and li[i - 1]["desat"] for i in runtime(wl)), f"{[li[i-1]['modShown'] for i in runtime(wl)]}")
     check("microstyle.no_degrade_logs", w.logs() == "" and ws.logs() == "", w.logs())
 
 

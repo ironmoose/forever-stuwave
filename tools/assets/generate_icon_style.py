@@ -10,12 +10,12 @@ iconramp_<family>.tga: 8x8, opaque, a diagonal gradient from the family's hot co
 bottom right. The families are the colour families of tools/assets/synthwave_icons.py FAMILIES (the colours are repeated
 here, this script stays standalone like the others; the tests compare the two).
 
-iconcover_key.tga: 128x128, the key's plate colour wherever the micro key's slanted shape is NOT, over key columns 2 to 32 of
+iconcover_key.tga: 128x128, the key's plate colour wherever the micro key's slanted shape is NOT, over key columns 1 to 33 of
 34 and the full height (the bounding box of the key's inside, which is the rectangle the keys draw their icon in). A MaskTexture
 does not clip on this client, so the icon is a plain rectangle and this cover, drawn over it and under the key's ring, hides
 the two triangles that would stick out of the slanted key. Its shape is the key shape: the plate texture (cell_slant.tga)
-minus the ring texture (deck_key_slant_outline.tga) grown by half a design px, stretched over the key's 34 x 26 design px
-and cut to those columns, so it meets the ring exactly. The key leans / (top right to bottom left), so the solid wedges
+minus the ring texture (deck_key_slant_outline.tga), stretched over the key's 34 x 26 design px and cut to those columns,
+so the icon meets the ring's inner edge with no band of plate colour between them. The key leans / (top right to bottom left), so the solid wedges
 are the top left and the bottom right. Those two textures are read from FS_ASSET_INPUT_DIR (default: the repository's Media/Textures), so they must already
 exist.
 
@@ -33,11 +33,11 @@ RAMP_SIZE = 8
 COVER_SIZE = 128
 KEY_W, KEY_H = 34, 26  # the micro key, design px (MicroBars.lua)
 SCALE = 8              # samples per design px while the shape is built
-GROW = 4               # the ring's line is grown by this many samples (half a design px) so the icon stops short of it
+GROW = 0               # the ring's line is grown by this many samples before it is cut out: 0, so the icon meets the ring's inner edge
 # Key columns (design px of the 34 wide key) the cover and the icon span: the bounding box of the key's inside (the plate
-# minus the ring's line, columns 2.1 to 31.9 of 34, rounded out to whole design px; the tests pin it). Media's cover and
+# minus the ring's line, columns 1.6 to 32.4 of 34, rounded out to whole design px; the tests pin it). Media's cover and
 # IconStyleData.covers follow.
-COVER_RECTS = {"key": (2, 32)}
+COVER_RECTS = {"key": (1, 33)}
 # Fraction of the way across the diagonal that is horizontal: the ramp runs mostly top to bottom.
 RAMP_DIAGONAL = 0.35
 COVER_COLOR = (0x0D, 0x06, 0x20)  # Theme COLOR_HUD_SCRIM's colour: the deck behind the keys
@@ -114,7 +114,7 @@ def area(a, out_w, out_h):
 
 def key_inside(input_dir):
     """Alpha of the area inside the key's border over the key's own rectangle, SCALE samples per design px: the plate
-    texture minus the ring texture's line grown by GROW samples."""
+    texture minus the ring texture's line (grown by GROW samples, none now)."""
     w, h = KEY_W * SCALE, KEY_H * SCALE
     plate = bilinear(read_tga_alpha(os.path.join(input_dir, "cell_slant.tga")), w, h)
     ring = bilinear(read_tga_alpha(os.path.join(input_dir, "deck_key_slant_outline.tga")), w, h)
