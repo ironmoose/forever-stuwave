@@ -90,7 +90,7 @@ FAMILIES = {
 # Per output size: (line width in output px, edge blur in SOURCE px, threshold low, high,
 # glow sigma in output px, glow gain, scanline strength).
 TUNING = {
-    64: dict(line=1.7, esig=1.1, lo=0.20, hi=0.55, glow=3.2, gain=0.85, scan=0.20, dlift=0.5, dglow=0.14),
+    64: dict(line=1.7, esig=1.1, lo=0.20, hi=0.55, glow=3.2, gain=0.85, scan=0.20, dlift=0.5, dglow=0.12),
     32: dict(line=1.35, esig=1.2, lo=0.27, hi=0.62, glow=2.0, gain=0.80, scan=0.13, dlift=0.6, dglow=0.12),
     16: dict(line=1.05, esig=1.3, lo=0.32, hi=0.68, glow=0.9, gain=0.40, scan=0.0, dlift=0.7, dglow=0.10),
 }
@@ -298,8 +298,12 @@ def bilinear(src: np.ndarray, out: int) -> np.ndarray:
 
 def style_d(src: np.ndarray, out: int, fam: tuple) -> np.ndarray:
     """What the client can do live, and nothing more: SetDesaturated, SetVertexColor (a multiply)
-    and one extra ADD texture (glow_round). Lift is by (1 - gray) so highlights keep their detail,
-    and the glow is low so base plus glow stays under 1 (headroom 1 - DHEAD).
+    and one extra low-alpha ADD texture (glow_round).
+
+    The lift `gray * (1 + k * (1 - gray))` is a compressive curve: it raises shadows more than
+    highlights so detail survives. The client cannot apply a curve, so in game it is approximated
+    by SetVertexColor at about 0.85 to 0.9 times the tint (DHEAD) plus, at most, a low-alpha second
+    ADD draw of the icon. Headroom 1 - DHEAD keeps base plus glow under 1 at the centre.
     """
     tune = TUNING[out]
     gray = luma(bilinear(src, out))
