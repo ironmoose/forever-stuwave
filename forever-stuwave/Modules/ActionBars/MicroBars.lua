@@ -168,7 +168,7 @@ local function IsText(value)
     return type(value) == "string" and not FS.IsSecret(value)
 end
 
--- The spec of a glyph name: { kind = "baked", file } or { kind = "runtime", file, coords, size, fam, boost }.
+-- The spec of a glyph name: { kind = "baked", file } or { kind = "runtime", file, coords, size, limit, fam, boost }.
 -- `faction` is UnitFactionGroup("player") and `class` UnitClass's token; anything that is not a plain string (nil,
 -- "Neutral", a secret value, a name nobody drew) gets the free emblem, the person glyph or the generic glyph. Pure, so the
 -- harness can walk every name.
@@ -185,7 +185,7 @@ local function GlyphSpec(name, faction, class)
         end
     end
     if entry then
-        return { kind = "runtime", file = entry.file, coords = entry.coords, size = entry.size, fam = entry.fam, boost = entry.boost }
+        return { kind = "runtime", file = entry.file, coords = entry.coords, size = entry.size, limit = entry.limit, fam = entry.fam, boost = entry.boost }
     end
     return { kind = "baked", file = ART_DIR .. (OWN_ART[name] and name or "character") .. ".tga" }
 end
@@ -428,6 +428,38 @@ local function Style()
     return style
 end
 
+-- The window { l, r, t, b } of a runtime glyph's texture to show in a rectangle of `aspect` (width over height): the data's
+-- window has the nominal key's aspect; when the layout makes the keys narrower the window narrows to match, at the same
+-- height and centre, so the picture is never squeezed sideways. It stays inside the glyph's own part of the texture (`limit`:
+-- a button frame or a neighbouring atlas cell must never show); a width that would not fit there shrinks the height instead.
+-- Without an aspect (before the key is sized) the data's window is used as it is. Pure, so the harness can walk every glyph.
+local function FitWindow(spec, aspect)
+    local c, size, limit = spec.coords, spec.size, spec.limit
+    if type(aspect) ~= "number" or aspect ~= aspect or aspect <= 0 or aspect == math.huge or not (size and limit) then
+        return c[1], c[2], c[3], c[4]
+    end
+    local tw, th = size[1], size[2]
+    local h = (c[4] - c[3]) * th
+    local w = aspect * h
+    local limitW = (limit[2] - limit[1]) * tw
+    if w > limitW then
+        w = limitW
+        h = w / aspect
+    end
+    local cx, cy = (c[1] + c[2]) / 2 * tw, (c[3] + c[4]) / 2 * th
+    cx = math.min(math.max(cx, limit[1] * tw + w / 2), limit[2] * tw - w / 2)
+    cy = math.min(math.max(cy, limit[3] * th + h / 2), limit[4] * th - h / 2)
+    return (cx - w / 2) / tw, (cx + w / 2) / tw, (cy - h / 2) / th, (cy + h / 2) / th
+end
+
+-- Writes a runtime key's window to the glyph and to its ADD copy, which must show the same one (texture writes only).
+local function SetWindow(key)
+    if key.spec.kind ~= "runtime" then return end
+    local l, r, t, b = FitWindow(key.spec, key.aspect)
+    key.glyph:SetTexCoord(l, r, t, b)
+    if key.chain then key.chain.boost:SetTexCoord(l, r, t, b) end
+end
+
 local function Paint(key, v)
     Tint(key.plate, v.plate)
     Tint(key.edge, v.edgeColor, v.edgeA)
@@ -441,7 +473,10 @@ local function Paint(key, v)
     elseif runtime then
         Tint(key.glyph, v.glyph, v.glyphA)
         -- the game's texture wears a look: the base stays grey, the ramp supplies the colour (grey too when disabled)
-        if not key.chain.active then FS.IconStyle.Dress(key.chain, key.spec.file, key.spec.coords, key.spec) end
+        if not key.chain.active then
+            FS.IconStyle.Dress(key.chain, key.spec.file, nil, key.spec)
+            SetWindow(key)
+        end
         key.glyph:SetDesaturated(true)
         -- a disabled key (dimmed and grey) drops the MOD ramp as a dimmed spell tile does: the ramp ignores alpha
         FS.IconStyle.Sync(key.chain, { r = v.glyph[1], g = v.glyph[2], b = v.glyph[3], a = v.glyphA, desat = v.glyphDesat, shown = true,
@@ -512,6 +547,12 @@ local function SizeKey(key, s, keyW)
         end
         Place(key.glyph, cover.x0, cover.x1)
         Place(key.cover, cover.x0, cover.x1)
+        -- the rectangle as drawn (snapped edges): the glyph's window is refitted to its aspect, so a key the layout made
+        -- narrower is not squeezed sideways
+        local rw = w - Edge(cover.x0 * w) - Edge((1 - cover.x1) * w)
+        local rh = bottom - top
+        key.aspect = rh > 0 and rw / rh or nil
+        SetWindow(key)
     else
         -- The art covers the key: the square baked texture is stretched to the key's size and cropped (texcoords) to
         -- the fixed central band of rows that holds the key's slanted shape (BAKED_PAD), so the shape always lands on
@@ -555,7 +596,6 @@ local function ApplySpec(key, spec)
         return
     end
     local data, fx = FS.IconStyleData, key.fx
-    key.glyph:SetTexCoord(spec.coords[1], spec.coords[2], spec.coords[3], spec.coords[4])
     if not key.chain then
         key.cover = Crisp(fx:CreateTexture(nil, "ARTWORK", nil, GLYPH_SUBLEVEL + FS.IconStyle.TOP_OFFSET + 1))
         key.cover:SetTexture(MEDIA .. data.cover.file)
@@ -564,9 +604,10 @@ local function ApplySpec(key, spec)
         for _, tex in ipairs({ key.chain.boost, key.chain.mod, key.chain.lift }) do Crisp(tex) end
     end
     key.cover:Show()
-    if not FS.IconStyle.Dress(key.chain, spec.file, spec.coords, spec) then
+    if not FS.IconStyle.Dress(key.chain, spec.file, nil, spec) then
         error("no ramp for family " .. tostring(spec.fam))
     end
+    SetWindow(key)
 end
 
 -- Creates the overlay frames and textures. Frames are created with the mouse
@@ -1604,7 +1645,7 @@ end
 
 -- Exported for the headless smoke test, the settings page and /dump.
 FS.MicroBars = {
-    SETTING = STYLE_SETTING, STYLES = STYLES, Style = Style,
+    SETTING = STYLE_SETTING, STYLES = STYLES, Style = Style, FitWindow = FitWindow,
     keys = keyList, ComputeVisual = ComputeVisual, Apply = Apply,
     KeyLayout = KeyLayout, Pitch = Pitch, RowWidth = RowWidth,
     Glyphs = GLYPHS, GlyphGeneric = GLYPH_GENERIC, GlyphSpec = GlyphSpec,

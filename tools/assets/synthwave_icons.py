@@ -736,7 +736,8 @@ def runtime_entry(im: Image.Image, window: tuple[float, float, float, float], fi
     x0, x1 = RECT_COLS
     box = fit_window(window, limit, x1 - x0, KEY_H)
     frac = (box[0] / w, box[2] / w, box[1] / h, box[3] / h)
-    return {"file": file_id, "fam": fam, "coords": frac, "size": (w, h), "boost": boost_for(im, box)}
+    lim = (limit[0] / w, limit[2] / w, limit[1] / h, limit[3] / h)
+    return {"file": file_id, "fam": fam, "coords": frac, "size": (w, h), "limit": lim, "boost": boost_for(im, box)}
 
 
 def micro_runtime_data(root: Path) -> tuple[dict, dict, dict]:
@@ -765,7 +766,7 @@ def micro_runtime_data(root: Path) -> tuple[dict, dict, dict]:
         top, bottom = 0.5 - span / 2, 0.5 + span / 2
         win = (CLASS_CROP[0] * w, top * h, CLASS_CROP[1] * w, bottom * h)
         klass[token] = {"file": "Interface\\Icons\\ClassIcon_" + name, "coords": (CLASS_CROP[0], CLASS_CROP[1], round(top, 5), round(bottom, 5)),
-                        "size": (w, h), "fam": CLASS_FAMILY, "boost": boost_for(im, win)}
+                        "size": (w, h), "limit": (CLASS_CROP[0], CLASS_CROP[1], CLASS_CROP[0], CLASS_CROP[1]), "fam": CLASS_FAMILY, "boost": boost_for(im, win)}
     return micro, pvp, klass
 
 
@@ -777,7 +778,9 @@ def lua_entry(ent: dict) -> str:
     fid = ent["file"]
     file = fid if isinstance(fid, int) else '"' + fid.replace("\\", "\\\\") + '"'
     l, r, t, b = (lua_num(round(v, 5)) for v in ent["coords"])
+    ll, lr, lt, lb = (lua_num(round(v, 5)) for v in ent["limit"])
     return (f'{{ file = {file}, coords = {{ {l}, {r}, {t}, {b} }}, size = {{ {ent["size"][0]}, {ent["size"][1]} }}, '
+            f'limit = {{ {ll}, {lr}, {lt}, {lb} }}, '
             f'fam = "{ent["fam"]}", boost = {lua_num(ent["boost"])} }}')
 
 
@@ -810,8 +813,9 @@ def lua_runtime_data(root: Path) -> str:
         "--   cover:  the cover texture of a micro key and the key columns it spans (fractions of the key width): also the\n"
         "--           rectangle every glyph is drawn in\n"
         "--   micro, pvp, class: the game texture a micro key draws (file id or path), the upright texcoord window (l, r, t, b)\n"
-        "--           zoomed to the rectangle's aspect, the texture's size in texels (w, h; the harness checks the aspect with it),\n"
-        "--           the family and the boost (0 plain, 1 twice as bright)\n"
+        "--           zoomed to the rectangle's aspect, the texture's size in texels (w, h), the glyph's own part of the texture\n"
+        "--           (limit: l, r, t, b; the window is refitted inside it when the keys shrink) and the family and the boost\n"
+        "--           (0 plain, 1 twice as bright)\n"
         "--   spells: byFile (the icon file id the client reports for a spell) and byName (the lower case icon file name)\n"
         "--           to an icon name; look: that name to its family and boost; bySpell: the spell ids that wear each icon,\n"
         "--           kept for the harness (every spell the class tabs show must be here)\n"

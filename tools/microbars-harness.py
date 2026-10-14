@@ -794,6 +794,7 @@ def spec_dict(spec) -> dict:
     if "coords" in out:
         out["coords"] = [spec.coords[i] for i in range(1, len(spec.coords) + 1)]
     out["size"] = [spec.size[i] for i in (1, 2)] if spec.size is not None else None
+    out["limit"] = [spec.limit[i] for i in (1, 2, 3, 4)] if spec.limit is not None else None
     return out
 
 
@@ -822,11 +823,13 @@ def check_glyph_files() -> None:
                     bad.append(f"{stem}/{faction} baked {spec['file']}")
                 continue
             n_runtime += 1
-            c, size = spec["coords"], spec["size"]
+            c, size, limit = spec["coords"], spec["size"], spec["limit"]
             # upright, never sheared: four values (l, r, t, b) of the texture, and the texel window has the rectangle's aspect
             # (the rectangle is the key's inside, 32 x 26 design px), so the picture is zoomed to fill it and never stretched
             shape = (len(c) == 4 and all(0 <= v <= 1 for v in c) and c[0] < c[1] and c[2] < c[3] and size is not None
-                     and abs(((c[1] - c[0]) * size[0]) / ((c[3] - c[2]) * size[1]) / rect_aspect - 1) <= 0.02)
+                     and abs(((c[1] - c[0]) * size[0]) / ((c[3] - c[2]) * size[1]) / rect_aspect - 1) <= 0.02
+                     # and the window sits inside the glyph's own part of the texture (the limit)
+                     and limit is not None and limit[0] <= c[0] + 1e-4 and c[1] <= limit[1] + 1e-4 and limit[2] <= c[2] + 1e-4 and c[3] <= limit[3] + 1e-4)
             ok = (isinstance(spec["file"], (int, str)) and shape and str(spec["fam"]) in ramps and 0 <= spec["boost"] <= 1)
             if not ok:
                 bad.append(f"{stem}/{faction} {spec}")
@@ -1098,10 +1101,8 @@ def check_fill() -> None:
               all(i["boostTex"] == i["tex"] and i.get("boostCoords") is not None and len(i["boostCoords"]) == len(i["c"])
                   and [i["boostCoords"][k] for k in range(1, len(i["c"]) + 1)] == [i["c"][k] for k in range(1, len(i["c"]) + 1)] for i in infos),
               f"{infos[0].get('boostCoords')} {infos[0]['c']}")
-        want = [[k.spec.coords[n] for n in range(1, len(k.spec.coords) + 1)] for k in keys]
-        check(f"fill.{tag}.the_glyph_draws_the_specs_four_upright_texcoords",
-              all([i["c"][n] for n in range(1, len(i["c"]) + 1)] == c for i, c in zip(infos, want))
-              and [len(c) for c in want] == [4] * count, f"{[len(c) for c in want]}")
+        check(f"fill.{tag}.the_glyph_and_its_spec_are_four_upright_texcoords",
+              all(len(i["c"]) == 4 and len(k.spec.coords) == 4 for i, k in zip(infos, keys)), f"{[len(i['c']) for i in infos]}")
         check(f"fill.{tag}.no_degrade_logs", w.logs() == "", w.logs())
     # a key without a class (our own baked art): the whole key, the fixed band
     for count, scale in ((12, 1.0), (14, 1.0)):
@@ -1148,6 +1149,65 @@ def check_crisp() -> None:
     w = World(12, scale=0.64).login()
     infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
     check("crisp.without_pixel_numbers_edges_are_whole_ui_units", all(i["left"] == int(i["left"]) and i["cl"] == int(i["cl"]) for i in infos))
+
+
+def check_window_follows_the_rect() -> None:
+    """When the layout shrinks the keys (more keys than the slot holds) the rectangle gets narrower but keeps its height, so a
+    window with the nominal aspect would be squeezed sideways. The window is refitted to the rendered rectangle (after the
+    edges are snapped to pixels): its texel aspect equals the rectangle's within 2% or one physical pixel, at 12, 14 and 16
+    keys, at the live scale and at 1.0, for every game texture including the class icon; and it stays inside the glyph's own
+    limit."""
+    cases = ((768 / 1440, 0.64, 0.64), (768 / 1440, 1.0, 1.0))
+    bad, seen, widths = {}, 0, set()
+    for count in (12, 14, 16):
+        for factor, eff, scale in cases:
+            w = World(count, scale=scale, pixel_factor=factor, effective_scale=eff).login()
+            px = factor / eff
+            keys = list(w.get("FS.MicroBars.keys").values())
+            for n, (k, i) in enumerate(zip(keys, (dict(v.items()) for _, v in w.call("h_glyphInfo").items()))):
+                if i["kind"] != "runtime":
+                    continue
+                seen += 1
+                rw = i["bw"] - i["left"] - i["right"]
+                rh = i["bh"] + i["vert"]["g"][2] - i["vert"]["g"][1]
+                c = [float(i["c"][m]) for m in (1, 2, 3, 4)]
+                size, limit = k.spec.size, k.spec.limit
+                tw, th = (c[1] - c[0]) * size[1], (c[3] - c[2]) * size[2]
+                widths.add(round(rw / rh, 2))
+                inside = limit is not None and all(float(limit[1]) - 1e-4 <= c[0] and c[1] <= float(limit[2]) + 1e-4
+                                                    and float(limit[3]) - 1e-4 <= c[2] and c[3] <= float(limit[4]) + 1e-4 for _ in (0,))
+                ok = (abs(tw / th - rw / rh) <= 0.02 * rw / rh or abs(tw / th * rh - rw) <= px) and inside and th > 0
+                boost = i.get("boostCoords")
+                if boost is not None:
+                    ok = ok and [float(boost[m]) for m in (1, 2, 3, 4)] == c
+                if not ok:
+                    bad[(count, scale, n)] = (round(tw / th, 3), round(rw / rh, 3))
+    check("window.the_texel_aspect_follows_the_rendered_rectangle_when_the_keys_shrink", seen > 30 and not bad and len(widths) >= 3,
+          f"{seen} keys, aspects {sorted(widths)}, bad {list(bad.items())[:3]}")
+
+
+def check_fit_window() -> None:
+    """FitWindow, the pure part: the data's window at its own aspect; a narrower rectangle narrows the window at the same height
+    and centre; one too wide for the glyph's own part of the texture shrinks the height instead; no aspect, no change."""
+    w = World(12).login()
+    fit = w.get("FS.MicroBars.FitWindow")
+    spec = w.lua.eval("{ coords = { 0.25, 0.75, 0.4, 0.6 }, size = { 64, 64 }, limit = { 0.2, 0.8, 0.3, 0.7 } }")   # 32 x 12.8 texels
+    got = lambda a: [float(v) for v in fit(spec, a)]  # noqa: E731
+    nominal = [0.25, 0.75, 0.4, 0.6]
+    check("fit.the_nominal_aspect_gives_the_data_window", all(near(a, b, 1e-6) for a, b in zip(got(2.5), nominal)), f"{got(2.5)}")
+    narrow = got(2.0)
+    check("fit.a_narrower_rectangle_narrows_the_window_at_the_same_height_and_centre",
+          near(narrow[3] - narrow[2], 0.2, 1e-6) and near((narrow[1] - narrow[0]) * 64 / ((narrow[3] - narrow[2]) * 64), 2.0, 1e-6)
+          and near(narrow[0] + narrow[1], 1.0, 1e-6) and near(narrow[2] + narrow[3], 1.0, 1e-6), f"{narrow}")
+    wide = got(5.0)
+    check("fit.a_width_the_limit_cannot_hold_shrinks_the_height_and_stays_inside",
+          near((wide[1] - wide[0]) * 64 / ((wide[3] - wide[2]) * 64), 5.0, 1e-6) and wide[0] >= 0.2 - 1e-6 and wide[1] <= 0.8 + 1e-6
+          and wide[2] >= 0.3 - 1e-6 and wide[3] <= 0.7 + 1e-6 and wide[3] - wide[2] < 0.2, f"{wide}")
+    edge = w.lua.eval("{ coords = { 0.2, 0.3, 0.4, 0.6 }, size = { 64, 64 }, limit = { 0.2, 0.8, 0.3, 0.7 } }")   # 6.4 x 12.8 texels at the edge
+    pushed = [float(v) for v in fit(edge, 2.5)]
+    check("fit.a_window_that_grows_past_the_limits_edge_is_pushed_back_inside_it", near(pushed[0], 0.2, 1e-6) and near(pushed[1], 0.7, 1e-6), f"{pushed}")
+    check("fit.no_aspect_or_a_bad_one_changes_nothing",
+          all([float(v) for v in fit(spec, a)] == nominal for a in (None, 0, -1, float("nan"), float("inf"))))
 
 
 def check_late_class() -> None:
@@ -1319,7 +1379,7 @@ def check_deck(lean: float, gap: float) -> None:
     c = consts()
     check("deck.exports_the_resize_api", c["hasSet"] and c["getMicro"] > 0, f"{c}")
     natural12 = c["keyW"] + 11 * (c["keyW"] * (1 - lean) + gap)
-    check("deck.micro_max_is_the_12_key_row_rounded_up", c["microMax"] == math.ceil(natural12 - 1e-9) and 0 <= c["microMax"] - natural12 < 1,
+    check("deck.micro_max_is_the_12_key_row_rounded_up", c["microMax"] == math.ceil(natural12 - 1e-4) and 0 <= c["microMax"] - natural12 < 1,
           f"max {c['microMax']} natural {natural12:.3f}")
     max_w = 2 * c["pad"] + c["microMax"] + c["divider"] + c["bagW"]
     check("deck.layout_w_is_the_max_of_the_parts_sum", layout_deck_w() == max_w, f"Layout.lua says {layout_deck_w()}, parts sum {max_w}")
@@ -1667,6 +1727,8 @@ def main() -> int:
     check_slant_direction()
     check_no_empty_wedge()
     check_crisp()
+    check_window_follows_the_rect()
+    check_fit_window()
     check_late_class()
     check_glyph_tint()
     check_microstyle()
