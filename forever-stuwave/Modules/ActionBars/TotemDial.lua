@@ -43,6 +43,8 @@ local D = {
     TICK = 0.1,                 -- seconds between the ticker's looks
     PULSE_HZ = 4,               -- radians per second of the waiting pulse
     CARD = { W = 198, ROW = 27, ROWS = 4, TOP = 56, FOOT = 30 },
+    BTN_PAD = 14,               -- design px each side of the label of an editor button that sizes to its text (the config
+                                -- window's buttons: width = text + 28)
     CONFIRM = 3,                -- seconds DELETE stays armed
     CHOOSER_TILE = 26,
 }
@@ -811,6 +813,29 @@ local function StyleButton(b, c, text, size)
     b.text:SetText(text)
 end
 
+-- `w` UI units rounded UP to a whole number of physical screen pixels at the frame's effective scale.
+local function SnapUp(frame, w)
+    local ok, es = pcall(function() return frame:GetEffectiveScale() end)
+    if not ok or type(es) ~= "number" or es <= 0 then return math.ceil(w) end
+    return math.ceil(w * es - 1e-6) / es
+end
+
+-- The width of a button that sizes to its label: the widest of `labels` at `size` plus BTN_PAD each side, never under the
+-- design width `minW`, in whole physical pixels. The button's text is put back as it was. The label is centred on the
+-- button (NewButton), so the padding is symmetric.
+local function TextButtonWidth(b, labels, size, minW, s)
+    local keep = b.text:GetText()
+    Mono(b.text, size, MUTED)
+    local widest = 0
+    for _, label in ipairs(labels) do
+        b.text:SetText(label)
+        local ok, tw = pcall(function() return b.text:GetStringWidth() end)
+        if ok and type(tw) == "number" and tw > widest then widest = tw end
+    end
+    b.text:SetText(keep or "")
+    return SnapUp(b, math.max(minW * s, widest + 2 * D.BTN_PAD * s))
+end
+
 local function CloseChooser()
     if chooser and chooser:IsShown() then chooser:Hide() end
 end
@@ -934,7 +959,12 @@ end
 local function SeatCard()
     local s = Scale()
     local C = D.CARD
-    card:SetSize(C.W * s, (C.TOP + C.ROWS * C.ROW + C.FOOT) * s)
+    -- the two foot buttons size to their labels (DELETE is as wide for SURE? too, so it does not jump); the card grows to
+    -- hold them side by side when the labels need more than the design width
+    local delW = TextButtonWidth(card.delete, { "DELETE", "SURE?" }, 9, 58, s)
+    local useW = card.useGnarly and TextButtonWidth(card.useGnarly, { "USE AS GNARLY PRESET" }, 9, 120, s) or 0
+    local cardW = SnapUp(card, math.max(C.W * s, (16 + (card.useGnarly and 6 or 0)) * s + delW + useW))
+    card:SetSize(cardW, (C.TOP + C.ROWS * C.ROW + C.FOOT) * s)
     SeatEdges(card.edges, card, math.max(1, s))
     SetEdges(card.edges, VIOLET, 0.85)
     card.title:ClearAllPoints()
@@ -946,7 +976,7 @@ local function SeatCard()
     StyleButton(card.close, MUTED, "x", 11)
     card.name:ClearAllPoints()
     card.name:SetPoint("TOPLEFT", card, "TOPLEFT", 8 * s, -20 * s)
-    card.name:SetSize((C.W - 16) * s, 18 * s)
+    card.name:SetSize(cardW - 16 * s, 18 * s)
     Mono(card.name, 12, WHITE)
     card.nameEdges = card.nameEdges or NewEdges(card.name, "BORDER", 0)
     SeatEdges(card.nameEdges, card.name, math.max(1, s))
@@ -957,7 +987,7 @@ local function SeatCard()
     for i, row in ipairs(card.rows) do
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", card, "TOPLEFT", 8 * s, -(C.TOP + (i - 1) * C.ROW) * s)
-        row:SetSize((C.W - 16) * s, (C.ROW - 3) * s)
+        row:SetSize(cardW - 16 * s, (C.ROW - 3) * s)
         row.num:ClearAllPoints()
         row.num:SetPoint("LEFT", row, "LEFT", 6 * s, 0)
         Mono(row.num, 11, WHITE)
@@ -980,11 +1010,11 @@ local function SeatCard()
     end
     card.delete:ClearAllPoints()
     card.delete:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", -8 * s, 8 * s)
-    card.delete:SetSize(58 * s, 17 * s)
+    card.delete:SetSize(delW, 17 * s)
     if card.useGnarly then
         card.useGnarly:ClearAllPoints()
         card.useGnarly:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", 8 * s, 8 * s)
-        card.useGnarly:SetSize(120 * s, 17 * s)
+        card.useGnarly:SetSize(useW, 17 * s)
     end
 end
 

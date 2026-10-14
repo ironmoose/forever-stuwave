@@ -101,6 +101,10 @@ MOCKS = r"""
 function __Region:SetAutoFocus() end
 function __Region:SetMaxLetters(n) self._max = n end
 function __Region:SetTextInsets() end
+-- text width by length (5.4 px a character, the 9 px mono face) and the screen pixels a UI unit covers
+function __Region:GetStringWidth() return #(self._text or "") * 5.4 end
+__es = 1
+function __Region:GetEffectiveScale() return __es end
 function __Region:ClearFocus() self._focus = false end
 function __Region:SetFocus() self._focus = true end
 -- the keys and the CVar the click path reads
@@ -1279,7 +1283,7 @@ def check_the_card_closes_on_escape_and_combat_and_hangs_on_the_last_cell():
     DL(lua).OpenEditor(i)
     assert sb.same(lua, c._points[len(seq(c._points))].rel, dial(lua)), "with GNARLY off the card hangs on the dial"
     conf(lua, "totems.gnarly", True)
-    approx(float(c._w), 198.0, "card width")
+    assert float(c._w) >= 198.0, "the card is narrower than its design width"
     approx(float(c._h), 56 + 4 * 27 + 30, "card height")
     DL(lua).OpenEditor(i)
     script(lua, rows(lua)[0].tile, "OnClick")
@@ -1683,7 +1687,7 @@ def check_use_as_gnarly_preset_in_the_editor_ties_and_unties_and_shift_click_edi
     DL(lua).OpenEditor(a)
     ub = card(lua).useGnarly
     assert str(ub.text._text) == "USE AS GNARLY PRESET"
-    assert int(ub._w) == 120 and int(card(lua).delete._w) == 58
+    assert float(ub._w) >= 120 and float(card(lua).delete._w) >= 58
     script(lua, ub, "OnClick")
     assert P.Gnarly() == a and gb(lua)._attrs["type1"] == "macro"
     close(seq(ub.edges[1]._color), PINK, "the tied button is pink")
@@ -1699,6 +1703,34 @@ def check_use_as_gnarly_preset_in_the_editor_ties_and_unties_and_shift_click_edi
     run(lua, "__shift = false")
     DL(lua).CloseEditor()
     P.SetGnarly(None)
+
+
+def check_the_editor_buttons_that_size_to_their_text_are_padded_symmetrically_and_snapped_to_whole_pixels():
+    pad = 14.0                                  # D.BTN_PAD, the config window's buttons: text + 28
+    for es, sc in ((1.0, 1.0), (0.64, 1.0), (1.3333333, 1.25)):
+        lua = boot(sc)
+        run(lua, f"__es = {es}")
+        P = PS(lua)
+        i = make(lua)
+        DL(lua).OpenEditor(i)
+        c = card(lua)
+        for name in ("useGnarly", "delete"):
+            b = getattr(c, name)
+            w = float(b._w)
+            for label in {"useGnarly": ["USE AS GNARLY PRESET"], "delete": ["DELETE", "SURE?"]}[name]:
+                assert w >= len(label) * 5.4 + 2 * pad * sc - 1e-6, f"es {es}: {name} is {w} wide, {label} needs more"
+            assert abs(w * es - round(w * es)) < 1e-6, f"es {es}: {name} is not whole physical pixels ({w * es})"
+            p = b.text._points[1]
+            assert (p.point, p.relPoint) == ("CENTER", "CENTER") and not float(p.x or 0) and not float(p.y or 0), \
+                f"{name}: the label is not centred"
+            assert sb.same(lua, p.rel, b)
+        # SURE? does not change the width
+        before = float(c.delete._w)
+        script(lua, c.delete, "OnClick")
+        assert str(c.delete.text._text) == "SURE?" and float(c.delete._w) == before
+        # side by side inside the card
+        assert (8 + 6 + 8) * sc + float(c.useGnarly._w) + float(c.delete._w) <= float(c._w) + 1e-6, "the buttons overflow the card"
+        assert abs(float(c.name._w) - (float(c._w) - 16 * sc)) < 1e-6 and abs(float(rows(lua)[0]._w) - (float(c._w) - 16 * sc)) < 1e-6
 
 
 def shift_click(lua, button):
@@ -2261,6 +2293,7 @@ CHECKS = [
     check_the_press_flash_and_sound_belong_to_the_gnarly_cell_and_have_their_own_switches,
     check_the_gnarly_tooltip_and_the_unset_tooltip,
     check_use_as_gnarly_preset_in_the_editor_ties_and_unties_and_shift_click_edits_it,
+    check_the_editor_buttons_that_size_to_their_text_are_padded_symmetrically_and_snapped_to_whole_pixels,
     check_shift_click_on_an_unset_gnarly_with_room_makes_an_empty_preset_ties_it_and_opens_it,
     check_shift_click_on_an_unset_gnarly_leaves_the_dial_on_its_new_slot,
     check_shift_click_on_an_unset_gnarly_with_every_preset_made_opens_the_active_one,
