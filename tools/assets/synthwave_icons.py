@@ -40,6 +40,12 @@ forever-stuwave/Media/Textures/glyphart_<name>.tga, 64x64 BGRA that fills the ke
 faction. MicroBars.lua picks them; Character and Legacy have no static Blizzard art and keep
 their hand drawn glyph_ files (tools/assets/generate_deck_glyphs.py).
 
+Shipping the class tab spell icons (style B again): `--bake-spells` writes spellart_<icon>.tga (64x64,
+opaque, the whole icon file so the tiles' usual texcoords crop it like the stock icon) and the lookup table
+forever-stuwave/Core/SpellArtData.lua. Sources: spellfiles/<icon name>.blp, the 64 px icon files
+(interface/icons/<name>, file ids in SPELL_ICONS). FS.SpellArt picks them by the file id the client reports
+and falls back to the stock icon for anything not baked.
+
 Derived art is made from Blizzard's icons: fine for personal use. A public release should
 prefer style D, which ships no copies of Blizzard art.
 
@@ -544,6 +550,90 @@ def bake_micro(root: Path, out_dir: Path) -> list[Path]:
     return written
 
 
+# ---------------------------------------------------------------------------
+# Shipping: the class tab spell icons in style B
+# ---------------------------------------------------------------------------
+
+SPELL_BAKE_SIZE = 64  # power of two; the tiles show it at about 32 px
+# (icon file name, icon file data id, family, [(spell id, spell name)]). The ids and icon names are the TBC
+# data (wowhead's tooltip data, dataEnv 5), the file ids come from the community listfile. The client reports a
+# spell's icon as its file id, so that is the key MicroBars-style lookups use (FS.SpellArt); a spell that is not
+# listed here simply keeps its stock icon. Sources: spellfiles/<icon name>.blp, interface/icons/<icon name>.
+SPELL_ICONS = [
+    ("spell_nature_rockbiter", 136086, "earth", [(8017, 'Rockbiter Weapon')]),
+    ("spell_fire_flametounge", 135814, "fire", [(8024, 'Flametongue Weapon')]),
+    ("spell_frost_frostbrand", 135847, "frost", [(8033, 'Frostbrand Weapon')]),
+    ("spell_nature_cyclone", 136018, "air", [(8232, 'Windfury Weapon')]),
+    ("spell_nature_lightningshield", 136051, "lightning", [(324, 'Lightning Shield')]),
+    ("ability_shaman_watershield", 132315, "water", [(24398, 'Water Shield')]),
+    ("spell_fire_searingtotem", 135825, "fire", [(3599, 'Searing Totem')]),
+    ("spell_frostresistancetotem_01", 135866, "frost", [(8181, 'Frost Resistance Totem')]),
+    ("spell_fire_selfdestruct", 135826, "fire", [(8190, 'Magma Totem')]),
+    ("spell_nature_guardianward", 136040, "fire", [(8227, 'Flametongue Totem')]),
+    ("spell_nature_stoneskintotem", 136098, "earth", [(8071, 'Stoneskin Totem')]),
+    ("spell_nature_strengthofearthtotem02", 136102, "earth", [(2484, 'Earthbind Totem')]),
+    ("spell_nature_stoneclawtotem", 136097, "earth", [(5730, 'Stoneclaw Totem')]),
+    ("spell_nature_earthbindtotem", 136023, "earth", [(8075, 'Strength of Earth Totem')]),
+    ("spell_nature_tremortotem", 136108, "earth", [(8143, 'Tremor Totem')]),
+    ("inv_spear_04", 135127, "water", [(5394, 'Healing Stream Totem')]),
+    ("spell_nature_poisoncleansingtotem", 136070, "water", [(8166, 'Poison Cleansing Totem')]),
+    ("spell_nature_manaregentotem", 136053, "water", [(5675, 'Mana Spring Totem')]),
+    ("spell_fireresistancetotem_01", 135832, "fire", [(8184, 'Fire Resistance Totem')]),
+    ("spell_nature_groundingtotem", 136039, "air", [(8177, 'Grounding Totem')]),
+    ("spell_nature_natureresistancetotem", 136061, "air", [(10595, 'Nature Resistance Totem')]),
+    ("ability_thunderbolt", 132325, "house_pink", [(21084, 'Seal of Righteousness')]),
+    ("spell_holy_holysmite", 135924, "house_pink", [(21082, 'Seal of the Crusader')]),
+    ("ability_warrior_innerrage", 132347, "house_pink", [(20375, 'Seal of Command')]),
+    ("spell_holy_healingaura", 135917, "house_pink", [(20165, 'Seal of Light')]),
+    ("spell_holy_righteousnessaura", 135960, "house_pink", [(20166, 'Seal of Wisdom')]),
+    ("spell_holy_sealofwrath", 135971, "house_pink", [(20164, 'Seal of Justice')]),
+    ("spell_holy_devotionaura", 135893, "house_cyan", [(465, 'Devotion Aura')]),
+    ("spell_holy_auraoflight", 135873, "house_cyan", [(7294, 'Retribution Aura')]),
+    ("spell_holy_mindsooth", 135933, "house_cyan", [(19746, 'Concentration Aura')]),
+    ("spell_shadow_sealofkings", 136192, "house_cyan", [(19876, 'Shadow Resistance Aura')]),
+    ("spell_frost_wizardmark", 135865, "house_cyan", [(19888, 'Frost Resistance Aura')]),
+    ("spell_fire_sealoffire", 135824, "house_cyan", [(19891, 'Fire Resistance Aura')]),
+    ("spell_holy_mindvision", 135934, "house_cyan", [(20218, 'Sanctity Aura')]),
+    ("ability_warrior_offensivestance", 132349, "house_violet", [(2457, 'Battle Stance')]),
+    ("ability_warrior_defensivestance", 132341, "house_violet", [(71, 'Defensive Stance')]),
+    ("ability_racial_avatar", 132275, "house_violet", [(2458, 'Berserker Stance')]),
+]
+
+
+def load_icon(path: Path) -> np.ndarray:
+    """A full 64 px icon file, border included: the tiles crop it with the same texcoords as the stock icon."""
+    return np.asarray(Image.open(path).convert("RGB"), dtype=np.float64) / 255.0
+
+
+def lua_spell_data() -> str:
+    by_file = "".join(f'    [{fdid}] = "{icon}",\n' for icon, fdid, _f, _ids in SPELL_ICONS)
+    by_name = "".join(f'    {icon} = "{icon}",\n' for icon, _fd, _f, _ids in SPELL_ICONS)
+    by_spell = "".join(f'    [{sid}] = "{icon}",  -- {name}\n' for icon, _fd, _f, ids in SPELL_ICONS for sid, name in ids)
+    return (
+        "-- Generated by tools/assets/synthwave_icons.py --bake-spells. Do not edit by hand.\n"
+        "-- Class tab spell icons that have a baked gradient version (Media/Textures/spellart_<name>.tga, 64x64).\n"
+        "-- byFile: the icon file id the client reports for a spell -> art name. byName: the lower case icon file\n"
+        "-- name (a client that answers with an Interface\\Icons path) -> art name. bySpell: the spell ids that wear\n"
+        "-- each icon, kept for the harness (every spell the tabs show must be here).\n"
+        "local _, FS = ...\n"
+        "FS.SpellArtData = {\n  byFile = {\n" + by_file + "  },\n  byName = {\n" + by_name + "  },\n  bySpell = {\n"
+        + by_spell + "  },\n}\n"
+    )
+
+
+def bake_spells(root: Path, tex_dir: Path, lua_path: Path) -> None:
+    """Write spellart_<icon>.tga (style B, opaque) and the lookup table FS.SpellArtData."""
+    tex_dir.mkdir(parents=True, exist_ok=True)
+    for icon, _fdid, fam, _ids in SPELL_ICONS:
+        src = load_icon(root / "spellfiles" / f"{icon}.blp")
+        rgb = finish(gradient_map(src, SPELL_BAKE_SIZE, FAMILIES[fam]), SPELL_BAKE_SIZE, TUNING[SPELL_BAKE_SIZE], scan=False)
+        rgba = (np.dstack([rgb, np.ones(rgb.shape[:2])]) * 255 + 0.5).astype(np.uint8)
+        (tex_dir / f"spellart_{icon}.tga").write_bytes(tga_bytes(rgba))
+        print("baked", f"spellart_{icon}.tga", file=sys.stderr)
+    lua_path.write_text(lua_spell_data(), encoding="utf-8", newline="\n")
+    print("wrote", lua_path, file=sys.stderr)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--sources", type=Path, required=True, help="directory holding spells/, micro/, subs/")
@@ -553,8 +643,15 @@ def main() -> int:
     ap.add_argument("--bake-micro", action="store_true",
                     help="write the shipped micro menu textures (style B, 64x64 .tga) into forever-stuwave/Media/Textures "
                          "(or FS_ASSET_OUTPUT_DIR) and stop")
+    ap.add_argument("--bake-spells", action="store_true",
+                    help="write the class tab spell icons (style B, 64x64 .tga) and Core/SpellArtData.lua, then stop")
     args = ap.parse_args()
 
+    if args.bake_spells:
+        out = Path(os.environ.get("FS_ASSET_OUTPUT_DIR") or REPO / "forever-stuwave" / "Media" / "Textures")
+        lua = Path(os.environ.get("FS_SPELLART_DATA") or REPO / "forever-stuwave" / "Core" / "SpellArtData.lua")
+        bake_spells(args.sources, out, lua)
+        return 0
     if args.bake_micro:
         out = Path(os.environ.get("FS_ASSET_OUTPUT_DIR") or REPO / "forever-stuwave" / "Media" / "Textures")
         bake_micro(args.sources, out)

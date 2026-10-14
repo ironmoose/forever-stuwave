@@ -1001,7 +1001,7 @@ local function ShowPick(button, pick)
     button.fsPick = pick
     button.fsSpellID = pick and pick.id or nil
     if pick and pick.icon then
-        button.icon:SetTexture(pick.icon)
+        FS.FrameHelpers.SetSpellIcon(button.icon, pick.icon)
         button.icon:Show()
     elseif pick then
         button.icon:Show()
@@ -1512,7 +1512,7 @@ function TotemBar.OpenPicker(key)
             tile.fsColor = c
             tile.fsHover = false
             tile.fsCurrent = current ~= nil and item.id == current.id
-            if item.icon then tile.icon:SetTexture(item.icon) end
+            if item.icon then FS.FrameHelpers.SetSpellIcon(tile.icon, item.icon) end
             tile.fsUnderline:SetColorTexture(c[1], c[2], c[3], 0.95)
             tile.fsUnderline:ClearAllPoints()
             tile.fsUnderline:SetPoint("BOTTOMLEFT", tile, "BOTTOMLEFT", 5 * s, 2 * s)

@@ -11,6 +11,8 @@ Core/Theme.lua
 Core/Layout.lua
 Core/Config.lua
 Core/FrameHelpers.lua
+Core/SpellArtData.lua
+Core/SpellArt.lua
 Core/ChevronCastBar.lua
 Core/PanelSkins.lua
 Modules/Tracker/Tracker.lua

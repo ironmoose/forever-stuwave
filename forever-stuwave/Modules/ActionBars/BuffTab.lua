@@ -571,7 +571,7 @@ local function PaintButton(button, v)
     -- icon or chip: one of them. The chip keeps its colours either way, so the fallback is always painted.
     local icon = button.icon
     if iconTex then
-        icon:SetTexture(iconTex)
+        FH.SetSpellIcon(icon, iconTex)
         r, g, b = Shade(WHITE, tint)
         local k = look.icon or 1
         icon:SetVertexColor(r * k, g * k, b * k, 1)

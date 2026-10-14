@@ -526,7 +526,7 @@ local function ApplyRow(key, entries)
                 button.fsCommand = "SHAPESHIFTBUTTON" .. entry.form
                 button.commandName = button.fsCommand
             end
-            if entry.icon then button.icon:SetTexture(entry.icon) end
+            if entry.icon then FS.FrameHelpers.SetSpellIcon(button.icon, entry.icon) end
             Tint(button, entry.color or FS.Theme.COLOR_POWER)
             UpdateHotkey(button)
             SetActive(button, entry.active)

@@ -1272,6 +1272,14 @@ local COOLDOWN_SWIPE_ALPHA = 0.64
 -- all three are unused while they do not.)
 local DEFAULT_CUT_CHAMFER = 6
 
+-- Draws a spell icon on `tex`: through FS.SpellArt (the gradient or stock style of the setting `icons.spellstyle`, which
+-- repaints the texture when the setting changes) when that is loaded, else the stock texture as given. A texture write.
+function Helpers.SetSpellIcon(tex, stock)
+    local art = FS.SpellArt
+    if art and art.Set then return art.Set(tex, stock) end
+    tex:SetTexture(stock)
+end
+
 function Helpers.SeatCutIcon(button)
     local icon = button.icon
     if not icon then return end

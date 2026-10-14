@@ -1325,6 +1325,27 @@ local function BuffTabGroup(page)
     UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip })
 end
 
+-- The spell icon style for the class tabs (SpellArt.lua): gradient or the game's own icons, repainted live. Left out until a
+-- tab has drawn a spell icon (a class with none has nothing to style); its ? tip explains it.
+local function SpellIconGroup(page)
+    local art = FS.SpellArt
+    if not (art and art.SETTING and art.Applies and art.Applies()) then return end
+    local def = art.SETTING
+    local TEXT = { gradient = "Gradient", stock = "Stock" }
+    UI.Header(page, "Class tab icons")
+    UI.Dropdown(page, {
+        label = def.label, tip = def.tip,
+        get = function() return art.Style() end,
+        text = function(value) return TEXT[value] or tostring(value) end,
+        items = function()
+            local items = {}
+            for i, value in ipairs(art.STYLES) do items[i] = { value = value, text = TEXT[value] } end
+            return items
+        end,
+        set = function(value) Config.Set(def.key, value) end,
+    })
+end
+
 CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, build = function(page)
     UI.Header(page, "Player and target", "Hidden frames stay click-through and invisible.")
     UI.Toggle(page, { label = "Hide player frame", key = "unitFrames.hidePlayer" })
@@ -1334,6 +1355,7 @@ CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, buil
     UI.Toggle(page, { label = "Background grid", key = "actionbars.grid" })
     FiveSecondGroup(page)
     BuffTabGroup(page)
+    SpellIconGroup(page)
 end })
 
 local PIECE_ORDER = { "you", "tgt", "dot", "shard", "prc", "buff", "party" }

@@ -265,7 +265,7 @@ local function UpdateButton(button)
 
     if button.icon then
         if icon then
-            button.icon:SetTexture(icon)
+            FS.FrameHelpers.SetSpellIcon(button.icon, icon)
             button.icon:Show()
         else
             button.icon:Hide()
