@@ -14,6 +14,9 @@ local SCAN_DELAY = 0.1       -- UNIT_AURA bursts coalesce into one scan this lon
 local PENDING_TTL = 60       -- seconds a SENT cast is remembered without a verdict
 local STALE_AFTER = 30       -- a ledger target whose debuffs all ended this long ago is dropped
 local NO_EXPIRY_AGE = 120    -- an entry with no known expiry is believed this long after it was written
+-- The Hud's Priest and Warlock rows sort before every other row: their order is HUD_ORDER + 1 .. n (profile order), far below
+-- the class order (1 .. n) and the seen-in-a-snapshot order (101 ..) of the ledger and scan rows, so they never interleave.
+local HUD_ORDER = -1000
 
 -- The debuffs worth a row for each class, in display order. A name listed here is tracked from its first cast in
 -- combat even with no SPELL_SECONDS length (it then shows "?" until a snapshot measures it); a name seen in any
@@ -27,13 +30,21 @@ local NO_EXPIRY_AGE = 120    -- an entry with no known expiry is believed this l
 -- Priest and Warlock DoTs (Shadow Word: Pain, Devouring Plague, Corruption, Immolate, the banes, Siphon Life) are
 -- timed by FS.HudSpells and are not repeated here. Rupture, Kidney Shot (the length follows the combo points) and
 -- Fire Vulnerability (no length in the Forever tooltip) are listed WITHOUT a length: unverified.
+-- Fire Vulnerability and Deep Wounds have no player cast with that name (a Mage's Fire spells and a Warrior's crits put
+-- them on the target): they are listed only to fix their display order once a snapshot sees them.
+-- The point blank AoE entries (Psychic Scream, Frost Nova, Cone of Cold, Intimidating Shout, Demoralizing Roar) are timed
+-- from the cast. Whether the cast hit the target is unknown until a snapshot runs, so in combat they are estimates, as
+-- Thunder Clap and Demoralizing Shout are.
+--
 -- Debuffs that are only ever SEEN, never cast at the target: the Rogue poisons. Coating a weapon is a player cast with the
 -- very name of the aura it later puts on the target (a proc, with no cast), so a cast of one of these names is the weapon
 -- coat and must never write a ledger row on the current target. They show from a snapshot (out of combat, or the in
--- combat reconcile) alone.
+-- combat reconcile) alone. Deadly and Crippling Poison are in CLASS_DEBUFFS and so are cast-tracked by name; Wound, Mind
+-- Numbing and Anesthetic Poison are not tracked today, and are listed because a snapshot sighting sets known[name], after
+-- which Tracks would accept a coat cast of that name. Forever's spelling of Mind Numbing is unverified: both are listed.
 local SNAPSHOT_ONLY = {
     ["Deadly Poison"] = true, ["Crippling Poison"] = true, ["Wound Poison"] = true, ["Mind-numbing Poison"] = true,
-    ["Anesthetic Poison"] = true,
+    ["Mind Numbing Poison"] = true, ["Anesthetic Poison"] = true,
 }
 
 local CLASS_DEBUFFS = {
@@ -503,7 +514,7 @@ local function OnHud(state)
                     id = FH and FH.SpellIDForName and FH.SpellIDForName(name) or nil,   -- plain: the dot's tooltip spell
                     icon = PlainOf(e.icon, "number") or PlainOf(e.icon, "string"),
                     expires = live and expires or 0, duration = live and PlainOf(e.duration, "number") or nil,
-                    count = 1, order = #hudEntries + 1,
+                    count = 1, order = HUD_ORDER + #hudEntries + 1,
                 }
             end
         end

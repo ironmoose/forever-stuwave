@@ -762,7 +762,6 @@ case("coating_a_weapon_with_a_poison_adds_no_target_row_but_a_snapshot_still_sho
 local TD = boot({ class = "ROGUE" })
 SPELLS_BY_ID[2823] = { name = "Deadly Poison", icon = 6001 }
 SPELLS_BY_ID[3408] = { name = "Crippling Poison", icon = 6002 }
-SPELLS_BY_ID[1329] = { name = "Mutilate", icon = 6003 }
 TD.Subscribe(function() end)
 IN_COMBAT = true
 cast(2823, guid()); cast(3408, guid())
@@ -821,6 +820,32 @@ check(list[#list].name == "Curse of Weakness", "and it sorts after them")
 local n = 0
 for _, e in ipairs(list) do if e.name == "Corruption" then n = n + 1 end end
 check(n == 1, "the scan's Corruption is not listed twice")
+""")
+
+case("hud_rows_always_come_before_ledger_rows_whatever_their_class_order")(r"""
+local TD = boot({ class = "WARLOCK", hud = true })
+SPELLS_BY_ID[5782] = { name = "Fear", icon = 8001 }
+SPELLS_BY_ID[1714] = { name = "Curse of Tongues", icon = 8002 }
+SPELLS_BY_ID[702] = { name = "Curse of Weakness", icon = 8003 }
+local function row(key, icon, remaining, expiresAt, duration)
+    return { key = key, icon = icon, remaining = remaining, expiresAt = expiresAt, duration = duration }
+end
+TD.Subscribe(function() end)
+IN_COMBAT = true
+cast(5782, guid()); cast(1714, guid()); cast(702, guid())      -- ledger rows with class orders 5, 4 and 3
+for _, fn in ipairs({ unpack(HUDSUBS) }) do
+    fn({ active = true, targetEpoch = 1, row = { row("corruption", 7001, 10, NOW + 10, 18), row("bane_agony", 7002, 0),
+        row("immolate", 7003, 9, NOW + 9, 15) } })
+end
+local list = TD.Get()
+check(#list == 6, "three Hud rows and three ledger rows, got " .. names(list))
+local want = { "Corruption", "Bane of Agony", "Immolate" }
+for i, n in ipairs(want) do check(list[i].name == n, "Hud row " .. i .. " first, in profile order, got " .. names(list)) end
+for i = 4, 6 do
+    check(list[i].name == "Curse of Weakness" or list[i].name == "Curse of Tongues" or list[i].name == "Fear", "ledger rows after, got " .. names(list))
+end
+-- the ledger rows keep their class order among themselves
+check(list[4].name == "Curse of Weakness" and list[5].name == "Curse of Tongues" and list[6].name == "Fear", names(list))
 """)
 
 case("a_class_without_hud_dots_does_not_subscribe_to_the_hud")(r"""
@@ -977,6 +1002,15 @@ def static_checks() -> list[tuple[str, str | None]]:
             break
     else:
         out.append(("read_aura_slot_shape", None))
+    spells_src = SPELLS.read_text(encoding="utf-8")
+    td_src = SERVICE.read_text(encoding="utf-8")
+    block = re.search(r"local SPELL_SECONDS = \{(.*?)\n\}", td_src, re.S)
+    seconds = set(re.findall(r'\["([^"]+)"\] = \{', block.group(1))) if block else set()
+    hud_names = set(re.findall(r'"([^"]+)"', " ".join(re.findall(r"names = \{([^}]*)\}", spells_src))))
+    both = sorted(seconds & hud_names)
+    out.append(("spell_seconds_and_hudspells_names_do_not_overlap",
+                None if seconds and hud_names and not both else
+                f"names in both SPELL_SECONDS and HudSpells (a duplicate source): {both}" if both else "could not read the name lists"))
     return out
 
 
