@@ -195,6 +195,7 @@ do
         local dy = (p.point:find("BOTTOM") and h) or (p.point:find("TOP") and 0) or h / 2
         return { l = x - dx, t = y + dy, w = w, h = h }
     end
+    function __Region:GetTexture() return self._texture end
     function __Region:GetLeft()
         if __noRect or self._noRect then return nil end
         if self._forceLeft then return self._forceLeft end
@@ -2047,7 +2048,7 @@ def icon(lua, i):
         vertex=rgb(b.icon._vertex) if b.icon._vertex else None,
         desat=bool(b.icon._desat), chip=shown(b.fsChip.ring) and shown(b.fsChip.fill) and shown(b.fsChip.code),
         chip_any=shown(b.fsChip.ring) or shown(b.fsChip.fill) or shown(b.fsChip.glow) or shown(b.fsChip.code),
-        plate=shown(b.fsTextPlate) or shown(b.fsWordPlate), band=shown(b.fsWordPlate), text=b.fsText._text,
+        plate=shown(b.fsTextPlate), text=b.fsText._text,
     )
 
 
@@ -2351,7 +2352,7 @@ def check_the_imbue_slots_carry_our_lit_icon_and_the_engine_time_on_both_hands()
         assert int(part.lit._texture) == 100000 + 8024, "the regen repaint writes BOTH hands' lit icons"
 
 
-def check_in_combat_the_tiles_wear_the_missing_look_and_only_the_alpha_is_written():
+def check_in_combat_the_tiles_wear_the_out_of_combat_missing_look_and_only_the_alpha_is_written():
     lua = engine_world()
     shield_aura_up(lua)
     assert (tile(lua, IMBUE)["text"], tile(lua, SHIELD)["text"]) == ("30m", "3")
@@ -2366,8 +2367,14 @@ def check_in_combat_the_tiles_wear_the_missing_look_and_only_the_alpha_is_writte
     for i, word in ((IMBUE, "IMBUE"), (SHIELD, "SHIELD")):
         t, ic = tile(lua, i), icon(lua, i)
         assert t["text"] == word and ic["plate"], f"tile {i} wears the missing word in combat: {t['text']!r}"
-        close(t["text_color"], tuple(float(x) for x in (L.warn.text[1], L.warn.text[2], L.warn.text[3])), "the red word")
-        assert t["dashes"] == [0.0] * 4 and t["line_a"] == 0, "no estimate dashes or underline in combat"
+        # the same look as the one out of combat (the 'warn' look): red ring, red word, red underline, dim icon
+        close(t["ring"], rgb(L.warn.ring), "the red ring")
+        assert abs(t["ring_a"] - float(L.warn.ringA)) < 1e-3, t
+        close(t["text_color"], rgb(L.warn.text), "the red word")
+        close(t["line"], rgb(L.warn.line), "the red underline")
+        assert abs(t["line_a"] - float(L.warn.lineA)) < 1e-3
+        assert t["dashes"] == [0.0] * 4, "no estimate dashes in combat"
+        assert t["glow_a"] == 0, "the red glow reaches outside the tile where nothing can cover it"
         assert ic["desat"] and all(abs(x - 0.45) < 1e-3 for x in ic["vertex"]), f"the dim missing icon: {ic}"
     for name, in_combat in ac_log(lua)[mark:]:
         assert name == "SetAlpha" and in_combat, f"{name} written in combat"
@@ -2393,77 +2400,65 @@ def point_writes(lua, i):
             end
         end
         wrap(b)
-        for _, r in ipairs({ b.icon, b.fsPlate, b.fsTextPlate, b.fsWordPlate, b.fsText, b.fsLine, b.fsChip.fill, b.fsChip.ring,
+        for _, r in ipairs({ b.icon, b.fsPlate, b.fsTextPlate, b.fsText, b.fsLine, b.fsChip.fill, b.fsChip.ring,
                              b.fsChip.glow, b.fsChip.code }) do wrap(r) end
         for _, d in ipairs(b.fsDashes) do wrap(d) end
     """ % i)
 
 
-def check_in_combat_the_missing_look_is_the_base_under_the_slot_and_stays_inside_what_it_covers(scale):
+BG_RGB = (13 / 255, 6 / 255, 32 / 255)
+
+
+def check_the_slot_covers_the_whole_tile_with_the_lit_look_and_nothing_moves_in_combat(scale):
     lua = engine_world(scale=scale)
     shield_aura_up(lua)
     c = acs(lua)[0]
     L = bt(lua).Looks()
-    out_plate = {i: tile(lua, i)["plate"] for i in (IMBUE, SHIELD)}
-    set_combat(lua, True)
+    slots = {IMBUE: [c._ench[1], c._ench[2]], SHIELD: [c._slots["shield"].frame]}
+    ring_a = float(L.on.ringA)
+    lit_ring = tuple(float(L.on.ring[k]) * ring_a + BG_RGB[k - 1] * (1 - ring_a) for k in (1, 2, 3))
+    for i in (IMBUE, SHIELD):
+        b = btn(lua, i)
+        assert len(parts_of(lua, i)) == len(slots[i])
+        for part in parts_of(lua, i):
+            # the cover: a plate and a ring of the tile's own shape, seated on the TILE, opaque, children of the slot (so
+            # the engine's hide of the slot hides them), the plate under the lit icon and the ring over it
+            for name, layer in (("coverPlate", "BACKGROUND"), ("coverRing", "OVERLAY")):
+                cv = getattr(part, name)
+                assert cv is not None, f"tile {i}: no {name}"
+                assert same(lua, cv._points[1].rel, b) and same(lua, cv._points[2].rel, b), f"{name} is not seated on the tile"
+                assert float(cv._vertex[4]) == 1.0, f"{name} is not opaque"
+                assert str(cv._layer) == layer, f"{name} is on {cv._layer}"
+                assert same(lua, cv._parent, part.slot), f"{name} is not a child of the slot"
+            assert str(part.coverPlate._texture) == str(b.fsPlate._texture)
+            assert str(part.coverRing._texture) == str(b.fsSkin.border.ring._texture)
+            close(rgb(part.coverRing._vertex), lit_ring, "the lit ring colour")
+            close(rgb(part.coverPlate._vertex), BG_RGB, "the plate colour")
     for i in (IMBUE, SHIELD):
         point_writes(lua, i)
+    set_combat(lua, True)
     fire(lua, "PLAYER_REGEN_DISABLED")
     tick(lua, 5)
-    slots = {IMBUE: [c._ench[1], c._ench[2]], SHIELD: [c._slots["shield"].frame]}
 
     def snapshot():
         return {i: (tile(lua, i), icon(lua, i)) for i in (IMBUE, SHIELD)}
 
     full = snapshot()
-    # the buff drops mid fight: the engine empties every slot; the tile is not told and not repainted
+    # the buff drops mid fight: the engine hides every slot (the cover goes with it); the tile is not told
     for i in (IMBUE, SHIELD):
         for sl in slots[i]:
             sl.Hide(sl)
     update(lua)
     tick(lua, 5)
     empty = snapshot()
-    # recast in combat: the slots fill again
     for i in (IMBUE, SHIELD):
         for sl in slots[i]:
             sl.Show(sl)
     update(lua)
     tick(lua, 5)
     refilled = snapshot()
-    assert empty == full == refilled, "the base is the missing look whatever the slot does"
+    assert empty == full == refilled, "the tile underneath is the missing look whatever the slot does"
     assert int(g(lua).__pw) == 0, "an anchor was written on a tile region in combat"
-    for i in (IMBUE, SHIELD):
-        t, ic = empty[i]
-        # everything the slot cannot cover stays neutral: the ring and glow, the button plate, the underline
-        close(t["ring"], tuple(float(x) for x in (L.hollow.ring[1], L.hollow.ring[2], L.hollow.ring[3])), "neutral ring")
-        assert abs(t["ring_a"] - 0.6) < 1e-3 and t["glow_a"] == 0 and t["line_a"] == 0, t
-        close(t["plate"], tuple(float(x) for x in (L.hollow.plate[1], L.hollow.plate[2], L.hollow.plate[3])), "neutral button plate")
-        assert abs(t["plate_a"] - float(L.hollow.plate[4])) < 1e-3
-        assert float(btn(lua, i).fsChip.glow._vertex[4]) == 0, "no chip glow spills out of the icon rect"
-        b = btn(lua, i)
-        room = float(b.icon.GetRight(b.icon)) - float(b.icon.GetLeft(b.icon))
-        word = t["text"]
-        # the band's anchors keep it inside the icon rect at every scale, shown or not
-        wp, ic_ = b.fsWordPlate, b.icon
-        assert wp.GetLeft(wp) >= ic_.GetLeft(ic_) - 1e-6 and wp.GetRight(wp) <= ic_.GetRight(ic_) + 1e-6
-        assert wp.GetTop(wp) <= ic_.GetTop(ic_) + 1e-6 and wp.GetBottom(wp) >= ic_.GetBottom(ic_) - 1e-6, \
-            f"the band leaves the icon rect vertically at {scale}"
-        assert wp.GetTop(wp) > wp.GetBottom(wp), "the band collapsed"
-        if word:
-            # the red word is inside the icon rect, on a band that is anchored to the icon itself
-            glyphs = len(word) * 0.5615 * t["px"]
-            assert glyphs <= room + 1e-6, f"{word} ({glyphs:.2f}) spills past the icon rect ({room:.2f}) at {scale}"
-            assert ic["band"] and not shown(b.fsTextPlate), "the band plate stands behind the word"
-            pts = b.fsWordPlate._points
-            assert same(lua, pts[1].rel, b.icon) and same(lua, pts[2].rel, b.icon), "the band is anchored to the icon rect"
-        else:
-            # not even the smallest size fits the rect: no word, no plate, only the dim icon says it
-            assert word == "" and not ic["plate"], f"{i}: a plate without a word at {scale}"
-            assert len(("IMBUE", "SHIELD")[i - 1]) * 0.5615 * 6 > room, f"{i}: the word was dropped though it fits at {scale}"
-        assert ic["desat"] and all(abs(x - 0.45) < 1e-3 for x in ic["vertex"])
-        # the slot's lit icon is on that rect
-        for sl in slots[i]:
-            assert same(lua, sl._points[1].rel, b.icon)
     face = float(btn(lua, SHIELD).fsFace._level)
     assert float(c._level) > float(g(lua).FSBuffTab._level) and float(c._level) > face, "the container is above every tile frame"
     for i in (IMBUE, SHIELD):
@@ -2471,14 +2466,57 @@ def check_in_combat_the_missing_look_is_the_base_under_the_slot_and_stays_inside
     leave_combat(lua)
     tick(lua, 5)
     for i in (IMBUE, SHIELD):
-        assert tile(lua, i)["plate"] == out_plate[i], "the out of combat plate colour is back"
-        assert shown(btn(lua, i).fsTextPlate) and not shown(btn(lua, i).fsWordPlate), "the padded plate is back"
+        assert shown(btn(lua, i).fsTextPlate)
 
 
-def check_the_missing_word_is_fitted_to_the_icon_rect_at_every_ui_scale():
-    # the icon inset is 3 screen px whatever the scale, so the room shrinks faster than the tile at small scales
-    for scale in (0.5333, 0.64, 0.70, 0.90, 1.0, 1.25):
-        check_in_combat_the_missing_look_is_the_base_under_the_slot_and_stays_inside_what_it_covers(scale)
+def check_the_imbue_tile_goes_live_in_combat_only_after_a_slot_was_seen_shown_with_an_imbue_on():
+    lua = engine_world()
+    shield_aura_up(lua)
+    c = acs(lua)[0]
+    hands = [c._ench[1], c._ench[2]]
+    # this client's item enchantment slots never show for the imbue that is on: the tile keeps its frozen estimate
+    for sl in hands:
+        sl.Hide(sl)
+    run(lua, "FSBuffTabButton1.fsEngine.seen = nil")          # as if no pass had seen them shown yet
+    tick(lua, 2)
+    assert btn(lua, IMBUE).fsEngine.seen is not True
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    update(lua)
+    assert not bt(lua).EngineLive("imbue") and bt(lua).EngineLive("shield"), "only the shield tile is live"
+    assert tile(lua, IMBUE)["text"] in ("30m", "29m") and not icon(lua, IMBUE)["desat"], "the imbue tile keeps its counting-down estimate"
+    assert tile(lua, SHIELD)["text"] == "SHIELD", "the shield tile is on the engine path"
+    leave_combat(lua)
+    # an imbue on and a slot seen shown: the tile is live from the next fight
+    for sl in hands:
+        sl.Show(sl)
+    tick(lua, 2)
+    assert btn(lua, IMBUE).fsEngine.seen is True
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    update(lua)
+    assert bt(lua).EngineLive("imbue") and tile(lua, IMBUE)["text"] == "IMBUE"
+    # an imbue that is not on (a missing look) proves nothing, however the slot reads
+    lua = engine_world(tips={16: ["Heavy Axe"]})
+    tick(lua, 2)
+    assert btn(lua, IMBUE).fsEngine.seen is not True
+
+
+def check_the_state_line_reports_each_imbue_slot_for_the_live_test():
+    lua = engine_world()
+    shield_aura_up(lua)
+    tick(lua, 2)
+    g(lua).FS.BuffTab.SaveStatus()
+    line = str(g(lua).ForeverSTUwaveDB.buffTabEngine.line)
+    assert "imbue declared=2 parts=2" in line and "seen=true" in line, line
+    assert line.count("shown=true") == 3 and "lit=true" in line, line
+    assert re.search(r"slot1 shown=true \d+x\d+ lit=true; slot2 shown=true", line), line
+    assert "shield declared=1" in line and "slot1 shown=" in line.split("shield declared=1")[1], line
+    for sl in (acs(lua)[0]._ench[1], acs(lua)[0]._ench[2]):
+        sl.Hide(sl)
+    tick(lua, 2)
+    g(lua).FS.BuffTab.SaveStatus()
+    assert str(g(lua).ForeverSTUwaveDB.buffTabEngine.line).count("shown=false") >= 2, "the line did not follow the slots"
 
 
 def check_the_missing_word_in_combat_keeps_its_out_of_combat_size():
@@ -3212,8 +3250,9 @@ CHECKS = [
     check_the_combat_container_is_built_once_out_of_combat_with_both_slots,
     check_the_shield_slot_seats_on_the_icon_and_draws_icon_time_and_count,
     check_the_imbue_slots_carry_our_lit_icon_and_the_engine_time_on_both_hands,
-    check_in_combat_the_tiles_wear_the_missing_look_and_only_the_alpha_is_written,
-    check_the_missing_word_is_fitted_to_the_icon_rect_at_every_ui_scale,
+    check_in_combat_the_tiles_wear_the_out_of_combat_missing_look_and_only_the_alpha_is_written,
+    check_the_imbue_tile_goes_live_in_combat_only_after_a_slot_was_seen_shown_with_an_imbue_on,
+    check_the_state_line_reports_each_imbue_slot_for_the_live_test,
     check_the_missing_word_in_combat_keeps_its_out_of_combat_size,
     check_regen_arms_a_container_that_reads_back_off_and_a_combat_login_builds_at_regen,
     check_nothing_is_built_in_combat_whoever_asks,
@@ -3245,7 +3284,7 @@ CHECKS = [
     check_a_rescale_reseats_every_engine_text_out_of_combat_only,
 ]
 SCALED_CHECKS = [
-    check_in_combat_the_missing_look_is_the_base_under_the_slot_and_stays_inside_what_it_covers,
+    check_the_slot_covers_the_whole_tile_with_the_lit_look_and_nothing_moves_in_combat,
     check_the_shoulder_is_the_two_by_one_block_at_316_and_the_buttons_sit_inside_it,
     check_every_tile_string_fits_inside_its_tile_in_every_state,
 ]

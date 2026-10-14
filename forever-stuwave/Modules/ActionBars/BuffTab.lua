@@ -70,7 +70,6 @@ local BT = {
     MISSING = { imbue = "IMBUE", shield = "SHIELD" },   -- the word of the missing look (ShamanBuffs says the same out of combat)
     TEXT_INSET = 3,                 -- design px kept clear on each side of the time or word (the cut border's chamfer)
     ADVANCE = 0.5615,               -- Mononoki Bold's advance per em (every glyph; the font is monospaced)
-    PLATE_H = 12,                   -- design px, the height of the band plate behind the missing word in combat
     TEXT_Y = 27,                    -- the time line's centre, design px below the tile top
     TICK = 1,                       -- seconds between repaints (the clock text)
     CHIP_GLOW_A = 0.35,             -- the chip's glow alpha while a chip glows (the looks table says which do)
@@ -87,7 +86,7 @@ local BT = {
         { key = "shield", title = "Lightning Shield", label = "Lightning Shield", unlock = 8 },
     },
     ATTRS = { "type", "spell" },
-    EVENTS = { "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD" },
+    EVENTS = { "SPELLS_CHANGED", "LEARNED_SPELL_IN_SKILL_LINE", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD" },
     -- state-only events: a repaint of the usability tint, legal in combat
     USABLE_EVENTS = { "SPELL_UPDATE_USABLE", "ACTIONBAR_UPDATE_USABLE", "PLAYER_REGEN_DISABLED" },
     host = nil,
@@ -161,6 +160,10 @@ EngineState.allProven = AllProven
 local function EngineLive(button)
     local eng = button.fsEngine
     if not (eng and eng.declared > 0 and AllProven() and EngineState.armed and InCombatLockdown()) then return false end
+    -- an item enchantment tile is live only once a slot was SEEN shown out of combat while the plain read said an imbue
+    -- is on (ProveEngine): until then the engine is not known to draw this client's imbues at all, and the tile keeps
+    -- its frozen estimate, which counts down from the last read, rather than showing a missing look over a live buff
+    if eng.item and not eng.seen then return false end
     return Setting(BT.SETTINGS.combatstate)
 end
 function BuffTab.EngineLive(key)
@@ -212,14 +215,10 @@ local function BuildLooks()
             icon = 0.6, desat = true },
     }
     looks.cyan = { ring = T.COLOR_POWER, ringA = 1, glowA = 0.6 }
-    -- ENGINE MODE under the slot (PaintButton): the MISSING look on everything the slot's lit icon covers (the icon
-    -- dim and desaturated, the red word on its plate, the chip), and the NEUTRAL hollow look on everything it cannot
-    -- (the button plate and the border ring and glow sit in the band outside the icon rect, and the underline is
-    -- below it). The slot draws over the red while the buff is up and leaves it showing when the buff drops.
-    looks.engine = setmetatable({
-        ring = looks.hollow.ring, ringA = looks.hollow.ringA, glowA = 0, plate = plain, plateA = plain[4],
-        chipGlow = false, lineA = 0,
-    }, { __index = looks.warn })
+    -- ENGINE MODE (PaintButton): exactly the MISSING look, except the red glow. The slot of a buff that is up covers
+    -- the whole tile (an opaque plate, the lit icon and a neutral ring, see CoverSlot); the glow is an ADD blend that
+    -- reaches outside the tile where nothing can cover it, so it stays off.
+    looks.engine = setmetatable({ glowA = 0 }, { __index = looks.warn })
     return looks
 end
 BuffTab.Looks = BuildLooks
@@ -438,10 +437,6 @@ local function StyleButton(button, size, scale)
         button.fsTextPlate:SetPoint("TOPLEFT", button.fsText, "TOPLEFT", -2, 0)
         button.fsTextPlate:SetPoint("BOTTOMRIGHT", button.fsText, "BOTTOMRIGHT", 2, 0)
         button.fsTextPlate:Hide()
-        -- the engine mode plate: a band across the icon rect (it can never leave the rect the slot covers)
-        button.fsWordPlate = face:CreateTexture(nil, "ARTWORK", nil, 7)
-        button.fsWordPlate:SetColorTexture(LABEL_PLATE[1], LABEL_PLATE[2], LABEL_PLATE[3], LABEL_PLATE[4])
-        button.fsWordPlate:Hide()
         button.fsLine = face:CreateTexture(nil, "OVERLAY", nil, 2)
         button.fsLine:SetColorTexture(1, 1, 1, 1)
         button.fsDashes = {}
@@ -468,14 +463,6 @@ local function StyleButton(button, size, scale)
     chip.code:SetPoint("CENTER", chip.fill, "CENTER", 0, -0.5 * s)
     button.fsText:ClearAllPoints()
     button.fsText:SetPoint("CENTER", button, "TOP", 0, -BT.TEXT_Y * s)
-    -- the band: all four edges inside the icon rect (left and right on the icon, top and bottom the time line's band
-    -- clamped to the icon's), so it can never leave the rect the slot covers whatever the scale
-    local inset = FH.CutIconInset(button)
-    local top = math.max(inset, (BT.TEXT_Y - BT.PLATE_H / 2) * s)
-    local bottom = math.min(BT.BTN * s - inset, (BT.TEXT_Y + BT.PLATE_H / 2) * s)
-    button.fsWordPlate:ClearAllPoints()
-    button.fsWordPlate:SetPoint("TOPLEFT", button.icon, "TOPLEFT", 0, -(top - inset))
-    button.fsWordPlate:SetPoint("BOTTOMRIGHT", button.icon, "BOTTOMRIGHT", 0, (BT.BTN * s - inset) - bottom)
     button.fsLine:ClearAllPoints()
     button.fsLine:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", 5 * s, 3 * s)
     button.fsLine:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -5 * s, 3 * s)
@@ -535,20 +522,12 @@ end
 -- The font size for `text`: `px`, or smaller so the string stays inside the tile with TEXT_INSET design px clear on
 -- each side. The tile shrinks with the UI scale and fonts do not, so the longest words (SHIELD) are fitted to the
 -- current scale; whole and half pixels only (rounded down), never below BT.MIN_PX, and a rescale repaints, which refits.
---
--- With `room` (screen px, the icon rect an engine slot covers) the string must fit that width instead: nil comes back
--- when even BT.MIN_PX would spill, and the caller leaves the string out.
-local function FitPx(text, px, room)
+local function FitPx(text, px)
     local n = type(text) == "string" and #text or 0
     if n == 0 then return px end
-    local fit = math.floor((room or (BT.BTN - 2 * BT.TEXT_INSET) * Scale()) / (n * BT.ADVANCE) * 2) / 2
-    if room and fit < BT.MIN_PX then return nil end
+    local room = (BT.BTN - 2 * BT.TEXT_INSET) * Scale()
+    local fit = math.floor(room / (n * BT.ADVANCE) * 2) / 2
     return math.max(math.min(fit, px), BT.MIN_PX)
-end
-
--- The width of the icon rect an engine slot is seated on: the tile less the icon's unscaled inset on each side.
-local function IconRoom(button)
-    return BT.BTN * Scale() - 2 * FH.CutIconInset(button)
 end
 
 -- Paints one tile from its view. Writes only when something changed.
@@ -580,13 +559,6 @@ local function PaintButton(button, v)
     local tint = UsabilityColor(button.fsUsable)
     local look = engineMode and L.engine or (L[v.mode] or L.hollow)
     local text = engineMode and BT.MISSING[button.fsKey] or v.text
-    -- the word fitted to the icon rect the slot covers; a word that cannot fit there at BT.MIN_PX is left out (the
-    -- dim icon says it), so no red text ever sits outside the rect. Out of combat the word fits the tile as before.
-    local size
-    if engineMode then
-        size = FitPx(text, (button.fsKey == "shield") and BT.WORD_PX or BT.TEXT_PX, IconRoom(button))
-        if not size then text = nil end
-    end
     local skin = button.fsSkin
     if skin and skin.border and skin.border.ring then
         local r = hover and L.cyan.ring or look.ring
@@ -615,21 +587,14 @@ local function PaintButton(button, v)
         icon:SetDesaturated(look.desat and true or false)
         icon:Show()
         chip.fill:Hide(); chip.ring:Hide(); chip.glow:Hide(); chip.code:Hide()
-        -- two plates, each anchored once out of combat (an anchor is not written on a secure tile's child in combat):
-        -- the padded one hugs the glyphs, the band one spans the icon rect the slot covers and shows in engine mode
-        local hasText = text ~= nil and text ~= ""
-        button.fsTextPlate:SetShown(hasText and not engineMode)
-        button.fsWordPlate:SetShown(hasText and engineMode)
+        button.fsTextPlate:SetShown(text ~= nil and text ~= "")
     else
         icon:Hide()
         chip.fill:Show(); chip.ring:Show(); chip.glow:Show(); chip.code:Show()
         button.fsTextPlate:Hide()
-        button.fsWordPlate:Hide()
     end
-    if not engineMode then
-        size = FitPx(text, (v.mode == "warn" and button.fsKey == "shield") and BT.WORD_PX or BT.TEXT_PX)
-    end
-    size = size or BT.MIN_PX
+    local missing = engineMode or v.mode == "warn"
+    local size = FitPx(text, (missing and button.fsKey == "shield") and BT.WORD_PX or BT.TEXT_PX)
     if button.fsTextPx ~= size then
         button.fsTextPx = size
         FS.Theme.ApplyMono(button.fsText, size, look.text)
@@ -765,6 +730,31 @@ local function NewPlate(slot, text)
     return plate
 end
 
+-- The lit look of the WHOLE tile, drawn by the slot frame (a child of the slot, so the engine shows and hides it with
+-- the slot: SetShown(aura ~= nil), Blizzard_CustomAuraButton ApplyVisibility). Under the tile's missing look (red ring,
+-- plate, dim icon, red word) a slot with an aura draws: an opaque plate of the tile's shape, the lit icon on top of it
+-- (the aura's own), and an opaque ring of the lit colour over the tile's own ring. Both sit on the TILE, not the slot, so
+-- they reach the tile's edge. Built and seated out of combat (initializeFrame); nothing is anchored or read in combat.
+-- A tile with no readable plate or ring texture simply gets no cover on that part.
+local function CoverSlot(tile, part)
+    local slot, skin = part.slot, tile.fsSkin
+    local L = BuildLooks()
+    local margin = skin and skin.chamfer
+    local function Layer(source, layer, sublevel, color)
+        local path = source and source:GetTexture()
+        if path == nil then return nil end
+        local tex = slot:CreateTexture(nil, layer, nil, sublevel)
+        tex:SetTexture(path)
+        FS.Theme.ApplyNineSlice(tex, margin)
+        tex:SetPoint("TOPLEFT", tile, "TOPLEFT", 0, 0)
+        tex:SetPoint("BOTTOMRIGHT", tile, "BOTTOMRIGHT", 0, 0)
+        tex:SetVertexColor(color[1], color[2], color[3], 1)
+        return tex
+    end
+    part.coverPlate = Layer(tile.fsPlate, "BACKGROUND", -8, BG)
+    part.coverRing = Layer(skin and skin.border and skin.border.ring, "OVERLAY", 7, Mix(BG, L.on.ring, L.on.ringA))
+end
+
 -- The slot's frame, built by the engine (at AddAuraSlot, or later, when it first needs one): no mouse (the secure tile
 -- below keeps clicks and the tooltip), seated on the tile's icon rect, the lit icon and the engine's texts. Each step on
 -- its own, so a missing method stops nothing. It registers its parts on the tile, one entry per frame.
@@ -780,6 +770,7 @@ local function InitSlot(tile, ownIcon)
         eng.bad = true                               -- UNPROVEN until a proof pass out of combat has read it
         tile.fsSig = nil
         pcall(function() slot:SetAllPoints(tile.icon) end)
+        pcall(CoverSlot, tile, part)
         pcall(function()
             local lit = slot:CreateTexture(nil, "ARTWORK")
             lit:SetAllPoints(slot)
@@ -852,6 +843,7 @@ local function AddImbueSlots(container, tile, s)
         return
     end
     local eng = NewEngineTile(tile)
+    eng.item = true
     local ok, err = pcall(function()
         local layout = { elementSpacing = 0, lineSpacing = 0, groupSpacing = 0, groupLineSpacing = 0,
             elementWidth = BT.BTN * s, elementHeight = BT.BTN * s }
@@ -958,6 +950,18 @@ local function GuardMouse(slot)
     end
 end
 
+-- What a slot frame shows right now, for the tile's live test and the state line (out of combat only, plain values
+-- only): shownCode 0 unknown, 1 hidden, 2 shown; w and h its size in whole px (0 unknown).
+local function ReadPart(part)
+    local slot = part.slot
+    local ok, shown = pcall(slot.IsShown, slot)
+    part.shownCode = (ok and not IsSecret(shown) and type(shown) == "boolean") and (shown and 2 or 1) or 0
+    local okW, w = pcall(slot.GetWidth, slot)
+    local okH, h = pcall(slot.GetHeight, slot)
+    part.w = (okW and type(w) == "number" and not IsSecret(w)) and math.floor(w + 0.5) or 0
+    part.h = (okH and type(h) == "number" and not IsSecret(h)) and math.floor(h + 0.5) or 0
+end
+
 -- The PROOF pass, out of combat only (SeatEngine, and the tick every second): every slot frame of every tile read against
 -- the tile's icon BEFORE anything is written. A slot found off the icon is put back (its tile is not live until the next
 -- pass reads it right); one that cannot be read is unproven, except that a HIDDEN slot (no aura to draw) with no readable
@@ -969,6 +973,7 @@ local function ProveEngine()
         if eng then
             local bad = false
             for _, part in ipairs(eng.parts) do
+                ReadPart(part)
                 local placed = Placed(part.slot, button.icon)
                 if placed == nil and part.ok and Hidden(part.slot) then
                     part.nils = 0                              -- keeps its last proof
@@ -994,6 +999,17 @@ local function ProveEngine()
             if eng.bad ~= bad then
                 eng.bad = bad
                 button.fsSig = nil
+            end
+            if eng.item and not eng.seen then
+                local v = ViewOf(button)
+                if v and (v.mode == "on" or v.mode == "exp") then
+                    for _, part in ipairs(eng.parts) do
+                        if part.shownCode == 2 then
+                            eng.seen = true
+                            button.fsSig = nil
+                        end
+                    end
+                end
             end
         end
     end
@@ -1103,7 +1119,11 @@ local function WriteStatus()
                 if part.ok then ok = ok + 1 end
                 if (part.nils or 0) > nils then nils = part.nils end
             end
-            sig = (sig * 31 + #eng.parts * 7 + ok * 3 + (eng.bad and 1 or 0) + nils * 13) % 2147483647
+            sig = (sig * 31 + #eng.parts * 7 + ok * 3 + (eng.bad and 1 or 0) + nils * 13 + (eng.seen and 17 or 0)) % 2147483647
+            for _, part in ipairs(eng.parts) do
+                sig = (sig * 31 + (part.shownCode or 0) * 5 + (part.w or 0) * 3 + (part.h or 0)
+                    + (part.lit and part.lit:GetTexture() ~= nil and 11 or 0)) % 2147483647
+            end
         end
     end
     -- the spell icon values with no baked art (SpellArt.lua) ride along in the same table
@@ -1131,8 +1151,16 @@ local function WriteStatus()
             end
             saved.tiles[button.fsKey] = { declared = eng.declared, parts = #eng.parts, ok = ok, nils = nils,
                 bad = eng.bad and true or false }
-            text[#text + 1] = string.format("%s declared=%d parts=%d ok=%d nils=%d bad=%s", button.fsKey, eng.declared,
-                #eng.parts, ok, nils, tostring(eng.bad and true or false))
+            local detail = {}
+            for n, part in ipairs(eng.parts) do
+                local code = part.shownCode or 0
+                detail[#detail + 1] = string.format("slot%d shown=%s %dx%d lit=%s", n,
+                    code == 2 and "true" or (code == 1 and "false" or "?"), part.w or 0, part.h or 0,
+                    part.lit and tostring(part.lit:GetTexture() ~= nil) or "n/a")
+            end
+            text[#text + 1] = string.format("%s declared=%d parts=%d ok=%d nils=%d bad=%s%s%s", button.fsKey, eng.declared,
+                #eng.parts, ok, nils, tostring(eng.bad and true or false), eng.item and (" seen=" .. tostring(eng.seen == true)) or "",
+                #detail > 0 and (" [" .. table.concat(detail, "; ") .. "]") or "")
         end
     end
     saved.line = table.concat(text, " | ")
@@ -1514,10 +1542,10 @@ local function Apply()
     FS.ShamanBuffs.OnChange(Refresh)
 
     local events = CreateFrame("Frame")
-    for _, event in ipairs(BT.EVENTS) do pcall(events.RegisterEvent, events, event) end
+    FS.FrameHelpers.RegisterEvents(events, BT.EVENTS)
     events:RegisterEvent("PLAYER_REGEN_ENABLED")
     events:RegisterEvent("UPDATE_BINDINGS")
-    for _, event in ipairs(BT.USABLE_EVENTS) do pcall(events.RegisterEvent, events, event) end
+    FS.FrameHelpers.RegisterEvents(events, BT.USABLE_EVENTS)
     events:SetScript("OnEvent", OnEvent)
 
     local ticker = CreateFrame("Frame")
