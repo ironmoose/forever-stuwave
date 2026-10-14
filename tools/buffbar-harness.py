@@ -2857,8 +2857,8 @@ def check_the_state_line_for_the_live_test_is_saved_and_quiet_ticks_allocate_not
     lua = engine_world()
     tick(lua, 1.1)
     line = str(g(lua).ForeverSTUwaveDB.buffTabEngine.line)
-    assert "armed=true" in line and "alpha=0" in line and "rebuilds=0" in line and "gaveUp=false" in line, line
-    assert "shield declared=1 parts=1 ok=1 bad=false" in line and "imbue declared=2 parts=2 ok=2 bad=false" in line, line
+    assert "setting=on armed=true" in line and "alpha=0" in line and "rebuilds=0" in line and "gaveUp=false" in line, line
+    assert "shield declared=1 parts=1 ok=1 nils=0 bad=false" in line and "imbue declared=2 parts=2 ok=2 nils=0 bad=false" in line, line
     set_combat(lua, True)
     fire(lua, "PLAYER_REGEN_DISABLED")
     update(lua)
@@ -2867,7 +2867,7 @@ def check_the_state_line_for_the_live_test_is_saved_and_quiet_ticks_allocate_not
     run(lua, "__acs[1]._ench[2]._forceLeft, __acs[1]._ench[2]._forceTop = 7, 9")
     tick(lua, 1.1)
     line = str(g(lua).ForeverSTUwaveDB.buffTabEngine.line)
-    assert "imbue declared=2 parts=2 ok=1 bad=true" in line, line
+    assert "imbue declared=2 parts=2 ok=1 nils=0 bad=true" in line, line
     for word in ("bot", "automat", "macro", "cheat", "hack", "probe", "monitor"):
         assert word not in line.lower()
     measure = """
@@ -2891,6 +2891,36 @@ def check_the_state_line_for_the_live_test_is_saved_and_quiet_ticks_allocate_not
         grew[name] = float(g(world_).__grew)
     # the rest is the mock's own tooltip and aura reads; the proof pass and the state line add nothing to it
     assert grew["engine"] <= grew["plain"] * 1.1 + 2000, f"400 quiet ticks: {grew}"
+
+
+def check_the_state_line_tells_the_setting_and_unreadable_from_misplaced_and_a_refusing_db_never_throws():
+    lua = engine_world()
+    tick(lua, 1.1)
+    g(lua).FS.Config.Set("buffs.combatstate", False)
+    update(lua)
+    assert "setting=off" in str(g(lua).ForeverSTUwaveDB.buffTabEngine.line)
+    g(lua).FS.Config.Set("buffs.combatstate", True)
+    update(lua)
+    assert "setting=on" in str(g(lua).ForeverSTUwaveDB.buffTabEngine.line)
+    run(lua, "__acs[1]._slots.shield.frame._noRect = true\n__acs[1]._ench[2]._forceLeft, __acs[1]._ench[2]._forceTop = 7, 9")
+    for _ in range(3):
+        tick(lua, 1.1)
+    line = str(g(lua).ForeverSTUwaveDB.buffTabEngine.line)
+    assert "shield declared=1 parts=1 ok=0 nils=3 bad=true" in line, line      # unreadable: nils counts up
+    assert "imbue declared=2 parts=2 ok=1 nils=0 bad=true" in line, line       # misplaced: nils stays 0
+    # a database that refuses the write (read only) or is not a table: Paint and the tick do not throw
+    run(lua, """ForeverSTUwaveDB = setmetatable({}, { __newindex = function() error("read only") end,
+        __index = function() return nil end })""")
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    update(lua)
+    leave_combat(lua)
+    tick(lua, 1.1)
+    assert g(lua).FS.BuffTab.BT.warned.bufftab_status
+    run(lua, "ForeverSTUwaveDB = 5")
+    update(lua)
+    tick(lua, 1.1)
+    assert str(g(lua).type(g(lua).ForeverSTUwaveDB)) == "table"
 
 
 def check_a_throwing_engine_tick_does_not_break_the_tick():
@@ -3042,6 +3072,7 @@ CHECKS = [
     check_an_unreadable_slot_is_logged_after_five_ticks_and_a_hidden_proven_one_keeps_its_proof,
     check_a_slot_with_the_right_corner_but_the_wrong_size_is_not_on_the_icon,
     check_the_state_line_for_the_live_test_is_saved_and_quiet_ticks_allocate_nothing,
+    check_the_state_line_tells_the_setting_and_unreadable_from_misplaced_and_a_refusing_db_never_throws,
     check_a_throwing_engine_tick_does_not_break_the_tick,
     check_a_late_init_of_a_parked_containers_slot_is_not_attributed_to_the_new_container,
     check_the_chip_and_ring_chrome_numbers_are_pinned_by_value,

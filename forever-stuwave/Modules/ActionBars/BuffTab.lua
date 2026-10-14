@@ -1041,44 +1041,55 @@ BuffTab.EnsureEngine = EnsureEngine
 -- The state of the combat state for the live test, in ForeverSTUwaveDB.buffTabEngine (written to disk on /reload or
 -- logout): `line` is the one readable line, the rest are the same numbers. Rewritten in place only when something it
 -- shows changed (a numeric signature is compared first), so a quiet tick allocates nothing.
-local function SaveStatus()
-    local sig = (EngineState.armed and 1 or 0) + (EngineState.gaveUp and 2 or 0) + (EngineState.retryAt and 4 or 0)
+local function WriteStatus()
+    local on = Setting(BT.SETTINGS.combatstate) and true or false
+    local sig = (on and 1048576 or 0) + (EngineState.armed and 1 or 0) + (EngineState.gaveUp and 2 or 0) + (EngineState.retryAt and 4 or 0)
         + (InCombatLockdown() and 8 or 0) + (EngineState.alpha or 2) * 16 + EngineState.rebuilds * 128
         + EngineState.failures * 1024
     for _, button in ipairs(BT.list) do
         local eng = button.fsEngine
         if eng then
-            local ok = 0
+            local ok, nils = 0, 0
             for _, part in ipairs(eng.parts) do
                 if part.ok then ok = ok + 1 end
+                if (part.nils or 0) > nils then nils = part.nils end
             end
-            sig = (sig * 31 + #eng.parts * 7 + ok * 3 + (eng.bad and 1 or 0)) % 2147483647
+            sig = (sig * 31 + #eng.parts * 7 + ok * 3 + (eng.bad and 1 or 0) + nils * 13) % 2147483647
         end
     end
-    ForeverSTUwaveDB = ForeverSTUwaveDB or {}
+    if type(ForeverSTUwaveDB) ~= "table" then ForeverSTUwaveDB = {} end
     local saved = ForeverSTUwaveDB.buffTabEngine
     if saved and saved.sig == sig and saved == EngineState.status then return end
-    saved = { sig = sig, armed = EngineState.armed, alpha = EngineState.alpha, rebuilds = EngineState.rebuilds,
+    saved = { sig = sig, setting = on, armed = EngineState.armed, alpha = EngineState.alpha, rebuilds = EngineState.rebuilds,
         failures = EngineState.failures, retryAt = EngineState.retryAt, gaveUp = EngineState.gaveUp,
         combat = InCombatLockdown() and true or false, tiles = {} }
-    local text = { string.format("armed=%s alpha=%s combat=%s rebuilds=%d failures=%d retryAt=%s gaveUp=%s",
-        tostring(saved.armed), tostring(saved.alpha), tostring(saved.combat), saved.rebuilds, saved.failures,
+    local text = { string.format("setting=%s armed=%s alpha=%s combat=%s rebuilds=%d failures=%d retryAt=%s gaveUp=%s",
+        on and "on" or "off", tostring(saved.armed), tostring(saved.alpha), tostring(saved.combat), saved.rebuilds, saved.failures,
         tostring(saved.retryAt), tostring(saved.gaveUp)) }
     for _, button in ipairs(BT.list) do
         local eng = button.fsEngine
         if eng then
-            local ok = 0
+            local ok, nils = 0, 0
             for _, part in ipairs(eng.parts) do
                 if part.ok then ok = ok + 1 end
+                if (part.nils or 0) > nils then nils = part.nils end
             end
-            saved.tiles[button.fsKey] = { declared = eng.declared, parts = #eng.parts, ok = ok, bad = eng.bad and true or false }
-            text[#text + 1] = string.format("%s declared=%d parts=%d ok=%d bad=%s", button.fsKey, eng.declared,
-                #eng.parts, ok, tostring(eng.bad and true or false))
+            saved.tiles[button.fsKey] = { declared = eng.declared, parts = #eng.parts, ok = ok, nils = nils,
+                bad = eng.bad and true or false }
+            text[#text + 1] = string.format("%s declared=%d parts=%d ok=%d nils=%d bad=%s", button.fsKey, eng.declared,
+                #eng.parts, ok, nils, tostring(eng.bad and true or false))
         end
     end
     saved.line = table.concat(text, " | ")
     ForeverSTUwaveDB.buffTabEngine = saved
     EngineState.status = saved
+end
+
+-- Paint and the tick call this; a database that refuses the write must never make them throw.
+local function SaveStatus()
+    if not pcall(WriteStatus) then
+        WarnOnce("bufftab_status", "the buff tab state line could not be saved")
+    end
 end
 BuffTab.SaveStatus = SaveStatus
 
