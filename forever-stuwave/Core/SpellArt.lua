@@ -1,4 +1,4 @@
--- Spell icon style: the class tabs (Shaman buff and totem tabs, Paladin seals and auras, Warrior stances) wear either
+-- Spell icons: the class tabs (Shaman buff and totem tabs, Paladin seals and auras, Warrior stances) wear either
 -- the game's own icon ("stock") or the same icon restyled live in the STUwave colours ("gradient", the default), chosen
 -- by the setting `icons.spellstyle`.
 --
@@ -20,7 +20,7 @@ local SpellArt = {}
 FS.SpellArt = SpellArt
 
 SpellArt.SETTING = {
-    key = "icons.spellstyle", default = "gradient", label = "Spell icon style",
+    key = "icons.spellstyle", default = "gradient", label = "Spell icons",
     tip = "Gradient draws the spell icons on the class tabs (Shaman buffs and totems, Paladin seals and auras, "
         .. "Warrior stances) in the STUwave colours. Stock shows the game's own icons.",
 }

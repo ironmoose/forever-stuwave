@@ -196,6 +196,7 @@ def check_look() -> None:
     sa = lua.eval("FS.SpellArt")
     first_file, first_name = next(iter(table_items(lua.eval("FS.IconStyleData.spells.byFile")).items()))
     want = lua.eval("FS.IconStyleData.spells.look")[first_name]
+    check("setting.the_label_matches_the_micro_menus_wording", str(sa.SETTING.label) == "Spell icons", f"{sa.SETTING.label}")
     check("look.default_style_is_gradient", str(sa.Style()) == "gradient", f"{sa.Style()}")
     got = sa.Look(first_file)
     check("look.mapped_file_id_gives_its_look", got is not None and str(got.fam) == str(want.fam) and got.boost == want.boost, f"{got}")

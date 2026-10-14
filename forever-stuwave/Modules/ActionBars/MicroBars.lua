@@ -415,16 +415,21 @@ if FS.Config and FS.Config.RegisterDefault then
     FS.Config.RegisterDefault(STYLE_SETTING.key, STYLE_SETTING.default)
 end
 
--- "gradient" unless the setting says "stock"; any other value, or no Config, is the default.
-local function Style()
+-- "gradient" unless the setting says "stock"; any other value, or no Config, is the default. Read from Config when the
+-- file loads, at login and whenever the setting changes (below), never per paint.
+local function ReadStyle()
     local config = FS.Config
-    local ok, value = pcall(function() return config and config.Get and config.Get(STYLE_SETTING.key) end)
-    if ok and value == "stock" then return "stock" end
+    local value = config and config.Get and config.Get(STYLE_SETTING.key)
+    if value == "stock" then return "stock" end
     return "gradient"
 end
 
--- The fill under a narrow glyph wears what the glyph wears: the same tint and grey, and in the gradient style its own ADD
--- copy (the glyph's brightness lift must not stop at the glyph's rectangle or its edge would show).
+local style = ReadStyle()
+
+local function Style()
+    return style
+end
+
 local function PaintFill(key, tint, a, desat, gradient)
     local fill = key.fill
     if not fill then return end
@@ -1598,6 +1603,7 @@ events:SetScript("OnEvent", function(self, event, arg1)
         pcall(self.RegisterEvent, self, e)
     end
     InstallGlobalHooks()
+    style = ReadStyle()
     Apply()
 
     if FS.Layout.OnRescale then
@@ -1621,6 +1627,7 @@ end)
 -- A change of the style repaints every key: texture writes only, legal in combat.
 if FS.Config and FS.Config.OnChange then
     FS.Config.OnChange(STYLE_SETTING.key, function()
+        style = ReadStyle()
         for _, key in ipairs(keyList) do pcall(ApplyKeyState, key) end
     end)
 end

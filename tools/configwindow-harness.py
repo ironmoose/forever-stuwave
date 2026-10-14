@@ -1073,7 +1073,7 @@ local function withIconStyle(micro, spells)
             FS.MicroBars = style({ key = "icons.microstyle", default = "gradient", label = "Micro menu icons", tip = "Micro tip." })
         end
         if spells ~= nil then
-            FS.SpellArt = style({ key = "icons.spellstyle", default = "gradient", label = "Spell icon style", tip = "Spell tip." }, spells)
+            FS.SpellArt = style({ key = "icons.spellstyle", default = "gradient", label = "Spell icons", tip = "Spell tip." }, spells)
         end
     end
 end
@@ -1083,8 +1083,8 @@ function T.the_unit_frames_page_has_one_icon_style_group_with_both_dropdowns_and
     W.Open("unitframes")
     yes(headerY("ICON STYLE"), "an Icon style header")
     no(headerY("CLASS TAB ICONS"), "the old class tab header is gone")
-    yes(headerY("ICON STYLE") < yOf("Micro menu icons") and yOf("Micro menu icons") < yOf("Spell icon style"), "micro first, then spells, under the one header")
-    for label, tip in pairs({ ["Micro menu icons"] = "Micro tip.", ["Spell icon style"] = "Spell tip." }) do
+    yes(headerY("ICON STYLE") < yOf("Micro menu icons") and yOf("Micro menu icons") < yOf("Spell icons"), "micro first, then spells, under the one header")
+    for label, tip in pairs({ ["Micro menu icons"] = "Micro tip.", ["Spell icons"] = "Spell tip." }) do
         local r, found = row(label), nil
         for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
         eq(found, tip, label .. ": explained by a ? tip")
@@ -1107,10 +1107,10 @@ function T.the_icon_style_group_leaves_out_what_does_not_apply()
     local W = boot({ preWindow = withIconStyle(true, false) })
     W.Open("unitframes")
     yes(headerY("ICON STYLE") and row("Micro menu icons"), "the micro row stays for a class with no spell tiles")
-    no(row("Spell icon style"), "no spell row until a tab drew an icon")
+    no(row("Spell icons"), "no spell row until a tab drew an icon")
     W = boot({ preWindow = withIconStyle(false, true) })
     W.Open("unitframes")
-    yes(headerY("ICON STYLE") and row("Spell icon style"), "the spell row stays without the micro bar")
+    yes(headerY("ICON STYLE") and row("Spell icons"), "the spell row stays without the micro bar")
     no(row("Micro menu icons"), "a client without the micro bar has no micro row")
     W = boot({ preWindow = withIconStyle(false, nil) })
     W.Open("unitframes")

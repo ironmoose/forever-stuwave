@@ -1526,6 +1526,12 @@ def check_microstyle() -> None:
     check("microstyle.the_setting_is_icons_microstyle_with_a_gradient_default_and_a_tip",
           setting is not None and setting.key == "icons.microstyle" and setting.default == "gradient" and len(str(setting.tip)) > 20
           and w.get("FS.Config.Get")("icons.microstyle") == "gradient", f"{setting}")
+    check("microstyle.the_label_is_micro_menu_icons", str(setting.label) == "Micro menu icons", f"{setting.label}")
+    # the style is read from Config once at load and again on a change, never per paint
+    w.lua.execute("GETS = 0; REAL_GET = FS.Config.Get; FS.Config.Get = function(k) GETS = GETS + 1; return REAL_GET(k) end")
+    w.call("h_script", 1, "OnEnter"); w.call("h_script", 1, "OnLeave"); w.call("h_enabled", 2, False); w.call("h_enabled", 2, True)
+    check("microstyle.painting_never_reads_the_config", w.get("GETS") == 0, f"{w.get('GETS')} reads")
+    w.lua.execute("FS.Config.Get = REAL_GET")
     check("microstyle.the_styles_are_gradient_and_stock", [str(v) for _, v in mb.STYLES.items()] == ["gradient", "stock"])
     rt = runtime(w)
     check("microstyle.most_keys_draw_the_games_texture", len(rt) >= 10, f"{rt}")
@@ -1583,6 +1589,12 @@ def check_microstyle() -> None:
     si = infos(ws)
     check("microstyle.a_key_built_under_stock_paints_stock_at_login",
           all(not si[i - 1]["modShown"] and not si[i - 1]["desat"] for i in runtime(ws)), f"{[si[i-1]['modShown'] for i in runtime(ws)]}")
+    # a saved value the Config already holds when the player logs in (no change event fires for it) is read at login
+    wl = World(12)
+    wl.lua.execute('CONFIG["icons.microstyle"] = "stock"')
+    wl.login()
+    li = infos(wl)
+    check("microstyle.a_saved_stock_value_is_read_at_login", all(not li[i - 1]["modShown"] and not li[i - 1]["desat"] for i in runtime(wl)), f"{[li[i-1]['modShown'] for i in runtime(wl)]}")
     check("microstyle.no_degrade_logs", w.logs() == "" and ws.logs() == "", w.logs())
 
 
