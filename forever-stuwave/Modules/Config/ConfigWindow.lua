@@ -1316,6 +1316,15 @@ local function FiveSecondGroup(page)
     end
 end
 
+-- The Shaman buff tab's combat state switch (BuffTab.lua), for a Shaman that has the tab; its ? tip explains it.
+local function BuffTabGroup(page)
+    local tab = FS.BuffTab
+    if not (tab and tab.SETTINGS and tab.Applies and tab.Applies()) then return end
+    UI.Header(page, "Shaman buff tab")
+    local def = tab.SETTINGS.combatstate
+    UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip })
+end
+
 CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, build = function(page)
     UI.Header(page, "Player and target", "Hidden frames stay click-through and invisible.")
     UI.Toggle(page, { label = "Hide player frame", key = "unitFrames.hidePlayer" })
@@ -1324,6 +1333,7 @@ CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, buil
     UI.Toggle(page, { label = "Professions panel", key = "professions.shown" })
     UI.Toggle(page, { label = "Background grid", key = "actionbars.grid" })
     FiveSecondGroup(page)
+    BuffTabGroup(page)
 end })
 
 local PIECE_ORDER = { "you", "tgt", "dot", "shard", "prc", "buff", "party" }

@@ -1016,6 +1016,37 @@ function T.the_five_second_rule_group_is_left_out_for_other_classes_and_clients(
     no(row("Regen pulse"), "a client without the tab has no row")
 end
 
+-- ---- the Shaman buff tab's combat state switch on the Unit Frames page (BuffTab.lua's SETTINGS) ----
+
+local function withBuffTab(applies)
+    return function()
+        unitFramesDefaults()
+        local S = { combatstate = { key = "buffs.combatstate", default = true, label = "Buff tab combat state", tip = "Tip four." } }
+        for _, def in pairs(S) do FS.Config.RegisterDefault(def.key, def.default) end
+        FS.BuffTab = { SETTINGS = S, Applies = function() return applies end }
+    end
+end
+
+function T.the_unit_frames_page_has_the_buff_tab_combat_state_switch_for_a_shaman()
+    local W = boot({ preWindow = withBuffTab(true) })
+    W.Open("unitframes")
+    yes(headerY("SHAMAN BUFF TAB"), "a Shaman buff tab header")
+    yes(row("Buff tab combat state").control.fsChecked, "on by default")
+    press("Buff tab combat state")
+    eq(FS.Config.Get("buffs.combatstate"), false)
+    local r, found = row("Buff tab combat state"), nil
+    for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
+    eq(found, "Tip four.", "explained by a ? tip")
+    eq(#texts(r), 3, "label, state and the ? icon only, no helper line")
+    W = boot({ preWindow = withBuffTab(false) })
+    W.Open("unitframes")
+    no(row("Buff tab combat state"), "a character without the tab has no row")
+    no(headerY("SHAMAN BUFF TAB"), "and no header")
+    W = boot({ preWindow = unitFramesDefaults })
+    W.Open("unitframes")
+    no(row("Buff tab combat state"), "a client without the tab has no row")
+end
+
 function T.the_gunsight_page_has_the_three_target_and_player_groups_in_the_mockups_order()
     local W = boot({ preWindow = withTagsAndMyBuffs })
     W.Open("gunsight")

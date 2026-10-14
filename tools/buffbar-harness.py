@@ -155,12 +155,71 @@ end
 C_Spell.GetSpellTexture = function(id) if __iconMode == "legacy" then return nil end return iconOf(id) end
 GetSpellTexture = function(id) return iconOf(id) end
 
+-- Region geometry (y up): GetLeft / GetTop resolved from the anchors, so a check can ask where a slot really stands.
+-- UIParent's origin is its bottom left.
+do
+    local function anchorPos(box, point)
+        local l, t, w, h = box.l, box.t, box.w, box.h
+        local x = l + ((point:find("RIGHT") and w) or (point:find("LEFT") and 0) or w / 2)
+        local y = t - ((point:find("BOTTOM") and h) or (point:find("TOP") and 0) or h / 2)
+        return x, y
+    end
+    local function box(r)
+        if r == UIParent then return { l = 0, t = r._h, w = r._w, h = r._h } end
+        local pts = r._points or {}
+        if #pts == 0 then
+            local parent = r._parent or UIParent
+            local b = box(parent)
+            return { l = b.l, t = b.t, w = r._w, h = r._h }
+        end
+        local function at(p)
+            local rb = box(p.rel or r._parent or UIParent)
+            local x, y = anchorPos(rb, p.relPoint or p.point)
+            return x + (p.x or 0), y + (p.y or 0)
+        end
+        if #pts >= 2 then
+            local tl, br
+            for _, p in ipairs(pts) do
+                if p.point == "TOPLEFT" then tl = p elseif p.point == "BOTTOMRIGHT" then br = p end
+            end
+            if tl and br then
+                local x1, y1 = at(tl)
+                local x2, y2 = at(br)
+                return { l = x1, t = y1, w = x2 - x1, h = y1 - y2 }
+            end
+        end
+        local p = pts[1]
+        local x, y = at(p)
+        local w, h = r._w or 0, r._h or 0
+        local dx = (p.point:find("RIGHT") and w) or (p.point:find("LEFT") and 0) or w / 2
+        local dy = (p.point:find("BOTTOM") and h) or (p.point:find("TOP") and 0) or h / 2
+        return { l = x - dx, t = y + dy, w = w, h = h }
+    end
+    function __Region:GetLeft()
+        if __noRect then return nil end
+        if self._forceLeft then return self._forceLeft end
+        return box(self).l
+    end
+    function __Region:GetTop()
+        if __noRect then return nil end
+        if self._forceTop then return self._forceTop end
+        return box(self).t
+    end
+end
+
 -- The engine's AuraContainer, strict like combathud-harness's: only what the addon is allowed to call. __template: the
--- client has the template; __acThrows / __acSlotThrows ("shield" or "imbue") / __acEnchThrows: a failing build, slot or
--- item enchantment; __noEnchantApi: no AddItemEnchantment; __acRefuse: SetEnabled / Show / Hide are refused without a
--- raise. Every call that writes the container is logged in __acLog with the combat state it ran in.
-__acs, __acLog, __acAttempts = {}, {}, 0
+-- client has the template; __acThrows (true: always, a number: that many builds) / __acSlotThrows ("shield" or
+-- "imbue") / __acEnchThrows (true, "main" or "off") / __noEnchantApi: a failing build, slot or item enchantment;
+-- __acRefuse: SetEnabled / Show / Hide are refused without a raise. Every call that writes the container is logged in
+-- __acLog with the combat state it ran in. Slot frames are RESTRICTED in combat (SetPoint, SetAllPoints and every
+-- write to a region of theirs is refused and counted in __slotBlocked) except inside initializeFrame.
+-- __acLazy: initializeFrame runs later, from __acFlush(), as the engine does when it first needs a frame;
+-- __acOverride: "init" (the engine re-anchors a slot right after init; SetAllPoints fixes it) or "sticky" (the engine's
+-- layout owns the anchor and SetAllPoints cannot fix it); __acMouseOn: the engine turns the slot's mouse back on after
+-- init; __acPropagate: the slot has SetPropagateMouseClicks / Motion.
+__acs, __acLog, __acAttempts, __acPending, __slotBlocked = {}, {}, 0, {}, 0
 __template, __acThrows, __acSlotThrows, __acEnchThrows, __noEnchantApi, __acRefuse = false, false, nil, false, false, false
+__acLazy, __acOverride, __acMouseOn, __acPropagate, __noRect = false, nil, false, false, false
 C_XMLUtil = { GetTemplateInfo = function(name)
     if __template and name == "CustomAuraContainerTemplate" then return { name = name } end
 end }
@@ -175,21 +234,72 @@ do
             return fn(self, ...)
         end
     end
+    local function guarded(r, names)
+        for _, n in ipairs(names) do
+            local base = r[n]
+            r[n] = function(me, ...)
+                if __combat and (me._slotOwner or me)._slotRestricted then __slotBlocked = __slotBlocked + 1; return end
+                return base(me, ...)
+            end
+        end
+    end
     local function newSlot(parent)
         local slot = create("Frame", nil, parent)
         slot._order = {}
-        for _, n in ipairs({ "SetMouseMotionEnabled", "SetMouseClickEnabled", "SetHideTooltipInCombat" }) do
+        guarded(slot, { "SetPoint", "SetAllPoints", "ClearAllPoints" })
+        local mkTex, mkFs = slot.CreateTexture, slot.CreateFontString
+        local function inherit(region)
+            region._slotOwner = region._parent
+            guarded(region, { "SetTexture", "SetPoint", "ClearAllPoints", "SetAllPoints", "SetText", "SetVertexColor",
+                "SetColorTexture", "SetTexCoord" })
+            return region
+        end
+        slot.CreateTexture = function(me, ...) return inherit(mkTex(me, ...)) end
+        slot.CreateFontString = function(me, ...) return inherit(mkFs(me, ...)) end
+        for _, n in ipairs({ "SetMouseMotionEnabled", "SetMouseClickEnabled" }) do
             slot[n] = function(me, v) me._order[#me._order + 1] = n; me["_" .. n] = v end
+        end
+        slot.SetHideTooltipInCombat = function(me, v) me._order[#me._order + 1] = "SetHideTooltipInCombat" end
+        slot.IsMouseClickEnabled = function(me) return me._SetMouseClickEnabled ~= false end
+        slot.IsMouseMotionEnabled = function(me) return me._SetMouseMotionEnabled ~= false end
+        if __acPropagate then
+            slot.SetPropagateMouseClicks = function(me, v) me._propClicks = v end
+            slot.SetPropagateMouseMotion = function(me, v) me._propMotion = v end
         end
         slot.SetIcon = function(me, tex) me._order[#me._order + 1] = "SetIcon"; me._icon = tex end
         slot.SetDurationText = function(me, fs) me._order[#me._order + 1] = "SetDurationText"; me._durationText = fs end
         slot.SetApplicationCount = function(me, fs) me._order[#me._order + 1] = "SetApplicationCount"; me._countText = fs end
         return slot
     end
+    local function runInit(slot, opts)
+        slot._slotRestricted = false          -- initializeFrame runs before the frame turns restricted
+        opts.initializeFrame(slot)
+        slot._slotRestricted = true
+        if __acMouseOn then slot._SetMouseClickEnabled, slot._SetMouseMotionEnabled = true, true end
+        if __acOverride == "init" then
+            slot._points = {}
+            slot._SetPointDirect = true
+            slot._points[1] = { point = "TOPLEFT", rel = UIParent, relPoint = "BOTTOMLEFT", x = 7, y = 9 }
+        elseif __acOverride == "sticky" then
+            slot._forceLeft, slot._forceTop = 7, 9
+        end
+    end
+    function __acFlush()
+        local list = __acPending
+        __acPending = {}
+        for _, e in ipairs(list) do runInit(e.slot, e.opts) end
+    end
+    local function install(me, slot, opts)
+        if __acLazy then __acPending[#__acPending + 1] = { slot = slot, opts = opts } else runInit(slot, opts) end
+    end
     function CreateFrame(kind, name, parent, tmpl)
         if kind ~= "AuraContainer" then return create(kind, name, parent, tmpl) end
         __acAttempts = __acAttempts + 1
-        if __acThrows then error("boom: CreateFrame AuraContainer") end
+        if __acThrows == true then error("boom: CreateFrame AuraContainer") end
+        if type(__acThrows) == "number" and __acThrows > 0 then
+            __acThrows = __acThrows - 1
+            error("boom: CreateFrame AuraContainer")
+        end
         assert(tmpl == "CustomAuraContainerTemplate", "wrong template")
         local f = create("Frame", name, parent)
         f._kind = "AuraContainer"
@@ -217,7 +327,7 @@ do
             if __acSlotThrows == "shield" then error("boom: AddAuraSlot") end
             local slot = newSlot(me)
             me._slots[key] = { filter = filter, ids = ids, frame = slot }
-            opts.initializeFrame(slot)
+            install(me, slot, opts)
             return slot
         end)
         if not __noEnchantApi then
@@ -225,12 +335,15 @@ do
             logged(f, "AddItemEnchantment", function(me, which, opts)
                 assert(which == 1 or which == 2, "bad enchantment slot")
                 assert(type(opts) == "table" and type(opts.initializeFrame) == "function", "initializeFrame required")
-                if __acEnchThrows or __acSlotThrows == "imbue" then error("boom: AddItemEnchantment") end
+                if __acEnchThrows == true or __acSlotThrows == "imbue" or (__acEnchThrows == "main" and which == 1)
+                    or (__acEnchThrows == "off" and which == 2) then
+                    error("boom: AddItemEnchantment")
+                end
                 local slot = newSlot(me)
                 me._ench[which] = slot
                 me._enchOrder = me._enchOrder or {}
                 me._enchOrder[#me._enchOrder + 1] = which
-                opts.initializeFrame(slot)
+                install(me, slot, opts)
                 return slot
             end)
         end
@@ -2193,22 +2306,39 @@ def check_the_shield_slot_seats_on_the_icon_and_draws_icon_time_and_count():
     assert float(c._level) > float(g(lua).FSBuffTab._level), "the container is above the tiles"
 
 
-def check_the_imbue_slots_carry_our_lit_icon_and_the_engine_time_and_follow_the_pick():
+def parts_of(lua, i):
+    eng = btn(lua, i).fsEngine
+    return [eng.parts[k] for k in range(1, len(eng.parts) + 1)]
+
+
+def check_the_imbue_slots_carry_our_lit_icon_and_the_engine_time_on_both_hands():
     lua = engine_world()
     c = acs(lua)[0]
     b = btn(lua, IMBUE)
+    parts = parts_of(lua, IMBUE)
+    assert len(parts) == 2, "both hands keep their own parts"
+    assert btn(lua, IMBUE).fsEngine.declared == 2
     for hand in (1, 2):
         slot = c._ench[hand]
         order = order_of(slot)
         assert "SetDurationText" in order and "SetIcon" not in order, f"hand {hand}: {order}"
         assert same(lua, slot._points[1].rel, b.icon)
-    lit = b.fsEng.lit
-    assert int(lit._texture) == 100000 + 8017
+    assert {bool(same(lua, p.slot, c._ench[h])) for p in parts for h in (1, 2) if same(lua, p.slot, c._ench[h])} == {True}
+    for part in parts:
+        assert int(part.lit._texture) == 100000 + 8017, "each hand's lit icon is the pick"
+        assert part.dur._points[1].rel is not None and part.durPlate is not None, "time seated at init, on a plate"
     set_combat(lua, True)
     fire(lua, "PLAYER_REGEN_DISABLED")
     cast(lua, "Flametongue Weapon")
     tick(lua, 5)
-    assert int(lit._texture) == 100000 + 8024, "the lit icon follows an imbue cast in combat"
+    assert int(g(lua).__slotBlocked) == 0, "a slot region was written in combat"
+    for part in parts:
+        assert int(part.lit._texture) == 100000 + 8017, "no lit icon write in combat"
+    tip(lua, 16, ["Flametongue 1 (59 min)"])
+    leave_combat(lua)
+    tick(lua, 5)
+    for part in parts:
+        assert int(part.lit._texture) == 100000 + 8024, "the regen repaint writes BOTH hands' lit icons"
 
 
 def check_in_combat_the_tiles_drop_to_the_dim_base_and_only_the_alpha_is_written():
@@ -2266,17 +2396,28 @@ def check_nothing_is_built_in_combat_whoever_asks():
     assert int(g(lua).__acAttempts) == 2 and len(acs(lua)) == 2, "the next out of combat pass builds it"
 
 
-def check_a_failed_build_logs_once_leaves_today_and_gives_up_after_three():
+def check_a_failed_build_logs_once_leaves_today_and_gives_up_after_three_passes():
     lua = engine_world(pre="__acThrows = true\n__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end")
+    assert int(g(lua).__acAttempts) == 1, "the login burst of syncs is one pass, one attempt"
     for _ in range(6):
         fire(lua, "SPELLS_CHANGED")
-    assert int(g(lua).__acAttempts) == 3 and engine_cap(lua).gaveUp is True, f"{int(g(lua).__acAttempts)} attempts"
+    assert int(g(lua).__acAttempts) == 1, "more syncs in the same pass do not try again"
+    assert not engine_cap(lua).gaveUp
+    for n in (2, 3):
+        set_combat(lua, True)
+        fire(lua, "PLAYER_REGEN_DISABLED")
+        leave_combat(lua)
+        assert int(g(lua).__acAttempts) == n, f"pass {n}"
+    assert engine_cap(lua).gaveUp is True
+    leave_combat(lua)
+    assert int(g(lua).__acAttempts) == 3
     assert int(g(lua).__logs) == 1, f"{int(g(lua).__logs)} log lines"
     assert acs(lua) == []
+    tick(lua, 5)
     shield_aura_up(lua)
     set_combat(lua, True)
     update(lua)
-    assert btn(lua, SHIELD).fsEng is None
+    assert btn(lua, SHIELD).fsEngine is None
     # today's combat look: the estimate with its tilde, undimmed
     assert tile(lua, SHIELD)["text"] == "~3", tile(lua, SHIELD)["text"]
     assert not icon(lua, SHIELD)["desat"]
@@ -2290,7 +2431,7 @@ def check_a_client_without_the_template_or_item_enchantments_keeps_todays_tiles(
     update(lua)
     assert tile(lua, SHIELD)["text"] == "~3"
     lua = engine_world(pre="__noEnchantApi = true")
-    assert btn(lua, IMBUE).fsEng is None and btn(lua, SHIELD).fsEng is not None, "only the imbue tile loses its slot"
+    assert btn(lua, IMBUE).fsEngine is None and btn(lua, SHIELD).fsEngine is not None, "only the imbue tile loses its slot"
     shield_aura_up(lua)
     set_combat(lua, True)
     fire(lua, "PLAYER_REGEN_DISABLED")
@@ -2299,26 +2440,219 @@ def check_a_client_without_the_template_or_item_enchantments_keeps_todays_tiles(
     assert tile(lua, SHIELD)["text"] == ""
 
 
-def check_a_failed_slot_costs_only_its_own_tile():
-    for which, lost, kept in (("shield", SHIELD, IMBUE), ("imbue", IMBUE, SHIELD)):
-        lua = engine_world(pre=f'__acSlotThrows = "{which}"')
-        assert len(acs(lua)) == 1, "the container itself stands"
-        assert btn(lua, lost).fsEng is None and btn(lua, kept).fsEng is not None, which
-        shield_aura_up(lua)
-        set_combat(lua, True)
-        fire(lua, "PLAYER_REGEN_DISABLED")
-        update(lua)
-        assert tile(lua, kept)["text"] == "", f"{which}: the kept tile is in engine mode"
-        assert tile(lua, lost)["text"] != "", f"{which}: the lost tile keeps today's text"
+def check_a_failed_shield_slot_costs_only_its_own_tile():
+    lua = engine_world(pre='__acSlotThrows = "shield"')
+    assert len(acs(lua)) == 1, "the container itself stands"
+    assert btn(lua, SHIELD).fsEngine is None and btn(lua, IMBUE).fsEngine is not None
+    shield_aura_up(lua)
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    update(lua)
+    assert tile(lua, IMBUE)["text"] == "", "the kept tile is in engine mode"
+    assert tile(lua, SHIELD)["text"] != "", "the lost tile keeps today's text"
 
 
-def check_a_rescale_reseats_the_engine_texts_out_of_combat():
+def check_a_half_failed_imbue_pair_parks_the_container_and_rebuilds_without_imbue_slots():
+    for hand in ("main", "off", True):
+        lua = engine_world(pre=f"__acEnchThrows = {hand!r}".replace("True", "true").replace("'", '"'))
+        cs = acs(lua)
+        assert len(cs) == 2, f"{hand}: the failed container and its replacement"
+        old, new = cs
+        assert not old._enabled and not shown(old) and float(old._alpha) == 0, f"{hand}: the failed container is parked"
+        assert new._enabled and shown(new) and not new._ench[1] and "shield" in [str(k) for k in new._slots.keys()]
+        assert len(list(new._ench.keys())) == 0, f"{hand}: no stray enchantment slot on the live container"
+        assert btn(lua, IMBUE).fsEngine is None and btn(lua, SHIELD).fsEngine is not None
+        assert len(g(lua).FS.BuffTab.Engine.parked) == 1
+        for _ in range(3):
+            fire(lua, "SPELLS_CHANGED")
+        assert len(acs(lua)) == 2, f"{hand}: the imbue slots are not tried again"
+
+
+def check_a_lazily_built_slot_seats_its_texts_and_icon_on_its_own():
+    lua = engine_world(pre="__acLazy = true")
+    assert parts_of(lua, SHIELD) == [] and btn(lua, SHIELD).fsEngine.declared == 1, "init has not run yet"
+    update(lua)
+    leave_combat(lua)                 # a Sync and a regen pass, with no frame yet: nothing depends on them
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    run(lua, "__acFlush()")           # the engine first needs the frames in combat
+    assert int(g(lua).__slotBlocked) == 0, "initializeFrame was treated as restricted"
+    for i, n in ((SHIELD, 1), (IMBUE, 2)):
+        parts = parts_of(lua, i)
+        assert len(parts) == n, (i, len(parts))
+        for part in parts:
+            assert part.dur is not None and len(part.dur._points) == 1, "the time is seated by initializeFrame itself"
+            assert same(lua, part.dur._points[1].rel, btn(lua, i))
+            assert part.durPlate is not None
+        if i == SHIELD:
+            assert parts[0].count is not None and parts[0].count._points[1].point == "TOPRIGHT"
+            assert parts[0].countPlate is not None, "the count has a label plate too"
+    # the unproven state is not trusted yet: no layout was read, so the slot is kept
+    assert btn(lua, SHIELD).fsEngine.bad is False
+    leave_combat(lua)
+    assert [len(parts_of(lua, i)) for i in (SHIELD, IMBUE)] == [1, 2]
+
+
+def check_the_engine_state_is_entered_only_on_a_proven_arm():
     lua = engine_world()
-    slot = acs(lua)[0]._slots["shield"].frame
-    y0 = float(slot._durationText._points[1].y)
+    shield_aura_up(lua)
+    c = acs(lua)[0]
+    assert engine_cap(lua).armed is True
+    # a re-arm the engine refuses: the container reads back off, so combat shows today's estimate, not "not active"
+    run(lua, "__acs[1]._enabled = false\n__acRefuse = true")
+    set_combat(lua, True)
+    leave_combat(lua)
+    assert engine_cap(lua).armed is False, "the readback says it is not armed"
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    update(lua)
+    assert float(c._alpha) == 0, "a container that is not armed is never shown"
+    assert tile(lua, SHIELD)["text"] == "~3" and not icon(lua, SHIELD)["desat"], "today's frozen estimate"
+    assert not bt(lua).EngineLive("shield")
+    # the engine takes the arm at the next out of combat pass: proven again
+    run(lua, "__acRefuse = false")
+    leave_combat(lua)
+    assert engine_cap(lua).armed is True and c._enabled
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    assert float(c._alpha) == 1 and bt(lua).EngineLive("shield")
+
+
+def check_a_slot_that_is_not_on_its_tiles_icon_clears_that_tiles_engine_state():
+    # the engine's layout re-anchors the slot for good: no tile can be trusted
+    lua = engine_world(pre='__acOverride = "sticky"\n__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end')
+    shield_aura_up(lua)
+    for i in (SHIELD, IMBUE):
+        assert btn(lua, i).fsEngine.bad is True, i
+    assert int(g(lua).__logs) == 1 and g(lua).FS.BuffTab.BT.warned.bufftab_engine_layout, "logged once"
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    update(lua)
+    assert not bt(lua).EngineLive("shield") and not bt(lua).EngineLive("imbue")
+    assert tile(lua, SHIELD)["text"] == "~3" and not icon(lua, SHIELD)["desat"], "today's estimate stays"
+    # a re-anchor done once at init is put right by the next seat, and the tile is proven again
+    lua = engine_world(pre='__acOverride = "init"')
+    for i in (SHIELD, IMBUE):
+        assert btn(lua, i).fsEngine.bad is False, i
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    assert bt(lua).EngineLive("shield") and bt(lua).EngineLive("imbue")
+    # a client that cannot say where anything stands proves nothing either way: the slot is kept
+    lua = engine_world(pre="__noRect = true")
+    assert btn(lua, SHIELD).fsEngine.bad is False
+
+
+def check_the_setting_turns_the_combat_state_off_and_back_on():
+    lua = engine_world()
+    shield_aura_up(lua)
+    c = acs(lua)[0]
+    cfg = g(lua).FS.Config
+    assert cfg.Get("buffs.combatstate") is True, "on by default"
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    assert float(c._alpha) == 1
+    cfg.Set("buffs.combatstate", False)
+    update(lua)
+    assert float(c._alpha) == 0 and tile(lua, SHIELD)["text"] == "~3", "off in combat: the estimate, the slots hidden"
+    assert [t for t in tip_text(lua, SHIELD)][1].startswith("Charges cannot be read in combat")
+    cfg.Set("buffs.combatstate", True)
+    update(lua)
+    assert float(c._alpha) == 1 and tile(lua, SHIELD)["text"] == ""
+    leave_combat(lua)
+    cfg.Set("buffs.combatstate", False)
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    assert float(c._alpha) == 0 and tile(lua, SHIELD)["text"] != ""
+    # a world that starts with it off never builds a container
+    lua = engine_world(pre="FS.Config.Set('buffs.combatstate', false)")
+    assert acs(lua) == []
+    leave_combat(lua)
+    g(lua).FS.Config.Set("buffs.combatstate", True)
+    assert len(acs(lua)) == 1, "switching it on out of combat builds it"
+
+
+def check_the_in_combat_tooltip_says_the_game_shows_the_state_and_that_any_enchant_lights_the_imbue():
+    lua = engine_world()
+    shield_aura_up(lua)
+    before = tip_text(lua, IMBUE)
+    assert before[1] == "Main hand imbue, 30 min left."
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    imbue, shield = tip_text(lua, IMBUE), tip_text(lua, SHIELD)
+    assert imbue == ["Rockbiter Weapon", "The game shows the imbue time in combat.",
+                     "In combat this shows any weapon enchant.", "Click: cast Rockbiter Weapon."], imbue
+    assert shield == ["Lightning Shield", "The game shows your shield and its time in combat.",
+                      "Click: cast Lightning Shield."], shield
+    for line in imbue + shield:
+        assert "min left" not in line and "charges" not in line.lower(), f"a frozen number as fact: {line}"
+    leave_combat(lua)
+    tick(lua, 5)
+    assert tip_text(lua, IMBUE)[1].startswith("Main hand imbue")
+
+
+def check_a_slot_found_with_the_mouse_on_is_made_click_through_and_logged():
+    lua = engine_world(pre="__acMouseOn = true\n__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end")
+    c = acs(lua)[0]
+    slots = [c._slots["shield"].frame, c._ench[1], c._ench[2]]
+    for slot in slots:
+        assert slot._SetMouseClickEnabled is False and slot._SetMouseMotionEnabled is False, "mouse turned off again"
+    assert int(g(lua).__logs) == 1
+    # where the client has them, propagating clicks and motion keeps the tile's tooltip and click working
+    lua = engine_world(pre="__acMouseOn = true\n__acPropagate = true")
+    c = acs(lua)[0]
+    for slot in (c._slots["shield"].frame, c._ench[1], c._ench[2]):
+        assert slot._propClicks is True and slot._propMotion is True
+    # a slot with the mouse already off is left alone
+    lua = engine_world(pre="__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end")
+    assert int(g(lua).__logs) == 0
+
+
+def check_a_changed_spellbook_rebuilds_the_container_with_the_new_shield_ids():
+    lua = engine_world()
+    old = acs(lua)[0]
+    assert 99999 not in {int(k) for k in old._slots["shield"].ids.keys()}
+    fire(lua, "SPELLS_CHANGED")
+    assert len(acs(lua)) == 1, "an unchanged id set keeps the container"
+    run(lua, '__spell("Lightning Shield", 99999, true)')
+    set_combat(lua, True)
+    fire(lua, "SPELLS_CHANGED")
+    assert len(acs(lua)) == 1, "nothing is rebuilt in combat"
+    leave_combat(lua)
+    cs = acs(lua)
+    assert len(cs) == 2, "the changed ids rebuild"
+    assert not old._enabled and not shown(old) and float(old._alpha) == 0, "the old container is parked"
+    assert 99999 in {int(k) for k in cs[1]._slots["shield"].ids.keys()}
+    assert cs[1]._enabled and shown(cs[1])
+    assert len(g(lua).FS.BuffTab.Engine.parked) == 1
+    assert btn(lua, SHIELD).fsEngine is not None and parts_of(lua, SHIELD)[0].slot is not None
+
+
+def check_the_chip_and_ring_chrome_numbers_are_pinned_by_value():
+    lua = world(tips={16: ["Rockbiter 1 (56 min)"]})
+    t = tile(lua, IMBUE)
+    approx(float(t["chip_glow"][1]) if False else float(btn(lua, IMBUE).fsChip.glow._vertex[4]), 0.35, "chip glow alpha")
+    assert float(bt(lua).BT.CHIP_GLOW_A) == 0.35
+    L = bt(lua).Looks()
+    assert (float(L.on.ringA), float(L.on.glowA)) == (0.35, 0.0)
+    assert (float(L.exp.ringA), float(L.exp.glowA)) == (0.9, 0.5)
+    assert (float(L.warn.ringA), float(L.warn.glowA)) == (0.85, 0.5)
+    assert (float(L.hollow.ringA), float(L.hollow.glowA)) == (0.6, 0.0)
+    assert (float(L.cyan.ringA), float(L.cyan.glowA)) == (1.0, 0.6)
+
+
+def check_a_rescale_reseats_every_engine_text_out_of_combat_only():
+    lua = engine_world()
+    texts = [(p.dur, float(p.dur._points[1].y)) for i in (SHIELD, IMBUE) for p in parts_of(lua, i)]
+    assert len(texts) == 3, "the shield's time and both hands' times"
+    set_combat(lua, True)
     lua.eval("__rescale")(0.8333)
-    y1 = float(slot._durationText._points[1].y)
-    assert y1 != y0 and abs(y1 / y0 - 0.8333) < 0.01, (y0, y1)
+    assert int(g(lua).__slotBlocked) == 0, "a rescale in combat wrote a slot region"
+    assert all(float(d._points[1].y) == y0 for d, y0 in texts), "nothing is re-seated in combat"
+    leave_combat(lua)
+    for dur, y0 in texts:
+        y1 = float(dur._points[1].y)
+        assert y1 != y0 and abs(y1 / y0 - 0.8333) < 0.01, (y0, y1)
+    assert int(g(lua).__slotBlocked) == 0
 
 
 CHECKS = [
@@ -2409,14 +2743,23 @@ CHECKS = [
     check_an_icon_the_client_never_answers_costs_nothing_between_retries,
     check_the_combat_container_is_built_once_out_of_combat_with_both_slots,
     check_the_shield_slot_seats_on_the_icon_and_draws_icon_time_and_count,
-    check_the_imbue_slots_carry_our_lit_icon_and_the_engine_time_and_follow_the_pick,
+    check_the_imbue_slots_carry_our_lit_icon_and_the_engine_time_on_both_hands,
     check_in_combat_the_tiles_drop_to_the_dim_base_and_only_the_alpha_is_written,
     check_regen_arms_a_container_that_reads_back_off_and_a_combat_login_builds_at_regen,
     check_nothing_is_built_in_combat_whoever_asks,
-    check_a_failed_build_logs_once_leaves_today_and_gives_up_after_three,
+    check_a_failed_build_logs_once_leaves_today_and_gives_up_after_three_passes,
     check_a_client_without_the_template_or_item_enchantments_keeps_todays_tiles,
-    check_a_failed_slot_costs_only_its_own_tile,
-    check_a_rescale_reseats_the_engine_texts_out_of_combat,
+    check_a_failed_shield_slot_costs_only_its_own_tile,
+    check_a_half_failed_imbue_pair_parks_the_container_and_rebuilds_without_imbue_slots,
+    check_a_lazily_built_slot_seats_its_texts_and_icon_on_its_own,
+    check_the_engine_state_is_entered_only_on_a_proven_arm,
+    check_a_slot_that_is_not_on_its_tiles_icon_clears_that_tiles_engine_state,
+    check_the_setting_turns_the_combat_state_off_and_back_on,
+    check_the_in_combat_tooltip_says_the_game_shows_the_state_and_that_any_enchant_lights_the_imbue,
+    check_a_slot_found_with_the_mouse_on_is_made_click_through_and_logged,
+    check_a_changed_spellbook_rebuilds_the_container_with_the_new_shield_ids,
+    check_the_chip_and_ring_chrome_numbers_are_pinned_by_value,
+    check_a_rescale_reseats_every_engine_text_out_of_combat_only,
 ]
 SCALED_CHECKS = [
     check_the_shoulder_is_the_two_by_one_block_at_316_and_the_buttons_sit_inside_it,
