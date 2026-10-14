@@ -426,10 +426,14 @@ end
 
 local style = ReadStyle()
 
+-- Cached: it changes only after the OnChange callback below or at login, so every write of the setting must go through
+-- Config.Set (a raw write to the saved table would leave this stale).
 local function Style()
     return style
 end
 
+-- The fill under a narrow glyph wears what the glyph wears: the same tint and grey, and in the gradient style its own ADD
+-- copy (the glyph's brightness lift must not stop at the glyph's rectangle or its edge would show).
 local function PaintFill(key, tint, a, desat, gradient)
     local fill = key.fill
     if not fill then return end
