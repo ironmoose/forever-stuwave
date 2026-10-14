@@ -2742,6 +2742,22 @@ def check_the_pixel_unit_falls_through_to_the_screen_height_when_pixelutil_gives
     assert unit() is None
 
 
+def check_a_bad_effective_scale_is_taken_as_1_by_the_pixel_unit():
+    lua = boot()
+    run(lua, "PixelUtil = { GetPixelToUIUnitFactor = function() return 768 / 1440 end }")
+    unit = lambda: float(g(lua).FS.FrameHelpers.PixelUnit(g(lua).UIParent))
+    run(lua, "__ees = 1")
+    base = unit()
+    assert abs(base - 768 / 1440) < 1e-9
+    for label, value in (("zero", "0"), ("negative", "-0.5"), ("NaN", "0 / 0"), ("infinity", "math.huge"), ("a string", "'x'"),
+                         ("nil", "nil")):
+        run(lua, f"__ees = {value}")
+        got = unit()
+        assert abs(got - base) < 1e-9, f"an effective scale of {label} gave {got}, wanted the scale 1 result {base}"
+    run(lua, "__ees = 0.64")
+    assert abs(unit() - base / 0.64) < 1e-9
+
+
 CHECKS = [
     check_toc_lists_the_preset_files_after_the_totem_bar_and_bindings_declare_the_dial,
     check_the_settings_have_their_keys_defaults_tips_and_registered_defaults,
@@ -2837,6 +2853,7 @@ CHECKS = [
     check_ticks_with_an_unchanged_refusal_never_refresh_the_open_card,
     check_a_chooser_reopened_after_the_refusal_cleared_has_live_tiles,
     check_the_pixel_unit_falls_through_to_the_screen_height_when_pixelutil_gives_nothing_usable,
+    check_a_bad_effective_scale_is_taken_as_1_by_the_pixel_unit,
     check_leaving_a_pick_cell_with_the_button_down_drops_the_pressed_look,
     check_a_disabled_row_does_not_light_its_edge_and_every_editor_texture_is_pixel_snapped,
     check_the_files_use_no_snippets_no_state_drivers_and_no_flagged_words,
