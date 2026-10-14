@@ -11,7 +11,9 @@ by SetVertexColor alone. The 10 x 12 art sits at the slot's top-left corner; the
 
 led_glow.tga is a 64x32 soft glow, white with all the shape in the alpha channel: a filled bar with a quadratic
 falloff to every side. It sits behind the readout as its own texture (blend ADD) and is stretched to the glow
-rect; the hard edged segments never carry a blur themselves.
+rect (the solid 50 x 18 core of the 64 x 32 canvas is stretched over the lit area, the 6 texel falloff spills
+outside it; FiveSecondTab.lua keeps those numbers as GLOW_CORE_W and GLOW_CORE_H); the hard edged segments never
+carry a blur themselves.
 
 The segment rows below are [x, y, width] runs one texel tall; mockups/five-second-rule-compact-2026-10-14.html
 (SEGS) draws the same table. Pure stdlib, matching the other generators here: 18-byte header, image type 2,
@@ -53,8 +55,8 @@ SEGMENTS = {
 }
 
 GLOW_W, GLOW_H = 64, 32
-GLOW_INNER_W, GLOW_INNER_H = 36, 8      # the solid core, centred; the falloff spills outside it
-GLOW_FALL_X, GLOW_FALL_Y = 12.0, 10.0   # falloff distance in texels, horizontal and vertical
+GLOW_INNER_W, GLOW_INNER_H = 50, 18      # the solid core, centred; the falloff spills outside it
+GLOW_FALL_X, GLOW_FALL_Y = 6.0, 6.0     # falloff distance in texels, horizontal and vertical
 SUPERSAMPLE = 3
 
 
