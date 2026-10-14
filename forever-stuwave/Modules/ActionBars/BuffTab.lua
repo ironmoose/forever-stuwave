@@ -389,7 +389,16 @@ end
 -- so the slots sit at container + 1 and their children above that: the frame is put above the highest level found under
 -- the container (floor: host + ENGINE_LEVEL + 3). Out of combat only: StyleButton, SeatHost and the engine passes call
 -- this, and it writes a level only when it changed.
-local function SeatHotkeyHost(button)
+-- The level the key label frames sit at: the floor, or one over the highest frame under the container. One walk per pass;
+-- the caller hands the result to every tile's SeatHotkeyHost.
+local function HotkeyLevel()
+    local level = (BT.host and BT.host:GetFrameLevel() or 0) + BT.ENGINE_LEVEL + 3
+    local container = EngineState.container
+    if container then level = math.max(level, TopLevel(container, 3) + 1) end
+    return level
+end
+
+local function SeatHotkeyHost(button, level)
     if InCombatLockdown() then return end
     if not button.fsHotkeyHost then
         local hh = CreateFrame("Frame", nil, button)
@@ -398,9 +407,7 @@ local function SeatHotkeyHost(button)
         button.fsHotkeyHost = hh
     end
     local hh = button.fsHotkeyHost
-    local level = (BT.host and BT.host:GetFrameLevel() or 0) + BT.ENGINE_LEVEL + 3
-    local container = EngineState.container
-    if container then level = math.max(level, TopLevel(container, 3) + 1) end
+    level = level or HotkeyLevel()
     if hh:GetFrameLevel() ~= level then hh:SetFrameLevel(level) end
     if button.HotKey and button.HotKey:GetParent() ~= hh then button.HotKey:SetParent(hh) end
     if button.fsHotkeyPlate and button.fsHotkeyPlate:GetParent() ~= hh then button.fsHotkeyPlate:SetParent(hh) end
@@ -1063,7 +1070,8 @@ local function ProveEngine()
     end
     -- a slot or a child the engine made since the last pass may sit higher than the key label frames: lift them
     if EngineState.container then
-        for _, button in ipairs(BT.list) do SeatHotkeyHost(button) end
+        local level = HotkeyLevel()
+        for _, button in ipairs(BT.list) do SeatHotkeyHost(button, level) end
     end
 end
 
@@ -1468,7 +1476,8 @@ local function SeatHost()
     host:ClearAllPoints()
     host:SetPoint(point, rel, relPoint, x, y)
     if rel.GetFrameLevel then host:SetFrameLevel(rel:GetFrameLevel() + 5) end
-    for _, button in ipairs(BT.list) do SeatHotkeyHost(button) end
+    local level = HotkeyLevel()
+    for _, button in ipairs(BT.list) do SeatHotkeyHost(button, level) end
     host:Show()
 end
 

@@ -2560,7 +2560,9 @@ def check_the_key_label_frame_is_above_every_slot_and_slot_child_and_follows_the
     for i in (IMBUE, SHIELD):
         assert float(btn(lua, i).fsHotkeyHost._level) > top, "the key label frame is not above every slot"
     # a frame the engine adds under a slot later, higher than anything seen so far: the next out of combat pass lifts the label
-    run(lua, "local k = CreateFrame('Frame', nil, __acs[1]._ench[1]); k:SetFrameLevel(__acs[1]._level + 40)")
+    # container > slot > k > k2: the third generation below the container is the highest
+    run(lua, "local k = CreateFrame('Frame', nil, __acs[1]._ench[1]); k:SetFrameLevel(__acs[1]._level + 5)\n"
+             "local k2 = CreateFrame('Frame', nil, k); k2:SetFrameLevel(__acs[1]._level + 40)")
     set_combat(lua, True)
     fire(lua, "PLAYER_REGEN_DISABLED")
     tick(lua, 3)
@@ -2573,6 +2575,16 @@ def check_the_key_label_frame_is_above_every_slot_and_slot_child_and_follows_the
     tick(lua, 3)
     for i in (IMBUE, SHIELD):
         assert float(btn(lua, i).fsHotkeyHost._level) > float(c._level) + 40, "the label frame stayed under a late slot child"
+    # quiet ticks write no level, and the walk under the container runs once per pass for both tiles
+    run(lua, "__lv = 0; __walks = 0\n"
+             "for _, i in ipairs({ 1, 2 }) do local hh = _G['FSBuffTabButton' .. i].fsHotkeyHost; local f = hh.SetFrameLevel\n"
+             "hh.SetFrameLevel = function(me, l) __lv = __lv + 1; return f(me, l) end end\n"
+             "local c = __acs[1]; local gc = c.GetChildren; c.GetChildren = function(me) __walks = __walks + 1; return gc(me) end")
+    tick(lua, 1.0)
+    assert int(g(lua).__lv) == 0, "a quiet tick wrote a frame level"
+    run(lua, "__walks = 0")
+    tick(lua, 1.0)
+    assert int(g(lua).__walks) == 1, f"{g(lua).__walks} walks under the container in one pass"
     # the floor: host + ENGINE_LEVEL + 3
     host = g(lua).FSBuffTab
     for i in (IMBUE, SHIELD):
