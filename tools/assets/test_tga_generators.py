@@ -222,6 +222,9 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "slice_glow": (32, 32),
     },
     "tab_plate": {"tab_plate": (32, 32), "tab_edge": (32, 32)},
+    # generate_led_segments.py: the five second rule tab's LED art, a 64x64 atlas of 16x16 slots (fourteen segments of a
+    # 10x12 cell) and the 64x32 soft glow behind the readout.
+    "led_segments": {"led_segments": (64, 64), "led_glow": (64, 32)},
     "tab_slant": {
         "tab_slant": (32, 32),
         "tab_slant_glow": (32, 32),
@@ -1940,3 +1943,51 @@ def test_committed_pole_art_matches_the_generator(pole_outputs: Path) -> None:
     assert len(outs) == len(POLE_ART)
     for out in outs:
         assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
+
+
+# ---------------------------------------------------------------------------
+# generate_led_segments.py: the LED atlas
+#
+# Expectations hardcoded here: slot n of the 64x64 atlas (column n % 4, row n // 4, 16x16 texels) holds segment n of
+# a, b, c, d, e, f, g1, g2, i, l, h, j, k, m with this many opaque texels, inside the 10x12 cell, alpha only 0 or 255,
+# and no texel of any slot is shared between two segments (the atlas has one segment per slot, and a cell drawn from
+# all fourteen has 112 distinct texels).
+# ---------------------------------------------------------------------------
+
+LED_SEGMENT_TEXELS = [12, 8, 8, 12, 8, 8, 6, 6, 6, 6, 8, 8, 8, 8]
+
+
+@pytest.fixture(scope="module")
+def led_outputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    work = tmp_path_factory.mktemp("led_segments")
+    _run_generator(GENERATOR_DIR / "generate_led_segments.py", work)
+    return work
+
+
+def test_led_atlas_slots_hold_the_fourteen_disjoint_segments(led_outputs: Path) -> None:
+    path = led_outputs / "led_segments.tga"
+    union: set[tuple[int, int]] = set()
+    for slot, expected in enumerate(LED_SEGMENT_TEXELS):
+        ox, oy = (slot % 4) * 16, (slot // 4) * 16
+        cell = {
+            (x, y)
+            for y in range(16)
+            for x in range(16)
+            if _alpha_at(path, ox + x, oy + y) > 0
+        }
+        assert len(cell) == expected, f"slot {slot}: {len(cell)} opaque texels, expected {expected}"
+        assert all(x < 10 and y < 12 for x, y in cell), f"slot {slot} leaves the 10 x 12 cell"
+        assert all(_alpha_at(path, ox + x, oy + y) == 255 for x, y in cell), f"slot {slot} has partial alpha"
+        assert not (union & cell), f"slot {slot} shares texels with an earlier segment"
+        union |= cell
+    assert len(union) == 112
+    for slot in (14, 15):
+        ox, oy = (slot % 4) * 16, (slot // 4) * 16
+        assert all(_alpha_at(path, ox + x, oy + y) == 0 for x in range(16) for y in range(16)), f"slot {slot} not empty"
+
+
+def test_led_glow_is_solid_at_the_centre_and_clear_at_the_edges(led_outputs: Path) -> None:
+    path = led_outputs / "led_glow.tga"
+    assert _alpha_at(path, 32, 16) == 255
+    for x, y in ((0, 0), (63, 0), (0, 31), (63, 31), (0, 16), (63, 16), (32, 0), (32, 31)):
+        assert _alpha_at(path, x, y) == 0, (x, y)
