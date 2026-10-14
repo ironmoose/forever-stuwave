@@ -70,6 +70,11 @@ Theme.COLOR_AMBER = { 1, 0.7137, 0.2824, 1 }           -- #ffb648 --amber
 Theme.COLOR_WARM  = { 1, 0.2392, 0.1216, 1 }           -- #ff3d1f --warm
 Theme.COLOR_RED   = { 1, 0.2314, 0.3059, 1 }           -- #ff3b4e --red
 Theme.COLOR_MUTED = { 0.6157, 0.5765, 0.7686, 1 }      -- #9d93c4 --muted (the party pet column's PET label)
+-- Blizzard's own action feedback tints (ActionBars.lua UpdateUsable; the Shaman totem and buff tabs use the same pair):
+-- out of mana is blue, otherwise unusable is grey, out of range is red.
+Theme.COLOR_UNUSABLE = { 0.4, 0.4, 0.4 }
+Theme.COLOR_OOM = { 0.5, 0.5, 1.0 }
+Theme.COLOR_OUT_OF_RANGE = { 0.8, 0.1, 0.1 }
 -- The four totem elements (the Gunsight Shaman poles, mockups/gunsight-class-module-shaman-2026-10-08.html EL; the totem tab uses the same hexes)
 Theme.COLOR_TOTEM = {
     fire  = { 1, 0.3529, 0.2353, 1 },                   -- #ff5a3c

@@ -87,10 +87,10 @@ local MAIN_FILL = { 1, 0.180, 0.592, 0.08 }
 -- The button background's #241640 -> #160c2b gradient now lives BAKED into
 -- media/slice_cut2_button.tga (see media/generate_cut_corner_outline.py); change it there.
 
--- Blizzard's own feedback colors for unusable / out-of-mana / out-of-range.
-local COLOR_UNUSABLE = { 0.4, 0.4, 0.4 }
-local COLOR_OOM = { 0.5, 0.5, 1.0 }
-local COLOR_OUT_OF_RANGE = { 0.8, 0.1, 0.1 }
+-- Blizzard's own feedback colors for unusable / out-of-mana / out-of-range (Theme.lua, shared with the class tabs).
+local COLOR_UNUSABLE = FS.Theme.COLOR_UNUSABLE
+local COLOR_OOM = FS.Theme.COLOR_OOM
+local COLOR_OUT_OF_RANGE = FS.Theme.COLOR_OUT_OF_RANGE
 
 -- Hover: magenta, matching the MAIN bar accent rather than default-UI gold.
 

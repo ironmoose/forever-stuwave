@@ -1884,6 +1884,49 @@ function Helpers.IsKnownSpellId(id, fallback)
     return fallback ~= false
 end
 
+-- Usability feedback for the class tabs (TotemBar.lua, BuffTab.lua), the same rule ActionBars.lua UpdateUsable follows:
+-- out of mana is "oom" (Theme.COLOR_OOM), otherwise unusable is "unusable" (Theme.COLOR_UNUSABLE), else "usable"
+-- (no tint). The answer is nil when it cannot be told (a secret value in combat, an API that is missing, raised or
+-- answered nothing): the caller then leaves whatever it painted last, it never guesses. A plain "not enough mana"
+-- wins even when the usable flag is secret, since that alone decides the colour.
+local function Usability(isUsable, notEnoughMana)
+    if not IsSecret(notEnoughMana) and notEnoughMana and notEnoughMana ~= 0 then return "oom" end
+    if IsSecret(notEnoughMana) or IsSecret(isUsable) then return nil end
+    if isUsable == nil or (type(isUsable) ~= "boolean" and type(isUsable) ~= "number") then return nil end
+    if isUsable == false or isUsable == 0 then return "unusable" end
+    return "usable"
+end
+
+-- The usability of an action id (IsUsableAction), nil when it cannot be told.
+function Helpers.ActionUsability(actionId)
+    if not IsUsableAction then return nil end
+    local ok, isUsable, notEnoughMana = pcall(IsUsableAction, actionId)
+    if not ok then return nil end
+    return Usability(isUsable, notEnoughMana)
+end
+
+-- The usability of a spell id or name (C_Spell.IsSpellUsable, else IsUsableSpell), nil when it cannot be told.
+function Helpers.SpellUsability(spell)
+    if spell == nil then return nil end
+    local ok, isUsable, notEnoughMana
+    if C_Spell and C_Spell.IsSpellUsable then
+        ok, isUsable, notEnoughMana = pcall(C_Spell.IsSpellUsable, spell)
+    elseif IsUsableSpell then
+        ok, isUsable, notEnoughMana = pcall(IsUsableSpell, spell)
+    else
+        return nil
+    end
+    if not ok then return nil end
+    return Usability(isUsable, notEnoughMana)
+end
+
+-- The theme colour of a usability state: Theme.COLOR_OOM, Theme.COLOR_UNUSABLE, or nil for "usable" (and for nil).
+function Helpers.UsabilityColor(state)
+    if state == "oom" then return Theme.COLOR_OOM end
+    if state == "unusable" then return Theme.COLOR_UNUSABLE end
+    return nil
+end
+
 -- The key label in a button's top right corner (button.HotKey, its plate button.fsHotkeyPlate and the command
 -- button.fsCommand), shown only while the command has a binding.
 function Helpers.UpdateButtonHotkey(button)

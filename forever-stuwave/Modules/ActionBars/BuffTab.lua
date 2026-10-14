@@ -24,6 +24,14 @@
 --   * No `.bar`, `.isExtra`, `.buttonType`, `CalculateAction` or other field Blizzard's secure click code reads is ever
 --     written on a button, and no attribute that makes it borrow its parent's (the "use parent" family): such a write
 --     taints the click. Every button carries explicit `type` and `spell` attributes only.
+--   * USABILITY: the same feedback as the main bars (ActionBars.lua UpdateUsable, colours Theme.COLOR_OOM and
+--     Theme.COLOR_UNUSABLE), asked of the spell the tile casts (C_Spell.IsSpellUsable, else IsUsableSpell): out of mana
+--     blends the tile's foreground (chip stroke, glow and code, the time or word, the underline) toward blue,
+--     otherwise unusable toward grey, usable is the approved look. The cut border, the plate and the chip fill keep
+--     their state colours, and the state colour is blended, not replaced, so the quiet gold, pink and amber states
+--     still read. A secret, missing or raised answer leaves the tint as it was; a locked or absent tile is plain and
+--     never asked. Event driven (SPELL_UPDATE_USABLE, ACTIONBAR_UPDATE_USABLE, the combat edges, a sync, a changed
+--     spell): font and texture writes only, a repaint only when the state changed.
 --   * VISIBILITY: the tab follows the Console shoulder like the totem tab, Shaman only, and does NOT depend on a
 --     target (it is a self buff reminder on the player side). With the Console off it sits beside the totem tab
 --     (which then sits above the stance bar).
@@ -36,6 +44,8 @@ local BuffTab = {}
 FS.BuffTab = BuffTab
 
 local FH = FS.FrameHelpers
+local SpellUsability = FH.SpellUsability
+local UsabilityColor = FH.UsabilityColor
 local MEDIA = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
 
 local BT = {
@@ -50,6 +60,7 @@ local BT = {
     CODE_PX = 10, TEXT_PX = 11, WORD_PX = 9,
     TEXT_Y = 27,                    -- the time line's centre, design px below the tile top
     TICK = 1,                       -- seconds between repaints (the clock text)
+    TINT_MIX = 0.6,                 -- how far the foreground colours move toward the usability tint (out of mana, unusable)
     -- Append only, never reorder: the index is the saved keybind.
     BUTTONS = {
         { key = "imbue", title = "Weapon imbue", label = "Weapon imbue" },
@@ -57,6 +68,8 @@ local BT = {
     },
     ATTRS = { "type", "spell" },
     EVENTS = { "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD" },
+    -- state-only events: a repaint of the usability tint, legal in combat
+    USABLE_EVENTS = { "SPELL_UPDATE_USABLE", "ACTIONBAR_UPDATE_USABLE", "PLAYER_REGEN_DISABLED" },
     host = nil,
     list = {},          -- the two buttons, by index
     byKey = {},         -- and by key
@@ -371,6 +384,13 @@ local function SetColor(tex, c, a)
     tex:SetVertexColor(c[1], c[2], c[3], a or c[4] or 1)
 end
 
+-- A colour moved BT.TINT_MIX of the way toward the usability tint (nil tint: the colour itself), as r, g, b.
+local function Shade(c, tint)
+    if not tint then return c[1], c[2], c[3] end
+    local k = BT.TINT_MIX
+    return c[1] + (tint[1] - c[1]) * k, c[2] + (tint[2] - c[2]) * k, c[3] + (tint[3] - c[3]) * k
+end
+
 -- Paints one tile from its view. Writes only when something changed.
 local function PaintButton(button, v)
     if button.fsLocked or not button.fsFace or not (v and v.mode) then return end
@@ -379,12 +399,15 @@ local function PaintButton(button, v)
     -- the state last painted, compared field by field: no signature string or table is built per call
     local estimate, other = v.estimate and true or false, v.other and true or false
     if button.fsSig and button.fsMode == v.mode and button.fsCode == v.code and button.fsTxt == v.text
-        and button.fsEst == estimate and button.fsHov == hover and button.fsOth == other then
+        and button.fsEst == estimate and button.fsHov == hover and button.fsOth == other
+        and button.fsPaintedUse == button.fsUsable then
         return
     end
     button.fsSig = true
     button.fsMode, button.fsCode, button.fsTxt = v.mode, v.code, v.text
     button.fsEst, button.fsHov, button.fsOth = estimate, hover, other
+    button.fsPaintedUse = button.fsUsable
+    local tint = UsabilityColor(button.fsUsable)
     local look = L[v.mode] or L.hollow
     local skin = button.fsSkin
     if skin and skin.border and skin.border.ring then
@@ -398,18 +421,22 @@ local function PaintButton(button, v)
     SetColor(button.fsPlate, look.plate, look.plateA or look.plate[4])
     local chip = button.fsChip
     SetColor(chip.fill, look.chipFill, look.chipFillA)
-    SetColor(chip.ring, look.chip, 1)
-    chip.glow:SetVertexColor(look.chip[1], look.chip[2], look.chip[3], look.chipGlow and 0.35 or 0)
-    chip.code:SetTextColor(look.code[1], look.code[2], look.code[3], 1)
+    local r, g, b = Shade(look.chip, tint)
+    chip.ring:SetVertexColor(r, g, b, 1)
+    chip.glow:SetVertexColor(r, g, b, look.chipGlow and 0.35 or 0)
+    r, g, b = Shade(look.code, tint)
+    chip.code:SetTextColor(r, g, b, 1)
     chip.code:SetText(v.code or "")
     local size = (v.mode == "warn" and button.fsKey == "shield") and BT.WORD_PX or BT.TEXT_PX
     if button.fsTextPx ~= size then
         button.fsTextPx = size
         FS.Theme.ApplyMono(button.fsText, size, look.text)
     end
-    button.fsText:SetTextColor(look.text[1], look.text[2], look.text[3], look.textA)
+    r, g, b = Shade(look.text, tint)
+    button.fsText:SetTextColor(r, g, b, look.textA)
     button.fsText:SetText(v.text or "")
-    SetColor(button.fsLine, look.line, look.lineA)
+    r, g, b = Shade(look.line, tint)
+    button.fsLine:SetVertexColor(r, g, b, look.lineA)
     for _, dash in ipairs(button.fsDashes) do dash:SetAlpha(v.estimate and 1 or 0) end
 end
 
@@ -447,6 +474,38 @@ end
 local function WantedSpell(button)
     local v = ViewOf(button)
     return v and v.spell or nil
+end
+
+-- Reads one tile's usability from the spell it casts and repaints it when the state changed. An answer that cannot be
+-- told (nil: secret, missing, raised) leaves the tint as it was; a locked tile is plain; an absent one is hidden.
+local function UpdateUsable(button)
+    if button.fsLocked then
+        button.fsUsable, button.fsUsableSpell = nil, nil
+        return
+    end
+    if button.fsAbsent then return end
+    local spell = WantedSpell(button)
+    button.fsUsableSpell = spell
+    if not spell then return end
+    local state = SpellUsability(spell)
+    if state and state ~= button.fsUsable then
+        button.fsUsable = state
+        PaintButton(button, ViewOf(button))
+    end
+end
+
+local function UpdateAllUsable()
+    for _, button in ipairs(BT.list) do UpdateUsable(button) end
+end
+BuffTab.UpdateUsable = UpdateAllUsable
+
+-- A tile whose spell changed since it was last judged (a different imbue) is judged again without waiting for an event.
+local function UpdateUsableIfSpellChanged()
+    for _, button in ipairs(BT.list) do
+        if not button.fsLocked and not button.fsAbsent and WantedSpell(button) ~= button.fsUsableSpell then
+            UpdateUsable(button)
+        end
+    end
 end
 
 -- Re-aims the click at the view's spell: now out of combat, at regen from combat. Attribute writes only.
@@ -569,6 +628,7 @@ local function ApplyButtons()
         end
         FH.UpdateButtonHotkey(button)
     end
+    UpdateAllUsable()
     BuffTab.Paint()
 end
 
@@ -649,6 +709,7 @@ local function Refresh()
     else
         FollowSpell()
     end
+    UpdateUsableIfSpellChanged()
     BuffTab.Paint()
 end
 
@@ -664,7 +725,10 @@ local function Tick(self, dt)
 end
 
 local function OnEvent(_, event)
-    if event == "PLAYER_REGEN_ENABLED" then
+    if event == "SPELL_UPDATE_USABLE" or event == "ACTIONBAR_UPDATE_USABLE" or event == "PLAYER_REGEN_DISABLED" then
+        UpdateAllUsable()
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        UpdateAllUsable()
         if BT.pendingSync then Sync() else FollowSpell() end
     elseif event == "UPDATE_BINDINGS" then
         for _, button in ipairs(BT.list) do
@@ -693,6 +757,7 @@ local function Apply()
     for _, event in ipairs(BT.EVENTS) do pcall(events.RegisterEvent, events, event) end
     events:RegisterEvent("PLAYER_REGEN_ENABLED")
     events:RegisterEvent("UPDATE_BINDINGS")
+    for _, event in ipairs(BT.USABLE_EVENTS) do pcall(events.RegisterEvent, events, event) end
     events:SetScript("OnEvent", OnEvent)
 
     local ticker = CreateFrame("Frame")

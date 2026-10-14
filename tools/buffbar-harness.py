@@ -1425,6 +1425,198 @@ def check_an_unchanged_tick_allocates_nothing_in_or_out_of_combat():
         assert float(g(lua).__grew) < 2000, f"combat={combat}: 400 idle ticks allocated {float(g(lua).__grew):.0f} bytes"
 
 
+# ---------------------------------------------------------------------------------------------
+# Checks: usability feedback (out of mana -> blue, unusable -> grey, usable -> the approved look)
+# ---------------------------------------------------------------------------------------------
+
+
+def use_theme(lua, name):
+    return tbh.theme_color(lua, name)
+
+
+def use_spell(lua, name, ok, no_mana=False):
+    """What the spell API answers for a spell, by the name the tile casts."""
+    tbh.usable(lua, "spell", '"%s"' % name, ok, no_mana)
+
+
+def dist(a, b):
+    return sum((a[i] - b[i]) ** 2 for i in range(3)) ** 0.5
+
+
+FOREGROUND = ("chip", "text_color", "code_color", "line")
+
+
+def check_low_mana_tints_the_tile_foreground_blue_unusable_grey_and_usable_is_the_approved_look():
+    lua = world(tips={16: ["Rockbiter 1 (56 min)"]})
+    base = tile(lua, IMBUE)
+    oom, grey = use_theme(lua, "COLOR_OOM"), use_theme(lua, "COLOR_UNUSABLE")
+    use_spell(lua, "Rockbiter Weapon", False, True)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    t = tile(lua, IMBUE)
+    for part in FOREGROUND:
+        assert dist(t[part], oom) < dist(base[part], oom), f"out of mana: {part} did not move toward blue"
+        assert t[part][2] > t[part][0], f"out of mana: {part} is not blue {t[part]}"
+    # what is not the foreground keeps the approved look: the cut border, the chip fill, the alphas, the text
+    close(t["ring"], base["ring"], "border"), close(t["fill"], base["fill"], "chip fill")
+    approx(t["ring_a"], base["ring_a"], "border alpha"), approx(t["text_a"], base["text_a"], "text alpha")
+    assert (t["code"], t["text"]) == (base["code"], base["text"]), "the words changed"
+    use_spell(lua, "Rockbiter Weapon", False, False)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    t = tile(lua, IMBUE)
+    for part in FOREGROUND:
+        assert dist(t[part], grey) < dist(base[part], grey), f"unusable: {part} did not move toward grey"
+    use_spell(lua, "Rockbiter Weapon", True, False)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    t = tile(lua, IMBUE)
+    for part in FOREGROUND + ("ring", "fill"):
+        close(t[part], base[part], f"usable again: {part}", 1e-6)
+    approx(t["text_a"], base["text_a"], "usable again: text alpha")
+
+
+def check_the_tint_blends_with_each_state_colour_pink_amber_and_hollow():
+    lua = world(tips={16: ["Rockbiter 1 (42 sec)"]})
+    pink = tile(lua, IMBUE)
+    use_spell(lua, "Rockbiter Weapon", False, True)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    oom = use_theme(lua, "COLOR_OOM")
+    t = tile(lua, IMBUE)
+    assert dist(t["chip"], oom) < dist(pink["chip"], oom) and t["chip"] != pink["chip"]
+    assert t["code"] == pink["code"]
+    # the state moves on under the tint: the tint stays, the colours follow the new state
+    tip(lua, 16, ["Rockbiter 1 (59 min)"])
+    fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+    update(lua)
+    quiet = tile(lua, IMBUE)
+    assert quiet["chip"] != t["chip"], "the tint froze the old state colour"
+    assert dist(quiet["chip"], oom) < dist(C["gold"], oom), "the tint was lost when the state changed"
+    # a missing imbue (amber hollow word) is tinted too, and hover keeps its cyan border
+    tip(lua, 16, ["Heavy Axe"])
+    fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+    update(lua)
+    b = btn(lua, IMBUE)
+    lua.eval("__Region.Fire")(b, "OnEnter")
+    close(tile(lua, IMBUE)["ring"], C["cyan"], "hover border under the tint")
+    assert dist(tile(lua, IMBUE)["chip"], oom) < dist(C["amber"], oom)
+
+
+def check_the_tile_asks_the_spell_api_about_the_spell_it_casts():
+    lua = world(spells=("Rockbiter Weapon", "Flametongue Weapon", "Lightning Shield"), tips={16: ["Rockbiter 1 (50 min)"]})
+    lua.execute("__use_reset()")
+    fire(lua, "SPELL_UPDATE_USABLE")
+    asked = {str(k) for k in g(lua).__use.seen.spell.keys()}
+    assert asked == {"Lightning Shield", "Rockbiter Weapon"}, f"asked about {sorted(asked)}"
+    # the imbue the tile now casts changes with no usability event: the new spell is judged at the next repaint
+    use_spell(lua, "Flametongue Weapon", False, True)
+    tip(lua, 16, ["Flametongue 1 (50 min)"])
+    fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+    update(lua)
+    assert str(view(lua, "imbue").spell) == "Flametongue Weapon"
+    tick(lua, 1.5)
+    oom = use_theme(lua, "COLOR_OOM")
+    t = tile(lua, IMBUE)
+    assert dist(t["chip"], oom) < dist(C["gold"], oom) and t["chip"][2] > t["chip"][0], "the new imbue was not judged"
+
+
+def check_a_secret_missing_or_raising_answer_leaves_the_tile_tint_as_it_was():
+    lua = world(tips={16: ["Rockbiter 1 (56 min)"]})
+    base = tile(lua, IMBUE)
+    use_spell(lua, "Rockbiter Weapon", False, True)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    tinted = tile(lua, IMBUE)
+    assert tinted["chip"] != base["chip"]
+    lua.execute('__use.throwOn["Rockbiter Weapon"] = true; __use.throwOn["Lightning Shield"] = true')
+    for mode in ("secret", "throw", "none"):
+        tbh.use_mode(lua, mode)
+        fire(lua, "SPELL_UPDATE_USABLE")
+        assert tile(lua, IMBUE) == tinted, f"{mode}: the tint moved"
+    set_combat(lua, True)
+    tbh.use_mode(lua, "secret")
+    fire(lua, "SPELL_UPDATE_USABLE")
+    update(lua)
+    assert tile(lua, IMBUE) == tinted, "combat secret: the tint moved"
+    tbh.use_mode(lua, None)
+    use_spell(lua, "Rockbiter Weapon", True, False)
+    fire(lua, "ACTIONBAR_UPDATE_USABLE")
+    for part in FOREGROUND:
+        close(tile(lua, IMBUE)[part], base[part], f"a plain answer in combat: {part}", 1e-6)
+    assert blocked(lua) == 0, "usability touched a protected frame in combat"
+
+
+def check_the_tint_follows_each_usability_event_and_leaving_combat():
+    for event in ("SPELL_UPDATE_USABLE", "ACTIONBAR_UPDATE_USABLE", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED"):
+        lua = world(tips={16: ["Rockbiter 1 (56 min)"]})
+        base = tile(lua, IMBUE)
+        use_spell(lua, "Rockbiter Weapon", False, True)
+        if event == "PLAYER_REGEN_ENABLED":
+            set_combat(lua, True)
+            set_combat(lua, False)
+        fire(lua, event)
+        assert tile(lua, IMBUE)["chip"] != base["chip"], f"{event} did not refresh the tint"
+    # the shield tile reads its own spell
+    lua = world(tips={16: ["Rockbiter 1 (56 min)"]})
+    run(lua, "__shield(3, 480)")
+    fire(lua, "UNIT_AURA", "player")
+    update(lua)
+    base = tile(lua, SHIELD)
+    use_spell(lua, "Lightning Shield", False, False)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    assert tile(lua, SHIELD)["chip"] != base["chip"], "the shield tile did not follow its spell"
+
+
+def check_a_locked_or_absent_tile_is_never_asked_and_never_tinted():
+    lua = world(spells=("Rockbiter Weapon",), tips={16: ["Rockbiter 1 (30 min)"]})
+    b = btn(lua, SHIELD)
+    assert b.fsLocked
+    lua.execute("__use_reset()")
+    use_spell(lua, "Lightning Shield", False, True)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    asked = {str(k) for k in g(lua).__use.seen.spell.keys()}
+    assert "Lightning Shield" not in asked, "a locked tile was asked"
+    assert shown(b.fsMold) and not shown(b.fsFace)
+    # learned while the usable answer says out of mana: the tile comes up already tinted
+    run(lua, '__spell("Lightning Shield", 324, true)')
+    fire(lua, "SPELLS_CHANGED")
+    assert not b.fsLocked
+    oom = use_theme(lua, "COLOR_OOM")
+    tinted = tile(lua, SHIELD)["chip"]
+    use_spell(lua, "Lightning Shield", True, False)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    plain = tile(lua, SHIELD)["chip"]
+    assert tinted != plain and dist(tinted, oom) < dist(plain, oom), "an unlocked tile came up without the usability"
+    # no imbue known: the tile is absent and not asked
+    lua = world(spells=("Lightning Shield",))
+    lua.execute("__use_reset()")
+    fire(lua, "SPELL_UPDATE_USABLE")
+    asked = {str(k) for k in g(lua).__use.seen.spell.keys()}
+    assert asked <= {"Lightning Shield"}, f"an absent imbue tile was asked: {sorted(asked)}"
+
+
+def check_a_tinted_idle_tick_allocates_nothing_in_or_out_of_combat():
+    for combat in (False, True):
+        lua = world(tips={16: ["Rockbiter 1 (59 min)"]})
+        run(lua, "__shield(3, 480)")
+        fire(lua, "UNIT_AURA", "player")
+        use_spell(lua, "Rockbiter Weapon", False, True)
+        use_spell(lua, "Lightning Shield", False, False)
+        fire(lua, "SPELL_UPDATE_USABLE")
+        if combat:
+            set_combat(lua, True)
+        run(lua, """
+            if jit then jit.off() end        -- compiled traces would count as allocation; the client runs plain Lua 5.1
+            local ShamanBuffs, BuffTab = FS.ShamanBuffs, FS.BuffTab
+            local t = __now
+            local function step(i) ShamanBuffs.Update(t + i * 0.01); BuffTab.UpdateUsable(); BuffTab.Paint() end
+            for i = 1, 50 do step(i) end
+            collectgarbage("collect"); collectgarbage("stop")
+            local before = collectgarbage("count")
+            for i = 51, 450 do step(i) end
+            __grew = (collectgarbage("count") - before) * 1024
+            collectgarbage("restart")
+        """)
+        assert float(g(lua).__grew) < 2000, f"combat={combat}: 400 tinted ticks allocated {float(g(lua).__grew):.0f} bytes"
+
+
+
 CHECKS = [
     check_parse_reads_minutes_seconds_hours_with_and_without_a_rank,
     check_parse_ignores_lines_that_are_not_an_imbue_with_a_time,
@@ -1486,6 +1678,13 @@ CHECKS = [
     check_toc_lists_the_buff_files_after_the_totem_bar,
     check_no_em_dashes_and_no_flagged_words_in_the_new_files,
     check_the_old_class_module_chips_are_gone_from_the_gunsight_file,
+    check_low_mana_tints_the_tile_foreground_blue_unusable_grey_and_usable_is_the_approved_look,
+    check_the_tint_blends_with_each_state_colour_pink_amber_and_hollow,
+    check_the_tile_asks_the_spell_api_about_the_spell_it_casts,
+    check_a_secret_missing_or_raising_answer_leaves_the_tile_tint_as_it_was,
+    check_the_tint_follows_each_usability_event_and_leaving_combat,
+    check_a_locked_or_absent_tile_is_never_asked_and_never_tinted,
+    check_a_tinted_idle_tick_allocates_nothing_in_or_out_of_combat,
 ]
 SCALED_CHECKS = [
     check_the_shoulder_is_the_two_by_one_block_at_316_and_the_buttons_sit_inside_it,

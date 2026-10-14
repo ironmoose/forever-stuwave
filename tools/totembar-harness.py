@@ -236,6 +236,33 @@ function GetTotemDuration(slot)
     local t = __tot[slot]
     if t and not __totObjNil then return { totemFor = slot } end
 end
+-- usability: IsUsableAction(action) and C_Spell.IsSpellUsable(spell) answer usable, notEnoughMana from
+-- __use[kind][key] (unset: usable). __use.mode: "secret" (both answers secret), "throw" (for the keys in __use.throwOn,
+-- so the main bars, which share IsUsableAction here, are not thrown at), "none" (no answer).
+-- The counters, the last key asked and the set of keys ever asked only allocate for a key not seen before, so a hot
+-- loop over the same buttons allocates nothing.
+__use = { action = {}, spell = {}, mode = nil, throwOn = {}, n = { action = 0, spell = 0, legacy = 0 },
+          last = {}, seen = { action = {}, spell = {}, legacy = {} } }
+function __usable(kind, key, usable, noMana) __use[kind][key] = { usable, noMana } end
+function __use_reset()
+    __use.n.action, __use.n.spell, __use.n.legacy = 0, 0, 0
+    __use.last.action, __use.last.spell, __use.last.legacy = nil, nil, nil
+    __use.seen = { action = {}, spell = {}, legacy = {} }
+end
+local function usableAnswer(kind, key)
+    __use.n[kind] = __use.n[kind] + 1
+    __use.last[kind] = key
+    __use.seen[kind][key] = true
+    if __use.mode == "throw" and __use.throwOn[key] then error("usability blew up") end
+    if __use.mode == "secret" then return __SECRET, __SECRET end
+    if __use.mode == "none" then return end
+    local a = __use[kind == "legacy" and "spell" or kind][key]
+    if a then return a[1], a[2] end
+    return true, false
+end
+function IsUsableAction(action) return usableAnswer("action", action) end
+C_Spell.IsSpellUsable = function(spell) return usableAnswer("spell", spell) end
+function IsUsableSpell(spell) return usableAnswer("legacy", spell) end
 """
 
 def boot(scale: float = 1.0, *, klass: str = "SHAMAN", learned=(), lists=None, spells=(), combat: bool = False,
@@ -2376,6 +2403,270 @@ def check_no_em_dashes_in_the_new_files():
         assert chr(0x2014) not in path.read_text(encoding="utf-8"), f"{path.name} has an em dash"
 
 
+# ---------------------------------------------------------------------------------------------
+# Usability feedback: out of mana -> blue, unusable -> grey, usable -> normal (the main bars' colours)
+# ---------------------------------------------------------------------------------------------
+
+
+def theme_color(lua, name):
+    c = getattr(g(lua).FS.Theme, name)
+    return (float(c[1]), float(c[2]), float(c[3]))
+
+
+def tint_of(region):
+    """The rgb a region was last tinted with; a region never tinted is plain white."""
+    v = region._vertex
+    return (1.0, 1.0, 1.0) if v is None else (float(v[1]), float(v[2]), float(v[3]))
+
+
+def usable(lua, kind, key, ok, no_mana=False):
+    lua.execute(f"__usable({kind!r}, {key}, {'true' if ok else 'false'}, {'true' if no_mana else 'false'})")
+
+
+def use_mode(lua, mode):
+    lua.execute(f"__use.mode = {('nil' if mode is None else repr(mode))}")
+
+
+def use_count(lua, kind) -> int:
+    return int(g(lua).__use.n[kind])
+
+
+def same_rgb(a, b, what):
+    for i in range(3):
+        approx(a[i], b[i], what)
+
+
+def check_the_main_bars_feedback_colours_live_in_the_theme():
+    lua = all_known_with_lists()
+    th = g(lua).FS.Theme
+    assert theme_color(lua, "COLOR_OOM") == (0.5, 0.5, 1.0), "out of mana is not Blizzard's blue"
+    assert theme_color(lua, "COLOR_UNUSABLE") == (0.4, 0.4, 0.4), "unusable is not Blizzard's grey"
+    assert th.COLOR_OUT_OF_RANGE is not None
+    src = (ADDON / "Modules/ActionBars/ActionBars.lua").read_text(encoding="utf-8")
+    assert not re.search(r"COLOR_(OOM|UNUSABLE)\s*=\s*\{", src), "ActionBars.lua still carries its own colour literals"
+
+
+def check_an_action_mode_element_tints_its_icon_by_the_slots_usability():
+    lua = all_known_with_lists()
+    b = by_key(lua, "earth")
+    assert b.fsMode == "action"
+    slot = action_id(2)
+    assert tint_of(b.icon) == (1.0, 1.0, 1.0), "a usable totem is not plain"
+    usable(lua, "action", slot, False, True)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    same_rgb(tint_of(b.icon), theme_color(lua, "COLOR_OOM"), "out of mana")
+    usable(lua, "action", slot, False, False)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    same_rgb(tint_of(b.icon), theme_color(lua, "COLOR_UNUSABLE"), "unusable")
+    usable(lua, "action", slot, True, False)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    same_rgb(tint_of(b.icon), (1, 1, 1), "usable again")
+    # the tint is per button: the fire totem asked its own slot
+    usable(lua, "action", action_id(1), False, True)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    same_rgb(tint_of(by_key(lua, "fire").icon), theme_color(lua, "COLOR_OOM"), "fire out of mana")
+    same_rgb(tint_of(b.icon), (1, 1, 1), "earth stayed usable")
+
+
+def check_a_spell_mode_element_asks_the_spell_api_about_its_current_pick():
+    lua = boot(learned=TOTEMS["earth"])
+    b = by_key(lua, "earth")
+    assert b.fsMode == "spell"
+    lua.execute("__use_reset()")
+    stone = tid(lua, "Stoneskin Totem")
+    usable(lua, "spell", stone, False, True)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    same_rgb(tint_of(b.icon), theme_color(lua, "COLOR_OOM"), "out of mana in spell mode")
+    assert use_count(lua, "spell") > 0, "spell mode never asked the spell API"
+    assert int(g(lua).__use.last.spell) == stone, "the spell API was not asked about the current pick"
+    assert action_id(2) not in {int(k) for k in g(lua).__use.seen.action.keys()}, "spell mode asked about its action slot"
+    # a new pick is judged on its own spell at once, with no usable event in between
+    magma_free = tid(lua, "Earthbind Totem")
+    usable(lua, "spell", magma_free, False, False)
+    tb(lua).Pick("earth", magma_free)
+    same_rgb(tint_of(b.icon), theme_color(lua, "COLOR_UNUSABLE"), "the new pick is unusable")
+    # the legacy API answers when C_Spell has none
+    lua.execute("C_Spell.IsSpellUsable = nil; __use_reset()")
+    usable(lua, "spell", magma_free, False, True)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    same_rgb(tint_of(b.icon), theme_color(lua, "COLOR_OOM"), "legacy IsUsableSpell")
+    assert use_count(lua, "legacy") > 0
+
+
+def check_an_action_mode_element_never_asks_the_spell_api():
+    lua = all_known_with_lists()
+    lua.execute("__use_reset()")
+    fire(lua, "SPELL_UPDATE_USABLE")
+    fire(lua, "ACTIONBAR_UPDATE_USABLE")
+    asked = {int(k) for k in g(lua).__use.seen.action.keys()}
+    assert {action_id(s) for s in SLOT.values()} <= asked, f"the four multi-cast slots were not all asked: {sorted(asked)}"
+    # only the set drop and recall (plain spell buttons) ask the spell API
+    spells = {int(k) for k in g(lua).__use.seen.spell.keys()}
+    assert spells == {CALL, RECALL}, f"the spell API was asked about {sorted(spells)}"
+
+
+def check_the_set_drop_and_recall_tint_their_glyph_and_leave_the_dark_plate_alone():
+    lua = all_known_with_lists()
+    for key, sid in (("set", CALL), ("recall", RECALL)):
+        b = by_key(lua, key)
+        base = tint_of(b.fsGlyph)
+        want = tuple(float(b.fsColor[i]) for i in (1, 2, 3))
+        same_rgb(base, want, f"{key} glyph at rest")
+        plate = [float(x) for x in seq(b.icon._color)]
+        usable(lua, "spell", sid, False, True)
+        fire(lua, "SPELL_UPDATE_USABLE")
+        same_rgb(tint_of(b.fsGlyph), theme_color(lua, "COLOR_OOM"), f"{key} glyph out of mana")
+        approx(b.fsGlyph._vertex[4], 0.95, f"{key} glyph alpha")
+        usable(lua, "spell", sid, False, False)
+        fire(lua, "SPELL_UPDATE_USABLE")
+        same_rgb(tint_of(b.fsGlyph), theme_color(lua, "COLOR_UNUSABLE"), f"{key} glyph unusable")
+        usable(lua, "spell", sid, True, False)
+        fire(lua, "SPELL_UPDATE_USABLE")
+        same_rgb(tint_of(b.fsGlyph), want, f"{key} glyph usable again")
+        approx(b.fsGlyph._vertex[4], 0.95, f"{key} glyph alpha restored")
+        assert [float(x) for x in seq(b.icon._color)] == plate, f"{key}: the dark plate changed"
+        assert tint_of(b.icon) == (1.0, 1.0, 1.0), f"{key}: the plate was tinted"
+
+
+def check_the_tint_composes_with_the_element_glyph_and_underline_colours():
+    lua = all_known_with_lists()
+    for key in SLOT:
+        b = by_key(lua, key)
+        usable(lua, "action", action_id(SLOT[key]), False, True)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    for key in SLOT:
+        b = by_key(lua, key)
+        want = tuple(float(b.fsColor[i]) for i in (1, 2, 3))
+        same_rgb(tint_of(b.fsGlyph), want, f"{key}: the crown lost its element colour")
+        approx(b.fsGlyph._vertex[4], 0.95, f"{key}: crown alpha")
+        c = [float(x) for x in seq(b.fsUnderline._color)]
+        same_rgb(c, want, f"{key}: the underline lost its element colour")
+        same_rgb(tint_of(b.icon), theme_color(lua, "COLOR_OOM"), f"{key}: the icon is not blue")
+
+
+def check_a_locked_button_stays_as_it_is_whatever_usability_says():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"), spells=("Call of the Elements",))
+    recall, fire_b = by_key(lua, "recall"), by_key(lua, "fire")
+    for b in (recall, fire_b):
+        assert b.fsLocked and shown(b.fsMold), f"{b.fsKey} is not locked"
+    lua.execute("__use.default = nil; __use_reset()")
+    for sid in (RECALL, 3599):
+        usable(lua, "spell", sid, False, True)
+    usable(lua, "action", action_id(1), False, True)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    for b in (recall, fire_b):
+        want = tuple(float(b.fsColor[i]) for i in (1, 2, 3))
+        same_rgb(tint_of(b.fsGlyph), want, f"locked {b.fsKey} glyph")
+        assert tint_of(b.icon) == (1.0, 1.0, 1.0), f"locked {b.fsKey} icon"
+        assert shown(b.fsMold) and shown(b.fsLockText) and float(b._alpha) == 0.4, f"locked {b.fsKey} look changed"
+    # a tint taken while the button was live is dropped when it locks (the mold is not blue)
+    lua2 = all_known_with_lists()
+    b = by_key(lua2, "recall")
+    usable(lua2, "spell", RECALL, False, True)
+    fire(lua2, "SPELL_UPDATE_USABLE")
+    same_rgb(tint_of(b.fsGlyph), theme_color(lua2, "COLOR_OOM"), "live tint")
+    lua2.execute('__unlearn("Totemic Recall")')
+    fire(lua2, "SPELLS_CHANGED")
+    assert b.fsLocked
+    same_rgb(tint_of(b.fsGlyph), tuple(float(b.fsColor[i]) for i in (1, 2, 3)), "a locked glyph kept the tint")
+
+
+def check_a_secret_or_missing_answer_leaves_the_current_tint():
+    lua = all_known_with_lists()
+    earth, recall = by_key(lua, "earth"), by_key(lua, "recall")
+    usable(lua, "action", action_id(2), False, True)
+    usable(lua, "spell", RECALL, False, False)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    oom, grey = theme_color(lua, "COLOR_OOM"), theme_color(lua, "COLOR_UNUSABLE")
+    same_rgb(tint_of(earth.icon), oom, "start"), same_rgb(tint_of(recall.fsGlyph), grey, "start")
+    lua.execute(f"__use.throwOn[{action_id(2)}] = true; __use.throwOn[{RECALL}] = true")
+    for mode in ("secret", "throw", "none"):
+        use_mode(lua, mode)
+        fire(lua, "SPELL_UPDATE_USABLE")
+        same_rgb(tint_of(earth.icon), oom, f"{mode}: the icon guessed")
+        same_rgb(tint_of(recall.fsGlyph), grey, f"{mode}: the glyph guessed")
+    # in combat too, where the client hands back secrets
+    set_combat(lua, True)
+    use_mode(lua, "secret")
+    fire(lua, "SPELL_UPDATE_USABLE")
+    same_rgb(tint_of(earth.icon), oom, "combat secret")
+    # a plain answer in combat is a texture write and lands
+    use_mode(lua, None)
+    usable(lua, "action", action_id(2), True, False)
+    fire(lua, "ACTIONBAR_UPDATE_USABLE")
+    same_rgb(tint_of(earth.icon), (1, 1, 1), "a plain answer in combat")
+    assert blocked(lua) == 0, "usability touched a protected frame in combat"
+    # one half secret: not enough mana is plainly true, so it is blue whatever the other half is
+    lua.execute("""
+        local real = IsUsableAction
+        function IsUsableAction(a) return __SECRET, true end
+    """)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    same_rgb(tint_of(earth.icon), oom, "not enough mana plainly true")
+    lua.execute("function IsUsableAction(a) return false, __SECRET end")
+    fire(lua, "SPELL_UPDATE_USABLE")
+    same_rgb(tint_of(earth.icon), oom, "a secret mana flag with an unusable spell is not guessed")
+
+
+def check_the_tint_refreshes_on_each_usability_event_and_leaving_combat():
+    for event in ("SPELL_UPDATE_USABLE", "ACTIONBAR_UPDATE_USABLE", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED"):
+        lua = all_known_with_lists()
+        b = by_key(lua, "water")
+        usable(lua, "action", action_id(3), False, True)
+        if event == "PLAYER_REGEN_ENABLED":
+            set_combat(lua, True)
+            set_combat(lua, False)
+        fire(lua, event)
+        same_rgb(tint_of(b.icon), theme_color(lua, "COLOR_OOM"), f"{event} did not refresh the tint")
+    # a sync (learning, a rescale) paints it too, without a usability event
+    lua = all_known_with_lists()
+    usable(lua, "action", action_id(3), False, False)
+    fire(lua, "SPELLS_CHANGED")
+    same_rgb(tint_of(by_key(lua, "water").icon), theme_color(lua, "COLOR_UNUSABLE"), "a sync")
+
+
+def check_the_usability_refresh_allocates_nothing_and_rewrites_nothing_unchanged():
+    for combat in (False, True):
+        lua = all_known_with_lists()
+        usable(lua, "action", action_id(2), False, True)
+        usable(lua, "spell", RECALL, False, False)
+        fire(lua, "SPELL_UPDATE_USABLE")
+        if combat:
+            set_combat(lua, True)
+        lua.execute("""
+            if jit then jit.off() end        -- compiled traces would count as allocation; the client runs plain Lua 5.1
+            local update = FS.TotemBar.UpdateUsable
+            for i = 1, 50 do update() end
+            collectgarbage("collect"); collectgarbage("stop")
+            local before = collectgarbage("count")
+            for i = 1, 400 do update() end
+            __grew = (collectgarbage("count") - before) * 1024
+            collectgarbage("restart")
+        """)
+        assert float(g(lua).__grew) < 2000, f"combat={combat}: 400 refreshes allocated {float(g(lua).__grew):.0f} bytes"
+
+
+def check_the_usability_path_has_no_per_frame_script():
+    src = TOTEMBAR.read_text(encoding="utf-8")
+    body = src[src.index("local function UpdateUsable"):src.index("local function UpdateAllUsable")]
+    assert "OnUpdate" not in body, "usability polls per frame"
+
+
+def check_the_picked_tiles_underline_is_scaled_with_the_tile(scale):
+    lua = boot(scale, learned=TOTEMS["earth"], lists=lists_for("earth"))
+    tb(lua).OpenPicker("earth")
+    picker = tb(lua).Picker()
+    tiles = [e for e in seq(picker.fsEntries) if shown(e)]
+    for tile in tiles:
+        pts = {str(p.point): p for p in seq(tile.fsUnderline._points)}
+        assert set(pts) == {"BOTTOMLEFT", "BOTTOMRIGHT"}, f"underline anchors {sorted(pts)}"
+        approx(pts["BOTTOMLEFT"].x, 5 * scale, "underline left inset"), approx(pts["BOTTOMLEFT"].y, 2 * scale, "underline lift")
+        approx(pts["BOTTOMRIGHT"].x, -5 * scale, "underline right inset"), approx(pts["BOTTOMRIGHT"].y, 2 * scale, "underline lift (right)")
+        approx(tile.fsUnderline._h, 2 * scale, "underline height")
+        approx(tile._w, 32 * scale, "tile width")
+
+
+
 CHECKS = [
     check_six_named_secure_buttons_in_the_fixed_order_built_once,
     check_only_a_shaman_gets_a_tab,
@@ -2459,8 +2750,20 @@ CHECKS = [
     check_the_flyout_chrome_follows_the_picker_and_the_bump,
     check_toc_lists_the_totem_bar_after_the_seal_bar,
     check_no_em_dashes_in_the_new_files,
+    check_the_main_bars_feedback_colours_live_in_the_theme,
+    check_an_action_mode_element_tints_its_icon_by_the_slots_usability,
+    check_a_spell_mode_element_asks_the_spell_api_about_its_current_pick,
+    check_an_action_mode_element_never_asks_the_spell_api,
+    check_the_set_drop_and_recall_tint_their_glyph_and_leave_the_dark_plate_alone,
+    check_the_tint_composes_with_the_element_glyph_and_underline_colours,
+    check_a_locked_button_stays_as_it_is_whatever_usability_says,
+    check_a_secret_or_missing_answer_leaves_the_current_tint,
+    check_the_tint_refreshes_on_each_usability_event_and_leaving_combat,
+    check_the_usability_refresh_allocates_nothing_and_rewrites_nothing_unchanged,
+    check_the_usability_path_has_no_per_frame_script,
 ]
 SCALED_CHECKS = [
+    check_the_picked_tiles_underline_is_scaled_with_the_tile,
     check_the_piece_hit_area_is_38_by_13_flush_with_the_button_top,
     check_clicks_on_the_button_face_never_land_on_the_piece,
     check_the_shoulder_is_the_six_by_one_block_and_the_buttons_sit_inside_it,

@@ -71,6 +71,14 @@
 --   * SetAttribute, Show, Hide, SetPoint and SetSize on a secure button (or its host) are refused in combat.
 --     Everything that does any of them runs out of combat only; combat sets `pendingSync` and
 --     PLAYER_REGEN_ENABLED replays it. Textures, swipes and the picker follow in combat; SetMultiCastSpell waits for regen.
+--   * USABILITY: the same feedback as the main bars (ActionBars.lua UpdateUsable, colours Theme.COLOR_OOM and
+--     Theme.COLOR_UNUSABLE): out of mana tints blue, otherwise unusable tints grey, usable is the plain look. An
+--     ELEMENT button tints its spell icon only (the crown and the underline keep the element colour); the set drop
+--     and recall buttons, whose face is the glyph, tint the glyph (the dark plate behind it is left alone). The
+--     source is IsUsableAction on the multi-cast slot in ACTION mode and C_Spell.IsSpellUsable (else IsUsableSpell)
+--     on the current pick in SPELL mode. An answer that is secret, missing or raised leaves the tint as it was.
+--     A locked button is plain. Event driven (SPELL_UPDATE_USABLE, ACTIONBAR_UPDATE_USABLE, the combat edges, a
+--     sync, a new pick): texture writes only, legal in combat, a write only when the state changed.
 --   * SEAT: TotemBar.HostPoint / TotemBar.SlotPoint, answered by the class shoulder while it stands, with the
 --     same fallback as SealBar (above the stance bar's seat).
 --
@@ -89,6 +97,7 @@ local TB = {
     -- the Paladin block's numbers (ClassShoulder.lua); this block is 6 x 1
     BTN = 38, GAP = 4.8, PAD = 6, PT = 6, PB = 5, COLS = 6,
     BORDER_ALPHA = 0.35,
+    GLYPH_ALPHA = 0.95,         -- the pole crown / face glyph (StyleButton, and the usability tint restores it)
     LOCKED_ALPHA = 0.4,
     MC_SET = 1,                 -- the multi-cast page Call of the Elements drops
     MAX_ENTRIES = 6,            -- picker tiles (an element holds at most 5 totems by level 30)
@@ -151,7 +160,8 @@ local TB = {
     DESTROY_ALL = "/click FSTotemDestroy1\n/click FSTotemDestroy2\n/click FSTotemDestroy3\n/click FSTotemDestroy4",
     EVENTS = { "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD" },
     -- state-only events: texture and Cooldown writes, legal in combat
-    LIVE_EVENTS = { "SPELL_UPDATE_COOLDOWN", "PLAYER_TOTEM_UPDATE", "ACTIONBAR_SLOT_CHANGED" },
+    LIVE_EVENTS = { "SPELL_UPDATE_COOLDOWN", "PLAYER_TOTEM_UPDATE", "ACTIONBAR_SLOT_CHANGED",
+        "SPELL_UPDATE_USABLE", "ACTIONBAR_UPDATE_USABLE", "PLAYER_REGEN_DISABLED" },
     -- not on every client; asked with a pcall
     OPTIONAL_EVENTS = { "UPDATE_MULTI_CAST_ACTIONBAR" },
     host = nil,
@@ -692,7 +702,7 @@ local function StyleButton(button, size, scale)
     if not button.fsGlyph then
         local glyph = textHost:CreateTexture(nil, "OVERLAY", nil, 2)
         glyph:SetTexture(MEDIA .. def.glyph .. ".tga")
-        glyph:SetVertexColor(button.fsColor[1], button.fsColor[2], button.fsColor[3], 0.95)
+        glyph:SetVertexColor(button.fsColor[1], button.fsColor[2], button.fsColor[3], TB.GLYPH_ALPHA)
         button.fsGlyph = glyph
     end
     button.fsGlyph:ClearAllPoints()
@@ -898,6 +908,54 @@ local function UpdateAllHotkeys()
 end
 
 -------------------------------------------------------------------------------
+-- Usability (texture writes: legal in combat)
+-------------------------------------------------------------------------------
+
+local ActionUsability = FS.FrameHelpers.ActionUsability
+local SpellUsability = FS.FrameHelpers.SpellUsability
+local UsabilityColor = FS.FrameHelpers.UsabilityColor
+
+-- Paints a usability state ("oom", "unusable", anything else is plain) when it differs from the one painted. An
+-- element button tints its spell icon; the set drop and recall buttons wear their glyph as the face, so the glyph
+-- takes the tint colour instead (their element colour comes back with the plain state).
+local function PaintUsable(button, state)
+    if button.fsTint == state then return end
+    local c = UsabilityColor(state)
+    if button.fsDef.slot then
+        if not button.icon then return end
+        button.fsTint = state
+        if c then button.icon:SetVertexColor(c[1], c[2], c[3]) else button.icon:SetVertexColor(1, 1, 1) end
+    else
+        local glyph = button.fsGlyph
+        if not glyph then return end
+        button.fsTint = state
+        local from = c or button.fsColor
+        glyph:SetVertexColor(from[1], from[2], from[3], TB.GLYPH_ALPHA)
+    end
+end
+
+-- Reads one button's usability from where it casts: the multi-cast slot in ACTION mode, the spell otherwise. An
+-- answer that cannot be told (nil: secret, missing, raised) leaves the painted state alone. A locked button is plain.
+local function UpdateUsable(button)
+    if button.fsLocked then
+        PaintUsable(button, nil)
+        return
+    end
+    local state
+    if button.fsMode == "action" and button.fsActionId then
+        state = ActionUsability(button.fsActionId)
+    elseif button.fsSpellID then
+        state = SpellUsability(button.fsSpellID)
+    end
+    if state then PaintUsable(button, state) end
+end
+
+local function UpdateAllUsable()
+    for _, button in ipairs(TB.list) do UpdateUsable(button) end
+end
+TotemBar.UpdateUsable = UpdateAllUsable
+
+-------------------------------------------------------------------------------
 -- Applying a state to a button
 -------------------------------------------------------------------------------
 
@@ -922,6 +980,7 @@ local function Lock(button)
     end
     UpdateCooldown(button)
     UpdateTotemSweep(button)
+    PaintUsable(button, nil)
 end
 
 local function Unlock(button)
@@ -948,6 +1007,7 @@ local function ShowPick(button, pick)
         button.icon:Show()
     end
     UpdateCooldown(button)
+    UpdateUsable(button)
 end
 
 -- An empty or foreign multi-cast slot (one the native multi-cast button named) gets the pick once per (slot, pick).
@@ -1066,6 +1126,7 @@ local function ApplyFixed(button, def)
     button.icon:SetColorTexture(0.04, 0.02, 0.09, 0.9)
     button.icon:Show()
     UpdateCooldown(button)
+    UpdateUsable(button)
 end
 
 -- A pick the native bar made (or one we sent) moved the multi-cast slot: show it. Texture state and a saved
@@ -1434,9 +1495,9 @@ function TotemBar.OpenPicker(key)
             if item.icon then tile.icon:SetTexture(item.icon) end
             tile.fsUnderline:SetColorTexture(c[1], c[2], c[3], 0.95)
             tile.fsUnderline:ClearAllPoints()
-            tile.fsUnderline:SetPoint("BOTTOMLEFT", tile, "BOTTOMLEFT", 5, 2)
-            tile.fsUnderline:SetPoint("BOTTOMRIGHT", tile, "BOTTOMRIGHT", -5, 2)
-            tile.fsUnderline:SetHeight(2)
+            tile.fsUnderline:SetPoint("BOTTOMLEFT", tile, "BOTTOMLEFT", 5 * s, 2 * s)
+            tile.fsUnderline:SetPoint("BOTTOMRIGHT", tile, "BOTTOMRIGHT", -5 * s, 2 * s)
+            tile.fsUnderline:SetHeight(2 * s)
             PaintTile(tile)
             tile:Show()
         else
@@ -1553,6 +1614,7 @@ end
 
 local function OnEvent(_, event)
     if event == "PLAYER_REGEN_ENABLED" then
+        UpdateAllUsable()
         if TB.pendingSync then
             Sync()
         else
@@ -1562,6 +1624,8 @@ local function OnEvent(_, event)
         end
     elseif event == "UPDATE_BINDINGS" then
         UpdateAllHotkeys()
+    elseif event == "SPELL_UPDATE_USABLE" or event == "ACTIONBAR_UPDATE_USABLE" or event == "PLAYER_REGEN_DISABLED" then
+        UpdateAllUsable()
     elseif event == "SPELL_UPDATE_COOLDOWN" then
         UpdateAllCooldowns()
     elseif event == "PLAYER_TOTEM_UPDATE" then
