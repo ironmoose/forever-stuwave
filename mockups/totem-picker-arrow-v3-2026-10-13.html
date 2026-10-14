@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1600">
+<title>Totem picker arrow v3</title>
+<style>
+@font-face{font-family:'Mononoki';src:url(../forever-stuwave/Media/Fonts/MononokiNerdFontMono-Bold.ttf) format('truetype');font-weight:100 900;font-style:normal;font-display:block}
+:root{
+  color-scheme:dark;
+  --bg:#0d0620; --fg:#e9e2ff; --muted:#9d93c4; --white:#f3fbff; --text:#e2e8f0;
+  --violet:#a855f7; --cyan:#22e0ff; --pink:#ff2e97; --amber:#ffb648; --green:#39ff14;
+  --edge:rgba(168,85,247,.35);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg)}
+body{width:100%;max-width:1600px;padding:28px 30px 44px;color:var(--fg);font-family:'Mononoki',ui-monospace,monospace;font-weight:700;line-height:1.45;overflow-x:hidden}
+h1{margin:0;font-size:30px;letter-spacing:.08em;color:var(--white);text-shadow:0 0 18px var(--violet);font-weight:700}
+.ref{display:inline-block;margin:10px 0 0;padding:2px 10px;font-size:13px;letter-spacing:.12em;color:var(--amber);border:1px solid rgba(255,182,72,.5);background:rgba(255,182,72,.06)}
+.sub{margin:10px 0 8px;color:var(--muted);font-size:15px;max-width:1500px}
+.sub b,.cap b{color:var(--white);font-weight:700}
+h2{margin:44px 0 8px;font-size:22px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 12px var(--violet);font-weight:700}
+h2 i{font-style:normal;color:var(--pink)}
+.cap{font-size:13px;line-height:1.5;color:var(--muted);margin:0 0 12px;max-width:1500px}
+.rowlab{font-size:15px;letter-spacing:.1em;color:var(--white);margin:20px 0 8px;text-shadow:0 0 10px var(--violet)}
+.rowlab i{font-style:normal;color:var(--pink)}
+.rowlab small{font-size:12px;color:var(--muted);letter-spacing:0;text-shadow:none;margin-left:10px}
+.frame{display:block;border:1px solid var(--edge);background:#120a22;line-height:0}
+.frame svg{display:block}
+svg text{font-family:'Mononoki',ui-monospace,monospace;font-weight:700}
+.row{display:flex;gap:14px;align-items:flex-end;flex-wrap:nowrap}
+.cell{flex:none}
+.cell .tc{max-width:306px;min-height:44px;margin-top:5px;font-size:11px;line-height:1.35;color:var(--muted)}
+.cell .tc b{color:var(--cyan);display:block;font-size:11px;letter-spacing:.06em}
+.notes{display:flex;flex-wrap:wrap;gap:26px;align-items:flex-start;margin-top:8px}
+.panel{border:1px solid var(--edge);background:rgba(26,16,37,.7);padding:12px 16px 14px;font-size:12px;line-height:1.5;color:var(--text);width:740px}
+.panel h3{margin:0 0 6px;font-size:13px;letter-spacing:.12em;color:var(--cyan);font-weight:700}
+.panel b{color:var(--white);font-weight:700}
+table.dp{border-collapse:collapse;width:100%;font-size:12px}
+table.dp td{padding:3px 4px;vertical-align:top;border-top:1px solid rgba(168,85,247,.2);color:var(--text);line-height:1.35}
+table.dp td.e{width:150px;color:#fff;white-space:nowrap}
+table.dp td.v{color:var(--muted)}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <filter id="gls" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  <filter id="gls2" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  <filter id="haze" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="1.6"/></filter>
+</defs></svg>
+
+<h1>TOTEM PICKER ARROW V3</h1>
+<div class="ref">Parker's design, 2026-10-13, Shaman</div>
+<p class="sub">Parker's whiteboard sketch, built to the real button geometry. On hover a <b>separate flat piece</b> appears above the element button, styled like the button (same fill, same element coloured stroke as the button's hover look). Its lower left edge runs <b>parallel to the button's chamfer cut</b> with a thin even seam, so the cut seems to continue as a line. The piece is a thick wedge over the cut corner plus a thinner bar running right along the top of the button, like a folder tab. A <b>synthwave neon arrow</b> points up and to the right, along the chamfer direction, inside the wedge end.</p>
+<p class="sub"><b>The height conflict, both shown.</b> At sketch proportions the piece is about 11 px tall on the 38 px button, but the gap between the button top and the tab's top rail is only 6 px. The earlier rule (arrow stays inside the tab outline) is overridden by the sketch, so <b>V1 "As drawn"</b> follows the sketch and the tab outline grows around it while hovered. <b>V2 "Fits the gap"</b> squeezes the same shape under the rail. Parker judges.</p>
+<p class="sub"><b>The arrow style (both variants, all states):</b> a neon double line. An outer blurred haze and a gradient body run from the element colour at the tail to hot magenta at the head, with a thin near white core on top, and the piece carries faint scanlines behind it. Dim on button hover, full glow on arrow hover, flipped to point down and left when the list is open. <b>The flyout is concept A's, redrawn unchanged.</b> Level 26 Shaman: Fire and Earth known, Air still locked. Icon art in the flyout is a stand in and the tooltip text is approximate. Dashed white rectangles in the 4x cells are the click area.</p>
+
+<div id="out"></div>
+
+<h2><i>Z //</i> NOTES, CLICK AREA AND BUILD</h2>
+<div class="notes" id="spec"></div>
+
+<script>
+var C={cyan:'#22e0ff',pink:'#ff2e97',violet:'#a855f7',amber:'#ffb648',white:'#f3fbff',muted:'#9d93c4',fg:'#e9e2ff',bg:'#0d0620',gold:'#d9a521'};
+var TABFILL='#281745';
+function hex(h){return [1,3,5].map(function(i){return parseInt(h.substr(i,2),16);});}
+function mix(a,b,t){var x=hex(a),y=hex(b);return '#'+[0,1,2].map(function(i){return ('0'+Math.round(x[i]+(y[i]-x[i])*t).toString(16)).slice(-2);}).join('');}
+function mold(x,y,w,h,c){return x+','+(y+c)+' '+(x+c)+','+y+' '+(x+w)+','+y+' '+(x+w)+','+(y+h-c)+' '+(x+w-c)+','+(y+h)+' '+x+','+(y+h);}
+function txt(x,y,s,size,fill,o){o=o||{};return '<text x="'+x+'" y="'+y+'" font-size="'+size+'" fill="'+fill+'" text-anchor="'+(o.a||'start')+'"'+(o.op!=null?' fill-opacity="'+o.op+'"':'')+'>'+s+'</text>';}
+function pts(a){return a.map(function(p){return p[0]+','+p[1];}).join(' ');}
+function dpath(a,close){return 'M'+a.map(function(p){return p[0]+','+p[1];}).join(' L')+(close?' Z':'');}
+
+/* Console and totem tab geometry, design px (Console.lua, TotemBar.lua). y = 0 is the Console's top line. */
+var G={H:72,CUT:14,BTN:38,GAP:4.8,PAD:6,PT:6,BH:49,FLARE:10,SCUT:6,TX:36,TW:264,
+  TILE:32,TGAP:3,TPAD:3};
+var T=-49, BY=-G.BH+G.PT; /* tab top rail y, button top y (-43) */
+var ELS={
+  fire:{j:0,c:'#ff5a3c',name:'Fire',list:[['searing','Searing Totem'],['frostres','Frost Resistance Totem'],['magma','Magma Totem']]},
+  earth:{j:1,c:'#a8e063',name:'Earth',list:[['stoneskin','Stoneskin Totem'],['earthbind','Earthbind Totem'],['stoneclaw','Stoneclaw Totem'],['strength','Strength of Earth Totem'],['tremor','Tremor Totem']]},
+  water:{j:2,c:'#4aa8ff'},air:{j:3,c:'#e2d4ff',u:30},set:{j:4,c:'#22e0ff'},recall:{j:5,c:'#ffb648'}
+};
+var ORDER=['fire','earth','water','air','set','recall'];
+var TIPS={
+  earthbind:{n:'Earthbind Totem',cost:'30 mana',d:'Summons an Earthbind Totem with 5 health at the feet of the caster for 45 sec that slows the movement of enemies within 10 yards by 50%.'},
+  frostres:{n:'Frost Resistance Totem',cost:'50 mana',d:'Summons a Frost Resistance Totem with 5 health at the feet of the caster for 2 min that increases the Frost resistance of party members within 30 yards by 30.'},
+  magma:{n:'Magma Totem',cost:'230 mana',d:'Summons a Magma Totem with 5 health at the feet of the caster for 20 sec that deals 22 Fire damage every 2 sec to all enemies within 8 yards.'}
+};
+function bx(el){return G.TX+G.PAD+ELS[el].j*(G.BTN+G.GAP);}
+var uid=0;
+
+/* ---------- stand in spell icons (26 x 26 art inside a 32 tile) ---------- */
+function icon(name,c,x,y,s){
+  var o='',cx=x+s/2,cy=y+s/2,dk=mix(C.bg,c,.35);
+  o+='<rect x="'+x+'" y="'+y+'" width="'+s+'" height="'+s+'" fill="'+mix('#05020f',c,.16)+'"/>';
+  o+='<rect x="'+(cx-7)+'" y="'+(cy+4)+'" width="14" height="7" fill="'+dk+'" stroke="'+c+'" stroke-width="1"/>';
+  o+='<rect x="'+(cx-5.5)+'" y="'+(cy-2)+'" width="11" height="6" fill="'+dk+'" stroke="'+c+'" stroke-width="1"/>';
+  o+='<rect x="'+(cx-3.5)+'" y="'+(cy-6.5)+'" width="7" height="4.5" fill="'+c+'"/>';
+  var e='';
+  switch(name){
+   case 'searing': e='<polygon points="'+(cx-3)+','+(cy-7)+' '+cx+','+(cy-13)+' '+(cx+3)+','+(cy-7)+'" fill="#ffd36a"/>';break;
+   case 'frostres': e='<path d="M'+cx+','+(cy-13)+' L'+cx+','+(cy-7)+' M'+(cx-3)+','+(cy-10)+' L'+(cx+3)+','+(cy-10)+'" stroke="#9fe3ff" stroke-width="1.4"/>';break;
+   case 'magma': e='<path d="M'+(cx-5)+','+(cy-10)+' q2.5,-4 5,0 t5,0" stroke="#ffd36a" stroke-width="1.6" fill="none"/>';break;
+   case 'stoneskin': e='<polygon points="'+(cx-3.5)+','+(cy-13)+' '+(cx+3.5)+','+(cy-13)+' '+(cx+3.5)+','+(cy-9)+' '+cx+','+(cy-7)+' '+(cx-3.5)+','+(cy-9)+'" fill="#e8f2c8"/>';break;
+   case 'earthbind': e='<circle cx="'+cx+'" cy="'+(cy-10)+'" r="3" fill="none" stroke="#e8f2c8" stroke-width="1.4"/>';break;
+   case 'stoneclaw': e='<path d="M'+(cx-4)+','+(cy-7)+' l1.5,-6 l1.5,5 l1,-6 l1.5,6 l1.5,-5 l1.5,6" stroke="#e8f2c8" stroke-width="1.2" fill="none"/>';break;
+   case 'strength': e='<path d="M'+cx+','+(cy-7)+' L'+cx+','+(cy-13)+' M'+(cx-3)+','+(cy-10)+' L'+cx+','+(cy-13)+' L'+(cx+3)+','+(cy-10)+'" stroke="#e8f2c8" stroke-width="1.5" fill="none"/>';break;
+   case 'tremor': e='<path d="M'+(cx-5)+','+(cy-9)+' l2.5,-3 l2.5,6 l2.5,-6 l2.5,3" stroke="#e8f2c8" stroke-width="1.4" fill="none"/>';break;
+  }
+  return o+e;
+}
+
+/* ---------- a tab element button (approved art), st = rest | hov | own ---------- */
+function totemBtn(el,y,st){
+  var d=ELS[el],x=bx(el),w=G.BTN,cx=x+w/2,cy=y+w/2-2,c=d.c,dk=mix(C.bg,c,.35),o='';
+  var glow=(st==='hov');
+  var shape=function(dd){return mold(x+dd,y+dd,w-2*dd,w-2*dd,5);};
+  o+='<polygon points="'+shape(0)+'" fill="'+(glow?mix(C.bg,c,.1):'rgba(13,6,32,.72)')+'"/>';
+  o+='<polygon points="'+shape(.5)+'" fill="none" stroke="'+(st==='rest'?C.violet:c)+'" stroke-opacity="'+(st==='rest'?.35:st==='own'?.6:1)+'" stroke-width="'+(st==='rest'?1.1:1.2)+'"'+(glow?' filter="url(#gls)"':'')+' stroke-linejoin="miter"/>';
+  o+='<rect x="'+(cx-8)+'" y="'+(cy+2)+'" width="16" height="7" fill="'+dk+'" stroke="'+c+'" stroke-width="1.1"/><rect x="'+(cx-6)+'" y="'+(cy-4)+'" width="12" height="6" fill="'+dk+'" stroke="'+c+'" stroke-width="1.1"/><rect x="'+(cx-4)+'" y="'+(cy-9)+'" width="8" height="5" fill="'+c+'"/>';
+  o+='<rect x="'+(x+5)+'" y="'+(y+w-5)+'" width="'+(w-10)+'" height="2" fill="'+c+'" fill-opacity=".9"/>';
+  return o;
+}
+function lockedBtn(el,y,txtL){
+  var x=bx(el),w=G.BTN,cx=x+w/2;
+  return '<g opacity=".4"><polygon points="'+mold(x+.8,y+.8,w-1.6,w-1.6,5)+'" fill="none" stroke="'+C.muted+'" stroke-width="1.6" stroke-dasharray="1.6 3" stroke-linecap="round"/>'+txt(cx,y+w/2+4,txtL,11,C.muted,{a:'middle'})+'</g>';
+}
+function plainBtn(el,y){
+  var d=ELS[el],x=bx(el),w=G.BTN,cx=x+w/2,cy=y+w/2-2,c=d.c,dk=mix(C.bg,c,.35),o='';
+  o+='<polygon points="'+mold(x,y,w,w,5)+'" fill="rgba(13,6,32,.72)"/><polygon points="'+mold(x+.5,y+.5,w-1,w-1,5)+'" fill="none" stroke="'+C.violet+'" stroke-opacity=".35" stroke-width="1.1"/>';
+  if(el==='set'){[[-6,-8],[2,-8],[-6,0],[2,0]].forEach(function(p){o+='<rect x="'+(cx+p[0])+'" y="'+(cy+p[1]+1)+'" width="5" height="5" fill="'+c+'"/>';});}
+  else if(el==='recall'){o+='<circle cx="'+cx+'" cy="'+(cy-1)+'" r="8" fill="none" stroke="'+c+'" stroke-width="2.4" stroke-dasharray="36 14" transform="rotate(-60 '+cx+' '+(cy-1)+')"/>';}
+  else{o+='<rect x="'+(cx-8)+'" y="'+(cy+2)+'" width="16" height="7" fill="'+dk+'" stroke="'+c+'" stroke-width="1.1"/><rect x="'+(cx-6)+'" y="'+(cy-4)+'" width="12" height="6" fill="'+dk+'" stroke="'+c+'" stroke-width="1.1"/><rect x="'+(cx-4)+'" y="'+(cy-9)+'" width="8" height="5" fill="'+c+'"/>';}
+  o+='<rect x="'+(x+5)+'" y="'+(y+w-5)+'" width="'+(w-10)+'" height="2" fill="'+c+'" fill-opacity=".9"/>';
+  return o;
+}
+
+/* ---------- the flyout silhouette: concept A's, unchanged ---------- */
+function chimney(el,n){
+  var xl=bx(el),xr=xl+G.BTN,cx=(xl+xr)/2;
+  var H=4+n*G.TILE+(n-1)*G.TGAP+5,top=T-H;
+  var p=[[xl,T],[xl,top+6],[xl+6,top],[xr,top],[xr,T-10],[xr+10,T]];
+  return {p:p,xl:xl,xr:xr,cx:cx,top:top,H:H,T:T};
+}
+var S0=[[0,14],[14,0],[36,0],[36,-43],[42,-49]];
+var POST=[[300,-49],[300,-10],[310,0],[380,0]];
+
+/* ---------- Parker's piece ---------- */
+/* Coordinates are relative to the element button's top left corner, y down. Chamfer c = 5: the cut runs x + y = 5.
+   Seam s = perpendicular gap to the cut, and also the vertical gap under the bar. */
+var CUTC=5, BTNW=38;
+function cfg(kind,st){
+  if(st==='open'){
+    /* the base the flyout grows out of */
+    if(kind==='V1')return {th:5,s:2,left:-1.5,ar:{hx:1.2,hy:-0.4,len:5,w:2.8,up:false},extra:0};
+    return {th:3,s:1.5,left:-1.2,ar:{hx:0.5,hy:1.2,len:4,w:2,up:false},extra:3};
+  }
+  if(kind==='V1')return {th:11,s:2,left:-2,ar:{hx:8.4,hy:-8.2,len:7,w:3.4,up:true},extra:0};
+  return {th:3,s:1.5,left:-1.2,ar:{hx:4.4,hy:-2.8,len:4,w:2,up:true},extra:3};
+}
+function pieceRel(k){
+  var d=k.s*Math.SQRT2,tipx=-0.5,tipy=CUTC-d-tipx,yb=-k.s,xj=CUTC-d-yb;
+  return [[tipx,tipy],[k.left,yb-k.th],[BTNW,yb-k.th],[BTNW,yb],[xj,yb]];
+}
+function hitOf(kind,st,el){
+  var k=cfg(kind,st),x=bx(el);
+  var h=k.s+k.th+k.extra;
+  return [x+k.left,BY-(k.s+k.th),BTNW-k.left,h];
+}
+/* the neon arrow: haze, gradient body, bright core. lvl = dim | lit | open */
+function neonArrow(e,kind,st,lvl,id){
+  var k=cfg(kind,st),a=k.ar,x=bx(e),c=ELS[e].c,o='';
+  var hx=x+a.hx,hy=BY+a.hy,tx,ty,w1x,w1y,w2x,w2y;
+  if(a.up){tx=hx-a.len;ty=hy+a.len;w1x=hx-a.w;w1y=hy;w2x=hx;w2y=hy+a.w;}
+  else{tx=hx+a.len;ty=hy-a.len;w1x=hx+a.w;w1y=hy;w2x=hx;w2y=hy-a.w;}
+  var d='M'+tx+','+ty+' L'+hx+','+hy+' M'+w1x+','+w1y+' L'+hx+','+hy+' L'+w2x+','+w2y;
+  var gid='ng'+id;
+  var hazeOp=lvl==='lit'?.95:lvl==='open'?.8:.32, bodyOp=lvl==='lit'?1:lvl==='open'?.95:.62, coreOp=lvl==='lit'?1:lvl==='open'?.9:.45;
+  var sw=(kind==='V2')?1.3:1.7, hw=(kind==='V2')?3.2:4;
+  o+='<defs><linearGradient id="'+gid+'" gradientUnits="userSpaceOnUse" x1="'+tx+'" y1="'+ty+'" x2="'+hx+'" y2="'+hy+'"><stop offset="0" stop-color="'+c+'"/><stop offset=".55" stop-color="'+mix(c,C.pink,.6)+'"/><stop offset="1" stop-color="'+C.pink+'"/></linearGradient></defs>';
+  o+='<path d="'+d+'" fill="none" stroke="url(#'+gid+')" stroke-width="'+hw+'" stroke-opacity="'+hazeOp+'" stroke-linejoin="miter" filter="url(#haze)"/>';
+  o+='<path d="'+d+'" fill="none" stroke="url(#'+gid+')" stroke-width="'+sw+'" stroke-opacity="'+bodyOp+'" stroke-linejoin="miter"/>';
+  o+='<path d="'+d+'" fill="none" stroke="#fff4fb" stroke-width="'+(sw*.38)+'" stroke-opacity="'+coreOp+'" stroke-linejoin="miter"/>';
+  return o;
+}
+/* the flat piece itself, styled like the button's hover look */
+function pieceSvg(e,kind,st,id){
+  var k=cfg(kind,st),x=bx(e),c=ELS[e].c,rel=pieceRel(k),o='';
+  var abs=rel.map(function(p){return [x+p[0],BY+p[1]];});
+  var lvl=(st==='arrow')?'lit':(st==='open')?'open':'dim';
+  var fill=lvl==='lit'?mix(C.bg,c,.2):lvl==='open'?mix(C.bg,c,.15):mix(C.bg,c,.1);
+  var sOp=lvl==='lit'?1:lvl==='open'?.85:.6;
+  var cid='pc'+id,P=pts(abs);
+  o+='<clipPath id="'+cid+'"><polygon points="'+P+'"/></clipPath>';
+  o+='<polygon points="'+P+'" fill="'+fill+'"/>';
+  /* faint scanlines behind the arrow */
+  var minY=Math.min.apply(null,abs.map(function(p){return p[1];})),maxY=Math.max.apply(null,abs.map(function(p){return p[1];}));
+  o+='<g clip-path="url(#'+cid+')" stroke="'+C.pink+'" stroke-opacity="'+(lvl==='lit'?.2:.11)+'" stroke-width=".5">';
+  for(var yy=Math.ceil(minY)+.75;yy<maxY;yy+=1.5)o+='<line x1="'+(x-4)+'" y1="'+yy+'" x2="'+(x+BTNW+2)+'" y2="'+yy+'"/>';
+  o+='</g>';
+  if(lvl==='lit')o+='<polygon points="'+P+'" fill="none" stroke="'+c+'" stroke-width="1" stroke-linejoin="miter" filter="url(#gls)"/>';
+  o+='<g clip-path="url(#'+cid+')"><polygon points="'+P+'" fill="none" stroke="'+c+'" stroke-opacity="'+sOp+'" stroke-width="2" stroke-linejoin="miter"/></g>';
+  o+=neonArrow(e,kind,st,lvl,id);
+  return o;
+}
+function elBtn(kind,e,y,s,st,id){
+  if(kind==='A'||s==='rest')return totemBtn(e,y,s);
+  return totemBtn(e,y,s)+pieceSvg(e,kind,st,id);
+}
+
+/* tab outline: V1 grows a bump over the hovered button while the piece is up */
+function bumpPts(kind,e){
+  var k=cfg(kind,'btn'),xl=bx(e),xr=xl+G.BTN,topP=BY-(k.s+k.th),topO=topP-4;
+  var a=[];
+  if(e!=='fire')a.push([xl-6,T]);
+  a.push([xl-6,topO+5],[xl-1,topO],[xr+4,topO],[xr+4,T-6],[xr+10,T]);
+  return a;
+}
+
+/* ---------- old A arrow, kept only for the comparison row ---------- */
+function oldArrow(el,st){
+  var c=ELS[el].c,cx=bx(el)+G.BTN/2,full=(st==='arrow'||st==='open'),a=full?1:.62,o='',f=(st==='open');
+  var Tg=[[cx-13,-48.5],[cx-13,-45],[cx-9.5,-41.8],[cx+9.5,-41.8],[cx+13,-45],[cx+13,-48.5]];
+  o+='<polygon points="'+pts(Tg)+'" fill="'+mix(TABFILL,c,full?.3:.18)+'"/>';
+  o+='<path d="'+dpath(Tg)+'" fill="none" stroke="'+c+'" stroke-opacity="'+a+'" stroke-width="1"'+(full?' filter="url(#gls)"':'')+' stroke-linejoin="miter"/>';
+  var ap=f?-43.2:-46.3,en=f?-46.3:-43.2;
+  o+='<polyline points="'+(cx-4.2)+','+en+' '+cx+','+ap+' '+(cx+4.2)+','+en+'" fill="none" stroke="'+(full?mix(c,'#ffffff',.35):c)+'" stroke-opacity="'+(full?1:.9)+'" stroke-width="1.9" stroke-linejoin="miter"/>';
+  return o;
+}
+
+/* ---------- the whole scene ---------- */
+function scene(opt){
+  var id=++uid,kind=opt.kind,el=opt.el,d=ELS[el],c=d.c,st=opt.st,vb=opt.vb,sc=opt.sc||1,H=G.H;
+  var open=(st==='open'),n=d.list.length,ch=open?chimney(el,n):null;
+  var bump=(kind==='V1'&&(st==='btn'||st==='arrow'));
+  var full,strokes=[];
+  if(open){
+    full=S0.slice().concat(ch.p).concat(POST).concat([[380,H],[0,H]]);
+    strokes=[S0.concat([ch.p[0]]),ch.p,[ch.p[ch.p.length-1]].concat(POST)];
+  }else if(bump){
+    var s0=(el==='fire')?S0.slice(0,4):S0.slice();
+    var line=s0.concat(bumpPts(kind,el)).concat(POST);
+    full=line.concat([[380,H],[0,H]]);
+    strokes=[line];
+  }else{
+    full=S0.concat(POST).concat([[380,H],[0,H]]);
+    strokes=[S0,[S0[S0.length-1]].concat(POST)];
+  }
+  var o='<svg xmlns="http://www.w3.org/2000/svg" width="'+(vb[2]*sc)+'" height="'+(vb[3]*sc)+'" viewBox="'+vb.join(' ')+'">';
+  o+='<defs><linearGradient id="cg'+id+'" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="'+H+'"><stop offset="0" stop-color="rgb(45,27,78)" stop-opacity=".8"/><stop offset="1" stop-color="rgb(11,6,20)" stop-opacity=".88"/></linearGradient>';
+  o+='<linearGradient id="fd'+id+'" gradientUnits="userSpaceOnUse" x1="0" y1="'+(H-34)+'" x2="0" y2="'+(H-2)+'"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#000"/></linearGradient>';
+  o+='<mask id="fm'+id+'" maskUnits="userSpaceOnUse" x="-200" y="-500" width="1400" height="'+(500+H)+'"><rect x="-200" y="-500" width="1400" height="'+(500+H-2)+'" fill="url(#fd'+id+')"/></mask>';
+  o+='<mask id="om'+id+'" maskUnits="userSpaceOnUse" x="-200" y="-500" width="1400" height="'+(540+H)+'"><rect x="-200" y="-500" width="1400" height="'+(540+H)+'" fill="#fff"/><path d="'+dpath(full,true)+'" fill="#000"/></mask></defs>';
+  o+='<g mask="url(#fm'+id+')">';
+  o+='<g mask="url(#om'+id+')" fill="none" stroke="'+C.violet+'" stroke-linejoin="round">';
+  [[22,.05],[15,.08],[10,.12],[5.5,.2]].forEach(function(p){o+='<path d="'+dpath(full,true)+'" stroke-width="'+p[0]+'" stroke-opacity="'+p[1]+'"/>';});
+  o+='</g>';
+  o+='<path d="'+dpath(full,true)+'" fill="url(#cg'+id+')"/>';
+  for(var i=0;i<10;i++)o+='<rect x="'+(15+i*40)+'.5" y="15.5" width="35" height="35" fill="rgba(13,6,32,.35)" stroke="'+C.violet+'" stroke-opacity=".18"/>';
+  var sk='fill="none" stroke-linejoin="miter" stroke-width="1"';
+  strokes.forEach(function(p){o+='<path d="'+dpath(p)+'" '+sk+' stroke="'+C.violet+'" stroke-opacity=".72"/>';});
+  ORDER.forEach(function(e){
+    if(e==='air'){o+=lockedBtn(e,BY,'L30');return;}
+    if(e==='fire'||e==='earth'){
+      var s='rest';
+      if(e===el){s=(st==='btn'||st==='arrow')?'hov':open?'own':'rest';}
+      o+=(e===el)?elBtn(kind,e,BY,s,st,id):totemBtn(e,BY,s);
+    }else o+=plainBtn(e,BY);
+  });
+  if(kind==='A'&&st!=='rest')o+=oldArrow(el,st);
+  if(open){
+    for(i=0;i<n;i++){
+      var tx=ch.xl+G.TPAD,ty=ch.T-4-G.TILE-i*(G.TILE+G.TGAP);
+      o+=tile(d.list[i][0],c,tx,ty,i===0,opt.tip&&opt.tip[0]===i);
+    }
+  }
+  o+='</g>';
+  if(opt.hit&&kind!=='A'){var h=hitOf(kind,st,el);
+    o+='<rect x="'+h[0]+'" y="'+h[1]+'" width="'+h[2]+'" height="'+h[3]+'" fill="rgba(255,255,255,.07)" stroke="#fff" stroke-width=".5" stroke-dasharray="1.6 1.2"/>';}
+  if(open&&opt.tip){
+    var ti=opt.tip[0],tx2=ch.xl+G.TPAD+G.TILE+5,ty2=ch.T-4-G.TILE-ti*(G.TILE+G.TGAP);
+    o+=tipSvg(d.list[ti][0],tx2,ty2+G.TILE/2);
+  }
+  return o+'</svg>';
+}
+
+/* flyout icon button: A's, unchanged */
+function tile(name,c,x,y,cur,hov){
+  var w=G.TILE,cu=4,cid='tc'+(++uid),o='';
+  o+='<clipPath id="'+cid+'"><polygon points="'+mold(x+1,y+1,w-2,w-2,cu)+'"/></clipPath>';
+  o+='<polygon points="'+mold(x,y,w,w,cu)+'" fill="'+(hov?mix(C.bg,c,.12):'rgba(13,6,32,.72)')+'"/>';
+  o+='<g clip-path="url(#'+cid+')">'+icon(name,c,x+3,y+3,w-6)+'</g>';
+  o+='<polygon points="'+mold(x+.5,y+.5,w-1,w-1,cu)+'" fill="none" stroke="'+(hov||cur?c:C.violet)+'" stroke-opacity="'+(hov?1:cur?.75:.35)+'" stroke-width="1.2"'+(hov?' filter="url(#gls)"':'')+'/>';
+  if(cur)o+='<rect x="'+(x+5)+'" y="'+(y+w-4)+'" width="'+(w-10)+'" height="2" fill="'+c+'" fill-opacity=".95"/>';
+  return o;
+}
+function wrap(s,n){var w=s.split(' '),l=[],cur='';w.forEach(function(x){if((cur+' '+x).trim().length>n){l.push(cur);cur=x;}else cur=(cur+' '+x).trim();});if(cur)l.push(cur);return l;}
+function tipSvg(name,x,cy){
+  var t=TIPS[name];if(!t)return '';
+  var lines=wrap(t.d,30),h=2*15+lines.length*15+14,w=30*7.3+22,y=cy-h/2;
+  var o='<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" fill="rgba(13,6,32,.97)" stroke="'+C.violet+'" stroke-opacity=".85"/>';
+  o+=txt(x+11,y+19,t.n,12,C.white,{});
+  o+=txt(x+11,y+34,t.cost,12,C.white,{});
+  lines.forEach(function(l,i){o+=txt(x+11,y+49+i*15,l,12,'#ffd100',{});});
+  return o;
+}
+
+/* ---------- page assembly ---------- */
+var STATES=[['rest','REST'],['btn','HOVER ON THE BUTTON'],['arrow','HOVER ON THE ARROW'],['open','LIST OPEN']];
+function frame(svg,w){return '<div class="frame" style="width:'+w+'px">'+svg+'</div>';}
+function hitLabel(kind,el){
+  return kind==='V1'?'V1 hover: 40 x 13, 0 px into the face':'V2 hover: 39.2 x 7.5, 3 px into the face';
+}
+function rows(kind,el,txts){
+  var d=ELS[el],b=bx(el),o='';
+  o+='<div class="rowlab"><i>'+d.name.toUpperCase()+'</i> button, 1x<small>'+(el==='fire'?'leftmost: the tab\'s chamfered top left corner sits 6 px to the left of the button':'second button')+'</small></div><div class="row">';
+  STATES.forEach(function(s){
+    var op=s[0]==='open',vb=[24,op?-262:-74,op?350:300,op?270:82];
+    o+='<div class="cell">'+frame(scene({vb:vb,sc:1,kind:kind,el:el,st:s[0],tip:op?[el==='fire'?2:1]:null}),op?352:302)+'<div class="tc"><b>'+s[1]+'</b></div></div>';
+  });
+  o+='</div>';
+  o+='<div class="rowlab"><i>'+d.name.toUpperCase()+'</i> button, 4x<small>dashed white = click area ('+hitLabel(kind,el)+').</small></div><div class="row">';
+  STATES.forEach(function(s){
+    var op=s[0]==='open',vb=op?[b-17,-104,76,98]:[b-17,-72,76,62];
+    o+='<div class="cell">'+frame(scene({vb:vb,sc:4,kind:kind,el:el,st:s[0],hit:(s[0]!=='rest'),tip:null}),306)+'<div class="tc"><b>'+s[1]+'</b>'+(txts[s[0]]||'')+'</div></div>';
+  });
+  o+='</div>';
+  return o;
+}
+function big(kind){
+  var o='<div class="rowlab"><i>FLYOUT</i> open, 2x<small>Earth (5 icons, cursor on Earthbind) and Fire (3 icons, cursor on Magma). Whole silhouette, tab to top. The flyout is A\'s.</small></div><div class="row">';
+  ['earth','fire'].forEach(function(el){
+    o+='<div class="cell">'+frame(scene({vb:[34,-252,340,262],sc:2,kind:kind,el:el,st:'open',tip:[el==='fire'?2:1]}),682)+'</div>';
+  });
+  return o+'</div>';
+}
+var VARS=[
+ {k:'V1',t:'AS DRAWN, rises above the rail',
+  cap:'<b>Made of:</b> Parker\'s piece at sketch size. A bar about 11 px thick runs the full width of the button, 2 px above its top edge, and a wedge at the left end wraps the chamfer cut with a 2 px seam parallel to the cut. The piece rises about 7 px above the tab\'s top rail, so while it is up <b>the tab outline grows around it</b>: the rail steps up over that one button with a small shoulder on each side, same Console stroke and fill, so the tab looks like it stretches rather than something poking out. When the cursor leaves, the bump goes away. <b>Open:</b> the flyout\'s first tile bottom sits 4 px above the rail, so the full height piece would hit it. The piece <b>sinks into a 5 px base</b> under the tile column (same shape, same seam), the bump gives way to the flyout\'s own opening, and the arrow flips to point down and left, meaning close. The flyout itself is not touched.',
+  st:{btn:'Piece appears, dim: button hover fill, thin element stroke, neon arrow at low strength. The tab rail steps up over this button.',arrow:'Cursor on the piece: fill lifts, stroke glows, the arrow runs hot magenta at the head with a bright core.',open:'Piece sinks to a 5 px base under the flyout, arrow flipped down and left.'}},
+ {k:'V2',t:'FITS THE GAP, under the rail',
+  cap:'<b>Made of:</b> the same shape squeezed into the 6 px between the button top and the rail: a bar 3 px thick, a 1.5 px seam under it, 1 px of tab left above it, and the wedge filling the cut corner with the same parallel seam. The tab outline does not change at all, and nothing rises above the rail. The cost is the arrow, which has only about 4 px of room, so it is a small neon chevron. <b>Open:</b> the piece stays the same size, the arrow flips down and left, and the flyout opens above it as in A.',
+  st:{btn:'Thin piece appears, dim, with a small neon arrow in the wedge.',arrow:'Cursor on the piece: stroke glows and the arrow brightens.',open:'Same piece, arrow flipped down and left.'}}
+];
+var out='';
+out+='<h2><i>REF //</i> A\'S ARROW, THE ONE THAT READS DETACHED</h2><p class="cap">For comparison only (Earth, 4x). The tongue has its own fill and stroke and floats in the gap.</p>';
+(function(){
+  var b=bx('earth'),o='<div class="row">';
+  [['arrow','HOVER ON THE ARROW'],['open','LIST OPEN']].forEach(function(s){
+    var op=s[0]==='open',vb=op?[b-17,-104,76,98]:[b-17,-72,76,62];
+    o+='<div class="cell">'+frame(scene({vb:vb,sc:4,kind:'A',el:'earth',st:s[0],tip:null}),306)+'<div class="tc"><b>'+s[1]+'</b></div></div>';
+  });
+  out+=o+'</div>';
+})();
+VARS.forEach(function(cp){
+  out+='<h2><i>'+cp.k+' //</i> '+cp.t+'</h2><p class="cap">'+cp.cap+'</p>';
+  out+=rows(cp.k,'earth',cp.st);
+  out+=rows(cp.k,'fire',cp.st);
+  out+=big(cp.k);
+});
+document.getElementById('out').innerHTML=out;
+
+document.getElementById('spec').innerHTML=
+ '<div class="panel"><h3>SHARED RULES (BOTH)</h3><table class="dp">'+
+ '<tr><td class="e">Show</td><td class="v">Only while the cursor is over the element button or the piece (today\'s ShowArrow and HideArrowIfAway logic). Locked buttons never show it. Alt click on the element button still opens the picker. Nothing is drawn at rest, so the button art at rest is untouched.</td></tr>'+
+ '<tr><td class="e">Shape</td><td class="v">One flat piece, button hover fill, element coloured stroke. Lower left edge parallel to the chamfer with an even seam (2 px in V1 and open, 1.5 px in V2). Wedge on the left, bar across the full button width, right end flush with the button\'s right edge.</td></tr>'+
+ '<tr><td class="e">Arrow</td><td class="v">Neon double line pointing up and right along the cut: haze, gradient body (element colour to magenta), near white core, with faint magenta scanlines in the piece. Dim on button hover, full on piece hover, flipped (down and left) when open.</td></tr>'+
+ '<tr><td class="e">Flyout</td><td class="v">Concept A\'s, unchanged: icon tiles in a column, 32 px, gap 3, grows out of the tab as one more shoulder, real spell tooltip to the right.</td></tr>'+
+ '</table></div>'+
+ '<div class="panel"><h3>CLICK AREA AND BUILD</h3><table class="dp">'+
+ '<tr><td class="e">V1 click</td><td class="v">40 x 13 box around the bar and wedge, anchored to the button top left. It covers none of the button face (the wedge tip below the button top sits in the empty cut corner), so the 3 px rule is met with room to spare. Moving from the button up to the piece stays on connected surfaces except for the 2 px seam, so the hover logic should treat the seam as inside.</td></tr>'+
+ '<tr><td class="e">V2 click</td><td class="v">39.2 x 7.5 box. The piece itself is only 4.5 px tall, so the box reaches 3 px into the button face (the most the earlier rule allows) to be a usable target. Alt click on the button still opens the picker.</td></tr>'+
+ '<tr><td class="e">Build</td><td class="v">Texture art on the existing arrow Button, anchored to the element button\'s top left instead of its centre. Nine slice cannot do the diagonal edge, so the piece (fill, stroke, scanlines, arrow) is a baked texture per element colour, or one greyscale texture tinted by SetVertexColor, with a second baked state for lit and a flipped copy for open. The haze and gradient have to be baked into the texture.</td></tr>'+
+ '<tr><td class="e">V1 tab</td><td class="v">The Console outline needs a bump: while the piece is up, the top rail over that button steps up about 11 px with a 5 px chamfer on the left shoulder and a flare on the right, same stroke and fill. Today the outline is fixed art, so this means either a second baked rail texture per button slot shown with the piece or a small bump overlay frame placed over the rail. The flyout\'s open foot already does something similar, so that work can be reused. V2 changes nothing in the tab drawing.</td></tr>'+
+ '</table></div>'+
+ '<div class="panel"><h3>WHAT TO JUDGE</h3><table class="dp">'+
+ '<tr><td class="e">V1</td><td class="v">Matches the sketch and the arrow reads clearly at 1x. Costs a tab outline that changes shape on hover, and the piece changes size when the list opens.</td></tr>'+
+ '<tr><td class="e">V2</td><td class="v">No tab change and no size jump when the list opens, but the arrow is about 4 px and the bar is a thin line at 1x. Compare the 1x rows first.</td></tr>'+
+ '<tr><td class="e">Note</td><td class="v">Code notes come from the mockup geometry. TotemBar.lua was not re read for this pass.</td></tr>'+
+ '</table></div>';
+</script>
+</body>
+</html>
