@@ -73,6 +73,7 @@ Modules/ActionBars/TotemPiece.lua
 Modules/ActionBars/TotemBar.lua
 Modules/ActionBars/ShamanBuffs.lua
 Modules/ActionBars/BuffTab.lua
+Modules/ActionBars/FiveSecondTab.lua
 Modules/CombatHud/CombatHud.lua
 Modules/CombatHud/GunsightClass.lua
 Modules/CombatHud/GunsightShamanShocks.lua

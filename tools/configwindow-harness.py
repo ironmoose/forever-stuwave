@@ -970,6 +970,52 @@ local function menuTexts()
     return table.concat(out, ",")
 end
 
+-- ---- the five second rule group on the Unit Frames page (FiveSecondTab.lua's SETTINGS) ----
+
+local function withFiveSecond(applies)
+    return function()
+        unitFramesDefaults()
+        local S = {
+            enabled = { key = "fivesecond.enabled", default = true, label = "Five second rule tab", tip = "Tip one." },
+            pulse = { key = "fivesecond.pulse", default = true, label = "Regen pulse", tip = "Tip two." },
+            sound = { key = "fivesecond.sound", default = false, label = "Regen sound", tip = "Tip three." },
+        }
+        for _, def in pairs(S) do FS.Config.RegisterDefault(def.key, def.default) end
+        FS.FiveSecondTab = { SETTINGS = S, Applies = function() return applies end }
+    end
+end
+
+function T.the_unit_frames_page_has_the_five_second_rule_toggles_for_a_mana_class()
+    local W = boot({ preWindow = withFiveSecond(true) })
+    W.Open("unitframes")
+    yes(headerY("FIVE SECOND RULE"), "a Five second rule header")
+    yes(row("Five second rule tab").control.fsChecked, "the tab is on by default")
+    yes(row("Regen pulse").control.fsChecked, "the pulse is on by default")
+    no(row("Regen sound").control.fsChecked, "the sound is off by default")
+    press("Regen sound")
+    eq(FS.Config.Get("fivesecond.sound"), true)
+    yes(row("Regen sound").control.fsChecked)
+    press("Five second rule tab")
+    eq(FS.Config.Get("fivesecond.enabled"), false)
+    eq(FS.Config.Get("fivesecond.pulse"), true, "the other keys are untouched")
+    for label, tip in pairs({ ["Five second rule tab"] = "Tip one.", ["Regen pulse"] = "Tip two.", ["Regen sound"] = "Tip three." }) do
+        local r, found = row(label), nil
+        for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
+        eq(found, tip, label .. ": explained by a ? tip")
+        eq(#texts(r), 3, label .. ": label, state and the ? icon only, no helper line")
+    end
+end
+
+function T.the_five_second_rule_group_is_left_out_for_other_classes_and_clients()
+    local W = boot({ preWindow = withFiveSecond(false) })
+    W.Open("unitframes")
+    no(row("Regen pulse"), "a class without mana has no row")
+    no(headerY("FIVE SECOND RULE"), "and no header")
+    W = boot({ preWindow = unitFramesDefaults })
+    W.Open("unitframes")
+    no(row("Regen pulse"), "a client without the tab has no row")
+end
+
 function T.the_gunsight_page_has_the_three_target_and_player_groups_in_the_mockups_order()
     local W = boot({ preWindow = withTagsAndMyBuffs })
     W.Open("gunsight")

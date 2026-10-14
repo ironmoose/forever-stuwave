@@ -15,5 +15,5 @@ The `/fsconfig` window: a category nav and a content well, built from `FS.Config
 - `UI.Slider` is built from Theme pieces on a plain Button, not a Blizzard Slider. It drags through an `OnUpdate` that exists only while the mouse is down.
 
 ## Dependencies
-- Depends on: `FS.Theme`, `FS.Config`, `FS.Gunsight`, `FS.GunsightBoxes`, `FS.GunsightTags`
+- Depends on: `FS.Theme`, `FS.Config`, `FS.Gunsight`, `FS.GunsightBoxes`, `FS.GunsightTags`, `FS.FiveSecondTab` (the Five second rule group on the Unit Frames page reads its `SETTINGS`; the group is left out for a class without mana or a client without the tab)
 - Depended on by: nothing; modules expose settings, this file reads them

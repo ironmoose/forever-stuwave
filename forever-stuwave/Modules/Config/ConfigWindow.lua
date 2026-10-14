@@ -1304,6 +1304,18 @@ end
 -- Pages
 -------------------------------------------------------------------------------
 
+-- The five second rule tab's three switches (FiveSecondTab.lua), for the classes whose power is mana; each row explains itself in its
+-- ? tip. A client or class without the tab leaves the group out.
+local function FiveSecondGroup(page)
+    local tab = FS.FiveSecondTab
+    if not (tab and tab.SETTINGS and tab.Applies and tab.Applies()) then return end
+    UI.Header(page, "Five second rule")
+    for _, name in ipairs({ "enabled", "pulse", "sound" }) do
+        local def = tab.SETTINGS[name]
+        UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip })
+    end
+end
+
 CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, build = function(page)
     UI.Header(page, "Player and target", "Hidden frames stay click-through and invisible.")
     UI.Toggle(page, { label = "Hide player frame", key = "unitFrames.hidePlayer" })
@@ -1311,6 +1323,7 @@ CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, buil
     UI.Header(page, "Panels")
     UI.Toggle(page, { label = "Professions panel", key = "professions.shown" })
     UI.Toggle(page, { label = "Background grid", key = "actionbars.grid" })
+    FiveSecondGroup(page)
 end })
 
 local PIECE_ORDER = { "you", "tgt", "dot", "shard", "prc", "buff", "party" }

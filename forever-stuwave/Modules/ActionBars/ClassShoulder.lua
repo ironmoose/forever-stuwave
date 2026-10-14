@@ -37,8 +37,14 @@
 -- answers a seat takes an optional `key` (default: the class's first shoulder, so the Paladin, Warrior and totem tab
 -- callers are unchanged).
 --
--- Loads after PetDock.lua and ConsoleKeys.lua, before SealBar.lua, TotemBar.lua and BuffTab.lua. Nothing here is
--- verified in game.
+-- The five second rule tab (FiveSecondTab.lua, 2 x 1, 92.8 x 49) is a shoulder of EVERY mana class, not of one owner:
+-- it stands after the class's own tab(s), 16 design px right of the last one's right side (the totem tab ends at 300 and
+-- its flare at 310, the buff tab starts at 316, so the same 6 px of top line stay visible), or at the first seat (36)
+-- when the class has no tab. Its seat is worked out on every Refresh from the shoulders that stand, so a class tab that
+-- arrives or goes after it moves it; a changed seat tells the owner like a shown or hidden one.
+--
+-- Loads after PetDock.lua and ConsoleKeys.lua, before SealBar.lua, TotemBar.lua, BuffTab.lua and FiveSecondTab.lua.
+-- Nothing here is verified in game.
 
 local _, FS = ...
 
@@ -108,7 +114,18 @@ local OWNERS = {
         },
     },
 }
--- every shoulder def, flat: the owner's first, then its `also` list
+-- The five second rule tab: a shoulder of any class whose FiveSecondTab says so, seated after the class's own.
+local FIVE = {
+    key = "fivesecond", cols = 2, rows = 1, after = 16,
+    wants = function()
+        local tab = FS.FiveSecondTab
+        return tab and tab.OwnsShoulder and tab.OwnsShoulder()
+    end,
+    changed = function()
+        if FS.FiveSecondTab and FS.FiveSecondTab.Sync then FS.FiveSecondTab.Sync() end
+    end,
+}
+-- every shoulder def, flat: the owner's first, then its `also` list, then the five second rule tab
 local DEFS = {}
 for _, owner in pairs(OWNERS) do
     owner.dx = owner.dx or C.DX
@@ -120,6 +137,9 @@ for _, owner in pairs(OWNERS) do
         DEFS[extra.key] = extra
     end
 end
+FIVE.dx = C.DX
+FIVE.w, FIVE.h = BlockSize(FIVE.cols, FIVE.rows)
+DEFS[FIVE.key] = FIVE
 
 local stands = {}      -- key -> { shoulder, shown }: built once per def, never resized (NewShoulder has no resize)
 local primary             -- the def of the player's class's first shoulder (what the key-less calls answer)
@@ -160,11 +180,18 @@ local function Wanted()
     local owner = OWNERS[PlayerClass()]
     primary = owner
     local console = Console()
-    if not (owner and console and console.IsDrawn()) then return console, {} end
+    if not (console and console.IsDrawn()) then return console, {} end
     local list = {}
-    if owner.wants() then list[#list + 1] = owner end
-    for _, extra in ipairs(owner.also or {}) do
-        if extra.wants() then list[#list + 1] = extra end
+    if owner then
+        if owner.wants() then list[#list + 1] = owner end
+        for _, extra in ipairs(owner.also or {}) do
+            if extra.wants() then list[#list + 1] = extra end
+        end
+    end
+    if FIVE.wants() then
+        local last = list[#list]
+        FIVE.dx = last and (last.dx + last.w + FIVE.after) or C.DX
+        list[#list + 1] = FIVE
     end
     return console, list
 end
@@ -298,9 +325,9 @@ local function ShowOne(console, def)
     st.shoulder:Seat("BOTTOMLEFT", console.root, "TOPLEFT", def.dx, 0)
     st.shoulder:Rescale()
     st.shoulder.art:Show()
-    local was = st.shown
-    st.shown = true
-    return not was
+    local was, seat = st.shown, st.dx
+    st.shown, st.dx = true, def.dx
+    return not was or seat ~= def.dx
 end
 
 -- The one entry: builds, seats, shows or hides to match the world. Out of combat only; a request in combat
