@@ -714,6 +714,15 @@ def check_glyph_files() -> None:
     bad = [n for n in baked if tga_header(media / n) != (2, 64, 64, 32, 0x28, 18 + 64 * 64 * 4)]
     check("glyphs.baked_art_is_64x64_bgra_tga_of_exact_size", len(baked) >= 19 and not bad, f"{len(baked)} files, bad {bad}")
     check("glyphs.no_baked_art_is_orphaned", not orphans, f"{orphans}")
+    # The shipped art itself sits in the fixed crop band (MicroBars.lua BAKED_PAD, rows 7.5 to 56.5 of 64): every
+    # file's alpha spans rows 7 to 56 (the band, its soft edge rows included) and nothing lies outside them.
+    out_of_band = {}
+    for n in baked:
+        data = (media / n).read_bytes()[18:]
+        rows = [y for y in range(64) if any(data[(y * 64 + x) * 4 + 3] for x in range(64))]
+        if not rows or (rows[0], rows[-1]) != (7, 56):
+            out_of_band[n] = rows[:1] + rows[-1:]
+    check("glyphs.shipped_art_alpha_sits_in_the_fixed_crop_band", not out_of_band, f"{out_of_band}")
     # The old hand drawn glyph_<name>.tga line glyphs are not drawn any more (glyph_hud_* belong to the Console keys).
     stale = sorted(p.name for p in media.glob("glyph_*.tga") if not p.name.startswith("glyph_hud_"))
     check("glyphs.no_unreferenced_line_glyph_files", not stale, f"{stale}")
