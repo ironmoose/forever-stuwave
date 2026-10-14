@@ -459,9 +459,81 @@ function Shoulder:SetEdge(color, strokeAlpha, haloAlpha)
         return false
     end
     strokeAlpha, haloAlpha = strokeAlpha or self.strokeAlpha, haloAlpha or self.haloAlpha
+    self.color = color
     for _, tex in ipairs(self.stroke) do Tint(tex, color, strokeAlpha) end
     for _, tex in ipairs(self.halo) do Tint(tex, color, haloAlpha) end
+    local rail = self.rail
+    if rail and rail.extraStroke then
+        Tint(rail.extraStroke, color, strokeAlpha)
+        Tint(rail.extraHalo, color, haloAlpha)
+    end
     return true
+end
+
+-- The top rail of a chassis shoulder (opts.chassis) can be opened under something drawn over it, like the
+-- Shaman totem tab's hover bump, and closed again. The rail is two textures: the 1 px top line (x from the cut to
+-- W) and the halo strip over it (x from the cut to where the top right corner block takes over, rail.hEnd).
+-- OpenTop(strokeFrom, strokeTo, haloFrom, haloTo, hideCorner) leaves a gap in each, in design px of the art:
+-- the original texture keeps the part left of the gap, a second texture (made on the first call, tinted like the
+-- first) the part right of it. A gap that starts at or left of the cut leaves only the right part, and
+-- hideCorner also hides the top left cut's three pieces (a wall that runs straight up through the cut corner).
+-- Plain texture writes, legal in combat like Seat. False for a shoulder without a chassis, or numbers that are not
+-- plain, ordered and inside the rail; the rail is left as it was.
+function Shoulder:OpenTop(strokeFrom, strokeTo, haloFrom, haloTo, hideCorner)
+    local rail = self.rail
+    if not rail then return false end
+    if not (IsFinite(strokeFrom) and IsFinite(strokeTo) and IsFinite(haloFrom) and IsFinite(haloTo)) then
+        return false
+    end
+    if not (strokeFrom < strokeTo and strokeTo < self.W and haloFrom < haloTo and haloTo < rail.hEnd) then
+        return false
+    end
+    local art = self.art
+    if not rail.extraStroke then
+        local color = self.color or Theme.COLOR_BORDER
+        rail.extraStroke = NewTexture(self.normal, "BORDER", Theme.FLAT_TEXTURE)
+        Tint(rail.extraStroke, color, self.strokeAlpha)
+        rail.extraHalo = NewTexture(self.normal, "BACKGROUND", rail.haloTexture)
+        rail.extraHalo:SetTexCoord(rail.haloUV[1], rail.haloUV[2], rail.haloUV[3], rail.haloUV[4])
+        Tint(rail.extraHalo, color, self.haloAlpha)
+    end
+    local function split(tex, extra, from, to, first, last, y, h)
+        if from <= first then
+            Place(art, tex, to, y, last - to, h)
+            extra:Hide()
+        else
+            Place(art, tex, first, y, from - first, h)
+            Place(art, extra, to, y, last - to, h)
+            extra:Show()
+        end
+    end
+    split(rail.stroke, rail.extraStroke, strokeFrom, strokeTo, rail.c, self.W, 0, rail.line)
+    split(rail.halo, rail.extraHalo, haloFrom, haloTo, rail.c, rail.hEnd, -rail.g, rail.g)
+    local corner = not hideCorner
+    for _, tex in ipairs(rail.corner) do
+        if corner then tex:Show() else tex:Hide() end
+    end
+    rail.gap = { strokeFrom, strokeTo, haloFrom, haloTo, hideCorner and true or false }
+    return true
+end
+
+-- Puts the rail back as it was built. False when it is not open.
+function Shoulder:CloseTop()
+    local rail = self.rail
+    if not (rail and rail.gap) then return false end
+    local art = self.art
+    Place(art, rail.stroke, rail.c, 0, self.W - rail.c, rail.line)
+    Place(art, rail.halo, rail.c, -rail.g, rail.hEnd - rail.c, rail.g)
+    rail.extraStroke:Hide()
+    rail.extraHalo:Hide()
+    for _, tex in ipairs(rail.corner) do tex:Show() end
+    rail.gap = nil
+    return true
+end
+
+-- The gap OpenTop left, { strokeFrom, strokeTo, haloFrom, haloTo, cornerHidden }, or nil.
+function Shoulder:TopGap()
+    return self.rail and self.rail.gap or nil
 end
 
 -- opts.chassis = { fill = { r, g, b, a }, strokeAlpha, haloAlpha, halo } -> the validated copy, or nil. A
@@ -557,6 +629,20 @@ function PetDock.NewShoulder(parent, W, H, opts)
         shoulder.normal = normal
         FillEdge(art, W, H, normal, Theme.COLOR_BORDER, shoulder.stroke, shoulder.halo,
             shoulder.strokeAlpha, shoulder.haloAlpha, chassis and chassis.halo or nil)
+        shoulder.color = Theme.COLOR_BORDER
+        if chassis then
+            -- what OpenTop moves: the top line (BuildDockStroke's second piece), the halo strip over it
+            -- (BuildChassisHalo's second) and the three pieces of the top left cut (each list's first)
+            local halo = chassis.halo
+            shoulder.fillTint = chassis.fill
+            shoulder.rail = {
+                c = C.CUT, line = C.LINE, g = halo.pad, hEnd = W - (halo.margin - halo.pad),
+                haloTexture = halo.texture,
+                haloUV = { halo.mid0 / halo.size, halo.mid1 / halo.size, 0, halo.pad / halo.size },
+                stroke = shoulder.stroke[2], halo = shoulder.halo[2],
+                corner = { shoulder.fill[1], shoulder.stroke[1], shoulder.halo[1] },
+            }
+        end
 
         if opts and opts.red == true then
             -- The red twin: host (the curve alpha) > pulse child (the Alpha animation) > the same geometry in red.

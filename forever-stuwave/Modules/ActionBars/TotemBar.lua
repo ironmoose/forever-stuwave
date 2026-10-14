@@ -50,8 +50,10 @@
 --   * LOCKED: an element with no known totem, and a Set drop or Recall not yet learned, carry NO castable
 --     attribute, show the dotted mold and their unlock level, and dim by alpha. They are never hidden: Show and
 --     Hide on a secure button are refused in combat.
---   * PICKING: a small arrow tab on each element button (up only while the cursor is over the button or the arrow,
---     inside the tab's outline, hit area the glyph plus a 6 px margin, 3 px into the face at most), or an Alt-click, opens a plain frame (not secure, parented
+--   * PICKING: a hover PIECE on each element button (TotemPiece.lua: a square cap piece over the button, up only while
+--     the cursor is over the button or the piece, or while the picker for that element is open; the tab outline grows a
+--     bump around it; the click area is the piece, 38 x 13 design px, 0 px into the button face; its chevron points down
+--     while the picker is open), or an Alt-click, opens a plain frame (not secure, parented
 --     to UIParent; nothing secure is its child or anchor target) listing the known totems. A click stores the
 --     pick per character (ForeverSTUwaveDB.totemPicks[guid]) and, in action mode, calls SetMultiCastSpell out of
 --     combat (queued for regen in combat). The saved pick is written ONLY by an explicit user pick or by adopting
@@ -88,10 +90,13 @@ local TB = {
     LOCKED_ALPHA = 0.4,
     MC_SET = 1,                 -- the multi-cast page Call of the Elements drops
     MAX_ENTRIES = 6,            -- picker rows (an element holds at most 5 totems by level 30)
-    ENTRY_W = 168, ENTRY_H = 24, PICKER_PAD = 4, PICKER_RISE = 8,
-    -- the arrow's hit area: the glyph plus 6 on each side, standing mostly in the tab's 6 px strip over the button
-    -- (its top is ARROW_RISE over the button face, 0.5 under the tab's top outline) and 3 into the face at most
-    ARROW_W = 28, ARROW_H = 8.5, ARROW_RISE = 5.5,
+    ENTRY_W = 168, ENTRY_H = 24, PICKER_PAD = 4,
+    PICKER_RISE = 17,           -- over the button top: clears the 13 px hover piece with a 4 px gap (the icon flyout will sit on the piece)
+    -- the arrow's hit area is the hover piece itself (TotemPiece.lua, mockups/totem-picker-arrow-v3-2026-10-13.html):
+    -- the button's width, the 11 px bar plus the 2 px seam under it, standing on the button top with ARROW_INTO = 0 px
+    -- inside the face (the piece's wedge tip under the button top is art only, never clickable). Its top is 7 px over
+    -- the tab's top rail, which grows a bump around it while it is up.
+    ARROW_W = 38, ARROW_H = 13, ARROW_INTO = 0,
     PICKER_IDLE = 0.6,          -- seconds with the mouse away before the picker closes itself
     -- Append only, never reorder: the index is the saved keybind.
     BUTTONS = {
@@ -531,15 +536,30 @@ local function PaintRing(button)
     if skin.glow then skin.glow:SetVertexColor(color[1], color[2], color[3], TB.BORDER_ALPHA) end
 end
 
--- The arrow tab (a plain Button on the element button) opens the picker; Alt-click on the button does too.
+-- The hover piece (a plain Button on the element button) opens the picker; Alt-click on the button does too.
 local function OnArrowClick(self)
     TotemBar.TogglePicker(self.fsKey)
 end
 
--- The arrow is up only while the cursor is over its element button or over the arrow itself, like Blizzard's own
--- flyout arrow. IsMouseOver is the cursor's position against each frame's rect, so crossing from the button onto
--- the arrow (the button's OnLeave fires first) never drops it. The arrow is a plain frame: Show and Hide on it are
--- legal in combat even though its parent is a secure button.
+-- true while the picker is open for this element's button
+local function PickerOpenFor(button)
+    local picker = TB.picker
+    return picker ~= nil and picker:IsShown() and picker.fsKey == button.fsKey
+end
+
+-- The piece's look: lit while the cursor is on it or its picker is open, the chevron down while the picker is open.
+-- Texture writes on the plain arrow only, legal in combat.
+local function RefreshPiece(button)
+    local arrow = button.fsArrow
+    if not arrow then return end
+    local open = PickerOpenFor(button)
+    FS.TotemPiece.SetLook(arrow, arrow.fsOver or open, open)
+end
+
+-- The piece is up only while the cursor is over its element button or over the piece itself (like Blizzard's own
+-- flyout arrow), or while the picker for it is open. IsMouseOver is the cursor's position against each frame's rect,
+-- so crossing from the button onto the piece (the button's OnLeave fires first) never drops it. The arrow is a plain
+-- frame: Show and Hide on it are legal in combat even though its parent is a secure button.
 local function ShowArrow(button)
     local arrow = button.fsArrow
     if arrow and not button.fsLocked then arrow:Show() end
@@ -547,7 +567,43 @@ end
 
 local function HideArrowIfAway(button)
     local arrow = button.fsArrow
-    if arrow and arrow:IsShown() and not (button:IsMouseOver() or arrow:IsMouseOver()) then arrow:Hide() end
+    if not (arrow and arrow:IsShown()) or PickerOpenFor(button) then return end
+    if not (button:IsMouseOver() or arrow:IsMouseOver()) then arrow:Hide() end
+end
+
+-- The piece comes up with the bump around it; both go together. OnShow also fires for a picker opened without the
+-- cursor (a key press), which shows the piece in its open state.
+local function OnArrowShow(self)
+    FS.TotemPiece.SetBump(self.fsButton.fsCol, true)
+    RefreshPiece(self.fsButton)
+end
+
+-- One bump stands at a time, so a hover over another element moves the open picker's bump away. When that hover
+-- ends the open picker's piece is still up and gets its bump back.
+local function RestoreOpenPickerBump(except)
+    local picker = TB.picker
+    local owner = picker and picker:IsShown() and picker.fsOwner or nil
+    if owner and owner ~= except and owner.fsArrow and owner.fsArrow:IsShown() then
+        FS.TotemPiece.SetBump(owner.fsCol, true)
+    end
+end
+
+local function OnArrowHide(self)
+    self.fsOver = false
+    RefreshPiece(self.fsButton)
+    FS.TotemPiece.SetBump(self.fsButton.fsCol, false)
+    RestoreOpenPickerBump(self.fsButton)
+end
+
+local function OnArrowEnter(self)
+    self.fsOver = true
+    RefreshPiece(self.fsButton)
+end
+
+local function OnArrowLeave(self)
+    self.fsOver = false
+    RefreshPiece(self.fsButton)
+    HideArrowIfAway(self.fsButton)
 end
 
 local function OnButtonEnter(self)
@@ -673,26 +729,25 @@ local function StyleButton(button, size, scale)
         button.fsLockText = text
     end
 
-    -- the arrow tab: a plain Button, so a click on it never reaches the secure action underneath. The Button is the
-    -- HIT AREA and it is small on purpose: 28 x 8.5 design px, the 16 x 8 chevron plus a 6 px margin each side,
-    -- standing in the tab's 6 px strip over the button and reaching 3 px into the face. Everything below that stays
-    -- the button's own (drop, dismiss, shift and its tooltip). Both stay inside the tab, 0.5 under its top outline.
-    if def.slot and not button.fsArrow then
+    -- the hover piece: a plain Button, so a click on it never reaches the secure action underneath. The Button is
+    -- the HIT AREA and it is exactly the piece's bar and seam: 38 x 13 design px standing on the button top, 0 px
+    -- inside the face, so everything on the face (drop, dismiss, shift and its tooltip) stays the button's. The art
+    -- (TotemPiece.lua) is regions of this Button and hangs a little past its rect: the wedge tip under the button top
+    -- and a glow, none of it clickable.
+    -- (without TotemPiece.lua, which is not required to load, the tab builds with no piece: the picker still opens
+    -- by key and Alt-click)
+    if def.slot and FS.TotemPiece and not button.fsArrow then
         local arrow = CreateFrame("Button", nil, button)
         arrow.fsKey = def.key
         arrow.fsButton = button
         arrow:RegisterForClicks("LeftButtonUp")
-        local tex = arrow:CreateTexture(nil, "OVERLAY")
-        tex:SetTexture(MEDIA .. "cast_chevron_up_fill.tga")
-        tex:SetVertexColor(button.fsColor[1], button.fsColor[2], button.fsColor[3], 0.85)
-        arrow.fsTex = tex
+        FS.TotemPiece.Attach(arrow, button.fsColor)
         arrow:SetScript("OnClick", OnArrowClick)
-        arrow:SetScript("OnEnter", function(self) self.fsTex:SetAlpha(1) end)
-        arrow:SetScript("OnLeave", function(self)
-            self.fsTex:SetAlpha(0.85)
-            HideArrowIfAway(self.fsButton)
-        end)
-        -- a missed OnLeave (the cursor warped, the frame hidden under it) must not leave the arrow standing
+        arrow:SetScript("OnEnter", OnArrowEnter)
+        arrow:SetScript("OnLeave", OnArrowLeave)
+        arrow:SetScript("OnShow", OnArrowShow)
+        arrow:SetScript("OnHide", OnArrowHide)
+        -- a missed OnLeave (the cursor warped, the frame hidden under it) must not leave the piece standing
         arrow:SetScript("OnUpdate", function(self) HideArrowIfAway(self.fsButton) end)
         arrow:Hide()
         button.fsArrow = arrow
@@ -701,11 +756,9 @@ local function StyleButton(button, size, scale)
         local arrow = button.fsArrow
         arrow:SetSize(TB.ARROW_W * scale, TB.ARROW_H * scale)
         arrow:ClearAllPoints()
-        arrow:SetPoint("TOP", button, "TOP", 0, TB.ARROW_RISE * scale)
+        arrow:SetPoint("BOTTOMLEFT", button, "TOPLEFT", 0, -TB.ARROW_INTO * scale)
         arrow:SetFrameLevel(textHost:GetFrameLevel() + 1)
-        arrow.fsTex:SetSize(16 * scale, 8 * scale)
-        arrow.fsTex:ClearAllPoints()
-        arrow.fsTex:SetPoint("CENTER", arrow, "CENTER", 0, 0)
+        if FS.TotemPiece then FS.TotemPiece.Seat(arrow, scale) end
     end
 end
 
@@ -713,6 +766,7 @@ local function BuildButton(host, def, index)
     local button = CreateFrame("Button", "FSTotemButton" .. index, host, "SecureActionButtonTemplate")
     button.fsKey = def.key
     button.fsDef = def
+    button.fsCol = index
     button.fsColor = Hex(def.color)
     button.fsCommand = "CLICK FSTotemButton" .. index .. ":LeftButton"
     button:RegisterForClicks("AnyUp", "AnyDown")
@@ -1284,10 +1338,18 @@ local function BuildPicker()
     picker:SetScript("OnShow", function(self)
         self.fsIdle = 0
         self:SetScript("OnUpdate", PickerIdle)
+        -- the owner's piece lights and its chevron points down
+        if self.fsOwner then RefreshPiece(self.fsOwner) end
     end)
     picker:SetScript("OnHide", function(self)
         self:SetScript("OnUpdate", nil)
+        local owner = self.fsOwner
         self.fsOwner, self.fsKey = nil, nil
+        -- the owner's piece points up again and goes if the cursor is away
+        if owner then
+            RefreshPiece(owner)
+            HideArrowIfAway(owner)
+        end
     end)
     if type(_G.UISpecialFrames) == "table" then table.insert(_G.UISpecialFrames, "FSTotemPicker") end
     TB.picker = picker
@@ -1336,8 +1398,16 @@ function TotemBar.OpenPicker(key)
     end
     picker:ClearAllPoints()
     picker:SetPoint("BOTTOM", button, "TOP", 0, TB.PICKER_RISE * s)
+    local previous = picker:IsShown() and picker.fsOwner or nil
     picker.fsOwner, picker.fsKey = button, key
     picker.fsIdle = 0
+    -- the piece of the element that had the picker goes back to its hover look, this one's comes up in its open one
+    if previous and previous ~= button then
+        RefreshPiece(previous)
+        HideArrowIfAway(previous)
+    end
+    ShowArrow(button)
+    RefreshPiece(button)
     picker:Show()
 end
 

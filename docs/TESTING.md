@@ -161,12 +161,16 @@ restart, not /reload. If your Shaman has the Call of the Elements spell
    click it: that element's totem goes away at once. Shift-right click any
    element button: ALL your totems go away at once (try it in combat too).
    Hover for the reminder text, which mentions this.
-3. Change totem: move the cursor onto an element button and a small arrow
-   appears at its top edge, fully inside the tab; it goes away when the cursor
-   leaves the button and the arrow (it must not flicker as you move from the
-   button onto it, and its click area is a little wider than the arrow).
-   Clicking anywhere lower on the button face must still drop, dismiss or show
-   the tooltip, never open the list. Click the arrow, or Alt-click the button
+3. Change totem: move the cursor onto an element button and a square piece
+   with an up chevron appears just above it, rising a little over the tab's top
+   edge while the tab outline grows a bump around it (a bump shoulder is wider
+   on Fire, the leftmost button). It goes away, bump and all, when the cursor
+   leaves the button and the piece (it must not flicker as you move from the
+   button onto it; its click area is the piece itself, the full width of the
+   button, and never reaches into the button face). The chevron glows when the
+   cursor is on the piece, and points down while the list is open.
+   Clicking anywhere on the button face must still drop, dismiss or show
+   the tooltip, never open the list. Click the piece, or Alt-click the button
    (Alt-click must NOT drop a totem). A list of the totems you know for that
    element appears. Click one: the button now shows it and drops it. Try
    it in combat too: a pick made in combat is applied when the fight ends, and

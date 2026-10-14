@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Runs the real ShamanBuffs.lua and BuffTab.lua (the Shaman buff tab: IMBUE and SHIELD tiles) headless, in
 totembar-harness's world: the actionbars mock, FrameHelpers.lua, ActionBars.lua, Console.lua, StanceBar.lua,
-PetActionBar.lua, PetDock.lua, ClassShoulder.lua and TotemBar.lua.
+PetActionBar.lua, PetDock.lua, ClassShoulder.lua, TotemPiece.lua and TotemBar.lua.
 
 The tab is a second Shaman shoulder on the Console's top edge (mockups/shaman-buff-tab-2026-10-12.html): 2 columns x
 1 row (92.8 x 49 design px) at 316 design px, right of the totem tab. The numbers and colours below are read out of
@@ -208,7 +208,7 @@ def boot(scale: float = 1.0, *, klass: str = "SHAMAN", spells=("Rockbiter Weapon
         setup.append(f"__tip[{slot}] = {{{items}}}")
     return sb.boot(scale, klass=klass, known=[], combat=combat, console=console,
                    extra_lua=csh.PATCH + mocks + "\n" + "\n".join(setup),
-                   extra_files=(csh.PETDOCK, csh.CLASSSHOULDER, tbh.TOTEMBAR, SHAMANBUFFS, BUFFTAB),
+                   extra_files=(csh.PETDOCK, csh.CLASSSHOULDER, tbh.TOTEMPIECE, tbh.TOTEMBAR, SHAMANBUFFS, BUFFTAB),
                    pre_login=csh.SPIES + pre_login)
 
 

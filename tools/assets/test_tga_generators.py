@@ -74,6 +74,15 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         **{f"totem_{name}": (32, 32) for name in ("fire", "earth", "water", "air", "set", "recall")},
         "totem_mold": (64, 64),
     },
+    # generate_totem_piece.py: the totem tab's hover piece and its chevron (256x128 canvases, 4 texels per design
+    # px), the bump's baked stroke (256 square) and halo (128x64).
+    "totem_piece": {
+        **{name: (256, 128) for name in (
+            "totem_piece_fill", "totem_piece_scan", "totem_piece_glow", "totem_piece_edge",
+            "totem_chev_body", "totem_chev_pink", "totem_chev_haze", "totem_chev_haze_pink", "totem_chev_core")},
+        "totem_bump_stroke": (256, 256),
+        "totem_bump_halo": (128, 64),
+    },
     # generate_hud_key_ring.py: sixteen arc segments of the toggle key ring.
     "hud_key_ring": {f"hud_key_ring_{i:02d}": (128, 64) for i in range(16)},
     # generate_console_chrome.py: Console panel chassis (cut 14) and the 45 degree tab foot.
@@ -1696,6 +1705,115 @@ def test_totem_mold_is_dotted_with_two_chamfers(totem_outputs: Path) -> None:
 def test_committed_totem_glyphs_match_their_generator(totem_outputs: Path) -> None:
     outs = sorted(totem_outputs.glob("*.tga"))
     assert len(outs) == 7
+    for out in outs:
+        assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
+
+
+# --- the totem tab's hover piece, chevron and bump ---------------------------
+#
+# Hardcoded from mockups/totem-picker-arrow-v3-2026-10-13.html (V1 "As drawn"): design px relative to the
+# element button's top left, y down. The piece canvases are 4 texels per px, the piece canvas' top left at
+# (-13, -21), the chevron canvas' at (-13, -23.3).
+
+TOTEM_PIECE_GENERATOR = GENERATOR_DIR / "generate_totem_piece.py"
+TOTEM_K = 4
+
+
+@pytest.fixture(scope="module")
+def totem_piece_outputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    work = tmp_path_factory.mktemp("totem_piece")
+    _run_generator(TOTEM_PIECE_GENERATOR, work)
+    return work
+
+
+def _at(grid, ox: float, oy: float, x: float, y: float) -> int:
+    return grid[int((y - oy) * TOTEM_K)][int((x - ox) * TOTEM_K)]
+
+
+def test_totem_piece_layers_are_white_with_shape_in_alpha(totem_piece_outputs: Path) -> None:
+    for path in sorted(totem_piece_outputs.glob("totem_*.tga")):
+        assert _is_white(path), path.name
+        assert max(px[3] for row in _rgba_grid(path) for px in row) > 100, f"{path.name} is empty"
+
+
+def test_totem_piece_is_square_on_three_sides_with_one_slanted_edge(totem_piece_outputs: Path) -> None:
+    fill = _alpha_grid(totem_piece_outputs / "totem_piece_fill.tga")
+    solid = lambda x, y: _at(fill, -13, -21, x, y) >= 250
+    empty = lambda x, y: _at(fill, -13, -21, x, y) <= 5
+    # the bar: x 0..38, y -13..-2, vertical left and right edges flush with the button, horizontal top and bottom
+    assert solid(0.3, -12.7) and solid(37.7, -12.7) and solid(0.3, -2.3) and solid(37.7, -2.3) and solid(19, -7)
+    assert empty(-0.3, -7) and empty(38.3, -7) and empty(19, -13.3) and empty(19, -1.7), "the bar is not 38 x 11"
+    # the seam to the button top (y = 0) is 2 px; the wedge reaches under the bar's bottom line only on the left
+    assert empty(30, 0.5) and empty(19, -1)
+    # the one slanted edge runs x + y = 5 - 2 sqrt 2 = 2.17, 45 degrees like the chamfer cut x + y = 5, 2 px away
+    assert solid(0.4, 1.4) and empty(0.4, 2.4), "the wedge tip is not where the seam says"
+    for x in (0.6, 1.5, 2.5, 3.5):
+        y_edge = 5 - 2 * math.sqrt(2) - x
+        assert solid(x, y_edge - 0.5) and empty(x, y_edge + 0.5), f"the slanted edge drifts at x {x}"
+
+
+def test_totem_piece_edge_is_a_one_px_stroke_inside_the_polygon(totem_piece_outputs: Path) -> None:
+    edge = _alpha_grid(totem_piece_outputs / "totem_piece_edge.tga")
+    assert _at(edge, -13, -21, 0.5, -7) >= 250 and _at(edge, -13, -21, 37.5, -7) >= 250
+    assert _at(edge, -13, -21, 19, -12.5) >= 250 and _at(edge, -13, -21, 19, -2.5) >= 250
+    assert _at(edge, -13, -21, 19, -7) == 0 and _at(edge, -13, -21, 1.5, -7) == 0, "the stroke is wider than 1 px"
+    assert _at(edge, -13, -21, -0.5, -7) == 0, "the stroke leaks outside the polygon"
+
+
+def test_totem_chevron_is_30_wide_bold_and_magenta_at_the_apex(totem_piece_outputs: Path) -> None:
+    body = _alpha_grid(totem_piece_outputs / "totem_chev_body.tga")
+    pink = _alpha_grid(totem_piece_outputs / "totem_chev_pink.tga")
+    at = lambda grid, x, y: _at(grid, -13, -23.3, x, y)
+    # apex (19, -11.6), arms to x 4 and 34, 5.2 down, 3.4 thick
+    assert at(body, 19, -11.0) >= 250 and at(body, 5, -5.0) >= 250 and at(body, 33, -5.0) >= 250
+    assert at(body, 2, -5.0) == 0 and at(body, 36, -5.0) == 0 and at(body, 19, -12.5) == 0
+    assert at(body, 19, -6.0) == 0, "the notch under the apex is open"
+    # the magenta share: nothing at the arm feet, most of it at the apex
+    assert at(pink, 6, -3.6) < 60 and at(pink, 19, -10.8) > 200
+
+
+def test_totem_chevron_flips_into_the_down_chevron_about_its_own_canvas_centre(totem_piece_outputs: Path) -> None:
+    # the chevron spans y -11.6 .. -3.0, centre -7.3; its canvas is centred on -7.3 (origin -23.3 + 16)
+    body = _alpha_grid(totem_piece_outputs / "totem_chev_body.tga")
+    flipped = body[::-1]
+    assert _at(flipped, -13, -23.3, 19, -3.6) >= 250, "the flipped chevron's apex is not where the open state wants it (-3)"
+    assert _at(flipped, -13, -23.3, 19, -11.0) == 0
+
+
+def test_totem_bump_stroke_walls_top_and_foot(totem_piece_outputs: Path) -> None:
+    stroke = _alpha_grid(totem_piece_outputs / "totem_bump_stroke.tga")
+    # normal variant: region origin (-5, -18) at texel (2, 2). Walls 4 px out (x -4 and 42), top -17, rail -6.
+    at = lambda x, y: stroke[2 + int((y + 18) * 4)][2 + int((x + 5) * 4)]
+    assert at(-3.5, -12) >= 250 and at(41.5, -14) >= 250 and at(20, -16.5) >= 250, "walls and top"
+    assert at(20, -12) == 0 and at(-4.5, -12) == 0 and at(42.5, -14) == 0
+    # the foot runs from the wall's vertex (41.5, -12) at 45 degrees to the rail (47.5, -6)
+    for t in (1.0, 3.0, 5.0):
+        assert at(41.5 + t, -12 + t) >= 200, f"the foot has a gap at {t}"
+    assert at(45, -12) == 0, "the foot is not a diagonal"
+    # the leftmost variant: region origin (-7, -18) at texel (2, 64); its left wall is 6 px out and runs down to y 0
+    fire = lambda x, y: stroke[64 + int((y + 18) * 4)][2 + int((x + 7) * 4)]
+    assert fire(-5.5, -12) >= 250 and fire(-5.5, -0.5) >= 250 and fire(-3.5, -12) == 0
+
+
+def test_totem_bump_halo_is_the_consoles_profile_around_the_outline(totem_piece_outputs: Path) -> None:
+    halo = _alpha_grid(totem_piece_outputs / "totem_bump_halo.tga")
+    # normal variant: region origin (-15, -28) at texel (2, 2), one texel per px
+    at = lambda x, y: halo[2 + int(y + 28)][2 + int(x + 15)]
+    assert at(10, -3) == 0 and at(10, -10) == 0, "nothing inside the bump or the tab"
+    # outside the top wall (y -17) the halo steps down with distance; the profile reaches about 9.5 px
+    near, mid, far = at(10, -17.5 - 0.0), at(10, -20.5), at(10, -26.5)
+    assert near > mid > far >= 0 and near > 100
+    # beside the left wall (x -4), and the concave corner where it meets the rail does not double up
+    assert at(-5, -10) > 0 and at(-14.5, -6.5) > 0
+    corner, side, rail = at(-5.5, -6.5), at(-5.5, -12), at(-14, -6.5)
+    assert corner >= max(side, rail) - 1 and corner <= 255
+    # the rail's own halo resumes either side: the same profile at the piece's two far edges
+    assert at(-14.5, -6.5) == at(52.5, -6.5) or abs(at(-14.5, -6.5) - at(52.5, -6.5)) <= 2
+
+
+def test_committed_totem_piece_textures_match_their_generator(totem_piece_outputs: Path) -> None:
+    outs = sorted(totem_piece_outputs.glob("*.tga"))
+    assert len(outs) == 11
     for out in outs:
         assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
 

@@ -68,6 +68,7 @@ Modules/CombatHud/GunsightMyBuffs.lua
 Modules/ActionBars/ConsoleKeys.lua
 Modules/ActionBars/ClassShoulder.lua
 Modules/ActionBars/SealBar.lua
+Modules/ActionBars/TotemPiece.lua
 Modules/ActionBars/TotemBar.lua
 Modules/ActionBars/ShamanBuffs.lua
 Modules/ActionBars/BuffTab.lua

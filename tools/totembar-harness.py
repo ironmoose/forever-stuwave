@@ -59,6 +59,8 @@ except ImportError:
 HERE = Path(__file__).resolve().parent
 ADDON = HERE.parent / "forever-stuwave"
 TOTEMBAR = Path(os.environ.get("TOTEMBAR_LUA", ADDON / "Modules/ActionBars/TotemBar.lua"))
+TOTEMPIECE = Path(os.environ.get("TOTEMPIECE_LUA", ADDON / "Modules/ActionBars/TotemPiece.lua"))
+PIECE_GENERATOR = HERE / "assets" / "generate_totem_piece.py"
 BINDINGS = Path(os.environ.get("BINDINGS_XML", ADDON / "Bindings.xml"))
 TOC = Path(os.environ.get("TOC_FILE", ADDON / "forever-stuwave.toc"))
 
@@ -117,6 +119,8 @@ do
     end
 end
 __Region.SetReverse = function(self, v) self._reverse = v end
+-- the texture coordinates a region was last given (the mock's own SetTexCoord keeps none)
+__Region.SetTexCoord = function(self, ...) self._coord = { ... } end
 function GameTooltip:SetOwner(owner) self._lines = {}; self._owner = owner end
 function GameTooltip:ClearLines() self._lines = {} end
 function GameTooltip:SetText(t) self._lines = { t } end
@@ -230,7 +234,7 @@ end
 """
 
 def boot(scale: float = 1.0, *, klass: str = "SHAMAN", learned=(), lists=None, spells=(), combat: bool = False,
-         bar_mode=None, list_mode=None, console: bool = True, pre_login: str = "", native: bool = True):
+         bar_mode=None, list_mode=None, console: bool = True, pre_login: str = "", native: bool = True, piece_file: bool = True):
     """A Shaman world. `learned`: totem names the spellbook knows; `lists`: {slot: [names]} the multi-cast
     API reports; `spells`: other spell names to know (Call of the Elements etc., by id through __spell).
     `native`: install Blizzard's multi-cast buttons answering the formula's ids (False: the formula is all there is)."""
@@ -249,7 +253,7 @@ def boot(scale: float = 1.0, *, klass: str = "SHAMAN", learned=(), lists=None, s
         setup.append(f'__mc.listMode = "{list_mode}"')
     return sb.boot(scale, klass=klass, known=[], combat=combat, console=console,
                    extra_lua=csh.PATCH + mocks + "\n" + "\n".join(setup),
-                   extra_files=(csh.PETDOCK, csh.CLASSSHOULDER, TOTEMBAR),
+                   extra_files=(csh.PETDOCK, csh.CLASSSHOULDER) + ((TOTEMPIECE,) if piece_file else ()) + (TOTEMBAR,),
                    pre_login=pre_login)
 
 
@@ -772,85 +776,70 @@ def check_the_arrow_shows_and_hides_in_combat_without_a_protected_touch():
     assert before == after, f"protected operations in combat: {before} -> {after}"
 
 
+_FX = {"LEFT": 0.0, "TOPLEFT": 0.0, "BOTTOMLEFT": 0.0, "TOP": 0.5, "CENTER": 0.5, "BOTTOM": 0.5,
+       "RIGHT": 1.0, "TOPRIGHT": 1.0, "BOTTOMRIGHT": 1.0}
+_FY = {"TOP": 1.0, "TOPLEFT": 1.0, "TOPRIGHT": 1.0, "CENTER": 0.5, "LEFT": 0.5, "RIGHT": 0.5,
+       "BOTTOM": 0.0, "BOTTOMLEFT": 0.0, "BOTTOMRIGHT": 0.0}
+
+
 def _rect(parent_rect, frame, rel_rect):
     """Rect (l, b, r, t) of `frame`, anchored by one point to a rect, in the parent's coordinates."""
     p = frame._points[1]
     w, h = float(frame._w), float(frame._h)
     rl, rb, rr, rt = rel_rect
-    fx = {"TOP": 0.5, "CENTER": 0.5, "BOTTOM": 0.5}[p.relPoint]
-    fy = {"TOP": 1.0, "CENTER": 0.5, "BOTTOM": 0.0}[p.relPoint]
-    ax = rl + (rr - rl) * fx + float(p.x)
-    ay = rb + (rt - rb) * fy + float(p.y)
-    gx = {"TOP": 0.5, "CENTER": 0.5, "BOTTOM": 0.5}[p.point]
-    gy = {"TOP": 1.0, "CENTER": 0.5, "BOTTOM": 0.0}[p.point]
-    left, bottom = ax - w * gx, ay - h * gy
+    ax = rl + (rr - rl) * _FX[p.relPoint] + float(p.x)
+    ay = rb + (rt - rb) * _FY[p.relPoint] + float(p.y)
+    left, bottom = ax - w * _FX[p.point], ay - h * _FY[p.point]
     return (left, bottom, left + w, bottom + h)
 
 
-def check_the_arrow_and_its_hit_area_sit_inside_the_tab_and_the_hit_area_is_bigger_than_the_glyph(scale):
-    lua = boot(scale, learned=TOTEMS["earth"], lists=lists_for("earth"))
+def _button_rect(b):
+    q = b._points[1]
+    return (float(q.x), float(q.y), float(q.x) + float(b._w), float(q.y) + float(b._h))
+
+
+def check_the_piece_hit_area_is_38_by_13_flush_with_the_button_top(scale):
+    lua = boot(scale, learned=TOTEMS["earth"] + TOTEMS["fire"], lists=lists_for("earth", "fire"))
     host = g(lua).FSTotemBar
     tab = (0.0, 0.0, float(host._w), float(host._h))
-    approx(tab[2], 264.0 * scale, "tab width", 0.01 * scale), approx(tab[3], 49.0 * scale, "tab height", 0.01 * scale)
+    eps = 1e-6
     for key in ("fire", "earth", "water", "air"):
         b = by_key(lua, key)
-        q = b._points[1]
-        brect = (float(q.x), float(q.y), float(q.x) + float(b._w), float(q.y) + float(b._h))
+        brect = _button_rect(b)
         a = b.fsArrow
         assert len(seq(a._points)) == 1, "the arrow is anchored by more than one point"
+        approx(a._w, 38 * scale, f"{key} hit width"), approx(a._h, 13 * scale, f"{key} hit height")
+        p = a._points[1]
+        assert (p.point, p.relPoint) == ("BOTTOMLEFT", "TOPLEFT") and sb.same(lua, p.rel, b), \
+            f"{key}: the hit area is anchored {p.point} to {p.relPoint} of {p.rel}"
         arect = _rect(None, a, brect)
-        eps = 1e-6
-        for what, r in (("hit area", arect),):
-            assert r[0] >= tab[0] - eps and r[1] >= tab[1] - eps and r[2] <= tab[2] + eps and r[3] <= tab[3] + eps, \
-                f"{key} {what} {r} leaves the tab {tab}"
-        # clear of the tab's top outline (a stroke), not merely touching it
-        assert arect[3] <= tab[3] - 0.5 * scale + eps, f"{key} arrow touches the tab's top edge: {arect} vs {tab}"
-        glyph = a.fsTex
-        grect = _rect(None, glyph, arect)
-        assert grect[0] >= arect[0] - eps and grect[2] <= arect[2] + eps
-        assert grect[1] >= arect[1] - eps and grect[3] <= arect[3] + eps, f"{key} glyph leaves its hit area"
-        assert grect[3] <= tab[3] - 0.5 * scale + eps, f"{key} glyph overhangs the tab top"
-        # the approved glyph, unchanged: 16 x 8, the element colour, the same texture
-        approx(glyph._w, 16 * scale, "glyph width"), approx(glyph._h, 8 * scale, "glyph height")
-        assert glyph._texture.endswith("cast_chevron_up_fill.tga"), glyph._texture
-        # the hit area is clearly bigger than the glyph, both ways, and the arrow stays inside its button column
-        assert a._w >= 1.4 * glyph._w and a._h >= glyph._h, f"{key} hit area {a._w}x{a._h} vs glyph {glyph._w}x{glyph._h}"
-        # ... but only the glyph plus a small margin: at most 6 design px wider each side, and it reaches at most
-        # 3 design px into the button face, so the rest of the face (drop, dismiss, tooltip) stays the button's
-        assert a._w <= glyph._w + 12 * scale + eps, f"{key} hit area is {a._w} wide for a {glyph._w} glyph"
-        assert arect[1] >= brect[3] - 3.0 * scale - eps, f"{key} hit area reaches {brect[3] - arect[1]} into the face"
-        assert arect[0] >= brect[0] - eps and arect[2] <= brect[2] + eps, "the hit area overlaps the next button"
+        # 0 px into the face: it starts at the button top, and spans exactly the button's width
+        assert abs(arect[1] - brect[3]) < eps, f"{key} hit area reaches {brect[3] - arect[1]} into the face"
+        assert abs(arect[0] - brect[0]) < eps and abs(arect[2] - brect[2]) < eps, f"{key} hit area is not the button wide"
+        # the piece rises 7 px over the tab's top rail (the host's top)
+        approx(arect[3] - tab[3], 7 * scale, f"{key} rise over the tab's top rail", 0.01 * scale)
 
 
-def check_clicks_on_the_button_face_below_the_arrow_land_on_the_button_not_the_arrow(scale):
+def check_clicks_on_the_button_face_never_land_on_the_piece(scale):
     lua = boot(scale, learned=TOTEMS["earth"], lists=lists_for("earth"))
     b = by_key(lua, "earth")
-    q = b._points[1]
-    brect = (float(q.x), float(q.y), float(q.x) + float(b._w), float(q.y) + float(b._h))
+    brect = _button_rect(b)
     arect = _rect(None, b.fsArrow, brect)
     top, left, right = brect[3], brect[0], brect[2]
-    cx = (left + right) / 2
 
     def hits_arrow(x, y):
         return arect[0] <= x <= arect[2] and arect[1] <= y <= arect[3]
 
-    # the whole top quarter of the face, scanned: below the arrow's reach, nothing is the arrow's
-    quarter = float(b._h) / 4
     step = scale / 2
-    y = top
-    while y >= top - quarter:
+    y = top - step
+    while y >= top - float(b._h) / 4:
         x = left
         while x <= right:
-            depth = (top - y) / scale
-            if depth > 3.0 + 1e-6:
-                assert not hits_arrow(x, y), f"the arrow eats a click {depth:.1f} px under the button top"
+            assert not hits_arrow(x, y), f"the piece eats a click {(top - y) / scale:.1f} px under the button top"
             x += step
         y -= step
-    # inside the 3 px strip, away from the glyph by more than the margin: also the button's
-    for dx in (-17 * scale, 17 * scale):
-        assert not hits_arrow(cx + dx, top - 1 * scale), "the arrow's hit area is wider than glyph plus margin"
-    # and the arrow is still there to be hit: the glyph centre, and just over the button's top edge
-    assert hits_arrow(cx, top + 2 * scale) and hits_arrow(cx, top - 1 * scale)
+    # the wedge tip under the button top is not clickable either; the seam and the bar are
+    assert hits_arrow((left + right) / 2, top + 1 * scale) and hits_arrow(left + 1 * scale, top + 12 * scale)
 
 
 def check_the_picker_lists_the_known_totems_and_a_click_picks_and_closes():
@@ -1630,18 +1619,325 @@ def check_the_file_uses_no_snippets_and_no_state_drivers():
         assert needle not in text, f"TotemBar.lua mentions {needle}"
 
 
+def piece(lua, key):
+    return by_key(lua, key).fsArrow.fsPiece
+
+
+def coord(tex):
+    return [float(v) for v in seq(tex._coord)]
+
+
+def tp(lua):
+    return g(lua).FS.TotemPiece
+
+
+def shoulder_obj(lua):
+    return csh.shoulder(lua)
+
+
+def check_the_piece_is_made_of_plain_regions_of_the_plain_arrow_button():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"))
+    b = by_key(lua, "earth")
+    a = b.fsArrow
+    assert a._kind == "Button" and not a._secure and not a._protected, "the arrow is not a plain Button"
+    assert sb.same(lua, a._parent, b)
+    pc = piece(lua, "earth")
+    for key in ("fill", "scan", "glow", "edge", "hazeA", "hazeB", "bodyA", "bodyB", "core"):
+        tex = pc[key]
+        assert tex is not None and tex._kind == "Texture" and sb.same(lua, tex._parent, a), f"{key} is not on the arrow"
+        assert str(tex._texture).endswith(".tga"), f"{key} has no baked texture: {tex._texture}"
+    for k in ("fire", "earth", "water", "air"):
+        other = by_key(lua, k).fsArrow
+        assert not other._secure and not other._protected, f"{k}'s arrow is secure"
+        assert not [1 for _ in seq(other._attrs)], f"{k}'s arrow carries attributes"
+
+
+def check_the_piece_shows_on_button_hover_dim_and_goes_lit_on_the_piece_and_hides_away():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"))
+    b = by_key(lua, "earth")
+    a = b.fsArrow
+    pc = piece(lua, "earth")
+    assert not shown(a), "the piece is up at rest"
+    enter(lua, b)
+    assert shown(a) and not pc.lit, "button hover must bring the piece up dim"
+    assert not shown(pc.glow), "the dim piece glows"
+    over(a, True)
+    fire_script(lua, b, "OnLeave")
+    fire_script(lua, a, "OnEnter")
+    assert shown(a) and pc.lit and shown(pc.glow), "the cursor on the piece must light it"
+    over(a, False)
+    fire_script(lua, a, "OnLeave")
+    assert shown(a) and not pc.lit, "off the piece but still on the button it must go back to dim"
+    over(b, False)
+    fire_script(lua, b, "OnLeave")
+    assert not shown(a), "the piece stayed after the cursor left"
+
+
+def check_the_chevron_points_up_and_flips_down_while_the_picker_is_open():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"))
+    b = by_key(lua, "earth")
+    a = b.fsArrow
+    pc = piece(lua, "earth")
+    enter(lua, b)
+    assert not pc.flipped and coord(pc.bodyA) == [0, 1, 0, 1], f"the chevron does not point up: {coord(pc.bodyA)}"
+    click(lua, a)
+    picker = tb(lua).Picker()
+    assert shown(picker) and pc.flipped and pc.lit, "an open picker must flip the chevron and light the piece"
+    assert float(picker._points[1].y) >= 13, "the list overlaps the piece it opened from"
+    for key in ("hazeA", "hazeB", "bodyA", "bodyB", "core"):
+        assert coord(pc[key]) == [0, 1, 1, 0], f"{key} is not flipped down: {coord(pc[key])}"
+    # the cursor leaves everything: the piece stays up while the picker is open for this element
+    over(a, False)
+    over(b, False)
+    picker._mouseOver = True
+    fire_script(lua, b, "OnLeave")
+    fire_script(lua, a, "OnLeave")
+    fire_script(lua, a, "OnUpdate", 0.016)
+    assert shown(a) and pc.flipped, "the piece dropped while its picker was open"
+    # the picker closes: the chevron points up again and the piece goes with the cursor away
+    click(lua, a)
+    assert not shown(picker)
+    assert not shown(a), "the piece stayed up after the picker closed with the cursor away"
+    assert coord(pc.bodyA) == [0, 1, 0, 1] and not pc.flipped, "the chevron did not flip back up"
+    # the picker opened by something else (a key, Alt-click) brings the piece up in its open state
+    tb(lua).OpenPicker("earth")
+    assert shown(a) and pc.flipped
+    tb(lua).ClosePicker()
+    assert not shown(a)
+    # a picker for another element does not flip this one
+    lua = all_known_with_lists()
+    tb(lua).OpenPicker("fire")
+    assert piece(lua, "fire").flipped and not piece(lua, "earth").flipped and not shown(by_key(lua, "earth").fsArrow)
+    tb(lua).OpenPicker("earth")
+    assert not piece(lua, "fire").flipped and piece(lua, "earth").flipped
+    assert not shown(by_key(lua, "fire").fsArrow), "the old owner's piece stayed up"
+
+
+def check_the_bump_stands_only_around_the_hovered_button_and_the_rail_opens_under_it():
+    lua = all_known_with_lists()
+    sh = shoulder_obj(lua)
+    p = tp(lua)
+    assert p.BumpCol() is None and sh.TopGap(sh) is None
+    top = sh.rail.stroke
+    rest = (float(top._points[1].x), float(top._w))
+    earth, fire_b = by_key(lua, "earth"), by_key(lua, "fire")
+    enter(lua, earth)
+    assert int(p.BumpCol()) == 2, "no bump around the hovered element"
+    gap = sh.TopGap(sh)
+    assert gap is not None
+    rect = p.BumpRect(2)
+    approx(gap[1], rect.left, "the rail opens at the bump's left wall")
+    approx(gap[2], rect.right + 5, "the rail resumes under the foot")
+    assert float(top._w) < rest[1], "the original rail was not cut short"
+    assert shown(sh.rail.extraStroke) and shown(sh.rail.extraHalo), "the right part of the rail is not drawn"
+    # one bump at a time: another element's hover moves it
+    over(earth, False)
+    fire_script(lua, earth, "OnLeave")
+    assert p.BumpCol() is None and sh.TopGap(sh) is None, "the bump stayed after the cursor left"
+    assert (float(top._points[1].x), float(top._w)) == rest, "the rail was not put back as it was"
+    assert not shown(sh.rail.extraStroke), "the rail's right part stayed"
+    enter(lua, fire_b)
+    assert int(p.BumpCol()) == 1 and int(p.BumpCol()) != 2
+    over(fire_b, False)
+    fire_script(lua, fire_b, "OnLeave")
+    assert p.BumpCol() is None
+    # a locked button never brings one up
+    lua = boot()
+    enter(lua, by_key(lua, "fire"))
+    assert tp(lua).BumpCol() is None
+
+
+def check_hovering_another_element_never_leaves_an_open_picker_without_its_bump():
+    lua = all_known_with_lists()
+    sh = shoulder_obj(lua)
+    p = tp(lua)
+    fire_b, earth = by_key(lua, "fire"), by_key(lua, "earth")
+    tb(lua).OpenPicker("fire")
+    assert int(p.BumpCol()) == 1 and shown(fire_b.fsArrow), "the open picker has no piece or bump"
+    # the cursor passes over another element and leaves it again: the open picker's bump comes back
+    enter(lua, earth)
+    assert int(p.BumpCol()) == 2, "the hovered element has no bump"
+    over(earth, False)
+    fire_script(lua, earth, "OnLeave")
+    assert not shown(earth.fsArrow)
+    assert shown(fire_b.fsArrow) and p.BumpCol() is not None and int(p.BumpCol()) == 1, \
+        "the open picker's piece stands without its bump"
+    assert sh.TopGap(sh) is not None, "the open picker's rail stayed closed"
+    # an Alt-click opened picker is the same
+    tb(lua).OpenPicker("earth")
+    water = by_key(lua, "water")
+    enter(lua, water)
+    over(water, False)
+    fire_script(lua, water, "OnLeave")
+    assert int(p.BumpCol()) == 2 and shown(earth.fsArrow), "Alt-click picker lost its bump"
+    # the picker closes with the cursor away: everything goes
+    tb(lua).ClosePicker()
+    assert p.BumpCol() is None and sh.TopGap(sh) is None and not shown(earth.fsArrow)
+
+
+def check_escape_closing_the_picker_drops_the_bump_and_flips_the_chevron_back():
+    lua = all_known_with_lists()
+    sh = shoulder_obj(lua)
+    p = tp(lua)
+    earth = by_key(lua, "earth")
+    pc = piece(lua, "earth")
+    tb(lua).OpenPicker("earth")
+    assert "FSTotemPicker" in [str(v) for v in seq(g(lua).UISpecialFrames)], "the picker is not an Escape frame"
+    assert pc.flipped and int(p.BumpCol()) == 2
+    picker = tb(lua).Picker()
+    # Escape hides every UISpecialFrames frame; the cursor is away
+    picker.Hide(picker)
+    assert not shown(picker)
+    assert not pc.flipped and coord(pc.bodyA) == [0, 1, 0, 1], "the chevron stayed down after Escape"
+    assert not shown(earth.fsArrow), "the piece stayed up after Escape with the cursor away"
+    assert p.BumpCol() is None and sh.TopGap(sh) is None, "the bump stayed after Escape"
+    # with the cursor still on the button the piece and bump stay, the chevron up
+    tb(lua).OpenPicker("earth")
+    over(earth, True)
+    picker.Hide(picker)
+    assert shown(earth.fsArrow) and not pc.flipped and int(p.BumpCol()) == 2
+
+
+def check_the_tab_builds_without_the_piece_file():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"), piece_file=False)
+    assert g(lua).FS.TotemPiece is None, "the piece file loaded"
+    assert len([1 for i in range(1, 7) if btn(lua, i) is not None]) == 6, "the tab did not build"
+    b = by_key(lua, "earth")
+    # a build that stopped at the missing piece leaves the button unsized
+    assert float(b._w) == 38 and float(b._h) == 38, "the tab's build stopped at the missing piece"
+    assert b.fsArrow is None, "an arrow without a piece"
+    enter(lua, b)       # no piece, no error
+    over(b, False)
+    fire_script(lua, b, "OnLeave")
+    tb(lua).OpenPicker("earth")
+    assert shown(tb(lua).Picker()), "the picker needs the piece"
+    tb(lua).ClosePicker()
+
+
+def check_the_fire_bump_uses_the_6_px_left_shoulder_and_the_others_4():
+    lua = all_known_with_lists()
+    sh = shoulder_obj(lua)
+    p = tp(lua)
+    cs = g(lua).FS.ClassShoulder.C
+    pitch = float(cs.BTN) + float(cs.GAP)
+    for col, key in ((1, "fire"), (2, "earth"), (3, "water"), (4, "air")):
+        rect = p.BumpRect(col)
+        button = float(cs.PAD) + (col - 1) * pitch
+        wall = 6 if col == 1 else 4
+        approx(rect.left, button - wall, f"{key} bump left wall")
+        approx(rect.right, button + 38 + 4, f"{key} bump right wall")
+        approx(rect.top, -11, f"{key} bump top")
+        b = by_key(lua, key)
+        enter(lua, b)
+        parts = [f for f in g(lua).__frames.values() if f._kind == "Texture" and sb.same(lua, f._parent, sh.art)
+                 and f._points and f._points[1].y is not None]
+        # the bump's body fill: its left edge is the wall
+        body = [t for t in parts if abs(float(t._points[1].x) - rect.left) < 1e-6 and abs(float(t._points[1].y) - 11) < 1e-6]
+        assert body, f"{key}: no fill starting at the left wall {rect.left}"
+        approx(float(body[0]._w), rect.right - rect.left, f"{key} body width")
+        corner_hidden = not shown(sh.rail.corner[1])
+        assert corner_hidden == (col == 1), f"{key}: the top left cut must be hidden for Fire only"
+        gap = sh.TopGap(sh)
+        approx(gap[1], rect.left, f"{key} rail gap start")
+        assert gap[5] == (col == 1)
+        over(b, False)
+        fire_script(lua, b, "OnLeave")
+        assert shown(sh.rail.corner[1]) and sh.TopGap(sh) is None, f"{key}: the cut corner did not come back"
+
+
+def check_the_piece_and_the_bump_work_in_combat_without_a_protected_touch():
+    lua = all_known_with_lists()
+    b = by_key(lua, "earth")
+    a = b.fsArrow
+    pc = piece(lua, "earth")
+    sh = shoulder_obj(lua)
+    set_combat(lua, True)
+    before = (blocked(lua), int(lua.eval("__protectedTouch")))
+    enter(lua, b)
+    assert shown(a) and int(tp(lua).BumpCol()) == 2 and sh.TopGap(sh) is not None, "no piece or bump in combat"
+    click(lua, a)
+    assert shown(tb(lua).Picker()) and pc.flipped, "the chevron did not flip in combat"
+    click(lua, a)
+    over(b, False)
+    fire_script(lua, b, "OnLeave")
+    assert not shown(a) and tp(lua).BumpCol() is None and sh.TopGap(sh) is None, "the piece or bump stayed in combat"
+    after = (blocked(lua), int(lua.eval("__protectedTouch")))
+    assert before == after, f"protected operations in combat: {before} -> {after}"
+
+
+def check_opening_the_rail_refuses_bad_numbers_and_a_tab_that_is_not_standing_has_no_bump():
+    lua = all_known_with_lists()
+    sh = shoulder_obj(lua)
+    top = sh.rail.stroke
+    rest = (float(top._points[1].x), float(top._w))
+    nan = float("nan")
+    for args in ((50, 40, 40, 90, False), (nan, 60, 40, 90, False), (50, 60, 40, 40, False),
+                 (50, 300, 40, 90, False), (50, 60, 40, 900, False)):
+        assert not sh.OpenTop(sh, *args), f"OpenTop took {args}"
+        assert sh.TopGap(sh) is None and (float(top._points[1].x), float(top._w)) == rest
+    assert not sh.CloseTop(sh), "CloseTop on a closed rail"
+    # a retint reaches the rail's second part
+    assert sh.OpenTop(sh, 50, 60, 40, 80, False)
+    assert sh.SetEdge(sh, lua.table_from([1, 0, 0]), 0.5, 0.25)
+    assert [float(v) for v in seq(sh.rail.extraStroke._vertex)] == [1, 0, 0, 0.5]
+    assert [float(v) for v in seq(sh.rail.extraHalo._vertex)] == [1, 0, 0, 0.25]
+    assert sh.CloseTop(sh) and (float(top._points[1].x), float(top._w)) == rest
+    # the Console goes off: no shoulder stands, so hovering brings the piece but no bump
+    lua = all_known_with_lists()
+    csh.console(lua).SetActive(False)
+    b = by_key(lua, "earth")
+    enter(lua, b)
+    assert tp(lua).BumpCol() is None, "a bump on a tab that is not drawn"
+    assert shown(b.fsArrow), "the piece still works without the chassis"
+
+
+def check_the_baked_art_and_the_lua_numbers_agree():
+    import importlib.util as iu
+    spec = iu.spec_from_file_location("generate_totem_piece", PIECE_GENERATOR)
+    gen = iu.module_from_spec(spec)
+    spec.loader.exec_module(gen)
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"))
+    c = tp(lua).C
+    approx(float(c.SEAM), gen.SEAM, "seam"), approx(float(c.BAR), gen.BAR, "bar")
+    approx(float(c.HIT_H), gen.SEAM + gen.BAR, "hit height"), approx(float(c.HIT_W), gen.BTN_W, "hit width")
+    assert [float(v) for v in seq(c.PIECE_ORIGIN)] == [float(v) for v in gen.PIECE_ORIGIN]
+    assert [float(v) for v in seq(c.CHEV_ORIGIN)] == [float(v) for v in gen.CHEV_ORIGIN]
+    assert float(c.CANVAS_W) * gen.PIECE_K == gen.PIECE_CANVAS_W and float(c.CANVAS_H) * gen.PIECE_K == gen.PIECE_CANVAS_H
+    assert (float(c.FOOT), float(c.RISE), float(c.HALO_PAD)) == (gen.BUMP_FOOT, gen.BUMP_RISE, gen.GLOW_PAD)
+    assert (float(c.SHOULDER), float(c.SHOULDER_FIRST)) == (-gen.VARIANTS["normal"], -gen.VARIANTS["fire"])
+    assert float(c.SHOULDER) == gen.BUMP_RIGHT - gen.BTN_W, "the right wall is as far out as the left one"
+    for name, table, at in (("STROKE", c.STROKE, gen.BUMP_STROKE_AT), ("HALO", c.HALO, gen.BUMP_HALO_AT)):
+        for variant in ("normal", "fire"):
+            region = gen.BUMP_STROKE_REGION[variant] if name == "STROKE" else gen.BUMP_HALO_REGION[variant]
+            want = [float(v) for v in region] + [float(v) for v in at[variant]]
+            got = [float(v) for v in seq(table[variant])]
+            assert got == want, f"{name} {variant}: Lua {got} vs generator {want}"
+    assert float(c.STROKE.k) == gen.BUMP_K and float(c.STROKE.size) == gen.BUMP_CANVAS
+    assert (float(c.HALO.w), float(c.HALO.h)) == (gen.HALO_CANVAS_W, gen.HALO_CANVAS_H)
+    # the baked files exist, power of two, the sizes the Lua cuts them at
+    import struct
+    tex = ADDON / "Media" / "Textures"
+    for name, size in (("totem_piece_fill", (256, 128)), ("totem_chev_core", (256, 128)),
+                       ("totem_bump_stroke", (256, 256)), ("totem_bump_halo", (128, 64))):
+        data = (tex / f"{name}.tga").read_bytes()
+        assert struct.unpack("<HH", data[12:16]) == size, f"{name}.tga is not {size}"
+
+
 def check_toc_lists_the_totem_bar_after_the_seal_bar():
     lines = [ln.strip() for ln in TOC.read_text(encoding="utf-8").splitlines()]
     mods = [ln for ln in lines if ln.endswith(".lua")]
     t = "Modules/ActionBars/TotemBar.lua"
     assert t in mods, "TotemBar.lua is not in the .toc"
     for dep in ("Modules/ActionBars/StanceBar.lua", "Modules/ActionBars/ClassShoulder.lua",
-                "Modules/ActionBars/SealBar.lua", "Modules/Pet/PetDock.lua", "Core/FrameHelpers.lua"):
+                "Modules/ActionBars/SealBar.lua", "Modules/Pet/PetDock.lua", "Core/FrameHelpers.lua",
+                "Modules/ActionBars/TotemPiece.lua"):
+        assert dep in mods, f"{dep} is not in the .toc"
         assert mods.index(dep) < mods.index(t), f"{dep} must load before TotemBar.lua"
+    assert mods.index("Modules/ActionBars/ClassShoulder.lua") < mods.index("Modules/ActionBars/TotemPiece.lua")
 
 
 def check_no_em_dashes_in_the_new_files():
-    for path in (TOTEMBAR, Path(__file__), HERE / "assets" / "generate_totem_glyphs.py"):
+    for path in (TOTEMBAR, TOTEMPIECE, Path(__file__), HERE / "assets" / "generate_totem_glyphs.py", PIECE_GENERATOR):
         assert path.exists(), f"{path} is missing"
         assert chr(0x2014) not in path.read_text(encoding="utf-8"), f"{path.name} has an em dash"
 
@@ -1711,12 +2007,23 @@ CHECKS = [
     check_a_throwing_secret_or_missing_api_never_breaks_a_sync,
     check_picks_are_kept_per_character,
     check_the_file_uses_no_snippets_and_no_state_drivers,
+    check_the_piece_is_made_of_plain_regions_of_the_plain_arrow_button,
+    check_the_piece_shows_on_button_hover_dim_and_goes_lit_on_the_piece_and_hides_away,
+    check_the_chevron_points_up_and_flips_down_while_the_picker_is_open,
+    check_the_bump_stands_only_around_the_hovered_button_and_the_rail_opens_under_it,
+    check_hovering_another_element_never_leaves_an_open_picker_without_its_bump,
+    check_escape_closing_the_picker_drops_the_bump_and_flips_the_chevron_back,
+    check_the_tab_builds_without_the_piece_file,
+    check_the_fire_bump_uses_the_6_px_left_shoulder_and_the_others_4,
+    check_the_piece_and_the_bump_work_in_combat_without_a_protected_touch,
+    check_opening_the_rail_refuses_bad_numbers_and_a_tab_that_is_not_standing_has_no_bump,
+    check_the_baked_art_and_the_lua_numbers_agree,
     check_toc_lists_the_totem_bar_after_the_seal_bar,
     check_no_em_dashes_in_the_new_files,
 ]
 SCALED_CHECKS = [
-    check_clicks_on_the_button_face_below_the_arrow_land_on_the_button_not_the_arrow,
-    check_the_arrow_and_its_hit_area_sit_inside_the_tab_and_the_hit_area_is_bigger_than_the_glyph,
+    check_the_piece_hit_area_is_38_by_13_flush_with_the_button_top,
+    check_clicks_on_the_button_face_never_land_on_the_piece,
     check_the_shoulder_is_the_six_by_one_block_and_the_buttons_sit_inside_it,
 ]
 

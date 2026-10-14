@@ -348,6 +348,13 @@ function ClassShoulder.IsShown(key)
     return Stand(key) ~= nil
 end
 
+-- The shoulder object (PetDock.NewShoulder's) of the class's first shoulder, or the one named by `key`, while it
+-- stands; nil otherwise. The owner draws on it (the totem tab's hover bump opens the top rail through it).
+function ClassShoulder.Shoulder(key)
+    local st = Stand(key)
+    return st and st.shoulder or nil
+end
+
 -- The standing block's size and button edge in UI units (design px x the layout scale), or nil while no
 -- shoulder stands.
 function ClassShoulder.BlockSize(key)
