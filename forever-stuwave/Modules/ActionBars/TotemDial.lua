@@ -347,7 +347,8 @@ local function OnClick(self, mouseButton, down)
             if not down and cell == "dial" then Dial.EditActive() end
             if not down and cell == "gnarly" then Dial.EditGnarly() end
         elseif IsPressEvent(down) then
-            PS.NotePress(cell)
+            -- an empty GNARLY cell casts nothing: no press, flash or sound for it
+            if cell ~= "gnarly" or (self.fsAttrKey or "") ~= "" then PS.NotePress(cell) end
         end
     elseif mouseButton == "RightButton" and not down and cell == "dial" then
         if PS.Setting(PS.SETTINGS.dialRight) then PS.Cycle(1) end

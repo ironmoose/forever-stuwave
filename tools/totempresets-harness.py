@@ -1776,11 +1776,50 @@ def check_shift_click_on_an_unset_gnarly_leaves_the_dial_on_its_new_slot():
     P.SetGnarly(None)
     assert P.Count() == 3 and P.IsNew(P.Active())
     P.SetTotem(1, "fire", IDS["Magma Totem"])
-    assert int(TB(lua).CurrentPick("fire").id) != IDS["Magma Totem"]
+    picks = {e: int(TB(lua).CurrentPick(e).id) for e in ("fire", "earth", "water", "air") if TB(lua).CurrentPick(e)}
+    assert picks["fire"] != IDS["Magma Totem"]
+    serial = int(g(lua).FS.TotemBar.MC.PickSerial())
+    run(lua, "__mc.calls = {}")
     shift_click(lua, gb(lua))
     assert P.Count() == 4 and P.Gnarly() == 4 and int(card(lua).fsIndex) == 4
     assert not P.IsNew(P.Active()) and int(P.Active()) == 1
-    assert int(TB(lua).CurrentPick("fire").id) == IDS["Magma Totem"], "the dial now on preset 1 did not apply it"
+    # a click on GNARLY never rewrites the live totems, whatever slot the dial lands on
+    assert {e: int(TB(lua).CurrentPick(e).id) for e in picks} == picks, "the picks were rewritten"
+    assert int(g(lua).FS.TotemBar.MC.PickSerial()) == serial and len(seq(g(lua).__mc.calls)) == 0, \
+        "a Pick or a set 1 write happened"
+
+
+def check_making_the_gnarly_preset_leaves_the_dials_step_record_alone():
+    lua, a, b = gnarly_world()
+    P = PS(lua)
+    P.SetGnarly(None)
+    P.Tracker("dial").k = 1
+    P.Tracker("gnarly").k = 2
+    shift_click(lua, gb(lua))
+    assert P.Gnarly() == 3
+    assert int(P.Tracker("dial").k) == 1, "the dial's step record was reset"
+    assert int(P.Tracker("gnarly").k) == 0, "the GNARLY step record was not reset"
+
+
+def check_a_press_of_an_empty_gnarly_cell_records_nothing():
+    lua, a, b = gnarly_world()
+    P = PS(lua)
+    P.SetGnarly(None)
+    assert gb(lua)._attrs["type1"] is None
+    run(lua, "__sounds = {}")
+    for down in (True, False):
+        click(lua, gb(lua), "LeftButton", down)
+    run(lua, '__cvars.ActionButtonUseKeyDown = "1"')
+    for down in (True, False):
+        click(lua, gb(lua), "LeftButton", down)
+    assert int(P.Tracker("gnarly").presses) == 0, "an empty cell counted a press"
+    assert P.PressAge("gnarly") is None, "an empty cell started the press flash"
+    assert len(seq(g(lua).__sounds)) == 0, "an empty cell played the press sound"
+    # a cell with a preset still counts it
+    P.SetGnarly(b)
+    run(lua, '__cvars.ActionButtonUseKeyDown = "0"')
+    click(lua, gb(lua), "LeftButton", False)
+    assert int(P.Tracker("gnarly").presses) == 1 and P.PressAge("gnarly") is not None
 
 
 def check_shift_click_on_an_unset_gnarly_with_every_preset_made_opens_the_active_one():
@@ -2296,6 +2335,8 @@ CHECKS = [
     check_the_editor_buttons_that_size_to_their_text_are_padded_symmetrically_and_snapped_to_whole_pixels,
     check_shift_click_on_an_unset_gnarly_with_room_makes_an_empty_preset_ties_it_and_opens_it,
     check_shift_click_on_an_unset_gnarly_leaves_the_dial_on_its_new_slot,
+    check_making_the_gnarly_preset_leaves_the_dials_step_record_alone,
+    check_a_press_of_an_empty_gnarly_cell_records_nothing,
     check_shift_click_on_an_unset_gnarly_with_every_preset_made_opens_the_active_one,
     check_shift_click_on_a_set_gnarly_opens_its_own_preset_and_makes_nothing,
     check_shift_click_on_an_unset_gnarly_in_combat_is_refused_and_makes_nothing,

@@ -595,7 +595,8 @@ end
 
 -- Shift click on an unset GNARLY: makes an EMPTY preset, ties it as the GNARLY preset and returns its index (nil and
 -- why when it cannot). The dial's active slot is not changed: when the dial sat on the NEW slot it stays on the NEW slot
--- that follows the new preset (or, with none left, on the first preset, as PS.Active clamps it anyway).
+-- that follows the new preset (or, with none left, on the first preset, as PS.Active clamps it anyway). Nothing is
+-- applied to the buttons: the player's picks and the set 1 slots stay as they are.
 function PS.CreateGnarly()
     local why = Refusal()
     if why then return nil, why end
@@ -608,8 +609,7 @@ function PS.CreateGnarly()
         store.gnarly = index
         if wasNew then store.active = index < P.MAX and index + 1 or 1 end
     end)
-    PS.ResetSteps()
-    if wasNew and index >= P.MAX then Reapply() end
+    PS.ResetSteps("gnarly")                   -- the dial's step record is not touched
     local tb = TotemBar()
     if tb and tb.Sync then tb.Sync() end
     Notify("edited", index)
@@ -795,11 +795,14 @@ function PS.OnCast(spellId)
     Notify("step", best)
 end
 
-function PS.ResetSteps()
+-- Starts the step records over: every cell's, or only `only`'s (a cell key).
+function PS.ResetSteps(only)
     local any = false
-    for _, t in pairs(steps) do
-        if t.k ~= 0 then any = true end
-        t.k, t.at, t.pressAt = 0, nil, nil
+    for cell, t in pairs(steps) do
+        if only == nil or cell == only then
+            if t.k ~= 0 then any = true end
+            t.k, t.at, t.pressAt = 0, nil, nil
+        end
     end
     if any then Notify("step") end
 end
