@@ -70,6 +70,13 @@ Theme.COLOR_AMBER = { 1, 0.7137, 0.2824, 1 }           -- #ffb648 --amber
 Theme.COLOR_WARM  = { 1, 0.2392, 0.1216, 1 }           -- #ff3d1f --warm
 Theme.COLOR_RED   = { 1, 0.2314, 0.3059, 1 }           -- #ff3b4e --red
 Theme.COLOR_MUTED = { 0.6157, 0.5765, 0.7686, 1 }      -- #9d93c4 --muted (the party pet column's PET label)
+-- The four totem elements (the Gunsight Shaman poles, mockups/gunsight-class-module-shaman-2026-10-08.html EL; the totem tab uses the same hexes)
+Theme.COLOR_TOTEM = {
+    fire  = { 1, 0.3529, 0.2353, 1 },                   -- #ff5a3c
+    earth = { 0.6588, 0.8784, 0.3882, 1 },              -- #a8e063
+    water = { 0.2902, 0.6588, 1, 1 },                   -- #4aa8ff
+    air   = { 0.8863, 0.8314, 1, 1 },                   -- #e2d4ff
+}
 -- The party row edge of the unit the player has targeted (PartyFrames ApplyBoxEdge). An electric
 -- indigo-violet, deliberately bluer than COLOR_BORDER (#a855f7, hue 271) and the Curse dispel
 -- colour (#A335EE / #9933FF, hue 276-280), and far from the pinks (COLOR_HEALTH, caret power).

@@ -83,6 +83,13 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "totem_bump_stroke": (256, 256),
         "totem_bump_halo": (128, 64),
     },
+    # generate_totem_pole.py: the Gunsight Shaman module's pole blocks, dashed molds and dashed head outlines, art in the top left
+    # of the next power of two canvas.
+    "totem_pole": {
+        "pole_block_40": (256, 32), "pole_block_26": (128, 32),
+        "pole_mold_40": (256, 256), "pole_mold_26": (128, 256),
+        "pole_dash_48": (256, 64), "pole_dash_30": (128, 64),
+    },
     # generate_hud_key_ring.py: sixteen arc segments of the toggle key ring.
     "hud_key_ring": {f"hud_key_ring_{i:02d}": (128, 64) for i in range(16)},
     # generate_console_chrome.py: Console panel chassis (cut 14) and the 45 degree tab foot.
@@ -1820,3 +1827,86 @@ def test_committed_totem_piece_textures_match_their_generator(totem_piece_output
 
 if __name__ == "__main__":
     sys.exit(pytest.main([str(Path(__file__).resolve()), "-v"]))
+
+
+# --- Shaman Gunsight totem pole art -----------------------------------------
+
+POLE_GENERATOR = GENERATOR_DIR / "generate_totem_pole.py"
+# name -> (art width, art height) in texels, the oracle written out by hand: 4 texels per image px, a 1 px margin on stroked pieces
+POLE_ART = {
+    "pole_block_40": (160, 20), "pole_block_26": (104, 20),
+    "pole_mold_40": (168, 196), "pole_mold_26": (112, 196),
+    "pole_dash_48": (200, 44), "pole_dash_30": (128, 44),
+}
+
+
+@pytest.fixture(scope="module")
+def pole_outputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    work = tmp_path_factory.mktemp("totem_pole")
+    _run_generator(POLE_GENERATOR, work)
+    return work
+
+
+def _rgba_grid(path: Path) -> list[list[tuple[int, int, int, int]]]:
+    data = path.read_bytes()
+    width, height = struct.unpack("<HH", data[12:16])
+    body = data[TGA_HEADER_SIZE:]
+    grid = []
+    for y in range(height):
+        row = []
+        for x in range(width):
+            b, g, r, a = body[(y * width + x) * 4:(y * width + x) * 4 + 4]
+            row.append((r, g, b, a))
+        grid.append(row)
+    return grid
+
+
+@pytest.mark.parametrize("name", sorted(POLE_ART))
+def test_pole_art_sits_in_the_top_left_and_the_rest_is_clear(pole_outputs: Path, name: str) -> None:
+    grid = _rgba_grid(pole_outputs / f"{name}.tga")
+    art_w, art_h = POLE_ART[name]
+    assert max(a for row in grid[:art_h] for (_, _, _, a) in row[:art_w]) == 255
+    outside = [a for y, row in enumerate(grid) for x, (_, _, _, a) in enumerate(row) if x >= art_w or y >= art_h]
+    assert not any(outside), "ink outside the art area would show through the crop"
+
+
+@pytest.mark.parametrize("name,w", [("pole_block_40", 40), ("pole_block_26", 26)])
+def test_pole_block_is_opaque_with_the_dark_line_baked_in(pole_outputs: Path, name: str, w: int) -> None:
+    grid = _rgba_grid(pole_outputs / f"{name}.tga")
+    assert all(grid[y][x][3] == 255 for y in range(20) for x in range(w * 4))
+    assert grid[0][0][:3] == (255, 255, 255) and grid[19][w * 4 - 1][:3] == (255, 255, 255)
+    # the line: 1 image px tall at y 2, from x 3 to w - 3, a 45% blend of #0a0416 over white
+    line = grid[2 * 4 + 1][(w // 2) * 4]
+    assert line[:3] == (146, 142, 151), line
+    assert grid[2 * 4 + 1][2 * 4][:3] == (255, 255, 255), "the line is inset 3 px"
+    assert grid[3 * 4 + 1][(w // 2) * 4][:3] == (255, 255, 255), "and 1 px tall"
+
+
+@pytest.mark.parametrize("name", ["pole_mold_40", "pole_mold_26"])
+def test_pole_mold_is_a_dashed_rectangle_with_an_empty_middle(pole_outputs: Path, name: str) -> None:
+    grid = _rgba_grid(pole_outputs / f"{name}.tga")
+    art_w, art_h = POLE_ART[name]
+    assert all(grid[y][x][3] == 0 for y in range(24, art_h - 24) for x in range(24, art_w - 24)), "the middle must be empty"
+    top = [max(grid[y][x][3] for y in range(0, 8)) for x in range(8, art_w - 8)]
+    assert any(v == 0 for v in top) and any(v == 255 for v in top), "dashed, not continuous"
+    # the dash runs 2 on, 3 off along the top: 8 texels on, 12 off
+    ink = sum(1 for v in top if v > 128)
+    assert 0.3 < ink / len(top) < 0.5, ink / len(top)
+
+
+@pytest.mark.parametrize("name", ["pole_dash_48", "pole_dash_30"])
+def test_pole_head_dash_is_chamfered_top_left_and_bottom_right(pole_outputs: Path, name: str) -> None:
+    grid = _rgba_grid(pole_outputs / f"{name}.tga")
+    art_w, art_h = POLE_ART[name]
+    # the cut corners carry no ink at their very corner, the sharp ones (top right, bottom left) do
+    assert all(grid[y][x][3] == 0 for y in range(0, 4) for x in range(0, 4))
+    assert all(grid[y][x][3] == 0 for y in range(art_h - 4, art_h) for x in range(art_w - 4, art_w))
+    assert max(grid[y][x][3] for y in range(0, 10) for x in range(art_w - 10, art_w)) > 128
+    assert max(grid[y][x][3] for y in range(art_h - 10, art_h) for x in range(0, 10)) > 128
+
+
+def test_committed_pole_art_matches_the_generator(pole_outputs: Path) -> None:
+    outs = sorted(pole_outputs.glob("*.tga"))
+    assert len(outs) == len(POLE_ART)
+    for out in outs:
+        assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
