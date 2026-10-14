@@ -1129,28 +1129,31 @@ def check_fill() -> None:
 def check_crisp() -> None:
     """Pixel crisp: where the client says what a physical pixel is, every edge of the icon pieces is a whole number of them, and
     the pieces have the engine's own snapping off and a texel bias of 0. Without the numbers (no PixelUtil) whole UI units."""
-    # UI scale 0.64 of a 1440 screen: a physical pixel is 0.5333 UI units at effective scale 1, so 34 design px * 0.64 = 21.76
-    # (768 / 1440, 0.64, 0.64) is the live case: a physical pixel of 0.8333 UI units, so no edge falls on a whole unit by luck
-    for factor, eff, scale in ((768 / 1440, 0.5333, 0.64), (768 / 1080, 0.711, 0.64), (768 / 1440, 1.0, 1.0), (768 / 1440, 0.64, 0.64)):
+    # UI scale 0.64 of a 1440 screen: 34 design px * 0.64 = 21.76
+    # The first two cases have a pixel of exactly one UI unit (the effective scale equals the factor), so edges on whole UI units
+    # are whole pixels there: they pin the scale 0.64 sizes only. The cases that tell rounding to physical pixels from rounding
+    # to UI units are the effective scale 1.0 one (a pixel of 0.5333 units) and the live one, (768 / 1440, 0.64, 0.64): a pixel
+    # of 0.8333 units, so no edge falls on a whole unit by luck.
+    for factor, eff, scale in ((768 / 1440, 768 / 1440, 0.64), (768 / 1080, 768 / 1080, 0.64), (768 / 1440, 1.0, 1.0), (768 / 1440, 0.64, 0.64)):
         w = World(12, scale=scale, pixel_factor=factor, effective_scale=eff).login()
         px = factor / eff
         infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
         offs = [(i["left"], i["right"], i["cl"], i["cr"]) for i in infos]
         whole = all(abs(v / px - round(v / px)) < 1e-6 for o in offs for v in o)
-        check(f"crisp.every_edge_is_a_whole_number_of_physical_pixels.factor_{factor:.3f}_eff_{eff}_scale_{scale}", whole, f"px {px:.4f} {offs[:2]}")
+        check(f"crisp.every_edge_is_a_whole_number_of_physical_pixels.factor_{factor:.3f}_eff_{eff:.4f}_scale_{scale}", whole, f"px {px:.4f} {offs[:2]}")
         cover_x0 = w.get("FS.IconStyleData.cover.x0")
-        check(f"crisp.no_piece_is_more_than_half_a_pixel_off_its_design_place.eff_{eff}_scale_{scale}",
+        check(f"crisp.no_piece_is_more_than_half_a_pixel_off_its_design_place.eff_{eff:.4f}_scale_{scale}",
               all(abs(i["cl"] - cover_x0 * i["bw"]) <= px / 2 + 1e-6 for i in infos), f"{[(i['cl'], cover_x0 * i['bw']) for i in infos][:2]}")
-        check(f"crisp.pieces_have_engine_snapping_on_and_bias_0.eff_{eff}_scale_{scale}",
+        check(f"crisp.pieces_have_engine_snapping_on_and_bias_0.eff_{eff:.4f}_scale_{scale}",
               all(all(v is True for v in i["snaps"].values()) and all(v == 0 for v in i["biases"].values()) for i in infos), f"{infos[0]['snaps']} {infos[0]['biases']}")
         # and the art still meets the ring when the glyph's edges are rounded to those pixels: drawn at that many screen pixels
         # per UI unit, no pixel inside the ring falls outside the glyph's window
         missed = {n: _key_wedge_misses(i, 1 / px) for n, i in enumerate(infos) if i["kind"] == "runtime"}
-        check(f"crisp.the_art_meets_the_ring_on_whole_physical_pixels.factor_{factor:.3f}_eff_{eff}_scale_{scale}",
+        check(f"crisp.the_art_meets_the_ring_on_whole_physical_pixels.factor_{factor:.3f}_eff_{eff:.4f}_scale_{scale}",
               len(missed) == 12 and not any(missed.values()), f"px {px:.4f} {missed}")
         # top and bottom edges: the key height lands on whole physical pixels too, both pieces alike
         heights = [(i["bh"] + i["vert"][p][2] - i["vert"][p][1]) for i in infos for p in ("g", "c")]
-        check(f"crisp.the_key_height_is_a_whole_number_of_physical_pixels.factor_{factor:.3f}_eff_{eff}_scale_{scale}",
+        check(f"crisp.the_key_height_is_a_whole_number_of_physical_pixels.factor_{factor:.3f}_eff_{eff:.4f}_scale_{scale}",
               all(abs(v / px - round(v / px)) < 1e-6 for v in heights) and all(abs(v - infos[0]["bh"]) <= px / 2 + 1e-6 for v in heights), f"px {px:.4f} {heights[:3]} bh {infos[0]['bh']}")
     # no PixelUtil: whole UI units, as before
     w = World(12, scale=0.64).login()
