@@ -78,7 +78,7 @@ table.grid td.nm small{display:block;color:var(--muted);font-size:10px;font-weig
 <div class="strips" id="tabStrips"></div>
 
 <h2>02 <i>//</i> MICRO MENU</h2>
-<p class="cap">Source is the classic micro button art, cropped out of its frame (32x64 BLP, the glyph is only about 22x29 px, so it is soft when upscaled). Cells show <b>64</b>, <b>32</b> and the real <b>16 px</b>. First column is today's hand drawn glyph for comparison. A dagger marks a stand in icon: the classic art for Character is a runtime portrait, and Professions, Guild and PvP have no classic micro art, so a nearby Blizzard icon was used just to judge the style. Legacy and Housing are not shown (no source art).</p>
+<p class="cap">Source is the classic micro button art, cropped out of its frame (32x64 BLP, the glyph is only about 22x29 px, so it is soft when upscaled). Cells show <b>64</b>, <b>32</b> and the real <b>16 px</b>. First column is today's hand drawn glyph for comparison. The sources are the classic micro art, the modern micro menu atlas (Professions, Guild, Housing) and the PvP faction emblem. Character (a runtime portrait) and Legacy have no static art and are not shown.</p>
 <div id="microGrid"></div>
 
 <div class="rowlab">IN CONTEXT <i></i>MICRO MENU BAR<small>34x26 slanted keys, 16 px glyph, idle look from MicroBars.lua (edge alpha .35, soft LED at .6, glyph multiplied by the live #cfc4ef tint) with the accent cycling cyan, violet, pink. Real size, then 3x.</small></div>
@@ -98,7 +98,7 @@ function grid(rows,sizes,host,withCurrent){
   ORDER.forEach(function(k){t+='<th>'+STYLE_NAMES[k]+'</th>';});
   t+='</tr>';
   rows.forEach(function(r){
-    t+='<tr><td class="nm">'+r.label+(r.stand_in?' &dagger;':'')+'<small>'+r.family.replace('house_','house ')+'</small></td>';
+    t+='<tr><td class="nm">'+r.label+''+'<small>'+r.family.replace('house_','house ')+'</small></td>';
     if(withCurrent){
       var c=DATA.current[r.key];
       t+='<td><div class="cellimgs">'+(c?'<div><img width="32" height="32" src="'+src(c)+'" style="image-rendering:pixelated"><div class="sizelab">16 x2</div></div><div><img width="16" height="16" src="'+src(c)+'"><div class="sizelab">16</div></div>':'<span class="sizelab">none</span>')+'</div></td>';

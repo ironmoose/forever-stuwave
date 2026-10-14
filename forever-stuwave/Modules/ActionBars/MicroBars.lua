@@ -46,6 +46,7 @@ local TEX_GLOW = MEDIA .. "cell_slant_glow.tga"
 local TEX_LED = MEDIA .. "deck_led.tga"
 local TEX_DOT = MEDIA .. "glow_round.tga"
 local GLYPH_DIR = MEDIA .. "glyph_"
+local ART_DIR = MEDIA .. "glyphart_"
 
 -- Design px defaults, replaced at Apply by FS.Deck's own numbers when present.
 local KEY_W, KEY_H, KEY_GAP = 34, 26, 3
@@ -101,6 +102,35 @@ local GLYPHS = {
     PVP = "pvp", Socials = "socials", WorldMap = "worldmap",
 }
 local GLYPH_GENERIC = "help"
+
+-- Glyph names that wear baked art (glyphart_<name>.tga: the micro button's own Blizzard icon on the
+-- STUwave gradient, tools/assets/synthwave_icons.py --bake-micro). Any other name keeps its hand
+-- drawn glyph_<name>.tga: Character (Blizzard draws a live portrait there) and Legacy have no
+-- static art. PvP has one file per faction instead of a plain "pvp" file.
+local ART = {
+    spellbook = true, talents = true, professions = true, achievement = true, questlog = true,
+    guild = true, socials = true, lfd = true, collections = true, ej = true, worldmap = true,
+    store = true, help = true, mainmenu = true, housing = true,
+}
+local PVP_ART = { Alliance = "pvp_alliance", Horde = "pvp_horde" }
+local PVP_ART_OTHER = "pvp_ffa"
+
+-- The texture file a glyph name wears. `faction` is UnitFactionGroup("player") (nil or "Neutral"
+-- gives the faction free emblem). Pure, so the harness can walk every name.
+local function GlyphPath(name, faction)
+    if name == "pvp" then
+        return ART_DIR .. (PVP_ART[faction] or PVP_ART_OTHER) .. ".tga"
+    end
+    if ART[name] then return ART_DIR .. name .. ".tga" end
+    return GLYPH_DIR .. name .. ".tga"
+end
+
+local function PlayerFaction()
+    if type(UnitFactionGroup) ~= "function" then return nil end
+    local ok, faction = pcall(UnitFactionGroup, "player")
+    if ok and type(faction) == "string" then return faction end
+    return nil
+end
 
 -- Window frames whose visibility mirrors a button's "open" state, as a fallback
 -- beside SetButtonState. Only one-to-one mappings: PlayerSpellsFrame hosts both
@@ -785,7 +815,7 @@ local function EnsureKey(button, index)
 
     local name = button:GetName() or ""
     local base = BaseName(name)
-    local glyphFile = GLYPH_DIR .. (GLYPHS[base] or GLYPH_GENERIC) .. ".tga"
+    local glyphFile = GlyphPath(GLYPHS[base] or GLYPH_GENERIC, PlayerFaction())
 
     local ov = CreateFrame("Frame", nil, button)
     ov:EnableMouse(false)
@@ -1382,6 +1412,7 @@ end)
 FS.MicroBars = {
     keys = keyList, ComputeVisual = ComputeVisual, Apply = Apply,
     KeyLayout = KeyLayout, Pitch = Pitch, RowWidth = RowWidth,
+    Glyphs = GLYPHS, GlyphGeneric = GLYPH_GENERIC, GlyphPath = GlyphPath,
 }
 
 -- Verifies the micro buttons actually landed in the deck and picked up their

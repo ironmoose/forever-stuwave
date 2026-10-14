@@ -15,13 +15,16 @@ width and edge threshold stay tuned for it). D is simulated here only so it can 
 in game it needs no art at all and works for any spell.
 
 Sources are NOT part of the repository. Download them yourself into a directory that is
-never committed (the mockup used debug/icon-sources-2026-10-14/):
+never committed (the mockup used debug/icon-sources-2026-10-14/). All are fetched by file id
+from wago.tools (https://wago.tools/api/casc/<fileid>?download), ids from the community listfile:
 
     spells/<iconname>.jpg    https://wow.zamimg.com/images/wow/icons/large/<iconname>.jpg  (56 px)
-    micro/<name>.blp         classic micro button art, fetched by file id from wago.tools
-                             (32x64 BLP: the button frame with the glyph inside)
-    subs/<iconname>.jpg      zamimg icons standing in where the micro button art is a
-                             runtime portrait or does not exist
+    micro/<name>.blp         classic micro button art (32x64 BLP: the button frame with the glyph
+                             inside), interface/buttons/ui-microbutton-<name>-up
+    micro/pvp_<faction>.blp  interface/targetingframe/ui-pvp-alliance, -horde, -ffa (64x64)
+    micro/uimicromenu2x.blp  interface/hud/uimicromenu2x, file id 4708813: the modern micro menu
+                             atlas (uncompressed BLP2). Cells come from UiTextureAtlasMember
+                             (wago.tools/db2/UiTextureAtlasMember/csv, atlas 2136).
 
 Usage (read untrusted downloads with -I so nothing in their directory is imported):
 
@@ -30,6 +33,12 @@ Usage (read untrusted downloads with -I so nothing in their directory is importe
 
 The preview page embeds the derived art as base64, so it defaults to debug/ (gitignored) and
 must never be committed to the public repository.
+
+Shipping the micro menu (style B, the approved look): `--bake-micro` writes
+forever-stuwave/Media/Textures/glyphart_<name>.tga, 32x32 BGRA with a rounded alpha, no scanline
+(it would alias when the client rescales), one file per micro glyph plus one PvP file per
+faction. MicroBars.lua picks them; Character and Legacy have no static Blizzard art and keep
+their hand drawn glyph_ files (tools/assets/generate_deck_glyphs.py).
 
 Derived art is made from Blizzard's icons: fine for personal use. A public release should
 prefer style D, which ships no copies of Blizzard art.
@@ -43,6 +52,8 @@ import argparse
 import base64
 import io
 import json
+import os
+import struct
 import sys
 from pathlib import Path
 
@@ -187,6 +198,43 @@ def load_micro(path: Path) -> np.ndarray:
     y0, x0 = (side - h) // 2, (side - w) // 2
     out[y0:y0 + h, x0:x0 + w] = rgb
     return out
+
+
+def read_blp2_bgra(path: Path) -> Image.Image:
+    """An uncompressed (colour encoding 3, BGRA) BLP2, which Pillow does not read: the modern
+    micro menu atlas is one."""
+    d = path.read_bytes()
+    magic, _typ, enc, _ad, _ae, _mips, w, h = struct.unpack("<4sIBBBBII", d[:20])
+    if magic != b"BLP2" or enc != 3:
+        raise ValueError(f"{path}: not an uncompressed BLP2 (encoding {enc})")
+    off = struct.unpack("<I", d[20:24])[0]
+    px = np.frombuffer(d[off:off + w * h * 4], dtype=np.uint8).reshape(h, w, 4)
+    return Image.fromarray(px[..., [2, 1, 0, 3]], "RGBA")
+
+
+def trim_square(rgba: Image.Image) -> np.ndarray:
+    """Composite on the key plate colour, crop to the visible art, pad to a square."""
+    a = np.asarray(rgba.convert("RGBA"), dtype=np.float64) / 255.0
+    alpha = a[..., 3]
+    ys, xs = np.where(alpha > 0.08)
+    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+    rgb = a[..., :3] * alpha[..., None] + PLATE * (1 - alpha[..., None])
+    crop = rgb[y0:y1, x0:x1]
+    h, w = crop.shape[:2]
+    side = max(h, w) + max(2, round(max(h, w) * 0.12))
+    out = np.zeros((side, side, 3)) + PLATE
+    oy, ox = (side - h) // 2, (side - w) // 2
+    out[oy:oy + h, ox:ox + w] = crop
+    return out
+
+
+def load_atlas(path: Path, left: int, top: int, w: int, h: int) -> np.ndarray:
+    return trim_square(read_blp2_bgra(path).crop((left, top, left + w, top + h)))
+
+
+def load_emblem(path: Path) -> np.ndarray:
+    """A plain RGBA BLP such as the PvP faction emblem."""
+    return trim_square(Image.open(path))
 
 
 # ---------------------------------------------------------------------------
@@ -345,35 +393,49 @@ SHAMAN = [
     ("Water Shield", "spells/ability_shaman_watershield.jpg", "water"),
 ]
 
-# (glyph file stem, label, source, accent) in the deck's order. A "~" source is a stand-in
-# from subs/ because the classic micro button art is a runtime portrait or does not exist.
+# (glyph file stem, label, source, family) in the deck's order. Sources, all of them real client
+# art (see the module docstring): "micro/<name>.blp" is a classic 32x64 micro button, "atlas:" is a
+# cell of the modern micro menu atlas (left,top,width,height), and the PvP emblem is the faction
+# crest the classic PvP button draws. Character has no static art (the button draws your portrait
+# at runtime) and Legacy has none at all, so both keep their hand drawn glyph_ file and are not here.
+# The family is the deck's accent cycle position the glyph had in the approved preview.
+ATLAS = "atlas:micro/uimicromenu2x.blp@"
 MICRO = [
-    ("character", "Character", "~subs/achievement_character_human_male.jpg"),
-    ("spellbook", "Spellbook", "micro/spellbook.blp"),
-    ("talents", "Talents", "micro/talents.blp"),
-    ("professions", "Professions", "~subs/trade_blacksmithing.jpg"),
-    ("achievement", "Achievements", "micro/achievement.blp"),
-    ("questlog", "Quest Log", "micro/quest.blp"),
-    ("guild", "Guild", "~subs/inv_shirt_guildtabard_01.jpg"),
-    ("socials", "Social", "micro/socials.blp"),
-    ("lfd", "Group Finder", "micro/lfg.blp"),
-    ("pvp", "PvP", "~subs/achievement_pvp_a_01.jpg"),
-    ("collections", "Collections", "micro/mounts.blp"),
-    ("ej", "Adventure Guide", "micro/ej.blp"),
-    ("worldmap", "World Map", "micro/world.blp"),
-    ("store", "Shop", "micro/store.blp"),
-    ("help", "Help", "micro/help.blp"),
-    ("mainmenu", "Main Menu", "micro/mainmenu.blp"),
+    ("spellbook", "Spellbook", "micro/spellbook.blp", "house_violet"),
+    ("talents", "Talents", "micro/talents.blp", "house_pink"),
+    ("professions", "Professions", ATLAS + "397,337,64,82", "house_cyan"),
+    ("achievement", "Achievements", "micro/achievement.blp", "house_violet"),
+    ("questlog", "Quest Log", "micro/quest.blp", "house_pink"),
+    ("guild", "Guild", ATLAS + "265,421,64,82", "house_cyan"),
+    ("socials", "Social", "micro/socials.blp", "house_violet"),
+    ("lfd", "Group Finder", "micro/lfg.blp", "house_pink"),
+    ("pvp", "PvP", "micro/pvp_horde.blp", "house_cyan"),
+    ("collections", "Collections", "micro/mounts.blp", "house_violet"),
+    ("ej", "Adventure Guide", "micro/ej.blp", "house_pink"),
+    ("worldmap", "World Map", "micro/world.blp", "house_cyan"),
+    ("store", "Shop", "micro/store.blp", "house_violet"),
+    ("help", "Help", "micro/help.blp", "house_pink"),
+    ("mainmenu", "Main Menu", "micro/mainmenu.blp", "house_cyan"),
+    ("housing", "Housing", ATLAS + "331,337,64,82", "house_violet"),
+]
+# PvP is baked once per faction (MicroBars.lua picks by UnitFactionGroup), never as plain "pvp".
+PVP_VARIANTS = [
+    ("pvp_alliance", "micro/pvp_alliance.blp"),
+    ("pvp_horde", "micro/pvp_horde.blp"),
+    ("pvp_ffa", "micro/pvp_ffa.blp"),
 ]
 MICRO_FAMILIES = ["house_cyan", "house_violet", "house_pink"]  # the deck's accent cycle
 
 
 def load_any(root: Path, rel: str) -> np.ndarray:
+    if rel.startswith("atlas:"):
+        name, rect = rel[len("atlas:"):].split("@")
+        return load_atlas(root / name, *[int(v) for v in rect.split(",")])
     path = root / rel.lstrip("~")
     if not path.exists():
         raise FileNotFoundError(path)
     if path.suffix == ".blp":
-        return load_micro(path)
+        return load_micro(path) if Image.open(path).size == (32, 64) else load_emblem(path)
     return load_spell(path)
 
 
@@ -414,13 +476,70 @@ def current_glyphs() -> dict[str, bytes]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Shipping: the micro menu's style B textures
+# ---------------------------------------------------------------------------
+
+BAKE_SIZE = 32  # power of two; MicroBars.lua draws the glyph at 16 design px, so 2x for the GPU to minify
+BAKE_RADIUS = 7.0  # corner radius in texels: the square art backdrop fades into the key instead of showing as a box
+
+
+def rounded_mask(n: int, radius: float, feather: float = 1.2) -> np.ndarray:
+    """Alpha of a rounded square filling the n x n texture, with a soft edge."""
+    ss = 8
+    m = n * ss
+    yy, xx = (np.mgrid[0:m, 0:m] + 0.5) / ss
+    qx = np.abs(xx - n / 2) - (n / 2 - radius)
+    qy = np.abs(yy - n / 2) - (n / 2 - radius)
+    dist = np.hypot(np.maximum(qx, 0), np.maximum(qy, 0)) + np.minimum(np.maximum(qx, qy), 0) - radius
+    a = np.clip(0.5 - dist / feather, 0, 1)
+    return a.reshape(n, ss, n, ss).mean(axis=(1, 3))
+
+
+def bake_glyph(src: np.ndarray, fam: tuple) -> np.ndarray:
+    """Style B at BAKE_SIZE as RGBA uint8. No scanline: it would alias when the client rescales."""
+    rgb = finish(gradient_map(src, BAKE_SIZE, fam), BAKE_SIZE, TUNING[BAKE_SIZE], scan=False)
+    a = rounded_mask(BAKE_SIZE, BAKE_RADIUS)
+    return (np.dstack([rgb, a]) * 255 + 0.5).astype(np.uint8)
+
+
+def tga_bytes(rgba: np.ndarray) -> bytes:
+    """Uncompressed 32 bit TGA, top-left origin, BGRA: the format the other generators write."""
+    h, w = rgba.shape[:2]
+    header = struct.pack("<BBBHHBHHHHBB", 0, 0, 2, 0, 0, 0, 0, 0, w, h, 32, 0x28)
+    return header + rgba[..., [2, 1, 0, 3]].tobytes()
+
+
+def bake_micro(root: Path, out_dir: Path) -> list[Path]:
+    """Write glyphart_<name>.tga for every micro entry (and every PvP faction) into out_dir."""
+    jobs = [(stem, rel, fam) for stem, _label, rel, fam in MICRO if stem != "pvp"]
+    pvp_fam = next(f for stem, _l, _r, f in MICRO if stem == "pvp")
+    jobs += [(stem, rel, pvp_fam) for stem, rel in PVP_VARIANTS]
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = []
+    for stem, rel, fam in jobs:
+        path = out_dir / f"glyphart_{stem}.tga"
+        path.write_bytes(tga_bytes(bake_glyph(load_any(root, rel), FAMILIES[fam])))
+        written.append(path)
+        print("baked", path.name, file=sys.stderr)
+    return written
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--sources", type=Path, required=True, help="directory holding spells/, micro/, subs/")
     ap.add_argument("--html", type=Path, default=REPO / "debug" / "synthwave-icons-2026-10-14.html",
                     help="standalone preview page (default is under debug/, which is untracked: it embeds Blizzard art, never commit it)")
     ap.add_argument("--png-dir", type=Path, help="also write every rendered PNG here")
+    ap.add_argument("--bake-micro", action="store_true",
+                    help="write the shipped micro menu textures (style B, 32x32 .tga) into forever-stuwave/Media/Textures "
+                         "(or FS_ASSET_OUTPUT_DIR) and stop")
     args = ap.parse_args()
+
+    if args.bake_micro:
+        out = Path(os.environ.get("FS_ASSET_OUTPUT_DIR") or REPO / "forever-stuwave" / "Media" / "Textures")
+        bake_micro(args.sources, out)
+        return 0
 
     shaman = render_set(args.sources, [(n, n, r, f) for n, r, f in SHAMAN], list(FAMILIES))
     micro = render_set(args.sources, MICRO, MICRO_FAMILIES)

@@ -385,13 +385,21 @@ function h_opaqueFills()
     end
     return n
 end
+-- Every glyph file path a key's overlay wears (the hand drawn glyph_ files and the baked glyphart_ ones).
+function h_glyphPaths()
+    local out = {}
+    for _, o in ipairs(ALL) do
+        if o.kind == "Texture" and o.tex and tostring(o.tex):find("glyph%a*_") and underButton(o) then out[#out + 1] = tostring(o.tex) end
+    end
+    return out
+end
 -- Per button: how many textures under its overlay use a glyph file.
 function h_glyphCounts()
     local out = {}
     for i, b in ipairs(BUTTONS) do
         local n = 0
         for _, o in ipairs(ALL) do
-            if o.kind == "Texture" and o.tex and tostring(o.tex):find("glyph_", 1, true) then
+            if o.kind == "Texture" and o.tex and tostring(o.tex):find("glyph%a*_") then
                 local p = o.parent
                 while p and p ~= b do p = p.parent end
                 if p == b then n = n + 1 end
@@ -621,6 +629,39 @@ def check_overlay() -> None:
     check("overlay.no_opaque_rect_under_the_plate", w.call("h_opaqueFills") == 0, f"{w.call('h_opaqueFills')} opaque fills")
     counts = [c for _, c in w.call("h_glyphCounts").items()]
     check("overlay.glyph_drawn_once_per_key", counts == [1] * 12, f"{counts}")
+
+
+def tga_header(path: Path) -> tuple[int, int, int, int]:
+    """(image type, width, height, bits per pixel) of an uncompressed TGA."""
+    h = path.read_bytes()[:18]
+    return h[2], int.from_bytes(h[12:14], "little"), int.from_bytes(h[14:16], "little"), h[16]
+
+
+def check_glyph_files() -> None:
+    """Every micro entry resolves to a shipped, loadable texture, and no baked glyph is orphaned."""
+    media = ADDON / "Media" / "Textures"
+    w = World(12).login()
+    paths = [str(p) for _, p in w.call("h_glyphPaths").items()]
+    names = [p.rsplit("\\", 1)[-1] for p in paths]
+    missing = [n for n in names if not (media / n).exists()]
+    check("glyphs.every_built_key_wears_a_shipped_file", len(names) == 12 and not missing, f"{len(names)} keys, missing {missing}")
+
+    mb = w.get("FS.MicroBars")
+    stems = sorted({str(v) for _, v in mb.Glyphs.items()} | {str(mb.GlyphGeneric)})
+    resolved = {(stem, f): str(mb.GlyphPath(stem, f)).rsplit("\\", 1)[-1]
+                for stem in stems for f in ("Alliance", "Horde", "Neutral", None)}
+    gone = sorted({n for n in resolved.values() if not (media / n).exists()})
+    check("glyphs.every_mapping_entry_and_faction_resolves_to_an_existing_file", len(stems) >= 17 and not gone, f"{len(stems)} stems, missing {gone}")
+    pvp = {f: resolved[("pvp", f)] for f in ("Alliance", "Horde", "Neutral", None)}
+    check("glyphs.pvp_follows_the_players_faction",
+          pvp["Alliance"] != pvp["Horde"] and pvp["Neutral"] == pvp[None] and len(set(pvp.values())) == 3, f"{pvp}")
+
+    baked = sorted(p.name for p in media.glob("glyphart_*.tga"))
+    orphans = [n for n in baked if n not in set(resolved.values())]
+    bad = [n for n in baked if tga_header(media / n) != (2, 32, 32, 32)]
+    check("glyphs.baked_art_is_32x32_bgra_tga", len(baked) >= 15 and not bad, f"{len(baked)} files, bad {bad}")
+    check("glyphs.no_baked_art_is_orphaned", not orphans, f"{orphans}")
+    check("glyphs.no_degrade_logs", w.logs() == "", w.logs())
 
 
 def check_art() -> None:
@@ -962,6 +1003,7 @@ def main() -> int:
     check_constants(lean, gap)
     check_layout(lean, gap)
     check_overlay()
+    check_glyph_files()
     check_art()
     check_hit_rects(lean, gap)
     check_deck(lean, gap)
