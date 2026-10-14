@@ -65,7 +65,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 
 REPO = Path(__file__).resolve().parent.parent.parent
 
@@ -512,10 +512,10 @@ def current_glyphs() -> dict[str, bytes]:
 
 BAKE_SIZE = 64  # power of two: a square the key covers; MicroBars.lua crops it to the key's band of rows
 BAKE_FILL = 1.15  # the art is padded to this much of its size with its own backdrop: just enough that the key's slanted corners do not cut the glyph, little enough that the art still fills the key
-# The micro key's geometry (MicroBars.lua KEY_W, KEY_H, LEAN_FRAC): the slanted shape is baked into the alpha because
-# a MaskTexture does not clip on this client. Drawn at the key's width, the texture's central band of rows
-# (KEY_H / KEY_W of its height) is the key; everything outside the slanted outline is transparent.
-KEY_W, KEY_H, KEY_LEAN = 34.0, 26.0, 0.34
+# The micro key's design size (MicroBars.lua KEY_W, KEY_H): the baked art is the key's rect, drawn at the key's width, the
+# texture's central band of rows (KEY_H / KEY_W of its height) is the key; the area inside the key's border is opaque and
+# everything else is transparent (a MaskTexture does not clip on this client).
+KEY_W, KEY_H = 34.0, 26.0
 
 
 def pad_backdrop(src: np.ndarray, scale: float) -> np.ndarray:
@@ -531,25 +531,37 @@ def pad_backdrop(src: np.ndarray, scale: float) -> np.ndarray:
 
 
 def key_shape_alpha(n: int) -> np.ndarray:
-    """Alpha of the key's slanted outline inside the central band of an n x n square, soft at the edge."""
+    """Alpha of the area INSIDE the key's border, in the central band of an n x n square: the plate texture's shape
+    (cell_slant.tga) minus the ring's line (deck_key_slant_outline.tga, grown by a texel), both drawn stretched over the key's rect, so the art
+    stops at the ring's inner edge. The ring is only 35% opaque at idle, so art under it would show through as art running
+    over the border; and the drawn shapes, not a constant lean, are what the art has to fit."""
     ss = 8
-    scale_x = n / KEY_W
     band_h = n * KEY_H / KEY_W
     y0 = (n - band_h) / 2
-    lean = KEY_LEAN * KEY_W
-    pts = [(lean, 0), (KEY_W, 0), (KEY_W - lean, KEY_H), (0, KEY_H)]
-    poly = [(x * scale_x * ss, (y0 + y * scale_x) * ss) for x, y in pts]
-    im = Image.new("L", (n * ss, n * ss), 0)
-    ImageDraw.Draw(im).polygon(poly, fill=255)
-    a = np.asarray(im, dtype=np.float64) / 255.0
-    return a.reshape(n, ss, n, ss).mean(axis=(1, 3))
+    tex = REPO / "forever-stuwave" / "Media" / "Textures"
+
+    def stretched(name: str) -> np.ndarray:
+        alpha = Image.open(tex / name).convert("RGBA").getchannel("A")
+        top, bottom = round(y0 * ss), round((y0 + band_h) * ss)
+        canvas = Image.new("L", (n * ss, n * ss), 0)
+        canvas.paste(alpha.resize((n * ss, bottom - top), Image.BILINEAR), (0, top))
+        return np.asarray(canvas, dtype=np.float64).reshape(n, ss, n, ss).mean(axis=(1, 3)) / 255.0
+
+    ring = stretched("deck_key_slant_outline.tga")
+    padded = np.pad(ring, 1, mode="edge")
+    # one texel of margin: the art ends just inside the ring's line, so the ring's soft inner edge never carries any
+    ring = np.max([padded[1 + dy:1 + dy + n, 1 + dx:1 + dx + n] for dy in (-1, 0, 1) for dx in (-1, 0, 1)], axis=0)
+    return np.clip(stretched("cell_slant.tga") - ring, 0.0, 1.0)
 
 
 def bake_glyph(src: np.ndarray, fam: tuple) -> np.ndarray:
-    """Style B at BAKE_SIZE as RGBA uint8: art edge to edge, alpha the key's slanted shape. No scanline: it
-    would alias when the client rescales."""
+    """Style B at BAKE_SIZE as RGBA uint8: art edge to edge, alpha the area inside the key's border. No scanline: it
+    would alias when the client rescales. Outside the shape the colour is the plate's, not the art's: the client filters
+    straight (not premultiplied) alpha, so bright art colour in transparent texels would fringe into the border and the gap."""
     rgb = finish(gradient_map(pad_backdrop(src, BAKE_FILL), BAKE_SIZE, fam), BAKE_SIZE, TUNING[BAKE_SIZE], scan=False)
-    return (np.dstack([rgb, key_shape_alpha(BAKE_SIZE)]) * 255 + 0.5).astype(np.uint8)
+    alpha = key_shape_alpha(BAKE_SIZE)
+    rgb = rgb * alpha[..., None] + PLATE * (1.0 - alpha[..., None])
+    return (np.dstack([rgb, alpha]) * 255 + 0.5).astype(np.uint8)
 
 
 def tga_bytes(rgba: np.ndarray) -> bytes:

@@ -48,6 +48,9 @@ import re
 import sys
 from pathlib import Path
 
+import numpy as np
+from PIL import Image
+
 try:
     from lupa.luajit21 import LuaRuntime
 except ImportError:
@@ -729,6 +732,43 @@ def check_glyph_files() -> None:
         if worst > 1:
             off[n] = worst
     check("glyphs.shipped_art_alpha_is_the_keys_shape", len(baked) >= 20 and not off, f"{len(baked)} files, off by more than one step: {off}")
+
+    # Live layout: at every key count the art is drawn in the key's rect (the plate and the ring fill the same rect), so
+    # resample the shipped art band, the plate and the ring to the key's pixel size (3 screen px per design px, as on the live
+    # client) and check the art stays INSIDE the ring: never beyond the plate, and off the ring line's core, where a bright
+    # edge would read as running over the border (the ring is only 35% opaque at idle) or leak into the gap.
+    plate_im = Image.open(media / "cell_slant.tga").convert("RGBA").getchannel("A")
+    ring_im = Image.open(media / "deck_key_slant_outline.tga").convert("RGBA").getchannel("A")
+    pad = (1 - 26 / 34) / 2
+    leaks = {}
+    for count in (12, 14, 16, 18):
+        info = dict(World(count).login().call("h_glyphInfo")[1].items())
+        size = (round(info["w"] * 3), round(info["h"] * 3))
+        plate = np.asarray(plate_im.resize(size, Image.BILINEAR), dtype=float) / 255
+        ring = np.asarray(ring_im.resize(size, Image.BILINEAR), dtype=float) / 255
+        for n in baked:
+            art_im = Image.open(media / n).convert("RGBA").getchannel("A")
+            art = np.asarray(art_im.resize(size, Image.BILINEAR, box=(0, pad * 64, 64, (1 - pad) * 64)), dtype=float) / 255
+            beyond = float((art - plate).max())
+            core = ring >= 0.75  # the ring line itself; its soft inner edge may still carry a little art
+            under = float(art[core].max()) if core.any() else 0.0
+            if beyond > 0.08 or under > 0.2:
+                leaks[(count, n)] = (round(beyond, 2), round(under, 2))
+    check("glyphs.art_stays_inside_the_plate_and_off_the_ring_at_every_key_count", not leaks,
+          f"{len(leaks)} leaks (beyond the plate, under the ring), first {list(leaks.items())[:3]}")
+    # Outside the shape the RGB is the plate colour, not the art: a straight alpha bilinear fetch blends in the RGB of
+    # transparent texels, and bright art there would fringe into the gap.
+    dark = (0x14, 0x0A, 0x24)
+    bleed = {}
+    for n in baked:
+        data = (media / n).read_bytes()[18:]
+        worst = 0
+        for i in range(0, len(data), 4):
+            if data[i + 3] == 0:
+                worst = max(worst, abs(data[i + 2] - dark[0]), abs(data[i + 1] - dark[1]), abs(data[i] - dark[2]))
+        if worst > 3:
+            bleed[n] = worst
+    check("glyphs.transparent_texels_carry_the_plate_colour_not_the_art", not bleed, f"{bleed}")
     # The old hand drawn glyph_<name>.tga line glyphs are not drawn any more (glyph_hud_* belong to the Console keys).
     stale = sorted(p.name for p in media.glob("glyph_*.tga") if not p.name.startswith("glyph_hud_"))
     check("glyphs.no_unreferenced_line_glyph_files", not stale, f"{stale}")
