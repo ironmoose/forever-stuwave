@@ -2047,7 +2047,7 @@ def icon(lua, i):
         vertex=rgb(b.icon._vertex) if b.icon._vertex else None,
         desat=bool(b.icon._desat), chip=shown(b.fsChip.ring) and shown(b.fsChip.fill) and shown(b.fsChip.code),
         chip_any=shown(b.fsChip.ring) or shown(b.fsChip.fill) or shown(b.fsChip.glow) or shown(b.fsChip.code),
-        plate=shown(b.fsTextPlate), text=b.fsText._text,
+        plate=shown(b.fsTextPlate) or shown(b.fsWordPlate), band=shown(b.fsWordPlate), text=b.fsText._text,
     )
 
 
@@ -2381,9 +2381,22 @@ def check_in_combat_the_tiles_wear_the_missing_look_and_only_the_alpha_is_writte
     assert icon(lua, IMBUE)["plate"] and icon(lua, SHIELD)["plate"]
 
 
-def plate_pad(lua, i):
-    pts = btn(lua, i).fsTextPlate._points
-    return float(pts[1].x), float(pts[2].x)
+def point_writes(lua, i):
+    """Wraps SetPoint and ClearAllPoints on every region of tile i and counts the calls into __pw (reset to 0)."""
+    run(lua, """
+        __pw = 0
+        local b = _G["FSBuffTabButton%d"]
+        local function wrap(r)
+            for _, m in ipairs({ "SetPoint", "ClearAllPoints", "SetAllPoints" }) do
+                local f = r[m]
+                r[m] = function(...) __pw = __pw + 1 return f(...) end
+            end
+        end
+        wrap(b)
+        for _, r in ipairs({ b.icon, b.fsPlate, b.fsTextPlate, b.fsWordPlate, b.fsText, b.fsLine, b.fsChip.fill, b.fsChip.ring,
+                             b.fsChip.glow, b.fsChip.code }) do wrap(r) end
+        for _, d in ipairs(b.fsDashes) do wrap(d) end
+    """ % i)
 
 
 def check_in_combat_the_missing_look_is_the_base_under_the_slot_and_stays_inside_what_it_covers(scale):
@@ -2392,8 +2405,9 @@ def check_in_combat_the_missing_look_is_the_base_under_the_slot_and_stays_inside
     c = acs(lua)[0]
     L = bt(lua).Looks()
     out_plate = {i: tile(lua, i)["plate"] for i in (IMBUE, SHIELD)}
-    assert plate_pad(lua, SHIELD) == (-2.0, 2.0), "out of combat the label plate keeps its pad"
     set_combat(lua, True)
+    for i in (IMBUE, SHIELD):
+        point_writes(lua, i)
     fire(lua, "PLAYER_REGEN_DISABLED")
     tick(lua, 5)
     slots = {IMBUE: [c._ench[1], c._ench[2]], SHIELD: [c._slots["shield"].frame]}
@@ -2417,6 +2431,7 @@ def check_in_combat_the_missing_look_is_the_base_under_the_slot_and_stays_inside
     tick(lua, 5)
     refilled = snapshot()
     assert empty == full == refilled, "the base is the missing look whatever the slot does"
+    assert int(g(lua).__pw) == 0, "an anchor was written on a tile region in combat"
     for i in (IMBUE, SHIELD):
         t, ic = empty[i]
         # everything the slot cannot cover stays neutral: the ring and glow, the button plate, the underline
@@ -2425,25 +2440,39 @@ def check_in_combat_the_missing_look_is_the_base_under_the_slot_and_stays_inside
         close(t["plate"], tuple(float(x) for x in (L.hollow.plate[1], L.hollow.plate[2], L.hollow.plate[3])), "neutral button plate")
         assert abs(t["plate_a"] - float(L.hollow.plate[4])) < 1e-3
         assert float(btn(lua, i).fsChip.glow._vertex[4]) == 0, "no chip glow spills out of the icon rect"
-        if i == SHIELD:
-            assert abs(t["px"] - min(9 * 1.0, t["px"])) < 1e-6 and t["px"] <= 9, "the SHIELD word keeps its smaller size"
-        # everything red (the word on its plate) lies inside the icon rect the slot covers
         b = btn(lua, i)
         room = float(b.icon.GetRight(b.icon)) - float(b.icon.GetLeft(b.icon))
         word = t["text"]
-        glyphs = len(word) * 0.5615 * t["px"]
-        pad_l, pad_r = plate_pad(lua, i)
-        assert (pad_l, pad_r) == (0.0, 0.0), "the label plate hugs the word in combat"
-        assert glyphs <= room + 1e-6, f"{word} ({glyphs}) spills past the icon rect ({room})"
-        # the slot's lit icon is on that rect, opaque cover, above every tile frame
+        if word:
+            # the red word is inside the icon rect, on a band that is anchored to the icon itself
+            glyphs = len(word) * 0.5615 * t["px"]
+            assert glyphs <= room + 1e-6, f"{word} ({glyphs:.2f}) spills past the icon rect ({room:.2f}) at {scale}"
+            assert ic["band"] and not shown(b.fsTextPlate), "the band plate stands behind the word"
+            pts = b.fsWordPlate._points
+            assert same(lua, pts[1].rel, b.icon) and same(lua, pts[2].rel, b.icon), "the band is anchored to the icon rect"
+        else:
+            # not even the smallest size fits the rect: no word, no plate, only the dim icon says it
+            assert word == "" and not ic["plate"], f"{i}: a plate without a word at {scale}"
+            assert len(("IMBUE", "SHIELD")[i - 1]) * 0.5615 * 6 > room, f"{i}: the word was dropped though it fits at {scale}"
+        assert ic["desat"] and all(abs(x - 0.45) < 1e-3 for x in ic["vertex"])
+        # the slot's lit icon is on that rect
         for sl in slots[i]:
             assert same(lua, sl._points[1].rel, b.icon)
-    assert float(c._level) > float(g(lua).FSBuffTab._level)
+    face = float(btn(lua, SHIELD).fsFace._level)
+    assert float(c._level) > float(g(lua).FSBuffTab._level) and float(c._level) > face, "the container is above every tile frame"
+    for i in (IMBUE, SHIELD):
+        assert float(c._level) > float(btn(lua, i)._level)
     leave_combat(lua)
     tick(lua, 5)
-    assert plate_pad(lua, SHIELD) == (-2.0, 2.0), "the pad is back after combat"
     for i in (IMBUE, SHIELD):
         assert tile(lua, i)["plate"] == out_plate[i], "the out of combat plate colour is back"
+        assert shown(btn(lua, i).fsTextPlate) and not shown(btn(lua, i).fsWordPlate), "the padded plate is back"
+
+
+def check_the_missing_word_is_fitted_to_the_icon_rect_at_every_ui_scale():
+    # the icon inset is 3 screen px whatever the scale, so the room shrinks faster than the tile at small scales
+    for scale in (0.5333, 0.64, 0.70, 0.90, 1.0, 1.25):
+        check_in_combat_the_missing_look_is_the_base_under_the_slot_and_stays_inside_what_it_covers(scale)
 
 
 def check_the_missing_word_in_combat_keeps_its_out_of_combat_size():
@@ -3162,6 +3191,7 @@ CHECKS = [
     check_the_shield_slot_seats_on_the_icon_and_draws_icon_time_and_count,
     check_the_imbue_slots_carry_our_lit_icon_and_the_engine_time_on_both_hands,
     check_in_combat_the_tiles_wear_the_missing_look_and_only_the_alpha_is_written,
+    check_the_missing_word_is_fitted_to_the_icon_rect_at_every_ui_scale,
     check_the_missing_word_in_combat_keeps_its_out_of_combat_size,
     check_regen_arms_a_container_that_reads_back_off_and_a_combat_login_builds_at_regen,
     check_nothing_is_built_in_combat_whoever_asks,

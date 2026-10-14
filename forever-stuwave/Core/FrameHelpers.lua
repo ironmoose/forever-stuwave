@@ -1280,13 +1280,18 @@ function Helpers.SetSpellIcon(tex, stock)
     pcall(tex.SetTexture, tex, stock)
 end
 
+-- The inset (screen px, NOT scaled with the button) SeatCutIcon keeps between the button edge and its icon.
+function Helpers.CutIconInset(button)
+    local skin = button.fsSkin
+    local chamfer = (skin and skin.chamfer) or (Theme and Theme.SLICE_CUT_MARGIN) or DEFAULT_CUT_CHAMFER
+    return math.ceil(chamfer / 2)
+end
+
 function Helpers.SeatCutIcon(button)
     local icon = button.icon
     if not icon then return end
 
-    local skin = button.fsSkin
-    local chamfer = (skin and skin.chamfer) or (Theme and Theme.SLICE_CUT_MARGIN) or DEFAULT_CUT_CHAMFER
-    local inset = math.ceil(chamfer / 2)
+    local inset = Helpers.CutIconInset(button)
 
     icon:ClearAllPoints()
     icon:SetPoint("TOPLEFT", button, "TOPLEFT", inset, -inset)

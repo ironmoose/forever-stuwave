@@ -70,6 +70,7 @@ local BT = {
     MISSING = { imbue = "IMBUE", shield = "SHIELD" },   -- the word of the missing look (ShamanBuffs says the same out of combat)
     TEXT_INSET = 3,                 -- design px kept clear on each side of the time or word (the cut border's chamfer)
     ADVANCE = 0.5615,               -- Mononoki Bold's advance per em (every glyph; the font is monospaced)
+    PLATE_H = 12,                   -- design px, the height of the band plate behind the missing word in combat
     TEXT_Y = 27,                    -- the time line's centre, design px below the tile top
     TICK = 1,                       -- seconds between repaints (the clock text)
     CHIP_GLOW_A = 0.35,             -- the chip's glow alpha while a chip glows (the looks table says which do)
@@ -437,6 +438,10 @@ local function StyleButton(button, size, scale)
         button.fsTextPlate:SetPoint("TOPLEFT", button.fsText, "TOPLEFT", -2, 0)
         button.fsTextPlate:SetPoint("BOTTOMRIGHT", button.fsText, "BOTTOMRIGHT", 2, 0)
         button.fsTextPlate:Hide()
+        -- the engine mode plate: a band across the icon rect (it can never leave the rect the slot covers)
+        button.fsWordPlate = face:CreateTexture(nil, "ARTWORK", nil, 7)
+        button.fsWordPlate:SetColorTexture(LABEL_PLATE[1], LABEL_PLATE[2], LABEL_PLATE[3], LABEL_PLATE[4])
+        button.fsWordPlate:Hide()
         button.fsLine = face:CreateTexture(nil, "OVERLAY", nil, 2)
         button.fsLine:SetColorTexture(1, 1, 1, 1)
         button.fsDashes = {}
@@ -463,6 +468,11 @@ local function StyleButton(button, size, scale)
     chip.code:SetPoint("CENTER", chip.fill, "CENTER", 0, -0.5 * s)
     button.fsText:ClearAllPoints()
     button.fsText:SetPoint("CENTER", button, "TOP", 0, -BT.TEXT_Y * s)
+    -- the band: left and right edges on the icon, centred on the time line (the icon is centred on the tile)
+    button.fsWordPlate:ClearAllPoints()
+    button.fsWordPlate:SetPoint("LEFT", button.icon, "LEFT", 0, -(BT.TEXT_Y - BT.BTN / 2) * s)
+    button.fsWordPlate:SetPoint("RIGHT", button.icon, "RIGHT", 0, -(BT.TEXT_Y - BT.BTN / 2) * s)
+    button.fsWordPlate:SetHeight(BT.PLATE_H * s)
     button.fsLine:ClearAllPoints()
     button.fsLine:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", 5 * s, 3 * s)
     button.fsLine:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -5 * s, 3 * s)
@@ -522,12 +532,20 @@ end
 -- The font size for `text`: `px`, or smaller so the string stays inside the tile with TEXT_INSET design px clear on
 -- each side. The tile shrinks with the UI scale and fonts do not, so the longest words (SHIELD) are fitted to the
 -- current scale; whole and half pixels only (rounded down), never below BT.MIN_PX, and a rescale repaints, which refits.
-local function FitPx(text, px)
+--
+-- With `room` (screen px, the icon rect an engine slot covers) the string must fit that width instead: nil comes back
+-- when even BT.MIN_PX would spill, and the caller leaves the string out.
+local function FitPx(text, px, room)
     local n = type(text) == "string" and #text or 0
     if n == 0 then return px end
-    local room = (BT.BTN - 2 * BT.TEXT_INSET) * Scale()
-    local fit = math.floor(room / (n * BT.ADVANCE) * 2) / 2
+    local fit = math.floor((room or (BT.BTN - 2 * BT.TEXT_INSET) * Scale()) / (n * BT.ADVANCE) * 2) / 2
+    if room and fit < BT.MIN_PX then return nil end
     return math.max(math.min(fit, px), BT.MIN_PX)
+end
+
+-- The width of the icon rect an engine slot is seated on: the tile less the icon's unscaled inset on each side.
+local function IconRoom(button)
+    return BT.BTN * Scale() - 2 * FH.CutIconInset(button)
 end
 
 -- Paints one tile from its view. Writes only when something changed.
@@ -559,14 +577,12 @@ local function PaintButton(button, v)
     local tint = UsabilityColor(button.fsUsable)
     local look = engineMode and L.engine or (L[v.mode] or L.hollow)
     local text = engineMode and BT.MISSING[button.fsKey] or v.text
-    -- the label plate hugs the glyphs in engine mode (no side pad), so the red under the slot's lit icon stays inside
-    -- the icon rect the slot covers; out of combat it keeps the 2 px pad
-    local pad = engineMode and 0 or 2
-    if button.fsPlatePad ~= pad then
-        button.fsPlatePad = pad
-        button.fsTextPlate:ClearAllPoints()
-        button.fsTextPlate:SetPoint("TOPLEFT", button.fsText, "TOPLEFT", -pad, 0)
-        button.fsTextPlate:SetPoint("BOTTOMRIGHT", button.fsText, "BOTTOMRIGHT", pad, 0)
+    -- the word fitted to the icon rect the slot covers; a word that cannot fit there at BT.MIN_PX is left out (the
+    -- dim icon says it), so no red text ever sits outside the rect. Out of combat the word fits the tile as before.
+    local size
+    if engineMode then
+        size = FitPx(text, (button.fsKey == "shield") and BT.WORD_PX or BT.TEXT_PX, IconRoom(button))
+        if not size then text = nil end
     end
     local skin = button.fsSkin
     if skin and skin.border and skin.border.ring then
@@ -596,14 +612,21 @@ local function PaintButton(button, v)
         icon:SetDesaturated(look.desat and true or false)
         icon:Show()
         chip.fill:Hide(); chip.ring:Hide(); chip.glow:Hide(); chip.code:Hide()
-        button.fsTextPlate:SetShown(text ~= nil and text ~= "")
+        -- two plates, each anchored once out of combat (an anchor is not written on a secure tile's child in combat):
+        -- the padded one hugs the glyphs, the band one spans the icon rect the slot covers and shows in engine mode
+        local hasText = text ~= nil and text ~= ""
+        button.fsTextPlate:SetShown(hasText and not engineMode)
+        button.fsWordPlate:SetShown(hasText and engineMode)
     else
         icon:Hide()
         chip.fill:Show(); chip.ring:Show(); chip.glow:Show(); chip.code:Show()
         button.fsTextPlate:Hide()
+        button.fsWordPlate:Hide()
     end
-    local missing = engineMode or v.mode == "warn"
-    local size = FitPx(text, (missing and button.fsKey == "shield") and BT.WORD_PX or BT.TEXT_PX)
+    if not engineMode then
+        size = FitPx(text, (v.mode == "warn" and button.fsKey == "shield") and BT.WORD_PX or BT.TEXT_PX)
+    end
+    size = size or BT.MIN_PX
     if button.fsTextPx ~= size then
         button.fsTextPx = size
         FS.Theme.ApplyMono(button.fsText, size, look.text)
