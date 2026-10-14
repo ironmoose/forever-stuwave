@@ -44,6 +44,16 @@ The fill is plain rectangles and a cut wedge in Lua; what is baked here:
                       128 x 64 canvas. The halo of the rail resumes either side of it, so each piece carries
                       the concave corners (the nearest outline wins: one composite, never two).
 
+THE FLYOUT. While the icon picker is open the bump's top is open between the button's two edges and a chimney rises
+out of it (Lua: TotemPiece.SetFlyout; the mockup's open state). Its walls, top line, fill and the straight runs of
+its halo are plain rectangles and the Console's own halo strips; its top left cut uses the shared cut pieces. What
+the Console's pieces cannot draw is where the chimney's walls meet the bump's top (the concave corners, where the
+nearest outline wins), so those two junctions are baked here, for the open shape instead of the closed bump:
+
+  totem_flyout_halo   the halo left of the chimney's left wall (normal and leftmost variants) and right of its right
+                      wall, from 11 px over the bump top down to the rail, one texel per px, three pieces in a
+                      64 square canvas.
+
 Pure stdlib, like every generator here. Output: 18-byte header, image type 2, descriptor 0x28 (top-left origin,
 8 alpha bits), BGRA top to bottom.
 
@@ -120,6 +130,16 @@ BUMP_HALO_REGION = {
 }
 BUMP_HALO_AT = {"normal": (2, 2), "fire": (2, 32)}
 HALO_BLEED = 2                # texels of the real halo field kept around each piece, for the bilinear filter
+
+# ---- the flyout (the chimney's two junctions with the bump top) ----
+FLY_LEFT, FLY_RIGHT = 0.0, BTN_W        # the chimney's walls: the button's own edges
+FLY_HALO_CANVAS = 64
+FLY_HALO_REGION = {
+    "left": (-4.0 - GLOW_PAD, BUMP_TOP - GLOW_PAD, FLY_LEFT, RAIL),
+    "left_fire": (-6.0 - GLOW_PAD, BUMP_TOP - GLOW_PAD, FLY_LEFT, 0.0),
+    "right": (FLY_RIGHT, BUMP_TOP - GLOW_PAD, BUMP_RIGHT + GLOW_PAD, RAIL),
+}
+FLY_HALO_AT = {"left": (2, 2), "left_fire": (22, 2), "right": (44, 2)}
 
 # the Console's halo profile (generate_shoulder_glow.py)
 HALO = [(1.5, 0.26), (3.2, 0.17), (5.0, 0.10), (7.0, 0.055)]
@@ -334,6 +354,31 @@ def bump_halo_value(variant):
     return value
 
 
+def flyout_halo_value(side):
+    """The halo of the open outline: the chimney's wall rises from the bump top, so above the shoulder the nearest
+    outline is the wall, and at the concave corner the wall and the shoulder's top share one composite."""
+    if side == "right":
+        foot = [(BUMP_RIGHT, VERTEX - STROKE_OFF), (BUMP_RIGHT + BUMP_FOOT + STROKE_OFF, RAIL), (FAR, RAIL)]
+        path = [(FLY_RIGHT, -FAR), (FLY_RIGHT, BUMP_TOP), (BUMP_RIGHT, BUMP_TOP)] + foot
+        closing = [(FAR, FAR), (-FAR, FAR), (-FAR, -FAR)]
+    else:
+        lx = VARIANTS["fire" if side == "left_fire" else "normal"]
+        if side == "left":
+            path = [(-FAR, RAIL), (lx, RAIL), (lx, BUMP_TOP), (FLY_LEFT, BUMP_TOP), (FLY_LEFT, -FAR)]
+            closing = [(FAR, -FAR), (FAR, FAR), (-FAR, FAR)]
+        else:
+            path = [(lx, FAR), (lx, BUMP_TOP), (FLY_LEFT, BUMP_TOP), (FLY_LEFT, -FAR)]
+            closing = [(FAR, -FAR), (FAR, FAR)]
+    shape = path + closing
+
+    def value(x, y):
+        if inside(x, y, shape):
+            return 0.0
+        return halo_alpha(line_dist(x, y, path))
+
+    return value
+
+
 def canvas_with(width, height, pieces):
     """pieces: (atlas position of the piece itself, its grid, bleed texels around it already in the grid)."""
     grid = [[0.0] * width for _ in range(height)]
@@ -369,6 +414,17 @@ def build_bump_halo():
     return canvas_with(HALO_CANVAS_W, HALO_CANVAS_H, pieces)
 
 
+def build_flyout_halo():
+    pieces = []
+    for side in FLY_HALO_REGION:
+        region = FLY_HALO_REGION[side]
+        w, h = region_texels(region, 1)
+        m = HALO_BLEED
+        pieces.append((FLY_HALO_AT[side],
+                       bake(w + 2 * m, h + 2 * m, 1, (region[0] - m, region[1] - m), flyout_halo_value(side)), m))
+    return canvas_with(FLY_HALO_CANVAS, FLY_HALO_CANVAS, pieces)
+
+
 # ---------------------------------------------------------------- output
 
 def write_tga(path, grid):
@@ -400,6 +456,7 @@ def main():
         ("totem_chev_core", chev_core),
         ("totem_bump_stroke", build_bump_stroke),
         ("totem_bump_halo", build_bump_halo),
+        ("totem_flyout_halo", build_flyout_halo),
     ]
     for name, make in outputs:
         write_tga(os.path.join(here, name + ".tga"), make())

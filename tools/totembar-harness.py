@@ -29,8 +29,12 @@ combat only (no secure snippet, no state driver), cooldown swipes fed from durat
     one fresh try; the tab's own default fill is never saved as the user's pick;
   * totems are found by rank 1 spell id (their localized name finds the highest rank known), not by English name;
   * the picker is a plain frame on UIParent that nothing secure is a child of or anchored to; it opens from the
-    arrow tab or an Alt-click (which never drops the totem), lists the known totems, and a click stores the pick
-    per character;
+    hover piece or an Alt-click (which never drops the totem) and is the ICON flyout: 32 px tiles with no text, gap 3,
+    pad 3, in a column on the button's axis whose first tile is 4 px over the piece top, the real spell tooltip to the
+    right of the hovered tile, the current pick marked, a click stores the pick per character and closes it. Its
+    chimney (TotemPiece.lua) rises out of the bump as one continuous outline, rasterised from the baked textures
+    here; the whole path (piece or Alt-click, the cursor over the gap onto a tile, the tile the topmost mouse
+    target, the click) is walked with a cursor model;
   * the Shaman shoulder, the Ghost Wolf stance bar staying where it was, no `.bar` field and no `useparent-`
     attribute on any button (Blizzard's secure code reads both during a click).
 
@@ -47,6 +51,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import re
+import struct
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -121,7 +126,7 @@ end
 __Region.SetReverse = function(self, v) self._reverse = v end
 -- the texture coordinates a region was last given (the mock's own SetTexCoord keeps none)
 __Region.SetTexCoord = function(self, ...) self._coord = { ... } end
-function GameTooltip:SetOwner(owner) self._lines = {}; self._owner = owner end
+function GameTooltip:SetOwner(owner, anchor) self._lines = {}; self._owner = owner; self._anchor = anchor; self._points = {} end
 function GameTooltip:ClearLines() self._lines = {} end
 function GameTooltip:SetText(t) self._lines = { t } end
 UISpecialFrames = {}
@@ -993,8 +998,11 @@ def check_the_picker_opens_and_picks_in_combat_without_a_protected_touch():
     picker = tb(lua).Picker()
     assert shown(picker), "the picker did not open in combat"
     entries = [e for e in seq(picker.fsEntries) if shown(e)]
+    fire_script(lua, entries[0], "OnEnter")
+    fire_script(lua, entries[0], "OnLeave")
     click(lua, entries[1])
     tb(lua).OpenPicker("fire")
+    fire_script(lua, [e for e in seq(picker.fsEntries) if shown(e)][0], "OnEnter")
     tb(lua).ClosePicker()
     assert blocked(lua) == before, "the picker caused a refused protected call"
     assert int(g(lua).__protectedTouch) == touch, "the picker touched a frame under a protected parent in combat"
@@ -1176,8 +1184,10 @@ def check_spell_attributes_use_the_localized_totem_name():
     b = by_key(lua, "earth")
     assert attr(b, "spell1") == loc, f"spell1 {attr(b, 'spell1')!r}"
     tb(lua).OpenPicker("earth")
-    labels = [e.fsLabel._text for e in seq(tb(lua).Picker().fsEntries) if shown(e)]
-    assert labels[0] == loc, labels
+    first = [e for e in seq(tb(lua).Picker().fsEntries) if shown(e)][0]
+    fire_script(lua, first, "OnEnter")
+    assert int(g(lua).GameTooltip._spellID) == tid(lua, "Stoneskin Totem"), "the tile asks the tooltip for the spell id"
+    fire_script(lua, first, "OnLeave")
     lua.eval("__Region.Fire")(b, "OnEnter")
     text = " | ".join(str(x) for x in seq(g(lua).GameTooltip._lines))
     assert loc in text and "Stoneskin" not in text, text
@@ -1683,7 +1693,7 @@ def check_the_chevron_points_up_and_flips_down_while_the_picker_is_open():
     click(lua, a)
     picker = tb(lua).Picker()
     assert shown(picker) and pc.flipped and pc.lit, "an open picker must flip the chevron and light the piece"
-    assert float(picker._points[1].y) >= 13, "the list overlaps the piece it opened from"
+    assert abs(float(picker._points[1].y) - 17) < 1e-6, "the flyout is not where the v3 mockup's open state has it"
     for key in ("hazeA", "hazeB", "bodyA", "bodyB", "core"):
         assert coord(pc[key]) == [0, 1, 1, 0], f"{key} is not flipped down: {coord(pc[key])}"
     # the cursor leaves everything: the piece stays up while the picker is open for this element
@@ -1914,13 +1924,437 @@ def check_the_baked_art_and_the_lua_numbers_agree():
             assert got == want, f"{name} {variant}: Lua {got} vs generator {want}"
     assert float(c.STROKE.k) == gen.BUMP_K and float(c.STROKE.size) == gen.BUMP_CANVAS
     assert (float(c.HALO.w), float(c.HALO.h)) == (gen.HALO_CANVAS_W, gen.HALO_CANVAS_H)
+    # the open outline's junction halos
+    for name, side in (("left", "left"), ("leftFire", "left_fire"), ("right", "right")):
+        want = [float(v) for v in gen.FLY_HALO_REGION[side]] + [float(v) for v in gen.FLY_HALO_AT[side]]
+        got = [float(v) for v in seq(c.FLY_HALO[name])]
+        assert got == want, f"FLY_HALO {name}: Lua {got} vs generator {want}"
+    assert float(c.FLY_HALO.size) == gen.FLY_HALO_CANVAS
+    assert float(c.HALO_PAD) == gen.GLOW_PAD == -gen.FLY_HALO_REGION["left"][1] + gen.BUMP_TOP, "the junctions start one halo pad over the bump top"
+    assert (gen.FLY_LEFT, gen.FLY_RIGHT) == (0.0, float(c.BTN)), "the chimney's walls are the button's edges"
     # the baked files exist, power of two, the sizes the Lua cuts them at
     import struct
     tex = ADDON / "Media" / "Textures"
     for name, size in (("totem_piece_fill", (256, 128)), ("totem_chev_core", (256, 128)),
-                       ("totem_bump_stroke", (256, 256)), ("totem_bump_halo", (128, 64))):
+                       ("totem_bump_stroke", (256, 256)), ("totem_bump_halo", (128, 64)),
+                       ("totem_flyout_halo", (64, 64))):
         data = (tex / f"{name}.tga").read_bytes()
         assert struct.unpack("<HH", data[12:16]) == size, f"{name}.tga is not {size}"
+
+
+# ---------------------------------------------------------------------------------------------
+# The icon flyout (mockups/totem-picker-arrow-2026-10-13.html concept A, open state of
+# mockups/totem-picker-arrow-v3-2026-10-13.html V1): tiles on the picker frame, chimney chrome on the tab
+# ---------------------------------------------------------------------------------------------
+
+V3_MOCKUP = HERE.parent / "mockups" / "totem-picker-arrow-v3-2026-10-13.html"
+TEXTURES = ADDON / "Media" / "Textures"
+_TGA = {}
+
+
+def _tga(path):
+    if path not in _TGA:
+        data = Path(path).read_bytes()
+        w, h = struct.unpack("<HH", data[12:16])
+        assert data[16] == 32, f"{path} is not 32 bit"
+        off = 18 + data[0]
+        _TGA[path] = (w, h, data[off:off + w * h * 4], bool(data[17] & 0x20))
+    return _TGA[path]
+
+
+def _alpha_at(path, u, v):
+    w, h, px, top_first = _tga(path)
+    x, y = min(w - 1, max(0, int(u * w))), min(h - 1, max(0, int(v * h)))
+    row = y if top_first else h - 1 - y
+    return px[(row * w + x) * 4 + 3] / 255.0
+
+
+def tex_info(t):
+    """((x, y, w, h) in the art's design px, the baked file or None for a flat one, the texcoord window l r t b)."""
+    p = t._points[1]
+    name = str(t._texture)
+    path = TEXTURES / name.replace("\\", "/").split("/")[-1] if name.endswith(".tga") else None
+    c = [float(v) for v in seq(t._coord)] if t._coord is not None else [0.0, 1.0, 0.0, 1.0]
+    assert len(c) == 4, f"{name}: a texcoord with {len(c)} numbers"
+    return (float(p.x), -float(p.y), float(t._w), float(t._h)), path, c
+
+
+def tab_infos(frame, layer):
+    return [tex_info(t) for t in seq(frame._regions) if t._kind == "Texture" and t._layer == layer and t._shown]
+
+
+def sample(infos, x, y):
+    """The summed alpha of every piece at the art point (x, y)."""
+    total = 0.0
+    for (bx_, by_, bw, bh), path, (l, r, tp_, bt) in infos:
+        if bx_ <= x < bx_ + bw and by_ <= y < by_ + bh:
+            if path is None:
+                total += 1.0
+            else:
+                total += _alpha_at(path, l + (r - l) * (x - bx_) / bw, tp_ + (bt - tp_) * (y - by_) / bh)
+    return total
+
+
+def overlap(a, b):
+    ax, ay, aw, ah = a[0]
+    bx_, by_, bw, bh = b[0]
+    return min(ax + aw, bx_ + bw) - max(ax, bx_) > 1e-6 and min(ay + ah, by_ + bh) - max(ay, by_) > 1e-6
+
+
+def snapshot(sh):
+    return sorted((tuple(round(v, 6) for v in info[0]), str(info[1]), tuple(info[2]))
+                  for info in tab_infos(sh.normal, "BORDER") + tab_infos(sh.normal, "BACKGROUND")
+                  + tab_infos(sh.art, "BACKGROUND"))
+
+
+def flyout_height(n):
+    return n * 32 + (n - 1) * 3 + 5
+
+
+def _flyout_case(key):
+    lua = all_known_with_lists()
+    sh, p = shoulder_obj(lua), tp(lua)
+    col, n = ORDER.index(key) + 1, len(TOTEMS[key])
+    b = by_key(lua, key)
+    enter(lua, b)
+    rect = p.BumpRect(col)
+    left, floor = float(rect.button), float(rect.top)
+    top, wall_out = floor - flyout_height(n), (6 if key == "fire" else 4)
+    hover = snapshot(sh)
+    hover_strokes = tab_infos(sh.normal, "BORDER")
+    assert sample(hover_strokes, left + 19.5, floor + 0.5) >= 0.99, "the hover bump has no top line to open"
+    tb(lua).OpenPicker(key)
+    assert p.FlyoutCol() is not None and int(p.FlyoutCol()) == col, "no chimney around the open picker"
+    fr = p.FlyoutRect(col, flyout_height(n))
+    for name, want in (("left", left), ("right", left + 38), ("floor", floor), ("top", top)):
+        approx(fr[name], want, f"flyout {name}")
+    assert abs(float(rect.buttonTop) - floor - 17) < 1e-6, "the bump top is not 17 px over the button top"
+    strokes = tab_infos(sh.normal, "BORDER")
+    # the chimney's own outline: two walls, the top line and the top left cut
+    boxes = [tuple(round(v, 6) for v in s[0]) for s in strokes]
+    for want, label in (((left, top + 6, 1, floor + 1 - top - 6), "left wall"), ((left + 37, top + 1, 1, floor - top), "right wall"),
+                        ((left + 6, top, 32, 1), "top line"), ((left, top, 6, 6), "top left cut")):
+        assert tuple(round(v, 6) for v in want) in boxes, f"{key}: no chimney {label} at {want}; strokes {boxes}"
+    # the bump's own stroke is split at the walls: the part left of the left wall and the part right of the right
+    bump_parts = [s for s in strokes if s[1] is not None and s[1].name == "totem_bump_stroke.tga"]
+    assert len(bump_parts) == 2, f"{key}: the bump stroke is {len(bump_parts)} pieces while open"
+    bump_parts.sort(key=lambda s: s[0][0])
+    approx(bump_parts[0][0][0] + bump_parts[0][0][2], left, f"{key} bump stroke ends at the left wall")
+    approx(bump_parts[1][0][0], left + 38, f"{key} bump stroke resumes at the right wall")
+    # no stroke piece lies on another (the rail's pieces run under the foot's window by design: the raster below
+    # counts those pixels)
+    above = [s_ for s_ in strokes if s_[0][1] < -1]
+    for i in range(len(above)):
+        for j in range(i + 1, len(above)):
+            assert not overlap(above[i], above[j]), f"{key}: stroke pieces {above[i][0]} and {above[j][0]} overlap"
+    # raster: the opening has no line across it, the outline is one connected line, nowhere doubled
+    assert sample(strokes, left + 19.5, floor + 0.5) < 0.01, f"{key}: a line still crosses the chimney's mouth"
+    h = int(flyout_height(n))
+    lit, worst = set(), 0.0
+    for i in range(-10, 52):
+        for j in range(-h - 2, 12):
+            a = sample(strokes, left + i + 0.5, floor + j + 0.5)
+            if a >= 0.5:
+                lit.add((i, j))
+            if j <= 4:
+                worst = max(worst, a)
+    assert worst <= 1.001, f"{key}: a stroke is drawn twice (summed alpha {worst})"
+    assert (0, -10) in lit, f"{key}: the chimney's left wall is not lit"
+    seen, todo = {(0, -10)}, [(0, -10)]
+    while todo:
+        ci, cj = todo.pop()
+        for di in (-1, 0, 1):
+            for dj in (-1, 0, 1):
+                q = (ci + di, cj + dj)
+                if q in lit and q not in seen:
+                    seen.add(q)
+                    todo.append(q)
+    for q, label in (((19, -h), "top line"), ((37, -10), "right wall"), ((40, 0), "right shoulder"),
+                     ((41, 3), "bump right wall"), ((46, 9), "the foot"), ((48, 11), "the rail past the foot"),
+                     ((-wall_out, 11), "the rail at the left wall"), ((-wall_out, 0), "bump left wall")):
+        assert q in seen, f"{key}: {label} {q} is not on the one continuous outline"
+    # the fill: one layer everywhere inside, none in the cut corner, the bump's fill meeting it at the floor
+    fills = tab_infos(sh.art, "BACKGROUND")
+    for i in range(38):
+        for j in range(h):
+            d = i + 0.5 + j + 0.5
+            if abs(d - 6) < 1.6:
+                continue
+            c = sum(1 for f in fills if sample([f], left + i + 0.5, top + j + 0.5) >= 0.5)
+            assert c == (0 if d < 6 else 1), f"{key}: {c} fill layers at chimney pixel {(i, j)}"
+    assert sum(1 for f in fills if sample([f], left + 19.5, floor + 0.5) >= 0.5) == 1, "the bump fill does not meet the chimney"
+    # the halo: the bump's own is gone from inside the chimney, the walls and the top glow outside
+    halos = tab_infos(sh.normal, "BACKGROUND")
+    assert sample(halos, left + 19.5, floor - 6) < 0.01, f"{key}: the bump's halo lights the chimney's mouth"
+    assert sample(halos, left - 2.5, floor - 5.5) > 0.2, f"{key}: no halo beside the chimney wall above the shoulder"
+    assert sample(halos, left + 40.5, floor - 14.5) > 0.2, f"{key}: no halo beside the right wall"
+    assert sample(halos, left + 19.5, top - 2.5) > 0.2, f"{key}: no halo over the top"
+    # closing puts the hover bump back, piece for piece
+    tb(lua).ClosePicker()
+    assert p.FlyoutCol() is None
+    assert snapshot(sh) == hover, f"{key}: closing did not restore the hover bump"
+
+
+def check_the_chimney_grows_out_of_the_bump_as_one_outline_earth():
+    _flyout_case("earth")
+
+
+def check_the_chimney_grows_out_of_the_bump_as_one_outline_fire():
+    _flyout_case("fire")
+
+
+def check_the_flyout_numbers_are_the_v3_mockups():
+    html = V3_MOCKUP.read_text(encoding="utf-8")
+    for needle in ("TILE:32,TGAP:3,TPAD:3", "var H=4+n*G.TILE+(n-1)*G.TGAP+5;", "bt=fl-4", "fl=BY-(k.s+k.th)",
+                   "var w=G.TILE,cu=4,", "lx=(el==='fire')?xl-6:xl-4", "[xr,bt],[xr+4,bt]", "tx=ch.xl+G.TPAD"):
+        assert needle in html, f"the v3 mockup no longer says {needle!r}; re-read the open state"
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"))
+    f = tb(lua).FLYOUT
+    assert (int(f.TILE), int(f.GAP), int(f.PAD), int(f.TOP_PAD), int(f.CUT), int(f.ABOVE)) == (32, 3, 3, 5, 4, 4)
+    c = tp(lua).C
+    assert int(f.RISE) == int(f.ABOVE) + int(c.SEAM) + int(c.BAR) == 17, "the flyout is not 4 px over the piece top"
+    assert int(f.RISE) == int(c.RISE) + 6, "the flyout does not start at the bump top"
+
+
+def check_the_picker_is_an_icon_only_column_of_32_px_tiles_on_the_buttons_axis(scale):
+    lua = boot(scale, learned=TOTEMS["earth"], lists=lists_for("earth"))
+    tb(lua).OpenPicker("earth")
+    picker, b = tb(lua).Picker(), by_key(lua, "earth")
+    tiles = [e for e in seq(picker.fsEntries) if shown(e)]
+    assert len(tiles) == 5
+    pr, br, ar = csh.D(lua, picker), csh.D(lua, b), csh.D(lua, b.fsArrow)
+    approx(pr["x"], br["x"], "the column is on the button's axis", 0.01), approx(pr["w"], 38, "flyout width", 0.01)
+    approx(pr["h"], flyout_height(5), "flyout height", 0.01)
+    bottom = pr["y"] + pr["h"]
+    approx(bottom, br["y"] - 17, "the flyout starts 17 px over the button top", 0.01)
+    approx(bottom, ar["y"] - 4, "the first tile is 4 px over the piece top", 0.01)
+    for i, tile in enumerate(tiles):
+        d = csh.D(lua, tile)
+        assert tile._kind == "Button" and not tile._secure and not tile._protected, "a tile is not a plain Button"
+        approx(d["w"], 32, f"tile {i} width", 0.01), approx(d["h"], 32, f"tile {i} height", 0.01)
+        approx(d["x"], br["x"] + 3, f"tile {i} left pad", 0.01)
+        approx(br["x"] + 38 - (d["x"] + d["w"]), 3, f"tile {i} right pad", 0.01)
+        approx(d["y"] + d["h"], bottom - i * 35, f"tile {i} bottom (gap 3)", 0.01)
+        assert tile.icon._texture == 9000 + tid(lua, TOTEMS["earth"][i]), "a tile does not carry its spell icon"
+        assert [r for r in seq(tile._regions) if r._kind == "FontString"] == [], "a tile carries a name FontString"
+        assert tile.fsSkin.chamfer == 4, "a tile is not the cut 4 button"
+    assert [r for r in seq(picker._regions) if r._kind == "FontString"] == [], "the picker carries text"
+
+
+def check_a_tile_shows_the_real_spell_tooltip_to_the_right_and_hides_it_on_leave(scale):
+    lua = boot(scale, learned=TOTEMS["earth"], lists=lists_for("earth"))
+    tb(lua).OpenPicker("earth")
+    picker = tb(lua).Picker()
+    tiles = [e for e in seq(picker.fsEntries) if shown(e)]
+    tip = g(lua).GameTooltip
+    fire_script(lua, tiles[1], "OnEnter")
+    assert int(tip._spellID) == tid(lua, "Earthbind Totem") and shown(tip), "the tile did not ask for its spell tooltip"
+    pt = tip._points[1]
+    assert (pt.point, pt.relPoint) == ("LEFT", "RIGHT") and sb.same(lua, pt.rel, tiles[1]), "the tooltip is not beside the tile"
+    approx(pt.x, 5 * scale, "tooltip gap to the right of the tile"), approx(pt.y, 0, "tooltip centred on the tile")
+    assert tiles[1].fsHover, "the hovered tile does not light"
+    fire_script(lua, tiles[1], "OnLeave")
+    assert not shown(tip), "the tooltip stayed after the cursor left the tile"
+    assert not tiles[1].fsHover
+    # the picker closing under the cursor takes the tooltip with it
+    fire_script(lua, tiles[0], "OnEnter")
+    assert shown(tip)
+    tb(lua).ClosePicker()
+    assert not shown(tip), "the tooltip outlived the picker"
+
+
+def check_the_picked_tile_is_marked_and_only_it():
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"))
+    tb(lua).Pick("earth", tid(lua, "Earthbind Totem"))
+    tb(lua).OpenPicker("earth")
+    tiles = [e for e in seq(tb(lua).Picker().fsEntries) if shown(e)]
+    marks = [bool(shown(t.fsUnderline)) for t in tiles]
+    assert marks == [False, True, False, False, False], f"marks {marks}"
+    ring = [float(v) for v in seq(tiles[1].fsSkin.border.ring._vertex)]
+    rest = [float(v) for v in seq(tiles[0].fsSkin.border.ring._vertex)]
+    approx(ring[3], 0.75, "the picked tile's ring"), approx(rest[3], 0.35, "an ordinary tile's ring")
+    assert ring[:3] != rest[:3], "the picked ring is not the element colour"
+    click(lua, tiles[3])
+    tb(lua).OpenPicker("earth")
+    marks = [bool(shown(t.fsUnderline)) for t in [e for e in seq(tb(lua).Picker().fsEntries) if shown(e)]]
+    assert marks == [False, False, False, True, False], f"the mark did not follow the pick: {marks}"
+
+
+def check_the_flyout_chrome_follows_the_picker_and_the_bump():
+    lua = all_known_with_lists()
+    p = tp(lua)
+
+    def col():
+        v = p.FlyoutCol()
+        return None if v is None else int(v)
+    assert col() is None
+    tb(lua).OpenPicker("earth")
+    picker = tb(lua).Picker()
+    assert col() == 2
+    tiles = [e for e in seq(picker.fsEntries) if shown(e)]
+    click(lua, tiles[0])
+    assert not shown(picker) and col() is None, "a pick left the chimney standing"
+    tb(lua).OpenPicker("earth")
+    picker.Hide(picker)
+    assert col() is None, "Escape left the chimney standing"
+    tb(lua).OpenPicker("earth")
+    idle = picker._scripts.OnUpdate
+    for _ in range(40):
+        idle(picker, 0.1)
+    assert not shown(picker) and col() is None, "the idle close left the chimney standing"
+    tb(lua).OpenPicker("earth")
+    tb(lua).OpenPicker("fire")
+    assert col() == 1, "the chimney did not move to the element whose picker opened"
+    # another element's hover moves the one bump away; the chimney goes with it and returns with the bump
+    water = by_key(lua, "water")
+    enter(lua, water)
+    assert col() is None and int(p.BumpCol()) == 3, "the chimney stands without its bump"
+    over(water, False)
+    fire_script(lua, water, "OnLeave")
+    assert col() == 1, "the chimney did not come back with the open picker's bump"
+    tb(lua).ClosePicker()
+    assert col() is None
+
+
+# --- the whole path, the way the mouse takes it ------------------------------------------------
+
+STRATA = ["WORLD", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG", "FULLSCREEN", "FULLSCREEN_DIALOG", "TOOLTIP"]
+
+
+def _strata(f):
+    while f is not None:
+        if f._strata:
+            return STRATA.index(str(f._strata))
+        f = f._parent
+    return STRATA.index("MEDIUM")
+
+
+def _chain_shown(f):
+    while f is not None:
+        if not f._shown:
+            return False
+        f = f._parent
+    return True
+
+
+class Mouse:
+    """A cursor in design px (D coordinates). It finds the topmost mouse-enabled frame under it the way the
+    engine does (strata, then frame level), moves each frame's IsMouseOver flag, and fires OnEnter / OnLeave
+    when the target changes."""
+
+    def __init__(self, lua):
+        self.lua, self.target = lua, None
+
+    def frames(self):
+        out = []
+        for f in g(self.lua)["__frames"].values():
+            if f._kind in ("Texture", "FontString", "MaskTexture") or f is g(self.lua).UIParent:
+                continue
+            m = f._mouse
+            if m is False or not (m or f._clicks):
+                continue
+            out.append(f)
+        return out
+
+    def rect(self, f):
+        try:
+            return csh.D(self.lua, f)
+        except LuaError:
+            return None
+
+    def hit(self, x, y):
+        best, key = None, None
+        for f in self.frames():
+            if not _chain_shown(f):
+                continue
+            d = self.rect(f)
+            if d and d["x"] <= x < d["x"] + d["w"] and d["y"] <= y < d["y"] + d["h"]:
+                k = (_strata(f), float(f._level or 0))
+                if key is None or k >= key:
+                    best, key = f, k
+        return best
+
+    def move(self, x, y):
+        top = self.hit(x, y)
+        for f in self.frames():
+            d = self.rect(f)
+            over(f, bool(d and _chain_shown(f) and d["x"] <= x < d["x"] + d["w"] and d["y"] <= y < d["y"] + d["h"]))
+        same = (top is None and self.target is None) or (top is not None and self.target is not None
+                                                        and sb.same(self.lua, top, self.target))
+        if not same:
+            if self.target is not None:
+                fire_script(self.lua, self.target, "OnLeave")
+            self.target = top
+            if top is not None:
+                fire_script(self.lua, top, "OnEnter")
+        return top
+
+    def tick(self, dt):
+        for f in self.frames():
+            if f._scripts.OnUpdate is not None and _chain_shown(f):
+                f._scripts.OnUpdate(f, dt)
+
+
+def _centre(lua, f):
+    d = csh.D(lua, f)
+    return d["x"] + d["w"] / 2, d["y"] + d["h"] / 2
+
+
+def _walk(mouse, a, b, steps=60):
+    for i in range(steps + 1):
+        mouse.move(a[0] + (b[0] - a[0]) * i / steps, a[1] + (b[1] - a[1]) * i / steps)
+        mouse.tick(0.016)
+
+
+def _end_to_end(open_by, scale=1.0):
+    lua = boot(scale, learned=TOTEMS["earth"], lists=lists_for("earth"))
+    lua.execute("local o = FS.TotemBar.Pick; __picked = {}; "
+                "FS.TotemBar.Pick = function(k, id) __picked[#__picked + 1] = { k, id }; return o(k, id) end")
+    b = by_key(lua, "earth")
+    a = b.fsArrow
+    mouse = Mouse(lua)
+    start = _centre(lua, b)
+    assert sb.same(lua, mouse.move(*start), b), "the button is not what the cursor hits on its face"
+    assert shown(a), "the piece did not come up under the cursor"
+    if open_by == "piece":
+        _walk(mouse, start, _centre(lua, a))
+        assert sb.same(lua, mouse.hit(*_centre(lua, a)), a), "something sits over the piece and eats its click"
+        click(lua, a)
+        here = _centre(lua, a)
+    else:
+        lua.execute("__alt = true")
+        click(lua, b, "LeftButton", False)
+        here = start
+    picker = tb(lua).Picker()
+    assert shown(picker), f"opening by the {open_by} did not open the picker"
+    tiles = [e for e in seq(picker.fsEntries) if shown(e)]
+    # the cursor goes from where it is, over the piece and the gap, onto the third tile; the picker must stay open
+    for t in (tiles[0], tiles[2]):
+        _walk(mouse, here, _centre(lua, t))
+        here = _centre(lua, t)
+        assert shown(picker), "the picker closed on the way to a tile"
+        assert sb.same(lua, mouse.hit(*here), t), "the tile is not the topmost mouse target at its centre"
+    for dx, dy in ((-12, -10), (12, -10), (-12, 10), (12, 10)):
+        assert sb.same(lua, mouse.hit(here[0] + dx, here[1] + dy), tiles[2]), f"a frame covers part of the tile at {(dx, dy)}"
+    assert int(g(lua).GameTooltip._spellID) == int(tiles[2].fsSpellID) and shown(g(lua).GameTooltip)
+    assert shown(a) and int(tp(lua).BumpCol()) == 2 and int(tp(lua).FlyoutCol()) == 2
+    for _ in range(80):
+        mouse.tick(0.05)
+    assert shown(picker), "the picker closed under the cursor"
+    click(lua, mouse.hit(*here))
+    got = [(str(x[1]), int(x[2])) for x in seq(g(lua).__picked)]
+    assert got == [("earth", tid(lua, "Stoneclaw Totem"))], f"Pick was called with {got}"
+    assert not shown(picker), "the picker stayed open after the pick"
+    assert picks(lua).earth.name == "Stoneclaw Totem", "the pick was not saved"
+    assert mc_calls(lua)[-1][:2] == (action_id(2), tid(lua, "Stoneclaw Totem")), "the multi-cast slot was not asked"
+
+
+def check_the_whole_path_from_the_piece_click_to_a_picked_totem(scale):
+    _end_to_end("piece", scale)
+
+
+def check_the_whole_path_from_an_alt_click_to_a_picked_totem(scale):
+    _end_to_end("alt", scale)
 
 
 def check_toc_lists_the_totem_bar_after_the_seal_bar():
@@ -2018,6 +2452,11 @@ CHECKS = [
     check_the_piece_and_the_bump_work_in_combat_without_a_protected_touch,
     check_opening_the_rail_refuses_bad_numbers_and_a_tab_that_is_not_standing_has_no_bump,
     check_the_baked_art_and_the_lua_numbers_agree,
+    check_the_chimney_grows_out_of_the_bump_as_one_outline_earth,
+    check_the_chimney_grows_out_of_the_bump_as_one_outline_fire,
+    check_the_flyout_numbers_are_the_v3_mockups,
+    check_the_picked_tile_is_marked_and_only_it,
+    check_the_flyout_chrome_follows_the_picker_and_the_bump,
     check_toc_lists_the_totem_bar_after_the_seal_bar,
     check_no_em_dashes_in_the_new_files,
 ]
@@ -2025,6 +2464,10 @@ SCALED_CHECKS = [
     check_the_piece_hit_area_is_38_by_13_flush_with_the_button_top,
     check_clicks_on_the_button_face_never_land_on_the_piece,
     check_the_shoulder_is_the_six_by_one_block_and_the_buttons_sit_inside_it,
+    check_the_picker_is_an_icon_only_column_of_32_px_tiles_on_the_buttons_axis,
+    check_a_tile_shows_the_real_spell_tooltip_to_the_right_and_hides_it_on_leave,
+    check_the_whole_path_from_the_piece_click_to_a_picked_totem,
+    check_the_whole_path_from_an_alt_click_to_a_picked_totem,
 ]
 
 

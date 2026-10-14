@@ -82,6 +82,7 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
             "totem_chev_body", "totem_chev_pink", "totem_chev_haze", "totem_chev_haze_pink", "totem_chev_core")},
         "totem_bump_stroke": (256, 256),
         "totem_bump_halo": (128, 64),
+        "totem_flyout_halo": (64, 64),
     },
     # generate_totem_pole.py: the Gunsight Shaman module's pole blocks, dashed molds and dashed head outlines, art in the top left
     # of the next power of two canvas.
@@ -1831,9 +1832,29 @@ def test_totem_bump_halo_is_the_consoles_profile_around_the_outline(totem_piece_
     assert at(-14.5, -6.5) == at(52.5, -6.5) or abs(at(-14.5, -6.5) - at(52.5, -6.5)) <= 2
 
 
+def test_totem_flyout_halo_is_the_open_outlines_profile_at_the_walls(totem_piece_outputs: Path) -> None:
+    halo = _alpha_grid(totem_piece_outputs / "totem_flyout_halo.tga")
+    # left piece (normal): region origin (-15, -28) at texel (2, 2), one texel per px; right piece: (38, -28) at (44, 2)
+    left = lambda x, y: halo[2 + int(y + 28)][2 + int(x + 15)]
+    right = lambda x, y: halo[2 + int(y + 28)][44 + int(x - 38)]
+    # beside the chimney's wall (x 0) above the bump top (y -17) the profile is the wall's, the same at every height
+    assert left(-0.5, -27.5) == left(-0.5, -20.5) > 100, "the wall's halo is not constant above the shoulder"
+    assert left(-0.5, -27.5) > left(-3.5, -27.5) > left(-8.5, -27.5) >= 0
+    assert right(38.5, -27.5) == right(38.5, -20.5) > 100
+    # inside the shoulder (x -4..0, y below -17) and inside the chimney there is no halo
+    assert left(-2, -14) == 0 and left(-2, -10) == 0, "the shoulder is lit inside"
+    # just over the shoulder's top the wall and the top line share one composite, not two
+    corner, side, over = left(-0.5, -17.5), left(-0.5, -22), left(-2, -17.5)
+    assert corner >= max(side, over) - 1 and corner <= 255
+    assert left(-3.5, -17.5) > 0 and left(-14.5, -10) > 0, "the halo beside the bump's left wall is gone"
+    # the leftmost piece: region origin (-17, -28) at texel (22, 2); its wall goes down to y 0
+    fire = lambda x, y: halo[2 + int(y + 28)][22 + int(x + 17)]
+    assert fire(-0.5, -24) == left(-0.5, -24) and fire(-6.5, -10) > 0 and fire(-3, -10) == 0
+
+
 def test_committed_totem_piece_textures_match_their_generator(totem_piece_outputs: Path) -> None:
     outs = sorted(totem_piece_outputs.glob("*.tga"))
-    assert len(outs) == 11
+    assert len(outs) == 12
     for out in outs:
         assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
 

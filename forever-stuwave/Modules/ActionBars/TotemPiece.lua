@@ -24,6 +24,13 @@
 -- flat rectangles and one cut wedge. The tab's top rail is opened under the bump through Shoulder:OpenTop, and closed
 -- again when the bump goes. One bump stands at a time. Nothing here is secure and nothing waits for combat.
 --
+-- THE FLYOUT CHROME. While the icon picker is open (TotemBar.lua's tiles) the bump's top is open between the button's
+-- two edges and a chimney rises out of it, the open state of the same mockup: the Console's stroke, fill and halo,
+-- walls on the button's own edges, the top left cut 6, a square top right corner. SetFlyout(col, height) says how
+-- tall it is above the bump top; it stands only while the bump of that column stands. The bump's stroke is split at
+-- the walls (two windows of the same baked atlas), its own halo is swapped for the open outline's two junction
+-- pieces (totem_flyout_halo), and the straight runs of the chimney's halo are the Console's own strips.
+--
 -- Loads after ClassShoulder.lua, before TotemBar.lua. Nothing here is verified in game.
 
 local _, FS = ...
@@ -62,6 +69,14 @@ local C = {
         w = 128, h = 64,
         normal = { -15, -28, 53, -6, 2, 2 },
         fire = { -17, -28, 53, 0, 2, 32 },
+    },
+    -- generator: the open outline's two junctions with the bump top, left of the chimney's left wall (x 0) and right of
+    -- its right wall (x 38), in a 64 square canvas, one texel per px
+    FLY_HALO = {
+        size = 64,
+        left = { -15, -28, 0, -6, 2, 2 },
+        leftFire = { -17, -28, 0, 0, 22, 2 },
+        right = { 38, -28, 53, -6, 44, 2 },
     },
 }
 TotemPiece.C = C
@@ -222,33 +237,172 @@ local function MakeParts(shoulder)
     stroke:SetTexture(MEDIA .. "totem_bump_stroke.tga")
     stroke:Hide()
     parts.stroke = stroke
+    local strokeR = normal:CreateTexture(nil, "BORDER")
+    strokeR:SetTexture(MEDIA .. "totem_bump_stroke.tga")
+    strokeR:Hide()
+    parts.strokeR = strokeR
     return parts
 end
 
 local function Tint(parts, shoulder)
     local color = shoulder.color or (FS.Theme and FS.Theme.COLOR_BORDER) or { 0.659, 0.333, 0.969, 1 }
-    parts.stroke:SetVertexColor(color[1], color[2], color[3], shoulder.strokeAlpha or 1)
-    parts.halo:SetVertexColor(color[1], color[2], color[3], shoulder.haloAlpha or 1)
+    local sa, ha = shoulder.strokeAlpha or 1, shoulder.haloAlpha or 1
+    parts.stroke:SetVertexColor(color[1], color[2], color[3], sa)
+    parts.strokeR:SetVertexColor(color[1], color[2], color[3], sa)
+    parts.halo:SetVertexColor(color[1], color[2], color[3], ha)
+    local fly = parts.fly
+    if fly then
+        for _, tex in ipairs(fly.strokes) do tex:SetVertexColor(color[1], color[2], color[3], sa) end
+        for _, tex in ipairs(fly.halos) do tex:SetVertexColor(color[1], color[2], color[3], ha) end
+    end
+end
+
+local flyout = nil          -- { col, height }: the picker is open for that column, its chimney this tall over the bump top
+
+local function CutCoord(c)
+    local u = c / 16
+    return 0, u, 0, u
+end
+
+-- The chimney's textures, made on the first open: fill on the art, stroke and halo on the normal edge's layer.
+local function MakeFly(parts)
+    local shoulder = parts.shoulder
+    local art, normal = shoulder.art, shoulder.normal
+    local theme = FS.Theme
+    local fill = shoulder.fillTint or { 0.176, 0.106, 0.306, 0.8 }
+    local fly = { fills = {}, strokes = {}, halos = {} }
+    local function flat(name)
+        local tex = art:CreateTexture(nil, "BACKGROUND")
+        tex:SetTexture(theme.FLAT_TEXTURE)
+        tex:SetVertexColor(fill[1], fill[2], fill[3], fill[4])
+        tex:Hide()
+        fly[name] = tex
+        fly.fills[#fly.fills + 1] = tex
+    end
+    flat("body")
+    flat("head")
+    local cut = art:CreateTexture(nil, "BACKGROUND")
+    cut:SetTexture(theme.FILL_CUT_TEXTURES[C.WEDGE_CUT])
+    cut:SetVertexColor(fill[1], fill[2], fill[3], fill[4])
+    cut:Hide()
+    fly.cut = cut
+    fly.fills[#fly.fills + 1] = cut
+    local function line(name, file)
+        local tex = normal:CreateTexture(nil, "BORDER")
+        tex:SetTexture(file or theme.FLAT_TEXTURE)
+        tex:Hide()
+        fly[name] = tex
+        fly.strokes[#fly.strokes + 1] = tex
+    end
+    line("wallL")
+    line("wallR")
+    line("topLine")
+    line("cutLine", theme.BORDER_CUT_TEXTURES[C.WEDGE_CUT][1])
+    local glow = FS.Console and FS.Console.GLOW
+    local dock = FS.PetDock and FS.PetDock.C and FS.PetDock.C.SHOULDER_GLOW
+    if type(glow) == "table" and type(dock) == "table" then
+        fly.glow, fly.dock = glow, dock
+        local function halo(name, file)
+            local tex = normal:CreateTexture(nil, "BACKGROUND")
+            tex:SetTexture(file)
+            tex:Hide()
+            fly[name] = tex
+            fly.halos[#fly.halos + 1] = tex
+        end
+        halo("haloTL", MEDIA .. "shoulder_glow.tga")
+        halo("haloTop", glow.texture)
+        halo("haloTR", glow.texture)
+        halo("haloR", glow.texture)
+        halo("haloL", glow.texture)
+        halo("jointL", MEDIA .. "totem_flyout_halo.tga")
+        halo("jointR", MEDIA .. "totem_flyout_halo.tga")
+    end
+    return fly
+end
+
+local function HideFly(parts)
+    local fly = parts.fly
+    if not fly then return end
+    for _, list in ipairs({ fly.fills, fly.strokes, fly.halos }) do
+        for _, tex in ipairs(list) do tex:Hide() end
+    end
 end
 
 local function LowerBump()
     local parts = bump.parts
     if bump.col and parts then
-        for _, key in ipairs({ "upper", "lower", "corner", "wedge", "halo", "stroke" }) do parts[key]:Hide() end
+        for _, key in ipairs({ "upper", "lower", "corner", "wedge", "halo", "stroke", "strokeR" }) do parts[key]:Hide() end
+        HideFly(parts)
         if bump.shoulder and bump.shoulder.CloseTop then bump.shoulder:CloseTop() end
     end
     bump.col = nil
 end
 
-local function RaiseBump(col)
-    local shoulder = Standing()
+-- A window of a baked atlas region, placed on the art: `spec` is { region x0, y0, x1, y1 relative to the button,
+-- atlas x, y of the region's top left }, `from` / `to` clip it in x (design px relative to the button).
+local function Window(art, tex, spec, k, w, h, bx, by, from, to)
+    local x0, y0, x1, y1, ax, ay = spec[1], spec[2], spec[3], spec[4], spec[5], spec[6]
+    if from and from > x0 then
+        ax = ax + (from - x0) * k
+        x0 = from
+    end
+    if to and to < x1 then x1 = to end
+    Put(art, tex, bx + x0, by + y0, x1 - x0, y1 - y0)
+    tex:SetTexCoord(ax / w, (ax + (x1 - x0) * k) / w, ay / h, (ay + (y1 - y0) * k) / h)
+end
+
+-- The chimney of an open picker on `rect`'s column, `height` over the bump top (art design px).
+local function PlaceFly(parts, rect, height)
+    local fly = parts.fly
+    local art = parts.shoulder.art
+    local x0, x1 = rect.button, rect.button + C.BTN
+    local floor = rect.top
+    local top = floor - height
+    local c = C.WEDGE_CUT
+    Put(art, fly.head, x0 + c, top, C.BTN - c, c)
+    Put(art, fly.body, x0, top + c, C.BTN, floor - top - c)
+    Put(art, fly.cut, x0, top, c, c)
+    fly.cut:SetTexCoord(CutCoord(c))
+    Put(art, fly.cutLine, x0, top, c, c)
+    fly.cutLine:SetTexCoord(CutCoord(c))
+    Put(art, fly.topLine, x0 + c, top, C.BTN - c, 1)
+    Put(art, fly.wallL, x0, top + c, 1, floor + 1 - top - c)
+    Put(art, fly.wallR, x1 - 1, top + 1, 1, floor - top)     -- under the top line's last pixel, never on it
+    for _, tex in ipairs(fly.fills) do tex:Show() end
+    for _, tex in ipairs(fly.strokes) do tex:Show() end
+    local glow, dock = fly.glow, fly.dock
+    if not glow then return end
+    local g, m, n = glow.pad, glow.margin, glow.size
+    local mid0, mid1 = glow.mid0 / n, glow.mid1 / n
+    local corner = m - g
+    local joint = floor - C.HALO_PAD            -- where the baked junctions begin: the walls' straight run ends
+    local k = dock.CANVAS
+    Put(art, fly.haloTL, x0 - g, top - g, g + c, g + c)
+    fly.haloTL:SetTexCoord(dock.TL[1] / k, (dock.TL[1] + dock.TL[3]) / k, dock.TL[2] / k, (dock.TL[2] + dock.TL[4]) / k)
+    Put(art, fly.haloTop, x0 + c, top - g, C.BTN - corner - c, g)
+    fly.haloTop:SetTexCoord(mid0, mid1, 0, g / n)
+    Put(art, fly.haloTR, x1 - corner, top - g, m, m)
+    fly.haloTR:SetTexCoord(1 - m / n, 1, 0, m / n)
+    Put(art, fly.haloR, x1, top + corner, g, joint - top - corner)
+    fly.haloR:SetTexCoord(1 - g / n, 1, mid0, mid1)
+    Put(art, fly.haloL, x0 - g, top + c, g, joint - top - c)
+    fly.haloL:SetTexCoord(0, g / n, mid0, mid1)
+    for _, key in ipairs({ "haloTL", "haloTop", "haloTR", "haloR", "haloL" }) do fly[key]:Show() end
+    local h = C.FLY_HALO
+    Window(art, fly.jointL, rect.first and h.leftFire or h.left, 1, h.size, h.size, rect.button, rect.buttonTop)
+    Window(art, fly.jointR, h.right, 1, h.size, h.size, rect.button, rect.buttonTop)
+    fly.jointL:Show()
+    fly.jointR:Show()
+end
+
+-- Lays the standing bump out for its state: the hover bump alone, or opened into the picker's chimney. Idempotent.
+local function ApplyBump()
+    local col, parts, shoulder = bump.col, bump.parts, bump.shoulder
+    if not (col and parts and shoulder) then return end
     local rect = TotemPiece.BumpRect(col)
-    if not (shoulder and shoulder.art and shoulder.normal and shoulder.OpenTop and rect) then return end
-    if bump.col == col and bump.shoulder == shoulder then return end
-    LowerBump()
-    if not bump.parts or bump.parts.shoulder ~= shoulder then bump.parts = MakeParts(shoulder) end
-    local parts, art = bump.parts, shoulder.art
-    bump.shoulder = shoulder
+    if not rect then return end
+    local art = shoulder.art
+    local open = flyout ~= nil and flyout.col == col
     local variant = rect.first and "fire" or "normal"
     local bx = rect.button
     local by = rect.buttonTop       -- the button's top, art y
@@ -269,22 +423,46 @@ local function RaiseBump(col)
         parts.corner:Hide()
     end
 
-    -- the baked stroke and halo: the region of the variant, cut from its atlas
-    local function place(tex, spec, k, w, h)
-        local x0, y0, x1, y1, ax, ay = spec[1], spec[2], spec[3], spec[4], spec[5], spec[6]
-        Put(art, tex, bx + x0, by + y0, x1 - x0, y1 - y0)
-        tex:SetTexCoord(ax / w, (ax + (x1 - x0) * k) / w, ay / h, (ay + (y1 - y0) * k) / h)
+    -- the baked stroke and halo: the region of the variant, cut from its atlas. Open, the stroke is two windows
+    -- (left of the left wall, right of the right wall) and the halo is the open outline's two junction pieces
+    local fly = parts.fly
+    if open and not fly then
+        fly = MakeFly(parts)
+        parts.fly = fly
     end
-    place(parts.stroke, C.STROKE[variant], C.STROKE.k, C.STROKE.size, C.STROKE.size)
-    place(parts.halo, C.HALO[variant], 1, C.HALO.w, C.HALO.h)
+    local S = C.STROKE
+    if open then
+        Window(art, parts.stroke, S[variant], S.k, S.size, S.size, bx, by, nil, 0)
+        Window(art, parts.strokeR, S[variant], S.k, S.size, S.size, bx, by, C.BTN, nil)
+        parts.strokeR:Show()
+        parts.halo:Hide()
+        PlaceFly(parts, rect, flyout.height)
+    else
+        Window(art, parts.stroke, S[variant], S.k, S.size, S.size, bx, by)
+        parts.strokeR:Hide()
+        Window(art, parts.halo, C.HALO[variant], 1, C.HALO.w, C.HALO.h, bx, by)
+        parts.halo:Show()
+        HideFly(parts)
+    end
     Tint(parts, shoulder)
-    for _, key in ipairs({ "upper", "lower", "wedge", "halo", "stroke" }) do parts[key]:Show() end
+    for _, key in ipairs({ "upper", "lower", "wedge", "stroke" }) do parts[key]:Show() end
 
     -- the rail opens from the left wall to where the foot ends (the line runs under its last pixel), its halo from
     -- a halo pad before the left wall to a pad after the right
     shoulder:OpenTop(rect.left, rect.right + C.RAIL_RESUME, rect.left - C.HALO_PAD, rect.right + C.HALO_PAD,
         rect.first)
+end
+
+local function RaiseBump(col)
+    local shoulder = Standing()
+    local rect = TotemPiece.BumpRect(col)
+    if not (shoulder and shoulder.art and shoulder.normal and shoulder.OpenTop and rect) then return end
+    if bump.col == col and bump.shoulder == shoulder then return end
+    LowerBump()
+    if not bump.parts or bump.parts.shoulder ~= shoulder then bump.parts = MakeParts(shoulder) end
+    bump.shoulder = shoulder
     bump.col = col
+    ApplyBump()
 end
 
 -- Raises the bump around button `col` (1..6), or lowers it when `col` is the one standing. One bump at a time:
@@ -300,4 +478,32 @@ end
 -- The button whose bump stands, or nil.
 function TotemPiece.BumpCol()
     return bump.col
+end
+
+-- The picker for column `col` is open (or, with no arguments, closed): its chimney stands `height` design px over
+-- the bump top for as long as the bump of that column stands, a plain texture write, legal in combat. A height that
+-- is not a number a cut corner fits under clears it.
+function TotemPiece.SetFlyout(col, height)
+    if type(col) == "number" and type(height) == "number" and height == height and height > 2 * C.WEDGE_CUT
+        and height < 4096 then
+        flyout = { col = col, height = height }
+    else
+        flyout = nil
+    end
+    ApplyBump()
+end
+
+-- The column whose chimney is drawn right now, or nil.
+function TotemPiece.FlyoutCol()
+    if flyout and bump.col == flyout.col then return flyout.col end
+    return nil
+end
+
+-- Where the chimney of column `col` stands, `height` tall: art design px, left / right the walls' outer edges,
+-- floor the bump top the walls rise from, top the chimney's top line.
+function TotemPiece.FlyoutRect(col, height)
+    local rect = TotemPiece.BumpRect(col)
+    if not (rect and type(height) == "number") then return nil end
+    return { left = rect.button, right = rect.button + C.BTN, floor = rect.top, top = rect.top - height,
+        first = rect.first }
 end

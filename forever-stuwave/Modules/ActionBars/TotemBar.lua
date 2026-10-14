@@ -54,7 +54,9 @@
 --     the cursor is over the button or the piece, or while the picker for that element is open; the tab outline grows a
 --     bump around it; the click area is the piece, 38 x 13 design px, 0 px into the button face; its chevron points down
 --     while the picker is open), or an Alt-click, opens a plain frame (not secure, parented
---     to UIParent; nothing secure is its child or anchor target) listing the known totems. A click stores the
+--     to UIParent; nothing secure is its child or anchor target) that holds the known totems as an ICON ONLY flyout: a
+--     column of 32 px tiles growing out of the tab's bump (TotemPiece.lua draws the chimney around it), the real spell
+--     tooltip to the right of the hovered tile, the current pick marked. A click stores the
 --     pick per character (ForeverSTUwaveDB.totemPicks[guid]) and, in action mode, calls SetMultiCastSpell out of
 --     combat (queued for regen in combat). The saved pick is written ONLY by an explicit user pick or by adopting
 --     what a slot already held, never for the default (the first known totem). Any Alt-modified click carries an
@@ -89,9 +91,14 @@ local TB = {
     BORDER_ALPHA = 0.35,
     LOCKED_ALPHA = 0.4,
     MC_SET = 1,                 -- the multi-cast page Call of the Elements drops
-    MAX_ENTRIES = 6,            -- picker rows (an element holds at most 5 totems by level 30)
-    ENTRY_W = 168, ENTRY_H = 24, PICKER_PAD = 4,
-    PICKER_RISE = 17,           -- over the button top: clears the 13 px hover piece with a 4 px gap (the icon flyout will sit on the piece)
+    MAX_ENTRIES = 6,            -- picker tiles (an element holds at most 5 totems by level 30)
+    -- the icon flyout (mockups/totem-picker-arrow-2026-10-13.html concept A, open state of
+    -- mockups/totem-picker-arrow-v3-2026-10-13.html V1; the harness reads those numbers back out of the v3 file):
+    -- 32 px tiles in a column on the button's own axis, bottom up, a 3 px gap, 3 px to each wall, 5 px over the last
+    -- tile, the cut 4 seat of the tab's buttons. The first tile sits ABOVE = 4 px over the piece top, so the column's
+    -- bottom is RISE = piece top (SEAM 2 + BAR 11) + ABOVE over the button top, which is the bump top the chimney's
+    -- walls rise out of (TotemPiece.lua draws the chimney).
+    FLYOUT = { TILE = 32, GAP = 3, PAD = 3, TOP_PAD = 5, CUT = 4, ABOVE = 4, RISE = 17, TIP_GAP = 5 },
     -- the arrow's hit area is the hover piece itself (TotemPiece.lua, mockups/totem-picker-arrow-v3-2026-10-13.html):
     -- the button's width, the 11 px bar plus the 2 px seam under it, standing on the button top with ARROW_INTO = 0 px
     -- inside the face (the piece's wedge tip under the button top is art only, never clickable). Its top is 7 px over
@@ -1270,20 +1277,54 @@ local function ClosePicker()
     if picker and picker:IsShown() then picker:Hide() end
 end
 TotemBar.ClosePicker = ClosePicker
+TotemBar.FLYOUT = TB.FLYOUT
 
+-- A tile's look: the border violet at rest, the element colour on hover (and a glow), the element colour a little
+-- dimmer plus an underline on the current pick. Texture writes only.
+local function PaintTile(tile)
+    local skin, c = tile.fsSkin, tile.fsColor
+    if not (skin and c) then return end
+    local v = (FS.Theme and FS.Theme.COLOR_BORDER) or { 0.659, 0.333, 0.969, 1 }
+    local ring, glow = skin.border and skin.border.ring, skin.glow
+    if tile.fsHover then
+        if ring then ring:SetVertexColor(c[1], c[2], c[3], 1) end
+        if glow then glow:SetVertexColor(c[1], c[2], c[3], 0.55) end
+    elseif tile.fsCurrent then
+        if ring then ring:SetVertexColor(c[1], c[2], c[3], 0.75) end
+        if glow then glow:SetVertexColor(c[1], c[2], c[3], 0) end
+    else
+        if ring then ring:SetVertexColor(v[1], v[2], v[3], 0.35) end
+        if glow then glow:SetVertexColor(c[1], c[2], c[3], 0) end
+    end
+    if tile.fsUnderline then tile.fsUnderline:SetShown(tile.fsCurrent and true or false) end
+end
+
+-- The pick is made after the picker has closed: a throw inside Pick must never leave the list standing with
+-- nothing done.
 local function EntryClick(self)
     local picker = TB.picker
-    if not (picker and picker.fsKey and self.fsSpellID) then return end
-    TotemBar.Pick(picker.fsKey, self.fsSpellID)
+    local key, id = picker and picker.fsKey, self.fsSpellID
+    if not (key and id) then return end
     ClosePicker()
+    TotemBar.Pick(key, id)
 end
 
 local function EntryEnter(self)
+    self.fsHover = true
+    PaintTile(self)
     local tip = GameTooltip
     if not (tip and self.fsSpellID and tip.SetSpellByID) then return end
-    tip:SetOwner(self, "ANCHOR_RIGHT")
+    tip:SetOwner(self, "ANCHOR_NONE")
+    tip:ClearAllPoints()
+    tip:SetPoint("LEFT", self, "RIGHT", TB.FLYOUT.TIP_GAP * Scale(), 0)
     tip:SetSpellByID(self.fsSpellID)
     tip:Show()
+end
+
+local function EntryLeave(self)
+    self.fsHover = false
+    PaintTile(self)
+    HideTooltip()
 end
 
 -- Closes the picker once the mouse has been off it and its element for PICKER_IDLE seconds.
@@ -1299,41 +1340,37 @@ local function PickerIdle(self, elapsed)
     if self.fsIdle >= TB.PICKER_IDLE then self:Hide() end
 end
 
+-- One tile: a plain Button wearing the tab buttons' chrome at the cut 4 (plate, ring, glow, the icon seated in the
+-- cut), no text, an underline for the current pick.
+local function BuildTile(picker)
+    local f = TB.FLYOUT
+    local tile = CreateFrame("Button", nil, picker)
+    tile:RegisterForClicks("LeftButtonUp")
+    tile:SetSize(f.TILE, f.TILE)
+    local icon = tile:CreateTexture(nil, "ARTWORK")
+    icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    tile.icon = icon
+    FS.Theme.SkinButton(tile, { cut = true, chamfer = f.CUT, glowAlpha = 0 })
+    FS.FrameHelpers.SeatAuraTile(tile)
+    local line = tile:CreateTexture(nil, "OVERLAY", nil, 2)
+    line:SetColorTexture(1, 1, 1, 0.95)
+    line:Hide()
+    tile.fsUnderline = line
+    tile:SetScript("OnClick", EntryClick)
+    tile:SetScript("OnEnter", EntryEnter)
+    tile:SetScript("OnLeave", EntryLeave)
+    return tile
+end
+
 local function BuildPicker()
     if TB.picker then return TB.picker end
     local picker = CreateFrame("Frame", "FSTotemPicker", UIParent)
     picker:SetFrameStrata("DIALOG")
     picker:EnableMouse(true)
     picker:Hide()
-    local fill = picker:CreateTexture(nil, "BACKGROUND")
-    fill:SetColorTexture(0.024, 0.012, 0.071, 0.94)
-    fill:SetAllPoints(picker)
-    local line = picker:CreateTexture(nil, "BORDER")
-    line:SetColorTexture(1, 1, 1, 0.9)
-    line:SetPoint("TOPLEFT", picker, "TOPLEFT", 0, 0)
-    line:SetPoint("TOPRIGHT", picker, "TOPRIGHT", 0, 0)
-    line:SetHeight(2)
-    picker.fsLine = line
     picker.fsEntries = {}
     for i = 1, TB.MAX_ENTRIES do
-        local entry = CreateFrame("Button", nil, picker)
-        entry:RegisterForClicks("LeftButtonUp")
-        local icon = entry:CreateTexture(nil, "ARTWORK")
-        icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-        entry.fsIcon = icon
-        local label = entry:CreateFontString(nil, "OVERLAY")
-        FS.Theme.ApplyMono(label, 11, FS.Theme.COLOR_TEXT_WHITE)
-        label:SetJustifyH("LEFT")
-        entry.fsLabel = label
-        local mark = entry:CreateTexture(nil, "BACKGROUND")
-        mark:SetColorTexture(1, 1, 1, 0.16)
-        mark:SetAllPoints(entry)
-        mark:Hide()
-        entry.fsMark = mark
-        entry:SetScript("OnClick", EntryClick)
-        entry:SetScript("OnEnter", EntryEnter)
-        entry:SetScript("OnLeave", HideTooltip)
-        picker.fsEntries[i] = entry
+        picker.fsEntries[i] = BuildTile(picker)
     end
     picker:SetScript("OnShow", function(self)
         self.fsIdle = 0
@@ -1345,6 +1382,15 @@ local function BuildPicker()
         self:SetScript("OnUpdate", nil)
         local owner = self.fsOwner
         self.fsOwner, self.fsKey = nil, nil
+        -- the chimney goes with the picker, and the tooltip of a tile the cursor was on
+        if FS.TotemPiece and FS.TotemPiece.SetFlyout then FS.TotemPiece.SetFlyout() end
+        for _, tile in ipairs(self.fsEntries) do
+            if tile.fsHover then
+                tile.fsHover = false
+                PaintTile(tile)
+                HideTooltip()
+            end
+        end
         -- the owner's piece points up again and goes if the cursor is away
         if owner then
             RefreshPiece(owner)
@@ -1360,7 +1406,7 @@ function TotemBar.Picker()
     return TB.picker
 end
 
--- Opens the picker above an element button with that element's known totems. Plain frames only, so it is legal
+-- Opens the flyout above an element button with that element's known totems. Plain frames only, so it is legal
 -- in combat. A locked element has nothing to list.
 function TotemBar.OpenPicker(key)
     local button = TB.byKey[key]
@@ -1369,35 +1415,38 @@ function TotemBar.OpenPicker(key)
     if #st.list == 0 then return end
     local picker = BuildPicker()
     local s = Scale()
+    local f = TB.FLYOUT
     local current = st.pick
     local n = math.min(#st.list, TB.MAX_ENTRIES)
+    local height = n * f.TILE + (n - 1) * f.GAP + f.TOP_PAD
     local c = button.fsColor
-    picker.fsLine:SetColorTexture(c[1], c[2], c[3], 0.9)
-    picker:SetSize((TB.ENTRY_W + 2 * TB.PICKER_PAD) * s, (n * TB.ENTRY_H + 2 * TB.PICKER_PAD + 2) * s)
-    for i, entry in ipairs(picker.fsEntries) do
-        entry:ClearAllPoints()
+    picker:SetSize((TB.ARROW_W) * s, height * s)
+    for i, tile in ipairs(picker.fsEntries) do
+        tile:ClearAllPoints()
         local item = st.list[i]
         if item and i <= n then
-            entry:SetSize(TB.ENTRY_W * s, TB.ENTRY_H * s)
-            entry:SetPoint("BOTTOMLEFT", picker, "BOTTOMLEFT", TB.PICKER_PAD * s,
-                (TB.PICKER_PAD + (i - 1) * TB.ENTRY_H) * s)
-            entry.fsSpellID = item.id
-            entry.fsIcon:SetSize((TB.ENTRY_H - 4) * s, (TB.ENTRY_H - 4) * s)
-            entry.fsIcon:ClearAllPoints()
-            entry.fsIcon:SetPoint("LEFT", entry, "LEFT", 2 * s, 0)
-            if item.icon then entry.fsIcon:SetTexture(item.icon) end
-            entry.fsLabel:ClearAllPoints()
-            entry.fsLabel:SetPoint("LEFT", entry.fsIcon, "RIGHT", 6 * s, 0)
-            entry.fsLabel:SetText(item.name)
-            entry.fsMark:SetShown(current ~= nil and item.id == current.id)
-            entry:Show()
+            tile:SetSize(f.TILE * s, f.TILE * s)
+            tile:SetPoint("BOTTOMLEFT", picker, "BOTTOMLEFT", f.PAD * s, (i - 1) * (f.TILE + f.GAP) * s)
+            tile.fsSpellID = item.id
+            tile.fsColor = c
+            tile.fsHover = false
+            tile.fsCurrent = current ~= nil and item.id == current.id
+            if item.icon then tile.icon:SetTexture(item.icon) end
+            tile.fsUnderline:SetColorTexture(c[1], c[2], c[3], 0.95)
+            tile.fsUnderline:ClearAllPoints()
+            tile.fsUnderline:SetPoint("BOTTOMLEFT", tile, "BOTTOMLEFT", 5, 2)
+            tile.fsUnderline:SetPoint("BOTTOMRIGHT", tile, "BOTTOMRIGHT", -5, 2)
+            tile.fsUnderline:SetHeight(2)
+            PaintTile(tile)
+            tile:Show()
         else
-            entry.fsSpellID = nil
-            entry:Hide()
+            tile.fsSpellID = nil
+            tile.fsHover = false
+            tile:Hide()
         end
     end
     picker:ClearAllPoints()
-    picker:SetPoint("BOTTOM", button, "TOP", 0, TB.PICKER_RISE * s)
+    picker:SetPoint("BOTTOMLEFT", button, "TOPLEFT", 0, f.RISE * s)
     local previous = picker:IsShown() and picker.fsOwner or nil
     picker.fsOwner, picker.fsKey = button, key
     picker.fsIdle = 0
@@ -1408,6 +1457,7 @@ function TotemBar.OpenPicker(key)
     end
     ShowArrow(button)
     RefreshPiece(button)
+    if FS.TotemPiece and FS.TotemPiece.SetFlyout then FS.TotemPiece.SetFlyout(button.fsCol, height) end
     picker:Show()
 end
 
