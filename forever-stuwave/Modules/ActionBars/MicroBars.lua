@@ -106,10 +106,10 @@ local function Round(v)
     return math.floor(v + 0.5)
 end
 
--- Pixel crisp: the icon pieces sit on whole physical pixels (SizeKey), so the engine's own snapping is switched off and the
--- texel bias is 0, where the client has the calls.
+-- Pixel crisp: the icon pieces sit on whole physical pixels (SizeKey) and are snapped to the pixel grid with no texel bias,
+-- as the other STUwave textures are, so the engine catches any float drift in the anchor chain; where the client has the calls.
 local function Crisp(tex)
-    if tex.SetSnapToPixelGrid then pcall(tex.SetSnapToPixelGrid, tex, false) end
+    if tex.SetSnapToPixelGrid then pcall(tex.SetSnapToPixelGrid, tex, true) end
     if tex.SetTexelSnappingBias then pcall(tex.SetTexelSnappingBias, tex, 0) end
     return tex
 end
@@ -462,7 +462,9 @@ local function Paint(key, v)
         -- the game's texture wears a look: the base stays grey, the ramp supplies the colour (grey too when disabled)
         if not key.chain.active then FS.IconStyle.Dress(key.chain, key.spec.file, key.spec.coords, key.spec) end
         key.glyph:SetDesaturated(true)
-        FS.IconStyle.Sync(key.chain, { r = v.glyph[1], g = v.glyph[2], b = v.glyph[3], a = v.glyphA, desat = v.glyphDesat, shown = true })
+        -- a disabled key (dimmed and grey) drops the MOD ramp as a dimmed spell tile does: the ramp ignores alpha
+        FS.IconStyle.Sync(key.chain, { r = v.glyph[1], g = v.glyph[2], b = v.glyph[3], a = v.glyphA, desat = v.glyphDesat, shown = true,
+            noMod = v.glyphA < 1 or v.glyphDesat })
         PaintFill(key, v.glyph, v.glyphA, true, true)
     else
         Tint(key.glyph, v.glyph, v.glyphA)
@@ -523,10 +525,12 @@ local function SizeKey(key, s, keyW)
             return Round(v)
         end
         local cover, rect = data.cover, data.rects[key.spec.rect] or data.cover
+        -- the height too: the top edge is the key's own, the bottom one is moved so the rectangle is a whole number of pixels
+        local top, bottom = Edge(0), Edge(h)
         local function Place(tex, x0, x1)
             tex:ClearAllPoints()
-            tex:SetPoint("TOPLEFT", key.ov, "TOPLEFT", Edge(x0 * w), 0)
-            tex:SetPoint("BOTTOMRIGHT", key.ov, "BOTTOMRIGHT", -Edge((1 - x1) * w), 0)
+            tex:SetPoint("TOPLEFT", key.ov, "TOPLEFT", Edge(x0 * w), -top)
+            tex:SetPoint("BOTTOMRIGHT", key.ov, "BOTTOMRIGHT", -Edge((1 - x1) * w), h - bottom)
         end
         Place(key.glyph, rect.x0, rect.x1)
         Place(key.fill, cover.x0, cover.x1)

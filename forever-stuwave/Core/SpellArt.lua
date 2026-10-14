@@ -261,7 +261,10 @@ if type(CreateFrame) == "function" then
     local events = CreateFrame("Frame")
     pcall(events.RegisterEvent, events, "PLAYER_REGEN_ENABLED")
     events:SetScript("OnEvent", function()
-        for tex in pairs(deferred) do
+        -- a copy first: a draw that still finds the lockdown on defers its tile again, and the table must not change under pairs
+        local waiting = {}
+        for tex in pairs(deferred) do waiting[#waiting + 1] = tex end
+        for _, tex in ipairs(waiting) do
             deferred[tex] = nil
             local stock = bound[tex]
             if stock ~= nil then Write(tex, stock) end

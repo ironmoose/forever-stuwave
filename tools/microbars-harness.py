@@ -461,6 +461,9 @@ function h_glyphInfo()
                 info.fillBoostShown, info.fillBoostVertex, info.fillBoostSub = fb.shown, fb.vertex, fb.sublevel
                 info.fillBoostBlend, info.fillBoostAnchor, info.fillBoostTex, info.fillBoostDesat = fb.blend, fb.allPoints == f, tostring(fb.tex), fb.desat
                 info.fl, info.fr = f.pts[1][4], -f.pts[2][4]
+                if #g.pts == 2 then
+                    info.vert = { g = { g.pts[1][5], -g.pts[2][5] }, f = { f.pts[1][5], -f.pts[2][5] }, c = { k.cover.pts[1][5], -k.cover.pts[2][5] } }
+                end
                 info.snaps = { g.snap, f.snap, fb.snap, k.cover.snap, c.boost.snap, c.mod.snap, c.lift.snap }
                 info.biases = { g.bias, f.bias, fb.bias, k.cover.bias, c.boost.bias, c.mod.bias, c.lift.bias }
             end
@@ -1041,7 +1044,9 @@ def check_fill() -> None:
         cover_ok = [i["cl"] == i["fl"] and i["cr"] == i["fr"] and i["cl"] == int(i["cl"]) and i["cr"] == int(i["cr"])
                     and abs(i["cl"] - cover_cols[0] * i["bw"]) <= 0.5 and abs(i["cr"] - (1 - cover_cols[1]) * i["bw"]) <= 0.5 for i in infos]
         check(f"fill.{tag}.the_cover_and_the_fill_share_the_cover_columns_in_whole_pixels", all(cover_ok), f"{[(i['cl'], i['cr'], i['fl'], i['fr']) for i in infos][:3]}")
-        check(f"fill.{tag}.the_rectangles_are_the_keys_full_height", all(i["top"] == 0 and i["bottom"] == 0 for i in infos),
+        # full height: within half a UI unit (the height is rounded to whole pixels, see check_crisp), all three pieces alike
+        check(f"fill.{tag}.the_rectangles_are_the_keys_full_height",
+              all(i["top"] == 0 and abs(i["bottom"]) <= 0.5 + EPS and tuple(i["vert"]["g"].values()) == tuple(i["vert"]["f"].values()) == tuple(i["vert"]["c"].values()) for i in infos),
               f"{[(i['top'], i['bottom']) for i in infos][:2]}")
         check(f"fill.{tag}.the_boost_follows_the_glyph_and_the_ramp_and_lift_follow_the_fill", all(i["boostAnchor"] and i["modAnchor"] and i["liftAnchor"] and i["fillBoostAnchor"] for i in infos))
         order = [(i["fillSub"], i["fillBoostSub"], i["sub"], i["boostSub"], i["modSub"], i["liftSub"], i["coverSub"], i["edgeSub"]) for i in infos]
@@ -1091,8 +1096,12 @@ def check_crisp() -> None:
         check(f"crisp.every_edge_is_a_whole_number_of_physical_pixels.factor_{factor:.3f}_scale_{scale}", whole, f"px {px:.4f} {offs[:2]}")
         check(f"crisp.no_piece_is_more_than_half_a_pixel_off_its_design_place.scale_{scale}",
               all(abs(i["cl"] - 0.0588 * i["bw"]) <= px / 2 + 1e-6 for i in infos), f"{[(i['cl'], 0.0588 * i['bw']) for i in infos][:2]}")
-        check(f"crisp.pieces_have_engine_snapping_off_and_bias_0.scale_{scale}",
-              all(all(v is False for v in i["snaps"].values()) and all(v == 0 for v in i["biases"].values()) for i in infos), f"{infos[0]['snaps']} {infos[0]['biases']}")
+        check(f"crisp.pieces_have_engine_snapping_on_and_bias_0.scale_{scale}",
+              all(all(v is True for v in i["snaps"].values()) and all(v == 0 for v in i["biases"].values()) for i in infos), f"{infos[0]['snaps']} {infos[0]['biases']}")
+        # top and bottom edges: the key height lands on whole physical pixels too, all three pieces alike
+        heights = [(i["bh"] + i["vert"][p][2] - i["vert"][p][1]) for i in infos for p in ("g", "f", "c")]
+        check(f"crisp.the_key_height_is_a_whole_number_of_physical_pixels.factor_{factor:.3f}_scale_{scale}",
+              all(abs(v / px - round(v / px)) < 1e-6 for v in heights) and all(abs(v - infos[0]["bh"]) <= px / 2 + 1e-6 for v in heights), f"px {px:.4f} {heights[:3]} bh {infos[0]['bh']}")
     # no PixelUtil: whole UI units, as before
     w = World(12, scale=0.64).login()
     infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
@@ -1146,7 +1155,7 @@ def check_glyph_tint() -> None:
         boost = float(w.get("FS.MicroBars.keys")[i].spec.boost)
         return {"base": [info["vertex"][k] for k in (1, 2, 3, 4)], "baseDesat": bool(info["desat"]),
                 "boost": [info["boostVertex"][k] for k in (1, 2, 3, 4)], "rampGrey": bool(info["modDesat"]),
-                "lift": info["liftVertex"][4], "boostK": boost}
+                "lift": info["liftVertex"][4], "boostK": boost, "modShown": info["modShown"]}
 
     base, base2 = painted(1), painted(2)
     check("tint.a_key_paints_idle_at_login", near(base["base"][3], 1) and all(0.88 <= c < 1 for c in base["base"][:3]) and not base["rampGrey"], f"{base}")
@@ -1160,7 +1169,9 @@ def check_glyph_tint() -> None:
     check("tint.leaving_returns_to_idle", painted(1) == base, f"{painted(1)} vs {base}")
     w.call("h_enabled", 2, False)
     dis = painted(2)
-    check("tint.a_disabled_key_paints_its_ramp_grey_and_dim", dis["rampGrey"] and dis["base"][3] < 1 and dis["boost"][3] < 1 and dis["lift"] < 1, f"{dis}")
+    check("tint.a_disabled_key_is_grey_and_dim_with_no_ramp_like_a_dimmed_spell_tile",
+          dis["modShown"] is False and dis["base"][3] < 1 and dis["baseDesat"] and dis["boost"][3] < 1 and dis["lift"] < 1, f"{dis}")
+    check("tint.a_hovered_or_idle_key_keeps_its_ramp", base["modShown"] is True and hov["modShown"] is True, f"{base['modShown']} {hov['modShown']}")
     w.call("h_enabled", 2, True)
     check("tint.re_enabling_restores_colour", painted(2) == base2 and painted(1) == base, f"{painted(2)}")
     # a baked key (no class): the plain baked art is tinted and desaturated as before
@@ -1568,7 +1579,8 @@ def check_microstyle() -> None:
     cfg_set("icons.microstyle", "gradient")
     back = infos(w)
     check("microstyle.back_to_gradient_repaints_every_key_live_even_a_disabled_one",
-          all(back[i - 1]["modShown"] and back[i - 1]["desat"] is True for i in rt) and back[1]["modDesat"] is True and back[1]["vertex"][4] < 1, f"{back[1]['modDesat']}")
+          all(back[i - 1]["modShown"] and back[i - 1]["desat"] is True for i in rt if i != 2)
+          and back[1]["modShown"] is False and back[1]["desat"] is True and back[1]["vertex"][4] < 1, f"{back[1]['modShown']}")
     w.call("h_enabled", 2, True)
     check("microstyle.the_round_trip_restores_the_gradient_look", infos(w) == grad)
 

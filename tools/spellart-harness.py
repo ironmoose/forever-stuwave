@@ -133,6 +133,10 @@ function CreateFrame()
 end
 function fire_regen()
     IN_COMBAT = false
+    fire_regen_raw()
+end
+-- the end of combat event while the lockdown still reads true (a draw then wants to defer the tile again)
+function fire_regen_raw()
     for _, f in ipairs(EVENT_FRAMES) do if f.events.PLAYER_REGEN_ENABLED and f.script then f.script(f, "PLAYER_REGEN_ENABLED") end end
 end
 function load_chunk(src, name) return assert(loadstring(src, name))("ForeverSTUwave", FS) end
@@ -372,6 +376,20 @@ def check_combat() -> None:
     sa.Set(c, f2)
     lua.eval("fire_regen")()
     check("combat.a_deferred_tile_is_built_once_with_its_latest_icon", made(pc) == 3 and c.tex == f2 and overlays(pc)["boost"].tex == f2, f"{made(pc)} {c.tex}")
+    # the end of combat event with the lockdown still on: every tile is deferred again, nothing is built, nothing raises, and
+    # the next real end of combat builds them (the tiles are copied to a list before they are written)
+    pe = [new_parent() for _ in range(6)]
+    tiles = [new_tex(p, "ARTWORK", 0) for p in pe]
+    lua.execute("IN_COMBAT = true")
+    for t in tiles:
+        sa.Set(t, f1)
+    ok = lua.eval("function() return pcall(fire_regen_raw) end")()
+    check("combat.an_end_of_combat_event_with_the_lockdown_still_on_does_not_raise", ok is True, f"{ok}")
+    check("combat.and_builds_nothing", all(made(p) == 0 for p in pe), f"{[made(p) for p in pe]}")
+    lua.eval("fire_regen")()
+    check("combat.the_deferred_tiles_are_built_at_the_real_end", all(made(p) == 3 for p in pe), f"{[made(p) for p in pe]}")
+    check("combat.the_regen_handler_walks_a_copy_not_the_table_it_changes",
+          "waiting[#waiting + 1] = tex" in (ADDON / "Core" / "SpellArt.lua").read_text(encoding="utf-8"))
     # a tile that stops asking for a look in combat is not built afterwards
     pd = new_parent()
     d = new_tex(pd, "ARTWORK", 0)
