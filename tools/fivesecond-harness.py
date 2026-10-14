@@ -1145,6 +1145,28 @@ def check_the_chrome_is_the_buff_tabs_cut_plate_with_a_skinned_border():
     close(rgb(tile.fsSkin.border.ring._vertex), C["violet"], "border after leaving")
 
 
+def check_the_tile_chrome_numbers_are_pinned_by_value():
+    lua = world()
+    K = ft(lua).FT.CHROME
+    got = {k: float(K[k]) for k in ("idleRing", "idleGlow", "suspRing", "suspGlow", "regenRing", "regenGlow",
+                                    "pulseGlow", "hoverGlow", "chipGlow")}
+    want = dict(idleRing=0.35, idleGlow=0.0, suspRing=0.65, suspGlow=0.0, regenRing=1.0, regenGlow=0.35,
+                pulseGlow=0.65, hoverGlow=0.6, chipGlow=0.35)
+    assert got == want, got
+    refresh(lua)
+    # hover lifts a glowless tile to the hover floor, full cyan ring
+    for tile in (cells_tile(lua), rate_tile(lua)):
+        lua.eval("__Region.Fire")(tile, "OnEnter")
+        approx(float(tile.fsSkin.glow._vertex[4]), 0.6, "hover glow")
+        approx(float(tile.fsSkin.border.ring._vertex[4]), 1.0, "hover ring")
+        lua.eval("__Region.Fire")(tile, "OnLeave")
+        approx(float(tile.fsSkin.glow._vertex[4]), 0.0, "no glow after leaving")
+        approx(float(tile.fsSkin.border.ring._vertex[4]), 0.35, "idle ring")
+    run(lua, "__regen = { 14.8, 4.9 }")
+    tick(lua, 1.2)
+    approx(rate_look(lua)["chip_glow_a"], 0.35, "chip glow")
+
+
 def check_hiding_the_host_under_the_mouse_clears_the_hover_and_the_tooltip():
     lua = world()
     for tile in (cells_tile(lua), rate_tile(lua)):
@@ -1263,6 +1285,7 @@ CHECKS = [
     check_a_failed_build_leaves_no_listener_running,
     check_the_chrome_is_the_buff_tabs_cut_plate_with_a_skinned_border,
     check_hiding_the_host_under_the_mouse_clears_the_hover_and_the_tooltip,
+    check_the_tile_chrome_numbers_are_pinned_by_value,
     check_the_rate_tile_underline_is_dashed_with_the_mockups_four_dashes,
     check_toc_lists_the_tab_after_the_buff_tab_and_before_the_config_window,
     check_no_em_dashes_and_no_flagged_words_in_the_new_files,
