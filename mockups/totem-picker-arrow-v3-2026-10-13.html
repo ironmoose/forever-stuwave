@@ -135,9 +135,18 @@ function plainBtn(el,y){
 }
 
 /* ---------- the flyout silhouette: concept A's, unchanged ---------- */
-function chimney(el,n){
+function chimney(el,n,kind){
   var xl=bx(el),xr=xl+G.BTN,cx=(xl+xr)/2;
-  var H=4+n*G.TILE+(n-1)*G.TGAP+5,top=T-H;
+  var H=4+n*G.TILE+(n-1)*G.TGAP+5;
+  if(kind==='V1'){
+    /* the full height piece is the floor: tiles and column are A's, lifted so the first tile sits 4 px above the piece top.
+       The hover bump stays (4 px shoulders, 6 px on Fire) and the column walls rise out of the bump top. */
+    var k=cfg('V1','btn'),fl=BY-(k.s+k.th),bt=fl-4,top=fl-H,lx=(el==='fire')?xl-6:xl-4,p=[];
+    if(el!=='fire')p.push([lx,T]);
+    p.push([lx,bt],[xl,bt],[xl,top+6],[xl+6,top],[xr,top],[xr,bt],[xr+4,bt],[xr+4,T-6],[xr+10,T]);
+    return {p:p,xl:xl,xr:xr,cx:cx,top:top,H:H,T:fl};
+  }
+  var top=T-H;
   var p=[[xl,T],[xl,top+6],[xl+6,top],[xr,top],[xr,T-10],[xr+10,T]];
   return {p:p,xl:xl,xr:xr,cx:cx,top:top,H:H,T:T};
 }
@@ -151,7 +160,7 @@ var CUTC=5, BTNW=38;
 function cfg(kind,st){
   if(st==='open'){
     /* the base the flyout grows out of */
-    if(kind==='V1')return {th:4,s:2,left:0,ar:{cx:19,ay:-3.0,W:9,h:1,t:1.1,dir:1},extra:0};
+    if(kind==='V1')return {th:11,s:2,left:0,ar:{cx:19,ay:-3.0,W:15,h:5.2,t:3.4,dir:1},extra:0};
     return {th:3,s:1.5,left:0,ar:{cx:19,ay:-1.9,W:12,h:1,t:1.1,dir:1},extra:3};
   }
   if(kind==='V1')return {th:11,s:2,left:0,ar:{cx:19,ay:-11.6,W:15,h:5.2,t:3.4,dir:-1},extra:0};
@@ -188,7 +197,7 @@ function neonArrow(e,kind,st,lvl,id){
 function pieceSvg(e,kind,st,id){
   var k=cfg(kind,st),x=bx(e),c=ELS[e].c,rel=pieceRel(k),o='';
   var abs=rel.map(function(p){return [x+p[0],BY+p[1]];});
-  var lvl=(st==='arrow')?'lit':(st==='open')?'open':'dim';
+  var lvl=(st==='arrow'||(st==='open'&&kind==='V1'))?'lit':(st==='open')?'open':'dim';
   var fill=lvl==='lit'?mix(C.bg,c,.2):lvl==='open'?mix(C.bg,c,.15):mix(C.bg,c,.1);
   var sOp=lvl==='lit'?1:lvl==='open'?.85:.6;
   var cid='pc'+id,P=pts(abs);
@@ -232,10 +241,15 @@ function oldArrow(el,st){
 /* ---------- the whole scene ---------- */
 function scene(opt){
   var id=++uid,kind=opt.kind,el=opt.el,d=ELS[el],c=d.c,st=opt.st,vb=opt.vb,sc=opt.sc||1,H=G.H;
-  var open=(st==='open'),n=d.list.length,ch=open?chimney(el,n):null;
+  var open=(st==='open'),n=d.list.length,ch=open?chimney(el,n,kind):null;
   var bump=(kind==='V1'&&(st==='btn'||st==='arrow'));
   var full,strokes=[];
-  if(open){
+  if(open&&kind==='V1'){
+    var s1=(el==='fire')?S0.slice(0,4):S0.slice();
+    var line1=s1.concat(ch.p).concat(POST);
+    full=line1.concat([[380,H],[0,H]]);
+    strokes=[line1];
+  }else if(open){
     full=S0.slice().concat(ch.p).concat(POST).concat([[380,H],[0,H]]);
     strokes=[S0.concat([ch.p[0]]),ch.p,[ch.p[ch.p.length-1]].concat(POST)];
   }else if(bump){
@@ -337,8 +351,8 @@ function big(kind){
 }
 var VARS=[
  {k:'V1',t:'AS DRAWN, rises above the rail',
-  cap:'<b>Made of:</b> Parker\'s piece at sketch size. A bar about 11 px thick runs the full width of the button, 2 px above its top edge, and its lower left edge is the only angled one, running parallel to the chamfer cut with a 2 px seam. The piece rises about 7 px above the tab\'s top rail, so while it is up <b>the tab outline grows around it</b>: the rail steps up over that one button with a small shoulder on each side, same Console stroke and fill, so the tab looks like it stretches rather than something poking out. When the cursor leaves, the bump goes away. <b>Open:</b> the flyout\'s first tile bottom sits 4 px above the rail, so the full height piece would hit it. The piece <b>sinks into a 4 px base</b> under the tile column (same shape, same seam), the bump gives way to the flyout\'s own opening, and the chevron flips to point down, meaning close. The flyout itself is not touched.',
-  st:{btn:'Piece appears, dim: button hover fill, thin element stroke, bold chevron at low strength. The tab rail steps up over this button.',arrow:'Cursor on the piece: fill lifts, stroke glows, the arrow runs hot magenta at the head with a bright core.',open:'Piece sinks to a 4 px base under the flyout, chevron flipped to point down. The 4 px base only leaves about 2 px inside the stroke, so it is a slim chevron.'}},
+  cap:'<b>Made of:</b> Parker\'s piece at sketch size. A bar about 11 px thick runs the full width of the button, 2 px above its top edge, and its lower left edge is the only angled one, running parallel to the chamfer cut with a 2 px seam. The piece rises about 7 px above the tab\'s top rail, so while it is up <b>the tab outline grows around it</b>: the rail steps up over that one button with a small shoulder on each side, same Console stroke and fill, so the tab looks like it stretches rather than something poking out. When the cursor leaves, the bump goes away. <b>Open:</b> the piece keeps its full hover size and shape and becomes the floor of the flyout. <b>The flyout column is lifted</b> so its first tile sits 4 px above the top of the piece, and the column walls rise out of the same bump the hover state draws, so the tab outline joins cleanly with no double lines. The piece ends sit inside the walls, and on Fire the tab wall stays 6 px left of the button. The chevron flips to point down, meaning close. The flyout itself (tiles, gaps, stroke, fill, foot flare) is not touched, only moved up.',
+  st:{btn:'Piece appears, dim: button hover fill, thin element stroke, bold chevron at low strength. The tab rail steps up over this button.',arrow:'Cursor on the piece: fill lifts, stroke glows, the arrow runs hot magenta at the head with a bright core.',open:'Same full size piece as the arrow hover, with the bold chevron flipped to point down. The flyout column sits on top of it, lifted about 7 px, and grows out of the bump.'}},
  {k:'V2',t:'FITS THE GAP, under the rail',
   cap:'<b>Made of:</b> the same shape squeezed into the 6 px between the button top and the rail: a bar 3 px thick, a 1.5 px seam under it, 1 px of tab left above it, and the wedge filling the cut corner with the same parallel seam. The tab outline does not change at all, and nothing rises above the rail. The cost is the arrow, which has only about 1 px of room inside the stroke, so it is a wide, flat chevron (24 px wide, about 2 px tall) laid over the bar. <b>Open:</b> the piece stays the same size, the chevron flips to point down, and the flyout opens above it as in A.',
   st:{btn:'Thin piece appears, dim, with a wide flat chevron along the bar.',arrow:'Cursor on the piece: stroke glows and the chevron brightens.',open:'Same piece, chevron flipped to point down.'}}
@@ -375,7 +389,7 @@ document.getElementById('spec').innerHTML=
  '<tr><td class="e">V1 tab</td><td class="v">The Console outline needs a bump: while the piece is up, the top rail over that button steps up about 11 px with vertical walls and square top corners (4 px clear of the piece, 6 px on the leftmost button where it meets the tab wall) and the usual flare back down to the rail on the right, same stroke and fill. Today the outline is fixed art, so this means either a second baked rail texture per button slot shown with the piece or a small bump overlay frame placed over the rail. The flyout\'s open foot already does something similar, so that work can be reused. V2 changes nothing in the tab drawing.</td></tr>'+
  '</table></div>'+
  '<div class="panel"><h3>WHAT TO JUDGE</h3><table class="dp">'+
- '<tr><td class="e">V1</td><td class="v">Matches the sketch and the arrow reads clearly at 1x. Costs a tab outline that changes shape on hover, and the piece changes size when the list opens.</td></tr>'+
+ '<tr><td class="e">V1</td><td class="v">Matches the sketch and the arrow reads clearly at 1x. Costs a tab outline that changes shape on hover, and the flyout sits about 7 px higher than in A, because the full height piece is its floor.</td></tr>'+
  '<tr><td class="e">V2</td><td class="v">No tab change and no size jump when the list opens, but the chevron is only about 2 px tall and the bar is a thin line at 1x. Compare the 1x rows first.</td></tr>'+
  '<tr><td class="e">Note</td><td class="v">Code notes come from the mockup geometry. TotemBar.lua was not re read for this pass.</td></tr>'+
  '</table></div>';
