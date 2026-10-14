@@ -794,13 +794,12 @@ local function Mono(fs, size, c)
     Theme.ApplyMono(fs, math.floor(size * Scale() + 0.5), c or WHITE)
 end
 
--- Pixels. The editor draws on whole physical pixels: sizes and offsets are rounded at the frame's effective scale, boxes
--- that centre something are an EVEN number of pixels (so the centre is a pixel edge), and lines and glyphs are textures
--- one pixel thick that snap to the pixel grid.
+-- Pixels. The editor draws on whole physical pixels: sizes and offsets are rounded to the screen's pixels, boxes that
+-- centre something are an EVEN number of pixels (so the centre is a pixel edge), and lines and glyphs are textures one
+-- pixel thick that snap to the pixel grid. Es is the physical pixels in one UI unit (FrameHelpers.PixelsPerUnit: the pixel
+-- factor over the effective scale, NOT the effective scale itself).
 local function Es(frame)
-    local ok, es = pcall(function() return frame:GetEffectiveScale() end)
-    if ok and type(es) == "number" and es > 0 then return es end
-    return 1
+    return FS.FrameHelpers.PixelsPerUnit(frame)
 end
 
 local function PxRound(frame, v)

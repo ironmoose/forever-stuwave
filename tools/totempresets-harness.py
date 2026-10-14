@@ -103,8 +103,14 @@ function __Region:SetMaxLetters(n) self._max = n end
 function __Region:SetTextInsets() end
 -- text width by length (5.4 px a character, the 9 px mono face) and the screen pixels a UI unit covers
 function __Region:GetStringWidth() return #(self._text or "") * 5.4 end
+-- the pixel model of the client (Blizzard_SharedXML/PixelUtil.lua): one UI unit is effective scale * physical height / 768
+-- pixels. `__es` is that count when the effective scale __ees is 1 (the physical height __physH then follows from it); a
+-- test of the real display sets __ees and __physH (effective scale 0.64, physical height 1440: 1 unit = 1.2 pixels).
 __es = 1
-function __Region:GetEffectiveScale() return __es end
+__ees = 1
+__physH = nil
+PixelUtil = { GetPixelToUIUnitFactor = function() return 768 / (__physH or 768 * __es) end }
+function __Region:GetEffectiveScale() return __ees end
 function __Region:SetEnabled(on) self._enabled = on ~= false end
 function __Region:IsEnabled() return self._enabled ~= false end
 function __Region:SetSnapToPixelGrid(on) self._snap = on end
@@ -1711,9 +1717,9 @@ def check_use_as_gnarly_preset_in_the_editor_ties_and_unties_and_shift_click_edi
 
 def check_the_editor_buttons_that_size_to_their_text_are_padded_symmetrically_and_snapped_to_whole_pixels():
     pad = 14.0                                  # D.BTN_PAD, the config window's buttons: text + 28
-    for es, sc in ((1.0, 1.0), (0.64, 1.0), (1.3333333, 1.25)):
+    for es, sc in ((1.0, 1.0), (0.64, 1.0), (1.3333333, 1.25), (1.2, LIVE_SCALE)):
         lua = boot(sc)
-        run(lua, f"__es = {es}")
+        set_display(lua, es, sc)
         P = PS(lua)
         i = make(lua)
         DL(lua).OpenEditor(i)
@@ -1793,9 +1799,10 @@ def glyph_px(b, es):
 
 
 def check_the_close_x_and_the_arrows_are_drawn_on_whole_pixels_with_equal_margins_at_every_scale():
-    for es, sc in ((1.0, 1.0), (0.64, 1.0), (1.3333333, 1.25), (0.7, 0.8), (1.2, 1.0), (1.5, 1.0), (0.9, 1.0), (1.1, 1.0), (1.75, 1.0), (2.2, 1.0)):
+    for es, sc in ((1.0, 1.0), (0.64, 1.0), (1.3333333, 1.25), (0.7, 0.8), (1.2, 1.0), (1.5, 1.0), (0.9, 1.0), (1.1, 1.0),
+                   (1.75, 1.0), (2.2, 1.0), (1.2, LIVE_SCALE)):
         lua = boot(sc)
-        run(lua, f"__es = {es}")
+        set_display(lua, es, sc)
         P = PS(lua)
         i = make(lua)
         DL(lua).OpenEditor(i)
@@ -2477,6 +2484,19 @@ def check_the_files_use_no_snippets_no_state_drivers_and_no_flagged_words():
                         continue
                     assert not re.search(r"\b" + word, low) or word == "bot" and not re.search(r"\bbot\b", low), \
                         f"{path.name}: flagged word {word!r} in: {ln.strip()}"
+
+
+LIVE_SCALE = 0.8333     # Parker's layout scale; with effective scale 0.64 and physical height 1440 one UI unit is 1.2 pixels
+
+
+def set_display(lua, ppu, scale):
+    """The physical pixels in one UI unit. Parker's real display (1.2 pixels at layout scale 0.8333) is built the way the
+    client has it: effective scale 0.64 and physical height 1440, so a test that took the effective scale for the pixel
+    count would see 0.64."""
+    if ppu == 1.2 and scale == LIVE_SCALE:
+        run(lua, "__es = 1; __ees = 0.64; __physH = 1440")
+    else:
+        run(lua, f"__es = {ppu}")
 
 
 def live_click(lua, b):

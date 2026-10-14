@@ -1498,17 +1498,34 @@ def font_sizes(lua, i):
 
 
 ADVANCE = 0.5615    # BT.ADVANCE: the glyph advance in em the addon fits with
+CAP, ASCENT, DESCENT = 0.703, 0.879, 0.244      # Mononoki Bold, per em
 
 
-def word_px(lua, i):
-    return float(btn(lua, i).fsWord._font[2])
+def word_px(lua, i, ppu=1.0):
+    """The missing word's size in PHYSICAL pixels (the font is set in UI units)."""
+    return float(btn(lua, i).fsWord._font[2]) * ppu
 
 
-def word_fit(lua, i, word):
-    """The size the addon must give `word` on tile i's band: 9 px, or smaller so it keeps a pixel clear (half each side)."""
+def word_fit(lua, i, word, ppu=1.0):
+    """The size the addon must give `word` on tile i's band: 9 physical px, or smaller so it keeps a pixel clear across the
+    band and its capitals keep a pixel clear above and below."""
     import math
-    room = float(btn(lua, i).fsBand._w) - 1.0       # the harness effective scale is 1
-    return max(min(math.floor(room / (len(word) * ADVANCE) * 2) / 2, 9.0), 6.0)
+    b = btn(lua, i)
+    band_w, band_h = round(float(b.fsBand._w) * ppu), round(float(b.fsBand._h) * ppu)
+    across = math.floor((band_w - 1) / (len(word) * ADVANCE) * 2) / 2
+    tall = math.floor((band_h - 2) / CAP * 2) / 2
+    return max(min(across, tall, 9.0), 6.0)
+
+
+def ink_rows(lua, i, ppu):
+    """(cap top, baseline) of the word's ink, physical pixels from the band's top, for a line centred in its box."""
+    b = btn(lua, i)
+    size = float(b.fsWord._font[2]) * ppu
+    box_top = -float(b.fsWord._points[1].y) * ppu - (-float(b.fsBand._points[1].y) * ppu)
+    box_h = float(b.fsWord._h) * ppu
+    line_top = box_top + (box_h - (ASCENT + DESCENT) * size) / 2
+    base = line_top + ASCENT * size
+    return base - CAP * size, base
 
 
 def check_tile_fonts_are_the_design_size_at_every_scale_and_after_a_rescale():
@@ -3311,15 +3328,27 @@ def check_a_rescale_reseats_every_engine_text_out_of_combat_only():
 
 ES_MOCK = """
 __es = %s
-function __Region:GetEffectiveScale() return __es end
+__ees = 1
+__physH = nil
+PixelUtil = { GetPixelToUIUnitFactor = function() return 768 / (__physH or 768 * __es) end }
+function __Region:GetEffectiveScale() return __ees end
+function __Region:SetJustifyH(j) self._justifyH = j end
+"""
+# Parker's display: effective scale 0.64, physical height 1440 (1 UI unit = 1.2 pixels), layout scale 0.8333
+LIVE_ES = """
+__es = 1
+__ees = 0.64
+__physH = 1440
+PixelUtil = { GetPixelToUIUnitFactor = function() return 768 / (__physH or 768 * __es) end }
+function __Region:GetEffectiveScale() return __ees end
 function __Region:SetJustifyH(j) self._justifyH = j end
 """
 LABEL_RGB = (6 / 255, 3 / 255, 18 / 255)    # LABEL_PLATE: the band is the label plate colour
 
 
-def band_world(es, scale=1.0, **kw):
+def band_world(es, scale=1.0, mock=None, **kw):
     kw.setdefault("tips", {16: ["Heavy Axe"]})
-    kw.setdefault("pre_login", ES_MOCK % es)
+    kw.setdefault("pre_login", mock or ES_MOCK % es)
     lua = world(scale, **kw)
     run(lua, "__noshield()")
     fire(lua, "UNIT_AURA", "player")
@@ -3332,22 +3361,25 @@ def whole(v, es):
     return abs(x - round(x)) < 1e-6
 
 
-BAND_CASES = ((1.0, 1.0), (1.0, 0.8333), (1.3333333, 1.0), (0.64, 1.25), (1.7777778, 0.8333))
+# (physical pixels per UI unit, layout scale, mock): the sweep at an effective scale of 1, then Parker's real display
+# (effective scale 0.64, physical height 1440, layout scale 0.8333: 1 unit = 1.2 pixels, so 1 design px = 1 pixel)
+BAND_CASES = ((1.0, 1.0, None), (1.0, 0.8333, None), (1.3333333, 1.0, None), (0.64, 1.25, None),
+              (1.7777778, 0.8333, None), (1.2, 0.8333, "live"))
 
 
 def check_the_band_and_its_word_sit_on_whole_physical_pixels_inside_the_ring_at_every_scale():
-    for es, sc in BAND_CASES:
-        lua = band_world(es, sc)
+    for es, sc, mock in BAND_CASES:
+        lua = band_world(es, sc, mock=LIVE_ES if mock else None)
         tile_px = round(N["BTN"] * sc * es)
         for i, word in ((IMBUE, "IMBUE"), (SHIELD, "SHIELD")):
             b = btn(lua, i)
             band, wd = b.fsBand, b.fsWord
             pt, wp = band._points[1], wd._points[1]
-            where = f"es {es} scale {sc} {word}"
+            where = f"ppu {es} scale {sc} {word}"
             assert len(band._points) == 1 and len(wd._points) == 1, where
             assert (pt.point, wp.point) == ("TOPLEFT", "TOPLEFT") and sb.same(lua, pt.rel, b) and sb.same(lua, wp.rel, b), where
             for what, v in (("band left", pt.x), ("band top", pt.y), ("band w", band._w), ("band h", band._h),
-                            ("word w", wd._w), ("word h", wd._h)):
+                            ("word left", wp.x), ("word top", wp.y), ("word w", wd._w), ("word h", wd._h)):
                 assert whole(v, es), f"{where}: {what} {v} is not whole physical pixels ({float(v) * es})"
             left, top = round(float(pt.x) * es), round(-float(pt.y) * es)
             w, h = round(float(band._w) * es), round(float(band._h) * es)
@@ -3358,15 +3390,24 @@ def check_the_band_and_its_word_sit_on_whole_physical_pixels_inside_the_ring_at_
             assert abs(left - (tile_px - (left + w))) == tile_px % 2, f"{where}: side margins {left} / {tile_px - left - w}"
             assert top == round(24 * sc * es) and h == max(2, round(9 * sc * es)), (where, top, h)
             assert top + h <= tile_px - 1, f"{where}: the band runs past the tile bottom"
-            # the word box: the band's width, an even number of pixels tall, from the band's top (a centred line on a pixel edge)
-            assert (round(float(wd._w) * es), round(-float(wp.y) * es), round(float(wp.x) * es)) == (w, top, left), where
-            assert round(float(wd._h) * es) % 2 == 0 and round(float(wd._h) * es) <= h, where
+            # the word box: the band's width, one pixel below the band's top, an even number of pixels tall (a centred line
+            # on a pixel edge) and inside the band
+            wtop, wh = round(-float(wp.y) * es), round(float(wd._h) * es)
+            assert (round(float(wd._w) * es), round(float(wp.x) * es)) == (w, left), where
+            assert wtop == top + 1 and wh % 2 == 0 and wtop + wh <= top + h, (where, top, wtop, wh, h)
             assert wd._justifyH == "CENTER", where
-            # the word fits the band with a pixel clear (so equal margins either side), by the addon's advance and the font's own
-            size = float(wd._font[2])
-            room = w / es
-            assert len(word) * ADVANCE * size <= room - 1 / es + 1e-6, f"{where}: {word} at {size}px does not fit {room}"
-            assert _advance(word) * size <= room - 1 / es + 1e-6, f"{where}: {word} (font advances) does not fit"
+            # the word is sized in physical pixels (the font is in UI units): 9, or fitted down; it fits the band with a
+            # pixel clear, by the addon's advance and the font's own
+            phys = word_px(lua, i, es)
+            assert abs(phys - word_fit(lua, i, word, es)) < 1e-6, f"{where}: {word} is {phys} physical px"
+            assert len(word) * ADVANCE * phys <= w - 1 + 1e-6, f"{where}: {word} at {phys}px does not fit {w}"
+            assert _advance(word) * phys <= w - 1 + 1e-6, f"{where}: {word} (font advances) does not fit"
+            if mock:
+                assert abs(phys - 9.0) < 1e-6, f"{where}: the word is {phys} physical px, not 9"
+            # the ink (capitals) sits inside the band: no red over the icon rows above it
+            cap_top, base = ink_rows(lua, i, es)
+            if sc >= 0.8:
+                assert cap_top >= 0.5 and base <= h - 0.5, f"{where}: ink {cap_top:.2f}..{base:.2f} outside the band 0..{h}"
             # opaque label plate colour, on the tile's face frame; word red, time plate gone
             v = band._color
             assert all(abs(float(v[k + 1]) - LABEL_RGB[k]) < 1e-3 for k in range(3)) and abs(float(v[4]) - 0.96) < 1e-6, \

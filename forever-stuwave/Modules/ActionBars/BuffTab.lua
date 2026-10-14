@@ -65,11 +65,12 @@ local BT = {
     BESIDE = 16,                    -- design px between the totem tab and this one with the Console off
     LOCKED_ALPHA = 0.4,
     CHIP_W = 22, CHIP_H = 15, CHIP_TOP = 5, CHIP_C = 3, GLOW_PAD = 3,
-    CODE_PX = 10, TEXT_PX = 11, WORD_PX = 9,    -- WORD_PX: the missing word (IMBUE and SHIELD), on the band below
+    CODE_PX = 10, TEXT_PX = 11, WORD_PX = 9,    -- WORD_PX: the missing word (IMBUE and SHIELD), in PHYSICAL pixels, on the band below
     MIN_PX = 6,                     -- FitPx never goes below this, however small the UI scale
     MISSING = { imbue = "IMBUE", shield = "SHIELD" },   -- the word of the missing look (ShamanBuffs says the same out of combat)
     TEXT_INSET = 3,                 -- design px kept clear on each side of the time or word (the cut border's chamfer)
     ADVANCE = 0.5615,               -- Mononoki Bold's advance per em (every glyph; the font is monospaced)
+    CAP = 0.703, ASCENT = 0.879, DESCENT = 0.244,   -- Mononoki Bold's capital height, ascent and descent per em
     TEXT_Y = 27,                    -- the time line's centre, design px below the tile top
     -- the missing word's band (mockups/bufftab-missing-word-2026-10-14.html, option D): rows 24 to 32 from the tile top
     -- (9 tall), x 3 to 35 (32 wide), the label plate colour at .96. The word is a fontstring of its own on it.
@@ -417,52 +418,47 @@ end
 
 local SeatBand
 
--- The tile's physical pixel count helpers: the band and its word sit on whole pixels at the frame's effective scale.
-local function EffectiveScale(frame)
-    local ok, es = pcall(function() return frame:GetEffectiveScale() end)
-    if ok and type(es) == "number" and es > 0 then return es end
-    return 1
-end
-
--- The font size of the missing word: BT.WORD_PX, or smaller so the word keeps half a pixel clear on each side of the band
--- (the tile shrinks with the UI scale and fonts do not); whole and half pixels, never below BT.MIN_PX.
-local function WordPx(word, bandWidth, es)
+-- The size, in physical pixels, of the missing word: BT.WORD_PX, or smaller so the word keeps a pixel clear across the band
+-- and its capitals keep a pixel clear above and below inside it (the tile shrinks with the UI scale and fonts do not);
+-- whole and half pixels, never below BT.MIN_PX.
+local function WordPx(word, bandW, bandH)
     local n = type(word) == "string" and #word or 0
     if n == 0 then return BT.WORD_PX end
-    local room = bandWidth - 1 / es
-    local fit = math.floor(room / (n * BT.ADVANCE) * 2) / 2
-    return math.max(math.min(fit, BT.WORD_PX), BT.MIN_PX)
+    local across = math.floor((bandW - 1) / (n * BT.ADVANCE) * 2) / 2
+    local tall = math.floor((bandH - 2) / BT.CAP * 2) / 2
+    return math.max(math.min(across, tall, BT.WORD_PX), BT.MIN_PX)
 end
 
--- Seats the band and the word box once per scale (out of combat: StyleButton). Every edge is a whole physical pixel: the
--- band is an even number of pixels wide and centred in the tile, its top and height are rounded, and the word box is the
--- band's width and an even number of pixels tall from the band's top, so the word's centre is a pixel edge.
+-- Seats the band and the word box once per scale (out of combat: StyleButton), in PHYSICAL pixels: `es` is the pixels in one
+-- UI unit (FrameHelpers.PixelsPerUnit), not the effective scale. The band is an even number of pixels wide and centred in
+-- the tile, its top and height are rounded; the word box is the band's width, starts one pixel below the band's top and
+-- is an even number of pixels tall, so the line is centred on a pixel edge and the capitals' ink (cap top .703 em above
+-- the baseline, the line .879 + .244 em tall, centred in the box) stays inside the band. The font is set in UI units for
+-- WordPx physical pixels (WORD_PX is a size on the screen, not scaled by the layout scale).
 function SeatBand(button, size, s)
-    local es = EffectiveScale(button)
+    local es = FH.PixelsPerUnit(button)
     local tilePx = math.floor(size * es + 0.5)
     local bandW = math.floor(BT.BAND_W * s * es / 2 + 0.5) * 2
     bandW = math.max(2, math.min(bandW, tilePx - 2))
     local left = math.floor((tilePx - bandW) / 2)
     local top = math.floor(BT.BAND_TOP * s * es + 0.5)
     local height = math.max(2, math.floor(BT.BAND_H * s * es + 0.5))
-    local wordH = math.max(2, height - height % 2)
+    local wordH = math.max(2, height - 1 - (height - 1) % 2)
     local px = 1 / es
     button.fsBand:ClearAllPoints()
     button.fsBand:SetPoint("TOPLEFT", button, "TOPLEFT", left * px, -top * px)
     button.fsBand:SetSize(bandW * px, height * px)
     button.fsWord:ClearAllPoints()
-    button.fsWord:SetPoint("TOPLEFT", button, "TOPLEFT", left * px, -top * px)
+    button.fsWord:SetPoint("TOPLEFT", button, "TOPLEFT", left * px, -(top + 1) * px)
     button.fsWord:SetSize(bandW * px, wordH * px)
-    local wpx = WordPx(BT.MISSING[button.fsKey], bandW * px, es)
+    local wpx = WordPx(BT.MISSING[button.fsKey], bandW, height) * px
     if button.fsWordPx ~= wpx then
         button.fsWordPx = wpx
         FS.Theme.ApplyMono(button.fsWord, wpx, FS.Theme.COLOR_RED)
     end
-    for _, tex in ipairs({ button.fsBand }) do
-        if tex.SetSnapToPixelGrid then
-            pcall(tex.SetSnapToPixelGrid, tex, true)
-            if tex.SetTexelSnappingBias then pcall(tex.SetTexelSnappingBias, tex, 0) end
-        end
+    if button.fsBand.SetSnapToPixelGrid then
+        pcall(button.fsBand.SetSnapToPixelGrid, button.fsBand, true)
+        if button.fsBand.SetTexelSnappingBias then pcall(button.fsBand.SetTexelSnappingBias, button.fsBand, 0) end
     end
 end
 
