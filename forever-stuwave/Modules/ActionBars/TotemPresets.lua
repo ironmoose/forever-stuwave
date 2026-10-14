@@ -23,11 +23,23 @@
 --   * LEVELS: an element's totem the character does not know is LOCKED: it shows as a dashed grey arc and a "(level N)"
 --     line, the step skips it, and a preset that has only locked totems steps nothing.
 --
--- State line: ForeverSTUwaveDB.totemPresetState.line (on disk after a /reload) names the live unknowns: what the dial's
--- script attribute reads back as, how many presses and matching casts it has seen, and the preset queue. Neutral words.
+--   * GNARLY: the second cell (FSTotemButton8, pink) steps ONE preset that never changes with the dial: the character's
+--     GNARLY preset (store.gnarly, picked in the settings or by USE AS GNARLY PRESET in the editor). Its script is
+--     written out of combat like the dial's and is not touched by a switch, so it is armed in combat whatever the dial
+--     is waiting on. It keeps its own step record, attributed to the cell whose press came just before a cast.
+--   * SET 2: the GNARLY preset's totems are also written into the native multi-cast set 2 (Call of the Ancestors, level
+--     30) so that spell drops them. SyncSet2 is defensive: out of combat only, only for an element whose set 1 slot is
+--     proven to map (the native button agrees with the formula, or the slot holds that element's totem), one attempt per
+--     element and spell per session, read back, and the set 1 slots are read before and after: a set 1 slot that
+--     changed is restored and set 2 is given up for the session. No chat line; the state line carries the result.
+--
+-- State line: ForeverSTUwaveDB.totemPresetState.line (on disk after a /reload) names the live unknowns: what each cell's
+-- script attribute reads back as, how many presses and matching casts it has seen, the preset queue and the set 2
+-- result. Neutral words.
 --
 -- UNVERIFIED in game: that a cast sequence run from a secure button casts totems here and advances only on a cast, that
--- it accepts reset=combat/N, the SOUNDKIT names of the cues, and the UNIT_SPELLCAST_SUCCEEDED spell id being plain.
+-- it accepts reset=combat/N, the SOUNDKIT names of the cues, the UNIT_SPELLCAST_SUCCEEDED spell id being plain, and
+-- that SetMultiCastSpell on set 2 (action ids 4 past set 1) lands and leaves set 1 alone.
 --
 -- Loads after TotemBar.lua (it adds the cells to the tab at load) and before TotemDial.lua.
 
@@ -41,6 +53,9 @@ local P = {
     NAME_MAX = 8,               -- letters in a name
     STEP_IDLE = 6,              -- seconds without a press before the step starts over
     APPLIED_FLASH = 1.6,        -- seconds the changed buttons stay marked after a switch
+    PRESS_FLASH = 0.25,         -- seconds the GNARLY cell flashes after a press
+    PRESS_WINDOW = 2,           -- seconds after a press in which a matching cast is counted as that press's drop
+    SET2_STEP = 4,              -- action ids from a set 1 slot to the same slot of set 2
     ELEMENTS = { "fire", "earth", "water", "air" },
     DEFAULT_ORDER = { "earth", "fire", "water", "air" },    -- the order a new preset gets
     -- the character level each totem opens at (ForeverDB), by rank 1 spell id; an element's own opening level is the floor
@@ -52,7 +67,8 @@ local P = {
     },
     ELEMENT_LEVEL = { fire = 10, earth = 4, water = 20, air = 30 },
     -- SOUNDKIT names of the cues; a client without one plays nothing
-    SOUND = { waiting = "IG_MAINMENU_OPTION_CHECKBOX_OFF", applied = "IG_MAINMENU_OPTION_CHECKBOX_ON" },
+    SOUND = { waiting = "IG_MAINMENU_OPTION_CHECKBOX_OFF", applied = "IG_MAINMENU_OPTION_CHECKBOX_ON",
+        press = "IG_ABILITY_ICON_DROP" },
     warned = {},
 }
 PS.P = P
@@ -91,6 +107,24 @@ local SETTINGS = {
     appliedSound = {
         key = "totems.appliedSound", default = false, label = "Applied sound",
         tip = "Plays a short sound when a preset switch applies.",
+    },
+    gnarly = {
+        key = "totems.gnarly", default = true, label = "GNARLY button",
+        tip = "Adds a second cell that always drops the preset you choose, one totem per press. It is never switched, "
+            .. "so it works in combat. It starts over after combat ends or a short pause.",
+    },
+    gnarlyFlash = {
+        key = "totems.gnarlyFlash", default = true, label = "Press flash",
+        tip = "The GNARLY cell flashes for a moment each time you press it.",
+    },
+    gnarlySound = {
+        key = "totems.gnarlySound", default = false, label = "Press sound",
+        tip = "Plays a short sound each time you press the GNARLY cell.",
+    },
+    gnarlySet2 = {
+        key = "totems.gnarlySet2", default = true, label = "Also on Call of the Ancestors",
+        tip = "Puts the GNARLY preset's totems on the Call of the Ancestors set (level 30), so that spell drops them too. "
+            .. "Only changes that set, only out of combat.",
     },
 }
 PS.SETTINGS = SETTINGS
@@ -482,6 +516,17 @@ end
 -- Editing (out of combat only)
 -------------------------------------------------------------------------------
 
+-- An edit of preset `index` reached the buttons that carry it: the dial's active one is picked again, and the GNARLY
+-- cell's script is written again when it steps this preset.
+local function AfterEdit(index)
+    if index == PS.Active() then
+        Reapply()
+    elseif index == PS.Gnarly() then
+        local tb = TotemBar()
+        if tb and tb.Sync and not InCombat() then tb.Sync() end
+    end
+end
+
 -- Makes a preset in the NEW slot as a copy of what the four element buttons cast. Returns its index, or nil and why.
 function PS.Create()
     local why = Refusal()
@@ -536,7 +581,7 @@ function PS.SetTotem(index, element, base)
         if not base and at then table.remove(preset.order, at) end
     end)
     PS.ResetSteps()
-    if index == PS.Active() then Reapply() end
+    AfterEdit(index)
     Notify("edited", index)
     return true
 end
@@ -555,7 +600,7 @@ function PS.Move(index, element, delta)
     if not to or to < 1 or to > #preset.order then return false, "it cannot move that way" end
     Save(function() preset.order[at], preset.order[to] = preset.order[to], preset.order[at] end)
     PS.ResetSteps()
-    if index == PS.Active() then Reapply() end
+    AfterEdit(index)
     Notify("edited", index)
     return true
 end
@@ -577,6 +622,31 @@ function PS.Delete(index)
     return true
 end
 
+-- The settings dropdown's entries for the GNARLY preset: { value, text } with 0 for none, and the name of a value.
+function PS.GnarlyChoices()
+    local out = { { value = 0, text = "None" } }
+    for i = 1, PS.Count() do out[#out + 1] = { value = i, text = i .. " " .. PS.Get(i).name } end
+    return out
+end
+
+function PS.GnarlyName(value)
+    local preset = value and value ~= 0 and PS.Get(value) or nil
+    return preset and (value .. " " .. preset.name) or "None"
+end
+
+-- Ties the GNARLY cell to preset `index` (nil unties it). Out of combat only: its script is a secure attribute.
+function PS.SetGnarly(index)
+    local why = Refusal()
+    if why then return false, why end
+    if index ~= nil and not PS.Get(index) then return false, "no such preset" end
+    Save(function(store) store.gnarly = index end)
+    PS.ResetSteps()
+    local tb = TotemBar()
+    if tb and tb.Sync then tb.Sync() end
+    Notify("edited", index)
+    return true
+end
+
 -------------------------------------------------------------------------------
 -- The step: our record of how far the sequence has got
 -------------------------------------------------------------------------------
@@ -592,9 +662,13 @@ local function Track(cell)
     return t
 end
 
--- The preset a cell steps: the dial's is the active one (nil on the NEW slot).
+-- The preset a cell steps: the dial's is the active one (nil on the NEW slot), the GNARLY cell's is its own.
 function PS.CellPreset(cell)
     if cell == "dial" then return PS.ActivePreset() end
+    if cell == "gnarly" then
+        local index = PS.Gnarly()
+        return index and PS.Get(index) or nil
+    end
 end
 
 -- (done, total) for a cell: how many totems of its sequence have dropped, and how many it has.
@@ -611,12 +685,23 @@ end
 function PS.NotePress(cell)
     local t = Track(cell)
     t.presses = t.presses + 1
-    t.at = Now()
+    t.pressAt = Now()
+    t.at = t.pressAt
+    if cell == "gnarly" and Setting(SETTINGS.gnarlySound) then Play(P.SOUND.press) end
     Notify("step", cell)
 end
 
--- UNIT_SPELLCAST_SUCCEEDED for the player: a totem the sequence was waiting for counts as the next step done. A
--- finished sequence starts over at the next drop, as the game's does.
+-- Seconds since the cell was last pressed, or nil when it never was.
+function PS.PressAge(cell)
+    local t = steps[cell]
+    local now = Now()
+    if not (t and t.pressAt and now) then return nil end
+    return now - t.pressAt
+end
+
+-- UNIT_SPELLCAST_SUCCEEDED for the player: a totem the sequence was waiting for counts as the next step done, for the
+-- cell whose press came just before it (the game advances a sequence only when its own button runs it). A finished
+-- sequence starts over at the next drop, as the game's does.
 function PS.OnCast(spellId)
     if IsSecret(spellId) then
         P.castIdsSecret = true
@@ -625,27 +710,34 @@ function PS.OnCast(spellId)
     if type(spellId) ~= "number" then return end
     local name = SpellById(spellId)
     if not name then return end
+    local now = Now()
+    local best, bestAt
     for cell, t in pairs(steps) do
         local list = PS.Steps(PS.CellPreset(cell))
-        if #list > 0 then
-            if t.k >= #list then t.k = 0 end
-            local want = list[t.k + 1]
-            if want and want.name == name then
-                t.k = t.k + 1
-                t.matched = t.matched + 1
-                t.at = Now()
-                t.lastName = name
-                Notify("step", cell)
+        if #list > 0 and t.pressAt and now and now - t.pressAt <= P.PRESS_WINDOW then
+            local from = t.k >= #list and 0 or t.k
+            local want = list[from + 1]
+            if want and want.name == name and (not bestAt or t.pressAt >= bestAt) then
+                best, bestAt = cell, t.pressAt
             end
         end
     end
+    if not best then return end
+    local t, list = steps[best], PS.Steps(PS.CellPreset(best))
+    if t.k >= #list then t.k = 0 end
+    t.k = t.k + 1
+    t.matched = t.matched + 1
+    t.at = now
+    t.pressAt = nil
+    t.lastName = name
+    Notify("step", best)
 end
 
 function PS.ResetSteps()
     local any = false
     for _, t in pairs(steps) do
         if t.k ~= 0 then any = true end
-        t.k, t.at = 0, nil
+        t.k, t.at, t.pressAt = 0, nil, nil
     end
     if any then Notify("step") end
 end
@@ -671,6 +763,118 @@ function PS.Tracker(cell)
 end
 
 -------------------------------------------------------------------------------
+-- The native multi-cast set 2 (Call of the Ancestors) carries the GNARLY preset
+-------------------------------------------------------------------------------
+
+-- state: nil (never looked), "off" (setting off, no preset or nothing to write), "wait" (no bar, set not known or in
+-- combat), "ok" (every wanted slot reads back), "partial" (some did not land), "dead" (given up for the session, with
+-- `why`). set1Intact: false once a set 1 slot was seen to change under a set 2 write.
+local set2 = { tried = {}, results = {}, set1Intact = true }
+PS.Set2 = set2
+
+local function Dead(why)
+    set2.state, set2.why = "dead", why
+end
+
+local function KnowsAncestors(mc)
+    local helpers = FS.FrameHelpers
+    return helpers and helpers.IsKnownSpellId and helpers.IsKnownSpellId(mc.ANCESTORS_ID, false) or false
+end
+
+-- Does the set 1 slot of `element` map as the formula says? The native button agrees with the formula, or (no native
+-- button) the slot holds one of the element's own totems.
+local function Set1Maps(tb, mc, element, slot, id1)
+    local native = mc.NativeActionId(slot)
+    if native ~= nil then return native == id1 end
+    local held, readable = mc.ReadSlot(id1)
+    if not (readable and held) then return false end
+    for _, item in ipairs(tb.KnownList(element)) do
+        if item.id == held then return true end
+    end
+    return false
+end
+
+-- Writes the GNARLY preset's known totems into set 2, once per element and spell for the session. Out of combat only.
+function PS.SyncSet2()
+    if InCombat() or set2.state == "dead" then return end
+    local tb = TotemBar()
+    local mc = tb and tb.MC
+    local preset = Setting(SETTINGS.gnarly) and Setting(SETTINGS.gnarlySet2) and PS.CellPreset("gnarly") or nil
+    if not (mc and preset) then
+        set2.state = "off"
+        return
+    end
+    local bar = mc.Bar()
+    if not (bar and mc.Active() and KnowsAncestors(mc)) then
+        set2.state = "wait"
+        return
+    end
+    local work = {}
+    for _, entry in ipairs(PS.Steps(preset)) do
+        local button = tb.Button(entry.element)
+        local slot = button and button.fsDef and button.fsDef.slot
+        if slot then
+            local id1 = mc.ActionId(bar, slot)
+            local key = entry.element .. ":" .. entry.id
+            work[#work + 1] = { element = entry.element, spell = entry.id, slot = slot, id1 = id1,
+                id2 = id1 + P.SET2_STEP, key = key }
+        end
+    end
+    -- the mapping must be proven for every element before anything is written
+    for _, w in ipairs(work) do
+        if not Set1Maps(tb, mc, w.element, w.slot, w.id1) then
+            Dead("set 1 slot of " .. w.element .. " does not map")
+            return
+        end
+    end
+    local before, wrote = {}, false
+    for _, w in ipairs(work) do
+        local held, readable = mc.ReadSlot(w.id1)
+        if not readable then
+            set2.state = "wait"      -- set 1 cannot be read, so it could not be proven untouched: write nothing
+            return
+        end
+        before[w.id1] = held
+    end
+    for _, w in ipairs(work) do
+        local key = w.key .. ":" .. w.id2
+        if not set2.tried[key] then
+            local held = mc.ReadSlot(w.id2)
+            set2.tried[key] = true
+            if held ~= w.spell then
+                local landed = mc.SendPick(w.id2, w.spell)
+                wrote = true
+                set2.results[key] = landed and "landed" or "sent"
+            else
+                set2.results[key] = "landed"
+            end
+        end
+    end
+    -- set 1 must read exactly as before
+    for _, w in ipairs(work) do
+        local now = select(1, mc.ReadSlot(w.id1))
+        if now ~= before[w.id1] then
+            set2.set1Intact = false
+            if before[w.id1] then mc.SendPick(w.id1, before[w.id1]) end
+            Dead("a set 1 slot changed under a set 2 write")
+        end
+    end
+    if set2.state == "dead" then
+        if tb.Sync then tb.Sync() end
+        return
+    end
+    local landed, total = 0, 0
+    for _, w in ipairs(work) do
+        total = total + 1
+        local held, readable = mc.ReadSlot(w.id2)
+        if readable and held == w.spell then landed = landed + 1 end
+    end
+    set2.landed, set2.total = landed, total
+    set2.state = (total == 0 and "off") or (landed == total and "ok") or "partial"
+    if wrote then Notify("set2") end
+end
+
+-------------------------------------------------------------------------------
 -- The state line for the live test
 -------------------------------------------------------------------------------
 
@@ -682,7 +886,7 @@ local function Write()
     local db = _G.ForeverSTUwaveDB
     if type(db) ~= "table" or ConfigReadOnly() then return end
     local parts = { "presets=" .. PS.Count(), "active=" .. PS.Active(), "pending=" .. tostring(P.pending) }
-    for _, cell in ipairs({ "dial" }) do
+    for _, cell in ipairs({ "dial", "gnarly" }) do
         local t = Track(cell)
         local button = TotemBar() and TotemBar().Button and TotemBar().Button(cell)
         local kind, len = "none", 0
@@ -697,6 +901,9 @@ local function Write()
             t.presses, t.matched)
     end
     if P.castIdsSecret then parts[#parts + 1] = "castids=secret" end
+    local state = set2.state or "unseen"
+    parts[#parts + 1] = "set2=" .. state .. (set2.total and (" " .. set2.landed .. "/" .. set2.total) or "")
+        .. (set2.why and (" (" .. set2.why .. ")") or "") .. " set1Intact=" .. tostring(set2.set1Intact)
     local line = table.concat(parts, " | ")
     if line == lastLine and type(db.totemPresetState) == "table" then return end
     lastLine = line
@@ -724,6 +931,10 @@ local function Register()
     tb.AddCell({
         key = "dial", title = "Preset dial", color = "22e0ff", label = "Totem preset dial",
         enabled = function() return Setting(SETTINGS.dial) end,
+    })
+    tb.AddCell({
+        key = "gnarly", title = "GNARLY", color = "ff2e97", label = "Totem GNARLY preset", hot = true,
+        enabled = function() return Setting(SETTINGS.gnarly) end,
     })
 end
 Register()

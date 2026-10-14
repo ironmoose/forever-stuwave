@@ -1053,6 +1053,8 @@ local PRESET_ROWS = {
     dial = "Preset dial", dialPlate = "Name plate", dialRight = "Cycle with right click",
     dialWheel = "Cycle with mouse wheel", waitPulse = "Waiting pulse", waitSound = "Waiting sound",
     appliedFlash = "Applied flash", appliedSound = "Applied sound",
+    gnarly = "GNARLY button", gnarlyFlash = "Press flash", gnarlySound = "Press sound",
+    gnarlySet2 = "Also on Call of the Ancestors",
 }
 
 local function withTotemPresets(applies)
@@ -1060,11 +1062,16 @@ local function withTotemPresets(applies)
         unitFramesDefaults()
         local S = {}
         for name, label in pairs(PRESET_ROWS) do
-            S[name] = { key = "totems." .. name, default = name ~= "waitSound" and name ~= "appliedSound", label = label,
-                tip = "Tip " .. name .. "." }
+            S[name] = { key = "totems." .. name, label = label, tip = "Tip " .. name .. ".",
+                default = name ~= "waitSound" and name ~= "appliedSound" and name ~= "gnarlySound" }
             FS.Config.RegisterDefault(S[name].key, S[name].default)
         end
-        FS.TotemPresets = { SETTINGS = S, Applies = function() return applies end }
+        local gnarly = nil
+        FS.TotemPresets = { SETTINGS = S, Applies = function() return applies end,
+            Gnarly = function() return gnarly end,
+            SetGnarly = function(i) gnarly = i; return true end,
+            GnarlyName = function(v) return v == 0 and "None" or (v .. " MELEE") end,
+            GnarlyChoices = function() return { { value = 0, text = "None" }, { value = 1, text = "1 MELEE" } } end }
     end
 end
 
@@ -1080,6 +1087,13 @@ function T.the_unit_frames_page_has_the_totem_presets_group_with_one_switch_and_
         eq(found, "Tip " .. name .. ".", label .. ": explained by a ? tip")
         eq(#texts(r), 3, label .. ": label, state and the ? icon only, no helper line")
     end
+    yes(row("GNARLY preset"), "the GNARLY preset dropdown")
+    local drop, found = row("GNARLY preset"), nil
+    for _, o in ipairs(ALL) do if o.fsTip and o.parent == drop then found = o.fsTip end end
+    yes(found and found ~= "", "the dropdown is explained by a ? tip")
+    eq(drop.control.fsValue, 0, "no GNARLY preset yet")
+    yes(headerY("TOTEM PRESETS") < yOf("GNARLY button") and yOf("GNARLY button") < yOf("GNARLY preset")
+        and yOf("GNARLY preset") < yOf("Press flash"), "the GNARLY rows follow the dial rows in order")
     yes(row("Preset dial").control.fsChecked, "the dial is on by default")
     no(row("Waiting sound").control.fsChecked, "the waiting sound is off by default")
     press("Waiting sound")

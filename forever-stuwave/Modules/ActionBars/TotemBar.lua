@@ -1695,6 +1695,13 @@ end
 
 TotemBar.ELEMENTS = { "fire", "earth", "water", "air" }
 
+-- The multi-cast helpers the preset code uses for the second set (TotemPresets.lua SyncSet2). Same functions the tab
+-- itself uses, so the set 1 rules (out of combat only, read back, pcall) hold for it too.
+TotemBar.MC = {
+    Bar = MultiCastBar, Active = MultiCastBarActive, ReadSlot = ReadSlot, SendPick = SendPick,
+    NativeActionId = NativeActionId, ActionId = ActionId, SET = TB.MC_SET, ANCESTORS_ID = 66843,
+}
+
 local function Build()
     TB.host = CreateFrame("Frame", "FSTotemBar", UIParent)
     TB.host:SetFrameStrata("LOW")

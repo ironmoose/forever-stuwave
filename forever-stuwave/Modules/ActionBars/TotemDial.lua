@@ -254,7 +254,7 @@ function Dial.StateOf(cell)
     local index = PS.Active()
     local preset = PS.CellPreset(cell)
     st.index, st.preset = index, preset
-    st.name = preset and preset.name or "NEW"
+    st.name = preset and preset.name or (cell == "gnarly" and "UNSET" or "NEW")
     local entries = PS.Entries(preset)
     local k, total = PS.Progress(cell)
     st.k, st.total = k, total
@@ -279,7 +279,12 @@ function Dial.StateOf(cell)
         end
         st.arcs[#st.arcs + 1] = item
     end
-    st.digit = (#entries == 0 or not preset) and "+" or tostring(index)
+    st.empty = #entries == 0 or not preset
+    if cell == "gnarly" then
+        st.digit = "!"
+    else
+        st.digit = st.empty and "+" or tostring(index)
+    end
     if cell == "dial" then
         local pending = PS.Pending()
         if pending then
@@ -332,6 +337,7 @@ local function OnClick(self, mouseButton, down)
     if mouseButton == "LeftButton" then
         if ShiftDown() then
             if not down and cell == "dial" then Dial.EditActive() end
+            if not down and cell == "gnarly" then Dial.EditGnarly() end
         elseif IsPressEvent(down) then
             PS.NotePress(cell)
         end
@@ -512,7 +518,7 @@ function Paint(button)
     else
         button.fsNext:Hide()
         button.fsDigit:SetText(st.digit)
-        local c = st.digit == "+" and MUTED or WHITE
+        local c = st.empty and MUTED or WHITE
         button.fsDigit:SetTextColor(c[1], c[2], c[3], 1)
         button.fsDigit:Show()
     end
@@ -524,20 +530,25 @@ function Paint(button)
     local skin = button.fsSkin
     local ring = skin and skin.border and skin.border.ring
     local glow = skin and skin.glow
-    local lit = button.fsHover or st.stepping
+    local age = PS.PressAge(button.fsKey)
+    local pressed = button.fsKey == "gnarly" and age ~= nil and age < PS.P.PRESS_FLASH
+        and PS.Setting(PS.SETTINGS.gnarlyFlash)
+    local lit = button.fsHover or st.stepping or pressed
     if pending then
         if ring then ring:SetVertexColor(AMBER[1], AMBER[2], AMBER[3], 0) end
         if glow then glow:SetVertexColor(AMBER[1], AMBER[2], AMBER[3], 0) end
         PaintDashSet(button.fsDashes, AMBER, 0.9 * alpha, true)
         Tint(button.fsBar, AMBER, 0.9 * alpha)
     else
-        if ring then ring:SetVertexColor(edge[1], edge[2], edge[3], button.fsHot and 0.8 or (lit and 0.9 or 0.5)) end
-        if glow then glow:SetVertexColor(edge[1], edge[2], edge[3], lit and 0.35 or 0) end
+        if ring then
+            ring:SetVertexColor(edge[1], edge[2], edge[3], pressed and 1 or button.fsHot and 0.8 or (lit and 0.9 or 0.5))
+        end
+        if glow then glow:SetVertexColor(edge[1], edge[2], edge[3], pressed and 0.8 or (lit and 0.35 or 0)) end
         PaintDashSet(button.fsDashes, AMBER, 0, false)
         Tint(button.fsBar, edge, button.fsHot and 0.9 or 0.85)
     end
     if button.fsHot then
-        button.fsTint:SetVertexColor(PINK[1], PINK[2], PINK[3], 0.1)
+        button.fsTint:SetVertexColor(PINK[1], PINK[2], PINK[3], pressed and 0.4 or 0.1)
     elseif button.fsHover then
         button.fsTint:SetVertexColor(CYAN[1], CYAN[2], CYAN[3], 0.1)
     else
@@ -671,7 +682,6 @@ function Dial.Tooltip(button)
     local st = Dial.StateOf(cell)
     local idle = PS.P.STEP_IDLE
     if cell == "dial" then
-        local slots = PS.SlotCount()
         if not st.preset then
             Line(tip, "PRESET " .. st.index .. ": NEW", WHITE)
             Line(tip, "Empty. Shift click the dial to make one from your totem buttons.", MUTED, true)
@@ -693,8 +703,16 @@ function Dial.Tooltip(button)
         if st.pending then
             Line(tip, "Waiting for combat to end: " .. st.pendingName, AMBER, true)
         end
-        if slots > 1 and not st.pending then
-            -- the dial turns through every preset; nothing more to say
+    elseif cell == "gnarly" then
+        if not st.preset then
+            Line(tip, "GNARLY PRESET: NONE", PINK)
+            Line(tip, "Choose one in the settings, or open a preset (Shift click the dial) and press USE AS GNARLY "
+                .. "PRESET.", MUTED, true)
+        else
+            Line(tip, "GNARLY PRESET: " .. st.name, PINK)
+            Dial.PresetLines(tip, st.preset)
+            Line(tip, "Click: drop the next totem. Always ready, even in combat.", GOLD, true)
+            Line(tip, "Starts over after combat ends or a " .. idle .. " s pause.", CYAN, true)
         end
     end
     tip:Show()
@@ -1150,6 +1168,39 @@ function Dial.EditActive()
     Dial.OpenEditor(index)
 end
 
+-- Shift click on the GNARLY cell: edits its preset (nothing when it has none).
+function Dial.EditGnarly()
+    local PS = Presets()
+    if InCombat() then return Refuse("Editing waits for combat to end.") end
+    local index = PS.Gnarly()
+    if index and PS.Get(index) then Dial.OpenEditor(index) end
+end
+
+-- USE AS GNARLY PRESET: a button on the card that ties the GNARLY cell to the preset it edits; again unties it.
+function Dial.BuildCardExtras(c)
+    local PS = Presets()
+    c.useGnarly = NewButton(c, 120, 17)
+    c.useGnarly:SetScript("OnClick", function()
+        if not c.fsIndex then return end
+        local on = PS.Gnarly() == c.fsIndex
+        local ok, why = PS.SetGnarly(not on and c.fsIndex or nil)
+        if ok == false then Refuse(why) end
+        Dial.RefreshCard()
+    end)
+end
+
+function Dial.RefreshCardExtras(c)
+    local PS = Presets()
+    local on = PS.Gnarly() == c.fsIndex
+    StyleButton(c.useGnarly, on and PINK or MUTED, "USE AS GNARLY PRESET", 9)
+    if on then
+        c.useGnarly.fill:SetColorTexture(PINK[1] * 0.2 + 0.04, PINK[2] * 0.2 + 0.02, PINK[3] * 0.2 + 0.09, 0.9)
+        SetEdges(c.useGnarly.edges, PINK, 0.9)
+    else
+        c.useGnarly.fill:SetColorTexture(0.051, 0.024, 0.125, 0.8)
+    end
+end
+
 function Dial.Card()
     return card
 end
@@ -1171,7 +1222,9 @@ function Dial.Refresh()
     end
     PaintMarks()
     if card and card:IsShown() then Dial.RefreshCard() end
-    Presets().SaveState()
+    local PS = Presets()
+    if not pcall(PS.SyncSet2) then PS.Set2.state = "dead"; PS.Set2.why = "the set 2 sync raised" end
+    PS.SaveState()
 end
 
 local function Tick(self, elapsed)
@@ -1182,7 +1235,10 @@ local function Tick(self, elapsed)
     PS.Expire()
     local tb = Totems()
     local pending = PS.Pending()
-    local flashing = PS.P.applied and PS.P.applied.at and (GetTime and GetTime() or 0) - PS.P.applied.at < PS.P.APPLIED_FLASH + D.TICK
+    local now = GetTime and GetTime() or 0
+    local flashing = PS.P.applied and PS.P.applied.at and now - PS.P.applied.at < PS.P.APPLIED_FLASH + D.TICK
+    local age = PS.PressAge("gnarly")
+    if age and age < PS.P.PRESS_FLASH + D.TICK then flashing = true end
     if pending or flashing or self.fsWas then
         for _, def in ipairs(tb.Cells and tb.Cells() or {}) do
             local button = tb.Button(def.key)
@@ -1194,7 +1250,7 @@ local function Tick(self, elapsed)
 end
 
 local function OnPresetEvent(what)
-    if what == "step" or what == "pending" or what == "applied" or what == "edited" or what == "regen" then
+    if what == "step" or what == "pending" or what == "applied" or what == "edited" or what == "regen" or what == "set2" then
         local tb = Totems()
         for _, def in ipairs(tb and tb.Cells and tb.Cells() or {}) do
             local button = tb.Button(def.key)
@@ -1232,7 +1288,9 @@ local function Init()
             if tb and tb.Sync then tb.Sync() end
         end
         FS.Config.OnChange(PS.SETTINGS.dial.key, Apply)
+        FS.Config.OnChange(PS.SETTINGS.gnarly.key, Apply)
         FS.Config.OnChange(PS.SETTINGS.dialPlate.key, function() Dial.Refresh() end)
+        FS.Config.OnChange(PS.SETTINGS.gnarlySet2.key, function() Dial.Refresh() end)
     end
 end
 Init()

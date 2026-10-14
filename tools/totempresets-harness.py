@@ -110,7 +110,7 @@ __cvars = { ActionButtonUseKeyDown = "0" }
 C_CVar = C_CVar or {}
 C_CVar.GetCVar = function(name) return __cvars[name] end
 -- the sound kit: a client without these names plays nothing
-SOUNDKIT = { IG_MAINMENU_OPTION_CHECKBOX_OFF = 856, IG_MAINMENU_OPTION_CHECKBOX_ON = 857 }
+SOUNDKIT = { IG_MAINMENU_OPTION_CHECKBOX_OFF = 856, IG_MAINMENU_OPTION_CHECKBOX_ON = 857, IG_ABILITY_ICON_DROP = 858 }
 __sounds = {}
 function PlaySound(id) __sounds[#__sounds + 1] = id end
 UIErrorsFrame = { AddMessage = function(self, text) __errors = __errors or {}; __errors[#__errors + 1] = text end }
@@ -337,6 +337,8 @@ def check_the_settings_have_their_keys_defaults_tips_and_registered_defaults():
         "dialRight": ("totems.dialRight", True), "dialWheel": ("totems.dialWheel", True),
         "waitPulse": ("totems.waitPulse", True), "waitSound": ("totems.waitSound", False),
         "appliedFlash": ("totems.appliedFlash", True), "appliedSound": ("totems.appliedSound", False),
+        "gnarly": ("totems.gnarly", True), "gnarlyFlash": ("totems.gnarlyFlash", True),
+        "gnarlySound": ("totems.gnarlySound", False), "gnarlySet2": ("totems.gnarlySet2", True),
     }
     for name, (key, default) in want.items():
         assert str(S[name].key) == key and S[name].default is default, name
@@ -344,7 +346,7 @@ def check_the_settings_have_their_keys_defaults_tips_and_registered_defaults():
         tip = str(S[name].tip)
         assert tip.endswith("."), f"{name}: tip {tip!r}"
         assert g(lua).FS.Config.Get(key) is default, f"{key} default"
-    for cue in ("waitSound", "appliedSound", "waitPulse", "appliedFlash"):
+    for cue in ("waitSound", "appliedSound", "waitPulse", "appliedFlash", "gnarlyFlash", "gnarlySound"):
         assert cue in want, cue      # each cue has its own off switch
 
 
@@ -740,8 +742,14 @@ def check_a_press_counts_on_the_event_the_game_acts_on():
     assert int(t.presses) == 2
 
 
-def cast_name(lua, name):
+def cast_raw(lua, name):
     run(lua, f"__castOk({IDS[name]})")
+
+
+def cast_name(lua, name, cell="dial"):
+    """A press of the cell, then the cast it brings (the game casts after the click)."""
+    click(lua, btn(lua, cell), "LeftButton", False)
+    cast_raw(lua, name)
 
 
 def check_the_record_advances_on_the_next_totem_cast_and_ignores_the_rest():
@@ -751,6 +759,9 @@ def check_the_record_advances_on_the_next_totem_cast_and_ignores_the_rest():
     assert tuple(P.Progress("dial")) == (0, 4)
     cast_name(lua, "Searing Totem")
     assert P.Progress("dial")[0] == 0, "a cast out of turn counted"
+    advance(lua, 2.5)
+    cast_raw(lua, "Stoneskin Totem")
+    assert P.Progress("dial")[0] == 0, "a cast with no press before it counted"
     cast_name(lua, "Stoneskin Totem")
     assert tuple(P.Progress("dial")) == (1, 4)
     cast_name(lua, "Stoneskin Totem")
@@ -763,6 +774,9 @@ def check_the_record_advances_on_the_next_totem_cast_and_ignores_the_rest():
     run(lua, '__fire_event("UNIT_SPELLCAST_SUCCEEDED", "target", "guid", %d)' % IDS["Searing Totem"])
     assert P.Progress("dial")[0] == 1, "another unit's cast counted"
     assert int(P.Tracker("dial").matched) == 5
+    advance(lua, 2.5)
+    cast_raw(lua, "Searing Totem")
+    assert P.Progress("dial")[0] == 1, "a cast long after the press counted"
 
 
 def check_the_record_starts_over_at_combat_end_after_six_idle_seconds_and_on_any_edit():
@@ -1208,8 +1222,14 @@ def check_the_card_closes_on_escape_and_combat_and_hangs_on_the_last_cell():
     assert "FSTotemEditor" in [str(x) for x in seq(g(lua).UISpecialFrames)], "Escape does not close the card"
     assert c._strata == "DIALOG"
     p = c._points[1]
-    assert (p.point, p.relPoint) == ("BOTTOMRIGHT", "TOPRIGHT") and sb.same(lua, p.rel, dial(lua))
+    assert (p.point, p.relPoint) == ("BOTTOMRIGHT", "TOPRIGHT") and sb.same(lua, p.rel, btn(lua, "gnarly")), \
+        "the card hangs on the last cell"
     approx(p.x, 4.4, "card x"), approx(p.y, 21, "card y")
+    DL(lua).CloseEditor()
+    conf(lua, "totems.gnarly", False)
+    DL(lua).OpenEditor(i)
+    assert sb.same(lua, c._points[len(seq(c._points))].rel, dial(lua)), "with GNARLY off the card hangs on the dial"
+    conf(lua, "totems.gnarly", True)
     approx(float(c._w), 198.0, "card width")
     approx(float(c._h), 56 + 4 * 27 + 30, "card height")
     DL(lua).OpenEditor(i)
@@ -1247,30 +1267,39 @@ def check_the_tab_grows_by_one_cell_and_the_buff_and_five_second_tabs_follow(sca
     cs = csh.cs(lua)
     host = g(lua).FSTotemBar
     w7 = 2 * PAD + 7 * BTN + 6 * GAP
-    approx(float(host._w) / scale, w7, "host width in design px", 0.01)
-    assert TB(lua).Cols() == 7
+    w8 = 2 * PAD + 8 * BTN + 7 * GAP
+    approx(float(host._w) / scale, w8, "host width in design px", 0.01)
+    assert TB(lua).Cols() == 8
     d = dial(lua)
     q = d._points[1]
     assert sb.same(lua, q.rel, host) and (q.point, q.relPoint) == ("BOTTOMLEFT", "BOTTOMLEFT")
     approx(q.x, (PAD + 6 * (BTN + GAP)) * scale, "dial x"), approx(q.y, 5 * scale, "dial y")
     approx(float(d._w), BTN * scale, "dial width"), approx(float(d._h), BTN * scale, "dial height")
     assert shown(d)
-    buff_x = 36 + w7 + 16
+    g8 = btn(lua, "gnarly")._points[1]
+    approx(g8.x, (PAD + 7 * (BTN + GAP)) * scale, "GNARLY x")
+    buff_x = 36 + w8 + 16
     approx(g(lua).FSBuffTab._points[1].x, buff_x * scale, "buff tab follows", 0.5 * scale)
     five_x = buff_x + 92.8 + 16
     approx(g(lua).FSFiveSecondTab._points[1].x, five_x * scale, "five second tab follows", 0.5 * scale)
     # the dial off puts them back
     conf(lua, "totems.dial", False)
-    approx(float(host._w) / scale, 2 * PAD + 6 * BTN + 5 * GAP, "host width back to six", 0.01)
+    approx(float(host._w) / scale, w7, "host width with the dial off", 0.01)
     assert not shown(d), "the dial stayed with its switch off"
+    g7 = btn(lua, "gnarly")._points[1]
+    approx(g7.x, (PAD + 6 * (BTN + GAP)) * scale, "GNARLY steps into column 7")
+    approx(g(lua).FSBuffTab._points[1].x, (36 + w7 + 16) * scale, "buff tab with one cell", 0.5 * scale)
+    conf(lua, "totems.gnarly", False)
+    approx(float(host._w) / scale, 2 * PAD + 6 * BTN + 5 * GAP, "host width back to six", 0.01)
+    assert not shown(btn(lua, "gnarly")), "the GNARLY cell stayed with its switch off"
     approx(g(lua).FSBuffTab._points[1].x, 316 * scale, "buff tab back", 0.5 * scale)
     approx(g(lua).FSFiveSecondTab._points[1].x, (316 + 92.8 + 16) * scale, "five second tab back", 0.5 * scale)
-    conf(lua, "totems.dial", True)
-    assert shown(dial(lua))
+    conf(lua, "totems.dial", True), conf(lua, "totems.gnarly", True)
+    assert shown(dial(lua)) and shown(btn(lua, "gnarly"))
     approx(g(lua).FSBuffTab._points[1].x, buff_x * scale, "buff tab again", 0.5 * scale)
     # the shoulder art is the wider block
     bw, bh, _ = cs.BlockSize()
-    approx(float(bw), w7 * scale, "BlockSize width", 0.5)
+    approx(float(bw), w8 * scale, "BlockSize width", 0.5)
 
 
 def check_the_dial_switch_pressed_in_combat_waits_for_regen():
@@ -1281,11 +1310,11 @@ def check_the_dial_switch_pressed_in_combat_waits_for_regen():
     conf(lua, "totems.dial", False)
     assert blocked(lua) == n, "a protected write was tried in combat"
     assert shown(d), "the dial hid in combat"
-    approx(float(g(lua).FSTotemBar._w), 2 * PAD + 7 * BTN + 6 * GAP, "the host kept its width in combat")
+    approx(float(g(lua).FSTotemBar._w), 2 * PAD + 8 * BTN + 7 * GAP, "the host kept its width in combat")
     leave_combat(lua)
     TB(lua).Sync()
     assert not shown(d), "the dial did not hide after combat"
-    approx(float(g(lua).FSTotemBar._w), 264.0, "host back to 264")
+    approx(float(g(lua).FSTotemBar._w), 2 * PAD + 7 * BTN + 6 * GAP, "host one cell narrower after combat")
 
 
 def check_the_cells_stand_right_of_the_six_and_the_buttons_keep_their_slots():
@@ -1295,6 +1324,10 @@ def check_the_cells_stand_right_of_the_six_and_the_buttons_keep_their_slots():
         approx(q.x, PAD + (i - 1) * (BTN + GAP), f"button {i} x")
     assert str(dial(lua).fsKey) == "dial" and dial(lua).commandName == "CLICK FSTotemButton7:LeftButton"
     assert str(g(lua)["BINDING_NAME_CLICK FSTotemButton7:LeftButton"]) == "Totem preset dial"
+    assert str(btn(lua, "gnarly").fsKey) == "gnarly" and btn(lua, "gnarly").commandName == "CLICK FSTotemButton8:LeftButton"
+    assert str(g(lua)["BINDING_NAME_CLICK FSTotemButton8:LeftButton"]) == "Totem GNARLY preset"
+    names = [b.get("name") for b in ET.parse(BINDINGS).getroot().findall("Binding")]
+    assert "CLICK FSTotemButton8:LeftButton" in names, names
 
 
 def check_a_rescale_resizes_and_reseats_the_face():
@@ -1308,8 +1341,344 @@ def check_a_rescale_resizes_and_reseats_the_face():
     q = d._points[1]
     approx(q.x, (PAD + 6 * (BTN + GAP)) * s, "dial x after a rescale")
     approx(float(btn(lua, "dial").fsRail._h), 12 * s, "plate height after a rescale")
-    approx(float(g(lua).FSTotemBar._w), (2 * PAD + 7 * BTN + 6 * GAP) * s, "host width after a rescale")
-    approx(g(lua).FSBuffTab._points[1].x, (36 + 2 * PAD + 7 * BTN + 6 * GAP + 16) * s, "buff tab after a rescale", 0.5)
+    approx(float(g(lua).FSTotemBar._w), (2 * PAD + 8 * BTN + 7 * GAP) * s, "host width after a rescale")
+    approx(g(lua).FSBuffTab._points[1].x, (36 + 2 * PAD + 8 * BTN + 7 * GAP + 16) * s, "buff tab after a rescale", 0.5)
+
+
+# ---------------------------------------------------------------------------------------------
+# Checks: the GNARLY cell
+# ---------------------------------------------------------------------------------------------
+
+
+def gnarly_world(**kw):
+    """A world with two presets; the second is the GNARLY preset."""
+    lua = boot(**kw)
+    a, b = two_presets(lua)
+    assert PS(lua).SetGnarly(b) is True
+    PS(lua).Select(a)
+    return lua, a, b
+
+
+def gb(lua):
+    return btn(lua, "gnarly")
+
+
+def check_the_gnarly_cell_carries_its_own_preset_whatever_the_dial_is_doing():
+    lua = boot()
+    P = PS(lua)
+    g8 = gb(lua)
+    assert g8._attrs["type1"] is None and g8._attrs["shift-type1"] == "" and g8._attrs["alt-type1"] == ""
+    a, b = two_presets(lua)
+    assert P.Gnarly() is None and P.CellPreset("gnarly") is None
+    assert P.SetGnarly(b) is True and P.Gnarly() == b
+    assert g8._attrs["type1"] == "macro" and str(g8._attrs["macrotext1"]) == text_of(lua, b)
+    assert "Magma Totem" in str(g8._attrs["macrotext1"])
+    # the dial turns: GNARLY keeps its script, in and out of combat
+    script_text = str(g8._attrs["macrotext1"])
+    P.Select(a)
+    P.Select(b)
+    P.Select(3)
+    assert str(g8._attrs["macrotext1"]) == script_text, "a dial switch changed the GNARLY script"
+    P.Select(a)
+    set_combat(lua, True)
+    n = blocked(lua)
+    P.Select(b)
+    assert P.Pending() == b and str(g8._attrs["macrotext1"]) == script_text
+    click(lua, g8, "LeftButton", False)
+    assert blocked(lua) == n, "a press tried a protected write"
+    assert int(P.Tracker("gnarly").presses) == 1, "GNARLY did not take a press in combat"
+    assert int(P.Tracker("dial").presses) == 0
+    cast_name(lua, "Tremor Totem", "gnarly")
+    assert tuple(P.Progress("gnarly")) == (1, 3), tuple(P.Progress("gnarly"))
+    leave_combat(lua)
+    assert P.Progress("gnarly")[0] == 0, "combat ended and the GNARLY step stayed"
+
+
+def check_gnarly_is_set_unset_edited_and_shifted_by_a_delete():
+    lua = boot()
+    P = PS(lua)
+    a, b = two_presets(lua)
+    assert P.SetGnarly(9)[0] is False, "a preset that does not exist was accepted"
+    set_combat(lua, True)
+    assert P.SetGnarly(b)[0] is False and P.Gnarly() is None, "GNARLY was tied in combat"
+    set_combat(lua, False)
+    P.SetGnarly(b)
+    g8 = gb(lua)
+    # an edit of the GNARLY preset reaches its script even when the dial shows another preset
+    P.Select(a)
+    P.SetTotem(b, "water", None)
+    assert "Mana Spring" not in str(g8._attrs["macrotext1"]), "an edit did not reach the GNARLY script"
+    P.Move(b, "earth", 1)
+    assert str(g8._attrs["macrotext1"]) == text_of(lua, b)
+    # a delete before it shifts the tie, a delete of it unties
+    c = make(lua)
+    P.SetGnarly(c)
+    P.Delete(a)
+    assert P.Gnarly() == c - 1 and str(g8._attrs["macrotext1"]) == text_of(lua, c - 1)
+    P.Delete(P.Gnarly())
+    assert P.Gnarly() is None and g8._attrs["type1"] is None, "deleting the GNARLY preset left its script"
+    P.SetGnarly(1)
+    assert P.SetGnarly(None) is True and P.Gnarly() is None
+    assert [str(x.text) for x in seq(P.GnarlyChoices())][:1] == ["None"]
+    assert str(P.GnarlyName(0)) == "None"
+
+
+def check_the_gnarly_cell_looks_pink_with_a_bang_and_its_own_plate():
+    lua, a, b = gnarly_world()
+    g8 = gb(lua)
+    look(lua)
+    assert str(g8.fsDigit._text) == "!" and str(g8.fsRail.text._text) == "CASTER"
+    ks = kinds(lua, "gnarly")
+    assert [(n, k) for n, _, k in ks] == [("3", "t")] * 3, ks
+    ring = g8.fsSkin.border.ring._vertex
+    close(seq(ring), PINK, "ring colour")
+    close(seq(g8.fsBar._vertex), PINK, "underline colour")
+    close(seq(g8.fsRail.edges[1]._color), PINK, "plate edge")
+    # the dial next to it stays cyan
+    close(seq(dial(lua).fsSkin.border.ring._vertex), CYAN, "dial ring colour")
+    cast_name(lua, "Tremor Totem", "gnarly")
+    look(lua)
+    assert str(g8.fsRaise.text._text) == "1/3" and [k for _, _, k in kinds(lua, "gnarly")] == ["g", "k", "t"]
+    assert PS(lua).Progress("dial")[0] == 0, "a GNARLY drop moved the dial's step"
+    # no preset: a dashed ring with a muted bang and a plate that says so
+    PS(lua).SetGnarly(None)
+    look(lua)
+    assert str(g8.fsDigit._text) == "!" and shown(g8.fsEmpty) and str(g8.fsRail.text._text) == "UNSET"
+    close(seq(g8.fsDigit._textColor), MUTED, "the bang is muted without a preset")
+
+
+def check_two_cells_with_the_same_first_totem_count_a_cast_for_the_one_pressed():
+    lua = boot()
+    P = PS(lua)
+    a = make(lua, picks={"fire": "Searing Totem", "earth": "Stoneskin Totem", "water": None, "air": None}, name="ONE")
+    b = make(lua, picks={"fire": "Magma Totem", "earth": "Stoneskin Totem", "water": None, "air": None}, name="TWO")
+    P.SetGnarly(b)
+    P.Select(a)
+    cast_name(lua, "Stoneskin Totem", "gnarly")
+    assert (P.Progress("dial")[0], P.Progress("gnarly")[0]) == (0, 1), "the cast went to the wrong cell"
+    advance(lua, 3)
+    cast_name(lua, "Stoneskin Totem", "dial")
+    assert (P.Progress("dial")[0], P.Progress("gnarly")[0]) == (1, 1)
+    # both pressed, the later press owns the cast
+    run(lua, "FS.TotemPresets.ResetSteps()")
+    click(lua, dial(lua), "LeftButton", False)
+    advance(lua, 0.3)
+    click(lua, gb(lua), "LeftButton", False)
+    cast_raw(lua, "Stoneskin Totem")
+    assert (P.Progress("dial")[0], P.Progress("gnarly")[0]) == (0, 1)
+
+
+def check_the_press_flash_and_sound_belong_to_the_gnarly_cell_and_have_their_own_switches():
+    lua, a, b = gnarly_world()
+    g8 = gb(lua)
+    ring = lambda: float(seq(g8.fsSkin.border.ring._vertex)[3])
+    look(lua)
+    base = ring()
+    click(lua, g8, "LeftButton", False)
+    assert ring() > base + 0.1, "no flash on a press"
+    advance(lua, 0.2), tick(lua)
+    assert ring() > base + 0.1, "the flash ended early"
+    advance(lua, 0.2), tick(lua)
+    assert abs(ring() - base) < 0.01, "the flash outlived its time"
+    advance(lua, 6.5), tick(lua), look(lua)
+    base = ring()
+    conf(lua, "totems.gnarlyFlash", False)
+    click(lua, g8, "LeftButton", False)
+    assert abs(ring() - base) < 0.01, "the flash played with its setting off"
+    # the dial never flashes on a press
+    click(lua, dial(lua), "LeftButton", False)
+    assert float(seq(dial(lua).fsSkin.border.ring._vertex)[3]) < 0.95
+    run(lua, "__sounds = {}")
+    click(lua, g8, "LeftButton", False)
+    assert len(seq(g(lua).__sounds)) == 0, "a press sound played with its setting off"
+    conf(lua, "totems.gnarlySound", True)
+    click(lua, g8, "LeftButton", False)
+    assert [int(x) for x in seq(g(lua).__sounds)] == [858]
+    click(lua, dial(lua), "LeftButton", False)
+    assert len(seq(g(lua).__sounds)) == 1, "the dial played the GNARLY press sound"
+
+
+def check_the_gnarly_tooltip_and_the_unset_tooltip():
+    lua, a, b = gnarly_world()
+    g8 = gb(lua)
+    hover(lua, g8)
+    ls = [plain(x) for x in lines(lua)]
+    assert ls[0] == "GNARLY PRESET: CASTER", ls
+    assert ls[1:4] == ["1 Tremor Totem", "2 Magma Totem", "3 Mana Spring Totem"], ls
+    assert "Click: drop the next totem. Always ready, even in combat." in ls, ls
+    assert "Starts over after combat ends or a 6 s pause." in ls
+    unhover(lua, g8)
+    PS(lua).SetGnarly(None)
+    hover(lua, g8)
+    ls = [plain(x) for x in lines(lua)]
+    assert ls[0] == "GNARLY PRESET: NONE" and any("USE AS GNARLY PRESET" in x for x in ls), ls
+
+
+def check_use_as_gnarly_preset_in_the_editor_ties_and_unties_and_shift_click_edits_it():
+    lua, a, b = gnarly_world()
+    P = PS(lua)
+    P.SetGnarly(None)
+    DL(lua).OpenEditor(a)
+    ub = card(lua).useGnarly
+    assert str(ub.text._text) == "USE AS GNARLY PRESET"
+    assert int(ub._w) == 120 and int(card(lua).delete._w) == 58
+    script(lua, ub, "OnClick")
+    assert P.Gnarly() == a and gb(lua)._attrs["type1"] == "macro"
+    close(seq(ub.edges[1]._color), PINK, "the tied button is pink")
+    script(lua, ub, "OnClick")
+    assert P.Gnarly() is None, "a second press did not untie it"
+    script(lua, ub, "OnClick")
+    DL(lua).CloseEditor()
+    P.SetGnarly(b)
+    run(lua, "__shift = true")
+    click(lua, gb(lua), "LeftButton", False)
+    assert shown(card(lua)) and int(card(lua).fsIndex) == b, "shift click on GNARLY did not edit its preset"
+    assert int(P.Tracker("gnarly").presses) == 0
+    run(lua, "__shift = false")
+    DL(lua).CloseEditor()
+    P.SetGnarly(None)
+    run(lua, "__shift = true")
+    click(lua, gb(lua), "LeftButton", False)
+    assert not shown(card(lua)), "shift click opened an editor with no GNARLY preset"
+    run(lua, "__shift = false")
+
+
+def set2_ids(*elements):
+    return {e: tbh.action_id(tbh.SLOT[e], mc_set=2) for e in elements}
+
+
+def check_the_gnarly_preset_is_written_into_set_two_once_and_read_back():
+    lua = boot()
+    P = PS(lua)
+    a, b = two_presets(lua)
+    run(lua, "__mc.calls = {}")
+    P.SetGnarly(b)
+    ids = set2_ids("earth", "fire", "water")
+    mc = g(lua).__mc
+    calls = [(int(c[1]), int(c[2]), bool(c.combat)) for c in seq(mc.calls)]
+    wrote = {act: sp for act, sp, _ in calls if act in ids.values()}
+    assert wrote == {ids["earth"]: IDS["Tremor Totem"], ids["fire"]: IDS["Magma Totem"],
+                     ids["water"]: IDS["Mana Spring Totem"]}, f"set 2 writes {wrote}"
+    assert not any(c for _, _, c in calls), "a set 2 write was made in combat"
+    assert tbh.action_id(4, mc_set=2) not in wrote, "the air slot was written though the preset leaves it out"
+    assert P.Set2.state == "ok" and P.Set2.set1Intact is True
+    # nothing is written again for the same element and spell
+    run(lua, "__mc.calls = {}")
+    TB(lua).Sync()
+    TB(lua).Sync()
+    again = [int(c[1]) for c in seq(g(lua).__mc.calls) if int(c[1]) in ids.values()]
+    assert again == [], f"set 2 was written again: {again}"
+    # a different spell for an element is a new attempt
+    P.SetTotem(b, "fire", IDS["Searing Totem"])
+    again = {int(c[1]): int(c[2]) for c in seq(g(lua).__mc.calls)}
+    assert again.get(ids["fire"]) == IDS["Searing Totem"]
+    # set 1 follows the dial (the GNARLY preset is also the active one here), so it holds the new fire totem
+    assert pick_of(lua, "fire") == "Searing Totem" and pick_of(lua, "earth") == "Tremor Totem"
+    line = str(g(lua).ForeverSTUwaveDB.totemPresetState.line)
+    assert "set2=ok 3/3" in line and "set1Intact=true" in line, line
+
+
+def check_set_two_waits_for_what_it_needs_and_never_writes_in_combat():
+    # setting off, no GNARLY, the cell off
+    for how in ("gnarlySet2", "gnarly"):
+        lua = boot()
+        P = PS(lua)
+        a, b = two_presets(lua)
+        conf(lua, f"totems.{how}", False)
+        run(lua, "__mc.calls = {}")
+        P.SetGnarly(b)
+        ids = set(set2_ids("earth", "fire", "water", "air").values())
+        assert not [c for c in seq(g(lua).__mc.calls) if int(c[1]) in ids], f"{how} off still wrote set 2"
+        assert P.Set2.state == "off"
+    # Call of the Ancestors not known: nothing is written, and it is tried again once it is
+    lua = boot()
+    P = PS(lua)
+    a, b = two_presets(lua)
+    run(lua, '__learned[__spells["Call of the Ancestors"]] = nil')
+    run(lua, "__mc.calls = {}")
+    P.SetGnarly(b)
+    ids = set(set2_ids("earth", "fire", "water", "air").values())
+    assert not [c for c in seq(g(lua).__mc.calls) if int(c[1]) in ids] and P.Set2.state == "wait"
+    run(lua, '__learned[__spells["Call of the Ancestors"]] = true')
+    TB(lua).Sync()
+    assert [c for c in seq(g(lua).__mc.calls) if int(c[1]) in ids] and P.Set2.state == "ok"
+    # in combat the call is never made
+    lua = boot()
+    P = PS(lua)
+    a, b = two_presets(lua)
+    P.SetGnarly(b)
+    run(lua, "__mc.calls = {}; __mc.slots = {}")
+    P.Set2.tried = {}
+    set_combat(lua, True)
+    P.SyncSet2()
+    DL(lua).Refresh()
+    assert len(seq(g(lua).__mc.calls)) == 0, "SetMultiCastSpell was called in combat"
+
+
+def check_set_two_is_given_up_when_the_set_one_slot_does_not_map_or_changes():
+    # the native button disagrees with the formula: nothing is written at all
+    lua = boot()
+    P = PS(lua)
+    a, b = two_presets(lua)
+    run(lua, "__native(500)")
+    run(lua, "__mc.calls = {}")
+    P.SetGnarly(b)
+    ids = set(set2_ids("earth", "fire", "water", "air").values())
+    assert not [c for c in seq(g(lua).__mc.calls) if int(c[1]) in ids], "set 2 was written on an unproven mapping"
+    assert P.Set2.state == "dead" and "map" in str(P.Set2.why)
+    assert "set2=dead" in str(g(lua).ForeverSTUwaveDB.totemPresetState.line)
+    # a write that lands on set 1 as well: set 1 is put back and set 2 is dead for the session
+    lua = boot()
+    P = PS(lua)
+    a, b = two_presets(lua)
+    P.Select(a)
+    run(lua, "local base = SetMultiCastSpell\n"
+             "SetMultiCastSpell = function(act, sp) base(act, sp); if act > (%d - 1) * 12 + 4 then base(act - 4, sp) end end" % tbh.BAR)
+    P.SetGnarly(b)
+    assert P.Set2.state == "dead" and P.Set2.set1Intact is False, f"{P.Set2.state} {P.Set2.set1Intact}"
+    assert pick_of(lua, "fire") == "Searing Totem" and pick_of(lua, "earth") == "Stoneskin Totem", \
+        "set 1 was left changed"
+    held = g(lua).__mc.slots[tbh.action_id(tbh.SLOT["fire"])]
+    assert int(held) == IDS["Searing Totem"], "the set 1 slot was not restored"
+    run(lua, "__mc.calls = {}")
+    P.SetTotem(b, "fire", IDS["Flametongue Totem"])
+    ids = set(set2_ids("earth", "fire", "water", "air").values())
+    assert not [c for c in seq(g(lua).__mc.calls) if int(c[1]) in ids], "set 2 was tried again after it died"
+    line = str(g(lua).ForeverSTUwaveDB.totemPresetState.line)
+    assert "set2=dead" in line and "set1Intact=false" in line, line
+
+
+def check_a_set_two_call_that_raises_or_does_not_land_never_breaks_the_tab():
+    lua = boot()
+    P = PS(lua)
+    a, b = two_presets(lua)
+    run(lua, "__mc.throws = false; local base = SetMultiCastSpell\n"
+             "SetMultiCastSpell = function(act, sp) if act > (%d - 1) * 12 + 4 then error('boom') end return base(act, sp) end" % tbh.BAR)
+    P.SetGnarly(b)
+    TB(lua).Sync()
+    assert P.Set2.state in ("partial", "ok", "off", "wait"), P.Set2.state
+    assert P.Set2.state != "ok"
+    lua = boot()
+    P = PS(lua)
+    a, b = two_presets(lua)
+    run(lua, "__mc.delay = true")
+    P.SetGnarly(b)
+    assert P.Set2.state == "partial", "a write that has not shown yet should read as partial"
+    ids = set(set2_ids("earth", "fire", "water", "air").values())
+    sent = [int(c[1]) for c in seq(g(lua).__mc.calls) if int(c[1]) in ids]
+    TB(lua).Sync()
+    TB(lua).Sync()
+    assert [int(c[1]) for c in seq(g(lua).__mc.calls) if int(c[1]) in ids] == sent, \
+        "a set 2 write that has not landed was sent again (one attempt per element and spell)"
+    run(lua, "__mc_flush()")
+    TB(lua).Sync()
+    assert P.Set2.state == "ok", "the late slot update was not seen"
+    lua = boot()
+    P = PS(lua)
+    a, b = two_presets(lua)
+    run(lua, "__mc.infoMode = 'secret'")
+    P.SetGnarly(b)
+    assert P.Set2.state == "wait", "unreadable slots must write nothing"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1326,7 +1695,8 @@ def check_the_state_line_names_the_live_unknowns():
     P.SaveState()
     st = g(lua).ForeverSTUwaveDB.totemPresetState
     line = str(st.line)
-    for part in ("presets=1", "active=1", "pending=nil", "dial type1=macro", "step=1/4", "presses=1", "casts=1"):
+    for part in ("presets=1", "active=1", "pending=nil", "dial type1=macro", "step=1/4", "presses=2", "casts=1",
+                 "gnarly type1=none"):
         assert part in line, f"{part!r} not in {line!r}"
     assert int(st.active) == 1
     assert int(re.search(r"script=(\d+)", line).group(1)) == len(text_of(lua, i))
@@ -1426,6 +1796,17 @@ CHECKS = [
     check_the_dial_switch_pressed_in_combat_waits_for_regen,
     check_the_cells_stand_right_of_the_six_and_the_buttons_keep_their_slots,
     check_a_rescale_resizes_and_reseats_the_face,
+    check_the_gnarly_cell_carries_its_own_preset_whatever_the_dial_is_doing,
+    check_gnarly_is_set_unset_edited_and_shifted_by_a_delete,
+    check_the_gnarly_cell_looks_pink_with_a_bang_and_its_own_plate,
+    check_two_cells_with_the_same_first_totem_count_a_cast_for_the_one_pressed,
+    check_the_press_flash_and_sound_belong_to_the_gnarly_cell_and_have_their_own_switches,
+    check_the_gnarly_tooltip_and_the_unset_tooltip,
+    check_use_as_gnarly_preset_in_the_editor_ties_and_unties_and_shift_click_edits_it,
+    check_the_gnarly_preset_is_written_into_set_two_once_and_read_back,
+    check_set_two_waits_for_what_it_needs_and_never_writes_in_combat,
+    check_set_two_is_given_up_when_the_set_one_slot_does_not_map_or_changes,
+    check_a_set_two_call_that_raises_or_does_not_land_never_breaks_the_tab,
     check_the_state_line_names_the_live_unknowns,
     check_the_state_line_never_creates_a_database_never_writes_a_read_only_config_and_survives_a_throwing_one,
     check_a_throwing_listener_or_totem_api_never_breaks_a_press_or_a_sync,

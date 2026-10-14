@@ -1337,6 +1337,21 @@ local function TotemPresetsGroup(page)
         local def = S[name]
         UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip, inset = 14 })
     end
+    UI.Toggle(page, { label = S.gnarly.label, key = S.gnarly.key, tip = S.gnarly.tip })
+    if presets.GnarlyChoices then
+        UI.Dropdown(page, {
+            label = "GNARLY preset",
+            tip = "The preset the GNARLY button drops. Saved for this character.",
+            get = function() return presets.Gnarly() or 0 end,
+            text = function(value) return presets.GnarlyName(value) end,
+            items = function() return presets.GnarlyChoices() end,
+            set = function(value) presets.SetGnarly(value ~= 0 and value or nil) end,
+        })
+    end
+    for _, name in ipairs({ "gnarlyFlash", "gnarlySound", "gnarlySet2" }) do
+        local def = S[name]
+        UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip, inset = 14 })
+    end
 end
 
 -- The spell icon style for the class tabs (SpellArt.lua): gradient or the game's own icons, repainted live. Left out until a
