@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Runs the real GunsightShamanShocks.lua (the shock trace, the Fire Nova ring and the Earth Shock KICK tag) headless.
+"""Runs the real GunsightShamanShocks.lua (the shock trace and the Fire Nova ring) headless.
 
 The Shaman Gunsight Class Module (GunsightShaman.lua) owns the module frame and the totem poles; this file is the second
 lane of Concept A "Totem Poles" (mockups/gunsight-class-module-shaman-2026-10-08.html, poleMod): the ground trace that
 charges along the shared Earth / Flame / Frost Shock cooldown with the bolt and its RDY / seconds label at the end, the
-cyan ring around the Fire totem head while Fire Nova is ready with the NOVA footer tag, and the pink KICK tag on the target
-box while the target casts and Earth Shock is ready. GunsightShaman.lua calls it through FS.GunsightShamanShocks =
+cyan ring around the Fire totem head while Fire Nova is ready with the NOVA footer tag. It draws no KICK tag: that comes
+from GunsightTape.lua's class neutral tag. GunsightShaman.lua calls it through FS.GunsightShamanShocks =
 { Build(frame), Seat(section, rect, scale), OnShow(section), OnHide(section) }. The harness builds the section on a plain
 frame under a fake host, as GunsightShaman.lua does. The checks pin:
 
@@ -17,14 +17,11 @@ frame under a fake host, as GunsightShaman.lua does. The checks pin:
     plain isActive of false, or a cooldown that is only the global one), the plain seconds out of combat, the engine fill
     (SetTimerDuration with the duration object) while it charges, "~" and the cast ledger when the timing is secret in
     combat, "?" when even isActive is secret, any rank of any shock starting the shared cooldown;
-  * secret values: not one is compared or computed on (the mock's secret raises), only handed to SetTimerDuration and
-    SetAlphaFromBoolean;
+  * secret values: not one is compared or computed on (the mock's secret raises), only handed to SetTimerDuration;
   * Fire Nova: nothing before it is learned (and it appears when it is), the ring and NOVA tag lit while it is ready, the
     tag dim and the ring gone on its cooldown, both gone when the poles say the Fire totem is down, the ring following the
     head the poles report;
-  * the KICK tag: shown only with a cast or channel on the target, Earth Shock known and the shared cooldown ready; a
-    secret flag reaches the tag only through SetAlphaFromBoolean (a client without it shows nothing for a secret flag); the
-    cast events and a target change drive it;
+  * no KICK tag and no target reads: the build makes none, and only the player's own casts and the view events listen;
   * OnHide stops the ticker and every view event, a cast while hidden is still ledgered, and OnShow re-reads everything;
   * the per frame path allocates nothing on the addon side.
 
@@ -89,7 +86,6 @@ def mockup_numbers() -> dict:
     foot = _m(r"var fy=gy\+(\d+);.*?circ\((\d+),fy\+(\d+),4,null,C\.cyan,1,1\.2,'2 2',true\)\+txt\((\d+),fy\+(\d+),'NOVA',(\d+)", pole, "NOVA footer")
     px = _m(r"var PX=\{fire:\[(\d+),(\d+)\]", src, "pole x")
     bp = _m(r"var NB=(\d+),BP=(\d+),BH=(\d+);", src, "pole blocks")
-    kick = _m(r"tag\((\d+),(\d+),(\d+),'KICK',C\.pink\)", src, "KICK tag")
     return {
         "GY": int(ground.group(1)), "X0": int(ground.group(2)),
         "TRACE_EX": int(trace.group(1)), "TRACE_DY": int(trace.group(2)),
@@ -100,7 +96,6 @@ def mockup_numbers() -> dict:
         "NOVA_X": int(foot.group(4)), "NOVA_BASE": int(foot.group(5)), "NOVA_SIZE": int(foot.group(6)),
         "FIRE_X": int(px.group(1)) + int(px.group(2)) // 2,
         "NB": int(bp.group(1)), "BP": int(bp.group(2)),
-        "KICK_W": int(kick.group(3)),
     }
 
 
@@ -119,17 +114,7 @@ def lua_value(v) -> str:
 # ---------------------------------------------------------------------------------------
 
 MOCK = CLASS_HARNESS.MOCK + r"""
--- SetAlphaFromBoolean: the only consumer of a secret flag. The engine resolves it through ENGINE_NOTINT.
-ENGINE_NOTINT = false
 do
-    local FrameMT = getmetatable(UIParent).__index
-    function FrameMT:SetAlphaFromBoolean(flag, whenTrue, whenFalse)
-        self.alphaFlag = flag
-        local f = flag
-        if f == SECRET then f = ENGINE_NOTINT end
-        self.alpha = f and whenTrue or whenFalse
-        self.alphaFromBoolean = (self.alphaFromBoolean or 0) + 1
-    end
     -- a StatusBar driven by the engine's timer: it records the object it was given
     local create = CreateFrame
     function CreateFrame(kind, name, parent, template)
@@ -149,7 +134,7 @@ NAMES = { [8042] = "Earth Shock", [25454] = "Earth Shock", [8050] = "Flame Shock
 IDOF = { ["Earth Shock"] = 8042, ["Flame Shock"] = 8050, ["Frost Shock"] = 8056, ["Fire Nova"] = 408341 }
 KNOWN = {}
 CD, CD_CALLS, DUR_CALLS, DUR = {}, 0, 0, {}
-CAST, CHANNEL, USABLE = nil, nil, {}
+USABLE = {}
 local RESULT, INFO = {}, {}                       -- reused: the mock's own tables are not what the cases count
 SECRET_FN = function(v) return v == SECRET end
 
@@ -183,14 +168,6 @@ local function mockSpells()
     }
     IsPlayerSpell = function(id) return KNOWN[id] == true end
     IsSpellKnown = function(id) return KNOWN[id] == true end
-    UnitCastingInfo = function(unit)
-        if unit ~= "target" or not CAST then return nil end
-        return CAST.name, "", 135846, 0, 0, false, "cast-id", CAST.notInt, 116
-    end
-    UnitChannelInfo = function(unit)
-        if unit ~= "target" or not CHANNEL then return nil end
-        return CHANNEL.name, "", 135846, 0, 0, false, CHANNEL.notInt, 117
-    end
 end
 
 local function learn(...)
@@ -205,41 +182,26 @@ local EARTH, FLAME, FROST, NOVA = 8042, 8050, 8056, 408341
 -- every spell off cooldown unless a case says otherwise
 local function allReady() for _, id in ipairs({ EARTH, FLAME, FROST, NOVA }) do cdReady(id) end end
 
-TIMERS = {}
-C_Timer = { After = function(_, fn) TIMERS[#TIMERS + 1] = fn end }
-function flushTimers()
-    local q = TIMERS
-    TIMERS = {}
-    for _, fn in ipairs(q) do fn() end
-end
-
 local function boot(opts)
     opts = opts or {}
     STRICT_EVENTS = false
-    TIMERS = {}
     resetKnownEvents()
-    for e in ([[SPELL_UPDATE_COOLDOWN SPELLS_CHANGED LEARNED_SPELL_IN_TAB PLAYER_LEVEL_UP UNIT_SPELLCAST_START UNIT_SPELLCAST_STOP
-        UNIT_SPELLCAST_FAILED UNIT_SPELLCAST_INTERRUPTED UNIT_SPELLCAST_DELAYED UNIT_SPELLCAST_CHANNEL_START
-        UNIT_SPELLCAST_CHANNEL_STOP UNIT_SPELLCAST_CHANNEL_UPDATE UNIT_SPELLCAST_INTERRUPTIBLE UNIT_SPELLCAST_SUCCEEDED
+    for e in ([[SPELL_UPDATE_COOLDOWN SPELLS_CHANGED LEARNED_SPELL_IN_TAB PLAYER_LEVEL_UP UNIT_SPELLCAST_SUCCEEDED
         SPELL_UPDATE_USABLE PLAYER_REGEN_ENABLED PLAYER_REGEN_DISABLED]]):gmatch("%S+") do
-        KNOWN_EVENTS[e] = true     -- UNIT_SPELLCAST_NOT_INTERRUPTIBLE is deliberately missing: a refused event must not break the build
+        KNOWN_EVENTS[e] = true     -- any other event (a target cast, a target change) is refused and would be logged
     end
     resetWorld()
     SetScreen(opts.height or 1440)
-    KNOWN, CD, CAST, CHANNEL, USABLE, DUR = {}, {}, nil, nil, {}, {}
-    CD_CALLS, DUR_CALLS, ENGINE_NOTINT = 0, 0, false
+    KNOWN, CD, USABLE, DUR = {}, {}, {}, {}
+    CD_CALLS, DUR_CALLS = 0, 0
     NOW = 5000
     FS.IsSecret = function(v) return SECRET_FN(v) end
     stubTheme_()
     local T = FS.Theme
     T.COLOR_TEXT_WHITE = { 1, 1, 1, 1 }
     T.COLOR_POWER = { 0.133, 0.878, 1, 1 }
-    T.COLOR_HEALTH = { 1, 0.180, 0.592, 1 }
     T.COLOR_MUTED = { 0.6157, 0.5765, 0.7686, 1 }
     T.COLOR_HUD_SCRIM = { 0.051, 0.024, 0.125, 0.4675 }
-    T.SLICE_CUT2_OUTLINE_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\slice_cut2_outline.tga"
-    T.SLICE_CUT_MARGIN = 6
-    T.AddCut2Texture = function(frame, path, color, layer, sublevel) return T.AddSliceTexture(frame, path, color, layer, sublevel) end
     stubHud_()
     assert(loadstring(HAS_TARGET_SRC, "@Theme.lua"))()
     loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
@@ -250,9 +212,6 @@ local function boot(opts)
     mockSpells()
     if opts.known ~= false then learn("Earth Shock", "Flame Shock", "Fire Nova") end
     if opts.ready ~= false then allReady() end
-    if opts.noAlphaFlag then
-        getmetatable(UIParent).__index.SetAlphaFromBoolean = nil
-    end
     FRAMES_BEFORE = #FRAMES
     loadAddonFile(SHOCKS_SRC, "Modules/CombatHud/GunsightShamanShocks.lua")
     Shocks = FS.GunsightShamanShocks
@@ -308,9 +267,6 @@ local function mutedTint(r)
 end
 local function textRgb(fs) local c = fs.textColor; return c[1], c[2], c[3] end
 local function cast(id, unit) fire("UNIT_SPELLCAST_SUCCEEDED", unit or "player", "guid", id) end
-local function kickOn() return vis(SEC.kick) and SEC.kick.alpha > 0 end
-local function startCast(notInt, name) CAST = { name = name or "Frostbolt", notInt = notInt }; fire("UNIT_SPELLCAST_START", "target", "guid", 116) end
-local function stopCast() CAST = nil; CHANNEL = nil; fire("UNIT_SPELLCAST_STOP", "target", "guid", 116) end
 local function nearRect(r, x, y, w, h, what)
     local l, t, rw, rh = imgRect(r)
     near(l, x, what .. " left", 0.02); near(t, y, what .. " top", 0.02)
@@ -356,7 +312,7 @@ check(listeners() - before == 1, "only the player's own cast ledger listens befo
 for _, f in ipairs(built()) do
     check(not f:IsProtected(), "no protected frame")
 end
-check(not vis(SEC.kick) or not SEC.kick.shown, "the KICK tag starts hidden")
+check(SEC.kick == nil and SEC.kickLabel == nil, "no KICK tag of its own: GunsightTape.lua draws it")
 noDegrade()
 """)
 
@@ -367,7 +323,6 @@ check(not vis(SEC.base) and not vis(SEC.bar) and not vis(SEC.ready) and not vis(
 check(not vis(SEC.boltFill) and not vis(SEC.boltLine) and not vis(SEC.boltGlow), "no bolt without a shock")
 check(not vis(SEC.label), "no label without a shock")
 check(not vis(SEC.ring) and not vis(SEC.pip) and not vis(SEC.novaText), "no Nova pieces before Fire Nova is learned")
-check(not kickOn(), "no KICK tag")
 check(onUpdates() == 0, "nothing ticks")
 noDegrade()
 """)
@@ -479,8 +434,6 @@ check(SEC.label.text == "?", "the label says ?, got " .. tostring(SEC.label.text
 local r, g, b = textRgb(SEC.label)
 check(math.abs(r - 0.6157) < 0.01, "? is muted")
 check(vis(SEC.boltLine) and mutedTint(SEC.boltLine) and not vis(SEC.boltGlow), "the bolt outline is muted and unlit")
-startCast(false)
-check(not kickOn(), "no KICK on a flag nobody can read")
 noDegrade()
 """)
 
@@ -606,99 +559,6 @@ check(vis(SEC.ring), "a secret usability reads as a Fire totem that stands")
 noDegrade()
 """)
 
-case("the_KICK_tag_needs_a_cast_on_the_target_earth_shock_and_a_ready_shock")(r"""
-boot({})
-mount("lower")
-check(not kickOn(), "no cast, no tag")
-startCast(false)
-check(kickOn(), "a kickable cast with Earth Shock ready shows the tag")
-check(SEC.kick.shown and SEC.kickLabel.text == "KICK", "the word KICK")
-stopCast()
-check(not kickOn(), "the cast ended")
-startCast(true)
-check(not kickOn(), "a cast that cannot be kicked shows nothing")
-stopCast()
-CHANNEL = { name = "Drain Life", notInt = false }
-fire("UNIT_SPELLCAST_CHANNEL_START", "target", "guid", 117)
-check(kickOn(), "a channel counts")
-CHANNEL = nil
-fire("UNIT_SPELLCAST_CHANNEL_STOP", "target", "guid", 117)
-check(not kickOn(), "the channel ended")
-IN_COMBAT = true
-cdSecret(8042)
-cast(8042)
-startCast(false)
-check(not kickOn(), "the shared cooldown is down: no tag")
-tick(7)
-check(kickOn(), "the shock is ready again while the cast goes on: the tag comes up by itself")
-cdReady(8042)
-noDegrade()
-""")
-
-case("the_KICK_tag_needs_earth_shock_itself")(r"""
-boot({ known = false })
-learn("Flame Shock", "Fire Nova")
-mount("lower")
-startCast(false)
-check(not kickOn(), "Flame Shock cannot interrupt: no tag")
-learn("Earth Shock")
-fire("SPELLS_CHANGED")
-check(kickOn(), "Earth Shock learned: the tag shows")
-noDegrade()
-""")
-
-case("a_secret_interruptible_flag_reaches_the_tag_only_through_SetAlphaFromBoolean")(r"""
-boot({})
-IN_COMBAT = true
-mount("lower")
-ENGINE_NOTINT = false
-CAST = { name = SECRET, notInt = SECRET }     -- name and flag both secret in combat
-fire("UNIT_SPELLCAST_START", "target", "guid", 116)
-check(SEC.kick.alphaFlag == SECRET, "the secret flag went to SetAlphaFromBoolean untouched")
-check(kickOn(), "the engine says interruptible: the tag shows")
-ENGINE_NOTINT = true
-fire("UNIT_SPELLCAST_INTERRUPTIBLE", "target", "guid", 116)
-check(not kickOn(), "the engine says not interruptible: the tag is clear")
-cdSecret(8042); cast(8042)
-check(not vis(SEC.kick) or SEC.kick.alpha == 0, "and not ready: nothing")
-noDegrade()
-""")
-
-case("a_client_without_SetAlphaFromBoolean_shows_nothing_for_a_secret_flag_and_still_reads_a_plain_one")(r"""
-boot({ noAlphaFlag = true })
-IN_COMBAT = true
-mount("lower")
-CAST = { name = "Frostbolt", notInt = SECRET }
-fire("UNIT_SPELLCAST_START", "target", "guid", 116)
-check(not kickOn(), "a secret flag cannot be read here: no tag")
-CAST = { name = "Frostbolt", notInt = false }
-fire("UNIT_SPELLCAST_START", "target", "guid", 116)
-check(kickOn(), "a plain flag is read as it is")
-noDegrade()
-""")
-
-case("a_target_change_re_reads_the_cast_a_frame_later")(r"""
-boot({})
-mount("lower")
-check(not kickOn(), "idle")
-CAST = { name = "Frostbolt", notInt = false }
-fire("PLAYER_TARGET_CHANGED")
-flushTimers()
-check(kickOn(), "the new target's cast is read next frame")
-CAST = nil
-fire("PLAYER_TARGET_CHANGED")
-flushTimers()
-check(not kickOn(), "and a target that is not casting clears it")
-noDegrade()
-""")
-
-case("an_event_this_client_refuses_does_not_break_the_module")(r"""
-boot({})
-mount("lower")
-startCast(false)
-check(kickOn(), "the cast events that exist still drive the tag (UNIT_SPELLCAST_NOT_INTERRUPTIBLE is refused by this client)")
-""")
-
 case("OnHide_stops_the_ticker_and_every_view_event_but_the_ledger_stays")(r"""
 boot({})
 IN_COMBAT = true
@@ -714,15 +574,13 @@ Shocks.OnHide(SEC)
 check(onUpdates() == 0, "OnHide clears the ticker")
 check(listeners() == ledgerOnly, "OnHide drops every view event, back to the ledger alone: " .. listeners() .. " vs " .. ledgerOnly)
 local calls = CD_CALLS
-fire("SPELL_UPDATE_COOLDOWN"); fire("PLAYER_TARGET_CHANGED"); startCast(false); tick(2); flushTimers()
+fire("SPELL_UPDATE_COOLDOWN"); fire("SPELL_UPDATE_USABLE"); tick(2)
 check(CD_CALLS == calls, "nothing reads a cooldown while hidden")
 cast(8042)                                    -- a shock cast while hidden: only the ledger records it
 check(CD_CALLS == calls, "the ledger records without reading the client")
-CAST = nil
 Shocks.OnShow(SEC)
 check(onUpdates() >= 1, "OnShow starts ticking again from a re-read")
 check(SEC.label.text == "~6s" or SEC.label.text == "~5.9s", "the cast made while hidden is in the ledger, got " .. tostring(SEC.label.text))
-check(not kickOn(), "and the tag re-reads the (now empty) cast")
 noDegrade()
 """)
 
@@ -789,19 +647,6 @@ check(SEC.novaText.points[1][1] == "LEFT", "NOVA is left anchored")
 local cx, cy = imgCenter(SEC.novaText)
 near(cx, R.x + MU.NOVA_X - 1213, "NOVA x", 0.05)
 near(cy, R.y + fy + MU.NOVA_BASE - CAP * MU.NOVA_SIZE, "NOVA y", 0.1)
-noDegrade()
-""")
-
-case("the_KICK_tag_rides_the_target_boxs_top_right_corner_like_the_tape_tag")(r"""
-boot({})
-mount("lower")
-local l, t, w, h = imgRect(FS.Gunsight.anchors.boxR)
-local grow = 0
-nearRect(SEC.kick, l + w - 40, t - 8 - grow, MU.KICK_W, 15, "KICK tag")
-check(SEC.kick.points[1][2] == FS.Gunsight.anchors.boxR, "anchored to the boxR anchor")
-SEC.kick.points = {}
-Shocks.Seat(SEC, RECTS.upper, 1.28)
-nearRect(SEC.kick, l + w - 40, t - 8 - grow, MU.KICK_W, 15, "KICK tag after a move to the upper area")
 noDegrade()
 """)
 
@@ -884,6 +729,8 @@ def static_checks() -> list[tuple[str, str | None]]:
     out.append(("no_em_or_en_dashes", None if not re.search("[–—]", src) else "GunsightShamanShocks.lua has an em or en dash"))
     code = "\n".join(re.sub(r"--.*$", "", ln) for ln in src.splitlines())
     out.append(("player_text_never_says_tape", None if not re.search(r"\"[^\"]*\btape\b[^\"]*\"", code, re.I) else "player text says tape"))
+    out.append(("draws_no_kick_tag_and_reads_no_target_cast", None if not re.search(r"\"KICK\"|UnitCastingInfo|UnitChannelInfo|SetAlphaFromBoolean", code)
+                else "KICK comes from GunsightTape.lua: this file draws no tag and reads no target cast"))
     out.append(("never_touches_a_secure_template", None if "SecureActionButtonTemplate" not in src and "SecureUnitButtonTemplate" not in src
                 else "a secure template under a host would make it protected"))
     out.append(("never_parents_to_uiparent_or_the_root", None if not re.search(r"CreateFrame\([^)]*(UIParent|Gunsight\.root)", src)

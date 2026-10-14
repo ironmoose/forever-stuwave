@@ -1,10 +1,10 @@
--- Forever STUwave: Gunsight Shaman Class Module, lane 2: the SHOCK TRACE, the FIRE NOVA RING and the Earth Shock KICK tag.
+-- Forever STUwave: Gunsight Shaman Class Module, lane 2: the SHOCK TRACE and the FIRE NOVA RING.
 --
 -- The approved design is mockups/gunsight-class-module-shaman-2026-10-08.html, Concept A "Totem Poles", poleMod(): the ground the
 -- totem poles stand on is also the shock gauge. A zigzag trace under the ground line charges left to right as the shared Earth /
 -- Flame / Frost Shock cooldown runs, and a bolt at its end lights (RDY) when a shock can be cast; a cyan ring around the Fire
--- totem's head says Fire Nova is ready, with a NOVA tag in the footer; and the pink KICK tag on the target box says "Earth Shock
--- now" while the target casts. GunsightShaman.lua owns the module frame and the totem poles and calls this file:
+-- totem's head says Fire Nova is ready, with a NOVA tag in the footer. There is no Earth Shock KICK tag here: KICK comes
+-- from GunsightTape.lua's class neutral tag on the target box. GunsightShaman.lua owns the module frame and the totem poles and calls this file:
 --
 --   FS.GunsightShamanShocks = { Build(frame) -> section, Seat(section, rect, scale), OnShow(section), OnHide(section) }
 --
@@ -26,26 +26,16 @@
 -- ahead; a cast the ledger never saw reads ready (it fails toward suggesting the spell). A secret isActive is UNKNOWN: "?", no
 -- charge, never a guess. The trace's own fill is the ENGINE's: C_Spell.GetSpellCooldownDuration -> StatusBar:SetTimerDuration
 -- takes the (secret-bearing) duration object in combat and draws the crop; without that API the fill is a plain number from the
--- same plain or estimated timing. No secret is ever compared or computed on: it is only handed to SetTimerDuration and
--- SetAlphaFromBoolean.
+-- same plain or estimated timing. No secret is ever compared or computed on: it is only handed to SetTimerDuration.
 --
 -- FIRE NOVA. Ring and tag need the spell in the book (resolved by name, ids as a fallback, IsPlayerSpell and its siblings), then
 -- the same cooldown reading with a 10 s ledger. The ring shows while it is ready and the Fire totem stands; the footer tag
 -- (a dashed pip and NOVA) stays while the totem stands, cyan when ready and muted when not. It cannot know whether an enemy is
 -- within 10 yd of the totem: the ring is advice, not a guarantee.
 --
--- KICK. The tag shows only with a cast or channel on the target, Earth Shock in the book and the shared cooldown ready. Whether
--- the cast can be kicked is UnitCastingInfo's notInterruptible: possibly secret in combat, so it reaches the tag only through
--- Frame:SetAlphaFromBoolean (secret flag: tag alpha 0 when it cannot be kicked); a plain flag is read as it is; a client
--- without SetAlphaFromBoolean shows nothing for a secret flag. It sits where GunsightTape.lua's class neutral KICK tag sits
--- (the target box's top right corner, same size and chrome), so on a Shaman the two coincide: the tape's tag says "the cast can
--- be kicked", this one only while Earth Shock is also ready.
---
 -- EVENTS AND TICKER. The cast ledger listens from Build on and stays on through OnHide (it only records). Everything else
--- listens from OnShow to OnHide: SPELL_UPDATE_COOLDOWN and SPELL_UPDATE_USABLE, the spellbook events, PLAYER_REGEN_*, the
--- target's cast events and PLAYER_TARGET_CHANGED (the target's cast is read once more a frame later, since onShow and the target
--- change dispatch before UnitCastingInfo reflects the new target). One OnUpdate (a tenth of a second) runs only while a shock
--- or Fire Nova counts down, and stops itself. The per frame path allocates nothing on the addon side: the time strings come
+-- listens from OnShow to OnHide: SPELL_UPDATE_COOLDOWN and SPELL_UPDATE_USABLE, the spellbook events and PLAYER_REGEN_*. Nothing
+-- here reads the target. One OnUpdate (a tenth of a second) runs only while a shock or Fire Nova counts down, and stops itself. The per frame path allocates nothing on the addon side: the time strings come
 -- from tables built at load and a text or colour is written only when it changes. Plain frames only, nothing secure.
 
 local _, FS = ...
@@ -77,7 +67,6 @@ local C = {
     FOOT_DY = 22, PIP_X = 11, PIP_DY = 7, PIP = 10,     -- fy = gy + 22; the pip centred at (1224, fy + 7), 10 px canvas
     NOVA_X = 19, NOVA_BASE = 11, NOVA_SIZE = 10,        -- txt(1232, fy + 11, 'NOVA', 10)
     OFF_PIP_A = 0.8, OFF_TEXT_A = 0.75,                 -- the not ready tag: muted, .8 and .75
-    KICK_W = 36, KICK_H = 15, KICK_DX = 40, KICK_DY = 8, KICK_TEXT = 11, KICK_FILL_A = 0.95,   -- GunsightTape.lua's KICK tag, off boxR
     SHOCK_CD = 6, NOVA_CD = 10, GCD_WINDOW = 1.6,       -- seconds: the shared shock cooldown, Fire Nova's, the longest global cooldown
     TICK = 0.1,                                         -- the ticker's period
     -- Mononoki Bold: the line box's middle sits 325 / 1024 of the size above the baseline (GunsightSeals.lua's CAP)
@@ -137,10 +126,6 @@ local function PlainOf(v, kind)
     if IsSecret(v) then return nil end
     if type(v) == kind then return v end
     return nil
-end
-
-local function Present(v)
-    return IsSecret(v) or v ~= nil
 end
 
 local function SpellIdByName(name)
@@ -347,40 +332,6 @@ local function At(s, region, anchor, x, y)
     Point(region, anchor, s.ox + x, s.oy + y)
 end
 
--- The KICK tag: a chamfered plate, a pink stroke and the word (GunsightTape.lua's BuildKick, on this module's frame).
-local function BuildKick(s, parent)
-    local Theme = FS.Theme
-    local kick = CreateFrame("Frame", nil, parent)
-    kick:EnableMouse(false)
-    local bg = s.colors.scrim
-    Theme.AddCut2Texture(kick, Theme.SLICE_CUT2_FILL_TEXTURE, { bg[1], bg[2], bg[3], C.KICK_FILL_A }, "BACKGROUND", 0)
-    Theme.AddCut2Texture(kick, Theme.SLICE_CUT2_OUTLINE_TEXTURE, s.colors.pink, "BORDER")
-    local label = kick:CreateFontString(nil, "OVERLAY")
-    Theme.ApplyMono(label, 6, s.colors.pink)           -- a font first: SetText on a FontString with none throws
-    label:SetPoint("CENTER", kick, "CENTER", 0, 0)
-    label:SetText("KICK")
-    kick:SetFrameLevel(parent:GetFrameLevel() + 6)
-    kick:Hide()
-    kick.fsOn = false
-    s.kick, s.kickLabel = kick, label
-end
-
--- GunsightTape.lua's rule: the tag rides the target box's top right corner, up by the box's own growth.
-local function SeatKick(s)
-    local kick = s.kick
-    local anchor = Gunsight.anchors and Gunsight.anchors.boxR
-    if not (kick and anchor) then return end
-    local grow = 0
-    local cast = FS.GunsightTape
-    local box = cast and cast.tgt and cast.tgt.box
-    if type(box) == "table" and type(box.grow) == "number" then grow = box.grow end
-    local k = ui(1)
-    kick:ClearAllPoints()
-    kick:SetPoint("TOPLEFT", anchor, "TOPRIGHT", -C.KICK_DX * k, (C.KICK_DY + grow) * k)
-    kick:SetSize(C.KICK_W * k, C.KICK_H * k)
-    FS.Theme.ApplyMono(s.kickLabel, math.max(6, floor(ui(C.KICK_TEXT) + 0.5)), s.colors.pink)
-end
-
 -------------------------------------------------------------------------------
 -- Painting (each write only on a change)
 -------------------------------------------------------------------------------
@@ -475,39 +426,6 @@ local function PaintNova(s)
     end
 end
 
--- The target's cast: present (a cast or a channel), and its notInterruptible flag (plain, secret or nil)
-local function ReadTargetCast()
-    if type(UnitCastingInfo) == "function" then
-        local ok, name, _, _, _, _, _, _, notInt = pcall(UnitCastingInfo, "target")
-        if ok and Present(name) then return true, notInt end
-    end
-    if type(UnitChannelInfo) == "function" then
-        local ok, name, _, _, _, _, notInt = pcall(UnitChannelInfo, "target")
-        if ok and Present(name) then return true, notInt end
-    end
-    return false
-end
-
-local function EvalKick(s)
-    local kick = s.kick
-    if not kick then return end
-    local want, flag = false, nil
-    if s.earthKnown and s.shock.mode == "ready" then want, flag = ReadTargetCast() end
-    local on = false
-    if want then
-        if IsSecret(flag) then
-            if kick.SetAlphaFromBoolean then
-                kick:SetAlphaFromBoolean(flag, 0, 1)          -- true = cannot be kicked: clear
-                on = true
-            end
-        elseif type(flag) == "boolean" and not flag then
-            kick:SetAlpha(1)
-            on = true
-        end
-    end
-    SetOn(kick, on)
-end
-
 -------------------------------------------------------------------------------
 -- The live layer
 -------------------------------------------------------------------------------
@@ -520,10 +438,6 @@ local function Refresh(s, now, restart)
     ReadGroup(s.nova, now)
     PaintShock(s, restart)
     PaintNova(s)
-    if s.kickMode ~= s.shock.mode then
-        s.kickMode = s.shock.mode
-        EvalKick(s)
-    end
     Sync(s)
 end
 
@@ -559,23 +473,12 @@ end
 local function ResolveAll(s)
     ResolveGroup(s.shock)
     ResolveGroup(s.nova)
-    s.earthKnown = s.shock.members[1].known == true
 end
 
 local function Reread(s, restart)
     if not s.live then return end
     local ok, err = pcall(Refresh, s, nil, restart)
     if not ok then LogOnce("refresh", "refresh failed: " .. tostring(err)) end
-end
-
--- onShow and a target change dispatch before UnitCastingInfo reflects the new target: read the cast once more a frame later
-local function RereadCastNextFrame(s)
-    if s.castQueued or not (C_Timer and C_Timer.After) then return end
-    s.castQueued = true
-    C_Timer.After(0, function()
-        s.castQueued = false
-        if s.live then pcall(EvalKick, s) end
-    end)
 end
 
 local BOOK_EVENTS = { SPELLS_CHANGED = true, LEARNED_SPELL_IN_TAB = true, PLAYER_LEVEL_UP = true }
@@ -585,14 +488,9 @@ local function OnViewEvent(s, event)
     if not s.live then return end
     if BOOK_EVENTS[event] then
         ResolveAll(s)
-        s.kickMode = nil
         Reread(s, true)
     elseif COOLDOWN_EVENTS[event] then
         Reread(s, true)
-    else
-        local ok, err = pcall(EvalKick, s)
-        if not ok then LogOnce("kick", "kick failed: " .. tostring(err)) end
-        if event == "PLAYER_TARGET_CHANGED" then RereadCastNextFrame(s) end
     end
 end
 
@@ -614,16 +512,8 @@ end
 
 local VIEW_EVENTS = {
     "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_USABLE", "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP",
-    "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "PLAYER_TARGET_CHANGED",
+    "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED",
 }
-local TARGET_EVENTS = {
-    "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED", "UNIT_SPELLCAST_DELAYED",
-    "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_CHANNEL_STOP", "UNIT_SPELLCAST_CHANNEL_UPDATE",
-    "UNIT_SPELLCAST_INTERRUPTIBLE", "UNIT_SPELLCAST_NOT_INTERRUPTIBLE",
-}
-
--- The two flag events only refine a cast the other cast events already announce: a client without them is not worth a chat line
-local OPTIONAL_EVENTS = { UNIT_SPELLCAST_INTERRUPTIBLE = true, UNIT_SPELLCAST_NOT_INTERRUPTIBLE = true }
 
 -- A client refuses an event it does not know: each registration is its own pcall, and a refusal is logged once
 local function SetViewEvents(s, on)
@@ -632,14 +522,6 @@ local function SetViewEvents(s, on)
         if on then
             local ok, err = pcall(ev.RegisterEvent, ev, e)
             if not ok then LogOnce("event_" .. e, e .. " cannot be registered on this client (" .. tostring(err) .. ")") end
-        else
-            pcall(ev.UnregisterEvent, ev, e)
-        end
-    end
-    for _, e in ipairs(TARGET_EVENTS) do
-        if on then
-            local ok, err = pcall(ev.RegisterUnitEvent, ev, e, "target")
-            if not ok and not OPTIONAL_EVENTS[e] then LogOnce("event_" .. e, e .. " cannot be registered on this client (" .. tostring(err) .. ")") end
         else
             pcall(ev.UnregisterEvent, ev, e)
         end
@@ -664,7 +546,7 @@ local function BuildSection(frame)
     local s = { ox = 0, oy = 0, live = false, ticking = false, lastTick = 0, groups = NewGroups(), fireUp = nil, fireY = C.FIRE_Y }
     s.shock, s.nova = s.groups.shock, s.groups.nova
     s.colors = {
-        cyan = Tok("COLOR_POWER", { 0.133, 0.878, 1, 1 }), pink = Tok("COLOR_HEALTH", { 1, 0.180, 0.592, 1 }),
+        cyan = Tok("COLOR_POWER", { 0.133, 0.878, 1, 1 }),
         muted = Tok("COLOR_MUTED", { 0.6157, 0.5765, 0.7686, 1 }), white = Tok("COLOR_TEXT_WHITE", { 1, 1, 1, 1 }),
         violet = Tok("COLOR_BORDER", { 0.659, 0.333, 0.969, 1 }), scrim = Tok("COLOR_HUD_SCRIM", { 0.051, 0.024, 0.125, 1 }),
     }
@@ -706,12 +588,6 @@ local function BuildSection(frame)
     s.pip = NewTex(holder, "ARTWORK", 5, "nova_pip.tga")
     s.novaText = NewText(holder, C.NOVA_SIZE, "LEFT", K.cyan)
     SetLabel(s.novaText, "NOVA")
-
-    local ok, err = pcall(BuildKick, s, holder)
-    if not ok then
-        LogOnce("kickbuild", "the KICK tag did not build (" .. tostring(err) .. ")")
-        s.kick, s.kickLabel = nil, nil
-    end
 
     -- the view events (off until OnShow) and the player's cast ledger (on from here)
     local ev = CreateFrame("Frame", nil, holder)
@@ -768,7 +644,6 @@ local function SeatSection(s, rect)
     s.pip:SetSize(C.PIP * k, C.PIP * k)
     SeatFont(s.novaText, C.NOVA_SIZE, s.colors.cyan)
     At(s, s.novaText, "LEFT", C.NOVA_X, fy + C.NOVA_BASE - C.CAP * C.NOVA_SIZE)
-    SeatKick(s)
 end
 
 local Shocks = {}
@@ -792,10 +667,9 @@ function Shocks.OnShow(s)
     if type(s) ~= "table" or not s.built then return end
     s.live = true
     ResolveAll(s)
-    s.shockMode, s.kickMode = nil, nil
+    s.shockMode = nil
     SetViewEvents(s, true)
     Reread(s, true)
-    RereadCastNextFrame(s)
 end
 
 function Shocks.OnHide(s)
@@ -806,5 +680,4 @@ function Shocks.OnHide(s)
         s.ticking = false
         s.holder:SetScript("OnUpdate", nil)
     end
-    if s.kick then SetOn(s.kick, false) end
 end
