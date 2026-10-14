@@ -1300,6 +1300,27 @@ def check_tile_fonts_are_the_design_size_at_every_scale_and_after_a_rescale():
     assert font_sizes(lua, SHIELD)[0] == 11.0
 
 
+def check_the_missing_imbue_word_stays_at_the_full_size_where_it_fits_and_only_shield_starts_small():
+    # the mockup drops only SHIELD to 9 (`m==='warn'&&k==='shield'?9:11`): IMBUE is 11 where it fits, fitted below that
+    lua = world(1.0, tips={16: ["Heavy Axe"]})
+    assert btn(lua, IMBUE).fsText._text == "IMBUE"
+    assert font_sizes(lua, IMBUE)[0] == 11.0, font_sizes(lua, IMBUE)
+    lua = world(0.8333, tips={16: ["Heavy Axe"]})
+    size = font_sizes(lua, IMBUE)[0]
+    assert size < 11.0, "the word IMBUE must still shrink at Parker's live scale, where 11 px overflows the tile"
+    assert_tile_text_fits(lua, IMBUE, 0.8333, "imbue missing at 0.8333")
+
+
+def check_a_fitted_tile_string_never_goes_below_six_pixels():
+    lua = world(0.25, tips={16: ["Heavy Axe"]})
+    run(lua, "__noshield()")
+    fire(lua, "UNIT_AURA", "player")
+    update(lua)
+    assert btn(lua, SHIELD).fsText._text == "SHIELD"
+    assert font_sizes(lua, IMBUE)[0] == 6.0, font_sizes(lua, IMBUE)
+    assert font_sizes(lua, SHIELD)[0] == 6.0, font_sizes(lua, SHIELD)
+
+
 def counting(lua):
     run(lua, "__changes = 0; FS.ShamanBuffs.OnChange(function() __changes = __changes + 1 end)")
     return lambda: int(g(lua).__changes)
@@ -1810,6 +1831,8 @@ CHECKS = [
     check_a_two_handed_weapon_without_an_imbue_asks_for_one,
     check_the_tooltip_is_never_read_in_combat_and_the_clock_counts_down_from_the_last_read,
     check_tile_fonts_are_the_design_size_at_every_scale_and_after_a_rescale,
+    check_the_missing_imbue_word_stays_at_the_full_size_where_it_fits_and_only_shield_starts_small,
+    check_a_fitted_tile_string_never_goes_below_six_pixels,
     check_an_irrelevant_cast_is_a_no_op_and_an_unknown_id_with_the_shield_name_is_ignored,
     check_leaving_combat_keeps_the_shield_an_estimate_until_the_next_tick_reads_the_snapshot,
     check_a_tooltip_read_that_contradicts_a_fresh_cast_waits_for_the_grace,

@@ -57,7 +57,8 @@ local BT = {
     BESIDE = 16,                    -- design px between the totem tab and this one with the Console off
     LOCKED_ALPHA = 0.4,
     CHIP_W = 22, CHIP_H = 15, CHIP_TOP = 5, CHIP_C = 3, GLOW_PAD = 3,
-    CODE_PX = 10, TEXT_PX = 11, WORD_PX = 9,
+    CODE_PX = 10, TEXT_PX = 11, WORD_PX = 9,    -- WORD_PX: the missing word of SHIELD only (the mockup's `m==='warn'&&k==='shield'?9:11`)
+    MIN_PX = 6,                     -- FitPx never goes below this, however small the UI scale
     TEXT_INSET = 3,                 -- design px kept clear on each side of the time or word (the cut border's chamfer)
     ADVANCE = 0.5615,               -- Mononoki Bold's advance per em (every glyph; the font is monospaced)
     TEXT_Y = 27,                    -- the time line's centre, design px below the tile top
@@ -395,13 +396,13 @@ end
 
 -- The font size for `text`: `px`, or smaller so the string stays inside the tile with TEXT_INSET design px clear on
 -- each side. The tile shrinks with the UI scale and fonts do not, so the longest words (SHIELD) are fitted to the
--- current scale; whole and half pixels only (rounded down), and a rescale repaints, which refits.
+-- current scale; whole and half pixels only (rounded down), never below BT.MIN_PX, and a rescale repaints, which refits.
 local function FitPx(text, px)
     local n = type(text) == "string" and #text or 0
     if n == 0 then return px end
     local room = (BT.BTN - 2 * BT.TEXT_INSET) * Scale()
     local fit = math.floor(room / (n * BT.ADVANCE) * 2) / 2
-    return fit < px and fit or px
+    return math.max(math.min(fit, px), BT.MIN_PX)
 end
 
 -- Paints one tile from its view. Writes only when something changed.
@@ -440,7 +441,7 @@ local function PaintButton(button, v)
     r, g, b = Shade(look.code, tint)
     chip.code:SetTextColor(r, g, b, 1)
     chip.code:SetText(v.code or "")
-    local size = FitPx(v.text, v.mode == "warn" and BT.WORD_PX or BT.TEXT_PX)
+    local size = FitPx(v.text, (v.mode == "warn" and button.fsKey == "shield") and BT.WORD_PX or BT.TEXT_PX)
     if button.fsTextPx ~= size then
         button.fsTextPx = size
         FS.Theme.ApplyMono(button.fsText, size, look.text)
