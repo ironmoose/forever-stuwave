@@ -26,7 +26,10 @@ never committed (the mockup used debug/icon-sources-2026-10-14/):
 Usage (read untrusted downloads with -I so nothing in their directory is imported):
 
     uv run python -I tools/assets/synthwave_icons.py --sources debug/icon-sources-2026-10-14 \\
-        --html mockups/synthwave-icons-2026-10-14.html
+        --html debug/synthwave-icons-2026-10-14.html
+
+The preview page embeds the derived art as base64, so it defaults to debug/ (gitignored) and
+must never be committed to the public repository.
 
 Derived art is made from Blizzard's icons: fine for personal use. A public release should
 prefer style D, which ships no copies of Blizzard art.
@@ -87,9 +90,9 @@ FAMILIES = {
 # Per output size: (line width in output px, edge blur in SOURCE px, threshold low, high,
 # glow sigma in output px, glow gain, scanline strength).
 TUNING = {
-    64: dict(line=1.7, esig=1.1, lo=0.20, hi=0.55, glow=3.2, gain=0.85, scan=0.20),
-    32: dict(line=1.35, esig=1.2, lo=0.27, hi=0.62, glow=2.0, gain=0.80, scan=0.13),
-    16: dict(line=1.05, esig=1.3, lo=0.32, hi=0.68, glow=0.9, gain=0.40, scan=0.0),
+    64: dict(line=1.7, esig=1.1, lo=0.20, hi=0.55, glow=3.2, gain=0.85, scan=0.20, dlift=0.5, dglow=0.14),
+    32: dict(line=1.35, esig=1.2, lo=0.27, hi=0.62, glow=2.0, gain=0.80, scan=0.13, dlift=0.6, dglow=0.12),
+    16: dict(line=1.05, esig=1.3, lo=0.32, hi=0.68, glow=0.9, gain=0.40, scan=0.0, dlift=0.7, dglow=0.10),
 }
 # Vertex colour style D multiplies the desaturated icon by, per family.
 D_TINT = {
@@ -97,6 +100,7 @@ D_TINT = {
     "fire": hexrgb("#ff6a3c"), "earth": hexrgb("#a6ff4a"), "frost": hexrgb("#4ad2ff"),
     "air": hexrgb("#9a8cff"), "lightning": CYAN, "water": hexrgb("#3b8bff"),
 }
+DHEAD = 0.88  # style D keeps this much of full white so the ADD glow cannot clip it
 SS = 8  # supersample factor for the work canvas
 
 
@@ -276,19 +280,36 @@ def style_c(src: np.ndarray, out: int, fam: tuple) -> np.ndarray:
     return finish(rgb, out, tune, scan=True)
 
 
+def bilinear(src: np.ndarray, out: int) -> np.ndarray:
+    """Sample src at out x out pixel centres with plain 2x2 bilinear taps and no prefilter.
+
+    That is what the client does when it minifies a texture, so style D aliases a little at 32 and
+    16 px where a Lanczos or box downscale would not. Approximate: the real filter and mip chain
+    depend on the client's texture settings.
+    """
+    n = src.shape[0]
+    u = (np.arange(out) + 0.5) * n / out - 0.5
+    i0 = np.clip(np.floor(u).astype(int), 0, n - 1)
+    i1 = np.clip(i0 + 1, 0, n - 1)
+    f = np.clip(u - np.floor(u), 0, 1)
+    rows = src[i0] * (1 - f)[:, None, None] + src[i1] * f[:, None, None]
+    return rows[:, i0] * (1 - f)[None, :, None] + rows[:, i1] * f[None, :, None]
+
+
 def style_d(src: np.ndarray, out: int, fam: tuple) -> np.ndarray:
-    """What the client can do live: desaturate, vertex colour (multiply), additive glow overlay."""
-    work = out * SS
-    big = resize(src, work, Image.BICUBIC)
-    gray = luma(big)
-    gray = np.clip(gray * 2.0, 0, 1)  # the tint multiplies, so lift first (a second ADD draw of the icon, about 2x)
+    """What the client can do live, and nothing more: SetDesaturated, SetVertexColor (a multiply)
+    and one extra ADD texture (glow_round). Lift is by (1 - gray) so highlights keep their detail,
+    and the glow is low so base plus glow stays under 1 (headroom 1 - DHEAD).
+    """
+    tune = TUNING[out]
+    gray = luma(bilinear(src, out))
+    gray = gray * (1.0 + tune["dlift"] * (1.0 - gray)) * DHEAD
     tint = D_TINT[next(k for k, v in FAMILIES.items() if v is fam)]
     rgb = gray[..., None] * tint
-    yy, xx = np.mgrid[0:work, 0:work]
-    d = np.hypot(xx - (work - 1) / 2, yy - (work - 1) / 2) / (work / 2)
-    glow = (np.clip(1 - d, 0, 1) ** 1.6)[..., None] * tint * 0.26  # an ADD overlay, glow_round style
-    rgb = np.clip(rgb + glow, 0, 1)
-    return finish(rgb, out, TUNING[out], scan=False)
+    yy, xx = np.mgrid[0:out, 0:out]
+    d = np.hypot(xx - (out - 1) / 2, yy - (out - 1) / 2) / (out / 2)
+    glow = (np.clip(1 - d, 0, 1) ** 1.6)[..., None] * tint * tune["dglow"]  # glow_round, ADD blend
+    return np.clip(rgb + glow, 0, 1)
 
 
 def finish(rgb: np.ndarray, out: int, tune: dict, scan: bool = False) -> np.ndarray:
@@ -344,7 +365,6 @@ MICRO_FAMILIES = ["house_cyan", "house_violet", "house_pink"]  # the deck's acce
 
 
 def load_any(root: Path, rel: str) -> np.ndarray:
-    sub = rel.startswith("~")
     path = root / rel.lstrip("~")
     if not path.exists():
         raise FileNotFoundError(path)
@@ -393,7 +413,8 @@ def current_glyphs() -> dict[str, bytes]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--sources", type=Path, required=True, help="directory holding spells/, micro/, subs/")
-    ap.add_argument("--html", type=Path, help="write the standalone mockup page here")
+    ap.add_argument("--html", type=Path, default=REPO / "debug" / "synthwave-icons-2026-10-14.html",
+                    help="standalone preview page (default is under debug/, which is untracked: it embeds Blizzard art, never commit it)")
     ap.add_argument("--png-dir", type=Path, help="also write every rendered PNG here")
     args = ap.parse_args()
 
@@ -418,6 +439,7 @@ def main() -> int:
             "micro": [dict(r, img={k: enc(v) for k, v in r["img"].items()}) for r in micro],
             "current": {k: enc(v) for k, v in cur.items()},
         }
+        args.html.parent.mkdir(parents=True, exist_ok=True)
         args.html.write_text(build_page(json.dumps(data)), encoding="utf-8")
         print("wrote", args.html, file=sys.stderr)
     return 0

@@ -66,7 +66,7 @@ table.grid td.nm small{display:block;color:var(--muted);font-size:10px;font-weig
 <tr><td class="l">A</td><td class="n">WIREFRAME</td><td class="c">Edge detected thin neon lines (violet weak, pink mid, cyan or element accent strong, white hot core) on a near black violet ground, soft glow.</td><td class="k">Baked .tga per icon and size, plus the regeneration script (tools/assets/synthwave_icons.py).</td></tr>
 <tr><td class="l">B</td><td class="n">GRADIENT MAP</td><td class="c">Luminance mapped onto the STUwave ramp (deep violet, pink, accent), shapes kept, faint scanline.</td><td class="k">Baked .tga per icon and size, same script.</td></tr>
 <tr><td class="l">C</td><td class="n">HYBRID</td><td class="c">B dimmed underneath with A's neon edges on top. The shape from B, the neon from A.</td><td class="k">Baked .tga per icon and size, same script.</td></tr>
-<tr><td class="l">D</td><td class="n">RUNTIME TINT</td><td class="c">No baked art. The real icon, desaturated, vertex colour tinted, with an ADD glow overlay (simulated here as the game can do it live).</td><td class="k">Free for any spell or item, now and later. No art, no script, nothing to bake or keep in sync.</td></tr>
+<tr><td class="l">D</td><td class="n">RUNTIME TINT</td><td class="c">No baked art. The real icon, desaturated, vertex colour tinted, with an ADD glow overlay (simulated here with only what the client can do live: desaturate, vertex colour, one ADD texture; approximate, the client minifies bilinear).</td><td class="k">Free for any spell or item, now and later. No art, no script, nothing to bake or keep in sync.</td></tr>
 </table>
 <p class="legal">The derived art is made from Blizzard's icons: fine for personal use. If the addon is released publicly, style D avoids shipping copies of Blizzard art.</p>
 
@@ -81,7 +81,7 @@ table.grid td.nm small{display:block;color:var(--muted);font-size:10px;font-weig
 <p class="cap">Source is the classic micro button art, cropped out of its frame (32x64 BLP, the glyph is only about 22x29 px, so it is soft when upscaled). Cells show <b>64</b>, <b>32</b> and the real <b>16 px</b>. First column is today's hand drawn glyph for comparison. A dagger marks a stand in icon: the classic art for Character is a runtime portrait, and Professions, Guild and PvP have no classic micro art, so a nearby Blizzard icon was used just to judge the style. Legacy and Housing are not shown (no source art).</p>
 <div id="microGrid"></div>
 
-<div class="rowlab">IN CONTEXT <i></i>MICRO MENU BAR<small>34x26 slanted keys, 16 px glyph, accent edge cycling cyan, violet, pink like the deck. Real size, then 3x.</small></div>
+<div class="rowlab">IN CONTEXT <i></i>MICRO MENU BAR<small>34x26 slanted keys, 16 px glyph, idle look from MicroBars.lua (edge alpha .35, soft LED at .6, glyph multiplied by the live #cfc4ef tint) with the accent cycling cyan, violet, pink. Real size, then 3x.</small></div>
 <div id="deckStrips"></div>
 <p class="note">Reading it at 16 px: <b>B</b> keeps the silhouettes best, <b>A</b> is the most neon but loses small detail, <b>C</b> sits between, and <b>D</b> is the cheapest but dim on dark sources. The slanted key plate is drawn from cell_slant geometry (lean 34% of the width). The classic art carries its own square dark backdrop, which shows inside the slanted key; a bake would mask it to the glyph.</p>
 
@@ -147,15 +147,19 @@ function tileSvg(row,k,z){
 
 // ---- micro menu bar ---------------------------------------------------------
 var ACC=['#22e0ff','#7C3AED','#ff2e97'];
-function keySvg(img,i,z,gsize){
+var TINTF='<filter id="gt" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0.812 0 0 0 0  0 0.769 0 0 0  0 0 0.937 0 0  0 0 0 1 0"/></filter>'+
+  '<filter id="led" x="-40%" y="-200%" width="180%" height="500%"><feGaussianBlur stdDeviation="0.9"/></filter>';
+// idle key, as MicroBars.lua ComputeVisual draws it: edge alpha .35, glyph multiplied by GLYPH_NORMAL #cfc4ef,
+// LED a 20x5 soft glow (deck_led.tga, core about 15x2.5) at alpha .6
+function keySvg(img,i,z,tint){
   var W=34,H=26,L=Math.round(W*0.34);
   var pts=[[L,0],[W,0],[W-L,H],[0,H]].map(function(p){return p.join(',');}).join(' ');
   var a=ACC[i%3];
-  return '<svg xmlns="'+NS+'" width="'+(W*z)+'" height="'+(H*z)+'" viewBox="0 0 '+W+' '+H+'" style="margin-right:'+((3-L)*z)+'px">'+
+  return '<svg xmlns="'+NS+'" width="'+(W*z)+'" height="'+(H*z)+'" viewBox="0 0 '+W+' '+H+'" style="margin-right:'+((3-L)*z)+'px"><defs>'+TINTF+'</defs>'+
     '<polygon points="'+pts+'" fill="#140a24" fill-opacity=".95"/>'+
-    '<polygon points="'+pts+'" fill="none" stroke="'+a+'" stroke-opacity=".8" stroke-width="1"/>'+
-    '<image href="'+img+'" x="'+((W-16)/2)+'" y="'+((H-16)/2)+'" width="16" height="16"/>'+
-    '<rect x="'+(W/2-14)+'" y="'+(H-3)+'" width="20" height="2" fill="'+a+'" fill-opacity=".9"/></svg>';
+    '<polygon points="'+pts+'" fill="none" stroke="'+a+'" stroke-opacity=".35" stroke-width="1"/>'+
+    '<image href="'+img+'" x="'+((W-16)/2)+'" y="'+((H-16)/2)+'" width="16" height="16"'+(tint?' filter="url(#gt)"':'')+'/>'+
+    '<rect x="'+(W/2-4-7.5)+'" y="'+(H-3.75)+'" width="15" height="2.5" rx="1.25" fill="'+a+'" fill-opacity=".6" filter="url(#led)"/></svg>';
 }
 (function(){
   var host=document.getElementById('deckStrips');
@@ -171,7 +175,7 @@ function keySvg(img,i,z,gsize){
         var img;
         if(k=='CURRENT'){var c=DATA.current[r.key]; if(!c)return; img=src(c);}
         else img=src(r.img[k+(z>=3?64:16)]);
-        html+=keySvg(img,i,z);
+        html+=keySvg(img,i,z,k!='CURRENT');
       });
       d.innerHTML=html;w.appendChild(d);host.appendChild(w);
     });

@@ -12,3 +12,6 @@ dist/
 .uv/
 .coverage
 htmlcov/
+
+# local previews and downloaded sources (they embed or hold Blizzard art)
+debug/
