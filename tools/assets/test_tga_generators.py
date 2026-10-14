@@ -39,12 +39,11 @@ TGA_HEADER_SIZE = 18
 #     slice_button, slice_border, slice_glow).
 EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     "anti_corner": (64, 64),
-    # generate_icon_style.py: the runtime icon style's nine 8x8 colour ramps and the two 64x64 key covers.
+    # generate_icon_style.py: the runtime icon style's nine 8x8 colour ramps and the one 128x128 key cover.
     "icon_style": {
         **{f"iconramp_{family}": (8, 8) for family in (
             "house_cyan", "house_violet", "house_pink", "fire", "earth", "frost", "air", "lightning", "water")},
-        "iconcover_a": (64, 64),
-        "iconcover_b": (64, 64),
+        "iconcover_key": (128, 128),
     },
     "border_corner": (64, 64),
     "border_rail": (4, 128),
@@ -2046,34 +2045,48 @@ def test_icon_ramp_runs_from_the_hot_colour_to_the_mid_colour(icon_style_outputs
 
 
 def test_icon_cover_is_clear_inside_the_key_and_solid_outside_it(icon_style_outputs: Path) -> None:
-    for key in "ab":
-        path = icon_style_outputs / f"iconcover_{key}.tga"
-        alpha = lambda x, y: _pixel(path, x, y)[3]  # noqa: E731
-        # the middle of the key is the icon's: nothing over it
-        assert alpha(32, 32) == 0, key
-        # the slanted key leaves the top left and the bottom right of the rectangle uncovered by the plate: solid there
-        assert alpha(1, 2) == 255 and alpha(62, 61) == 255, key
-        # the top right and the bottom left corners of the rectangle are inside the key (it leans /): clear
-        assert alpha(55, 12) <= 8 and alpha(8, 51) <= 8, (key, alpha(55, 12), alpha(8, 51))
+    path = icon_style_outputs / "iconcover_key.tga"
+    alpha = lambda x, y: _pixel(path, x, y)[3]  # noqa: E731
+    # the cover spans the whole key box; the middle of the key is the icon's: nothing over it
+    assert alpha(64, 64) == 0
+    # the key leans /: its top left and bottom right wedges are outside the shape, solid there
+    assert alpha(3, 4) == 255 and alpha(124, 123) == 255 and alpha(10, 20) == 255 and alpha(117, 108) == 255
+    # the top right and the bottom left corners of the box are inside the key: clear (this is what a mirrored cover gets wrong)
+    assert alpha(104, 30) <= 8 and alpha(30, 98) <= 8 and alpha(100, 20) <= 8 and alpha(22, 108) <= 8, (
+        alpha(104, 30), alpha(30, 98), alpha(100, 20), alpha(22, 108))
+
+
+def test_icon_rectangle_is_the_bounding_box_of_the_keys_inside(icon_style_outputs: Path) -> None:
+    """The icon is a rectangle over key columns COVER_RECTS["key"]; no part of the key's inside may lie outside it (that would
+    be an uncovered plate wedge) and the rectangle may not be wider than the inside by more than a design px each side."""
+    gen = importlib.util.module_from_spec(importlib.util.spec_from_file_location("gis", ICON_STYLE_GENERATOR))
+    gen.__spec__.loader.exec_module(gen)
+    inside = gen.key_inside(MEDIA_DIR)
+    cols = [x for x in range(inside.shape[1]) if inside[:, x].max() > 0.02]
+    x0, x1 = gen.COVER_RECTS["key"]
+    assert x0 * gen.SCALE <= cols[0] and (cols[-1] + 1) <= x1 * gen.SCALE, (cols[0] / gen.SCALE, (cols[-1] + 1) / gen.SCALE, x0, x1)
+    assert cols[0] - x0 * gen.SCALE < gen.SCALE and x1 * gen.SCALE - (cols[-1] + 1) < gen.SCALE
+    # and the slant: the inside leans / (its top row sits right of its bottom row)
+    top, bottom = inside[0:8, :].sum(axis=0), inside[-8:, :].sum(axis=0)
+    centre = lambda v: float((v * range(len(v))).sum() / v.sum())  # noqa: E731
+    assert centre(top) > centre(bottom) + 40, (centre(top), centre(bottom))
 
 
 def test_icon_cover_is_symmetric_under_a_half_turn(icon_style_outputs: Path) -> None:
-    # the key is a parallelogram and both rectangles are centred on it
-    for key in "ab":
-        path = icon_style_outputs / f"iconcover_{key}.tga"
-        worst = max(abs(_pixel(path, x, y)[3] - _pixel(path, 63 - x, 63 - y)[3]) for y in range(64) for x in range(64))
-        assert worst <= 40, (key, worst)
+    # the key is a parallelogram and the box is its bounding box
+    path = icon_style_outputs / "iconcover_key.tga"
+    worst = max(abs(_pixel(path, x, y)[3] - _pixel(path, 127 - x, 127 - y)[3]) for y in range(128) for x in range(128))
+    assert worst <= 40, worst
 
 
 def test_icon_cover_is_the_plate_colour_everywhere(icon_style_outputs: Path) -> None:
-    for key in "ab":
-        path = icon_style_outputs / f"iconcover_{key}.tga"
-        assert {_pixel(path, x, y)[:3] for x in range(0, 64, 7) for y in range(0, 64, 7)} == {(0x0D, 0x06, 0x20)}
+    path = icon_style_outputs / "iconcover_key.tga"
+    assert {_pixel(path, x, y)[:3] for x in range(0, 128, 7) for y in range(0, 128, 7)} == {(0x0D, 0x06, 0x20)}
 
 
 def test_committed_ramps_and_covers_match_their_generator(icon_style_outputs: Path) -> None:
     outs = sorted(icon_style_outputs.glob("*.tga"))
-    assert len(outs) == 11
+    assert len(outs) == 10
     for out in outs:
         assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
 

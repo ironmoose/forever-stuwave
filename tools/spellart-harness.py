@@ -120,6 +120,21 @@ function hooksecurefunc(obj, name, fn)
     local orig = obj[name]
     obj[name] = function(...) local r = { orig(...) }; fn(...); return unpack(r) end
 end
+IN_COMBAT = false
+function InCombatLockdown() return IN_COMBAT end
+-- Event frames as the client has them: the harness fires PLAYER_REGEN_ENABLED at every frame that registered it.
+EVENT_FRAMES = {}
+function CreateFrame()
+    local f = { events = {} }
+    function f:RegisterEvent(e) self.events[e] = true end
+    function f:SetScript(_, fn) self.script = fn end
+    EVENT_FRAMES[#EVENT_FRAMES + 1] = f
+    return f
+end
+function fire_regen()
+    IN_COMBAT = false
+    for _, f in ipairs(EVENT_FRAMES) do if f.events.PLAYER_REGEN_ENABLED and f.script then f.script(f, "PLAYER_REGEN_ENABLED") end end
+end
 function load_chunk(src, name) return assert(loadstring(src, name))("ForeverSTUwave", FS) end
 """
 
@@ -246,6 +261,21 @@ def check_set_and_repaint() -> None:
           and abs(lift.vertex[4] - 0.5) < 1e-6, f"{boost.vertex} {lift.vertex}")
     lua.eval("function(t) t:SetAlpha(0.4) end")(a)
     check("follow.alpha_reaches_the_boost_and_the_lift", abs(boost.vertex[4] - 0.4) < 1e-6 and abs(lift.vertex[4] - 0.4 * (0.5 + 0.25 + 0.75) / 3) < 1e-6, f"{boost.vertex} {lift.vertex}")
+    check("dim.a_dimmed_tile_loses_its_ramp_and_keeps_the_boost_and_lift", mod.shown is False and (boost.shown is True) == (look[n1].boost >= 0.02) and lift.shown is True,
+          f"{mod.shown} {boost.shown} {lift.shown} {look[n1].boost}")
+    lua.eval("function(t) t:SetVertexColor(1, 1, 1, 1); t:SetAlpha(0.4) end")(a)
+    check("dim.alpha_alone_under_1_drops_the_ramp_the_stance_bar_case", mod.shown is False and lift.shown is True and abs(lift.vertex[4] - 0.4) < 1e-6,
+          f"{mod.shown} {lift.vertex}")
+    lua.eval("function(t) t:SetAlpha(0) end")(a)
+    check("dim.alpha_0_hides_every_overlay", all(o.shown is False for o in (boost, mod, lift)), f"{boost.shown} {mod.shown} {lift.shown}")
+    lua.eval("function(t) t:SetAlpha(1); t:SetVertexColor(1, 0.2, 0.2, 1) end")(a)
+    check("dim.a_warn_red_tile_has_no_ramp_to_multiply_it_black_and_the_boost_and_lift_carry_the_red",
+          mod.shown is False and abs(boost.vertex[1] - look[n1].boost) < 1e-6 and abs(boost.vertex[2] - 0.2 * look[n1].boost) < 1e-6
+          and abs(lift.vertex[4] - (1 + 0.2 + 0.2) / 3) < 1e-6, f"{mod.shown} {boost.vertex} {lift.vertex}")
+    lua.eval("function(t) t:SetVertexColor(1, 1, 1, 1) end")(a)
+    check("dim.a_plain_white_full_alpha_tile_gets_its_ramp_back", mod.shown is True and lift.shown is True, f"{mod.shown}")
+    lua.eval("function(t) t:SetVertexColor(0.99, 0.99, 0.99, 1) end")(a)
+    check("dim.a_nearly_white_tint_still_counts_as_white", mod.shown is True)
     lua.eval("function(t) t:SetAlpha(1); t:SetVertexColor(1, 1, 1, 1) end")(a)
     lua.eval("function(t) t:SetDesaturated(true) end")(a)
     check("follow.a_desaturated_tile_keeps_a_grey_base_and_a_grey_ramp", a.desat is True and mod.desat is True, f"{a.desat} {mod.desat}")
@@ -296,6 +326,59 @@ def check_set_and_repaint() -> None:
     check("set.a_desaturation_asked_for_before_the_first_look_survives", overlays(pre.parent)["mod"].desat is True)
     cfg_set("icons.spellstyle", "stock")
     check("set.and_comes_back_when_the_look_is_released", pre.desat is True)
+
+
+def check_combat() -> None:
+    """The chain is never built in combat (it creates, layers and anchors regions of a tile that may sit on a secure host): a
+    tile that asks for a look then keeps the stock icon and is dressed at PLAYER_REGEN_ENABLED; a chain that exists is only
+    given texture, colour and alpha writes."""
+    lua = world()
+    sa = lua.eval("FS.SpellArt")
+    new_tex, new_parent = lua.globals().NewTex, lua.globals().NewParent
+    cfg_set = lua.eval("FS.Config.Set")
+    by_file = table_items(lua.eval("FS.IconStyleData.spells.byFile"))
+    (f1, _n1), (f2, _n2) = list(by_file.items())[:2]
+    made = lambda p: len(table_items(p.made))  # noqa: E731
+    check("combat.the_spell_art_listens_for_the_end_of_combat", lua.eval("#EVENT_FRAMES") >= 1 and lua.eval("EVENT_FRAMES[1].events.PLAYER_REGEN_ENABLED") is True)
+    pa, pb = new_parent(), new_parent()
+    a, b = new_tex(pa, "ARTWORK", 0), new_tex(pb, "OVERLAY", 7)
+    lua.execute("IN_COMBAT = true")
+    sa.Set(a, f1)
+    sa.Set(b, f1)
+    check("combat.no_chain_is_built_in_combat", made(pa) == 0 and made(pb) == 0, f"{made(pa)} {made(pb)}")
+    check("combat.the_tile_keeps_the_stock_icon_and_is_not_greyed_in_combat", a.tex == f1 and a.desat is not True and b.tex == f1, f"{a.tex} {a.desat}")
+    check("combat.the_base_is_not_re_layered_in_combat", b.sub == 7, f"{b.sub}")
+    cfg_set("icons.spellstyle", "stock")
+    cfg_set("icons.spellstyle", "gradient")
+    check("combat.a_repaint_in_combat_builds_nothing_either", made(pa) == 0 and made(pb) == 0)
+    lua.eval("fire_regen")()
+    check("combat.the_chain_is_built_when_combat_ends", made(pa) == 3 and made(pb) == 3 and a.desat is True, f"{made(pa)} {made(pb)} {a.desat}")
+    check("combat.and_the_top_sublevel_tile_is_lowered_then", b.sub + 3 <= 7, f"{b.sub}")
+    mod = overlays(pa)["mod"]
+    check("combat.the_built_chain_is_dressed", mod.shown is True and str(mod.tex).endswith(".tga"))
+    # an existing chain still takes texture writes in combat, and no region is made
+    lua.execute("IN_COMBAT = true")
+    sa.Set(a, f2)
+    check("combat.an_existing_chain_follows_a_new_icon_in_combat", a.tex == f2 and made(pa) == 3 and overlays(pa)["boost"].tex == f2, f"{a.tex} {made(pa)}")
+    cfg_set("icons.spellstyle", "stock")
+    check("combat.and_is_released_in_combat", mod.shown is False and a.desat is False)
+    cfg_set("icons.spellstyle", "gradient")
+    check("combat.and_dressed_again_in_combat", mod.shown is True and a.desat is True and made(pa) == 3)
+    # a texture bound in combat that is rebound before combat ends is built once
+    pc = new_parent()
+    c = new_tex(pc, "ARTWORK", 0)
+    sa.Set(c, f1)
+    sa.Set(c, f2)
+    lua.eval("fire_regen")()
+    check("combat.a_deferred_tile_is_built_once_with_its_latest_icon", made(pc) == 3 and c.tex == f2 and overlays(pc)["boost"].tex == f2, f"{made(pc)} {c.tex}")
+    # a tile that stops asking for a look in combat is not built afterwards
+    pd = new_parent()
+    d = new_tex(pd, "ARTWORK", 0)
+    lua.execute("IN_COMBAT = true")
+    sa.Set(d, f1)
+    sa.Set(d, 999999)
+    lua.eval("fire_regen")()
+    check("combat.a_tile_rebound_to_an_unmapped_icon_is_not_built", made(pd) == 0 and d.tex == 999999, f"{made(pd)}")
 
 
 def check_set_never_throws() -> None:
@@ -466,6 +549,7 @@ def main() -> int:
     check_data(lua)
     check_look()
     check_set_and_repaint()
+    check_combat()
     check_set_never_throws()
     check_unmapped_record()
     check_unmapped_database_guards()

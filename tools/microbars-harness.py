@@ -138,6 +138,7 @@ def layout_deck_w() -> int:
 
 MOCK = r"""
 SCALE, IN_COMBAT, NOW = 1, false, 100
+EFFECTIVE_SCALE = 1
 RESCALE, LOGS, ALL, POINTCALLS, ANIMGROUPS = {}, {}, {}, 0, {}
 local noop = function() end
 
@@ -211,6 +212,9 @@ function M:CreateMaskTexture() error("CreateMaskTexture: masks do not clip on th
 function M:SetHorizTile() end
 function M:SetVertTile() end
 function M:SetDesaturated(v) self.desat = v end
+function M:SetSnapToPixelGrid(v) self.snap = v end
+function M:SetTexelSnappingBias(v) self.bias = v end
+function M:GetEffectiveScale() return EFFECTIVE_SCALE end
 function CreateColor(r, g, b, a) return { r, g, b, a } end
 function M:SetGradient(orientation, c1, c2) self.gradient = { orientation, c1, c2 } end
 
@@ -445,11 +449,20 @@ function h_glyphInfo()
                 info.boostTex, info.modTex, info.liftColor = tostring(c.boost.tex), tostring(c.mod.tex), c.lift.color
                 info.boostVertex, info.liftVertex, info.modDesat = c.boost.vertex, c.lift.vertex, c.mod.desat
                 info.boostShown, info.modShown, info.liftShown = c.boost.shown, c.mod.shown, c.lift.shown
-                info.boostAnchor, info.modAnchor, info.liftAnchor = c.boost.allPoints == g, c.mod.allPoints == g, c.lift.allPoints == g
+                info.boostAnchor = c.boost.allPoints == g
+                info.modAnchor, info.liftAnchor = c.mod.allPoints == k.fill, c.lift.allPoints == k.fill
                 info.boostCoords = c.boost.coords
                 info.coverTex, info.coverSub, info.coverLayer = tostring(k.cover.tex), k.cover.sublevel, k.cover.layer
                 info.coverShown = k.cover.shown
                 info.cl, info.cr = k.cover.pts[1][4], -k.cover.pts[2][4]
+                f, fb = k.fill, k.fillBoost
+                info.fillShown, info.fillTex, info.fillCoords, info.fillDesat = f.shown, tostring(f.tex), f.coords, f.desat
+                info.fillVertex, info.fillSub = f.vertex, f.sublevel
+                info.fillBoostShown, info.fillBoostVertex, info.fillBoostSub = fb.shown, fb.vertex, fb.sublevel
+                info.fillBoostBlend, info.fillBoostAnchor, info.fillBoostTex, info.fillBoostDesat = fb.blend, fb.allPoints == f, tostring(fb.tex), fb.desat
+                info.fl, info.fr = f.pts[1][4], -f.pts[2][4]
+                info.snaps = { g.snap, f.snap, fb.snap, k.cover.snap, c.boost.snap, c.mod.snap, c.lift.snap }
+                info.biases = { g.bias, f.bias, fb.bias, k.cover.bias, c.boost.bias, c.mod.bias, c.lift.bias }
             end
         end
         out[i] = info
@@ -524,7 +537,7 @@ function h_glyphCounts()
                     while p and p ~= b do p = p.parent end
                     if p == b then
                         n = n + 1
-                        local same = o == k.glyph or o.allPoints == k.glyph
+                        local same = o == k.glyph or o.allPoints == k.glyph or (k.fill ~= nil and (o == k.fill or o.allPoints == k.fill))
                         if not same then strays = strays + 1 end
                     end
                 end
@@ -654,7 +667,8 @@ end
 class World:
     def __init__(self, n: int = 12, scale: float = 1.0, hidden: tuple[int, ...] = (), layout_cfg: bool = True,
                  store: str | None = None, nolayout: bool = False, deck: bool = True, cls: str | None = "SHAMAN",
-                 faction: str | None = "Horde", class_error: bool = False):
+                 faction: str | None = "Horde", class_error: bool = False, pixel_factor: float | None = None,
+                 effective_scale: float = 1.0):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
         self.lua.execute(MOCK)
         g = self.lua.globals()
@@ -664,6 +678,9 @@ class World:
         g.DATA_SRC = (ADDON / "Core" / "IconStyleData.lua").read_text(encoding="utf-8")
         g.STYLE_SRC = (ADDON / "Core" / "IconStyle.lua").read_text(encoding="utf-8")
         g.CLASS_TOKEN, g.FACTION, g.CLASS_ERR = cls, faction, class_error
+        g.EFFECTIVE_SCALE = effective_scale
+        if pixel_factor is not None:
+            self.lua.execute(f"PixelUtil = {{ GetPixelToUIUnitFactor = function() return {pixel_factor} end }}")
         g.SCALE = scale
         g.COLOR_POWER = self.lua.table_from(list(theme_color_power()))
         g.COLOR_SCRIM = self.lua.table_from(list(theme_color_scrim()))
@@ -757,7 +774,7 @@ def check_overlay() -> None:
     w = World(12).login()
     check("overlay.no_opaque_rect_under_the_plate", w.call("h_opaqueFills") == 0, f"{w.call('h_opaqueFills')} opaque fills")
     counts = [dict(c.items()) for _, c in w.call("h_glyphCounts").items()]
-    check("overlay.glyph_drawn_once_per_key", all(c["n"] <= 2 and c["strays"] == 0 for c in counts), f"{counts[:2]}")
+    check("overlay.glyph_and_its_copies_and_fill_only_per_key", all(c["n"] <= 4 and c["strays"] == 0 for c in counts), f"{counts[:2]}")
 
 
 def tga_header(path: Path) -> tuple[int, int, int, int, int, int]:
@@ -777,6 +794,7 @@ def spec_dict(spec) -> dict:
     out = {str(k): v for k, v in spec.items()}
     if "coords" in out:
         out["coords"] = [spec.coords[i] for i in (1, 2, 3, 4)]
+    out["fill"] = [spec.fill[i] for i in (1, 2, 3, 4)] if spec.fill is not None else None
     return out
 
 
@@ -794,7 +812,7 @@ def check_glyph_files() -> None:
     stems = sorted({str(v) for _, v in mb.Glyphs.items()} | {str(mb.GlyphGeneric)})
     own = {"character", "legacy"}
     ramps = {str(k) for k, _ in data.ramps.items()}
-    covers = {str(k) for k, _ in data.covers.items()}
+    rects = {str(k) for k, _ in data.rects.items()}
     bad: list[str] = []
     n_runtime = 0
     for stem in stems:
@@ -807,7 +825,9 @@ def check_glyph_files() -> None:
             n_runtime += 1
             c = spec["coords"]
             ok = (isinstance(spec["file"], (int, str)) and all(0 <= v <= 1 for v in c) and c[0] < c[1] and c[2] < c[3]
-                  and spec["cover"] in covers and str(spec["fam"]) in ramps and 0 <= spec["boost"] <= 1)
+                  and spec["rect"] in rects and str(spec["fam"]) in ramps and 0 <= spec["boost"] <= 1
+                  and (spec["rect"] == "k") == (spec.get("fill") is None)
+                  and (spec.get("fill") is None or (all(0 <= v <= 1 for v in spec["fill"]) and spec["fill"][0] < spec["fill"][1] and spec["fill"][2] < spec["fill"][3])))
             if not ok:
                 bad.append(f"{stem}/{faction} {spec}")
     check("glyphs.every_name_and_faction_resolves_to_a_sound_spec", len(stems) >= 18 and "character" in stems and "legacy" in stems
@@ -819,8 +839,9 @@ def check_glyph_files() -> None:
     # all nine classes: the class icon path is the client's own Interface\Icons\ClassIcon_<Class>
     got = {t: spec_dict(mb.GlyphSpec("character", None, t)) for t in CLASS_NAMES}
     check("glyphs.all_nine_classes_wear_their_own_class_icon",
-          all(g["kind"] == "runtime" and g["file"] == f"Interface\\Icons\\ClassIcon_{CLASS_NAMES[t]}" and g["cover"] == "b"
-              and g["coords"] == [0.07, 0.93, 0.07, 0.93] for t, g in got.items()), f"{got}")
+          all(g["kind"] == "runtime" and g["file"] == f"Interface\\Icons\\ClassIcon_{CLASS_NAMES[t]}" and g["rect"] == "k" and g["fill"] is None
+              and g["coords"][:2] == [0.07, 0.93] and near(g["coords"][3] - g["coords"][2], 0.86 * 26 / 30, 1e-3)
+              and near(g["coords"][2] + g["coords"][3], 1.0, 1e-3) for t, g in got.items()), f"{got}")
     check("glyphs.the_nine_class_icons_are_nine_different_files", len({g["file"] for g in got.values()}) == 9)
     fallback = [str(v) for _, v in w.call("h_oddClasses").items()]
     check("glyphs.a_secret_nil_unknown_or_odd_class_token_gets_the_person_glyph_and_is_never_indexed",
@@ -849,11 +870,11 @@ def check_glyph_files() -> None:
     bad = [n for n in baked if tga_header(media / n) != (2, 64, 64, 32, 0x28, 18 + 64 * 64 * 4)]
     check("glyphs.baked_art_is_64x64_bgra_tga_of_exact_size", not bad, f"bad {bad}")
     missing = [str(r.file) for _, r in data.ramps.items() if not (media / str(r.file)).exists()]
-    missing += [str(c.file) for _, c in data.covers.items() if not (media / str(c.file)).exists()]
-    check("glyphs.every_ramp_and_cover_is_shipped", not missing and len(ramps) == 9 and covers == {"a", "b"}, f"{missing}")
+    missing += [str(data.cover.file)] if not (media / str(data.cover.file)).exists() else []
+    check("glyphs.every_ramp_and_the_cover_is_shipped", not missing and len(ramps) == 9 and rects == {"a", "b", "k"}, f"{missing}")
     odd_sizes = [str(r.file) for _, r in data.ramps.items() if tga_header(media / str(r.file))[:4] != (2, 8, 8, 32)]
-    odd_sizes += [str(c.file) for _, c in data.covers.items() if tga_header(media / str(c.file))[:4] != (2, 64, 64, 32)]
-    check("glyphs.ramps_are_8x8_and_covers_64x64_bgra", not odd_sizes, f"{odd_sizes}")
+    odd_sizes += [str(data.cover.file)] if tga_header(media / str(data.cover.file))[:4] != (2, 128, 128, 32) else []
+    check("glyphs.ramps_are_8x8_and_the_cover_128x128_bgra", not odd_sizes, f"{odd_sizes}")
     # The baked keys' alpha IS the key's slanted shape: compare against the shape recomputed from the key's geometry
     # (tools/assets/synthwave_icons.py key_shape_alpha), within one 8 bit step. That pins the fixed crop band (rows 7 to
     # 56 of 64) and also the lean, any horizontal shift and any clipped corner.
@@ -886,67 +907,164 @@ def check_glyph_files() -> None:
     check("glyphs.no_degrade_logs_after_the_file_checks", w.logs() == "", w.logs())
 
 
+def _plate_and_ring(info: dict, px: float):
+    """The key's plate and ring alpha (0..1, rows top to bottom) at `px` screen px per design px, from the real textures."""
+    media = ADDON / "Media" / "Textures"
+    kw, kh = round(info["bw"] * px), round(info["bh"] * px)
+    out = []
+    for name in ("cell_slant.tga", "deck_key_slant_outline.tga"):
+        im = Image.open(media / name).convert("RGBA").getchannel("A")
+        out.append(np.asarray(im.resize((kw, kh), Image.BILINEAR), dtype=float) / 255)
+    return out[0], out[1], kw, kh
+
+
+def _inside(plate, ring, px: float):
+    """True where a pixel is well inside the key: on the plate and clear of the ring's line (the ring draws over the rest)."""
+    kh, kw = plate.shape
+    reach = round(px * 0.5) + 1
+    padded = np.pad(ring, reach, mode="edge")
+    near_ring = np.max([padded[reach + dy:reach + dy + kh, reach + dx:reach + dx + kw]
+                        for dy in range(-reach, reach + 1) for dx in range(-reach, reach + 1)], axis=0)
+    return (plate - near_ring) >= 0.75
+
+
 def check_cover_geometry() -> None:
     """The icon is a plain rectangle and the cover hides what sticks out of the slanted key. At every key count, and at 3 and
-    1 screen px per design px (1 is the live case on a 2560x1440 window, where the 64 texel art is minified to about 34), the
-    cover must hide every texel of the rectangle outside the plate and must stay off the plate's inside (the ring draws over it)."""
+    1 screen px per design px (1 is the live case on a 2560x1440 window, where the 128 texel art is minified to about 34), the
+    cover must hide every texel of the rectangle outside the plate and must stay off the plate's inside (the ring draws over it).
+    The cover texture is compared with the REAL plate and ring, so a cover that leans the wrong way (\\ for /) fails here."""
     media = ADDON / "Media" / "Textures"
-    plate_im = Image.open(media / "cell_slant.tga").convert("RGBA").getchannel("A")
-    ring_im = Image.open(media / "deck_key_slant_outline.tga").convert("RGBA").getchannel("A")
     bad = {}
     for count, px in ((c, k) for c in (12, 14, 16, 18) for k in (3, 1)):
         w = World(count).login()
         for i, info in enumerate((dict(v.items()) for _, v in w.call("h_glyphInfo").items())):
             if info.get("kind") != "runtime":
                 continue
-            kw, kh = round(info["bw"] * px), round(info["bh"] * px)
-            plate = np.asarray(plate_im.resize((kw, kh), Image.BILINEAR), dtype=float) / 255
-            ring = np.asarray(ring_im.resize((kw, kh), Image.BILINEAR), dtype=float) / 255
+            plate, ring, kw, kh = _plate_and_ring(info, px)
             left, right = round(info["cl"] * px), round(info["cr"] * px)
-            tex = media / ("iconcover_a.tga" if "iconcover_a" in info["coverTex"] else "iconcover_b.tga")
-            cover_im = Image.open(tex).convert("RGBA").getchannel("A")
+            cover_im = Image.open(media / "iconcover_key.tga").convert("RGBA").getchannel("A")
             cover = np.asarray(cover_im.resize((kw - left - right, kh), Image.BILINEAR), dtype=float) / 255
             region = slice(left, kw - right)
             outside = 1.0 - plate[:, region]
             leak = float((outside - cover).max())            # outside the plate and not covered: the icon would show there
-            reach = round(px * 0.5) + 1   # the cover reaches 0.5 design px past the ring's line; stay clear of that band
-            padded = np.pad(ring, reach, mode="edge")
-            near_ring = np.max([padded[reach + dy:reach + dy + kh, reach + dx:reach + dx + kw]
-                                for dy in range(-reach, reach + 1) for dx in range(-reach, reach + 1)], axis=0)
-            inner = ((plate - near_ring) >= 0.75)[:, region]
+            inner = _inside(plate, ring, px)[:, region]
             under = float(cover[inner].max()) if inner.any() else 0.0   # the cover over the plate's inside would hide icon
             if leak > 0.08 or under > 0.2:
                 bad[(count, px, i)] = (round(leak, 2), round(under, 2))
     check("cover.hides_everything_outside_the_plate_and_nothing_inside_it_at_every_key_count", not bad, f"{len(bad)} bad, first {list(bad.items())[:3]}")
 
 
+def check_slant_direction() -> None:
+    """The slant is pinned against the key plate: the plate leans / (its top row sits right of its bottom row), the ring the
+    same, and so does the cover's clear area; the cover's SOLID wedges are the top left and the bottom right."""
+    media = ADDON / "Media" / "Textures"
+    w = World(12).login()
+    info = dict(w.call("h_glyphInfo")[1].items())
+    plate, ring, kw, kh = _plate_and_ring(info, 8)
+    centre = lambda a: float((a.sum(axis=0) * np.arange(a.shape[1])).sum() / a.sum())  # noqa: E731
+    top_p, bottom_p = centre(plate[: kh // 8]), centre(plate[-kh // 8:])
+    top_r, bottom_r = centre(ring[: kh // 8]), centre(ring[-kh // 8:])
+    check("slant.the_plate_and_the_ring_lean_slash", top_p > bottom_p + 20 and top_r > bottom_r + 20, f"plate {top_p:.0f}/{bottom_p:.0f} ring {top_r:.0f}/{bottom_r:.0f}")
+    cover = np.asarray(Image.open(media / "iconcover_key.tga").convert("RGBA").getchannel("A"), dtype=float) / 255
+    clear = 1.0 - cover
+    top_c, bottom_c = centre(clear[: len(clear) // 8]), centre(clear[-len(clear) // 8:])
+    check("slant.the_covers_clear_area_leans_the_same_way", top_c > bottom_c + 10, f"{top_c:.0f} {bottom_c:.0f}")
+    n = cover.shape[0]
+    tl, tr, bl, br = (float(cover[:n // 4, :n // 4].mean()), float(cover[:n // 4, -n // 4:].mean()),
+                      float(cover[-n // 4:, :n // 4].mean()), float(cover[-n // 4:, -n // 4:].mean()))
+    check("slant.the_solid_wedges_are_the_top_left_and_the_bottom_right", tl > 0.8 and br > 0.8 and tr < 0.6 and bl < 0.6 and tl - tr > 0.35 and br - bl > 0.35, f"tl {tl:.2f} tr {tr:.2f} bl {bl:.2f} br {br:.2f}")
+    # the cover and the plate line up: where the plate is solid and well inside, the cover is clear, in every corner of the key
+    inner = _inside(plate, ring, 8)
+    cov_at_key = np.asarray(Image.open(media / "iconcover_key.tga").convert("RGBA").getchannel("A").resize(
+        (round(info["cr"] * 0 + (1 - 0) * 0) + round((w.get("FS.IconStyleData.cover.x1") - w.get("FS.IconStyleData.cover.x0")) * kw), kh), Image.BILINEAR), dtype=float) / 255
+    x0 = round(w.get("FS.IconStyleData.cover.x0") * kw)
+    inside_in_cover = inner[:, x0:x0 + cov_at_key.shape[1]]
+    check("slant.the_cover_is_clear_wherever_the_plate_is_well_inside", float(cov_at_key[inside_in_cover].max()) < 0.2)
+
+
+def check_no_empty_wedge() -> None:
+    """Every pixel inside the key's ring is covered by the icon's art: the glyph rectangle, or for a narrow glyph the fill
+    spread over the key's inside (a lean-slash key leaves a wedge at the bottom left and the top right of a narrow rectangle)."""
+    bad = {}
+    seen = set()
+    for count, px in ((c, k) for c in (12, 16) for k in (3, 1)):
+        w = World(count).login()
+        for i, info in enumerate((dict(v.items()) for _, v in w.call("h_glyphInfo").items())):
+            if info.get("kind") != "runtime":
+                continue
+            plate, ring, kw, kh = _plate_and_ring(info, px)
+            inner = _inside(plate, ring, px)
+            art = np.zeros(inner.shape, dtype=bool)
+            gl, gr = round(info["left"] * px), round(info["right"] * px)
+            art[:, gl:kw - gr] = True
+            if info["fillShown"]:
+                fl, fr = round(info["fl"] * px), round(info["fr"] * px)
+                art[:, fl:kw - fr] = True
+            seen.add(count)
+            gap = int((inner & ~art).sum())
+            if gap:
+                bad[(count, px, i)] = gap
+    check("wedge.no_plate_pixel_inside_the_ring_is_left_without_art_at_every_key_count", seen == {12, 16} and not bad, f"{len(bad)} keys, first {list(bad.items())[:3]}")
+    # and the data keeps its promise: a glyph narrower than the key's inside always has a fill, a full one never does
+    w = World(12).login()
+    infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
+    cov = w.get("FS.IconStyleData.cover")
+    rects = w.get("FS.IconStyleData.rects")
+    kinds = []
+    for k, info in zip(w.get("FS.MicroBars.keys").values(), infos):
+        if info["kind"] != "runtime":
+            continue
+        full = abs(rects[str(k.spec.rect)].x0 - cov.x0) < 1e-6 and abs(rects[str(k.spec.rect)].x1 - cov.x1) < 1e-6
+        kinds.append((full, bool(info["fillShown"])))
+    check("wedge.a_narrow_glyph_has_a_fill_and_a_full_one_does_not", kinds and all(f != fill for f, fill in kinds), f"{kinds}")
+    check("wedge.the_keys_include_full_and_narrow_glyphs_so_both_paths_are_pinned", any(f for f, _ in kinds) and any(not f for f, _ in kinds), f"{kinds}")
+
+
 def check_fill() -> None:
-    """The game's textures get a plain rectangle in the cover's columns with the cover over it, in a fixed order under the ring
-    (no mask: it would not clip); our own baked art covers its key, cropped to a FIXED band so the baked slant matches the
-    plate at any key width."""
+    """The game's textures get a plain rectangle (the glyph's rect, plus a fill over the key's inside for a narrow one) with the
+    cover over it, in a fixed order under the ring (no mask: it would not clip); our own baked art covers its key, cropped to a
+    FIXED band so the baked slant matches the plate at any key width."""
     baked_pad = (1 - 26 / 34) / 2  # the baked shape's rows (tools/assets/synthwave_icons.py KEY_W, KEY_H)
     data = World(12).login().get("FS.IconStyleData")
-    covers = {str(k): (c.x0, c.x1) for k, c in data.covers.items()}
+    rect_of = {str(k): (r.x0, r.x1) for k, r in data.rects.items()}
+    cover_cols = (data.cover.x0, data.cover.x1)
     for count, scale in ((12, 1.0), (12, 0.64), (14, 1.0), (16, 1.0)):
         w = World(count, scale=scale).login()
         infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
+        keys = list(w.get("FS.MicroBars.keys").values())
         tag = f"keys_{count}_scale_{scale}"
         check(f"fill.{tag}.every_key_has_a_glyph", len(infos) == count and all(i["kind"] == "runtime" for i in infos), f"{len(infos)}")
-        rects = [(i["left"], i["right"], i["cl"], i["cr"], covers["a" if "iconcover_a" in i["coverTex"] else "b"], i["bw"]) for i in infos]
-        # the glyph and its cover share one rectangle, whole pixels, in the cover's columns of the key
-        check(f"fill.{tag}.glyph_and_cover_share_the_cover_columns_in_whole_pixels",
-              all(l == cl and r == cr and l == int(l) and r == int(r) and abs(l - x0 * bw) <= 0.5 and abs(r - (1 - x1) * bw) <= 0.5
-                  for l, r, cl, cr, (x0, x1), bw in rects), f"{rects[:2]}")
-        check(f"fill.{tag}.the_rectangle_is_the_keys_full_height", all(i["top"] == 0 and i["bottom"] == 0 for i in infos),
+        # the glyph sits in its own rect's columns, the cover and the fill in the cover's, all whole pixels
+        glyph_ok = [abs(i["left"] - rect_of[str(k.spec.rect)][0] * i["bw"]) <= 0.5 and abs(i["right"] - (1 - rect_of[str(k.spec.rect)][1]) * i["bw"]) <= 0.5
+                    and i["left"] == int(i["left"]) and i["right"] == int(i["right"]) for k, i in zip(keys, infos)]
+        check(f"fill.{tag}.the_glyph_sits_in_its_rects_columns_in_whole_pixels", all(glyph_ok), f"{[(i['left'], i['right']) for i in infos][:3]}")
+        cover_ok = [i["cl"] == i["fl"] and i["cr"] == i["fr"] and i["cl"] == int(i["cl"]) and i["cr"] == int(i["cr"])
+                    and abs(i["cl"] - cover_cols[0] * i["bw"]) <= 0.5 and abs(i["cr"] - (1 - cover_cols[1]) * i["bw"]) <= 0.5 for i in infos]
+        check(f"fill.{tag}.the_cover_and_the_fill_share_the_cover_columns_in_whole_pixels", all(cover_ok), f"{[(i['cl'], i['cr'], i['fl'], i['fr']) for i in infos][:3]}")
+        check(f"fill.{tag}.the_rectangles_are_the_keys_full_height", all(i["top"] == 0 and i["bottom"] == 0 for i in infos),
               f"{[(i['top'], i['bottom']) for i in infos][:2]}")
-        check(f"fill.{tag}.the_overlays_follow_the_glyphs_rectangle", all(i["boostAnchor"] and i["modAnchor"] and i["liftAnchor"] for i in infos))
-        order = [(i["sub"], i["boostSub"], i["modSub"], i["liftSub"], i["coverSub"], i["edgeSub"]) for i in infos]
-        check(f"fill.{tag}.glyph_boost_ramp_lift_cover_then_the_ring_in_that_order",
-              all(a < b < c < d < e < f and i["layer"] == i["edgeLayer"] == i["coverLayer"] == "ARTWORK" for (a, b, c, d, e, f), i in zip(order, infos)), f"{order[:1]}")
-        check(f"fill.{tag}.blend_modes_are_ADD_MOD_ADD", all((i["boostBlend"], i["modBlend"], i["liftBlend"]) == ("ADD", "MOD", "ADD") for i in infos))
+        check(f"fill.{tag}.the_boost_follows_the_glyph_and_the_ramp_and_lift_follow_the_fill", all(i["boostAnchor"] and i["modAnchor"] and i["liftAnchor"] and i["fillBoostAnchor"] for i in infos))
+        order = [(i["fillSub"], i["fillBoostSub"], i["sub"], i["boostSub"], i["modSub"], i["liftSub"], i["coverSub"], i["edgeSub"]) for i in infos]
+        check(f"fill.{tag}.fill_fillboost_glyph_boost_ramp_lift_cover_then_the_ring_in_that_order",
+              all(all(x < y for x, y in zip(o, o[1:])) and i["layer"] == i["edgeLayer"] == i["coverLayer"] == "ARTWORK" for o, i in zip(order, infos)), f"{order[:1]}")
+        check(f"fill.{tag}.the_lowest_piece_is_inside_the_engines_sublevel_range", all(-8 <= o[0] and o[-1] <= 7 for o in order), f"{order[:1]}")
+        check(f"fill.{tag}.blend_modes_are_ADD_MOD_ADD", all((i["boostBlend"], i["modBlend"], i["liftBlend"], i["fillBoostBlend"]) == ("ADD", "MOD", "ADD", "ADD") for i in infos))
         check(f"fill.{tag}.the_boost_copy_and_the_glyph_show_the_same_window",
               all(i["boostTex"] == i["tex"] and [i["boostCoords"][k] for k in (1, 2, 3, 4)] == [i["c"][k] for k in (1, 2, 3, 4)] for i in infos),
               f"{infos[0]['boostCoords']} {infos[0]['c']}")
+        fill_ok = []
+        for k, i in zip(keys, infos):
+            if k.spec.fill is None:
+                fill_ok.append(not i["fillShown"] and not i["fillBoostShown"])
+            else:
+                want = [k.spec.fill[n] for n in (1, 2, 3, 4)]
+                fill_ok.append(i["fillShown"] and i["fillTex"] == i["tex"] and i["fillBoostTex"] == i["tex"]
+                               and [i["fillCoords"][n] for n in (1, 2, 3, 4)] == want and i["fillDesat"] is True and i["fillBoostDesat"] is True)
+        check(f"fill.{tag}.a_fill_shows_its_flat_patch_of_the_same_texture_and_a_full_glyph_has_none", all(fill_ok), f"{fill_ok}")
+        check(f"fill.{tag}.the_fill_wears_the_glyphs_tint", all(list(i["fillVertex"].values()) == list(i["vertex"].values()) for k, i in zip(keys, infos) if k.spec.fill is not None))
+        check(f"fill.{tag}.the_fill_boost_matches_the_glyph_boost_so_no_seam_shows",
+              all(near(i["fillBoostVertex"][1], i["boostVertex"][1]) and near(i["fillBoostVertex"][4], i["boostVertex"][4]) and i["fillBoostShown"] == i["boostShown"]
+                  for k, i in zip(keys, infos) if k.spec.fill is not None))
         check(f"fill.{tag}.no_degrade_logs", w.logs() == "", w.logs())
     # a key without a class (our own baked art): the whole key, the fixed band
     for count, scale in ((12, 1.0), (14, 1.0)):
@@ -958,6 +1076,55 @@ def check_fill() -> None:
               near(first["c"][1], 0) and near(first["c"][2], 1) and near(first["c"][3], baked_pad) and near(first["c"][4], 1 - baked_pad), f"{first['c']}")
         check(f"fill.{tag}.ring_draws_over_the_icon", first["layer"] == "ARTWORK" and first["edgeLayer"] == "ARTWORK" and first["sub"] < first["edgeSub"])
         check(f"fill.{tag}.a_baked_key_has_no_overlays", first.get("boostSub") is None, f"{first.get('boostSub')}")
+
+
+def check_crisp() -> None:
+    """Pixel crisp: where the client says what a physical pixel is, every edge of the icon pieces is a whole number of them, and
+    the pieces have the engine's own snapping off and a texel bias of 0. Without the numbers (no PixelUtil) whole UI units."""
+    # UI scale 0.64 of a 1440 screen: a physical pixel is 0.5333 UI units at effective scale 1, so 34 design px * 0.64 = 21.76
+    for factor, eff, scale in ((768 / 1440, 0.5333, 0.64), (768 / 1080, 0.711, 0.64), (768 / 1440, 1.0, 1.0)):
+        w = World(12, scale=scale, pixel_factor=factor, effective_scale=eff).login()
+        px = factor / eff
+        infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
+        offs = [(i["left"], i["right"], i["cl"], i["cr"], i["fl"], i["fr"]) for i in infos]
+        whole = all(abs(v / px - round(v / px)) < 1e-6 for o in offs for v in o)
+        check(f"crisp.every_edge_is_a_whole_number_of_physical_pixels.factor_{factor:.3f}_scale_{scale}", whole, f"px {px:.4f} {offs[:2]}")
+        check(f"crisp.no_piece_is_more_than_half_a_pixel_off_its_design_place.scale_{scale}",
+              all(abs(i["cl"] - 0.0588 * i["bw"]) <= px / 2 + 1e-6 for i in infos), f"{[(i['cl'], 0.0588 * i['bw']) for i in infos][:2]}")
+        check(f"crisp.pieces_have_engine_snapping_off_and_bias_0.scale_{scale}",
+              all(all(v is False for v in i["snaps"].values()) and all(v == 0 for v in i["biases"].values()) for i in infos), f"{infos[0]['snaps']} {infos[0]['biases']}")
+    # no PixelUtil: whole UI units, as before
+    w = World(12, scale=0.64).login()
+    infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
+    check("crisp.without_pixel_numbers_edges_are_whole_ui_units", all(i["left"] == int(i["left"]) and i["cl"] == int(i["cl"]) for i in infos))
+
+
+def check_late_class() -> None:
+    """UnitClass answering nothing at build (the client is still loading the player): the Character key wears the person glyph,
+    and at PLAYER_ENTERING_WORLD, out of combat, it is dressed with the class icon; PvP follows a faction learned late."""
+    w = World(12, cls=None, faction=None).login()
+    first = dict(w.call("h_glyphInfo")[1].items())
+    check("late.the_character_key_starts_on_the_person_glyph", first["kind"] == "baked" and str(first["tex"]).endswith("glyphart_character.tga"), f"{first['tex']}")
+    w.g.CLASS_TOKEN = "PRIEST"
+    w.g.IN_COMBAT = True
+    w.g.h_fire("PLAYER_ENTERING_WORLD")
+    held = dict(w.call("h_glyphInfo")[1].items())
+    check("late.nothing_changes_in_combat", held["kind"] == "baked", f"{held['kind']}")
+    w.g.IN_COMBAT = False
+    w.g.h_fire("PLAYER_ENTERING_WORLD")
+    got = dict(w.call("h_glyphInfo")[1].items())
+    check("late.the_class_icon_arrives_out_of_combat", got["kind"] == "runtime" and str(got["tex"]).endswith("ClassIcon_Priest"), f"{got['kind']} {got['tex']}")
+    check("late.the_late_key_has_its_chain_and_is_sized_and_painted", got["modShown"] and got["cl"] > 0 and got["left"] > 0 and got["desat"] is True and got["coverShown"], f"{got.get('modShown')} {got.get('cl')}")
+    # and back again when the answer goes (a different class: the key follows it)
+    w.g.CLASS_TOKEN = "WARRIOR"
+    w.g.h_fire("PLAYER_ENTERING_WORLD")
+    again = dict(w.call("h_glyphInfo")[1].items())
+    check("late.a_changed_class_changes_the_icon", str(again["tex"]).endswith("ClassIcon_Warrior"), f"{again['tex']}")
+    w.g.CLASS_TOKEN = None
+    w.g.h_fire("PLAYER_ENTERING_WORLD")
+    gone = dict(w.call("h_glyphInfo")[1].items())
+    check("late.an_unknown_class_goes_back_to_the_person_glyph_and_releases_the_chain", gone["kind"] == "baked" and not gone.get("modShown"), f"{gone['kind']} {gone.get('modShown')}")
+    check("late.no_degrade_logs", w.logs() == "", w.logs())
 
 
 def check_glyph_tint() -> None:
@@ -1427,6 +1594,10 @@ def main() -> int:
     check_glyph_files()
     check_fill()
     check_cover_geometry()
+    check_slant_direction()
+    check_no_empty_wedge()
+    check_crisp()
+    check_late_class()
     check_glyph_tint()
     check_microstyle()
     check_art()

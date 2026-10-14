@@ -661,8 +661,13 @@ CLASS_TOKENS = {"WARRIOR": "Warrior", "PALADIN": "Paladin", "HUNTER": "Hunter", 
                 "SHAMAN": "Shaman", "MAGE": "Mage", "WARLOCK": "Warlock", "DRUID": "Druid"}
 CLASS_CROP = (0.07, 0.93)
 CLASS_FAMILY = "house_cyan"
-# The two glyph rectangles the keys draw icons in, key columns of the 34 wide key (generate_icon_style.py COVER_RECTS), full height.
-COVER_RECTS = {"a": (6.0, 28.0), "b": (4.0, 30.0)}
+# The rectangles the keys draw icons in, key columns of the 34 wide key, full height. "k" is the key's inside bounding box
+# (generate_icon_style.py COVER_RECTS["key"], also the cover's span): an icon that fills it has no plate wedge left over.
+# "a" and "b" are narrower, for glyphs the client's texture cannot be widened to k (a button face with a frame around it, a
+# round emblem): they draw the glyph in the middle and a FILL under it, a flat patch of the texture's own background
+# stretched over k, so the key still has no empty wedge.
+RECTS = {"a": (6.0, 28.0), "b": (4.0, 30.0), "k": (2.0, 32.0)}
+COVER_FILE = "iconcover_key.tga"
 FIT_PAD = 1.06  # the window is this much larger than the glyph, so it does not touch the key's edge
 BOOST_TARGET = 0.85  # the 90th percentile of the icon's brightness is lifted to about this
 LIFT_STRENGTH = 0.15  # the flat ADD under the ramp: the family's weak colour times this tints the shadows
@@ -708,10 +713,41 @@ def fit_window(box: tuple[float, float, float, float], limit: tuple[float, float
     return cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2
 
 
-def pick_cover(box: tuple[float, float, float, float]) -> str:
-    """Rectangle a: the narrow one, for glyphs taller than wide. b for everything squarer."""
+def pick_rect(box: tuple[float, float, float, float]) -> str:
+    """The narrow rectangle for a glyph: a for glyphs taller than wide, b for everything squarer."""
     l, t, r, b = box
     return "a" if (r - l) / (b - t) <= 0.92 else "b"
+
+
+def flat_patch(im: Image.Image, limit: tuple[float, float, float, float], glyph: tuple[float, float, float, float]
+               ) -> tuple[float, float, float, float]:
+    """Texcoord window (l, r, t, b, as fractions) of a flat 3x3 texel patch of `limit`, taken from the middle of a flat 5x5
+    block so the stretch never bleeds a neighbour: the texture's own background (a button face, or a transparent margin),
+    which is what lies around a glyph that is drawn narrower than the key, stretched under it. Among the flat ones the patch
+    whose colour is closest to the border of the glyph's window `glyph` wins, so the fill meets the glyph without a seam. Only the
+    four corners of the limit are looked at: a glyph can fill the middle, and a flat patch of it would paint the glyph's own colour."""
+    a = np.asarray(im.convert("RGBA"), dtype=np.float64) / 255.0
+    w, h = im.size
+    ll, lt, lr, lb = (int(round(v)) for v in limit)
+    gl, gt, gr, gb = (int(round(v)) for v in glyph)
+    win = a[gt:gb, gl:gr]
+    edge = np.concatenate([win[:, 0], win[:, -1], win[0], win[-1]]).mean(axis=0)
+    best, where = None, None
+    zone = 8  # texels: the four corners of the limit, where the face shows around a round or narrow glyph
+    for y in range(lt + 1, lb - 4):
+        for x in range(ll + 1, lr - 4):
+            if not ((x < ll + zone or x + 3 > lr - zone) and (y < lt + zone or y + 3 > lb - zone)):
+                continue
+            block = a[y - 1:y + 4, x - 1:x + 4].reshape(-1, 4)
+            flat = float(block.std(axis=0).sum())
+            miss = float(np.abs(a[y:y + 3, x:x + 3].reshape(-1, 4).mean(axis=0) - edge).sum())
+            score = flat + 2.0 * miss
+            if best is None or score < best:
+                best, where = score, (x, y)
+    if where is None:
+        raise ValueError("no room for a flat patch")
+    x, y = where
+    return (x / w, (x + 3) / w, y / h, (y + 3) / h)
 
 
 def boost_for(im: Image.Image, window: tuple[float, float, float, float]) -> float:
@@ -728,13 +764,28 @@ def boost_for(im: Image.Image, window: tuple[float, float, float, float]) -> flo
 
 def runtime_entry(im: Image.Image, window: tuple[float, float, float, float], file_id, fam: str,
                   limit: tuple[float, float, float, float] | None = None) -> dict:
-    """One icon's data: the file, the texcoord window, the cover rectangle it sits in, the family and the boost."""
-    cover = pick_cover(window)
-    x0, x1 = COVER_RECTS[cover]
+    """One icon's data: the file, the texcoord window, the rectangle it sits in, the fill under a narrow one, the family and
+    the boost. The glyph gets the key's whole inside (k) when the client's texture can be widened to that rectangle without
+    leaving the limit (the glyph's own part of the texture) and without cropping the glyph; otherwise a narrower rectangle and
+    a fill."""
     w, h = im.size
-    box = fit_window(window, limit or (0, 0, w, h), x1 - x0, KEY_H)
-    return {"file": file_id, "coords": (box[0] / w, box[2] / w, box[1] / h, box[3] / h), "cover": cover, "fam": fam,
-            "boost": boost_for(im, box)}
+    limit = limit or (0, 0, w, h)
+    x0, x1 = RECTS["k"]
+    box = fit_window(window, limit, x1 - x0, KEY_H)
+    slack = 0.5  # texels
+    whole = box[0] - slack <= window[0] and box[1] - slack <= window[1] and box[2] + slack >= window[2] and box[3] + slack >= window[3]
+    entry = {"file": file_id, "fam": fam}
+    if whole:
+        entry["rect"], entry["fill"] = "k", None
+    else:
+        rect = pick_rect(window)
+        rx0, rx1 = RECTS[rect]
+        box = fit_window(window, limit, rx1 - rx0, KEY_H)
+        entry["rect"] = rect
+        entry["fill"] = flat_patch(im, limit, box)
+    entry["coords"] = (box[0] / w, box[2] / w, box[1] / h, box[3] / h)
+    entry["boost"] = boost_for(im, box)
+    return entry
 
 
 def micro_runtime_data(root: Path) -> tuple[dict, dict, dict]:
@@ -756,10 +807,14 @@ def micro_runtime_data(root: Path) -> tuple[dict, dict, dict]:
     for token, name in CLASS_TOKENS.items():
         im = read_rgba(root, f"classicons/{name.lower()}.blp")
         w, h = im.size
-        win = (CLASS_CROP[0] * w, CLASS_CROP[0] * h, CLASS_CROP[1] * w, CLASS_CROP[1] * h)
-        # the 0.07 crop is already the whole glyph, a square: show exactly it, in the square rectangle
-        klass[token] = {"file": "Interface\\Icons\\ClassIcon_" + name, "coords": (CLASS_CROP[0], CLASS_CROP[1], CLASS_CROP[0], CLASS_CROP[1]),
-                        "cover": "b", "fam": CLASS_FAMILY, "boost": boost_for(im, win)}
+        # the 0.07 crop is the whole glyph, a square; the key's inside is wider than tall, so its full width is shown and the
+        # rows are cropped to the rectangle's aspect, centred (the art is full bleed: it fills the key, the cover trims it)
+        x0, x1 = RECTS["k"]
+        span = (CLASS_CROP[1] - CLASS_CROP[0]) * (KEY_H / (x1 - x0))
+        top, bottom = 0.5 - span / 2, 0.5 + span / 2
+        win = (CLASS_CROP[0] * w, top * h, CLASS_CROP[1] * w, bottom * h)
+        klass[token] = {"file": "Interface\\Icons\\ClassIcon_" + name, "coords": (CLASS_CROP[0], CLASS_CROP[1], round(top, 5), round(bottom, 5)),
+                        "rect": "k", "fill": None, "fam": CLASS_FAMILY, "boost": boost_for(im, win)}
     return micro, pvp, klass
 
 
@@ -771,7 +826,11 @@ def lua_entry(ent: dict) -> str:
     fid = ent["file"]
     file = fid if isinstance(fid, int) else '"' + fid.replace("\\", "\\\\") + '"'
     l, r, t, b = (lua_num(round(v, 5)) for v in ent["coords"])
-    return (f'{{ file = {file}, coords = {{ {l}, {r}, {t}, {b} }}, cover = "{ent["cover"]}", '
+    fill = ""
+    if ent["fill"] is not None:
+        fl, fr, ft, fb = (lua_num(round(v, 5)) for v in ent["fill"])
+        fill = f', fill = {{ {fl}, {fr}, {ft}, {fb} }}'
+    return (f'{{ file = {file}, coords = {{ {l}, {r}, {t}, {b} }}, rect = "{ent["rect"]}"{fill}, '
             f'fam = "{ent["fam"]}", boost = {lua_num(ent["boost"])} }}')
 
 
@@ -787,9 +846,10 @@ def lua_runtime_data(root: Path) -> str:
     ramps = "".join(
         f'    {fam} = {{ file = "iconramp_{fam}.tga", lift = {{ {", ".join(lua_num(round(float(c) * LIFT_STRENGTH, 4)) for c in FAMILIES[fam][0])} }} }},\n'
         for fam in FAMILIES)
-    covers = "".join(
-        f'    {k} = {{ file = "iconcover_{k}.tga", x0 = {lua_num(round(x0 / KEY_W, 5))}, x1 = {lua_num(round(x1 / KEY_W, 5))} }},\n'
-        for k, (x0, x1) in COVER_RECTS.items())
+    cx0, cx1 = RECTS["k"]
+    cover = f'  cover = {{ file = "{COVER_FILE}", x0 = {lua_num(round(cx0 / KEY_W, 5))}, x1 = {lua_num(round(cx1 / KEY_W, 5))} }},\n'
+    rects = "".join(
+        f'    {k} = {{ x0 = {lua_num(round(x0 / KEY_W, 5))}, x1 = {lua_num(round(x1 / KEY_W, 5))} }},\n' for k, (x0, x1) in RECTS.items())
     micro_s = "".join(f"    {k} = {lua_entry(v)},\n" for k, v in micro.items())
     pvp_s = "".join(f"    {k} = {lua_entry(v)},\n" for k, v in pvp.items())
     class_s = "".join(f"    {k} = {lua_entry(v)},\n" for k, v in klass.items())
@@ -802,16 +862,19 @@ def lua_runtime_data(root: Path) -> str:
         "-- Generated by tools/assets/synthwave_icons.py --gen-runtime. Do not edit by hand.\n"
         "-- The runtime icon style's data (Core/IconStyle.lua): numbers only, nothing derived from game art.\n"
         "--   ramps:  colour families, the ramp texture and the flat ADD that tints the shadows\n"
-        "--   covers: the two glyph rectangles of a micro key (fractions of the key width) and their cover texture\n"
-        "--   micro, pvp, class: the game texture a micro key draws (file id or path), the texcoord window, the cover\n"
-        "--           rectangle, the family and the boost (0 plain, 1 twice as bright)\n"
+        "--   cover:  the cover texture of a micro key and the key columns it spans (fractions of the key width)\n"
+        "--   rects:  the rectangles a glyph is drawn in, as the same fractions: k fills the key's inside, a and b are narrower\n"
+        "--   micro, pvp, class: the game texture a micro key draws (file id or path), the texcoord window, the rectangle\n"
+        "--           it sits in, the fill window under a narrow one (a flat patch of the same texture, stretched over k), the\n"
+        "--           family and the boost (0 plain, 1 twice as bright)\n"
         "--   spells: byFile (the icon file id the client reports for a spell) and byName (the lower case icon file name)\n"
         "--           to an icon name; look: that name to its family and boost; bySpell: the spell ids that wear each icon,\n"
         "--           kept for the harness (every spell the class tabs show must be here)\n"
         "local _, FS = ...\n"
         "FS.IconStyleData = {\n"
         "  ramps = {\n" + ramps + "  },\n"
-        "  covers = {\n" + covers + "  },\n"
+        + cover +
+        "  rects = {\n" + rects + "  },\n"
         "  micro = {\n" + micro_s + "  },\n"
         "  pvp = {\n" + pvp_s + "  },\n"
         "  class = {\n" + class_s + "  },\n"

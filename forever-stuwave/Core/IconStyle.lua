@@ -28,6 +28,7 @@ IconStyle.TOP_OFFSET = LIFT_OFFSET  -- how many sublevels a chain needs above it
 local MAX_SUBLEVEL = 7
 -- below this the ADD copy is not worth a draw
 local MIN_BOOST = 0.02
+IconStyle.MIN_BOOST = MIN_BOOST
 
 local function Ramps()
     local data = FS.IconStyleData
@@ -46,21 +47,24 @@ function IconStyle.ClampSublevel(sub)
     return math.min(sub or 0, MAX_SUBLEVEL - LIFT_OFFSET)
 end
 
--- Builds the overlay textures over `base`, in `parent` at `layer` and sublevels above `sub`. They follow the base's
--- rectangle (SetAllPoints on it) and start hidden. `sub` must already be clamped (ClampSublevel).
-function IconStyle.NewChain(base, parent, layer, sub)
-    local function overlay(offset, blend)
+-- Builds the overlay textures over `base`, in `parent` at `layer` and sublevels above `sub`. The ADD copy follows the base's
+-- rectangle (SetAllPoints on it); the MOD ramp and the ADD lift follow `anchor` (a texture or frame, the base when omitted),
+-- which lets a glyph drawn narrower than its key take its colour over the whole key. They start hidden. `sub` must already be
+-- clamped (ClampSublevel).
+function IconStyle.NewChain(base, parent, layer, sub, anchor)
+    local function overlay(offset, blend, follow)
         local tex = parent:CreateTexture(nil, layer, nil, sub + offset)
         tex:SetBlendMode(blend)
-        tex:SetAllPoints(base)
+        tex:SetAllPoints(follow)
         tex:Hide()
         return tex
     end
+    anchor = anchor or base
     return {
-        base = base,
-        boost = overlay(BOOST_OFFSET, "ADD"),
-        mod = overlay(MOD_OFFSET, "MOD"),
-        lift = overlay(LIFT_OFFSET, "ADD"),
+        base = base, anchor = anchor,
+        boost = overlay(BOOST_OFFSET, "ADD", base),
+        mod = overlay(MOD_OFFSET, "MOD", anchor),
+        lift = overlay(LIFT_OFFSET, "ADD", anchor),
         look = nil, wantDesat = false, active = false,
     }
 end
@@ -82,18 +86,20 @@ function IconStyle.Dress(chain, file, coords, look)
     return true
 end
 
--- Copies a state onto the overlays. st = { r, g, b, a, desat, shown }: the tint and alpha the base wears, whether the
--- look is desaturated (the ramp then draws grey) and whether the icon is shown. The base itself is the caller's.
+-- Copies a state onto the overlays. st = { r, g, b, a, desat, shown, noMod }: the tint and alpha the base wears, whether the
+-- look is desaturated (the ramp then draws grey), whether the icon is shown, and noMod (the base is dimmed or tinted: a tile
+-- at alpha 0.4 or a red warn tint; the MOD ramp ignores both, so it is left out and the ADD copy and lift carry the tint
+-- and alpha instead). Alpha 0 hides everything. The base itself is the caller's.
 function IconStyle.Sync(chain, st)
     local look = chain.look
     if not look or not chain.active then return end
     local r, g, b, a = st.r or 1, st.g or 1, st.b or 1, st.a or 1
-    local shown = st.shown ~= false
+    local shown = st.shown ~= false and a > 0
     local boost = look.boost or 0
     chain.boost:SetVertexColor(r * boost, g * boost, b * boost, a)
     chain.boost:SetShown(shown and boost >= MIN_BOOST)
     chain.mod:SetDesaturated(st.desat and true or false)
-    chain.mod:SetShown(shown)
+    chain.mod:SetShown(shown and not st.noMod)
     local mean = (r + g + b) / 3
     chain.lift:SetVertexColor(1, 1, 1, a * mean)
     chain.lift:SetShown(shown)

@@ -118,14 +118,19 @@ end
 -- texture -> its chain of overlays (FS.IconStyle), built the first time the texture gets a look. Weak keys.
 local chains = setmetatable({}, { __mode = "k" })
 
+-- A tint with every channel at or above this is a plain white one.
+local NEAR_WHITE = 0.98
+
 -- What the texture wears now, read back from it, copied onto the overlays.
 local function Mirror(chain)
     local tex = chain.base
     local r, g, b, a = tex:GetVertexColor()
-    local alpha = tex:GetAlpha()
+    local alpha = (a or 1) * (tex:GetAlpha() or 1)
+    -- a dimmed or tinted tile (the stance bar's 0.4, the buff tab's warn red): the MOD ramp would ignore it
+    local dim = alpha < 1 or (r or 1) < NEAR_WHITE or (g or 1) < NEAR_WHITE or (b or 1) < NEAR_WHITE
     FS.IconStyle.Sync(chain, {
-        r = r, g = g, b = b, a = (a or 1) * (alpha or 1),
-        desat = chain.wantDesat, shown = tex:IsShown(),
+        r = r, g = g, b = b, a = alpha,
+        desat = chain.wantDesat, shown = tex:IsShown(), noMod = dim,
     })
     chain.boost:SetTexCoord(tex:GetTexCoord())
 end
@@ -194,16 +199,33 @@ local function ChainOf(tex)
     return chain
 end
 
+-- Textures that asked for a look in combat: the chain is not built in combat (creating, anchoring and layering regions of a
+-- tile that may sit on a secure host), so they keep the stock icon until PLAYER_REGEN_ENABLED.
+local deferred = setmetatable({}, { __mode = "k" })
+
+local function InCombat()
+    return type(InCombatLockdown) == "function" and InCombatLockdown() and true or false
+end
+
 -- Look runs inside the pcall too: nothing about the value or the setting can throw out of a bind or a repaint.
 local function Draw(tex, stock)
     local look = SpellArt.Look(stock)
     local chain = chains[tex]
     if not look or not FS.IconStyle then
+        deferred[tex] = nil
         if chain and chain.active then Release(chain) end
         tex:SetTexture(stock)
         return
     end
-    chain = ChainOf(tex)
+    if not chain then
+        if InCombat() then
+            deferred[tex] = true
+            tex:SetTexture(stock)
+            return
+        end
+        chain = ChainOf(tex)
+    end
+    deferred[tex] = nil
     chain.writing = true
     local ok, err = pcall(tex.SetTexture, tex, stock)
     chain.writing = false
@@ -232,4 +254,17 @@ end
 
 if FS.Config and FS.Config.OnChange then
     FS.Config.OnChange(SpellArt.SETTING.key, SpellArt.Repaint)
+end
+
+-- Out of combat again: build the chains that were asked for in combat.
+if type(CreateFrame) == "function" then
+    local events = CreateFrame("Frame")
+    pcall(events.RegisterEvent, events, "PLAYER_REGEN_ENABLED")
+    events:SetScript("OnEvent", function()
+        for tex in pairs(deferred) do
+            deferred[tex] = nil
+            local stock = bound[tex]
+            if stock ~= nil then Write(tex, stock) end
+        end
+    end)
 end

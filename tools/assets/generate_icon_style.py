@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generates the art of the runtime icon style: nine colour ramps and two key covers.
+"""Generates the art of the runtime icon style: nine colour ramps and one key cover.
 
 Why: the micro keys and the class tab spell tiles draw the game's OWN icon textures, restyled live (Core/IconStyle.lua):
 the icon is desaturated, an ADD copy of it lifts its brightness, one of these ramp textures is MULTIPLIED over it
@@ -10,13 +10,14 @@ iconramp_<family>.tga: 8x8, opaque, a diagonal gradient from the family's hot co
 bottom right. The families are the colour families of tools/assets/synthwave_icons.py FAMILIES (the colours are repeated
 here, this script stays standalone like the others; the tests compare the two).
 
-iconcover_a.tga and iconcover_b.tga: 64x64, the key's plate colour wherever the micro key's slanted shape is NOT, over the two
-glyph rectangles the keys draw their icon in (A: key columns 6 to 28 of 34, B: 4 to 30; both the full key height). A
-MaskTexture does not clip on this client, so the icon is a plain rectangle and this cover, drawn over it and under the key's
-ring, hides the corners that would stick out of the slanted key. Its shape is the key shape: the plate texture
-(cell_slant.tga) minus the ring texture (deck_key_slant_outline.tga) grown by half a design px, stretched over the key's
-34 x 26 design px, so it meets the ring exactly. Those two textures are read from FS_ASSET_INPUT_DIR (default: the
-repository's Media/Textures), so they must already exist.
+iconcover_key.tga: 128x128, the key's plate colour wherever the micro key's slanted shape is NOT, over key columns 2 to 32 of
+34 and the full height (the bounding box of the key's inside, which is the rectangle the keys draw their icon in). A MaskTexture
+does not clip on this client, so the icon is a plain rectangle and this cover, drawn over it and under the key's ring, hides
+the two triangles that would stick out of the slanted key. Its shape is the key shape: the plate texture (cell_slant.tga)
+minus the ring texture (deck_key_slant_outline.tga) grown by half a design px, stretched over the key's 34 x 26 design px
+and cut to those columns, so it meets the ring exactly. The key leans / (top right to bottom left), so the solid wedges
+are the top left and the bottom right. Those two textures are read from FS_ASSET_INPUT_DIR (default: the repository's Media/Textures), so they must already
+exist.
 
 Needs numpy.
 
@@ -29,12 +30,14 @@ import struct
 import numpy as np
 
 RAMP_SIZE = 8
-COVER_SIZE = 64
+COVER_SIZE = 128
 KEY_W, KEY_H = 34, 26  # the micro key, design px (MicroBars.lua)
 SCALE = 8              # samples per design px while the shape is built
 GROW = 4               # the ring's line is grown by this many samples (half a design px) so the icon stops short of it
-# Key columns (design px of the 34 wide key) the two glyph rectangles span; Media's covers and IconStyleData.covers follow.
-COVER_RECTS = {"a": (6, 28), "b": (4, 30)}
+# Key columns (design px of the 34 wide key) the cover and the icon span: the bounding box of the key's inside (the plate
+# minus the ring's line, columns 2.1 to 31.9 of 34, rounded out to whole design px; the tests pin it). Media's cover and
+# IconStyleData.covers follow.
+COVER_RECTS = {"key": (2, 32)}
 # Fraction of the way across the diagonal that is horizontal: the ramp runs mostly top to bottom.
 RAMP_DIAGONAL = 0.35
 COVER_COLOR = (0x0D, 0x06, 0x20)  # Theme COLOR_HUD_SCRIM's colour: the deck behind the keys
@@ -122,7 +125,7 @@ def key_inside(input_dir):
 
 
 def cover_alpha(inside, key):
-    """64x64 coverage (0..1) of everything outside the key shape, inside the glyph rectangle `key` (a or b)."""
+    """COVER_SIZE square coverage (0..1) of everything outside the key shape, over the columns of the cover `key`."""
     x0, x1 = COVER_RECTS[key]
     cols = inside[:, x0 * SCALE:x1 * SCALE]
     return area(1.0 - cols, COVER_SIZE, COVER_SIZE)
