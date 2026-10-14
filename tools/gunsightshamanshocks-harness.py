@@ -51,6 +51,7 @@ SHOCKS = Path(os.environ.get("GUNSIGHTSHAMANSHOCKS_LUA") or ADDON / "Modules/Com
 GUNSIGHT = ADDON / "Modules/CombatHud/Gunsight.lua"
 LAYOUT = ADDON / "Core/Layout.lua"
 CONFIG = ADDON / "Core/Config.lua"
+FRAMEHELPERS = ADDON / "Core/FrameHelpers.lua"
 TOC = ADDON / "forever-stuwave.toc"
 TEXTURES = ADDON / "Media" / "Textures"
 MOCKUP = HERE.parent / "mockups" / "gunsight-class-module-shaman-2026-10-08.html"
@@ -186,7 +187,7 @@ local function boot(opts)
     opts = opts or {}
     STRICT_EVENTS = false
     resetKnownEvents()
-    for e in ([[SPELL_UPDATE_COOLDOWN SPELLS_CHANGED LEARNED_SPELL_IN_TAB PLAYER_LEVEL_UP UNIT_SPELLCAST_SUCCEEDED
+    for e in ([[SPELL_UPDATE_COOLDOWN SPELLS_CHANGED LEARNED_SPELL_IN_SKILL_LINE PLAYER_LEVEL_UP UNIT_SPELLCAST_SUCCEEDED
         SPELL_UPDATE_USABLE PLAYER_REGEN_ENABLED PLAYER_REGEN_DISABLED]]):gmatch("%S+") do
         KNOWN_EVENTS[e] = true     -- any other event (a target cast, a target change) is refused and would be logged
     end
@@ -206,6 +207,7 @@ local function boot(opts)
     assert(loadstring(HAS_TARGET_SRC, "@Theme.lua"))()
     loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
     loadAddonFile(CONFIG_SRC, "Core/Config.lua")
+    loadAddonFile(FRAMEHELPERS_SRC, "Core/FrameHelpers.lua")
     loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
     UnitExists = function() return true end
     UnitClass = function() return "Shaman", "SHAMAN" end
@@ -586,6 +588,22 @@ check(vis(SEC.ring), "a secret usability reads as a Fire totem that stands")
 noDegrade()
 """)
 
+case("a_view_event_the_client_lacks_is_skipped_without_a_chat_line_and_the_rest_still_listen")(r"""
+boot({})
+KNOWN_EVENTS.SPELL_UPDATE_USABLE = nil
+local printed = {}
+print = function(...) printed[#printed + 1] = table.concat({ ... }, " ") end
+ForeverSTUwaveDB = {}
+mount("lower", { show = false })
+Shocks.OnShow(SEC)
+check(next(DEGRADED) == nil, "no chat line through the degrade path: " .. tostring(next(DEGRADED)))
+check(#printed == 0, "nothing printed")
+check(ForeverSTUwaveDB.unknownEvents and ForeverSTUwaveDB.unknownEvents.SPELL_UPDATE_USABLE, "the refused event is recorded in the saved variables")
+local on = false
+for _, f in ipairs(FRAMES) do if f.events.SPELL_UPDATE_COOLDOWN then on = true end end
+check(on, "the events the client has are still on")
+""")
+
 case("OnHide_stops_the_ticker_and_every_view_event_but_the_ledger_stays")(r"""
 boot({})
 IN_COMBAT = true
@@ -775,6 +793,7 @@ def run_case(name: str, body: str, mu: dict) -> str | None:
     g = lua.globals()
     g.LAYOUT_SRC = LAYOUT.read_text(encoding="utf-8")
     g.CONFIG_SRC = CONFIG.read_text(encoding="utf-8")
+    g.FRAMEHELPERS_SRC = FRAMEHELPERS.read_text(encoding="utf-8")
     g.GUNSIGHT_SRC = GUNSIGHT.read_text(encoding="utf-8")
     g.SHOCKS_SRC = SHOCKS.read_text(encoding="utf-8")
     g.HAS_TARGET_SRC = _load("gunsight-harness").theme_target_rule_lua()

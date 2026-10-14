@@ -1945,7 +1945,7 @@ local function ForgetLearnedCooldowns()
 end
 function handlers.SPELLS_CHANGED() Relearn(); ForgetLearnedCooldowns(); RequestTalentRead() end
 handlers.PLAYER_LEVEL_UP = handlers.SPELLS_CHANGED
-handlers.LEARNED_SPELL_IN_TAB = handlers.SPELLS_CHANGED
+handlers.LEARNED_SPELL_IN_SKILL_LINE = handlers.SPELLS_CHANGED
 -- Talent changes (only with a talent timed DoT in the profile): the rank is read again out of combat.
 function handlers.PLAYER_TALENT_UPDATE() RequestTalentRead() end
 handlers.CHARACTER_POINTS_CHANGED = handlers.PLAYER_TALENT_UPDATE
@@ -1969,7 +1969,7 @@ end
 
 local PLAIN_EVENTS = {
     "PLAYER_TARGET_CHANGED", "PLAYER_REGEN_ENABLED", "PLAYER_ENTERING_WORLD", "SPELLS_CHANGED",
-    "PLAYER_LEVEL_UP", "LEARNED_SPELL_IN_TAB", "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW",
+    "PLAYER_LEVEL_UP", "LEARNED_SPELL_IN_SKILL_LINE", "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW",
     "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE", "PLAYER_DEAD",
 }
 local TALENT_EVENTS = {
@@ -1994,7 +1994,7 @@ local function Setup()
     profile = Profiles[token]
     if not profile then return end
 
-    for _, e in ipairs(PLAIN_EVENTS) do pcall(eventFrame.RegisterEvent, eventFrame, e) end
+    FS.FrameHelpers.RegisterEvents(eventFrame, PLAIN_EVENTS)
     for key in pairs(profile.dots or EMPTY) do
         local t = Spells[key] and Spells[key].applyTalent
         if t then
@@ -2003,12 +2003,10 @@ local function Setup()
         end
     end
     if talentWanted then
-        for _, e in ipairs(TALENT_EVENTS) do pcall(eventFrame.RegisterEvent, eventFrame, e) end
+        FS.FrameHelpers.RegisterEvents(eventFrame, TALENT_EVENTS)
     end
-    for _, e in ipairs(PLAYER_EVENTS) do
-        pcall(eventFrame.RegisterUnitEvent, eventFrame, e, "player")
-    end
-    pcall(eventFrame.RegisterUnitEvent, eventFrame, "UNIT_AURA", "target", "player")
+    FS.FrameHelpers.RegisterEvents(eventFrame, PLAYER_EVENTS, "player")
+    FS.FrameHelpers.RegisterEvent(eventFrame, "UNIT_AURA", "target", "player")
 
     -- A shown, parentless, region-less frame still gets OnUpdate (a HIDDEN frame does not),
     -- and draws nothing. Throttled to TICK seconds.

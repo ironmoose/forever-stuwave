@@ -38,7 +38,7 @@ except ImportError:
 HERE = Path(__file__).resolve().parent
 # HUD_HARNESS_ADDON_DIR points the harness at a scratch copy, for mutation checks.
 ADDON = Path(os.environ.get("HUD_HARNESS_ADDON_DIR") or HERE.parent / "forever-stuwave")
-FILES = ["Modules/CombatHud/HudSpells.lua", "Modules/CombatHud/HudProfiles.lua", "Modules/CombatHud/HudLogic.lua"]
+FILES = ["Core/FrameHelpers.lua", "Modules/CombatHud/HudSpells.lua", "Modules/CombatHud/HudProfiles.lua", "Modules/CombatHud/HudLogic.lua"]
 
 MOCK = r"""
 __realType = type
@@ -1511,7 +1511,7 @@ setTalent("Improved Shadow Word: Pain", 2)
 settleTalents()
 local reads = W.talentReads
 for _ = 1, 5 do fire("SPELLS_CHANGED") end
-fire("PLAYER_LEVEL_UP"); fire("LEARNED_SPELL_IN_TAB"); fire("PLAYER_TALENT_UPDATE"); fire("CHARACTER_POINTS_CHANGED")
+fire("PLAYER_LEVEL_UP"); fire("LEARNED_SPELL_IN_SKILL_LINE"); fire("PLAYER_TALENT_UPDATE"); fire("CHARACTER_POINTS_CHANGED")
 check(W.talentReads == reads, "events only mark the read pending, got " .. (W.talentReads - reads))
 tick(0.25); tick(0.25); tick(0.25)
 check(W.talentReads == reads + 1, "one walk for the whole burst, got " .. (W.talentReads - reads))
@@ -2946,7 +2946,7 @@ case("warlock_profile_is_well_formed", "WARLOCK")(STRUCTURE)
 def run_case(name: str, cls: str, body: str) -> str | None:
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.execute(MOCK)
-    lua.execute(f'resetWorld("{cls}"); FS = {{}}')
+    lua.execute(f'resetWorld("{cls}"); FS = {{ Theme = {{}} }}')
     if name in PRELOGIN:    # before the files load: HudLogic sets itself up as it loads
         lua.execute(PRELOGIN[name])
     lua.execute("FS.LogDegradeOnce = function(k, m) __errors[#__errors + 1] = k .. ': ' .. tostring(m) end")
@@ -2957,6 +2957,8 @@ def run_case(name: str, cls: str, body: str) -> str | None:
             return f"{fname} is missing"
         try:
             loader(path.read_text(encoding="utf-8"), fname)
+            if fname == "Core/FrameHelpers.lua":
+                lua.execute("__frames = {}")    # the helper's own listener frames are not the HUD's
             if fname == "Modules/CombatHud/HudProfiles.lua":
                 lua.execute(TEST_PROFILES)
         except LuaError as err:

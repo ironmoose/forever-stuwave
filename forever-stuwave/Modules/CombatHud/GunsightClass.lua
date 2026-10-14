@@ -324,23 +324,21 @@ local function OnComboEvent(_, event, unit, token)
 end
 
 local function SetComboEvents(on)
-    -- optional: a refusal is not worth a chat line (another registered event covers it)
-    local function reg(event, unitOnly, optional)
+    -- a refusal is never a chat line: FrameHelpers records the event in the saved variables
+    local function reg(event, unitOnly)
         if on then
-            local ok, err
             if unitOnly then
-                ok, err = pcall(frame.RegisterUnitEvent, frame, event, "player")
+                FS.FrameHelpers.RegisterEvent(frame, event, "player")
             else
-                ok, err = pcall(frame.RegisterEvent, frame, event)
+                FS.FrameHelpers.RegisterEvent(frame, event)
             end
-            if not ok and not optional then LogOnce("event_" .. event, event .. " cannot be registered on this client (" .. tostring(err) .. ")") end
         else
             pcall(frame.UnregisterEvent, frame, event)
         end
     end
     reg("PLAYER_TARGET_CHANGED")
     reg("UNIT_POWER_UPDATE", true)
-    reg("UNIT_POWER_FREQUENT", true, true)
+    reg("UNIT_POWER_FREQUENT", true)
     reg("UNIT_MAXPOWER", true)
     if class == "DRUID" then
         for _, e in ipairs(DRUID_EVENTS) do reg(e) end

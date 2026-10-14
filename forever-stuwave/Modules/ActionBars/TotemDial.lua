@@ -1301,9 +1301,7 @@ local function Init()
     local events = CreateFrame("Frame")
     events:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
     events:RegisterEvent("PLAYER_REGEN_DISABLED")
-    for _, learn in ipairs({ "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD" }) do
-        events:RegisterEvent(learn)
-    end
+    FS.FrameHelpers.RegisterEvents(events, { "SPELLS_CHANGED", "LEARNED_SPELL_IN_SKILL_LINE", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD" })
     events:SetScript("OnEvent", OnGameEvent)
     local ticker = CreateFrame("Frame", "FSTotemDialTicker")
     ticker:SetScript("OnUpdate", Tick)

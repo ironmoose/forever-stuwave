@@ -1992,3 +1992,84 @@ function Helpers.AnchorTooltip(owner)
         tip:SetOwner(owner, "ANCHOR_TOP")
     end
 end
+
+-------------------------------------------------------------------------------
+-- Event registration that tolerates events this client does not have
+-------------------------------------------------------------------------------
+
+-- Registering an event the client does not know raises ("Attempt to register unknown
+-- event"), and the old per module pcall printed that to chat in the middle of a fight
+-- (the old tab learn event is gone on 16001; LEARNED_SPELL_IN_SKILL_LINE replaced it).
+-- Every spell and learn event list goes through here instead: an event the client calls
+-- invalid (C_EventUtils.IsEventValid when it exists, else the refusal itself, pcall'd) is
+-- skipped, never printed, and recorded once in ForeverSTUwaveDB.unknownEvents so a
+-- reload shows which names this client turned down. The saved table is never created or
+-- replaced here, and a read only profile is not written to. Files register some events
+-- before ADDON_LOADED has made the table, so a record with nowhere to go waits in
+-- `pendingUnknown` and is written on the first event after the table exists.
+local unknownSeen, pendingUnknown = {}, {}
+
+local function WriteUnknownEvents()
+    if next(pendingUnknown) == nil then return end
+    local db = _G.ForeverSTUwaveDB
+    if type(db) ~= "table" then return end
+    local readOnly = FS.Config and FS.Config.IsReadOnly
+    if readOnly and readOnly() then
+        pendingUnknown = {}
+        return
+    end
+    db.unknownEvents = type(db.unknownEvents) == "table" and db.unknownEvents or {}
+    for event, record in pairs(pendingUnknown) do
+        db.unknownEvents[event] = db.unknownEvents[event] or record
+    end
+    pendingUnknown = {}
+end
+
+local function NoteUnknownEvent(event, why)
+    event = tostring(event)
+    if unknownSeen[event] then return end
+    unknownSeen[event] = true
+    pendingUnknown[event] = { time = type(_G.time) == "function" and _G.time() or 0, why = why }
+    WriteUnknownEvents()
+end
+
+local function ClientCallsInvalid(event)
+    local utils = _G.C_EventUtils
+    if type(utils) ~= "table" or type(utils.IsEventValid) ~= "function" then return false end
+    local ok, valid = pcall(utils.IsEventValid, event)
+    return ok and valid == false
+end
+
+-- True when the event is now registered. Any extra arguments are unit tokens and make it a
+-- RegisterUnitEvent. Silent: a skipped event is only recorded, never printed.
+function Helpers.RegisterEvent(frame, event, ...)
+    if type(frame) ~= "table" or type(event) ~= "string" then return false end
+    if ClientCallsInvalid(event) then
+        NoteUnknownEvent(event, "invalid")
+        return false
+    end
+    local ok
+    if select("#", ...) > 0 then
+        if type(frame.RegisterUnitEvent) ~= "function" then return false end
+        ok = pcall(frame.RegisterUnitEvent, frame, event, ...)
+    else
+        if type(frame.RegisterEvent) ~= "function" then return false end
+        ok = pcall(frame.RegisterEvent, frame, event)
+    end
+    if not ok then NoteUnknownEvent(event, "refused") end
+    return ok
+end
+
+-- Registers each name in `events`; returns how many the client accepted.
+function Helpers.RegisterEvents(frame, events, ...)
+    local count = 0
+    if type(frame) ~= "table" or type(events) ~= "table" then return count end
+    for _, event in ipairs(events) do
+        if Helpers.RegisterEvent(frame, event, ...) then count = count + 1 end
+    end
+    return count
+end
+
+local unknownFlush = CreateFrame("Frame")
+pcall(unknownFlush.RegisterEvent, unknownFlush, "PLAYER_ENTERING_WORLD")
+unknownFlush:SetScript("OnEvent", WriteUnknownEvents)

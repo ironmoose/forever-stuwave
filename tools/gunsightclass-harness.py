@@ -48,6 +48,7 @@ AREAS = ADDON / "Modules/CombatHud/GunsightAreas.lua"
 COMBATHUD = ADDON / "Modules/CombatHud/CombatHud.lua"
 LAYOUT = ADDON / "Core/Layout.lua"
 CONFIG = ADDON / "Core/Config.lua"
+FRAMEHELPERS = ADDON / "Core/FrameHelpers.lua"
 TOC = ADDON / "forever-stuwave.toc"
 MOCKUP = HERE.parent / "mockups" / "gunsight-modules-concepts-v7-2026-10-08.html"
 TEXTURES = ADDON / "Media" / "Textures"
@@ -310,6 +311,7 @@ local function boot(opts)
     UnitCanAttack = function() return TARGET.attackable end
     loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
     loadAddonFile(CONFIG_SRC, "Core/Config.lua")
+    loadAddonFile(FRAMEHELPERS_SRC, "Core/FrameHelpers.lua")
     loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
     if opts.realAreas then
         -- the REAL registry, so the target side rules apply (no target hides the host and stops the module)
@@ -433,7 +435,7 @@ resetWorld()
 SetScreen(1440)
 FS.IsSecret = function(v) return false end
 stubTheme_(); stubHud_()
-loadAddonFile(LAYOUT_SRC, "Core/Layout.lua"); loadAddonFile(CONFIG_SRC, "Core/Config.lua"); loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
+loadAddonFile(LAYOUT_SRC, "Core/Layout.lua"); loadAddonFile(CONFIG_SRC, "Core/Config.lua"); loadAddonFile(FRAMEHELPERS_SRC, "Core/FrameHelpers.lua"); loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
 UnitClass = function() return "Class", "WARLOCK" end
 FS.GunsightAreas = {}
 loadAddonFile(CLASS_SRC, "Modules/CombatHud/GunsightClass.lua")
@@ -677,7 +679,7 @@ spec, host = mount("lower")
 check(next(DEGRADED) == nil, "a Druid event was refused: " .. tostring(next(DEGRADED)))
 """)
 
-case("a_refused_power_event_is_logged_once_and_the_other_still_works_the_spare_one_is_silent")(r"""
+case("a_refused_power_event_is_recorded_quietly_and_the_other_still_works")(r"""
 boot({ class = "ROGUE", combo = 1 })
 KNOWN_EVENTS.UNIT_POWER_FREQUENT = nil
 local spec, host = mount("lower")
@@ -685,17 +687,17 @@ check(next(DEGRADED) == nil, "the spare UNIT_POWER_FREQUENT is optional, nothing
 COMBO = 4
 fire("UNIT_POWER_UPDATE", "player", "COMBO_POINTS")
 check(textOf(host, "4") and litCount(host) == 4, "UNIT_POWER_UPDATE still updates the pips and count")
-boot({ class = "ROGUE", combo = 1 })
+boot({ class = "ROGUE", combo = 1, db = {} })
 KNOWN_EVENTS.UNIT_POWER_UPDATE = nil
 spec, host = mount("lower")
-check(DEGRADED["gunsightclass_event_UNIT_POWER_UPDATE"], "the refused event is logged through the degrade path")
+check(next(DEGRADED) == nil, "a refused event is not a degrade line: " .. tostring(next(DEGRADED)))
+check(ForeverSTUwaveDB.unknownEvents and ForeverSTUwaveDB.unknownEvents.UNIT_POWER_UPDATE, "the refused event is recorded in the saved variables")
 check(textOf(host, "1"), "the module still draws")
 COMBO = 3
 fire("UNIT_POWER_FREQUENT", "player", "COMBO_POINTS")
 check(textOf(host, "3") and litCount(host) == 3, "UNIT_POWER_FREQUENT still updates the pips and count")
-DEGRADED["gunsightclass_event_UNIT_POWER_UPDATE"] = nil
 spec.onHide("lower"); spec.onShow("lower")
-check(DEGRADED["gunsightclass_event_UNIT_POWER_UPDATE"] == nil, "a second show does not log it again")
+check(next(DEGRADED) == nil, "a second show logs nothing either")
 check(PRINTED[1] == nil, "nothing is printed to chat")
 """)
 
@@ -1034,6 +1036,7 @@ def run_case(name: str, body: str, mu: dict, tn: dict) -> str | None:
     g = lua.globals()
     g.LAYOUT_SRC = LAYOUT.read_text(encoding="utf-8")
     g.CONFIG_SRC = CONFIG.read_text(encoding="utf-8")
+    g.FRAMEHELPERS_SRC = FRAMEHELPERS.read_text(encoding="utf-8")
     g.GUNSIGHT_SRC = GUNSIGHT.read_text(encoding="utf-8")
     g.CLASS_SRC = CLASS.read_text(encoding="utf-8")
     g.AREAS_SRC = AREAS.read_text(encoding="utf-8")

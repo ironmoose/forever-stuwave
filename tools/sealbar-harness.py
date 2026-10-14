@@ -533,7 +533,7 @@ def check_secret_throwing_and_unreadable_answers_hide_and_never_throw():
 
 def check_every_spellbook_event_reevaluates():
     seals = expected_seals()
-    for event in ("SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD"):
+    for event in ("SPELLS_CHANGED", "LEARNED_SPELL_IN_SKILL_LINE", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD"):
         lua = boot(known=[seals[0]])
         assert not shown(seal(lua, 2))
         g(lua).__learn(seals[1])
@@ -1177,7 +1177,7 @@ def check_spellbook_changes_in_combat_wait_for_regen():
     set_combat(lua, True)
     g(lua).__learn(seals[1])
     g(lua).__forget(seals[0])
-    for event in ("SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD"):
+    for event in ("SPELLS_CHANGED", "LEARNED_SPELL_IN_SKILL_LINE", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD"):
         fire(lua, event)
     assert blocked(lua) == 0, "SetAttribute, Show or Hide ran against a protected button in combat"
     assert spell_of(seal(lua, 1)) == seals[0] and shown(seal(lua, 1)), "a button changed in combat"

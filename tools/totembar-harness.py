@@ -519,7 +519,7 @@ def check_learning_a_totem_unlocks_just_that_element():
     lua = boot()
     set_combat(lua, False)
     lua.execute('__know("Stoneskin Totem")')
-    fire(lua, "LEARNED_SPELL_IN_TAB")
+    fire(lua, "LEARNED_SPELL_IN_SKILL_LINE")
     earth, fire_b = by_key(lua, "earth"), by_key(lua, "fire")
     assert not earth.fsLocked and earth._alpha == 1 and attr(earth, "type1") == "spell"
     assert not shown(earth.fsMold)
@@ -822,7 +822,7 @@ def check_a_locked_button_never_shows_an_arrow():
     f3 = by_key(lua3, "earth")
     over(f3, True)
     lua3.execute('__know("Stoneskin Totem")')
-    fire(lua3, "LEARNED_SPELL_IN_TAB")
+    fire(lua3, "LEARNED_SPELL_IN_SKILL_LINE")
     assert not f3.fsLocked and shown(f3.fsArrow), "the unlocked button under the cursor has no arrow"
 
 
@@ -998,7 +998,7 @@ def check_the_dismiss_all_attributes_are_written_out_of_combat_only():
     set_combat(lua, True)
     before = blocked(lua)
     lua.execute('__know("Stoneskin Totem")')
-    for event in ("SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP"):
+    for event in ("SPELLS_CHANGED", "LEARNED_SPELL_IN_SKILL_LINE", "PLAYER_LEVEL_UP"):
         fire(lua, event)
     assert blocked(lua) == before, "a protected write was tried in combat"
     assert attr(by_key(lua, "earth"), "shift-type2") is None, "written in combat"
@@ -1101,7 +1101,7 @@ def check_attribute_writes_wait_out_combat_and_replay_at_regen():
     set_combat(lua, True)
     before = blocked(lua)
     lua.execute('__know("Stoneskin Totem"); __spell("Totemic Recall", 36936, true)')
-    for event in ("SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD"):
+    for event in ("SPELLS_CHANGED", "LEARNED_SPELL_IN_SKILL_LINE", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD"):
         fire(lua, event)
     assert blocked(lua) == before, "a protected write was tried in combat"
     assert by_key(lua, "earth").fsLocked and attr(by_key(lua, "earth"), "type1") is None

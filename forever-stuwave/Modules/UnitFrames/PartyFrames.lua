@@ -2488,14 +2488,12 @@ local function Init()
     FS.partyEvents = moduleEvents
 
     -- Whether a buff spell is known, and the dispel set, are cached; a spellbook change
-    -- drops both and repaints. Event names are pcall-guarded (UNVERIFIED on this
-    -- client, like PLAYER_ROLES_ASSIGNED above).
+    -- drops both and repaints. Event names that this client does not have are skipped
+    -- quietly by FrameHelpers.RegisterEvents.
     if PLAYER_BUFFS or DISPELS.CLASS[PlayerClass()] then
         local spellEvents = CreateFrame("Frame")
-        for _, event in ipairs({ "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP",
-                                 "CHARACTER_POINTS_CHANGED", "PLAYER_TALENT_UPDATE" }) do
-            pcall(spellEvents.RegisterEvent, spellEvents, event)
-        end
+        FS.FrameHelpers.RegisterEvents(spellEvents, { "SPELLS_CHANGED", "LEARNED_SPELL_IN_SKILL_LINE", "PLAYER_LEVEL_UP",
+                                                      "CHARACTER_POINTS_CHANGED", "PLAYER_TALENT_UPDATE" })
         spellEvents:SetScript("OnEvent", function()
             ResetBuffSpellCache()
             DISPELS.cache = nil

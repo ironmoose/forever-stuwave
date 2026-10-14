@@ -165,7 +165,7 @@ local TB = {
     -- (FSTotemDestroy1..4, type destroytotem, totem-slot 1..4). /click presses LeftButton, the buttons carry no
     -- modifier-prefixed attribute and the bare totem-slot answers whatever modifier is held.
     DESTROY_ALL = "/click FSTotemDestroy1\n/click FSTotemDestroy2\n/click FSTotemDestroy3\n/click FSTotemDestroy4",
-    EVENTS = { "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD" },
+    EVENTS = { "SPELLS_CHANGED", "LEARNED_SPELL_IN_SKILL_LINE", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD" },
     -- state-only events: texture and Cooldown writes, legal in combat
     LIVE_EVENTS = { "SPELL_UPDATE_COOLDOWN", "PLAYER_TOTEM_UPDATE", "ACTIONBAR_SLOT_CHANGED",
         "SPELL_UPDATE_USABLE", "ACTIONBAR_UPDATE_USABLE", "PLAYER_REGEN_DISABLED" },
@@ -1789,11 +1789,11 @@ local function Apply()
     end
 
     local events = CreateFrame("Frame")
-    for _, event in ipairs(TB.EVENTS) do pcall(events.RegisterEvent, events, event) end
+    FS.FrameHelpers.RegisterEvents(events, TB.EVENTS)
     events:RegisterEvent("PLAYER_REGEN_ENABLED")
     events:RegisterEvent("UPDATE_BINDINGS")
-    for _, event in ipairs(TB.LIVE_EVENTS) do pcall(events.RegisterEvent, events, event) end
-    for _, event in ipairs(TB.OPTIONAL_EVENTS) do pcall(events.RegisterEvent, events, event) end
+    FS.FrameHelpers.RegisterEvents(events, TB.LIVE_EVENTS)
+    FS.FrameHelpers.RegisterEvents(events, TB.OPTIONAL_EVENTS)
     events:SetScript("OnEvent", OnEvent)
 
     if FS.Layout.OnRescale then FS.Layout.OnRescale(Sync) end

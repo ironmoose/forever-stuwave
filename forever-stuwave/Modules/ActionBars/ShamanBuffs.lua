@@ -710,7 +710,7 @@ end
 ShamanBuffs.NoteCast = function(spellId) return NoteCast(spellId, Now()) end
 
 local SPELLBOOK_EVENTS = {
-    SPELLS_CHANGED = true, PLAYER_LEVEL_UP = true, LEARNED_SPELL_IN_SKILL_LINE = true, LEARNED_SPELL_IN_TAB = true,
+    SPELLS_CHANGED = true, PLAYER_LEVEL_UP = true, LEARNED_SPELL_IN_SKILL_LINE = true,
 }
 
 local function OnEvent(_, event, unit, _, spellId)
@@ -758,14 +758,13 @@ local events
 function ShamanBuffs.Start()
     if events then return true end
     events = CreateFrame("Frame")
-    local function reg(event, unitOnly, optional)
-        local ok, err
+    -- an event this client lacks is skipped and recorded quietly by FrameHelpers, never printed
+    local function reg(event, unitOnly)
         if unitOnly then
-            ok, err = pcall(events.RegisterUnitEvent, events, event, "player")
+            FH.RegisterEvent(events, event, "player")
         else
-            ok, err = pcall(events.RegisterEvent, events, event)
+            FH.RegisterEvent(events, event)
         end
-        if not ok and not optional then LogOnce("event_" .. event, event .. " cannot be registered (" .. tostring(err) .. ")") end
     end
     reg("UNIT_SPELLCAST_SUCCEEDED", true)
     reg("UNIT_INVENTORY_CHANGED", true)
@@ -773,7 +772,7 @@ function ShamanBuffs.Start()
     reg("PLAYER_EQUIPMENT_CHANGED")
     reg("PLAYER_REGEN_ENABLED")
     reg("PLAYER_ENTERING_WORLD")
-    for event in pairs(SPELLBOOK_EVENTS) do reg(event, false, true) end
+    for event in pairs(SPELLBOOK_EVENTS) do reg(event) end
     events:SetScript("OnEvent", function(...)
         local ok, err = pcall(OnEvent, ...)
         if not ok then LogOnce("event", err) end

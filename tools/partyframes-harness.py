@@ -1009,7 +1009,7 @@ def _check_dispel_halo(c_unitauras: bool) -> None:
 
 ALL_RAID = "__raid={Magic=true,Disease=true,Poison=true,Curse=true}"
 PURIFY, CLEANSE, DISPEL_MAGIC, DISPEL_MAGIC_2, CURE_DISEASE = 1152, 4987, 527, 988, 528
-SPELLBOOK_DISPEL_EVENTS = ("SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP")
+SPELLBOOK_DISPEL_EVENTS = ("SPELLS_CHANGED", "LEARNED_SPELL_IN_SKILL_LINE", "PLAYER_LEVEL_UP")
 
 
 def _dispel_rt(player_class: str, known, extra: str = "") -> LuaRuntime:
@@ -2654,7 +2654,7 @@ def _check_buff_unknown_spell() -> None:
     assert _tiles(row) == [], "nothing resolves the name: not known"
 
 
-SPELLBOOK_EVENTS = ("SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP",
+SPELLBOOK_EVENTS = ("SPELLS_CHANGED", "LEARNED_SPELL_IN_SKILL_LINE", "PLAYER_LEVEL_UP",
                     "CHARACTER_POINTS_CHANGED", "PLAYER_TALENT_UPDATE")
 
 

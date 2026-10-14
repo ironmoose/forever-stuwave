@@ -48,6 +48,7 @@ SHOCKS = ADDON / "Modules/CombatHud/GunsightShamanShocks.lua"
 GUNSIGHT = ADDON / "Modules/CombatHud/Gunsight.lua"
 LAYOUT = ADDON / "Core/Layout.lua"
 CONFIG = ADDON / "Core/Config.lua"
+FRAMEHELPERS = ADDON / "Core/FrameHelpers.lua"
 THEME = ADDON / "Core/Theme.lua"
 TOC = ADDON / "forever-stuwave.toc"
 AREAS = ADDON / "Modules/CombatHud/GunsightAreas.lua"
@@ -208,6 +209,7 @@ local function boot(opts)
     assert(loadstring(HAS_TARGET_SRC, "@Theme.lua"))()
     loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
     loadAddonFile(CONFIG_SRC, "Core/Config.lua")
+    loadAddonFile(FRAMEHELPERS_SRC, "Core/FrameHelpers.lua")
     loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
     if opts.realAreas then
         TARGET = { exists = not opts.noTarget }
@@ -308,7 +310,7 @@ resetWorld()
 SetScreen(1440)
 FS.IsSecret = function(v) return false end
 stubTheme_(); stubHud_()
-loadAddonFile(LAYOUT_SRC, "Core/Layout.lua"); loadAddonFile(CONFIG_SRC, "Core/Config.lua"); loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
+loadAddonFile(LAYOUT_SRC, "Core/Layout.lua"); loadAddonFile(CONFIG_SRC, "Core/Config.lua"); loadAddonFile(FRAMEHELPERS_SRC, "Core/FrameHelpers.lua"); loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
 UnitClass = function() return "Shaman", "SHAMAN" end
 FS.GunsightAreas = {}
 loadAddonFile(SHAMAN_SRC, "Modules/CombatHud/GunsightShaman.lua")
@@ -779,7 +781,7 @@ check(#calls == n + 1, "once it took, only the show's own forced re-read calls a
 
 case("with_the_real_shocks_file_a_timer_bar_pole_has_no_ring_and_keeps_the_NOVA_tag")(r"""
 boot({ realShocks = true })
-for _, e in ipairs({ "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_USABLE", "LEARNED_SPELL_IN_TAB" }) do KNOWN_EVENTS[e] = true end
+for _, e in ipairs({ "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_USABLE", "LEARNED_SPELL_IN_SKILL_LINE" }) do KNOWN_EVENTS[e] = true end
 KNOWN_SPELLS[408341] = true
 C_Spell.GetSpellInfo = function(n) if n == "Fire Nova" then return { spellID = 408341, name = "Fire Nova" } end end
 C_Spell.GetSpellCooldown = function() return { isActive = false, isOnGCD = false, startTime = 0, duration = 0 } end
@@ -799,7 +801,7 @@ check(isVisible(sec.novaText) and isVisible(sec.pip), "the Fire totem stands: th
 
 case("with_the_real_shocks_file_the_nova_ring_follows_the_fire_head_and_is_drawn_over_it")(r"""
 boot({ realShocks = true })
-for _, e in ipairs({ "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_USABLE", "LEARNED_SPELL_IN_TAB" }) do KNOWN_EVENTS[e] = true end
+for _, e in ipairs({ "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_USABLE", "LEARNED_SPELL_IN_SKILL_LINE" }) do KNOWN_EVENTS[e] = true end
 KNOWN_SPELLS[408341] = true
 C_Spell.GetSpellInfo = function(n) if n == "Fire Nova" then return { spellID = 408341, name = "Fire Nova" } end end
 C_Spell.GetSpellCooldown = function() return { isActive = false, isOnGCD = false, startTime = 0, duration = 0 } end
@@ -969,6 +971,7 @@ def run_case(name: str, body: str) -> str | None:
     g = lua.globals()
     g.LAYOUT_SRC = LAYOUT.read_text(encoding="utf-8")
     g.CONFIG_SRC = CONFIG.read_text(encoding="utf-8")
+    g.FRAMEHELPERS_SRC = FRAMEHELPERS.read_text(encoding="utf-8")
     g.GUNSIGHT_SRC = GUNSIGHT.read_text(encoding="utf-8")
     g.SHAMAN_SRC = SHAMAN.read_text(encoding="utf-8")
     g.TOTEMS_SRC = TOTEMS.read_text(encoding="utf-8")

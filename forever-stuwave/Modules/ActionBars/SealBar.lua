@@ -89,7 +89,7 @@ local SB = {
     ROWS = { { key = "seal", prefix = "FSSealButton" }, { key = "aura", prefix = "FSAuraButton" } },
     ROW_INDEX = { seal = 1, aura = 2 },
     EVENTS = {
-        "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD",
+        "SPELLS_CHANGED", "LEARNED_SPELL_IN_SKILL_LINE", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD",
         "UPDATE_SHAPESHIFT_FORMS",
     },
     -- state-only events: texture and Cooldown writes, legal in combat
@@ -692,7 +692,7 @@ local function Apply()
     end
 
     local events = CreateFrame("Frame")
-    for _, event in ipairs(SB.EVENTS) do pcall(events.RegisterEvent, events, event) end
+    FS.FrameHelpers.RegisterEvents(events, SB.EVENTS)
     events:RegisterEvent("PLAYER_REGEN_ENABLED")
     events:RegisterEvent("UPDATE_BINDINGS")
     for _, event in ipairs(SB.LIVE_EVENTS) do events:RegisterEvent(event) end

@@ -609,7 +609,7 @@ local function OnEvent(_, event, arg1, arg2, arg3)
             ok, err = pcall(RefreshAll, GetTime())
         end
         if not ok then LogOnce("update", err) end
-    elseif event == "SPELLS_CHANGED" or event == "PLAYER_LEVEL_UP" or event == "LEARNED_SPELL_IN_TAB" then
+    elseif event == "SPELLS_CHANGED" or event == "PLAYER_LEVEL_UP" or event == "LEARNED_SPELL_IN_SKILL_LINE" then
         if event ~= "PLAYER_LEVEL_UP" then pcall(ResolveNames) end
         local ok, err = pcall(T.RefreshUnlocked)
         if not ok then LogOnce("unlocked", err) end
@@ -627,12 +627,12 @@ function T.Start()
     started = true
     events = CreateFrame("Frame")
     events:SetScript("OnEvent", OnEvent)
-    for _, e in ipairs({ "PLAYER_TOTEM_UPDATE", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "PLAYER_ENTERING_WORLD",
-        "SPELLS_CHANGED", "PLAYER_LEVEL_UP", "LEARNED_SPELL_IN_TAB" }) do
-        pcall(events.RegisterEvent, events, e)        -- a client without an event refuses it: skipped, not an error
+    -- a client without an event refuses it: FrameHelpers skips it quietly, it is not an error
+    FS.FrameHelpers.RegisterEvents(events, { "PLAYER_TOTEM_UPDATE", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
+        "PLAYER_ENTERING_WORLD", "SPELLS_CHANGED", "PLAYER_LEVEL_UP", "LEARNED_SPELL_IN_SKILL_LINE" })
+    if not FS.FrameHelpers.RegisterEvent(events, "UNIT_SPELLCAST_SUCCEEDED", "player") then
+        FS.FrameHelpers.RegisterEvent(events, "UNIT_SPELLCAST_SUCCEEDED")
     end
-    local ok = events.RegisterUnitEvent and pcall(events.RegisterUnitEvent, events, "UNIT_SPELLCAST_SUCCEEDED", "player")
-    if not ok then pcall(events.RegisterEvent, events, "UNIT_SPELLCAST_SUCCEEDED") end
     ResolveNames()
     pcall(T.Refresh)
 end

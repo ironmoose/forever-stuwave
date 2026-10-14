@@ -38,6 +38,7 @@ HERE = Path(__file__).resolve().parent
 ADDON = HERE.parent / "forever-stuwave"
 TOTEMS = Path(os.environ.get("SHAMANTOTEMS_LUA") or ADDON / "Modules/CombatHud/ShamanTotems.lua")
 TOTEMBAR = ADDON / "Modules/ActionBars/TotemBar.lua"
+FRAMEHELPERS = ADDON / "Core/FrameHelpers.lua"
 TOC = ADDON / "forever-stuwave.toc"
 
 MOCK = r"""
@@ -128,6 +129,12 @@ STEAM = { name = "Searing Totem", start = 990, dur = 30, spell = 3599 }
 function load(opts)
     opts = opts or {}
     CLASS = opts.class or "SHAMAN"
+    if not FS.FrameHelpers then
+        -- the real helper the module registers through; its own listener frames are not the module's, so they are not tracked
+        FS.Theme = FS.Theme or {}
+        assert(loadstring(HELPERS_SRC, "@FrameHelpers.lua"))("forever-stuwave", FS)
+        for k in pairs(FRAMES) do FRAMES[k] = nil end
+    end
     local fn = assert(loadstring(TOTEMS_SRC, "@ShamanTotems.lua"))
     fn("forever-stuwave", FS)
     fire("PLAYER_LOGIN")
@@ -670,20 +677,20 @@ fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 77001)
 check(not T.IsFar(1) and T.Get(1).posY == nil, "once resolved, the localized Projection clears FAR")
 """)
 
-case("learned_spell_in_tab_is_listened_to_where_the_client_has_it_and_skipped_where_not")(r"""
+case("the_skill_line_learn_event_is_listened_to_where_the_client_has_it_and_skipped_quietly_where_not")(r"""
 local T = load()
 check(next(DEGRADED) == nil, "an event this client lacks is not a degrade")
 local seen = false
-for _, f in ipairs(FRAMES) do if f.events.LEARNED_SPELL_IN_TAB then seen = true end end
+for _, f in ipairs(FRAMES) do if f.events.LEARNED_SPELL_IN_SKILL_LINE then seen = true end end
 check(not seen, "not registered where the client has no such event")
 for k in pairs(FRAMES) do FRAMES[k] = nil end
 FS.ShamanTotems = nil
-KNOWN_EVENTS.LEARNED_SPELL_IN_TAB = true
+KNOWN_EVENTS.LEARNED_SPELL_IN_SKILL_LINE = true
 LEVEL = 1
 local T2 = load()
 check(not T2.IsUnlocked(3), "water is locked at level 1")
 KNOWN_SPELLS[5394] = true
-fire("LEARNED_SPELL_IN_TAB")
+fire("LEARNED_SPELL_IN_SKILL_LINE")
 check(T2.IsUnlocked(3), "a learned water totem opens the element")
 """)
 
@@ -751,6 +758,7 @@ def run_case(name: str, body: str) -> str | None:
     lua = LuaRuntime(unpack_returned_tuples=True, register_eval=False)
     lua.execute(MOCK)
     lua.globals().TOTEMS_SRC = TOTEMS.read_text(encoding="utf-8")
+    lua.globals().HELPERS_SRC = FRAMEHELPERS.read_text(encoding="utf-8")
     try:
         lua.execute(body)
     except LuaError as e:

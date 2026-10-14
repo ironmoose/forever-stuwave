@@ -2383,14 +2383,14 @@ end
 local events = CreateFrame("Frame")
 for _, e in ipairs({ "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED",
                      "PLAYER_TARGET_CHANGED",
-                     "SPELLS_CHANGED", "PLAYER_LEVEL_UP", "LEARNED_SPELL_IN_TAB",
+                     "SPELLS_CHANGED", "PLAYER_LEVEL_UP", "LEARNED_SPELL_IN_SKILL_LINE",
                      "UPDATE_BINDINGS", "ACTIONBAR_SLOT_CHANGED", "ACTIONBAR_PAGE_CHANGED" }) do
-    -- Individually guarded: an event absent on this client (16001 has no
-    -- LEARNED_SPELL_IN_TAB) should skip, not abort the whole file.
-    pcall(events.RegisterEvent, events, e)
+    -- Individually guarded: an event absent on this client should skip quietly
+    -- (FrameHelpers records it), not abort the whole file.
+    FS.FrameHelpers.RegisterEvent(events, e)
 end
 -- Our own successful casts only (the held buff verdict, ClearHeldOnCast).
-pcall(events.RegisterUnitEvent, events, "UNIT_SPELLCAST_SUCCEEDED", "player")
+FS.FrameHelpers.RegisterEvent(events, "UNIT_SPELLCAST_SUCCEEDED", "player")
 
 local function BuildPending()
     if not enabled or InCombatSafe() then return end
@@ -2456,7 +2456,7 @@ local function Relearn()
 end
 handlers.SPELLS_CHANGED = Relearn
 handlers.PLAYER_LEVEL_UP = Relearn
-handlers.LEARNED_SPELL_IN_TAB = Relearn
+handlers.LEARNED_SPELL_IN_SKILL_LINE = Relearn
 -- the next tile's key label: a rebind, or a spell moved on the bars (or the main bar's page). These
 -- events fire in bursts (dragging a spell, a page flip) and change nothing but that label, so only
 -- the next tile is redrawn, not the whole HUD.

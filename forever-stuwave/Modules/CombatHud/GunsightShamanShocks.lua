@@ -485,7 +485,7 @@ local function Reread(s, restart)
     if not ok then LogOnce("refresh", "refresh failed: " .. tostring(err)) end
 end
 
-local BOOK_EVENTS = { SPELLS_CHANGED = true, LEARNED_SPELL_IN_TAB = true, PLAYER_LEVEL_UP = true }
+local BOOK_EVENTS = { SPELLS_CHANGED = true, LEARNED_SPELL_IN_SKILL_LINE = true, PLAYER_LEVEL_UP = true }
 local COOLDOWN_EVENTS = { SPELL_UPDATE_COOLDOWN = true, SPELL_UPDATE_USABLE = true, PLAYER_REGEN_ENABLED = true, PLAYER_REGEN_DISABLED = true }
 
 local function OnViewEvent(s, event)
@@ -515,20 +515,17 @@ local function OnOwnCast(s, _, _, _, spellID)
 end
 
 local VIEW_EVENTS = {
-    "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_USABLE", "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP",
+    "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_USABLE", "SPELLS_CHANGED", "LEARNED_SPELL_IN_SKILL_LINE", "PLAYER_LEVEL_UP",
     "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED",
 }
 
--- A client refuses an event it does not know: each registration is its own pcall, and a refusal is logged once
+-- A client refuses an event it does not know: FrameHelpers skips it and records it in the saved variables, no chat line
 local function SetViewEvents(s, on)
     local ev = s.events
-    for _, e in ipairs(VIEW_EVENTS) do
-        if on then
-            local ok, err = pcall(ev.RegisterEvent, ev, e)
-            if not ok then LogOnce("event_" .. e, e .. " cannot be registered on this client (" .. tostring(err) .. ")") end
-        else
-            pcall(ev.UnregisterEvent, ev, e)
-        end
+    if on then
+        FS.FrameHelpers.RegisterEvents(ev, VIEW_EVENTS)
+    else
+        for _, e in ipairs(VIEW_EVENTS) do pcall(ev.UnregisterEvent, ev, e) end
     end
 end
 
