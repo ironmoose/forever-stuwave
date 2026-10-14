@@ -575,7 +575,7 @@ function UI.Toggle(content, o)
     local master = o.master == true
     local row = NewRow(content, {
         label = o.label, tip = o.tip, half = o.half, height = master and 34 or ROW_H,
-        size = master and 12 or 11, inset = master and 10 or 0,
+        size = master and 12 or 11, inset = master and 10 or o.inset or 0,
     })
     if master then
         Theme.AddCutSliceFill(row, { C.violet[1], C.violet[2], C.violet[3], 0.07 }, 6)
@@ -1325,6 +1325,20 @@ local function BuffTabGroup(page)
     UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip })
 end
 
+-- The Shaman totem presets (TotemPresets.lua): the dial's switch, then its parts and cues, each with its own off switch
+-- and its own ? tip. Out of the list for a client or class without the totem tab.
+local function TotemPresetsGroup(page)
+    local presets = FS.TotemPresets
+    if not (presets and presets.SETTINGS and presets.Applies and presets.Applies()) then return end
+    UI.Header(page, "Totem presets")
+    local S = presets.SETTINGS
+    UI.Toggle(page, { label = S.dial.label, key = S.dial.key, tip = S.dial.tip })
+    for _, name in ipairs({ "dialPlate", "dialRight", "dialWheel", "waitPulse", "waitSound", "appliedFlash", "appliedSound" }) do
+        local def = S[name]
+        UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip, inset = 14 })
+    end
+end
+
 -- The spell icon style for the class tabs (SpellArt.lua): gradient or the game's own icons, repainted live. Left out until a
 -- tab has drawn a spell icon (a class with none has nothing to style); its ? tip explains it.
 local function SpellIconGroup(page)
@@ -1355,6 +1369,7 @@ CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, buil
     UI.Toggle(page, { label = "Background grid", key = "actionbars.grid" })
     FiveSecondGroup(page)
     BuffTabGroup(page)
+    TotemPresetsGroup(page)
     SpellIconGroup(page)
 end })
 

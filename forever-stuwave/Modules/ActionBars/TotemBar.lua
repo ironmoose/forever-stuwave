@@ -82,6 +82,13 @@
 --   * SEAT: TotemBar.HostPoint / TotemBar.SlotPoint, answered by the class shoulder while it stands, with the
 --     same fallback as SealBar (above the stance bar's seat).
 --
+--   * CELLS: TotemPresets.lua adds up to two more buttons after the six, FSTotemButton7 (the preset dial) and 8
+--     (GNARLY), through TotemBar.AddCell at its own load, before the tab builds. A cell def carries `cell = true`
+--     and `enabled()`; the tab is 6 + (cells that are enabled) columns wide (TotemBar.Cols, which ClassShoulder.lua
+--     reads for the shoulder's width), the cells stand after the six in order, a cell that is off hides. TotemDial.lua
+--     styles and paints them; this file only seats, shows, hides and asks them for their attributes in Sync (out of
+--     combat). Without those two files the tab is the six stock buttons it always was.
+--
 -- Design reference only: ShamanForever (GPL-3) was read for what a totem bar does, no code was taken from it.
 -- Loads after SealBar.lua. Nothing here is verified in game.
 
@@ -168,6 +175,7 @@ local TB = {
     list = {},          -- the six buttons, by index
     byKey = {},         -- and by key
     destroy = {},       -- the four hidden dismiss buttons, by totem slot
+    cells = {},         -- the cell defs TotemPresets.lua added (also appended to BUTTONS), in order
     picker = nil,
     pending = {},       -- key -> { id, sent, at, ignore }: a multi-cast pick not in the slot yet (sent = the call ran,
                         -- at = when; ignore = slot contents that are not a native change)
@@ -519,6 +527,10 @@ local function ShowTooltip(self)
     local tip = GameTooltip
     local def = self.fsDef
     if not (tip and def) then return end
+    if def.cell then
+        if FS.TotemDial and FS.TotemDial.Tooltip then FS.TotemDial.Tooltip(self) end
+        return
+    end
     AnchorTooltip(self)
     local c = self.fsColor
     if self.fsLocked then
@@ -699,19 +711,21 @@ local function StyleButton(button, size, scale)
     FS.FrameHelpers.SeatButtonHotkey(button, textHost)
 
     -- the pole crown: a small badge on an element button, the whole face glyph on the set and recall buttons
-    if not button.fsGlyph then
+    if def.glyph and not button.fsGlyph then
         local glyph = textHost:CreateTexture(nil, "OVERLAY", nil, 2)
         glyph:SetTexture(MEDIA .. def.glyph .. ".tga")
         glyph:SetVertexColor(button.fsColor[1], button.fsColor[2], button.fsColor[3], TB.GLYPH_ALPHA)
         button.fsGlyph = glyph
     end
-    button.fsGlyph:ClearAllPoints()
-    if def.slot then
-        button.fsGlyph:SetSize(13 * scale, 13 * scale)
-        button.fsGlyph:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", 4 * scale, 6 * scale)
-    else
-        button.fsGlyph:SetSize(26 * scale, 26 * scale)
-        button.fsGlyph:SetPoint("CENTER", button, "CENTER", 0, 0)
+    if button.fsGlyph then
+        button.fsGlyph:ClearAllPoints()
+        if def.slot then
+            button.fsGlyph:SetSize(13 * scale, 13 * scale)
+            button.fsGlyph:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", 4 * scale, 6 * scale)
+        else
+            button.fsGlyph:SetSize(26 * scale, 26 * scale)
+            button.fsGlyph:SetPoint("CENTER", button, "CENTER", 0, 0)
+        end
     end
 
     -- the element underline
@@ -727,8 +741,8 @@ local function StyleButton(button, size, scale)
         button.fsUnderline:SetHeight(2 * scale)
     end
 
-    -- a locked button: the dotted mold and its unlock level
-    if not button.fsMold then
+    -- a locked button: the dotted mold and its unlock level (a cell is never locked)
+    if def.unlock and not button.fsMold then
         local mold = button:CreateTexture(nil, "ARTWORK", nil, 1)
         mold:SetTexture(MEDIA .. "totem_mold.tga")
         local m = FS.Theme.COLOR_MUTED or { 0.62, 0.58, 0.77, 1 }
@@ -737,7 +751,7 @@ local function StyleButton(button, size, scale)
         mold:Hide()
         button.fsMold = mold
     end
-    if not button.fsLockText then
+    if def.unlock and not button.fsLockText then
         local text = textHost:CreateFontString(nil, "OVERLAY")
         FS.Theme.ApplyMono(text, 11, FS.Theme.COLOR_MUTED or FS.Theme.COLOR_TEXT_WHITE)
         text:SetPoint("CENTER", button, "CENTER", 0, 0)
@@ -777,6 +791,9 @@ local function StyleButton(button, size, scale)
         arrow:SetFrameLevel(textHost:GetFrameLevel() + 1)
         if FS.TotemPiece then FS.TotemPiece.Seat(arrow, scale) end
     end
+
+    -- a cell (TotemDial.lua) wears its own face on this chrome
+    if def.cell and FS.TotemDial and FS.TotemDial.StyleCell then FS.TotemDial.StyleCell(button, textHost, scale) end
 end
 
 local function BuildButton(host, def, index)
@@ -1224,22 +1241,53 @@ function TotemBar.SlotPoint(col)
     return "BOTTOMLEFT", TB.host, "BOTTOMLEFT", (TB.PAD + (col - 1) * pitch) * s, TB.PB * s
 end
 
+local function CellOn(def)
+    if not def.enabled then return true end
+    local ok, on = pcall(def.enabled)
+    return ok and on == true
+end
+
+-- The columns the tab stands on: the six stock buttons and one more for each cell that is on.
+function TotemBar.Cols()
+    local cols = TB.COLS
+    for _, def in ipairs(TB.cells) do
+        if CellOn(def) then cols = cols + 1 end
+    end
+    return cols
+end
+
 local function SeatButtons()
     local s = Scale()
-    TB.host:SetSize((2 * TB.PAD + TB.COLS * TB.BTN + (TB.COLS - 1) * TB.GAP) * s, (TB.PT + TB.BTN + TB.PB) * s)
+    local cols = TotemBar.Cols()
+    TB.host:SetSize((2 * TB.PAD + cols * TB.BTN + (cols - 1) * TB.GAP) * s, (TB.PT + TB.BTN + TB.PB) * s)
     for _, button in ipairs(TB.list) do StyleButton(button, TB.BTN * s, s) end
 end
 
 local function ApplyButtons()
+    local cellCol = TB.COLS
     for i, button in ipairs(TB.list) do
-        button:ClearAllPoints()
-        button:SetPoint(TotemBar.SlotPoint(i))
         local def = button.fsDef
-        if def.slot then ApplyElement(button, def) else ApplyFixed(button, def) end
-        UpdateHotkey(button)
-        PaintRing(button)
-        UpdateTotemSweep(button)
-        button:Show()
+        if def.cell then
+            -- the cells stand after the six, in order, and a cell that is off hides (Show and Hide are out of combat)
+            if CellOn(def) then
+                cellCol = cellCol + 1
+                button:ClearAllPoints()
+                button:SetPoint(TotemBar.SlotPoint(cellCol))
+                if FS.TotemDial and FS.TotemDial.ApplyCell then FS.TotemDial.ApplyCell(button, def) end
+                UpdateHotkey(button)
+                button:Show()
+            else
+                button:Hide()
+            end
+        else
+            button:ClearAllPoints()
+            button:SetPoint(TotemBar.SlotPoint(i))
+            if def.slot then ApplyElement(button, def) else ApplyFixed(button, def) end
+            UpdateHotkey(button)
+            PaintRing(button)
+            UpdateTotemSweep(button)
+            button:Show()
+        end
     end
 end
 
@@ -1341,6 +1389,10 @@ local function Sync()
         if not ok then WarnOnce("totembar_sync", "totem tab update failed (" .. tostring(err) .. ")") end
     end
     TB.needsResync = false
+    if FS.TotemDial and FS.TotemDial.Refresh then
+        local ok, err = pcall(FS.TotemDial.Refresh)
+        if not ok then WarnOnce("totembar_dial", "totem preset cells failed to paint (" .. tostring(err) .. ")") end
+    end
 end
 TotemBar.Sync = Sync
 
@@ -1595,8 +1647,53 @@ function TotemBar.Pick(key, spellId)
 end
 
 -------------------------------------------------------------------------------
--- Init
+-- Cells and what the preset code reads (TotemPresets.lua, TotemDial.lua)
 -------------------------------------------------------------------------------
+
+-- Adds a cell button after the existing ones. Only before the tab builds (the buttons are built once and their
+-- order is the saved keybind order): a late call is refused. A def is { key, title, color, label, enabled = function() }.
+function TotemBar.AddCell(def)
+    if TB.built or type(def) ~= "table" or type(def.key) ~= "string" or TB.byKey[def.key] then return false end
+    for _, other in ipairs(TB.cells) do
+        if other.key == def.key then return false end
+    end
+    def.cell = true
+    TB.cells[#TB.cells + 1] = def
+    TB.BUTTONS[#TB.BUTTONS + 1] = def
+    _G["BINDING_NAME_CLICK FSTotemButton" .. #TB.BUTTONS .. ":LeftButton"] = def.label
+    return true
+end
+
+function TotemBar.Button(key)
+    return TB.byKey[key]
+end
+
+-- The cell defs added so far, in order.
+function TotemBar.Cells()
+    return TB.cells
+end
+
+-- The element's totems the player knows right now, as { id (the rank the player knows), name, icon } entries (the
+-- picker's own list), or an empty list. Reads only.
+function TotemBar.KnownList(key)
+    local button = TB.byKey[key]
+    if not (button and button.fsDef.slot) then return {} end
+    local ok, st = pcall(Evaluate, button.fsDef)
+    return ok and st and st.list or {}
+end
+
+-- What the element's button casts now: { id, name, icon } or nil.
+function TotemBar.CurrentPick(key)
+    local button = TB.byKey[key]
+    return button and button.fsPick or nil
+end
+
+-- The rank 1 totem table of an element: { id, English name } entries in the default order.
+function TotemBar.Static(key)
+    return TB.TOTEMS[key]
+end
+
+TotemBar.ELEMENTS = { "fire", "earth", "water", "air" }
 
 local function Build()
     TB.host = CreateFrame("Frame", "FSTotemBar", UIParent)
@@ -1635,6 +1732,11 @@ end
 local function OnEvent(_, event)
     if event == "PLAYER_REGEN_ENABLED" then
         UpdateAllUsable()
+        -- a preset switch picked in combat applies first, so the sync below writes what it chose
+        if FS.TotemPresets and FS.TotemPresets.OnRegen then
+            local ok, err = pcall(FS.TotemPresets.OnRegen)
+            if not ok then WarnOnce("totembar_presets", "a queued preset switch failed (" .. tostring(err) .. ")") end
+        end
         if TB.pendingSync then
             Sync()
         else

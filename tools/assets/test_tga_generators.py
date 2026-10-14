@@ -74,6 +74,12 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         **{f"totem_{name}": (32, 32) for name in ("fire", "earth", "water", "air", "set", "recall")},
         "totem_mold": (64, 64),
     },
+    # generate_totem_dial.py: the preset dial's ring arcs (one per arc count n, position i and look: t quiet, g done,
+    # k next, c core, d locked), each a 64x64 canvas covering the whole 38 px button, and the dashed empty ring.
+    "totem_dial": {
+        **{f"totem_dial_n{n}_{i}_{kind}": (64, 64) for n in range(1, 5) for i in range(1, n + 1) for kind in "tgkcd"},
+        "totem_dial_empty": (64, 64),
+    },
     # generate_totem_piece.py: the totem tab's hover piece and its chevron (256x128 canvases, 4 texels per design
     # px), the bump's baked stroke (256 square) and halo (128x64).
     "totem_piece": {
@@ -106,16 +112,6 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "deck_led": (32, 8),
         # Same dims as cell_slant.tga, which the micro keys reuse for the fill.
         "deck_key_slant_outline": (32, 32),
-    },
-    "deck_glyphs": {
-        name: (32, 32)
-        for name in (
-            "glyph_character", "glyph_professions", "glyph_spellbook",
-            "glyph_talents", "glyph_legacy", "glyph_questlog", "glyph_guild",
-            "glyph_lfd", "glyph_collections", "glyph_help", "glyph_store",
-            "glyph_mainmenu", "glyph_achievement", "glyph_ej", "glyph_pvp",
-            "glyph_socials", "glyph_worldmap", "glyph_housing",
-        )
     },
     # generate_cut_corner_outline.py writes the four-corner chamfered nine-slice
     # pair (slice_cut_outline, slice_cut_fill) and the two-corner (top-left +

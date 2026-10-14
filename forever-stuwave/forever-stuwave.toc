@@ -73,6 +73,8 @@ Modules/ActionBars/ClassShoulder.lua
 Modules/ActionBars/SealBar.lua
 Modules/ActionBars/TotemPiece.lua
 Modules/ActionBars/TotemBar.lua
+Modules/ActionBars/TotemPresets.lua
+Modules/ActionBars/TotemDial.lua
 Modules/ActionBars/ShamanBuffs.lua
 Modules/ActionBars/BuffTab.lua
 Modules/ActionBars/FiveSecondTab.lua

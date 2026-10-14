@@ -1047,6 +1047,56 @@ function T.the_unit_frames_page_has_the_buff_tab_combat_state_switch_for_a_shama
     no(row("Buff tab combat state"), "a client without the tab has no row")
 end
 
+-- ---- the Shaman totem presets group on the Unit Frames page (TotemPresets.lua's SETTINGS) ----
+
+local PRESET_ROWS = {
+    dial = "Preset dial", dialPlate = "Name plate", dialRight = "Cycle with right click",
+    dialWheel = "Cycle with mouse wheel", waitPulse = "Waiting pulse", waitSound = "Waiting sound",
+    appliedFlash = "Applied flash", appliedSound = "Applied sound",
+}
+
+local function withTotemPresets(applies)
+    return function()
+        unitFramesDefaults()
+        local S = {}
+        for name, label in pairs(PRESET_ROWS) do
+            S[name] = { key = "totems." .. name, default = name ~= "waitSound" and name ~= "appliedSound", label = label,
+                tip = "Tip " .. name .. "." }
+            FS.Config.RegisterDefault(S[name].key, S[name].default)
+        end
+        FS.TotemPresets = { SETTINGS = S, Applies = function() return applies end }
+    end
+end
+
+function T.the_unit_frames_page_has_the_totem_presets_group_with_one_switch_and_one_tip_per_cue()
+    local W = boot({ preWindow = withTotemPresets(true) })
+    W.Open("unitframes")
+    yes(headerY("TOTEM PRESETS"), "a Totem presets header")
+    for name, label in pairs(PRESET_ROWS) do
+        local r = row(label)
+        yes(r, label .. ": a row")
+        local found
+        for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
+        eq(found, "Tip " .. name .. ".", label .. ": explained by a ? tip")
+        eq(#texts(r), 3, label .. ": label, state and the ? icon only, no helper line")
+    end
+    yes(row("Preset dial").control.fsChecked, "the dial is on by default")
+    no(row("Waiting sound").control.fsChecked, "the waiting sound is off by default")
+    press("Waiting sound")
+    eq(FS.Config.Get("totems.waitSound"), true)
+    eq(FS.Config.Get("totems.appliedSound"), false, "the other cue is untouched")
+    press("Applied flash")
+    eq(FS.Config.Get("totems.appliedFlash"), false)
+    eq(FS.Config.Get("totems.waitPulse"), true, "a cue switch touches only itself")
+    W = boot({ preWindow = withTotemPresets(false) })
+    W.Open("unitframes")
+    no(row("Preset dial"), "a character without the tab has no row")
+    no(headerY("TOTEM PRESETS"), "and no header")
+    W = boot({ preWindow = unitFramesDefaults })
+    W.Open("unitframes")
+    no(row("Preset dial"), "a client without the presets has no row")
+end
+
 function T.the_gunsight_page_has_the_three_target_and_player_groups_in_the_mockups_order()
     local W = boot({ preWindow = withTagsAndMyBuffs })
     W.Open("gunsight")

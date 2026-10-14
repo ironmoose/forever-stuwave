@@ -1217,7 +1217,7 @@ def check_bindings_xml_declares_the_two_buff_tab_commands_after_the_totems():
     want = [f"CLICK FSBuffTabButton{i}:LeftButton" for i in (1, 2)]
     assert names[-2:] == want, f"binding names {names}"
     assert names[:-2] == [f"CLICK FSSealButton{i}:LeftButton" for i in range(1, 8)] + [
-        f"CLICK FSTotemButton{i}:LeftButton" for i in range(1, 7)], "the earlier commands moved"
+        f"CLICK FSTotemButton{i}:LeftButton" for i in range(1, 8)], "the earlier commands moved"
     assert all(b.get("category") == "ADDONS" and not b.get("header") for b in root.findall("Binding")[-2:])
 
 

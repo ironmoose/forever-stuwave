@@ -29,8 +29,10 @@
 -- When the shoulder goes (Console off) the gap is closed and handed back (ReclaimGap).
 --
 -- A class may own a SECOND shoulder (`also`): the Shaman's buff tab (BuffTab.lua, 2 x 1, 92.8 x 49) stands on the
--- Console's top edge at 316 design px, 16 right of the totem tab's left edge plus its 264: the totem tab ends at 300
--- and its flare reaches 310, so 6 px of chassis top line stay visible between the two. Each shoulder is its own art
+-- Console's top edge 16 design px right of the totem tab's right side (316 with the six stock cells, further right
+-- by 42.8 for each preset cell the totem tab grows by): the totem tab ends at 300 and its flare reaches 310, so 6 px of
+-- chassis top line stay visible between the two. A def may carry `colsFn`, its column count asked on every Refresh;
+-- the art is built once per width (NewShoulder has no resize) and the one that fits is shown. Each shoulder is its own art
 -- (NewShoulder has no resize) with its own `wants` and `changed`. The Console has ONE dock gap, so while several
 -- stand the gap is the union of their spans, and the stretch of top line that union opens between two shoulders is
 -- joined with a plain line texture of the Console's own colour (a hole the mockup does not have). Every function that
@@ -91,6 +93,11 @@ local OWNERS = {
     },
     SHAMAN = {
         key = "shaman", cols = 6, rows = 1,
+        -- the totem tab grows by a cell for each preset cell the player has on (TotemPresets.lua): 6 to 8
+        colsFn = function()
+            local totems = FS.TotemBar
+            return totems and totems.Cols and totems.Cols() or 6
+        end,
         wants = function()
             local totems = FS.TotemBar
             return totems and totems.OwnsShoulder and totems.OwnsShoulder()
@@ -102,7 +109,7 @@ local OWNERS = {
         -- the buff tab: IMBUE and SHIELD, right of the totem tab (mockup shaman-buff-tab-2026-10-12)
         also = {
             {
-                key = "shamanbuff", dx = 316, cols = 2, rows = 1,
+                key = "shamanbuff", after = 16, cols = 2, rows = 1,
                 wants = function()
                     local tab = FS.BuffTab
                     return tab and tab.OwnsShoulder and tab.OwnsShoulder()
@@ -182,17 +189,28 @@ local function Wanted()
     local console = Console()
     if not (console and console.IsDrawn()) then return console, {} end
     local list = {}
+    -- a def's size follows its colsFn; a def with `after` stands that far right of the one before it
+    local function Seat(def)
+        if def.colsFn then
+            local ok, cols = pcall(def.colsFn)
+            if ok and type(cols) == "number" and cols >= 1 and cols ~= def.cols then
+                def.cols = cols
+                def.w, def.h = BlockSize(cols, def.rows)
+            end
+        end
+        if def.after then
+            local last = list[#list]
+            def.dx = last and (last.dx + last.w + def.after) or C.DX
+        end
+        list[#list + 1] = def
+    end
     if owner then
-        if owner.wants() then list[#list + 1] = owner end
+        if owner.wants() then Seat(owner) end
         for _, extra in ipairs(owner.also or {}) do
-            if extra.wants() then list[#list + 1] = extra end
+            if extra.wants() then Seat(extra) end
         end
     end
-    if FIVE.wants() then
-        local last = list[#list]
-        FIVE.dx = last and (last.dx + last.w + FIVE.after) or C.DX
-        list[#list + 1] = FIVE
-    end
+    if FIVE.wants() then Seat(FIVE) end
     return console, list
 end
 
@@ -318,7 +336,16 @@ local function ShowOne(console, def)
         st = {}
         stands[def.key] = st
     end
-    st.shoulder = st.shoulder or Build(console, def)
+    -- the art for this width (built once per width: NewShoulder has no resize); the one before it goes
+    st.byCols = st.byCols or {}
+    local art = st.byCols[def.cols]
+    if not art then
+        art = Build(console, def)
+        st.byCols[def.cols] = art
+    end
+    local resized = st.shoulder ~= nil and st.shoulder ~= art
+    if resized then st.shoulder.art:Hide() end
+    st.shoulder = art or st.shoulder
     if not st.shoulder then return false end
     -- Seat first (the art stands on the chassis top edge), then the scale and level; the art shows only
     -- once it is where it belongs.
@@ -327,7 +354,7 @@ local function ShowOne(console, def)
     st.shoulder.art:Show()
     local was, seat = st.shown, st.dx
     st.shown, st.dx = true, def.dx
-    return not was or seat ~= def.dx
+    return not was or seat ~= def.dx or resized
 end
 
 -- The one entry: builds, seats, shows or hides to match the world. Out of combat only; a request in combat

@@ -1327,12 +1327,12 @@ def check_hotkey_text_and_quick_keybind_commands():
     assert not shown(b.HotKey)
 
 
-def check_bindings_xml_declares_six_totem_commands_after_the_seals():
+def check_bindings_xml_declares_the_totem_commands_after_the_seals():
     root = ET.parse(BINDINGS).getroot()
     # the buff tab's two commands follow (buffbar-harness.py pins them)
     names = [b.get("name") for b in root.findall("Binding") if "FSBuffTabButton" not in b.get("name", "")]
     want = [f"CLICK FSSealButton{i}:LeftButton" for i in range(1, 8)] + [
-        f"CLICK FSTotemButton{i}:LeftButton" for i in range(1, 7)]
+        f"CLICK FSTotemButton{i}:LeftButton" for i in range(1, 8)]    # six buttons and the preset dial (TotemPresets.lua)
     assert names == want, f"binding names {names}"
     items = root.findall("Binding")
     assert all(b.get("category") == "ADDONS" for b in items)
@@ -2753,7 +2753,7 @@ CHECKS = [
     check_the_header_no_longer_claims_a_blocked_call_is_dropped_silently,
     check_tooltip_text_and_the_unlock_hint,
     check_hotkey_text_and_quick_keybind_commands,
-    check_bindings_xml_declares_six_totem_commands_after_the_seals,
+    check_bindings_xml_declares_the_totem_commands_after_the_seals,
     check_binding_labels_exist_for_every_class,
     check_no_secure_frame_is_anchored_to_the_shoulder_art,
     check_the_stance_bar_keeps_ghost_wolf_and_the_tab_takes_no_forms,
