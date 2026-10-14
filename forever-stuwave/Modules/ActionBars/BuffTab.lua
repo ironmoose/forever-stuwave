@@ -74,6 +74,8 @@ local BT = {
     CHIP_GLOW_A = 0.35,             -- the chip's glow alpha while a chip glows (the looks table says which do)
     ICON_RETRY = 2,                 -- seconds before a tile asks again for an icon the client has not answered
     ENGINE_TEMPLATE = "CustomAuraContainerTemplate", ENGINE_LEVEL = 12,    -- the combat state container (engine section)
+    ENGINE_REBUILDS = 3,            -- spellbook driven container rebuilds a session
+    ENGINE_RETRY = 10,              -- seconds before the one uncounted retry of a failed build
     ENGINE_LIMIT = 3,               -- failed container builds in a row before the combat state is given up for the session
     TINT_MIX = 0.6,                 -- how far the foreground colours move toward the usability tint (out of mana, unusable)
     -- Append only, never reorder: the index is the saved keybind.
@@ -116,8 +118,8 @@ end
 BT.SETTINGS = {
     combatstate = {
         key = "buffs.combatstate", default = true, label = "Buff tab combat state",
-        tip = "In combat the game itself draws your Lightning Shield and weapon enchant on the Shaman buff tab, with "
-            .. "their real time. Off shows the last known state instead, marked as an estimate.",
+        tip = "In combat the game itself draws your Lightning Shield and weapon enchant on the Shaman buff tab. "
+            .. "Off shows the last known state instead.",
     },
 }
 BuffTab.SETTINGS = BT.SETTINGS
@@ -137,7 +139,7 @@ end
 -- The combat state container's bookkeeping (the builder is the engine section below; the painter needs the answer
 -- earlier). `armed` is a READBACK: the container read back enabled and shown after the last out of combat arm.
 local EngineState = { container = nil, armed = false, failures = 0, gaveUp = false, alpha = nil, templateOk = nil,
-    parked = {}, idsKey = nil, passTried = false, noImbue = false }
+    parked = {}, seenIds = nil, rebuilds = 0, passTried = false, noImbue = false, retryAt = nil }
 BuffTab.Engine = EngineState
 
 -- true while `button` shows the engine drawn combat state: in combat, the setting on, the container armed (read back),
@@ -617,8 +619,13 @@ end
 -- look, a dim desaturated icon, no word, no count, no underline, no dashes), because the frozen reads would lie. It
 -- is only entered on PROOF: the container read back enabled and shown after the last out of combat arm (CombatHud's
 -- live CORRECTION: a refused arm or a re-anchored slot shows a confident wrong "not active" for the whole fight), and
--- no slot of the tile was found off the tile's icon rect (GetLeft/GetTop compared out of combat; an unreadable answer
--- proves nothing and keeps the slot). The setting `buffs.combatstate` (default on) turns it off: the tiles keep today's
+-- every slot frame of the tile was PROVEN on the tile's icon rect: its GetLeft/GetTop read BEFORE anything re-seats it
+-- (so an override by the engine's layout is seen) and equal to the icon's, by a proof pass out of combat on every
+-- tick (a layout pass after our seat is caught within a second). A slot frame that does not exist yet proves nothing
+-- wrong and draws nothing; one that exists but cannot be read, or was built in combat (the engine's layout pass comes
+-- after init, and combat cannot look), is UNPROVEN and its tile is not live until the next out of combat proof. A
+-- tile with an unproven or misplaced slot also hides the container (alpha 0 for all), so no stray lit icon draws over a
+-- tile that shows its frozen state. The setting `buffs.combatstate` (default on) turns it off: the tiles keep today's
 -- frozen estimate and the container stays invisible. Out of combat the plain reads stay authoritative and the container
 -- is invisible (alpha 0), so nothing is drawn twice. The tile's own count never shows in combat: if the engine draws
 -- no orb count the tile shows none rather than a stale one.
@@ -633,7 +640,9 @@ end
 -- estimate); a failed slot costs just its tile; a failed imbue slot parks the whole container (no stray off hand slot)
 -- and the rebuild goes without imbue slots. BT.ENGINE_LIMIT failed out of combat PASSES in a row (one attempt per pass,
 -- a pass ends at regen) give the path up for the session. Every failed or replaced container is parked and tracked. The
--- shield id set is recomputed out of combat when the spellbook changes; a changed set parks the container and rebuilds.
+-- shield id set is checked out of combat when the spellbook changes; it rebuilds only when an id never seen before
+-- appears, at most BT.ENGINE_REBUILDS times a session. A failed build gets one uncounted retry BT.ENGINE_RETRY seconds
+-- later from the tick (a login that failed once would otherwise lose whole fights).
 -- UNVERIFIED in game: the slot rendering over the tiles, the layering, the item enchantment slot frames, whether the
 -- engine draws an orb count at all, and what an item enchantment slot reports.
 
@@ -696,14 +705,16 @@ end
 -- below keeps clicks and the tooltip), seated on the tile's icon rect, the lit icon and the engine's texts. Each step on
 -- its own, so a missing method stops nothing. It registers its parts on the tile, one entry per frame.
 local function InitSlot(tile, ownIcon)
+    local eng = tile.fsEngine                         -- captured at add time: the one this slot was declared on
     return function(slot)
         Quiet(slot, "SetMouseMotionEnabled", false)
         Quiet(slot, "SetMouseClickEnabled", false)
         Quiet(slot, "SetHideTooltipInCombat", true)
-        local eng = tile.fsEngine
-        if not eng then return end
-        local part = { slot = slot }
+        if tile.fsEngine ~= eng then return end      -- a parked container's late frame is not this tile's
+        local part = { slot = slot, ok = false }
         eng.parts[#eng.parts + 1] = part
+        eng.bad = true                               -- UNPROVEN until a proof pass out of combat has read it
+        tile.fsSig = nil
         pcall(function() slot:SetAllPoints(tile.icon) end)
         pcall(function()
             local lit = slot:CreateTexture(nil, "ARTWORK")
@@ -796,14 +807,6 @@ local function AddImbueSlots(container, tile, s)
     end
 end
 
--- A key for an id set (sorted ids), so a changed spellbook is noticed.
-local function IdsKey(ids)
-    local list = {}
-    for id in pairs(ids) do list[#list + 1] = id end
-    table.sort(list)
-    return table.concat(list, ",")
-end
-
 local function ParkContainer(container)
     Quiet(container, "SetEnabled", false)
     Quiet(container, "Hide")
@@ -818,11 +821,11 @@ local function ClearEngineTiles()
     end
 end
 
--- Builds the container with its slots, out of combat. Returns the container and the shield id key. Any failure parks
+-- Builds the container with its slots, out of combat. Returns the container and the shield id set it covers. Any failure parks
 -- the container (a frame cannot be destroyed) and clears the tiles' slots before raising.
 local function BuildContainer(withImbue)
     local container = CreateFrame("AuraContainer", nil, BT.host, BT.ENGINE_TEMPLATE)
-    local key
+    local ids
     local ok, err = pcall(function()
         local s = Scale()
         container:SetSize(1, 1)
@@ -831,8 +834,7 @@ local function BuildContainer(withImbue)
         container:SetUnit("player")
         container:SetAlpha(0)
         local shield, imbue = BT.byKey.shield, BT.byKey.imbue
-        local ids = FS.ShamanBuffs.ShieldIds()
-        key = IdsKey(ids)
+        ids = FS.ShamanBuffs.ShieldIds()
         if shield then AddShieldSlot(container, shield, ids) end
         if imbue and withImbue then AddImbueSlots(container, imbue, s) end
         container:SetEnabled(true)
@@ -843,11 +845,9 @@ local function BuildContainer(withImbue)
         ClearEngineTiles()
         error(err, 0)
     end
-    return container, key
+    return container, ids
 end
 
--- Re-seats every slot (the icon rect anchor and the texts) for the current scale, then PROVES it: the mouse read back,
--- each slot's position against its tile's icon. Out of combat only (Sync after every build and rescale, and regen).
 local function Rect(region)
     local okL, left = pcall(region.GetLeft, region)
     local okT, top = pcall(region.GetTop, region)
@@ -855,6 +855,14 @@ local function Rect(region)
         return left, top
     end
     return nil
+end
+
+-- true when `slot` stands on `icon`, false when it stands elsewhere, nil when either cannot be read.
+local function Placed(slot, icon)
+    local sl, st = Rect(slot)
+    local il, it = Rect(icon)
+    if not (sl and il) then return nil end
+    return math.abs(il - sl) <= 1.5 and math.abs(it - st) <= 1.5
 end
 
 local function GuardMouse(slot)
@@ -875,22 +883,24 @@ local function GuardMouse(slot)
     end
 end
 
-local function SeatEngine()
-    local s = Scale()
+-- The PROOF pass, out of combat only (SeatEngine, and the tick every second): every slot frame of every tile read against
+-- the tile's icon BEFORE anything is written. A slot found off the icon is put back (its tile is not live until the next
+-- pass reads it right); one that cannot be read is unproven. Allocation free when nothing is wrong.
+local function ProveEngine()
     for _, button in ipairs(BT.list) do
         local eng = button.fsEngine
         if eng then
             local bad = false
-            local il, it = Rect(button.icon)
             for _, part in ipairs(eng.parts) do
-                pcall(function() part.slot:SetAllPoints(button.icon) end)
-                SeatPart(button, part, s)
-                GuardMouse(part.slot)
-                local sl, st = Rect(part.slot)
-                if il and sl and (math.abs(il - sl) > 1.5 or math.abs(it - st) > 1.5) then bad = true end
-            end
-            if bad then
-                WarnOnce("bufftab_engine_layout", "a combat state slot is not on its tile; that tile keeps the last known state")
+                local placed = Placed(part.slot, button.icon)
+                part.ok = placed == true
+                if not part.ok then
+                    bad = true
+                    if placed == false then
+                        WarnOnce("bufftab_engine_layout", "a combat state slot is not on its tile; that tile keeps the last known state")
+                        pcall(part.slot.SetAllPoints, part.slot, button.icon)
+                    end
+                end
             end
             if eng.bad ~= bad then
                 eng.bad = bad
@@ -900,14 +910,42 @@ local function SeatEngine()
     end
 end
 
+-- Re-seats every slot's texts for the current scale, reads the mouse back, then proves the positions. Out of combat
+-- only (Sync after every build and rescale, and regen).
+local function SeatEngine()
+    local s = Scale()
+    for _, button in ipairs(BT.list) do
+        local eng = button.fsEngine
+        if eng then
+            for _, part in ipairs(eng.parts) do
+                SeatPart(button, part, s)
+                GuardMouse(part.slot)
+            end
+        end
+    end
+    ProveEngine()
+end
+
+-- true when an id of `ids` was never covered by a container before.
+local function HasNewId(ids)
+    local seen = EngineState.seenIds
+    if not seen then return true end
+    for id in pairs(ids) do
+        if not seen[id] then return true end
+    end
+    return false
+end
+
 -- Out of combat: builds the container once, arms it again when it reads back off, rebuilds it when the shield ids
--- changed. Combat does none of it.
-local function EnsureEngine()
+-- grew. `retry` is the tick's one uncounted second attempt after a failed build. Combat does none of it.
+local function EnsureEngine(retry)
     if EngineState.gaveUp or not BT.host or InCombatLockdown() then return end
     if not Setting(BT.SETTINGS.combatstate) then return end
     local container = EngineState.container
     if container then
-        if IdsKey(FS.ShamanBuffs.ShieldIds()) == EngineState.idsKey then
+        local rebuild = false
+        if EngineState.rebuilds < BT.ENGINE_REBUILDS and HasNewId(FS.ShamanBuffs.ShieldIds()) then rebuild = true end
+        if not rebuild then
             if not ContainerIs(container, true) then
                 Quiet(container, "SetUnit", "player")
                 Quiet(container, "SetEnabled", true)
@@ -917,43 +955,68 @@ local function EnsureEngine()
             EngineState.armed = ContainerIs(container, true)
             return
         end
-        -- the spellbook moved the shield ids: the old slot filter is stale
+        -- the spellbook brought a shield id the slot filter lacks
+        EngineState.rebuilds = EngineState.rebuilds + 1
         ParkContainer(container)
         EngineState.container, EngineState.armed, EngineState.alpha = nil, false, nil
         ClearEngineTiles()
     end
-    if EngineState.passTried then return end
+    if EngineState.passTried and not retry then return end
     if not EngineTemplate() then
         WarnOnce("bufftab_engine_template", "this client has no " .. BT.ENGINE_TEMPLATE .. "; the tiles show no combat state")
         EngineState.gaveUp = true
         return
     end
-    local ok, result, key = pcall(BuildContainer, not EngineState.noImbue)
+    local ok, result, ids = pcall(BuildContainer, not EngineState.noImbue)
     if not ok and type(result) == "table" and result.imbue then
         EngineState.noImbue = true
         WarnOnce("bufftab_engine_imbue", "the imbue tile carries no combat state (" .. result.imbue .. ")")
-        ok, result, key = pcall(BuildContainer, false)
+        ok, result, ids = pcall(BuildContainer, false)
     end
     if ok then
-        EngineState.failures = 0
-        EngineState.container, EngineState.idsKey, EngineState.alpha = result, key, 0
+        EngineState.failures, EngineState.retryAt = 0, nil
+        EngineState.container, EngineState.alpha = result, 0
+        EngineState.seenIds = EngineState.seenIds or {}
+        for id in pairs(ids) do EngineState.seenIds[id] = true end
         EngineState.armed = ContainerIs(result, true)
         for _, button in ipairs(BT.list) do button.fsSig = nil end
         BuffTab.Paint()             -- the imbue slots' lit icons take the tile's icon now
         return
     end
-    EngineState.passTried = true     -- one attempt per out of combat pass; regen starts the next
-    EngineState.failures = EngineState.failures + 1
     WarnOnce("bufftab_engine_build", "the combat state could not be built (" .. tostring(result) .. ")")
+    if retry then return end         -- the extra attempt costs nothing and is not repeated
+    EngineState.passTried = true     -- one counted attempt per out of combat pass; regen starts the next
+    EngineState.failures = EngineState.failures + 1
+    EngineState.retryAt = GetTime() + BT.ENGINE_RETRY
     if EngineState.failures >= BT.ENGINE_LIMIT then EngineState.gaveUp = true end
 end
 BuffTab.EnsureEngine = EnsureEngine
 
--- The only thing combat writes: 1 while in combat and the state is on (the slots draw over the tiles), 0 otherwise.
+-- The tick's share, out of combat only: the one uncounted retry of a failed build, and the proof pass.
+local function EngineTick()
+    if InCombatLockdown() then return end
+    local at = EngineState.retryAt
+    if at and not EngineState.container and GetTime() >= at then
+        EngineState.retryAt = nil
+        EnsureEngine(true)
+        SeatEngine()
+        return
+    end
+    if EngineState.container then ProveEngine() end
+end
+
+-- The only thing combat writes: 1 while in combat and the state is on and every slot of every tile is proven (a tile
+-- that shows its frozen state must not have a stray lit icon drawn over it), 0 otherwise.
 local function SyncEngineAlpha()
     local container = EngineState.container
     if not container then return end
     local alpha = (InCombatLockdown() and EngineState.armed and Setting(BT.SETTINGS.combatstate)) and 1 or 0
+    if alpha == 1 then
+        for _, button in ipairs(BT.list) do
+            local eng = button.fsEngine
+            if eng and eng.bad then alpha = 0 end
+        end
+    end
     if EngineState.alpha ~= alpha and Quiet(container, "SetAlpha", alpha) then EngineState.alpha = alpha end
 end
 
@@ -1253,6 +1316,8 @@ local function Tick(self, dt)
     if not (BT.host and BT.host:IsShown()) then return end
     local ok, err = pcall(Refresh)
     if not ok then WarnOnce("bufftab_tick", "buff tab repaint failed (" .. tostring(err) .. ")") end
+    local okE, errE = pcall(EngineTick)
+    if not okE then WarnOnce("bufftab_tick_engine", "buff tab combat state check failed (" .. tostring(errE) .. ")") end
 end
 
 local function OnEvent(_, event)

@@ -2423,6 +2423,40 @@ def check_a_failed_build_logs_once_leaves_today_and_gives_up_after_three_passes(
     assert not icon(lua, SHIELD)["desat"]
 
 
+def check_a_failed_build_gets_one_uncounted_retry_ten_seconds_later_from_the_tick():
+    lua = engine_world(pre="__acThrows = 1")
+    assert int(g(lua).__acAttempts) == 1 and not acs(lua) and int(engine_cap(lua).failures) == 1
+    tick(lua, 5)
+    assert int(g(lua).__acAttempts) == 1, "too early"
+    tick(lua, 5.5)
+    assert int(g(lua).__acAttempts) == 2 and len(acs(lua)) == 1, "the retry built it"
+    assert int(engine_cap(lua).failures) == 0 and not engine_cap(lua).gaveUp
+    assert btn(lua, SHIELD).fsEngine is not None
+    # it keeps failing: the retry is once per pass, uncounted, and never starts another
+    lua = engine_world(pre="__acThrows = true")
+    assert int(engine_cap(lua).failures) == 1
+    for _ in range(6):
+        tick(lua, 5)
+    assert int(g(lua).__acAttempts) == 2, "exactly one extra attempt in the pass"
+    assert int(engine_cap(lua).failures) == 1, "the retry does not count toward the limit"
+    for n in (2, 3):
+        set_combat(lua, True)
+        fire(lua, "PLAYER_REGEN_DISABLED")
+        leave_combat(lua)
+    assert engine_cap(lua).gaveUp is True, "three counted passes still give up"
+    base = int(g(lua).__acAttempts)
+    for _ in range(4):
+        tick(lua, 5)
+    assert int(g(lua).__acAttempts) == base, "gave up: nothing more"
+    # never in combat
+    lua = engine_world(pre="__acThrows = 1")
+    set_combat(lua, True)
+    tick(lua, 20)
+    assert int(g(lua).__acAttempts) == 1, "no retry in combat"
+    leave_combat(lua)
+    assert int(g(lua).__acAttempts) == 2 and len(acs(lua)) == 1, "regen starts the next counted pass"
+
+
 def check_a_client_without_the_template_or_item_enchantments_keeps_todays_tiles():
     lua = boot(weapons={16: "INVTYPE_WEAPON"}, tips={16: ["Rockbiter 1 (30 min)"]})        # no template
     assert acs(lua) == [] and engine_cap(lua).gaveUp is True
@@ -2487,10 +2521,75 @@ def check_a_lazily_built_slot_seats_its_texts_and_icon_on_its_own():
         if i == SHIELD:
             assert parts[0].count is not None and parts[0].count._points[1].point == "TOPRIGHT"
             assert parts[0].countPlate is not None, "the count has a label plate too"
-    # the unproven state is not trusted yet: no layout was read, so the slot is kept
-    assert btn(lua, SHIELD).fsEngine.bad is False
-    leave_combat(lua)
+    # frames that first appear in combat are UNPROVEN: no layout was read, so the tiles stay on today's estimate and the
+    # container stays invisible (no stray lit icon over a tile that shows its frozen state)
+    for i in (SHIELD, IMBUE):
+        assert btn(lua, i).fsEngine.bad is True and not bt(lua).EngineLive("shield" if i == SHIELD else "imbue")
+    update(lua)
+    assert float(acs(lua)[0]._alpha) == 0, "an unproven slot keeps the container hidden"
+    assert tile(lua, SHIELD)["text"] != "", "the frozen estimate stays"
+    leave_combat(lua)                 # the proof pass out of combat reads them on the icon rects
     assert [len(parts_of(lua, i)) for i in (SHIELD, IMBUE)] == [1, 2]
+    for i in (SHIELD, IMBUE):
+        assert btn(lua, i).fsEngine.bad is False, i
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    assert float(acs(lua)[0]._alpha) == 1 and bt(lua).EngineLive("shield")
+
+
+def check_a_lazy_slot_flushed_out_of_combat_is_proven_by_the_next_tick_and_a_bad_one_is_not():
+    lua = engine_world(pre="__acLazy = true")
+    run(lua, "__acFlush()")
+    for i in (SHIELD, IMBUE):
+        assert btn(lua, i).fsEngine.bad is True, "unproven until a pass has read it"
+    tick(lua, 1.1)
+    for i in (SHIELD, IMBUE):
+        assert btn(lua, i).fsEngine.bad is False, i
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    assert bt(lua).EngineLive("shield") and float(acs(lua)[0]._alpha) == 1
+    # a layout the engine owns for good: every tick reads it off the icon, the tiles never go live
+    lua = engine_world(pre='__acLazy = true\n__acOverride = "sticky"\n__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end')
+    run(lua, "__acFlush()")
+    for _ in range(3):
+        tick(lua, 1.1)
+    for i in (SHIELD, IMBUE):
+        assert btn(lua, i).fsEngine.bad is True, i
+    assert int(g(lua).__logs) == 1, "logged once"
+    shield_aura_up(lua)
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    update(lua)
+    assert not bt(lua).EngineLive("shield") and not bt(lua).EngineLive("imbue")
+    assert float(acs(lua)[0]._alpha) == 0, "a misplaced slot never draws a lit icon"
+    assert tile(lua, SHIELD)["text"] == "~3"
+    tick(lua, 1.1)
+    tick(lua, 1.1)
+    assert int(g(lua).__slotBlocked) == 0, "the tick wrote a slot region in combat"
+
+
+def check_a_layout_pass_after_our_seat_is_caught_by_the_next_tick():
+    lua = engine_world()
+    for i in (SHIELD, IMBUE):
+        assert btn(lua, i).fsEngine.bad is False
+    tick(lua, 1.1)
+    assert btn(lua, SHIELD).fsEngine.bad is False
+    # the engine re-anchors a proven slot (a layout pass after our seat)
+    run(lua, "__acs[1]._slots.shield.frame._forceLeft, __acs[1]._slots.shield.frame._forceTop = 7, 9")
+    tick(lua, 1.1)
+    assert btn(lua, SHIELD).fsEngine.bad is True and btn(lua, IMBUE).fsEngine.bad is False
+    assert not bt(lua).EngineLive("shield") and bt(lua).EngineLive("imbue") is not None
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    assert float(acs(lua)[0]._alpha) == 0, "one bad tile hides the container for all"
+    assert not bt(lua).EngineLive("shield")
+    # an engine that lets the repair stand: the slot is back on the icon, the next pass proves it
+    lua = engine_world()
+    run(lua, "local f = __acs[1]._slots.shield.frame\nf._points = {}\nf._points[1] = { point = 'TOPLEFT', rel = UIParent, relPoint = 'BOTTOMLEFT', x = 7, y = 9 }")
+    tick(lua, 1.1)
+    assert btn(lua, SHIELD).fsEngine.bad is True, "found off the icon: put back, not live this pass"
+    tick(lua, 1.1)
+    assert btn(lua, SHIELD).fsEngine.bad is False, "read back right"
 
 
 def check_the_engine_state_is_entered_only_on_a_proven_arm():
@@ -2530,16 +2629,28 @@ def check_a_slot_that_is_not_on_its_tiles_icon_clears_that_tiles_engine_state():
     update(lua)
     assert not bt(lua).EngineLive("shield") and not bt(lua).EngineLive("imbue")
     assert tile(lua, SHIELD)["text"] == "~3" and not icon(lua, SHIELD)["desat"], "today's estimate stays"
-    # a re-anchor done once at init is put right by the next seat, and the tile is proven again
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    update(lua)
+    assert float(acs(lua)[0]._alpha) == 0, "no tile is live, so no lit icon is drawn"
+    # a re-anchor done once at init is put right at the first pass and proven by the next tick
     lua = engine_world(pre='__acOverride = "init"')
+    assert g(lua).FS.BuffTab.BT.warned.bufftab_engine_layout, "the first pass found it off the icon and put it back"
+    tick(lua, 1.1)
     for i in (SHIELD, IMBUE):
         assert btn(lua, i).fsEngine.bad is False, i
     set_combat(lua, True)
     fire(lua, "PLAYER_REGEN_DISABLED")
     assert bt(lua).EngineLive("shield") and bt(lua).EngineLive("imbue")
-    # a client that cannot say where anything stands proves nothing either way: the slot is kept
+    # a client that cannot say where anything stands PROVES nothing: no tile goes live, nothing is drawn
     lua = engine_world(pre="__noRect = true")
-    assert btn(lua, SHIELD).fsEngine.bad is False
+    for _ in range(3):
+        tick(lua, 1.1)
+    assert btn(lua, SHIELD).fsEngine.bad is True and btn(lua, IMBUE).fsEngine.bad is True
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    update(lua)
+    assert not bt(lua).EngineLive("shield") and float(acs(lua)[0]._alpha) == 0
 
 
 def check_the_setting_turns_the_combat_state_off_and_back_on():
@@ -2548,6 +2659,9 @@ def check_the_setting_turns_the_combat_state_off_and_back_on():
     c = acs(lua)[0]
     cfg = g(lua).FS.Config
     assert cfg.Get("buffs.combatstate") is True, "on by default"
+    assert g(lua).FS.BuffTab.SETTINGS.combatstate.tip == (
+        "In combat the game itself draws your Lightning Shield and weapon enchant on the Shaman buff tab. "
+        "Off shows the last known state instead."), "the tip says what the game draws and what off shows"
     set_combat(lua, True)
     fire(lua, "PLAYER_REGEN_DISABLED")
     assert float(c._alpha) == 1
@@ -2625,6 +2739,44 @@ def check_a_changed_spellbook_rebuilds_the_container_with_the_new_shield_ids():
     assert cs[1]._enabled and shown(cs[1])
     assert len(g(lua).FS.BuffTab.Engine.parked) == 1
     assert btn(lua, SHIELD).fsEngine is not None and parts_of(lua, SHIELD)[0].slot is not None
+
+
+def check_flapping_shield_ids_rebuild_only_for_a_new_id_and_at_most_three_times():
+    lua = engine_world()
+    # an id that was covered once and leaves and returns costs no rebuild
+    run(lua, '__spell("Lightning Shield", 99999, true)')
+    fire(lua, "SPELLS_CHANGED")
+    assert len(acs(lua)) == 2, "a never seen id rebuilds"
+    for _ in range(4):
+        run(lua, '__spell("Lightning Shield", 99999, false)')
+        fire(lua, "SPELLS_CHANGED")
+        run(lua, '__spell("Lightning Shield", 99999, true)')
+        fire(lua, "SPELLS_CHANGED")
+    assert len(acs(lua)) == 2, f"{len(acs(lua))} containers: a flapping id must not rebuild"
+    # new ids keep arriving: bounded at three rebuilds a session
+    for n in range(5):
+        run(lua, f'__spell("Lightning Shield", {90000 + n}, true)')
+        fire(lua, "SPELLS_CHANGED")
+    assert int(engine_cap(lua).rebuilds) == 3 and len(acs(lua)) == 4, (int(engine_cap(lua).rebuilds), len(acs(lua)))
+    assert len(engine_cap(lua).parked) == 3
+
+
+def check_a_late_init_of_a_parked_containers_slot_is_not_attributed_to_the_new_container():
+    lua = engine_world(pre="__acLazy = true")
+    old_eng = btn(lua, SHIELD).fsEngine
+    run(lua, '__spell("Lightning Shield", 99999, true)')
+    fire(lua, "SPELLS_CHANGED")                       # rebuilds: the first container is parked, its slots uninitialised
+    new_eng = btn(lua, SHIELD).fsEngine
+    assert len(acs(lua)) == 2 and not same(lua, old_eng, new_eng)
+    pending = len(list(g(lua).__acPending.keys()))
+    assert pending >= 2
+    run(lua, "__sentinel = 'proven'")
+    run(lua, "local b = __acs and FS.BuffTab.BT.list[2]\nb.fsSig = __sentinel")
+    # the parked container's frames init late, then the new container's own
+    run(lua, "local first = __acPending[1]\n__acPending = { first }\n__acRest = nil\n__acFlush()")
+    assert len(parts_of(lua, SHIELD)) == 0, "the parked container's slot is not this tile's"
+    assert btn(lua, SHIELD).fsSig == "proven", "a parked container's late frame did not touch the tile"
+    assert new_eng.bad is False
 
 
 def check_the_chip_and_ring_chrome_numbers_are_pinned_by_value():
@@ -2748,16 +2900,21 @@ CHECKS = [
     check_regen_arms_a_container_that_reads_back_off_and_a_combat_login_builds_at_regen,
     check_nothing_is_built_in_combat_whoever_asks,
     check_a_failed_build_logs_once_leaves_today_and_gives_up_after_three_passes,
+    check_a_failed_build_gets_one_uncounted_retry_ten_seconds_later_from_the_tick,
     check_a_client_without_the_template_or_item_enchantments_keeps_todays_tiles,
     check_a_failed_shield_slot_costs_only_its_own_tile,
     check_a_half_failed_imbue_pair_parks_the_container_and_rebuilds_without_imbue_slots,
     check_a_lazily_built_slot_seats_its_texts_and_icon_on_its_own,
+    check_a_lazy_slot_flushed_out_of_combat_is_proven_by_the_next_tick_and_a_bad_one_is_not,
+    check_a_layout_pass_after_our_seat_is_caught_by_the_next_tick,
     check_the_engine_state_is_entered_only_on_a_proven_arm,
     check_a_slot_that_is_not_on_its_tiles_icon_clears_that_tiles_engine_state,
     check_the_setting_turns_the_combat_state_off_and_back_on,
     check_the_in_combat_tooltip_says_the_game_shows_the_state_and_that_any_enchant_lights_the_imbue,
     check_a_slot_found_with_the_mouse_on_is_made_click_through_and_logged,
     check_a_changed_spellbook_rebuilds_the_container_with_the_new_shield_ids,
+    check_flapping_shield_ids_rebuild_only_for_a_new_id_and_at_most_three_times,
+    check_a_late_init_of_a_parked_containers_slot_is_not_attributed_to_the_new_container,
     check_the_chip_and_ring_chrome_numbers_are_pinned_by_value,
     check_a_rescale_reseats_every_engine_text_out_of_combat_only,
 ]
