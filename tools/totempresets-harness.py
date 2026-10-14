@@ -1409,7 +1409,7 @@ def check_the_known_totems_are_scanned_once_per_event_not_once_per_repaint():
         tick(lua, 0.1)
     scans = int(g(lua).__kl)
     assert 0 < scans <= 4, f"{scans} spellbook scans over twenty repaints of a waiting switch"
-    for event in ("SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD"):
+    for event in ("SPELLS_CHANGED", "LEARNED_SPELL_IN_SKILL_LINE", "PLAYER_LEVEL_UP", "PLAYER_ENTERING_WORLD"):
         scans = int(g(lua).__kl)
         fire(lua, event)
         advance(lua, 0.1)
@@ -1679,7 +1679,10 @@ def check_use_as_gnarly_preset_in_the_editor_ties_and_unties_and_shift_click_edi
     P.SetGnarly(None)
     run(lua, "__shift = true")
     click(lua, gb(lua), "LeftButton", False)
-    assert not shown(card(lua)), "shift click opened an editor with no GNARLY preset"
+    assert shown(card(lua)) and int(card(lua).fsIndex) == int(P.Active()), "shift click on an unset GNARLY did not open the active preset"
+    assert int(P.Tracker("gnarly").presses) == 0
+    script(lua, card(lua).useGnarly, "OnClick")
+    assert P.Gnarly() == int(card(lua).fsIndex), "USE AS GNARLY PRESET from the unset click did not tie it"
     run(lua, "__shift = false")
 
 
