@@ -62,6 +62,7 @@ DATABAR_LUA = ADDON / "Modules/DataBars/DataBar.lua"
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "control-deck-v1-2026-10-01.html"
 CELL_SLANT = ADDON / "Media" / "Textures" / "cell_slant.tga"
 EPS = 0.01
+GLYPH_SIZE = 16  # design px of a hand drawn line glyph, as the mockup draws it
 
 
 # ---------------------------------------------------------------------------------------
@@ -202,6 +203,12 @@ function M:SetColorTexture(r, g, b, a) self.color = { r, g, b, a } end
 function M:SetVertexColor(r, g, b, a) self.vertex = { r, g, b, a } end
 function M:SetBlendMode(mode) self.blend = mode end
 function M:SetTexCoord() end
+function M:CreateMaskTexture()
+    local t = newObj("MaskTexture", self)
+    self.regions[#self.regions + 1] = t
+    return t
+end
+function M:AddMaskTexture(m) self.masks = self.masks or {}; self.masks[#self.masks + 1] = m end
 function M:SetHorizTile() end
 function M:SetVertTile() end
 function M:SetDesaturated() end
@@ -390,6 +397,32 @@ function h_glyphPaths()
     local out = {}
     for _, o in ipairs(ALL) do
         if o.kind == "Texture" and o.tex and tostring(o.tex):find("glyph%a*_") and underButton(o) then out[#out + 1] = tostring(o.tex) end
+    end
+    return out
+end
+-- Per button: the glyph texture (size, layer, masks) and the edge ring texture it must sit under.
+function h_glyphInfo()
+    local out = {}
+    for i, b in ipairs(BUTTONS) do
+        local info = { bw = b.w, bh = b.h }
+        for _, o in ipairs(ALL) do
+            if o.kind == "Texture" and o.tex and underButton(o) then
+                local p = o.parent
+                while p and p ~= b do p = p.parent end
+                if p == b then
+                    local t = tostring(o.tex)
+                    if t:find("glyph%a*_") then
+                        info.w, info.h, info.layer, info.sub = o.w, o.h, o.layer, o.sublevel
+                        info.masks = o.masks and #o.masks or 0
+                        local m = o.masks and o.masks[1]
+                        if m then info.maskTex, info.maskAllPoints = tostring(m.tex), m.allPoints ~= nil end
+                    elseif t:find("deck_key_slant_outline", 1, true) then
+                        info.edgeLayer, info.edgeSub = o.layer, o.sublevel
+                    end
+                end
+            end
+        end
+        out[i] = info
     end
     return out
 end
@@ -648,7 +681,7 @@ def check_glyph_files() -> None:
 
     mb = w.get("FS.MicroBars")
     stems = sorted({str(v) for _, v in mb.Glyphs.items()} | {str(mb.GlyphGeneric)})
-    resolved = {(stem, f): str(mb.GlyphPath(stem, f)).rsplit("\\", 1)[-1]
+    resolved = {(stem, f): str(mb.GlyphPath(stem, f)[0]).rsplit("\\", 1)[-1]
                 for stem in stems for f in ("Alliance", "Horde", "Neutral", None)}
     gone = sorted({n for n in resolved.values() if not (media / n).exists()})
     check("glyphs.every_mapping_entry_and_faction_resolves_to_an_existing_file", len(stems) >= 17 and not gone, f"{len(stems)} stems, missing {gone}")
@@ -662,6 +695,30 @@ def check_glyph_files() -> None:
     check("glyphs.baked_art_is_32x32_bgra_tga", len(baked) >= 15 and not bad, f"{len(baked)} files, bad {bad}")
     check("glyphs.no_baked_art_is_orphaned", not orphans, f"{orphans}")
     check("glyphs.no_degrade_logs", w.logs() == "", w.logs())
+
+
+def check_fill_and_mask() -> None:
+    """Baked art covers its key and is clipped by the key's own shape; line glyphs stay small and unmasked."""
+    for scale in (1.0, 0.64):
+        w = World(12, scale=scale).login()
+        infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
+        paths = [str(p) for _, p in w.call("h_glyphPaths").items()]
+        art = [i for i, p in zip(infos, paths) if "glyphart_" in p]
+        line = [i for i, p in zip(infos, paths) if "glyphart_" not in p]
+        tag = f"scale_{scale}"
+        check(f"fill.{tag}.art_keys_exist", len(art) >= 8 and len(art) + len(line) == 12, f"{len(art)} art, {len(line)} line")
+        covers = all(near(i["w"], max(i["bw"], i["bh"])) and near(i["h"], i["w"]) and i["w"] >= i["bw"] - EPS and i["w"] >= i["bh"] - EPS
+                     for i in art)
+        check(f"fill.{tag}.art_covers_the_key_keeping_its_aspect", covers, f"{[(i['w'], i['h'], i['bw'], i['bh']) for i in art][:2]}")
+        check(f"fill.{tag}.art_is_masked_by_the_key_shape",
+              all(i["masks"] == 1 and i["maskAllPoints"] and str(i["maskTex"]).endswith("cell_slant.tga") for i in art),
+              f"{[(i['masks'], i.get('maskTex')) for i in art][:2]}")
+        check(f"fill.{tag}.ring_draws_over_the_icon",
+              all(i["layer"] == "ARTWORK" and i["edgeLayer"] == "ARTWORK" and i["sub"] < i["edgeSub"] for i in art + line),
+              f"{[(i['layer'], i['sub'], i['edgeLayer'], i['edgeSub']) for i in (art + line)][:2]}")
+        check(f"fill.{tag}.line_glyphs_stay_small_and_unmasked",
+              all(near(i["w"], GLYPH_SIZE * scale) and i["masks"] == 0 for i in line), f"{[(i['w'], i['masks']) for i in line]}")
+        check(f"fill.{tag}.no_degrade_logs", w.logs() == "", w.logs())
 
 
 def check_art() -> None:
@@ -1004,6 +1061,7 @@ def main() -> int:
     check_layout(lean, gap)
     check_overlay()
     check_glyph_files()
+    check_fill_and_mask()
     check_art()
     check_hit_rects(lean, gap)
     check_deck(lean, gap)

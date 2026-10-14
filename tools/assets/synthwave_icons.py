@@ -35,7 +35,7 @@ The preview page embeds the derived art as base64, so it defaults to debug/ (git
 must never be committed to the public repository.
 
 Shipping the micro menu (style B, the approved look): `--bake-micro` writes
-forever-stuwave/Media/Textures/glyphart_<name>.tga, 32x32 BGRA with a rounded alpha, no scanline
+forever-stuwave/Media/Textures/glyphart_<name>.tga, 32x32 opaque BGRA that fills the key edge to edge (the key's shape is the mask), no scanline
 (it would alias when the client rescales), one file per micro glyph plus one PvP file per
 faction. MicroBars.lua picks them; Character and Legacy have no static Blizzard art and keep
 their hand drawn glyph_ files (tools/assets/generate_deck_glyphs.py).
@@ -194,7 +194,7 @@ def load_micro(path: Path) -> np.ndarray:
     rgb = a[..., :3] * a[..., 3:4]
     h, w = rgb.shape[:2]
     side = max(h, w)
-    out = np.zeros((side, side, 3)) + rgb[0:2].reshape(-1, 3).mean(axis=0)
+    out = np.zeros((side, side, 3)) + np.percentile(rgb.reshape(-1, 3), 10, axis=0)
     y0, x0 = (side - h) // 2, (side - w) // 2
     out[y0:y0 + h, x0:x0 + w] = rgb
     return out
@@ -481,26 +481,26 @@ def current_glyphs() -> dict[str, bytes]:
 # ---------------------------------------------------------------------------
 
 BAKE_SIZE = 32  # power of two; MicroBars.lua draws the glyph at 16 design px, so 2x for the GPU to minify
-BAKE_RADIUS = 7.0  # corner radius in texels: the square art backdrop fades into the key instead of showing as a box
+BAKE_FILL = 1.4  # the art is padded to this much of its size with its own backdrop, so the glyph is not cut by the key's mask
 
 
-def rounded_mask(n: int, radius: float, feather: float = 1.2) -> np.ndarray:
-    """Alpha of a rounded square filling the n x n texture, with a soft edge."""
-    ss = 8
-    m = n * ss
-    yy, xx = (np.mgrid[0:m, 0:m] + 0.5) / ss
-    qx = np.abs(xx - n / 2) - (n / 2 - radius)
-    qy = np.abs(yy - n / 2) - (n / 2 - radius)
-    dist = np.hypot(np.maximum(qx, 0), np.maximum(qy, 0)) + np.minimum(np.maximum(qx, qy), 0) - radius
-    a = np.clip(0.5 - dist / feather, 0, 1)
-    return a.reshape(n, ss, n, ss).mean(axis=(1, 3))
+def pad_backdrop(src: np.ndarray, scale: float) -> np.ndarray:
+    """Surround the art with its own backdrop colour (a low percentile per channel, so it lands on the
+    same dark the gradient map gives the art's own background) so the glyph sits inside a larger field."""
+    n = src.shape[0]
+    border = np.percentile(src.reshape(-1, 3), 10, axis=0)
+    side = int(round(n * scale))
+    out = np.zeros((side, side, 3)) + border
+    o = (side - n) // 2
+    out[o:o + n, o:o + n] = src
+    return out
 
 
 def bake_glyph(src: np.ndarray, fam: tuple) -> np.ndarray:
-    """Style B at BAKE_SIZE as RGBA uint8. No scanline: it would alias when the client rescales."""
-    rgb = finish(gradient_map(src, BAKE_SIZE, fam), BAKE_SIZE, TUNING[BAKE_SIZE], scan=False)
-    a = rounded_mask(BAKE_SIZE, BAKE_RADIUS)
-    return (np.dstack([rgb, a]) * 255 + 0.5).astype(np.uint8)
+    """Style B at BAKE_SIZE as opaque RGBA uint8, edge to edge: MicroBars.lua covers the key with it and
+    clips the overflow with the key's own shape. No scanline: it would alias when the client rescales."""
+    rgb = finish(gradient_map(pad_backdrop(src, BAKE_FILL), BAKE_SIZE, fam), BAKE_SIZE, TUNING[BAKE_SIZE], scan=False)
+    return (np.dstack([rgb, np.ones(rgb.shape[:2])]) * 255 + 0.5).astype(np.uint8)
 
 
 def tga_bytes(rgba: np.ndarray) -> bytes:

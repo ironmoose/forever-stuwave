@@ -115,14 +115,16 @@ local ART = {
 local PVP_ART = { Alliance = "pvp_alliance", Horde = "pvp_horde" }
 local PVP_ART_OTHER = "pvp_ffa"
 
--- The texture file a glyph name wears. `faction` is UnitFactionGroup("player") (nil or "Neutral"
--- gives the faction free emblem). Pure, so the harness can walk every name.
+-- The texture file a glyph name wears, and whether it is baked art that FILLS the key (cover, clipped by
+-- the key's slanted shape) rather than a small line glyph drawn centred at GLYPH_SIZE. `faction` is
+-- UnitFactionGroup("player") (nil or "Neutral" gives the faction free emblem). Pure, so the harness can
+-- walk every name.
 local function GlyphPath(name, faction)
     if name == "pvp" then
-        return ART_DIR .. (PVP_ART[faction] or PVP_ART_OTHER) .. ".tga"
+        return ART_DIR .. (PVP_ART[faction] or PVP_ART_OTHER) .. ".tga", true
     end
-    if ART[name] then return ART_DIR .. name .. ".tga" end
-    return GLYPH_DIR .. name .. ".tga"
+    if ART[name] then return ART_DIR .. name .. ".tga", true end
+    return GLYPH_DIR .. name .. ".tga", false
 end
 
 local function PlayerFaction()
@@ -385,7 +387,10 @@ local function SizeKey(key, s, keyW)
     key.scale = s
     local w, h = (keyW or KEY_W) * s, KEY_H * s
 
-    key.glyph:SetSize(GLYPH_SIZE * s, GLYPH_SIZE * s)
+    -- Baked art covers the key: a square as wide as the larger side keeps the aspect ratio and lets the
+    -- overflow past the slanted shape be masked off. A line glyph stays small and centred.
+    local g = key.fill and math.max(w, h) or GLYPH_SIZE * s
+    key.glyph:SetSize(g, g)
     PlaceGlyph(key)
 
     key.hoverGlow:SetSize(w * HOVER_GLOW_W, h * HOVER_GLOW_H)
@@ -414,7 +419,7 @@ end
 -- the parallelogram are transparent so the deck shows through), everything lit
 -- sits on `fx`, one level higher, so a neighbour's glow is not cut by this key's
 -- plate.
-local function PopulateKey(key, button, glyphFile)
+local function PopulateKey(key, button, glyphFile, fill)
     local ov = key.ov
     ov:SetAllPoints(button)
 
@@ -436,8 +441,18 @@ local function PopulateKey(key, button, glyphFile)
     key.edge:SetTexture(TEX_EDGE)
     key.edge:SetAllPoints(ov)
 
-    key.glyph = fx:CreateTexture(nil, "OVERLAY", nil, 0)
+    -- Under the edge (ARTWORK 0), so the key's ring still draws over the icon; the LED and pip stay above.
+    key.glyph = fx:CreateTexture(nil, "ARTWORK", nil, -1)
     key.glyph:SetTexture(glyphFile)
+    -- Filling art needs the key's own shape as a mask (the plate texture is that shape). Without mask
+    -- support the art falls back to the small centred size instead of spilling out of the key.
+    if fill and type(fx.CreateMaskTexture) == "function" and type(key.glyph.AddMaskTexture) == "function" then
+        key.mask = fx:CreateMaskTexture()
+        key.mask:SetTexture(TEX_PLATE, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        key.mask:SetAllPoints(ov)
+        key.glyph:AddMaskTexture(key.mask)
+        key.fill = true
+    end
 
     key.led = fx:CreateTexture(nil, "OVERLAY", nil, 1)
     key.led:SetTexture(TEX_LED)
@@ -815,7 +830,7 @@ local function EnsureKey(button, index)
 
     local name = button:GetName() or ""
     local base = BaseName(name)
-    local glyphFile = GlyphPath(GLYPHS[base] or GLYPH_GENERIC, PlayerFaction())
+    local glyphFile, fill = GlyphPath(GLYPHS[base] or GLYPH_GENERIC, PlayerFaction())
 
     local ov = CreateFrame("Frame", nil, button)
     ov:EnableMouse(false)
@@ -833,7 +848,7 @@ local function EnsureKey(button, index)
         flags = { flash = pulseState[button] == true },
     }
 
-    local ok, err = pcall(PopulateKey, key, button, glyphFile)
+    local ok, err = pcall(PopulateKey, key, button, glyphFile, fill)
     if not ok then
         -- A half-built overlay would cover the button with nothing on it.
         ov:Hide()
