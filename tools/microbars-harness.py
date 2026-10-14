@@ -202,13 +202,9 @@ function M:SetTexture(p) self.tex = p end
 function M:SetColorTexture(r, g, b, a) self.color = { r, g, b, a } end
 function M:SetVertexColor(r, g, b, a) self.vertex = { r, g, b, a } end
 function M:SetBlendMode(mode) self.blend = mode end
-function M:SetTexCoord() end
-function M:CreateMaskTexture()
-    local t = newObj("MaskTexture", self)
-    self.regions[#self.regions + 1] = t
-    return t
-end
-function M:AddMaskTexture(m) self.masks = self.masks or {}; self.masks[#self.masks + 1] = m end
+function M:SetTexCoord(l, r, t, b) self.coords = { l, r, t, b } end
+-- A MaskTexture does not clip on this client (Theme.lua): the mock raises on one so no key quietly relies on it.
+function M:CreateMaskTexture() error("CreateMaskTexture: masks do not clip on this client") end
 function M:SetHorizTile() end
 function M:SetVertTile() end
 function M:SetDesaturated() end
@@ -413,9 +409,7 @@ function h_glyphInfo()
                     local t = tostring(o.tex)
                     if t:find("glyph%a*_") then
                         info.w, info.h, info.layer, info.sub = o.w, o.h, o.layer, o.sublevel
-                        info.masks = o.masks and #o.masks or 0
-                        local m = o.masks and o.masks[1]
-                        if m then info.maskTex, info.maskAllPoints = tostring(m.tex), m.allPoints ~= nil end
+                        info.c = o.coords
                     elseif t:find("deck_key_slant_outline", 1, true) then
                         info.edgeLayer, info.edgeSub = o.layer, o.sublevel
                     end
@@ -691,14 +685,14 @@ def check_glyph_files() -> None:
 
     baked = sorted(p.name for p in media.glob("glyphart_*.tga"))
     orphans = [n for n in baked if n not in set(resolved.values())]
-    bad = [n for n in baked if tga_header(media / n) != (2, 32, 32, 32)]
-    check("glyphs.baked_art_is_32x32_bgra_tga", len(baked) >= 15 and not bad, f"{len(baked)} files, bad {bad}")
+    bad = [n for n in baked if tga_header(media / n) != (2, 64, 64, 32)]
+    check("glyphs.baked_art_is_64x64_bgra_tga", len(baked) >= 15 and not bad, f"{len(baked)} files, bad {bad}")
     check("glyphs.no_baked_art_is_orphaned", not orphans, f"{orphans}")
     check("glyphs.no_degrade_logs", w.logs() == "", w.logs())
 
 
-def check_fill_and_mask() -> None:
-    """Baked art covers its key and is clipped by the key's own shape; line glyphs stay small and unmasked."""
+def check_fill() -> None:
+    """Baked art covers its key (cover, not contain); line glyphs stay small and centred. No mask: it would not clip."""
     for scale in (1.0, 0.64):
         w = World(12, scale=scale).login()
         infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
@@ -707,17 +701,18 @@ def check_fill_and_mask() -> None:
         line = [i for i, p in zip(infos, paths) if "glyphart_" not in p]
         tag = f"scale_{scale}"
         check(f"fill.{tag}.art_keys_exist", len(art) >= 8 and len(art) + len(line) == 12, f"{len(art)} art, {len(line)} line")
-        covers = all(near(i["w"], max(i["bw"], i["bh"])) and near(i["h"], i["w"]) and i["w"] >= i["bw"] - EPS and i["w"] >= i["bh"] - EPS
-                     for i in art)
-        check(f"fill.{tag}.art_covers_the_key_keeping_its_aspect", covers, f"{[(i['w'], i['h'], i['bw'], i['bh']) for i in art][:2]}")
-        check(f"fill.{tag}.art_is_masked_by_the_key_shape",
-              all(i["masks"] == 1 and i["maskAllPoints"] and str(i["maskTex"]).endswith("cell_slant.tga") for i in art),
-              f"{[(i['masks'], i.get('maskTex')) for i in art][:2]}")
+        check(f"fill.{tag}.art_is_the_size_of_the_key",
+              all(near(i["w"], i["bw"]) and near(i["h"], i["bh"]) for i in art), f"{[(i['w'], i['h'], i['bw'], i['bh']) for i in art][:2]}")
+        # cover: the whole width of the square texture, the central band of rows whose share is key height / key width
+        bands = [tuple(i["c"][k] for k in (1, 2, 3, 4)) for i in art]
+        check(f"fill.{tag}.art_crops_to_the_keys_aspect_centred",
+              all(i["c"][1] == 0 and i["c"][2] == 1 and near(i["c"][3], (1 - i["bh"] / i["bw"]) / 2) and near(i["c"][4], 1 - i["c"][3])
+                  for i in art), f"{bands[:2]}")
         check(f"fill.{tag}.ring_draws_over_the_icon",
               all(i["layer"] == "ARTWORK" and i["edgeLayer"] == "ARTWORK" and i["sub"] < i["edgeSub"] for i in art + line),
               f"{[(i['layer'], i['sub'], i['edgeLayer'], i['edgeSub']) for i in (art + line)][:2]}")
-        check(f"fill.{tag}.line_glyphs_stay_small_and_unmasked",
-              all(near(i["w"], GLYPH_SIZE * scale) and i["masks"] == 0 for i in line), f"{[(i['w'], i['masks']) for i in line]}")
+        check(f"fill.{tag}.line_glyphs_stay_small_uncropped",
+              all(near(i["w"], GLYPH_SIZE * scale) and i.get("c") is None for i in line), f"{[(i['w'], i.get('c')) for i in line]}")
         check(f"fill.{tag}.no_degrade_logs", w.logs() == "", w.logs())
 
 
@@ -1061,7 +1056,7 @@ def main() -> int:
     check_layout(lean, gap)
     check_overlay()
     check_glyph_files()
-    check_fill_and_mask()
+    check_fill()
     check_art()
     check_hit_rects(lean, gap)
     check_deck(lean, gap)

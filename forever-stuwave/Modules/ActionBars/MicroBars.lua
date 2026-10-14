@@ -115,8 +115,8 @@ local ART = {
 local PVP_ART = { Alliance = "pvp_alliance", Horde = "pvp_horde" }
 local PVP_ART_OTHER = "pvp_ffa"
 
--- The texture file a glyph name wears, and whether it is baked art that FILLS the key (cover, clipped by
--- the key's slanted shape) rather than a small line glyph drawn centred at GLYPH_SIZE. `faction` is
+-- The texture file a glyph name wears, and whether it is baked art that FILLS the key (cover, the slanted
+-- shape baked into its alpha) rather than a small line glyph drawn centred at GLYPH_SIZE. `faction` is
 -- UnitFactionGroup("player") (nil or "Neutral" gives the faction free emblem). Pure, so the harness can
 -- walk every name.
 local function GlyphPath(name, faction)
@@ -332,7 +332,7 @@ end
 local function PlaceGlyph(key)
     local s = key.scale or 1
     key.glyph:ClearAllPoints()
-    key.glyph:SetPoint("CENTER", key.ov, "CENTER", 0, (key.lift or 0) * s)
+    key.glyph:SetPoint("CENTER", key.ov, "CENTER", 0, key.fill and 0 or (key.lift or 0) * s)
 end
 
 local function Paint(key, v)
@@ -387,10 +387,17 @@ local function SizeKey(key, s, keyW)
     key.scale = s
     local w, h = (keyW or KEY_W) * s, KEY_H * s
 
-    -- Baked art covers the key: a square as wide as the larger side keeps the aspect ratio and lets the
-    -- overflow past the slanted shape be masked off. A line glyph stays small and centred.
-    local g = key.fill and math.max(w, h) or GLYPH_SIZE * s
-    key.glyph:SetSize(g, g)
+    -- Baked art covers the key: a square texture, drawn at the key's width, cropped (texcoords) to the band of
+    -- rows that is the key's height over its width, so the aspect ratio holds and the overflow is cut. The
+    -- slanted shape is in the art's alpha, and the ring over it hides any rounding at the edge. A line glyph
+    -- stays small and centred.
+    if key.fill then
+        local pad = (1 - math.min(1, h / math.max(w, 1))) / 2
+        key.glyph:SetTexCoord(0, 1, pad, 1 - pad)
+        key.glyph:SetSize(w, h)
+    else
+        key.glyph:SetSize(GLYPH_SIZE * s, GLYPH_SIZE * s)
+    end
     PlaceGlyph(key)
 
     key.hoverGlow:SetSize(w * HOVER_GLOW_W, h * HOVER_GLOW_H)
@@ -444,15 +451,10 @@ local function PopulateKey(key, button, glyphFile, fill)
     -- Under the edge (ARTWORK 0), so the key's ring still draws over the icon; the LED and pip stay above.
     key.glyph = fx:CreateTexture(nil, "ARTWORK", nil, -1)
     key.glyph:SetTexture(glyphFile)
-    -- Filling art needs the key's own shape as a mask (the plate texture is that shape). Without mask
-    -- support the art falls back to the small centred size instead of spilling out of the key.
-    if fill and type(fx.CreateMaskTexture) == "function" and type(key.glyph.AddMaskTexture) == "function" then
-        key.mask = fx:CreateMaskTexture()
-        key.mask:SetTexture(TEX_PLATE, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-        key.mask:SetAllPoints(ov)
-        key.glyph:AddMaskTexture(key.mask)
-        key.fill = true
-    end
+    -- Filling art. No MaskTexture here: it does not clip on this client (Theme.lua, FILL_CORNER_TEXTURE). The art
+    -- is baked with the key's slanted shape in its alpha instead, so covering the key is just sizing and cropping
+    -- the texture (SizeKey).
+    key.fill = fill and true or false
 
     key.led = fx:CreateTexture(nil, "OVERLAY", nil, 1)
     key.led:SetTexture(TEX_LED)

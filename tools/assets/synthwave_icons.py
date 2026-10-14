@@ -35,7 +35,7 @@ The preview page embeds the derived art as base64, so it defaults to debug/ (git
 must never be committed to the public repository.
 
 Shipping the micro menu (style B, the approved look): `--bake-micro` writes
-forever-stuwave/Media/Textures/glyphart_<name>.tga, 32x32 opaque BGRA that fills the key edge to edge (the key's shape is the mask), no scanline
+forever-stuwave/Media/Textures/glyphart_<name>.tga, 64x64 BGRA that fills the key (the key's slanted shape is baked into its alpha: a MaskTexture does not clip on this client), no scanline
 (it would alias when the client rescales), one file per micro glyph plus one PvP file per
 faction. MicroBars.lua picks them; Character and Legacy have no static Blizzard art and keep
 their hand drawn glyph_ files (tools/assets/generate_deck_glyphs.py).
@@ -58,7 +58,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 REPO = Path(__file__).resolve().parent.parent.parent
 
@@ -480,8 +480,12 @@ def current_glyphs() -> dict[str, bytes]:
 # Shipping: the micro menu's style B textures
 # ---------------------------------------------------------------------------
 
-BAKE_SIZE = 32  # power of two; MicroBars.lua draws the glyph at 16 design px, so 2x for the GPU to minify
-BAKE_FILL = 1.4  # the art is padded to this much of its size with its own backdrop, so the glyph is not cut by the key's mask
+BAKE_SIZE = 64  # power of two: a square the key covers; MicroBars.lua crops it to the key's band of rows
+BAKE_FILL = 1.4  # the art is padded to this much of its size with its own backdrop, so the glyph is not cut by the key's shape
+# The micro key's geometry (MicroBars.lua KEY_W, KEY_H, LEAN_FRAC): the slanted shape is baked into the alpha because
+# a MaskTexture does not clip on this client. Drawn at the key's width, the texture's central band of rows
+# (KEY_H / KEY_W of its height) is the key; everything outside the slanted outline is transparent.
+KEY_W, KEY_H, KEY_LEAN = 34.0, 26.0, 0.34
 
 
 def pad_backdrop(src: np.ndarray, scale: float) -> np.ndarray:
@@ -496,11 +500,26 @@ def pad_backdrop(src: np.ndarray, scale: float) -> np.ndarray:
     return out
 
 
+def key_shape_alpha(n: int) -> np.ndarray:
+    """Alpha of the key's slanted outline inside the central band of an n x n square, soft at the edge."""
+    ss = 8
+    scale_x = n / KEY_W
+    band_h = n * KEY_H / KEY_W
+    y0 = (n - band_h) / 2
+    lean = KEY_LEAN * KEY_W
+    pts = [(lean, 0), (KEY_W, 0), (KEY_W - lean, KEY_H), (0, KEY_H)]
+    poly = [(x * scale_x * ss, (y0 + y * scale_x) * ss) for x, y in pts]
+    im = Image.new("L", (n * ss, n * ss), 0)
+    ImageDraw.Draw(im).polygon(poly, fill=255)
+    a = np.asarray(im, dtype=np.float64) / 255.0
+    return a.reshape(n, ss, n, ss).mean(axis=(1, 3))
+
+
 def bake_glyph(src: np.ndarray, fam: tuple) -> np.ndarray:
-    """Style B at BAKE_SIZE as opaque RGBA uint8, edge to edge: MicroBars.lua covers the key with it and
-    clips the overflow with the key's own shape. No scanline: it would alias when the client rescales."""
+    """Style B at BAKE_SIZE as RGBA uint8: art edge to edge, alpha the key's slanted shape. No scanline: it
+    would alias when the client rescales."""
     rgb = finish(gradient_map(pad_backdrop(src, BAKE_FILL), BAKE_SIZE, fam), BAKE_SIZE, TUNING[BAKE_SIZE], scan=False)
-    return (np.dstack([rgb, np.ones(rgb.shape[:2])]) * 255 + 0.5).astype(np.uint8)
+    return (np.dstack([rgb, key_shape_alpha(BAKE_SIZE)]) * 255 + 0.5).astype(np.uint8)
 
 
 def tga_bytes(rgba: np.ndarray) -> bytes:
@@ -532,7 +551,7 @@ def main() -> int:
                     help="standalone preview page (default is under debug/, which is untracked: it embeds Blizzard art, never commit it)")
     ap.add_argument("--png-dir", type=Path, help="also write every rendered PNG here")
     ap.add_argument("--bake-micro", action="store_true",
-                    help="write the shipped micro menu textures (style B, 32x32 .tga) into forever-stuwave/Media/Textures "
+                    help="write the shipped micro menu textures (style B, 64x64 .tga) into forever-stuwave/Media/Textures "
                          "(or FS_ASSET_OUTPUT_DIR) and stop")
     args = ap.parse_args()
 
