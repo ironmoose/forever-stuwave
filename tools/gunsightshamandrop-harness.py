@@ -435,6 +435,23 @@ seat()
 check(DEGRADED.gunsightshamandrop_apply == 1, "the failure is logged once")
 """)
 
+case("an_apply_that_throws_is_retried_at_the_next_regen")(r"""
+FS.GunsightShaman.frame = MODULE
+local D = load()
+tabAll()
+local origin = FS.GunsightShaman.Origin
+local fail = true
+FS.GunsightShaman.Origin = function() if fail then error("boom") end return origin() end
+seat()
+check(DEGRADED.gunsightshamandrop_apply == 1, "logged once")
+check(next(D.catchers) == nil, "nothing was built yet")
+fail = false
+fire("PLAYER_REGEN_ENABLED")               -- no combat in between: the failed apply left itself owed
+check(D.catchers[1] and D.catchers[1].mouse == true, "the retry at regen built and armed the catchers")
+fire("PLAYER_REGEN_ENABLED")
+check(DEGRADED.gunsightshamandrop_apply == 1, "no second line")
+""")
+
 case("without_a_unit_watch_api_the_catchers_stay_off_and_say_so")(r"""
 RegisterUnitWatch = nil
 FS.GunsightShaman.frame = MODULE

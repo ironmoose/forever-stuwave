@@ -487,6 +487,7 @@ def check_listeners_hear_each_element_button_after_its_attributes_settle_and_nev
     last = [row for row in seq(lua.eval("__ann")) if str(row["key"]) == "earth"][-1]
     assert str(last["type1"]) == "spell" and last["spell1"] is not None and last["action1"] is None
     # in combat nothing settles, so nothing is announced; regen announces
+    assert warnings(lua) == 1, f"a throwing listener is named once in chat, got {warnings(lua)}"
     set_combat(lua, True)
     lua.execute("__n = #__ann")
     fire(lua, "SPELLS_CHANGED")

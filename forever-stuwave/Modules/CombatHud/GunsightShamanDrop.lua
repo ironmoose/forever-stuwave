@@ -30,12 +30,14 @@
 --   * the element is open (ShamanTotems.IsUnlocked) and its tab button has a castable type1 (a locked or not learned element
 --     has none, and then no catcher is even built).
 --   With no target the holder is hidden by the unit watch whatever the mouse says.
---   Accepted limits, like the target menu button's: a module moved to the other area, an element learned, or the Gunsight
---   switched off while in combat leaves the catchers where and as they were until PLAYER_REGEN_ENABLED (the root only fades
---   in combat, so an invisible catcher can still take a click meanwhile).
+--   Accepted limits, like the target menu button's: a module moved to the other area, an element learned, the dot piece
+--   switched off, an area reassigned, or the Gunsight switched off while in combat leaves the catchers where and as they were,
+--   mouse on included, until PLAYER_REGEN_ENABLED (EnableMouse on a secure frame is refused in combat, and the root only
+--   fades), so a left click on the now invisible column still casts meanwhile.
 --
 -- Left click only. Right and middle clicks are passed through to the world when the client lets us (SetPassThroughButtons,
--- as the target menu does); where it does not, one chat line says so and a right drag that starts over a pole is swallowed.
+-- as the target menu does). Accepted limit: on a client that cannot, the catchers keep the mouse (the left click is the
+-- feature), one chat line says so, and a right drag that starts over a pole, the camera turn, is swallowed.
 -- Alt-click does nothing (on the tab it opens the picker). Nothing is drawn: no texture, no region, no tooltip, no script.
 --
 -- Nothing here is verified in game; the harness is a strict mock.
@@ -234,7 +236,10 @@ function Drop.Sync()
     end
     pending = false
     local ok, err = pcall(Apply)
-    if not ok then LogOnce("apply", err) end
+    if not ok then
+        pending = true              -- PLAYER_REGEN_ENABLED tries again
+        LogOnce("apply", err)
+    end
 end
 
 local function Request()
