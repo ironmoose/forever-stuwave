@@ -734,16 +734,16 @@ def check_glyph_files() -> None:
     check("glyphs.shipped_art_alpha_is_the_keys_shape", len(baked) >= 20 and not off, f"{len(baked)} files, off by more than one step: {off}")
 
     # Live layout: at every key count the art is drawn in the key's rect (the plate and the ring fill the same rect), so
-    # resample the shipped art band, the plate and the ring to the key's pixel size (3 screen px per design px, as on the live
-    # client) and check the art stays INSIDE the ring: never beyond the plate, and off the ring line's core, where a bright
+    # resample the shipped art band, the plate and the ring to the key's pixel size (3 screen px per design px, and 1, the
+    # live case on a 2560x1440 window where the 64 texel art is minified to about 34) and check the art stays INSIDE the ring: never beyond the plate, and off the ring line's core, where a bright
     # edge would read as running over the border (the ring is only 35% opaque at idle) or leak into the gap.
     plate_im = Image.open(media / "cell_slant.tga").convert("RGBA").getchannel("A")
     ring_im = Image.open(media / "deck_key_slant_outline.tga").convert("RGBA").getchannel("A")
     pad = (1 - 26 / 34) / 2
     leaks = {}
-    for count in (12, 14, 16, 18):
+    for count, px in ((c, k) for c in (12, 14, 16, 18) for k in (3, 1)):
         info = dict(World(count).login().call("h_glyphInfo")[1].items())
-        size = (round(info["w"] * 3), round(info["h"] * 3))
+        size = (round(info["w"] * px), round(info["h"] * px))
         plate = np.asarray(plate_im.resize(size, Image.BILINEAR), dtype=float) / 255
         ring = np.asarray(ring_im.resize(size, Image.BILINEAR), dtype=float) / 255
         for n in baked:
@@ -753,7 +753,7 @@ def check_glyph_files() -> None:
             core = ring >= 0.75  # the ring line itself; its soft inner edge may still carry a little art
             under = float(art[core].max()) if core.any() else 0.0
             if beyond > 0.08 or under > 0.2:
-                leaks[(count, n)] = (round(beyond, 2), round(under, 2))
+                leaks[(count, px, n)] = (round(beyond, 2), round(under, 2))
     check("glyphs.art_stays_inside_the_plate_and_off_the_ring_at_every_key_count", not leaks,
           f"{len(leaks)} leaks (beyond the plate, under the ring), first {list(leaks.items())[:3]}")
     # Outside the shape the RGB is the plate colour, not the art: a straight alpha bilinear fetch blends in the RGB of
