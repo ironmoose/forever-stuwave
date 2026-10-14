@@ -1145,6 +1145,29 @@ def check_the_chrome_is_the_buff_tabs_cut_plate_with_a_skinned_border():
     close(rgb(tile.fsSkin.border.ring._vertex), C["violet"], "border after leaving")
 
 
+def check_hiding_the_host_under_the_mouse_clears_the_hover_and_the_tooltip():
+    lua = world()
+    for tile in (cells_tile(lua), rate_tile(lua)):
+        lua.eval("__Region.Fire")(tile, "OnEnter")
+        close(rgb(tile.fsSkin.border.ring._vertex), C["cyan"], "hover border")
+        assert shown(g(lua).GameTooltip), "the tooltip is up"
+        host(lua).Hide(host(lua))
+        lua.eval("__Region.Fire")(tile, "OnHide")        # the engine runs OnHide on the children of a hidden frame
+        assert not tile.fsHover, "the hover survived the hide"
+        assert not shown(g(lua).GameTooltip), "the tooltip of a hidden tile stayed up"
+        host(lua).Show(host(lua))
+        refresh(lua)
+        close(rgb(tile.fsSkin.border.ring._vertex), C["violet"], "no hover rim after the host shows again")
+    # a tooltip that belongs to something else is left alone
+    lua = world()
+    tile = cells_tile(lua)
+    lua.eval("__Region.Fire")(tile, "OnEnter")
+    run(lua, "function GameTooltip:IsOwned(f) return false end")
+    lua.eval("__Region.Fire")(tile, "OnHide")
+    assert shown(g(lua).GameTooltip), "hid a tooltip another frame owns"
+    assert not tile.fsHover
+
+
 def check_the_rate_tile_underline_is_dashed_with_the_mockups_four_dashes():
     lua = world()
     assert len(seq(rate_tile(lua).fsDashes)) == 4
@@ -1239,6 +1262,7 @@ CHECKS = [
     check_the_listeners_are_for_the_unit_player_and_start_once,
     check_a_failed_build_leaves_no_listener_running,
     check_the_chrome_is_the_buff_tabs_cut_plate_with_a_skinned_border,
+    check_hiding_the_host_under_the_mouse_clears_the_hover_and_the_tooltip,
     check_the_rate_tile_underline_is_dashed_with_the_mockups_four_dashes,
     check_toc_lists_the_tab_after_the_buff_tab_and_before_the_config_window,
     check_no_em_dashes_and_no_flagged_words_in_the_new_files,

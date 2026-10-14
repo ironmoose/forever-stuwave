@@ -626,6 +626,14 @@ local function StyleTile(tile, scale)
             Tab.Paint()
             GameTooltip:Hide()
         end)
+        -- a hidden host (a Druid form change, the master toggle) sends no OnLeave: forget the hover, and hide the tooltip
+        -- only while it is this tile's
+        tile:SetScript("OnHide", function(self)
+            local ours = TipIsOurs(self)
+            self.fsHover = nil
+            self.fsSig = nil
+            if ours then GameTooltip:Hide() end
+        end)
     end
 
     if not tile.fsFace then
