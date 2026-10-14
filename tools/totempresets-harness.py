@@ -2490,13 +2490,14 @@ LIVE_SCALE = 0.8333     # Parker's layout scale; with effective scale 0.64 and p
 
 
 def set_display(lua, ppu, scale):
-    """The physical pixels in one UI unit. Parker's real display (1.2 pixels at layout scale 0.8333) is built the way the
-    client has it: effective scale 0.64 and physical height 1440, so a test that took the effective scale for the pixel
-    count would see 0.64."""
+    """The physical pixels in one UI unit, built the way the client has it: an effective scale and a physical screen height
+    (one UI unit is effective scale * physical height / 768 pixels). Parker's real display is effective scale 0.64 with
+    physical height 1440 (1.2 pixels at layout scale 0.8333); every other count here uses the same effective scale and the
+    height that gives it, so a test that took the effective scale for the pixel count would see 0.64."""
     if ppu == 1.2 and scale == LIVE_SCALE:
         run(lua, "__es = 1; __ees = 0.64; __physH = 1440")
     else:
-        run(lua, f"__es = {ppu}")
+        run(lua, f"__es = 1; __ees = 0.64; __physH = {ppu * 768 / 0.64!r}")
 
 
 def live_click(lua, b):
@@ -2669,6 +2670,50 @@ def check_a_disabled_row_does_not_light_its_edge_and_every_editor_texture_is_pix
             assert t._snap is True and float(t._bias) == 0, "an editor texture is not snapped to the pixel grid"
 
 
+def check_ticks_with_an_unchanged_refusal_never_refresh_the_open_card():
+    for locked in (False, True):
+        lua = boot()
+        i = make(lua)
+        if locked:
+            lock_presets(lua)
+        DL(lua).OpenEditor(i)
+        c = card(lua)
+        assert c.fsLocked is locked, "the card does not remember its lock state"
+        run(lua, "__rc = 0; local f = FS.TotemDial.RefreshCard; FS.TotemDial.RefreshCard = function(...) __rc = __rc + 1 return f(...) end")
+        c.name._text = "TYPING"
+        for _ in range(5):
+            tick(lua)
+        assert int(g(lua).__rc) == 0, f"the ticker refreshed an open card whose refusal had not changed (locked {locked})"
+        assert c.name._text == "TYPING", "a tick wiped the name box while typing"
+
+
+def check_a_chooser_reopened_after_the_refusal_cleared_has_live_tiles():
+    lua = boot()
+    i = make(lua)
+    DL(lua).OpenEditor(i)
+    row = rows(lua)[0]
+    live_click(lua, row.tile)
+    chooser = g(lua).FSTotemChooser
+    assert shown(chooser)
+    lock_presets(lua)
+    DL(lua).RefreshCard()
+    tiles = [chooser.tiles[k] for k in range(1, len(seq(chooser.tiles)) + 1) if shown(chooser.tiles[k])]
+    assert tiles and all(t._enabled is False and float(t._alpha) == 0.4 for t in tiles)
+    run(lua, "FS.TotemDial.Chooser():Hide()")
+    lock_presets(lua, False)
+    DL(lua).RefreshCard()
+    live_click(lua, row.tile)
+    assert shown(chooser)
+    tiles = [chooser.tiles[k] for k in range(1, len(seq(chooser.tiles)) + 1) if shown(chooser.tiles[k])]
+    assert tiles
+    for t in tiles:
+        assert t._enabled is not False and not t.fsDisabled, "a reopened chooser kept a tile disabled"
+        assert float(t._alpha) == 1, "a reopened chooser kept a tile dimmed"
+    picks = dict(PS(lua).Get(i).picks)
+    click(lua, tiles[-1])
+    assert not shown(chooser) and dict(PS(lua).Get(i).picks) != picks, "a reopened chooser tile did not take the click"
+
+
 CHECKS = [
     check_toc_lists_the_preset_files_after_the_totem_bar_and_bindings_declare_the_dial,
     check_the_settings_have_their_keys_defaults_tips_and_registered_defaults,
@@ -2761,6 +2806,8 @@ CHECKS = [
     check_a_dimmed_pick_cell_and_the_other_dimmed_controls_take_no_clicks_and_say_why,
     check_an_open_card_unlocks_when_the_refusal_clears_and_locks_when_it_begins,
     check_the_name_box_drops_its_hover_look_when_the_card_hides,
+    check_ticks_with_an_unchanged_refusal_never_refresh_the_open_card,
+    check_a_chooser_reopened_after_the_refusal_cleared_has_live_tiles,
     check_leaving_a_pick_cell_with_the_button_down_drops_the_pressed_look,
     check_a_disabled_row_does_not_light_its_edge_and_every_editor_texture_is_pixel_snapped,
     check_the_files_use_no_snippets_no_state_drivers_and_no_flagged_words,
