@@ -1720,6 +1720,9 @@ def check_the_editor_buttons_that_size_to_their_text_are_padded_symmetrically_an
             for label in {"useGnarly": ["USE AS GNARLY PRESET"], "delete": ["DELETE", "SURE?"]}[name]:
                 assert w >= len(label) * 5.4 + 2 * pad * sc - 1e-6, f"es {es}: {name} is {w} wide, {label} needs more"
             assert abs(w * es - round(w * es)) < 1e-6, f"es {es}: {name} is not whole physical pixels ({w * es})"
+            assert round(w * es) % 2 == 0, f"es {es}: {name} is an odd number of pixels wide, its centred label lands on a half pixel"
+            h = float(b._h)
+            assert abs(h * es - round(h * es)) < 1e-6 and round(h * es) % 2 == 0, f"es {es}: {name} is {h} tall"
             p = b.text._points[1]
             assert (p.point, p.relPoint) == ("CENTER", "CENTER") and not float(p.x or 0) and not float(p.y or 0), \
                 f"{name}: the label is not centred"
@@ -1730,7 +1733,209 @@ def check_the_editor_buttons_that_size_to_their_text_are_padded_symmetrically_an
         assert str(c.delete.text._text) == "SURE?" and float(c.delete._w) == before
         # side by side inside the card
         assert (8 + 6 + 8) * sc + float(c.useGnarly._w) + float(c.delete._w) <= float(c._w) + 1e-6, "the buttons overflow the card"
-        assert abs(float(c.name._w) - (float(c._w) - 16 * sc)) < 1e-6 and abs(float(rows(lua)[0]._w) - (float(c._w) - 16 * sc)) < 1e-6
+        edge = 2 * round(8 * sc * es) / es
+        assert abs(float(c.name._w) - (float(c._w) - edge)) < 1e-6 and abs(float(rows(lua)[0]._w) - (float(c._w) - edge)) < 1e-6
+
+
+def rgba(t):
+    c = t._color if t._color is not None else t._vertex
+    return tuple(round(float(c[i]), 4) for i in (1, 2, 3, 4)) if c is not None else None
+
+
+def look_of(b):
+    """Everything a button's state paints: fill, edges, label colour, glyph pixels, frame alpha."""
+    out = {"fill": rgba(b.fill), "alpha": float(b._alpha), "edges": [rgba(e) for e in seq(b.edges)]}
+    tc = b.text._textColor
+    out["text"] = tuple(round(float(tc[i]), 4) for i in (1, 2, 3, 4)) if tc is not None else None
+    out["glyph"] = [rgba(t) for t in seq(b.glyph)] if b.glyph is not None else []
+    return out
+
+
+def drive(lua, b, label, hover_changes=True):
+    """Enter, press, release, leave: each state looks different from the last and leave restores the first exactly."""
+    base = look_of(b)
+    script(lua, b, "OnEnter")
+    hov = look_of(b)
+    if hover_changes:
+        assert hov != base, f"{label}: hover looks like normal"
+    script(lua, b, "OnMouseDown")
+    pre = look_of(b)
+    if hover_changes:
+        assert pre != hov, f"{label}: pressed looks like hover"
+    script(lua, b, "OnMouseUp")
+    assert look_of(b) == hov, f"{label}: release did not return to hover"
+    script(lua, b, "OnLeave")
+    assert look_of(b) == base, f"{label}: leave did not restore the normal look"
+    # the mouse leaving while the button is held down drops both states
+    script(lua, b, "OnEnter")
+    script(lua, b, "OnMouseDown")
+    script(lua, b, "OnLeave")
+    assert look_of(b) == base, f"{label}: leaving with the button down kept a look"
+    return base, hov, pre
+
+
+def glyph_px(b, es):
+    """The glyph pixels as integer (x, y) from the button's top left, and the button size in pixels."""
+    pts = []
+    for t in seq(b.glyph):
+        if not t._shown:
+            continue
+        p = t._points[1]
+        x, y = float(p.x) * es, -float(p.y) * es
+        assert abs(x - round(x)) < 1e-6 and abs(y - round(y)) < 1e-6, f"glyph pixel off the grid: {x}, {y}"
+        assert abs(float(t._w) * es - 1) < 1e-6 and abs(float(t._h) * es - 1) < 1e-6, "glyph pixel is not one pixel"
+        pts.append((round(x), round(y)))
+    return pts, round(float(b._w) * es), round(float(b._h) * es)
+
+
+def check_the_close_x_and_the_arrows_are_drawn_on_whole_pixels_with_equal_margins_at_every_scale():
+    for es, sc in ((1.0, 1.0), (0.64, 1.0), (1.3333333, 1.25), (0.7, 0.8)):
+        lua = boot(sc)
+        run(lua, f"__es = {es}")
+        P = PS(lua)
+        i = make(lua)
+        DL(lua).OpenEditor(i)
+        c = card(lua)
+        assert len(seq(P.Get(i).order)) >= 3
+        shapes = [("close", c.close)] + [(f"up{n}", r.up) for n, r in enumerate(rows(lua)) if shown(r.up)] + \
+                 [(f"down{n}", r.down) for n, r in enumerate(rows(lua)) if shown(r.down)]
+        assert len(shapes) >= 4
+        for label, b in shapes:
+            pts, bw, bh = glyph_px(b, es)
+            assert pts and bw % 2 == 0 and bh % 2 == 0, f"es {es} {label}: button {bw}x{bh}"
+            xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+            left, right = min(xs), bw - 1 - max(xs)
+            top, bottom = min(ys), bh - 1 - max(ys)
+            assert left == right and top == bottom and left >= 1 and top >= 1, \
+                f"es {es} sc {sc} {label}: margins l{left} r{right} t{top} b{bottom} in {bw}x{bh}"
+            if label == "close":
+                assert max(xs) - min(xs) == max(ys) - min(ys), "the X is not square"
+                assert len(set(pts)) == len(pts) and (min(xs), min(ys)) in pts and (max(xs), max(ys)) in pts
+                assert (min(xs), max(ys)) in pts and (max(xs), min(ys)) in pts, "the X lacks its corners"
+            # the label of a glyph button is empty: nothing for font metrics to put off centre
+            assert not b.text._text
+
+
+def check_every_interactive_editor_element_has_hover_pressed_and_disabled_looks_and_restores_exactly():
+    lua = boot()
+    P = PS(lua)
+    i = make(lua)
+    DL(lua).OpenEditor(i)
+    c = card(lua)
+    live = [("close", c.close)] + [(f"up{n}", r.up) for n, r in enumerate(rows(lua)) if shown(r.up)] + \
+           [(f"down{n}", r.down) for n, r in enumerate(rows(lua)) if shown(r.down)] + \
+           [("delete", c.delete), ("useGnarly", c.useGnarly)]
+    for label, b in live:
+        drive(lua, b, label)
+    # the armed DELETE has a look of its own, with its own hover
+    script(lua, c.delete, "OnClick")
+    assert str(c.delete.text._text) == "SURE?"
+    armed, armed_hover, _ = drive(lua, c.delete, "armed delete")
+    DL(lua).RefreshCard()
+    assert look_of(c.delete) == armed, "a repaint changed the armed look"
+    DL(lua).CloseEditor()
+    DL(lua).OpenEditor(i)
+    c = card(lua)
+    # USE AS GNARLY PRESET, tied: its own base look, still reacts
+    script(lua, c.useGnarly, "OnClick")
+    assert P.Gnarly() == i
+    on, on_hover, _ = drive(lua, c.useGnarly, "tied useGnarly")
+    assert on != look_of_untied(lua, i)
+    # disabled: the frame is dimmed and the mouse changes nothing
+    run(lua, "__refusal = FS.TotemPresets.Refusal; FS.TotemPresets.Refusal = function() return 'saving is off' end")
+    DL(lua).RefreshCard()
+    for label, b in [("delete", c.delete), ("useGnarly", c.useGnarly)] + \
+            [(f"up{n}", r.up) for n, r in enumerate(rows(lua)) if shown(r.up)]:
+        assert float(b._alpha) == 0.4, f"{label} is not dimmed while the presets cannot be saved"
+        dis = look_of(b)
+        script(lua, b, "OnEnter")
+        script(lua, b, "OnMouseDown")
+        assert look_of(b) == dis, f"{label}: a disabled button reacted to the mouse"
+        script(lua, b, "OnMouseUp")
+        script(lua, b, "OnLeave")
+    assert float(c.close._alpha) == 1, "the close button is dimmed"
+    run(lua, "FS.TotemPresets.Refusal = __refusal")
+    DL(lua).RefreshCard()
+    assert float(c.delete._alpha) == 1 and float(c.useGnarly._alpha) == 1
+
+
+def look_of_untied(lua, i):
+    P = PS(lua)
+    P.SetGnarly(None)
+    DL(lua).RefreshCard()
+    out = look_of(card(lua).useGnarly)
+    P.SetGnarly(i)
+    DL(lua).RefreshCard()
+    return out
+
+
+def check_the_name_box_the_pick_cells_and_the_row_light_up_on_hover_and_restore():
+    lua = boot()
+    P = PS(lua)
+    i = make(lua)
+    DL(lua).OpenEditor(i)
+    c = card(lua)
+    n = c.name
+    base = ([rgba(e) for e in seq(c.nameEdges)], rgba(n.fill))
+    script(lua, n, "OnEnter")
+    script(lua, n, "OnLeave")
+    assert ([rgba(e) for e in seq(c.nameEdges)], rgba(n.fill)) == base, "the name box kept its hover look after leaving"
+    script(lua, n, "OnEnter")
+    hov = ([rgba(e) for e in seq(c.nameEdges)], rgba(n.fill))
+    assert hov != base and hov[0][0][3] > base[0][0][3], "the name box has no hover look"
+    script(lua, n, "OnEditFocusGained")
+    assert rgba(c.nameEdges[1])[3] == 1.0
+    script(lua, n, "OnLeave")
+    assert rgba(c.nameEdges[1])[3] == 1.0, "leaving dropped the focus look"
+    script(lua, n, "OnEditFocusLost")
+    assert ([rgba(e) for e in seq(c.nameEdges)], rgba(n.fill)) == base, "the name box did not return to normal"
+    # the pick cell: its ring shows on hover, full while pressed, and the row's edge lights with it
+    row = rows(lua)[0]
+    t = row.tile
+    ring0, row0 = [rgba(e) for e in seq(t.hl)], [rgba(e) for e in seq(row.edges)]
+    assert ring0[0][3] == 0
+    script(lua, t, "OnEnter")
+    assert rgba(t.hl[1])[3] == 0.9 and rgba(row.edges[1])[3] > row0[0][3]
+    script(lua, t, "OnMouseDown")
+    assert rgba(t.hl[1])[3] == 1.0
+    script(lua, t, "OnMouseUp")
+    script(lua, t, "OnLeave")
+    assert [rgba(e) for e in seq(t.hl)] == ring0 and [rgba(e) for e in seq(row.edges)] == row0
+    # the chooser tiles
+    script(lua, t, "OnClick")
+    tile = g(lua).FSTotemChooser.tiles[1]
+    ring0 = [rgba(e) for e in seq(tile.hl)]
+    script(lua, tile, "OnEnter")
+    assert rgba(tile.hl[1])[3] == 0.9
+    script(lua, tile, "OnMouseDown")
+    assert rgba(tile.hl[1])[3] == 1.0
+    script(lua, tile, "OnMouseUp")
+    script(lua, tile, "OnLeave")
+    assert [rgba(e) for e in seq(tile.hl)] == ring0
+    # disabled while the presets cannot be saved
+    run(lua, "FS.TotemPresets.Refusal = function() return 'saving is off' end")
+    DL(lua).RefreshCard()
+    assert float(n._alpha) == 0.4 and float(t._alpha) == 0.4
+    script(lua, n, "OnEnter")
+    script(lua, t, "OnEnter")
+    assert rgba(t.hl[1])[3] == 0, "a disabled cell lit up"
+    assert rgba(c.nameEdges[1])[3] == 0.4
+
+
+def check_the_dial_and_gnarly_cells_light_on_hover_and_restore_in_and_out_of_combat():
+    for combat in (False, True):
+        lua, a, b = gnarly_world()
+        if combat:
+            set_combat(lua, True)
+        for cell in (btn(lua, "dial"), gb(lua)):
+            ring = cell.fsSkin.border.ring
+            glow = cell.fsSkin.glow
+            base = (rgba(ring), rgba(glow), rgba(cell.fsTint))
+            script(lua, cell, "OnEnter")
+            hov = (rgba(ring), rgba(glow), rgba(cell.fsTint))
+            assert hov != base, f"{cell.fsKey} has no hover look (combat {combat})"
+            script(lua, cell, "OnLeave")
+            assert (rgba(ring), rgba(glow), rgba(cell.fsTint)) == base, f"{cell.fsKey} did not restore (combat {combat})"
 
 
 def shift_click(lua, button):
@@ -2333,6 +2538,10 @@ CHECKS = [
     check_the_gnarly_tooltip_and_the_unset_tooltip,
     check_use_as_gnarly_preset_in_the_editor_ties_and_unties_and_shift_click_edits_it,
     check_the_editor_buttons_that_size_to_their_text_are_padded_symmetrically_and_snapped_to_whole_pixels,
+    check_the_close_x_and_the_arrows_are_drawn_on_whole_pixels_with_equal_margins_at_every_scale,
+    check_every_interactive_editor_element_has_hover_pressed_and_disabled_looks_and_restores_exactly,
+    check_the_name_box_the_pick_cells_and_the_row_light_up_on_hover_and_restore,
+    check_the_dial_and_gnarly_cells_light_on_hover_and_restore_in_and_out_of_combat,
     check_shift_click_on_an_unset_gnarly_with_room_makes_an_empty_preset_ties_it_and_opens_it,
     check_shift_click_on_an_unset_gnarly_leaves_the_dial_on_its_new_slot,
     check_making_the_gnarly_preset_leaves_the_dials_step_record_alone,

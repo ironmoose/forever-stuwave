@@ -794,36 +794,168 @@ local function Mono(fs, size, c)
     Theme.ApplyMono(fs, math.floor(size * Scale() + 0.5), c or WHITE)
 end
 
+-- Pixels. The editor draws on whole physical pixels: sizes and offsets are rounded at the frame's effective scale, boxes
+-- that centre something are an EVEN number of pixels (so the centre is a pixel edge), and lines and glyphs are textures
+-- one pixel thick that snap to the pixel grid.
+local function Es(frame)
+    local ok, es = pcall(function() return frame:GetEffectiveScale() end)
+    if ok and type(es) == "number" and es > 0 then return es end
+    return 1
+end
+
+local function PxRound(frame, v)
+    local es = Es(frame)
+    return math.floor(v * es + 0.5) / es
+end
+
+local function PxThick(frame, v)
+    local es = Es(frame)
+    return math.max(1, math.floor(v * es + 0.5)) / es
+end
+
+local function PxEven(frame, v)
+    local es = Es(frame)
+    local n = math.max(2, math.ceil(v * es - 1e-6))
+    if n % 2 == 1 then n = n + 1 end
+    return n / es
+end
+
+-- `w` UI units rounded UP to a whole number of physical screen pixels.
+local function SnapUp(frame, w)
+    local es = Es(frame)
+    return math.ceil(w * es - 1e-6) / es
+end
+
+local function Snap(tex)
+    if tex and tex.SetSnapToPixelGrid then
+        pcall(tex.SetSnapToPixelGrid, tex, true)
+        if tex.SetTexelSnappingBias then pcall(tex.SetTexelSnappingBias, tex, 0) end
+    end
+end
+
+local function SnapAll(list)
+    for i = 1, #list do Snap(list[i]) end
+end
+
+local function Edges(frame, layer, sub)
+    local edges = NewEdges(frame, layer, sub)
+    SnapAll(edges)
+    return edges
+end
+
+local function Mix3(a, b, t)
+    return { a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t }
+end
+
+local FILL = { 0.051, 0.024, 0.125 }
+
+-- A button's look from its state. Normal comes from b.fsLook (ring colour, text colour, fill, edge alpha, a fill mix
+-- toward the ring); hover brightens the fill toward the ring (the config window's hover, 0.16) and takes the ring to full
+-- alpha, pressed goes further (0.32), disabled is the frame at alpha 0.4 and ignores the mouse. Textures and colours only.
+local function PaintButton(b)
+    local look = b.fsLook
+    if not look then return end
+    local live = not b.fsDisabled
+    local hover, pressed = live and b.fsHover, live and b.fsPressed
+    local mix = (pressed and 0.32) or (hover and 0.16) or look.mix or 0
+    local f = Mix3(look.fill or FILL, look.ring, mix)
+    b.fill:SetColorTexture(f[1], f[2], f[3], look.fillA or 0.8)
+    SetEdges(b.edges, look.ring, (hover or pressed) and 1 or (look.edgeA or 0.8))
+    local tc = (hover or pressed) and WHITE or look.text
+    b.text:SetTextColor(tc[1], tc[2], tc[3], 1)
+    if b.glyph then
+        for i = 1, #b.glyph do b.glyph[i]:SetColorTexture(tc[1], tc[2], tc[3], 1) end
+    end
+    b:SetAlpha(b.fsDisabled and 0.4 or 1)
+    if b.fsAfter then b.fsAfter(b) end
+end
+
+local function SetDisabled(b, off)
+    off = off and true or false
+    b.fsDisabled = off
+    if b.SetEnabled then pcall(b.SetEnabled, b, not off) end
+    PaintButton(b)
+end
+
 local function NewButton(parent, w, h)
     local b = CreateFrame("Button", nil, parent)
     b:SetSize(w, h)
     b.fill = b:CreateTexture(nil, "BACKGROUND")
     b.fill:SetAllPoints(b)
-    b.fill:SetColorTexture(0.051, 0.024, 0.125, 0.8)
-    b.edges = NewEdges(b, "BORDER", 0)
+    b.fill:SetColorTexture(FILL[1], FILL[2], FILL[3], 0.8)
+    b.edges = Edges(b, "BORDER", 0)
     b.text = b:CreateFontString(nil, "OVERLAY")
     b.text:SetPoint("CENTER", b, "CENTER", 0, 0)
     b:RegisterForClicks("LeftButtonUp")
+    b:SetScript("OnEnter", function(self) self.fsHover = true; PaintButton(self) end)
+    b:SetScript("OnLeave", function(self) self.fsHover, self.fsPressed = false, false; PaintButton(self) end)
+    b:SetScript("OnMouseDown", function(self) self.fsPressed = true; PaintButton(self) end)
+    b:SetScript("OnMouseUp", function(self) self.fsPressed = false; PaintButton(self) end)
+    b:SetScript("OnHide", function(self) self.fsHover, self.fsPressed = false, false end)
     return b
 end
 
-local function StyleButton(b, c, text, size)
-    SeatEdges(b.edges, b, math.max(1, Scale()))
-    SetEdges(b.edges, c, 0.8)
-    Mono(b.text, size or 9, c == MUTED and MUTED or WHITE)
+-- Styles a text button: `c` is its ring colour (MUTED keeps the label muted too), `o` { mix, edgeA, fill, fillA }.
+local function StyleButton(b, c, text, size, o)
+    o = o or {}
+    SeatEdges(b.edges, b, PxThick(b, math.max(1, Scale())))
+    local tc = c == MUTED and MUTED or WHITE
+    b.fsTextColor = tc
+    b.fsLook = { ring = c, text = tc, mix = o.mix, edgeA = o.edgeA, fill = o.fill, fillA = o.fillA }
+    Mono(b.text, size or 9, tc)
     b.text:SetText(text)
+    PaintButton(b)
 end
 
--- `w` UI units rounded UP to a whole number of physical screen pixels at the frame's effective scale.
-local function SnapUp(frame, w)
-    local ok, es = pcall(function() return frame:GetEffectiveScale() end)
-    if not ok or type(es) ~= "number" or es <= 0 then return math.ceil(w) end
-    return math.ceil(w * es - 1e-6) / es
+-- A glyph drawn as whole-pixel squares on button `b`: `cells` are { x, y } pixels from the glyph's top left, w and h its
+-- size in pixels. The margins to the button are equal on both sides when the button's size and the glyph's have the same
+-- parity (the buttons are even, the glyphs are even).
+local function SeatGlyph(b, cells, w, h)
+    local px = 1 / Es(b)
+    local es = Es(b)
+    local bw, bh = math.floor(b:GetWidth() * es + 0.5), math.floor(b:GetHeight() * es + 0.5)
+    local mx, my = math.floor((bw - w) / 2), math.floor((bh - h) / 2)
+    b.glyph = b.glyph or {}
+    for i, cell in ipairs(cells) do
+        local t = b.glyph[i]
+        if not t then
+            t = b:CreateTexture(nil, "OVERLAY")
+            Snap(t)
+            b.glyph[i] = t
+        end
+        t:ClearAllPoints()
+        t:SetSize(px, px)
+        t:SetPoint("TOPLEFT", b, "TOPLEFT", (mx + cell[1]) * px, -(my + cell[2]) * px)
+        t:Show()
+    end
+    for i = #cells + 1, #b.glyph do b.glyph[i]:Hide() end
+end
+
+-- The close X: two one pixel diagonals of an even n x n square (they never share a pixel).
+local function XCells(n)
+    local cells = {}
+    for k = 0, n - 1 do
+        cells[#cells + 1] = { k, k }
+        cells[#cells + 1] = { n - 1 - k, k }
+    end
+    return cells
+end
+
+-- A chevron h pixels tall and 2h wide: up (the point at the top) or down.
+local function ChevronCells(h, up)
+    local cells = {}
+    for r = 0, h - 1 do
+        local y = up and r or (h - 1 - r)
+        cells[#cells + 1] = { h - 1 - r, y }
+        cells[#cells + 1] = { h + r, y }
+    end
+    return cells
 end
 
 -- The width of a button that sizes to its label: the widest of `labels` at `size` plus BTN_PAD each side, never under the
--- design width `minW`, in whole physical pixels. The button's text is put back as it was. The label is centred on the
--- button (NewButton), so the padding is symmetric.
+-- design width `minW`, an even number of physical pixels (the label is centred, so its centre is a pixel edge). The
+-- button's text and its colour are put back as they were. The label is centred on the button (NewButton), so the padding
+-- is symmetric.
 local function TextButtonWidth(b, labels, size, minW, s)
     local keep = b.text:GetText()
     Mono(b.text, size, MUTED)
@@ -834,7 +966,37 @@ local function TextButtonWidth(b, labels, size, minW, s)
         if ok and type(tw) == "number" and tw > widest then widest = tw end
     end
     b.text:SetText(keep or "")
-    return SnapUp(b, math.max(minW * s, widest + 2 * D.BTN_PAD * s))
+    local tc = b.fsTextColor or MUTED
+    Mono(b.text, size, tc)
+    return PxEven(b, math.max(minW * s, widest + 2 * D.BTN_PAD * s))
+end
+
+-- A pick cell (row tile, chooser tile): a ring of edges in the element's colour that shows on hover and is full while
+-- pressed; disabled dims the cell and shows no ring. Textures and colours only.
+local function PaintTile(t)
+    local a = 0
+    if not t.fsDisabled then a = t.fsPressed and 1 or (t.fsHover and 0.9 or 0) end
+    SetEdges(t.hl, t.fsRing or WHITE, a)
+    t:SetAlpha(t.fsDisabled and 0.4 or 1)
+    if t.fsAfter then t.fsAfter(t) end
+end
+
+local function NewTileHover(t)
+    t.hl = Edges(t, "OVERLAY", 2)
+    PaintTile(t)
+    t:SetScript("OnMouseDown", function(self) self.fsPressed = true; PaintTile(self) end)
+    t:SetScript("OnMouseUp", function(self) self.fsPressed = false; PaintTile(self) end)
+    t:SetScript("OnHide", function(self) self.fsHover, self.fsPressed = false, false end)
+end
+
+local function PaintName()
+    local n = card and card.name
+    if not n then return end
+    local live = not n.fsDisabled
+    SetEdges(card.nameEdges, CYAN, n.fsFocus and 1 or ((live and n.fsHover) and 0.75 or 0.4))
+    local f = Mix3({ 0.039, 0.016, 0.086 }, CYAN, (live and n.fsHover and not n.fsFocus) and 0.08 or 0)
+    n.fill:SetColorTexture(f[1], f[2], f[3], 1)
+    n:SetAlpha(n.fsDisabled and 0.4 or 1)
 end
 
 local function CloseChooser()
@@ -874,7 +1036,7 @@ local function OpenChooser(row)
         chooser.fill = chooser:CreateTexture(nil, "BACKGROUND")
         chooser.fill:SetAllPoints(chooser)
         chooser.fill:SetColorTexture(0.051, 0.024, 0.125, 0.97)
-        chooser.edges = NewEdges(chooser, "BORDER", 0)
+        chooser.edges = Edges(chooser, "BORDER", 0)
         chooser.tiles = {}
         chooser:Hide()
     end
@@ -888,9 +1050,11 @@ local function OpenChooser(row)
         if base then items[#items + 1] = { base = base, id = item.id, icon = item.icon, name = item.name } end
     end
     items[#items + 1] = { leave = true }
-    local size, gap = D.CHOOSER_TILE * s, 3 * s
-    chooser:SetSize((#items * D.CHOOSER_TILE + (#items + 1) * 3) * s, (D.CHOOSER_TILE + 6) * s)
-    SeatEdges(chooser.edges, chooser, math.max(1, s))
+    local size = PxEven(chooser, D.CHOOSER_TILE * s)
+    local pad = PxRound(chooser, 3 * s)
+    chooser:SetSize(#items * size + (#items + 1) * pad, size + 2 * pad)
+    local thick = PxThick(chooser, math.max(1, s))
+    SeatEdges(chooser.edges, chooser, thick)
     SetEdges(chooser.edges, ELEMENT[element] or VIOLET, 0.85)
     local preset = PS.Get(index)
     local current = preset and preset.picks[element]
@@ -905,6 +1069,7 @@ local function OpenChooser(row)
             tile.mark = tile:CreateTexture(nil, "OVERLAY")
             tile.text = tile:CreateFontString(nil, "OVERLAY")
             tile.text:SetPoint("CENTER", tile, "CENTER", 0, 0)
+            NewTileHover(tile)
             tile:SetScript("OnClick", function(self)
                 local edit = PS.SetTotem(card.fsIndex, self.fsElement, self.fsBase)
                 if edit == false then return end
@@ -912,6 +1077,8 @@ local function OpenChooser(row)
                 Dial.RefreshCard()
             end)
             tile:SetScript("OnEnter", function(self)
+                self.fsHover = true
+                PaintTile(self)
                 if self.fsSpell and GameTooltip and GameTooltip.SetSpellByID then
                     GameTooltip:SetOwner(self, "ANCHOR_TOP")
                     GameTooltip:SetSpellByID(self.fsSpell)
@@ -922,15 +1089,22 @@ local function OpenChooser(row)
                     GameTooltip:Show()
                 end
             end)
-            tile:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+            tile:SetScript("OnLeave", function(self)
+                self.fsHover, self.fsPressed = false, false
+                PaintTile(self)
+                if GameTooltip then GameTooltip:Hide() end
+            end)
             chooser.tiles[i] = tile
         end
         local item = items[i]
         if item then
             tile:ClearAllPoints()
-            tile:SetPoint("LEFT", chooser, "LEFT", (3 + (i - 1) * (D.CHOOSER_TILE + 3)) * s, 0)
+            tile:SetPoint("LEFT", chooser, "LEFT", pad + (i - 1) * (size + pad), 0)
             tile:SetSize(size, size)
             tile.fsElement, tile.fsBase, tile.fsSpell = element, item.base, item.id
+            tile.fsRing = ELEMENT[element] or WHITE
+            SeatEdges(tile.hl, tile, thick)
+            PaintTile(tile)
             if item.leave then
                 tile.icon:SetColorTexture(0.04, 0.02, 0.09, 0.9)
                 Mono(tile.text, 11, MUTED)
@@ -941,9 +1115,9 @@ local function OpenChooser(row)
                 tile.text:Hide()
             end
             tile.mark:ClearAllPoints()
-            tile.mark:SetPoint("BOTTOMLEFT", tile, "BOTTOMLEFT", 2 * s, 1 * s)
-            tile.mark:SetPoint("BOTTOMRIGHT", tile, "BOTTOMRIGHT", -2 * s, 1 * s)
-            tile.mark:SetHeight(2 * s)
+            tile.mark:SetPoint("BOTTOMLEFT", tile, "BOTTOMLEFT", PxRound(tile, 2 * s), PxRound(tile, 1 * s))
+            tile.mark:SetPoint("BOTTOMRIGHT", tile, "BOTTOMRIGHT", -PxRound(tile, 2 * s), PxRound(tile, 1 * s))
+            tile.mark:SetHeight(PxThick(tile, 2 * s))
             local c = ELEMENT[element] or WHITE
             tile.mark:SetColorTexture(c[1], c[2], c[3], 1)
             tile.mark:SetShown((item.leave and current == nil) or (not item.leave and current == item.base))
@@ -953,77 +1127,100 @@ local function OpenChooser(row)
         end
     end
     chooser:ClearAllPoints()
-    chooser:SetPoint("TOPRIGHT", row, "TOPLEFT", -4 * s, 0)
+    chooser:SetPoint("TOPRIGHT", row, "TOPLEFT", -PxRound(chooser, 4 * s), 0)
     chooser:Show()
 end
 
 local function SeatCard()
     local s = Scale()
     local C = D.CARD
+    local function u(v) return PxRound(card, v * s) end
+    local function even(v) return PxEven(card, v * s) end
     -- the two foot buttons size to their labels (DELETE is as wide for SURE? too, so it does not jump); the card grows to
     -- hold them side by side when the labels need more than the design width
     local delW = TextButtonWidth(card.delete, { "DELETE", "SURE?" }, 9, 58, s)
     local useW = card.useGnarly and TextButtonWidth(card.useGnarly, { "USE AS GNARLY PRESET" }, 9, 120, s) or 0
     local cardW = SnapUp(card, math.max(C.W * s, (16 + (card.useGnarly and 6 or 0)) * s + delW + useW))
-    card:SetSize(cardW, (C.TOP + C.ROWS * C.ROW + C.FOOT) * s)
-    SeatEdges(card.edges, card, math.max(1, s))
+    local thick = PxThick(card, math.max(1, s))
+    card:SetSize(cardW, u(C.TOP + C.ROWS * C.ROW + C.FOOT))
+    SeatEdges(card.edges, card, thick)
     SetEdges(card.edges, VIOLET, 0.85)
     card.title:ClearAllPoints()
-    card.title:SetPoint("TOPLEFT", card, "TOPLEFT", 8 * s, -4 * s)
+    card.title:SetPoint("TOPLEFT", card, "TOPLEFT", u(8), -u(4))
     Mono(card.title, 10, MUTED)
+    -- the close X: an even square, a drawn glyph (font metrics cannot centre it), equal margins on whole pixels
     card.close:ClearAllPoints()
-    card.close:SetPoint("TOPRIGHT", card, "TOPRIGHT", -3 * s, -2 * s)
-    card.close:SetSize(14 * s, 14 * s)
-    StyleButton(card.close, MUTED, "x", 11)
+    card.close:SetPoint("TOPRIGHT", card, "TOPRIGHT", -u(3), -u(2))
+    local closeSize = even(14)
+    card.close:SetSize(closeSize, closeSize)
+    SeatEdges(card.close.edges, card.close, thick)
+    card.close.fsLook = { ring = MUTED, text = MUTED }
+    local cpx = math.floor(closeSize * Es(card.close) + 0.5)
+    local xn = math.max(4, 2 * math.floor(cpx * 0.43 / 2 + 0.5))
+    SeatGlyph(card.close, XCells(xn), xn, xn)
+    PaintButton(card.close)
     card.name:ClearAllPoints()
-    card.name:SetPoint("TOPLEFT", card, "TOPLEFT", 8 * s, -20 * s)
-    card.name:SetSize(cardW - 16 * s, 18 * s)
+    card.name:SetPoint("TOPLEFT", card, "TOPLEFT", u(8), -u(20))
+    card.name:SetSize(cardW - 2 * u(8), even(18))
     Mono(card.name, 12, WHITE)
-    card.nameEdges = card.nameEdges or NewEdges(card.name, "BORDER", 0)
-    SeatEdges(card.nameEdges, card.name, math.max(1, s))
+    card.nameEdges = card.nameEdges or Edges(card.name, "BORDER", 0)
+    SeatEdges(card.nameEdges, card.name, thick)
     card.label:ClearAllPoints()
-    card.label:SetPoint("TOPLEFT", card, "TOPLEFT", 8 * s, -45 * s)
+    card.label:SetPoint("TOPLEFT", card, "TOPLEFT", u(8), -u(45))
     Mono(card.label, 9, MUTED)
     card.label:SetText("DROP ORDER")
     for i, row in ipairs(card.rows) do
         row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", card, "TOPLEFT", 8 * s, -(C.TOP + (i - 1) * C.ROW) * s)
-        row:SetSize(cardW - 16 * s, (C.ROW - 3) * s)
+        row:SetPoint("TOPLEFT", card, "TOPLEFT", u(8), -u(C.TOP + (i - 1) * C.ROW))
+        row:SetSize(cardW - 2 * u(8), even(C.ROW - 3))
         row.num:ClearAllPoints()
-        row.num:SetPoint("LEFT", row, "LEFT", 6 * s, 0)
+        row.num:SetPoint("LEFT", row, "LEFT", u(6), 0)
         Mono(row.num, 11, WHITE)
         row.bar:ClearAllPoints()
-        row.bar:SetPoint("LEFT", row, "LEFT", 19 * s, 0)
-        row.bar:SetSize(3 * s, 14 * s)
+        row.bar:SetPoint("LEFT", row, "LEFT", u(19), 0)
+        row.bar:SetSize(u(3), even(14))
         row.tile:ClearAllPoints()
-        row.tile:SetPoint("LEFT", row, "LEFT", 26 * s, 0)
-        row.tile:SetSize(22 * s, 22 * s)
+        row.tile:SetPoint("LEFT", row, "LEFT", u(26), 0)
+        row.tile:SetSize(even(22), even(22))
+        SeatEdges(row.tile.hl, row.tile, thick)
         row.label:ClearAllPoints()
-        row.label:SetPoint("LEFT", row, "LEFT", 52 * s, 0)
+        row.label:SetPoint("LEFT", row, "LEFT", u(52), 0)
         Mono(row.label, 10, WHITE)
+        local aw, ah = even(12), even(14)
         row.up:ClearAllPoints()
-        row.up:SetPoint("RIGHT", row, "RIGHT", -22 * s, 0)
-        row.up:SetSize(12 * s, 14 * s)
+        row.up:SetPoint("RIGHT", row, "RIGHT", -u(22), 0)
+        row.up:SetSize(aw, ah)
         row.down:ClearAllPoints()
-        row.down:SetPoint("RIGHT", row, "RIGHT", -6 * s, 0)
-        row.down:SetSize(12 * s, 14 * s)
-        SeatEdges(row.edges, row, math.max(1, s))
+        row.down:SetPoint("RIGHT", row, "RIGHT", -u(6), 0)
+        row.down:SetSize(aw, ah)
+        -- the arrows are chevrons h pixels tall and 2h wide, h even, with room left either side
+        local h = math.max(2, 2 * math.floor((math.floor(aw * Es(row.up) + 0.5) - 4) / 4))
+        for _, pair in ipairs({ { row.up, true }, { row.down, false } }) do
+            SeatEdges(pair[1].edges, pair[1], thick)
+            SeatGlyph(pair[1], ChevronCells(h, pair[2]), 2 * h, h)
+        end
+        SeatEdges(row.edges, row, thick)
     end
     card.delete:ClearAllPoints()
-    card.delete:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", -8 * s, 8 * s)
-    card.delete:SetSize(delW, 17 * s)
+    card.delete:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", -u(8), u(8))
+    card.delete:SetSize(delW, even(17))
     if card.useGnarly then
         card.useGnarly:ClearAllPoints()
-        card.useGnarly:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", 8 * s, 8 * s)
-        card.useGnarly:SetSize(useW, 17 * s)
+        card.useGnarly:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", u(8), u(8))
+        card.useGnarly:SetSize(useW, even(17))
     end
+end
+
+local function PaintRow(row)
+    local lit = row.tile.fsHover or row.up.fsHover or row.down.fsHover
+    SetEdges(row.edges, VIOLET, (lit and not row.tile.fsDisabled) and 0.7 or 0.35)
 end
 
 local function BuildRow(parent, i)
     local row = CreateFrame("Frame", nil, parent)
     row.fill = row:CreateTexture(nil, "BACKGROUND")
     row.fill:SetAllPoints(row)
-    row.edges = NewEdges(row, "BORDER", 0)
+    row.edges = Edges(row, "BORDER", 0)
     row.num = row:CreateFontString(nil, "OVERLAY")
     row.bar = row:CreateTexture(nil, "ARTWORK")
     row.tile = CreateFrame("Button", nil, row)
@@ -1036,6 +1233,16 @@ local function BuildRow(parent, i)
     row.label = row:CreateFontString(nil, "OVERLAY")
     row.up = NewButton(row, 12, 14)
     row.down = NewButton(row, 12, 14)
+    NewTileHover(row.tile)
+    row.tile:SetScript("OnEnter", function(self) self.fsHover = true; PaintTile(self) end)
+    row.tile:SetScript("OnLeave", function(self) self.fsHover, self.fsPressed = false, false; PaintTile(self) end)
+    row.up.fsLook = { ring = MUTED, text = MUTED }
+    row.down.fsLook = { ring = MUTED, text = MUTED }
+    -- hovering a cell or an arrow lights the row's edge
+    local function lit() PaintRow(row) end
+    row.tile.fsAfter, row.up.fsAfter, row.down.fsAfter = lit, lit, lit
+    PaintButton(row.up)
+    PaintButton(row.down)
     row.tile:SetScript("OnClick", function() OpenChooser(row) end)
     row.up:SetScript("OnClick", function()
         local ok, why = Presets().Move(card.fsIndex, row.fsElement, -1)
@@ -1070,7 +1277,7 @@ local function BuildCard()
     card.fill = card:CreateTexture(nil, "BACKGROUND")
     card.fill:SetAllPoints(card)
     card.fill:SetColorTexture(0.051, 0.024, 0.125, 0.97)
-    card.edges = NewEdges(card, "BORDER", 0)
+    card.edges = Edges(card, "BORDER", 0)
     card.title = card:CreateFontString(nil, "OVERLAY")
     card.close = NewButton(card, 14, 14)
     card.close:SetScript("OnClick", function() Dial.CloseEditor() end)
@@ -1092,13 +1299,15 @@ local function BuildCard()
     card.name:SetScript("OnEditFocusGained", function(self)
         if self.fsFocus then return end
         self.fsFocus = true
-        if card.nameEdges then SetEdges(card.nameEdges, CYAN, 1) end
+        PaintName()
     end)
     card.name:SetScript("OnEditFocusLost", function(self)
         self.fsFocus = false
-        if card.nameEdges then SetEdges(card.nameEdges, CYAN, 0.4) end
+        PaintName()
         Commit()
     end)
+    card.name:SetScript("OnEnter", function(self) self.fsHover = true; PaintName() end)
+    card.name:SetScript("OnLeave", function(self) self.fsHover = false; PaintName() end)
     card.label = card:CreateFontString(nil, "OVERLAY")
     card.rows = {}
     for i = 1, D.CARD.ROWS do card.rows[i] = BuildRow(card, i) end
@@ -1113,7 +1322,7 @@ local function BuildCard()
             if ok == false then Refuse(why) end
         else
             card.fsConfirm = now
-            StyleButton(self, PINK, "SURE?", 9)
+            StyleButton(self, PINK, "SURE?", 9, { mix = 0.22, edgeA = 1 })
         end
     end)
     card:SetScript("OnHide", function(self)
@@ -1140,7 +1349,10 @@ function Dial.RefreshCard()
     SeatCard()
     card.title:SetText("PRESET " .. card.fsIndex)
     card.name:SetText(preset.name)
-    SetEdges(card.nameEdges, CYAN, card.name.fsFocus and 1 or 0.4)
+    local locked = PS.Refusal() ~= nil
+    card.name.fsDisabled = locked
+    if card.name.SetEnabled then pcall(card.name.SetEnabled, card.name, not locked) end
+    PaintName()
     local order = ElementOrder(preset)
     for i, row in ipairs(card.rows) do
         local element = order[i]
@@ -1149,7 +1361,9 @@ function Dial.RefreshCard()
         local entry = PS.Entry(element, preset.picks[element])
         local set = entry ~= nil
         row.fill:SetColorTexture(0.051, 0.024, 0.125, 0.6)
-        SetEdges(row.edges, VIOLET, 0.35)
+        row.fsLock = locked
+        row.tile.fsRing = c
+        row.tile.fsDisabled = locked
         row.num:SetText(set and tostring(i) or "-")
         row.bar:SetColorTexture(c[1], c[2], c[3], 1)
         if set then
@@ -1167,13 +1381,20 @@ function Dial.RefreshCard()
             row.label:SetText("left out")
             Tint(row.label, MUTED)
         end
-        StyleButton(row.up, MUTED, "^", 11)
-        StyleButton(row.down, MUTED, "v", 11)
+        PaintTile(row.tile)
+        SetDisabled(row.up, locked)
+        SetDisabled(row.down, locked)
         row.up:SetShown(set and i > 1)
         row.down:SetShown(set and i < #preset.order)
+        PaintRow(row)
     end
-    StyleButton(card.delete, PINK, "DELETE", 9)
     if card.fsConfirm and (GetTime and GetTime() or 0) - card.fsConfirm >= D.CONFIRM then card.fsConfirm = nil end
+    if card.fsConfirm then
+        StyleButton(card.delete, PINK, "SURE?", 9, { mix = 0.22, edgeA = 1 })
+    else
+        StyleButton(card.delete, PINK, "DELETE", 9)
+    end
+    SetDisabled(card.delete, locked)
     if Dial.RefreshCardExtras then Dial.RefreshCardExtras(card, preset) end
 end
 
@@ -1243,13 +1464,13 @@ end
 function Dial.RefreshCardExtras(c)
     local PS = Presets()
     local on = PS.Gnarly() == c.fsIndex
-    StyleButton(c.useGnarly, on and PINK or MUTED, "USE AS GNARLY PRESET", 9)
     if on then
-        c.useGnarly.fill:SetColorTexture(PINK[1] * 0.2 + 0.04, PINK[2] * 0.2 + 0.02, PINK[3] * 0.2 + 0.09, 0.9)
-        SetEdges(c.useGnarly.edges, PINK, 0.9)
+        StyleButton(c.useGnarly, PINK, "USE AS GNARLY PRESET", 9, { fill = { PINK[1] * 0.2 + 0.04, PINK[2] * 0.2 + 0.02, PINK[3] * 0.2 + 0.09 },
+            fillA = 0.9, edgeA = 0.9 })
     else
-        c.useGnarly.fill:SetColorTexture(0.051, 0.024, 0.125, 0.8)
+        StyleButton(c.useGnarly, MUTED, "USE AS GNARLY PRESET", 9)
     end
+    SetDisabled(c.useGnarly, PS.Refusal() ~= nil)
 end
 
 function Dial.Card()
