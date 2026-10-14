@@ -198,6 +198,7 @@ local function boot(opts)
         [6343] = { name = "Thunder Clap", icon = 1003 }, [7777] = { name = "Thunder Clap", icon = 1003 }, [8647] = { name = "Expose Armor", icon = 1004 },
         [172] = { name = "Corruption", icon = 1005 }, [9999] = { name = "Heroic Strike", icon = 1006 },
         [20271] = { name = "Judgement", icon = 1007 }, [853] = { name = "Hammer of Justice", icon = 1008 },
+        [1943] = { name = "Rupture", icon = 1010 }, [408] = { name = "Kidney Shot", icon = 1011 },
     }
     FS.GunsightAreas = { AreaOf = function(id) return AREA[id] end,
         OnAreaChanged = function(fn) AREACB[#AREACB + 1] = fn end }
@@ -355,8 +356,8 @@ case("an_unknown_duration_is_an_entry_with_no_expiry")(r"""
 local TD = boot({ class = "ROGUE" })
 TD.Subscribe(function() end)
 IN_COMBAT = true
-cast(8647, guid())                    -- Expose Armor: a Rogue debuff with no table duration, nobody has scanned it yet
-local e = byName(TD.Get(), "Expose Armor")
+cast(1943, guid())                    -- Rupture: a Rogue debuff whose length follows the combo points, so no table duration
+local e = byName(TD.Get(), "Rupture")
 check(e, "a class debuff name is tracked from its first cast")
 check(e.expires == nil and e.duration == nil, "no duration is known: expires and duration are nil")
 check(e.count == 1, "one stack")
@@ -488,10 +489,10 @@ near(e.expires, NOW + 8, "expires")
 """)
 
 case("a_secret_duration_in_the_scan_is_ignored_and_never_compared")(r"""
-local TD = boot({ class = "MAGE" })
-AURAS = { aura("Fireball", SECRET, SECRET, 0, "player", 9998) }
+local TD = boot({ class = "ROGUE" })
+AURAS = { aura("Rupture", SECRET, SECRET, 0, "player", 1943) }       -- no table length for Rupture (combo points)
 TD.Subscribe(function() end)
-local e = byName(TD.Get(), "Fireball")
+local e = byName(TD.Get(), "Rupture")
 check(e and e.expires == nil and e.duration == nil, "a secret duration leaves the entry untimed, no error")
 """)
 
@@ -634,6 +635,129 @@ check(pushes == before + 1, "a real area change (no reason) rebuilds once, got "
 check(names(TD.Get()) == "Hammer of Justice", "and Judgement is carried by the Seal module now, got " .. names(TD.Get()))
 """)
 
+case("every_class_gets_a_timed_entry_from_its_first_cast_in_combat")(r"""
+-- Forever durations (foreverdb.net spell pages, checked 2026-10-14); a first cast in combat is timed with no snapshot
+local function first(class, id, name, want)
+    local TD = boot({ class = class })
+    SPELLS_BY_ID[id] = { name = name, icon = 5000 }
+    TD.Subscribe(function() end)
+    IN_COMBAT = true
+    NOW = NOW + 1
+    cast(id, guid())
+    local e = byName(TD.Get(), name)
+    check(e, class .. " " .. name .. " is tracked from its first cast, got " .. names(TD.Get()))
+    check(e.duration == want and e.expires, class .. " " .. name .. " (" .. id .. ") should be " .. want .. " s, got " .. tostring(e.duration))
+    near(e.expires, NOW + want, name .. " expires = cast + " .. want)
+end
+first("SHAMAN", 8050, "Flame Shock", 12)                 -- rank 1
+first("SHAMAN", 8053, "Flame Shock", 12)                 -- rank 3
+first("SHAMAN", 8056, "Frost Shock", 8)
+first("HUNTER", 1978, "Serpent Sting", 15)
+first("HUNTER", 1130, "Hunter's Mark", 120)
+first("HUNTER", 5116, "Concussive Shot", 4)
+first("HUNTER", 2974, "Wing Clip", 10)
+first("HUNTER", 3043, "Scorpid Sting", 20)
+first("HUNTER", 24118, "Lacerate", 21)
+first("DRUID", 1822, "Rake", 9)
+first("DRUID", 1079, "Rip", 12)
+first("DRUID", 770, "Faerie Fire", 40)
+first("DRUID", 99, "Demoralizing Roar", 30)
+first("ROGUE", 703, "Garrote", 18)
+first("ROGUE", 8647, "Expose Armor", 30)
+first("ROGUE", 1776, "Gouge", 4)
+first("ROGUE", 1833, "Cheap Shot", 4)
+first("MAGE", 122, "Frost Nova", 8)
+first("MAGE", 120, "Cone of Cold", 6)
+first("WARRIOR", 676, "Disarm", 10)
+first("WARRIOR", 5246, "Intimidating Shout", 8)
+first("WARRIOR", 1715, "Hamstring", 15)
+first("PALADIN", 2878, "Turn Undead", 10)
+first("PRIEST", 14914, "Holy Fire", 10)
+first("PRIEST", 8122, "Psychic Scream", 8)
+first("PRIEST", 10797, "Starshards", 6)
+first("WARLOCK", 704, "Curse of Recklessness", 120)
+first("WARLOCK", 1714, "Curse of Tongues", 30)
+first("WARLOCK", 440892, "Curse of the Elements", 300)
+""")
+
+case("a_debuff_whose_length_follows_the_rank_is_timed_by_the_cast_rank_id")(r"""
+local function dur(class, id, name)
+    local TD = boot({ class = class })
+    SPELLS_BY_ID[id] = { name = name, icon = 5000 }
+    TD.Subscribe(function() end)
+    IN_COMBAT = true
+    cast(id, guid())
+    return byName(TD.Get(), name).duration
+end
+check(dur("MAGE", 116, "Frostbolt") == 5, "Frostbolt rank 1 slow is 5 s")
+check(dur("MAGE", 7322, "Frostbolt") == 7, "Frostbolt rank 4 slow is 7 s")
+check(dur("MAGE", 25304, "Frostbolt") == 9, "the top Frostbolt rank slow is 9 s")
+check(dur("MAGE", 133, "Fireball") == 4, "Fireball rank 1 DoT is 4 s")
+check(dur("MAGE", 3140, "Fireball") == 8, "Fireball rank 4 DoT is 8 s")
+check(dur("MAGE", 118, "Polymorph") == 20, "Polymorph rank 1 is 20 s")
+check(dur("MAGE", 12824, "Polymorph") == 30, "Polymorph rank 2 is 30 s")
+check(dur("DRUID", 8921, "Moonfire") == 9, "Moonfire rank 1 is 9 s")
+check(dur("DRUID", 8924, "Moonfire") == 12, "Moonfire rank 2 is 12 s")
+check(dur("DRUID", 339, "Entangling Roots") == 12, "Entangling Roots rank 1 is 12 s")
+check(dur("DRUID", 5195, "Entangling Roots") == 18, "Entangling Roots rank 3 is 18 s")
+check(dur("DRUID", 2637, "Hibernate") == 20, "Hibernate rank 1 is 20 s")
+check(dur("ROGUE", 6770, "Sap") == 25, "Sap rank 1 is 25 s")
+check(dur("ROGUE", 2070, "Sap") == 35, "Sap rank 2 is 35 s")
+check(dur("PALADIN", 853, "Hammer of Justice") == 3, "Hammer of Justice rank 1 is 3 s")
+check(dur("PALADIN", 5588, "Hammer of Justice") == 4, "Hammer of Justice rank 2 is 4 s")
+check(dur("PRIEST", 9484, "Shackle Undead") == 30, "Shackle Undead rank 1 is 30 s")
+check(dur("WARLOCK", 5782, "Fear") == 10, "Fear rank 1 is 10 s")
+check(dur("WARLOCK", 6213, "Fear") == 15, "Fear rank 2 is 15 s")
+check(dur("WARLOCK", 710, "Banish") == 20, "Banish rank 1 is 20 s")
+check(dur("HUNTER", 1513, "Scare Beast") == 10, "Scare Beast rank 1 is 10 s")
+check(dur("HUNTER", 14326, "Scare Beast") == 15, "Scare Beast rank 2 is 15 s")
+""")
+
+case("an_unverified_duration_stays_untimed_until_a_snapshot_teaches_it")(r"""
+-- Rupture and Kidney Shot last as long as the combo points spent: no table length, so the first cast shows "?"
+local TD = boot({ class = "ROGUE" })
+TD.Subscribe(function() end)
+IN_COMBAT = true
+cast(1943, guid())
+cast(408, guid())
+local r, k = byName(TD.Get(), "Rupture"), byName(TD.Get(), "Kidney Shot")
+check(r and r.expires == nil and r.duration == nil, "Rupture is untimed on its first cast")
+check(k and k.expires == nil and k.duration == nil, "Kidney Shot is untimed on its first cast")
+IN_COMBAT = false
+AURAS = { aura("Rupture", NOW + 12, 14, 0, "player", 1943) }
+retarget("Creature-B"); retarget("Creature-A")
+IN_COMBAT = true
+NOW = NOW + 1
+cast(1943, guid())
+near(byName(TD.Get(), "Rupture").duration, 14, "after one snapshot the same cast is timed from what was measured")
+""")
+
+case("priest_and_warlock_hud_dots_keep_their_hudspells_durations")(r"""
+local TD = boot({ class = "WARLOCK" })
+SPELLS_BY_ID[6222] = { name = "Corruption", icon = 1005 }
+TD.Subscribe(function() end)
+IN_COMBAT = true
+cast(6222, guid())
+near(byName(TD.Get(), "Corruption").duration, 15, "Corruption rank 2 is timed by HudSpells, not duplicated here")
+local P = boot({ class = "PRIEST" })
+SPELLS_BY_ID[594] = { name = "Shadow Word: Pain", icon = 1012 }
+P.Subscribe(function() end)
+IN_COMBAT = true
+cast(594, guid())
+near(byName(P.Get(), "Shadow Word: Pain").duration, 18, "Shadow Word: Pain is timed by HudSpells")
+""")
+
+case("a_buff_or_utility_cast_is_never_taken_for_a_target_debuff")(r"""
+local TD = boot({ class = "SHAMAN" })
+SPELLS_BY_ID[8042] = { name = "Earth Shock", icon = 5001 }
+SPELLS_BY_ID[8033] = { name = "Frostbrand Weapon", icon = 5002 }
+SPELLS_BY_ID[8017] = { name = "Rockbiter Weapon", icon = 5003 }
+TD.Subscribe(function() end)
+IN_COMBAT = true
+cast(8042, guid()); cast(8033, guid()); cast(8017, guid())
+check(#TD.Get() == 0, "an interrupt and weapon imbues leave no debuff on the target, got " .. names(TD.Get()))
+""")
+
 case("friendly_and_dead_targets_show_nothing")(r"""
 local TD = boot({ class = "WARRIOR" })
 AURAS = { aura("Rend", NOW + 12, 21, 0, "player", 11572) }
@@ -767,7 +891,7 @@ case("ledger_entries_with_no_expiry_are_pruned_by_age")(r"""
 local TD = boot({ class = "ROGUE" })
 TD.Subscribe(function() end)
 IN_COMBAT = true
-cast(8647, guid())                      -- Expose Armor, no known duration, on Creature-A
+cast(1943, guid())                      -- Rupture, no known duration, on Creature-A
 check(#TD.Get() == 1, "setup")
 retarget("Creature-B")
 NOW = NOW + 60
