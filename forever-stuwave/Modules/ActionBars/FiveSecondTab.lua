@@ -63,6 +63,15 @@ local FT = {
     BTN = 38, GAP = 4.8, PAD = 6, PT = 6, PB = 5, COLS = 2,
     CELLS = 5, CELL_X = 4, CELL_PITCH = 6.5, CELL_Y = 6, CELL_W = 4, CELL_H = 12,
     CHIP_W = 22, CHIP_H = 15, CHIP_TOP = 5, CHIP_C = 3, GLOW_PAD = 3,
+    -- The tile chrome in one place (the mockup's tile strokes): the ring and glow alphas per state. Idle and the retention
+    -- tile are the quiet violet ring with no glow; suspended is amber; regen is cyan, its glow pulsing on top.
+    CHROME = {
+        idleRing = 0.35, idleGlow = 0,
+        suspRing = 0.65, suspGlow = 0,
+        regenRing = 1, regenGlow = 0.35, pulseGlow = 0.65,
+        hoverGlow = 0.6,            -- the floor of the glow under the mouse (the ring is full cyan)
+        chipGlow = 0.35,            -- the retention chip's glow while it shows a percent
+    },
     CODE_PX = 10, TEXT_PX = 11, REGEN_PX = 10, RATE_PX = 10, RATE_LONG_PX = 9,
     MIN_PX = 6, TEXT_INSET = 3, ADVANCE = 0.5615, TEXT_Y = 27,
     IDLE_CELL_ALPHA = 0.4,
@@ -467,7 +476,7 @@ local function PaintRim(tile, color, colorA, glowColor, glowA)
     local skin = tile.fsSkin
     local cyan = FS.Theme.COLOR_POWER
     if tile.fsHover then
-        color, colorA, glowColor, glowA = cyan, 1, cyan, math.max(glowA, 0.6)
+        color, colorA, glowColor, glowA = cyan, 1, cyan, math.max(glowA, FT.CHROME.hoverGlow)
     end
     if skin and skin.border and skin.border.ring then
         skin.border.ring:SetVertexColor(color[1], color[2], color[3], colorA)
@@ -509,11 +518,12 @@ local function PaintCells(tile)
         cell.fill:SetVertexColor(c[1], c[2], c[3], susp and 1 or cellA)
     end
 
-    local glowA, ringA = 0, 0.35
+    local K = FT.CHROME
+    local glowA, ringA = K.idleGlow, K.idleRing
     if susp then
         scratch[1], scratch[2], scratch[3] = Lerp(BG[1], amber[1], 0.09), Lerp(BG[2], amber[2], 0.09), Lerp(BG[3], amber[3], 0.09)
         tile.fsPlate:SetVertexColor(scratch[1], scratch[2], scratch[3], 0.9)
-        PaintRim(tile, amber, 0.65, amber, 0)
+        PaintRim(tile, amber, K.suspRing, amber, K.suspGlow)
         tile.fsLine:SetVertexColor(amber[1], amber[2], amber[3], 0.9)
         SetText(tile.fsText, FT.TEXT_PX, Hex(amber) .. "~|r" .. string.format("%.1f", math.max(0, v.t)))
         tile.fsText:SetTextColor(1, 1, 1, 1)
@@ -522,8 +532,8 @@ local function PaintCells(tile)
         scratch[1], scratch[2], scratch[3] = Lerp(BG[1], Lerp(BG[1], cyan[1], 0.1), f), Lerp(BG[2], Lerp(BG[2], cyan[2], 0.1), f),
             Lerp(BG[3], Lerp(BG[3], cyan[3], 0.1), f)
         tile.fsPlate:SetVertexColor(scratch[1], scratch[2], scratch[3], Lerp(0.72, 0.9, f))
-        ringA = Lerp(0.35, 1, f)
-        glowA = 0.35 * f + 0.65 * v.pulse
+        ringA = Lerp(K.idleRing, K.regenRing, f)
+        glowA = K.regenGlow * f + K.pulseGlow * v.pulse
         scratch[1], scratch[2], scratch[3] = Lerp(violet[1], cyan[1], f), Lerp(violet[2], cyan[2], f), Lerp(violet[3], cyan[3], f)
         PaintRim(tile, scratch, ringA, cyan, glowA)
         Tint(tile.fsLine, muted, cyan, f, Lerp(0.5, 0.9, f))
@@ -552,13 +562,13 @@ local function PaintRate(tile)
         true, v.rateText, v.cached, v.ret, aq, hover, hasRate
 
     tile.fsPlate:SetVertexColor(BG[1], BG[2], BG[3], 0.72)
-    PaintRim(tile, violet, 0.35, violet, 0)
+    PaintRim(tile, violet, FT.CHROME.idleRing, violet, FT.CHROME.idleGlow)
 
     local chip = tile.fsChip
     if v.ret then
         chip.fill:SetVertexColor(Lerp(BG[1], cyan[1], 0.3), Lerp(BG[2], cyan[2], 0.3), Lerp(BG[3], cyan[3], 0.3), 1)
         chip.ring:SetVertexColor(cyan[1], cyan[2], cyan[3], 1)
-        chip.glow:SetVertexColor(cyan[1], cyan[2], cyan[3], 0.35)
+        chip.glow:SetVertexColor(cyan[1], cyan[2], cyan[3], FT.CHROME.chipGlow)
         chip.code:SetTextColor(white[1], white[2], white[3], 1)
         SetText(chip.code, FitPx(v.ret .. "%", FT.CODE_PX, FT.CHIP_W - 2), v.ret .. "%")
     else
@@ -609,7 +619,7 @@ local function StyleTile(tile, scale)
     if not tile.fsPlate then
         tile.fsPlate = T.AddCut2Texture(tile, T.SLICE_CUT2_BUTTON_TEXTURE, { 1, 1, 1, 1 }, "BACKGROUND", -8)
     end
-    T.SkinCutButton(tile, { borderColor = T.COLOR_BORDER, glowAlpha = 0 })
+    T.SkinCutButton(tile, { borderColor = T.COLOR_BORDER, glowAlpha = FT.CHROME.idleGlow })
 
     if not tile.fsHooked then
         tile.fsHooked = true

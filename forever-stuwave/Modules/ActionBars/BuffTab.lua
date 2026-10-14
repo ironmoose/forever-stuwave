@@ -71,6 +71,7 @@ local BT = {
     ADVANCE = 0.5615,               -- Mononoki Bold's advance per em (every glyph; the font is monospaced)
     TEXT_Y = 27,                    -- the time line's centre, design px below the tile top
     TICK = 1,                       -- seconds between repaints (the clock text)
+    CHIP_GLOW_A = 0.35,             -- the chip's glow alpha while a chip glows (the looks table says which do)
     ICON_RETRY = 2,                 -- seconds before a tile asks again for an icon the client has not answered
     ENGINE_TEMPLATE = "CustomAuraContainerTemplate", ENGINE_LEVEL = 12,    -- the combat state container (engine section)
     ENGINE_LIMIT = 3,               -- failed container builds in a row before the combat state is given up for the session
@@ -140,6 +141,7 @@ local function BuildLooks()
     local violet = T.COLOR_BORDER
     local hollow = Mix(muted, { 1, 1, 1 }, 0.25)
     local plain = { BG[1], BG[2], BG[3], 0.72 }
+    -- Every tile chrome number lives in this table (ringA, glowA, chipGlowA per state); nothing else sets them.
     looks = {
         on = { ring = violet, ringA = 0.35, glowA = 0, plate = plain, chip = GOLD, chipFill = Mix(BG, GOLD, 0.3),
             chipFillA = 1, chipGlow = true, code = white, text = FG, textA = 0.85, line = GOLD, lineA = 0.9, icon = 1 },
@@ -292,7 +294,7 @@ local function StyleButton(button, size, scale)
     if not button.fsPlate then
         button.fsPlate = T.AddCut2Texture(button, T.SLICE_CUT2_BUTTON_TEXTURE, { 1, 1, 1, 1 }, "BACKGROUND", -8)
     end
-    T.SkinCutButton(button, { borderColor = T.COLOR_BORDER, glowAlpha = 0 })
+    T.SkinCutButton(button, { borderColor = T.COLOR_BORDER, glowAlpha = BuildLooks().on.glowA })
 
     if not button.fsHooked then
         button.fsHooked = true
@@ -495,7 +497,7 @@ local function PaintButton(button, v)
     SetColor(chip.fill, look.chipFill, look.chipFillA)
     local r, g, b = Shade(look.chip, tint)
     chip.ring:SetVertexColor(r, g, b, 1)
-    chip.glow:SetVertexColor(r, g, b, look.chipGlow and 0.35 or 0)
+    chip.glow:SetVertexColor(r, g, b, look.chipGlow and BT.CHIP_GLOW_A or 0)
     r, g, b = Shade(look.code, tint)
     chip.code:SetTextColor(r, g, b, 1)
     chip.code:SetText(v.code or "")
