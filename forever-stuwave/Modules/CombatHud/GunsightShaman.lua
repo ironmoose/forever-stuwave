@@ -20,10 +20,12 @@
 --   locked  the element is not open yet (Earth 4, Fire 10, Water 20, Air 30): a dotted empty mold with its level and name.
 --   far     a totem you walked away from (ShamanTotems sets it from the drop position): a ghost pole, a dashed amber head, FAR.
 --
--- The shock trace along the ground, the Fire Nova ring and the Earth Shock KICK tag are GunsightShamanShocks.lua's (FS.GunsightShamanShocks:
--- Build(frame) -> section, Seat(section, rect, scale), OnShow(section), OnHide(section); every call is feature detected and pcalled, the
--- table may be absent). The section gets `fireHead` (the Fire pole's head frame, which moves as the pole drains) and `totems`
--- (FS.ShamanTotems). The footer row below the ground (NOVA and the right hand end of the ground line's trace) is left free for it.
+-- The shock trace along the ground and the Fire Nova ring are GunsightShamanShocks.lua's (FS.GunsightShamanShocks: Build(frame) ->
+-- section, Seat(section, rect, scale), OnShow(section), OnHide(section); every call is feature detected and pcalled, the table may
+-- be absent). There is no KICK tag in that lane: KICK comes from GunsightTape.lua's class neutral tag. The poles tell the section
+-- where the Fire totem is through `section.SetFire(up, headY)` (up: the Fire totem stands and is not FAR; headY: the Fire head's
+-- centre in image px from the rect's top), called only when one of the two changed and once more after the section's OnShow. The
+-- footer row below the ground (NOVA and the right hand end of the ground line's trace) is left free for it.
 --
 -- VISIBILITY. A class module: the host hides with no target and onHide / onShow fire on that edge (GunsightAreas.lua). onHide stops
 -- the OnUpdate and the subscription; onShow subscribes, re-reads the totems and repaints. ShamanTotems keeps listening through
@@ -69,6 +71,7 @@ local C = {
     MOLD_FILL_A = 0.05,                       -- the mold's fill: the element colour .05
     HEAD_H = 9, HEAD_MIX = 0.42,              -- ch(hx, hy, w, 9, 2), mix(bg, c, .42)
     HEAD_DOWN_MIX = 0.12,                     -- the DROP head: mix(bg, amber, .12)
+    FIRE_RING_DY = 3,                         -- the Nova ring is centred 3 px below the head's top (GunsightShamanShocks FIRE_Y 24 = a full head)
     CROWN_UP = 3,                             -- the crown is centred 3 px above the head (ty + 3, the head starts at ty + 6)
     CROWN_FAR_MIX = 0.35,                     -- a FAR crown: mix(c, bg, .35)
     EYE_Y = 3, EYE_H = 3, EYE_A = 0.9,        -- rect(cx -+ .., hy + 3, .., 3, '#0a0416', .9)
@@ -147,6 +150,7 @@ local ticking = false
 local acc = 0
 local section                  -- what GunsightShamanShocks.Build returned, if anything
 local lastRect
+local fireUp, fireY            -- what the section was last told about the Fire totem (nil until the first paint)
 
 local function Seat(fn)
     seats[#seats + 1] = fn
@@ -467,6 +471,8 @@ local function PaintLabel(p, text, color, alpha)
     p.label:Show()
 end
 
+local PushFire                 -- defined with the shocks seam below
+
 local function PaintPole(p, now)
     local st = Totems.Get(p.slot)
     local v = p.view
@@ -533,6 +539,12 @@ local function PaintPole(p, now)
         p.seatHead()
     end
     PaintLabel(p, text, tone, 1)
+
+    if p.slot == 1 then
+        -- the Nova ring wants a Fire totem that stands within reach, and the head's centre (a bar pole counts as a full one)
+        local nb = mode == "blocks" and lit or C.NB
+        PushFire(st.up == true and not far, C.GY - nb * C.BP - C.HEAD_H + C.FIRE_RING_DY)
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -586,7 +598,7 @@ function Sync()
 end
 
 -------------------------------------------------------------------------------
--- The shock trace, the Nova ring and the KICK tag (GunsightShamanShocks.lua): feature detected, never fatal
+-- The shock trace, the Nova ring (GunsightShamanShocks.lua): feature detected, never fatal
 -------------------------------------------------------------------------------
 
 local function Shocks(name, ...)
@@ -598,6 +610,15 @@ local function Shocks(name, ...)
         return nil
     end
     return result
+end
+
+-- Tells the section where the Fire totem is; a call only when either value changed, or when forced (the section's OnShow re-reads)
+function PushFire(up, y, force)
+    if not force and up == fireUp and y == fireY then return end
+    fireUp, fireY = up, y
+    if type(section) ~= "table" or type(section.SetFire) ~= "function" then return end
+    local ok, err = pcall(section.SetFire, up, y)
+    if not ok then LogOnce("SetFire", "GunsightShamanShocks SetFire failed: " .. tostring(err)) end
 end
 
 local function LayoutScale()
@@ -656,15 +677,8 @@ local function BuildModule(host)
     end
     Shaman.frame, Shaman.parts = mod, P
     Shaman.zone = zoneParts
-    -- the Fire pole's head follows the pole down, so the Nova ring anchors to it
-    Shaman.fireHead = P[1].head
     section = Shocks("Build", mod)
-    if type(section) == "table" then
-        section.fireHead = Shaman.fireHead
-        section.totems = Totems
-    elseif section ~= nil then
-        section = nil
-    end
+    if type(section) ~= "table" then section = nil end
     if Totems.Start then Totems.Start() end
     for slot = 1, #POLES do PaintPole(P[slot], GetTime()) end
     return mod
@@ -680,7 +694,10 @@ local function OnAreaShown(area)
     if not ok then LogOnce("refresh", err) end
     PaintAll(GetTime())
     Sync()
-    if section then Shocks("OnShow", section) end
+    if section then
+        Shocks("OnShow", section)
+        if fireUp ~= nil then PushFire(fireUp, fireY, true) end
+    end
 end
 
 local function OnAreaHidden(area)

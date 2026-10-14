@@ -3,7 +3,7 @@
 -- The approved design is mockups/gunsight-class-module-shaman-2026-10-08.html, Concept A "Totem Poles", poleMod(): the ground the
 -- totem poles stand on is also the shock gauge. A zigzag trace under the ground line charges left to right as the shared Earth /
 -- Flame / Frost Shock cooldown runs, and a bolt at its end lights (RDY) when a shock can be cast; a cyan ring around the Fire
--- totem's head says Fire Nova is ready, with a NOVA tag in the footer. There is no Earth Shock KICK tag here: KICK comes
+-- totem's head says Fire Nova is ready (drawn over the head, on a frame above it), with a NOVA tag in the footer. There is no Earth Shock KICK tag here: KICK comes
 -- from GunsightTape.lua's class neutral tag on the target box. GunsightShaman.lua owns the module frame and the totem poles and calls this file:
 --
 --   FS.GunsightShamanShocks = { Build(frame) -> section, Seat(section, rect, scale), OnShow(section), OnHide(section) }
@@ -69,6 +69,7 @@ local C = {
     OFF_PIP_A = 0.8, OFF_TEXT_A = 0.75,                 -- the not ready tag: muted, .8 and .75
     SHOCK_CD = 6, NOVA_CD = 10, GCD_WINDOW = 1.6,       -- seconds: the shared shock cooldown, Fire Nova's, the longest global cooldown
     TICK = 0.1,                                         -- the ticker's period
+    RING_LEVEL = 3,                                     -- the ring's frame sits this far above the module frame: the Fire head is at +2 and its opaque fill would hide the arcs
     -- Mononoki Bold: the line box's middle sits 325 / 1024 of the size above the baseline (GunsightSeals.lua's CAP)
     CAP = 325 / 1024,
 }
@@ -583,8 +584,12 @@ local function BuildSection(frame)
     s.label = NewText(holder, C.LABEL_SIZE, "CENTER", K.white)
 
     -- Fire Nova: the ring on the Fire head, the footer pip and word
-    s.ringGlow = NewTex(holder, "BACKGROUND", 2, "nova_ring_glow.tga")
-    s.ring = NewTex(holder, "ARTWORK", 4, "nova_ring.tga")
+    local ringFrame = CreateFrame("Frame", nil, holder)
+    ringFrame:SetFrameLevel(frame:GetFrameLevel() + C.RING_LEVEL)
+    ringFrame:EnableMouse(false)
+    s.ringFrame = ringFrame
+    s.ringGlow = NewTex(ringFrame, "BACKGROUND", 2, "nova_ring_glow.tga")
+    s.ring = NewTex(ringFrame, "ARTWORK", 4, "nova_ring.tga")
     s.pip = NewTex(holder, "ARTWORK", 5, "nova_pip.tga")
     s.novaText = NewText(holder, C.NOVA_SIZE, "LEFT", K.cyan)
     SetLabel(s.novaText, "NOVA")

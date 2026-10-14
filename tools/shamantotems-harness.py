@@ -526,6 +526,81 @@ POS = { 100, 230, 0, 1 }; step()
 for s = 1, 4 do check(T.IsFar(s), "slot " .. s .. " far past the default 20") end
 """)
 
+case("a_set_drop_keeps_the_data_and_the_position_of_totems_already_standing")(FAR_SETUP + r"""
+drop(3599, 1)
+local st = T.Get(1)
+local start = st.start
+check(st.name == "Searing Totem" and st.source == "cast" and st.posX == 200, "searing is stamped")
+NOW = NOW + 5
+POS = { 100, 260, 0, 1 }
+for s = 2, 4 do TOT[s] = { name = "x", start = 0, dur = 0, spell = 0 } end
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 66842)
+check(st.name == "Searing Totem" and st.spellID == 3599 and st.source == "cast", "the standing totem keeps its name and source")
+check(st.start == start and st.duration == 30 and st.expires == start + 30, "and its numbers")
+check(st.posX == 200 and st.stampAt == start, "and the position it was dropped at")
+for s = 2, 4 do
+    local o = T.Get(s)
+    check(o.up and o.source == nil and o.posX == 260, "slot " .. s .. " was empty: stamped at the new position")
+end
+step()
+check(T.IsFar(1), "the old Fire totem is far from where it really stands")
+for s = 2, 4 do check(not T.IsFar(s), "slot " .. s .. " is where the set dropped it") end
+""")
+
+case("call_of_the_spirits_is_a_set_drop")(FAR_SETUP + r"""
+for s = 1, 4 do TOT[s] = { name = "x", start = 0, dur = 0, spell = 0 } end
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 66844)
+for s = 1, 4 do check(T.IsUp(s) and T.Get(s).posX == 200, "slot " .. s .. " stamped by Call of the Spirits") end
+""")
+
+case("a_transient_missing_spell_name_is_not_remembered_as_not_a_totem")(r"""
+local T = load()
+COMBAT = true
+TOT[1] = { name = "x", start = 0, dur = 0, spell = 0 }
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 99001)      -- the client has no name for the id yet
+check(not T.Get(1).source, "unknown, ignored")
+SPELL_NAMES[99001] = "Searing Totem"
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 99001)
+check(T.Get(1).source == "cast" and T.Get(1).duration == 30, "the name arrived: the next cast counts")
+SPELL_NAMES[99002] = "Frostbolt"
+local calls = 0
+local real = C_Spell.GetSpellName
+C_Spell.GetSpellName = function(id) calls = calls + 1; return real(id) end
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 99002)
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 99002)
+check(calls == 1, "a name that is known and not a totem is remembered, got " .. calls .. " lookups")
+""")
+
+case("totemic_projection_is_found_through_the_spell_book_and_not_by_an_english_name_alone")(FAR_SETUP + r"""
+SPELL_NAMES[77001] = "Totemprojektion"
+drop(3599, 1)
+POS = { 100, 300, 0, 1 }; step()
+check(T.IsFar(1), "far")
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 77001)
+check(T.IsFar(1), "a localized name nobody resolved is not Projection")
+C_Spell.GetSpellInfo = function(n) if n == "Totemic Projection" then return { name = "Totemprojektion", spellID = 77001 } end end
+fire("SPELLS_CHANGED")                                      -- learned later (level 22): the names are resolved again
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 77001)
+check(not T.IsFar(1) and T.Get(1).posY == nil, "once resolved, the localized Projection clears FAR")
+""")
+
+case("learned_spell_in_tab_is_listened_to_where_the_client_has_it_and_skipped_where_not")(r"""
+local T = load()
+check(next(DEGRADED) == nil, "an event this client lacks is not a degrade")
+local seen = false
+for _, f in ipairs(FRAMES) do if f.events.LEARNED_SPELL_IN_TAB then seen = true end end
+check(not seen, "not registered where the client has no such event")
+for k in pairs(FRAMES) do FRAMES[k] = nil end
+FS.ShamanTotems = nil
+KNOWN_EVENTS.LEARNED_SPELL_IN_TAB = true
+LEVEL = 1
+local T2 = load()
+check(not T2.IsUnlocked(3), "water is locked at level 1")
+KNOWN_SPELLS[5394] = true
+fire("LEARNED_SPELL_IN_TAB")
+check(T2.IsUnlocked(3), "a learned water totem opens the element")
+""")
+
 case("no_secret_is_ever_touched")(r"""
 local T = load()
 -- every client answer secret, in and out of combat
@@ -580,6 +655,9 @@ def static_checks() -> list[tuple[str, str | None]]:
                 None if bar_ids and bar_ids == mine else f"TotemBar ids {sorted(bar_ids)} vs ShamanTotems ids {sorted(mine)}"))
     slots = {int(a): int(b) for a, b in re.findall(r"slot = (\d), id = (\d+)", src)}
     out.append(("every_element_has_a_totem", None if set(slots) == {1, 2, 3, 4} else f"slots seen {sorted(slots)}"))
+    book = re.search(r"local function KnowsSpell.*?\nend\n", src, re.S)
+    out.append(("knows_spell_builds_no_table_per_call",
+                None if book and "{" not in re.sub(r"--.*", "", book.group(0)) else "KnowsSpell builds a table on every call: hoist it"))
     return out
 
 

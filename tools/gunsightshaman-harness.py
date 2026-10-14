@@ -16,7 +16,7 @@ FS.GunsightAreas is a FAKE for the registration cases and the REAL file for the 
     the case);
   * the OnUpdate runs only while the module is shown and a totem is up, allocates nothing on a steady tick, and stops on hide; onShow
     re-reads totems that changed while hidden; the target gate hides the host and stops the module;
-  * the GunsightShamanShocks seam: Build / Seat / OnShow / OnHide feature detected and pcalled, the section gets the Fire head;
+  * the GunsightShamanShocks seam: Build / Seat / OnShow / OnHide feature detected and pcalled, section.SetFire(up, headY) told when the Fire totem or its head moves, the real Nova ring follows the head and sits above it;
   * the baked art matches the crops the module uses, the TOC order, no secure frame, no event of its own.
 
 The mock is strict. It is NOT the real client.
@@ -44,6 +44,7 @@ HERE = Path(__file__).resolve().parent
 ADDON = HERE.parent / "forever-stuwave"
 SHAMAN = Path(os.environ.get("GUNSIGHTSHAMAN_LUA") or ADDON / "Modules/CombatHud/GunsightShaman.lua")
 TOTEMS = ADDON / "Modules/CombatHud/ShamanTotems.lua"
+SHOCKS = ADDON / "Modules/CombatHud/GunsightShamanShocks.lua"
 GUNSIGHT = ADDON / "Modules/CombatHud/Gunsight.lua"
 LAYOUT = ADDON / "Core/Layout.lua"
 CONFIG = ADDON / "Core/Config.lua"
@@ -218,6 +219,7 @@ local function boot(opts)
     UnitClass = function() return "Shaman", opts.class or "SHAMAN" end
     if not opts.noTotems then loadAddonFile(TOTEMS_SRC, "Modules/CombatHud/ShamanTotems.lua") end
     FS.GunsightShamanShocks = opts.shocks
+    if opts.realShocks then loadAddonFile(SHOCKS_SRC, "Modules/CombatHud/GunsightShamanShocks.lua") end
     loadAddonFile(SHAMAN_SRC, "Modules/CombatHud/GunsightShaman.lua")
     fire("ADDON_LOADED", "forever-stuwave")
     fire("PLAYER_LOGIN")
@@ -337,7 +339,6 @@ for slot = 1, 4 do
     n = n + 1
 end
 check(onUpdateFrames() == 0, "nothing runs while no totem stands")
-check(FS.GunsightShaman.fireHead == parts()[1].head, "the Fire head is exported for the Nova ring")
 check(FS.ShamanTotems.IsStarted(), "the data module is listening")
 noDegrade()
 """)
@@ -670,8 +671,6 @@ boot({ shocks = {
 } })
 local spec, host, frame = mount("lower")
 check(calls[1][1] == "Build" and calls[1][2] == frame, "Build gets the module frame")
-check(sec.fireHead == parts()[1].head, "the section is handed the Fire head")
-check(sec.totems == FS.ShamanTotems, "and the totem data")
 local seat
 for _, c in ipairs(calls) do if c[1] == "Seat" then seat = c end end
 check(seat and seat[2] == sec and seat[3] == RECTS.lower and type(seat[4]) == "number", "Seat(section, rect, scale)")
@@ -693,6 +692,95 @@ boot({ shocks = {} })
 mount("lower")
 boot({})
 mount("upper")
+""")
+
+case("the_poles_tell_the_shocks_section_where_the_fire_head_is")(r"""
+local calls = {}
+local sec = { SetFire = function(up, y) calls[#calls + 1] = { up, y } end }
+boot({ shocks = { Build = function() return sec end } })
+POS = { 100, 200, 0, 1 }
+local spec = mount("lower")
+local function headY(n) return C().GY - n * C().BP - C().HEAD_H + 3 end
+local last = calls[#calls]
+check(last and last[1] == false, "with no Fire totem the section is told so, got " .. tostring(last and last[1]))
+-- a full pole: eight blocks
+TOT[1] = { name = "Searing Totem", start = NOW, dur = 30, spell = 3599 }
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 3599)
+fire("PLAYER_TOTEM_UPDATE", 1)
+last = calls[#calls]
+check(last[1] == true, "the Fire totem stands")
+near3(last[2], headY(8), "a full pole's head")
+-- it drains a block: ceil(22 / 30 * 8) = 6
+local n = #calls
+tick(8)
+last = calls[#calls]
+check(last[1] == true and #calls == n + 1, "one call when the head moved, got " .. (#calls - n))
+near3(last[2], headY(6), "the head after it drained two blocks")
+n = #calls
+tick(0.1); tick(0.1); tick(0.1)
+check(#calls == n, "no call while neither value changed, got " .. (#calls - n))
+-- walking away: FAR is not a standing Fire totem for the ring
+POS = { 100, 300, 0, 1 }
+tick(0.3)
+check(FS.ShamanTotems.IsFar(1), "the totem is far")
+last = calls[#calls]
+check(last[1] == false, "FAR tells the section the Fire totem is not at hand")
+POS = { 100, 200, 0, 1 }
+tick(0.3)
+check(calls[#calls][1] == true, "back in range")
+-- the totem goes away
+TOT[1] = nil
+fire("PLAYER_TOTEM_UPDATE", 1)
+check(calls[#calls][1] == false, "gone: SetFire(false)")
+-- an earth totem is not the Fire totem
+n = #calls
+drop(2, "Stoneskin Totem", 8071, 300, 300)
+check(#calls == n, "another element does not call SetFire")
+-- a timer bar pole (no number) is a full head
+clear(2)
+SECRET_READS = true
+TOT[1] = { name = "x", start = 0, dur = 0, spell = 0 }
+fire("PLAYER_REGEN_DISABLED")
+last = calls[#calls]
+check(last[1] == true, "up by the duration object alone")
+near3(last[2], headY(8), "a bar pole's head is a full pole's")
+-- the module is shown again after a hide: the section is told once more
+spec.onHide("lower")
+n = #calls
+spec.onShow("lower")
+check(#calls > n, "onShow pushes the Fire state again")
+-- a section without SetFire, or one that throws, never breaks the poles
+boot({ shocks = { Build = function() return {} end } })
+mount("lower"); drop(1, "Searing Totem", 3599, 25, 30)
+boot({ shocks = { Build = function() return { SetFire = function() error("boom") end } end } })
+mount("lower"); drop(1, "Searing Totem", 3599, 25, 30)
+check(parts()[1].label.text == "25s", "the poles work with a failing SetFire")
+check(DEGRADED.gunsightshaman_SetFire, "and the failure is logged once")
+""")
+
+case("with_the_real_shocks_file_the_nova_ring_follows_the_fire_head_and_is_drawn_over_it")(r"""
+boot({ realShocks = true })
+for _, e in ipairs({ "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_USABLE", "LEARNED_SPELL_IN_TAB" }) do KNOWN_EVENTS[e] = true end
+KNOWN_SPELLS[408341] = true
+C_Spell.GetSpellInfo = function(n) if n == "Fire Nova" then return { spellID = 408341, name = "Fire Nova" } end end
+C_Spell.GetSpellCooldown = function() return { isActive = false, isOnGCD = false, startTime = 0, duration = 0 } end
+local spec = mount("lower")
+local sec
+for _, f in ipairs(FRAMES) do if f.fsSection then sec = f.fsSection end end
+check(sec and sec.SetFire, "the real section is built")
+check(not isVisible(sec.ring), "no Fire totem, no ring")
+drop(1, "Searing Totem", 3599, 30, 30)
+check(isVisible(sec.ring), "a Fire totem stands and Fire Nova is ready: the ring shows")
+local function ringY() local _, y = imgCenter(sec.ring); return y - RECTS.lower.y end
+near3(ringY(), C().GY - 8 * C().BP - C().HEAD_H + 3, "the ring sits on a full head")
+tick(8)
+near3(ringY(), C().GY - 6 * C().BP - C().HEAD_H + 3, "and follows the head down")
+local head = parts()[1].head
+check(sec.ring.parent:GetFrameLevel() > head:GetFrameLevel(), "the ring is on a frame above the head's")
+check(sec.ringGlow.parent:GetFrameLevel() > head:GetFrameLevel(), "and so is its glow")
+clear(1)
+check(not isVisible(sec.ring), "the totem goes: the ring goes")
+noDegrade()
 """)
 
 case("seat_follows_the_rect_and_the_rescale_in_either_area")(r"""
@@ -822,6 +910,7 @@ def run_case(name: str, body: str) -> str | None:
     g.GUNSIGHT_SRC = GUNSIGHT.read_text(encoding="utf-8")
     g.SHAMAN_SRC = SHAMAN.read_text(encoding="utf-8")
     g.TOTEMS_SRC = TOTEMS.read_text(encoding="utf-8")
+    g.SHOCKS_SRC = SHOCKS.read_text(encoding="utf-8")
     g.AREAS_SRC = AREAS.read_text(encoding="utf-8")
     g.HAS_TARGET_SRC = _load("gunsight-harness").theme_target_rule_lua()
     try:

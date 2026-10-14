@@ -30,8 +30,8 @@
 -- four). While the totem is up, a throttled Tick compares the stamp with the current position and sets `far` when the distance
 -- passes the totem's range (DEFS, 20 yd by default). FAR is only ever set from two PLAIN numbers with the same instance id: a nil
 -- position (instances), a secret one, a different instance id or no stamp leaves it false, never a guess. The stamp is dropped
--- with the slot, and a cast of Totemic Projection (matched by its English name) drops every stamp because it moves the totems
--- somewhere this addon cannot see. The ranges are mostly unmeasured (see DEFS). FAR source: verified live: pending probe.
+-- with the slot, and a cast of Totemic Projection (matched by id or localized name, see ResolveNames) drops every stamp because it
+-- moves the totems somewhere this addon cannot see. The ranges are mostly unmeasured (see DEFS). FAR source: verified live: pending probe.
 --
 -- RECORD FIELDS (read only for callers; one table per slot, reused, nothing is allocated after load):
 --   up, far, unlocked        booleans
@@ -93,7 +93,11 @@ local DEFS = {
 T.DEFS = DEFS
 
 -- The set drops (they put four totems down in one event, so only the position can be stamped) and Totemic Projection.
-local SET_IDS = { [66842] = "Call of the Elements", [66843] = "Call of the Ancestors" }
+local SET_IDS = { [66842] = "Call of the Elements", [66843] = "Call of the Ancestors", [66844] = "Call of the Spirits" }
+-- Totemic Projection has no id measured on this client (FSCheck probes it by name). Ids to list here when one is: they resolve to the
+-- localized name like the others. Meanwhile ResolveNames asks the spell book for the English name and learns the id and the
+-- localized name from the answer (an English client, or any client where the book answers to that name).
+local PROJECTION_IDS = {}
 local PROJECTION = "Totemic Projection"
 local SET_DEF, PROJECTION_DEF = { set = true }, { projection = true }
 
@@ -107,6 +111,7 @@ for id, name in pairs(SET_IDS) do
     BY_NAME[name] = SET_DEF
 end
 BY_NAME[PROJECTION] = PROJECTION_DEF
+for _, id in ipairs(PROJECTION_IDS) do BY_ID[id] = PROJECTION_DEF end
 
 local S = {}                        -- slot -> record
 for slot = 1, NSLOTS do
@@ -293,9 +298,10 @@ end
 -- Unlocked: is the element open for this character
 -------------------------------------------------------------------------------
 
+local BOOK_FNS = { "IsPlayerSpell", "IsSpellKnown" }
 local function KnowsSpell(id)
-    for _, fn in ipairs({ "IsPlayerSpell", "IsSpellKnown" }) do
-        local f = _G[fn]
+    for i = 1, #BOOK_FNS do
+        local f = _G[BOOK_FNS[i]]
         if type(f) == "function" then
             local ok, known = pcall(f, id)
             if ok and not Secret(known) and known == true then return true end
@@ -357,7 +363,8 @@ local function SpellIcon(id)
     return nil
 end
 
--- The totem definition a plain spell id stands for: a rank 1 id directly, any other rank through the spell's name. Cached by id.
+-- The totem definition a plain spell id stands for: a rank 1 id directly, any other rank through the spell's name. Cached by id once
+-- the name is known (a spell that is not a totem is remembered as such; an id with no name yet is not).
 local ID_CACHE = {}
 local function DefOf(id)
     local def = BY_ID[id]
@@ -365,7 +372,8 @@ local function DefOf(id)
     local cached = ID_CACHE[id]
     if cached == nil then
         local name = SpellName(id)
-        cached = name and BY_NAME[name] or false
+        if name == nil then return nil end      -- the client has no name for it (yet): ask again next time, remember nothing
+        cached = BY_NAME[name] or false
         ID_CACHE[id] = cached
     end
     return cached or nil
@@ -407,7 +415,11 @@ local function OnCast(id)
     local y, x, inst = ReadPosition()
     local force
     if def.set then
-        for slot = 1, NSLOTS do Stamp(S[slot], nil, nil, now, y, x, inst) end
+        -- a totem already standing keeps its name, numbers and drop position until PLAYER_TOTEM_UPDATE says otherwise: the set may
+        -- not have replaced it. Only an empty slot is stamped (with the position the set dropped it at).
+        for slot = 1, NSLOTS do
+            if not S[slot].up then Stamp(S[slot], nil, nil, now, y, x, inst) end
+        end
         force = true
     else
         Stamp(S[def.slot], def, id, now, y, x, inst)
@@ -510,6 +522,34 @@ end
 -- Events
 -------------------------------------------------------------------------------
 
+-- The localized names of the totems and sets (so a higher rank or a localized client still finds its definition), and Projection's
+-- id and localized name from the spell book. Cheap and idempotent; run at Start and again when the book changes (Projection is
+-- learned at level 22).
+local function ResolveNames()
+    for _, def in ipairs(DEFS) do
+        local name = SpellName(def.id)
+        if name and not BY_NAME[name] then BY_NAME[name] = def end
+    end
+    for id, english in pairs(SET_IDS) do
+        local name = SpellName(id)
+        if name and not BY_NAME[name] then BY_NAME[name] = SET_DEF end
+        NAME_ID[english] = id
+    end
+    for _, id in ipairs(PROJECTION_IDS) do
+        local name = SpellName(id)
+        if name and not BY_NAME[name] then BY_NAME[name] = PROJECTION_DEF end
+    end
+    local info = C_Spell and C_Spell.GetSpellInfo
+    if type(info) == "function" then
+        local ok, rec = pcall(info, PROJECTION)
+        if ok and type(rec) == "table" and not Secret(rec) then
+            local name, id = PlainStr(rec.name), PlainNum(rec.spellID)
+            if name and not BY_NAME[name] then BY_NAME[name] = PROJECTION_DEF end
+            if id and not BY_ID[id] then BY_ID[id] = PROJECTION_DEF end
+        end
+    end
+end
+
 local events
 
 local function OnEvent(_, event, arg1, arg2, arg3)
@@ -528,6 +568,7 @@ local function OnEvent(_, event, arg1, arg2, arg3)
         end
         if not ok then LogOnce("update", err) end
     elseif event == "SPELLS_CHANGED" or event == "PLAYER_LEVEL_UP" or event == "LEARNED_SPELL_IN_TAB" then
+        if event ~= "PLAYER_LEVEL_UP" then pcall(ResolveNames) end
         local ok, err = pcall(T.RefreshUnlocked)
         if not ok then LogOnce("unlocked", err) end
     else
@@ -545,21 +586,12 @@ function T.Start()
     events = CreateFrame("Frame")
     events:SetScript("OnEvent", OnEvent)
     for _, e in ipairs({ "PLAYER_TOTEM_UPDATE", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "PLAYER_ENTERING_WORLD",
-        "SPELLS_CHANGED", "PLAYER_LEVEL_UP" }) do
-        pcall(events.RegisterEvent, events, e)
+        "SPELLS_CHANGED", "PLAYER_LEVEL_UP", "LEARNED_SPELL_IN_TAB" }) do
+        pcall(events.RegisterEvent, events, e)        -- a client without an event refuses it: skipped, not an error
     end
     local ok = events.RegisterUnitEvent and pcall(events.RegisterUnitEvent, events, "UNIT_SPELLCAST_SUCCEEDED", "player")
     if not ok then pcall(events.RegisterEvent, events, "UNIT_SPELLCAST_SUCCEEDED") end
-    -- the localized names of the totems, so a higher rank or a localized client still finds its definition
-    for _, def in ipairs(DEFS) do
-        local name = SpellName(def.id)
-        if name and not BY_NAME[name] then BY_NAME[name] = def end
-    end
-    for id, english in pairs(SET_IDS) do
-        local name = SpellName(id)
-        if name and not BY_NAME[name] then BY_NAME[name] = SET_DEF end
-        NAME_ID[english] = id
-    end
+    ResolveNames()
     pcall(T.Refresh)
 end
 
