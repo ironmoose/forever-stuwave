@@ -69,21 +69,15 @@ function IconStyle.NewChain(base, parent, layer, sub, anchor)
     }
 end
 
--- SetTexCoord for a table of numbers: { left, right, top, bottom } stretches that window over the texture's rectangle, eight
--- values { ULx, ULy, LLx, LLy, URx, URy, LRx, LRy } place the rectangle's corners in the texture one by one (a leaning icon).
-function IconStyle.SetCoords(tex, coords)
-    tex:SetTexCoord(unpack(coords))
-end
-
 -- Points the chain at a game texture and a look ({ fam = family, boost = 0 to 1 }). `file` is what the base draws (a file
--- id or a path); `coords` (optional) what it shows, as SetCoords reads it. The base itself is not written here.
+-- id or a path); `coords` (optional) the window of it, { left, right, top, bottom }. The base itself is not written here.
 function IconStyle.Dress(chain, file, coords, look)
     local ramp = IconStyle.Ramp(look and look.fam)
     if not ramp then return false end
     chain.look = look
     chain.boost:SetTexture(file)
     chain.boost:SetDesaturated(true)
-    if coords then IconStyle.SetCoords(chain.boost, coords) end
+    if coords then chain.boost:SetTexCoord(coords[1], coords[2], coords[3], coords[4]) end
     chain.mod:SetTexture(MEDIA .. ramp.file)
     chain.mod:SetTexCoord(0, 1, 0, 1)
     local lift = ramp.lift

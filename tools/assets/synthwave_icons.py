@@ -41,8 +41,8 @@ game's own textures and restyle them live in the client (Core/IconStyle.lua: Set
 an ADD lift; the ramps and the key covers are our own art, tools/assets/generate_icon_style.py). This tool still
 renders styles A to D from the downloaded sources for the preview page, and writes:
 
-    --gen-runtime   forever-stuwave/Core/IconStyleData.lua: per icon the texture (a file id or a path), the texcoords
-                    that draw it (leaning with the key for a micro glyph), the colour family and a boost (how much brighter than the plain
+    --gen-runtime   forever-stuwave/Core/IconStyleData.lua: per icon the texture (a file id or a path), the upright
+                    texcoord window that fills the icon rectangle, the colour family and a boost (how much brighter than the plain
                     desaturated icon it must be drawn). Numbers only; the sources are read, nothing of them is copied.
     --bake-own      glyphart_character.tga and glyphart_legacy.tga: the Character fallback (the person glyph, used when
                     the class is unknown) and the Legacy key, baked from our OWN hand drawn shapes
@@ -662,16 +662,11 @@ CLASS_TOKENS = {"WARRIOR": "Warrior", "PALADIN": "Paladin", "HUNTER": "Hunter", 
 CLASS_CROP = (0.07, 0.93)
 CLASS_FAMILY = "house_cyan"
 # The micro key's icon rectangle is the key's inside bounding box: key columns 1 to 33 of the 34 wide key, full height
-# (generate_icon_style.py COVER_RECTS["key"], also the cover's span). The key leans / (cell_slant: the top edge sits
-# SLANT_LEAN of the key's width right of the bottom edge), so a picture drawn upright in that rectangle would be cut by the
-# cover at two corners and leave the plate bare at the other two. A glyph is therefore drawn LEANING with the key: the
-# rectangle's four corners sample the texture along the plate's slant (SetTexCoord's eight value form), so the picture
-# fills the key's inside up to the ring. GLYPH_W is the width, in design px of the 34 wide key, that the glyph's window
-# spans across the key's middle row; the key's inside is about 18 design px wide there, the window is wider so the cover
-# and the ring trim a little of its margin instead of leaving a gap.
+# (generate_icon_style.py COVER_RECTS["key"], also the cover's span), so no plate wedge is left without art on the `/` leaning
+# key; the cover then trims the two outside triangles along the slant. Every glyph is drawn UPRIGHT (four texcoords, no lean)
+# zoomed to fill that rectangle: the texcoord window has the rectangle's aspect, so the picture is cropped at the texture's
+# edge when its own part of the texture is too narrow or too short, and never stretched.
 RECT_COLS = (1.0, 33.0)
-SLANT_LEAN = 0.34
-GLYPH_W = 21.0
 COVER_FILE = "iconcover_key.tga"
 FIT_PAD = 1.06  # the window is this much larger than the glyph, so it does not touch the key's edge
 BOOST_TARGET = 0.85  # the 90th percentile of the icon's brightness is lifted to about this
@@ -718,21 +713,6 @@ def fit_window(box: tuple[float, float, float, float], limit: tuple[float, float
     return cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2
 
 
-def lean_coords(window: tuple[float, float, float, float]) -> tuple[float, ...]:
-    """SetTexCoord's eight values (UL, LL, UR, LR corners, x then y) for the icon rectangle (RECT_COLS, full height) so the
-    texture window `window` (l, r, t, b as fractions) is drawn leaning with the key: the window's width is GLYPH_W design px,
-    centred on the plate's middle at each row, and its rows run top to bottom over the key's height. Outside the window the
-    corners sample more of the texture (clamped at its edge); the cover hides that part."""
-    l, r, t, b = window
-    x0, x1 = RECT_COLS
-
-    def u(x: float, y: float) -> float:
-        centre = KEY_W / 2 + SLANT_LEAN * KEY_W * (0.5 - y / KEY_H)
-        return l + (r - l) * ((x - centre) / GLYPH_W + 0.5)
-
-    return (u(x0, 0), t, u(x0, KEY_H), b, u(x1, 0), t, u(x1, KEY_H), b)
-
-
 def boost_for(im: Image.Image, window: tuple[float, float, float, float]) -> float:
     """How much brighter than the plain desaturated icon the style must draw it, 0 (as is) to 1 (twice)."""
     a = np.asarray(im.convert("RGBA"), dtype=np.float64) / 255.0
@@ -747,14 +727,16 @@ def boost_for(im: Image.Image, window: tuple[float, float, float, float]) -> flo
 
 def runtime_entry(im: Image.Image, window: tuple[float, float, float, float], file_id, fam: str,
                   limit: tuple[float, float, float, float] | None = None) -> dict:
-    """One icon's data: the file, the texcoord corners that draw it leaning with the key, the window they were made from, the
-    family and the boost. The window is the glyph grown a little and fitted to GLYPH_W by the key's height, kept inside the
-    `limit` (the glyph's own part of the texture: a button frame or a neighbouring atlas cell must never show)."""
+    """One icon's data: the file, the upright texcoord window (l, r, t, b as fractions), the texture's size in texels, the
+    family and the boost. The window is the glyph grown a little, given the icon rectangle's aspect (a transparent margin is
+    added, or the other axis cropped, centred) and kept inside the `limit` (the glyph's own part of the texture: a button
+    frame or a neighbouring atlas cell must never show), so the picture fills the rectangle without being stretched."""
     w, h = im.size
     limit = limit or (0, 0, w, h)
-    box = fit_window(window, limit, GLYPH_W, KEY_H)
+    x0, x1 = RECT_COLS
+    box = fit_window(window, limit, x1 - x0, KEY_H)
     frac = (box[0] / w, box[2] / w, box[1] / h, box[3] / h)
-    return {"file": file_id, "fam": fam, "coords": lean_coords(frac), "window": frac, "boost": boost_for(im, box)}
+    return {"file": file_id, "fam": fam, "coords": frac, "size": (w, h), "boost": boost_for(im, box)}
 
 
 def micro_runtime_data(root: Path) -> tuple[dict, dict, dict]:
@@ -783,7 +765,7 @@ def micro_runtime_data(root: Path) -> tuple[dict, dict, dict]:
         top, bottom = 0.5 - span / 2, 0.5 + span / 2
         win = (CLASS_CROP[0] * w, top * h, CLASS_CROP[1] * w, bottom * h)
         klass[token] = {"file": "Interface\\Icons\\ClassIcon_" + name, "coords": (CLASS_CROP[0], CLASS_CROP[1], round(top, 5), round(bottom, 5)),
-                        "fam": CLASS_FAMILY, "boost": boost_for(im, win)}
+                        "size": (w, h), "fam": CLASS_FAMILY, "boost": boost_for(im, win)}
     return micro, pvp, klass
 
 
@@ -794,11 +776,9 @@ def lua_num(v) -> str:
 def lua_entry(ent: dict) -> str:
     fid = ent["file"]
     file = fid if isinstance(fid, int) else '"' + fid.replace("\\", "\\\\") + '"'
-    coords = ", ".join(lua_num(round(v, 5)) for v in ent["coords"])
-    window = ""
-    if "window" in ent:
-        window = ", window = { " + ", ".join(lua_num(round(v, 5)) for v in ent["window"]) + " }"
-    return f'{{ file = {file}, coords = {{ {coords} }}{window}, fam = "{ent["fam"]}", boost = {lua_num(ent["boost"])} }}'
+    l, r, t, b = (lua_num(round(v, 5)) for v in ent["coords"])
+    return (f'{{ file = {file}, coords = {{ {l}, {r}, {t}, {b} }}, size = {{ {ent["size"][0]}, {ent["size"][1]} }}, '
+            f'fam = "{ent["fam"]}", boost = {lua_num(ent["boost"])} }}')
 
 
 def spell_look(root: Path, icon: str, fam: str) -> dict:
@@ -829,10 +809,9 @@ def lua_runtime_data(root: Path) -> str:
         "--   ramps:  colour families, the ramp texture and the flat ADD that tints the shadows\n"
         "--   cover:  the cover texture of a micro key and the key columns it spans (fractions of the key width): also the\n"
         "--           rectangle every glyph is drawn in\n"
-        "--   micro, pvp, class: the game texture a micro key draws (file id or path), the texcoords, the family and the boost\n"
-        "--           (0 plain, 1 twice as bright). micro and pvp glyphs draw LEANING with the key: coords are the eight values of\n"
-        "--           SetTexCoord (UL, LL, UR, LR corners, x then y) and window is the l, r, t, b part of the texture they show;\n"
-        "--           class icons are full bleed: four values, l, r, t, b\n"
+        "--   micro, pvp, class: the game texture a micro key draws (file id or path), the upright texcoord window (l, r, t, b)\n"
+        "--           zoomed to the rectangle's aspect, the texture's size in texels (w, h; the harness checks the aspect with it),\n"
+        "--           the family and the boost (0 plain, 1 twice as bright)\n"
         "--   spells: byFile (the icon file id the client reports for a spell) and byName (the lower case icon file name)\n"
         "--           to an icon name; look: that name to its family and boost; bySpell: the spell ids that wear each icon,\n"
         "--           kept for the harness (every spell the class tabs show must be here)\n"

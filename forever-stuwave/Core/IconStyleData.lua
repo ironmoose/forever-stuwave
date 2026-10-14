@@ -3,10 +3,9 @@
 --   ramps:  colour families, the ramp texture and the flat ADD that tints the shadows
 --   cover:  the cover texture of a micro key and the key columns it spans (fractions of the key width): also the
 --           rectangle every glyph is drawn in
---   micro, pvp, class: the game texture a micro key draws (file id or path), the texcoords, the family and the boost
---           (0 plain, 1 twice as bright). micro and pvp glyphs draw LEANING with the key: coords are the eight values of
---           SetTexCoord (UL, LL, UR, LR corners, x then y) and window is the l, r, t, b part of the texture they show;
---           class icons are full bleed: four values, l, r, t, b
+--   micro, pvp, class: the game texture a micro key draws (file id or path), the upright texcoord window (l, r, t, b)
+--           zoomed to the rectangle's aspect, the texture's size in texels (w, h; the harness checks the aspect with it),
+--           the family and the boost (0 plain, 1 twice as bright)
 --   spells: byFile (the icon file id the client reports for a spell) and byName (the lower case icon file name)
 --           to an icon name; look: that name to its family and boost; bySpell: the spell ids that wear each icon,
 --           kept for the harness (every spell the class tabs show must be here)
@@ -25,37 +24,37 @@ FS.IconStyleData = {
   },
   cover = { file = "iconcover_key.tga", x0 = 0.0294, x1 = 0.9706 },
   micro = {
-    spellbook = { file = 130810, coords = { -0.213, 0.4669, 0.1654, 0.8925, 0.8346, 0.4669, 1.213, 0.8925 }, window = { 0.1562, 0.8438, 0.4669, 0.8925 }, fam = "house_violet", boost = 0.39 },
-    talents = { file = 130813, coords = { -0.213, 0.4669, 0.1654, 0.8925, 0.8346, 0.4669, 1.213, 0.8925 }, window = { 0.1562, 0.8438, 0.4669, 0.8925 }, fam = "house_pink", boost = 0.41 },
-    achievement = { file = 235422, coords = { -0.213, 0.4669, 0.1654, 0.8925, 0.8346, 0.4669, 1.213, 0.8925 }, window = { 0.1562, 0.8438, 0.4669, 0.8925 }, fam = "house_violet", boost = 0.08 },
-    questlog = { file = 130804, coords = { -0.213, 0.4669, 0.1654, 0.8925, 0.8346, 0.4669, 1.213, 0.8925 }, window = { 0.1562, 0.8438, 0.4669, 0.8925 }, fam = "house_pink", boost = 0 },
-    socials = { file = 130807, coords = { -0.213, 0.4669, 0.1654, 0.8925, 0.8346, 0.4669, 1.213, 0.8925 }, window = { 0.1562, 0.8438, 0.4669, 0.8925 }, fam = "house_violet", boost = 0 },
-    lfd = { file = 130798, coords = { -0.213, 0.4669, 0.1654, 0.8925, 0.8346, 0.4669, 1.213, 0.8925 }, window = { 0.1562, 0.8438, 0.4669, 0.8925 }, fam = "house_pink", boost = 0.81 },
-    mainmenu = { file = 130801, coords = { -0.213, 0.4669, 0.1654, 0.8925, 0.8346, 0.4669, 1.213, 0.8925 }, window = { 0.1562, 0.8438, 0.4669, 0.8925 }, fam = "house_cyan", boost = 0.22 },
-    help = { file = 130794, coords = { -0.213, 0.4669, 0.1654, 0.8925, 0.8346, 0.4669, 1.213, 0.8925 }, window = { 0.1562, 0.8438, 0.4669, 0.8925 }, fam = "house_pink", boost = 1 },
-    worldmap = { file = 130816, coords = { -0.213, 0.4669, 0.1654, 0.8925, 0.8346, 0.4669, 1.213, 0.8925 }, window = { 0.1562, 0.8438, 0.4669, 0.8925 }, fam = "house_cyan", boost = 0.6 },
-    ej = { file = 525019, coords = { -0.213, 0.4669, 0.1654, 0.8925, 0.8346, 0.4669, 1.213, 0.8925 }, window = { 0.1562, 0.8438, 0.4669, 0.8925 }, fam = "house_pink", boost = 1 },
-    collections = { file = 615164, coords = { -0.213, 0.4669, 0.1654, 0.8925, 0.8346, 0.4669, 1.213, 0.8925 }, window = { 0.1562, 0.8438, 0.4669, 0.8925 }, fam = "house_violet", boost = 0.36 },
-    store = { file = 902317, coords = { -0.213, 0.4669, 0.1654, 0.8925, 0.8346, 0.4669, 1.213, 0.8925 }, window = { 0.1562, 0.8438, 0.4669, 0.8925 }, fam = "house_violet", boost = 0.27 },
-    professions = { file = 4708813, coords = { 0.3711, 0.6855, 0.3968, 0.8008, 0.4421, 0.6855, 0.4677, 0.8008 }, window = { 0.3961, 0.4427, 0.6855, 0.8008 }, fam = "house_cyan", boost = 0.42 },
-    guild = { file = 4708813, coords = { 0.2427, 0.8484, 0.2676, 0.9602, 0.3115, 0.8484, 0.3364, 0.9602 }, window = { 0.267, 0.3121, 0.8484, 0.9602 }, fam = "house_cyan", boost = 0.25 },
-    housing = { file = 4708813, coords = { 0.3051, 0.6803, 0.3313, 0.7982, 0.3777, 0.6803, 0.4039, 0.7982 }, window = { 0.3307, 0.3783, 0.6803, 0.7982 }, fam = "house_violet", boost = 0.07 },
+    spellbook = { file = 130810, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, fam = "house_violet", boost = 0.36 },
+    talents = { file = 130813, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, fam = "house_pink", boost = 0.34 },
+    achievement = { file = 235422, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, fam = "house_violet", boost = 0 },
+    questlog = { file = 130804, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, fam = "house_pink", boost = 0.01 },
+    socials = { file = 130807, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, fam = "house_violet", boost = 0 },
+    lfd = { file = 130798, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, fam = "house_pink", boost = 0.49 },
+    mainmenu = { file = 130801, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, fam = "house_cyan", boost = 0.18 },
+    help = { file = 130794, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, fam = "house_pink", boost = 1 },
+    worldmap = { file = 130816, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, fam = "house_cyan", boost = 0.52 },
+    ej = { file = 525019, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, fam = "house_pink", boost = 0.75 },
+    collections = { file = 615164, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, fam = "house_violet", boost = 0.18 },
+    store = { file = 902317, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, fam = "house_violet", boost = 0.19 },
+    professions = { file = 4708813, coords = { 0.3908, 0.4481, 0.6966, 0.7897 }, size = { 1024, 512 }, fam = "house_cyan", boost = 0.42 },
+    guild = { file = 4708813, coords = { 0.2588, 0.3213, 0.8535, 0.9551 }, size = { 1024, 512 }, fam = "house_cyan", boost = 0.25 },
+    housing = { file = 4708813, coords = { 0.3232, 0.3857, 0.6885, 0.79 }, size = { 1024, 512 }, fam = "house_violet", boost = 0.07 },
   },
   pvp = {
-    Alliance = { file = 136998, coords = { -0.187, 0.03, 0.0781, 0.6262, 0.5469, 0.03, 0.812, 0.6262 }, window = { 0.0717, 0.5533, 0.03, 0.6262 }, fam = "house_cyan", boost = 0.24 },
-    Horde = { file = 137000, coords = { -0.3059, 0, 0.0223, 0.7382, 0.6027, 0, 0.9309, 0.7382 }, window = { 0.0144, 0.6106, 0, 0.7382 }, fam = "house_cyan", boost = 1 },
-    other = { file = 136999, coords = { -0.2286, 0, 0.0586, 0.6459, 0.5664, 0, 0.8536, 0.6459 }, window = { 0.0516, 0.5734, 0, 0.6459 }, fam = "house_cyan", boost = 0.69 },
+    Alliance = { file = 136998, coords = { 0, 0.7339, 0.03, 0.6262 }, size = { 64, 64 }, fam = "house_cyan", boost = 0.24 },
+    Horde = { file = 137000, coords = { 0, 0.7339, 0.0144, 0.6106 }, size = { 64, 64 }, fam = "house_cyan", boost = 1 },
+    other = { file = 136999, coords = { 0, 0.795, 0, 0.6459 }, size = { 64, 64 }, fam = "house_cyan", boost = 0.69 },
   },
   class = {
-    WARRIOR = { file = "Interface\\Icons\\ClassIcon_Warrior", coords = { 0.07, 0.93, 0.1506, 0.8494 }, fam = "house_cyan", boost = 0.03 },
-    PALADIN = { file = "Interface\\Icons\\ClassIcon_Paladin", coords = { 0.07, 0.93, 0.1506, 0.8494 }, fam = "house_cyan", boost = 0.04 },
-    HUNTER = { file = "Interface\\Icons\\ClassIcon_Hunter", coords = { 0.07, 0.93, 0.1506, 0.8494 }, fam = "house_cyan", boost = 0.83 },
-    ROGUE = { file = "Interface\\Icons\\ClassIcon_Rogue", coords = { 0.07, 0.93, 0.1506, 0.8494 }, fam = "house_cyan", boost = 0.02 },
-    PRIEST = { file = "Interface\\Icons\\ClassIcon_Priest", coords = { 0.07, 0.93, 0.1506, 0.8494 }, fam = "house_cyan", boost = 0.07 },
-    SHAMAN = { file = "Interface\\Icons\\ClassIcon_Shaman", coords = { 0.07, 0.93, 0.1506, 0.8494 }, fam = "house_cyan", boost = 0.27 },
-    MAGE = { file = "Interface\\Icons\\ClassIcon_Mage", coords = { 0.07, 0.93, 0.1506, 0.8494 }, fam = "house_cyan", boost = 0 },
-    WARLOCK = { file = "Interface\\Icons\\ClassIcon_Warlock", coords = { 0.07, 0.93, 0.1506, 0.8494 }, fam = "house_cyan", boost = 0.12 },
-    DRUID = { file = "Interface\\Icons\\ClassIcon_Druid", coords = { 0.07, 0.93, 0.1506, 0.8494 }, fam = "house_cyan", boost = 0.34 },
+    WARRIOR = { file = "Interface\\Icons\\ClassIcon_Warrior", coords = { 0.07, 0.93, 0.1506, 0.8494 }, size = { 64, 64 }, fam = "house_cyan", boost = 0.03 },
+    PALADIN = { file = "Interface\\Icons\\ClassIcon_Paladin", coords = { 0.07, 0.93, 0.1506, 0.8494 }, size = { 64, 64 }, fam = "house_cyan", boost = 0.04 },
+    HUNTER = { file = "Interface\\Icons\\ClassIcon_Hunter", coords = { 0.07, 0.93, 0.1506, 0.8494 }, size = { 64, 64 }, fam = "house_cyan", boost = 0.83 },
+    ROGUE = { file = "Interface\\Icons\\ClassIcon_Rogue", coords = { 0.07, 0.93, 0.1506, 0.8494 }, size = { 64, 64 }, fam = "house_cyan", boost = 0.02 },
+    PRIEST = { file = "Interface\\Icons\\ClassIcon_Priest", coords = { 0.07, 0.93, 0.1506, 0.8494 }, size = { 64, 64 }, fam = "house_cyan", boost = 0.07 },
+    SHAMAN = { file = "Interface\\Icons\\ClassIcon_Shaman", coords = { 0.07, 0.93, 0.1506, 0.8494 }, size = { 64, 64 }, fam = "house_cyan", boost = 0.27 },
+    MAGE = { file = "Interface\\Icons\\ClassIcon_Mage", coords = { 0.07, 0.93, 0.1506, 0.8494 }, size = { 64, 64 }, fam = "house_cyan", boost = 0 },
+    WARLOCK = { file = "Interface\\Icons\\ClassIcon_Warlock", coords = { 0.07, 0.93, 0.1506, 0.8494 }, size = { 64, 64 }, fam = "house_cyan", boost = 0.12 },
+    DRUID = { file = "Interface\\Icons\\ClassIcon_Druid", coords = { 0.07, 0.93, 0.1506, 0.8494 }, size = { 64, 64 }, fam = "house_cyan", boost = 0.34 },
   },
   spells = {
   byFile = {

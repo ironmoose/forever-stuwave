@@ -437,7 +437,6 @@ function h_glyphInfo()
             local g = k.glyph
             info.kind, info.tex, info.layer, info.sub, info.c = k.spec.kind, tostring(g.tex), g.layer, g.sublevel, g.coords
             info.w, info.h = g.w, g.h
-            info.window = k.spec.window
             info.vertex, info.desat = g.vertex, g.desat
             if #g.pts == 2 then   -- a rectangle between two corners of the key
                 info.left, info.right, info.top, info.bottom = g.pts[1][4], -g.pts[2][4], g.pts[1][5], -g.pts[2][5]
@@ -794,7 +793,7 @@ def spec_dict(spec) -> dict:
     out = {str(k): v for k, v in spec.items()}
     if "coords" in out:
         out["coords"] = [spec.coords[i] for i in range(1, len(spec.coords) + 1)]
-    out["window"] = [spec.window[i] for i in (1, 2, 3, 4)] if spec.window is not None else None
+    out["size"] = [spec.size[i] for i in (1, 2)] if spec.size is not None else None
     return out
 
 
@@ -812,6 +811,7 @@ def check_glyph_files() -> None:
     stems = sorted({str(v) for _, v in mb.Glyphs.items()} | {str(mb.GlyphGeneric)})
     own = {"character", "legacy"}
     ramps = {str(k) for k, _ in data.ramps.items()}
+    rect_aspect = (data.cover.x1 - data.cover.x0) * 34 / 26   # the icon rectangle: the cover's columns by the key's height
     bad: list[str] = []
     n_runtime = 0
     for stem in stems:
@@ -822,13 +822,11 @@ def check_glyph_files() -> None:
                     bad.append(f"{stem}/{faction} baked {spec['file']}")
                 continue
             n_runtime += 1
-            c, win = spec["coords"], spec["window"]
-            if stem == "character":   # a class icon: full bleed, four values
-                shape = len(c) == 4 and win is None and all(0 <= v <= 1 for v in c) and c[0] < c[1] and c[2] < c[3]
-            else:                      # a leaning glyph: the eight corners, and the window they were made from
-                shape = (len(c) == 8 and win is not None and all(0 <= v <= 1 for v in win) and win[0] < win[1] and win[2] < win[3]
-                         and c[1] == c[5] == win[2] and c[3] == c[7] == win[3]            # rows run top to bottom over the window
-                         and c[0] < c[4] and c[2] < c[6] and c[0] < c[2] and c[4] < c[6])  # leaning / : the top row samples left of the bottom
+            c, size = spec["coords"], spec["size"]
+            # upright, never sheared: four values (l, r, t, b) of the texture, and the texel window has the rectangle's aspect
+            # (the rectangle is the key's inside, 32 x 26 design px), so the picture is zoomed to fill it and never stretched
+            shape = (len(c) == 4 and all(0 <= v <= 1 for v in c) and c[0] < c[1] and c[2] < c[3] and size is not None
+                     and abs(((c[1] - c[0]) * size[0]) / ((c[3] - c[2]) * size[1]) / rect_aspect - 1) <= 0.02)
             ok = (isinstance(spec["file"], (int, str)) and shape and str(spec["fam"]) in ramps and 0 <= spec["boost"] <= 1)
             if not ok:
                 bad.append(f"{stem}/{faction} {spec}")
@@ -841,7 +839,7 @@ def check_glyph_files() -> None:
     # all nine classes: the class icon path is the client's own Interface\Icons\ClassIcon_<Class>
     got = {t: spec_dict(mb.GlyphSpec("character", None, t)) for t in CLASS_NAMES}
     check("glyphs.all_nine_classes_wear_their_own_class_icon",
-          all(g["kind"] == "runtime" and g["file"] == f"Interface\\Icons\\ClassIcon_{CLASS_NAMES[t]}" and g["window"] is None
+          all(g["kind"] == "runtime" and g["file"] == f"Interface\\Icons\\ClassIcon_{CLASS_NAMES[t]}" and len(g["coords"]) == 4
               and g["coords"][:2] == [0.07, 0.93] and near(g["coords"][3] - g["coords"][2], 0.86 * 26 / 32, 1e-3)
               and near(g["coords"][2] + g["coords"][3], 1.0, 1e-3) for t, g in got.items()), f"{got}")
     check("glyphs.the_nine_class_icons_are_nine_different_files", len({g["file"] for g in got.values()}) == 9)
@@ -995,27 +993,11 @@ def check_slant_direction() -> None:
     check("slant.the_cover_is_clear_wherever_the_plate_is_well_inside", float(cov_at_key[inside_in_cover].max()) < 0.2)
 
 
-def _sampled_window(info: dict) -> tuple[list[float], tuple[float, float, float, float]]:
-    """(the glyph's texcoord args, the window of its texture the art may show): a plain 4 value glyph shows its whole window; a
-    leaning one (8 value corners) also carries the window it was sheared from."""
-    n = len(info["c"])
-    coords = [float(info["c"][k]) for k in range(1, n + 1)]
-    if n == 4:
-        return coords, (coords[0], coords[1], coords[2], coords[3])
-    win = info["window"]
-    return coords, tuple(float(win[k]) for k in (1, 2, 3, 4))
-
-
 def _texcoords_at(coords: list[float], fx: np.ndarray, fy: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """The texture point the client draws at fractions (fx, fy) of the glyph rectangle: SetTexCoord's four values stretch the
-    window over it, its eight values (UL, LL, UR, LR corners, x then y) interpolate between the corners."""
-    if len(coords) == 4:
-        l, r, t, b = coords
-        return l + (r - l) * fx, t + (b - t) * fy
-    ulx, uly, llx, lly, urx, ury, lrx, lry = coords
-    u = (1 - fx) * (1 - fy) * ulx + (1 - fx) * fy * llx + fx * (1 - fy) * urx + fx * fy * lrx
-    v = (1 - fx) * (1 - fy) * uly + (1 - fx) * fy * lly + fx * (1 - fy) * ury + fx * fy * lry
-    return u, v
+    """The texture point the client draws at fractions (fx, fy) of the glyph rectangle: SetTexCoord's four values (l, r, t, b)
+    stretch that window over it."""
+    l, r, t, b = coords
+    return l + (r - l) * fx, t + (b - t) * fy
 
 
 def _key_wedge_misses(info: dict, px: float, tol: float = 0.004) -> int:
@@ -1024,7 +1006,11 @@ def _key_wedge_misses(info: dict, px: float, tol: float = 0.004) -> int:
     plate, ring, kw, kh = _plate_and_ring(info, px)
     inner = _inside(plate, ring, px)
     gl, gr = round(info["left"] * px), kw - round(info["right"] * px)
-    coords, (wl, wr, wt, wb) = _sampled_window(info)
+    n = len(info["c"])
+    coords = [float(info["c"][k]) for k in range(1, n + 1)]
+    if n != 4:   # a glyph is upright: four texcoords
+        return -1
+    wl, wr, wt, wb = coords
     ys, xs = np.nonzero(inner)
     fx, fy = (xs + 0.5 - gl) / (gr - gl), (ys + 0.5) / kh
     u, v = _texcoords_at(coords, fx, fy)
@@ -1033,11 +1019,11 @@ def _key_wedge_misses(info: dict, px: float, tol: float = 0.004) -> int:
 
 
 def check_no_empty_wedge() -> None:
-    """The art meets the ring: every pixel inside the key's ring is drawn from the glyph's own window of the game's texture.
-    The glyph rectangle spans the key's inside and the key leans /, so a glyph drawn upright leaves a wedge with no art (the
-    plate shows) at two corners and loses the other two to the cover; one drawn leaning with the key (sampled along the
-    plate's slant) has art at every pixel up to the ring. Checked per key against the real plate and ring, at every key count
-    and at 3 and 1 screen px per design px."""
+    """No plate pixel inside the ring is left without art: every pixel inside the key's ring is drawn from the glyph's own window
+    of the game's texture. The key leans /, so a glyph rectangle narrower than the key's inside leaves a wedge with no art at
+    two corners; an upright glyph is zoomed to fill the whole inside (the cover's columns, full height, four texcoords) and
+    the cover trims the two outside triangles. Checked per key against the real plate and ring, at every key count and at 3
+    and 1 screen px per design px."""
     bad = {}
     seen = set()
     tol = 0.004  # texture fractions, a quarter texel of a 64 texel texture
@@ -1067,7 +1053,10 @@ def check_no_empty_wedge() -> None:
         fx, fy = (xs + 0.5 - gl) / (gr - gl), (ys + 0.5) / kh
         for name, e in entries:
             coords = [float(e.coords[k]) for k in range(1, len(e.coords) + 1)]
-            wl, wr, wt, wb = (coords[0], coords[1], coords[2], coords[3]) if len(coords) == 4 else tuple(float(e.window[k]) for k in (1, 2, 3, 4))
+            if len(coords) != 4:   # a glyph is upright: four texcoords
+                bad[(px, name)] = -1
+                continue
+            wl, wr, wt, wb = coords
             u, v = _texcoords_at(coords, fx, fy)
             miss = (fx < 0) | (fx > 1) | (u < wl - tol) | (u > wr + tol) | (v < wt - tol) | (v > wb + tol)
             if miss.any():
@@ -1105,14 +1094,14 @@ def check_fill() -> None:
               all(all(x < y for x, y in zip(o, o[1:])) and i["layer"] == i["edgeLayer"] == i["coverLayer"] == "ARTWORK" for o, i in zip(order, infos)), f"{order[:1]}")
         check(f"fill.{tag}.the_lowest_piece_is_inside_the_engines_sublevel_range", all(-8 <= o[0] and o[-1] <= 7 for o in order), f"{order[:1]}")
         check(f"fill.{tag}.blend_modes_are_ADD_MOD_ADD", all((i["boostBlend"], i["modBlend"], i["liftBlend"]) == ("ADD", "MOD", "ADD") for i in infos))
-        check(f"fill.{tag}.the_boost_copy_and_the_glyph_show_the_same_corners",
+        check(f"fill.{tag}.the_boost_copy_and_the_glyph_show_the_same_window",
               all(i["boostTex"] == i["tex"] and i.get("boostCoords") is not None and len(i["boostCoords"]) == len(i["c"])
                   and [i["boostCoords"][k] for k in range(1, len(i["c"]) + 1)] == [i["c"][k] for k in range(1, len(i["c"]) + 1)] for i in infos),
               f"{infos[0].get('boostCoords')} {infos[0]['c']}")
         want = [[k.spec.coords[n] for n in range(1, len(k.spec.coords) + 1)] for k in keys]
-        check(f"fill.{tag}.the_glyph_draws_the_specs_coords_four_values_for_the_class_icon_and_eight_for_the_rest",
+        check(f"fill.{tag}.the_glyph_draws_the_specs_four_upright_texcoords",
               all([i["c"][n] for n in range(1, len(i["c"]) + 1)] == c for i, c in zip(infos, want))
-              and [len(c) for c in want] == [4] + [8] * (count - 1), f"{[len(c) for c in want]}")
+              and [len(c) for c in want] == [4] * count, f"{[len(c) for c in want]}")
         check(f"fill.{tag}.no_degrade_logs", w.logs() == "", w.logs())
     # a key without a class (our own baked art): the whole key, the fixed band
     for count, scale in ((12, 1.0), (14, 1.0)):
@@ -1572,8 +1561,7 @@ def check_constants(lean: float, gap: float) -> None:
 
 
 def check_microstyle() -> None:
-    """icons.microstyle: stock (the default) shows the game's textures in their own colours, leaning with the key and cut to
-    it by the cover; gradient restyles them; our own baked keys (Legacy, the person glyph) do not change; every key repaints
+    """icons.microstyle: stock (the default) shows the game's textures in their own colours, upright and cut to the key by the cover; gradient restyles them; our own baked keys (Legacy, the person glyph) do not change; every key repaints
     live."""
     def plain(x):
         return {k: plain(v) for k, v in x.items()} if hasattr(x, "items") else x
@@ -1614,7 +1602,7 @@ def check_microstyle() -> None:
           all(grad[i - 1]["desat"] is True and grad[i - 1]["modShown"] and grad[i - 1]["liftShown"] for i in rt))
     bad = [i for i in rt if stock[i - 1]["left"] != grad[i - 1]["left"] or stock[i - 1]["right"] != grad[i - 1]["right"]
            or stock[i - 1]["tex"] != grad[i - 1]["tex"] or dict(stock[i - 1]["c"]) != dict(grad[i - 1]["c"])]
-    check("microstyle.both_styles_draw_the_same_texture_with_the_same_corners_in_the_same_place", not bad, f"{bad}")
+    check("microstyle.both_styles_draw_the_same_texture_with_the_same_window_in_the_same_place", not bad, f"{bad}")
     # no class known: the Character key falls back to our baked person glyph (Legacy is baked too, see the glyph checks)
     wo = World(16, cls=None).login()
     before = infos(wo)
