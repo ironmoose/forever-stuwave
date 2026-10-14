@@ -23,10 +23,19 @@ local NO_EXPIRY_AGE = 120    -- an entry with no known expiry is believed this l
 -- Shock, Kick, Counterspell, Shield Bash: they leave no aura), effects shorter than 4 s (Bash, Chastise, Confounding
 -- Flash), ground and trap areas (Flamestrike, Blizzard, Rain of Fire, Freezing / Immolation Trap: the aura is
 -- named after the trap or the target is not the one aimed at), pet abilities, weapon and talent procs with no cast
--- (Frostbrand Attack, Deep Wounds' refreshes, poisons), and Paladin Judgement, which the Seal module owns.
+-- (Frostbrand Attack, Deep Wounds' refreshes), and Paladin Judgement, which the Seal module owns.
 -- Priest and Warlock DoTs (Shadow Word: Pain, Devouring Plague, Corruption, Immolate, the banes, Siphon Life) are
 -- timed by FS.HudSpells and are not repeated here. Rupture, Kidney Shot (the length follows the combo points) and
 -- Fire Vulnerability (no length in the Forever tooltip) are listed WITHOUT a length: unverified.
+-- Debuffs that are only ever SEEN, never cast at the target: the Rogue poisons. Coating a weapon is a player cast with the
+-- very name of the aura it later puts on the target (a proc, with no cast), so a cast of one of these names is the weapon
+-- coat and must never write a ledger row on the current target. They show from a snapshot (out of combat, or the in
+-- combat reconcile) alone.
+local SNAPSHOT_ONLY = {
+    ["Deadly Poison"] = true, ["Crippling Poison"] = true, ["Wound Poison"] = true, ["Mind-numbing Poison"] = true,
+    ["Anesthetic Poison"] = true,
+}
+
 local CLASS_DEBUFFS = {
     WARRIOR = { "Rend", "Deep Wounds", "Thunder Clap", "Sunder Armor", "Demoralizing Shout", "Hamstring", "Disarm",
         "Intimidating Shout" },
@@ -438,7 +447,7 @@ local function OnSucceeded(unit, castGUID, spellID)
     if p then key = p.key else key = TargetKey() end
     if not key then return end
     local name, icon = SpellInfo(id)
-    if not (name and Tracks(name)) then return end
+    if not (name and Tracks(name)) or SNAPSHOT_ONLY[name] then return end
     local now = GetTime()
     local bucket = ledger[key]
     if not bucket then bucket = {}; ledger[key] = bucket end

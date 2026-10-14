@@ -758,6 +758,28 @@ cast(8042, guid()); cast(8033, guid()); cast(8017, guid())
 check(#TD.Get() == 0, "an interrupt and weapon imbues leave no debuff on the target, got " .. names(TD.Get()))
 """)
 
+case("coating_a_weapon_with_a_poison_adds_no_target_row_but_a_snapshot_still_shows_the_poison")(r"""
+local TD = boot({ class = "ROGUE" })
+SPELLS_BY_ID[2823] = { name = "Deadly Poison", icon = 6001 }
+SPELLS_BY_ID[3408] = { name = "Crippling Poison", icon = 6002 }
+SPELLS_BY_ID[1329] = { name = "Mutilate", icon = 6003 }
+TD.Subscribe(function() end)
+IN_COMBAT = true
+cast(2823, guid()); cast(3408, guid())
+check(#TD.Get() == 0, "the weapon coat is a player cast with the poison's name: no row, got " .. names(TD.Get()))
+IN_COMBAT = false; fire("PLAYER_REGEN_ENABLED")
+AURAS = { aura("Deadly Poison", NOW + 12, 12, 3, "player", 2818) }
+sync(TD)
+local before = byName(TD.Get(), "Deadly Poison")
+check(before ~= nil, "a snapshot with the poison on the target still shows it, got " .. names(TD.Get()))
+-- a later coat in combat neither duplicates nor rewrites the snapshot's row
+IN_COMBAT = true; fire("PLAYER_REGEN_DISABLED")
+NOW = NOW + 2
+cast(2823, guid())
+local after = byName(TD.Get(), "Deadly Poison")
+check(after and after.expires == before.expires and after.count == before.count and #TD.Get() == 1, "a coat leaves the measured row alone")
+""")
+
 case("friendly_and_dead_targets_show_nothing")(r"""
 local TD = boot({ class = "WARRIOR" })
 AURAS = { aura("Rend", NOW + 12, 21, 0, "player", 11572) }

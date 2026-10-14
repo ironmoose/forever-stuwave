@@ -70,9 +70,10 @@ FS.HudSpells = {
 
     -- Warlock ----------------------------------------------------------------------------
     -- Corruption lasts 12/15/18 s for ranks 1/2/3+. The rank ids 172 (r1) and 25311 (r7)
-    -- are the verified ends of the rank range; 6222 (r2) is from classic spell data and
-    -- NOT verified on Forever (6223, 7648, 11671 and 11672 are ranks 3 to 6, all 18 s, so
-    -- they need no entry). The out-of-combat aura reconcile corrects a wrong guess.
+    -- are the ends of the rank range; 6222 is rank 2, 15 s, learned at level 14 (ForeverDB
+    -- https://foreverdb.net/spell/6222, checked 2026-10-14). 6223, 7648, 11671 and 11672 are
+    -- ranks 3 to 6, all 18 s, so they need no entry. The out-of-combat aura reconcile
+    -- corrects a wrong guess.
     corruption  = { names = { "Corruption" }, ids = { 25311, 172 }, cast = 2.0, apply = 18,
                     applyByRank = { [172] = 12, [6222] = 15 } },
     -- Not in the verified list: Agony, Doom and Siphon Life carry their classic durations.
