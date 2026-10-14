@@ -981,6 +981,14 @@ local function PaintTile(t)
     if t.fsAfter then t.fsAfter(t) end
 end
 
+-- Disables or enables a pick cell: dimmed, no ring, and the engine drops its clicks.
+local function SetTileDisabled(t, off)
+    off = off and true or false
+    t.fsDisabled = off
+    if t.SetEnabled then pcall(t.SetEnabled, t, not off) end
+    PaintTile(t)
+end
+
 local function NewTileHover(t)
     t.hl = Edges(t, "OVERLAY", 2)
     PaintTile(t)
@@ -1001,6 +1009,14 @@ end
 
 local function CloseChooser()
     if chooser and chooser:IsShown() then chooser:Hide() end
+end
+
+-- Dims and disables the chooser's tiles while the presets cannot be edited (the refusal can begin with the chooser open).
+local function LockChooser(locked)
+    if not (chooser and chooser:IsShown()) then return end
+    for _, tile in ipairs(chooser.tiles) do
+        if tile:IsShown() then SetTileDisabled(tile, locked) end
+    end
 end
 
 function Dial.CloseEditor()
@@ -1028,6 +1044,8 @@ end
 local function OpenChooser(row)
     local PS = Presets()
     if InCombat() then return Refuse("Editing waits for combat to end.") end
+    local why = PS.Refusal()
+    if why then return Refuse(why) end
     if not chooser then
         chooser = CreateFrame("Frame", "FSTotemChooser", UIParent)
         chooser:SetFrameStrata("DIALOG")
@@ -1071,8 +1089,10 @@ local function OpenChooser(row)
             tile.text:SetPoint("CENTER", tile, "CENTER", 0, 0)
             NewTileHover(tile)
             tile:SetScript("OnClick", function(self)
-                local edit = PS.SetTotem(card.fsIndex, self.fsElement, self.fsBase)
-                if edit == false then return end
+                local why = PS.Refusal()
+                if why then return Refuse(why) end
+                local edit, reason = PS.SetTotem(card.fsIndex, self.fsElement, self.fsBase)
+                if edit == false then return Refuse(reason) end
                 CloseChooser()
                 Dial.RefreshCard()
             end)
@@ -1104,7 +1124,7 @@ local function OpenChooser(row)
             tile.fsElement, tile.fsBase, tile.fsSpell = element, item.base, item.id
             tile.fsRing = ELEMENT[element] or WHITE
             SeatEdges(tile.hl, tile, thick)
-            PaintTile(tile)
+            SetTileDisabled(tile, false)
             if item.leave then
                 tile.icon:SetColorTexture(0.04, 0.02, 0.09, 0.9)
                 Mono(tile.text, 11, MUTED)
@@ -1308,6 +1328,7 @@ local function BuildCard()
     end)
     card.name:SetScript("OnEnter", function(self) self.fsHover = true; PaintName() end)
     card.name:SetScript("OnLeave", function(self) self.fsHover = false; PaintName() end)
+    card.name:SetScript("OnHide", function(self) self.fsHover = false; PaintName() end)
     card.label = card:CreateFontString(nil, "OVERLAY")
     card.rows = {}
     for i = 1, D.CARD.ROWS do card.rows[i] = BuildRow(card, i) end
@@ -1350,6 +1371,8 @@ function Dial.RefreshCard()
     card.title:SetText("PRESET " .. card.fsIndex)
     card.name:SetText(preset.name)
     local locked = PS.Refusal() ~= nil
+    card.fsLocked = locked
+    LockChooser(locked)
     card.name.fsDisabled = locked
     if card.name.SetEnabled then pcall(card.name.SetEnabled, card.name, not locked) end
     PaintName()
@@ -1363,7 +1386,6 @@ function Dial.RefreshCard()
         row.fill:SetColorTexture(0.051, 0.024, 0.125, 0.6)
         row.fsLock = locked
         row.tile.fsRing = c
-        row.tile.fsDisabled = locked
         row.num:SetText(set and tostring(i) or "-")
         row.bar:SetColorTexture(c[1], c[2], c[3], 1)
         if set then
@@ -1381,7 +1403,7 @@ function Dial.RefreshCard()
             row.label:SetText("left out")
             Tint(row.label, MUTED)
         end
-        PaintTile(row.tile)
+        SetTileDisabled(row.tile, locked)
         SetDisabled(row.up, locked)
         SetDisabled(row.down, locked)
         row.up:SetShown(set and i > 1)
@@ -1514,6 +1536,8 @@ local function Tick(self, elapsed)
     self.fsAcc = 0
     local PS = Presets()
     PS.Expire()
+    -- an open card follows the refusal: it unlocks when "editable in a moment" passes, and locks if saving is lost
+    if card and card:IsShown() and card.fsLocked ~= (PS.Refusal() ~= nil) then Dial.RefreshCard() end
     local pending = PS.Pending()
     local now = GetTime and GetTime() or 0
     local applied = PS.P.applied and PS.P.applied.at and now - PS.P.applied.at < PS.P.APPLIED_FLASH + D.TICK

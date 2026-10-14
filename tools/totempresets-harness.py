@@ -105,6 +105,10 @@ function __Region:SetTextInsets() end
 function __Region:GetStringWidth() return #(self._text or "") * 5.4 end
 __es = 1
 function __Region:GetEffectiveScale() return __es end
+function __Region:SetEnabled(on) self._enabled = on ~= false end
+function __Region:IsEnabled() return self._enabled ~= false end
+function __Region:SetSnapToPixelGrid(on) self._snap = on end
+function __Region:SetTexelSnappingBias(v) self._bias = v end
 function __Region:ClearFocus() self._focus = false end
 function __Region:SetFocus() self._focus = true end
 -- the keys and the CVar the click path reads
@@ -1789,7 +1793,7 @@ def glyph_px(b, es):
 
 
 def check_the_close_x_and_the_arrows_are_drawn_on_whole_pixels_with_equal_margins_at_every_scale():
-    for es, sc in ((1.0, 1.0), (0.64, 1.0), (1.3333333, 1.25), (0.7, 0.8)):
+    for es, sc in ((1.0, 1.0), (0.64, 1.0), (1.3333333, 1.25), (0.7, 0.8), (1.2, 1.0), (1.5, 1.0), (0.9, 1.0), (1.1, 1.0), (1.75, 1.0), (2.2, 1.0)):
         lua = boot(sc)
         run(lua, f"__es = {es}")
         P = PS(lua)
@@ -2475,6 +2479,176 @@ def check_the_files_use_no_snippets_no_state_drivers_and_no_flagged_words():
                         f"{path.name}: flagged word {word!r} in: {ln.strip()}"
 
 
+def live_click(lua, b):
+    """A click as the client delivers it: a disabled button gets none."""
+    if getattr(b, "_enabled", None) is not False:
+        click(lua, b)
+
+
+def errors(lua):
+    e = g(lua).__errors
+    return [str(e[k]) for k in range(1, len(e) + 1)] if e is not None else []
+
+
+def lock_presets(lua, on=True):
+    if on:
+        run(lua, "__refusal = FS.TotemPresets.Refusal; FS.TotemPresets.Refusal = function() return 'saving is off' end")
+    else:
+        run(lua, "FS.TotemPresets.Refusal = __refusal")
+
+
+def check_a_dimmed_pick_cell_and_the_other_dimmed_controls_take_no_clicks_and_say_why():
+    lua = boot()
+    P = PS(lua)
+    i = make(lua)
+    DL(lua).OpenEditor(i)
+    c = card(lua)
+    t = rows(lua)[0].tile
+    before = (str(c.name._text), P.Get(i).name)
+    lock_presets(lua)
+    DL(lua).RefreshCard()
+    assert float(t._alpha) == 0.4 and t._enabled is False, "the dimmed pick cell is still enabled"
+    for label, b in [("pick cell", t), ("delete", c.delete), ("useGnarly", c.useGnarly)] + \
+            [(f"up{n}", r.up) for n, r in enumerate(rows(lua)) if shown(r.up)] + \
+            [(f"down{n}", r.down) for n, r in enumerate(rows(lua)) if shown(r.down)]:
+        assert b._enabled is False, f"{label} was left enabled while the presets cannot be saved"
+    assert c.name._enabled is False, "the name box was left enabled"
+    run(lua, "__errors = {}")
+    live_click(lua, t)
+    chooser = g(lua).FSTotemChooser
+    assert chooser is None or not shown(chooser), "a dimmed pick cell opened the chooser"
+    assert errors(lua) == [], "a click the client would drop said something"
+    # a click that does arrive (the engine drops none here, but a script can call it) is refused with the reason
+    click(lua, t)
+    chooser = g(lua).FSTotemChooser
+    assert chooser is None or not shown(chooser), "the pick cell opened the chooser while the presets cannot be saved"
+    assert errors(lua) == ["saving is off"], errors(lua)
+    for b in (c.delete, c.useGnarly):
+        live_click(lua, b)
+    assert shown(c) and P.Get(i) is not None and P.Gnarly() is None, "a dimmed footer button acted"
+    # the chooser open when the refusal begins: its tiles dim, drop clicks, and a click that arrives says why
+    lock_presets(lua, False)
+    DL(lua).RefreshCard()
+    assert t._enabled is not False and float(t._alpha) == 1
+    live_click(lua, t)
+    chooser = g(lua).FSTotemChooser
+    assert shown(chooser)
+    tile = chooser.tiles[1]
+    other = chooser.tiles[2]
+    assert tile._enabled is not False
+    lock_presets(lua)
+    DL(lua).RefreshCard()
+    assert float(tile._alpha) == 0.4 and tile._enabled is False and other._enabled is False, "the chooser tiles stayed live"
+    run(lua, "__errors = {}")
+    picks = dict(P.Get(i).picks)
+    click(lua, other)
+    assert errors(lua) == ["saving is off"], f"a chooser tile click was silent: {errors(lua)}"
+    assert dict(P.Get(i).picks) == picks and shown(chooser), "a refused chooser click still changed the pick or closed the chooser"
+    # a refusal from the store itself is told too
+    lock_presets(lua, False)
+    DL(lua).RefreshCard()
+    run(lua, "__errors = {}; __sp = FS.TotemPresets.SetTotem; FS.TotemPresets.SetTotem = function() return false, 'no such totem' end")
+    click(lua, other)
+    assert errors(lua) == ["no such totem"], errors(lua)
+    run(lua, "FS.TotemPresets.SetTotem = __sp")
+    assert float(tile._alpha) == 1 and tile._enabled is not False, "the chooser tiles stayed dimmed after the refusal cleared"
+
+
+def check_an_open_card_unlocks_when_the_refusal_clears_and_locks_when_it_begins():
+    lua = boot()
+    i = make(lua)
+    lock_presets(lua)
+    DL(lua).OpenEditor(i)
+    c = card(lua)
+    t = rows(lua)[0].tile
+    assert float(c.delete._alpha) == 0.4 and t._enabled is False and c.name._enabled is False
+    lock_presets(lua, False)
+    tick(lua)
+    assert float(c.delete._alpha) == 1 and t._enabled is not False and c.name._enabled is not False and float(t._alpha) == 1, \
+        "the open card stayed locked after the refusal cleared"
+    lock_presets(lua)
+    tick(lua)
+    assert float(c.delete._alpha) == 0.4 and t._enabled is False and c.name._enabled is False, "the open card did not lock"
+    # a hidden card is not refreshed by the ticker
+    DL(lua).CloseEditor()
+    run(lua, "__rc = 0; local f = FS.TotemDial.RefreshCard; FS.TotemDial.RefreshCard = function(...) __rc = __rc + 1 return f(...) end")
+    lock_presets(lua, False)
+    tick(lua)
+    assert int(g(lua).__rc) == 0, "the ticker refreshed a hidden card"
+
+
+def check_the_name_box_drops_its_hover_look_when_the_card_hides():
+    lua = boot()
+    i = make(lua)
+    DL(lua).OpenEditor(i)
+    c = card(lua)
+    base = ([rgba(e) for e in seq(c.nameEdges)], rgba(c.name.fill))
+    script(lua, c.name, "OnEnter")
+    assert ([rgba(e) for e in seq(c.nameEdges)], rgba(c.name.fill)) != base
+    DL(lua).CloseEditor()
+    script(lua, c.name, "OnHide")       # the mock does not pass a parent's hide down to its children
+    assert not c.name.fsHover, "the name box kept fsHover across a hide"
+    assert ([rgba(e) for e in seq(c.nameEdges)], rgba(c.name.fill)) == base, "the name box kept its hover look across a hide"
+
+
+def check_leaving_a_pick_cell_with_the_button_down_drops_the_pressed_look():
+    lua = boot()
+    i = make(lua)
+    DL(lua).OpenEditor(i)
+    row = rows(lua)[0]
+    t = row.tile
+    ring0, row0 = [rgba(e) for e in seq(t.hl)], [rgba(e) for e in seq(row.edges)]
+    script(lua, t, "OnEnter")
+    script(lua, t, "OnMouseDown")
+    assert rgba(t.hl[1])[3] == 1.0
+    script(lua, t, "OnLeave")
+    assert not t.fsPressed and not t.fsHover
+    assert [rgba(e) for e in seq(t.hl)] == ring0 and [rgba(e) for e in seq(row.edges)] == row0, "leaving with the button down kept a look"
+    script(lua, t, "OnClick")
+    tile = g(lua).FSTotemChooser.tiles[1]
+    ring0 = [rgba(e) for e in seq(tile.hl)]
+    script(lua, tile, "OnEnter")
+    script(lua, tile, "OnMouseDown")
+    script(lua, tile, "OnLeave")
+    assert not tile.fsPressed and not tile.fsHover
+    assert [rgba(e) for e in seq(tile.hl)] == ring0, "the chooser tile kept its pressed look after the mouse left"
+    # hiding the chooser or the card drops both states too
+    script(lua, tile, "OnEnter")
+    script(lua, tile, "OnMouseDown")
+    DL(lua).CloseEditor()
+    script(lua, tile, "OnHide")
+    assert not tile.fsPressed and not tile.fsHover
+
+
+def check_a_disabled_row_does_not_light_its_edge_and_every_editor_texture_is_pixel_snapped():
+    lua = boot()
+    i = make(lua)
+    DL(lua).OpenEditor(i)
+    row = rows(lua)[0]
+    base = [rgba(e) for e in seq(row.edges)]
+    lock_presets(lua)
+    DL(lua).RefreshCard()
+    dim = [rgba(e) for e in seq(row.edges)]
+    script(lua, row.tile, "OnEnter")
+    assert [rgba(e) for e in seq(row.edges)] == dim, "a disabled row lit its edge on hover"
+    script(lua, row.tile, "OnLeave")
+    lock_presets(lua, False)
+    DL(lua).RefreshCard()
+    script(lua, row.tile, "OnEnter")
+    assert [rgba(e) for e in seq(row.edges)] != base, "a live row does not light its edge on hover"
+    script(lua, row.tile, "OnLeave")
+    # every edge and glyph texture of the editor is snapped to the pixel grid, bias 0
+    c = card(lua)
+    script(lua, row.tile, "OnClick")
+    chooser = g(lua).FSTotemChooser
+    groups = [c.edges, c.nameEdges, c.close.edges, c.close.glyph, c.delete.edges, c.useGnarly.edges, row.edges, row.tile.hl,
+              row.up.edges, row.up.glyph, chooser.edges, chooser.tiles[1].hl]
+    for group in groups:
+        assert len(seq(group)) > 0
+        for t in seq(group):
+            assert t._snap is True and float(t._bias) == 0, "an editor texture is not snapped to the pixel grid"
+
+
 CHECKS = [
     check_toc_lists_the_preset_files_after_the_totem_bar_and_bindings_declare_the_dial,
     check_the_settings_have_their_keys_defaults_tips_and_registered_defaults,
@@ -2564,6 +2738,11 @@ CHECKS = [
     check_the_state_line_names_the_live_unknowns,
     check_the_state_line_never_creates_a_database_never_writes_a_read_only_config_and_survives_a_throwing_one,
     check_a_throwing_listener_or_totem_api_never_breaks_a_press_or_a_sync,
+    check_a_dimmed_pick_cell_and_the_other_dimmed_controls_take_no_clicks_and_say_why,
+    check_an_open_card_unlocks_when_the_refusal_clears_and_locks_when_it_begins,
+    check_the_name_box_drops_its_hover_look_when_the_card_hides,
+    check_leaving_a_pick_cell_with_the_button_down_drops_the_pressed_look,
+    check_a_disabled_row_does_not_light_its_edge_and_every_editor_texture_is_pixel_snapped,
     check_the_files_use_no_snippets_no_state_drivers_and_no_flagged_words,
 ]
 
