@@ -1018,6 +1018,20 @@ def _texcoords_at(coords: list[float], fx: np.ndarray, fy: np.ndarray) -> tuple[
     return u, v
 
 
+def _key_wedge_misses(info: dict, px: float, tol: float = 0.004) -> int:
+    """How many pixels inside the ring of the built key `info` (drawn at `px` screen pixels per UI unit) are not drawn from the
+    glyph's own window: the glyph's rectangle is placed by its two corner offsets, whole pixels where the client says so."""
+    plate, ring, kw, kh = _plate_and_ring(info, px)
+    inner = _inside(plate, ring, px)
+    gl, gr = round(info["left"] * px), kw - round(info["right"] * px)
+    coords, (wl, wr, wt, wb) = _sampled_window(info)
+    ys, xs = np.nonzero(inner)
+    fx, fy = (xs + 0.5 - gl) / (gr - gl), (ys + 0.5) / kh
+    u, v = _texcoords_at(coords, fx, fy)
+    miss = (fx < 0) | (fx > 1) | (u < wl - tol) | (u > wr + tol) | (v < wt - tol) | (v > wb + tol)
+    return int(miss.sum())
+
+
 def check_no_empty_wedge() -> None:
     """The art meets the ring: every pixel inside the key's ring is drawn from the glyph's own window of the game's texture.
     The glyph rectangle spans the key's inside and the key leans /, so a glyph drawn upright leaves a wedge with no art (the
@@ -1032,17 +1046,10 @@ def check_no_empty_wedge() -> None:
         for i, info in enumerate((dict(v.items()) for _, v in w.call("h_glyphInfo").items())):
             if info.get("kind") != "runtime":
                 continue
-            plate, ring, kw, kh = _plate_and_ring(info, px)
-            inner = _inside(plate, ring, px)
-            gl, gr = round(info["left"] * px), kw - round(info["right"] * px)
-            coords, (wl, wr, wt, wb) = _sampled_window(info)
-            ys, xs = np.nonzero(inner)
-            fx, fy = (xs + 0.5 - gl) / (gr - gl), (ys + 0.5) / kh
-            u, v = _texcoords_at(coords, fx, fy)
-            miss = (fx < 0) | (fx > 1) | (u < wl - tol) | (u > wr + tol) | (v < wt - tol) | (v > wb + tol)
             seen.add(count)
-            if miss.any():
-                bad[(count, px, i)] = int(miss.sum())
+            missed = _key_wedge_misses(info, px, tol)
+            if missed:
+                bad[(count, px, i)] = missed
     check("wedge.every_pixel_inside_the_ring_is_drawn_from_the_glyphs_own_window_at_every_key_count", seen == {12, 16} and not bad,
           f"{len(bad)} keys, first {list(bad.items())[:3]}")
     # the world only builds a few keys (the rest wear the generic glyph), so every entry of the data is walked too: the micro
@@ -1123,21 +1130,27 @@ def check_crisp() -> None:
     """Pixel crisp: where the client says what a physical pixel is, every edge of the icon pieces is a whole number of them, and
     the pieces have the engine's own snapping off and a texel bias of 0. Without the numbers (no PixelUtil) whole UI units."""
     # UI scale 0.64 of a 1440 screen: a physical pixel is 0.5333 UI units at effective scale 1, so 34 design px * 0.64 = 21.76
-    for factor, eff, scale in ((768 / 1440, 0.5333, 0.64), (768 / 1080, 0.711, 0.64), (768 / 1440, 1.0, 1.0)):
+    # (768 / 1440, 0.64, 0.64) is the live case: a physical pixel of 0.8333 UI units, so no edge falls on a whole unit by luck
+    for factor, eff, scale in ((768 / 1440, 0.5333, 0.64), (768 / 1080, 0.711, 0.64), (768 / 1440, 1.0, 1.0), (768 / 1440, 0.64, 0.64)):
         w = World(12, scale=scale, pixel_factor=factor, effective_scale=eff).login()
         px = factor / eff
         infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
         offs = [(i["left"], i["right"], i["cl"], i["cr"]) for i in infos]
         whole = all(abs(v / px - round(v / px)) < 1e-6 for o in offs for v in o)
-        check(f"crisp.every_edge_is_a_whole_number_of_physical_pixels.factor_{factor:.3f}_scale_{scale}", whole, f"px {px:.4f} {offs[:2]}")
+        check(f"crisp.every_edge_is_a_whole_number_of_physical_pixels.factor_{factor:.3f}_eff_{eff}_scale_{scale}", whole, f"px {px:.4f} {offs[:2]}")
         cover_x0 = w.get("FS.IconStyleData.cover.x0")
-        check(f"crisp.no_piece_is_more_than_half_a_pixel_off_its_design_place.scale_{scale}",
+        check(f"crisp.no_piece_is_more_than_half_a_pixel_off_its_design_place.eff_{eff}_scale_{scale}",
               all(abs(i["cl"] - cover_x0 * i["bw"]) <= px / 2 + 1e-6 for i in infos), f"{[(i['cl'], cover_x0 * i['bw']) for i in infos][:2]}")
-        check(f"crisp.pieces_have_engine_snapping_on_and_bias_0.scale_{scale}",
+        check(f"crisp.pieces_have_engine_snapping_on_and_bias_0.eff_{eff}_scale_{scale}",
               all(all(v is True for v in i["snaps"].values()) and all(v == 0 for v in i["biases"].values()) for i in infos), f"{infos[0]['snaps']} {infos[0]['biases']}")
+        # and the art still meets the ring when the glyph's edges are rounded to those pixels: drawn at that many screen pixels
+        # per UI unit, no pixel inside the ring falls outside the glyph's window
+        missed = {n: _key_wedge_misses(i, 1 / px) for n, i in enumerate(infos) if i["kind"] == "runtime"}
+        check(f"crisp.the_art_meets_the_ring_on_whole_physical_pixels.factor_{factor:.3f}_eff_{eff}_scale_{scale}",
+              len(missed) == 12 and not any(missed.values()), f"px {px:.4f} {missed}")
         # top and bottom edges: the key height lands on whole physical pixels too, both pieces alike
         heights = [(i["bh"] + i["vert"][p][2] - i["vert"][p][1]) for i in infos for p in ("g", "c")]
-        check(f"crisp.the_key_height_is_a_whole_number_of_physical_pixels.factor_{factor:.3f}_scale_{scale}",
+        check(f"crisp.the_key_height_is_a_whole_number_of_physical_pixels.factor_{factor:.3f}_eff_{eff}_scale_{scale}",
               all(abs(v / px - round(v / px)) < 1e-6 for v in heights) and all(abs(v - infos[0]["bh"]) <= px / 2 + 1e-6 for v in heights), f"px {px:.4f} {heights[:3]} bh {infos[0]['bh']}")
     # no PixelUtil: whole UI units, as before
     w = World(12, scale=0.64).login()
