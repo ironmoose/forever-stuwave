@@ -77,7 +77,11 @@ function fire(event, ...)
 end
 
 READ_ONLY = false
-FS = { IsSecret = function() return false end, Theme = {}, Config = { IsReadOnly = function() return READ_ONLY end } }
+SECRET = setmetatable({}, {
+    __index = function() error("SECRET_OP: index", 2) end, __newindex = function() error("SECRET_OP: write", 2) end,
+    __pairs = function() error("SECRET_OP: pairs", 2) end,
+})
+FS = { IsSecret = function(v) return v == SECRET end, Theme = {}, Config = { IsReadOnly = function() return READ_ONLY end } }
 ForeverSTUwaveDB = { profiles = {} }
 
 function load()
@@ -211,6 +215,79 @@ ForeverSTUwaveDB = { profiles = {} }
 fire("PLAYER_ENTERING_WORLD")
 check(ForeverSTUwaveDB.unknownEvents == nil or ForeverSTUwaveDB.unknownEvents.LEARNED_SPELL_IN_TAB == nil,
     "an event that registered fine is not written as refused")
+""")
+
+case("a_success_before_the_saved_table_exists_clears_the_stale_record_once_it_does")(r"""
+ForeverSTUwaveDB = nil
+local H = load()
+check(H.RegisterEvent(frame(), "SPELLS_CHANGED") == true, "registered while the table is not there yet")
+ForeverSTUwaveDB = { unknownEvents = { SPELLS_CHANGED = { time = 5 }, OTHER_EVENT = { time = 6 } } }
+fire("PLAYER_ENTERING_WORLD")
+check(ForeverSTUwaveDB.unknownEvents.SPELLS_CHANGED == nil, "the old refusal is dropped once the table exists")
+check(ForeverSTUwaveDB.unknownEvents.OTHER_EVENT, "other records stay")
+""")
+
+case("a_read_only_profile_keeps_the_stale_record_a_late_success_would_have_cleared")(r"""
+ForeverSTUwaveDB = nil
+local H = load()
+H.RegisterEvent(frame(), "SPELLS_CHANGED")
+READ_ONLY = true
+ForeverSTUwaveDB = { unknownEvents = { SPELLS_CHANGED = { time = 5 } } }
+fire("PLAYER_ENTERING_WORLD")
+check(ForeverSTUwaveDB.unknownEvents.SPELLS_CHANGED, "read only: not removed")
+""")
+
+case("records_say_why_and_a_plain_success_clears_only_a_name_record")(r"""
+local H = load()
+H.RegisterEvent(frame(), "NO_SUCH_UNIT_EVENT", "player")
+check(ForeverSTUwaveDB.unknownEvents.NO_SUCH_UNIT_EVENT.why == "unit", "a refused unit registration says unit")
+H.RegisterEvent(frame(), "NO_SUCH_EVENT")
+check(ForeverSTUwaveDB.unknownEvents.NO_SUCH_EVENT.why == "invalid", "a refused plain registration says invalid")
+ForeverSTUwaveDB.unknownEvents.UNIT_SPELLCAST_SUCCEEDED = { time = 5, why = "unit" }
+check(H.RegisterEvent(frame(), "UNIT_SPELLCAST_SUCCEEDED") == true, "the plain registration works")
+check(ForeverSTUwaveDB.unknownEvents.UNIT_SPELLCAST_SUCCEEDED, "a plain success does not erase a bad unit token record")
+check(H.RegisterEvent(frame(), "UNIT_SPELLCAST_SUCCEEDED", "player") == true, "the unit registration works")
+check(ForeverSTUwaveDB.unknownEvents.UNIT_SPELLCAST_SUCCEEDED == nil, "a unit success clears it")
+ForeverSTUwaveDB.unknownEvents.SPELLS_CHANGED = { time = 5, why = "invalid" }
+H.RegisterEvent(frame(), "SPELLS_CHANGED")
+check(ForeverSTUwaveDB.unknownEvents.SPELLS_CHANGED == nil, "a plain success clears a name record")
+C_EventUtils = { IsEventValid = function(e) return KNOWN_EVENTS[e] == true end }
+H = load()
+H.RegisterEvent(frame(), "NO_SUCH_EVENT_2")
+check(ForeverSTUwaveDB.unknownEvents.NO_SUCH_EVENT_2.why == "invalid", "an event the client calls invalid says invalid")
+""")
+
+case("a_saved_record_table_that_is_not_plain_is_never_written_to")(r"""
+local H = load()
+ForeverSTUwaveDB.unknownEvents = "oops"
+check(H.RegisterEvent(frame(), "SPELLS_CHANGED") == true, "a string in the way is no error")
+check(ForeverSTUwaveDB.unknownEvents == "oops", "left alone")
+ForeverSTUwaveDB.unknownEvents = SECRET
+check(H.RegisterEvent(frame(), "PLAYER_LEVEL_UP") == true, "a secret in the way is no error")
+ForeverSTUwaveDB.unknownEvents = { SPELLS_CHANGED = "oops", PLAYER_LEVEL_UP = SECRET }
+H.RegisterEvent(frame(), "SPELLS_CHANGED")
+H.RegisterEvent(frame(), "PLAYER_LEVEL_UP")
+check(ForeverSTUwaveDB.unknownEvents.SPELLS_CHANGED == nil, "a record that is not a table is dropped by a success")
+check(ForeverSTUwaveDB.unknownEvents.PLAYER_LEVEL_UP == SECRET or ForeverSTUwaveDB.unknownEvents.PLAYER_LEVEL_UP == nil, "a secret record is not read")
+""")
+
+case("safe_register_unit_event_skips_an_invalid_name_silently_and_reports_other_failures")(r"""
+C_EventUtils = { IsEventValid = function(e) return KNOWN_EVENTS[e] == true end }
+local H = load()
+local reports = {}
+local function onFail(event, err) reports[#reports + 1] = event end
+REGISTER_CALLS = 0
+local f = frame()
+H.SafeRegisterUnitEvent(f, "RETAIL_ONLY_EVENT", "player", onFail)
+check(#reports == 0, "an invalid name never reaches onFail")
+check(REGISTER_CALLS == 0, "and is never registered")
+check(ForeverSTUwaveDB.unknownEvents.RETAIL_ONLY_EVENT, "it is recorded")
+check(#PRINTS == 0 and #ADDED == 0, "silent")
+H.SafeRegisterUnitEvent(f, "UNIT_SPELLCAST_SUCCEEDED", "player", onFail)
+check(#reports == 0 and f.units[1] == "player", "a valid one registers")
+f.RegisterUnitEvent = function() error("bad unit token") end
+H.SafeRegisterUnitEvent(f, "UNIT_SPELLCAST_SUCCEEDED", "nobody", onFail)
+check(#reports == 1 and reports[1] == "UNIT_SPELLCAST_SUCCEEDED", "another failure keeps today's onFail")
 """)
 
 case("a_frame_without_the_method_or_a_nil_frame_is_not_an_error")(r"""

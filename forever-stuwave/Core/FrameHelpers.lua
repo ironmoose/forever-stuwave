@@ -212,6 +212,141 @@ function Helpers.NewStepRunner(describeStep, describeOnce)
 end
 
 -------------------------------------------------------------------------------
+-- Event registration that tolerates events this client does not have
+-------------------------------------------------------------------------------
+
+-- Registering an event the client does not know raises ("Attempt to register unknown
+-- event"), and the old per module pcall printed that to chat in the middle of a fight
+-- (the old tab learn event is gone on 16001; LEARNED_SPELL_IN_SKILL_LINE replaced it).
+-- Every spell and learn event list goes through here instead: an event the client calls
+-- invalid (C_EventUtils.IsEventValid when it exists, else the refusal itself, pcall'd) is
+-- skipped, never printed, and recorded once in ForeverSTUwaveDB.unknownEvents so a
+-- reload (and /fsbug) shows which names this client turned down. The saved table is never
+-- created or replaced here, and a read only profile is not written to.
+-- A record says why: "invalid" (the name) or "unit" (a refused unit registration, which may
+-- be the unit token and not the name). A later plain success clears only an "invalid"
+-- record, a later unit success clears either.
+-- Files register some events before ADDON_LOADED has made the table, so a record with
+-- nowhere to go waits in `pendingUnknown`, and a success with nowhere to clear waits in
+-- `pendingForget`; both are applied on the first event after the table exists.
+local unknownSeen, pendingUnknown, pendingForget = {}, {}, {}
+
+local function ReadOnlyProfile()
+    local readOnly = FS.Config and FS.Config.IsReadOnly
+    return readOnly and readOnly() or false
+end
+
+local function PlainTable(v)
+    return type(v) == "table" and not (IsSecret and IsSecret(v))
+end
+
+-- Whether a record left by `why` is cleared by a success; unitSuccess = it was a unit registration.
+local function ClearedBy(record, unitSuccess)
+    if unitSuccess then return true end
+    if not PlainTable(record) then return true end
+    local why = record.why
+    if IsSecret and IsSecret(why) then return false end
+    return why == nil or why == "invalid"
+end
+
+local function WriteUnknownEvents()
+    if next(pendingUnknown) == nil and next(pendingForget) == nil then return end
+    local db = _G.ForeverSTUwaveDB
+    if type(db) ~= "table" then return end
+    if ReadOnlyProfile() then
+        pendingUnknown, pendingForget = {}, {}
+        return
+    end
+    local saved = db.unknownEvents
+    if next(pendingForget) ~= nil and PlainTable(saved) then
+        for event, unitSuccess in pairs(pendingForget) do
+            if saved[event] ~= nil and ClearedBy(saved[event], unitSuccess) then saved[event] = nil end
+        end
+    end
+    pendingForget = {}
+    if next(pendingUnknown) == nil then return end
+    if saved ~= nil and not PlainTable(saved) then
+        pendingUnknown = {}
+        return
+    end
+    db.unknownEvents = saved or {}
+    for event, record in pairs(pendingUnknown) do
+        db.unknownEvents[event] = db.unknownEvents[event] or record
+    end
+    pendingUnknown = {}
+end
+
+local function NoteUnknownEvent(event, why)
+    event = tostring(event)
+    if unknownSeen[event] then return end
+    unknownSeen[event] = true
+    pendingForget[event] = nil
+    pendingUnknown[event] = { time = type(_G.time) == "function" and _G.time() or 0, why = why }
+    WriteUnknownEvents()
+end
+
+-- A client that now knows an event drops the record an older session left for it.
+local function ForgetUnknownEvent(event, unitSuccess)
+    local pending = pendingUnknown[event]
+    if pending and ClearedBy(pending, unitSuccess) then pendingUnknown[event] = nil end
+    local db = _G.ForeverSTUwaveDB
+    if type(db) ~= "table" then
+        pendingForget[event] = pendingForget[event] or unitSuccess
+        return
+    end
+    local saved = db.unknownEvents
+    if not PlainTable(saved) or saved[event] == nil then return end
+    if ReadOnlyProfile() then return end
+    if ClearedBy(saved[event], unitSuccess) then saved[event] = nil end
+end
+
+local function ClientCallsInvalid(event)
+    local utils = _G.C_EventUtils
+    if type(utils) ~= "table" or type(utils.IsEventValid) ~= "function" then return false end
+    local ok, valid = pcall(utils.IsEventValid, event)
+    return ok and valid == false
+end
+
+-- True when the event is now registered. Any extra arguments are unit tokens and make it a
+-- RegisterUnitEvent. Silent: a skipped event is only recorded, never printed.
+function Helpers.RegisterEvent(frame, event, ...)
+    if type(frame) ~= "table" or type(event) ~= "string" then return false end
+    if ClientCallsInvalid(event) then
+        NoteUnknownEvent(event, "invalid")
+        return false
+    end
+    local ok
+    local unitEvent = select("#", ...) > 0
+    if unitEvent then
+        if type(frame.RegisterUnitEvent) ~= "function" then return false end
+        ok = pcall(frame.RegisterUnitEvent, frame, event, ...)
+    else
+        if type(frame.RegisterEvent) ~= "function" then return false end
+        ok = pcall(frame.RegisterEvent, frame, event)
+    end
+    if ok then
+        ForgetUnknownEvent(event, unitEvent)
+    else
+        NoteUnknownEvent(event, unitEvent and "unit" or "invalid")
+    end
+    return ok
+end
+
+-- Registers each name in `events`; returns how many the client accepted.
+function Helpers.RegisterEvents(frame, events, ...)
+    local count = 0
+    if type(frame) ~= "table" or type(events) ~= "table" then return count end
+    for _, event in ipairs(events) do
+        if Helpers.RegisterEvent(frame, event, ...) then count = count + 1 end
+    end
+    return count
+end
+
+local unknownFlush = CreateFrame("Frame")
+pcall(unknownFlush.RegisterEvent, unknownFlush, "PLAYER_ENTERING_WORLD")
+unknownFlush:SetScript("OnEvent", WriteUnknownEvents)
+
+-------------------------------------------------------------------------------
 -- pcall-wrapped RegisterUnitEvent
 -------------------------------------------------------------------------------
 
@@ -221,9 +356,17 @@ end
 -- prints every failure; Buffs dedups through its ReportOnce), so each
 -- module's exact wording is preserved. Dup in CastBars/Buffs before this
 -- extraction.
+-- An event the client calls invalid never reaches `onFail` (nor chat): it is recorded quietly
+-- like Helpers.RegisterEvent does. Every other failure still goes to `onFail`.
 function Helpers.SafeRegisterUnitEvent(events, event, unit, onFail)
+    if ClientCallsInvalid(event) then
+        NoteUnknownEvent(event, "invalid")
+        return
+    end
     local ok, err = pcall(events.RegisterUnitEvent, events, event, unit)
-    if not ok then
+    if ok then
+        ForgetUnknownEvent(event, true)
+    else
         onFail(event, err)
     end
 end
@@ -1992,98 +2135,3 @@ function Helpers.AnchorTooltip(owner)
         tip:SetOwner(owner, "ANCHOR_TOP")
     end
 end
-
--------------------------------------------------------------------------------
--- Event registration that tolerates events this client does not have
--------------------------------------------------------------------------------
-
--- Registering an event the client does not know raises ("Attempt to register unknown
--- event"), and the old per module pcall printed that to chat in the middle of a fight
--- (the old tab learn event is gone on 16001; LEARNED_SPELL_IN_SKILL_LINE replaced it).
--- Every spell and learn event list goes through here instead: an event the client calls
--- invalid (C_EventUtils.IsEventValid when it exists, else the refusal itself, pcall'd) is
--- skipped, never printed, and recorded once in ForeverSTUwaveDB.unknownEvents so a
--- reload (and /fsbug) shows which names this client turned down; a later successful
--- registration of the same name removes its record. The saved table is never created or
--- replaced here, and a read only profile is not written to. Files register some events
--- before ADDON_LOADED has made the table, so a record with nowhere to go waits in
--- `pendingUnknown` and is written on the first event after the table exists.
-local unknownSeen, pendingUnknown = {}, {}
-
-local function ReadOnlyProfile()
-    local readOnly = FS.Config and FS.Config.IsReadOnly
-    return readOnly and readOnly() or false
-end
-
-local function WriteUnknownEvents()
-    if next(pendingUnknown) == nil then return end
-    local db = _G.ForeverSTUwaveDB
-    if type(db) ~= "table" then return end
-    if ReadOnlyProfile() then
-        pendingUnknown = {}
-        return
-    end
-    db.unknownEvents = type(db.unknownEvents) == "table" and db.unknownEvents or {}
-    for event, record in pairs(pendingUnknown) do
-        db.unknownEvents[event] = db.unknownEvents[event] or record
-    end
-    pendingUnknown = {}
-end
-
-local function NoteUnknownEvent(event, why)
-    event = tostring(event)
-    if unknownSeen[event] then return end
-    unknownSeen[event] = true
-    pendingUnknown[event] = { time = type(_G.time) == "function" and _G.time() or 0, why = why }
-    WriteUnknownEvents()
-end
-
--- A client that now knows an event drops the record an older session left for it.
-local function ForgetUnknownEvent(event)
-    pendingUnknown[event] = nil
-    local db = _G.ForeverSTUwaveDB
-    local saved = type(db) == "table" and db.unknownEvents
-    if type(saved) ~= "table" or saved[event] == nil or ReadOnlyProfile() then return end
-    saved[event] = nil
-end
-
-local function ClientCallsInvalid(event)
-    local utils = _G.C_EventUtils
-    if type(utils) ~= "table" or type(utils.IsEventValid) ~= "function" then return false end
-    local ok, valid = pcall(utils.IsEventValid, event)
-    return ok and valid == false
-end
-
--- True when the event is now registered. Any extra arguments are unit tokens and make it a
--- RegisterUnitEvent. Silent: a skipped event is only recorded, never printed.
-function Helpers.RegisterEvent(frame, event, ...)
-    if type(frame) ~= "table" or type(event) ~= "string" then return false end
-    if ClientCallsInvalid(event) then
-        NoteUnknownEvent(event, "invalid")
-        return false
-    end
-    local ok
-    if select("#", ...) > 0 then
-        if type(frame.RegisterUnitEvent) ~= "function" then return false end
-        ok = pcall(frame.RegisterUnitEvent, frame, event, ...)
-    else
-        if type(frame.RegisterEvent) ~= "function" then return false end
-        ok = pcall(frame.RegisterEvent, frame, event)
-    end
-    if ok then ForgetUnknownEvent(event) else NoteUnknownEvent(event, "refused") end
-    return ok
-end
-
--- Registers each name in `events`; returns how many the client accepted.
-function Helpers.RegisterEvents(frame, events, ...)
-    local count = 0
-    if type(frame) ~= "table" or type(events) ~= "table" then return count end
-    for _, event in ipairs(events) do
-        if Helpers.RegisterEvent(frame, event, ...) then count = count + 1 end
-    end
-    return count
-end
-
-local unknownFlush = CreateFrame("Frame")
-pcall(unknownFlush.RegisterEvent, unknownFlush, "PLAYER_ENTERING_WORLD")
-unknownFlush:SetScript("OnEvent", WriteUnknownEvents)
