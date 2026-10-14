@@ -847,17 +847,33 @@ local function IsElementTotem(tb, element, held)
     return false
 end
 
+-- Does the active preset want the totem `held` on the element's set 1 button (a change to it is a pick, not a bleed)?
+local function WantedOnSet1(element, held)
+    local active = PS.Get(PS.Active())
+    local entry = active and PS.Entry(element, active.picks[element])
+    return entry ~= nil and entry.id == held
+end
+
 -- A set 2 write can reach set 1 a moment after it returns (the slot updates when the game gets to it). For the
 -- window after a send (until the pass that judges it), a set 1 slot that reads other than it did before the send AND
--- reads the spell that was sent to its set 2 twin is that bleed. The tab's own picks cannot say: it adopts whatever
+-- reads the spell that was sent to its set 2 twin is that bleed, unless the active preset wants that totem there (then
+-- it is counted unproven, never restored). Any pick through the tab (a preset switch or the picker) ends the window. The tab's own picks cannot say: it adopts whatever
 -- its slot holds as the pick, so a comparison with the pick sees nothing. Returns the work item and the old spell.
 local function Set1Bled(mc, work, window)
+    local legit = 0
     for _, w in ipairs(work) do
         local was = window.before[w.id1]          -- false: the slot was empty
         local rec = set2.sent[w.id2]
         local now, readable = mc.ReadSlot(w.id1)
-        if was ~= nil and readable and now ~= (was or nil) and rec and now == rec.spell then return w, was or nil end
+        if was ~= nil and readable and now ~= (was or nil) and rec and now == rec.spell then
+            if WantedOnSet1(w.element, now) then
+                legit = legit + 1                 -- the dial's preset wants this totem there: not a bleed
+            else
+                return w, was or nil, legit
+            end
+        end
     end
+    return nil, nil, legit
 end
 
 -- Writes the GNARLY preset's known totems into set 2. Out of combat only. A slot that does not read the wanted spell
@@ -908,9 +924,15 @@ function PS.SyncSet2()
     -- only sees one pass)
     set2.check = "none"
     local window = set2.window
+    local legit = 0
+    if window and window.serial ~= (mc.PickSerial and mc.PickSerial() or 0) then
+        set2.window, window = nil, nil
+    end
     if window then
         set2.check = "window"
-        local bled, was = Set1Bled(mc, work, window)
+        local bled, was
+        bled, was, legit = Set1Bled(mc, work, window)
+        if legit > 0 then set2.window, window = nil, nil end
         if bled then
             set2.set1Intact = false
             if was then mc.SendPick(bled.id1, was) end
@@ -918,7 +940,7 @@ function PS.SyncSet2()
             if tb.Sync then tb.Sync() end
             return
         end
-        if mc.Settled(window.at) then set2.window = nil end
+        if window and mc.Settled(window.at) then set2.window = nil end
     end
     local wrote, unproven = false, 0
     for _, w in ipairs(work) do
@@ -945,12 +967,13 @@ function PS.SyncSet2()
             end                         -- else the last send is still settling: its re-look is already scheduled
         end
     end
-    set2.unproven = unproven
+    set2.unproven = unproven + legit
     if wrote then
         set2.wrote = true
         set2.check = set2.check == "window" and "window+bracket" or "bracket"
         local win = set2.window or { before = {} }
         win.at = mc.Now()
+        win.serial = mc.PickSerial and mc.PickSerial() or 0
         for id1, held in pairs(before) do
             if win.before[id1] == nil then win.before[id1] = held or false end
         end

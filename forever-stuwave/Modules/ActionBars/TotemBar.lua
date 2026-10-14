@@ -1609,6 +1609,7 @@ end
 function TotemBar.Pick(key, spellId)
     local button = TB.byKey[key]
     if not (button and button.fsDef.slot and type(spellId) == "number") then return end
+    TB.pickSerial = (TB.pickSerial or 0) + 1       -- the set 2 watch drops its window on any pick (PickSerial)
     local entry = button.fsList and EntryById(button.fsList, spellId)
     if not entry then
         local name, icon = SpellById(spellId)
@@ -1705,6 +1706,8 @@ TotemBar.MC = {
     Now = Now, Settled = Settled, ScheduleVerify = ScheduleVerify,
     -- a set 1 pick of the element is still on its way / the element uses its spell instead of its slot
     Pending = function(key) return TB.pending[key] ~= nil end,
+    -- counts every TotemBar.Pick (the tab's picker and the presets both go through it)
+    PickSerial = function() return TB.pickSerial or 0 end,
     SpellOnly = function(key) return TB.spellOnly[key] == true end,
 }
 

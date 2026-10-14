@@ -449,6 +449,7 @@ def check_a_read_only_config_or_no_database_keeps_the_presets_in_memory_and_refu
     assert not r or r[0] is None, "an edit went through a store that cannot be saved"
     assert P.Count() == 0 and g(lua).ForeverSTUwaveDB.totemPresets is None, "the database was written"
     assert P.Select(1) in ("applied", "queued", False), "switching still answers"
+    assert "cannot be saved this session" in str(P.Refusal()), "a read only config got another refusal text"
     lua = boot()
     run(lua, "ForeverSTUwaveDB = nil")
     P = PS(lua)
@@ -456,8 +457,10 @@ def check_a_read_only_config_or_no_database_keeps_the_presets_in_memory_and_refu
     r = P.Create()
     assert not r or r[0] is None
     assert g(lua).ForeverSTUwaveDB is None, "a missing database was created"
+    assert "cannot be saved this session" in str(P.Refusal()), "a missing database got another refusal text"
     run(lua, 'ForeverSTUwaveDB = "oops"')
     assert P.Writable() is False and P.Count() == 0 and g(lua).ForeverSTUwaveDB == "oops"
+    assert "cannot be saved this session" in str(P.Refusal()), "a database that is not a table got another refusal text"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -766,6 +769,7 @@ def check_a_press_counts_on_the_event_the_game_acts_on():
     click(lua, d, "LeftButton", False)
     assert int(t.presses) == 2, "an edit click was counted as a drop"
     run(lua, "__shift = false")
+    DL(lua).CloseEditor()
     # an Alt click drops nothing: no press either, on either cell
     run(lua, "__alt = true")
     gt = PS(lua).Tracker("gnarly")
@@ -774,6 +778,14 @@ def check_a_press_counts_on_the_event_the_game_acts_on():
         click(lua, cell_btn, "LeftButton", False)
     assert int(t.presses) == 2 and int(gt.presses) == 0, "an Alt click was counted as a drop"
     assert PS(lua).PressAge("gnarly") is None, "an Alt click started the GNARLY press flash"
+    # Alt with Shift is still the shift edit: it opens the editor and counts nothing
+    run(lua, "__shift = true")
+    click(lua, d, "LeftButton", True)
+    click(lua, d, "LeftButton", False)
+    assert card(lua) is not None and shown(card(lua)), "alt+shift did not open the editor"
+    assert int(t.presses) == 2, "alt+shift was counted as a drop"
+    run(lua, "__shift = false")
+    DL(lua).CloseEditor()
     run(lua, "__alt = false")
     click(lua, d, "RightButton", False)
     assert int(t.presses) == 2
@@ -1394,6 +1406,16 @@ def check_a_character_key_that_cannot_be_read_never_saves_under_a_made_up_one():
         assert saved(lua) is not None and g(lua).ForeverSTUwaveDB.totemPresets["player"] is None
 
 
+def check_an_unreadable_character_key_with_a_database_that_cannot_save_keeps_the_session_refusal():
+    for setup in ("FS.Config.IsReadOnly = function() return true end", "ForeverSTUwaveDB = nil",
+                  'ForeverSTUwaveDB = "oops"'):
+        lua = boot()
+        run(lua, f"UnitGUID = function() return nil end; {setup}")
+        P = PS(lua)
+        assert P.Writable() is False
+        assert "cannot be saved this session" in str(P.Refusal()), f"{setup}: the refusal promised an edit in a moment"
+
+
 def check_the_known_totems_are_scanned_once_per_event_not_once_per_repaint():
     lua = boot()
     P = PS(lua)
@@ -1801,6 +1823,42 @@ def check_set_one_is_watched_until_a_set_two_send_is_judged_and_the_line_says_wh
     assert P.Set2.state != "dead" and P.Set2.check == "none"
 
 
+def check_a_pick_of_the_gnarly_totem_inside_the_window_is_the_players_and_is_never_put_back():
+    id1 = tbh.action_id(tbh.SLOT["fire"])
+
+    def world():
+        lua = boot()
+        P = PS(lua)
+        a, b = two_presets(lua)
+        P.Select(a)
+        run(lua, "__mc.delay = true")
+        P.SetGnarly(b)                         # sends queue: Magma, Tremor, Mana Spring; window open
+        return lua, P, a, b
+
+    # a preset switch in the same second picks the GNARLY totem onto set 1
+    lua, P, a, b = world()
+    P.Select(b)
+    run(lua, "__mc_flush()")
+    advance(lua, 1.2)
+    assert P.Set2.state != "dead" and P.Set2.set1Intact is True, "a preset switch was blamed as a bleed"
+    assert int(g(lua).__mc.slots[id1]) == IDS["Magma Totem"], "the player's pick was put back"
+    # a pick from the tab's picker does the same
+    lua, P, a, b = world()
+    TB(lua).Pick("fire", IDS["Magma Totem"])
+    run(lua, "__mc_flush()")
+    advance(lua, 1.2)
+    assert P.Set2.state != "dead" and P.Set2.set1Intact is True, "a manual pick was blamed as a bleed"
+    assert int(g(lua).__mc.slots[id1]) == IDS["Magma Totem"], "the manual pick was put back"
+    # a set 1 slot that changes to what the active preset wants is not restored, only left unproven
+    lua, P, a, b = world()
+    run(lua, "FS.TotemPresets.Active = function() return %d end" % b)
+    run(lua, f"__mc.slots[{id1}] = __ids['Magma Totem']; __mc_flush()")
+    advance(lua, 1.2)
+    assert P.Set2.state != "dead" and P.Set2.set1Intact is True
+    assert int(g(lua).__mc.slots[id1]) == IDS["Magma Totem"], "a slot the active preset wants was put back"
+    assert int(P.Set2.unproven) >= 1
+
+
 def check_a_set_two_slot_is_written_only_when_it_reads_back_holding_nothing_or_an_element_totem():
     lua = boot()
     P = PS(lua)
@@ -2115,6 +2173,7 @@ CHECKS = [
     check_edit_clicks_in_every_modifier_combination_never_drop_a_totem,
     check_the_dial_tip_says_a_shift_keybind_edits,
     check_a_character_key_that_cannot_be_read_never_saves_under_a_made_up_one,
+    check_an_unreadable_character_key_with_a_database_that_cannot_save_keeps_the_session_refusal,
     check_the_known_totems_are_scanned_once_per_event_not_once_per_repaint,
     check_a_totem_learned_during_the_fight_is_picked_by_the_switch_that_waited,
     check_the_cells_stand_right_of_the_six_and_the_buttons_keep_their_slots,
@@ -2130,6 +2189,7 @@ CHECKS = [
     check_a_spell_that_comes_back_is_written_to_set_two_again,
     check_a_set_two_send_that_has_not_shown_is_looked_at_again_and_sent_again_a_few_times,
     check_set_one_is_watched_until_a_set_two_send_is_judged_and_the_line_says_which_check_ran,
+    check_a_pick_of_the_gnarly_totem_inside_the_window_is_the_players_and_is_never_put_back,
     check_a_set_two_slot_is_written_only_when_it_reads_back_holding_nothing_or_an_element_totem,
     check_set_two_raising_inside_the_refresh_is_caught_and_the_state_is_still_saved,
     check_a_press_is_used_up_by_the_cast_it_brought_and_a_reset_forgets_it,
