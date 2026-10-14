@@ -255,6 +255,51 @@ def check_unmapped_database_guards() -> None:
     check("unmapped.a_state_field_that_is_not_a_table_is_left_alone", str(lua.eval("ForeverSTUwaveDB.buffTabEngine")) == "x")
 
 
+def check_unmapped_guards_are_pinned() -> None:
+    """The recorder's own guards, which the pcall around it would hide: metatable traps on nil, numbers and strings count any index or
+    write that gets past them, and a write counter proves a flushed list is not written again."""
+    lua = world()
+    lua.execute("""
+        function TrapRun(db, id)
+            local hits = 0
+            local trap = function() hits = hits + 1 end
+            ForeverSTUwaveDB = db
+            local smt = getmetatable("")
+            debug.setmetatable(nil, { __index = trap, __newindex = trap })
+            debug.setmetatable(0, { __index = trap, __newindex = trap })
+            smt.__newindex = trap
+            local ok = pcall(FS.SpellArt.Resolve, id)
+            smt.__newindex = nil
+            debug.setmetatable(0, nil)
+            debug.setmetatable(nil, nil)
+            ForeverSTUwaveDB = {}
+            return ok, hits
+        end
+        function CountWrites(first, second)
+            local writes, store = 0, {}
+            ForeverSTUwaveDB = { buffTabEngine = setmetatable({}, {
+                __index = store, __newindex = function(_, k, v) writes = writes + 1; store[k] = v end }) }
+            FS.SpellArt.Resolve(first)
+            local afterFirst = writes
+            FS.SpellArt.Resolve(first)
+            local afterRepeat = writes
+            FS.SpellArt.Resolve(second)
+            return afterFirst, afterRepeat, writes
+        end
+    """)
+    ok, hits = lua.globals().TrapRun(None, 880000001)
+    check("guards.a_nil_database_is_never_indexed", ok is True and hits == 0, f"ok {ok}, trap hit {hits} times")
+    ok, hits = lua.globals().TrapRun(5, 880000002)
+    check("guards.a_number_database_is_never_indexed_or_written", ok is True and hits == 0, f"ok {ok}, trap hit {hits} times")
+    ok, hits = lua.eval("function() return TrapRun({ buffTabEngine = 'x' }, 880000003) end")()
+    check("guards.a_string_state_field_is_never_written", ok is True and hits == 0, f"ok {ok}, trap hit {hits} times")
+    ok, hits = lua.globals().TrapRun({}, 880000004)
+    check("guards.the_traps_are_quiet_for_a_normal_database", ok is True and hits == 0, f"ok {ok}, trap hit {hits} times")
+    first, again, second = lua.globals().CountWrites(990000001, 990000002)
+    check("guards.a_flushed_list_is_not_written_again_until_something_new", (first, again, second) == (1, 1, 2),
+          f"writes after the first {first}, after the repeat {again}, after a new one {second}")
+
+
 def check_sources() -> None:
     read = lambda rel: (ADDON / rel).read_text(encoding="utf-8")  # noqa: E731
     users = {
@@ -296,6 +341,7 @@ def main() -> int:
     check_set_never_throws()
     check_unmapped_record()
     check_unmapped_database_guards()
+    check_unmapped_guards_are_pinned()
     print(f"\n{len(FAILS)} failed" if FAILS else "\nall checks passed")
     return len(FAILS)
 
