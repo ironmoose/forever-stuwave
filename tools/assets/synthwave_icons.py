@@ -511,7 +511,7 @@ def current_glyphs() -> dict[str, bytes]:
 # ---------------------------------------------------------------------------
 
 BAKE_SIZE = 64  # power of two: a square the key covers; MicroBars.lua crops it to the key's band of rows
-BAKE_FILL = 1.4  # the art is padded to this much of its size with its own backdrop, so the glyph is not cut by the key's shape
+BAKE_FILL = 1.15  # the art is padded to this much of its size with its own backdrop: just enough that the key's slanted corners do not cut the glyph, little enough that the art still fills the key
 # The micro key's geometry (MicroBars.lua KEY_W, KEY_H, LEAN_FRAC): the slanted shape is baked into the alpha because
 # a MaskTexture does not clip on this client. Drawn at the key's width, the texture's central band of rows
 # (KEY_H / KEY_W of its height) is the key; everything outside the slanted outline is transparent.
