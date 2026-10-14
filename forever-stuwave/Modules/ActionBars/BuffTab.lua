@@ -12,7 +12,7 @@
 --     Keybind mode binds it. A click casts: IMBUE the imbue its chip shows (or the best known one when none is up),
 --     SHIELD casts Lightning Shield: type "spell" with the localized spell name.
 --   * A tile is a chip (the imbue code, or LS) over a time or count, an underline in the state colour and a border:
---     quiet gold when up, pink under five minutes (the time replaces the orb count), an amber hollow word when
+--     quiet gold when up, pink under five minutes (the time replaces the orb count), a red hollow word when
 --     missing, a hollow "?" when nothing can be read, a dashed underline and a "~" for the shield estimate in combat.
 --     Everything that changes with the state (colours, text, alpha) is a texture or font write, legal in combat.
 --   * LOCKED: SHIELD until Lightning Shield is known (level 8) carries NO castable attribute, shows the dotted mold
@@ -28,7 +28,7 @@
 --     Theme.COLOR_UNUSABLE), asked of the spell the tile casts (C_Spell.IsSpellUsable, else IsUsableSpell): out of mana
 --     blends the tile's foreground (chip stroke, glow and code, the time or word, the underline) toward blue,
 --     otherwise unusable toward grey, usable is the approved look. The cut border, the plate and the chip fill keep
---     their state colours, and the state colour is blended, not replaced, so the quiet gold, pink and amber states
+--     their state colours, and the state colour is blended, not replaced, so the quiet gold, pink and red states
 --     still read. A secret, missing or raised answer leaves the tint as it was; a locked or absent tile is plain and
 --     never asked. Event driven (SPELL_UPDATE_USABLE, ACTIONBAR_UPDATE_USABLE, the combat edges, a sync, a changed
 --     spell): font and texture writes only, a repaint only when the state changed.
@@ -58,6 +58,8 @@ local BT = {
     LOCKED_ALPHA = 0.4,
     CHIP_W = 22, CHIP_H = 15, CHIP_TOP = 5, CHIP_C = 3, GLOW_PAD = 3,
     CODE_PX = 10, TEXT_PX = 11, WORD_PX = 9,
+    TEXT_INSET = 3,                 -- design px kept clear on each side of the time or word (the cut border's chamfer)
+    ADVANCE = 0.5615,               -- Mononoki Bold's advance per em (every glyph; the font is monospaced)
     TEXT_Y = 27,                    -- the time line's centre, design px below the tile top
     TICK = 1,                       -- seconds between repaints (the clock text)
     TINT_MIX = 0.6,                 -- how far the foreground colours move toward the usability tint (out of mana, unusable)
@@ -120,7 +122,7 @@ end
 local function BuildLooks()
     if looks then return looks end
     local T = FS.Theme
-    local white, amber, muted, pink = T.COLOR_TEXT_WHITE, T.COLOR_AMBER, T.COLOR_MUTED, T.COLOR_HEALTH
+    local white, red, muted, pink = T.COLOR_TEXT_WHITE, T.COLOR_RED, T.COLOR_MUTED, T.COLOR_HEALTH
     local violet = T.COLOR_BORDER
     local hollow = Mix(muted, { 1, 1, 1 }, 0.25)
     local plain = { BG[1], BG[2], BG[3], 0.72 }
@@ -130,9 +132,9 @@ local function BuildLooks()
         exp = { ring = pink, ringA = 0.9, glowA = 0.5, plate = Mix(BG, pink, 0.1), plateA = 0.9, chip = pink,
             chipFill = Mix(BG, pink, 0.3), chipFillA = 1, chipGlow = true, code = white, text = pink, textA = 1,
             line = pink, lineA = 0.9 },
-        warn = { ring = amber, ringA = 0.85, glowA = 0.5, plate = Mix(BG, amber, 0.1), plateA = 0.9, chip = amber,
-            chipFill = Mix(BG, amber, 0.22), chipFillA = 1, chipGlow = true, code = amber, text = amber, textA = 1,
-            line = amber, lineA = 0.9 },
+        warn = { ring = red, ringA = 0.85, glowA = 0.5, plate = Mix(BG, red, 0.1), plateA = 0.9, chip = red,
+            chipFill = Mix(BG, red, 0.22), chipFillA = 1, chipGlow = true, code = red, text = red, textA = 1,
+            line = red, lineA = 0.9 },
         hollow = { ring = muted, ringA = 0.6, glowA = 0, plate = plain, chip = hollow, chipFill = BG,
             chipFillA = 0.7, chipGlow = false, code = hollow, text = muted, textA = 1, line = muted, lineA = 0.55 },
     }
@@ -170,7 +172,7 @@ function BuffTab.TipLines(key)
     local T = FS.Theme
     local v = FS.ShamanBuffs and FS.ShamanBuffs.View()[key]
     if not (v and v.mode) then return nil end
-    local gold, pink, amber, muted = GOLD, T.COLOR_HEALTH, T.COLOR_AMBER, T.COLOR_MUTED
+    local gold, pink, red, muted = GOLD, T.COLOR_HEALTH, T.COLOR_RED, T.COLOR_MUTED
     local lines = {}
     local function add(text, color, wrap) lines[#lines + 1] = { text, color, wrap } end
     local click = v.spell and ("Click: cast " .. v.spell .. ".") or nil
@@ -180,7 +182,7 @@ function BuffTab.TipLines(key)
             add(v.spell or "Weapon imbue", v.mode == "exp" and pink or gold)
             add(handName .. " imbue, " .. LeftText(v.remaining or 0) .. ".", { 1, 1, 1 }, true)
         elseif v.mode == "warn" then
-            add("Weapon imbue", amber)
+            add("Weapon imbue", red)
             add("No imbue on your " .. (v.lackHand == "off" and "off" or "main") .. " hand.", { 1, 1, 1 }, true)
         else
             add("Weapon imbue", muted)
@@ -216,7 +218,7 @@ function BuffTab.TipLines(key)
             add((text or "Active") .. ".", { 1, 1, 1 }, true)
         end
     elseif v.mode == "warn" then
-        add(title, amber)
+        add(title, red)
         add("Not active.", { 1, 1, 1 }, true)
     else
         add(title, muted)
@@ -391,6 +393,17 @@ local function Shade(c, tint)
     return c[1] + (tint[1] - c[1]) * k, c[2] + (tint[2] - c[2]) * k, c[3] + (tint[3] - c[3]) * k
 end
 
+-- The font size for `text`: `px`, or smaller so the string stays inside the tile with TEXT_INSET design px clear on
+-- each side. The tile shrinks with the UI scale and fonts do not, so the longest words (SHIELD) are fitted to the
+-- current scale; whole and half pixels only (rounded down), and a rescale repaints, which refits.
+local function FitPx(text, px)
+    local n = type(text) == "string" and #text or 0
+    if n == 0 then return px end
+    local room = (BT.BTN - 2 * BT.TEXT_INSET) * Scale()
+    local fit = math.floor(room / (n * BT.ADVANCE) * 2) / 2
+    return fit < px and fit or px
+end
+
 -- Paints one tile from its view. Writes only when something changed.
 local function PaintButton(button, v)
     if button.fsLocked or not button.fsFace or not (v and v.mode) then return end
@@ -427,7 +440,7 @@ local function PaintButton(button, v)
     r, g, b = Shade(look.code, tint)
     chip.code:SetTextColor(r, g, b, 1)
     chip.code:SetText(v.code or "")
-    local size = (v.mode == "warn" and button.fsKey == "shield") and BT.WORD_PX or BT.TEXT_PX
+    local size = FitPx(v.text, v.mode == "warn" and BT.WORD_PX or BT.TEXT_PX)
     if button.fsTextPx ~= size then
         button.fsTextPx = size
         FS.Theme.ApplyMono(button.fsText, size, look.text)
@@ -486,7 +499,14 @@ local function UpdateUsable(button)
     if button.fsAbsent then return end
     local spell = WantedSpell(button)
     button.fsUsableSpell = spell
-    if not spell then return end
+    if not spell then
+        -- nothing to ask about: the old tint no longer describes anything the tile casts
+        if button.fsUsable ~= nil then
+            button.fsUsable = nil
+            PaintButton(button, ViewOf(button))
+        end
+        return
+    end
     local state = SpellUsability(spell)
     if state and state ~= button.fsUsable then
         button.fsUsable = state

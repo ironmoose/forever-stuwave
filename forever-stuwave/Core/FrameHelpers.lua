@@ -1887,37 +1887,37 @@ end
 -- Usability feedback for the class tabs (TotemBar.lua, BuffTab.lua), the same rule ActionBars.lua UpdateUsable follows:
 -- out of mana is "oom" (Theme.COLOR_OOM), otherwise unusable is "unusable" (Theme.COLOR_UNUSABLE), else "usable"
 -- (no tint). The answer is nil when it cannot be told (a secret value in combat, an API that is missing, raised or
--- answered nothing): the caller then leaves whatever it painted last, it never guesses. A plain "not enough mana"
--- wins even when the usable flag is secret, since that alone decides the colour.
-local function Usability(isUsable, notEnoughMana)
+-- answered nothing at all): the caller then leaves whatever it painted last, it never guesses. A plain "not enough
+-- mana" wins even when the usable flag is secret, and a plain falsy usable flag (false, 0, or the old 1-or-nil style's
+-- nil) is "unusable" even when the mana flag is secret, as on the main bars. `n` is the number of values the API
+-- returned (select("#", ...)): a call that returned values with a nil first is an answer, a call that returned none is not.
+local function Usability(n, isUsable, notEnoughMana)
     if not IsSecret(notEnoughMana) and notEnoughMana and notEnoughMana ~= 0 then return "oom" end
-    if IsSecret(notEnoughMana) or IsSecret(isUsable) then return nil end
-    if isUsable == nil or (type(isUsable) ~= "boolean" and type(isUsable) ~= "number") then return nil end
-    if isUsable == false or isUsable == 0 then return "unusable" end
+    if n == 0 or IsSecret(isUsable) then return nil end
+    if isUsable ~= nil and type(isUsable) ~= "boolean" and type(isUsable) ~= "number" then return nil end
+    if isUsable == nil or isUsable == false or isUsable == 0 then return "unusable" end
+    if IsSecret(notEnoughMana) then return nil end
     return "usable"
+end
+
+-- Usability of a pcall's results (ok, then whatever the API returned). A top level function: no closure per call.
+local function UsabilityOf(ok, ...)
+    if not ok then return nil end
+    return Usability(select("#", ...), ...)
 end
 
 -- The usability of an action id (IsUsableAction), nil when it cannot be told.
 function Helpers.ActionUsability(actionId)
     if not IsUsableAction then return nil end
-    local ok, isUsable, notEnoughMana = pcall(IsUsableAction, actionId)
-    if not ok then return nil end
-    return Usability(isUsable, notEnoughMana)
+    return UsabilityOf(pcall(IsUsableAction, actionId))
 end
 
 -- The usability of a spell id or name (C_Spell.IsSpellUsable, else IsUsableSpell), nil when it cannot be told.
 function Helpers.SpellUsability(spell)
     if spell == nil then return nil end
-    local ok, isUsable, notEnoughMana
-    if C_Spell and C_Spell.IsSpellUsable then
-        ok, isUsable, notEnoughMana = pcall(C_Spell.IsSpellUsable, spell)
-    elseif IsUsableSpell then
-        ok, isUsable, notEnoughMana = pcall(IsUsableSpell, spell)
-    else
-        return nil
-    end
-    if not ok then return nil end
-    return Usability(isUsable, notEnoughMana)
+    local fn = (C_Spell and C_Spell.IsSpellUsable) or IsUsableSpell
+    if not fn then return nil end
+    return UsabilityOf(pcall(fn, spell))
 end
 
 -- The theme colour of a usability state: Theme.COLOR_OOM, Theme.COLOR_UNUSABLE, or nil for "usable" (and for nil).

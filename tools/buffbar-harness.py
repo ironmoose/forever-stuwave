@@ -15,8 +15,9 @@ the mockup, so a mockup move fails here. Checked:
   * the shield model: orbs from the aura snapshot, the expiring time, the combat estimate, Water Shield is not nagged,
     a Water Shield cast in combat clears the pending Lightning Shield cast, and a missing aura end is the application
     time plus the duration, not the last read plus ten minutes;
-  * the tiles: states and colours from the mockup (quiet gold, pink expiring, amber hollow missing, hollow "?"), the
-    locked dotted mold with its level, the absent imbue tile, the hover border and the tooltip lines;
+  * the tiles: states and colours from the mockup (quiet gold, pink expiring, red hollow missing, hollow "?"), the
+    locked dotted mold with its level, the absent imbue tile, the hover border and the tooltip lines; every string of
+    every state fits inside its tile at each UI scale (measured with the real font's advances);
   * the secure buttons: type "spell" with the spell name, written out of combat only and queued for regen, never a
     field or attribute Blizzard's secure click path reads, built once, bound through Bindings.xml;
   * the seat: shoulder block, host and buttons at the mockup's geometry, the Console gap and the bridge between the
@@ -98,7 +99,7 @@ def mockup() -> dict:
     geo = sb._m(r"var G=\{(.*?)\};", src, "geometry").group(1)
     num = {k: float(v) for k, v in re.findall(r"(\w+):([\d.]+)", geo)}
     chip = sb._m(r"function chip\(cx,cy,code,m\)\{(.*?)\n\}", src, "chip").group(1)
-    warn_fill = float(sb._m(r"m==='warn'\)\{s=C\.amber;f=mix\(C\.bg,C\.amber,([\d.]+)\)", chip, "warn chip fill").group(1))
+    warn_fill = float(sb._m(r"m==='warn'\)\{s=C\.red;f=mix\(C\.bg,C\.red,([\d.]+)\)", chip, "warn chip fill").group(1))
     exp_fill = float(sb._m(r"m==='exp'\)\{s=C\.pink;f=mix\(C\.bg,C\.pink,([\d.]+)\)", chip, "exp chip fill").group(1))
     on_fill = float(sb._m(r"else\{s=C\.gold;f=mix\(C\.bg,C\.gold,([\d.]+)\)", chip, "on chip fill").group(1))
     body = sb._m(r"function tileBody\(x,y,st\)\{(.*?)\n\}", src, "tileBody").group(1)
@@ -130,6 +131,7 @@ FS.Theme.COLOR_HEALTH = FS.Theme.COLOR_HEALTH or { 1, 0.18, 0.592, 1 }
 FS.Theme.COLOR_POWER = FS.Theme.COLOR_POWER or { 0.133, 0.878, 1, 1 }
 FS.Theme.COLOR_BORDER = FS.Theme.COLOR_BORDER or { 0.659, 0.333, 0.969, 1 }
 FS.Theme.COLOR_AMBER = FS.Theme.COLOR_AMBER or { 1, 0.7137, 0.2824, 1 }
+FS.Theme.COLOR_RED = FS.Theme.COLOR_RED or { 1, 0.2314, 0.3059, 1 }
 FS.Theme.COLOR_MUTED = FS.Theme.COLOR_MUTED or { 0.6157, 0.5765, 0.7686, 1 }
 -- the host parents secure buttons, so it is restricted in combat like the Console root
 do
@@ -291,6 +293,9 @@ def tile(lua, i):
         text_color=rgb(b.fsText._textColor), text_a=float(b.fsText._textColor[4]),
         code_color=rgb(b.fsChip.code._textColor), line=rgb(b.fsLine._vertex), line_a=float(b.fsLine._vertex[4]),
         dashes=[float(d._alpha) for d in [b.fsDashes[k] for k in range(1, 5)]],
+        plate=rgb(b.fsPlate._vertex), plate_a=float(b.fsPlate._vertex[4]),
+        glow=rgb(b.fsSkin.glow._vertex), glow_a=float(b.fsSkin.glow._vertex[4]),
+        chip_glow=rgb(b.fsChip.glow._vertex), px=float(b.fsText._font[2]),
     )
 
 
@@ -302,6 +307,19 @@ def tip_text(lua, i):
 
 
 MIN = 60
+
+
+def assert_warn_is_red(t, what):
+    """The missing state is the alert red on EVERY part: border, glow, plate, chip stroke, chip glow, chip fill, code,
+    word and underline (not amber, which does not pop)."""
+    red = C["red"]
+    for part in ("ring", "glow", "chip", "chip_glow", "code_color", "text_color", "line"):
+        close(t[part], red, f"{what} {part}")
+    close(t["fill"], _mix(BG, red, MK["warn_fill"]), f"{what} chip fill")
+    close(t["plate"], _mix(BG, red, 0.1), f"{what} plate")
+    approx(t["ring_a"], MK["ring_alpha"]["warn"], f"{what} border alpha")
+    for part in ("ring", "chip", "code_color", "text_color", "line"):
+        assert dist(t[part], C["amber"]) > 0.2, f"{what} {part} is still amber"
 
 
 def one_hand(lua, line="Rockbiter 1 (56 min)"):
@@ -447,14 +465,12 @@ def check_under_five_minutes_the_tile_turns_pink_and_under_one_minute_counts_sec
     assert (view(lua, "imbue").mode, tile(lua, IMBUE)["text"]) == ("exp", "42s")
 
 
-def check_a_missing_imbue_is_an_amber_hollow_word_and_an_unreadable_one_a_hollow_question_mark():
+def check_a_missing_imbue_is_a_red_hollow_word_and_an_unreadable_one_a_hollow_question_mark():
     lua = world(tips={16: ["Heavy Axe"]})
     v = view(lua, "imbue")
     assert (v.mode, v.text) == ("warn", "IMBUE"), (v.mode, v.text)
     t = tile(lua, IMBUE)
-    close(t["chip"], C["amber"], "missing chip"), close(t["fill"], _mix(BG, C["amber"], MK["warn_fill"]), "missing fill")
-    close(t["ring"], C["amber"], "missing border"), approx(t["ring_a"], MK["ring_alpha"]["warn"], "missing alpha")
-    close(t["text_color"], C["amber"], "missing word"), close(t["code_color"], C["amber"], "missing code")
+    assert_warn_is_red(t, "missing imbue")
     assert t["text"] == "IMBUE"
     # nothing to go on: no tooltip data at all
     lua = world(pre_login='__tipMode = "throw"')
@@ -674,7 +690,7 @@ def check_the_shield_shows_ls_and_its_orbs_then_its_time_when_expiring():
     assert view(lua, "shield").text == "38s"
 
 
-def check_a_missing_shield_is_amber_and_no_snapshot_yet_is_a_hollow_question_mark():
+def check_a_missing_shield_is_red_and_no_snapshot_yet_is_a_hollow_question_mark():
     lua = world()
     run(lua, "__noshield()")
     fire(lua, "UNIT_AURA", "player")
@@ -682,16 +698,14 @@ def check_a_missing_shield_is_amber_and_no_snapshot_yet_is_a_hollow_question_mar
     v = view(lua, "shield")
     assert (v.mode, v.text) == ("warn", "SHIELD"), (v.mode, v.text)
     t = tile(lua, SHIELD)
-    close(t["chip"], C["amber"], "missing shield chip"), close(t["text_color"], C["amber"], "missing word")
+    assert_warn_is_red(t, "missing shield")
     lua = world(pre_login="FS.PlayerAuras = nil")
     v = view(lua, "shield")
     assert (v.mode, v.text) == ("hollow", "?"), (v.mode, v.text)
-    # the 9 px word: SHIELD is longer than IMBUE
-    assert btn(lua, SHIELD).fsTextPx in (9, 11)
     run(lua, "FS.PlayerAuras = { Get = function() return __snap end, IsFrozen = function() return false end }; __noshield()")
     fire(lua, "UNIT_AURA", "player")
     update(lua)
-    assert btn(lua, SHIELD).fsTextPx == 9, "the word SHIELD is set small to fit the tile"
+    assert btn(lua, SHIELD).fsTextPx < 11, "the word SHIELD is set small to fit the tile"
 
 
 def check_in_combat_the_shield_is_an_estimate_with_a_tilde_and_dashes():
@@ -937,7 +951,7 @@ def check_tooltip_lines_follow_the_mockups_wording():
     assert str(lines[1][1]) and len(lines) == 3
 
 
-def check_the_tooltip_colours_are_gold_pink_amber_and_muted():
+def check_the_tooltip_colours_are_gold_pink_red_and_muted():
     lua = world(tips={16: ["Rockbiter 1 (59 min)"]})
     def title(key):
         return rgb(bt(lua).TipLines(key)[1][2])
@@ -947,7 +961,11 @@ def check_the_tooltip_colours_are_gold_pink_amber_and_muted():
     close(title("imbue"), C["pink"], "expiring title")
     tip(lua, 16, ["Heavy Axe"])
     fire(lua, "UNIT_INVENTORY_CHANGED", "player")
-    close(title("imbue"), C["amber"], "missing title")
+    close(title("imbue"), C["red"], "missing title")
+    run(lua, "__noshield()")
+    fire(lua, "UNIT_AURA", "player")
+    update(lua)
+    close(rgb(bt(lua).TipLines("shield")[1][2]), C["red"], "missing shield title")
 
 
 def check_hover_turns_the_border_cyan_and_leaving_restores_the_state_colour():
@@ -1271,7 +1289,7 @@ def check_tile_fonts_are_the_design_size_at_every_scale_and_after_a_rescale():
     lua.eval("__rescale")(1 / 1.2)
     update(lua)
     assert font_sizes(lua, IMBUE) == (11.0, 10.0, 11.0), font_sizes(lua, IMBUE)
-    assert font_sizes(lua, SHIELD) == (9.0, 10.0, 11.0), font_sizes(lua, SHIELD)
+    assert font_sizes(lua, SHIELD) == (7.5, 10.0, 11.0), font_sizes(lua, SHIELD)   # the word is fitted to the narrower tile
     # and from a boot at the small scale
     lua = world(1 / 1.2, tips={16: ["Rockbiter 1 (59 min)"]})
     assert font_sizes(lua, IMBUE) == (11.0, 10.0, 11.0), font_sizes(lua, IMBUE)
@@ -1473,7 +1491,7 @@ def check_low_mana_tints_the_tile_foreground_blue_unusable_grey_and_usable_is_th
     approx(t["text_a"], base["text_a"], "usable again: text alpha")
 
 
-def check_the_tint_blends_with_each_state_colour_pink_amber_and_hollow():
+def check_the_tint_blends_with_each_state_colour_pink_red_and_hollow():
     lua = world(tips={16: ["Rockbiter 1 (42 sec)"]})
     pink = tile(lua, IMBUE)
     use_spell(lua, "Rockbiter Weapon", False, True)
@@ -1489,14 +1507,175 @@ def check_the_tint_blends_with_each_state_colour_pink_amber_and_hollow():
     quiet = tile(lua, IMBUE)
     assert quiet["chip"] != t["chip"], "the tint froze the old state colour"
     assert dist(quiet["chip"], oom) < dist(C["gold"], oom), "the tint was lost when the state changed"
-    # a missing imbue (amber hollow word) is tinted too, and hover keeps its cyan border
+    # a missing imbue (red hollow word) is tinted too, and hover keeps its cyan border
     tip(lua, 16, ["Heavy Axe"])
     fire(lua, "UNIT_INVENTORY_CHANGED", "player")
     update(lua)
     b = btn(lua, IMBUE)
     lua.eval("__Region.Fire")(b, "OnEnter")
     close(tile(lua, IMBUE)["ring"], C["cyan"], "hover border under the tint")
-    assert dist(tile(lua, IMBUE)["chip"], oom) < dist(C["amber"], oom)
+    assert dist(tile(lua, IMBUE)["chip"], oom) < dist(C["red"], oom)
+
+
+THEME = ADDON / "Core/Theme.lua"
+
+
+def check_the_red_is_the_themes_red_token_and_the_mockups():
+    src = THEME.read_text(encoding="utf-8")
+    m = sb._m(r"Theme\.COLOR_RED\s*=\s*\{([^}]*)\}", src, "COLOR_RED")
+    vals = tuple(float(x) for x in m.group(1).split(",")[:3])
+    close(vals, C["red"], "Theme.COLOR_RED vs the mockup's red", 1e-3)
+    assert BUFFTAB.read_text(encoding="utf-8").count("COLOR_RED") >= 1, "BuffTab does not use Theme.COLOR_RED"
+
+
+def check_gold_and_pink_are_unchanged_and_only_the_missing_state_is_red():
+    lua = world(tips={16: ["Rockbiter 1 (59 min)"]})
+    t = tile(lua, IMBUE)
+    for part in ("chip", "line"):
+        close(t[part], C["gold"], f"quiet {part}")
+    close(t["fill"], _mix(BG, C["gold"], MK["on_fill"]), "quiet fill")
+    approx(t["ring_a"], MK["ring_alpha"]["on"], "quiet border alpha")
+    tip(lua, 16, ["Rockbiter 1 (42 sec)"])
+    fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+    t = tile(lua, IMBUE)
+    for part in ("chip", "ring", "text_color", "line", "glow", "chip_glow"):
+        close(t[part], C["pink"], f"expiring {part}")
+    close(t["fill"], _mix(BG, C["pink"], MK["exp_fill"]), "expiring fill")
+    close(t["plate"], _mix(BG, C["pink"], 0.1), "expiring plate")
+    assert dist(C["red"], C["pink"]) > 0.25, "the alert red must not read as the expiring pink"
+
+
+def check_the_missing_red_composes_with_the_usability_tints():
+    lua = world(tips={16: ["Heavy Axe"]})
+    base = tile(lua, IMBUE)
+    assert_warn_is_red(base, "missing")
+    oom, grey = use_theme(lua, "COLOR_OOM"), use_theme(lua, "COLOR_UNUSABLE")
+    for name, tint, no_mana in (("out of mana", oom, True), ("unusable", grey, False)):
+        use_spell(lua, "Rockbiter Weapon", False, no_mana)
+        fire(lua, "SPELL_UPDATE_USABLE")
+        t = tile(lua, IMBUE)
+        for part in FOREGROUND:
+            close(t[part], _mix(C["red"], tint, 0.6), f"{name}: red blended 60% toward the tint, {part}", 5e-3)
+        close(t["chip_glow"], _mix(C["red"], tint, 0.6), f"{name}: the chip glow follows the chip stroke", 5e-3)
+        # the cut border, glow, plate and chip fill keep the red state
+        for part in ("ring", "glow", "plate", "fill"):
+            close(t[part], base[part], f"{name}: {part} stays the state colour", 1e-6)
+        assert dist(t["chip"], C["red"]) > 0.1, f"{name}: the tint did not show on the red chip"
+    # the blended red is still told from the blended pink (expiring) under the same tint
+    use_spell(lua, "Rockbiter Weapon", False, True)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    red_oom = tile(lua, IMBUE)["chip"]
+    tip(lua, 16, ["Rockbiter 1 (42 sec)"])
+    fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+    update(lua)
+    assert dist(red_oom, tile(lua, IMBUE)["chip"]) > 0.08, "tinted red and tinted pink are not told apart"
+
+
+# Mononoki Bold, the font every tile string is set in: advances read from the font file, not from the Lua under test
+def _advance(text: str) -> float:
+    from fontTools.ttLib import TTFont
+    font = TTFont(str(ADDON / "Media/Fonts/MononokiNerdFontMono-Bold.ttf"))
+    cmap, hmtx, em = font.getBestCmap(), font["hmtx"], font["head"].unitsPerEm
+    return sum(hmtx[cmap[ord(ch)]][0] for ch in text) / em
+
+
+TEXT_INSET = 3      # design px kept clear on each side of a tile string (the chamfer of the cut border)
+
+
+def assert_tile_text_fits(lua, i, scale, what):
+    b = btn(lua, i)
+    text, size = str(b.fsText._text), float(b.fsText._font[2])
+    width, room = _advance(text) * size, (N["BTN"] - 2 * TEXT_INSET) * scale
+    assert width <= room + 1e-6, f"{what}: {text!r} is {width:.1f} wide at {size}px, the tile allows {room:.1f}"
+    code, csize = str(b.fsChip.code._text), float(b.fsChip.code._font[2])
+    assert _advance(code) * csize <= (22 - 2 * 2) * scale + 1e-6, f"{what}: chip code {code!r} overflows the chip"
+    return size
+
+
+def check_every_tile_string_fits_inside_its_tile_in_every_state(scale):
+    lua = world(scale, tips={16: ["Heavy Axe"]})
+    assert_tile_text_fits(lua, IMBUE, scale, "imbue missing")
+    run(lua, "__noshield()")
+    fire(lua, "UNIT_AURA", "player")
+    update(lua)
+    assert btn(lua, SHIELD).fsText._text == "SHIELD"
+    words = assert_tile_text_fits(lua, SHIELD, scale, "shield missing")
+    assert words >= 7, f"the word SHIELD shrank to {words}px, past legible"
+    for line in ("Rockbiter 1 (59 min)", "Rockbiter 1 (42 sec)", "Rockbiter 1 (3 min)"):
+        tip(lua, 16, [line])
+        fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+        update(lua)
+        assert_tile_text_fits(lua, IMBUE, scale, f"imbue {line}")
+    tip(lua, 16, ["Heavy Axe"])
+    fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+    update(lua)
+    assert_tile_text_fits(lua, IMBUE, scale, "imbue missing again")
+    for count, remaining in ((3, 480), (0, 480), (1, 45)):
+        run(lua, f"__shield({count}, {remaining})")
+        fire(lua, "UNIT_AURA", "player")
+        update(lua)
+        assert_tile_text_fits(lua, SHIELD, scale, f"shield {count} / {remaining}")
+    run(lua, "__water()")
+    fire(lua, "UNIT_AURA", "player")
+    update(lua)
+    assert_tile_text_fits(lua, SHIELD, scale, "shield water")
+    set_combat(lua, True)
+    run(lua, "__shield(3, 480)")
+    fire(lua, "UNIT_AURA", "player")
+    update(lua)
+    assert_tile_text_fits(lua, SHIELD, scale, "shield estimate in combat")
+    if scale == 1.0:
+        # a rescale refits the word
+        leave_combat(lua)
+        run(lua, "__noshield()")
+        fire(lua, "UNIT_AURA", "player")
+        update(lua)
+        lua.eval("__rescale")(1 / 1.2)
+        update(lua)
+        assert_tile_text_fits(lua, SHIELD, 1 / 1.2, "shield missing after a rescale")
+        assert_tile_text_fits(lua, IMBUE, 1 / 1.2, "imbue missing after a rescale")
+
+
+def check_a_nil_first_answer_is_unusable_and_a_secret_mana_flag_does_not_hide_a_plain_false():
+    lua = world(tips={16: ["Rockbiter 1 (56 min)"]})
+    base = tile(lua, IMBUE)
+    grey = use_theme(lua, "COLOR_UNUSABLE")
+    # the old 1-or-nil style: the call answered, the first value is nil = not usable (grey)
+    tbh.use_mode(lua, "nilvalue")
+    fire(lua, "SPELL_UPDATE_USABLE")
+    t = tile(lua, IMBUE)
+    for part in FOREGROUND:
+        assert dist(t[part], grey) < dist(base[part], grey), f"nil answer: {part} did not go grey"
+    # an answer of nothing at all still cannot be told: the tint stays
+    tbh.use_mode(lua, "none")
+    fire(lua, "SPELL_UPDATE_USABLE")
+    assert tile(lua, IMBUE) == t, "no answer at all moved the tint"
+    # a plain usable flag + a secret mana flag cannot be told (no change); plain false is grey whatever the mana is
+    tbh.use_mode(lua, None)
+    use_spell(lua, "Rockbiter Weapon", True, False)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    assert tile(lua, IMBUE) == base
+    tbh.use_mode(lua, "secretmana")
+    use_spell(lua, "Rockbiter Weapon", True, False)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    assert tile(lua, IMBUE) == base, "a secret mana flag with a usable spell moved the tint"
+    use_spell(lua, "Rockbiter Weapon", False, False)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    t = tile(lua, IMBUE)
+    for part in FOREGROUND:
+        assert dist(t[part], grey) < dist(base[part], grey), f"secret mana, plain false: {part} did not go grey"
+
+
+def check_a_tile_whose_spell_goes_nil_drops_its_tint():
+    lua = world(tips={16: ["Rockbiter 1 (56 min)"]})
+    base = tile(lua, IMBUE)
+    use_spell(lua, "Rockbiter Weapon", False, True)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    assert tile(lua, IMBUE) != base
+    run(lua, "FS.ShamanBuffs.View().imbue.spell = nil")
+    bt(lua).UpdateUsable()
+    assert btn(lua, IMBUE).fsUsable is None, "fsUsable survived the spell going nil"
+    assert tile(lua, IMBUE) == base, "the tint stayed after the spell went nil"
 
 
 def check_the_tile_asks_the_spell_api_about_the_spell_it_casts():
@@ -1625,7 +1804,7 @@ CHECKS = [
     check_tooltip_reads_say_imbue_none_or_unreadable,
     check_the_main_hand_imbue_shows_its_code_and_time_in_the_quiet_look,
     check_under_five_minutes_the_tile_turns_pink_and_under_one_minute_counts_seconds,
-    check_a_missing_imbue_is_an_amber_hollow_word_and_an_unreadable_one_a_hollow_question_mark,
+    check_a_missing_imbue_is_a_red_hollow_word_and_an_unreadable_one_a_hollow_question_mark,
     check_dual_wield_shows_the_least_time_and_asks_for_the_missing_hand,
     check_a_shield_or_an_empty_off_hand_never_asks_for_an_imbue,
     check_a_two_handed_weapon_without_an_imbue_asks_for_one,
@@ -1645,7 +1824,7 @@ CHECKS = [
     check_get_weapon_enchant_info_counts_only_when_it_answers_true,
     check_no_imbue_known_means_no_tile_and_learning_one_brings_it,
     check_the_shield_shows_ls_and_its_orbs_then_its_time_when_expiring,
-    check_a_missing_shield_is_amber_and_no_snapshot_yet_is_a_hollow_question_mark,
+    check_a_missing_shield_is_red_and_no_snapshot_yet_is_a_hollow_question_mark,
     check_in_combat_the_shield_is_an_estimate_with_a_tilde_and_dashes,
     check_a_shield_cast_in_combat_shows_three_orbs_and_a_pending_cast_expires_with_the_clock,
     check_water_shield_is_never_nagged_and_a_water_shield_cast_in_combat_clears_the_lightning_cast,
@@ -1658,7 +1837,7 @@ CHECKS = [
     check_no_forbidden_field_or_attribute_is_ever_written_on_a_secure_button,
     check_the_files_use_no_snippets_and_no_state_drivers,
     check_tooltip_lines_follow_the_mockups_wording,
-    check_the_tooltip_colours_are_gold_pink_amber_and_muted,
+    check_the_tooltip_colours_are_gold_pink_red_and_muted,
     check_hover_turns_the_border_cyan_and_leaving_restores_the_state_colour,
     check_hotkey_text_and_quick_keybind_commands,
     check_bindings_xml_declares_the_two_buff_tab_commands_after_the_totems,
@@ -1679,7 +1858,12 @@ CHECKS = [
     check_no_em_dashes_and_no_flagged_words_in_the_new_files,
     check_the_old_class_module_chips_are_gone_from_the_gunsight_file,
     check_low_mana_tints_the_tile_foreground_blue_unusable_grey_and_usable_is_the_approved_look,
-    check_the_tint_blends_with_each_state_colour_pink_amber_and_hollow,
+    check_the_tint_blends_with_each_state_colour_pink_red_and_hollow,
+    check_the_red_is_the_themes_red_token_and_the_mockups,
+    check_gold_and_pink_are_unchanged_and_only_the_missing_state_is_red,
+    check_the_missing_red_composes_with_the_usability_tints,
+    check_a_nil_first_answer_is_unusable_and_a_secret_mana_flag_does_not_hide_a_plain_false,
+    check_a_tile_whose_spell_goes_nil_drops_its_tint,
     check_the_tile_asks_the_spell_api_about_the_spell_it_casts,
     check_a_secret_missing_or_raising_answer_leaves_the_tile_tint_as_it_was,
     check_the_tint_follows_each_usability_event_and_leaving_combat,
@@ -1688,6 +1872,7 @@ CHECKS = [
 ]
 SCALED_CHECKS = [
     check_the_shoulder_is_the_two_by_one_block_at_316_and_the_buttons_sit_inside_it,
+    check_every_tile_string_fits_inside_its_tile_in_every_state,
 ]
 
 

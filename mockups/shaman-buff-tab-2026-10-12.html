@@ -9,7 +9,7 @@
 :root{
   color-scheme:dark;
   --bg:#0d0620; --fg:#e9e2ff; --muted:#9d93c4; --white:#f3fbff; --text:#e2e8f0;
-  --violet:#a855f7; --cyan:#22e0ff; --pink:#ff2e97; --amber:#ffb648; --green:#39ff14;
+  --violet:#a855f7; --cyan:#22e0ff; --pink:#ff2e97; --red:#ff3b4e; --amber:#ffb648; --green:#39ff14;
   --gold:#d9a521; --track:#0a0416; --line:#3a2168;
   --edge:rgba(168,85,247,.35);
 }
@@ -64,7 +64,7 @@ table.dp td.v{color:var(--muted)}
 
 <h1>SHAMAN BUFF TAB</h1>
 <div class="ref">Design reference, 2026-10-12, Shaman</div>
-<p class="sub">The IMBUE and SHIELD self reminders leave the Gunsight area and become a <b>second shoulder tab</b> on the Console's top edge, immediately right of the totem tab. Same chrome as the totem tab (the Console's own fill, stroke and halo, top left cut 6, right foot flaring 10), same 38 px buttons. Two clickable tiles: <b>IMBUE</b> casts the imbue, <b>SHIELD</b> casts Lightning Shield. States and colours are the approved Gunsight chips (quiet gold, amber hollow when missing, hollow ? when unreadable), plus pink for expiring. Everything at 1 design px = 1 px unless a caption says 2x.</p>
+<p class="sub">The IMBUE and SHIELD self reminders leave the Gunsight area and become a <b>second shoulder tab</b> on the Console's top edge, immediately right of the totem tab. Same chrome as the totem tab (the Console's own fill, stroke and halo, top left cut 6, right foot flaring 10), same 38 px buttons. Two clickable tiles: <b>IMBUE</b> casts the imbue, <b>SHIELD</b> casts Lightning Shield. States and colours are the approved Gunsight chips (quiet gold, red hollow when missing, hollow ? when unreadable), plus pink for expiring. Everything at 1 design px = 1 px unless a caption says 2x.</p>
 
 <h2><i>A //</i> CONSOLE TOP EDGE, REAL SCALE</h2>
 <p class="cap">Cropped strip of the Console (chassis left to chassis right, the lower rows fade out). Level 14 Shaman: Earth and Fire totems learned, Water, Air, Set drop and Recall still locked molds. The empty top edge between the new tab and the HUD key tab stays empty.</p>
@@ -97,7 +97,7 @@ table.dp td.v{color:var(--muted)}
 <table class="dp">
 <tr><td class="e">Quiet (on)</td><td class="v">Gold chip, text at 85%. Imbue over 5 min, shield over 5 min.</td></tr>
 <tr><td class="e">Expiring</td><td class="v">Pink chip, text, border and underline. Under 5 min on the clock; minutes become seconds under 1 min. Shield shows its time while expiring and the orb count otherwise.</td></tr>
-<tr><td class="e">Missing (warn)</td><td class="v">Amber hollow chip, border and underline glow, the word IMBUE or SHIELD in amber.</td></tr>
+<tr><td class="e">Missing (warn)</td><td class="v">Red hollow chip, border and underline glow, the word IMBUE or SHIELD in red (the alert red, #ff3b4e; amber did not pop).</td></tr>
 <tr><td class="e">Unreadable</td><td class="v">Hollow muted chip and a ? when the data cannot be read in combat. Imbue lasts 60 min so this mostly shows for the shield.</td></tr>
 <tr><td class="e">Estimate</td><td class="v">Shield orbs in combat from our own hit ledger: "~3", dashed underline.</td></tr>
 <tr><td class="e">Not learned</td><td class="v">Locked mold with the unlock level, dimmed to 40%, never hidden (Show and Hide on a secure button are refused in combat). SHIELD is L8. IMBUE never locks (Rockbiter is level 1).</td></tr>
@@ -106,7 +106,7 @@ table.dp td.v{color:var(--muted)}
 </div>
 
 <script>
-var C={cyan:'#22e0ff',pink:'#ff2e97',violet:'#a855f7',amber:'#ffb648',white:'#f3fbff',muted:'#9d93c4',fg:'#e9e2ff',bg:'#0d0620',gold:'#d9a521'};
+var C={cyan:'#22e0ff',pink:'#ff2e97',violet:'#a855f7',amber:'#ffb648',red:'#ff3b4e',white:'#f3fbff',muted:'#9d93c4',fg:'#e9e2ff',bg:'#0d0620',gold:'#d9a521'};
 function hex(h){return [1,3,5].map(function(i){return parseInt(h.substr(i,2),16);});}
 function mix(a,b,t){var x=hex(a),y=hex(b);return '#'+[0,1,2].map(function(i){return ('0'+Math.round(x[i]+(y[i]-x[i])*t).toString(16)).slice(-2);}).join('');}
 function ch(x,y,w,h,c){return (x+c)+','+y+' '+(x+w)+','+y+' '+(x+w)+','+(y+h-c)+' '+(x+w-c)+','+(y+h)+' '+x+','+(y+h)+' '+x+','+(y+c);}
@@ -122,7 +122,7 @@ var uid=0;
 /* a tile: 38 x 38 at (x,y). st = {k:'imbue'|'shield', m:'on|exp|warn|hollow|est|locked', code, t, lock, hover, tip} */
 function chip(cx,cy,code,m){
   var w=22,h=15,x=cx-w/2,y=cy-h/2,o='',s,f,tc;
-  if(m==='warn'){s=C.amber;f=mix(C.bg,C.amber,.22);tc=C.amber;}
+  if(m==='warn'){s=C.red;f=mix(C.bg,C.red,.22);tc=C.red;}
   else if(m==='hollow'){s=mix(C.muted,'#ffffff',.25);f='rgba(13,6,32,.7)';tc=s;}
   else if(m==='exp'){s=C.pink;f=mix(C.bg,C.pink,.3);tc=C.white;}
   else{s=C.gold;f=mix(C.bg,C.gold,.3);tc=C.white;}
@@ -138,11 +138,11 @@ function tileBody(x,y,st){
     return o;
   }
   if(m==='exp'){bc=C.pink;ba=.9;ac=C.pink;tcol=C.pink;}
-  else if(m==='warn'){bc=C.amber;ba=.85;ac=C.amber;tcol=C.amber;}
+  else if(m==='warn'){bc=C.red;ba=.85;ac=C.red;tcol=C.red;}
   else if(m==='hollow'){bc=C.muted;ba=.6;ac=C.muted;tcol=C.muted;}
   else{bc=C.violet;ba=.35;ac=C.gold;tcol=C.fg;}
   var glow=(m==='exp'||m==='warn')?' filter="url(#gls)"':'';
-  o+='<polygon points="'+mold(x,y,w,h,5)+'" fill="'+(m==='warn'?mix(C.bg,C.amber,.1):m==='exp'?mix(C.bg,C.pink,.1):'rgba(13,6,32,.72)')+'"/>';
+  o+='<polygon points="'+mold(x,y,w,h,5)+'" fill="'+(m==='warn'?mix(C.bg,C.red,.1):m==='exp'?mix(C.bg,C.pink,.1):'rgba(13,6,32,.72)')+'"/>';
   o+='<polygon points="'+mold(x+.5,y+.5,w-1,h-1,5)+'" fill="none" stroke="'+bc+'" stroke-opacity="'+ba+'" stroke-width="1.1"'+glow+'/>';
   o+=chip(cx,y+12.5,st.code,m);
   tx=m==='warn'?(st.k==='imbue'?'IMBUE':'SHIELD'):m==='hollow'?'?':st.t;
@@ -261,7 +261,7 @@ sI+=cell(IMB.on,'Buff up, over 5 min. Gold chip, text at 85%.','QUIET, ROCKBITER
   sI+=cell({k:'imbue',m:'on',code:code,t:'59m'},'Same tile, the code changes with the imbue on the weapon.',nm);});
 sI+=cell(IMB.exp,'Under 5 min: pink chip, text, border, underline.','EXPIRING, MINUTES');
 sI+=cell(IMB.sec,'Under 1 min the text switches to seconds.','EXPIRING, SECONDS');
-sI+=cell(IMB.warn,'Imbue missing. Amber hollow chip and the word.','MISSING');
+sI+=cell(IMB.warn,'Imbue missing. Red hollow chip and the word.','MISSING');
 sI+=cell(IMB.hol,'Cannot be read in combat. Hollow chip and a ?.','UNREADABLE');
 sI+=cell(IMB.on,'Cyan border, tooltip on the strip. Click casts.','HOVER',true);
 document.getElementById('sh-imbue').innerHTML=sI;
@@ -269,7 +269,7 @@ sS+=cell(SHD.on,'Shield up, orbs left.','QUIET, 3 ORBS');
 sS+=cell({k:'shield',m:'on',code:'LS',t:'1'},'One orb left, still quiet while the clock is fine.','QUIET, 1 ORB');
 sS+=cell(SHD.exp,'Under 5 min: pink, time replaces the orb count.','EXPIRING, MINUTES');
 sS+=cell(SHD.sec,'Under 1 min: seconds.','EXPIRING, SECONDS');
-sS+=cell(SHD.warn,'Shield missing. Amber hollow chip and the word.','MISSING');
+sS+=cell(SHD.warn,'Shield missing. Red hollow chip and the word.','MISSING');
 sS+=cell(SHD.hol,'Orb count not readable in combat.','UNREADABLE');
 sS+=cell(SHD.est,'In combat: our own hit ledger, ~ and a dashed underline.','ESTIMATE, ~3');
 sS+=cell(SHD.lock,'Not learned: the dotted mold and the level, dimmed to 40%.','LOCKED, L8');
@@ -284,9 +284,9 @@ function tt(h,hc,lines,state){return '<div class="tt"><div class="h" style="colo
 document.getElementById('tips').innerHTML=
  tt('Rockbiter Weapon',C.gold,[['Main hand imbue, 59 min left.','w'],['Click: cast Rockbiter Weapon.','m']],'IMBUE, QUIET')+
  tt('Rockbiter Weapon',C.pink,[['Main hand imbue, 42 sec left.','w'],['Click: cast Rockbiter Weapon.','m']],'IMBUE, EXPIRING')+
- tt('Weapon imbue',C.amber,[['No imbue on your main hand.','w'],['Click: cast Rockbiter Weapon.','m']],'IMBUE, MISSING')+
+ tt('Weapon imbue',C.red,[['No imbue on your main hand.','w'],['Click: cast Rockbiter Weapon.','m']],'IMBUE, MISSING')+
  tt('Lightning Shield',C.gold,[['3 charges, 8 min left.','w'],['Click: cast Lightning Shield.','m']],'SHIELD, QUIET')+
- tt('Lightning Shield',C.amber,[['Not active.','w'],['Click: cast Lightning Shield.','m']],'SHIELD, MISSING')+
+ tt('Lightning Shield',C.red,[['Not active.','w'],['Click: cast Lightning Shield.','m']],'SHIELD, MISSING')+
  tt('Lightning Shield',C.muted,[['Charges cannot be read in combat. About 3 left.','w'],['Click: cast Lightning Shield.','m']],'SHIELD, ESTIMATE')+
  tt('Lightning Shield',C.muted,[['Opens at level 8.','m']],'SHIELD, LOCKED');
 </script>

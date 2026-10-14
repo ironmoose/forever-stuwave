@@ -256,7 +256,9 @@ local function usableAnswer(kind, key)
     if __use.mode == "throw" and __use.throwOn[key] then error("usability blew up") end
     if __use.mode == "secret" then return __SECRET, __SECRET end
     if __use.mode == "none" then return end
+    if __use.mode == "nilvalue" then return nil end         -- the old 1-or-nil style: nil means "not usable"
     local a = __use[kind == "legacy" and "spell" or kind][key]
+    if __use.mode == "secretmana" then return (a and a[1]) or (a == nil), __SECRET end
     if a then return a[1], a[2] end
     return true, false
 end
@@ -2605,7 +2607,8 @@ def check_a_secret_or_missing_answer_leaves_the_current_tint():
     same_rgb(tint_of(earth.icon), oom, "not enough mana plainly true")
     lua.execute("function IsUsableAction(a) return false, __SECRET end")
     fire(lua, "SPELL_UPDATE_USABLE")
-    same_rgb(tint_of(earth.icon), oom, "a secret mana flag with an unusable spell is not guessed")
+    same_rgb(tint_of(earth.icon), theme_color(lua, "COLOR_UNUSABLE"),
+             "a secret mana flag with a plainly unusable spell is grey, like the main bars")
 
 
 def check_the_tint_refreshes_on_each_usability_event_and_leaving_combat():
