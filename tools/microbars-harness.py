@@ -41,6 +41,7 @@ Exit 0 = every check passed; otherwise the number of failures.
 
 from __future__ import annotations
 
+import importlib.util
 import math
 import os
 import re
@@ -714,15 +715,20 @@ def check_glyph_files() -> None:
     bad = [n for n in baked if tga_header(media / n) != (2, 64, 64, 32, 0x28, 18 + 64 * 64 * 4)]
     check("glyphs.baked_art_is_64x64_bgra_tga_of_exact_size", len(baked) >= 19 and not bad, f"{len(baked)} files, bad {bad}")
     check("glyphs.no_baked_art_is_orphaned", not orphans, f"{orphans}")
-    # The shipped art itself sits in the fixed crop band (MicroBars.lua BAKED_PAD, rows 7.5 to 56.5 of 64): every
-    # file's alpha spans rows 7 to 56 (the band, its soft edge rows included) and nothing lies outside them.
-    out_of_band = {}
+    # The shipped art's alpha IS the key's slanted shape: compare every file against the shape recomputed from the key's
+    # geometry (tools/assets/synthwave_icons.py key_shape_alpha), within one 8 bit step. That pins the fixed crop band (rows
+    # 7 to 56 of 64) and also the lean, any horizontal shift and any clipped corner.
+    spec = importlib.util.spec_from_file_location("synthwave_icons", HERE / "assets" / "synthwave_icons.py")
+    icons = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(icons)
+    want = [round(float(v) * 255) for v in icons.key_shape_alpha(64).reshape(-1)]
+    off = {}
     for n in baked:
         data = (media / n).read_bytes()[18:]
-        rows = [y for y in range(64) if any(data[(y * 64 + x) * 4 + 3] for x in range(64))]
-        if not rows or (rows[0], rows[-1]) != (7, 56):
-            out_of_band[n] = rows[:1] + rows[-1:]
-    check("glyphs.shipped_art_alpha_sits_in_the_fixed_crop_band", not out_of_band, f"{out_of_band}")
+        worst = max(abs(data[i * 4 + 3] - w) for i, w in enumerate(want))
+        if worst > 1:
+            off[n] = worst
+    check("glyphs.shipped_art_alpha_is_the_keys_shape", len(baked) >= 20 and not off, f"{len(baked)} files, off by more than one step: {off}")
     # The old hand drawn glyph_<name>.tga line glyphs are not drawn any more (glyph_hud_* belong to the Console keys).
     stale = sorted(p.name for p in media.glob("glyph_*.tga") if not p.name.startswith("glyph_hud_"))
     check("glyphs.no_unreferenced_line_glyph_files", not stale, f"{stale}")
