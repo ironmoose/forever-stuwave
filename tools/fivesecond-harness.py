@@ -2300,7 +2300,7 @@ def check_a_hidden_tab_runs_no_ticker_at_all():
     assert not visible(lua, ticker(lua)), "a Druid in a form without mana has no ticker"
 
 
-def check_hiding_the_whole_ui_stops_the_ticker_and_the_idle_glow():
+def check_hiding_the_whole_ui_costs_the_ticker_and_the_idle_glow_nothing():
     lua = world()
     FT = ft(lua).FT
     refresh(lua)
@@ -2310,7 +2310,7 @@ def check_hiding_the_whole_ui_stops_the_ticker_and_the_idle_glow():
     cast(lua)
     refresh(lua)
     assert not bool(FT.fast) and not bool(FT.ambient), "and the tab asks for no fast pass"
-    assert not bool(FT.breath.on) and not bool(FT.breath.gaugeOn), "the idle glow stops with the interface hidden"
+    assert not bool(FT.breath.on) and not bool(FT.breath.gaugeOn), "a paint with the interface hidden turns the glow off (in the client nothing repaints, so the groups just play unseen at no cost)"
     run(lua, "UIParent:Show()")
     run(lua, "__advance(10)")
     refresh(lua)
@@ -2481,7 +2481,7 @@ CHECKS = [
     check_every_switch_stops_its_own_effect_and_only_that_one,
     check_the_ticker_runs_every_frame_only_while_something_quick_moves,
     check_a_hidden_tab_runs_no_ticker_at_all,
-    check_hiding_the_whole_ui_stops_the_ticker_and_the_idle_glow,
+    check_hiding_the_whole_ui_costs_the_ticker_and_the_idle_glow_nothing,
     check_the_idle_glow_loops_without_a_jump,
     check_the_idle_glow_says_so_when_a_piece_of_the_rim_is_missing,
     check_the_stutter_asks_for_the_ambient_ticker_only_around_its_window,
