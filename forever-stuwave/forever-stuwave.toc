@@ -75,6 +75,7 @@ Modules/ActionBars/ShamanBuffs.lua
 Modules/ActionBars/BuffTab.lua
 Modules/CombatHud/CombatHud.lua
 Modules/CombatHud/GunsightClass.lua
+Modules/CombatHud/GunsightShamanShocks.lua
 Modules/CombatHud/GunsightShaman.lua
 Modules/Diagnostics/FSCheck.lua
 Modules/Diagnostics/BugReport.lua
