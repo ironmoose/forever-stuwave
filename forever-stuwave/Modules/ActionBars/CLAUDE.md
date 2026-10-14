@@ -4,7 +4,7 @@ The Console, its bars and the class shoulders on its top edge. This file covers 
 
 ## Key Files
 - `ClassShoulder.lua` -- the shoulder chrome and the seats. `OWNERS` lists the class tabs (Paladin, Warrior, Shaman and the Shaman's `also` buff tab); `FIVE` is the five second rule tab, a shoulder of every mana class that is NOT an owner entry
-- `BuffTab.lua` + `ShamanBuffs.lua` -- the Shaman IMBUE and SHIELD tab and its data
+- `BuffTab.lua` + `ShamanBuffs.lua` -- the Shaman IMBUE and SHIELD tab and its data. Each tile wears the ICON of the spell it casts (`C_Spell.GetSpellTexture` of the view's `spellId`: the imbue shown, Lightning Shield, Water Shield while that is up), the time or orb count as a small overlay on a label plate; missing and unreadable states dim and desaturate it; a spell the client gives no texture for keeps the mockup's chip label and is asked again after 2 s
 - `FiveSecondTab.lua` -- the five second rule tab (mockups/five-second-rule-module-2026-10-14.html, concept C, CELLS)
 
 ## Five second rule tab (`FS.FiveSecondTab`)

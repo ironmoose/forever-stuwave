@@ -11,10 +11,14 @@
 --     saved keybind order (append only). CLICK FSBuffTabButtonN:LeftButton is declared in Bindings.xml and Quick
 --     Keybind mode binds it. A click casts: IMBUE the imbue its chip shows (or the best known one when none is up),
 --     SHIELD casts Lightning Shield: type "spell" with the localized spell name.
---   * A tile is a chip (the imbue code, or LS) over a time or count, an underline in the state colour and a border:
---     quiet gold when up, pink under five minutes (the time replaces the orb count), a red hollow word when
---     missing, a hollow "?" when nothing can be read, a dashed underline and a "~" for the shield estimate in combat.
---     Everything that changes with the state (colours, text, alpha) is a texture or font write, legal in combat.
+--   * A tile is the ICON of the spell it casts (the imbue shown, Lightning Shield; Water Shield while that one is up),
+--     seated in the cut border like an action button's, with the time or count as a small overlay on a dark label plate,
+--     an underline in the state colour and a border: quiet gold underline when up, pink under five minutes (the time
+--     replaces the orb count), the icon dimmed and desaturated with a red word when missing (dimmed and desaturated
+--     with a "?" when nothing can be read), a dashed underline and a "~" for the shield estimate in combat. The
+--     icon is C_Spell.GetSpellTexture of the view's `spellId` (it follows the imbue pick); a spell the client gives
+--     no texture for falls back to the mockup's chip (the imbue code, or LS) over the same text.
+--     Everything that changes with the state (colours, text, icon, alpha) is a texture or font write, legal in combat.
 --   * LOCKED: SHIELD until Lightning Shield is known (level 8) carries NO castable attribute, shows the dotted mold
 --     and its unlock level, and dims by alpha; it is never hidden (Show and Hide on a secure button are refused in
 --     combat). IMBUE never locks (Rockbiter is level 1); it is absent (hidden, out of combat) while no imbue is known.
@@ -63,6 +67,7 @@ local BT = {
     ADVANCE = 0.5615,               -- Mononoki Bold's advance per em (every glyph; the font is monospaced)
     TEXT_Y = 27,                    -- the time line's centre, design px below the tile top
     TICK = 1,                       -- seconds between repaints (the clock text)
+    ICON_RETRY = 2,                 -- seconds before a tile asks again for an icon the client has not answered
     TINT_MIX = 0.6,                 -- how far the foreground colours move toward the usability tint (out of mana, unusable)
     -- Append only, never reorder: the index is the saved keybind.
     BUTTONS = {
@@ -115,6 +120,8 @@ local GOLD = { 0xd9 / 255, 0xa5 / 255, 0x21 / 255 }        -- #d9a521 the chip g
 local FG = { 0xe9 / 255, 0xe2 / 255, 1 }                   -- #e9e2ff the soft foreground
 local BG = { 13 / 255, 6 / 255, 32 / 255 }                 -- #0d0620
 local GAP_FILL = { 0x1a / 255, 0x0f / 255, 0x2e / 255 }    -- #1a0f2e the dashes of the estimate underline
+local WHITE = { 1, 1, 1 }
+local LABEL_PLATE = { 0.024, 0.012, 0.071, 0.78 }              -- rgba(6,3,18,.78) the label plate of the aura tiles
 
 local function Mix(a, b, t)
     return { a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t }
@@ -129,15 +136,16 @@ local function BuildLooks()
     local plain = { BG[1], BG[2], BG[3], 0.72 }
     looks = {
         on = { ring = violet, ringA = 0.35, glowA = 0, plate = plain, chip = GOLD, chipFill = Mix(BG, GOLD, 0.3),
-            chipFillA = 1, chipGlow = true, code = white, text = FG, textA = 0.85, line = GOLD, lineA = 0.9 },
+            chipFillA = 1, chipGlow = true, code = white, text = FG, textA = 0.85, line = GOLD, lineA = 0.9, icon = 1 },
         exp = { ring = pink, ringA = 0.9, glowA = 0.5, plate = Mix(BG, pink, 0.1), plateA = 0.9, chip = pink,
             chipFill = Mix(BG, pink, 0.3), chipFillA = 1, chipGlow = true, code = white, text = pink, textA = 1,
-            line = pink, lineA = 0.9 },
+            line = pink, lineA = 0.9, icon = 1 },
         warn = { ring = red, ringA = 0.85, glowA = 0.5, plate = Mix(BG, red, 0.1), plateA = 0.9, chip = red,
             chipFill = Mix(BG, red, 0.22), chipFillA = 1, chipGlow = true, code = red, text = red, textA = 1,
-            line = red, lineA = 0.9 },
+            line = red, lineA = 0.9, icon = 0.45, desat = true },
         hollow = { ring = muted, ringA = 0.6, glowA = 0, plate = plain, chip = hollow, chipFill = BG,
-            chipFillA = 0.7, chipGlow = false, code = hollow, text = muted, textA = 1, line = muted, lineA = 0.55 },
+            chipFillA = 0.7, chipGlow = false, code = hollow, text = muted, textA = 1, line = muted, lineA = 0.55,
+            icon = 0.6, desat = true },
     }
     looks.cyan = { ring = T.COLOR_POWER, ringA = 1, glowA = 0.6 }
     return looks
@@ -183,10 +191,10 @@ function BuffTab.TipLines(key)
             add(v.spell or "Weapon imbue", v.mode == "exp" and pink or gold)
             add(handName .. " imbue, " .. LeftText(v.remaining or 0) .. ".", { 1, 1, 1 }, true)
         elseif v.mode == "warn" then
-            add("Weapon imbue", red)
+            add(v.spell or "Weapon imbue", red)
             add("No imbue on your " .. (v.lackHand == "off" and "off" or "main") .. " hand.", { 1, 1, 1 }, true)
         else
-            add("Weapon imbue", muted)
+            add(v.spell or "Weapon imbue", muted)
             add("The imbue time cannot be read yet.", { 1, 1, 1 }, true)
         end
         if click then add(click, muted, true) end
@@ -246,6 +254,23 @@ local function HideTooltip()
     GameTooltip:Hide()
 end
 
+-- The icon texture of a spell id (a rank 1 id: every rank wears one icon), or nil when the client will not say. A secret
+-- or odd answer is nil too, so the tile keeps its chip.
+local function SpellIcon(id)
+    if type(id) ~= "number" then return nil end
+    local modern = C_Spell and C_Spell.GetSpellTexture
+    if type(modern) == "function" then
+        local ok, tex = pcall(modern, id)
+        if ok and not IsSecret(tex) and (type(tex) == "number" or type(tex) == "string") then return tex end
+    end
+    local legacy = _G.GetSpellTexture
+    if type(legacy) == "function" then
+        local ok, tex = pcall(legacy, id)
+        if ok and not IsSecret(tex) and (type(tex) == "number" or type(tex) == "string") then return tex end
+    end
+    return nil
+end
+
 local function NewText(parent, px, color)
     local fs = parent:CreateFontString(nil, "OVERLAY")
     FS.Theme.ApplyMono(fs, px, color)
@@ -276,6 +301,16 @@ local function StyleButton(button, size, scale)
             HideTooltip()
         end)
     end
+
+    -- the icon of the spell the tile casts, in the cut border like an action button's (button.icon is the field
+    -- SeatCutIcon seats); the chip below is the fallback while the client gives no texture
+    if not button.icon then
+        local icon = button:CreateTexture(nil, "ARTWORK")
+        icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        icon:Hide()
+        button.icon = icon
+    end
+    FH.SeatCutIcon(button)
 
     local textHost = FH.SeatButtonText(button)
     FH.SeatButtonHotkey(button, textHost)
@@ -312,6 +347,12 @@ local function StyleButton(button, size, scale)
 
         button.fsText = NewText(face, BT.TEXT_PX, T.COLOR_TEXT_WHITE)
         button.fsText:SetJustifyH("CENTER")
+        -- the dark label plate behind the time or count while the icon shows (the aura tiles' LABEL_PLATE colour)
+        button.fsTextPlate = face:CreateTexture(nil, "ARTWORK", nil, 7)
+        button.fsTextPlate:SetColorTexture(LABEL_PLATE[1], LABEL_PLATE[2], LABEL_PLATE[3], LABEL_PLATE[4])
+        button.fsTextPlate:SetPoint("TOPLEFT", button.fsText, "TOPLEFT", -2, 0)
+        button.fsTextPlate:SetPoint("BOTTOMRIGHT", button.fsText, "BOTTOMRIGHT", 2, 0)
+        button.fsTextPlate:Hide()
         button.fsLine = face:CreateTexture(nil, "OVERLAY", nil, 2)
         button.fsLine:SetColorTexture(1, 1, 1, 1)
         button.fsDashes = {}
@@ -414,13 +455,18 @@ local function PaintButton(button, v)
     local estimate, other = v.estimate and true or false, v.other and true or false
     if button.fsSig and button.fsMode == v.mode and button.fsCode == v.code and button.fsTxt == v.text
         and button.fsEst == estimate and button.fsHov == hover and button.fsOth == other
-        and button.fsPaintedUse == button.fsUsable then
+        and button.fsPaintedUse == button.fsUsable and button.fsIconId == v.spellId
+        and (button.fsIconOk or not v.spellId or GetTime() < (button.fsIconRetry or 0)) then
         return
     end
     button.fsSig = true
     button.fsMode, button.fsCode, button.fsTxt = v.mode, v.code, v.text
     button.fsEst, button.fsHov, button.fsOth = estimate, hover, other
     button.fsPaintedUse = button.fsUsable
+    -- the icon: asked again on every paint while the client has not answered (the signature above lets that through)
+    local iconTex = SpellIcon(v.spellId)
+    button.fsIconId, button.fsIconOk = v.spellId, iconTex ~= nil
+    button.fsIconRetry = GetTime() + BT.ICON_RETRY
     local tint = UsabilityColor(button.fsUsable)
     local look = L[v.mode] or L.hollow
     local skin = button.fsSkin
@@ -441,6 +487,22 @@ local function PaintButton(button, v)
     r, g, b = Shade(look.code, tint)
     chip.code:SetTextColor(r, g, b, 1)
     chip.code:SetText(v.code or "")
+    -- icon or chip: one of them. The chip keeps its colours either way, so the fallback is always painted.
+    local icon = button.icon
+    if iconTex then
+        icon:SetTexture(iconTex)
+        r, g, b = Shade(WHITE, tint)
+        local k = look.icon or 1
+        icon:SetVertexColor(r * k, g * k, b * k, 1)
+        icon:SetDesaturated(look.desat and true or false)
+        icon:Show()
+        chip.fill:Hide(); chip.ring:Hide(); chip.glow:Hide(); chip.code:Hide()
+        button.fsTextPlate:SetShown(v.text ~= nil and v.text ~= "")
+    else
+        icon:Hide()
+        chip.fill:Show(); chip.ring:Show(); chip.glow:Show(); chip.code:Show()
+        button.fsTextPlate:Hide()
+    end
     local size = FitPx(v.text, (v.mode == "warn" and button.fsKey == "shield") and BT.WORD_PX or BT.TEXT_PX)
     if button.fsTextPx ~= size then
         button.fsTextPx = size
@@ -553,6 +615,7 @@ local function Lock(button)
     button.fsLocked, button.fsAbsent = true, false
     button:SetAlpha(BT.LOCKED_ALPHA)
     button.fsFace:Hide()
+    button.icon:Hide()
     button.fsMold:Show()
     button.fsLockText:Show()
     button.fsPlate:SetAlpha(0)

@@ -549,7 +549,7 @@ local view = {
 
 local function EvaluateImbue(now)
     local v = view.imbue
-    v.mode, v.code, v.text, v.remaining, v.hand, v.lackHand, v.spell = nil, nil, nil, nil, nil, nil, nil
+    v.mode, v.code, v.text, v.remaining, v.hand, v.lackHand, v.spell, v.spellId = nil, nil, nil, nil, nil, nil, nil, nil
     local nKnown, onlyKnown = KnownImbues()
     local best -- the imbued hand with the least time left
     local lacking
@@ -578,14 +578,17 @@ local function EvaluateImbue(now)
     end
     if not code and nKnown == 1 then code = onlyKnown end
     v.code = code or "IM"
-    local def = DefOf(code)
-    v.spell = (def and known[code] and CastName(code)) or (BestKnownImbue() and CastName(BestKnownImbue())) or nil
+    -- the imbue the tile casts and shows: the one displayed when it is learned, else the best known one. spellId is
+    -- its rank 1 id, the tile's icon (every rank wears the same icon).
+    local shown = (DefOf(code) and known[code]) and code or BestKnownImbue()
+    if shown then v.spell, v.spellId = CastName(shown), DefOf(shown).base end
 end
 
 local function EvaluateShield(now)
     local v = view.shield
     v.mode, v.text, v.count, v.remaining, v.estimate, v.other = nil, nil, nil, nil, false, false
     v.code, v.unlock, v.spell = "LS", M.SHIELD_UNLOCK, SpellNameById(SHIELD.base) or SHIELD.name
+    v.spellId = SHIELD.base         -- the tile's icon: Lightning Shield, or Water Shield while that one is up
     if not known.shield then
         v.mode = "locked"
         return
@@ -605,7 +608,7 @@ local function EvaluateShield(now)
         end
     end
     if not up and shield.other then
-        v.mode, v.text, v.other = "hollow", "WS", true
+        v.mode, v.text, v.other, v.spellId = "hollow", "WS", true, WATER.base
         return
     end
     if shield.seen == nil and not up then

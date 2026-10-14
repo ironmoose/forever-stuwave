@@ -144,6 +144,16 @@ do
     end
 end
 __now = 10000
+-- spell icons: 100000 + the spell id; __iconMode "nil" answers nothing, "secret" a secret value, "legacy" only the global
+function __Region:SetDesaturated(v) self._desat = v and true or false end
+C_Spell = C_Spell or {}
+local function iconOf(id)
+    if __iconMode == "nil" then return nil end
+    if __iconMode == "secret" then return __SECRET end
+    return 100000 + id
+end
+C_Spell.GetSpellTexture = function(id) if __iconMode == "legacy" then return nil end return iconOf(id) end
+GetSpellTexture = function(id) return iconOf(id) end
 -- equipment: slot -> item id, item id -> equip location
 __eq, __loc, __eqMode = {}, {}, nil
 function GetInventoryItemID(unit, slot)
@@ -932,7 +942,7 @@ def check_tooltip_lines_follow_the_mockups_wording():
     assert tip_text(lua, IMBUE)[1] == "Main hand imbue, 42 sec left."
     tip(lua, 16, ["Heavy Axe"])
     fire(lua, "UNIT_INVENTORY_CHANGED", "player")
-    assert tip_text(lua, IMBUE) == ["Weapon imbue", "No imbue on your main hand.", "Click: cast Rockbiter Weapon."], \
+    assert tip_text(lua, IMBUE) == ["Rockbiter Weapon", "No imbue on your main hand.", "Click: cast Rockbiter Weapon."], \
         tip_text(lua, IMBUE)
     run(lua, "__shield(3, 480)")
     fire(lua, "UNIT_AURA", "player")
@@ -1817,6 +1827,209 @@ def check_a_tinted_idle_tick_allocates_nothing_in_or_out_of_combat():
 
 
 
+# ---------------------------------------------------------------------------------------------
+# Checks: the spell icon on each tile
+# ---------------------------------------------------------------------------------------------
+
+
+def icon(lua, i):
+    """What a tile shows as its icon: the texture, whether it and the chip stand, the colour, desaturation, the plate."""
+    b = btn(lua, i)
+    tex = b.icon._texture
+    return dict(
+        tex=None if tex is None else int(tex), shown=shown(b.icon),
+        vertex=rgb(b.icon._vertex) if b.icon._vertex else None,
+        desat=bool(b.icon._desat), chip=shown(b.fsChip.ring) and shown(b.fsChip.fill) and shown(b.fsChip.code),
+        chip_any=shown(b.fsChip.ring) or shown(b.fsChip.fill) or shown(b.fsChip.glow) or shown(b.fsChip.code),
+        plate=shown(b.fsTextPlate), text=b.fsText._text,
+    )
+
+
+def check_each_tile_wears_the_icon_of_the_spell_it_casts_and_the_chip_steps_aside():
+    lua = world(spells=("Rockbiter Weapon", "Flametongue Weapon", "Frostbrand Weapon", "Windfury Weapon",
+                        "Lightning Shield", "Water Shield"), tips={16: ["Rockbiter 1 (56 min)"]})
+    t = icon(lua, IMBUE)
+    assert t["shown"] and t["tex"] == 100000 + IMBUE_IDS["Rockbiter Weapon"], t
+    assert not t["chip_any"], "the chip still shows under the icon"
+    assert t["plate"] and t["text"] == "56m", "the time stays on the tile, on a label plate"
+    run(lua, "__shield(3, 480)")
+    fire(lua, "UNIT_AURA", "player")
+    update(lua)
+    t = icon(lua, SHIELD)
+    assert t["shown"] and t["tex"] == 100000 + SHIELD_ID and not t["chip_any"], t
+    assert t["plate"] and t["text"] == "3", "the orb count stays on the tile"
+    # the icon is the spell's own, not a fixed one: it follows the imbue the tile shows
+    for name, line in (("Flametongue Weapon", "Flametongue 1 (59 min)"), ("Frostbrand Weapon", "Frostbrand 1 (59 min)"),
+                       ("Windfury Weapon", "Windfury 1 (59 min)"), ("Rockbiter Weapon", "Rockbiter 1 (59 min)")):
+        tip(lua, 16, [line])
+        fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+        update(lua)
+        assert icon(lua, IMBUE)["tex"] == 100000 + IMBUE_IDS[name], (name, icon(lua, IMBUE))
+
+
+def check_the_missing_imbue_icon_is_the_one_the_click_casts():
+    lua = world(spells=("Rockbiter Weapon", "Flametongue Weapon", "Lightning Shield"), tips={16: ["Heavy Axe"]})
+    v = view(lua, "imbue")
+    assert v.mode == "warn"
+    t = icon(lua, IMBUE)
+    best = IMBUE_IDS["Flametongue Weapon"]
+    assert t["tex"] == 100000 + best, f"a missing imbue shows the best known one, which is what the click casts: {t}"
+    assert str(attr(btn(lua, IMBUE), "spell")) == "Flametongue Weapon"
+
+
+def check_water_shield_up_shows_its_own_icon_dimmed():
+    lua = world(spells=("Rockbiter Weapon", "Lightning Shield", "Water Shield"), tips={16: ["Rockbiter 1 (56 min)"]})
+    run(lua, "__water()")
+    fire(lua, "UNIT_AURA", "player")
+    update(lua)
+    assert view(lua, "shield").other
+    t = icon(lua, SHIELD)
+    assert t["tex"] == 100000 + WATER_ID, t
+    assert t["desat"] and max(t["vertex"]) < 0.7, "Water Shield is another shield: dimmed and desaturated"
+
+
+def check_missing_and_unreadable_states_dim_and_desaturate_the_icon_and_quiet_ones_do_not():
+    lua = world(tips={16: ["Rockbiter 1 (56 min)"]})
+    t = icon(lua, IMBUE)
+    assert not t["desat"] and t["vertex"] == (1.0, 1.0, 1.0), f"quiet: {t}"
+    tip(lua, 16, ["Rockbiter 1 (42 sec)"])
+    fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+    update(lua)
+    t = icon(lua, IMBUE)
+    assert not t["desat"] and t["vertex"] == (1.0, 1.0, 1.0), f"expiring keeps the lit icon (the pink says it): {t}"
+    tip(lua, 16, ["Heavy Axe"])
+    fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+    update(lua)
+    miss = icon(lua, IMBUE)
+    assert miss["desat"] and all(abs(c - 0.45) < 1e-3 for c in miss["vertex"]), f"missing: {miss}"
+    assert miss["text"] == "IMBUE" and miss["plate"], "the red word stays, on its plate"
+    tip(lua, 16, None)
+    run(lua, "__tipMode = 'nolines'")
+    fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+    update(lua)
+    run(lua, "__shield(3, 480)")
+    fire(lua, "UNIT_AURA", "player")
+    update(lua)
+    assert not icon(lua, SHIELD)["desat"]
+    run(lua, "__noshield()")
+    fire(lua, "UNIT_AURA", "player")
+    update(lua)
+    miss = icon(lua, SHIELD)
+    assert miss["desat"] and miss["vertex"][0] < 0.5, f"a shield that is not up: {miss}"
+    # the estimate in combat is a lit icon (the shield was up)
+    run(lua, "__shield(3, 480)")
+    fire(lua, "UNIT_AURA", "player")
+    set_combat(lua, True)
+    update(lua)
+    assert not icon(lua, SHIELD)["desat"]
+
+
+def check_the_usability_tint_reaches_the_icon():
+    lua = world(tips={16: ["Rockbiter 1 (56 min)"]})
+    base = icon(lua, IMBUE)["vertex"]
+    use_spell(lua, "Rockbiter Weapon", False, True)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    t = icon(lua, IMBUE)["vertex"]
+    assert t[2] > t[0] and t != base, f"out of mana: the icon is blue ({t})"
+    use_spell(lua, "Rockbiter Weapon", True, False)
+    fire(lua, "SPELL_UPDATE_USABLE")
+    assert icon(lua, IMBUE)["vertex"] == base
+
+
+def check_a_spell_the_client_has_no_icon_for_keeps_the_chip_and_picks_the_icon_up_later():
+    for mode in ("nil", "secret"):
+        lua = boot(weapons={16: "INVTYPE_WEAPON"}, tips={16: ["Rockbiter 1 (56 min)"]},
+                   pre_login=f'__iconMode = "{mode}"')
+        fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+        update(lua)
+        t = icon(lua, IMBUE)
+        assert not t["shown"] and t["chip"] and not t["plate"], f"{mode}: the chip is the fallback {t}"
+        assert (tile(lua, IMBUE)["code"], tile(lua, IMBUE)["text"]) == ("RB", "56m")
+        close(tile(lua, IMBUE)["chip"], C["gold"], "fallback chip stroke")
+        run(lua, "__iconMode = nil")
+        tick(lua, 5)
+        t = icon(lua, IMBUE)
+        assert t["shown"] and t["tex"] == 100000 + 8017 and not t["chip_any"], f"{mode}: icon after the client answers {t}"
+    lua = boot(weapons={16: "INVTYPE_WEAPON"}, tips={16: ["Rockbiter 1 (56 min)"]}, pre_login='__iconMode = "legacy"')
+    update(lua)
+    assert icon(lua, IMBUE)["tex"] == 100000 + 8017, "the legacy GetSpellTexture answers when C_Spell has none"
+
+
+def check_no_imbue_known_has_no_spell_id_and_the_chip_label_stays():
+    lua = world(spells=("Lightning Shield",), tips={16: ["Heavy Axe"]})
+    assert not shown(btn(lua, IMBUE)), "no imbue known: the tile is absent"
+    assert view(lua, "imbue").spellId is None
+    assert view(lua, "shield").spellId == SHIELD_ID
+
+
+def check_a_locked_shield_hides_its_icon_and_learning_it_brings_the_icon_back():
+    lua = world(spells=("Rockbiter Weapon",), tips={16: ["Rockbiter 1 (56 min)"]})
+    assert not shown(btn(lua, SHIELD).icon), "a locked tile shows its mold, not an icon"
+    lua.execute('__spell("Lightning Shield", 324, true)')
+    fire(lua, "SPELLS_CHANGED")
+    update(lua)
+    assert shown(btn(lua, SHIELD).icon) and icon(lua, SHIELD)["tex"] == 100000 + SHIELD_ID
+    # and back: a tile that was showing its icon hides it when the spell goes away
+    lua.execute('__spell("Lightning Shield", 324, false)')
+    fire(lua, "SPELLS_CHANGED")
+    update(lua)
+    if btn(lua, SHIELD).fsLocked:
+        assert not shown(btn(lua, SHIELD).icon), "a tile that locks again keeps no icon over its mold"
+
+
+def check_an_icon_change_in_combat_is_a_texture_write_only():
+    lua = world(spells=("Rockbiter Weapon", "Flametongue Weapon", "Lightning Shield"),
+                tips={16: ["Rockbiter 1 (30 min)"]})
+    before = blocked(lua)
+    set_combat(lua, True)
+    cast(lua, "Flametongue Weapon")
+    tick(lua, 5)
+    assert icon(lua, IMBUE)["tex"] == 100000 + IMBUE_IDS["Flametongue Weapon"], "the icon follows a cast in combat"
+    assert blocked(lua) == before, "a protected write happened painting an icon in combat"
+    leave_combat(lua)
+    assert icon(lua, IMBUE)["shown"]
+
+
+def check_the_tooltip_leads_with_the_spell_name_in_every_state():
+    lua = world(spells=("Rockbiter Weapon", "Flametongue Weapon", "Lightning Shield"),
+                tips={16: ["Rockbiter 1 (59 min)"]})
+    assert tip_text(lua, IMBUE)[0] == "Rockbiter Weapon"
+    tip(lua, 16, ["Rockbiter 1 (42 sec)"])
+    fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+    assert tip_text(lua, IMBUE)[0] == "Rockbiter Weapon"
+    tip(lua, 16, ["Heavy Axe"])
+    fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+    assert tip_text(lua, IMBUE)[0] == "Rockbiter Weapon", "a missing imbue names the spell the click casts (the last one up)"
+    tip(lua, 16, None)
+    run(lua, "__tipMode = 'nolines'")
+    fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+    update(lua)
+    assert tip_text(lua, IMBUE)[0] in ("Rockbiter Weapon", "Flametongue Weapon"), tip_text(lua, IMBUE)
+    for setup in ("__shield(3, 480)", "__noshield()"):
+        run(lua, setup)
+        fire(lua, "UNIT_AURA", "player")
+        update(lua)
+        text = tip_text(lua, SHIELD)
+        assert text[0] == "Lightning Shield" and text[-1] == "Click: cast Lightning Shield.", text
+
+
+def check_an_icon_the_client_never_answers_costs_nothing_between_retries():
+    lua = boot(weapons={16: "INVTYPE_WEAPON"}, tips={16: ["Rockbiter 1 (56 min)"]}, pre_login='__iconMode = "nil"')
+    run(lua, """
+        if jit then jit.off() end
+        local ShamanBuffs, BuffTab = FS.ShamanBuffs, FS.BuffTab
+        local t = __now
+        local function step(i) ShamanBuffs.Update(t + i * 0.01); BuffTab.Paint() end
+        for i = 1, 50 do step(i) end
+        collectgarbage("collect"); collectgarbage("stop")
+        local before = collectgarbage("count")
+        for i = 51, 450 do step(i) end
+        __grew = (collectgarbage("count") - before) * 1024
+        collectgarbage("restart")
+    """)
+    assert float(g(lua).__grew) < 2000, f"an unanswered icon repainted every call: {float(g(lua).__grew):.0f} bytes"
+
+
 CHECKS = [
     check_parse_reads_minutes_seconds_hours_with_and_without_a_rank,
     check_parse_ignores_lines_that_are_not_an_imbue_with_a_time,
@@ -1892,6 +2105,17 @@ CHECKS = [
     check_the_tint_follows_each_usability_event_and_leaving_combat,
     check_a_locked_or_absent_tile_is_never_asked_and_never_tinted,
     check_a_tinted_idle_tick_allocates_nothing_in_or_out_of_combat,
+    check_each_tile_wears_the_icon_of_the_spell_it_casts_and_the_chip_steps_aside,
+    check_the_missing_imbue_icon_is_the_one_the_click_casts,
+    check_water_shield_up_shows_its_own_icon_dimmed,
+    check_missing_and_unreadable_states_dim_and_desaturate_the_icon_and_quiet_ones_do_not,
+    check_the_usability_tint_reaches_the_icon,
+    check_a_spell_the_client_has_no_icon_for_keeps_the_chip_and_picks_the_icon_up_later,
+    check_no_imbue_known_has_no_spell_id_and_the_chip_label_stays,
+    check_a_locked_shield_hides_its_icon_and_learning_it_brings_the_icon_back,
+    check_an_icon_change_in_combat_is_a_texture_write_only,
+    check_the_tooltip_leads_with_the_spell_name_in_every_state,
+    check_an_icon_the_client_never_answers_costs_nothing_between_retries,
 ]
 SCALED_CHECKS = [
     check_the_shoulder_is_the_two_by_one_block_at_316_and_the_buttons_sit_inside_it,
