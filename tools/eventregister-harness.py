@@ -257,6 +257,15 @@ H.RegisterEvent(frame(), "NO_SUCH_EVENT_2")
 check(ForeverSTUwaveDB.unknownEvents.NO_SUCH_EVENT_2.why == "invalid", "an event the client calls invalid says invalid")
 """)
 
+case("a_legacy_refused_record_is_cleared_by_a_plain_success")(r"""
+local H = load()
+ForeverSTUwaveDB.unknownEvents = { SPELLS_CHANGED = { time = 5, why = "refused" }, PLAYER_LEVEL_UP = { time = 5, why = "unit" } }
+H.RegisterEvent(frame(), "SPELLS_CHANGED")
+H.RegisterEvent(frame(), "PLAYER_LEVEL_UP")
+check(ForeverSTUwaveDB.unknownEvents.SPELLS_CHANGED == nil, "the legacy record is cleared")
+check(ForeverSTUwaveDB.unknownEvents.PLAYER_LEVEL_UP, "a unit record is still kept by a plain success")
+""")
+
 case("a_saved_record_table_that_is_not_plain_is_never_written_to")(r"""
 local H = load()
 ForeverSTUwaveDB.unknownEvents = "oops"

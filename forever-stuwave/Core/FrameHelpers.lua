@@ -246,7 +246,8 @@ local function ClearedBy(record, unitSuccess)
     if not PlainTable(record) then return true end
     local why = record.why
     if IsSecret and IsSecret(why) then return false end
-    return why == nil or why == "invalid"
+    -- "refused" is what the first versions wrote for a plain refusal: the same as "invalid"
+    return why == nil or why == "invalid" or why == "refused"
 end
 
 local function WriteUnknownEvents()
@@ -357,7 +358,9 @@ unknownFlush:SetScript("OnEvent", WriteUnknownEvents)
 -- module's exact wording is preserved. Dup in CastBars/Buffs before this
 -- extraction.
 -- An event the client calls invalid never reaches `onFail` (nor chat): it is recorded quietly
--- like Helpers.RegisterEvent does. Every other failure still goes to `onFail`.
+-- like Helpers.RegisterEvent does. That needs C_EventUtils.IsEventValid: without it a refused
+-- unit registration cannot be told apart from a bad unit token, so it still goes to `onFail`.
+-- Every other failure goes to `onFail` too.
 function Helpers.SafeRegisterUnitEvent(events, event, unit, onFail)
     if ClientCallsInvalid(event) then
         NoteUnknownEvent(event, "invalid")
