@@ -315,6 +315,11 @@ FS.FrameHelpers = {
         if not ok then onFail(event, err) end
     end,
     DimBlizzardFrame = function(frame) __dimmed[#__dimmed + 1] = frame end,
+    -- the quiet registration; a harness that hands over the helpers' source gets the real one instead
+    RegisterEvent = function(frame, event, ...)
+        if select("#", ...) > 0 then return pcall(frame.RegisterUnitEvent, frame, event, ...) end
+        return pcall(frame.RegisterEvent, frame, event)
+    end,
 }
 -- The real spell tooltip helpers (hover-only, cached id), lent to the stub when a harness hands over the source.
 if __helpers_source then
