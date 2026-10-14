@@ -979,9 +979,12 @@ local function withFiveSecond(applies)
             enabled = { key = "fivesecond.enabled", default = true, label = "Five second rule tab", tip = "Tip one." },
             pulse = { key = "fivesecond.pulse", default = true, label = "Regen pulse", tip = "Tip two." },
             sound = { key = "fivesecond.sound", default = false, label = "Regen sound", tip = "Tip three." },
+            motion = { key = "fivesecond.motion", default = true, label = "Animate the tab", tip = "Tip five." },
+            flash = { key = "fivesecond.fx.flash", default = true, label = "Cast flash", tip = "Tip six." },
+            sweep = { key = "fivesecond.fx.sweep", default = true, label = "Regen sweep", tip = "Tip seven." },
         }
         for _, def in pairs(S) do FS.Config.RegisterDefault(def.key, def.default) end
-        FS.FiveSecondTab = { SETTINGS = S, Applies = function() return applies end }
+        FS.FiveSecondTab = { SETTINGS = S, FT = { FX_NAMES = { "flash", "sweep" } }, Applies = function() return applies end }
     end
 end
 
@@ -998,7 +1001,14 @@ function T.the_unit_frames_page_has_the_five_second_rule_toggles_for_a_mana_clas
     press("Five second rule tab")
     eq(FS.Config.Get("fivesecond.enabled"), false)
     eq(FS.Config.Get("fivesecond.pulse"), true, "the other keys are untouched")
-    for label, tip in pairs({ ["Five second rule tab"] = "Tip one.", ["Regen pulse"] = "Tip two.", ["Regen sound"] = "Tip three." }) do
+    yes(row("Animate the tab").control.fsChecked, "the motion master is on by default")
+    yes(row("Cast flash").control.fsChecked, "an effect switch is on by default")
+    yes(row("Regen sweep").control.fsChecked, "each effect has its own switch")
+    press("Cast flash")
+    eq(FS.Config.Get("fivesecond.fx.flash"), false)
+    eq(FS.Config.Get("fivesecond.fx.sweep"), true, "the other effects are untouched")
+    for label, tip in pairs({ ["Five second rule tab"] = "Tip one.", ["Regen pulse"] = "Tip two.", ["Regen sound"] = "Tip three.",
+        ["Animate the tab"] = "Tip five.", ["Cast flash"] = "Tip six.", ["Regen sweep"] = "Tip seven." }) do
         local r, found = row(label), nil
         for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
         eq(found, tip, label .. ": explained by a ? tip")

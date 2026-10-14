@@ -1304,15 +1304,20 @@ end
 -- Pages
 -------------------------------------------------------------------------------
 
--- The five second rule tab's three switches (FiveSecondTab.lua), for the classes whose power is mana; each row explains itself in its
--- ? tip. A client or class without the tab leaves the group out.
+-- The five second rule tab's switches (FiveSecondTab.lua), for the classes whose power is mana: the tab, its pulse and sound,
+-- then the master of its motion with one switch under it for each effect; each row explains itself in its ? tip. A client or
+-- class without the tab leaves the group out.
 local function FiveSecondGroup(page)
     local tab = FS.FiveSecondTab
     if not (tab and tab.SETTINGS and tab.Applies and tab.Applies()) then return end
     UI.Header(page, "Five second rule")
-    for _, name in ipairs({ "enabled", "pulse", "sound" }) do
+    for _, name in ipairs({ "enabled", "pulse", "sound", "motion" }) do
         local def = tab.SETTINGS[name]
         UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip })
+    end
+    for _, name in ipairs(tab.FT.FX_NAMES) do
+        local def = tab.SETTINGS[name]
+        UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip, inset = 14 })
     end
 end
 

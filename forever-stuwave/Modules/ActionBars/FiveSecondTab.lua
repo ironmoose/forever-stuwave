@@ -1,18 +1,30 @@
 -- Forever STUwave: five second rule tab
 --
--- A second shoulder on the Console chassis for every class whose power is mana (mockups/five-second-rule-module-2026-10-14.html,
--- concept C, CELLS): 2 columns x 1 row (92.8 x 49 design px), the chrome of the Shaman buff tab (BuffTab.lua), seated after the
--- class's own tab when it has one and in its place otherwise (ClassShoulder.lua owns the seat). It is a player side cue, always
--- there, not gated on a target, and display only: no click, no binding. Two 38 px tiles:
+-- A second shoulder on the Console chassis for every class whose power is mana (mockups/five-second-rule-compact-2026-10-14.html,
+-- the D2 face with the LED readout and digit option B): one 92.8 x 49 design px face with no name labels, the chrome of the
+-- Shaman buff tab (BuffTab.lua), seated after the class's own tab when it has one and in its place otherwise (ClassShoulder.lua
+-- owns the seat). It is a player side cue, always there, not gated on a target, and display only: no click, no binding. Two
+-- hover zones, one tooltip each:
 --
---   * CELLS: five cells. A mana spend starts a five second window; the cells are amber and drain one a second right to left
---     (the current cell part full), the text counts in tenths behind a "~" and says SUSPENDED in the tooltip. At 0.0 the cells
---     turn cyan and the word is REGEN, the rim flashes once (the pulse), a short sound plays if the player turned it on, and a
---     few seconds later the tile fades to its dim idle look.
---   * RATE: mana per second and a retention chip. The pair GetPowerRegen returns is plain out of combat only, so it is read
---     out of combat and kept; the underline is dashed while the numbers on show are the kept ones. The casting rate shows
---     while the window runs, the full rate otherwise. The chip is the percent of the full rate that casting keeps (a
---     talent such as Meditation), cyan when above 0, a hollow "0%" otherwise.
+--   * CELLS (hero tile and gauge): a 14 segment LED readout, our own art (Media/Textures/led_segments.tga, one texture per
+--     segment, lit or unlit by SetVertexColor), and a ten segment gauge under it. A mana spend starts a five second window; the
+--     gauge is amber and drains one segment every half second right to left, the readout counts in tenths behind a LED tilde and
+--     says SUSPENDED in the tooltip. At 0.0 the held digits turn cyan, a band sweeps the face once and each cell flips from digit to
+--     the word REGEN under it, the rim flashes once (the pulse), a short sound plays if the player turned it on, and a few seconds
+--     later the face fades to its dim idle look.
+--   * RATE (the bottom line): mana per second with a coloured bar under it and a retention chip. The pair GetPowerRegen returns is
+--     plain out of combat only, so it is read out of combat and kept; the bar is dashed while the numbers on show are the kept
+--     ones. The casting rate shows while the window runs, the full rate otherwise. The chip is the percent of the full rate that
+--     casting keeps (a talent such as Meditation), cyan when above 0, a hollow "0%" otherwise, "--" with no reading.
+--
+-- Motion (the SETTINGS under `motion`, each with its own switch) is a pure function of the ledger and the clock, Motion() below:
+-- the cast flash, the digit dip and warm last second, the whole second pulse, the gauge flicker, the regen sweep, the tick pulse,
+-- the idle glow and the kept rate stutter. The quick ones (flash, sweep, count) run the ticker every frame, the slow ones at
+-- TICK_AMBIENT. At most one strong motion plays at a time; the rest are faint.
+--
+-- Crisp: every size and offset is a whole count of physical pixels (the design px times the scale, rounded edge by edge), the
+-- LED art is drawn one texel to a pixel and never scaled fractionally, the textures snap to the pixel grid with no texel bias
+-- where the client has the calls, and the glow is its own texture behind the shapes.
 --
 -- Client facts it stands on (research 2026-10-14, Forever 1.60.1) and its limits. All of it is an ESTIMATE from the player's own
 -- casts, which the tooltip says:
@@ -32,7 +44,7 @@
 --     window keeps counting while the tab is hidden. The shoulder art follows at the next Refresh, out of combat.
 --   * The sound is SOUNDKIT.TELL_MESSAGE (a guess for this client), feature detected and off by default.
 --
--- Nothing here is protected: the host and both tiles are plain frames, so building, the paint, the master toggle and the Druid
+-- Nothing here is protected: the host and its zones are plain frames, so building, the paint, the master toggle and the Druid
 -- hide are legal in combat. Only the seat (SetPoint onto the Console, which ClassShoulder.lua parks in combat) waits for
 -- PLAYER_REGEN_ENABLED. Loads after BuffTab.lua and before ConfigWindow.lua (which reads SETTINGS at page build). Nothing here
 -- is verified in game.
@@ -58,27 +70,55 @@ local FT = {
     LATE = 1.5,                     -- a regen seen later than this after its end makes no pulse and no sound
     CHANNEL_GRACE = 1,              -- seconds after a channel starts before UnitChannelInfo is trusted to say it ended
     READ_EVERY = 1,                 -- seconds between GetPowerRegen reads (a plain answer only out of combat)
-    TICK_FAST = 0.1, TICK_SLOW = 0.5,
-    -- the tile numbers are BuffTab's (the same chrome), design px
-    BTN = 38, GAP = 4.8, PAD = 6, PT = 6, PB = 5, COLS = 2,
-    CELLS = 5, CELL_X = 4, CELL_PITCH = 6.5, CELL_Y = 6, CELL_W = 4, CELL_H = 12,
-    CHIP_W = 22, CHIP_H = 15, CHIP_TOP = 5, CHIP_C = 3, GLOW_PAD = 3,
-    -- The tile chrome in one place (the mockup's tile strokes): the ring and glow alphas per state. Idle and the retention
-    -- tile are the quiet violet ring with no glow; suspended is amber; regen is cyan, its glow pulsing on top.
+    TICK_SLOW = 0.5, TICK_AMBIENT = 0.05,
+    -- The face in design px, from the host's top left (the page's D2 numbers). The host is the buff tab's size.
+    HOST_W = 92.8, HOST_H = 49,
+    HERO = { x = 6, y = 6, w = 81, h = 16 },    -- the tile the readout sits in (chamfer 6)
+    FACE_H = 37,                                 -- the clipped wash of the cast flash: x 6..87, y 6..43
+    LED_CX = 46,                                 -- the readout is centred here, vertically on the hero tile
+    CELL_W = 10, CELL_H = 12, ATLAS = 64,        -- a cell in texels, the atlas side
+    COUNT_W = 34, WORD_W = 58,                   -- tilde 8 + 2 + digit 10 + dot 4 + digit 10; five cells and four gaps of 2
+    WORD_X = 17,                                 -- the word's left, so the cell centres are 22, 34, 46, 58, 70
+    DIGIT_X = { tilde0 = 29, tilde = 33, d1 = 44, dot = 51, d2 = 58 },  -- the counting group's part centres (sweep tests)
+    GAUGE_N = 10, GAUGE_WELL = { x = 6, w = 81 }, GAUGE_Y = 24, GAUGE_H = 5,
+    GAUGE_X = 7, GAUGE_PITCH = 8, GAUGE_SEG_W = 7, GAUGE_SEG_Y = 25, GAUGE_SEG_H = 3,
+    GAUGE_OFF = 0.22, GAUGE_IDLE = 0.3, GAUGE_GLOW = 0.3, GAUGE_GLOW_W = 104, GAUGE_GLOW_H = 12,
+    RATE_ZONE_Y = 30, RATE_X = 8, RATE_BASE = 39, RATE_BAR_Y = 41, RATE_ROOM = 35,
+    DASH_PITCH = 5, DASH_ON = 3, DASHES = 9,
+    CHIP = { x = 57, y = 31, w = 30, h = 12 }, CHIP_C = 3, GLOW_PAD = 3, CHIP_ROOM = 28, CHIP_IDLE_TEXT = 0.65,
+    -- The rim chrome in one place: the ring and glow alphas per state. Idle is the quiet violet ring; suspended is amber; regen
+    -- is cyan, its glow flaring once on top (the pulse); the idle glow breathes on top of the quiet look.
     CHROME = {
-        idleRing = 0.35, idleGlow = 0,
-        suspRing = 0.65, suspGlow = 0,
-        regenRing = 1, regenGlow = 0.35, pulseGlow = 0.65,
+        idleRing = 0.4, idleGlow = 0,
+        suspRing = 0.7, suspGlow = 0,
+        regenRing = 1, regenGlow = 0.45, flareGlow = 0.5,
+        breathRing = 0.3, breathRingSwing = 0.3, breathGlow = 0.45,
         hoverGlow = 0.6,            -- the floor of the glow under the mouse (the ring is full cyan)
-        chipGlow = 0.35,            -- the retention chip's glow while it shows a percent
+        chipGlow = 0.4, chipTick = 0.4,
     },
-    CODE_PX = 10, TEXT_PX = 11, REGEN_PX = 10, RATE_PX = 10, RATE_LONG_PX = 9,
-    MIN_PX = 6, TEXT_INSET = 3, ADVANCE = 0.5615, TEXT_Y = 27,
-    IDLE_CELL_ALPHA = 0.4,
+    IDLE_ALPHA = 0.72,              -- the dim look of the whole face at rest
+    -- the LED look
+    GHOST_COUNT = 0.07, GHOST_LIFT = 0.06, GHOST_RES = 0.08, GHOST_IDLE = 0.05, WORD_IDLE = 0.55,
+    GLOW_STEADY = 0.5, GLOW_PULSE = 0.6,
+    GLOW_W = 64, GLOW_H = 32, GLOW_CORE_W = 50, GLOW_CORE_H = 18,   -- led_glow.tga: its canvas and its solid core, texels
+    -- the motion, seconds unless noted
+    FLASH_TIME = 0.5, FLASH_ALPHA = 0.3,
+    DIP_TIME = 0.035, DIP_DEPTH = 0.22,
+    PULSE_SECOND = 0.28, PULSE_RISE = 0.03,
+    FLICK_TIME = 0.3,
+    SWEEP_TIME = 1,
+    TICK_FIRST = 1.5, TICK_EVERY = 2, TICK_TIME = 0.5,
+    BREATH_TIME = 3.9,
+    GLITCH_MS = 320, GLITCH_EVERY_MS = 2400,
+    FX_NAMES = { "flash", "digits", "wpulse", "drop", "sweep", "tick", "breath", "glitch" },
+    CODE_PX = 10, RATE_PX = 11, RATE_LONG_PX = 9,
+    MIN_PX = 6, ADVANCE = 0.5615,
     host = nil, cells = nil, rate = nil,
     built = false,
     seated = false,
     pendingSync = false,
+    switchesDirty = true,
+    sigCells = {}, sigRate = {},
     warned = {},
 }
 Tab.FT = FT
@@ -97,6 +137,43 @@ local SETTINGS = {
     sound = {
         key = "fivesecond.sound", default = false, label = "Regen sound",
         tip = "Plays a short sound when your regen resumes.",
+    },
+    -- the motion: a master and one switch for each effect (labels and tips as the page's list)
+    motion = {
+        key = "fivesecond.motion", default = true, label = "Animate the tab",
+        tip = "Turns all motion on the tab on or off. Off keeps the tab still: only its colours and numbers change.",
+    },
+    flash = {
+        key = "fivesecond.fx.flash", default = true, label = "Cast flash",
+        tip = "A brief flash across the tab when you spend mana.",
+    },
+    digits = {
+        key = "fivesecond.fx.digits", default = true, label = "LED digit motion",
+        tip = "Digit motion: a short flash or fade as the digits change.",
+    },
+    wpulse = {
+        key = "fivesecond.fx.wpulse", default = true, label = "Whole second pulse",
+        tip = "Whole second pulse: the countdown flashes as each second passes.",
+    },
+    drop = {
+        key = "fivesecond.fx.drop", default = true, label = "Gauge flicker",
+        tip = "The gauge segment that just emptied flickers once.",
+    },
+    sweep = {
+        key = "fivesecond.fx.sweep", default = true, label = "Regen sweep",
+        tip = "A bright sweep crosses the gauge and the readout when your regen resumes.",
+    },
+    tick = {
+        key = "fivesecond.fx.tick", default = true, label = "Regen tick pulse",
+        tip = "A short pulse on the rate every two seconds while regen runs. It is a timer, not a reading of your mana.",
+    },
+    breath = {
+        key = "fivesecond.fx.breath", default = true, label = "Idle glow",
+        tip = "The tab glows softly while it waits.",
+    },
+    glitch = {
+        key = "fivesecond.fx.glitch", default = true, label = "Kept and unreadable stutter",
+        tip = "The rate stutters now and then while it shows a number kept from before the fight, or none at all.",
     },
 }
 Tab.SETTINGS = SETTINGS
@@ -185,6 +262,7 @@ local L = {
     channel = false,    -- a mana channel is in progress: the window is held open
     channelAt = 0,
     pulseAt = nil,      -- GetTime() the rim flash started
+    startAt = nil,      -- GetTime() the window was last started (the cast flash)
 }
 local view = {
     phase = "idle",     -- "idle" | "susp" | "res"
@@ -239,6 +317,8 @@ local function ChannelActive()
 end
 
 local function StartWindow(now)
+    FT.fast = true          -- the ticker runs every frame from the next one, not from its next slow pass
+    L.startAt = now
     L.endsAt = now + FT.WINDOW
     L.resumed = false
     L.pulseAt = nil
@@ -266,7 +346,7 @@ function Tab.OnChannelStop(now)
 end
 
 function Tab.Reset()
-    L.endsAt, L.resumed, L.channel, L.pulseAt = nil, false, false, nil
+    L.endsAt, L.resumed, L.channel, L.pulseAt, L.startAt = nil, false, false, nil, nil
 end
 
 local function Chime()
@@ -309,6 +389,8 @@ local function ReadRegen()
         rate.retPct = pct >= 1 and pct or nil
     end
 end
+
+local Motion     -- the motion model below (defined after the view it reads)
 
 -- Brings the ledger to `now` (a spend, an end, a fade) and the view with it. Idempotent for one `now`.
 function Tab.Update(now)
@@ -353,7 +435,7 @@ function Tab.Update(now)
     else
         view.rate, view.rateText = rate.base, rate.baseText
     end
-    FT.active = phase == "susp" or pulse > 0 or (phase == "res" and fade < 1)
+    Motion(now)
     return view
 end
 
@@ -400,16 +482,16 @@ function Tab.TipLines(which)
     return lines
 end
 
--- `refresh`: the tile already owns the tooltip, so only its lines are rewritten (no new SetOwner, which would clear and
+-- `refresh`: the zone already owns the tooltip, so only its lines are rewritten (no new SetOwner, which would clear and
 -- re-place it every tick); a client without ClearLines anchors again.
-local function ShowTooltip(tile, refresh)
+local function ShowTooltip(zone, refresh)
     local tip = GameTooltip
     if not tip then return end
-    local lines = Tab.TipLines(tile.fsKey)
+    local lines = Tab.TipLines(zone.fsKey)
     if refresh and type(tip.ClearLines) == "function" then
         tip:ClearLines()
     else
-        FH.AnchorTooltip(tile)
+        FH.AnchorTooltip(zone)
     end
     for _, line in ipairs(lines) do
         local c = line[2]
@@ -418,23 +500,167 @@ local function ShowTooltip(tile, refresh)
     tip:Show()
 end
 
-local function TipIsOurs(tile)
+local function TipIsOurs(zone)
     local tip = GameTooltip
-    if not (tip and tile.fsHover) then return false end
-    if type(tip.IsOwned) == "function" then return tip:IsOwned(tile) and true or false end
-    if type(tip.GetOwner) == "function" then return tip:GetOwner() == tile end
+    if not (tip and zone.fsHover) then return false end
+    if type(tip.IsOwned) == "function" then return tip:IsOwned(zone) and true or false end
+    if type(tip.GetOwner) == "function" then return tip:GetOwner() == zone end
     return true
 end
 
 -------------------------------------------------------------------------------
--- Painting (texture and font writes only)
+-- Motion: pure functions of the ledger and the clock
 -------------------------------------------------------------------------------
 
-local BG = { 13 / 255, 6 / 255, 32 / 255 }                 -- #0d0620
-local GAP_FILL = { 0x1a / 255, 0x0f / 255, 0x2e / 255 }    -- #1a0f2e the dashes of the cached underline
+-- The motion switches as last read: on.<name> is true when the master AND that switch are on. Re-read when any of them
+-- changes (Apply registers the callbacks); a client without Config.OnChange re-reads every pass.
+local on = { master = true }
+
+local function ReadSwitches()
+    local master = Setting(SETTINGS.motion)
+    on.master = master
+    for _, name in ipairs(FT.FX_NAMES) do
+        on[name] = master and Setting(SETTINGS[name])
+    end
+    FT.switchesDirty = not FT.watching
+end
+
+-- What moves right now, from the view and the clock; Tab.Update fills it. 0 / false / nil mean "nothing moves".
+local fx = {
+    flash = 0,          -- 1 at a cast down to 0 over FLASH_TIME: the white wash over the face
+    dip = false,        -- the first DIP_TIME of every new tenth: the lit segments dim a little
+    warm = 0,           -- 0..1 over the last second of the count: amber through white toward cyan
+    zp = 0,             -- the whole second pulse, 0..1, at 4.0 3.0 2.0 1.0
+    dropSeg = 0,        -- the gauge segment (1 based) that just emptied and flickers, 0 for none
+    dropA = 0,          -- its flicker alpha
+    pp = 1,             -- the regen sweep position 0..1 (1 when it is over or switched off)
+    flare = 0,          -- 0..1..0 over the pulse: the rim glow at REGEN
+    tick = 0,           -- 1 at a mana tick estimate down to 0 over TICK_TIME
+    breath = nil,       -- 0..1 in the idle look
+    glitchA = 1, glitchDx = 0,
+}
+Tab.Fx = function() return fx end
+
+local function Clamp01(v)
+    if v < 0 then return 0 end
+    if v > 1 then return 1 end
+    return v
+end
+
+-- The dying flicker of a segment that just emptied: age in seconds.
+local function Flick(age)
+    if age < 0 or age > FT.FLICK_TIME then return 0 end
+    return (1 - age / FT.FLICK_TIME) * (0.55 + 0.45 * math.sin(age * 110))
+end
+
+Motion = function(now)
+    if FT.switchesDirty then ReadSwitches() end
+    local v = view
+    local susp = v.phase == "susp"
+    local t = v.t
+    local flash, dip, warm, zp, dropSeg, dropA = 0, false, 0, 0, 0, 0
+    if susp then
+        if on.flash and L.startAt then
+            local age = now - L.startAt
+            if age >= 0 and age < FT.FLASH_TIME then flash = 1 - age / FT.FLASH_TIME end
+        end
+        -- the digit motion never runs under the cast flash
+        if on.digits and flash <= 0 and t <= FT.WINDOW - 0.05 then
+            local tenths = math.floor(t * 10 + 0.5)
+            local age = tenths * 0.1 + 0.05 - t
+            dip = age >= 0 and age < FT.DIP_TIME
+            if t < 1 then warm = Clamp01(1 - t) end
+        end
+        if on.wpulse then
+            local k = math.ceil(t - 0.05)
+            local age = k + 0.05 - t
+            if k >= 1 and k <= FT.WINDOW - 1 and age >= 0 and age < FT.PULSE_SECOND then
+                zp = age < FT.PULSE_RISE and age / FT.PULSE_RISE
+                    or (1 - (age - FT.PULSE_RISE) / (FT.PULSE_SECOND - FT.PULSE_RISE)) ^ 1.5
+            end
+        end
+        if on.drop and t > 0.3 then
+            local lit = t / FT.WINDOW * FT.GAUGE_N
+            local jd = math.ceil(lit)
+            local fl = Flick((jd - lit) * (FT.WINDOW / FT.GAUGE_N)) * (1 - zp)
+            if fl > 0 and jd >= 1 and jd < FT.GAUGE_N then dropSeg, dropA = jd + 1, 0.9 * fl end
+        end
+    end
+    local pp, tick = 1, 0
+    local endsAt = L.endsAt
+    if v.phase == "res" and endsAt then
+        local since = now - endsAt
+        if on.sweep and since < FT.SWEEP_TIME then pp = Clamp01(since / FT.SWEEP_TIME) end
+        if on.tick then
+            local into = since - FT.TICK_FIRST
+            if into >= 0 then
+                local age = into % FT.TICK_EVERY
+                if age < FT.TICK_TIME then tick = 1 - age / FT.TICK_TIME end
+            end
+        end
+    end
+    local flare = 0
+    if on.master and v.pulse > 0 then flare = math.sin(math.pi * (1 - v.pulse)) end
+    local breath
+    if on.breath and v.phase == "idle" then
+        breath = 0.5 - 0.5 * math.cos(2 * math.pi * (now % FT.BREATH_TIME) / FT.BREATH_TIME)
+    end
+    local glitchA, glitchDx = 1, 0
+    if on.glitch and not susp and pp >= 1 and (v.cached or v.base == nil) then
+        local gp = (now * 1000) % FT.GLITCH_EVERY_MS
+        if gp < FT.GLITCH_MS then
+            glitchA = 0.35 + 0.65 * math.abs(math.sin(gp * 0.09))
+            glitchDx = math.sin(gp * 0.5) > 0 and 1 or -1
+        end
+    end
+    fx.flash, fx.dip, fx.warm, fx.zp, fx.dropSeg, fx.dropA = flash, dip, warm, zp, dropSeg, dropA
+    fx.pp, fx.flare, fx.tick, fx.breath, fx.glitchA, fx.glitchDx = pp, flare, tick, breath, glitchA, glitchDx
+    -- the ticker runs every frame while something quick moves, at TICK_AMBIENT while something slow does
+    FT.fast = susp or v.pulse > 0 or pp < 1 or flash > 0
+    FT.ambient = FT.fast or breath ~= nil or tick > 0 or v.phase == "res"
+        or (on.glitch and not susp and (v.cached or v.base == nil))
+        or (on.tick and v.phase == "res")
+end
+
+-------------------------------------------------------------------------------
+-- LED art: fourteen segments a cell, from the led_segments atlas
+-------------------------------------------------------------------------------
+
+-- The atlas slot order (generate_led_segments.py SEGMENT_ORDER): slot n is column n % 4, row n // 4 of 16 x 16 texels in a
+-- 64 x 64 image; a cell is 10 x 12 texels in the slot's top-left corner.
+local SEGMENT_ORDER = { "a", "b", "c", "d", "e", "f", "g1", "g2", "i", "l", "h", "j", "k", "m" }
+Tab.SEGMENT_ORDER = SEGMENT_ORDER
+
+-- Which segments each character lights (the page's SEG14 table).
+local GLYPH_TEXT = {
+    ["0"] = "a b c d e f", ["1"] = "b c", ["2"] = "a b g1 g2 e d", ["3"] = "a b c d g1 g2", ["4"] = "f b g1 g2 c",
+    ["5"] = "a f g1 g2 c d", ["6"] = "a f e d c g1 g2", ["7"] = "a b c", ["8"] = "a b c d e f g1 g2",
+    ["9"] = "a b c d f g1 g2", R = "a b f e g1 g2 m", E = "a f e d g1 g2", G = "a f e d c g2", N = "f e b c h m",
+}
+Tab.GLYPH_TEXT = GLYPH_TEXT
+
+local GLYPH = {}
+do
+    local index = {}
+    for n, name in ipairs(SEGMENT_ORDER) do index[name] = n end
+    for ch, text in pairs(GLYPH_TEXT) do
+        local lit = {}
+        for name in text:gmatch("%S+") do lit[index[name]] = true end
+        GLYPH[ch] = lit
+    end
+end
+
+-- The tilde of the estimate mark: four 2 x 2 bars, (x, y) in texels from the readout's left and top.
+local TILDE = { { 0, 5 }, { 2, 4 }, { 4, 6 }, { 6, 5 } }
+
+local scratch = { 0, 0, 0 }
 
 local function Lerp(a, b, t)
     return a + (b - a) * t
+end
+
+local function Mix(a, b, t)
+    return Lerp(a[1], b[1], t), Lerp(a[2], b[2], t), Lerp(a[3], b[3], t)
 end
 
 -- Moves `a` toward `b` by t and writes it to a texture (or a font string) with the alpha.
@@ -445,6 +671,42 @@ end
 local function TintText(region, a, b, t, alpha)
     region:SetTextColor(Lerp(a[1], b[1], t), Lerp(a[2], b[2], t), Lerp(a[3], b[3], t), alpha)
 end
+
+-- One cell's 14 textures: the lit ones of `ch` (nil for none) take the lit colour, the others the ghost colour.
+local function PaintCell(cell, ch, lr, lg, lb, la, gr, gg, gb, ga)
+    if cell.ch == ch and cell.lr == lr and cell.lg == lg and cell.lb == lb and cell.la == la
+        and cell.gr == gr and cell.gg == gg and cell.gb == gb and cell.ga == ga then
+        return
+    end
+    cell.ch, cell.lr, cell.lg, cell.lb, cell.la, cell.gr, cell.gg, cell.gb, cell.ga = ch, lr, lg, lb, la, gr, gg, gb, ga
+    local lit = ch and GLYPH[ch]
+    local seg = cell.seg
+    for n = 1, #SEGMENT_ORDER do
+        if lit and lit[n] then
+            seg[n]:SetVertexColor(lr, lg, lb, la)
+        else
+            seg[n]:SetVertexColor(gr, gg, gb, ga)
+        end
+    end
+end
+
+-- Shows or hides a region only when it is not already so (a repaint touches the same pieces every frame).
+local function ShowIf(region, want)
+    if region:IsShown() ~= want then region:SetShown(want) end
+end
+
+local function ShowCell(cell, want)
+    ShowIf(cell.frame, want)
+end
+
+-------------------------------------------------------------------------------
+-- Painting (texture and font writes only)
+-------------------------------------------------------------------------------
+
+local BG = { 13 / 255, 6 / 255, 32 / 255 }                 -- #0d0620
+local REC = { 6 / 255, 2 / 255, 16 / 255 }                 -- #060210 the gauge well
+local STALE = { 0xb9 / 255, 0xae / 255, 0xe0 / 255 }       -- #b9aee0 the kept rate
+local WHITE = { 1, 1, 1 }
 
 -- The font size for `text`: `px`, or smaller so the string stays inside `room` design px at the current scale; whole and half
 -- pixels only (rounded down), never below FT.MIN_PX.
@@ -466,16 +728,11 @@ local function SetText(fs, px, text)
     end
 end
 
-local function Hex(c)
-    return string.format("|cff%02x%02x%02x", math.floor(c[1] * 255 + 0.5), math.floor(c[2] * 255 + 0.5),
-        math.floor(c[3] * 255 + 0.5))
-end
-
 -- The rim: the border ring and its glow, lit cyan under the mouse.
-local function PaintRim(tile, color, colorA, glowColor, glowA)
+local function PaintRim(tile, hover, color, colorA, glowColor, glowA)
     local skin = tile.fsSkin
     local cyan = FS.Theme.COLOR_POWER
-    if tile.fsHover then
+    if hover then
         color, colorA, glowColor, glowA = cyan, 1, cyan, math.max(glowA, FT.CHROME.hoverGlow)
     end
     if skin and skin.border and skin.border.ring then
@@ -486,120 +743,317 @@ local function PaintRim(tile, color, colorA, glowColor, glowA)
     end
 end
 
-local scratch = { 0, 0, 0 }
+local function Q20(v)
+    return math.floor(v * 20 + 0.5)
+end
 
-local function PaintCells(tile)
+-- A quick effect repaints when its value moves by a hundredth (an alpha step nobody can see).
+local function Q100(v)
+    return math.floor(v * 100 + 0.5)
+end
+
+-- The glow behind the readout (steady and pulse share one rect): the texture's solid core sits over the lit area of the
+-- counting group or of the word. Seated again only when the group changes.
+local function SeatGlows(mode)
+    local led = FT.led
+    if led.glowMode == mode then return end
+    led.glowMode = mode
+    local g = mode == "word" and led.wordRect or led.countRect
+    for _, tex in ipairs(led.glows) do
+        tex:ClearAllPoints()
+        tex:SetPoint("CENTER", FT.host, "TOPLEFT", g[1], -g[2])
+        tex:SetSize(g[3] * FT.GLOW_W / FT.GLOW_CORE_W, g[4] * FT.GLOW_H / FT.GLOW_CORE_H)
+    end
+end
+
+-- The readout while the window runs (susp), or the held digits under the sweep: which cells show and what they spell.
+local DIGITS = { [0] = "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" }
+
+local function PaintCount(led, col, lc, litA, ghostA, zp, held, bx)
+    local cr, cg, cb = col[1], col[2], col[3]
+    local lr, lg, lb = lc[1], lc[2], lc[3]
+    local flashK = 0.85 * zp
+    lr, lg, lb = Lerp(lr, 1, flashK), Lerp(lg, 1, flashK), Lerp(lb, 1, flashK)
+    local ch1, ch2 = "0", "0"
+    if not held then
+        local tenths = math.floor(view.t * 10 + 0.5)
+        ch1, ch2 = DIGITS[math.floor(tenths / 10) % 10], DIGITS[tenths % 10]
+    end
+    -- band x of -1 shows everything; else a part shows while the band has not passed its centre
+    local k = held and bx or -1e9
+    local D = FT.DIGIT_X
+    local showTilde, showD1, showDot, showD2 = D.tilde > k, D.d1 > k, D.dot > k, D.d2 > k
+    for i = 1, 4 do
+        local bar = led.tilde[i]
+        ShowIf(bar, showTilde)
+        bar:SetVertexColor(lr, lg, lb, 1)
+    end
+    ShowIf(led.dot, showDot)
+    led.dot:SetVertexColor(lr, lg, lb, 1)
+    ShowCell(led.d1, showD1)
+    ShowCell(led.d2, showD2)
+    PaintCell(led.d1, ch1, lr, lg, lb, 1, cr, cg, cb, ghostA)
+    PaintCell(led.d2, ch2, lr, lg, lb, litA, cr, cg, cb, ghostA)
+    return lr, lg, lb
+end
+
+local WORD = { "R", "E", "G", "E", "N" }
+local wordColor = { 0, 0, 0 }
+
+local function PaintCells(zone)
     local T = FS.Theme
-    local amber, cyan, muted = T.COLOR_AMBER, T.COLOR_POWER, T.COLOR_MUTED
-    local violet = T.COLOR_BORDER
+    local amber, cyan, muted, violet = T.COLOR_AMBER, T.COLOR_POWER, T.COLOR_MUTED, T.COLOR_BORDER
     local v = view
     local susp = v.phase == "susp"
     local f = susp and 1 or v.fade
-    local hover = tile.fsHover and true or false
+    local hover = zone.fsHover and true or false
     local tenths = susp and math.floor(v.t * 10 + 0.5) or -1
-    local fq, pq = math.floor(f * 20 + 0.5), math.floor(v.pulse * 20 + 0.5)
-    if tile.fsSig and tile.fsPhase == v.phase and tile.fsTenths == tenths and tile.fsFq == fq and tile.fsPq == pq
-        and tile.fsHov == hover then
+    local fq, pq = Q20(f), Q20(v.pulse)
+    local flashQ, zpQ, warmQ, dropQ = Q100(fx.flash), Q100(fx.zp), Q100(fx.warm), Q100(fx.dropA)
+    -- the sweep band moves a design px at a time; the glow breathes and flares in hundredths
+    local ppQ, breathQ, flareQ = math.floor(fx.pp * FT.HERO.w + 0.5), fx.breath and Q100(fx.breath) or -1, Q100(fx.flare)
+    local K = FT.sigCells
+    if K.on and K.phase == v.phase and K.tenths == tenths and K.fq == fq and K.pq == pq and K.hover == hover
+        and K.flash == flashQ and K.zp == zpQ and K.warm == warmQ and K.drop == dropQ and K.dropSeg == fx.dropSeg
+        and K.pp == ppQ and K.breath == breathQ and K.flare == flareQ and K.dip == fx.dip and K.sweeping == (fx.pp < 1) then
         return
     end
-    tile.fsSig, tile.fsPhase, tile.fsTenths, tile.fsFq, tile.fsPq, tile.fsHov = true, v.phase, tenths, fq, pq, hover
+    K.on, K.phase, K.tenths, K.fq, K.pq, K.hover = true, v.phase, tenths, fq, pq, hover
+    K.flash, K.zp, K.warm, K.drop, K.dropSeg, K.pp, K.breath, K.flare, K.dip, K.sweeping =
+        flashQ, zpQ, warmQ, dropQ, fx.dropSeg, ppQ, breathQ, flareQ, fx.dip, fx.pp < 1
 
-    local h = FT.CELL_H * Scale()
-    local cellA = FT.IDLE_CELL_ALPHA + (1 - FT.IDLE_CELL_ALPHA) * f
-    for i, cell in ipairs(tile.fsCells) do
-        local a = susp and math.max(0, math.min(1, v.t - (i - 1))) or 1
-        if a > 0 then
-            cell.fill:SetHeight(h * a)
-            cell.fill:Show()
-        else
-            cell.fill:Hide()
-        end
-        local c = susp and amber or cyan
-        cell.fill:SetVertexColor(c[1], c[2], c[3], susp and 1 or cellA)
-    end
+    local led = FT.led
+    local hero = FT.hero
+    local C = FT.CHROME
+    local b = fx.breath
+    local zp = fx.zp
+    local sweeping = fx.pp < 1
+    local bx = FT.HERO.x + ppQ                          -- the sweep band, design px from the host's left
 
-    local K = FT.CHROME
-    local glowA, ringA = K.idleGlow, K.idleRing
+    -- the hero tile: plate, rim, glow
     if susp then
-        scratch[1], scratch[2], scratch[3] = Lerp(BG[1], amber[1], 0.09), Lerp(BG[2], amber[2], 0.09), Lerp(BG[3], amber[3], 0.09)
-        tile.fsPlate:SetVertexColor(scratch[1], scratch[2], scratch[3], 0.9)
-        PaintRim(tile, amber, K.suspRing, amber, K.suspGlow)
-        tile.fsLine:SetVertexColor(amber[1], amber[2], amber[3], 0.9)
-        SetText(tile.fsText, FT.TEXT_PX, Hex(amber) .. "~|r" .. string.format("%.1f", math.max(0, v.t)))
-        tile.fsText:SetTextColor(1, 1, 1, 1)
+        local r, g, bl = Mix(BG, amber, 0.09)
+        hero.fsPlate:SetVertexColor(r, g, bl, 0.9)
+        PaintRim(hero, hover, amber, C.suspRing, amber, C.suspGlow)
     else
-        -- idle (f = 0) to the regen look (f = 1)
-        scratch[1], scratch[2], scratch[3] = Lerp(BG[1], Lerp(BG[1], cyan[1], 0.1), f), Lerp(BG[2], Lerp(BG[2], cyan[2], 0.1), f),
-            Lerp(BG[3], Lerp(BG[3], cyan[3], 0.1), f)
-        tile.fsPlate:SetVertexColor(scratch[1], scratch[2], scratch[3], Lerp(0.72, 0.9, f))
-        ringA = Lerp(K.idleRing, K.regenRing, f)
-        glowA = K.regenGlow * f + K.pulseGlow * v.pulse
-        scratch[1], scratch[2], scratch[3] = Lerp(violet[1], cyan[1], f), Lerp(violet[2], cyan[2], f), Lerp(violet[3], cyan[3], f)
-        PaintRim(tile, scratch, ringA, cyan, glowA)
-        Tint(tile.fsLine, muted, cyan, f, Lerp(0.5, 0.9, f))
-        local size = FitPx("REGEN", FT.REGEN_PX, FT.BTN - 2 * FT.TEXT_INSET)
-        SetText(tile.fsText, size, "REGEN")
-        TintText(tile.fsText, muted, cyan, f, Lerp(0.75, 1, f))
+        local r, g, bl = Mix(BG, cyan, 0.1 * f)
+        hero.fsPlate:SetVertexColor(r, g, bl, Lerp(0.72, 0.9, f))
+        local ringA = Lerp(b and (C.breathRing + C.breathRingSwing * b) or C.idleRing, C.regenRing, f)
+        local glowA = C.regenGlow * f + C.flareGlow * fx.flare + (1 - f) * (b and C.breathGlow * b or 0)
+        scratch[1], scratch[2], scratch[3] = Mix(violet, cyan, f)
+        PaintRim(hero, hover, scratch, ringA, scratch, glowA)
     end
+
+    -- the LED readout
+    local ghostA, litA
+    if susp then
+        local col = amber
+        local lc = col
+        if fx.warm > 0 then
+            local w = fx.warm
+            local hr, hg, hb = Mix(amber, WHITE, 0.8)
+            if w < 0.5 then
+                scratch[1], scratch[2], scratch[3] = Lerp(amber[1], hr, w * 2), Lerp(amber[2], hg, w * 2), Lerp(amber[3], hb, w * 2)
+            else
+                scratch[1], scratch[2], scratch[3] = Lerp(hr, cyan[1], (w - 0.5) * 2), Lerp(hg, cyan[2], (w - 0.5) * 2),
+                    Lerp(hb, cyan[3], (w - 0.5) * 2)
+            end
+            lc = scratch
+        end
+        ghostA = FT.GHOST_COUNT + FT.GHOST_LIFT * zp
+        litA = fx.dip and (1 - FT.DIP_DEPTH) or 1
+        for i = 1, 5 do ShowCell(led.word[i], false) end
+        local lr, lg, lb = PaintCount(led, col, lc, litA, ghostA, zp, false, 0)
+        led.glow:SetVertexColor(lr, lg, lb, FT.GLOW_STEADY)
+        led.pulse:SetVertexColor(lr, lg, lb, zp * FT.GLOW_PULSE)
+        SeatGlows("count")
+    else
+        local col = wordColor
+        col[1], col[2], col[3] = Mix(muted, cyan, f)
+        litA = Lerp(FT.WORD_IDLE, 1, f)
+        ghostA = Lerp(FT.GHOST_IDLE, FT.GHOST_RES, f)
+        -- the held countdown digits, cyan, until the band has passed each one
+        local held = sweeping and on.digits
+        if held then
+            PaintCount(led, cyan, cyan, 1, ghostA, 0, true, bx)
+        else
+            ShowCell(led.d1, false)
+            ShowCell(led.d2, false)
+            for i = 1, 4 do ShowIf(led.tilde[i], false) end
+            ShowIf(led.dot, false)
+        end
+        local W = FT.WORD_X
+        for i = 1, 5 do
+            local cell = led.word[i]
+            ShowCell(cell, true)
+            local cx = W + (i - 1) * 12 + 5
+            local masked = held and cx > bx
+            local hot = 0
+            if held and not masked then
+                local dx = math.abs(cx - bx)
+                if dx < 9 then hot = 0.8 * (1 - dx / 9) end
+            end
+            local lr, lg, lb = Lerp(col[1], 1, hot), Lerp(col[2], 1, hot), Lerp(col[3], 1, hot)
+            PaintCell(cell, (not masked) and WORD[i] or nil, lr, lg, lb, litA, col[1], col[2], col[3], ghostA)
+        end
+        led.glow:SetVertexColor(col[1], col[2], col[3], FT.GLOW_STEADY * f)
+        led.pulse:SetVertexColor(col[1], col[2], col[3], 0)
+        SeatGlows("word")
+    end
+
+    -- the gauge
+    local gaugeCol = susp and amber or cyan
+    local n = FT.GAUGE_N
+    local lit = susp and Clamp01(v.t / FT.WINDOW) * n or 0
+    for i = 1, n do
+        local seg = FT.gauge.seg[i]
+        if susp then
+            local a = Clamp01(lit - (i - 1))
+            if i == fx.dropSeg then
+                seg:SetVertexColor(amber[1], amber[2], amber[3], math.max(FT.GAUGE_OFF, fx.dropA))
+            elseif a > 0 then
+                seg:SetVertexColor(amber[1], amber[2], amber[3], 0.45 + 0.55 * a)
+            else
+                seg:SetVertexColor(violet[1], violet[2], violet[3], FT.GAUGE_OFF)
+            end
+        else
+            local x = FT.GAUGE_X + (i - 1) * FT.GAUGE_PITCH + FT.GAUGE_SEG_W / 2
+            if sweeping and math.abs(x - bx) < 9 then
+                seg:SetVertexColor(1, 1, 1, 0.95)
+            else
+                seg:SetVertexColor(cyan[1], cyan[2], cyan[3], Lerp(b and (0.24 + 0.14 * b) or FT.GAUGE_IDLE, 0.85, f))
+            end
+        end
+    end
+    FT.gauge.glow:SetVertexColor(gaugeCol[1], gaugeCol[2], gaugeCol[3], susp and FT.GAUGE_GLOW or FT.GAUGE_GLOW * f)
+
+    FT.cells:SetAlpha(Lerp(FT.IDLE_ALPHA, 1, f))
+    FT.fxFlash:SetVertexColor(1, 1, 1, FT.FLASH_ALPHA * fx.flash)
 end
 
 local HOLLOW_MIX = 0.25
 
-local function PaintRate(tile)
+local function PaintRate(zone)
     local T = FS.Theme
-    local cyan, muted, white = T.COLOR_POWER, T.COLOR_MUTED, T.COLOR_TEXT_WHITE
-    local violet = T.COLOR_BORDER
+    local cyan, muted, violet = T.COLOR_POWER, T.COLOR_MUTED, T.COLOR_BORDER
     local v = view
-    local hover = tile.fsHover and true or false
+    local hover = zone.fsHover and true or false
+    local idle = v.phase == "idle"
     local act = v.phase == "susp" and 1 or v.fade
-    local aq = math.floor(act * 20 + 0.5)
     local hasRate = v.rateText ~= nil
-    if tile.fsSig and tile.fsRate == v.rateText and tile.fsCached == v.cached and tile.fsRet == v.ret
-        and tile.fsAq == aq and tile.fsHov == hover and tile.fsHas == hasRate then
+    local kept = hasRate and v.cached
+    local aq, tq, gq = Q20(act), Q100(fx.tick), Q100(fx.glitchA)
+    local K = FT.sigRate
+    if K.on and K.rate == v.rateText and K.cached == v.cached and K.ret == v.ret and K.aq == aq and K.hover == hover
+        and K.has == hasRate and K.tq == tq and K.gq == gq and K.gdx == fx.glitchDx and K.idle == idle then
         return
     end
-    tile.fsSig, tile.fsRate, tile.fsCached, tile.fsRet, tile.fsAq, tile.fsHov, tile.fsHas =
-        true, v.rateText, v.cached, v.ret, aq, hover, hasRate
+    K.on, K.rate, K.cached, K.ret, K.aq, K.hover, K.has, K.tq, K.gq, K.gdx, K.idle =
+        true, v.rateText, v.cached, v.ret, aq, hover, hasRate, tq, gq, fx.glitchDx, idle
 
-    tile.fsPlate:SetVertexColor(BG[1], BG[2], BG[3], 0.72)
-    PaintRim(tile, violet, FT.CHROME.idleRing, violet, FT.CHROME.idleGlow)
-
-    local chip = tile.fsChip
-    if v.ret then
-        chip.fill:SetVertexColor(Lerp(BG[1], cyan[1], 0.3), Lerp(BG[2], cyan[2], 0.3), Lerp(BG[3], cyan[3], 0.3), 1)
-        chip.ring:SetVertexColor(cyan[1], cyan[2], cyan[3], 1)
-        chip.glow:SetVertexColor(cyan[1], cyan[2], cyan[3], FT.CHROME.chipGlow)
-        chip.code:SetTextColor(white[1], white[2], white[3], 1)
-        SetText(chip.code, FitPx(v.ret .. "%", FT.CODE_PX, FT.CHIP_W - 2), v.ret .. "%")
-    else
-        local r, g, b = Lerp(muted[1], 1, HOLLOW_MIX), Lerp(muted[2], 1, HOLLOW_MIX), Lerp(muted[3], 1, HOLLOW_MIX)
-        chip.fill:SetVertexColor(BG[1], BG[2], BG[3], 0.7)
-        chip.ring:SetVertexColor(r, g, b, 1)
-        chip.glow:SetVertexColor(r, g, b, 0)
-        chip.code:SetTextColor(r, g, b, 1)
-        SetText(chip.code, FitPx("0%", FT.CODE_PX, FT.CHIP_W - 2), "0%")
-    end
-
+    local gA, gDx = fx.glitchA, fx.glitchDx
     local text = hasRate and (v.rateText .. "/s") or "--"
     local base = (hasRate and #v.rateText >= 4) and FT.RATE_LONG_PX or FT.RATE_PX
-    SetText(tile.fsText, FitPx(text, base, FT.BTN - 2 * FT.TEXT_INSET), text)
-    tile.fsText:SetTextColor(white[1], white[2], white[3], Lerp(0.8, 1, act))
-    tile.fsLine:SetVertexColor(cyan[1], cyan[2], cyan[3], Lerp(0.5, 0.9, act))
-    local dashed = v.cached and 1 or 0
-    for _, dash in ipairs(tile.fsDashes) do dash:SetAlpha(dashed) end
+    local size = FitPx(text, base, FT.RATE_ROOM)
+    local fs = FT.rateText
+    SetText(fs, size, text)
+    local color = kept and STALE or ((not hasRate or idle) and muted or WHITE)
+    fs:SetTextColor(color[1], color[2], color[3], gA)
+    -- seat: left aligned at the bar's left, centre line a third of the size above the baseline, whole pixels
+    local s, px = Scale(), FT.px
+    local cy = math.floor((FT.RATE_BASE - size * 0.36) + 0.5)
+    if fs.fsX ~= gDx or fs.fsY ~= cy then
+        fs.fsX, fs.fsY = gDx, cy
+        fs:ClearAllPoints()
+        fs:SetPoint("LEFT", FT.host, "TOPLEFT", FT.Snap(FT.RATE_X) + gDx * px, -FT.Snap(cy))
+    end
+
+    -- the bar under it: solid, dashed while the numbers are the kept ones, plain muted when there is no reading
+    local widthUI = #text * size * FT.ADVANCE
+    local wd = math.floor(widthUI / s + 0.5)         -- design px, whole (the page rounds it the same way)
+    local bar = FT.rateBar
+    local pk = (not kept and hasRate and fx.tick > 0.5) and 1 or 0
+    if kept then
+        ShowIf(bar.solid, false)
+        ShowIf(bar.hi, false)
+        local count = math.min(#bar.dash, math.ceil(wd / FT.DASH_PITCH))
+        for i, dash in ipairs(bar.dash) do
+            if i <= count then
+                local x = (i - 1) * FT.DASH_PITCH
+                FT.Place(dash, FT.RATE_X + x, FT.RATE_BAR_Y, math.min(FT.DASH_ON, wd - x), 2)
+                dash:SetVertexColor(STALE[1], STALE[2], STALE[3], 0.9)
+                ShowIf(dash, true)
+            else
+                ShowIf(dash, false)
+            end
+        end
+    else
+        for _, dash in ipairs(bar.dash) do ShowIf(dash, false) end
+        FT.Place(bar.solid, FT.RATE_X, FT.RATE_BAR_Y - pk, wd, 2 + 2 * pk)
+        ShowIf(bar.solid, true)
+        if not hasRate then
+            bar.solid:SetVertexColor(muted[1], muted[2], muted[3], 0.7)
+        else
+            local r, g, b = Mix(muted, cyan, act)
+            bar.solid:SetVertexColor(r, g, b, Lerp(0.45, 0.95, act))
+        end
+        if pk > 0 then
+            FT.Place(bar.hi, FT.RATE_X, FT.RATE_BAR_Y - pk, wd, 2 + 2 * pk)
+            bar.hi:SetVertexColor(1, 1, 1, 0.5)
+            ShowIf(bar.hi, true)
+        else
+            ShowIf(bar.hi, false)
+        end
+    end
+
+    -- the retention chip
+    local chip = FT.chip
+    local tk = fx.tick
+    local ret = v.ret
+    local codeColor
+    if ret then
+        chip.fill:SetVertexColor(Lerp(BG[1], cyan[1], 0.3), Lerp(BG[2], cyan[2], 0.3), Lerp(BG[3], cyan[3], 0.3), 1)
+        chip.ring:SetVertexColor(cyan[1], cyan[2], cyan[3], 1)
+        chip.glow:SetVertexColor(cyan[1], cyan[2], cyan[3], FT.CHROME.chipGlow + FT.CHROME.chipTick * tk)
+        codeColor = WHITE
+        SetText(chip.code, FitPx(ret .. "%", FT.CODE_PX, FT.CHIP_ROOM), ret .. "%")
+    else
+        local r, g, b = Lerp(muted[1], 1, HOLLOW_MIX), Lerp(muted[2], 1, HOLLOW_MIX), Lerp(muted[3], 1, HOLLOW_MIX)
+        chip.fill:SetVertexColor(BG[1], BG[2], BG[3], 0.75)
+        if tk > 0 then
+            chip.ring:SetVertexColor(cyan[1], cyan[2], cyan[3], 0.5 + 0.5 * tk)
+        else
+            chip.ring:SetVertexColor(r, g, b, idle and 0.5 or 0.9)
+        end
+        chip.glow:SetVertexColor(r, g, b, 0)
+        scratch[1], scratch[2], scratch[3] = r, g, b
+        codeColor = scratch
+        local code = hasRate and "0%" or "--"
+        SetText(chip.code, FitPx(code, FT.CODE_PX, FT.CHIP_ROOM), code)
+    end
+    chip.code:SetTextColor(codeColor[1], codeColor[2], codeColor[3], (idle and FT.CHIP_IDLE_TEXT or 1) * gA)
+    if chip.code.fsX ~= gDx then
+        chip.code.fsX = gDx
+        chip.code:ClearAllPoints()
+        chip.code:SetPoint("CENTER", chip.fill, "CENTER", gDx * px, 0)
+    end
+    if hover then
+        chip.ring:SetVertexColor(cyan[1], cyan[2], cyan[3], 1)
+    end
+    FT.rate:SetAlpha(Lerp(FT.IDLE_ALPHA, 1, act))
 end
 
 function Tab.Paint()
-    if not FT.built then return end
+    if not FT.built or not FT.led then return end
     PaintCells(FT.cells)
     PaintRate(FT.rate)
-    for _, tile in ipairs(FT.tiles) do
-        if TipIsOurs(tile) then ShowTooltip(tile, true) end
+    for _, zone in ipairs(FT.tiles) do
+        if TipIsOurs(zone) then ShowTooltip(zone, true) end
     end
 end
 
 -------------------------------------------------------------------------------
--- The tiles
+-- The face
 -------------------------------------------------------------------------------
 
 local function NewText(parent, px)
@@ -609,151 +1063,292 @@ local function NewText(parent, px)
     return fs
 end
 
--- Runs once per tile, from Build and again on every re-seat. Everything that creates a region or hook is guarded so a
--- throw partway is finished by the next Build.
-local function StyleTile(tile, scale)
+-- Pixel crisp: a texture snapped to the pixel grid with no texel bias, where the client has the calls (GunsightFrame.lua).
+local function Crisp(tex)
+    if tex.SetSnapToPixelGrid then pcall(tex.SetSnapToPixelGrid, tex, true) end
+    if tex.SetTexelSnappingBias then pcall(tex.SetTexelSnappingBias, tex, 0) end
+    return tex
+end
+
+local function FlatTexture(parent, layer, sub)
+    local tex = Crisp(parent:CreateTexture(nil, layer or "ARTWORK", nil, sub or 0))
+    tex:SetColorTexture(1, 1, 1, 1)
+    return tex
+end
+
+-- UI units per physical pixel (PixelUtil's factor over the host's effective scale), or nil when the client will not say.
+local function PixelUnit()
+    local factor
+    local pixelUtil, physical = _G.PixelUtil, _G.GetPhysicalScreenSize
+    if type(pixelUtil) == "table" and type(pixelUtil.GetPixelToUIUnitFactor) == "function" then
+        local ok, v = pcall(pixelUtil.GetPixelToUIUnitFactor)
+        if ok then factor = v end
+    elseif type(physical) == "function" then
+        local ok, _, h = pcall(physical)
+        if ok and type(h) == "number" and not IsSecret(h) and h > 0 then factor = 768 / h end
+    end
+    if type(factor) ~= "number" or IsSecret(factor) or factor ~= factor or factor <= 0 or factor == math.huge then return nil end
+    local scale = 1
+    local host = FT.host
+    if host and host.GetEffectiveScale then
+        local ok, v = pcall(host.GetEffectiveScale, host)
+        if ok and type(v) == "number" and not IsSecret(v) and v > 0 and v < math.huge then scale = v end
+    end
+    return factor / scale
+end
+
+-- The grid for this scale: px UI units a physical pixel; n physical pixels a texel of the LED art (a whole number, so the
+-- art is never scaled fractionally), the nearest to a design px that still leaves the ring clear of the hero tile; u = n * px
+-- the UI units of one texel. The Layout scale is the UI height over 1440, so a design px is physical height / 1440 pixels
+-- whatever the UI scale slider says: one on a 1440 screen (px = the scale, n = 1), 1.5 on 2160 (n = 1: two would fill the tile).
+local function SeatGrid()
+    local s = Scale()
+    local px = PixelUnit() or s
+    FT.s, FT.px = s, px
+    local ratio = s / px
+    local fit = math.floor((FT.HERO.h * ratio - 2) / FT.CELL_H)
+    FT.n = math.max(1, math.min(math.floor(ratio + 0.5), fit))
+    FT.u = FT.n * px
+end
+
+-- `d` design px as a whole count of physical pixels.
+local function PixelsOf(d)
+    return math.floor(d * FT.s / FT.px + 0.5)
+end
+
+function FT.Snap(d)
+    return PixelsOf(d) * FT.px
+end
+
+-- Seats `region` over the design rect (x, y from the host's top left, w, h), edge by edge on whole pixels so neighbours
+-- keep their joint.
+function FT.Place(region, x, y, w, h)
+    local px = FT.px
+    local l, t = PixelsOf(x), PixelsOf(y)
+    local r, b = PixelsOf(x + w), PixelsOf(y + h)
+    region:ClearAllPoints()
+    region:SetPoint("TOPLEFT", FT.host, "TOPLEFT", l * px, -t * px)
+    region:SetSize((r - l) * px, (b - t) * px)
+end
+local Place = FT.Place
+
+-- Seats `region` at a whole pixel count (x, y: pixels from the host's top left) with a size in pixels.
+local function PlacePx(region, x, y, w, h)
+    local px = FT.px
+    region:ClearAllPoints()
+    region:SetPoint("TOPLEFT", FT.host, "TOPLEFT", x * px, -y * px)
+    region:SetSize(w * px, h * px)
+end
+
+local function NewCell(parent, level)
+    local frame = CreateFrame("Frame", nil, parent)
+    frame:EnableMouse(false)
+    frame:SetFrameLevel(level)
+    local cell = { frame = frame, seg = {} }
+    for n = 1, #SEGMENT_ORDER do
+        local tex = Crisp(frame:CreateTexture(nil, "ARTWORK", nil, 1))
+        tex:SetTexture(MEDIA .. "led_segments.tga")
+        local l, t = ((n - 1) % 4) * 0.25, math.floor((n - 1) / 4) * 0.25
+        tex:SetTexCoord(l, l + FT.CELL_W / FT.ATLAS, t, t + FT.CELL_H / FT.ATLAS)
+        cell.seg[n] = tex
+    end
+    return cell
+end
+
+-- Creates every region of the face once; a throw partway is finished by the next Build (each group is guarded).
+local function BuildFace()
     local T = FS.Theme
-    local s = scale
-    tile:SetSize(FT.BTN * s, FT.BTN * s)
-
-    if not tile.fsPlate then
-        tile.fsPlate = T.AddCut2Texture(tile, T.SLICE_CUT2_BUTTON_TEXTURE, { 1, 1, 1, 1 }, "BACKGROUND", -8)
+    local host = FT.host
+    local cells, rateZone = FT.cells, FT.rate
+    if not FT.hero then
+        local hero = CreateFrame("Frame", nil, cells)
+        hero:EnableMouse(false)
+        hero.fsPlate = T.AddCut2Texture(hero, T.SLICE_CUT2_BUTTON_TEXTURE, { 1, 1, 1, 1 }, "BACKGROUND", -8)
+        T.SkinCutButton(hero, { borderColor = T.COLOR_BORDER, glowAlpha = FT.CHROME.idleGlow })
+        FT.hero = hero
     end
-    T.SkinCutButton(tile, { borderColor = T.COLOR_BORDER, glowAlpha = FT.CHROME.idleGlow })
-
-    if not tile.fsHooked then
-        tile.fsHooked = true
-        tile:EnableMouse(true)
-        tile:SetScript("OnEnter", function(self)
-            self.fsHover = true
-            self.fsSig = nil
-            Tab.Paint()
-            ShowTooltip(self)
-        end)
-        tile:SetScript("OnLeave", function(self)
-            self.fsHover = nil
-            self.fsSig = nil
-            Tab.Paint()
-            GameTooltip:Hide()
-        end)
-        -- a hidden host (a Druid form change, the master toggle) sends no OnLeave: forget the hover, and hide the tooltip
-        -- only while it is this tile's
-        tile:SetScript("OnHide", function(self)
-            local ours = TipIsOurs(self)
-            self.fsHover = nil
-            self.fsSig = nil
-            if ours then GameTooltip:Hide() end
-        end)
-    end
-
-    if not tile.fsFace then
-        local face = CreateFrame("Frame", nil, tile)
-        face:SetAllPoints(tile)
-        face:EnableMouse(false)
-        tile.fsFace = face
-
-        tile.fsText = NewText(face, FT.TEXT_PX)
-        tile.fsText:SetJustifyH("CENTER")
-        tile.fsLine = face:CreateTexture(nil, "OVERLAY", nil, 2)
-        tile.fsLine:SetColorTexture(1, 1, 1, 1)
-
-        if tile.fsKey == "cells" then
+    if not FT.gauge then
+        local body = CreateFrame("Frame", nil, cells)
+        body:EnableMouse(false)
+        body:SetFrameLevel(cells:GetFrameLevel() + 3)
+        local g = { frame = body, seg = {}, line = {} }
+        g.glow = Crisp(body:CreateTexture(nil, "BACKGROUND", nil, 1))
+        g.glow:SetTexture(MEDIA .. "led_glow.tga")
+        g.glow:SetBlendMode("ADD")
+        g.plate = FlatTexture(body, "BACKGROUND", 2)
+        g.plate:SetVertexColor(REC[1], REC[2], REC[3], 0.9)
+        for k = 1, 4 do
+            g.line[k] = FlatTexture(body, "BORDER", 0)
             local v = T.COLOR_BORDER
-            tile.fsCells = {}
-            for i = 1, FT.CELLS do
-                local cell = { edges = {} }
-                for k = 1, 4 do
-                    local edge = face:CreateTexture(nil, "ARTWORK", nil, 0)
-                    edge:SetColorTexture(v[1], v[2], v[3], 0.5)
-                    cell.edges[k] = edge
-                end
-                cell.fill = face:CreateTexture(nil, "ARTWORK", nil, 1)
-                cell.fill:SetColorTexture(1, 1, 1, 1)
-                tile.fsCells[i] = cell
-            end
-        else
-            local c = FT.CHIP_C
-            local ringPath, glowPath = MEDIA .. "slice_cut2_outline_c3.tga", MEDIA .. "slice_cut2_glow_c3.tga"
-            if T.Cut2ButtonSet then
-                local ok, ring, glow, used = pcall(T.Cut2ButtonSet, FT.CHIP_C)
-                if ok and type(ring) == "string" and type(glow) == "string" then
-                    ringPath, glowPath, c = ring, glow, used or c
-                end
-            end
-            local chip = {}
-            chip.glow = face:CreateTexture(nil, "BACKGROUND", nil, 0)
-            chip.glow:SetTexture(glowPath)
-            T.ApplyNineSlice(chip.glow, (T.SLICE_CUT2_GLOW_PAD or 4) + c)
-            chip.glow:SetBlendMode("ADD")
-            chip.fill = face:CreateTexture(nil, "BACKGROUND", nil, 1)
-            chip.fill:SetTexture(MEDIA .. "slice_cut2_fill_c" .. c .. ".tga")
-            T.ApplyNineSlice(chip.fill, c)
-            chip.ring = face:CreateTexture(nil, "ARTWORK", nil, 0)
-            chip.ring:SetTexture(ringPath)
-            T.ApplyNineSlice(chip.ring, c)
-            chip.code = NewText(face, FT.CODE_PX)
-            chip.code:SetJustifyH("CENTER")
-            tile.fsChip = chip
-            tile.fsDashes = {}
-            for i = 1, 4 do
-                local dash = face:CreateTexture(nil, "OVERLAY", nil, 3)
-                dash:SetColorTexture(GAP_FILL[1], GAP_FILL[2], GAP_FILL[3], 1)
-                dash:SetAlpha(0)
-                tile.fsDashes[i] = dash
-            end
+            g.line[k]:SetVertexColor(v[1], v[2], v[3], 0.4)
         end
+        for i = 1, FT.GAUGE_N do g.seg[i] = FlatTexture(body, "ARTWORK", 0) end
+        FT.gauge = g
+        FT.body = body
     end
-
-    tile.fsText:ClearAllPoints()
-    tile.fsText:SetPoint("CENTER", tile, "TOP", 0, -FT.TEXT_Y * s)
-    tile.fsLine:ClearAllPoints()
-    tile.fsLine:SetPoint("BOTTOMLEFT", tile, "BOTTOMLEFT", 5 * s, 3 * s)
-    tile.fsLine:SetPoint("BOTTOMRIGHT", tile, "BOTTOMRIGHT", -5 * s, 3 * s)
-    tile.fsLine:SetHeight(2 * s)
-
-    if tile.fsCells then
-        local w, h, t = FT.CELL_W * s, FT.CELL_H * s, 1 * s
-        local bottom = (FT.BTN - FT.CELL_Y - FT.CELL_H) * s
-        for i, cell in ipairs(tile.fsCells) do
-            local x = (FT.CELL_X + (i - 1) * FT.CELL_PITCH) * s
-            local top, under, left, right = cell.edges[1], cell.edges[2], cell.edges[3], cell.edges[4]
-            top:ClearAllPoints()
-            top:SetPoint("TOPLEFT", tile, "TOPLEFT", x, -FT.CELL_Y * s)
-            top:SetSize(w, t)
-            under:ClearAllPoints()
-            under:SetPoint("BOTTOMLEFT", tile, "BOTTOMLEFT", x, bottom)
-            under:SetSize(w, t)
-            left:ClearAllPoints()
-            left:SetPoint("TOPLEFT", tile, "TOPLEFT", x, -FT.CELL_Y * s)
-            left:SetSize(t, h)
-            right:ClearAllPoints()
-            right:SetPoint("TOPLEFT", tile, "TOPLEFT", x + w - t, -FT.CELL_Y * s)
-            right:SetSize(t, h)
-            cell.fill:ClearAllPoints()
-            cell.fill:SetPoint("BOTTOMLEFT", tile, "BOTTOMLEFT", x, bottom)
-            cell.fill:SetWidth(w)
-            cell.fill:SetHeight(h)
+    if not FT.led then
+        local body = FT.body
+        local led = { word = {}, tilde = {} }
+        led.glow = Crisp(body:CreateTexture(nil, "BACKGROUND", nil, 3))
+        led.glow:SetTexture(MEDIA .. "led_glow.tga")
+        led.glow:SetBlendMode("ADD")
+        led.pulse = Crisp(body:CreateTexture(nil, "BACKGROUND", nil, 4))
+        led.pulse:SetTexture(MEDIA .. "led_glow.tga")
+        led.pulse:SetBlendMode("ADD")
+        led.glows = { led.glow, led.pulse }
+        local level = body:GetFrameLevel() + 1
+        led.d1, led.d2 = NewCell(body, level), NewCell(body, level)
+        for i = 1, 5 do led.word[i] = NewCell(body, level) end
+        led.cells = { led.d1, led.d2, led.word[1], led.word[2], led.word[3], led.word[4], led.word[5] }
+        for i = 1, 4 do led.tilde[i] = FlatTexture(body, "ARTWORK", 1) end
+        led.dot = FlatTexture(body, "ARTWORK", 1)
+        FT.led = led
+    end
+    if not FT.fxFrame then
+        local frame = CreateFrame("Frame", nil, host)
+        frame:EnableMouse(false)
+        frame:SetClipsChildren(true)
+        frame:SetFrameLevel(host:GetFrameLevel() + 8)
+        FT.fxFrame = frame
+        FT.fxFlash = FlatTexture(frame, "OVERLAY", 7)
+        FT.fxFlash:SetAllPoints(frame)
+        FT.fxFlash:SetVertexColor(1, 1, 1, 0)
+    end
+    if not FT.chip then
+        local c = FT.CHIP_C
+        local ringPath, glowPath = MEDIA .. "slice_cut2_outline_c3.tga", MEDIA .. "slice_cut2_glow_c3.tga"
+        if T.Cut2ButtonSet then
+            local ok, ring, glow, used = pcall(T.Cut2ButtonSet, FT.CHIP_C)
+            if ok and type(ring) == "string" and type(glow) == "string" then
+                ringPath, glowPath, c = ring, glow, used or c
+            end
         end
-    else
-        local chip = tile.fsChip
-        local x = (FT.BTN - FT.CHIP_W) / 2 * s
-        for _, tex in ipairs({ chip.fill, chip.ring }) do
+        local chip = {}
+        chip.glow = rateZone:CreateTexture(nil, "BACKGROUND", nil, 0)
+        chip.glow:SetTexture(glowPath)
+        T.ApplyNineSlice(chip.glow, (T.SLICE_CUT2_GLOW_PAD or 4) + c)
+        chip.glow:SetBlendMode("ADD")
+        chip.fill = rateZone:CreateTexture(nil, "BACKGROUND", nil, 1)
+        chip.fill:SetTexture(MEDIA .. "slice_cut2_fill_c" .. c .. ".tga")
+        T.ApplyNineSlice(chip.fill, c)
+        chip.ring = rateZone:CreateTexture(nil, "ARTWORK", nil, 0)
+        chip.ring:SetTexture(ringPath)
+        T.ApplyNineSlice(chip.ring, c)
+        chip.code = NewText(rateZone, FT.CODE_PX)
+        chip.code:SetJustifyH("CENTER")
+        FT.chip = chip
+    end
+    if not FT.rateBar then
+        local bar = { dash = {} }
+        bar.solid = FlatTexture(rateZone, "OVERLAY", 1)
+        bar.hi = FlatTexture(rateZone, "OVERLAY", 2)
+        bar.hi:Hide()
+        for i = 1, FT.DASHES do
+            bar.dash[i] = FlatTexture(rateZone, "OVERLAY", 1)
+            bar.dash[i]:Hide()
+        end
+        FT.rateBar = bar
+    end
+    if not FT.rateText then
+        FT.rateText = NewText(rateZone, FT.RATE_PX)
+        FT.rateText:SetJustifyH("LEFT")
+    end
+end
+
+-- Runs from Build and again on every re-seat: sizes and points only, on whole pixels.
+local function LayoutFace()
+    local s = Scale()
+    SeatGrid()
+    local px, n, u = FT.px, FT.n, FT.u
+    local H = FT.HERO
+    FT.host:SetSize(FT.HOST_W * s, FT.HOST_H * s)
+
+    Place(FT.cells, H.x, H.y, H.w, FT.GAUGE_Y + FT.GAUGE_H - H.y)
+    Place(FT.rate, H.x, FT.RATE_ZONE_Y, H.w, FT.CHIP.y + FT.CHIP.h - FT.RATE_ZONE_Y)
+    Place(FT.fxFrame, H.x, H.y, H.w, FT.FACE_H)
+    Place(FT.hero, H.x, H.y, H.w, H.h)
+    FT.cells.fsSig = nil
+    FT.sigCells.on = nil
+    FT.sigRate.on = nil
+
+    -- the gauge: the well, its outline, ten segments
+    local G = FT.gauge
+    Place(G.plate, FT.GAUGE_WELL.x, FT.GAUGE_Y, FT.GAUGE_WELL.w, FT.GAUGE_H)
+    local wx, wy, ww, wh = FT.GAUGE_WELL.x, FT.GAUGE_Y, FT.GAUGE_WELL.w, FT.GAUGE_H
+    Place(G.line[1], wx, wy, ww, 1)
+    Place(G.line[2], wx, wy + wh - 1, ww, 1)
+    Place(G.line[3], wx, wy + 1, 1, wh - 2)
+    Place(G.line[4], wx + ww - 1, wy + 1, 1, wh - 2)
+    for i = 1, FT.GAUGE_N do
+        Place(G.seg[i], FT.GAUGE_X + (i - 1) * FT.GAUGE_PITCH, FT.GAUGE_SEG_Y, FT.GAUGE_SEG_W, FT.GAUGE_SEG_H)
+    end
+    G.glow:ClearAllPoints()
+    G.glow:SetPoint("CENTER", FT.host, "TOPLEFT", FT.Snap(wx + ww / 2), -FT.Snap(FT.GAUGE_SEG_Y + FT.GAUGE_SEG_H / 2))
+    G.glow:SetSize(FT.Snap(FT.GAUGE_GLOW_W), FT.Snap(FT.GAUGE_GLOW_H))
+
+    -- the readout: the counting group (tilde, two digits, a dot) and the word are both centred on the hero tile; every
+    -- number below is a whole count of physical pixels, one texel being n of them
+    local led = FT.led
+    local centre = PixelsOf(FT.LED_CX)
+    local rowPx = PixelsOf(H.y + H.h / 2) - math.floor(FT.CELL_H * n / 2)
+    local wordPx = centre - math.floor(FT.WORD_W * n / 2)
+    local countPx = centre - math.floor(FT.COUNT_W * n / 2)
+    for i, bar in ipairs(led.tilde) do
+        PlacePx(bar, countPx + TILDE[i][1] * n, rowPx + TILDE[i][2] * n, 2 * n, 2 * n)
+    end
+    PlacePx(led.dot, countPx + 21 * n, rowPx + 10 * n, 2 * n, 2 * n)
+    PlacePx(led.d1.frame, countPx + 10 * n, rowPx, FT.CELL_W * n, FT.CELL_H * n)
+    PlacePx(led.d2.frame, countPx + 24 * n, rowPx, FT.CELL_W * n, FT.CELL_H * n)
+    for i = 1, 5 do PlacePx(led.word[i].frame, wordPx + (i - 1) * 12 * n, rowPx, FT.CELL_W * n, FT.CELL_H * n) end
+    for _, cell in ipairs(led.cells) do
+        for _, tex in ipairs(cell.seg) do
             tex:ClearAllPoints()
-            tex:SetPoint("TOPLEFT", tile, "TOPLEFT", x, -FT.CHIP_TOP * s)
-            tex:SetSize(FT.CHIP_W * s, FT.CHIP_H * s)
+            tex:SetAllPoints(cell.frame)
         end
-        chip.glow:ClearAllPoints()
-        chip.glow:SetPoint("TOPLEFT", tile, "TOPLEFT", x - FT.GLOW_PAD * s, (-FT.CHIP_TOP + FT.GLOW_PAD) * s)
-        chip.glow:SetSize((FT.CHIP_W + 2 * FT.GLOW_PAD) * s, (FT.CHIP_H + 2 * FT.GLOW_PAD) * s)
-        chip.code:ClearAllPoints()
-        chip.code:SetPoint("CENTER", chip.fill, "CENTER", 0, -0.5 * s)
-        for i, dash in ipairs(tile.fsDashes) do
-            dash:ClearAllPoints()
-            dash:SetPoint("BOTTOMLEFT", tile, "BOTTOMLEFT", (5 + 4 + (i - 1) * 6) * s, 3 * s)
-            dash:SetSize(2 * s, 2 * s)
-        end
+        cell.ch = nil
     end
-    tile.fsSig = nil        -- sizes and points were rewritten: paint again (fonts are never scaled)
+    local h = FT.CELL_H * n
+    led.countRect = { (countPx + FT.COUNT_W * n / 2) * px, (rowPx + h / 2) * px, FT.COUNT_W * n * px, h * px }
+    led.wordRect = { (wordPx + FT.WORD_W * n / 2) * px, (rowPx + h / 2) * px, FT.WORD_W * n * px, h * px }
+    led.glowMode = nil
+
+    -- the rate line and the chip
+    FT.rateText.fsX = nil
+    local C = FT.CHIP
+    Place(FT.chip.fill, C.x, C.y, C.w, C.h)
+    Place(FT.chip.ring, C.x, C.y, C.w, C.h)
+    local gp = FT.GLOW_PAD
+    Place(FT.chip.glow, C.x - gp, C.y - gp, C.w + 2 * gp, C.h + 2 * gp)
+    FT.chip.code.fsX = nil
+    FT.rateBar.solid:ClearAllPoints()
+    FT.rateBar.solid:SetSize(1, 1)
+end
+
+-- The hover, tooltip and hide hooks of a zone.
+local function HookZone(zone)
+    if zone.fsHooked then return end
+    zone.fsHooked = true
+    zone:EnableMouse(true)
+    zone:SetScript("OnEnter", function(self)
+        self.fsHover = true
+        FT.sigCells.on, FT.sigRate.on = nil, nil
+        Tab.Paint()
+        ShowTooltip(self)
+    end)
+    zone:SetScript("OnLeave", function(self)
+        self.fsHover = nil
+        FT.sigCells.on, FT.sigRate.on = nil, nil
+        Tab.Paint()
+        GameTooltip:Hide()
+    end)
+    -- a hidden host (a Druid form change, the master toggle) sends no OnLeave: forget the hover, and hide the tooltip
+    -- only while it is this zone's
+    zone:SetScript("OnHide", function(self)
+        local ours = TipIsOurs(self)
+        self.fsHover = nil
+        FT.sigCells.on, FT.sigRate.on = nil, nil
+        if ours then GameTooltip:Hide() end
+    end)
 end
 
 -------------------------------------------------------------------------------
@@ -771,17 +1366,6 @@ function Tab.HostPoint()
     return nil
 end
 
--- Where tile `col` (1..2) stands on the host.
-function Tab.SlotPoint(col)
-    local shoulder = FS.ClassShoulder
-    if shoulder and shoulder.SlotPoint then
-        local ok, point, rel, relPoint, x, y = pcall(shoulder.SlotPoint, FT.host, 1, col, FT.KEY)
-        if ok and point then return point, rel, relPoint, x, y end
-    end
-    local s, pitch = Scale(), FT.BTN + FT.GAP
-    return "BOTTOMLEFT", FT.host, "BOTTOMLEFT", (FT.PAD + (col - 1) * pitch) * s, FT.PB * s
-end
-
 local function ApplyVisibility()
     local host = FT.host
     if not host then return end
@@ -790,16 +1374,6 @@ local function ApplyVisibility()
     if want then Tab.Update() Tab.Paint() end
 end
 Tab.ApplyVisibility = ApplyVisibility
-
-local function SeatTiles()
-    local s = Scale()
-    FT.host:SetSize((2 * FT.PAD + FT.COLS * FT.BTN + (FT.COLS - 1) * FT.GAP) * s, (FT.PT + FT.BTN + FT.PB) * s)
-    for i, tile in ipairs(FT.tiles) do
-        StyleTile(tile, s)
-        tile:ClearAllPoints()
-        tile:SetPoint(Tab.SlotPoint(i))
-    end
-end
 
 local function SeatHost()
     local host = FT.host
@@ -816,12 +1390,12 @@ local function SeatHost()
     ApplyVisibility()
 end
 
--- The seat steps. The tiles are plain frames on a plain host, so styling and sizing them is legal in combat and happens at
--- once; the host's anchor onto the Console waits for PLAYER_REGEN_ENABLED like everything on the chassis. Each step is its own
--- pcall so one failure cannot stop the next.
+-- The seat steps. The face is plain frames on a plain host, so sizing it is legal in combat and happens at once; the host's
+-- anchor onto the Console waits for PLAYER_REGEN_ENABLED like everything on the chassis. Each step is its own pcall so one
+-- failure cannot stop the next.
 local function Sync()
     if not FT.built then return end
-    local ok, err = pcall(SeatTiles)
+    local ok, err = pcall(LayoutFace)
     if not ok then WarnOnce("fivesecond_sync", "five second rule tab update failed (" .. tostring(err) .. ")") end
     if InCombatLockdown() then
         FT.pendingSync = true
@@ -838,14 +1412,23 @@ Tab.Sync = Sync
 -------------------------------------------------------------------------------
 
 local function Build()
-    FT.host = CreateFrame("Frame", "FSFiveSecondTab", UIParent)
-    FT.host:SetFrameStrata("LOW")
-    FT.host:Hide()
-    FT.cells = CreateFrame("Frame", "FSFiveSecondCells", FT.host)
-    FT.cells.fsKey = "cells"
-    FT.rate = CreateFrame("Frame", "FSFiveSecondRate", FT.host)
-    FT.rate.fsKey = "rate"
+    if not FT.host then
+        FT.host = CreateFrame("Frame", "FSFiveSecondTab", UIParent)
+        FT.host:SetFrameStrata("LOW")
+        FT.host:Hide()
+    end
+    if not FT.cells then
+        FT.cells = CreateFrame("Frame", "FSFiveSecondCells", FT.host)
+        FT.cells.fsKey = "cells"
+    end
+    if not FT.rate then
+        FT.rate = CreateFrame("Frame", "FSFiveSecondRate", FT.host)
+        FT.rate.fsKey = "rate"
+    end
     FT.tiles = { FT.cells, FT.rate }
+    SeatGrid()
+    BuildFace()
+    for _, zone in ipairs(FT.tiles) do HookZone(zone) end
     FT.built = true
 end
 
@@ -854,11 +1437,12 @@ local function Refresh()
     if FT.host and FT.host:IsShown() then Tab.Paint() end
 end
 
--- One pass about every tenth of a second while the window runs or a flash is dying, every half second otherwise. A plain
--- frame, nothing protected.
+-- One pass every frame while the count runs or a flash dies, at TICK_AMBIENT while a slow motion plays, every half second
+-- otherwise. A plain frame, nothing protected.
 local function Tick(self, dt)
     self.fsElapsed = (self.fsElapsed or 0) + dt
-    if self.fsElapsed < (FT.active and FT.TICK_FAST or FT.TICK_SLOW) then return end
+    local every = FT.fast and 0 or (FT.ambient and FT.TICK_AMBIENT or FT.TICK_SLOW)
+    if self.fsElapsed < every then return end
     self.fsElapsed = 0
     local ok, err = pcall(Refresh)
     if not ok then WarnOnce("fivesecond_tick", "five second rule tab repaint failed (" .. tostring(err) .. ")") end
@@ -906,7 +1490,7 @@ local function Apply()
         return
     end
 
-    -- Listeners start only now that the tiles exist (a failed or non-mana build leaves none running).
+    -- Listeners start only now that the face exists (a failed or non-mana build leaves none running).
     local events = CreateFrame("Frame")
     local function reg(event, unitOnly)
         local registered
@@ -935,7 +1519,18 @@ local function Apply()
             ApplyVisibility()
             if FS.ClassShoulder and FS.ClassShoulder.Refresh then pcall(FS.ClassShoulder.Refresh) end
         end)
+        -- a motion switch: read them again and repaint at once
+        FT.watching = true
+        local function motionChanged()
+            FT.switchesDirty = true
+            FT.sigCells.on, FT.sigRate.on = nil, nil
+            if FT.host and FT.host:IsShown() then Refresh() end
+        end
+        FS.Config.OnChange(SETTINGS.motion.key, motionChanged)
+        FS.Config.OnChange(SETTINGS.pulse.key, motionChanged)
+        for _, name in ipairs(FT.FX_NAMES) do FS.Config.OnChange(SETTINGS[name].key, motionChanged) end
     end
+    FT.switchesDirty = true
     if FS.Layout.OnRescale then FS.Layout.OnRescale(Sync) end
     if FS.ActionBars and FS.ActionBars.OnGeometry then FS.ActionBars.OnGeometry(Sync) end
 
