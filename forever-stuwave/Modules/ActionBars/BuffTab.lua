@@ -67,6 +67,7 @@ local BT = {
     CHIP_W = 22, CHIP_H = 15, CHIP_TOP = 5, CHIP_C = 3, GLOW_PAD = 3,
     CODE_PX = 10, TEXT_PX = 11, WORD_PX = 9,    -- WORD_PX: the missing word of SHIELD only (the mockup's `m==='warn'&&k==='shield'?9:11`)
     MIN_PX = 6,                     -- FitPx never goes below this, however small the UI scale
+    MISSING = { imbue = "IMBUE", shield = "SHIELD" },   -- the word of the missing look (ShamanBuffs says the same out of combat)
     TEXT_INSET = 3,                 -- design px kept clear on each side of the time or word (the cut border's chamfer)
     ADVANCE = 0.5615,               -- Mononoki Bold's advance per em (every glyph; the font is monospaced)
     TEXT_Y = 27,                    -- the time line's centre, design px below the tile top
@@ -210,6 +211,14 @@ local function BuildLooks()
             icon = 0.6, desat = true },
     }
     looks.cyan = { ring = T.COLOR_POWER, ringA = 1, glowA = 0.6 }
+    -- ENGINE MODE under the slot (PaintButton): the MISSING look on everything the slot's lit icon covers (the icon
+    -- dim and desaturated, the red word on its plate, the chip), and the NEUTRAL hollow look on everything it cannot
+    -- (the button plate and the border ring and glow sit in the band outside the icon rect, and the underline is
+    -- below it). The slot draws over the red while the buff is up and leaves it showing when the buff drops.
+    looks.engine = setmetatable({
+        ring = looks.hollow.ring, ringA = looks.hollow.ringA, glowA = 0, plate = plain, plateA = plain[4],
+        chipGlow = false, lineA = 0,
+    }, { __index = looks.warn })
     return looks
 end
 BuffTab.Looks = BuildLooks
@@ -526,8 +535,8 @@ local function PaintButton(button, v)
     if button.fsLocked or not button.fsFace or not (v and v.mode) then return end
     local L = BuildLooks()
     local hover = button.fsHover and true or false
-    -- ENGINE MODE: in combat a tile with a proven slot shows only the dim "not active" base; the slot draws the lit
-    -- icon, the time and the count on top while the buff is really up (see the engine section)
+    -- ENGINE MODE: in combat a tile with a proven slot shows the MISSING look as its base (looks.engine); the slot
+    -- draws the lit icon, the time and the count on top while the buff is really up (see the engine section)
     local engineMode = EngineLive(button)
     -- the state last painted, compared field by field: no signature string or table is built per call
     local estimate, other = v.estimate and true or false, v.other and true or false
@@ -548,8 +557,17 @@ local function PaintButton(button, v)
     button.fsIconId, button.fsIconOk = v.spellId, iconTex ~= nil
     button.fsIconRetry = GetTime() + BT.ICON_RETRY
     local tint = UsabilityColor(button.fsUsable)
-    local look = engineMode and L.hollow or (L[v.mode] or L.hollow)
-    local text = (not engineMode) and v.text or nil
+    local look = engineMode and L.engine or (L[v.mode] or L.hollow)
+    local text = engineMode and BT.MISSING[button.fsKey] or v.text
+    -- the label plate hugs the glyphs in engine mode (no side pad), so the red under the slot's lit icon stays inside
+    -- the icon rect the slot covers; out of combat it keeps the 2 px pad
+    local pad = engineMode and 0 or 2
+    if button.fsPlatePad ~= pad then
+        button.fsPlatePad = pad
+        button.fsTextPlate:ClearAllPoints()
+        button.fsTextPlate:SetPoint("TOPLEFT", button.fsText, "TOPLEFT", -pad, 0)
+        button.fsTextPlate:SetPoint("BOTTOMRIGHT", button.fsText, "BOTTOMRIGHT", pad, 0)
+    end
     local skin = button.fsSkin
     if skin and skin.border and skin.border.ring then
         local r = hover and L.cyan.ring or look.ring
@@ -584,7 +602,8 @@ local function PaintButton(button, v)
         chip.fill:Show(); chip.ring:Show(); chip.glow:Show(); chip.code:Show()
         button.fsTextPlate:Hide()
     end
-    local size = FitPx(text, (v.mode == "warn" and button.fsKey == "shield") and BT.WORD_PX or BT.TEXT_PX)
+    local missing = engineMode or v.mode == "warn"
+    local size = FitPx(text, (missing and button.fsKey == "shield") and BT.WORD_PX or BT.TEXT_PX)
     if button.fsTextPx ~= size then
         button.fsTextPx = size
         FS.Theme.ApplyMono(button.fsText, size, look.text)
@@ -593,7 +612,7 @@ local function PaintButton(button, v)
     button.fsText:SetTextColor(r, g, b, look.textA)
     button.fsText:SetText(text or "")
     r, g, b = Shade(look.line, tint)
-    button.fsLine:SetVertexColor(r, g, b, engineMode and 0 or look.lineA)
+    button.fsLine:SetVertexColor(r, g, b, look.lineA)
     for _, dash in ipairs(button.fsDashes) do dash:SetAlpha((not engineMode and v.estimate) and 1 or 0) end
     -- the imbue slots' own lit icons follow the tile's icon (an item enchantment slot has no aura icon of its own).
     -- Out of combat only: a slot frame is restricted in combat, and the regen repaint (the engine mode flips) writes it.
@@ -625,10 +644,14 @@ end
 --     spell filter, so a sharpening stone, a weightstone or an oil lights the tile in combat too, and the lit icon is
 --     the pick, not the actual enchant. The in combat tooltip says so.
 -- While the buff is up the engine draws the slot over the tile; when it falls off the slot draws nothing and the tile's
--- own dim "not active" icon shows through. No Lua ever learns which.
+-- own MISSING look shows through (the dim icon and the red IMBUE / SHIELD word on its plate), and it is covered again
+-- when the buff is recast. No Lua ever learns which: the base is the missing look always, the slot is the only thing
+-- that says "up". Only what the slot's lit icon covers is red (its rect is the tile's icon rect and it draws above every
+-- tile frame); the border ring and glow, the button plate and the underline are outside it and stay neutral.
 --
--- In combat a tile with a slot is in ENGINE MODE (PaintButton, EngineLive): the dim "not active" base only (the hollow
--- look, a dim desaturated icon, no word, no count, no underline, no dashes), because the frozen reads would lie. It
+-- In combat a tile with a slot is in ENGINE MODE (PaintButton, EngineLive): the missing look as the base (looks.engine:
+-- a dim desaturated icon and the red word, a neutral ring, no count, no underline, no dashes), because the frozen reads
+-- would lie. It
 -- is only entered on PROOF: the container read back enabled and shown after the last out of combat arm (CombatHud's
 -- live CORRECTION: a refused arm or a re-anchored slot shows a confident wrong "not active" for the whole fight), and
 -- every slot frame of the tile was PROVEN on the tile's icon rect: its GetLeft/GetTop read BEFORE anything re-seats it
