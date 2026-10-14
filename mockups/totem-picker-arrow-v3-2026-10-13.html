@@ -151,11 +151,11 @@ var CUTC=5, BTNW=38;
 function cfg(kind,st){
   if(st==='open'){
     /* the base the flyout grows out of */
-    if(kind==='V1')return {th:5,s:2,left:-1.5,ar:{hx:1.2,hy:-0.4,len:5,w:2.8,up:false},extra:0};
+    if(kind==='V1')return {th:4,s:2,left:0,ar:{hx:3.5,hy:-3.1,len:2,w:2,up:false},extra:0};
     return {th:3,s:1.5,left:-1.2,ar:{hx:0.5,hy:1.2,len:4,w:2,up:false},extra:3};
   }
   if(kind==='V1')return {th:11,s:2,left:-2,ar:{hx:8.4,hy:-8.2,len:7,w:3.4,up:true},extra:0};
-  return {th:3,s:1.5,left:-1.2,ar:{hx:4.4,hy:-2.8,len:4,w:2,up:true},extra:3};
+  return {th:3,s:1.5,left:-1.2,ar:{hx:3.6,hy:-3.4,len:3.6,w:1.7,up:true},extra:3};
 }
 function pieceRel(k){
   var d=k.s*Math.SQRT2,tipx=-0.5,tipy=CUTC-d-tipx,yb=-k.s,xj=CUTC-d-yb;
@@ -335,8 +335,8 @@ function big(kind){
 }
 var VARS=[
  {k:'V1',t:'AS DRAWN, rises above the rail',
-  cap:'<b>Made of:</b> Parker\'s piece at sketch size. A bar about 11 px thick runs the full width of the button, 2 px above its top edge, and a wedge at the left end wraps the chamfer cut with a 2 px seam parallel to the cut. The piece rises about 7 px above the tab\'s top rail, so while it is up <b>the tab outline grows around it</b>: the rail steps up over that one button with a small shoulder on each side, same Console stroke and fill, so the tab looks like it stretches rather than something poking out. When the cursor leaves, the bump goes away. <b>Open:</b> the flyout\'s first tile bottom sits 4 px above the rail, so the full height piece would hit it. The piece <b>sinks into a 5 px base</b> under the tile column (same shape, same seam), the bump gives way to the flyout\'s own opening, and the arrow flips to point down and left, meaning close. The flyout itself is not touched.',
-  st:{btn:'Piece appears, dim: button hover fill, thin element stroke, neon arrow at low strength. The tab rail steps up over this button.',arrow:'Cursor on the piece: fill lifts, stroke glows, the arrow runs hot magenta at the head with a bright core.',open:'Piece sinks to a 5 px base under the flyout, arrow flipped down and left.'}},
+  cap:'<b>Made of:</b> Parker\'s piece at sketch size. A bar about 11 px thick runs the full width of the button, 2 px above its top edge, and a wedge at the left end wraps the chamfer cut with a 2 px seam parallel to the cut. The piece rises about 7 px above the tab\'s top rail, so while it is up <b>the tab outline grows around it</b>: the rail steps up over that one button with a small shoulder on each side, same Console stroke and fill, so the tab looks like it stretches rather than something poking out. When the cursor leaves, the bump goes away. <b>Open:</b> the flyout\'s first tile bottom sits 4 px above the rail, so the full height piece would hit it. The piece <b>sinks into a 4 px base</b> under the tile column (same shape, same seam), the bump gives way to the flyout\'s own opening, and the arrow flips to point down and left, meaning close. The flyout itself is not touched.',
+  st:{btn:'Piece appears, dim: button hover fill, thin element stroke, neon arrow at low strength. The tab rail steps up over this button.',arrow:'Cursor on the piece: fill lifts, stroke glows, the arrow runs hot magenta at the head with a bright core.',open:'Piece sinks to a 4 px base under the flyout, arrow flipped down and left.'}},
  {k:'V2',t:'FITS THE GAP, under the rail',
   cap:'<b>Made of:</b> the same shape squeezed into the 6 px between the button top and the rail: a bar 3 px thick, a 1.5 px seam under it, 1 px of tab left above it, and the wedge filling the cut corner with the same parallel seam. The tab outline does not change at all, and nothing rises above the rail. The cost is the arrow, which has only about 4 px of room, so it is a small neon chevron. <b>Open:</b> the piece stays the same size, the arrow flips down and left, and the flyout opens above it as in A.',
   st:{btn:'Thin piece appears, dim, with a small neon arrow in the wedge.',arrow:'Cursor on the piece: stroke glows and the arrow brightens.',open:'Same piece, arrow flipped down and left.'}}
@@ -367,8 +367,8 @@ document.getElementById('spec').innerHTML=
  '<tr><td class="e">Flyout</td><td class="v">Concept A\'s, unchanged: icon tiles in a column, 32 px, gap 3, grows out of the tab as one more shoulder, real spell tooltip to the right.</td></tr>'+
  '</table></div>'+
  '<div class="panel"><h3>CLICK AREA AND BUILD</h3><table class="dp">'+
- '<tr><td class="e">V1 click</td><td class="v">40 x 13 box around the bar and wedge, anchored to the button top left. It covers none of the button face (the wedge tip below the button top sits in the empty cut corner), so the 3 px rule is met with room to spare. Moving from the button up to the piece stays on connected surfaces except for the 2 px seam, so the hover logic should treat the seam as inside.</td></tr>'+
- '<tr><td class="e">V2 click</td><td class="v">39.2 x 7.5 box. The piece itself is only 4.5 px tall, so the box reaches 3 px into the button face (the most the earlier rule allows) to be a usable target. Alt click on the button still opens the picker.</td></tr>'+
+ '<tr><td class="e">V1 click</td><td class="v">40 x 13 box around the bar and wedge, anchored to the button top left. It covers none of the button face (the wedge tip below the button top sits in the empty cut corner), so the 3 px rule is met with room to spare. The wedge tip below the button top is not clickable (keeps the 0 px into the face rule). Moving from the button up to the piece stays on connected surfaces except for the 2 px seam, so the hover logic should treat the seam as inside.</td></tr>'+
+ '<tr><td class="e">V2 click</td><td class="v">39.2 x 7.5 box. The piece itself is only 3 px tall (4.5 px with the seam), so the box reaches 3 px into the button face (the most the earlier rule allows) to be a usable target. Alt click on the button still opens the picker.</td></tr>'+
  '<tr><td class="e">Build</td><td class="v">Texture art on the existing arrow Button, anchored to the element button\'s top left instead of its centre. Nine slice cannot do the diagonal edge, so the piece (fill, stroke, scanlines, arrow) is a baked texture per element colour, or one greyscale texture tinted by SetVertexColor, with a second baked state for lit and a flipped copy for open. The haze and gradient have to be baked into the texture.</td></tr>'+
  '<tr><td class="e">V1 tab</td><td class="v">The Console outline needs a bump: while the piece is up, the top rail over that button steps up about 11 px with a 5 px chamfer on the left shoulder and a flare on the right, same stroke and fill. Today the outline is fixed art, so this means either a second baked rail texture per button slot shown with the piece or a small bump overlay frame placed over the rail. The flyout\'s open foot already does something similar, so that work can be reused. V2 changes nothing in the tab drawing.</td></tr>'+
  '</table></div>'+
