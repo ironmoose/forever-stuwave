@@ -2512,6 +2512,19 @@ def check_the_imbue_tile_goes_live_in_combat_only_after_a_slot_was_seen_shown_wi
     assert btn(lua, IMBUE).fsEngine.seen is not True
 
 
+def check_the_cover_plate_margin_is_the_tile_plates_not_the_skin_chamfer():
+    # the skin's chamfer can differ from the plate's margin (SLICE_CUT_MARGIN): the cover plate follows the plate
+    lua = engine_world(pre="__acLazy = true")          # the engine builds the slot frames later: set the chamfer first
+    run(lua, "FSBuffTabButton1.fsSkin.chamfer = 4; FSBuffTabButton2.fsSkin.chamfer = 4; __acFlush()")
+    shield_aura_up(lua)
+    for i in (IMBUE, SHIELD):
+        b = btn(lua, i)
+        assert float(b.fsSkin.chamfer) == 4 and len(parts_of(lua, i)) > 0
+        for part in parts_of(lua, i):
+            assert float(part.coverPlate._slice[1]) == float(g(lua).FS.Theme.SLICE_CUT_MARGIN)
+            assert float(part.coverRing._slice[1]) == 4, "the ring follows the skin chamfer"
+
+
 def check_the_state_line_reports_each_imbue_slot_for_the_live_test():
     lua = engine_world()
     shield_aura_up(lua)
@@ -2535,6 +2548,47 @@ def check_the_state_line_reports_each_imbue_slot_for_the_live_test():
     g(lua).FS.BuffTab.SaveStatus()
     line2 = str(g(lua).ForeverSTUwaveDB.buffTabEngine.line)
     assert line2.count("cover=plate;") + line2.count("cover=plate]") == 2 and line2.count("cover=none") == 1, line2
+
+
+def check_the_key_label_frame_is_above_every_slot_and_slot_child_and_follows_the_host_out_of_combat():
+    # a created child frame gets its parent's level + 1: the slots sit at container + 1, their children above that
+    lua = engine_world()
+    shield_aura_up(lua)
+    c = acs(lua)[0]
+    top = sb.top_level(c)
+    assert top > float(c._level), "the mock gave the slots no level of their own"
+    for i in (IMBUE, SHIELD):
+        assert float(btn(lua, i).fsHotkeyHost._level) > top, "the key label frame is not above every slot"
+    # a frame the engine adds under a slot later, higher than anything seen so far: the next out of combat pass lifts the label
+    run(lua, "local k = CreateFrame('Frame', nil, __acs[1]._ench[1]); k:SetFrameLevel(__acs[1]._level + 40)")
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    tick(lua, 3)
+    levels = {i: float(btn(lua, i).fsHotkeyHost._level) for i in (IMBUE, SHIELD)}
+    assert all(v < float(c._level) + 40 for v in levels.values()), "the label frame was re-levelled in combat"
+    for i in (IMBUE, SHIELD):                 # even when asked to, in combat
+        g(lua).FS.BuffTab.SeatHotkeyHost(btn(lua, i))
+        assert float(btn(lua, i).fsHotkeyHost._level) == levels[i], "the label frame was re-levelled in combat"
+    leave_combat(lua)
+    tick(lua, 3)
+    for i in (IMBUE, SHIELD):
+        assert float(btn(lua, i).fsHotkeyHost._level) > float(c._level) + 40, "the label frame stayed under a late slot child"
+    # the floor: host + ENGINE_LEVEL + 3
+    host = g(lua).FSBuffTab
+    for i in (IMBUE, SHIELD):
+        assert float(btn(lua, i).fsHotkeyHost._level) >= float(host._level) + 12 + 3
+
+
+def check_the_host_moving_to_another_level_takes_the_key_label_frames_with_it():
+    lua = boot()                         # no container: only the host seat can move the label frames
+    host = g(lua).FSBuffTab
+    rel = host._points[1].rel
+    for i in (IMBUE, SHIELD):
+        assert float(btn(lua, i).fsHotkeyHost._level) >= float(host._level) + 12 + 3
+    run(lua, "local h = FSBuffTab._points[1].rel; h._level = h._level + 30")
+    g(lua).FS.BuffTab.Sync()
+    for i in (IMBUE, SHIELD):
+        assert float(btn(lua, i).fsHotkeyHost._level) >= float(host._level) + 12 + 3, "the label frame stayed at the old host level"
 
 
 def check_the_key_label_rides_above_the_combat_cover_and_is_never_moved_in_combat():
@@ -3067,6 +3121,7 @@ def check_the_state_line_for_the_live_test_is_saved_and_quiet_ticks_allocate_not
         function __Region:GetTop() return 9 end
         function __Region:GetRight() return 25 end
         function __Region:GetBottom() return -9 end
+        function __Region:GetChildren() end          -- the client's returns its children as values, no table
         for i = 1, 50 do __tickAll(1.1) end
         collectgarbage("collect"); collectgarbage("stop")
         local before = collectgarbage("count")
@@ -3292,7 +3347,10 @@ CHECKS = [
     check_the_imbue_slots_carry_our_lit_icon_and_the_engine_time_on_both_hands,
     check_in_combat_the_tiles_wear_the_out_of_combat_missing_look_and_only_the_alpha_is_written,
     check_the_imbue_tile_goes_live_in_combat_only_after_a_slot_was_seen_shown_with_an_imbue_on,
+    check_the_cover_plate_margin_is_the_tile_plates_not_the_skin_chamfer,
     check_the_state_line_reports_each_imbue_slot_for_the_live_test,
+    check_the_key_label_frame_is_above_every_slot_and_slot_child_and_follows_the_host_out_of_combat,
+    check_the_host_moving_to_another_level_takes_the_key_label_frames_with_it,
     check_the_key_label_rides_above_the_combat_cover_and_is_never_moved_in_combat,
     check_the_missing_word_in_combat_keeps_its_out_of_combat_size,
     check_regen_arms_a_container_that_reads_back_off_and_a_combat_login_builds_at_regen,

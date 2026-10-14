@@ -361,9 +361,36 @@ local function NewText(parent, px, color)
     return fs
 end
 
+-- The highest frame level in a frame's tree (itself and its child frames, `depth` generations down), read out of combat.
+-- No table or closure is made: the tick runs this every pass.
+local TopLevel
+local function TopOfKids(depth, top, ...)
+    for i = 1, select("#", ...) do
+        local below = TopLevel(select(i, ...), depth)
+        if below > top then top = below end
+    end
+    return top
+end
+local function TopWithKids(frame, depth, top)
+    return TopOfKids(depth - 1, top, frame:GetChildren())
+end
+function TopLevel(frame, depth)
+    local ok, top = pcall(frame.GetFrameLevel, frame)
+    if not ok or type(top) ~= "number" then return 0 end
+    if depth > 0 and frame.GetChildren then
+        local okc, deeper = pcall(TopWithKids, frame, depth, top)
+        if okc and type(deeper) == "number" then top = deeper end
+    end
+    return top
+end
+
 -- The tile's key label (and its plate) rides a frame of its own above the combat container, so the lit cover the slot
--- draws (the slot is a child of the container) never hides it. Out of combat only: StyleButton and SeatHost call this.
+-- draws (the slot is a child of the container) never hides it. The client gives a created child its parent's level + 1,
+-- so the slots sit at container + 1 and their children above that: the frame is put above the highest level found under
+-- the container (floor: host + ENGINE_LEVEL + 3). Out of combat only: StyleButton, SeatHost and the engine passes call
+-- this, and it writes a level only when it changed.
 local function SeatHotkeyHost(button)
+    if InCombatLockdown() then return end
     if not button.fsHotkeyHost then
         local hh = CreateFrame("Frame", nil, button)
         hh:SetAllPoints(button)
@@ -371,7 +398,10 @@ local function SeatHotkeyHost(button)
         button.fsHotkeyHost = hh
     end
     local hh = button.fsHotkeyHost
-    if BT.host then hh:SetFrameLevel(BT.host:GetFrameLevel() + BT.ENGINE_LEVEL + 1) end
+    local level = (BT.host and BT.host:GetFrameLevel() or 0) + BT.ENGINE_LEVEL + 3
+    local container = EngineState.container
+    if container then level = math.max(level, TopLevel(container, 3) + 1) end
+    if hh:GetFrameLevel() ~= level then hh:SetFrameLevel(level) end
     if button.HotKey and button.HotKey:GetParent() ~= hh then button.HotKey:SetParent(hh) end
     if button.fsHotkeyPlate and button.fsHotkeyPlate:GetParent() ~= hh then button.fsHotkeyPlate:SetParent(hh) end
 end
@@ -1031,6 +1061,10 @@ local function ProveEngine()
             end
         end
     end
+    -- a slot or a child the engine made since the last pass may sit higher than the key label frames: lift them
+    if EngineState.container then
+        for _, button in ipairs(BT.list) do SeatHotkeyHost(button) end
+    end
 end
 
 -- Re-seats every slot's texts for the current scale, reads the mouse back, then proves the positions. Out of combat
@@ -1196,6 +1230,7 @@ local function SaveStatus()
     end
 end
 BuffTab.SaveStatus = SaveStatus
+BuffTab.SeatHotkeyHost = SeatHotkeyHost
 
 -- The tick's share, out of combat only: the one uncounted retry of a failed build, and the proof pass.
 local function EngineTick()
