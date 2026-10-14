@@ -1,0 +1,686 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1600">
+<title>Totem presets</title>
+<style>
+@font-face{font-family:'Mononoki';src:url(../forever-stuwave/Media/Fonts/MononokiNerdFontMono-Bold.ttf) format('truetype');font-weight:100 900;font-style:normal;font-display:block}
+:root{
+  color-scheme:dark;
+  --bg:#0d0620; --fg:#e9e2ff; --muted:#9d93c4; --white:#f3fbff; --text:#e2e8f0;
+  --violet:#a855f7; --cyan:#22e0ff; --pink:#ff2e97; --amber:#ffb648; --green:#39ff14; --red:#ff3b4e;
+  --edge:rgba(168,85,247,.35);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg)}
+body{width:100%;max-width:1600px;padding:28px 30px 44px;color:var(--fg);font-family:'Mononoki',ui-monospace,monospace;font-weight:700;line-height:1.45;overflow-x:hidden}
+h1{margin:0;font-size:30px;letter-spacing:.08em;color:var(--white);text-shadow:0 0 18px var(--violet);font-weight:700}
+.ref{display:inline-block;margin:10px 0 0;padding:2px 10px;font-size:13px;letter-spacing:.12em;color:var(--amber);border:1px solid rgba(255,182,72,.5);background:rgba(255,182,72,.06)}
+.sub{margin:10px 0 8px;color:var(--muted);font-size:15px;max-width:1500px}
+.sub b,.cap b{color:var(--white);font-weight:700}
+h2{margin:46px 0 8px;font-size:22px;letter-spacing:.1em;color:var(--white);text-shadow:0 0 12px var(--violet);font-weight:700}
+h2 i{font-style:normal;color:var(--pink)}
+.cap{font-size:13px;line-height:1.5;color:var(--muted);margin:0 0 12px;max-width:1500px}
+.rowlab{font-size:15px;letter-spacing:.1em;color:var(--white);margin:22px 0 8px;text-shadow:0 0 10px var(--violet)}
+.rowlab i{font-style:normal;color:var(--pink)}
+.rowlab small{font-size:12px;color:var(--muted);letter-spacing:0;text-shadow:none;margin-left:10px}
+.frame{display:block;border:1px solid var(--edge);background:#120a22;line-height:0}
+.frame.cb{border-color:rgba(255,46,151,.75)}
+.frame svg{display:block}
+svg text{font-family:'Mononoki',ui-monospace,monospace;font-weight:700}
+.row{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap}
+.row.top{align-items:flex-start}
+.cell{flex:none}
+.cell .tc{max-width:420px;margin-top:5px;font-size:11px;line-height:1.35;color:var(--muted)}
+.cell .tc b{color:var(--cyan);display:block;font-size:11px;letter-spacing:.06em}
+.cell .tc b.cb{color:var(--pink)}
+.notes{display:flex;flex-wrap:wrap;gap:26px;align-items:flex-start;margin-top:12px}
+.panel{border:1px solid var(--edge);background:rgba(26,16,37,.7);padding:12px 16px 14px;font-size:12px;line-height:1.5;color:var(--text);width:740px}
+.panel.full{width:1506px}
+.panel h3{margin:0 0 6px;font-size:13px;letter-spacing:.12em;color:var(--cyan);font-weight:700}
+.panel h3.no{color:var(--pink)}
+.panel b{color:var(--white);font-weight:700}
+.panel ul{margin:0;padding-left:16px}
+.panel li{margin:0 0 4px}
+.panel .m{color:var(--muted)}
+.panel .u{color:var(--amber)}
+table.dp{border-collapse:collapse;width:100%;font-size:12px}
+table.dp td,table.dp th{padding:3px 6px 3px 4px;vertical-align:top;border-top:1px solid rgba(168,85,247,.2);color:var(--text);line-height:1.35;text-align:left}
+table.dp th{color:var(--cyan);font-size:11px;letter-spacing:.08em;border-top:0}
+table.dp td.e{color:#fff;white-space:nowrap}
+table.dp td.v{color:var(--muted)}
+.sw{display:inline-block;width:9px;height:9px;margin-right:5px;vertical-align:-1px}
+.tag{display:inline-block;padding:0 6px;font-size:10px;letter-spacing:.08em;border:1px solid;margin-left:4px;white-space:nowrap}
+.tag.ok{color:var(--cyan);border-color:rgba(34,224,255,.5)}
+.tag.un{color:var(--amber);border-color:rgba(255,182,72,.55)}
+.tag.fo{color:var(--green);border-color:rgba(57,255,20,.45)}
+.tag.nf{color:var(--muted);border-color:rgba(157,147,196,.5)}
+/* hover tooltips (HTML), same family as the buff tab */
+.tips{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;margin:10px 0 0}
+.tt{position:relative;background:rgba(13,6,32,.97);border:1px solid rgba(168,85,247,.85);padding:8px 11px 9px;font-size:12px;line-height:1.5;width:290px;box-shadow:0 0 14px rgba(168,85,247,.25)}
+.tt .h{color:var(--white);font-size:13px;margin-bottom:2px}
+.tt .ln{color:var(--text)}
+.tt .m{color:var(--muted)}
+.tt .w{color:#ffd100}
+.tt .st{margin-top:5px;font-size:10px;letter-spacing:.1em;color:var(--cyan)}
+.tt .st.am{color:var(--amber)}
+.tt .cap2{font-size:10px;letter-spacing:.1em;color:var(--pink);margin-bottom:4px}
+/* settings mock */
+.setwrap{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
+.set{width:360px;border:1px solid rgba(168,85,247,.6);background:linear-gradient(#1b0f33,#0f0824);padding:12px 16px 14px;box-shadow:0 0 18px rgba(168,85,247,.18)}
+.set .hd{font-size:12px;letter-spacing:.14em;color:var(--muted);margin:0 0 10px}
+.set .hd b{color:var(--cyan);font-weight:700}
+.srow{display:flex;align-items:center;gap:10px;height:28px;font-size:14px;color:var(--white)}
+.srow.sm{margin-left:26px;font-size:13px}
+.srow.dim{opacity:.5}
+.srow .grow{flex:1}
+.tg{display:inline-block;width:36px;height:16px;flex:none;position:relative;background:rgba(168,85,247,.55);clip-path:polygon(4px 0,100% 0,100% calc(100% - 4px),calc(100% - 4px) 100%,0 100%,0 4px)}
+.tg::before{content:'';position:absolute;left:1px;top:1px;right:1px;bottom:1px;background:#140a26;clip-path:polygon(3px 0,100% 0,100% calc(100% - 3px),calc(100% - 3px) 100%,0 100%,0 3px)}
+.tg::after{content:'';position:absolute;top:4px;left:5px;width:8px;height:8px;background:var(--muted)}
+.tg.on{background:var(--cyan)}
+.tg.on::before{background:#0d3a4a}
+.tg.on::after{left:23px;background:var(--cyan);box-shadow:0 0 6px var(--cyan)}
+.q{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border:1px solid var(--cyan);border-radius:50%;font-size:11px;line-height:1;color:var(--cyan);flex:none}
+.q.open{background:rgba(34,224,255,.18);box-shadow:0 0 8px rgba(34,224,255,.5)}
+.sel{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;min-width:104px;height:20px;padding:0 8px;font-size:12px;color:var(--white);border:1px solid rgba(168,85,247,.7);background:#0a0416}
+.sel::after{content:'';border:4px solid transparent;border-top-color:var(--cyan);margin-top:4px}
+.sep{height:1px;background:rgba(168,85,247,.25);margin:6px 0}
+.slab{font-size:11px;letter-spacing:.1em;color:var(--cyan);margin:6px 0 6px}
+.settt{position:relative}
+.settt .tt{width:300px;margin-top:2px}
+.settt .tt::before{content:'';position:absolute;left:-7px;top:10px;width:12px;height:12px;background:rgba(13,6,32,.97);border-left:1px solid rgba(168,85,247,.85);border-bottom:1px solid rgba(168,85,247,.85);transform:rotate(45deg)}
+.lg{display:flex;flex-wrap:wrap;gap:6px 22px;margin:6px 0 0;font-size:11px;color:var(--muted)}
+.lg span b{color:var(--white)}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <filter id="gls" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  <filter id="gls2" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  <filter id="haze" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="1.6"/></filter>
+</defs></svg>
+
+<h1>TOTEM PRESETS</h1>
+<div class="ref">Design draft for Parker, 2026-10-14, Shaman</div>
+<p class="sub">Parker asked for <b>presets</b>: "a healing preset, an oh shit button preset, etc". Three distinct ways to give the totem tab that, each drawn the same way: the tab at true size in six states, a 3x zoom, the editing flow, and the settings rows. Everything is built inside what the client lets an addon do (box below). <b>All preset contents are EXAMPLES</b> the player renames and refills, not recommendations. Icon art is a stand in. A pink frame is a mockup device that means "in combat", it is not drawn in game.</p>
+
+<div class="notes">
+ <div class="panel"><h3>FEATURE LIST (ALL THREE CONCEPTS)</h3><ul>
+  <li><b>A preset</b> is a name (up to 8 letters), one totem per element, and a drop order. An element can be left out: switching keeps that button as it is and stepping skips it. Up to 4 presets per character.</li>
+  <li><b>Switch</b> with one click out of combat. The four element buttons and the Gunsight poles follow at once.</li>
+  <li><b>Switch in combat</b> is allowed but queued: it shows as waiting and applies the moment combat ends.</li>
+  <li><b>Set link:</b> the active preset is written into the native set, so SET DROP (Call of the Elements) drops it in one cast. One preset can be pinned to the second set, so Shift on SET DROP (Call of the Ancestors, level 30) drops it with no switching, even in combat.</li>
+  <li><b>Step drop:</b> one press drops the next totem of the preset, four presses lay all four, with a visible progress count. Works before level 20, where no sets exist.</li>
+  <li><b>Partly locked presets</b> use what the character knows and say what is missing. Empty presets are dotted.</li>
+  <li><b>Editing</b> (create, rename, fill, reorder, delete) only out of combat.</li>
+  <li><b>Every cue is optional:</b> the waiting pulse, the applied flash and each sound have their own off toggle. Settings explain themselves with the circled ? tooltip, no helper lines.</li>
+  <li><b>Keybinds:</b> any new button is appended after the six existing ones, so saved binds never move.</li>
+ </ul></div>
+ <div class="panel"><h3>WHAT THE GAME LETS US DO</h3><ul>
+  <li>Change what the four element buttons cast, <b>out of combat</b> (the same attribute sync the picker uses today).</li>
+  <li>Write a preset into native set 1 or set 2 with the pick call, <b>out of combat</b>. After that SET DROP and Shift+SET DROP drop it in combat with one press (3 s cast, pushback applies).</li>
+  <li>A <b>dedicated step button</b> with a fixed script written before the fight: each press drops the next totem. <span class="u">Needs a live check:</span> secure macro casting on this client is unverified.</li>
+  <li>Draw progress from our own cast events and the live totem duration objects. Both are readable in combat.</li>
+  <li>Hold a switch made in combat and apply it at combat end, with a visible waiting cue.</li>
+ </ul>
+ <h3 class="no" style="margin-top:10px">WHAT IT DOES NOT LET US DO</h3><ul>
+  <li>Change any secure button in combat. A switch made in combat can never take effect before the fight ends.</li>
+  <li>Drop four totems with one click before level 20. One click is one cast and totems share the global cooldown.</li>
+  <li>Edit a preset in combat, or write the set slots in combat.</li>
+  <li>Know if a step totem was killed. The fixed script only knows which step it is on, so a lost totem is re-dropped from its element button. The script restarts after combat or a pause. A stun or failed cast can leave the step off by one until that restart (old forum reports, unverified here).</li>
+  <li>Read which totem stands while in combat (names are hidden). We use our own cast record.</li>
+  <li>Use a third native set yet: Call of the Spirits is level 40 per ForeverDB, above the beta cap of 30 (<span class="u">unverified</span>, one Blizzard article orders 30 and 40 differently).</li>
+ </ul>
+ <div class="m" style="margin-top:6px">Words like macro are design notes on this page only. Client text says preset, set and drop.</div></div>
+</div>
+
+<div class="notes">
+ <div class="panel full"><h3>RESEARCH SUMMARY (15 minutes, what could and could not be confirmed)</h3>
+ <table class="dp">
+  <tr><th style="width:150px">QUESTION</th><th>FINDING</th><th style="width:300px">SOURCE</th></tr>
+  <tr><td class="e">Solo leveling</td><td class="v">Earthbind is the totem solo shamans lean on (kiting a mob that reaches you). Searing only when you stay in one spot. Skip water and air solo. On Forever, Elemental at 20: Searing, Lightning Bolt from range, Stoneclaw if a second mob joins, Earthbind plus the Earthbound talent when something reaches you. <span class="tag ok">CONFIRMED FOR FOREVER</span></td><td class="v">foreverdb.net/class/Shaman/builds ; noobtoboss.com Classic totem guide (Era, general)</td></tr>
+  <tr><td class="e">Group healing</td><td class="v">Pre pull: Healing Stream plus Stoneskin (or Strength of Earth for a melee heavy group), Searing once the tank has the mob, Tremor before fear, charm or sleep pulls. Mana Spring from 26 for healer and casters. Totemic Recall after the pull for 25% mana back. <span class="tag ok">CONFIRMED FOR FOREVER</span></td><td class="v">foreverdb.net/class/Shaman/pve ; foreverdb.net/guide/leveling-shaman</td></tr>
+  <tr><td class="e">Melee vs caster</td><td class="v">Melee: Strength of Earth, a fire damage totem, Healing Stream. Casters: Mana Spring, Stoneskin, Searing. The strong air totems (Windfury 32, Grace of Air 42, Wrath of Air) are above the beta cap, so at 30 the air slot is only Grounding or Nature Resistance. <span class="tag fo">ERA / TBC LOGIC, FOREVER LISTS MATCH</span></td><td class="v">warcrafttavern.com/tbc/guides/shaman-totems ; foreverdb.net spell levels</td></tr>
+  <tr><td class="e">Panic</td><td class="v">Stoneclaw: taunts creatures within 8 yd onto itself for 15 s, "long enough for the tank to take them back" (ForeverDB). Earthbind in the path of adds. Grounding (30): takes one harmful spell per 10 s, drop it when an enemy casts Polymorph, Fear or a big nuke. Magma only for real packs, it costs a lot (230 mana) for 20 s. Only one Earth totem can stand, so Stoneclaw and Earthbind are alternatives, not a pair. <span class="tag ok">CONFIRMED FOR FOREVER</span></td><td class="v">foreverdb.net/class/Shaman/pve and builds ; adze doc 01M4J97N0ANDYQD14FANR8JANF (Magma cost)</td></tr>
+  <tr><td class="e">Worth re dropping mid fight</td><td class="v">Short lived ones: Stoneclaw 15 s (30 s cooldown), Magma 20 s, Searing 30 s (rank 1), Earthbind 45 s, Grounding 45 s (one redirect per 10 s). The 5 minute buff totems (Stoneskin, Strength of Earth, Healing Stream, Mana Spring, Tremor, resistances) only when killed (all totems have 5 health) or the party left the 30 yd range. Durations for Stoneclaw and Earthbind are Classic values, unmeasured here. <span class="tag un">PARTLY UNVERIFIED</span></td><td class="v">foreverdb.net/class/Shaman/changes ; repo ShamanTotems.lua DEFS (dur and "sure" flags)</td></tr>
+  <tr><td class="e">Step order</td><td class="v">Old forum advice for one button step scripts: put the shortest lived totems first, so extra presses in a long fight refresh the ones that expire; restart the script when combat ends. Warning from the same threads: a stun or failed cast throws a step script off by one until it restarts. Era and Wrath era posts, not Forever. <span class="tag un">UNVERIFIED ON THIS CLIENT</span></td><td class="v">dual-boxing.com threads 15116 "Totem Macros", 2064 "Totem sequences"</td></tr>
+  <tr><td class="e">Set drop value</td><td class="v">Call of the Elements is widely called weak on the Forever forums: 3 s cast with pushback, totem GCD only 1.0 s, so four manual drops take about the same time. Hence the step drop is the real combat tool and the set link is a pre pull convenience (ForeverDB itself says "use it before a fight, not in the middle of one"). <span class="tag ok">CONFIRMED</span></td><td class="v">Blizzard forum threads quoted in adze doc 01M4J97N0ANDYQD14FANR8JANF ; foreverdb.net/guide/leveling-shaman</td></tr>
+  <tr><td class="e">Not found</td><td class="v">No Reddit thread specific to Forever totem setups surfaced in the time box. Nothing found that says what Forever players actually bind as an emergency button. <span class="tag nf">NO DATA</span></td><td class="v">exa searches, 2026-10-14</td></tr>
+ </table></div>
+</div>
+
+<div class="notes">
+ <div class="panel full"><h3>EXAMPLE PRESETS (rename and refill freely, these are placeholders)</h3>
+ <table class="dp">
+  <tr><th style="width:90px">NAME</th><th>FIRE</th><th>EARTH</th><th>WATER</th><th>AIR</th><th style="width:210px">DROP ORDER</th><th>IDEA / EVIDENCE</th></tr>
+  <tr><td class="e">SOLO</td><td class="v"><i class="sw" style="background:#ff5a3c"></i>Searing (10)</td><td class="v"><i class="sw" style="background:#a8e063"></i>Earthbind (6)</td><td class="v">left out</td><td class="v">left out</td><td class="v">Earth, Fire</td><td class="v">Grinding one spot, kiting. Backed (guides above).</td></tr>
+  <tr><td class="e">MELEE</td><td class="v"><i class="sw" style="background:#ff5a3c"></i>Searing (10)</td><td class="v"><i class="sw" style="background:#a8e063"></i>Strength of Earth (10)</td><td class="v"><i class="sw" style="background:#4aa8ff"></i>Healing Stream (20)</td><td class="v">left out</td><td class="v">Earth, Fire, Water</td><td class="v">Dungeon with melee. Backed (ForeverDB pre pull advice).</td></tr>
+  <tr><td class="e">CASTER</td><td class="v"><i class="sw" style="background:#ff5a3c"></i>Searing (10)</td><td class="v"><i class="sw" style="background:#a8e063"></i>Stoneskin (4)</td><td class="v"><i class="sw" style="background:#4aa8ff"></i>Mana Spring (26)</td><td class="v">left out</td><td class="v">Water, Earth, Fire</td><td class="v">Caster heavy group. Backed by the TBC guide, Forever value of Mana Spring unmeasured.</td></tr>
+  <tr><td class="e">HEAL</td><td class="v">left out</td><td class="v"><i class="sw" style="background:#a8e063"></i>Stoneskin (4)</td><td class="v"><i class="sw" style="background:#4aa8ff"></i>Healing Stream (20)</td><td class="v">left out</td><td class="v">Earth, Water</td><td class="v">Healer pre pull. Backed (ForeverDB resto notes).</td></tr>
+  <tr><td class="e">PANIC</td><td class="v"><i class="sw" style="background:#ff5a3c"></i>Magma (26)</td><td class="v"><i class="sw" style="background:#a8e063"></i>Stoneclaw (8)</td><td class="v"><i class="sw" style="background:#4aa8ff"></i>Healing Stream (20)</td><td class="v"><i class="sw" style="background:#e2d4ff"></i>Grounding (30)</td><td class="v">Earth, Air, Fire, Water</td><td class="v">Pull mobs off the soft target, soak a nuke, burn the pile. Short lived first. Backed in pieces, the combination is a guess.</td></tr>
+  <tr><td class="e">RESIST</td><td class="v"><i class="sw" style="background:#ff5a3c"></i>Frost Resistance (24)</td><td class="v"><i class="sw" style="background:#a8e063"></i>Stoneskin (4)</td><td class="v"><i class="sw" style="background:#4aa8ff"></i>Fire Resistance (28)</td><td class="v"><i class="sw" style="background:#e2d4ff"></i>Nature Resistance (30)</td><td class="v">Air, Water, Fire, Earth</td><td class="v"><span class="u">Example only.</span> Nothing in the beta found that needs it yet.</td></tr>
+ </table></div>
+</div>
+
+<div id="out"></div>
+
+<h2><i>Q //</i> OPEN QUESTIONS</h2>
+<div class="notes"><div class="panel full"><ul>
+ <li><b>Live check (blocks step drop):</b> does a secure macro with a step sequence cast totems on this client, does it advance only on a successful cast, and what does its reset option accept?</li>
+ <li><b>Live check (blocks set pinning):</b> is the pick call accepted for the second set slots, and does writing set 2 leave set 1 intact? The picker only edits set 1 today.</li>
+ <li><b>Call of the Spirits:</b> ForeverDB says level 40, above the cap. Treat set 3 as absent until a level 40 character exists.</li>
+ <li><b>Limit of 4 presets:</b> chips fit 4 in concepts A and B, and the dial in C could carry more. Keep one limit for all?</li>
+ <li><b>Left out element:</b> keep the current pick (drawn here) or clear the button?</li>
+ <li><b>Half laid step set:</b> what restarts it: combat end only, or also a pause of a few seconds (6 s drawn in the tooltips as a placeholder)?</li>
+ <li><b>Concept C width:</b> the tab grows from 6 to 8 cells (264 to 350 px) and the buff tab slides right. Acceptable?</li>
+ <li><b>Panic preset in A and B:</b> they have no always armed panic button. Pinning it to the Shift set (level 30) is the only no switch route. Enough?</li>
+</ul></div></div>
+
+<script>
+var C={cyan:'#22e0ff',pink:'#ff2e97',violet:'#a855f7',amber:'#ffb648',white:'#f3fbff',muted:'#9d93c4',fg:'#e9e2ff',bg:'#0d0620',gold:'#d9a521'};
+function hex(h){return [1,3,5].map(function(i){return parseInt(h.substr(i,2),16);});}
+function mix(a,b,t){var x=hex(a),y=hex(b);return '#'+[0,1,2].map(function(i){return ('0'+Math.round(x[i]+(y[i]-x[i])*t).toString(16)).slice(-2);}).join('');}
+function mold(x,y,w,h,c){return x+','+(y+c)+' '+(x+c)+','+y+' '+(x+w)+','+y+' '+(x+w)+','+(y+h-c)+' '+(x+w-c)+','+(y+h)+' '+x+','+(y+h);}
+function txt(x,y,s,size,fill,o){o=o||{};return '<text x="'+x+'" y="'+y+'" font-size="'+size+'" fill="'+fill+'" text-anchor="'+(o.a||'start')+'"'+(o.op!=null?' fill-opacity="'+o.op+'"':'')+'>'+s+'</text>';}
+function pts(a){return a.map(function(p){return p[0]+','+p[1];}).join(' ');}
+function dpath(a,close){return 'M'+a.map(function(p){return p[0]+','+p[1];}).join(' L')+(close?' Z':'');}
+function rect(x,y,w,h,fill,stroke,sw,extra){return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" fill="'+fill+'"'+(stroke?' stroke="'+stroke+'" stroke-width="'+(sw||1)+'"':'')+(extra||'')+'/>';}
+var uid=0;
+
+/* ---------- geometry: Console and totem tab, design px (Console.lua, TotemBar.lua). y = 0 is the Console top line ---------- */
+var G={H:72,BTN:38,GAP:4.8,TILE:32,TGAP:3};
+var T=-49, BY=-43;
+var S0=[[0,14],[14,0],[36,0],[36,-43],[42,-49]];
+function bxj(j){return 42+42.8*j;}
+var ELS={fire:{j:0,c:'#ff5a3c',name:'Fire'},earth:{j:1,c:'#a8e063',name:'Earth'},water:{j:2,c:'#4aa8ff',name:'Water'},air:{j:3,c:'#e2d4ff',name:'Air'}};
+var EL4=['fire','earth','water','air'];
+function bx(e){return bxj(ELS[e].j);}
+var UNL={fire:10,earth:4,water:20,air:30};
+var TOT={
+ stoneskin:{e:'earth',n:'Stoneskin Totem',lv:4},earthbind:{e:'earth',n:'Earthbind Totem',lv:6},stoneclaw:{e:'earth',n:'Stoneclaw Totem',lv:8},
+ strength:{e:'earth',n:'Strength of Earth Totem',lv:10},tremor:{e:'earth',n:'Tremor Totem',lv:18},
+ searing:{e:'fire',n:'Searing Totem',lv:10},frostres:{e:'fire',n:'Frost Resistance Totem',lv:24},magma:{e:'fire',n:'Magma Totem',lv:26},flametongue:{e:'fire',n:'Flametongue Totem',lv:28},
+ healing:{e:'water',n:'Healing Stream Totem',lv:20},poison:{e:'water',n:'Poison Cleansing Totem',lv:22},mana:{e:'water',n:'Mana Spring Totem',lv:26},fireres:{e:'water',n:'Fire Resistance Totem',lv:28},
+ grounding:{e:'air',n:'Grounding Totem',lv:30},natres:{e:'air',n:'Nature Resistance Totem',lv:30}
+};
+var LIST={fire:['searing','frostres','magma','flametongue'],earth:['stoneskin','earthbind','stoneclaw','strength','tremor'],water:['healing','poison','mana','fireres'],air:['grounding','natres']};
+
+/* ---------- example presets (placeholders the player replaces) ---------- */
+var PR={
+ solo:{n:'SOLO',s:{fire:'searing',earth:'earthbind',water:null,air:null},order:['earth','fire']},
+ melee:{n:'MELEE',s:{fire:'searing',earth:'strength',water:'healing',air:null},order:['earth','fire','water']},
+ heal:{n:'HEAL',s:{fire:null,earth:'stoneskin',water:'healing',air:null},order:['earth','water']},
+ panic:{n:'PANIC',s:{fire:'magma',earth:'stoneclaw',water:'healing',air:'grounding'},order:['earth','air','fire','water']},
+ fresh:{n:'NEW',s:{fire:null,earth:null,water:null,air:null},order:[]}
+};
+var BASE={fire:'searing',earth:'stoneskin',water:'healing',air:'grounding'};
+function ov(base,p){var r={};EL4.forEach(function(e){r[e]=(p&&p.s[e])?p.s[e]:base[e];});return r;}
+function pflag(p,lvl){var n=0,lock=0;EL4.forEach(function(e){var t=p.s[e];if(t){n++;if(lvl<UNL[e]||lvl<TOT[t].lv)lock++;}});if(n===0)return 'empty';return lock?'part':'';}
+function lockedEl(p,e,lvl){var t=p.s[e];return !!t&&(lvl<UNL[e]||lvl<TOT[t].lv);}
+
+/* ---------- stand in spell icons (26 art inside a 32 tile), approved v3 style plus the extra totems ---------- */
+function icon(name,c,x,y,s){
+  var o='',cx=x+s/2,cy=y+s/2,dk=mix(C.bg,c,.35);
+  o+='<rect x="'+x+'" y="'+y+'" width="'+s+'" height="'+s+'" fill="'+mix('#05020f',c,.16)+'"/>';
+  o+='<rect x="'+(cx-7)+'" y="'+(cy+4)+'" width="14" height="7" fill="'+dk+'" stroke="'+c+'" stroke-width="1"/>';
+  o+='<rect x="'+(cx-5.5)+'" y="'+(cy-2)+'" width="11" height="6" fill="'+dk+'" stroke="'+c+'" stroke-width="1"/>';
+  o+='<rect x="'+(cx-3.5)+'" y="'+(cy-6.5)+'" width="7" height="4.5" fill="'+c+'"/>';
+  var e='';
+  switch(name){
+   case 'searing': e='<polygon points="'+(cx-3)+','+(cy-7)+' '+cx+','+(cy-13)+' '+(cx+3)+','+(cy-7)+'" fill="#ffd36a"/>';break;
+   case 'flametongue': e='<polygon points="'+(cx-4)+','+(cy-7)+' '+(cx-1)+','+(cy-13)+' '+(cx+1)+','+(cy-9)+' '+(cx+4)+','+(cy-12)+' '+(cx+4)+','+(cy-7)+'" fill="#ffd36a"/>';break;
+   case 'frostres': e='<path d="M'+cx+','+(cy-13)+' L'+cx+','+(cy-7)+' M'+(cx-3)+','+(cy-10)+' L'+(cx+3)+','+(cy-10)+'" stroke="#9fe3ff" stroke-width="1.4"/>';break;
+   case 'magma': e='<path d="M'+(cx-5)+','+(cy-10)+' q2.5,-4 5,0 t5,0" stroke="#ffd36a" stroke-width="1.6" fill="none"/>';break;
+   case 'stoneskin': e='<polygon points="'+(cx-3.5)+','+(cy-13)+' '+(cx+3.5)+','+(cy-13)+' '+(cx+3.5)+','+(cy-9)+' '+cx+','+(cy-7)+' '+(cx-3.5)+','+(cy-9)+'" fill="#e8f2c8"/>';break;
+   case 'earthbind': e='<circle cx="'+cx+'" cy="'+(cy-10)+'" r="3" fill="none" stroke="#e8f2c8" stroke-width="1.4"/>';break;
+   case 'stoneclaw': e='<path d="M'+(cx-4)+','+(cy-7)+' l1.5,-6 l1.5,5 l1,-6 l1.5,6 l1.5,-5 l1.5,6" stroke="#e8f2c8" stroke-width="1.2" fill="none"/>';break;
+   case 'strength': e='<path d="M'+cx+','+(cy-7)+' L'+cx+','+(cy-13)+' M'+(cx-3)+','+(cy-10)+' L'+cx+','+(cy-13)+' L'+(cx+3)+','+(cy-10)+'" stroke="#e8f2c8" stroke-width="1.5" fill="none"/>';break;
+   case 'tremor': e='<path d="M'+(cx-5)+','+(cy-9)+' l2.5,-3 l2.5,6 l2.5,-6 l2.5,3" stroke="#e8f2c8" stroke-width="1.4" fill="none"/>';break;
+   case 'healing': e='<path d="M'+cx+','+(cy-13)+' l3,4.5 a3,3 0 1 1 -6,0 z" fill="#bfe6ff"/>';break;
+   case 'poison': e='<circle cx="'+cx+'" cy="'+(cy-10)+'" r="2.8" fill="#bfe6ff"/><rect x="'+(cx-1.2)+'" y="'+(cy-10.6)+'" width="2.4" height="2.4" fill="'+dk+'"/>';break;
+   case 'mana': e='<path d="M'+(cx-5)+','+(cy-10)+' q2.5,-3 5,0 t5,0 M'+(cx-5)+','+(cy-12.5)+' q2.5,-3 5,0 t5,0" stroke="#bfe6ff" stroke-width="1.2" fill="none"/>';break;
+   case 'fireres': e='<polygon points="'+(cx-3)+','+(cy-7)+' '+cx+','+(cy-13)+' '+(cx+3)+','+(cy-7)+'" fill="none" stroke="#ffd36a" stroke-width="1.3"/>';break;
+   case 'natres': e='<path d="M'+(cx-4)+','+(cy-7)+' q0,-6 8,-6 q0,6 -8,6 z" fill="#d6f5c0"/>';break;
+   case 'grounding': e='<path d="M'+cx+','+(cy-13)+' L'+cx+','+(cy-8)+' M'+(cx-3)+','+(cy-10)+' L'+cx+','+(cy-7.5)+' L'+(cx+3)+','+(cy-10)+'" stroke="#f3eaff" stroke-width="1.5" fill="none"/>';break;
+  }
+  return o+e;
+}
+function iconAt(name,c,cx,cy,size){var k=size/26;return '<g transform="translate('+(cx-size/2)+' '+(cy-size/2)+') scale('+k+')">'+icon(name,c,0,0,26)+'</g>';}
+/* a flyout / card tile: v3's tile(), icon in a chamfered mold, current pick gets the element underline */
+function tile(name,c,x,y,cur,hov,w){
+  w=w||G.TILE;var cu=4,cid='tc'+(++uid),o='';
+  o+='<clipPath id="'+cid+'"><polygon points="'+mold(x+1,y+1,w-2,w-2,cu)+'"/></clipPath>';
+  o+='<polygon points="'+mold(x,y,w,w,cu)+'" fill="'+(hov?mix(C.bg,c,.12):'rgba(13,6,32,.72)')+'"/>';
+  o+='<g clip-path="url(#'+cid+')">'+icon(name,c,x+3,y+3,w-6)+'</g>';
+  o+='<polygon points="'+mold(x+.5,y+.5,w-1,w-1,cu)+'" fill="none" stroke="'+(hov||cur?c:C.violet)+'" stroke-opacity="'+(hov?1:cur?.75:.35)+'" stroke-width="1.2"'+(hov?' filter="url(#gls)"':'')+'/>';
+  if(cur)o+='<rect x="'+(x+5)+'" y="'+(y+w-4)+'" width="'+(w-10)+'" height="2" fill="'+c+'" fill-opacity=".95"/>';
+  return o;
+}
+function emptyTile(c,x,y,w){w=w||G.TILE;return '<polygon points="'+mold(x+.8,y+.8,w-1.6,w-1.6,4)+'" fill="rgba(13,6,32,.5)" stroke="'+c+'" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="1.6 3" stroke-linecap="round"/>'+txt(x+w/2,y+w/2+4,'--',11,C.muted,{a:'middle',op:.7});}
+
+/* ---------- tab buttons ---------- */
+function brackets(x,y,w,h,col,off,len){off=off||2.5;len=len||6;var a=x-off,b=y-off,c2=x+w+off,d=y+h+off;
+ return '<path d="M'+a+','+(b+len)+' L'+a+','+b+' L'+(a+len)+','+b+' M'+(c2-len)+','+b+' L'+c2+','+b+' L'+c2+','+(b+len)+' M'+c2+','+(d-len)+' L'+c2+','+d+' L'+(c2-len)+','+d+' M'+(a+len)+','+d+' L'+a+','+d+' L'+a+','+(d-len)+'" fill="none" stroke="'+col+'" stroke-width="1.4" filter="url(#gls)"/>';}
+/* element button: picked totem icon, element underline. st: up (standing), next, wait, mode hov|own, chg cyan|amber */
+function elBtn(j,e,tot,st){
+  st=st||{};var x=bxj(j),y=BY,w=G.BTN,c=ELS[e].c,o='',cid='eb'+(++uid);
+  var up=st.up,hov=st.mode==='hov'||st.mode==='own';
+  o+='<polygon points="'+mold(x,y,w,w,5)+'" fill="'+(up?mix(C.bg,c,.16):hov?mix(C.bg,c,.1):'rgba(13,6,32,.72)')+'"/>';
+  o+='<clipPath id="'+cid+'"><polygon points="'+mold(x+1,y+1,w-2,w-2,4)+'"/></clipPath>';
+  o+='<g clip-path="url(#'+cid+')" opacity="'+((up||hov||st.next)?1:st.wait?.7:.88)+'">'+icon(tot,c,x+3,y+3,32)+'</g>';
+  o+='<polygon points="'+mold(x+.5,y+.5,w-1,w-1,5)+'" fill="none" stroke="'+((up||hov)?c:C.violet)+'" stroke-opacity="'+(up?.95:hov?.9:.35)+'" stroke-width="1.2"'+((up||st.mode==='hov')?' filter="url(#gls)"':'')+'/>';
+  o+='<rect x="'+(x+5)+'" y="'+(y+w-5)+'" width="'+(w-10)+'" height="2" fill="'+(st.next?C.cyan:c)+'" fill-opacity="'+(up?1:st.wait?.3:.9)+'"/>';
+  if(up)o+='<rect x="'+(x+w-9)+'" y="'+(y+3)+'" width="5" height="5" fill="#fff" filter="url(#gls)"/>';
+  if(st.next)o+=brackets(x,y,w,w,C.cyan);
+  if(st.chg==='cyan')o+='<polygon points="'+mold(x+.5,y+.5,w-1,w-1,5)+'" fill="none" stroke="'+C.cyan+'" stroke-width="1.6" filter="url(#gls)"/><rect x="'+(x+9)+'" y="'+(y+1)+'" width="'+(w-15)+'" height="1.6" fill="'+C.cyan+'"/>';
+  if(st.chg==='amber')o+='<polygon points="'+mold(x+.5,y+.5,w-1,w-1,5)+'" fill="none" stroke="'+C.amber+'" stroke-width="1.5" stroke-dasharray="3 2.4"/><path d="M'+(x+w-10)+','+(y+3)+' l6,0 l-3,5.5 z" fill="'+C.amber+'"/>';
+  return o;
+}
+function lockedBtn(j,t){var x=bxj(j),w=G.BTN,cx=x+w/2;
+  return '<g opacity=".4"><polygon points="'+mold(x+.8,BY+.8,w-1.6,w-1.6,5)+'" fill="none" stroke="'+C.muted+'" stroke-width="1.6" stroke-dasharray="1.6 3" stroke-linecap="round"/>'+txt(cx,BY+w/2+4,t,11,C.muted,{a:'middle'})+'</g>';}
+/* SET DROP: four squares glyph. over.step = squares filled (step drop progress), over.badge = [{t,col,dash}] */
+function setBtn(over){over=over||{};var x=bxj(4),y=BY,w=G.BTN,cx=x+w/2,cy=y+w/2-2,c='#22e0ff',o='';
+  o+='<polygon points="'+mold(x,y,w,w,5)+'" fill="rgba(13,6,32,.72)"/><polygon points="'+mold(x+.5,y+.5,w-1,w-1,5)+'" fill="none" stroke="'+(over.step!=null?c:C.violet)+'" stroke-opacity="'+(over.step!=null?.8:.35)+'" stroke-width="1.1"/>';
+  [[-6,-8],[2,-8],[-6,0],[2,0]].forEach(function(p,i){var on=(over.step==null)||i<over.step;
+    o+='<rect x="'+(cx+p[0])+'" y="'+(cy+p[1]+1)+'" width="5" height="5" fill="'+c+'" fill-opacity="'+(on?1:.22)+'"'+((over.step!=null&&i===over.step)?' stroke="#fff" stroke-width=".8"':'')+'/>';});
+  o+='<rect x="'+(x+5)+'" y="'+(y+w-5)+'" width="'+(w-10)+'" height="2" fill="'+c+'" fill-opacity=".9"/>';
+  if(over.next)o+=brackets(x,y,w,w,C.cyan);
+  (over.badge||[]).forEach(function(b,i){var bxp=x+w-12-i*12;
+    o+='<rect x="'+bxp+'" y="'+(y+1.5)+'" width="10" height="9" fill="'+(b.dash?'rgba(255,182,72,.1)':mix(C.bg,b.col,.25))+'" stroke="'+b.col+'" stroke-width="1"'+(b.dash?' stroke-dasharray="2 1.5"':'')+'/>'+txt(bxp+5,y+9,b.t,9,b.dash?C.amber:C.white,{a:'middle'});});
+  return o;}
+function recallBtn(){var x=bxj(5),y=BY,w=G.BTN,cx=x+w/2,cy=y+w/2-2,c='#ffb648',o='';
+  o+='<polygon points="'+mold(x,y,w,w,5)+'" fill="rgba(13,6,32,.72)"/><polygon points="'+mold(x+.5,y+.5,w-1,w-1,5)+'" fill="none" stroke="'+C.violet+'" stroke-opacity=".35" stroke-width="1.1"/>';
+  o+='<circle cx="'+cx+'" cy="'+(cy-1)+'" r="8" fill="none" stroke="'+c+'" stroke-width="2.4" stroke-dasharray="36 14" transform="rotate(-60 '+cx+' '+(cy-1)+')"/><rect x="'+(x+5)+'" y="'+(y+w-5)+'" width="'+(w-10)+'" height="2" fill="'+c+'" fill-opacity=".9"/>';
+  return o;}
+/* the six stock buttons from the picks */
+function buttons(o){var s='';
+  EL4.forEach(function(e,j){
+    if(o.lvl<UNL[e]){s+=lockedBtn(j,'L'+UNL[e]);return;}
+    s+=elBtn(j,e,o.picks[e],(o.st&&o.st[e])||{});
+  });
+  if(o.lvl<20)s+=lockedBtn(4,'L20')+lockedBtn(5,'L20');else s+=setBtn(o.set)+recallBtn();
+  return s;}
+
+/* ---------- chips (preset tabs) ---------- */
+function chipPoly(x,y,w,h,c){return x+','+(y+h)+' '+x+','+(y+c)+' '+(x+c)+','+y+' '+(x+w-c)+','+y+' '+(x+w)+','+(y+c)+' '+(x+w)+','+(y+h);}
+/* st: act, pend, hov, flag ('empty'|'part'|''), pin, plus, num */
+function chip(x,y,w,h,label,st){
+  st=st||{};var o='',col=st.pend?C.amber:(st.act||st.hov)?C.cyan:C.violet;
+  var dash=(st.flag==='empty'||st.plus||st.pend)?' stroke-dasharray="2.2 1.8"':'';
+  o+='<polygon points="'+chipPoly(x,y,w,h,3)+'" fill="'+(st.act?mix(C.bg,C.cyan,.22):st.pend?mix(C.bg,C.amber,.1):st.hov?mix(C.bg,C.cyan,.1):'rgba(13,6,32,.85)')+'"/>';
+  o+='<polygon points="'+chipPoly(x+.5,y+.5,w-1,h,3)+'" fill="none" stroke="'+col+'" stroke-opacity="'+((st.act||st.pend||st.hov)?1:.5)+'" stroke-width="1"'+dash+((st.act||st.hov)?' filter="url(#gls)"':'')+'/>';
+  var lx=st.flag==='part'?x+w/2-3.5:x+w/2;
+  o+=txt(lx,y+h-2.5,label,10,st.act?C.white:st.pend?C.amber:C.muted,{a:'middle'});
+  if(st.flag==='part'){var kx=x+w-8,ky=y+h-5;o+='<path d="M'+(kx+1)+','+ky+' v-1.8 a2,2 0 0 1 4,0 v1.8" fill="none" stroke="'+C.amber+'" stroke-width="1"/><rect x="'+kx+'" y="'+ky+'" width="6" height="3.6" fill="'+C.amber+'"/>';}
+  if(st.pin)o+='<rect x="'+(x+w-4.5)+'" y="'+(y+1.5)+'" width="3" height="3" fill="'+C.cyan+'" filter="url(#gls)"/>';
+  return o;}
+function plusChip(x,y,w,h,hov){var o=chip(x,y,w,h,'',{plus:true,hov:hov});var cx=x+w/2,cy=y+h/2+.5;
+  return o+'<path d="M'+(cx-3)+','+cy+' h6 M'+cx+','+(cy-3)+' v6" stroke="'+(hov?C.cyan:C.muted)+'" stroke-width="1.4"/>';}
+/* a name plate sitting right aligned at xr, baseline y. prog = array of 'done'|'next'|'wait' with element colours */
+function plate(xr,y,t,col,prog,els){
+  var pw=prog?prog.length*7+4:0,w=t.length*6.7+10+pw,x=xr-w,o='';
+  o+='<rect x="'+x+'" y="'+(y-11)+'" width="'+w+'" height="14" fill="rgba(13,6,32,.94)" stroke="'+col+'" stroke-opacity=".85"/>';
+  if(prog)prog.forEach(function(s,i){var px=x+4+i*7,ec=ELS[els[i]].c;
+    o+='<rect x="'+px+'" y="'+(y-7)+'" width="5" height="5" fill="'+ec+'" fill-opacity="'+(s==='done'?1:s==='next'?.55:.2)+'"'+(s==='next'?' stroke="#fff" stroke-width=".8"':'')+'/>';});
+  o+=txt(x+5+pw,y,t,11,col===C.amber?C.amber:C.white);
+  return o;}
+
+/* ---------- V1 piece and chimney (copied from totem-picker-arrow-v3, open state), with an optional preset cap ---------- */
+var CUTC=5,BTNW=38;
+function pieceRel(k){var d=k.s*Math.SQRT2,tipy=CUTC-d,yb=-k.s,xj=CUTC-d-yb;return [[0,tipy],[0,yb-k.th],[BTNW,yb-k.th],[BTNW,yb],[xj,yb]];}
+function neonArrow(e,id){
+  var a={cx:19,ay:-3.0,W:15,h:5.2,t:3.4,dir:1},x=bx(e),c=ELS[e].c,o='';
+  var ax=x+a.cx,ay=BY+a.ay,dr=a.dir;
+  var P=[[ax,ay],[ax+a.W,ay-dr*a.h],[ax+a.W,ay-dr*(a.h+a.t)],[ax,ay-dr*a.t],[ax-a.W,ay-dr*(a.h+a.t)],[ax-a.W,ay-dr*a.h]];
+  var mid=[[ax-a.W,ay-dr*(a.h+a.t/2)],[ax,ay-dr*a.t/2],[ax+a.W,ay-dr*(a.h+a.t/2)]];
+  var gid='ng'+id;
+  o+='<defs><linearGradient id="'+gid+'" gradientUnits="userSpaceOnUse" x1="0" y1="'+(ay-dr*(a.h+a.t))+'" x2="0" y2="'+ay+'"><stop offset="0" stop-color="'+c+'"/><stop offset=".5" stop-color="'+mix(c,C.pink,.6)+'"/><stop offset="1" stop-color="'+C.pink+'"/></linearGradient></defs>';
+  o+='<polygon points="'+pts(P)+'" fill="url(#'+gid+')" fill-opacity=".95" stroke="url(#'+gid+')" stroke-width="3.6" stroke-opacity=".95" stroke-linejoin="miter" filter="url(#haze)"/>';
+  o+='<polygon points="'+pts(P)+'" fill="url(#'+gid+')" stroke="none"/>';
+  o+='<polyline points="'+pts(mid)+'" fill="none" stroke="#fff4fb" stroke-width=".6" stroke-linejoin="miter"/>';
+  return o;}
+function pieceOpen(e){
+  var id=++uid,k={th:11,s:2},x=bx(e),c=ELS[e].c,rel=pieceRel(k),o='';
+  var abs=rel.map(function(p){return [x+p[0],BY+p[1]];}),P=pts(abs),cid='pc'+id;
+  o+='<clipPath id="'+cid+'"><polygon points="'+P+'"/></clipPath>';
+  o+='<polygon points="'+P+'" fill="'+mix(C.bg,c,.2)+'"/>';
+  var minY=Math.min.apply(null,abs.map(function(p){return p[1];})),maxY=Math.max.apply(null,abs.map(function(p){return p[1];}));
+  o+='<g clip-path="url(#'+cid+')" stroke="'+C.pink+'" stroke-opacity=".2" stroke-width=".5">';
+  for(var yy=Math.ceil(minY)+.75;yy<maxY;yy+=1.5)o+='<line x1="'+(x-4)+'" y1="'+yy+'" x2="'+(x+BTNW+2)+'" y2="'+yy+'"/>';
+  o+='</g><polygon points="'+P+'" fill="none" stroke="'+c+'" stroke-width="1" stroke-linejoin="miter" filter="url(#gls)"/>';
+  o+='<g clip-path="url(#'+cid+')"><polygon points="'+P+'" fill="none" stroke="'+c+'" stroke-width="2" stroke-linejoin="miter"/></g>';
+  return o+neonArrow(e,id);}
+/* flyout silhouette: V1 chimney. cap = width of the preset cap on top (0 = stock flyout) */
+function chimney(el,n,cap){
+  var xl=bx(el),xr=xl+G.BTN,fl=BY-13,bt=fl-4,H=4+n*G.TILE+(n-1)*G.TGAP+5+(cap?24:0),top=fl-H,lx=(el==='fire')?xl-6:xl-4,p=[];
+  if(el!=='fire')p.push([lx,T]);
+  p.push([lx,bt],[xl,bt],[xl,top+6],[xl+6,top]);
+  if(cap)p.push([xl+cap,top],[xl+cap,top+20],[xr,top+20]);else p.push([xr,top]);
+  p.push([xr,bt],[xr+4,bt],[xr+4,T-6],[xr+10,T]);
+  return {p:p,xl:xl,xr:xr,top:top,fl:fl,el:el};}
+function flyoutTiles(ch,el,cur,hov,tipless){
+  var s='',L=LIST[el],c=ELS[el].c;
+  L.forEach(function(t,i){if(lvlOK(t)){var ty=ch.fl-4-G.TILE-i*(G.TILE+G.TGAP);s+=tile(t,c,ch.xl+3,ty,t===cur,t===hov);}});
+  return s;}
+var CURLVL=30;
+function lvlOK(t){return TOT[t].lv<=CURLVL;}
+
+/* ---------- the Console shell: outline, fill, grid, then the inner scene ---------- */
+function shell(o,inner){
+  var id=++uid,H=G.H,cols=o.cols||6,R=300+(cols-6)*42.8,vb=o.vb,sc=o.sc||1,TL=R+80;
+  var POST=[[R,-49],[R,-10],[R+10,0],[TL,0]],full,strokes;
+  if(o.chim){var s1=(o.chim.el==='fire')?S0.slice(0,4):S0.slice();var line1=s1.concat(o.chim.p).concat(POST);full=line1.concat([[TL,H],[0,H]]);strokes=[line1];}
+  else{full=S0.concat(POST).concat([[TL,H],[0,H]]);strokes=[S0,[S0[S0.length-1]].concat(POST)];}
+  var s='<svg xmlns="http://www.w3.org/2000/svg" width="'+(vb[2]*sc)+'" height="'+(vb[3]*sc)+'" viewBox="'+vb.join(' ')+'">';
+  s+='<defs><linearGradient id="cg'+id+'" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="'+H+'"><stop offset="0" stop-color="rgb(45,27,78)" stop-opacity=".8"/><stop offset="1" stop-color="rgb(11,6,20)" stop-opacity=".88"/></linearGradient>';
+  s+='<linearGradient id="fd'+id+'" gradientUnits="userSpaceOnUse" x1="0" y1="'+(H-34)+'" x2="0" y2="'+(H-2)+'"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#000"/></linearGradient>';
+  s+='<mask id="fm'+id+'" maskUnits="userSpaceOnUse" x="-200" y="-600" width="1400" height="'+(600+H)+'"><rect x="-200" y="-600" width="1400" height="'+(600+H-2)+'" fill="url(#fd'+id+')"/></mask>';
+  s+='<mask id="om'+id+'" maskUnits="userSpaceOnUse" x="-200" y="-600" width="1400" height="'+(640+H)+'"><rect x="-200" y="-600" width="1400" height="'+(640+H)+'" fill="#fff"/><path d="'+dpath(full,true)+'" fill="#000"/></mask></defs>';
+  s+='<g mask="url(#fm'+id+')">';
+  s+='<g mask="url(#om'+id+')" fill="none" stroke="'+C.violet+'" stroke-linejoin="round">';
+  [[22,.05],[15,.08],[10,.12],[5.5,.2]].forEach(function(p){s+='<path d="'+dpath(full,true)+'" stroke-width="'+p[0]+'" stroke-opacity="'+p[1]+'"/>';});
+  s+='</g><path d="'+dpath(full,true)+'" fill="url(#cg'+id+')"/>';
+  for(var i=0;i<11;i++)s+='<rect x="'+(15+i*40)+'.5" y="15.5" width="35" height="35" fill="rgba(13,6,32,.35)" stroke="'+C.violet+'" stroke-opacity=".18"/>';
+  strokes.forEach(function(p){s+='<path d="'+dpath(p)+'" fill="none" stroke-linejoin="miter" stroke-width="1" stroke="'+C.violet+'" stroke-opacity=".72"/>';});
+  s+=inner+'</g></svg>';
+  return s;}
+
+function frame(svg,w,cb){return '<div class="frame'+(cb?' cb':'')+'" style="width:'+(w+2)+'px">'+svg+'</div>';}
+function cell(svg,w,cb,label,desc){return '<div class="cell" style="width:'+(w+2)+'px">'+frame(svg,w,cb)+'<div class="tc"><b'+(cb?' class="cb"':'')+'>'+label+'</b>'+(desc||'')+'</div></div>';}
+function progOf(p,k){return p.order.map(function(e,i){return i<k?'done':i===k?'next':'wait';});}
+function stFromProg(p,k){var st={},pr=progOf(p,k);p.order.forEach(function(e,i){st[e]={up:pr[i]==='done',next:pr[i]==='next',wait:pr[i]==='wait'};});return st;}
+function mergeChg(st,els,col){els.forEach(function(e){st[e]=st[e]||{};st[e].chg=col;});return st;}
+function diffEls(a,b){return EL4.filter(function(e){return a[e]!==b[e];});}
+
+/* ======================================================================================================================
+   CONCEPT A: INDEX TABS ON THE RAIL.  Up to 4 numbered tabs sit on the tab's top rail above SET DROP and RECALL.
+   ====================================================================================================================== */
+var A_X0=213,A_STEP=22,A_W=19,A_Y=-60,A_H=11;
+function chipsA(ps,act,o){
+  o=o||{};var s='';
+  for(var i=0;i<4;i++){var x=A_X0+i*A_STEP,p=ps[i];
+    if(!p){if(i===ps.length&&!o.noPlus)s+=plusChip(x,A_Y,A_W,A_H,o.plusHov);continue;}
+    s+=chip(x,A_Y,A_W,A_H,String(i+1),{act:i===act,pend:o.pend===i,hov:o.hov===i,flag:pflag(p,o.lvl),pin:o.pin===i});}
+  return s;}
+function sceneA(o){
+  CURLVL=o.lvl;
+  var ps=o.presets,act=o.act,p=ps[act],picks=o.picks,st={};
+  if(o.k!=null)st=stFromProg(p,o.k);
+  if(o.chg)mergeChg(st,o.chg,o.chgCol||'cyan');
+  var inner=buttons({lvl:o.lvl,picks:picks,st:st,set:o.k!=null?{step:o.k,next:o.k>=p.order.length?false:false}:{}});
+  inner+=chipsA(ps,act,{lvl:o.lvl,pend:o.pend,hov:o.hov,pin:o.pin,plusHov:o.plusHov,noPlus:o.noPlus});
+  var pt=o.plateText!=null?o.plateText:p.n;
+  if(o.plateText!==''){
+    if(o.pend!=null)inner+=plate(A_X0+3*A_STEP+A_W,-67,p.n+' > '+ps[o.pend].n,C.amber);
+    else inner+=plate(A_X0+3*A_STEP+A_W,-67,pt,o.k!=null?C.cyan:C.cyan,o.k!=null?progOf(p,o.k):null,o.k!=null?p.order:null);
+  }
+  inner+=o.extra||'';
+  return shell({vb:o.vb,sc:o.sc,cols:6},inner);}
+
+/* the edit card of concept A. step: new | name | fill | done */
+function btnTxt(x,y,w,h,t,col,fill){return rect(x,y,w,h,fill||'rgba(13,6,32,.8)',col||C.violet,1)+txt(x+w/2,y+h-5,t,9,col===C.pink?C.pink:C.white,{a:'middle'});}
+function cardA(x0,y0,o){
+  var w=190,h=124,s='';
+  s+='<rect x="'+x0+'" y="'+y0+'" width="'+w+'" height="'+h+'" fill="rgba(13,6,32,.97)" stroke="'+C.violet+'" stroke-opacity=".85"/>';
+  s+=txt(x0+8,y0+14,'PRESET '+o.num,10,C.muted)+txt(x0+w-9,y0+14,'x',11,C.muted,{a:'end'});
+  s+=rect(x0+8,y0+20,w-16,18,'#0a0416',C.cyan,o.nameFocus?1:.4,o.nameFocus?'':' stroke-opacity=".4"');
+  s+=txt(x0+14,y0+33,o.name,12,o.nameDim?C.muted:C.white);
+  if(o.nameFocus)s+=rect(x0+14+o.name.length*7.3+1,y0+24,1.5,10,C.cyan,null);
+  var ty=y0+45;
+  if(o.pickEl){var L=LIST[o.pickEl],c=ELS[o.pickEl].c;
+    L.forEach(function(t,i){s+=tile(t,c,x0+8+i*35,ty,t===o.cur,t===o.hovT);});
+    s+=txt(x0+8,ty+46,ELS[o.pickEl].name.toUpperCase()+': pick one',9,c);
+  }else{
+    EL4.forEach(function(e,i){var t=o.slots[e],tx=x0+8+i*(32+6),c=ELS[e].c;
+      if(t)s+=tile(t,c,tx,ty,true,o.hotEl===e);else s+=emptyTile(c,tx,ty);
+      if(o.ord&&t&&o.ord.indexOf(e)>=0){var n=o.ord.indexOf(e)+1;s+=rect(tx-1,ty-1,9,10,'rgba(13,6,32,.95)',c,.8)+txt(tx+3.5,ty+7,String(n),9,C.white,{a:'middle'});}
+      s+=txt(tx+16,ty+44,e.charAt(0).toUpperCase(),9,c,{a:'middle'});});
+  }
+  var fy=y0+h-24;
+  s+=btnTxt(x0+8,fy,58,17,'FROM TAB')+btnTxt(x0+70,fy,62,17,'PIN SET 2',o.pinOn?C.cyan:null,o.pinOn?mix(C.bg,C.cyan,.2):null)+btnTxt(x0+136,fy,46,17,'DELETE',C.pink);
+  return s;}
+
+var PS4=[PR.solo,PR.melee,PR.heal,PR.panic];
+function conceptA(){
+  var vbS=[20,-96,400,134],w=400;
+  var cells='';
+  var mel=ov(BASE,PR.melee),heal=ov(BASE,PR.heal),pan=ov(BASE,PR.panic);
+  cells+=cell(sceneA({vb:vbS,lvl:30,presets:PS4,act:1,picks:mel,pin:3}),w,false,'1 IDLE','MELEE is active. SET DROP and the four buttons carry it. Tab 4 has a cyan dot: PANIC is pinned to Shift+SET DROP.');
+  cells+=cell(sceneA({vb:vbS,lvl:30,presets:PS4,act:2,picks:heal,pin:3,chg:['earth'],hov:null}),w,false,'2 SWITCHED (OUT OF COMBAT)','Tab 3 clicked. Only Earth changed (Strength of Earth to Stoneskin), cyan edge. Fire and Water keep their picks, HEAL leaves them out.');
+  cells+=cell(sceneA({vb:vbS,lvl:30,presets:PS4,act:1,picks:mel,pin:3,pend:3,chg:['fire','earth'],chgCol:'amber'}),w,true,'3 SWITCH QUEUED (IN COMBAT)','Tab 4 was clicked mid fight. Nothing changes yet: amber dashed tab, amber plate "MELEE > PANIC", amber dashed edge and mark on the buttons that will change. Applies at combat end.');
+  cells+=cell(sceneA({vb:vbS,lvl:30,presets:PS4,act:3,picks:pan,pin:3,k:2}),w,true,'4 STEP DROP (IN COMBAT, CTRL+CLICK SET DROP)','PANIC, press 2 of 4. Earth and Air stand (white mark), Fire is next (cyan brackets). The plate squares and the SET glyph squares count the presses too.');
+  cells+=cell(sceneA({vb:vbS,lvl:14,presets:[PR.solo,PR.melee],act:0,picks:{fire:'searing',earth:'earthbind',water:'healing',air:'grounding'},k:null,noPlus:false}),w,false,'5 BEFORE LEVEL 20','Level 14: Earth and Fire only, SET DROP and RECALL show their dotted L20 molds. Presets still switch, and the Ctrl+click step drop still works. MELEE carries a lock (needs Water).');
+  cells+=cell(sceneA({vb:vbS,lvl:26,presets:[PR.solo,PR.melee,PR.fresh,PR.panic],act:2,picks:{fire:'searing',earth:'stoneskin',water:'healing',air:'grounding'},pin:null,plateText:'NEW'}),w,false,'6 LOCKED AND EMPTY','Level 26. Tab 3 is a fresh empty preset (dotted). Tab 4 PANIC has a lock: Grounding needs level 30, so it would apply three of four and say so.');
+  var o='<h2><i>A //</i> INDEX TABS ON THE RAIL</h2>';
+  o+='<p class="cap"><b>Idea:</b> presets are numbered index tabs standing on the totem tab\'s top rail, right above SET DROP and RECALL (the two cells that have no hover piece). The tab always shows the active preset, there is one name plate above the row, and SET DROP simply drops whatever is active. It is the most visible concept and costs no new cell. <b>Limit:</b> room for four tabs (19 px each), labelled by number. <b>Combat:</b> the active preset rides on SET DROP (one cast), the pinned preset rides on Shift+SET DROP, and Ctrl+click on SET DROP is the step drop.</p>';
+  o+='<div class="rowlab"><i>A</i> six states, 1x<small>true design px. Pink frame = in combat (mockup device).</small></div><div class="row">'+cells+'</div>';
+  o+='<div class="rowlab"><i>A</i> zoom, 3x<small>left: tab 2 hovered; middle: waiting switch; right: step drop in progress.</small></div><div class="row top">';
+  o+=cell(sceneA({vb:[196,-92,112,100],sc:3,lvl:30,presets:PS4,act:1,picks:mel,pin:3,hov:2}),336,false,'HOVER','Hovered tab brightens, the plate keeps the ACTIVE preset name.');
+  o+=cell(sceneA({vb:[196,-92,112,100],sc:3,lvl:30,presets:PS4,act:1,picks:mel,pin:3,pend:3,chg:['fire','earth'],chgCol:'amber'}),336,true,'WAITING','Amber dashed tab 4, plate shows the move.');
+  o+=cell(sceneA({vb:[196,-92,112,100],sc:3,lvl:30,presets:PS4,act:3,picks:pan,pin:3,k:2}),336,true,'STEP 2 OF 4','Squares in the plate and on SET DROP follow the order Earth, Air, Fire, Water.');
+  o+='</div>';
+  /* tooltips */
+  o+='<div class="rowlab"><i>A</i> hover tooltips<small>spell style, same family as the buff tab.</small></div><div class="tips">';
+  o+=ttPreset('PRESET 2: MELEE',PR.melee,'Left click: use this preset. Right click: edit it.','Out of combat: applies now. In combat: applies when combat ends.')+
+     ttPreset('PRESET 4: PANIC (pinned)',PR.panic,'Pinned to Shift+SET DROP, so it drops in combat with no switching.','Level 30 and Call of the Ancestors needed.')+
+     ttLocked('PRESET 4: PANIC',PR.panic,26,'Grounding Totem needs level 30. Uses the other three.')+
+     ttEmpty('PRESET 3: NEW','Empty. Right click to fill it, or use FROM TAB.');
+  o+='</div>';
+  /* editing flow */
+  var fv=[100,-215,230,240],fw=345,sc=1.5,p3=[PR.solo,PR.melee,PR.heal];
+  var ed='';
+  ed+=cell(sceneA({vb:[100,-110,230,135],sc:sc,lvl:30,presets:p3,act:1,picks:mel,plusHov:true,extra:plate(A_X0+3*A_STEP+A_W,-84,'NEW PRESET',C.cyan)}),fw,false,'1 CREATE','Click the + tab. A new preset is born as a copy of the four buttons, so nothing is typed from scratch.');
+  ed+=cell(sceneA({vb:fv,sc:sc,lvl:30,presets:p3.concat([{n:'NEW',s:ov({fire:null,earth:null,water:null,air:null},{s:mel,}),order:['earth','fire','water']}]),act:3,picks:mel,plateText:'',extra:cardA(108,-208,{num:4,name:'PANIC',nameFocus:true,caret:true,slots:mel,ord:['earth','fire','water'],hotEl:null})}),fw,false,'2 RENAME','Right click a tab edits it. The name field has focus at once, 8 letters max, Enter to keep.');
+  ed+=cell(sceneA({vb:fv,sc:sc,lvl:30,presets:p3.concat([PR.panic]),act:3,picks:mel,plateText:'',extra:cardA(108,-208,{num:4,name:'PANIC',slots:mel,pickEl:'earth',cur:'strength',hovT:'stoneclaw'})}),fw,false,'3 FILL','Click a slot: its row becomes that element\'s known totems (same icon only tiles as the picker). Stoneclaw hovered. Leave an element out with --.');
+  ed+=cell(sceneA({vb:fv,sc:sc,lvl:30,presets:PS4,act:3,picks:pan,pin:3,chg:['fire','earth'],extra:cardA(108,-208,{num:4,name:'PANIC',slots:pan,ord:['earth','air','fire','water'],pinOn:true})}),fw,false,'4 ORDER AND PIN','Numbers on the slots are the drop order (drag a slot to reorder). PIN SET 2 puts this preset on Shift+SET DROP. FROM TAB copies the four buttons in. Esc closes. Editing is shut in combat.');
+  o+='<div class="rowlab"><i>A</i> editing flow, 1.5x<small>create, rename, fill, order and pin. All out of combat.</small></div><div class="row top">'+ed+'</div>';
+  o+=settingsA();
+  return o;}
+
+/* ======================================================================================================================
+   CONCEPT B: PRESET CAP IN THE FLYOUT.  The existing icon flyout grows a cap with the preset tabs. Quiet when closed.
+   ====================================================================================================================== */
+var B_CAP=162;
+function capB(ch,ps,act,o){
+  o=o||{};var s='',x0=ch.xl+5,y0=ch.top+3;
+  for(var i=0;i<4;i++){var x=x0+i*23,p=ps[i];
+    if(!p){if(i===ps.length)s+=plusChip(x,y0,20,14,o.plusHov);continue;}
+    s+=chip(x,y0,20,14,String(i+1),{act:i===act,pend:o.pend===i,hov:o.hov===i,flag:pflag(p,o.lvl),pin:o.pin===i});}
+  var nx=x0+4*23+4,name=o.nameEdit!=null?o.nameEdit:(o.pend!=null?'>'+ps[o.pend].n:ps[act].n);
+  if(o.nameField){s+=rect(nx-3,y0,B_CAP-(nx-ch.xl)-3,14,'#0a0416',C.cyan,1)+txt(nx+1,y0+11,name,11,C.white)+rect(nx+1+name.length*6.7+1,y0+2,1.5,10,C.cyan,null);}
+  else s+=txt(nx,y0+11,name,11,o.pend!=null?C.amber:C.white);
+  return s;}
+function sceneB(o){
+  CURLVL=o.lvl;
+  var ps=o.presets,act=o.act,p=ps[act],picks=o.picks,st={};
+  if(o.k!=null)st=stFromProg(p,o.k);
+  if(o.chg)mergeChg(st,o.chg,o.chgCol||'cyan');
+  var badge=[{t:String(act+1),col:C.cyan}];
+  if(o.pend!=null)badge.push({t:String(o.pend+1),col:C.amber,dash:true});
+  var inner='',ch=null;
+  if(o.open){
+    var el=o.open.el,n=LIST[el].filter(lvlOK).length;ch=chimney(el,n,B_CAP);
+    st[el]=st[el]||{};st[el].mode='own';
+  }
+  inner+=buttons({lvl:o.lvl,picks:picks,st:st,set:o.lvl>=20?{step:o.k,badge:o.nobadge?[]:badge}:{}});
+  if(o.open){
+    inner+=pieceOpen(o.open.el);
+    inner+=flyoutTiles(ch,o.open.el,picks[o.open.el],o.open.hov);
+    inner+=capB(ch,ps,act,{lvl:o.lvl,pend:o.pend,hov:o.hov,pin:o.pin,plusHov:o.plusHov,nameField:o.nameField,nameEdit:o.nameEdit});
+  }
+  inner+=o.extra||'';
+  return shell({vb:o.vb,sc:o.sc,cols:6,chim:ch},inner);}
+function conceptB(){
+  var vbC=[20,-96,400,134],vbO=[20,-246,400,284],w=400;
+  var mel=ov(BASE,PR.melee),heal=ov(BASE,PR.heal),pan=ov(BASE,PR.panic);
+  var openF={el:'fire'};
+  var cells='';
+  var B6=[];
+  B6.push(cell(sceneB({vb:vbC,lvl:30,presets:PS4,act:1,picks:mel,pin:3}),w,false,'1 IDLE (LIST CLOSED)','Looks like the stock tab. The only trace is the number on SET DROP: MELEE (2) is active.'));
+  B6.push(cell(sceneB({vb:vbO,lvl:30,presets:PS4,act:2,picks:heal,pin:3,chg:['earth'],open:openF}),w,false,'2 SWITCHED (OUT OF COMBAT)','The Fire list is open and its cap shows the tabs. Tab 3 was clicked: Earth changed (cyan edge) and the SET badge reads 3.'));
+  B6.push(cell(sceneB({vb:vbO,lvl:30,presets:PS4,act:1,picks:mel,pin:3,pend:3,chg:['fire','earth'],chgCol:'amber',open:openF}),w,true,'3 SWITCH QUEUED (IN COMBAT)','Opened and clicked in combat. Tab 4 goes amber dashed and the cap name reads >PANIC, a second amber badge 4 waits beside the active 2 on SET DROP. Applies at combat end.'));
+  B6.push(cell(sceneB({vb:vbC,lvl:30,presets:PS4,act:3,picks:pan,pin:3,k:2}),w,true,'4 STEP DROP (IN COMBAT, CTRL+CLICK SET DROP)','PANIC, press 2 of 4. The SET glyph squares count the presses, element buttons show standing and next, the badge shows the preset number.'));
+  B6.push(cell(sceneB({vb:vbC,lvl:14,presets:[PR.solo,PR.melee],act:0,picks:{fire:'searing',earth:'earthbind',water:'healing',air:'grounding'}}),w,false,'5 BEFORE LEVEL 20','Level 14: no SET DROP, no badge, no sets. The list cap still switches the two known buttons. Ctrl+click on the first element button steps the preset instead.'));
+  B6.push(cell(sceneB({vb:vbO,lvl:26,presets:[PR.solo,PR.melee,PR.fresh,PR.panic],act:2,picks:{fire:'searing',earth:'stoneskin',water:'healing',air:'grounding'},open:openF}),w,false,'6 LOCKED AND EMPTY','Level 26. Tab 3 is a fresh empty preset (dotted), tab 4 PANIC carries a lock because Grounding needs level 30.'));
+  cells=[B6[1],B6[2],B6[5],B6[0],B6[3],B6[4]].join('');
+  var o='<h2><i>B //</i> PRESET CAP IN THE FLYOUT</h2>';
+  o+='<p class="cap"><b>Idea:</b> no new cell and nothing on the tab at rest. The icon flyout that already opens above an element button grows a <b>cap</b> on top: four tabs and the active name. The model is the simplest of the three: <b>the four buttons are always the active preset</b>, and picking a totem in any flyout writes into that preset, so there is no separate editor. The one resting trace is a small number badge on SET DROP. <b>Combat:</b> the badge\'s preset rides on SET DROP, Shift+SET DROP carries the pinned one, Ctrl+click on SET DROP is the step drop. <b>Cost:</b> you must open a list to switch, and a pick edits the preset you are on (use + to copy before experimenting).</p>';
+  o+='<div class="rowlab"><i>B</i> six states, 1x<small>the Fire list is the one drawn open. Top row: list open. Bottom row: list closed.</small></div><div class="row">'+cells+'</div>';
+  o+='<div class="rowlab"><i>B</i> zoom, 3x<small>the cap, a waiting switch, and the SET DROP badge.</small></div><div class="row top">';
+  o+=cell(sceneB({vb:[34,-236,170,50],sc:3,lvl:30,presets:PS4,act:1,picks:mel,pin:3,hov:2,open:openF}),510,false,'CAP, TAB 3 HOVERED','Tabs sit on the flyout top, name to the right. Cyan dot on tab 4 = pinned to Shift+SET DROP.');
+  o+=cell(sceneB({vb:[34,-236,170,50],sc:3,lvl:30,presets:PS4,act:1,picks:mel,pin:3,pend:3,open:openF}),510,true,'CAP, WAITING','Tab 4 dashed amber, name reads >PANIC in amber.');
+  o+=cell(sceneB({vb:[200,-52,60,56],sc:3,lvl:30,presets:PS4,act:1,picks:mel,pin:3,pend:3}),180,true,'SET DROP BADGE','Cyan 2 is live, dashed amber 4 is waiting.');
+  o+='</div>';
+  o+='<div class="rowlab"><i>B</i> hover tooltips</div><div class="tips">';
+  o+=ttPreset('PRESET 2: MELEE',PR.melee,'Left click: use this preset. Double click the name to rename.','Out of combat: applies now. In combat: applies when combat ends.')+
+     ttSetBadge()+
+     ttLocked('PRESET 4: PANIC',PR.panic,26,'Grounding Totem needs level 30. Uses the other three.')+
+     ttEmpty('PRESET 3: NEW','Empty. Pick a totem in any list to start filling it.');
+  o+='</div>';
+  /* editing flow: Earth list, 1.5x */
+  var fv=[60,-275,230,300],fw=345,sc=1.5,p3=[PR.solo,PR.melee,PR.heal],earthO={el:'earth'};
+  var ed='';
+  ed+=cell(sceneB({vb:fv,sc:sc,lvl:30,presets:p3,act:1,picks:mel,plusHov:true,open:earthO,nobadge:false}),fw,false,'1 CREATE','Click + in the cap. A copy of the four buttons becomes preset 4 and is selected.');
+  ed+=cell(sceneB({vb:fv,sc:sc,lvl:30,presets:p3.concat([{n:'NEW',s:mel,order:['earth','fire','water']}]),act:3,picks:mel,open:earthO,nameField:true,nameEdit:'PANIC'}),fw,false,'2 RENAME','Double click the name. It turns into a field with focus, Enter keeps it, Esc cancels.');
+  ed+=cell(sceneB({vb:fv,sc:sc,lvl:30,presets:p3.concat([PR.panic]),act:3,picks:mel,open:{el:'earth',hov:'stoneclaw'}}),fw,false,'3 FILL','Pick Stoneclaw in the Earth list: it is written into preset 4 at once and the Earth button changes. Same for each element. No separate save step.');
+  ed+=cell(sceneB({vb:fv,sc:sc,lvl:30,presets:PS4,act:3,picks:pan,pin:3,chg:['fire','earth'],open:earthO}),fw,false,'4 PIN AND DELETE','Right click a cap tab for a small menu: Pin to Shift set, Move earlier, Move later, Delete. Drop order follows the element order shown on the tab unless moved.');
+  o+='<div class="rowlab"><i>B</i> editing flow, 1.5x<small>the Earth list drawn open.</small></div><div class="row">'+ed+'</div>';
+  o+=settingsB();
+  return o;}
+
+/* ======================================================================================================================
+   CONCEPT C: PRESET DIAL + PANIC BUTTON.  Two new cells on the tab (7 and 8). The dial steps the active preset, the panic
+   cell is a fixed preset that is always armed, so it needs no switching in combat.
+   ====================================================================================================================== */
+function arc(cx,cy,r,a0,a1){function pol(a){var t=a*Math.PI/180;return [cx+r*Math.sin(t),cy-r*Math.cos(t)];}var p=pol(a0),q=pol(a1);return 'M'+p[0].toFixed(2)+','+p[1].toFixed(2)+' A'+r+','+r+' 0 '+((a1-a0)>180?1:0)+' 1 '+q[0].toFixed(2)+','+q[1].toFixed(2);}
+/* a ring button. o: j, p preset, lvl, k (steps done or null), digit, hot (panic), hov, pend, chg */
+function ringBtn(o){
+  var x=bxj(o.j),y=BY,w=G.BTN,cx=x+w/2,cy=y+w/2-2,r=11.5,p=o.p,n=p.order.length,s='';
+  var hot=o.hot,edge=hot?C.pink:C.cyan,k=o.k;
+  s+='<polygon points="'+mold(x,y,w,w,5)+'" fill="'+(hot?mix(C.bg,C.pink,.1):o.hov?mix(C.bg,C.cyan,.1):'rgba(13,6,32,.72)')+'"/>';
+  s+='<polygon points="'+mold(x+.5,y+.5,w-1,w-1,5)+'" fill="none" stroke="'+(o.pend?C.amber:edge)+'" stroke-opacity="'+(hot?.8:(o.hov||k!=null)?.9:.5)+'" stroke-width="1.2"'+(o.pend?' stroke-dasharray="3 2.4"':'')+((o.hov||k!=null)?' filter="url(#gls)"':'')+'/>';
+  if(n===0){s+='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+C.muted+'" stroke-opacity=".6" stroke-width="3" stroke-dasharray="2 3.2"/>';}
+  else{var seg=360/n,gap=n===1?0:14;
+    p.order.forEach(function(e,i){
+      var a0=i*seg+gap/2,a1=(i+1)*seg-gap/2,locked=lockedEl(p,e,o.lvl),c=ELS[e].c,state=k==null?'idle':(i<k?'done':i===k?'next':'wait');
+      if(locked){s+='<path d="'+arc(cx,cy,r,a0,a1)+'" fill="none" stroke="'+C.muted+'" stroke-opacity=".6" stroke-width="3.6" stroke-dasharray="2 2.6"/>';return;}
+      var op=state==='idle'?.55:state==='done'?1:state==='next'?.9:.25;
+      s+='<path d="'+arc(cx,cy,r,a0,a1)+'" fill="none" stroke="'+c+'" stroke-opacity="'+op+'" stroke-width="'+(state==='next'?5:3.6)+'"'+(state==='done'?' filter="url(#gls)"':'')+'/>';
+      if(state==='next')s+='<path d="'+arc(cx,cy,r,a0+1,a1-1)+'" fill="none" stroke="#fff" stroke-opacity=".9" stroke-width="1.2"/>';
+    });}
+  var next=(k!=null&&k<n)?p.order[k]:null;
+  if(next)s+=iconAt(p.s[next],ELS[next].c,cx,cy,13);
+  else if(o.digit!=null)s+=txt(cx,cy+4.5,o.digit,13,(n===0)?C.muted:C.white,{a:'middle'});
+  s+='<rect x="'+(x+5)+'" y="'+(y+w-5)+'" width="'+(w-10)+'" height="2" fill="'+(o.pend?C.amber:edge)+'" fill-opacity="'+(hot?.9:.85)+'"/>';
+  if(next)s+=brackets(x,y,w,w,C.cyan);
+  if(o.pend)s+='<path d="M'+(x+w-10)+','+(y+3)+' l6,0 l-3,5.5 z" fill="'+C.amber+'"/>';
+  return s;}
+/* name plate attached to the rail above a cell: centred on the cell */
+function railPlate(j,t,col,prog,els){
+  var cx=bxj(j)+19,pw=prog?prog.length*7+3:0,w=t.length*6.1+9+pw,x=cx-w/2,y=-61,o='';
+  o+='<polygon points="'+chipPoly(x,y,w,12,3)+'" fill="rgba(13,6,32,.94)"/><polygon points="'+chipPoly(x+.5,y+.5,w-1,11.5,3)+'" fill="none" stroke="'+col+'" stroke-opacity=".9" stroke-width="1"/>';
+  if(prog)prog.forEach(function(s,i){var px=x+4+i*7,ec=ELS[els[i]].c;o+='<rect x="'+px+'" y="'+(y+3.5)+'" width="5" height="5" fill="'+ec+'" fill-opacity="'+(s==='done'?1:s==='next'?.55:.2)+'"'+(s==='next'?' stroke="#fff" stroke-width=".8"':'')+'/>';});
+  o+=txt(x+4.5+pw,y+9.2,t,10,col===C.amber?C.amber:col===C.pink?C.pink:C.white);
+  return o;}
+function sceneC(o){
+  CURLVL=o.lvl;
+  var ps=o.presets,act=o.act,p=ps[act],picks=o.picks,st={};
+  if(o.chg)mergeChg(st,o.chg,o.chgCol||'cyan');
+  var inner=buttons({lvl:o.lvl,picks:picks,st:st,set:{}});
+  var dl=o.dialLocked;
+  if(o.lvl>=1){
+    inner+=ringBtn({j:6,p:p,lvl:o.lvl,digit:p.order.length?String(act+1):'+',hov:o.dialHov,pend:o.pend!=null});
+    inner+=ringBtn({j:7,p:o.panic,lvl:o.lvl,hot:true,k:o.pk,digit:'!',hov:o.panicHov});
+    inner+=railPlate(6,o.pend!=null?'>'+ps[o.pend].n:p.n,o.pend!=null?C.amber:C.cyan);
+    var pr=(o.pk!=null)?progOf(o.panic,o.pk):null;
+    inner+=railPlate(7,o.panic.n,C.pink);
+    if(pr)inner+=plate(bxj(7)+40,-66,o.pk+'/'+o.panic.order.length,C.pink,pr,o.panic.order);
+  }
+  inner+=o.extra||'';
+  return shell({vb:o.vb,sc:o.sc,cols:8},inner);}
+/* editor card of C: rows with drop order, element, totem, up and down */
+function cardC(x0,y0,o){
+  var w=198,rh=27,h=34+24+4*rh+30,s='';
+  s+='<rect x="'+x0+'" y="'+y0+'" width="'+w+'" height="'+h+'" fill="rgba(13,6,32,.97)" stroke="'+C.violet+'" stroke-opacity=".85"/>';
+  s+=txt(x0+8,y0+14,'PRESET '+o.num,10,C.muted)+txt(x0+w-9,y0+14,'x',11,C.muted,{a:'end'});
+  s+=rect(x0+8,y0+20,w-16,18,'#0a0416',C.cyan,o.nameFocus?1:.4,o.nameFocus?'':' stroke-opacity=".4"');
+  s+=txt(x0+14,y0+33,o.name,12,C.white);
+  if(o.nameFocus)s+=rect(x0+14+o.name.length*7.3+1,y0+24,1.5,10,C.cyan,null);
+  s+=txt(x0+8,y0+51,'DROP ORDER',9,C.muted);
+  var ry=y0+56;
+  o.ord.concat(EL4.filter(function(e){return o.ord.indexOf(e)<0;})).forEach(function(e,i){var t=(i<o.ord.length)?o.slots[e]:null,c=ELS[e].c,y=ry+i*rh;
+    s+=rect(x0+8,y,w-16,rh-3,o.hotRow===i?mix(C.bg,c,.12):'rgba(13,6,32,.6)',o.hotRow===i?c:C.violet,1,o.hotRow===i?'':' stroke-opacity=".35"');
+    s+=txt(x0+16,y+16,i<o.ord.length?String(i+1):'-',11,i<o.ord.length?C.white:C.muted);
+    s+=rect(x0+27,y+5,3,rh-13,c,null);
+    if(t){s+='<g>'+tile(t,c,x0+34,y+1,true,false,22)+'</g>'+txt(x0+60,y+16,TOT[t].n.replace(' Totem',''),10,C.white);}
+    else s+=emptyTile(c,x0+34,y+1,22)+txt(x0+60,y+16,'left out',10,C.muted);
+    s+=txt(x0+w-34,y+16,'^',11,C.muted,{a:'middle'})+txt(x0+w-20,y+16,'v',11,C.muted,{a:'middle'});});
+  var fy=y0+h-24;
+  s+=btnTxt(x0+8,fy,112,17,'USE AS PANIC PRESET',o.panicOn?C.pink:null,o.panicOn?mix(C.bg,C.pink,.2):null)+btnTxt(x0+124,fy,66,17,'DELETE',C.pink);
+  return s;}
+function conceptC(){
+  var vbS=[20,-100,420,138],w=420;
+  var mel=ov(BASE,PR.melee),heal=ov(BASE,PR.heal),pan=ov(BASE,PR.panic);
+  var cells='';
+  cells+=cell(sceneC({vb:vbS,lvl:30,presets:PS4,act:1,picks:mel,panic:PR.panic}),w,false,'1 IDLE','Dial (cell 7) shows MELEE: three arcs in drop order, its number in the middle. Panic (cell 8) is pink and fixed to PANIC.');
+  cells+=cell(sceneC({vb:vbS,lvl:30,presets:PS4,act:2,picks:heal,panic:PR.panic,chg:['earth'],dialHov:true}),w,false,'2 SWITCHED (OUT OF COMBAT)','Right click on the dial (or wheel) went to HEAL: two arcs, Earth button changed (cyan edge). The panic cell did not move.');
+  cells+=cell(sceneC({vb:vbS,lvl:30,presets:PS4,act:1,picks:mel,panic:PR.panic,pend:3,chg:['fire','earth'],chgCol:'amber'}),w,true,'3 SWITCH QUEUED (IN COMBAT)','Dial turned to PANIC mid fight. Amber dashed dial and plate ">PANIC", amber marks on buttons that will change. Panic cell is unaffected, it never needs switching.');
+  cells+=cell(sceneC({vb:vbS,lvl:30,presets:PS4,act:1,picks:mel,panic:PR.panic,pk:2}),w,true,'4 PANIC, PRESS 3 OF 4 NEXT (IN COMBAT)','Two presses done: Earth and Air arcs lit, Fire next (white arc, Magma icon in the centre, cyan brackets). Plate squares count 2 of 4.');
+  cells+=cell(sceneC({vb:vbS,lvl:14,presets:[PR.solo,PR.melee],act:0,picks:{fire:'searing',earth:'earthbind',water:'healing',air:'grounding'},panic:{n:'PANIC',s:{fire:'searing',earth:'stoneclaw',water:null,air:null},order:['earth','fire']}}),w,false,'5 BEFORE LEVEL 20','Level 14: no sets, but the dial and panic cell are plain step buttons, so presets still work. Panic here holds Stoneclaw and Searing.');
+  cells+=cell(sceneC({vb:vbS,lvl:26,presets:[PR.solo,PR.melee,PR.fresh,PR.panic],act:2,picks:{fire:'searing',earth:'stoneskin',water:'healing',air:'grounding'},panic:PR.panic}),w,false,'6 LOCKED AND EMPTY','Level 26. The dial holds an empty preset (dashed ring, +). The panic ring shows Grounding as a dashed grey arc: locked until 30, the other three still drop.');
+  var o='<h2><i>C //</i> PRESET DIAL AND PANIC BUTTON</h2>';
+  o+='<p class="cap"><b>Idea:</b> the presets get their own two cells on the tab. The <b>dial</b> holds the active preset and steps it (one drop per press). The <b>panic cell</b> is a second step button that is permanently tied to one preset, because you cannot switch in combat, so the preset you need in an emergency must already be wired. It is the only concept with an always armed emergency button, and the only one that adds cells: the tab grows from 6 to 8 cells (264 to 350 px) and the buff tab slides right. Both new cells are appended after the six existing ones, so saved keybinds do not move. <b>Combat:</b> SET DROP still drops native set 1 and Shift+SET DROP set 2; the dial and the panic cell are step buttons.</p>';
+  o+='<div class="rowlab"><i>C</i> six states, 1x<small>the tab is 86 px wider than today\'s.</small></div><div class="row">'+cells+'</div>';
+  o+='<div class="rowlab"><i>C</i> zoom, 3x<small>dial idle, dial waiting, panic stepping, panic partly locked.</small></div><div class="row top">';
+  var zv=[282,-92,110,100];
+  o+=cell(sceneC({vb:zv,sc:3,lvl:30,presets:PS4,act:1,picks:mel,panic:PR.panic}),330,false,'IDLE','Left dial, right panic. Arcs are in drop order, colours are the elements.');
+  o+=cell(sceneC({vb:zv,sc:3,lvl:30,presets:PS4,act:1,picks:mel,panic:PR.panic,pend:3}),330,true,'DIAL WAITING','Amber dashed dial, plate ">PANIC".');
+  o+=cell(sceneC({vb:zv,sc:3,lvl:30,presets:PS4,act:1,picks:mel,panic:PR.panic,pk:2}),330,true,'PANIC STEP 3 NEXT','Done arcs glow, next arc is thick with a white core, next totem shown inside.');
+  o+=cell(sceneC({vb:zv,sc:3,lvl:26,presets:PS4,act:1,picks:mel,panic:PR.panic}),330,false,'PANIC PARTLY LOCKED','Dashed grey arc = Grounding, needs level 30.');
+  o+='</div>';
+  o+='<div class="rowlab"><i>C</i> hover tooltips</div><div class="tips">';
+  o+=ttDial()+ttPanic()+ttLocked('PANIC (PRESET 4)',PR.panic,26,'Grounding Totem needs level 30. Drops the other three.')+ttEmpty('PRESET 3: NEW','Empty. Shift click the dial to edit.');
+  o+='</div>';
+  var fv=[170,-300,250,326],fw=325,sc=1.3;
+  var ed='';
+  var p3=[PR.solo,PR.melee,PR.heal];
+  ed+=cell(sceneC({vb:[170,-110,250,148],sc:sc,lvl:30,presets:p3,act:1,picks:mel,panic:PR.panic,dialHov:true,extra:plate(380,-76,'SHIFT CLICK: EDIT',C.cyan)}),fw,false,'1 OPEN','Shift click the dial opens the editor for the dial\'s preset. Right click cycles, wheel cycles.');
+  ed+=cell(sceneC({vb:fv,sc:sc,lvl:30,presets:PS4,act:3,picks:mel,panic:PR.panic,extra:cardC(186,-300+40,{num:4,name:'PANIC',nameFocus:true,ord:['earth','fire','water'],slots:mel})}),fw,false,'2 RENAME','The name field has focus. 8 letters, Enter keeps it. New presets start as a copy of the four buttons.');
+  ed+=cell(sceneC({vb:fv,sc:sc,lvl:30,presets:PS4,act:3,picks:pan,panic:PR.panic,extra:cardC(186,-300+40,{num:4,name:'PANIC',ord:['earth','fire','water','air'],slots:pan,hotRow:1})}),fw,false,'3 FILL AND ORDER','Click a row\'s totem to open that element\'s icon list; the arrows move it in the order. Put short lived totems first.');
+  ed+=cell(sceneC({vb:fv,sc:sc,lvl:30,presets:PS4,act:3,picks:pan,panic:PR.panic,extra:cardC(186,-300+40,{num:4,name:'PANIC',ord:['earth','air','fire','water'],slots:pan,panicOn:true})}),fw,false,'4 PANIC AND SAVE','USE AS PANIC PRESET ties the panic cell to this preset. Closing the card saves. Editing is shut in combat.');
+  o+='<div class="rowlab"><i>C</i> editing flow, 1.3x</div><div class="row top">'+ed+'</div>';
+  o+=settingsC();
+  return o;}
+
+/* ---------- tooltips and settings (HTML) ---------- */
+function sw(e){return '<i class="sw" style="background:'+ELS[e].c+'"></i>';}
+function ttPreset(title,p,foot,st){
+  var ls='';p.order.forEach(function(e,i){ls+='<div class="ln">'+(i+1)+' '+sw(e)+TOT[p.s[e]].n+'</div>';});
+  EL4.forEach(function(e){if(!p.s[e])ls+='<div class="ln m">'+sw(e)+ELS[e].name+': left out</div>';});
+  return '<div class="tt"><div class="h">'+title+'</div>'+ls+'<div class="w" style="margin-top:3px">'+foot+'</div><div class="st">'+st+'</div></div>';}
+function ttLocked(title,p,lvl,why){
+  var ls='';p.order.forEach(function(e,i){var lk=lockedEl(p,e,lvl);ls+='<div class="ln'+(lk?' m':'')+'">'+(i+1)+' '+sw(e)+TOT[p.s[e]].n+(lk?' (level '+Math.max(UNL[e],TOT[p.s[e]].lv)+')':'')+'</div>';});
+  return '<div class="tt"><div class="h">'+title+'</div>'+ls+'<div class="st am">'+why+'</div></div>';}
+function ttEmpty(title,t){return '<div class="tt"><div class="h">'+title+'</div><div class="m">'+t+'</div></div>';}
+function ttSetBadge(){return '<div class="tt"><div class="h">SET DROP</div><div class="ln">Call of the Elements: drops preset 2 (MELEE)</div><div class="ln">Shift: Call of the Ancestors, preset 4 (PANIC)</div><div class="ln">Ctrl click: next totem of preset 2</div><div class="st">3 s cast. Step drop: one totem per press.</div></div>';}
+function ttDial(){return '<div class="tt"><div class="h">PRESET DIAL: 2 MELEE</div><div class="ln">1 '+sw('earth')+'Strength of Earth Totem</div><div class="ln">2 '+sw('fire')+'Searing Totem</div><div class="ln">3 '+sw('water')+'Healing Stream Totem</div><div class="w" style="margin-top:3px">Click: drop the next totem. Right click or wheel: next preset. Shift click: edit.</div><div class="st">Starts over after combat ends or a 6 s pause.</div></div>';}
+function ttPanic(){return '<div class="tt"><div class="cap2">PANIC</div><div class="h">PANIC PRESET: PANIC</div><div class="ln">1 '+sw('earth')+'Stoneclaw Totem</div><div class="ln">2 '+sw('air')+'Grounding Totem</div><div class="ln">3 '+sw('fire')+'Magma Totem</div><div class="ln">4 '+sw('water')+'Healing Stream Totem</div><div class="w" style="margin-top:3px">Click: drop the next totem. Always ready, even in combat.</div><div class="st">Starts over after combat ends or a 6 s pause.</div></div>';}
+function sRow(label,on,o){o=o||{};return '<div class="srow'+(o.sm?' sm':'')+(o.dim?' dim':'')+'"><span class="tg'+(on?' on':'')+'"></span><span>'+label+'</span><span class="q'+(o.open?' open':'')+'">?</span></div>';}
+function sSel(label,val,o){o=o||{};return '<div class="srow'+(o.sm?' sm':'')+'"><span class="grow">'+label+'</span><span class="sel">'+val+'</span><span class="q'+(o.open?' open':'')+'">?</span></div>';}
+function sPanel(title,body,tip){return '<div class="setwrap"><div class="set"><div class="hd"><b>SHAMAN</b> / TOTEMS / '+title+'</div>'+body+'</div>'+(tip?'<div class="settt"><div class="tt"><div class="h">'+tip[0]+'</div><div class="ln">'+tip[1]+'</div></div></div>':'')+'</div>';}
+function cuesRows(){return '<div class="sep"></div><div class="slab">WHEN A SWITCH WAITS FOR COMBAT TO END</div>'+sRow('Waiting pulse',true,{sm:true})+sRow('Waiting sound',false,{sm:true})+'<div class="slab">WHEN IT APPLIES</div>'+sRow('Applied flash',true,{sm:true})+sRow('Applied sound',false,{sm:true});}
+function settingsA(){
+  var b=sRow('Preset tabs',true,{open:true})+sRow('Name plate',true,{sm:true})+sRow('Set Drop uses the active preset',true)+sRow('Step drop on Ctrl click',true)+sSel('Shift Set Drop drops','PANIC')+cuesRows();
+  return '<div class="rowlab"><i>A</i> settings rows<small>explanations live in the circled ? tooltip. Left: the Preset tabs tooltip open.</small></div>'+sPanel('PRESETS',b,['Preset tabs','Shows up to four numbered tabs on the totem tab. Left click uses a preset, right click edits it. Switching works out of combat. In combat the switch waits until combat ends.']);}
+function settingsB(){
+  var b=sRow('Preset row in the totem lists',true)+sRow('Preset number on Set Drop',true,{open:true})+sRow('Step drop on Ctrl click',true)+sRow('New preset copies the tab',true)+sSel('Shift Set Drop drops','PANIC')+cuesRows();
+  return '<div class="rowlab"><i>B</i> settings rows<small>Left: the Preset number tooltip open.</small></div>'+sPanel('PRESETS',b,['Preset number on Set Drop','Shows which preset Set Drop will drop. A second, amber number appears while a switch waits for combat to end.']);}
+function settingsC(){
+  var b=sRow('Preset dial',true)+sRow('Name plate',true,{sm:true})+sRow('Cycle with right click',true,{sm:true})+sRow('Cycle with mouse wheel',true,{sm:true})+sRow('Panic button',true,{open:true})+sSel('Panic preset','PANIC',{sm:true})+sRow('Press flash',true,{sm:true})+sRow('Press sound',false,{sm:true})+cuesRows();
+  return '<div class="rowlab"><i>C</i> settings rows<small>Left: the Panic button tooltip open.</small></div>'+sPanel('PRESETS',b,['Panic button','Adds a second cell that always drops the preset you choose, one totem per press. It is never switched, so it works in combat. It starts over after combat ends or a short pause.']);}
+
+document.getElementById('out').innerHTML=conceptA()+conceptB()+conceptC();
+</script>
+</body>
+</html>
