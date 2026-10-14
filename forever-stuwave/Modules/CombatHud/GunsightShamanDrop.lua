@@ -30,10 +30,11 @@
 --   * the element is open (ShamanTotems.IsUnlocked) and its tab button has a castable type1 (a locked or not learned element
 --     has none, and then no catcher is even built).
 --   With no target the holder is hidden by the unit watch whatever the mouse says.
---   Accepted limits, like the target menu button's: a module moved to the other area, an element learned, the dot piece
---   switched off, an area reassigned, or the Gunsight switched off while in combat leaves the catchers where and as they were,
---   mouse on included, until PLAYER_REGEN_ENABLED (EnableMouse on a secure frame is refused in combat, and the root only
---   fades), so a left click on the now invisible column still casts meanwhile.
+--   Accepted limits, like the target menu button's: a module moved to the other area, the dot piece switched off, an area
+--   reassigned, or the Gunsight switched off while in combat leaves the catchers where and as they were, mouse on included,
+--   until PLAYER_REGEN_ENABLED (EnableMouse on a secure frame is refused in combat, and the root only fades), so a left click
+--   on the now invisible column still casts meanwhile. An element learned in combat leaves nothing stale: its catcher is
+--   simply built at PLAYER_REGEN_ENABLED instead of at once (no secure frame is created in combat).
 --
 -- Left click only. Right and middle clicks are passed through to the world when the client lets us (SetPassThroughButtons,
 -- as the target menu does). Accepted limit: on a client that cannot, the catchers keep the mouse (the left click is the
