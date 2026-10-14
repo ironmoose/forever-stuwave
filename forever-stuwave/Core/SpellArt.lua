@@ -47,14 +47,45 @@ local function ArtName(stock)
     return nil
 end
 
+-- The icon values the client reported that have no baked art, each once, in the order first seen (capped), so a play
+-- session shows which spells Forever draws with an id the table lacks. Kept in ForeverSTUwaveDB.buffTabEngine.unmappedIcons
+-- (BuffTab's state table, on disk after a /reload) and carried across its rewrites by BuffTab's WriteStatus.
+local UNMAPPED_CAP = 40
+local unmapped, unmappedSeen = {}, {}
+
+function SpellArt.UnmappedLine()
+    if #unmapped == 0 then return nil end
+    return table.concat(unmapped, ", ")
+end
+
+function SpellArt.UnmappedCount()
+    return #unmapped
+end
+
+local function NoteUnmapped(stock)
+    if type(stock) ~= "number" and type(stock) ~= "string" then return end
+    local key = tostring(stock)
+    if unmappedSeen[key] or #unmapped >= UNMAPPED_CAP then return end
+    unmappedSeen[key] = true
+    unmapped[#unmapped + 1] = key
+    -- never create or replace the database (Config leaves a corrupt or newer one alone on purpose)
+    local db = ForeverSTUwaveDB
+    if type(db) ~= "table" or (FS.Config and type(FS.Config.IsReadOnly) == "function" and FS.Config.IsReadOnly()) then return end
+    if db.buffTabEngine == nil then db.buffTabEngine = {} end
+    if type(db.buffTabEngine) == "table" then db.buffTabEngine.unmappedIcons = table.concat(unmapped, ", ") end
+end
+
 -- The texture to draw for the stock one the client gave: the baked file when the style is gradient and there is
 -- one, else `stock` untouched (nil, a secret value and anything unknown included).
 function SpellArt.Resolve(stock)
     if stock == nil or (FS.IsSecret and FS.IsSecret(stock)) then return stock end
-    if SpellArt.Style() ~= "gradient" then return stock end
     local name = ArtName(stock)
-    if name then return MEDIA .. "spellart_" .. name .. ".tga" end
-    return stock
+    if not name then
+        pcall(NoteUnmapped, stock)
+        return stock
+    end
+    if SpellArt.Style() ~= "gradient" then return stock end
+    return MEDIA .. "spellart_" .. name .. ".tga"
 end
 
 -- texture -> the stock texture it was last given. Weak keys: a dropped button frees its entry.
@@ -65,19 +96,19 @@ function SpellArt.Applies()
     return next(bound) ~= nil
 end
 
+-- Resolve runs inside the pcall too: nothing about the value or the setting can throw out of a bind or a repaint.
+local function Draw(tex, stock)
+    tex:SetTexture(SpellArt.Resolve(stock))
+end
+
 local function Write(tex, stock)
-    pcall(tex.SetTexture, tex, SpellArt.Resolve(stock))
+    pcall(Draw, tex, stock)
 end
 
 -- Draws `stock` on `tex` in the current style and remembers it for a later repaint.
 function SpellArt.Set(tex, stock)
     bound[tex] = stock
     Write(tex, stock)
-end
-
--- Stops following the setting (the texture is about to show something that is not a spell icon).
-function SpellArt.Forget(tex)
-    bound[tex] = nil
 end
 
 function SpellArt.Repaint()

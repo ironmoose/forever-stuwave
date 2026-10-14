@@ -61,6 +61,17 @@ FS = {
         OnChange = function(key, fn) CALLBACKS[key] = CALLBACKS[key] or {}; table.insert(CALLBACKS[key], fn) end,
     },
 }
+ForeverSTUwaveDB = {}
+-- byFile / byName that raise when the secret value (100.5) is read as a key: removing Resolve's IsSecret guard fails a check.
+function TrapSecretKeys()
+    for _, field in ipairs({ "byFile", "byName" }) do
+        local real = FS.SpellArtData[field]
+        FS.SpellArtData[field] = setmetatable({}, { __index = function(_, k)
+            if k == 100.5 then error("a secret value was used as a key") end
+            return real[k]
+        end })
+    end
+end
 function NewTex() return { SetTexture = function(self, p) self.tex = p; self.writes = (self.writes or 0) + 1 end } end
 function NewBroken() return { SetTexture = function() error("boom") end } end
 function load_chunk(src, name) return assert(loadstring(src, name))("ForeverSTUwave", FS) end
@@ -128,7 +139,11 @@ def check_resolve() -> None:
           and str(sa.Resolve(f"interface/icons/{first_name}.blp")) == path(first_name), f"{sa.Resolve('Interface\\Icons\\' + first_name)}")
     check("resolve.unmapped_icons_stay_stock", sa.Resolve(1234567) == 1234567 and str(sa.Resolve("Interface\\Icons\\inv_misc_questionmark")) == "Interface\\Icons\\inv_misc_questionmark")
     check("resolve.nil_and_odd_values_come_back_unchanged", sa.Resolve(None) is None and sa.Resolve(True) is True)
-    check("resolve.a_secret_value_is_never_indexed", sa.Resolve(100.5) == 100.5)
+    lua.execute("TrapSecretKeys()")
+    ok, got = lua.eval("function() return pcall(FS.SpellArt.Resolve, 100.5) end")()
+    check("resolve.a_secret_value_is_never_indexed", ok is True and got == 100.5, f"{ok} {got}")
+    ok, got = lua.eval("function() return pcall(FS.SpellArt.Resolve, 5) end")()
+    check("resolve.the_trap_is_live_for_plain_ids", ok is True and got == 5, f"{ok} {got}")
 
     lua.eval("FS.Config.Set")("icons.spellstyle", "stock")
     check("resolve.stock_setting_returns_the_stock_texture", sa.Resolve(first_file) == first_file and str(sa.Style()) == "stock")
@@ -158,9 +173,7 @@ def check_set_and_repaint() -> None:
     sa.Set(a, f2)
     cfg_set("icons.spellstyle", "stock")
     check("set.a_rebound_texture_follows_its_new_icon", a.tex == f2, f"{a.tex}")
-    sa.Forget(b)
-    cfg_set("icons.spellstyle", "gradient")
-    check("set.a_forgotten_texture_is_left_alone", b.tex == f2 and str(a.tex) == path(n2), f"{b.tex} {a.tex}")
+    check("set.there_is_no_unused_Forget", sa.Forget is None)
     # a texture whose write raises is skipped, never fatal, and the others still repaint
     lua.execute(f"BROKEN = NewBroken(); BIND_OK = pcall(FS.SpellArt.Set, BROKEN, {f1})")
     good = new_tex()
@@ -168,6 +181,51 @@ def check_set_and_repaint() -> None:
     cfg_set("icons.spellstyle", "stock")
     cfg_set("icons.spellstyle", "gradient")
     check("set.a_texture_that_errors_never_stops_the_rest", lua.eval("BIND_OK") is True and str(good.tex) == path(n1), f"{lua.eval('BIND_OK')} {good.tex}")
+
+
+def check_set_never_throws() -> None:
+    """Resolve runs inside Set's pcall: a secret, or a setting read that raises, can never throw out of a bind or a repaint."""
+    lua = world()
+    sa = lua.eval("FS.SpellArt")
+    lua.execute("TrapSecretKeys()")
+    ok = lua.eval("function(t) return (pcall(FS.SpellArt.Set, t, 100.5)) end")(lua.globals().NewTex())
+    check("never_throws.a_secret_bind_does_not_throw", ok is True)
+    lua.execute("FS.Config.Get = function() error('config exploded') end")
+    tex = lua.globals().NewTex()
+    ok = lua.eval("function(t) return (pcall(FS.SpellArt.Set, t, 777)) end")(tex)
+    check("never_throws.a_raising_setting_read_does_not_throw_out_of_Set", ok is True)
+    ok = lua.eval("function() return (pcall(FS.SpellArt.Repaint)) end")()
+    check("never_throws.a_raising_setting_read_does_not_throw_out_of_Repaint", ok is True)
+
+
+def check_unmapped_record() -> None:
+    """The icon values the client reports that have no baked art are listed once, in the saved table next to the buff tab state line."""
+    lua = world()
+    sa = lua.eval("FS.SpellArt")
+    check("unmapped.nothing_recorded_at_start", sa.UnmappedLine() is None and sa.UnmappedCount() == 0)
+    first_file = next(iter(table_items(lua.eval("FS.SpellArtData.byFile")).keys()))
+    sa.Resolve(first_file)
+    sa.Resolve(100.5)
+    sa.Resolve(None)
+    sa.Resolve(True)
+    check("unmapped.mapped_secret_nil_and_odd_values_are_not_recorded", sa.UnmappedCount() == 0, f"{sa.UnmappedLine()}")
+    sa.Resolve(1234567)
+    sa.Resolve(1234567)
+    sa.Resolve("Interface\\Icons\\inv_misc_questionmark")
+    check("unmapped.an_unmapped_value_is_recorded_once", str(sa.UnmappedLine()) == "1234567, Interface\\Icons\\inv_misc_questionmark" and sa.UnmappedCount() == 2, f"{sa.UnmappedLine()}")
+    saved = lua.eval("ForeverSTUwaveDB.buffTabEngine")
+    check("unmapped.it_rides_in_the_buff_tab_state_table", saved is not None and str(saved.unmappedIcons) == str(sa.UnmappedLine()), f"{saved}")
+    lua.eval("FS.Config.Set")("icons.spellstyle", "stock")
+    sa.Resolve(7654321)
+    check("unmapped.recorded_in_the_stock_style_too", sa.UnmappedCount() == 3, f"{sa.UnmappedLine()}")
+    for n in range(100, 200):
+        sa.Resolve(n)
+    check("unmapped.the_list_is_capped", sa.UnmappedCount() == 40, f"{sa.UnmappedCount()}")
+    lua.execute("FS.Config.IsReadOnly = function() return true end; ForeverSTUwaveDB.buffTabEngine = nil; FS.SpellArt.Resolve(555555555)")
+    check("unmapped.a_read_only_database_is_not_written", lua.eval("ForeverSTUwaveDB.buffTabEngine") is None)
+    lua.execute("FS.Config.IsReadOnly = nil; ForeverSTUwaveDB = 5")
+    ok = lua.eval("function() return (pcall(FS.SpellArt.Resolve, 666666666)) end")()
+    check("unmapped.a_database_that_is_not_a_table_never_throws", ok is True)
 
 
 def check_sources() -> None:
@@ -183,7 +241,11 @@ def check_sources() -> None:
         check(f"sources.{Path(rel).stem}_draws_spell_icons_through_SetSpellIcon", n >= want and not raw, f"{n} calls, raw {raw}")
     fh = read("Core/FrameHelpers.lua")
     check("sources.FrameHelpers_SetSpellIcon_delegates_with_a_stock_fallback",
-          re.search(r"function Helpers\.SetSpellIcon\(tex, stock\)(?s:.*?)FS\.SpellArt(?s:.*?):SetTexture\(stock\)", fh) is not None)
+          re.search(r"function Helpers\.SetSpellIcon\(tex, stock\)(?s:.*?)FS\.SpellArt(?s:.*?)pcall\(tex\.SetTexture, tex, stock\)", fh) is not None)
+    bt = read("Modules/ActionBars/BuffTab.lua")
+    check("sources.the_buff_tab_state_table_carries_the_unmapped_icon_list", "UnmappedLine" in bt and "unmappedIcons" in bt)
+    st = read("Modules/ActionBars/StanceBar.lua")
+    check("sources.StanceBar_guards_the_form_icon_against_secrets", re.search(r"IsSecret\(icon\)", st) is not None)
     toc = [line.strip() for line in read("forever-stuwave.toc").splitlines() if line.strip() and not line.startswith("##")]
     pos = {name: toc.index(name) for name in ("Core/SpellArtData.lua", "Core/SpellArt.lua", "Modules/ActionBars/StanceBar.lua",
                                               "Modules/ActionBars/TotemBar.lua", "Modules/ActionBars/BuffTab.lua") if name in toc}
@@ -204,6 +266,8 @@ def main() -> int:
     check_data(lua)
     check_resolve()
     check_set_and_repaint()
+    check_set_never_throws()
+    check_unmapped_record()
     print(f"\n{len(FAILS)} failed" if FAILS else "\nall checks passed")
     return len(FAILS)
 

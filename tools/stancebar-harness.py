@@ -240,6 +240,17 @@ def check_an_unlearned_stance_leaves_its_slot_empty_and_learning_it_fills_it():
     assert not sb.shown(stance(lua, 3)), "a stance that went away kept its button"
 
 
+def check_a_secret_form_icon_is_never_handed_to_the_texture():
+    lua = warrior()
+    before = stance(lua, 1).icon._texture
+    assert before is not None and before != 424242
+    sb.form_mode(lua, "icon_secret")
+    fire(lua, "UPDATE_SHAPESHIFT_FORM")
+    fire(lua, "UPDATE_SHAPESHIFT_FORMS")
+    assert stance(lua, 1).icon._texture == before, f"a secret icon reached SetTexture: {stance(lua, 1).icon._texture}"
+    assert sb.shown(stance(lua, 1).icon), "an unreadable icon hid the tile"
+
+
 def check_a_slot_is_the_stances_place_in_the_mockup_order_not_the_form_index():
     lua = warrior(forms=(WARRIOR_STANCES[1], WARRIOR_STANCES[0]))     # form 1 is Defensive, form 2 is Battle
     block = D(lua, csh.shoulder(lua).art)
@@ -584,6 +595,7 @@ CHECKS = [
     check_a_restore_in_combat_waits_for_the_end_of_combat,
     check_the_dim_runs_no_blizzard_script,
     check_the_stance_buttons_wear_the_paladin_button_look,
+    check_a_secret_form_icon_is_never_handed_to_the_texture,
     check_an_unlearned_stance_leaves_its_slot_empty_and_learning_it_fills_it,
     check_a_slot_is_the_stances_place_in_the_mockup_order_not_the_form_index,
     check_forms_the_client_names_otherwise_take_the_slot_of_their_index,

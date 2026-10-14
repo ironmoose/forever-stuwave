@@ -264,7 +264,9 @@ local function UpdateButton(button)
     end
 
     if button.icon then
-        if icon then
+        if IsSecret(icon) then
+            -- an unreadable icon is neither drawn nor hidden: the last plain one stays
+        elseif icon then
             FS.FrameHelpers.SetSpellIcon(button.icon, icon)
             button.icon:Show()
         else

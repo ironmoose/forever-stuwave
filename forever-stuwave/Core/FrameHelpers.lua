@@ -1277,7 +1277,7 @@ local DEFAULT_CUT_CHAMFER = 6
 function Helpers.SetSpellIcon(tex, stock)
     local art = FS.SpellArt
     if art and art.Set then return art.Set(tex, stock) end
-    tex:SetTexture(stock)
+    pcall(tex.SetTexture, tex, stock)
 end
 
 function Helpers.SeatCutIcon(button)

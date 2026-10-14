@@ -2944,6 +2944,19 @@ def check_the_state_line_tells_the_setting_and_unreadable_from_misplaced_and_a_r
     assert g(lua).ForeverSTUwaveDB.buffTabEngine is not None
 
 
+def check_the_unmapped_spell_icon_list_rides_in_the_saved_state_table():
+    lua = engine_world()
+    tick(lua, 1.1)
+    assert g(lua).ForeverSTUwaveDB.buffTabEngine.unmappedIcons is None, "nothing unmapped yet, nothing saved"
+    run(lua, """__unmapped = { "111", "222" }
+        FS.SpellArt = { UnmappedLine = function() return table.concat(__unmapped, ", ") end, UnmappedCount = function() return #__unmapped end }""")
+    tick(lua, 1.1)
+    assert str(g(lua).ForeverSTUwaveDB.buffTabEngine.unmappedIcons) == "111, 222", "the list was not saved with the state line"
+    run(lua, '__unmapped[3] = "333"')
+    tick(lua, 1.1)
+    assert str(g(lua).ForeverSTUwaveDB.buffTabEngine.unmappedIcons) == "111, 222, 333", "a new unmapped icon was not rewritten"
+
+
 def check_a_throwing_engine_tick_does_not_break_the_tick():
     lua = engine_world()
     shield_aura_up(lua)
@@ -3094,6 +3107,7 @@ CHECKS = [
     check_a_slot_with_the_right_corner_but_the_wrong_size_is_not_on_the_icon,
     check_the_state_line_for_the_live_test_is_saved_and_quiet_ticks_allocate_nothing,
     check_the_state_line_tells_the_setting_and_unreadable_from_misplaced_and_a_refusing_db_never_throws,
+    check_the_unmapped_spell_icon_list_rides_in_the_saved_state_table,
     check_a_throwing_engine_tick_does_not_break_the_tick,
     check_a_late_init_of_a_parked_containers_slot_is_not_attributed_to_the_new_container,
     check_the_chip_and_ring_chrome_numbers_are_pinned_by_value,

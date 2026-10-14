@@ -1057,6 +1057,10 @@ local function WriteStatus()
             sig = (sig * 31 + #eng.parts * 7 + ok * 3 + (eng.bad and 1 or 0) + nils * 13) % 2147483647
         end
     end
+    -- the spell icon values with no baked art (SpellArt.lua) ride along in the same table
+    local art = FS.SpellArt
+    local unmappedIcons = art and art.UnmappedLine and art.UnmappedLine() or nil
+    sig = (sig * 31 + (art and art.UnmappedCount and art.UnmappedCount() or 0)) % 2147483647
     -- never create or replace the database: Config leaves a corrupt or newer-version one alone on purpose
     local db = ForeverSTUwaveDB
     if type(db) ~= "table" or (FS.Config and type(FS.Config.IsReadOnly) == "function" and FS.Config.IsReadOnly()) then return end
@@ -1064,7 +1068,7 @@ local function WriteStatus()
     if saved and saved.sig == sig and saved == EngineState.status then return end
     saved = { sig = sig, setting = on, armed = EngineState.armed, alpha = EngineState.alpha, rebuilds = EngineState.rebuilds,
         failures = EngineState.failures, retryAt = EngineState.retryAt, gaveUp = EngineState.gaveUp,
-        combat = InCombatLockdown() and true or false, tiles = {} }
+        combat = InCombatLockdown() and true or false, tiles = {}, unmappedIcons = unmappedIcons }
     local text = { string.format("setting=%s armed=%s alpha=%s combat=%s rebuilds=%d failures=%d retryAt=%s gaveUp=%s",
         on and "on" or "off", tostring(saved.armed), tostring(saved.alpha), tostring(saved.combat), saved.rebuilds, saved.failures,
         tostring(saved.retryAt), tostring(saved.gaveUp)) }
