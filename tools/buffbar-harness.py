@@ -2917,10 +2917,31 @@ def check_the_state_line_tells_the_setting_and_unreadable_from_misplaced_and_a_r
     leave_combat(lua)
     tick(lua, 1.1)
     assert g(lua).FS.BuffTab.BT.warned.bufftab_status
-    run(lua, "ForeverSTUwaveDB = 5")
-    update(lua)
+    # a database that is not a table (Config leaves it alone on purpose): never replaced, no throw, no warning
+    lua = engine_world()
     tick(lua, 1.1)
-    assert str(g(lua).type(g(lua).ForeverSTUwaveDB)) == "table"
+    run(lua, "ForeverSTUwaveDB = 5")
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    update(lua)
+    leave_combat(lua)
+    tick(lua, 1.1)
+    assert int(g(lua).ForeverSTUwaveDB) == 5, "the global was assigned"
+    assert not g(lua).FS.BuffTab.BT.warned.bufftab_status
+    # Config in read-only mode: the table is not touched either
+    lua = engine_world()
+    tick(lua, 1.1)
+    before = str(g(lua).ForeverSTUwaveDB.buffTabEngine.line)
+    run(lua, "FS.Config.IsReadOnly = function() return true end\nForeverSTUwaveDB.buffTabEngine = nil")
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    update(lua)
+    leave_combat(lua)
+    tick(lua, 1.1)
+    assert g(lua).ForeverSTUwaveDB.buffTabEngine is None, "a read-only database was written"
+    run(lua, "FS.Config.IsReadOnly = function() return false end")
+    tick(lua, 1.1)
+    assert g(lua).ForeverSTUwaveDB.buffTabEngine is not None
 
 
 def check_a_throwing_engine_tick_does_not_break_the_tick():

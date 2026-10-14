@@ -1057,8 +1057,10 @@ local function WriteStatus()
             sig = (sig * 31 + #eng.parts * 7 + ok * 3 + (eng.bad and 1 or 0) + nils * 13) % 2147483647
         end
     end
-    if type(ForeverSTUwaveDB) ~= "table" then ForeverSTUwaveDB = {} end
-    local saved = ForeverSTUwaveDB.buffTabEngine
+    -- never create or replace the database: Config leaves a corrupt or newer-version one alone on purpose
+    local db = ForeverSTUwaveDB
+    if type(db) ~= "table" or (FS.Config and type(FS.Config.IsReadOnly) == "function" and FS.Config.IsReadOnly()) then return end
+    local saved = db.buffTabEngine
     if saved and saved.sig == sig and saved == EngineState.status then return end
     saved = { sig = sig, setting = on, armed = EngineState.armed, alpha = EngineState.alpha, rebuilds = EngineState.rebuilds,
         failures = EngineState.failures, retryAt = EngineState.retryAt, gaveUp = EngineState.gaveUp,
@@ -1081,7 +1083,7 @@ local function WriteStatus()
         end
     end
     saved.line = table.concat(text, " | ")
-    ForeverSTUwaveDB.buffTabEngine = saved
+    db.buffTabEngine = saved
     EngineState.status = saved
 end
 
