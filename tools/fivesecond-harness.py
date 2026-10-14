@@ -593,6 +593,96 @@ def check_the_led_has_ninety_eight_segment_textures_cut_from_the_atlas_and_snapp
         assert t._snap is True and float(t._bias) == 0.0, "a flat piece is not snapped to the pixel grid"
 
 
+def _tex_rect_px(lua, tex, parent=None):
+    FT = ft(lua).FT
+    px = float(FT.px)
+    p = tex._points[1]
+    return float(p.x) / px, float(p.y) / px, float(tex._w) / px, float(tex._h) / px
+
+
+def check_the_readout_glow_is_a_soft_copy_under_each_lit_segment_and_never_a_block():
+    k = MK["k"]
+    lua = world(motion=False)
+    FT = ft(lua).FT
+    n = int(FT.n)
+    cast(lua)
+    tick(lua, 1.3)                                     # the count, ~3.7
+    L = led(lua)
+    assert led_text(lua)[0] == "~3.7", led_text(lua)
+    for cell in (L.d1, L.d2):
+        segs, glows = seq(cell.seg), seq(cell.gl)
+        assert len(glows) == 14
+        lit = [i for i, t in enumerate(segs) if float(t._vertex[4]) > 0.3]
+        assert lit
+        for i, gl in enumerate(glows):
+            assert str(gl._texture).endswith("led_segment_glow.tga") and str(gl._blend) == "ADD"
+            assert gl._snap is True and float(gl._bias) == 0.0
+            tc = [float(x) for x in seq(gl._coord if gl._coord is not None else gl._tc)]
+            col, row = i % 4, i // 4
+            want = [col * 0.25, col * 0.25 + 14 / 64, row * 0.25, row * 0.25 + 16 / 64]
+            assert tc and all(abs(a - b) < 1e-9 for a, b in zip(tc, want)), f"glow {i} cut {tc} != {want}"
+            x, y, w, h = _tex_rect_px(lua, gl)
+            assert (x, y, w, h) == (-2 * n, 2 * n, 14 * n, 16 * n), f"glow {i} sits at {(x, y, w, h)}"
+            a = float(gl._vertex[4])
+            if i in lit:
+                close(rgb(gl._vertex), rgb(segs[i]._vertex), f"glow {i} wears its segment's colour", 1e-6)
+                approx(a, k["glow_steady"] * float(segs[i]._vertex[4]), f"glow {i} alpha", 1e-6)
+            else:
+                assert a == 0.0, f"an unlit segment glows ({i}: {a})"
+    # the tilde and the dot glow too, from the 2 x 2 block slot
+    pieces = list(zip(seq(L.tilde), seq(L.tildeGl))) + [(L.dot, L.dotGl)]
+    assert len(pieces) == 5
+    for bar, gl in pieces:
+        assert str(gl._texture).endswith("led_segment_glow.tga") and str(gl._blend) == "ADD"
+        tc = [float(x) for x in seq(gl._coord if gl._coord is not None else gl._tc)]
+        assert all(abs(a - b) < 1e-9 for a, b in zip(tc, [0.5, 0.5 + 6 / 64, 0.75, 0.75 + 6 / 64])), tc
+        bx, by, bw, bh = _tex_rect_px(lua, bar)
+        gx, gy, gw, gh = _tex_rect_px(lua, gl)
+        assert (gx, gy, gw, gh) == (bx - 2 * n, by + 2 * n, 6 * n, 6 * n), f"{(gx, gy, gw, gh)} vs {(bx, by)}"
+        approx(float(gl._vertex[4]), k["glow_steady"], "tilde glow", 1e-6)
+    # no block: the only led_glow.tga textures are the ten gauge segment halos, each about the size of its segment
+    soft = [r for r in descendants(host(lua)) if r._kind == "Texture" and str(r._texture).endswith("led_glow.tga")]
+    assert len(soft) == 10, len(soft)
+    s_ = float(FT.s)
+    for r in soft:
+        assert float(r._w) < 15 * s_ and float(r._h) < 10 * s_, "a glow bigger than a gauge segment's halo"
+    # the word glows at regen, faded with the look, and the ghost segments never glow
+    cast(lua)
+    tick(lua, 5.4)
+    for cell in seq(L.word):
+        for t, gl in zip(seq(cell.seg), seq(cell.gl)):
+            if float(t._vertex[4]) > 0.3:
+                approx(float(gl._vertex[4]), k["glow_steady"] * float(view(lua).fade), "word glow", 0.02)
+            else:
+                assert float(gl._vertex[4]) == 0.0
+    tick(lua, 8.0)
+    assert all(float(gl._vertex[4]) == 0.0 for cell in seq(L.word) for gl in seq(cell.gl)), "no glow at rest"
+
+
+def check_the_gauge_glow_is_a_halo_on_each_segment_and_only_when_not_idle():
+    lua = world(motion=False)
+    FT = ft(lua).FT
+    G = FT.gauge
+    gls, segs = seq(G.gl), seq(G.seg)
+    assert len(gls) == 10
+    for seg, gl in zip(segs, gls):
+        assert str(gl._texture).endswith("led_glow.tga") and str(gl._blend) == "ADD"
+    refresh(lua)
+    assert all(float(gl._vertex[4]) == 0.0 for gl in gls), "idle gauge does not glow"
+    cast(lua)
+    tick(lua, 1.3)
+    for i, (seg, gl) in enumerate(zip(segs, gls)):
+        close(rgb(gl._vertex), rgb(seg._vertex), f"halo {i} wears its segment's colour", 1e-6)
+        approx(float(gl._vertex[4]), float(seg._vertex[4]), f"halo {i} alpha", 1e-6)
+        sx, sy, sw, sh = _tex_rect_px(lua, seg)
+        gx, gy, gw, gh = _tex_rect_px(lua, gl)
+        pad = round(3 * float(FT.s) / float(FT.px))
+        assert (gx, gy, gw, gh) == (sx - pad, sy + pad, sw + 2 * pad, sh + 2 * pad), f"halo {i}: {(gx, gy, gw, gh)} vs {(sx, sy, sw, sh)}"
+    cast(lua)
+    tick(lua, 5.4)
+    assert all(float(gl._vertex[4]) > 0.5 for gl in gls), "the cyan gauge glows at regen"
+
+
 def check_the_cast_wash_is_clipped_to_the_face():
     lua = world()
     FT = ft(lua).FT
@@ -1862,7 +1952,8 @@ def check_the_whole_second_pulse_flashes_the_digits_at_4_3_2_1_and_never_at_5_or
         v = view(l)
         L = led(l)
         unlit = [float(t._vertex[4]) for t in seq(L.d1.seg) if float(t._vertex[4]) < 0.3]
-        return (float(v.t), v.phase, fx(l)["zp"], float(L.pulse._vertex[4]), cell_color(L.d1), unlit[0] if unlit else None)
+        lit_glow = [float(g_._vertex[4]) for t, g_ in zip(seq(L.d1.seg), seq(L.d1.gl)) if float(t._vertex[4]) > 0.3]
+        return (float(v.t), v.phase, fx(l)["zp"], lit_glow[0] if lit_glow else 0.0, cell_color(L.d1), unlit[0] if unlit else None)
 
     rec = play(lua, 4.6, probe)
     for k_ in (4, 3, 2, 1):
@@ -1873,7 +1964,8 @@ def check_the_whole_second_pulse_flashes_the_digits_at_4_3_2_1_and_never_at_5_or
         first = [r[2] for r in win if r[2] > 0][0]
         assert first < peak, "the pulse does not rise"
     for t, phase, zp, glow, lit, ghost in rec:
-        approx(glow, 0.6 * zp, "pulse glow follows the pulse", 0.01)
+        if phase == "susp":
+            approx(glow, min(1.0, k["glow_steady"] + 0.6 * zp), "the glow under the lit segments blooms with the pulse", 0.01)
         if zp > 0:
             assert phase == "susp" and any(k_ - 0.23 - 0.02 < t <= k_ + 0.05 + 0.02 for k_ in (1, 2, 3, 4)), (t, zp)
             assert not (t > 4.5), "a pulse under the cast flash or at 5.0"
@@ -1889,7 +1981,7 @@ def check_the_whole_second_pulse_flashes_the_digits_at_4_3_2_1_and_never_at_5_or
         cast(lua)
         tick(lua, 0.6)
         rec = play(lua, 4.6, probe)
-        assert all(r[2] == 0 and r[3] == 0 for r in rec), f"{name}: the pulse ran"
+        assert all(r[2] == 0 and abs(r[3] - k["glow_steady"]) < 0.01 for r in rec if r[1] == "susp"), f"{name}: the pulse ran"
     # regen itself carries no whole second pulse
     lua = world()
     cast(lua)
@@ -2410,6 +2502,8 @@ CHECKS = [
     check_the_glyph_tables_and_the_segment_order_are_the_mockups,
     check_the_generator_draws_the_mockups_disjoint_segments,
     check_the_led_has_ninety_eight_segment_textures_cut_from_the_atlas_and_snapped,
+    check_the_readout_glow_is_a_soft_copy_under_each_lit_segment_and_never_a_block,
+    check_the_gauge_glow_is_a_halo_on_each_segment_and_only_when_not_idle,
     check_the_cast_wash_is_clipped_to_the_face,
     check_the_led_numbers_are_the_mockups,
     check_a_mana_cast_starts_five_seconds_and_the_readout_counts_in_tenths,

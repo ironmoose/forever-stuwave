@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generates led_segments.tga and led_glow.tga: the art of the five second rule tab's LED readout.
+"""Generates led_segments.tga, led_segment_glow.tga and led_glow.tga: the art of the five second rule tab's LED readout.
 
 led_segments.tga is a 64x64 atlas of sixteen 16x16 slots (4 across, 4 down, slot n at column n % 4, row n // 4).
 Slots 0..13 hold one of the fourteen segments of a 14 segment cell, in SEGMENT_ORDER; slots 14 and 15 are empty.
@@ -9,11 +9,16 @@ blocks), so a segment tinted with SetVertexColor at a partial alpha never double
 The tab draws one texture per segment, 1 texel per physical pixel (never scaled fractionally), lit or unlit
 by SetVertexColor alone. The 10 x 12 art sits at the slot's top-left corner; the rest of the slot is clear.
 
-led_glow.tga is a 64x32 soft glow, white with all the shape in the alpha channel: a filled bar with a quadratic
-falloff to every side. It sits behind the readout as its own texture (blend ADD) and is stretched to the glow
-rect (the solid 50 x 18 core of the 64 x 32 canvas is stretched over the lit area, the 6 texel falloff spills
-outside it; FiveSecondTab.lua keeps those numbers as GLOW_CORE_W and GLOW_CORE_H); the hard edged segments never
-carry a blur themselves.
+led_segment_glow.tga is the same atlas blurred, the soft copy the page draws under the hard edged segments (a Gaussian of
+sigma 1 texel, white, all the shape in the alpha channel, drawn at half strength by the tab). Each slot keeps the layout of
+led_segments.tga shifted by a two texel margin: the 10 x 12 art sits at (2, 2) and the glow fills the slot's 14 x 16 top left
+rect, so the tab seats the texture two texels up and left of the segment's cell. Slot 14 holds the blurred 2 x 2 block of the
+tilde and the dot (art at (2, 2), glow in 6 x 6); slot 15 is empty. A blur keeps the mass, so a cell glows exactly where its
+lit segments are and nowhere else.
+
+led_glow.tga is a 64x32 soft box: the Gaussian blur of a solid 35 x 11 core (the page's gauge segments are 7 x 3 design
+px and glow 3 px past each side, so the core is 7/13 by 3/9 of the canvas and the falloff sigma is 1.2 px). The tab stretches
+it over a gauge segment's rect plus that margin. There is no flat top and no edge: the hump falls to zero at the border.
 
 The segment rows below are [x, y, width] runs one texel tall; mockups/five-second-rule-compact-2026-10-14.html
 (SEGS) draws the same table. Pure stdlib, matching the other generators here: 18-byte header, image type 2,
@@ -55,9 +60,12 @@ SEGMENTS = {
 }
 
 GLOW_W, GLOW_H = 64, 32
-GLOW_INNER_W, GLOW_INNER_H = 50, 18      # the solid core, centred; the falloff spills outside it
-GLOW_FALL_X, GLOW_FALL_Y = 6.0, 6.0     # falloff distance in texels, horizontal and vertical
-SUPERSAMPLE = 3
+GLOW_INNER_W, GLOW_INNER_H = 35, 11      # the solid core, centred; the blur spills outside it
+GLOW_SIGMA_X = (GLOW_W - GLOW_INNER_W) / 2 / 3 * 1.2   # 3 design px of margin a side is 1.2 sigma-px: 14.5 texels = 3 px
+GLOW_SIGMA_Y = (GLOW_H - GLOW_INNER_H) / 2 / 3 * 1.2
+SEGMENT_GLOW_SIGMA = 1.0                 # texels
+SEGMENT_GLOW_MARGIN = 2                  # texels of glow past the cell on the left and top (and the right and bottom)
+BLOCK_SLOT = 14                          # the blurred 2 x 2 block of the tilde and the dot
 
 
 def build_atlas():
@@ -73,27 +81,67 @@ def build_atlas():
     return rows
 
 
-def _glow_alpha(px, py):
-    left = (GLOW_W - GLOW_INNER_W) / 2
-    top = (GLOW_H - GLOW_INNER_H) / 2
-    dx = max(left - px, px - (left + GLOW_INNER_W), 0.0) / GLOW_FALL_X
-    dy = max(top - py, py - (top + GLOW_INNER_H), 0.0) / GLOW_FALL_Y
-    d = math.hypot(dx, dy)
-    if d >= 1.0:
-        return 0.0
-    return (1.0 - d) ** 2
+def _phi(z):
+    return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+
+
+def _box_blur_1d(x, lo, hi, sigma):
+    """The blur of the interval [lo, hi) sampled over the texel [x, x + 1): its mean."""
+    # the integral of the blurred indicator over the texel, by the antiderivative of Phi
+    def big_phi(z):
+        return z * _phi(z) + math.exp(-z * z / 2.0) / math.sqrt(2.0 * math.pi)
+
+    def prim(t):
+        return sigma * big_phi((t - lo) / sigma) - sigma * big_phi((t - hi) / sigma)
+
+    return (prim(x + 1.0) - prim(x)) / 1.0
+
+
+def _blur_rows(mask, sigma, size_w, size_h):
+    """The Gaussian blur of a 0/1 texel mask (a list of rows) as float rows, edge texels treated as clear."""
+    radius = int(math.ceil(sigma * 3.5))
+    kernel = [_phi((d + 0.5) / sigma) - _phi((d - 0.5) / sigma) for d in range(-radius, radius + 1)]
+    horizontal = [[sum(kernel[k] * (mask[y][x + k - radius] if 0 <= x + k - radius < size_w else 0.0)
+                       for k in range(len(kernel))) for x in range(size_w)] for y in range(size_h)]
+    return [[sum(kernel[k] * (horizontal[y + k - radius][x] if 0 <= y + k - radius < size_h else 0.0)
+                 for k in range(len(kernel))) for x in range(size_w)] for y in range(size_h)]
+
+
+def build_segment_glow():
+    """The blurred atlas as rows of (r, g, b, a): each slot's art shifted by the margin, then blurred inside the slot."""
+    rows = [[(255, 255, 255, 0)] * ATLAS for _ in range(ATLAS)]
+    shapes = [SEGMENTS[name] for name in SEGMENT_ORDER] + [[[0, 0, 2], [0, 1, 2]]]
+    for n, runs in enumerate(shapes):
+        ox, oy = (n % 4) * SLOT, (n // 4) * SLOT
+        mask = [[0.0] * SLOT for _ in range(SLOT)]
+        for x, y, width in runs:
+            for q in range(width):
+                mask[y + SEGMENT_GLOW_MARGIN][x + q + SEGMENT_GLOW_MARGIN] = 1.0
+        blurred = _blur_rows(mask, SEGMENT_GLOW_SIGMA, SLOT, SLOT)
+        for y in range(SLOT):
+            for x in range(SLOT):
+                # the glow rect is the cell plus the margin on every side: 14 x 16 for a segment, 6 x 6 for the block
+                in_rect = x < (6 if n == BLOCK_SLOT else CELL_W + 2 * SEGMENT_GLOW_MARGIN) and \
+                    y < (6 if n == BLOCK_SLOT else CELL_H + 2 * SEGMENT_GLOW_MARGIN)
+                alpha = int(round(blurred[y][x] * 255)) if in_rect else 0
+                rows[oy + y][ox + x] = (255, 255, 255, alpha)
+    return rows
 
 
 def build_glow():
+    """The soft box: the blur of a solid core, tapered to exactly zero at the border."""
+    left = (GLOW_W - GLOW_INNER_W) / 2
+    top = (GLOW_H - GLOW_INNER_H) / 2
+    ax = [_box_blur_1d(x, left, left + GLOW_INNER_W, GLOW_SIGMA_X) for x in range(GLOW_W)]
+    ay = [_box_blur_1d(y, top, top + GLOW_INNER_H, GLOW_SIGMA_Y) for y in range(GLOW_H)]
+    edge_x, edge_y = ax[0], ay[0]
     rows = []
     for y in range(GLOW_H):
         row = []
         for x in range(GLOW_W):
-            total = 0.0
-            for sy in range(SUPERSAMPLE):
-                for sx in range(SUPERSAMPLE):
-                    total += _glow_alpha(x + (sx + 0.5) / SUPERSAMPLE, y + (sy + 0.5) / SUPERSAMPLE)
-            row.append((255, 255, 255, int(round(total / (SUPERSAMPLE * SUPERSAMPLE) * 255))))
+            wx = max(0.0, (ax[x] - edge_x) / (1.0 - edge_x))
+            wy = max(0.0, (ay[y] - edge_y) / (1.0 - edge_y))
+            row.append((255, 255, 255, int(round(wx * wy * 255))))
         rows.append(row)
     return rows
 
@@ -117,6 +165,7 @@ def main():
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "forever-stuwave", "Media", "Textures"),
     )
     write_tga(os.path.join(out, "led_segments.tga"), build_atlas())
+    write_tga(os.path.join(out, "led_segment_glow.tga"), build_segment_glow())
     write_tga(os.path.join(out, "led_glow.tga"), build_glow())
 
 

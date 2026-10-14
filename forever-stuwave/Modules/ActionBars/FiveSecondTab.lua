@@ -7,7 +7,7 @@
 -- hover zones, one tooltip each:
 --
 --   * CELLS (hero tile and gauge): a 14 segment LED readout, our own art (Media/Textures/led_segments.tga, one texture per
---     segment, lit or unlit by SetVertexColor), and a ten segment gauge under it. A mana spend starts a five second window; the
+--     segment, lit or unlit by SetVertexColor, with a blurred copy of the segment under each lit one), and a ten segment gauge under it. A mana spend starts a five second window; the
 --     gauge is amber and drains one segment every half second right to left, the readout counts in tenths behind a LED tilde and
 --     says SUSPENDED in the tooltip. At 0.0 the held digits turn cyan, a band sweeps the face once and each cell flips from digit to
 --     the word REGEN under it, the rim flashes once (the pulse), a short sound plays if the player turned it on, and a few seconds
@@ -84,7 +84,7 @@ local FT = {
     DIGIT_X = { tilde0 = 29, tilde = 33, d1 = 44, dot = 51, d2 = 58 },  -- the counting group's part centres (sweep tests)
     GAUGE_N = 10, GAUGE_WELL = { x = 6, w = 81 }, GAUGE_Y = 24, GAUGE_H = 5,
     GAUGE_X = 7, GAUGE_PITCH = 8, GAUGE_SEG_W = 7, GAUGE_SEG_Y = 25, GAUGE_SEG_H = 3,
-    GAUGE_OFF = 0.22, GAUGE_IDLE = 0.3, GAUGE_BREATH_LO = 0.24, GAUGE_BREATH_HI = 0.38, GAUGE_GLOW = 0.3, GAUGE_GLOW_W = 104, GAUGE_GLOW_H = 12,
+    GAUGE_OFF = 0.22, GAUGE_IDLE = 0.3, GAUGE_BREATH_LO = 0.24, GAUGE_BREATH_HI = 0.38,
     RATE_ZONE_Y = 30, RATE_X = 8, RATE_BASE = 39, RATE_BAR_Y = 41, RATE_ROOM = 35,
     DASH_PITCH = 5, DASH_ON = 3, DASHES = 9,
     CHIP = { x = 57, y = 31, w = 30, h = 12 }, CHIP_C = 3, GLOW_PAD = 3, CHIP_ROOM = 28, CHIP_IDLE_TEXT = 0.65,
@@ -102,7 +102,10 @@ local FT = {
     -- the LED look
     GHOST_COUNT = 0.07, GHOST_LIFT = 0.06, GHOST_RES = 0.08, GHOST_IDLE = 0.05, WORD_IDLE = 0.55,
     GLOW_STEADY = 0.5, GLOW_PULSE = 0.6,
-    GLOW_W = 64, GLOW_H = 32, GLOW_CORE_W = 50, GLOW_CORE_H = 18,   -- led_glow.tga: its canvas and its solid core, texels
+    -- the glow is a soft copy under each lit piece, never a block behind the readout: led_segment_glow.tga is the segment atlas
+    -- blurred (a cell's glow is the 14 x 16 texel rect two texels past the cell, a tilde bar or the dot's the 6 x 6 one),
+    -- and led_glow.tga is the soft box stretched over a gauge segment plus GAUGE_GLOW_PAD design px on every side
+    SEG_GLOW_PAD = 2, SEG_GLOW_W = 14, SEG_GLOW_H = 16, BLOCK_GLOW = 6, BLOCK_SLOT = 14, GAUGE_GLOW_PAD = 3,
     -- the motion, seconds unless noted
     FLASH_TIME = 0.5, FLASH_ALPHA = 0.3,
     DIP_TIME = 0.035, DIP_DEPTH = 0.22,
@@ -674,20 +677,24 @@ local function TintText(region, a, b, t, alpha)
     region:SetTextColor(Lerp(a[1], b[1], t), Lerp(a[2], b[2], t), Lerp(a[3], b[3], t), alpha)
 end
 
--- One cell's 14 textures: the lit ones of `ch` (nil for none) take the lit colour, the others the ghost colour.
-local function PaintCell(cell, ch, lr, lg, lb, la, gr, gg, gb, ga)
+-- One cell's 14 textures: the lit ones of `ch` (nil for none) take the lit colour, the others the ghost colour. `glow` is the
+-- alpha of the soft copy under each lit segment (0 for none); an unlit segment never glows.
+local function PaintCell(cell, ch, lr, lg, lb, la, gr, gg, gb, ga, glow)
     if cell.ch == ch and cell.lr == lr and cell.lg == lg and cell.lb == lb and cell.la == la
-        and cell.gr == gr and cell.gg == gg and cell.gb == gb and cell.ga == ga then
+        and cell.gr == gr and cell.gg == gg and cell.gb == gb and cell.ga == ga and cell.glow == glow then
         return
     end
     cell.ch, cell.lr, cell.lg, cell.lb, cell.la, cell.gr, cell.gg, cell.gb, cell.ga = ch, lr, lg, lb, la, gr, gg, gb, ga
+    cell.glow = glow
     local lit = ch and GLYPH[ch]
-    local seg = cell.seg
+    local seg, gl = cell.seg, cell.gl
     for n = 1, #SEGMENT_ORDER do
         if lit and lit[n] then
             seg[n]:SetVertexColor(lr, lg, lb, la)
+            gl[n]:SetVertexColor(lr, lg, lb, glow * la)
         else
             seg[n]:SetVertexColor(gr, gg, gb, ga)
+            gl[n]:SetVertexColor(lr, lg, lb, 0)
         end
     end
 end
@@ -835,24 +842,10 @@ local function Q100(v)
     return math.floor(v * 100 + 0.5)
 end
 
--- The glow behind the readout (steady and pulse share one rect): the texture's solid core sits over the lit area of the
--- counting group or of the word. Seated again only when the group changes.
-local function SeatGlows(mode)
-    local led = FT.led
-    if led.glowMode == mode then return end
-    led.glowMode = mode
-    local g = mode == "word" and led.wordRect or led.countRect
-    for _, tex in ipairs(led.glows) do
-        tex:ClearAllPoints()
-        tex:SetPoint("CENTER", FT.host, "TOPLEFT", g[1], -g[2])
-        tex:SetSize(g[3] * FT.GLOW_W / FT.GLOW_CORE_W, g[4] * FT.GLOW_H / FT.GLOW_CORE_H)
-    end
-end
-
 -- The readout while the window runs (susp), or the held digits under the sweep: which cells show and what they spell.
 local DIGITS = { [0] = "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" }
 
-local function PaintCount(led, col, lc, litA, ghostA, zp, held, bx)
+local function PaintCount(led, col, lc, litA, ghostA, zp, held, bx, glow)
     local cr, cg, cb = col[1], col[2], col[3]
     local lr, lg, lb = lc[1], lc[2], lc[3]
     local flashK = 0.85 * zp
@@ -870,13 +863,17 @@ local function PaintCount(led, col, lc, litA, ghostA, zp, held, bx)
         local bar = led.tilde[i]
         ShowIf(bar, showTilde)
         bar:SetVertexColor(lr, lg, lb, 1)
+        ShowIf(led.tildeGl[i], showTilde)
+        led.tildeGl[i]:SetVertexColor(lr, lg, lb, glow)
     end
     ShowIf(led.dot, showDot)
     led.dot:SetVertexColor(lr, lg, lb, 1)
+    ShowIf(led.dotGl, showDot)
+    led.dotGl:SetVertexColor(lr, lg, lb, glow)
     ShowCell(led.d1, showD1)
     ShowCell(led.d2, showD2)
-    PaintCell(led.d1, ch1, lr, lg, lb, 1, cr, cg, cb, ghostA)
-    PaintCell(led.d2, ch2, lr, lg, lb, litA, cr, cg, cb, ghostA)
+    PaintCell(led.d1, ch1, lr, lg, lb, 1, cr, cg, cb, ghostA, glow)
+    PaintCell(led.d2, ch2, lr, lg, lb, litA, cr, cg, cb, ghostA, glow)
     return lr, lg, lb
 end
 
@@ -948,10 +945,8 @@ local function PaintCells(zone)
         ghostA = FT.GHOST_COUNT + FT.GHOST_LIFT * zp
         litA = fx.dip and (1 - FT.DIP_DEPTH) or 1
         for i = 1, 5 do ShowCell(led.word[i], false) end
-        local lr, lg, lb = PaintCount(led, col, lc, litA, ghostA, zp, false, 0)
-        led.glow:SetVertexColor(lr, lg, lb, FT.GLOW_STEADY)
-        led.pulse:SetVertexColor(lr, lg, lb, zp * FT.GLOW_PULSE)
-        SeatGlows("count")
+        -- the soft copy under the lit segments, brighter at the whole second pulse
+        PaintCount(led, col, lc, litA, ghostA, zp, false, 0, math.min(1, FT.GLOW_STEADY + FT.GLOW_PULSE * zp))
     else
         local col = wordColor
         col[1], col[2], col[3] = Mix(muted, cyan, f)
@@ -960,12 +955,16 @@ local function PaintCells(zone)
         -- the held countdown digits, cyan, until the band has passed each one
         local held = sweeping and on.digits
         if held then
-            PaintCount(led, cyan, cyan, 1, ghostA, 0, true, bx)
+            PaintCount(led, cyan, cyan, 1, ghostA, 0, true, bx, FT.GLOW_STEADY)
         else
             ShowCell(led.d1, false)
             ShowCell(led.d2, false)
-            for i = 1, 4 do ShowIf(led.tilde[i], false) end
+            for i = 1, 4 do
+                ShowIf(led.tilde[i], false)
+                ShowIf(led.tildeGl[i], false)
+            end
             ShowIf(led.dot, false)
+            ShowIf(led.dotGl, false)
         end
         local W = FT.WORD_X
         for i = 1, 5 do
@@ -979,38 +978,38 @@ local function PaintCells(zone)
                 if dx < 9 then hot = 0.8 * (1 - dx / 9) end
             end
             local lr, lg, lb = Lerp(col[1], 1, hot), Lerp(col[2], 1, hot), Lerp(col[3], 1, hot)
-            PaintCell(cell, (not masked) and WORD[i] or nil, lr, lg, lb, litA, col[1], col[2], col[3], ghostA)
+            PaintCell(cell, (not masked) and WORD[i] or nil, lr, lg, lb, litA, col[1], col[2], col[3], ghostA, FT.GLOW_STEADY * f)
         end
-        led.glow:SetVertexColor(col[1], col[2], col[3], FT.GLOW_STEADY * f)
-        led.pulse:SetVertexColor(col[1], col[2], col[3], 0)
-        SeatGlows("word")
     end
 
-    -- the gauge
-    local gaugeCol = susp and amber or cyan
+    -- the gauge: each segment has a soft halo of its own colour and alpha under it (none at rest, fading in with the look)
     local n = FT.GAUGE_N
     local lit = susp and Clamp01(v.t / FT.WINDOW) * n or 0
+    local halo = f
+    local gauge = FT.gauge
     for i = 1, n do
-        local seg = FT.gauge.seg[i]
+        local seg, gl = gauge.seg[i], gauge.gl[i]
+        local r, g, bl, a
         if susp then
-            local a = Clamp01(lit - (i - 1))
+            local ai = Clamp01(lit - (i - 1))
             if i == fx.dropSeg then
-                seg:SetVertexColor(amber[1], amber[2], amber[3], math.max(FT.GAUGE_OFF, fx.dropA))
-            elseif a > 0 then
-                seg:SetVertexColor(amber[1], amber[2], amber[3], 0.45 + 0.55 * a)
+                r, g, bl, a = amber[1], amber[2], amber[3], math.max(FT.GAUGE_OFF, fx.dropA)
+            elseif ai > 0 then
+                r, g, bl, a = amber[1], amber[2], amber[3], 0.45 + 0.55 * ai
             else
-                seg:SetVertexColor(violet[1], violet[2], violet[3], FT.GAUGE_OFF)
+                r, g, bl, a = violet[1], violet[2], violet[3], FT.GAUGE_OFF
             end
         else
             local x = FT.GAUGE_X + (i - 1) * FT.GAUGE_PITCH + FT.GAUGE_SEG_W / 2
             if sweeping and math.abs(x - bx) < 9 then
-                seg:SetVertexColor(1, 1, 1, 0.95)
+                r, g, bl, a = 1, 1, 1, 0.95
             else
-                seg:SetVertexColor(cyan[1], cyan[2], cyan[3], Lerp(b and FT.GAUGE_BREATH_HI or FT.GAUGE_IDLE, 0.85, f))
+                r, g, bl, a = cyan[1], cyan[2], cyan[3], Lerp(b and FT.GAUGE_BREATH_HI or FT.GAUGE_IDLE, 0.85, f)
             end
         end
+        seg:SetVertexColor(r, g, bl, a)
+        gl:SetVertexColor(r, g, bl, a * halo)
     end
-    FT.gauge.glow:SetVertexColor(gaugeCol[1], gaugeCol[2], gaugeCol[3], susp and FT.GAUGE_GLOW or FT.GAUGE_GLOW * f)
 
     FT.cells:SetAlpha(Lerp(FT.IDLE_ALPHA, 1, f))
     FT.fxFlash:SetVertexColor(1, 1, 1, FT.FLASH_ALPHA * fx.flash)
@@ -1229,11 +1228,18 @@ local function NewCell(parent, level)
     local frame = CreateFrame("Frame", nil, parent)
     frame:EnableMouse(false)
     frame:SetFrameLevel(level)
-    local cell = { frame = frame, seg = {} }
+    local cell = { frame = frame, seg = {}, gl = {} }
     for n = 1, #SEGMENT_ORDER do
+        local l, t = ((n - 1) % 4) * 0.25, math.floor((n - 1) / 4) * 0.25
+        -- the soft copy first (ADD, under the segment), cut from the blurred atlas: the cell plus two texels on every side
+        local gl = Crisp(frame:CreateTexture(nil, "ARTWORK", nil, 0))
+        gl:SetTexture(MEDIA .. "led_segment_glow.tga")
+        gl:SetBlendMode("ADD")
+        gl:SetTexCoord(l, l + FT.SEG_GLOW_W / FT.ATLAS, t, t + FT.SEG_GLOW_H / FT.ATLAS)
+        gl:SetVertexColor(1, 1, 1, 0)
+        cell.gl[n] = gl
         local tex = Crisp(frame:CreateTexture(nil, "ARTWORK", nil, 1))
         tex:SetTexture(MEDIA .. "led_segments.tga")
-        local l, t = ((n - 1) % 4) * 0.25, math.floor((n - 1) / 4) * 0.25
         tex:SetTexCoord(l, l + FT.CELL_W / FT.ATLAS, t, t + FT.CELL_H / FT.ATLAS)
         cell.seg[n] = tex
     end
@@ -1257,9 +1263,7 @@ local function BuildFace()
         body:EnableMouse(false)
         body:SetFrameLevel(cells:GetFrameLevel() + 3)
         local g = { frame = body, seg = {}, line = {} }
-        g.glow = Crisp(body:CreateTexture(nil, "BACKGROUND", nil, 1))
-        g.glow:SetTexture(MEDIA .. "led_glow.tga")
-        g.glow:SetBlendMode("ADD")
+        g.gl = {}
         g.plate = FlatTexture(body, "BACKGROUND", 2)
         g.plate:SetVertexColor(REC[1], REC[2], REC[3], 0.9)
         for k = 1, 4 do
@@ -1267,7 +1271,14 @@ local function BuildFace()
             local v = T.COLOR_BORDER
             g.line[k]:SetVertexColor(v[1], v[2], v[3], 0.4)
         end
-        for i = 1, FT.GAUGE_N do g.seg[i] = FlatTexture(body, "ARTWORK", 0) end
+        for i = 1, FT.GAUGE_N do
+            local gl = Crisp(body:CreateTexture(nil, "ARTWORK", nil, -1))
+            gl:SetTexture(MEDIA .. "led_glow.tga")
+            gl:SetBlendMode("ADD")
+            gl:SetVertexColor(1, 1, 1, 0)
+            g.gl[i] = gl
+            g.seg[i] = FlatTexture(body, "ARTWORK", 0)
+        end
         FT.gauge = g
         FT.body = body
     end
@@ -1275,13 +1286,19 @@ local function BuildFace()
     if not FT.led then
         local body = FT.body
         local led = { word = {}, tilde = {} }
-        led.glow = Crisp(body:CreateTexture(nil, "BACKGROUND", nil, 3))
-        led.glow:SetTexture(MEDIA .. "led_glow.tga")
-        led.glow:SetBlendMode("ADD")
-        led.pulse = Crisp(body:CreateTexture(nil, "BACKGROUND", nil, 4))
-        led.pulse:SetTexture(MEDIA .. "led_glow.tga")
-        led.pulse:SetBlendMode("ADD")
-        led.glows = { led.glow, led.pulse }
+        -- the glow of the tilde bars and the dot: the blurred 2 x 2 block, one texture each, under the flat piece
+        local function BlockGlow()
+            local gl = Crisp(body:CreateTexture(nil, "ARTWORK", nil, 0))
+            gl:SetTexture(MEDIA .. "led_segment_glow.tga")
+            gl:SetBlendMode("ADD")
+            local l, t = (FT.BLOCK_SLOT % 4) * 0.25, math.floor(FT.BLOCK_SLOT / 4) * 0.25
+            gl:SetTexCoord(l, l + FT.BLOCK_GLOW / FT.ATLAS, t, t + FT.BLOCK_GLOW / FT.ATLAS)
+            gl:SetVertexColor(1, 1, 1, 0)
+            return gl
+        end
+        led.tildeGl = {}
+        for i = 1, 4 do led.tildeGl[i] = BlockGlow() end
+        led.dotGl = BlockGlow()
         local level = body:GetFrameLevel() + 1
         led.d1, led.d2 = NewCell(body, level), NewCell(body, level)
         for i = 1, 5 do led.word[i] = NewCell(body, level) end
@@ -1368,9 +1385,10 @@ local function LayoutFace()
     for i = 1, FT.GAUGE_N do
         Place(G.seg[i], FT.GAUGE_X + (i - 1) * FT.GAUGE_PITCH, FT.GAUGE_SEG_Y, FT.GAUGE_SEG_W, FT.GAUGE_SEG_H)
     end
-    G.glow:ClearAllPoints()
-    G.glow:SetPoint("CENTER", FT.host, "TOPLEFT", FT.Snap(wx + ww / 2), -FT.Snap(FT.GAUGE_SEG_Y + FT.GAUGE_SEG_H / 2))
-    G.glow:SetSize(FT.Snap(FT.GAUGE_GLOW_W), FT.Snap(FT.GAUGE_GLOW_H))
+    local gp = FT.GAUGE_GLOW_PAD
+    for i = 1, FT.GAUGE_N do
+        Place(G.gl[i], FT.GAUGE_X + (i - 1) * FT.GAUGE_PITCH - gp, FT.GAUGE_SEG_Y - gp, FT.GAUGE_SEG_W + 2 * gp, FT.GAUGE_SEG_H + 2 * gp)
+    end
 
     -- the readout: the counting group (tilde, two digits, a dot) and the word are both centred on the hero tile; every
     -- number below is a whole count of physical pixels, one texel being n of them
@@ -1379,10 +1397,14 @@ local function LayoutFace()
     local rowPx = PixelsOf(H.y + H.h / 2) - math.floor(FT.CELL_H * n / 2)
     local wordPx = centre - math.floor(FT.WORD_W * n / 2)
     local countPx = centre - math.floor(FT.COUNT_W * n / 2)
+    local gm, bg = FT.SEG_GLOW_PAD * n, FT.BLOCK_GLOW * n
     for i, bar in ipairs(led.tilde) do
-        PlacePx(bar, countPx + TILDE[i][1] * n, rowPx + TILDE[i][2] * n, 2 * n, 2 * n)
+        local bx, by = countPx + TILDE[i][1] * n, rowPx + TILDE[i][2] * n
+        PlacePx(bar, bx, by, 2 * n, 2 * n)
+        PlacePx(led.tildeGl[i], bx - gm, by - gm, bg, bg)
     end
     PlacePx(led.dot, countPx + 21 * n, rowPx + 10 * n, 2 * n, 2 * n)
+    PlacePx(led.dotGl, countPx + 21 * n - gm, rowPx + 10 * n - gm, bg, bg)
     PlacePx(led.d1.frame, countPx + 10 * n, rowPx, FT.CELL_W * n, FT.CELL_H * n)
     PlacePx(led.d2.frame, countPx + 24 * n, rowPx, FT.CELL_W * n, FT.CELL_H * n)
     for i = 1, 5 do PlacePx(led.word[i].frame, wordPx + (i - 1) * 12 * n, rowPx, FT.CELL_W * n, FT.CELL_H * n) end
@@ -1391,20 +1413,22 @@ local function LayoutFace()
             tex:ClearAllPoints()
             tex:SetAllPoints(cell.frame)
         end
+        -- the glow rect: the cell plus two texels on every side, so 14 x 16 texels from two texels up and left
+        for _, gl in ipairs(cell.gl) do
+            gl:ClearAllPoints()
+            gl:SetPoint("TOPLEFT", cell.frame, "TOPLEFT", -gm * px, gm * px)
+            gl:SetSize(FT.SEG_GLOW_W * n * px, FT.SEG_GLOW_H * n * px)
+        end
         cell.ch = nil
     end
-    local h = FT.CELL_H * n
-    led.countRect = { (countPx + FT.COUNT_W * n / 2) * px, (rowPx + h / 2) * px, FT.COUNT_W * n * px, h * px }
-    led.wordRect = { (wordPx + FT.WORD_W * n / 2) * px, (rowPx + h / 2) * px, FT.WORD_W * n * px, h * px }
-    led.glowMode = nil
 
     -- the rate line and the chip
     FT.rateText.fsX = nil
     local C = FT.CHIP
     Place(FT.chip.fill, C.x, C.y, C.w, C.h)
     Place(FT.chip.ring, C.x, C.y, C.w, C.h)
-    local gp = FT.GLOW_PAD
-    Place(FT.chip.glow, C.x - gp, C.y - gp, C.w + 2 * gp, C.h + 2 * gp)
+    local cgp = FT.GLOW_PAD
+    Place(FT.chip.glow, C.x - cgp, C.y - cgp, C.w + 2 * cgp, C.h + 2 * cgp)
     FT.chip.code.fsX = nil
     FT.rateBar.solid:ClearAllPoints()
     FT.rateBar.solid:SetSize(1, 1)

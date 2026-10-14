@@ -229,8 +229,9 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     },
     "tab_plate": {"tab_plate": (32, 32), "tab_edge": (32, 32)},
     # generate_led_segments.py: the five second rule tab's LED art, a 64x64 atlas of 16x16 slots (fourteen segments of a
-    # 10x12 cell) and the 64x32 soft glow behind the readout.
-    "led_segments": {"led_segments": (64, 64), "led_glow": (64, 32)},
+    # 10x12 cell), the same atlas blurred for the glow behind each lit segment, and the 64x32 soft box glow of the gauge
+    # segments and the pulse.
+    "led_segments": {"led_segments": (64, 64), "led_segment_glow": (64, 64), "led_glow": (64, 32)},
     "tab_slant": {
         "tab_slant": (32, 32),
         "tab_slant_glow": (32, 32),
@@ -1992,11 +1993,48 @@ def test_led_atlas_slots_hold_the_fourteen_disjoint_segments(led_outputs: Path) 
         assert all(_alpha_at(path, ox + x, oy + y) == 0 for x in range(16) for y in range(16)), f"slot {slot} not empty"
 
 
-def test_led_glow_is_solid_at_the_centre_and_clear_at_the_edges(led_outputs: Path) -> None:
+def test_led_segment_glow_atlas_is_the_segments_blurred_with_a_two_texel_margin(led_outputs: Path) -> None:
+    seg = led_outputs / "led_segments.tga"
+    glow = led_outputs / "led_segment_glow.tga"
+    for slot, texels in enumerate(LED_SEGMENT_TEXELS):
+        ox, oy = (slot % 4) * 16, (slot // 4) * 16
+        total, peak, outside = 0, 0, 0
+        for y in range(16):
+            for x in range(16):
+                a = _alpha_at(glow, ox + x, oy + y)
+                total += a
+                peak = max(peak, a)
+                if x >= 14 or y >= 16:
+                    outside += a
+        # a blur keeps the mass: the segment's texels, to a few percent (a little reaches the slot's edge)
+        assert abs(total / 255 - texels) < 0.06 * texels, f"slot {slot}: mass {total / 255:.1f} vs {texels} texels"
+        assert 0.45 * 255 < peak < 0.95 * 255, f"slot {slot}: peak {peak}"
+        assert outside == 0, f"slot {slot} spills past the 14 x 16 glow rect"
+        # the glow reaches past the segment into the margin, soft: no segment texel is fully opaque
+        halo = 0
+        for y in range(16):
+            for x in range(14):
+                if _alpha_at(glow, ox + x, oy + y) > 0 and not (
+                    x >= 2 and y >= 2 and _alpha_at(seg, ox + x - 2, oy + y - 2) > 0
+                ):
+                    halo += 1
+        assert halo > texels, f"slot {slot} has no halo"
+    block = sum(_alpha_at(glow, 2 * 16 + x, 3 * 16 + y) for x in range(16) for y in range(16))
+    assert abs(block / 255 - 4) < 0.25, "slot 14: the 2 x 2 block's mass"
+    assert all(_alpha_at(glow, 3 * 16 + x, 3 * 16 + y) == 0 for x in range(16) for y in range(16)), "slot 15 not empty"
+
+
+def test_led_glow_is_a_soft_box_with_no_hard_edge(led_outputs: Path) -> None:
     path = led_outputs / "led_glow.tga"
-    assert _alpha_at(path, 32, 16) == 255
+    centre = _alpha_at(path, 32, 16)
+    assert 0.7 * 255 < centre < 0.95 * 255, centre
     for x, y in ((0, 0), (63, 0), (0, 31), (63, 31), (0, 16), (63, 16), (32, 0), (32, 31)):
         assert _alpha_at(path, x, y) == 0, (x, y)
+    row = [_alpha_at(path, x, 16) for x in range(64)]
+    col = [_alpha_at(path, 32, y) for y in range(32)]
+    assert max(abs(a - b) for a, b in zip(row, row[1:])) < 0.12 * 255, "a hard step along the middle row"
+    assert max(abs(a - b) for a, b in zip(col, col[1:])) < 0.18 * 255, "a hard step along the middle column"
+    assert row[:32] == sorted(row[:32]) and row[32:] == sorted(row[32:], reverse=True), "not a single soft hump"
 
 
 # --- the runtime icon style: ramps and key covers ----------------------------
