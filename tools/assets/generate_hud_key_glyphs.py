@@ -26,8 +26,7 @@ texel is about 0.4 design units. The two sub-paths drawn with `stroke-opacity`
 alpha; where a faint stroke touches a full one the full one wins.
 
 There is deliberately no baked glow: the key draws the glyph twice (once a little
-larger and dim, ADD blend, the mockup's `.kgg`), exactly like the micro menu
-glyphs from generate_deck_glyphs.py. White RGB, shape in alpha; Lua tints it with
+larger and dim, ADD blend, the mockup's `.kgg`). White RGB, shape in alpha; Lua tints it with
 SetVertexColor.
 
 Pure stdlib. Output per file: 18-byte header, image type 2, descriptor 0x28

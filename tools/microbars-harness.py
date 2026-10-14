@@ -62,7 +62,6 @@ DATABAR_LUA = ADDON / "Modules/DataBars/DataBar.lua"
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "control-deck-v1-2026-10-01.html"
 CELL_SLANT = ADDON / "Media" / "Textures" / "cell_slant.tga"
 EPS = 0.01
-GLYPH_SIZE = 16  # design px of a hand drawn line glyph, as the mockup draws it
 
 
 # ---------------------------------------------------------------------------------------
@@ -207,7 +206,7 @@ function M:SetTexCoord(l, r, t, b) self.coords = { l, r, t, b } end
 function M:CreateMaskTexture() error("CreateMaskTexture: masks do not clip on this client") end
 function M:SetHorizTile() end
 function M:SetVertTile() end
-function M:SetDesaturated() end
+function M:SetDesaturated(v) self.desat = v end
 function CreateColor(r, g, b, a) return { r, g, b, a } end
 function M:SetGradient(orientation, c1, c2) self.gradient = { orientation, c1, c2 } end
 
@@ -236,7 +235,7 @@ function M:GetNormalTexture() return self.normalTex end
 function M:GetPushedTexture() return self.pushedTex end
 function M:GetDisabledTexture() return self.disabledTex end
 function M:GetHighlightTexture() return self.highlightTex end
-function M:IsEnabled() return true end
+function M:IsEnabled() return self.isDisabled ~= true end
 function M:GetButtonState() return "NORMAL" end
 function M:SetButtonState() end
 
@@ -410,6 +409,7 @@ function h_glyphInfo()
                     if t:find("glyph%a*_") then
                         info.w, info.h, info.layer, info.sub = o.w, o.h, o.layer, o.sublevel
                         info.c = o.coords
+                        info.vertex, info.desat, info.tex = o.vertex, o.desat, t
                     elseif t:find("deck_key_slant_outline", 1, true) then
                         info.edgeLayer, info.edgeSub = o.layer, o.sublevel
                     end
@@ -419,6 +419,25 @@ function h_glyphInfo()
         out[i] = info
     end
     return out
+end
+-- A faction that is a secret value (a string the client will not let code index with), a table or a number never reaches PVP_ART.
+function h_oddFactions()
+    local real = FS.IsSecret
+    FS.IsSecret = function(v) return v == "Alliance" end
+    local GP = FS.MicroBars.GlyphPath
+    local out = { GP("pvp", "Alliance"), GP("pvp", {}), GP("pvp", 42), GP("pvp", nil) }
+    FS.IsSecret = real
+    return out
+end
+-- Drive one button's state the way the client does: run the hooks of a script, or flip its enabled flag and run OnEnable/OnDisable.
+function h_script(i, which)
+    local b = BUTTONS[i]
+    for _, fn in ipairs(b.hooks[which] or {}) do fn(b) end
+end
+function h_enabled(i, on)
+    local b = BUTTONS[i]
+    b.isDisabled = not on
+    h_script(i, on and "OnEnable" or "OnDisable")
 end
 -- Per button: how many textures under its overlay use a glyph file.
 function h_glyphCounts()
@@ -658,62 +677,101 @@ def check_overlay() -> None:
     check("overlay.glyph_drawn_once_per_key", counts == [1] * 12, f"{counts}")
 
 
-def tga_header(path: Path) -> tuple[int, int, int, int]:
-    """(image type, width, height, bits per pixel) of an uncompressed TGA."""
-    h = path.read_bytes()[:18]
-    return h[2], int.from_bytes(h[12:14], "little"), int.from_bytes(h[14:16], "little"), h[16]
+def tga_header(path: Path) -> tuple[int, int, int, int, int, int]:
+    """(image type, width, height, bits per pixel, descriptor, file size) of a TGA."""
+    data = path.read_bytes()
+    h = data[:18]
+    return h[2], int.from_bytes(h[12:14], "little"), int.from_bytes(h[14:16], "little"), h[16], h[17], len(data)
 
 
 def check_glyph_files() -> None:
-    """Every micro entry resolves to a shipped, loadable texture, and no baked glyph is orphaned."""
+    """Every micro entry resolves to a shipped, loadable texture, and nothing in the micro glyph set is orphaned."""
     media = ADDON / "Media" / "Textures"
     w = World(12).login()
     paths = [str(p) for _, p in w.call("h_glyphPaths").items()]
     names = [p.rsplit("\\", 1)[-1] for p in paths]
     missing = [n for n in names if not (media / n).exists()]
     check("glyphs.every_built_key_wears_a_shipped_file", len(names) == 12 and not missing, f"{len(names)} keys, missing {missing}")
+    check("glyphs.every_key_wears_baked_art", all(n.startswith("glyphart_") for n in names), f"{names}")
 
     mb = w.get("FS.MicroBars")
     stems = sorted({str(v) for _, v in mb.Glyphs.items()} | {str(mb.GlyphGeneric)})
-    resolved = {(stem, f): str(mb.GlyphPath(stem, f)[0]).rsplit("\\", 1)[-1]
+    resolved = {(stem, f): str(mb.GlyphPath(stem, f)).rsplit("\\", 1)[-1]
                 for stem in stems for f in ("Alliance", "Horde", "Neutral", None)}
     gone = sorted({n for n in resolved.values() if not (media / n).exists()})
-    check("glyphs.every_mapping_entry_and_faction_resolves_to_an_existing_file", len(stems) >= 17 and not gone, f"{len(stems)} stems, missing {gone}")
+    check("glyphs.every_mapping_entry_and_faction_resolves_to_an_existing_file",
+          len(stems) >= 18 and "character" in stems and "legacy" in stems and not gone, f"{len(stems)} stems, missing {gone}")
     pvp = {f: resolved[("pvp", f)] for f in ("Alliance", "Horde", "Neutral", None)}
     check("glyphs.pvp_follows_the_players_faction",
           pvp["Alliance"] != pvp["Horde"] and pvp["Neutral"] == pvp[None] and len(set(pvp.values())) == 3, f"{pvp}")
+    # A faction that is not a plain string (a secret value, a table) must not be indexed.
+    odd = w.call("h_oddFactions")
+    check("glyphs.a_secret_or_non_string_faction_gets_the_free_emblem",
+          len(odd) == 4 and all(str(o).endswith("glyphart_pvp_ffa.tga") for _, o in odd.items()), f"{dict(odd.items())}")
 
     baked = sorted(p.name for p in media.glob("glyphart_*.tga"))
     orphans = [n for n in baked if n not in set(resolved.values())]
-    bad = [n for n in baked if tga_header(media / n) != (2, 64, 64, 32)]
-    check("glyphs.baked_art_is_64x64_bgra_tga", len(baked) >= 15 and not bad, f"{len(baked)} files, bad {bad}")
+    bad = [n for n in baked if tga_header(media / n) != (2, 64, 64, 32, 0x28, 18 + 64 * 64 * 4)]
+    check("glyphs.baked_art_is_64x64_bgra_tga_of_exact_size", len(baked) >= 19 and not bad, f"{len(baked)} files, bad {bad}")
     check("glyphs.no_baked_art_is_orphaned", not orphans, f"{orphans}")
+    # The old hand drawn glyph_<name>.tga line glyphs are not drawn any more (glyph_hud_* belong to the Console keys).
+    stale = sorted(p.name for p in media.glob("glyph_*.tga") if not p.name.startswith("glyph_hud_"))
+    check("glyphs.no_unreferenced_line_glyph_files", not stale, f"{stale}")
     check("glyphs.no_degrade_logs", w.logs() == "", w.logs())
 
 
 def check_fill() -> None:
-    """Baked art covers its key (cover, not contain); line glyphs stay small and centred. No mask: it would not clip."""
-    for scale in (1.0, 0.64):
-        w = World(12, scale=scale).login()
+    """Baked art covers its key (cover, not contain), cropped to a FIXED band so the baked slant matches the plate at any
+    key width. No mask: it would not clip."""
+    baked_pad = (1 - 26 / 34) / 2  # the baked shape's rows (tools/assets/synthwave_icons.py KEY_W, KEY_H)
+    for count, scale in ((12, 1.0), (12, 0.64), (14, 1.0), (16, 1.0)):
+        w = World(count, scale=scale).login()
         infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
-        paths = [str(p) for _, p in w.call("h_glyphPaths").items()]
-        art = [i for i, p in zip(infos, paths) if "glyphart_" in p]
-        line = [i for i, p in zip(infos, paths) if "glyphart_" not in p]
-        tag = f"scale_{scale}"
-        check(f"fill.{tag}.art_keys_exist", len(art) >= 8 and len(art) + len(line) == 12, f"{len(art)} art, {len(line)} line")
+        tag = f"keys_{count}_scale_{scale}"
+        check(f"fill.{tag}.every_key_has_art", len(infos) == count and all("glyphart_" in str(i["tex"]) for i in infos), f"{len(infos)}")
         check(f"fill.{tag}.art_is_the_size_of_the_key",
-              all(near(i["w"], i["bw"]) and near(i["h"], i["bh"]) for i in art), f"{[(i['w'], i['h'], i['bw'], i['bh']) for i in art][:2]}")
-        # cover: the whole width of the square texture, the central band of rows whose share is key height / key width
-        bands = [tuple(i["c"][k] for k in (1, 2, 3, 4)) for i in art]
-        check(f"fill.{tag}.art_crops_to_the_keys_aspect_centred",
-              all(i["c"][1] == 0 and i["c"][2] == 1 and near(i["c"][3], (1 - i["bh"] / i["bw"]) / 2) and near(i["c"][4], 1 - i["c"][3])
-                  for i in art), f"{bands[:2]}")
+              all(near(i["w"], i["bw"]) and near(i["h"], i["bh"]) for i in infos), f"{[(i['w'], i['h'], i['bw'], i['bh']) for i in infos][:2]}")
+        # cover: the whole width of the square texture and always the baked band of rows, whatever the key's aspect
+        check(f"fill.{tag}.art_crops_to_the_baked_band",
+              all(near(i["c"][1], 0) and near(i["c"][2], 1) and near(i["c"][3], baked_pad) and near(i["c"][4], 1 - baked_pad)
+                  for i in infos), f"{[tuple(i['c'].values()) for i in infos][:2]}")
         check(f"fill.{tag}.ring_draws_over_the_icon",
-              all(i["layer"] == "ARTWORK" and i["edgeLayer"] == "ARTWORK" and i["sub"] < i["edgeSub"] for i in art + line),
-              f"{[(i['layer'], i['sub'], i['edgeLayer'], i['edgeSub']) for i in (art + line)][:2]}")
-        check(f"fill.{tag}.line_glyphs_stay_small_uncropped",
-              all(near(i["w"], GLYPH_SIZE * scale) and i.get("c") is None for i in line), f"{[(i['w'], i.get('c')) for i in line]}")
+              all(i["layer"] == "ARTWORK" and i["edgeLayer"] == "ARTWORK" and i["sub"] < i["edgeSub"] for i in infos),
+              f"{[(i['layer'], i['sub'], i['edgeLayer'], i['edgeSub']) for i in infos][:2]}")
         check(f"fill.{tag}.no_degrade_logs", w.logs() == "", w.logs())
+
+
+def check_glyph_tint() -> None:
+    """The art is full colour: idle is a touch calm, hover, active and pressed are the art as baked, disabled is desaturated and dim."""
+    w = World(12).login()
+    mb = w.get("FS.MicroBars")
+    tint = {}
+    for name, flags in (("idle", {}), ("hover", {"hover": True}), ("active", {"active": True}), ("pressed", {"pressed": True}), ("disabled", {"disabled": True})):
+        v = mb.ComputeVisual(w.lua.table_from(flags), w.lua.table_from([1, 1, 1]), None)
+        tint[name] = (tuple(v.glyph[i] for i in (1, 2, 3)), v.glyphA, bool(v.glyphDesat))
+    idle, hot = tint["idle"], (((1, 1, 1)), 1, False)
+    check("tint.idle_is_a_touch_calm_not_dark", all(0.88 <= c < 1 for c in idle[0]) and idle[1] == 1 and not idle[2], f"{idle}")
+    check("tint.hover_active_pressed_are_the_art_as_baked", all(tint[k] == hot for k in ("hover", "active", "pressed")), f"{tint}")
+    off = tint["disabled"]
+    check("tint.disabled_is_desaturated_and_dim_not_a_dark_multiply", off[2] and off[1] < 1 and all(c >= 0.7 for c in off[0]), f"{off}")
+
+    def painted(i: int) -> tuple[list[float], bool]:
+        info = dict(w.call("h_glyphInfo")[i].items())
+        return [info["vertex"][k] for k in (1, 2, 3, 4)], bool(info["desat"])
+
+    base = painted(1)
+    check("tint.a_key_paints_idle_at_login", near(base[0][3], 1) and not base[1] and all(0.88 <= c < 1 for c in base[0][:3]), f"{base}")
+    w.call("h_script", 1, "OnEnter")
+    hov = painted(1)
+    check("tint.a_hovered_key_paints_full_colour", hov[0] == [1, 1, 1, 1] and not hov[1], f"{hov}")
+    w.call("h_script", 1, "OnLeave")
+    check("tint.leaving_returns_to_idle", painted(1) == base, f"{painted(1)} vs {base}")
+    w.call("h_enabled", 2, False)
+    dis = painted(2)
+    check("tint.a_disabled_key_paints_desaturated", dis[1] and dis[0][3] < 1, f"{dis}")
+    w.call("h_enabled", 2, True)
+    check("tint.re_enabling_restores_colour", painted(2) == base and painted(1) == base, f"{painted(2)}")
+    check("tint.no_degrade_logs", w.logs() == "", w.logs())
 
 
 def check_art() -> None:
@@ -1057,6 +1115,7 @@ def main() -> int:
     check_overlay()
     check_glyph_files()
     check_fill()
+    check_glyph_tint()
     check_art()
     check_hit_rects(lean, gap)
     check_deck(lean, gap)

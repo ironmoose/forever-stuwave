@@ -45,7 +45,6 @@ local TEX_EDGE = MEDIA .. "deck_key_slant_outline.tga"
 local TEX_GLOW = MEDIA .. "cell_slant_glow.tga"
 local TEX_LED = MEDIA .. "deck_led.tga"
 local TEX_DOT = MEDIA .. "glow_round.tga"
-local GLYPH_DIR = MEDIA .. "glyph_"
 local ART_DIR = MEDIA .. "glyphart_"
 
 -- Design px defaults, replaced at Apply by FS.Deck's own numbers when present.
@@ -54,7 +53,6 @@ local KEY_W, KEY_H, KEY_GAP = 34, 26, 3
 -- generator's SLANT 0.34); the keys nest by this much.
 local LEAN_FRAC = 0.34
 
-local GLYPH_SIZE = 16
 local LED_W, LED_H = 20, 5
 local LED_X, LED_Y = -4, 1      -- LED rides the slanted bottom edge, left of centre
 local PIP_SIZE = 7              -- active dot above the key
@@ -63,7 +61,6 @@ local FLASH_PIP_SIZE = 9        -- notification dot, top right
 local FLASH_PIP_X, FLASH_PIP_Y = -6, -3
 local HOVER_GLOW_W, HOVER_GLOW_H = 1.45, 1.7   -- of the key; cell_slant_glow's core is about 69% x 62%
 local FLASH_GLOW_W, FLASH_GLOW_H = 1.3, 1.45
-local LIFT = 1                  -- glyph travel on hover (up) and press (down)
 
 -- Overlay frame level above its button. Blizzard's NotificationOverlay child sits
 -- at button + 100, so 120 keeps our key (and the fx/flash hosts above it) on top.
@@ -83,9 +80,21 @@ local VIOLET = { 0.486, 0.227, 0.929 } -- #7C3AED
 local PINK = { 1.0, 0.180, 0.592 }     -- #ff2e97
 local ACCENTS = { CYAN, VIOLET, PINK }
 
-local GLYPH_NORMAL = { 0.812, 0.769, 0.937 }  -- #cfc4ef
-local GLYPH_HOT = { 1, 1, 1 }
-local GLYPH_OFF = { 0.353, 0.314, 0.439 }     -- #5a5070
+-- The art is full colour, so these multiply it (vertex colour) instead of tinting a white mask: idle is a touch calm
+-- (a few percent darker, slightly cool), hover, active and pressed are the art as baked (the hover glow behind the
+-- key is the lift), disabled is desaturated and dimmer rather than a heavy dark multiply.
+local GLYPH_TINT = {
+    idle = { 0.93, 0.91, 0.97, 1 },
+    hot = { 1, 1, 1, 1 },
+    off = { 0.78, 0.76, 0.86, 0.7, desaturate = true },
+}
+
+-- The baked art's key shape (34 x 26 design px, tools/assets/synthwave_icons.py KEY_W, KEY_H): its slanted
+-- outline sits in the central band of rows of the square texture, whatever size the key is drawn at, so the crop
+-- is this fixed band and the texture is stretched to the key (a key narrower than 34 squashes the art sideways,
+-- the slant stays on the plate).
+local BAKED_W, BAKED_H = 34, 26
+local BAKED_PAD = (1 - BAKED_H / BAKED_W) / 2
 
 local LATENCY_GREEN = { 0.224, 1.0, 0.078 }   -- #39ff14
 local LATENCY_YELLOW = { 1.0, 0.882, 0.302 }
@@ -103,34 +112,28 @@ local GLYPHS = {
 }
 local GLYPH_GENERIC = "help"
 
--- Glyph names that wear baked art (glyphart_<name>.tga: the micro button's own Blizzard icon on the
--- STUwave gradient, tools/assets/synthwave_icons.py --bake-micro). Any other name keeps its hand
--- drawn glyph_<name>.tga: Character (Blizzard draws a live portrait there) and Legacy have no
--- static art. PvP has one file per faction instead of a plain "pvp" file.
-local ART = {
-    spellbook = true, talents = true, professions = true, achievement = true, questlog = true,
-    guild = true, socials = true, lfd = true, collections = true, ej = true, worldmap = true,
-    store = true, help = true, mainmenu = true, housing = true,
-}
+-- Every glyph name wears baked art, glyphart_<name>.tga: the micro button's own Blizzard icon on the STUwave
+-- gradient (tools/assets/synthwave_icons.py --bake-micro), or for Character (Blizzard draws a live portrait there)
+-- and Legacy (no static art) the hand drawn shape on the same gradient. PvP has one file per faction instead of
+-- a plain "pvp" file.
 local PVP_ART = { Alliance = "pvp_alliance", Horde = "pvp_horde" }
 local PVP_ART_OTHER = "pvp_ffa"
 
--- The texture file a glyph name wears, and whether it is baked art that FILLS the key (cover, the slanted
--- shape baked into its alpha) rather than a small line glyph drawn centred at GLYPH_SIZE. `faction` is
--- UnitFactionGroup("player") (nil or "Neutral" gives the faction free emblem). Pure, so the harness can
--- walk every name.
+-- The texture file a glyph name wears: art that FILLS the key (cover, the slanted shape baked into its alpha).
+-- `faction` is UnitFactionGroup("player"); anything that is not a plain string (nil, "Neutral", a secret value)
+-- gets the faction free emblem. Pure, so the harness can walk every name.
 local function GlyphPath(name, faction)
     if name == "pvp" then
-        return ART_DIR .. (PVP_ART[faction] or PVP_ART_OTHER) .. ".tga", true
+        if type(faction) ~= "string" or FS.IsSecret(faction) then faction = nil end
+        return ART_DIR .. (PVP_ART[faction] or PVP_ART_OTHER) .. ".tga"
     end
-    if ART[name] then return ART_DIR .. name .. ".tga", true end
-    return GLYPH_DIR .. name .. ".tga", false
+    return ART_DIR .. name .. ".tga"
 end
 
 local function PlayerFaction()
     if type(UnitFactionGroup) ~= "function" then return nil end
     local ok, faction = pcall(UnitFactionGroup, "player")
-    if ok and type(faction) == "string" then return faction end
+    if ok and not FS.IsSecret(faction) and type(faction) == "string" then return faction end
     return nil
 end
 
@@ -286,37 +289,35 @@ local function ComputeVisual(f, accent, ledTint)
     local v = {
         plate = PLATE_NORMAL,
         edgeColor = accent, edgeA = 0.35,
-        glyph = GLYPH_NORMAL, glyphA = 1,
+        glyph = GLYPH_TINT.idle, glyphA = 1, glyphDesat = false,
         glowColor = accent, glowA = 0,
         ledColor = ledTint or accent, ledA = 0.6,
-        lift = 0, pip = false, flash = false,
+        pip = false, flash = false,
     }
 
     if f.disabled then
-        v.glyph, v.glyphA = GLYPH_OFF, 0.6
+        v.glyph, v.glyphA, v.glyphDesat = GLYPH_TINT.off, GLYPH_TINT.off[4], GLYPH_TINT.off.desaturate == true
         v.edgeA = 0.15
         v.ledA = 0
     else
         if f.active then
             v.edgeA = 1
             v.ledA = 1
-            v.glyph = GLYPH_HOT
+            v.glyph = GLYPH_TINT.hot
             v.pip = true
         end
         if f.hover then
             v.edgeA = math.max(v.edgeA, 0.9)
             v.glowA = 0.5
-            v.glyph = GLYPH_HOT
+            v.glyph = GLYPH_TINT.hot
             v.ledA = 1
-            v.lift = LIFT
         end
         if f.pressed then
             v.plate = PLATE_PRESSED
             v.edgeColor, v.edgeA = PINK, 1
-            v.glyph = GLYPH_HOT
+            v.glyph = GLYPH_TINT.hot
             v.glowColor, v.glowA = PINK, 0.35
             v.ledColor, v.ledA = PINK, 1
-            v.lift = -LIFT
         end
     end
 
@@ -329,26 +330,16 @@ local function Tint(tex, c, a)
     tex:SetVertexColor(c[1], c[2], c[3], a or c[4] or 1)
 end
 
-local function PlaceGlyph(key)
-    local s = key.scale or 1
-    key.glyph:ClearAllPoints()
-    key.glyph:SetPoint("CENTER", key.ov, "CENTER", 0, key.fill and 0 or (key.lift or 0) * s)
-end
-
 local function Paint(key, v)
     Tint(key.plate, v.plate)
     Tint(key.edge, v.edgeColor, v.edgeA)
     Tint(key.glyph, v.glyph, v.glyphA)
+    key.glyph:SetDesaturated(v.glyphDesat)
     Tint(key.hoverGlow, v.glowColor, v.glowA)
     key.hoverGlow:SetShown(v.glowA > 0)
     Tint(key.led, v.ledColor, v.ledA)
     key.led:SetShown(v.ledA > 0)
     key.pip:SetShown(v.pip)
-
-    if key.lift ~= v.lift then
-        key.lift = v.lift
-        PlaceGlyph(key)
-    end
 
     if v.flash then
         key.flashHost:Show()
@@ -387,18 +378,13 @@ local function SizeKey(key, s, keyW)
     key.scale = s
     local w, h = (keyW or KEY_W) * s, KEY_H * s
 
-    -- Baked art covers the key: a square texture, drawn at the key's width, cropped (texcoords) to the band of
-    -- rows that is the key's height over its width, so the aspect ratio holds and the overflow is cut. The
-    -- slanted shape is in the art's alpha, and the ring over it hides any rounding at the edge. A line glyph
-    -- stays small and centred.
-    if key.fill then
-        local pad = (1 - math.min(1, h / math.max(w, 1))) / 2
-        key.glyph:SetTexCoord(0, 1, pad, 1 - pad)
-        key.glyph:SetSize(w, h)
-    else
-        key.glyph:SetSize(GLYPH_SIZE * s, GLYPH_SIZE * s)
-    end
-    PlaceGlyph(key)
+    -- The art covers the key: the square baked texture is stretched to the key's size and cropped (texcoords) to
+    -- the fixed central band of rows that holds the key's slanted shape (BAKED_PAD), so the shape always lands on
+    -- the plate and the overflow is cut. The ring over it hides any rounding at the edge.
+    key.glyph:SetTexCoord(0, 1, BAKED_PAD, 1 - BAKED_PAD)
+    key.glyph:SetSize(w, h)
+    key.glyph:ClearAllPoints()
+    key.glyph:SetPoint("CENTER", key.ov, "CENTER", 0, 0)
 
     key.hoverGlow:SetSize(w * HOVER_GLOW_W, h * HOVER_GLOW_H)
     key.hoverGlow:ClearAllPoints()
@@ -426,7 +412,7 @@ end
 -- the parallelogram are transparent so the deck shows through), everything lit
 -- sits on `fx`, one level higher, so a neighbour's glow is not cut by this key's
 -- plate.
-local function PopulateKey(key, button, glyphFile, fill)
+local function PopulateKey(key, button, glyphFile)
     local ov = key.ov
     ov:SetAllPoints(button)
 
@@ -454,7 +440,6 @@ local function PopulateKey(key, button, glyphFile, fill)
     -- Filling art. No MaskTexture here: it does not clip on this client (Theme.lua, FILL_CORNER_TEXTURE). The art
     -- is baked with the key's slanted shape in its alpha instead, so covering the key is just sizing and cropping
     -- the texture (SizeKey).
-    key.fill = fill and true or false
 
     key.led = fx:CreateTexture(nil, "OVERLAY", nil, 1)
     key.led:SetTexture(TEX_LED)
@@ -832,7 +817,7 @@ local function EnsureKey(button, index)
 
     local name = button:GetName() or ""
     local base = BaseName(name)
-    local glyphFile, fill = GlyphPath(GLYPHS[base] or GLYPH_GENERIC, PlayerFaction())
+    local glyphFile = GlyphPath(GLYPHS[base] or GLYPH_GENERIC, PlayerFaction())
 
     local ov = CreateFrame("Frame", nil, button)
     ov:EnableMouse(false)
@@ -850,7 +835,7 @@ local function EnsureKey(button, index)
         flags = { flash = pulseState[button] == true },
     }
 
-    local ok, err = pcall(PopulateKey, key, button, glyphFile, fill)
+    local ok, err = pcall(PopulateKey, key, button, glyphFile)
     if not ok then
         -- A half-built overlay would cover the button with nothing on it.
         ov:Hide()

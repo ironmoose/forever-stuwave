@@ -37,8 +37,9 @@ must never be committed to the public repository.
 Shipping the micro menu (style B, the approved look): `--bake-micro` writes
 forever-stuwave/Media/Textures/glyphart_<name>.tga, 64x64 BGRA that fills the key (the key's slanted shape is baked into its alpha: a MaskTexture does not clip on this client), no scanline
 (it would alias when the client rescales), one file per micro glyph plus one PvP file per
-faction. MicroBars.lua picks them; Character and Legacy have no static Blizzard art and keep
-their hand drawn glyph_ files (tools/assets/generate_deck_glyphs.py).
+faction. MicroBars.lua picks them. Character and Legacy have no static Blizzard art: their hand drawn line
+shapes (tools/assets/deck_glyph_sources.py) are laid over a violet vignette backdrop and run through the same
+gradient map, so the row reads as one family.
 
 Shipping the class tab spell icons (style B again): `--bake-spells` writes spellart_<icon>.tga (64x64,
 opaque, the whole icon file so the tiles' usual texcoords crop it like the stock icon) and the lookup table
@@ -430,10 +431,35 @@ PVP_VARIANTS = [
     ("pvp_horde", "micro/pvp_horde.blp"),
     ("pvp_ffa", "micro/pvp_ffa.blp"),
 ]
+# Character and Legacy have no static art: baked from the hand drawn shapes (load_glyph_field).
+MICRO_SHAPES = [
+    ("character", "glyph:character", "house_cyan"),
+    ("legacy", "glyph:legacy", "house_pink"),
+]
 MICRO_FAMILIES = ["house_cyan", "house_violet", "house_pink"]  # the deck's accent cycle
 
 
+def load_glyph_field(name: str) -> np.ndarray:
+    """A hand drawn line shape (deck_glyph_sources) on a synthetic backdrop: a soft bright core fading to a dark
+    edge, so the gradient map gives it a filled, lit field like the Blizzard art, with the strokes the hottest
+    thing on it. The shape's 32 px coverage is upscaled first so its edges are smooth at the bake size."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import deck_glyph_sources  # noqa: PLC0415  (same directory)
+
+    n = 64
+    cov = Image.fromarray((np.asarray(deck_glyph_sources.render(name)) * 255).astype(np.uint8)).resize((n, n), Image.LANCZOS)
+    cov = np.asarray(cov, dtype=np.float64) / 255.0
+    yy, xx = np.mgrid[0:n, 0:n]
+    r = np.hypot((xx + 0.5) / n - 0.5, (yy + 0.5) / n - 0.5) / 0.5
+    field = 0.20 + 0.30 * np.exp(-((r / 0.75) ** 2))
+    field = field + 0.14 * blur(cov, 2.0)  # a soft halo round the strokes
+    field = field * (1 - cov) + cov
+    return np.dstack([field] * 3)
+
+
 def load_any(root: Path, rel: str) -> np.ndarray:
+    if rel.startswith("glyph:"):
+        return load_glyph_field(rel[len("glyph:"):])
     if rel.startswith("atlas:"):
         name, rect = rel[len("atlas:"):].split("@")
         return load_atlas(root / name, *[int(v) for v in rect.split(",")])
@@ -467,16 +493,14 @@ def render_set(root: Path, entries, families) -> list[dict]:
 
 
 def current_glyphs() -> dict[str, bytes]:
-    """The hand-drawn glyph_*.tga files tinted the way MicroBars draws them, for comparison."""
+    """The two hand drawn line shapes tinted the way the old micro keys drew them, for the preview's CURRENT column."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import deck_glyph_sources  # noqa: PLC0415  (same directory)
+
     out = {}
-    tex = REPO / "forever-stuwave" / "Media" / "Textures"
     tint = hexrgb("#cfc4ef")
-    for stem, *_ in MICRO:
-        p = tex / f"glyph_{stem}.tga"
-        if not p.exists():
-            continue
-        im = Image.open(p).convert("RGBA")
-        a = np.asarray(im, dtype=np.float64)[..., 3] / 255.0
+    for stem, *_ in MICRO_SHAPES:
+        a = np.asarray(deck_glyph_sources.render(stem))
         rgb = a[..., None] * tint + (1 - a[..., None]) * PLATE
         out[stem] = to_png(np.asarray(Image.fromarray((rgb * 255).astype(np.uint8)).resize((16, 16), Image.LANCZOS)) / 255.0)
     return out
@@ -536,10 +560,11 @@ def tga_bytes(rgba: np.ndarray) -> bytes:
 
 
 def bake_micro(root: Path, out_dir: Path) -> list[Path]:
-    """Write glyphart_<name>.tga for every micro entry (and every PvP faction) into out_dir."""
+    """Write glyphart_<name>.tga for every micro entry, PvP faction and Character/Legacy shape into out_dir."""
     jobs = [(stem, rel, fam) for stem, _label, rel, fam in MICRO if stem != "pvp"]
     pvp_fam = next(f for stem, _l, _r, f in MICRO if stem == "pvp")
     jobs += [(stem, rel, pvp_fam) for stem, rel in PVP_VARIANTS]
+    jobs += MICRO_SHAPES
     out_dir.mkdir(parents=True, exist_ok=True)
     written = []
     for stem, rel, fam in jobs:
