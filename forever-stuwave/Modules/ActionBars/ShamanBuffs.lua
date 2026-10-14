@@ -63,6 +63,10 @@ local IMBUES = {
 local SHIELD = { name = "Lightning Shield", base = 324 }
 local WATER = { name = "Water Shield", base = 24398 }
 ShamanBuffs.IMBUES = IMBUES
+-- Every rank id of the two shields, for an aura slot's includeSpellIDs (an aura reports the rank id that was cast).
+-- UNVERIFIED classic data from memory; the ids the shield names resolve to today are added at run time as well.
+local SHIELD_RANKS = { 324, 325, 905, 945, 8134, 10431, 10432, 25469, 25472 }
+local WATER_RANKS = { 24398, 33736 }
 -- Item equip locations that are a weapon (a shield is INVTYPE_SHIELD, a held-in-off-hand frill INVTYPE_HOLDABLE).
 local WEAPON_LOC = {
     INVTYPE_WEAPON = true, INVTYPE_WEAPONMAINHAND = true, INVTYPE_WEAPONOFFHAND = true, INVTYPE_2HWEAPON = true,
@@ -652,6 +656,20 @@ function ShamanBuffs.Known()
     RefreshKnown()
     local n = KnownImbues()
     return { imbue = n > 0, shield = known.shield and true or false }
+end
+
+-- The ids the SHIELD tile's engine slot covers: Lightning Shield and Water Shield, every rank, as the map id -> true
+-- includeSpellIDs wants (a fresh table each call; it is asked once, out of combat).
+function ShamanBuffs.ShieldIds()
+    local set = {}
+    for _, list in ipairs({ SHIELD_RANKS, WATER_RANKS }) do
+        for _, id in ipairs(list) do set[id] = true end
+    end
+    for _, def in ipairs({ SHIELD, WATER }) do
+        local ok, id = pcall(FH.ResolveSpell, def.name)
+        if ok and not IsSecret(id) and type(id) == "number" then set[id] = true end
+    end
+    return set
 end
 
 -- The imbue the tile should cast right now: the displayed one, else the best known; nil with none known.

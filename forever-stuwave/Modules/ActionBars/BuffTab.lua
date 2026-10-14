@@ -40,6 +40,10 @@
 --     target (it is a self buff reminder on the player side). With the Console off it sits beside the totem tab
 --     (which then sits above the stance bar).
 --
+--   * COMBAT STATE: the reads above freeze in combat, so one AuraContainer on "player" inside the host draws the real
+--     shield and weapon enchant over the tiles there (see "The engine drawn state in combat" below); out of combat
+--     the plain reads draw and the container is invisible.
+--
 -- Loads after ShamanBuffs.lua, which loads after TotemBar.lua. Nothing here is verified in game.
 
 local _, FS = ...
@@ -68,6 +72,8 @@ local BT = {
     TEXT_Y = 27,                    -- the time line's centre, design px below the tile top
     TICK = 1,                       -- seconds between repaints (the clock text)
     ICON_RETRY = 2,                 -- seconds before a tile asks again for an icon the client has not answered
+    ENGINE_TEMPLATE = "CustomAuraContainerTemplate", ENGINE_LEVEL = 12,    -- the combat state container (engine section)
+    ENGINE_LIMIT = 3,               -- failed container builds in a row before the combat state is given up for the session
     TINT_MIX = 0.6,                 -- how far the foreground colours move toward the usability tint (out of mana, unusable)
     -- Append only, never reorder: the index is the saved keybind.
     BUTTONS = {
@@ -451,15 +457,20 @@ local function PaintButton(button, v)
     if button.fsLocked or not button.fsFace or not (v and v.mode) then return end
     local L = BuildLooks()
     local hover = button.fsHover and true or false
+    -- ENGINE MODE: in combat a tile with an engineMode slot shows only the dim "not active" base; the slot draws the lit
+    -- icon, the time and the count on top while the buff is really up (see the engine section)
+    local engineMode = button.fsEng ~= nil and InCombatLockdown() and true or false
     -- the state last painted, compared field by field: no signature string or table is built per call
     local estimate, other = v.estimate and true or false, v.other and true or false
     if button.fsSig and button.fsMode == v.mode and button.fsCode == v.code and button.fsTxt == v.text
         and button.fsEst == estimate and button.fsHov == hover and button.fsOth == other
         and button.fsPaintedUse == button.fsUsable and button.fsIconId == v.spellId
+        and button.fsEngNow == engineMode
         and (button.fsIconOk or not v.spellId or GetTime() < (button.fsIconRetry or 0)) then
         return
     end
     button.fsSig = true
+    button.fsEngNow = engineMode
     button.fsMode, button.fsCode, button.fsTxt = v.mode, v.code, v.text
     button.fsEst, button.fsHov, button.fsOth = estimate, hover, other
     button.fsPaintedUse = button.fsUsable
@@ -468,7 +479,8 @@ local function PaintButton(button, v)
     button.fsIconId, button.fsIconOk = v.spellId, iconTex ~= nil
     button.fsIconRetry = GetTime() + BT.ICON_RETRY
     local tint = UsabilityColor(button.fsUsable)
-    local look = L[v.mode] or L.hollow
+    local look = engineMode and L.hollow or (L[v.mode] or L.hollow)
+    local text = (not engineMode) and v.text or nil
     local skin = button.fsSkin
     if skin and skin.border and skin.border.ring then
         local r = hover and L.cyan.ring or look.ring
@@ -497,23 +509,267 @@ local function PaintButton(button, v)
         icon:SetDesaturated(look.desat and true or false)
         icon:Show()
         chip.fill:Hide(); chip.ring:Hide(); chip.glow:Hide(); chip.code:Hide()
-        button.fsTextPlate:SetShown(v.text ~= nil and v.text ~= "")
+        button.fsTextPlate:SetShown(text ~= nil and text ~= "")
     else
         icon:Hide()
         chip.fill:Show(); chip.ring:Show(); chip.glow:Show(); chip.code:Show()
         button.fsTextPlate:Hide()
     end
-    local size = FitPx(v.text, (v.mode == "warn" and button.fsKey == "shield") and BT.WORD_PX or BT.TEXT_PX)
+    local size = FitPx(text, (v.mode == "warn" and button.fsKey == "shield") and BT.WORD_PX or BT.TEXT_PX)
     if button.fsTextPx ~= size then
         button.fsTextPx = size
         FS.Theme.ApplyMono(button.fsText, size, look.text)
     end
     r, g, b = Shade(look.text, tint)
     button.fsText:SetTextColor(r, g, b, look.textA)
-    button.fsText:SetText(v.text or "")
+    button.fsText:SetText(text or "")
     r, g, b = Shade(look.line, tint)
-    button.fsLine:SetVertexColor(r, g, b, look.lineA)
-    for _, dash in ipairs(button.fsDashes) do dash:SetAlpha(v.estimate and 1 or 0) end
+    button.fsLine:SetVertexColor(r, g, b, engineMode and 0 or look.lineA)
+    for _, dash in ipairs(button.fsDashes) do dash:SetAlpha((not engineMode and v.estimate) and 1 or 0) end
+    -- the imbue slot's own lit icon follows the tile's icon (an item enchantment slot has no aura icon of its own)
+    local lit = button.fsEng and button.fsEng.lit
+    if lit then pcall(lit.SetTexture, lit, iconTex) end
+end
+
+-------------------------------------------------------------------------------
+-- The engine drawn state in combat (UNVERIFIED live)
+-------------------------------------------------------------------------------
+--
+-- Addon aura and weapon reads are refused in combat, so the tiles above freeze there (an estimate with a "~"). The
+-- engine still draws the player's own buff row in combat, so the same trick as CombatHud.lua's buff covers and DoT
+-- timers (read its header, "THE OCCLUSION TRICK" and "DOT TIMERS") is used: ONE AuraContainer on unit "player" inside the
+-- tab host, with
+--   * SHIELD: one AddAuraSlot (HELPFUL, candidateFilters.includeSpellIDs = every Lightning Shield and Water Shield
+--     rank id, ShamanBuffs.ShieldIds), whose frame sits exactly on the tile's icon rect, above the tile's own icon.
+--     Its initializeFrame builds the lit icon (SetIcon: the aura's own icon, so a Water Shield shows as itself), the
+--     engine's duration text (SetDurationText) bottom centre where the tile's time sits, and the orb count
+--     (SetApplicationCount) top right.
+--   * IMBUE: AddItemEnchantment on the main hand and the off hand slots (the way Buffs.lua's AddNativeEnchants does),
+--     both on the tile's icon rect, the main hand drawn last so it wins an overlap. An enchantment slot's own icon is
+--     probably the weapon's, not the imbue's, so no SetIcon here: the frame carries OUR lit icon texture (the imbue the
+--     tile shows, rewritten by every paint) and the engine's duration text.
+-- While the buff is up the engine draws the slot over the tile; when it falls off the slot draws nothing and the tile's
+-- own dim "not active" icon shows through. No Lua ever learns which.
+--
+-- In combat a tile with a slot is in ENGINE MODE (PaintButton): the dim "not active" base only (the hollow look, a dim
+-- desaturated icon, no word, no count, no underline, no dashes), because the frozen reads would lie. Out of combat the
+-- plain reads stay authoritative and the container is invisible (alpha 0), so nothing is drawn twice. The tile's
+-- own count never shows in combat: if the engine draws no orb count the tile shows none rather than a stale one.
+--
+-- Rules (CombatHud's live CORRECTION): the container is built, given its unit, enabled and shown OUT OF COMBAT only
+-- (Sync, and again at PLAYER_REGEN_ENABLED when it reads back off); in combat the only write is SetAlpha (1 in combat,
+-- 0 out). A failed build logs once and leaves the tiles as they were (the frozen estimate); BT.ENGINE_LIMIT failed
+-- container builds in a row give the path up for the session. A slot that fails leaves just its tile without one.
+-- UNVERIFIED in game: the slot rendering over the tiles, the layering, the item enchantment slot frames, whether the
+-- engine draws an orb count at all, and what an item enchantment slot reports.
+
+local EngineState = { container = nil, failures = 0, gaveUp = false, alpha = nil, templateOk = nil }
+BuffTab.Engine = EngineState
+
+local function Quiet(obj, method, ...)
+    local okGet, fn = pcall(function() return obj[method] end)
+    if okGet and type(fn) == "function" then return (pcall(fn, obj, ...)) end
+    return true
+end
+
+local function EngineTemplate()
+    if EngineState.templateOk ~= nil then return EngineState.templateOk end
+    local info = C_XMLUtil and C_XMLUtil.GetTemplateInfo
+    local ok = false
+    if type(info) == "function" then
+        local good, result = pcall(info, BT.ENGINE_TEMPLATE)
+        ok = good and result ~= nil and result ~= false
+    end
+    EngineState.templateOk = ok
+    return ok
+end
+
+-- true when the container reads back in the wanted state; a blocked call raises nothing, so only a readback proves it.
+local function ContainerIs(container, live)
+    local ok, isShown = pcall(container.IsShown, container)
+    if ok and not IsSecret(isShown) and (isShown and true or false) ~= live then return false end
+    local okFn, fn = pcall(function() return container.IsEnabled end)
+    if okFn and type(fn) == "function" then
+        local okE, enabled = pcall(fn, container)
+        if okE and not IsSecret(enabled) and (enabled and true or false) ~= live then return false end
+    end
+    return true
+end
+
+-- The slot's frame, built by the engine: no mouse (the secure tile below keeps clicks and the tooltip), seated on the
+-- tile's icon rect, the lit icon and the engine's texts. Each step on its own, so a missing method stops nothing.
+local function InitSlot(tile, ownIcon)
+    return function(slot)
+        Quiet(slot, "SetMouseMotionEnabled", false)
+        Quiet(slot, "SetMouseClickEnabled", false)
+        Quiet(slot, "SetHideTooltipInCombat", true)
+        local parts = { slot = slot }
+        tile.fsEng = parts
+        pcall(function() slot:SetAllPoints(tile.icon) end)
+        pcall(function()
+            local lit = slot:CreateTexture(nil, "ARTWORK")
+            lit:SetAllPoints(slot)
+            lit:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+            if ownIcon then
+                parts.lit = lit
+                local tex = SpellIcon(ViewOf(tile) and ViewOf(tile).spellId)
+                if tex then lit:SetTexture(tex) end
+            else
+                slot:SetIcon(lit)
+            end
+        end)
+        pcall(function()
+            local dur = slot:CreateFontString(nil, "OVERLAY")
+            FS.Theme.ApplyMono(dur, BT.TEXT_PX, FS.Theme.COLOR_TEXT_WHITE)
+            dur:SetJustifyH("CENTER")
+            slot:SetDurationText(dur, {})
+            parts.dur = dur
+        end)
+        if not ownIcon then
+            pcall(function()
+                local count = slot:CreateFontString(nil, "OVERLAY")
+                FS.Theme.ApplyMono(count, BT.CODE_PX, FS.Theme.COLOR_TEXT_WHITE)
+                count:SetJustifyH("RIGHT")
+                slot:SetApplicationCount(count)
+                parts.count = count
+            end)
+        end
+    end
+end
+
+-- Re-seats a slot's texts for the current scale (the tile's own time and top right spots). Out of combat only: from
+-- StyleButton, which Sync runs on every rescale.
+local function SeatEngineTexts(button, s)
+    local parts = button.fsEng
+    if not parts then return end
+    if parts.dur then
+        pcall(function()
+            parts.dur:ClearAllPoints()
+            parts.dur:SetPoint("CENTER", button, "TOP", 0, -BT.TEXT_Y * s)
+        end)
+    end
+    if parts.count then
+        pcall(function()
+            parts.count:ClearAllPoints()
+            parts.count:SetPoint("TOPRIGHT", button, "TOPRIGHT", -4 * s, -4 * s)
+        end)
+    end
+end
+
+local function SortOptions()
+    local method = type(_G.AuraContainerSortMethod) == "table" and _G.AuraContainerSortMethod.Default or nil
+    local direction = type(_G.AuraContainerSortDirection) == "table" and _G.AuraContainerSortDirection.Normal or nil
+    return method, direction
+end
+
+local function AddShieldSlot(container, tile)
+    local method, direction = SortOptions()
+    local ok, err = pcall(container.AddAuraSlot, container, "shield", "HELPFUL", {
+        initializeFrame = InitSlot(tile, false),
+        candidateFilters = { includeSpellIDs = FS.ShamanBuffs.ShieldIds() },
+        sortMethod = method,
+        sortDirection = direction,
+    })
+    if not ok then
+        tile.fsEng = nil
+        WarnOnce("bufftab_engine_shield", "the shield tile carries no combat state (" .. tostring(err) .. ")")
+    end
+end
+
+local function AddImbueSlots(container, tile, s)
+    if type(container.AddItemEnchantment) ~= "function" or type(container.SetItemEnchantmentLayout) ~= "function"
+        or type(_G.AuraContainerItemEnchantmentSlot) ~= "table" then
+        WarnOnce("bufftab_engine_imbue", "the imbue tile carries no combat state (this client has no item enchantment slots)")
+        return
+    end
+    local ok, err = pcall(function()
+        local layout = { elementSpacing = 0, lineSpacing = 0, groupSpacing = 0, groupLineSpacing = 0,
+            elementWidth = BT.BTN * s, elementHeight = BT.BTN * s }
+        if type(_G.CustomAuraContainerItemEnchantmentPlacement) == "table" then
+            layout.placement = _G.CustomAuraContainerItemEnchantmentPlacement.AfterAuraGroups
+        end
+        container:SetItemEnchantmentLayout(layout)
+        local slots = _G.AuraContainerItemEnchantmentSlot
+        container:AddItemEnchantment(slots.OffHand, { initializeFrame = InitSlot(tile, true) })
+        container:AddItemEnchantment(slots.MainHand, { initializeFrame = InitSlot(tile, true) })
+    end)
+    if not ok then
+        tile.fsEng = nil
+        WarnOnce("bufftab_engine_imbue", "the imbue tile carries no combat state (" .. tostring(err) .. ")")
+    end
+end
+
+local function BuildContainer()
+    local container = CreateFrame("AuraContainer", nil, BT.host, BT.ENGINE_TEMPLATE)
+    local ok, err = pcall(function()
+        local s = Scale()
+        container:SetSize(1, 1)
+        container:SetPoint("CENTER", BT.host, "CENTER", 0, 0)
+        container:SetFrameLevel(BT.host:GetFrameLevel() + BT.ENGINE_LEVEL)
+        container:SetUnit("player")
+        container:SetAlpha(0)
+        local shield, imbue = BT.byKey.shield, BT.byKey.imbue
+        if shield then AddShieldSlot(container, shield) end
+        if imbue then AddImbueSlots(container, imbue, s) end
+        container:SetEnabled(true)
+        container:Show()
+    end)
+    if not ok then
+        -- a frame cannot be destroyed: park it quietly, and no tile keeps a half built slot
+        Quiet(container, "SetEnabled", false)
+        Quiet(container, "Hide")
+        for _, button in ipairs(BT.list) do button.fsEng = nil end
+        error(err, 0)
+    end
+    return container
+end
+
+-- Out of combat: builds the container once, arms it again when it reads back off. Combat does neither.
+local function EnsureEngine()
+    if EngineState.gaveUp or not BT.host or InCombatLockdown() then return end
+    local container = EngineState.container
+    if container then
+        if not ContainerIs(container, true) then
+            Quiet(container, "SetUnit", "player")
+            Quiet(container, "SetEnabled", true)
+            Quiet(container, "Show")
+            EngineState.alpha = nil
+        end
+        return
+    end
+    if not EngineTemplate() then
+        WarnOnce("bufftab_engine_template", "this client has no " .. BT.ENGINE_TEMPLATE .. "; the tiles show no combat state")
+        EngineState.gaveUp = true
+        return
+    end
+    local ok, result = pcall(BuildContainer)
+    if ok then
+        EngineState.failures = 0
+        EngineState.container = result
+        EngineState.alpha = 0
+        for _, button in ipairs(BT.list) do button.fsSig = nil end
+        BuffTab.Paint()             -- the imbue slot's lit icon takes the tile's icon now
+        return
+    end
+    EngineState.failures = EngineState.failures + 1
+    WarnOnce("bufftab_engine_build", "the combat state could not be built (" .. tostring(result) .. ")")
+    if EngineState.failures >= BT.ENGINE_LIMIT then EngineState.gaveUp = true end
+end
+
+BuffTab.EnsureEngine = EnsureEngine
+
+-- The only thing combat writes: 1 while in combat (the slots draw over the tiles), 0 out of it (the plain reads draw).
+local function SyncEngineAlpha()
+    local container = EngineState.container
+    if not container then return end
+    local alpha = InCombatLockdown() and 1 or 0
+    if EngineState.alpha ~= alpha and Quiet(container, "SetAlpha", alpha) then EngineState.alpha = alpha end
+end
+
+-- Re-seats every slot's texts for the current scale; Sync runs it after every build and rescale (out of combat).
+local function SeatEngine()
+    local s = Scale()
+    for _, button in ipairs(BT.list) do SeatEngineTexts(button, s) end
 end
 
 -- true when the tooltip of `button` is up: it is repainted with the tile.
@@ -526,6 +782,7 @@ end
 
 function BuffTab.Paint()
     if not BT.built then return end
+    SyncEngineAlpha()
     for _, button in ipairs(BT.list) do
         PaintButton(button, ViewOf(button))
         if TipIsOurs(button) then ShowTooltip(button) end
@@ -738,7 +995,7 @@ local function Sync()
         return
     end
     BT.pendingSync = false
-    for _, step in ipairs({ SeatButtons, ApplyButtons, SeatHost }) do
+    for _, step in ipairs({ SeatButtons, ApplyButtons, SeatHost, EnsureEngine, SeatEngine }) do
         local ok, err = pcall(step)
         if not ok then WarnOnce("bufftab_sync", "buff tab update failed (" .. tostring(err) .. ")") end
     end
@@ -809,11 +1066,21 @@ local function Tick(self, dt)
 end
 
 local function OnEvent(_, event)
-    if event == "SPELL_UPDATE_USABLE" or event == "ACTIONBAR_UPDATE_USABLE" or event == "PLAYER_REGEN_DISABLED" then
+    if event == "SPELL_UPDATE_USABLE" or event == "ACTIONBAR_UPDATE_USABLE" then
         UpdateAllUsable()
+    elseif event == "PLAYER_REGEN_DISABLED" then
+        UpdateAllUsable()
+        BuffTab.Paint()             -- the combat state: the engine slots are shown, the tiles drop to the dim base
     elseif event == "PLAYER_REGEN_ENABLED" then
         UpdateAllUsable()
-        if BT.pendingSync then Sync() else FollowSpell() end
+        if BT.pendingSync then
+            Sync()
+        else
+            FollowSpell()
+            EnsureEngine()          -- arm (or build) the combat state container out of combat
+            SeatEngine()
+        end
+        BuffTab.Paint()
     elseif event == "UPDATE_BINDINGS" then
         for _, button in ipairs(BT.list) do
             if button:IsShown() then FH.UpdateButtonHotkey(button) end
