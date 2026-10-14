@@ -588,6 +588,34 @@ function PS.Create()
     return index
 end
 
+-- Is there room for another preset (the cap is P.MAX)?
+function PS.HasRoom()
+    return PS.Count() < P.MAX
+end
+
+-- Shift click on an unset GNARLY: makes an EMPTY preset, ties it as the GNARLY preset and returns its index (nil and
+-- why when it cannot). The dial's active slot is not changed: when the dial sat on the NEW slot it stays on the NEW slot
+-- that follows the new preset (or, with none left, on the first preset, as PS.Active clamps it anyway).
+function PS.CreateGnarly()
+    local why = Refusal()
+    if why then return nil, why end
+    if not PS.HasRoom() then return nil, "there is no room for another preset" end
+    local wasNew = PS.IsNew(PS.Active())
+    local index
+    Save(function(store)
+        store.list[#store.list + 1] = { name = "NEW", picks = {}, order = {} }
+        index = #store.list
+        store.gnarly = index
+        if wasNew then store.active = index < P.MAX and index + 1 or 1 end
+    end)
+    PS.ResetSteps()
+    if wasNew and index >= P.MAX then Reapply() end
+    local tb = TotemBar()
+    if tb and tb.Sync then tb.Sync() end
+    Notify("edited", index)
+    return index
+end
+
 function PS.Rename(index, text)
     local why = Refusal()
     if why then return false, why end

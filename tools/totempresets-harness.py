@@ -1699,13 +1699,89 @@ def check_use_as_gnarly_preset_in_the_editor_ties_and_unties_and_shift_click_edi
     run(lua, "__shift = false")
     DL(lua).CloseEditor()
     P.SetGnarly(None)
+
+
+def shift_click(lua, button):
     run(lua, "__shift = true")
-    click(lua, gb(lua), "LeftButton", False)
-    assert shown(card(lua)) and int(card(lua).fsIndex) == int(P.Active()), "shift click on an unset GNARLY did not open the active preset"
-    assert int(P.Tracker("gnarly").presses) == 0
-    script(lua, card(lua).useGnarly, "OnClick")
-    assert P.Gnarly() == int(card(lua).fsIndex), "USE AS GNARLY PRESET from the unset click did not tie it"
+    click(lua, button, "LeftButton", True)
+    click(lua, button, "LeftButton", False)
     run(lua, "__shift = false")
+
+
+def check_shift_click_on_an_unset_gnarly_with_room_makes_an_empty_preset_ties_it_and_opens_it():
+    lua, a, b = gnarly_world()
+    P = PS(lua)
+    P.SetGnarly(None)
+    assert P.Count() == 2 and int(P.Active()) == a
+    shift_click(lua, gb(lua))
+    assert P.Count() == 3, "no preset was made"
+    assert P.Gnarly() == 3, "the new preset was not tied as the GNARLY preset"
+    assert shown(card(lua)) and int(card(lua).fsIndex) == 3, "the editor is not on the new preset"
+    assert str(P.Get(3).name) == "NEW" and len(order_of(lua, 3)) == 0, "the new preset is not empty"
+    assert int(P.Active()) == a, "making the GNARLY preset moved the dial"
+    assert int(P.Tracker("gnarly").presses) == 0 and int(P.Tracker("dial").presses) == 0, "a shift click was counted"
+    assert gb(lua)._attrs["type1"] is None, "an empty GNARLY preset left a cast on the cell"
+    # a second shift click edits the same preset, it does not make another
+    DL(lua).CloseEditor()
+    shift_click(lua, gb(lua))
+    assert P.Count() == 3 and int(card(lua).fsIndex) == 3
+
+
+def check_shift_click_on_an_unset_gnarly_leaves_the_dial_on_its_new_slot():
+    lua = boot()
+    P = PS(lua)
+    P.Create()
+    P.Select(2)                                # the NEW slot
+    assert P.IsNew(P.Active())
+    shift_click(lua, gb(lua))
+    assert P.Count() == 2 and P.Gnarly() == 2 and int(card(lua).fsIndex) == 2
+    assert int(P.Active()) == 3 and P.IsNew(P.Active()), "the dial left its NEW slot"
+    # with the last room taken there is no NEW slot left: the dial is on a real preset, as PS.Active clamps it
+    DL(lua).CloseEditor()
+    P.SetGnarly(None)
+    P.Create()
+    P.Select(P.Count() + 1)
+    P.SetGnarly(None)
+    assert P.Count() == 3 and P.IsNew(P.Active())
+    P.SetTotem(1, "fire", IDS["Magma Totem"])
+    assert int(TB(lua).CurrentPick("fire").id) != IDS["Magma Totem"]
+    shift_click(lua, gb(lua))
+    assert P.Count() == 4 and P.Gnarly() == 4 and int(card(lua).fsIndex) == 4
+    assert not P.IsNew(P.Active()) and int(P.Active()) == 1
+    assert int(TB(lua).CurrentPick("fire").id) == IDS["Magma Totem"], "the dial now on preset 1 did not apply it"
+
+
+def check_shift_click_on_an_unset_gnarly_with_every_preset_made_opens_the_active_one():
+    lua = boot()
+    P = PS(lua)
+    for _ in range(4):
+        P.Create()
+    assert P.Count() == 4 and P.Gnarly() is None
+    P.Select(2)
+    shift_click(lua, gb(lua))
+    assert P.Count() == 4, "a fifth preset was made"
+    assert shown(card(lua)) and int(card(lua).fsIndex) == 2, "the active preset was not opened"
+    assert P.Gnarly() is None and card(lua).useGnarly is not None, "the GNARLY preset was tied without the button"
+    script(lua, card(lua).useGnarly, "OnClick")
+    assert P.Gnarly() == 2
+
+
+def check_shift_click_on_a_set_gnarly_opens_its_own_preset_and_makes_nothing():
+    lua, a, b = gnarly_world()
+    P = PS(lua)
+    shift_click(lua, gb(lua))
+    assert P.Count() == 2 and P.Gnarly() == b and int(card(lua).fsIndex) == b and int(P.Active()) == a
+
+
+def check_shift_click_on_an_unset_gnarly_in_combat_is_refused_and_makes_nothing():
+    lua, a, b = gnarly_world()
+    P = PS(lua)
+    P.SetGnarly(None)
+    set_combat(lua, True)
+    shift_click(lua, gb(lua))
+    assert P.Count() == 2 and P.Gnarly() is None, "a preset was made in combat"
+    assert card(lua) is None or not shown(card(lua)), "the editor opened in combat"
+    assert int(P.Tracker("gnarly").presses) == 0
 
 
 def set2_ids(*elements):
@@ -2185,6 +2261,11 @@ CHECKS = [
     check_the_press_flash_and_sound_belong_to_the_gnarly_cell_and_have_their_own_switches,
     check_the_gnarly_tooltip_and_the_unset_tooltip,
     check_use_as_gnarly_preset_in_the_editor_ties_and_unties_and_shift_click_edits_it,
+    check_shift_click_on_an_unset_gnarly_with_room_makes_an_empty_preset_ties_it_and_opens_it,
+    check_shift_click_on_an_unset_gnarly_leaves_the_dial_on_its_new_slot,
+    check_shift_click_on_an_unset_gnarly_with_every_preset_made_opens_the_active_one,
+    check_shift_click_on_a_set_gnarly_opens_its_own_preset_and_makes_nothing,
+    check_shift_click_on_an_unset_gnarly_in_combat_is_refused_and_makes_nothing,
     check_the_gnarly_preset_is_written_into_set_two_once_and_read_back,
     check_a_spell_that_comes_back_is_written_to_set_two_again,
     check_a_set_two_send_that_has_not_shown_is_looked_at_again_and_sent_again_a_few_times,

@@ -712,8 +712,8 @@ function Dial.Tooltip(button)
     elseif cell == "gnarly" then
         if not st.preset then
             Line(tip, "GNARLY PRESET: NONE", PINK)
-            Line(tip, "Choose one in the settings, or Shift click here to open a preset and press USE AS GNARLY "
-                .. "PRESET.", MUTED, true)
+            Line(tip, "Choose one in the settings, or Shift click here to make one. With every preset made, Shift click "
+                .. "opens the active one: press USE AS GNARLY PRESET.", MUTED, true)
         else
             Line(tip, "GNARLY PRESET: " .. st.name, PINK)
             Dial.PresetLines(tip, st.preset)
@@ -1180,13 +1180,20 @@ function Dial.EditActive()
     Dial.OpenEditor(index)
 end
 
--- Shift click on the GNARLY cell: edits its preset. With none set it opens the dial's active preset instead (a NEW
--- one when that is the NEW slot), where USE AS GNARLY PRESET ties it to the cell.
+-- Shift click on the GNARLY cell: edits its preset. With none set and room for another, it makes an empty preset, ties it
+-- as the GNARLY preset and opens it; with all the presets made it opens the dial's active preset instead (a NEW one
+-- when that is the NEW slot), where USE AS GNARLY PRESET ties it to the cell.
 function Dial.EditGnarly()
     local PS = Presets()
     if InCombat() then return Refuse("Editing waits for combat to end.") end
     local index = PS.Gnarly()
-    if index and PS.Get(index) then Dial.OpenEditor(index) else Dial.EditActive() end
+    if index and PS.Get(index) then return Dial.OpenEditor(index) end
+    if PS.HasRoom() then
+        local made, why = PS.CreateGnarly()
+        if not made then return Refuse(why) end
+        return Dial.OpenEditor(made)
+    end
+    Dial.EditActive()
 end
 
 -- USE AS GNARLY PRESET: a button on the card that ties the GNARLY cell to the preset it edits; again unties it.
