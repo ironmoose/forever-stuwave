@@ -1232,7 +1232,7 @@ def check_the_cells_tooltip_says_how_long_and_that_it_is_an_estimate():
     cast(lua)
     tick(lua, 2.7)
     lines = tip_text(lua, cells_tile(lua))
-    assert lines[0] == "Five second rule", lines
+    assert lines[0] == "Mana regen", lines
     assert re.fullmatch(r"About 2\.[2-4] s until regen resumes\.", lines[1]), lines
     assert lines[2] == "Estimate from your own casts. Free casts are not seen.", lines
     assert len(lines) == 3, lines
@@ -1242,12 +1242,49 @@ def check_the_cells_tooltip_says_how_long_and_that_it_is_an_estimate():
     leave_tip(lua, cells_tile(lua))
 
 
+BANNED = re.compile(r"five[ -]second|5[ -]?sec", re.IGNORECASE)
+
+
+def check_no_player_facing_string_names_the_five_second_rule():
+    # every string literal in the two files that carry client text (code names such as "fivesecond.enabled" have no space)
+    for path in (FSTAB, CONFIGWINDOW):
+        for no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if line.lstrip().startswith("--"):
+                continue
+            for lit in re.findall(r'"((?:[^"\\]|\\.)*)"', line):
+                assert not BANNED.search(lit), f"{path.name}:{no}: {lit!r}"
+    # and what a player reads at run time: the settings, every tooltip state, the page group
+    lua = world()
+    S = ft(lua).SETTINGS
+    for name in ("enabled", "pulse", "sound", "motion", "flash", "digits", "wpulse", "drop", "sweep", "tick", "breath", "glitch"):
+        for field in ("label", "tip"):
+            text = str(getattr(S[name], field))
+            assert not re.search(r"five second|5 second|5 sec", text, re.IGNORECASE), f"{name}.{field}: {text!r}"
+    assert str(S.enabled.label) == "Mana regen module"
+    seen = []
+    for state in ("idle", "count", "regen"):
+        if state == "count":
+            cast(lua)
+            tick(lua, 2.0)
+        elif state == "regen":
+            tick(lua, 3.4)
+        for which in ("cells", "rate"):
+            seen += [plain_text(line[1]) for line in seq(ft(lua).TipLines(which))]
+    run(lua, "__regenMode = 'throw'")
+    tick(lua, 1.5)
+    for which in ("cells", "rate"):
+        seen += [plain_text(line[1]) for line in seq(ft(lua).TipLines(which))]
+    assert seen
+    for text in seen:
+        assert not re.search(r"five second|5 second|5 sec|the rule", text, re.IGNORECASE), text
+
+
 def check_the_cells_tooltip_after_the_rule_says_regen_is_running():
     lua = world()
     cast(lua)
     tick(lua, 5.4)
     lines = tip_text(lua, cells_tile(lua))
-    assert lines[0] == "Five second rule" and "until regen resumes" not in lines[1], lines
+    assert lines[0] == "Mana regen" and "until regen resumes" not in lines[1], lines
     assert lines[-1] == "Estimate from your own casts. Free casts are not seen.", lines
     close(rgb(ft(lua).TipLines("cells")[1][2]), C["cyan"], "regen title")
 
@@ -1257,15 +1294,15 @@ def check_the_rate_tooltip_names_both_rates_and_the_cache():
     run(lua, "__regen = { 12.4, 0.001 }")
     tick(lua, 1.2)
     lines = tip_text(lua, rate_tile(lua))
-    assert lines == ["Mana regen", "12.4 per second now, 12.4 once the rule ends."], lines
+    assert lines == ["Mana regen", "12.4 per second now, 12.4 once regen resumes."], lines
     cast(lua)
     refresh(lua)
     lines = tip_text(lua, rate_tile(lua))
-    assert lines == ["Mana regen", "0.0 per second now, 12.4 once the rule ends."], lines
+    assert lines == ["Mana regen", "0.0 per second now, 12.4 once regen resumes."], lines
     enter_combat(lua)
     tick(lua, 1.2)
     lines = tip_text(lua, rate_tile(lua))
-    assert lines == ["Mana regen", "0.0 per second now, 12.4 once the rule ends.",
+    assert lines == ["Mana regen", "0.0 per second now, 12.4 once regen resumes.",
                      "Read out of combat, kept while you fight."], lines
     close(rgb(ft(lua).TipLines("rate")[1][2]), C["cyan"], "rate title")
     # Meditation
@@ -1275,7 +1312,7 @@ def check_the_rate_tooltip_names_both_rates_and_the_cache():
     cast(lua)
     refresh(lua)
     lines = tip_text(lua, rate_tile(lua))
-    assert lines[:2] == ["Mana regen", "4.9 per second now, 14.8 once the rule ends."], lines
+    assert lines[:2] == ["Mana regen", "4.9 per second now, 14.8 once regen resumes."], lines
     assert "33%" in lines[2] and "cast" in lines[2], lines
 
 
@@ -1326,7 +1363,7 @@ def check_the_settings_have_their_defaults_keys_labels_and_tips():
         assert cfg.Get(key) is default, f"{key} default"
     assert [str(x) for x in seq(ft(lua).FT.FX_NAMES)] == FX_NAMES
     # the three original rows keep their labels, the page's motion rows their words
-    assert str(S.enabled.label) == "Five second rule tab" and str(S.pulse.label) == "Regen pulse"
+    assert str(S.enabled.label) == "Mana regen module" and str(S.pulse.label) == "Regen pulse"
     assert str(S.sound.label) == "Regen sound" and str(S.motion.label) == "Animate the tab"
     assert str(S.digits.tip) == "Digit motion: a short flash or fade as the digits change."
     assert str(S.wpulse.tip) == "Whole second pulse: the countdown flashes as each second passes."
@@ -2531,6 +2568,7 @@ CHECKS = [
     check_the_rate_numbers_survive_secrets_and_bad_values,
     check_the_idle_and_the_combat_tick_allocate_nothing,
     check_the_cells_tooltip_says_how_long_and_that_it_is_an_estimate,
+    check_no_player_facing_string_names_the_five_second_rule,
     check_the_cells_tooltip_after_the_rule_says_regen_is_running,
     check_the_rate_tooltip_names_both_rates_and_the_cache,
     check_the_rate_tooltip_with_no_reading_says_so,

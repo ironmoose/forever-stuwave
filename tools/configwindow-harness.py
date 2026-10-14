@@ -970,13 +970,13 @@ local function menuTexts()
     return table.concat(out, ",")
 end
 
--- ---- the five second rule group on the Unit Frames page (FiveSecondTab.lua's SETTINGS) ----
+-- ---- the mana regen group on the Unit Frames page (FiveSecondTab.lua's SETTINGS) ----
 
 local function withFiveSecond(applies)
     return function()
         unitFramesDefaults()
         local S = {
-            enabled = { key = "fivesecond.enabled", default = true, label = "Five second rule tab", tip = "Tip one." },
+            enabled = { key = "fivesecond.enabled", default = true, label = "Mana regen module", tip = "Tip one." },
             pulse = { key = "fivesecond.pulse", default = true, label = "Regen pulse", tip = "Tip two." },
             sound = { key = "fivesecond.sound", default = false, label = "Regen sound", tip = "Tip three." },
             motion = { key = "fivesecond.motion", default = true, label = "Animate the tab", tip = "Tip five." },
@@ -991,14 +991,14 @@ end
 function T.the_unit_frames_page_has_the_five_second_rule_toggles_for_a_mana_class()
     local W = boot({ preWindow = withFiveSecond(true) })
     W.Open("unitframes")
-    yes(headerY("FIVE SECOND RULE"), "a Five second rule header")
-    yes(row("Five second rule tab").control.fsChecked, "the tab is on by default")
+    yes(headerY("MANA REGEN"), "a Mana regen header")
+    yes(row("Mana regen module").control.fsChecked, "the tab is on by default")
     yes(row("Regen pulse").control.fsChecked, "the pulse is on by default")
     no(row("Regen sound").control.fsChecked, "the sound is off by default")
     press("Regen sound")
     eq(FS.Config.Get("fivesecond.sound"), true)
     yes(row("Regen sound").control.fsChecked)
-    press("Five second rule tab")
+    press("Mana regen module")
     eq(FS.Config.Get("fivesecond.enabled"), false)
     eq(FS.Config.Get("fivesecond.pulse"), true, "the other keys are untouched")
     yes(row("Animate the tab").control.fsChecked, "the motion master is on by default")
@@ -1007,7 +1007,7 @@ function T.the_unit_frames_page_has_the_five_second_rule_toggles_for_a_mana_clas
     press("Cast flash")
     eq(FS.Config.Get("fivesecond.fx.flash"), false)
     eq(FS.Config.Get("fivesecond.fx.sweep"), true, "the other effects are untouched")
-    for label, tip in pairs({ ["Five second rule tab"] = "Tip one.", ["Regen pulse"] = "Tip two.", ["Regen sound"] = "Tip three.",
+    for label, tip in pairs({ ["Mana regen module"] = "Tip one.", ["Regen pulse"] = "Tip two.", ["Regen sound"] = "Tip three.",
         ["Animate the tab"] = "Tip five.", ["Cast flash"] = "Tip six.", ["Regen sweep"] = "Tip seven." }) do
         local r, found = row(label), nil
         for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
@@ -1020,7 +1020,7 @@ function T.the_five_second_rule_group_is_left_out_for_other_classes_and_clients(
     local W = boot({ preWindow = withFiveSecond(false) })
     W.Open("unitframes")
     no(row("Regen pulse"), "a class without mana has no row")
-    no(headerY("FIVE SECOND RULE"), "and no header")
+    no(headerY("MANA REGEN"), "and no header")
     W = boot({ preWindow = unitFramesDefaults })
     W.Open("unitframes")
     no(row("Regen pulse"), "a client without the tab has no row")

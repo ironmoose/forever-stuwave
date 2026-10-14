@@ -131,8 +131,8 @@ Tab.FT = FT
 -- Settings: read by the config window at page build, each explained there by its `tip` (a ? icon), never by a helper line.
 local SETTINGS = {
     enabled = {
-        key = "fivesecond.enabled", default = true, label = "Five second rule tab",
-        tip = "A tab on the Console that counts the five seconds after you spend mana, when your regen is suspended, "
+        key = "fivesecond.enabled", default = true, label = "Mana regen module",
+        tip = "A tab on the Console that counts the seconds after you spend mana, while your regen is suspended, "
             .. "and shows your mana per second. Off hides it.",
     },
     pulse = {
@@ -467,10 +467,10 @@ function Tab.TipLines(which)
     local v = view
     if which == "cells" then
         if v.phase == "susp" then
-            add("Five second rule", amber)
+            add("Mana regen", amber)
             add(string.format("About %.1f s until regen resumes.", math.max(0, v.t)), white, true)
         else
-            add("Five second rule", cyan)
+            add("Mana regen", cyan)
             add("Regen is running.", white, true)
         end
         add("Estimate from your own casts. Free casts are not seen.", muted, true)
@@ -482,7 +482,7 @@ function Tab.TipLines(which)
         return lines
     end
     add("Mana regen", cyan)
-    add(string.format("%s per second now, %s once the rule ends.", v.rateText, rate.baseText), white, true)
+    add(string.format("%s per second now, %s once regen resumes.", v.rateText, rate.baseText), white, true)
     if v.cached then add("Read out of combat, kept while you fight.", muted, true) end
     if v.ret then add(string.format("You keep %d%% of it while you cast.", v.ret), muted, true) end
     return lines
@@ -773,13 +773,13 @@ local function BuildBreath()
     local skin = hero and hero.fsSkin
     if FT.breath then return end
     if not (skin and skin.border and skin.border.ring and skin.glow and gauge) then
-        WarnOnce("fivesecond_breath", "five second rule tab idle glow unavailable (the rim or the gauge is missing)")
+        WarnOnce("fivesecond_breath", "mana regen module idle glow unavailable (the rim or the gauge is missing)")
         return
     end
     local C = FT.CHROME
     local B = { ring = skin.border.ring, glow = skin.glow, groups = {}, gauge = {}, on = false, gaugeOn = false }
     if not (B.ring.CreateAnimationGroup and B.glow.CreateAnimationGroup) then
-        WarnOnce("fivesecond_breath", "five second rule tab idle glow unavailable (no animation groups)")
+        WarnOnce("fivesecond_breath", "mana regen module idle glow unavailable (no animation groups)")
         return
     end
     B.groups[1] = BreathGroup(B.ring, C.breathRing / (C.breathRing + C.breathRingSwing))
@@ -1517,14 +1517,14 @@ end
 local function Sync()
     if not FT.built then return end
     local ok, err = pcall(LayoutFace)
-    if not ok then WarnOnce("fivesecond_sync", "five second rule tab update failed (" .. tostring(err) .. ")") end
+    if not ok then WarnOnce("fivesecond_sync", "mana regen module update failed (" .. tostring(err) .. ")") end
     if InCombatLockdown() then
         FT.pendingSync = true
         return
     end
     FT.pendingSync = false
     ok, err = pcall(SeatHost)
-    if not ok then WarnOnce("fivesecond_sync", "five second rule tab update failed (" .. tostring(err) .. ")") end
+    if not ok then WarnOnce("fivesecond_sync", "mana regen module update failed (" .. tostring(err) .. ")") end
 end
 Tab.Sync = Sync
 
@@ -1566,7 +1566,7 @@ local function Tick(self, dt)
     if self.fsElapsed < every then return end
     self.fsElapsed = 0
     local ok, err = pcall(Refresh)
-    if not ok then WarnOnce("fivesecond_tick", "five second rule tab repaint failed (" .. tostring(err) .. ")") end
+    if not ok then WarnOnce("fivesecond_tick", "mana regen module repaint failed (" .. tostring(err) .. ")") end
 end
 
 local function OnEvent(_, event, unit, _, spellID)
@@ -1607,7 +1607,7 @@ local function Apply()
 
     local ok, err = pcall(Build)
     if not ok then
-        print("|cff22e0ffForever STUwave|r: five second rule tab failed to build (" .. tostring(err) .. ")")
+        print("|cff22e0ffForever STUwave|r: mana regen module failed to build (" .. tostring(err) .. ")")
         return
     end
 

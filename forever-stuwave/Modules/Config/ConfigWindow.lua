@@ -1310,7 +1310,7 @@ end
 local function FiveSecondGroup(page)
     local tab = FS.FiveSecondTab
     if not (tab and tab.SETTINGS and tab.Applies and tab.Applies()) then return end
-    UI.Header(page, "Five second rule")
+    UI.Header(page, "Mana regen")
     for _, name in ipairs({ "enabled", "pulse", "sound", "motion" }) do
         local def = tab.SETTINGS[name]
         UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip })
