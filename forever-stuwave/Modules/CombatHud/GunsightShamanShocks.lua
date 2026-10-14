@@ -15,7 +15,9 @@
 --
 --   section.SetFire(up, headY)   up: true (the Fire totem stands), false (it is gone: no ring, no NOVA tag), nil (not known,
 --                                the default: a Fire Nova that reads unusable for a reason other than mana counts as "no
---                                totem"); headY: the Fire head's centre in image px from rect.y (default 24, a full pole's)
+--                                totem"); headY: the Fire head's centre in image px from rect.y (default 24, a full pole's),
+--                                or false when the head's place cannot be known (it rides an engine drawn timer bar): no ring,
+--                                the NOVA tag stays; nil leaves it as it was
 --
 -- THE SHOCK. Earth, Flame and Frost Shock share one cooldown (6 s), so one record answers for all three. READY comes from the
 -- cooldown's plain isActive (plain in combat, probe 2026-10-01): false is ready, whatever else; a plain isOnGCD or a cooldown no
@@ -414,7 +416,8 @@ local function PaintNova(s)
     local g, K = s.nova, s.colors
     local show = g.known and FireUp(s)
     local ready = show and g.mode == "ready"
-    SetOn(s.ring, ready); SetOn(s.ringGlow, ready)
+    local ring = ready and not s.headLost
+    SetOn(s.ring, ring); SetOn(s.ringGlow, ring)
     SetOn(s.pip, show); SetOn(s.novaText, show)
     if not show then return end
     if ready then
@@ -585,6 +588,7 @@ local function BuildSection(frame)
 
     -- Fire Nova: the ring on the Fire head, the footer pip and word
     local ringFrame = CreateFrame("Frame", nil, holder)
+    ringFrame:SetAllPoints(holder)                  -- a frame with no rect draws nothing on this client (see Gunsight.lua's root)
     ringFrame:SetFrameLevel(frame:GetFrameLevel() + C.RING_LEVEL)
     ringFrame:EnableMouse(false)
     s.ringFrame = ringFrame
@@ -606,7 +610,10 @@ local function BuildSection(frame)
 
     s.SetFire = function(up, headY)
         if up == nil or up == true or up == false then s.fireUp = up end
-        if type(headY) == "number" and not IsSecret(headY) then
+        if headY == false then
+            s.headLost = true                        -- the head's place is not knowable (a timer bar pole): no ring, the tag stays
+        elseif type(headY) == "number" and not IsSecret(headY) then
+            s.headLost = false
             s.fireY = headY
             if s.ring then
                 At(s, s.ring, "TOPLEFT", C.FIRE_X - C.RING / 2, s.fireY - C.RING / 2)

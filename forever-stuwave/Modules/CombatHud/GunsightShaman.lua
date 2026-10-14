@@ -541,9 +541,14 @@ local function PaintPole(p, now)
     PaintLabel(p, text, tone, 1)
 
     if p.slot == 1 then
-        -- the Nova ring wants a Fire totem that stands within reach, and the head's centre (a bar pole counts as a full one)
-        local nb = mode == "blocks" and lit or C.NB
-        PushFire(st.up == true and not far, C.GY - nb * C.BP - C.HEAD_H + C.FIRE_RING_DY)
+        -- the Nova ring wants a Fire totem that stands within reach, and the head's centre. A bar pole's head rides the fill the
+        -- engine draws (its height is never a plain number), so there the place is false: the section draws no ring then
+        local headY = false
+        if mode ~= "bar" then
+            local nb = mode == "blocks" and lit or C.NB
+            headY = C.GY - nb * C.BP - C.HEAD_H + C.FIRE_RING_DY
+        end
+        PushFire(st.up == true and not far, headY)
     end
 end
 
@@ -615,10 +620,16 @@ end
 -- Tells the section where the Fire totem is; a call only when either value changed, or when forced (the section's OnShow re-reads)
 function PushFire(up, y, force)
     if not force and up == fireUp and y == fireY then return end
-    fireUp, fireY = up, y
-    if type(section) ~= "table" or type(section.SetFire) ~= "function" then return end
+    if type(section) ~= "table" or type(section.SetFire) ~= "function" then
+        fireUp, fireY = up, y
+        return
+    end
     local ok, err = pcall(section.SetFire, up, y)
-    if not ok then LogOnce("SetFire", "GunsightShamanShocks SetFire failed: " .. tostring(err)) end
+    if not ok then
+        LogOnce("SetFire", "GunsightShamanShocks SetFire failed: " .. tostring(err))
+        return                                  -- not told: the next paint tries again
+    end
+    fireUp, fireY = up, y
 end
 
 local function LayoutScale()

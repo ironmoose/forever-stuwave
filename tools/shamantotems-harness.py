@@ -547,6 +547,92 @@ check(T.IsFar(1), "the old Fire totem is far from where it really stands")
 for s = 2, 4 do check(not T.IsFar(s), "slot " .. s .. " is where the set dropped it") end
 """)
 
+MULTICAST = r"""
+-- The multi-cast bar: ACT[actionId] = the spell id a set's slot holds. Bar index 12 here, like the client.
+ACT = {}
+local function setSlotId(bar, set, slot) return (bar - 1) * 12 + (set - 1) * 4 + slot end
+function assign(set, slot, spell, bar) ACT[setSlotId(bar or 12, set, slot)] = spell end
+function installMulticast(opts)
+    opts = opts or {}
+    if opts.modern ~= false then
+        C_ActionBar = { GetMultiCastBarIndex = function() return opts.bar or 12 end }
+    else
+        GetMultiCastBarIndex = function() return opts.bar or 12 end
+    end
+    HasAction = function(id) return ACT[id] ~= nil end
+    GetActionInfo = function(id) if ACT[id] then return "spell", ACT[id] end end
+end
+"""
+
+case("a_set_drop_replaces_the_numbers_and_position_of_a_standing_totem_its_slots_assign")(FAR_SETUP + MULTICAST + r"""
+installMulticast()
+assign(2, 1, 3599)             -- set 2 (Call of the Ancestors): Fire = Searing
+assign(2, 2, 8071)             -- Earth = Stoneskin
+assign(1, 3, 5394)             -- a decoy: set 1's Water must not count for set 2
+drop(5730, 2)                  -- a Stoneclaw (15 s) stands in Earth
+local old = T.Get(2)
+check(old.name == "Stoneclaw Totem" and old.duration == 15 and old.posX == 200, "Stoneclaw is stamped")
+drop(5394, 3)                  -- Healing Stream stands in Water, dropped here
+NOW = NOW + 5
+POS = { 100, 260, 0, 1 }
+TOT[1] = { name = "x", start = 0, dur = 0, spell = 0 }      -- the Fire totem comes up with the set
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 66843)
+local e, f, w, a = T.Get(2), T.Get(1), T.Get(3), T.Get(4)
+check(e.name == "Stoneskin Totem" and e.spellID == 8071 and e.duration == 300 and e.source == "cast", "Earth now wears Stoneskin's numbers, got " .. tostring(e.name))
+check(e.start == NOW and e.expires == NOW + 300, "and a fresh start")
+check(e.posX == 260 and e.stampAt == NOW, "and the position of the set drop")
+check(f.name == "Searing Totem" and f.duration == 30 and f.expires == NOW + 30 and f.posX == 260, "Fire (not stamped before) is stamped from its assigned spell")
+check(w.name == "Healing Stream Totem" and w.posX == 200 and w.start == 1000, "Water has no slot in the set: untouched")
+check(not a.up and a.posX == nil and a.name == nil, "Air has no slot in the set and is down: untouched")
+""")
+
+case("a_set_drop_with_an_unreadable_assigned_spell_stamps_the_position_and_no_numbers")(FAR_SETUP + MULTICAST + r"""
+installMulticast()
+ACT[(12 - 1) * 12 + 0 * 4 + 2] = 8071
+GetActionInfo = function(id) return "macro", 5 end      -- the slot holds something that is not a spell
+drop(8071, 2)
+NOW = NOW + 5
+POS = { 100, 260, 0, 1 }
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 66842)
+local e = T.Get(2)
+check(e.up and e.source == nil and e.name == nil and e.posX == 260, "no numbers (which totem is unknown), the new position")
+""")
+
+case("a_set_drop_falls_back_when_the_multicast_api_is_missing_or_unreadable")(FAR_SETUP + MULTICAST + r"""
+-- bar index secret: the old rule (only slots not up are stamped)
+installMulticast()
+C_ActionBar.GetMultiCastBarIndex = function() return SECRET end
+assign(1, 2, 8071)
+drop(3599, 1)
+NOW = NOW + 5
+POS = { 100, 260, 0, 1 }
+for s = 2, 4 do TOT[s] = { name = "x", start = 0, dur = 0, spell = 0 } end
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 66842)
+check(T.Get(1).name == "Searing Totem" and T.Get(1).posX == 200, "a standing totem keeps its data")
+check(T.Get(2).up and T.Get(2).source == nil and T.Get(2).posX == 260, "an empty slot is stamped with the position")
+-- no HasAction at all
+HasAction = nil
+installMulticast()
+HasAction = nil
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 66842)
+check(T.Get(1).posX == 200, "no HasAction: still the old rule")
+-- a secret HasAction answer
+installMulticast()
+HasAction = function() return SECRET end
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 66842)
+check(T.Get(1).posX == 200, "a secret HasAction: still the old rule")
+""")
+
+case("the_legacy_global_bar_index_is_used_when_there_is_no_C_ActionBar")(FAR_SETUP + MULTICAST + r"""
+installMulticast({ modern = false, bar = 12 })
+assign(1, 2, 8071)
+drop(5730, 2)
+NOW = NOW + 5
+POS = { 100, 260, 0, 1 }
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 66842)
+check(T.Get(2).name == "Stoneskin Totem" and T.Get(2).posX == 260, "the global GetMultiCastBarIndex answers")
+""")
+
 case("call_of_the_spirits_is_a_set_drop")(FAR_SETUP + r"""
 for s = 1, 4 do TOT[s] = { name = "x", start = 0, dur = 0, spell = 0 } end
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 66844)

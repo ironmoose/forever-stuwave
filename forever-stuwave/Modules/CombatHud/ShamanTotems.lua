@@ -26,8 +26,8 @@
 --           runs on the duration object alone and the block count is not available.
 --
 -- FAR (a totem you walked away from). UnitPosition("player") is stamped at the drop, because a totem drops at the player's feet:
--- y, x and the instance id, taken at the player's UNIT_SPELLCAST_SUCCEEDED of a totem spell (Call of the Elements stamps all
--- four). While the totem is up, a throttled Tick compares the stamp with the current position and sets `far` when the distance
+-- y, x and the instance id, taken at the player's UNIT_SPELLCAST_SUCCEEDED of a totem spell (a set drop stamps every element its
+-- multi-cast slots hold, see OnCast). While the totem is up, a throttled Tick compares the stamp with the current position and sets `far` when the distance
 -- passes the totem's range (DEFS, 20 yd by default). FAR is only ever set from two PLAIN numbers with the same instance id: a nil
 -- position (instances), a secret one, a different instance id or no stamp leaves it false, never a guess. The stamp is dropped
 -- with the slot, and a cast of Totemic Projection (matched by id or localized name, see ResolveNames) drops every stamp because it
@@ -99,7 +99,10 @@ local SET_IDS = { [66842] = "Call of the Elements", [66843] = "Call of the Ances
 -- localized name from the answer (an English client, or any client where the book answers to that name).
 local PROJECTION_IDS = {}
 local PROJECTION = "Totemic Projection"
-local SET_DEF, PROJECTION_DEF = { set = true }, { projection = true }
+local PROJECTION_DEF = { projection = true }
+local SET_INDEX = { [66842] = 1, [66843] = 2, [66844] = 3 }       -- the set number each set drop spell stands for
+local SET_DEFS = {}                                                -- spell id -> { set = true, index = n }
+for id, index in pairs(SET_INDEX) do SET_DEFS[id] = { set = true, index = index } end
 
 local BY_ID, BY_NAME, NAME_ID = {}, {}, {}
 for _, def in ipairs(DEFS) do
@@ -107,8 +110,8 @@ for _, def in ipairs(DEFS) do
     BY_NAME[def.name] = def
 end
 for id, name in pairs(SET_IDS) do
-    BY_ID[id] = SET_DEF
-    BY_NAME[name] = SET_DEF
+    BY_ID[id] = SET_DEFS[id]
+    BY_NAME[name] = SET_DEFS[id]
 end
 BY_NAME[PROJECTION] = PROJECTION_DEF
 for _, id in ipairs(PROJECTION_IDS) do BY_ID[id] = PROJECTION_DEF end
@@ -387,11 +390,38 @@ local function Stamp(st, def, id, now, y, x, inst)
         st.name, st.spellID, st.icon = def.name, id, SpellIcon(id)
         st.start, st.duration, st.expires, st.source = now, def.dur, now + def.dur, "cast"
         st.range = def.range
-    else                                        -- a set drop: which totems came down is not knowable here
+    else                                        -- a set drop whose totem is not knowable here
         st.name, st.spellID, st.icon = nil, nil, nil
         st.start, st.duration, st.expires, st.source = nil, nil, nil, nil
         st.range = nil
     end
+end
+
+-- The multi-cast page: C_ActionBar.GetMultiCastBarIndex, else the older global. nil when neither answers a plain whole number.
+local function MultiCastBar()
+    local api = type(C_ActionBar) == "table" and C_ActionBar.GetMultiCastBarIndex or GetMultiCastBarIndex
+    if type(api) ~= "function" then return nil end
+    local ok, bar = pcall(api)
+    bar = ok and PlainNum(bar) or nil
+    if bar and bar >= 1 and floor(bar) == bar then return bar end
+    return nil
+end
+
+-- Does a set's slot (Fire 1, Earth 2, Water 3, Air 4) hold a spell: true and the spell id (nil when the action is not a plain
+-- spell), false (plainly empty) or nil (HasAction is missing, raised or answered a secret). The action id of the slot is
+-- (bar - 1) * 12 + (set - 1) * 4 + slot; both HasAction and GetActionInfo are plain.
+local function SetSlotHolds(bar, set, slot)
+    if type(HasAction) ~= "function" or type(set) ~= "number" then return nil end
+    local id = (bar - 1) * 12 + (set - 1) * 4 + slot
+    local ok, has = pcall(HasAction, id)
+    if not ok or Secret(has) then return nil end
+    if not has then return false end
+    local spell
+    if type(GetActionInfo) == "function" then
+        local okInfo, kind, sid = pcall(GetActionInfo, id)
+        if okInfo and not Secret(kind) and kind == "spell" then spell = PlainNum(sid) end
+    end
+    return true, spell
 end
 
 local function OnCast(id)
@@ -415,10 +445,22 @@ local function OnCast(id)
     local y, x, inst = ReadPosition()
     local force
     if def.set then
-        -- a totem already standing keeps its name, numbers and drop position until PLAYER_TOTEM_UPDATE says otherwise: the set may
-        -- not have replaced it. Only an empty slot is stamped (with the position the set dropped it at).
+        -- The set casts the totems its four multi-cast slots hold. Where that is readable, every element whose slot holds a spell is
+        -- stamped again (numbers from the static table through that spell, and the position of this drop) whether or not it was up:
+        -- the set replaces a standing totem of the element. An element with an empty slot is left as it is. Where it is not readable
+        -- (no bar index, no HasAction, a secret answer) a totem already standing keeps its name, numbers and drop position until
+        -- PLAYER_TOTEM_UPDATE says otherwise and only an empty slot is stamped (with the position the set dropped it at).
+        local bar = MultiCastBar()
         for slot = 1, NSLOTS do
-            if not S[slot].up then Stamp(S[slot], nil, nil, now, y, x, inst) end
+            local held, spell
+            if bar then held, spell = SetSlotHolds(bar, def.index, slot) end
+            if held == true then
+                local totem = spell and DefOf(spell) or nil
+                if totem and (totem.set or totem.projection or totem.slot ~= slot) then totem = nil end
+                Stamp(S[slot], totem, totem and spell or nil, now, y, x, inst)
+            elseif held == nil and not S[slot].up then
+                Stamp(S[slot], nil, nil, now, y, x, inst)
+            end
         end
         force = true
     else
@@ -532,7 +574,7 @@ local function ResolveNames()
     end
     for id, english in pairs(SET_IDS) do
         local name = SpellName(id)
-        if name and not BY_NAME[name] then BY_NAME[name] = SET_DEF end
+        if name and not BY_NAME[name] then BY_NAME[name] = SET_DEFS[id] end
         NAME_ID[english] = id
     end
     for _, id in ipairs(PROJECTION_IDS) do

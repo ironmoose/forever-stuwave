@@ -743,7 +743,7 @@ TOT[1] = { name = "x", start = 0, dur = 0, spell = 0 }
 fire("PLAYER_REGEN_DISABLED")
 last = calls[#calls]
 check(last[1] == true, "up by the duration object alone")
-near3(last[2], headY(8), "a bar pole's head is a full pole's")
+check(last[2] == false, "a bar pole's head rides the engine's fill: its place is not computable, so the section is told false, got " .. tostring(last[2]))
 -- the module is shown again after a hide: the section is told once more
 spec.onHide("lower")
 n = #calls
@@ -756,6 +756,45 @@ boot({ shocks = { Build = function() return { SetFire = function() error("boom")
 mount("lower"); drop(1, "Searing Totem", 3599, 25, 30)
 check(parts()[1].label.text == "25s", "the poles work with a failing SetFire")
 check(DEGRADED.gunsightshaman_SetFire, "and the failure is logged once")
+""")
+
+case("a_failing_SetFire_is_tried_again_at_the_next_paint")(r"""
+local calls, fail = {}, true
+local sec = { SetFire = function(up, y)
+    calls[#calls + 1] = { up, y }
+    if fail then fail = false; error("boom") end
+end }
+boot({ shocks = { Build = function() return sec end } })
+POS = { 100, 200, 0, 1 }
+local spec = mount("lower")
+check(#calls >= 1 and DEGRADED.gunsightshaman_SetFire, "the first call threw and was logged")
+local n = #calls
+spec.onHide("lower"); spec.onShow("lower")          -- a repaint of every pole, nothing about the Fire totem changed
+check(#calls > n, "the next paint tells the section again: a throw is not remembered as told, got " .. (#calls - n))
+check(calls[#calls][1] == false, "with the same state it failed to take")
+n = #calls
+spec.onHide("lower"); spec.onShow("lower")
+check(#calls == n + 1, "once it took, only the show's own forced re-read calls again, got " .. (#calls - n))
+""")
+
+case("with_the_real_shocks_file_a_timer_bar_pole_has_no_ring_and_keeps_the_NOVA_tag")(r"""
+boot({ realShocks = true })
+for _, e in ipairs({ "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_USABLE", "LEARNED_SPELL_IN_TAB" }) do KNOWN_EVENTS[e] = true end
+KNOWN_SPELLS[408341] = true
+C_Spell.GetSpellInfo = function(n) if n == "Fire Nova" then return { spellID = 408341, name = "Fire Nova" } end end
+C_Spell.GetSpellCooldown = function() return { isActive = false, isOnGCD = false, startTime = 0, duration = 0 } end
+local spec = mount("lower")
+local sec
+for _, f in ipairs(FRAMES) do if f.fsSection then sec = f.fsSection end end
+drop(1, "Searing Totem", 3599, 30, 30)
+check(isVisible(sec.ring) and isVisible(sec.novaText), "a numbered pole: ring and tag")
+clear(1)
+SECRET_READS = true
+TOT[1] = { name = "x", start = 0, dur = 0, spell = 0 }
+fire("PLAYER_REGEN_DISABLED")
+check(parts()[1].bar and isVisible(parts()[1].bar), "the pole is in bar mode")
+check(not isVisible(sec.ring) and not isVisible(sec.ringGlow), "no ring floats above a head that follows the draining fill")
+check(isVisible(sec.novaText) and isVisible(sec.pip), "the Fire totem stands: the NOVA tag stays")
 """)
 
 case("with_the_real_shocks_file_the_nova_ring_follows_the_fire_head_and_is_drawn_over_it")(r"""

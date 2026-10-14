@@ -545,6 +545,33 @@ SEC.SetFire(nil)
 noDegrade()
 """)
 
+case("the_ring_frame_has_a_rect_of_its_own_so_the_client_draws_its_textures")(r"""
+boot({})
+mount("lower")
+local rf = SEC.ringFrame
+check(rf and (rf:GetNumPoints() > 0 or rf.allPoints ~= nil), "a frame with no points has no rect on this client and draws nothing: the ring frame needs an anchor")
+check(rf.allPoints == SEC.holder, "the ring frame fills the holder")
+check(SEC.ring.parent == rf and SEC.ringGlow.parent == rf, "the ring and its glow are drawn by that frame")
+check(vis(SEC.ring), "and the ring shows")
+noDegrade()
+""")
+
+case("a_head_that_cannot_be_placed_hides_the_ring_and_keeps_the_NOVA_tag")(r"""
+boot({})
+mount("lower")
+check(vis(SEC.ring) and vis(SEC.ringGlow), "the ring shows on a full head")
+SEC.SetFire(true, false)
+check(not vis(SEC.ring) and not vis(SEC.ringGlow), "headY false: the head's place is unknown, no ring")
+check(vis(SEC.pip) and vis(SEC.novaText), "the Fire totem still stands: the NOVA tag stays")
+SEC.SetFire(true, 40)
+check(vis(SEC.ring) and vis(SEC.ringGlow), "a head with a place brings the ring back")
+local _, y = imgCenter(SEC.ring)
+near(y, 632 + 40, "at that place", 0.05)
+SEC.SetFire(false, false)
+check(not vis(SEC.ring) and not vis(SEC.pip) and not vis(SEC.novaText), "no Fire totem: nothing")
+noDegrade()
+""")
+
 case("without_a_word_from_the_poles_an_unusable_nova_reads_as_no_fire_totem")(r"""
 boot({})
 USABLE[408341] = { false, false }
