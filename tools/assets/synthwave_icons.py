@@ -25,6 +25,8 @@ from wago.tools (https://wago.tools/api/casc/<fileid>?download), ids from the co
     micro/uimicromenu2x.blp  interface/hud/uimicromenu2x, file id 4708813: the modern micro menu
                              atlas (uncompressed BLP2). Cells come from UiTextureAtlasMember
                              (wago.tools/db2/UiTextureAtlasMember/csv, atlas 2136).
+    classicons/<class>.blp   interface/icons/classicon_<class> (64x64), ids 625999 to 626008 (626002 is the monk)
+    spellfiles/<icon>.blp    the 64 px spell icon files, interface/icons/<name>, ids in SPELL_ICONS
 
 Usage (read untrusted downloads with -I so nothing in their directory is imported):
 
@@ -34,21 +36,20 @@ Usage (read untrusted downloads with -I so nothing in their directory is importe
 The preview page embeds the derived art as base64, so it defaults to debug/ (gitignored) and
 must never be committed to the public repository.
 
-Shipping the micro menu (style B, the approved look): `--bake-micro` writes
-forever-stuwave/Media/Textures/glyphart_<name>.tga, 64x64 BGRA that fills the key (the key's slanted shape is baked into its alpha: a MaskTexture does not clip on this client), no scanline
-(it would alias when the client rescales), one file per micro glyph plus one PvP file per
-faction. MicroBars.lua picks them. Character and Legacy have no static Blizzard art: their hand drawn line
-shapes (tools/assets/deck_glyph_sources.py) are laid over a violet vignette backdrop and run through the same
-gradient map, so the row reads as one family.
+Shipping: NOTHING derived from the game's art is shipped. The micro keys and the class tab spell tiles draw the
+game's own textures and restyle them live in the client (Core/IconStyle.lua: SetDesaturated, an ADD copy, a MOD ramp,
+an ADD lift; the ramps and the key covers are our own art, tools/assets/generate_icon_style.py). This tool still
+renders styles A to D from the downloaded sources for the preview page, and writes:
 
-Shipping the class tab spell icons (style B again): `--bake-spells` writes spellart_<icon>.tga (64x64,
-opaque, the whole icon file so the tiles' usual texcoords crop it like the stock icon) and the lookup table
-forever-stuwave/Core/SpellArtData.lua. Sources: spellfiles/<icon name>.blp, the 64 px icon files
-(interface/icons/<name>, file ids in SPELL_ICONS). FS.SpellArt picks them by the file id the client reports
-and falls back to the stock icon for anything not baked.
+    --gen-runtime   forever-stuwave/Core/IconStyleData.lua: per icon the texture (a file id or a path), the window of it
+                    to show, the cover rectangle, the colour family and a boost (how much brighter than the plain
+                    desaturated icon it must be drawn). Numbers only; the sources are read, nothing of them is copied.
+    --bake-own      glyphart_character.tga and glyphart_legacy.tga: the Character fallback (the person glyph, used when
+                    the class is unknown) and the Legacy key, baked from our OWN hand drawn shapes
+                    (tools/assets/deck_glyph_sources.py) on a violet vignette through the same gradient map, with the
+                    key's slanted shape baked into the alpha (a MaskTexture does not clip on this client). No game art.
 
-Derived art is made from Blizzard's icons: fine for personal use. A public release should
-prefer style D, which ships no copies of Blizzard art.
+tools/assets/test_tga_generators.py fails if a shipped texture has neither a generator nor is one of those two.
 
 Needs Pillow and numpy only.
 """
@@ -571,17 +572,14 @@ def tga_bytes(rgba: np.ndarray) -> bytes:
     return header + rgba[..., [2, 1, 0, 3]].tobytes()
 
 
-def bake_micro(root: Path, out_dir: Path) -> list[Path]:
-    """Write glyphart_<name>.tga for every micro entry, PvP faction and Character/Legacy shape into out_dir."""
-    jobs = [(stem, rel, fam) for stem, _label, rel, fam in MICRO if stem != "pvp"]
-    pvp_fam = next(f for stem, _l, _r, f in MICRO if stem == "pvp")
-    jobs += [(stem, rel, pvp_fam) for stem, rel in PVP_VARIANTS]
-    jobs += MICRO_SHAPES
+def bake_own(out_dir: Path) -> list[Path]:
+    """Write glyphart_character.tga and glyphart_legacy.tga, the two keys drawn from our OWN hand drawn shapes
+    (deck_glyph_sources.py): no game art is involved. Every other key draws the game's own texture at runtime."""
     out_dir.mkdir(parents=True, exist_ok=True)
     written = []
-    for stem, rel, fam in jobs:
+    for stem, rel, fam in MICRO_SHAPES:
         path = out_dir / f"glyphart_{stem}.tga"
-        path.write_bytes(tga_bytes(bake_glyph(load_any(root, rel), FAMILIES[fam])))
+        path.write_bytes(tga_bytes(bake_glyph(load_any(Path("."), rel), FAMILIES[fam])))
         written.append(path)
         print("baked", path.name, file=sys.stderr)
     return written
@@ -637,61 +635,213 @@ SPELL_ICONS = [
 ]
 
 
-def load_icon(path: Path) -> np.ndarray:
-    """A full 64 px icon file, border included: the tiles crop it with the same texcoords as the stock icon."""
-    return np.asarray(Image.open(path).convert("RGB"), dtype=np.float64) / 255.0
+# ---------------------------------------------------------------------------
+# Shipping: the runtime icon style's data (numbers only: file ids, texture windows, gains)
+# ---------------------------------------------------------------------------
+#
+# The micro keys and the class tab tiles draw the game's OWN textures and restyle them live (Core/IconStyle.lua), so
+# no art derived from the game is shipped. What the addon needs per icon is a handful of numbers: which texture, which
+# window of it to show, how bright it needs to be, which colour family. They are computed here from the downloaded
+# sources (never committed) and written to forever-stuwave/Core/IconStyleData.lua.
+
+# Game textures by file id (community listfile). The classic micro button textures are 32x64: a button frame with the glyph
+# window at (5,29)-(27,58).
+CLASSIC_MICRO_IDS = {
+    "spellbook": (130810, "spellbook"), "talents": (130813, "talents"), "achievement": (235422, "achievement"),
+    "questlog": (130804, "quest"), "socials": (130807, "socials"), "lfd": (130798, "lfg"), "mainmenu": (130801, "mainmenu"),
+    "help": (130794, "help"), "worldmap": (130816, "world"), "ej": (525019, "ej"), "collections": (615164, "mounts"),
+    "store": (902317, "store"),
+}
+CLASSIC_WINDOW = (5, 29, 27, 58)
+ATLAS_ID = 4708813  # interface/hud/uimicromenu2x
+ATLAS_CELLS = {"professions": (397, 337, 64, 82), "guild": (265, 421, 64, 82), "housing": (331, 337, 64, 82)}
+PVP_IDS = {"Alliance": (136998, "pvp_alliance"), "Horde": (137000, "pvp_horde"), "other": (136999, "pvp_ffa")}
+# The class keys draw Interface\Icons\ClassIcon_<Class> (64x64, a bevel at the edge: the 0.07 crop the tiles use skips it).
+CLASS_TOKENS = {"WARRIOR": "Warrior", "PALADIN": "Paladin", "HUNTER": "Hunter", "ROGUE": "Rogue", "PRIEST": "Priest",
+                "SHAMAN": "Shaman", "MAGE": "Mage", "WARLOCK": "Warlock", "DRUID": "Druid"}
+CLASS_CROP = (0.07, 0.93)
+CLASS_FAMILY = "house_cyan"
+# The two glyph rectangles the keys draw icons in, key columns of the 34 wide key (generate_icon_style.py COVER_RECTS), full height.
+COVER_RECTS = {"a": (6.0, 28.0), "b": (4.0, 30.0)}
+FIT_PAD = 1.06  # the window is this much larger than the glyph, so it does not touch the key's edge
+BOOST_TARGET = 0.85  # the 90th percentile of the icon's brightness is lifted to about this
+LIFT_STRENGTH = 0.15  # the flat ADD under the ramp: the family's weak colour times this tints the shadows
 
 
-def lua_spell_data() -> str:
+def read_rgba(root: Path, rel: str) -> Image.Image:
+    path = root / rel
+    if path.suffix == ".blp" and Image.open(path).size == (32, 64):
+        return Image.open(path).convert("RGBA")
+    try:
+        return Image.open(path).convert("RGBA")
+    except Exception:  # noqa: BLE001  (the modern atlas is an uncompressed BLP2 Pillow does not read)
+        return read_blp2_bgra(path)
+
+
+def alpha_bbox(im: Image.Image) -> tuple[int, int, int, int]:
+    a = np.asarray(im.convert("RGBA"), dtype=np.float64)[..., 3] / 255.0
+    ys, xs = np.where(a > 0.08)
+    return int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
+
+
+def fit_window(box: tuple[float, float, float, float], limit: tuple[float, float, float, float], rect_w: float,
+               rect_h: float, pad: float = FIT_PAD) -> tuple[float, float, float, float]:
+    """The texel window to show in a rect_w x rect_h rectangle so the glyph in `box` (l, t, r, b texels) fills it: grown
+    by `pad`, widened or heightened to the rect's aspect (a transparent margin), and kept inside `limit` (the part of the
+    texture that is the glyph's own: a button frame or a neighbouring atlas cell must never show), cropping the other axis
+    when the limit ends first."""
+    l, t, r, b = box
+    ll, lt, lr, lb = limit
+    cx, cy = (l + r) / 2, (t + b) / 2
+    w, h = (r - l) * pad, (b - t) * pad
+    aspect = rect_w / rect_h
+    if w / h < aspect:
+        w = h * aspect
+    else:
+        h = w / aspect
+    if w > lr - ll:
+        w, h = lr - ll, (lr - ll) / aspect
+    if h > lb - lt:
+        h, w = lb - lt, (lb - lt) * aspect
+    cx = min(max(cx, ll + w / 2), lr - w / 2)
+    cy = min(max(cy, lt + h / 2), lb - h / 2)
+    return cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2
+
+
+def pick_cover(box: tuple[float, float, float, float]) -> str:
+    """Rectangle a: the narrow one, for glyphs taller than wide. b for everything squarer."""
+    l, t, r, b = box
+    return "a" if (r - l) / (b - t) <= 0.92 else "b"
+
+
+def boost_for(im: Image.Image, window: tuple[float, float, float, float]) -> float:
+    """How much brighter than the plain desaturated icon the style must draw it, 0 (as is) to 1 (twice)."""
+    a = np.asarray(im.convert("RGBA"), dtype=np.float64) / 255.0
+    l, t, r, b = (int(round(v)) for v in window)
+    a = a[t:b, l:r]
+    lum = luma(a[..., :3])
+    solid = lum[a[..., 3] > 0.5]
+    p90 = float(np.percentile(solid, 90)) if solid.size else 0.5
+    gain = float(np.clip(BOOST_TARGET / max(p90, 0.05), 1.0, 2.0))
+    return round(gain - 1.0, 2)
+
+
+def runtime_entry(im: Image.Image, window: tuple[float, float, float, float], file_id, fam: str,
+                  limit: tuple[float, float, float, float] | None = None) -> dict:
+    """One icon's data: the file, the texcoord window, the cover rectangle it sits in, the family and the boost."""
+    cover = pick_cover(window)
+    x0, x1 = COVER_RECTS[cover]
+    w, h = im.size
+    box = fit_window(window, limit or (0, 0, w, h), x1 - x0, KEY_H)
+    return {"file": file_id, "coords": (box[0] / w, box[2] / w, box[1] / h, box[3] / h), "cover": cover, "fam": fam,
+            "boost": boost_for(im, box)}
+
+
+def micro_runtime_data(root: Path) -> tuple[dict, dict, dict]:
+    """(micro, pvp, class) data tables. micro: stem -> entry; pvp: faction -> entry; class: token -> entry."""
+    fam_of = {stem: fam for stem, _l, _r, fam in MICRO}
+    micro, pvp, klass = {}, {}, {}
+    for stem, (fid, local) in CLASSIC_MICRO_IDS.items():
+        im = read_rgba(root, f"micro/{local}.blp")
+        micro[stem] = runtime_entry(im, CLASSIC_WINDOW, fid, fam_of[stem], limit=CLASSIC_WINDOW)
+    sheet = read_blp2_bgra(root / "micro/uimicromenu2x.blp")
+    for stem, (left, top, w, h) in ATLAS_CELLS.items():
+        cell = sheet.crop((left, top, left + w, top + h))
+        x0, y0, x1, y1 = alpha_bbox(cell)
+        win = (left + x0, top + y0, left + x1, top + y1)
+        micro[stem] = runtime_entry(sheet, win, ATLAS_ID, fam_of[stem], limit=(left, top, left + w, top + h))
+    for faction, (fid, local) in PVP_IDS.items():
+        im = read_rgba(root, f"micro/{local}.blp")
+        pvp[faction] = runtime_entry(im, alpha_bbox(im), fid, fam_of["pvp"])
+    for token, name in CLASS_TOKENS.items():
+        im = read_rgba(root, f"classicons/{name.lower()}.blp")
+        w, h = im.size
+        win = (CLASS_CROP[0] * w, CLASS_CROP[0] * h, CLASS_CROP[1] * w, CLASS_CROP[1] * h)
+        # the 0.07 crop is already the whole glyph, a square: show exactly it, in the square rectangle
+        klass[token] = {"file": "Interface\\Icons\\ClassIcon_" + name, "coords": (CLASS_CROP[0], CLASS_CROP[1], CLASS_CROP[0], CLASS_CROP[1]),
+                        "cover": "b", "fam": CLASS_FAMILY, "boost": boost_for(im, win)}
+    return micro, pvp, klass
+
+
+def lua_num(v) -> str:
+    return f"{v:.4f}".rstrip("0").rstrip(".") if isinstance(v, float) else str(v)
+
+
+def lua_entry(ent: dict) -> str:
+    fid = ent["file"]
+    file = fid if isinstance(fid, int) else '"' + fid.replace("\\", "\\\\") + '"'
+    l, r, t, b = (lua_num(round(v, 5)) for v in ent["coords"])
+    return (f'{{ file = {file}, coords = {{ {l}, {r}, {t}, {b} }}, cover = "{ent["cover"]}", '
+            f'fam = "{ent["fam"]}", boost = {lua_num(ent["boost"])} }}')
+
+
+def spell_look(root: Path, icon: str, fam: str) -> dict:
+    """The boost for a spell tile: the tiles draw the 0.07 crop of the 64 px icon file."""
+    im = Image.open(root / "spellfiles" / f"{icon}.blp").convert("RGBA")
+    w, h = im.size
+    return {"fam": fam, "boost": boost_for(im, (0.07 * w, 0.07 * h, 0.93 * w, 0.93 * h))}
+
+
+def lua_runtime_data(root: Path) -> str:
+    micro, pvp, klass = micro_runtime_data(root)
+    ramps = "".join(
+        f'    {fam} = {{ file = "iconramp_{fam}.tga", lift = {{ {", ".join(lua_num(round(float(c) * LIFT_STRENGTH, 4)) for c in FAMILIES[fam][0])} }} }},\n'
+        for fam in FAMILIES)
+    covers = "".join(
+        f'    {k} = {{ file = "iconcover_{k}.tga", x0 = {lua_num(round(x0 / KEY_W, 5))}, x1 = {lua_num(round(x1 / KEY_W, 5))} }},\n'
+        for k, (x0, x1) in COVER_RECTS.items())
+    micro_s = "".join(f"    {k} = {lua_entry(v)},\n" for k, v in micro.items())
+    pvp_s = "".join(f"    {k} = {lua_entry(v)},\n" for k, v in pvp.items())
+    class_s = "".join(f"    {k} = {lua_entry(v)},\n" for k, v in klass.items())
+    looks = {icon: spell_look(root, icon, fam) for icon, _fd, fam, _ids in SPELL_ICONS}
     by_file = "".join(f'    [{fdid}] = "{icon}",\n' for icon, fdid, _f, _ids in SPELL_ICONS)
     by_name = "".join(f'    {icon} = "{icon}",\n' for icon, _fd, _f, _ids in SPELL_ICONS)
     by_spell = "".join(f'    [{sid}] = "{icon}",  -- {name}\n' for icon, _fd, _f, ids in SPELL_ICONS for sid, name in ids)
+    look_s = "".join(f'    {icon} = {{ fam = "{v["fam"]}", boost = {lua_num(v["boost"])} }},\n' for icon, v in looks.items())
     return (
-        "-- Generated by tools/assets/synthwave_icons.py --bake-spells. Do not edit by hand.\n"
-        "-- Class tab spell icons that have a baked gradient version (Media/Textures/spellart_<name>.tga, 64x64).\n"
-        "-- byFile: the icon file id the client reports for a spell -> art name. byName: the lower case icon file\n"
-        "-- name (a client that answers with an Interface\\Icons path) -> art name. bySpell: the spell ids that wear\n"
-        "-- each icon, kept for the harness (every spell the tabs show must be here).\n"
+        "-- Generated by tools/assets/synthwave_icons.py --gen-runtime. Do not edit by hand.\n"
+        "-- The runtime icon style's data (Core/IconStyle.lua): numbers only, nothing derived from game art.\n"
+        "--   ramps:  colour families, the ramp texture and the flat ADD that tints the shadows\n"
+        "--   covers: the two glyph rectangles of a micro key (fractions of the key width) and their cover texture\n"
+        "--   micro, pvp, class: the game texture a micro key draws (file id or path), the texcoord window, the cover\n"
+        "--           rectangle, the family and the boost (0 plain, 1 twice as bright)\n"
+        "--   spells: byFile (the icon file id the client reports for a spell) and byName (the lower case icon file name)\n"
+        "--           to an icon name; look: that name to its family and boost; bySpell: the spell ids that wear each icon,\n"
+        "--           kept for the harness (every spell the class tabs show must be here)\n"
         "local _, FS = ...\n"
-        "FS.SpellArtData = {\n  byFile = {\n" + by_file + "  },\n  byName = {\n" + by_name + "  },\n  bySpell = {\n"
-        + by_spell + "  },\n}\n"
+        "FS.IconStyleData = {\n"
+        "  ramps = {\n" + ramps + "  },\n"
+        "  covers = {\n" + covers + "  },\n"
+        "  micro = {\n" + micro_s + "  },\n"
+        "  pvp = {\n" + pvp_s + "  },\n"
+        "  class = {\n" + class_s + "  },\n"
+        "  spells = {\n"
+        "  byFile = {\n" + by_file + "  },\n  byName = {\n" + by_name + "  },\n  look = {\n" + look_s + "  },\n  bySpell = {\n"
+        + by_spell + "  },\n  },\n}\n"
     )
-
-
-def bake_spells(root: Path, tex_dir: Path, lua_path: Path) -> None:
-    """Write spellart_<icon>.tga (style B, opaque) and the lookup table FS.SpellArtData."""
-    tex_dir.mkdir(parents=True, exist_ok=True)
-    for icon, _fdid, fam, _ids in SPELL_ICONS:
-        src = load_icon(root / "spellfiles" / f"{icon}.blp")
-        rgb = finish(gradient_map(src, SPELL_BAKE_SIZE, FAMILIES[fam]), SPELL_BAKE_SIZE, TUNING[SPELL_BAKE_SIZE], scan=False)
-        rgba = (np.dstack([rgb, np.ones(rgb.shape[:2])]) * 255 + 0.5).astype(np.uint8)
-        (tex_dir / f"spellart_{icon}.tga").write_bytes(tga_bytes(rgba))
-        print("baked", f"spellart_{icon}.tga", file=sys.stderr)
-    lua_path.write_text(lua_spell_data(), encoding="utf-8", newline="\n")
-    print("wrote", lua_path, file=sys.stderr)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--sources", type=Path, required=True, help="directory holding spells/, micro/, subs/")
+    ap.add_argument("--sources", type=Path, default=Path("."), help="directory holding spells/, micro/, classicons/, spellfiles/ (not needed by --bake-own)")
     ap.add_argument("--html", type=Path, default=REPO / "debug" / "synthwave-icons-2026-10-14.html",
                     help="standalone preview page (default is under debug/, which is untracked: it embeds Blizzard art, never commit it)")
     ap.add_argument("--png-dir", type=Path, help="also write every rendered PNG here")
-    ap.add_argument("--bake-micro", action="store_true",
-                    help="write the shipped micro menu textures (style B, 64x64 .tga) into forever-stuwave/Media/Textures "
-                         "(or FS_ASSET_OUTPUT_DIR) and stop")
-    ap.add_argument("--bake-spells", action="store_true",
-                    help="write the class tab spell icons (style B, 64x64 .tga) and Core/SpellArtData.lua, then stop")
+    ap.add_argument("--bake-own", action="store_true",
+                    help="write glyphart_character.tga and glyphart_legacy.tga (our own hand drawn shapes) into "
+                         "forever-stuwave/Media/Textures (or FS_ASSET_OUTPUT_DIR), then stop")
+    ap.add_argument("--gen-runtime", action="store_true",
+                    help="write Core/IconStyleData.lua (file ids, texture windows, boosts; numbers only), then stop")
     args = ap.parse_args()
 
-    if args.bake_spells:
-        out = Path(os.environ.get("FS_ASSET_OUTPUT_DIR") or REPO / "forever-stuwave" / "Media" / "Textures")
-        lua = Path(os.environ.get("FS_SPELLART_DATA") or REPO / "forever-stuwave" / "Core" / "SpellArtData.lua")
-        bake_spells(args.sources, out, lua)
+    if args.gen_runtime:
+        lua = Path(os.environ.get("FS_ICONSTYLE_DATA") or REPO / "forever-stuwave" / "Core" / "IconStyleData.lua")
+        lua.write_text(lua_runtime_data(args.sources), encoding="utf-8", newline="\n")
+        print("wrote", lua, file=sys.stderr)
         return 0
-    if args.bake_micro:
+    if args.bake_own:
         out = Path(os.environ.get("FS_ASSET_OUTPUT_DIR") or REPO / "forever-stuwave" / "Media" / "Textures")
-        bake_micro(args.sources, out)
+        bake_own(out)
         return 0
 
     shaman = render_set(args.sources, [(n, n, r, f) for n, r, f in SHAMAN], list(FAMILIES))

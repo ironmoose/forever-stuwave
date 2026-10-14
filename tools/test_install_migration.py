@@ -19,7 +19,7 @@ INSTALLER = REPO / "tools" / "deploy-forever-stuwave.sh"
 # Frozen from the pre-reorganization manifest: dependency order must survive moves.
 LOAD_ORDER = (
     "ErrorLog.lua", "Nameplates.lua", "Theme.lua", "Layout.lua", "Config.lua", "FrameHelpers.lua",
-    "SpellArtData.lua", "SpellArt.lua", "ChevronCastBar.lua", "PanelSkins.lua", "Tracker.lua", "ChatCore.lua", "ChatTabs.lua",
+    "IconStyleData.lua", "IconStyle.lua", "SpellArt.lua", "ChevronCastBar.lua", "PanelSkins.lua", "Tracker.lua", "ChatCore.lua", "ChatTabs.lua",
     "ChatEditBox.lua", "ChatTermBar.lua", "ChatWindowState.lua", "ChatFrameSkin.lua",
     "ChatSlashCommands.lua", "ChatFormat.lua", "UnitFrames.lua", "TargetAuras.lua",
     "PartyFrames.lua", "CastBars.lua", "Buffs.lua", "Professions.lua", "ActionBars.lua",
@@ -86,7 +86,7 @@ def test_module_manifest_preserves_dependency_order_and_loads_every_runtime_modu
     modules = [Path(entry) for entry in entries if entry.endswith(".lua")]
 
     assert tuple(path.name for path in modules) == LOAD_ORDER
-    assert len(set(modules)) == 82
+    assert len(set(modules)) == 83
     assert all((RUNTIME / entry).is_file() for entry in entries)
     assert all(path.parts[0] in {"Core", "Modules"} for path in modules)
     assert not list(RUNTIME.glob("*.lua"))

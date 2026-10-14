@@ -252,6 +252,12 @@ function hooksecurefunc(a, b, c)
     tbl[name] = function(...) local r = { orig(...) }; fn(...); return unpack(r) end
 end
 function InCombatLockdown() return IN_COMBAT end
+-- The player the keys read when they are built: CLASS_TOKEN / FACTION are set by the World, CLASS_ERR makes UnitClass raise.
+function UnitClass()
+    if CLASS_ERR then error("UnitClass exploded") end
+    return "Local", CLASS_TOKEN, 1
+end
+function UnitFactionGroup() return FACTION end
 function GetTime() return NOW end
 
 UIParent = newObj("Frame", nil, "UIParent")
@@ -332,6 +338,8 @@ function h_setup(n, hiddenCsv, deckW)
     end
     for idx in (hiddenCsv or ""):gmatch("%d+") do BUTTONS[tonumber(idx)]:Hide() end
     if not NODECK then assert(loadstring(DECK_SRC, "@Deck.lua"))("forever-stuwave", FS) end
+    assert(loadstring(DATA_SRC, "@IconStyleData.lua"))("forever-stuwave", FS)
+    assert(loadstring(STYLE_SRC, "@IconStyle.lua"))("forever-stuwave", FS)
     assert(loadstring(MICRO_SRC, "@MicroBars.lua"))("forever-stuwave", FS)
 end
 function h_fire(event)
@@ -387,50 +395,97 @@ end
 function h_opaqueFills()
     local n = 0
     for _, o in ipairs(ALL) do
-        if o.kind == "Texture" and o.color and o.color[4] == 1 and o.allPoints and underButton(o) then n = n + 1 end
+        if o.kind == "Texture" and o.color and o.color[4] == 1 and o.allPoints and o.blend ~= "ADD" and underButton(o) then n = n + 1 end   -- the low ADD lift under the ramp is not a well
     end
     return n
 end
--- Every glyph file path a key's overlay wears (the hand drawn glyph_ files and the baked glyphart_ ones).
+-- The micro key built for a button (FS.MicroBars.keys), nil before the key exists.
+local function keyOf(b)
+    for _, k in ipairs(FS.MicroBars.keys) do if k.button == b then return k end end
+end
+-- What every key draws: the texture of its glyph (a file id, a path or a baked file), and its kind.
 function h_glyphPaths()
     local out = {}
-    for _, o in ipairs(ALL) do
-        if o.kind == "Texture" and o.tex and tostring(o.tex):find("glyph%a*_") and underButton(o) then out[#out + 1] = tostring(o.tex) end
+    for i, b in ipairs(BUTTONS) do
+        local k = keyOf(b)
+        if k then out[#out + 1] = { tex = tostring(k.glyph.tex), kind = k.spec.kind, file = k.spec.file } end
     end
     return out
 end
--- Per button: the glyph texture (size, layer, masks) and the edge ring texture it must sit under.
+-- Per button: the glyph texture (rectangle, layer), the ring texture it must sit under, and the pieces of its look.
 function h_glyphInfo()
     local out = {}
     for i, b in ipairs(BUTTONS) do
+        local k = keyOf(b)
         local info = { bw = b.w, bh = b.h }
-        for _, o in ipairs(ALL) do
-            if o.kind == "Texture" and o.tex and underButton(o) then
-                local p = o.parent
-                while p and p ~= b do p = p.parent end
-                if p == b then
-                    local t = tostring(o.tex)
-                    if t:find("glyph%a*_") then
-                        info.w, info.h, info.layer, info.sub = o.w, o.h, o.layer, o.sublevel
-                        info.c = o.coords
-                        info.vertex, info.desat, info.tex = o.vertex, o.desat, t
-                    elseif t:find("deck_key_slant_outline", 1, true) then
-                        info.edgeLayer, info.edgeSub = o.layer, o.sublevel
-                    end
-                end
+        if k then
+            local g = k.glyph
+            info.kind, info.tex, info.layer, info.sub, info.c = k.spec.kind, tostring(g.tex), g.layer, g.sublevel, g.coords
+            info.w, info.h = g.w, g.h
+            info.vertex, info.desat = g.vertex, g.desat
+            if #g.pts == 2 then   -- a rectangle between two corners of the key
+                info.left, info.right, info.top, info.bottom = g.pts[1][4], -g.pts[2][4], g.pts[1][5], -g.pts[2][5]
+            end
+            info.edgeLayer, info.edgeSub = k.edge.layer, k.edge.sublevel
+            if k.chain then
+                local c = k.chain
+                info.boostSub, info.modSub, info.liftSub = c.boost.sublevel, c.mod.sublevel, c.lift.sublevel
+                info.boostBlend, info.modBlend, info.liftBlend = c.boost.blend, c.mod.blend, c.lift.blend
+                info.boostTex, info.modTex, info.liftColor = tostring(c.boost.tex), tostring(c.mod.tex), c.lift.color
+                info.boostVertex, info.liftVertex, info.modDesat = c.boost.vertex, c.lift.vertex, c.mod.desat
+                info.boostShown, info.modShown, info.liftShown = c.boost.shown, c.mod.shown, c.lift.shown
+                info.boostAnchor, info.modAnchor, info.liftAnchor = c.boost.allPoints == g, c.mod.allPoints == g, c.lift.allPoints == g
+                info.boostCoords = c.boost.coords
+                info.coverTex, info.coverSub, info.coverLayer = tostring(k.cover.tex), k.cover.sublevel, k.cover.layer
+                info.cl, info.cr = k.cover.pts[1][4], -k.cover.pts[2][4]
             end
         end
         out[i] = info
     end
     return out
 end
--- A faction that is a secret value (a string the client will not let code index with), a table or a number never reaches PVP_ART.
+-- GlyphSpec's answers for a class token that is odd: a secret string, a table, a number, nil, an unknown name. The class table
+-- is trapped so reading the secret as a key raises.
+function h_oddClasses()
+    local real = FS.IsSecret
+    FS.IsSecret = function(v) return v == "SHAMAN" end
+    local classes = FS.IconStyleData.class
+    FS.IconStyleData.class = setmetatable({}, { __index = function(_, k)
+        if k == "SHAMAN" then error("a secret class token was used as a key") end
+        return classes[k]
+    end })
+    local GS = FS.MicroBars.GlyphSpec
+    local out = {}
+    for i, c in ipairs({ "SHAMAN", {}, 42, false, "NOTACLASS", "" }) do
+        local ok, spec = pcall(GS, "character", nil, c)
+        out[i] = ok and spec.kind or "error"
+    end
+    local ok, spec = pcall(GS, "character", nil, nil)
+    out[#out + 1] = ok and spec.kind or "error"
+    FS.IsSecret = real
+    FS.IconStyleData.class = classes
+    return out
+end
+-- A faction that is a secret value (a string the client will not let code index with), a table or a number never reaches the pvp table.
 function h_oddFactions()
     local real = FS.IsSecret
     FS.IsSecret = function(v) return v == "Alliance" end
-    local GP = FS.MicroBars.GlyphPath
-    local out = { GP("pvp", "Alliance"), GP("pvp", {}), GP("pvp", 42), GP("pvp", nil) }
+    local data = FS.IconStyleData
+    local pvp = data.pvp
+    data.pvp = setmetatable({}, { __index = function(_, k)
+        if k == "Alliance" then error("a secret faction was used as a key") end
+        return pvp[k]
+    end })
+    local GS = FS.MicroBars.GlyphSpec
+    local out = {}
+    for i, f in ipairs({ "Alliance", {}, 42, false }) do
+        local ok, spec = pcall(GS, "pvp", f, nil)
+        out[i] = ok and tostring(spec.file) or "error"
+    end
+    local ok, spec = pcall(GS, "pvp", nil, nil)
+    out[#out + 1] = ok and tostring(spec.file) or "error"
     FS.IsSecret = real
+    data.pvp = pvp
     return out
 end
 -- Drive one button's state the way the client does: run the hooks of a script, or flip its enabled flag and run OnEnable/OnDisable.
@@ -443,19 +498,27 @@ function h_enabled(i, on)
     b.isDisabled = not on
     h_script(i, on and "OnEnable" or "OnDisable")
 end
--- Per button: how many textures under its overlay use a glyph file.
+-- Per button: how many textures under it draw the key's glyph texture (the base and, for the game's textures, the ADD copy that
+-- brightens it), and how many of those are NOT the base's rectangle (the old 1.4x ADD copy read as a second, larger icon).
 function h_glyphCounts()
     local out = {}
     for i, b in ipairs(BUTTONS) do
-        local n = 0
-        for _, o in ipairs(ALL) do
-            if o.kind == "Texture" and o.tex and tostring(o.tex):find("glyph%a*_") then
-                local p = o.parent
-                while p and p ~= b do p = p.parent end
-                if p == b then n = n + 1 end
+        local k = keyOf(b)
+        local n, strays = 0, 0
+        if k then
+            for _, o in ipairs(ALL) do
+                if o.kind == "Texture" and o.tex ~= nil and o.tex == k.glyph.tex then
+                    local p = o.parent
+                    while p and p ~= b do p = p.parent end
+                    if p == b then
+                        n = n + 1
+                        local same = o == k.glyph or o.allPoints == k.glyph
+                        if not same then strays = strays + 1 end
+                    end
+                end
             end
         end
-        out[i] = n
+        out[i] = { n = n, strays = strays }
     end
     return out
 end
@@ -578,13 +641,17 @@ end
 
 class World:
     def __init__(self, n: int = 12, scale: float = 1.0, hidden: tuple[int, ...] = (), layout_cfg: bool = True,
-                 store: str | None = None, nolayout: bool = False, deck: bool = True):
+                 store: str | None = None, nolayout: bool = False, deck: bool = True, cls: str | None = "SHAMAN",
+                 faction: str | None = "Horde", class_error: bool = False):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
         self.lua.execute(MOCK)
         g = self.lua.globals()
         g.STORE, g.STORE_IDX, g.NOLAYOUT, g.NODECK = store, n, nolayout, not deck   # the Store button is the last one built
         g.DECK_SRC = DECK_LUA.read_text(encoding="utf-8")
         g.MICRO_SRC = MICRO_LUA.read_text(encoding="utf-8")
+        g.DATA_SRC = (ADDON / "Core" / "IconStyleData.lua").read_text(encoding="utf-8")
+        g.STYLE_SRC = (ADDON / "Core" / "IconStyle.lua").read_text(encoding="utf-8")
+        g.CLASS_TOKEN, g.FACTION, g.CLASS_ERR = cls, faction, class_error
         g.SCALE = scale
         g.COLOR_POWER = self.lua.table_from(list(theme_color_power()))
         g.COLOR_SCRIM = self.lua.table_from(list(theme_color_scrim()))
@@ -677,8 +744,8 @@ def check_layout(lean: float, gap: float) -> None:
 def check_overlay() -> None:
     w = World(12).login()
     check("overlay.no_opaque_rect_under_the_plate", w.call("h_opaqueFills") == 0, f"{w.call('h_opaqueFills')} opaque fills")
-    counts = [c for _, c in w.call("h_glyphCounts").items()]
-    check("overlay.glyph_drawn_once_per_key", counts == [1] * 12, f"{counts}")
+    counts = [dict(c.items()) for _, c in w.call("h_glyphCounts").items()]
+    check("overlay.glyph_drawn_once_per_key", all(c["n"] <= 2 and c["strays"] == 0 for c in counts), f"{counts[:2]}")
 
 
 def tga_header(path: Path) -> tuple[int, int, int, int, int, int]:
@@ -688,116 +755,201 @@ def tga_header(path: Path) -> tuple[int, int, int, int, int, int]:
     return h[2], int.from_bytes(h[12:14], "little"), int.from_bytes(h[14:16], "little"), h[16], h[17], len(data)
 
 
+CLASS_NAMES = {"WARRIOR": "Warrior", "PALADIN": "Paladin", "HUNTER": "Hunter", "ROGUE": "Rogue", "PRIEST": "Priest",
+               "SHAMAN": "Shaman", "MAGE": "Mage", "WARLOCK": "Warlock", "DRUID": "Druid"}
+# Independent oracle: the ramp and cover files the generator writes, and the two keys drawn from our own hand drawn shapes.
+OWN_BAKED = ["glyphart_character.tga", "glyphart_legacy.tga"]
+
+
+def spec_dict(spec) -> dict:
+    out = {str(k): v for k, v in spec.items()}
+    if "coords" in out:
+        out["coords"] = [spec.coords[i] for i in (1, 2, 3, 4)]
+    return out
+
+
 def check_glyph_files() -> None:
-    """Every micro entry resolves to a shipped, loadable texture, and nothing in the micro glyph set is orphaned."""
+    """Every micro entry resolves to the game's own texture with a look, or to our own baked art, and the data is sane."""
     media = ADDON / "Media" / "Textures"
     w = World(12).login()
-    paths = [str(p) for _, p in w.call("h_glyphPaths").items()]
-    names = [p.rsplit("\\", 1)[-1] for p in paths]
-    missing = [n for n in names if not (media / n).exists()]
-    check("glyphs.every_built_key_wears_a_shipped_file", len(names) == 12 and not missing, f"{len(names)} keys, missing {missing}")
-    check("glyphs.every_key_wears_baked_art", all(n.startswith("glyphart_") for n in names), f"{names}")
+    infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
+    check("glyphs.every_built_key_has_a_glyph", len(infos) == 12 and all(i.get("kind") for i in infos), f"{len(infos)}")
+    check("glyphs.no_built_key_wears_a_baked_game_texture",
+          all(i["kind"] == "runtime" or str(i["tex"]).endswith(tuple(OWN_BAKED)) for i in infos), f"{[i['tex'] for i in infos]}")
 
     mb = w.get("FS.MicroBars")
+    data = w.get("FS.IconStyleData")
     stems = sorted({str(v) for _, v in mb.Glyphs.items()} | {str(mb.GlyphGeneric)})
-    resolved = {(stem, f): str(mb.GlyphPath(stem, f)).rsplit("\\", 1)[-1]
-                for stem in stems for f in ("Alliance", "Horde", "Neutral", None)}
-    gone = sorted({n for n in resolved.values() if not (media / n).exists()})
-    check("glyphs.every_mapping_entry_and_faction_resolves_to_an_existing_file",
-          len(stems) >= 18 and "character" in stems and "legacy" in stems and not gone, f"{len(stems)} stems, missing {gone}")
-    pvp = {f: resolved[("pvp", f)] for f in ("Alliance", "Horde", "Neutral", None)}
+    own = {"character", "legacy"}
+    ramps = {str(k) for k, _ in data.ramps.items()}
+    covers = {str(k) for k, _ in data.covers.items()}
+    bad: list[str] = []
+    n_runtime = 0
+    for stem in stems:
+        for faction in ("Alliance", "Horde", "Neutral", None):
+            spec = spec_dict(mb.GlyphSpec(stem, faction, "SHAMAN"))
+            if spec["kind"] == "baked":
+                if stem not in own or not str(spec["file"]).endswith(f"glyphart_{stem}.tga"):
+                    bad.append(f"{stem}/{faction} baked {spec['file']}")
+                continue
+            n_runtime += 1
+            c = spec["coords"]
+            ok = (isinstance(spec["file"], (int, str)) and all(0 <= v <= 1 for v in c) and c[0] < c[1] and c[2] < c[3]
+                  and spec["cover"] in covers and str(spec["fam"]) in ramps and 0 <= spec["boost"] <= 1)
+            if not ok:
+                bad.append(f"{stem}/{faction} {spec}")
+    check("glyphs.every_name_and_faction_resolves_to_a_sound_spec", len(stems) >= 18 and "character" in stems and "legacy" in stems
+          and n_runtime >= 16 * 4 and not bad, f"{len(stems)} stems, {n_runtime} runtime, bad {bad[:2]}")
+    # Character is the class icon, Legacy always our own art, and every other name draws a game texture.
+    check("glyphs.legacy_is_our_own_baked_art", spec_dict(mb.GlyphSpec("legacy", None, "SHAMAN"))["kind"] == "baked")
+    check("glyphs.the_nonexistent_name_gets_the_generic_glyph",
+          spec_dict(mb.GlyphSpec("nonsense", None, None))["file"] == spec_dict(mb.GlyphSpec(str(mb.GlyphGeneric), None, None))["file"])
+    # all nine classes: the class icon path is the client's own Interface\Icons\ClassIcon_<Class>
+    got = {t: spec_dict(mb.GlyphSpec("character", None, t)) for t in CLASS_NAMES}
+    check("glyphs.all_nine_classes_wear_their_own_class_icon",
+          all(g["kind"] == "runtime" and g["file"] == f"Interface\\Icons\\ClassIcon_{CLASS_NAMES[t]}" and g["cover"] == "b"
+              and g["coords"] == [0.07, 0.93, 0.07, 0.93] for t, g in got.items()), f"{got}")
+    check("glyphs.the_nine_class_icons_are_nine_different_files", len({g["file"] for g in got.values()}) == 9)
+    fallback = [str(v) for _, v in w.call("h_oddClasses").items()]
+    check("glyphs.a_secret_nil_unknown_or_odd_class_token_gets_the_person_glyph_and_is_never_indexed",
+          fallback == ["baked"] * 7, f"{fallback}")
+    # PvP follows the faction, and an odd faction gets the free emblem
+    pvp = {f: spec_dict(mb.GlyphSpec("pvp", f, None))["file"] for f in ("Alliance", "Horde", "Neutral", None)}
     check("glyphs.pvp_follows_the_players_faction",
           pvp["Alliance"] != pvp["Horde"] and pvp["Neutral"] == pvp[None] and len(set(pvp.values())) == 3, f"{pvp}")
-    # A faction that is not a plain string (a secret value, a table) must not be indexed.
-    odd = w.call("h_oddFactions")
-    check("glyphs.a_secret_or_non_string_faction_gets_the_free_emblem",
-          len(odd) == 4 and all(str(o).endswith("glyphart_pvp_ffa.tga") for _, o in odd.items()), f"{dict(odd.items())}")
+    odd = [str(v) for _, v in w.call("h_oddFactions").items()]
+    check("glyphs.a_secret_or_non_string_faction_gets_the_free_emblem_and_is_never_indexed",
+          len(odd) == 5 and set(odd) == {str(pvp[None])}, f"{odd}")
 
+    # Which class the key shows is read when the key is built
+    for token in ("PRIEST", "WARRIOR"):
+        first = dict(World(12, cls=token).login().call("h_glyphInfo")[1].items())
+        check(f"glyphs.the_character_key_reads_the_class_at_build.{token.lower()}",
+              str(first["tex"]).endswith(f"ClassIcon_{CLASS_NAMES[token]}"), f"{first['tex']}")
+    for label, kwargs in (("no_class", {"cls": None}), ("class_lookup_raises", {"class_error": True})):
+        info = dict(World(12, **kwargs).login().call("h_glyphInfo")[1].items())
+        check(f"glyphs.the_character_key_falls_back_to_the_person_glyph.{label}", str(info["tex"]).endswith("glyphart_character.tga"), f"{info['tex']}")
+    check("glyphs.no_degrade_logs", w.logs() == "", w.logs())
+
+    # What is shipped: our own two baked keys, the ramps and the covers; nothing derived from the game.
     baked = sorted(p.name for p in media.glob("glyphart_*.tga"))
-    orphans = [n for n in baked if n not in set(resolved.values())]
+    check("glyphs.only_our_own_hand_drawn_keys_are_baked", baked == OWN_BAKED, f"{baked}")
     bad = [n for n in baked if tga_header(media / n) != (2, 64, 64, 32, 0x28, 18 + 64 * 64 * 4)]
-    check("glyphs.baked_art_is_64x64_bgra_tga_of_exact_size", len(baked) >= 19 and not bad, f"{len(baked)} files, bad {bad}")
-    check("glyphs.no_baked_art_is_orphaned", not orphans, f"{orphans}")
-    # The shipped art's alpha IS the key's slanted shape: compare every file against the shape recomputed from the key's
-    # geometry (tools/assets/synthwave_icons.py key_shape_alpha), within one 8 bit step. That pins the fixed crop band (rows
-    # 7 to 56 of 64) and also the lean, any horizontal shift and any clipped corner.
+    check("glyphs.baked_art_is_64x64_bgra_tga_of_exact_size", not bad, f"bad {bad}")
+    missing = [str(r.file) for _, r in data.ramps.items() if not (media / str(r.file)).exists()]
+    missing += [str(c.file) for _, c in data.covers.items() if not (media / str(c.file)).exists()]
+    check("glyphs.every_ramp_and_cover_is_shipped", not missing and len(ramps) == 9 and covers == {"a", "b"}, f"{missing}")
+    odd_sizes = [str(r.file) for _, r in data.ramps.items() if tga_header(media / str(r.file))[:4] != (2, 8, 8, 32)]
+    odd_sizes += [str(c.file) for _, c in data.covers.items() if tga_header(media / str(c.file))[:4] != (2, 64, 64, 32)]
+    check("glyphs.ramps_are_8x8_and_covers_64x64_bgra", not odd_sizes, f"{odd_sizes}")
+    # The baked keys' alpha IS the key's slanted shape: compare against the shape recomputed from the key's geometry
+    # (tools/assets/synthwave_icons.py key_shape_alpha), within one 8 bit step. That pins the fixed crop band (rows 7 to
+    # 56 of 64) and also the lean, any horizontal shift and any clipped corner.
     spec = importlib.util.spec_from_file_location("synthwave_icons", HERE / "assets" / "synthwave_icons.py")
     icons = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(icons)
     want = [round(float(v) * 255) for v in icons.key_shape_alpha(64).reshape(-1)]
     off = {}
     for n in baked:
-        data = (media / n).read_bytes()[18:]
-        worst = max(abs(data[i * 4 + 3] - w) for i, w in enumerate(want))
+        raw = (media / n).read_bytes()[18:]
+        worst = max(abs(raw[i * 4 + 3] - w_) for i, w_ in enumerate(want))
         if worst > 1:
             off[n] = worst
-    check("glyphs.shipped_art_alpha_is_the_keys_shape", len(baked) >= 20 and not off, f"{len(baked)} files, off by more than one step: {off}")
-
-    # Live layout: at every key count the art is drawn in the key's rect (the plate and the ring fill the same rect), so
-    # resample the shipped art band, the plate and the ring to the key's pixel size (3 screen px per design px, and 1, the
-    # live case on a 2560x1440 window where the 64 texel art is minified to about 34) and check the art stays INSIDE the ring: never beyond the plate, and off the ring line's core, where a bright
-    # edge would read as running over the border (the ring is only 35% opaque at idle) or leak into the gap.
-    plate_im = Image.open(media / "cell_slant.tga").convert("RGBA").getchannel("A")
-    ring_im = Image.open(media / "deck_key_slant_outline.tga").convert("RGBA").getchannel("A")
-    pad = (1 - 26 / 34) / 2
-    leaks = {}
-    for count, px in ((c, k) for c in (12, 14, 16, 18) for k in (3, 1)):
-        info = dict(World(count).login().call("h_glyphInfo")[1].items())
-        size = (round(info["w"] * px), round(info["h"] * px))
-        plate = np.asarray(plate_im.resize(size, Image.BILINEAR), dtype=float) / 255
-        ring = np.asarray(ring_im.resize(size, Image.BILINEAR), dtype=float) / 255
-        for n in baked:
-            art_im = Image.open(media / n).convert("RGBA").getchannel("A")
-            art = np.asarray(art_im.resize(size, Image.BILINEAR, box=(0, pad * 64, 64, (1 - pad) * 64)), dtype=float) / 255
-            beyond = float((art - plate).max())
-            core = ring >= 0.75  # the ring line itself; its soft inner edge may still carry a little art
-            under = float(art[core].max()) if core.any() else 0.0
-            if beyond > 0.08 or under > 0.2:
-                leaks[(count, px, n)] = (round(beyond, 2), round(under, 2))
-    check("glyphs.art_stays_inside_the_plate_and_off_the_ring_at_every_key_count", not leaks,
-          f"{len(leaks)} leaks (beyond the plate, under the ring), first {list(leaks.items())[:3]}")
+    check("glyphs.baked_art_alpha_is_the_keys_shape", len(baked) == 2 and not off, f"off by more than one step: {off}")
     # Outside the shape the RGB is the plate colour, not the art: a straight alpha bilinear fetch blends in the RGB of
     # transparent texels, and bright art there would fringe into the gap.
     dark = (0x14, 0x0A, 0x24)
     bleed = {}
     for n in baked:
-        data = (media / n).read_bytes()[18:]
+        raw = (media / n).read_bytes()[18:]
         worst = 0
-        for i in range(0, len(data), 4):
-            if data[i + 3] == 0:
-                worst = max(worst, abs(data[i + 2] - dark[0]), abs(data[i + 1] - dark[1]), abs(data[i] - dark[2]))
+        for i in range(0, len(raw), 4):
+            if raw[i + 3] == 0:
+                worst = max(worst, abs(raw[i + 2] - dark[0]), abs(raw[i + 1] - dark[1]), abs(raw[i] - dark[2]))
         if worst > 3:
             bleed[n] = worst
     check("glyphs.transparent_texels_carry_the_plate_colour_not_the_art", not bleed, f"{bleed}")
-    # The old hand drawn glyph_<name>.tga line glyphs are not drawn any more (glyph_hud_* belong to the Console keys).
     stale = sorted(p.name for p in media.glob("glyph_*.tga") if not p.name.startswith("glyph_hud_"))
     check("glyphs.no_unreferenced_line_glyph_files", not stale, f"{stale}")
-    check("glyphs.no_degrade_logs", w.logs() == "", w.logs())
+    check("glyphs.no_degrade_logs_after_the_file_checks", w.logs() == "", w.logs())
+
+
+def check_cover_geometry() -> None:
+    """The icon is a plain rectangle and the cover hides what sticks out of the slanted key. At every key count, and at 3 and
+    1 screen px per design px (1 is the live case on a 2560x1440 window, where the 64 texel art is minified to about 34), the
+    cover must hide every texel of the rectangle outside the plate and must stay off the plate's inside (the ring draws over it)."""
+    media = ADDON / "Media" / "Textures"
+    plate_im = Image.open(media / "cell_slant.tga").convert("RGBA").getchannel("A")
+    ring_im = Image.open(media / "deck_key_slant_outline.tga").convert("RGBA").getchannel("A")
+    bad = {}
+    for count, px in ((c, k) for c in (12, 14, 16, 18) for k in (3, 1)):
+        w = World(count).login()
+        for i, info in enumerate((dict(v.items()) for _, v in w.call("h_glyphInfo").items())):
+            if info.get("kind") != "runtime":
+                continue
+            kw, kh = round(info["bw"] * px), round(info["bh"] * px)
+            plate = np.asarray(plate_im.resize((kw, kh), Image.BILINEAR), dtype=float) / 255
+            ring = np.asarray(ring_im.resize((kw, kh), Image.BILINEAR), dtype=float) / 255
+            left, right = round(info["cl"] * px), round(info["cr"] * px)
+            tex = media / ("iconcover_a.tga" if "iconcover_a" in info["coverTex"] else "iconcover_b.tga")
+            cover_im = Image.open(tex).convert("RGBA").getchannel("A")
+            cover = np.asarray(cover_im.resize((kw - left - right, kh), Image.BILINEAR), dtype=float) / 255
+            region = slice(left, kw - right)
+            outside = 1.0 - plate[:, region]
+            leak = float((outside - cover).max())            # outside the plate and not covered: the icon would show there
+            reach = round(px * 0.5) + 1   # the cover reaches 0.5 design px past the ring's line; stay clear of that band
+            padded = np.pad(ring, reach, mode="edge")
+            near_ring = np.max([padded[reach + dy:reach + dy + kh, reach + dx:reach + dx + kw]
+                                for dy in range(-reach, reach + 1) for dx in range(-reach, reach + 1)], axis=0)
+            inner = ((plate - near_ring) >= 0.75)[:, region]
+            under = float(cover[inner].max()) if inner.any() else 0.0   # the cover over the plate's inside would hide icon
+            if leak > 0.08 or under > 0.2:
+                bad[(count, px, i)] = (round(leak, 2), round(under, 2))
+    check("cover.hides_everything_outside_the_plate_and_nothing_inside_it_at_every_key_count", not bad, f"{len(bad)} bad, first {list(bad.items())[:3]}")
 
 
 def check_fill() -> None:
-    """Baked art covers its key (cover, not contain), cropped to a FIXED band so the baked slant matches the plate at any
-    key width. No mask: it would not clip."""
+    """The game's textures get a plain rectangle in the cover's columns with the cover over it, in a fixed order under the ring
+    (no mask: it would not clip); our own baked art covers its key, cropped to a FIXED band so the baked slant matches the
+    plate at any key width."""
     baked_pad = (1 - 26 / 34) / 2  # the baked shape's rows (tools/assets/synthwave_icons.py KEY_W, KEY_H)
+    data = World(12).login().get("FS.IconStyleData")
+    covers = {str(k): (c.x0, c.x1) for k, c in data.covers.items()}
     for count, scale in ((12, 1.0), (12, 0.64), (14, 1.0), (16, 1.0)):
         w = World(count, scale=scale).login()
         infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
         tag = f"keys_{count}_scale_{scale}"
-        check(f"fill.{tag}.every_key_has_art", len(infos) == count and all("glyphart_" in str(i["tex"]) for i in infos), f"{len(infos)}")
-        check(f"fill.{tag}.art_is_the_size_of_the_key",
-              all(near(i["w"], i["bw"]) and near(i["h"], i["bh"]) for i in infos), f"{[(i['w'], i['h'], i['bw'], i['bh']) for i in infos][:2]}")
-        # cover: the whole width of the square texture and always the baked band of rows, whatever the key's aspect
-        check(f"fill.{tag}.art_crops_to_the_baked_band",
-              all(near(i["c"][1], 0) and near(i["c"][2], 1) and near(i["c"][3], baked_pad) and near(i["c"][4], 1 - baked_pad)
-                  for i in infos), f"{[tuple(i['c'].values()) for i in infos][:2]}")
-        check(f"fill.{tag}.ring_draws_over_the_icon",
-              all(i["layer"] == "ARTWORK" and i["edgeLayer"] == "ARTWORK" and i["sub"] < i["edgeSub"] for i in infos),
-              f"{[(i['layer'], i['sub'], i['edgeLayer'], i['edgeSub']) for i in infos][:2]}")
+        check(f"fill.{tag}.every_key_has_a_glyph", len(infos) == count and all(i["kind"] == "runtime" for i in infos), f"{len(infos)}")
+        rects = [(i["left"], i["right"], i["cl"], i["cr"], covers["a" if "iconcover_a" in i["coverTex"] else "b"], i["bw"]) for i in infos]
+        # the glyph and its cover share one rectangle, whole pixels, in the cover's columns of the key
+        check(f"fill.{tag}.glyph_and_cover_share_the_cover_columns_in_whole_pixels",
+              all(l == cl and r == cr and l == int(l) and r == int(r) and abs(l - x0 * bw) <= 0.5 and abs(r - (1 - x1) * bw) <= 0.5
+                  for l, r, cl, cr, (x0, x1), bw in rects), f"{rects[:2]}")
+        check(f"fill.{tag}.the_rectangle_is_the_keys_full_height", all(i["top"] == 0 and i["bottom"] == 0 for i in infos),
+              f"{[(i['top'], i['bottom']) for i in infos][:2]}")
+        check(f"fill.{tag}.the_overlays_follow_the_glyphs_rectangle", all(i["boostAnchor"] and i["modAnchor"] and i["liftAnchor"] for i in infos))
+        order = [(i["sub"], i["boostSub"], i["modSub"], i["liftSub"], i["coverSub"], i["edgeSub"]) for i in infos]
+        check(f"fill.{tag}.glyph_boost_ramp_lift_cover_then_the_ring_in_that_order",
+              all(a < b < c < d < e < f and i["layer"] == i["edgeLayer"] == i["coverLayer"] == "ARTWORK" for (a, b, c, d, e, f), i in zip(order, infos)), f"{order[:1]}")
+        check(f"fill.{tag}.blend_modes_are_ADD_MOD_ADD", all((i["boostBlend"], i["modBlend"], i["liftBlend"]) == ("ADD", "MOD", "ADD") for i in infos))
+        check(f"fill.{tag}.the_boost_copy_and_the_glyph_show_the_same_window",
+              all(i["boostTex"] == i["tex"] and [i["boostCoords"][k] for k in (1, 2, 3, 4)] == [i["c"][k] for k in (1, 2, 3, 4)] for i in infos),
+              f"{infos[0]['boostCoords']} {infos[0]['c']}")
         check(f"fill.{tag}.no_degrade_logs", w.logs() == "", w.logs())
+    # a key without a class (our own baked art): the whole key, the fixed band
+    for count, scale in ((12, 1.0), (14, 1.0)):
+        w = World(count, scale=scale, cls=None).login()
+        first = dict(w.call("h_glyphInfo")[1].items())
+        tag = f"baked_{count}_scale_{scale}"
+        check(f"fill.{tag}.art_is_the_size_of_the_key", near(first["w"], first["bw"]) and near(first["h"], first["bh"]), f"{first['w']}x{first['h']} vs {first['bw']}x{first['bh']}")
+        check(f"fill.{tag}.art_crops_to_the_baked_band",
+              near(first["c"][1], 0) and near(first["c"][2], 1) and near(first["c"][3], baked_pad) and near(first["c"][4], 1 - baked_pad), f"{first['c']}")
+        check(f"fill.{tag}.ring_draws_over_the_icon", first["layer"] == "ARTWORK" and first["edgeLayer"] == "ARTWORK" and first["sub"] < first["edgeSub"])
+        check(f"fill.{tag}.a_baked_key_has_no_overlays", first.get("boostSub") is None, f"{first.get('boostSub')}")
 
 
 def check_glyph_tint() -> None:
-    """The art is full colour: idle is a touch calm, hover, active and pressed are the art as baked, disabled is desaturated and dim."""
+    """The glyph is full colour: idle is a touch calm, hover, active and pressed are the glyph as styled, disabled is desaturated and dim."""
     w = World(12).login()
     mb = w.get("FS.MicroBars")
     tint = {}
@@ -806,27 +958,40 @@ def check_glyph_tint() -> None:
         tint[name] = (tuple(v.glyph[i] for i in (1, 2, 3)), v.glyphA, bool(v.glyphDesat))
     idle, hot = tint["idle"], (((1, 1, 1)), 1, False)
     check("tint.idle_is_a_touch_calm_not_dark", all(0.88 <= c < 1 for c in idle[0]) and idle[1] == 1 and not idle[2], f"{idle}")
-    check("tint.hover_active_pressed_are_the_art_as_baked", all(tint[k] == hot for k in ("hover", "active", "pressed")), f"{tint}")
+    check("tint.hover_active_pressed_are_the_glyph_as_styled", all(tint[k] == hot for k in ("hover", "active", "pressed")), f"{tint}")
     off = tint["disabled"]
     check("tint.disabled_is_desaturated_and_dim_not_a_dark_multiply", off[2] and off[1] < 1 and all(c >= 0.7 for c in off[0]), f"{off}")
 
-    def painted(i: int) -> tuple[list[float], bool]:
+    def painted(i: int) -> dict:
         info = dict(w.call("h_glyphInfo")[i].items())
-        return [info["vertex"][k] for k in (1, 2, 3, 4)], bool(info["desat"])
+        boost = float(w.get("FS.MicroBars.keys")[i].spec.boost)
+        return {"base": [info["vertex"][k] for k in (1, 2, 3, 4)], "baseDesat": bool(info["desat"]),
+                "boost": [info["boostVertex"][k] for k in (1, 2, 3, 4)], "rampGrey": bool(info["modDesat"]),
+                "lift": info["liftVertex"][4], "boostK": boost}
 
-    base = painted(1)
-    check("tint.a_key_paints_idle_at_login", near(base[0][3], 1) and not base[1] and all(0.88 <= c < 1 for c in base[0][:3]), f"{base}")
+    base, base2 = painted(1), painted(2)
+    check("tint.a_key_paints_idle_at_login", near(base["base"][3], 1) and all(0.88 <= c < 1 for c in base["base"][:3]) and not base["rampGrey"], f"{base}")
+    check("tint.the_glyph_is_always_drawn_grey_under_its_ramp", base["baseDesat"] is True, f"{base}")
+    check("tint.the_boost_copy_wears_the_same_tint_scaled_by_its_boost",
+          all(near(base["boost"][k], base["base"][k] * base["boostK"]) for k in range(3)) and near(base["boost"][3], base["base"][3]), f"{base}")
     w.call("h_script", 1, "OnEnter")
     hov = painted(1)
-    check("tint.a_hovered_key_paints_full_colour", hov[0] == [1, 1, 1, 1] and not hov[1], f"{hov}")
+    check("tint.a_hovered_key_paints_full_colour", hov["base"] == [1, 1, 1, 1] and not hov["rampGrey"] and near(hov["lift"], 1), f"{hov}")
     w.call("h_script", 1, "OnLeave")
     check("tint.leaving_returns_to_idle", painted(1) == base, f"{painted(1)} vs {base}")
     w.call("h_enabled", 2, False)
     dis = painted(2)
-    check("tint.a_disabled_key_paints_desaturated", dis[1] and dis[0][3] < 1, f"{dis}")
+    check("tint.a_disabled_key_paints_its_ramp_grey_and_dim", dis["rampGrey"] and dis["base"][3] < 1 and dis["boost"][3] < 1 and dis["lift"] < 1, f"{dis}")
     w.call("h_enabled", 2, True)
-    check("tint.re_enabling_restores_colour", painted(2) == base and painted(1) == base, f"{painted(2)}")
-    check("tint.no_degrade_logs", w.logs() == "", w.logs())
+    check("tint.re_enabling_restores_colour", painted(2) == base2 and painted(1) == base, f"{painted(2)}")
+    # a baked key (no class): the plain baked art is tinted and desaturated as before
+    wb = World(12, cls=None).login()
+    info = dict(wb.call("h_glyphInfo")[1].items())
+    check("tint.a_baked_key_paints_idle_and_not_desaturated", not info["desat"] and near(info["vertex"][4], 1), f"{info['vertex']} {info['desat']}")
+    wb.call("h_enabled", 1, False)
+    info = dict(wb.call("h_glyphInfo")[1].items())
+    check("tint.a_disabled_baked_key_is_desaturated", info["desat"] is True and info["vertex"][4] < 1)
+    check("tint.no_degrade_logs", w.logs() == "" and wb.logs() == "", w.logs())
 
 
 def check_art() -> None:
@@ -1170,6 +1335,7 @@ def main() -> int:
     check_overlay()
     check_glyph_files()
     check_fill()
+    check_cover_geometry()
     check_glyph_tint()
     check_art()
     check_hit_rects(lean, gap)

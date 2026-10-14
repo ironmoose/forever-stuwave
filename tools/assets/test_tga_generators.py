@@ -39,6 +39,13 @@ TGA_HEADER_SIZE = 18
 #     slice_button, slice_border, slice_glow).
 EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     "anti_corner": (64, 64),
+    # generate_icon_style.py: the runtime icon style's nine 8x8 colour ramps and the two 64x64 key covers.
+    "icon_style": {
+        **{f"iconramp_{family}": (8, 8) for family in (
+            "house_cyan", "house_violet", "house_pink", "fire", "earth", "frost", "air", "lightning", "water")},
+        "iconcover_a": (64, 64),
+        "iconcover_b": (64, 64),
+    },
     "border_corner": (64, 64),
     "border_rail": (4, 128),
     # generate_cell_glow.py's own SIZE constant says 64x64, but it writes
@@ -261,7 +268,7 @@ def _run_generator(generator_path: Path, work_dir: Path) -> None:
     result = subprocess.run(
         [sys.executable, script_copy.name],
         cwd=work_dir,
-        env={**os.environ, "FS_ASSET_OUTPUT_DIR": str(work_dir)},
+        env={**os.environ, "FS_ASSET_OUTPUT_DIR": str(work_dir), "FS_ASSET_INPUT_DIR": str(MEDIA_DIR)},
         capture_output=True,
         text=True,
         timeout=120,
@@ -1991,3 +1998,120 @@ def test_led_glow_is_solid_at_the_centre_and_clear_at_the_edges(led_outputs: Pat
     assert _alpha_at(path, 32, 16) == 255
     for x, y in ((0, 0), (63, 0), (0, 31), (63, 31), (0, 16), (63, 16), (32, 0), (32, 31)):
         assert _alpha_at(path, x, y) == 0, (x, y)
+
+
+# --- the runtime icon style: ramps and key covers ----------------------------
+
+ICON_STYLE_GENERATOR = GENERATOR_DIR / "generate_icon_style.py"
+ICON_FAMILIES = ("house_cyan", "house_violet", "house_pink", "fire", "earth", "frost", "air", "lightning", "water")
+
+
+@pytest.fixture(scope="module")
+def icon_style_outputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    work = tmp_path_factory.mktemp("icon_style")
+    _run_generator(ICON_STYLE_GENERATOR, work)
+    return work
+
+
+def _pixel(path: Path, x: int, y: int) -> tuple[int, int, int, int]:
+    """(r, g, b, a) of a texel of a 32 bit top-left TGA."""
+    data = path.read_bytes()
+    width = struct.unpack_from("<H", data, 12)[0]
+    o = 18 + (y * width + x) * 4
+    return data[o + 2], data[o + 1], data[o], data[o + 3]
+
+
+def _synthwave_families():
+    spec = importlib.util.spec_from_file_location("synthwave_icons_for_test", GENERATOR_DIR / "synthwave_icons.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(GENERATOR_DIR))
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(GENERATOR_DIR))
+    return module.FAMILIES
+
+
+@pytest.mark.parametrize("family", ICON_FAMILIES)
+def test_icon_ramp_runs_from_the_hot_colour_to_the_mid_colour(icon_style_outputs: Path, family: str) -> None:
+    mid, hot = (tuple(round(float(c) * 255) for c in rgb) for rgb in _synthwave_families()[family][1:])
+    path = icon_style_outputs / f"iconramp_{family}.tga"
+    top_left, bottom_right = _pixel(path, 0, 0), _pixel(path, 7, 7)
+    assert top_left[3] == bottom_right[3] == 255, "a ramp is opaque (MOD ignores alpha, and the ramp must not punch holes)"
+    # the corners are one texel from the ends of the diagonal: close to hot at the top left, close to mid at the bottom right
+    assert all(abs(a - b) <= 28 for a, b in zip(top_left[:3], hot)), (top_left, hot)
+    assert all(abs(a - b) <= 28 for a, b in zip(bottom_right[:3], mid)), (bottom_right, mid)
+    # and it really is a gradient, mostly top to bottom
+    assert _pixel(path, 0, 0)[:3] != _pixel(path, 0, 7)[:3] and _pixel(path, 0, 3)[:3] != _pixel(path, 0, 4)[:3]
+
+
+def test_icon_cover_is_clear_inside_the_key_and_solid_outside_it(icon_style_outputs: Path) -> None:
+    for key in "ab":
+        path = icon_style_outputs / f"iconcover_{key}.tga"
+        alpha = lambda x, y: _pixel(path, x, y)[3]  # noqa: E731
+        # the middle of the key is the icon's: nothing over it
+        assert alpha(32, 32) == 0, key
+        # the slanted key leaves the top left and the bottom right of the rectangle uncovered by the plate: solid there
+        assert alpha(1, 2) == 255 and alpha(62, 61) == 255, key
+        # the top right and the bottom left corners of the rectangle are inside the key (it leans /): clear
+        assert alpha(55, 12) <= 8 and alpha(8, 51) <= 8, (key, alpha(55, 12), alpha(8, 51))
+
+
+def test_icon_cover_is_symmetric_under_a_half_turn(icon_style_outputs: Path) -> None:
+    # the key is a parallelogram and both rectangles are centred on it
+    for key in "ab":
+        path = icon_style_outputs / f"iconcover_{key}.tga"
+        worst = max(abs(_pixel(path, x, y)[3] - _pixel(path, 63 - x, 63 - y)[3]) for y in range(64) for x in range(64))
+        assert worst <= 40, (key, worst)
+
+
+def test_icon_cover_is_the_plate_colour_everywhere(icon_style_outputs: Path) -> None:
+    for key in "ab":
+        path = icon_style_outputs / f"iconcover_{key}.tga"
+        assert {_pixel(path, x, y)[:3] for x in range(0, 64, 7) for y in range(0, 64, 7)} == {(0x0D, 0x06, 0x20)}
+
+
+def test_committed_ramps_and_covers_match_their_generator(icon_style_outputs: Path) -> None:
+    outs = sorted(icon_style_outputs.glob("*.tga"))
+    assert len(outs) == 11
+    for out in outs:
+        assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
+
+
+# --- nothing derived from the game's art is shipped ----------------------------
+
+# The only textures that are not written by a generate_*.py: the two micro keys drawn from our own hand drawn shapes
+# (tools/assets/deck_glyph_sources.py), baked by `synthwave_icons.py --bake-own`. No game art goes into them.
+OWN_BAKED = {"glyphart_character", "glyphart_legacy"}
+
+
+def _generated_stems() -> set[str]:
+    stems: set[str] = set()
+    for name, dims in EXPECTED_DIMS.items():
+        stems |= set(dims) if isinstance(dims, dict) else {name}
+    return stems
+
+
+def test_every_shipped_texture_is_our_own_art() -> None:
+    """The manifest of allowed texture files: what a generator in this directory writes, and the two own-art baked keys.
+    A texture that came from a game file (a spell icon, a micro button, a class icon) is neither, so this fails."""
+    shipped = {p.stem for p in MEDIA_DIR.glob("*.tga")}
+    unknown = sorted(shipped - _generated_stems() - OWN_BAKED)
+    assert not unknown, f"textures with no own-art source (a generator or the own-art bake): {unknown[:10]} ({len(unknown)})"
+    assert OWN_BAKED <= shipped
+
+
+def test_no_other_image_format_is_shipped_in_the_textures_folder() -> None:
+    other = sorted(p.name for p in MEDIA_DIR.iterdir() if p.is_file() and p.suffix != ".tga")
+    assert not other, other
+
+
+def test_the_own_art_bake_writes_exactly_the_two_own_keys(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [sys.executable, str(GENERATOR_DIR / "synthwave_icons.py"), "--bake-own"],
+        env={**os.environ, "FS_ASSET_OUTPUT_DIR": str(tmp_path)}, capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    assert {p.stem for p in tmp_path.glob("*.tga")} == OWN_BAKED
+    for out in tmp_path.glob("*.tga"):
+        assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
