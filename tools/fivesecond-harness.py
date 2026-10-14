@@ -226,6 +226,65 @@ do
     function R:SetClipsChildren(v) self._clips = v end
     function R:GetEffectiveScale() return __effScale or 1 end
 end
+-- Animation groups that record what they are told and play on the mock clock: Alpha animations only, looped, with the IN_OUT
+-- smoothing as a cosine. __animAlpha(region) is the alpha the region has now (its own, or what a playing group makes of it).
+do
+    local R = __Region
+    local Group = {}
+    local noop = function() end
+    local function methods(t) return setmetatable(t, { __index = function(_, k) return Group[k] or noop end }) end
+    function Group:SetLooping(v) self.looping = v end
+    function Group:Play() self.playing, self.t0 = true, GetTime() end
+    function Group:Stop() self.playing = false end
+    function Group:IsPlaying() return self.playing end
+    function Group:CreateAnimation(kind)
+        local anim = setmetatable({ kind = kind, order = 1, duration = 0, from = 0, to = 1 }, { __index = function() return noop end })
+        function anim:SetFromAlpha(v) self.from = v end
+        function anim:SetToAlpha(v) self.to = v end
+        function anim:SetDuration(v) self.duration = v end
+        function anim:SetOrder(v) self.order = v end
+        function anim:SetSmoothing(v) self.smoothing = v end
+        self.anims[#self.anims + 1] = anim
+        return anim
+    end
+    function R:CreateAnimationGroup()
+        local group = methods({ owner = self, anims = {}, playing = false, looping = "NONE" })
+        self._groups = self._groups or {}
+        self._groups[#self._groups + 1] = group
+        return group
+    end
+    function __animAlpha(region)
+        for _, group in ipairs(region._groups or {}) do
+            if group.playing then
+                local list = {}
+                for _, anim in ipairs(group.anims) do list[#list + 1] = anim end
+                table.sort(list, function(x, y) return x.order < y.order end)
+                local total = 0
+                for _, anim in ipairs(list) do total = total + anim.duration end
+                local t = GetTime() - group.t0
+                if group.looping == "REPEAT" then t = t % total elseif t > total then t = total end
+                for _, anim in ipairs(list) do
+                    if t <= anim.duration or anim == list[#list] then
+                        local p = anim.duration > 0 and math.min(1, t / anim.duration) or 1
+                        if anim.smoothing == "IN_OUT" then p = 0.5 - 0.5 * math.cos(math.pi * p) end
+                        return anim.from + (anim.to - anim.from) * p
+                    end
+                    t = t - anim.duration
+                end
+            end
+        end
+        return region._alpha or 1
+    end
+end
+-- a hidden frame runs no OnUpdate in the client
+function __tickAll(dt)
+    __advance(dt)
+    local list = {}
+    for _, f in ipairs(__frames) do
+        if f._scripts.OnUpdate and f._shown ~= false then list[#list + 1] = f end
+    end
+    for _, f in ipairs(list) do f._scripts.OnUpdate(f, dt) end
+end
 """
 
 
@@ -400,6 +459,11 @@ def gauge_levels(lua) -> list:
     return out
 
 
+def eff_alpha(lua, region) -> float:
+    """The alpha a region draws with right now: its own, or what a playing animation group makes of it."""
+    return float(lua.eval("__animAlpha")(region))
+
+
 def cells_look(lua):
     hero = ft(lua).FT.hero
     L = led(lua)
@@ -408,8 +472,8 @@ def cells_look(lua):
     lit = cell_color(L.word[1]) if word else cell_color(L.d1)
     return dict(
         text=text, count=count, word=word, ring=rgb(hero.fsSkin.border.ring._vertex),
-        ring_a=float(hero.fsSkin.border.ring._vertex[4]), glow=rgb(hero.fsSkin.glow._vertex),
-        glow_a=float(hero.fsSkin.glow._vertex[4]), plate=rgb(hero.fsPlate._vertex), plate_a=float(hero.fsPlate._vertex[4]),
+        ring_a=float(hero.fsSkin.border.ring._vertex[4]) * eff_alpha(lua, hero.fsSkin.border.ring), glow=rgb(hero.fsSkin.glow._vertex),
+        glow_a=float(hero.fsSkin.glow._vertex[4]) * eff_alpha(lua, hero.fsSkin.glow), plate=rgb(hero.fsPlate._vertex), plate_a=float(hero.fsPlate._vertex[4]),
         lit=lit[0], lit_a=lit[1], alpha=float(cells_tile(lua)._alpha),
     )
 
@@ -453,7 +517,7 @@ def leave_combat(lua):
 def fx(lua) -> dict:
     f = ft(lua).Fx()
     return {k: (f[k] if f[k] is not None else None) for k in
-            ("flash", "dip", "warm", "zp", "dropSeg", "dropA", "pp", "flare", "tick", "breath", "glitchA", "glitchDx")}
+            ("flash", "dip", "warm", "zp", "dropSeg", "dropA", "pp", "flare", "tick", "breathing", "glitchA", "glitchDx")}
 
 
 def regen_look(lua, after=1.2):
@@ -1930,14 +1994,14 @@ def check_the_rim_flares_once_at_regen_with_the_pulse_switch_and_not_without():
     tick(lua, 5.0)
     rec = play(lua, 1.4, lambda l: cells_look(l)["glow_a"])
     assert max(rec) < k["res_glow"] + 0.01, "a flare with the pulse switch off"
-    # the master takes the flare off the rim but the pulse is still counted (the sound and the counter are the ledger's)
+    # the master takes the pulse with it: none is started or counted
     lua = world()
     conf(lua, "fivesecond.motion", False)
     cast(lua)
     tick(lua, 5.0)
     rec = play(lua, 1.4, lambda l: cells_look(l)["glow_a"])
     assert max(rec) < k["res_glow"] + 0.01
-    assert int(view(lua).pulses) == 1
+    assert int(view(lua).pulses) == 0
 
 
 def check_the_regen_tick_pulse_grows_the_bar_a_pixel_each_side_on_a_two_second_timer():
@@ -1976,24 +2040,72 @@ def check_the_regen_tick_pulse_grows_the_bar_a_pixel_each_side_on_a_two_second_t
     assert all(r[0] == 0 and r[1] == 2.0 for r in play(lua, 4.4, probe))
 
 
-def check_the_idle_glow_breathes_the_rim_and_only_at_rest():
+def check_the_idle_glow_is_a_looping_animation_of_the_rim_and_only_at_rest():
     k = MK["k"]
     lua = world()
     refresh(lua)
-    rec = play(lua, 4.2, lambda l: (fx(l)["breath"], cells_look(l)["ring_a"], cells_look(l)["glow_a"]))
-    bs = [r[0] for r in rec]
-    assert min(bs) < 0.05 and max(bs) > 0.95, (min(bs), max(bs))
-    for b, ring, glow in rec:
-        approx(ring, k["breath_ring"] + k["breath_swing"] * b, "breathing ring", 0.02)
-        approx(glow, k["breath_glow"] * b, "breathing glow", 0.02)
-    # not while counting or at regen
+    B = ft(lua).FT.breath
+    groups = seq(B.groups)
+    assert len(groups) == 2 and bool(B.on) and all(bool(g.playing) for g in groups), "the idle glow plays"
+    gauge = seq(B.gauge)
+    assert len(gauge) == 10 and bool(B.gaugeOn) and all(bool(g.playing) for g in gauge), "and so does the gauge"
+    for g in gauge:
+        approx(sum(float(a.duration) for a in seq(g.anims)), k["breath_time"], "the gauge cycle is the same period")
+    for g in groups:
+        assert str(g.looping) == "REPEAT"
+        approx(sum(float(a.duration) for a in seq(g.anims)), k["breath_time"], "one cycle is the mockup's period")
+        assert all(str(a.kind) == "Alpha" and str(a.smoothing) == "IN_OUT" for a in seq(g.anims))
+    rec = play(lua, k["breath_time"] + 0.3, lambda l: (cells_look(l)["ring_a"], cells_look(l)["glow_a"]))
+    rings, glows = [r[0] for r in rec], [r[1] for r in rec]
+    approx(min(rings), k["breath_ring"], "the dimmest ring", 0.02)
+    approx(max(rings), k["breath_ring"] + k["breath_swing"], "the brightest ring", 0.02)
+    approx(min(glows), 0.0, "the dimmest glow", 0.02)
+    approx(max(glows), k["breath_glow"], "the brightest glow", 0.02)
+    seg = ft(lua).FT.gauge.seg[1]
+    gs = play(lua, k["breath_time"], lambda l: float(seg._vertex[4]) * eff_alpha(l, seg))
+    approx(min(gs), 0.24, "the dimmest idle gauge segment", 0.02)
+    approx(max(gs), 0.24 + 0.14, "the brightest idle gauge segment", 0.02)
+    # the extremes sit half a period apart
+    lo = rings.index(min(rings[:int(k["breath_time"] * 60)]))
+    hi = rings.index(max(rings[:int(k["breath_time"] * 60)]))
+    approx(abs(hi - lo) / 60, k["breath_time"] / 2, "the glow rises and falls over half a period each", 0.1)
+    # no ticker pass is needed to move it
+    assert not bool(ft(lua).FT.fast) and not bool(ft(lua).FT.ambient)
+    # not while counting
     cast(lua)
-    assert all(r[0] is None for r in play(lua, 0.5, lambda l: (fx(l)["breath"],)))
+    tick(lua, 0.1)
+    assert not bool(B.on) and not bool(B.gaugeOn) and not any(bool(g.playing) for g in groups + gauge), "the glow stops under the count"
+    approx(cells_look(lua)["ring_a"], MK["k"]["susp_ring"], "the count's own ring", 1e-6)
+    approx(eff_alpha(lua, ft(lua).FT.hero.fsSkin.border.ring), 1.0, "the ring alpha is back to full")
+    # nor under the mouse: the hover ring is steady
     lua = world()
-    conf(lua, "fivesecond.fx.breath", False)
     refresh(lua)
-    rec = play(lua, 4.2, lambda l: (fx(l)["breath"], cells_look(l)["ring_a"], cells_look(l)["glow_a"]))
-    assert all(r[0] is None and abs(r[1] - k["idle_ring"]) < 1e-6 and r[2] == 0 for r in rec)
+    lua.eval("__Region.Fire")(cells_tile(lua), "OnEnter")
+    refresh(lua)
+    B = ft(lua).FT.breath
+    assert not bool(B.on), "the glow stops under the mouse"
+    assert bool(B.gaugeOn), "but the gauge keeps breathing"
+    approx(cells_look(lua)["ring_a"], 1.0, "the hover ring", 1e-6)
+    lua.eval("__Region.Fire")(cells_tile(lua), "OnLeave")
+    refresh(lua)
+    assert bool(B.on), "and plays again after it"
+    # the switch and the master stop it
+    for key in ("fivesecond.fx.breath", "fivesecond.motion"):
+        lua = world()
+        refresh(lua)
+        assert bool(ft(lua).FT.breath.on)
+        conf(lua, key, False)
+        B = ft(lua).FT.breath
+        assert not bool(B.on) and not any(bool(g.playing) for g in seq(B.groups)), key
+        rec = play(lua, k["breath_time"], lambda l: (cells_look(l)["ring_a"], cells_look(l)["glow_a"]))
+        assert all(abs(r[0] - k["idle_ring"]) < 1e-6 and r[1] == 0 for r in rec), key
+        conf(lua, key, True)
+        assert bool(ft(lua).FT.breath.on), key + " back on"
+    # a hidden tab does not breathe
+    lua = world()
+    refresh(lua)
+    conf(lua, "fivesecond.enabled", False)
+    assert not bool(ft(lua).FT.breath.on), "hidden"
 
 
 def check_the_kept_and_unreadable_rate_stutter_in_short_bursts_and_a_live_rate_never_does():
@@ -2035,10 +2147,12 @@ def check_the_kept_and_unreadable_rate_stutter_in_short_bursts_and_a_live_rate_n
     assert not any(r[2] < 1 for r in rec if r[0] == "susp" or r[1] < 1), "a stutter under the count or the sweep"
     assert any(r[2] < 1 for r in rec if r[0] != "susp" and r[1] >= 1), "no stutter once the sweep is over"
     # an unreadable rate stutters too; the switch stops it
-    lua = world(combat=True)
+    lua = world()
+    run(lua, "__regenMode = 'throw'")
     refresh(lua)
     assert any(r[0] < 1 for r in play(lua, 5.0, probe))
-    lua = world(combat=True)
+    lua = world()
+    run(lua, "__regenMode = 'throw'")
     conf(lua, "fivesecond.fx.glitch", False)
     refresh(lua)
     assert not any(r[0] < 1 for r in play(lua, 5.0, probe))
@@ -2094,7 +2208,7 @@ def check_every_switch_stops_its_own_effect_and_only_that_one():
         return dict(
             flash=max(r["flash"] for r in rec) > 0, dip=any(r["dip"] for r in rec), warm=max(r["warm"] for r in rec) > 0,
             zp=max(r["zp"] for r in rec) > 0, dropSeg=any(r["dropSeg"] for r in rec), pp=min(r["pp"] for r in rec) < 1,
-            tick=max(r["tick"] for r in rec) > 0, breath=any(r["breath"] is not None for r in rec),
+            tick=max(r["tick"] for r in rec) > 0, breath=any(bool(r["breathing"]) for r in rec),
             glitchA=min(r["glitchA"] for r in rec) < 1, flare=max(r["flare"] for r in rec) > 0,
         )
 
@@ -2116,17 +2230,24 @@ def check_every_switch_stops_its_own_effect_and_only_that_one():
     assert not any(got.values()), f"the master is off but these run: {[k for k, v in got.items() if v]}"
 
 
+def ticker(lua):
+    return g(lua).FSFiveSecondTicker
+
+
 def check_the_ticker_runs_every_frame_only_while_something_quick_moves():
     lua = world()
     FT = ft(lua).FT
     refresh(lua)
-    assert not bool(FT.fast) and bool(FT.ambient), "idle with the idle glow on is the slow motion rate"
+    assert not bool(FT.fast) and not bool(FT.ambient), "idle with the idle glow on is the slow rate: the glow is an animation group"
     cast(lua)
     tick(lua, 0.1)
     assert bool(FT.fast), "the count runs the ticker every frame"
     tick(lua, 5.5)
     tick(lua, 1.0)
     assert not bool(FT.fast), "the hold is slow motion"
+    assert bool(FT.ambient), "the hold fades at the ambient rate"
+    tick(lua, 8.0)
+    assert not bool(FT.fast) and not bool(FT.ambient), "back at rest the ticker is the slow rate again"
     lua = world()
     for name in ("breath", "tick", "glitch"):
         conf(lua, f"fivesecond.fx.{name}", False)
@@ -2135,6 +2256,87 @@ def check_the_ticker_runs_every_frame_only_while_something_quick_moves():
     lua = world(motion=False)
     refresh(lua)
     assert not bool(ft(lua).FT.ambient)
+
+
+def check_a_hidden_tab_runs_no_ticker_at_all():
+    lua = world()
+    FT = ft(lua).FT
+    refresh(lua)
+    assert shown(ticker(lua)), "a shown tab ticks"
+    cast(lua)
+    tick(lua, 0.2)
+    assert bool(FT.fast)
+    conf(lua, "fivesecond.enabled", False)
+    assert not shown(ticker(lua)), "the ticker frame is hidden with the tab, so it gets no OnUpdate"
+    cast(lua)
+    refresh(lua)
+    assert not bool(FT.fast) and not bool(FT.ambient), "a hidden tab asks for no ticker"
+    run(lua, "__advance(5.5)")
+    refresh(lua)
+    assert str(view(lua).phase) == "res" and not bool(FT.fast) and not bool(FT.ambient), "nor in the regen hold"
+    conf(lua, "fivesecond.enabled", True)
+    assert shown(ticker(lua)), "and it ticks again when the tab comes back"
+    # a Druid out of mana form hides the tab the same way
+    lua = world(klass="DRUID")
+    refresh(lua)
+    assert shown(ticker(lua))
+    run(lua, "__powerType = { 3, 'ENERGY' }")
+    lua.eval("__fire_event")("UNIT_DISPLAYPOWER", "player")
+    assert not shown(ticker(lua)), "a Druid in a form without mana has no ticker"
+
+
+def check_the_stutter_asks_for_the_ambient_ticker_only_around_its_window():
+    k = MK["k"]
+    for unreadable in (False, True):
+        lua = world()
+        if unreadable:
+            run(lua, "__regenMode = 'throw'")
+        refresh(lua)
+        if not unreadable:
+            enter_combat(lua)
+        tick(lua, 0.2)
+        FT = ft(lua).FT
+        rec = play(lua, 12.0, lambda l: (bool(FT.ambient), float(fx(l)["glitchA"]) < 1))
+        busy = sum(1 for r in rec if r[0]) / len(rec)
+        assert 0 < busy < 0.45, f"the ambient ticker runs {busy:.0%} of a kept rate"
+        assert all(r[0] for r in rec if r[1]), "the ambient ticker runs through every stutter frame"
+        # a pass every slow tick still lands before each window
+        assert sum(1 for a, b in zip(rec, rec[1:]) if not a[1] and b[1]) >= 4, "the stutter still happens"
+
+
+def check_the_pulse_cannot_run_the_every_frame_ticker_with_motion_off():
+    lua = world()
+    FT = ft(lua).FT
+    refresh(lua)
+    cast(lua)
+    tick(lua, 5.05)
+    assert float(view(lua).pulse) > 0 and bool(FT.fast), "the pulse runs the ticker with motion on"
+    conf(lua, "fivesecond.motion", False)
+    refresh(lua)
+    assert not bool(FT.fast), "motion off: a pulse in flight does not hold the every frame ticker"
+
+
+def check_no_pulse_is_counted_while_motion_is_off():
+    lua = world(motion=False)
+    refresh(lua)
+    cast(lua)
+    tick(lua, 5.2)
+    v = view(lua)
+    assert float(v.pulse) == 0.0, "no pulse is on"
+    assert int(v.pulses) == 0, "no pulse is counted"
+    assert all(float(r) == 0 for r in play(lua, 1.0, lambda l: fx(l)["flare"])), "and no flare"
+    lua = world()
+    refresh(lua)
+    cast(lua)
+    tick(lua, 5.2)
+    assert int(view(lua).pulses) == 1, "motion on: the one pulse"
+    # the sound is its own switch and plays either way
+    lua = world(motion=False)
+    conf(lua, "fivesecond.sound", True)
+    refresh(lua)
+    cast(lua)
+    tick(lua, 5.2)
+    assert int(view(lua).sounds) == 1, "the sound does not depend on the motion master"
 
 
 CHECKS = [
@@ -2206,11 +2408,15 @@ CHECKS = [
     check_the_regen_sweep_carries_the_held_digits_into_the_word_under_one_band,
     check_the_rim_flares_once_at_regen_with_the_pulse_switch_and_not_without,
     check_the_regen_tick_pulse_grows_the_bar_a_pixel_each_side_on_a_two_second_timer,
-    check_the_idle_glow_breathes_the_rim_and_only_at_rest,
+    check_the_idle_glow_is_a_looping_animation_of_the_rim_and_only_at_rest,
     check_the_kept_and_unreadable_rate_stutter_in_short_bursts_and_a_live_rate_never_does,
     check_at_most_one_strong_motion_plays_at_a_time,
     check_every_switch_stops_its_own_effect_and_only_that_one,
     check_the_ticker_runs_every_frame_only_while_something_quick_moves,
+    check_a_hidden_tab_runs_no_ticker_at_all,
+    check_the_stutter_asks_for_the_ambient_ticker_only_around_its_window,
+    check_the_pulse_cannot_run_the_every_frame_ticker_with_motion_off,
+    check_no_pulse_is_counted_while_motion_is_off,
 ]
 SCALED_CHECKS = [
     check_the_rate_line_is_fitted_at_both_lengths_and_the_bar_is_as_wide_as_the_text,

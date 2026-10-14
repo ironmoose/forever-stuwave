@@ -20,7 +20,9 @@
 -- Motion (the SETTINGS under `motion`, each with its own switch) is a pure function of the ledger and the clock, Motion() below:
 -- the cast flash, the digit dip and warm last second, the whole second pulse, the gauge flicker, the regen sweep, the tick pulse,
 -- the idle glow and the kept rate stutter. The quick ones (flash, sweep, count) run the ticker every frame, the slow ones at
--- TICK_AMBIENT. At most one strong motion plays at a time; the rest are faint.
+-- TICK_AMBIENT. The idle glow is the exception: it is two Alpha AnimationGroups on the rim's ring and glow textures, so a
+-- tab at rest has no ticker work (half second passes) and a hidden tab has no ticker at all. At most one strong motion plays
+-- at a time; the rest are faint.
 --
 -- Crisp: every size and offset is a whole count of physical pixels (the design px times the scale, rounded edge by edge), the
 -- LED art is drawn one texel to a pixel and never scaled fractionally, the textures snap to the pixel grid with no texel bias
@@ -82,7 +84,7 @@ local FT = {
     DIGIT_X = { tilde0 = 29, tilde = 33, d1 = 44, dot = 51, d2 = 58 },  -- the counting group's part centres (sweep tests)
     GAUGE_N = 10, GAUGE_WELL = { x = 6, w = 81 }, GAUGE_Y = 24, GAUGE_H = 5,
     GAUGE_X = 7, GAUGE_PITCH = 8, GAUGE_SEG_W = 7, GAUGE_SEG_Y = 25, GAUGE_SEG_H = 3,
-    GAUGE_OFF = 0.22, GAUGE_IDLE = 0.3, GAUGE_GLOW = 0.3, GAUGE_GLOW_W = 104, GAUGE_GLOW_H = 12,
+    GAUGE_OFF = 0.22, GAUGE_IDLE = 0.3, GAUGE_BREATH_LO = 0.24, GAUGE_BREATH_HI = 0.38, GAUGE_GLOW = 0.3, GAUGE_GLOW_W = 104, GAUGE_GLOW_H = 12,
     RATE_ZONE_Y = 30, RATE_X = 8, RATE_BASE = 39, RATE_BAR_Y = 41, RATE_ROOM = 35,
     DASH_PITCH = 5, DASH_ON = 3, DASHES = 9,
     CHIP = { x = 57, y = 31, w = 30, h = 12 }, CHIP_C = 3, GLOW_PAD = 3, CHIP_ROOM = 28, CHIP_IDLE_TEXT = 0.65,
@@ -362,7 +364,8 @@ local function RegenBegan(now)
     L.resumed = true
     if not (FT.host and FT.host:IsShown()) then return end
     if now - L.endsAt > FT.LATE then return end
-    if Setting(SETTINGS.pulse) then
+    -- a pulse is motion: with the master off there is nothing to see, so none is started or counted
+    if Setting(SETTINGS.pulse) and Setting(SETTINGS.motion) then
         L.pulseAt = now
         view.pulses = view.pulses + 1
     end
@@ -536,7 +539,7 @@ local fx = {
     pp = 1,             -- the regen sweep position 0..1 (1 when it is over or switched off)
     flare = 0,          -- 0..1..0 over the pulse: the rim glow at REGEN
     tick = 0,           -- 1 at a mana tick estimate down to 0 over TICK_TIME
-    breath = nil,       -- 0..1 in the idle look
+    breathing = false,  -- the idle glow is on (its AnimationGroups play); the animation, not Motion, moves it
     glitchA = 1, glitchDx = 0,
 }
 Tab.Fx = function() return fx end
@@ -601,25 +604,24 @@ Motion = function(now)
     end
     local flare = 0
     if on.master and v.pulse > 0 then flare = math.sin(math.pi * (1 - v.pulse)) end
-    local breath
-    if on.breath and v.phase == "idle" then
-        breath = 0.5 - 0.5 * math.cos(2 * math.pi * (now % FT.BREATH_TIME) / FT.BREATH_TIME)
-    end
-    local glitchA, glitchDx = 1, 0
+    local shown = FT.host ~= nil and FT.host:IsShown()
+    local breathing = shown and on.breath and v.phase == "idle"
+    local glitchA, glitchDx, glitchSoon = 1, 0, false
     if on.glitch and not susp and pp >= 1 and (v.cached or v.base == nil) then
         local gp = (now * 1000) % FT.GLITCH_EVERY_MS
         if gp < FT.GLITCH_MS then
             glitchA = 0.35 + 0.65 * math.abs(math.sin(gp * 0.09))
             glitchDx = math.sin(gp * 0.5) > 0 and 1 or -1
         end
+        -- the faster ticker is wanted only from the slow pass before the window to the end of it
+        glitchSoon = gp < FT.GLITCH_MS or gp >= FT.GLITCH_EVERY_MS - FT.TICK_SLOW * 1000
     end
     fx.flash, fx.dip, fx.warm, fx.zp, fx.dropSeg, fx.dropA = flash, dip, warm, zp, dropSeg, dropA
-    fx.pp, fx.flare, fx.tick, fx.breath, fx.glitchA, fx.glitchDx = pp, flare, tick, breath, glitchA, glitchDx
-    -- the ticker runs every frame while something quick moves, at TICK_AMBIENT while something slow does
-    FT.fast = susp or v.pulse > 0 or pp < 1 or flash > 0
-    FT.ambient = FT.fast or breath ~= nil or tick > 0 or v.phase == "res"
-        or (on.glitch and not susp and (v.cached or v.base == nil))
-        or (on.tick and v.phase == "res")
+    fx.pp, fx.flare, fx.tick, fx.breathing, fx.glitchA, fx.glitchDx = pp, flare, tick, breathing, glitchA, glitchDx
+    -- the ticker runs every frame while something quick moves, at TICK_AMBIENT while a short slow one does, and not at all
+    -- while the tab is hidden; the idle glow needs none of it (an animation)
+    FT.fast = shown and (susp or (on.master and v.pulse > 0) or pp < 1 or flash > 0)
+    FT.ambient = shown and (FT.fast or tick > 0 or v.phase == "res" or glitchSoon)
 end
 
 -------------------------------------------------------------------------------
@@ -728,6 +730,73 @@ local function SetText(fs, px, text)
     end
 end
 
+-- The idle glow: two looping Alpha AnimationGroups, one on the rim's ring and one on its glow, so the client moves them and the
+-- addon spends nothing per frame. The paint leaves each at its brightest alpha; the region alpha swings between `lo` and 1,
+-- which is the mockup's ring 0.3 to 0.6 and glow 0 to 0.45 over BREATH_TIME (IN_OUT smoothing standing for its cosine).
+local function BreathGroup(region, lo)
+    if not region.CreateAnimationGroup then return nil end
+    local group = region:CreateAnimationGroup()
+    group:SetLooping("REPEAT")
+    local half = FT.BREATH_TIME / 2
+    local up = group:CreateAnimation("Alpha")
+    up:SetFromAlpha(lo)
+    up:SetToAlpha(1)
+    up:SetDuration(half)
+    up:SetOrder(1)
+    if up.SetSmoothing then up:SetSmoothing("IN_OUT") end
+    local down = group:CreateAnimation("Alpha")
+    down:SetFromAlpha(1)
+    down:SetToAlpha(lo)
+    down:SetDuration(half)
+    down:SetOrder(2)
+    if down.SetSmoothing then down:SetSmoothing("IN_OUT") end
+    return group
+end
+
+-- Built once the rim and the gauge both exist. `groups` are the rim's two; `gauge` is one per gauge segment, which breathes
+-- from 0.24 to 0.38 (the segments are textures of their own).
+local function BuildBreath()
+    local hero, gauge = FT.hero, FT.gauge
+    local skin = hero and hero.fsSkin
+    if FT.breath or not (skin and skin.border and skin.border.ring and skin.glow and gauge) then return end
+    local C = FT.CHROME
+    local B = { ring = skin.border.ring, glow = skin.glow, groups = {}, gauge = {}, on = false, gaugeOn = false }
+    B.groups[1] = BreathGroup(B.ring, C.breathRing / (C.breathRing + C.breathRingSwing))
+    B.groups[2] = BreathGroup(B.glow, 0)
+    for i = 1, FT.GAUGE_N do
+        B.gauge[i] = BreathGroup(gauge.seg[i], FT.GAUGE_BREATH_LO / FT.GAUGE_BREATH_HI)
+    end
+    FT.breath = B
+end
+
+local function Switch(groups, want)
+    for _, group in ipairs(groups) do
+        if want then group:Play() else group:Stop() end
+    end
+end
+
+-- Plays or stops the idle glow: the rim (stopped under the mouse, whose ring is steady) and the gauge segments apart; a stop
+-- puts the regions back at full alpha.
+local function SetBreath(rim, gauge)
+    local B = FT.breath
+    if not B then return end
+    if B.on ~= rim then
+        B.on = rim
+        Switch(B.groups, rim)
+        if not rim then
+            B.ring:SetAlpha(1)
+            B.glow:SetAlpha(1)
+        end
+    end
+    if B.gaugeOn ~= gauge then
+        B.gaugeOn = gauge
+        Switch(B.gauge, gauge)
+        if not gauge then
+            for i = 1, #B.gauge do FT.gauge.seg[i]:SetAlpha(1) end
+        end
+    end
+end
+
 -- The rim: the border ring and its glow, lit cyan under the mouse.
 local function PaintRim(tile, hover, color, colorA, glowColor, glowA)
     local skin = tile.fsSkin
@@ -810,8 +879,8 @@ local function PaintCells(zone)
     local tenths = susp and math.floor(v.t * 10 + 0.5) or -1
     local fq, pq = Q20(f), Q20(v.pulse)
     local flashQ, zpQ, warmQ, dropQ = Q100(fx.flash), Q100(fx.zp), Q100(fx.warm), Q100(fx.dropA)
-    -- the sweep band moves a design px at a time; the glow breathes and flares in hundredths
-    local ppQ, breathQ, flareQ = math.floor(fx.pp * FT.HERO.w + 0.5), fx.breath and Q100(fx.breath) or -1, Q100(fx.flare)
+    -- the sweep band moves a design px at a time; the glow flares in hundredths; the idle glow is on or off
+    local ppQ, breathQ, flareQ = math.floor(fx.pp * FT.HERO.w + 0.5), fx.breathing and 1 or 0, Q100(fx.flare)
     local K = FT.sigCells
     if K.on and K.phase == v.phase and K.tenths == tenths and K.fq == fq and K.pq == pq and K.hover == hover
         and K.flash == flashQ and K.zp == zpQ and K.warm == warmQ and K.drop == dropQ and K.dropSeg == fx.dropSeg
@@ -825,7 +894,7 @@ local function PaintCells(zone)
     local led = FT.led
     local hero = FT.hero
     local C = FT.CHROME
-    local b = fx.breath
+    local b = fx.breathing
     local zp = fx.zp
     local sweeping = fx.pp < 1
     local bx = FT.HERO.x + ppQ                          -- the sweep band, design px from the host's left
@@ -838,11 +907,13 @@ local function PaintCells(zone)
     else
         local r, g, bl = Mix(BG, cyan, 0.1 * f)
         hero.fsPlate:SetVertexColor(r, g, bl, Lerp(0.72, 0.9, f))
-        local ringA = Lerp(b and (C.breathRing + C.breathRingSwing * b) or C.idleRing, C.regenRing, f)
-        local glowA = C.regenGlow * f + C.flareGlow * fx.flare + (1 - f) * (b and C.breathGlow * b or 0)
+        -- the idle glow paints its brightest alpha; the animation dims it by its region alpha down to breathRing / the dark
+        local ringA = Lerp(b and (C.breathRing + C.breathRingSwing) or C.idleRing, C.regenRing, f)
+        local glowA = C.regenGlow * f + C.flareGlow * fx.flare + (1 - f) * (b and C.breathGlow or 0)
         scratch[1], scratch[2], scratch[3] = Mix(violet, cyan, f)
         PaintRim(hero, hover, scratch, ringA, scratch, glowA)
     end
+    SetBreath(b and not hover and true or false, b and true or false)
 
     -- the LED readout
     local ghostA, litA
@@ -921,7 +992,7 @@ local function PaintCells(zone)
             if sweeping and math.abs(x - bx) < 9 then
                 seg:SetVertexColor(1, 1, 1, 0.95)
             else
-                seg:SetVertexColor(cyan[1], cyan[2], cyan[3], Lerp(b and (0.24 + 0.14 * b) or FT.GAUGE_IDLE, 0.85, f))
+                seg:SetVertexColor(cyan[1], cyan[2], cyan[3], Lerp(b and FT.GAUGE_BREATH_HI or FT.GAUGE_IDLE, 0.85, f))
             end
         end
     end
@@ -1186,6 +1257,7 @@ local function BuildFace()
         FT.gauge = g
         FT.body = body
     end
+    BuildBreath()
     if not FT.led then
         local body = FT.body
         local led = { word = {}, tilde = {} }
@@ -1366,11 +1438,23 @@ function Tab.HostPoint()
     return nil
 end
 
+-- Shows or hides the host. The ticker frame follows it (a hidden frame gets no OnUpdate) and the idle glow stops with it.
+local function ShowHost(want)
+    local host = FT.host
+    host:SetShown(want)
+    if FT.ticker then FT.ticker:SetShown(want) end
+    if not want then
+        SetBreath(false, false)
+        FT.sigCells.on = nil
+        FT.fast, FT.ambient = false, false
+    end
+end
+
 local function ApplyVisibility()
     local host = FT.host
     if not host then return end
     local want = FT.seated and Tab.Shown() or false
-    host:SetShown(want)
+    ShowHost(want)
     if want then Tab.Update() Tab.Paint() end
 end
 Tab.ApplyVisibility = ApplyVisibility
@@ -1380,7 +1464,7 @@ local function SeatHost()
     local point, rel, relPoint, x, y = Tab.HostPoint()
     if not point then
         FT.seated = false
-        host:Hide()
+        ShowHost(false)
         return
     end
     host:ClearAllPoints()
@@ -1437,8 +1521,8 @@ local function Refresh()
     if FT.host and FT.host:IsShown() then Tab.Paint() end
 end
 
--- One pass every frame while the count runs or a flash dies, at TICK_AMBIENT while a slow motion plays, every half second
--- otherwise. A plain frame, nothing protected.
+-- One pass every frame while the count runs or a flash dies, at TICK_AMBIENT while a short slow motion plays, every half second
+-- otherwise; the frame is hidden with the tab. A plain frame, nothing protected.
 local function Tick(self, dt)
     self.fsElapsed = (self.fsElapsed or 0) + dt
     local every = FT.fast and 0 or (FT.ambient and FT.TICK_AMBIENT or FT.TICK_SLOW)
@@ -1513,6 +1597,8 @@ local function Apply()
 
     local ticker = CreateFrame("Frame", "FSFiveSecondTicker")
     ticker:SetScript("OnUpdate", Tick)
+    ticker:SetShown(FT.host:IsShown())
+    FT.ticker = ticker
 
     if FS.Config and FS.Config.OnChange then
         FS.Config.OnChange(SETTINGS.enabled.key, function()
