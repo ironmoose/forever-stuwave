@@ -1057,6 +1057,21 @@ local function Settle(def, st)
 end
 
 -- An element button from its evaluated state. Out of combat only (attributes).
+-- Listeners told, after an element button's castable attributes were settled (written, kept or stripped by Lock), which
+-- button it was: GunsightShamanDrop.lua copies type1 / action1 / spell1 onto its pole click catchers so a click on a pole
+-- casts exactly what this button casts. Called from ApplyElement only, which runs out of combat only (Sync), so a listener
+-- may write secure attributes. A listener that throws is skipped.
+local attributeListeners = {}
+function TotemBar.OnAttributes(fn)
+    if type(fn) ~= "function" then return end
+    for i = 1, #attributeListeners do if attributeListeners[i] == fn then return end end
+    attributeListeners[#attributeListeners + 1] = fn
+end
+
+local function AnnounceAttributes(button)
+    for i = 1, #attributeListeners do pcall(attributeListeners[i], button) end
+end
+
 local function ApplyElement(button, def)
     local st = Evaluate(def)
     if st.mode == "action" and not st.landed then
@@ -1070,6 +1085,7 @@ local function ApplyElement(button, def)
     end
     if not st.pick then
         Lock(button)
+        AnnounceAttributes(button)
         return
     end
     Unlock(button)
@@ -1094,6 +1110,7 @@ local function ApplyElement(button, def)
         TB.ownFill[def.key] = nil
     end
     ShowPick(button, pick)
+    AnnounceAttributes(button)
 end
 
 -- Set drop and Recall: a plain spell button, locked until the first of its spells is known.

@@ -461,6 +461,41 @@ def check_a_mode_change_rewrites_the_attributes_cleanly():
     assert b.fsMode == "action" and attr(b, "spell1") is None and attr(b, "action1") == action_id(2)
 
 
+def check_listeners_hear_each_element_button_after_its_attributes_settle_and_never_in_combat():
+    # GunsightShamanDrop.lua copies type1 / action1 / spell1 onto the pole click catchers from this announcement
+    lua = boot(learned=TOTEMS["earth"], lists=lists_for("earth"))
+    lua.execute("""
+        __ann = {}
+        FS.TotemBar.OnAttributes(function(b)
+            __ann[#__ann + 1] = { key = b.fsKey, slot = b.fsDef.slot, type1 = b:GetAttribute("type1"),
+                spell1 = b:GetAttribute("spell1"), action1 = b:GetAttribute("action1"), locked = b.fsLocked }
+        end)
+        FS.TotemBar.OnAttributes(function() error("a listener that throws is skipped") end)
+        __n = #__ann
+    """)
+    fire(lua, "SPELLS_CHANGED")
+    seen = {str(row["key"]): row for row in seq(lua.eval("__ann"))}
+    assert sorted(seen) == ["air", "earth", "fire", "water"], sorted(seen)    # element buttons only, not Set drop or Recall
+    assert [int(seen[k]["slot"]) for k in ("fire", "earth", "water", "air")] == [1, 2, 3, 4]
+    earth = seen["earth"]
+    assert not earth["locked"] and str(earth["type1"]) == "action" and int(earth["action1"]) == action_id(2), "settled attributes at call time"
+    for k in ("fire", "water", "air"):
+        assert seen[k]["locked"] and seen[k]["type1"] is None, f"{k} is announced stripped"
+    # a spell mode pick is announced with its spell
+    lua.execute("__mc.lists[2] = nil")
+    fire(lua, "SPELLS_CHANGED")
+    last = [row for row in seq(lua.eval("__ann")) if str(row["key"]) == "earth"][-1]
+    assert str(last["type1"]) == "spell" and last["spell1"] is not None and last["action1"] is None
+    # in combat nothing settles, so nothing is announced; regen announces
+    set_combat(lua, True)
+    lua.execute("__n = #__ann")
+    fire(lua, "SPELLS_CHANGED")
+    assert int(lua.eval("#__ann - __n")) == 0, "an announcement in combat"
+    set_combat(lua, False)
+    fire(lua, "PLAYER_REGEN_ENABLED")
+    assert int(lua.eval("#__ann - __n")) >= 4, "the replayed sync announces"
+
+
 def check_locked_buttons_carry_nothing_castable_and_dim_by_alpha():
     lua = boot()      # nothing known: a level 1 Shaman
     for i in range(1, 7):
@@ -2677,6 +2712,7 @@ CHECKS = [
     check_spell_mode_when_there_is_no_usable_multicast_bar,
     check_no_multicast_api_at_all_degrades_to_spell_mode,
     check_a_mode_change_rewrites_the_attributes_cleanly,
+    check_listeners_hear_each_element_button_after_its_attributes_settle_and_never_in_combat,
     check_locked_buttons_carry_nothing_castable_and_dim_by_alpha,
     check_learning_a_totem_unlocks_just_that_element,
     check_set_and_recall_buttons,

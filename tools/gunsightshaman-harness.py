@@ -842,6 +842,29 @@ near3(l4, l2, "a rescale keeps the head on the same image px")
 noDegrade()
 """)
 
+case("origin_and_on_seat_tell_whoever_sits_over_the_poles_where_the_module_is")(r"""
+boot({})
+local S = FS.GunsightShaman
+check(type(S.Origin) == "function" and type(S.OnSeat) == "function", "Origin and OnSeat are the click catchers' seam")
+local seen = {}
+S.OnSeat(function(x, y) seen[#seen + 1] = { x, y } end)
+S.OnSeat(function() error("a listener that throws must not stop the seat") end)
+local spec, host = mount("lower")                       -- mount seats the lower rect
+check(#seen >= 1, "the seat of the built module is announced")
+local last = seen[#seen]
+near3(last[1], RECTS.lower.x + (RECTS.lower.w - S.C.W) / 2, "x is the module origin, centred across the rect")
+near3(last[2], RECTS.lower.y, "y is the rect's top")
+local ox, oy = S.Origin()
+near3(ox, last[1]); near3(oy, last[2])
+local n = #seen
+spec.seat(RECTS.upper)
+check(#seen == n + 1, "a move to the other area is announced")
+local ux, uy = S.Origin()
+near3(uy - oy, RECTS.upper.y - RECTS.lower.y, "the origin follows the area")
+spec.seat(nil); spec.seat({ x = "a" })
+check(#seen == n + 1, "a bad rect announces nothing")
+""")
+
 case("element_colours_come_from_the_theme_tokens_when_they_exist")(r"""
 boot({ tokens = { fire = { 0.1, 0.2, 0.3, 1 }, earth = { 0.4, 0.5, 0.6, 1 }, water = { 0.7, 0.8, 0.9, 1 }, air = { 1, 1, 0, 1 } } })
 local spec, host = mount("lower")

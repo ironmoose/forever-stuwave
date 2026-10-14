@@ -645,6 +645,16 @@ end
 -- The GunsightAreas module: build, seat, onShow, onHide
 -------------------------------------------------------------------------------
 
+-- The module's top left in image px (the origin every pole x and y is measured from), and a listener hook for whoever seats
+-- something over the poles (GunsightShamanDrop.lua's click catchers): fn(OX, OY) after every seat that moved the module.
+local seatListeners = {}
+function Shaman.Origin() return OX, OY end
+function Shaman.OnSeat(fn)
+    if type(fn) ~= "function" then return end
+    for i = 1, #seatListeners do if seatListeners[i] == fn then return end end
+    seatListeners[#seatListeners + 1] = fn
+end
+
 local function SeatModule(rect)
     if type(rect) ~= "table" then return end
     local x, y, w = rect.x, rect.y, rect.w
@@ -654,6 +664,10 @@ local function SeatModule(rect)
     if mod then
         SeatAll()
         if section then Shocks("Seat", section, rect, LayoutScale()) end
+        for i = 1, #seatListeners do
+            local ok, err = pcall(seatListeners[i], OX, OY)
+            if not ok then LogOnce("seatlistener", err) end
+        end
     end
 end
 

@@ -199,6 +199,15 @@ restart, not /reload. If your Shaman has the Call of the Elements spell
 8. `/fsconsole off`: the tab goes back to sit above the stance bar, and
    `/fsconsole on` returns it to the shoulder. Other classes see no tab.
 
+## Shaman: click a totem pole
+
+Needs the Gunsight HUD with its Class Module shown (a target is needed for the poles to show) on a Shaman who knows at least one totem. This build adds a file: do a FULL client restart, not /reload.
+
+1. Target anything. Left click anywhere on an open element's pole (the whole column, from above the crown to under the label, including a DROP head): it drops the totem the totem tab shows for that element, exactly as left clicking that tab button does. Click a pole whose totem already stands: it drops it again. Locked poles (dotted mold) do nothing.
+2. Change the pick on the tab (cursor on the button, piece, list): the pole now drops the new pick. Try it in combat too: a pick made in combat applies when the fight ends, on the pole and on the tab alike.
+3. Do it in combat as well: clicks on a pole must still cast. With no target the poles are gone and so is the click. Right drag over a pole should still turn the camera; if it does not, say so.
+4. Move the Class Module to the other area (`/fsconfig`, Gunsight): the click follows the poles. Do it in combat: the click stays where it was until the fight ends. Turn the Gunsight off out of combat: the poles do nothing.
+
 ## Shaman: imbue and shield tab
 
 Use a Shaman who knows Rockbiter Weapon and, from level 8, Lightning Shield. This build adds new files and key bindings, so do a FULL client restart, not /reload. A second tab now sits on the Console's top edge, to the right of the totem tab: two square tiles, IMBUE on the left and SHIELD on the right. It follows the Console (`/fsconsole off` and `on`) and does not need a target. The Gunsight Class Module for the Shaman is now empty: it draws nothing (no "coming soon" plate either) until the totem poles come later. The old chips beside the target cast bar are gone.
