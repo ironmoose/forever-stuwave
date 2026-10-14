@@ -2443,6 +2443,12 @@ def check_in_combat_the_missing_look_is_the_base_under_the_slot_and_stays_inside
         b = btn(lua, i)
         room = float(b.icon.GetRight(b.icon)) - float(b.icon.GetLeft(b.icon))
         word = t["text"]
+        # the band's anchors keep it inside the icon rect at every scale, shown or not
+        wp, ic_ = b.fsWordPlate, b.icon
+        assert wp.GetLeft(wp) >= ic_.GetLeft(ic_) - 1e-6 and wp.GetRight(wp) <= ic_.GetRight(ic_) + 1e-6
+        assert wp.GetTop(wp) <= ic_.GetTop(ic_) + 1e-6 and wp.GetBottom(wp) >= ic_.GetBottom(ic_) - 1e-6, \
+            f"the band leaves the icon rect vertically at {scale}"
+        assert wp.GetTop(wp) > wp.GetBottom(wp), "the band collapsed"
         if word:
             # the red word is inside the icon rect, on a band that is anchored to the icon itself
             glyphs = len(word) * 0.5615 * t["px"]
