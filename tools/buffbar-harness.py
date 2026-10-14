@@ -504,16 +504,18 @@ def tip_calls(lua):
 def tile(lua, i):
     """What a tile shows: chip code, text, chip stroke / fill colours and alpha, border, underline."""
     b = btn(lua, i)
+    word = shown(b.fsWord)      # the missing word is its own fontstring on a band; the time line is empty then
+    label = b.fsWord if word else b.fsText
     return dict(
-        code=b.fsChip.code._text, text=b.fsText._text, chip=rgb(b.fsChip.ring._vertex),
+        word=word, code=b.fsChip.code._text, text=label._text, chip=rgb(b.fsChip.ring._vertex),
         fill=rgb(b.fsChip.fill._vertex), fill_a=float(b.fsChip.fill._vertex[4]),
         ring=rgb(b.fsSkin.border.ring._vertex), ring_a=float(b.fsSkin.border.ring._vertex[4]),
-        text_color=rgb(b.fsText._textColor), text_a=float(b.fsText._textColor[4]),
+        text_color=rgb(label._textColor), text_a=float(label._textColor[4]),
         code_color=rgb(b.fsChip.code._textColor), line=rgb(b.fsLine._vertex), line_a=float(b.fsLine._vertex[4]),
         dashes=[float(d._alpha) for d in [b.fsDashes[k] for k in range(1, 5)]],
         plate=rgb(b.fsPlate._vertex), plate_a=float(b.fsPlate._vertex[4]),
         glow=rgb(b.fsSkin.glow._vertex), glow_a=float(b.fsSkin.glow._vertex[4]),
-        chip_glow=rgb(b.fsChip.glow._vertex), px=float(b.fsText._font[2]),
+        chip_glow=rgb(b.fsChip.glow._vertex), px=float(label._font[2]),
     )
 
 
@@ -923,7 +925,7 @@ def check_a_missing_shield_is_red_and_no_snapshot_yet_is_a_hollow_question_mark(
     run(lua, "FS.PlayerAuras = { Get = function() return __snap end, IsFrozen = function() return false end }; __noshield()")
     fire(lua, "UNIT_AURA", "player")
     update(lua)
-    assert btn(lua, SHIELD).fsTextPx < 11, "the word SHIELD is set small to fit the tile"
+    assert word_px(lua, SHIELD) <= 9, "the word SHIELD is set no larger than 9 px"
 
 
 def check_in_combat_the_shield_is_an_estimate_with_a_tilde_and_dashes():
@@ -1495,19 +1497,37 @@ def font_sizes(lua, i):
     return (float(b.fsText._font[2]), float(b.fsChip.code._font[2]), float(b.fsLockText._font[2]))
 
 
+ADVANCE = 0.5615    # BT.ADVANCE: the glyph advance in em the addon fits with
+
+
+def word_px(lua, i):
+    return float(btn(lua, i).fsWord._font[2])
+
+
+def word_fit(lua, i, word):
+    """The size the addon must give `word` on tile i's band: 9 px, or smaller so it keeps a pixel clear (half each side)."""
+    import math
+    room = float(btn(lua, i).fsBand._w) - 1.0       # the harness effective scale is 1
+    return max(min(math.floor(room / (len(word) * ADVANCE) * 2) / 2, 9.0), 6.0)
+
+
 def check_tile_fonts_are_the_design_size_at_every_scale_and_after_a_rescale():
     # like the totem and seal tabs: text is not scaled with the UI scale, and a rescale leaves it as it was
     lua = world(1.0, tips={16: ["Rockbiter 1 (59 min)"]})
     run(lua, "__noshield()")
     fire(lua, "UNIT_AURA", "player")
     update(lua)
-    assert btn(lua, SHIELD).fsText._text == "SHIELD"
+    assert tile(lua, SHIELD)["text"] == "SHIELD"
     assert font_sizes(lua, IMBUE) == (11.0, 10.0, 11.0), font_sizes(lua, IMBUE)
-    assert font_sizes(lua, SHIELD) == (9.0, 10.0, 11.0), font_sizes(lua, SHIELD)
+    assert font_sizes(lua, SHIELD) == (11.0, 10.0, 11.0), font_sizes(lua, SHIELD)    # the time line keeps its size
+    assert (word_px(lua, IMBUE), word_px(lua, SHIELD)) == (9.0, 9.0), "the missing word is 9 px, IMBUE and SHIELD alike"
     lua.eval("__rescale")(1 / 1.2)
     update(lua)
     assert font_sizes(lua, IMBUE) == (11.0, 10.0, 11.0), font_sizes(lua, IMBUE)
-    assert font_sizes(lua, SHIELD) == (7.5, 10.0, 11.0), font_sizes(lua, SHIELD)   # the word is fitted to the narrower tile
+    assert font_sizes(lua, SHIELD) == (11.0, 10.0, 11.0), font_sizes(lua, SHIELD)
+    # the word is fitted to the narrower band, at the rescale (out of combat), and never again
+    assert word_px(lua, SHIELD) == word_fit(lua, SHIELD, "SHIELD") < 9.0, word_px(lua, SHIELD)
+    assert word_px(lua, IMBUE) == word_fit(lua, IMBUE, "IMBUE"), word_px(lua, IMBUE)
     # and from a boot at the small scale
     lua = world(1 / 1.2, tips={16: ["Rockbiter 1 (59 min)"]})
     assert font_sizes(lua, IMBUE) == (11.0, 10.0, 11.0), font_sizes(lua, IMBUE)
@@ -1518,14 +1538,16 @@ def check_tile_fonts_are_the_design_size_at_every_scale_and_after_a_rescale():
     assert font_sizes(lua, SHIELD)[0] == 11.0
 
 
-def check_the_missing_imbue_word_stays_at_the_full_size_where_it_fits_and_only_shield_starts_small():
-    # the mockup drops only SHIELD to 9 (`m==='warn'&&k==='shield'?9:11`): IMBUE is 11 where it fits, fitted below that
+def check_the_missing_word_is_9_px_where_it_fits_the_band_and_fitted_below_that():
+    # option D: IMBUE and SHIELD are both 9 px on the band at the design scale; a narrower band fits them down
     lua = world(1.0, tips={16: ["Heavy Axe"]})
-    assert btn(lua, IMBUE).fsText._text == "IMBUE"
-    assert font_sizes(lua, IMBUE)[0] == 11.0, font_sizes(lua, IMBUE)
+    run(lua, "__noshield()")
+    fire(lua, "UNIT_AURA", "player")
+    update(lua)
+    assert tile(lua, IMBUE)["text"] == "IMBUE" and tile(lua, SHIELD)["text"] == "SHIELD"
+    assert (word_px(lua, IMBUE), word_px(lua, SHIELD)) == (9.0, 9.0), (word_px(lua, IMBUE), word_px(lua, SHIELD))
     lua = world(0.8333, tips={16: ["Heavy Axe"]})
-    size = font_sizes(lua, IMBUE)[0]
-    assert size < 11.0, "the word IMBUE must still shrink at Parker's live scale, where 11 px overflows the tile"
+    assert word_px(lua, IMBUE) == word_fit(lua, IMBUE, "IMBUE") < 9.0, "the word still shrinks at Parker's live scale"
     assert_tile_text_fits(lua, IMBUE, 0.8333, "imbue missing at 0.8333")
 
 
@@ -1534,9 +1556,9 @@ def check_a_fitted_tile_string_never_goes_below_six_pixels():
     run(lua, "__noshield()")
     fire(lua, "UNIT_AURA", "player")
     update(lua)
-    assert btn(lua, SHIELD).fsText._text == "SHIELD"
-    assert font_sizes(lua, IMBUE)[0] == 6.0, font_sizes(lua, IMBUE)
-    assert font_sizes(lua, SHIELD)[0] == 6.0, font_sizes(lua, SHIELD)
+    assert tile(lua, SHIELD)["text"] == "SHIELD"
+    assert word_px(lua, IMBUE) == 6.0, word_px(lua, IMBUE)
+    assert word_px(lua, SHIELD) == 6.0, word_px(lua, SHIELD)
 
 
 def counting(lua):
@@ -1823,8 +1845,12 @@ TEXT_INSET = 3      # design px kept clear on each side of a tile string (the ch
 
 def assert_tile_text_fits(lua, i, scale, what):
     b = btn(lua, i)
-    text, size = str(b.fsText._text), float(b.fsText._font[2])
-    width, room = _advance(text) * size, (N["BTN"] - 2 * TEXT_INSET) * scale
+    on_band = shown(b.fsWord)
+    label = b.fsWord if on_band else b.fsText
+    text, size = str(label._text), float(label._font[2])
+    # the missing word keeps a pixel clear inside its band; every other string keeps TEXT_INSET inside the tile
+    room = float(b.fsBand._w) - 1.0 if on_band else (N["BTN"] - 2 * TEXT_INSET) * scale
+    width = _advance(text) * size
     assert width <= room + 1e-6, f"{what}: {text!r} is {width:.1f} wide at {size}px, the tile allows {room:.1f}"
     code, csize = str(b.fsChip.code._text), float(b.fsChip.code._font[2])
     assert _advance(code) * csize <= (22 - 2 * 2) * scale + 1e-6, f"{what}: chip code {code!r} overflows the chip"
@@ -1837,7 +1863,7 @@ def check_every_tile_string_fits_inside_its_tile_in_every_state(scale):
     run(lua, "__noshield()")
     fire(lua, "UNIT_AURA", "player")
     update(lua)
-    assert btn(lua, SHIELD).fsText._text == "SHIELD"
+    assert tile(lua, SHIELD)["text"] == "SHIELD"
     words = assert_tile_text_fits(lua, SHIELD, scale, "shield missing")
     assert words >= 7, f"the word SHIELD shrank to {words}px, past legible"
     for line in ("Rockbiter 1 (59 min)", "Rockbiter 1 (42 sec)", "Rockbiter 1 (3 min)"):
@@ -2049,7 +2075,8 @@ def icon(lua, i):
         vertex=rgb(b.icon._vertex) if b.icon._vertex else None,
         desat=bool(b.icon._desat), chip=shown(b.fsChip.ring) and shown(b.fsChip.fill) and shown(b.fsChip.code),
         chip_any=shown(b.fsChip.ring) or shown(b.fsChip.fill) or shown(b.fsChip.glow) or shown(b.fsChip.code),
-        plate=shown(b.fsTextPlate), text=b.fsText._text,
+        plate=shown(b.fsTextPlate), text=b.fsWord._text if shown(b.fsWord) else b.fsText._text,
+        band=shown(b.fsBand),
     )
 
 
@@ -2110,7 +2137,7 @@ def check_missing_and_unreadable_states_dim_and_desaturate_the_icon_and_quiet_on
     update(lua)
     miss = icon(lua, IMBUE)
     assert miss["desat"] and all(abs(c - 0.45) < 1e-3 for c in miss["vertex"]), f"missing: {miss}"
-    assert miss["text"] == "IMBUE" and miss["plate"], "the red word stays, on its plate"
+    assert miss["text"] == "IMBUE" and miss["band"] and not miss["plate"], "the red word stays, on its band"
     tip(lua, 16, None)
     run(lua, "__tipMode = 'nolines'")
     fire(lua, "UNIT_INVENTORY_CHANGED", "player")
@@ -2367,7 +2394,8 @@ def check_in_combat_the_tiles_wear_the_out_of_combat_missing_look_and_only_the_a
     L = bt(lua).Looks()
     for i, word in ((IMBUE, "IMBUE"), (SHIELD, "SHIELD")):
         t, ic = tile(lua, i), icon(lua, i)
-        assert t["text"] == word and ic["plate"], f"tile {i} wears the missing word in combat: {t['text']!r}"
+        assert t["text"] == word and t["word"] and ic["band"] and not ic["plate"], \
+            f"tile {i} wears the missing word in combat: {t['text']!r}"
         # the same look as the one out of combat (the 'warn' look): red ring, red word, red underline, dim icon
         close(t["ring"], rgb(L.warn.ring), "the red ring")
         assert abs(t["ring_a"] - float(L.warn.ringA)) < 1e-3, t
@@ -2387,6 +2415,7 @@ def check_in_combat_the_tiles_wear_the_out_of_combat_missing_look_and_only_the_a
     assert (tile(lua, IMBUE)["text"], tile(lua, SHIELD)["text"]) in (("30m", "3"), ("29m", "3")), "the plain reads are back"
     assert not icon(lua, IMBUE)["desat"] and not icon(lua, SHIELD)["desat"]
     assert icon(lua, IMBUE)["plate"] and icon(lua, SHIELD)["plate"]
+    assert not icon(lua, IMBUE)["band"] and not icon(lua, SHIELD)["band"], "the band is gone with the word"
 
 
 def point_writes(lua, i):
@@ -2401,7 +2430,7 @@ def point_writes(lua, i):
             end
         end
         wrap(b)
-        for _, r in ipairs({ b.icon, b.fsPlate, b.fsTextPlate, b.fsText, b.fsLine, b.fsChip.fill, b.fsChip.ring,
+        for _, r in ipairs({ b.icon, b.fsPlate, b.fsTextPlate, b.fsText, b.fsBand, b.fsWord, b.fsLine, b.fsChip.fill, b.fsChip.ring,
                              b.fsChip.glow, b.fsChip.code }) do wrap(r) end
         for _, d in ipairs(b.fsDashes) do wrap(d) end
     """ % i)
@@ -2631,8 +2660,8 @@ def check_the_missing_word_in_combat_keeps_its_out_of_combat_size():
     set_combat(lua, True)
     fire(lua, "PLAYER_REGEN_DISABLED")
     tick(lua, 5)
-    assert tile(lua, SHIELD)["text"] == "SHIELD" and tile(lua, SHIELD)["px"] == 9, "SHIELD is the smaller word size"
-    assert tile(lua, IMBUE)["text"] == "IMBUE" and tile(lua, IMBUE)["px"] == 11
+    assert tile(lua, SHIELD)["text"] == "SHIELD" and tile(lua, SHIELD)["px"] == word_fit(lua, SHIELD, "SHIELD")
+    assert tile(lua, IMBUE)["text"] == "IMBUE" and tile(lua, IMBUE)["px"] == word_fit(lua, IMBUE, "IMBUE")
 
 
 def check_regen_arms_a_container_that_reads_back_off_and_a_combat_login_builds_at_regen():
@@ -3268,6 +3297,165 @@ def check_a_rescale_reseats_every_engine_text_out_of_combat_only():
     assert int(g(lua).__slotBlocked) == 0
 
 
+# ---------------------------------------------------------------------------------------------
+# The missing word band (option D): whole physical pixels, up versus missing, combat, rescale
+# ---------------------------------------------------------------------------------------------
+
+ES_MOCK = """
+__es = %s
+function __Region:GetEffectiveScale() return __es end
+function __Region:SetJustifyH(j) self._justifyH = j end
+"""
+LABEL_RGB = (6 / 255, 3 / 255, 18 / 255)    # LABEL_PLATE: the band is the label plate colour
+
+
+def band_world(es, scale=1.0, **kw):
+    kw.setdefault("tips", {16: ["Heavy Axe"]})
+    kw.setdefault("pre_login", ES_MOCK % es)
+    lua = world(scale, **kw)
+    run(lua, "__noshield()")
+    fire(lua, "UNIT_AURA", "player")
+    update(lua)
+    return lua
+
+
+def whole(v, es):
+    x = float(v) * es
+    return abs(x - round(x)) < 1e-6
+
+
+BAND_CASES = ((1.0, 1.0), (1.0, 0.8333), (1.3333333, 1.0), (0.64, 1.25), (1.7777778, 0.8333))
+
+
+def check_the_band_and_its_word_sit_on_whole_physical_pixels_inside_the_ring_at_every_scale():
+    for es, sc in BAND_CASES:
+        lua = band_world(es, sc)
+        tile_px = round(N["BTN"] * sc * es)
+        for i, word in ((IMBUE, "IMBUE"), (SHIELD, "SHIELD")):
+            b = btn(lua, i)
+            band, wd = b.fsBand, b.fsWord
+            pt, wp = band._points[1], wd._points[1]
+            where = f"es {es} scale {sc} {word}"
+            assert len(band._points) == 1 and len(wd._points) == 1, where
+            assert (pt.point, wp.point) == ("TOPLEFT", "TOPLEFT") and sb.same(lua, pt.rel, b) and sb.same(lua, wp.rel, b), where
+            for what, v in (("band left", pt.x), ("band top", pt.y), ("band w", band._w), ("band h", band._h),
+                            ("word w", wd._w), ("word h", wd._h)):
+                assert whole(v, es), f"{where}: {what} {v} is not whole physical pixels ({float(v) * es})"
+            left, top = round(float(pt.x) * es), round(-float(pt.y) * es)
+            w, h = round(float(band._w) * es), round(float(band._h) * es)
+            assert w % 2 == 0, f"{where}: the band is {w} px wide, an odd width cannot centre"
+            assert left >= 1 and left + w <= tile_px - 1, f"{where}: the band pokes past the ring ({left}..{left + w} of {tile_px})"
+            # equal margins, except on a tile of an odd pixel count where an even band (so the word stays on whole pixels)
+            # cannot be centred: one pixel off, the narrower side on the left
+            assert abs(left - (tile_px - (left + w))) == tile_px % 2, f"{where}: side margins {left} / {tile_px - left - w}"
+            assert top == round(24 * sc * es) and h == max(2, round(9 * sc * es)), (where, top, h)
+            assert top + h <= tile_px - 1, f"{where}: the band runs past the tile bottom"
+            # the word box: the band's width, an even number of pixels tall, from the band's top (a centred line on a pixel edge)
+            assert (round(float(wd._w) * es), round(-float(wp.y) * es), round(float(wp.x) * es)) == (w, top, left), where
+            assert round(float(wd._h) * es) % 2 == 0 and round(float(wd._h) * es) <= h, where
+            assert wd._justifyH == "CENTER", where
+            # the word fits the band with a pixel clear (so equal margins either side), by the addon's advance and the font's own
+            size = float(wd._font[2])
+            room = w / es
+            assert len(word) * ADVANCE * size <= room - 1 / es + 1e-6, f"{where}: {word} at {size}px does not fit {room}"
+            assert _advance(word) * size <= room - 1 / es + 1e-6, f"{where}: {word} (font advances) does not fit"
+            # opaque label plate colour, on the tile's face frame; word red, time plate gone
+            v = band._color
+            assert all(abs(float(v[k + 1]) - LABEL_RGB[k]) < 1e-3 for k in range(3)) and abs(float(v[4]) - 0.96) < 1e-6, \
+                [float(v[k]) for k in range(1, 5)]
+            assert sb.same(lua, band._parent, b.fsFace) and sb.same(lua, wd._parent, b.fsFace), where
+            assert shown(band) and shown(wd) and not shown(b.fsTextPlate), where
+            close(rgb(wd._textColor), C["red"], f"{where} red word")
+
+
+def check_the_up_state_has_no_band_and_no_word_and_the_time_keeps_its_plate():
+    lua = band_world(1.0, tips={16: ["Rockbiter 1 (56 min)"]})
+    run(lua, "__shield(3, 480)")
+    fire(lua, "UNIT_AURA", "player")
+    update(lua)
+    for i in (IMBUE, SHIELD):
+        b, ic = btn(lua, i), icon(lua, i)
+        assert not shown(b.fsBand) and not shown(b.fsWord) and ic["plate"], (i, ic)
+        assert tile(lua, i)["text"] and not tile(lua, i)["word"]
+    # the time line is where it was: centred 27 design px down, 11 px
+    p = btn(lua, IMBUE).fsText._points[1]
+    assert (p.point, p.relPoint, float(p.y)) == ("CENTER", "TOP", -27.0), (p.point, p.relPoint, p.y)
+    assert float(btn(lua, IMBUE).fsText._font[2]) == 11.0
+    # missing again: the band and word come back, the time text and its plate go
+    run(lua, "__noshield()")
+    fire(lua, "UNIT_AURA", "player")
+    update(lua)
+    b = btn(lua, SHIELD)
+    assert shown(b.fsBand) and shown(b.fsWord) and not shown(b.fsTextPlate) and b.fsText._text == "", \
+        (shown(b.fsBand), shown(b.fsWord), shown(b.fsTextPlate), b.fsText._text)
+    # the hollow question mark is not a missing word
+    lua = world(pre_login="FS.PlayerAuras = nil", tips={16: ["Heavy Axe"]})
+    b = btn(lua, SHIELD)
+    assert b.fsText._text == "?" and not shown(b.fsBand) and not shown(b.fsWord), "hollow is not a missing-word state"
+
+
+def look_of(lua, i):
+    b = btn(lua, i)
+    pts = tuple((round(float(q.x), 4), round(float(q.y), 4), str(q.point)) for q in
+                (b.fsBand._points[k] for k in range(1, len(b.fsBand._points) + 1)))
+    return (shown(b.fsBand), shown(b.fsWord), str(b.fsWord._text), tuple(round(float(x), 4) for x in b.fsWord._textColor),
+            float(b.fsWord._font[2]), tuple(round(float(x), 4) for x in b.fsBand._color), shown(b.fsTextPlate),
+            str(b.fsText._text), pts, (round(float(b.fsBand._w), 4), round(float(b.fsBand._h), 4)),
+            (round(float(b.fsWord._w), 4), round(float(b.fsWord._h), 4)))
+
+
+def check_the_combat_missing_look_equals_the_out_of_combat_one_and_no_band_point_or_size_is_written_in_combat():
+    for es, sc in ((1.0, 1.0), (1.3333333, 0.8333)):
+        lua = engine_world(scale=sc, pre=ES_MOCK % es)
+        run(lua, "__noshield()")
+        fire(lua, "UNIT_AURA", "player")
+        tip(lua, 16, ["Heavy Axe"])
+        fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+        update(lua)
+        tick(lua, 5)
+        out = {i: look_of(lua, i) for i in (IMBUE, SHIELD)}
+        assert out[IMBUE][0] and out[SHIELD][0], "missing out of combat"
+        shield_aura_up(lua)            # the frozen view says up, the engine mode paints the missing base in combat
+        for i in (IMBUE, SHIELD):
+            point_writes(lua, i)
+        run(lua, "__sw = 0; for _, i in ipairs({1, 2}) do local b = _G['FSBuffTabButton'..i]; for _, r in ipairs({b.fsBand, b.fsWord}) do for _, m in ipairs({'SetSize','SetWidth','SetHeight','SetFont'}) do local f = r[m]; r[m] = function(...) __sw = __sw + 1 return f(...) end end end end")
+        set_combat(lua, True)
+        fire(lua, "PLAYER_REGEN_DISABLED")
+        tick(lua, 5)
+        inside = {i: look_of(lua, i) for i in (IMBUE, SHIELD)}
+        assert inside == out, f"es {es}: the combat missing look differs from the out of combat one:\n{inside}\n{out}"
+        assert int(g(lua).__pw) == 0, "a band or word point was written in combat"
+        assert int(g(lua).__sw) == 0, "a band or word size or font was written in combat"
+        leave_combat(lua)
+
+
+def check_the_band_and_word_sit_on_the_face_frame_under_every_engine_slot():
+    lua = engine_world()
+    shield_aura_up(lua)
+    c = acs(lua)[0]
+    for i, frames in ((SHIELD, [c._slots["shield"].frame]), (IMBUE, [c._ench[1], c._ench[2]])):
+        b = btn(lua, i)
+        for r in (b.fsBand, b.fsWord):
+            assert sb.same(lua, r._parent, b.fsFace)
+        for fr in frames:
+            assert float(fr._level) > float(b.fsFace._level), f"tile {i}: the slot is not above the band's frame"
+
+
+def check_a_rescale_reseats_the_band_out_of_combat_only():
+    lua = band_world(1.0, 1.0)
+    run(lua, "__sw = 0; for _, i in ipairs({1, 2}) do local b = _G['FSBuffTabButton'..i]; for _, r in ipairs({b.fsBand, b.fsWord}) do for _, m in ipairs({'SetPoint','SetSize'}) do local f = r[m]; r[m] = function(...) __sw = __sw + 1 return f(...) end end end end")
+    before = [(float(btn(lua, i).fsBand._w), float(btn(lua, i).fsBand._h)) for i in (IMBUE, SHIELD)]
+    set_combat(lua, True)
+    lua.eval("__rescale")(0.8333)
+    update(lua)
+    assert int(g(lua).__sw) == 0, "the band was re-seated in combat"
+    assert [(float(btn(lua, i).fsBand._w), float(btn(lua, i).fsBand._h)) for i in (IMBUE, SHIELD)] == before
+    leave_combat(lua)
+    update(lua)
+    assert int(g(lua).__sw) > 0 and float(btn(lua, IMBUE).fsBand._w) < before[0][0], "the rescale did not re-seat the band"
+    assert word_px(lua, SHIELD) == word_fit(lua, SHIELD, "SHIELD")
+
+
 CHECKS = [
     check_parse_reads_minutes_seconds_hours_with_and_without_a_rank,
     check_parse_ignores_lines_that_are_not_an_imbue_with_a_time,
@@ -3282,7 +3470,7 @@ CHECKS = [
     check_a_two_handed_weapon_without_an_imbue_asks_for_one,
     check_the_tooltip_is_never_read_in_combat_and_the_clock_counts_down_from_the_last_read,
     check_tile_fonts_are_the_design_size_at_every_scale_and_after_a_rescale,
-    check_the_missing_imbue_word_stays_at_the_full_size_where_it_fits_and_only_shield_starts_small,
+    check_the_missing_word_is_9_px_where_it_fits_the_band_and_fitted_below_that,
     check_a_fitted_tile_string_never_goes_below_six_pixels,
     check_an_irrelevant_cast_is_a_no_op_and_an_unknown_id_with_the_shield_name_is_ignored,
     check_leaving_combat_keeps_the_shield_an_estimate_until_the_next_tick_reads_the_snapshot,
@@ -3393,6 +3581,11 @@ CHECKS = [
     check_a_late_init_of_a_parked_containers_slot_is_not_attributed_to_the_new_container,
     check_the_chip_and_ring_chrome_numbers_are_pinned_by_value,
     check_a_rescale_reseats_every_engine_text_out_of_combat_only,
+    check_the_band_and_its_word_sit_on_whole_physical_pixels_inside_the_ring_at_every_scale,
+    check_the_up_state_has_no_band_and_no_word_and_the_time_keeps_its_plate,
+    check_the_combat_missing_look_equals_the_out_of_combat_one_and_no_band_point_or_size_is_written_in_combat,
+    check_the_band_and_word_sit_on_the_face_frame_under_every_engine_slot,
+    check_a_rescale_reseats_the_band_out_of_combat_only,
 ]
 SCALED_CHECKS = [
     check_the_slot_covers_the_whole_tile_with_the_lit_look_and_nothing_moves_in_combat,

@@ -65,12 +65,15 @@ local BT = {
     BESIDE = 16,                    -- design px between the totem tab and this one with the Console off
     LOCKED_ALPHA = 0.4,
     CHIP_W = 22, CHIP_H = 15, CHIP_TOP = 5, CHIP_C = 3, GLOW_PAD = 3,
-    CODE_PX = 10, TEXT_PX = 11, WORD_PX = 9,    -- WORD_PX: the missing word of SHIELD only (the mockup's `m==='warn'&&k==='shield'?9:11`)
+    CODE_PX = 10, TEXT_PX = 11, WORD_PX = 9,    -- WORD_PX: the missing word (IMBUE and SHIELD), on the band below
     MIN_PX = 6,                     -- FitPx never goes below this, however small the UI scale
     MISSING = { imbue = "IMBUE", shield = "SHIELD" },   -- the word of the missing look (ShamanBuffs says the same out of combat)
     TEXT_INSET = 3,                 -- design px kept clear on each side of the time or word (the cut border's chamfer)
     ADVANCE = 0.5615,               -- Mononoki Bold's advance per em (every glyph; the font is monospaced)
     TEXT_Y = 27,                    -- the time line's centre, design px below the tile top
+    -- the missing word's band (mockups/bufftab-missing-word-2026-10-14.html, option D): rows 24 to 32 from the tile top
+    -- (9 tall), x 3 to 35 (32 wide), the label plate colour at .96. The word is a fontstring of its own on it.
+    BAND_TOP = 24, BAND_H = 9, BAND_W = 32, BAND_A = 0.96,
     TICK = 1,                       -- seconds between repaints (the clock text)
     CHIP_GLOW_A = 0.35,             -- the chip's glow alpha while a chip glows (the looks table says which do)
     ICON_RETRY = 2,                 -- seconds before a tile asks again for an icon the client has not answered
@@ -398,6 +401,8 @@ local function HotkeyLevel()
     return level
 end
 
+local SeatBand
+
 local function SeatHotkeyHost(button, level)
     if InCombatLockdown() then return end
     if not button.fsHotkeyHost then
@@ -411,6 +416,55 @@ local function SeatHotkeyHost(button, level)
     if hh:GetFrameLevel() ~= level then hh:SetFrameLevel(level) end
     if button.HotKey and button.HotKey:GetParent() ~= hh then button.HotKey:SetParent(hh) end
     if button.fsHotkeyPlate and button.fsHotkeyPlate:GetParent() ~= hh then button.fsHotkeyPlate:SetParent(hh) end
+end
+
+-- The tile's physical pixel count helpers: the band and its word sit on whole pixels at the frame's effective scale.
+local function EffectiveScale(frame)
+    local ok, es = pcall(function() return frame:GetEffectiveScale() end)
+    if ok and type(es) == "number" and es > 0 then return es end
+    return 1
+end
+
+-- The font size of the missing word: BT.WORD_PX, or smaller so the word keeps half a pixel clear on each side of the band
+-- (the tile shrinks with the UI scale and fonts do not); whole and half pixels, never below BT.MIN_PX.
+local function WordPx(word, bandWidth, es)
+    local n = type(word) == "string" and #word or 0
+    if n == 0 then return BT.WORD_PX end
+    local room = bandWidth - 1 / es
+    local fit = math.floor(room / (n * BT.ADVANCE) * 2) / 2
+    return math.max(math.min(fit, BT.WORD_PX), BT.MIN_PX)
+end
+
+-- Seats the band and the word box once per scale (out of combat: StyleButton). Every edge is a whole physical pixel: the
+-- band is an even number of pixels wide and centred in the tile, its top and height are rounded, and the word box is the
+-- band's width and an even number of pixels tall from the band's top, so the word's centre is a pixel edge.
+function SeatBand(button, size, s)
+    local es = EffectiveScale(button)
+    local tilePx = math.floor(size * es + 0.5)
+    local bandW = math.floor(BT.BAND_W * s * es / 2 + 0.5) * 2
+    bandW = math.max(2, math.min(bandW, tilePx - 2))
+    local left = math.floor((tilePx - bandW) / 2)
+    local top = math.floor(BT.BAND_TOP * s * es + 0.5)
+    local height = math.max(2, math.floor(BT.BAND_H * s * es + 0.5))
+    local wordH = math.max(2, height - height % 2)
+    local px = 1 / es
+    button.fsBand:ClearAllPoints()
+    button.fsBand:SetPoint("TOPLEFT", button, "TOPLEFT", left * px, -top * px)
+    button.fsBand:SetSize(bandW * px, height * px)
+    button.fsWord:ClearAllPoints()
+    button.fsWord:SetPoint("TOPLEFT", button, "TOPLEFT", left * px, -top * px)
+    button.fsWord:SetSize(bandW * px, wordH * px)
+    local wpx = WordPx(BT.MISSING[button.fsKey], bandW * px, es)
+    if button.fsWordPx ~= wpx then
+        button.fsWordPx = wpx
+        FS.Theme.ApplyMono(button.fsWord, wpx, FS.Theme.COLOR_RED)
+    end
+    for _, tex in ipairs({ button.fsBand }) do
+        if tex.SetSnapToPixelGrid then
+            pcall(tex.SetSnapToPixelGrid, tex, true)
+            if tex.SetTexelSnappingBias then pcall(tex.SetTexelSnappingBias, tex, 0) end
+        end
+    end
 end
 
 -- Runs once per button, from Build and again on every re-seat. Everything that creates a region, hook or frame
@@ -490,6 +544,14 @@ local function StyleButton(button, size, scale)
         button.fsTextPlate:SetPoint("TOPLEFT", button.fsText, "TOPLEFT", -2, 0)
         button.fsTextPlate:SetPoint("BOTTOMRIGHT", button.fsText, "BOTTOMRIGHT", 2, 0)
         button.fsTextPlate:Hide()
+        -- the missing word's band and word (option D): built once, never re-anchored or resized afterwards except by a rescale
+        -- out of combat (StyleButton); a paint only shows, hides, colours and sets text
+        button.fsBand = face:CreateTexture(nil, "ARTWORK", nil, 6)
+        button.fsBand:SetColorTexture(LABEL_PLATE[1], LABEL_PLATE[2], LABEL_PLATE[3], BT.BAND_A)
+        button.fsBand:Hide()
+        button.fsWord = NewText(face, BT.WORD_PX, T.COLOR_RED)
+        button.fsWord:SetJustifyH("CENTER")
+        button.fsWord:Hide()
         button.fsLine = face:CreateTexture(nil, "OVERLAY", nil, 2)
         button.fsLine:SetColorTexture(1, 1, 1, 1)
         button.fsDashes = {}
@@ -516,6 +578,7 @@ local function StyleButton(button, size, scale)
     chip.code:SetPoint("CENTER", chip.fill, "CENTER", 0, -0.5 * s)
     button.fsText:ClearAllPoints()
     button.fsText:SetPoint("CENTER", button, "TOP", 0, -BT.TEXT_Y * s)
+    SeatBand(button, size, s)
     button.fsLine:ClearAllPoints()
     button.fsLine:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", 5 * s, 3 * s)
     button.fsLine:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -5 * s, 3 * s)
@@ -611,7 +674,11 @@ local function PaintButton(button, v)
     button.fsIconRetry = GetTime() + BT.ICON_RETRY
     local tint = UsabilityColor(button.fsUsable)
     local look = engineMode and L.engine or (L[v.mode] or L.hollow)
-    local text = engineMode and BT.MISSING[button.fsKey] or v.text
+    local missing = engineMode or v.mode == "warn"
+    local word = missing and (engineMode and BT.MISSING[button.fsKey] or v.text) or nil
+    if word == "" then word = nil end
+    -- the missing word has its own band and fontstring (option D); the time line and its plate show only while up
+    local text = (not word) and v.text or nil
     local skin = button.fsSkin
     if skin and skin.border and skin.border.ring then
         local r = hover and L.cyan.ring or look.ring
@@ -646,8 +713,7 @@ local function PaintButton(button, v)
         chip.fill:Show(); chip.ring:Show(); chip.glow:Show(); chip.code:Show()
         button.fsTextPlate:Hide()
     end
-    local missing = engineMode or v.mode == "warn"
-    local size = FitPx(text, (missing and button.fsKey == "shield") and BT.WORD_PX or BT.TEXT_PX)
+    local size = FitPx(text, BT.TEXT_PX)
     if button.fsTextPx ~= size then
         button.fsTextPx = size
         FS.Theme.ApplyMono(button.fsText, size, look.text)
@@ -655,6 +721,13 @@ local function PaintButton(button, v)
     r, g, b = Shade(look.text, tint)
     button.fsText:SetTextColor(r, g, b, look.textA)
     button.fsText:SetText(text or "")
+    -- the band and the word: colour, text and visibility only (their points, size and font were seated out of combat)
+    button.fsBand:SetShown(word ~= nil)
+    button.fsWord:SetShown(word ~= nil)
+    if word then
+        button.fsWord:SetTextColor(r, g, b, look.textA)
+        button.fsWord:SetText(word)
+    end
     r, g, b = Shade(look.line, tint)
     button.fsLine:SetVertexColor(r, g, b, look.lineA)
     for _, dash in ipairs(button.fsDashes) do dash:SetAlpha((not engineMode and v.estimate) and 1 or 0) end
