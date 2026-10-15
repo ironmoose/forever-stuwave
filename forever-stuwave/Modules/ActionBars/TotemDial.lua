@@ -40,7 +40,8 @@ local D = {
     DASH = 3, DASH_THICK = 1.4, DASH_COUNT = 5,
     BRACKET = { OFF = 2.5, LEN = 6, THICK = 1.4 },
     TICK = 0.1,                 -- seconds between the ticker's looks
-    CARD = { W = 198, ROW = 27, ROWS = 4, TOP = 56, FOOT = 30 },
+    CARD = { W = 198, ROW = 27, ROWS = 4, TOP = 94, FOOT = 30,     -- TOP is where the first drop order row starts
+             SWATCH = 20, PITCH = 27, SWATCH_Y = 56 },
     BTN_PAD = 14,               -- design px each side of the label of an editor button that sizes to its text (the config
                                 -- window's buttons: width = text + 28)
     CONFIRM = 3,                -- seconds CLEAR stays armed
@@ -102,22 +103,24 @@ local function NewEdges(frame, layer, sub)
     return edges
 end
 
-local function SeatEdges(edges, frame, thick)
+-- Seats a ring of four edges on `frame`, `inset` units inside its border (0 = on it).
+local function SeatEdges(edges, frame, thick, inset)
+    local i = inset or 0
     edges[1]:ClearAllPoints()
-    edges[1]:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
-    edges[1]:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+    edges[1]:SetPoint("TOPLEFT", frame, "TOPLEFT", i, -i)
+    edges[1]:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -i, -i)
     edges[1]:SetHeight(thick)
     edges[2]:ClearAllPoints()
-    edges[2]:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
-    edges[2]:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+    edges[2]:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", i, i)
+    edges[2]:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -i, i)
     edges[2]:SetHeight(thick)
     edges[3]:ClearAllPoints()
-    edges[3]:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
-    edges[3]:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+    edges[3]:SetPoint("TOPLEFT", frame, "TOPLEFT", i, -i)
+    edges[3]:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", i, i)
     edges[3]:SetWidth(thick)
     edges[4]:ClearAllPoints()
-    edges[4]:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
-    edges[4]:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+    edges[4]:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -i, -i)
+    edges[4]:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -i, i)
     edges[4]:SetWidth(thick)
 end
 
@@ -971,6 +974,79 @@ local function OpenChooser(row)
     chooser:Show()
 end
 
+-- An outline swatch: a tinted square with a ring in its colour and a dot (the mockup's states: quiet, hover, pressed, and
+-- selected with a white outer ring, an inner ring in its colour and a bigger dot). Disabled is the frame at alpha 0.4.
+local function PaintSwatch(sw)
+    local c = sw.fsRgb
+    if not c then return end
+    local live = not sw.fsDisabled
+    local hover, pressed = live and sw.fsHover, live and sw.fsPressed
+    local selected = sw.fsSelected
+    local f = Mix3(FILL, c, pressed and 0.5 or ((hover or selected) and 0.35 or 0.22))
+    sw.fill:SetColorTexture(f[1], f[2], f[3], 1)
+    local bright = hover or pressed
+    if selected then
+        SetEdges(sw.edges, WHITE, 1)
+        SetEdges(sw.inner, c, 1)
+        for i = 1, #sw.inner do sw.inner[i]:Show() end
+    else
+        SetEdges(sw.edges, c, bright and 1 or 0.6)
+        for i = 1, #sw.inner do sw.inner[i]:Hide() end
+    end
+    sw.dot:SetColorTexture(c[1], c[2], c[3], (selected or bright) and 1 or 0.9)
+    local d = selected and sw.fsDotBig or sw.fsDotSmall
+    if d then sw.dot:SetSize(d, d) end
+    sw:SetAlpha(sw.fsDisabled and 0.4 or 1)
+end
+
+local function SetSwatchDisabled(sw, off)
+    sw.fsDisabled = off and true or false
+    if sw.SetEnabled then pcall(sw.SetEnabled, sw, not off) end
+    PaintSwatch(sw)
+end
+
+local function BuildSwatch(parent, index)
+    local PS = Presets()
+    local def = PS.P.COLORS[index]
+    local sw = CreateFrame("Button", nil, parent)
+    sw:RegisterForClicks("LeftButtonUp")
+    sw.fsColor = index
+    sw.fsRgb = def.rgb
+    sw.fsName = string.upper(def.key)
+    sw.fill = sw:CreateTexture(nil, "BACKGROUND")
+    sw.fill:SetAllPoints(sw)
+    sw.edges = Edges(sw, "BORDER", 1)
+    sw.inner = Edges(sw, "BORDER", 2)
+    sw.dot = sw:CreateTexture(nil, "ARTWORK")
+    Snap(sw.fill)
+    Snap(sw.dot)
+    sw:SetScript("OnEnter", function(self)
+        self.fsHover = true
+        PaintSwatch(self)
+        if GameTooltip then
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine(self.fsName, MUTED[1], MUTED[2], MUTED[3])
+            GameTooltip:Show()
+        end
+    end)
+    sw:SetScript("OnLeave", function(self)
+        self.fsHover, self.fsPressed = false, false
+        PaintSwatch(self)
+        if GameTooltip then GameTooltip:Hide() end
+    end)
+    sw:SetScript("OnMouseDown", function(self) self.fsPressed = true; PaintSwatch(self) end)
+    sw:SetScript("OnMouseUp", function(self) self.fsPressed = false; PaintSwatch(self) end)
+    sw:SetScript("OnHide", function(self) self.fsHover, self.fsPressed = false, false; PaintSwatch(self) end)
+    sw:SetScript("OnClick", function(self)
+        local why = PS.Refusal()
+        if why then return Refuse(why) end
+        local ok, reason = PS.SetColor(card.fsIndex, self.fsColor)
+        if ok == false then Refuse(reason) end
+        Dial.RefreshCard()
+    end)
+    return sw
+end
+
 local function SeatCard()
     local s = Scale()
     local C = D.CARD
@@ -1001,8 +1077,25 @@ local function SeatCard()
     Mono(card.name, 12, WHITE)
     card.nameEdges = card.nameEdges or Edges(card.name, "BORDER", 0)
     SeatEdges(card.nameEdges, card.name, thick)
+    card.outline:ClearAllPoints()
+    card.outline:SetPoint("TOPLEFT", card, "TOPLEFT", u(8), -u(45))
+    Mono(card.outline, 9, MUTED)
+    card.outline:SetText("OUTLINE")
+    -- the swatches: an even square each on one pitch, the dot an even square centred in it
+    local pitch, size = u(C.PITCH), even(C.SWATCH)
+    for i, sw in ipairs(card.swatches) do
+        sw:ClearAllPoints()
+        sw:SetPoint("TOPLEFT", card, "TOPLEFT", u(8) + (i - 1) * pitch, -u(C.SWATCH_Y))
+        sw:SetSize(size, size)
+        SeatEdges(sw.edges, sw, thick)
+        SeatEdges(sw.inner, sw, thick, thick)
+        sw.dot:ClearAllPoints()
+        sw.dot:SetPoint("CENTER", sw, "CENTER", 0, 0)
+        sw.fsDotSmall, sw.fsDotBig = even(6), even(8)
+        PaintSwatch(sw)
+    end
     card.label:ClearAllPoints()
-    card.label:SetPoint("TOPLEFT", card, "TOPLEFT", u(8), -u(45))
+    card.label:SetPoint("TOPLEFT", card, "TOPLEFT", u(8), -u(82))
     Mono(card.label, 9, MUTED)
     card.label:SetText("DROP ORDER")
     for i, row in ipairs(card.rows) do
@@ -1039,43 +1132,64 @@ local function SeatCard()
     end
     -- CLEAR is one button across the card (its label is the same width for CLEAR and SURE?: nothing jumps)
     card.clear:ClearAllPoints()
-    card.clear:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", u(8), u(8))
-    card.clear:SetSize(cardW - 2 * u(8), even(17))
+    card.clear:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", u(8), u(7))
+    card.clear:SetSize(cardW - 2 * u(8), even(18))
 end
 
+-- A row's look: the fill tints toward the violet ring on hover (0.16) and press (0.32), the ring goes to full alpha with the
+-- mouse on the row or on one of its arrows, and the icon box ring (the element's colour) rises from 0.35 to 0.9. Disabled
+-- dims every piece to alpha 0.4 and shows no hover. Textures and colours only.
 local function PaintRow(row)
-    local lit = row.tile.fsHover or row.up.fsHover or row.down.fsHover
-    SetEdges(row.edges, VIOLET, (lit and not row.tile.fsDisabled) and 0.7 or 0.35)
+    local live = not row.fsDisabled
+    local hover, pressed = live and row.fsHover, live and row.fsPressed
+    local lit = live and (hover or pressed or (not row.up.fsDisabled and row.up.fsHover) or (not row.down.fsDisabled and row.down.fsHover))
+    local f = Mix3(FILL, VIOLET, pressed and 0.32 or (hover and 0.16 or 0))
+    row.fill:SetColorTexture(f[1], f[2], f[3], 0.8)
+    local k = row.fsDisabled and 0.4 or 1
+    SetEdges(row.edges, VIOLET, (lit and 1 or 0.35) * k)
+    local boxA = row.fsSet and ((hover or pressed) and 0.9 or 0.35) or 0
+    SetEdges(row.tile.hl, row.tile.fsRing or WHITE, boxA * k)
+    for _, piece in ipairs({ row.fill, row.num, row.bar, row.label, row.tile }) do piece:SetAlpha(k) end
 end
 
-local function BuildRow(parent, i)
-    local row = CreateFrame("Frame", nil, parent)
+local function SetRowDisabled(row, off)
+    row.fsDisabled = off and true or false
+    if row.SetEnabled then pcall(row.SetEnabled, row, not off) end
+    PaintRow(row)
+end
+
+-- One drop order row: a single button for its whole width (bar, number, icon, name), with the two arrows small buttons on top.
+local function BuildRow(parent)
+    local row = CreateFrame("Button", nil, parent)
+    row:RegisterForClicks("LeftButtonUp")
     row.fill = row:CreateTexture(nil, "BACKGROUND")
     row.fill:SetAllPoints(row)
     row.edges = Edges(row, "BORDER", 0)
     row.num = row:CreateFontString(nil, "OVERLAY")
     row.bar = row:CreateTexture(nil, "ARTWORK")
-    row.tile = CreateFrame("Button", nil, row)
-    row.tile:RegisterForClicks("LeftButtonUp")
+    row.tile = CreateFrame("Frame", nil, row)           -- the icon box: it draws, the row takes the mouse
     row.tile.icon = row.tile:CreateTexture(nil, "ARTWORK")
     row.tile.icon:SetAllPoints(row.tile)
     row.tile.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    row.tile.hl = Edges(row.tile, "OVERLAY", 2)
     row.tile.text = row.tile:CreateFontString(nil, "OVERLAY")
     row.tile.text:SetPoint("CENTER", row.tile, "CENTER", 0, 0)
     row.label = row:CreateFontString(nil, "OVERLAY")
     row.up = NewButton(row, 12, 14)
     row.down = NewButton(row, 12, 14)
-    NewTileHover(row.tile)
-    row.tile:SetScript("OnEnter", function(self) self.fsHover = true; PaintTile(self) end)
-    row.tile:SetScript("OnLeave", function(self) self.fsHover, self.fsPressed = false, false; PaintTile(self) end)
     row.up.fsLook = { ring = MUTED, text = MUTED }
     row.down.fsLook = { ring = MUTED, text = MUTED }
-    -- hovering a cell or an arrow lights the row's edge
+    -- hovering an arrow lights the row's edge
     local function lit() PaintRow(row) end
-    row.tile.fsAfter, row.up.fsAfter, row.down.fsAfter = lit, lit, lit
+    row.up.fsAfter, row.down.fsAfter = lit, lit
     PaintButton(row.up)
     PaintButton(row.down)
-    row.tile:SetScript("OnClick", function() OpenChooser(row) end)
+    row:SetScript("OnEnter", function(self) self.fsHover = true; PaintRow(self) end)
+    row:SetScript("OnLeave", function(self) self.fsHover, self.fsPressed = false, false; PaintRow(self) end)
+    row:SetScript("OnMouseDown", function(self) self.fsPressed = true; PaintRow(self) end)
+    row:SetScript("OnMouseUp", function(self) self.fsPressed = false; PaintRow(self) end)
+    row:SetScript("OnHide", function(self) self.fsHover, self.fsPressed = false, false; PaintRow(self) end)
+    row:SetScript("OnClick", function(self) OpenChooser(self) end)
     row.up:SetScript("OnClick", function()
         local ok, why = Presets().Move(card.fsIndex, row.fsElement, -1)
         if ok == false then Refuse(why) end
@@ -1144,8 +1258,11 @@ local function BuildCard()
     card.name:SetScript("OnHide", function(self) self.fsHover = false; PaintName() end)
     card.label = card:CreateFontString(nil, "OVERLAY")
     card.rows = {}
-    for i = 1, D.CARD.ROWS do card.rows[i] = BuildRow(card, i) end
-    card.clear = NewButton(card, 58, 17)
+    card.outline = card:CreateFontString(nil, "OVERLAY")
+    card.swatches = {}
+    for i = 1, #PS.P.COLORS do card.swatches[i] = BuildSwatch(card, i) end
+    for i = 1, D.CARD.ROWS do card.rows[i] = BuildRow(card) end
+    card.clear = NewButton(card, 58, 18)
     card.clear:SetScript("OnClick", function(self)
         local PS = Presets()
         local why = PS.Refusal()
@@ -1209,8 +1326,7 @@ function Dial.RefreshCard()
         local c = ELEMENT[element] or WHITE
         local entry = PS.Entry(element, picks[element])
         local set = entry ~= nil
-        row.fill:SetColorTexture(0.051, 0.024, 0.125, 0.6)
-        row.fsLock = locked
+        row.fsSet = set
         row.tile.fsRing = c
         row.num:SetText(set and tostring(i) or "-")
         row.bar:SetColorTexture(c[1], c[2], c[3], 1)
@@ -1229,12 +1345,17 @@ function Dial.RefreshCard()
             row.label:SetText("left out")
             Tint(row.label, MUTED)
         end
-        SetTileDisabled(row.tile, locked)
+        SetRowDisabled(row, locked)
         SetDisabled(row.up, locked)
         SetDisabled(row.down, locked)
         row.up:SetShown(set and i > 1)
         row.down:SetShown(set and i < count)
         PaintRow(row)
+    end
+    local colour = PS.Color(card.fsIndex)
+    for i, sw in ipairs(card.swatches) do
+        sw.fsSelected = i == colour
+        SetSwatchDisabled(sw, locked)
     end
     PaintClear()
 end
