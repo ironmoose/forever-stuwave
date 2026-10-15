@@ -3,7 +3,7 @@
 in totembar-harness's world: the actionbars mock, FrameHelpers.lua, ActionBars.lua, Console.lua, StanceBar.lua,
 PetActionBar.lua, PetDock.lua, ClassShoulder.lua, TotemPiece.lua, TotemBar.lua, the buff tab, the mana regen tab.
 
-The look is mockups/totem-presets-two-2026-10-14.html. The numbers and states below are read from the mockup's
+The look is the two preset design mockup. The numbers and states below are read from the mockup's
 description in TotemDial.lua; the live unknowns (a secure cast sequence stepping totems, the spell id of a cast being
 plain) are modelled, never claimed. Checked:
 
@@ -1822,6 +1822,119 @@ def check_the_card_layout_matches_the_mockup_on_whole_pixels_at_every_scale():
             assert -float(c.outline._points[1].y) == 45 and -float(c.label._points[1].y) == 82
 
 
+def dash_pixels(tile, es):
+    """The shown dash textures of a tile as pixel rects (x, y, w, h) from its top left, checked to be whole pixels."""
+    out = []
+    for t in seq(tile.dashes):
+        if not shown(t):
+            continue
+        p = t._points[1]
+        r = (float(p.x) * es, -float(p.y) * es, float(t._w) * es, float(t._h) * es)
+        assert all(abs(v - round(v)) < 1e-6 for v in r), f"a dash is off the pixel grid: {r}"
+        assert t._snap is True and float(t._bias) == 0
+        out.append(tuple(round(v) for v in r))
+    return out
+
+
+def check_a_left_out_row_has_a_dashed_muted_box_and_a_small_dashes_label_and_no_ring():
+    lua = boot()
+    set_display(lua, 1.0, 1.0)
+    i = make(lua, picks={"fire": None}, name="MELEE")
+    DL(lua).OpenEditor(i)
+    r = rows(lua)
+    left, kept = r[3], r[0]
+    assert str(left.label._text) == "left out" and str(left.tile.text._text) == "--"
+    assert shown(left.tile.text) and left.tile.text._mono.size == 9, "the dashes label is not size 9"
+    close(tuple(float(x) for x in seq(left.tile.text._mono.color)), MUTED, "left out dashes label")
+    # the ring of a set row (0.35) is hidden here, and the dashed box takes its place
+    assert all(rgba(e)[3] == 0 for e in seq(left.tile.hl)), "a left out row shows the 0.35 ring"
+    dashes = [t for t in seq(left.tile.dashes) if shown(t)]
+    assert dashes and all(abs(rgba(t)[3] - 0.6) < 1e-6 for t in dashes)
+    for t in dashes:
+        close(rgba(t)[:3], MUTED, "dash colour")
+    assert not any(shown(t) for t in seq(kept.tile.dashes)), "a set row shows dashes"
+    assert rgba(kept.tile.hl[1])[3] == 0.35
+    # the mockup's box: 22 x 22 pixels, 2 on 2 off along the top and bottom, one pixel thick
+    px = dash_pixels(left.tile, 1.0)
+    w, h = round(float(left.tile._w)), round(float(left.tile._h))
+    top = sorted(x for x, y, dw, dh in px if y == 0 and dh == 1)
+    assert top == [0, 4, 8, 12, 16, 20] and all(dw == 2 for x, y, dw, dh in px if y == 0 and dh == 1 and x < 20), (w, top)
+    assert sorted(x for x, y, dw, dh in px if y == h - 1) == top, "the bottom run differs from the top"
+    left_runs = sorted((y, dh) for x, y, dw, dh in px if x == 0 and dw == 1 and 0 < y < h - 1)
+    assert left_runs[0] == (1, 1) and left_runs[1] == (4, 2), left_runs
+    assert sorted((y, dh) for x, y, dw, dh in px if x == w - 1 and 0 < y < h - 1) == left_runs
+    # filling the element hides the dashes and restores the ring; leaving it out again brings them back
+    P = PS(lua)
+    P.SetTotem(i, "fire", IDS["Magma Totem"])
+    for row in rows(lua):
+        assert not any(shown(t) for t in seq(row.tile.dashes)), "a full card shows dashes"
+        assert rgba(row.tile.hl[1])[3] == 0.35
+    P.SetTotem(i, "fire", None)
+    assert any(shown(t) for t in seq(rows(lua)[3].tile.dashes))
+    # a disabled row dims the box with the rest; the box is still snapped at a fractional scale
+    lock_presets(lua)
+    DL(lua).RefreshCard()
+    assert float(rows(lua)[3].tile._alpha) == 0.4
+    lock_presets(lua, False)
+    lua = boot(LIVE_SCALE)
+    set_display(lua, 1.2, LIVE_SCALE)
+    DL(lua).OpenEditor(2)
+    assert dash_pixels(rows(lua)[0].tile, 1.2), "no dashes on an unset slot's rows at the live scale"
+
+
+def check_the_selected_swatchs_inner_ring_sits_one_pixel_inside_the_white_outer_ring():
+    for es, sc in ((1.0, 1.0), (1.2, LIVE_SCALE), (2.2, 1.0)):
+        lua = boot(sc)
+        set_display(lua, es, sc)
+        make(lua)
+        DL(lua).OpenEditor(1)
+        sw = swatches(lua)[0]
+        outer, inner = sw.edges, sw.inner
+        thick = float(outer[1]._h)
+        assert abs(thick * es - round(thick * es)) < 1e-6 and round(thick * es) >= 1
+        for k in (1, 2, 3, 4):
+            o, n = outer[k]._points[1], inner[k]._points[1]
+            assert float(o.x) == 0 and float(o.y) == 0, "the outer ring is not on the border"
+            assert abs(abs(float(n.x)) - thick) < 1e-9 or abs(abs(float(n.y)) - thick) < 1e-9, \
+                f"es {es}: inner edge {k} is not inset by one ring thickness"
+        n1 = inner[1]._points[1]
+        assert abs(float(n1.x) - thick) < 1e-9 and abs(float(n1.y) + thick) < 1e-9, "the inner top left is not one ring inside"
+        n4 = inner[4]._points[1]
+        assert abs(float(n4.x) + thick) < 1e-9 and abs(float(n4.y) + thick) < 1e-9, "the inner right edge is not inset"
+        assert sw_look(sw)["inner_shown"] and all(rgba(e)[:3] == (1.0, 1.0, 1.0) for e in seq(outer)), \
+            "the white outer ring is covered"
+
+
+def check_a_disabled_row_ignores_its_arrows_hover_and_a_swatch_tooltip_goes_with_the_card():
+    lua = boot()
+    i = make(lua)
+    DL(lua).OpenEditor(i)
+    row = rows(lua)[0]
+    lock_presets(lua)
+    DL(lua).RefreshCard()
+    dim = [rgba(e) for e in seq(row.edges)]
+    script(lua, row.down, "OnEnter")
+    assert [rgba(e) for e in seq(row.edges)] == dim, "an arrow of a disabled row lit the row's edge"
+    script(lua, row.down, "OnLeave")
+    lock_presets(lua, False)
+    DL(lua).RefreshCard()
+    # the swatch tooltip: shown on hover, hidden on leave, and hidden when the card closes with the mouse still on it
+    tip = g(lua).GameTooltip
+    run(lua, "GameTooltip:Hide(); GameTooltip._lines = {}")
+    sw = swatches(lua)[2]
+    script(lua, sw, "OnEnter")
+    assert shown(tip) and lines(lua) == ["VIOLET"], lines(lua)
+    script(lua, sw, "OnLeave")
+    assert not shown(tip), "the swatch tooltip stayed after the mouse left"
+    script(lua, sw, "OnEnter")
+    DL(lua).CloseEditor()
+    assert not shown(tip), "the swatch tooltip stayed after the card closed"
+    DL(lua).OpenEditor(i)
+    script(lua, swatches(lua)[2], "OnEnter")
+    enter_combat(lua)
+    assert not shown(card(lua)) and not shown(tip), "the swatch tooltip stayed after a combat close"
+
+
 def check_each_drop_order_row_is_one_button_for_its_whole_width_with_the_arrows_on_top():
     lua = boot()
     P = PS(lua)
@@ -2757,6 +2870,9 @@ CHECKS = [
     check_the_swatches_light_on_hover_and_press_restore_and_dim_while_the_presets_cannot_be_saved,
     check_the_card_layout_matches_the_mockup_on_whole_pixels_at_every_scale,
     check_each_drop_order_row_is_one_button_for_its_whole_width_with_the_arrows_on_top,
+    check_a_left_out_row_has_a_dashed_muted_box_and_a_small_dashes_label_and_no_ring,
+    check_the_selected_swatchs_inner_ring_sits_one_pixel_inside_the_white_outer_ring,
+    check_a_disabled_row_ignores_its_arrows_hover_and_a_swatch_tooltip_goes_with_the_card,
     check_the_close_x_and_the_arrows_are_drawn_on_whole_pixels_with_equal_margins_at_every_scale,
     check_every_interactive_editor_element_has_hover_pressed_and_disabled_looks_and_restores_exactly,
     check_the_name_box_the_pick_cells_and_the_row_light_up_on_hover_and_restore,

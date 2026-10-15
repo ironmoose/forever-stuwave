@@ -1,6 +1,6 @@
 -- Forever STUwave: the totem preset cells (look, tooltips, editor)
 --
--- Mockup mockups/totem-presets-two-2026-10-14.html, drawn on the two cells TotemPresets.lua adds to the totem tab. This
+-- The design mockup, drawn on the two cells TotemPresets.lua adds to the totem tab. This
 -- file is the picture and the controls; the rules (presets, colours, the step record) are TotemPresets.lua's.
 --
 --   * A CELL is a 38 px totem tab button wearing a ring: one arc per totem of its preset, in drop order, each in its
@@ -818,6 +818,57 @@ local function NewTileHover(t)
     t:SetScript("OnHide", function(self) self.fsHover, self.fsPressed = false, false end)
 end
 
+-- A dashed box on a frame, drawn in whole pixels (the mockup's dbox: 2 pixels on, 2 off, one pixel thick): a pool of
+-- snapped textures on `host`, seated to the frame by SeatDashBox.
+local DASH_POOL = 40
+
+local function NewDashBox(host)
+    local box = {}
+    for i = 1, DASH_POOL do
+        local t = host:CreateTexture(nil, "OVERLAY", nil, 2)
+        Snap(t)
+        t:Hide()
+        box[i] = t
+    end
+    return box
+end
+
+local function SeatDashBox(box, frame)
+    local es = Es(frame)
+    local pw, ph = math.floor(frame:GetWidth() * es + 0.5), math.floor(frame:GetHeight() * es + 0.5)
+    local px = 1 / es
+    local n = 0
+    local function put(x, y, w, h)
+        n = n + 1
+        local t = box[n]
+        if not t then return end
+        t:ClearAllPoints()
+        t:SetPoint("TOPLEFT", frame, "TOPLEFT", x * px, -y * px)
+        t:SetSize(w * px, h * px)
+    end
+    -- runs of "on" pixels along one side: pixel k is on when floor(k / 2) is even
+    local function runs(from, to, place)
+        local start
+        for k = from, to + 1 do
+            local on = k <= to and math.floor(k / 2) % 2 == 0
+            if on and not start then start = k end
+            if not on and start then place(start, k - start); start = nil end
+        end
+    end
+    runs(0, pw - 1, function(x, len) put(x, 0, len, 1); put(x, ph - 1, len, 1) end)
+    runs(1, ph - 2, function(y, len) put(0, y, 1, len); put(pw - 1, y, 1, len) end)
+    box.n = math.min(n, #box)
+    for i = box.n + 1, #box do box[i]:Hide() end
+end
+
+-- Colours the seated dashes and shows them (or hides them all).
+local function PaintDashBox(box, c, a, show)
+    for i = 1, #box do
+        box[i]:SetColorTexture(c[1], c[2], c[3], a)
+        box[i]:SetShown(show and i <= (box.n or 0))
+    end
+end
+
 local function PaintName()
     local n = card and card.name
     if not n then return end
@@ -1027,16 +1078,23 @@ local function BuildSwatch(parent, index)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:AddLine(self.fsName, MUTED[1], MUTED[2], MUTED[3])
             GameTooltip:Show()
+            self.fsTip = true
         end
     end)
     sw:SetScript("OnLeave", function(self)
         self.fsHover, self.fsPressed = false, false
         PaintSwatch(self)
         if GameTooltip then GameTooltip:Hide() end
+        self.fsTip = false
     end)
     sw:SetScript("OnMouseDown", function(self) self.fsPressed = true; PaintSwatch(self) end)
     sw:SetScript("OnMouseUp", function(self) self.fsPressed = false; PaintSwatch(self) end)
-    sw:SetScript("OnHide", function(self) self.fsHover, self.fsPressed = false, false; PaintSwatch(self) end)
+    sw:SetScript("OnHide", function(self)
+        self.fsHover, self.fsPressed = false, false
+        PaintSwatch(self)
+        if self.fsTip and GameTooltip then GameTooltip:Hide() end
+        self.fsTip = false
+    end)
     sw:SetScript("OnClick", function(self)
         local why = PS.Refusal()
         if why then return Refuse(why) end
@@ -1112,6 +1170,7 @@ local function SeatCard()
         row.tile:SetPoint("LEFT", row, "LEFT", u(26), 0)
         row.tile:SetSize(even(22), even(22))
         SeatEdges(row.tile.hl, row.tile, thick)
+        SeatDashBox(row.tile.dashes, row.tile)
         row.label:ClearAllPoints()
         row.label:SetPoint("LEFT", row, "LEFT", u(52), 0)
         Mono(row.label, 10, WHITE)
@@ -1149,6 +1208,8 @@ local function PaintRow(row)
     SetEdges(row.edges, VIOLET, (lit and 1 or 0.35) * k)
     local boxA = row.fsSet and ((hover or pressed) and 0.9 or 0.35) or 0
     SetEdges(row.tile.hl, row.tile.fsRing or WHITE, boxA * k)
+    -- a left out row has a dashed muted box in place of the ring
+    PaintDashBox(row.tile.dashes, MUTED, 0.6, not row.fsSet)
     for _, piece in ipairs({ row.fill, row.num, row.bar, row.label, row.tile }) do piece:SetAlpha(k) end
 end
 
@@ -1172,6 +1233,7 @@ local function BuildRow(parent)
     row.tile.icon:SetAllPoints(row.tile)
     row.tile.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     row.tile.hl = Edges(row.tile, "OVERLAY", 2)
+    row.tile.dashes = NewDashBox(row.tile)
     row.tile.text = row.tile:CreateFontString(nil, "OVERLAY")
     row.tile.text:SetPoint("CENTER", row.tile, "CENTER", 0, 0)
     row.label = row:CreateFontString(nil, "OVERLAY")
@@ -1281,6 +1343,10 @@ local function BuildCard()
     end)
     card:SetScript("OnHide", function(self)
         CloseChooser()
+        for _, sw in ipairs(self.swatches) do
+            if sw.fsTip and GameTooltip then GameTooltip:Hide() end
+            sw.fsTip = false
+        end
         self.fsConfirm = nil
         if self.name.ClearFocus then self.name:ClearFocus() end
     end)
@@ -1337,9 +1403,9 @@ function Dial.RefreshCard()
             row.label:SetText((entry.name:gsub(" Totem$", "")) .. (entry.known and "" or " (L" .. entry.level .. ")"))
             Tint(row.label, entry.known and WHITE or MUTED)
         else
-            row.tile.icon:SetColorTexture(0.04, 0.02, 0.09, 0.5)
+            row.tile.icon:SetColorTexture(0, 0, 0, 0)
             row.tile.icon:SetVertexColor(1, 1, 1, 1)
-            Mono(row.tile.text, 11, MUTED)
+            Mono(row.tile.text, 9, MUTED)
             row.tile.text:SetText("--")
             row.tile.text:Show()
             row.label:SetText("left out")

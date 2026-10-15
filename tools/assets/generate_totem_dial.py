@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates the arc textures of the totem preset cells.
 
-Reference: mockups/totem-presets-2026-10-14.html, concept C, ringBtn(). A cell is a 38 design unit square button
+Reference: the design mockup (the preset cell, concept C, ringBtn()). A cell is a 38 design unit square button
 wearing a ring of radius 11.5 centred 2 units above the button centre (cx 19, cy 17 in the box), split into one arc per
 totem of the preset: n arcs of 360 / n degrees each, 14 degrees of gap between neighbours (no gap for a single arc),
 the first arc starting at the top and running clockwise.

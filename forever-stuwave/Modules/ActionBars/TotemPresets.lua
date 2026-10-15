@@ -1,6 +1,6 @@
 -- Forever STUwave: Shaman totem presets (data and rules)
 --
--- Mockup: mockups/totem-presets-two-2026-10-14.html. A PRESET is a name (up to 8 letters), up to one totem per element
+-- Design: the two preset mockup. A PRESET is a name (up to 8 letters), up to one totem per element
 -- (stored as the rank 1 spell id, the identity TotemBar.lua keeps for every totem) and a DROP ORDER. A character has
 -- exactly TWO preset slots, Preset 1 and Preset 2, each with an OUTLINE COLOUR picked from P.COLORS (cyan, pink, violet,
 -- amber, green, red, white), saved in ForeverSTUwaveDB.totemPresets[guid] =
