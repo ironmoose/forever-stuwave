@@ -27,8 +27,8 @@ PATTERNS = {
     "local user name": "khil" + "drak",
     "home directory": "/ho" + "me/",
     "mail domain": "gma" + r"il\.com",
-    "windows user path": r"(?<![a-z])c:\\+us" + "ers",
-    "windows user path, forward slashes": "(?<![a-z])c:/+us" + "ers",
+    "windows user path": r"(?<![a-z])[a-z]:\\+us" + "ers",
+    "windows user path, forward slashes": "(?<![a-z])[a-z]:/+us" + "ers",
     "macos home directory": "(?<![a-z0-9:])/us" + "ers/",
 }
 FORBIDDEN = {label: re.compile(pattern, re.IGNORECASE) for label, pattern in PATTERNS.items()}

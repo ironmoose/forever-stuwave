@@ -19,8 +19,8 @@ SAMPLES = {
     "local user name": ["kh" + "ildrak"],
     "home directory": ["/ho" + "me/someone/project"],
     "mail domain": ["someone@gma" + "il.com"],
-    "windows user path": ["C:" + "\\Us" + "ers\\someone", "c:" + "\\\\us" + "ers\\\\x"],
-    "windows user path, forward slashes": ["C:/Us" + "ers/someone", "c://us" + "ers"],
+    "windows user path": ["C:" + "\\Us" + "ers\\someone", "c:" + "\\\\us" + "ers\\\\x", "D:" + "\\Us" + "ers\\bob"],
+    "windows user path, forward slashes": ["C:/Us" + "ers/someone", "c://us" + "ers", "x:/Us" + "ers/y"],
     "macos home directory": ["/Us" + "ers/someone/project", "cd /us" + "ers/x"],
 }
 NEAR_MISSES = {
