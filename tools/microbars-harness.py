@@ -665,7 +665,7 @@ class World:
     def __init__(self, n: int = 12, scale: float = 1.0, hidden: tuple[int, ...] = (), layout_cfg: bool = True,
                  store: str | None = None, nolayout: bool = False, deck: bool = True, cls: str | None = "SHAMAN",
                  faction: str | None = "Horde", class_error: bool = False, pixel_factor: float | None = None,
-                 effective_scale: float = 1.0, style: str | None = None):
+                 effective_scale: float = 1.0, style: str | None = None, help_zoom: float | None = None):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
         self.lua.execute(MOCK)
         g = self.lua.globals()
@@ -679,10 +679,13 @@ class World:
         if pixel_factor is not None:
             self.lua.execute(f"PixelUtil = {{ GetPixelToUIUnitFactor = function() return {pixel_factor} end }}")
         g.SCALE = scale
+        g.HELP_ZOOM = help_zoom
         g.COLOR_POWER = self.lua.table_from(list(theme_color_power()))
         g.COLOR_SCRIM = self.lua.table_from(list(theme_color_scrim()))
         self.g = g
         g.h_setup(n, ",".join(str(h) for h in hidden), layout_deck_w() if layout_cfg else None)
+        if help_zoom is not None:   # a zoom on the Help glyph (the generic glyph of every unnamed key) before the keys are built
+            self.lua.execute("FS.IconStyleData.micro.help.zoom = HELP_ZOOM")
         if style is not None:   # the icon style setting before the keys are built (the default is stock)
             self.lua.eval("FS.Config.Set")("icons.microstyle", style)
 
@@ -940,8 +943,9 @@ def check_cover_geometry() -> None:
     bad = {}
     for count, px in ((c, k) for c in (12, 14, 16, 18) for k in (3, 1)):
         w = World(count).login()
+        keys = list(w.get("FS.MicroBars.keys").values())
         for i, info in enumerate((dict(v.items()) for _, v in w.call("h_glyphInfo").items())):
-            if info.get("kind") != "runtime":
+            if info.get("kind") != "runtime" or keys[i].spec.zoom is not None:   # a zoomed-out glyph leaves the sides to the plate on purpose
                 continue
             plate, ring, kw, kh = _plate_and_ring(info, px)
             left, right = round(info["cl"] * px), round(info["cr"] * px)
@@ -1032,8 +1036,9 @@ def check_no_empty_wedge() -> None:
     tol = 0.004  # texture fractions, a quarter texel of a 64 texel texture
     for count, px in ((c, k) for c in (12, 16) for k in (3, 1)):
         w = World(count).login()
+        keys = list(w.get("FS.MicroBars.keys").values())
         for i, info in enumerate((dict(v.items()) for _, v in w.call("h_glyphInfo").items())):
-            if info.get("kind") != "runtime":
+            if info.get("kind") != "runtime" or keys[i].spec.zoom is not None:   # a zoomed-out glyph leaves the sides to the plate on purpose
                 continue
             seen.add(count)
             missed = _key_wedge_misses(info, px, tol)
@@ -1055,6 +1060,8 @@ def check_no_empty_wedge() -> None:
         ys, xs = np.nonzero(inner)
         fx, fy = (xs + 0.5 - gl) / (gr - gl), (ys + 0.5) / kh
         for name, e in entries:
+            if e.zoom is not None:   # zoomed out: the picture is drawn narrower, so the sides are plate (check_zoomed_key)
+                continue
             coords = [float(e.coords[k]) for k in range(1, len(e.coords) + 1)]
             if len(coords) != 4:   # a glyph is upright: four texcoords
                 bad[(px, name)] = -1
@@ -1082,10 +1089,16 @@ def check_fill() -> None:
         tag = f"keys_{count}_scale_{scale}"
         check(f"fill.{tag}.every_key_has_a_glyph", len(infos) == count and all(i["kind"] == "runtime" for i in infos), f"{len(infos)}")
         # the glyph and the cover span the cover's columns, in whole pixels
-        glyph_ok = [abs(i["left"] - cover_cols[0] * i["bw"]) <= 0.5 and abs(i["right"] - (1 - cover_cols[1]) * i["bw"]) <= 0.5
-                    and i["left"] == int(i["left"]) and i["right"] == int(i["right"]) for i in infos]
+        # a zoomed-out key (data `zoom`) draws its glyph narrower, centred in these columns (check_zoomed_key); the cover is the same
+        zoomed = [k.spec.zoom is not None for k in keys]
+        glyph_ok = [abs(i["cl"] - cover_cols[0] * i["bw"]) <= 0.5 and abs(i["cr"] - (1 - cover_cols[1]) * i["bw"]) <= 0.5
+                    and i["cl"] == int(i["cl"]) and i["cr"] == int(i["cr"])
+                    and ((i["left"] >= i["cl"] and i["right"] >= i["cr"]) if z else
+                         (abs(i["left"] - cover_cols[0] * i["bw"]) <= 0.5 and abs(i["right"] - (1 - cover_cols[1]) * i["bw"]) <= 0.5
+                          and i["left"] == int(i["left"]) and i["right"] == int(i["right"])))
+                    for i, z in zip(infos, zoomed)]
         check(f"fill.{tag}.the_glyph_sits_in_the_covers_columns_in_whole_pixels", all(glyph_ok), f"{[(i['left'], i['right']) for i in infos][:3]}")
-        cover_ok = [i["cl"] == i["left"] and i["cr"] == i["right"] for i in infos]
+        cover_ok = [z or (i["cl"] == i["left"] and i["cr"] == i["right"]) for i, z in zip(infos, zoomed)]
         check(f"fill.{tag}.the_cover_and_the_glyph_share_the_same_columns", all(cover_ok), f"{[(i['cl'], i['cr'], i['left'], i['right']) for i in infos][:3]}")
         # full height: within half a UI unit (the height is rounded to whole pixels, see check_crisp), both pieces alike
         check(f"fill.{tag}.the_rectangles_are_the_keys_full_height",
@@ -1208,6 +1221,176 @@ def check_fit_window() -> None:
     check("fit.a_window_that_grows_past_the_limits_edge_is_pushed_back_inside_it", near(pushed[0], 0.2, 1e-6) and near(pushed[1], 0.7, 1e-6), f"{pushed}")
     check("fit.no_aspect_or_a_bad_one_changes_nothing",
           all([float(v) for v in fit(spec, a)] == nominal for a in (None, 0, -1, float("nan"), float("inf"))))
+
+
+# The icon data as v5 (5dac1c0, the look Parker approved) wrote it, minus the zoom-out: every entry's own line of
+# Core/IconStyleData.lua. A zoom-out may add `zoom = z` to the keys listed in ZOOMED and nothing else; every other entry, and the
+# rest of a zoomed one, is this text exactly.
+CLASSIC_V5 = 'coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }'
+V5_ENTRIES = {
+    "micro.spellbook": f'file = 130810, {CLASSIC_V5}, fam = "house_violet", boost = 0.36',
+    "micro.talents": f'file = 130813, {CLASSIC_V5}, fam = "house_pink", boost = 0.34',
+    "micro.achievement": f'file = 235422, {CLASSIC_V5}, fam = "house_violet", boost = 0',
+    "micro.questlog": f'file = 130804, {CLASSIC_V5}, fam = "house_pink", boost = 0.01',
+    "micro.socials": f'file = 130807, {CLASSIC_V5}, fam = "house_violet", boost = 0',
+    "micro.lfd": f'file = 130798, {CLASSIC_V5}, fam = "house_pink", boost = 0.49',
+    "micro.mainmenu": f'file = 130801, {CLASSIC_V5}, fam = "house_cyan", boost = 0.18',
+    "micro.help": f'file = 130794, {CLASSIC_V5}, fam = "house_pink", boost = 1',
+    "micro.worldmap": f'file = 130816, {CLASSIC_V5}, fam = "house_cyan", boost = 0.52',
+    "micro.ej": f'file = 525019, {CLASSIC_V5}, fam = "house_pink", boost = 0.75',
+    "micro.collections": f'file = 615164, {CLASSIC_V5}, fam = "house_violet", boost = 0.18',
+    "micro.store": f'file = 902317, {CLASSIC_V5}, fam = "house_violet", boost = 0.19',
+    "micro.professions": 'file = 4708813, coords = { 0.3908, 0.4481, 0.6966, 0.7897 }, size = { 1024, 512 }, limit = { 0.3877, 0.4502, 0.6582, 0.8184 }, fam = "house_cyan", boost = 0.42',
+    "micro.guild": 'file = 4708813, coords = { 0.2588, 0.3213, 0.8535, 0.9551 }, size = { 1024, 512 }, limit = { 0.2588, 0.3213, 0.8223, 0.9824 }, fam = "house_cyan", boost = 0.25',
+    "micro.housing": 'file = 4708813, coords = { 0.3232, 0.3857, 0.6885, 0.79 }, size = { 1024, 512 }, limit = { 0.3232, 0.3857, 0.6582, 0.8184 }, fam = "house_violet", boost = 0.07',
+    "pvp.Alliance": 'file = 136998, coords = { 0, 0.7339, 0.03, 0.6262 }, size = { 64, 64 }, limit = { 0, 1, 0, 1 }, fam = "house_cyan", boost = 0.24',
+    "pvp.Horde": 'file = 137000, coords = { 0, 0.7339, 0.0144, 0.6106 }, size = { 64, 64 }, limit = { 0, 1, 0, 1 }, fam = "house_cyan", boost = 1',
+    "pvp.other": 'file = 136999, coords = { 0, 0.795, 0, 0.6459 }, size = { 64, 64 }, limit = { 0, 1, 0, 1 }, fam = "house_cyan", boost = 0.69',
+}
+CLASS_V5_BOOST = {"WARRIOR": "0.03", "PALADIN": "0.04", "HUNTER": "0.83", "ROGUE": "0.02", "PRIEST": "0.07", "SHAMAN": "0.27",
+                  "MAGE": "0", "WARLOCK": "0.12", "DRUID": "0.34"}
+for _tok, _boost in CLASS_V5_BOOST.items():
+    V5_ENTRIES[f"class.{_tok}"] = ('file = "Interface\\\\Icons\\\\ClassIcon_' + CLASS_NAMES[_tok] + '", coords = { 0.07, 0.93, 0.1506, 0.8494 }, '
+                                   'size = { 64, 64 }, limit = { 0.07, 0.93, 0.07, 0.93 }, fam = "house_cyan", boost = ' + _boost)
+# The micro keys whose close-up crop reads as a blob (positions 2, 4, 5, 7, 10 and 12 of the v5 row), by the name the data holds.
+ZOOMED = {"micro.spellbook", "micro.achievement", "micro.questlog", "micro.lfd", "micro.worldmap", "micro.collections"}
+
+
+def data_lines() -> dict[str, str]:
+    """Each entry of Core/IconStyleData.lua (micro, pvp, class) as its text between the braces."""
+    out, section = {}, None
+    for line in (ADDON / "Core" / "IconStyleData.lua").read_text(encoding="utf-8").splitlines():
+        m = re.match(r"  (micro|pvp|class) = \{$", line)
+        if m:
+            section = m.group(1)
+            continue
+        if line == "  },":
+            section = None
+        m = re.match(r"    (\w+) = \{ (.*) \},$", line)
+        if section and m:
+            out[f"{section}.{m.group(1)}"] = m.group(2)
+    return out
+
+
+def check_zoom_data() -> None:
+    """The zoom-out touches only the keys it was asked for. Every other entry of the icon data is v5's text, and a zoomed entry
+    is v5's text plus one `zoom` value in (0, 1] (0 is v5's close-up, 1 is the whole glyph): so the other keys, and every key's
+    texture, window, limit, family and boost, are pixel identical to what Parker approved."""
+    got = data_lines()
+    check("zoom.the_data_has_exactly_the_v5_entries", set(got) == set(V5_ENTRIES), f"{sorted(set(got) ^ set(V5_ENTRIES))}")
+    bad, zoomed = [], set()
+    for name, text in got.items():
+        m = re.search(r", zoom = ([0-9.]+)$", text)
+        base = text[:m.start()] if m else text
+        if m:
+            zoomed.add(name)
+            if not 0 < float(m.group(1)) <= 1:
+                bad.append((name, "zoom out of (0, 1]"))
+        if base != V5_ENTRIES.get(name):
+            bad.append((name, base))
+    check("zoom.every_entry_is_v5s_text_apart_from_the_zoom_value", not bad, f"{bad[:2]}")
+    check("zoom.exactly_the_asked_for_keys_carry_a_zoom", zoomed == ZOOMED, f"{sorted(zoomed ^ ZOOMED)}")
+    # and the spec a key is built from carries the data's zoom, nothing more: a key with none must not get one on the way
+    w = World(12).login()
+    mb, data = w.get("FS.MicroBars"), w.get("FS.IconStyleData")
+    via = {}
+    for name in data.micro.keys():
+        via[f"micro.{name}"] = (mb.GlyphSpec(name, None, None).zoom, data.micro[name].zoom)
+    for faction in data.pvp.keys():
+        via[f"pvp.{faction}"] = (mb.GlyphSpec("pvp", faction if faction != "other" else "Neutral", None).zoom, data.pvp[faction].zoom)
+    for token in data["class"].keys():
+        via[f"class.{token}"] = (mb.GlyphSpec("character", None, token).zoom, data["class"][token].zoom)
+    check("zoom.the_spec_of_every_glyph_carries_exactly_the_datas_zoom", len(via) == 27 and all(a == b for a, b in via.values()),
+          f"{[(k, v) for k, v in via.items() if v[0] != v[1]][:3]}")
+
+
+def check_glyph_view() -> None:
+    """GlyphView, the pure part: no zoom (or a bad one) is FitWindow's window filling the rectangle; a zoom grows the window's
+    height from the fill window's toward the glyph's whole part of the texture (`limit`) at the same width and centre, and
+    answers the aspect the picture is then drawn at (its own), so the picture is shown whole instead of cropped, never stretched."""
+    w = World(12).login()
+    view = w.get("FS.MicroBars.GlyphView")
+    fit = w.get("FS.MicroBars.FitWindow")
+
+    def spec(zoom="nil"):   # 32 x 12.8 texels in a limit of 38.4 x 25.6
+        return w.lua.eval("{ coords = { 0.25, 0.75, 0.4, 0.6 }, size = { 64, 64 }, limit = { 0.2, 0.8, 0.3, 0.7 }, zoom = " + str(zoom) + " }")
+    got = lambda sp, a, d=None: [None if v is None else float(v) for v in view(sp, a, d)]  # noqa: E731
+    plain = got(spec(), 2.5)
+    check("view.without_a_zoom_it_is_the_fit_window_filling_the_rectangle",
+          plain[:4] == [float(v) for v in fit(spec(), 2.5)] and plain[4] is None, f"{plain}")
+    check("view.a_zero_or_bad_zoom_is_no_zoom", all(got(spec(z), 2.5) == plain for z in (0, -0.5, "0/0", "'x'", "{}")),
+          f"{[got(spec(z), 2.5) for z in (0, -0.5)]}")
+    half = got(spec(0.5), 2.5)
+    th = (half[3] - half[2]) * 64
+    tw = (half[1] - half[0]) * 64
+    check("view.a_zoom_grows_the_height_part_of_the_way_to_the_whole_limit_at_the_same_width_and_centre",
+          near(th, 12.8 + 0.5 * (25.6 - 12.8), 1e-4) and near(tw, 32, 1e-4) and near(half[0] + half[1], 1.0, 1e-6) and near(half[2] + half[3], 1.0, 1e-6),
+          f"{half} {tw}x{th}")
+    check("view.the_drawn_aspect_is_the_windows_own_so_nothing_is_stretched", near(half[4], tw / th, 1e-4) and half[4] < 2.5, f"{half[4]} {tw / th}")
+    full = got(spec(1), 2.5)
+    check("view.a_zoom_of_1_shows_the_whole_height_of_the_limit",
+          near(full[2], 0.3, 1e-6) and near(full[3], 0.7, 1e-6) and near(full[4], 32 / 25.6, 1e-4), f"{full}")
+    check("view.a_zoom_past_1_is_1", got(spec(7), 2.5) == full, f"{got(spec(7), 2.5)}")
+    snapped = got(spec(0.5), 2.5, 1.5)
+    check("view.a_drawn_aspect_given_by_the_caller_sets_the_windows_width_at_that_height",
+          near((snapped[1] - snapped[0]) / (snapped[3] - snapped[2]), 1.5, 1e-4) and near(snapped[3] - snapped[2], half[3] - half[2], 1e-6) and near(snapped[4], half[4], 1e-6),
+          f"{snapped}")
+    edge = w.lua.eval("{ coords = { 0.2, 0.8, 0.3, 0.45 }, size = { 64, 64 }, limit = { 0.2, 0.8, 0.3, 0.7 }, zoom = 1 }")
+    pushed = got(edge, 4.0)
+    check("view.a_window_at_the_limits_edge_stays_inside_it_when_it_grows",
+          near(pushed[2], 0.3, 1e-6) and near(pushed[3], 0.7, 1e-6) and pushed[0] >= 0.2 - 1e-6 and pushed[1] <= 0.8 + 1e-6, f"{pushed}")
+    check("view.no_aspect_or_a_bad_one_changes_nothing",
+          all(got(spec(0.5), a)[:4] == [0.25, 0.75, 0.4, 0.6] and got(spec(0.5), a)[4] is None for a in (None, 0, -1, float("nan"), float("inf"))))
+
+
+def check_zoomed_key() -> None:
+    """A zoomed key draws the glyph's window zoomed out and the rectangle it fills narrower, centred in the key's inside (the plate
+    shows at the two sides): the window has the rectangle's aspect (nothing stretched), on whole physical pixels, with the cover
+    still over the whole inside and the ARTWORK stack unchanged. Keys with no zoom are untouched. At every key count."""
+    bad, seen = {}, 0
+    for count in (12, 14, 16):
+        for factor, eff, scale in ((768 / 1440, 0.64, 0.64), (768 / 1440, 1.0, 1.0), (768 / 1440, 768 / 1440, 0.64)):
+            w = World(count, scale=scale, pixel_factor=factor, effective_scale=eff, help_zoom=0.5).login()
+            px = factor / eff
+            keys = list(w.get("FS.MicroBars.keys").values())
+            infos = [dict(v.items()) for _, v in w.call("h_glyphInfo").items()]
+            for n, (k, i) in enumerate(zip(keys, infos)):
+                if i["kind"] != "runtime":
+                    continue
+                rw = i["bw"] - i["left"] - i["right"]
+                rh = i["bh"] + i["vert"]["g"][2] - i["vert"]["g"][1]
+                cw = i["bw"] - i["cr"] - i["cl"]
+                c = [float(i["c"][m]) for m in (1, 2, 3, 4)]
+                size, limit = k.spec.size, k.spec.limit
+                tw, th = (c[1] - c[0]) * size[1], (c[3] - c[2]) * size[2]
+                if k.spec.zoom is None:
+                    ok = abs(i["left"] - i["cl"]) < 1e-6 and abs(i["right"] - i["cr"]) < 1e-6
+                else:
+                    seen += 1
+                    fill_h = (float(k.spec.coords[4]) - float(k.spec.coords[3])) * size[2]
+                    ok = (cw - rw > 2 * px                                                            # narrower than the cover's inside
+                          and abs((i["left"] - i["cl"]) - (i["right"] - i["cr"])) <= px + 1e-6          # centred within a pixel
+                          and abs(tw / th * rh - rw) <= 1e-3                                          # the window is the SNAPPED rectangle's aspect
+                          and th > fill_h + 1                                                         # the window shows more rows than v5's
+                          and all(abs(v / px - round(v / px)) < 1e-6 for v in (i["left"], i["right"]))
+                          and float(limit[3]) - 1e-4 <= c[2] and c[3] <= float(limit[4]) + 1e-4
+                          and i["cl"] <= i["left"] and i["cr"] <= i["right"]
+                          and i["boostAnchor"] and i["modAnchor"] and i["liftAnchor"])
+                    boost = i.get("boostCoords")
+                    ok = ok and boost is not None and [float(boost[m]) for m in (1, 2, 3, 4)] == c
+                if not ok:
+                    bad[(count, scale, eff, n)] = (rw, cw, i["left"], i["right"], round(tw / th, 3))
+    check("zoomed.the_rectangle_is_narrower_and_centred_and_shows_the_window_at_its_own_aspect_at_every_key_count", seen > 60 and not bad,
+          f"{seen} zoomed keys, bad {list(bad.items())[:3]}")
+    # a zoom of 1 shows the whole of the glyph's part of the texture, but for the hair a whole pixel rectangle takes off one axis
+    w = World(12, help_zoom=1).login()
+    k = list(w.get("FS.MicroBars.keys").values())[2]
+    i = dict(w.call("h_glyphInfo")[3].items())
+    c = [float(i["c"][m]) for m in (1, 2, 3, 4)]
+    lim = [float(k.spec.limit[m]) for m in (1, 2, 3, 4)]
+    check("zoomed.at_1_the_window_is_the_whole_limit_of_the_texture_within_a_pixel_of_the_rectangle",
+          lim[0] - 1e-4 <= c[0] and c[1] <= lim[1] + 1e-4 and lim[2] - 1e-4 <= c[2] and c[3] <= lim[3] + 1e-4
+          and (c[1] - c[0]) >= 0.97 * (lim[1] - lim[0]) and (c[3] - c[2]) >= 0.97 * (lim[3] - lim[2]), f"{c} vs {lim}")
 
 
 def check_late_class() -> None:
@@ -1729,6 +1912,9 @@ def main() -> int:
     check_crisp()
     check_window_follows_the_rect()
     check_fit_window()
+    check_zoom_data()
+    check_glyph_view()
+    check_zoomed_key()
     check_late_class()
     check_glyph_tint()
     check_microstyle()

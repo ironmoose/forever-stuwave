@@ -6,7 +6,8 @@
 --   micro, pvp, class: the game texture a micro key draws (file id or path), the upright texcoord window (l, r, t, b)
 --           zoomed to the rectangle's aspect, the texture's size in texels (w, h), the glyph's own part of the texture
 --           (limit: l, r, t, b; the window is refitted inside it when the keys shrink) and the family and the boost
---           (0 plain, 1 twice as bright)
+--           (0 plain, 1 twice as bright); zoom, on some keys only: how far the window is zoomed out from the close-up
+--           (0 as is, 1 the whole of the limit), drawn in a narrower rectangle (MicroBars.lua GlyphView)
 --   spells: byFile (the icon file id the client reports for a spell) and byName (the lower case icon file name)
 --           to an icon name; look: that name to its family and boost; bySpell: the spell ids that wear each icon,
 --           kept for the harness (every spell the class tabs show must be here)
@@ -25,17 +26,17 @@ FS.IconStyleData = {
   },
   cover = { file = "iconcover_key.tga", x0 = 0.0294, x1 = 0.9706 },
   micro = {
-    spellbook = { file = 130810, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }, fam = "house_violet", boost = 0.36 },
+    spellbook = { file = 130810, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }, fam = "house_violet", boost = 0.36, zoom = 0.5 },
     talents = { file = 130813, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }, fam = "house_pink", boost = 0.34 },
-    achievement = { file = 235422, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }, fam = "house_violet", boost = 0 },
-    questlog = { file = 130804, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }, fam = "house_pink", boost = 0.01 },
+    achievement = { file = 235422, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }, fam = "house_violet", boost = 0, zoom = 0.5 },
+    questlog = { file = 130804, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }, fam = "house_pink", boost = 0.01, zoom = 0.5 },
     socials = { file = 130807, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }, fam = "house_violet", boost = 0 },
-    lfd = { file = 130798, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }, fam = "house_pink", boost = 0.49 },
+    lfd = { file = 130798, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }, fam = "house_pink", boost = 0.49, zoom = 0.5 },
     mainmenu = { file = 130801, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }, fam = "house_cyan", boost = 0.18 },
     help = { file = 130794, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }, fam = "house_pink", boost = 1 },
-    worldmap = { file = 130816, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }, fam = "house_cyan", boost = 0.52 },
+    worldmap = { file = 130816, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }, fam = "house_cyan", boost = 0.52, zoom = 0.5 },
     ej = { file = 525019, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }, fam = "house_pink", boost = 0.75 },
-    collections = { file = 615164, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }, fam = "house_violet", boost = 0.18 },
+    collections = { file = 615164, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }, fam = "house_violet", boost = 0.18, zoom = 0.5 },
     store = { file = 902317, coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }, fam = "house_violet", boost = 0.19 },
     professions = { file = 4708813, coords = { 0.3908, 0.4481, 0.6966, 0.7897 }, size = { 1024, 512 }, limit = { 0.3877, 0.4502, 0.6582, 0.8184 }, fam = "house_cyan", boost = 0.42 },
     guild = { file = 4708813, coords = { 0.2588, 0.3213, 0.8535, 0.9551 }, size = { 1024, 512 }, limit = { 0.2588, 0.3213, 0.8223, 0.9824 }, fam = "house_cyan", boost = 0.25 },

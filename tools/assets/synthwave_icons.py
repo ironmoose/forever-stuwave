@@ -653,6 +653,11 @@ CLASSIC_MICRO_IDS = {
     "store": (902317, "store"),
 }
 CLASSIC_WINDOW = (5, 29, 27, 58)
+# Micro keys whose classic glyph is shown zoomed OUT: the close-up crop that fills the key cuts a button's face to about 60% of
+# its height, which turns some of them into blobs. A zoom z in (0, 1] grows the window's height from that crop (0) to the whole
+# glyph part of the texture (1) at the same width; the picture is then drawn in a narrower rectangle of its own aspect,
+# centred (MicroBars.lua GlyphView). Per key, so every other key keeps the close-up. Keyed by the micro name.
+MICRO_ZOOM = {"spellbook": 0.5, "achievement": 0.5, "questlog": 0.5, "lfd": 0.5, "worldmap": 0.5, "collections": 0.5}
 ATLAS_ID = 4708813  # interface/hud/uimicromenu2x
 ATLAS_CELLS = {"professions": (397, 337, 64, 82), "guild": (265, 421, 64, 82), "housing": (331, 337, 64, 82)}
 PVP_IDS = {"Alliance": (136998, "pvp_alliance"), "Horde": (137000, "pvp_horde"), "other": (136999, "pvp_ffa")}
@@ -726,7 +731,7 @@ def boost_for(im: Image.Image, window: tuple[float, float, float, float]) -> flo
 
 
 def runtime_entry(im: Image.Image, window: tuple[float, float, float, float], file_id, fam: str,
-                  limit: tuple[float, float, float, float] | None = None) -> dict:
+                  limit: tuple[float, float, float, float] | None = None, zoom: float | None = None) -> dict:
     """One icon's data: the file, the upright texcoord window (l, r, t, b as fractions), the texture's size in texels, the
     family and the boost. The window is the glyph grown a little, given the icon rectangle's aspect (a transparent margin is
     added, or the other axis cropped, centred) and kept inside the `limit` (the glyph's own part of the texture: a button
@@ -737,7 +742,10 @@ def runtime_entry(im: Image.Image, window: tuple[float, float, float, float], fi
     box = fit_window(window, limit, x1 - x0, KEY_H)
     frac = (box[0] / w, box[2] / w, box[1] / h, box[3] / h)
     lim = (limit[0] / w, limit[2] / w, limit[1] / h, limit[3] / h)
-    return {"file": file_id, "fam": fam, "coords": frac, "size": (w, h), "limit": lim, "boost": boost_for(im, box)}
+    entry = {"file": file_id, "fam": fam, "coords": frac, "size": (w, h), "limit": lim, "boost": boost_for(im, box)}
+    if zoom:
+        entry["zoom"] = zoom   # the window above is the close-up; the runtime grows it by this much (MICRO_ZOOM)
+    return entry
 
 
 def micro_runtime_data(root: Path) -> tuple[dict, dict, dict]:
@@ -746,7 +754,7 @@ def micro_runtime_data(root: Path) -> tuple[dict, dict, dict]:
     micro, pvp, klass = {}, {}, {}
     for stem, (fid, local) in CLASSIC_MICRO_IDS.items():
         im = read_rgba(root, f"micro/{local}.blp")
-        micro[stem] = runtime_entry(im, CLASSIC_WINDOW, fid, fam_of[stem], limit=CLASSIC_WINDOW)
+        micro[stem] = runtime_entry(im, CLASSIC_WINDOW, fid, fam_of[stem], limit=CLASSIC_WINDOW, zoom=MICRO_ZOOM.get(stem))
     sheet = read_blp2_bgra(root / "micro/uimicromenu2x.blp")
     for stem, (left, top, w, h) in ATLAS_CELLS.items():
         cell = sheet.crop((left, top, left + w, top + h))
@@ -781,7 +789,7 @@ def lua_entry(ent: dict) -> str:
     ll, lr, lt, lb = (lua_num(round(v, 5)) for v in ent["limit"])
     return (f'{{ file = {file}, coords = {{ {l}, {r}, {t}, {b} }}, size = {{ {ent["size"][0]}, {ent["size"][1]} }}, '
             f'limit = {{ {ll}, {lr}, {lt}, {lb} }}, '
-            f'fam = "{ent["fam"]}", boost = {lua_num(ent["boost"])} }}')
+            f'fam = "{ent["fam"]}", boost = {lua_num(ent["boost"])}' + (f', zoom = {lua_num(ent["zoom"])}' if ent.get("zoom") else "") + " }")
 
 
 def spell_look(root: Path, icon: str, fam: str) -> dict:
@@ -815,7 +823,8 @@ def lua_runtime_data(root: Path) -> str:
         "--   micro, pvp, class: the game texture a micro key draws (file id or path), the upright texcoord window (l, r, t, b)\n"
         "--           zoomed to the rectangle's aspect, the texture's size in texels (w, h), the glyph's own part of the texture\n"
         "--           (limit: l, r, t, b; the window is refitted inside it when the keys shrink) and the family and the boost\n"
-        "--           (0 plain, 1 twice as bright)\n"
+        "--           (0 plain, 1 twice as bright); zoom, on some keys only: how far the window is zoomed out from the close-up\n"
+        "--           (0 as is, 1 the whole of the limit), drawn in a narrower rectangle (MicroBars.lua GlyphView)\n"
         "--   spells: byFile (the icon file id the client reports for a spell) and byName (the lower case icon file name)\n"
         "--           to an icon name; look: that name to its family and boost; bySpell: the spell ids that wear each icon,\n"
         "--           kept for the harness (every spell the class tabs show must be here)\n"

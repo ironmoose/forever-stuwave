@@ -168,7 +168,7 @@ local function IsText(value)
     return type(value) == "string" and not FS.IsSecret(value)
 end
 
--- The spec of a glyph name: { kind = "baked", file } or { kind = "runtime", file, coords, size, limit, fam, boost }.
+-- The spec of a glyph name: { kind = "baked", file } or { kind = "runtime", file, coords, size, limit, zoom, fam, boost }.
 -- `faction` is UnitFactionGroup("player") and `class` UnitClass's token; anything that is not a plain string (nil,
 -- "Neutral", a secret value, a name nobody drew) gets the free emblem, the person glyph or the generic glyph. Pure, so the
 -- harness can walk every name.
@@ -185,7 +185,7 @@ local function GlyphSpec(name, faction, class)
         end
     end
     if entry then
-        return { kind = "runtime", file = entry.file, coords = entry.coords, size = entry.size, limit = entry.limit, fam = entry.fam, boost = entry.boost }
+        return { kind = "runtime", file = entry.file, coords = entry.coords, size = entry.size, limit = entry.limit, zoom = entry.zoom, fam = entry.fam, boost = entry.boost }
     end
     return { kind = "baked", file = ART_DIR .. (OWN_ART[name] and name or "character") .. ".tga" }
 end
@@ -452,10 +452,41 @@ local function FitWindow(spec, aspect)
     return (cx - w / 2) / tw, (cx + w / 2) / tw, (cy - h / 2) / th, (cy + h / 2) / th
 end
 
+-- A glyph's window and the aspect it is drawn at. Most glyphs fill their rectangle: FitWindow's window, no drawn aspect (nil).
+-- A spec with a `zoom` in (0, 1] shows more of the picture instead: the window is as wide as the fill window but its height
+-- grows from the fill window's (zoom 0, the close-up crop) to the glyph's whole part of the texture (zoom 1, `limit`), centred
+-- the same and kept inside the limit; the picture is then drawn in a narrower rectangle of its own aspect (the third result,
+-- width over height) so nothing is stretched. `drawAspect` is the aspect of the rectangle as it was snapped to pixels: the
+-- window's width follows it at the same height. Pure, so the harness can walk every glyph.
+local function GlyphView(spec, aspect, drawAspect)
+    local l, r, t, b = FitWindow(spec, aspect)
+    local zoom, size, limit = spec.zoom, spec.size, spec.limit
+    if type(zoom) ~= "number" or zoom ~= zoom or zoom <= 0 or not (size and limit)
+        or type(aspect) ~= "number" or aspect ~= aspect or aspect <= 0 or aspect == math.huge then
+        return l, r, t, b, nil
+    end
+    local tw, th = size[1], size[2]
+    local w, h = (r - l) * tw, (b - t) * th
+    h = h + math.min(zoom, 1) * ((limit[4] - limit[3]) * th - h)
+    local own = w / h
+    if type(drawAspect) == "number" and drawAspect == drawAspect and drawAspect > 0 and drawAspect < math.huge then
+        w = drawAspect * h
+        local limitW = (limit[2] - limit[1]) * tw
+        if w > limitW then   -- a snapped rectangle a hair wider than the window's own aspect: a hair less height, never stretched
+            w = limitW
+            h = w / drawAspect
+        end
+    end
+    local cx, cy = (l + r) / 2 * tw, (spec.coords[3] + spec.coords[4]) / 2 * th
+    cx = math.min(math.max(cx, limit[1] * tw + w / 2), limit[2] * tw - w / 2)
+    cy = math.min(math.max(cy, limit[3] * th + h / 2), limit[4] * th - h / 2)
+    return (cx - w / 2) / tw, (cx + w / 2) / tw, (cy - h / 2) / th, (cy + h / 2) / th, own
+end
+
 -- Writes a runtime key's window to the glyph and to its ADD copy, which must show the same one (texture writes only).
 local function SetWindow(key)
     if key.spec.kind ~= "runtime" then return end
-    local l, r, t, b = FitWindow(key.spec, key.aspect)
+    local l, r, t, b = GlyphView(key.spec, key.aspect, key.drawAspect)
     key.glyph:SetTexCoord(l, r, t, b)
     if key.chain then key.chain.boost:SetTexCoord(l, r, t, b) end
 end
@@ -540,18 +571,29 @@ local function SizeKey(key, s, keyW)
         local cover = data.cover
         -- the height too: the top edge is the key's own, the bottom one is moved so the rectangle is a whole number of pixels
         local top, bottom = Edge(0), Edge(h)
-        local function Place(tex, x0, x1)
+        local function PlaceAt(tex, left, right)   -- the offsets of its two corners from the key's left and right edges
             tex:ClearAllPoints()
-            tex:SetPoint("TOPLEFT", key.ov, "TOPLEFT", Edge(x0 * w), -top)
-            tex:SetPoint("BOTTOMRIGHT", key.ov, "BOTTOMRIGHT", -Edge((1 - x1) * w), h - bottom)
+            tex:SetPoint("TOPLEFT", key.ov, "TOPLEFT", left, -top)
+            tex:SetPoint("BOTTOMRIGHT", key.ov, "BOTTOMRIGHT", -right, h - bottom)
         end
-        Place(key.glyph, cover.x0, cover.x1)
-        Place(key.cover, cover.x0, cover.x1)
+        local left, right = Edge(cover.x0 * w), Edge((1 - cover.x1) * w)
+        PlaceAt(key.cover, left, right)
         -- the rectangle as drawn (snapped edges): the glyph's window is refitted to its aspect, so a key the layout made
         -- narrower is not squeezed sideways
-        local rw = w - Edge(cover.x0 * w) - Edge((1 - cover.x1) * w)
+        local rw = w - left - right
         local rh = bottom - top
         key.aspect = rh > 0 and rw / rh or nil
+        key.drawAspect = nil
+        -- a zoomed-out glyph shows more of the picture in a narrower rectangle of its own aspect, centred in the inside
+        -- (the plate shows at the two sides); the others fill it
+        local own = select(5, GlyphView(key.spec, key.aspect))
+        if own and rh > 0 then
+            local gw = Round(math.min(own * rh, rw) / (px or 1)) * (px or 1)
+            local gl = Edge(left + (rw - gw) / 2)
+            left, right = gl, Edge(w - gl - gw)
+            key.drawAspect = (w - left - right) / rh
+        end
+        PlaceAt(key.glyph, left, right)
         SetWindow(key)
     else
         -- The art covers the key: the square baked texture is stretched to the key's size and cropped (texcoords) to
@@ -1645,7 +1687,7 @@ end
 
 -- Exported for the headless smoke test, the settings page and /dump.
 FS.MicroBars = {
-    SETTING = STYLE_SETTING, STYLES = STYLES, Style = Style, FitWindow = FitWindow,
+    SETTING = STYLE_SETTING, STYLES = STYLES, Style = Style, FitWindow = FitWindow, GlyphView = GlyphView,
     keys = keyList, ComputeVisual = ComputeVisual, Apply = Apply,
     KeyLayout = KeyLayout, Pitch = Pitch, RowWidth = RowWidth,
     Glyphs = GLYPHS, GlyphGeneric = GLYPH_GENERIC, GlyphSpec = GlyphSpec,
