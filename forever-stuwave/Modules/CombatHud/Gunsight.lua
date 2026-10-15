@@ -1,7 +1,6 @@
 -- Forever STUwave: Gunsight HUD core (geometry root, anchor frames, piece registry).
 --
--- The Gunsight HUD is the locked design in mockups/gunsight-hud-v2-2026-10-02/
--- gunsight-hud-v2-2026-10-02.html: two vertical tapes either side of your character, info boxes
+-- The Gunsight HUD is the locked design in the design mockup: two vertical tapes either side of your character, info boxes
 -- above them, a next-cast tile, soul shards, buff reminders, a DoT time axis on the enemy side,
 -- proc posts and one horizon hairline. Later lanes build the pieces; THIS file
 -- owns where they sit and how they switch on and off, so no lane re-derives a coordinate.
@@ -67,7 +66,7 @@ local TL = { x0 = 796, x1 = 826 }                   -- TL: your tape
 local TR = { x0 = 1164, x1 = 1194 }                 -- TR: target tape
 local BOXL = { x = 724, y = 424, w = 114, h = 56 }  -- BOXL: your info box
 -- BOXR: target info box. The v2 mockup draws it 114 wide; it is 20 image px wider to the right (approved 2026-10-09,
--- mockups/gunsight-target-wider-2026-10-09.html): the left edge, the tape and the cast tile stay put. BOXL is unchanged.
+-- the design mockup): the left edge, the tape and the cast tile stay put. BOXL is unchanged.
 local BOXR = { x = 1152, y = 424, w = 134, h = 56 }
 local LBRK = 836                                    -- LBRK: left proc post x
 local RBRK = 2 * CX - LBRK                          -- RBRK: right proc post x

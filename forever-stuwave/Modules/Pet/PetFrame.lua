@@ -1,7 +1,7 @@
 -- Forever STUwave: Pet Frame (the pet component's one panel: container +
 -- chrome + drag/lock + visibility gate + the HP/mana block)
 --
--- ONE panel, the approved console dock option C (mockups/gunsight-hud-v2-2026-10-02,
+-- ONE panel, the approved console dock option C (the design mockup,
 -- PE_G.dc and drawPet's dc branch): the player, "put the pet HP and mana bar above the
 -- action bar and only take up like 2/5, and leave the rest for the cast bar ... as one
 -- component". TOP ROW (26 high): statusSlot (the name with plain muted "LV n" text at its

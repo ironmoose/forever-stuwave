@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates the VERTICAL cast tape chevron textures (shallow chevrons pointing UP).
 
-Reference: mockups/gunsight-hud-v2-2026-10-02/gunsight-hud-v2-2026-10-02.html,
+Reference: the design mockup,
 drawTape() and chevPath(cx, ay, hw, d, t). The Gunsight HUD's two cast tapes are
 columns of 20 up-pointing chevrons that light from the bottom. Sibling of
 generate_cast_chevron.py (the horizontal bar chevrons, pointing RIGHT); same

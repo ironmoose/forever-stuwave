@@ -3,7 +3,7 @@
 buffbar-harness's world: the actionbars mock, FrameHelpers.lua, ActionBars.lua, Console.lua, StanceBar.lua, PetActionBar.lua,
 PetDock.lua, ClassShoulder.lua, and for a Paladin or a Shaman the class tab it is seated after.
 
-The tab is a second Console shoulder (mockups/five-second-rule-compact-2026-10-14.html, face D2 with digit option B): one
+The tab is a second Console shoulder (the design mockup, face D2 with digit option B): one
 92.8 x 49 design px face on the player side, display only, two hover zones. The numbers and colours below are read out of the
 mockup, so a mockup move fails here. Checked:
 

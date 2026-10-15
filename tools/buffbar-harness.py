@@ -3,7 +3,7 @@
 totembar-harness's world: the actionbars mock, FrameHelpers.lua, ActionBars.lua, Console.lua, StanceBar.lua,
 PetActionBar.lua, PetDock.lua, ClassShoulder.lua, TotemPiece.lua and TotemBar.lua.
 
-The tab is a second Shaman shoulder on the Console's top edge (mockups/shaman-buff-tab-2026-10-12.html): 2 columns x
+The tab is a second Shaman shoulder on the Console's top edge (the design mockup): 2 columns x
 1 row (92.8 x 49 design px) at 316 design px, right of the totem tab. The numbers and colours below are read out of
 the mockup, so a mockup move fails here. Checked:
 

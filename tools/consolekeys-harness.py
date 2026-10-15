@@ -3,7 +3,7 @@
 mock WoW API gunsight-harness.py uses, plus the real Layout.lua, Gunsight.lua, ChevronCastBar.lua and
 Console.lua (the Console's geometry comes from a controllable stand-in for ActionBars.lua).
 
-The keys are the locked mockup's (mockups/gunsight-hud-v2-2026-10-02/gunsight-hud-v2-2026-10-02.html:
+The keys are the locked mockup's (the design mockup:
 DECK_DEFS, keyX, the `.cdeck.bm` key rules, the Rings block). The checks pin:
 
   * the eight keys are plain Buttons inside the Console tab, seated from Console.KeyRect (never from a

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates the line art soul shard textures of the Gunsight combat HUD.
 
-Reference: addons/ForeverSTUwave/mockups/gunsight-hud-v2-2026-10-02/gunsight-hud-v2-2026-10-02.html,
+Reference: the design mockup,
 SH_GLYPH and drawShards(). The brief was a line art version of the actual soulshard icon:
 an elongated faceted crystal leaning right with a sharp point at the bottom. CombatHud.lua stacks
 four textures per held shard and tints each one, nothing is baked in colour (white RGB, shape in

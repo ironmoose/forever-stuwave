@@ -6,7 +6,7 @@
 -- only the fill run; the frame chrome, name tab and spell icon belong to the
 -- caller (PetCastBar.lua / CastBars.lua).
 --
--- SOURCE OF TRUTH: mockups/castbar-v2-chevrons-locked-2026-10-01.html (card H,
+-- SOURCE OF TRUTH: the design mockup (card H,
 -- Medium ignite, Finish None, Lock-in "All (burst)", Caret "Chevron outline",
 -- interrupt 25/30/25/20 over 1.0s, hold 1.0s, fade 300ms). The math below is a
 -- port of that script; local function names match the JS names so the two can

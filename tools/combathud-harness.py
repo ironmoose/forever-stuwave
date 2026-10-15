@@ -3,7 +3,7 @@
 
 CombatHud.lua is the DISPLAY layer over FS.Hud (HudSpells -> HudProfiles -> HudLogic): a spell
 row, the next-cast tile, soul shard diamonds and buff reminders, seated around the Stack A cast
-bars exactly where mockups/combat-hud-stack-a-2026-10-02.html puts them. FS.Hud is a mock here
+bars exactly where the design mockup puts them. FS.Hud is a mock here
 (its own behaviour is pinned by hud-harness.py); the real HudSpells.lua and HudProfiles.lua are
 loaded so the profiles' selfBuffs, dots and procs are the shipped data. The checks pin:
 

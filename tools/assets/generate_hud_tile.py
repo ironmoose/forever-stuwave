@@ -30,7 +30,7 @@ import struct
 SIZE = 64
 CUT_FRACTION = 6.0 / 36.0       # chamfer as a fraction of the tile: 6 px on the 36 px spell tile
 CUT_SUPERSAMPLE = 8             # NxN samples per texel for the antialiased chamfer edge
-SURFACE = (0x2D, 0x1B, 0x4E)    # --surface in mockups/combat-hud-stack-a-2026-10-02.html
+SURFACE = (0x2D, 0x1B, 0x4E)    # --surface in the design mockup
 BG = (0x1A, 0x10, 0x25)         # --bg
 
 

@@ -3,7 +3,7 @@
 
 GunsightAreas.lua owns the dot piece frame, the upper and lower area hosts under it, and the module
 registry (FS.GunsightAreas.RegisterModule / AreaOf / OnAreaChanged) that the Target Debuffs and the
-class modules plug into (mockups/gunsight-modules-concepts-v7-2026-10-08.html). The checks pin:
+class modules plug into (the design mockup). The checks pin:
 
   * registration before and after the areas build, a module built once and lazily, the class spec
     chosen by the player's class token, a bad spec refused, a replaced spec retired;

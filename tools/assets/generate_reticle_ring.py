@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates reticle_ring.tga: the ring of the target of target plate's reticle.
 
-Reference: mockups/gunsight-tot-icon-2026-10-09.html, concept A (reticle()): a 9 x 9 glyph made of a ring (circle
+Reference: the design mockup, concept A (reticle()): a 9 x 9 glyph made of a ring (circle
 centre (4.5, 4.5), radius 2.5, stroke 1), four 2 px ticks and a 1 x 1 centre dot. The ticks and the dot are plain
 solid textures in Lua; only the ring needs a texture.
 

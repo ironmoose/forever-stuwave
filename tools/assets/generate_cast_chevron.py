@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates the cast bar chevron textures (solid neon chevrons, pointing RIGHT).
 
-Reference: addons/ForeverSTUwave/mockups/castbar-v2-chevrons-locked-2026-10-01.html,
+Reference: the design mockup,
 card H ("Solid chevrons"), function segsChev() and the "outline" caret in
 placeShapedCaret(). The player locked that look; the shared cast bar Lua engine
 draws these textures (mirrored with SetTexCoord for channels, tinted with

@@ -4,7 +4,7 @@ against a mock WoW API.
 
 GunsightDots.lua registers two modules with FS.GunsightAreas, "debuffsH" and "debuffsV", that draw
 FS.TargetDebuffs inside one target side area. The numbers are parsed back out of
-mockups/gunsight-modules-concepts-v7-2026-10-08.html (dotsH, dotsV), so a mockup edit fails here instead of
+the design mockup (dotsH, dotsV), so a mockup edit fails here instead of
 drifting. The checks pin:
 
   * the seam: both modules register with the areas, the dot piece is NOT registered here any more, nothing

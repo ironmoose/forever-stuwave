@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates the art of the Shaman Gunsight totem poles that a plain solid texture cannot draw.
 
-Reference: mockups/gunsight-class-module-shaman-2026-10-08.html, Concept A "Totem Poles", the functions
+Reference: the design mockup, Concept A "Totem Poles", the functions
 `pole(k, s, gy, st, an)` and `head(el, cx, ty, w, c, mode)`. Three kinds of piece, each at two widths (the wide Fire pole
 and the three narrow ones), all white RGB with the shape in alpha so Lua tints them with SetVertexColor:
 

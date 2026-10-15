@@ -2008,8 +2008,8 @@ def check_the_baked_art_and_the_lua_numbers_agree():
 
 
 # ---------------------------------------------------------------------------------------------
-# The icon flyout (mockups/totem-picker-arrow-2026-10-13.html concept A, open state of
-# mockups/totem-picker-arrow-v3-2026-10-13.html V1): tiles on the picker frame, chimney chrome on the tab
+# The icon flyout (the design mockup concept A, open state of
+# the design mockup V1): tiles on the picker frame, chimney chrome on the tab
 # ---------------------------------------------------------------------------------------------
 
 V3_MOCKUP = HERE.parent / "mockups" / "totem-picker-arrow-v3-2026-10-13.html"

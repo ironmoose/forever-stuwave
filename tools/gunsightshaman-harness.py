@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Runs the real GunsightShaman.lua (the Shaman Gunsight Class Module: the totem poles) headless.
 
-Reference: mockups/gunsight-class-module-shaman-2026-10-08.html, Concept A "Totem Poles" (poleMod, pole, head). The data comes from the
+Reference: the design mockup, Concept A "Totem Poles" (poleMod, pole, head). The data comes from the
 REAL ShamanTotems.lua, fed by a mock of the client facts measured on this client (out of combat GetTotemInfo is plain and haveTotem is
 true with a blank name when nothing stands; in combat every GetTotemInfo return is secret and GetTotemDuration alone says a totem is up).
 FS.GunsightAreas is a FAKE for the registration cases and the REAL file for the target gate cases. The checks pin:

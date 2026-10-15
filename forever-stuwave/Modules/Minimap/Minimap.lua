@@ -68,7 +68,7 @@ local COLOR_BORDER_BLEND = { 0.343, 0.660, 0.988, 1 }
 -- housing" look; its own border/radius are local since the mockup gives the
 -- chassis a slightly rounded strip against the hard-square map above it.
 -- EVERY size below is DERIVED from the map edge, exactly as the mockup does
--- it. mockups/full-ui-layout.html's minimap renderer computes m = min(w,h) and
+-- it. the design mockup's minimap renderer computes m = min(w,h) and
 -- then sizes each part as a fraction of m:
 --
 --     btn   = max(9,  m*0.12)      bezel key edge
@@ -133,7 +133,7 @@ local NORTH_FONT_SIZE
 local NORTH_INSET_Y
 
 -- Readout box chrome: near-black fill (#04020c) and a faint cyan border, both
--- matching mockups/full-ui-layout.html's .mmreadout rather than the panel's
+-- matching the design mockup's .mmreadout rather than the panel's
 -- COLOR_BG/COLOR_BORDER tokens, which read too bright for this small a chip.
 -- Also reused as the bezel keys' own dark fill (item 9) and the tray
 -- drawer's fill (item 10): a single near-black "console housing" color

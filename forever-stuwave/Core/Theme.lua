@@ -60,12 +60,12 @@ Theme.COLOR_CAST_NO_INTERRUPT  = { 0.42, 0.42, 0.45, 1 }
 -- new hex), replacing Blizzard's NORMAL_FONT_COLOR gold in menu item text.
 Theme.COLOR_MENU_TEXT = Theme.COLOR_POWER
 
--- Gunsight HUD tokens (mockups/gunsight-hud-v2-2026-10-02, :root custom properties of the same
+-- Gunsight HUD tokens (the design mockup, :root custom properties of the same
 -- names; gunsight-harness.py reads the mockup and fails if these drift). CombatHud.lua's local
 -- gold/warm fallbacks carry the same triples and defer to these when present.
 Theme.COLOR_GOLD  = { 1, 0.8235, 0.2471, 1 }           -- #ffd23f --gold
 Theme.COLOR_STEEL = { 0.5529, 0.5765, 0.6510, 1 }      -- #8d93a6 --steel
-Theme.COLOR_SILVER = { 0.8, 0.8078, 0.8431, 1 }         -- #ccced7 steel mixed 55% to white (the rare level icon tint; mockups/gunsight-level-tag-2026-10-08.html)
+Theme.COLOR_SILVER = { 0.8, 0.8078, 0.8431, 1 }         -- #ccced7 steel mixed 55% to white (the rare level icon tint; the design mockup)
 Theme.COLOR_AMBER = { 1, 0.7137, 0.2824, 1 }           -- #ffb648 --amber
 Theme.COLOR_WARM  = { 1, 0.2392, 0.1216, 1 }           -- #ff3d1f --warm
 Theme.COLOR_RED   = { 1, 0.2314, 0.3059, 1 }           -- #ff3b4e --red
@@ -75,7 +75,7 @@ Theme.COLOR_MUTED = { 0.6157, 0.5765, 0.7686, 1 }      -- #9d93c4 --muted (the p
 Theme.COLOR_UNUSABLE = { 0.4, 0.4, 0.4 }
 Theme.COLOR_OOM = { 0.5, 0.5, 1.0 }
 Theme.COLOR_OUT_OF_RANGE = { 0.8, 0.1, 0.1 }
--- The four totem elements (the Gunsight Shaman poles, mockups/gunsight-class-module-shaman-2026-10-08.html EL; the totem tab uses the same hexes)
+-- The four totem elements (the Gunsight Shaman poles, the design mockup EL; the totem tab uses the same hexes)
 Theme.COLOR_TOTEM = {
     fire  = { 1, 0.3529, 0.2353, 1 },                   -- #ff5a3c
     earth = { 0.6588, 0.8784, 0.3882, 1 },              -- #a8e063
@@ -355,7 +355,7 @@ Theme.SLICE_CUT2_GLOW_MARGIN = Theme.SLICE_CUT2_GLOW_PAD + Theme.SLICE_CUT_MARGI
 Theme.MASK_CUT2_SQUARE_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\mask_cut2_square.tga"
 
 -- Cast bar chevrons (media/generate_cast_chevron.py, locked look in
--- mockups/castbar-v2-chevrons-locked-2026-10-01.html, card H). All five are white RGB
+-- the design mockup, card H). All five are white RGB
 -- with the shape in alpha, drawn POINTING RIGHT; mirror them with SetTexCoord (swap
 -- the U ends) for channels and tint with SetVertexColor.
 --   CAST_CHEVRON_FILL_TEXTURE     64x64, one solid chevron segment

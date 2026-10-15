@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates the Shaman Gunsight shock trace, shock bolt and Fire Nova textures.
 
-Reference: mockups/gunsight-class-module-shaman-2026-10-08.html, Concept A "Totem Poles", poleMod():
+Reference: the design mockup, Concept A "Totem Poles", poleMod():
 
     shock trace   a zigzag stroke along the ground: points every 8 image px from x = 0 to 160 (the last moved to 162),
                   y alternating -2.5 and +2.5 about the centre line, stroke 1.4 to 2 px

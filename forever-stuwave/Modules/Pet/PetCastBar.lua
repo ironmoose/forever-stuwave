@@ -3,7 +3,7 @@
 --
 -- Chevron cast/channel bar for FS.PetFrame.castSlot, the top-row slot PetFrame.lua reserves
 -- to the right of the status slot (the console-docked pet component, option C of
--- mockups/gunsight-hud-v2-2026-10-02: the slot is 198 x 26, the 10 pet buttons sit under it).
+-- the design mockup: the slot is 198 x 26, the 10 pet buttons sit under it).
 -- A leaf module like CastBars.lua: nothing else in the addon consumes anything from this
 -- file, so there is no FS.PetCastBar export. Loads after Theme.lua/FrameHelpers.lua/
 -- ChevronCastBar.lua/PetFrame.lua per the .toc, so FS.Theme.*/FS.FrameHelpers.* fields are

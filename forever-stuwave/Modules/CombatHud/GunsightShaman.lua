@@ -1,6 +1,6 @@
 -- Forever STUwave: Gunsight Class Module for the Shaman: the totem poles
 --
--- The approved design is mockups/gunsight-class-module-shaman-2026-10-08.html, Concept A "Totem Poles": poolMod(y0), pole(),
+-- The approved design is the design mockup, Concept A "Totem Poles": poolMod(y0), pole(),
 -- head() and crown(). Four carved poles (Fire the wide hero pole, then Earth, Water, Air) stand on a violet ground line. Each pole
 -- is 8 blocks of its own lifetime: blocks leave from the top, so the carved head sinks toward the ground, and the last block turns
 -- amber (re-drop). The block count is ceil(remaining / duration * 8). An amber re-drop band runs behind the last block row.

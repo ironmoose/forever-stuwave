@@ -1,6 +1,6 @@
 -- Forever STUwave: the Shaman totem tab's hover PIECE and the tab's hover BUMP
 --
--- Design reference: mockups/totem-picker-arrow-v3-2026-10-13.html, concept V1 "As drawn". Textures: tools/assets/
+-- Design reference: the design mockup, concept V1 "As drawn". Textures: tools/assets/
 -- generate_totem_piece.py (every number marked "generator" below is that file's, and totembar-harness.py reads the
 -- generator back and compares).
 --

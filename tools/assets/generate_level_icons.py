@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates the four 32x32 level tag icons of the Gunsight target box.
 
-Reference: mockups/gunsight-level-tag-2026-10-08.html, concept B ("crown and glint"). The
+Reference: the design mockup, concept B ("crown and glint"). The
 crown and skull outlines are the mockup's SVG paths (CROWN_BODY, CROWN_BASE, SKULL), scaled
 to the 32 texel canvas. The user then replaced B's four-point glint with a clear five-point
 STAR, so the rare icon and the rare elite shoulder mark are stars, not sparkles.

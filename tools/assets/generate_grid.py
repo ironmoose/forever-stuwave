@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Bakes grid.tga: the synthwave perspective floor that sits behind the action
-bars, matching mockups/full-ui-layout.html rather than approximating it.
+bars, matching the design mockup rather than approximating it.
 
 WoW cannot do CSS 3D transforms, so the mockup's construction is reproduced by
 inverse-mapping every texture pixel back through the same transform the browser
 applies and asking "is this pixel on a grid line". The mockup builds the grid
-from THREE stacked layers (full CSS in mockups/SPEC-grid.txt):
+from THREE stacked layers (full CSS in the design mockup):
 
   .gridgrad    violet radial wash + vertical gradient, below the horizon
   .gridlines   cyan VERTICAL + pink HORIZONTAL lines, rotateX(76deg) under

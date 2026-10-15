@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates the Shaman totem tab's hover PIECE and its tab BUMP.
 
-Reference: mockups/totem-picker-arrow-v3-2026-10-13.html, concept V1 "As drawn" (pieceRel, pieceSvg, neonArrow,
+Reference: the design mockup, concept V1 "As drawn" (pieceRel, pieceSvg, neonArrow,
 bumpPts). On hover an element button grows a square cap piece above it; the tab outline grows a bump around the
 piece. WoW cannot draw the slanted edge, the chevron gradient or the haze at run time, so they are baked here.
 

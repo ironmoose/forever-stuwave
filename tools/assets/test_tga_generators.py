@@ -449,7 +449,7 @@ def test_glow_cut2_follows_the_chamfer_on_top_left_and_bottom_right(cut_outputs:
 # 64x64 box (45 degree arms, notch at the vertical middle), the glow and burst
 # canvases are 128x128 with that box centred (32 texel pad), and the strip is a
 # 32x16 tile holding 2 chevrons at a 16 texel pitch. Prototype:
-# mockups/castbar-v2-chevrons-locked-2026-10-01.html (segsChev).
+# the design mockup (segsChev).
 # ---------------------------------------------------------------------------
 
 CHEVRON_GENERATOR = GENERATOR_DIR / "generate_cast_chevron.py"
@@ -942,7 +942,7 @@ def test_mask_minimap_cuts_top_left_and_bottom_right_only(tmp_path: Path) -> Non
 
 
 # ---------------------------------------------------------------------------
-# Gunsight HUD textures (mockups/gunsight-hud-v2-2026-10-02): vertical cast tape
+# Gunsight HUD textures (the design mockup): vertical cast tape
 # chevron, toggle key glyphs and ring arcs, Console chassis chrome.
 #
 # Every number below is hardcoded from the mockup, never read from a generator.
@@ -1738,7 +1738,7 @@ def test_committed_totem_glyphs_match_their_generator(totem_outputs: Path) -> No
 
 # --- the totem tab's hover piece, chevron and bump ---------------------------
 #
-# Hardcoded from mockups/totem-picker-arrow-v3-2026-10-13.html (V1 "As drawn"): design px relative to the
+# Hardcoded from the design mockup (V1 "As drawn"): design px relative to the
 # element button's top left, y down. The piece canvases are 4 texels per px, the piece canvas' top left at
 # (-13, -21), the chevron canvas' at (-13, -23.3).
 

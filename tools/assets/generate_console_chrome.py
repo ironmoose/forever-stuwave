@@ -2,7 +2,7 @@
 """Generates the Console panel chrome of the Gunsight HUD: a cut-14 chassis nine-slice
 set and the 45 degree foot of the stepped shoulder tab.
 
-Reference: mockups/gunsight-hud-v2-2026-10-02/gunsight-hud-v2-2026-10-02.html,
+Reference: the design mockup,
 "Console panel style": cnTrace(tab) draws the chassis outline (cut CN_CUT = 14 at
 the TOP-LEFT and BOTTOM-RIGHT corners, TOP-RIGHT and BOTTOM-LEFT square) plus the
 stepped shoulder; cnBake() fills it, throws the halo OUTSIDE the outline only and

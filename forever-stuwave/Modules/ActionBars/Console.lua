@@ -1,7 +1,7 @@
 -- Forever STUwave: Console
 --
 -- The Gunsight HUD's action bar chassis (the locked design in
--- mockups/gunsight-hud-v2-2026-10-02/gunsight-hud-v2-2026-10-02.html, the "Console
+-- the design mockup, the "Console
 -- panel style": CN_* constants, cnTrace, cnBake, drawConsole). ONE plate around the 72
 -- buttons, cut 14 at the TOP-LEFT and BOTTOM-RIGHT, with a stepped shoulder tab on top
 -- of the right half that holds the 8 HUD keys (a later lane seats them on `FS.Console.tab`,

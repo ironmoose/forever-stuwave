@@ -1,7 +1,6 @@
 -- Forever STUwave: Gunsight cast info boxes (the boxes of pieces "you" and "tgt").
 --
--- The two info boxes of the Gunsight HUD (mockups/gunsight-hud-v2-2026-10-02/
--- gunsight-hud-v2-2026-10-02.html, infoBox and castIcon, drawn by drawYour on BOXL and drawTarget on
+-- The two info boxes of the Gunsight HUD (the design mockup, infoBox and castIcon, drawn by drawYour on BOXL and drawTarget on
 -- BOXR): a chamfered plate above each tape (114 x 56 yours, 134 x 56 the target's) with a small caps header, two lines of text and a
 -- 28 square spell icon tile on its inner side.
 --

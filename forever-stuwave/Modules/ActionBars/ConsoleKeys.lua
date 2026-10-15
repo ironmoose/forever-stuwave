@@ -1,7 +1,7 @@
 -- Forever STUwave: Console keys
 --
 -- The eight HUD keys on the Console's shoulder tab (the locked design in
--- mockups/gunsight-hud-v2-2026-10-02/gunsight-hud-v2-2026-10-02.html: DECK_DEFS, GLY, keySvg,
+-- the design mockup: DECK_DEFS, GLY, keySvg,
 -- the `.cdeck.bm` key rules and the Rings block). Each key toggles ONE Gunsight piece (DEFS order is
 -- the slot order when every key shows; the pitch is one even gap, there are no group gaps):
 --

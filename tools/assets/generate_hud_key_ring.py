@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates the sixteen ring arc textures of the Gunsight HUD toggle keys.
 
-Reference: mockups/gunsight-hud-v2-2026-10-02/gunsight-hud-v2-2026-10-02.html,
+Reference: the design mockup,
 buildRing(), perimAt() and perimPath(). Each toggle key wears a ring that follows
 its outline, split into RING_N = 16 equal stretches of the perimeter; the ring
 ignites, flickers and goes out arc by arc, so each arc is its own texture and the

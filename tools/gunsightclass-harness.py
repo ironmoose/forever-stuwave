@@ -2,7 +2,7 @@
 """Runs the real GunsightClass.lua (the Gunsight Class Module: Warlock shards, Rogue and Druid combo points) headless.
 
 GunsightClass.lua registers the module "class" through FS.GunsightAreas.RegisterModule and draws it in the
-upper or lower area the area host gives it (mockups/gunsight-modules-concepts-v7-2026-10-08.html: states A and B
+upper or lower area the area host gives it (the design mockup: states A and B
 for the shard count, state F for the combo points; shardsSlot and comboModule). FS.GunsightAreas is a FAKE here
 with the same API as the real one (its own harness covers it). The checks pin:
 

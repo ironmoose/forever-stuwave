@@ -9,7 +9,7 @@
 --     only): 1 Fire, 2 Earth, 3 Water, 4 Air, 5 Set drop, 6 Recall. CLICK FSTotemButtonN:LeftButton is declared
 --     in Bindings.xml and Quick Keybind mode binds it.
 --   * An ELEMENT button shows the picked totem's own spell icon, an element coloured underline and the element's
---     pole crown (mockups/gunsight-class-module-shaman-2026-10-08.html, Concept A) as a small badge. Right click
+--     pole crown (the design mockup, Concept A) as a small badge. Right click
 --     dismisses the totem through the secure "destroytotem" type (type2, totem-slot2 = the element's totem slot:
 --     FIRE 1, EARTH 2, WATER 3, AIR 4). LEFT click drops the picked totem, in one of two modes decided at sync
 --     time, per element:
@@ -108,14 +108,14 @@ local TB = {
     LOCKED_ALPHA = 0.4,
     MC_SET = 1,                 -- the multi-cast page Call of the Elements drops
     MAX_ENTRIES = 6,            -- picker tiles (an element holds at most 5 totems by level 30)
-    -- the icon flyout (mockups/totem-picker-arrow-2026-10-13.html concept A, open state of
-    -- mockups/totem-picker-arrow-v3-2026-10-13.html V1; the harness reads those numbers back out of the v3 file):
+    -- the icon flyout (the design mockup concept A, open state of
+    -- the design mockup V1; the harness reads those numbers back out of the v3 file):
     -- 32 px tiles in a column on the button's own axis, bottom up, a 3 px gap, 3 px to each wall, 5 px over the last
     -- tile, the cut 4 seat of the tab's buttons. The first tile sits ABOVE = 4 px over the piece top, so the column's
     -- bottom is RISE = piece top (SEAM 2 + BAR 11) + ABOVE over the button top, which is the bump top the chimney's
     -- walls rise out of (TotemPiece.lua draws the chimney).
     FLYOUT = { TILE = 32, GAP = 3, PAD = 3, TOP_PAD = 5, CUT = 4, ABOVE = 4, RISE = 17, TIP_GAP = 5 },
-    -- the arrow's hit area is the hover piece itself (TotemPiece.lua, mockups/totem-picker-arrow-v3-2026-10-13.html):
+    -- the arrow's hit area is the hover piece itself (TotemPiece.lua, the design mockup):
     -- the button's width, the 11 px bar plus the 2 px seam under it, standing on the button top with ARROW_INTO = 0 px
     -- inside the face (the piece's wedge tip under the button top is art only, never clickable). Its top is 7 px over
     -- the tab's top rail, which grows a bump around it while it is up.

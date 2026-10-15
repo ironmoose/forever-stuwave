@@ -1,7 +1,7 @@
 -- Forever STUwave: Cast Bars (cast bar v2 step 3b)
 --
 -- PLAYER and TARGET cast bars on the shared chevron engine (ChevronCastBar.lua), laid out
--- as the user's locked "Stack A" (mockups/castbar-v2-compare.html, the "Full combat HUD" card
+-- as the user's locked "Stack A" (the design mockup, the "Full combat HUD" card
 -- and the player card, variant H): two chamfered bars of the SAME width, the target bar on
 -- top and the player bar below, 18 units apart on a FIXED seat (see STACK PLACEMENT; the
 -- optional ForeverStatusStrip dev strip used to sit in that gap and now lives in the data bar, decision
@@ -44,7 +44,7 @@
 -- children at scale 1). Each bar sits on its own FS.Layout entry, `tcast` and `pcast` (CENTER offsets
 -- from UIParent's CENTER in UI units: unscaled, noSize, so /fsedit can move them like any component
 -- and the fitted bar width stays). The defaults are the old fixed seat: the gap centre at (0, -317)
--- with GAP (18, the gap of the approved off-state mockup mockups/off-state-and-bridge-2026-10-02.html)
+-- with GAP (18, the gap of the approved off-state mockup)
 -- between the two frames, i.e. tcast y -297 and pcast y -337:
 --     target frame CENTER = (SEAT_X, SEAT_Y + GAP / 2 + FRAME_H / 2)
 --     player frame CENTER = (SEAT_X, SEAT_Y - GAP / 2 - FRAME_H / 2)

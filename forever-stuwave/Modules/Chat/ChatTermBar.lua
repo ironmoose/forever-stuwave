@@ -233,7 +233,7 @@ function Chat.BuildTermBar()
     label:SetPoint("LEFT", bar, "LEFT", 46, 0)
     ApplyMono(label, 9, COLOR_POWER)
     -- Exact string from the mockup's terminal renderer
-    -- (mockups/full-ui-layout.html: <div class="termbar">...stuwave://general).
+    -- (the design mockup: <div class="termbar">...stuwave://general).
     label:SetText("stuwave://general")
 
     Chat.termBar = bar

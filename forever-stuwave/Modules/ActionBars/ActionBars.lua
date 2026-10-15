@@ -40,7 +40,7 @@
 -- are fixed slot ranges and are unaffected. Without RegisterAttributeDriver the old attribute
 -- path stays: it can only re-point out of combat.
 --
--- Layout is the mockup, not an approximation -- mockups/full-ui-layout.html,
+-- Layout is the mockup, not an approximation -- the design mockup,
 -- role "actionbars":
 --     .abstack  column, gap 5, padding 5
 --     .abrow    3 rows, gap 6
@@ -172,7 +172,7 @@ end
 -- Console mode
 --
 -- Console.lua draws ONE chassis behind all 72 buttons (the Gunsight HUD's action
--- bar, mockups/gunsight-hud-v2-2026-10-02). While it is active the per-pill chrome
+-- bar, the design mockup). While it is active the per-pill chrome
 -- (fill, border, MAIN pink border and tag) is hidden and the gap between the left
 -- and right halves grows from the 6 unit pill gap (7.2 design px) to SPINE_DESIGN
 -- design px, for the centre spine. `/fsconsole off` (Console.lua) falls back to the

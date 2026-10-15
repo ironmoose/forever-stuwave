@@ -1,6 +1,6 @@
 -- Forever STUwave: Gunsight Seal module, the Paladin's class module for one half height area (upper or lower).
 --
--- The approved design is mockups/gunsight-modules-concepts-v7-2026-10-08.html, sealModule(y0): the seal tile with its name and
+-- The approved design is the design mockup, sealModule(y0): the seal tile with its name and
 -- "SEAL ACTIVE", the time left large, a 188 px drain bar (0 to 30 s left to right, an amber RESEAL band on the 0 to 3 s end,
 -- ticks and 0 / 15 / 30 numbers) and the Judgement row (a J chip, a 0 to 40 s bar, the time on the target). Every image px number
 -- is in the constants block with its mockup name, and gunsightseals-harness.py re-reads them from the HTML.

@@ -2,7 +2,7 @@
 """Runs the real GunsightTags.lua (the KICK style tags on the target box) headless against a mock WoW API.
 
 GunsightTags.lua draws three tags on the target info box of the Gunsight HUD, in the shape of the KICK tag
-(mockups/gunsight-modules-concepts-v7-2026-10-08.html, tag() and tags()): level and class on the top edge, health
+(the design mockup, tag() and tags()): level and class on the top edge, health
 percent and target of target on the bottom edge. This harness reuses the gunsightboxes-harness world (REAL
 CastBars.lua, ChevronCastBar.lua, Layout.lua, Config.lua, Gunsight.lua, GunsightBoxes.lua and GunsightTape.lua)
 and adds the real GunsightTags.lua, a mock secure button (a frame made from a Secure template is protected and
@@ -57,7 +57,7 @@ TAGS = Path(os.environ.get("GUNSIGHTTAGS_LUA") or ADDON / "Modules/CombatHud/Gun
 TOC = ADDON / "forever-stuwave.toc"
 MOCKUP = HERE.parent / "mockups" / "gunsight-modules-concepts-v7-2026-10-08.html"
 # The level plate's geometry, pinned here: pad 5, icon gap 3, minimum width 15, Mononoki's digit advance 575/1024 em.
-# These came from mockups/gunsight-level-tag-2026-10-08.html (var PAD, GAP, MINW, ADV); the mockup is disposable,
+# These came from the design mockup (var PAD, GAP, MINW, ADV); the mockup is disposable,
 # so the harness no longer reads it.
 LEVEL_TAG = dict(ADV=575 / 1024, PAD=5, GAP=3, MINW=15)
 
@@ -80,8 +80,8 @@ def _m(pattern: str, text: str, what: str) -> re.Match:
     return m
 
 
-# The target of target plate grows with the box (+20 image px, mockups/gunsight-target-wider-2026-10-09.html) and wears the
-# ping reticle (mockups/gunsight-tot-icon-2026-10-09.html, concept A) inside its left pad. Both mockups are disposable, so
+# The target of target plate grows with the box (+20 image px, the design mockup) and wears the
+# ping reticle (the design mockup, concept A) inside its left pad. Both mockups are disposable, so
 # the numbers are pinned here. Rects are x, y, w, h in image px inside the 9 x 9 reticle box; the ring is a circle of radius
 # 2.5 and stroke 1 about (4.5, 4.5), so its bounding square is 6 wide from 1.5. The ticks are the path M4.5 0V2 M4.5 7V9
 # M0 4.5H2 M7 4.5H9 (stroke 1, butt caps) and the dot is the 1 x 1 rect at (4, 4).
@@ -2054,7 +2054,7 @@ function T.a_failing_target_menu_build_does_not_take_the_target_of_target_down()
 end
 
 -- ---- the player class badge ---------------------------------------------------------------
--- mockups/gunsight-player-class-icon-2026-10-13.html concept B, with Blizzard's own round class icon in place of the drawn disc:
+-- the design mockup concept B, with Blizzard's own round class icon in place of the drawn disc:
 -- a 26 px chamfered tile in the box's tone on the box's top left corner (11 px left of the box, 18 above its top), the level tag
 -- 17 px in instead of 1 for a player. The mockup is disposable, so its numbers are pinned here.
 

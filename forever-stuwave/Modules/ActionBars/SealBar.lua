@@ -1,6 +1,6 @@
 -- Forever STUwave: Paladin Seal and Aura bar
 --
--- The Paladin shoulder of the approved Gunsight mockup (mockups/gunsight-hud-v2-2026-10-02,
+-- The Paladin shoulder of the approved Gunsight mockup (the design mockup,
 -- `LS_*`, `SEALS`, `AURAS`, `lsBtn`): ONE tall block holding the seal bar on top and the aura bar
 -- against the Console chassis, 7 buttons each, 38 design px and 4.8 apart. It exists so the player can
 -- bind a seal or an aura with Blizzard's built-in Quick Keybind mode. The shoulder CHROME (the open

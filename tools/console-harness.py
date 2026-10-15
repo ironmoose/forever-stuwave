@@ -3,7 +3,7 @@
 
 The Console is the Gunsight HUD's action bar chassis: ONE plate around the 72 buttons with
 a stepped shoulder tab on top for the HUD keys (the locked design in
-mockups/gunsight-hud-v2-2026-10-02/gunsight-hud-v2-2026-10-02.html, "Console panel style").
+the design mockup, "Console panel style").
 The checks pin the geometry the mockup states, resolved from the REAL button frames rather
 than from a copy of the arithmetic:
 

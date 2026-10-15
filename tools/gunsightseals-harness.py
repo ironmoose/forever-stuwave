@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Runs the real GunsightSeals.lua (the Paladin's Seal module of the Gunsight HUD) headless against a mock WoW API.
 
-GunsightSeals.lua is sealModule in mockups/gunsight-modules-concepts-v7-2026-10-08.html: a compact class module that fits ONE
+GunsightSeals.lua is sealModule in the design mockup: a compact class module that fits ONE
 half height area (upper or lower). It registers itself with GunsightAreas as the "class" module for PALADIN and draws from the
 rect the area hands it. GunsightAreas is a FAKE here (the registry API only: RegisterModule, then build, seat, onShow, onHide);
 Gunsight, Layout and Theme are small stand-ins, so this file does not depend on the files other lanes own. The checks pin:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Runs the real GunsightBoxes.lua (the two cast info boxes of the Gunsight HUD) headless against a mock WoW API.
 
-GunsightBoxes.lua is the info boxes of mockups/gunsight-hud-v2-2026-10-02/gunsight-hud-v2-2026-10-02.html
+GunsightBoxes.lua is the info boxes of the design mockup
 (infoBox and castIcon, drawn by drawYour on BOXL and drawTarget on BOXR). It builds the box chrome and the
 members the CAST STATE MACHINE writes to (icon, name, timer, tick counter), and GunsightTape.lua hands them to
 CastBars.lua inside the two tape bar tables, so the boxes are driven by the existing paths and nothing here
@@ -26,7 +26,7 @@ the castbars-harness stubs) and adds the real GunsightBoxes.lua. It pins:
   * INTERRUPTED: CastBars' onVerdict hook shows the red tone, "INTERRUPTED" and a flicker group, the next
     write or cast clears them, Stack A bars never have a hook;
   * target bar settings (FS.Config keys under gunsight.targetBars.*, defaults and ranges read from
-    mockups/config-window-2026-10-07.html): the defaults are 11 / 4 / 100, the 100% width draws what
+    the design mockup): the defaults are 11 / 4 / 100, the 100% width draws what
     the old 120% drew, a width stored on the old scale is converted once per profile, a change applies
     live to the heights, width and numbers and survives a rescale and a profile switch, a protected
     frame defers the change to PLAYER_REGEN_ENABLED, and the numbers (current, current / max, percent) go only

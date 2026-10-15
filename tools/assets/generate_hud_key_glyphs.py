@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates the eight 32x32 glyphs for the Gunsight HUD toggle keys.
 
-Reference: mockups/gunsight-hud-v2-2026-10-02/gunsight-hud-v2-2026-10-02.html, the
+Reference: the design mockup, the
 GLY table (one SVG fragment per glyph, 16 x 16 viewBox) and DECK_DEFS (which key
 uses which glyph). The glyph SVG is rasterised as written: the path strings below
 are copied from GLY and parsed here, so the two cannot drift by hand-tracing.

@@ -1,6 +1,6 @@
 -- Forever STUwave: Gunsight Shaman Class Module, lane 2: the SHOCK TRACE and the FIRE NOVA RING.
 --
--- The approved design is mockups/gunsight-class-module-shaman-2026-10-08.html, Concept A "Totem Poles", poleMod(): the ground the
+-- The approved design is the design mockup, Concept A "Totem Poles", poleMod(): the ground the
 -- totem poles stand on is also the shock gauge. A zigzag trace under the ground line charges left to right as the shared Earth /
 -- Flame / Frost Shock cooldown runs, and a bolt at its end lights (RDY) when a shock can be cast; a cyan ring around the Fire
 -- totem's head says Fire Nova is ready (drawn over the head, on a frame above it), with a NOVA tag in the footer. There is no Earth Shock KICK tag here: KICK comes

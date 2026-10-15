@@ -1,5 +1,5 @@
 -- Forever STUwave: Gunsight Target debuffs modules, Horizontal ("debuffsH") and Vertical ("debuffsV").
--- Both draw FS.TargetDebuffs inside one target side area (mockups/gunsight-modules-concepts-v7-2026-10-08.html,
+-- Both draw FS.TargetDebuffs inside one target side area (the design mockup,
 -- dotsH and dotsV): rows of icon, time and drain bar, or the 0 to 30 s axis compressed to 112 px with a chip per debuff.
 -- gunsightdots-harness.py parses the mockup for the numbers below, so a mockup edit fails there instead of drifting.
 --

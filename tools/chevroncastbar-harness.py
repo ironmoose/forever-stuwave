@@ -13,7 +13,7 @@ checks pin its BEHAVIOUR with a stepped clock:
     to the solid cyan after the Medium ignite;
   * determinism: per-segment flicker comes from a seeded PRNG; the golden
     numbers below were produced by the PROTOTYPE'S OWN JavaScript
-    (mockups/castbar-v2-chevrons-locked-2026-10-01.html, makeFlicker + rng) so a
+    (the design mockup, makeFlicker + rng) so a
     drift in the Lua port shows up here;
   * caret: tip at the true progress x, mirrored for channels;
   * Succeed / Interrupt / channel timelines and the phase boundaries;

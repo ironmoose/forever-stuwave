@@ -1,7 +1,7 @@
 -- Forever STUwave: Gunsight Class Module for Warlock (soul shards), Rogue and Druid (combo points).
 --
 -- Registers the module "class" with FS.GunsightAreas, which hosts it in the upper or lower area and calls seat(rect)
--- again on every rescale. Offsets are image px from the area rect's corner (mockups/gunsight-modules-concepts-v7-2026-10-08.html,
+-- again on every rescale. Offsets are image px from the area rect's corner (the design mockup,
 -- shardsSlot and comboModule); gunsightclass-harness.py parses them back out of the mockup.
 
 local _, FS = ...

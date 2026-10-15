@@ -2,7 +2,7 @@
 """Runs the real Gunsight.lua (the L1 core of the Gunsight HUD) headless against a mock WoW API.
 
 Gunsight.lua is the geometry root, the anchor frames and the piece registry every later Gunsight
-lane builds on (mockups/gunsight-hud-v2-2026-10-02/gunsight-hud-v2-2026-10-02.html is the
+lane builds on (the design mockup is the
 locked design). The checks pin:
 
   * constants: every geometry number in Gunsight.lua is parsed back out of the mockup's JS and
@@ -54,7 +54,7 @@ TOC = ADDON / "forever-stuwave.toc"
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-hud-v2-2026-10-02" / "gunsight-hud-v2-2026-10-02.html"
 MOCKUP_V7 = Path(__file__).resolve().parent.parent / "mockups" / "gunsight-modules-concepts-v7-2026-10-08.html"
 # The target info box is drawn this many image px wider than the v2 mockup's BOXR (left edge, tape and cast tile stay
-# put; your box is unchanged). Approved 2026-10-09, mockups/gunsight-target-wider-2026-10-09.html: 114 -> 134.
+# put; your box is unchanged). Approved 2026-10-09, the design mockup: 114 -> 134.
 TARGET_WIDEN = 20
 
 

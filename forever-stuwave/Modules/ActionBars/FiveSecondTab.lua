@@ -1,6 +1,6 @@
 -- Forever STUwave: five second rule tab
 --
--- A second shoulder on the Console chassis for every class whose power is mana (mockups/five-second-rule-compact-2026-10-14.html,
+-- A second shoulder on the Console chassis for every class whose power is mana (the design mockup,
 -- the D2 face with the LED readout and digit option B): one 92.8 x 49 design px face with no name labels, the chrome of the
 -- Shaman buff tab (BuffTab.lua), seated after the class's own tab when it has one and in its place otherwise (ClassShoulder.lua
 -- owns the seat). It is a player side cue, always there, not gated on a target, and display only: no click, no binding. Two

@@ -44,7 +44,7 @@ FS.Layout = FS.Layout or {
     -- slots above for that purpose. `pet`/`petbar` stay in the table unremoved --
     -- a concurrent lane may still reference either -- this is a new entry, not a
     -- replacement of them. 348 x 68 is the approved console dock option C
-    -- (mockups/gunsight-hud-v2-2026-10-02, PE_G.dc: 5 top inset + 26 top row + 3 +
+    -- (the design mockup, PE_G.dc: 5 top inset + 26 top row + 3 +
     -- 30 buttons + 4 bottom pad, 6 on the sides; HP/mana left and the cast bar right
     -- over the 10 buttons); petframe-harness.py parses the size back out of the mockup.
     -- SEAT (2026-10-03): moved from (-380, -405) to (-363, -403) because the Console
@@ -146,7 +146,7 @@ FS.Layout.CHAT_CLEARANCE = 12
 FS.Layout.CONSOLE_PET_GAP = 8
 
 -- The layout planner exports in SCREEN PIXELS at this resolution (the "resolution"
--- field of mockups/layout-v2.json). WoW frames are positioned in UI units, and
+-- field of the design mockup). WoW frames are positioned in UI units, and
 -- UIParent is only ever ~768 units tall no matter the monitor, so the exported
 -- numbers are roughly 1.9x too large as-is.
 --

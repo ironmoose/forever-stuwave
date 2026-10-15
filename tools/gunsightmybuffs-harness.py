@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Runs the real GunsightMyBuffs.lua (the My buffs flank plate of the Gunsight HUD) headless against a mock WoW API.
 
-GunsightMyBuffs.lua draws the concept B plate of mockups/gunsight-modules-concepts-v7-2026-10-08.html (buffs()): a
+GunsightMyBuffs.lua draws the concept B plate of the design mockup (buffs()): a
 plate outboard of the next cast tile with up to four of the player's buffs as cut tiles, the time left under each and
 a cyan pip when a party or raid member cast the buff. The mockup draws it 164 x 56 with 24 px tiles; playtest found
 that large, so the plate is sized from ONE tunable (Gunsight.lua's MYBUFFS tile, the Target Debuffs row chip) and

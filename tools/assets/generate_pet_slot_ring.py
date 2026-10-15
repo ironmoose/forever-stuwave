@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates the sixteen ring arc textures of the pet action bar's autocast ring.
 
-Reference: mockups/castbar-v2-chevrons-locked-2026-10-01.html, buildRing() in the "Pet slot rings"
+Reference: the design mockup, buildRing() in the "Pet slot rings"
 section. Each pet slot is a 30 design unit button wearing a CIRCLE of radius 11.5 (stroke 1.5)
 centred on it, split into RING_N = 16 equal arcs (arc i runs from -90 degrees + i/16 of a turn,
 clockwise, to the next arc plus 0.02 radian of hairline overlap). The ring ignites, flickers and goes

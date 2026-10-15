@@ -2,7 +2,7 @@
 """Runs the real PetFrame.lua headless against a strict mock WoW API.
 
 PetFrame.lua is the pet component's one panel, matching the approved console dock
-option C of mockups/gunsight-hud-v2-2026-10-02 (PE_G.dc, drawPet's dc branch, peStatusDc):
+option C of the design mockup (PE_G.dc, drawPet's dc branch, peStatusDc):
 a 348 x 68 panel, a 26 high top row with the HP/mana block on the left and the cast
 slot on the right, and the 10 pet buttons underneath. The panel insets are 5 on top
 and 6 (PE_PAD) on the sides, the buttons sit 3 below the top row, and 4 is left under

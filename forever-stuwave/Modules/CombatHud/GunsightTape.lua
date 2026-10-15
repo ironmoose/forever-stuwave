@@ -1,7 +1,6 @@
 -- Forever STUwave: Gunsight cast tapes (piece keys "you" and "tgt").
 --
--- The two cast tapes of the Gunsight HUD (mockups/gunsight-hud-v2-2026-10-02/
--- gunsight-hud-v2-2026-10-02.html, drawTape, and the KICK tag and padlock of drawTarget): YOUR cast
+-- The two cast tapes of the Gunsight HUD (the design mockup, drawTape, and the KICK tag and padlock of drawTarget): YOUR cast
 -- on a 30 wide vertical tape left of the character (anchor tapeL), the TARGET's on an identical one right
 -- of it (anchor tapeR). Both carry the SAME chevron track, half width C.HW (10: 20 across, 5 inset from each
 -- side edge): the target used to run the mockup's wider hw 14 and its chevrons reached the plate edge while

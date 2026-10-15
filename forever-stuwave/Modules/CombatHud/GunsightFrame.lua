@@ -1,6 +1,6 @@
 -- Forever STUwave: Gunsight HUD frame work (horizon, proc rungs).
 --
--- Two pieces of the locked design (mockups/gunsight-hud-v2-2026-10-02/gunsight-hud-v2-2026-10-02.html)
+-- Two pieces of the locked design (the design mockup)
 -- built on the Gunsight core (Gunsight.lua owns the geometry and the piece registry). Every line is
 -- a texture seated by mockup image coordinates through FS.Gunsight.G and FS.Gunsight.ui; nothing
 -- here re-derives a number the core already has, and every number the file adds is in the constants

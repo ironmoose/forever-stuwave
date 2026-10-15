@@ -1,7 +1,7 @@
 -- Forever STUwave: KICK style tags on the target box (outlines in the box's own tone: steel, pink while kickable, red for INTERRUPTED), the level on the top edge and health percent and target of target on the bottom edge, each with an FS.Config toggle.
 -- The target of target tag is a SecureUnitButtonTemplate button that targets that unit on a click; in combat it only takes SetAlpha and text.
 -- A second secure button, the target menu, covers the whole target box and opens the unit context menu (Invite, Inspect, Whisper...) on a right click.
--- A player target also wears its class icon (Blizzard's round class icons) in a tile on the box's top left corner (mockups/gunsight-player-class-icon-2026-10-13.html, concept B).
+-- A player target also wears its class icon (Blizzard's round class icons) in a tile on the box's top left corner (the design mockup, concept B).
 -- Unit values go straight to SetFormattedText / SetText and are never compared, since they may be secret.
 
 local _, FS = ...
@@ -21,10 +21,10 @@ local IsSecret = FS.IsSecret or function() return false end
 local C = {
     H = 15, CHAMFER = 5, FILL_A = 0.95, TEXT_SIZE = 11,
     LEVEL = { dx = 1, pad = 5, gap = 3, minW = 15, advance = 575 / 1024 },   -- no fixed width: pad, [icon, gap], digits, pad; advance is Mononoki's digit width in em
-    -- The target of target plate is 89 wide: the target box grew 20 image px to the right (mockups/gunsight-target-wider-2026-10-09.html)
+    -- The target of target plate is 89 wide: the target box grew 20 image px to the right (the design mockup)
     -- and the plate with it, still 4 short of the box's right edge. It holds the ping reticle, then the name.
     HEALTH = { dx = 4, w = 32 }, TOT = { dx = 41, w = 89 },
-    -- Reticle A (mockups/gunsight-tot-icon-2026-10-09.html): a 9 x 9 glyph at (x, y) inside the plate's left pad, then a gap, then the
+    -- Reticle A (the design mockup): a 9 x 9 glyph at (x, y) inside the plate's left pad, then a gap, then the
     -- label, which takes the rest: 89 - 3 - 3 - 11 = 72 image px. Parts are { x, y, w, h } in the glyph box, image px: a ring (radius 2.5,
     -- stroke 1, so a 6 square from 1.5, a texture), four 1 px ticks and a 1 px centre dot (solid textures).
     RETICLE = {
@@ -173,8 +173,7 @@ end
 -- Level and class
 -------------------------------------------------------------------------------
 
--- The level number in white, on a plate sized to it: pad, [icon, gap], digits, pad, never under minW (mockups/
--- gunsight-level-tag-2026-10-08.html). The plate keeps its seat and grows to the right. The level goes to
+-- The level number in white, on a plate sized to it: pad, [icon, gap], digits, pad, never under minW (the design mockup). The plate keeps its seat and grows to the right. The level goes to
 -- SetFormattedText as an argument (it may be secret); a level below 1 reads "??". The classification has no text: its
 -- icon (C.ICONS) fills the icon slot (SetLevelIcon), which costs no width while it is empty. A world boss shows the
 -- skull alone, no digits, as the mockup does.

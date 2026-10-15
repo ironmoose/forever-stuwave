@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Runs the real GunsightTape.lua (the two cast tapes of the Gunsight HUD) headless against a mock WoW API.
 
-GunsightTape.lua is pieces "you" and "tgt" of mockups/gunsight-hud-v2-2026-10-02/gunsight-hud-v2-2026-10-02.html
+GunsightTape.lua is pieces "you" and "tgt" of the design mockup
 (drawTape, plus the KICK tag and padlock of drawTarget): your cast on a 30 wide vertical tape left of the
 character, the target's on an identical one right of it, both built on the shared chevron engine (vertical runs)
 and driven by the EXISTING CastBars.lua state machine through its view seam (FS.CastBars.SetView). The checks

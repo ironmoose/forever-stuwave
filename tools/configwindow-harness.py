@@ -11,7 +11,7 @@ The window is a plain themed frame with a category nav and a content well. These
     shows the same state; the legacy ForeverSTUwaveDB.gunsight values migrate once into the
     active profile and a profile switch moves the live pieces;
   * the target bar group (health and resource heights, width, numbers, number format) takes its labels,
-    defaults, ranges, tooltip and format options from mockups/config-window-2026-10-07.html;
+    defaults, ranges, tooltip and format options from the design mockup;
   * UI.Slider is built from Theme pieces (no Blizzard slider), binds a key or get/set, auto-stacks, snaps to
     its step, and takes mouse down, drag, release, wheel and click-on-track;
   * the Unit Frames page carries the Professions panel toggle (professions.shown) and the
@@ -934,7 +934,7 @@ function T.fsgun_reports_a_read_only_config()
 end
 
 
--- ---- the target side, target box tags and player side groups (mockups/gunsight-modules-concepts-v7-2026-10-08.html) ----
+-- ---- the target side, target box tags and player side groups (the design mockup) ----
 
 local TAG_KEYS = { level = "gunsight.tags.level", health = "gunsight.tags.health", tot = "gunsight.tags.tot", classIcon = "gunsight.tags.classicon" }
 local function withTags()
@@ -1316,7 +1316,7 @@ function T.the_dropdown_text_option_maps_the_value_to_its_label()
     eq(b.fsLabel:GetText(), "Target Debuffs Horizontal", "the text option decides what shows")
 end
 
--- ---- the target health and resource group (mockups/config-window-2026-10-07.html) ----------------------
+-- ---- the target health and resource group (the design mockup) ----------------------
 
 local function boxSettings() return FS.GunsightBoxes.SETTINGS end
 local function sliderRow(label) return assert(row(label), "no row " .. label) end

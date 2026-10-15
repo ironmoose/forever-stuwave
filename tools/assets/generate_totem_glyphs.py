@@ -2,7 +2,7 @@
 """Generates the Shaman totem tab glyphs: the four element crowns, the set mark, the recall mark and the
 dotted mold of a locked button.
 
-Reference: mockups/gunsight-class-module-shaman-2026-10-08.html, Concept A "Totem Poles", the
+Reference: the design mockup, Concept A "Totem Poles", the
 `crown(el, cx, ty, c)` function. Each pole wears a 12 x 6 unit crown drawn from a handful of points:
 
     fire   a solid three peaked flame           (7 point polygon)

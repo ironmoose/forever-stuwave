@@ -11,7 +11,7 @@ spellcast events and a stepped clock:
     triangle texture, the timer reading "elapsed / total" at the mockup's font size;
   * geometry: every number of the console-dock option C cast bar (bar 26 high, icon 20 at
     3 / 3, run 14 high from x 28, the spell name over the timer, NO tab) parsed back out of
-    mockups/gunsight-hud-v2-2026-10-02 (peCastDc, peDcCount, PE_DC_*) and checked at
+    the design mockup (peCastDc, peDcCount, PE_DC_*) and checked at
     scales 1, 0.8333 and 0.64; the text column is a fixed design constant (NAME_MAX_W) wide enough
     for the timer sample and about 9 characters of the 8 pt name, the chevron track is a pure
     function of constants (run:FitWithin over the slot less run x, NAME_MAX_W, the pad and the

@@ -4,7 +4,7 @@ headless against the same mock WoW API gunsight-harness.py uses, plus the real L
 Gunsight.lua and HudProfiles.lua.
 
 GunsightFrame.lua draws two of the locked mockup's pieces
-(mockups/gunsight-hud-v2-2026-10-02/gunsight-hud-v2-2026-10-02.html):
+(the design mockup):
 
   * the HORIZON: hline(630, ...) split into three short segments around the character, plus the
     break ticks vline(LBRK/RBRK, 623, 637). The left segment belongs to YOU, the right one to

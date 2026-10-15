@@ -1,6 +1,6 @@
 -- Forever STUwave: Shaman buff tab
 --
--- A second Shaman shoulder on the Console chassis, right of the totem tab (mockups/shaman-buff-tab-2026-10-12.html):
+-- A second Shaman shoulder on the Console chassis, right of the totem tab (the design mockup):
 -- 2 columns x 1 row (92.8 x 49 design px) seated at 316 design px, holding two self reminder tiles, IMBUE and SHIELD.
 -- The chrome is ClassShoulder.lua's (its `also` shoulder of the Shaman); the tiles are plain SecureActionButtonTemplate
 -- buttons on a separate protected host, built the way TotemBar.lua builds the totem tab's: attributes written from Lua
@@ -72,7 +72,7 @@ local BT = {
     ADVANCE = 0.5615,               -- Mononoki Bold's advance per em (every glyph; the font is monospaced)
     CAP = 0.703, ASCENT = 0.879, DESCENT = 0.244,   -- Mononoki Bold's capital height, ascent and descent per em
     TEXT_Y = 27,                    -- the time line's centre, design px below the tile top
-    -- the missing word's band (mockups/bufftab-missing-word-2026-10-14.html, option D): rows 24 to 32 from the tile top
+    -- the missing word's band (the design mockup, option D): rows 24 to 32 from the tile top
     -- (9 tall), x 3 to 35 (32 wide), the label plate colour at .96. The word is a fontstring of its own on it.
     BAND_TOP = 24, BAND_H = 9, BAND_W = 32, BAND_A = 0.96,
     TICK = 1,                       -- seconds between repaints (the clock text)

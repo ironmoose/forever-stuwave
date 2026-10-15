@@ -118,7 +118,7 @@ end
 
 -------------------------------------------------------------------------------
 -- Autocast ring (the approved "Pet slot rings" of
--- mockups/castbar-v2-chevrons-locked-2026-10-01.html)
+-- the design mockup)
 --
 -- A circle of sixteen arcs (media/pet_slot_ring_00..15.tga, radius 11.5 design units on the 30
 -- unit button, drawn 38 units square so the baked glow fits) in the addon green

@@ -27,7 +27,7 @@ and bottom right) with the page's vertical gradient baked into RGBA, #3a2860 at 
 px, the bottom 6 the last 6, and the 20 middle rows are stretched over the 4 between, so each row carries the gradient at the
 tile row it ends up on. It is drawn white (never tinted) under the lit segments.
 
-The segment rows below are [x, y, width] runs one texel tall; mockups/five-second-rule-compact-2026-10-14.html
+The segment rows below are [x, y, width] runs one texel tall; the design mockup
 (SEGS) draws the same table. Pure stdlib, matching the other generators here: 18-byte header, image type 2,
 descriptor 0x28 (top-left origin, 8 alpha bits), BGRA top to bottom.
 

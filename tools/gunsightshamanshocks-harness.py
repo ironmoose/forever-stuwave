@@ -2,7 +2,7 @@
 """Runs the real GunsightShamanShocks.lua (the shock trace and the Fire Nova ring) headless.
 
 The Shaman Gunsight Class Module (GunsightShaman.lua) owns the module frame and the totem poles; this file is the second
-lane of Concept A "Totem Poles" (mockups/gunsight-class-module-shaman-2026-10-08.html, poleMod): the ground trace that
+lane of Concept A "Totem Poles" (the design mockup, poleMod): the ground trace that
 charges along the shared Earth / Flame / Frost Shock cooldown with the bolt and its RDY / seconds label at the end, the
 cyan ring around the Fire totem head while Fire Nova is ready with the NOVA footer tag. It draws no KICK tag: that comes
 from GunsightTape.lua's class neutral tag. GunsightShaman.lua calls it through FS.GunsightShamanShocks =
