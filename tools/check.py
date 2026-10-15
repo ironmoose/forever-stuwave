@@ -12,6 +12,7 @@ ROOT = HERE.parent
 def main() -> int:
     """Stop on the first failed gate, harness, or Python test suite."""
     commands = [
+        [sys.executable, str(HERE / "private-name-gate.py")],
         [sys.executable, str(HERE / "parse-gate.py")],
         [sys.executable, str(HERE / "lua-lint.py"), "--fail-on", "high"],
     ]
