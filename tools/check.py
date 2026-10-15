@@ -43,10 +43,12 @@ def main() -> int:
     if source and not Path(source).is_dir():
         print(f"{MOCKUPS_ENV} is set to {source!r}, which is not an existing directory")
         return 2
-    link = link_mockups()
-    # SIGTERM raises SystemExit so the finally block below still removes the link.
+    link = None
+    # SIGTERM raises SystemExit so the finally block below still removes the link; the handler
+    # goes in first so no signal can arrive between creating the link and the try.
     previous = signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
     try:
+        link = link_mockups()
         return run_all()
     finally:
         signal.signal(signal.SIGTERM, previous)
