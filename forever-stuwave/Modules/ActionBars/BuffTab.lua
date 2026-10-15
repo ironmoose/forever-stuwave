@@ -1233,8 +1233,9 @@ end
 -- The PROOF pass, out of combat only (SeatEngine, and the tick every second): every slot frame of every tile read against
 -- the tile's icon BEFORE anything is written. A slot found off the icon is put back (its tile is not live until the next
 -- pass reads it right); one that cannot be read is unproven, except that an IDLE slot (hidden, or with no size: nothing to
--- draw) with no readable rect keeps the proof it already has, and one never proven is simply not required (it does not
--- hold the tile, or the container, back: the off hand slot of a Shaman with no off hand). An unreadable slot that is not
+-- draw) with no readable rect keeps the proof it already has, and one never proven is not required while another slot
+-- of the same tile is proven (the off hand slot of a Shaman with no off hand does not hold the tile, or the container,
+-- back; a tile none of whose slots was ever seen on it stays unproven). An unreadable slot that is not
 -- idle is logged after BT.UNREADABLE_TICKS passes; an idle one never is (it has no aura to locate). Allocation free when
 -- nothing is wrong.
 local function ProveEngine()
@@ -1242,6 +1243,7 @@ local function ProveEngine()
         local eng = button.fsEngine
         if eng then
             local bad = false
+            local anyOk, skipped = false, false
             for _, part in ipairs(eng.parts) do
                 ReadPart(part)
                 local placed = Placed(part.slot, button.icon)
@@ -1260,7 +1262,9 @@ local function ProveEngine()
                     else
                         part.nils = 0
                     end
-                    if not part.ok and not idle then       -- an idle slot never seen is not required
+                    if not part.ok and idle then
+                        skipped = true                         -- not required while a sibling slot of the tile is proven
+                    elseif not part.ok then
                         bad = true
                         if placed == false then
                             WarnOnce("bufftab_engine_layout", "a combat state slot is not on its tile; that tile keeps the last known state")
@@ -1269,6 +1273,10 @@ local function ProveEngine()
                     end
                 end
             end
+            for _, part in ipairs(eng.parts) do
+                if part.ok then anyOk = true end
+            end
+            if skipped and not anyOk then bad = true end   -- a tile no slot of which was ever seen on it is unproven
             if eng.bad ~= bad then
                 eng.bad = bad
                 button.fsSig = nil

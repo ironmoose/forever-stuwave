@@ -3173,12 +3173,12 @@ def check_an_unreadable_slot_is_logged_after_five_ticks_and_a_hidden_proven_one_
     run(lua, f"{slot}._noRect = false\n{slot}._forceLeft, {slot}._forceTop = 7, 9")
     tick(lua, 1.1)
     assert btn(lua, SHIELD).fsEngine.bad is True
-    # a slot never proven and hidden with no rect is idle: nothing to prove
+    # a tile whose only slot was never proven and is hidden with no rect has nothing proven: it stays unproven
     lua = engine_world(pre="__acLazy = true")
     run(lua, "__acFlush()")
     run(lua, f"{slot}._noRect = true\n{slot}:Hide()")
     tick(lua, 1.1)
-    assert btn(lua, SHIELD).fsEngine.bad is False
+    assert btn(lua, SHIELD).fsEngine.bad is True
 
 
 def check_an_idle_slot_with_no_size_and_no_rect_is_not_a_fault_but_a_shown_unreadable_one_is():
@@ -3198,6 +3198,25 @@ def check_an_idle_slot_with_no_size_and_no_rect_is_not_a_fault_but_a_shown_unrea
     set_combat(lua, True)
     fire(lua, "PLAYER_REGEN_DISABLED")
     assert bt(lua).EngineLive("shield") and float(acs(lua)[0]._alpha) == 1, "the shield tile is live in combat"
+    # a tile none of whose slots was ever seen on it stays unproven, however idle they read: the shield slot alone
+    # collapsed with its aura up, and an imbue tile whose two hands are both idle
+    lua = engine_world()
+    sh = "__acs[1]._slots.shield.frame"
+    run(lua, "FS.BuffTab.BT.byKey.shield.fsEngine.parts[1].ok = false")
+    run(lua, f"{sh}:ClearAllPoints()\n{sh}:SetSize(0, 0)\n{sh}._noRect = true\n{sh}.IsShown = function() return __SECRET end")
+    shield_aura_up(lua)
+    tick(lua, 1.1)
+    assert btn(lua, SHIELD).fsEngine.bad is True, "a lone collapsed shield slot was taken as proven"
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    assert not bt(lua).EngineLive("shield") and float(acs(lua)[0]._alpha) == 0, "a blank state would be painted over the buff"
+    leave_combat(lua)
+    lua = engine_world()
+    run(lua, "for _, part in ipairs(FS.BuffTab.BT.byKey.imbue.fsEngine.parts) do part.ok = false end")
+    for ref in ("__acs[1]._ench[1]", "__acs[1]._ench[2]"):
+        run(lua, f"{ref}:ClearAllPoints()\n{ref}:SetSize(0, 0)\n{ref}._noRect = true\n{ref}.IsShown = function() return __SECRET end")
+    tick(lua, 1.1)
+    assert btn(lua, IMBUE).fsEngine.bad is True, "an imbue tile with both hands unseen was taken as proven"
     # the off hand slot gets a size but no readable rect: it is a fault and blocks the container again
     leave_combat(lua)
     run(lua, f"{off}:SetAllPoints(FS.BuffTab.BT.byKey.imbue.icon)")
