@@ -15,20 +15,24 @@ NAME = "Park" + "er"
 SAMPLES = {
     "personal name": [NAME, NAME.lower() + "'s call", "tells_" + NAME.lower() + "_what", NAME.upper() + " PICK"],
     "legal first name": ["Pa" + "ul", "by pa" + "ul."],
-    "mail account": ["air" + "ete@example.org"],
+    "mail account": ["air" + "ete@example.org", "C_air" + "et_dir"],
     "local user name": ["kh" + "ildrak"],
     "home directory": ["/ho" + "me/someone/project"],
     "mail domain": ["someone@gma" + "il.com"],
     "windows user path": ["C:" + "\\Us" + "ers\\someone", "c:" + "\\\\us" + "ers\\\\x"],
+    "windows user path, forward slashes": ["C:/Us" + "ers/someone", "c://us" + "ers"],
+    "macos home directory": ["/Us" + "ers/someone/project", "cd /us" + "ers/x"],
 }
 NEAR_MISSES = {
     "personal name": ["s" + "park" + "ers", NAME.lower() + "s", "Park", "sports park"],
     "legal first name": ["Pa" + "ulina", "sp" + "aul" + "ding", "Pa"],
-    "mail account": ["air" + "plane"],
+    "mail account": ["air" + "plane", "airfield"],
     "local user name": ["khil"],
     "home directory": ["homepage", "/home"],
     "mail domain": ["gma" + "il" + "com", "gmailer.com"],
     "windows user path": ["C:" + "\\Prog" + "ram Files"],
+    "windows user path, forward slashes": ["C:/Prog" + "ram Files", "c:/us" + "age"],
+    "macos home directory": ["github.com/us" + "ers/x", "/us" + "er/x", "/Us" + "ersx/", "my/us" + "ers"],
 }
 
 

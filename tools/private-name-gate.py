@@ -23,11 +23,13 @@ ROOT = Path(__file__).resolve().parent.parent
 PATTERNS = {
     "personal name": "(?<![a-z])park" + "er(?![a-z])",
     "legal first name": r"(?<![a-z])pa" + r"ul(?![a-z])",
-    "mail account": "air" + "ete",
+    "mail account": "air" + "et",
     "local user name": "khil" + "drak",
     "home directory": "/ho" + "me/",
     "mail domain": "gma" + r"il\.com",
     "windows user path": r"c:\\+us" + "ers",
+    "windows user path, forward slashes": "c:/+us" + "ers",
+    "macos home directory": "(?<![a-z:])/us" + "ers/",
 }
 FORBIDDEN = {label: re.compile(pattern, re.IGNORECASE) for label, pattern in PATTERNS.items()}
 SKIP_DIRS = {"mockups", ".git", ".venv", ".venv-lua", "__pycache__", ".pytest_cache", "dist", "debug"}
