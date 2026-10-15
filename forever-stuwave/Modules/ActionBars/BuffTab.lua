@@ -1165,6 +1165,15 @@ local function Hidden(slot)
     return ok and not IsSecret(shown) and shown == false
 end
 
+-- true when `slot` has no size, width and height both plain 0: it draws nothing. The client keeps IsShown secret for a slot,
+-- so a slot with no aura (the off hand of a one handed Shaman) can be told apart from a shown one only by this.
+local function Collapsed(slot)
+    local okW, w = pcall(slot.GetWidth, slot)
+    local okH, h = pcall(slot.GetHeight, slot)
+    return okW and okH and type(w) == "number" and type(h) == "number" and not IsSecret(w) and not IsSecret(h)
+        and w == 0 and h == 0
+end
+
 local function GuardMouse(slot)
     local function On(method)
         local ok, fn = pcall(function() return slot[method] end)
@@ -1223,9 +1232,9 @@ end
 
 -- The PROOF pass, out of combat only (SeatEngine, and the tick every second): every slot frame of every tile read against
 -- the tile's icon BEFORE anything is written. A slot found off the icon is put back (its tile is not live until the next
--- pass reads it right); one that cannot be read is unproven, except that a HIDDEN slot (no aura to draw) with no readable
--- rect keeps the proof it already has. An unreadable slot is logged after BT.UNREADABLE_TICKS passes. Allocation free
--- when nothing is wrong.
+-- pass reads it right); one that cannot be read is unproven, except that an IDLE slot (hidden, or with no size: nothing to
+-- draw) with no readable rect keeps the proof it already has. An unreadable slot that is not idle is logged after
+-- BT.UNREADABLE_TICKS passes; an idle one never is (it has no aura to locate). Allocation free when nothing is wrong.
 local function ProveEngine()
     for _, button in ipairs(BT.list) do
         local eng = button.fsEngine
@@ -1234,11 +1243,14 @@ local function ProveEngine()
             for _, part in ipairs(eng.parts) do
                 ReadPart(part)
                 local placed = Placed(part.slot, button.icon)
-                if placed == nil and part.ok and Hidden(part.slot) then
+                local idle = placed == nil and (Hidden(part.slot) or Collapsed(part.slot))
+                if idle and part.ok then
                     part.nils = 0                              -- keeps its last proof
                 else
                     part.ok = placed == true
-                    if placed == nil then
+                    if idle then
+                        part.nils = 0                          -- unproven, but nothing is there to be mislaid
+                    elseif placed == nil then
                         part.nils = (part.nils or 0) + 1
                         if part.nils >= BT.UNREADABLE_TICKS then
                             WarnOnce("bufftab_engine_unreadable", "a combat state slot cannot be located; that tile keeps the last known state")

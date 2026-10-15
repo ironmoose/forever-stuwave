@@ -289,6 +289,9 @@ do
             slot.SetPropagateMouseClicks = function(me, v) me._propClicks = v end
             slot.SetPropagateMouseMotion = function(me, v) me._propMotion = v end
         end
+        -- an anchored slot reads the tile's 26 px (the live reading); one with no anchors and no size reads 0
+        slot.GetWidth = function(me) return (me._points and #me._points > 0) and 26 or me._w or 0 end
+        slot.GetHeight = function(me) return (me._points and #me._points > 0) and 26 or me._h or 0 end
         slot.SetIcon = function(me, tex) me._order[#me._order + 1] = "SetIcon"; me._icon = tex end
         slot.SetDurationText = function(me, fs) me._order[#me._order + 1] = "SetDurationText"; me._durationText = fs end
         slot.SetApplicationCount = function(me, fs) me._order[#me._order + 1] = "SetApplicationCount"; me._countText = fs end
@@ -3178,6 +3181,38 @@ def check_an_unreadable_slot_is_logged_after_five_ticks_and_a_hidden_proven_one_
     assert btn(lua, SHIELD).fsEngine.bad is True
 
 
+def check_an_idle_slot_with_no_size_and_no_rect_is_not_a_fault_but_a_shown_unreadable_one_is():
+    # live (Orc Shaman, level 10, no off hand): the off hand enchantment slot reads 0x0 with no rect and a secret IsShown,
+    # on every pass; that is a slot with nothing to draw, not a slot to warn about
+    off = "__acs[1]._ench[2]"
+    idle = f"{off}:ClearAllPoints()\n{off}:SetSize(0, 0)\n{off}._noRect = true\n{off}.IsShown = function() return __SECRET end"
+    lua = engine_world(pre="__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end")
+    run(lua, "local part = FS.BuffTab.BT.byKey.imbue.fsEngine.parts[1]; part.ok = false")     # the off hand slot, never proven
+    run(lua, idle)
+    for _ in range(12):
+        tick(lua, 1.1)
+    assert not g(lua).FS.BuffTab.BT.warned.bufftab_engine_unreadable and int(g(lua).__logs) == 0, "an idle slot was reported"
+    assert btn(lua, IMBUE).fsEngine.bad is True, "a slot never seen on its tile stays unproven"
+    # a slot that was proven and then went idle keeps the proof
+    lua = engine_world(pre="__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end")
+    tick(lua, 1.1)
+    assert btn(lua, IMBUE).fsEngine.bad is False
+    run(lua, idle)
+    for _ in range(12):
+        tick(lua, 1.1)
+    assert btn(lua, IMBUE).fsEngine.bad is False and int(g(lua).__logs) == 0, "an idle proven slot lost its proof"
+    # the same slot with a size but no readable rect is still a fault, and one that stands elsewhere still logs
+    lua = engine_world(pre="__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end")
+    run(lua, f"{off}._noRect = true\n{off}.IsShown = function() return __SECRET end")
+    for _ in range(5):
+        tick(lua, 1.1)
+    assert g(lua).FS.BuffTab.BT.warned.bufftab_engine_unreadable and int(g(lua).__logs) == 1
+    lua = engine_world(pre="__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end")
+    run(lua, f"{off}._forceLeft, {off}._forceTop = 7, 9")
+    tick(lua, 1.1)
+    assert g(lua).FS.BuffTab.BT.warned.bufftab_engine_layout
+
+
 def check_a_slot_with_the_right_corner_but_the_wrong_size_is_not_on_the_icon():
     lua = engine_world()
     tick(lua, 1.1)
@@ -4054,6 +4089,7 @@ CHECKS = [
     check_flapping_shield_ids_rebuild_only_for_a_new_id_and_at_most_three_times,
     check_one_misplaced_tile_hides_the_container_and_no_tile_claims_the_engine_state,
     check_an_unreadable_slot_is_logged_after_five_ticks_and_a_hidden_proven_one_keeps_its_proof,
+    check_an_idle_slot_with_no_size_and_no_rect_is_not_a_fault_but_a_shown_unreadable_one_is,
     check_a_slot_with_the_right_corner_but_the_wrong_size_is_not_on_the_icon,
     check_the_state_line_for_the_live_test_is_saved_and_quiet_ticks_allocate_nothing,
     check_the_state_line_tells_the_setting_and_unreadable_from_misplaced_and_a_refusing_db_never_throws,
