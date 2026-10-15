@@ -483,12 +483,13 @@ local fitWaiting = setmetatable({}, { __mode = "k" })
 -- Fits the word again with the real font. Only a current fit that is not done, only once the font reads back, and never in
 -- combat (a font or size write is not allowed there): the fit then stays waiting for PLAYER_REGEN_ENABLED. ApplyMono puts the
 -- word's colour back to full red, so the tile is painted again straight after (its saved state cleared, or Paint would
--- skip it), which restores the state's own colour and alpha.
+-- skip it), which restores the state's own colour and alpha. The fit is done only if the font still reads back after the
+-- write; a miss leaves it open for the next landing.
 local function RefitNow(button, fit)
     if button.fsFit ~= fit or fit.done or not FontLoaded(button.fsWord) then return false end
     if InCombatLockdown and InCombatLockdown() then return false end
-    fit.done = true
     FitWord(button, fit)
+    fit.done = FontLoaded(button.fsWord)    -- a font that did not take stays open for the next landing
     button.fsSig = nil              -- Paint writes only on a change: this one has to, the word is full red again
     BuffTab.Paint()
     return true

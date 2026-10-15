@@ -3595,16 +3595,11 @@ __timers, __delays = {}, {}
 C_Timer = { After = function(d, fn) __delays[#__delays + 1] = d; __timers[#__timers + 1] = fn end }
 FS.Theme.FONT_MONO = FS.Theme.FONT_MONO or "Interface/AddOns/forever-stuwave/Media/Fonts/MononokiNerdFontMono-Bold.ttf"
 __fontReal = false
--- the real ApplyMono also puts the colour on (alpha 1 when it has none); the shared mock only sets the font
-FS.Theme.ApplyMono = function(fs, size, color)
-    fs:SetFont("mono.ttf", size, "")
-    if color then fs:SetTextColor(color[1], color[2], color[3], color[4] or 1) end
-end
 function __Region:GetFont() return __fontReal and FS.Theme.FONT_MONO or "Fonts/FRIZQT__.TTF", 10, "" end
 local real = __Region.GetStringWidth
 function __Region:GetStringWidth() if __fontReal then return real(self) end return real(self) * 0.5 end
 """
-HOOK = "FS.Theme.OnFontLanded = function(fn) __landed = fn end\n"
+HOOK = "FS.Theme.OnFontLanded = function(fn) __regs = (__regs or 0) + 1; __landed = fn end\n"
 FIRE_TIMERS = "local t = __timers; __timers = {}; for _, fn in ipairs(t) do fn() end"
 COUNT_FONT = ("__wf = 0; for _, i in ipairs({1, 2}) do local w = _G['FSBuffTabButton'..i].fsWord; local f = w.SetFont; "
               "w.SetFont = function(...) __wf = __wf + 1 return f(...) end end")
@@ -3680,6 +3675,53 @@ def check_the_word_is_painted_again_after_a_refit_so_it_never_flashes_full_red()
         assert word_px(lua, SHIELD, 1.0) < 9.0
         after = word_color(lua)
         assert after == before, f"hook {hook}: the refit left the word {after}, Paint's was {before}"
+
+
+def check_a_second_seat_does_not_register_a_second_font_listener():
+    lua = cold_world(True)
+    assert int(g(lua).__regs) == 1, f"the tiles registered {g(lua).__regs} listeners for the font"
+    lua.eval("__rescale")(0.8333)
+    update(lua)
+    lua.eval("__rescale")(1.0)
+    update(lua)
+    assert int(g(lua).__regs) == 1, f"a re-seat registered more listeners: {g(lua).__regs}"
+    land(lua, True)
+    assert word_px(lua, SHIELD, 1.0) < 9.0, "the one listener no longer refits"
+
+
+def check_a_tile_with_no_word_never_waits_for_the_font_or_schedules_a_timer():
+    for hook in (True, False):
+        lua = cold_world(hook)
+        assert btn(lua, SHIELD).fsFit.waiting, f"hook {hook}: the control tile with a word is not waiting"
+        run(lua, "__d0 = #__timers; FS.BuffTab.BT.MISSING = {}")
+        lua.eval("__rescale")(0.8333)
+        update(lua)
+        for i in (IMBUE, SHIELD):
+            fit = btn(lua, i).fsFit
+            assert fit.word is None and not fit.waiting, f"hook {hook}: a tile with no word waits for the font"
+        run(lua, "__d1 = #__timers")
+        assert int(g(lua).__d1) == int(g(lua).__d0), f"hook {hook}: a tile with no word scheduled timers"
+
+
+def check_a_refit_that_did_not_take_stays_open_for_the_next_landing():
+    for hook in (True, False):
+        lua = cold_world(hook)
+        # the font reads as loaded when asked, then goes missing again as soon as the word's size is set
+        run(lua, "__fontReal = true; __flaky = true; local w = _G['FSBuffTabButton2'].fsWord; local f = w.SetFont\n"
+                 "w.SetFont = function(...) if __flaky then __flaky = false; __fontReal = false end return f(...) end")
+        fire_word = ("__landed(_G['FSBuffTabButton2'].fsWord)" if hook else
+                     "__timers[#__timers - 2]()")
+        run(lua, fire_word)
+        assert not btn(lua, SHIELD).fsFit.done, f"hook {hook}: a refit whose font did not read back was taken as done"
+        run(lua, "__fontReal = true")
+        fire_word = ("__landed(_G['FSBuffTabButton2'].fsWord)" if hook else
+                     "__timers[#__timers - 1]()")
+        run(lua, fire_word)
+        assert btn(lua, SHIELD).fsFit.done and abs(word_px(lua, SHIELD, 1.0) - hinted_fit(lua, SHIELD, "SHIELD", 1.0)) < 1e-6, \
+            f"hook {hook}: the next landing did not fit the word"
+        n = int(g(lua).__wf)
+        run(lua, fire_word)
+        assert int(g(lua).__wf) == n, f"hook {hook}: a done fit ran again"
 
 
 def check_a_refit_waits_out_combat_and_runs_when_it_ends_and_never_writes_a_font_inside_it():
@@ -4028,6 +4070,9 @@ CHECKS = [
     check_a_word_wider_than_the_band_overflows_at_the_smallest_size_and_is_never_cut,
     check_a_word_measured_in_the_fallback_font_is_fitted_again_when_the_bundled_font_lands,
     check_the_word_is_painted_again_after_a_refit_so_it_never_flashes_full_red,
+    check_a_second_seat_does_not_register_a_second_font_listener,
+    check_a_tile_with_no_word_never_waits_for_the_font_or_schedules_a_timer,
+    check_a_refit_that_did_not_take_stays_open_for_the_next_landing,
     check_a_refit_waits_out_combat_and_runs_when_it_ends_and_never_writes_a_font_inside_it,
     check_a_refit_that_was_overtaken_by_a_new_seat_does_nothing,
     check_a_refit_that_raises_is_caught_and_reported_quietly,

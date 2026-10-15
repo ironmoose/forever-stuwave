@@ -1454,6 +1454,41 @@ case("font_landed_listeners_hear_each_recovered_fontstring_and_a_throwing_one_st
     assert(#heard == 2, "a recovered fontstring is not announced again")
 """)
 
+case("font_retry_waits_out_combat_and_runs_when_it_ends", FONT_COLD_PREAMBLE + """
+    local heard = 0
+    T.OnFontLanded(function() heard = heard + 1 end)
+    local inCombat = true
+    InCombatLockdown = function() return inCombat end
+    local a = newFontString()
+    T.ApplyFontGeneric(a, T.FONT_ORBITRON, 14, nil, "")
+    local writes = a.setCalls
+    engine.ready = true
+    fire("PLAYER_LOGIN"); fire("PLAYER_ENTERING_WORLD"); runTimers()
+    assert(a.setCalls == writes, "a font was written in combat: " .. tostring(a.setCalls - writes))
+    assert(a.font == FRIZQT and #msgs == 0 and heard == 0, "the window closed or warned while in combat")
+    local waiting = false
+    for _, f in ipairs(frames) do if f.events["PLAYER_REGEN_ENABLED"] then waiting = true end end
+    assert(waiting, "nothing waits for the end of combat")
+    fire("PLAYER_REGEN_ENABLED")          -- still in combat (a stale event): nothing is written
+    assert(a.setCalls == writes and a.font == FRIZQT, "a font was written while still in combat")
+    inCombat = false
+    fire("PLAYER_REGEN_ENABLED")
+    assert(a.font == T.FONT_ORBITRON and heard == 1 and #msgs == 0, "the retry did not run when combat ended")
+    for _, f in ipairs(frames) do assert(not f.events["PLAYER_REGEN_ENABLED"], "the combat event stays registered") end
+""")
+
+case("font_that_never_loads_still_warns_once_after_combat_ends", FONT_COLD_PREAMBLE + """
+    local inCombat = true
+    InCombatLockdown = function() return inCombat end
+    local a = newFontString()
+    T.ApplyFontGeneric(a, T.FONT_ORBITRON, 14, nil, "")
+    fire("PLAYER_LOGIN"); fire("PLAYER_ENTERING_WORLD"); runTimers()
+    assert(#msgs == 0, "the verdict came in combat")
+    inCombat = false
+    fire("PLAYER_REGEN_ENABLED")
+    assert(#msgs == 1 and a.font == FRIZQT, "the failed font was not reported when combat ended")
+""")
+
 case("font_retry_keeps_color_and_shadow", FONT_COLD_PREAMBLE + """
     local fs = newFontString()
     T.ApplyFontGeneric(fs, T.FONT_ORBITRON, 14, { 1, 0, 0, 0.5 }, "")

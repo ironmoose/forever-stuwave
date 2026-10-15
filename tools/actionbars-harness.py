@@ -434,7 +434,12 @@ FS = {
         AddRoundedFill = function() end,
         AddGradientBorder = function() end, AddOuterGlow = function() end,
         FONT_MONO = "mono.ttf",
-        ApplyMono = function(fs, size) fs:SetFont("mono.ttf", size, "") end,   -- the real one calls SetFont
+        -- the real one: ApplyFontGeneric with no outline, i.e. SetFont then SetTextColor (white when it has no colour)
+        ApplyMono = function(fs, size, color)
+            fs:SetFont("mono.ttf", size, "")
+            local c = color or { 1, 1, 1, 1 }
+            fs:SetTextColor(c[1], c[2], c[3], c[4] or 1)
+        end,
         -- the real one: SetFont then SetTextColor (the shadow and fallback-path parts are not modelled)
         ApplyFontGeneric = function(fs, path, size, color, flags)
             fs:SetFont(path, size, flags == nil and "OUTLINE" or flags)

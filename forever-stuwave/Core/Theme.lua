@@ -794,6 +794,12 @@ end
 -- path in SetFontChecked and is reported at once, instead of landing in a queue
 -- that is never retried again.
 local function RetryPendingFonts()
+    -- Not in combat: a fontstring of a secure frame cannot take a font write there, and the pcall below would read that as a
+    -- genuine miss. The pass waits for PLAYER_REGEN_ENABLED, with the window (its flags and events) left as it is.
+    if fontEvents and InCombatLockdown and InCombatLockdown() then
+        fontEvents:RegisterEvent("PLAYER_REGEN_ENABLED")
+        return
+    end
     local finalPass = fontRetry.sawWorld and fontRetry.timerDone
     if finalPass then fontRetry.settled = true end
     local snapshot = {}
@@ -842,6 +848,11 @@ if type(CreateFrame) == "function" then
     fontEvents:RegisterEvent("PLAYER_LOGIN")
     fontEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
     fontEvents:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_REGEN_ENABLED" then
+            fontEvents:UnregisterEvent("PLAYER_REGEN_ENABLED")
+            if fontRetry.started then RetryPendingFonts() end
+            return
+        end
         if event == "PLAYER_ENTERING_WORLD" then fontRetry.sawWorld = true end
         if fontRetry.started then
             RetryPendingFonts()
