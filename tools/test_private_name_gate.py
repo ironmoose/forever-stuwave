@@ -30,9 +30,9 @@ NEAR_MISSES = {
     "local user name": ["khil"],
     "home directory": ["homepage", "/home"],
     "mail domain": ["gma" + "il" + "com", "gmailer.com"],
-    "windows user path": ["C:" + "\\Prog" + "ram Files"],
-    "windows user path, forward slashes": ["C:/Prog" + "ram Files", "c:/us" + "age"],
-    "macos home directory": ["github.com/us" + "ers/x", "/us" + "er/x", "/Us" + "ersx/", "my/us" + "ers"],
+    "windows user path": ["C:" + "\\Prog" + "ram Files", "sr" + "c:\\us" + "ers"],
+    "windows user path, forward slashes": ["C:/Prog" + "ram Files", "c:/us" + "age", "sr" + "c:/us" + "ers"],
+    "macos home directory": ["github.com/us" + "ers/x", "/us" + "er/x", "/Us" + "ersx/", "my/us" + "ers", "/v1/us" + "ers/12"],
 }
 
 
