@@ -104,8 +104,9 @@ local FT = {
     GLOW_STEADY = 0.5, GLOW_PULSE = 0.6,
     -- the glow is a soft copy under each lit piece, never a block behind the readout: led_segment_glow.tga is the segment atlas
     -- blurred (a cell's glow is the 14 x 16 texel rect two texels past the cell, a tilde bar or the dot's the 6 x 6 one),
-    -- and led_glow.tga is the soft box stretched over a gauge segment plus GAUGE_GLOW_PAD design px on every side
-    SEG_GLOW_PAD = 2, SEG_GLOW_W = 14, SEG_GLOW_H = 16, BLOCK_GLOW = 6, BLOCK_SLOT = 14, GAUGE_GLOW_PAD = 3,
+    -- and led_glow.tga is the soft box stretched over a gauge segment plus GAUGE_GLOW_PAD design px on every side (one, so a
+    -- halo never leaves the gauge well)
+    SEG_GLOW_PAD = 2, SEG_GLOW_W = 14, SEG_GLOW_H = 16, BLOCK_GLOW = 6, BLOCK_SLOT = 14, GAUGE_GLOW_PAD = 1,
     -- the motion, seconds unless noted
     FLASH_TIME = 0.5, FLASH_ALPHA = 0.3,
     DIP_TIME = 0.035, DIP_DEPTH = 0.22,
@@ -910,14 +911,10 @@ local function PaintCells(zone)
     local sweeping = fx.pp < 1
     local bx = FT.HERO.x + ppQ                          -- the sweep band, design px from the host's left
 
-    -- the hero tile: plate, rim, glow
+    -- the hero tile: the plate is static art (led_well.tga), so only the rim and glow are painted
     if susp then
-        local r, g, bl = Mix(BG, amber, 0.09)
-        hero.fsPlate:SetVertexColor(r, g, bl, 0.9)
         PaintRim(hero, hover, amber, C.suspRing, amber, C.suspGlow)
     else
-        local r, g, bl = Mix(BG, cyan, 0.1 * f)
-        hero.fsPlate:SetVertexColor(r, g, bl, Lerp(0.72, 0.9, f))
         -- the idle glow paints its brightest alpha; the animation dims it by its region alpha down to breathRing / the dark
         local ringA = Lerp(b and (C.breathRing + C.breathRingSwing) or C.idleRing, C.regenRing, f)
         local glowA = C.regenGlow * f + C.flareGlow * fx.flare + (1 - f) * (b and C.breathGlow or 0)
@@ -1254,8 +1251,13 @@ local function BuildFace()
     if not FT.hero then
         local hero = CreateFrame("Frame", nil, cells)
         hero:EnableMouse(false)
-        hero.fsPlate = T.AddCut2Texture(hero, T.SLICE_CUT2_BUTTON_TEXTURE, { 1, 1, 1, 1 }, "BACKGROUND", -8)
+        -- the page's violet gradient is baked into led_well.tga (a nine-slice, chamfer 6, top left and bottom right), so the
+        -- plate is drawn white and never tinted; the idle dimming is the zone's alpha
+        hero.fsPlate = T.AddCut2Texture(hero, MEDIA .. "led_well.tga", { 1, 1, 1, 1 }, "BACKGROUND", -8)
         T.SkinCutButton(hero, { borderColor = T.COLOR_BORDER, glowAlpha = FT.CHROME.idleGlow })
+        -- the page's top highlight: a 1 px line of white at 0.08, two px under the top edge
+        FT.shine = FlatTexture(hero, "BACKGROUND", -7)
+        FT.shine:SetVertexColor(1, 1, 1, 0.08)
         FT.hero = hero
     end
     if not FT.gauge then
@@ -1370,6 +1372,7 @@ local function LayoutFace()
     Place(FT.rate, H.x, FT.RATE_ZONE_Y, H.w, FT.CHIP.y + FT.CHIP.h - FT.RATE_ZONE_Y)
     Place(FT.fxFrame, H.x, H.y, H.w, FT.FACE_H)
     Place(FT.hero, H.x, H.y, H.w, H.h)
+    Place(FT.shine, H.x + 6, H.y + 1, H.w - 7, 1)
     FT.cells.fsSig = nil
     FT.sigCells.on = nil
     FT.sigRate.on = nil

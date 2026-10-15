@@ -657,6 +657,28 @@ def check_the_readout_glow_is_a_soft_copy_under_each_lit_segment_and_never_a_blo
                 assert float(gl._vertex[4]) == 0.0
     tick(lua, 8.0)
     assert all(float(gl._vertex[4]) == 0.0 for cell in seq(L.word) for gl in seq(cell.gl)), "no glow at rest"
+    assert not any(shown(g_) for g_ in list(seq(L.tildeGl)) + [L.dotGl]), "the tilde and dot glows are hidden at rest"
+    assert not any(shown(b_) for b_ in list(seq(L.tilde)) + [L.dot])
+
+
+def check_the_readout_well_is_the_pages_gradient_plate_with_its_top_highlight():
+    lua = world(motion=False)
+    FT = ft(lua).FT
+    hero = FT.hero
+    px = float(FT.px)
+    # a plate cut from the baked gradient, chamfer 6, filling the hero tile exactly
+    assert str(hero.fsPlate._texture).endswith("led_well.tga")
+    corners = {str(p.point): (p.rel.fsPlate is not None, float(p.x), float(p.y)) for p in seq(hero.fsPlate._points)}
+    assert corners == {"TOPLEFT": (True, 0.0, 0.0), "BOTTOMRIGHT": (True, 0.0, 0.0)}, ("the plate fills the tile", corners)
+    # the page's 1 px white 0.08 line two px under the top edge, from the chamfer to one px short of the right end
+    shine = FT.shine
+    close(rgb(shine._vertex), (1.0, 1.0, 1.0), "highlight colour")
+    approx(float(shine._vertex[4]), 0.08, "highlight alpha", 1e-9)
+    H = MK["hero"]
+    x, y, w, h = _tex_rect_px(lua, shine)
+    s_ = float(FT.s) / px
+    assert (x, -y, w, h) == (round((H[0] + 6) * s_), round((H[1] + 1) * s_), round((H[2] - 7) * s_), round(s_)), (x, y, w, h)
+    assert shine._snap is True and float(shine._bias) == 0.0
 
 
 def check_the_gauge_glow_is_a_halo_on_each_segment_and_only_when_not_idle():
@@ -676,8 +698,11 @@ def check_the_gauge_glow_is_a_halo_on_each_segment_and_only_when_not_idle():
         approx(float(gl._vertex[4]), float(seg._vertex[4]), f"halo {i} alpha", 1e-6)
         sx, sy, sw, sh = _tex_rect_px(lua, seg)
         gx, gy, gw, gh = _tex_rect_px(lua, gl)
-        pad = round(3 * float(FT.s) / float(FT.px))
+        pad = round(1 * float(FT.s) / float(FT.px))
         assert (gx, gy, gw, gh) == (sx - pad, sy + pad, sw + 2 * pad, sh + 2 * pad), f"halo {i}: {(gx, gy, gw, gh)} vs {(sx, sy, sw, sh)}"
+        # no halo lands past the well, so none lands past the tile edge
+        wx_, wy_, ww_, wh_ = _tex_rect_px(lua, G.plate)
+        assert gx >= wx_ and gx + gw <= wx_ + ww_ and gy <= wy_ and gy - gh >= wy_ - wh_, f"halo {i} spills past the well"
     cast(lua)
     tick(lua, 5.4)
     assert all(float(gl._vertex[4]) > 0.5 for gl in gls), "the cyan gauge glows at regen"
@@ -806,7 +831,9 @@ def check_the_suspended_look_is_amber_all_the_way_through():
     look = cells_look(lua)
     close(look["ring"], C["amber"], "suspended border")
     approx(look["ring_a"], MK["k"]["susp_ring"], "suspended border alpha", 0.02)
-    close(look["plate"], _mix(BG, C["amber"], 0.09), "suspended plate")
+    assert str(ft(lua).FT.hero.fsPlate._texture).endswith("led_well.tga")
+    close(look["plate"], (1.0, 1.0, 1.0), "the baked gradient plate is not tinted")
+    approx(look["plate_a"], 1.0, "and not faded", 1e-9)
     close(look["lit"], C["amber"], "suspended digits")
     approx(look["lit_a"], 1.0, "suspended digit alpha", 0.01)
     approx(look["glow_a"], 0.0, "no glow while suspended", 1e-6)
@@ -941,8 +968,8 @@ def check_at_zero_the_digits_turn_cyan_and_the_word_says_regen():
     assert look["text"] == "REGEN" and look["count"] == "", led_text(lua)
     close(look["ring"], C["cyan"], "regen border")
     approx(look["ring_a"], 1.0, "regen border alpha", 0.02)
-    close(look["plate"], _mix(BG, C["cyan"], 0.1), "regen plate")
-    approx(look["plate_a"], 0.9, "regen plate alpha", 0.01)
+    close(look["plate"], (1.0, 1.0, 1.0), "the baked gradient plate is not tinted at regen either")
+    approx(look["plate_a"], 1.0, "and not faded", 1e-9)
     approx(look["glow_a"], MK["k"]["res_glow"], "regen glow", 0.01)
     close(look["lit"], C["cyan"], "regen word")
     approx(look["lit_a"], 1.0, "regen word alpha", 0.01)
@@ -2540,6 +2567,7 @@ CHECKS = [
     check_the_generator_draws_the_mockups_disjoint_segments,
     check_the_led_has_ninety_eight_segment_textures_cut_from_the_atlas_and_snapped,
     check_the_readout_glow_is_a_soft_copy_under_each_lit_segment_and_never_a_block,
+    check_the_readout_well_is_the_pages_gradient_plate_with_its_top_highlight,
     check_the_gauge_glow_is_a_halo_on_each_segment_and_only_when_not_idle,
     check_the_cast_wash_is_clipped_to_the_face,
     check_the_led_numbers_are_the_mockups,

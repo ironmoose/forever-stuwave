@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generates led_segments.tga, led_segment_glow.tga and led_glow.tga: the art of the five second rule tab's LED readout.
+"""Generates led_segments.tga, led_segment_glow.tga, led_glow.tga and led_well.tga: the art of the mana regen module's LED readout.
 
 led_segments.tga is a 64x64 atlas of sixteen 16x16 slots (4 across, 4 down, slot n at column n % 4, row n // 4).
 Slots 0..13 hold one of the fourteen segments of a 14 segment cell, in SEGMENT_ORDER; slots 14 and 15 are empty.
@@ -16,9 +16,16 @@ rect, so the tab seats the texture two texels up and left of the segment's cell.
 tilde and the dot (art at (2, 2), glow in 6 x 6); slot 15 is empty. A blur keeps the mass, so a cell glows exactly where its
 lit segments are and nowhere else.
 
-led_glow.tga is a 64x32 soft box: the Gaussian blur of a solid 35 x 11 core (the page's gauge segments are 7 x 3 design
-px and glow 3 px past each side, so the core is 7/13 by 3/9 of the canvas and the falloff sigma is 1.2 px). The tab stretches
-it over a gauge segment's rect plus that margin. There is no flat top and no edge: the hump falls to zero at the border.
+led_glow.tga is a 64x32 soft box: the Gaussian blur of a solid 50 x 19 core (a gauge segment is 7 x 3 design px and its halo
+reaches 1 px past each side, so the core is 7/9 by 3/5 of the canvas and the falloff fits inside that px). The tab stretches
+it over a gauge segment's rect plus that px, so the halo never leaves the gauge well. There is no flat top and no edge: the
+hump falls to zero at the border.
+
+led_well.tga is the readout well's plate: a 32x32 nine-slice fill (margin 6, the chamfer of the two corner cut tile, top left
+and bottom right) with the page's vertical gradient baked into RGBA, #3a2860 at 0.62 through #1a1236 at 0.8 to #0a0516 at
+0.9. The tile is 16 px high, so the texture rows are mapped as the nine-slice shows them: the top 6 rows are the top 6 of 16
+px, the bottom 6 the last 6, and the 20 middle rows are stretched over the 4 between, so each row carries the gradient at the
+tile row it ends up on. It is drawn white (never tinted) under the lit segments.
 
 The segment rows below are [x, y, width] runs one texel tall; mockups/five-second-rule-compact-2026-10-14.html
 (SEGS) draws the same table. Pure stdlib, matching the other generators here: 18-byte header, image type 2,
@@ -60,9 +67,11 @@ SEGMENTS = {
 }
 
 GLOW_W, GLOW_H = 64, 32
-GLOW_INNER_W, GLOW_INNER_H = 35, 11      # the solid core, centred; the blur spills outside it
-GLOW_SIGMA_X = (GLOW_W - GLOW_INNER_W) / 2 / 3 * 1.2   # 3 design px of margin a side is 1.2 sigma-px: 14.5 texels = 3 px
-GLOW_SIGMA_Y = (GLOW_H - GLOW_INNER_H) / 2 / 3 * 1.2
+GLOW_INNER_W, GLOW_INNER_H = 50, 19      # the solid core, centred; the blur spills outside it
+GLOW_SIGMA_X = (GLOW_W - GLOW_INNER_W) / 2 / 2.2       # the 1 px margin a side (7 texels) holds about 2.2 sigma
+GLOW_SIGMA_Y = (GLOW_H - GLOW_INNER_H) / 2 / 2.2
+WELL_SIZE, WELL_MARGIN, WELL_TILE_H, WELL_SS = 32, 6, 16, 6
+WELL_STOPS = ((0.0, (0x3a, 0x28, 0x60), 0.62), (0.5, (0x1a, 0x12, 0x36), 0.8), (1.0, (0x0a, 0x05, 0x16), 0.9))
 SEGMENT_GLOW_SIGMA = 1.0                 # texels
 SEGMENT_GLOW_MARGIN = 2                  # texels of glow past the cell on the left and top (and the right and bottom)
 BLOCK_SLOT = 14                          # the blurred 2 x 2 block of the tilde and the dot
@@ -146,6 +155,48 @@ def build_glow():
     return rows
 
 
+def _well_stop(t):
+    for (t0, c0, a0), (t1, c1, a1) in zip(WELL_STOPS, WELL_STOPS[1:]):
+        if t <= t1:
+            k = (t - t0) / (t1 - t0)
+            return tuple(c0[i] + (c1[i] - c0[i]) * k for i in range(3)), a0 + (a1 - a0) * k
+    return WELL_STOPS[-1][1], WELL_STOPS[-1][2]
+
+
+def _well_row_t(y):
+    """The fraction of the 16 px tile a texture row lands on under the nine-slice margins."""
+    if y < WELL_MARGIN:
+        return (y + 0.5) / WELL_TILE_H
+    if y >= WELL_SIZE - WELL_MARGIN:
+        return (WELL_TILE_H - WELL_MARGIN + (y - (WELL_SIZE - WELL_MARGIN)) + 0.5) / WELL_TILE_H
+    middle = WELL_SIZE - 2 * WELL_MARGIN
+    stretched = WELL_TILE_H - 2 * WELL_MARGIN
+    return (WELL_MARGIN + (y - WELL_MARGIN + 0.5) / middle * stretched) / WELL_TILE_H
+
+
+def _cut_coverage(x, y):
+    """Coverage of texel (x, y) by the 32 x 32 plate with a 6 texel diagonal cut at the top left and the bottom right
+    (supersampled 6 x 6, the same rule generate_cut_corner_outline.py fills with; the generators are standalone)."""
+    hits = 0
+    for sy in range(WELL_SS):
+        for sx in range(WELL_SS):
+            px, py = x + (sx + 0.5) / WELL_SS, y + (sy + 0.5) / WELL_SS
+            if px + py < WELL_MARGIN or (WELL_SIZE - px) + (WELL_SIZE - py) < WELL_MARGIN:
+                continue
+            hits += 1
+    return hits / (WELL_SS * WELL_SS)
+
+
+def build_well():
+    """The two corner cut fill (top left and bottom right) with the page's gradient baked in."""
+    rows = []
+    for y in range(WELL_SIZE):
+        (r, g, b), a = _well_stop(_well_row_t(y))
+        rows.append([(int(round(r)), int(round(g)), int(round(b)), int(round(_cut_coverage(x, y) * a * 255)))
+                     for x in range(WELL_SIZE)])
+    return rows
+
+
 def write_tga(path, rows):
     height, width = len(rows), len(rows[0])
     header = struct.pack("<BBBHHBHHHHBB", 0, 0, 2, 0, 0, 0, 0, 0, width, height, 32, 0x28)
@@ -167,6 +218,7 @@ def main():
     write_tga(os.path.join(out, "led_segments.tga"), build_atlas())
     write_tga(os.path.join(out, "led_segment_glow.tga"), build_segment_glow())
     write_tga(os.path.join(out, "led_glow.tga"), build_glow())
+    write_tga(os.path.join(out, "led_well.tga"), build_well())
 
 
 if __name__ == "__main__":

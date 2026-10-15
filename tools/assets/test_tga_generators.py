@@ -231,7 +231,7 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     # generate_led_segments.py: the five second rule tab's LED art, a 64x64 atlas of 16x16 slots (fourteen segments of a
     # 10x12 cell), the same atlas blurred for the glow behind each lit segment, and the 64x32 soft box glow of the gauge
     # segments and the pulse.
-    "led_segments": {"led_segments": (64, 64), "led_segment_glow": (64, 64), "led_glow": (64, 32)},
+    "led_segments": {"led_segments": (64, 64), "led_segment_glow": (64, 64), "led_glow": (64, 32), "led_well": (32, 32)},
     "tab_slant": {
         "tab_slant": (32, 32),
         "tab_slant_glow": (32, 32),
@@ -2027,14 +2027,31 @@ def test_led_segment_glow_atlas_is_the_segments_blurred_with_a_two_texel_margin(
 def test_led_glow_is_a_soft_box_with_no_hard_edge(led_outputs: Path) -> None:
     path = led_outputs / "led_glow.tga"
     centre = _alpha_at(path, 32, 16)
-    assert 0.7 * 255 < centre < 0.95 * 255, centre
+    assert 0.9 * 255 < centre <= 255, centre
     for x, y in ((0, 0), (63, 0), (0, 31), (63, 31), (0, 16), (63, 16), (32, 0), (32, 31)):
         assert _alpha_at(path, x, y) == 0, (x, y)
     row = [_alpha_at(path, x, 16) for x in range(64)]
     col = [_alpha_at(path, 32, y) for y in range(32)]
-    assert max(abs(a - b) for a, b in zip(row, row[1:])) < 0.12 * 255, "a hard step along the middle row"
-    assert max(abs(a - b) for a, b in zip(col, col[1:])) < 0.18 * 255, "a hard step along the middle column"
+    assert max(abs(a - b) for a, b in zip(row, row[1:])) < 0.16 * 255, "a hard step along the middle row"
+    assert max(abs(a - b) for a, b in zip(col, col[1:])) < 0.16 * 255, "a hard step along the middle column"
     assert row[:32] == sorted(row[:32]) and row[32:] == sorted(row[32:], reverse=True), "not a single soft hump"
+
+
+def test_led_well_is_the_pages_violet_gradient_in_a_two_corner_cut_plate(led_outputs: Path) -> None:
+    path = led_outputs / "led_well.tga"
+    # the page's tile fill: #3a2860 at 0.62 through #1a1236 at 0.8 to #0a0516 at 0.9, top to bottom, chamfer 6 at the top
+    # left and the bottom right
+    r0, g0, b0, a0 = _pixel(path, 20, 0)
+    assert abs(r0 - 0x3a) <= 6 and abs(g0 - 0x28) <= 6 and abs(b0 - 0x60) <= 6, (r0, g0, b0)
+    assert abs(a0 - 0.62 * 255) <= 10, a0
+    r1, g1, b1, a1 = _pixel(path, 12, 31)
+    assert abs(r1 - 0x0a) <= 6 and abs(g1 - 0x05) <= 6 and abs(b1 - 0x16) <= 6, (r1, g1, b1)
+    assert abs(a1 - 0.9 * 255) <= 10, a1
+    # the middle row of the texture is the page's 0.5 stop
+    rm, gm, bm, am = _pixel(path, 16, 16)
+    assert abs(rm - 0x1a) <= 12 and abs(am - 0.8 * 255) <= 12, (rm, gm, bm, am)
+    assert _pixel(path, 0, 0)[3] == 0 and _pixel(path, 31, 31)[3] == 0, "the cut corners are clear"
+    assert _pixel(path, 31, 0)[3] > 150 and _pixel(path, 0, 31)[3] > 200, "the square corners are filled"
 
 
 # --- the runtime icon style: ramps and key covers ----------------------------
