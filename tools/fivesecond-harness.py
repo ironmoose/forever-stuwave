@@ -1651,6 +1651,16 @@ def check_everything_sits_on_whole_pixels_and_the_led_art_is_never_scaled_fracti
             if region._kind != "FontString":
                 _whole(float(region._w), px, f"{ctx}: {region._kind} {region._name} width")
                 _whole(float(region._h), px, f"{ctx}: {region._kind} {region._name} height")
+        # the tile's plate and ring are nine-slices that fill the hero frame edge to edge, so the frame is whole pixels, they
+        # are snapped to the grid with no texel bias, and so is the highlight line
+        hero = FT.hero
+        _whole(float(hero._w), px, f"{ctx}: hero width")
+        _whole(float(hero._h), px, f"{ctx}: hero height")
+        for what, tex in (("plate", hero.fsPlate), ("ring", hero.fsSkin.border.ring), ("highlight", FT.shine)):
+            assert tex._snap is True and float(tex._bias) == 0.0, f"{ctx}: the {what} is not snapped to the pixel grid"
+        for what, tex in (("plate", hero.fsPlate), ("ring", hero.fsSkin.border.ring)):
+            corners = {str(q.point): (float(q.x), float(q.y)) for q in seq(tex._points)}
+            assert corners == {"TOPLEFT": (0.0, 0.0), "BOTTOMRIGHT": (0.0, 0.0)}, f"{ctx}: the {what} does not fill the hero frame {corners}"
         # the art: one texel is n whole pixels, whatever the design scale is
         L = led(lua)
         for cell in seq(L.cells):

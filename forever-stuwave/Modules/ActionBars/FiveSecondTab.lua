@@ -1255,6 +1255,10 @@ local function BuildFace()
         -- plate is drawn white and never tinted; the idle dimming is the zone's alpha
         hero.fsPlate = T.AddCut2Texture(hero, MEDIA .. "led_well.tga", { 1, 1, 1, 1 }, "BACKGROUND", -8)
         T.SkinCutButton(hero, { borderColor = T.COLOR_BORDER, glowAlpha = FT.CHROME.idleGlow })
+        -- the plate and the ring are nine-slices with a one texel stroke, so they are snapped like every other piece of the face
+        -- (the shared skin leaves them to the client's default); the frame they fill is placed on whole pixels by LayoutFace
+        Crisp(hero.fsPlate)
+        if hero.fsSkin and hero.fsSkin.border and hero.fsSkin.border.ring then Crisp(hero.fsSkin.border.ring) end
         -- the page's top highlight: a 1 px line of white at 0.08, one px under the top edge
         FT.shine = FlatTexture(hero, "BACKGROUND", -7)
         FT.shine:SetVertexColor(1, 1, 1, 0.08)
