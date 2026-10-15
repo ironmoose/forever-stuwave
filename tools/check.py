@@ -27,14 +27,21 @@ def missing_mockup(output: str) -> str | None:
     return None
 
 
-def link_mockups() -> Path | None:
-    """Symlink ROOT/mockups to $FS_MOCKUPS_DIR when mockups/ is absent; the link, or None."""
+def link_mockups() -> None:
+    """Symlink ROOT/mockups to $FS_MOCKUPS_DIR when mockups/ is absent."""
     link = ROOT / "mockups"
     source = os.environ.get(MOCKUPS_ENV)
     if link.exists() or link.is_symlink() or not source or not Path(source).is_dir():
-        return None
+        return
     link.symlink_to(Path(source).resolve(), target_is_directory=True)
-    return link
+
+
+def unlink_mockups() -> None:
+    """Remove ROOT/mockups only when it is a symlink that resolves to $FS_MOCKUPS_DIR."""
+    link = ROOT / "mockups"
+    source = os.environ.get(MOCKUPS_ENV)
+    if source and link.is_symlink() and link.resolve() == Path(source).resolve():
+        link.unlink()
 
 
 def main() -> int:
@@ -43,17 +50,18 @@ def main() -> int:
     if source and not Path(source).is_dir():
         print(f"{MOCKUPS_ENV} is set to {source!r}, which is not an existing directory")
         return 2
-    link = None
+    # A link that was already there is the caller's own: only a link made below is removed.
+    own_link = not ((ROOT / "mockups").exists() or (ROOT / "mockups").is_symlink())
     # SIGTERM raises SystemExit so the finally block below still removes the link; the handler
     # goes in first so no signal can arrive between creating the link and the try.
     previous = signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
     try:
-        link = link_mockups()
+        link_mockups()
         return run_all()
     finally:
         signal.signal(signal.SIGTERM, previous)
-        if link is not None:
-            link.unlink()
+        if own_link:
+            unlink_mockups()
 
 
 def run_all() -> int:
