@@ -1,6 +1,6 @@
 -- Forever STUwave: XP bar
 --
--- SEGMENTED and DOCKED, on Parker's call ("segmented sounds cool. can we do
+-- SEGMENTED and DOCKED, on the player's call ("segmented sounds cool. can we do
 -- something so it like is docked to the databar and looks like it is apart").
 --
 -- The previous version was a 1000px bar floating on its own above the data bar,
@@ -33,7 +33,7 @@ local TRACK_FILL  = { 0.024, 0.012, 0.071, 0.90 } -- rgba(6,3,18,.9)
 local RAIL_COLOR  = { 0.133, 0.878, 1, 0.8 }      -- matches the data bar's rails
 local CELL_EMPTY  = { 0.086, 0.055, 0.157, 1 }    -- unlit cell
 -- The ramp across the bar. It used to run #7c3aed -> #a855f7, which is two
--- shades of the same violet -- that is why Parker called it plain purple: the
+-- shades of the same violet -- that is why the player called it plain purple: the
 -- bar had no colour journey at all, only a slight lightening nobody can see
 -- across 2500 pixels.
 --
@@ -54,7 +54,7 @@ local BAR_HEIGHT = 12
 -------------------------------------------------------------------------------
 -- Pip variants (/fsxp)
 -------------------------------------------------------------------------------
--- Parker's verdict on the segmented bar was "not there yet", and every
+-- The player's verdict on the segmented bar was "not there yet", and every
 -- candidate on the table changes how a pip READS rather than what it measures.
 -- Comparing them by editing a constant costs a reload per guess, which is the
 -- real reason this stalled -- so they ship together and switch live.
@@ -79,7 +79,7 @@ local BAR_HEIGHT = 12
 --   caps          bright top and bottom edge on each lit cell
 --   bands         horizontal slices cut across the whole bar, thickening down
 --
--- Parker's brief for this batch: the bar spreads across the whole screen over
+-- The player's brief for this batch: the bar spreads across the whole screen over
 -- hours, so the interesting part is the LEADING EDGE and the motion, not the
 -- static shape of one cell. Most of these are about what the sweep does.
 local MAX_CELLS = 80
@@ -211,7 +211,7 @@ local TRACE_HEIGHT      = 2      -- circuit trace: the wire linking the pads
 local CASCADE_MAX       = 14
 -- Eighty narrow cells rather than fifty wide ones. Fifty across a 2560 screen
 -- is a 48px slab each, which reads as a progress bar however it is coloured --
--- Parker's word for the first pass was "boring". Eighty gives a dense run of
+-- The player's word for the first pass was "boring". Eighty gives a dense run of
 -- slashes instead.
 local CELL_COUNT = MAX_CELLS   -- textures built; a variant may use fewer
 local CELL_GAP = 3
@@ -225,7 +225,7 @@ local CELL_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\cell_
 
 -- The head bloom is a ROUND radial, and that is deliberate after trying the
 -- alternative. A slanted, pip-shaped bloom scaled up read as a blowout that
--- swallowed its neighbours -- Parker: "the glow is insane on the leading pip",
+-- swallowed its neighbours -- Player: "the glow is insane on the leading pip",
 -- then "the original glow was perfect". A soft circle at the leading edge
 -- reads as a light source; the pip shape at that size reads as a giant pip.
 --
@@ -240,7 +240,7 @@ local GLOW_ROUND_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\
 --   the head cell itself, near-white and additively doubled
 local HEAD_COLOR = { 1, 0.92, 1, 1 }
 -- Exactly the first version's numbers. Per-pip halos were tried in between and
--- removed on Parker's call: eighty overlapping ADD glows made the run read as
+-- removed on the player's call: eighty overlapping ADD glows made the run read as
 -- one smeared bar of light and buried the slashes that give it its shape. The
 -- pips carry their own interest through colour and shading instead -- see
 -- FILL_STOPS and ShadePip -- which is what "they need some love, not more
@@ -340,7 +340,7 @@ end
 -- Tooltip
 -------------------------------------------------------------------------------
 
--- OUR tooltip, not GameTooltip. Parker: "it should be a synthwave looking
+-- OUR tooltip, not GameTooltip. Player: "it should be a synthwave looking
 -- tooltip" -- and GameTooltip would have been the wrong dependency anyway,
 -- since Tooltip.lua's skin of it is still a first pass and anything we do here
 -- would inherit whatever that is doing on the day.
@@ -1036,7 +1036,7 @@ local function Build()
         bar.ticks[#bar.ticks + 1] = { texture = tick, at = at }
     end
 
-    -- HOVER, not a permanent readout. Parker: "the xp bar doesn't show any
+    -- HOVER, not a permanent readout. Player: "the xp bar doesn't show any
     -- numbers unless i mouse over a pip then it can do like a tooltip" -- so
     -- the bar is pure shape at rest and the figures live in the tooltip.
     --

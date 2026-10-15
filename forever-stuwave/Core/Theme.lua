@@ -326,7 +326,7 @@ Theme.SLICE_CUT_OUTLINE_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Te
 -- Solid companion to the outline: same chamfered outer shape, full coverage inside, so a
 -- tinted fill sits flush under the stroke with no gap.
 Theme.SLICE_CUT_FILL_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\slice_cut_fill.tga"
-Theme.SLICE_CUT_MARGIN = 6   -- tune alongside CHAMFER in the generator; Parker will check vs the artifact
+Theme.SLICE_CUT_MARGIN = 6   -- tune alongside CHAMFER in the generator; the player will check vs the artifact
 
 -- Two-corner cut ("cut2"): only TOP-LEFT and BOTTOM-RIGHT are chamfered, TOP-RIGHT and
 -- BOTTOM-LEFT stay square. The locked pet-slot plate shape, now the look of the action,
@@ -518,7 +518,7 @@ end
 -- cleared, and were refused throughout the middle.
 --
 -- Callers MUST check this before scanning. A refused pcall still builds its
--- refusal string, and that is not free: Parker's FS MEM readout climbed to
+-- refusal string, and that is not free: the player's FS MEM readout climbed to
 -- 9.2M in a single session, which is ~30 of those long messages a second from
 -- five party rows scanning on a ticker. Skipping the scan and holding the last
 -- known display costs nothing and shows the same thing.
@@ -602,7 +602,7 @@ end
 -- are drawn on a light parchment background, so their font objects are black or
 -- near-black. StripBlizzardChrome hides that parchment and SkinPanel puts a
 -- near-black panel behind it instead, which leaves the text unreadable --
--- Parker, 2026-09-22, on an innkeeper: "dialogue for the inkeeper is blanked
+-- Player, 2026-09-22, on an innkeeper: "dialogue for the inkeeper is blanked
 -- out but the icons" render fine. Icons are textures and survive; the text is
 -- still there, just black on black.
 --
@@ -1670,7 +1670,7 @@ local BLIZZARD_INSETS = { "Inset", "InsetFrame", "ScrollFrameInset", "ListInset"
 --
 -- SkinPanel used to draw our chrome onto a Blizzard frame and leave that frame's
 -- own art alone, which gives exactly two outcomes and this project has now shipped
--- both. Drawing over the top washed out Blizzard's text (Parker reported it on the
+-- both. Drawing over the top washed out Blizzard's text (the player reported it on the
 -- gossip dialog). The fix for that pushed our fill to BACKGROUND sublevel -8,
 -- explicitly "behind Blizzard's own panel textures" -- which are OPAQUE, so from
 -- then on the skin rendered underneath them and every panel looked stock.
@@ -1930,7 +1930,7 @@ function Theme.SkinButton(button, opts)
         --     row 6:  22e0ff ... 22bddd 1f93b1 | 0c0b0e 0c0b0e | 164d59
         --     row 7:              237699 22afcf | 0d0c0e        | 174e59
         --
-        -- That dark notch in all four corners is what Parker kept reporting as
+        -- That dark notch in all four corners is what the player kept reporting as
         -- "the corners are still not correct", through several rounds of me
         -- looking at the border instead. A single texture whose shape IS the
         -- rounded rect cannot leave that gap.
@@ -1982,8 +1982,8 @@ function Theme.SkinButton(button, opts)
         -- Rounded border: ONE nine-sliced ring (slice_border.tga), not four
         -- rails plus four corner quads.
         --
-        -- The old construction is what Parker kept seeing as "corners popping
-        -- out". Dumping the pixels under his close-up showed the failure
+        -- The old construction is what the player kept seeing as "corners popping
+        -- out". Dumping the pixels under the player's close-up showed the failure
         -- exactly: the left rail ended at one row, the arc quad started two
         -- rows later, and the button's near-black ground (111015) showed
         -- through the gap; the three border pixels that did land were a hard

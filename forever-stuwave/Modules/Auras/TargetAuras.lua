@@ -5,7 +5,7 @@
 -- event-driven refresh) but neither target nor focus has a Blizzard aura
 -- frame of its own on this client to hide -- there is nothing to reskin,
 -- only a gap to fill. Debuffs get visual priority (closest to the panel,
--- own-cast tint) per Parker's ask: "I want to see my own dots on the target."
+-- own-cast tint) per the player's ask: "I want to see my own dots on the target."
 
 local _, FS = ...
 
@@ -214,13 +214,13 @@ local function DebuffContainerHeight(activeDebuffCount)
 end
 
 -- Debuffs anchor directly off the panel's `.visual` bottom edge (closest to
--- the frame -- Parker's ask for visual priority on his own dots); buffs sit
+-- the frame -- the player's ask for visual priority on their own dots); buffs sit
 -- below that. debuffContainer's height is measured from the live debuff row
 -- count (DebuffContainerHeight, above); buffContainer keeps a fixed
 -- broad-strokes height (ROWS_VISIBLE rows) and simply follows debuffContainer's
 -- own BOTTOM edge, so it no longer sits behind a big reserved dead-space block
 -- when there are few or no debuffs. Icons beyond buffContainer's nominal box
--- are still positioned but not clipped. Parker will retune spacing/rows in-game.
+-- are still positioned but not clipped. The player will retune spacing/rows in-game.
 local function BuildAuraDisplay(unit, frame)
     local display = {
         unit = unit,
@@ -325,7 +325,7 @@ local function RefreshDisplay(display)
     -- RefreshAurasEvent comment for the 9.2MB leak this gate avoids.
     if not FS.AurasReadable() then return end
 
-    -- Debuffs first: Parker's ask is to see his own dots on the target, so
+    -- Debuffs first: the player's ask is to see their own dots on the target, so
     -- the debuff container (closest to the panel) is populated before buffs.
     local debuffOk, debuffCountOrErr = pcall(
         RefreshCategory, display.debuffPool, unit, "HARMFUL", MAX_DEBUFF_SLOTS, display.debuffContainer, true

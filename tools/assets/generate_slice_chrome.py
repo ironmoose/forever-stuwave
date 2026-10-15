@@ -7,7 +7,7 @@ Why this exists, and why the older corner pieces are being retired for it:
 Every rounded thing in this addon was composited out of primitives -- a centre
 quad, four 1px rails, and four corner quads cut from a 64x64 arc texture. At
 panel size that reads fine. At action-button size (a 4px radius on a ~22px
-button) it falls apart, and a pixel dump of Parker's close-up says exactly how:
+button) it falls apart, and a pixel dump of the player's close-up says exactly how:
 
     y=7:  111015 111015 22e0ff   <- two near-BLACK pixels in the elbow
     y=8:  111015 22e0ff 22e0ff
@@ -16,7 +16,7 @@ button) it falls apart, and a pixel dump of Parker's close-up says exactly how:
 The rail ends and the arc quad did not meet. Two pixels of the button's dark
 ground showed through the join, and the three cyan pixels that did land formed
 a hard staircase with no antialiasing, because a 64x64 arc squeezed into a 4x4
-quad has nothing left to interpolate. That is the "corners popping out" Parker
+quad has nothing left to interpolate. That is the "corners popping out" the player
 kept seeing -- not a glow bug, a seam.
 
 Nine-slicing removes the seam by construction: ONE texture, and the engine
@@ -27,7 +27,7 @@ confirmed present on this client (interface 16001) by live probe, along with
 path we are guessing at.
 
 It is also much cheaper: a skinned button drops from ~13 texture regions to 3,
-which matters because Parker is running at 25 FPS with 72 action buttons on
+which matters because the player is running at 25 FPS with 72 action buttons on
 screen.
 
 SIZE/RADIUS/margin contract: the margin passed to SetTextureSliceMargins must
@@ -145,7 +145,7 @@ def build_glow():
     Replaces the four edge strips plus four corner quads that Theme.SkinButton
     used to build. Those strips are flush to the button's SQUARE edge, so they
     never covered the area a rounded corner cuts away: every button had a hard
-    dark notch between its corner arc and its halo, which is what Parker kept
+    dark notch between its corner arc and its halo, which is what the player kept
     seeing as "the corners are still not correct". A single sliced texture
     whose shape is the rounded rect itself cannot leave that gap.
 

@@ -41,7 +41,7 @@ local TAB_IDLE_PLATE_ALPHA = 0.55
 -- cyan wash behind the active one. That was the wrong target twice over. The
 -- mock's `.termtabs` is a strip we draw INSIDE the terminal chassis, between the
 -- term bar and the message body -- not a treatment applied to Blizzard's tabs,
--- which on this client only appear on hover. Parker: "the chat doesn't have tabs
+-- which on this client only appear on hover. Player: "the chat doesn't have tabs
 -- my dude, we haven't built that out yet", and "they are invisible if they are
 -- there and not part of the terminal design."
 --
@@ -170,7 +170,7 @@ end
 --
 -- A real drag-to-reorder feature is deferred -- the Forever beta client
 -- discards per-character SavedVariables across a /reload (design notes),
--- so a user-chosen dock order cannot be persisted yet. Parker's call: "for
+-- so a user-chosen dock order cannot be persisted yet. The player's call: "for
 -- now hard code the comms channel as the first one." When that client bug is
 -- fixed, replace this with the real reorder feature (design notes) driven
 -- by a persisted user order, and this function goes away.
@@ -301,7 +301,7 @@ local function CreateTabPill(parent)
     pill.topLine = topLine
 
     -- The cyan baseline belongs to the ACTIVE TAB, spanning that tab's whole
-    -- bottom edge -- Parker: "i meant the cyan glow along the bottom of the
+    -- bottom edge -- Player: "i meant the cyan glow along the bottom of the
     -- one tab. not the whole thing." Mirroring the top: from the pill's left
     -- (where the leading cap IS filled) to mid's right (where the trailing cap
     -- is not).
@@ -309,7 +309,7 @@ local function CreateTabPill(parent)
     rail:SetColorTexture(1, 1, 1, 1)
     -- 1px, the SAME as topLine. This was TAB_UNDERLINE_H (2), and a 2px solid
     -- under a glow of equal reach is what made the bottom look heavier than
-    -- the top even after the glow heights matched -- Parker: "is it like there
+    -- the top even after the glow heights matched -- Player: "is it like there
     -- is a 2 or 3px solid then the glow?" The two edges are now the same
     -- construction, mirrored.
     rail:SetHeight(TAB_EDGE_LINE_H)
@@ -384,7 +384,7 @@ end
 -- Every tab wears the SAME chrome; only its colour says which one is live.
 --
 -- Selection used to be signalled by the chrome existing at all -- the inactive
--- tabs were a bare label. Parker's call is a state change instead: "lets have
+-- tabs were a bare label. The player's call is a state change instead: "lets have
 -- the not active tabs have the same shape but instead of magents lets use the
 -- cyan and do all 4 sides the same color and also mute it a little it looks
 -- deactivated. For the active tab have all 4 sides magenta."
@@ -421,7 +421,7 @@ local function PaintPill(pill, isActive)
     pill.scan:SetAlpha(isActive and 0.35 or 0.20)
 
     -- The label is just one more thing wearing the edge colour, at the same
-    -- alpha as the lines. Parker: "cyan text for teh deactived tabs, magenta
+    -- alpha as the lines. Player: "cyan text for teh deactived tabs, magenta
     -- text for activated. have the cyan text also be muted to match teh lines
     -- etc." One colour per state across the whole tab, so nothing on it has
     -- to be kept in sync by hand.
@@ -431,7 +431,7 @@ end
 -------------------------------------------------------------------------------
 -- The social tab: the terminal's leading element, before the channel tabs.
 --
--- Parker's design. It is the old chat social button rebuilt as part of the tab
+-- The player's design. It is the old chat social button rebuilt as part of the tab
 -- row rather than an icon parked beside it: "we can stick it as the starter to
 -- our tabs. so the one side of the button is straight and then it goes to the
 -- angled rectangle to start our tabs."
@@ -898,7 +898,7 @@ end
 -- Parented to UIParent, NOT to a chat frame's backdrop, and this is the whole
 -- point. It used to be built on ChatFrame1's backdrop, which is a child of
 -- ChatFrame1 -- so selecting the Combat Log hid ChatFrame1, took the strip down
--- with it, and left no way back to General short of a /reload. Parker hit that
+-- with it, and left no way back to General short of a /reload. The player hit that
 -- exactly: "when i click on the combat tab this happens. I have to reload to get
 -- chat back."
 --

@@ -30,7 +30,7 @@ spellcast events and a stepped clock:
     ignored while the engine is finishing; DELAYED re-times without re-igniting;
   * secret times: the engine refuses, a simple engine-timed tiled strip bar takes over
     and nothing throws;
-  * the timer size (Parker: "if both casts are 10s or more... temporarily decrease the font size"):
+  * the timer size (Player: "if both casts are 10s or more... temporarily decrease the font size"):
     the timer FontString wears the small size (TIMER_SMALL_FONT_SIZE, parsed from the source; the
     largest half point that fits "99.9 / 99.9" in the 48 px box at scales 1, 0.8333 and 0.64) while the
     FIRST number of the readout (elapsed for a cast, remaining for a channel; never above the total) is
@@ -1624,7 +1624,7 @@ function T.unit_pet_with_a_secret_cast_guid_aborts_the_hold()
     W.idle("a secret GUID at cast start keeps the old abort")
 end
 
--- ---- the timer shrinks while BOTH numbers of the readout are 10 or more (Parker: "if both casts are 10s
+-- ---- the timer shrinks while BOTH numbers of the readout are 10 or more (Player: "if both casts are 10s
 -- or more... temporarily decrease the font size") -----------------------------------------------------
 
 -- The timer box is NAME_MAX_W + RUN_GAP wide (48 px) and the readout is right justified with no wrap, so

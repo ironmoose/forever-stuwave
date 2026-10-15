@@ -3,7 +3,7 @@
 -- terminal chassis (border, term bar, tab strip, edit box); this file owns what
 -- a message looks like once it is printed.
 --
--- The complaint this answers (Parker, 2026-09-21): "the text of the chat like
+-- The complaint this answers (player, 2026-09-21): "the text of the chat like
 -- '1:[general] somecharacter: yea bro totally and stuff' -- that is the default
 -- blizzard font colors and pattern."
 --
@@ -19,7 +19,7 @@
 -- noise.
 --
 -- ONE DELIBERATE DEPARTURE FROM THE MOCK: the mock draws every speaker in flat
--- cyan, but Parker asked for class colours ("i like the class colored authors"),
+-- cyan, but the player asked for class colours ("i like the class colored authors"),
 -- so names render by class and cyan is only the fallback. See NAME below.
 --
 -- SCOPE: the cases the mock draws, plus numbered channels. Whispers, yells,
@@ -46,7 +46,7 @@ local CYAN   = "22e0ff" -- --cyan,  party; also the speaker colon and name fallb
 -- glance if the orange is not pushed well past it.
 local ORANGE = "ff6a1a" -- raid and battleground (instance chat)
 
--- Locked colours for two SPECIFIC numbered channels (Parker, 2026-09-24), not
+-- Locked colours for two SPECIFIC numbered channels (player, 2026-09-24), not
 -- part of the capture-and-preserve scheme every other numbered channel still
 -- uses -- see RewriteChannelTag below.
 local GEN_VIOLET   = "a56bff" -- [General] tag
@@ -70,7 +70,7 @@ local MAX_CHAT_FRAMES = 10
 -- What gets restyled
 -------------------------------------------------------------------------------
 
--- The speaker. Parker, on seeing the first build: "i like the class colored
+-- The speaker. Player, on seeing the first build: "i like the class colored
 -- authors" -- so the mock's flat cyan name is deliberately NOT what ships. This
 -- renders the name in the player's class colour and keeps cyan only as the
 -- fallback for a name Blizzard did not colour.
@@ -95,7 +95,7 @@ local NAME = "|cff" .. CYAN .. "%s|r|cff" .. CYAN .. ":|r "
 -- Blizzard's |Hchannel:...|h wrapper is preserved on the tag so it stays
 -- clickable (click [Guild] to reply in guild). The |cff sits OUTSIDE the
 -- hyperlink: a colour opened inside |h...|h does not reliably survive the link.
--- Tag colours are Parker's call, 2026-09-21: "i want guild our neon green or
+-- Tag colours are the player's call, 2026-09-21: "i want guild our neon green or
 -- whatever color we are using for green, whispers hot pink. party cyan. raid
 -- and battlegrounds hot orange." That reassigns guild and party from the
 -- first cut, which had them pink and green respectively.
@@ -171,7 +171,7 @@ local MINT_TYPES = {
 -- Numbered channels
 -------------------------------------------------------------------------------
 
--- Parker: "i really liked the mockup of no channel number. the [channel] had
+-- Player: "i really liked the mockup of no channel number. the [channel] had
 -- the colour in it and was obvious enough."
 --
 -- General/Trade/LFG cannot be done the way guild and party are. Their bracketed
@@ -221,7 +221,7 @@ for i = 1, CHANNEL_COUNT do
 end
 
 -- Every type with a speaker whose name should take a class colour. Channels
--- included, since Parker wants class-coloured authors and General is where most
+-- included, since the player wants class-coloured authors and General is where most
 -- unfamiliar names turn up.
 local SPEAKER_TYPES = {}
 for typeKey in pairs(FORMATS) do
@@ -406,7 +406,7 @@ local function CaptureOriginals()
     end
 end
 
--- Class-coloured speaker names, on Parker's call ("i like the class colored
+-- Class-coloured speaker names, on the player's call ("i like the class colored
 -- authors"). Turned on only for the types this file restyles, so the player's
 -- setting for every other channel is untouched.
 --
@@ -478,14 +478,14 @@ local function RewriteChannelTag(link, label)
     if not index then return nil end
 
     -- Measured label: "2. General - Tirisfal Glades". The leading index is the
-    -- thing Parker asked to lose; the trailing zone is dead weight next to it,
+    -- thing the player asked to lose; the trailing zone is dead weight next to it,
     -- and both patterns are no-ops on a label that lacks them, which is the
     -- safe way to be wrong about a custom channel's name.
     label = label:gsub("^%s*%d+%.%s*", ""):gsub("%s+%-%s+.*$", "")
     if label == "" then return nil end
 
     -- General and Trade get LOCKED synthwave colours instead of the player's
-    -- captured per-channel colour (Parker, 2026-09-24), matched by the
+    -- captured per-channel colour (player, 2026-09-24), matched by the
     -- RESOLVED NAME rather than by index: channel numbering is per-character,
     -- so an index-keyed colour would paint whatever channel happens to sit at
     -- that slot on an alt, not necessarily General/Trade. `label` at this
@@ -605,7 +605,7 @@ end
 -------------------------------------------------------------------------------
 
 -- Default ON: the point of shipping it is to see it. This touches every line of
--- chat, though, which is how Parker actually plays, so the off switch has to
+-- chat, though, which is how the player actually plays, so the off switch has to
 -- exist and has to be a true restore -- hence CaptureOriginals above.
 local function Wanted()
     if type(ForeverSTUwaveDB) ~= "table" then return true end

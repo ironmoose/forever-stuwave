@@ -3,7 +3,7 @@
 
 WHY A CAP AND NOT A NINE-SLICE
 
-The tab plate leans like the XP bar's cells (Parker: "for the shape lets try
+The tab plate leans like the XP bar's cells (Player: "for the shape lets try
 the cool slanty rectangle like we have in the xp bar"), and a leaning shape
 CANNOT be nine-sliced. Nine-slice stretches the middle band vertically and
 leaves the corner slices at native size, so a straight diagonal comes out as
@@ -107,7 +107,7 @@ def _edge_light(px, py):
     full-width top), and the middle run's glow is a rectangle that has to stop
     where the straight part stops. Without the cap lighting its own straight
     edge, that stop is a hard vertical seam and the glow reads as a rectangle
-    floating inside a leaning plate -- Parker: "lol now it looks silly."
+    floating inside a leaning plate -- Player: "lol now it looks silly."
 
     Baking both here means the cap's light follows the silhouette on the
     diagonal AND hands off seamlessly to the middle run on the flat.
@@ -185,7 +185,7 @@ def _mid_light(px, py):
     for its straight edge. That is the whole point of generating it here rather
     than reusing glow_edge.tga: that texture is a different curve (no solid
     core) spanning its own full height, so however carefully the two were sized
-    they met at the cap seam as two different lights -- Parker: "the corners
+    they met at the cap seam as two different lights -- Player: "the corners
     still don't line up... i think you have a different glow."
 
     Drawn at the same height as the caps, this is pixel-identical to them row

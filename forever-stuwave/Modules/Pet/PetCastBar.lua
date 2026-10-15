@@ -128,7 +128,7 @@
 -- run ends a whole RUN_GAP before the text column starts, so the box never overlaps the run. The common
 -- readouts fit whole ("0.0 / 0.0" is about 43 px, "0.0 / 12.0" about 47.7).
 --
--- TIMER SIZE (Parker: "if both casts are 10s or more... temporarily decrease the font size"). A readout
+-- TIMER SIZE (Player: "if both casts are 10s or more... temporarily decrease the font size"). A readout
 -- wider than the box ("10.0 / 12.5" is 11 characters, about 52 px at 8.5 pt against 48) would be cut by
 -- the engine's own truncation, and it only grows to 11 characters while BOTH numbers are 10 or more. The
 -- first number (elapsed for a cast, remaining for a channel) is never above the total, so that is exactly
@@ -281,7 +281,7 @@ local GHOST_ALPHA = 0.24
 -- The pink halo around the bar: lock-in burst peak is the engine's own 0.9; the hold
 -- glow alpha is the engine's (0.7). Only the tint lives here.
 --
--- VISUAL NOTE (estimate, needs Parker's eyeball): the halo is a nine-slice that sits
+-- VISUAL NOTE (estimate, needs the player's eyeball): the halo is a nine-slice that sits
 -- SLICE_GLOW_PAD (4) outside the bar (BuildGlow), the lock-in burst grows it a further
 -- GLOW_BURST_EXPAND (5) units, and the 1.04 pop (off by default) would scale the whole panel.
 -- For about 0.3s at lock-in the halo bleeds roughly 4-9 px past the bar, which is onto the status

@@ -148,7 +148,7 @@ local READOUT_FONT_SIZE
 -- The box takes whatever the bezel has left of the THREE key slots (tracking, calendar, mail;
 -- see RefreshMetrics). The mail slot is only visible while mail is waiting, but its seat is
 -- always reserved: sizing the box for two keys put it 26 px under the pink slot at m = 250
--- (Parker: "when i get mail it goes behind the cords"). The text is then sized to the box, not
+-- (Player: "when i get mail it goes behind the cords"). The text is then sized to the box, not
 -- the other way round: READOUT_FIT.chars mono glyphs ("99.9, 99.9" + a space + "19:56") at
 -- READOUT_FIT.advance em each (Mononoki Nerd Font Mono, measured 0.5615 em) inside
 -- READOUT_FIT.inset per side. The coord formatter (FormatCoord) clamps each number to
@@ -253,7 +253,7 @@ RefreshMetrics()
 -- MinimapCluster is TALLER THAN ITS MAP. It reserves a header strip above the
 -- map for the zone text and the expansion/addon-compartment buttons, and
 -- hiding those children does not give the space back -- the reservation is the
--- cluster's own geometry. Parker, 2026-09-22: "the minmap has some invisible
+-- cluster's own geometry. Player, 2026-09-22: "the minmap has some invisible
 -- stuff above it", which is exactly this.
 --
 -- So seating the CLUSTER at FS.Layout.minimap puts the cluster's box where the
@@ -278,7 +278,7 @@ RefreshMetrics()
 -- is right only while the cluster stays exactly the height Apply set; a Layout pass
 -- after it moved the map by (H' - H) / 2 (about 30 units too high). That is what the
 -- mock in minimap-harness.py reproduces, and ONLY when a Layout pass lands after our
--- re-seat. Whether Blizzard's real first-login sequence does that (Parker's new Mage,
+-- re-seat. Whether Blizzard's real first-login sequence does that (the player's new Mage,
 -- 2026-10-05: chat right, minimap not) is UNVERIFIED; the seat log (minimapSeatLog,
 -- mt vs tt and ml vs tl) is the instrument that settles it.
 --
@@ -728,7 +728,7 @@ end
 
 -- Small (cornerRadius:4 at the mockup's base 250px width -> fraction 0.016)
 -- rounded-corner mask, replacing the prior hard-square WHITE8X8 mask (which
--- was "verified working in-game" as a hard square, but per Parker's spec the
+-- was "verified working in-game" as a hard square, but per the player's spec the
 -- mockup wants a small rounding on the map face itself). SetMaskTexture
 -- stretches the mask to whatever Minimap's current size is, so this
 -- FRACTIONAL radius stays correct automatically at any UI scale -- no
@@ -783,7 +783,7 @@ local function HideIfExists(frame)
     end)
 end
 
--- Parker, 2026-09-2X: "weird circles" on the minimap, and separately "looks
+-- Player, 2026-09-2X: "weird circles" on the minimap, and separately "looks
 -- bad and is cut off on the right side" (the cutoff half is Layout.lua's
 -- problem -- see the minimap/minimaptray x-shift comment there -- this is
 -- only the circles half). HideBlizzardChrome above only hides a fixed list
@@ -1594,7 +1594,7 @@ end
 -- Addon-button tray drawer (collects LibDBIcon + stray minimap buttons)
 -------------------------------------------------------------------------------
 
--- Parker: "any addons that are loaded and would normally put icons around the minimap need
+-- Player: "any addons that are loaded and would normally put icons around the minimap need
 -- to be moved to the tray ... so it doesn't clutter our awesome ui. Also I never saw a
 -- button to pop out the tray."
 --

@@ -3,7 +3,7 @@
 -- engine-drawn auras: an AuraContainer per block, unit "player", HELPFUL and HARMFUL,
 -- so the engine reads and draws the auras and no aura data ever enters addon Lua.
 -- That is what makes the row work IN COMBAT, where every addon aura read is refused
--- and the old pooled row froze or emptied (Parker, 2026-10-04: "not being able to see
+-- and the old pooled row froze or emptied (player, 2026-10-04: "not being able to see
 -- your buffs in combat sucks"). The look is the approved cut-corner tile, built in
 -- each group's initializeFrame (see BuildFace).
 --
@@ -68,7 +68,7 @@ local LINE_SLACK = 1
 -- Used only when FS.Layout.buffs is unavailable (see ApplyContainerLayout).
 -- Clears the minimap's default top-right footprint (FS.Layout.minimap,
 -- Theme.lua) instead of the previous -20,-20 corner anchor, which overlapped
--- it. TUNE: Parker may want this adjusted once FS.Layout.buffs is verified
+-- it. TUNE: The player may want this adjusted once FS.Layout.buffs is verified
 -- in-game.
 local FALLBACK_ANCHOR_X = -20
 local FALLBACK_ANCHOR_Y = -280

@@ -148,9 +148,9 @@ def seconds_since_input() -> float:
 
 
 def user_is_playing(hwnd: int, grace: float = 4.0) -> bool:
-    """True when Parker is at the keyboard AND WoW is the window he is in.
+    """True when the player is at the keyboard AND WoW is the window they are in.
 
-    Parker's idea, after I interrupted him twice: "in your python script you
+    The player's idea, after I interrupted them twice: "in your python script you
     should check if i am using the keyboard or mouse".
 
     Both halves matter. Idle time alone is useless here, because he types to me
@@ -463,7 +463,7 @@ def tap_key(hwnd: int, vk: int) -> None:
 
 # Typing cadence. The old flat 0.03s was ~400wpm, which reads as a script
 # driving the box. A uniform random delay replaced it and still did not look
-# right -- Parker, watching it on his own screen: "it still doesn't look like i
+# right -- the player, watching it on their own screen: "it still doesn't look like i
 # am typing."
 #
 # Uniform jitter is the problem. Real inter-key gaps are not evenly spread
@@ -692,10 +692,10 @@ def reload_ui(hwnd: int, command: str = "/fsreload") -> None:
                 and (GetUnitSpeed and GetUnitSpeed("player") or 0) == 0
              then ReloadUI() end
 
-    On 2026-09-20 a reload fired while Parker was mid-fight. Opening the chat
-    box captures the keyboard, so he could not use an ability, and he burned
-    his only healing potion to survive it. It happened AGAIN an hour later
-    while he was running -- combat alone was not a wide enough guard, because
+    On 2026-09-20 a reload fired while the player was mid-fight. Opening the chat
+    box captures the keyboard, so they could not use an ability, and they burned
+    their only healing potion to survive it. It happened AGAIN an hour later
+    while they were running -- combat alone was not a wide enough guard, because
     losing the keyboard mid-run is its own problem.
 
     So the test is combat OR movement. The client decides, not this script: if
@@ -994,14 +994,14 @@ def main() -> int:
     # (PostMessage input is invisible to GetLastInputInfo); on Linux it is a
     # correctness requirement, because a uinput tap is real HID input and
     # DOES reset the Mutter idle clock this guard reads -- a later re-check
-    # would see the tool's own typing as "Parker is active" and the tool
+    # would see the tool's own typing as "the player is active" and the tool
     # would never be able to lock itself out.
     if not args.force and user_is_playing(hwnd):
         idle = seconds_since_input()
         print("")
         print(f"REFUSED: WoW is focused and there was input {idle:.1f}s ago --")
-        print("         Parker appears to be playing. Ask before taking the")
-        print("         client, or pass --force if he has just said go.")
+        print("         The player appears to be playing. Ask before taking the")
+        print("         client, or pass --force if they have just said go.")
         return 2
 
     nested_display = (

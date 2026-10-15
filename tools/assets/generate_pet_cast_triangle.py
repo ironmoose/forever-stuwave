@@ -66,7 +66,7 @@ while CANVAS_WIDTH < TRIANGLE_WIDTH:
 # Padding between the triangle's own edges and TRIANGLE_WIDTH/HEIGHT's own
 # bounds, texels, for antialiasing headroom -- same "1-2px inset" idea as
 # generate_cut_corner_outline.py's CHAMFER/THICKNESS margin. Starting guess
-# pending Parker's eyeball against the Pet Frame Designer artifact.
+# pending the player's eyeball against the Pet Frame Designer artifact.
 PADDING = 1.5
 
 # Antialiasing subpixel grid (NxN samples per texel), same technique and

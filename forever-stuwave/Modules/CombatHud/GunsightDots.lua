@@ -3,7 +3,7 @@
 -- dotsH and dotsV): rows of icon, time and drain bar, or the 0 to 30 s axis compressed to 112 px with a chip per debuff.
 -- gunsightdots-harness.py parses the mockup for the numbers below, so a mockup edit fails there instead of drifting.
 --
--- ABSENT CUE (Parker, 2026-10-03): the dim recast row or chip shows ONLY in combat; out of combat it is hidden and a
+-- ABSENT CUE (player, 2026-10-03): the dim recast row or chip shows ONLY in combat; out of combat it is hidden and a
 -- live one is never touched. "In combat" is a file-local flag driven by PLAYER_REGEN_DISABLED / PLAYER_REGEN_ENABLED
 -- and seeded from InCombatLockdown() OR UnitAffectingCombat(), because lockdown can still read false inside the
 -- REGEN_DISABLED dispatch; a throwing or secret answer reads as in combat so the cue is never hidden on a guess.

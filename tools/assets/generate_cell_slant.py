@@ -3,7 +3,7 @@
 
 Why: the first segmented XP bar drew each cell with SetColorTexture, which can
 only make a rectangle. Eighty upright rectangles in a row reads as a progress
-bar, which is exactly what Parker called boring. Leaning them turns the same
+bar, which is exactly what the player called boring. Leaning them turns the same
 data into an arcade power meter -- the shape does the work, not the colour.
 
 The lean is expressed as a fraction of the WIDTH, so it scales with the cell

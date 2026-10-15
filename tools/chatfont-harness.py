@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Runs the real ChatFrameSkin.lua and ChatSlashCommands.lua headless against a mock WoW API.
 
-Parker: "lets also default the chat to 14pt". Nothing in the addon set the chat font size,
+Player: "lets also default the chat to 14pt". Nothing in the addon set the chat font size,
 so each window wore Blizzard's per-window size (the stock default is
 CHAT_FRAME_DEFAULT_FONT_SIZE = 18, and an unset chat-cache size of 0 means "use 18").
 These checks pin the addon's own default:

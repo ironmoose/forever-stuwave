@@ -526,7 +526,7 @@ function Helpers.CreatePillBar(parent, opts)
     -- chamfer and hide them via the handle, the same path SetPillHeight takes.
     local buildRadius = (IsCut() and fillRadius <= 0) and 2 or fillRadius
     bar.fsFillCorners = Theme.AddFillCorners(cornerMask, bar, maskColor, buildRadius)
-    -- No leading-edge quad under cut (Parker, playtest 2026-10-04: a diagonal notch cut
+    -- No leading-edge quad under cut (player, playtest 2026-10-04: a diagonal notch cut
     -- into the fill and the caret whenever HP or mana was below 100%): a quad riding the
     -- fill's moving right edge is right for a rounded pill end, but under cut it carves a
     -- travelling bottom-right notch into the fill and the caret at every mid-bar level, and
@@ -588,7 +588,7 @@ end
 -- and CreatePillBar's cornerMask above for why bar+2 stays safely below it.
 --
 -- RESTORED 2026-09-25: the 2026-09-25 static-tick rewrite went too far the
--- other way (Parker: "we had the pulse nailed down, why did it go to
+-- other way (Player: "we had the pulse nailed down, why did it go to
 -- shit?"). Back to a 3px line, tinted per bar via the `color` argument
 -- ({r,g,b,a}), with a gentle alpha pulse -- no glow texture, no scale
 -- animation, just the line's own alpha bouncing.
@@ -657,7 +657,7 @@ local HAS_CURVE_API = type(C_CurveUtil) == "table" and type(C_CurveUtil.CreateCu
 -- The near-empty breakpoint above: without it, a step curve with only
 -- AddPoint(0,1)/AddPoint(1,0) reads alpha 1 for every fraction from 0 up to
 -- just below 1, so a dead unit (0% HP) still shows the pulsing caret at full
--- alpha. Parker may need to tune this in-game -- too large hides the caret
+-- alpha. The player may need to tune this in-game -- too large hides the caret
 -- at low-but-real HP, too small may miss the point due to float rounding on
 -- 0/max health or power.
 local EPSILON = 0.0005
@@ -693,7 +693,7 @@ local warnedNoCaretFullHide = false
 local curveHideBroken = false
 
 -- Hides `caret.host` (line + glow's shared clip frame) when the bar is at
--- 100%, per Parker's direction that the caret be disabled at a full bar.
+-- 100%, per the player's direction that the caret be disabled at a full bar.
 -- `kind` is "health" or "power", selecting which secret-safe percent API to
 -- read. Two SEPARATE fallbacks: the curve/percent path erroring latches
 -- `curveHideBroken` for every later call, while the curve/percent APIs being
@@ -1421,7 +1421,7 @@ local DEFAULT_CUT_CHAMFER = 6
 -- UI units per physical screen pixel at `frame`, or nil when the client will not say. GetEffectiveScale is NOT pixels per
 -- unit: Blizzard_SharedXML/PixelUtil.lua turns units into pixels as Round(units * es / (768 / physicalHeight)), so one
 -- unit is es * physicalHeight / 768 pixels, and a pixel is PixelUtil.GetPixelToUIUnitFactor() / es units (768 / physical
--- height when PixelUtil is missing, throws or answers nothing usable). Parker's display (effective scale 0.64, physical
+-- height when PixelUtil is missing, throws or answers nothing usable). The player's display (effective scale 0.64, physical
 -- height 1440) has 1 unit = 1.2 px. Secret and non-finite answers are refused.
 local function Good(v)
     return type(v) == "number" and not IsSecret(v) and v == v and v > 0 and v < math.huge
@@ -1559,7 +1559,7 @@ end
 -- Seats `button.cooldown` over the button's ICON, edge to edge, and fixes its
 -- draw flags.
 --
--- Why this exists (Parker: "the GCD ... covers the button and doesn't extend to
+-- Why this exists (Player: "the GCD ... covers the button and doesn't extend to
 -- the edge"): ActionButtonTemplate anchors its cooldown to the icon with a 3px
 -- inset on every side (ActionButtonTemplate.xml, the <Cooldown ... parentKey=
 -- "cooldown"> block: TOPLEFT +3,-3 / BOTTOMRIGHT -3,3 relative to the icon).
@@ -1717,7 +1717,7 @@ end
 
 -- Blizzard's Quick Keybind mode (Settings > Keybindings > Quick Keybind, or Edit
 -- Mode) lets the player hover an action button and press a key, or click it with
--- a mouse button, to bind that button's command. Parker could not bind one of our
+-- a mouse button, to bind that button's command. The player could not bind one of our
 -- buttons to mouse button 4: it only works on buttons that take part in the mode,
 -- and ours did not.
 --

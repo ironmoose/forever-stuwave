@@ -7,7 +7,7 @@ which control they are.
 
 Drawn as plain glyphs, tinted by the caller -- minimise pink, maximise green,
 carrying the colours the old status lamps had. An earlier pass punched them out
-of a round glowing lamp, traffic-light style; Parker's call was to drop the
+of a round glowing lamp, traffic-light style; the player's call was to drop the
 disc ("i don't think the icons need the round bg") and match the flat glyphs in
 the title bar's right-hand group instead, which is also one less thing between
 the shape and the reader at this size.

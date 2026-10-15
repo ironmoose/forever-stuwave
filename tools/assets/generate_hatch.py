@@ -6,7 +6,7 @@ perfectly on ANY power-of-two size, no matter how the diagonal happens to
 land at the tile boundary, unlike a stripe defined from a fixed start point
 would. UnitFrames.lua's absorb/shield overlay tiles this (SetHorizTile +
 SetVertTile on the StatusBar's fill texture, Theme.lua's HATCH_TEXTURE) to
-get Parker's mockup-review ask: "HATCHED DIAGONAL STRIPES (light gray/white
+get the player's mockup-review ask: "HATCHED DIAGONAL STRIPES (light gray/white
 stripes on transparent, roughly 45 degrees, about 3-4px period)" in place of
 the old flat translucent-white shield tint.
 
@@ -26,7 +26,7 @@ import struct
 
 WIDTH = 16
 HEIGHT = 16
-PERIOD = 4        # stripe repeat period in pixels (Parker's ask: ~3-4px)
+PERIOD = 4        # stripe repeat period in pixels (the player's ask: ~3-4px)
 STRIPE_WIDTH = 2   # of PERIOD pixels, how many are opaque "stripe" pixels
 STRIPE_ALPHA = 0.85  # light gray/white, not fully opaque
 

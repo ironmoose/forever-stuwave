@@ -46,7 +46,7 @@
 --   fillerOrder  "wand" (the default) or "spell". Rotation rules tagged `filler = "wand"`
 --              or `filler = "spell"` are pulled out and re-inserted, together, at the place
 --              of the first filler rule: wand rules first by default, spell rules first for
---              "spell". The wand leads by default on purpose (Parker: "my wand does great
+--              "spell". The wand leads by default on purpose (Player: "my wand does great
 --              dmg and it costs no mana"). A priest at Shadow 40+ can set "spell" to put
 --              Mind Flay ahead of the wand; the wand still sits ahead of the last spell rule
 --              (Smite), so it takes over when Mind Flay is unaffordable.
@@ -113,7 +113,7 @@ FS.HudProfiles.PRIEST = {
     rotation = {
         -- Form first: Shadowform is known and the player is not in it.
         { cast = "shadowform", when = { { "buffMissing", "shadowform" } } },
-        -- Opener (Parker's habit; matches Method and Wowhead): the hard cast first. If Mind
+        -- Opener (the player's habit; matches Method and Wowhead): the hard cast first. If Mind
         -- Blast is on cooldown at the pull, or the target is out of range, this rule skips
         -- and Shadow Word: Pain opens. The range gate is orUnknown: a range that cannot be
         -- read never hides the opener. Usable and mana are the implicit affordability check.
@@ -121,7 +121,7 @@ FS.HudProfiles.PRIEST = {
                                         { "orUnknown", { "inRange", "mind_blast" } } } },
         { cast = "sw_pain", when = { { "dotMissing", "sw_pain" } } },
         -- Devouring Plague: 60 s cooldown, 24 s, big mana. Only on a target that has lived
-        -- a while. [HEURISTIC] Parker chose 8 s on 2026-10-09 (not sourced; the research
+        -- a while. [HEURISTIC] the player chose 8 s on 2026-10-09 (not sourced; the research
         -- lists give no number).
         { cast = "dplague", when = { { "dotMissing", "dplague" }, { "cooldownReady", "dplague" },
                                      { "engagedFor", 8 } } },

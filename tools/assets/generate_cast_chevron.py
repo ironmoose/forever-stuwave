@@ -3,7 +3,7 @@
 
 Reference: addons/ForeverSTUwave/mockups/castbar-v2-chevrons-locked-2026-10-01.html,
 card H ("Solid chevrons"), function segsChev() and the "outline" caret in
-placeShapedCaret(). Parker locked that look; the shared cast bar Lua engine
+placeShapedCaret(). The player locked that look; the shared cast bar Lua engine
 draws these textures (mirrored with SetTexCoord for channels, tinted with
 SetVertexColor, nothing is baked in colour).
 

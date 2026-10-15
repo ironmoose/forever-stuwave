@@ -56,7 +56,7 @@ SlashCmdList["FSCHAT"] = function(msg)
 
     -- `/fschat paint` outlines EVERY drawable in the chat stack in a different
     -- colour; `/fschat spill` outlines only the ones that hang outside the
-    -- panel border and prints them. Parker's idea, after the invisible frames
+    -- panel border and prints them. The player's idea, after the invisible frames
     -- defeated three rounds of reasoning from numbers: "you should just update
     -- the lua to go through each part a different color."
     --
@@ -64,7 +64,7 @@ SlashCmdList["FSCHAT"] = function(msg)
     --
     --   1. It only walked DIRECT CHILDREN. The offender can be a grandchild.
     --   2. It only walked FRAMES. A loose Blizzard TEXTURE region draws just
-    --      as visibly and has no children to find it by. Parker: "there is
+    --      as visibly and has no children to find it by. Player: "there is
     --      something there that we are not painting."
     --   3. It FILLED each rect, so the topmost paint hid every rect beneath
     --      it and the whole panel went one colour.
@@ -113,7 +113,7 @@ SlashCmdList["FSCHAT"] = function(msg)
         -- A missing method returning the "everything is fine" value is the
         -- same silent fallback this file has been bitten by before, so
         -- this does the multiplication itself and treats a hidden ancestor as
-        -- zero, which is what actually decides whether Parker can see it.
+        -- zero, which is what actually decides whether the player can see it.
         local function VisibleAlpha(obj)
             local alpha = (obj.GetAlpha and obj:GetAlpha()) or 1
             local parent = obj.GetParent and obj:GetParent()
@@ -156,7 +156,7 @@ SlashCmdList["FSCHAT"] = function(msg)
             -- Effective alpha, not IsShown. Half this panel's furniture is
             -- "shown" at alpha 0 because that is how it was silenced, and a
             -- geometry-only report lists all of it as spilling -- 27 hits, of
-            -- which most draw nothing. What is asked here is "what can Parker
+            -- which most draw nothing. What is asked here is "what can the player
             -- SEE outside the border", and only alpha answers that.
             local alpha = VisibleAlpha(obj)
             if alpha < 0.05 then return end
@@ -390,7 +390,7 @@ SlashCmdList["FSCHAT"] = function(msg)
         end
         out.chatChildren = table.concat(kids, " | ")
 
-        -- Does the TEXT itself overhang the frame that holds it? Parker:
+        -- Does the TEXT itself overhang the frame that holds it? The player:
         -- "Some of the text is overlapping the white bg."
         --
         -- Frames do NOT clip their children unless told to, so a message line
@@ -477,7 +477,7 @@ SlashCmdList["FSCHAT"] = function(msg)
         -- frame's own; GetEffectiveAlpha multiplies in every parent, which is
         -- where an inherited fade would hide.
         -- GEOMETRY as well, because level and alpha together still cannot tell
-        -- you that a frame is half-swallowed by the one below it. Parker's
+        -- you that a frame is half-swallowed by the one below it. The player's
         -- screenshot of the COMBAT LOG selected shows the tab glyphs sheared
         -- in half by the panel's top edge, which no amount of correct strata
         -- would show up in -- and which the chat-tab measurement missed

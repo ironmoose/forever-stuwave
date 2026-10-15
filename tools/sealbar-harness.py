@@ -3,7 +3,7 @@
 FrameHelpers.lua, ActionBars.lua, StanceBar.lua, PetActionBar.lua and Console.lua.
 
 The buttons are the Paladin shoulder of the approved Gunsight mockup (`LS_*`, `SEALS`, `AURAS`,
-`lsBtn`, the seal bar over the aura bar), so Parker can bind them with Blizzard's built-in Quick
+`lsBtn`, the seal bar over the aura bar), so the player can bind them with Blizzard's built-in Quick
 Keybind mode. The checks read the mockup's own numbers back out of the HTML, so a mockup move
 fails here:
 

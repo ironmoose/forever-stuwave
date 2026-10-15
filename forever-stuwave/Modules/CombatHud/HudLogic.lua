@@ -363,7 +363,7 @@ end
 -- Fire reminders on an unbuffed player (exactly when they matter) and skip the DoT
 -- reconcile on a clean target. The check: out of combat, strip the buffs or target a mob
 -- with no debuffs of ours, then count the values returned at index 1.
--- The SEAL reconcile alone passes `zeroIsEmpty`: Parker's live /fsinspect class run (out of combat,
+-- The SEAL reconcile alone passes `zeroIsEmpty`: the player's live /fsinspect class run (out of combat,
 -- level 7) showed the player HELPFUL read works, and a buffless paladin must read "no seal" so the
 -- seal rule can fire, so there zero values at index 1 are an EMPTY list. Every other caller keeps
 -- the unreadable reading above.

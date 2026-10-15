@@ -1590,7 +1590,7 @@ def check_the_missing_word_is_9_px_where_it_fits_the_band_and_fitted_below_that(
     assert tile(lua, IMBUE)["text"] == "IMBUE" and tile(lua, SHIELD)["text"] == "SHIELD"
     assert (word_px(lua, IMBUE), word_px(lua, SHIELD)) == (9.0, 9.0), (word_px(lua, IMBUE), word_px(lua, SHIELD))
     lua = world(0.8333, tips={16: ["Heavy Axe"]})
-    assert word_px(lua, IMBUE) == word_fit(lua, IMBUE, "IMBUE") < 9.0, "the word still shrinks at Parker's live scale"
+    assert word_px(lua, IMBUE) == word_fit(lua, IMBUE, "IMBUE") < 9.0, "the word still shrinks at the player's live scale"
     assert_tile_text_fits(lua, IMBUE, 0.8333, "imbue missing at 0.8333")
 
 
@@ -3474,7 +3474,7 @@ PixelUtil = { GetPixelToUIUnitFactor = function() return 768 / (__physH or 768 *
 function __Region:GetEffectiveScale() return __ees end
 function __Region:SetJustifyH(j) self._justifyH = j end
 """
-# Parker's display: effective scale 0.64, physical height 1440 (1 UI unit = 1.2 pixels), layout scale 0.8333
+# The player's display: effective scale 0.64, physical height 1440 (1 UI unit = 1.2 pixels), layout scale 0.8333
 LIVE_ES = """
 __hint = true
 __es = 1
@@ -3502,7 +3502,7 @@ def whole(v, es):
     return abs(x - round(x)) < 1e-6
 
 
-# (physical pixels per UI unit, layout scale, mock): the sweep at an effective scale of 1, then Parker's real display
+# (physical pixels per UI unit, layout scale, mock): the sweep at an effective scale of 1, then the player's real display
 # (effective scale 0.64, physical height 1440, layout scale 0.8333: 1 unit = 1.2 pixels, so 1 design px = 1 pixel)
 BAND_CASES = ((1.0, 1.0, None), (1.0, 0.8333, None), (1.3333333, 1.0, None), (0.64, 1.25, None),
               (1.7777778, 0.8333, None), (1.2, 0.8333, "live"))

@@ -15,15 +15,15 @@
 -- meant to persist; on this client it evidently does not survive a reload, and
 -- the fallback runs instead.
 --
--- Rather than guess coordinates, this records where Parker actually drags it
--- and re-applies that. He positions it once more and it stays.
+-- Rather than guess coordinates, this records where the player actually drags it
+-- and re-applies that. The player positions it once more and it stays.
 --
 -- THE FIRST ATTEMPT FAILED, and why is the interesting part. It used
 -- HookScript("OnShow", ...) as its backstop. But CreateMainView does
 -- `PTR_IssueReporter:SetScript("OnShow", SetFrameLocation)`, and SetScript
 -- REPLACES the whole handler chain -- HookScript hooks included. The frame is
 -- created at file scope, so we find it and hook it early, and then their
--- view-building silently deletes our hook. Parker's drag survived exactly until
+-- view-building silently deletes our hook. The player's drag survived exactly until
 -- the next reload, every time.
 --
 -- So the mechanisms now are:
@@ -84,7 +84,7 @@ ForeverSTUwaveIssueReporterPos = ForeverSTUwaveIssueReporterPos or {}
 -- the frame every single time. A dragged position simply cannot persist
 -- until that client bug is fixed.
 --
--- Hardwired to the spot Parker dragged the frame to and had captured live
+-- Hardwired to the spot the player dragged the frame to and had captured live
 -- (2026-09-24): PTR_IssueReporter:GetRect() read left=1527.1, bottom=165.1
 -- against UIParent 2132.95x1200 (scale 0.64) -- clear of the bags and the
 -- tooltip that the old bottom-right default collided with. Expressed as a
@@ -193,7 +193,7 @@ local function Install()
     -- REPLACES the entire handler chain -- including any HookScript hooks
     -- already attached. The frame is created at file scope, so we find it and
     -- hook it early, and then their view-building silently deletes our hook.
-    -- That is why Parker's drag survived until the next reload and no further.
+    -- That is why the player's drag survived until the next reload and no further.
     --
     -- A method hook cannot be wiped by SetScript, and it runs AFTER Show()
     -- completes -- which includes their OnShow handler -- so our placement is

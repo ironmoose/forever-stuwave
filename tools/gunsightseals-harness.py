@@ -512,7 +512,7 @@ check(onUpdateFrames() == 0, "no ticker at file load")
 """)
 
 case("real_areas_the_seal_module_hides_and_unsubscribes_with_no_target_and_returns_current")(r"""
--- Parker: "this happens every new module". The real registry gates the class host on the target; the Seal module must
+-- Player: "this happens every new module". The real registry gates the class host on the target; the Seal module must
 -- go quiet with it (no Hud subscription, no ticker, no target events) and come back painting the CURRENT state.
 local Seals, Areas = bootReal()
 STATE = sealAt("sor", 20)

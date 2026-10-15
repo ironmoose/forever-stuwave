@@ -1,6 +1,6 @@
 -- Forever STUwave: /fscheck -- opt-in, read-only secret-value check
 --
--- Parker types /fscheck ONCE before a play session. It records into
+-- The player types /fscheck ONCE before a play session. It records into
 -- ForeverSTUwaveDB.fscheck what this client lets an addon READ, in and out of
 -- combat, so the 12.1 secret-value rules are measured instead of guessed:
 --
@@ -60,7 +60,7 @@
 --   * Read-only. No protected call, no SetAttribute, no secure template. The one
 --     visible thing is an AuraContainer built from the same template Plater uses.
 --     The one exception is the opt-in `/fscheck shaman` subcommands (see the SH block): the totem button row
---     of secure buttons and the two calls that may be protected, each typed by Parker, never automatic.
+--     of secure buttons and the two calls that may be protected, each typed by the player, never automatic.
 --   * A secret value is never compared, concatenated, truth-tested, indexed or
 --     tostring'd, and never stored. Only its type and the boolean "isSecret" are
 --     recorded. A plain value is stored only where a field is marked `keep`, and
@@ -887,7 +887,7 @@ end
 -- duration fontstring, each handed to the button's own binder.
 local function InitButton(button)
     -- First thing, before the button turns forbidden: the tiles must not take clicks
-    -- or show tooltips while Parker is fighting (Plater_Auras.lua does the same).
+    -- or show tooltips while the player is fighting (Plater_Auras.lua does the same).
     Quiet(button, "SetMouseMotionEnabled", false)
     Quiet(button, "SetMouseClickEnabled", false)
     Quiet(button, "SetHideTooltipInCombat", true)
@@ -3431,7 +3431,7 @@ function PP.ShieldFor(unit)
     out.totalAbsorbs = PP.Stamp(arec)
     out.incomingHeals = PP.Call(true, Api("UnitGetIncomingHeals"), unit)
     -- A secret number handed to TruncateWhenZero is the sanctioned way to turn "is there any shield"
-    -- into text; only the call's secrecy is read here, Parker judges what it draws.
+    -- into text; only the call's secrecy is read here, the player judges what it draws.
     if arec.ok and (arec.n or 0) >= 1 then
         out.truncateWhenZero = PP.Call(true, Api("C_StringUtil", "TruncateWhenZero"), absorbs)
     else
@@ -3817,7 +3817,7 @@ PP.HANDLERS = {
 --                interrupted), multicast (UPDATE_MULTI_CAST_ACTIONBAR with HasMultiCastActionBar), click (the
 --                totem button row: each click with the totem state before and after, and the events that followed
 --                it within 3 s).
--- Nothing protected runs by itself. These run ONLY when Parker types them:
+-- Nothing protected runs by itself. These run ONLY when the player types them:
 --   /fscheck shaman buttons        a small labelled TEMPORARY strip of 3 SecureActionButtonTemplate buttons:
 --                                  dismiss (left slot 1, right slot 2, shift-left 3, shift-right 4 through
 --                                  the secure `destroytotem` action), a `/castsequence` through two known
@@ -4441,7 +4441,7 @@ SH.HANDLERS = {
     UNIT_SPELLCAST_INTERRUPTED = function(event, ...) SH.LogCast(event, ...) end,
 }
 
--- The explicit protected-risk calls (typed by Parker, never automatic) ---------------------------------
+-- The explicit protected-risk calls (typed by the player, never automatic) ---------------------------------
 
 -- Appends one run to shaman.<name>.runs (bounded) and returns it.
 function SH.NewRun(name)
@@ -4863,7 +4863,7 @@ end
 --   group  AddAuraGroup "HELPFUL|PLAYER", candidateFilters.maxDuration = 60 (ID free fallback;
 --          also shows Power Word: Shield and any other of your short buffs): up to 4 buttons;
 --   bar    a second slot "renewbar" (same filter and ids) under the boxes, labelled "bar": the
---          shape Parker chose for party rows, a HoT TIMER BAR. Its button gets, each step in its
+--          shape the player chose for party rows, a HoT TIMER BAR. Its button gets, each step in its
 --          own pcall and each result recorded in tokens.<t>.barSteps: a 160 x 4 StatusBar on a dark
 --          track, fill reversed, handed to SetDurationBar (direction RemainingTime, interpolation
 --          Immediate); a FontString handed to SetDurationText with a bare-number format (a numeric
@@ -4874,8 +4874,8 @@ end
 --          also records which of those methods, enums and factories exist on this client.
 -- The first two shapes draw the engine's cooldown sweep and duration text. The bar shape proves
 -- the engine can drive a StatusBar timer, a custom number and a pandemic overlay on a party row.
--- A button that is up while Renew is on that unit shows a ticking number: that part Parker judges
--- by eye, never read in code. For the bar he judges four things: (1) the bar drains from the left
+-- A button that is up while Renew is on that unit shows a ticking number: that part the player judges
+-- by eye, never read in code. For the bar the player judges four things: (1) the bar drains from the left
 -- toward the number, (2) the number counts whole seconds with no "s", (3) the number turns amber
 -- at 3 seconds, (4) whether an amber overlay appears on the bar near the end (pandemic). The
 -- samples also count how often the bar slot and the pandemic texture read shown (secret = unk).
@@ -4986,7 +4986,7 @@ function HP.IdSet(meta)
 end
 
 -- First thing in every initializeFrame, before the button turns restricted: the tiles take no
--- clicks and show no tooltips while Parker is fighting.
+-- clicks and show no tooltips while the player is fighting.
 function HP.Preamble(button)
     Quiet(button, "SetMouseMotionEnabled", false)
     Quiet(button, "SetMouseClickEnabled", false)

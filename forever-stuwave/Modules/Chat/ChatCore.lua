@@ -46,7 +46,7 @@ local PAD_X = 10
 -- Term bar (14) + tab strip (15) + a little breathing room. The strip lives
 -- in this band ABOVE ChatFrame1, so adding it never resizes Blizzard's
 -- message area.
--- The edit box sits INSIDE the terminal (Parker's call), so the bottom padding
+-- The edit box sits INSIDE the terminal (the player's call), so the bottom padding
 -- has to reserve its full height plus a little breathing room -- otherwise the
 -- message text runs underneath it.
 local EDITBOX_HEIGHT = 20
@@ -178,7 +178,7 @@ Chat.pendingSelectedTab = ForeverSTUwaveDB and ForeverSTUwaveDB.chatSelectedTab
 -- is unset, so a persisted user choice still wins once the client's
 -- SavedVariables bug is fixed. The Forever beta client never restores
 -- per-character SavedVariables across a /reload (design notes), so this
--- default always fires today -- Parker's interim call, companion to
+-- default always fires today -- the player's interim call, companion to
 -- ChatTabs.lua's comms-first pill hardcode (design notes tracks the real
 -- persisted-order/selection feature this stands in for).
 -- Consumed and cleared by Chat.ApplyDockState's own one-shot block, same
@@ -190,7 +190,7 @@ Chat.pendingDefaultComms = not (ForeverSTUwaveDB and ForeverSTUwaveDB.chatSelect
 --
 -- One frame that owns every piece of chat: the backdrops, the term bar, the
 -- tab strip, the social tab, the edit boxes, the prompt, and the Blizzard chat
--- windows and tabs themselves. Parker's design: "like 'component chat
+-- windows and tabs themselves. The player's design: "like 'component chat
 -- terminal' holds all things chat".
 --
 -- It exists because z-order was being maintained by hand in four places. The
@@ -310,7 +310,7 @@ end
 -- same height on this client: measured 2026-09-22, ChatFrame1 is 310.8 and
 -- ChatFrame2 (Combat Log) is 286.8, sharing a bottom edge and differing by 24
 -- at the top. Anchoring each backdrop to its own frame therefore made the
--- panel visibly change height as you switched tabs, which is what Parker saw
+-- panel visibly change height as you switched tabs, which is what the player saw
 -- ("fix the combat tab so the bg stays the same height").
 --
 -- ChatFrame1 is the dock's primary and keeps a valid rect even while hidden
@@ -339,7 +339,7 @@ function Chat.AnchorBackdrop(frame, backdrop)
 
     -- Minimised: the panel sits at the bottom of the screen, so collapsing
     -- toward the BOTTOM leaves the term bar where the chat was, rather than
-    -- stranding it up where the panel's top edge used to be. Parker: "when it
+    -- stranding it up where the panel's top edge used to be. Player: "when it
     -- minimizes it goes from the bottom up to the top instead of from the top
     -- down to the bottom." Anchoring the bottom to the chat frame the way the
     -- normal case does would keep the panel full height, because a hidden
@@ -397,7 +397,7 @@ function Chat.SeatTerminalChrome(frame)
     -- Its ">" prompt is the terminal's, and it was being buried by the panel
     -- whenever the box did not have focus: the client only raises the edit box
     -- on focus, so an unfocused prompt loses the z fight to the backdrop.
-    -- Parker: "the > needs to be brougth forward in front of the chat cyan
+    -- Player: "the > needs to be brougth forward in front of the chat cyan
     -- border bg regardless if it is active or not." Seating it here makes that
     -- true by construction, focused or not, rather than depending on what the
     -- client happens to raise.

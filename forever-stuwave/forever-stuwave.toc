@@ -2,7 +2,7 @@
 ## Title: Forever STUwave
 ## Notes: Custom UI for WoW Forever.
 ## Version: 0.1.0-alpha.2
-## Author: parker
+## Author: ironmoose
 ## SavedVariables: ForeverSTUwaveDB, ForeverSTUwaveErrorLog
 
 Core/ErrorLog.lua

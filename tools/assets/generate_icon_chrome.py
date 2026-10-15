@@ -3,7 +3,7 @@
 
 WHY WE DRAW THESE INSTEAD OF TINTING BLIZZARD'S
 
-Parker: "We don't need the borders for these. just the icons will be fine."
+Player: "We don't need the borders for these. just the icons will be fine."
 Dropping our own border got the channel button there -- measured via
 `/fschat parts`, its glyph is a separate OVERLAY region
 (`chatframe-button-icon-voicechat`) sitting on a `chatframe-button-up` disc, so

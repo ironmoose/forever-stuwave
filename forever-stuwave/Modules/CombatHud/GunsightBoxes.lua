@@ -156,7 +156,7 @@ local C = {
     TB_LOW = 0.35, LOW_EPSILON = 0.0005,             -- TB_LOW; PartyFrames' LOW_HP_EPSILON
     -- target bar settings and numbers (not in the mockup; the config window mockup has the controls)
     BAR_PX = 0.5,                                    -- image px per slider px: its 4 is the 2 above (the health default is 11)
-    BAR_WIDTH_SCALE = 1.2,                           -- the width setting's 100% is the look the old 120% gave (Parker, in game)
+    BAR_WIDTH_SCALE = 1.2,                           -- the width setting's 100% is the look the old 120% gave (player, in game)
     NUM_SIZE = 9, NUM_PAD = 1,                       -- number type size, gap above and below the numbers row
     NUM_SECRET_SIZE = 8,                             -- a secret value is never measured: a smaller fixed size for its compact text
     NUM_MIN = 7,                                     -- smallest size a plain value's numbers may shrink to (screen px)

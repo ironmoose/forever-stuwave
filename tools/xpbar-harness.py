@@ -6,7 +6,7 @@ Why this exists: the parse gate proves a file compiles and lua-lint proves its
 names resolve, but neither RUNS a line of it. The XP bar now carries thirteen
 looks whose differences are geometry and colour maths -- width profiles, height
 profiles, colour models, chase distances -- and the only other way to find a nil
-index in one of them is to ship it to Parker and have his bar disappear.
+index in one of them is to ship it to the player and have their bar disappear.
 
 So this stubs enough of the widget API to load the real file, fires
 PLAYER_LOGIN, then switches through every variant at five XP levels, checking

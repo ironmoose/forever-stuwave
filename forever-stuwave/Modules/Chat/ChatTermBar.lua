@@ -69,11 +69,11 @@ local TITLE_BUTTON_ALPHA_HOVER = 1.00
 -- with the scroll bar and the whole button frame, which is why ElvUI chat
 -- never has furniture hanging off it.
 --
--- We keep both, because Parker asked for the scroll bar to be SKINNED rather
+-- We keep both, because the player asked for the scroll bar to be SKINNED rather
 -- than removed, so they have to be seated inside the border instead.
 local SCROLL_BAR_WIDTH = 14
 -- ONE inset for the bar and the jump button, because they stack vertically and
--- any difference reads immediately as a misalignment. Parker caught exactly
+-- any difference reads immediately as a misalignment. The player caught exactly
 -- that when the two carried their own numbers: "it moved the scroll bar over
 -- to the right too much and now it isn't lined up with the scroll to bottom
 -- glyph." They share a width too, so they share a centre line.
@@ -86,7 +86,7 @@ local SCROLL_RAIL_ALPHA = 0.22
 local SCROLL_THUMB_ALPHA = 0.95
 
 -- The term bar's own chassis, and the reason the header read as "washed out,
--- like they are behind the main terminal" (Parker, 2026-09-22). It was not a
+-- like they are behind the main terminal" (player, 2026-09-22). It was not a
 -- draw-order or alpha problem -- measured, everything was level 6 at alpha
 -- 1.00 and the active pill was full-strength cyan. There was simply no BAR:
 -- the mock's `.termbar` carries an 8% cyan wash and a 30% cyan bottom rule,
@@ -103,7 +103,7 @@ local TERM_BAR_RULE    = 0.30
 --
 -- These were the mock's two decorative status lamps, a pink and a green glow.
 -- Turning them into controls first kept the lamp and punched the glyph out of
--- it, traffic-light style. Parker's call was to drop the disc -- "i don't
+-- it, traffic-light style. The player's call was to drop the disc -- "i don't
 -- think the icons need the round bg. Lets just make the glyphs similar to the
 -- icons on the right and then just color them green and pink" -- so they are
 -- now flat tinted glyphs styled exactly like the chat and channel buttons at
@@ -274,7 +274,7 @@ local function SkinTitleButton(button, index, iconTexture, tooltip)
 
     button.tooltip = tooltip
 
-    -- NO BORDER, and none of Blizzard's art either. Parker: "We don't need the
+    -- NO BORDER, and none of Blizzard's art either. Player: "We don't need the
     -- borders for these. just the icons will be fine." A box around a 16px
     -- glyph reads as a button widget, and there are already two bordered
     -- shapes in this strip (the tab pills and the social starter); a third
@@ -369,7 +369,7 @@ function Chat.SkinTitleButtons()
     -- the way a window's own menu control does; the channel speaker reads as
     -- content and sits inboard of it.
     local order = {
-        -- "Chat Menu" wording is a placeholder Parker may retune -- he is the
+        -- "Chat Menu" wording is a placeholder the player may retune -- they are the
         -- visual judge on label copy in this bar.
         { _G.ChatFrameMenuButton, ICON_CHAT_TEXTURE, "Chat Menu" },
         { _G.ChatFrameChannelButton, ICON_CHANNEL_TEXTURE },
@@ -421,7 +421,7 @@ local function SeatScrollBar(frame)
 end
 
 -- Shows the jump button only when there is somewhere to jump BACK from.
--- Parker: "show it if there is a scroll bar etc." Blizzard drives this itself
+-- Player: "show it if there is a scroll bar etc." Blizzard drives this itself
 -- in stock UI, but we re-anchor and re-skin the button, so the visibility is
 -- asserted here rather than assumed -- and a button that is always on screen
 -- reads as decoration, not as a control.

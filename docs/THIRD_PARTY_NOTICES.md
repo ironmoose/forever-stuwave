@@ -16,4 +16,4 @@ Gameplay screenshots, the game art or icons visible in them, and borrowed game i
 
 ## Project code
 
-Project code and original project assets are distributed under the [MIT License](../LICENSE), copyright 2026 Parker (ironmoose). The font licenses above apply separately; MIT does not relicense fonts or Blizzard imagery.
+Project code and original project assets are distributed under the [MIT License](../LICENSE), copyright 2026 ironmoose. The font licenses above apply separately; MIT does not relicense fonts or Blizzard imagery.

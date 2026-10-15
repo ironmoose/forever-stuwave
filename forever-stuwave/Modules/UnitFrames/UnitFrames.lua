@@ -49,7 +49,7 @@ local DimBlizzardFrame = FS.FrameHelpers.DimBlizzardFrame
 local COLOR_REACTION_FRIEND  = { 0.224, 1, 0.078, 1 }        -- #39ff14
 local COLOR_REACTION_NEUTRAL = { 0.918, 1, 0, 1 }            -- #eaff00
 local COLOR_REACTION_HOSTILE = { 1, 0.027, 0.227, 1 }        -- #ff073a
--- Solid bright green (was translucent 0.35) per Parker's in-game review:
+-- Solid bright green (was translucent 0.35) per the player's in-game review:
 -- "incoming heals work and shields work but the art is not like the mockup."
 -- COLOR_HEAL is the same #39ff14 the mockup's --green uses.
 local COLOR_HEAL_OVERLAY     = { COLOR_HEAL[1], COLOR_HEAL[2], COLOR_HEAL[3], 0.92 }
@@ -432,7 +432,7 @@ local function BuildUnitFrame(unitToken, frameName, mirrored)
     if HAS_TOTAL_ABSORBS then
         health.absorbOverlay = CreateOverlayBar(health, COLOR_ABSORB_OVERLAY, health.healOverlay:GetStatusBarTexture())
 
-        -- Hatched diagonal stripes instead of a flat tint (Parker's mockup
+        -- Hatched diagonal stripes instead of a flat tint (the player's mockup
         -- review: "HATCHED DIAGONAL STRIPES (light gray/white stripes on
         -- transparent, roughly 45 degrees, about 3-4px period)"). Overrides
         -- CreateOverlayBar's own FLAT_TEXTURE fill with the smallest

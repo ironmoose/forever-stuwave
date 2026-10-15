@@ -2001,7 +2001,7 @@ end)
 -- `/fsmo` toggles a watch on UPDATE_MOUSEOVER_UNIT. Each CHANGE of unit or frame prints one chat
 -- line: UnitExists, UnitName, UnitIsFriend and the name of the frame under the mouse. It exists to
 -- answer "does mouseover casting see the unit I am hovering, and which frame is it over" while
--- Parker plays, so it prints and stores nothing else. Every API is pcall'd and every value goes
+-- The player plays, so it prints and stores nothing else. Every API is pcall'd and every value goes
 -- through FS.IsSecret BEFORE anything else touches it: a secret prints the word "secret" and is
 -- never compared, concatenated or tostring'd. The throttle key is built only from the printed
 -- strings (plus a plain GUID when readable), so a held hover on one unit stays silent. The watch

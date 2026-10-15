@@ -51,13 +51,13 @@ import struct
 SIZE = 32
 # Chamfer (45-degree corner cut) size, in texels. MUST match
 # Theme.SLICE_CUT_MARGIN -- change the two together. Starting guess pending
-# Parker's eyeball against the Pet Frame Designer artifact.
+# The player's eyeball against the Pet Frame Designer artifact.
 CHAMFER = 6.0
-# Outline stroke width, in texels. Starting guess pending Parker's eyeball
+# Outline stroke width, in texels. Starting guess pending the player's eyeball
 # against the Pet Frame Designer artifact.
 THICKNESS = 1.5
 # Antialiasing subpixel grid (NxN samples per texel). Starting guess pending
-# Parker's eyeball against the Pet Frame Designer artifact.
+# The player's eyeball against the Pet Frame Designer artifact.
 SUPERSAMPLE = 6
 
 # Corner sets: which corners of the plate get the 45-degree cut.

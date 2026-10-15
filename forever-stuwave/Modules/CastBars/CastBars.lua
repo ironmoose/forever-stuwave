@@ -149,7 +149,7 @@ local IsSecret = FS.IsSecret
 local DimBlizzardFrame = FS.FrameHelpers.DimBlizzardFrame
 
 -------------------------------------------------------------------------------
--- Layout constants (UIParent units) -- SINGLE-POINT TUNABLE, need Parker's eyeball
+-- Layout constants (UIParent units) -- SINGLE-POINT TUNABLE, need the player's eyeball
 -------------------------------------------------------------------------------
 
 local FRAME_H = 22

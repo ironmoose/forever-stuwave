@@ -8,7 +8,7 @@ here as an opaque 64 x 64 texture that CombatHud.lua stretches over every spell 
 tile and the buff tiles (the tiles are all square, and a CSS 135 degree gradient over a square is
 t = (x + y) / (2 * size), the same for every size).
 
-Two-corner twin, hud_tile_cut2.tga (Parker, 2026-10-02: every rectangle gets TOP-LEFT and
+Two-corner twin, hud_tile_cut2.tga (player, 2026-10-02: every rectangle gets TOP-LEFT and
 BOTTOM-RIGHT cut corners, tiles included): the same gradient, byte for byte in RGB, with the
 top-left and bottom-right corners chamfered in alpha (antialiased by supersampling) and the
 other two square. hud_tile.tga itself is NOT changed. The tile is STRETCHED over 24 to 56 px

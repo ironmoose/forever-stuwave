@@ -4,7 +4,7 @@
 Why: the first glow pass used a straight horizontal bleed plus a ROUND radial
 at the leading edge. Against eighty leaning pips both read as foreign -- a
 rectangular haze and a circular blob over a bar made entirely of slashes.
-Parker's note was "the glow needs to be slanty too" and "the pips should get
+The player's note was "the glow needs to be slanty too" and "the pips should get
 some", which is the same fix twice: every glowing thing on this bar should be
 the pip's own shape.
 

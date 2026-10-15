@@ -73,7 +73,7 @@ local STACK_PAD, STACK_GAP = 5, 5
 local ROW_GAP = 6
 local BAR_PAD = 3
 -- Mockup gap is 3, but our glow throws 5-6px outward from every edge, so
--- neighbouring buttons were bleeding into each other. Widened on Parker's call
+-- neighbouring buttons were bleeding into each other. Widened on the player's call
 -- so each button's halo has room to fall off before the next one starts.
 local BTN_GAP = 7
 -- Header plate chamfer: 6 is a baked size (Theme.CUT_SIZES), so SnapCut keeps it as is;
@@ -546,8 +546,8 @@ local function UpdateIcon(button)
 end
 
 -- 12.0 secret values. GetActionCount hands back a SECRET number once combat
--- starts, and `count > 1` is a comparison, which is illegal on one -- Parker
--- hit this the moment he pulled: 89 throws, all from this line.
+-- starts, and `count > 1` is a comparison, which is illegal on one -- the player
+-- hit this the moment they pulled: 89 throws, all from this line.
 --
 -- The 12.0 answer is not to guard the comparison, it is to stop asking for a
 -- number. C_ActionBar.GetActionDisplayCount returns what the engine wants
@@ -711,7 +711,7 @@ end
 -- Key-press feedback. A key bound to ACTIONBUTTONn / MULTIACTIONBARnBUTTONn never reaches
 -- OUR button: the binding body calls ActionButtonDown(n) / MultiActionButtonDown(bar, n),
 -- which push and click Blizzard's own hidden twin (see the hide-strategy notes above).
--- So the cast worked and our button showed nothing: no press, no animation. Parker: "when
+-- So the cast worked and our button showed nothing: no press, no animation. Player: "when
 -- I am hitting my keybind I don't get ... the button on the action bar making any kind
 -- of animation".
 --
@@ -889,7 +889,7 @@ end
 --
 -- Our buttons are built from SecureActionButtonTemplate by hand, so they never
 -- inherited ActionBarActionButtonMixin's drag handlers and there was simply
--- nothing listening -- the bars were not "locked", they were inert. Parker
+-- nothing listening -- the bars were not "locked", they were inert. The player
 -- found this trying to move a skill.
 --
 -- Plain insecure handlers are the right tool here, which is worth justifying
@@ -1147,7 +1147,7 @@ local function StyleButton(button, size)
     -- history below is why it is ONE nine-sliced texture, which still holds for a
     -- chamfer (the corner slice just holds a 45 degree cut instead of an arc).
     --
-    -- Parker found the original cause -- the background was square behind a
+    -- The player found the original cause -- the background was square behind a
     -- round border. The first fix rebuilt it the way Theme.AddRoundedFill
     -- builds a panel (centre + four edge strips + four corner quads), and that
     -- still showed corners, because at a 4px radius FILL_CORNER_TEXTURE's
@@ -1211,7 +1211,7 @@ local function StyleButton(button, size)
     -- This was four edge strips flush to the button's SQUARE edge, which is the
     -- construction the base glow already had to be rewritten out of -- and the
     -- rewrite never carried over here, so hovering brought the dark corner
-    -- notch straight back. Parker: "the hover state for action bars has the
+    -- notch straight back. Player: "the hover state for action bars has the
     -- broken corners still".
     --
     -- Strips cannot cover the area a rounded corner cuts away, at any size or
@@ -1314,7 +1314,7 @@ local function StyleButton(button, size)
 
     -- The GCD / cooldown swipe. Re-seated onto the icon edge to edge, because
     -- the inherited template leaves it 3px inside the icon (4px inside our
-    -- border), which Parker saw as "the GCD ... doesn't extend to the edge".
+    -- border), which the player saw as "the GCD ... doesn't extend to the edge".
     -- Full rationale at FrameHelpers.SeatButtonCooldown.
     --
     -- Square swipe (no swipeTexture): the icon is square because masks don't clip here
@@ -1339,7 +1339,7 @@ local function StyleButton(button, size)
     -- judged this cleanest in-game" -- and it runs after this, so a shadow set
     -- here is silently wiped anyway. That is exactly what had been happening:
     -- the keys were rendering as bare cyan on top of bright spell art with no
-    -- separation at all, which is why Parker could not read them.
+    -- separation at all, which is why the player could not read them.
     --
     -- SetWidth(0) restores auto-sizing on a FontString, so the plate anchored
     -- to its edges hugs the text and stays tight on "1" as well as "SHIFT-F".
@@ -1454,7 +1454,7 @@ local function BuildBar(spec, geo, parent)
         -- Free the PICKUP modifier from the secure handler, so holding it turns
         -- a press into a DRAG instead of a cast.
         --
-        -- Parker: "if i am holding shift to move a spell on my bar it still
+        -- Player: "if i am holding shift to move a spell on my bar it still
         -- tries to cast it" -- which finally explains the drag failure. With
         -- AnyDown registered the secure cast resolves on mouse-DOWN, before a
         -- drag can begin, so the modifier never gets a chance to matter.
@@ -1482,7 +1482,7 @@ local function BuildBar(spec, geo, parent)
         -- press and prevented drags. That theory was wrong -- Blizzard's own
         -- action buttons register key-down and drag fine -- and narrowing it
         -- stopped click-to-cast working on EVERY bar. This exact pairing is
-        -- the configuration Parker confirmed casting with in game.
+        -- the configuration the player confirmed casting with in game.
         --
         -- Whatever is wrong with drag and drop, it is not this line.
         button:RegisterForClicks("AnyUp", "AnyDown")

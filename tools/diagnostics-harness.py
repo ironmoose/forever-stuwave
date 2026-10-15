@@ -9,7 +9,7 @@ error, aura reads are skipped in combat, the chat output has one fixed shape, li
 capped, and the result is handed to /fsbug through GetClassInspect (fsbug-harness.py pins the report
 side). The routing of the subcommand lives in PanelSkins.lua; the real dispatcher is loaded and driven.
 
-`/fsmo` is the mouseover-cast check Parker runs in game. The properties worth pinning are the
+`/fsmo` is the mouseover-cast check the player runs in game. The properties worth pinning are the
 safety ones: the toggle registers and unregisters UPDATE_MOUSEOVER_UNIT, one compact line is
 printed per CHANGE of unit or frame (never per event), a secret name or flag prints the word
 "secret" without ever being compared or concatenated, the watch turns itself off after 120s (and

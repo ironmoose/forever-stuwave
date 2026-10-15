@@ -206,7 +206,7 @@ local function Record(err, stackOverride, ours, plainKey)
     if existing then
         existing.count = existing.count + 1
         -- lastSeen at most once a second. date() builds a fresh string every
-        -- call, and a bad update path throws at frame rate -- Parker's combat
+        -- call, and a bad update path throws at frame rate -- the player's combat
         -- pull produced 89 throws, each one allocating a timestamp nobody
         -- reads, on top of whatever the error itself allocated. Cheap to fix
         -- and the log is no less useful to the second.
@@ -546,13 +546,13 @@ end
 
 -- /fsreload -- reload, but only when it is safe to steal the keyboard.
 --
--- Parker's idea ("we should make a macro for your check so you are not typing
+-- The player's idea ("we should make a macro for your check so you are not typing
 -- it every time"). the dev tooling drives reloads by typing into the chat box, and
 -- the guarded form of that was a long /run one-liner -- noisy, and close to
 -- the chat box's 255-character limit. This is nine characters.
 --
 -- The guard exists because a reload opens the chat box and captures the
--- keyboard. Firing one mid-fight cost Parker his only healing potion; firing
+-- keyboard. Firing one mid-fight cost the player their only healing potion; firing
 -- one mid-run is its own problem. The client is the only thing that actually
 -- knows, so the client decides.
 --
@@ -584,7 +584,7 @@ end
 -- Memory diagnostic
 -------------------------------------------------------------------------------
 
--- Parker watched FS MEM climb and asked whether we are leaking. The data bar
+-- The player watched FS MEM climb and asked whether we are leaking. The data bar
 -- cannot answer that on its own: GetAddOnMemoryUsage reports memory ATTRIBUTED
 -- to the addon that has not been collected yet, so it climbs for every addon
 -- between garbage collections and drops when one runs. A rising number is

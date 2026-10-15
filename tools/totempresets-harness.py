@@ -89,6 +89,12 @@ CYAN = (0.133, 0.878, 1.0)
 PINK = (1.0, 0.18, 0.592)
 AMBER = (1.0, 0.7137, 0.2824)
 MUTED = (0.6157, 0.5765, 0.7686)
+VIOLET = (0.659, 0.333, 0.969)
+ROW_FILL = (0.051, 0.024, 0.125)       # the face colour of the editor's buttons and rows
+
+
+def mix3(a, b, t):
+    return tuple(a[k] + (b[k] - a[k]) * t for k in range(3))
 
 # ---------------------------------------------------------------------------------------------
 # The world
@@ -1291,7 +1297,7 @@ def check_the_editor_rows_the_chooser_and_the_up_down_buttons():
     script(lua, rows(lua)[2].up, "OnClick")
     assert order_of(lua, i) == ["earth", "water", "air"]
     # the chooser: the known totems of the element and "left out"
-    script(lua, rows(lua)[3].tile, "OnClick")
+    script(lua, rows(lua)[3], "OnClick")
     ch = DL(lua).Chooser()
     assert ch is not None and shown(ch)
     tiles = [t for t in seq(ch.tiles) if shown(t)]
@@ -1300,7 +1306,7 @@ def check_the_editor_rows_the_chooser_and_the_up_down_buttons():
     assert int(P.Get(i).picks.fire) == IDS["Magma Totem"] and order_of(lua, i)[-1] == "fire"
     assert not shown(ch), "the chooser stayed after a choice"
     assert c1(lua)._attrs["macrotext1"] and "Magma" in str(c1(lua)._attrs["macrotext1"]), "the cell script did not follow"
-    script(lua, rows(lua)[3].tile, "OnClick")
+    script(lua, rows(lua)[3], "OnClick")
     tiles = [t for t in seq(DL(lua).Chooser().tiles) if shown(t)]
     script(lua, tiles[-1], "OnClick")
     assert P.Get(i).picks.fire is None and "fire" not in order_of(lua, i), "left out did not remove the totem"
@@ -1308,7 +1314,7 @@ def check_the_editor_rows_the_chooser_and_the_up_down_buttons():
     lua = boot(learned=TOTEMS["fire"][:2])
     i = make(lua)
     DL(lua).OpenEditor(i)
-    script(lua, rows(lua)[0].tile, "OnClick")
+    script(lua, rows(lua)[0], "OnClick")
     assert len([t for t in seq(DL(lua).Chooser().tiles) if shown(t)]) == 3, "only the two known totems and left out"
 
 
@@ -1322,7 +1328,7 @@ def check_an_unset_slot_opens_empty_and_its_first_totem_makes_the_preset_named_f
     assert all(str(x.label._text) == "left out" and not shown(x.up) and not shown(x.down) for x in r)
     assert float(c.clear._alpha) == 0.4 and c.clear._enabled is False, "CLEAR is live on an empty slot"
     assert P.Get(2) is None
-    script(lua, r[1].tile, "OnClick")
+    script(lua, r[1], "OnClick")
     tiles = [t for t in seq(DL(lua).Chooser().tiles) if shown(t)]
     script(lua, tiles[0], "OnClick")
     assert P.Get(2) is not None and str(P.Get(2).name) == "PRESET 2" and str(c.name._text) == "PRESET 2"
@@ -1416,7 +1422,7 @@ def check_the_card_closes_on_escape_and_combat_and_hangs_on_the_last_cell():
     conf(lua, "totems.gnarly", True)
     assert float(c._w) >= 198.0, "the card is narrower than its design width"
     DL(lua).OpenEditor(i)
-    script(lua, rows(lua)[0].tile, "OnClick")
+    script(lua, rows(lua)[0], "OnClick")
     assert shown(DL(lua).Chooser())
     DL(lua).CloseEditor()
     assert not shown(c) and not shown(DL(lua).Chooser()), "the chooser outlived the card"
@@ -1671,6 +1677,178 @@ def check_clear_is_one_full_width_button_padded_symmetrically_and_snapped_to_who
         assert abs(float(c.name._w) - (float(c._w) - edge)) < 1e-6 and abs(float(rows(lua)[0]._w) - (float(c._w) - edge)) < 1e-6
 
 
+def sw_look(sw):
+    """Everything a swatch paints: fill, outer ring, inner ring (shown only when selected), dot colour and pixel size."""
+    return {"fill": rgba(sw.fill), "ring": [rgba(e) for e in seq(sw.edges)], "inner": [rgba(e) for e in seq(sw.inner)],
+            "inner_shown": all(shown(e) for e in seq(sw.inner)), "dot": rgba(sw.dot), "dotw": round(float(sw.dot._w), 4),
+            "alpha": float(sw._alpha)}
+
+
+def swatches(lua):
+    return seq(card(lua).swatches)
+
+
+def check_the_card_has_a_row_of_seven_outline_swatches_that_choose_the_slots_colour():
+    lua = boot()
+    P = PS(lua)
+    a, b = two_presets(lua)
+    DL(lua).OpenEditor(1)
+    c = card(lua)
+    sws = swatches(lua)
+    assert len(sws) == 7 and all(shown(w) for w in sws)
+    assert str(c.outline._text) == "OUTLINE" and str(c.label._text) == "DROP ORDER"
+    for k, (name, hx) in enumerate(PALETTE):
+        want = hex_rgb(hx)
+        close(rgba(sws[k].dot), want, f"swatch {name} dot")
+        assert sws[k].fsColor == k + 1
+    # the selected swatch (the slot's colour: cyan) wears a white outer ring, an inner ring in its colour and a bigger dot
+    sel = sw_look(sws[0])
+    assert all(e[:3] == (1.0, 1.0, 1.0) and e[3] == 1.0 for e in sel["ring"]), "the selected ring is not white"
+    assert sel["inner_shown"] and all(abs(e[3] - 1) < 1e-6 for e in sel["inner"])
+    close(sel["inner"][0], hex_rgb("22e0ff"), "selected inner ring")
+    other = sw_look(sws[1])
+    assert not other["inner_shown"] and sel["dotw"] > other["dotw"], "only the selected swatch has the big dot"
+    assert abs(other["ring"][0][3] - 0.6) < 1e-3 and abs(other["dot"][3] - 0.9) < 1e-3, "an unselected swatch is quiet"
+    close(other["ring"][0], hex_rgb("ff2e97"), "unselected ring colour")
+    close(other["fill"], mix3(ROW_FILL, hex_rgb("ff2e97"), 0.22), "unselected fill")
+    close(sel["fill"], mix3(ROW_FILL, hex_rgb("22e0ff"), 0.35), "selected fill")
+    # a click chooses the colour for this slot only, the cell follows, the selection moves
+    script(lua, sws[4], "OnClick")
+    assert (P.Color(1), P.Color(2)) == (5, 2)
+    close(ring_of(c1(lua)), hex_rgb("39ff14"), "the cell border follows the swatch")
+    assert sw_look(swatches(lua)[4])["inner_shown"] and not sw_look(swatches(lua)[0])["inner_shown"]
+    DL(lua).OpenEditor(2)
+    assert sw_look(swatches(lua)[1])["inner_shown"] and not sw_look(swatches(lua)[4])["inner_shown"], "the card did not follow the slot"
+    # an unset slot takes a colour too, and CLEAR keeps it
+    DL(lua).CloseEditor()
+    P.Clear(2)
+    DL(lua).OpenEditor(2)
+    script(lua, swatches(lua)[6], "OnClick")
+    assert P.Color(2) == 7 and P.Get(2) is None
+    close(vtx(btn(lua, "preset2").fsBar), MUTED, "an unset cell keeps the muted underline whatever its colour")
+
+
+def check_the_swatches_light_on_hover_and_press_restore_and_dim_while_the_presets_cannot_be_saved():
+    lua = boot()
+    P = PS(lua)
+    i = make(lua)
+    DL(lua).OpenEditor(i)
+    sws = swatches(lua)
+    plain = sws[2]
+    base = sw_look(plain)
+    script(lua, plain, "OnEnter")
+    hov = sw_look(plain)
+    close(hov["fill"], mix3(ROW_FILL, hex_rgb("a855f7"), 0.35), "hover fill")
+    assert hov["ring"][0][3] == 1.0 and hov["dot"][3] == 1.0 and not hov["inner_shown"]
+    script(lua, plain, "OnMouseDown")
+    pre = sw_look(plain)
+    close(pre["fill"], mix3(ROW_FILL, hex_rgb("a855f7"), 0.5), "pressed fill")
+    assert pre["ring"][0][3] == 1.0
+    script(lua, plain, "OnMouseUp")
+    assert sw_look(plain) == hov
+    script(lua, plain, "OnLeave")
+    assert sw_look(plain) == base, "leaving did not restore the swatch"
+    script(lua, plain, "OnEnter")
+    script(lua, plain, "OnMouseDown")
+    script(lua, plain, "OnLeave")
+    assert sw_look(plain) == base, "leaving with the button down kept a look"
+    script(lua, plain, "OnEnter")
+    DL(lua).CloseEditor()
+    script(lua, plain, "OnHide")
+    assert sw_look(plain) == base, "hiding kept the hover look"
+    # a selected swatch keeps its white ring on hover
+    DL(lua).OpenEditor(i)
+    selected = swatches(lua)[0]
+    sbase = sw_look(selected)
+    script(lua, selected, "OnEnter")
+    assert sw_look(selected)["ring"] == sbase["ring"] and sw_look(selected)["inner_shown"]
+    script(lua, selected, "OnLeave")
+    # disabled: dimmed, no clicks, no reaction, and a click that arrives is refused with the reason
+    lock_presets(lua)
+    DL(lua).RefreshCard()
+    for w in swatches(lua):
+        assert w._enabled is False and float(w._alpha) == 0.4, "a swatch stayed live while the presets cannot be saved"
+    dis = sw_look(plain)
+    script(lua, plain, "OnEnter")
+    script(lua, plain, "OnMouseDown")
+    assert sw_look(plain) == dis, "a disabled swatch reacted to the mouse"
+    script(lua, plain, "OnMouseUp")
+    script(lua, plain, "OnLeave")
+    run(lua, "__errors = {}")
+    click(lua, plain)
+    assert errors(lua) == ["saving is off"] and P.Color(i) == 1
+    lock_presets(lua, False)
+    DL(lua).RefreshCard()
+    assert all(w._enabled is not False and float(w._alpha) == 1 for w in swatches(lua))
+    click(lua, plain)
+    assert P.Color(i) == 3
+    # every swatch texture is snapped to the pixel grid
+    for w in swatches(lua):
+        for group in (w.edges, w.inner):
+            for t in seq(group):
+                assert t._snap is True and float(t._bias) == 0
+        assert w.fill._snap is True and w.dot._snap is True
+
+
+def check_the_card_layout_matches_the_mockup_on_whole_pixels_at_every_scale():
+    for es, sc in ((1.0, 1.0), (0.64, 1.0), (1.3333333, 1.25), (1.5, 1.0), (2.2, 1.0), (1.2, LIVE_SCALE)):
+        lua = boot(sc)
+        set_display(lua, es, sc)
+        i = make(lua)
+        DL(lua).OpenEditor(i)
+        c = card(lua)
+        pw = lambda v: float(v) * es
+        whole = lambda v: abs(pw(v) - round(pw(v))) < 1e-6
+        sws = swatches(lua)
+        sizes = {round(pw(w._w)) for w in sws}
+        assert len(sizes) == 1 and sizes.pop() % 2 == 0 and all(whole(w._w) and whole(w._h) for w in sws), f"es {es}: swatch size"
+        xs = [pw(w._points[1].x) for w in sws]
+        ys = {pw(w._points[1].y) for w in sws}
+        steps = {round(xs[k + 1] - xs[k], 6) for k in range(6)}
+        assert len(steps) == 1 and all(abs(x - round(x)) < 1e-6 for x in xs) and len(ys) == 1, f"es {es}: swatch pitch {steps}"
+        assert abs(xs[0] - round(8 * sc * es)) < 1e-6, f"es {es}: the first swatch is not at the left margin"
+        assert abs(steps.pop() - 27 * sc * es) <= 1, f"es {es}: swatch pitch is off the mockup's 27"
+        # the dot is centred in its swatch (both even)
+        for w in sws:
+            assert round(pw(w.dot._w)) % 2 == 0 and whole(w.dot._w)
+        # the order from top: title, name, OUTLINE, swatches, DROP ORDER, rows, CLEAR
+        assert -pw(c.name._points[1].y) < -pw(sws[0]._points[1].y) < -pw(rows(lua)[0]._points[1].y)
+        assert -pw(c.outline._points[1].y) < -pw(sws[0]._points[1].y) < -pw(c.label._points[1].y) < -pw(rows(lua)[0]._points[1].y)
+        if es == 1.0:
+            assert float(c._h) == 232 and float(c._w) == 198, f"card {c._w}x{c._h}"
+            assert -float(sws[0]._points[1].y) == 56 and float(sws[0]._w) == 20 and float(sws[1]._points[1].x) - float(sws[0]._points[1].x) == 27
+            assert -float(rows(lua)[0]._points[1].y) == 94 and -float(rows(lua)[3]._points[1].y) == 94 + 81
+            assert float(rows(lua)[0]._h) == 24 and float(c.clear._h) == 18
+            assert -float(c.outline._points[1].y) == 45 and -float(c.label._points[1].y) == 82
+
+
+def check_each_drop_order_row_is_one_button_for_its_whole_width_with_the_arrows_on_top():
+    lua = boot()
+    P = PS(lua)
+    i = make(lua, picks={"fire": None}, name="MELEE")
+    DL(lua).OpenEditor(i)
+    r = rows(lua)
+    for row in r:
+        assert row._kind == "Button" or str(row._kind) == "Button", "a row is not a button"
+        assert row.tile._enabled is None or row.tile._enabled is not False
+        assert not getattr(row.tile, "_mouse", False), "the icon box takes the mouse the row should get"
+        for arrow in (row.up, row.down):
+            assert float(arrow._level) > float(row._level), "an arrow is not above its row"
+    # the click opens the chooser for that row's element from anywhere on the row
+    script(lua, r[1], "OnClick")
+    ch = DL(lua).Chooser()
+    assert shown(ch) and str(ch.tiles[1].fsElement) == "water", "the row did not open its own element's chooser"
+    # an arrow's click moves the row and does not open anything
+    run(lua, "FS.TotemDial.Chooser():Hide()")
+    script(lua, r[0].down, "OnClick")
+    assert order_of(lua, i)[:2] == ["water", "earth"] and not shown(DL(lua).Chooser())
+    # a row left out shows no arrows and still opens the chooser
+    left = rows(lua)[3]
+    assert not shown(left.up) and not shown(left.down)
+    script(lua, left, "OnClick")
+    assert shown(DL(lua).Chooser())
+
+
 def rgba(t):
     c = t._color if t._color is not None else t._vertex
     return tuple(round(float(c[i]), 4) for i in (1, 2, 3, 4)) if c is not None else None
@@ -1811,20 +1989,28 @@ def check_the_name_box_the_pick_cells_and_the_row_light_up_on_hover_and_restore(
     assert rgba(c.nameEdges[1])[3] == 1.0, "leaving dropped the focus look"
     script(lua, n, "OnEditFocusLost")
     assert ([rgba(e) for e in seq(c.nameEdges)], rgba(n.fill)) == base, "the name box did not return to normal"
-    # the pick cell: its ring shows on hover, full while pressed, and the row's edge lights with it
+    # the whole row is the button: hover tints its fill 16% toward the violet ring and takes the ring to full alpha, pressed
+    # tints 32%, and the icon box ring (element colour) goes from .35 to .9
     row = rows(lua)[0]
     t = row.tile
-    ring0, row0 = [rgba(e) for e in seq(t.hl)], [rgba(e) for e in seq(row.edges)]
-    assert ring0[0][3] == 0
-    script(lua, t, "OnEnter")
-    assert rgba(t.hl[1])[3] == 0.9 and rgba(row.edges[1])[3] > row0[0][3]
-    script(lua, t, "OnMouseDown")
-    assert rgba(t.hl[1])[3] == 1.0
-    script(lua, t, "OnMouseUp")
-    script(lua, t, "OnLeave")
-    assert [rgba(e) for e in seq(t.hl)] == ring0 and [rgba(e) for e in seq(row.edges)] == row0
+    ring0, row0, fill0 = [rgba(e) for e in seq(t.hl)], [rgba(e) for e in seq(row.edges)], rgba(row.fill)
+    assert ring0[0][3] == 0.35 and row0[0][3] == 0.35
+    script(lua, row, "OnEnter")
+    assert rgba(t.hl[1])[3] == 0.9 and rgba(row.edges[1])[3] == 1.0
+    close(rgba(row.fill)[:3], mix3(ROW_FILL, VIOLET, 0.16), "row hover fill")
+    script(lua, row, "OnMouseDown")
+    assert rgba(t.hl[1])[3] == 0.9 and rgba(row.edges[1])[3] == 1.0
+    close(rgba(row.fill)[:3], mix3(ROW_FILL, VIOLET, 0.32), "row pressed fill")
+    script(lua, row, "OnMouseUp")
+    script(lua, row, "OnLeave")
+    assert [rgba(e) for e in seq(t.hl)] == ring0 and [rgba(e) for e in seq(row.edges)] == row0 and rgba(row.fill) == fill0
+    # an arrow under the mouse lights only the row's edge
+    script(lua, row.down, "OnEnter")
+    assert rgba(row.edges[1])[3] == 1.0 and rgba(row.fill) == fill0, "an arrow tinted the row or did not light its edge"
+    script(lua, row.down, "OnLeave")
+    assert [rgba(e) for e in seq(row.edges)] == row0
     # the chooser tiles
-    script(lua, t, "OnClick")
+    script(lua, row, "OnClick")
     tile = g(lua).FSTotemChooser.tiles[1]
     ring0 = [rgba(e) for e in seq(tile.hl)]
     script(lua, tile, "OnEnter")
@@ -1837,10 +2023,11 @@ def check_the_name_box_the_pick_cells_and_the_row_light_up_on_hover_and_restore(
     # disabled while the presets cannot be saved
     run(lua, "FS.TotemPresets.Refusal = function() return 'saving is off' end")
     DL(lua).RefreshCard()
-    assert float(n._alpha) == 0.4 and float(t._alpha) == 0.4
+    assert float(n._alpha) == 0.4 and float(t._alpha) == 0.4 and float(row.fill._alpha) == 0.4 and row._enabled is False
     script(lua, n, "OnEnter")
-    script(lua, t, "OnEnter")
-    assert rgba(t.hl[1])[3] == 0, "a disabled cell lit up"
+    script(lua, row, "OnEnter")
+    assert abs(rgba(row.edges[1])[3] - 0.14) < 1e-3 and abs(rgba(t.hl[1])[3] - 0.14) < 1e-3, "a disabled row lit up"
+    close(rgba(row.fill)[:3], fill0[:3], "a disabled row tinted")
     assert rgba(c.nameEdges[1])[3] == 0.4
 
 
@@ -2236,12 +2423,12 @@ def check_the_files_use_no_snippets_no_state_drivers_and_no_flagged_words():
                         f"{path.name}: flagged word {word!r} in: {ln.strip()}"
 
 
-LIVE_SCALE = 0.8333     # Parker's layout scale; with effective scale 0.64 and physical height 1440 one UI unit is 1.2 pixels
+LIVE_SCALE = 0.8333     # the player's layout scale; with effective scale 0.64 and physical height 1440 one UI unit is 1.2 pixels
 
 
 def set_display(lua, ppu, scale):
     """The physical pixels in one UI unit, built the way the client has it: an effective scale and a physical screen height
-    (one UI unit is effective scale * physical height / 768 pixels). Parker's real display is effective scale 0.64 with
+    (one UI unit is effective scale * physical height / 768 pixels). The player's real display is effective scale 0.64 with
     physical height 1440 (1.2 pixels at layout scale 0.8333); every other count here uses the same effective scale and the
     height that gives it, so a test that took the effective scale for the pixel count would see 0.64."""
     if ppu == 1.2 and scale == LIVE_SCALE:
@@ -2274,11 +2461,11 @@ def check_a_dimmed_pick_cell_and_the_other_dimmed_controls_take_no_clicks_and_sa
     i = make(lua)
     DL(lua).OpenEditor(i)
     c = card(lua)
-    t = rows(lua)[0].tile
+    t = rows(lua)[0]
     before = (str(c.name._text), P.Get(i).name)
     lock_presets(lua)
     DL(lua).RefreshCard()
-    assert float(t._alpha) == 0.4 and t._enabled is False, "the dimmed pick cell is still enabled"
+    assert float(t.tile._alpha) == 0.4 and t._enabled is False, "the dimmed pick row is still enabled"
     for label, b in [("pick cell", t), ("clear", c.clear)] + \
             [(f"up{n}", r.up) for n, r in enumerate(rows(lua)) if shown(r.up)] + \
             [(f"down{n}", r.down) for n, r in enumerate(rows(lua)) if shown(r.down)]:
@@ -2300,7 +2487,7 @@ def check_a_dimmed_pick_cell_and_the_other_dimmed_controls_take_no_clicks_and_sa
     # the chooser open when the refusal begins: its tiles dim, drop clicks, and a click that arrives says why
     lock_presets(lua, False)
     DL(lua).RefreshCard()
-    assert t._enabled is not False and float(t._alpha) == 1
+    assert t._enabled is not False and float(t.tile._alpha) == 1
     live_click(lua, t)
     chooser = g(lua).FSTotemChooser
     assert shown(chooser)
@@ -2331,11 +2518,11 @@ def check_an_open_card_unlocks_when_the_refusal_clears_and_locks_when_it_begins(
     lock_presets(lua)
     DL(lua).OpenEditor(i)
     c = card(lua)
-    t = rows(lua)[0].tile
+    t = rows(lua)[0]
     assert float(c.clear._alpha) == 0.4 and t._enabled is False and c.name._enabled is False
     lock_presets(lua, False)
     tick(lua)
-    assert float(c.clear._alpha) == 1 and t._enabled is not False and c.name._enabled is not False and float(t._alpha) == 1, \
+    assert float(c.clear._alpha) == 1 and t._enabled is not False and c.name._enabled is not False and float(t.tile._alpha) == 1, \
         "the open card stayed locked after the refusal cleared"
     lock_presets(lua)
     tick(lua)
@@ -2368,14 +2555,20 @@ def check_leaving_a_pick_cell_with_the_button_down_drops_the_pressed_look():
     DL(lua).OpenEditor(i)
     row = rows(lua)[0]
     t = row.tile
-    ring0, row0 = [rgba(e) for e in seq(t.hl)], [rgba(e) for e in seq(row.edges)]
-    script(lua, t, "OnEnter")
-    script(lua, t, "OnMouseDown")
-    assert rgba(t.hl[1])[3] == 1.0
-    script(lua, t, "OnLeave")
-    assert not t.fsPressed and not t.fsHover
-    assert [rgba(e) for e in seq(t.hl)] == ring0 and [rgba(e) for e in seq(row.edges)] == row0, "leaving with the button down kept a look"
-    script(lua, t, "OnClick")
+    ring0, row0, fill0 = [rgba(e) for e in seq(t.hl)], [rgba(e) for e in seq(row.edges)], rgba(row.fill)
+    script(lua, row, "OnEnter")
+    script(lua, row, "OnMouseDown")
+    assert rgba(row.edges[1])[3] == 1.0 and row.fsPressed
+    script(lua, row, "OnLeave")
+    assert not row.fsPressed and not row.fsHover
+    assert [rgba(e) for e in seq(t.hl)] == ring0 and [rgba(e) for e in seq(row.edges)] == row0 and rgba(row.fill) == fill0, \
+        "leaving with the button down kept a look"
+    # hiding the card drops both states too
+    script(lua, row, "OnEnter")
+    script(lua, row, "OnMouseDown")
+    script(lua, row, "OnHide")
+    assert not row.fsPressed and not row.fsHover and rgba(row.fill) == fill0
+    script(lua, row, "OnClick")
     tile = g(lua).FSTotemChooser.tiles[1]
     ring0 = [rgba(e) for e in seq(tile.hl)]
     script(lua, tile, "OnEnter")
@@ -2400,17 +2593,17 @@ def check_a_disabled_row_does_not_light_its_edge_and_every_editor_texture_is_pix
     lock_presets(lua)
     DL(lua).RefreshCard()
     dim = [rgba(e) for e in seq(row.edges)]
-    script(lua, row.tile, "OnEnter")
+    script(lua, row, "OnEnter")
     assert [rgba(e) for e in seq(row.edges)] == dim, "a disabled row lit its edge on hover"
-    script(lua, row.tile, "OnLeave")
+    script(lua, row, "OnLeave")
     lock_presets(lua, False)
     DL(lua).RefreshCard()
-    script(lua, row.tile, "OnEnter")
+    script(lua, row, "OnEnter")
     assert [rgba(e) for e in seq(row.edges)] != base, "a live row does not light its edge on hover"
-    script(lua, row.tile, "OnLeave")
+    script(lua, row, "OnLeave")
     # every edge and glyph texture of the editor is snapped to the pixel grid, bias 0
     c = card(lua)
-    script(lua, row.tile, "OnClick")
+    script(lua, row, "OnClick")
     chooser = g(lua).FSTotemChooser
     groups = [c.edges, c.nameEdges, c.close.edges, c.close.glyph, c.clear.edges, row.edges, row.tile.hl,
               row.up.edges, row.up.glyph, chooser.edges, chooser.tiles[1].hl]
@@ -2442,7 +2635,7 @@ def check_a_chooser_reopened_after_the_refusal_cleared_has_live_tiles():
     i = make(lua)
     DL(lua).OpenEditor(i)
     row = rows(lua)[0]
-    live_click(lua, row.tile)
+    live_click(lua, row)
     chooser = g(lua).FSTotemChooser
     assert shown(chooser)
     lock_presets(lua)
@@ -2452,7 +2645,7 @@ def check_a_chooser_reopened_after_the_refusal_cleared_has_live_tiles():
     run(lua, "FS.TotemDial.Chooser():Hide()")
     lock_presets(lua, False)
     DL(lua).RefreshCard()
-    live_click(lua, row.tile)
+    live_click(lua, row)
     assert shown(chooser)
     tiles = [chooser.tiles[k] for k in range(1, len(seq(chooser.tiles)) + 1) if shown(chooser.tiles[k])]
     assert tiles
@@ -2560,6 +2753,10 @@ CHECKS = [
     check_two_cells_with_the_same_first_totem_count_a_cast_for_the_one_pressed,
     check_each_cell_steps_its_own_preset_whatever_the_other_is_doing_in_and_out_of_combat,
     check_clear_is_one_full_width_button_padded_symmetrically_and_snapped_to_whole_pixels,
+    check_the_card_has_a_row_of_seven_outline_swatches_that_choose_the_slots_colour,
+    check_the_swatches_light_on_hover_and_press_restore_and_dim_while_the_presets_cannot_be_saved,
+    check_the_card_layout_matches_the_mockup_on_whole_pixels_at_every_scale,
+    check_each_drop_order_row_is_one_button_for_its_whole_width_with_the_arrows_on_top,
     check_the_close_x_and_the_arrows_are_drawn_on_whole_pixels_with_equal_margins_at_every_scale,
     check_every_interactive_editor_element_has_hover_pressed_and_disabled_looks_and_restores_exactly,
     check_the_name_box_the_pick_cells_and_the_row_light_up_on_hover_and_restore,

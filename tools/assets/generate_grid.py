@@ -51,7 +51,7 @@ answer to match. PERSPECTIVE_OVER_HEIGHT below pins the ratio that actually
 governs the shape, derived for a typical planner canvas (screen element approx
 1600px wide for the 2560px virtual screen, making the 183px-tall grid section
 render about 114px tall, so 520/114 ~= 4.5). Line DENSITY has the same
-dependency, hence CSS_CANVAS_W. Both are named and isolated here: if Parker
+dependency, hence CSS_CANVAS_W. Both are named and isolated here: if the player
 says the convergence or the line spacing reads wrong against the mockup, these
 two numbers are the tuning surface and nothing else needs to move.
 

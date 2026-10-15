@@ -45,14 +45,14 @@ end
 --
 -- The input is a PROMPT LINE inside the terminal, not a box: no border, no
 -- ground, a green ">" and a blinking green BLOCK caret. The previous pass drew
--- a bordered slab, which is what Parker meant by "doesn't look like the mockup
+-- a bordered slab, which is what the player meant by "doesn't look like the mockup
 -- with the carret".
 local COLOR_PROMPT = { 0.224, 1, 0.078, 1 }   -- --green #39ff14
 local CARET_W = 6
 local CARET_H = 11
 local PROMPT_GAP = 6                          -- gap between ">" and the text
--- Caret geometry, matched against VS Code's block cursor, which is what Parker
--- pointed at as the reference. Measured off his screenshot of it: the block's
+-- Caret geometry, matched against VS Code's block cursor, which is what the player
+-- pointed at as the reference. Measured off a screenshot of it: the block's
 -- top is level with the ASCENDERS (the tops of l, k, d, h) and its bottom sits
 -- a couple of pixels BELOW the baseline -- it covers the character cell, not
 -- the line box.
@@ -384,7 +384,7 @@ function Chat.HookEditBoxFocusGlow(editBox)
 
     local caret, glow = editBox.fsChatCaret, editBox.fsChatCaretGlow
 
-    -- Hidden unless the box has focus, which is Parker's call after seeing the
+    -- Hidden unless the box has focus, which is the player's call after seeing the
     -- passive version: "you can hide the blinking cursor unless you are going
     -- to type something."
     --

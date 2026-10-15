@@ -23,7 +23,7 @@ local TEXT_BLEED = 3
 -- Message font size
 -------------------------------------------------------------------------------
 
--- Parker: "lets also default the chat to 14pt". Blizzard's own default is
+-- Player: "lets also default the chat to 14pt". Blizzard's own default is
 -- CHAT_FRAME_DEFAULT_FONT_SIZE (18), and a chat-cache size of 0 means "use
 -- that", so left alone each window wore 18. ForeverSTUwaveDB.chatFontSize
 -- (account-wide: per-character saved variables are discarded on this beta
@@ -144,7 +144,7 @@ function Chat.SkinChatFrame(frame, index)
 
     -- Give the message text room for its ascenders and descenders.
     --
-    -- Parker: "If the first line of chat has letters that go below the base
+    -- Player: "If the first line of chat has letters that go below the base
     -- like a g it gets cut off", and then the same at the top. Measured: the
     -- cut sits exactly at ChatFrame1's bottom edge, and the glyphs are flush
     -- to both ends.

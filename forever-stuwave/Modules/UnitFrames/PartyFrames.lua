@@ -260,7 +260,7 @@ local ROW_DEFS = {
     { unit = "party4", petUnit = "partypet4" },
 }
 
--- ALERTS LIVE OUTSIDE THE PANEL, 2026-09-21 (Parker's call).
+-- ALERTS LIVE OUTSIDE THE PANEL, 2026-09-21 (the player's call).
 --
 -- Cleansable debuffs and a MISSING party buff appear in a tray just
 -- outside the container's LEFT edge, level with the member's row. Two earlier
@@ -270,7 +270,7 @@ local ROW_DEFS = {
 --
 -- Outside solves the real problem: the panel occupies exactly the same pixels
 -- whether nobody has a debuff or everybody does, so nothing reflows and the
--- health bar is always the full width of the row. Parker: "stuff that i can
+-- health bar is always the full width of the row. Player: "stuff that i can
 -- cleanse or fort falling off should show up outside the party bounding box by
 -- the party member that way the size is always the same."
 --
@@ -304,7 +304,7 @@ local ALERT_GLOW_ALPHA_MISSING = 0.5
 
 -- Party buffs the player can provide, per class token. The tray alerts only for
 -- a buff the player KNOWS (spellbook check) and has enabled, and only when the
--- unit lacks it (an up buff never alerts, whatever time it has left: Parker, "we don't have
+-- unit lacks it (an up buff never alerts, whatever time it has left: the player, "we don't have
 -- to show it if it is there"). `names` is every aura name that satisfies it, from ANY caster:
 -- the single-target name first, then the group version (a Prayer of Fortitude from another
 -- priest covers Power Word: Fortitude).
@@ -737,7 +737,7 @@ local function ScanDebuffs(unit)
     -- never return more. That test has a hole big enough to drive the whole
     -- feature through: a filter that does nothing at all returns exactly the
     -- same rows, which is `equal`, which passed -- so on any client where RAID
-    -- is not implemented, every debuff was labelled cleansable. Parker, on a
+    -- is not implemented, every debuff was labelled cleansable. Player, on a
     -- priest: "the buffs and debuffs that are showing up i can't even cleanse".
     --
     -- The dispel type is on the aura data we already read, so there is no
@@ -1509,7 +1509,7 @@ local function BuildPartyRow(unit, frameName, parent)
     -- own columns, which left a 69px health bar in a 162px row with dead space
     -- either side. The mock has no side columns at all: `.php` is `flex:2.4`
     -- spanning the whole of `.pmain`, with the role chip ABOVE it in the name
-    -- row. Parker on seeing the columns: "the hp bar is like 100px wide with a
+    -- row. The player on seeing the columns: "the hp bar is like 100px wide with a
     -- ton of empty space on either side ... the original mock was how i wanted
     -- it to look". (The icons briefly overlaid the bar's ends after this; see
     -- the ALERTS LIVE OUTSIDE THE PANEL note near ALERT_ICON_SIZE above for
@@ -1947,7 +1947,7 @@ local function UpdateRowAlerts(frame)
 
     -- Aura reads are refused under combat lockdown, and each refusal costs a
     -- long error string; five rows on a ticker was the bulk of the memory
-    -- Parker watched climb. Hold whatever is already on the row instead.
+    -- The player watched climb. Hold whatever is already on the row instead.
     if not FS.AurasReadable() then return end
 
     local cleansable = ScanDebuffs(unit)

@@ -1488,7 +1488,7 @@ function T.quickkeybind_hover_selects_our_button()
 end
 
 function T.quickkeybind_mouse_button_4_reaches_the_binder()
-    -- Parker: binding a custom button to mouse button 4 "wouldn't take".
+    -- The player: binding a custom button to mouse button 4 "wouldn't take".
     qkShow()
     for _, btn in ipairs({ __button(2, 3), stanceButton(1), petButton(2) }) do
         wipe(__qk.keys)

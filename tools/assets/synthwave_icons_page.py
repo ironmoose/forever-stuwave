@@ -61,7 +61,7 @@ table.grid td.nm small{display:block;color:var(--muted);font-size:10px;font-weig
 <body>
 <h1>SYNTHWAVE ICON STYLES</h1>
 <div class="ref">DESIGN REFERENCE / STYLE MOCKUP, 2026-10-14</div>
-<p class="sub">Parker's idea: <b>do not hand draw the tab and micro menu icons, restyle Blizzard's own</b>. Four ways to do it, shown on the six Shaman buff tab icons and the whole micro menu. Pick a style (or a style per surface) and the next phase bakes it. Everything below is at the real in game size unless a label says zoom; judge <b>32 px</b> for buff tiles and <b>16 px</b> for the micro menu.</p>
+<p class="sub">the player's idea: <b>do not hand draw the tab and micro menu icons, restyle Blizzard's own</b>. Four ways to do it, shown on the six Shaman buff tab icons and the whole micro menu. Pick a style (or a style per surface) and the next phase bakes it. Everything below is at the real in game size unless a label says zoom; judge <b>32 px</b> for buff tiles and <b>16 px</b> for the micro menu.</p>
 <table class="styles">
 <tr><td class="l">A</td><td class="n">WIREFRAME</td><td class="c">Edge detected thin neon lines (violet weak, pink mid, cyan or element accent strong, white hot core) on a near black violet ground, soft glow.</td><td class="k">Baked .tga per icon and size, plus the regeneration script (tools/assets/synthwave_icons.py).</td></tr>
 <tr><td class="l">B</td><td class="n">GRADIENT MAP</td><td class="c">Luminance mapped onto the STUwave ramp (deep violet, pink, accent), shapes kept, faint scanline.</td><td class="k">Baked .tga per icon and size, same script.</td></tr>

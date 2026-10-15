@@ -5,7 +5,7 @@
 -- on a 30 wide vertical tape left of the character (anchor tapeL), the TARGET's on an identical one right
 -- of it (anchor tapeR). Both carry the SAME chevron track, half width C.HW (10: 20 across, 5 inset from each
 -- side edge): the target used to run the mockup's wider hw 14 and its chevrons reached the plate edge while
--- yours stopped short (Parker, in game: they should look the same). Both are runs of the shared chevron engine
+-- yours stopped short (player, in game: they should look the same). Both are runs of the shared chevron engine
 -- (ChevronCastBar.lua, vertical, TEXTURES_UP): 20 chevrons nested at the mockup pitch, dim at rest,
 -- lit from the bottom as the cast fills. gunsight-hud pieces only; the info boxes (boxL / boxR) are
 -- GunsightBoxes.lua's: BuildTape asks it for the box and hands the box's members to CastBars (see EXPORTS).

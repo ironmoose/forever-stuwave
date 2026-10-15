@@ -301,7 +301,7 @@ function Chat.ApplyWindowState()
     end
 
     -- Maximised, the panel goes OVER everything -- and this is now ONE call,
-    -- which is the whole point of the chat terminal container. Parker:
+    -- which is the whole point of the chat terminal container. The player:
     -- "wouldn't it be easier if like the whole chat panel was its own group
     -- and you just changed the strata of the container group and all the stuff
     -- inside stayed."

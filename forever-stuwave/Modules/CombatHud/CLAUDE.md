@@ -18,9 +18,9 @@ The combat HUD: HudSpells -> HudProfiles -> HudLogic decide what to show, Combat
 - Target debuffs: `TargetDebuffs.lua` (`FS.TargetDebuffs`: `Subscribe(fn(list, epoch))`, `Unsubscribe`, `Get`) is the only data source for the `debuffsH` and `debuffsV` modules in `GunsightDots.lua`. It reads auras only while `FS.AurasReadable()`, keeps a cast ledger in combat (an estimate, see its header), and takes Priest and Warlock rows from the Hud DoT ledger. An entry with `expires == nil` has no known duration (H shows "?" and no bar track, V skips it; a cast is timed from a snapshot of that spell id or name, else `SPELL_SECONDS` in TargetDebuffs.lua (Warrior filled), else HudSpells); `expires <= GetTime()` is absent, drawn only in combat.
 
 ## New Gunsight module: show/hide checklist
-Everything on the target side hides with no target (Parker, live, Shaman: an IMBUE chip floated alone with no target; self buff reminders belong on the player side, not here). Before a module is done:
+Everything on the target side hides with no target (player, live, Shaman: an IMBUE chip floated alone with no target; self buff reminders belong on the player side, not here). Before a module is done:
 - Name its visibility contract: target (hides with no target, the default for `class`), dots (`FS.TargetTakesDots`), or always (only the player side, never the target side).
-- A `class` module needs no gating code of its own; do not add a `showWithoutTarget` style exception without Parker's recorded approval.
+- A `class` module needs no gating code of its own; do not add a `showWithoutTarget` style exception without the player's recorded approval.
 - Every frame, texture and font string hangs under the host the registry hands `build(host)`, never `UIParent` or `Gunsight.root`, so the host's hide takes it along.
 - `onHide` stops the OnUpdate and every event the module registered; `onShow` restarts them and re-reads state (the spellbook, auras and weapons may have changed while hidden).
 - Anything that happens while hidden and cannot be re-read later (a cast, a learned id) needs a listener that stays on through `onHide` and only records data (a Shaman imbue cast with no target is the example; that data model now lives in `ShamanBuffs.lua` because a self buff reminder belongs on the player side); everything else is re-read in `onShow`.

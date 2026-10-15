@@ -286,7 +286,7 @@ function T.constants_match_the_mockup()
     eq(C.N, MU.N, "chevron count")
     -- ONE half width for both tapes: yours (the mockup's hw:10 on the player tape). The mockup's target
     -- default (hw 14) is deliberately NOT followed: it drew the target's chevrons to the plate edge, and
-    -- Parker wants the two tapes alike (see the_target_track_is_inset_like_your_track).
+    -- The player wants the two tapes alike (see the_target_track_is_inset_like_your_track).
     eq(C.HW, MU.HW_YOU, "half width is the player tape's")
     eq(C.CHEV_D, MU.CHEV_D); near(C.CHEV_T, MU.CHEV_T, 1e-9)
     eq(C.TICKS, MU.TICKS); eq(C.TICK_DIV, MU.TICK_DIV); eq(C.TICK_MID, MU.TICK_MID)
@@ -367,7 +367,7 @@ function T.the_run_is_a_vertical_engine_run_seated_from_the_anchor()
     near(W.tgt.run.segW, W.you.run.segW, 1e-9, "20 wide on both tapes")
 end
 
--- Parker, in game: "on my cast bar the chevrons don't extend to the edge and the target ones do. They
+-- Player, in game: "on my cast bar the chevrons don't extend to the edge and the target ones do. They
 -- should look the same." Your tape is the approved look, so the target's track must sit in its tape
 -- exactly as yours does: the same chevron size and pitch, the same inset from the side edges and the same
 -- padding at both ends. The insets are measured off the built frames (anchor rect against the engine's own

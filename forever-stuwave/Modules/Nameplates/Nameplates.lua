@@ -27,7 +27,7 @@ local QUEST_ICON_GAP = 4
 -- auras, so no aura data ever enters addon Lua and the row works in combat; the
 -- Plater design). Two groups share its flow layout, "own" first: the player's own
 -- debuffs (the DoT row, pink border) and everyone else's (violet border).
--- Parker, 2026-10-02: "the dots and debuffs are not showing up on the nameplates".
+-- Player, 2026-10-02: "the dots and debuffs are not showing up on the nameplates".
 -- Blizzard's own AurasFrame cannot be borrowed: HideBlizzardPlate hides its
 -- UnitFrame and the reparent path threw "Can't measure restricted regions".
 local AURA_ICON_SIZE = 18
@@ -85,7 +85,7 @@ local COLOR_BAR_TAPPED = { 0.42, 0.42, 0.45, 1 }     -- tapped by someone else: 
 -- Power strip fill colors, keyed by numeric power type via GetPowerTypeColors
 -- below. Mana reuses FS.Theme.COLOR_POWER (the existing cyan token, applied
 -- at runtime -- see GetPowerTypeColors' own comment); rage/energy are new,
--- addon-local colors (Parker's design call, not new Theme.lua tokens --
+-- addon-local colors (the player's design call, not new Theme.lua tokens --
 -- PartyFrames.lua's own POWER_COLORS table is a DIFFERENT palette by design,
 -- not reused here).
 local COLOR_POWER_RAGE = { 1, 0.302, 0.302, 1 }    -- #ff4d4d
@@ -105,7 +105,7 @@ local COLOR_REACTION_FRIEND  = { 0.224, 1, 0.078, 1 }  -- #39ff14
 -- that happen to share a hue. Do NOT add a Theme.lua token for this.
 local COLOR_QUEST_AMBER = COLOR_REACTION_NEUTRAL
 
--- Name-text reaction palette (Parker's literal design call): white/yellow/red,
+-- Name-text reaction palette (the player's literal design call): white/yellow/red,
 -- a DELIBERATELY separate hue set from the green/amber/red palette above, which
 -- colors the health BAR FILL for the same three reaction buckets. Two
 -- different visual signals sharing one hue per bucket would read as the same
@@ -115,7 +115,7 @@ local COLOR_NAME_HOSTILE = { 1, 0.15, 0.15, 1 }
 local COLOR_NAME_NEUTRAL = { 1, 0.9, 0.1, 1 }
 local COLOR_NAME_FRIENDLY = { 1, 1, 1, 1 }
 
--- Engagement/threat palette (Parker's design call): for an ATTACKABLE unit
+-- Engagement/threat palette (the player's design call): for an ATTACKABLE unit
 -- that is on a threat table, both the health-bar fill and the name text use
 -- one of these two so the two read as the same color -- see
 -- GetEngagementColor below. A unit with no threat yet (not engaged) has no
@@ -404,7 +404,7 @@ end
 
 -- Threat/engagement color for an attackable unit, shared by the fill
 -- (UpdateFillColor) and name (UpdateName) paths so the two match on a mob
--- once it is engaged -- Parker's ask. UnitCanAttack/UnitThreatSituation's
+-- once it is engaged -- the player's ask. UnitCanAttack/UnitThreatSituation's
 -- secrecy on a nameplate unit token is UNVERIFIED on this client, so both are
 -- FS.IsSecret-guarded before any truth-test/nil-check, same secrecy-first-
 -- then-nil ordering as GetReactionColor's own comment above. Argument order
@@ -626,7 +626,7 @@ end
 -- The cut is a FIXED shape: only the static wedges at the BAR's corners are drawn, and the
 -- fill is clipped by them, so its right end is square at every level and takes the chamfer only
 -- when it reaches the end of the bar. There is deliberately NO leading-edge quad under "cut"
--- (Parker, playtest 2026-10-04: "when the HP is dropping it has the line and the corner"): a
+-- (player, playtest 2026-10-04: "when the HP is dropping it has the line and the corner"): a
 -- quad riding the fill's right edge (Theme.AddLeadingEdgeCorners) is right for a rounded pill
 -- end, but here it carved a travelling bottom-right notch into the fill and into the caret line
 -- at every mid-bar level, and at full HP it drew a second, doubly opaque copy of the static
@@ -917,7 +917,7 @@ local function CreatePlateFrame()
     local nameText = root:CreateFontString(nil, "OVERLAY")
     ApplyFont(nameText, FONT_SIZE)
     nameText:SetTextColor(unpack(COLOR_TEXT))
-    -- Left-aligned off the health bar's own LEFT edge (Parker's ask), not
+    -- Left-aligned off the health bar's own LEFT edge (the player's ask), not
     -- centered -- a long name then grows rightward instead of shifting the
     -- whole label off-center over the bar.
     nameText:SetPoint("BOTTOMLEFT", healthBar, "TOPLEFT", 0, 2)

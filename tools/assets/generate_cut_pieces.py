@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates the CUT-CORNER (chamfered) chrome pieces that replace the rounded set.
 
-Decision (Parker, 2026-10-02): chamfered cut corners are the default chrome
+Decision (player, 2026-10-02): chamfered cut corners are the default chrome
 everywhere and rounded is retired. EVERY rectangle or square is two-corner (2C:
 TOP-LEFT + BOTTOM-RIGHT cut, TOP-RIGHT + BOTTOM-LEFT square), panels, bars and
 tooltips included; there is no four-corner chrome (the older four-corner

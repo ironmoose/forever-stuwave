@@ -1416,7 +1416,7 @@ check(b.pw_shield == nil, "Power Word: Shield is not a maintained buff")
 at(2)
 check(nxt() == "shoot", "a young fight: no Plague, no Death, the wand, got " .. tostring(nxt()))
 at(7.9)
-check(nxt() == "shoot", "Parker chose 8s: still no Plague (or Death) at 7.9s, got " .. tostring(nxt()))
+check(nxt() == "shoot", "the player chose 8s: still no Plague (or Death) at 7.9s, got " .. tostring(nxt()))
 at(8.1)
 check(nxt() == "dplague", "after 8s: Devouring Plague, got " .. tostring(nxt()))
 cast("Devouring Plague")
@@ -2244,7 +2244,7 @@ check(S().seal and S().seal.key == "sor", "a secret aura entry changes nothing")
 """)
 
 case("seal_zero_value_scan_reads_as_an_empty_list", "PALADIN")(r"""
--- Parker's live inspect: a buffed player reads fine; a buffless one may return ZERO values at index 1,
+-- The player's live inspect: a buffed player reads fine; a buffless one may return ZERO values at index 1,
 -- which for the seal (and only the seal) means 'no auras', so the seal rule can fire
 at(0)
 C_UnitAuras.GetAuraDataByIndex = function() end                    -- ZERO values, no throw

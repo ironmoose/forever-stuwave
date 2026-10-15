@@ -4,7 +4,7 @@
 WHY THESE EXIST
 
 The active tab started as a flat SetColorTexture rectangle, became a rounded
-nine-sliced plate with an ADD bloom, and Parker rejected both: "the tab bg is
+nine-sliced plate with an ADD bloom, and the player rejected both: "the tab bg is
 just a box right now and should be cool synthwave looking", then "rounding
 corners are nice for the tab but it feels out of place" and "the gradient bar
 running across the tab looks weird", and finally "the tabs are better but look

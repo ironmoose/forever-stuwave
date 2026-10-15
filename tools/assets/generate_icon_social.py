@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates icon_social.tga: the friends/person glyph, rendered as a hologram.
 
-Parker: "Still have the person icon but instead of it just being solid have it
+Player: "Still have the person icon but instead of it just being solid have it
 look all holographic with the lines and stuff."
 
 So the silhouette stays the familiar head-and-shoulders -- it has to read as

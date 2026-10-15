@@ -103,7 +103,7 @@ local BAG_IDS = { 0, 1, 2, 3, 4 }
 -- on failure, so a client-specific API gap only omits that one readout.
 -------------------------------------------------------------------------------
 
--- LOCAL time, on Parker's call -- "can we make it my local time. Not server
+-- LOCAL time, on the player's call -- "can we make it my local time. Not server
 -- time?".
 --
 -- The two are different functions, and the naming is the trap: GetGameTime()
@@ -112,7 +112,7 @@ local BAG_IDS = { 0, 1, 2, 3, 4 }
 --
 -- GetGameTime is kept only as a fallback for a client without date(), which is
 -- theoretical here but costs one line.
--- 12-hour, on Parker's call ("can you make it non-military time").
+-- 12-hour, on the player's call ("can you make it non-military time").
 --
 -- The hour is run back through tonumber to drop %I's leading zero -- "1:05 AM"
 -- rather than "01:05 AM" -- since a padded 12-hour clock reads like the
@@ -269,7 +269,7 @@ local BAGS_COLOR_OK = { 0.133, 1, 0.463 }    -- --green
 local BAGS_COLOR_WARN = { 1, 0.714, 0.282 }  -- --amber
 local BAGS_COLOR_FULL = { 1, 0.180, 0.592 }  -- --pink
 
--- Perf segments. Parker is seeing 25 fps in Undercity and wants to know whether
+-- Perf segments. The player is seeing 25 fps in Undercity and wants to know whether
 -- this addon is the cause, so the bar reports OUR cost specifically rather than
 -- a global number that cannot answer the question.
 --

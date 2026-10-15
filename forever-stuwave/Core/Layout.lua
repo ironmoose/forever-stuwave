@@ -10,7 +10,7 @@ local addonName, FS = ...
 -- Layout
 -------------------------------------------------------------------------------
 
--- Canonical layout/anchors, baked from Parker's finalized planner export
+-- Canonical layout/anchors, baked from the player's finalized planner export
 -- (artifact 7nuxcfvA6WA1eg8bMqcsZq). Every entry anchors point="CENTER" of the
 -- frame to relPoint="CENTER" of UIParent; x/y are the game-px offset from
 -- UIParent's center to the element's own center at 2560x1440 (Y is +up), so
@@ -89,7 +89,7 @@ FS.Layout = FS.Layout or {
     -- and collide. At 773 / 808 they end at 983 / 978 and clear it.
     buffs       = { point = "CENTER", relPoint = "CENTER", x = 773,   y = 637,  w = 420,  h = 80  },
     debuffs     = { point = "CENTER", relPoint = "CENTER", x = 808,   y = 493,  w = 340,  h = 56  },
-    -- x shifted from 1136 to 1126 (2026-09-25, Parker: "cut off on the right
+    -- x shifted from 1136 to 1126 (2026-09-25, Player: "cut off on the right
     -- side"). At the design canvas's right edge (half-width 1280), the old
     -- x=1136 left the map's own right edge (1136 + 250/2 = 1261) only 19
     -- design px of margin -- and ApplyChrome's outer glow (GLOW_SIZE =

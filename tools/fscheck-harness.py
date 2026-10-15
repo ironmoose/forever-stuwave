@@ -2538,7 +2538,7 @@ scan(ForeverSTUwaveDB.fscheck)
 """
 )
 
-case("hot_rerun_keeps_the_bar_record_and_chat_tells_parker_what_to_watch")(
+case("hot_rerun_keeps_the_bar_record_and_chat_tells_the_player_what_to_watch")(
     r"""
 hotMock(1)
 runCmd("hot")
@@ -2662,7 +2662,7 @@ check(f._events.UNIT_ABSORB_AMOUNT_CHANGED == "unit:player,party1" and f._events
     "absorb and prediction events must be unit events for player and party1")
 check(string.find(o.misc.cleuRegister, "forbidden (ADDON_ACTION_FORBIDDEN", 1, true), "CLEU snapshot records the forbidden result: " .. tostring(o.misc.cleuRegister))
 check(__cleuAttempts == 0, "COMBAT_LOG_EVENT_UNFILTERED must never be registered (protected on Forever): " .. tostring(__cleuAttempts))
-check(said("Run /fscheck priest again"), "chat line must tell Parker to run the command again")
+check(said("Run /fscheck priest again"), "chat line must tell the player to run the command again")
 noOnUpdate()
 check(said("priest"), "priest line missing")
 scan(p)
@@ -4315,7 +4315,7 @@ def cleu_register_check(root: Path) -> int:
     return 0
 
 
-# --- the shaman check: protected calls only where Parker types them -------------------------------------------
+# --- the shaman check: protected calls only where the player types them -------------------------------------------
 # /fscheck shaman must never call a protected or blocked API by itself: SetMultiCastSpell and DestroyTotem run only
 # inside the two subcommand functions, the secure attributes of the totem button row are written only inside the three
 # sync functions (reached from SH.SyncStrip, which SH.ButtonsOn calls after refusing combat), and Blizzard's totem

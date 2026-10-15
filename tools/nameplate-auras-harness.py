@@ -1056,12 +1056,12 @@ check(ch, "AddPanelChrome was not given the plate root")
 check(colorEq(ch.opts.accent, FS.Theme.COLOR_BORDER) and ch.opts.glowAlpha == 0.30, "accent/glowAlpha not the old plate values")
 check(root.fsGlow == ch.glow and root.fsBorder == ch.border, "fsGlow/fsBorder are not the AddPanelChrome handles")
 
--- Parker 2026-10-04 (playtest): a quad riding the fill's right edge cut a travelling BOTTOM-RIGHT
+-- Player 2026-10-04 (playtest): a quad riding the fill's right edge cut a travelling BOTTOM-RIGHT
 -- notch into the fill (and into the caret line) at every mid-bar level. The cut shape is FIXED:
 -- the static erase at the bar's own corners is the whole mask, so the fill's right end is
 -- square mid-bar and takes the chamfer only when it reaches the end.
 check(#__leadCorners == 0, "a leading-edge corner quad was built under cut: " .. #__leadCorners)
--- Parker 2026-10-04 (second playtest): "slight black in the corners". The unit-sized anti_cut
+-- Player 2026-10-04 (second playtest): "slight black in the corners". The unit-sized anti_cut
 -- quads overshot the nine-sliced stroke's diagonal at the engine's own texel ratio. Under cut each
 -- bar gets a NINE-SLICE erase laid over the plate ROOT rect (the stroke's own rect, so the engine
 -- scales wedge and stroke together at any plate scale), hosted on the bar's clipping mask so the

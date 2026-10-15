@@ -2583,7 +2583,7 @@ def _check_buff_other_caster_and_group() -> None:
 
 
 def _check_buff_present_never_alerts() -> None:
-    """Parker: show a buff alert only when the buff is MISSING. Any buff that is up, however
+    """The player: show a buff alert only when the buff is MISSING. Any buff that is up, however
     little time it has left, gives no tile."""
     rt = _buff_rt(known=(FORT,))
     row = _party1(rt)

@@ -2050,7 +2050,7 @@ end
 function T.the_settings_default_to_11_4_and_100_and_draw_the_taller_rails()
     local W = world()
     local C, s = FS.GunsightBoxes.C, S()
-    -- Parker's call after playing: a taller health rail (the config mockup was updated to 11), resource and width as mocked
+    -- The player's call after playing: a taller health rail (the config mockup was updated to 11), resource and width as mocked
     eq(s.hpHeight.default, 11, "health rail default"); eq(s.hpHeight.default, MB.CFG.HEALTH); eq(s.powerHeight.default, 4, "resource rail default")
     eq(s.powerHeight.default, MB.CFG.RESOURCE); eq(s.width.default, 100, "width default"); eq(s.width.default, MB.CFG.WIDTH)
     -- a slider px is half a mockup image px: 4 is still the option B power rule (2), 11 is a 5.5 image px health rule

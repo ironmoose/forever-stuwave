@@ -2765,7 +2765,7 @@ check(not FS.CombatHud.IsEnabled(), "disabled")
 """)
 
 # ---------------------------------------------------------------------------------------
-# Cut corners (Parker, 2026-10-02): tiles are TOP-LEFT and BOTTOM-RIGHT chamfered like every
+# Cut corners (player, 2026-10-02): tiles are TOP-LEFT and BOTTOM-RIGHT chamfered like every
 # other rectangle. The fill is hud_tile_cut2.tga (chamfer baked at 1/6 of the tile), the ring a
 # cut outline nine-slice, the glow the cut glow, the icon seated inside the cut.
 # ---------------------------------------------------------------------------------------
