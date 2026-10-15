@@ -819,9 +819,7 @@ local function NewTileHover(t)
 end
 
 -- A dashed box on a frame, drawn in whole pixels (the mockup's dbox: 2 pixels on, 2 off, one pixel thick): a pool of
--- snapped textures on `host`, seated to the frame by SeatDashBox, which grows the pool to the runs the pixel size needs.
-local DASH_POOL = 40
-
+-- snapped textures on `host`, seated to the frame by SeatDashBox, which creates them as the pixel size needs runs.
 local function NewDashTexture(box)
     local t = box.host:CreateTexture(nil, "OVERLAY", nil, 2)
     Snap(t)
@@ -831,9 +829,7 @@ local function NewDashTexture(box)
 end
 
 local function NewDashBox(host)
-    local box = { host = host }
-    for _ = 1, DASH_POOL do NewDashTexture(box) end
-    return box
+    return { host = host }
 end
 
 local function SeatDashBox(box, frame)
