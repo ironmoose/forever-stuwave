@@ -1187,8 +1187,8 @@ def check_window_follows_the_rect() -> None:
                 size, limit = k.spec.size, k.spec.limit
                 tw, th = (c[1] - c[0]) * size[1], (c[3] - c[2]) * size[2]
                 widths.add(round(rw / rh, 2))
-                inside = limit is not None and all(float(limit[1]) - 1e-4 <= c[0] and c[1] <= float(limit[2]) + 1e-4
-                                                    and float(limit[3]) - 1e-4 <= c[2] and c[3] <= float(limit[4]) + 1e-4 for _ in (0,))
+                inside = limit is not None and (float(limit[1]) - 1e-4 <= c[0] and c[1] <= float(limit[2]) + 1e-4
+                                                and float(limit[3]) - 1e-4 <= c[2] and c[3] <= float(limit[4]) + 1e-4)
                 ok = (abs(tw / th - rw / rh) <= 0.02 * rw / rh or abs(tw / th * rh - rw) <= px) and inside and th > 0
                 boost = i.get("boostCoords")
                 if boost is not None:
@@ -1197,6 +1197,27 @@ def check_window_follows_the_rect() -> None:
                     bad[(count, scale, n)] = (round(tw / th, 3), round(rw / rh, 3))
     check("window.the_texel_aspect_follows_the_rendered_rectangle_when_the_keys_shrink", seen > 30 and not bad and len(widths) >= 3,
           f"{seen} keys, aspects {sorted(widths)}, bad {list(bad.items())[:3]}")
+
+
+def check_window_survives_a_style_switch() -> None:
+    """Switching the micro style from stock to gradient dresses each key's chain again without coords, so the ADD copy must keep the
+    window the key was sized with and still show what the glyph shows (the fitted window, not the data's nominal one), at 12 and 14
+    keys."""
+    bad, seen = {}, 0
+    for count in (12, 14):
+        w = World(count).login()
+        w.get("FS.Config.Set")("icons.microstyle", "gradient")
+        keys = list(w.get("FS.MicroBars.keys").values())
+        for n, (k, i) in enumerate(zip(keys, (dict(v.items()) for _, v in w.call("h_glyphInfo").items()))):
+            if i["kind"] != "runtime":
+                continue
+            seen += 1
+            c = [float(i["c"][m]) for m in (1, 2, 3, 4)]
+            boost = i.get("boostCoords")
+            fitted = [float(v) for v in w.get("FS.MicroBars.GlyphView")(k.spec, k.aspect, k.drawAspect)[:4]]
+            if boost is None or [float(boost[m]) for m in (1, 2, 3, 4)] != c or any(abs(a - b) > 1e-6 for a, b in zip(c, fitted)):
+                bad[(count, n)] = (c, boost)
+    check("window.a_style_switch_leaves_the_add_copy_on_the_keys_fitted_window", seen >= 20 and not bad, f"{seen} keys, bad {list(bad.items())[:2]}")
 
 
 def check_fit_window() -> None:
@@ -1252,8 +1273,10 @@ CLASS_V5_BOOST = {"WARRIOR": "0.03", "PALADIN": "0.04", "HUNTER": "0.83", "ROGUE
 for _tok, _boost in CLASS_V5_BOOST.items():
     V5_ENTRIES[f"class.{_tok}"] = ('file = "Interface\\\\Icons\\\\ClassIcon_' + CLASS_NAMES[_tok] + '", coords = { 0.07, 0.93, 0.1506, 0.8494 }, '
                                    'size = { 64, 64 }, limit = { 0.07, 0.93, 0.07, 0.93 }, fam = "house_cyan", boost = ' + _boost)
-# The micro keys whose close-up crop reads as a blob (positions 2, 4, 5, 7, 10 and 12 of the v5 row), by the name the data holds.
-ZOOMED = {"micro.spellbook", "micro.achievement", "micro.questlog", "micro.lfd", "micro.worldmap", "micro.collections"}
+# The twelve micro keys that draw a classic button texture, by the name the data holds: the close-up crop turns them into blobs.
+# The atlas keys, the faction emblems and the class icons keep v5's window.
+ZOOMED = {f"micro.{n}" for n in ("spellbook", "talents", "achievement", "questlog", "socials", "lfd", "mainmenu", "help", "worldmap", "ej",
+                                  "collections", "store")}
 
 
 def data_lines() -> dict[str, str]:
@@ -1273,9 +1296,9 @@ def data_lines() -> dict[str, str]:
 
 
 def check_zoom_data() -> None:
-    """The zoom-out touches only the keys it was asked for. Every other entry of the icon data is v5's text, and a zoomed entry
-    is v5's text plus one `zoom` value in (0, 1] (0 is v5's close-up, 1 is the whole glyph): so the other keys, and every key's
-    texture, window, limit, family and boost, are pixel identical to what Parker approved."""
+    """The zoom-out is data on the classic button keys only. The atlas keys, the faction emblems and the class icons are v5's text, and a
+    zoomed entry is v5's text plus one `zoom` value in (0, 1] (0 is v5's close-up, 1 is the whole glyph): every key's texture,
+    close-up window, limit, family and boost stay what Parker approved; only the zoom is new."""
     got = data_lines()
     check("zoom.the_data_has_exactly_the_v5_entries", set(got) == set(V5_ENTRIES), f"{sorted(set(got) ^ set(V5_ENTRIES))}")
     bad, zoomed = [], set()
@@ -1289,7 +1312,7 @@ def check_zoom_data() -> None:
         if base != V5_ENTRIES.get(name):
             bad.append((name, base))
     check("zoom.every_entry_is_v5s_text_apart_from_the_zoom_value", not bad, f"{bad[:2]}")
-    check("zoom.exactly_the_asked_for_keys_carry_a_zoom", zoomed == ZOOMED, f"{sorted(zoomed ^ ZOOMED)}")
+    check("zoom.exactly_the_classic_button_keys_carry_a_zoom", zoomed == ZOOMED, f"{sorted(zoomed ^ ZOOMED)}")
     # and the spec a key is built from carries the data's zoom, nothing more: a key with none must not get one on the way
     w = World(12).login()
     mb, data = w.get("FS.MicroBars"), w.get("FS.IconStyleData")
@@ -1562,7 +1585,7 @@ def check_deck(lean: float, gap: float) -> None:
     c = consts()
     check("deck.exports_the_resize_api", c["hasSet"] and c["getMicro"] > 0, f"{c}")
     natural12 = c["keyW"] + 11 * (c["keyW"] * (1 - lean) + gap)
-    check("deck.micro_max_is_the_12_key_row_rounded_up", c["microMax"] == math.ceil(natural12 - 1e-4) and 0 <= c["microMax"] - natural12 < 1,
+    check("deck.micro_max_is_the_12_key_row_rounded_up", c["microMax"] == math.ceil(natural12 - 1e-9) and 0 <= c["microMax"] - natural12 < 1,
           f"max {c['microMax']} natural {natural12:.3f}")
     max_w = 2 * c["pad"] + c["microMax"] + c["divider"] + c["bagW"]
     check("deck.layout_w_is_the_max_of_the_parts_sum", layout_deck_w() == max_w, f"Layout.lua says {layout_deck_w()}, parts sum {max_w}")
@@ -1911,6 +1934,7 @@ def main() -> int:
     check_no_empty_wedge()
     check_crisp()
     check_window_follows_the_rect()
+    check_window_survives_a_style_switch()
     check_fit_window()
     check_zoom_data()
     check_glyph_view()

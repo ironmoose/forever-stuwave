@@ -505,8 +505,7 @@ local function Paint(key, v)
         Tint(key.glyph, v.glyph, v.glyphA)
         -- the game's texture wears a look: the base stays grey, the ramp supplies the colour (grey too when disabled)
         if not key.chain.active then
-            FS.IconStyle.Dress(key.chain, key.spec.file, nil, key.spec)
-            SetWindow(key)
+            FS.IconStyle.Dress(key.chain, key.spec.file, nil, key.spec)   -- no coords: the ADD copy keeps the window SetWindow gave it
         end
         key.glyph:SetDesaturated(true)
         -- a disabled key (dimmed and grey) drops the MOD ramp as a dimmed spell tile does: the ramp ignores alpha

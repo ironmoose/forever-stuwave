@@ -653,11 +653,13 @@ CLASSIC_MICRO_IDS = {
     "store": (902317, "store"),
 }
 CLASSIC_WINDOW = (5, 29, 27, 58)
-# Micro keys whose classic glyph is shown zoomed OUT: the close-up crop that fills the key cuts a button's face to about 60% of
-# its height, which turns some of them into blobs. A zoom z in (0, 1] grows the window's height from that crop (0) to the whole
-# glyph part of the texture (1) at the same width; the picture is then drawn in a narrower rectangle of its own aspect,
-# centred (MicroBars.lua GlyphView). Per key, so every other key keeps the close-up. Keyed by the micro name.
-MICRO_ZOOM = {"spellbook": 0.5, "achievement": 0.5, "questlog": 0.5, "lfd": 0.5, "worldmap": 0.5, "collections": 0.5}
+# The classic button micro keys are shown zoomed OUT: the close-up crop that fills the key cuts a button's face to about 60% of its
+# height, which turns the glyphs into blobs. A zoom z in (0, 1] grows the window's height from that crop (0) to the whole glyph
+# part of the texture (1) at the same width; the picture is then drawn in a narrower rectangle of its own aspect, centred
+# (MicroBars.lua GlyphView). One shared value, and a per key override only where a glyph needs its own (keyed by micro name).
+# The atlas keys, the faction emblems and the class icons keep the close-up (no zoom).
+MICRO_ZOOM = 0.5
+MICRO_ZOOM_OVERRIDE: dict[str, float] = {}
 ATLAS_ID = 4708813  # interface/hud/uimicromenu2x
 ATLAS_CELLS = {"professions": (397, 337, 64, 82), "guild": (265, 421, 64, 82), "housing": (331, 337, 64, 82)}
 PVP_IDS = {"Alliance": (136998, "pvp_alliance"), "Horde": (137000, "pvp_horde"), "other": (136999, "pvp_ffa")}
@@ -754,7 +756,7 @@ def micro_runtime_data(root: Path) -> tuple[dict, dict, dict]:
     micro, pvp, klass = {}, {}, {}
     for stem, (fid, local) in CLASSIC_MICRO_IDS.items():
         im = read_rgba(root, f"micro/{local}.blp")
-        micro[stem] = runtime_entry(im, CLASSIC_WINDOW, fid, fam_of[stem], limit=CLASSIC_WINDOW, zoom=MICRO_ZOOM.get(stem))
+        micro[stem] = runtime_entry(im, CLASSIC_WINDOW, fid, fam_of[stem], limit=CLASSIC_WINDOW, zoom=MICRO_ZOOM_OVERRIDE.get(stem, MICRO_ZOOM))
     sheet = read_blp2_bgra(root / "micro/uimicromenu2x.blp")
     for stem, (left, top, w, h) in ATLAS_CELLS.items():
         cell = sheet.crop((left, top, left + w, top + h))
