@@ -3173,12 +3173,12 @@ def check_an_unreadable_slot_is_logged_after_five_ticks_and_a_hidden_proven_one_
     run(lua, f"{slot}._noRect = false\n{slot}._forceLeft, {slot}._forceTop = 7, 9")
     tick(lua, 1.1)
     assert btn(lua, SHIELD).fsEngine.bad is True
-    # a slot never proven and hidden with no rect stays unproven
+    # a slot never proven and hidden with no rect is idle: nothing to prove
     lua = engine_world(pre="__acLazy = true")
     run(lua, "__acFlush()")
     run(lua, f"{slot}._noRect = true\n{slot}:Hide()")
     tick(lua, 1.1)
-    assert btn(lua, SHIELD).fsEngine.bad is True
+    assert btn(lua, SHIELD).fsEngine.bad is False
 
 
 def check_an_idle_slot_with_no_size_and_no_rect_is_not_a_fault_but_a_shown_unreadable_one_is():
@@ -3192,7 +3192,21 @@ def check_an_idle_slot_with_no_size_and_no_rect_is_not_a_fault_but_a_shown_unrea
     for _ in range(12):
         tick(lua, 1.1)
     assert not g(lua).FS.BuffTab.BT.warned.bufftab_engine_unreadable and int(g(lua).__logs) == 0, "an idle slot was reported"
-    assert btn(lua, IMBUE).fsEngine.bad is True, "a slot never seen on its tile stays unproven"
+    assert btn(lua, IMBUE).fsEngine.bad is False, "an idle slot never seen is not required, the imbue tile is proven by its main hand"
+    assert g(lua).FS.BuffTab.Engine.allProven() is True
+    shield_aura_up(lua)
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    assert bt(lua).EngineLive("shield") and float(acs(lua)[0]._alpha) == 1, "the shield tile is live in combat"
+    # the off hand slot gets a size but no readable rect: it is a fault and blocks the container again
+    leave_combat(lua)
+    run(lua, f"{off}:SetAllPoints(FS.BuffTab.BT.byKey.imbue.icon)")
+    tick(lua, 1.1)
+    assert btn(lua, IMBUE).fsEngine.bad is True and g(lua).FS.BuffTab.Engine.allProven() is False
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    assert not bt(lua).EngineLive("shield") and float(acs(lua)[0]._alpha) == 0, "an unproven sized slot hides the container"
+    leave_combat(lua)
     # a slot that was proven and then went idle keeps the proof
     lua = engine_world(pre="__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end")
     tick(lua, 1.1)

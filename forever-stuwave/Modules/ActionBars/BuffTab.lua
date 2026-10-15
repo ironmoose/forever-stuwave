@@ -1233,8 +1233,10 @@ end
 -- The PROOF pass, out of combat only (SeatEngine, and the tick every second): every slot frame of every tile read against
 -- the tile's icon BEFORE anything is written. A slot found off the icon is put back (its tile is not live until the next
 -- pass reads it right); one that cannot be read is unproven, except that an IDLE slot (hidden, or with no size: nothing to
--- draw) with no readable rect keeps the proof it already has. An unreadable slot that is not idle is logged after
--- BT.UNREADABLE_TICKS passes; an idle one never is (it has no aura to locate). Allocation free when nothing is wrong.
+-- draw) with no readable rect keeps the proof it already has, and one never proven is simply not required (it does not
+-- hold the tile, or the container, back: the off hand slot of a Shaman with no off hand). An unreadable slot that is not
+-- idle is logged after BT.UNREADABLE_TICKS passes; an idle one never is (it has no aura to locate). Allocation free when
+-- nothing is wrong.
 local function ProveEngine()
     for _, button in ipairs(BT.list) do
         local eng = button.fsEngine
@@ -1249,7 +1251,7 @@ local function ProveEngine()
                 else
                     part.ok = placed == true
                     if idle then
-                        part.nils = 0                          -- unproven, but nothing is there to be mislaid
+                        part.nils = 0                          -- unproven, but nothing is there to be mislaid or to draw
                     elseif placed == nil then
                         part.nils = (part.nils or 0) + 1
                         if part.nils >= BT.UNREADABLE_TICKS then
@@ -1258,7 +1260,7 @@ local function ProveEngine()
                     else
                         part.nils = 0
                     end
-                    if not part.ok then
+                    if not part.ok and not idle then       -- an idle slot never seen is not required
                         bad = true
                         if placed == false then
                             WarnOnce("bufftab_engine_layout", "a combat state slot is not on its tile; that tile keeps the last known state")
