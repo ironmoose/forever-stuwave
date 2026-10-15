@@ -154,8 +154,9 @@ local FONT_FLAGS = "OUTLINE"
 -- the current target's nameplate: three flat blocks side by side, yellow, blue, yellow, drawn above everything
 -- else the plate carries. The colors are pure and flat (SetColorTexture, alpha 1, no mask, no vertex color, no
 -- theming) so the mark reads clearly on any background. The blocks sit on a small child frame of the plate
--- (TARGET_MARK_LEVEL_BOOST above the plate, over the bars and the aura container) that ignores its parents'
--- alpha, so the engine's plate fades (occlusion, distance) cannot dim or tint them. Each block is a fixed
+-- (TARGET_MARK_LEVEL_BOOST above the plate, over the bars and the aura container, in the fixed TOOLTIP strata so
+-- it also draws over the Gunsight HUD and every other UI frame) that ignores its parents' alpha, so the engine's
+-- plate fades (occlusion, distance) cannot dim or tint them. Each block is a fixed
 -- TARGET_MARK_BLOCK_W x TARGET_MARK_BLOCK_H in SCREEN pixels: the size is recomputed from the plate's effective
 -- scale while the mark is up, so the engine's selected/distance plate scaling does not resize it. Off, nothing
 -- is created beyond one hidden frame and three textures per pooled plate, and the plate looks as it always did.
@@ -165,6 +166,9 @@ local TARGET_MARK_BLOCK_H = 4
 local TARGET_MARK_COLORS = { { 1, 1, 0 }, { 0, 0, 1 }, { 1, 1, 0 } }
 -- Highest sublevel of the OVERLAY layer inside the mark's own frame.
 local TARGET_MARK_SUBLEVEL = 7
+-- The mark's frame has a strata of its own, the top one, fixed: the plate root is LOW and the Gunsight HUD is MEDIUM on
+-- UIParent, so a mark that inherited the plate's strata was drawn behind the HUD.
+local TARGET_MARK_STRATA = "TOOLTIP"
 -- Frame level of the mark's frame relative to the plate; AURA_LEVEL_BOOST is the highest sibling above it.
 local TARGET_MARK_LEVEL_BOOST = AURA_LEVEL_BOOST + 15
 -- Above both stacks that rise from the health bar: the name row with the raid marker over it, and the two-row
@@ -953,6 +957,8 @@ local function CreatePlateFrame()
     -- only while the setting is on. The frame ignores its parents' alpha (feature-detected) and sits well above
     -- the plate's bars and aura container, so nothing dims, tints or covers the blocks.
     local markHost = CreateFrame("Frame", nil, root)
+    if type(markHost.SetFrameStrata) == "function" then pcall(markHost.SetFrameStrata, markHost, TARGET_MARK_STRATA) end
+    if type(markHost.SetFixedFrameStrata) == "function" then pcall(markHost.SetFixedFrameStrata, markHost, true) end
     markHost:SetFrameLevel(root:GetFrameLevel() + TARGET_MARK_LEVEL_BOOST)
     if type(markHost.SetIgnoreParentAlpha) == "function" then markHost:SetIgnoreParentAlpha(true) end
     markHost:Hide()

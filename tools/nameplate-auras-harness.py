@@ -1591,6 +1591,10 @@ end
 check(host._calls.SetIgnoreParentAlpha == 1 and host._args.SetIgnoreParentAlpha[1] == true, "mark frame follows its parent's alpha")
 check(host._level > r1.healthBar:GetFrameLevel() and host._level > r1.powerBar:GetFrameLevel()
     and host._level > r1.castBar:GetFrameLevel(), "mark frame is not above the bars")
+-- the mark has the top strata of its own, fixed, so the Gunsight HUD (MEDIUM, on UIParent) and a parent re-strata cannot cover it
+check(host._calls.SetFrameStrata == 1 and host._args.SetFrameStrata[1] == "TOOLTIP", "mark frame is not in the TOOLTIP strata")
+check(host._calls.SetFixedFrameStrata == 1 and host._args.SetFixedFrameStrata[1] == true, "mark frame strata is not fixed")
+check(host._at.SetFrameStrata < host._at.SetFixedFrameStrata, "strata fixed before it was set")
 if r1.auraContainer then check(host._level > r1.auraContainer._level, "mark frame is not above the aura container") end
 -- off: repeated passes do no per-plate work
 for _ = 1, 5 do fire("PLAYER_TARGET_CHANGED") end
