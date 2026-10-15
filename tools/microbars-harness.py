@@ -4,7 +4,7 @@
 Runs the real addons/forever-stuwave/Deck.lua and MicroBars.lua under lupa against a small STRICT
 mock WoW API (a widget method the mock does not define is a nil call, which the code under test
 turns into a degrade log, which every case asserts is empty). The mock models just enough of
-Blizzard's micro button to catch the bugs Parker saw in game: textures created by SetNormalAtlas
+Blizzard's micro button to catch the bugs seen in game: textures created by SetNormalAtlas
 and friends, a Portrait, flash regions, and Blizzard's own alpha writes on those regions.
 
 What it pins:
@@ -1244,7 +1244,7 @@ def check_fit_window() -> None:
           all([float(v) for v in fit(spec, a)] == nominal for a in (None, 0, -1, float("nan"), float("inf"))))
 
 
-# The icon data as v5 (5dac1c0, the look Parker approved) wrote it, minus the zoom-out: every entry's own line of
+# The icon data as v5 (5dac1c0, the approved v5 look) wrote it, minus the zoom-out: every entry's own line of
 # Core/IconStyleData.lua. A zoom-out may add `zoom = z` to the keys listed in ZOOMED and nothing else; every other entry, and the
 # rest of a zoomed one, is this text exactly.
 CLASSIC_V5 = 'coords = { 0.1562, 0.8438, 0.54, 0.8193 }, size = { 32, 64 }, limit = { 0.1562, 0.8438, 0.4531, 0.9062 }'
@@ -1298,7 +1298,7 @@ def data_lines() -> dict[str, str]:
 def check_zoom_data() -> None:
     """The zoom-out is data on the classic button keys only. The atlas keys, the faction emblems and the class icons are v5's text, and a
     zoomed entry is v5's text plus one `zoom` value in (0, 1] (0 is v5's close-up, 1 is the whole glyph): every key's texture,
-    close-up window, limit, family and boost stay what Parker approved; only the zoom is new."""
+    close-up window, limit, family and boost stay the approved v5 look; the zoom (the approved moderate level, 0.5) is the only new value."""
     got = data_lines()
     check("zoom.the_data_has_exactly_the_v5_entries", set(got) == set(V5_ENTRIES), f"{sorted(set(got) ^ set(V5_ENTRIES))}")
     bad, zoomed = [], set()

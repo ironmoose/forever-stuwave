@@ -658,7 +658,7 @@ CLASSIC_WINDOW = (5, 29, 27, 58)
 # part of the texture (1) at the same width; the picture is then drawn in a narrower rectangle of its own aspect, centred
 # (MicroBars.lua GlyphView). One shared value, and a per key override only where a glyph needs its own (keyed by micro name).
 # The atlas keys, the faction emblems and the class icons keep the close-up (no zoom).
-MICRO_ZOOM = 0.5
+MICRO_ZOOM = 0.5   # the approved moderate level (full face is 1; the close-up crop is 0)
 MICRO_ZOOM_OVERRIDE: dict[str, float] = {}
 ATLAS_ID = 4708813  # interface/hud/uimicromenu2x
 ATLAS_CELLS = {"professions": (397, 337, 64, 82), "guild": (265, 421, 64, 82), "housing": (331, 337, 64, 82)}

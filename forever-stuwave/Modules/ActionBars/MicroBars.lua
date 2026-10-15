@@ -505,7 +505,10 @@ local function Paint(key, v)
         Tint(key.glyph, v.glyph, v.glyphA)
         -- the game's texture wears a look: the base stays grey, the ramp supplies the colour (grey too when disabled)
         if not key.chain.active then
-            FS.IconStyle.Dress(key.chain, key.spec.file, nil, key.spec)   -- no coords: the ADD copy keeps the window SetWindow gave it
+            FS.IconStyle.Dress(key.chain, key.spec.file, nil, key.spec)
+            -- Dress writes no coords, so the ADD copy should keep its window; this guards against a client that resets
+            -- texcoords on SetTexture (not confirmable offline)
+            SetWindow(key)
         end
         key.glyph:SetDesaturated(true)
         -- a disabled key (dimmed and grey) drops the MOD ramp as a dimmed spell tile does: the ramp ignores alpha
@@ -582,7 +585,7 @@ local function SizeKey(key, s, keyW)
         local rw = w - left - right
         local rh = bottom - top
         key.aspect = rh > 0 and rw / rh or nil
-        key.drawAspect = nil
+        key.drawAspect = nil   -- defensive: a key re-sized as a spec without a zoom must not keep the last spec's drawn aspect
         -- a zoomed-out glyph shows more of the picture in a narrower rectangle of its own aspect, centred in the inside
         -- (the plate shows at the two sides); the others fill it
         local own = select(5, GlyphView(key.spec, key.aspect))
