@@ -121,11 +121,14 @@ local function WarnOnce(key, text)
 end
 
 -- The same, silent: the failure goes to the degrade log on disk (FS.LogQuiet) and not to chat, for a problem the player cannot
--- act on. `err` is the error text.
-local function QuietOnce(key, text)
+-- act on. `err` is the error value; its text is built inside the pcall, so an error that will not turn into text (a secret)
+-- cannot make the report itself throw.
+local function QuietOnce(key, text, err)
     if BT.warned[key] then return end
     BT.warned[key] = true
-    if FS.LogQuiet then FS.LogQuiet(key, text) end
+    if FS.LogQuiet then
+        pcall(function() FS.LogQuiet(key, err == nil and text or (text .. tostring(err))) end)
+    end
 end
 
 -- Settings: read by the config window (Unit Frames page), explained there by the `tip` (a ? icon).
@@ -426,6 +429,56 @@ end
 
 local SeatBand
 
+-- The width, in UI units, the client gives the word's text as set now, or nil when it will not say (a secret or a missing
+-- call). The advance the client uses is hinted to whole pixels, so it can be wider than the font file's advance.
+local function MeasuredWidth(fs)
+    local call = fs.GetUnboundedStringWidth or fs.GetStringWidth
+    if not call then return nil end
+    local ok, w = pcall(call, fs)
+    if ok and type(w) == "number" and not IsSecret(w) and w == w and w >= 0 and w < math.huge then return w end
+    return nil
+end
+
+-- Whether the word's fontstring wears the bundled font now. On a cold start the client may not have the file yet and the
+-- word is measured in the fallback face (Theme retries the font a few times in the first seconds); an unreadable answer
+-- counts as loaded, so nothing waits on it.
+local function FontLoaded(fs)
+    if not fs.GetFont then return true end
+    local ok, face = pcall(fs.GetFont, fs)
+    local want = FS.Theme.FONT_MONO
+    if not ok or IsSecret(face) or type(face) ~= "string" or type(want) ~= "string" then return true end
+    local function leaf(path) return (path:gsub("/", "\\"):match("([^\\]*)$") or path):lower() end
+    return leaf(face) == leaf(want)
+end
+
+-- Sets the word at its start size and shrinks it in half pixels until the width the client measures fits the band less a
+-- pixel. Runs when the tile is seated and again when the bundled font lands after a miss.
+local function FitWord(button, fit)
+    local fs, px, phys = button.fsWord, 1 / fit.es, fit.start
+    FS.Theme.ApplyMono(fs, phys * px, FS.Theme.COLOR_RED)
+    if not fit.word then return end
+    fs:SetText(fit.word)
+    while phys > BT.MIN_PX do
+        local w = MeasuredWidth(fs)
+        if not w or w * fit.es <= fit.bandW - 1 + 1e-6 then break end
+        phys = math.max(BT.MIN_PX, phys - 0.5)
+        FS.Theme.ApplyMono(fs, phys * px, FS.Theme.COLOR_RED)
+    end
+end
+
+-- Fits the word again once the font has landed: Theme's own retries run at 0, 2 and 5 seconds, so look just after each. A
+-- seat made since (a rescale) has its own fit and this one stops.
+local function ScheduleRefit(button, fit)
+    if not (C_Timer and C_Timer.After) then return end
+    for _, delay in ipairs({ 0.1, 2.1, 5.1 }) do
+        C_Timer.After(delay, function()
+            if button.fsFit ~= fit or fit.done or not FontLoaded(button.fsWord) then return end
+            fit.done = true
+            FitWord(button, fit)
+        end)
+    end
+end
+
 -- The size, in physical pixels, the missing word starts at: BT.WORD_PX, or smaller so it keeps a pixel clear across the
 -- band and its capitals keep a pixel clear above and below (the tile shrinks with the UI scale and fonts do not); whole and
 -- half pixels, never below BT.MIN_PX. This is the model; the client's own measure (WordFits) has the last word.
@@ -435,16 +488,6 @@ local function WordPx(word, bandW, bandH)
     local across = math.floor((bandW - 1) / (n * BT.ADVANCE) * 2) / 2
     local tall = math.floor((bandH - 2) / BT.CAP * 2) / 2
     return math.max(math.min(across, tall, BT.WORD_PX), BT.MIN_PX)
-end
-
--- The width, in UI units, the client gives the word's text as set now, or nil when it will not say (a secret or a missing
--- call). The advance the client uses is hinted to whole pixels, so it can be wider than the font file's advance.
-local function MeasuredWidth(fs)
-    local call = fs.GetUnboundedStringWidth or fs.GetStringWidth
-    if not call then return nil end
-    local ok, w = pcall(call, fs)
-    if ok and type(w) == "number" and not IsSecret(w) and w == w and w >= 0 and w < math.huge then return w end
-    return nil
 end
 
 -- Seats the band and the word once per scale (out of combat: StyleButton), in PHYSICAL pixels: `es` is the pixels in one
@@ -473,17 +516,10 @@ function SeatBand(button, size, s)
     local fs = button.fsWord
     fs:ClearAllPoints()
     fs:SetPoint("CENTER", button, "TOPLEFT", (left + bandW / 2) * px, -(top + 1 + wordH / 2) * px)
-    local phys = WordPx(word, bandW, height)
-    FS.Theme.ApplyMono(fs, phys * px, FS.Theme.COLOR_RED)
-    if word then
-        fs:SetText(word)
-        while phys > BT.MIN_PX do
-            local w = MeasuredWidth(fs)
-            if not w or w * es <= bandW - 1 + 1e-6 then break end
-            phys = math.max(BT.MIN_PX, phys - 0.5)
-            FS.Theme.ApplyMono(fs, phys * px, FS.Theme.COLOR_RED)
-        end
-    end
+    local fit = { word = word, start = WordPx(word, bandW, height), bandW = bandW, es = es }
+    button.fsFit = fit
+    FitWord(button, fit)
+    if word and not FontLoaded(fs) then ScheduleRefit(button, fit) end
     if fs.SetWordWrap then pcall(fs.SetWordWrap, fs, false) end
     if button.fsBand.SetSnapToPixelGrid then
         pcall(button.fsBand.SetSnapToPixelGrid, button.fsBand, true)
@@ -1381,7 +1417,7 @@ end
 -- Paint and the tick call this; a database that refuses the write must never make them throw.
 local function SaveStatus()
     local ok, err = pcall(WriteStatus)
-    if not ok then QuietOnce("bufftab_status", "the buff tab state line could not be saved: " .. tostring(err)) end
+    if not ok then QuietOnce("bufftab_status", "the buff tab state line could not be saved: ", err) end
 end
 BuffTab.SaveStatus = SaveStatus
 BuffTab.SeatHotkeyHost = SeatHotkeyHost

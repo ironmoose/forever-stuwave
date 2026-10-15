@@ -404,7 +404,10 @@ FS = {
     -- Two secret stand-ins: __SECRET (above), and the falsy one the secret-guard checks use: they set
     -- __secretFalse so a bare `false` reads as a secret value (a naive `not <secret>` cannot be mocked,
     -- so a falsy one is what makes unguarded code defer the overlay).
-    IsSecret = function(v) return rawequal(v, __SECRET) or (__secretFalse == true and v == false) end,
+    -- __secretStr: a plain string standing for a secret one (Lua cannot trap == or a compare on a string, so IsSecret
+    -- is the only thing that tells it; a check using it asserts the answer, not an error).
+    IsSecret = function(v) return rawequal(v, __SECRET) or (__secretFalse == true and v == false)
+        or (__secretStr ~= nil and v == __secretStr) end,
     LogDegradeOnce = function(key, msg) __degraded[key] = msg; __degradeCount = __degradeCount + 1 end,
     LogQuiet = function(key, msg) __quiet[key] = msg end,
     Layout = {

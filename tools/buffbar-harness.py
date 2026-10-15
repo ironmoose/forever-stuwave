@@ -3586,6 +3586,74 @@ def check_a_word_wider_than_the_band_overflows_at_the_smallest_size_and_is_never
     assert abs(word_px(lua, SHIELD, 1.0) - word_fit(lua, SHIELD, "SHIELD", 1.0)) < 1e-6
 
 
+def check_a_word_measured_in_the_fallback_font_is_fitted_again_when_the_bundled_font_lands():
+    # a cold start: the bundled font is not there yet, so the word is measured in a narrower fallback face and keeps its
+    # start size; Theme retries the font a few seconds later, and the fit has to run again with the real face
+    mock = ES_MOCK % 1.0 + """
+__timers = {}
+C_Timer = { After = function(_, fn) __timers[#__timers + 1] = fn end }
+FS.Theme.FONT_MONO = FS.Theme.FONT_MONO or "Interface/AddOns/forever-stuwave/Media/Fonts/MononokiNerdFontMono-Bold.ttf"
+__fontReal = false
+function __Region:GetFont() return __fontReal and FS.Theme.FONT_MONO or "Fonts/FRIZQT__.TTF", 10, "" end
+local real = __Region.GetStringWidth
+function __Region:GetStringWidth() if __fontReal then return real(self) end return real(self) * 0.5 end
+"""
+    lua = band_world(1.0, 1.0, mock=mock)
+    assert word_px(lua, SHIELD, 1.0) == 9.0, "the fallback face did not keep the start size"
+    run(lua, "__fontReal = true; local t = __timers; __timers = {}; for _, fn in ipairs(t) do fn() end")
+    assert abs(word_px(lua, SHIELD, 1.0) - hinted_fit(lua, SHIELD, "SHIELD", 1.0)) < 1e-6 and word_px(lua, SHIELD, 1.0) < 9.0, \
+        "the word was not fitted again once the real font landed"
+    # a timer that fires while the font is still missing changes nothing, and a seat made since owns the word
+    lua = band_world(1.0, 1.0, mock=mock)
+    run(lua, "local t = __timers; __timers = {}; for _, fn in ipairs(t) do fn() end")
+    assert word_px(lua, SHIELD, 1.0) == 9.0, "a retry with no font refit anyway"
+    # a font that was there from the start schedules nothing
+    lua = band_world(1.0, 1.0, mock=mock.replace("__fontReal = false", "__fontReal = true"))
+    run(lua, "__n = #__timers")
+    assert int(g(lua).__n) == 0, "a loaded font still scheduled a refit"
+
+
+def check_a_secret_aura_name_is_judged_by_a_plain_spell_id_and_never_by_the_name():
+    # a plain string flagged secret (see __secretStr): the name must not decide, the spell id does
+    got = {}
+    for label, aura in (
+        ("lightning id", "{ name = __secretStr, count = 3, spellId = 324, expirationTime = __now + 480 }"),
+        ("water id", "{ name = __secretStr, count = 3, spellId = 24398, expirationTime = __now + 480 }"),
+        ("no id", "{ name = __secretStr, count = 3, expirationTime = __now + 480 }"),
+        ("secret id", "{ name = __secretStr, count = __SECRET, spellId = __SECRET, expirationTime = __SECRET }"),
+        ("plain name, water id", "{ name = 'Lightning Shield', count = 3, spellId = 24398, expirationTime = __now + 480 }"),
+    ):
+        lua = engine_world(tips={16: ["Heavy Axe"]})
+        run(lua, '__secretStr = "<secret name>"; __degradeCount = 0; __quiet = {}')
+        run(lua, "__snap = { buffs = { " + aura + " } }")
+        fire(lua, "UNIT_AURA", "player")
+        update(lua)
+        tick(lua, 1.1)
+        v = view(lua, "shield")
+        got[label] = (str(v.mode), bool(v.other), tile(lua, SHIELD)["word"])
+        assert int(g(lua).__degradeCount) == 0, f"{label}: something was said: {list(g(lua).__degraded.keys())}"
+    assert got["lightning id"][:2] == ("on", False) and not got["lightning id"][2], got
+    assert got["water id"][:2] == ("hollow", True), f"a secret name with a Water Shield id was taken for Lightning Shield: {got}"
+    assert got["no id"][1] is False and got["no id"][2] and got["secret id"][1] is False and got["secret id"][2], \
+        f"a secret name with no usable id was taken for a shield: {got}"
+    assert got["plain name, water id"][:2] == ("on", False), got
+
+
+def check_a_state_line_error_that_will_not_turn_into_text_cannot_break_the_report():
+    lua = engine_world()
+    tick(lua, 1.1)
+    run(lua, """__bad = setmetatable({}, { __tostring = function() error("no text") end })
+        ForeverSTUwaveDB = setmetatable({}, { __newindex = function() error(__bad) end, __index = function() return nil end })""")
+    set_combat(lua, True)
+    fire(lua, "PLAYER_REGEN_DISABLED")
+    update(lua)
+    leave_combat(lua)
+    tick(lua, 1.1)
+    assert g(lua).FS.BuffTab.BT.warned.bufftab_status, "the failed write was not reported"
+    assert g(lua).__degraded.bufftab_tick is None and g(lua).__degraded.bufftab_sync is None, \
+        "the report itself threw and the tick caught it"
+
+
 def check_the_up_state_has_no_band_and_no_word_and_the_time_keeps_its_plate():
     lua = band_world(1.0, tips={16: ["Rockbiter 1 (56 min)"]})
     run(lua, "__shield(3, 480)")
@@ -3804,6 +3872,9 @@ CHECKS = [
     check_a_rescale_reseats_every_engine_text_out_of_combat_only,
     check_the_band_and_its_word_sit_on_whole_physical_pixels_inside_the_ring_at_every_scale,
     check_a_word_wider_than_the_band_overflows_at_the_smallest_size_and_is_never_cut,
+    check_a_word_measured_in_the_fallback_font_is_fitted_again_when_the_bundled_font_lands,
+    check_a_secret_aura_name_is_judged_by_a_plain_spell_id_and_never_by_the_name,
+    check_a_state_line_error_that_will_not_turn_into_text_cannot_break_the_report,
     check_the_up_state_has_no_band_and_no_word_and_the_time_keeps_its_plate,
     check_the_combat_missing_look_equals_the_out_of_combat_one_and_no_band_point_or_size_is_written_in_combat,
     check_the_band_and_word_sit_on_the_face_frame_under_every_engine_slot,
