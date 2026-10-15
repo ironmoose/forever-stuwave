@@ -38,6 +38,12 @@ uv run bash tools/package-forever-stuwave.sh
 
 The script uses `python3` by default inside uv's environment (`PYTHON` can override it), and requires Git, zip, unzip and tar. It stages runtime files, validates the staged `.toc`, runs parse and HIGH lint gates, and produces `dist/ForeverSTUwave-<version>-<commit>-<date>.zip`. Its top folder is `forever-stuwave`. Uncommitted edits, tooling, mockups and generators do not enter the ZIP. Send [TESTING.md](TESTING.md) separately.
 
+The GitHub release asset is named `ForeverSTUwave-<version>.zip`, without the commit and date. After packaging, copy the new ZIP to that name before uploading it:
+
+```sh
+cp dist/ForeverSTUwave-<version>-<commit>-<date>.zip dist/ForeverSTUwave-<version>.zip
+```
+
 ## Deploying a development build
 
 Close the game before replacing files. The deploy scripts stage runtime files only and guard against overwriting a source or Git checkout. Keep the source checkout outside `Interface/AddOns`. If you used an earlier clone, move it aside and make a fresh clone outside `AddOns` once; screenshot removal required a history cleanup.
@@ -88,6 +94,6 @@ Feature-detect APIs and use secret guards before reading or transforming values.
 
 ## Current alpha boundary
 
-Priest and Warlock HUD profiles ship alongside Paladin seal/aura controls, the compact Seal module and its Judgement row. Judgement does not consume the seal on Forever. Judgement and its lane, Quick Keybind, and label visuals have live signoff; seal/aura clicks, expiry/no-seal states, shoulder seam and minimap first login still need checks. Advanced Paladin level 10/20 rotation rules are incomplete. Party row mouseover casting also needs live verification. See [TESTING.md](TESTING.md).
+Priest and Warlock HUD profiles ship alongside Paladin seal/aura controls, the compact Seal module and its Judgement row. Shaman has a totem tab with two totem preset cells, a buff tab, and a totem pole Class Module with a shock gauge. Every mana class has the Mana regen module, and the micro menu and class tab spell icons can be switched between Stock and Gradient. These Shaman and Mana regen pieces have headless checks and early client testing; the checklist in [TESTING.md](TESTING.md) still applies. Judgement does not consume the seal on Forever. Judgement and its lane, Quick Keybind, and label visuals have live signoff; seal/aura clicks, expiry/no-seal states, shoulder seam and minimap first login still need checks. Advanced Paladin level 10/20 rotation rules are incomplete. Party row mouseover casting also needs live verification. See [TESTING.md](TESTING.md).
 
 Project code is MIT; preserve [third party notices](THIRD_PARTY_NOTICES.md) and font OFL files.

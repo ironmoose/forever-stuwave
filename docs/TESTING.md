@@ -43,7 +43,7 @@ Log in on a priest. This records what a priest UI could read on this client, out
 
 1. Out of combat, type `/fscheck priest`. It saves an out-of-combat snapshot and starts logging.
 2. Play normally for a few minutes: pull a mob (the in-combat snapshot saves about 4 seconds into the fight), cast and wand, drink, shield yourself and a party member if you have one, and kill a mob or two. Typing `/fscheck priest` again re-snapshots the state you are in, and keeps the logs. If you start it in combat, the out-of-combat snapshot follows when the fight ends.
-   Run 2 setup: a party member in your group (the party1 rows are void without one), you holding Inner Fire and a Power Word: Shield (so Weakened Soul is up), Renew cast on the party member, and about 30 seconds idle after a mana cast (no casts, mana below max) so the five second rule and the tick phase show up in the power log. Also target a mob in combat: the snapshot records its classification and level to see how durable it reads. The logs now carry `powerFrequent` sampled to about one entry a second (`total` is the raw event count, `sampledOut` what was skipped) and `powerOther` for non-mana power events; the power logs hold 300 entries (about five minutes of the sampled ones), the others 50; a cost call that returns nothing is read as a free spell (`costAssumption` in the saved meta); every spell id in the snapshot records the name the client resolves it to (`spellName`). The AuraContainer matrix is not part of this check.
+   Run 2 setup: a party member in your group (the party1 rows are void without one), you holding Inner Fire and a Power Word: Shield (so Weakened Soul is up), Renew cast on the party member, and about 30 seconds idle after a mana cast (no casts, mana below max) so the mana regen window and the tick phase show up in the power log. Also target a mob in combat: the snapshot records its classification and level to see how durable it reads. The logs now carry `powerFrequent` sampled to about one entry a second (`total` is the raw event count, `sampledOut` what was skipped) and `powerOther` for non-mana power events; the power logs hold 300 entries (about five minutes of the sampled ones), the others 50; a cost call that returns nothing is read as a free spell (`costAssumption` in the saved meta); every spell id in the snapshot records the name the client resolves it to (`spellName`). The AuraContainer matrix is not part of this check.
 3. `/fscheck priest off` stops the logging (it stops by itself after 20 minutes). Then `/reload` or log out to save.
 4. Send the `fscheck.priest` table from `ForeverSTUwaveDB` in `WTF/Account/<id>/SavedVariables/forever-stuwave.lua`. It holds the account's settings too: strip those first.
 
@@ -198,6 +198,7 @@ restart, not /reload. If your Shaman has the Call of the Elements spell
    Bound keys show as the button's key label.
 8. `/fsconsole off`: the tab goes back to sit above the stance bar, and
    `/fsconsole on` returns it to the shoulder. Other classes see no tab.
+9. Two more cells sit at the right end of the tab: Preset 1 and Preset 2. They are checked in the next section.
 
 ## Shaman: click a totem pole
 
@@ -208,21 +209,65 @@ Needs the Gunsight HUD with its Class Module shown (a target is needed for the p
 3. Do it in combat as well: clicks on a pole must still cast. With no target the poles are gone and so is the click. Right drag over a pole should still turn the camera; if it does not, say so.
 4. Move the Class Module to the other area (`/fsconfig`, Gunsight): the click follows the poles. Do it in combat: the click stays where it was until the fight ends. Turn the Gunsight off out of combat: the poles do nothing.
 
+## Shaman: totem presets
+
+Use a Shaman who knows at least two totems of different elements (Earth 4, Fire 10). Do a FULL client restart, not /reload. Two cells, Preset 1 (cyan outline) and Preset 2 (pink outline), stand at the right end of the totem tab. The tab is wider than before. Everything here also needs to be tried in combat where marked.
+
+1. Unset cells: a character with no saved presets sees two dim, dashed cells with a "+" and the plate UNSET. A plain click on one does nothing.
+2. Make a preset: Shift click an unset cell. It is made from the totems on the four totem buttons and its editor card opens. Press the cell once per totem: each press drops the next totem of the preset in drop order, the arcs of the dropped totems glow, the next arc is thick, and its icon replaces the number in the middle. A small step count (for example 2/4) shows above the cell while the steps run.
+3. The steps start over after combat ends and after a few seconds without a press. Try the presses in combat: they must still drop totems. Report with `/fsbug` if a press drops the wrong totem or the same one twice.
+4. A totem you cannot use yet shows as a dashed grey arc with its level; the step skips it. A preset with only locked totems steps nothing.
+5. The editor card (Shift click a cell with a preset, or any keybind on the cell that includes Shift): a name box (up to 8 letters), a row of seven outline colour swatches (cyan, pink, violet, amber, green, red, white), four drop order rows, and CLEAR. Each drop order row is one button across its whole width: click it to pick that element's totem from a list of the totems you know, or "left out". The up and down arrows reorder the rows. Every change saves at once. CLEAR asks twice.
+6. Pick a colour swatch: the cell's border, glow, underline and name plate take the colour at once. The colour belongs to the cell: clearing the preset keeps it.
+7. Editing is shut in combat: the card closes when combat starts and refuses clicks. Choosing a colour is not gated that way. Report it if the card stays open into a fight.
+8. Name plates: the name sits on a small plate above each cell. Turn "Name plates" off in `/fsconfig` (Unit Frames, Totem presets) and the plates go.
+9. Preset 2 and Call of the Ancestors (level 30): with "Also on Call of the Ancestors" on, Preset 2's totems are also written into the Call of the Ancestors set, out of combat only. Casting that spell should drop them. Turning the setting off leaves the set as it is. Report with `/fsbug` if your normal Call of the Elements set changed.
+10. `/fsconfig` has an on/off switch for Preset 1 and for Preset 2 (off hides the cell), each with a ? tip.
+11. Migration: a character whose saved presets came from the earlier build (a dial with up to four presets) is moved once. The active preset becomes Preset 1, a second different preset becomes Preset 2, and the rest are kept aside, not deleted. Colours start cyan and pink. Check that your old presets are where you expect after the first login on this build.
+12. Hover a cell: the tooltip explains the click and Shift click. Quick Keybind (Esc > Options > Keybindings, Forever STUwave) binds both cells; a bound key with Shift opens the editor and drops no totem.
+
 ## Shaman: imbue and shield tab
 
-Use a Shaman who knows Rockbiter Weapon and, from level 8, Lightning Shield. This build adds new files and key bindings, so do a FULL client restart, not /reload. A second tab now sits on the Console's top edge, to the right of the totem tab: two square tiles, IMBUE on the left and SHIELD on the right. It follows the Console (`/fsconsole off` and `on`) and does not need a target. The Gunsight Class Module for the Shaman is now empty: it draws nothing (no "coming soon" plate either) until the totem poles come later. The old chips beside the target cast bar are gone.
+Use a Shaman who knows Rockbiter Weapon and, from level 8, Lightning Shield. This build adds new files and key bindings, so do a FULL client restart, not /reload. A second tab sits on the Console's top edge, to the right of the totem tab: two square tiles, IMBUE on the left and SHIELD on the right. Each tile wears the icon of the spell it casts. It follows the Console (`/fsconsole off` and `on`) and does not need a target. The old chips beside the target cast bar are gone.
 
-1. With no imbue on your weapon the left tile is an amber hollow word, IMBUE. With no Lightning Shield the right tile is an amber hollow word, SHIELD. Below level 8 the right tile is a dotted, dimmed mold with L8 on it; it fills in when you learn Lightning Shield. A Shaman who knows no imbue yet sees no left tile.
-2. Cast Rockbiter Weapon on your weapon (no target needed). The tile turns quiet gold, shows RB and the minutes left, for example 59m. Flametongue shows FT, Frostbrand FB and Windfury Weapon WF. Report any imbue that shows the wrong letters.
-3. Cast Lightning Shield. The right tile turns quiet gold, shows LS and the number of orbs left. Get hit: the number goes down, and the tile goes amber when the last orb is gone.
-4. Under five minutes left on the imbue (or the shield), the tile and its time turn pink. Under one minute the time counts in seconds. Let it run out: the tile turns amber hollow again.
-5. In combat: the imbue time keeps counting down and never shows a wrong value. The shield count shows a "~" in front and a dashed underline (an estimate, because the game hides auras in combat); it is right again once the fight ends. A "?" in a hollow tile means there is nothing to go on yet. Cast an imbue or the shield in the middle of a fight: the tile updates at once. An imbue cast in combat is counted as a fresh hour on the hand it most likely went to and is checked against the weapon when the fight ends. Swapping a weapon in combat shows "?" until the fight ends.
-6. Dual wield (two weapons): with imbues on both, the tile shows the one with less time left. With an imbue on only one weapon while the other hand holds a weapon, the tile is amber IMBUE until both are imbued. A shield or an empty off hand never triggers it. Cast the same imbue on the second weapon while the first has little time left: the tile must keep showing the smaller time.
-7. With a Water Shield up instead of Lightning Shield, the right tile is a quiet hollow WS (it does not nag).
+1. With no imbue on your weapon the left tile shows the imbue icon dimmed and desaturated, with a red IMBUE word on a dark band across it. With no Lightning Shield the right tile does the same with SHIELD. Below level 8 the right tile is a dotted, dimmed mold with the level it opens at. A Shaman who knows no imbue yet sees no left tile.
+2. Cast Rockbiter Weapon on your weapon (no target needed). The tile shows the Rockbiter icon in full colour with the minutes left, for example 59m, under a quiet gold underline. Switching to another imbue changes the icon to that spell.
+3. Cast Lightning Shield. The right tile shows its icon with the number of orbs left. Get hit: the number goes down, and the tile goes red when the last orb is gone.
+4. Under five minutes left on the imbue (or the shield), the underline and the time turn pink. Under one minute the time counts in seconds. Let it run out: the tile goes dim and red again.
+5. In combat the game itself draws your Lightning Shield and weapon enchant on the tab, so an expired shield or imbue still shows red until you recast. The "Buff tab combat state" switch in `/fsconfig` (Unit Frames) turns that off; off shows the last known state instead. Without it the shield count shows a "~" and a dashed underline (an estimate). A "?" on a dimmed tile means there is nothing to go on yet. Cast an imbue or the shield in the middle of a fight: the tile updates. Swapping a weapon in combat shows "?" until the fight ends.
+6. Dual wield (two weapons): with imbues on both, the tile shows the one with less time left. With an imbue on only one weapon while the other hand holds a weapon, the tile shows the missing look until both are imbued. A shield or an empty off hand never triggers it.
+7. With a Water Shield up instead of Lightning Shield, the right tile shows the Water Shield icon quietly (it does not nag).
 8. Hover a tile: the border turns cyan and the tooltip names the spell, the time left and what a click does. Click the IMBUE tile: it casts the imbue it shows (the best one you know when none is up). Click the SHIELD tile: it casts Lightning Shield. Try the clicks in combat too. If a tile stops responding in combat, or a click does nothing, report it with `/fsbug`.
 9. Quick Keybind (Esc > Options > Keybindings, Forever STUwave) binds both tiles; a bound key shows on the tile.
 10. `/fsconsole off`: the tab sits right next to the totem tab. `/fsconsole on` returns both to the Console's top edge, with the Console line running unbroken between them. Clear your target (Escape): both tiles stay. Type `/reload` out of combat: the tiles come back with the right time. Report with `/fsbug` if a tile is wrong, and say what was on your weapon.
 11. Other classes see no tab.
+
+## Mana regen module
+
+Use any class that uses mana (Priest, Mage, Warlock, Paladin, Shaman, Druid, Hunter). A full client restart is needed the first time. The module is a tab on the Console, seated after the class's own tab (in its place when the class has none). It is always there, needs no target, and has no click and no keybind. It is an estimate from your own casts, which its tooltips say.
+
+1. At rest the tab is dim: a row of LED cells, a gauge of ten segments under it, and a rate line at the bottom (mana per second with a coloured bar and a small percent chip).
+2. Spend mana (cast anything that costs mana). The cells count down from 5.0 in tenths behind a tilde, the gauge is amber and loses one segment every half second, and the tab flashes briefly at the cast. Hover the cells: the tooltip says regen is suspended.
+3. At 0.0 the digits turn cyan, a bright band sweeps across, the cells flip to the word REGEN, the rim flashes once, and a few seconds later the tab fades back to its dim look. A new cast during the countdown restarts it.
+4. The rate line: out of combat it shows your full mana per second. While the countdown runs it shows the casting rate. The chip shows the percent of the full rate that casting keeps (a talent such as Meditation); a hollow 0% means none, "--" means no reading. A dashed bar means the numbers on show were kept from before the fight.
+5. Channelled spells are unverified: a channel that costs mana should hold the countdown at 5.0 until it ends, then run it down. A free cast from a proc (such as Clearcasting) can leave the countdown longer than the real window. Report anything else that looks wrong with `/fsbug`.
+6. `/fsconfig` (Unit Frames, Mana regen): Mana regen module (off hides it), Regen pulse, Regen sound (off by default), Animate the tab (master), and one switch each for Cast flash, LED digit motion, Whole second pulse, Gauge flicker, Regen sweep, Regen tick pulse, Idle glow, and Kept and unreadable stutter. Each has a ? tip. Motion off keeps the tab still; only colours and numbers change.
+7. Hide the interface (Alt+Z): nothing on the tab animates. Warriors and Rogues see no tab.
+
+## Icon style: Micro menu icons and Spell icons
+
+The micro menu and the class tabs use the game's own icons, restyled while the game runs. No game art ships with the addon. `/fsconfig` (Unit Frames, Icon style) has two dropdowns, each Stock or Gradient. A change repaints at once, with no reload.
+
+1. Micro menu icons (default Stock): Stock shows the game's own icons in their own colours, upright, filling the whole slanted key with no gap at the two slanted sides and no cut corner. Gradient draws them in the STUwave colours. Character and Legacy have our own artwork and look the same in both.
+2. Spell icons (default Gradient; the row appears once a class tab has drawn a spell icon): covers the Shaman buff tab and totem tab, Paladin seals and auras, and Warrior stances. Switch to Stock and the tiles show the game's own icons; Gradient restyles them.
+3. Try both dropdowns in combat. The tiles must not show blank, and nothing should error. Report with `/fsbug` if an icon turns blank or the wrong shape.
+
+## Bags, action bars and stances
+
+1. Bag bar: hover a bag in the bag bar and its slots in the open bags highlight. The backpack slot has our own backpack icon.
+2. Bag bar with no controller: the gamepad bag bar is hidden and does not cover Clean Up. It also hides in combat.
+3. Main bar: change stance or form, enter stealth, and mount a vehicle or enter a quest override bar, in combat too. The main bar follows and clicks on it work.
+4. Stance bar: click the active form to cancel it (leave Druid form, drop stealth), like the stock bar.
 
 ## Layout editor: /fsedit
 
@@ -293,7 +338,7 @@ Not yet checked in game. Mocked checks cover the layout, the time text, the comb
 3. In combat the numbers are an estimate: a cast that is resisted still counts, and refreshes that are not casts (a Rogue's poison procs, Deep Wounds) do not show until combat ends. A row with "--" has no known duration yet; it fills in after one fight on any mob with that debuff. Report a row that stays wrong after combat ends.
 4. Paladin: with the Class Module (Seal) in an area, Judgement is not listed in Target debuffs; Holy Vengeance and Hammer of Justice are. Retarget: the list restarts for the new target.
 
-### Class Module: shards and combo points
+### Class Module: shards, combo points and totem poles
 
 Not yet checked in game. Mocked checks cover the layout and the events, not how it looks. Design: the Gunsight class modules mockup (kept locally), states A, B, D and F.
 
@@ -301,7 +346,8 @@ Not yet checked in game. Mocked checks cover the layout and the events, not how 
 2. Warlock: with the Class Module in an area and a hostile mob targeted, the count under your cast bar is gone; clear your target and it comes back there. Set both areas to Empty and the glyph and count return under your cast bar; at 0 shards they show a dim glyph and a muted 0.
 3. Rogue: the Class Module area shows five yellow pips, the lit count and the caption COMBO POINTS. Build combo points on a hostile target and the pips and the count follow; with no target, or a friendly or dead one, the area stays empty. Report it if the pips never light (the combo events are unverified on this client).
 4. Druid: the same combo display appears in cat form only. Shift to caster or bear form and it clears; report it if it stays up or never appears in cat form (the form check reads the power type and is unverified on this client).
-5. Any other class: the Class Module draws nothing.
+5. Shaman: the Class Module shows four totem poles standing on a ground line, Fire (the wide pole), Earth, Water, Air. A pole loses a block as its totem runs down, its head sinks, and the last block turns amber. An element with no totem shows a dashed head and DROP; an element you have not opened yet is a dotted mold with its level; a totem you walked away from is a ghost pole marked FAR. The ground line is also a shock gauge: it charges as the shared shock cooldown runs and a bolt lights when you can cast one. A cyan ring on the Fire totem's head and a NOVA tag mean Fire Nova is ready. Clicking a pole is covered in "Shaman: click a totem pole".
+6. Any other class: the Class Module shows a COMING SOON plate while you have a target.
 
 ## Professions panel: /fsprof
 
