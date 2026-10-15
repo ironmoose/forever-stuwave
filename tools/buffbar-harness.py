@@ -3284,6 +3284,76 @@ def check_the_state_line_tells_the_setting_and_unreadable_from_misplaced_and_a_r
     assert g(lua).ForeverSTUwaveDB.buffTabEngine is not None
 
 
+def check_zero_one_or_secret_buffs_in_and_out_of_combat_render_without_error_or_noise():
+    # (label, aura snapshot, main hand tooltip, imbue word shown, shield word shown); None = not asserted
+    secret_buffs = "__snap = { buffs = { __SECRET, { name = __SECRET, count = __SECRET, spellId = __SECRET, expirationTime = __SECRET } } }"
+    cases = (
+        ("no buffs", "__snap = { buffs = {} }", ["Heavy Axe"], True, True),
+        ("imbue only", "__snap = { buffs = {} }", ["Rockbiter 1 (56 min)"], False, True),
+        ("shield only", "__shield(3, 480)", ["Heavy Axe"], True, False),
+        ("both", "__shield(3, 480)", ["Rockbiter 1 (56 min)"], False, False),
+        ("secret auras", secret_buffs, ["Heavy Axe"], None, None),
+    )
+    for label, snap, tooltip, imbue_word, shield_word in cases:
+        for combat in (False, True):
+            lua = engine_world(tips={16: tooltip})
+            run(lua, "__degradeCount = 0; __quiet = {}")
+            run(lua, snap)
+            fire(lua, "UNIT_AURA", "player")
+            fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+            update(lua)
+            tick(lua, 1.1)
+            where = f"{label}, combat {combat}"
+            if not combat:
+                for i, want in ((IMBUE, imbue_word), (SHIELD, shield_word)):
+                    if want is not None:
+                        assert tile(lua, i)["word"] is want, f"{where}: tile {i} word shown is {tile(lua, i)['word']}"
+            else:
+                set_combat(lua, True)
+                fire(lua, "PLAYER_REGEN_DISABLED")
+                tick(lua, 5)
+                update(lua)
+                if shield_word is not False:
+                    pass
+                # the shield tile is on the engine path in combat: the missing base, whatever the frozen view says
+                assert tile(lua, SHIELD)["word"] is True, f"{where}: the engine shield tile is not on its missing base"
+            g(lua).FS.BuffTab.SaveStatus()
+            assert not g(lua).FS.BuffTab.BT.warned.bufftab_status, f"{where}: the state line failed to save"
+            assert int(g(lua).__degradeCount) == 0 and not len(list(g(lua).__quiet.keys())), \
+                f"{where}: something was logged: {list(g(lua).__degraded.keys())} {list(g(lua).__quiet.keys())}"
+            assert "setting=" in str(g(lua).ForeverSTUwaveDB.buffTabEngine.line), f"{where}: no state line"
+
+
+def check_a_slot_whose_is_shown_is_unreadable_says_why_and_falls_back_to_is_visible():
+    lua = engine_world(tips={16: ["Rockbiter 1 (30 min)"]})
+    tick(lua, 1.1)
+    imbue = lambda: g(lua).FS.BuffTab.BT.byKey.imbue.fsEngine
+    parts = lambda: [imbue().parts[k] for k in (1, 2)]
+    for label, shown_body, visible_body, want_code, want_why in (
+        ("secret and no IsVisible", "return __SECRET", None, 0, "secret/missing"),
+        ("throwing", "error('restricted')", None, 0, "error/missing"),
+        ("a number", "return 1", None, 0, "type:number/missing"),
+        ("secret, IsVisible plain true", "return __SECRET", "return true", 2, None),
+        ("secret, IsVisible plain false", "return __SECRET", "return false", 1, None),
+        ("secret, IsVisible secret", "return __SECRET", "return __SECRET", 0, "secret/secret"),
+    ):
+        run(lua, "for _, i in ipairs({ 1, 2 }) do local part = FS.BuffTab.BT.byKey.imbue.fsEngine.parts[i]; part.slot.IsShown = function() "
+                 + shown_body + " end; part.slot.IsVisible = " + (f"function() {visible_body} end" if visible_body else "nil") + " end")
+        tick(lua, 1.1)
+        for part in parts():
+            assert int(part.shownCode) == want_code and (part.shownWhy is None if want_why is None else str(part.shownWhy) == want_why), \
+                f"{label}: code {part.shownCode} why {part.shownWhy}"
+        line = str(g(lua).ForeverSTUwaveDB.buffTabEngine.line)
+        if want_why:
+            assert f"shown=?({want_why})" in line, (label, line)
+    # an unreadable IsShown with a plain IsVisible still opens the seen gate for an imbue that is on
+    lua = engine_world(tips={16: ["Rockbiter 1 (30 min)"]})
+    run(lua, "for _, i in ipairs({ 1, 2 }) do local part = FS.BuffTab.BT.byKey.imbue.fsEngine.parts[i]; part.slot.IsShown = function() return __SECRET end; part.slot.IsVisible = function() return true end end")
+    run(lua, "FS.BuffTab.BT.byKey.imbue.fsEngine.seen = nil")
+    tick(lua, 1.1)
+    assert g(lua).FS.BuffTab.BT.byKey.imbue.fsEngine.seen is True
+
+
 def check_a_secret_or_odd_slot_value_never_makes_the_state_line_fail_or_speak():
     lua = engine_world()
     shield_aura_up(lua)
@@ -3309,7 +3379,8 @@ def check_a_secret_or_odd_slot_value_never_makes_the_state_line_fail_or_speak():
         assert int(g(lua).__degradeCount) == 0 and not len(list(g(lua).__quiet.keys())), "the state line spoke"
     leave_combat(lua)
     tick(lua, 1.1)
-    assert "slot1 shown=? 0x0 lit=?" in str(g(lua).ForeverSTUwaveDB.buffTabEngine.line), g(lua).ForeverSTUwaveDB.buffTabEngine.line
+    assert "slot1 shown=?(secret/missing) 0x0 lit=?" in str(g(lua).ForeverSTUwaveDB.buffTabEngine.line), \
+        g(lua).ForeverSTUwaveDB.buffTabEngine.line
     # raw secrets in the fields themselves (whatever wrote them): no arithmetic, comparison or format on a raw value
     run(lua, """local eng = FS.BuffTab.BT.byKey.imbue.fsEngine
         local part = eng.parts[1]
@@ -3320,7 +3391,7 @@ def check_a_secret_or_odd_slot_value_never_makes_the_state_line_fail_or_speak():
     assert not g(lua).FS.BuffTab.BT.warned.bufftab_status, "a raw secret field made the state line fail"
     assert int(g(lua).__degradeCount) == 0 and not len(list(g(lua).__quiet.keys()))
     line = str(g(lua).ForeverSTUwaveDB.buffTabEngine.line)
-    assert "slot1 shown=secret secretxsecret lit=secret" in line and "declared=secret" in line, line
+    assert re.search(r"slot1 shown=secret(\([^)]*\))? secretxsecret lit=secret", line) and "declared=secret" in line, line
 
 
 def check_the_unmapped_spell_icon_list_rides_in_the_saved_state_table():
@@ -3722,6 +3793,8 @@ CHECKS = [
     check_a_slot_with_the_right_corner_but_the_wrong_size_is_not_on_the_icon,
     check_the_state_line_for_the_live_test_is_saved_and_quiet_ticks_allocate_nothing,
     check_the_state_line_tells_the_setting_and_unreadable_from_misplaced_and_a_refusing_db_never_throws,
+    check_zero_one_or_secret_buffs_in_and_out_of_combat_render_without_error_or_noise,
+    check_a_slot_whose_is_shown_is_unreadable_says_why_and_falls_back_to_is_visible,
     check_a_secret_or_odd_slot_value_never_makes_the_state_line_fail_or_speak,
     check_the_unmapped_spell_icon_list_rides_in_the_saved_state_table,
     check_a_corrupt_state_table_is_replaced_and_never_errors_each_tick,

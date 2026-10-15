@@ -118,7 +118,7 @@ end
 
 -- Whether a spell name is this definition's (English, or the client's own language through the rank id).
 local function NameIs(name, def)
-    if type(name) ~= "string" then return false end
+    if IsSecret(name) or type(name) ~= "string" then return false end
     return name == def.name or name == SpellNameById(def.base)
 end
 
@@ -467,10 +467,15 @@ local shield = {
     holdUntil = 0,        -- GetTime() until which the snapshot is not read (just after regen it may lag)
 }
 
+-- A secret aura, name or id is unknown, never compared: a secret name falls back to a plain spell id like a missing one.
 local function AuraIs(aura, def)
-    if type(aura) ~= "table" then return false end
-    if NameIs(aura.name, def) then return true end
-    if aura.name == nil and type(aura.spellId) == "number" then return NameIs(SpellNameById(aura.spellId), def) end
+    if IsSecret(aura) or type(aura) ~= "table" then return false end
+    local name = aura.name
+    if NameIs(name, def) then return true end
+    if IsSecret(name) or name == nil then
+        local id = PlainOf(aura.spellId, "number")
+        if id then return NameIs(SpellNameById(id), def) end
+    end
     return false
 end
 
@@ -493,8 +498,8 @@ local function ReadShield(now)
     shield.frozen = frozen
     if frozen then return end
     local ok, snap = pcall(auras.Get)
-    local list = ok and type(snap) == "table" and snap.buffs or nil
-    if type(list) ~= "table" then return end
+    local list = ok and not IsSecret(snap) and type(snap) == "table" and snap.buffs or nil
+    if IsSecret(list) or type(list) ~= "table" then return end
     local other = false
     for i = 1, #list do
         local aura = list[i]

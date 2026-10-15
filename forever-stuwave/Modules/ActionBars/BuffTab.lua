@@ -1104,10 +1104,28 @@ end
 
 -- What a slot frame shows right now, for the tile's live test and the state line (out of combat only, plain values
 -- only): shownCode 0 unknown, 1 hidden, 2 shown; w and h its size in whole px (0 unknown).
+-- One plain boolean answer of `slot` to `method`, or nil and why not: "error", "secret", "type:<type>" or "missing".
+local function PlainBoolean(slot, method)
+    local call = slot[method]
+    if type(call) ~= "function" then return nil, "missing" end
+    local ok, v = pcall(call, slot)
+    if not ok then return nil, "error" end
+    if IsSecret(v) then return nil, "secret" end
+    if type(v) ~= "boolean" then return nil, "type:" .. type(v) end
+    return v
+end
+
 local function ReadPart(part)
     local slot = part.slot
-    local ok, shown = pcall(slot.IsShown, slot)
-    part.shownCode = (ok and not IsSecret(shown) and type(shown) == "boolean") and (shown and 2 or 1) or 0
+    -- whether the slot draws: IsShown, else IsVisible when the client keeps IsShown from us; why it was unknown is kept for
+    -- the state line (a slot that draws an aura may be secret by design)
+    local shown, why = PlainBoolean(slot, "IsShown")
+    if shown == nil then
+        local visible, why2 = PlainBoolean(slot, "IsVisible")
+        if visible ~= nil then shown = visible else why = why .. "/" .. why2 end
+    end
+    part.shownCode = shown == nil and 0 or (shown and 2 or 1)
+    part.shownWhy = shown == nil and why or nil
     local okW, w = pcall(slot.GetWidth, slot)
     local okH, h = pcall(slot.GetHeight, slot)
     part.w = (okW and type(w) == "number" and not IsSecret(w)) and math.floor(w + 0.5) or 0
@@ -1308,7 +1326,7 @@ local function WriteStatus()
             sig = (sig * 31 + #eng.parts * 7 + ok * 3 + (eng.bad and 1 or 0) + nils * 13 + (eng.seen and 17 or 0)) % 2147483647
             for _, part in ipairs(eng.parts) do
                 sig = (sig * 31 + Num(part.shownCode) * 5 + Num(part.w) * 3 + Num(part.h)
-                    + Num(part.litCode) * 11 + (part.coverPlate and 19 or 0)
+                    + Num(part.litCode) * 11 + (part.shownWhy and #part.shownWhy or 0) * 37 + (part.coverPlate and 19 or 0)
                     + (part.coverRing and 23 or 0)) % 2147483647
             end
         end
@@ -1346,7 +1364,8 @@ local function WriteStatus()
                 local lit = "n/a"
                 if part.lit then lit = CodeText(part.litCode, "false", "true") end
                 detail[#detail + 1] = string.format("slot%d shown=%s %sx%s lit=%s cover=%s", n,
-                    CodeText(part.shownCode, "false", "true"), Plain(part.w), Plain(part.h), lit,
+                    CodeText(part.shownCode, "false", "true") .. (part.shownWhy and ("(" .. part.shownWhy .. ")") or ""),
+                    Plain(part.w), Plain(part.h), lit,
                     cover ~= "" and cover or "none")
             end
             text[#text + 1] = string.format("%s declared=%s parts=%d ok=%d nils=%s bad=%s%s%s", button.fsKey, Plain(eng.declared),
