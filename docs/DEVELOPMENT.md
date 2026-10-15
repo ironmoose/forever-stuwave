@@ -1,6 +1,6 @@
 # Development
 
-This standalone repository is the canonical Forever STUwave source. Runtime files live in `forever-stuwave/`. `tools/` contains development utilities, Lua harnesses, Python tests, support modules and fixtures; `tools/assets/` contains texture generators and the font builder. Browser design mockups live in a local, untracked `mockups/` folder (ignored by git); they are design studies, not demonstrations of shipped behavior. Harnesses that compare against a mockup are skipped by `tools/check.py` when the mockup is absent.
+This standalone repository is the canonical Forever STUwave source. Runtime files live in `forever-stuwave/`. `tools/` contains development utilities, Lua harnesses, Python tests, support modules and fixtures; `tools/assets/` contains texture generators and the font builder. Browser design mockups live in a local, untracked `mockups/` folder (ignored by git); they are design studies, not demonstrations of shipped behavior. Harnesses that compare against a mockup are skipped, and counted in a closing summary, by `tools/check.py` when `mockups/` is absent. To get full coverage from a clean export run `FS_MOCKUPS_DIR=<checkout>/mockups uv run python tools/check.py`; the script links that directory in as `mockups/` for the run and removes the link afterwards. When `mockups/` exists or `FS_MOCKUPS_DIR` is set, a missing mockup file is a failure.
 
 ## Setup and checks
 

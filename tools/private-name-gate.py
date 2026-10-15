@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # Assembled from pieces so this file does not contain the words it forbids.
 FORBIDDEN = re.compile("park" + "er|air" + "ete", re.IGNORECASE)
-SKIP_DIRS = {".git", ".venv", ".venv-lua", "__pycache__", ".pytest_cache", "dist", "debug"}
+SKIP_DIRS = {"mockups", ".git", ".venv", ".venv-lua", "__pycache__", ".pytest_cache", "dist", "debug"}
 
 
 def candidate_files() -> list[Path]:
