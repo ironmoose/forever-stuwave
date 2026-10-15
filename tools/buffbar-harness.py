@@ -3586,31 +3586,180 @@ def check_a_word_wider_than_the_band_overflows_at_the_smallest_size_and_is_never
     assert abs(word_px(lua, SHIELD, 1.0) - word_fit(lua, SHIELD, "SHIELD", 1.0)) < 1e-6
 
 
-def check_a_word_measured_in_the_fallback_font_is_fitted_again_when_the_bundled_font_lands():
-    # a cold start: the bundled font is not there yet, so the word is measured in a narrower fallback face and keeps its
-    # start size; Theme retries the font a few seconds later, and the fit has to run again with the real face
-    mock = ES_MOCK % 1.0 + """
-__timers = {}
-C_Timer = { After = function(_, fn) __timers[#__timers + 1] = fn end }
+# A cold start: the bundled font is not there yet, so the word is measured in a narrower fallback face and keeps its start
+# size; Theme retries the font at login, entering the world and on timers, and the fit has to run again with the real face.
+# __timers / __delays record what the addon schedules; __landed is the listener it gave Theme (HOOK, the Theme that has the
+# hook); __wf counts the SetFont calls the word's fontstrings take.
+COLD_FONT = """
+__timers, __delays = {}, {}
+C_Timer = { After = function(d, fn) __delays[#__delays + 1] = d; __timers[#__timers + 1] = fn end }
 FS.Theme.FONT_MONO = FS.Theme.FONT_MONO or "Interface/AddOns/forever-stuwave/Media/Fonts/MononokiNerdFontMono-Bold.ttf"
 __fontReal = false
+-- the real ApplyMono also puts the colour on (alpha 1 when it has none); the shared mock only sets the font
+FS.Theme.ApplyMono = function(fs, size, color)
+    fs:SetFont("mono.ttf", size, "")
+    if color then fs:SetTextColor(color[1], color[2], color[3], color[4] or 1) end
+end
 function __Region:GetFont() return __fontReal and FS.Theme.FONT_MONO or "Fonts/FRIZQT__.TTF", 10, "" end
 local real = __Region.GetStringWidth
 function __Region:GetStringWidth() if __fontReal then return real(self) end return real(self) * 0.5 end
 """
-    lua = band_world(1.0, 1.0, mock=mock)
-    assert word_px(lua, SHIELD, 1.0) == 9.0, "the fallback face did not keep the start size"
-    run(lua, "__fontReal = true; local t = __timers; __timers = {}; for _, fn in ipairs(t) do fn() end")
-    assert abs(word_px(lua, SHIELD, 1.0) - hinted_fit(lua, SHIELD, "SHIELD", 1.0)) < 1e-6 and word_px(lua, SHIELD, 1.0) < 9.0, \
-        "the word was not fitted again once the real font landed"
-    # a timer that fires while the font is still missing changes nothing, and a seat made since owns the word
-    lua = band_world(1.0, 1.0, mock=mock)
-    run(lua, "local t = __timers; __timers = {}; for _, fn in ipairs(t) do fn() end")
-    assert word_px(lua, SHIELD, 1.0) == 9.0, "a retry with no font refit anyway"
+HOOK = "FS.Theme.OnFontLanded = function(fn) __landed = fn end\n"
+FIRE_TIMERS = "local t = __timers; __timers = {}; for _, fn in ipairs(t) do fn() end"
+COUNT_FONT = ("__wf = 0; for _, i in ipairs({1, 2}) do local w = _G['FSBuffTabButton'..i].fsWord; local f = w.SetFont; "
+              "w.SetFont = function(...) __wf = __wf + 1 return f(...) end end")
+
+
+def cold_world(hook, es=1.0, sc=1.0):
+    mock = ES_MOCK % es + COLD_FONT + (HOOK if hook else "")
+    lua = band_world(es, sc, mock=mock)
+    run(lua, COUNT_FONT)
+    return lua
+
+
+def land(lua, hook):
+    """The font arrives: through Theme's listener, or (no hook) the timers the addon scheduled."""
+    run(lua, "__fontReal = true")
+    if hook:
+        run(lua, "for _, i in ipairs({1, 2}) do __landed(_G['FSBuffTabButton'..i].fsWord) end")
+    else:
+        run(lua, FIRE_TIMERS)
+
+
+def check_a_word_measured_in_the_fallback_font_is_fitted_again_when_the_bundled_font_lands():
+    fits = {}
+    for hook in (True, False):
+        where = "with Theme's hook" if hook else "without it"
+        lua = cold_world(hook)
+        assert word_px(lua, SHIELD, 1.0) == 9.0, f"{where}: the fallback face did not keep the start size"
+        delays = sorted({float(g(lua).__delays[k]) for k in range(1, len(g(lua).__delays) + 1)})
+        if hook:
+            assert delays == [] and g(lua).__landed is not None, f"{where}: timers were scheduled beside the hook {delays}"
+        else:
+            assert delays == [0.1, 2.1, 5.1], f"{where}: the fallback timers are {delays}"
+        # the font still missing: nothing changes
+        if hook:
+            run(lua, "for _, i in ipairs({1, 2}) do __landed(_G['FSBuffTabButton'..i].fsWord) end")
+        else:
+            run(lua, FIRE_TIMERS)
+        assert word_px(lua, SHIELD, 1.0) == 9.0 and int(g(lua).__wf) == 0, f"{where}: a retry with no font refit anyway"
+        lua = cold_world(hook)
+        land(lua, hook)
+        assert abs(word_px(lua, SHIELD, 1.0) - hinted_fit(lua, SHIELD, "SHIELD", 1.0)) < 1e-6 and word_px(lua, SHIELD, 1.0) < 9.0, \
+            f"{where}: the word was not fitted again once the real font landed"
+        # done is done: a second arrival (the listener again) writes nothing, and the three timers of a seat together make
+        # exactly the fonts one fit makes
+        n = fits[hook] = int(g(lua).__wf)
+        assert n > 0
+        if hook:
+            run(lua, "for _, i in ipairs({1, 2}) do __landed(_G['FSBuffTabButton'..i].fsWord) end")
+            assert int(g(lua).__wf) == n, f"{where}: a fit that was done ran again"
+    assert fits[True] == fits[False], f"the timers fitted more than once: {fits}"
     # a font that was there from the start schedules nothing
-    lua = band_world(1.0, 1.0, mock=mock.replace("__fontReal = false", "__fontReal = true"))
+    lua = band_world(1.0, 1.0, mock=ES_MOCK % 1.0 + COLD_FONT.replace("__fontReal = false", "__fontReal = true") + HOOK)
     run(lua, "__n = #__timers")
     assert int(g(lua).__n) == 0, "a loaded font still scheduled a refit"
+
+
+def word_color(lua):
+    """The colour on the missing word's own fontstring (tile()'s text_color is the state text beside it)."""
+    c = btn(lua, SHIELD).fsWord._textColor
+    return tuple(round(float(c[k]), 4) for k in (1, 2, 3, 4))
+
+
+def check_the_word_is_painted_again_after_a_refit_so_it_never_flashes_full_red():
+    for hook in (True, False):
+        lua = cold_world(hook)
+        # out of mana tints the word away from the theme's pure red, so a refit that leaves ApplyMono's colour shows
+        use_spell(lua, "Lightning Shield", False, True)
+        fire(lua, "SPELL_UPDATE_USABLE")
+        before = word_color(lua)
+        red = g(lua).FS.Theme.COLOR_RED
+        assert dist(before, [float(red[k]) for k in (1, 2, 3)]) > 0.05, f"the word is not tinted: {before}"
+        land(lua, hook)
+        assert word_px(lua, SHIELD, 1.0) < 9.0
+        after = word_color(lua)
+        assert after == before, f"hook {hook}: the refit left the word {after}, Paint's was {before}"
+
+
+def check_a_refit_waits_out_combat_and_runs_when_it_ends_and_never_writes_a_font_inside_it():
+    for hook in (True, False):
+        lua = cold_world(hook)
+        enter = lambda: (set_combat(lua, True), fire(lua, "PLAYER_REGEN_DISABLED"))
+        enter()
+        land(lua, hook)
+        assert int(g(lua).__wf) == 0 and word_px(lua, SHIELD, 1.0) == 9.0, f"hook {hook}: a font or size was written in combat"
+        leave_combat(lua)
+        assert abs(word_px(lua, SHIELD, 1.0) - hinted_fit(lua, SHIELD, "SHIELD", 1.0)) < 1e-6 and word_px(lua, SHIELD, 1.0) < 9.0, \
+            f"hook {hook}: the fit did not run when combat ended"
+        n = int(g(lua).__wf)
+        enter()
+        leave_combat(lua)
+        assert int(g(lua).__wf) == n, "a done fit ran again at the end of combat"
+        # the font still missing at the end of combat: it keeps waiting, then fits when it lands
+        lua = cold_world(hook)
+        set_combat(lua, True)
+        fire(lua, "PLAYER_REGEN_DISABLED")
+        leave_combat(lua)
+        assert int(g(lua).__wf) == 0 and word_px(lua, SHIELD, 1.0) == 9.0
+        land(lua, hook)
+        assert word_px(lua, SHIELD, 1.0) < 9.0, f"hook {hook}: a fit that waited out combat never ran"
+
+
+def check_a_refit_that_was_overtaken_by_a_new_seat_does_nothing():
+    # no hook: the timers hold the fit of their seat; a rescale makes a new fit and the old timers must not apply theirs
+    lua = cold_world(False)
+    run(lua, "__old = {}; for k, fn in ipairs(__timers) do __old[k] = fn end")
+    lua.eval("__rescale")(0.8333)
+    update(lua)
+    seated, writes = word_px(lua, SHIELD, 1.0), int(g(lua).__wf)
+    run(lua, "__fontReal = true; for _, fn in ipairs(__old) do fn() end")
+    assert word_px(lua, SHIELD, 1.0) == seated and int(g(lua).__wf) == writes, "a timer of an old seat applied its fit"
+    # and the new seat's own timers still do
+    run(lua, FIRE_TIMERS)
+    assert int(g(lua).__wf) > writes and word_px(lua, SHIELD, 1.0) < 9.0, "the new seat's fit never ran"
+    # with the hook the listener goes by the current fit
+    lua = cold_world(True)
+    lua.eval("__rescale")(0.8333)
+    update(lua)
+    run(lua, "__fontReal = true; for _, i in ipairs({1, 2}) do __landed(_G['FSBuffTabButton'..i].fsWord) end")
+    assert abs(word_px(lua, SHIELD, 1.0) - hinted_fit(lua, SHIELD, "SHIELD", 1.0)) < 1e-6, "the listener did not fit for the current seat"
+
+
+def check_a_refit_that_raises_is_caught_and_reported_quietly():
+    for hook in (True, False):
+        lua = cold_world(hook)
+        run(lua, "__fontReal = true; __quiet = {}; __degradeCount = 0\n"
+                 "for _, i in ipairs({1, 2}) do _G['FSBuffTabButton'..i].fsWord.SetFont = function() error('boom') end end")
+        if hook:
+            run(lua, "for _, i in ipairs({1, 2}) do __landed(_G['FSBuffTabButton'..i].fsWord) end")
+        else:
+            run(lua, FIRE_TIMERS)
+        assert g(lua).FS.BuffTab.BT.warned.bufftab_refit and "boom" in str(g(lua).__quiet.bufftab_refit), \
+            f"hook {hook}: the failed refit was not kept in the quiet log"
+        assert int(g(lua).__degradeCount) == 0, "a failed refit said something to chat"
+
+
+# Lua cannot trap == on a string, so a secret name is a plain marker string; these spies count what else touches a secret
+# (the marker or __SECRET): any string function, and any spell-name lookup keyed by one. A guarded read leaves both at zero.
+# __byCalls counts every spell-name lookup: an aura with no usable id must cause none (the unguarded name compare asks for one).
+SECRET_SPIES = """
+__secretHits, __byCalls = {}, 0
+local function secret(v) return rawequal(v, __SECRET) or (__secretStr ~= nil and rawequal(v, __secretStr)) end
+for _, name in ipairs({"lower", "upper", "find", "match", "gmatch", "gsub", "sub", "format", "len", "rep", "byte", "reverse"}) do
+    local f = string[name]
+    string[name] = function(...)
+        for k = 1, select("#", ...) do if secret((select(k, ...))) then __secretHits[#__secretHits + 1] = "string." .. name break end end
+        return f(...)
+    end
+end
+local by = FS.FrameHelpers.SpellById
+FS.FrameHelpers.SpellById = function(id)
+    if secret(id) then __secretHits[#__secretHits + 1] = "SpellById(secret)" end
+    __byCalls = __byCalls + 1
+    return by(id)
+end
+"""
 
 
 def check_a_secret_aura_name_is_judged_by_a_plain_spell_id_and_never_by_the_name():
@@ -3625,10 +3774,15 @@ def check_a_secret_aura_name_is_judged_by_a_plain_spell_id_and_never_by_the_name
     ):
         lua = engine_world(tips={16: ["Heavy Axe"]})
         run(lua, '__secretStr = "<secret name>"; __degradeCount = 0; __quiet = {}')
+        run(lua, SECRET_SPIES)
         run(lua, "__snap = { buffs = { " + aura + " } }")
         fire(lua, "UNIT_AURA", "player")
         update(lua)
         tick(lua, 1.1)
+        hits = [str(g(lua).__secretHits[k]) for k in range(1, len(g(lua).__secretHits) + 1)]
+        assert not hits, f"{label}: a secret reached {hits}"
+        if label in ("no id", "secret id"):
+            assert int(g(lua).__byCalls) == 0, f"{label}: a spell name was looked up for an aura that has no usable id"
         v = view(lua, "shield")
         got[label] = (str(v.mode), bool(v.other), tile(lua, SHIELD)["word"])
         assert int(g(lua).__degradeCount) == 0, f"{label}: something was said: {list(g(lua).__degraded.keys())}"
@@ -3684,8 +3838,8 @@ def look_of(lua, i):
     b = btn(lua, i)
     pts = tuple((round(float(q.x), 4), round(float(q.y), 4), str(q.point)) for q in
                 (b.fsBand._points[k] for k in range(1, len(b.fsBand._points) + 1)))
-    return (shown(b.fsBand), shown(b.fsWord), str(b.fsWord._text), tuple(round(float(x), 4) for x in b.fsWord._textColor),
-            float(b.fsWord._font[2]), tuple(round(float(x), 4) for x in b.fsBand._color), shown(b.fsTextPlate),
+    return (shown(b.fsBand), shown(b.fsWord), str(b.fsWord._text), tuple(round(float(b.fsWord._textColor[k]), 4) for k in (1, 2, 3, 4)),
+            float(b.fsWord._font[2]), tuple(round(float(b.fsBand._color[k]), 4) for k in (1, 2, 3, 4)), shown(b.fsTextPlate),
             str(b.fsText._text), pts, (round(float(b.fsBand._w), 4), round(float(b.fsBand._h), 4)),
             (round(float(b.fsWord._w), 4), round(float(b.fsWord._h), 4)))
 
@@ -3873,6 +4027,10 @@ CHECKS = [
     check_the_band_and_its_word_sit_on_whole_physical_pixels_inside_the_ring_at_every_scale,
     check_a_word_wider_than_the_band_overflows_at_the_smallest_size_and_is_never_cut,
     check_a_word_measured_in_the_fallback_font_is_fitted_again_when_the_bundled_font_lands,
+    check_the_word_is_painted_again_after_a_refit_so_it_never_flashes_full_red,
+    check_a_refit_waits_out_combat_and_runs_when_it_ends_and_never_writes_a_font_inside_it,
+    check_a_refit_that_was_overtaken_by_a_new_seat_does_nothing,
+    check_a_refit_that_raises_is_caught_and_reported_quietly,
     check_a_secret_aura_name_is_judged_by_a_plain_spell_id_and_never_by_the_name,
     check_a_state_line_error_that_will_not_turn_into_text_cannot_break_the_report,
     check_the_up_state_has_no_band_and_no_word_and_the_time_keeps_its_plate,

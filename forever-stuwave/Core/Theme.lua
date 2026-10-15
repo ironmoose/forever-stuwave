@@ -760,10 +760,19 @@ local function CloseFontEvents()
     end
 end
 
+-- Listeners told when a retry puts a bundled font on a fontstring that missed it (a cold start): a module that measured its
+-- text in the fallback face fits it again. Each runs under pcall, so one cannot stop the retry or the others.
+local fontLandedListeners = {}
+
+function Theme.OnFontLanded(fn)
+    if type(fn) == "function" then fontLandedListeners[#fontLandedListeners + 1] = fn end
+end
+
 local function RetryOneFont(fontString, pending, finalPass)
     fontString:SetFont(pending.path, pending.size, pending.flags)
     if FontReadsBack(fontString, pending.path) then
         pendingFonts[fontString] = nil
+        for _, fn in ipairs(fontLandedListeners) do pcall(fn, fontString) end
         return
     end
     if not pending.keepFace then ApplyFallbackFont(fontString, pending.size, pending.flags) end

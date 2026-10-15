@@ -429,6 +429,17 @@ end
 
 local SeatBand
 
+-- The size, in physical pixels, the missing word starts at: BT.WORD_PX, or smaller so it keeps a pixel clear across the
+-- band and its capitals keep a pixel clear above and below (the tile shrinks with the UI scale and fonts do not); whole and
+-- half pixels, never below BT.MIN_PX. This is the model; the client's own measure (WordFits) has the last word.
+local function WordPx(word, bandW, bandH)
+    local n = type(word) == "string" and #word or 0
+    if n == 0 then return BT.WORD_PX end
+    local across = math.floor((bandW - 1) / (n * BT.ADVANCE) * 2) / 2
+    local tall = math.floor((bandH - 2) / BT.CAP * 2) / 2
+    return math.max(math.min(across, tall, BT.WORD_PX), BT.MIN_PX)
+end
+
 -- The width, in UI units, the client gives the word's text as set now, or nil when it will not say (a secret or a missing
 -- call). The advance the client uses is hinted to whole pixels, so it can be wider than the font file's advance.
 local function MeasuredWidth(fs)
@@ -466,28 +477,58 @@ local function FitWord(button, fit)
     end
 end
 
--- Fits the word again once the font has landed: Theme's own retries run at 0, 2 and 5 seconds, so look just after each. A
--- seat made since (a rescale) has its own fit and this one stops.
-local function ScheduleRefit(button, fit)
-    if not (C_Timer and C_Timer.After) then return end
+-- The fits waiting for the bundled font: the word's fontstring -> its button (weak, so a discarded tile is not kept).
+local fitWaiting = setmetatable({}, { __mode = "k" })
+
+-- Fits the word again with the real font. Only a current fit that is not done, only once the font reads back, and never in
+-- combat (a font or size write is not allowed there): the fit then stays waiting for PLAYER_REGEN_ENABLED. ApplyMono puts the
+-- word's colour back to full red, so the tile is painted again straight after (its saved state cleared, or Paint would
+-- skip it), which restores the state's own colour and alpha.
+local function RefitNow(button, fit)
+    if button.fsFit ~= fit or fit.done or not FontLoaded(button.fsWord) then return false end
+    if InCombatLockdown and InCombatLockdown() then return false end
+    fit.done = true
+    FitWord(button, fit)
+    button.fsSig = nil              -- Paint writes only on a change: this one has to, the word is full red again
+    BuffTab.Paint()
+    return true
+end
+
+-- RefitNow under pcall: a retry callback or timer must never throw into Theme or the timer queue.
+local function SafeRefit(button, fit)
+    local ok, err = pcall(RefitNow, button, fit)
+    if not ok then QuietOnce("bufftab_refit", "the buff tab word could not be fitted again: ", err) end
+end
+
+-- Hears Theme's font retry (at login, entering the world and on its timers) and refits the word whose font just landed.
+-- A client or Theme without the hook gets timers just after each of Theme's own retries instead.
+local fontHooked = false
+local function HookFontRetry()
+    if fontHooked then return true end
+    local T = FS.Theme
+    if not (T and type(T.OnFontLanded) == "function") then return false end
+    fontHooked = true
+    T.OnFontLanded(function(fontString)
+        local button = fitWaiting[fontString]
+        if button and button.fsFit then SafeRefit(button, button.fsFit) end
+    end)
+    return true
+end
+
+local function WaitForFont(button, fit)
+    fitWaiting[button.fsWord] = button
+    if HookFontRetry() or not (C_Timer and C_Timer.After) then return end
     for _, delay in ipairs({ 0.1, 2.1, 5.1 }) do
-        C_Timer.After(delay, function()
-            if button.fsFit ~= fit or fit.done or not FontLoaded(button.fsWord) then return end
-            fit.done = true
-            FitWord(button, fit)
-        end)
+        C_Timer.After(delay, function() SafeRefit(button, fit) end)
     end
 end
 
--- The size, in physical pixels, the missing word starts at: BT.WORD_PX, or smaller so it keeps a pixel clear across the
--- band and its capitals keep a pixel clear above and below (the tile shrinks with the UI scale and fonts do not); whole and
--- half pixels, never below BT.MIN_PX. This is the model; the client's own measure (WordFits) has the last word.
-local function WordPx(word, bandW, bandH)
-    local n = type(word) == "string" and #word or 0
-    if n == 0 then return BT.WORD_PX end
-    local across = math.floor((bandW - 1) / (n * BT.ADVANCE) * 2) / 2
-    local tall = math.floor((bandH - 2) / BT.CAP * 2) / 2
-    return math.max(math.min(across, tall, BT.WORD_PX), BT.MIN_PX)
+-- PLAYER_REGEN_ENABLED: a fit that waited out combat runs now.
+local function RefitAfterCombat()
+    for _, button in ipairs(BT.list) do
+        local fit = button.fsFit
+        if fit and not fit.done and fit.waiting then SafeRefit(button, fit) end
+    end
 end
 
 -- Seats the band and the word once per scale (out of combat: StyleButton), in PHYSICAL pixels: `es` is the pixels in one
@@ -519,7 +560,10 @@ function SeatBand(button, size, s)
     local fit = { word = word, start = WordPx(word, bandW, height), bandW = bandW, es = es }
     button.fsFit = fit
     FitWord(button, fit)
-    if word and not FontLoaded(fs) then ScheduleRefit(button, fit) end
+    if word and not FontLoaded(fs) then
+        fit.waiting = true
+        WaitForFont(button, fit)
+    end
     if fs.SetWordWrap then pcall(fs.SetWordWrap, fs, false) end
     if button.fsBand.SetSnapToPixelGrid then
         pcall(button.fsBand.SetSnapToPixelGrid, button.fsBand, true)
@@ -1757,6 +1801,7 @@ local function OnEvent(_, event)
         UpdateAllUsable()
         BuffTab.Paint()             -- the combat state: the engine slots are shown, the tiles drop to the dim base
     elseif event == "PLAYER_REGEN_ENABLED" then
+        RefitAfterCombat()
         UpdateAllUsable()
         EngineState.passTried = false       -- a new out of combat pass may try the container again
         if BT.pendingSync then

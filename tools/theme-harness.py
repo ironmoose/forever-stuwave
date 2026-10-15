@@ -1432,6 +1432,28 @@ case("font_retry_pass_survives_a_hook_that_queues_more_fontstrings", FONT_COLD_P
     for i = 1, 60 do assert(made[i].font == T.FONT_MONO, "queued mid-pass, recovered on the next pass " .. i) end
 """)
 
+case("font_landed_listeners_hear_each_recovered_fontstring_and_a_throwing_one_stops_nothing", FONT_COLD_PREAMBLE + """
+    local heard, later = {}, {}
+    T.OnFontLanded(function(fs) error("listener failed") end)
+    T.OnFontLanded(function(fs) heard[#heard + 1] = fs end)
+    T.OnFontLanded("not a function")
+    T.OnFontLanded(function(fs) later[#later + 1] = fs.font end)
+    local a, b = newFontString(), newFontString()
+    T.ApplyFontGeneric(a, T.FONT_ORBITRON, 14, nil, "")
+    T.ApplyFontGeneric(b, T.FONT_MONO, 11, nil, "")
+    assert(#heard == 0, "nobody is told while the font is still missing")
+    fire("PLAYER_LOGIN"); runTimers()
+    assert(#heard == 0 and a.font == FRIZQT, "a retry that did not take tells nobody")
+    engine.ready = true
+    fire("PLAYER_ENTERING_WORLD")       -- the entering-world retry is a landing too
+    assert(#heard == 2 and ((heard[1] == a and heard[2] == b) or (heard[1] == b and heard[2] == a)),
+        "each recovered fontstring is passed once: " .. #heard)
+    assert(a.font == T.FONT_ORBITRON and b.font == T.FONT_MONO, "a throwing listener left a fontstring unrecovered")
+    assert(later[1] == T.FONT_ORBITRON or later[1] == T.FONT_MONO, "the listener after the throwing one never ran, or ran before the font was on")
+    runTimers()
+    assert(#heard == 2, "a recovered fontstring is not announced again")
+""")
+
 case("font_retry_keeps_color_and_shadow", FONT_COLD_PREAMBLE + """
     local fs = newFontString()
     T.ApplyFontGeneric(fs, T.FONT_ORBITRON, 14, { 1, 0, 0, 0.5 }, "")
