@@ -1882,6 +1882,37 @@ def check_a_left_out_row_has_a_dashed_muted_box_and_a_small_dashes_label_and_no_
     assert dash_pixels(rows(lua)[0].tile, 1.2), "no dashes on an unset slot's rows at the live scale"
 
 
+def check_the_dashed_box_lights_every_pixel_of_the_rule_at_every_scale_and_the_left_out_icon_has_no_fill():
+    for es in (1.0, 1.2, 1.875, 2.2, 2.8125):
+        lua = boot()
+        set_display(lua, es, 1.0)
+        i = make(lua, picks={"fire": None}, name="MELEE")
+        DL(lua).OpenEditor(i)
+        tile = rows(lua)[3].tile
+        pw, ph = round(float(tile._w) * es), round(float(tile._h) * es)
+        lit = {}
+        for x, y, w, h in dash_pixels(tile, es):
+            for yy in range(y, y + h):
+                for xx in range(x, x + w):
+                    assert (xx, yy) not in lit, f"es {es}: pixel {(xx, yy)} is drawn twice"
+                    lit[(xx, yy)] = True
+        want = {}
+        for k in range(pw):
+            if (k // 2) % 2 == 0:
+                want[(k, 0)] = want[(k, ph - 1)] = True
+        for k in range(1, ph - 1):
+            if (k // 2) % 2 == 0:
+                want[(0, k)] = want[(pw - 1, k)] = True
+        for t in seq(tile.dashes):
+            if shown(t):
+                close(rgba(t)[:3], MUTED, f"es {es} dash colour")
+                assert abs(rgba(t)[3] - 0.6) < 1e-6, f"es {es}: a dash has alpha {rgba(t)[3]}"
+        assert set(lit) == set(want), (f"es {es} ({pw}x{ph}): missing {sorted(set(want) - set(lit))[:6]}, "
+                                       f"extra {sorted(set(lit) - set(want))[:6]}")
+        # the left out icon is a clear texture (the dashed box is its whole look); a set row keeps the dark plate
+        assert rgba(tile.icon)[3] == 0, f"es {es}: a left out icon has a fill of alpha {rgba(tile.icon)[3]}"
+
+
 def check_the_selected_swatchs_inner_ring_sits_one_pixel_inside_the_white_outer_ring():
     for es, sc in ((1.0, 1.0), (1.2, LIVE_SCALE), (2.2, 1.0)):
         lua = boot(sc)
@@ -2871,6 +2902,7 @@ CHECKS = [
     check_the_card_layout_matches_the_mockup_on_whole_pixels_at_every_scale,
     check_each_drop_order_row_is_one_button_for_its_whole_width_with_the_arrows_on_top,
     check_a_left_out_row_has_a_dashed_muted_box_and_a_small_dashes_label_and_no_ring,
+    check_the_dashed_box_lights_every_pixel_of_the_rule_at_every_scale_and_the_left_out_icon_has_no_fill,
     check_the_selected_swatchs_inner_ring_sits_one_pixel_inside_the_white_outer_ring,
     check_a_disabled_row_ignores_its_arrows_hover_and_a_swatch_tooltip_goes_with_the_card,
     check_the_close_x_and_the_arrows_are_drawn_on_whole_pixels_with_equal_margins_at_every_scale,

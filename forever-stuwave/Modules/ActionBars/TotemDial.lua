@@ -819,17 +819,20 @@ local function NewTileHover(t)
 end
 
 -- A dashed box on a frame, drawn in whole pixels (the mockup's dbox: 2 pixels on, 2 off, one pixel thick): a pool of
--- snapped textures on `host`, seated to the frame by SeatDashBox.
+-- snapped textures on `host`, seated to the frame by SeatDashBox, which grows the pool to the runs the pixel size needs.
 local DASH_POOL = 40
 
+local function NewDashTexture(box)
+    local t = box.host:CreateTexture(nil, "OVERLAY", nil, 2)
+    Snap(t)
+    t:Hide()
+    box[#box + 1] = t
+    return t
+end
+
 local function NewDashBox(host)
-    local box = {}
-    for i = 1, DASH_POOL do
-        local t = host:CreateTexture(nil, "OVERLAY", nil, 2)
-        Snap(t)
-        t:Hide()
-        box[i] = t
-    end
+    local box = { host = host }
+    for _ = 1, DASH_POOL do NewDashTexture(box) end
     return box
 end
 
@@ -840,8 +843,7 @@ local function SeatDashBox(box, frame)
     local n = 0
     local function put(x, y, w, h)
         n = n + 1
-        local t = box[n]
-        if not t then return end
+        local t = box[n] or NewDashTexture(box)
         t:ClearAllPoints()
         t:SetPoint("TOPLEFT", frame, "TOPLEFT", x * px, -y * px)
         t:SetSize(w * px, h * px)
@@ -857,11 +859,12 @@ local function SeatDashBox(box, frame)
     end
     runs(0, pw - 1, function(x, len) put(x, 0, len, 1); put(x, ph - 1, len, 1) end)
     runs(1, ph - 2, function(y, len) put(0, y, 1, len); put(pw - 1, y, 1, len) end)
-    box.n = math.min(n, #box)
-    for i = box.n + 1, #box do box[i]:Hide() end
+    box.n = n
+    for i = n + 1, #box do box[i]:Hide() end
 end
 
--- Colours the seated dashes and shows them (or hides them all).
+-- Colours the dashes and shows the seated ones (or hides them all). The pool only grows while seating, and every seat is
+-- followed by a paint, so a new dash takes its colour here.
 local function PaintDashBox(box, c, a, show)
     for i = 1, #box do
         box[i]:SetColorTexture(c[1], c[2], c[3], a)
