@@ -29,7 +29,7 @@ PATTERNS = {
     "mail domain": "gma" + r"il\.com",
     "windows user path": r"(?<![a-z])[a-z]:\\+us" + "ers",
     "windows user path, forward slashes": "(?<![a-z])[a-z]:/+us" + "ers",
-    "macos home directory": "(?<![a-z0-9:/])/us" + "ers/",
+    "macos home directory": "(?<![a-z0-9:])(?<!:/)/us" + "ers/",
 }
 FORBIDDEN = {label: re.compile(pattern, re.IGNORECASE) for label, pattern in PATTERNS.items()}
 SKIP_DIRS = {"mockups", ".git", ".venv", ".venv-lua", "__pycache__", ".pytest_cache", "dist", "debug"}

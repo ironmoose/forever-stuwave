@@ -21,7 +21,7 @@ SAMPLES = {
     "mail domain": ["someone@gma" + "il.com"],
     "windows user path": ["C:" + "\\Us" + "ers\\someone", "c:" + "\\\\us" + "ers\\\\x", "D:" + "\\Us" + "ers\\bob"],
     "windows user path, forward slashes": ["C:/Us" + "ers/someone", "c://us" + "ers", "x:/Us" + "ers/y"],
-    "macos home directory": ["/Us" + "ers/someone/project", "cd /us" + "ers/x"],
+    "macos home directory": ["/Us" + "ers/someone/project", "cd /us" + "ers/x", "file:///Us" + "ers/a", "//Us" + "ers/a/b", "~//Us" + "ers/a"],
 }
 NEAR_MISSES = {
     "personal name": ["s" + "park" + "ers", NAME.lower() + "s", "Park", "sports park"],
