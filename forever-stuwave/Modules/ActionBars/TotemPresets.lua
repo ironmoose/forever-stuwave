@@ -1,45 +1,42 @@
 -- Forever STUwave: Shaman totem presets (data and rules)
 --
--- Concept C of mockups/totem-presets-2026-10-14.html. A PRESET is a name (up to 8 letters), up to one totem per element
--- (stored as the rank 1 spell id, the identity TotemBar.lua keeps for every totem) and a DROP ORDER. Up to P.MAX
--- presets per character, saved in ForeverSTUwaveDB.totemPresets[guid] = { list = { preset... }, active = n }.
--- An element a preset leaves out keeps its current pick (switching never clears a button) and is skipped by the step.
+-- Mockup: mockups/totem-presets-two-2026-10-14.html. A PRESET is a name (up to 8 letters), up to one totem per element
+-- (stored as the rank 1 spell id, the identity TotemBar.lua keeps for every totem) and a DROP ORDER. A character has
+-- exactly TWO preset slots, Preset 1 and Preset 2, each with an OUTLINE COLOUR picked from P.COLORS (cyan, pink, violet,
+-- amber, green, red, white), saved in ForeverSTUwaveDB.totemPresets[guid] =
+--     { slots = { [1] = preset|nil, [2] = preset|nil }, colors = { n1, n2 }, retired = { preset... } }
+-- The colour belongs to the cell, not to the preset: clearing a preset keeps it, and a bad or missing colour reads as the
+-- slot's default (cyan for Preset 1, pink for Preset 2).
 --
---   * The active preset is the DIAL's (cell 7 of the totem tab, TotemDial.lua). Switching to one picks each of its
---     totems on the element buttons through TotemBar.Pick, the same call the icon picker makes, so the buttons, the
---     native multi-cast set (SET DROP) and the Gunsight poles follow at once. A pick never made twice: an element that
---     already casts the totem is left alone.
---   * Switching changes secure attributes and the multi-cast slots, so it is OUT OF COMBAT ONLY. A switch picked in
---     combat is QUEUED (P.pending, shown by the dial) and applied at PLAYER_REGEN_ENABLED by OnRegen. Editing a preset
---     (create, rename, fill, reorder, delete) is out of combat too and is refused in combat.
---   * The slot past the last preset is a NEW slot while there is room (the dial shows a "+"): selecting it changes
---     nothing, and Shift click on the dial makes a preset there as a copy of the four buttons.
---   * STEP: a click on the dial drops the next totem of the active preset. The script behind the click is a cast
---     sequence over the totems the player knows (`/castsequence reset=combat/N totem1, totem2, ...`, N = P.STEP_IDLE),
---     written to the dial as a secure attribute out of combat (TotemDial.lua ApplyCell); it restarts when combat ends
---     and after P.STEP_IDLE seconds without a press. The progress the dial draws is OUR record, advanced by
---     UNIT_SPELLCAST_SUCCEEDED for the next totem of the sequence (OnCast) and reset the same two ways (ResetSteps,
---     Expire); a stun or a failed cast can leave the game's step off by one from ours until the restart.
+--   * Each slot has a cell on the totem tab (FSTotemButton7 for Preset 1, FSTotemButton8 for Preset 2; TotemDial.lua draws
+--     them). A click drops the next totem of that slot's preset and nothing is ever switched: both cells are secure buttons
+--     whose script is written out of combat from the tab's Sync (TotemDial.lua ApplyCell), so a press works in combat.
+--     Editing a preset (fill, reorder, rename, colour, CLEAR) is out of combat only and is refused in combat. An unset slot
+--     is a dim cell that does nothing when pressed; Shift click on it makes the preset from the four totem buttons.
+--   * STEP: the script behind the click is a cast sequence over the totems the player knows (`/castsequence
+--     reset=combat/N totem1, totem2, ...`, N = P.STEP_IDLE); it restarts when combat ends and after P.STEP_IDLE seconds
+--     without a press. The progress a cell draws is OUR record, advanced by UNIT_SPELLCAST_SUCCEEDED for the next totem of
+--     the sequence (OnCast) and reset the same two ways (ResetSteps, Expire); a stun or a failed cast can leave the game's
+--     step off by one from ours until the restart.
 --   * LEVELS: an element's totem the character does not know is LOCKED: it shows as a dashed grey arc and a "(level N)"
 --     line, the step skips it, and a preset that has only locked totems steps nothing.
---
---   * GNARLY: the second cell (FSTotemButton8, pink) steps ONE preset that never changes with the dial: the character's
---     GNARLY preset (store.gnarly, picked in the settings or by USE AS GNARLY PRESET in the editor). Its script is
---     written out of combat like the dial's and is not touched by a switch, so it is armed in combat whatever the dial
---     is waiting on. It keeps its own step record, attributed to the cell whose press came just before a cast.
---   * SET 2: the GNARLY preset's totems are also written into the native multi-cast set 2 (Call of the Ancestors, level
---     30) so that spell drops them. SyncSet2 is defensive: out of combat only, only for an element whose set 1 slot is
---     proven to map (the native button agrees with the formula, or the slot holds that element's totem), one attempt per
---     element and spell per session, read back, and the set 1 slots are read before and after: a set 1 slot that
---     changed is restored and set 2 is given up for the session. No chat line; the state line carries the result.
+--   * SET 2: Preset 2's totems are also written into the native multi-cast set 2 (Call of the Ancestors, level 30) so that
+--     spell drops them. SyncSet2 is defensive: out of combat only, only for an element whose set 1 slot is proven to map
+--     (the native button agrees with the formula, or the slot holds that element's totem), one attempt per element and
+--     spell per session, read back, and the set 1 slots are read before and after: a set 1 slot that changed is restored
+--     and set 2 is given up for the session. No chat line; the state line carries the result.
+--   * MIGRATION: a file written by the build with the dial (a list of up to four presets, an active index and a GNARLY tie)
+--     moves into the two slots once, when the character's store is first read: Preset 1 is the active preset (the first
+--     one when the dial rested on the empty slot), Preset 2 is the GNARLY preset when it is a different one, else the first
+--     other preset in list order, else unset. Colours start as cyan and pink, as the cells looked before. Presets past two
+--     go to `retired` in the same table, unseen, never deleted. A file that already has `slots` is never migrated.
 --
 -- State line: ForeverSTUwaveDB.totemPresetState.line (on disk after a /reload) names the live unknowns: what each cell's
--- script attribute reads back as, how many presses and matching casts it has seen, the preset queue and the set 2
--- result. Neutral words.
+-- script attribute reads back as, how many presses and matching casts it has seen, and the set 2 result. Neutral words.
 --
 -- UNVERIFIED in game: that a cast sequence run from a secure button casts totems here and advances only on a cast, that
--- it accepts reset=combat/N, the SOUNDKIT names of the cues, the UNIT_SPELLCAST_SUCCEEDED spell id being plain, and
--- that SetMultiCastSpell on set 2 (action ids 4 past set 1) lands and leaves set 1 alone.
+-- it accepts reset=combat/N, the UNIT_SPELLCAST_SUCCEEDED spell id being plain, and that SetMultiCastSpell on set 2
+-- (action ids 4 past set 1) lands and leaves set 1 alone.
 --
 -- Loads after TotemBar.lua (it adds the cells to the tab at load) and before TotemDial.lua.
 
@@ -48,17 +45,27 @@ local _, FS = ...
 local PS = {}
 FS.TotemPresets = PS
 
+local function Rgb(hex)
+    return { tonumber(hex:sub(1, 2), 16) / 255, tonumber(hex:sub(3, 4), 16) / 255, tonumber(hex:sub(5, 6), 16) / 255, 1 }
+end
+
 local P = {
-    MAX = 4,                    -- presets per character
-    NAME_MAX = 8,               -- letters in a name
+    SLOTS = 2,                  -- preset slots per character
+    NAME_MAX = 8,               -- letters in a name ("PRESET 2" fits)
     STEP_IDLE = 6,              -- seconds without a press before the step starts over
-    APPLIED_FLASH = 1.6,        -- seconds the changed buttons stay marked after a switch
-    PRESS_FLASH = 0.25,         -- seconds the GNARLY cell flashes after a press
     PRESS_WINDOW = 2,           -- seconds after a press in which a matching cast is counted as that press's drop
     SET2_STEP = 4,              -- action ids from a set 1 slot to the same slot of set 2
     SET2_ATTEMPTS = 3,          -- sends of one spell to one set 2 slot (each after TB.SETTLE seconds without it showing)
     ELEMENTS = { "fire", "earth", "water", "air" },
     DEFAULT_ORDER = { "earth", "fire", "water", "air" },    -- the order a new preset gets
+    -- the outline colours a cell can wear, in the order the editor's swatches stand; a slot saves the index
+    COLORS = {
+        { key = "cyan", hex = "22e0ff" }, { key = "pink", hex = "ff2e97" }, { key = "violet", hex = "a855f7" },
+        { key = "amber", hex = "ffb648" }, { key = "green", hex = "39ff14" }, { key = "red", hex = "ff3b4e" },
+        { key = "white", hex = "f3fbff" },
+    },
+    DEFAULT_COLOR = { 1, 2 },   -- Preset 1 cyan, Preset 2 pink
+    CELL = { preset1 = 1, preset2 = 2 },        -- cell key -> slot
     -- the character level each totem opens at (ForeverDB), by rank 1 spell id; an element's own opening level is the floor
     LEVEL = {
         [8071] = 4, [2484] = 6, [5730] = 8, [8075] = 10, [8143] = 18,
@@ -67,65 +74,33 @@ local P = {
         [8177] = 30, [10595] = 30,
     },
     ELEMENT_LEVEL = { fire = 10, earth = 4, water = 20, air = 30 },
-    -- SOUNDKIT names of the cues; a client without one plays nothing
-    SOUND = { waiting = "IG_MAINMENU_OPTION_CHECKBOX_OFF", applied = "IG_MAINMENU_OPTION_CHECKBOX_ON",
-        press = "IG_ABILITY_ICON_DROP" },
     warned = {},
 }
+for _, color in ipairs(P.COLORS) do color.rgb = Rgb(color.hex) end
 PS.P = P
 
--- Settings, read by the config window; each is explained by its `tip` (a ? icon), never by a helper line.
+-- Settings, read by the config window; each is explained by its `tip` (a ? icon), never by a helper line. The keys are
+-- the ones players already saved (the cells were the dial and GNARLY before).
 local SETTINGS = {
-    dial = {
-        key = "totems.dial", default = true, label = "Preset dial",
-        tip = "A cell on the totem tab that holds your active totem preset. Click drops the next totem of it, one per "
-            .. "press. Shift click edits it, and so does a keybind that includes Shift. Off hides it.",
+    preset1 = {
+        key = "totems.dial", default = true, label = "Preset 1",
+        tip = "A cell on the totem tab that drops the totems of Preset 1, one per press. It works in combat and starts over "
+            .. "after combat ends or a short pause. Shift click edits it, and so does a keybind that includes Shift (which "
+            .. "drops no totem, so avoid Shift in its keybind). Off hides it.",
     },
-    dialPlate = {
-        key = "totems.dialPlate", default = true, label = "Name plate",
-        tip = "Shows the preset's name on a small plate above the dial.",
+    preset2 = {
+        key = "totems.gnarly", default = true, label = "Preset 2",
+        tip = "A second cell that drops the totems of Preset 2, one per press. It works in combat and starts over after "
+            .. "combat ends or a short pause. Shift click edits it, and so does a keybind that includes Shift (which drops "
+            .. "no totem, so avoid Shift in its keybind). Off hides it.",
     },
-    dialRight = {
-        key = "totems.dialRight", default = true, label = "Cycle with right click",
-        tip = "Right click on the dial switches to the next preset. In combat the switch waits until combat ends.",
+    plate = {
+        key = "totems.dialPlate", default = true, label = "Name plates",
+        tip = "Shows each preset's name on a small plate above its cell.",
     },
-    dialWheel = {
-        key = "totems.dialWheel", default = true, label = "Cycle with mouse wheel",
-        tip = "Scrolling over the dial switches to the next or previous preset. In combat the switch waits until combat ends.",
-    },
-    waitPulse = {
-        key = "totems.waitPulse", default = true, label = "Waiting pulse",
-        tip = "The dial pulses amber while a switch made in combat waits for combat to end.",
-    },
-    waitSound = {
-        key = "totems.waitSound", default = false, label = "Waiting sound",
-        tip = "Plays a short sound when a switch is made in combat and has to wait.",
-    },
-    appliedFlash = {
-        key = "totems.appliedFlash", default = true, label = "Applied flash",
-        tip = "Marks the totem buttons that changed for a moment when a preset switch applies.",
-    },
-    appliedSound = {
-        key = "totems.appliedSound", default = false, label = "Applied sound",
-        tip = "Plays a short sound when a preset switch applies.",
-    },
-    gnarly = {
-        key = "totems.gnarly", default = true, label = "GNARLY button",
-        tip = "Adds a second cell that always drops the preset you choose, one totem per press. It is never switched, "
-            .. "so it works in combat. It starts over after combat ends or a short pause. Shift click edits its preset, "
-            .. "and so does a keybind that includes Shift (which drops no totem, so avoid Shift in its keybind).",
-    },
-    gnarlyFlash = {
-        key = "totems.gnarlyFlash", default = true, label = "Press flash",
-        tip = "The GNARLY cell flashes for a moment each time you press it.",
-    },
-    gnarlySound = {
-        key = "totems.gnarlySound", default = false, label = "Press sound",
-        tip = "Plays a short sound each time you press the GNARLY cell.",
-    },
-    gnarlySet2 = {
+    set2 = {
         key = "totems.gnarlySet2", default = true, label = "Also on Call of the Ancestors",
-        tip = "Puts the GNARLY preset's totems on the Call of the Ancestors set (level 30), so that spell drops them too. "
+        tip = "Puts Preset 2's totems on the Call of the Ancestors set (level 30), so that spell drops them too. "
             .. "Only changes that set, only out of combat. Turning this off leaves set 2 as it is.",
     },
 }
@@ -173,7 +148,7 @@ local function InCombat()
 end
 
 -------------------------------------------------------------------------------
--- Listeners (the dial repaints, the cues play)
+-- Listeners (the cells repaint)
 -------------------------------------------------------------------------------
 
 local listeners = {}
@@ -227,12 +202,17 @@ local function CleanName(text)
 end
 PS.CleanName = CleanName
 
+
+local function DefaultName(slot)
+    return slot and ("PRESET " .. slot) or "NEW"
+end
+
 -- A preset as the file may hold it, made plain and consistent: only known ids, an order of exactly the elements with a
--- totem (kept in order, the rest appended), a name that is never empty. A broken entry becomes nil.
-local function Sanitize(entry)
+-- totem (kept in order, the rest appended), a name that is never empty (PRESET n for slot n). A broken entry becomes nil.
+local function Sanitize(entry, slot)
     if type(entry) ~= "table" then return nil end
     local preset = { name = CleanName(entry.name), picks = {}, order = {} }
-    if preset.name == "" then preset.name = "NEW" end
+    if preset.name == "" then preset.name = DefaultName(slot) end
     if type(entry.picks) == "table" then
         for _, element in ipairs(P.ELEMENTS) do
             local id = entry.picks[element]
@@ -254,45 +234,91 @@ local function Sanitize(entry)
     return preset
 end
 
-local memory                -- the store of a session that cannot write the database
-local clean = {}            -- the character keys whose saved table has been sanitised this session
+-- A colour index as the file may hold it: a whole number in range, else the slot's default.
+local function CleanColor(value, slot)
+    if type(value) == "number" and value == math.floor(value) and value >= 1 and value <= #P.COLORS then return value end
+    return P.DEFAULT_COLOR[slot]
+end
 
--- The character's store { list, active } and whether it is the saved one. A database that is not a table, a
+local function EmptyStore()
+    return { slots = {}, colors = { P.DEFAULT_COLOR[1], P.DEFAULT_COLOR[2] }, retired = {} }
+end
+
+-- Moves a file written by the build with the dial (store.list, store.active, store.gnarly) into the two slots; see the
+-- header for the rule. The presets that find no slot go to store.retired in list order.
+local function Migrate(store)
+    local list = {}
+    for _, entry in ipairs(type(store.list) == "table" and store.list or {}) do
+        local preset = Sanitize(entry)
+        if preset then list[#list + 1] = preset end
+    end
+    local first = type(store.active) == "number" and list[store.active] and store.active or (list[1] and 1 or nil)
+    local second
+    if type(store.gnarly) == "number" and list[store.gnarly] and store.gnarly ~= first then
+        second = store.gnarly
+    else
+        for i = 1, #list do
+            if i ~= first then
+                second = i
+                break
+            end
+        end
+    end
+    local out = EmptyStore()
+    out.slots[1] = first and list[first] or nil
+    out.slots[2] = second and list[second] or nil
+    for i, preset in ipairs(list) do
+        if i ~= first and i ~= second then out.retired[#out.retired + 1] = preset end
+    end
+    store.slots, store.colors, store.retired = out.slots, out.colors, out.retired
+    store.list, store.active, store.gnarly = nil, nil, nil
+end
+
+local memory                -- the store of a session that cannot write the database
+local clean = {}            -- the character keys whose saved table has been read this session: key -> the table
+
+-- The character's store { slots, colors, retired } and whether it is the saved one. A database that is not a table, a
 -- read-only Config, or a character key that cannot be read yet (never saved under a made up one) leaves the presets in
 -- memory: readable, never written to disk (every edit is refused there, so the memory store only ever holds a slot).
 local function Store()
     local db = _G.ForeverSTUwaveDB
     local key = CharKey()
     if type(db) ~= "table" or ConfigReadOnly() or not key then
-        memory = memory or { list = {}, active = 1 }
+        memory = memory or EmptyStore()
         return memory, false
     end
     if type(db.totemPresets) ~= "table" then db.totemPresets = {} end
     local store = db.totemPresets[key]
     if type(store) ~= "table" then
-        store = { list = {}, active = 1 }
+        store = EmptyStore()
         db.totemPresets[key] = store
     end
     if not clean[key] or clean[key] ~= store then
-        local list = {}
-        for _, entry in ipairs(type(store.list) == "table" and store.list or {}) do
+        if type(store.slots) ~= "table" then Migrate(store) end
+        local slots = {}
+        for slot = 1, P.SLOTS do slots[slot] = Sanitize(store.slots[slot], slot) end
+        store.slots = slots
+        local colors = type(store.colors) == "table" and store.colors or {}
+        store.colors = { CleanColor(colors[1], 1), CleanColor(colors[2], 2) }
+        local retired = {}
+        for _, entry in ipairs(type(store.retired) == "table" and store.retired or {}) do
             local preset = Sanitize(entry)
-            if preset and #list < P.MAX then list[#list + 1] = preset end
+            if preset then retired[#retired + 1] = preset end
         end
-        store.list = list
-        if type(store.active) ~= "number" or store.active < 1 or store.active > #list + 1 then store.active = 1 end
-        if type(store.gnarly) ~= "number" or not list[store.gnarly] then store.gnarly = nil end
+        store.retired = retired
         clean[key] = store
     end
     return store, true
 end
 
-function PS.Count()
-    return #Store().list
+local function ValidSlot(slot)
+    return slot == 1 or slot == 2
 end
 
-function PS.Get(index)
-    return Store().list[index]
+-- The preset in a slot (1 or 2), or nil when the slot is unset.
+function PS.Get(slot)
+    if not ValidSlot(slot) then return nil end
+    return Store().slots[slot]
 end
 
 function PS.Writable()
@@ -300,35 +326,28 @@ function PS.Writable()
     return saved
 end
 
--- Slots the dial turns through: every preset and, while there is room, one NEW slot after them.
-function PS.SlotCount()
-    local n = PS.Count()
-    return n + (n < P.MAX and 1 or 0)
+-- The slot a cell key stands for (1 or 2), or nil.
+function PS.SlotOf(cell)
+    return P.CELL[cell]
 end
 
--- true when slot `index` is the NEW slot (past the last preset)
-function PS.IsNew(index)
-    return index > PS.Count()
+-- The colour index of a slot (a whole number into P.COLORS); a bad value reads as the slot's default.
+function PS.Color(slot)
+    if not ValidSlot(slot) then return nil end
+    return CleanColor(Store().colors[slot], slot)
 end
 
-function PS.Active()
-    local store = Store()
-    local index = store.active
-    if index > PS.SlotCount() then index = 1 end
-    return index
+-- The colour of a slot as { r, g, b, 1 }.
+function PS.ColorRgb(slot)
+    local index = PS.Color(slot)
+    return index and P.COLORS[index].rgb or nil
 end
 
-function PS.Pending()
-    return P.pending
-end
-
--- The preset the dial shows: the one at the active slot, nil for the NEW slot.
-function PS.ActivePreset()
-    return PS.Get(PS.Active())
-end
-
-function PS.Gnarly()
-    return Store().gnarly
+-- true when a slot has nothing to clear: no preset, or one with no totem that still carries its default name.
+function PS.IsEmpty(slot)
+    local preset = PS.Get(slot)
+    if not preset then return true end
+    return next(preset.picks) == nil and preset.name == DefaultName(slot)
 end
 
 local entriesCache = {}      -- preset table -> its PS.Entries; dropped with the known lists and on every save
@@ -345,8 +364,8 @@ end
 -------------------------------------------------------------------------------
 
 -- The totems of `element` the character knows (TotemBar.KnownList), kept until something that can change it happens: a
--- sync (Dial.Refresh), a learn event, regen. The dial repaints ten times a second while a switch waits and every paint
--- asks for each preset totem, so an uncached spellbook scan per ask would run dozens of times a second.
+-- sync (Dial.Refresh), a learn event, regen. Every cell paint asks for each preset totem, so an uncached spellbook scan
+-- per ask would run dozens of times a second.
 local knownCache = {}
 function PS.InvalidateKnown()
     knownCache = {}
@@ -374,7 +393,6 @@ function PS.Entry(element, base)
     end
     local entry = { element = element, base = base, name = name or "", icon = icon, known = false,
         level = math.max(P.LEVEL[base] or 0, P.ELEMENT_LEVEL[element] or 0) }
-    local tb = TotemBar()
     for _, item in ipairs(PS.Known(element)) do
         if item.name ~= "" and item.name == entry.name then
             entry.known, entry.id, entry.icon = true, item.id, item.icon or icon
@@ -428,49 +446,8 @@ function PS.StepText(preset)
 end
 
 -------------------------------------------------------------------------------
--- Cues
+-- Editing (out of combat only)
 -------------------------------------------------------------------------------
-
-local function Play(name)
-    local kit = _G.SOUNDKIT
-    local id = type(kit) == "table" and kit[name]
-    if type(id) == "number" and PlaySound then pcall(PlaySound, id) end
-end
-
--------------------------------------------------------------------------------
--- Switching
--------------------------------------------------------------------------------
-
--- The element buttons that will change when preset `index` applies: { element... }.
-function PS.WouldChange(index)
-    local out = {}
-    local preset = PS.Get(index)
-    if not preset then return out end
-    local tb = TotemBar()
-    for _, element in ipairs(P.ELEMENTS) do
-        local entry = PS.Entry(element, preset.picks[element])
-        if entry and entry.known then
-            local current = tb.CurrentPick(element)
-            if not (current and current.id == entry.id) then out[#out + 1] = element end
-        end
-    end
-    return out
-end
-
--- Applies slot `index` out of combat: every totem of the preset the character knows is picked on its element button
--- unless the button already casts it. The slot becomes the saved active one. Returns the elements that changed.
-local function ApplySlot(index)
-    local changed = PS.WouldChange(index)
-    local tb = TotemBar()
-    local preset = PS.Get(index)
-    for _, element in ipairs(changed) do
-        local entry = PS.Entry(element, preset.picks[element])
-        tb.Pick(element, entry.id)
-    end
-    Save(function(store) store.active = index end)
-    if tb.Sync then tb.Sync() end
-    return changed
-end
 
 -- One refusal reason for an edit, or nil when it may go ahead.
 local function Refusal()
@@ -485,89 +462,25 @@ local function Refusal()
 end
 PS.Refusal = Refusal
 
--- Switches the dial to slot `index`. In combat the switch is queued and the dial shows it as pending.
-function PS.Select(index)
-    local slots = PS.SlotCount()
-    if type(index) ~= "number" or index < 1 or index > slots then return false end
-    if InCombat() then
-        if index == PS.Active() then
-            P.pending = nil
-        elseif P.pending ~= index then
-            P.pending = index
-            if Setting(SETTINGS.waitSound) then Play(P.SOUND.waiting) end
-        end
-        Notify("pending", P.pending)
-        return "queued"
-    end
-    P.pending = nil
-    local changed = ApplySlot(index)
-    P.applied = { at = Now(), elements = changed }
-    if #changed > 0 and Setting(SETTINGS.appliedSound) then Play(P.SOUND.applied) end
-    PS.ResetSteps()
-    Notify("applied", changed)
-    return "applied"
+-- An edit of slot `slot` reached the secure script of its cell: the tab writes it again (out of combat, as edits are).
+local function AfterEdit()
+    local tb = TotemBar()
+    if tb and tb.Sync and not InCombat() then tb.Sync() end
 end
 
--- The next (dir 1) or previous (dir -1) slot, from the pending one when a switch is waiting.
-function PS.Cycle(dir)
-    local slots = PS.SlotCount()
-    local from = P.pending or PS.Active()
-    local index = ((from - 1 + (dir or 1)) % slots) + 1
-    return PS.Select(index)
+-- The step record of a slot's cell starts over (an edit changed what its script drops).
+local function ResetSlot(slot)
+    PS.ResetSteps("preset" .. slot)
 end
 
--- At PLAYER_REGEN_ENABLED: the queued switch applies, and every step starts over.
-function PS.OnRegen()
-    PS.InvalidateKnown()
-    PS.ResetSteps()
-    local index = P.pending
-    if index then
-        P.pending = nil
-        if index <= PS.SlotCount() then
-            local changed = ApplySlot(index)
-            P.applied = { at = Now(), elements = changed }
-            if #changed > 0 and Setting(SETTINGS.appliedSound) then Play(P.SOUND.applied) end
-            Notify("applied", changed)
-            return
-        end
-    end
-    Notify("regen")
-end
-
--- The active preset changed under the dial (an edit): its totems are picked again (changed ones only).
-local function Reapply()
-    if InCombat() then return end
-    local index = PS.Active()
-    if PS.IsNew(index) then
-        local tb = TotemBar()
-        if tb and tb.Sync then tb.Sync() end
-        return
-    end
-    ApplySlot(index)
-end
-
--------------------------------------------------------------------------------
--- Editing (out of combat only)
--------------------------------------------------------------------------------
-
--- An edit of preset `index` reached the buttons that carry it: the dial's active one is picked again, and the GNARLY
--- cell's script is written again when it steps this preset.
-local function AfterEdit(index)
-    if index == PS.Active() then
-        Reapply()
-    elseif index == PS.Gnarly() then
-        local tb = TotemBar()
-        if tb and tb.Sync and not InCombat() then tb.Sync() end
-    end
-end
-
--- Makes a preset in the NEW slot as a copy of what the four element buttons cast. Returns its index, or nil and why.
-function PS.Create()
+-- Makes slot `slot` as a copy of what the four element buttons cast, named PRESET n. Returns the slot, or nil and why (nothing is made when the buttons give no totem).
+function PS.Create(slot)
     local why = Refusal()
     if why then return nil, why end
-    if PS.Count() >= P.MAX then return nil, "there is no room for another preset" end
+    if not ValidSlot(slot) then return nil, "no such preset" end
+    if PS.Get(slot) then return nil, "that preset is already made" end
     local tb = TotemBar()
-    local preset = { name = "NEW", picks = {}, order = {} }
+    local preset = { name = DefaultName(slot), picks = {}, order = {} }
     for _, element in ipairs(P.ELEMENTS) do
         local current = tb and tb.CurrentPick(element)
         local base = current and PS.BaseOf(element, current)
@@ -576,64 +489,47 @@ function PS.Create()
     for _, element in ipairs(P.DEFAULT_ORDER) do
         if preset.picks[element] then preset.order[#preset.order + 1] = element end
     end
-    local index
-    Save(function(store)
-        store.list[#store.list + 1] = preset
-        index = #store.list
-        store.active = index
-    end)
-    PS.ResetSteps()
-    Reapply()
-    Notify("edited", index)
-    return index
+    if #preset.order == 0 then return nil, "no totems to copy" end
+    Save(function(store) store.slots[slot] = preset end)
+    ResetSlot(slot)
+    AfterEdit()
+    Notify("edited", slot)
+    return slot
 end
 
--- Is there room for another preset (the cap is P.MAX)?
-function PS.HasRoom()
-    return PS.Count() < P.MAX
-end
-
--- Shift click on an unset GNARLY: makes an EMPTY preset, ties it as the GNARLY preset and returns its index (nil and
--- why when it cannot). The dial's active slot is not changed: when the dial sat on the NEW slot it stays on the NEW slot
--- that follows the new preset (or, with none left, on the first preset, as PS.Active clamps it anyway). Nothing is
--- applied to the buttons: the player's picks and the set 1 slots stay as they are.
-function PS.CreateGnarly()
-    local why = Refusal()
-    if why then return nil, why end
-    if not PS.HasRoom() then return nil, "there is no room for another preset" end
-    local wasNew = PS.IsNew(PS.Active())
-    local index
-    Save(function(store)
-        store.list[#store.list + 1] = { name = "NEW", picks = {}, order = {} }
-        index = #store.list
-        store.gnarly = index
-        if wasNew then store.active = index < P.MAX and index + 1 or 1 end
-    end)
-    PS.ResetSteps("gnarly")                   -- the dial's step record is not touched
-    local tb = TotemBar()
-    if tb and tb.Sync then tb.Sync() end
-    Notify("edited", index)
-    return index
-end
-
-function PS.Rename(index, text)
+-- Renames a preset. A name typed on an unset slot makes an empty preset that holds it.
+function PS.Rename(slot, text)
     local why = Refusal()
     if why then return false, why end
-    local preset = PS.Get(index)
+    if not ValidSlot(slot) then return false, "no such preset" end
     local name = CleanName(text)
-    if not preset or name == "" then return false, "a name needs a letter" end
-    Save(function() preset.name = name end)
-    Notify("edited", index)
+    if name == "" then return false, "a name needs a letter" end
+    Save(function(store)
+        local preset = store.slots[slot]
+        if preset then
+            preset.name = name
+        else
+            store.slots[slot] = { name = name, picks = {}, order = {} }
+        end
+    end)
+    Notify("edited", slot)
     return true
 end
 
--- Puts `base` (a rank 1 id, or nil to leave the element out) on the preset. A new totem joins the end of the order.
-function PS.SetTotem(index, element, base)
+-- Puts `base` (a rank 1 id, or nil to leave the element out) on the preset. A new totem joins the end of the order. The
+-- first totem on an unset slot makes the preset, named PRESET n until a name is typed.
+function PS.SetTotem(slot, element, base)
     local why = Refusal()
     if why then return false, why end
-    local preset = PS.Get(index)
-    if not preset or not IsBaseId(element, base or BaseIds(element)[1]) then return false, "no such totem" end
-    Save(function()
+    if not ValidSlot(slot) then return false, "no such preset" end
+    if not IsBaseId(element, base or BaseIds(element)[1]) then return false, "no such totem" end
+    if base == nil and not PS.Get(slot) then return true end
+    Save(function(store)
+        local preset = store.slots[slot]
+        if not preset then
+            preset = { name = DefaultName(slot), picks = {}, order = {} }
+            store.slots[slot] = preset
+        end
         preset.picks[element] = base
         local at
         for i, e in ipairs(preset.order) do
@@ -642,17 +538,17 @@ function PS.SetTotem(index, element, base)
         if base and not at then preset.order[#preset.order + 1] = element end
         if not base and at then table.remove(preset.order, at) end
     end)
-    PS.ResetSteps()
-    AfterEdit(index)
-    Notify("edited", index)
+    ResetSlot(slot)
+    AfterEdit()
+    Notify("edited", slot)
     return true
 end
 
 -- Moves an element up (-1) or down (1) in the drop order.
-function PS.Move(index, element, delta)
+function PS.Move(slot, element, delta)
     local why = Refusal()
     if why then return false, why end
-    local preset = PS.Get(index)
+    local preset = PS.Get(slot)
     if not preset then return false, "no such preset" end
     local at
     for i, e in ipairs(preset.order) do
@@ -661,52 +557,41 @@ function PS.Move(index, element, delta)
     local to = at and at + delta
     if not to or to < 1 or to > #preset.order then return false, "it cannot move that way" end
     Save(function() preset.order[at], preset.order[to] = preset.order[to], preset.order[at] end)
-    PS.ResetSteps()
-    AfterEdit(index)
-    Notify("edited", index)
+    ResetSlot(slot)
+    AfterEdit()
+    Notify("edited", slot)
     return true
 end
 
-function PS.Delete(index)
+-- Empties a slot: the totems and the name go, the outline colour stays. An empty slot has nothing to clear.
+function PS.Clear(slot)
     local why = Refusal()
     if why then return false, why end
-    if not PS.Get(index) then return false, "no such preset" end
-    Save(function(store)
-        table.remove(store.list, index)
-        if store.active > index then store.active = store.active - 1 end
-        if store.gnarly == index then store.gnarly = nil elseif store.gnarly and store.gnarly > index then store.gnarly = store.gnarly - 1 end
-        if store.active > #store.list + (#store.list < P.MAX and 1 or 0) then store.active = 1 end
-    end)
-    P.pending = nil
-    PS.ResetSteps()
-    Reapply()
-    Notify("edited", index)
+    if not ValidSlot(slot) then return false, "no such preset" end
+    if PS.IsEmpty(slot) then return false, "there is nothing to clear" end
+    Save(function(store) store.slots[slot] = nil end)
+    ResetSlot(slot)
+    AfterEdit()
+    Notify("edited", slot)
     return true
 end
 
--- The settings dropdown's entries for the GNARLY preset: { value, text } with 0 for none, and the name of a value.
-function PS.GnarlyChoices()
-    local out = { { value = 0, text = "None" } }
-    for i = 1, PS.Count() do out[#out + 1] = { value = i, text = i .. " " .. PS.Get(i).name } end
-    return out
-end
-
-function PS.GnarlyName(value)
-    local preset = value and value ~= 0 and PS.Get(value) or nil
-    return preset and (value .. " " .. preset.name) or "None"
-end
-
--- Ties the GNARLY cell to preset `index` (nil unties it). Out of combat only: its script is a secure attribute.
-function PS.SetGnarly(index)
+-- Chooses the outline colour of a slot (an index into P.COLORS). Kept when the preset is cleared.
+function PS.SetColor(slot, index)
     local why = Refusal()
     if why then return false, why end
-    if index ~= nil and not PS.Get(index) then return false, "no such preset" end
-    Save(function(store) store.gnarly = index end)
-    PS.ResetSteps()
-    local tb = TotemBar()
-    if tb and tb.Sync then tb.Sync() end
-    Notify("edited", index)
+    if not ValidSlot(slot) then return false, "no such preset" end
+    if CleanColor(index, 0) == nil then return false, "no such colour" end
+    Save(function(store) store.colors[slot] = index end)
+    Notify("edited", slot)
     return true
+end
+
+-- At PLAYER_REGEN_ENABLED: the known totems are read again and every step starts over.
+function PS.CombatEnded()
+    PS.InvalidateKnown()
+    PS.ResetSteps()
+    Notify("regen")
 end
 
 -------------------------------------------------------------------------------
@@ -724,13 +609,9 @@ local function Track(cell)
     return t
 end
 
--- The preset a cell steps: the dial's is the active one (nil on the NEW slot), the GNARLY cell's is its own.
+-- The preset a cell steps: the one in its own slot (nil when the slot is unset).
 function PS.CellPreset(cell)
-    if cell == "dial" then return PS.ActivePreset() end
-    if cell == "gnarly" then
-        local index = PS.Gnarly()
-        return index and PS.Get(index) or nil
-    end
+    return PS.Get(P.CELL[cell])
 end
 
 -- (done, total) for a cell: how many totems of its sequence have dropped, and how many it has.
@@ -749,16 +630,7 @@ function PS.NotePress(cell)
     t.presses = t.presses + 1
     t.pressAt = Now()
     t.at = t.pressAt
-    if cell == "gnarly" and Setting(SETTINGS.gnarlySound) then Play(P.SOUND.press) end
     Notify("step", cell)
-end
-
--- Seconds since the cell was last pressed, or nil when it never was.
-function PS.PressAge(cell)
-    local t = steps[cell]
-    local now = Now()
-    if not (t and t.pressAt and now) then return nil end
-    return now - t.pressAt
 end
 
 -- UNIT_SPELLCAST_SUCCEEDED for the player: a totem the sequence was waiting for counts as the next step done, for the
@@ -807,7 +679,7 @@ function PS.ResetSteps(only)
     if any then Notify("step") end
 end
 
--- The idle restart: a started sequence with no press or drop for STEP_IDLE seconds starts over. Called from the dial's
+-- The idle restart: a started sequence with no press or drop for STEP_IDLE seconds starts over. Called from the cells'
 -- ticker; true when anything restarted.
 function PS.Expire()
     local now = Now()
@@ -827,8 +699,9 @@ function PS.Tracker(cell)
     return Track(cell)
 end
 
+
 -------------------------------------------------------------------------------
--- The native multi-cast set 2 (Call of the Ancestors) carries the GNARLY preset
+-- The native multi-cast set 2 (Call of the Ancestors) carries Preset 2
 -------------------------------------------------------------------------------
 
 -- state: nil (never looked), "off" (setting off, no preset or nothing to write), "wait" (no bar, set not known or in
@@ -878,36 +751,23 @@ local function IsElementTotem(tb, element, held)
     return false
 end
 
--- Does the active preset want the totem `held` on the element's set 1 button (a change to it is a pick, not a bleed)?
-local function WantedOnSet1(element, held)
-    local active = PS.Get(PS.Active())
-    local entry = active and PS.Entry(element, active.picks[element])
-    return entry ~= nil and entry.id == held
-end
-
 -- A set 2 write can reach set 1 a moment after it returns (the slot updates when the game gets to it). For the
 -- window after a send (until the pass that judges it), a set 1 slot that reads other than it did before the send AND
--- reads the spell that was sent to its set 2 twin is that bleed, unless the active preset wants that totem there (then
--- it is counted unproven, never restored). Any pick through the tab (a preset switch or the picker) ends the window. The tab's own picks cannot say: it adopts whatever
--- its slot holds as the pick, so a comparison with the pick sees nothing. Returns the work item and the old spell.
+-- reads the spell that was sent to its set 2 twin is that bleed. Any pick through the tab (the picker) ends the window.
+-- Returns the work item and the old spell of the slot that bled.
 local function Set1Bled(mc, work, window)
-    local legit = 0
     for _, w in ipairs(work) do
         local was = window.before[w.id1]          -- false: the slot was empty
         local rec = set2.sent[w.id2]
         local now, readable = mc.ReadSlot(w.id1)
         if was ~= nil and readable and now ~= (was or nil) and rec and now == rec.spell then
-            if WantedOnSet1(w.element, now) then
-                legit = legit + 1                 -- the dial's preset wants this totem there: not a bleed
-            else
-                return w, was or nil, legit
-            end
+            return w, was or nil
         end
     end
-    return nil, nil, legit
+    return nil, nil
 end
 
--- Writes the GNARLY preset's known totems into set 2. Out of combat only. A slot that does not read the wanted spell
+-- Writes Preset 2's known totems into set 2. Out of combat only. A slot that does not read the wanted spell
 -- is sent it again once TB.SETTLE seconds have passed since the last send (at most P.SET2_ATTEMPTS sends of one spell
 -- to one slot), and a send that did not show at once schedules a re-look, as the picks do. A slot is written only when
 -- it reads back and holds nothing or a totem of its element; anything else is left alone and counted unproven.
@@ -915,7 +775,7 @@ function PS.SyncSet2()
     if InCombat() or set2.state == "dead" then return end
     local tb = TotemBar()
     local mc = tb and tb.MC
-    local preset = Setting(SETTINGS.gnarly) and Setting(SETTINGS.gnarlySet2) and PS.CellPreset("gnarly") or nil
+    local preset = Setting(SETTINGS.preset2) and Setting(SETTINGS.set2) and PS.CellPreset("preset2") or nil
     if not (mc and preset) then
         set2.state = "off"
         return
@@ -955,15 +815,12 @@ function PS.SyncSet2()
     -- only sees one pass)
     set2.check = "none"
     local window = set2.window
-    local legit = 0
     if window and window.serial ~= (mc.PickSerial and mc.PickSerial() or 0) then
         set2.window, window = nil, nil
     end
     if window then
         set2.check = "window"
-        local bled, was
-        bled, was, legit = Set1Bled(mc, work, window)
-        if legit > 0 then set2.window, window = nil, nil end
+        local bled, was = Set1Bled(mc, work, window)
         if bled then
             set2.set1Intact = false
             if was then mc.SendPick(bled.id1, was) end
@@ -998,7 +855,7 @@ function PS.SyncSet2()
             end                         -- else the last send is still settling: its re-look is already scheduled
         end
     end
-    set2.unproven = unproven + legit
+    set2.unproven = unproven
     if wrote then
         set2.wrote = true
         set2.check = set2.check == "window" and "window+bracket" or "bracket"
@@ -1045,8 +902,8 @@ local lastLine
 local function Write()
     local db = _G.ForeverSTUwaveDB
     if type(db) ~= "table" or ConfigReadOnly() then return end
-    local parts = { "presets=" .. PS.Count(), "active=" .. PS.Active(), "pending=" .. tostring(P.pending) }
-    for _, cell in ipairs({ "dial", "gnarly" }) do
+    local parts = { "presets=" .. ((PS.Get(1) and 1 or 0) + (PS.Get(2) and 1 or 0)), "colors=" .. PS.Color(1) .. "," .. PS.Color(2) }
+    for _, cell in ipairs({ "preset1", "preset2" }) do
         local t = Track(cell)
         local button = TotemBar() and TotemBar().Button and TotemBar().Button(cell)
         local kind, len = "none", 0
@@ -1069,7 +926,7 @@ local function Write()
     local line = table.concat(parts, " | ")
     if line == lastLine and type(db.totemPresetState) == "table" then return end
     lastLine = line
-    db.totemPresetState = { line = line, active = PS.Active(), pending = P.pending }
+    db.totemPresetState = { line = line }
 end
 
 function PS.SaveState()
@@ -1079,6 +936,7 @@ function PS.SaveState()
         if FS.LogQuiet then FS.LogQuiet("totempresets_state", "the preset state line could not be saved: " .. tostring(err)) end
     end
 end
+
 
 -------------------------------------------------------------------------------
 -- Who has it
@@ -1090,17 +948,18 @@ function PS.Applies()
     return tb ~= nil and tb.OwnsShoulder ~= nil and tb.OwnsShoulder() == true
 end
 
--- The cell defs the tab adds after its six buttons. The dial is cell 7; its `enabled` is the setting.
+-- The cell defs the tab adds after its six buttons: Preset 1 is cell 7, Preset 2 cell 8; each `enabled` is its setting.
+-- The def's colour is only the first look before a cell paints: a cell wears the outline colour of its slot.
 local function Register()
     local tb = TotemBar()
     if not (tb and tb.AddCell) then return end
     tb.AddCell({
-        key = "dial", title = "Preset dial", color = "22e0ff", label = "Totem preset dial",
-        enabled = function() return Setting(SETTINGS.dial) end,
+        key = "preset1", title = "Preset 1", color = "22e0ff", label = "Totem preset 1",
+        enabled = function() return Setting(SETTINGS.preset1) end,
     })
     tb.AddCell({
-        key = "gnarly", title = "GNARLY", color = "ff2e97", label = "Totem GNARLY preset", hot = true,
-        enabled = function() return Setting(SETTINGS.gnarly) end,
+        key = "preset2", title = "Preset 2", color = "ff2e97", label = "Totem preset 2",
+        enabled = function() return Setting(SETTINGS.preset2) end,
     })
 end
 Register()

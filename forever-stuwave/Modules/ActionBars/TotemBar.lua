@@ -82,8 +82,8 @@
 --   * SEAT: TotemBar.HostPoint / TotemBar.SlotPoint, answered by the class shoulder while it stands, with the
 --     same fallback as SealBar (above the stance bar's seat).
 --
---   * CELLS: TotemPresets.lua adds up to two more buttons after the six, FSTotemButton7 (the preset dial) and 8
---     (GNARLY), through TotemBar.AddCell at its own load, before the tab builds. A cell def carries `cell = true`
+--   * CELLS: TotemPresets.lua adds up to two more buttons after the six, FSTotemButton7 (Preset 1) and 8
+--     (Preset 2), through TotemBar.AddCell at its own load, before the tab builds. A cell def carries `cell = true`
 --     and `enabled()`; the tab is 6 + (cells that are enabled) columns wide (TotemBar.Cols, which ClassShoulder.lua
 --     reads for the shoulder's width), the cells stand after the six in order, a cell that is off hides. TotemDial.lua
 --     styles and paints them; this file only seats, shows, hides and asks them for their attributes in Sync (out of
@@ -1748,10 +1748,10 @@ end
 local function OnEvent(_, event)
     if event == "PLAYER_REGEN_ENABLED" then
         UpdateAllUsable()
-        -- a preset switch picked in combat applies first, so the sync below writes what it chose
-        if FS.TotemPresets and FS.TotemPresets.OnRegen then
-            local ok, err = pcall(FS.TotemPresets.OnRegen)
-            if not ok then WarnOnce("totembar_presets", "a queued preset switch failed (" .. tostring(err) .. ")") end
+        -- the preset cells start their steps over and read the known totems again before the sync below
+        if FS.TotemPresets and FS.TotemPresets.CombatEnded then
+            local ok, err = pcall(FS.TotemPresets.CombatEnded)
+            if not ok then WarnOnce("totembar_presets", "the totem presets could not start over (" .. tostring(err) .. ")") end
         end
         if TB.pendingSync then
             Sync()

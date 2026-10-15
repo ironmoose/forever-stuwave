@@ -1120,65 +1120,52 @@ end
 -- ---- the Shaman totem presets group on the Unit Frames page (TotemPresets.lua's SETTINGS) ----
 
 local PRESET_ROWS = {
-    dial = "Preset dial", dialPlate = "Name plate", dialRight = "Cycle with right click",
-    dialWheel = "Cycle with mouse wheel", waitPulse = "Waiting pulse", waitSound = "Waiting sound",
-    appliedFlash = "Applied flash", appliedSound = "Applied sound",
-    gnarly = "GNARLY button", gnarlyFlash = "Press flash", gnarlySound = "Press sound",
-    gnarlySet2 = "Also on Call of the Ancestors",
+    preset1 = { key = "totems.dial", label = "Preset 1" }, preset2 = { key = "totems.gnarly", label = "Preset 2" },
+    plate = { key = "totems.dialPlate", label = "Name plates" },
+    set2 = { key = "totems.gnarlySet2", label = "Also on Call of the Ancestors" },
 }
 
 local function withTotemPresets(applies)
     return function()
         unitFramesDefaults()
         local S = {}
-        for name, label in pairs(PRESET_ROWS) do
-            S[name] = { key = "totems." .. name, label = label, tip = "Tip " .. name .. ".",
-                default = name ~= "waitSound" and name ~= "appliedSound" and name ~= "gnarlySound" }
+        for name, def in pairs(PRESET_ROWS) do
+            S[name] = { key = def.key, label = def.label, tip = "Tip " .. name .. ".", default = true }
             FS.Config.RegisterDefault(S[name].key, S[name].default)
         end
-        local gnarly = nil
-        FS.TotemPresets = { SETTINGS = S, Applies = function() return applies end,
-            Gnarly = function() return gnarly end,
-            SetGnarly = function(i) gnarly = i; return true end,
-            GnarlyName = function(v) return v == 0 and "None" or (v .. " MELEE") end,
-            GnarlyChoices = function() return { { value = 0, text = "None" }, { value = 1, text = "1 MELEE" } } end }
+        FS.TotemPresets = { SETTINGS = S, Applies = function() return applies end }
     end
 end
 
-function T.the_unit_frames_page_has_the_totem_presets_group_with_one_switch_and_one_tip_per_cue()
+function T.the_unit_frames_page_has_the_totem_presets_group_with_one_switch_and_one_tip_per_row()
     local W = boot({ preWindow = withTotemPresets(true) })
     W.Open("unitframes")
     yes(headerY("TOTEM PRESETS"), "a Totem presets header")
-    for name, label in pairs(PRESET_ROWS) do
-        local r = row(label)
-        yes(r, label .. ": a row")
+    for name, def in pairs(PRESET_ROWS) do
+        local r = row(def.label)
+        yes(r, def.label .. ": a row")
         local found
         for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
-        eq(found, "Tip " .. name .. ".", label .. ": explained by a ? tip")
-        eq(#texts(r), 3, label .. ": label, state and the ? icon only, no helper line")
+        eq(found, "Tip " .. name .. ".", def.label .. ": explained by a ? tip")
+        eq(#texts(r), 3, def.label .. ": label, state and the ? icon only, no helper line")
     end
-    yes(row("GNARLY preset"), "the GNARLY preset dropdown")
-    local drop, found = row("GNARLY preset"), nil
-    for _, o in ipairs(ALL) do if o.fsTip and o.parent == drop then found = o.fsTip end end
-    yes(found and found ~= "", "the dropdown is explained by a ? tip")
-    eq(drop.control.fsValue, 0, "no GNARLY preset yet")
-    yes(headerY("TOTEM PRESETS") < yOf("GNARLY button") and yOf("GNARLY button") < yOf("GNARLY preset")
-        and yOf("GNARLY preset") < yOf("Press flash"), "the GNARLY rows follow the dial rows in order")
-    yes(row("Preset dial").control.fsChecked, "the dial is on by default")
-    no(row("Waiting sound").control.fsChecked, "the waiting sound is off by default")
-    press("Waiting sound")
-    eq(FS.Config.Get("totems.waitSound"), true)
-    eq(FS.Config.Get("totems.appliedSound"), false, "the other cue is untouched")
-    press("Applied flash")
-    eq(FS.Config.Get("totems.appliedFlash"), false)
-    eq(FS.Config.Get("totems.waitPulse"), true, "a cue switch touches only itself")
+    no(row("GNARLY preset"), "no GNARLY dropdown any more")
+    yes(headerY("TOTEM PRESETS") < yOf("Preset 1") and yOf("Preset 1") < yOf("Preset 2")
+        and yOf("Preset 2") < yOf("Name plates") and yOf("Name plates") < yOf("Also on Call of the Ancestors"),
+        "the rows follow the header in order")
+    yes(row("Preset 1").control.fsChecked and row("Preset 2").control.fsChecked, "both cells are on by default")
+    press("Preset 2")
+    eq(FS.Config.Get("totems.gnarly"), false)
+    eq(FS.Config.Get("totems.dial"), true, "a switch touches only itself")
+    press("Name plates")
+    eq(FS.Config.Get("totems.dialPlate"), false)
     W = boot({ preWindow = withTotemPresets(false) })
     W.Open("unitframes")
-    no(row("Preset dial"), "a character without the tab has no row")
+    no(row("Preset 1"), "a character without the tab has no row")
     no(headerY("TOTEM PRESETS"), "and no header")
     W = boot({ preWindow = unitFramesDefaults })
     W.Open("unitframes")
-    no(row("Preset dial"), "a client without the presets has no row")
+    no(row("Preset 1"), "a client without the presets has no row")
 end
 
 function T.the_gunsight_page_has_the_three_target_and_player_groups_in_the_mockups_order()

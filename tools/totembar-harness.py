@@ -1332,7 +1332,7 @@ def check_bindings_xml_declares_the_totem_commands_after_the_seals():
     # the buff tab's two commands follow (buffbar-harness.py pins them)
     names = [b.get("name") for b in root.findall("Binding") if "FSBuffTabButton" not in b.get("name", "")]
     want = [f"CLICK FSSealButton{i}:LeftButton" for i in range(1, 8)] + [
-        f"CLICK FSTotemButton{i}:LeftButton" for i in range(1, 9)]    # six buttons, the preset dial and GNARLY (TotemPresets.lua)
+        f"CLICK FSTotemButton{i}:LeftButton" for i in range(1, 9)]    # six buttons, the two preset cells (TotemPresets.lua)
     assert names == want, f"binding names {names}"
     items = root.findall("Binding")
     assert all(b.get("category") == "ADDONS" for b in items)

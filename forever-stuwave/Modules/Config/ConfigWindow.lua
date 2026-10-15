@@ -1330,33 +1330,17 @@ local function BuffTabGroup(page)
     UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip })
 end
 
--- The Shaman totem presets (TotemPresets.lua): the dial's switch, then its parts and cues, each with its own off switch
--- and its own ? tip. Out of the list for a client or class without the totem tab.
+-- The Shaman totem presets (TotemPresets.lua): a switch for each of the two preset cells, the name plates, and the set 2
+-- write that Preset 2 owns, each with its own ? tip. Out of the list for a client or class without the totem tab.
 local function TotemPresetsGroup(page)
     local presets = FS.TotemPresets
     if not (presets and presets.SETTINGS and presets.Applies and presets.Applies()) then return end
     UI.Header(page, "Totem presets")
     local S = presets.SETTINGS
-    UI.Toggle(page, { label = S.dial.label, key = S.dial.key, tip = S.dial.tip })
-    for _, name in ipairs({ "dialPlate", "dialRight", "dialWheel", "waitPulse", "waitSound", "appliedFlash", "appliedSound" }) do
-        local def = S[name]
-        UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip, inset = 14 })
-    end
-    UI.Toggle(page, { label = S.gnarly.label, key = S.gnarly.key, tip = S.gnarly.tip })
-    if presets.GnarlyChoices then
-        UI.Dropdown(page, {
-            label = "GNARLY preset",
-            tip = "The preset the GNARLY button drops. Saved for this character.",
-            get = function() return presets.Gnarly() or 0 end,
-            text = function(value) return presets.GnarlyName(value) end,
-            items = function() return presets.GnarlyChoices() end,
-            set = function(value) presets.SetGnarly(value ~= 0 and value or nil) end,
-        })
-    end
-    for _, name in ipairs({ "gnarlyFlash", "gnarlySound", "gnarlySet2" }) do
-        local def = S[name]
-        UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip, inset = 14 })
-    end
+    UI.Toggle(page, { label = S.preset1.label, key = S.preset1.key, tip = S.preset1.tip })
+    UI.Toggle(page, { label = S.preset2.label, key = S.preset2.key, tip = S.preset2.tip })
+    UI.Toggle(page, { label = S.plate.label, key = S.plate.key, tip = S.plate.tip, inset = 14 })
+    UI.Toggle(page, { label = S.set2.label, key = S.set2.key, tip = S.set2.tip, inset = 14 })
 end
 
 -- The icon style group: how the micro menu and the class tab spell icons are drawn, the STUwave gradient or the game's own

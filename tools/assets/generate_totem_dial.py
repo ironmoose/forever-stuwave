@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generates the arc textures of the totem preset dial and the GNARLY cell.
+"""Generates the arc textures of the totem preset cells.
 
 Reference: mockups/totem-presets-2026-10-14.html, concept C, ringBtn(). A cell is a 38 design unit square button
 wearing a ring of radius 11.5 centred 2 units above the button centre (cx 19, cy 17 in the box), split into one arc per
