@@ -670,7 +670,7 @@ def check_the_readout_well_is_the_pages_gradient_plate_with_its_top_highlight():
     assert str(hero.fsPlate._texture).endswith("led_well.tga")
     corners = {str(p.point): (p.rel.fsPlate is not None, float(p.x), float(p.y)) for p in seq(hero.fsPlate._points)}
     assert corners == {"TOPLEFT": (True, 0.0, 0.0), "BOTTOMRIGHT": (True, 0.0, 0.0)}, ("the plate fills the tile", corners)
-    # the page's 1 px white 0.08 line two px under the top edge, from the chamfer to one px short of the right end
+    # the page's 1 px white 0.08 line one px under the top edge, from the chamfer to one px short of the right end
     shine = FT.shine
     close(rgb(shine._vertex), (1.0, 1.0, 1.0), "highlight colour")
     approx(float(shine._vertex[4]), 0.08, "highlight alpha", 1e-9)

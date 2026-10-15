@@ -1255,7 +1255,7 @@ local function BuildFace()
         -- plate is drawn white and never tinted; the idle dimming is the zone's alpha
         hero.fsPlate = T.AddCut2Texture(hero, MEDIA .. "led_well.tga", { 1, 1, 1, 1 }, "BACKGROUND", -8)
         T.SkinCutButton(hero, { borderColor = T.COLOR_BORDER, glowAlpha = FT.CHROME.idleGlow })
-        -- the page's top highlight: a 1 px line of white at 0.08, two px under the top edge
+        -- the page's top highlight: a 1 px line of white at 0.08, one px under the top edge
         FT.shine = FlatTexture(hero, "BACKGROUND", -7)
         FT.shine:SetVertexColor(1, 1, 1, 0.08)
         FT.hero = hero
