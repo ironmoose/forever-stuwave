@@ -12,7 +12,7 @@ The README's vector masthead contains outlines derived from FS Display and Share
 
 ## Game imagery
 
-Gameplay screenshots, the game art or icons visible in them, and borrowed game icons used in browser mockups include Blizzard Entertainment material. This project does not claim ownership of those materials or grant a license to them. Forever STUwave is an independent addon project.
+Gameplay screenshots, the game art or icons visible in them, and borrowed game icons used in local design mockups include Blizzard Entertainment material. This project does not claim ownership of those materials or grant a license to them. Forever STUwave is an independent addon project.
 
 ## Project code
 

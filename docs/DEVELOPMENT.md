@@ -1,6 +1,6 @@
 # Development
 
-This standalone repository is the canonical Forever STUwave source. Runtime files live in `forever-stuwave/`. `tools/` contains development utilities, Lua harnesses, Python tests, support modules and fixtures; `tools/assets/` contains texture generators and the font builder. `mockups/` contains browser design sources and their required reference assets. Mockups are design studies, not demonstrations of shipped behavior.
+This standalone repository is the canonical Forever STUwave source. Runtime files live in `forever-stuwave/`. `tools/` contains development utilities, Lua harnesses, Python tests, support modules and fixtures; `tools/assets/` contains texture generators and the font builder. Browser design mockups live in a local, untracked `mockups/` folder (ignored by git); they are design studies, not demonstrations of shipped behavior. Harnesses that compare against a mockup are skipped by `tools/check.py` when the mockup is absent.
 
 ## Setup and checks
 
@@ -24,7 +24,7 @@ uv run python -m pytest -q
 
 Lint can optionally use a client globals dump through `FS_GLOBALS_DUMP`; keep the dump outside the repository. Missing optional global evidence must not be presented as a verified client API inventory.
 
-Run generators with `uv run python tools/assets/<script>.py`; textures go to `forever-stuwave/Media/Textures/`. Set `FS_ASSET_OUTPUT_DIR` to generate into a scratch directory. Read each generator's inputs and outputs before running it, and inspect generated diffs. `tools/assets/make_display_font.py` produces the renamed FS Display font; preserve its OFL notice. Browser mockups can be opened locally; their references remain design assets.
+Run generators with `uv run python tools/assets/<script>.py`; textures go to `forever-stuwave/Media/Textures/`. Set `FS_ASSET_OUTPUT_DIR` to generate into a scratch directory. Read each generator's inputs and outputs before running it, and inspect generated diffs. `tools/assets/make_display_font.py` produces the renamed FS Display font; preserve its OFL notice. Browser mockups, when present locally, can be opened directly.
 
 ## Changes and release artifacts
 

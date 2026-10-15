@@ -275,7 +275,7 @@ Not yet checked in game. Mocked checks cover the sizes, the secret-safe numbers 
 
 ## Gunsight target side: /fsconfig, Gunsight HUD page
 
-Not yet checked in game. Mocked checks cover which module sits in which area, the swap rule and the combat rules, not how it looks. Beside the target cast bar the horizon line splits two areas: upper (Target Debuffs Horizontal by default) and lower (Class Module by default). The design is `mockups/gunsight-modules-concepts-v7-2026-10-08.html`.
+Not yet checked in game. Mocked checks cover which module sits in which area, the swap rule and the combat rules, not how it looks. Beside the target cast bar the horizon line splits two areas: upper (Target Debuffs Horizontal by default) and lower (Class Module by default). The design was a browser mockup of the Gunsight class modules (kept locally, not in this repository).
 
 1. Open /fsconfig, Gunsight HUD. The page starts with Target side (Upper area, Lower area), then Target box tags, then Player side (Next cast only; My buffs is deferred to the next release). Each group header has a ? icon; Target side's says Target debuffs shows only the debuffs you applied and the Class Module shows your class's own resource.
 2. Each area dropdown offers Target Debuffs Horizontal, Target Debuffs Vertical, Class Module, Empty, in that order. Pick Class Module for the upper area: the lower area takes Target Debuffs Horizontal at once (the swap), and both modules move on screen. Pick Target Debuffs Vertical for the lower area while the upper holds the Class Module: no swap, the lower area changes style.
@@ -295,7 +295,7 @@ Not yet checked in game. Mocked checks cover the layout, the time text, the comb
 
 ### Class Module: shards and combo points
 
-Not yet checked in game. Mocked checks cover the layout and the events, not how it looks. Design: `mockups/gunsight-modules-concepts-v7-2026-10-08.html`, states A, B, D and F.
+Not yet checked in game. Mocked checks cover the layout and the events, not how it looks. Design: the Gunsight class modules mockup (kept locally), states A, B, D and F.
 
 1. Warlock: target a hostile mob first (with no target the area hides and the shard count shows under your cast bar instead). The Class Module area then shows one shard glyph, the count and the caption SOUL SHARDS. At 0 shards the glyph is dim and the count reads 0. Create or delete a shard and the count follows.
 2. Warlock: with the Class Module in an area and a hostile mob targeted, the count under your cast bar is gone; clear your target and it comes back there. Set both areas to Empty and the glyph and count return under your cast bar; at 0 shards they show a dim glyph and a muted 0.
@@ -391,7 +391,7 @@ Pick the class module for the upper or lower Gunsight area in the config window,
 
 ## Box tags: level and class, health percent, target of target
 
-Not yet checked in game. Mocked checks cover the seats, the secret-safe text and the combat rules, not how it looks. Design: `mockups/gunsight-modules-concepts-v7-2026-10-08.html`, states A to F. The three tags (Level and rank, Health percent, Target of target) are switches on the Gunsight HUD page under Target box tags, all on by default.
+Not yet checked in game. Mocked checks cover the seats, the secret-safe text and the combat rules, not how it looks. Design: the Gunsight class modules mockup (kept locally), states A to F. The three tags (Level and rank, Health percent, Target of target) are switches on the Gunsight HUD page under Target box tags, all on by default.
 
 1. Target a hostile elite: a small tag on the top edge, left of KICK, reads L plus the level in white and ELITE in gold. A normal mob shows only the level, a rare shows RARE, a boss BOSS, a skull-level mob `??`. Switch target and the tag follows; level up on a target dummy of another level and it updates.
 2. A tag on the bottom edge, left, shows the target's health percent in green and follows hits and heals, in combat too (the value is hidden by the game there; say if it stays blank).
@@ -412,7 +412,7 @@ Not yet checked in game. With numbers off the target box is exactly as before.
 
 ## Gunsight: player class badge
 
-Not yet checked in game. Mocked checks cover the seat, the tex coords per class, the secret-safe reads and the combat rules, not how it looks. Design: `mockups/gunsight-player-class-icon-2026-10-13.html`, concept B, with the game's own round class icon instead of the mockup's drawn disc. A `/reload` applies it; no full restart is needed (no new file). Switch: "Player class icon" on the Gunsight HUD page under Target box tags, on by default.
+Not yet checked in game. Mocked checks cover the seat, the tex coords per class, the secret-safe reads and the combat rules, not how it looks. Design: the player class icon mockup (kept locally), concept B, with the game's own round class icon instead of the mockup's drawn disc. A `/reload` applies it; no full restart is needed (no new file). Switch: "Player class icon" on the Gunsight HUD page under Target box tags, on by default.
 
 1. Target a player (a friendly one in town is enough): a small chamfered tile with the round class icon sits on the target box's top left corner, hanging out of the box, and the level tag is a little further right than usual. Try a few classes (a Priest, a Warlock, a Rogue, a Druid) and say if any icon is the wrong class or is cropped, stretched or square instead of round.
 2. Target an NPC, a pet and a totem: no tile, and the level tag is exactly where it always was. Switch from a player to an NPC and back: the tile goes and returns with the right class at once, never the previous target's class.
