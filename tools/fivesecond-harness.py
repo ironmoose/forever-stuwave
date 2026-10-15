@@ -1272,14 +1272,38 @@ def check_the_cells_tooltip_says_how_long_and_that_it_is_an_estimate():
 BANNED = re.compile(r"five[ -]second|5[ -]?sec", re.IGNORECASE)
 
 
+_LUA_TOKEN = re.compile(r"\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'|--.*")
+_LUA_BLOCK_COMMENT = re.compile(r"--\[(=*)\[.*?\]\1\]", re.DOTALL)
+_LUA_LONG_STRING = re.compile(r"\[(=*)\[(.*?)\]\1\]", re.DOTALL)
+
+
+def lua_literals(text):
+    """Every string literal of a Lua source, single quoted, double quoted and long bracket, with comments dropped."""
+    text = _LUA_BLOCK_COMMENT.sub(lambda m: "\n" * m.group(0).count("\n"), text)
+    for no, line in enumerate(text.splitlines(), 1):
+        for m in _LUA_TOKEN.finditer(line):
+            if m.group(0).startswith("--"):
+                break
+            yield no, m.group(0)[1:-1]
+    for m in _LUA_LONG_STRING.finditer(text):
+        yield text.count("\n", 0, m.start()) + 1, m.group(2)
+
+
+def check_the_literal_scan_reads_every_quote_style_and_skips_comments_and_code_names():
+    text = "local a = 'Five second rule'\nlocal b = \"x\" -- 5 sec rule in a comment\nlocal c = [[the 5 SEC rule]]\n" \
+           "--[[ a block\nfive second ]]\nlocal d = \"FSFiveSecondTab\" .. 'fivesecond.enabled' .. '\"'\n"
+    hits = [(no, lit) for no, lit in lua_literals(text) if BANNED.search(lit)]
+    assert hits == [(1, "Five second rule"), (3, "the 5 SEC rule")], hits
+
+
 def check_no_player_facing_string_names_the_five_second_rule():
-    # every string literal in the two files that carry client text (code names such as "fivesecond.enabled" have no space)
-    for path in (FSTAB, CONFIGWINDOW):
-        for no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if line.lstrip().startswith("--"):
-                continue
-            for lit in re.findall(r'"((?:[^"\\]|\\.)*)"', line):
-                assert not BANNED.search(lit), f"{path.name}:{no}: {lit!r}"
+    # every string literal of every runtime file (code names such as "fivesecond.enabled" or FSFiveSecondTab have no space or
+    # hyphen after "five", so they pass; comments are not text a player reads)
+    files = sorted(ADDON.rglob("*.lua"))
+    assert FSTAB in files and len(files) > 20, files
+    for path in files:
+        for no, lit in lua_literals(path.read_text(encoding="utf-8")):
+            assert not BANNED.search(lit), f"{path.relative_to(ADDON)}:{no}: {lit!r}"
     # and what a player reads at run time: the settings, every tooltip state, the page group
     lua = world()
     S = ft(lua).SETTINGS
@@ -1617,8 +1641,8 @@ def check_everything_sits_on_whole_pixels_and_the_led_art_is_never_scaled_fracti
         cast(lua)
         tick(lua, 5.7)
         for region in descendants(host(lua)):
-            if region._kind == "Texture" and region._texture and "glow" in str(region._texture):
-                continue                      # a glow is a soft blob; the shapes are what must sit on pixels
+            if region._kind == "Texture" and region._texture and str(region._texture).endswith("slice_cut2_glow.tga"):
+                continue                      # the rim's own glow is the shared skin's soft blob; every LED glow and halo is pinned
             if region._points[1] is None or not sb.same(lua, region._points[1].rel, host(lua)):
                 continue
             for p in seq(region._points):
@@ -2596,6 +2620,7 @@ CHECKS = [
     check_the_rate_numbers_survive_secrets_and_bad_values,
     check_the_idle_and_the_combat_tick_allocate_nothing,
     check_the_cells_tooltip_says_how_long_and_that_it_is_an_estimate,
+    check_the_literal_scan_reads_every_quote_style_and_skips_comments_and_code_names,
     check_no_player_facing_string_names_the_five_second_rule,
     check_the_cells_tooltip_after_the_rule_says_regen_is_running,
     check_the_rate_tooltip_names_both_rates_and_the_cache,
