@@ -128,6 +128,17 @@ ALL_SPELLS = dict(IMBUE_IDS, **{"Lightning Shield": SHIELD_ID, "Water Shield": W
 GUID = tbh.GUID
 
 MOCKS = r"""
+-- The width the client gives a string: Mononoki Bold's advance (0.5615 em) at the fontstring's size, in UI units. With
+-- __hint set (the band tests) the advance is hinted UP to whole physical pixels, as the live client did when "SHIELD" came
+-- out as "SH...": 9 px gives 5.05, drawn as 6, so six letters need 36 pixels and not 30.3.
+function __Region:GetStringWidth()
+    local ppu = (__ees or 1) * (__physH or 768 * (__es or 1)) / 768
+    local size = (self._font and self._font[2]) or 0
+    local adv = 0.5615 * size * ppu
+    if __hint then adv = math.ceil(adv - 1e-9) end
+    return #(self._text or "") * adv / ppu
+end
+function __Region:SetWordWrap(on) self._wrap = on end
 FS.Theme.COLOR_HEALTH = FS.Theme.COLOR_HEALTH or { 1, 0.18, 0.592, 1 }
 FS.Theme.COLOR_POWER = FS.Theme.COLOR_POWER or { 0.133, 0.878, 1, 1 }
 FS.Theme.COLOR_BORDER = FS.Theme.COLOR_BORDER or { 0.659, 0.333, 0.969, 1 }
@@ -1518,14 +1529,29 @@ def word_fit(lua, i, word, ppu=1.0):
 
 
 def ink_rows(lua, i, ppu):
-    """(cap top, baseline) of the word's ink, physical pixels from the band's top, for a line centred in its box."""
+    """(cap top, baseline) of the word's ink, physical pixels from the band's top, for a line centred on the word's point."""
     b = btn(lua, i)
     size = float(b.fsWord._font[2]) * ppu
-    box_top = -float(b.fsWord._points[1].y) * ppu - (-float(b.fsBand._points[1].y) * ppu)
-    box_h = float(b.fsWord._h) * ppu
-    line_top = box_top + (box_h - (ASCENT + DESCENT) * size) / 2
+    centre = -float(b.fsWord._points[1].y) * ppu - (-float(b.fsBand._points[1].y) * ppu)
+    line_top = centre - (ASCENT + DESCENT) * size / 2
     base = line_top + ASCENT * size
     return base - CAP * size, base
+
+
+def hinted_width(word, size):
+    """The physical width of `word` at `size` physical px when the client hints each advance up to a whole pixel."""
+    import math
+    return len(word) * math.ceil(ADVANCE * size - 1e-9)
+
+
+def hinted_fit(lua, i, word, ppu):
+    """The size the seat must end on: the model's start (9, or less), shrunk in half pixels until the hinted width fits the
+    band less a pixel, never under 6."""
+    size = word_fit(lua, i, word, ppu)
+    room = round(float(btn(lua, i).fsBand._w) * ppu) - 1
+    while size > 6.0 and hinted_width(word, size) > room + 1e-6:
+        size = max(6.0, size - 0.5)
+    return size
 
 
 def check_tile_fonts_are_the_design_size_at_every_scale_and_after_a_rescale():
@@ -3228,6 +3254,9 @@ def check_the_state_line_tells_the_setting_and_unreadable_from_misplaced_and_a_r
     leave_combat(lua)
     tick(lua, 1.1)
     assert g(lua).FS.BuffTab.BT.warned.bufftab_status
+    assert g(lua).__degraded.bufftab_status is None, "a failed state line write said something to chat"
+    assert "could not be saved" in str(g(lua).__quiet.bufftab_status) and "read only" in str(g(lua).__quiet.bufftab_status), \
+        "the failed write was not kept in the quiet degrade log with its error"
     # a database that is not a table (Config leaves it alone on purpose): never replaced, no throw, no warning
     lua = engine_world()
     tick(lua, 1.1)
@@ -3253,6 +3282,45 @@ def check_the_state_line_tells_the_setting_and_unreadable_from_misplaced_and_a_r
     run(lua, "FS.Config.IsReadOnly = function() return false end")
     tick(lua, 1.1)
     assert g(lua).ForeverSTUwaveDB.buffTabEngine is not None
+
+
+def check_a_secret_or_odd_slot_value_never_makes_the_state_line_fail_or_speak():
+    lua = engine_world()
+    shield_aura_up(lua)
+    tick(lua, 1.1)
+    run(lua, "__degradeCount = 0; __quiet = {}")
+    # every read the state line makes of a slot is secret, in combat (nothing is read in combat) and out of it
+    run(lua, """local eng = FS.BuffTab.BT.byKey.imbue.fsEngine
+        local part = eng.parts[1]
+        part.slot.IsShown = function() return __SECRET end
+        part.slot.GetWidth = function() return __SECRET end
+        part.slot.GetHeight = function() return __SECRET end
+        part.lit.GetTexture = function()
+            if InCombatLockdown() then error("restricted region read in combat") end
+            return __SECRET
+        end""")
+    for combat in (False, True):
+        if combat:
+            set_combat(lua, True)
+        tick(lua, 1.1)
+        update(lua)
+        g(lua).FS.BuffTab.SaveStatus()
+        assert not g(lua).FS.BuffTab.BT.warned.bufftab_status, f"a secret slot value made the state line fail (combat {combat})"
+        assert int(g(lua).__degradeCount) == 0 and not len(list(g(lua).__quiet.keys())), "the state line spoke"
+    leave_combat(lua)
+    tick(lua, 1.1)
+    assert "slot1 shown=? 0x0 lit=?" in str(g(lua).ForeverSTUwaveDB.buffTabEngine.line), g(lua).ForeverSTUwaveDB.buffTabEngine.line
+    # raw secrets in the fields themselves (whatever wrote them): no arithmetic, comparison or format on a raw value
+    run(lua, """local eng = FS.BuffTab.BT.byKey.imbue.fsEngine
+        local part = eng.parts[1]
+        part.w, part.h, part.shownCode, part.litCode, part.nils = __SECRET, __SECRET, __SECRET, __SECRET, __SECRET
+        eng.declared = __SECRET""")
+    run(lua, "FS.BuffTab.Engine.status = nil")      # the signature is unchanged (a secret counts as 0): force the rewrite
+    g(lua).FS.BuffTab.SaveStatus()
+    assert not g(lua).FS.BuffTab.BT.warned.bufftab_status, "a raw secret field made the state line fail"
+    assert int(g(lua).__degradeCount) == 0 and not len(list(g(lua).__quiet.keys()))
+    line = str(g(lua).ForeverSTUwaveDB.buffTabEngine.line)
+    assert "slot1 shown=secret secretxsecret lit=secret" in line and "declared=secret" in line, line
 
 
 def check_the_unmapped_spell_icon_list_rides_in_the_saved_state_table():
@@ -3327,6 +3395,7 @@ def check_a_rescale_reseats_every_engine_text_out_of_combat_only():
 # ---------------------------------------------------------------------------------------------
 
 ES_MOCK = """
+__hint = true
 __es = %s
 __ees = 1
 __physH = nil
@@ -3336,6 +3405,7 @@ function __Region:SetJustifyH(j) self._justifyH = j end
 """
 # Parker's display: effective scale 0.64, physical height 1440 (1 UI unit = 1.2 pixels), layout scale 0.8333
 LIVE_ES = """
+__hint = true
 __es = 1
 __ees = 0.64
 __physH = 1440
@@ -3377,9 +3447,9 @@ def check_the_band_and_its_word_sit_on_whole_physical_pixels_inside_the_ring_at_
             pt, wp = band._points[1], wd._points[1]
             where = f"ppu {es} scale {sc} {word}"
             assert len(band._points) == 1 and len(wd._points) == 1, where
-            assert (pt.point, wp.point) == ("TOPLEFT", "TOPLEFT") and sb.same(lua, pt.rel, b) and sb.same(lua, wp.rel, b), where
+            assert pt.point == "TOPLEFT" and sb.same(lua, pt.rel, b) and sb.same(lua, wp.rel, b), where
             for what, v in (("band left", pt.x), ("band top", pt.y), ("band w", band._w), ("band h", band._h),
-                            ("word left", wp.x), ("word top", wp.y), ("word w", wd._w), ("word h", wd._h)):
+                            ("word centre x", wp.x), ("word centre y", wp.y)):
                 assert whole(v, es), f"{where}: {what} {v} is not whole physical pixels ({float(v) * es})"
             left, top = round(float(pt.x) * es), round(-float(pt.y) * es)
             w, h = round(float(band._w) * es), round(float(band._h) * es)
@@ -3390,20 +3460,26 @@ def check_the_band_and_its_word_sit_on_whole_physical_pixels_inside_the_ring_at_
             assert abs(left - (tile_px - (left + w))) == tile_px % 2, f"{where}: side margins {left} / {tile_px - left - w}"
             assert top == round(24 * sc * es) and h == max(2, round(9 * sc * es)), (where, top, h)
             assert top + h <= tile_px - 1, f"{where}: the band runs past the tile bottom"
-            # the word box: the band's width, one pixel below the band's top, an even number of pixels tall (a centred line
-            # on a pixel edge) and inside the band
-            wtop, wh = round(-float(wp.y) * es), round(float(wd._h) * es)
-            assert (round(float(wd._w) * es), round(float(wp.x) * es)) == (w, left), where
-            assert wtop == top + 1 and wh % 2 == 0 and wtop + wh <= top + h, (where, top, wtop, wh, h)
+            # the word has no box of its own (a fontstring with a width is cut to "SH..." when the text is wider, one without
+            # simply grows), only a centre: the band's middle across, the middle of a box one pixel below the band's top and an
+            # even number of pixels tall down; both a whole pixel
+            assert float(wd._w) == 0 and float(wd._h) == 0, f"{where}: the word has a box of its own, it can be cut with an ellipsis"
+            assert wd._wrap is False, f"{where}: the word wraps"
+            assert (wp.point, wp.relPoint) == ("CENTER", "TOPLEFT"), where
+            cx, cy = float(wp.x) * es, -float(wp.y) * es
+            assert abs(cx - (left + w / 2)) < 1e-6 and whole(wp.x, es) and whole(wp.y, es), (where, cx, left + w / 2)
+            box_h = round((cy - top - 1) * 2)
+            assert abs(cy - round(cy)) < 1e-6 and abs((cy - top - 1) * 2 - box_h) < 1e-6 and box_h % 2 == 0 and 2 <= box_h <= h - 1, \
+                (where, cy, top, h)
             assert wd._justifyH == "CENTER", where
-            # the word is sized in physical pixels (the font is in UI units): 9, or fitted down; it fits the band with a
-            # pixel clear, by the addon's advance and the font's own
+            # the word is sized in physical pixels (the font is in UI units): 9, or shrunk until the width the client measures
+            # fits the band less a pixel (the mock hints the advance up to whole pixels, so SHIELD cannot keep 9)
             phys = word_px(lua, i, es)
-            assert abs(phys - word_fit(lua, i, word, es)) < 1e-6, f"{where}: {word} is {phys} physical px"
-            assert len(word) * ADVANCE * phys <= w - 1 + 1e-6, f"{where}: {word} at {phys}px does not fit {w}"
-            assert _advance(word) * phys <= w - 1 + 1e-6, f"{where}: {word} (font advances) does not fit"
+            assert abs(phys - hinted_fit(lua, i, word, es)) < 1e-6, f"{where}: {word} is {phys} physical px, wanted {hinted_fit(lua, i, word, es)}"
+            measured = float(wd.GetStringWidth(wd)) * es
+            assert measured <= w - 1 + 1e-6, f"{where}: {word} measures {measured} in a band of {w}"
             if mock:
-                assert abs(phys - 9.0) < 1e-6, f"{where}: the word is {phys} physical px, not 9"
+                assert abs(word_px(lua, IMBUE, es) - 9.0) < 1e-6 and word_px(lua, SHIELD, es) < 9.0, "the live word sizes"
             # the ink (capitals) sits inside the band: no red over the icon rows above it
             cap_top, base = ink_rows(lua, i, es)
             if sc >= 0.8:
@@ -3415,6 +3491,28 @@ def check_the_band_and_its_word_sit_on_whole_physical_pixels_inside_the_ring_at_
             assert sb.same(lua, band._parent, b.fsFace) and sb.same(lua, wd._parent, b.fsFace), where
             assert shown(band) and shown(wd) and not shown(b.fsTextPlate), where
             close(rgb(wd._textColor), C["red"], f"{where} red word")
+
+
+def check_a_word_wider_than_the_band_overflows_at_the_smallest_size_and_is_never_cut():
+    # the client cuts a fontstring that has a width to "SH..." when the text does not fit; the word has none, so at the
+    # smallest size it overflows the band (it is the whole word, centred) instead
+    for ppu, sc in ((1.0, 0.25), (1.0, 0.4), (1.2, 0.3)):
+        lua = band_world(ppu, sc)
+        for i, word in ((IMBUE, "IMBUE"), (SHIELD, "SHIELD")):
+            b = btn(lua, i)
+            wd = b.fsWord
+            assert shown(wd) and str(wd._text) == word, f"{word} is not shown in full"
+            assert float(wd._w) == 0 and float(wd._h) == 0, f"{word} has a box that can cut it with an ellipsis"
+            assert wd._wrap is False
+            assert word_px(lua, i, ppu) == hinted_fit(lua, i, word, ppu)
+        assert word_px(lua, SHIELD, ppu) == 6.0, "the smallest size is not reached on a band this narrow"
+        assert float(btn(lua, SHIELD).fsWord.GetStringWidth(btn(lua, SHIELD).fsWord)) * ppu > float(btn(lua, SHIELD).fsBand._w) * ppu, \
+            "the band is wide enough, so the overflow case is not exercised"
+    # a missing, throwing or secret measure keeps the model size and never raises
+    lua = band_world(1.0, 1.0, mock=ES_MOCK % 1.0 + "function __Region:GetStringWidth() return __SECRET end")
+    assert abs(word_px(lua, SHIELD, 1.0) - word_fit(lua, SHIELD, "SHIELD", 1.0)) < 1e-6
+    lua = band_world(1.0, 1.0, mock=ES_MOCK % 1.0 + "function __Region:GetStringWidth() error('restricted') end")
+    assert abs(word_px(lua, SHIELD, 1.0) - word_fit(lua, SHIELD, "SHIELD", 1.0)) < 1e-6
 
 
 def check_the_up_state_has_no_band_and_no_word_and_the_time_keeps_its_plate():
@@ -3624,6 +3722,7 @@ CHECKS = [
     check_a_slot_with_the_right_corner_but_the_wrong_size_is_not_on_the_icon,
     check_the_state_line_for_the_live_test_is_saved_and_quiet_ticks_allocate_nothing,
     check_the_state_line_tells_the_setting_and_unreadable_from_misplaced_and_a_refusing_db_never_throws,
+    check_a_secret_or_odd_slot_value_never_makes_the_state_line_fail_or_speak,
     check_the_unmapped_spell_icon_list_rides_in_the_saved_state_table,
     check_a_corrupt_state_table_is_replaced_and_never_errors_each_tick,
     check_a_throwing_engine_tick_does_not_break_the_tick,
@@ -3631,6 +3730,7 @@ CHECKS = [
     check_the_chip_and_ring_chrome_numbers_are_pinned_by_value,
     check_a_rescale_reseats_every_engine_text_out_of_combat_only,
     check_the_band_and_its_word_sit_on_whole_physical_pixels_inside_the_ring_at_every_scale,
+    check_a_word_wider_than_the_band_overflows_at_the_smallest_size_and_is_never_cut,
     check_the_up_state_has_no_band_and_no_word_and_the_time_keeps_its_plate,
     check_the_combat_missing_look_equals_the_out_of_combat_one_and_no_band_point_or_size_is_written_in_combat,
     check_the_band_and_word_sit_on_the_face_frame_under_every_engine_slot,

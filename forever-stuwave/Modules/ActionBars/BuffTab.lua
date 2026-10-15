@@ -120,6 +120,14 @@ local function WarnOnce(key, text)
     FS.LogDegradeOnce(key, "|cffff4488Forever STUwave|r: " .. text)
 end
 
+-- The same, silent: the failure goes to the degrade log on disk (FS.LogQuiet) and not to chat, for a problem the player cannot
+-- act on. `err` is the error text.
+local function QuietOnce(key, text)
+    if BT.warned[key] then return end
+    BT.warned[key] = true
+    if FS.LogQuiet then FS.LogQuiet(key, text) end
+end
+
 -- Settings: read by the config window (Unit Frames page), explained there by the `tip` (a ? icon).
 BT.SETTINGS = {
     combatstate = {
@@ -418,9 +426,9 @@ end
 
 local SeatBand
 
--- The size, in physical pixels, of the missing word: BT.WORD_PX, or smaller so the word keeps a pixel clear across the band
--- and its capitals keep a pixel clear above and below inside it (the tile shrinks with the UI scale and fonts do not);
--- whole and half pixels, never below BT.MIN_PX.
+-- The size, in physical pixels, the missing word starts at: BT.WORD_PX, or smaller so it keeps a pixel clear across the
+-- band and its capitals keep a pixel clear above and below (the tile shrinks with the UI scale and fonts do not); whole and
+-- half pixels, never below BT.MIN_PX. This is the model; the client's own measure (WordFits) has the last word.
 local function WordPx(word, bandW, bandH)
     local n = type(word) == "string" and #word or 0
     if n == 0 then return BT.WORD_PX end
@@ -429,12 +437,25 @@ local function WordPx(word, bandW, bandH)
     return math.max(math.min(across, tall, BT.WORD_PX), BT.MIN_PX)
 end
 
--- Seats the band and the word box once per scale (out of combat: StyleButton), in PHYSICAL pixels: `es` is the pixels in one
+-- The width, in UI units, the client gives the word's text as set now, or nil when it will not say (a secret or a missing
+-- call). The advance the client uses is hinted to whole pixels, so it can be wider than the font file's advance.
+local function MeasuredWidth(fs)
+    local call = fs.GetUnboundedStringWidth or fs.GetStringWidth
+    if not call then return nil end
+    local ok, w = pcall(call, fs)
+    if ok and type(w) == "number" and not IsSecret(w) and w == w and w >= 0 and w < math.huge then return w end
+    return nil
+end
+
+-- Seats the band and the word once per scale (out of combat: StyleButton), in PHYSICAL pixels: `es` is the pixels in one
 -- UI unit (FrameHelpers.PixelsPerUnit), not the effective scale. The band is an even number of pixels wide and centred in
--- the tile, its top and height are rounded; the word box is the band's width, starts one pixel below the band's top and
--- is an even number of pixels tall, so the line is centred on a pixel edge and the capitals' ink (cap top .703 em above
--- the baseline, the line .879 + .244 em tall, centred in the box) stays inside the band. The font is set in UI units for
--- WordPx physical pixels (WORD_PX is a size on the screen, not scaled by the layout scale).
+-- the tile, its top and height are rounded. The word has NO size of its own, only its centre: the client truncates a
+-- fontstring with a fixed width to "SH..." when the text is wider than the box, while one without a width simply grows,
+-- so the word can overflow the band at the smallest size but is never cut. The centre is the middle of a box one pixel
+-- below the band's top and an even number of pixels tall (a pixel edge), so the capitals' ink (cap top .703 em above the
+-- baseline, the line .879 + .244 em tall, centred on that point) stays inside the band. The font is set in UI units for
+-- WordPx physical pixels (WORD_PX is a size on the screen, not scaled by the layout scale) and then SHRUNK in half pixels
+-- until the width the client measures fits the band less a pixel.
 function SeatBand(button, size, s)
     local es = FH.PixelsPerUnit(button)
     local tilePx = math.floor(size * es + 0.5)
@@ -448,14 +469,22 @@ function SeatBand(button, size, s)
     button.fsBand:ClearAllPoints()
     button.fsBand:SetPoint("TOPLEFT", button, "TOPLEFT", left * px, -top * px)
     button.fsBand:SetSize(bandW * px, height * px)
-    button.fsWord:ClearAllPoints()
-    button.fsWord:SetPoint("TOPLEFT", button, "TOPLEFT", left * px, -(top + 1) * px)
-    button.fsWord:SetSize(bandW * px, wordH * px)
-    local wpx = WordPx(BT.MISSING[button.fsKey], bandW, height) * px
-    if button.fsWordPx ~= wpx then
-        button.fsWordPx = wpx
-        FS.Theme.ApplyMono(button.fsWord, wpx, FS.Theme.COLOR_RED)
+    local word = BT.MISSING[button.fsKey]
+    local fs = button.fsWord
+    fs:ClearAllPoints()
+    fs:SetPoint("CENTER", button, "TOPLEFT", (left + bandW / 2) * px, -(top + 1 + wordH / 2) * px)
+    local phys = WordPx(word, bandW, height)
+    FS.Theme.ApplyMono(fs, phys * px, FS.Theme.COLOR_RED)
+    if word then
+        fs:SetText(word)
+        while phys > BT.MIN_PX do
+            local w = MeasuredWidth(fs)
+            if not w or w * es <= bandW - 1 + 1e-6 then break end
+            phys = math.max(BT.MIN_PX, phys - 0.5)
+            FS.Theme.ApplyMono(fs, phys * px, FS.Theme.COLOR_RED)
+        end
     end
+    if fs.SetWordWrap then pcall(fs.SetWordWrap, fs, false) end
     if button.fsBand.SetSnapToPixelGrid then
         pcall(button.fsBand.SetSnapToPixelGrid, button.fsBand, true)
         if button.fsBand.SetTexelSnappingBias then pcall(button.fsBand.SetTexelSnappingBias, button.fsBand, 0) end
@@ -545,7 +574,7 @@ local function StyleButton(button, size, scale)
         button.fsBand:SetColorTexture(LABEL_PLATE[1], LABEL_PLATE[2], LABEL_PLATE[3], BT.BAND_A)
         button.fsBand:Hide()
         button.fsWord = NewText(face, BT.WORD_PX, T.COLOR_RED)
-        button.fsWord:SetJustifyH("CENTER")
+        button.fsWord:SetJustifyH("CENTER")        -- a word with no width is centred on its point
         button.fsWord:Hide()
         button.fsLine = face:CreateTexture(nil, "OVERLAY", nil, 2)
         button.fsLine:SetColorTexture(1, 1, 1, 1)
@@ -1083,6 +1112,14 @@ local function ReadPart(part)
     local okH, h = pcall(slot.GetHeight, slot)
     part.w = (okW and type(w) == "number" and not IsSecret(w)) and math.floor(w + 0.5) or 0
     part.h = (okH and type(h) == "number" and not IsSecret(h)) and math.floor(h + 0.5) or 0
+    -- the lit icon's texture: 0 unknown (no call, an error or a secret), 1 none, 2 one. Read here, out of combat, so the
+    -- state line (written in combat too) never touches the region.
+    local lit = part.lit
+    part.litCode = 0
+    if lit then
+        local okT, tex = pcall(lit.GetTexture, lit)
+        if okT and not IsSecret(tex) then part.litCode = tex ~= nil and 2 or 1 end
+    end
 end
 
 -- The PROOF pass, out of combat only (SeatEngine, and the tick every second): every slot frame of every tile read against
@@ -1234,6 +1271,27 @@ BuffTab.EnsureEngine = EnsureEngine
 -- The state of the combat state for the live test, in ForeverSTUwaveDB.buffTabEngine (written to disk on /reload or
 -- logout): `line` is the one readable line, the rest are the same numbers. Rewritten in place only when something it
 -- shows changed (a numeric signature is compared first), so a quiet tick allocates nothing.
+-- A plain whole number or "secret" for a value that is not one: nothing in the state line is formatted from a raw value.
+local function Plain(v)
+    if IsSecret(v) then return "secret" end
+    if type(v) ~= "number" or v ~= v or v == math.huge or v == -math.huge then return "?" end
+    return tostring(math.floor(v + 0.5))
+end
+
+-- A plain number for the signature: a secret or non-number counts as 0 (no arithmetic or comparison on it).
+local function Num(v)
+    if type(v) ~= "number" or IsSecret(v) or v ~= v or v == math.huge or v == -math.huge then return 0 end
+    return v
+end
+
+-- The state line's word for a coded value (0 unknown, 1 no, 2 yes): "secret" for a secret one.
+local function CodeText(v, no, yes)
+    if IsSecret(v) then return "secret" end
+    if v == 2 then return yes end
+    if v == 1 then return no end
+    return "?"
+end
+
 local function WriteStatus()
     local on = Setting(BT.SETTINGS.combatstate) and true or false
     local sig = (on and 1048576 or 0) + (EngineState.armed and 1 or 0) + (EngineState.gaveUp and 2 or 0) + (EngineState.retryAt and 4 or 0)
@@ -1245,12 +1303,12 @@ local function WriteStatus()
             local ok, nils = 0, 0
             for _, part in ipairs(eng.parts) do
                 if part.ok then ok = ok + 1 end
-                if (part.nils or 0) > nils then nils = part.nils end
+                if Num(part.nils) > nils then nils = Num(part.nils) end
             end
             sig = (sig * 31 + #eng.parts * 7 + ok * 3 + (eng.bad and 1 or 0) + nils * 13 + (eng.seen and 17 or 0)) % 2147483647
             for _, part in ipairs(eng.parts) do
-                sig = (sig * 31 + (part.shownCode or 0) * 5 + (part.w or 0) * 3 + (part.h or 0)
-                    + (part.lit and part.lit:GetTexture() ~= nil and 11 or 0) + (part.coverPlate and 19 or 0)
+                sig = (sig * 31 + Num(part.shownCode) * 5 + Num(part.w) * 3 + Num(part.h)
+                    + Num(part.litCode) * 11 + (part.coverPlate and 19 or 0)
                     + (part.coverRing and 23 or 0)) % 2147483647
             end
         end
@@ -1267,8 +1325,9 @@ local function WriteStatus()
     saved = { sig = sig, setting = on, armed = EngineState.armed, alpha = EngineState.alpha, rebuilds = EngineState.rebuilds,
         failures = EngineState.failures, retryAt = EngineState.retryAt, gaveUp = EngineState.gaveUp,
         combat = InCombatLockdown() and true or false, tiles = {}, unmappedIcons = unmappedIcons }
-    local text = { string.format("setting=%s armed=%s alpha=%s combat=%s rebuilds=%d failures=%d retryAt=%s gaveUp=%s",
-        on and "on" or "off", tostring(saved.armed), tostring(saved.alpha), tostring(saved.combat), saved.rebuilds, saved.failures,
+    local text = { string.format("setting=%s armed=%s alpha=%s combat=%s rebuilds=%s failures=%s retryAt=%s gaveUp=%s",
+        on and "on" or "off", tostring(saved.armed), tostring(saved.alpha), tostring(saved.combat), Plain(saved.rebuilds),
+        Plain(saved.failures),
         tostring(saved.retryAt), tostring(saved.gaveUp)) }
     for _, button in ipairs(BT.list) do
         local eng = button.fsEngine
@@ -1276,21 +1335,22 @@ local function WriteStatus()
             local ok, nils = 0, 0
             for _, part in ipairs(eng.parts) do
                 if part.ok then ok = ok + 1 end
-                if (part.nils or 0) > nils then nils = part.nils end
+                if Num(part.nils) > nils then nils = Num(part.nils) end
             end
-            saved.tiles[button.fsKey] = { declared = eng.declared, parts = #eng.parts, ok = ok, nils = nils,
+            saved.tiles[button.fsKey] = { declared = Num(eng.declared), parts = #eng.parts, ok = ok, nils = nils,
                 bad = eng.bad and true or false }
             local detail = {}
             for n, part in ipairs(eng.parts) do
-                local code = part.shownCode or 0
                 local cover = (part.coverPlate and "plate" or "") .. (part.coverPlate and part.coverRing and "+" or "")
                     .. (part.coverRing and "ring" or "")
-                detail[#detail + 1] = string.format("slot%d shown=%s %dx%d lit=%s cover=%s", n,
-                    code == 2 and "true" or (code == 1 and "false" or "?"), part.w or 0, part.h or 0,
-                    part.lit and tostring(part.lit:GetTexture() ~= nil) or "n/a", cover ~= "" and cover or "none")
+                local lit = "n/a"
+                if part.lit then lit = CodeText(part.litCode, "false", "true") end
+                detail[#detail + 1] = string.format("slot%d shown=%s %sx%s lit=%s cover=%s", n,
+                    CodeText(part.shownCode, "false", "true"), Plain(part.w), Plain(part.h), lit,
+                    cover ~= "" and cover or "none")
             end
-            text[#text + 1] = string.format("%s declared=%d parts=%d ok=%d nils=%d bad=%s%s%s", button.fsKey, eng.declared,
-                #eng.parts, ok, nils, tostring(eng.bad and true or false), eng.item and (" seen=" .. tostring(eng.seen == true)) or "",
+            text[#text + 1] = string.format("%s declared=%s parts=%d ok=%d nils=%s bad=%s%s%s", button.fsKey, Plain(eng.declared),
+                #eng.parts, ok, Plain(nils), tostring(eng.bad and true or false), eng.item and (" seen=" .. tostring(eng.seen == true)) or "",
                 #detail > 0 and (" [" .. table.concat(detail, "; ") .. "]") or "")
         end
     end
@@ -1301,9 +1361,8 @@ end
 
 -- Paint and the tick call this; a database that refuses the write must never make them throw.
 local function SaveStatus()
-    if not pcall(WriteStatus) then
-        WarnOnce("bufftab_status", "the buff tab state line could not be saved")
-    end
+    local ok, err = pcall(WriteStatus)
+    if not ok then QuietOnce("bufftab_status", "the buff tab state line could not be saved: " .. tostring(err)) end
 end
 BuffTab.SaveStatus = SaveStatus
 BuffTab.SeatHotkeyHost = SeatHotkeyHost

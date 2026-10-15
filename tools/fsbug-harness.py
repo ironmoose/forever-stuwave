@@ -1602,6 +1602,25 @@ case("err_ours_is_logged_suppressed_and_announced_once", """
     assert(#lines == 1 and lines[1] == EXPECT_LINE, tostring(lines[1]))
 """)
 
+case("err_log_quiet_keeps_the_record_without_a_chat_line_and_never_creates_the_database", """
+    local FS = LoadEL()
+    ForeverSTUwaveDB = nil
+    FS.LogQuiet("k1", "first")
+    assert(ForeverSTUwaveDB == nil, "LogQuiet created the database")
+    ForeverSTUwaveDB = {}
+    FS.LogQuiet("k1", "first")
+    FS.LogQuiet("k2", 42)
+    assert(ForeverSTUwaveDB.degradeLog.k1.msg == "first" and ForeverSTUwaveDB.degradeLog.k2.msg == "42")
+    assert(#Lines() == 0, "LogQuiet printed a line")
+    ForeverSTUwaveDB = { degradeLog = "junk" }
+    FS.LogQuiet("k3", "third")
+    assert(ForeverSTUwaveDB.degradeLog.k3.msg == "third", "a corrupt degradeLog was not replaced")
+    ForeverSTUwaveDB = setmetatable({}, { __newindex = function() error("refused") end })
+    FS.LogQuiet("k4", "fourth")           -- a database that refuses the write: no throw
+    ForeverSTUwaveDB = 5
+    FS.LogQuiet("k5", "fifth")
+""")
+
 case("err_combat_flag_is_recorded", """
     local FS = LoadEL()
     W.combat = true

@@ -498,6 +498,17 @@ function FS.LogDegradeOnce(key, msg)
     ForeverSTUwaveDB.degradeLog[key] = { msg = msg, time = time() }
 end
 
+-- The same record as LogDegradeOnce, with no chat line: for a failure the player cannot act on, kept on disk (after a
+-- /reload) for whoever reads the degrade log. Never creates the database, never raises.
+function FS.LogQuiet(key, msg)
+    local db = ForeverSTUwaveDB
+    if type(db) ~= "table" then return end
+    pcall(function()
+        if type(db.degradeLog) ~= "table" then db.degradeLog = {} end
+        db.degradeLog[key] = { msg = tostring(msg), time = time() }
+    end)
+end
+
 SLASH_FSERR1 = "/fserr"
 SlashCmdList["FSERR"] = function(msg)
     msg = (msg or ""):lower():gsub("%s", "")

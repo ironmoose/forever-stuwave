@@ -1063,8 +1063,9 @@ local function Write()
     if P.castIdsSecret then parts[#parts + 1] = "castids=secret" end
     local state = set2.state or "unseen"
     parts[#parts + 1] = "set2=" .. state .. (set2.total and (" " .. set2.landed .. "/" .. set2.total) or "")
-        .. (set2.why and (" (" .. set2.why .. ")") or "") .. (set2.unproven > 0 and (" unproven=" .. set2.unproven) or "")
-        .. " set1Intact=" .. tostring(set2.set1Intact) .. " set1Check=" .. set2.check
+        .. (set2.why and (" (" .. tostring(set2.why) .. ")") or "")
+        .. ((set2.unproven or 0) > 0 and (" unproven=" .. tostring(set2.unproven)) or "")
+        .. " set1Intact=" .. tostring(set2.set1Intact) .. " set1Check=" .. tostring(set2.check)
     local line = table.concat(parts, " | ")
     if line == lastLine and type(db.totemPresetState) == "table" then return end
     lastLine = line
@@ -1072,7 +1073,11 @@ local function Write()
 end
 
 function PS.SaveState()
-    if not pcall(Write) then WarnOnce("totempresets_state", "the preset state line could not be saved") end
+    local ok, err = pcall(Write)
+    if not ok and not P.warned.totempresets_state then
+        P.warned.totempresets_state = true
+        if FS.LogQuiet then FS.LogQuiet("totempresets_state", "the preset state line could not be saved: " .. tostring(err)) end
+    end
 end
 
 -------------------------------------------------------------------------------

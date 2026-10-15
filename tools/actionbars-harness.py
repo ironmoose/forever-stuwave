@@ -41,6 +41,7 @@ ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
 MOCK = r"""
 __frames = {}
 __degraded = {}
+__quiet = {}
 
 local Region = {}
 Region.__index = Region
@@ -405,6 +406,7 @@ FS = {
     -- so a falsy one is what makes unguarded code defer the overlay).
     IsSecret = function(v) return rawequal(v, __SECRET) or (__secretFalse == true and v == false) end,
     LogDegradeOnce = function(key, msg) __degraded[key] = msg; __degradeCount = __degradeCount + 1 end,
+    LogQuiet = function(key, msg) __quiet[key] = msg end,
     Layout = {
         action = { w = 1089, h = 178 }, stance = { w = 100, h = 38 }, grid = { w = 2560, h = 183 },
         Apply = function(frame, id)

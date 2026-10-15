@@ -2452,8 +2452,20 @@ def check_the_state_line_never_creates_a_database_never_writes_a_read_only_confi
     assert g(lua).ForeverSTUwaveDB.totemPresetState is None, "the state line wrote a read-only profile"
     lua = boot()
     make(lua)
-    run(lua, "ForeverSTUwaveDB = setmetatable({}, { __newindex = function() error('refused') end })")
+    run(lua, "__degradeCount = 0; ForeverSTUwaveDB = setmetatable({}, { __newindex = function() error('refused') end })")
     PS(lua).SaveState()
+    assert int(g(lua).__degradeCount) == 0, "a refused state line write said something to chat"
+    assert "could not be saved" in str(g(lua).__quiet.totempresets_state) and "refused" in str(g(lua).__quiet.totempresets_state), \
+        "the refused write was not kept in the quiet degrade log with its error"
+    # secret values from the cell buttons: no throw and no chat
+    lua = boot()
+    make(lua)
+    run(lua, "__degradeCount = 0; for _, c in ipairs({ 'dial', 'gnarly' }) do local b = FS.TotemBar.Button(c); "
+             "if b then b.GetAttribute = function() return __SECRET end end end")
+    PS(lua).SaveState()
+    assert int(g(lua).__degradeCount) == 0 and g(lua).FS.TotemPresets.P.warned.totempresets_state is None, \
+        "secret attributes made the state line fail"
+    assert "type1=none" in str(g(lua).ForeverSTUwaveDB.totemPresetState.line)
 
 
 def check_a_throwing_listener_or_totem_api_never_breaks_a_press_or_a_sync():
