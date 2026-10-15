@@ -15,6 +15,7 @@ htmlcov/
 
 # local design mockups (untracked, kept on disk for review; they embed Blizzard art)
 mockups/
+mockups
 
 # local previews and downloaded sources (they embed or hold Blizzard art)
 debug/
