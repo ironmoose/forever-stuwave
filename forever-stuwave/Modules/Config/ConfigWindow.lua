@@ -1372,10 +1372,55 @@ local function IconStyleGroup(page)
     for _, mod in ipairs(mods) do IconStyleDropdown(page, mod) end
 end
 
+-- The party frames' own switch and seat (PartyFrames.lua, LayoutEdit.lua), apart from the Gunsight HUD, so nothing here
+-- is dimmed by its master switch. A Show switch, Move (the layout editor, which brings this page back from DONE or Esc)
+-- and Reset position, each explained by its ? tip. LayoutEdit.lua loads after this file, so it is looked up at the click.
+-- Out of the list for a client without the party frames.
+local PARTY_TIPS = {
+    show = "The party frames have their own switch. They follow it with the Gunsight HUD on or off, and the Party Frame key "
+        .. "on the Console moves it too.",
+    move = "Opens the layout editor. Drag the Party handle to move the party frames, right-click it to reset. "
+        .. "Done or Esc brings you back here. Out of combat only.",
+    reset = "Puts the party frames back at their design seat. Cannot be undone.",
+}
+
+local function PartyFramesGroup(page)
+    local party = FS.PartyFrames
+    if not (party and party.CONFIG_KEY) then return end
+    UI.Header(page, "Party frames")
+    UI.Toggle(page, { label = "Show party frames", key = party.CONFIG_KEY, tip = PARTY_TIPS.show })
+    UI.Button(page, {
+        label = "Move party frames", tip = PARTY_TIPS.move, text = "Move",
+        onClick = function()
+            local edit = FS.LayoutEdit
+            if not (edit and edit.EnterFromConfig) then
+                Say("the layout editor is not available.")
+                return
+            end
+            edit.EnterFromConfig("unitframes")   -- refuses in combat itself and leaves this window open
+        end,
+    })
+    UI.Button(page, {
+        label = "Reset position", tip = PARTY_TIPS.reset, text = "Reset", warn = true,
+        confirm = "Put the party frames back at their default position?",
+        onClick = function()
+            local edit = FS.LayoutEdit
+            if not (edit and edit.ResetOne) then
+                Say("the layout editor is not available.")
+            elseif not FS.partyContainer then
+                Say("the party frames are not up yet.")   -- a login in combat builds them when the fight ends
+            else
+                edit.ResetOne("party")
+            end
+        end,
+    })
+end
+
 CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, build = function(page)
     UI.Header(page, "Player and target", "Hidden frames stay click-through and invisible.")
     UI.Toggle(page, { label = "Hide player frame", key = "unitFrames.hidePlayer" })
     UI.Toggle(page, { label = "Hide target frame", key = "unitFrames.hideTarget" })
+    PartyFramesGroup(page)
     UI.Header(page, "Panels")
     UI.Toggle(page, { label = "Professions panel", key = "professions.shown" })
     UI.Toggle(page, { label = "Background grid", key = "actionbars.grid" })

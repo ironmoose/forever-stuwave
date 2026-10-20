@@ -16,6 +16,11 @@ The window is a plain themed frame with a category nav and a content well. These
     its step, and takes mouse down, drag, release, wheel and click-on-track;
   * the Unit Frames page carries the Professions panel toggle (professions.shown) and the
     Background grid toggle (actionbars.grid);
+  * the Unit Frames page carries a Party frames group between Player and target and Panels: a Show
+    switch on FS.PartyFrames.CONFIG_KEY that the Gunsight master switch does not dim, Move (hands over to
+    LayoutEdit.EnterFromConfig, asking to come back to this page, LayoutEdit looked up at the click) and
+    Reset position (asks, then LayoutEdit.ResetOne("party"), guarded while the frames do not exist yet),
+    each explained by a ? tip, and the group absent without the party frames;
   * the Profiles page calls the Config API (switch, new, copy, rename, delete, reset), asks before
     anything destructive, and keeps Delete off for Default and the active profile;
   * every page is a clipped ScrollFrame: content taller than the panel gets a scroll range, the wheel and a
@@ -1181,6 +1186,162 @@ function T.the_unit_frames_page_has_the_totem_presets_group_with_one_switch_and_
     W = boot({ preWindow = unitFramesDefaults })
     W.Open("unitframes")
     no(row("Preset 1"), "a client without the presets has no row")
+end
+
+-- ---- the party frames group on the Unit Frames page (PartyFrames.lua's switch, LayoutEdit's Move and Reset) ----
+
+local PARTY_KEY = "gunsight.pieces.party"
+local function withPartyFrames()
+    unitFramesDefaults()
+    FS.Config.RegisterDefault(PARTY_KEY, true)
+    FS.PartyFrames = { CONFIG_KEY = PARTY_KEY }
+    FS.partyContainer = {}
+end
+-- LayoutEdit.lua loads after this window, so a check installs it after the boot, like the client does.
+local function stubLayoutEdit()
+    local E = { entered = {}, resets = {}, enterResult = true }
+    function E.EnterFromConfig(page) E.entered[#E.entered + 1] = page; return E.enterResult end
+    function E.ResetOne(id) E.resets[#E.resets + 1] = id; return true end
+    FS.LayoutEdit = E
+    return E
+end
+local function rowY(label) return -row(label).points[1].y end
+local function printedHas(needle) return table.concat(__printed, "\n"):find(needle, 1, true) ~= nil end
+
+function T.the_unit_frames_page_has_a_party_frames_group_between_player_and_target_and_panels()
+    local W = boot({ preWindow = withPartyFrames })
+    W.Open("unitframes")
+    local player, party, panels = headerY("PLAYER AND TARGET"), headerY("PARTY FRAMES"), headerY("PANELS")
+    yes(player and party and panels, "the three headers")
+    yes(player < party and party < panels, "the party frames group sits between the two")
+    local show, move, reset = rowY("Show party frames"), rowY("Move party frames"), rowY("Reset position")
+    yes(party < show and show < move and move < reset and reset < panels, "its three rows, in order, inside the group")
+    eq(#texts(row("Show party frames")), 3, "the switch row: label, state and the ? icon, no helper line")
+    eq(#texts(row("Move party frames")), 3, "the Move row: label, button and the ? icon")
+    eq(#texts(row("Reset position")), 3, "the Reset row: label, button and the ? icon")
+    yes(findText("Move", row("Move party frames")), "the button reads Move")
+    yes(findText("Reset", row("Reset position")), "the button reads Reset")
+end
+
+function T.the_party_frames_group_is_left_out_without_the_party_frames()
+    local W = boot({ preWindow = unitFramesDefaults })
+    W.Open("unitframes")
+    no(headerY("PARTY FRAMES"), "no header")
+    no(row("Show party frames"), "no switch")
+    W = boot({ preWindow = function() unitFramesDefaults(); FS.PartyFrames = {} end })
+    W.Open("unitframes")
+    no(headerY("PARTY FRAMES"), "a module with no saved key has no group")
+    W = boot({ preWindow = withPartyFrames })
+    W.Open("gunsight")
+    no(hasText(win(), "party"), "the Gunsight HUD page says nothing about them")
+end
+
+function T.the_party_frames_switch_is_their_own_key_and_the_gunsight_master_switch_does_not_dim_it()
+    local W = boot({ preWindow = withPartyFrames })
+    W.Open("unitframes")
+    local r = row("Show party frames")
+    yes(r.control.fsChecked, "on by default")
+    press("Show party frames")
+    eq(FS.Config.Get(PARTY_KEY), false)
+    no(r.control.fsChecked)
+    FS.Config.Set(PARTY_KEY, true)
+    yes(r.control.fsChecked, "an external change shows")
+    FS.Config.Set(FS.Gunsight.CONFIG_ENABLED, false)
+    yes(r.control.enabled, "the Gunsight master switch off does not dim it")
+    yes(row("Move party frames").control.enabled and row("Reset position").control.enabled, "nor the buttons")
+    yes(press("Show party frames"), "and it still works")
+    eq(FS.Config.Get(PARTY_KEY), false)
+    eq(FS.Config.Get(FS.Gunsight.CONFIG_ENABLED), false, "the master switch is untouched")
+    FS.Config.Set(FS.Gunsight.CONFIG_ENABLED, true)
+    yes(not r.control.fsChecked and r.control.enabled, "and neither does switching the Gunsight on move it")
+end
+
+function T.every_party_frames_row_explains_itself_in_a_tip()
+    local W = boot({ preWindow = withPartyFrames })
+    W.Open("unitframes")
+    local function tipOf(label)
+        local r, found = row(label), nil
+        for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
+        return found
+    end
+    local show, move, reset = tipOf("Show party frames"), tipOf("Move party frames"), tipOf("Reset position")
+    yes(show and show:find("own switch", 1, true) and show:find("HUD on or off", 1, true),
+        "the switch says the party frames have their own switch and follow it with the HUD on or off: " .. tostring(show))
+    yes(move and move:find("Party handle", 1, true) and move:find("right-click", 1, true),
+        "Move says to drag the Party handle and right-click to reset: " .. tostring(move))
+    yes(reset and reset:find("design seat", 1, true), "Reset says where the frames go: " .. tostring(reset))
+    for _, tip in ipairs({ show, move, reset }) do
+        yes(not tip:lower():find("bot", 1, true) and not tip:find("tape", 1, true), "neutral wording: " .. tip)
+    end
+    local page
+    for _, o in ipairs(ALL) do if o.kind == "ScrollFrame" and o:IsVisible() and o.fsPageKey == "unitframes" then page = o end end
+    for _, t in ipairs(texts(page)) do
+        yes(#t <= 40 and not t:find("[^.]%.$"), "no inline help text on the page: " .. t)
+    end
+end
+
+function T.move_hands_over_to_the_layout_editor_and_asks_to_come_back_to_this_page()
+    local W = boot({ preWindow = withPartyFrames })
+    W.Open("unitframes")
+    local E = stubLayoutEdit()
+    yes(click("Move", row("Move party frames")), "Move was pressed")
+    eq(#E.entered, 1, "one hand over")
+    eq(E.entered[1], "unitframes", "DONE or Esc comes back to the Unit Frames page")
+    eq(#E.resets, 0)
+    eq(#__errors, 0)
+    E.enterResult = false                     -- the editor refused (combat, Blizzard Edit Mode): it says why itself
+    click("Move", row("Move party frames"))
+    eq(#E.entered, 2)
+    yes(win():IsShown(), "and this window is left as it was")
+end
+
+function T.move_and_reset_say_so_when_the_layout_editor_is_not_there()
+    local W = boot({ preWindow = withPartyFrames })
+    W.Open("unitframes")
+    click("Move", row("Move party frames"))
+    yes(printedHas("layout editor"), "Move says it cannot")
+    __printed = {}
+    click("Reset", row("Reset position"))
+    click("Confirm", dialog())
+    yes(printedHas("layout editor"), "and so does Reset")
+    eq(#__errors, 0)
+end
+
+function T.reset_position_asks_then_puts_only_the_party_frames_back()
+    local W = boot({ preWindow = withPartyFrames })
+    W.Open("unitframes")
+    local E = stubLayoutEdit()
+    click("Reset", row("Reset position"))
+    yes(dialog():IsVisible(), "it asks first")
+    eq(#E.resets, 0, "nothing until confirmed")
+    click("Cancel", dialog())
+    eq(#E.resets, 0)
+    click("Reset", row("Reset position"))
+    click("Confirm", dialog())
+    eq(#E.resets, 1)
+    eq(E.resets[1], "party", "the party frames only")
+    local b = owner(findText("Reset", row("Reset position")))
+    yes(b.fsWarn, "it wears the warning skin like the other resets")
+end
+
+function T.reset_position_before_the_party_frames_exist_does_nothing_and_says_so()
+    local W = boot({ preWindow = withPartyFrames })
+    FS.partyContainer = nil                   -- a login in combat: the container is built at the first regen
+    W.Open("unitframes")
+    local E = stubLayoutEdit()
+    click("Reset", row("Reset position"))
+    click("Confirm", dialog())
+    eq(#E.resets, 0, "nothing to reseat yet")
+    yes(printedHas("not up yet"), "and it says so")
+    eq(#__errors, 0)
+end
+
+function T.read_only_settings_dim_the_party_frames_switch_and_both_buttons()
+    local W = boot({ db = "junk", preWindow = withPartyFrames })
+    W.Open("unitframes")
+    no(row("Show party frames").control.enabled, "switch")
+    no(row("Move party frames").control.enabled, "Move")
+    no(row("Reset position").control.enabled, "Reset")
 end
 
 function T.the_gunsight_page_has_the_three_target_and_player_groups_in_the_mockups_order()
