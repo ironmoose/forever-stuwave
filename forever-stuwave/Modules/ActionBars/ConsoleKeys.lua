@@ -40,7 +40,8 @@
 -- PLAIN BUTTONS, NOT SECURE. They only call FS.Gunsight.SetPiece, which itself fades a piece and
 -- uses alpha only for a protected frame in combat, so a click works in combat. Click only: there
 -- are no keybinds and no number in the tooltip. They hang off `FS.Console.tab` (a plain frame that
--- shows and hides with the Console, so /fsconsole off hides the keys with it) and are seated from
+-- shows and hides with the Console, so /fsconsole off hides the keys with it, and that the Console also hides
+-- while no key is drawn) and are seated from
 -- `FS.Console.KeyRect(index, scale)`, never from a copy of the tab geometry: a change to the tab
 -- moves the keys. There are deliberately NO coloured annunciator ticks under the tab's top edge
 -- (the mockup's CN_TICK rects were dropped by design): on and off show in the ring, the glyph and
@@ -679,6 +680,11 @@ Gunsight.OnActiveChanged(function(active)
     end
 end)
 
+-- (The Console may already have drawn once with its default full count when this runs, because the geometry can
+-- arrive before the Gunsight is ready. Both land in the one login event dispatch and the count changes below in
+-- the same pass, so the default tab is replaced before anything is rendered. The count is not seeded earlier on
+-- purpose: this is the moment Gunsight.IsEnabled() is final (before the Gunsight's init it reads its default,
+-- true), and reading it sooner would depend on the order of two files' event handlers.)
 Gunsight.OnReady(function()
     gunsightReady = true
     loginEnabled = Gunsight.IsEnabled() and true or false

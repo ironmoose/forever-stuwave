@@ -981,14 +981,68 @@ end
 
 function T.zero_keys_set_before_the_first_seat_are_used_by_it()
     eq(C().root, nil, "no chassis was built: saved off")
+    local heard = {}
+    C().OnTabChanged(function(h) heard[#heard + 1] = h end)
     truthy(C().SetKeyCount(0), "stored before anything is built")
     SlashCmdList.FSCONSOLE("on")
     eq(C().IsDrawn(), true, "drawn after the first on")
+    eq(#heard, 0, "no tab was drawn and none was standing before: nothing to tell")
     for _, k in ipairs(TAB_PIECES) do eq(C().parts[k]:IsShown(), false, k .. " hidden on the first draw") end
     eq(C().tab:IsShown(), false, "tab frame hidden on the first draw")
     near(D(C().parts.lineTop).r, chassisDesign() - 1, "top line runs to the right edge on the first draw")
     truthy(C().SetKeyCount(8))
     for _, k in ipairs(TAB_PIECES) do eq(C().parts[k]:IsShown(), true, k .. " shown once keys come") end
+    eq(#heard, 1, "the tab arriving is heard once"); near(heard[1], M.TH, "with its height")
+end
+
+-- ---- the tab height, and the notice when it changes ---------------------------------------
+-- Dependents (the cast bars lift above the tallest tab standing on the Console) read TabHeight() and re-place
+-- when OnTabChanged fires: the height of the key tab above the chassis top line in design px, 0 with no tab
+-- or no chassis drawn.
+function T.tab_height_is_the_standing_tab_and_zero_with_no_tab_or_no_chassis()
+    near(C().TabHeight(), M.TH, "the key tab stands: its height")
+    C().SetKeyCount(0); near(C().TabHeight(), 0, "no keys, no tab")
+    C().SetKeyCount(5); near(C().TabHeight(), M.TH, "the height does not depend on the count")
+    SlashCmdList.FSCONSOLE("off"); near(C().TabHeight(), 0, "the Console is off: nothing stands")
+    SlashCmdList.FSCONSOLE("on"); near(C().TabHeight(), M.TH, "and back")
+end
+
+function T.tab_listeners_hear_a_change_of_the_tab_height_and_nothing_else()
+    local heard = {}
+    C().OnTabChanged(function(h) heard[#heard + 1] = h end)
+    C().SetKeyCount(6); C().SetKeyCount(4)
+    eq(#heard, 0, "a narrower tab is the same height")
+    C().SetKeyCount(0)
+    eq(#heard, 1, "the tab goes"); near(heard[1], 0, "to no height")
+    C().SetKeyCount(0)
+    eq(#heard, 1, "the same count again says nothing")
+    C().SetKeyCount(3)
+    eq(#heard, 2, "the tab comes back"); near(heard[2], M.TH, "at its height")
+    __rescale(__scale == 1 and 1 / 1.2 or 1)
+    eq(#heard, 2, "a rescale changes no design px height")
+    C().SetKeyCount(0)
+    __combat = true
+    eq(C().SetKeyCount(5), false, "refused in combat")
+    __combat = false
+    eq(#heard, 3, "a refused count tells nothing (the one call here is the tab going)")
+    SlashCmdList.FSCONSOLE("off")
+    eq(#heard, 3, "the tab was already gone: still no height to lose")
+    C().SetKeyCount(5)
+    SlashCmdList.FSCONSOLE("on")
+    eq(#heard, 4, "the Console on again with a tab"); near(heard[4], M.TH, "at its height")
+    SlashCmdList.FSCONSOLE("off")
+    eq(#heard, 5, "the Console off takes the standing tab with it"); near(heard[5], 0, "to no height")
+end
+
+function T.a_failing_tab_listener_does_not_stop_the_others_or_the_seat()
+    C().OnTabChanged(function() error("boom") end)
+    local got
+    C().OnTabChanged(function(h) got = h end)
+    C().OnTabChanged(nil)
+    C().OnTabChanged("not a function")
+    truthy(C().SetKeyCount(0), "the count is accepted")
+    near(got, 0, "the next listener still hears it")
+    eq(C().parts.foot:IsShown(), false, "and the tab is down")
 end
 
 -- ---- key gap rule -----------------------------------------------------------------------

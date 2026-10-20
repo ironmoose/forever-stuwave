@@ -6,14 +6,14 @@
 -- buttons, cut 14 at the TOP-LEFT and BOTTOM-RIGHT, with a stepped shoulder tab on top
 -- of the right half that holds the 8 HUD keys (a later lane seats them on `FS.Console.tab`,
 -- inside `FS.Console.keyArea`). No recess plate behind the buttons. With no keys shown
--- (SetKeyCount(0)) there is no tab: see NO TAB.
+-- (SetKeyCount(0)) there is no tab, `FS.Console.tab` is hidden and `keyArea` is nil: see NO TAB.
 --
 -- UNITS. Everything drawn is written in DESIGN px (2560 x 1440), on `Console.art`, a
 -- child frame scaled by FS.Layout.Scale(): one unit there is one design px, which is one
 -- physical pixel at 1440p, so a 1 texel line is a 1 pixel line and the baked textures
 -- (made at 1 texel = 1 design px) land at their native size. Nine-slice margins and the
 -- tab foot's 59.2 x 50.2 box therefore need no conversion. `root` and `tab` are plain UI
--- unit frames (what a key lane wants to parent to); `keyArea` is in UI units.
+-- unit frames (what a key lane wants to parent to); `keyArea` is in UI units (nil while no tab is drawn).
 --
 -- WHY IT IS NOT PARENTED TO THE STACK. FSActionBarStack parents secure buttons, so it is
 -- protected implicitly and nothing parented to it may change in combat. The Console hangs
@@ -39,7 +39,8 @@
 -- pieces: the shoulder pieces (foot rail, tab top line, wedge, tab fill, tab top halo) and the key lane's frame
 -- are hidden, and the chassis top line, the top halo and the right edge run to the top right corner the way
 -- the left edge runs to the bottom left (`layout.th` is then 0, the value another module reads to know how
--- tall a tab stands above the top line). Any count from 1 on is the tab as it always was.
+-- tall a tab stands above the top line, which TabHeight() and OnTabChanged() publish). Any count from 1 on is
+-- the tab as it always was.
 --
 -- OFF SWITCH. `/fsconsole on|off`, saved in ForeverSTUwaveDB.consoleEnabled (default
 -- on). Off hides this frame and ActionBars.lua brings the per-pill chrome and the 6 unit
@@ -242,6 +243,32 @@ local function Degrade(key, err)
     end
 end
 
+-- The key tab's height above the chassis top line in design px, 0 with no tab or while the chassis is not
+-- drawn. Other modules lift what they stand above the Console by it (the cast bars), so they read it here and
+-- re-place when OnTabChanged tells them it changed. It changes only when a re-seat or a hide changes whether a
+-- tab stands: a rescale or a different key count leaves it alone, so the notice does not fire for them.
+local tabListeners = {}
+local tellTab = 0   -- the height the listeners were last told (or started with)
+function Console.TabHeight()
+    return (drawn and Console.layout and Console.layout.th) or 0
+end
+
+-- fn(height) runs after the Console changes the height TabHeight() reports, with the new height (not for
+-- the state at registration: read TabHeight() once). Out of combat only, like every Console re-seat.
+function Console.OnTabChanged(fn)
+    if type(fn) == "function" then tabListeners[#tabListeners + 1] = fn end
+end
+
+local function NotifyTab()
+    local h = Console.TabHeight()
+    if h == tellTab then return end
+    tellTab = h
+    for _, fn in ipairs(tabListeners) do
+        local ok, err = pcall(fn, h)
+        if not ok then Degrade("tab_listener", err) end
+    end
+end
+
 local function NewTex(layer, sub)
     return art:CreateTexture(nil, layer, nil, sub)
 end
@@ -429,8 +456,9 @@ local function SeatHalo(L)
     Place(parts.haloBL, -GP, H - cut, GM, GM);             Uv(parts.haloBL, 0, GM / TEXN, block1, 1)
     -- straight runs: left, the chassis top up to the foot texture, the tab top from the foot stub on, right, bottom
     Place(parts.haloLeft, -GP, cut, GP, H - 2 * cut);      Uv(parts.haloLeft, 0, GP / TEXN, mid0, mid1)
-    -- (the pet dock gap splits the top run in two: [cut, hx0] and [hx1, tx - FOOT_PAD], the halo's own pair, which
-    -- is the line's pair unless SetDockGap was given another)
+    -- (the pet dock gap splits the top run in two: [cut, hx0] and [hx1, L.haloEnd], the halo's own pair, which
+    -- is the line's pair unless SetDockGap was given another; L.haloEnd is the foot texture's start, tx - FOOT_PAD,
+    -- or W - cut with no tab)
     PlaceRun(parts.haloTop, cut, -GP, (gap and gap.x0 or footStart) - cut, GP)
     Uv(parts.haloTop, mid0, mid1, 0, GP / TEXN)
     PlaceRun(parts.haloTop2, gap and gap.x1 or footStart, -GP, gap and footStart - gap.x1 or 0, GP)
@@ -623,7 +651,7 @@ end
 
 -- ActionBars.lua publishes geometry after every re-seat, always out of combat.
 local seatedG   -- the geometry the chassis is drawn from right now, nil while nothing is drawn
-local function OnGeometry(g)
+local function ApplyGeometry(g)
     if buildFailed then
         drawn = false
         seatedG = nil
@@ -666,6 +694,11 @@ local function OnGeometry(g)
     root:Show()
 end
 
+local function OnGeometry(g)
+    ApplyGeometry(g)
+    NotifyTab()
+end
+
 -- Sizes the shoulder tab for `n` shown HUD keys (0 to KEY.COUNT, clamped): the tab box is the left
 -- inset plus the keys at the even pitch plus the 15 right padding, and the whole slanted shoulder
 -- (halo, fill, wedge, foot rail, outline) re-seats on that edge. 0 keys draw no tab at all (NO TAB, above).
@@ -681,6 +714,7 @@ function Console.SetKeyCount(n)
     if built and seatedG then
         local ok, err = pcall(Seat, seatedG)
         if not ok then Degrade("seat_keys", err) end
+        NotifyTab()
     end
     return true
 end
