@@ -5,9 +5,11 @@ Runs the real addons/forever-stuwave/Bags.lua under lupa against a small mock Wo
 the Blizzard structures the file touches, the way the 12.1 FrameXML builds them (corroborating only; the
 target client is 16001):
 
-  * an item slot is an ItemButton: `icon`, `Count`, `IconBorder` (quality), `IconOverlay`, `NewItemTexture`,
-    `flash`, `UpgradeIcon`, `JunkIcon`, `searchOverlay`, ... and the button's own NormalTexture
-    (Interface\\Buttons\\UI-Quickslot2, the square slot frame), Pushed/Highlight textures;
+  * an item slot is an ItemButton: `icon`, `Count`, `IconBorder` (Interface\\Common\\WhiteIconFrame, shown and tinted by
+    SetItemButtonQuality for every Common-and-up item), `IconOverlay`, `NewItemTexture`, `flash`, `UpgradeIcon`,
+    `JunkIcon`, `searchOverlay`, ... and the button's own NormalTexture (Interface\\Buttons\\UI-Quickslot2, the
+    square slot frame), Pushed/Highlight textures; ItemButtonMixin:SetAlpha writes alpha through to the icon and the
+    IconBorder (Blizzard_ItemButton/Shared/ItemButtonTemplate.lua);
   * an EMPTY container slot has no background region of its own: SetItemButtonTexture(nil) points the ICON at
     the `bags-item-slot64` atlas (the brown winged slot), so that is what the empty-slot hook must clear;
   * a combined-bags slot makes `ItemSlotBackground` (UI-Bag-Components) inside Initialize, AFTER the first skin;
@@ -24,11 +26,14 @@ target client is 16001):
 
 What it pins:
 
-  * item slots: Blizzard's normal texture, the combined-bags background, the bank background and the empty-slot
-    icon art are hidden after the skin AND stay hidden after Blizzard re-shows them (alpha write, a region
-    created later); a region whose hook install failed is retried on the next pass; a filled slot keeps its icon;
-  * the quality IconBorder (and IconOverlay, NewItemTexture, flash, UpgradeIcon, JunkIcon, search overlay,
-    pushed and highlight textures, ExtendedSlot) is never hooked, hidden or recoloured by us;
+  * item slots: Blizzard's normal texture, the combined-bags background, the bank background, the empty-slot
+    icon art and the quality IconBorder (the square rounded frame a FILLED slot wears) are hidden after the skin
+    AND stay hidden after Blizzard re-shows them (alpha write, a region created later, a repaint that re-shows and
+    re-tints the border, ItemButtonMixin:SetAlpha); a region whose hook install failed is retried on the next
+    pass; a filled slot keeps its icon; Blizzard's shown state and colour of the IconBorder are left alone (only
+    its alpha is held);
+  * IconOverlay, NewItemTexture, flash, UpgradeIcon, JunkIcon, IconQuestTexture, search overlay, pushed and
+    highlight textures, ExtendedSlot are never hooked, hidden or recoloured by us;
   * our plate (cut2 button texture, BACKGROUND -8) and border (SkinCutButton) exist once per button across
     repeated UpdateItems; an empty slot shows only the plate and the ring; hooks are installed once;
   * the money line (container, combined bags, bank) follows DataBar.lua's GOLD segment: same coin colours, dot
@@ -322,6 +327,13 @@ function BlizzardPaint(b, info)
     else
         b.IconBorder:Hide()
     end
+end
+
+-- ItemButtonMixin:SetAlpha (Blizzard_ItemButton/Shared/ItemButtonTemplate.lua): a button alpha write goes to its
+-- icon and to the IconBorder as a plain region SetAlpha, whatever alpha we are holding there.
+function BlizzardButtonAlpha(b, a)
+    b.icon:SetAlpha(a)
+    b.IconBorder:SetAlpha(a)
 end
 
 -- Blizzard re-sets the slot art outside any of our hooks' control.
@@ -646,19 +658,58 @@ def check_art() -> None:
     check("art.no_degrade_logs", w.degrade() == "", w.degrade())
 
 
+def check_icon_border() -> None:
+    # A filled slot wears Blizzard's IconBorder (WhiteIconFrame, 37 x 37, tinted by quality for Common and up): a square
+    # rounded frame whose corners poke past the cut corners of our ring. It is held at alpha 0 like the other slot art.
+    # Only the alpha is ours: Blizzard keeps the shown state, the colour and the texture.
+    w = World()
+    w.run("comb:UpdateItems()")          # the combined window is painted after the load in this mock; the others before it
+    filled = ["c1.Items[1]", "c1.Items[3]", "comb.Items[1]", "comb.Items[3]", "bank.pool[1]"]
+    every = " and ".join(f"not Visible({b}.IconBorder)" for b in filled)
+    check("border.hidden_on_every_filled_slot_after_the_skin", w.ev(every), "; ".join(tags(w, b) for b in filled))
+    check("border.blizzards_shown_state_and_colour_are_untouched",
+          w.ev("c1.Items[1].IconBorder:IsShown() and not c1.Items[2].IconBorder:IsShown() and bank.pool[1].IconBorder:IsShown()"))
+    r, g, b = (float(v) for v in w.ev("(function() local r, g, b = c1.Items[1].IconBorder:GetVertexColor(); return {r, g, b} end)()").values())
+    check("border.blizzards_colour_is_untouched", near(r, 0.1) and near(g, 0.9) and near(b, 0.2), f"{r},{g},{b}")
+    check("border.blizzards_texture_is_untouched", w.ev("c1.Items[1].IconBorder:GetTexture() == 'Interface\\\\Common\\\\WhiteIconFrame'"))
+    check("border.empty_slot_has_none_either", w.ev("not Visible(c1.Items[2].IconBorder) and not Visible(comb.Items[2].IconBorder)"))
+
+    # Blizzard repaints every slot: border re-shown and re-tinted, then the button alpha written through
+    w.run("c1.infos[1].quality = { 0.64, 0.21, 0.93 }; c1:UpdateItems(); comb:UpdateItems(); bank.RefreshAllItemsForSelectedTab(bank)")
+    check("border.stays_hidden_after_blizzard_repaints_and_retints_it", w.ev(every), "; ".join(tags(w, b) for b in filled))
+    check("border.repaint_still_owns_the_colour_and_shown_state",
+          w.ev("c1.Items[1].IconBorder:IsShown() and select(1, c1.Items[1].IconBorder:GetVertexColor()) == 0.64"))
+    w.run("for _, expr in ipairs({ c1.Items[1], comb.Items[1], bank.pool[1] }) do BlizzardButtonAlpha(expr, 1) end")
+    check("border.stays_hidden_after_the_button_alpha_write", w.ev(every), "; ".join(tags(w, b) for b in filled))
+    w.run("BlizzardButtonAlpha(c1.Items[1], 0.5)")
+    check("border.the_icon_alpha_stays_blizzards", w.ev("c1.Items[1].icon:GetAlpha() == 0.5 and not Visible(c1.Items[1].IconBorder)"))
+
+    # an item arriving in an empty slot, then a Blizzard reset of the slot art: still icon, plate and ring only
+    w.run("c1.infos[2] = { icon = 136, quality = { 1, 1, 1 } }; c1:UpdateItems(); BlizzardReset(c1.Items[2])")
+    check("border.item_arriving_in_an_empty_slot_shows_no_border", tags(w, "c1.Items[2]") == "icon,plate,ring", tags(w, "c1.Items[2]"))
+    w.run("bank.infos[2] = { icon = 137, quality = { 0, 0.44, 0.87 } }; bank.RefreshAllItemsForSelectedTab(bank)")
+    check("border.item_arriving_in_an_empty_bank_slot_shows_no_border", tags(w, "bank.pool[2]") == "icon,plate,ring", tags(w, "bank.pool[2]"))
+
+    # one hook, only on the alpha: Show / SetShown / SetVertexColor / SetTexture / SetAtlas are Blizzard's alone
+    for _ in range(3):
+        w.run("c1:UpdateItems(); comb:UpdateItems(); bank.RefreshAllItemsForSelectedTab(bank)")
+    check("border.alpha_hooked_once", w.ev("HookCount(c1.Items[1].IconBorder, 'SetAlpha') == 1 and HookCount(bank.pool[1].IconBorder, 'SetAlpha') == 1"),
+          str(w.ev("HookCount(c1.Items[1].IconBorder, 'SetAlpha')")))
+    check("border.nothing_else_on_it_is_hooked",
+          w.ev("(function() for _, m in ipairs({ 'Show', 'Hide', 'SetShown', 'SetVertexColor', 'SetTexture', 'SetAtlas' }) do "
+               "if HookCount(c1.Items[1].IconBorder, m) ~= 0 then return false end end return true end)()"))
+    check("border.nothing_swallowed", w.swallowed() == "", w.swallowed())
+    check("border.no_degrade_logs", w.degrade() == "", w.degrade())
+
+
 def check_untouched() -> None:
     w = World()
     w.run("c1:UpdateItems(); for _, b in ipairs(c1.Items) do BlizzardReset(b) end; c1:UpdateItems()")
-    keep = ["IconBorder", "IconOverlay", "IconOverlay2", "NewItemTexture", "BattlepayItemTexture", "flash", "UpgradeIcon",
+    keep = ["IconOverlay", "IconOverlay2", "NewItemTexture", "BattlepayItemTexture", "flash", "UpgradeIcon",
             "JunkIcon", "IconQuestTexture", "searchOverlay", "ItemContextOverlay", "PushedTexture", "HighlightTexture",
             "ExtendedSlot", "Count"]
     hooked = [field for field in keep if w.ev(f"TouchedByUs(c1.Items[1].{field})")]
     check("keep.no_hook_on_any_untouched_region", not hooked, "hooked by us: " + ", ".join(hooked))
-    # the quality border keeps Blizzard's own colour and shown state for a filled slot and an empty one
-    r, g, b = (float(v) for v in w.ev("(function() local x = c1.Items[1].IconBorder; local r, g, b = x:GetVertexColor(); return {r, g, b} end)()").values())
-    check("keep.icon_border_colour_is_blizzards", near(r, 0.1) and near(g, 0.9) and near(b, 0.2), f"{r},{g},{b}")
-    check("keep.icon_border_shown_for_a_filled_slot_only", w.ev("c1.Items[1].IconBorder:IsShown() and not c1.Items[2].IconBorder:IsShown()"))
-    check("keep.icon_border_alpha_untouched", w.ev("c1.Items[1].IconBorder:GetAlpha() == 1"))
     check("keep.new_item_glow_alpha_left_to_blizzard", w.ev("c1.Items[1].NewItemTexture:GetAlpha() == 0 and c1.Items[1].flash:GetAlpha() == 0"))
     w.run("c1.Items[1].NewItemTexture:SetAlpha(0.7)")
     check("keep.new_item_glow_alpha_write_is_not_reverted", w.ev("c1.Items[1].NewItemTexture:GetAlpha() == 0.7"))
@@ -699,8 +750,9 @@ def check_plate_and_border() -> None:
     check("plate.empty_bank_slot_shows_only_plate_and_ring", tags(w, "bank.pool[2]") == "plate,ring", tags(w, "bank.pool[2]"))
     w.run("comb.Items[2]:SetItemButtonTexture(nil); comb:UpdateItems()")
     check("plate.empty_combined_slot_shows_only_plate_and_ring", tags(w, "comb.Items[2]") == "plate,ring", tags(w, "comb.Items[2]"))
-    # a filled slot: icon (the item) on top of the plate, and the quality border is Blizzard's, shown
-    check("plate.filled_slot_has_icon_plate_ring_and_the_quality_border", tags(w, "c1.Items[1]") == "IconBorder,icon,plate,ring", tags(w, "c1.Items[1]"))
+    # a filled slot: the icon (the item) on top of the plate, our ring, and no Blizzard border at all
+    check("plate.filled_slot_has_only_icon_plate_and_ring", tags(w, "c1.Items[1]") == "icon,plate,ring", tags(w, "c1.Items[1]"))
+    check("plate.filled_bank_slot_has_only_icon_plate_and_ring", tags(w, "bank.pool[1]") == "icon,plate,ring", tags(w, "bank.pool[1]"))
     check("plate.nothing_swallowed", w.swallowed() == "", w.swallowed())
     check("plate.no_degrade_logs", w.degrade() == "", w.degrade())
 
@@ -1052,6 +1104,7 @@ def check_bag_highlight() -> None:
 def main() -> int:
     db = databar_money()
     check_art()
+    check_icon_border()
     check_untouched()
     check_plate_and_border()
     check_hold_retry()

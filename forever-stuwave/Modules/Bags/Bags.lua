@@ -63,6 +63,22 @@ local MAX_CONTAINERS = 13 -- historical NUM_CONTAINER_FRAMES ceiling; loop skips
 -- alpha 0 and the icon is cleared when an empty-slot atlas lands on it (the
 -- plate under it is what then shows).
 --
+-- A FILLED slot wears one more piece of Blizzard art, the button's `IconBorder`:
+-- UpdateItems and BankPanelItemButtonMixin:Refresh call SetItemButtonQuality, which
+-- shows it with Interface\Common\WhiteIconFrame (a square frame with rounded corners)
+-- and tints it by quality (SetItemButtonBorder, SetItemButtonBorderVertexColor) for
+-- every quality in BAG_ITEM_QUALITY_COLORS, Common (grey) included
+-- (Blizzard_ItemButton/Mainline/ItemButtonTemplate.lua, Blizzard_Colors/Mainline/
+-- ColorConstants.lua, 12.1 source). An empty slot gets no border, which is why only slots
+-- holding an item still showed Blizzard's frame, its rounded corners reaching past the cut
+-- corners of our ring. So it is held at alpha 0 with the rest. Blizzard drives it with
+-- Show/Hide, SetTexture and SetVertexColor, none of which touch alpha, so its shown state,
+-- texture and colour stay Blizzard's; the one alpha write is ItemButtonMixin:SetAlpha
+-- (Blizzard_ItemButton/Shared/ItemButtonTemplate.lua), which writes a button's alpha
+-- through to the IconBorder, and the SetAlpha hook below re-zeros it. The quality colour is
+-- therefore not drawn on an item slot; a treatment of our own for it is a design decision
+-- that is not made here (the bag bar tints its edge for Uncommon and up, BagBar.lua).
+--
 -- What re-shows this art is a NEW region, not a write to a held one: the button's
 -- SetNormalTexture/SetNormalAtlas can build a fresh normal texture (the money
 -- buttons do after ClearNormalTexture) and Initialize builds `ItemSlotBackground`,
@@ -70,14 +86,15 @@ local MAX_CONTAINERS = 13 -- historical NUM_CONTAINER_FRAMES ceiling; loop skips
 -- exists now. A held region also gets a post-hook on its own SetAlpha that writes
 -- 0 again (MicroBars.lua's recipe: a per-REGION guard against our own write
 -- re-entering the hook, a weak-keyed table so nothing is kept alive): the 12.1
--- ContainerFrame/BankFrame/ItemButton source never writes alpha on these regions,
--- so that hook is only a guard against another writer. SetAtlas and SetTexture on
+-- ContainerFrame/BankFrame/ItemButton source writes alpha on none of these regions
+-- but the IconBorder (ItemButtonMixin:SetAlpha), so for the rest that hook is only a
+-- guard against another writer. SetAtlas and SetTexture on
 -- an existing region leave its alpha alone (Blizzard re-points the bank
 -- `Background` with SetAtlas, UpdateBackgroundForBankType), so they are not hooked.
 --
--- Deliberately NOT touched: IconBorder (the quality border and its colour),
--- IconOverlay/IconOverlay2, NewItemTexture/BattlepayItemTexture/flash (new-item
--- glows), UpgradeIcon, JunkIcon, IconQuestTexture, searchOverlay,
+-- Deliberately NOT touched: IconOverlay/IconOverlay2, NewItemTexture/
+-- BattlepayItemTexture/flash (new-item glows), UpgradeIcon, JunkIcon,
+-- IconQuestTexture, searchOverlay,
 -- ItemContextOverlay, Cooldown, Count, the lock/desaturate state, the pushed and
 -- highlight textures (interaction feedback) and ExtendedSlot (the
 -- locked-until-secured marker, ContainerFrameItemButtonMixin:UpdateExtended).
@@ -85,7 +102,7 @@ local held = setmetatable({}, { __mode = "k" })      -- region -> zeroed and its
 local zeroing = setmetatable({}, { __mode = "k" })   -- region -> our own write is in flight
 local clearing = setmetatable({}, { __mode = "k" })  -- icon -> our own clear is in flight
 
-local ART_FIELDS = { "NormalTexture", "ItemSlotBackground", "Background" }
+local ART_FIELDS = { "NormalTexture", "ItemSlotBackground", "Background", "IconBorder" }
 local ART_SETTERS = { "SetNormalTexture", "SetNormalAtlas", "Initialize" }
 local EMPTY_SLOT_ATLASES = { ["bags-item-slot64"] = true, ["warband-bank-slot"] = true }
 
@@ -213,18 +230,17 @@ end
 -- BankItemButtonTemplate) is `<ItemButton mixin="...">`, not a bespoke
 -- Button. `.IconBorder` (the quality border, vertex-colored per-item by the
 -- shared `SetItemButtonQuality`, called from both UpdateItems and
--- BankPanelItemButtonMixin:Refresh) is deliberately left untouched: it IS the
--- quality signal, and our ring (Theme.SkinCutButton) is a separate OVERLAY
--- layer, never a replacement. The slot art sweep runs on EVERY pass (it only
--- does work for a region it has not held yet), because a combined-bag slot
+-- BankPanelItemButtonMixin:Refresh) is slot art too and is held hidden with the
+-- rest (see above); our ring (Theme.SkinCutButton) is a separate OVERLAY layer
+-- and the only border a slot wears. The slot art sweep runs on EVERY pass (it
+-- only does work for a region it has not held yet), because a combined-bag slot
 -- makes its ItemSlotBackground after our first pass.
 --
 -- The icon is NOT inset to the cut ring (FrameHelpers.SeatCutIcon is not
 -- used), same decision as Loot.lua: icons are not inset to the cut ring. The icon
--- is a Blizzard region and the square IconBorder (37 x 37, centred) and
+-- is a Blizzard region and the square IconQuestTexture (37 x 38) and
 -- NewItemTexture over it would poke past the ring anyway, so moving only the icon
--- would detach the quality border from the item by the inset instead of fixing
--- the corners.
+-- would detach them from the item by the inset instead of fixing the corners.
 local function SkinItemButton(button)
     if not button then return end
     SweepSlotArt(button)
