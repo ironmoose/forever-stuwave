@@ -50,7 +50,7 @@ local dragging = nil
 local handles = {}
 local overlay = nil
 local donePanel = nil
-local returnToConfig = false
+local returnToConfig = false   -- the config page DONE or Esc reopens, when the config window started the edit
 local pageRegistered = false
 local blizzardHooked = false
 
@@ -539,12 +539,26 @@ function LayoutEdit.Exit()
     Say("layout editor off")
 end
 
--- DONE and Esc: leave, and go back to the Layout page when the config button started the edit.
+-- Closes the config window and opens the editor, out of combat only (a refusal leaves the window open and says why).
+-- DONE or Esc then reopens the page named here, the Layout page by default. The Layout page's button and any other page
+-- with its own Move button start here, so the way back is one rule. Entering while already editing arms nothing.
+function LayoutEdit.EnterFromConfig(pageKey)
+    if RefuseInCombat() then return false end
+    local window = FS.ConfigWindow
+    if type(window) == "table" and type(window.Close) == "function" then window.Close() end
+    local was = editing
+    local entered = LayoutEdit.Enter() == true
+    returnToConfig = entered and not was and (pageKey or PAGE_KEY) or false
+    return entered
+end
+
+-- DONE and Esc: leave, and go back to the page that started the edit from the config window.
 function LayoutEdit.Done()
-    local reopen = returnToConfig and editing and not InCombatLockdown()
+    local page = returnToConfig
+    local reopen = page and editing and not InCombatLockdown()
     LayoutEdit.Exit()
     local window = FS.ConfigWindow
-    if reopen and type(window) == "table" and type(window.Open) == "function" then window.Open(PAGE_KEY) end
+    if reopen and type(window) == "table" and type(window.Open) == "function" then window.Open(page) end
 end
 
 function LayoutEdit.Toggle()
@@ -603,12 +617,7 @@ local function BuildPage(content)
         UI.Button(content, {
             text = "EDIT LAYOUT",
             big = true,
-            onClick = function()
-                if RefuseInCombat() then return end
-                if FS.ConfigWindow.Close then FS.ConfigWindow.Close() end
-                local was = editing
-                returnToConfig = LayoutEdit.Enter() == true and not was
-            end,
+            onClick = function() LayoutEdit.EnterFromConfig(PAGE_KEY) end,
         })
     end
     if UI.Header then UI.Header(content, "Snapping") end

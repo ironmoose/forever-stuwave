@@ -14,8 +14,9 @@ These checks pin that:
   * snap, grid size, arrow and Shift+arrow nudges, Esc, right-click reset and reset all;
   * pet, chat and minimap special cases;
   * the Layout page registers when FS.ConfigWindow exists and is skipped cleanly when not;
-  * a DONE panel shows only while editing, and DONE or Esc reopens the Layout page when the
-    editor was entered from the config window, never after /fsedit, combat or Blizzard Edit Mode.
+  * a DONE panel shows only while editing, and DONE or Esc reopens the page that started the editor
+    from the config window (the Layout page's button, or another page through EnterFromConfig),
+    never after /fsedit, combat or Blizzard Edit Mode.
 
 The three Lua files are the real ones; the frames are a recording mock with a tiny anchor
 solver, NOT the real client. Keyboard propagation is a recorded call, not client behaviour.
@@ -1268,6 +1269,63 @@ function T.a_refused_entry_from_config_does_not_arm_the_return()
     SlashCmdList.FSEDIT("")
     clickDone()
     eq(#FS.ConfigWindow.opened, 0)
+end
+
+-- ---- another page of the config window starts the editor too (EnterFromConfig) ----
+
+function T.another_page_enters_the_editor_and_done_and_esc_bring_that_page_back()
+    FS.ConfigWindow = fakeWindow()
+    edit(); seat("stance")
+    local order = {}
+    local close = FS.ConfigWindow.Close
+    FS.ConfigWindow.Close = function() order[#order + 1] = "close"; return close() end
+    local enter = FS.LayoutEdit.Enter
+    FS.LayoutEdit.Enter = function() order[#order + 1] = "enter"; return enter() end
+    eq(FS.LayoutEdit.EnterFromConfig("unitframes"), true)
+    eq(table.concat(order, ","), "close,enter", "the window closes, then the editor opens")
+    eq(FS.LayoutEdit.IsEditing(), true)
+    eq(#FS.ConfigWindow.opened, 0, "settings stay closed while editing")
+    clickDone()
+    eq(FS.ConfigWindow.opened[1], "unitframes", "DONE reopens the page that started it")
+    eq(FS.LayoutEdit.EnterFromConfig("unitframes"), true)
+    key("ESCAPE")
+    eq(FS.ConfigWindow.opened[2], "unitframes", "and so does Esc")
+    eq(FS.LayoutEdit.EnterFromConfig(), true)
+    clickDone()
+    eq(FS.ConfigWindow.opened[3], "layout", "no page named: the Layout page")
+end
+
+function T.entering_from_another_page_in_combat_keeps_the_window_open_and_says_why()
+    FS.ConfigWindow = fakeWindow()
+    edit(); seat("stance")
+    __combat = true
+    eq(FS.LayoutEdit.EnterFromConfig("unitframes"), false)
+    eq(FS.ConfigWindow.closed, 0, "the window stays open")
+    eq(FS.LayoutEdit.IsEditing(), false)
+    eq(__printedHas("combat"), true, "and says why")
+    __combat = false
+    SlashCmdList.FSEDIT("")
+    clickDone()
+    eq(#FS.ConfigWindow.opened, 0, "a refused entry arms nothing")
+end
+
+function T.entering_from_another_page_while_already_editing_does_not_arm_the_return()
+    FS.ConfigWindow = fakeWindow()
+    edit(); seat("stance")
+    SlashCmdList.FSEDIT("")
+    eq(FS.LayoutEdit.EnterFromConfig("unitframes"), true)
+    clickDone()
+    eq(FS.LayoutEdit.IsEditing(), false)
+    eq(#FS.ConfigWindow.opened, 0)
+end
+
+function T.entering_from_a_page_with_no_config_window_still_enters()
+    edit(); seat("stance")
+    eq(FS.LayoutEdit.EnterFromConfig("unitframes"), true)
+    eq(FS.LayoutEdit.IsEditing(), true)
+    clickDone()
+    eq(FS.LayoutEdit.IsEditing(), false)
+    eq(#__errors, 0)
 end
 
 function T.leaving_without_a_config_window_is_quiet()
