@@ -17,6 +17,16 @@ clock and a stubbed screen:
     snapping), a ForeverStatusStrip frame anywhere on screen never moves the bars and is never read, the
     engine is re-laid out once per move (no loop), and a UI scale change re-places the stack and
     refits the bars;
+  * console clearance: a bar on its shipped seat is lifted over the Console art under it (chassis,
+    key tab from Console.TabHeight() (layout.th without it), the class blocks FS.ClassShoulder.EachStanding names), the lowest edge
+    including the player's name tab ends CONSOLE_CAST_GAP above the tallest piece and the 18 gap
+    between the bars is kept; no lift for a Priest-style Console with nothing standing, for art off to
+    one side, for a Console that is not drawn, or for a bar dragged with /fsedit (and a default bar
+    beside a dragged one takes its own need); the gap defaults when Layout has none, a rect that
+    cannot be read keeps the last lift, a throwing visitor never stops a cast, the read repeats at
+    each cast start, on each geometry notice and on the Console's tab notice when it has one (one
+    subscription each, at PLAYER_LOGIN), and a Gunsight
+    view bar leaves Stack A alone;
   * casts: start, succeed and lock-in (timer "0.9 / 1.5" style, " / total" muted), a natural
     channel end plays the engine's finish, a clip stops, the tick counter (by spell id, then
     name) and CUT, DELAYED never restarts the engine, mismatched castIDs and cast events during a
@@ -609,6 +619,353 @@ function T.an_engine_relayout_alone_re_places_the_stack()
     local edgePx = (UIParent._cx + W.G.frame._points.CENTER.x - W.G.frame._w / 2) * 0.64
     near(edgePx, math.floor(edgePx + 0.5), 1e-6, "on the NEW pixel grid (no second pass needed)")
     near(W.P.frame._w, W.P.run.W + 94, 1e-9, "and re-sized")
+end
+
+-- ---- console clearance ----------------------------------------------------------
+-- Stack A draws while the Gunsight HUD is off, over the Console's top edge: the class shoulders (the Shaman's totem,
+-- buff and regen tabs), the key tab and the chassis halo rise there. A bar that is still on its shipped seat is lifted
+-- to keep CONSOLE_CAST_GAP over whatever the Console art reaches under its span, read at the start of every cast.
+--
+-- A UI scale of 0.64 is the live one: UIParent 1200 units high, one design px = 1200 / 1440 units. The Console is a
+-- stand-in with the numbers the real one publishes (root's rect, layout w / h / tx / th in design px, GLOW.pad,
+-- IsDrawn); ClassShoulder only answers EachStanding. Every expected number is worked out here from design px figures
+-- (the Shaman's tabs are 49 high, the halo reaches 11, the gap is 8), never by asking CastBars.lua.
+local DS = (768 / 0.64) / 1440                   -- UI units per design px
+local PX = 1 / 0.64                              -- one physical pixel in UI units in this mock (a bar snaps to one)
+local CHASSIS_TOP = -383                         -- the chassis top line, UI units below UIParent's centre
+local CHASSIS_LEFT = -511                        -- design px from UIParent's centre
+local HALO, GAPDP, TABHANG, BARH = 11, 8, 15, 22
+-- the Shaman's three tabs with the two preset cells: dx (from the chassis left), width, height, design px
+local function shaman() return { { 36, 349.6, 49 }, { 401.6, 92.8, 49 }, { 510.4, 92.8, 49 } } end
+-- a Priest's one tab, the mana regen module, on the far left
+local function priest() return { { 36, 92.8, 49 } } end
+
+local function consoleWorld(opts)
+    opts = opts or {}
+    local dragged = {}
+    local W = world({ scale = 0.64, beforeLoad = function()
+        FS.Layout = {
+            Scale = function() return DS end,
+            CONSOLE_CAST_GAP = opts.gap or GAPDP,
+            pcast = { point = "CENTER", relPoint = "CENTER", x = 0, y = -337, w = 268, h = 22, unscaled = true, noSize = true },
+            tcast = { point = "CENTER", relPoint = "CENTER", x = 0, y = -297, w = 268, h = 22, unscaled = true, noSize = true },
+            Apply = function() end,
+            OnRescale = function() end,
+            IsOverridden = function(id) return dragged[id] == true end,
+        }
+        FS.ActionBars = opts.actionBars
+    end })
+    W.dragged = dragged
+    local ux, uy = UIParent:GetCenter()
+    local root = CreateFrame("Frame", "FSConsole", UIParent)
+    root._l, root._t = ux + CHASSIS_LEFT * DS, uy + (opts.chassisTop or CHASSIS_TOP)
+    W.root = root
+    W.shoulders = opts.shoulders or {}
+    W.drawn = true
+    W.keyTab = { w = 1022, h = 170, tx = 667.6, th = opts.th or 0 }
+    FS.Console = { root = root, layout = W.keyTab, GLOW = { pad = HALO }, IsDrawn = function() return W.drawn end,
+        OnTabChanged = opts.onTabChanged, TabHeight = opts.tabHeight }
+    FS.ClassShoulder = { EachStanding = function(fn) for _, r in ipairs(W.shoulders) do fn(r[1], r[2], r[3]) end end }
+    function W.start(unit)
+        unit = unit or "player"
+        W.cast(unit, "Healing Wave", "C1", 100, 2.5)
+        W.fire(unit == "player" and W.P or W.G, "UNIT_SPELLCAST_START")
+    end
+    -- ends whatever the player bar shows, so the next START begins a fresh cast
+    function W.end_cast()
+        __units.player.cast = nil
+        W.fire(W.P, "PLAYER_ENTERING_WORLD")
+    end
+    function W.p() return W.P.frame._points.CENTER end
+    function W.g() return W.G.frame._points.CENTER end
+    -- the player stack's lowest point, name tab included, and the target's lowest edge
+    function W.lowest() return W.p().y - BARH / 2 - TABHANG end
+    return W
+end
+
+function T.a_cast_start_lifts_the_stack_over_the_shamans_shoulders()
+    local W = consoleWorld({ shoulders = shaman() })
+    near(W.p().y, -337, PX, "before any cast the bars sit on the shipped seat"); near(W.g().y, -297, PX)
+    local top = CHASSIS_TOP + (49 + HALO) * DS                 -- the tabs and their halo
+    local lift = top + GAPDP * DS - (-337 - BARH / 2 - TABHANG)
+    ok(lift > 30, "the shipped seat is well inside the tabs: " .. lift)
+    W.start()
+    near(W.p().y, -337 + lift, PX, "the player bar is lifted until its name tab clears the tabs by the gap")
+    near(W.g().y, -297 + lift, PX, "the target bar goes with it")
+    near(W.g().y - W.p().y, 40, PX, "the 18 gap between the frames is kept")
+    ok(W.lowest() >= top + GAPDP * DS - PX, "the tab hanging under the player bar clears the tallest tab: " .. W.lowest() .. " vs " .. top)
+    near(W.p().x, 0, PX, "x is not touched"); near(W.g().x, 0, PX)
+    eq(W.P.frame._shown, true)
+    W.clean(); eq(#__degrades, 0, "no degrade logs")
+end
+
+function T.the_lift_re_lays_out_each_engine_once_and_a_second_cast_moves_nothing()
+    local W = consoleWorld({ shoulders = shaman() })
+    local a, b = W.P.run.layoutCalls, W.G.run.layoutCalls
+    W.start()
+    eq(W.P.run.layoutCalls, a + 1, "the player engine measures its origin against the new seat once")
+    eq(W.G.run.layoutCalls, b + 1, "and the target's")
+    W.end_cast(); W.start()
+    eq(W.P.run.layoutCalls, a + 1, "the same Console again: nothing moved, nothing re-laid out")
+    eq(W.G.run.layoutCalls, b + 1)
+    W.clean()
+end
+
+function T.a_stack_clear_of_the_console_art_keeps_the_shipped_seat()
+    -- a Priest's one tab stands far left of the bars, and the chassis halo is well under them
+    local W = consoleWorld({ shoulders = priest() })
+    local a = W.P.run.layoutCalls
+    W.start()
+    near(W.p().y, -337, PX); near(W.g().y, -297, PX)
+    eq(W.P.run.layoutCalls, a, "nothing moved, nothing re-laid out")
+    W.clean()
+end
+
+function T.the_chassis_halo_alone_lifts_a_stack_that_would_sit_on_it()
+    -- the action stack dragged up: the chassis top line is at -340, the halo reaches 11 design px above it
+    local W = consoleWorld({ chassisTop = -340 })
+    local lift = (-340 + HALO * DS) + GAPDP * DS - (-337 - BARH / 2 - TABHANG)
+    W.start()
+    near(W.p().y, -337 + lift, PX, "lifted over the chassis halo")
+    ok(W.lowest() >= -340 + HALO * DS + GAPDP * DS - PX, "and clear of it by the gap")
+end
+
+function T.a_console_entirely_above_the_bars_does_not_pull_them_up_to_it()
+    -- the bars' top (the target tab's top) is below the Console's bottom halo: nothing overlaps, nothing lifts
+    local W = consoleWorld({ chassisTop = -100, shoulders = shaman() })
+    W.start()
+    near(W.p().y, -337, PX); near(W.g().y, -297, PX)
+end
+
+function T.the_key_tab_counts_while_it_stands_and_not_once_it_is_gone()
+    -- no class tab: the key tab (th design px high) on the right half is the tallest thing under the bars' right end
+    local W = consoleWorld({ th = 39.2 })
+    local lift = (CHASSIS_TOP + (39.2 + HALO) * DS) + GAPDP * DS - (-337 - BARH / 2 - TABHANG)
+    ok(lift > 20, "setup: the key tab reaches the player stack: " .. lift)
+    W.start()
+    near(W.p().y, -337 + lift, PX, "lifted over the key tab")
+    W.end_cast()
+    W.keyTab.th = 0                                  -- the Console published that the tab is gone
+    W.start()
+    near(W.p().y, -337, PX, "th = 0: the key tab is gone, the bars are back on the shipped seat")
+    near(W.g().y, -297, PX)
+end
+
+function T.the_consoles_published_tab_height_is_what_counts_when_it_has_one()
+    -- Console.TabHeight() is the published figure (0 with no tab or while nothing is drawn); layout.th is
+    -- only the fallback for a Console build without it.
+    local height = 0
+    local W = consoleWorld({ th = 39.2, tabHeight = function() return height end })
+    W.start()
+    near(W.p().y, -337, PX, "TabHeight 0: no tab, whatever layout.th last held")
+    W.end_cast()
+    height = 39.2
+    W.keyTab.th = 0
+    local lift = (CHASSIS_TOP + (39.2 + HALO) * DS) + GAPDP * DS - (-337 - BARH / 2 - TABHANG)
+    W.start()
+    near(W.p().y, -337 + lift, PX, "TabHeight 39.2: the tab counts")
+    W.end_cast()
+    height = "tall"
+    W.start()
+    near(W.p().y, -337, PX, "an unusable figure counts as no tab and never throws")
+    W.clean()
+end
+
+function T.the_key_tab_off_to_the_right_of_the_bars_does_not_lift_them()
+    local W = consoleWorld({ th = 39.2 })
+    W.keyTab.tx = 900                                -- a tab standing well right of the bars' span
+    W.start()
+    near(W.p().y, -337, PX, "not under the bars, not their business")
+end
+
+function T.the_seat_is_read_again_at_every_cast_start()
+    local W = consoleWorld({ shoulders = shaman() })
+    W.start()
+    local lifted = W.p().y
+    ok(lifted > -337 + 30, "setup: lifted")
+    W.end_cast()
+    W.shoulders = priest()                           -- the preset cells went off and the tabs shrank away
+    W.start()
+    near(W.p().y, -337, PX, "the next cast finds the way clear and the bars drop back")
+    W.end_cast()
+    W.shoulders = shaman()
+    W.start()
+    near(W.p().y, lifted, PX, "and up again when the tabs return")
+end
+
+function T.the_target_bar_starting_a_cast_re_reads_the_seat_too()
+    local W = consoleWorld({ shoulders = shaman() })
+    W.start("target")
+    near(W.p().y, -337 + (CHASSIS_TOP + (49 + HALO) * DS + GAPDP * DS - (-337 - BARH / 2 - TABHANG)), PX,
+        "a target cast (a target change re-reads it) seats the whole stack")
+end
+
+function T.a_bar_the_player_dragged_stays_where_it_was_dropped()
+    local W = consoleWorld({ shoulders = shaman() })
+    W.dragged.pcast = true; W.dragged.tcast = true
+    W.start()
+    near(W.p().y, -337, PX, "an overridden player bar is not lifted"); near(W.g().y, -297, PX, "nor the target bar")
+    W.end_cast()
+    W.dragged.tcast = false                          -- only the target bar is back on its shipped seat
+    W.start()
+    near(W.p().y, -337, PX, "the dragged player bar still stays")
+    near(W.g().y, -297, PX, "the target bar's lowest edge is clear of the tabs already, so it stays too")
+end
+
+function T.a_default_bar_beside_a_dragged_one_is_lifted_by_its_own_need()
+    local W = consoleWorld({ shoulders = shaman() })
+    W.dragged.tcast = true                           -- the target bar was dragged, the player bar was not
+    W.start()
+    local lift = CHASSIS_TOP + (49 + HALO) * DS + GAPDP * DS - (-337 - BARH / 2 - TABHANG)
+    near(W.p().y, -337 + lift, PX, "the player bar clears the tabs")
+    near(W.g().y, -297, PX, "the dragged target bar did not move")
+end
+
+function T.the_stack_follows_the_consoles_geometry_notice_between_casts()
+    -- The Console and the class tabs load after this file and seat themselves from ActionBars' geometry notice:
+    -- the stack subscribes at login, once, so it is seated against what they drew (and a cast that starts in combat,
+    -- when the Console's rect may not read, has a lift read out of it).
+    local subs = {}
+    local W = consoleWorld({ shoulders = shaman(), actionBars = { OnGeometry = function(fn) subs[#subs + 1] = fn end } })
+    eq(#subs, 0, "nothing at load: the Console is not there yet")
+    __fireEvent("PLAYER_LOGIN"); __fireEvent("PLAYER_LOGIN")
+    eq(#subs, 1, "one subscription however often login fires")
+    local lifted = W.p().y
+    ok(lifted > -337 + 30, "setup: seated over the tabs at login: " .. lifted)
+    W.shoulders = priest()
+    subs[1]({})
+    near(W.p().y, -337, PX, "the notice re-seats the idle stack: the way is clear")
+    W.shoulders = shaman()
+    subs[1]({})
+    near(W.p().y, lifted, PX, "and again over the tabs")
+    W.clean()
+end
+
+function T.the_stack_follows_the_consoles_tab_height_notice_when_it_has_one()
+    -- The Console tells when its key tab appears or goes (a key count change is not a geometry notice), so a
+    -- bar on screen between casts (the idle row) is not left over a tab that just came back.
+    local told = {}
+    local W = consoleWorld({ th = 0, onTabChanged = function(fn) told[#told + 1] = fn end })
+    __fireEvent("PLAYER_LOGIN"); __fireEvent("PLAYER_LOGIN")
+    eq(#told, 1, "one subscription however often login fires")
+    local lifted = -337 + (CHASSIS_TOP + (39.2 + HALO) * DS) + GAPDP * DS - (-337 - BARH / 2 - TABHANG)
+    near(W.p().y, -337, PX, "setup: no tab, shipped seat")
+    W.keyTab.th = 39.2
+    told[1](39.2)
+    near(W.p().y, lifted, PX, "the tab came back: the idle stack rises at once")
+    W.keyTab.th = 0
+    told[1](0)
+    near(W.p().y, -337, PX, "and falls back when it goes")
+    W.clean()
+end
+
+function T.a_console_without_a_tab_notice_is_no_error_at_login()
+    local W = consoleWorld({ th = 39.2 })
+    __fireEvent("PLAYER_LOGIN")
+    W.clean(); eq(#__degrades, 0)
+end
+
+function T.an_actionbars_without_a_geometry_notice_is_no_error_at_login()
+    local W = consoleWorld({ shoulders = shaman(), actionBars = {} })
+    __fireEvent("PLAYER_LOGIN")
+    W.clean(); eq(#__degrades, 0)
+end
+
+function T.a_default_target_bar_beside_a_dragged_player_bar_is_lifted_by_its_own_need()
+    -- a chassis dragged up into the target bar: its top line is at -310, the target bar's lowest edge at -308
+    local W = consoleWorld({ chassisTop = -310 })
+    W.dragged.pcast = true
+    W.start()
+    local lift = (-310 + HALO * DS) + GAPDP * DS - (-297 - BARH / 2)
+    ok(lift > 10, "setup: the target bar is in the halo's way: " .. lift)
+    near(W.g().y, -297 + lift, PX, "the target bar clears the halo by the gap")
+    near(W.p().y, -337, PX, "and the dragged player bar did not move")
+end
+
+function T.the_target_tab_standing_on_the_bar_counts_as_part_of_the_stack()
+    -- the Console's bottom halo edge is between the target frame's top (-286) and the top of its name tab (-271)
+    local rt = -280 + (170 + HALO) * DS
+    local W = consoleWorld({ chassisTop = rt })
+    W.start()
+    ok(W.p().y > -337 + 100, "the tab reaches the Console: the stack is lifted over it: " .. W.p().y)
+    local W2 = consoleWorld({ chassisTop = rt - 30 })           -- a Console wholly below the target tab's top, under the bar
+    W2.start()
+    ok(W2.p().y > -337 + 100, "(and the same lower down)")
+end
+
+function T.the_gap_comes_from_layout_and_defaults_to_8_design_px()
+    local W = consoleWorld({ shoulders = shaman(), gap = 20 })
+    W.start()
+    local lift = CHASSIS_TOP + (49 + HALO) * DS + 20 * DS - (-337 - BARH / 2 - TABHANG)
+    near(W.p().y, -337 + lift, PX, "a wider Layout.CONSOLE_CAST_GAP lifts further")
+    W.end_cast()
+    FS.Layout.CONSOLE_CAST_GAP = nil                 -- an older Layout.lua with no such constant
+    W.start()
+    near(W.p().y, -337 + (CHASSIS_TOP + (49 + HALO) * DS + 8 * DS - (-337 - BARH / 2 - TABHANG)), PX, "8 without it")
+end
+
+function T.an_older_layout_without_isoverridden_treats_the_seat_as_shipped()
+    local W = consoleWorld({ shoulders = shaman() })
+    FS.Layout.IsOverridden = nil
+    W.start()
+    ok(W.p().y > -337 + 30, "lifted: " .. W.p().y)
+    W.clean()
+end
+
+function T.a_console_that_is_not_drawn_leaves_the_shipped_seat()
+    local W = consoleWorld({ shoulders = shaman() })
+    W.drawn = false
+    W.start()
+    near(W.p().y, -337, PX, "Console off or hidden: no art to clear")
+    W.end_cast()
+    FS.Console = nil; FS.ClassShoulder = nil          -- and a world that never had one
+    W.start()
+    near(W.p().y, -337, PX); near(W.g().y, -297, PX)
+    W.clean()
+end
+
+function T.an_unreadable_console_rect_keeps_the_last_lift_and_never_throws()
+    local W = consoleWorld({ shoulders = shaman() })
+    W.start()
+    local lifted = W.p().y
+    ok(lifted > -337 + 30, "setup: lifted")
+    W.end_cast()
+    W.root._t = __SECRET                              -- in combat a frame anchored to a secure one may read as a secret
+    W.start()
+    near(W.p().y, lifted, PX, "the rect cannot be read: the last lift stands")
+    W.end_cast()
+    W.root._t = nil                                   -- no rect at all (not laid out yet)
+    W.start()
+    near(W.p().y, lifted, PX, "no rect: the same")
+    W.end_cast()
+    W.drawn = false                                   -- a known empty Console is not an unreadable one
+    W.start()
+    near(W.p().y, -337, PX, "Console gone: back on the shipped seat")
+    W.clean(); eq(#__degrades, 0, "nothing logged")
+end
+
+function T.a_throwing_console_or_shoulder_query_never_stops_the_cast()
+    local W = consoleWorld({ shoulders = shaman() })
+    FS.ClassShoulder.EachStanding = function() error("boom") end
+    W.start()
+    eq(W.P.frame._shown, true, "the cast still shows")
+    eq(W.P.run:GetPhase(), "cast")
+    W.clean()
+end
+
+function T.a_view_bar_starting_a_cast_leaves_stack_a_alone()
+    local W = consoleWorld({ shoulders = shaman() })
+    local function viewBar()
+        local function sink() return setmetatable({}, { __index = function() return function() end end }) end
+        return { frame = CreateFrame("Frame"), run = sink(), strip = sink(), icon = sink(), shield = sink(),
+            timer = sink(), tab = sink(), tabName = sink(), tabTicks = sink() }
+    end
+    local view = { player = viewBar(), target = viewBar() }
+    ok(FS.CastBars.SetView(view), "the Gunsight takes the casts")
+    local before = W.p().y
+    W.cast("player", "Healing Wave", "C1", 100, 2.5)
+    view.player.events._scripts.OnEvent(view.player.events, "UNIT_SPELLCAST_START", "player", "C1", 1, nil)
+    near(W.p().y, before, 1e-9, "Stack A is retired: a Gunsight cast does not re-seat it")
 end
 
 -- ---- player casts --------------------------------------------------------------

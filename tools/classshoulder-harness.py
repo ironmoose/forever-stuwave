@@ -1373,6 +1373,36 @@ def check_the_file_never_calls_a_protected_method_on_a_secure_frame():
         assert needle not in text, f"ClassShoulder.lua mentions {needle}"
 
 
+def standing(lua) -> list:
+    """What EachStanding visits, as (dx, width, height) design px tuples, in the order it visits them."""
+    lua.execute("__stand = {}; FS.ClassShoulder.EachStanding(function(dx, w, h) "
+                "__stand[#__stand + 1] = { dx, w, h } end)")
+    rows = g(lua).__stand
+    return [(rows[i][1], rows[i][2], rows[i][3]) for i in range(1, len(rows) + 1)]
+
+
+def check_each_standing_names_the_shoulders_that_stand_in_design_px():
+    """The cast bars clear the Console art over their span: they ask which shoulders stand (how far in from
+    the chassis left, how wide, how tall, all design px) instead of keeping a list of the class tabs."""
+    seen = standing(boot())
+    assert len(seen) == 1, f"the Paladin's one shoulder should be named: {seen}"
+    approx(seen[0][0], DX, "Paladin dx", 0.5), approx(seen[0][1], W, "Paladin width"), approx(seen[0][2], H, "Paladin height")
+    seen = standing(warrior())
+    assert len(seen) == 1, seen
+    approx(seen[0][0], DX, "Warrior dx", 0.5), approx(seen[0][1], WR["W"], "Warrior width"), approx(seen[0][2], WR["H"], "Warrior height")
+
+
+def check_each_standing_names_nothing_while_no_shoulder_stands():
+    for klass in ("WARLOCK", "PRIEST", "MAGE", "DRUID", "ROGUE"):
+        assert standing(boot(klass=klass)) == [], f"{klass}: a shoulder was named that does not stand"
+    assert standing(boot(console=False)) == [], "no Console, no shoulder"
+    lua = boot()
+    console(lua).SetActive(False)
+    assert standing(lua) == [], "the Console went off: the shoulder is hidden and must not be named"
+    console(lua).SetActive(True)
+    assert len(standing(lua)) == 1, "and named again when it stands again"
+
+
 CHECKS = [
     check_the_chassis_look_is_read_from_the_mockup,
     check_toc_lists_classshoulder_between_petdock_and_sealbar,
@@ -1382,6 +1412,8 @@ CHECKS = [
     check_the_warrior_shoulder_takes_the_gap_in_order_and_gives_it_back,
     check_a_warrior_without_the_console_or_without_forms_has_no_shoulder,
     check_a_warrior_shoulder_is_built_once_and_kept_per_owner,
+    check_each_standing_names_the_shoulders_that_stand_in_design_px,
+    check_each_standing_names_nothing_while_no_shoulder_stands,
     check_the_warrior_halo_is_the_mockups_halo_around_a_3x1_path,
     check_the_warrior_halo_tiles_without_overlap_or_holes,
     check_a_warrior_login_in_combat_builds_the_shoulder_at_regen,

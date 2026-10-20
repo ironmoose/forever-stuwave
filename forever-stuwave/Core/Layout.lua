@@ -141,9 +141,15 @@ FS.Layout = FS.Layout or {
 -- CHAT_CLEARANCE is the gap Console.lua's halo (ActionBars narrows the stack to fit) and
 -- PetFrame's panel keep from it. CONSOLE_PET_GAP is the gap between the Console's halo top
 -- and the pet panel's bottom edge (the seat of the `petcontainer` entry above).
+-- CONSOLE_CAST_GAP is the same gap for Stack A's cast bars (the `pcast` and `tcast` entries above): the
+-- lowest edge of the player bar, its spell name tab hanging under it included, keeps this far above the top of
+-- the Console art over the span the bars cover (chassis halo, class shoulders, key tab). The entries only
+-- say where a bar sits when nothing is in the way; CastBars.lua lifts a bar that is still on its shipped seat
+-- by whatever the gap takes (see CONSOLE CLEARANCE in its header).
 FS.Layout.CHAT_CHROME_RIGHT = -549
 FS.Layout.CHAT_CLEARANCE = 12
 FS.Layout.CONSOLE_PET_GAP = 8
+FS.Layout.CONSOLE_CAST_GAP = 8
 
 -- The layout planner exports in SCREEN PIXELS at this resolution (the "resolution"
 -- field of the design mockup). WoW frames are positioned in UI units, and
@@ -489,6 +495,14 @@ function FS.Layout.ClearAllOverrides()
     for id in pairs(frames) do frames[id] = nil end
     for id in pairs(FS.Layout._defaults) do RestoreDefault(id) end
     return true
+end
+
+-- True when `id` sits off its shipped seat: a saved override (or a drag) is in force. Only an entry that
+-- has a seat can be, and one whose override equals the shipped x and y is not. A module that adjusts a
+-- seat on its own (CastBars.lua lifts Stack A over the Console) leaves an overridden one alone.
+function FS.Layout.IsOverridden(id)
+    local def, L = FS.Layout._defaults[id], SeatEntry(id)
+    return def ~= nil and L ~= nil and (L.x ~= def.x or L.y ~= def.y)
 end
 
 -- Seats every applied frame `matches` accepts. A frame held back in combat is left to the

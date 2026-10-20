@@ -626,6 +626,50 @@ function T.player_and_target_move_independently()
     eq(t._points[1].x, 500, "target stayed put")
 end
 
+-- IsOverridden: CastBars.lua lifts Stack A over the Console only while a bar sits on its shipped seat, so a
+-- seat the player dragged (/fsedit) is left exactly where it was dropped.
+function T.is_overridden_tells_a_dragged_seat_from_the_shipped_one()
+    useStore()
+    eq(FS.Layout.IsOverridden("pcast"), false, "the shipped seat")
+    eq(FS.Layout.SetOverride("pcast", 10, -300), true)
+    eq(FS.Layout.IsOverridden("pcast"), true, "a dragged seat")
+    eq(FS.Layout.IsOverridden("tcast"), false, "another id is not touched")
+    eq(FS.Layout.SetOverride("pcast", 0, -337), true)
+    eq(FS.Layout.IsOverridden("pcast"), false, "an override that equals the shipped seat moves nothing")
+    FS.Layout.SetOverride("pcast", 10, -300)
+    eq(FS.Layout.ClearOverride("pcast"), true)
+    eq(FS.Layout.IsOverridden("pcast"), false, "reset puts it back on the shipped seat")
+    FS.Layout.SetOverride("pcast", 10, -300)
+    FS.Layout.ClearAllOverrides()
+    eq(FS.Layout.IsOverridden("pcast"), false, "reset all too")
+end
+
+function T.is_overridden_is_false_for_anything_that_is_not_a_seat()
+    useStore()
+    eq(FS.Layout.IsOverridden("nope"), false, "unknown id")
+    eq(FS.Layout.IsOverridden("deck"), false, "an entry with no x and y")
+    eq(FS.Layout.IsOverridden("_applied"), false, "a helper table")
+    eq(FS.Layout.IsOverridden(nil), false)
+    eq(FS.Layout.IsOverridden(7), false)
+end
+
+function T.is_overridden_reads_the_saved_store_loaded_at_login()
+    useStore({ v = 1, frames = { pcast = { x = 11, y = -22 } } })
+    eq(FS.Layout.IsOverridden("pcast"), true, "a saved override is in force")
+    eq(FS.Layout.IsOverridden("tcast"), false)
+    FS.Layout.UseStore({ v = 2, frames = { pcast = { x = 11, y = -22 } } })
+    eq(FS.Layout.IsOverridden("pcast"), false, "a store from a newer addon is ignored, so the seat is the shipped one")
+end
+
+-- CONSOLE_CAST_GAP sits beside CONSOLE_PET_GAP: the clearance Stack A keeps over the Console art.
+function T.console_cast_gap_is_a_positive_design_px_number_beside_the_pet_gap()
+    eq(type(FS.Layout.CONSOLE_CAST_GAP), "number", "CONSOLE_CAST_GAP")
+    if not (FS.Layout.CONSOLE_CAST_GAP > 0 and FS.Layout.CONSOLE_CAST_GAP == FS.Layout.CONSOLE_CAST_GAP) then
+        error("CONSOLE_CAST_GAP must be a positive number, got " .. tostring(FS.Layout.CONSOLE_CAST_GAP))
+    end
+    eq(FS.Layout.CONSOLE_CAST_GAP, FS.Layout.CONSOLE_PET_GAP, "the same 8 design px the pet panel keeps")
+end
+
 __checks = T
 """
 

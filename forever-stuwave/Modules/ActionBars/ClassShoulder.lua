@@ -418,6 +418,17 @@ function ClassShoulder.BlockSize(key)
     return def.w * s, def.h * s, C.BTN * s
 end
 
+-- Calls fn(dx, width, height) for every shoulder standing right now, in no particular order: how far in from
+-- the chassis left, how wide and how tall the block is, all in design px (the block itself, its halo not
+-- counted); it stands on the chassis top line. Nothing is visited while the Console is not drawn. For whoever has
+-- to keep clear of the Console art without keeping a list of the class tabs (the cast bars, CastBars.lua).
+function ClassShoulder.EachStanding(fn)
+    for key, st in pairs(stands) do
+        local def = DEFS[key]
+        if st.shown and st.shoulder and def then fn(def.dx, def.w, def.h) end
+    end
+end
+
 -- The owner's seat, from the same numbers: nil while no shoulder stands (the owner then uses its own).
 function ClassShoulder.HostPoint(key)
     local st, def = Stand(key)

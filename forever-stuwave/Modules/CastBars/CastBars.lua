@@ -59,9 +59,28 @@
 -- PlaceAndRefit re-runs each run's Layout once so that nudge is measured against the new seat
 -- (never from the onLayout path, where a Layout call is dropped as nested; onLayout calls
 -- PlaceStack only). Re-placed on UI_SCALE_CHANGED, DISPLAY_SIZE_CHANGED, PLAYER_LOGIN,
--- PLAYER_ENTERING_WORLD and from either run's onLayout (which also fires when the engine's own
+-- PLAYER_ENTERING_WORLD, on every FS.ActionBars geometry notice and every FS.Console tab notice
+-- (OnTabChanged, when the Console has it; both subscribed at PLAYER_LOGIN, after the
+-- Console and the class tabs have subscribed), at the start of every cast on these two bars, and from either
+-- run's onLayout (which also fires when the engine's own
 -- scale watcher re-lays a run out after ours, so a stale pixel size is corrected there; no
 -- second next-frame pass is needed now that no other addon's frame has to settle first).
+--
+-- CONSOLE CLEARANCE. The shipped seat is the pre-Console one, which sits where the Console and the class
+-- tabs standing on its top line (Shaman totem / buff / regen tabs, Paladin seals, the key tab) now are. A bar
+-- still on its shipped seat (FS.Layout.IsOverridden false; a seat dragged with /fsedit is the player's and is
+-- never moved) is therefore lifted by the one distance that puts the lowest edge of the whole stack, the
+-- player's hanging name tab included, CONSOLE_CAST_GAP (FS.Layout, design px) above the tallest piece of
+-- Console art under the bars' span. The art is read, not assumed: the chassis top line and size from
+-- FS.Console.root / .layout, the key tab from Console.TabHeight() (0 once it is gone, as with the Gunsight
+-- HUD off; layout.th on a build without it) and layout.tx, and each class block standing now from
+-- FS.ClassShoulder.EachStanding (its x, width and height in design px), each with the Console's halo around
+-- it. Only parts that overlap the bars in x count, so a narrow tab that is not under them lifts nothing, and
+-- a Console that is not drawn, or has nothing under the bars, leaves the seat as it was shipped. The stack
+-- moves as one: the 18 gap between the bars stays. The read repeats on the geometry and tab notices above
+-- and at the start of each cast (a class tab can appear without either; the bars are hidden between casts,
+-- so nothing is seen to jump). A rect that cannot be read plainly (a secret in combat) keeps the last lift.
+-- Bar visuals are not touched, only the seat.
 --
 -- EVENTS. Per bar, the eight UNIT_SPELLCAST_* events through RegisterUnitEvent for its unit,
 -- plus PLAYER_ENTERING_WORLD (a loading screen can swallow a verdict) and, for the target,
@@ -451,14 +470,116 @@ local function SeatBar(S, x, y, px, ux, uy)
 end
 
 -- The CENTER offsets of one bar: its FS.Layout entry (`tcast` / `pcast`, UI units), or the old fixed
--- seat when Layout or the entry is missing or unusable.
+-- seat when Layout or the entry is missing or unusable. The third answer is whether the bar is still on
+-- its shipped seat (a seat the player dragged it to with /fsedit is theirs, and is never lifted).
 local function StackSeat(id, fallbackY)
     local L = FS.Layout and FS.Layout[id]
-    if type(L) == "table" and IsNum(L.x) and IsNum(L.y) then return L.x, L.y end
-    return SEAT_X, fallbackY
+    if type(L) == "table" and IsNum(L.x) and IsNum(L.y) then
+        local isOverridden = FS.Layout.IsOverridden
+        return L.x, L.y, not (type(isOverridden) == "function" and isOverridden(id))
+    end
+    return SEAT_X, fallbackY, true
 end
 
--- Seats both bars on their layout entries. Returns true when either bar moved.
+-------------------------------------------------------------------------------
+-- Console clearance (see CONSOLE CLEARANCE in the header)
+-------------------------------------------------------------------------------
+
+-- The Console art as last read, in UIParent units with y up from the screen's bottom: clear[1..n] =
+-- { left, right, bottom, top } (reused tables, so a read allocates nothing once they exist); rl / rt / s / pad
+-- are the chassis left and top line, the layout scale and the halo's reach while a read is in progress; lift
+-- is the answer of the last read that could be trusted, kept for the reads that cannot.
+local clear = { n = 0, lift = 0 }
+local CLEAR_GAP_DP = 8          -- design px, when FS.Layout has no CONSOLE_CAST_GAP
+local KEY_TAB_REACH_DP = 21     -- design px: the key tab's foot stub left of its lane (Console.lua FOOT_PAD, 10) and the halo (11)
+local HALO_DP = 11              -- the halo's reach (Console.GLOW.pad) when the Console does not say
+
+local function AddPart(left, right, bottom, top)
+    local n = clear.n + 1
+    clear.n = n
+    local part = clear[n]
+    if not part then
+        part = {}
+        clear[n] = part
+    end
+    part[1], part[2], part[3], part[4] = left, right, bottom, top
+end
+
+-- ClassShoulder.EachStanding's visitor: one block standing on the chassis top line, its halo around it.
+local function AddShoulder(dx, width, height)
+    if not (IsNum(dx) and IsNum(width) and IsNum(height)) then
+        clear.bad = true
+        return
+    end
+    local s, pad, rl, rt = clear.s, clear.pad, clear.rl, clear.rt
+    AddPart(rl + (dx - pad) * s, rl + (dx + width + pad) * s, rt, rt + (height + pad) * s)
+end
+
+-- Reads what the Console draws into `clear`. True when that is known, "nothing drawn" included; false when
+-- the Console is there but its rect or a figure cannot be read plainly (in combat a frame anchored to a
+-- secure one may read as a secret), which leaves `clear` half written and not to be used.
+local function ReadParts()
+    clear.n, clear.bad = 0, false
+    local console = FS.Console
+    if type(console) ~= "table" or type(console.IsDrawn) ~= "function" or not console.IsDrawn() then return true end
+    local root, L = console.root, console.layout
+    if not (root and type(L) == "table") then return false end
+    local s = FS.Layout and type(FS.Layout.Scale) == "function" and FS.Layout.Scale() or 1
+    local rl, rt = root:GetLeft(), root:GetTop()
+    local pad = type(console.GLOW) == "table" and console.GLOW.pad or HALO_DP
+    if not (IsNum(s) and s > 0 and IsNum(rl) and IsNum(rt) and IsNum(L.w) and IsNum(L.h) and IsNum(pad)) then
+        return false
+    end
+    clear.rl, clear.rt, clear.s, clear.pad = rl, rt, s, pad
+    -- the chassis with its halo
+    AddPart(rl - pad * s, rl + (L.w + pad) * s, rt - (L.h + pad) * s, rt + pad * s)
+    -- the key tab, while it stands: the height the Console publishes (TabHeight, design px above the top
+    -- line, 0 once the tab is gone), or the layout figure of a Console build without it
+    local tabH = L.th
+    if type(console.TabHeight) == "function" then tabH = console.TabHeight() end
+    if IsNum(tabH) and tabH > 0 and IsNum(L.tx) then
+        AddPart(rl + (L.tx - KEY_TAB_REACH_DP) * s, rl + (L.w + pad) * s, rt, rt + (tabH + pad) * s)
+    end
+    -- the class shoulders on the top line
+    local shoulders = FS.ClassShoulder
+    if type(shoulders) == "table" and type(shoulders.EachStanding) == "function" then
+        shoulders.EachStanding(AddShoulder)
+    end
+    return not clear.bad
+end
+
+local function ReadConsole()
+    local ok, known = pcall(ReadParts)
+    return ok and known
+end
+
+-- How far a bar covering `left`..`right` and `lowest`..`top` has to rise to keep `gap` over the Console art
+-- under its span. Art wholly above the bar's top does not count: a bar below the Console is not in its way.
+local function NeedFor(left, right, lowest, top, gap)
+    local need = 0
+    for i = 1, clear.n do
+        local part = clear[i]
+        if right > part[1] and left < part[2] and top > part[3] then
+            local rise = part[4] + gap - lowest
+            if rise > need then need = rise end
+        end
+    end
+    return need
+end
+
+-- One bar's need at CENTER offset (cx, cy). The player's name tab hangs under its frame and the target's
+-- stands on top, so the player's lowest point is the tab's and the target's top is the tab's.
+local function BarNeed(S, cx, cy, ux, uy, gap)
+    local w = S.frame:GetWidth()
+    if not IsNum(w) then return 0 end
+    local left = ux + cx - w / 2
+    local hang = S.isTarget and 0 or TAB_H
+    local crown = S.isTarget and TAB_H or 0
+    return NeedFor(left, left + w, uy + cy - FRAME_H / 2 - hang, uy + cy + FRAME_H / 2 + crown, gap)
+end
+
+-- Seats both bars on their layout entries, each lifted by the stack's need over the Console when it is
+-- still on its shipped seat. Returns true when either bar moved.
 local function PlaceStack()
     local player, target = bars.player, bars.target
     if not (player and target) then return false end
@@ -468,11 +589,30 @@ local function PlaceStack()
     -- stack happened to be placed. One pixel in UIParent units is the engine's own run.px.
     local px = player.run.px
     local ux, uy = UIParent:GetCenter()
-    if not (IsNum(px) and px > 0 and IsNum(ux) and IsNum(uy)) then px = nil end
+    local located = IsNum(ux) and IsNum(uy)
+    if not (IsNum(px) and px > 0 and located) then px = nil end
 
     local half = GAP / 2 + FRAME_H / 2
-    local tx, ty = StackSeat("tcast", SEAT_Y + half)
-    local pX, pY = StackSeat("pcast", SEAT_Y - half)
+    local tx, ty, tFree = StackSeat("tcast", SEAT_Y + half)
+    local pX, pY, pFree = StackSeat("pcast", SEAT_Y - half)
+
+    -- The lift: the stack moves as one, so a bar on its shipped seat beside a dragged one takes its own need
+    -- and both on theirs take the larger. A Console that cannot be read now leaves the last answer standing.
+    local lift = clear.lift
+    if located and ReadConsole() then
+        lift = 0
+        if clear.n > 0 then
+            local gap = FS.Layout and FS.Layout.CONSOLE_CAST_GAP
+            if not IsNum(gap) or gap < 0 then gap = CLEAR_GAP_DP end
+            gap = gap * clear.s
+            if pFree then lift = BarNeed(player, pX, pY, ux, uy, gap) end
+            if tFree then lift = math.max(lift, BarNeed(target, tx, ty, ux, uy, gap)) end
+        end
+        clear.lift = lift
+    end
+    if tFree then ty = ty + lift end
+    if pFree then pY = pY + lift end
+
     local movedTarget = SeatBar(target, tx, ty, px, ux, uy)
     local movedPlayer = SeatBar(player, pX, pY, px, ux, uy)
     return movedTarget or movedPlayer
@@ -806,6 +946,10 @@ end
 -- Starts (or restarts) the bar for `info`. The bar is shown first: the engine's OnUpdate does
 -- not run while an ancestor is hidden.
 local function BeginCast(S, info)
+    -- A Stack A bar is about to show: seat the stack against the Console as it stands now (the Console never
+    -- says when its tabs change, and the bars are hidden between casts, so this is the one moment that matters).
+    -- Not for a view bar: the Gunsight draws those and Stack A is retired.
+    if bars[S.unit] == S then pcall(PlaceAndRefit) end
     ClearRest(S)
     S.strip:Hide()
     S.icon:SetTexture(info.texture)
@@ -1171,13 +1315,30 @@ local function WireEvents(S)
     events:SetScript("OnEvent", S.onEvent)
 end
 
--- Re-places the stack when the scale or display changes (and at login and on entering the world).
+-- Re-places the stack when the scale or display changes (and at login and on entering the world), and
+-- whenever the action bar stack re-seats: the Console and the class tabs draw from that notice, so this
+-- is where the stack's Console clearance is read again.
 local function WirePlacement()
     local watcher = CreateFrame("Frame")
+    local followingGeometry = false
     for _, event in ipairs({ "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED", "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD" }) do
         watcher:RegisterEvent(event)
     end
-    watcher:SetScript("OnEvent", function()
+    watcher:SetScript("OnEvent", function(_, event)
+        -- Subscribed at login, not at load: this file loads before ActionBars, and a later subscriber
+        -- is notified after the Console and the class tabs have re-seated themselves. A change of the key
+        -- count re-draws the Console without a geometry notice, so the Console's own tab notice (when this
+        -- build has it) is followed too.
+        if event == "PLAYER_LOGIN" and not followingGeometry then
+            followingGeometry = true
+            local replace = function() pcall(PlaceAndRefit) end
+            if FS.ActionBars and type(FS.ActionBars.OnGeometry) == "function" then
+                FS.ActionBars.OnGeometry(replace)
+            end
+            if FS.Console and type(FS.Console.OnTabChanged) == "function" then
+                FS.Console.OnTabChanged(replace)
+            end
+        end
         pcall(PlaceAndRefit)
     end)
     -- A layout re-seat (an /fsedit drop or reset, a rescale) puts each bar back on its entry unsnapped;
