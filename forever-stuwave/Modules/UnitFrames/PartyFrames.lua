@@ -2442,8 +2442,10 @@ function PartyFrames.SetShown(on)
     return ok
 end
 
--- Init runs while the files load, when FS.Config still answers its defaults, so this is where the saved value
--- reaches the container on a normal login; Init applies it again when a login in combat builds the container late.
+-- Init runs as the files load, before ADDON_LOADED gives FS.Config its saved values, so the apply it makes there
+-- sees the defaults. The saved value reaches the container here at PLAYER_LOGIN (FS.Config has resolved the
+-- character's profile by then), and through the OnChange hook above if a profile switch changes it later. A login in
+-- combat builds the container only after that, and Init applies the wanted state once more.
 do
     local login = CreateFrame("Frame")
     login:RegisterEvent("PLAYER_LOGIN")

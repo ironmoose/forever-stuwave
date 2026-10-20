@@ -3414,6 +3414,26 @@ def _check_shown_set_shown_without_a_change_still_follows_the_wanted_state() -> 
     _expect_look(rt, True, 1, "Show@1", "refused write")
 
 
+def _check_shown_state_never_touches_the_gunsight() -> None:
+    """The party frames follow their own saved value with the Gunsight HUD on, off or never built: the module
+    reads nothing from FS.Gunsight and subscribes to none of its notices, so the HUD's master switch cannot
+    reach the container or the setting."""
+    rt = _client(saved="""
+        __gunsightTouched = {}
+        FS.Gunsight = setmetatable({}, {__index = function(_, name)
+            __gunsightTouched[#__gunsightTouched + 1] = tostring(name)
+            return function() end
+        end})""")
+    rt.execute("FS.PartyFrames.SetShown(false)")
+    _expect_look(rt, False, 0, "Hide", "off")
+    rt.execute("__combat=true FS.PartyFrames.SetShown(true)")
+    _leave_combat(rt)
+    rt.execute("SlashCmdList.FSPARTY('hide')")
+    assert _wanted(rt) is False
+    touched = list(rt.globals().__gunsightTouched.values())
+    assert not touched, f"the party frames asked the Gunsight for {touched}"
+
+
 def _check_fsparty_show_and_hide() -> None:
     rt = _client()
     g = rt.globals()
@@ -3673,6 +3693,8 @@ def main() -> int:
          _check_shown_listener_may_call_back),
         ("party frames: a SetShown that changes nothing or is refused still follows the wanted state",
          _check_shown_set_shown_without_a_change_still_follows_the_wanted_state),
+        ("party frames: the Gunsight's master switch is none of their business",
+         _check_shown_state_never_touches_the_gunsight),
         ("/fsparty show and hide", _check_fsparty_show_and_hide),
         ("target edge: purple on the targeted row, retarget and clear",
          _check_target_edge_purple),

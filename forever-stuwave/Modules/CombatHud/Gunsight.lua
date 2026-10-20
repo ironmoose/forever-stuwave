@@ -284,7 +284,8 @@ local function MigrateLegacy(db)
     if not FS.Config.Set(CFG_ENABLED, FS.Config.Get(CFG_ENABLED)) then return end
     if db.enabled == false and not FS.Config.IsStored(CFG_ENABLED) then FS.Config.Set(CFG_ENABLED, false) end
     if type(db.pieces) == "table" then
-        -- "party" is no piece now, but FS.PartyFrames keeps its saved key: carry the legacy value there.
+        -- "party" is no piece now, but FS.PartyFrames keeps its saved key: carry the legacy value there. As for every
+        -- piece, a profile that holds the default on (stored as nothing) takes a legacy false, once.
         for _, key in ipairs({ "party", unpack(PIECE_KEYS) }) do
             local legacy = db.pieces[key]
             if type(legacy) == "boolean" and not FS.Config.IsStored(PieceKey(key)) then FS.Config.Set(PieceKey(key), legacy) end
