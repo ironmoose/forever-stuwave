@@ -2351,6 +2351,127 @@ local function WatchBlizzardParty()
     Sweep()
 end
 
+-------------------------------------------------------------------------------
+-- Shown state
+-------------------------------------------------------------------------------
+
+-- The party frames' on/off switch, apart from the Gunsight HUD. FS.PartyFrames exists from file load, before the
+-- container does (a login in combat defers Init to the first PLAYER_REGEN_ENABLED), so a caller can register a
+-- listener or ask at any time. The wanted state lives in FS.Config, so a call that finds no container only records it
+-- and Init applies it when it builds one.
+local PartyFrames = {}
+FS.PartyFrames = PartyFrames
+
+-- The private state and helpers share one table: this file is close to Lua's limit of 200 file-scope locals.
+local SHOWN = {
+    -- The saved key keeps the name it had when the Gunsight HUD owned this switch, so every profile keeps its value.
+    KEY = "gunsight.pieces.party",
+    owned = false,          -- Own() was called: login, Init and a profile switch put the container in the wanted state
+    loggedIn = false,       -- PLAYER_LOGIN has fired, so FS.Config holds this character's profile
+    requesting = false,     -- SetShown is writing the key and applies the container itself
+    owed = false,           -- the container's real Show or Hide waits for PLAYER_REGEN_ENABLED
+    listeners = {},
+    listenerFailed = false,
+}
+PartyFrames.CONFIG_KEY = SHOWN.KEY
+-- Gunsight.lua registers the same default while it still lists the piece; RegisterDefault replaces, so they agree.
+FS.Config.RegisterDefault(SHOWN.KEY, true)
+
+-- The wanted state, which is the saved value: right the moment SetShown, a profile switch or a reset changes it,
+-- whatever the container (nil, or owing a Show that combat blocks) looks like.
+function PartyFrames.IsShown()
+    return FS.Config.Get(SHOWN.KEY) == true
+end
+
+-- Puts the container in the wanted state. It parents secure unit buttons, so in combat only the alpha moves (Show
+-- and Hide are blocked under lockdown, and raise ADDON_ACTION_BLOCKED even inside a pcall) and the real call is owed
+-- to PLAYER_REGEN_ENABLED. Out of combat it looks as Gunsight.lua's ApplyFrame leaves a piece: alpha 1 before Show,
+-- Hide and then alpha 0. Mouse is never toggled, so a container hidden in combat is invisible but its rows still
+-- take clicks until the regen pass hides it.
+function SHOWN.Apply()
+    local container = FS.partyContainer
+    if not container then return end
+    local on = PartyFrames.IsShown()
+    if InCombatLockdown() then
+        container:SetAlpha(on and 1 or 0)
+        SHOWN.owed = true
+        return
+    end
+    SHOWN.owed = false
+    if on then
+        container:SetAlpha(1)
+        container:Show()
+    else
+        container:Hide()
+        container:SetAlpha(0)
+    end
+end
+
+-- The login and Init paths. Until Own() they do nothing: the Gunsight still registers the container as a piece and
+-- applies its own on/off state at login, and a second owner would fight it.
+function SHOWN.ApplyWanted()
+    if SHOWN.owned and SHOWN.loggedIn then SHOWN.Apply() end
+end
+
+-- The real Show or Hide a change made in combat owed, called from the regen handler Init builds.
+function SHOWN.FlushOwed()
+    if SHOWN.owed then SHOWN.Apply() end
+end
+
+-- Hands the container to this module: from here on login, Init and any change to the saved value put it in the
+-- wanted state, and the Gunsight must no longer drive it.
+function PartyFrames.Own()
+    SHOWN.owned = true
+    SHOWN.ApplyWanted()
+end
+
+-- fn(on) runs after the wanted state changed (SetShown, a profile switch, a reset), with the container already
+-- following it, though in combat its real Show or Hide may still be owed. Not called for the state at registration:
+-- read IsShown() once.
+function PartyFrames.OnShownChanged(fn)
+    if type(fn) == "function" then SHOWN.listeners[#SHOWN.listeners + 1] = fn end
+end
+
+function SHOWN.Notify(on)
+    for _, fn in ipairs(SHOWN.listeners) do
+        local ok, err = pcall(fn, on)
+        if not ok and not SHOWN.listenerFailed then
+            SHOWN.listenerFailed = true
+            FS.LogDegradeOnce("partyframes_shown_listener",
+                "ForeverSTUwave: a party frames OnShownChanged listener failed: " .. tostring(err))
+        end
+    end
+end
+
+-- A profile switch, reset or copy changes the saved value behind SetShown's back; follow it the same way.
+FS.Config.OnChange(SHOWN.KEY, function(new)
+    if SHOWN.owned or SHOWN.requesting then SHOWN.Apply() end
+    SHOWN.Notify(new == true)
+end)
+
+-- Stores the wish and puts the container in it. False, and nothing changed, when FS.Config refuses the write
+-- (read-only settings). A call that changes nothing still brings the container in line, since a container nobody
+-- applied can disagree with a value that was already saved.
+function PartyFrames.SetShown(on)
+    on = on and true or false
+    local changed = PartyFrames.IsShown() ~= on
+    SHOWN.requesting = changed
+    local ok = FS.Config.Set(SHOWN.KEY, on)
+    SHOWN.requesting = false
+    if not ok then return false end
+    if not changed then SHOWN.Apply() end
+    return true
+end
+
+do
+    local login = CreateFrame("Frame")
+    login:RegisterEvent("PLAYER_LOGIN")
+    login:SetScript("OnEvent", function()
+        SHOWN.loggedIn = true
+        SHOWN.ApplyWanted()
+    end)
+end
+
 local function Init()
     WatchBlizzardParty()
 
@@ -2413,6 +2534,7 @@ local function Init()
     rescaleEvents:RegisterEvent("PLAYER_REGEN_ENABLED")
     rescaleEvents:SetScript("OnEvent", function()
         if InCombatLockdown() then return end
+        SHOWN.FlushOwed()
         FS.Layout.Apply(container, "party")
         RefreshContentScale() -- re-snaps too
     end)
@@ -2457,6 +2579,7 @@ local function Init()
 
     FS.partyRows = rows
     FS.partyContainer = container
+    SHOWN.ApplyWanted() -- a login in combat reached PLAYER_LOGIN before this container existed
 
     -- Roster/role changes affect every row (a party slot's occupant, or any
     -- member's assigned role) rather than a single unit token, so this lives
@@ -2588,6 +2711,14 @@ SlashCmdList["FSPARTY"] = function(msg)
             print("  usage: /fsparty buff <key> on|off   (/fsparty buffs lists the keys)")
         end
         return
+    elseif cmd == "show" or cmd == "hide" then
+        if PartyFrames.SetShown(cmd == "show") then
+            print(("  party frames: %s%s"):format(cmd == "show" and "shown" or "hidden",
+                InCombatLockdown() and " (settles when combat ends)" or ""))
+        else
+            print("  party frames: the saved setting could not be changed")
+        end
+        return
     end
 
     print(("|cff22e0ffForever STUwave|r party: class %s dispels %s"):format(
@@ -2643,7 +2774,8 @@ SlashCmdList["FSPARTY"] = function(msg)
     end
     print("  -- means deliberately NOT alerted. Alerts show OUTSIDE the panel, to the "
         .. "left of the row: cleansable debuffs first, then party buffs you know that a member lacks. "
-        .. "/fsparty buffs lists them; /fsparty buff <key> on|off toggles one.")
+        .. "/fsparty buffs lists them; /fsparty buff <key> on|off toggles one. "
+        .. "/fsparty show and /fsparty hide switch the frames.")
 end
 
 if InCombatLockdown() then

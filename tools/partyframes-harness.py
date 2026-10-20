@@ -392,6 +392,9 @@ FS.Layout=nil
 """
 
 LOAD = "function(src,name,fs) assert(loadstring(src,name))(name,fs) end"
+# Config.lua matches ADDON_LOADED against the addon name it is handed, so it needs the real one
+# (LOAD hands a file its own chunk name).
+LOAD_AS_ADDON = "function(src,chunk,addon,fs) assert(loadstring(src,chunk))(addon,fs) end"
 
 # Blizzard's own party frames on the 12.x engine, shaped after Blizzard_UnitFrame (PartyFrame.lua,
 # PartyMemberFrame.lua, CompactPartyFrame.lua): PartyFrame owns pooled PartyMemberFrameTemplate
@@ -572,7 +575,12 @@ def _runtime(
     if not c_unitauras:
         rt.execute("C_UnitAuras=nil")  # FrameHelpers.ReadAuraSlot then takes the UnitAura path
     load = rt.eval(LOAD)
-    for filename in ("Core/Layout.lua", "Core/FrameHelpers.lua", "Modules/UnitFrames/PartyFrames.lua"):
+    load((ADDON / "Core/Layout.lua").read_text(encoding="utf-8"), "@Core/Layout.lua", rt.globals().FS)
+    # The toc order: Config loads before the party frames, which register a default and a listener on it.
+    rt.eval(LOAD_AS_ADDON)(
+        (ADDON / "Core/Config.lua").read_text(encoding="utf-8"), "@Core/Config.lua", "forever-stuwave",
+        rt.globals().FS)
+    for filename in ("Core/FrameHelpers.lua", "Modules/UnitFrames/PartyFrames.lua"):
         load((ADDON / filename).read_text(encoding="utf-8"), f"@{filename}", rt.globals().FS)
     if quiet:
         _assert_quiet(rt)
@@ -3188,6 +3196,241 @@ def _check_party_container_resnaps_and_waits_out_combat() -> None:
 
 
 # ---------------------------------------------------------------------------------------------
+# FS.PartyFrames: the wanted on/off state, kept apart from the container that follows it
+# ---------------------------------------------------------------------------------------------
+
+SHOWN_KEY = "gunsight.pieces.party"
+
+# Every real Show and Hide on the party container, in order, with the alpha it had at the call
+# ("Show@1", "Hide"). Under combat lockdown a call raises, as the client blocks it on a protected frame.
+TRACK_CONTAINER = r"""
+local create = CreateFrame
+function CreateFrame(kind, name, parent, ...)
+    local f = create(kind, name, parent, ...)
+    if name == 'ForeverSTUwavePartyContainer' then
+        local base = getmetatable(f).__index
+        f.log = {}
+        function f:Show()
+            if InCombatLockdown() then error('ADDON_ACTION_BLOCKED: Show', 0) end
+            self.log[#self.log + 1] = 'Show@' .. self.alpha
+            base.Show(self)
+        end
+        function f:Hide()
+            if InCombatLockdown() then error('ADDON_ACTION_BLOCKED: Hide', 0) end
+            self.log[#self.log + 1] = 'Hide'
+            base.Hide(self)
+        end
+    end
+    return f
+end
+"""
+
+
+def _event(rt: LuaRuntime, name: str, arg: str = "nil") -> None:
+    """Fire `name` on every frame that registered it (the arg is a Lua expression)."""
+    rt.execute(f"""for _,frame in ipairs(__frames) do
+        if frame.registered.{name} and frame.scripts.OnEvent then
+            frame.scripts.OnEvent(frame,'{name}',{arg})
+        end
+    end""")
+
+
+def _client(*, combat: bool = False, own: bool = True, saved: str = "", settle: bool = True) -> LuaRuntime:
+    """A client past ADDON_LOADED and PLAYER_LOGIN, the party container's Show and Hide tracked.
+    `own` hands the container to FS.PartyFrames at load, `combat` logs in under lockdown (the
+    container is then built at the first PLAYER_REGEN_ENABLED), `saved` runs before any file loads,
+    and `settle` forgets the calls the login itself made so a check counts only its own."""
+    rt = _runtime(before_load=f"""
+        __combat={'true' if combat else 'false'}
+        function InCombatLockdown() return __combat end
+        function UnitGUID() return 'Player-1-AAAA' end
+        {saved}
+        {TRACK_CONTAINER}""")
+    if own:
+        rt.execute("FS.PartyFrames.Own()")
+    _event(rt, "ADDON_LOADED", "'forever-stuwave'")
+    _event(rt, "PLAYER_LOGIN")
+    if settle and rt.globals().FS.partyContainer is not None:
+        rt.execute("FS.partyContainer.log = {}")
+    return rt
+
+
+def _leave_combat(rt: LuaRuntime) -> None:
+    rt.execute("__combat=false")
+    _event(rt, "PLAYER_REGEN_ENABLED")
+
+
+def _wanted(rt: LuaRuntime) -> bool:
+    return rt.eval("FS.PartyFrames.IsShown()")
+
+
+def _look(rt: LuaRuntime) -> tuple[bool, float, str]:
+    """What the container looks like: its own shown flag, its alpha, and the Show/Hide calls so far."""
+    shown = rt.eval("FS.partyContainer:IsShown()")
+    return bool(shown), rt.eval("FS.partyContainer:GetAlpha()"), rt.eval("table.concat(FS.partyContainer.log, ',')")
+
+
+def _expect_look(rt: LuaRuntime, shown: bool, alpha: float, calls: str, why: str = "") -> None:
+    got = _look(rt)
+    assert got == (shown, alpha, calls), f"{why or 'container'}: want {(shown, alpha, calls)}, got {got}"
+
+
+def _check_shown_api_exists_at_file_scope() -> None:
+    """A login in combat defers Init, so FS.PartyFrames must be there before the container is, under
+    the key the Gunsight piece saved to, with the default on."""
+    rt = _runtime(before_load="__combat=true function InCombatLockdown() return __combat end")
+    assert rt.globals().FS.partyContainer is None, "a login in combat must not build the container yet"
+    assert rt.eval("FS.PartyFrames.CONFIG_KEY") == SHOWN_KEY
+    for name in ("IsShown", "SetShown", "OnShownChanged", "Own"):
+        assert rt.eval(f"type(FS.PartyFrames.{name})") == "function", name
+    assert _wanted(rt) is True, "the frames are wanted until the saved value says otherwise"
+    assert rt.eval(f"FS.Config.Get('{SHOWN_KEY}')") is True
+
+
+def _check_shown_login_applies_the_saved_value() -> None:
+    """Init runs while the files load, before ADDON_LOADED, when FS.Config still answers its defaults:
+    the saved value reaches the container at PLAYER_LOGIN."""
+    saved = ("ForeverSTUwaveDB={profiles={Default={settings={['" + SHOWN_KEY + "']=false}}},"
+             "profileKeys={},profileLabels={}}")
+    rt = _client(saved=saved, settle=False)
+    assert _wanted(rt) is False
+    assert _look(rt)[:2] == (False, 0), "the saved off reached the container at login"
+    _assert_quiet(rt)
+
+
+def _check_shown_out_of_combat() -> None:
+    rt = _client()
+    assert rt.eval("FS.PartyFrames.SetShown(false)") is True
+    _expect_look(rt, False, 0, "Hide")
+    assert _wanted(rt) is False and rt.eval(f"FS.Config.Get('{SHOWN_KEY}')") is False
+    assert rt.eval("FS.PartyFrames.SetShown(true)") is True
+    # Alpha is 1 before Show runs: a container hidden at alpha 0 would show as nothing.
+    _expect_look(rt, True, 1, "Hide,Show@1")
+    assert rt.eval("FS.PartyFrames.SetShown(true)") is True
+    assert _look(rt)[:2] == (True, 1), "asking for the state it already has leaves it as it is"
+    _assert_quiet(rt)
+
+
+def _check_shown_in_combat_is_alpha_only_until_regen() -> None:
+    """The container holds secure unit buttons: Show and Hide are blocked in combat, so the change
+    fades by alpha, IsShown reports the wanted state, and the existing regen pass does the real call."""
+    rt = _client()
+    rt.execute("__combat=true")
+    assert rt.eval("FS.PartyFrames.SetShown(false)") is True
+    _expect_look(rt, True, 0, "", "combat: alpha only, no Hide")
+    assert _wanted(rt) is False, "IsShown is the wanted state, not container:IsShown()"
+    rt.execute("FS.PartyFrames.SetShown(true) FS.PartyFrames.SetShown(false)")
+    _leave_combat(rt)
+    _expect_look(rt, False, 0, "Hide", "one real Hide at regen, for the last wish")
+    # Wanted on in combat while the container is hidden: the Show waits, the alpha is ready for it.
+    rt.execute("__combat=true FS.PartyFrames.SetShown(true)")
+    _expect_look(rt, False, 1, "Hide")
+    assert _wanted(rt) is True
+    _leave_combat(rt)
+    _expect_look(rt, True, 1, "Hide,Show@1")
+    _event(rt, "PLAYER_REGEN_ENABLED")
+    assert _look(rt)[2] == "Hide,Show@1", "nothing owed, so regen calls nothing"
+    _assert_quiet(rt)
+
+
+def _check_shown_login_in_combat_applies_when_init_builds() -> None:
+    """The container does not exist at PLAYER_LOGIN in combat: the wanted state is only recorded,
+    and Init applies it the moment it builds the container."""
+    for wanted in (False, True):
+        rt = _client(combat=True)
+        assert rt.globals().FS.partyContainer is None
+        assert rt.eval(f"FS.PartyFrames.SetShown({str(wanted).lower()})") is True
+        assert _wanted(rt) is wanted
+        _leave_combat(rt)
+        shown, alpha, calls = _look(rt)
+        assert (shown, alpha) == (wanted, 1 if wanted else 0), f"wanted {wanted}: built as {shown}, alpha {alpha}"
+        assert ("Hide" in calls) is (not wanted), f"wanted {wanted}: calls {calls!r}"
+        _assert_quiet(rt)
+
+
+def _check_shown_profile_switch_in_combat() -> None:
+    """A profile switch or reset can land in combat: it takes the same alpha-only path."""
+    rt = _client()
+    rt.execute(f"""
+        __told = {{}}
+        FS.PartyFrames.OnShownChanged(function(on) __told[#__told + 1] = tostring(on) end)
+        assert(FS.Config.NewProfile('Raid', 'Default'))
+        assert(FS.Config.SetActiveProfile('Raid'))
+        FS.Config.Set('{SHOWN_KEY}', false)""")
+    _expect_look(rt, False, 0, "Hide")
+    rt.execute("__combat=true assert(FS.Config.SetActiveProfile('Default'))")
+    assert _wanted(rt) is True
+    _expect_look(rt, False, 1, "Hide", "back to a profile that wants them: alpha now, Show at regen")
+    _leave_combat(rt)
+    _expect_look(rt, True, 1, "Hide,Show@1")
+    rt.execute("__combat=true assert(FS.Config.SetActiveProfile('Raid'))")
+    assert _wanted(rt) is False
+    _expect_look(rt, True, 0, "Hide,Show@1", "a profile that hides them: alpha now, Hide at regen")
+    _leave_combat(rt)
+    _expect_look(rt, False, 0, "Hide,Show@1,Hide")
+    assert rt.eval("table.concat(__told, ',')") == "false,true,false"
+    _assert_quiet(rt)
+
+
+def _check_shown_listeners() -> None:
+    rt = _client()
+    rt.execute("""
+        __told = {}
+        FS.PartyFrames.OnShownChanged(function() error('boom') end)
+        FS.PartyFrames.OnShownChanged(function(on) __told[#__told + 1] = tostring(on) end)
+        FS.PartyFrames.OnShownChanged(nil)""")
+    rt.execute("FS.PartyFrames.SetShown(false) FS.PartyFrames.SetShown(false) FS.PartyFrames.SetShown(true)")
+    assert rt.eval("table.concat(__told, ',')") == "false,true", "a throwing listener must not stop the next one"
+    messages = list(rt.globals().__messages.values())
+    assert len(messages) == 1 and "boom" in messages[0], f"one latched degrade line, got {messages}"
+
+
+def _check_shown_stays_dormant_until_owned() -> None:
+    """While the Gunsight still shows and hides the container, nothing automatic may touch it:
+    not login, not Init, not a Config write it makes itself. An explicit SetShown still moves it."""
+    rt = _client(combat=True, own=False)
+    rt.execute(f"""
+        __told = {{}}
+        FS.PartyFrames.OnShownChanged(function(on) __told[#__told + 1] = tostring(on) end)
+        FS.Config.Set('{SHOWN_KEY}', false)""")
+    assert _wanted(rt) is False and rt.eval("table.concat(__told, ',')") == "false"
+    _leave_combat(rt)
+    _expect_look(rt, True, 1, "", "Init builds the container and leaves it alone")
+    _event(rt, "PLAYER_LOGIN")
+    rt.execute(f"FS.Config.Set('{SHOWN_KEY}', true) FS.Config.Set('{SHOWN_KEY}', false)")
+    _expect_look(rt, True, 1, "", "a Config write from elsewhere leaves the container to its owner")
+    assert rt.eval("FS.PartyFrames.SetShown(false)") is True
+    _expect_look(rt, False, 0, "Hide", "SetShown is explicit, so it applies even though the saved value matched")
+    rt.execute("FS.PartyFrames.Own()")
+    _expect_look(rt, False, 0, "Hide,Hide", "Own applies the wanted state at once")
+    _assert_quiet(rt)
+
+
+def _check_fsparty_show_and_hide() -> None:
+    rt = _client()
+    g = rt.globals()
+    g.SlashCmdList.FSPARTY("hide")
+    _expect_look(rt, False, 0, "Hide")
+    assert _wanted(rt) is False
+    assert g.__messages[len(g.__messages)] == "  party frames: hidden"
+    g.SlashCmdList.FSPARTY("show")
+    _expect_look(rt, True, 1, "Hide,Show@1")
+    assert _wanted(rt) is True
+    assert g.__messages[len(g.__messages)] == "  party frames: shown"
+    rt.execute("__combat=true")
+    g.SlashCmdList.FSPARTY("hide")
+    _expect_look(rt, True, 0, "Hide,Show@1", "combat: alpha only")
+    assert g.__messages[len(g.__messages)] == "  party frames: hidden (settles when combat ends)"
+    # A saved setting that cannot be written (a newer profile version is read-only) changes nothing.
+    ro = _client(saved="ForeverSTUwaveDB={profilesVersion=99}")
+    ro.globals().SlashCmdList.FSPARTY("hide")
+    _expect_look(ro, True, 1, "")
+    assert _wanted(ro) is True
+    last = ro.globals().__messages
+    assert "could not be changed" in last[len(last)], list(last.values())
+
+
+# ---------------------------------------------------------------------------------------------
 # Blizzard's own party frames (PartyFrame, CompactPartyFrame) are silenced without taint
 # ---------------------------------------------------------------------------------------------
 
@@ -3406,6 +3649,21 @@ def main() -> int:
          _check_party_container_on_whole_pixels),
         ("party container re-snaps on rescale and waits out combat",
          _check_party_container_resnaps_and_waits_out_combat),
+        ("party frames API exists at file scope, saved key and default on",
+         _check_shown_api_exists_at_file_scope),
+        ("party frames: PLAYER_LOGIN applies the saved value", _check_shown_login_applies_the_saved_value),
+        ("party frames: SetShown out of combat, alpha 1 before Show", _check_shown_out_of_combat),
+        ("party frames: in combat alpha only, the real Show/Hide at regen",
+         _check_shown_in_combat_is_alpha_only_until_regen),
+        ("party frames: a login in combat records the wish and Init applies it",
+         _check_shown_login_in_combat_applies_when_init_builds),
+        ("party frames: a profile switch in combat takes the alpha-only path",
+         _check_shown_profile_switch_in_combat),
+        ("party frames: listeners fire on a change, a throwing one is contained",
+         _check_shown_listeners),
+        ("party frames: login, Init and Config writes leave the container alone until owned",
+         _check_shown_stays_dormant_until_owned),
+        ("/fsparty show and hide", _check_fsparty_show_and_hide),
         ("target edge: purple on the targeted row, retarget and clear",
          _check_target_edge_purple),
         ("target edge: red > dispel > target > steel dashes > cyan", _check_target_edge_precedence),
