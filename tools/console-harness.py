@@ -447,8 +447,12 @@ function T.key_count_is_clamped_and_refused_in_combat()
     __combat = false
     truthy(C().SetKeyCount(99), "accepted")
     eq(C().GetKeyCount(), M.DECK_N, "clamped to the most keys the tab has")
+    truthy(C().SetKeyCount(1), "accepted")
+    eq(C().GetKeyCount(), 1, "one key is the smallest tab")
     truthy(C().SetKeyCount(0), "accepted")
-    eq(C().GetKeyCount(), 1, "clamped to one key")
+    eq(C().GetKeyCount(), 0, "no keys, no tab (see zero_keys_draw_no_tab)")
+    truthy(C().SetKeyCount(-3), "accepted")
+    eq(C().GetKeyCount(), 0, "a negative count is no keys")
 end
 
 function T.key_count_set_before_the_first_seat_is_used_by_it()
@@ -824,6 +828,167 @@ function T.is_drawn_is_false_before_the_first_seat_and_a_stored_gap_lands_on_the
     eq(C().IsDrawn(), true, "drawn after the first on")
     near(piece("lineTop").r, 100, "left stub to x0"); near(piece("lineTop2").x, 300, "right piece from x1")
     near(piece("haloTop").r, 100, "halo left piece to x0"); near(piece("haloTop2").x, 300, "halo right piece from x1")
+end
+
+-- ---- no keys, no tab ---------------------------------------------------------------------
+-- Zero shown keys (the Gunsight HUD off, or nothing to show) leave the shoulder with nothing to hold, so
+-- the Console is the plain plate: same cut corners, the top edge and the right edge run to the corner.
+local TAB_PIECES = { "foot", "lineTabTop", "tabWedge", "tabFill", "haloTabTop" }
+-- the pieces whose place changes when the tab goes: the top edge, the right edge, the top right halo, the
+-- screw in that corner, the tab pieces themselves and the key lane's frame
+local TAB_CHANGES = { ["parts.lineTop"] = true, ["parts.lineRight"] = true, ["parts.haloTop"] = true,
+                      ["parts.haloTR"] = true, ["parts.haloRight"] = true, ["parts.foot"] = true,
+                      ["parts.lineTabTop"] = true, ["parts.tabWedge"] = true, ["parts.tabFill"] = true,
+                      ["parts.haloTabTop"] = true, ["parts.screws.1"] = true, tab = true }
+
+-- every piece of the Console as { shown, x, y, w, h, tc } by path, to compare two states
+local function snapAll()
+    local out = {}
+    local function walk(path, t)
+        if type(t) ~= "table" then return end
+        if t._kind == "Texture" or t._kind == "FontString" then
+            local ok, d = pcall(D, t)
+            out[path] = { shown = t:IsShown(), x = ok and d.x or nil, y = ok and d.y or nil, w = ok and d.w or nil,
+                          h = ok and d.h or nil, tc = t._tc and table.concat(t._tc, ",") or nil }
+        elseif t._kind == nil then
+            for k, v in pairs(t) do walk(path .. "." .. tostring(k), v) end
+        end
+    end
+    walk("parts", C().parts)
+    local tab = rect(C().tab)
+    out.tab = { shown = C().tab:IsShown(), x = tab.l, y = tab.t, w = tab.w, h = tab.h }
+    return out
+end
+local function excepted(except, path)
+    if not except then return false end
+    for k in pairs(except) do
+        if path == k or path:sub(1, #k + 1) == k .. "." then return true end
+    end
+    return false
+end
+local function sameAll(a, b, label, except)
+    for path, pa in pairs(a) do
+        if not excepted(except, path) then
+            local pb = b[path]
+            truthy(pb, label .. ": " .. path .. " missing")
+            eq(pb.shown, pa.shown, label .. ": " .. path .. " shown")
+            eq(pb.tc, pa.tc, label .. ": " .. path .. " texcoord")
+            for _, f in ipairs({ "x", "y", "w", "h" }) do
+                if pa[f] ~= nil then near(pb[f], pa[f], label .. ": " .. path .. "." .. f, 1e-6) end
+            end
+        end
+    end
+end
+
+function T.zero_keys_draw_no_tab_and_the_top_edge_runs_the_full_width()
+    local W, H = chassisDesign()
+    local P = C().parts
+    truthy(C().SetKeyCount(0), "accepted out of combat")
+    eq(C().GetKeyCount(), 0, "key count")
+    eq(C().TabWidth(0), 0, "no keys, no tab box")
+    for _, k in ipairs(TAB_PIECES) do eq(P[k]:IsShown(), false, k .. " is hidden with no tab") end
+    eq(C().tab:IsShown(), false, "the key lane's frame is hidden")
+    eq(C().keyArea, nil, "no key area")
+    near(C().layout.th, 0, "no tab height")
+    -- the outline: the top line from the TL cut to the right line, which owns the corner texel and runs
+    -- down to the BR cut (the left edge's recipe, mirrored)
+    local top, right = D(P.lineTop), D(P.lineRight)
+    near(top.x, M.CUT, "top line starts after the cut"); near(top.r, W - 1, "top line ends at the right line")
+    near(top.y, 0, "top line on the top edge"); near(top.h, 1, "1 texel line")
+    eq(piece("lineTop2"), nil, "no second top piece")
+    near(right.r, W, "right line on the right edge"); near(right.y, 0, "right line starts on the top edge")
+    near(right.b, H - M.CUT, "right line ends at the BR cut"); near(right.w, 1, "1 texel line")
+    -- the halo: the TL corner block, one top strip, the TR corner block, the right strip
+    local ht, htr, hr = D(P.haloTop), D(P.haloTR), D(P.haloRight)
+    near(ht.x, D(P.haloTL).r, "top halo starts where the TL block ends"); near(ht.r, W - M.CUT, "top halo ends at the TR block")
+    near(ht.y, -GP, "top halo above the top edge"); near(ht.h, GP, "halo reach")
+    near(htr.x, W - M.CUT, "TR block"); near(htr.y, -GP, "TR block sits on the top edge halo"); near(htr.r, W + GP, "TR block reaches past the right edge")
+    near(hr.y, htr.b, "right halo starts where the TR block ends"); near(hr.x, W, "right halo outside the right edge")
+    near(hr.b, D(P.haloBR).y, "right halo ends at the BR block")
+    eq(piece("haloTop2"), nil, "no second halo piece")
+    -- the fill reaches the top right corner, the screw stands in it
+    near(D(P.fillTop).r, W, "fill reaches the right edge"); near(D(P.fillTop).y, 0, "fill top starts on the top edge")
+    local screw = D(P.screws[1].disc)
+    near(screw.x + screw.w / 2, W - 7.5, "screw x"); near(screw.y + screw.h / 2, 7.5, "screw sits in the plate's top right corner")
+    -- nothing is drawn above the top edge but the halo
+    local snap = snapAll()
+    for path, e in pairs(snap) do
+        if e.shown and e.y and path ~= "tab" and not path:find("^parts%.halo") and not path:find("^parts%.gap") then
+            truthy(e.y >= -1e-6, path .. " is drawn above the top edge (y=" .. tostring(e.y) .. ")")
+        end
+    end
+end
+
+function T.zero_keys_leave_the_rest_of_the_plate_exactly_as_it_is()
+    C().SetKeyCount(8)
+    local with = snapAll()
+    truthy(C().SetKeyCount(0))
+    sameAll(with, snapAll(), "no tab", TAB_CHANGES)
+end
+
+-- the tab comes back exactly: for every count, going to zero keys and back lands on the same pieces
+function T.zero_keys_and_back_restores_the_tab_exactly_for_every_count()
+    for _, n in ipairs({ 8, 7, 6, 4, 1 }) do
+        truthy(C().SetKeyCount(n))
+        local before, area = snapAll(), C().keyArea
+        local th, tx = C().layout.th, C().layout.tx
+        truthy(C().SetKeyCount(0))
+        for _, k in ipairs(TAB_PIECES) do eq(C().parts[k]:IsShown(), false, "n=" .. n .. " " .. k .. " hidden at zero keys") end
+        __rescale(__scale == 1 and 1 / 1.2 or 1)   -- a re-seat with no tab, at another scale, then back
+        __rescale(__scale == 1 and 1 / 1.2 or 1)
+        truthy(C().SetKeyCount(n))
+        sameAll(before, snapAll(), "n=" .. n .. " after the round trip")
+        for _, k in ipairs(TAB_PIECES) do eq(C().parts[k]:IsShown(), true, "n=" .. n .. " " .. k .. " back") end
+        eq(C().tab:IsShown(), true, "n=" .. n .. " tab frame back")
+        near(C().layout.th, th, "n=" .. n .. " tab height back"); near(C().layout.tx, tx, "n=" .. n .. " foot back")
+        near(C().keyArea.x, area.x, "n=" .. n .. " key area x"); near(C().keyArea.w, area.w, "n=" .. n .. " key area w")
+    end
+end
+
+function T.zero_keys_are_refused_in_combat_like_any_other_count()
+    C().SetKeyCount(6)
+    local before = snapAll()
+    __protect_stack()
+    __combat = true; __blocked = 0
+    eq(C().SetKeyCount(0), false, "refused in combat")
+    eq(C().GetKeyCount(), 6, "count unchanged by the refused call")
+    eq(__blocked, 0, "nothing protected touched in combat")
+    sameAll(before, snapAll(), "in combat")
+    __combat = false
+    truthy(C().SetKeyCount(0), "accepted after combat")
+    eq(C().parts.foot:IsShown(), false, "tab gone after combat")
+end
+
+function T.dock_gap_with_no_tab_runs_to_the_right_end_of_the_top_edge()
+    local W = chassisDesign()
+    C().SetKeyCount(0)
+    truthy(C().SetDockGap(100, 300))
+    local line, line2, h, h2 = piece("lineTop"), piece("lineTop2"), piece("haloTop"), piece("haloTop2")
+    truthy(line and line2 and h and h2, "both pieces of the line and of the halo")
+    near(line.r, 100, "left stub to x0"); near(line2.x, 300, "right piece from x1"); near(line2.r, W - 1, "right piece to the right line")
+    near(h.r, 100, "halo left piece to x0"); near(h2.x, 300, "halo right piece from x1"); near(h2.r, W - M.CUT, "halo right piece to the TR block")
+    -- a gap reaching past the end is clamped to the top edge and leaves no right piece
+    truthy(C().SetDockGap(100, 1e6, 90, 1e6))
+    near(C().layout.gap.x1, W - 1, "line gap clamped to the top line"); near(C().layout.haloGap.x1, W - M.CUT, "halo gap clamped to the top halo")
+    eq(piece("lineTop2"), nil, "no right line piece"); eq(piece("haloTop2"), nil, "no right halo piece")
+    C().SetDockGap(nil, nil)
+    -- and the tab coming back puts the foot's clamp back
+    C().SetKeyCount(8)
+    truthy(C().SetDockGap(100, C().layout.tx + 500, 90, C().layout.tx + 500))
+    near(C().layout.gap.x1, C().layout.tx, "with a tab the gap stops at the foot")
+    C().SetDockGap(nil, nil)
+end
+
+function T.zero_keys_set_before_the_first_seat_are_used_by_it()
+    eq(C().root, nil, "no chassis was built: saved off")
+    truthy(C().SetKeyCount(0), "stored before anything is built")
+    SlashCmdList.FSCONSOLE("on")
+    eq(C().IsDrawn(), true, "drawn after the first on")
+    for _, k in ipairs(TAB_PIECES) do eq(C().parts[k]:IsShown(), false, k .. " hidden on the first draw") end
+    eq(C().tab:IsShown(), false, "tab frame hidden on the first draw")
+    near(D(C().parts.lineTop).r, chassisDesign() - 1, "top line runs to the right edge on the first draw")
+    truthy(C().SetKeyCount(8))
+    for _, k in ipairs(TAB_PIECES) do eq(C().parts[k]:IsShown(), true, k .. " shown once keys come") end
 end
 
 -- ---- key gap rule -----------------------------------------------------------------------
@@ -1430,6 +1595,7 @@ FAILED_SEAT_FALLBACK = """
 VARIANTS = {
     "console_starts_off_when_saved_off": "ForeverSTUwaveDB = { consoleEnabled = false }",
     "is_drawn_is_false_before_the_first_seat_and_a_stored_gap_lands_on_the_first_draw": "ForeverSTUwaveDB = { consoleEnabled = false }",
+    "zero_keys_set_before_the_first_seat_are_used_by_it": "ForeverSTUwaveDB = { consoleEnabled = false }",
     "gap_patch_alpha_set_before_the_chassis_exists_lands_on_the_first_draw": "ForeverSTUwaveDB = { consoleEnabled = false }",
     "console_off_restores_the_pill_layout_exactly": "ForeverSTUwaveDB = { consoleEnabled = false }",
     "a_failed_build_falls_back_to_pill_chrome_without_reentering_or_unsaving": FAILED_BUILD_FALLBACK,

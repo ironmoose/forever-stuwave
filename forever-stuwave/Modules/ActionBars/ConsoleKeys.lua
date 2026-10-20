@@ -29,7 +29,10 @@
 -- the key is Hidden, the piece's on/off setting is never touched (Gunsight.SetPiece is not called) and the
 -- hidden key still follows OnPieceChanged. The shown keys take consecutive slots (the Console's
 -- KeyRect(slot)) at the even pitch, and `Console.SetKeyCount(n)` sizes the shoulder tab for the shown
--- count. The profile is resolved by HudLogic at load or PLAYER_LOGIN, before the Gunsight's OnReady
+-- count. The count is the number of keys actually drawn, whatever hid the rest, and ZERO drawn keys is what
+-- takes the tab away (the Console draws the plain plate then): a Gunsight that is off draws no key, so it has
+-- no tab, and a key that stays drawn with the Gunsight off (see KeyDrawn) keeps a tab of its own size.
+-- The profile is resolved by HudLogic at load or PLAYER_LOGIN, before the Gunsight's OnReady
 -- builds these keys; HudLogic has no profile-change hook (a class never changes), so the visibility is
 -- recomputed at every hook this file already has (the Console's geometry callback, a rescale,
 -- PLAYER_REGEN_ENABLED) plus PLAYER_ENTERING_WORLD, and applied only when the shown set changed.
@@ -72,19 +75,20 @@
 --
 -- WHAT EXISTS IS READ ONCE, THE SWITCH IS LIVE. Whether the keys are BUILT is captured at login
 -- (Gunsight.OnReady, the moment the Gunsight's own init has decided what to build): a Gunsight that was off then
--- builds no keys and registers no `party`, and `/fsgun on` afterwards builds nothing until a reload. A Gunsight
--- that was on follows Gunsight.OnActiveChanged, because the keys live on Console.tab and not under the Gunsight
--- root, so hiding the root does not hide them. Inactive: the key host is hidden (a plain frame, so also in
--- combat), the tab goes back to its full width and the `party` piece is RELEASED (Gunsight.ReleasePiece: the
+-- builds no keys, so no key is drawn and the Console draws no tab, and registers no `party`, and `/fsgun on`
+-- afterwards builds nothing until a reload. A Gunsight that was on follows Gunsight.OnActiveChanged, because
+-- the keys live on Console.tab and not under the Gunsight root, so hiding the root does not hide them.
+-- Inactive: the key host is hidden (a plain frame, so also in combat), no key is drawn so the tab goes away (at
+-- regen in combat, with the other re-seats) and the `party` piece is RELEASED (Gunsight.ReleasePiece: the
 -- party frames show whatever the piece says, as on a Gunsight-off login, and a Gunsight-off piece change or
 -- profile switch does not hide them). Active again: the host shows, the layout is re-seated for the shown set
--- and the party piece is resumed. The tab resize and any re-seat wait for PLAYER_REGEN_ENABLED in combat
--- like every other re-seat here; the party container is protected, so ReleasePiece / ResumePiece give it alpha
--- only in combat and the Show or Hide at regen.
+-- (the tab comes back sized for it) and the party piece is resumed. The tab resize and any re-seat wait for
+-- PLAYER_REGEN_ENABLED in combat like every other re-seat here; the party container is protected, so
+-- ReleasePiece / ResumePiece give it alpha only in combat and the Show or Hide at regen.
 --
 -- SCALE AND COMBAT. Built once. Re-seated (visibility, slots, positions, sizes, art scale, and the
--- tab's size through Console.SetKeyCount) from the Console's geometry callback, FS.Layout.OnRescale
--- and the visibility hooks above, outside combat only (the tab hangs off the protected action stack's
+-- tab's size, or its absence, through Console.SetKeyCount) from the Console's geometry callback,
+-- FS.Layout.OnRescale and the visibility hooks above, outside combat only (the tab hangs off the protected action stack's
 -- anchor chain, and Console.SetKeyCount refuses in combat); a re-seat asked for in combat runs at
 -- PLAYER_REGEN_ENABLED, all of it in one pass so the tab and the keys never disagree.
 
@@ -218,6 +222,8 @@ local shownCount = 0
 local partyRegistered = false
 local partyRetried = false   -- the one next-frame retry has been spent
 local inactive = false       -- the Gunsight is switched off (or waiting to come back): keys hidden, party released
+local gunsightReady = false  -- the Gunsight's OnReady has run: its state at login is final
+local loginEnabled = false   -- Gunsight.IsEnabled() as of login, never re-read (see WHAT EXISTS IS READ ONCE)
 local partyReleased = false  -- the party piece is stood down for an inactive Gunsight
 local RegisterParty        -- defined below the build code, called from a key click
 
@@ -516,25 +522,27 @@ local function BuildKey(i, def)
     return k
 end
 
--- The shown set under the current profile: "1" or "0" per DEFS entry.
+-- True when the key for `piece` is drawn right now: it has something to show for the class and the Gunsight
+-- is not inactive. The Console's tab is sized for the number of keys this lets through (the tab goes away at
+-- zero). A key meant to stay drawn with the Gunsight off has to be let through here, and OnActiveChanged
+-- (which hides the whole key host while inactive) has to leave the host shown for it.
+local function KeyDrawn(piece, profile)
+    return not inactive and ConsoleKeys.KeyShown(piece, profile)
+end
+
+-- The drawn set under the current profile: "1" or "0" per DEFS entry.
 local function ShownSignature()
     local p = Profile()
     local out = {}
-    for i, def in ipairs(DEFS) do out[i] = ConsoleKeys.KeyShown(def.key, p) and "1" or "0" end
+    for i, def in ipairs(DEFS) do out[i] = KeyDrawn(def.key, p) and "1" or "0" end
     return table.concat(out)
 end
 
--- Gives the shown keys consecutive slots, sizes the Console's tab for them, then seats, shows and
--- hides. Out of combat only (Reseat checks). The hit areas grow half a gap to each side, so they
--- tile the even pitch.
+-- Gives the drawn keys consecutive slots, sizes the Console's tab for them (no keys, no tab), then seats,
+-- shows and hides. Out of combat only (Reseat checks). The hit areas grow half a gap to each side, so they
+-- tile the even pitch. Runs without any key built too (a Gunsight that was off at login): then it only
+-- takes the tab away.
 local function ApplyLayout()
-    if inactive then
-        -- The Gunsight is off: draw nothing and size the tab as a Gunsight-off login does (the full set, no keys).
-        host:Hide()
-        Console.SetKeyCount(Console.KEY.COUNT)
-        seatedSig = nil
-        return
-    end
     local sig = ShownSignature()
     local slot = 0
     for i, k in ipairs(keys) do
@@ -542,7 +550,7 @@ local function ApplyLayout()
         if k.shown then k.slot = slot; slot = slot + 1 else k.slot = nil end
     end
     shownCount = slot
-    Console.SetKeyCount(slot)
+    Console.SetKeyCount(slot)   -- 0: the Console draws the plain plate, no tab
     local s = Scale()
     local half = Console.KEY.GAP / 2
     for _, k in ipairs(keys) do
@@ -560,12 +568,19 @@ local function ApplyLayout()
             k.btn:Hide()
         end
     end
-    host:Show()
+    if host then
+        if slot > 0 then host:Show() else host:Hide() end
+    end
     seatedSig = sig
 end
 
 local function Reseat()
-    if not built then return end
+    if not built then
+        -- A Gunsight that was off at login builds no keys, now or later this session: none is drawn, so the
+        -- Console is sized for none. (Until OnReady the state is unknown, and a build that failed or is waiting
+        -- for the Console's tab may still succeed: leave the Console alone then.)
+        if not (gunsightReady and not loginEnabled) then return end
+    end
     if InCombatLockdown() then
         pendingSeat = true
         return
@@ -578,13 +593,13 @@ end
 -- Re-reads the profile and applies a layout only when the shown set changed (or a re-seat is owed).
 -- The cheap check the visibility hooks run.
 local function Refresh()
-    if not built then return end
+    if not built then
+        if pendingSeat then Reseat() end   -- the no-key tab change that waited for combat to end
+        return
+    end
     if inactive and not pendingSeat then return end
     if pendingSeat or ShownSignature() ~= seatedSig then Reseat() end
 end
-
-local gunsightReady = false
-local loginEnabled = false   -- Gunsight.IsEnabled() as of login, never re-read (see WHAT EXISTS IS READ ONCE)
 
 -- The party frame container is the `party` piece. Registered once, when it exists (a login in
 -- combat builds it after combat) and the Gunsight was enabled at login.
@@ -668,6 +683,7 @@ Gunsight.OnReady(function()
     gunsightReady = true
     loginEnabled = Gunsight.IsEnabled() and true or false
     Ensure()
+    if not built then Reseat() end   -- a Gunsight that was off at login: no keys, so no tab
 end)
 
 -- The Console's own geometry callback runs first (it subscribed earlier), so the tab is seated.

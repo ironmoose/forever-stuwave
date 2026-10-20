@@ -5,7 +5,8 @@
 -- panel style": CN_* constants, cnTrace, cnBake, drawConsole). ONE plate around the 72
 -- buttons, cut 14 at the TOP-LEFT and BOTTOM-RIGHT, with a stepped shoulder tab on top
 -- of the right half that holds the 8 HUD keys (a later lane seats them on `FS.Console.tab`,
--- inside `FS.Console.keyArea`). No recess plate behind the buttons.
+-- inside `FS.Console.keyArea`). No recess plate behind the buttons. With no keys shown
+-- (SetKeyCount(0)) there is no tab: see NO TAB.
 --
 -- UNITS. Everything drawn is written in DESIGN px (2560 x 1440), on `Console.art`, a
 -- child frame scaled by FS.Layout.Scale(): one unit there is one design px, which is one
@@ -32,6 +33,13 @@
 -- halo around the whole rectangle would light the inside of the tab. Four corner blocks
 -- and four 1 D strips sampled from its middle; the tab's foot has its own texture
 -- (console_tab_foot) with the rail on the 45 degree diagonal and its outside halo.
+--
+-- NO TAB. The tab is drawn for the keys that are shown, and only for them: SetKeyCount(0) (no key shown, for
+-- example every key hidden because the Gunsight HUD is off) draws the plain plate. Same cut corners, same
+-- pieces: the shoulder pieces (foot rail, tab top line, wedge, tab fill, tab top halo) and the key lane's frame
+-- are hidden, and the chassis top line, the top halo and the right edge run to the top right corner the way
+-- the left edge runs to the bottom left (`layout.th` is then 0, the value another module reads to know how
+-- tall a tab stands above the top line). Any count from 1 on is the tab as it always was.
 --
 -- OFF SWITCH. `/fsconsole on|off`, saved in ForeverSTUwaveDB.consoleEnabled (default
 -- on). Off hides this frame and ActionBars.lua brings the per-pill chrome and the 6 unit
@@ -74,7 +82,7 @@ local C = {
     SR = 3,                                         -- screw radius
     TP = 15,                                        -- padding right of the last key, above the keys, and (perpendicular) from the cut to the first key
 }
--- COUNT is the most keys the tab holds. The pitch is EVEN (key + GAP): no group gaps.
+-- COUNT is the most keys the tab holds, none at all is no tab. The pitch is EVEN (key + GAP): no group gaps.
 local KEY = { W = 34, H = 26, C = 6, GAP = 4, PAD = 16, SH = 18, COUNT = 8 }
 local ROW_PITCH_DESIGN, BTN_DESIGN = 49.2, 36
 local function KeyX(i)
@@ -88,7 +96,7 @@ local function TabBox(n)
 end
 local function ClampCount(n)
     n = math.floor(tonumber(n) or KEY.COUNT)
-    if n < 1 then return 1 end
+    if n < 0 then return 0 end
     if n > KEY.COUNT then return KEY.COUNT end
     return n
 end
@@ -152,7 +160,10 @@ Console.OUTLINE_ALPHA = OUTLINE_ALPHA
 
 -- The key count the tab is sized for (see SetKeyCount); the default is the full set.
 local keyCount = KEY.COUNT
-function Console.TabWidth(n) return TabBox(ClampCount(n)) end
+function Console.TabWidth(n)
+    n = ClampCount(n)
+    return n > 0 and TabBox(n) or 0
+end
 function Console.GetKeyCount() return keyCount end
 
 -- The pet dock gap (see SetDockGap): { x0, x1, hx0, hx1 } in design px from the chassis left, as the
@@ -182,16 +193,21 @@ function Console.Compute(g, s, n)
     -- left edge of the first button of each half, relative to the chassis
     L.btnX = { d(g.halfX[1] + g.btnX0 - L.originX), d(g.halfX[2] + g.btnX0 - L.originX) }
     L.spineX = d(g.spineX - L.originX)
-    -- the shoulder: its foot stands on the chassis top line, its right edge is the chassis right edge
-    L.th = C.TH
-    L.tx = L.w - (TabBox(n and ClampCount(n) or keyCount) - C.FOOT)
-    -- the pet dock gap, clamped to the span the top line can be drawn on (the TL cut to the foot);
-    -- a gap that is empty once clamped, or lies outside the span, is no gap at all
+    -- the shoulder: its foot stands on the chassis top line, its right edge is the chassis right edge.
+    -- With no keys there is none: the top line runs to the right line (which owns the corner texel, as the
+    -- bottom line owns the bottom left one) and the top halo to the top right corner block.
+    local count = n and ClampCount(n) or keyCount
+    L.hasTab = count > 0
+    L.th = L.hasTab and C.TH or 0
+    L.tx = L.hasTab and (L.w - (TabBox(count) - C.FOOT)) or (L.w - LINE)
+    L.haloEnd = L.hasTab and (L.tx - FOOT_PAD) or (L.w - L.cut)
+    -- the pet dock gap, clamped to the span the top line can be drawn on (the TL cut to the foot, or to the
+    -- top right corner with no tab); a gap that is empty once clamped, or lies outside the span, is no gap at all
     if dockGap then
         local x0, x1 = math.max(dockGap[1], L.cut), math.min(dockGap[2], L.tx)
         if x1 > x0 then L.gap = { x0 = x0, x1 = x1 } end
         -- the halo stops where the foot texture's own halo begins (SeatHalo)
-        local h0, h1 = math.max(dockGap[3], L.cut), math.min(dockGap[4], L.tx - FOOT_PAD)
+        local h0, h1 = math.max(dockGap[3], L.cut), math.min(dockGap[4], L.haloEnd)
         if h1 > h0 then L.haloGap = { x0 = h0, x1 = h1 } end
     end
     return L
@@ -401,8 +417,8 @@ end
 local function SeatHalo(L)
     local W, H, cut, tx, th = L.w, L.h, L.cut, L.tx, L.th
     local gap = L.haloGap
-    local footStart = tx - FOOT_PAD   -- from here the foot texture carries the halo, chassis top line included
-    local footEnd = footStart + FOOT_W
+    local footStart = L.haloEnd       -- from here the foot texture carries the halo, chassis top line included
+    local footEnd = footStart + FOOT_W   -- (with no tab the top halo runs on to the top right corner block)
     local mid0, mid1 = GLOW.mid0 / TEXN, GLOW.mid1 / TEXN   -- the straight middle: does not vary along the edge
     local edge0 = (TEXN - GP) / TEXN              -- the texel the outline sits on, right and bottom
     local block1 = 1 - GM / TEXN                  -- start of the far corner block
@@ -422,8 +438,13 @@ local function SeatHalo(L)
     -- (and the gap patch, the top halo's own strip over the gap, carries it whole when its alpha is 1)
     PlaceRun(parts.gapHalo, gap and gap.x0 or 0, -GP, gap and gap.x1 - gap.x0 or 0, GP)
     Uv(parts.gapHalo, mid0, mid1, 0, GP / TEXN)
-    Place(parts.haloTabTop, footEnd, -th - GP, (W - cut) - footEnd, GP)
-    Uv(parts.haloTabTop, mid0, mid1, 0, GP / TEXN)
+    if L.hasTab then
+        Place(parts.haloTabTop, footEnd, -th - GP, (W - cut) - footEnd, GP)
+        Uv(parts.haloTabTop, mid0, mid1, 0, GP / TEXN)
+        parts.haloTabTop:Show()
+    else
+        parts.haloTabTop:Hide()
+    end
     Place(parts.haloRight, W, -th + cut, GP, (H - cut) - (-th + cut))
     Uv(parts.haloRight, edge0, 1, mid0, mid1)
     Place(parts.haloBottom, cut, H, W - 2 * cut, GP);      Uv(parts.haloBottom, mid0, mid1, edge0, 1)
@@ -445,8 +466,15 @@ local function SeatFill(L)
     local br = FillAt(1 - cut / 2 / H)
     parts.fillBR:SetVertexColor(br[1], br[2], br[3], br[4])
     -- the shoulder: a 45 degree wedge over the foot, then a plain rect to the right edge
-    Place(parts.tabWedge, tx, -th, th, th)
-    Place(parts.tabFill, tx + th, -th, W - tx - th, th)
+    if L.hasTab then
+        Place(parts.tabWedge, tx, -th, th, th)
+        Place(parts.tabFill, tx + th, -th, W - tx - th, th)
+        parts.tabWedge:Show()
+        parts.tabFill:Show()
+    else
+        parts.tabWedge:Hide()
+        parts.tabFill:Hide()
+    end
 end
 
 local function SeatOutline(L)
@@ -463,11 +491,18 @@ local function SeatOutline(L)
     Place(parts.lineBottom, 0, H - LINE, W - cut, LINE)
     Place(parts.cornerBR, W - cut, H - cut, cut, cut);     Uv(parts.cornerBR, 1 - c, 1, 1 - c, 1)
     -- shoulder: the foot rail (45 degrees, plus a 10 unit stub of the top edge), the top
-    -- edge, and ONE right edge from the tab top down to the BR cut
-    local footX = tx - FOOT_PAD
-    Place(parts.foot, footX, -FOOT_H + SEAM, FOOT_W, FOOT_H)
-    Place(parts.lineTabTop, footX + FOOT_W, -th, (W - LINE) - (footX + FOOT_W), LINE)
-    Place(parts.lineRight, W - LINE, -th, LINE, (H - cut) + th)
+    -- edge, and ONE right edge from the tab top down to the BR cut (none of the first two without a tab)
+    if L.hasTab then
+        local footX = tx - FOOT_PAD
+        Place(parts.foot, footX, -FOOT_H + SEAM, FOOT_W, FOOT_H)
+        Place(parts.lineTabTop, footX + FOOT_W, -th, (W - LINE) - (footX + FOOT_W), LINE)
+        parts.foot:Show()
+        parts.lineTabTop:Show()
+    else
+        parts.foot:Hide()
+        parts.lineTabTop:Hide()
+    end
+    Place(parts.lineRight, W - LINE, -th, LINE, (H - cut) + th)   -- th is 0 with no tab: from the top edge down
 end
 
 local function SeatInside(L)
@@ -510,7 +545,8 @@ local function SeatInside(L)
     parts.main:SetPoint("BOTTOMLEFT", art, "TOPLEFT", f.x, -(mainBase + desc))
     parts.serial:ClearAllPoints()
     parts.serial:SetPoint("BOTTOMLEFT", art, "TOPLEFT", 14, -(serialBase + desc))
-    -- a screw in each square corner: the shoulder's top right and the chassis bottom left
+    -- a screw in each square corner: the shoulder's top right (the chassis top right with no tab) and the
+    -- chassis bottom left
     local slashLen, slashLean = math.sqrt(4.2 * 4.2 + 2.4 * 2.4), math.atan2(2.4, 4.2)
     local spots = { { W - 7.5, -L.th + 7.5 }, { 7.5, H - 7.5 } }
     for i, spot in ipairs(spots) do
@@ -539,16 +575,22 @@ local function Seat(g)
     SeatInside(L)
     ApplyPatchAlpha()
 
-    -- the tab: a UI unit frame over the shoulder, the key lane's parent
+    -- the tab: a UI unit frame over the shoulder, the key lane's parent (hidden, and no key area, with no tab)
     local tab = Console.tab
-    tab:ClearAllPoints()
-    tab:SetPoint("TOPLEFT", root, "TOPLEFT", L.tx * s, L.th * s)
-    tab:SetSize((TabBox(keyCount) - C.FOOT) * s, L.th * s)
-    local first = Console.KeyRect(0, s)
-    Console.keyArea = {
-        x = first.x, y = first.y, h = first.h,
-        w = (KeyX(keyCount - 1) + KEY.W - KeyX(0)) * s,
-    }
+    if L.hasTab then
+        tab:ClearAllPoints()
+        tab:SetPoint("TOPLEFT", root, "TOPLEFT", L.tx * s, L.th * s)
+        tab:SetSize((TabBox(keyCount) - C.FOOT) * s, L.th * s)
+        tab:Show()
+        local first = Console.KeyRect(0, s)
+        Console.keyArea = {
+            x = first.x, y = first.y, h = first.h,
+            w = (KeyX(keyCount - 1) + KEY.W - KeyX(0)) * s,
+        }
+    else
+        tab:Hide()
+        Console.keyArea = nil
+    end
 end
 
 -- ActionBars hides each pill's own chrome while its console look is applied, so a console
@@ -624,11 +666,11 @@ local function OnGeometry(g)
     root:Show()
 end
 
--- Sizes the shoulder tab for `n` shown HUD keys (1 to KEY.COUNT, clamped): the tab box is the left
+-- Sizes the shoulder tab for `n` shown HUD keys (0 to KEY.COUNT, clamped): the tab box is the left
 -- inset plus the keys at the even pitch plus the 15 right padding, and the whole slanted shoulder
--- (halo, fill, wedge, foot rail, outline) re-seats on that edge. The key lane seats the keys in
--- slots with KeyRect, which does not change with the count. The chassis is anchored to the
--- protected action stack, so this is refused in combat (returns false, nothing changes and the
+-- (halo, fill, wedge, foot rail, outline) re-seats on that edge. 0 keys draw no tab at all (NO TAB, above).
+-- The key lane seats the keys in slots with KeyRect, which does not change with the count. The chassis is
+-- anchored to the protected action stack, so this is refused in combat (returns false, nothing changes and the
 -- count is not recorded): the caller asks again at PLAYER_REGEN_ENABLED. Returns true when the
 -- count is in force (also while the chassis is not drawn: the next geometry uses it).
 function Console.SetKeyCount(n)
