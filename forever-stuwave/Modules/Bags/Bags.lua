@@ -65,13 +65,16 @@ local MAX_CONTAINERS = 13 -- historical NUM_CONTAINER_FRAMES ceiling; loop skips
 --
 -- A FILLED slot wears one more piece of Blizzard art, the button's `IconBorder`:
 -- UpdateItems and BankPanelItemButtonMixin:Refresh call SetItemButtonQuality, which
--- shows it with Interface\Common\WhiteIconFrame (a square frame with rounded corners)
--- and tints it by quality (SetItemButtonBorder, SetItemButtonBorderVertexColor) for
--- every quality in BAG_ITEM_QUALITY_COLORS, Common (grey) included
+-- shows it with Interface\Common\WhiteIconFrame (a square frame with rounded corners;
+-- a relic item gets Interface\Artifacts\RelicIconFrame in the same region) and tints it
+-- by quality (SetItemButtonBorder, SetItemButtonBorderVertexColor) for Common and up: the
+-- qualities in BAG_ITEM_QUALITY_COLORS, Common (grey) first, so Poor (junk) gets none.
+-- ColorManager.GetColorDataForBagItemQuality may swap in a colour the player overrode
 -- (Blizzard_ItemButton/Mainline/ItemButtonTemplate.lua, Blizzard_Colors/Mainline/
--- ColorConstants.lua, 12.1 source). An empty slot gets no border, which is why only slots
--- holding an item still showed Blizzard's frame, its rounded corners reaching past the cut
--- corners of our ring. So it is held at alpha 0 with the rest. Blizzard drives it with
+-- ColorConstants.lua and ColorManager.lua, 12.1 source). An empty slot gets no border,
+-- which is why only slots holding an item still showed Blizzard's frame, its rounded
+-- corners reaching past the cut corners of our ring. So the region, whichever frame
+-- texture it wears, is held at alpha 0 with the rest. Blizzard drives it with
 -- Show/Hide, SetTexture and SetVertexColor, none of which touch alpha, so its shown state,
 -- texture and colour stay Blizzard's; the one alpha write is ItemButtonMixin:SetAlpha
 -- (Blizzard_ItemButton/Shared/ItemButtonTemplate.lua), which writes a button's alpha

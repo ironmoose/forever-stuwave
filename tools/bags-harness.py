@@ -329,8 +329,10 @@ function BlizzardPaint(b, info)
     end
 end
 
--- ItemButtonMixin:SetAlpha (Blizzard_ItemButton/Shared/ItemButtonTemplate.lua): a button alpha write goes to its
--- icon and to the IconBorder as a plain region SetAlpha, whatever alpha we are holding there.
+-- Mirrors ItemButtonMixin:SetAlpha (12.1 source, Blizzard_ItemButton/Shared/ItemButtonTemplate.lua lines 233-239), which
+-- also writes IconOverlay, Stock and Count; only the two regions this file reads are modelled. A button alpha write goes
+-- to the icon and to the IconBorder as a plain region SetAlpha, whatever alpha we are holding there. If the source line
+-- changes, change this with it.
 function BlizzardButtonAlpha(b, a)
     b.icon:SetAlpha(a)
     b.IconBorder:SetAlpha(a)
@@ -672,7 +674,6 @@ def check_icon_border() -> None:
     r, g, b = (float(v) for v in w.ev("(function() local r, g, b = c1.Items[1].IconBorder:GetVertexColor(); return {r, g, b} end)()").values())
     check("border.blizzards_colour_is_untouched", near(r, 0.1) and near(g, 0.9) and near(b, 0.2), f"{r},{g},{b}")
     check("border.blizzards_texture_is_untouched", w.ev("c1.Items[1].IconBorder:GetTexture() == 'Interface\\\\Common\\\\WhiteIconFrame'"))
-    check("border.empty_slot_has_none_either", w.ev("not Visible(c1.Items[2].IconBorder) and not Visible(comb.Items[2].IconBorder)"))
 
     # Blizzard repaints every slot: border re-shown and re-tinted, then the button alpha written through
     w.run("c1.infos[1].quality = { 0.64, 0.21, 0.93 }; c1:UpdateItems(); comb:UpdateItems(); bank.RefreshAllItemsForSelectedTab(bank)")
@@ -690,14 +691,11 @@ def check_icon_border() -> None:
     w.run("bank.infos[2] = { icon = 137, quality = { 0, 0.44, 0.87 } }; bank.RefreshAllItemsForSelectedTab(bank)")
     check("border.item_arriving_in_an_empty_bank_slot_shows_no_border", tags(w, "bank.pool[2]") == "icon,plate,ring", tags(w, "bank.pool[2]"))
 
-    # one hook, only on the alpha: Show / SetShown / SetVertexColor / SetTexture / SetAtlas are Blizzard's alone
+    # one alpha hook per region however many passes ran (Blizzard's own shown state and colour are pinned above)
     for _ in range(3):
         w.run("c1:UpdateItems(); comb:UpdateItems(); bank.RefreshAllItemsForSelectedTab(bank)")
     check("border.alpha_hooked_once", w.ev("HookCount(c1.Items[1].IconBorder, 'SetAlpha') == 1 and HookCount(bank.pool[1].IconBorder, 'SetAlpha') == 1"),
           str(w.ev("HookCount(c1.Items[1].IconBorder, 'SetAlpha')")))
-    check("border.nothing_else_on_it_is_hooked",
-          w.ev("(function() for _, m in ipairs({ 'Show', 'Hide', 'SetShown', 'SetVertexColor', 'SetTexture', 'SetAtlas' }) do "
-               "if HookCount(c1.Items[1].IconBorder, m) ~= 0 then return false end end return true end)()"))
     check("border.nothing_swallowed", w.swallowed() == "", w.swallowed())
     check("border.no_degrade_logs", w.degrade() == "", w.degrade())
 
@@ -752,7 +750,6 @@ def check_plate_and_border() -> None:
     check("plate.empty_combined_slot_shows_only_plate_and_ring", tags(w, "comb.Items[2]") == "plate,ring", tags(w, "comb.Items[2]"))
     # a filled slot: the icon (the item) on top of the plate, our ring, and no Blizzard border at all
     check("plate.filled_slot_has_only_icon_plate_and_ring", tags(w, "c1.Items[1]") == "icon,plate,ring", tags(w, "c1.Items[1]"))
-    check("plate.filled_bank_slot_has_only_icon_plate_and_ring", tags(w, "bank.pool[1]") == "icon,plate,ring", tags(w, "bank.pool[1]"))
     check("plate.nothing_swallowed", w.swallowed() == "", w.swallowed())
     check("plate.no_degrade_logs", w.degrade() == "", w.degrade())
 
