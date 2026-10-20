@@ -46,8 +46,9 @@
 --
 -- Slash: /fsgun [on | off | seat <dx> <dy> | piece <key> on|off | outlines]. Public surface (all
 -- FS.Gunsight.*): ui, Point, root, anchors, G, RegisterPiece, SetPiece, IsPieceOn, OnPieceChanged,
--- OnReady, IsEnabled, IsActive, OnActiveChanged, NeedsReload, ReleasePiece, ResumePiece, SetSeat, Reseat, CONFIG_ENABLED,
--- PieceConfigKey, AREA_IDS, AreaFamily, GetArea, SetArea, OnAreaChanged.
+-- OnReady, IsEnabled, IsActive, OnActiveChanged, NeedsReload, SetSeat, Reseat, CONFIG_ENABLED, PieceConfigKey,
+-- AREA_IDS, AreaFamily, GetArea, SetArea, OnAreaChanged. ReleasePiece and ResumePiece are still defined, but nothing
+-- calls them.
 
 local addonName, FS = ...
 

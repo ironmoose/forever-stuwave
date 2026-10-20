@@ -1289,7 +1289,9 @@ function T.move_hands_over_to_the_layout_editor_and_asks_to_come_back_to_this_pa
     eq(E.entered[1], "unitframes", "DONE or Esc comes back to the Unit Frames page")
     eq(#E.resets, 0)
     eq(#__errors, 0)
-    E.enterResult = false                     -- the editor refused (combat, Blizzard Edit Mode): it says why itself
+    -- The editor refused (combat, Blizzard Edit Mode). The stub only answers false; layoutedit-harness pins that
+    -- the real editor refuses before it closes the window.
+    E.enterResult = false
     click("Move", row("Move party frames"))
     eq(#E.entered, 2)
     yes(win():IsShown(), "and this window is left as it was")

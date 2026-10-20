@@ -1265,6 +1265,8 @@ function T.a_refused_entry_from_config_does_not_arm_the_return()
     __bliz = true
     spec.onClick()
     eq(FS.LayoutEdit.IsEditing(), false)
+    eq(FS.ConfigWindow.closed, 0, "the window is not closed for an entry Blizzard's Edit Mode refuses")
+    eq(__printedHas("Edit Mode"), true, "and says why")
     __bliz = false
     SlashCmdList.FSEDIT("")
     clickDone()
@@ -1307,6 +1309,29 @@ function T.entering_from_another_page_in_combat_keeps_the_window_open_and_says_w
     SlashCmdList.FSEDIT("")
     clickDone()
     eq(#FS.ConfigWindow.opened, 0, "a refused entry arms nothing")
+end
+
+function T.entering_from_another_page_while_blizzard_edit_mode_is_active_keeps_the_window_open_and_arms_nothing()
+    FS.ConfigWindow = fakeWindow()
+    edit(); seat("stance")
+    local entered = 0
+    local enter = FS.LayoutEdit.Enter
+    FS.LayoutEdit.Enter = function() entered = entered + 1; return enter() end
+    __bliz = true
+    eq(FS.LayoutEdit.EnterFromConfig("unitframes"), false)
+    eq(FS.ConfigWindow.closed, 0, "the window stays open, so the player keeps their place")
+    eq(FS.LayoutEdit.IsEditing(), false)
+    eq(FS.LayoutEdit.GetHandle("stance"), nil, "no handle shown")
+    eq(FS.LayoutEdit.GetDonePanel(), nil, "no DONE bar")
+    eq(__printedHas("Edit Mode"), true, "and says why")
+    eq(entered, 0, "the editor is not even asked: nothing to undo")
+    __bliz = false
+    SlashCmdList.FSEDIT("")
+    clickDone()
+    eq(#FS.ConfigWindow.opened, 0, "a refused entry arms no way back")
+    __bliz = true
+    eq(FS.LayoutEdit.EnterFromConfig(), false)
+    eq(FS.ConfigWindow.closed, 0, "the same for the Layout page's default")
 end
 
 function T.entering_from_another_page_while_already_editing_does_not_arm_the_return()

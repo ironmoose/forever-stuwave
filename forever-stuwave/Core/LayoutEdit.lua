@@ -491,13 +491,19 @@ local function RefuseInCombat()
     return true
 end
 
-function LayoutEdit.Enter()
-    if editing then return true end
-    if RefuseInCombat() then return false end
+-- True, after saying why, when the editor cannot start now: in combat, or with Blizzard's own Edit Mode open.
+local function RefuseToStart()
+    if RefuseInCombat() then return true end
     if BlizzardEditModeActive() then
         Say("close Blizzard Edit Mode first")
-        return false
+        return true
     end
+    return false
+end
+
+function LayoutEdit.Enter()
+    if editing then return true end
+    if RefuseToStart() then return false end
     -- Editing is on before any handle exists, so a failure part way is undone by Exit.
     editing = true
     selected = nil
@@ -542,8 +548,10 @@ end
 -- Closes the config window and opens the editor, out of combat only (a refusal leaves the window open and says why).
 -- DONE or Esc then reopens the page named here, the Layout page by default. The Layout page's button and any other page
 -- with its own Move button start here, so the way back is one rule. Entering while already editing arms nothing.
+-- Combat and Blizzard's Edit Mode are checked before the window closes, so a player who is refused keeps their place.
+-- Only a failure while Enter builds the handles still comes after the close (Enter then switches itself off again).
 function LayoutEdit.EnterFromConfig(pageKey)
-    if RefuseInCombat() then return false end
+    if RefuseToStart() then return false end
     local window = FS.ConfigWindow
     if type(window) == "table" and type(window.Close) == "function" then window.Close() end
     local was = editing
