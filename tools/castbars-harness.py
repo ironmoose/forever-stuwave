@@ -18,7 +18,8 @@ clock and a stubbed screen:
     engine is re-laid out once per move (no loop), and a UI scale change re-places the stack and
     refits the bars;
   * console clearance: a bar on its shipped seat is lifted over the Console art under it (chassis,
-    key tab from Console.TabHeight() (layout.th without it), the class blocks FS.ClassShoulder.EachStanding names), the lowest edge
+    key tab from Console.TabHeight() (layout.th without it) and its reach from layout.haloEnd less
+    GLOW.pad, the class blocks FS.ClassShoulder.EachStanding names), the lowest edge
     including the player's name tab ends CONSOLE_CAST_GAP above the tallest piece and the 18 gap
     between the bars is kept; no lift for a Priest-style Console with nothing standing, for art off to
     one side, for a Console that is not drawn, or for a bar dragged with /fsedit (and a default bar
@@ -768,6 +769,26 @@ function T.the_consoles_published_tab_height_is_what_counts_when_it_has_one()
     height = "tall"
     W.start()
     near(W.p().y, -337, PX, "an unusable figure counts as no tab and never throws")
+    W.clean()
+end
+
+function T.the_key_tabs_left_reach_comes_from_the_consoles_haloEnd_and_halo()
+    -- The tab's reach left of its lane is the Console's own foot start (layout.haloEnd) less the halo it publishes
+    -- (GLOW.pad), not a copy of either figure. The bar's right edge is placed in design px from the chassis left.
+    local W = consoleWorld({ th = 39.2 })
+    local rightDp = W.P.frame._w / 2 / DS - CHASSIS_LEFT
+    local function lift(pad) return (CHASSIS_TOP + (39.2 + pad) * DS) + GAPDP * DS - (-337 - BARH / 2 - TABHANG) end
+    W.keyTab.haloEnd = rightDp + HALO - 2            -- the halo's left edge 2 design px under the bar
+    W.start()
+    near(W.p().y, -337 + lift(HALO), PX, "haloEnd - halo under the bar: lifted")
+    W.end_cast()
+    W.keyTab.haloEnd = rightDp + HALO + 2            -- 2 design px clear of it
+    W.start()
+    near(W.p().y, -337, PX, "haloEnd - halo clear of the bar: not lifted")
+    W.end_cast()
+    FS.Console.GLOW.pad = 14                         -- a wider halo reaches back under the same bar
+    W.start()
+    near(W.p().y, -337 + lift(14), PX, "the Console's own halo figure is used")
     W.clean()
 end
 

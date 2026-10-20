@@ -69,18 +69,19 @@
 -- CONSOLE CLEARANCE. The shipped seat is the pre-Console one, which sits where the Console and the class
 -- tabs standing on its top line (Shaman totem / buff / regen tabs, Paladin seals, the key tab) now are. A bar
 -- still on its shipped seat (FS.Layout.IsOverridden false; a seat dragged with /fsedit is the player's and is
--- never moved) is therefore lifted by the one distance that puts the lowest edge of the whole stack, the
--- player's hanging name tab included, CONSOLE_CAST_GAP (FS.Layout, design px) above the tallest piece of
--- Console art under the bars' span. The art is read, not assumed: the chassis top line and size from
--- FS.Console.root / .layout, the key tab from Console.TabHeight() (0 once it is gone, as with the Gunsight
--- HUD off; layout.th on a build without it) and layout.tx, and each class block standing now from
--- FS.ClassShoulder.EachStanding (its x, width and height in design px), each with the Console's halo around
--- it. Only parts that overlap the bars in x count, so a narrow tab that is not under them lifts nothing, and
--- a Console that is not drawn, or has nothing under the bars, leaves the seat as it was shipped. The stack
--- moves as one: the 18 gap between the bars stays. The read repeats on the geometry and tab notices above
--- and at the start of each cast (a class tab can appear without either; the bars are hidden between casts,
--- so nothing is seen to jump). A rect that cannot be read plainly (a secret in combat) keeps the last lift.
--- Bar visuals are not touched, only the seat.
+-- never moved) is therefore lifted until its lowest edge, the player's hanging name tab included, is
+-- CONSOLE_CAST_GAP (FS.Layout, design px) above the tallest piece of Console art under the bars' span. With
+-- both bars on their shipped seats they rise together by the larger of their two needs, so the 18 gap between
+-- them stays; a bar beside a dragged one rises by its own need alone. The art is read, not assumed: the
+-- chassis top line and size from FS.Console.root / .layout, the key tab from Console.TabHeight() (0 once it
+-- is gone, as with the Gunsight HUD off; layout.th on a build without it) with its foot start from
+-- layout.haloEnd, and each class block standing now from FS.ClassShoulder.EachStanding (its x, width and
+-- height in design px), each with the Console's halo (Console.GLOW.pad) around it. Only parts that overlap
+-- the bars in x count, so a narrow tab that is not under them lifts nothing, and a Console that is not
+-- drawn, or has nothing under the bars, leaves the seat as it was shipped. The read repeats on the geometry
+-- and tab notices above and at the start of each cast (a class tab can appear without either; the bars are
+-- hidden between casts, so nothing is seen to jump). A rect that cannot be read plainly (a secret in combat)
+-- keeps the last lift. Bar visuals are not touched, only the seat.
 --
 -- EVENTS. Per bar, the eight UNIT_SPELLCAST_* events through RegisterUnitEvent for its unit,
 -- plus PLAYER_ENTERING_WORLD (a loading screen can swallow a verdict) and, for the target,
@@ -491,7 +492,7 @@ end
 -- is the answer of the last read that could be trusted, kept for the reads that cannot.
 local clear = { n = 0, lift = 0 }
 local CLEAR_GAP_DP = 8          -- design px, when FS.Layout has no CONSOLE_CAST_GAP
-local KEY_TAB_REACH_DP = 21     -- design px: the key tab's foot stub left of its lane (Console.lua FOOT_PAD, 10) and the halo (11)
+local KEY_FOOT_DP = 10          -- design px: the key tab's foot stub left of its lane, when the layout has no haloEnd
 local HALO_DP = 11              -- the halo's reach (Console.GLOW.pad) when the Console does not say
 
 local function AddPart(left, right, bottom, top)
@@ -537,8 +538,10 @@ local function ReadParts()
     -- line, 0 once the tab is gone), or the layout figure of a Console build without it
     local tabH = L.th
     if type(console.TabHeight) == "function" then tabH = console.TabHeight() end
-    if IsNum(tabH) and tabH > 0 and IsNum(L.tx) then
-        AddPart(rl + (L.tx - KEY_TAB_REACH_DP) * s, rl + (L.w + pad) * s, rt, rt + (tabH + pad) * s)
+    -- its left reach: where the foot starts (layout.haloEnd), less the halo
+    local footStart = IsNum(L.haloEnd) and L.haloEnd or (IsNum(L.tx) and L.tx - KEY_FOOT_DP)
+    if IsNum(tabH) and tabH > 0 and footStart then
+        AddPart(rl + (footStart - pad) * s, rl + (L.w + pad) * s, rt, rt + (tabH + pad) * s)
     end
     -- the class shoulders on the top line
     local shoulders = FS.ClassShoulder
@@ -578,7 +581,7 @@ local function BarNeed(S, cx, cy, ux, uy, gap)
     return NeedFor(left, left + w, uy + cy - FRAME_H / 2 - hang, uy + cy + FRAME_H / 2 + crown, gap)
 end
 
--- Seats both bars on their layout entries, each lifted by the stack's need over the Console when it is
+-- Seats both bars on their layout entries, each lifted over the Console (see CONSOLE CLEARANCE) when it is
 -- still on its shipped seat. Returns true when either bar moved.
 local function PlaceStack()
     local player, target = bars.player, bars.target
@@ -596,8 +599,9 @@ local function PlaceStack()
     local tx, ty, tFree = StackSeat("tcast", SEAT_Y + half)
     local pX, pY, pFree = StackSeat("pcast", SEAT_Y - half)
 
-    -- The lift: the stack moves as one, so a bar on its shipped seat beside a dragged one takes its own need
-    -- and both on theirs take the larger. A Console that cannot be read now leaves the last answer standing.
+    -- The lift: bars that are both on their shipped seats take the larger of their needs and rise together
+    -- (the gap between them stays); a bar beside a dragged one takes its own need alone, and a dragged one
+    -- is not moved. A Console that cannot be read now leaves the last answer standing.
     local lift = clear.lift
     if located and ReadConsole() then
         lift = 0
