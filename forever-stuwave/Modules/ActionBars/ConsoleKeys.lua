@@ -78,8 +78,9 @@
 -- Gunsight that was on follows Gunsight.OnActiveChanged, because the keys live on Console.tab and not under the
 -- Gunsight root, so hiding the root does not hide them. Inactive: each HUD key is hidden at once (plain frames,
 -- so also in combat) and no HUD key is drawn, so the tab narrows to the party key (at regen in combat, with the
--- other re-seats). Active again: the keys that were drawn show at once and the layout is re-seated for the shown
--- set. The tab resize and any re-seat wait for PLAYER_REGEN_ENABLED in combat like every other re-seat here. The
+-- other re-seats). Active again: the layout is re-seated for the shown set (a key the last layout still drew shows
+-- at once, which only happens for an off and on inside one fight). The tab resize and any re-seat wait for
+-- PLAYER_REGEN_ENABLED in combat like every other re-seat here. The
 -- party key is no part of this: the master switch never touches it or the party frames it switches.
 --
 -- SCALE AND COMBAT. Built once. Re-seated (visibility, slots, positions, sizes, art scale, and the
@@ -638,7 +639,9 @@ end)
 
 -- The master switch, live (see WHAT EXISTS IS READ ONCE, THE SWITCH IS LIVE). Only fires for a Gunsight that was built.
 -- The HUD keys stand down at once (plain frames, so also in combat) and the layout catches up when it can; the
--- party key is left alone. Coming back, the keys that were drawn before show again at once, in combat too.
+-- party key is left alone. Coming back, a key the last layout still drew shows again at once (a HUD that went off
+-- in combat comes back in the same fight); after an off out of combat the Gunsight itself returns only at regen,
+-- and the layout with it.
 Gunsight.OnActiveChanged(function(active)
     inactive = not active
     if built then

@@ -4,7 +4,7 @@
 -- the design mockup, the "Console
 -- panel style": CN_* constants, cnTrace, cnBake, drawConsole). ONE plate around the 72
 -- buttons, cut 14 at the TOP-LEFT and BOTTOM-RIGHT, with a stepped shoulder tab on top
--- of the right half that holds the 8 HUD keys (a later lane seats them on `FS.Console.tab`,
+-- of the right half that holds up to 8 keys (ConsoleKeys.lua seats them on `FS.Console.tab`,
 -- inside `FS.Console.keyArea`). No recess plate behind the buttons. With no keys shown
 -- (SetKeyCount(0)) there is no tab, `FS.Console.tab` is hidden and `keyArea` is nil: see NO TAB.
 --
@@ -34,8 +34,9 @@
 -- and four 1 D strips sampled from its middle; the tab's foot has its own texture
 -- (console_tab_foot) with the rail on the 45 degree diagonal and its outside halo.
 --
--- NO TAB. The tab is drawn for the keys that are shown, and only for them: SetKeyCount(0) (no key shown, for
--- example every key hidden because the Gunsight HUD is off) draws the plain plate. Same cut corners, same
+-- NO TAB. The tab is drawn for the keys that are shown, and only for them: SetKeyCount(0) (no key shown) draws
+-- the plain plate. ConsoleKeys always draws the party key, so nothing asks for zero today; the plain plate stays
+-- for a caller that does. Same cut corners, same
 -- pieces: the shoulder pieces (foot rail, tab top line, wedge, tab fill, tab top halo) and the key lane's frame
 -- are hidden, and the chassis top line, the top halo and the right edge run to the top right corner the way
 -- the left edge runs to the bottom left (`layout.th` is then 0, the value another module reads to know how
@@ -699,7 +700,7 @@ local function OnGeometry(g)
     NotifyTab()
 end
 
--- Sizes the shoulder tab for `n` shown HUD keys (0 to KEY.COUNT, clamped): the tab box is the left
+-- Sizes the shoulder tab for `n` shown keys (0 to KEY.COUNT, clamped): the tab box is the left
 -- inset plus the keys at the even pitch plus the 15 right padding, and the whole slanted shoulder
 -- (halo, fill, wedge, foot rail, outline) re-seats on that edge. 0 keys draw no tab at all (NO TAB, above).
 -- The key lane seats the keys in slots with KeyRect, which does not change with the count. The chassis is

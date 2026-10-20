@@ -1028,8 +1028,13 @@ checkPartyOnly(CK, "the Console came on after a disabled login")
 """)
 
 case("the_party_key_tooltip_opens_toward_the_console_whatever_the_key_count")(SHOWN_HELPERS + r"""
-local function corners(profile, db)
+local function corners(profile, db, only)
     local CK = boot({ profile = profile, db = db })
+    if only then
+        -- counts the classes cannot reach: say which HUD keys have something to show
+        CK.KeyShown = function(piece) return only[piece] == true end
+        CK.Refresh()
+    end
     local out = {}
     for _, k in ipairs(CK.keys) do
         if k.btn:IsShown() then
@@ -1047,6 +1052,8 @@ eq(corners(nil, { gunsight = { enabled = false, pieces = {} } }), "party=BOTTOMR
 -- the other counts keep their rule: slots 0 to 2 left, then centred, the last two right
 eq(corners("WARLOCK"), "you=BOTTOMLEFT,next=BOTTOMLEFT,shard=BOTTOMLEFT,buff=BOTTOM,tgt=BOTTOM,dot=BOTTOM,prc=BOTTOMRIGHT,party=BOTTOMRIGHT", "eight keys")
 eq(corners(false), "you=BOTTOMLEFT,tgt=BOTTOMLEFT,dot=BOTTOMLEFT,party=BOTTOMRIGHT", "four keys")
+eq(corners("WARLOCK", nil, { you = true }), "you=BOTTOMLEFT,party=BOTTOMRIGHT", "two keys")
+eq(corners("WARLOCK", nil, { you = true, tgt = true }), "you=BOTTOMLEFT,tgt=BOTTOMLEFT,party=BOTTOMRIGHT", "three keys")
 """)
 
 case("hide_clears_hover_and_down_and_repaints_the_look")(r"""
@@ -1411,6 +1418,25 @@ check(#FS.PartyFrames.calls == 2, "the master switch never asked the party frame
 check(#BLOCKED == 0, "nothing protected in combat")
 """)
 
+
+case("fsgun_off_out_of_combat_then_on_in_combat_returns_the_hud_keys_at_regen")(SHOWN_HELPERS + r"""
+local CK, G = boot({ profile = "PRIEST" })
+SlashCmdList["FSGUN"]("off")
+checkPartyOnly(CK, "off out of combat")
+IN_COMBAT = true
+SlashCmdList["FSGUN"]("on")
+check(G.IsActive() == false, "a hidden root cannot be shown in combat: the Gunsight waits for regen")
+for _, k in ipairs(CK.keys) do
+    if k.key ~= "party" then check(not k.btn:IsVisible(), k.key .. " is not drawn before the Gunsight is back") end
+end
+eq(FS.Console.GetKeyCount(), 1, "the Console is not resized in combat")
+check(#BLOCKED == 0, "nothing protected in combat")
+IN_COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+check(G.IsActive() == true, "the Gunsight is back at regen")
+checkFits(CK, 6, "the HUD keys return with it")
+for _, k in ipairs(CK.keys) do if k.shown then check(k.btn:IsVisible(), k.key .. " not drawn after regen") end end
+""")
 
 case("fsgun_off_then_on_in_one_fight_settles_on_the_saved_state_after_combat")(SHOWN_HELPERS + r"""
 local CK, G = boot({ profile = "PRIEST" })

@@ -73,8 +73,8 @@
 -- CONSOLE_CAST_GAP (FS.Layout, design px) above the tallest piece of Console art under the bars' span. With
 -- both bars on their shipped seats they rise together by the larger of their two needs, so the 18 gap between
 -- them stays; a bar beside a dragged one rises by its own need alone. The art is read, not assumed: the
--- chassis top line and size from FS.Console.root / .layout, the key tab from Console.TabHeight() (0 once it
--- is gone, as with the Gunsight HUD off; layout.th on a build without it) with its foot start from
+-- chassis top line and size from FS.Console.root / .layout, the key tab from Console.TabHeight() (0 while no
+-- tab stands or the Console is not drawn; layout.th on a build without it) with its foot start from
 -- layout.haloEnd, and each class block standing now from FS.ClassShoulder.EachStanding (its x, width and
 -- height in design px), each with the Console's halo (Console.GLOW.pad) around it. Only parts that overlap
 -- the bars in x count, so a narrow tab that is not under them lifts nothing, and a Console that is not
