@@ -23,14 +23,16 @@ DECK_DEFS, keyX, the `.cdeck.bm` key rules, the Rings block). The checks pin:
     outage takes 1.0 s and keeps the lit look until it ends, the ring then eases out over 0.4 s, and
     nothing is left running at rest; reduced motion, a hidden key and a missing Fx snap instead;
   * a rescale re-seats and creates nothing, in combat it waits for regen;
-  * the keys follow the Console (hidden with /fsconsole off) and what the Gunsight BUILT at login (not
-    built when it was disabled then; `/fsgun on` after that builds nothing until a reload);
+  * the keys follow the Console (hidden with /fsconsole off) and what the Gunsight BUILT at login (the HUD
+    keys are drawn only for a Gunsight that was on then; `/fsgun on` after a disabled login draws none
+    of them until a reload);
   * the party key is not a Gunsight piece: it reads, sets and follows FS.PartyFrames (a stand-in with
     that module's contract here; partyframes-harness.py pins the real one), so a click or a change of
     the saved value reaches the party frames only through it, and the master switch never touches it;
-  * the master switch is live for a Gunsight that was built: switched off, the keys are hidden (also in
-    combat) and no key is shown so the Console draws no tab (at regen in combat; a Gunsight that was off
-    at login has no keys either, so no tab from the start); switched on, they come back.
+  * the party key is drawn whatever the Gunsight is doing: with the HUD off (disabled at login, or switched
+    off live) it is the one key left, in slot 0 of a one key tab at the tab's full height, and a click
+    still switches the party frames; the master switch is live for a Gunsight that was built: switched
+    off, the HUD keys are hidden (also in combat; the tab narrows at regen), switched on, they come back.
 
 The mock is strict (a widget method it does not define fails as a nil call) and is NOT the real client.
 
@@ -916,65 +918,6 @@ local function checkTabBack(before, n, label)
 end
 """
 
-case("gunsight_disabled_builds_nothing_and_leaves_party_alone")(TAB_HELPERS + r"""
-local CK, G = boot({ db = { gunsight = { enabled = false, pieces = { party = false } } } })
-checkNoTab("gunsight disabled at login")
-check(not G.IsEnabled(), "gunsight is disabled")
-check(not CK.IsBuilt(), "keys were built with the Gunsight disabled")
-check(not FS.PartyFrames.IsShown() and #FS.PartyFrames.calls == 0, "the party frames keep their own saved state and nothing asked them anything")
-for _, f in ipairs(FRAMES) do check(not (f.name and f.name:find("^FSConsoleKey")), "a key frame exists: " .. tostring(f.name)) end
-""")
-
-case("fsgun_on_after_a_disabled_login_builds_nothing_until_a_reload")(TAB_HELPERS + r"""
-local CK, G = boot({ db = { gunsight = { enabled = false, pieces = {} } } })
-check(not CK.IsBuilt(), "keys built with the Gunsight disabled at login")
-SlashCmdList["FSGUN"]("on")
-FS.ActionBars.Publish()
-fire("PLAYER_REGEN_ENABLED")
-checkNoTab("gunsight switched on after a disabled login: no keys exist, so no tab")
-check(FS.Config.Get("gunsight.enabled") == true, "/fsgun on saves the setting")
-check(not G.IsEnabled(), "the live state is fixed at load, so a built UI never changes under it")
-check(not CK.IsBuilt(), "/fsgun on built the keys without a reload")
-for _, f in ipairs(FRAMES) do check(not (f.name and f.name:find("^FSConsoleKey")), "a key frame exists: " .. tostring(f.name)) end
-check(#FS.PartyFrames.calls == 0, "the party frames were asked something after a disabled login")
-""")
-
-case("a_disabled_login_with_the_geometry_arriving_after_it_draws_no_tab")(TAB_HELPERS + r"""
-local CK = boot({ geometryFirst = false, db = { gunsight = { enabled = false, pieces = {} } } })
-checkNoTab("geometry after a disabled login")
-""")
-
-case("a_disabled_login_in_combat_draws_no_tab_once_combat_ends")(TAB_HELPERS + r"""
-local CK = boot({ combat = true, db = { gunsight = { enabled = false, pieces = {} } } })
-eq(FS.Console.GetKeyCount(), FS.Console.KEY.COUNT, "the Console cannot be resized in combat")
-check(#BLOCKED == 0, "nothing protected was touched in combat")
-IN_COMBAT = false
-fire("PLAYER_REGEN_ENABLED")
-checkNoTab("after combat")
-""")
-
-case("hide_clears_hover_and_down_and_repaints_the_look")(r"""
-local CK = boot({})
-local k = keyOf(CK, "you")
-k.btn.scripts.OnEnter(k.btn)
-k.btn.scripts.OnMouseDown(k.btn)
-near(k.glow.vcolor[4], 0.5, "pressed halo before the hide")
-k.btn.scripts.OnHide(k.btn)
-check(not k.hover and not k.down, "hover/down not cleared on hide")
-near(k.glow.vcolor[4], 0.34, "the halo was not repainted to the resting look on hide")
-near(k.wash.vcolor[4], 0, "the wash was not repainted on hide")
-""")
-
-case("geometry_after_login_builds_the_keys_too")(r"""
-local CK = boot({ geometryFirst = false })
-check(CK.IsBuilt() and #CK.keys == 8, "keys must build when the Console geometry arrives after the Gunsight is ready")
-""")
-
-
-# ---------------------------------------------------------------------------------------
-# Keys that hide when their piece has nothing for the class, and the tab that fits the rest
-# ---------------------------------------------------------------------------------------
-
 SHOWN_HELPERS = TAB_HELPERS + r"""
 -- numbers compare within the harness epsilon, anything else exactly
 local function eq(a, b, msg)
@@ -1013,7 +956,121 @@ local function checkFits(CK, n, label)
     local lastRect = FS.Console.KeyRect(n - 1, s)
     eq(tab:GetWidth() - (lastRect.x + lastRect.w), FS.Console.C.TP * s, label .. ": 15 padding right of the last key")
 end
+-- The HUD is off: the party key alone is drawn, in slot 0 of a one key tab that stands at its full height,
+-- and the seven HUD keys exist but are hidden.
+local function checkPartyOnly(CK, label)
+    eq(joined(shownList(CK)), "party", label .. ": the party key alone is drawn")
+    checkFits(CK, 1, label)
+    eq(keyOf(CK, "party").slot, 0, label .. ": the party key takes slot 0")
+    eq(tabPiecesShown(), 6, label .. ": the tab stands")
+    eq(FS.Console.TabHeight(), FS.Console.C.TH, label .. ": at its full height")
+    check(keyOf(CK, "party").btn:IsVisible(), label .. ": the party key is visible")
+    for _, k in ipairs(CK.keys) do
+        if k.key ~= "party" then
+            check(not k.btn:IsShown() and not k.btn:IsVisible(), label .. ": " .. k.key .. " is hidden")
+        end
+    end
+end
 """
+
+case("gunsight_disabled_at_login_draws_only_the_party_key")(SHOWN_HELPERS + r"""
+local CK, G = boot({ db = { gunsight = { enabled = false, pieces = { party = false } } } })
+check(not G.IsEnabled(), "gunsight is disabled")
+check(CK.IsBuilt() and #CK.keys == 8, "the keys are built whatever the Gunsight is doing")
+checkPartyOnly(CK, "gunsight disabled at login")
+local party = keyOf(CK, "party")
+check(party.phase == "off", "the party key shows the party frames' saved state")
+check(not FS.PartyFrames.IsShown() and #FS.PartyFrames.calls == 0, "the party frames keep their own saved state and nothing asked them anything")
+click(party)
+check(table.concat(FS.PartyFrames.calls, ",") == "show" and FS.PartyFrames.IsShown(), "the party key still switches the party frames")
+finishAnims()
+check(party.phase == "on", "and follows the change")
+check(#BLOCKED == 0, "nothing protected was touched")
+""")
+
+case("fsgun_on_after_a_disabled_login_draws_no_hud_key_until_a_reload")(SHOWN_HELPERS + r"""
+local CK, G = boot({ db = { gunsight = { enabled = false, pieces = {} } } })
+checkPartyOnly(CK, "disabled login")
+SlashCmdList["FSGUN"]("on")
+FS.ActionBars.Publish()
+fire("PLAYER_REGEN_ENABLED")
+fire("PLAYER_ENTERING_WORLD")
+checkPartyOnly(CK, "gunsight switched on after a disabled login: no HUD was built, so none of its keys is drawn")
+check(FS.Config.Get("gunsight.enabled") == true, "/fsgun on saves the setting")
+check(not G.IsEnabled(), "the live state is fixed at load, so a built UI never changes under it")
+check(#FS.PartyFrames.calls == 0, "the party frames were asked something after a disabled login")
+-- a profile that arrives late does not draw a HUD key either
+HUD_PROFILE = FS.HudProfiles.WARLOCK
+FS.ActionBars.Publish()
+checkPartyOnly(CK, "a late profile with the HUD never built")
+""")
+
+case("a_disabled_login_with_the_geometry_arriving_after_it_draws_only_the_party_key")(SHOWN_HELPERS + r"""
+local CK = boot({ geometryFirst = false, db = { gunsight = { enabled = false, pieces = {} } } })
+checkPartyOnly(CK, "geometry after a disabled login")
+""")
+
+case("a_disabled_login_in_combat_draws_the_party_key_once_combat_ends")(SHOWN_HELPERS + r"""
+local CK = boot({ combat = true, db = { gunsight = { enabled = false, pieces = {} } } })
+eq(FS.Console.GetKeyCount(), FS.Console.KEY.COUNT, "the Console cannot be resized in combat")
+check(#BLOCKED == 0, "nothing protected was touched in combat")
+IN_COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+checkPartyOnly(CK, "after combat")
+""")
+
+case("a_disabled_login_with_the_console_off_draws_the_party_key_when_it_comes_on")(SHOWN_HELPERS + r"""
+local CK = boot({ consoleOff = true, db = { consoleEnabled = false, gunsight = { enabled = false, pieces = {} } } })
+check(not CK.IsBuilt(), "keys were built before the Console had a tab")
+SlashCmdList["FSCONSOLE"]("on")
+check(CK.IsBuilt(), "the keys are built once the Console is on")
+checkPartyOnly(CK, "the Console came on after a disabled login")
+""")
+
+case("the_party_key_tooltip_opens_toward_the_console_whatever_the_key_count")(SHOWN_HELPERS + r"""
+local function corners(profile, db)
+    local CK = boot({ profile = profile, db = db })
+    local out = {}
+    for _, k in ipairs(CK.keys) do
+        if k.btn:IsShown() then
+            k.btn.scripts.OnEnter(k.btn)
+            local pt = GameTooltip.points[1]
+            check(pt[2] == k.btn, k.key .. ": the tooltip hangs off its own key")
+            out[#out + 1] = k.key .. "=" .. pt[1]
+            k.btn.scripts.OnLeave(k.btn)
+        end
+    end
+    return table.concat(out, ",")
+end
+-- the tab ends at the Console's right edge, so the last key's tooltip always opens leftward
+eq(corners(nil, { gunsight = { enabled = false, pieces = {} } }), "party=BOTTOMRIGHT", "the lone party key")
+-- the other counts keep their rule: slots 0 to 2 left, then centred, the last two right
+eq(corners("WARLOCK"), "you=BOTTOMLEFT,next=BOTTOMLEFT,shard=BOTTOMLEFT,buff=BOTTOM,tgt=BOTTOM,dot=BOTTOM,prc=BOTTOMRIGHT,party=BOTTOMRIGHT", "eight keys")
+eq(corners(false), "you=BOTTOMLEFT,tgt=BOTTOMLEFT,dot=BOTTOMLEFT,party=BOTTOMRIGHT", "four keys")
+""")
+
+case("hide_clears_hover_and_down_and_repaints_the_look")(r"""
+local CK = boot({})
+local k = keyOf(CK, "you")
+k.btn.scripts.OnEnter(k.btn)
+k.btn.scripts.OnMouseDown(k.btn)
+near(k.glow.vcolor[4], 0.5, "pressed halo before the hide")
+k.btn.scripts.OnHide(k.btn)
+check(not k.hover and not k.down, "hover/down not cleared on hide")
+near(k.glow.vcolor[4], 0.34, "the halo was not repainted to the resting look on hide")
+near(k.wash.vcolor[4], 0, "the wash was not repainted on hide")
+""")
+
+case("geometry_after_login_builds_the_keys_too")(r"""
+local CK = boot({ geometryFirst = false })
+check(CK.IsBuilt() and #CK.keys == 8, "keys must build when the Console geometry arrives after the Gunsight is ready")
+""")
+
+
+# ---------------------------------------------------------------------------------------
+# Keys that hide when their piece has nothing for the class, and the tab that fits the rest
+# ---------------------------------------------------------------------------------------
+
 
 case("warlock_profile_shows_all_eight_keys")(SHOWN_HELPERS + r"""
 local CK = boot({ profile = "WARLOCK" })
@@ -1242,7 +1299,7 @@ checkFits(CK, 6, "priest after the console came back")
 # The master switch is live: the keys follow it, the party frames' own switch does not
 # ---------------------------------------------------------------------------------------
 
-case("fsgun_off_at_runtime_hides_the_keys_and_on_brings_them_back")(SHOWN_HELPERS + r"""
+case("fsgun_off_at_runtime_hides_the_hud_keys_and_on_brings_them_back")(SHOWN_HELPERS + r"""
 local CK, G = boot({ profile = "PRIEST" })
 checkFits(CK, 6, "priest before")
 local standing = tabGeometry()
@@ -1252,34 +1309,34 @@ FS.Console.OnTabChanged(function(h) heard[#heard + 1] = h end)
 SlashCmdList["FSGUN"]("off")
 FS.ActionBars.Publish()
 fire("PLAYER_REGEN_ENABLED")
-eq(#heard, 1, "the tab going is announced once"); eq(heard[1], 0, "as no height")
-for _, k in ipairs(CK.keys) do check(not k.btn:IsVisible(), k.key .. " is still drawn with the Gunsight off") end
-checkNoTab("gunsight off")
+eq(#heard, 0, "the tab stays, so its height is not announced")
+checkPartyOnly(CK, "gunsight off")
+check(tabGeometry().tx > standing.tx and tabGeometry().w < standing.w, "the tab narrowed to the one key")
 FS.ActionBars.Publish()
 fire("PLAYER_ENTERING_WORLD")
-for _, k in ipairs(CK.keys) do check(not k.btn:IsVisible(), k.key .. " came back on a hook while the Gunsight is off") end
-checkNoTab("hooks leave the tab away")
+checkPartyOnly(CK, "hooks leave the one key tab")
 SlashCmdList["FSGUN"]("on")
 checkFits(CK, 6, "priest after on")
 checkTabBack(standing, 6, "gunsight back on")
-eq(#heard, 2, "the tab coming back is announced once"); eq(heard[2], FS.Console.C.TH, "at its height")
+eq(#heard, 0, "and the height was never announced")
 for _, k in ipairs(CK.keys) do if k.shown then check(k.btn:IsVisible(), k.key .. " not back") end end
 click(keyOf(CK, "you"))
 check(not G.IsPieceOn("you"), "a key works again")
 -- and the round trip repeats
 SlashCmdList["FSGUN"]("off")
-checkNoTab("second off")
+checkPartyOnly(CK, "second off")
 SlashCmdList["FSGUN"]("on")
 checkTabBack(standing, 6, "second on")
 """)
 
-case("the_console_off_and_on_with_the_gunsight_off_keeps_the_tab_away")(SHOWN_HELPERS + r"""
+case("the_console_off_and_on_with_the_gunsight_off_keeps_only_the_party_key")(SHOWN_HELPERS + r"""
 local CK = boot({ profile = "PRIEST" })
 SlashCmdList["FSGUN"]("off")
-checkNoTab("gunsight off")
+checkPartyOnly(CK, "gunsight off")
 SlashCmdList["FSCONSOLE"]("off")
+for _, k in ipairs(CK.keys) do check(not k.btn:IsVisible(), k.key .. " visible with the console off") end
 SlashCmdList["FSCONSOLE"]("on")
-checkNoTab("console back on with the Gunsight off")
+checkPartyOnly(CK, "console back on with the Gunsight off")
 SlashCmdList["FSGUN"]("on")
 checkFits(CK, 6, "priest after on")
 eq(tabPiecesShown(), 6, "the tab is back with the keys")
@@ -1290,10 +1347,12 @@ local CK, G = boot({})
 SlashCmdList["FSGUN"]("off")
 G.SetPiece("shard", false, true)
 FS.PartyFrames.SetShown(false)
+check(keyOf(CK, "party").phase == "outage", "the party key is drawn with the Gunsight off, so its change plays")
 SlashCmdList["FSGUN"]("on")
 check(keyOf(CK, "shard").phase == "off", "the key shows the piece's state")
 check(not keyOf(CK, "shard").ringShown, "and no ring plays for a change made while it was hidden")
-check(keyOf(CK, "party").phase == "off" and not keyOf(CK, "party").ringShown, "the party key too")
+Advance(1500)
+check(keyOf(CK, "party").phase == "off", "the party key shows its state")
 """)
 
 case("fsgun_off_at_runtime_leaves_the_party_frames_alone")(r"""
@@ -1305,7 +1364,10 @@ check(not PF.IsShown(), "party off")
 SlashCmdList["FSGUN"]("off")
 check(not PF.IsShown(), "master off does not touch the party frames' setting")
 check(table.concat(PF.calls, ",") == "hide", "and asks them nothing: " .. table.concat(PF.calls, ","))
-PF.SetShown(true)                               -- their own switch still works with the Gunsight off
+check(keyOf(CK, "party").btn:IsVisible(), "the party key stays drawn with the Gunsight off")
+click(keyOf(CK, "party"))                       -- their own switch still works with the Gunsight off
+check(PF.IsShown() and table.concat(PF.calls, ",") == "hide,show", "the key switches them: " .. table.concat(PF.calls, ","))
+finishAnims()
 SlashCmdList["FSGUN"]("on")
 check(PF.IsShown(), "master on does not touch it either")
 check(table.concat(PF.calls, ",") == "hide,show", "no call from the master switch: " .. table.concat(PF.calls, ","))
@@ -1320,22 +1382,32 @@ finishAnims()
 check(not FS.PartyFrames.IsShown(), "party off")
 IN_COMBAT = true
 SlashCmdList["FSGUN"]("off")
-for _, k in ipairs(CK.keys) do check(not k.btn:IsVisible(), k.key .. " still drawn in combat after master off") end
+for _, k in ipairs(CK.keys) do
+    if k.key == "party" then
+        check(k.btn:IsVisible(), "the party key is drawn in combat after master off")
+    else
+        check(not k.btn:IsVisible(), k.key .. " still drawn in combat after master off")
+    end
+end
 eq(FS.Console.GetKeyCount(), 6, "the Console is not resized in combat")
-eq(tabPiecesShown(), 6, "the tab is not taken down in combat")
+eq(tabPiecesShown(), 6, "the tab is not narrowed in combat")
+click(keyOf(CK, "party"))
+check(FS.PartyFrames.IsShown(), "the party key works in combat with the Gunsight off")
 check(#BLOCKED == 0, "a protected action was attempted in combat: " .. table.concat(BLOCKED, ","))
 IN_COMBAT = false
 fire("PLAYER_REGEN_ENABLED")
-checkNoTab("after combat")
+checkPartyOnly(CK, "after combat")
 IN_COMBAT = true
 SlashCmdList["FSGUN"]("on")
 check(G.IsActive() == false, "a hidden root cannot come back in combat")
-for _, k in ipairs(CK.keys) do check(not k.btn:IsVisible(), k.key .. " drawn while the Gunsight is still inactive") end
+for _, k in ipairs(CK.keys) do
+    if k.key ~= "party" then check(not k.btn:IsVisible(), k.key .. " drawn while the Gunsight is still inactive") end
+end
 IN_COMBAT = false
 fire("PLAYER_REGEN_ENABLED")
 checkFits(CK, 6, "priest after combat")
 eq(tabPiecesShown(), 6, "the tab is back after combat")
-check(not FS.PartyFrames.IsShown() and #FS.PartyFrames.calls == 1, "the master switch never asked the party frames anything")
+check(#FS.PartyFrames.calls == 2, "the master switch never asked the party frames anything: " .. table.concat(FS.PartyFrames.calls, ","))
 check(#BLOCKED == 0, "nothing protected in combat")
 """)
 
@@ -1347,11 +1419,44 @@ IN_COMBAT = true
 SlashCmdList["FSGUN"]("off")
 SlashCmdList["FSGUN"]("on")                     -- back on in the same fight, before any regen
 check(G.IsActive() == true, "the root never left the screen: active again")
+for _, k in ipairs(CK.keys) do if k.shown then check(k.btn:IsVisible(), k.key .. " is back at once") end end
 IN_COMBAT = false
 fire("PLAYER_REGEN_ENABLED")
 checkFits(CK, 6, "the keys settle on the on state after combat")
 for _, k in ipairs(CK.keys) do if k.shown then check(k.btn:IsVisible(), k.key .. " not drawn after off then on in one fight") end end
 check(#BLOCKED == 0, "nothing protected in combat")
+""")
+
+
+case("fsgun_off_clears_a_hovered_hud_key_but_not_the_party_key")(SHOWN_HELPERS + r"""
+local CK = boot({ profile = "PRIEST" })
+local you, party = keyOf(CK, "you"), keyOf(CK, "party")
+you.btn.scripts.OnEnter(you.btn)
+you.btn.scripts.OnMouseDown(you.btn)
+check(GameTooltip.shown and GameTooltip.owner == you.btn, "tooltip on the hovered HUD key")
+SlashCmdList["FSGUN"]("off")
+check(not you.hover and not you.down, "the HUD key lost hover and press")
+check(not GameTooltip.shown, "and its tooltip went")
+SlashCmdList["FSGUN"]("on")
+party.btn.scripts.OnEnter(party.btn)
+SlashCmdList["FSGUN"]("off")
+check(party.hover, "the party key stays hovered")
+check(GameTooltip.shown and GameTooltip.owner == party.btn, "and keeps its tooltip")
+""")
+
+case("hooks_and_a_profile_change_with_the_gunsight_off_do_no_layout_work")(SHOWN_HELPERS + r"""
+local CK = boot({ profile = "PRIEST" })
+SlashCmdList["FSGUN"]("off")
+checkPartyOnly(CK, "gunsight off")
+local tab = FS.Console.tab
+local setSize, setPoint = tab.calls.SetSize, keyOf(CK, "party").btn.calls.SetPoint
+HUD_PROFILE = FS.HudProfiles.WARLOCK
+fire("PLAYER_ENTERING_WORLD"); fire("PLAYER_REGEN_ENABLED")
+checkPartyOnly(CK, "a profile change with the HUD off")
+eq(tab.calls.SetSize, setSize, "the tab was not resized again")
+eq(keyOf(CK, "party").btn.calls.SetPoint, setPoint, "the party key was not re-anchored")
+FS.ActionBars.Publish()
+checkPartyOnly(CK, "a geometry notice with the new profile")
 """)
 
 
