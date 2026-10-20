@@ -2,8 +2,9 @@
 --
 -- The eight HUD keys on the Console's shoulder tab (the locked design in
 -- the design mockup: DECK_DEFS, GLY, keySvg,
--- the `.cdeck.bm` key rules and the Rings block). Each key toggles ONE Gunsight piece (DEFS order is
--- the slot order when every key shows; the pitch is one even gap, there are no group gaps):
+-- the `.cdeck.bm` key rules and the Rings block). Each key toggles ONE switch: a Gunsight piece, or for the party
+-- key the party frames' own switch (DEFS order is the slot order when every key shows; the pitch is one even gap,
+-- there are no group gaps):
 --
 --   key 1  you    Your Cast      cyan    glyph_hud_chev       key 6  dot    Target side    violet  clock
 --   key 2  next   Next Cast      gold    play                 key 7  prc    Procs          amber   bolt
@@ -26,8 +27,8 @@
 -- (ConsoleKeys.Label), so it follows the profile as it resolves, like the shown set.
 --
 -- No profile (a class with no HUD) hides the four profile keys (shard, prc, next, buff). Hiding is VISUAL ONLY:
--- the key is Hidden, the piece's on/off setting is never touched (Gunsight.SetPiece is not called) and the
--- hidden key still follows OnPieceChanged. The shown keys take consecutive slots (the Console's
+-- the key is Hidden, the key's on/off setting is never touched (nothing is set) and the
+-- hidden key still follows its switch's change notice. The shown keys take consecutive slots (the Console's
 -- KeyRect(slot)) at the even pitch, and `Console.SetKeyCount(n)` sizes the shoulder tab for the shown
 -- count. The count is the number of keys actually drawn, whatever hid the rest, and ZERO drawn keys is what
 -- takes the tab away (the Console draws the plain plate then): a Gunsight that is off draws no key, so it has
@@ -37,8 +38,9 @@
 -- recomputed at every hook this file already has (the Console's geometry callback, a rescale,
 -- PLAYER_REGEN_ENABLED) plus PLAYER_ENTERING_WORLD, and applied only when the shown set changed.
 --
--- PLAIN BUTTONS, NOT SECURE. They only call FS.Gunsight.SetPiece, which itself fades a piece and
--- uses alpha only for a protected frame in combat, so a click works in combat. Click only: there
+-- PLAIN BUTTONS, NOT SECURE. They only call Switch.Set: FS.Gunsight.SetPiece, which itself fades a piece and
+-- uses alpha only for a protected frame in combat, or FS.PartyFrames.SetShown, which keeps the same combat
+-- rule for the party frames' secure rows, so a click works in combat. Click only: there
 -- are no keybinds and no number in the tooltip. They hang off `FS.Console.tab` (a plain frame that
 -- shows and hides with the Console, so /fsconsole off hides the keys with it, and that the Console also hides
 -- while no key is drawn) and are seated from
@@ -61,31 +63,24 @@
 -- last animated frame the ring eases out over 0.4 s. The port of `ringUpdate`, one OnUpdate on one
 -- driver frame that exists only while some ring is live.
 --
--- STATE. FS.Gunsight owns it. A key reads IsPieceOn(key) at OnReady and then follows OnPieceChanged,
--- so `/fsgun piece <key> on|off` moves the keys too. A change made while the key is not visible, or
--- with ForeverSTUwaveDB.reducedMotion == true (nothing in the addon sets it yet), snaps with no ring.
---
--- PARTY PIECE. Nothing else registers piece `party`, and PartyFrames.lua loads before Gunsight.lua, so
--- this file registers the party frame container (FS.partyContainer, a plain frame that parents the
--- secure rows, so Gunsight treats it as protected: alpha only in combat, the rest on regen) as piece
--- `party`, only when the Gunsight HUD is built and active, so a Gunsight that is off never drives the party
--- frames (see WHAT EXISTS IS READ ONCE, THE SWITCH IS LIVE for the live case).
--- The container can be missing when the client logs in during combat and this file's
--- PLAYER_REGEN_ENABLED handler runs before PartyFrames' own, so a nil container at regen schedules ONE
--- retry on the next frame, and the party key registers it lazily on its first click.
+-- STATE. The switch owns it, and Switch (below) is the one place that knows which switch a key has: IsOn,
+-- Set and OnChanged. Every key but party is a Gunsight piece (IsPieceOn, SetPiece, OnPieceChanged), so
+-- `/fsgun piece <key> on|off` moves those keys too. The party key is FS.PartyFrames (IsShown, SetShown,
+-- OnShownChanged): the party frames are no Gunsight piece, they show and hide themselves from their saved
+-- value whether the Gunsight HUD is built or not, so this file registers nothing with the Gunsight for them
+-- and a change to that value from anywhere (a profile switch) moves the key. A key reads IsOn at OnReady
+-- and then follows OnChanged. A change made while the key is not visible, or with
+-- ForeverSTUwaveDB.reducedMotion == true (nothing in the addon sets it yet), snaps with no ring.
 --
 -- WHAT EXISTS IS READ ONCE, THE SWITCH IS LIVE. Whether the keys are BUILT is captured at login
 -- (Gunsight.OnReady, the moment the Gunsight's own init has decided what to build): a Gunsight that was off then
--- builds no keys, so no key is drawn and the Console draws no tab, and registers no `party`, and `/fsgun on`
+-- builds no keys, so no key is drawn and the Console draws no tab, and `/fsgun on`
 -- afterwards builds nothing until a reload. A Gunsight that was on follows Gunsight.OnActiveChanged, because
 -- the keys live on Console.tab and not under the Gunsight root, so hiding the root does not hide them.
--- Inactive: the key host is hidden (a plain frame, so also in combat), no key is drawn so the tab goes away (at
--- regen in combat, with the other re-seats) and the `party` piece is RELEASED (Gunsight.ReleasePiece: the
--- party frames show whatever the piece says, as on a Gunsight-off login, and a Gunsight-off piece change or
--- profile switch does not hide them). Active again: the host shows, the layout is re-seated for the shown set
--- (the tab comes back sized for it) and the party piece is resumed. The tab resize and any re-seat wait for
--- PLAYER_REGEN_ENABLED in combat like every other re-seat here; the party container is protected, so
--- ReleasePiece / ResumePiece give it alpha only in combat and the Show or Hide at regen.
+-- Inactive: the key host is hidden (a plain frame, so also in combat) and no key is drawn, so the tab goes away (at
+-- regen in combat, with the other re-seats). Active again: the host shows and the layout is re-seated for the
+-- shown set (the tab comes back sized for it). The tab resize and any re-seat wait for PLAYER_REGEN_ENABLED in
+-- combat like every other re-seat here. The party frames are not part of this: the master switch never touches them.
 --
 -- SCALE AND COMBAT. Built once. Re-seated (visibility, slots, positions, sizes, art scale, and the
 -- tab's size, or its absence, through Console.SetKeyCount) from the Console's geometry callback,
@@ -108,14 +103,32 @@ local function Degrade(key, msg)
 end
 
 if not (Console and Console.KeyRect and Console.KEY and Console.SetKeyCount and FS.ActionBars and FS.ActionBars.OnGeometry
-        and FS.Gunsight and FS.Gunsight.OnReady and FS.Gunsight.OnPieceChanged
-        and FS.Gunsight.OnActiveChanged and FS.Gunsight.ReleasePiece and FS.Gunsight.ResumePiece
+        and FS.Gunsight and FS.Gunsight.OnReady and FS.Gunsight.OnPieceChanged and FS.Gunsight.OnActiveChanged
+        and FS.PartyFrames and FS.PartyFrames.IsShown and FS.PartyFrames.SetShown and FS.PartyFrames.OnShownChanged
         and Theme and Theme.AddSliceTexture and Theme.ApplyNineSlice) then
-    Degrade("load", "needs Console.lua, ActionBars.lua, Gunsight.lua and Theme.lua first, no keys")
+    Degrade("load", "needs Console.lua, ActionBars.lua, Gunsight.lua, PartyFrames.lua and Theme.lua first, no keys")
     return
 end
 
 local Gunsight = FS.Gunsight
+local PartyFrames = FS.PartyFrames
+
+-- Where a key's on/off state lives (see STATE above). The party key is the party frames' own switch, every other key
+-- a Gunsight piece. Calls go through the Gunsight table at call time, so nothing here caches a function.
+local Switch = {}
+function Switch.IsOn(piece)
+    if piece == "party" then return PartyFrames.IsShown() end
+    return Gunsight.IsPieceOn(piece)
+end
+function Switch.Set(piece, on)
+    if piece == "party" then return PartyFrames.SetShown(on) end
+    return Gunsight.SetPiece(piece, on)
+end
+-- fn(piece, on) runs after a key's state changed, however it was changed.
+function Switch.OnChanged(fn)
+    Gunsight.OnPieceChanged(fn)
+    PartyFrames.OnShownChanged(function(on) fn("party", on) end)
+end
 
 -------------------------------------------------------------------------------
 -- Constants (the mockup's: DECK_DEFS, kpts, keySvg, the .cdeck.bm rules, Rings)
@@ -220,13 +233,9 @@ local built = false
 local pendingSeat = false
 local seatedSig            -- shown-set signature of the last applied layout ("1" shown, "0" hidden, per DEFS)
 local shownCount = 0
-local partyRegistered = false
-local partyRetried = false   -- the one next-frame retry has been spent
-local inactive = false       -- the Gunsight is switched off (or waiting to come back): keys hidden, party released
+local inactive = false       -- the Gunsight is switched off (or waiting to come back): keys hidden
 local gunsightReady = false  -- the Gunsight's OnReady has run: its state at login is final
 local loginEnabled = false   -- Gunsight.IsEnabled() as of login, never re-read (see WHAT EXISTS IS READ ONCE)
-local partyReleased = false  -- the party piece is stood down for an inactive Gunsight
-local RegisterParty        -- defined below the build code, called from a key click
 
 local function Scale()
     if FS.Layout and FS.Layout.Scale then return FS.Layout.Scale() end
@@ -405,7 +414,7 @@ end
 
 local function ShowTip(k)
     local ok, err = pcall(function()
-        local on = Gunsight.IsPieceOn(k.key)
+        local on = Switch.IsOn(k.key)
         local s = Scale()
         GameTooltip:SetOwner(k.btn, "ANCHOR_NONE")
         GameTooltip:ClearAllPoints()
@@ -516,8 +525,7 @@ local function BuildKey(i, def)
     btn:SetScript("OnHide", function() k.hover = false; k.down = false; Look(k); HideTip(k) end)
     btn:Hide()   -- ApplyLayout shows the keys that have something to show
     btn:SetScript("OnClick", function()
-        if k.key == "party" then RegisterParty() end   -- the container may have appeared since the last try
-        Gunsight.SetPiece(k.key, not Gunsight.IsPieceOn(k.key))
+        Switch.Set(k.key, not Switch.IsOn(k.key))
         if k.hover then ShowTip(k) end   -- the ON / OFF word follows the click
     end)
     return k
@@ -602,19 +610,8 @@ local function Refresh()
     if pendingSeat or ShownSignature() ~= seatedSig then Reseat() end
 end
 
--- The party frame container is the `party` piece. Registered once, when it exists (a login in
--- combat builds it after combat) and the Gunsight was enabled at login.
-function RegisterParty()
-    if partyRegistered or not gunsightReady or not loginEnabled or inactive then return end
-    if not (FS.partyContainer and Gunsight.RegisterPiece) then return end
-    partyRegistered = true
-    local ok, err = pcall(Gunsight.RegisterPiece, "party", { frame = FS.partyContainer })
-    if not ok then Degrade("party", err) end
-end
-
 -- Builds the keys once the Gunsight state is final AND the Console has made its tab.
 local function Ensure()
-    RegisterParty()
     if built or not gunsightReady or not Console.tab then return end
     if not loginEnabled then return end
     local ok, err = pcall(function()
@@ -630,7 +627,7 @@ local function Ensure()
         built = true
         if inactive then host:Hide() end
         Reseat()
-        for _, k in ipairs(keys) do SetState(k, Gunsight.IsPieceOn(k.key), true) end
+        for _, k in ipairs(keys) do SetState(k, Switch.IsOn(k.key), true) end
     end)
     if not ok then
         Degrade("build", err)
@@ -642,7 +639,7 @@ end
 -- Wiring
 -------------------------------------------------------------------------------
 
-Gunsight.OnPieceChanged(function(piece, on)
+Switch.OnChanged(function(piece, on)
     local k = byPiece[piece]
     if k then SetState(k, on and true or false, false) end
 end)
@@ -663,20 +660,6 @@ Gunsight.OnActiveChanged(function(active)
             host:Show()
         end
         Reseat()
-    end
-    if inactive then
-        if partyRegistered and not partyReleased then
-            partyReleased = true
-            local ok, err = pcall(Gunsight.ReleasePiece, "party")
-            if not ok then Degrade("party_release", err) end
-        end
-    else
-        if partyReleased then
-            partyReleased = false
-            local ok, err = pcall(Gunsight.ResumePiece, "party")
-            if not ok then Degrade("party_resume", err) end
-        end
-        RegisterParty()
     end
 end)
 
@@ -705,12 +688,6 @@ events:RegisterEvent("PLAYER_REGEN_ENABLED")
 events:RegisterEvent("PLAYER_ENTERING_WORLD")
 events:SetScript("OnEvent", function()
     Ensure()
-    -- PartyFrames' regen handler may not have built the container yet: retry once, next frame.
-    if not partyRegistered and loginEnabled and not FS.partyContainer
-        and not partyRetried and C_Timer and C_Timer.After then
-        partyRetried = true
-        C_Timer.After(0, Ensure)
-    end
     Refresh()
 end)
 

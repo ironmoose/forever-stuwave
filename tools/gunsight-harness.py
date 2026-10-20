@@ -706,7 +706,7 @@ check(type(g) == "table", "ForeverSTUwaveDB.gunsight not created")
 check(g.enabled == nil and g.pieces == nil, "enabled and pieces live in FS.Config now, not in ForeverSTUwaveDB.gunsight")
 check(FS.Config.Get("gunsight.enabled") == true, "enabled defaults to true")
 check(g.seat and g.seat.dx == 0 and g.seat.dy == 0, "seat defaults to 0,0")
-for _, k in ipairs({ "you", "next", "shard", "buff", "tgt", "dot", "prc", "party", "mybuffs" }) do
+for _, k in ipairs({ "you", "next", "shard", "buff", "tgt", "dot", "prc", "mybuffs" }) do
     check(FS.Config.Get("gunsight.pieces." .. k) == true, "piece " .. k .. " defaults to on")
     check(Gs.IsPieceOn(k) == true, "IsPieceOn(" .. k .. ") defaults to true")
 end
@@ -721,10 +721,39 @@ check(FS.Config.Get("gunsight.pieces.buff") == false and Gs.IsPieceOn("buff") ==
 check(FS.Config.Get("gunsight.pieces.you") == true, "a non boolean piece value falls back to on")
 -- a saved value for the retired `frame` piece (the removed HUD Frame) is ignored, not an error
 check(Gs.IsPieceOn("frame") == false and Gs.SetPiece("frame", true) == false, "the retired frame piece is not a known piece")
-check(#Gs.PIECES == 9, "nine pieces, got " .. #Gs.PIECES)
+check(#Gs.PIECES == 8, "eight pieces, got " .. #Gs.PIECES)
+-- the party frames have their own switch (FS.PartyFrames): the Gunsight neither lists nor registers them
+check(Gs.IsPieceOn("party") == false and Gs.SetPiece("party", true) == false, "party is not a Gunsight piece")
+check(Gs.RegisterPiece("party", { frame = CreateFrame("Frame") }) == false, "party cannot register as a piece")
 check(g.seat.dx == 0 and g.seat.dy == 0, "a bad seat falls back to 0,0")
 """)
 
+
+case("a_legacy_party_value_is_carried_to_the_party_frames_key_before_the_old_pieces_are_dropped")(r"""
+-- The party frames left the piece list but kept their saved key (FS.PartyFrames registers its default before
+-- this file loads). An old gunsight.pieces.party must reach that key, not vanish with the legacy table.
+local function boot2(db)
+    SetScreen(1440)
+    ForeverSTUwaveDB = db
+    loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
+    loadAddonFile(CONFIG_SRC, "Core/Config.lua")
+    FS.Config.RegisterDefault("gunsight.pieces.party", true)
+    loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
+    fire("ADDON_LOADED", "forever-stuwave")
+    fire("PLAYER_LOGIN")
+    return FS.Gunsight
+end
+local Gs = boot2({ gunsight = { pieces = { party = false, buff = false } } })
+check(FS.Config.Get("gunsight.pieces.party") == false, "a legacy off party value is kept")
+check(FS.Config.Get("gunsight.pieces.buff") == false, "and the other pieces still migrate")
+check(ForeverSTUwaveDB.gunsight.pieces == nil, "the legacy table is gone")
+-- a value the profile already holds wins over the legacy one
+Gs = boot2({ gunsight = { pieces = { party = true } }, profiles = { Default = { settings = { ["gunsight.pieces.party"] = false } } } })
+check(FS.Config.Get("gunsight.pieces.party") == false, "a stored value is not overwritten by the legacy one")
+-- a non boolean legacy value is ignored
+Gs = boot2({ gunsight = { pieces = { party = "no" } } })
+check(FS.Config.Get("gunsight.pieces.party") == true and FS.Config.IsStored("gunsight.pieces.party") == false, "garbage falls back to the default")
+""")
 
 case("area_defaults_and_invalid_values_read_the_default")(r"""
 local Gs = boot({ height = 1440, db = {} })
@@ -876,13 +905,13 @@ case("protected_frame_in_combat_gets_alpha_only")(r"""
 local Gs = boot({ height = 1440, db = {} })
 local f = CreateFrame("Frame", nil, Gs.root)
 f.protected = true
-Gs.RegisterPiece("party", { frame = f })
-Gs.SetPiece("party", false, true)           -- hidden out of combat
+Gs.RegisterPiece("prc", { frame = f })
+Gs.SetPiece("prc", false, true)           -- hidden out of combat
 IN_COMBAT = true
 f.calls = {}
-Gs.SetPiece("party", true)                  -- on in combat
-Gs.SetPiece("party", false, true)           -- off in combat, instant
-Gs.SetPiece("party", true, true)            -- on in combat, instant
+Gs.SetPiece("prc", true)                  -- on in combat
+Gs.SetPiece("prc", false, true)           -- off in combat, instant
+Gs.SetPiece("prc", true, true)            -- on in combat, instant
 near(f:GetAlpha(), 1, "alpha follows the state in combat")
 check(f.calls.Show == nil and f.calls.Hide == nil and f.calls.EnableMouse == nil,
     "Show/Hide/EnableMouse are deferred in combat")
@@ -1006,29 +1035,29 @@ local Gs = boot({ height = 1440, db = {} })
 local f = CreateFrame("Frame", nil, Gs.root)
 f.protected = true
 local log = {}
-Gs.RegisterPiece("party", { frame = f, onShow = function() log[#log + 1] = "show" end, onHide = function() log[#log + 1] = "hide" end })
+Gs.RegisterPiece("prc", { frame = f, onShow = function() log[#log + 1] = "show" end, onHide = function() log[#log + 1] = "hide" end })
 log = {}
 f.calls = {}
 IN_COMBAT = true
-Gs.SetPiece("party", false)                -- non instant, in combat
+Gs.SetPiece("prc", false)                -- non instant, in combat
 check(f.calls.Hide == nil and f.calls.Show == nil, "Show/Hide called on a protected frame in combat")
 near(f:GetAlpha(), 0, "alpha 0 while off in combat")
 check(f.calls.EnableMouse == nil, "EnableMouse called on a protected frame in combat (blocked even in pcall)")
 check(f:IsShown(), "frame is still technically shown")
-check(Gs.IsPieceOn("party") == false, "state is off")
+check(Gs.IsPieceOn("prc") == false, "state is off")
 for _, grp in ipairs(f.groups or {}) do check(not grp.playing, "no fade on a protected frame in combat") end
-Gs.SetPiece("party", true)
+Gs.SetPiece("prc", true)
 check(f.calls.Hide == nil, "still no Hide")
 near(f:GetAlpha(), 1, "alpha back to 1")
 check(f.calls.EnableMouse == nil, "still no EnableMouse in combat")
-Gs.SetPiece("party", false)
+Gs.SetPiece("prc", false)
 IN_COMBAT = false
 fire("PLAYER_REGEN_ENABLED")
 check(not f:IsShown(), "after combat the off piece is really hidden")
 near(f:GetAlpha(), 0, "alpha after reconcile")
 check(table.concat(log, ",") == "hide,show,hide", "hooks in order: " .. table.concat(log, ","))
 -- reconcile for an on piece: hidden out of combat, shown by alpha only in combat, shown for real after
-Gs.SetPiece("party", true, true)
+Gs.SetPiece("prc", true, true)
 check(f:IsShown() and f:GetAlpha() == 1, "on again out of combat")
 """)
 
@@ -1036,11 +1065,11 @@ case("protected_frame_off_in_combat_then_shown_after_reconcile")(r"""
 local Gs = boot({ height = 1440, db = {} })
 local f = CreateFrame("Frame", nil, Gs.root)
 f.protected = true
-Gs.RegisterPiece("party", { frame = f })
-Gs.SetPiece("party", false, true)           -- hidden out of combat
+Gs.RegisterPiece("prc", { frame = f })
+Gs.SetPiece("prc", false, true)           -- hidden out of combat
 check(not f:IsShown(), "hidden out of combat")
 IN_COMBAT = true
-Gs.SetPiece("party", true)                  -- cannot Show now
+Gs.SetPiece("prc", true)                  -- cannot Show now
 check(f.calls.Show == 1, "only the earlier registration Show, none in combat: " .. tostring(f.calls.Show))
 IN_COMBAT = false
 fire("PLAYER_REGEN_ENABLED")
@@ -1170,49 +1199,6 @@ check(table.concat(seen, ",") == "false,true,false", "announced per flip: " .. t
 check(#BLOCKED == 0, "nothing protected was attempted in combat")
 """)
 
-case("a_released_piece_is_shown_and_left_alone_until_it_is_resumed")(r"""
-local Gs = boot({ height = 1440, db = {} })
-local f = CreateFrame("Frame", nil, Gs.root)
-local log = {}
-Gs.RegisterPiece("party", { frame = f, onShow = function() log[#log + 1] = "show" end, onHide = function() log[#log + 1] = "hide" end })
-Gs.SetPiece("party", false, true)
-check(not f:IsShown(), "off: hidden")
-log = {}
-check(Gs.ReleasePiece("party") == true, "release answers true")
-check(f:IsShown() and f:GetAlpha() == 1, "released: shown whatever its saved state")
-Gs.SetPiece("party", true, true)
-Gs.SetPiece("party", false)
-check(f:IsShown() and f:GetAlpha() == 1, "a state change while released does not touch the frame")
-check(Gs.IsPieceOn("party") == false, "but the state is still kept")
-check(#log == 0, "and runs no hook: " .. table.concat(log, ","))
-check(Gs.ResumePiece("party") == true, "resume answers true")
-check(not f:IsShown(), "resumed: the frame follows the saved state again (off)")
-check(table.concat(log, ",") == "hide", "the state's hook runs on resume: " .. table.concat(log, ","))
-check(Gs.ReleasePiece("nope") == false and Gs.ResumePiece("nope") == false, "an unregistered piece is refused")
-""")
-
-case("releasing_a_protected_piece_in_combat_is_alpha_only_then_shown_after_combat")(r"""
-local Gs = boot({ height = 1440, db = {} })
-local f = CreateFrame("Frame", nil, Gs.root)
-f.protected = true
-Gs.RegisterPiece("party", { frame = f })
-Gs.SetPiece("party", false, true)
-check(not f:IsShown(), "off out of combat")
-IN_COMBAT = true
-Gs.ReleasePiece("party")
-near(f:GetAlpha(), 1, "visible by alpha in combat")
-IN_COMBAT = false
-fire("PLAYER_REGEN_ENABLED")
-check(f:IsShown() and f:GetAlpha() == 1, "shown for real after combat, not hidden by the saved state")
-IN_COMBAT = true
-Gs.ResumePiece("party")
-near(f:GetAlpha(), 0, "resumed in combat: off by alpha")
-IN_COMBAT = false
-fire("PLAYER_REGEN_ENABLED")
-check(not f:IsShown(), "hidden for real after combat")
-check(#BLOCKED == 0, "nothing protected was attempted in combat")
-""")
-
 case("a_gunsight_off_at_load_cannot_be_switched_on_live")(r"""
 local Gs = boot({ height = 1440, db = { gunsight = { enabled = false } } })
 check(Gs.IsEnabled() == false and Gs.IsActive() == false, "nothing built, nothing active")
@@ -1251,9 +1237,10 @@ PRINTED = {}
 slash("")
 check(#PRINTED > 0, "no-arg prints the status")
 local status = table.concat(PRINTED, "\n")
-for _, k in ipairs({ "you", "next", "shard", "buff", "tgt", "dot", "prc", "party" }) do
+for _, k in ipairs({ "you", "next", "shard", "buff", "tgt", "dot", "prc" }) do
     check(status:find(k, 1, true), "status does not mention piece " .. k)
 end
+check(not status:find("party", 1, true), "status lists a party piece the Gunsight no longer has")
 PRINTED = {}
 slash("off")
 check(FS.Config.Get("gunsight.enabled") == false, "off did not save")
@@ -1280,6 +1267,11 @@ check(Gs.IsPieceOn("shard") == true, "piece on via slash")
 PRINTED = {}
 slash("piece bogus on")
 check(#PRINTED > 0, "an unknown piece prints a message")
+check(not table.concat(PRINTED, "\n"):find("party", 1, true), "the key list names no party piece")
+PRINTED = {}
+slash("piece party off")
+check(table.concat(PRINTED, "\n"):find("/fsparty", 1, true), "the old party piece points at /fsparty: " .. table.concat(PRINTED, " | "))
+check(FS.Config.IsStored("gunsight.pieces.party") == false, "and changes nothing")
 PRINTED = {}
 slash("garbage")
 check(#PRINTED > 0, "unknown subcommands print usage")

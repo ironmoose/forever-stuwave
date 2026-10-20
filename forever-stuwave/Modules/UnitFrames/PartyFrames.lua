@@ -2355,10 +2355,10 @@ end
 -- Shown state
 -------------------------------------------------------------------------------
 
--- The party frames' on/off switch, apart from the Gunsight HUD. FS.PartyFrames exists from file load, before the
--- container does (a login in combat defers Init to the first PLAYER_REGEN_ENABLED), so a caller can register a
--- listener or ask at any time. The wanted state lives in FS.Config, so a call that finds no container only records it
--- and Init applies it when it builds one.
+-- The party frames' on/off switch, apart from the Gunsight HUD: it works with the HUD on, off or never built.
+-- FS.PartyFrames exists from file load, before the container does (a login in combat defers Init to the first
+-- PLAYER_REGEN_ENABLED), so a caller can register a listener or ask at any time. The wanted state lives in FS.Config,
+-- so a call that finds no container only records it and Init applies it when it builds one.
 local PartyFrames = {}
 FS.PartyFrames = PartyFrames
 
@@ -2366,15 +2366,11 @@ FS.PartyFrames = PartyFrames
 local SHOWN = {
     -- The saved key keeps the name it had when the Gunsight HUD owned this switch, so every profile keeps its value.
     KEY = "gunsight.pieces.party",
-    owned = false,          -- Own() was called: login, Init and a profile switch put the container in the wanted state
-    loggedIn = false,       -- PLAYER_LOGIN has fired, so FS.Config holds this character's profile
-    requesting = false,     -- SetShown is writing the key and applies the container itself
     owed = false,           -- the container's real Show or Hide waits for PLAYER_REGEN_ENABLED
     listeners = {},
     listenerFailed = false,
 }
 PartyFrames.CONFIG_KEY = SHOWN.KEY
--- Gunsight.lua registers the same default while it still lists the piece; RegisterDefault replaces, so they agree.
 FS.Config.RegisterDefault(SHOWN.KEY, true)
 
 -- The wanted state, which is the saved value: right the moment SetShown, a profile switch or a reset changes it,
@@ -2385,9 +2381,8 @@ end
 
 -- Puts the container in the wanted state. It parents secure unit buttons, so in combat only the alpha moves (Show
 -- and Hide are blocked under lockdown, and raise ADDON_ACTION_BLOCKED even inside a pcall) and the real call is owed
--- to PLAYER_REGEN_ENABLED. Out of combat it looks as Gunsight.lua's ApplyFrame leaves a piece: alpha 1 before Show,
--- Hide and then alpha 0. Mouse is never toggled, so a container hidden in combat is invisible but its rows still
--- take clicks until the regen pass hides it.
+-- to PLAYER_REGEN_ENABLED. Out of combat: alpha 1 before Show, Hide and then alpha 0. Mouse is never toggled, so a
+-- container hidden in combat is invisible but its rows still take clicks until the regen pass hides it.
 function SHOWN.Apply()
     local container = FS.partyContainer
     if not container then return end
@@ -2407,22 +2402,9 @@ function SHOWN.Apply()
     end
 end
 
--- The login and Init paths. Until Own() they do nothing: the Gunsight still registers the container as a piece and
--- applies its own on/off state at login, and a second owner would fight it.
-function SHOWN.ApplyWanted()
-    if SHOWN.owned and SHOWN.loggedIn then SHOWN.Apply() end
-end
-
 -- The real Show or Hide a change made in combat owed, called from the regen handler Init builds.
 function SHOWN.FlushOwed()
     if SHOWN.owed then SHOWN.Apply() end
-end
-
--- Hands the container to this module: from here on login, Init and any change to the saved value put it in the
--- wanted state, and the Gunsight must no longer drive it.
-function PartyFrames.Own()
-    SHOWN.owned = true
-    SHOWN.ApplyWanted()
 end
 
 -- fn(on) runs after the wanted state changed (SetShown, a profile switch, a reset), with the container already
@@ -2443,33 +2425,29 @@ function SHOWN.Notify(on)
     end
 end
 
--- A profile switch, reset or copy changes the saved value behind SetShown's back; follow it the same way.
+-- SetShown, a profile switch, a reset or a copy: whatever changes the saved value puts the container in step.
 FS.Config.OnChange(SHOWN.KEY, function(new)
-    if SHOWN.owned or SHOWN.requesting then SHOWN.Apply() end
+    SHOWN.Apply()
     SHOWN.Notify(new == true)
 end)
 
--- Stores the wish and puts the container in it. False, and nothing changed, when FS.Config refuses the write
--- (read-only settings). A call that changes nothing still brings the container in line, since a container nobody
--- applied can disagree with a value that was already saved.
+-- Stores the wish and puts the container in it; false when FS.Config refuses the write (read-only settings). A
+-- change reaches the container through the hook above. A call that changes nothing, or is refused, still brings
+-- the container in line with the wanted state, since one nobody applied can disagree with a value already saved.
 function PartyFrames.SetShown(on)
     on = on and true or false
     local changed = PartyFrames.IsShown() ~= on
-    SHOWN.requesting = changed
     local ok = FS.Config.Set(SHOWN.KEY, on)
-    SHOWN.requesting = false
-    if not ok then return false end
-    if not changed then SHOWN.Apply() end
-    return true
+    if not (ok and changed) then SHOWN.Apply() end
+    return ok
 end
 
+-- Init runs while the files load, when FS.Config still answers its defaults, so this is where the saved value
+-- reaches the container on a normal login; Init applies it again when a login in combat builds the container late.
 do
     local login = CreateFrame("Frame")
     login:RegisterEvent("PLAYER_LOGIN")
-    login:SetScript("OnEvent", function()
-        SHOWN.loggedIn = true
-        SHOWN.ApplyWanted()
-    end)
+    login:SetScript("OnEvent", SHOWN.Apply)
 end
 
 local function Init()
@@ -2579,7 +2557,7 @@ local function Init()
 
     FS.partyRows = rows
     FS.partyContainer = container
-    SHOWN.ApplyWanted() -- a login in combat reached PLAYER_LOGIN before this container existed
+    SHOWN.Apply() -- a login in combat reached PLAYER_LOGIN before this container existed
 
     -- Roster/role changes affect every row (a party slot's occupant, or any
     -- member's assigned role) rather than a single unit token, so this lives

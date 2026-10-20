@@ -24,15 +24,13 @@ DECK_DEFS, keyX, the `.cdeck.bm` key rules, the Rings block). The checks pin:
     nothing is left running at rest; reduced motion, a hidden key and a missing Fx snap instead;
   * a rescale re-seats and creates nothing, in combat it waits for regen;
   * the keys follow the Console (hidden with /fsconsole off) and what the Gunsight BUILT at login (not
-    built, party piece not registered, when it was disabled then; `/fsgun on` after that builds nothing
-    until a reload); the party frame container becomes piece `party` (alpha only in combat while it is
-    protected), with one next-frame retry when it is missing at regen and a lazy register on the first
-    click;
+    built when it was disabled then; `/fsgun on` after that builds nothing until a reload);
+  * the party key is not a Gunsight piece: it reads, sets and follows FS.PartyFrames (a stand-in with
+    that module's contract here; partyframes-harness.py pins the real one), so a click or a change of
+    the saved value reaches the party frames only through it, and the master switch never touches it;
   * the master switch is live for a Gunsight that was built: switched off, the keys are hidden (also in
-    combat), no key is shown so the Console draws no tab (at regen in combat; a Gunsight that was off at
-    login has no keys either, so no tab from the start) and the party piece is released so
-    the party frames show as on a Gunsight-off login; switched on, they come back and the party piece
-    follows its state again.
+    combat) and no key is shown so the Console draws no tab (at regen in combat; a Gunsight that was off
+    at login has no keys either, so no tab from the start); switched on, they come back.
 
 The mock is strict (a widget method it does not define fails as a nil call) and is NOT the real client.
 
@@ -196,6 +194,28 @@ function FrameMT:CreateTexture(name, layer, template, sublevel)
     return t
 end
 
+-- FS.PartyFrames with the contract of PartyFrames.lua over the real Config: the wanted state is the saved
+-- gunsight.pieces.party value, SetShown writes it, and a listener hears every change of it. Made after Config
+-- and before Gunsight.lua loads, as the toc orders them. PF.calls is what the keys asked of it, PF.heard the
+-- number of changes of the saved value it saw.
+function MakePartyFrames()
+    local KEY = "gunsight.pieces.party"
+    FS.Config.RegisterDefault(KEY, true)
+    local PF = { CONFIG_KEY = KEY, calls = {}, heard = 0, listeners = {} }
+    FS.PartyFrames = PF
+    function PF.IsShown() return FS.Config.Get(KEY) == true end
+    function PF.SetShown(on)
+        PF.calls[#PF.calls + 1] = on and "show" or "hide"
+        return FS.Config.Set(KEY, on and true or false)
+    end
+    function PF.OnShownChanged(fn) PF.listeners[#PF.listeners + 1] = fn end
+    FS.Config.OnChange(KEY, function(new)
+        PF.heard = PF.heard + 1
+        for _, fn in ipairs(PF.listeners) do fn(new == true) end
+    end)
+    return PF
+end
+
 GameTooltip = { lines = {}, shown = false }
 function GameTooltip:SetOwner(owner, anchor) self.owner, self.anchor, self.lines, self.points = owner, anchor, {}, {} end
 function GameTooltip:ClearAllPoints() self.points = {} end
@@ -290,6 +310,7 @@ local function boot(opts)
     MakeTheme()
     loadAddonFile(LAYOUT_SRC, "Core/Layout.lua")
     loadAddonFile(CONFIG_SRC, "Core/Config.lua")
+    if not opts.noParty then MakePartyFrames() end
     loadAddonFile(GUNSIGHT_SRC, "Modules/CombatHud/Gunsight.lua")
     if not opts.noFx then loadAddonFile(CHEVRON_SRC, "Core/ChevronCastBar.lua") end
     FS.ActionBars = AB
@@ -302,10 +323,6 @@ local function boot(opts)
     if want == nil then want = "WARLOCK" end
     HUD_PROFILE = type(want) == "string" and FS.HudProfiles[want] or (type(want) == "table" and want or nil)
     FS.Hud = { GetProfile = function() return HUD_PROFILE end }
-    if opts.party then
-        FS.partyContainer = CreateFrame("Frame", "ForeverSTUwavePartyContainer", UIParent)
-        FS.partyContainer.protected = opts.partyProtected
-    end
     loadAddonFile(KEYS_SRC, "Modules/ActionBars/ConsoleKeys.lua")
     fire("ADDON_LOADED", "forever-stuwave")
     if opts.geometryFirst ~= false then FS.ActionBars.Publish() end
@@ -437,25 +454,33 @@ check(desc("shard") == "Held shards under your cast bar", "shard: " .. tostring(
 
 case("click_toggles_the_right_piece")(r"""
 local CK, G = boot({})
--- one key per console piece; a piece with no key (the My buffs plate) has no click to test
+-- one key per console switch: the Gunsight pieces, and the party frames' own. A piece with no key (the My buffs
+-- plate) has no click to test.
+local function isOn(piece)
+    if piece == "party" then return FS.PartyFrames.IsShown() end
+    return G.IsPieceOn(piece)
+end
+local all = { "party" }
+for _, piece in ipairs(G.PIECES) do all[#all + 1] = piece end
 for _, def in ipairs(CK.DEFS) do
     local piece = def.key
     local k = keyOf(CK, piece)
-    for _, other in ipairs(G.PIECES) do check(G.IsPieceOn(other), "all pieces start on") end
+    for _, other in ipairs(all) do check(isOn(other), "all switches start on") end
     click(k)
-    check(not G.IsPieceOn(piece), "clicking " .. piece .. " did not turn it off")
-    for _, other in ipairs(G.PIECES) do
-        if other ~= piece then check(G.IsPieceOn(other), "clicking " .. piece .. " also changed " .. other) end
+    check(not isOn(piece), "clicking " .. piece .. " did not turn it off")
+    for _, other in ipairs(all) do
+        if other ~= piece then check(isOn(other), "clicking " .. piece .. " also changed " .. other) end
     end
     check(FS.Config.Get("gunsight.pieces." .. piece) == false, piece .. " off was not saved")
     click(k)
-    check(G.IsPieceOn(piece), "clicking " .. piece .. " again did not turn it on")
+    check(isOn(piece), "clicking " .. piece .. " again did not turn it on")
 end
 """)
 
 case("initial_state_follows_the_saved_pieces")(r"""
-local CK, G = boot({ db = { gunsight = { pieces = { dot = false, tgt = false } } } })
+local CK, G = boot({ db = { gunsight = { pieces = { dot = false, tgt = false, party = false } } } })
 check(keyOf(CK, "dot").phase == "off" and keyOf(CK, "tgt").phase == "off", "saved off keys start off")
+check(keyOf(CK, "party").phase == "off" and not FS.PartyFrames.IsShown(), "a saved off party value starts its key off")
 check(keyOf(CK, "you").phase == "on", "a piece that is on starts on")
 check(OnUpdates() == 0, "the initial sync must not animate")
 check(keyOf(CK, "dot").led.vcolor[4] == 0 and keyOf(CK, "you").led.vcolor[4] == 1, "LED lit only on the on keys")
@@ -804,46 +829,48 @@ eq(k.art:GetScale(), s, "art scale at regen")
 """)
 
 case("click_works_in_combat_and_touches_nothing_protected")(r"""
-local CK, G = boot({ party = true, partyProtected = true })
+local CK, G = boot({})
 IN_COMBAT = true
 click(keyOf(CK, "you"))
 check(not G.IsPieceOn("you"), "the click did nothing in combat")
 Advance(200)
 check(#BLOCKED == 0, "a protected action was attempted in combat")
 click(keyOf(CK, "party"))
-check(not G.IsPieceOn("party"), "party off in combat")
-near(FS.partyContainer:GetAlpha(), 0, "the protected party container goes to alpha 0 in combat")
-check(FS.partyContainer:IsShown(), "and is not Hidden in combat")
-check(#BLOCKED == 0, "Show/Hide/EnableMouse was attempted on the protected frame, " .. table.concat(BLOCKED, ","))
-IN_COMBAT = false
-fire("PLAYER_REGEN_ENABLED")
-check(not FS.partyContainer:IsShown(), "the real Hide runs after combat")
+check(not FS.PartyFrames.IsShown(), "party off in combat")
+check(table.concat(FS.PartyFrames.calls, ",") == "hide", "the party click went to the party frames, which own the combat rules")
+check(#BLOCKED == 0, "a protected action was attempted, " .. table.concat(BLOCKED, ","))
 """)
 
-case("party_container_becomes_piece_party")(r"""
-local CK, G = boot({ party = true })
-click(keyOf(CK, "party"))
-Advance(10)
-finishAnims()
-check(not FS.partyContainer:IsShown() or FS.partyContainer:GetAlpha() == 0, "party key did not hide the party frames")
-click(keyOf(CK, "party"))
-finishAnims()
-check(FS.partyContainer:IsShown() and FS.partyContainer:GetAlpha() == 1, "party key did not bring the party frames back")
-""")
-
-case("party_without_a_container_still_toggles_state")(r"""
+case("the_party_key_goes_through_fs_partyframes_and_the_gunsight_never_hears_of_it")(r"""
 local CK, G = boot({})
+local PF = FS.PartyFrames
+local piecesSet, heard = {}, {}
+local setPiece = G.SetPiece
+G.SetPiece = function(key, ...) piecesSet[#piecesSet + 1] = key; return setPiece(key, ...) end
+G.OnPieceChanged(function(key) heard[#heard + 1] = key end)
 click(keyOf(CK, "party"))
-check(not G.IsPieceOn("party"), "party state toggles without a container")
+check(#piecesSet == 0, "the party click must not call Gunsight.SetPiece")
+check(table.concat(PF.calls, ",") == "hide", "it asked FS.PartyFrames to hide")
+check(PF.heard == 1, "one change of the saved value, seen by the party frames' hook alone")
+check(#heard == 0, "and the Gunsight announced nothing: it has no hook on that key")
+check(keyOf(CK, "party").phase == "outage" or keyOf(CK, "party").phase == "off", "the key follows FS.PartyFrames' notice")
+finishAnims()
+click(keyOf(CK, "you"))
+check(table.concat(PF.calls, ",") == "hide", "a Gunsight key does not reach the party frames")
+check(piecesSet[1] == "you", "it goes to the Gunsight")
+-- a write from anywhere (a profile switch does this) moves the key through the party frames' notice
+FS.Config.Set("gunsight.pieces.party", true)
+check(PF.heard == 2, "the write was seen once")
+check(keyOf(CK, "party").phase == "on", "the key follows a change it did not make")
+check(#heard == 1, "the Gunsight heard only its own piece")
+check(G.IsPieceOn("party") == false and G.SetPiece("party", false) == false, "the Gunsight knows no party piece")
 """)
 
-case("party_container_that_appears_later_is_registered")(r"""
-local CK, G = boot({})
-FS.partyContainer = CreateFrame("Frame", "ForeverSTUwavePartyContainer", UIParent)
-fire("PLAYER_REGEN_ENABLED")
-click(keyOf(CK, "party"))
-finishAnims()
-check(not FS.partyContainer:IsShown() or FS.partyContainer:GetAlpha() == 0, "late container not driven by the key")
+case("without_the_party_frames_module_no_keys_are_built")(r"""
+local CK = boot({ noParty = true })
+check(CK.IsBuilt == nil, "ConsoleKeys stopped at its load guard")
+check(DEGRADED["consolekeys_load"], "the missing module is logged")
+for _, f in ipairs(FRAMES) do check(not (f.name and f.name:find("^FSConsoleKey")), "a key frame exists: " .. tostring(f.name)) end
 """)
 
 case("hidden_when_the_console_is_off")(r"""
@@ -890,16 +917,16 @@ end
 """
 
 case("gunsight_disabled_builds_nothing_and_leaves_party_alone")(TAB_HELPERS + r"""
-local CK, G = boot({ party = true, db = { gunsight = { enabled = false, pieces = { party = false } } } })
+local CK, G = boot({ db = { gunsight = { enabled = false, pieces = { party = false } } } })
 checkNoTab("gunsight disabled at login")
 check(not G.IsEnabled(), "gunsight is disabled")
 check(not CK.IsBuilt(), "keys were built with the Gunsight disabled")
-check(FS.partyContainer:IsShown() and FS.partyContainer:GetAlpha() == 1, "the party frames were touched with the Gunsight disabled")
+check(not FS.PartyFrames.IsShown() and #FS.PartyFrames.calls == 0, "the party frames keep their own saved state and nothing asked them anything")
 for _, f in ipairs(FRAMES) do check(not (f.name and f.name:find("^FSConsoleKey")), "a key frame exists: " .. tostring(f.name)) end
 """)
 
 case("fsgun_on_after_a_disabled_login_builds_nothing_until_a_reload")(TAB_HELPERS + r"""
-local CK, G = boot({ party = true, db = { gunsight = { enabled = false, pieces = {} } } })
+local CK, G = boot({ db = { gunsight = { enabled = false, pieces = {} } } })
 check(not CK.IsBuilt(), "keys built with the Gunsight disabled at login")
 SlashCmdList["FSGUN"]("on")
 FS.ActionBars.Publish()
@@ -909,9 +936,7 @@ check(FS.Config.Get("gunsight.enabled") == true, "/fsgun on saves the setting")
 check(not G.IsEnabled(), "the live state is fixed at load, so a built UI never changes under it")
 check(not CK.IsBuilt(), "/fsgun on built the keys without a reload")
 for _, f in ipairs(FRAMES) do check(not (f.name and f.name:find("^FSConsoleKey")), "a key frame exists: " .. tostring(f.name)) end
-check(FS.partyContainer:IsShown() and FS.partyContainer:GetAlpha() == 1, "the party frames were touched after a disabled login")
-G.SetPiece("party", false, true)
-check(FS.partyContainer:IsShown() and FS.partyContainer:GetAlpha() == 1, "piece party was registered after a disabled login")
+check(#FS.PartyFrames.calls == 0, "the party frames were asked something after a disabled login")
 """)
 
 case("a_disabled_login_with_the_geometry_arriving_after_it_draws_no_tab")(TAB_HELPERS + r"""
@@ -926,33 +951,6 @@ check(#BLOCKED == 0, "nothing protected was touched in combat")
 IN_COMBAT = false
 fire("PLAYER_REGEN_ENABLED")
 checkNoTab("after combat")
-""")
-
-case("party_registration_retries_once_on_the_next_frame")(r"""
-local timers = {}
-C_Timer = { After = function(_, fn) timers[#timers + 1] = fn end }
-local CK, G = boot({})
-check(#timers == 0, "a timer was scheduled before any regen")
-fire("PLAYER_REGEN_ENABLED")
-check(#timers == 1, "a nil container at regen schedules one retry, got " .. #timers)
-fire("PLAYER_REGEN_ENABLED")
-check(#timers == 1, "a second regen must not stack another retry, got " .. #timers)
-FS.partyContainer = CreateFrame("Frame", "ForeverSTUwavePartyContainer", UIParent)
-for _, fn in ipairs(timers) do fn() end
-click(keyOf(CK, "party"))
-finishAnims()
-check(not FS.partyContainer:IsShown() or FS.partyContainer:GetAlpha() == 0, "the retry did not register the container")
-""")
-
-case("party_registers_lazily_on_the_first_click_when_the_retry_missed")(r"""
-C_Timer = nil
-local CK, G = boot({})
-fire("PLAYER_REGEN_ENABLED")   -- container still nil, and no C_Timer to retry with: must not throw
-FS.partyContainer = CreateFrame("Frame", "ForeverSTUwavePartyContainer", UIParent)
-click(keyOf(CK, "party"))
-finishAnims()
-check(not G.IsPieceOn("party"), "party state flipped")
-check(not FS.partyContainer:IsShown() or FS.partyContainer:GetAlpha() == 0, "the click did not register the container and apply the state")
 """)
 
 case("hide_clears_hover_and_down_and_repaints_the_look")(r"""
@@ -1241,11 +1239,11 @@ checkFits(CK, 6, "priest after the console came back")
 
 
 # ---------------------------------------------------------------------------------------
-# The master switch is live: the keys and the party piece follow it
+# The master switch is live: the keys follow it, the party frames' own switch does not
 # ---------------------------------------------------------------------------------------
 
 case("fsgun_off_at_runtime_hides_the_keys_and_on_brings_them_back")(SHOWN_HELPERS + r"""
-local CK, G = boot({ party = true, profile = "PRIEST" })
+local CK, G = boot({ profile = "PRIEST" })
 checkFits(CK, 6, "priest before")
 local standing = tabGeometry()
 eq(tabPiecesShown(), 6, "the tab stands with the Gunsight on")
@@ -1288,59 +1286,47 @@ eq(tabPiecesShown(), 6, "the tab is back with the keys")
 """)
 
 case("a_state_change_while_the_keys_are_hidden_is_right_when_they_return")(r"""
-local CK, G = boot({ party = true })
+local CK, G = boot({})
 SlashCmdList["FSGUN"]("off")
 G.SetPiece("shard", false, true)
+FS.PartyFrames.SetShown(false)
 SlashCmdList["FSGUN"]("on")
 check(keyOf(CK, "shard").phase == "off", "the key shows the piece's state")
 check(not keyOf(CK, "shard").ringShown, "and no ring plays for a change made while it was hidden")
+check(keyOf(CK, "party").phase == "off" and not keyOf(CK, "party").ringShown, "the party key too")
 """)
 
-case("fsgun_off_at_runtime_releases_the_party_frames_like_a_gunsight_off_login")(r"""
-local CK, G = boot({ party = true })
+case("fsgun_off_at_runtime_leaves_the_party_frames_alone")(r"""
+local CK, G = boot({})
+local PF = FS.PartyFrames
 click(keyOf(CK, "party"))
 finishAnims()
-check(not FS.partyContainer:IsShown(), "party piece off hides the party frames")
+check(not PF.IsShown(), "party off")
 SlashCmdList["FSGUN"]("off")
-check(FS.partyContainer:IsShown() and FS.partyContainer:GetAlpha() == 1, "master off: the party frames show, as when the Gunsight is off at login")
-G.SetPiece("party", true, true)
-G.SetPiece("party", false, true)
-check(FS.partyContainer:IsShown() and FS.partyContainer:GetAlpha() == 1, "and a party piece change does not hide them while the Gunsight is off")
+check(not PF.IsShown(), "master off does not touch the party frames' setting")
+check(table.concat(PF.calls, ",") == "hide", "and asks them nothing: " .. table.concat(PF.calls, ","))
+PF.SetShown(true)                               -- their own switch still works with the Gunsight off
 SlashCmdList["FSGUN"]("on")
-check(not FS.partyContainer:IsShown(), "master on: the party frames follow the piece state again (off)")
-G.SetPiece("party", true, true)
-check(FS.partyContainer:IsShown() and FS.partyContainer:GetAlpha() == 1, "and the piece drives them")
-""")
-
-case("a_party_container_that_appears_while_the_gunsight_is_off_is_left_alone_until_it_is_on")(r"""
-local CK, G = boot({})
-SlashCmdList["FSGUN"]("off")
-FS.partyContainer = CreateFrame("Frame", "ForeverSTUwavePartyContainer", UIParent)
-G.SetPiece("party", false, true)
-fire("PLAYER_REGEN_ENABLED")
-check(FS.partyContainer:IsShown() and FS.partyContainer:GetAlpha() == 1, "not registered while the Gunsight is off")
-SlashCmdList["FSGUN"]("on")
-fire("PLAYER_REGEN_ENABLED")
-check(not FS.partyContainer:IsShown(), "registered once it is on again, and it follows the off piece")
+check(PF.IsShown(), "master on does not touch it either")
+check(table.concat(PF.calls, ",") == "hide,show", "no call from the master switch: " .. table.concat(PF.calls, ","))
+check(keyOf(CK, "party").phase == "on", "the party key shows the state that changed while the Gunsight was off")
 """)
 
 case("fsgun_off_and_on_in_combat_touches_nothing_protected_and_settles_after")(SHOWN_HELPERS + r"""
-local CK, G = boot({ party = true, partyProtected = true, profile = "PRIEST" })
+local CK, G = boot({ profile = "PRIEST" })
 G.root.protected = true
-click(keyOf(CK, "party"))                       -- party piece off, out of combat
+click(keyOf(CK, "party"))                       -- party off, out of combat
 finishAnims()
-check(not FS.partyContainer:IsShown(), "party off")
+check(not FS.PartyFrames.IsShown(), "party off")
 IN_COMBAT = true
 SlashCmdList["FSGUN"]("off")
 for _, k in ipairs(CK.keys) do check(not k.btn:IsVisible(), k.key .. " still drawn in combat after master off") end
 eq(FS.Console.GetKeyCount(), 6, "the Console is not resized in combat")
 eq(tabPiecesShown(), 6, "the tab is not taken down in combat")
-near(FS.partyContainer:GetAlpha(), 1, "the party frames show by alpha in combat")
 check(#BLOCKED == 0, "a protected action was attempted in combat: " .. table.concat(BLOCKED, ","))
 IN_COMBAT = false
 fire("PLAYER_REGEN_ENABLED")
 checkNoTab("after combat")
-check(FS.partyContainer:IsShown() and FS.partyContainer:GetAlpha() == 1, "party frames shown for real after combat")
 IN_COMBAT = true
 SlashCmdList["FSGUN"]("on")
 check(G.IsActive() == false, "a hidden root cannot come back in combat")
@@ -1349,25 +1335,20 @@ IN_COMBAT = false
 fire("PLAYER_REGEN_ENABLED")
 checkFits(CK, 6, "priest after combat")
 eq(tabPiecesShown(), 6, "the tab is back after combat")
-check(not FS.partyContainer:IsShown(), "party follows its off piece again")
+check(not FS.PartyFrames.IsShown() and #FS.PartyFrames.calls == 1, "the master switch never asked the party frames anything")
 check(#BLOCKED == 0, "nothing protected in combat")
 """)
 
 
 case("fsgun_off_then_on_in_one_fight_settles_on_the_saved_state_after_combat")(SHOWN_HELPERS + r"""
-local CK, G = boot({ party = true, partyProtected = true, profile = "PRIEST" })
+local CK, G = boot({ profile = "PRIEST" })
 G.root.protected = true
-click(keyOf(CK, "party"))                       -- party piece saved off, out of combat
-finishAnims()
-check(not FS.partyContainer:IsShown(), "party off")
 IN_COMBAT = true
 SlashCmdList["FSGUN"]("off")
-near(FS.partyContainer:GetAlpha(), 1, "master off in combat: the party frames show by alpha")
 SlashCmdList["FSGUN"]("on")                     -- back on in the same fight, before any regen
 check(G.IsActive() == true, "the root never left the screen: active again")
 IN_COMBAT = false
 fire("PLAYER_REGEN_ENABLED")
-check(not FS.partyContainer:IsShown(), "the party frames settle on the saved piece state (off), not the stale master-off look")
 checkFits(CK, 6, "the keys settle on the on state after combat")
 for _, k in ipairs(CK.keys) do if k.shown then check(k.btn:IsVisible(), k.key .. " not drawn after off then on in one fight") end end
 check(#BLOCKED == 0, "nothing protected in combat")

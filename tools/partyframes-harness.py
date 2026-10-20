@@ -3235,19 +3235,17 @@ def _event(rt: LuaRuntime, name: str, arg: str = "nil") -> None:
     end""")
 
 
-def _client(*, combat: bool = False, own: bool = True, saved: str = "", settle: bool = True) -> LuaRuntime:
+def _client(*, combat: bool = False, saved: str = "", settle: bool = True) -> LuaRuntime:
     """A client past ADDON_LOADED and PLAYER_LOGIN, the party container's Show and Hide tracked.
-    `own` hands the container to FS.PartyFrames at load, `combat` logs in under lockdown (the
-    container is then built at the first PLAYER_REGEN_ENABLED), `saved` runs before any file loads,
-    and `settle` forgets the calls the login itself made so a check counts only its own."""
+    `combat` logs in under lockdown (the container is then built at the first PLAYER_REGEN_ENABLED),
+    `saved` runs before any file loads, and `settle` forgets the calls the login itself made so a
+    check counts only its own."""
     rt = _runtime(before_load=f"""
         __combat={'true' if combat else 'false'}
         function InCombatLockdown() return __combat end
         function UnitGUID() return 'Player-1-AAAA' end
         {saved}
         {TRACK_CONTAINER}""")
-    if own:
-        rt.execute("FS.PartyFrames.Own()")
     _event(rt, "ADDON_LOADED", "'forever-stuwave'")
     _event(rt, "PLAYER_LOGIN")
     if settle and rt.globals().FS.partyContainer is not None:
@@ -3281,7 +3279,7 @@ def _check_shown_api_exists_at_file_scope() -> None:
     rt = _runtime(before_load="__combat=true function InCombatLockdown() return __combat end")
     assert rt.globals().FS.partyContainer is None, "a login in combat must not build the container yet"
     assert rt.eval("FS.PartyFrames.CONFIG_KEY") == SHOWN_KEY
-    for name in ("IsShown", "SetShown", "OnShownChanged", "Own"):
+    for name in ("IsShown", "SetShown", "OnShownChanged"):
         assert rt.eval(f"type(FS.PartyFrames.{name})") == "function", name
     assert _wanted(rt) is True, "the frames are wanted until the saved value says otherwise"
     assert rt.eval(f"FS.Config.Get('{SHOWN_KEY}')") is True
@@ -3385,25 +3383,35 @@ def _check_shown_listeners() -> None:
     assert len(messages) == 1 and "boom" in messages[0], f"one latched degrade line, got {messages}"
 
 
-def _check_shown_stays_dormant_until_owned() -> None:
-    """While the Gunsight still shows and hides the container, nothing automatic may touch it:
-    not login, not Init, not a Config write it makes itself. An explicit SetShown still moves it."""
-    rt = _client(combat=True, own=False)
-    rt.execute(f"""
-        __told = {{}}
-        FS.PartyFrames.OnShownChanged(function(on) __told[#__told + 1] = tostring(on) end)
-        FS.Config.Set('{SHOWN_KEY}', false)""")
-    assert _wanted(rt) is False and rt.eval("table.concat(__told, ',')") == "false"
-    _leave_combat(rt)
-    _expect_look(rt, True, 1, "", "Init builds the container and leaves it alone")
-    _event(rt, "PLAYER_LOGIN")
-    rt.execute(f"FS.Config.Set('{SHOWN_KEY}', true) FS.Config.Set('{SHOWN_KEY}', false)")
-    _expect_look(rt, True, 1, "", "a Config write from elsewhere leaves the container to its owner")
-    assert rt.eval("FS.PartyFrames.SetShown(false)") is True
-    _expect_look(rt, False, 0, "Hide", "SetShown is explicit, so it applies even though the saved value matched")
-    rt.execute("FS.PartyFrames.Own()")
-    _expect_look(rt, False, 0, "Hide,Hide", "Own applies the wanted state at once")
+def _check_shown_listener_may_call_back() -> None:
+    """A listener that changes the state from inside its notification leaves the last wish standing."""
+    rt = _client()
+    rt.execute("""
+        __told = {}
+        FS.PartyFrames.OnShownChanged(function(on)
+            __told[#__told + 1] = tostring(on)
+            if on == false then FS.PartyFrames.SetShown(true) end
+        end)""")
+    rt.execute("FS.PartyFrames.SetShown(false)")
+    assert _wanted(rt) is True
+    _expect_look(rt, True, 1, "Hide,Show@1", "the nested wish was applied last")
+    assert rt.eval("table.concat(__told, ',')") == "false,true"
     _assert_quiet(rt)
+
+
+def _check_shown_set_shown_without_a_change_still_follows_the_wanted_state() -> None:
+    """A container that drifted from the wanted state is put back by a SetShown that changes nothing,
+    and by one that read-only settings refuse."""
+    drift = "FS.partyContainer:Hide() FS.partyContainer:SetAlpha(0) FS.partyContainer.log = {}"
+    rt = _client()
+    rt.execute(drift)
+    assert rt.eval("FS.PartyFrames.SetShown(true)") is True
+    _expect_look(rt, True, 1, "Show@1", "unchanged value")
+    rt = _client(saved="ForeverSTUwaveDB={profilesVersion=99}")
+    rt.execute(drift)
+    assert rt.eval("FS.PartyFrames.SetShown(false)") is False
+    assert _wanted(rt) is True, "a refused write changes nothing"
+    _expect_look(rt, True, 1, "Show@1", "refused write")
 
 
 def _check_fsparty_show_and_hide() -> None:
@@ -3424,7 +3432,7 @@ def _check_fsparty_show_and_hide() -> None:
     # A saved setting that cannot be written (a newer profile version is read-only) changes nothing.
     ro = _client(saved="ForeverSTUwaveDB={profilesVersion=99}")
     ro.globals().SlashCmdList.FSPARTY("hide")
-    _expect_look(ro, True, 1, "")
+    assert _look(ro)[:2] == (True, 1)
     assert _wanted(ro) is True
     last = ro.globals().__messages
     assert "could not be changed" in last[len(last)], list(last.values())
@@ -3661,8 +3669,10 @@ def main() -> int:
          _check_shown_profile_switch_in_combat),
         ("party frames: listeners fire on a change, a throwing one is contained",
          _check_shown_listeners),
-        ("party frames: login, Init and Config writes leave the container alone until owned",
-         _check_shown_stays_dormant_until_owned),
+        ("party frames: a listener may change the state from inside its notification",
+         _check_shown_listener_may_call_back),
+        ("party frames: a SetShown that changes nothing or is refused still follows the wanted state",
+         _check_shown_set_shown_without_a_change_still_follows_the_wanted_state),
         ("/fsparty show and hide", _check_fsparty_show_and_hide),
         ("target edge: purple on the targeted row, retarget and clear",
          _check_target_edge_purple),

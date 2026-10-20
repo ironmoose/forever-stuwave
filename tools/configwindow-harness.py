@@ -496,7 +496,7 @@ end
 local function protectedPiece()
     local frame = CreateFrame("Frame", nil, FS.Gunsight.root)
     frame.protected = true
-    FS.Gunsight.RegisterPiece("party", { frame = frame })
+    FS.Gunsight.RegisterPiece("prc", { frame = frame })
     return frame
 end
 
@@ -506,8 +506,8 @@ function T.the_window_opens_in_combat_and_a_toggle_only_fades_a_protected_piece(
     __combat = true
     W.Open("gunsight")
     yes(W.IsShown())
-    yes(press("Party frames"))
-    eq(FS.Gunsight.IsPieceOn("party"), false)
+    yes(press("Proc posts"))
+    eq(FS.Gunsight.IsPieceOn("prc"), false)
     eq(frame:GetAlpha(), 0, "alpha only in combat")
     yes(frame:IsShown(), "no Hide on a protected frame in combat")
     eq(#BLOCKED, 0, "no blocked action was attempted")
@@ -521,17 +521,17 @@ function T.a_profile_switch_in_combat_defers_a_protected_piece()
     local frame = protectedPiece()
     FS.Config.NewProfile("Raid")
     FS.Config.SetActiveProfile("Raid")
-    FS.Config.Set("gunsight.pieces.party", false)
+    FS.Config.Set("gunsight.pieces.prc", false)
     FS.Config.SetActiveProfile("Default")
     W.Open("gunsight")
     yes(frame:IsShown())
     __combat = true
     yes(FS.Config.SetActiveProfile("Raid"))
-    eq(FS.Gunsight.IsPieceOn("party"), false)
+    eq(FS.Gunsight.IsPieceOn("prc"), false)
     eq(frame:GetAlpha(), 0, "alpha only in combat")
     yes(frame:IsShown(), "still shown until combat ends")
     eq(#BLOCKED, 0)
-    no(row("Party frames").control.fsChecked, "the toggle follows at once")
+    no(row("Proc posts").control.fsChecked, "the toggle follows at once")
     __combat = false
     Fire("PLAYER_REGEN_ENABLED")
     no(frame:IsShown())
@@ -716,13 +716,13 @@ end
 
 local PIECE_LABELS = {
     you = "Your cast bar", tgt = "Target cast bar", next = "Next cast", dot = "Target side areas",
-    shard = "Soul shards", prc = "Proc posts", buff = "Buff reminders", party = "Party frames", mybuffs = "My buffs",
+    shard = "Soul shards", prc = "Proc posts", buff = "Buff reminders", mybuffs = "My buffs",
 }
 
 function T.every_gunsight_piece_has_a_label_and_a_row()
     local W = boot()
     W.Open("gunsight")
-    eq(#FS.Gunsight.PIECES, 9)
+    eq(#FS.Gunsight.PIECES, 8)
     for _, key in ipairs(FS.Gunsight.PIECES) do
         yes(PIECE_LABELS[key], "no label for piece " .. key)
         if key == "mybuffs" then
@@ -733,6 +733,21 @@ function T.every_gunsight_piece_has_a_label_and_a_row()
     end
     yes(row("Gunsight HUD"), "master toggle")
     yes(hasText(win(), "PIECES"), "section header")
+end
+
+function T.the_party_frames_are_no_gunsight_piece_and_the_pieces_pair_up_evenly()
+    local W = boot()
+    W.Open("gunsight")
+    no(row("Party frames"), "the party frames have their own switch, not a Gunsight row")
+    no(hasText(win(), "Party frames"), "and no text for them on the page")
+    -- six piece toggles in three left and right pairs: every left one has a right one beside it, none is alone
+    local labels = { "Your cast bar", "Target cast bar", "Target side areas", "Soul shards", "Proc posts", "Buff reminders" }
+    for i = 1, #labels, 2 do
+        local left, right = row(labels[i]), row(labels[i + 1])
+        eq(left.points[1].y, right.points[1].y, labels[i] .. " and " .. labels[i + 1] .. " share a line")
+        yes(left.points[1].x < right.points[1].x, labels[i] .. " sits left of " .. labels[i + 1])
+        if i > 1 then yes(-left.points[1].y > -row(labels[i - 1]).points[1].y, labels[i] .. " starts the next line") end
+    end
 end
 
 function T.gunsight_page_has_no_aura_rows_yet()
@@ -1197,7 +1212,7 @@ function T.next_cast_moved_out_of_the_pieces_list()
     W.Open("gunsight")
     no(row("Next cast tile"), "the old pieces row is gone")
     yes(yOf("Next cast") > headerY("PLAYER SIDE") and yOf("Next cast") < headerY("PIECES"), "Next cast sits in Player side")
-    for _, label in ipairs({ "Your cast bar", "Target cast bar", "Soul shards", "Proc posts", "Buff reminders", "Party frames" }) do
+    for _, label in ipairs({ "Your cast bar", "Target cast bar", "Soul shards", "Proc posts", "Buff reminders" }) do
         yes(yOf(label) > headerY("PIECES"), label .. " stays in the pieces list")
     end
     yes(row("Target side areas"), "the dot piece row stays, renamed for what it now switches")
@@ -1336,7 +1351,7 @@ function T.the_target_bar_group_has_the_mockups_header_and_rows_in_order()
     W.Open("gunsight")
     yes(hasText(win(), MC.header:upper()), "header " .. MC.header)
     local labels = { MC.health.label, MC.resource.label, MC.width.label, MC.numbers.label, MC.format.label }
-    local last = -row("Party frames").points[1].y
+    local last = -row("Buff reminders").points[1].y
     for _, label in ipairs(labels) do
         local r = sliderRow(label)
         local y = -r.points[1].y
@@ -1450,7 +1465,7 @@ end
 function T.the_target_bar_group_is_absent_without_the_boxes_module()
     local W = boot({ noBoxes = true })
     W.Open("gunsight")
-    yes(row("Party frames"), "the pieces still build")
+    yes(row("Buff reminders"), "the pieces still build")
     no(row(MC.health.label), "no slider without GunsightBoxes")
     no(hasText(win(), MC.header:upper()))
 end

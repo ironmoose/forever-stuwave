@@ -1385,10 +1385,10 @@ CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, buil
     IconStyleGroup(page)
 end })
 
-local PIECE_ORDER = { "you", "tgt", "dot", "shard", "prc", "buff", "party" }
+local PIECE_ORDER = { "you", "tgt", "dot", "shard", "prc", "buff" }
 local PIECE_LABELS = {
     you = "Your cast bar", tgt = "Target cast bar", dot = "Target side areas",
-    shard = "Soul shards", prc = "Proc posts", buff = "Buff reminders", party = "Party frames",
+    shard = "Soul shards", prc = "Proc posts", buff = "Buff reminders",
 }
 local AREA_LABELS = {
     debuffsH = "Target Debuffs Horizontal", debuffsV = "Target Debuffs Vertical", class = "Class Module", empty = "Empty",

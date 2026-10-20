@@ -13,12 +13,13 @@
 -- coordinates, never by a hand-converted number. Nothing is positioned at file load (UIParent is
 -- only 768 tall then); PLAYER_LOGIN and the FS.Layout rescale hook seat everything.
 --
--- PIECES. Keys you, next, shard, buff, tgt, dot, prc, party, mybuffs. RegisterPiece(key, {frame,
+-- PIECES. Keys you, next, shard, buff, tgt, dot, prc, mybuffs (the party frames are not a piece: FS.PartyFrames
+-- keeps their own switch, which works with the HUD off). RegisterPiece(key, {frame,
 -- onShow, onHide}) hands a piece's frame to the registry; SetPiece(key, on, instant) fades it
 -- (a 0.25 s Alpha AnimationGroup, never OnUpdate) and persists the state. The on/off state lives in
 -- FS.Config (gunsight.enabled, gunsight.pieces.<key>), so it follows the active profile, and is
 -- applied to a piece when it registers, or at init for pieces that registered before SavedVariables
--- existed. Only the seat stays in ForeverSTUwaveDB.gunsight. A PROTECTED frame (the party frames) is never
+-- existed. Only the seat stays in ForeverSTUwaveDB.gunsight. A PROTECTED piece frame is never
 -- Show/Hidden or EnableMouse'd in combat (ADDON_ACTION_BLOCKED fires even inside a pcall): alpha
 -- only, the rest reconciled on PLAYER_REGEN_ENABLED.
 --
@@ -40,8 +41,8 @@
 -- target button, cannot be changed in combat: for the rest of that fight it stays clickable (an accepted gap; its
 -- alpha is 0 with the root, and the real Hide at regen takes its mouse). Every INSECURE handler under the root must
 -- do nothing while IsActive() is false (GunsightMyBuffs' tooltip does; a new OnEnter, OnClick or tooltip under the
--- root must too). A frame the Gunsight drives but does not own (the party frames) is handed back with ReleasePiece
--- while the HUD is off, and taken again with ResumePiece.
+-- root must too). ReleasePiece and ResumePiece stand a piece's frame down while the HUD is off and take it back;
+-- nothing calls them since the party frames left the piece list.
 --
 -- Slash: /fsgun [on | off | seat <dx> <dy> | piece <key> on|off | outlines]. Public surface (all
 -- FS.Gunsight.*): ui, Point, root, anchors, G, RegisterPiece, SetPiece, IsPieceOn, OnPieceChanged,
@@ -99,7 +100,7 @@ local MYBUFFS = {
     textSize = MYB_TEXT, textY = MYB_TEXT_Y,
 }
 
-local PIECE_KEYS = { "you", "next", "shard", "buff", "tgt", "dot", "prc", "party", "mybuffs" }
+local PIECE_KEYS = { "you", "next", "shard", "buff", "tgt", "dot", "prc", "mybuffs" }
 local FADE_SECONDS = 0.25
 local PREFIX = "|cffff4488Forever STUwave|r: gunsight: "
 
@@ -283,7 +284,8 @@ local function MigrateLegacy(db)
     if not FS.Config.Set(CFG_ENABLED, FS.Config.Get(CFG_ENABLED)) then return end
     if db.enabled == false and not FS.Config.IsStored(CFG_ENABLED) then FS.Config.Set(CFG_ENABLED, false) end
     if type(db.pieces) == "table" then
-        for _, key in ipairs(PIECE_KEYS) do
+        -- "party" is no piece now, but FS.PartyFrames keeps its saved key: carry the legacy value there.
+        for _, key in ipairs({ "party", unpack(PIECE_KEYS) }) do
             local legacy = db.pieces[key]
             if type(legacy) == "boolean" and not FS.Config.IsStored(PieceKey(key)) then FS.Config.Set(PieceKey(key), legacy) end
         end
@@ -399,9 +401,9 @@ end
 
 -- Stands a registered piece down: its frame is shown and opaque whatever its saved state, and the registry stops
 -- driving it (SetPiece and profile switches still keep the state and announce it, but touch no frame and run no
--- hook). For a frame that is not the Gunsight's own while the Gunsight is switched off, like the party frames, which
--- a Gunsight that is off at login never touches. A protected frame in combat takes alpha only and the Show waits
--- for PLAYER_REGEN_ENABLED. False for a piece nothing registered.
+-- hook). It was for a frame that is not the Gunsight's own while the Gunsight is switched off (the party frames);
+-- nothing calls it now. A protected frame in combat takes alpha only and the Show waits for
+-- PLAYER_REGEN_ENABLED. False for a piece nothing registered.
 function Gunsight.ReleasePiece(key)
     local piece = pieces[key]
     if not piece then return false end
@@ -830,7 +832,9 @@ SlashCmdList["FSGUN"] = function(msg)
             Say("usage: /fsgun seat <dx> <dy>  (numbers, design px, Y up)")
         end
     elseif cmd == "piece" then
-        if not IsKnownKey(a) then
+        if a == "party" then
+            Say("the party frames have their own switch: /fsparty show or /fsparty hide.")
+        elseif not IsKnownKey(a) then
             Say("unknown piece '" .. a .. "'; keys: " .. table.concat(PIECE_KEYS, ", "))
         elseif b ~= "on" and b ~= "off" then
             Say("usage: /fsgun piece <key> on|off")
