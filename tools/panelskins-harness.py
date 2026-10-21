@@ -14,7 +14,10 @@ after /reload, the plain option row light). The properties pinned here:
   * a secret current text, a number or a secret SetText argument is skipped without error;
   * a SetText that throws inside the rewrite does not leave the target stuck (it keeps rewriting);
   * a rewrite that keeps throwing logs one degrade line per session (the latch), and a missing
-    FS.LogDegradeOnce neither errors nor spends the latch.
+    FS.LogDegradeOnce neither errors nor spends the latch;
+  * the quest log pane (QuestMapFrame) is skinned WITHOUT a title: its Blizzard search box sits in
+    the top band the title would draw, so the `stuwave://questlog` label read as a second, offset
+    "Search Quest Log" (playtest 2026-10-21). The real Panels.lua runs against a recording SkinPanel.
 
 The dark-text gate is the real `IsDarkText` text lifted out of Theme.lua, so a gate change fails
 here. The mock is NOT the real client. Run:
@@ -37,6 +40,7 @@ except ImportError:
 
 ADDON = Path(__file__).resolve().parent.parent / "forever-stuwave"
 PANELSKINS_SRC = (ADDON / "Core/PanelSkins.lua").read_text(encoding="utf-8")
+PANELS_SRC = (ADDON / "Modules/Skins/Panels.lua").read_text(encoding="utf-8")
 THEME_SRC = (ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
 
 
@@ -101,6 +105,23 @@ function LoadPanelSkins()
     local chunk = assert(loadstring(PANELSKINS_SRC, "@PanelSkins.lua"))
     chunk("forever-stuwave", FS)
     return FS
+end
+
+-- Runs the real Panels.lua over the real PanelSkins.lua with every frame in `present` existing as an
+-- empty table, and returns { [frame name] = the opts SkinPanel was given }. Theme is a recorder: the
+-- point is WHICH frames get WHICH chrome options, not how the chrome draws.
+function LoadPanels(present)
+    local FS = LoadPanelSkins()
+    local skinned = {}
+    local function noop() end
+    THEME.SkinPanel = function(frame, opts) skinned[frame.fsName] = opts end
+    THEME.StyleMoney, THEME.ApplyMono, THEME.SkinButton, THEME.LightenParchmentFonts = noop, noop, noop, noop
+    THEME.COLOR_BG, THEME.COLOR_BORDER, THEME.COLOR_POWER = { 0, 0, 0 }, { 1, 1, 1 }, { 1, 1, 1 }
+    THEME.COLOR_TEXT_PARCHMENT = { 0.749, 0.914, 0.839 }
+    for _, name in ipairs(present) do _G[name] = { fsName = name } end
+    assert(loadstring(PANELS_SRC, "@Panels.lua"))("forever-stuwave", FS)
+    for _, name in ipairs(present) do _G[name] = nil end
+    return skinned
 end
 
 -- The code the rewrite must emit for the parchment token, spelled out rather than recomputed so a
@@ -207,10 +228,20 @@ case("a_missing_degrade_logger_does_not_error_or_spend_the_log_latch", """
     assert(logged == 1, "expected exactly one degrade log once the logger returned, got " .. logged)
 """)
 
+case("the_quest_log_pane_is_skinned_without_a_title_band_over_its_search_box", """
+    local skinned = LoadPanels({ "QuestMapFrame", "WorldMapFrame" })
+    assert(skinned.QuestMapFrame, "QuestMapFrame was not skinned at all")
+    assert(skinned.QuestMapFrame.title == nil,
+        "the quest log pane's title band sits under its search box: " .. tostring(skinned.QuestMapFrame.title))
+    -- The map window that hosts it keeps its own title; only the embedded pane loses one.
+    assert(skinned.WorldMapFrame and skinned.WorldMapFrame.title == "map", "WorldMapFrame lost its title")
+""")
+
 
 def run_case(body: str) -> str | None:
     rt = LuaRuntime(unpack_returned_tuples=False)
     rt.globals().PANELSKINS_SRC = PANELSKINS_SRC
+    rt.globals().PANELS_SRC = PANELS_SRC
     rt.globals().THEME_DARK_TEXT_SRC = theme_dark_text_lua()
     try:
         rt.execute(MOCK)

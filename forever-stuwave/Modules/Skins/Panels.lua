@@ -70,7 +70,11 @@ local PANEL_FRAMES = {
     -- by the re-scan in the Init section below.
     { name = "SpellBookFrame", title = "spellbook" },
     { name = "PlayerSpellsFrame", title = "spellbook" },
-    { name = "QuestMapFrame", title = "questlog" },
+    -- No title: QuestMapFrame is the pane inside WorldMapFrame (which carries its own
+    -- title), and its Blizzard search box is anchored at the very top of the pane, inside the
+    -- band SkinPanel draws for a title. The `stuwave://questlog` label then showed through the
+    -- box as a second, offset "Search Quest Log" (playtest 2026-10-21).
+    { name = "QuestMapFrame" },
     { name = "QuestLogPopupDetailFrame", title = "quest.detail" },
     { name = "PlayerTalentFrame", title = "talents" },
     { name = "TalentFrame", title = "talents" },
