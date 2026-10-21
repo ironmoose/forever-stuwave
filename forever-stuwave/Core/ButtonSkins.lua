@@ -169,6 +169,7 @@ end
 local function Place(region, button, d)
     region:ClearAllPoints()
     region:SetPoint("TOPLEFT", button, "TOPLEFT", d, -d)
+    skin.managed = true -- SeatPlate seats the halo (inset and pixels), not Theme's own re-seat
     region:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -d, d)
 end
 

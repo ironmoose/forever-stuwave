@@ -600,7 +600,8 @@ end
 # The real Theme.lua functions the bars' skinning runs through; see MOCK.
 THEME_FUNCTIONS = (
     "ApplyNineSlice", "AddSliceTexture", "AddCut2Texture",
-    "SnapCut", "CutSizeIcon", "Cut2ButtonSet", "SkinButton", "SkinCutButton",
+    "SnapCut", "CutSizeIcon", "Cut2ButtonSet", "SeatButtonGlow", "ReseatButtonGlows", "ListenForScale",
+    "SkinButton", "SkinCutButton",
 )
 
 # File-local helpers those functions close over (CutSizeIcon -> SnapForHeight).
@@ -612,7 +613,7 @@ THEME_LOCAL_FUNCTIONS = ("SnapForHeight",)
 THEME_CONSTANTS = (
     "CHROME_CORNERS", "CUT_SIZES",
     "SLICE_MARGIN", "SLICE_GLOW_PAD", "SLICE_GLOW_MARGIN", "SLICE_CUT_MARGIN",
-    "SLICE_CUT2_GLOW_PAD", "SLICE_CUT2_GLOW_MARGIN",
+    "SLICE_CUT2_GLOW_PAD", "SLICE_CUT2_GLOW_MARGIN", "glowSeats",
     "COLOR_UNUSABLE", "COLOR_OOM", "COLOR_OUT_OF_RANGE",
 )
 

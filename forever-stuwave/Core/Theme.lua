@@ -1904,6 +1904,47 @@ end
 -- stored overlay. opts may pass `count`/`hotkey`/`name` FontString refs to
 -- restyle to plain Mononoki, since Blizzard's button templates vary too
 -- widely to guess region names generically.
+-- The halo is a nine-sliced file whose texels the engine draws one PHYSICAL pixel each (the ring is one pixel and the
+-- chamfer c pixels however a frame is scaled), while an anchor offset is in UI units. So the halo's `pad` texel falloff
+-- only meets the ring when its region reaches `pad` pixels past the button: pad / pixels-per-unit units. At one pixel
+-- per unit that is `pad` (what every call used to write); at the player's 1.2 the old offset put the falloff 0.8 px out,
+-- a dark pixel between ring and halo (it read as a second ring around a small plate). FS.FrameHelpers loads after this
+-- file, so it is looked up when a button is skinned; a client that will not say gives one pixel per unit.
+Theme.glowSeats = setmetatable({}, { __mode = "k" }) -- button -> its skin (glow and pad in texels)
+
+-- Seats `skin.glow` on `button` for the pixel scale the button has now.
+function Theme.SeatButtonGlow(button, skin)
+    local helpers = FS.FrameHelpers
+    local ok, ppu = false, nil
+    if helpers and helpers.PixelsPerUnit then ok, ppu = pcall(helpers.PixelsPerUnit, button) end
+    if not ok or type(ppu) ~= "number" or ppu ~= ppu or ppu <= 0 then ppu = 1 end
+    local units = skin.glowPad / ppu
+    local glow = skin.glow
+    if glow.ClearAllPoints then glow:ClearAllPoints() end
+    glow:SetPoint("TOPLEFT", button, "TOPLEFT", -units, units)
+    glow:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", units, -units)
+end
+
+-- Seats every skinned button's halo again for the pixel scale it has now (the UI scale or the resolution changed, or
+-- the button was skinned before its scale settled). A skin that seats its own halo (`skin.managed`, ButtonSkins') is
+-- left to its owner.
+function Theme.ReseatButtonGlows()
+    for button, skin in pairs(Theme.glowSeats) do
+        if not skin.managed and skin.glow then pcall(Theme.SeatButtonGlow, button, skin) end
+    end
+end
+
+-- Made with the first skinned button, not at file load (the font retry listener above is the one frame Theme makes at load).
+function Theme.ListenForScale()
+    if Theme.glowEvents or type(CreateFrame) ~= "function" then return end
+    local frame = CreateFrame("Frame")
+    Theme.glowEvents = frame
+    frame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    frame:RegisterEvent("UI_SCALE_CHANGED")
+    frame:RegisterEvent("DISPLAY_SIZE_CHANGED")
+    frame:SetScript("OnEvent", function() Theme.ReseatButtonGlows() end)
+end
+
 function Theme.SkinButton(button, opts)
     if not button then return nil end
     opts = opts or {}
@@ -1975,12 +2016,14 @@ function Theme.SkinButton(button, opts)
         local glow = button:CreateTexture(nil, "OVERLAY", nil, 0)
         glow:SetTexture(glowTexture or Theme.SLICE_GLOW_TEXTURE)
         Theme.ApplyNineSlice(glow, glowMargin or Theme.SLICE_GLOW_MARGIN)
-        glow:SetPoint("TOPLEFT", button, "TOPLEFT", -pad, pad)
-        glow:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", pad, -pad)
         glow:SetBlendMode("ADD")
         glow:SetVertexColor(r, g, b, glowAlpha)
 
         skin.glow = glow
+        skin.glowPad = pad
+        Theme.SeatButtonGlow(button, skin)
+        Theme.glowSeats[button] = skin
+        Theme.ListenForScale()
 
         -- Rounded border: ONE nine-sliced ring (slice_border.tga), not four
         -- rails plus four corner quads.

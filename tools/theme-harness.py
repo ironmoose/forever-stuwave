@@ -940,6 +940,44 @@ case("skinbutton_default_is_the_2c_c6_set_when_the_height_is_unknown", """
     assert(skin.chamfer == 6)
 """)
 
+case("skinbutton_halo_reaches_its_pad_in_physical_pixels_not_units", """
+    -- the sliced halo's falloff is `pad` texels and the engine draws a texel one screen pixel, so the region must
+    -- reach `pad` PIXELS past the button: pad / pixels-per-unit units
+    for _, ppu in ipairs({ 1, 1.2, 1.5, 2 }) do
+        FS.FrameHelpers = { PixelsPerUnit = function() return ppu end }
+        local b = NewFrame()
+        local skin = Theme.SkinButton(b, { borderColor = { 1, 0, 0 } })
+        local u = 4 / ppu
+        local tl, br = skin.glow.points.TOPLEFT, skin.glow.points.BOTTOMRIGHT
+        assert(Near(tl.x, -u) and Near(tl.y, u) and Near(br.x, u) and Near(br.y, -u), "pad at ppu " .. ppu .. ": " .. tl.x)
+    end
+    FS.FrameHelpers = nil
+    local b = NewFrame()
+    local skin = Theme.SkinButton(b)
+    assert(PointIs(skin.glow, "TOPLEFT", "TOPLEFT", -4, 4), "without FrameHelpers (or a client that will not say) one pixel per unit")
+""")
+
+case("skinbutton_an_explicit_glow_pad_is_also_texels", """
+    FS.FrameHelpers = { PixelsPerUnit = function() return 2 end }
+    local b = NewFrame()
+    local skin = Theme.SkinButton(b, { glowTexture = "x_glow", glowPad = 6, glowMargin = 9 })
+    assert(PointIs(skin.glow, "TOPLEFT", "TOPLEFT", -3, 3) and PointIs(skin.glow, "BOTTOMRIGHT", "BOTTOMRIGHT", 3, -3))
+""")
+
+case("skinbutton_halos_are_seated_again_when_the_pixel_scale_changes_and_a_managed_one_is_left_alone", """
+    local ppu = 1
+    FS.FrameHelpers = { PixelsPerUnit = function() return ppu end }
+    local a, b = NewFrame(), NewFrame()
+    local sa, sb = Theme.SkinButton(a), Theme.SkinButton(b)
+    sb.managed = true                                   -- a skin that seats its own halo (ButtonSkins)
+    sb.glow:ClearAllPoints()
+    sb.glow:SetPoint("TOPLEFT", b, "TOPLEFT", -9, 9)
+    ppu = 1.25
+    Theme.ReseatButtonGlows()
+    assert(PointIs(sa.glow, "TOPLEFT", "TOPLEFT", -3.2, 3.2), "seated again at 1.25: " .. sa.glow.points.TOPLEFT.x)
+    assert(PointIs(sb.glow, "TOPLEFT", "TOPLEFT", -9, 9), "a managed halo is not moved")
+""")
+
 case("skinbutton_picks_the_chamfer_from_the_button_height", """
     local want = { [37] = 6, [36] = 6, [32] = 6, [24] = 4, [18] = 3, [10] = 2 }
     for h, c in pairs(want) do
