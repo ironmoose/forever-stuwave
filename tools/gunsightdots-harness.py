@@ -165,12 +165,17 @@ end
 -- The real ordering: PLAYER_REGEN_DISABLED fires just BEFORE lockdown begins, so InCombatLockdown() reads
 -- false for the whole dispatch of that event and true afterwards; PLAYER_REGEN_ENABLED fires with lockdown
 -- already off. IN_COMBAT is the truth after the event; IN_REGEN_DISABLED is true only during that dispatch.
+-- UnitAffectingCombat flips with the fight (AFFECTING, when set, overrides it to model a reload).
 IN_REGEN_DISABLED = false
+AFFECTING = nil
 function InCombatLockdown()
     if IN_REGEN_DISABLED then return false end
     return IN_COMBAT
 end
-function UnitAffectingCombat() return IN_COMBAT end
+function UnitAffectingCombat()
+    if AFFECTING ~= nil then return AFFECTING end
+    return IN_COMBAT
+end
 function GetTime() return NOW end
 function check(c, msg) if not c then error(msg or "check failed", 2) end end
 function near(a, b, msg, eps)
@@ -435,7 +440,7 @@ function resetWorld()
     wipeList(SKIN_CALLS); wipeList(AURA_TOUCHED)
     for k in pairs(DEGRADED) do DEGRADED[k] = nil end
     for k in pairs(PLAYING) do PLAYING[k] = nil end
-    STATE, IN_COMBAT, IN_REGEN_DISABLED = nil, false, false
+    STATE, IN_COMBAT, IN_REGEN_DISABLED, AFFECTING = nil, false, false, nil
     FS = {}
     FS.LogDegradeOnce = function(key, msg) DEGRADED[key] = msg end
 end
@@ -460,6 +465,7 @@ function stubTheme_()
     local Theme = {
         COLOR_BORDER = { 0.659, 0.333, 0.969, 1 },
         COLOR_AMBER = { 1, 0.7137, 0.2824, 1 },
+        COLOR_RED = { 1, 0.2314, 0.3059, 1 },
         COLOR_STEEL = { 0.5529, 0.5765, 0.6510, 1 },
         FONT_MONO = "mono.ttf",
         SLICE_CUT2_FILL_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\slice_cut2_fill.tga",
@@ -542,12 +548,14 @@ SECRET_FN = function(v) return rawequal(v, SECRETV) end
 
 MODULES, PIECE_CALLS, TDSUBS = {}, {}, {}
 TDLIST, TDEPOCH = {}, 1
+local KEEP_KEY = "gunsight.target.keepfallen"
 
 local function boot(opts)
     opts = opts or {}
     resetWorld()
     MODULES, PIECE_CALLS, TDSUBS, TDLIST, TDEPOCH = {}, {}, {}, {}, 1
     IN_COMBAT = opts.combat ~= false
+    AFFECTING = opts.affecting
     SetScreen(opts.height or 1440)
     ForeverSTUwaveDB = opts.db or {}
     FS.IsSecret = function(v) return SECRET_FN(v) end
@@ -578,6 +586,8 @@ local function boot(opts)
     loadAddonFile(DOTS_SRC, "Modules/CombatHud/GunsightDots.lua")
     fire("ADDON_LOADED", "forever-stuwave")
     fire("PLAYER_LOGIN")
+    -- The reminder option ships on; the cases about a row that leaves run with it off, the reminder cases with fallen = true.
+    if not opts.defaultFallen then check(FS.Config.Set(KEEP_KEY, opts.fallen == true), "the option could not be set") end
     return FS.GunsightDots
 end
 
@@ -1019,6 +1029,187 @@ pushList({ old, ent("A", 10), ent("B", 11), ent("C", 12), ent("D", 13), ent("E",
 check(m.rows[1].key == "A" and m.rows[5].key == "E" and m.rows[5].mode == "live", "five live rows, the expired one skipped, got " .. tostring(m.rows[1].key) .. " " .. tostring(m.rows[5].key))
 """)
 
+case("the_keep_fallen_option_is_on_by_default_and_has_its_own_key")(r"""
+local D = boot({ defaultFallen = true })
+local def = D.SETTINGS and D.SETTINGS.keepFallen
+check(def, "FS.GunsightDots.SETTINGS.keepFallen names the setting")
+check(def.key == KEEP_KEY, "key, got " .. tostring(def.key))
+check(def.default == true and FS.Config.Get(KEEP_KEY) == true, "default on")
+""")
+
+case("a_debuff_that_runs_out_in_combat_stays_as_a_red_reminder_row")(r"""
+local D = boot({ combat = true, fallen = true })
+local RED = FS.Theme.COLOR_RED
+local m = mount("debuffsH", "upper")
+local flame, frost = ent("Flame Shock", 5, { duration = 12 }), ent("Frost Shock", 8, { duration = 8 })
+pushList({ flame, frost })
+tick(5.1)                              -- Flame Shock runs out; the service pushes nothing and still lists it
+local row = m.rows[1]
+check(row.key == "Flame Shock" and row.mode == "fallen", "the row stays, got " .. tostring(row.key) .. " " .. tostring(row.mode))
+check(isVisible(row.frame) and row.chip.frame.icon:IsShown() and row.chip.frame.icon.path == flame.icon, "the icon is kept")
+check(row.time.text == "" and row.stack.text == "", "no time and no stack count")
+check(not row.fillTex:IsShown() and row.barBg:IsShown(), "the bar is an empty track")
+colorIs(row.barBg.color, RED, "the track is red")
+colorIs(row.chip.frame.fsSkin.border.ring.vertex, RED, "the outline is the theme red")
+near3(row.chip.frame.fsSkin.glow.vertex[4], 0, "no glow, a crisp outline")
+local _, cy = imgCenter(row.chip.frame)
+near3(cy, rowCenterY(MU.TOP, 1), "it keeps its place")
+check(m.rows[2].key == "Frost Shock" and m.rows[2].mode == "live", "the other one keeps counting")
+check(onUpdateFrames() == 1, "one OnUpdate, for the live row only")
+tick(3)
+check(m.rows[1].mode == "fallen" and m.rows[2].mode == "fallen" and onUpdateFrames() == 0, "both fell: two reminders and nothing ticks")
+""")
+
+case("a_fallen_row_survives_the_service_no_longer_listing_the_entry")(r"""
+boot({ combat = true, fallen = true })
+local m = mount("debuffsH", "upper")
+local flame, frost = ent("Flame Shock", 5, { duration = 12 }), ent("Frost Shock", 8, { duration = 8 })
+pushList({ flame, frost })
+tick(5.1)
+pushList({ frost })                    -- a snapshot or the Hud list only what is on the target
+check(m.rows[1].key == "Flame Shock" and m.rows[1].mode == "fallen", "still the reminder, in its place")
+check(m.rows[2].key == "Frost Shock" and m.rows[2].mode == "live", "and the live one under it")
+""")
+
+case("reapplying_brings_the_normal_row_back_with_the_flash")(r"""
+local D = boot({ combat = true, fallen = true })
+local C = D.D.COLORS
+local m = mount("debuffsH", "upper")
+pushList({ ent("Flame Shock", 5, { duration = 12 }) })
+tick(5.1)
+local row = m.rows[1]
+check(row.mode == "fallen", "setup")
+pushList({ ent("Flame Shock", 12, { duration = 12 }) })
+check(row.mode == "live" and row.time.text == "12s" and row.fillTex:IsShown(), "a normal row again")
+colorIs(row.chip.frame.fsSkin.border.ring.vertex, C.violet, "violet outline again")
+check(row.chip.pop:IsShown(), "with the fresh-apply flash")
+tick(12.1)                             -- it falls again
+check(row.mode == "fallen" and not row.chip.pop:IsShown(), "and falls again")
+local late = ent("Flame Shock", 9); late.duration = nil          -- a reapply whose length nobody knows still flashes
+pushList({ late })
+check(row.mode == "live" and row.chip.pop:IsShown(), "any reapply out of the reminder flashes")
+""")
+
+case("a_new_target_clears_the_reminders")(r"""
+boot({ combat = true, fallen = true })
+local m = mount("debuffsH", "upper")
+pushList({ ent("Flame Shock", 5, { duration = 12 }) }, 1)
+tick(5.1)
+check(m.rows[1].mode == "fallen", "setup")
+pushList({ ent("Rend", 9) }, 2)
+check(m.rows[1].key == "Rend" and m.rows[1].mode == "live" and m.rows[2].mode == "off", "only the new target's list")
+pushList({}, 3)
+check(m.rows[1].mode == "off" and not m.body:IsShown(), "and an empty target shows nothing")
+""")
+
+case("a_dead_or_unattackable_target_clears_the_reminders")(r"""
+boot({ combat = true, fallen = true })
+local takes = true
+FS.TargetTakesDots = function() return takes end
+local m = mount("debuffsH", "upper")
+pushList({ ent("Flame Shock", 5, { duration = 12 }) })
+tick(5.1)
+check(m.rows[1].mode == "fallen", "setup")
+takes = false
+pushList({})                           -- the service lists nothing for a target that takes no DoTs
+check(m.rows[1].mode == "off", "the reminder goes with the target")
+takes = true
+pushList({})
+check(m.rows[1].mode == "off", "and does not come back")
+""")
+
+case("the_end_of_combat_clears_the_reminders_and_nothing_is_kept_out_of_combat")(r"""
+boot({ combat = true, fallen = true })
+local m = mount("debuffsH", "upper")
+pushList({ ent("Flame Shock", 5, { duration = 12 }) })
+tick(5.1)
+check(m.rows[1].mode == "fallen", "setup")
+IN_COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+check(m.rows[1].mode == "off" and not isVisible(m.rows[1].frame) and not m.body:IsShown(), "the reminder goes at the end of the fight with no push")
+local old = ent("Frost Shock", 5); old.expires = NOW - 1
+pushList({ old })
+check(m.rows[1].mode == "off", "a debuff that already ran out is not kept out of combat")
+pushList({ ent("Rend", 4, { duration = 15 }) })
+tick(4.1)
+check(m.rows[1].mode == "off" and not m.body:IsShown(), "nor one that runs out out of combat")
+""")
+
+case("the_combat_flag_for_the_reminders_follows_the_events_and_heals")(r"""
+local function expiredList() local e = ent("Frost Shock", 5); e.expires = NOW - 1; return { e } end
+boot({ combat = false, affecting = true, fallen = true })
+local m = mount("debuffsH", "upper")
+pushList(expiredList())
+check(m.rows[1].mode == "fallen", "UnitAffectingCombat true at build is combat")
+boot({ combat = true, affecting = false, fallen = true })
+m = mount("debuffsH", "upper")
+pushList(expiredList())
+check(m.rows[1].mode == "fallen", "InCombatLockdown true at build is combat")
+boot({ combat = false, affecting = false, fallen = true })
+m = mount("debuffsH", "upper")
+pushList(expiredList())
+check(m.rows[1].mode == "off", "both false is not")
+InCombatLockdown = function() error("boom") end
+fire("PLAYER_ENTERING_WORLD")
+pushList(expiredList())
+check(m.rows[1].mode == "fallen", "an unreadable answer reads as combat")
+InCombatLockdown = function() return true end              -- the lockdown lags the end-of-fight event
+IN_COMBAT, AFFECTING = false, false
+fire("PLAYER_REGEN_ENABLED")
+check(m.rows[1].mode == "off", "the event decides, not a live InCombatLockdown() read")
+IN_COMBAT, AFFECTING = true, true
+InCombatLockdown = function() return IN_COMBAT end
+pushList(expiredList())
+check(m.rows[1].mode == "off", "a push never sets the flag (REGEN_DISABLED not seen)")
+fire("PLAYER_REGEN_DISABLED")
+pushList(expiredList())
+check(m.rows[1].mode == "fallen", "the event does")
+IN_COMBAT, AFFECTING = false, false                        -- REGEN_ENABLED never reached us
+pushList(expiredList())
+check(m.rows[1].mode == "off", "a push that finds both APIs false clears a stuck flag")
+""")
+
+case("switching_the_option_off_takes_the_reminders_down_and_on_brings_back_the_listed_ones")(r"""
+boot({ combat = true, fallen = true })
+local m = mount("debuffsH", "upper")
+pushList({ ent("Flame Shock", 5, { duration = 12 }) })
+tick(5.1)
+check(m.rows[1].mode == "fallen", "setup")
+FS.Config.Set(KEEP_KEY, false)
+check(m.rows[1].mode == "off" and not m.body:IsShown(), "off: the reminder goes at once")
+FS.Config.Set(KEEP_KEY, true)
+check(m.rows[1].mode == "fallen" and m.rows[1].key == "Flame Shock", "on: the entry the service still lists is a reminder again")
+""")
+
+case("a_secret_expiry_is_never_compared_for_a_reminder")(r"""
+boot({ combat = true, fallen = true })
+local m = mount("debuffsH", "upper")
+local rend = ent("Rend", 4, { duration = 15 })
+local hidden = ent("Flame Shock", 5); hidden.expires = SECRETV
+local ok = pcall(pushList, { rend, hidden })
+check(ok, "a secret expiry does not throw")
+check(m.rows[1].key == "Rend" and m.rows[1].mode == "live" and m.rows[2].mode == "off", "it draws nothing and becomes no reminder")
+tick(4.1)
+check(m.rows[1].key == "Rend" and m.rows[1].mode == "fallen" and m.rows[2].mode == "off", "a plain expiry still falls")
+ok = pcall(pushList, { hidden })
+check(ok, "a later push with only the secret one does not throw")
+local kept = false
+for i = 1, #m.rows do if m.rows[i].key == "Rend" and m.rows[i].mode == "fallen" then kept = true end end
+check(kept, "and the plain reminder is still there")
+""")
+
+case("a_reminder_never_takes_a_row_from_a_live_debuff")(r"""
+boot({ combat = true, fallen = true })
+local m = mount("debuffsH", "upper")
+local a = ent("A", 5, { duration = 12 })
+pushList({ a, ent("B", 30), ent("C", 30), ent("D", 30), ent("E", 30) })
+tick(5.1)
+check(m.rows[1].key == "A" and m.rows[1].mode == "fallen" and m.rows[5].key == "E", "four live and one reminder fill the five rows")
+pushList({ a, ent("B", 30), ent("C", 30), ent("D", 30), ent("E", 30), ent("F", 30) })
+check(m.rows[1].key == "B" and m.rows[5].key == "F" and m.rows[5].mode == "live", "a fifth live debuff takes the reminder's row")
+for i = 1, 5 do check(m.rows[i].mode == "live", "row " .. i .. " is live") end
+""")
+
 case("the_band_pulses_and_a_row_enters_it_by_itself")(r"""
 local D = boot()
 local C = D.D.COLORS
@@ -1180,6 +1371,25 @@ end
 tick(3)
 check(m.rows[1].mode == "off" and not isVisible(m.rows[1].frame) and not m.body:IsShown() and not isVisible(m.parts.axis), "with nothing left the scale hides")
 check(onUpdateFrames() == 0, "and the driver stops")
+""")
+
+case("a_vertical_chip_that_runs_out_rests_at_zero_with_a_red_outline_until_reapplied")(r"""
+local D = boot({ combat = true, fallen = true })
+local C = D.D.COLORS
+local RED = FS.Theme.COLOR_RED
+local m = mount("debuffsV", "upper")
+pushList({ ent("Flame Shock", 5, { duration = 12 }), ent("Frost Shock", 20, { duration = 20 }) })
+tick(5.1)
+local chip = m.rows[1]
+check(chip.key == "Flame Shock" and chip.mode == "fallen" and isVisible(chip.frame), "the chip stays")
+local cx, cy = imgCenter(chip.chip.frame)
+near3(cx, MU.LANES[1] - MU.LV_SHIFT, "in its lane"); near3(cy, MU.AXB, "resting at 0")
+colorIs(chip.chip.frame.fsSkin.border.ring.vertex, RED, "red outline")
+check(not chip.rail:IsShown() and not chip.dot:IsShown(), "no rail and no dot")
+check(m.rows[2].key == "Frost Shock" and m.rows[2].mode == "live" and m.rows[2].rail:IsShown(), "the live chip keeps sliding")
+pushList({ ent("Flame Shock", 12, { duration = 12 }), ent("Frost Shock", 15, { duration = 20 }) })
+check(chip.mode == "live" and chip.rail:IsShown() and chip.chip.pop:IsShown(), "reapplied: a live chip with the flash")
+colorIs(chip.chip.frame.fsSkin.border.ring.vertex, C.violet, "violet again")
 """)
 
 case("the_vertical_axis_takes_four_lanes_and_skips_entries_with_no_expiry")(r"""

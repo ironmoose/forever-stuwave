@@ -1462,6 +1462,14 @@ local function TargetSideGroups(page)
         "Target debuffs shows only the debuffs you applied. Class Module shows your class's own resource: soul shards, seals, combo points.")
     AreaDropdown(page, "Upper area", "upper")
     AreaDropdown(page, "Lower area", "lower")
+    local Dots = FS.GunsightDots
+    if Dots and Dots.SETTINGS and Dots.SETTINGS.keepFallen then
+        UI.Toggle(page, {
+            label = "Keep fallen-off debuffs as a reapply reminder", key = Dots.SETTINGS.keepFallen.key,
+            tip = "When a debuff you applied runs out on your target during a fight, its row or chip stays with a red outline "
+                .. "as a reminder to apply it again. It clears when you reapply it, change target, or the fight ends.",
+        })
+    end
     local Tags = FS.GunsightTags
     if Tags and Tags.SETTINGS then
         local S = Tags.SETTINGS

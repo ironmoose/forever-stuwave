@@ -4,8 +4,9 @@
 -- procs, Deep Wounds, talents) are invisible, and a cast is timed from the last snapshot of that spell id or name,
 -- else the SPELL_SECONDS / HudSpells tables (an unknown one has no expiry); out of combat the snapshot is exact.
 -- The service pushes nothing at an expiry, so an entry stays listed with its expiry in the past until the next push and
--- the view drops it the moment it runs out, whatever the class: a debuff that is gone has no row. The Hud's Priest and
--- Warlock rows are listed only while the DoT is up, for the same reason.
+-- the view drops it the moment it runs out, whatever the class: a debuff that is gone has no row (or keeps a red outlined
+-- reminder row in combat, when the player's "Keep fallen-off debuffs" option is on; the view owns that, this service
+-- knows nothing of it). The Hud's Priest and Warlock rows are listed only while the DoT is up, for the same reason.
 
 local _, FS = ...
 

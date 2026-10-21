@@ -7,9 +7,18 @@
 -- drew for a Priest or Warlock DoT that was not on the target is gone): Gather skips an entry whose expiry has passed and
 -- the rows below it close up.
 --
+-- FALLEN-OFF REMINDER (player, 2026-10-21, "Keep fallen-off debuffs as a reapply reminder", on by default): while the
+-- option is on, the fight is on and the target takes DoTs, a debuff of yours that runs out keeps its row or chip as a
+-- reminder: the icon, a red outline (Theme.COLOR_RED), no time, no stack count and an empty bar track (the chip rests at
+-- 0 on the axis). A reapply brings the normal row back with the apply flash. The reminder is gone with a target change
+-- (the epoch), a dead or unattackable target, the end of combat, or the option switched off. m.fallen holds the entries
+-- (name -> entry, whole and read only) that ran out, so a reminder outlives the service dropping the entry, as a
+-- snapshot or the Hud does; the entries that are still listed are picked up again from the list. Reminders only fill
+-- rows the live debuffs leave free. Only a plain expiry that has passed ever makes one; a secret one is not compared.
+--
 -- MOTION: one OnUpdate per module, installed only while a row is live, places everything from expires - GetTime()
 -- and allocates nothing. The service pushes nothing at an expiry, so a row that runs out makes the module re-read the
--- list it last got, which leaves the expired entry out.
+-- list it last got, which leaves the expired entry out (or turns it into a reminder).
 --
 -- TIME TEXT: the font is monospaced, so the column from the text's left edge to the bar holds three characters: "13s",
 -- "2.4" and "2m" all stop short of the bar. A fourth ("2.4s") ran into it, so the tenths read without the "s".
@@ -85,6 +94,10 @@ V.PX_PER_S = V.SPAN / D.MAX_S
 
 Dots.D, Dots.H, Dots.V = D, H, V
 
+local SETTINGS = { keepFallen = { key = "gunsight.target.keepfallen", default = true } }
+Dots.SETTINGS = SETTINGS
+if FS.Config and FS.Config.RegisterDefault then FS.Config.RegisterDefault(SETTINGS.keepFallen.key, SETTINGS.keepFallen.default) end
+
 local LINE = G.LINE or 1.3
 local RAIL_CORE, RAIL_GLOW, DOT_BLOOM = 2.6, 7, 9
 local REAPPLY_EPS = 0.5                -- an expiry this much later than the last one is a reapply
@@ -131,6 +144,46 @@ local function ShowRow(row)
     if not row.frame:IsShown() then row.frame:Show() end
 end
 
+-- "In combat" is a file-local flag driven by PLAYER_REGEN_DISABLED / PLAYER_REGEN_ENABLED and seeded from
+-- InCombatLockdown() OR UnitAffectingCombat(), because lockdown can still read false inside the REGEN_DISABLED dispatch
+-- (and still true inside REGEN_ENABLED); a throwing or secret answer reads as in combat. A list push that finds both APIs
+-- plainly false clears a stuck flag (a missed REGEN_ENABLED), and never sets it. Only the reminders read it.
+local inCombat = true          -- placeholder: SeedCombat runs before any paint
+local sharedBuilt = false
+
+local function ReadCombat(fn, ...)
+    local ok, r = pcall(fn, ...)
+    if not ok or (FS.IsSecret and FS.IsSecret(r)) then return nil end
+    return r and true or false
+end
+
+-- Out of combat only when BOTH APIs plainly answer false.
+local function SeedCombat()
+    local lock = ReadCombat(InCombatLockdown)
+    local aff = ReadCombat(UnitAffectingCombat, "player")
+    inCombat = not (lock == false and aff == false)
+end
+
+local function HealCombat()
+    if inCombat then SeedCombat() end
+end
+
+local function KeepFallenOn()
+    local C = FS.Config
+    return C ~= nil and C.Get ~= nil and C.Get(SETTINGS.keepFallen.key) == true
+end
+
+-- The target takes DoTs (alive and attackable), the answer the host's gate uses.
+local function TargetTakes()
+    if type(FS.TargetTakesDots) ~= "function" then return true end
+    local ok, takes = pcall(FS.TargetTakesDots)
+    return not ok or takes ~= false
+end
+
+local function WipeFallen(fallen)
+    for name in pairs(fallen) do fallen[name] = nil end
+end
+
 -------------------------------------------------------------------------------
 -- Time text, built once so a steady frame allocates nothing
 -------------------------------------------------------------------------------
@@ -153,7 +206,7 @@ end
 -------------------------------------------------------------------------------
 
 local function NewModule(id, kind)
-    return { id = id, kind = kind, rows = {}, seats = {}, src = {}, rect = { x = D.RECT.x, y = D.RECT.y, w = D.RECT.w, h = D.RECT.h },
+    return { id = id, kind = kind, rows = {}, seats = {}, src = {}, fallen = {}, pool = {}, rect = { x = D.RECT.x, y = D.RECT.y, w = D.RECT.w, h = D.RECT.h },
         parts = {} }
 end
 
@@ -251,10 +304,13 @@ local function BuildChip(m, parent, size, level)
     return chip
 end
 
--- The chip's static look for the band.
-local function ChipLook(chip, band)
+-- The theme's alert red: the outline and track of a reminder.
+local function Red() return FS.Theme.COLOR_RED end
+
+-- The chip's static look for the band, or for a reminder (a red outline, no glow).
+local function ChipLook(chip, band, fallen)
     local f, skin = chip.frame, chip.frame.fsSkin
-    local c = band and K.amber or K.violet
+    local c = fallen and Red() or band and K.amber or K.violet
     ClearDesaturate(f.icon)
     f.icon:SetAlpha(1)
     if chip.plate then
@@ -263,7 +319,7 @@ local function ChipLook(chip, band)
         chip.plate:SetVertexColor(p[1], p[2], p[3], 1)
     end
     skin.border.ring:SetVertexColor(c[1], c[2], c[3], 1)
-    skin.glow:SetVertexColor(c[1], c[2], c[3], band and GLOW_BAND or GLOW_BASE)
+    skin.glow:SetVertexColor(c[1], c[2], c[3], fallen and 0 or band and GLOW_BAND or GLOW_BASE)
     local t = band and K.amber or K.white
     chip.label:SetTextColor(t[1], t[2], t[3], 1)
 end
@@ -314,14 +370,15 @@ local function RowTop(m) return m.rect.y + (m.rect.y >= CY and H.TOP_LOWER or H.
 local function LookH(row)
     local mode, band = row.mode, row.band
     if mode == "off" then return end
-    ChipLook(row.chip, band)
+    ChipLook(row.chip, band, mode == "fallen")
     local bg, fg, tc = BAR_COLOR, BAR_COLOR, K.white
     if band then bg, fg, tc = K.amber, K.amber, K.amber end
     if mode == "unknown" then tc = K.fg end
+    if mode == "fallen" then bg = Red() end
     row.barBg:SetColorTexture(bg[1], bg[2], bg[3], H.BAR_BG_A)
     row.fillTex:SetColorTexture(fg[1], fg[2], fg[3], 1)
     row.fillTex:SetShown(mode == "live")
-    row.barBg:SetShown(mode == "live")
+    row.barBg:SetShown(mode ~= "unknown")
     row.time:SetTextColor(tc[1], tc[2], tc[3], 1)
     row.stack:SetTextColor(K.white[1], K.white[2], K.white[3], 1)
 end
@@ -345,9 +402,10 @@ local function PaintH(row, rem)
     end
 end
 
--- A row whose duration nobody knows reads "?" with no track at all (an empty bar would claim a drained debuff).
+-- A row whose duration nobody knows reads "?" with no track at all (an empty bar would claim a drained debuff). A
+-- reminder reads nothing over its empty track.
 local function ParkH(row)
-    SetTime(row, "?")
+    SetTime(row, row.mode == "fallen" and "" or "?")
     row.fill = nil
 end
 
@@ -547,8 +605,13 @@ end
 local function LookV(row)
     local mode = row.mode
     if mode == "off" then return end
-    ChipLook(row.chip, row.band)
-    SetRailColor(row, row.band and "amber" or "violet")
+    ChipLook(row.chip, row.band, mode == "fallen")
+    if mode == "fallen" then
+        HideRail(row)
+        row.railColor = nil
+    else
+        SetRailColor(row, row.band and "amber" or "violet")
+    end
 end
 
 local function BuildRowV(m, i)
@@ -569,7 +632,11 @@ local function BuildRowV(m, i)
         Point(row.rail, "BOTTOM", row.x, AxisBottom(m))
         Point(row.railGlow, "BOTTOM", row.x, AxisBottom(m))
         row.y = nil
-        if row.mode == "live" then PlaceV(m, row, row.expires - GetTime()) end
+        if row.mode == "live" then
+            PlaceV(m, row, row.expires - GetTime())
+        elseif row.mode == "fallen" then
+            PlaceV(m, row, 0)
+        end
     end)
     return row
 end
@@ -631,7 +698,7 @@ end
 
 local function ClearRow(m, row)
     row.mode, row.key, row.iconId, row.expires, row.band, row.count = "off", nil, nil, nil, false, nil
-    row.fill, row.timeText, row.span = nil, nil, nil
+    row.fill, row.timeText, row.span, row.entry = nil, nil, nil, nil
     HidePop(row.chip)
     if m.kind == "V" then HideRail(row); row.railColor = nil end
     row.frame:Hide()
@@ -668,14 +735,15 @@ local function UpdateRow(m, row, e, now, newTarget)
         mode = "unknown"
     else
         expires = Num(raw)
-        mode = (expires and expires > now) and "live" or "off"
+        -- Gather lets an entry whose expiry has passed through only as a reminder
+        mode = expires and (expires > now and "live" or "fallen") or "off"
     end
     if mode == "off" then
         if row.mode ~= "off" then ClearRow(m, row) end
         return
     end
 
-    row.mode, row.expires = mode, expires
+    row.mode, row.expires, row.entry = mode, expires, e
     row.band = mode == "live" and expires - now <= D.BAND_S
     if mode == "live" then
         -- The bar's full length: the entry's own duration when it has one. Without one (nil, or a secret in combat)
@@ -702,15 +770,15 @@ local function UpdateRow(m, row, e, now, newTarget)
             else
                 HidePop(row.chip)                        -- the old target's flash does not follow the switch
             end
-        elseif prevMode == "live" and expires > prevExpires + REAPPLY_EPS then
-            StartPop(row.chip, now)
+        elseif prevMode == "fallen" or (prevMode == "live" and expires > prevExpires + REAPPLY_EPS) then
+            StartPop(row.chip, now)                      -- a reapply, whether out of a reminder or over a running timer
         end
     else
         HidePop(row.chip)
     end
 
     if m.kind == "H" then
-        local count = Num(e.count) or 1
+        local count = mode == "fallen" and 1 or Num(e.count) or 1
         if row.count ~= count then
             row.count = count
             row.stack:SetText(count > 1 and ("x" .. count) or "")
@@ -738,35 +806,87 @@ local function KnownExpiry(e)
     return true
 end
 
--- A debuff that has run out takes no row. An expiry that is secret or missing cannot be told, so that entry stays.
+-- A debuff that has run out takes no row of its own. An expiry that is secret or missing cannot be told, so that entry stays.
 local function RanOut(e, now)
     local expires = Num(e.expires)
     return expires ~= nil and expires <= now
 end
 
-local function Gather(m, list, now)
-    local src, n = m.src, 0
+-- Same order as the service's list: Hud rows first, then by order and name.
+local function ByOrder(a, b)
+    local ao, bo = Num(a.order) or 0, Num(b.order) or 0
+    if ao ~= bo then return ao < bo end
+    return (PlainString(a.name) or "") < (PlainString(b.name) or "")
+end
+
+-- Puts the reminders into src (n live entries) where their order says, into the rows the live ones leave free.
+local function AddFallen(m, n)
+    local src, pool, p = m.src, m.pool, 0
+    for _, e in pairs(m.fallen) do p = p + 1; pool[p] = e end
+    for i = p + 1, #pool do pool[i] = nil end
+    table.sort(pool, ByOrder)
+    for i = 1, p do
+        if n >= #m.rows then break end
+        local e, at = pool[i], n + 1
+        for j = 1, n do
+            if ByOrder(e, src[j]) then at = j; break end
+        end
+        table.insert(src, at, e)
+        n = n + 1
+    end
+    return n
+end
+
+-- m.src gets the entries that take a row, in list order. With `keep`, an entry that ran out is remembered as a
+-- reminder, one that is live again is forgotten as one, and the reminders are put back among the live entries.
+local function Gather(m, list, now, keep)
+    local src, fallen, n = m.src, m.fallen, 0
     for i = 1, #list do
         local e = list[i]
-        if n < #m.rows and type(e) == "table" and (m.kind == "H" or KnownExpiry(e)) and not RanOut(e, now) then
-            n = n + 1
-            src[n] = e
+        if type(e) == "table" and (m.kind == "H" or KnownExpiry(e)) then
+            if RanOut(e, now) then
+                local name = keep and PlainString(e.name)
+                if name then fallen[name] = e end
+            elseif n < #m.rows then
+                n = n + 1
+                src[n] = e
+            end
         end
     end
     for i = n + 1, #src do src[i] = nil end
+    if keep then
+        for i = 1, n do
+            local name = PlainString(src[i].name)
+            if name then fallen[name] = nil end
+        end
+        if next(fallen) ~= nil then AddFallen(m, n) end
+    end
+end
+
+-- Rows that were live and have run out since the last pass: their entries are the reminders, whether or not the service
+-- still lists them.
+local function NoteFallen(m, now)
+    for i = 1, #m.rows do
+        local row = m.rows[i]
+        if row.mode == "live" and row.entry and row.expires <= now then m.fallen[row.key] = row.entry end
+    end
 end
 
 local function DropRow(m, row)
-    row.mode, row.key, row.iconId, row.expires, row.span = "off", nil, nil, nil, nil
+    row.mode, row.key, row.iconId, row.expires, row.span, row.entry = "off", nil, nil, nil, nil, nil
     pcall(row.frame.Hide, row.frame)
 end
 
 local function Update(m, list, epoch)
+    HealCombat()
     local newTarget = epoch ~= m.lastEpoch
     m.lastEpoch = epoch
     m.list = list
     local now = GetTime()
-    Gather(m, type(list) == "table" and list or {}, now)
+    local keep = inCombat and KeepFallenOn() and TargetTakes()
+    if newTarget or not keep then WipeFallen(m.fallen) end
+    if keep and not newTarget then NoteFallen(m, now) end
+    Gather(m, type(list) == "table" and list or {}, now, keep)
     local used, live = 0, false
     for i = 1, #m.rows do
         local row = m.rows[i]
@@ -786,11 +906,41 @@ end
 -- Module build and hooks
 -------------------------------------------------------------------------------
 
+-- Runs every active module's list again (it reads the flag, the option and the target afresh): the end of a fight, a
+-- login into the world and the option switch.
+local function Refresh()
+    for _, m in pairs(Dots.modules or {}) do
+        if m.active and m.lastEpoch ~= nil then m.onList(m.list, m.lastEpoch) end
+    end
+end
+
+local function EnsureShared()
+    if sharedBuilt then return end
+    sharedBuilt = true
+    SeedCombat()
+    local events = CreateFrame("Frame", nil, Gunsight.root)
+    events:RegisterEvent("PLAYER_REGEN_DISABLED")     -- the reminders live in combat only
+    events:RegisterEvent("PLAYER_REGEN_ENABLED")
+    events:RegisterEvent("PLAYER_ENTERING_WORLD")
+    events:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_REGEN_DISABLED" then
+            inCombat = true                 -- the event itself: InCombatLockdown() may still read false here
+        elseif event == "PLAYER_REGEN_ENABLED" then
+            inCombat = false
+        else
+            SeedCombat()
+        end
+        if not inCombat then Refresh() end
+    end)
+    if FS.Config and FS.Config.OnChange then FS.Config.OnChange(SETTINGS.keepFallen.key, Refresh) end
+end
+
 local function BuildModule(m, host)
     local Theme, FH = FS.Theme, FS.FrameHelpers
-    if not (Theme and Theme.SkinButton and Theme.ApplyMono and Theme.AddSliceTexture and Theme.ApplyNineSlice and FH) then
+    if not (Theme and Theme.SkinButton and Theme.ApplyMono and Theme.AddSliceTexture and Theme.ApplyNineSlice and Theme.COLOR_RED and FH) then
         error("Theme or FrameHelpers is missing")
     end
+    EnsureShared()
     m.frame = CreateFrame("Frame", m.kind == "H" and "ForeverSTUwaveGunsightDebuffsH" or "ForeverSTUwaveGunsightDebuffsV", host)
     m.frame:SetSize(1, 1)
     m.frame:SetPoint("CENTER", Gunsight.root, "CENTER", 0, 0)
@@ -834,6 +984,7 @@ local function ModuleSpec(m)
             if m.subscribed and FS.TargetDebuffs then FS.TargetDebuffs.Unsubscribe(m.onList) end
             m.subscribed = false
             m.lastEpoch, m.list = nil, nil
+            WipeFallen(m.fallen)
             StopTicking(m)
             for i = 1, #m.rows do ClearRow(m, m.rows[i]) end
             m.body:Hide()

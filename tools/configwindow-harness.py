@@ -964,6 +964,11 @@ local function withTags()
     } }
     for _, key in pairs(TAG_KEYS) do FS.Config.RegisterDefault(key, true) end
 end
+local KEEP_FALLEN_KEY = "gunsight.target.keepfallen"
+local function withDots()
+    FS.GunsightDots = { SETTINGS = { keepFallen = { key = KEEP_FALLEN_KEY, default = true } } }
+    FS.Config.RegisterDefault(KEEP_FALLEN_KEY, true)
+end
 -- My buffs ships behind FS.Features.myBuffs (false in a release build: no row). Cases about the row switch it on before the window builds.
 local function withTagsAndMyBuffs() withTags(); FS.Features = { myBuffs = true } end
 local function yOf(label) return -row(label).points[1].y end
@@ -1357,6 +1362,45 @@ function T.the_gunsight_page_has_the_three_target_and_player_groups_in_the_mocku
     for i = 1, #order do yes(order[i], "missing row or header number " .. i) end
     for i = 2, #order do yes(order[i] > order[i - 1], "order broken at item " .. i) end
     yes(headerY("PIECES") > order[#order], "the pieces list follows the new groups")
+end
+
+function T.the_keep_fallen_debuffs_toggle_sits_under_the_area_dropdowns_on_by_default_and_writes_its_key()
+    local W = boot({ preWindow = function() withTags(); withDots() end })
+    W.Open("gunsight")
+    local label = "Keep fallen-off debuffs as a reapply reminder"
+    yes(row(label), "the row exists")
+    yes(yOf(label) > yOf("Lower area") and yOf(label) < headerY("TARGET BOX TAGS"), "it sits in Target side, under the area dropdowns")
+    yes(row(label).control.fsChecked, "it opens on")
+    press(label)
+    eq(FS.Config.Get(KEEP_FALLEN_KEY), false, "it writes its key")
+    no(row(label).control.fsChecked, "and repaints")
+    press(label)
+    eq(FS.Config.Get(KEEP_FALLEN_KEY), true)
+end
+
+function T.the_keep_fallen_debuffs_toggle_explains_itself_in_a_tip_not_helper_text()
+    local W = boot({ preWindow = function() withTags(); withDots() end })
+    W.Open("gunsight")
+    local ctl = row("Keep fallen-off debuffs as a reapply reminder")
+    local tip
+    for _, o in ipairs(ALL) do
+        if o.fsTip and o.parent == ctl.control.parent then tip = o.fsTip end
+    end
+    eq(tip, "When a debuff you applied runs out on your target during a fight, its row or chip stays with a red outline "
+        .. "as a reminder to apply it again. It clears when you reapply it, change target, or the fight ends.")
+    no(tip:find("\226\128\148"), "no em dash")
+    for _, o in ipairs(ALL) do
+        if o.kind == "FontString" and o:IsVisible() and (o:GetText() or ""):find("red outline", 1, true) then
+            error("the explanation is inline helper text")
+        end
+    end
+end
+
+function T.without_the_debuffs_module_there_is_no_keep_fallen_row()
+    local W = boot({ preWindow = withTags })
+    W.Open("gunsight")
+    no(row("Keep fallen-off debuffs as a reapply reminder"), "no row")
+    yes(row("Upper area") and row("Lower area"), "the dropdowns still build")
 end
 
 function T.in_a_release_build_my_buffs_has_no_row_and_player_side_keeps_next_cast()
