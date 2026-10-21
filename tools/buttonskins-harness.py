@@ -119,7 +119,7 @@ function Obj:GetFont() return self.font and self.font[1] or "font", self.font an
 function Obj:SetText(t) self.text = t end
 function Obj:GetText() return self.text end
 function Obj:SetTextColor(r, g, b, a) self.textColor = { r, g, b, a } end
-function Obj:SetShadowColor() end
+function Obj:SetShadowColor(r, g, b, a) self.shadow = { r, g, b, a } end
 function Obj:SetShadowOffset() end
 function Obj:SetJustifyH() end
 
@@ -652,17 +652,6 @@ case("resolve_treats_a_button_whose_label_is_only_in_its_font_string_as_a_text_b
     assert(B.ResolveCloseButtons(frame)[1].kind == "text", "the font string's text counts")
 """)
 
-case("theme_skin_close_button_skins_the_panels_x_and_leaves_the_close_text_button_alone_for_now", """
-    local B = LoadButtonSkins()
-    local frame = CreateFrame("Frame", "SettingsLike")
-    local x = NewButton(frame, { states = { "Normal", "Pushed", "Highlight", "Disabled" } })
-    local text = NewButton(frame, { slices = true, states = { "Highlight" }, text = "Close" })
-    frame.ClosePanelButton, frame.CloseButton = x, text
-    Theme.SkinCloseButton(frame)
-    assert(B.Parts(x) and #B.Parts(x).glyph == 12, "the real X got the pink X")
-    assert(B.Parts(text) == nil or #B.Parts(text).glyph == 0, "the Close text button did NOT get an X glyph")
-""")
-
 case("theme_skin_panel_skins_the_x_through_the_forwarder", """
     local B = LoadButtonSkins()
     local frame = CreateFrame("Frame", "PanelWithX")
@@ -677,6 +666,171 @@ case("theme_skin_close_button_is_a_no_op_until_button_skins_is_loaded", """
     local frame = CreateFrame("Frame")
     Theme.SkinCloseButton(frame)
     Theme.SkinCloseButton(nil)
+""")
+
+
+# ---------------------------------------------------------------------------
+# The text button
+# ---------------------------------------------------------------------------
+
+case("text_button_hides_the_stock_slices_and_state_art_and_keeps_the_label", """
+    local B = LoadButtonSkins()
+    local b = NewButton(nil, { w = 96, h = 22, slices = true, states = { "Highlight" }, text = "Close" })
+    B.SkinTextButton(b)
+    for _, key in ipairs({ "Left", "Middle", "Right" }) do
+        assert(b[key].alpha == 0, key .. " held hidden")
+        b[key]:SetAtlas("stock-" .. key .. "-Pressed")
+        b[key]:SetAlpha(1)
+        assert(b[key].alpha == 0, key .. " stays hidden when Blizzard swaps and re-shows it")
+    end
+    assert(b:GetHighlightTexture().alpha == 0, "the stock hover glow is held hidden")
+    assert(b.fontString.alpha == 1, "the label is not art")
+""")
+
+case("text_button_rests_as_ink_with_a_violet_ring_halo_and_cyan_label_by_default", """
+    local B = LoadButtonSkins()
+    local b = NewButton(nil, { w = 96, h = 22, slices = true, text = "Close" })
+    local p = B.SkinTextButton(b)
+    assert(SameRgb(p.face.tint, Theme.COLOR_BUTTON_INK), "face is ink")
+    assert(SameRgb(p.ring.tint, Theme.COLOR_BORDER) and Near(p.ring.tint[4], 0.70), "ring violet at .70")
+    assert(SameRgb(p.halo.tint, Theme.COLOR_BORDER) and Near(p.halo.tint[4], 0.35), "halo violet at .35")
+    assert(SameRgb(b.fontString.textColor, Theme.COLOR_POWER) and Near(b.fontString.textColor[4], 1), "label cyan")
+""")
+
+case("text_button_accents_set_the_ring_and_the_label", """
+    local B = LoadButtonSkins()
+    local function skin(accent)
+        local b = NewButton(nil, { w = 96, h = 22, slices = true, text = "Go" })
+        return B.SkinTextButton(b, { accent = accent }), b
+    end
+    local cp, cb = skin("cyan")
+    assert(SameRgb(cp.ring.tint, Theme.COLOR_POWER) and SameRgb(cb.fontString.textColor, Theme.COLOR_POWER), "cyan ring and label")
+    local pp, pb = skin("pink")
+    assert(SameRgb(pp.ring.tint, Theme.COLOR_HEALTH) and SameRgb(pb.fontString.textColor, Theme.COLOR_HEALTH), "pink ring and label")
+    local vp, vb = skin("nonsense")
+    assert(SameRgb(vp.ring.tint, Theme.COLOR_BORDER), "an unknown accent is violet")
+""")
+
+case("text_button_hover_washes_the_face_toward_its_ring_colour_and_lifts_the_label", """
+    local B = LoadButtonSkins()
+    local b = NewButton(nil, { w = 96, h = 22, slices = true, text = "Close" })
+    local p = B.SkinTextButton(b)
+    b:Fire("OnEnter")
+    assert(SameRgb(p.face.tint, Mix(Theme.COLOR_BUTTON_INK, Theme.COLOR_BORDER, 0.16)), "face + 16% violet")
+    assert(Near(p.ring.tint[4], 1.0) and Near(p.halo.tint[4], 0.70), "ring 1.0, halo .70")
+    assert(SameRgb(b.fontString.textColor, Mix(Theme.COLOR_POWER, { 1, 1, 1 }, 0.12)), "label +12% white")
+    b:Fire("OnLeave")
+    assert(SameRgb(p.face.tint, Theme.COLOR_BUTTON_INK) and SameRgb(b.fontString.textColor, Theme.COLOR_POWER), "rest on leave")
+""")
+
+case("text_button_pressed_and_disabled", """
+    local B = LoadButtonSkins()
+    local b = NewButton(nil, { w = 96, h = 22, slices = true, text = "Close" })
+    local p = B.SkinTextButton(b)
+    b:Fire("OnEnter"); b:Fire("OnMouseDown")
+    assert(SameRgb(p.face.tint, Mix(Theme.COLOR_BUTTON_INK, Theme.COLOR_BORDER, 0.32)), "face + 32%")
+    assert(Near(p.halo.tint[4], 0.50), "halo .50")
+    assert(SameRgb(b.fontString.textColor, Mix(Theme.COLOR_POWER, { 1, 1, 1 }, 0.40)), "label +40% white")
+    b:Fire("OnMouseUp")
+    assert(SameRgb(b.fontString.textColor, Mix(Theme.COLOR_POWER, { 1, 1, 1 }, 0.12)), "released over the button: the hover label")
+    b:Fire("OnLeave")
+    b:Disable()
+    assert(Near(p.ring.tint[4], 0.70 * 0.4) and Near(p.halo.tint[4], 0) and Near(p.face.tint[4], 0.4), "dimmed to .4, halo off")
+    assert(Near(b.fontString.textColor[4], 0.4), "label alpha .4")
+    b:Fire("OnEnter"); b:Fire("OnMouseDown")
+    assert(SameRgb(p.face.tint, Theme.COLOR_BUTTON_INK), "a disabled button takes no hover or press")
+""")
+
+case("text_button_label_font_objects_are_ours_mono_and_sized_by_the_button_height", """
+    local B = LoadButtonSkins()
+    local small = NewButton(nil, { w = 96, h = 22, slices = true, text = "Close" })
+    local big = NewButton(nil, { w = 204, h = 36, slices = true, text = "Options" })
+    B.SkinTextButton(small); B.SkinTextButton(big)
+    local function look(b, kind)
+        local o = b["font" .. kind]
+        assert(o, kind .. " font object set")
+        return o
+    end
+    for _, kind in ipairs({ "Normal", "Highlight", "Disabled" }) do
+        local o = look(small, kind)
+        assert(o.font and o.font[1] == Theme.FONT_MONO and o.font[2] == 11, kind .. " is 11 pt mono")
+        assert(look(big, kind).font[2] == 13, kind .. " is 13 pt on a 36 unit button")
+    end
+    assert(SameRgb(look(small, "Normal").textColor, Theme.COLOR_POWER), "normal: the label colour")
+    assert(SameRgb(look(small, "Highlight").textColor, Mix(Theme.COLOR_POWER, { 1, 1, 1 }, 0.12)), "highlight: lifted")
+    assert(Near(look(small, "Disabled").textColor[4], 0.4), "disabled: alpha .4")
+    assert(look(small, "Normal").shadow == nil or look(small, "Normal").shadow[4] == 0, "no shadow")
+""")
+
+case("text_button_chamfer_follows_the_button_height", """
+    local B = LoadButtonSkins()
+    for _, h in ipairs({ 22, 36, 16 }) do
+        local b = NewButton(nil, { w = 96, h = h, slices = true, text = "x" })
+        local p = B.SkinTextButton(b)
+        local ring = Theme.Cut2ButtonSet(Theme.CutSize(h))
+        assert(p.ring.texture == ring, "height " .. h .. " ring " .. tostring(p.ring.texture))
+    end
+""")
+
+case("text_button_never_touches_scripts_attributes_enabled_state_text_or_geometry", """
+    local B = LoadButtonSkins()
+    local b = NewButton(nil, { w = 96, h = 22, slices = true, text = "Log Out" })
+    local click = function() end
+    b.scripts.OnClick = click
+    local calls = {}
+    for _, m in ipairs({ "SetScript", "SetEnabled", "Enable", "Disable", "SetAttribute", "SetText", "SetSize", "SetWidth",
+            "SetHeight", "SetPoint", "ClearAllPoints", "SetHitRectInsets", "SetParent", "Show", "Hide" }) do
+        b[m] = function() calls[#calls + 1] = m end
+    end
+    B.SkinTextButton(b)
+    B.SkinTextButton(b, { accent = "pink" })
+    assert(#calls == 0, "forbidden writes: " .. table.concat(calls, ","))
+    assert(b.scripts.OnClick == click, "the click handler is untouched")
+    assert(b.text == "Log Out", "the label text is untouched")
+""")
+
+case("text_button_in_combat_on_a_protected_button_is_still_skinned_without_error", """
+    local B = LoadButtonSkins()
+    local b = NewButton(nil, { w = 96, h = 22, slices = true, text = "Options", protected = true })
+    COMBAT = true
+    local p = B.SkinTextButton(b)
+    assert(p and p.face and p.ring, "chrome built")
+    assert(b.Left.alpha == 0, "art held")
+""")
+
+case("text_button_skin_is_idempotent_and_a_new_accent_restyles_it_in_place", """
+    local B = LoadButtonSkins()
+    local b = NewButton(nil, { w = 96, h = 22, slices = true, text = "Close" })
+    local p = B.SkinTextButton(b)
+    local regions, hooks = #b.regions, 0
+    for _, list in pairs(b.hooks) do hooks = hooks + #list end
+    local again = B.SkinTextButton(b, { accent = "pink" })
+    local hooks2 = 0
+    for _, list in pairs(b.hooks) do hooks2 = hooks2 + #list end
+    assert(again == p, "same pieces")
+    assert(#b.regions == regions and hooks2 == hooks, "no second set of textures or hooks")
+    assert(SameRgb(p.ring.tint, Theme.COLOR_HEALTH) and SameRgb(b.fontString.textColor, Theme.COLOR_HEALTH), "now pink")
+    assert(SameRgb(b.fontNormal.textColor, Theme.COLOR_HEALTH), "the font objects follow the accent")
+""")
+
+case("text_button_without_a_label_or_not_a_button_is_handled", """
+    local B = LoadButtonSkins()
+    local b = NewButton(nil, { w = 40, h = 22, slices = true })
+    assert(B.SkinTextButton(b), "an unlabelled button still gets its plate")
+    assert(B.SkinTextButton(nil) == nil and B.SkinTextButton({}) == nil and B.SkinTextButton(7) == nil, "non-buttons")
+""")
+
+case("theme_skin_close_button_skins_the_panels_x_and_its_close_text_button_apart", """
+    local B = LoadButtonSkins()
+    local frame = CreateFrame("Frame", "SettingsLike")
+    local x = NewButton(frame, { states = { "Normal", "Pushed", "Highlight", "Disabled" } })
+    local text = NewButton(frame, { w = 96, h = 22, slices = true, states = { "Highlight" }, text = "Close" })
+    frame.ClosePanelButton, frame.CloseButton = x, text
+    Theme.SkinCloseButton(frame)
+    assert(B.Parts(x) and #B.Parts(x).glyph == 12, "the real X got the pink X")
+    local tp = B.Parts(text)
+    assert(tp and #tp.glyph == 0, "the Close text button is a text button, with no X on the word")
+    assert(text.Left.alpha == 0, "and its stock red art is gone")
 """)
 
 

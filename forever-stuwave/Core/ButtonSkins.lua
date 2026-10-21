@@ -254,6 +254,112 @@ function ButtonSkins.NewCloseButton(parent, onClick)
 end
 
 -------------------------------------------------------------------------------
+-- The text button
+-------------------------------------------------------------------------------
+
+-- Ring colour and label colour per accent. Violet is the default; cyan marks the primary action of a
+-- dialog, pink a warning one (Log Out, Exit Game, Defaults). The face is the same ink in all three.
+local ACCENTS = {
+    violet = { ring = "COLOR_BORDER", label = "COLOR_POWER", name = "Violet" },
+    cyan   = { ring = "COLOR_POWER",  label = "COLOR_POWER", name = "Cyan" },
+    pink   = { ring = "COLOR_HEALTH", label = "COLOR_HEALTH", name = "Pink" },
+}
+
+local function AccentOf(name)
+    local a = ACCENTS[name] or ACCENTS.violet
+    return (ACCENTS[name] and name) or "violet", Theme[a.ring], Theme[a.label], a.name
+end
+
+-- Our own font objects for a label (accent x size): the engine swaps a button's text between its normal,
+-- highlight and disabled font objects as it is entered, left, enabled and disabled, so a colour set on the
+-- font string alone would be undone on the next state change. Shared by every button of that accent and size.
+local fontSets = {}
+
+local function LabelFontSet(accent, size)
+    local key = accent .. ":" .. size
+    if fontSets[key] then return fontSets[key] end
+    local _, _, label, cap = AccentOf(accent)
+    local function make(suffix, lift, alpha)
+        if type(CreateFont) ~= "function" then return nil end
+        local ok, object = pcall(CreateFont, "ForeverSTUwaveTextButton" .. cap .. size .. suffix)
+        if not ok or not object then return nil end
+        pcall(object.SetFont, object, Theme.FONT_MONO, size, "")
+        local c = Mix(label, WHITE, lift)
+        pcall(object.SetTextColor, object, c[1], c[2], c[3], alpha)
+        pcall(object.SetShadowColor, object, 0, 0, 0, 0)
+        return object
+    end
+    local set = {
+        normal = make("", STATES.normal.lift, STATES.normal.al),
+        highlight = make("Hover", STATES.hover.lift, STATES.hover.al),
+        disabled = make("Off", STATES.disabled.lift, STATES.disabled.al),
+    }
+    fontSets[key] = set
+    return set
+end
+
+local function PaintText(button)
+    local p = parts[button]
+    if not p then return end
+    local S = STATES[StateName(button, p)]
+    PaintPlate(p, p.accentColor, S)
+    if p.fs then
+        local c = Mix(p.label, WHITE, S.lift)
+        p.fs:SetTextColor(c[1], c[2], c[3], S.al)
+    end
+end
+
+-- Points a button's three label font objects at the accent's set.
+local function SetLabelFonts(button, p)
+    local set = LabelFontSet(p.accent, p.size)
+    if not (set.normal and set.highlight and set.disabled) then
+        if p.fs then Theme.ApplyMono(p.fs, p.size, p.label) end -- no font objects here: style the font string itself
+        return
+    end
+    if button.SetNormalFontObject then button:SetNormalFontObject(set.normal) end
+    if button.SetHighlightFontObject then button:SetHighlightFontObject(set.highlight) end
+    if button.SetDisabledFontObject then button:SetDisabledFontObject(set.disabled) end
+end
+
+-- Skins a labelled Blizzard button as the STUwave text button: its Blizzard art held hidden, an ink cut plate
+-- with a ring and halo in the accent, our font for the label. opts.accent is "violet" (default), "cyan" or
+-- "pink"; opts.size the label size (default 11, 13 on a button 30 units or taller). Skinning again only
+-- changes the accent. Never writes the button's text, size, anchors, scripts or enabled state.
+function ButtonSkins.SkinTextButton(button, opts)
+    if type(button) ~= "table" or type(button.CreateTexture) ~= "function" then return nil end
+    opts = opts or {}
+    local accent, ring, label = AccentOf(opts.accent)
+
+    local p = parts[button]
+    if p then
+        if p.accent ~= accent then
+            p.accent, p.accentColor, p.label = accent, ring, label
+            SetLabelFonts(button, p)
+            PaintText(button)
+        end
+        return p
+    end
+
+    if FS.HeldArt then FS.HeldArt.HoldButton(button, OwnPieces(button)) end
+
+    local height = button.GetHeight and button:GetHeight() or 0
+    p = { hover = false, pressed = false, glyph = {}, accent = accent, accentColor = ring, label = label,
+        size = opts.size or ((height or 0) >= 30 and 13 or 11) }
+    parts[button] = p
+    p.fs = type(button.GetFontString) == "function" and button:GetFontString() or nil
+
+    local chamfer = opts.chamfer or Theme.CutSize(height) or X.CHAMFER
+    if chamfer < 2 then chamfer = Theme.CUT_SIZES[1] end
+    local skin, face, flat = BuildPlate(button, ring, chamfer)
+    p.face, p.flat, p.halo = face, flat, skin.glow
+    p.ring = skin.border.ring
+    SetLabelFonts(button, p)
+    PaintText(button)
+    HookScripts(button, p, PaintText)
+    return p
+end
+
+-------------------------------------------------------------------------------
 -- Which button of a panel is the X
 -------------------------------------------------------------------------------
 
