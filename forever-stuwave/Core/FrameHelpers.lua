@@ -1115,6 +1115,77 @@ function Helpers.ReadAuraSlot(unit, index, filter, report)
 end
 
 -------------------------------------------------------------------------------
+-- Engine drawn aura flag (a buff's presence in combat, never read)
+-------------------------------------------------------------------------------
+
+-- The player's aura data is SECRET in combat: no read, no comparison, no branch. The engine still knows. An
+-- AuraContainer slot (AddAuraSlot, unit "player", includeSpellIDs = the buff's ranks) is shown by the engine
+-- exactly while that aura is present, so slot:IsShown() is a boolean meaning "the buff is up", and in combat it is
+-- a SECRET boolean. The one sanctioned consumer of a secret boolean is Region:SetAlphaFromBoolean(flag,
+-- alphaIfTrue, alphaIfFalse) (AllowedWhenTainted): the engine picks the alpha, Lua never learns which. That is how
+-- BuffTab draws the imbue and totem states, lifted here so any tile can show "the buff is missing" in combat.
+--
+-- Nothing below ever tests the flag: Drive passes slot:IsShown() straight into the setter inside one pcall'd
+-- function, and Agrees (the only place a flag is compared) refuses a secret one. The alpha is resolved when the
+-- setter runs, so a caller must call Drive again whenever the aura may have changed (UNIT_AURA, a throttled
+-- OnUpdate). A plain SetAlpha afterwards resets it.
+local AuraFlag = {}
+Helpers.AuraFlag = AuraFlag
+
+local function MemberOf(obj, name) return obj[name] end
+
+local function ApplyFlag(region, slot, whenUp, whenDown)
+    region:SetAlphaFromBoolean(slot:IsShown(), whenUp, whenDown)
+end
+
+local function ShownOf(slot) return slot:IsShown() end
+
+-- True when both engine methods exist (nothing is called).
+function AuraFlag.Ready(region, slot)
+    if region == nil or slot == nil then return false end
+    local okSet, setter = pcall(MemberOf, region, "SetAlphaFromBoolean")
+    local okGet, getter = pcall(MemberOf, slot, "IsShown")
+    return okSet and okGet and type(setter) == "function" and type(getter) == "function"
+end
+
+-- region's alpha := whenUp while the slot's aura is present, whenDown while it is not, decided by the engine.
+-- True when the setter ran; false when it could not (a missing method, a throwing call), never an error.
+function AuraFlag.Drive(region, slot, whenUp, whenDown)
+    if region == nil or slot == nil then return false end
+    return (pcall(ApplyFlag, region, slot, whenUp, whenDown))
+end
+
+-- Out of combat only: does the slot's PLAIN flag equal `up` (what an aura read says)? true / false, or nil when the
+-- flag cannot be read plainly (secret, not a boolean, a throwing or missing method). Lets a caller notice a slot
+-- whose spell ids do not match the real aura and stop trusting its flag.
+function AuraFlag.Agrees(slot, up)
+    if slot == nil then return nil end
+    local ok, shown = pcall(ShownOf, slot)
+    if not ok or IsSecret(shown) or type(shown) ~= "boolean" then return nil end
+    return shown == (up and true or false)
+end
+
+local function PayloadLists(info) return info.removedAuraInstanceIDs, info.addedAuras, info.updatedAuraInstanceIDs end
+
+-- A list field "has entries": a secret list may, a plain one does if it is not empty.
+local function Listed(list)
+    if IsSecret(list) then return true end
+    return type(list) == "table" and next(list) ~= nil
+end
+
+-- Can this UNIT_AURA payload (the second event argument) mean an aura was removed? In combat the lists are plain nil
+-- or SECRET tables, so only their presence can be told: a removed list (secret or not, non empty) says yes, a payload
+-- listing only additions or refreshes says no, and one that lists nothing, is missing, is secret or cannot be read
+-- says yes (it cannot rule a removal out). The payload is never indexed when it is secret.
+function AuraFlag.MayHaveRemoved(info)
+    if IsSecret(info) or type(info) ~= "table" then return true end
+    local ok, removed, added, updated = pcall(PayloadLists, info)
+    if not ok then return true end
+    if Listed(removed) then return true end
+    return not (Listed(added) or Listed(updated))
+end
+
+-------------------------------------------------------------------------------
 -- Aura tooltip OnEnter (lockdown fallback + dispatch)
 -------------------------------------------------------------------------------
 

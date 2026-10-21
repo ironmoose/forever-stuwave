@@ -40,30 +40,37 @@
 -- path up for the session (same shape as the nameplate rows in Nameplates.lua). On a
 -- retarget the container needs UpdateAllAuras (SetUnit is a no-op for an unchanged token).
 --
--- THE OCCLUSION TRICK, the buff reminders in combat. FS.Hud cannot tell a buff is missing in
--- combat (aura reads are blocked), so it reports nothing. The engine CAN draw the buff, so:
--- for every tracked self buff (aura kind, known spell) a WARNING tile (24 x 24, pulsing pink
--- border) is seated, and an AuraContainer slot for that buff on unit "player" (filter HELPFUL,
--- includeSpellIDs = the buff's rank ids) is stacked ON TOP of it, same rect, higher frame
--- level, opaque icon. While the buff is up its aura icon covers the warning; when it falls
--- off, the slot draws nothing and the warning shows through. No Lua ever learns which.
--- CORRECTION (live, 16001): the cover did NOT reliably hide the tile of a present buff, so in
--- combat the tile is drawn only for a buff whose HELD out of combat verdict is "missing" (see
--- BuffEntries); the cover is now only a bonus that hides it after a recast. That
--- container is VISIBLE only in combat (out of combat the Hud's own reads are exact and its
--- buffsMissing drives the tiles, and a live slot would draw a stray icon over a hidden tile).
--- Form and pet checks (Shadowform, the pet) are plain in combat, so they come from
--- buffsMissing as usual, with no slot. In the Gunsight view that visibility is ALPHA ONLY: the container is
--- enabled, given its unit and shown OUT OF COMBAT (ArmCover, which also writes alpha 0, after its
--- slots exist, again on PLAYER_REGEN_ENABLED if something left it off) and then never switched in combat, because
--- SetEnabled/Show/Hide on a protected frame in combat is refused and a container that could not be
--- enabled would leave every warning a permanent false alarm. Combat only writes SetAlpha (1 in
--- combat with a tile to cover, 0 otherwise, SetCover), which is always allowed.
--- If the container cannot be armed (or built) combat shows only what the Hud reports. The container is
--- a child of the buff piece frame, so the piece's fade and hide reach the covers through the parent
--- (the cover never reads the piece state itself, so a present buff's warning cannot flash while the
--- piece fades). Stack A keeps the
--- plain SetEnabled/Show/Hide of SetLive.
+-- THE BUFF REMINDERS IN COMBAT. FS.Hud cannot tell a buff is missing in combat (aura reads are blocked), so it
+-- reports nothing. The engine CAN. For every tracked aura buff the player knows (Priest: Fortitude, Inner Fire;
+-- Warlock: Demon Armor) there is a WARNING tile (24 x 24, pulsing pink border) and an AuraContainer slot for that
+-- buff on unit "player" (filter HELPFUL, includeSpellIDs = the buff's rank ids, built OUT OF COMBAT). The engine
+-- shows the slot exactly while the aura is up, so slot:IsShown() is "the buff is up" as a SECRET boolean in combat.
+-- The only thing allowed to consume a secret boolean is Region:SetAlphaFromBoolean, so the tile's alpha is set
+-- from the slot (FS.FrameHelpers.AuraFlag.Drive): up is alpha 0, down is alpha 1. No Lua ever learns which.
+--
+-- GUNSIGHT VIEW (the shipped one). The slot draws nothing (no icon, no timer, no cover art) and its container
+-- stays at alpha 0 for good: the slot is only the carrier of the flag, and the tile is the thing that shows.
+-- A tile is ENGINE DRIVEN in combat when its slot exists, the container is armed, the client has the setter and the
+-- slot's flag was not caught disagreeing with the aura read out of combat (BuffEntries, AuraFlag.Agrees), and
+--   * the buff was absent at the last readable out of combat look (the HELD verdict, see BuffEntries), or
+--   * an aura was REMOVED this fight (the gate, ui.flagGate): a UNIT_AURA for the player whose payload may list a
+--     removal (AuraFlag.MayHaveRemoved; in combat its lists are plain nil or secret tables, so only their
+--     presence can be told, never which aura). Until then a tile whose buff was up at the pull stays hidden, so
+--     a slot whose ids do not match the real aura cannot raise a false alarm at the pull.
+-- An engine driven tile is SHOWN (it takes its place in the row) and its alpha follows the flag: on each render, on
+-- every UNIT_AURA, and from ONE throttled OnUpdate on its own driver frame (ui.flagDriver, running only while a tile
+-- is engine driven), because the order of our UNIT_AURA and the container's is not known. The gate and the alphas
+-- reset at PLAYER_REGEN_ENABLED and PLAYER_REGEN_DISABLED, in HideAll and in Disable. Without the setter, an
+-- unarmed container, a throwing call or a flag that disagrees, combat shows only the held verdict at plain alpha 1
+-- (a buff that drops mid fight then cannot warn). Form and pet checks (Shadowform, the pet) are plain in combat, so
+-- they come from buffsMissing as usual, with no slot. The container is a child of the buff piece frame, so the
+-- piece's fade and hide reach the tiles through the parent. Combat only ever writes SetAlpha on our own plain
+-- frames: SetEnabled/Show/Hide on the container are refused in combat, so it is enabled, given its unit and shown
+-- OUT OF COMBAT (ArmCover, again on PLAYER_REGEN_ENABLED if something left it off).
+--
+-- STACK A (the /fsgun off fallback) keeps the older occlusion: a visible cover slot, opaque icon and cut border, is
+-- stacked on top of the warning tile on a container that SetLive switches on in combat only, so a present buff's
+-- aura icon covers the warning. It never uses the engine flag.
 --
 -- PROCS glow a ring around the row tile and the next tile: the profile's glow colour, STATIC (the
 -- mockup's .ring.gold and .hud-next.gold carry no animation, only a box-shadow, drawn here by
@@ -95,9 +102,10 @@
 -- Slash: /fshud [on|off|idle on|idle off]. Settings live in ForeverSTUwaveDB.combatHud
 -- (account-wide; enabled is per class token). Default on for PRIEST, WARLOCK and PALADIN.
 --
--- UNVERIFIED in game: the AuraContainer slot rendering over our tiles, the occlusion layering,
--- the glow, the placement against the mockup, and whether includeSpellIDs covers every rank id
--- (see RANK_IDS). Headless check: python3 addons/combathud-harness.py.
+-- UNVERIFIED in game: the Stack A slot rendering over our tiles and its layering, the glow, the
+-- placement against the mockup, whether includeSpellIDs covers every rank id (see RANK_IDS), and above
+-- all the Gunsight combat reminder: that a buff slot's IsShown() in combat is the engine's aura-present
+-- flag and that SetAlphaFromBoolean on the tile follows it. Headless check: python3 tools/combathud-harness.py.
 
 local _, FS = ...
 
@@ -134,6 +142,7 @@ local TUNE = {
     CONTAINER_LEVEL = 20,                          -- aura containers sit above every tile of ours
     RING_LEVEL = 2,
     AURA_BUILD_FAIL_LIMIT = 3,
+    FLAG_THROTTLE = 0.1,                           -- the engine flag driver redraws at most 10 Hz
     IDLE_IN_COMBAT = true,
     SHARD_CANVAS_W = 16, SHARD_CANVAS_H = 32,      -- design px of the line, fill and facet files (generate_hud_shard.py LINE_TEX)
     SHARD_GLOW_CANVAS = 40,                        -- design px of the square glow file (GLOW_TEX)
@@ -386,10 +395,14 @@ end
 -- Frame building blocks
 -------------------------------------------------------------------------------
 
-local ui = { tiles = {}, buffTiles = {}, diamonds = {}, heldMissing = {}, castCleared = {} }
+-- flagGate: an aura was removed this fight (UNIT_AURA), see "THE BUFF REMINDERS IN COMBAT"; flagDriver: the frame whose
+-- OnUpdate re-reads the engine flags while a tile is engine driven (built on first use).
+local ui = { tiles = {}, buffTiles = {}, diamonds = {}, heldMissing = {}, castCleared = {}, flagGate = false }
 CombatHud.ui = ui
 local containers = {}
 CombatHud.containers = containers
+local AuraFlag = FS.FrameHelpers.AuraFlag       -- the engine drawn aura flag (Core/FrameHelpers.lua)
+local Flags = {}                                -- the engine flag driver's functions; a table, not locals (the file is near the local ceiling)
 
 -- Tooltips for the tiles that show a HudSpells spell (a skill that shows up has a tooltip). Hover only:
 -- the centre HUD must pass clicks through, and the mouse state is set once, when the tile is built (a buff
@@ -710,8 +723,8 @@ local function TemplateAvailable()
 end
 
 local function BuildContainer(unit)
-    -- The Gunsight view hangs the player container (the buff covers) under the buff PIECE frame, so the
-    -- piece's 0.25 s fade and its hide carry the covers with it instead of the covers popping off first.
+    -- The Gunsight view hangs the player container (the buff slots) under the buff PIECE frame, so the
+    -- piece's 0.25 s fade and its hide carry the tiles with it instead of the tiles popping off first.
     local home = (ui.gunsight and unit == "player" and ui.buffPiece) or ui.root
     local container = CreateFrame("AuraContainer", nil, home, AURA_CONTAINER_TEMPLATE)
     local ok, err = pcall(function()
@@ -813,18 +826,19 @@ local function SetLive(container, live)
     end
 end
 
--- Gunsight: a cover is visible (alpha 1) or not (alpha 0), nothing else. SetAlpha is allowed in combat.
+-- Gunsight: the container's own alpha, the only thing combat may write on it. It is only ever asked for 0 now (its
+-- slots carry the engine flag and draw nothing); SetAlpha is allowed in combat.
 local function SetCover(container, live)
     if not container then return end
     local alpha = live and 1 or 0
     if container.fsAlpha ~= alpha and Quiet(container, "SetAlpha", alpha) then container.fsAlpha = alpha end
 end
 
--- The Gunsight player container (the buff covers): enabled, given its unit and shown OUT OF COMBAT,
--- read back (the engine refuses a protected frame without raising), and left that way. `fsArmed` is the
--- state it was read back in; a container that reads back off is armed again on the next call. Arming also
+-- The Gunsight player container (the buff slots that carry the engine flags): enabled, given its unit and shown
+-- OUT OF COMBAT, read back (the engine refuses a protected frame without raising), and left that way. `fsArmed`
+-- is the state it was read back in; a container that reads back off is armed again on the next call. Arming also
 -- writes alpha 0 (not through the SetCover cache, which a refused or reset frame can leave stale): a
--- freshly armed live slot must draw nothing until combat asks for it.
+-- freshly armed live slot must never draw.
 local function ArmCover(container)
     if not container or InCombatSafe() then return end
     local rearm = not container.fsArmed
@@ -838,10 +852,11 @@ local function ArmCover(container)
     if rearm and Quiet(container, "SetAlpha", 0) then container.fsAlpha = 0 end
 end
 
--- The player container's visibility in either view.
+-- The player container's visibility. Stack A switches its visible covers on in combat; the Gunsight container
+-- never draws anything (its slots only carry the engine flag), so it is always asked for alpha 0.
 local function SetPlayerLive(live)
     local container = containers.player
-    if ui.gunsight then SetCover(container, live) else SetLive(container, live) end
+    if ui.gunsight then SetCover(container, false) else SetLive(container, live) end
 end
 
 local function SortOptions()
@@ -870,7 +885,9 @@ local function InitDotSlot(tile)
     end
 end
 
--- initializeFrame for a buff cover: the aura's own icon, opaque, with a cut border, exactly on
+-- initializeFrame for a buff slot. Gunsight: the slot is only the carrier of the engine's aura-present flag
+-- (Flags, FrameHelpers.AuraFlag), so it draws nothing: mouse off and seated on the warning tile, no icon, no
+-- cover art. Stack A: the aura's own icon, opaque, with a cut border, exactly on
 -- the warning tile. The cover carries its own cut tile fill under the icon (same TOP-LEFT and
 -- BOTTOM-RIGHT chamfer as the warning tile) so the icon inset around the cut does not let the
 -- warning tile's pink border show through a present buff, and its square icon never pokes past
@@ -883,6 +900,7 @@ local function InitBuffSlot(tile)
         Quiet(button, "SetMouseClickEnabled", false)
         Quiet(button, "SetHideTooltipInCombat", true)
         pcall(function() button:SetAllPoints(tile.holder) end)
+        if ui.gunsight then return end
         local cut = TileCut(G.BUFF * K())
         local cover = { button = button, cut = cut }
         tile.cover = cover
@@ -1745,8 +1763,73 @@ local function EnsureBuffTile(key)
     return t
 end
 
--- Out of combat: the occlusion slots of every tracked aura buff the player knows, so the
--- warnings can be put behind them in a fight. (A buff the player cannot cast has no tile.)
+-------------------------------------------------------------------------------
+-- The engine flag (Gunsight buff reminders in combat; see the header)
+-------------------------------------------------------------------------------
+
+-- Can the engine's flag decide this tile in combat? It needs its slot, an armed container (an unarmed one never
+-- updates its slots), the setter and the getter, and a slot that was not caught disagreeing with the aura read
+-- out of combat (tile.flagBad, BuffEntries).
+function Flags.Usable(tile)
+    local container = containers.player
+    return AuraFlag ~= nil and ui.gunsight == true and tile.slot ~= nil and tile.flagBad ~= true
+        and container ~= nil and container.fsArmed == true and AuraFlag.Ready(tile.holder, tile.slot)
+end
+
+-- The tile's alpha := 0 while its buff is up, 1 while it is not, resolved by the engine from the slot's secret flag.
+-- A setter that fails leaves a HELD warning visible and any other tile dark: never a warning from a guess.
+function Flags.Apply(tile)
+    if not AuraFlag.Drive(tile.holder, tile.slot, 0, 1) then
+        Quiet(tile.holder, "SetAlpha", ui.heldMissing[tile.key] == true and 1 or 0)
+    end
+    tile.flagDriven = true
+end
+
+-- Redraws every engine driven tile from its flag (UNIT_AURA, and the driver's OnUpdate).
+function Flags.Draw()
+    ui.flagAt = GetTime()
+    for _, tile in pairs(ui.buffTiles) do
+        if tile.flagOn then Flags.Apply(tile) end
+    end
+end
+
+-- The driver's OnUpdate, at most FLAG_THROTTLE apart. It runs every frame while a tile is engine driven, so the
+-- throttle test is a plain function (no closure per frame).
+function Flags.Throttled()
+    if ui.flagAt and GetTime() - ui.flagAt < TUNE.FLAG_THROTTLE then return end
+    Flags.Draw()
+end
+function Flags.Tick()
+    local ok, err = pcall(Flags.Throttled)
+    if not ok then LogOnce("flag_tick", err) end
+end
+
+-- The driver runs only while some tile is engine driven.
+function Flags.Sync(on)
+    if on then
+        if not ui.flagDriver then ui.flagDriver = CreateFrame("Frame", nil, UIParent) end
+        if not ui.flagDriver:GetScript("OnUpdate") then ui.flagDriver:SetScript("OnUpdate", Flags.Tick) end
+    elseif ui.flagDriver and ui.flagDriver:GetScript("OnUpdate") then
+        ui.flagDriver:SetScript("OnUpdate", nil)
+    end
+end
+
+-- A fight's engine state ends or begins, or the HUD goes away: the gate closes, the driver stops, and every tile
+-- that was engine driven gets plain alpha 1 back (the next render decides again).
+function Flags.Reset()
+    ui.flagGate = false
+    Flags.Sync(false)
+    for _, tile in pairs(ui.buffTiles) do
+        tile.flagOn = nil
+        if tile.flagDriven then
+            tile.flagDriven = nil
+            Quiet(tile.holder, "SetAlpha", 1)
+        end
+    end
+end
+
+-- Out of combat: the slots of every tracked aura buff the player knows, so the engine can carry each
+-- buff's flag in a fight. (A buff the player cannot cast has no tile.)
 local function EnsureBuffSlots(profile)
     if InCombatSafe() then return end
     for _, sb in ipairs(profile.selfBuffs or {}) do
@@ -1779,9 +1862,9 @@ local function EnsureBuffSlots(profile)
     if ui.gunsight then ArmCover(containers.player) end
 end
 
--- The tiles to show: out of combat (and whenever no occlusion is available) exactly what the Hud
+-- The tiles to show: out of combat (and whenever no slot is available) exactly what the Hud
 -- reports missing; in combat the plain checks (form, pet) the Hud still reports, plus every
--- tracked aura buff with a slot whose HELD verdict is "missing".
+-- tracked aura buff with a slot whose HELD verdict is "missing" (or, engine driven, after a removal).
 --
 -- THE HELD VERDICT (ui.heldMissing[key]). Aura reads are refused in combat, and an unreadable
 -- answer is UNKNOWN, never "missing". So an aura buff is only warned about in combat when the last
@@ -1792,11 +1875,15 @@ end
 -- combat refresh nag and is never held, or a buff up with 50 s left at the pull would warn all fight.
 -- Buffs marked oocOnly in the profile are the exception to "out of combat only" on purpose: a buff
 -- missing at the pull keeps its tile in combat.
--- The engine cover slot (the occlusion trick above) is NOT relied on to hide the tile: live on 16001
--- it did not, so the tile is simply not drawn unless the verdict is "missing". Known limits: a buff
--- that drops mid fight cannot warn (its aura is unreadable in combat); a login or reload into combat
--- starts with no verdict, which is the safe direction (no tile); casting the spell on someone else
--- also clears the verdict (the cast event does not say on whom), again the safe direction.
+-- THE ENGINE FLAG (Gunsight). A tile whose Flags.Usable holds is ENGINE DRIVEN: its entry carries `engine`, and its
+-- alpha follows the slot's secret flag (RenderBuffs). It is an entry when its verdict is "missing" OR when an aura was
+-- removed this fight (ui.flagGate), so a buff that drops mid fight warns. The flag is only trusted after it agreed
+-- with the aura read out of combat: each readable out of combat look compares the slot's plain flag with "the buff is
+-- up" and records the answer in tile.flagBad (a slot whose ids do not match the real aura is never trusted). A tile
+-- that is not engine driven (Stack A, no setter, an unarmed container, a disagreeing flag) is drawn at plain alpha 1
+-- from the held verdict alone. Known limits then: a buff that drops mid fight cannot warn (its aura is unreadable
+-- in combat); a login or reload into combat starts with no verdict, which is the safe direction (no tile); casting
+-- the spell on someone else also clears the verdict (the cast event does not say on whom), again the safe direction.
 local function BuffEntries(state, profile, inCombat)
     local missing, order = {}, {}
     for _, b in ipairs(state.buffsMissing or {}) do
@@ -1817,6 +1904,11 @@ local function BuffEntries(state, profile, inCombat)
             if type(key) == "string" and sb.kind == nil then
                 local m = missing[key]
                 local absent = m ~= nil and not m.expiring
+                local t = ui.buffTiles[key]
+                if t and t.slot and ui.gunsight and AuraFlag then
+                    local agrees = AuraFlag.Agrees(t.slot, not absent)
+                    if agrees ~= nil then t.flagBad = not agrees end
+                end
                 -- A cast of this buff landed since the last fight began (ClearHeldOnCast), but the state
                 -- being drawn can still be the stale one that says "missing" (the Hud pushes about every
                 -- 0.2 s): that replay must not undo the cast. Once a read says it is up, or the fight is
@@ -1830,13 +1922,13 @@ local function BuffEntries(state, profile, inCombat)
         end
     end
     local out, seen = {}, {}
-    local function add(key, icon)
+    local function add(key, icon, engine)
         if seen[key] then return end
         seen[key] = true
         local tile = EnsureBuffTile(key)
-        out[#out + 1] = { key = key, icon = icon or IconFor(key), tile = tile }
+        out[#out + 1] = { key = key, icon = icon or IconFor(key), tile = tile, engine = engine == true }
     end
-    -- Gunsight: only an armed container can cover anything; without one the warnings would be false alarms
+    -- Gunsight: only an armed container carries any flag; without one the warnings would be false alarms
     local cover = containers.player
     local occlusion = inCombat and cover ~= nil and (not ui.gunsight or cover.fsArmed == true)
     if occlusion then
@@ -1845,7 +1937,10 @@ local function BuffEntries(state, profile, inCombat)
             if type(key) == "string" then
                 if sb.kind == nil then
                     local t = ui.buffTiles[key]
-                    if t and t.slot and held[key] == true and SpellKnown(key) == true then add(key, nil) end
+                    if t and t.slot and SpellKnown(key) == true then
+                        local engine = Flags.Usable(t)
+                        if held[key] == true or (engine and ui.flagGate) then add(key, nil, engine) end
+                    end
                 elseif missing[key] then
                     add(key, missing[key].icon)
                 end
@@ -1894,14 +1989,13 @@ end
 local function RenderBuffs(state, profile, inCombat, shardsShown)
     EnsureBuffSlots(profile)
     local entries = BuffEntries(state, profile, inCombat)
-    -- the player container draws only in combat, where the warnings are behind it. Gunsight: alpha only
-    -- (SetCover); the buff piece frame, its parent (BuildContainer), carries the fade and the hide
-    local live = inCombat and #entries > 0
-    -- Gunsight: lastState can lag the client by a Hud tick (the piece's onShow replays it), so the cover
-    -- is also gated on the client really being in combat now. Stack A is left as it was.
-    if ui.gunsight and live and not InCombatNow() then live = false end
-    SetPlayerLive(live and true or false)
+    -- Stack A: the player container draws only in combat, where the warnings are behind it. Gunsight: its
+    -- container never draws (SetPlayerLive); the buff piece frame, its parent (BuildContainer), carries the
+    -- fade and the hide
+    SetPlayerLive((inCombat and #entries > 0) and true or false)
     LayoutBuffs(entries, shardsShown)
+    for _, tile in pairs(ui.buffTiles) do tile.flagOn = nil end
+    local driven = false
     for _, e in ipairs(entries) do
         local tile = e.tile
         if e.icon ~= nil then
@@ -1916,10 +2010,19 @@ local function RenderBuffs(state, profile, inCombat, shardsShown)
             tile.abbr:SetText(Abbrev(e.key))
         end
         CombatHud.SetTip(tile.holder, e.key)
+        if e.engine then
+            tile.flagOn = true
+            driven = true
+            Flags.Apply(tile)
+        elseif tile.flagDriven then
+            tile.flagDriven = nil
+            tile.holder:SetAlpha(1)
+        end
         tile.holder:Show()
         SetPulse(tile.pulse, true)
         SetPulse(tile.glowPulse, true)
     end
+    Flags.Sync(driven)
     ui.buffs:SetShown(#entries > 0)
 end
 
@@ -2042,6 +2145,7 @@ local function HideAll()
     ui.nextTile.shownKey = nil
     ClearCd()
     SyncTicker()
+    Flags.Reset()
     SetPlayerLive(false)
     SetLive(containers.target, false)
     SetBarsRest(1)
@@ -2165,8 +2269,8 @@ local function PlayerIsWarlock()
 end
 
 -- Hands the three piece frames to the Gunsight registry. Called through FS.Gunsight.OnReady (after
--- login and the first seat). The aura covers are children of the buff piece frame, so the piece's fade and
--- hide carry them with no re-render. Only the buff piece has a hook, onShow (never onHide): a hidden frame
+-- login and the first seat). The buff tiles and their aura container are children of the buff piece frame, so the
+-- piece's fade and hide carry them with no re-render. Only the buff piece has a hook, onShow (never onHide): a hidden frame
 -- may stop its pulse AnimationGroups and SetPulse only plays a group that is not playing, so showing the
 -- piece redraws, which restarts them.
 local function RegisterPieces()
@@ -2271,6 +2375,7 @@ function CombatHud.Disable()
     if type(Hud) == "table" and type(Hud.Unsubscribe) == "function" then pcall(Hud.Unsubscribe, OnState) end
     StopTicker()
     if ui.root then ui.root:Hide() end
+    Flags.Reset()
     SetLive(containers.target, false)
     SetPlayerLive(false)
     IdleOff()
@@ -2391,6 +2496,8 @@ for _, e in ipairs({ "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENAB
 end
 -- Our own successful casts only (the held buff verdict, ClearHeldOnCast).
 FS.FrameHelpers.RegisterEvent(events, "UNIT_SPELLCAST_SUCCEEDED", "player")
+-- The player's auras changing: only the Gunsight buff reminders listen (the engine flag gate and redraw).
+FS.FrameHelpers.RegisterEvent(events, "UNIT_AURA", "player")
 
 local function BuildPending()
     if not enabled or InCombatSafe() then return end
@@ -2414,10 +2521,10 @@ function handlers.PLAYER_ENTERING_WORLD()
     TryStart()
 end
 -- What combat put off: a Stack A container the engine would not move (SetLive left it pending) and the
--- aura covers' re-cut after a rescale (RescaleCover). The one redraw REPLAYS lastState, which at
--- PLAYER_REGEN_ENABLED is usually still the in-combat state until the next Hud push (about 0.2 s), so it
--- does not ask for the state wanted now; that push corrects it. This affects Stack A only (the Gunsight
--- cover is never pending and is zeroed by the handler itself) and the behaviour is unchanged.
+-- Stack A aura covers' re-cut after a rescale (RescaleCover; the Gunsight slot has no cover). The one redraw
+-- REPLAYS lastState, which at PLAYER_REGEN_ENABLED is usually still the in-combat state until the next Hud push
+-- (about 0.2 s), so it does not ask for the state wanted now; that push corrects it. This affects Stack A only
+-- (the Gunsight container is never pending) and the behaviour is unchanged.
 local function FlushDeferred()
     local redraw = false
     for _, container in pairs(containers) do
@@ -2432,17 +2539,33 @@ local function FlushDeferred()
 end
 function handlers.PLAYER_REGEN_ENABLED()
     for k in pairs(ui.castCleared) do ui.castCleared[k] = nil end     -- the next read after the fight is authoritative
-    -- the covers go dark on the event itself, not on the next Hud push; alpha is always allowed
+    -- the engine drive ends on the event itself, not on the next Hud push: the tiles are plain alpha 1 again
+    -- (out of combat the Hud's own reads decide), the gate closed and the driver stopped
+    Flags.Reset()
     if ui.gunsight then SetCover(containers.player, false) end
     BuildPending()
     FlushDeferred()
 end
--- Combat lockdown just began. HudLogic's inCombat can turn true (UnitAffectingCombat) a beat before
--- InCombatLockdown does, and that push leaves the Gunsight cover at alpha 0 (it is live only with BOTH);
--- nothing else re-renders when lockdown starts, so replay lastState now. The cover writes alpha only, which
--- combat allows. Stack A is left alone (its container is protected and its state is the Hud's, as before).
+-- Combat lockdown just began: every fight starts with a closed gate and plain tiles. HudLogic's inCombat can turn
+-- true (UnitAffectingCombat) a beat before InCombatLockdown does, so the held warnings may already be up; the
+-- replay of lastState redraws them (and their flags) now that the flags are secret. Stack A keeps its own
+-- behaviour (its container is protected and its state is the Hud's, as before).
 function handlers.PLAYER_REGEN_DISABLED()
+    Flags.Reset()
     if ui.gunsight then Rerender() end
+end
+
+-- The player's auras changed. Only the Gunsight view, only in combat, only while the HUD runs: the first payload
+-- that may list a removal opens the gate and redraws the row (the tiles the gate makes eligible join it); every
+-- payload refreshes the engine driven tiles from their flags.
+function handlers.UNIT_AURA(unit, info)
+    if not (enabled and ui.gunsight and AuraFlag) or PlainString(unit) ~= "player" or not InCombatNow() then return end
+    if not ui.flagGate and AuraFlag.MayHaveRemoved(info) then
+        ui.flagGate = true
+        Rerender()
+        return
+    end
+    Flags.Draw()
 end
 function handlers.PLAYER_TARGET_CHANGED()
     -- SetUnit is a no-op for an unchanged token ("target" stays "target"): a retarget needs the

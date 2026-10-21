@@ -353,6 +353,19 @@ Not yet checked in game. Mocked checks cover the layout and the events, not how 
 5. Shaman: the Class Module shows four totem poles standing on a ground line, Fire (the wide pole), Earth, Water, Air. A pole loses a block as its totem runs down, its head sinks, and the last block turns amber. An element with no totem shows a dashed head and DROP; an element you have not opened yet is a dotted mold with its level; a totem you walked away from is a ghost pole marked FAR. The ground line is also a shock gauge: it charges as the shared shock cooldown runs and a bolt lights when you can cast one. A cyan ring on the Fire totem's head and a NOVA tag mean Fire Nova is ready. Clicking a pole is covered in "Shaman: click a totem pole".
 6. Any other class: the Class Module shows a COMING SOON plate while you have a target.
 
+## Gunsight buff reminders in combat (Priest, Warlock)
+
+Not yet checked in game. Mocked checks cover the logic and the secret handling, not what the client really answers. Needs `/reload` after an update, and a mob to pull. The pink pulsing tile under the Gunsight HUD is the reminder; Buff reminders must be on in `/fsconfig`, Gunsight HUD page.
+
+1. Priest: with Power Word: Fortitude and Inner Fire both up, pull a mob. No pink tile shows. In the fight, right click Fortitude off your buff bar. Within about a tenth of a second a pink pulsing Fortitude tile appears; Inner Fire stays dark. Cast Fortitude on yourself again in the fight: the tile goes dark again.
+2. Priest: right click Inner Fire off in the fight. Its tile appears, Fortitude's stays dark if it is up.
+3. Warlock: with Demon Armor up, pull. No tile. Right click Demon Armor off in the fight: the pink tile appears. Cast it again: it goes dark.
+4. Either class: start a fight with a buff missing (cancel Fortitude or Demon Armor before the pull). The tile is up from the pull and goes dark when you cast the buff in the fight.
+5. After the fight, with all buffs up, nothing is shown. Start a second fight with every buff up: nothing shows until you remove one.
+6. False alarm check: in a fight with every tracked buff up, let some other buff or debuff on you fall off (a consumable buff, a debuff timing out). The Fortitude, Inner Fire and Demon Armor tiles must stay dark while those buffs are up.
+7. Report it if a tile shows for a buff that is up, or never shows when you remove a buff in a fight, or if any chat line from the combat HUD appears.
+8. Known limits: a tile whose buff is up is invisible but still takes its place in the row, so a lone visible tile can sit about 15 px off centre; hovering the empty place can still show the spell tooltip. A buff that was up at the pull and whose slot does not match its real aura (checked out of combat) is not tracked in the fight; it then warns only if it was missing at the pull.
+
 ## Party frames: Console key, /fsparty, /fsconfig
 
 Not yet checked in game. Mocked checks cover the switch, the key tab and the combat rules, not how it looks. The party frames are their own piece, not part of the Gunsight HUD: one saved switch per profile, the same with the HUD on or off. Be in a group so there are frames to see.

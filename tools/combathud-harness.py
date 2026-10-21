@@ -17,8 +17,11 @@ loaded so the profiles' selfBuffs, dots and procs are the shipped data. The chec
     includeSpellIDs), built out of combat only, a container failure leaves tiles without a
     timer and logs once, the container path is given up after repeated failures, and no aura
     read API is ever touched;
-  * the next tile, the shard row and the buff row (out of combat from buffsMissing, in combat
-    through the occlusion trick: warning tile BEHIND an aura slot on unit "player");
+  * the next tile, the shard row and the buff row (out of combat from buffsMissing; in combat the
+    Stack A view puts the warning tile BEHIND a visible aura slot on unit "player", and the Gunsight
+    view drives the tile's alpha from the slot's secret "aura present" flag through
+    SetAlphaFromBoolean: the slot draws nothing, a held verdict or a UNIT_AURA removal makes a tile
+    eligible, a throttled OnUpdate and UNIT_AURA redraw it, and the fallbacks are pinned);
   * secrets: sentinels raise on any operation and the mock pcall records every swallowed
     SECRET_OP, so a guarded-away touch still fails;
   * Subscribe / Unsubscribe, the idle cast bar calls, the slash command and its SavedVariables;
@@ -311,7 +314,14 @@ local function sentinel(kind)
     SENT[s] = kind
     return s
 end
-SN, SB, SS = sentinel("number"), sentinel("boolean"), sentinel("string")
+SN, SB, SS, ST = sentinel("number"), sentinel("boolean"), sentinel("string"), sentinel("table")
+-- What a secret boolean really holds. The addon can never read it; only the engine setters below do.
+SECRET_TRUTH = setmetatable({}, { __mode = "k" })
+function secretBool(truth)
+    local s = sentinel("boolean")
+    SECRET_TRUTH[s] = truth and true or false
+    return s
+end
 function type(v)
     local k = SENT[v]
     if k then return k end
@@ -398,7 +408,19 @@ function Base:Show() self._shown = true end
 function Base:Hide() self._shown = false end
 function Base:IsShown() return self._shown end
 function Base:SetShown(v) self._shown = v and true or false end
-function Base:SetAlpha(a) count("SetAlpha"); self._alpha = a end
+function Base:SetAlpha(a) count("SetAlpha"); self._alpha = a; self._alphaFromBool = nil end
+-- The engine setter that accepts a SECRET boolean: it resolves the alpha itself, the caller never learns which.
+-- A plain boolean is accepted too. Anything else raises, like the client.
+function Base:SetAlphaFromBoolean(b, whenTrue, whenFalse)
+    count("SetAlphaFromBoolean")
+    local truth = SECRET_TRUTH[b]
+    if truth == nil then
+        if realType(b) ~= "boolean" then error("SetAlphaFromBoolean: bad boolean argument", 2) end
+        truth = b
+    end
+    if truth then self._alpha = whenTrue else self._alpha = whenFalse end
+    self._alphaFromBool = true
+end
 function Base:GetAlpha() return self._alpha end
 function Base:GetParent() return self._parent end
 
@@ -590,6 +612,14 @@ function ACM:AddAuraSlot(key, filter, opts)
     frame._order, frame._icon, frame._durationText = {}, nil, nil
     setmetatable(frame, { __index = function(t, k)
         local f = ({
+            -- A buff slot (unit player) is shown by the engine exactly while its aura is up: `_auraUp` is that
+            -- state, and in combat the answer is a SECRET boolean. Other slots keep the addon's own Show/Hide.
+            IsShown = function(me)
+                if me._parent._unit ~= "player" then return me._shown end
+                local up = me._auraUp == true
+                if __combat then return secretBool(up) end
+                return up
+            end,
             SetMouseMotionEnabled = function(me, v) me._order[#me._order + 1] = "SetMouseMotionEnabled"; me._mouseMotion = v end,
             SetMouseClickEnabled = function(me, v) me._order[#me._order + 1] = "SetMouseClickEnabled"; me._mouseClick = v end,
             SetHideTooltipInCombat = function(me, v) me._order[#me._order + 1] = "SetHideTooltipInCombat" end,
@@ -2958,6 +2988,21 @@ function checkHomeShard(ui, anchor, k, n, label)
 end
 function textureCount(parent) local n = 0; for _, f in ipairs(__frames) do if f._kind == "Texture" and (parent == nil or f._parent == parent) then n = n + 1 end end; return n end
 function homeGlyphShown(ui) return ui.shardGlyph ~= nil and ui.shardGlyph.line._shown == true end
+-- The engine's "aura present" flag of a buff slot (what the AuraContainer does on its own), and one pass of the flag
+-- driver's OnUpdate `dt` seconds after the last one. The driver is the HUD's own frame (ui.flagDriver).
+function setAura(key, up) FS.CombatHud.ui.buffTiles[key].slot._auraUp = up and true or false end
+function tickFlags(dt)
+    dt = dt or 0.2
+    __now = __now + dt
+    local d = FS.CombatHud.ui.flagDriver
+    local fn = d and d:GetScript("OnUpdate")
+    check(fn, "the flag driver has no OnUpdate")
+    fn(d, dt)
+end
+function driving() local d = FS.CombatHud.ui.flagDriver; return d ~= nil and d:GetScript("OnUpdate") ~= nil end
+-- A UNIT_AURA payload for the player as the client sends it in combat: the lists are plain nil or SECRET tables.
+function auraEvent(info) fire("UNIT_AURA", "player", info) end
+function removalInfo() return { removedAuraInstanceIDs = ST, isFullUpdate = SB } end
 function effectivelyShown(f) while f do if f._shown == false then return false end; f = f._parent end; return true end
 function nextState(over)
     local s = { inCombat = false, shards = 3, next = { key = "shadow_bolt", icon = iconOf("shadow_bolt") },
@@ -3279,27 +3324,34 @@ check(ui.buffs._shown and ui.buffTiles.demon_armor.holder._shown, "buffs still s
 check(degraded("combathud_render") == 0, "no cast bar call")
 """)
 
-gcase("gunsight_occlusion_slot_sits_on_the_buff_anchor_and_follows_the_buff_piece", r"""
+gcase("gunsight_buff_slot_is_an_invisible_flag_on_the_buff_anchor_and_follows_the_buff_piece", r"""
 local ui, gs = gsBoot({ state = nextState({ inCombat = false }) })
 local c = FS.CombatHud.containers.player
-check(c, "the player container was built out of combat for the occlusion slots")
-__combat = true                      -- the cover is live only when the client really is in combat
-push(nextState({ inCombat = true, buffsMissing = {} }))
+check(c, "the player container was built out of combat for the buff slots")
 local tile = ui.buffTiles.demon_armor
-check(tile and tile.slot, "demon armor has an occlusion slot")
+check(tile and tile.slot, "demon armor has a slot")
 sameRect(tile.holder, gs.anchors.buff, "the warning tile sits on anchors.buff")
-sameRect(tile.slot, gs.anchors.buff, "the slot frame covers the warning tile exactly")
-check(c._enabled == true and c._shown == true and c._alpha == 1, "the container is live in combat: enabled, shown, alpha 1")
--- the covers hang under the buff piece frame, so its fade and its hide carry them too
+sameRect(tile.slot, gs.anchors.buff, "the slot frame sits on the warning tile")
+-- the slot only carries the engine's "aura present" flag: no cover art, no icon, no timer
+check(tile.cover == nil, "no cover is recorded: the slot draws nothing")
+check(#allShownDescendants(tile.slot) == 0, "and nothing hangs under the slot frame")
+local wired = {}
+for _, n in ipairs(tile.slot._order) do wired[n] = true end
+check(tile.slot._order[1] == "SetMouseMotionEnabled" and not wired.SetIcon and not wired.SetDurationText and not wired.SetDurationCooldown,
+    "mouse off first, and no icon or timer wired")
+__combat = true
+push(nextState({ inCombat = true, buffsMissing = {} }))
+check(c._alpha == 0, "the container never draws, in combat too: alpha " .. tostring(c._alpha))
+-- the container hangs under the buff piece frame, so the piece's fade and hide reach everything with it
 check(isUnder(c, seen.buff.frame), "the player container is a child of the buff piece frame")
--- the piece off leaves the container's own alpha at 1 (it follows the piece through its parent) and never switches it off
 gs.SetPiece("buff", false, true)
 check(seen.buff.frame._shown == false and seen.buff.frame._alpha == 0, "the buff piece is hidden")
-check(c._alpha == 1 and c._enabled == true and c._shown == true, "the piece off leaves the container's own alpha 1, enabled and shown")
-check(not effectivelyShown(c), "the cover is not visible: its parent piece is hidden")
+check(not effectivelyShown(tile.holder), "the warning tile goes with the piece")
+check(c._enabled == true and c._shown == true and c._alpha == 0, "the piece off leaves the container armed and invisible")
 gs.SetPiece("buff", true, true)
-check(seen.buff.frame._shown == true and c._enabled == true and c._alpha == 1, "the buff piece back on shows the covers again")
-check(effectivelyShown(c), "the cover is visible again with the piece")
+check(seen.buff.frame._shown == true and effectivelyShown(tile.holder), "the piece back on shows the tile again")
+check(c._enabled == true and c._shown == true and c._alpha == 0, "container still armed and invisible")
+check(degraded("combathud_render") == 0, "no render failure")
 """)
 
 gcase("gunsight_rescale_resizes_every_piece_in_place_and_a_repeat_changes_nothing", r"""
@@ -3349,127 +3401,328 @@ visit(1190)
 check(#__frames == frames and #__glows == glows, "a scale that snaps to the same sizes built " .. (#__frames - frames) .. " frames")
 """)
 
-gcase("gunsight_aura_cover_follows_a_rescale_and_waits_for_combat_to_end", r"""
+gcase("gunsight_a_rescale_leaves_the_buff_slot_alone_in_and_out_of_combat", r"""
 local ui, gs = gsBoot({ h = 1440, state = nextState({ inCombat = false }) })
 local tile = ui.buffTiles.demon_armor
-check(tile and tile.slot and tile.cover, "the slot cover is recorded on its tile")
-local T = FS.Theme
-local function inset(tex) return tex._points.TOPLEFT.x end
-local cut0 = T.SnapCut(math.floor(24 / 6 + 0.5))
-for _, e in ipairs(tile.cover.border) do check(e._slice == cut0, "cover border chamfer " .. cut0 .. " at 1.0, got " .. tostring(e._slice)) end
-check(inset(tile.cover.icon) == math.ceil(cut0 / 2), "cover icon inset at 1.0")
 setScreen(720); fire("UI_SCALE_CHANGED")
-local cut1 = T.SnapCut(math.floor(12 / 6 + 0.5))
-check(cut1 ~= cut0, "the test needs two different chamfers")
-for _, e in ipairs(tile.cover.border) do check(e._slice == cut1, "cover border re-cut to " .. cut1 .. ", got " .. tostring(e._slice)) end
-check(inset(tile.cover.icon) == math.ceil(cut1 / 2), "cover icon re-seated to the new chamfer")
--- a rescale that lands in combat leaves the engine-built cover alone until combat ends
+sameRect(tile.slot, tile.holder, "the slot follows the tile at half scale")
 __combat = true
 setScreen(1440); fire("UI_SCALE_CHANGED")
-for _, e in ipairs(tile.cover.border) do check(e._slice == cut1, "cover untouched in combat") end
-check(inset(tile.cover.icon) == math.ceil(cut1 / 2), "cover icon untouched in combat")
-__combat = false
-fire("PLAYER_REGEN_ENABLED")
-for _, e in ipairs(tile.cover.border) do check(e._slice == cut0, "cover re-cut at the end of combat, got " .. tostring(e._slice)) end
-check(inset(tile.cover.icon) == math.ceil(cut0 / 2), "cover icon re-seated at the end of combat")
+check(ui.coverPending == nil, "no cover re-cut is queued for the end of combat")
+sameRect(tile.slot, tile.holder, "and the slot follows the tile in combat")
+check(tile.cover == nil and #allShownDescendants(tile.slot) == 0, "still nothing under the slot")
+check(degraded("combathud_render") == 0, "no render failure")
 """)
 
-gcase("gunsight_cover_is_armed_out_of_combat_and_driven_by_alpha_alone", r"""
+gcase("gunsight_container_is_armed_out_of_combat_and_never_toggled_in_combat", r"""
 local ui, gs = gsBoot({ state = nextState({ inCombat = false }) })
 local c = FS.CombatHud.containers.player
--- built, given its unit and slots, then enabled and shown out of combat; invisible until combat
+-- built, given its unit and slots, then enabled and shown out of combat; invisible always
 check(c and c._unit == "player", "the player container is on unit player")
-check(c._enabled == true and c._shown == true, "the cover is enabled and shown out of combat, and stays so")
-check(c._alpha == 0, "alpha 0 out of combat: a live slot draws nothing over a hidden tile")
+check(c._enabled == true and c._shown == true, "enabled and shown out of combat, and stays so")
+check(c._alpha == 0, "alpha 0: a live slot draws nothing over a hidden tile")
 local function calls() return (c._enableCalls or 0), (c._showCalls or 0), (c._hideCalls or 0) end
 local e0, s0, h0 = calls()
-local function combatState() return nextState({ inCombat = true, buffsMissing = {} }) end
--- combat starts while the engine refuses every SetEnabled / Show / Hide and calls the frame protected:
--- the covers still appear, because alpha is the only thing combat ever writes
+-- combat starts while the engine refuses every SetEnabled / Show / Hide and calls the frame protected
 __combat = true; __acProtected = true; __acRefuse = true
-push(combatState())
-check(c._alpha == 1, "alpha 1 in combat with the buff piece on")
-check(ui.buffTiles.demon_armor.holder._shown, "the warning is up behind the cover")
+push(nextState({ inCombat = true, buffsMissing = {} }))
+check(c._alpha == 0, "alpha stays 0 in combat: the engine flag drives the tile, never the container")
+check(ui.buffTiles.demon_armor.holder._shown, "the warning is up (missing at the pull)")
 local e1, s1, h1 = calls()
 check(e1 == e0 and s1 == s0 and h1 == h0, "no SetEnabled, Show or Hide on the container in combat")
--- combat ends: alpha 0, nothing replayed (no stale enable), the container is simply left armed
+-- combat ends: nothing replayed, the container is simply left armed
 __combat = false; __acProtected = false; __acRefuse = false
-push(nextState({ inCombat = false }))   -- Demon Armor still missing out of combat
+push(nextState({ inCombat = false }))
 fire("PLAYER_REGEN_ENABLED")
-check(c._alpha == 0, "alpha 0 again once combat is over")
-check(c._enabled == true and c._shown == true, "the container is left armed, not toggled")
--- the piece off in combat does not touch the cover's own alpha: the piece carries it
-__combat = true
-push(combatState())
-check(c._alpha == 1, "combat again: alpha 1")
-gs.SetPiece("buff", false, true)
-check(c._alpha == 1 and not effectivelyShown(c), "the buff piece off: own alpha stays 1, not visible through the piece")
-gs.SetPiece("buff", true, true)
-check(c._alpha == 1 and effectivelyShown(c), "the buff piece on: alpha 1, visible")
-__combat = false
-push(nextState({ inCombat = false }))   -- Demon Armor still missing out of combat
+check(c._alpha == 0 and c._enabled == true and c._shown == true, "armed and invisible after combat")
 -- something left it off: the end of combat arms it again, alpha untouched
 c._enabled, c._shown = false, false
 fire("PLAYER_REGEN_ENABLED")
 check(c._enabled == true and c._shown == true and c._alpha == 0, "re-armed at the end of combat, still invisible")
 """)
 
-gcase("gunsight_regen_enabled_zeroes_the_cover_with_no_state_push_after_combat", r"""
--- the end of combat must not wait for the next Hud push (about 0.2 s): the covers go to alpha 0 on the event itself
+gcase("gunsight_regen_enabled_gives_the_tile_its_alpha_back_and_ends_the_engine_drive", r"""
+-- the end of combat must not wait for the next Hud push (about 0.2 s): the tile is back at alpha 1 on the event itself
 local ui, gs = gsBoot({ state = nextState({ inCombat = false }) })
-local c = FS.CombatHud.containers.player
+local tile = ui.buffTiles.demon_armor
 __combat = true
 push(nextState({ inCombat = true, buffsMissing = {} }))
-check(c._alpha == 1, "alpha 1 in combat with a tile to cover")
+setAura("demon_armor", true)
+tickFlags()
+check(tile.holder._alpha == 0 and tile.holder._alphaFromBool, "the buff is up: the engine flag left the tile at alpha 0")
+check(driving(), "the driver runs while a tile is engine driven")
+auraEvent(removalInfo())
+check(ui.flagGate == true, "a removal opened the gate")
 __combat = false
 fire("PLAYER_REGEN_ENABLED")        -- deliberately NO state push after combat
-check(c._alpha == 0, "alpha 0 on PLAYER_REGEN_ENABLED itself, got " .. tostring(c._alpha))
-check(c._enabled == true and c._shown == true, "and the container stays armed")
+check(tile.holder._alpha == 1 and not tile.holder._alphaFromBool, "alpha 1 on PLAYER_REGEN_ENABLED itself, got " .. tostring(tile.holder._alpha))
+check(not driving(), "the driver is stopped")
+check(ui.flagGate == false, "the gate is closed for the next fight")
+check(degraded("combathud_render") == 0, "no render failure")
 """)
 
-gcase("gunsight_regen_disabled_lights_the_cover_when_lockdown_starts_after_the_hud_said_inCombat", r"""
--- HudLogic can say inCombat (UnitAffectingCombat) a beat before InCombatLockdown is on: that push leaves the
--- cover at alpha 0, and nothing else re-renders when lockdown starts, so PLAYER_REGEN_DISABLED must
+gcase("gunsight_regen_disabled_starts_every_fight_with_a_closed_gate_and_keeps_the_held_warning", r"""
+-- HudLogic can say inCombat (UnitAffectingCombat) a beat before InCombatLockdown is on: the held warning is already up
+-- then, and the lockdown event must neither lose it nor leave a gate from the last fight open
 local ui, gs = gsBoot({ state = nextState({ inCombat = false }) })
-local c = FS.CombatHud.containers.player
+local tile = ui.buffTiles.demon_armor
 __combat = false
 push(nextState({ inCombat = true, buffsMissing = {} }))
-check(c._alpha == 0, "inCombat pushed with no lockdown yet: the cover stays at alpha 0, got " .. tostring(c._alpha))
+check(tile.holder._shown and tile.holder._alpha == 1, "the held warning shows as soon as the Hud says inCombat")
 __combat = true                      -- lockdown starts; deliberately NO state push
 fire("PLAYER_REGEN_DISABLED")
-check(c._alpha == 1, "alpha 1 on PLAYER_REGEN_DISABLED itself, got " .. tostring(c._alpha))
-check(ui.buffTiles.demon_armor.holder._shown, "the warning is up behind the cover")
-check(degraded("combathud_render") == 0 and degraded("combathud_event_PLAYER_REGEN_DISABLED") == 0, "no render or event failure")
--- an out of combat state at that moment (a stale event) must not light anything
-__combat = false
-push(nextState({ inCombat = false, buffsMissing = {} }))
+check(tile.holder._shown and tile.holder._alpha == 1, "and survives the lockdown event")
+setAura("demon_armor", true); tickFlags()
+check(tile.holder._alpha == 0, "the engine flag takes over in combat")
+auraEvent(removalInfo())
+check(ui.flagGate == true, "a removal opens the gate")
 fire("PLAYER_REGEN_DISABLED")
-check(c._alpha == 0, "no cover for an out of combat state, got " .. tostring(c._alpha))
+check(ui.flagGate == false, "the next fight begins with the gate closed")
+check(degraded("combathud_render") == 0 and degraded("combathud_event_PLAYER_REGEN_DISABLED") == 0, "no render or event failure")
 """)
 
-gcase("gunsight_buff_piece_shown_just_after_combat_keeps_the_cover_at_alpha_zero", r"""
--- the piece's onShow replays lastState, which can still say inCombat for ~0.2 s after the client left
--- combat: the cover is live only when the client is in combat NOW, and a throwing check is not live
+gcase("gunsight_a_stale_combat_state_replayed_after_the_fight_cannot_leave_a_tile_dark", r"""
 local ui, gs = gsBoot({ state = nextState({ inCombat = false }) })
-local c = FS.CombatHud.containers.player
+local tile = ui.buffTiles.demon_armor
 __combat = true
 push(nextState({ inCombat = true, buffsMissing = {} }))
-check(c._alpha == 1, "alpha 1 in combat with a tile to cover")
+setAura("demon_armor", true); tickFlags()
+check(tile.holder._alpha == 0, "dark while the engine says up")
 gs.SetPiece("buff", false, true)
-__combat = false                     -- combat ended; lastState still says inCombat = true (no push yet)
-gs.SetPiece("buff", true, true)      -- onShow -> Rerender replays lastState
-check(c._alpha == 0, "the buff piece shown out of combat leaves the cover at alpha 0, got " .. tostring(c._alpha))
--- the check itself throwing is not live either
-gs.SetPiece("buff", false, true)
-__combat = true; __combatThrows = true
-c._alpha, c.fsAlpha = 0, 0
-gs.SetPiece("buff", true, true)
-check(c._alpha == 0, "a throwing combat check fails closed to alpha 0, got " .. tostring(c._alpha))
-__combatThrows = false
+__combat = false
+fire("PLAYER_REGEN_ENABLED")
+gs.SetPiece("buff", true, true)      -- onShow replays lastState, which still says inCombat
+-- the replay draws the held tile from the plain flag; the next out of combat state puts it right
+push(nextState({ inCombat = false }))
+check(tile.holder._shown and tile.holder._alpha == 1 and not tile.holder._alphaFromBool, "the out of combat tile is at plain alpha 1")
+check(not driving(), "and nothing drives it")
+check(degraded("combathud_render") == 0, "no render failure")
 """)
 
-gcase("gunsight_arming_the_cover_writes_alpha_zero_before_any_state_arrives", r"""
--- a freshly armed cover is invisible without a Hud push: a live slot must never draw over a hidden tile
+gcase("gunsight_missing_at_the_pull_warns_and_the_engine_flag_darkens_it_when_the_buff_is_back", r"""
+local ui, gs = gsBoot({ state = nextState({ inCombat = false }) })   -- Demon Armor is missing at the pull
+local tile = ui.buffTiles.demon_armor
+check(ui.heldMissing.demon_armor == true, "setup: held missing")
+__combat = true
+push(nextState({ inCombat = true, buffsMissing = {} }))
+check(tile.holder._shown and ui.buffs:IsShown(), "the warning is up")
+check(tile.holder._alpha == 1 and tile.holder._alphaFromBool == true, "its alpha is resolved by the engine from the slot flag (aura down)")
+check(driving(), "the flag driver runs")
+-- the buff is cast: the flag goes up, the driver darkens the tile with no state push and no event
+setAura("demon_armor", true)
+tickFlags()
+check(tile.holder._alpha == 0 and tile.holder._shown, "aura up: alpha 0 (still shown, so the next change needs no layout)")
+-- inside the 0.1 s throttle the driver draws nothing
+setAura("demon_armor", false)
+tickFlags(0.01)
+check(tile.holder._alpha == 0, "inside the throttle nothing is redrawn")
+tickFlags(0.2)
+check(tile.holder._alpha == 1, "past the throttle the warning is back: the aura fell off again")
+-- a cast of the spell itself ends the held warning
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 696)
+check(not tile.holder._shown and not ui.buffs:IsShown(), "a recast clears the held warning outright")
+check(degraded("combathud_render") == 0, "no render failure")
+""")
+
+gcase("gunsight_up_at_the_pull_shows_nothing_until_an_aura_is_removed", r"""
+local ui, gs = gsBoot({ state = nextState({ inCombat = false, buffsMissing = {} }) })
+local tile = ui.buffTiles.demon_armor
+setAura("demon_armor", true)
+push(nextState({ inCombat = false, buffsMissing = {} }))      -- an agreeing look: the aura is up and the slot says so
+check(ui.heldMissing.demon_armor == false and tile.flagBad ~= true, "setup: held up, flag trusted")
+__combat = true
+push(nextState({ inCombat = true, buffsMissing = {} }))
+check(not tile.holder._shown and not ui.buffs:IsShown(), "no warning at the pull")
+check(not driving(), "nothing to drive yet")
+-- adds and refreshes are not removals
+auraEvent({ addedAuras = ST })
+auraEvent({ updatedAuraInstanceIDs = ST })
+check(ui.flagGate == false and not tile.holder._shown, "adds and refreshes open nothing")
+-- the buff is right clicked off: the engine drops the slot, then the removal arrives
+setAura("demon_armor", false)
+check(not tile.holder._shown and not driving(), "a flag change alone, with no removal seen, shows nothing and drives nothing")
+auraEvent(removalInfo())
+check(ui.flagGate == true, "the removal opened the gate")
+check(tile.holder._shown and ui.buffs:IsShown(), "the warning shows")
+check(tile.holder._alpha == 1 and tile.holder._alphaFromBool == true, "at alpha 1, resolved by the engine from the flag")
+check(driving(), "and the driver follows the flag from now on")
+-- recast: the event itself refreshes the flag
+setAura("demon_armor", true)
+auraEvent({ addedAuras = ST })
+check(tile.holder._alpha == 0, "the added aura darkens the tile on the event itself")
+setAura("demon_armor", false)
+tickFlags()
+check(tile.holder._alpha == 1, "and the driver brings it back when it falls off again")
+-- the next fight starts closed and quiet
+__combat = false
+fire("PLAYER_REGEN_ENABLED")
+__combat = true
+fire("PLAYER_REGEN_DISABLED")
+push(nextState({ inCombat = true, buffsMissing = {} }))
+check(ui.flagGate == false and not tile.holder._shown, "the next fight shows nothing again")
+check(degraded("combathud_render") == 0, "no render failure")
+""")
+
+gcase("gunsight_unit_aura_payloads_open_the_gate_only_on_a_possible_removal", r"""
+local ui, gs = gsBoot({ state = nextState({ inCombat = false, buffsMissing = {} }) })
+__combat = true
+local function opens(label, info, want)
+    fire("PLAYER_REGEN_DISABLED")
+    check(ui.flagGate == false, label .. ": setup, the gate starts closed")
+    auraEvent(info)
+    check((ui.flagGate == true) == want, label .. ": the gate " .. (want and "opens" or "stays closed"))
+end
+-- a removal, or a payload that cannot say: open
+opens("no payload", nil, true)
+opens("an empty payload", {}, true)
+opens("a secret payload", ST, true)
+opens("a secret boolean payload", SB, true)
+opens("a string payload", "x", true)
+opens("a secret removed list", { removedAuraInstanceIDs = ST }, true)
+opens("a plain removed list", { removedAuraInstanceIDs = { 5 } }, true)
+opens("a removed list beside added ones", { addedAuras = { {} }, removedAuraInstanceIDs = { 9 } }, true)
+opens("only empty lists", { removedAuraInstanceIDs = {}, addedAuras = {} }, true)
+-- adds and refreshes: closed
+opens("a plain added list", { addedAuras = { {} } }, false)
+opens("a secret added list", { addedAuras = ST }, false)
+opens("a secret updated list", { updatedAuraInstanceIDs = ST }, false)
+opens("a plain updated list", { updatedAuraInstanceIDs = { 4 } }, false)
+opens("adds and updates with a secret full update flag", { addedAuras = ST, updatedAuraInstanceIDs = ST, isFullUpdate = SB }, false)
+-- out of combat the event is ignored
+__combat = false
+fire("PLAYER_REGEN_ENABLED")
+auraEvent(removalInfo())
+check(ui.flagGate == false, "a removal out of combat opens nothing")
+check(degraded("combathud_render") == 0 and degraded("combathud_event_UNIT_AURA") == 0, "no render or event failure")
+""")
+
+gcase("gunsight_unit_aura_is_registered_for_the_player_unit_only", r"""
+local ui, gs = gsBoot({ state = nextState({ inCombat = false }) })
+local found
+for _, f in ipairs(__frames) do
+    if f._unitEvents and f._unitEvents.UNIT_AURA then found = f end
+end
+check(found, "UNIT_AURA is registered through RegisterUnitEvent")
+local units = found._unitEvents.UNIT_AURA
+check(#units == 1 and units[1] == "player", "for the player unit only, got " .. #units .. " unit(s)")
+""")
+
+gcase("gunsight_priest_fortitude_right_clicked_off_in_combat_shows_the_reminder", r"""
+local ui, gs = gsBoot({ state = mkState({ inCombat = false, buffsMissing = {} }) })
+local fort, inner = ui.buffTiles.fort, ui.buffTiles.inner_fire
+check(fort and fort.slot and inner and inner.slot, "both aura buffs have a slot (built out of combat)")
+setAura("fort", true); setAura("inner_fire", true)
+push(mkState({ inCombat = false, buffsMissing = {} }))          -- a readable look: both up, and the flags agree
+check(ui.heldMissing.fort == false and ui.heldMissing.inner_fire == false, "both held up")
+__combat = true
+push(mkState({ inCombat = true, buffsMissing = {} }))
+check(not fort.holder._shown and not inner.holder._shown and not ui.buffs:IsShown(), "no reminder while both are up")
+-- Fortitude is right clicked off in the fight
+setAura("fort", false)
+auraEvent(removalInfo())
+check(fort.holder._shown and fort.holder._alpha == 1, "Fortitude is missing: its reminder shows")
+check(inner.holder._shown and inner.holder._alpha == 0, "Inner Fire is still up: its tile stays dark")
+-- recast
+setAura("fort", true)
+tickFlags()
+check(fort.holder._alpha == 0, "Fortitude back: dark again")
+-- now Inner Fire falls off
+setAura("inner_fire", false)
+tickFlags()
+check(inner.holder._alpha == 1 and fort.holder._alpha == 0, "Inner Fire missing: its reminder shows, Fortitude's stays dark")
+check(degraded("combathud_render") == 0, "no render failure")
+""", "PRIEST")
+
+gcase("gunsight_a_slot_that_disagrees_with_the_aura_read_is_not_trusted", r"""
+local ui, gs = gsBoot({ state = nextState({ inCombat = false, buffsMissing = {} }) })
+local tile = ui.buffTiles.demon_armor
+-- the aura read says Demon Armor is up but the slot flag says no aura: the slot's ids do not match this aura
+setAura("demon_armor", false)
+push(nextState({ inCombat = false, buffsMissing = {} }))
+check(tile.flagBad == true, "the disagreement is recorded")
+__combat = true
+push(nextState({ inCombat = true, buffsMissing = {} }))
+auraEvent(removalInfo())
+check(not tile.holder._shown, "an untrusted flag opens no warning for a buff that was up")
+-- the slot catches up and the look agrees again: trusted again
+__combat = false
+fire("PLAYER_REGEN_ENABLED")
+setAura("demon_armor", true)
+push(nextState({ inCombat = false, buffsMissing = {} }))
+check(tile.flagBad == false, "an agreeing look trusts the flag again")
+-- missing per the read but the slot says up: untrusted, so the held warning stays at plain full alpha
+push(nextState({ inCombat = false }))
+check(tile.flagBad == true, "missing per the read, up per the slot: untrusted")
+__combat = true
+push(nextState({ inCombat = true, buffsMissing = {} }))
+check(tile.holder._shown and tile.holder._alpha == 1 and not tile.holder._alphaFromBool, "the held warning is drawn at plain alpha 1")
+check(not driving(), "and nothing drives it")
+-- an unreadable (secret) flag out of combat changes no verdict
+__combat = false
+fire("PLAYER_REGEN_ENABLED")
+tile.slot.IsShown = function() return SB end
+tile.flagBad = false
+push(nextState({ inCombat = false }))
+check(tile.flagBad == false, "an unreadable flag leaves the verdict alone")
+check(degraded("combathud_render") == 0, "no render failure")
+""")
+
+gcase("gunsight_without_the_engine_setter_the_pull_verdict_stands", r"""
+local ui, gs = gsBoot({ state = mkState({ inCombat = false, buffsMissing = { { key = "inner_fire" } } }) })
+local fort, inner = ui.buffTiles.fort, ui.buffTiles.inner_fire
+setAura("fort", true)
+push(mkState({ inCombat = false, buffsMissing = { { key = "inner_fire" } } }))   -- Fortitude up, Inner Fire missing at the pull
+-- this client has no SetAlphaFromBoolean on the tiles
+fort.holder.SetAlphaFromBoolean = false
+inner.holder.SetAlphaFromBoolean = false
+__combat = true
+push(mkState({ inCombat = true, buffsMissing = {} }))
+check(inner.holder._shown and inner.holder._alpha == 1 and not inner.holder._alphaFromBool, "the pull verdict still warns, at plain alpha 1")
+check(not fort.holder._shown, "and the buff that was up stays silent")
+auraEvent(removalInfo())
+check(not fort.holder._shown, "a removal shows nothing without the engine flag")
+check(not driving(), "no driver")
+check(degraded("combathud_render") == 0, "no render failure")
+""", "PRIEST")
+
+gcase("gunsight_a_throwing_engine_setter_fails_closed_for_the_unheld_and_open_for_the_held", r"""
+local ui, gs = gsBoot({ state = mkState({ inCombat = false, buffsMissing = { { key = "inner_fire" } } }) })
+local fort, inner = ui.buffTiles.fort, ui.buffTiles.inner_fire
+setAura("fort", true)
+push(mkState({ inCombat = false, buffsMissing = { { key = "inner_fire" } } }))
+local boom = function() error("boom: SetAlphaFromBoolean") end
+fort.holder.SetAlphaFromBoolean = boom
+inner.holder.SetAlphaFromBoolean = boom
+__combat = true
+push(mkState({ inCombat = true, buffsMissing = {} }))
+check(inner.holder._shown and inner.holder._alpha == 1, "a held warning is never lost to a failing setter")
+auraEvent(removalInfo())
+check(not fort.holder._shown or fort.holder._alpha == 0, "a warning only the flag could justify is not drawn when the flag cannot be used")
+check(degraded("combathud_render") == 0, "no render failure")
+""", "PRIEST")
+
+gcase("gunsight_hide_all_and_disable_drop_the_gate_the_alphas_and_the_driver", r"""
+local ui, gs = gsBoot({ state = nextState({ inCombat = false }) })
+local tile = ui.buffTiles.demon_armor
+__combat = true
+push(nextState({ inCombat = true, buffsMissing = {} }))
+setAura("demon_armor", true); tickFlags()
+auraEvent(removalInfo())
+check(driving() and ui.flagGate == true and tile.holder._alpha == 0, "setup: driven, gate open, dark")
+push(mkState({ active = false }))        -- HideAll
+check(not driving() and ui.flagGate == false and tile.holder._alpha == 1, "HideAll: driver stopped, gate closed, alpha restored")
+push(nextState({ inCombat = true, buffsMissing = {} }))
+auraEvent(removalInfo())
+check(driving() and ui.flagGate == true, "setup again")
+FS.CombatHud.Disable()
+check(not driving() and ui.flagGate == false and tile.holder._alpha == 1, "Disable: driver stopped, gate closed, alpha restored")
+auraEvent(removalInfo())
+check(ui.flagGate == false, "a disabled HUD ignores UNIT_AURA")
+check(FS.CombatHud.containers.player._alpha == 0, "the container is still invisible")
+""")
+
+gcase("gunsight_arming_the_container_writes_alpha_zero_before_any_state_arrives", r"""
+-- a freshly armed container is invisible without a Hud push: a live slot must never draw
 local ui, gs = gsBoot({ state = nextState({ inCombat = false }) })
 local c = FS.CombatHud.containers.player
 -- alpha 1 with a stale cache saying 0: only arming itself (not the cached SetCover) can put it right
@@ -3495,8 +3748,8 @@ check(tile.pulse.playing and tile.glowPulse.playing, "piece back on: both pulses
 check(degraded("combathud_render") == 0 and degraded("gunsight_hook_buff_onShow") == 0, "no render or hook failure")
 """)
 
-gcase("gunsight_without_an_armed_cover_combat_shows_only_what_the_hud_reports", r"""
--- the engine will not enable the container: no cover can ever appear, so a warning drawn in combat
+gcase("gunsight_without_an_armed_container_combat_shows_only_what_the_hud_reports", r"""
+-- the engine will not enable the container: its slots never carry a flag, so a warning drawn in combat
 -- would be a permanent false alarm and must not be
 __acRefuse = true
 local ui, gs = gsBoot({ state = nextState({ inCombat = false }) })
@@ -3504,15 +3757,15 @@ local c = FS.CombatHud.containers.player
 check(c and c._enabled ~= true, "the container could not be armed")
 __combat = true
 push(nextState({ inCombat = true, buffsMissing = {} }))
-check(ui.buffTiles.demon_armor and not ui.buffTiles.demon_armor.holder._shown, "no warning in combat without a cover to occlude it")
+check(ui.buffTiles.demon_armor and not ui.buffTiles.demon_armor.holder._shown, "no warning in combat without an armed container to carry the flag")
 check(c._alpha == 0, "and the container stays invisible")
--- the engine takes it at the end of combat: the next fight has its covers
+-- the engine takes it at the end of combat: the next fight has its flags
 __acRefuse = false; __combat = false
 fire("PLAYER_REGEN_ENABLED")
 check(c._enabled == true and c._shown == true, "armed at the end of combat")
 __combat = true
 push(nextState({ inCombat = true, buffsMissing = {} }))
-check(ui.buffTiles.demon_armor.holder._shown and c._alpha == 1, "the next fight shows the warning behind its cover")
+check(ui.buffTiles.demon_armor.holder._shown and c._alpha == 0, "the next fight shows the warning, and the container stays invisible")
 """)
 
 gcase("gunsight_home_glyph_carries_a_baked_glow_texture_and_re_rendering_builds_nothing", r"""
@@ -3598,6 +3851,23 @@ check(tile and size(tile.abbr) == 8, "Stack A buff abbreviation size 8")
 """)
 
 
+
+case("stack_a_never_drives_an_engine_flag")(r"""
+standard()
+__state = mkState({ inCombat = false, row = lockRow(), buffsMissing = { { key = "demon_armor" } } })
+login()
+local ui = FS.CombatHud.ui
+push(mkState({ inCombat = false, row = lockRow(), buffsMissing = { { key = "demon_armor" } } }))
+__combat = true
+push(mkState({ inCombat = true, row = lockRow(), buffsMissing = {} }))
+fire("UNIT_AURA", "player", { removedAuraInstanceIDs = ST, isFullUpdate = SB })
+fire("UNIT_AURA", "player", nil)
+local t = ui.buffTiles.demon_armor
+check(t.holder:IsShown(), "the held warning shows as before")
+check(t.holder._alpha == 1 and t.holder._alphaFromBool == nil, "at plain alpha 1")
+check(ui.flagDriver == nil and not ui.flagGate, "no driver and no gate in the Stack A view")
+check(FS.CombatHud.containers.player._enabled == true, "the Stack A container is still switched on in combat")
+""")
 
 # ---------------------------------------------------------------------------------------
 # Files
