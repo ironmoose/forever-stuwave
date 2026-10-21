@@ -10,15 +10,13 @@ drifting. The checks pin:
   * the seam: both modules register with the areas, the dot piece is NOT registered here any more, nothing
     is built before the areas call build, and a missing FS.GunsightAreas loads silently;
   * Horizontal: at most five rows at a 24.4 px pitch from the area top (the upper area 8 px down, the lower 2 px
-    up), each an icon chip, the time ("13s" above 3 s, "2.6s" below), a 0 to 30 s drain bar that turns amber at
-    3 s or less, "xN" for stacks, a dim "--" row for an absent debuff, and the ruler rules and ticks;
+    up), each an icon chip, the time ("13s" above 3 s, "2.6" below, never wider than "13s" so it stops short of the bar), a 0 to 30 s drain bar that turns amber at
+    3 s or less, "xN" for stacks, and the ruler rules and ticks; a debuff that runs out leaves its row, whatever the
+    class, and the rows below close up;
   * Vertical: the existing time axis compressed into 112 px (3.73 px a second) with its axis 26 px right of the
     target cast bar, ticks and labels inside, the amber band, four lanes, a header, a chip per debuff;
-  * the in-combat rule: the absent row or chip shows ONLY in combat (a file-local flag from the REGEN events,
-    seeded from InCombatLockdown() OR UnitAffectingCombat(), one-way self heal on a push), a live one is never
-    touched, and a visibility write happens only on a change;
-  * motion: one OnUpdate per module, only while a row is live, a row turning absent by itself, a white pop for
-    0.35 s on a (re)apply, and nothing read from any aura API.
+  * motion: one OnUpdate per module, only while a row is live, a row leaving by itself when it runs out, a white
+    pop for 0.35 s on a (re)apply, and nothing read from any aura API.
 
 The mock is strict (a widget method it does not define fails as a nil call). Theme and the FrameHelpers aura
 tile helper are STUBS here, and FS.GunsightAreas and FS.TargetDebuffs are fakes with the real API (their own
@@ -53,6 +51,7 @@ CONFIG = ADDON / "Core/Config.lua"
 AREAS = ADDON / "Modules/CombatHud/GunsightAreas.lua"
 TOC = ADDON / "forever-stuwave.toc"
 MOCKUP = HERE.parent / "mockups" / "gunsight-modules-concepts-v7-2026-10-08.html"
+MONO_FONT = ADDON / "Media/Fonts/MononokiNerdFontMono-Bold.ttf"
 
 
 def _load_gunsight_harness():
@@ -60,6 +59,14 @@ def _load_gunsight_harness():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def mono_advances() -> dict:
+    """Advance of every letter, digit and the few marks a row time can use, in em, read from the font file the time is set in."""
+    from fontTools.ttLib import TTFont
+    font = TTFont(str(MONO_FONT))
+    cmap, hmtx, em = font.getBestCmap(), font["hmtx"], font["head"].unitsPerEm
+    return {chr(c): hmtx[cmap[c]][0] / em for c in range(32, 127) if c in cmap and (chr(c).isalnum() or chr(c) in ".?-~ ")}
 
 
 def _m(pattern: str, text: str, what: str) -> re.Match:
@@ -79,8 +86,6 @@ def mockup_v7() -> dict:
     area_x, area_w = (int(v) for v in _m(r'<rect x="(\d+)" y="\'\+y\+\'" width="(\d+)"', src, "area x and width").groups())
     chip_x, chip_dy, chip = (int(v) for v in _m(r"chipIcon\((\d+),cy-(\d+),(\d+),d,abs\)", src, "H chip").groups())
     stack_x, stack_size = (int(v) for v in _m(r"txt\((\d+),cy\+4,'x'\+d\.n,(\d+),C\.white\)", src, "H stacks").groups())
-    abs_x, abs_size = (int(v) for v in _m(r"txt\((\d+),cy\+4\.5,'--',(\d+),C\.muted,\{op:\.7\}\)", src, "H absent dash").groups())
-    abs_bar_a = float(_m(r"rect\(\d+,cy-2,\d+,4,C\.muted,(\.\d+)\)", src, "H absent bar").group(1))
     time_x, tenths, time_size = (int(v) for v in _m(
         r"txt\((\d+),cy\+4\.5,\(d\.rem<(\d+)\?d\.rem\.toFixed\(1\):Math\.round\(d\.rem\)\)\+'s',(\d+),band\?C\.amber:C\.white\)", src, "H time").groups())
     bar_x, bar_w, bar_secs = (int(v) for v in _m(
@@ -109,14 +114,13 @@ def mockup_v7() -> dict:
     refresh_dx, refresh_size = (int(v) for v in _m(r"txt\(END\+(\d+),\(yb\+AXB\)/2\+3,'REFRESH',(\d+),", src, "V REFRESH").groups())
     v_chip = int(_m(r"ch\(x-12,y-12,(\d+),\d+,5\)", src, "V chip").group(1))
     css = {n: v.lower() for n, v in re.findall(r"\b(fg|muted|white|violet|amber|pink):'(#[0-9a-fA-F]{6})'", src)}
-    for need in ("fg", "muted", "white", "violet", "amber"):
+    for need in ("fg", "white", "violet", "amber"):
         if need not in css:
             sys.exit(f"mockup: colour token {need} missing")
     return dict(
         TOP=top, TBOT=tbot, PITCH=(tbot - top) / pdiv, HZ=hz,
         AREA_X=area_x, AREA_W=area_w, AREA_H=area_h, UPPER_Y=upper_y, LOWER_Y=lower_y,
         CHIP_X=chip_x, CHIP_DY=chip_dy, CHIP=chip, STACK_X=stack_x, STACK_SIZE=stack_size,
-        ABS_X=abs_x, ABS_SIZE=abs_size, ABS_BAR_A=abs_bar_a,
         TIME_X=time_x, TENTHS=tenths, TIME_SIZE=time_size, BAR_X=bar_x, BAR_W=bar_w, BAR_H=bar_h, BAR_SECS=bar_secs,
         BAR_BG_A=bar_bg_a, BAND_S=band_s, SEP_X0=sep_x0, SEP_X1=sep_x1, SEP_A=sep_a, SEP_HZ=sep_hz,
         TICK_X0=tick_x0, TICK_X1=tick_x1, TICK_A=tick_a,
@@ -161,17 +165,12 @@ end
 -- The real ordering: PLAYER_REGEN_DISABLED fires just BEFORE lockdown begins, so InCombatLockdown() reads
 -- false for the whole dispatch of that event and true afterwards; PLAYER_REGEN_ENABLED fires with lockdown
 -- already off. IN_COMBAT is the truth after the event; IN_REGEN_DISABLED is true only during that dispatch.
--- UnitAffectingCombat flips with the fight (AFFECTING, when set, overrides it to model a reload).
 IN_REGEN_DISABLED = false
-AFFECTING = nil
 function InCombatLockdown()
     if IN_REGEN_DISABLED then return false end
     return IN_COMBAT
 end
-function UnitAffectingCombat()
-    if AFFECTING ~= nil then return AFFECTING end
-    return IN_COMBAT
-end
+function UnitAffectingCombat() return IN_COMBAT end
 function GetTime() return NOW end
 function check(c, msg) if not c then error(msg or "check failed", 2) end end
 function near(a, b, msg, eps)
@@ -436,7 +435,7 @@ function resetWorld()
     wipeList(SKIN_CALLS); wipeList(AURA_TOUCHED)
     for k in pairs(DEGRADED) do DEGRADED[k] = nil end
     for k in pairs(PLAYING) do PLAYING[k] = nil end
-    STATE, IN_COMBAT, IN_REGEN_DISABLED, AFFECTING = nil, false, false, nil
+    STATE, IN_COMBAT, IN_REGEN_DISABLED = nil, false, false
     FS = {}
     FS.LogDegradeOnce = function(key, msg) DEGRADED[key] = msg end
 end
@@ -549,7 +548,6 @@ local function boot(opts)
     resetWorld()
     MODULES, PIECE_CALLS, TDSUBS, TDLIST, TDEPOCH = {}, {}, {}, {}, 1
     IN_COMBAT = opts.combat ~= false
-    AFFECTING = opts.affecting
     SetScreen(opts.height or 1440)
     ForeverSTUwaveDB = opts.db or {}
     FS.IsSecret = function(v) return SECRET_FN(v) end
@@ -596,15 +594,12 @@ local function mount(id, area, rect)
 end
 
 local nid = 0
--- rem: seconds left, 0 = absent (expiry in the past), nil = unknown duration. An entry is a ledger or scan row (it
--- leaves when it runs out) unless o.recast says it is a Hud DoT row, the recast cue that stays as a dim row; an
--- absent entry (rem <= 0) is always a Hud row, as the service's is.
+-- rem: seconds left, 0 = already run out (expiry in the past), nil = unknown duration.
 local function ent(name, rem, o)
     o = o or {}
     nid = nid + 1
     local e = { name = name, id = o.id, icon = (not o.noicon) and (9000 + nid) or nil, count = o.count or 1, order = nid, duration = o.duration or 18 }
     if rem == nil then e.expires = nil elseif rem <= 0 then e.expires = 0 else e.expires = NOW + rem end
-    if o.recast or (rem ~= nil and rem <= 0) then e.recast = true end
     return e
 end
 local function pushList(list, epoch)
@@ -626,7 +621,7 @@ eq(H.TOP_UPPER, MU.TOP - MU.UPPER_Y, "upper row top"); eq(H.TOP_LOWER, MU.HZ - M
 eq(H.CHIP, MU.CHIP, "chip size"); eq(H.CHIP_DX, MU.CHIP_X - MU.AREA_X, "chip x")
 eq(H.TIME_DX, MU.TIME_X - MU.AREA_X, "time x"); eq(H.TIME_SIZE, MU.TIME_SIZE, "time font"); eq(H.TENTHS_S, MU.TENTHS, "tenths below")
 eq(H.BAR_DX, MU.BAR_X - MU.AREA_X, "bar x"); eq(H.BAR_W, MU.BAR_W, "bar width"); eq(H.BAR_H, MU.BAR_H, "bar height")
-eq(H.BAR_BG_A, MU.BAR_BG_A, "bar background alpha"); eq(H.ABSENT_BAR_A, MU.ABS_BAR_A, "absent bar alpha")
+eq(H.BAR_BG_A, MU.BAR_BG_A, "bar background alpha")
 eq(H.STACK_DX, MU.STACK_X - MU.AREA_X, "stack x"); eq(H.STACK_SIZE, MU.STACK_SIZE, "stack font")
 eq(H.SEP_W, MU.SEP_X1 - MU.SEP_X0, "rule width"); eq(H.SEP_A, MU.SEP_A, "rule alpha"); eq(H.SEP_HZ_A, MU.SEP_HZ, "horizon rule alpha")
 eq(H.TICK_DX, MU.TICK_X0 - MU.AREA_X, "tick x"); eq(H.TICK_A, MU.TICK_A, "tick alpha")
@@ -645,7 +640,7 @@ eq(V.BAND_DASH[1], MU.V_BAND_DASH[1], "band dash"); eq(V.BAND_DASH[2], MU.V_BAND
 eq(V.CHIP, MU.V_CHIP, "vertical chip size")
 near(V.PX_PER_S, 112 / 30, "3.7 px a second", 1e-6)
 local function rgb(hex) return { tonumber(hex:sub(2, 3), 16) / 255, tonumber(hex:sub(4, 5), 16) / 255, tonumber(hex:sub(6, 7), 16) / 255 } end
-for _, name in ipairs({ "fg", "muted", "white", "violet", "amber" }) do colorIs(C.COLORS[name], rgb(MU.CSS[name]), "colour " .. name) end
+for _, name in ipairs({ "fg", "white", "violet", "amber" }) do colorIs(C.COLORS[name], rgb(MU.CSS[name]), "colour " .. name) end
 """)
 
 case("registers_two_modules_with_the_seam_and_no_dot_piece")(r"""
@@ -689,7 +684,7 @@ local m = mount("debuffsH", "upper")
 local list = { ent("Rend", 9), ent("Deep Wounds", 12), ent("Thunder Clap", 2.8), ent("Sunder Armor", 22, { count = 5 }), ent("Demoralizing Shout", 26) }
 pushList(list)
 check(#m.rows == 5, "five rows are built, got " .. #m.rows)
-local want = { "9s", "12s", "2.8s", "22s", "26s" }
+local want = { "9s", "12s", "2.8", "22s", "26s" }
 local rem = { 9, 12, 2.8, 22, 26 }
 for j = 1, 5 do
     local row = m.rows[j]
@@ -751,11 +746,54 @@ local m = mount("debuffsH", "upper")
 local function textFor(rem) pushList({ ent("Rend", rem) }); return m.rows[1].time.text end
 check(textFor(13.4) == "13s", "13.4 reads 13s, got " .. textFor(13.4))
 check(textFor(13.6) == "14s", "13.6 reads 14s, got " .. textFor(13.6))
-check(textFor(2.6) == "2.6s", "2.6 reads 2.6s, got " .. textFor(2.6))
+check(textFor(2.6) == "2.6", "2.6 reads 2.6, got " .. textFor(2.6))
 check(textFor(3) == "3s", "exactly 3 reads 3s, got " .. textFor(3))
-check(textFor(0.4) == "0.4s", "0.4 reads 0.4s, got " .. textFor(0.4))
+check(textFor(0.4) == "0.4", "0.4 reads 0.4, got " .. textFor(0.4))
 check(textFor(45) == "45s", "45 reads 45s, got " .. textFor(45))
 check(textFor(130) == "2m", "130 reads 2m, got " .. textFor(130))
+""")
+
+case("no_time_text_reaches_the_drain_bar_at_any_value")(r"""
+local D = boot()
+local H = D.H
+local m = mount("debuffsH", "upper")
+local GAP = 3                          -- image px kept clear between the text and the bar
+local function width(t)
+    local w = 0
+    for i = 1, #t do
+        local a = ADV[t:sub(i, i)]
+        check(a, "no glyph advance for " .. t:sub(i, i))
+        w = w + a * H.TIME_SIZE
+    end
+    return w
+end
+local widest, widestText = 0, nil
+local function look(rem)
+    pushList({ ent("Rend", rem, { duration = 4000 }) })
+    local t = m.rows[1].time.text
+    check(t and t ~= "", "a time text at " .. rem)
+    local w = width(t)
+    if w > widest then widest, widestText = w, t end
+end
+for i = 1, 70 do look(i * 0.05) end                -- every tenths string, up to the switch to seconds
+for i = 1, 200 do look(3 + i * 0.5) end            -- whole seconds up to 103 s
+for i = 1, 570 do look(100 + i * 7) end            -- minutes up to the hour
+pushList({ ent("Rend", nil) })
+check(m.rows[1].time.text == "?", "the unknown duration reads ?")
+check(width("?") <= H.BAR_DX - H.TIME_DX - GAP, "and fits")
+local room = H.BAR_DX - H.TIME_DX - GAP
+check(widest <= room, string.format("%q is %.1f px wide from x %d, the bar starts at %d and %d px stay clear: only %.1f px fit",
+    tostring(widestText), widest, H.TIME_DX, H.BAR_DX, GAP, room))
+""")
+
+case("an_entry_that_has_run_out_takes_no_row_and_leaves_no_dim_cue")(r"""
+boot({ combat = true })
+local m = mount("debuffsH", "upper")
+pushList({ ent("Shadow Word: Pain", 0), ent("Mind Flay", 7) })
+check(m.rows[1].key == "Mind Flay" and m.rows[1].mode == "live", "the live one takes the first row, got " .. tostring(m.rows[1].key))
+check(m.rows[2].mode == "off" and not isVisible(m.rows[2].frame), "nothing is drawn for the one that ran out, in combat too")
+pushList({ ent("Shadow Word: Pain", 0) })
+check(m.rows[1].mode == "off" and not m.body:IsShown() and onUpdateFrames() == 0, "alone, it draws nothing and nothing ticks")
 """)
 
 case("the_drain_bar_is_a_share_of_the_entry_duration_and_turns_amber_at_three")(r"""
@@ -880,33 +918,14 @@ pushList({ ent("Rend", 6, { duration = 24 }) }, 3)
 near3(fill(), MU.BAR_W * 6 / 24, "a known length on the new target is not replaced by the time left")
 """)
 
-case("an_absent_row_is_dim_with_dashes_and_no_fill")(r"""
-local D = boot()
-local C = D.D.COLORS
-local m = mount("debuffsH", "upper")
-pushList({ ent("Rend", 0), ent("Deep Wounds", 9) })
-local row = m.rows[1]
-check(row.mode == "absent", "mode absent, got " .. tostring(row.mode))
-check(row.time.text == "--", "the time reads --, got " .. tostring(row.time.text))
-colorIs(row.time.textColor, C.muted, "dash colour"); near3(row.time.textColor[4], 0.7, "dash alpha")
-check(not row.fillTex:IsShown(), "no drain fill")
-colorIs(row.barBg.color, C.muted, "bar background colour"); near3(row.barBg.color[4], MU.ABS_BAR_A, "bar background alpha")
-check(row.chip.frame.icon.desaturated == true, "grey icon")
-colorIs(row.chip.frame.fsSkin.border.ring.vertex, mix(C.muted, { 1, 1, 1 }, 0.25), "grey ring")
-near3(row.chip.frame.fsSkin.glow.vertex[4], 0, "no glow")
-check(isVisible(row.frame), "in combat the row shows")
-local _, cy = imgCenter(row.chip.frame)
-near3(cy, rowCenterY(MU.TOP, 1), "an absent row keeps its row")
-""")
-
-case("an_unknown_duration_shows_the_icon_and_dashes_in_and_out_of_combat")(r"""
+case("an_unknown_duration_shows_the_icon_and_a_question_mark_in_and_out_of_combat")(r"""
 local D = boot({ combat = false })
 local m = mount("debuffsH", "upper")
 pushList({ ent("Thunder Clap", nil) })
 local row = m.rows[1]
 check(row.mode == "unknown", "mode unknown, got " .. tostring(row.mode))
-check(isVisible(row.frame), "an unknown row is shown out of combat (it is not the recast cue)")
-check(row.time.text == "?", "an unknown duration reads ?, not the absent row's --, got " .. tostring(row.time.text))
+check(isVisible(row.frame), "an unknown row is shown out of combat")
+check(row.time.text == "?", "an unknown duration reads ?, got " .. tostring(row.time.text))
 check(row.chip.frame.icon.desaturated == false and row.chip.frame.icon.path ~= nil, "the icon is drawn normally")
 check(not row.fillTex:IsShown(), "no fill without a duration")
 check(not row.barBg:IsShown(), "no empty bar track for a duration nobody knows")
@@ -948,7 +967,7 @@ end
 case("rows_slide_on_one_onupdate_and_the_driver_stops_when_none_is_live")(r"""
 boot()
 local m, frame = mount("debuffsH", "upper")
-pushList({ ent("Rend", 9, { recast = true }), ent("Deep Wounds", 12, { recast = true }) })
+pushList({ ent("Rend", 9), ent("Deep Wounds", 12) })
 check(onUpdateFrames() == 1 and frame.scripts.OnUpdate, "one OnUpdate, on the module frame")
 tick(1.0)
 check(m.rows[1].time.text == "8s" and m.rows[2].time.text == "11s", "times follow GetTime, got " .. m.rows[1].time.text .. " " .. m.rows[2].time.text)
@@ -958,11 +977,10 @@ local writes = m.rows[1].fillTex.setPointCalls
 tick(0.001)
 check(m.rows[1].fillTex.setPointCalls == writes, "a steady frame re-anchors nothing")
 tick(8)                                -- Rend runs out at 9 s (1.001 s are gone already)
-check(m.rows[1].mode == "absent" and m.rows[1].time.text == "--", "an expiring recast row turns absent by itself")
-check(m.rows[2].mode == "live", "the other keeps counting")
+check(m.rows[1].key == "Deep Wounds" and m.rows[1].mode == "live" and m.rows[2].mode == "off", "an expiring row leaves by itself and the other moves up, still counting")
 check(onUpdateFrames() == 1, "still one OnUpdate")
 tick(5)
-check(m.rows[2].mode == "absent" and onUpdateFrames() == 0, "the driver is gone with the last live row")
+check(m.rows[1].mode == "off" and onUpdateFrames() == 0, "the driver is gone with the last live row")
 pushList({})
 check(onUpdateFrames() == 0, "an empty list runs nothing")
 """)
@@ -974,7 +992,7 @@ pushList({ ent("Flame Shock", 5, { duration = 12 }), ent("Frost Shock", 8, { dur
 check(m.rows[1].key == "Flame Shock" and m.rows[2].key == "Frost Shock", "setup: both rows live")
 tick(5.1)                              -- Flame Shock ran out with no push; Frost Shock has 2.9 s left
 check(m.rows[1].key == "Frost Shock" and m.rows[1].mode == "live", "the row below closes up, got " .. tostring(m.rows[1].key) .. " " .. m.rows[1].mode)
-check(m.rows[1].time.text == "2.9s", "and counts its own time, got " .. tostring(m.rows[1].time.text))
+check(m.rows[1].time.text == "2.9", "and counts its own time, got " .. tostring(m.rows[1].time.text))
 local _, _, w = imgRect(m.rows[1].fillTex)
 near3(w, MU.BAR_W * 2.9 / 8, "its bar keeps its own length, not a fresh full bar")
 check(m.rows[2].mode == "off" and not isVisible(m.rows[2].frame), "the freed row is empty and hidden: no dim '--' row")
@@ -1001,16 +1019,6 @@ pushList({ old, ent("A", 10), ent("B", 11), ent("C", 12), ent("D", 13), ent("E",
 check(m.rows[1].key == "A" and m.rows[5].key == "E" and m.rows[5].mode == "live", "five live rows, the expired one skipped, got " .. tostring(m.rows[1].key) .. " " .. tostring(m.rows[5].key))
 """)
 
-case("a_hud_recast_row_stays_as_the_dim_cue_while_a_ledger_row_beside_it_leaves")(r"""
-boot({ combat = true })
-local m = mount("debuffsH", "upper")
-pushList({ ent("Corruption", 4, { recast = true }), ent("Flame Shock", 4, { duration = 12 }) })
-tick(5)
-check(m.rows[1].key == "Corruption" and m.rows[1].mode == "absent" and m.rows[1].time.text == "--" and isVisible(m.rows[1].frame), "the Hud row turns into the dim cue")
-check(m.rows[2].mode == "off" and not isVisible(m.rows[2].frame), "the ledger row beside it is gone")
-check(onUpdateFrames() == 0, "nothing is live, so nothing ticks")
-""")
-
 case("the_band_pulses_and_a_row_enters_it_by_itself")(r"""
 local D = boot()
 local C = D.D.COLORS
@@ -1021,7 +1029,7 @@ colorIs(row.time.textColor, C.white, "outside the band")
 tick(0.5)
 colorIs(row.time.textColor, C.amber, "inside the band after 0.5 s")
 colorIs(row.fillTex.color, C.amber, "fill turned amber with no push")
-check(row.time.text == "2.9s", "tenths below three seconds, got " .. tostring(row.time.text))
+check(row.time.text == "2.9", "tenths below three seconds, got " .. tostring(row.time.text))
 """)
 
 case("a_pop_flashes_on_apply_and_reapply_and_not_on_a_target_switch")(r"""
@@ -1030,7 +1038,7 @@ local C = D.D.COLORS
 local m = mount("debuffsH", "upper")
 pushList({ ent("Rend", 12) }, 1)
 local row = m.rows[1]
-check(not row.chip.pop:IsShown(), "a debuff already up when first seen does not pop")
+check(not row.chip.pop:IsShown(), "a debuff already up when first seen (12 s of its 18) does not pop")
 tick(5)
 pushList({ ent("Rend", 17.9) }, 1)
 check(row.chip.pop:IsShown(), "a reapply pops")
@@ -1043,99 +1051,15 @@ local e = ent("Rend", 12.1 - 0.0); e.expires = row.expires + 0.1
 pushList({ e }, 1)
 check(not row.chip.pop:IsShown(), "a 0.1 s shift is not a reapply")
 pushList({ ent("Rend", 0) }, 1)
+check(row.mode == "off", "setup: the debuff ran out and its row left")
 pushList({ ent("Rend", 18) }, 1)
-check(row.chip.pop:IsShown(), "absent to live on the same target pops")
+check(row.chip.pop:IsShown(), "recast after it ran out, on the same target, pops")
 pushList({ ent("Rend", 9) }, 2)
 check(not row.chip.pop:IsShown(), "a new target's debuff that was already up does not pop")
 pushList({ ent("Rend", 18, { duration = 18 }) }, 3)
 check(row.chip.pop:IsShown(), "a fresh apply on a new target (remaining == duration) pops")
-pushList({ ent("Sunder Armor", 18) }, 3)
-check(not row.chip.pop:IsShown(), "another debuff in the same row is not a reapply")
-""")
-
-case("the_absent_cue_shows_only_in_combat_and_follows_the_events")(r"""
-boot({ combat = false })
-local m = mount("debuffsH", "upper")
-pushList({ ent("Rend", 0), ent("Deep Wounds", 10) })
-local a, b = m.rows[1], m.rows[2]
-check(a.mode == "absent" and not isVisible(a.frame), "out of combat the absent row is hidden")
-check(isVisible(b.frame) and b.mode == "live", "the live row is drawn")
-check(onUpdateFrames() == 1, "one OnUpdate, for the live row only")
-IN_COMBAT = true
-fire("PLAYER_REGEN_DISABLED")
-check(isVisible(a.frame), "PLAYER_REGEN_DISABLED shows it with no push, even though lockdown reads false in the dispatch")
-local w = a.frame.writes
-fire("PLAYER_REGEN_DISABLED"); fire("PLAYER_REGEN_DISABLED")
-check(a.frame.writes == w, "a steady state writes no visibility, got " .. (a.frame.writes - w))
-IN_COMBAT = false
-fire("PLAYER_REGEN_ENABLED")
-check(not isVisible(a.frame) and a.mode == "absent", "PLAYER_REGEN_ENABLED hides it again: hidden, not dropped")
-check(isVisible(b.frame), "the live row never changes")
-pushList({ ent("Rend", 0), ent("Deep Wounds", 10) })
-check(not isVisible(a.frame), "a push out of combat keeps it hidden")
-""")
-
-case("lockdown_lagging_the_regen_enabled_event_does_not_keep_the_cue")(r"""
-boot({ combat = true })
-local m = mount("debuffsH", "upper")
-pushList({ ent("Rend", 0) })
-check(isVisible(m.rows[1].frame), "setup: shown in combat")
-InCombatLockdown = function() return true end
-fire("PLAYER_REGEN_ENABLED")
-check(not isVisible(m.rows[1].frame), "the event decides, not a live InCombatLockdown() read")
-""")
-
-case("a_reload_mid_combat_seeds_the_flag_from_either_api")(r"""
-boot({ combat = false, affecting = true })
-local m = mount("debuffsH", "upper")
-pushList({ ent("Rend", 0) })
-check(isVisible(m.rows[1].frame), "UnitAffectingCombat true at build shows the cue")
-boot({ combat = true, affecting = false })
-m = mount("debuffsH", "upper")
-pushList({ ent("Rend", 0) })
-check(isVisible(m.rows[1].frame), "InCombatLockdown true at build shows it")
-boot({ combat = false, affecting = false })
-m = mount("debuffsH", "upper")
-pushList({ ent("Rend", 0) })
-check(not isVisible(m.rows[1].frame), "both false keeps it hidden")
-IN_COMBAT, AFFECTING = false, true
-fire("PLAYER_ENTERING_WORLD")
-check(isVisible(m.rows[1].frame), "PLAYER_ENTERING_WORLD re-seeds and shows it")
-IN_COMBAT, AFFECTING = false, false
-fire("PLAYER_ENTERING_WORLD")
-check(not isVisible(m.rows[1].frame), "and hides it again")
-""")
-
-case("an_unreadable_seed_keeps_the_cue_shown")(r"""
-boot({ combat = false })
-local m = mount("debuffsH", "upper")
-pushList({ ent("Rend", 0) })
-local no = function() return false end
-InCombatLockdown, UnitAffectingCombat = no, no
-fire("PLAYER_ENTERING_WORLD")
-check(not isVisible(m.rows[1].frame), "setup: hidden when both are plainly false")
-InCombatLockdown = function() error("boom") end
-fire("PLAYER_ENTERING_WORLD")
-check(isVisible(m.rows[1].frame), "a throwing InCombatLockdown keeps it shown")
-InCombatLockdown = no
-fire("PLAYER_ENTERING_WORLD")
-UnitAffectingCombat = function() return SECRETV end
-fire("PLAYER_ENTERING_WORLD")
-check(isVisible(m.rows[1].frame), "a secret UnitAffectingCombat keeps it shown")
-""")
-
-case("a_stuck_combat_flag_heals_from_a_push_but_a_push_never_sets_it")(r"""
-boot({ combat = true })
-local m = mount("debuffsH", "upper")
-pushList({ ent("Rend", 0), ent("Deep Wounds", 10) })
-check(isVisible(m.rows[1].frame), "setup: shown in combat")
-IN_COMBAT = false                       -- the REGEN_ENABLED event never reached us
-check(isVisible(m.rows[1].frame), "setup: still stuck")
-pushList({ ent("Rend", 0), ent("Deep Wounds", 10) })
-check(not isVisible(m.rows[1].frame), "a push that finds both APIs false clears the flag")
-IN_COMBAT = true                        -- combat began, but REGEN_DISABLED was missed
-pushList({ ent("Rend", 0), ent("Deep Wounds", 10) })
-check(not isVisible(m.rows[1].frame), "a push never sets the flag")
+pushList({ ent("Sunder Armor", 12) }, 3)
+check(not row.chip.pop:IsShown(), "another debuff, already up, taking the row does not inherit the flash")
 """)
 
 case("the_vertical_axis_geometry_is_112_px_with_the_axis_26_px_from_the_cast_bar")(r"""
@@ -1208,63 +1132,52 @@ case("vertical_chips_sit_on_their_lane_at_3_7_px_a_second")(r"""
 local D = boot({ combat = true })
 local C = D.D.COLORS
 local m = mount("debuffsV", "upper")
-local list = { ent("Corruption", 18), ent("Curse of Agony", 22), ent("Immolate", 2.4), ent("Siphon Life", 0) }
+local list = { ent("Corruption", 18), ent("Curse of Agony", 22), ent("Immolate", 2.4), ent("Siphon Life", 30) }
 pushList(list)
 local function secY(s) return MU.AXB - s / 30 * (MU.AXB - MU.AXT) end
-local rem = { 18, 22, 2.4, 0 }
+local rem = { 18, 22, 2.4, 30 }
 for i = 1, 4 do
     local row = m.rows[i]
     local cx, cy = imgCenter(row.chip.frame)
     near3(cx, MU.LANES[i] - MU.LV_SHIFT, "chip " .. i .. " lane x"); near3(cy, secY(rem[i]), "chip " .. i .. " y")
     near3(row.chip.frame:GetWidth(), MU.V_CHIP * K, "chip size")
 end
-check(m.rows[1].mode == "live" and m.rows[3].mode == "live" and m.rows[4].mode == "absent", "modes")
+check(m.rows[1].mode == "live" and m.rows[3].mode == "live" and m.rows[4].mode == "live", "modes")
 check(m.rows[1].rail:IsShown() and m.rows[1].dot:IsShown(), "a live chip has its rail and dot")
 colorIs(m.rows[1].chip.frame.fsSkin.border.ring.vertex, C.violet, "violet outside the band")
 colorIs(m.rows[3].chip.frame.fsSkin.border.ring.vertex, C.amber, "amber inside the band")
-check(isVisible(m.rows[4].frame) and not m.rows[4].rail:IsShown(), "the absent chip rests at 0 with no rail")
-check(m.rows[4].chip.frame.icon.desaturated == true, "grey")
 local _, y10 = imgCenter(m.rows[1].chip.frame)
 pushList({ ent("Corruption", 10) })
 local _, y10b = imgCenter(m.rows[1].chip.frame)
 near3(y10b - y10, 8 * 112 / 30, "eight seconds less is 29.9 px further down the axis")
 """)
 
-case("vertical_chips_slide_and_the_absent_chip_follows_combat")(r"""
+case("vertical_chips_slide_on_one_onupdate")(r"""
 boot({ combat = false })
 local m, frame = mount("debuffsV", "upper")
-pushList({ ent("Corruption", 0), ent("Immolate", 12, { recast = true }) })
-check(not isVisible(m.rows[1].frame), "out of combat the absent chip is hidden")
-check(isVisible(m.rows[2].frame) and m.rows[2].rail:IsShown(), "the live one is drawn")
-local _, y0 = imgCenter(m.rows[2].chip.frame)
+pushList({ ent("Immolate", 12) })
+check(isVisible(m.rows[1].frame) and m.rows[1].rail:IsShown(), "the chip is drawn out of combat too")
+local _, y0 = imgCenter(m.rows[1].chip.frame)
 tick(1.0)
-local _, y1 = imgCenter(m.rows[2].chip.frame)
+local _, y1 = imgCenter(m.rows[1].chip.frame)
 near3(y1 - y0, 112 / 30, "one second slides 3.73 px")
 check(onUpdateFrames() == 1, "one OnUpdate")
-IN_COMBAT = true
-fire("PLAYER_REGEN_DISABLED")
-check(isVisible(m.rows[1].frame), "the cue shows at pull")
-tick(11.5)
-check(m.rows[2].mode == "absent" and isVisible(m.rows[2].frame), "an expired chip becomes the recast cue")
-near3(select(2, imgCenter(m.rows[2].chip.frame)), MU.AXB, "resting at 0")
-check(onUpdateFrames() == 0, "no OnUpdate with nothing live")
 """)
 
 case("a_vertical_ledger_chip_leaves_when_it_runs_out_and_the_lanes_close_up")(r"""
 boot({ combat = true })
 local m = mount("debuffsV", "upper")
-pushList({ ent("Flame Shock", 5, { duration = 12 }), ent("Frost Shock", 8, { duration = 8 }), ent("Corruption", 4, { recast = true }) })
-tick(5.1)                              -- Flame Shock is gone, Corruption (a Hud row) rests at 0, Frost Shock has 2.9 s
+pushList({ ent("Flame Shock", 5, { duration = 12 }), ent("Frost Shock", 8, { duration = 8 }), ent("Corruption", 4, { duration = 18 }) })
+tick(5.1)                              -- Flame Shock and Corruption are gone, Frost Shock has 2.9 s
 check(m.rows[1].key == "Frost Shock" and m.rows[1].mode == "live" and isVisible(m.rows[1].frame), "the next chip takes lane 1")
 local cx, cy = imgCenter(m.rows[1].chip.frame)
 near3(cx, MU.LANES[1] - MU.LV_SHIFT, "lane 1 x")
 near3(cy, MU.AXB - 2.9 / 30 * (MU.AXB - MU.AXT), "and sits at the time it has left")
-check(m.rows[2].key == "Corruption" and m.rows[2].mode == "absent", "the Hud chip keeps its recast cue at 0")
-check(m.rows[3].mode == "off" and not isVisible(m.rows[3].frame) and not m.rows[3].rail:IsShown() and not m.rows[3].dot:IsShown(), "the freed lane is empty: no chip, rail or dot")
+for i = 2, 4 do
+    local r = m.rows[i]
+    check(r.mode == "off" and not isVisible(r.frame) and not r.rail:IsShown() and not r.dot:IsShown(), "the freed lane " .. i .. " is empty: no chip, rail or dot")
+end
 tick(3)
-check(m.rows[1].key == "Corruption" and m.rows[1].mode == "absent" and m.rows[2].mode == "off", "the last ledger chip leaves, the cue stays")
-pushList({ ent("Flame Shock", 5, { duration = 12 }) })
-tick(6)
 check(m.rows[1].mode == "off" and not isVisible(m.rows[1].frame) and not m.body:IsShown() and not isVisible(m.parts.axis), "with nothing left the scale hides")
 check(onUpdateFrames() == 0, "and the driver stops")
 """)
@@ -1574,6 +1487,7 @@ def run_case(name: str, body: str, mu: dict) -> str | None:
     lua.globals().AREAS_SRC = AREAS.read_text(encoding="utf-8")
     lua.globals().HAS_TARGET_SRC = _load_gunsight_harness().theme_target_rule_lua()
     lua.execute("MU = " + lua_value(mu))
+    lua.execute("ADV = " + lua_value(mono_advances()))
     try:
         lua.execute(PRELUDE + "\n" + body)
     except LuaError as e:

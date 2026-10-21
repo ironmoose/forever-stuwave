@@ -3,18 +3,16 @@
 -- dotsH and dotsV): rows of icon, time and drain bar, or the 0 to 30 s axis compressed to 112 px with a chip per debuff.
 -- gunsightdots-harness.py parses the mockup for the numbers below, so a mockup edit fails there instead of drifting.
 --
--- ABSENT CUE (player, 2026-10-03): the dim recast row or chip shows ONLY in combat; out of combat it is hidden and a
--- live one is never touched. Only an entry flagged `recast` (the Hud's Priest and Warlock DoT rows) gets the cue; any
--- other debuff, a Shaman's Flame Shock included, leaves its row when it runs out (player, 2026-10-20).
--- "In combat" is a file-local flag driven by PLAYER_REGEN_DISABLED / PLAYER_REGEN_ENABLED
--- and seeded from InCombatLockdown() OR UnitAffectingCombat(), because lockdown can still read false inside the
--- REGEN_DISABLED dispatch; a throwing or secret answer reads as in combat so the cue is never hidden on a guess.
--- A list push that finds both APIs plainly false clears a stuck flag (a missed REGEN_ENABLED), and never sets it.
+-- A DEBUFF THAT HAS RUN OUT HAS NO ROW (player, 2026-10-20, for every class; the dim "--" recast row the design once
+-- drew for a Priest or Warlock DoT that was not on the target is gone): Gather skips an entry whose expiry has passed and
+-- the rows below it close up.
 --
 -- MOTION: one OnUpdate per module, installed only while a row is live, places everything from expires - GetTime()
--- and allocates nothing. The service pushes nothing at an expiry, so a recast row that runs out turns absent by itself,
--- and any other row that runs out makes the module re-read the list it last got: Gather skips the expired entry and the
--- rows below it close up.
+-- and allocates nothing. The service pushes nothing at an expiry, so a row that runs out makes the module re-read the
+-- list it last got, which leaves the expired entry out.
+--
+-- TIME TEXT: the font is monospaced, so the column from the text's left edge to the bar holds three characters: "13s",
+-- "2.4" and "2m" all stop short of the bar. A fourth ("2.4s") ran into it, so the tenths read without the "s".
 --
 -- CHIP: a dark plate, the icon seated inside the cut by FrameHelpers.SeatAuraTile, the cut ring over it (violet,
 -- amber inside the 3 s band), and a white pop for 0.35 s when the debuff is (re)applied. Masks do not clip on this
@@ -40,7 +38,6 @@ local K = {
     violet = { 168 / 255, 85 / 255, 247 / 255 },    -- #a855f7
     amber = { 255 / 255, 182 / 255, 72 / 255 },     -- #ffb648
     fg = { 233 / 255, 226 / 255, 255 / 255 },       -- #e9e2ff
-    muted = { 157 / 255, 147 / 255, 196 / 255 },    -- #9d93c4
     white = { 243 / 255, 251 / 255, 255 / 255 },    -- #f3fbff
 }
 
@@ -62,7 +59,7 @@ local H = {
     TIME_DX = 33, TIME_SIZE = 13,       -- txt(1246, cy + 4.5, ..., 13)
     TENTHS_S = 3,                       -- d.rem < 3 shows tenths
     BAR_DX = 61, BAR_W = 52, BAR_H = 4, -- rect(1274, cy - 2, 52, 4)
-    BAR_BG_A = 0.2, ABSENT_BAR_A = 0.18, ABSENT_TEXT_A = 0.7,
+    BAR_BG_A = 0.2,
     STACK_DX = 119, STACK_SIZE = 11,    -- txt(1332, cy + 4, 'x' + n, 11)
     SEP_W = 131, SEP_A = 0.12, SEP_HZ_A = 0.55,   -- line(1213, ty, 1344, ty)
     TICK_DX = -9, TICK_A = 0.45,        -- line(1204, ty, 1213, ty)
@@ -99,7 +96,6 @@ local GLOW_ROUND = MEDIA .. "glow_round.tga"
 local function Mix(a, b, t)
     return { a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t }
 end
-local ABSENT_RING = Mix(K.muted, { 1, 1, 1 }, 0.25)
 local BAR_COLOR = Mix(K.violet, { 1, 1, 1 }, 0.25)
 local WARM_PLATE = { 1, 0.88, 0.7 }
 local PLAIN_PLATE = { 1, 1, 1 }
@@ -131,39 +127,8 @@ local function PlainString(v)
     return v
 end
 
-local modules = {}             -- id -> module, in build order (iterate with pairs: two entries)
-local inCombat = true          -- placeholder: SeedCombat runs before any paint
-local sharedBuilt = false
-
-local function ReadCombat(fn, ...)
-    local ok, r = pcall(fn, ...)
-    if not ok or (FS.IsSecret and FS.IsSecret(r)) then return nil end
-    return r and true or false
-end
-
--- Out of combat only when BOTH APIs plainly answer false.
-local function SeedCombat()
-    local lock = ReadCombat(InCombatLockdown)
-    local aff = ReadCombat(UnitAffectingCombat, "player")
-    inCombat = not (lock == false and aff == false)
-end
-
-local function SetRowShown(row, on)
-    if row.frame:IsShown() ~= on then row.frame:SetShown(on) end
-end
-
-local function SyncAbsent()
-    for _, m in pairs(modules) do
-        for i = 1, #m.rows do
-            if m.rows[i].mode == "absent" then SetRowShown(m.rows[i], inCombat) end
-        end
-    end
-end
-
-local function HealCombat()
-    if not inCombat then return end
-    SeedCombat()
-    if not inCombat then SyncAbsent() end
+local function ShowRow(row)
+    if not row.frame:IsShown() then row.frame:Show() end
 end
 
 -------------------------------------------------------------------------------
@@ -171,7 +136,7 @@ end
 -------------------------------------------------------------------------------
 
 local TENTHS, SECONDS, MINUTES = {}, {}, {}
-for i = 0, D.MAX_S do TENTHS[i] = string.format("%.1fs", i / 10) end
+for i = 0, D.MAX_S do TENTHS[i] = string.format("%.1f", i / 10) end
 for i = 0, 99 do SECONDS[i] = i .. "s" end
 for i = 1, 60 do MINUTES[i] = i .. "m" end
 
@@ -228,15 +193,9 @@ local function Gradient(tex, c, aBottom, aTop)
     end
 end
 
-local function Desaturate(tex, on)
-    if tex.SetDesaturated then
-        tex:SetDesaturated(on)
-        tex:SetVertexColor(1, 1, 1, 1)
-    elseif on then
-        tex:SetVertexColor(0.55, 0.55, 0.55, 1)
-    else
-        tex:SetVertexColor(1, 1, 1, 1)
-    end
+local function ClearDesaturate(tex)
+    if tex.SetDesaturated then tex:SetDesaturated(false) end
+    tex:SetVertexColor(1, 1, 1, 1)
 end
 
 local function HidePop(chip)
@@ -292,21 +251,11 @@ local function BuildChip(m, parent, size, level)
     return chip
 end
 
--- The chip's static look for a row mode ("absent", "live" or "unknown") and the band.
-local function ChipLook(chip, mode, band)
+-- The chip's static look for the band.
+local function ChipLook(chip, band)
     local f, skin = chip.frame, chip.frame.fsSkin
-    if mode == "absent" then
-        Desaturate(f.icon, true)
-        f.icon:SetAlpha(0.5)
-        if chip.plate then chip.plate:SetAlpha(0.7); chip.plate:SetVertexColor(1, 1, 1, 1) end
-        skin.border.ring:SetVertexColor(ABSENT_RING[1], ABSENT_RING[2], ABSENT_RING[3], 0.9)
-        skin.glow:SetVertexColor(ABSENT_RING[1], ABSENT_RING[2], ABSENT_RING[3], 0)
-        chip.label:SetTextColor(ABSENT_RING[1], ABSENT_RING[2], ABSENT_RING[3], 0.9)
-        HidePop(chip)
-        return
-    end
     local c = band and K.amber or K.violet
-    Desaturate(f.icon, false)
+    ClearDesaturate(f.icon)
     f.icon:SetAlpha(1)
     if chip.plate then
         local p = band and WARM_PLATE or PLAIN_PLATE
@@ -365,25 +314,16 @@ local function RowTop(m) return m.rect.y + (m.rect.y >= CY and H.TOP_LOWER or H.
 local function LookH(row)
     local mode, band = row.mode, row.band
     if mode == "off" then return end
-    ChipLook(row.chip, mode, band)
-    local bg, fg, tc, ta = BAR_COLOR, BAR_COLOR, K.white, 1
-    if mode == "absent" then
-        bg, tc, ta = K.muted, K.muted, H.ABSENT_TEXT_A
-        row.fillTex:Hide()
-        row.barBg:SetColorTexture(bg[1], bg[2], bg[3], H.ABSENT_BAR_A)
-        row.barBg:Show()
-    else
-        if band then bg, fg, tc = K.amber, K.amber, K.amber end
-        if mode == "unknown" then tc = K.fg end
-        row.barBg:SetColorTexture(bg[1], bg[2], bg[3], H.BAR_BG_A)
-        row.fillTex:SetColorTexture(fg[1], fg[2], fg[3], 1)
-        row.fillTex:SetShown(mode == "live")
-        row.barBg:SetShown(mode == "live")
-    end
-    row.time:SetTextColor(tc[1], tc[2], tc[3], ta)
-    if mode == "live" or mode == "unknown" then
-        row.stack:SetTextColor(K.white[1], K.white[2], K.white[3], 1)
-    end
+    ChipLook(row.chip, band)
+    local bg, fg, tc = BAR_COLOR, BAR_COLOR, K.white
+    if band then bg, fg, tc = K.amber, K.amber, K.amber end
+    if mode == "unknown" then tc = K.fg end
+    row.barBg:SetColorTexture(bg[1], bg[2], bg[3], H.BAR_BG_A)
+    row.fillTex:SetColorTexture(fg[1], fg[2], fg[3], 1)
+    row.fillTex:SetShown(mode == "live")
+    row.barBg:SetShown(mode == "live")
+    row.time:SetTextColor(tc[1], tc[2], tc[3], 1)
+    row.stack:SetTextColor(K.white[1], K.white[2], K.white[3], 1)
 end
 
 local function SetTime(row, s)
@@ -405,10 +345,9 @@ local function PaintH(row, rem)
     end
 end
 
--- An absent row reads "--" over its dim track; a row whose duration nobody knows reads "?" with no track at all
--- (an empty bar would claim a drained debuff).
+-- A row whose duration nobody knows reads "?" with no track at all (an empty bar would claim a drained debuff).
 local function ParkH(row)
-    SetTime(row, row.mode == "unknown" and "?" or "--")
+    SetTime(row, "?")
     row.fill = nil
 end
 
@@ -608,13 +547,8 @@ end
 local function LookV(row)
     local mode = row.mode
     if mode == "off" then return end
-    ChipLook(row.chip, mode, row.band)
-    if mode == "absent" then
-        HideRail(row)
-        row.railColor = nil
-    else
-        SetRailColor(row, row.band and "amber" or "violet")
-    end
+    ChipLook(row.chip, row.band)
+    SetRailColor(row, row.band and "amber" or "violet")
 end
 
 local function BuildRowV(m, i)
@@ -635,11 +569,7 @@ local function BuildRowV(m, i)
         Point(row.rail, "BOTTOM", row.x, AxisBottom(m))
         Point(row.railGlow, "BOTTOM", row.x, AxisBottom(m))
         row.y = nil
-        if row.mode == "live" then
-            PlaceV(m, row, row.expires - GetTime())
-        elseif row.mode == "absent" then
-            PlaceV(m, row, 0)
-        end
+        if row.mode == "live" then PlaceV(m, row, row.expires - GetTime()) end
     end)
     return row
 end
@@ -662,27 +592,10 @@ local function StartTicking(m)
     end
 end
 
-local function ToAbsent(m, row)
-    row.mode, row.expires, row.band, row.span = "absent", nil, false, nil
-    if m.kind == "H" then
-        ParkH(row)
-        LookH(row)
-    else
-        LookV(row)
-        row.y = nil
-        PlaceV(m, row, 0)
-    end
-    SetRowShown(row, inCombat)
-end
-
--- true while the row is still counting down. A row that ran out returns false: a recast row has turned absent, any
--- other is left live for MakeStep to drop through a fresh Update.
+-- true while the row is still counting down; false once it has run out (MakeStep then drops it through a fresh Update).
 local function StepRow(m, row, now)
     local rem = row.expires - now
-    if rem <= 0 then
-        if row.recast then ToAbsent(m, row) end
-        return false
-    end
+    if rem <= 0 then return false end
     local band = rem <= D.BAND_S
     if band ~= row.band then
         row.band = band
@@ -701,8 +614,7 @@ local function MakeStep(m)
         for i = 1, #m.rows do
             local row = m.rows[i]
             if row.mode == "live" then
-                if StepRow(m, row, now) then live = live + 1
-                elseif row.mode == "live" then ranOut = true end
+                if StepRow(m, row, now) then live = live + 1 else ranOut = true end
             end
         end
         if ranOut then
@@ -718,7 +630,7 @@ end
 -------------------------------------------------------------------------------
 
 local function ClearRow(m, row)
-    row.mode, row.key, row.iconId, row.expires, row.band, row.count, row.recast = "off", nil, nil, nil, false, nil, nil
+    row.mode, row.key, row.iconId, row.expires, row.band, row.count = "off", nil, nil, nil, false, nil
     row.fill, row.timeText, row.span = nil, nil, nil
     HidePop(row.chip)
     if m.kind == "V" then HideRail(row); row.railColor = nil end
@@ -737,7 +649,6 @@ local function UpdateRow(m, row, e, now, newTarget)
         return
     end
     local prevMode, prevExpires = row.mode, row.expires
-    row.recast = e.recast == true
     if row.key ~= name then
         prevMode, prevExpires = "off", nil
         HidePop(row.chip)                -- a flash belongs to the debuff that earned it
@@ -757,7 +668,7 @@ local function UpdateRow(m, row, e, now, newTarget)
         mode = "unknown"
     else
         expires = Num(raw)
-        if not expires then mode = "off" elseif expires > now then mode = "live" else mode = "absent" end
+        mode = (expires and expires > now) and "live" or "off"
     end
     if mode == "off" then
         if row.mode ~= "off" then ClearRow(m, row) end
@@ -783,13 +694,15 @@ local function UpdateRow(m, row, e, now, newTarget)
             row.span = expires - now
         end
         if row.span < expires - now then row.span = expires - now end
-        if newTarget then
+        if newTarget or prevMode == "off" then
+            -- A first sight (a new target, or a debuff taking a row: a recast after it ran out is one too). It flashes
+            -- only when it was applied within the last half second; one already up is not an apply.
             if duration and expires - now >= duration - FRESH_EPS then
-                StartPop(row.chip, now)                  -- applied within the last half second: a genuine apply
+                StartPop(row.chip, now)
             else
                 HidePop(row.chip)                        -- the old target's flash does not follow the switch
             end
-        elseif prevMode == "absent" or (prevMode == "live" and expires > prevExpires + REAPPLY_EPS) then
+        elseif prevMode == "live" and expires > prevExpires + REAPPLY_EPS then
             StartPop(row.chip, now)
         end
     else
@@ -814,7 +727,7 @@ local function UpdateRow(m, row, e, now, newTarget)
         row.y = nil
         PlaceV(m, row, mode == "live" and expires - now or 0)
     end
-    SetRowShown(row, mode ~= "absent" or inCombat)
+    ShowRow(row)
 end
 
 -- The vertical axis cannot place an entry with no expiry, so those are skipped.
@@ -825,10 +738,8 @@ local function KnownExpiry(e)
     return true
 end
 
--- A debuff that has run out takes no row, unless it is a recast cue (the Hud's DoT rows keep their dim row). An expiry
--- that is secret or missing cannot be told, so that entry stays.
+-- A debuff that has run out takes no row. An expiry that is secret or missing cannot be told, so that entry stays.
 local function RanOut(e, now)
-    if e.recast then return false end
     local expires = Num(e.expires)
     return expires ~= nil and expires <= now
 end
@@ -846,12 +757,11 @@ local function Gather(m, list, now)
 end
 
 local function DropRow(m, row)
-    row.mode, row.key, row.iconId, row.expires, row.span, row.recast = "off", nil, nil, nil, nil, nil
+    row.mode, row.key, row.iconId, row.expires, row.span = "off", nil, nil, nil, nil
     pcall(row.frame.Hide, row.frame)
 end
 
 local function Update(m, list, epoch)
-    HealCombat()
     local newTarget = epoch ~= m.lastEpoch
     m.lastEpoch = epoch
     m.list = list
@@ -876,32 +786,11 @@ end
 -- Module build and hooks
 -------------------------------------------------------------------------------
 
-local function EnsureShared()
-    if sharedBuilt then return end
-    sharedBuilt = true
-    SeedCombat()
-    local events = CreateFrame("Frame", nil, Gunsight.root)
-    events:RegisterEvent("PLAYER_REGEN_DISABLED")     -- the absent cue shows only in combat
-    events:RegisterEvent("PLAYER_REGEN_ENABLED")
-    events:RegisterEvent("PLAYER_ENTERING_WORLD")
-    events:SetScript("OnEvent", function(_, event)
-        if event == "PLAYER_REGEN_DISABLED" then
-            inCombat = true                 -- the event itself: InCombatLockdown() may still read false here
-        elseif event == "PLAYER_REGEN_ENABLED" then
-            inCombat = false
-        else
-            SeedCombat()
-        end
-        SyncAbsent()
-    end)
-end
-
 local function BuildModule(m, host)
     local Theme, FH = FS.Theme, FS.FrameHelpers
     if not (Theme and Theme.SkinButton and Theme.ApplyMono and Theme.AddSliceTexture and Theme.ApplyNineSlice and FH) then
         error("Theme or FrameHelpers is missing")
     end
-    EnsureShared()
     m.frame = CreateFrame("Frame", m.kind == "H" and "ForeverSTUwaveGunsightDebuffsH" or "ForeverSTUwaveGunsightDebuffsV", host)
     m.frame:SetSize(1, 1)
     m.frame:SetPoint("CENTER", Gunsight.root, "CENTER", 0, 0)
@@ -918,7 +807,6 @@ local function BuildModule(m, host)
     end
     m.step = MakeStep(m)
     m.built = true
-    modules[m.id] = m
     return m.frame
 end
 

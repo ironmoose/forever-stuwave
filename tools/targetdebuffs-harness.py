@@ -13,7 +13,7 @@ long left and how many stacks. The checks pin:
     from HudSpells; an unknown duration reads as an entry with no expiry; a recast stacks up to the cap;
   * retarget clears the list, dead and friendly targets show nothing, the Paladin's Judgement debuffs are
     left out while the Class Module area is in use, Priest and Warlock rows come from the Hud's DoT ledger
-    in profile order with absent rows kept;
+    in profile order, only while the DoT is up (a DoT that is not up, or has run out, is not listed);
   * nothing secret is ever compared, counted or concatenated, and nothing is built before the first
     Subscribe.
 
@@ -568,7 +568,7 @@ fire("UNIT_SPELLCAST_SUCCEEDED", "party1", "x", 11572)
 check(#TD.Get() == 0, "a party member's cast is not ours")
 """)
 
-case("an_expired_ledger_entry_stays_listed_but_is_not_a_recast_cue")(r"""
+case("an_expired_ledger_entry_stays_listed_with_its_expiry_in_the_past")(r"""
 local TD = boot()
 AURAS = { aura("Rend", NOW + 21, 21, 0, "player", 11572) }
 TD.Subscribe(function() end)
@@ -577,8 +577,7 @@ IN_COMBAT = true
 cast(11572, guid())
 NOW = NOW + 30
 local e = TD.Get()[1]
-check(e and e.expires <= GetTime(), "the entry is still listed with its expiry in the past")
-check(e.recast == nil, "and it carries no recast flag, so the view drops it at its expiry instead of drawing a dim row")
+check(e and e.expires <= GetTime(), "the entry is still listed with its expiry in the past: the service pushes nothing at an expiry, the view drops it")
 """)
 
 case("regen_replaces_the_ledger_with_a_fresh_snapshot")(r"""
@@ -798,7 +797,7 @@ check(#TD.Get() == 0, "a friendly target shows nothing")
 
 case("priest_and_warlock_rows_come_from_the_hud_ledger_in_profile_order")(r"""
 local TD = boot({ class = "WARLOCK", hud = true })
--- the Hud rows: Corruption up 10 s, Agony absent, Immolate unknown (all nil)
+-- the Hud rows: Corruption up 10 s, Agony not up, Immolate unknown (all nil)
 local function row(key, icon, remaining, expiresAt, duration)
     return { key = key, icon = icon, remaining = remaining, expiresAt = expiresAt, duration = duration }
 end
@@ -810,19 +809,21 @@ for _, fn in ipairs({ unpack(HUDSUBS) }) do
     fn(state({ row("corruption", 7001, 10, NOW + 10, 18), row("bane_agony", 7002, 0), row("immolate", 7003) }))
 end
 local list = TD.Get()
-check(list[1].name == "Corruption" and list[2].name == "Bane of Agony", "profile order first, got " .. names(list))
+check(list[1].name == "Corruption" and list[2].name == "Curse of Weakness", "the live Hud row first, got " .. names(list))
 near(list[1].expires, NOW + 10, "the Hud's timer wins over the scan's"); near(list[1].duration, 18, "duration")
 check(list[1].icon == 7001, "icon from the Hud row")
-check(list[1].id == 172 and list[2].id == 980, "a Hud row carries the spell id its name resolves to, got " .. tostring(list[1].id) .. ", " .. tostring(list[2].id))
-check(list[2].expires <= NOW, "an absent DoT is an entry with an expiry in the past (the recast cue)")
-check(list[1].recast == true and list[2].recast == true, "every Hud row is a recast cue: the view keeps it as a dim row after its expiry")
-check(byName(list, "Curse of Weakness").recast == nil, "a scanned debuff outside the profile is not a recast cue")
+check(list[1].id == 172, "a Hud row carries the spell id its name resolves to, got " .. tostring(list[1].id))
+check(not byName(list, "Bane of Agony"), "a DoT that is not up is not listed: no dim recast row, got " .. names(list))
 check(not byName(list, "Immolate"), "an unknown DoT draws nothing")
 check(byName(list, "Curse of Weakness"), "a player debuff outside the profile still shows, after the profile rows")
 check(list[#list].name == "Curse of Weakness", "and it sorts after them")
 local n = 0
 for _, e in ipairs(list) do if e.name == "Corruption" then n = n + 1 end end
 check(n == 1, "the scan's Corruption is not listed twice")
+for _, fn in ipairs({ unpack(HUDSUBS) }) do
+    fn(state({ row("corruption", 7001, 3, NOW - 1, 18) }))          -- its expiry passed since the Hud measured it
+end
+check(not byName(TD.Get(), "Corruption"), "a Hud DoT whose expiry has passed is not listed, and the scan's copy stays hidden behind it, got " .. names(TD.Get()))
 """)
 
 case("hud_rows_always_come_before_ledger_rows_whatever_their_class_order")(r"""
@@ -841,14 +842,14 @@ for _, fn in ipairs({ unpack(HUDSUBS) }) do
         row("immolate", 7003, 9, NOW + 9, 15) } })
 end
 local list = TD.Get()
-check(#list == 6, "three Hud rows and three ledger rows, got " .. names(list))
-local want = { "Corruption", "Bane of Agony", "Immolate" }
+check(#list == 5, "two live Hud rows (Agony is not up) and three ledger rows, got " .. names(list))
+local want = { "Corruption", "Immolate" }
 for i, n in ipairs(want) do check(list[i].name == n, "Hud row " .. i .. " first, in profile order, got " .. names(list)) end
-for i = 4, 6 do
+for i = 3, 5 do
     check(list[i].name == "Curse of Weakness" or list[i].name == "Curse of Tongues" or list[i].name == "Fear", "ledger rows after, got " .. names(list))
 end
 -- the ledger rows keep their class order among themselves
-check(list[4].name == "Curse of Weakness" and list[5].name == "Curse of Tongues" and list[6].name == "Fear", names(list))
+check(list[3].name == "Curse of Weakness" and list[4].name == "Curse of Tongues" and list[5].name == "Fear", names(list))
 """)
 
 case("a_class_without_hud_dots_does_not_subscribe_to_the_hud")(r"""

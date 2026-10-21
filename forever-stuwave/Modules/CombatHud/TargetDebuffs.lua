@@ -1,11 +1,11 @@
 -- Forever STUwave: data service for the player's own debuffs on the target (FS.TargetDebuffs).
--- Entries are { id, name, icon, expires, duration, count, order, recast }: an aura snapshot out of combat, an own-cast
+-- Entries are { id, name, icon, expires, duration, count, order }: an aura snapshot out of combat, an own-cast
 -- ledger in combat. IN COMBAT it is an estimate: a resisted cast still counts, refreshes that are not casts (poison
 -- procs, Deep Wounds, talents) are invisible, and a cast is timed from the last snapshot of that spell id or name,
 -- else the SPELL_SECONDS / HudSpells tables (an unknown one has no expiry); out of combat the snapshot is exact.
--- The service pushes nothing at an expiry, so a ledger or snapshot entry stays listed with its expiry in the past and the
--- view drops it when it runs out. Only the Hud's Priest and Warlock rows carry `recast = true`: a DoT of the profile that
--- is not on the target is a recast cue, which the view keeps as a dim row once it has run out (`expires` 0 while it is not up).
+-- The service pushes nothing at an expiry, so an entry stays listed with its expiry in the past until the next push and
+-- the view drops it the moment it runs out, whatever the class: a debuff that is gone has no row. The Hud's Priest and
+-- Warlock rows are listed only while the DoT is up, for the same reason.
 
 local _, FS = ...
 
@@ -508,17 +508,18 @@ local function OnHud(state)
             if remaining then
                 local expires = PlainOf(e.expiresAt, "number")
                 if not expires and remaining > 0 then expires = now + remaining end
-                local live = expires ~= nil and expires > now
-                local def = FS.HudSpells and FS.HudSpells[key]
-                local name = def and def.names and def.names[1] or key
-                local FH = FS.FrameHelpers
-                hudEntries[#hudEntries + 1] = {
-                    name = name,
-                    id = FH and FH.SpellIDForName and FH.SpellIDForName(name) or nil,   -- plain: the dot's tooltip spell
-                    icon = PlainOf(e.icon, "number") or PlainOf(e.icon, "string"),
-                    expires = live and expires or 0, duration = live and PlainOf(e.duration, "number") or nil,
-                    count = 1, order = HUD_ORDER + #hudEntries + 1, recast = true,
-                }
+                if expires and expires > now then
+                    local def = FS.HudSpells and FS.HudSpells[key]
+                    local name = def and def.names and def.names[1] or key
+                    local FH = FS.FrameHelpers
+                    hudEntries[#hudEntries + 1] = {
+                        name = name,
+                        id = FH and FH.SpellIDForName and FH.SpellIDForName(name) or nil,   -- plain: the dot's tooltip spell
+                        icon = PlainOf(e.icon, "number") or PlainOf(e.icon, "string"),
+                        expires = expires, duration = PlainOf(e.duration, "number"),
+                        count = 1, order = HUD_ORDER + #hudEntries + 1,
+                    }
+                end
             end
         end
     end
