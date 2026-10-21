@@ -7,7 +7,9 @@
 -- is feature-detected; a missing name silently no-ops rather than erroring.
 -- Item slots wear OUR plate only (the two-corner cut plate of the deck bag
 -- slots and action buttons, plus its cut border); Blizzard's own slot art is
--- hidden and held hidden. The money line wears the data bar's GOLD look.
+-- hidden and held hidden, and a filled slot's square icon is cut at the two cut
+-- corners by a panel-coloured wedge (no MaskTexture: it does not clip here).
+-- The money line wears the data bar's GOLD look.
 -- Blizzard's GamepadBagBar (a child of the combined bags, same frame level as
 -- the Clean Up button, a bag icon) is hidden while no controller is connected:
 -- on a client with the GamePadEnable CVar on and nothing plugged in it drew over
@@ -157,6 +159,12 @@ local function SweepSlotArt(button)
     for _, field in ipairs(ART_FIELDS) do HoldRegion(button[field]) end
 end
 
+-- True when `value` (an atlas name or a texture path) is the empty-slot art of this button.
+local function IsEmptySlotArt(button, value)
+    if type(value) ~= "string" then return false end
+    return value == button.emptyBackgroundAtlas or value == button.emptyBackgroundTexture or EMPTY_SLOT_ATLASES[value] == true
+end
+
 local function ClearEmptyIcon(icon)
     if clearing[icon] then return end
     clearing[icon] = true
@@ -172,24 +180,19 @@ local function HookEmptyIcon(button)
     local icon = button.icon
     if type(icon) ~= "table" then return end
 
-    local function isEmptyArt(value)
-        if type(value) ~= "string" then return false end
-        return value == button.emptyBackgroundAtlas or value == button.emptyBackgroundTexture or EMPTY_SLOT_ATLASES[value] == true
-    end
-
     if type(icon.GetAtlas) == "function" then
         local ok, atlas = pcall(icon.GetAtlas, icon)
-        if ok and isEmptyArt(atlas) then ClearEmptyIcon(icon) end
+        if ok and IsEmptySlotArt(button, atlas) then ClearEmptyIcon(icon) end
     end
     if type(hooksecurefunc) ~= "function" then return end
     if type(icon.SetAtlas) == "function" then
         pcall(hooksecurefunc, icon, "SetAtlas", function(self, atlas)
-            if isEmptyArt(atlas) then ClearEmptyIcon(self) end
+            if IsEmptySlotArt(button, atlas) then ClearEmptyIcon(self) end
         end)
     end
     if button.emptyBackgroundTexture ~= nil and type(icon.SetTexture) == "function" then
         pcall(hooksecurefunc, icon, "SetTexture", function(self, texture)
-            if isEmptyArt(texture) then ClearEmptyIcon(self) end
+            if IsEmptySlotArt(button, texture) then ClearEmptyIcon(self) end
         end)
     end
 end
@@ -218,6 +221,94 @@ local function AddPlate(button)
     end
 end
 
+-- Icon corners: the cut that a mask would make.
+--
+-- A filled slot's icon is a SQUARE texture over the whole button, so its TOP-LEFT and BOTTOM-RIGHT corners
+-- lie outside the cut of our plate and ring, and the icon art shows there as a pale square nub past the
+-- ring. The obvious fix, a MaskTexture on the icon, does nothing on this client:
+-- CreateMaskTexture and AddMaskTexture exist and clip nothing (verified in game 2026-09-17 with Blizzard's own
+-- TempPortraitAlphaMask; see FILL_CORNER_TEXTURE in Theme.lua and SeatCutIcon in FrameHelpers.lua), and Lua
+-- cannot tell a clipping mask from a dead one. So the cut is baked into art instead, the way the nameplate and
+-- party bars erase their fill corners: ONE nine-sliced texture, the cut2 erase file (an opaque wedge in the two
+-- cut corner slices and nothing else) in the panel colour, laid over the button's rect at the ring's own slice
+-- margin so the engine draws its corner cells at the ring's scale. Its cut line sits 7.25 texels from the
+-- corner, inside the ring's stroke (6.0 to 7.41), so none of the icon shows outside the cut and no gap shows
+-- between stroke and icon. Theme.AddCut2Texture builds it, as it builds the plate.
+--
+-- Layer: OVERLAY -1. OVERLAY draws over the icon (ARTWORK); the ring (OVERLAY 1) stays on top of the wedge; the
+-- glow (OVERLAY 0, ADD) also reaches into the cut triangle and must not be painted over.
+--
+-- The colour is Theme.COLOR_BG, the fill SkinPanel gives the bag windows, but opaque: that fill is 80% opaque,
+-- so on a bright world behind the window the wedge reads a little darker than the panel around it.
+-- An empty slot has no icon to cut, and an opaque wedge there would show as a dark triangle on the plate-less
+-- corner, so the wedge is shown only while the icon holds an item. That follows the ICON, not a refresh
+-- pass: the container path is SetShown then SetAtlas/SetTexture, the bank's is SetTexture then SetShown (an emptied
+-- bank slot keeps its old texture and is just hidden), and BankPanelItemButtonMixin:Refresh also runs for a single
+-- slot on ITEM_LOCK_CHANGED, outside the panel-wide refresh hooks. So the icon's five state setters get a
+-- post-hook each (no method replaced), and every skin pass re-reads it as well.
+--
+-- All of it is our own region: nothing on the item button's secure side is touched, so it works in combat.
+local ICON_CORNER_SUBLEVEL = -1
+local ICON_STATE_METHODS = { "SetTexture", "SetAtlas", "SetShown", "Show", "Hide" }
+
+-- One value off the icon; nil when the method is missing or throws.
+local function ReadIcon(icon, method)
+    if type(icon[method]) ~= "function" then return nil end
+    local ok, value = pcall(icon[method], icon)
+    if ok then return value end
+    return nil
+end
+
+-- True while the slot's icon is shown and holds something other than the empty-slot art. A secret texture or
+-- atlas is never compared or tested: it counts as an item.
+local function IconHoldsItem(button)
+    local icon = button.icon
+    if type(icon) ~= "table" then return false end
+    if not ReadIcon(icon, "IsShown") then return false end
+    local texture, atlas = ReadIcon(icon, "GetTexture"), ReadIcon(icon, "GetAtlas")
+    if FS.IsSecret and (FS.IsSecret(texture) or FS.IsSecret(atlas)) then return true end
+    if type(atlas) == "string" then return not IsEmptySlotArt(button, atlas) end
+    return texture ~= nil and not IsEmptySlotArt(button, texture)
+end
+
+local function SyncIconCorners(button)
+    local corners = button.fsBagCorners
+    if corners then corners:SetShown(IconHoldsItem(button)) end
+end
+
+local cornersWarned = false
+local function WarnNoCorners(why)
+    if cornersWarned then return end
+    cornersWarned = true
+    FS.LogDegradeOnce("bags_icon_corners", "Bags.lua: no icon corner cut, " .. why)
+end
+
+local function AddIconCorners(button)
+    local Theme = FS.Theme
+    local panel = Theme.COLOR_BG
+    if type(Theme.AddCut2Texture) ~= "function" or not Theme.SLICE_CUT2_ERASE_TEXTURE or type(panel) ~= "table" then
+        WarnNoCorners("Theme.AddCut2Texture / SLICE_CUT2_ERASE_TEXTURE / COLOR_BG missing")
+        return
+    end
+    local ok, corners = pcall(Theme.AddCut2Texture, button, Theme.SLICE_CUT2_ERASE_TEXTURE,
+        { panel[1], panel[2], panel[3], 1 }, "OVERLAY", ICON_CORNER_SUBLEVEL)
+    if not ok then
+        WarnNoCorners(tostring(corners))
+        return
+    end
+    corners:Hide()
+    button.fsBagCorners = corners
+
+    local icon = button.icon
+    if type(icon) == "table" and type(hooksecurefunc) == "function" then
+        local function sync() SyncIconCorners(button) end
+        for _, method in ipairs(ICON_STATE_METHODS) do
+            if type(icon[method]) == "function" then pcall(hooksecurefunc, icon, method, sync) end
+        end
+    end
+    SyncIconCorners(button)
+end
+
 -- One-time per-button setup (the per-button guard below), same idempotency
 -- shape as Loot.lua's fsLootRowSkinned: buttons are POOLED (a container's
 -- `.Items` entries are reused across bag-content changes; BankPanel's
@@ -244,9 +335,12 @@ end
 -- is a Blizzard region and the square IconQuestTexture (37 x 38) and
 -- NewItemTexture over it would poke past the ring anyway, so moving only the icon
 -- would detach them from the item by the inset instead of fixing the corners.
+-- The icon keeps its full size; its two corners outside the cut are covered by the
+-- wedge above (AddIconCorners), made last so the icon hooks sit after the empty-art clear.
 local function SkinItemButton(button)
     if not button then return end
     SweepSlotArt(button)
+    SyncIconCorners(button)
     if button.fsBagItemSkinned then return end
     button.fsBagItemSkinned = true
 
@@ -256,6 +350,7 @@ local function SkinItemButton(button)
     if SkinCutButton then
         SkinCutButton(button, { count = button.Count })
     end
+    AddIconCorners(button)
 end
 
 -- Calls fn(itemButton) for every currently-valid item button of a container or

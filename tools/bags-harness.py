@@ -36,6 +36,11 @@ What it pins:
     highlight textures, ExtendedSlot are never hooked, hidden or recoloured by us;
   * our plate (cut2 button texture, BACKGROUND -8) and border (SkinCutButton) exist once per button across
     repeated UpdateItems; an empty slot shows only the plate and the ring; hooks are installed once;
+  * the icon corners: a MaskTexture does not clip on this client, so a filled slot's square icon is cut by an opaque
+    panel-coloured wedge (the cut2 erase nine-slice, OVERLAY -1: above the icon, under the ring and the glow) in the TOP-LEFT
+    and BOTTOM-RIGHT corners; it shows only while the icon holds an item (never on an empty slot, whichever way the
+    icon is emptied or filled, with or without an UpdateItems pass), is made once per button, changes nothing
+    protected in combat, and a missing Theme piece degrades to the plain icon with one log;
   * the money line (container, combined bags, bank) follows DataBar.lua's GOLD segment: same coin colours, dot
     texture and size, text font size and dot to text gap, all read from DataBar.lua, never retyped; the
     Blizzard coin atlas stays hidden through the update path, a recreated texture and a font object swap; in
@@ -420,8 +425,9 @@ local function themeTex(frame, path, layer, sub, tag)
     return t
 end
 SECRET_IDS = false
+SECRET_VALUE = {}                 -- an opaque stand-in for a secret icon texture
 FS = {
-    IsSecret = function(v) return SECRET_IDS end,
+    IsSecret = function(v) return SECRET_IDS or v == SECRET_VALUE end,
     LogDegradeOnce = function(key, msg) DEGRADE[#DEGRADE + 1] = key end,
     PanelSkins = {
         RequireExport = function(fn) return fn ~= nil end,
@@ -433,6 +439,7 @@ FS = {
         FONT_MONO = "mono", SLICE_CUT2_BUTTON_TEXTURE = "slice_cut2_button.tga", SLICE_CUT_MARGIN = 6,
         SLICE_CUT2_OUTLINE_TEXTURE = "slice_cut2_outline.tga", SLICE_CUT2_GLOW_TEXTURE = "slice_cut2_glow.tga",
         SLICE_CUT2_GLOW_PAD = 4, SLICE_CUT2_GLOW_MARGIN = 10, COLOR_HEALTH = { 1, 0.18, 0.592, 1 },
+        SLICE_CUT2_ERASE_TEXTURE = "slice_cut2_erase_c6.tga", COLOR_BG = { 0.102, 0.063, 0.145, 0.80 },
         ApplyNineSlice = function(t, margin) t._slice = margin end,
         SkinPanel = function(frame) CALLS[#CALLS + 1] = { "SkinPanel", frame } end,
         ApplyMono = function(fs, size, color)
@@ -443,7 +450,8 @@ FS = {
         end,
         AddCut2Texture = function(frame, path, color, layer, sub)
             CALLS[#CALLS + 1] = { "AddCut2Texture", frame, path, layer, sub }
-            local t = themeTex(frame, path, layer, sub, layer == "BACKGROUND" and "plate" or "cut2")
+            local tag = layer == "BACKGROUND" and "plate" or (path:find("erase", 1, true) and "corners" or "cut2")
+            local t = themeTex(frame, path, layer, sub, tag)
             if color then t:SetVertexColor(color[1], color[2], color[3], color[4] or 1) end
             return t
         end,
@@ -518,6 +526,17 @@ function RegionCount(b, tag)
     local n = 0
     for _, r in ipairs(b._regions) do if r._tag == tag then n = n + 1 end end
     return n
+end
+function Corners(b)               -- the icon-corner wedge of an item button (tag set by the AddCut2Texture stand-in)
+    for _, r in ipairs(b._regions) do if r._tag == "corners" then return r end end
+end
+function CornersAlpha(b)
+    local r = Corners(b)
+    return r and r:GetAlpha() or -1
+end
+function CornersShown(b)
+    local r = Corners(b)
+    return r ~= nil and Visible(r)
 end
 function HookCount(obj, name)
     local n = 0
@@ -687,9 +706,9 @@ def check_icon_border() -> None:
 
     # an item arriving in an empty slot, then a Blizzard reset of the slot art: still icon, plate and ring only
     w.run("c1.infos[2] = { icon = 136, quality = { 1, 1, 1 } }; c1:UpdateItems(); BlizzardReset(c1.Items[2])")
-    check("border.item_arriving_in_an_empty_slot_shows_no_border", tags(w, "c1.Items[2]") == "icon,plate,ring", tags(w, "c1.Items[2]"))
+    check("border.item_arriving_in_an_empty_slot_shows_no_border", tags(w, "c1.Items[2]") == "corners,icon,plate,ring", tags(w, "c1.Items[2]"))
     w.run("bank.infos[2] = { icon = 137, quality = { 0, 0.44, 0.87 } }; bank.RefreshAllItemsForSelectedTab(bank)")
-    check("border.item_arriving_in_an_empty_bank_slot_shows_no_border", tags(w, "bank.pool[2]") == "icon,plate,ring", tags(w, "bank.pool[2]"))
+    check("border.item_arriving_in_an_empty_bank_slot_shows_no_border", tags(w, "bank.pool[2]") == "corners,icon,plate,ring", tags(w, "bank.pool[2]"))
 
     # one alpha hook per region however many passes ran (Blizzard's own shown state and colour are pinned above)
     for _ in range(3):
@@ -724,7 +743,7 @@ def check_plate_and_border() -> None:
         check(f"plate.{expr}_one_plate", w.ev(f"RegionCount({expr}, 'plate') == 1"), str(w.ev(f"RegionCount({expr}, 'plate')")))
         check(f"plate.{expr}_one_border_ring", w.ev(f"RegionCount({expr}, 'ring') == 1"))
         check(f"plate.{expr}_skinned_once", w.ev(f"Count('SkinCutButton', {expr}) == 1"), str(w.ev(f"Count('SkinCutButton', {expr})")))
-    plate = dict(w.ev("(function() local c = nil; for _, x in ipairs(CALLS) do if x[1] == 'AddCut2Texture' and x[2] == c1.Items[1] then c = x end end; if not c then return {} end; return { path = c[3], layer = c[4], sub = c[5] } end)()").items())
+    plate = dict(w.ev("(function() local c = nil; for _, x in ipairs(CALLS) do if x[1] == 'AddCut2Texture' and x[2] == c1.Items[1] and x[4] == 'BACKGROUND' then c = x end end; if not c then return {} end; return { path = c[3], layer = c[4], sub = c[5] } end)()").items())
     check("plate.is_the_cut2_button_texture_at_background_minus_8",
           plate == {"path": "slice_cut2_button.tga", "layer": "BACKGROUND", "sub": -8}, str(plate))
     opts = w.ev("(function() for _, x in ipairs(CALLS) do if x[1] == 'SkinCutButton' and x[2] == c1.Items[1] then return x[3].count == c1.Items[1].Count end end end)()")
@@ -737,7 +756,8 @@ def check_plate_and_border() -> None:
     check("plate.art_regions_have_no_atlas_or_texture_hook",
           w.ev("HookCount(c1.Items[1].NormalTexture, 'SetAtlas') == 0 and HookCount(c1.Items[1].NormalTexture, 'SetTexture') == 0 "
                "and HookCount(bank.pool[1].Background, 'SetAtlas') == 0"))
-    check("plate.icon_hooked_once", w.ev("HookCount(c1.Items[1].icon, 'SetAtlas') == 1"), str(w.ev("HookCount(c1.Items[1].icon, 'SetAtlas')")))
+    # SetAtlas carries two post-hooks, the empty-art clear and the icon-corner sync; neither is added again by a pass
+    check("plate.icon_hooked_once", w.ev("HookCount(c1.Items[1].icon, 'SetAtlas') == 2"), str(w.ev("HookCount(c1.Items[1].icon, 'SetAtlas')")))
     check("plate.container_update_hooked_once", w.ev("HookCount(c1, 'UpdateItems') == 1 and HookCount(comb, 'UpdateItems') == 1"))
     check("plate.combined_background_hooked_once", w.ev("HookCount(comb.Items[1].ItemSlotBackground, 'SetAlpha') == 1"))
 
@@ -749,9 +769,117 @@ def check_plate_and_border() -> None:
     w.run("comb.Items[2]:SetItemButtonTexture(nil); comb:UpdateItems()")
     check("plate.empty_combined_slot_shows_only_plate_and_ring", tags(w, "comb.Items[2]") == "plate,ring", tags(w, "comb.Items[2]"))
     # a filled slot: the icon (the item) on top of the plate, our ring, and no Blizzard border at all
-    check("plate.filled_slot_has_only_icon_plate_and_ring", tags(w, "c1.Items[1]") == "icon,plate,ring", tags(w, "c1.Items[1]"))
+    check("plate.filled_slot_has_only_icon_corners_plate_and_ring", tags(w, "c1.Items[1]") == "corners,icon,plate,ring", tags(w, "c1.Items[1]"))
     check("plate.nothing_swallowed", w.swallowed() == "", w.swallowed())
     check("plate.no_degrade_logs", w.degrade() == "", w.degrade())
+
+
+def check_icon_corners() -> None:
+    # MaskTexture does not clip on this client (Theme.lua, verified in game), so the cut that a mask would make is a baked
+    # wedge: the cut2 erase nine-slice (opaque in the TOP-LEFT and BOTTOM-RIGHT corner slices only) tinted the panel colour,
+    # over the same rect as the ring. It hides the filled slot's square icon corner outside the cut and nothing else.
+    w = World()
+    w.run("comb:UpdateItems()")          # the combined window is painted after the load in this mock; the others before it
+    filled = ["c1.Items[1]", "c1.Items[3]", "comb.Items[1]", "comb.Items[3]", "bank.pool[1]"]
+    empty = ["c1.Items[2]", "c1.Items[4]", "comb.Items[2]", "bank.pool[2]", "bank.pool[3]"]
+
+    def shown(expr: str) -> bool:
+        return bool(w.ev(f"CornersShown({expr})"))
+
+    check("corners.shown_on_every_filled_slot", all(shown(b) for b in filled), "; ".join(f"{b}={shown(b)}" for b in filled))
+    check("corners.hidden_on_every_empty_slot", not any(shown(b) for b in empty), "; ".join(f"{b}={shown(b)}" for b in empty))
+
+    # the look: the erase file over the button rect, the panel colour opaque, above the icon and under the ring and glow
+    look = dict(w.ev("(function() local r = Corners(c1.Items[1]); if not r then return { path = 'none', layer = 'none', sub = 0, ringSub = 0 } end; "
+                     "local cr, cg, cb, ca = r:GetVertexColor(); local call; "
+                     "for _, x in ipairs(CALLS) do if x[1] == 'AddCut2Texture' and x[2] == c1.Items[1] and x[3] == 'slice_cut2_erase_c6.tga' then call = x end end; "
+                     "return { path = r._texture, layer = r._layer, sub = r._sub, slice = r._slice, r = cr, g = cg, b = cb, a = ca, "
+                     "ringSub = (function() for _, q in ipairs(c1.Items[1]._regions) do if q._tag == 'ring' then return q._sub end end end)(), "
+                     "viaHelper = call ~= nil } end)()").items())
+    check("corners.is_the_cut2_erase_nine_slice_via_the_theme_helper", look["path"] == "slice_cut2_erase_c6.tga" and look.get("viaHelper", False), str(look))
+    check("corners.is_the_panel_colour_and_opaque", all(k in look for k in "rgba") and near(look["r"], 0.102) and near(look["g"], 0.063)
+          and near(look["b"], 0.145) and near(look["a"], 1), str(look))
+    check("corners.draw_above_the_icon_and_under_the_ring", look["layer"] == "OVERLAY" and look["sub"] == -1 and look["sub"] < look["ringSub"], str(look))
+
+    # made once per button however many passes ran, on every kind of slot, with one hook per icon method
+    for _ in range(3):
+        w.run("c1:UpdateItems(); comb:UpdateItems(); c1:GenerateSlots(); bank.RefreshAllItemsForSelectedTab(bank)")
+    for expr in ("c1.Items[1]", "c1.Items[2]", "comb.Items[1]", "bank.pool[1]", "bank.pool[2]"):
+        check(f"corners.{expr}_one_region", w.ev(f"RegionCount({expr}, 'corners') == 1"), str(w.ev(f"RegionCount({expr}, 'corners')")))
+    hooks = {m: int(w.ev(f"HookCount(c1.Items[1].icon, '{m}')")) for m in ("SetTexture", "SetShown", "Show", "Hide")}
+    check("corners.icon_hooked_once_per_method", all(n == 1 for n in hooks.values()), str(hooks))
+    check("corners.pass_leaves_the_state_alone", all(shown(b) for b in filled) and not any(shown(b) for b in empty))
+
+    # the wedge follows the ICON, with no UpdateItems pass in between
+    w.run("c1.Items[2]:SetItemButtonTexture(136)")
+    check("corners.an_item_arriving_shows_them", shown("c1.Items[2]"))
+    w.run("c1.Items[2]:SetItemButtonTexture(nil)")
+    check("corners.the_slot_emptying_hides_them", not shown("c1.Items[2]"))
+    w.run("c1.Items[4].icon:SetAtlas('Garrison-Bag')")
+    check("corners.a_real_atlas_icon_counts_as_art", shown("c1.Items[4]"))
+    w.run("c1.Items[4]:SetItemButtonTexture(nil)")
+    check("corners.the_empty_slot_atlas_does_not", not shown("c1.Items[4]"))
+    # the bank empties a slot by hiding the icon and leaves its old texture on it
+    w.run("bank.pool[2].icon:SetTexture(137); bank.pool[2].icon:SetShown(true)")
+    check("corners.a_bank_icon_shown_with_a_texture_shows_them", shown("bank.pool[2]"))
+    w.run("bank.pool[2].icon:SetShown(false)")
+    check("corners.a_hidden_bank_icon_hides_them_though_it_keeps_its_texture", not shown("bank.pool[2]") and w.ev("bank.pool[2].icon._texture == 137"))
+    w.run("bank.pool[2].icon:Show()")
+    check("corners.icon_show_shows_them", shown("bank.pool[2]"))
+    w.run("bank.pool[2].icon:Hide()")
+    check("corners.icon_hide_hides_them", not shown("bank.pool[2]"))
+    w.run("bank.pool[2].icon:SetTexture(nil); bank.pool[2].icon:Show()")
+    check("corners.a_shown_icon_with_no_texture_shows_none", not shown("bank.pool[2]"))
+
+    # a repaint that empties, then refills, a filled slot
+    w.run("c1.infos[1] = nil; c1:UpdateItems()")
+    check("corners.a_pass_that_empties_a_filled_slot_hides_them", not shown("c1.Items[1]"))
+    w.run("c1.infos[1] = { icon = 138 }; c1:UpdateItems()")
+    check("corners.a_pass_that_fills_it_again_shows_them", shown("c1.Items[1]"))
+
+    # Blizzard's alpha writes and the slot art holds never move them; the icon, its alpha and the other regions stay Blizzard's
+    w.run("BlizzardButtonAlpha(c1.Items[1], 0.5); BlizzardReset(c1.Items[1])")
+    check("corners.keep_the_icon_alpha_and_the_other_art_untouched",
+          w.ev("c1.Items[1].icon:GetAlpha() == 0.5 and CornersAlpha(c1.Items[1]) == 1 and not Visible(c1.Items[1].NormalTexture)")
+          and shown("c1.Items[1]"))
+
+    # a secret icon texture is never compared or tested: it counts as an item
+    w.run("c1.Items[2].icon:SetTexture(SECRET_VALUE); c1.Items[2].icon:SetShown(true)")
+    check("corners.a_secret_texture_counts_as_an_item", shown("c1.Items[2]") and w.swallowed() == "", w.swallowed())
+    w.run("c1.Items[2]:SetItemButtonTexture(nil)")
+
+    # combat: the item buttons are protected, only our region changes
+    w.run("INCOMBAT = true; PROTECTED_CALLS = {}")
+    w.run("c1.infos[2] = { icon = 139 }; c1.infos[1] = nil; c1:UpdateItems(); bank.pool[1].icon:SetShown(false); comb:UpdateItems()")
+    prot = str(w.ev("table.concat(PROTECTED_CALLS, ',')"))
+    check("corners.combat_repaint_moves_them_with_no_protected_call",
+          shown("c1.Items[2]") and not shown("c1.Items[1]") and not shown("bank.pool[1]") and prot == "", prot)
+    w.run("EndCombat()")
+    check("corners.nothing_swallowed", w.swallowed() == "", w.swallowed())
+    check("corners.no_degrade_logs", w.degrade() == "", w.degrade())
+
+    # a missing Theme piece: the slot keeps its icon, plate and ring, and one log says why
+    for label, pre in (("erase_texture", "FS.Theme.SLICE_CUT2_ERASE_TEXTURE = nil"), ("panel_colour", "FS.Theme.COLOR_BG = nil"),
+                       ("cut2_helper", "FS.Theme.AddCut2Texture = nil"),
+                       ("helper_throwing", "FS.Theme.AddCut2Texture = function(f, path) if path:find('erase', 1, true) then error('boom') end "
+                                           "return FS.Theme.__plate(f, path) end")):
+        pre_code = pre
+        if label == "helper_throwing":
+            pre_code = "FS.Theme.__plate = FS.Theme.AddCut2Texture; " + pre
+        w2 = World(pre=pre_code)
+        w2.run("c1:UpdateItems(); c1:UpdateItems()")
+        check(f"corners.missing_{label}_makes_none_and_logs_once",
+              w2.ev("RegionCount(c1.Items[1], 'corners') == 0") and w2.degrade().count("bags_icon_corners") == 1, w2.degrade())
+        check(f"corners.missing_{label}_keeps_the_slot_skinned",
+              w2.ev("Count('SkinCutButton', c1.Items[1]) == 1 and Visible(c1.Items[1].icon)") and not w2.ev("Visible(c1.Items[1].IconBorder)"))
+        if label != "helper_throwing":
+            check(f"corners.missing_{label}_swallows_nothing", w2.swallowed() == "", w2.swallowed())
+
+    # an icon with no state methods at all (a bare button) is harmless
+    w3 = World()
+    w3.run("bare = CreateFrame('Button', nil, UIParent); bare.icon = { GetObjectType = function() return 'Texture' end }; "
+           "c1.Items = { bare }; c1:UpdateItems()")
+    check("corners.an_icon_without_state_methods_is_harmless", w3.swallowed() == "" and w3.ev("not CornersShown(bare)"), w3.swallowed())
 
 
 def check_hold_retry() -> None:
@@ -1104,6 +1232,7 @@ def main() -> int:
     check_icon_border()
     check_untouched()
     check_plate_and_border()
+    check_icon_corners()
     check_hold_retry()
     check_money(db)
     check_colorblind()

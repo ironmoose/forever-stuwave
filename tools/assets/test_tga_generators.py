@@ -786,6 +786,24 @@ def test_cut2_erase_covers_the_committed_stroke_it_sits_inside(piece_outputs: Pa
                 assert erase[y][x] > 0, (c, x, y)
 
 
+@pytest.mark.parametrize("corner", ("tl", "br"))
+def test_c6_erase_hides_the_icon_outside_the_bag_slot_cut(piece_outputs: Path, corner: str) -> None:
+    """The bag slot cuts its square icon with slice_cut2_erase_c6 laid over the rect of the slot plate
+    (slice_cut2_button) and ring (slice_cut2_outline), the file the ring is sliced from. In each cut corner
+    slice every texel the plate does not fully cover is fully erased, so no icon corner shows outside the
+    cut, and the ring's stroke body is erased too, so no icon shows between the stroke and the cut."""
+    plate = _alpha_grid(MEDIA_DIR / "slice_cut2_button.tga")
+    ring = _alpha_grid(MEDIA_DIR / "slice_cut2_outline.tga")
+    erase = _alpha_grid(piece_outputs / "slice_cut2_erase_c6.tga")
+    for y in range(6):
+        for x in range(6):
+            tx, ty = (x, y) if corner == "tl" else (SLICE_N - 1 - x, SLICE_N - 1 - y)
+            if plate[ty][tx] < 255:
+                assert erase[ty][tx] == 255, ("outside the plate", x, y)
+            if ring[ty][tx] > 0 and x + y + 1 < 6 + 2 ** 0.5 - 0.5:
+                assert erase[ty][tx] > 0, ("under the stroke", x, y)
+
+
 def test_c6_erase_stays_byte_identical_to_the_committed_file(piece_outputs: Path) -> None:
     """The nameplate's c6 erase must not move when the generator learns a second chamfer."""
     assert (piece_outputs / "slice_cut2_erase_c6.tga").read_bytes() == (
