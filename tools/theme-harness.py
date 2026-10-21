@@ -913,6 +913,19 @@ case("skinpanel_still_returns_only_its_own_regions", """
     for _, t in ipairs(chrome) do assert(t ~= pre) end
 """)
 
+case("skinpanel_bandheight_sets_the_title_band_height", """
+    Theme.ApplyMono = function() end
+    local frame = NewFrame()
+    Theme.SkinPanel(frame, { title = "menu", strip = false, scanline = false, bandHeight = 30 })
+    local tall, short = false, false
+    for _, t in ipairs(frame.regions) do
+        if t.color and t.h == 30 then tall = true end
+        if t.color and t.h == Theme.PANEL_HEADER_H then short = true end
+    end
+    assert(tall, "a 30 unit title band")
+    assert(not short, "and not the default one")
+""")
+
 case("skinbutton_default_is_the_2c_c6_set_when_the_height_is_unknown", """
     local b = NewFrame()
     local skin = Theme.SkinButton(b, { borderColor = { 1, 0, 0 }, glowAlpha = 0.5 })

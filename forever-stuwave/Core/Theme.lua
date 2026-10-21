@@ -1821,6 +1821,8 @@ end
 --              ourselves and which therefore have no art to strip
 --   preserveTexture  one direct texture region to keep through the art sweep
 --   scanline   false to skip the CRT scrim
+--   bandHeight title band height in units (default Theme.PANEL_HEADER_H; the Game Menu's is taller, to fill
+--              the padding Blizzard keeps for its header)
 --   radius / fillColor / borderColor / glowSize / glowAlpha as before
 --
 -- Returns the list of chrome regions created, as before.
@@ -1870,7 +1872,7 @@ function Theme.SkinPanel(frame, opts)
         band:SetColorTexture(accent[1], accent[2], accent[3], 0.08)
         band:SetPoint("TOPLEFT", frame, "TOPLEFT", inset, -inset)
         band:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -inset, -inset)
-        band:SetHeight(Theme.PANEL_HEADER_H)
+        band:SetHeight(opts.bandHeight or Theme.PANEL_HEADER_H)
 
         local rule = frame:CreateTexture(nil, "ARTWORK")
         rule:SetColorTexture(accent[1], accent[2], accent[3], 0.30)

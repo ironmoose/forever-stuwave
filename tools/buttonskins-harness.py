@@ -35,6 +35,8 @@ def read_module(name: str) -> str:
 
 HELDART_SRC = read_module("Core/HeldArt.lua")
 BUTTONSKINS_SRC = read_module("Core/ButtonSkins.lua")
+PANELSKINS_SRC = read_module("Core/PanelSkins.lua")
+POPUPS_SRC = read_module("Modules/Skins/Popups.lua")
 
 MOCK = r"""
 COMBAT = false
@@ -253,6 +255,34 @@ function LoadButtonSkins()
 end
 
 function Near(a, b, eps) return math.abs(a - b) <= (eps or 1e-6) end
+
+-- The Game Menu as Blizzard builds it: Border and Header child frames, a button pool whose buttons are the real
+-- templated Buttons, and an InitButtons that a case replaces to add buttons the way AddButton does.
+SlashCmdList = {}
+LOG_OUT, EXIT_GAME, RETURN_TO_GAME, OPTIONS_MENU = "Log Out", "Exit Game", "Return to Game", "Options"
+function MakeGameMenu()
+    local menu = CreateFrame("Frame", "GameMenuFrame")
+    menu.w, menu.h = 260, 420
+    menu.Border = CreateFrame("Frame", nil, menu)
+    menu.Header = CreateFrame("Frame", nil, menu)
+    menu.active = {}
+    menu.buttonPool = { EnumerateActive = function() return pairs(menu.active) end }
+    function menu:Add(text, opts)
+        opts = opts or {}
+        local b = NewButton(menu, { w = 200, h = 36, slices = true, states = { "Highlight" }, text = text })
+        b.enabled = not opts.disabled
+        menu.active[b] = true
+        return b
+    end
+    menu.InitButtons = function() end
+    return menu
+end
+function LoadPopups()
+    LoadButtonSkins()
+    assert(PANELSKINS_SRC ~= "" and POPUPS_SRC ~= "", "PanelSkins.lua / Popups.lua missing")
+    assert(loadstring(PANELSKINS_SRC, "@PanelSkins.lua"))("forever-stuwave", FS)
+    assert(loadstring(POPUPS_SRC, "@Popups.lua"))("forever-stuwave", FS)
+end
 
 -- A panel frame with a stock Blizzard icon-only close button (24 x 24, four state textures), as
 -- UIPanelCloseButtonDefaultAnchors builds it. Returns frame, button.
@@ -834,6 +864,89 @@ case("theme_skin_close_button_skins_the_panels_x_and_its_close_text_button_apart
 """)
 
 
+# ---------------------------------------------------------------------------
+# The Game Menu
+# ---------------------------------------------------------------------------
+
+case("game_menu_hides_blizzards_gold_border_and_header_plate", """
+    local menu = MakeGameMenu()
+    LoadPopups()
+    assert(not menu.Border.shown, "the gold inner border (an opaque dark fill) is hidden")
+    assert(not menu.Header.shown, "the gold header plate and its Game Menu text are hidden")
+""")
+
+case("game_menu_gets_a_stuwave_menu_title_band_thirty_units_tall", """
+    local menu = MakeGameMenu()
+    LoadPopups()
+    assert(menu.fsPanelTitle and menu.fsPanelTitle.text == "stuwave://menu", "title: " .. tostring(menu.fsPanelTitle and menu.fsPanelTitle.text))
+    local band
+    for _, t in ipairs(menu.regions) do if t.color and t.h == 30 then band = t end end
+    assert(band, "a 30 unit band fills the padding Blizzard keeps for the header")
+""")
+
+case("game_menu_buttons_are_text_buttons_cyan_for_return_pink_for_log_out_and_exit_violet_for_the_rest", """
+    local menu = MakeGameMenu()
+    local options = menu:Add(OPTIONS_MENU)
+    local logout, quit = menu:Add(LOG_OUT), menu:Add(EXIT_GAME)
+    local back = menu:Add(RETURN_TO_GAME)
+    LoadPopups()
+    local B = FS.ButtonSkins
+    assert(B.Parts(options).accent == "violet", "Options violet")
+    assert(B.Parts(logout).accent == "pink" and B.Parts(quit).accent == "pink", "Log Out and Exit Game pink")
+    assert(B.Parts(back).accent == "cyan", "Return to Game cyan")
+    for _, b in ipairs({ options, logout, quit, back }) do
+        assert(b.Left.alpha == 0 and b.Middle.alpha == 0 and b.Right.alpha == 0, "stock red art held on " .. b.text)
+    end
+""")
+
+case("game_menu_skins_buttons_blizzard_adds_later_and_re_accents_a_recycled_one", """
+    local menu = MakeGameMenu()
+    local first = menu:Add(OPTIONS_MENU)
+    local late
+    -- what Blizzard's InitButtons does on every show: the pool hands the same button a new label and a new one appears
+    menu.InitButtons = function(self)
+        first.text = EXIT_GAME
+        first.fontString:SetText(EXIT_GAME)
+        if not late then late = self:Add(RETURN_TO_GAME) end
+    end
+    LoadPopups()
+    local B = FS.ButtonSkins
+    assert(B.Parts(first).accent == "violet", "skinned as Options first")
+    menu:InitButtons()
+    assert(B.Parts(late) and B.Parts(late).accent == "cyan", "the new button was skinned by the InitButtons hook")
+    assert(B.Parts(first).accent == "pink", "the recycled button took the new label's accent")
+    local regions = #first.regions
+    menu:InitButtons()
+    assert(#first.regions == regions, "no second set of textures on a recycled button")
+""")
+
+case("game_menu_buttons_keep_their_scripts_attributes_anchors_and_text", """
+    local menu = MakeGameMenu()
+    local logout = menu:Add(LOG_OUT)
+    local click = function() end
+    logout.scripts.OnClick = click
+    local calls = {}
+    for _, m in ipairs({ "SetScript", "SetAttribute", "SetEnabled", "SetText", "SetPoint", "ClearAllPoints", "SetSize", "SetWidth", "SetHeight" }) do
+        logout[m] = function() calls[#calls + 1] = m end
+    end
+    LoadPopups()
+    assert(#calls == 0, "the Game Menu skin wrote through: " .. table.concat(calls, ","))
+    assert(logout.scripts.OnClick == click and logout.text == LOG_OUT, "click handler and label untouched")
+""")
+
+case("game_menu_falls_back_to_the_named_menu_buttons_when_there_is_no_button_pool", """
+    local menu = MakeGameMenu()
+    menu.buttonPool = nil
+    local logout = NewButton(menu, { w = 200, h = 24, slices = true, text = "Log Out" })
+    _G.GameMenuButtonLogout = logout
+    local cont = NewButton(menu, { w = 200, h = 24, slices = true, text = "Return to Game" })
+    _G.GameMenuButtonContinue = cont
+    LoadPopups()
+    local B = FS.ButtonSkins
+    assert(B.Parts(logout).accent == "pink" and B.Parts(cont).accent == "cyan", "by name: Log Out pink, Continue cyan")
+""")
+
+
 MOCK_HELPERS = r"""
 function new_texture() return CreateFrame("Frame"):CreateTexture(nil, "BACKGROUND") end
 function new_fontstring() return CreateFrame("Frame"):CreateFontString(nil, "OVERLAY") end
@@ -847,6 +960,8 @@ def run_case(name: str, body: str) -> str | None:
     g.THEME_SRC = THEME_SRC
     g.HELDART_SRC = HELDART_SRC
     g.BUTTONSKINS_SRC = BUTTONSKINS_SRC
+    g.PANELSKINS_SRC = PANELSKINS_SRC
+    g.POPUPS_SRC = POPUPS_SRC
     try:
         rt.execute(MOCK)
         rt.execute(MOCK_HELPERS)

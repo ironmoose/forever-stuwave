@@ -33,7 +33,12 @@ local POPUP_FRAMES = {
     { name = "StaticPopup2" },
     { name = "StaticPopup3" },
     { name = "StaticPopup4" },
-    { name = "GameMenuFrame" },
+    -- The Game Menu (Esc): Blizzard's gold inner Border and its gold Header plate are child frames, which
+    -- the panel's art sweep never reaches, so they are hidden by name; a taller title band stands in for
+    -- the plate (the menu keeps 48 units of padding above its first button for it); `menu` skins its
+    -- buttons (below).
+    { name = "GameMenuFrame", title = "menu", bandHeight = 30, menu = true,
+      hide = { { name = "GameMenuFrame.Border" }, { name = "GameMenuFrame.Header" } } },
     { name = "ReadyCheckFrame" },
     { name = "RolePollPopup" },
     { name = "LFGInvitePopup" },
@@ -43,6 +48,81 @@ local POPUP_FRAMES = {
 -- StaticPopup button globals follow the <name>ButtonN convention; up to 4
 -- buttons per popup on this client.
 local STATIC_POPUP_BUTTON_COUNT = 4
+
+-------------------------------------------------------------------------------
+-- Game Menu buttons
+-------------------------------------------------------------------------------
+
+-- SKIN ONLY. The eight buttons are Blizzard's own and several run secure-adjacent flows (Log Out, Exit Game,
+-- Options): they are pooled (MainMenuFrameMixin builds them with CreateFramePool, and InitButtons re-sets
+-- the whole list up on every show), their OnClick closures are Blizzard's, and nothing here ever replaces,
+-- re-parents, re-anchors or SetScripts one. FS.ButtonSkins.SkinTextButton adds textures and font objects and
+-- post-hooks, with its state in weak tables, so a recycled button is never tainted by a field of ours.
+--
+-- Accent by what the button says: Return to Game is cyan, Log Out and Exit Game pink, the rest violet. The
+-- pool hands the same button a different label as the list changes, so the accent is re-read on every
+-- InitButtons. A client without the pool falls back to the named GameMenuButton* globals.
+local MENU_ACCENT_BY_TEXT = { LOG_OUT = "pink", EXIT_GAME = "pink", RETURN_TO_GAME = "cyan" } -- global string names
+local MENU_ACCENT_BY_NAME = { GameMenuButtonLogout = "pink", GameMenuButtonQuit = "pink", GameMenuButtonContinue = "cyan" }
+local MENU_BUTTON_NAMES = {
+    "GameMenuButtonHelp", "GameMenuButtonWhatsNew", "GameMenuButtonStore", "GameMenuButtonOptions",
+    "GameMenuButtonSettings", "GameMenuButtonUIOptions", "GameMenuButtonKeybindings", "GameMenuButtonMacros",
+    "GameMenuButtonAddons", "GameMenuButtonEditMode", "GameMenuButtonRatings", "GameMenuButtonLogout",
+    "GameMenuButtonQuit", "GameMenuButtonContinue",
+}
+
+local function MenuAccent(frame, button, name)
+    local text = button.GetText and button:GetText()
+    if type(text) == "string" and not (FS.IsSecret and FS.IsSecret(text)) then
+        for globalName, accent in pairs(MENU_ACCENT_BY_TEXT) do
+            if _G[globalName] == text then return accent end
+        end
+        -- the logout button reads "Camp" or "Log Out" by situation (GameMenuFrameMixin:GetLogoutText)
+        if type(frame.GetLogoutText) == "function" then
+            local ok, logout = pcall(frame.GetLogoutText, frame)
+            if ok and logout == text then return "pink" end
+        end
+    end
+    return MENU_ACCENT_BY_NAME[name or ""] or "violet"
+end
+
+local function SkinMenuButtons(frame)
+    local skin = FS.ButtonSkins and FS.ButtonSkins.SkinTextButton
+    if not skin then return end
+    local seen = {}
+    local pool = frame.buttonPool
+    if type(pool) == "table" and type(pool.EnumerateActive) == "function" then
+        pcall(function()
+            for button in pool:EnumerateActive() do
+                if not seen[button] then
+                    seen[button] = true
+                    skin(button, { accent = MenuAccent(frame, button) })
+                end
+            end
+        end)
+    end
+    for _, name in ipairs(MENU_BUTTON_NAMES) do
+        local button = _G[name]
+        if type(button) == "table" and not seen[button] then
+            seen[button] = true
+            skin(button, { accent = MenuAccent(frame, button, name) })
+        end
+    end
+end
+
+local menuHooked = setmetatable({}, { __mode = "k" }) -- frame -> its InitButtons / OnShow hooks are in
+
+-- Re-skins after Blizzard re-sets the list up (InitButtons, from OnShow and on store events), and on show
+-- for a client whose menu has no InitButtons.
+local function HookMenuButtons(frame)
+    if menuHooked[frame] then return end
+    menuHooked[frame] = true
+    local function again() SkinMenuButtons(frame) end
+    if type(hooksecurefunc) == "function" and type(frame.InitButtons) == "function" then
+        pcall(hooksecurefunc, frame, "InitButtons", again)
+    end
+    if type(frame.HookScript) == "function" then pcall(frame.HookScript, frame, "OnShow", again) end
+end
 
 -------------------------------------------------------------------------------
 -- Skin pass
@@ -60,8 +140,16 @@ local function SkinOne(entry)
     SkinPanel(frame, {
         fillColor = COLOR_BG,
         borderColor = COLOR_BORDER,
+        title = entry.title,
+        bandHeight = entry.bandHeight,
     })
     frame.fsPopupSkin = true
+
+    if entry.hide then FS.PanelSkins.HideNamed(entry.hide) end
+    if entry.menu then
+        SkinMenuButtons(frame)
+        HookMenuButtons(frame)
+    end
 
     if SkinButton and entry.name:match("^StaticPopup%d$") then
         for i = 1, STATIC_POPUP_BUTTON_COUNT do
