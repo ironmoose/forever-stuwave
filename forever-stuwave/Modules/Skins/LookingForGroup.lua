@@ -13,10 +13,15 @@
 -- FS.ButtonSkins.SkinTextButton (textures, font objects and post-hooks), and the rest is Hide() on the
 -- art of the three pages, re-hidden by PanelSkins.HideNamed when a page is shown again.
 --
+-- The Browse page's results scroll bar wears the shared scroll bar skin (FS.ScrollBarSkins). The Listing page's
+-- activity list bar (LFGListingFrameActivityViewScrollBar) is left stock on purpose: ElvUI's TBC skin of this
+-- window has a skin on that one commented out as confirmed to taint the group finder, and nothing here can show
+-- ours would not.
+--
 -- NOT skinned here, because no shared skin for them exists yet (tracked by the UI audit): the Category,
--- Filter by activity and role dropdown buttons, the Who page's search box, the results scroll bar, the
--- refresh, options and search icon buttons, the role buttons' check boxes, and the three side tabs. They keep
--- their Blizzard look, as do the role, tab and category icons.
+-- Filter by activity and role dropdown buttons, the Who page's search box, the refresh, options and search icon
+-- buttons, the role buttons' check boxes, and the three side tabs. They keep their Blizzard look, as do the
+-- role, tab and category icons.
 
 local _, FS = ...
 
@@ -96,6 +101,15 @@ local function SkinTextButtons()
         local button = _G[entry.name]
         if button then skin(button, { accent = entry.accent }) end
     end
+end
+
+-- The Browse results list's scroll bar, found by name and told by shape, so an old style slider (no Track) keeps
+-- its Blizzard look. The shared skin is idempotent; asking first keeps a rescan from handing it the bar again.
+local function SkinResultsScrollBar()
+    local skins = FS.ScrollBarSkins
+    local bar = _G.LFGBrowseFrameScrollBar
+    if not (skins and skins.IsScrollBar and skins.Skin and skins.IsScrollBar(bar)) then return end
+    if not (skins.Parts and skins.Parts(bar)) then skins.Skin(bar) end
 end
 
 -- The Who page's Filter button has no global name and its key is not known, so it is found by what it says:
@@ -195,6 +209,7 @@ local function Scan()
     SkinWindow()
     HidePageChrome()
     SkinTextButtons()
+    SkinResultsScrollBar()
     SkinFilterButton()
     HookCategoryButtons()
     SkinCategoryButtons()

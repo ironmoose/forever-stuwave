@@ -16,6 +16,8 @@ flows. The mock makes `SetScript` and `SetAttribute` throw, so any such write fa
     dropdowns, the role buttons and the tabs are not skinned (no shared skin for them exists yet);
   * the Who page's Filter button is found by its label, however deep it sits, and not by guessing a key;
   * category buttons get a ring and halo as they are added and when they are already there, once each;
+  * the Browse page's results scroll bar wears the shared scroll bar skin, once, when it is a modern bar;
+    the Listing page's activity list bar is left alone (a skin on it is known to taint the group finder);
   * a second scan adds no second hook.
 
 The mock is NOT the real client. Run:
@@ -143,7 +145,7 @@ end
 
 -- Loads the real PanelSkins.lua and LookingForGroup.lua over recorders for the Theme and the button skins.
 function Load()
-    local calls = { panels = {}, text = {}, rings = {}, degraded = {} }
+    local calls = { panels = {}, text = {}, rings = {}, degraded = {}, bars = {}, barParts = {} }
     local FS = {
         calls = calls,
         LogDegradeOnce = function(key, msg) calls.degraded[#calls.degraded + 1] = { key, msg } end,
@@ -155,6 +157,11 @@ function Load()
         },
         ButtonSkins = {
             SkinTextButton = function(button, opts) calls.text[#calls.text + 1] = { button = button, opts = opts or {} } end,
+        },
+        ScrollBarSkins = {
+            IsScrollBar = function(obj) return type(obj) == "table" and obj.isBar == true end,
+            Parts = function(bar) return calls.barParts[bar] end,
+            Skin = function(bar) calls.bars[#calls.bars + 1] = bar; calls.barParts[bar] = {}; return true end,
         },
     }
     assert(loadstring(PANELSKINS_SRC, "@PanelSkins.lua"))("forever-stuwave", FS)
@@ -340,6 +347,35 @@ case("a_second_scan_adds_no_second_hook_and_still_never_writes_a_script_or_attri
         assert(#(f.hooks.OnShow or {}) == n, f.fsName .. " gained OnShow hooks: " .. n .. " -> " .. #(f.hooks.OnShow or {}))
     end
     assert(#FS.calls.panels == 1, "SkinPanel ran again")
+""")
+
+case("the_browse_results_scroll_bar_wears_the_shared_skin_once", """
+    local W = BuildWindow()
+    local bar = Adopt(W.browse, Blizz("LFGBrowseFrameScrollBar", "Frame", { isBar = true }))
+    local FS = Load()
+    FireEvent("PLAYER_ENTERING_WORLD")
+    FireEvent("PLAYER_ENTERING_WORLD")
+    ShowAgain(W.browse)
+    assert(#FS.calls.bars == 1 and FS.calls.bars[1] == bar, "skin calls on the results bar: " .. #FS.calls.bars)
+""")
+
+case("the_listing_activity_list_scroll_bar_is_left_alone_and_a_bar_of_another_shape_is_not_skinned", """
+    local W = BuildWindow()
+    local activityBar = Adopt(W.listing, Blizz("LFGListingFrameActivityViewScrollBar", "Frame", { isBar = true }))
+    local old = Adopt(W.browse, Blizz("LFGBrowseFrameScrollBar", "Slider"))     -- an old style slider, no Track
+    local FS = Load()
+    FireEvent("PLAYER_ENTERING_WORLD")
+    assert(#FS.calls.bars == 0, "a bar was skinned: " .. #FS.calls.bars)
+    assert(activityBar.hides == 0, "the activity bar was hidden")
+""")
+
+case("a_missing_scroll_bar_skin_or_a_missing_bar_is_a_quiet_no_op", """
+    local W = BuildWindow()
+    local FS = Load()
+    FireEvent("PLAYER_ENTERING_WORLD")                  -- no LFGBrowseFrameScrollBar yet
+    FS.ScrollBarSkins = nil
+    Adopt(W.browse, Blizz("LFGBrowseFrameScrollBar", "Frame", { isBar = true }))
+    FireEvent("PLAYER_ENTERING_WORLD")
 """)
 
 
