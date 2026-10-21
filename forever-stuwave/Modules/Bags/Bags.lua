@@ -89,9 +89,8 @@ local MAX_CONTAINERS = 13 -- historical NUM_CONTAINER_FRAMES ceiling; loop skips
 -- SetNormalTexture/SetNormalAtlas can build a fresh normal texture (the money
 -- buttons do after ClearNormalTexture) and Initialize builds `ItemSlotBackground`,
 -- so those three methods get a post-hook that re-sweeps and holds whatever region
--- exists now. A held region also gets a post-hook on its own SetAlpha that writes
--- 0 again (MicroBars.lua's recipe: a per-REGION guard against our own write
--- re-entering the hook, a weak-keyed table so nothing is kept alive): the 12.1
+-- exists now. How a region is held (alpha 0 plus a SetAlpha post-hook) is FS.HeldArt,
+-- shared with the close and text button skins: the 12.1
 -- ContainerFrame/BankFrame/ItemButton source writes alpha on none of these regions
 -- but the IconBorder (ItemButtonMixin:SetAlpha), so for the rest that hook is only a
 -- guard against another writer. SetAtlas and SetTexture on
@@ -104,55 +103,14 @@ local MAX_CONTAINERS = 13 -- historical NUM_CONTAINER_FRAMES ceiling; loop skips
 -- ItemContextOverlay, Cooldown, Count, the lock/desaturate state, the pushed and
 -- highlight textures (interaction feedback) and ExtendedSlot (the
 -- locked-until-secured marker, ContainerFrameItemButtonMixin:UpdateExtended).
-local held = setmetatable({}, { __mode = "k" })      -- region -> zeroed and its SetAlpha hook installed
-local zeroing = setmetatable({}, { __mode = "k" })   -- region -> our own write is in flight
 local clearing = setmetatable({}, { __mode = "k" })  -- icon -> our own clear is in flight
 
 local ART_FIELDS = { "NormalTexture", "ItemSlotBackground", "Background", "IconBorder" }
 local ART_SETTERS = { "SetNormalTexture", "SetNormalAtlas", "Initialize" }
 local EMPTY_SLOT_ATLASES = { ["bags-item-slot64"] = true, ["warband-bank-slot"] = true }
 
-local function ZeroRegion(region)
-    if zeroing[region] then return end
-    zeroing[region] = true
-    pcall(region.SetAlpha, region, 0)
-    zeroing[region] = nil
-end
-
-local function IsTexture(region)
-    if type(region) ~= "table" or type(region.GetObjectType) ~= "function" then return false end
-    local ok, kind = pcall(region.GetObjectType, region)
-    return ok and kind == "Texture"
-end
-
-local function HoldRegion(region)
-    if held[region] or not IsTexture(region) or type(region.SetAlpha) ~= "function" then return end
-    ZeroRegion(region)
-    if type(hooksecurefunc) ~= "function" then
-        held[region] = true -- nothing to install, nothing to retry
-        return
-    end
-    -- Recorded only once the hook is in, so a failed install is tried again on the next sweep.
-    if pcall(hooksecurefunc, region, "SetAlpha", ZeroRegion) then held[region] = true end
-end
-
--- Holds the button's normal texture whichever way it is reached: the NormalTexture
--- parentKey, and whatever GetNormalTexture hands back now (the engine can swap it
--- for a new region, MoneyFrame_Update does after ClearNormalTexture).
-local function HoldNormalTexture(button)
-    HoldRegion(button.NormalTexture)
-    if type(button.GetNormalTexture) == "function" then
-        local ok, normal = pcall(button.GetNormalTexture, button)
-        if ok then HoldRegion(normal) end
-    end
-end
-
-local function HookNormalSetters(button, methods, sweep)
-    if type(hooksecurefunc) ~= "function" then return end
-    for _, method in ipairs(methods) do
-        if type(button[method]) == "function" then pcall(hooksecurefunc, button, method, sweep) end
-    end
-end
+local HeldArt = FS.HeldArt
+local HoldRegion, HoldNormalTexture, HookNormalSetters = HeldArt.Hold, HeldArt.HoldNormal, HeldArt.HookSetters
 
 local function SweepSlotArt(button)
     if not button then return end

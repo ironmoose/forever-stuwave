@@ -15,6 +15,7 @@ Core/IconStyleData.lua
 Core/IconStyle.lua
 Core/SpellArt.lua
 Core/ChevronCastBar.lua
+Core/HeldArt.lua
 Core/PanelSkins.lua
 Modules/Tracker/Tracker.lua
 Modules/Chat/ChatCore.lua

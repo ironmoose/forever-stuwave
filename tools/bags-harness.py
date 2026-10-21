@@ -87,6 +87,7 @@ ADDON = HERE.parent / "forever-stuwave"
 BAGS_LUA = Path(os.environ.get("BAGS_LUA") or ADDON / "Modules/Bags/Bags.lua")   # BAGS_LUA: a mutated scratch copy
 DATABAR_LUA = ADDON / "Modules/DataBars/DataBar.lua"
 THEME_LUA = ADDON / "Core/Theme.lua"
+HELDART_LUA = ADDON / "Core/HeldArt.lua"
 
 
 # ---------------------------------------------------------------------------------------
@@ -532,6 +533,8 @@ UIParent = new("Frame", nil)
 _G.UIParent = UIParent
 
 function __load(src)
+    -- Bags.lua holds Blizzard's slot art through FS.HeldArt (Core/HeldArt.lua, loaded before it in the .toc)
+    assert(loadstring(HELDART_SRC, "@HeldArt.lua"))("forever-stuwave", FS)
     local chunk = assert(loadstring(src, "@Bags.lua"))
     chunk("forever-stuwave", FS)
 end
@@ -643,6 +646,7 @@ class World:
     def __init__(self, src: str | None = None, *, with_plate_helper: bool = True, pre: str = "") -> None:
         self.rt = LuaRuntime(unpack_returned_tuples=False)
         self.g = self.rt.globals()
+        self.g.HELDART_SRC = HELDART_LUA.read_text(encoding="utf-8")
         self.rt.eval("function(src) assert(loadstring(src))() end")(MOCK)
         self.run(f"FS.Theme.COLOR_EPIC_RING = {epic_ring_table()}")
         self.run("""
