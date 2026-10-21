@@ -56,6 +56,7 @@ Modules/Bags/BagBar.lua
 Modules/Skins/HudText.lua
 Modules/Skins/IssueReporter.lua
 Modules/Skins/AuctionHouse.lua
+Modules/Skins/LookingForGroup.lua
 Modules/Diagnostics/Diagnostics.lua
 Modules/CombatHud/HudSpells.lua
 Modules/CombatHud/HudProfiles.lua

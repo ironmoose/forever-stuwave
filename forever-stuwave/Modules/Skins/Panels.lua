@@ -102,9 +102,9 @@ local PANEL_FRAMES = {
 -- ItemSocketingFrame -- bespoke parchment/border art layered on
 -- ButtonFrameTemplate (Blizzard_ItemSocketingUI.xml:143-242+), same bespoke
 -- family as Calendar/Achievement.
--- LFGParentFrame -- template unverified against the retail 12.1.0 source tree
--- (absent entirely); excluded on the unverified-template bar, unlike
--- Calendar/Achievement, which ARE verified.
+-- LFGParentFrame -- not a PANEL_FRAMES entry: its window source is not in the
+-- retail 12.1.0 tree, so Skins/LookingForGroup.lua skins it by the global names
+-- in the 16001 dump, with its own page-art and button handling.
 
 -- Content-child strip/hide/retint specs (FS.PanelSkins.ApplyGuts), one entry
 -- per PANEL_FRAMES parent that leaves leftover parchment on its own children.
