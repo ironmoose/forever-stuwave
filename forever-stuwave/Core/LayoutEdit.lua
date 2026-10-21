@@ -15,7 +15,6 @@ local MIN_HANDLE = 12
 local EDGE = 2
 local PAGE_KEY = "layout"
 local DONE_W, DONE_H, PANEL_W, PANEL_H = 64, 24, 214, 44
-local INK = { 0.090, 0.047, 0.165, 1 }
 
 -- Display order is also the label table; an id without an applied frame gets no handle.
 local MOVABLE = {
@@ -402,26 +401,22 @@ local function NewDonePanel()
     done:SetSize(DONE_W, DONE_H)
     done:SetPoint("RIGHT", panel, "RIGHT", -10, 0)
     done:RegisterForClicks("LeftButtonUp")
-    local fill = Theme and Theme.AddCutSliceFill and Theme.AddCutSliceFill(done, INK, 6)
-    if Theme and Theme.SkinButton then
-        Theme.SkinButton(done, { borderColor = { r, g, b, 1 }, chamfer = 6, glowAlpha = 0.35 })
-    end
-    done.label = done:CreateFontString(nil, "OVERLAY")
-    if Theme and Theme.ApplyMono then Theme.ApplyMono(done.label, 11, { r, g, b, 1 }) end
-    done.label:SetPoint("CENTER", done, "CENTER")
-    done.label:SetText("DONE")
+    -- A Button needs a font object before it can hold text.
+    done:SetNormalFontObject(_G.GameFontNormal)
+    done:SetText("DONE")
 
+    -- The tooltip handlers go on before the skin, which post-hooks the same scripts for its hover look.
     done:SetScript("OnEnter", function(self)
-        if fill then fill:SetVertexColor(INK[1] + (r - INK[1]) * 0.16, INK[2] + (g - INK[2]) * 0.16, INK[3] + (b - INK[3]) * 0.16, 1) end
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
         GameTooltip:SetText("Save and leave layout edit. Esc does the same.", 1, 1, 1, 1, true)
         GameTooltip:Show()
     end)
     done:SetScript("OnLeave", function()
-        if fill then fill:SetVertexColor(INK[1], INK[2], INK[3], 1) end
         GameTooltip:Hide()
     end)
     done:SetScript("OnClick", function() LayoutEdit.Done() end)
+    -- The shared STUwave text button in cyan: the plate, ring and halo, hover and pressed looks, the label fonts.
+    if FS.ButtonSkins and FS.ButtonSkins.SkinTextButton then FS.ButtonSkins.SkinTextButton(done, { accent = "cyan" }) end
     panel.done = done
     panel:Hide()
     return panel

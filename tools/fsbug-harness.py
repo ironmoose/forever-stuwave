@@ -1480,11 +1480,22 @@ case("frame_has_a_close_button", """
         if fr._kind == "Button" and fr._scripts.OnClick then close = fr end
     end
     assert(close, "Close button missing")
-    local label
-    for _, c in ipairs(close._children) do if c._text == "Close" then label = c end end
-    assert(label, "button reads Close")
+    assert(close._text == "Close", "button reads Close: " .. tostring(close._text))
+    assert(close._calls.SetNormalFontObject, "a button needs a font object before it can hold text")
     close._scripts.OnClick(close)
     assert(f:IsShown() == false)
+""")
+
+case("the_close_button_is_the_shared_text_button_in_the_violet_default", """
+    local FS = NewFS()
+    local skinned = {}
+    FS.ButtonSkins = { SkinTextButton = function(button, opts) skinned[#skinned + 1] = { button = button, opts = opts } end }
+    local _, BR = LoadBR({ FS = FS })
+    BR.ShowFrame("x")
+    assert(#skinned == 1, "text buttons skinned: " .. #skinned)
+    local b = skinned[1].button
+    assert(b._text == "Close" and b._scripts.OnClick, "it is the Close button")
+    assert(b._calls.SetNormalFontObject, "a font object before the text")
 """)
 
 case("a_build_that_throws_partway_leaves_no_visible_orphan_frame", """

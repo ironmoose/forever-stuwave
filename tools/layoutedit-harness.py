@@ -116,6 +116,8 @@ function Frame:StopMovingOrSizing() self._moving = false end
 function Frame:GetParent() return self._parent end
 function Frame:CreateTexture() return newRegion() end
 function Frame:CreateFontString() return newRegion() end
+function Frame:SetText(t) self._text = t end
+function Frame:GetText() return self._text end
 function Frame:GetEffectiveScale() return 1 end
 -- Anchor solver: UIParent is the only anchor target a checked frame uses.
 function Frame:_rect()
@@ -188,7 +190,7 @@ EditModeManagerFrame = {
     EnterEditMode = function() __blizTouched = __blizTouched + 1 end,
 }
 
-__themed = { panels = {}, buttons = {}, fills = {} }
+__themed = { panels = {}, buttons = {}, fills = {}, text = {} }
 FS_THEME_STUB = {
     COLOR_POWER = { 0.133, 0.878, 1, 1 },
     ApplyMono = function() end,
@@ -199,17 +201,20 @@ FS_THEME_STUB = {
         return newRegion()
     end,
 }
+FS_BUTTONSKINS_STUB = {
+    SkinTextButton = function(button, opts) __themed.text[#__themed.text + 1] = { button = button, opts = opts } end,
+}
 """
 
 SESSION = r"""
 function(layoutSrc, configSrc, editSrc)
     __frames, __printed, __errors, __timers, __moves = { UIParent }, {}, {}, {}, {}
     __combat, __shift, __bliz, __blizTouched = false, false, false, 0
-    __themed.panels, __themed.buttons, __themed.fills = {}, {}, {}
+    __themed.panels, __themed.buttons, __themed.fills, __themed.text = {}, {}, {}, {}
     GameTooltip._text, GameTooltip._shown, GameTooltip._owner = nil, false, nil
     SlashCmdList = {}
     ForeverSTUwaveDB = nil
-    FS = { Theme = FS_THEME_STUB }
+    FS = { Theme = FS_THEME_STUB, ButtonSkins = FS_BUTTONSKINS_STUB }
     assert(load(layoutSrc, "@Layout.lua"))("forever-stuwave", FS)
     assert(load(configSrc, "@Config.lua"))("forever-stuwave", FS)
     __fire("ADDON_LOADED", "forever-stuwave")
@@ -1135,7 +1140,7 @@ function T.the_done_panel_shows_only_while_editing()
     eq(overlay()._mouse, false, "the overlay still lets the mouse through")
     eq(panel._protected, nil, "a plain non-secure frame")
     eq(panel.done._template, nil, "no Blizzard button template")
-    eq(panel.done.label:GetText(), "DONE")
+    eq(panel.done:GetText(), "DONE", "the button holds its own label")
     local point, rel, relPoint, _, y = panel:GetPoint(1)
     eq(point, "TOP"); eq(rel, UIParent); eq(relPoint, "TOP"); eq(y < 0, true, "just below the top edge")
     FS.LayoutEdit.Exit()
@@ -1149,10 +1154,12 @@ function T.the_done_panel_is_built_from_the_theme_builders()
     FS.LayoutEdit.Enter()
     local panel = FS.LayoutEdit.GetDonePanel()
     eq(#__themed.panels, 1); eq(__themed.panels[1], panel)
-    eq(#__themed.buttons, 1); eq(__themed.buttons[1], panel.done)
-    eq(#__themed.fills, 1); eq(__themed.fills[1], panel.done)
+    eq(#__themed.text, 1, "the DONE button is the shared text button"); eq(__themed.text[1].button, panel.done)
+    eq(__themed.text[1].opts.accent, "cyan")
+    eq(#__themed.buttons, 0, "no hand drawn ring"); eq(#__themed.fills, 0, "no hand drawn face")
     FS.LayoutEdit.Exit(); FS.LayoutEdit.Enter()
     eq(#__themed.panels, 1, "skinned once, not on every Enter")
+    eq(#__themed.text, 1, "the button is skinned once too")
 end
 
 function T.clicking_done_leaves_edit_mode()

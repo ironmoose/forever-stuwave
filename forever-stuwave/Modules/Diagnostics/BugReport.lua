@@ -975,15 +975,12 @@ local function Build()
     local close = CreateFrame("Button", nil, frame)
     close:SetSize(90, 22)
     close:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -PAD, 12)
-    local skinnedButton = th and th.SkinButton and pcall(th.SkinButton, close)
-    if not skinnedButton then
-        local fill = close:CreateTexture(nil, "BACKGROUND")
-        fill:SetAllPoints(close)
-        fill:SetColorTexture(0.227, 0.129, 0.408, 0.9)
-    end
-    local closeLabel = Label(close, "Close", 11, cyan)
-    closeLabel:SetPoint("CENTER", close, "CENTER", 0, 0)
+    -- A Button needs a font object before it can hold text. The shared STUwave text button (FS.ButtonSkins) draws the
+    -- plate, ring and halo and sets the label fonts; without it the button is a plain label.
+    close:SetNormalFontObject(_G.GameFontNormal)
+    close:SetText("Close")
     close:SetScript("OnClick", function() frame:Hide() end)
+    if FS.ButtonSkins and FS.ButtonSkins.SkinTextButton then FS.ButtonSkins.SkinTextButton(close) end
 
     -- Escape closes it through the client's own special-frame stack, once.
     local specials = _G.UISpecialFrames
