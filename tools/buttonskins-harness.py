@@ -217,7 +217,7 @@ function NewButton(parent, opts)
 end
 
 function CreateFrame(kind, name, parent)
-    local f = new("Frame", parent)
+    local f = new(kind or "Frame", parent)
     if parent then parent.children[#parent.children + 1] = f end
     if name then f.name = name; _G[name] = f end
     return f
@@ -253,6 +253,37 @@ function LoadButtonSkins()
 end
 
 function Near(a, b, eps) return math.abs(a - b) <= (eps or 1e-6) end
+
+-- A panel frame with a stock Blizzard icon-only close button (24 x 24, four state textures), as
+-- UIPanelCloseButtonDefaultAnchors builds it. Returns frame, button.
+function StockX(frame_name)
+    local frame = CreateFrame("Frame", frame_name)
+    frame.w, frame.h = 400, 300
+    local b = NewButton(frame, { states = { "Normal", "Pushed", "Highlight", "Disabled" } })
+    b.points.TOPRIGHT = { rel = frame, rp = "TOPRIGHT", x = 1, y = 0 }
+    return frame, b
+end
+
+function Mix(a, b, t) return { a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t } end
+function SameRgb(c, want, eps)
+    return c and Near(c[1], want[1], eps or 1e-4) and Near(c[2], want[2], eps or 1e-4) and Near(c[3], want[3], eps or 1e-4)
+end
+-- A glyph cell's pixel position in the button (x right, y down), from its TOPLEFT anchor and the pixels per unit.
+function CellPx(t)
+    local p = t.points.TOPLEFT
+    return math.floor(p.x * PPU + 0.5), math.floor(-p.y * PPU + 0.5)
+end
+function CellSet(parts)
+    local set, n = {}, 0
+    for _, t in ipairs(parts.glyph) do
+        if t.shown then
+            local x, y = CellPx(t)
+            set[x .. "," .. y] = true
+            n = n + 1
+        end
+    end
+    return set, n
+end
 """
 
 CASES: list[tuple[str, str]] = []
@@ -351,6 +382,303 @@ case("hold_button_does_not_error_on_a_table_that_is_not_a_frame", """
     H.HoldButton(nil)
     H.HoldNormal({})
 """)
+
+# ---------------------------------------------------------------------------
+# The close button (the X)
+# ---------------------------------------------------------------------------
+
+case("x_button_hides_the_stock_art_and_keeps_it_hidden", """
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    B.SkinCloseButton(b)
+    for _, kind in ipairs({ "Normal", "Pushed", "Highlight", "Disabled" }) do
+        local t = b["Get" .. kind .. "Texture"](b)
+        assert(t.alpha == 0, kind .. " state texture is held hidden")
+        t:SetAlpha(1)
+        assert(t.alpha == 0, kind .. " stays hidden when Blizzard re-asserts it")
+        t:SetAtlas("RedButton-Exit")
+        assert(t.alpha == 0, kind .. " stays hidden across an atlas swap")
+    end
+""")
+
+case("x_button_is_a_14_unit_plate_seated_top_right_minus_5_minus_3_with_a_roomier_hit_rect", """
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    B.SkinCloseButton(b, { anchor = frame })
+    assert(b.w == 14 and b.h == 14, "plate " .. b.w .. " x " .. b.h)
+    local p = b.points.TOPRIGHT
+    assert(p and p.rel == frame and p.rp == "TOPRIGHT" and p.x == -5 and p.y == -3,
+        "seat " .. tostring(p and p.x) .. "," .. tostring(p and p.y))
+    local n = 0
+    for _ in pairs(b.points) do n = n + 1 end
+    assert(n == 1, "exactly one anchor, the stock TOPRIGHT +1,0 is gone: " .. n)
+    assert(b.hit and b.hit[1] == -3 and b.hit[2] == -3 and b.hit[3] == -2 and b.hit[4] == -3, "hit insets")
+""")
+
+case("x_button_seats_to_its_parent_when_no_anchor_frame_is_given", """
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    B.SkinCloseButton(b)
+    assert(b.points.TOPRIGHT.rel == frame, "the button's parent")
+""")
+
+case("x_button_plate_is_an_even_pixel_count_and_its_offsets_are_whole_pixels", """
+    PPU = 1.2   -- the player's display: effective scale 0.64 at 1440p
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    B.SkinCloseButton(b, { anchor = frame })
+    -- 14 units = 16.8 px, rounded up to the next even count, 18 px = 15 units
+    assert(Near(b.w, 15) and Near(b.h, 15), "plate " .. b.w)
+    local p = b.points.TOPRIGHT
+    assert(Near(p.x, -5) and Near(p.y, -4 / 1.2), "offsets are 6 px and 4 px: " .. p.x .. "," .. p.y)
+""")
+
+case("x_glyph_is_a_six_by_six_pixel_x_centred_in_the_plate", """
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    B.SkinCloseButton(b)
+    local parts = B.Parts(b)
+    local set, n = CellSet(parts)
+    assert(n == 12, "twelve one pixel squares: " .. n)
+    -- margin (14 - 6) / 2 = 4 on every side; two diagonals of a 6 x 6 square
+    for k = 0, 5 do
+        assert(set[(4 + k) .. "," .. (4 + k)], "main diagonal " .. k)
+        assert(set[(4 + 5 - k) .. "," .. (4 + k)], "anti diagonal " .. k)
+    end
+    for _, t in ipairs(parts.glyph) do assert(Near(t.w, 1) and Near(t.h, 1), "a pixel is one unit at 1 px per unit") end
+""")
+
+case("x_glyph_stays_six_physical_pixels_and_centred_when_a_unit_is_1_2_pixels", """
+    PPU = 1.2
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    B.SkinCloseButton(b)
+    local parts = B.Parts(b)
+    local set, n = CellSet(parts)
+    assert(n == 12, "twelve cells: " .. n)
+    -- an 18 px plate: margin (18 - 6) / 2 = 6
+    for k = 0, 5 do
+        assert(set[(6 + k) .. "," .. (6 + k)], "main diagonal " .. k)
+        assert(set[(6 + 5 - k) .. "," .. (6 + k)], "anti diagonal " .. k)
+    end
+    for _, t in ipairs(parts.glyph) do assert(Near(t.w, 1 / 1.2), "one pixel is 1/1.2 unit: " .. t.w) end
+""")
+
+case("x_glyph_cells_snap_to_the_pixel_grid_with_no_texel_bias", """
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    B.SkinCloseButton(b)
+    for i, t in ipairs(B.Parts(b).glyph) do
+        assert(t.snap == true and t.bias == 0, "cell " .. i .. " snaps with bias 0")
+    end
+""")
+
+case("x_button_rests_as_ink_with_a_pink_ring_halo_and_glyph", """
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    B.SkinCloseButton(b)
+    local parts = B.Parts(b)
+    assert(SameRgb(parts.face.tint, Theme.COLOR_BUTTON_INK), "face is ink")
+    assert(SameRgb(parts.ring.tint, Theme.COLOR_HEALTH) and Near(parts.ring.tint[4], 0.70), "ring pink at .70")
+    assert(SameRgb(parts.halo.tint, Theme.COLOR_HEALTH) and Near(parts.halo.tint[4], 0.35), "halo pink at .35")
+    assert(SameRgb(parts.glyph[1].color, Theme.COLOR_HEALTH) and Near(parts.glyph[1].color[4], 1), "glyph pink")
+    assert(parts.disc.shown == false or Near(parts.disc.tint[4], 0), "no glyph glow at rest")
+""")
+
+case("x_button_hover_stays_pink_washes_the_face_and_lights_the_ring_halo_and_glyph", """
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    B.SkinCloseButton(b)
+    local parts = B.Parts(b)
+    b:Fire("OnEnter")
+    assert(SameRgb(parts.face.tint, Mix(Theme.COLOR_BUTTON_INK, Theme.COLOR_HEALTH, 0.16)), "face + 16% pink")
+    assert(Near(parts.ring.tint[4], 1.0) and Near(parts.halo.tint[4], 0.70), "ring 1.0, halo .70")
+    assert(SameRgb(parts.glyph[1].color, Mix(Theme.COLOR_HEALTH, { 1, 1, 1 }, 0.12)), "glyph lifts toward white by 12%")
+    assert(parts.disc.shown and SameRgb(parts.disc.tint, Theme.COLOR_HEALTH) and Near(parts.disc.tint[4], 0.45), "glow disc .45")
+    b:Fire("OnLeave")
+    assert(SameRgb(parts.face.tint, Theme.COLOR_BUTTON_INK) and Near(parts.ring.tint[4], 0.70), "back to rest on leave")
+""")
+
+case("x_button_pressed_goes_further_than_hover_and_releases_back_to_hover", """
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    B.SkinCloseButton(b)
+    local parts = B.Parts(b)
+    b:Fire("OnEnter")
+    b:Fire("OnMouseDown")
+    assert(SameRgb(parts.face.tint, Mix(Theme.COLOR_BUTTON_INK, Theme.COLOR_HEALTH, 0.32)), "face + 32% pink")
+    assert(Near(parts.ring.tint[4], 1.0) and Near(parts.halo.tint[4], 0.50), "ring 1.0, halo .50")
+    assert(SameRgb(parts.glyph[1].color, Mix(Theme.COLOR_HEALTH, { 1, 1, 1 }, 0.40)), "glyph +40% white")
+    assert(Near(parts.disc.tint[4], 0.30), "glow .30")
+    b:Fire("OnMouseUp")
+    assert(SameRgb(parts.face.tint, Mix(Theme.COLOR_BUTTON_INK, Theme.COLOR_HEALTH, 0.16)), "released: hover again")
+""")
+
+case("x_button_disabled_dims_every_piece_to_four_tenths_and_ignores_the_mouse", """
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    B.SkinCloseButton(b)
+    local parts = B.Parts(b)
+    b:Disable()
+    assert(Near(parts.ring.tint[4], 0.70 * 0.4) and Near(parts.halo.tint[4], 0), "ring dimmed, halo off")
+    assert(Near(parts.face.tint[4], 0.4), "face alpha .4: " .. tostring(parts.face.tint[4]))
+    assert(Near(parts.glyph[1].color[4], 0.4), "glyph alpha .4")
+    b:Fire("OnEnter"); b:Fire("OnMouseDown")
+    assert(SameRgb(parts.face.tint, Theme.COLOR_BUTTON_INK), "a disabled button takes no hover or press wash")
+    b:Enable()
+    assert(Near(parts.face.tint[4], 1) and Near(parts.ring.tint[4], 1.0 * 1), "enabled again, still hovered: lit")
+""")
+
+case("x_button_never_touches_scripts_attributes_or_the_enabled_state", """
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    local click = function() end
+    b.scripts.OnClick = click
+    local calls = 0
+    for _, m in ipairs({ "SetScript", "SetEnabled", "Enable", "Disable", "SetAttribute", "SetText" }) do
+        b[m] = function() calls = calls + 1 end
+    end
+    B.SkinCloseButton(b)
+    assert(calls == 0, "skin wrote through " .. calls .. " forbidden setters")
+    assert(b.scripts.OnClick == click, "the click handler is untouched")
+""")
+
+case("x_button_on_a_protected_frame_in_combat_gets_chrome_but_no_geometry", """
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    b.protected = true
+    COMBAT = true
+    local geometry = 0
+    for _, m in ipairs({ "SetSize", "SetWidth", "SetHeight", "SetPoint", "ClearAllPoints", "SetHitRectInsets" }) do
+        local base = b[m]
+        b[m] = function(self, ...) geometry = geometry + 1; return base(self, ...) end
+    end
+    B.SkinCloseButton(b)
+    assert(geometry == 0, "geometry writes in combat: " .. geometry)
+    assert(B.Parts(b) and #B.Parts(b).glyph == 12, "the chrome was still built")
+    assert(b:GetNormalTexture().alpha == 0, "the stock art is still held")
+    COMBAT = false
+    b:Fire("OnShow")
+    assert(b.w == 14, "seated once combat ends and the button is shown")
+""")
+
+case("x_button_is_reseated_on_show_when_the_pixel_scale_changed", """
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    B.SkinCloseButton(b)
+    assert(b.w == 14, "14 units at 1 px per unit")
+    PPU = 1.2
+    b:Fire("OnShow")
+    assert(Near(b.w, 15), "18 px plate at 1.2 px per unit: " .. b.w)
+    local set, n = CellSet(B.Parts(b))
+    assert(n == 12 and set["6,6"] and set["11,6"], "glyph re-seated on the larger plate")
+""")
+
+case("x_skin_is_idempotent", """
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    B.SkinCloseButton(b)
+    local regions, hooks = #b.regions, 0
+    for _, list in pairs(b.hooks) do hooks = hooks + #list end
+    B.SkinCloseButton(b)
+    local hooks2 = 0
+    for _, list in pairs(b.hooks) do hooks2 = hooks2 + #list end
+    assert(#b.regions == regions, "no second set of textures: " .. regions .. " -> " .. #b.regions)
+    assert(hooks2 == hooks, "no second set of script hooks")
+""")
+
+case("x_button_keeps_a_ring_and_glow_an_earlier_skin_button_call_drew", """
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    Theme.SkinButton(b)                    -- the old Popups path
+    local earlier = b.fsSkin.border.ring
+    B.SkinCloseButton(b)
+    assert(earlier.alpha == 1, "the earlier ring is not held hidden")
+    assert(B.Parts(b).ring == earlier, "and it is the ring the states paint")
+""")
+
+case("new_close_button_builds_a_plain_button_with_the_x_and_the_click_handler", """
+    local B = LoadButtonSkins()
+    local parent = CreateFrame("Frame")
+    local clicked = 0
+    local b = B.NewCloseButton(parent, function() clicked = clicked + 1 end)
+    assert(b:GetParent() == parent and b:GetObjectType() == "Button", "a button of the parent")
+    assert(b.points.TOPRIGHT.rel == parent and b.points.TOPRIGHT.x == -5 and b.points.TOPRIGHT.y == -3, "seat")
+    assert(#B.Parts(b).glyph == 12, "the X")
+    b.scripts.OnClick(b)
+    assert(clicked == 1, "click handler runs")
+""")
+
+# ---------------------------------------------------------------------------
+# Which button of a panel is the X
+# ---------------------------------------------------------------------------
+
+case("resolve_finds_the_close_panel_button_the_close_button_the_border_frame_one_and_the_global", """
+    local B = LoadButtonSkins()
+    local frame = CreateFrame("Frame", "ResolvePanel")
+    local a = NewButton(frame, {})
+    local c = NewButton(frame, { text = "Close" })
+    local border = CreateFrame("Frame", nil, frame)
+    local d = NewButton(border, {})
+    local e = NewButton(frame, {})
+    frame.ClosePanelButton, frame.CloseButton, frame.BorderFrame = a, c, { CloseButton = d }
+    _G.ResolvePanelCloseButton = e
+    local found = B.ResolveCloseButtons(frame)
+    local by = {}
+    for _, f in ipairs(found) do by[f.button] = f.kind end
+    assert(#found == 4, "four buttons: " .. #found)
+    assert(by[a] == "x" and by[d] == "x" and by[e] == "x", "icon-only buttons are X buttons")
+    assert(by[c] == "text", "a button with a label is a text button")
+""")
+
+case("resolve_lists_a_button_reachable_two_ways_once_and_ignores_what_is_not_a_button", """
+    local B = LoadButtonSkins()
+    local frame = CreateFrame("Frame", "DupPanel")
+    local a = NewButton(frame, {})
+    frame.ClosePanelButton, frame.CloseButton = a, a
+    _G.DupPanelCloseButton = a
+    assert(#B.ResolveCloseButtons(frame) == 1, "once")
+    frame.ClosePanelButton, frame.CloseButton, _G.DupPanelCloseButton = "oops", {}, 7
+    assert(#B.ResolveCloseButtons(frame) == 0, "strings, plain tables and numbers are not buttons")
+    assert(#B.ResolveCloseButtons(nil) == 0, "nil frame")
+""")
+
+case("resolve_treats_a_button_whose_label_is_only_in_its_font_string_as_a_text_button", """
+    local B = LoadButtonSkins()
+    local frame = CreateFrame("Frame")
+    local b = NewButton(frame, { text = "Close" })
+    b.text = nil                    -- GetText answers nothing; the font string has the label
+    frame.CloseButton = b
+    assert(B.ResolveCloseButtons(frame)[1].kind == "text", "the font string's text counts")
+""")
+
+case("theme_skin_close_button_skins_the_panels_x_and_leaves_the_close_text_button_alone_for_now", """
+    local B = LoadButtonSkins()
+    local frame = CreateFrame("Frame", "SettingsLike")
+    local x = NewButton(frame, { states = { "Normal", "Pushed", "Highlight", "Disabled" } })
+    local text = NewButton(frame, { slices = true, states = { "Highlight" }, text = "Close" })
+    frame.ClosePanelButton, frame.CloseButton = x, text
+    Theme.SkinCloseButton(frame)
+    assert(B.Parts(x) and #B.Parts(x).glyph == 12, "the real X got the pink X")
+    assert(B.Parts(text) == nil or #B.Parts(text).glyph == 0, "the Close text button did NOT get an X glyph")
+""")
+
+case("theme_skin_panel_skins_the_x_through_the_forwarder", """
+    local B = LoadButtonSkins()
+    local frame = CreateFrame("Frame", "PanelWithX")
+    frame.w, frame.h = 300, 200
+    local x = NewButton(frame, { states = { "Normal", "Pushed", "Highlight", "Disabled" } })
+    frame.ClosePanelButton = x
+    Theme.SkinPanel(frame, { title = "demo" })
+    assert(B.Parts(x), "SkinPanel reaches the close button")
+""")
+
+case("theme_skin_close_button_is_a_no_op_until_button_skins_is_loaded", """
+    local frame = CreateFrame("Frame")
+    Theme.SkinCloseButton(frame)
+    Theme.SkinCloseButton(nil)
+""")
+
 
 MOCK_HELPERS = r"""
 function new_texture() return CreateFrame("Frame"):CreateTexture(nil, "BACKGROUND") end

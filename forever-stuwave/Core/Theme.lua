@@ -40,6 +40,7 @@ Theme.DISPEL_COLORS = {
 }
 Theme.COLOR_BAR_TRACK  = { 0.039, 0.016, 0.086, 1 }    -- #0a0416 (bar bg)
 Theme.COLOR_BAR_BORDER = { 0.227, 0.129, 0.408, 1 }    -- #3a2168 (--line, 1px bar border)
+Theme.COLOR_BUTTON_INK = { 0.090, 0.047, 0.165, 1 }     -- #170c2a, the face of a close or text button (ConfigWindow's ink)
 Theme.COLOR_HEALTH     = { 1, 0.180, 0.592, 1 }        -- #ff2e97
 Theme.COLOR_POWER      = { 0.133, 0.878, 1, 1 }        -- #22e0ff
 -- Leading-edge caret colors (locked mockup values), passed as the `color`
@@ -1768,37 +1769,13 @@ function Theme.StripBlizzardChrome(frame, preserveTexture)
     end
 end
 
--- Skins Blizzard's close button to match: its own art stripped, our nine-sliced
--- button chrome, and a mono X. Panels kept reading as stock even where our
--- chrome landed, partly because the one control you always look at was still
--- Blizzard's gold-and-red circle.
+-- Skins a Blizzard panel's close controls to match: the icon-only X becomes the STUwave close button (a
+-- pink pixel X on a small cut plate seated inside the corner) and a labelled "Close" becomes a STUwave text
+-- button. FS.ButtonSkins (Core/ButtonSkins.lua) owns the how; it loads after this file, so it is looked up
+-- when called.
 function Theme.SkinCloseButton(frame)
-    local close = frame.CloseButton
-    if not close and frame.GetName and frame:GetName() then
-        close = _G[frame:GetName() .. "CloseButton"]
-    end
-    if not close or close.fsClose then return end
-    close.fsClose = true
-
-    for _, region in ipairs({ close:GetRegions() }) do
-        if region.GetObjectType and region:GetObjectType() == "Texture" then
-            pcall(region.SetTexture, region, nil)
-        end
-    end
-
-    local x = close:CreateFontString(nil, "OVERLAY")
-    Theme.ApplyMono(x, 12, Theme.COLOR_HEALTH)
-    x:SetPoint("CENTER", close, "CENTER", 0, 0)
-    x:SetText("X")
-
-    Theme.SkinButton(close, { borderColor = Theme.COLOR_HEALTH, glowSize = 4 })
-
-    -- The only motion on the panel: the X warms on hover, so the control reads
-    -- as live rather than painted on.
-    close:HookScript("OnEnter", function() x:SetTextColor(1, 1, 1, 1) end)
-    close:HookScript("OnLeave", function()
-        x:SetTextColor(Theme.COLOR_HEALTH[1], Theme.COLOR_HEALTH[2], Theme.COLOR_HEALTH[3], 1)
-    end)
+    local skins = FS.ButtonSkins
+    if skins and frame then skins.SkinFrameClose(frame) end
 end
 
 -- The panel chrome stack, extracted from SkinPanel so the nameplate plate and the XP
