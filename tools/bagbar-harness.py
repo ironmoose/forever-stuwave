@@ -64,6 +64,7 @@ HERE = Path(__file__).resolve().parent
 ADDON = HERE.parent / "forever-stuwave"
 BAGBAR_LUA = Path(os.environ.get("BAGBAR_LUA") or ADDON / "Modules/Bags/BagBar.lua")   # BAGBAR_LUA: a mutated scratch copy
 DECK_LUA = Path(os.environ.get("DECK_LUA") or ADDON / "Modules/ActionBars/Deck.lua")
+THEME_LUA = ADDON / "Core/Theme.lua"
 EPS = 0.01
 
 STOCK = {
@@ -398,12 +399,21 @@ def py(v):
     return v
 
 
+def epic_ring_table() -> str:
+    """Theme.COLOR_EPIC_RING exactly as Theme.lua writes it (the Epic edge colour, shared with Bags.lua): read, never retyped."""
+    m = re.search(r"Theme\.COLOR_EPIC_RING\s*=\s*(\{[^}]*\})", THEME_LUA.read_text(encoding="utf-8"))
+    if not m:
+        sys.exit("Theme.lua: COLOR_EPIC_RING not found")
+    return m.group(1)
+
+
 class World:
     def __init__(self, scale: float = 1.0, missing: str | None = None, combat_at_load: bool = False,
                  late_xp: bool = False, login_in_combat: bool = False, xp_after_login: bool = False,
                  timers: bool = False, no_art: bool = False):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
         self.lua.execute(MOCK)
+        self.lua.execute(f"FS.Theme.COLOR_EPIC_RING = {epic_ring_table()}")
         g = self.lua.globals()
         g.DECK_SRC = DECK_LUA.read_text(encoding="utf-8")
         g.BAGBAR_SRC = BAGBAR_LUA.read_text(encoding="utf-8")
@@ -782,6 +792,24 @@ function h_bag1() for _, x in ipairs(FS.BagBar.slots) do if x.key == "bag1" then
     w.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
     v = py(w.lua.eval("h_bag1().edge.vertex"))
     check("quality.a_changed_quality_colour_is_picked_up", v == [1, 0, 0, 0.85], f"{v}")
+
+    # Epic takes the shared ring colour (Theme.COLOR_EPIC_RING, the colour Bags.lua gives an Epic item slot's ring) at the
+    # same 0.85, not Blizzard's Epic; Theme.lua is the one source, so the edge reads the table the Theme holds.
+    w.lua.execute("ITEM_QUALITY_COLORS[4] = { r = 0.64, g = 0.21, b = 0.93 }; function GetInventoryItemQuality() return 4 end")
+    w.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
+    v = py(w.lua.eval("h_bag1().edge.vertex"))
+    want = py(w.lua.eval("{ FS.Theme.COLOR_EPIC_RING[1], FS.Theme.COLOR_EPIC_RING[2], FS.Theme.COLOR_EPIC_RING[3], 0.85 }"))
+    check("quality.an_epic_bag_edge_takes_the_shared_epic_ring_colour_at_0.85", v == want and v[:3] != [0.64, 0.21, 0.93], f"{v} want {want}")
+    w.lua.execute("FS.Theme.COLOR_EPIC_RING[1] = 0.25")
+    w.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
+    check("quality.the_epic_edge_follows_the_theme_table", py(w.lua.eval("h_bag1().edge.vertex"))[0] == 0.25)
+    w.lua.execute("FS.Theme.COLOR_EPIC_RING = nil")
+    w.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
+    v = py(w.lua.eval("h_bag1().edge.vertex"))
+    check("quality.without_the_theme_colour_epic_uses_the_quality_colour", v == [0.64, 0.21, 0.93, 0.85], f"{v}")
+    w.lua.execute("ITEM_QUALITY_COLORS[4] = nil")
+    w.g.h_fire("PLAYER_EQUIPMENT_CHANGED")
+    check("quality.without_either_epic_keeps_the_accent_edge", py(w.lua.eval("h_bag1().edge.vertex"))[3] == 0.75)
 
 
 def check_free_count_text() -> None:

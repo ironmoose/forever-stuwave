@@ -316,8 +316,9 @@ end
 -- ColorManager.GetColorDataForItemQuality(0), also override-aware. A client without ColorManager falls back to the
 -- ITEM_QUALITY_COLORS table BagBar.lua reads, and a client with neither keeps the default ring and logs once.
 -- EPIC is the exception: Blizzard's #a335ee sits almost on top of the default ring (#a855f7), so Epic gets a deeper
--- royal purple of our own, #6a1fd1 (about 2.4:1 against the panel, 1.9:1 against the default ring). Epic therefore
--- ignores a player's Epic colour override; every other quality follows it.
+-- royal purple of our own, Theme.COLOR_EPIC_RING (#6a1fd1; about 2.4:1 against the panel, 1.9:1 against the default
+-- ring), the same colour BagBar.lua gives an Epic bag's edge. Epic therefore ignores a player's Epic colour override;
+-- every other quality follows it. A Theme without the token gives Epic the Blizzard colour like the rest.
 --
 -- The quality is read per slot, not from Blizzard's border: C_Container.GetContainerItemInfo(bag, slot) for a container slot,
 -- the `itemInfo` Blizzard just read for a bank slot (BankPanelItemButtonMixin:RefreshItemInfo). Both are plain
@@ -325,8 +326,7 @@ end
 -- pass, which follows every UpdateItems and bank refresh, in combat too (bags are usable in combat, this API is not
 -- restricted, and only our own ring region is written). The icon's state hooks re-apply the cached colour: an
 -- icon that no longer holds an item drops it at once, without waiting for a pass.
-local QUALITY_POOR, QUALITY_COMMON, QUALITY_UNCOMMON, QUALITY_EPIC = 0, 1, 2, 4   -- Enum.ItemQuality
-local EPIC_RING_COLOR = { 0x6a / 255, 0x1f / 255, 0xd1 / 255 } -- #6a1fd1
+local QUALITY_POOR, QUALITY_UNCOMMON, QUALITY_EPIC = 0, 2, 4   -- Enum.ItemQuality
 
 local function BagIDOf(itemButton)
     if type(itemButton.GetBagID) ~= "function" then return nil end
@@ -391,7 +391,8 @@ end
 -- r, g, b of the ring for an item quality; nil for the default ring.
 local function QualityRingColor(quality)
     if type(quality) ~= "number" or IsSecretValue(quality) then return nil end
-    if quality == QUALITY_EPIC then return EPIC_RING_COLOR[1], EPIC_RING_COLOR[2], EPIC_RING_COLOR[3] end
+    local epic = FS.Theme.COLOR_EPIC_RING
+    if quality == QUALITY_EPIC and epic then return epic[1], epic[2], epic[3] end
     if quality ~= QUALITY_POOR and quality < QUALITY_UNCOMMON then return nil end -- Common, and anything below Poor
     return QualityColorChannels(quality)
 end

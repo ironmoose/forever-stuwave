@@ -271,6 +271,17 @@ local function PlaceIcon(slot)
     end
 end
 
+-- r, g, b of a bag's edge from Uncommon up: Epic takes Theme.COLOR_EPIC_RING (the colour Bags.lua gives an Epic item
+-- slot's ring, so the two read as one quality colour), the rest the quality colour ReadItem cached; nil when there is none.
+local QUALITY_EPIC = 4
+local function QualityEdgeColor(slot)
+    local epic = Theme.COLOR_EPIC_RING
+    if slot.quality == QUALITY_EPIC and epic then return epic[1], epic[2], epic[3] end
+    local qc = slot.qualityColor
+    if qc then return qc.r, qc.g, qc.b end
+    return nil
+end
+
 local function ApplySlotState(slot)
     local button = slot.button
     if not button then return end
@@ -278,6 +289,9 @@ local function ApplySlotState(slot)
     local isBag = slot.kind == "bag" or slot.kind == "reagent"
     local hasItem = slot.hasItem
     local open, hover, pressed, locked, drag = slot.open, slot.hover, slot.pressed, slot.locked, slot.dragTarget
+
+    local qr, qg, qb
+    if slot.quality and slot.quality >= 2 then qr, qg, qb = QualityEdgeColor(slot) end
 
     local er, eg, eb, ea
     if drag then
@@ -288,9 +302,8 @@ local function ApplySlotState(slot)
         er, eg, eb, ea = accent[1], accent[2], accent[3], 1
     elseif isBag and not hasItem then
         er, eg, eb, ea = EDGE_EMPTY[1], EDGE_EMPTY[2], EDGE_EMPTY[3], 0.55
-    elseif slot.quality and slot.quality >= 2 and slot.qualityColor then
-        local qc = slot.qualityColor
-        er, eg, eb, ea = qc.r, qc.g, qc.b, 0.85
+    elseif qr then
+        er, eg, eb, ea = qr, qg, qb, 0.85
     else
         er, eg, eb, ea = accent[1], accent[2], accent[3], 0.75
     end
