@@ -40,8 +40,15 @@ local D = {
     DASH = 3, DASH_THICK = 1.4, DASH_COUNT = 5,
     BRACKET = { OFF = 2.5, LEN = 6, THICK = 1.4 },
     TICK = 0.1,                 -- seconds between the ticker's looks
-    CARD = { W = 198, ROW = 27, ROWS = 4, TOP = 94, FOOT = 30,     -- TOP is where the first drop order row starts
-             SWATCH = 20, PITCH = 27, SWATCH_Y = 56 },
+    -- The editor card, 218 x 252: 20 wider and taller than the first mockup's 198 x 232, so the close X (seated 5 in and 3 down)
+    -- clears the name field (the old 20 down was inside the X's 3 + 15 tall plate and its halo). The extra height is 10 above the
+    -- name field (the header row the X sits in), 2 of swatch size, and 2 on each of the four rows; the extra width is the swatch
+    -- row's (seven of 22 on a pitch of 30 span the 202 inside the 8 margins) and the name field's, rows' and CLEAR's.
+    -- TOP is where the first drop order row starts; the other Ys are the tops of the name field, the OUTLINE label, the
+    -- swatches and the DROP ORDER label. A row is ROW - 4 tall (26 at one pixel per unit), so rounding to whole pixels at a
+    -- scale that is not 1 still leaves a pixel between two rows.
+    CARD = { W = 218, ROW = 29, ROWS = 4, TOP = 106, FOOT = 30,
+             SWATCH = 22, PITCH = 30, SWATCH_Y = 66, NAME_Y = 30, OUTLINE_Y = 55, LABEL_Y = 94 },
     BTN_PAD = 14,               -- design px each side of the label of an editor button that sizes to its text (the config
                                 -- window's buttons: width = text + 28)
     CONFIRM = 3,                -- seconds CLEAR stays armed
@@ -1108,13 +1115,13 @@ local function SeatCard()
     card.title:SetPoint("TOPLEFT", card, "TOPLEFT", u(8), -u(4))
     Mono(card.title, 10, MUTED)
     card.name:ClearAllPoints()
-    card.name:SetPoint("TOPLEFT", card, "TOPLEFT", u(8), -u(20))
+    card.name:SetPoint("TOPLEFT", card, "TOPLEFT", u(8), -u(C.NAME_Y))
     card.name:SetSize(cardW - 2 * u(8), even(18))
     Mono(card.name, 12, WHITE)
     card.nameEdges = card.nameEdges or Edges(card.name, "BORDER", 0)
     SeatEdges(card.nameEdges, card.name, thick)
     card.outline:ClearAllPoints()
-    card.outline:SetPoint("TOPLEFT", card, "TOPLEFT", u(8), -u(45))
+    card.outline:SetPoint("TOPLEFT", card, "TOPLEFT", u(8), -u(C.OUTLINE_Y))
     Mono(card.outline, 9, MUTED)
     card.outline:SetText("OUTLINE")
     -- the swatches: an even square each on one pitch, the dot an even square centred in it
@@ -1131,13 +1138,13 @@ local function SeatCard()
         PaintSwatch(sw)
     end
     card.label:ClearAllPoints()
-    card.label:SetPoint("TOPLEFT", card, "TOPLEFT", u(8), -u(82))
+    card.label:SetPoint("TOPLEFT", card, "TOPLEFT", u(8), -u(C.LABEL_Y))
     Mono(card.label, 9, MUTED)
     card.label:SetText("DROP ORDER")
     for i, row in ipairs(card.rows) do
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", card, "TOPLEFT", u(8), -u(C.TOP + (i - 1) * C.ROW))
-        row:SetSize(cardW - 2 * u(8), even(C.ROW - 3))
+        row:SetSize(cardW - 2 * u(8), even(C.ROW - 4))
         row.num:ClearAllPoints()
         row.num:SetPoint("LEFT", row, "LEFT", u(6), 0)
         Mono(row.num, 11, WHITE)

@@ -1833,7 +1833,7 @@ def check_the_card_layout_matches_the_mockup_on_whole_pixels_at_every_scale():
         steps = {round(xs[k + 1] - xs[k], 6) for k in range(6)}
         assert len(steps) == 1 and all(abs(x - round(x)) < 1e-6 for x in xs) and len(ys) == 1, f"es {es}: swatch pitch {steps}"
         assert abs(xs[0] - round(8 * sc * es)) < 1e-6, f"es {es}: the first swatch is not at the left margin"
-        assert abs(steps.pop() - 27 * sc * es) <= 1, f"es {es}: swatch pitch is off the mockup's 27"
+        assert abs(steps.pop() - 30 * sc * es) <= 1, f"es {es}: swatch pitch is off the card's 30"
         # the dot is centred in its swatch (both even)
         for w in sws:
             assert round(pw(w.dot._w)) % 2 == 0 and whole(w.dot._w)
@@ -1841,11 +1841,97 @@ def check_the_card_layout_matches_the_mockup_on_whole_pixels_at_every_scale():
         assert -pw(c.name._points[1].y) < -pw(sws[0]._points[1].y) < -pw(rows(lua)[0]._points[1].y)
         assert -pw(c.outline._points[1].y) < -pw(sws[0]._points[1].y) < -pw(c.label._points[1].y) < -pw(rows(lua)[0]._points[1].y)
         if es == 1.0:
-            assert float(c._h) == 232 and float(c._w) == 198, f"card {c._w}x{c._h}"
-            assert -float(sws[0]._points[1].y) == 56 and float(sws[0]._w) == 20 and float(sws[1]._points[1].x) - float(sws[0]._points[1].x) == 27
-            assert -float(rows(lua)[0]._points[1].y) == 94 and -float(rows(lua)[3]._points[1].y) == 94 + 81
-            assert float(rows(lua)[0]._h) == 24 and float(c.clear._h) == 18
-            assert -float(c.outline._points[1].y) == 45 and -float(c.label._points[1].y) == 82
+            assert float(c._h) == 252 and float(c._w) == 218, f"card {c._w}x{c._h}"
+            assert -float(c.name._points[1].y) == 30
+            assert -float(sws[0]._points[1].y) == 66 and float(sws[0]._w) == 22 and float(sws[1]._points[1].x) - float(sws[0]._points[1].x) == 30
+            assert -float(rows(lua)[0]._points[1].y) == 106 and -float(rows(lua)[3]._points[1].y) == 106 + 87
+            assert float(rows(lua)[0]._h) == 26 and float(c.clear._h) == 18
+            assert -float(c.outline._points[1].y) == 55 and -float(c.label._points[1].y) == 94
+
+
+def card_displays():
+    """(pixels per unit, layout scale) pairs the card is laid out at, the player's own display last."""
+    return ((1.0, 1.0), (0.64, 1.0), (1.3333333, 1.25), (1.5, 1.0), (2.2, 1.0), (1.2, LIVE_SCALE))
+
+
+def card_rect(widget, c, es):
+    """A widget of the card as (left, top, right, bottom) in physical pixels from the card's top left, from its one anchor to
+    the card (TOPLEFT, TOPRIGHT or BOTTOMLEFT) and its size."""
+    p = widget._points[1]
+    w, h = float(widget._w) * es, float(widget._h) * es
+    cw, ch = float(c._w) * es, float(c._h) * es
+    x, y = float(p.x or 0) * es, float(p.y or 0) * es
+    point = str(p.point)
+    left = x if "LEFT" in point else cw + x - w
+    top = -y if "TOP" in point else ch - y - h
+    return (left, top, left + w, top + h)
+
+
+def check_the_card_is_twenty_wider_and_taller_and_its_content_fills_it_with_equal_margins_and_nothing_clipped():
+    for es, sc in card_displays():
+        lua = boot(sc)
+        set_display(lua, es, sc)
+        i = make(lua)
+        DL(lua).OpenEditor(i)
+        c = card(lua)
+        cw, ch = float(c._w) * es, float(c._h) * es
+        assert abs(cw - 218 * sc * es) <= 2 and abs(ch - 252 * sc * es) <= 2, f"es {es}: card is {cw}x{ch} px, not 218x252 design px"
+        sws, rs = swatches(lua), rows(lua)
+        margin = card_rect(sws[0], c, es)[0]
+        # the swatch row spans the card's inner width: equal margins either side (rounding each position and the even sizes
+        # may cost two pixels at the largest scale)
+        last = card_rect(sws[-1], c, es)
+        assert abs((cw - last[2]) - margin) <= 2 + 1e-6, f"es {es}: swatch row margins {margin} and {cw - last[2]}"
+        for name, w in [("name", c.name), ("clear", c.clear)] + [(f"row{k}", r) for k, r in enumerate(rs)]:
+            l, t, r, b = card_rect(w, c, es)
+            assert abs(l - margin) <= 1e-6 and abs((cw - r) - margin) <= 2 + 1e-6, f"es {es}: {name} spans {l}..{r} of {cw}"
+        # nothing past the card's edge
+        for name, w in [("name", c.name), ("clear", c.clear), ("close", c.close)] + [(f"sw{k}", x) for k, x in enumerate(sws)] + \
+                [(f"row{k}", r) for k, r in enumerate(rs)]:
+            l, t, r, b = card_rect(w, c, es)
+            assert l >= -1e-6 and t >= -1e-6 and r <= cw + 1e-6 and b <= ch + 1e-6, f"es {es}: {name} sticks out: {(l, t, r, b)} of {(cw, ch)}"
+        # the order from the top, every gap positive and whole pixels: name, swatches, rows, clear
+        edges = [card_rect(c.name, c, es), card_rect(sws[0], c, es)] + [card_rect(r, c, es) for r in rs] + [card_rect(c.clear, c, es)]
+        for a, b in zip(edges, edges[1:]):
+            assert b[1] - a[3] >= 1 - 1e-6, f"es {es}: two rows touch or overlap: {a} then {b}"
+        for rect in edges:
+            assert all(abs(v - round(v)) < 1e-6 for v in rect), f"es {es}: off the pixel grid: {rect}"
+        gaps = [round(rs[k + 1]._points[1].y * es - rs[k]._points[1].y * es, 6) for k in range(3)]
+        assert max(abs(gap) for gap in gaps) - min(abs(gap) for gap in gaps) <= 1, f"es {es}: the rows are not on one pitch (to a pixel): {gaps}"
+        # CLEAR keeps the same gap under the last row as the rows keep from each other plus the old footer
+        assert card_rect(c.clear, c, es)[1] - card_rect(rs[-1], c, es)[3] >= 4 * sc * es - 1.5
+
+
+def check_the_close_x_at_its_seat_clears_the_name_field_and_the_halo_does_not_reach_it_at_every_scale():
+    for es, sc in card_displays():
+        lua = boot(sc)
+        set_display(lua, es, sc)
+        i = make(lua)
+        DL(lua).OpenEditor(i)
+        c = card(lua)
+        x = c.close
+        p = x._points[1]
+        assert str(p.point) == "TOPRIGHT" and sb.same(lua, p.rel, c), "the X hangs on the card's top right"
+        seat_r, seat_t = -float(p.x) * es, -float(p.y) * es
+        assert abs(seat_r - 5 * es) <= 1 and abs(seat_t - 3 * es) <= 1, f"es {es}: X seat {seat_r}, {seat_t} px is not 5, 3 units"
+        bottom = card_rect(x, c, es)[3]
+        name_top = card_rect(c.name, c, es)[1]
+        halo = 4                                          # the halo's four texel falloff, in screen pixels
+        assert name_top - bottom >= halo + 2, f"es {es}: the X ends {bottom} px down, the name field starts at {name_top}"
+        # and the X stays inside the card's right edge
+        assert card_rect(x, c, es)[2] <= float(c._w) * es - seat_r + 1e-6
+
+
+def check_the_card_still_hangs_on_the_tab_and_grows_up_and_left_away_from_it():
+    lua = boot()
+    i = make(lua)
+    DL(lua).OpenEditor(i)
+    c = card(lua)
+    p = c._points[1]
+    assert (p.point, p.relPoint) == ("BOTTOMRIGHT", "TOPRIGHT") and sb.same(lua, p.rel, btn(lua, "preset2")), "the card hangs on the last cell"
+    assert float(p.y) == 21 and float(p.x) == 4.4, "the card keeps its 21 unit rise and its 4.4 unit shift"
+    # bottom right anchored: the extra 20 wide and 20 tall land left of and above the old card, never on the tab below
+    assert float(c._h) + 21 <= 720 and float(c._w) <= 1280, "the card could leave the screen from a tab in the lower half"
 
 
 def dash_pixels(tile, es):
@@ -2923,6 +3009,9 @@ CHECKS = [
     check_the_card_has_a_row_of_seven_outline_swatches_that_choose_the_slots_colour,
     check_the_swatches_light_on_hover_and_press_restore_and_dim_while_the_presets_cannot_be_saved,
     check_the_card_layout_matches_the_mockup_on_whole_pixels_at_every_scale,
+    check_the_card_is_twenty_wider_and_taller_and_its_content_fills_it_with_equal_margins_and_nothing_clipped,
+    check_the_close_x_at_its_seat_clears_the_name_field_and_the_halo_does_not_reach_it_at_every_scale,
+    check_the_card_still_hangs_on_the_tab_and_grows_up_and_left_away_from_it,
     check_each_drop_order_row_is_one_button_for_its_whole_width_with_the_arrows_on_top,
     check_a_left_out_row_has_a_dashed_muted_box_and_a_small_dashes_label_and_no_ring,
     check_the_dashed_box_lights_every_pixel_of_the_rule_at_every_scale_and_the_left_out_icon_has_no_fill,
