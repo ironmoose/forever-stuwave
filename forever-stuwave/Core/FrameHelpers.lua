@@ -2019,8 +2019,9 @@ function Helpers.AttachQuickKeybind(button, commandName)
         local pad = Theme.SLICE_CUT2_GLOW_PAD or 4
         highlight:SetTexture(Theme.SLICE_CUT2_GLOW_TEXTURE)
         Theme.ApplyNineSlice(highlight, Theme.SLICE_CUT2_GLOW_MARGIN)
-        highlight:SetPoint("TOPLEFT", button, "TOPLEFT", -pad, pad)
-        highlight:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", pad, -pad)
+        -- The glow's pad is texels the engine draws one screen pixel each, so it overhangs by `pad` PIXELS (not units),
+        -- seated again when the scale changes and not touched in combat while the button is protected (Theme.RegisterGlow).
+        Theme.RegisterGlow(highlight, button, pad)
     else
         highlight:SetTexture(Theme.FLAT_TEXTURE)
         highlight:SetAllPoints(button)

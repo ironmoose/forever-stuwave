@@ -600,7 +600,7 @@ end
 # The real Theme.lua functions the bars' skinning runs through; see MOCK.
 THEME_FUNCTIONS = (
     "ApplyNineSlice", "AddSliceTexture", "AddCut2Texture",
-    "SnapCut", "CutSizeIcon", "Cut2ButtonSet", "SeatButtonGlow", "ReseatButtonGlows", "ListenForScale",
+    "SnapCut", "CutSizeIcon", "Cut2ButtonSet", "SeatGlow", "RegisterGlow", "ReseatGlows", "ListenForScale",
     "SkinButton", "SkinCutButton",
 )
 
@@ -1649,6 +1649,30 @@ function T.quickkeybind_mode_highlights_bindable_buttons()
     eq(petButton(1).QuickKeybindHighlightTexture:IsShown(), true)
     qkHide()
     eq(b.QuickKeybindHighlightTexture:IsShown(), false, "hidden again")
+end
+
+function T.quickkeybind_highlight_overhangs_by_its_pad_in_physical_pixels_and_follows_the_scale()
+    local ppu = 1.25
+    FS.FrameHelpers.PixelsPerUnit = function() return ppu end
+    local b = bareButton()
+    FS.FrameHelpers.AttachQuickKeybind(b, "ACTIONBUTTON1")
+    local h = b.QuickKeybindHighlightTexture
+    local function topLeftX()
+        for _, p in ipairs(h._points) do if p.point == "TOPLEFT" then return p.x end end
+    end
+    local function near(a, want) return a ~= nil and math.abs(a - want) < 1e-6 end
+    eq(near(topLeftX(), -4 / 1.25), true, "four pixels out at 1.25 pixels per unit: " .. tostring(topLeftX()))
+    ppu = 1.5
+    __fire_event("UI_SCALE_CHANGED")
+    eq(near(topLeftX(), -4 / 1.5), true, "seated again at 1.5: " .. tostring(topLeftX()))
+    b._protected = true
+    __combat = true
+    ppu = 2
+    __fire_event("DISPLAY_SIZE_CHANGED")
+    eq(near(topLeftX(), -4 / 1.5), true, "a protected button's highlight is not moved in combat")
+    __combat = false
+    __fire_event("PLAYER_REGEN_ENABLED")
+    eq(near(topLeftX(), -4 / 2), true, "seated at regen: " .. tostring(topLeftX()))
 end
 
 function T.quickkeybind_mouse_wheel_binding_is_enabled_in_the_mode()

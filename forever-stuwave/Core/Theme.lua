@@ -1780,7 +1780,7 @@ end
 
 -- The panel chrome stack, extracted from SkinPanel so the nameplate plate and the XP
 -- tooltip can share one call site: nine-sliced fill (furthest back), an additive glow
--- overhanging the frame by SLICE_GLOW_PAD (just in front of it, so it reads as light
+-- overhanging the frame by SLICE_GLOW_PAD physical pixels (Theme.RegisterGlow; just in front of it, so it reads as light
 -- coming off the panel rather than a halo behind it), then the 1px border. The shape comes
 -- from the SLICE_* constants (two-corner cut under "cut", rounded under "round"), so this
 -- function never names a corner. Returns fill, glow, border so a caller can retint them.
@@ -1799,9 +1799,10 @@ function Theme.AddPanelChrome(frame, opts)
 
     local glow = Theme.AddSliceTexture(frame, Theme.SLICE_GLOW_TEXTURE,
         { accent[1], accent[2], accent[3], glowAlpha },
-        "BACKGROUND", -1, -Theme.SLICE_GLOW_PAD)
+        "BACKGROUND", -1)
     Theme.ApplyNineSlice(glow, Theme.SLICE_GLOW_MARGIN)
     glow:SetBlendMode("ADD")
+    Theme.RegisterGlow(glow, frame, Theme.SLICE_GLOW_PAD)
 
     local border = Theme.AddSliceTexture(frame, Theme.SLICE_BORDER_TEXTURE,
         { accent[1], accent[2], accent[3], 1 }, "BORDER", 0)
@@ -1910,46 +1911,55 @@ end
 -- per unit that is `pad` (what every call used to write); at the player's 1.2 the old offset put the falloff 0.8 px out,
 -- a dark pixel between ring and halo (it read as a second ring around a small plate). FS.FrameHelpers loads after this
 -- file, so it is looked up when a button is skinned; a client that will not say gives one pixel per unit.
-Theme.glowSeats = setmetatable({}, { __mode = "k" }) -- button -> its skin (glow and pad in texels)
+Theme.glowSeats = setmetatable({}, { __mode = "k" }) -- glow region -> { anchor, pad (texels), skin }
 
--- Seats `skin.glow` on `button` for the pixel scale the button has now.
-function Theme.SeatButtonGlow(button, skin)
+-- Seats `glow` on `anchor` so it overhangs it by `pad` physical pixels, for the pixel scale the anchor has now.
+function Theme.SeatGlow(glow, anchor, pad)
     local helpers = FS.FrameHelpers
     local ok, ppu = false, nil
-    if helpers and helpers.PixelsPerUnit then ok, ppu = pcall(helpers.PixelsPerUnit, button) end
+    if helpers and helpers.PixelsPerUnit then ok, ppu = pcall(helpers.PixelsPerUnit, anchor) end
     if not ok or type(ppu) ~= "number" or ppu ~= ppu or ppu <= 0 then ppu = 1 end
-    local units = skin.glowPad / ppu
-    local glow = skin.glow
+    local units = pad / ppu
     if glow.ClearAllPoints then glow:ClearAllPoints() end
-    glow:SetPoint("TOPLEFT", button, "TOPLEFT", -units, units)
-    glow:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", units, -units)
+    glow:SetPoint("TOPLEFT", anchor, "TOPLEFT", -units, units)
+    glow:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", units, -units)
 end
 
--- Seats every skinned button's halo again for the pixel scale it has now (the UI scale or the resolution changed, or
--- the button was skinned before its scale settled). A skin that seats its own halo (`skin.managed`, ButtonSkins') is
--- left to its owner. A protected button's halo is not touched in combat: it is seated at PLAYER_REGEN_ENABLED.
-function Theme.ReseatButtonGlows()
+-- Seats a glow now and again whenever the pixel scale changes. `skin` (optional) is a button skin: one that seats its
+-- own halo (`skin.managed`, ButtonSkins') is left to its owner. Used by SkinButton, AddPanelChrome (the panel glow)
+-- and the Quick Keybind highlight.
+function Theme.RegisterGlow(glow, anchor, pad, skin)
+    Theme.SeatGlow(glow, anchor, pad)
+    Theme.glowSeats[glow] = { anchor = anchor, pad = pad, skin = skin }
+    Theme.ListenForScale()
+end
+
+-- Seats every registered glow again for the pixel scale it has now (the UI scale or the resolution changed, or the
+-- glow was seated before its scale settled). A glow whose anchor is protected is not touched in combat: it is seated
+-- at PLAYER_REGEN_ENABLED.
+function Theme.ReseatGlows()
     local combat = InCombatLockdown and InCombatLockdown()
-    for button, skin in pairs(Theme.glowSeats) do
-        if not skin.managed and skin.glow then
+    for glow, entry in pairs(Theme.glowSeats) do
+        local anchor = entry.anchor
+        if not (entry.skin and entry.skin.managed) then
             local locked = false
-            if combat and type(button.CanChangeProtectedState) == "function" then
-                local ok, can = pcall(button.CanChangeProtectedState, button)
+            if combat and type(anchor.CanChangeProtectedState) == "function" then
+                local ok, can = pcall(anchor.CanChangeProtectedState, anchor)
                 locked = ok and can == false
-            elseif combat and type(button.IsProtected) == "function" then
-                local ok, protected = pcall(button.IsProtected, button)
+            elseif combat and type(anchor.IsProtected) == "function" then
+                local ok, protected = pcall(anchor.IsProtected, anchor)
                 locked = ok and protected and true or false
             end
             if locked then
                 Theme.glowsPending = true
             else
-                pcall(Theme.SeatButtonGlow, button, skin)
+                pcall(Theme.SeatGlow, glow, anchor, entry.pad)
             end
         end
     end
 end
 
--- Made with the first skinned button, not at file load (the font retry listener above is the one frame Theme makes at load).
+-- Made with the first registered glow, not at file load (the font retry listener above is the one frame Theme makes at load).
 function Theme.ListenForScale()
     if Theme.glowEvents or type(CreateFrame) ~= "function" then return end
     local frame = CreateFrame("Frame")
@@ -1963,7 +1973,7 @@ function Theme.ListenForScale()
             if not Theme.glowsPending then return end
             Theme.glowsPending = false
         end
-        Theme.ReseatButtonGlows()
+        Theme.ReseatGlows()
     end)
 end
 
@@ -2042,10 +2052,7 @@ function Theme.SkinButton(button, opts)
         glow:SetVertexColor(r, g, b, glowAlpha)
 
         skin.glow = glow
-        skin.glowPad = pad
-        Theme.SeatButtonGlow(button, skin)
-        Theme.glowSeats[button] = skin
-        Theme.ListenForScale()
+        Theme.RegisterGlow(glow, button, pad, skin)
 
         -- Rounded border: ONE nine-sliced ring (slice_border.tga), not four
         -- rails plus four corner quads.

@@ -973,7 +973,7 @@ case("skinbutton_halos_are_seated_again_when_the_pixel_scale_changes_and_a_manag
     sb.glow:ClearAllPoints()
     sb.glow:SetPoint("TOPLEFT", b, "TOPLEFT", -9, 9)
     ppu = 1.25
-    Theme.ReseatButtonGlows()
+    Theme.ReseatGlows()
     assert(PointIs(sa.glow, "TOPLEFT", "TOPLEFT", -3.2, 3.2), "seated again at 1.25: " .. sa.glow.points.TOPLEFT.x)
     assert(PointIs(sb.glow, "TOPLEFT", "TOPLEFT", -9, 9), "a managed halo is not moved")
 """)
@@ -1007,6 +1007,56 @@ case("skinbutton_halo_of_a_protected_button_waits_for_regen_when_the_scale_chang
     handler(nil, "PLAYER_REGEN_ENABLED")
     assert(PointIs(ss.glow, "TOPLEFT", "TOPLEFT", -3.2, 3.2), "the protected halo was not seated at regen")
     assert(PointIs(sl.glow, "TOPLEFT", "TOPLEFT", -3.2, 3.2), "the locked halo was not seated at regen")
+""")
+
+case("panel_glow_reaches_its_pad_in_physical_pixels_and_is_seated_again_when_the_scale_changes", """
+    local ppu = 1.2
+    FS.FrameHelpers = { PixelsPerUnit = function() return ppu end }
+    local handler
+    local realCF = CreateFrame
+    CreateFrame = function(...)
+        local f = realCF(...)
+        f.SetScript = function(_, name, fn) if name == "OnEvent" then handler = fn end end
+        return f
+    end
+    local frame = NewFrame()
+    local _, glow = Theme.AddPanelChrome(frame)
+    local u = Theme.SLICE_GLOW_PAD / ppu
+    local tl, br = glow.points.TOPLEFT, glow.points.BOTTOMRIGHT
+    assert(Near(tl.x, -u) and Near(tl.y, u) and Near(br.x, u) and Near(br.y, -u), "panel glow at 1.2: " .. tl.x)
+    assert(#frame.regions == 3, "still exactly three regions")
+    ppu = 1.5
+    handler(nil, "UI_SCALE_CHANGED")
+    tl = glow.points.TOPLEFT
+    assert(Near(tl.x, -4 / 1.5), "seated again at 1.5: " .. tl.x)
+""")
+
+case("panel_glow_of_an_unprotected_frame_is_seated_in_combat_and_an_explicit_registration_follows_the_same_rules", """
+    local ppu = 1
+    FS.FrameHelpers = { PixelsPerUnit = function() return ppu end }
+    local handler
+    local realCF = CreateFrame
+    CreateFrame = function(...)
+        local f = realCF(...)
+        f.SetScript = function(_, name, fn) if name == "OnEvent" then handler = fn end end
+        return f
+    end
+    local inCombat = false
+    InCombatLockdown = function() return inCombat end
+    local panel, button = NewFrame(), NewFrame()
+    button.IsProtected = function() return true end
+    local _, panelGlow = Theme.AddPanelChrome(panel)
+    local keyGlow = button:CreateTexture()
+    Theme.RegisterGlow(keyGlow, button, 4)              -- what the Quick Keybind highlight does
+    assert(PointIs(keyGlow, "TOPLEFT", "TOPLEFT", -4, 4) and PointIs(keyGlow, "BOTTOMRIGHT", "BOTTOMRIGHT", 4, -4))
+    inCombat = true
+    ppu = 1.25
+    handler(nil, "DISPLAY_SIZE_CHANGED")
+    assert(PointIs(panelGlow, "TOPLEFT", "TOPLEFT", -3.2, 3.2), "an unprotected panel is seated in combat")
+    assert(PointIs(keyGlow, "TOPLEFT", "TOPLEFT", -4, 4), "a protected button's highlight was moved in combat")
+    inCombat = false
+    handler(nil, "PLAYER_REGEN_ENABLED")
+    assert(PointIs(keyGlow, "TOPLEFT", "TOPLEFT", -3.2, 3.2), "the highlight was not seated at regen")
 """)
 
 case("skinbutton_picks_the_chamfer_from_the_button_height", """
