@@ -568,7 +568,7 @@ fire("UNIT_SPELLCAST_SUCCEEDED", "party1", "x", 11572)
 check(#TD.Get() == 0, "a party member's cast is not ours")
 """)
 
-case("an_expired_ledger_entry_stays_as_an_absent_row_with_expiry_in_the_past")(r"""
+case("an_expired_ledger_entry_stays_listed_but_is_not_a_recast_cue")(r"""
 local TD = boot()
 AURAS = { aura("Rend", NOW + 21, 21, 0, "player", 11572) }
 TD.Subscribe(function() end)
@@ -577,7 +577,8 @@ IN_COMBAT = true
 cast(11572, guid())
 NOW = NOW + 30
 local e = TD.Get()[1]
-check(e and e.expires <= GetTime(), "the entry is still listed, its expiry is past: the view draws it as absent")
+check(e and e.expires <= GetTime(), "the entry is still listed with its expiry in the past")
+check(e.recast == nil, "and it carries no recast flag, so the view drops it at its expiry instead of drawing a dim row")
 """)
 
 case("regen_replaces_the_ledger_with_a_fresh_snapshot")(r"""
@@ -814,6 +815,8 @@ near(list[1].expires, NOW + 10, "the Hud's timer wins over the scan's"); near(li
 check(list[1].icon == 7001, "icon from the Hud row")
 check(list[1].id == 172 and list[2].id == 980, "a Hud row carries the spell id its name resolves to, got " .. tostring(list[1].id) .. ", " .. tostring(list[2].id))
 check(list[2].expires <= NOW, "an absent DoT is an entry with an expiry in the past (the recast cue)")
+check(list[1].recast == true and list[2].recast == true, "every Hud row is a recast cue: the view keeps it as a dim row after its expiry")
+check(byName(list, "Curse of Weakness").recast == nil, "a scanned debuff outside the profile is not a recast cue")
 check(not byName(list, "Immolate"), "an unknown DoT draws nothing")
 check(byName(list, "Curse of Weakness"), "a player debuff outside the profile still shows, after the profile rows")
 check(list[#list].name == "Curse of Weakness", "and it sorts after them")

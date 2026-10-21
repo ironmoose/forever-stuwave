@@ -334,9 +334,9 @@ Not yet checked in game. Mocked checks cover which module sits in which area, th
 
 Not yet checked in game. Mocked checks cover the layout, the time text, the combat rules and the data rules, not how it looks or what this client reports in combat. It is available to every class and shows only debuffs you applied.
 
-1. Horizontal: Warrior on a hostile mob, cast Rend and Sunder Armor. Each debuff gets a row (icon, time, drain bar), at most five rows. Time reads whole seconds above 3 s ("13s") and tenths below ("2.6s"); the bar drains 30 s to 0 and turns amber at 3 s or less. Sunder Armor shows "x2", "x3" as it stacks.
+1. Horizontal: Warrior on a hostile mob, cast Rend and Sunder Armor. Each debuff gets a row (icon, time, drain bar), at most five rows. Time reads whole seconds above 3 s ("13s") and tenths below ("2.6s"); the bar drains 30 s to 0 and turns amber at 3 s or less. Sunder Armor shows "x2", "x3" as it stacks. A debuff that runs out leaves its row at once and the rows below move up (a Shaman's Flame Shock after its 12 s, in or out of combat); only a Priest or Warlock DoT stays behind as a dim recast row (step 2).
 2. Vertical: pick Target Debuffs Vertical. The existing time axis shows compressed (about 3.7 px a second), 26 px right of the target cast bar, with TARGET DEBUFFS above it. A Priest or Warlock chip slides down toward the amber band; a DoT that is not on the target shows dim at 0 only in combat.
-3. In combat the numbers are an estimate: a cast that is resisted still counts, and refreshes that are not casts (a Rogue's poison procs, Deep Wounds) do not show until combat ends. A row with "--" has no known duration yet; it fills in after one fight on any mob with that debuff. Report a row that stays wrong after combat ends.
+3. In combat the numbers are an estimate: a cast that is resisted still counts, and refreshes that are not casts (a Rogue's poison procs, Deep Wounds) do not show until combat ends. A row with "?" has no known duration yet; it fills in after one fight on any mob with that debuff. Report a row that stays wrong after combat ends.
 4. Paladin: with the Class Module (Seal) in an area, Judgement is not listed in Target debuffs; Holy Vengeance and Hammer of Justice are. Retarget: the list restarts for the new target.
 
 ### Class Module: shards, combo points and totem poles

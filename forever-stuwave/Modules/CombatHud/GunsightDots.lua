@@ -4,13 +4,17 @@
 -- gunsightdots-harness.py parses the mockup for the numbers below, so a mockup edit fails there instead of drifting.
 --
 -- ABSENT CUE (player, 2026-10-03): the dim recast row or chip shows ONLY in combat; out of combat it is hidden and a
--- live one is never touched. "In combat" is a file-local flag driven by PLAYER_REGEN_DISABLED / PLAYER_REGEN_ENABLED
+-- live one is never touched. Only an entry flagged `recast` (the Hud's Priest and Warlock DoT rows) gets the cue; any
+-- other debuff, a Shaman's Flame Shock included, leaves its row when it runs out (player, 2026-10-20).
+-- "In combat" is a file-local flag driven by PLAYER_REGEN_DISABLED / PLAYER_REGEN_ENABLED
 -- and seeded from InCombatLockdown() OR UnitAffectingCombat(), because lockdown can still read false inside the
 -- REGEN_DISABLED dispatch; a throwing or secret answer reads as in combat so the cue is never hidden on a guess.
 -- A list push that finds both APIs plainly false clears a stuck flag (a missed REGEN_ENABLED), and never sets it.
 --
 -- MOTION: one OnUpdate per module, installed only while a row is live, places everything from expires - GetTime()
--- and allocates nothing. A row that runs out turns absent by itself, since the service pushes nothing at an expiry.
+-- and allocates nothing. The service pushes nothing at an expiry, so a recast row that runs out turns absent by itself,
+-- and any other row that runs out makes the module re-read the list it last got: Gather skips the expired entry and the
+-- rows below it close up.
 --
 -- CHIP: a dark plate, the icon seated inside the cut by FrameHelpers.SeatAuraTile, the cut ring over it (violet,
 -- amber inside the 3 s band), and a white pop for 0.35 s when the debuff is (re)applied. Masks do not clip on this
@@ -671,10 +675,12 @@ local function ToAbsent(m, row)
     SetRowShown(row, inCombat)
 end
 
+-- true while the row is still counting down. A row that ran out returns false: a recast row has turned absent, any
+-- other is left live for MakeStep to drop through a fresh Update.
 local function StepRow(m, row, now)
     local rem = row.expires - now
     if rem <= 0 then
-        ToAbsent(m, row)
+        if row.recast then ToAbsent(m, row) end
         return false
     end
     local band = rem <= D.BAND_S
@@ -691,12 +697,19 @@ end
 local function MakeStep(m)
     return function()
         local now = GetTime()
-        local live = 0
+        local live, ranOut = 0, false
         for i = 1, #m.rows do
             local row = m.rows[i]
-            if row.mode == "live" and StepRow(m, row, now) then live = live + 1 end
+            if row.mode == "live" then
+                if StepRow(m, row, now) then live = live + 1
+                elseif row.mode == "live" then ranOut = true end
+            end
         end
-        if live == 0 then StopTicking(m) end
+        if ranOut then
+            m.onList(m.list, m.lastEpoch)           -- the expired entry is skipped; Update stops the driver when none is left
+        elseif live == 0 then
+            StopTicking(m)
+        end
     end
 end
 
@@ -705,7 +718,7 @@ end
 -------------------------------------------------------------------------------
 
 local function ClearRow(m, row)
-    row.mode, row.key, row.iconId, row.expires, row.band, row.count = "off", nil, nil, nil, false, nil
+    row.mode, row.key, row.iconId, row.expires, row.band, row.count, row.recast = "off", nil, nil, nil, false, nil, nil
     row.fill, row.timeText, row.span = nil, nil, nil
     HidePop(row.chip)
     if m.kind == "V" then HideRail(row); row.railColor = nil end
@@ -724,6 +737,7 @@ local function UpdateRow(m, row, e, now, newTarget)
         return
     end
     local prevMode, prevExpires = row.mode, row.expires
+    row.recast = e.recast == true
     if row.key ~= name then
         prevMode, prevExpires = "off", nil
         HidePop(row.chip)                -- a flash belongs to the debuff that earned it
@@ -811,11 +825,19 @@ local function KnownExpiry(e)
     return true
 end
 
-local function Gather(m, list)
+-- A debuff that has run out takes no row, unless it is a recast cue (the Hud's DoT rows keep their dim row). An expiry
+-- that is secret or missing cannot be told, so that entry stays.
+local function RanOut(e, now)
+    if e.recast then return false end
+    local expires = Num(e.expires)
+    return expires ~= nil and expires <= now
+end
+
+local function Gather(m, list, now)
     local src, n = m.src, 0
     for i = 1, #list do
         local e = list[i]
-        if n < #m.rows and type(e) == "table" and (m.kind == "H" or KnownExpiry(e)) then
+        if n < #m.rows and type(e) == "table" and (m.kind == "H" or KnownExpiry(e)) and not RanOut(e, now) then
             n = n + 1
             src[n] = e
         end
@@ -824,7 +846,7 @@ local function Gather(m, list)
 end
 
 local function DropRow(m, row)
-    row.mode, row.key, row.iconId, row.expires, row.span = "off", nil, nil, nil, nil
+    row.mode, row.key, row.iconId, row.expires, row.span, row.recast = "off", nil, nil, nil, nil, nil
     pcall(row.frame.Hide, row.frame)
 end
 
@@ -832,8 +854,9 @@ local function Update(m, list, epoch)
     HealCombat()
     local newTarget = epoch ~= m.lastEpoch
     m.lastEpoch = epoch
-    Gather(m, type(list) == "table" and list or {})
+    m.list = list
     local now = GetTime()
+    Gather(m, type(list) == "table" and list or {}, now)
     local used, live = 0, false
     for i = 1, #m.rows do
         local row = m.rows[i]
@@ -922,7 +945,7 @@ local function ModuleSpec(m)
             m.active, m.area = false, nil
             if m.subscribed and FS.TargetDebuffs then FS.TargetDebuffs.Unsubscribe(m.onList) end
             m.subscribed = false
-            m.lastEpoch = nil
+            m.lastEpoch, m.list = nil, nil
             StopTicking(m)
             for i = 1, #m.rows do ClearRow(m, m.rows[i]) end
             m.body:Hide()

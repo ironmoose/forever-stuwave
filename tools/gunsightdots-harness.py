@@ -596,12 +596,15 @@ local function mount(id, area, rect)
 end
 
 local nid = 0
--- rem: seconds left, 0 = absent (expiry in the past), nil = unknown duration.
+-- rem: seconds left, 0 = absent (expiry in the past), nil = unknown duration. An entry is a ledger or scan row (it
+-- leaves when it runs out) unless o.recast says it is a Hud DoT row, the recast cue that stays as a dim row; an
+-- absent entry (rem <= 0) is always a Hud row, as the service's is.
 local function ent(name, rem, o)
     o = o or {}
     nid = nid + 1
     local e = { name = name, id = o.id, icon = (not o.noicon) and (9000 + nid) or nil, count = o.count or 1, order = nid, duration = o.duration or 18 }
     if rem == nil then e.expires = nil elseif rem <= 0 then e.expires = 0 else e.expires = NOW + rem end
+    if o.recast or (rem ~= nil and rem <= 0) then e.recast = true end
     return e
 end
 local function pushList(list, epoch)
@@ -945,7 +948,7 @@ end
 case("rows_slide_on_one_onupdate_and_the_driver_stops_when_none_is_live")(r"""
 boot()
 local m, frame = mount("debuffsH", "upper")
-pushList({ ent("Rend", 9), ent("Deep Wounds", 12) })
+pushList({ ent("Rend", 9, { recast = true }), ent("Deep Wounds", 12, { recast = true }) })
 check(onUpdateFrames() == 1 and frame.scripts.OnUpdate, "one OnUpdate, on the module frame")
 tick(1.0)
 check(m.rows[1].time.text == "8s" and m.rows[2].time.text == "11s", "times follow GetTime, got " .. m.rows[1].time.text .. " " .. m.rows[2].time.text)
@@ -955,13 +958,57 @@ local writes = m.rows[1].fillTex.setPointCalls
 tick(0.001)
 check(m.rows[1].fillTex.setPointCalls == writes, "a steady frame re-anchors nothing")
 tick(8)                                -- Rend runs out at 9 s (1.001 s are gone already)
-check(m.rows[1].mode == "absent" and m.rows[1].time.text == "--", "an expiring row turns absent by itself")
+check(m.rows[1].mode == "absent" and m.rows[1].time.text == "--", "an expiring recast row turns absent by itself")
 check(m.rows[2].mode == "live", "the other keeps counting")
 check(onUpdateFrames() == 1, "still one OnUpdate")
 tick(5)
 check(m.rows[2].mode == "absent" and onUpdateFrames() == 0, "the driver is gone with the last live row")
 pushList({})
 check(onUpdateFrames() == 0, "an empty list runs nothing")
+""")
+
+case("a_ledger_row_leaves_when_it_runs_out_and_the_rows_below_close_up")(r"""
+boot({ combat = true })
+local m = mount("debuffsH", "upper")
+pushList({ ent("Flame Shock", 5, { duration = 12 }), ent("Frost Shock", 8, { duration = 8 }) })
+check(m.rows[1].key == "Flame Shock" and m.rows[2].key == "Frost Shock", "setup: both rows live")
+tick(5.1)                              -- Flame Shock ran out with no push; Frost Shock has 2.9 s left
+check(m.rows[1].key == "Frost Shock" and m.rows[1].mode == "live", "the row below closes up, got " .. tostring(m.rows[1].key) .. " " .. m.rows[1].mode)
+check(m.rows[1].time.text == "2.9s", "and counts its own time, got " .. tostring(m.rows[1].time.text))
+local _, _, w = imgRect(m.rows[1].fillTex)
+near3(w, MU.BAR_W * 2.9 / 8, "its bar keeps its own length, not a fresh full bar")
+check(m.rows[2].mode == "off" and not isVisible(m.rows[2].frame), "the freed row is empty and hidden: no dim '--' row")
+check(onUpdateFrames() == 1, "the driver keeps counting the other row")
+tick(3)
+check(m.rows[1].mode == "off" and not isVisible(m.rows[1].frame) and not m.body:IsShown(), "the last one leaves too")
+check(onUpdateFrames() == 0, "and the driver stops")
+""")
+
+case("an_expired_ledger_entry_does_not_come_back_on_a_later_push")(r"""
+boot({ combat = true })
+local m = mount("debuffsH", "upper")
+local list = { ent("Flame Shock", 5, { duration = 12 }) }
+pushList(list)
+tick(6)
+check(m.rows[1].mode == "off" and not m.body:IsShown(), "setup: the row left")
+pushList(list)                         -- the service still lists the entry, its expiry is past
+check(m.rows[1].mode == "off" and not isVisible(m.rows[1].frame) and not m.body:IsShown(), "the same list does not bring it back")
+pushList({ ent("Flame Shock", 12, { duration = 12 }) })
+check(m.rows[1].mode == "live" and m.rows[1].time.text == "12s" and isVisible(m.rows[1].frame), "a recast does")
+-- an entry that is already past when the list arrives takes no row, and does not count against the five
+local old = ent("Frost Shock", 5); old.expires = NOW - 1
+pushList({ old, ent("A", 10), ent("B", 11), ent("C", 12), ent("D", 13), ent("E", 14) })
+check(m.rows[1].key == "A" and m.rows[5].key == "E" and m.rows[5].mode == "live", "five live rows, the expired one skipped, got " .. tostring(m.rows[1].key) .. " " .. tostring(m.rows[5].key))
+""")
+
+case("a_hud_recast_row_stays_as_the_dim_cue_while_a_ledger_row_beside_it_leaves")(r"""
+boot({ combat = true })
+local m = mount("debuffsH", "upper")
+pushList({ ent("Corruption", 4, { recast = true }), ent("Flame Shock", 4, { duration = 12 }) })
+tick(5)
+check(m.rows[1].key == "Corruption" and m.rows[1].mode == "absent" and m.rows[1].time.text == "--" and isVisible(m.rows[1].frame), "the Hud row turns into the dim cue")
+check(m.rows[2].mode == "off" and not isVisible(m.rows[2].frame), "the ledger row beside it is gone")
+check(onUpdateFrames() == 0, "nothing is live, so nothing ticks")
 """)
 
 case("the_band_pulses_and_a_row_enters_it_by_itself")(r"""
@@ -1186,7 +1233,7 @@ near3(y10b - y10, 8 * 112 / 30, "eight seconds less is 29.9 px further down the 
 case("vertical_chips_slide_and_the_absent_chip_follows_combat")(r"""
 boot({ combat = false })
 local m, frame = mount("debuffsV", "upper")
-pushList({ ent("Corruption", 0), ent("Immolate", 12) })
+pushList({ ent("Corruption", 0), ent("Immolate", 12, { recast = true }) })
 check(not isVisible(m.rows[1].frame), "out of combat the absent chip is hidden")
 check(isVisible(m.rows[2].frame) and m.rows[2].rail:IsShown(), "the live one is drawn")
 local _, y0 = imgCenter(m.rows[2].chip.frame)
@@ -1201,6 +1248,25 @@ tick(11.5)
 check(m.rows[2].mode == "absent" and isVisible(m.rows[2].frame), "an expired chip becomes the recast cue")
 near3(select(2, imgCenter(m.rows[2].chip.frame)), MU.AXB, "resting at 0")
 check(onUpdateFrames() == 0, "no OnUpdate with nothing live")
+""")
+
+case("a_vertical_ledger_chip_leaves_when_it_runs_out_and_the_lanes_close_up")(r"""
+boot({ combat = true })
+local m = mount("debuffsV", "upper")
+pushList({ ent("Flame Shock", 5, { duration = 12 }), ent("Frost Shock", 8, { duration = 8 }), ent("Corruption", 4, { recast = true }) })
+tick(5.1)                              -- Flame Shock is gone, Corruption (a Hud row) rests at 0, Frost Shock has 2.9 s
+check(m.rows[1].key == "Frost Shock" and m.rows[1].mode == "live" and isVisible(m.rows[1].frame), "the next chip takes lane 1")
+local cx, cy = imgCenter(m.rows[1].chip.frame)
+near3(cx, MU.LANES[1] - MU.LV_SHIFT, "lane 1 x")
+near3(cy, MU.AXB - 2.9 / 30 * (MU.AXB - MU.AXT), "and sits at the time it has left")
+check(m.rows[2].key == "Corruption" and m.rows[2].mode == "absent", "the Hud chip keeps its recast cue at 0")
+check(m.rows[3].mode == "off" and not isVisible(m.rows[3].frame) and not m.rows[3].rail:IsShown() and not m.rows[3].dot:IsShown(), "the freed lane is empty: no chip, rail or dot")
+tick(3)
+check(m.rows[1].key == "Corruption" and m.rows[1].mode == "absent" and m.rows[2].mode == "off", "the last ledger chip leaves, the cue stays")
+pushList({ ent("Flame Shock", 5, { duration = 12 }) })
+tick(6)
+check(m.rows[1].mode == "off" and not isVisible(m.rows[1].frame) and not m.body:IsShown() and not isVisible(m.parts.axis), "with nothing left the scale hides")
+check(onUpdateFrames() == 0, "and the driver stops")
 """)
 
 case("the_vertical_axis_takes_four_lanes_and_skips_entries_with_no_expiry")(r"""
