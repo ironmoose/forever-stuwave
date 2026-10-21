@@ -112,6 +112,20 @@ function ButtonSkins.XCells(n)
     return cells
 end
 
+-- The other glyphs of the plate, on the same 6 x 6 pixel grid and the same one pixel cells: a MINUS (a 6 x 2 bar, for a
+-- button that collapses something) and a PLUS (a two pixel cross, for one that expands it again).
+function ButtonSkins.GlyphCells(kind)
+    if kind == "minus" or kind == "plus" then
+        local cells = {}
+        for x = 0, 5 do cells[#cells + 1] = { x, 2 }; cells[#cells + 1] = { x, 3 } end
+        if kind == "plus" then
+            for _, y in ipairs({ 0, 1, 4, 5 }) do cells[#cells + 1] = { 2, y }; cells[#cells + 1] = { 3, y } end
+        end
+        return cells
+    end
+    return ButtonSkins.XCells(X.GLYPH)
+end
+
 -- True when the button is protected AND we are in combat: its size, anchors and hit rect are off limits.
 local function Locked(button)
     if not (InCombatLockdown and InCombatLockdown()) then return false end
@@ -155,6 +169,7 @@ end
 -- call drew them) plus a cut slice fill under them. Returns skin, face, flatFace.
 local function BuildPlate(button, accent, chamfer)
     local skin = Theme.SkinButton(button, { borderColor = accent, chamfer = chamfer, glowAlpha = STATES.normal.halo })
+    skin.managed = true -- SeatPlate seats the halo (inset and pixels), not Theme's own re-seat
     local face = Theme.AddCutSliceFill(button, Theme.COLOR_BUTTON_INK, chamfer)
     local flat = false
     if not face then
@@ -169,7 +184,6 @@ end
 local function Place(region, button, d)
     region:ClearAllPoints()
     region:SetPoint("TOPLEFT", button, "TOPLEFT", d, -d)
-    skin.managed = true -- SeatPlate seats the halo (inset and pixels), not Theme's own re-seat
     region:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -d, d)
 end
 
@@ -225,22 +239,31 @@ local function SeatX(button, p)
     if p.plateEs ~= es then SeatPlate(button, p, es) end
     local bw = math.floor((button:GetWidth() or 0) * es + 0.5)
     local bh = math.floor((button:GetHeight() or 0) * es + 0.5)
-    local key = bw .. ":" .. bh .. ":" .. es
+    local key = bw .. ":" .. bh .. ":" .. es .. ":" .. p.kind
     if p.glyphKey == key then return end
     p.glyphKey = key
     local px = 1 / es
     local mx, my = math.floor((bw - X.GLYPH) / 2), math.floor((bh - X.GLYPH) / 2)
-    for i, cell in ipairs(ButtonSkins.XCells(X.GLYPH)) do
+    local cells = ButtonSkins.GlyphCells(p.kind)
+    for i, cell in ipairs(cells) do
         local t = p.glyph[i]
+        if not t then
+            t = button:CreateTexture(nil, "OVERLAY", nil, 3)
+            Snap(t)
+            p.glyph[i] = t
+        end
         t:ClearAllPoints()
         t:SetSize(px, px)
         t:SetPoint("TOPLEFT", button, "TOPLEFT", (mx + cell[1]) * px, -(my + cell[2]) * px)
+        t:Show()
     end
+    for i = #cells + 1, #p.glyph do p.glyph[i]:Hide() end
 end
 
 -- Skins an icon-only close button as the STUwave X: its Blizzard art held hidden, a 14 unit cut plate with a
 -- pink ring and halo, a 6 x 6 pixel X. opts.anchor is the frame it is seated to (default its parent).
--- Idempotent; returns the skin pieces ({ face, ring, halo, disc, glyph }).
+-- opts.glyph is "x" (default), "minus" or "plus" (see SetGlyph). Idempotent; returns the skin pieces ({ face, ring,
+-- halo, disc, glyph }).
 function ButtonSkins.SkinCloseButton(button, opts)
     if type(button) ~= "table" or type(button.CreateTexture) ~= "function" then return nil end
     if parts[button] then return parts[button] end
@@ -248,7 +271,7 @@ function ButtonSkins.SkinCloseButton(button, opts)
 
     if FS.HeldArt then FS.HeldArt.HoldButton(button, OwnPieces(button)) end
 
-    local p = { hover = false, pressed = false, glyph = {}, inset = 0 }
+    local p = { hover = false, pressed = false, glyph = {}, inset = 0, kind = opts.glyph or "x" }
     parts[button] = p
     p.anchor = opts.anchor or (button.GetParent and button:GetParent()) or UIParent
 
@@ -261,16 +284,20 @@ function ButtonSkins.SkinCloseButton(button, opts)
     p.disc:SetSize(X.DISC, X.DISC)
     p.disc:SetPoint("CENTER", button, "CENTER", 0, 0)
 
-    for i = 1, #ButtonSkins.XCells(X.GLYPH) do
-        local t = button:CreateTexture(nil, "OVERLAY", nil, 3)
-        Snap(t)
-        p.glyph[i] = t
-    end
-
-    SeatX(button, p)
+    SeatX(button, p) -- makes and seats the glyph cells
     PaintX(button)
     HookScripts(button, p, PaintX, function(self) SeatX(self, p) end)
     return p
+end
+
+-- Switches a skinned plate's glyph to "x", "minus" or "plus" (a collapse button follows its state with it). Our
+-- own textures only.
+function ButtonSkins.SetGlyph(button, kind)
+    local p = parts[button]
+    if not p or p.kind == kind or not p.disc then return end
+    p.kind = kind
+    SeatX(button, p)
+    PaintX(button)
 end
 
 -- A new close button on `parent`, seated top right, calling `onClick` (the parent's own Hide, usually).

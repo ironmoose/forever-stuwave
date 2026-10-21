@@ -38,6 +38,7 @@ BUTTONSKINS_SRC = read_module("Core/ButtonSkins.lua")
 PANELSKINS_SRC = read_module("Core/PanelSkins.lua")
 POPUPS_SRC = read_module("Modules/Skins/Popups.lua")
 PANELS_SRC = read_module("Modules/Skins/Panels.lua")
+TRACKER_SRC = read_module("Modules/Tracker/Tracker.lua")
 
 MOCK = r"""
 COMBAT = false
@@ -88,6 +89,9 @@ function Obj:ClearAllPoints() self.points = {}; self.allPoints = nil end
 function Obj:SetAllPoints(rel) self.allPoints = rel or self.parent end
 function Obj:GetEffectiveScale() return self.scale or 1 end
 function Obj:SetFrameLevel(l) self.level = l end
+function Obj:SetFrameStrata(v) self.strata = v end
+function Obj:GetFrameStrata() return self.strata or "MEDIUM" end
+function Obj:SetWordWrap() end
 function Obj:GetFrameLevel() return self.level end
 function Obj:IsProtected() return self.protected == true end
 function Obj:GetName() return self.name end
@@ -297,6 +301,34 @@ end
 function StockText(parent, text, w, h)
     return NewButton(parent, { w = w or 96, h = h or 22, slices = true, states = { "Highlight" }, text = text })
 end
+-- The objective tracker as Blizzard builds it: a container with a Header (background art, text, the collapse button) and
+-- the NineSlice, and the header's SetCollapsed that the container calls on every toggle.
+function MakeTracker(opts)
+    opts = opts or {}
+    local frame = CreateFrame("Frame", "ObjectiveTrackerFrame", UIParent)
+    frame.w, frame.h = 260, 600
+    frame.isCollapsed = opts.collapsed or false
+    function frame:IsCollapsed() return self.isCollapsed end
+    local header = CreateFrame("Frame", nil, frame)
+    header.w, header.h = 260, 32
+    header.Background = header:CreateTexture(nil, "BACKGROUND")
+    header.Text = header:CreateFontString(nil, "ARTWORK")
+    if not opts.noButton then
+        header.MinimizeButton = NewButton(header, { w = 18, h = 19, states = { "Normal", "Pushed", "Highlight" } })
+        header.MinimizeButton.points.RIGHT = { rel = header, rp = "RIGHT", x = -1, y = 0 }
+        header.MinimizeButton.scripts.OnClick = function() frame.clicked = true end
+    end
+    function header:SetCollapsed(collapsed) self.collapsed = collapsed end
+    frame.Header = header
+    frame.NineSlice = CreateFrame("Frame", nil, frame)
+    return frame, header
+end
+function LoadTracker()
+    LoadButtonSkins()
+    assert(PANELSKINS_SRC ~= "" and TRACKER_SRC ~= "", "PanelSkins.lua / Tracker.lua missing")
+    assert(loadstring(PANELSKINS_SRC, "@PanelSkins.lua"))("forever-stuwave", FS)
+    assert(loadstring(TRACKER_SRC, "@Tracker.lua"))("forever-stuwave", FS)
+end
 function LoadPopups()
     LoadButtonSkins()
     assert(PANELSKINS_SRC ~= "" and POPUPS_SRC ~= "", "PanelSkins.lua / Popups.lua missing")
@@ -496,6 +528,60 @@ case("x_glyph_is_a_six_by_six_pixel_x_centred_in_the_plate", """
         assert(set[(4 + 5 - k) .. "," .. (4 + k)], "anti diagonal " .. k)
     end
     for _, t in ipairs(parts.glyph) do assert(Near(t.w, 1) and Near(t.h, 1), "a pixel is one unit at 1 px per unit") end
+""")
+
+case("minus_glyph_is_a_six_by_two_pixel_bar_centred_in_the_plate", """
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    B.SkinCloseButton(b, { glyph = "minus" })
+    local parts = B.Parts(b)
+    local set, n = CellSet(parts)
+    assert(n == 12, "twelve cells: " .. n)
+    for x = 4, 9 do for y = 6, 7 do assert(set[x .. "," .. y], "bar cell " .. x .. "," .. y) end end
+""")
+
+case("plus_glyph_is_a_two_pixel_cross_inside_a_six_by_six_square", """
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    B.SkinCloseButton(b, { glyph = "plus" })
+    local set, n = CellSet(B.Parts(b))
+    assert(n == 20, "twenty cells: " .. n)
+    for x = 4, 9 do for y = 6, 7 do assert(set[x .. "," .. y], "horizontal " .. x .. "," .. y) end end
+    for x = 6, 7 do for y = 4, 9 do assert(set[x .. "," .. y], "vertical " .. x .. "," .. y) end end
+""")
+
+case("set_glyph_switches_what_is_drawn_and_a_plain_x_stays_twelve_cells", """
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    B.SkinCloseButton(b)
+    local p = B.Parts(b)
+    assert(#p.glyph == 12, "an X makes twelve cells")
+    B.SetGlyph(b, "plus")
+    local _, n = CellSet(p)
+    assert(n == 20, "plus: " .. n)
+    B.SetGlyph(b, "minus")
+    local set, m = CellSet(p)
+    assert(m == 12 and set["4,6"] and not set["6,4"], "minus: " .. m)
+    B.SetGlyph(b, "x")
+    local set2, k = CellSet(p)
+    assert(k == 12 and set2["4,4"] and set2["9,9"], "and back to the X")
+    assert(SameRgb(p.glyph[1].color, Theme.COLOR_HEALTH), "painted in the glyph colour")
+""")
+
+case("every_glyph_cell_takes_the_state_colours_of_the_plate", """
+    local B = LoadButtonSkins()
+    local frame, b = StockX()
+    B.SkinCloseButton(b, { glyph = "plus" })
+    local p = B.Parts(b)
+    b.mouseOver = true; b:Fire("OnEnter")
+    for i, t in ipairs(p.glyph) do
+        assert(SameRgb(t.color, Mix(Theme.COLOR_HEALTH, { 1, 1, 1 }, 0.12)), "hover lift on cell " .. i)
+    end
+    b:Fire("OnLeave")
+    B.SetGlyph(b, "minus")
+    for i, t in ipairs(p.glyph) do
+        assert(SameRgb(t.color, Theme.COLOR_HEALTH), "rest colour on cell " .. i .. " after a switch")
+    end
 """)
 
 case("x_glyph_stays_six_physical_pixels_and_centred_when_a_unit_is_1_2_pixels", """
@@ -1025,6 +1111,43 @@ case("gossip_goodbye_and_trainer_train_are_text_buttons", """
 
 
 # ---------------------------------------------------------------------------
+# The objective tracker's collapse button
+# ---------------------------------------------------------------------------
+
+case("tracker_collapse_button_is_the_shared_plate_with_a_minus_and_keeps_its_click", """
+    local frame, header = MakeTracker()
+    local mb = header.MinimizeButton
+    local click = mb.scripts.OnClick
+    LoadTracker()
+    local p = Skinned(mb, "the collapse button")
+    assert(p.kind == "minus" and #p.glyph == 12, "expanded: a minus, " .. tostring(p.kind))
+    local pt = mb.points.TOPRIGHT
+    assert(pt and pt.rel == header and pt.x == -5 and pt.y == -3, "seated in the header's title band like the panels' X")
+    assert(mb.scripts.OnClick == click, "its click path is Blizzard's")
+    for _, kind in ipairs({ "Normal", "Pushed", "Highlight" }) do assert(mb["Get" .. kind .. "Texture"](mb).alpha == 0, kind .. " art held") end
+    assert(SameRgb(p.ring.tint, Theme.COLOR_HEALTH), "pink like the X")
+""")
+
+case("tracker_collapse_button_shows_a_plus_while_the_container_is_collapsed_and_follows_the_toggle", """
+    local frame, header = MakeTracker({ collapsed = true })
+    LoadTracker()
+    local p = Skinned(header.MinimizeButton, "the collapse button")
+    assert(p.kind == "plus", "collapsed at load: a plus, " .. tostring(p.kind))
+    header:SetCollapsed(false)
+    assert(p.kind == "minus", "expanded: a minus")
+    header:SetCollapsed(true)
+    assert(p.kind == "plus", "collapsed again")
+    assert(header.collapsed == true, "Blizzard's own SetCollapsed still ran")
+""")
+
+case("tracker_without_a_collapse_button_is_left_alone", """
+    local frame, header = MakeTracker({ noButton = true })
+    LoadTracker()
+    assert(frame.fsTrackerChromeBuilt, "the panel chrome still built")
+""")
+
+
+# ---------------------------------------------------------------------------
 # Plate geometry: one ring, a halo that hugs it, an inset that leaves a gap between stacked buttons
 # ---------------------------------------------------------------------------
 
@@ -1155,6 +1278,7 @@ def run_case(name: str, body: str) -> str | None:
     g.PANELSKINS_SRC = PANELSKINS_SRC
     g.POPUPS_SRC = POPUPS_SRC
     g.PANELS_SRC = PANELS_SRC
+    g.TRACKER_SRC = TRACKER_SRC
     try:
         rt.execute(MOCK)
         rt.execute(MOCK_HELPERS)

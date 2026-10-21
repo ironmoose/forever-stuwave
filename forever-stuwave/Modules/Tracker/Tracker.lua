@@ -73,6 +73,28 @@ end
 -- Container chrome: backdrop + title band
 -------------------------------------------------------------------------------
 
+-- The container's collapse button (the red "collapse all" button at the right of the header) wears the shared STUwave
+-- plate (pink ring and halo, hover wash, pressed and disabled looks, Blizzard's art held hidden). It collapses the
+-- tracker, it does not close it, so its glyph is a minus while the tracker is expanded and a plus once collapsed, kept
+-- in step by a post-hook on the header's SetCollapsed (the container calls it on every toggle). Skin only: Blizzard's
+-- OnClick, the button's parent and its protected state are not touched; it is seated top right inside our title band.
+local function SkinCollapseButton(frame, header)
+    local skins = FS.ButtonSkins
+    local button = header and header.MinimizeButton
+    if not (skins and skins.SkinCloseButton and button) then return end
+    local collapsed = false
+    if type(frame.IsCollapsed) == "function" then
+        local ok, value = pcall(frame.IsCollapsed, frame)
+        collapsed = ok and value == true
+    end
+    skins.SkinCloseButton(button, { anchor = header, glyph = collapsed and "plus" or "minus" })
+    if type(hooksecurefunc) == "function" and type(header.SetCollapsed) == "function" then
+        hooksecurefunc(header, "SetCollapsed", function(_, nowCollapsed)
+            skins.SetGlyph(button, nowCollapsed == true and "plus" or "minus")
+        end)
+    end
+end
+
 -- Content-height RECT signal: ObjectiveTrackerFrame's own GetHeight() is NOT
 -- content-sized in normal play -- ObjectiveTrackerContainerMixin:UpdateHeight
 -- (Blizzard_ObjectiveTrackerContainer.lua:189-210) only recomputes height from
@@ -182,8 +204,8 @@ local function BuildContainerChrome()
         if header.Text and header.Text.SetAlpha then
             header.Text:SetAlpha(0)
         end
-        -- MinimizeButton is left completely untouched: stays visible, stays
-        -- functional, per scope.
+        -- MinimizeButton keeps its own click path and place in the header; it is only skinned (SkinCollapseButton).
+        SkinCollapseButton(frame, header)
     end
 
     -- Blizzard's own NineSlice background is alpha'd out (not Hidden) so our
