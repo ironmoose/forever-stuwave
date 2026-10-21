@@ -42,6 +42,17 @@ local STATES = {
     disabled = { ring = 0.70, halo = 0,    wash = 0,    lift = 0,    glow = 0,    al = 0.4 },
 }
 
+-- The ring, face and halo are nine-sliced files, and the engine draws a sliced file's texels one PHYSICAL pixel
+-- each (the ring is one pixel and the chamfer three whatever a frame's scale), while an anchor offset is in UI
+-- units. Theme.SkinButton puts the halo 4 units past the ring, which is 4 texels only at one pixel per unit; at
+-- the player's 1.2 the four texel falloff starts 0.8 px out, leaving a dark pixel between ring and halo that
+-- reads as a second ring around a small plate (the X). The halo is therefore seated in pixels, HALO_PX past
+-- the ring, and a text button's plate is inset TEXT_INSET_PX inside the button so the halos of stacked buttons
+-- (the Game Menu's) leave a gap; a plate never gets smaller than MIN_PLATE_PX tall.
+local HALO_PX = Theme.SLICE_CUT2_GLOW_PAD or 4
+local TEXT_INSET_PX = 3
+local MIN_PLATE_PX = 12
+
 local parts = setmetatable({}, { __mode = "k" })  -- button -> its skin pieces and state
 
 function ButtonSkins.Parts(button)
@@ -155,6 +166,22 @@ local function BuildPlate(button, accent, chamfer)
     return skin, face, flat
 end
 
+local function Place(region, button, d)
+    region:ClearAllPoints()
+    region:SetPoint("TOPLEFT", button, "TOPLEFT", d, -d)
+    region:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -d, d)
+end
+
+-- Seats the face and ring p.inset physical pixels inside `button` and the halo HALO_PX past the ring. Only our
+-- own textures are anchored, so this is safe on a protected button in combat.
+local function SeatPlate(button, p, es)
+    local inset = p.inset / es
+    Place(p.face, button, inset)
+    Place(p.ring, button, inset)
+    Place(p.halo, button, inset - HALO_PX / es)
+    p.plateEs = es
+end
+
 local function PaintPlate(p, accent, S)
     local face = Mix(Theme.COLOR_BUTTON_INK, accent, S.wash)
     if p.flat then
@@ -194,6 +221,7 @@ local function SeatX(button, p)
         if button.SetHitRectInsets then button:SetHitRectInsets(X.HIT[1], X.HIT[2], X.HIT[3], X.HIT[4]) end
         p.es = es
     end
+    if p.plateEs ~= es then SeatPlate(button, p, es) end
     local bw = math.floor((button:GetWidth() or 0) * es + 0.5)
     local bh = math.floor((button:GetHeight() or 0) * es + 0.5)
     local key = bw .. ":" .. bh .. ":" .. es
@@ -219,7 +247,7 @@ function ButtonSkins.SkinCloseButton(button, opts)
 
     if FS.HeldArt then FS.HeldArt.HoldButton(button, OwnPieces(button)) end
 
-    local p = { hover = false, pressed = false, glyph = {} }
+    local p = { hover = false, pressed = false, glyph = {}, inset = 0 }
     parts[button] = p
     p.anchor = opts.anchor or (button.GetParent and button:GetParent()) or UIParent
 
@@ -309,6 +337,29 @@ local function PaintText(button)
     end
 end
 
+-- The plate's inset for a button of this height (physical pixels): TEXT_INSET_PX, less on a short button so the
+-- plate keeps MIN_PLATE_PX; 0 while the button has no height yet.
+local function TextInset(button, es)
+    local h = math.floor((button:GetHeight() or 0) * es + 0.5)
+    return math.max(0, math.min(TEXT_INSET_PX, math.floor((h - MIN_PLATE_PX) / 2)))
+end
+
+-- Seats the plate, again when the pixel scale or the button's height has changed (cheap otherwise).
+local function SeatText(button)
+    local p = parts[button]
+    if not p then return end
+    local es = PixelsPerUnit(button)
+    local inset = TextInset(button, es)
+    if p.plateEs == es and p.inset == inset then return end
+    p.inset = inset
+    SeatPlate(button, p, es)
+end
+
+local function PaintAndSeatText(button)
+    SeatText(button)
+    PaintText(button)
+end
+
 -- Points a button's three label font objects at the accent's set.
 local function SetLabelFonts(button, p)
     local set = LabelFontSet(p.accent, p.size)
@@ -354,8 +405,9 @@ function ButtonSkins.SkinTextButton(button, opts)
     p.face, p.flat, p.halo = face, flat, skin.glow
     p.ring = skin.border.ring
     SetLabelFonts(button, p)
-    PaintText(button)
-    HookScripts(button, p, PaintText)
+    p.inset = 0
+    PaintAndSeatText(button)
+    HookScripts(button, p, PaintAndSeatText)
     return p
 end
 

@@ -84,7 +84,7 @@ function Obj:SetPoint(p, rel, rp, x, y)
     if type(rel) == "number" then rel, rp, x, y = nil, nil, rel, rp end
     self.points[p] = { rel = rel or self.parent, rp = rp or p, x = x or 0, y = y or 0 }
 end
-function Obj:ClearAllPoints() self.points = {} end
+function Obj:ClearAllPoints() self.points = {}; self.allPoints = nil end
 function Obj:SetAllPoints(rel) self.allPoints = rel or self.parent end
 function Obj:GetEffectiveScale() return self.scale or 1 end
 function Obj:SetFrameLevel(l) self.level = l end
@@ -1021,6 +1021,121 @@ case("gossip_goodbye_and_trainer_train_are_text_buttons", """
     assert(Skinned(gossip.GreetingPanel.GoodbyeButton, "Goodbye").accent == "violet", "Goodbye is violet")
     assert(Skinned(train, "Train").accent == "violet", "Train is violet")
     assert(train.Left.alpha == 0, "stock art held")
+""")
+
+
+# ---------------------------------------------------------------------------
+# Plate geometry: one ring, a halo that hugs it, an inset that leaves a gap between stacked buttons
+# ---------------------------------------------------------------------------
+
+case("the_x_is_one_face_one_ring_and_one_halo_even_when_two_close_buttons_resolve_to_it", """
+    PPU = 1.2
+    local frame, b = StockX("CharacterFrame")
+    frame.ClosePanelButton, frame.CloseButton = b, b          -- the same button under both names
+    LoadButtonSkins()
+    Theme.SkinCloseButton(frame)
+    Theme.SkinCloseButton(frame)                             -- and a later pass
+    local rings, halos, faces = 0, 0, 0
+    for _, r in ipairs(b.regions) do
+        local t = r.texture or ""
+        if t:find("slice_cut2_outline", 1, true) then rings = rings + 1 end
+        if t:find("slice_cut2_glow", 1, true) then halos = halos + 1 end
+        if t:find("slice_cut2_fill", 1, true) then faces = faces + 1 end
+    end
+    assert(rings == 1 and halos == 1 and faces == 1, "rings " .. rings .. " halos " .. halos .. " faces " .. faces)
+""")
+
+case("the_x_reuses_one_earlier_skin_button_ring_and_adds_no_second_one", """
+    PPU = 1.2
+    local frame, b = StockX("CharacterFrame")
+    frame.ClosePanelButton = b
+    LoadButtonSkins()
+    Theme.SkinButton(b, { borderColor = Theme.COLOR_BORDER })  -- what an older skin pass drew on a close button
+    Theme.SkinCloseButton(frame)
+    local rings = 0
+    for _, r in ipairs(b.regions) do
+        if (r.texture or ""):find("slice_cut2_outline", 1, true) then rings = rings + 1 end
+    end
+    assert(rings == 1, "one ring, got " .. rings)
+    assert(SameRgb(Skinned(b, "the X").ring.tint, Theme.COLOR_HEALTH), "and it is painted pink")
+""")
+
+case("the_halo_reaches_four_physical_pixels_past_the_ring_at_every_pixel_scale", """
+    -- the ring and halo are nine-sliced files whose texels the engine draws one physical pixel each, so the halo's
+    -- four texel falloff only meets the ring when the region reaches four PIXELS past it, not four units
+    for _, ppu in ipairs({ 1, 1.2, 1.5, 2 }) do
+        PPU = ppu
+        local frame, b = StockX("Frame" .. ppu)
+        frame.ClosePanelButton = b
+        LoadButtonSkins()
+        Theme.SkinCloseButton(frame)
+        local p = Skinned(b, "the X")
+        local pad = 4 / ppu
+        local tl, br = p.halo.points.TOPLEFT, p.halo.points.BOTTOMRIGHT
+        assert(Near(tl.x, -pad, 1e-6) and Near(tl.y, pad, 1e-6), "halo top left at ppu " .. ppu .. ": " .. tl.x .. "," .. tl.y)
+        assert(Near(br.x, pad, 1e-6) and Near(br.y, -pad, 1e-6), "halo bottom right at ppu " .. ppu)
+        local rt = p.ring.points.TOPLEFT
+        assert(rt.x == 0 and rt.y == 0, "the ring stays on the plate edge")
+        assert(p.face.points.TOPLEFT.x == 0, "so does the face")
+    end
+""")
+
+case("the_halo_is_seated_again_when_the_pixel_scale_changes", """
+    PPU = 1
+    local frame, b = StockX("CharacterFrame")
+    frame.ClosePanelButton = b
+    LoadButtonSkins()
+    Theme.SkinCloseButton(frame)
+    local p = Skinned(b, "the X")
+    assert(Near(p.halo.points.TOPLEFT.x, -4), "four units at one pixel per unit")
+    PPU = 2
+    b:Hide(); b:Show()
+    assert(Near(p.halo.points.TOPLEFT.x, -2), "two units at two pixels per unit: " .. p.halo.points.TOPLEFT.x)
+""")
+
+case("a_text_button_plate_sits_three_pixels_inside_the_button_so_stacked_buttons_keep_a_gap", """
+    PPU = 1.2
+    local menu = MakeGameMenu()
+    local a, b = menu:Add(OPTIONS_MENU), menu:Add(LOG_OUT)
+    LoadPopups()
+    local p = Skinned(a, "Options")
+    local inset = 3 / 1.2
+    for _, piece in ipairs({ p.face, p.ring }) do
+        local tl, br = piece.points.TOPLEFT, piece.points.BOTTOMRIGHT
+        assert(Near(tl.x, inset) and Near(tl.y, -inset) and Near(br.x, -inset) and Near(br.y, inset), "face and ring inset 3 px: " .. tl.x .. "," .. tl.y)
+    end
+    -- the halo reaches 4 px past the ring, so 1 px past the button: two stacked buttons' halos meet only at the seam
+    local h = p.halo.points.TOPLEFT
+    assert(Near(h.x, inset - 4 / 1.2) and Near(h.y, -(inset - 4 / 1.2)), "halo 4 px past the ring: " .. h.x)
+    local reach = (4 - 3)                                    -- px past the button edge
+    assert(reach <= 1, "the halo stays within a pixel of the button")
+    -- Blizzard's own anchors, size and click handler are untouched
+    for _ in pairs(a.points) do error("the button's own anchors were written") end
+    assert(a.w == 200 and a.h == 36, "size untouched")
+""")
+
+case("a_text_button_plate_is_inset_again_when_the_pixel_scale_changes", """
+    PPU = 1
+    local menu = MakeGameMenu()
+    local a = menu:Add(OPTIONS_MENU)
+    LoadPopups()
+    local p = Skinned(a, "Options")
+    assert(Near(p.ring.points.TOPLEFT.x, 3), "3 units at one pixel per unit")
+    PPU = 1.5
+    a:Hide(); a:Show()
+    assert(Near(p.ring.points.TOPLEFT.x, 2), "3 px is 2 units at 1.5: " .. p.ring.points.TOPLEFT.x)
+    assert(Near(p.halo.points.TOPLEFT.x, 2 - 4 / 1.5), "halo follows")
+""")
+
+case("a_short_text_button_keeps_a_plate_tall_enough_to_slice_and_is_inset_less", """
+    PPU = 1
+    local parent = CreateFrame("Frame", "Holder")
+    local b = StockText(parent, "Go", 60, 14)
+    LoadButtonSkins()
+    FS.ButtonSkins.SkinTextButton(b)
+    local p = Skinned(b, "Go")
+    local inset = p.ring.points.TOPLEFT.x
+    assert(Near(inset, 1), "a 14 px button leaves a 12 px plate, so the inset eases to 1 px: " .. inset)
 """)
 
 
