@@ -571,7 +571,7 @@ end
 -------------------------------------------------------------------------------
 
 -------------------------------------------------------------------------------
--- Text button sweep
+-- Panel sweep: text buttons and scroll bars
 -------------------------------------------------------------------------------
 
 -- Gives every stock text button of a skinned panel the shared STUwave text button (FS.ButtonSkins.SkinTextButton),
@@ -629,26 +629,50 @@ local function ChildrenOf(frame)
     return ok and list or {}
 end
 
--- Walks `frame`'s subtree (bounded in depth and in nodes) and skins what it finds. A ScrollBox is not walked: its
--- rows are pooled and rebuilt, and none is a stock text button. Returns how many buttons it skinned.
-function PanelSkins.SweepTextButtons(frame)
-    local skins = FS.ButtonSkins
-    if not (skins and skins.SkinTextButton and type(frame) == "table") then return 0 end
-    local count, nodes = 0, 0
+-- Walks `frame`'s subtree, bounded in depth and in nodes, and calls `visit(child)` on each frame. `visit` returns
+-- false to keep the walk out of that child. A ScrollBox is not walked: its rows are pooled and rebuilt, and none
+-- is a stock text button or a scroll bar.
+local function Walk(frame, visit)
+    local nodes = 0
     local function walk(node, depth)
         for _, child in ipairs(ChildrenOf(node)) do
             nodes = nodes + 1
             if nodes > SWEEP_MAX_NODES then return end
             if type(child) == "table" then
-                if IsStockTextButton(child) and not (skins.Parts and skins.Parts(child)) then
-                    skins.SkinTextButton(child, { accent = LabelAccent(LabelOf(child)) })
-                    count = count + 1
-                end
-                if depth < SWEEP_MAX_DEPTH and child.ScrollTarget == nil then walk(child, depth + 1) end
+                local into = visit(child)
+                if into ~= false and depth < SWEEP_MAX_DEPTH and child.ScrollTarget == nil then walk(child, depth + 1) end
             end
         end
     end
     walk(frame, 1)
+end
+
+-- Skins every stock text button under `frame`. Returns how many it skinned.
+function PanelSkins.SweepTextButtons(frame)
+    local skins = FS.ButtonSkins
+    if not (skins and skins.SkinTextButton and type(frame) == "table") then return 0 end
+    local count = 0
+    Walk(frame, function(child)
+        if IsStockTextButton(child) and not (skins.Parts and skins.Parts(child)) then
+            skins.SkinTextButton(child, { accent = LabelAccent(LabelOf(child)) })
+            count = count + 1
+        end
+    end)
+    return count
+end
+
+-- Skins every scroll bar under `frame` with the shared scroll bar skin (FS.ScrollBarSkins, the chat window's look),
+-- told by shape: a bar sits beside its ScrollBox, mostly as an anonymous child. A bar is not walked into (its
+-- steppers and thumb are its own). Returns how many it skinned.
+function PanelSkins.SweepScrollBars(frame)
+    local skins = FS.ScrollBarSkins
+    if not (skins and skins.Skin and skins.IsScrollBar and type(frame) == "table") then return 0 end
+    local count = 0
+    Walk(frame, function(child)
+        if not skins.IsScrollBar(child) then return end
+        if not (skins.Parts and skins.Parts(child)) and skins.Skin(child) then count = count + 1 end
+        return false
+    end)
     return count
 end
 
@@ -656,13 +680,16 @@ end
 -- tab's page is shown without the panel being shown again). One hook per frame; a protected page is not hooked.
 function PanelSkins.SweepOnShow(frame)
     if type(frame) ~= "table" then return end
-    PanelSkins.SweepTextButtons(frame)
-    local function again(self) PanelSkins.SweepTextButtons(self) end
-    PanelSkins.HookShowOnce(frame, "fsTextSweepHook", again)
+    local function sweep(self)
+        PanelSkins.SweepTextButtons(self)
+        PanelSkins.SweepScrollBars(self)
+    end
+    sweep(frame)
+    PanelSkins.HookShowOnce(frame, "fsSweepHook", sweep)
     for _, page in ipairs(ChildrenOf(frame)) do
         if type(page) == "table" and type(page.IsShown) == "function" and not page:IsShown() then
             local protected = type(page.IsProtected) == "function" and page:IsProtected()
-            if not protected then PanelSkins.HookShowOnce(page, "fsTextSweepHook", again) end
+            if not protected then PanelSkins.HookShowOnce(page, "fsSweepHook", sweep) end
         end
     end
 end

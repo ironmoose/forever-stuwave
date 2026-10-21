@@ -23,7 +23,10 @@ after /reload, the plain option row light). The properties pinned here:
     (UIPanelButtonTemplate keys Left, Middle, Right; ThreeSliceButtonTemplate keys Left, Center, Right, with a
     label) gets the shared STUwave text button, its accent chosen by the label (cyan commits, pink declines),
     while tabs, icon-only buttons, dropdowns, scroll rows and buttons an earlier skin owns are left alone, the
-    walk is bounded, and no script or attribute of a Blizzard button is ever written.
+    walk is bounded, and no script or attribute of a Blizzard button is ever written;
+  * the scroll bar sweep (PanelSkins.SweepScrollBars): every scroll bar the shared skin recognises in a skinned
+    panel's tree, beside its ScrollBox wherever that sits, is skinned once, never walked into, and a bar
+    built after the first sweep is skinned when the panel is shown again.
 
 The dark-text gate is the real `IsDarkText` text lifted out of Theme.lua, so a gate change fails
 here. The mock is NOT the real client. Run:
@@ -167,8 +170,15 @@ function LoadSweep()
             owned[button] = owned[button] or { accent = (opts or {}).accent } -- what the real skin does
         end,
     }
-    return FS, calls, owned
+    local bars, barOwned = {}, {}
+    FS.ScrollBarSkins = {
+        IsScrollBar = function(obj) return type(obj) == "table" and obj.isBar == true end,
+        Parts = function(obj) return barOwned[obj] end,
+        Skin = function(obj) bars[#bars + 1] = obj; barOwned[obj] = {}; return true end,
+    }
+    return FS, calls, owned, bars, barOwned
 end
+function Bar() return Widget("EventFrame", { isBar = true }) end
 function CallFor(calls, button)
     for _, c in ipairs(calls) do if c.button == button then return c end end
 end
@@ -412,6 +422,82 @@ case("every_skinned_panel_is_swept_when_panels_lua_skins_it", """
     _G.QuestFrame = { fsName = "QuestFrame" }
     assert(loadstring(PANELS_SRC, "@Panels.lua"))("forever-stuwave", FS)
     assert(swept.MailFrame == 1 and swept.QuestFrame == 1, "swept: " .. tostring(swept.MailFrame) .. " " .. tostring(swept.QuestFrame))
+""")
+
+case("a_scroll_bar_beside_its_scrollbox_anywhere_in_the_tree_is_skinned_once", """
+    local FS, calls, owned, bars = LoadSweep()
+    local panel = Widget("Frame")
+    local topBar = Add(panel, Bar())
+    local box = Add(panel, Widget("Frame", { ScrollTarget = {} }))
+    local page = Add(panel, Widget("Frame"))
+    local inner = Add(page, Widget("Frame"))
+    local deepBar = Add(inner, Bar())
+    Add(panel, Widget("Frame"))                         -- not a bar
+    local n = FS.PanelSkins.SweepScrollBars(panel)
+    assert(n == 2 and #bars == 2, "skinned " .. n .. " / " .. #bars)
+    assert(bars[1] == topBar and bars[2] == deepBar, "the wrong bars were skinned")
+""")
+
+case("a_scroll_bar_is_not_walked_into_and_a_scrollbox_hides_what_is_inside_it", """
+    local FS, calls, owned, bars = LoadSweep()
+    local panel = Widget("Frame")
+    local bar = Add(panel, Bar())
+    local insideBar = Add(bar, Bar())                   -- only seen if the walk went into the bar
+    local box = Add(panel, Widget("Frame", { ScrollTarget = {} }))
+    local insideBox = Add(box, Bar())                   -- only seen if the walk went into the ScrollBox
+    FS.PanelSkins.SweepScrollBars(panel)
+    assert(#bars == 1 and bars[1] == bar, "bars skinned: " .. #bars)
+""")
+
+case("a_bar_that_is_already_skinned_is_not_handed_to_the_skin_again", """
+    local FS, calls, owned, bars, barOwned = LoadSweep()
+    local panel = Widget("Frame")
+    local bar = Add(panel, Bar())
+    assert(FS.PanelSkins.SweepScrollBars(panel) == 1)
+    assert(FS.PanelSkins.SweepScrollBars(panel) == 0 and #bars == 1, "skinned again: " .. #bars)
+""")
+
+case("the_scroll_bar_sweep_walk_is_bounded_and_skips_a_frame_that_throws", """
+    local FS, calls, owned, bars = LoadSweep()
+    local panel = Widget("Frame")
+    local node = panel
+    for _ = 1, 60 do node = Add(node, Widget("Frame")) end
+    local deep = Add(node, Bar())
+    Add(panel, Widget("Frame", { GetChildren = function() error("no children for you") end }))
+    for _ = 1, 3000 do Add(panel, Widget("Frame")) end
+    local late = Add(panel, Bar())
+    FS.PanelSkins.SweepScrollBars(panel)
+    assert(#bars == 0, "the walk went too deep or past its cap: " .. #bars)
+""")
+
+case("sweep_on_show_skins_a_bar_built_later_when_the_panel_or_a_hidden_page_is_shown", """
+    local FS, calls, owned, bars = LoadSweep()
+    local panel = Widget("Frame")
+    local early = Add(panel, Bar())
+    local page = Add(panel, Widget("Frame", { shown = false }))
+    FS.PanelSkins.SweepOnShow(panel)
+    assert(#bars == 1 and bars[1] == early, "swept now: " .. #bars)
+    local late = Add(panel, Bar())
+    ShowAgain(panel)
+    assert(#bars == 2 and bars[2] == late, "a bar made later was not skinned when the panel was shown")
+    local pageBar = Add(page, Bar())
+    page.shown = true
+    ShowAgain(page)
+    assert(#bars == 3 and bars[3] == pageBar, "a hidden page's bar was not skinned when it was shown")
+""")
+
+case("a_missing_scroll_bar_skin_or_nothing_to_sweep_is_a_quiet_no_op_and_text_buttons_still_sweep", """
+    local FS, calls, owned, bars = LoadSweep()
+    local panel = Widget("Frame")
+    local accept = Add(panel, StockButton(ACCEPT))
+    Add(panel, Bar())
+    FS.ScrollBarSkins = nil
+    assert(FS.PanelSkins.SweepScrollBars(panel) == 0)
+    FS.PanelSkins.SweepOnShow(panel)
+    assert(CallFor(calls, accept), "the text buttons were not swept without a scroll bar skin")
+    FS.ScrollBarSkins = { IsScrollBar = function() return true end, Parts = function() end, Skin = function() error("not reached") end }
+    assert(FS.PanelSkins.SweepScrollBars(nil) == 0 and FS.PanelSkins.SweepScrollBars({}) == 0, "non-frames")
+    assert(FS.PanelSkins.SweepScrollBars(Widget("Frame")) == 0, "no children")
 """)
 
 

@@ -647,7 +647,8 @@ local function SkinOne(entry)
     end
 
     -- Every stock text button of the panel (Quest Accept and Decline, Mail Send and Reply, Trade, Macro, Social...)
-    -- becomes the shared STUwave text button, now and as its pages are shown. Skin only; see PanelSkins.
+    -- becomes the shared STUwave text button, and every scroll bar the chat window's rail and thumb, now and as
+    -- its pages are shown. Skin only; see PanelSkins.
     FS.PanelSkins.SweepOnShow(frame)
 end
 
