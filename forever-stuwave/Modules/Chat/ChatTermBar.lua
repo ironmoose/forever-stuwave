@@ -23,7 +23,6 @@ local ICON_CHANNEL_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Texture
 local ICON_JUMP_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\icon_jump.tga"
 local ICON_MINIMIZE_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\icon_minimize.tga"
 local ICON_MAXIMIZE_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\icon_maximize.tga"
-local SCROLL_RAIL_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\scroll_rail.tga"
 
 -------------------------------------------------------------------------------
 -- Scroll cluster
@@ -82,8 +81,6 @@ local SCROLL_INSET = 3
 -- arrow parked there. One button height plus a gap, derived rather than typed,
 -- so resizing the button cannot silently re-collide them.
 local SCROLL_BOTTOM_GAP = 4
-local SCROLL_RAIL_ALPHA = 0.22
-local SCROLL_THUMB_ALPHA = 0.95
 
 -- The term bar's own chassis, and the reason the header read as "washed out,
 -- like they are behind the main terminal" (player, 2026-09-22). It was not a
@@ -501,99 +498,23 @@ function Chat.SeatScrollFurniture(frame)
     UpdateJumpButton(frame)
 end
 
+-- The look is the shared scroll bar skin (Core/ScrollBarSkins.lua, lifted out of this function so every
+-- skinned panel wears the same bar); what stays here is where the chat bar sits, because Blizzard
+-- re-anchors it and the jump button stacks under it.
+local seatHooked = setmetatable({}, { __mode = "k" }) -- bar -> its OnShow re-seat is in
+
 function Chat.SkinChatScrollBar(frame)
     Chat.SeatScrollFurniture(frame)
 
     local bar = frame and frame.ScrollBar
-    if not bar or bar.fsScrollSkin then return end
-    bar.fsScrollSkin = true
+    if not bar then return end
 
-
-    -- Blizzard's art is the `minimal-scrollbar-*` atlas family, dumped with
-    -- /fschat scroll on this client:
-    --
-    --   bar.Track (a FRAME)  track-top / -bottom / -middle
-    --     .Thumb (a BUTTON)  small-thumb-top / -bottom / -middle
-    --   bar.Back, bar.Forward  arrow-top / arrow-bottom
-    --
-    -- THE TRACK IS A FRAME AND THE THUMB LIVES INSIDE IT. The previous pass
-    -- did bar.Track:SetAlpha(0) to blank the groove, which also faded the
-    -- thumb to nothing, so the bar looked like it had never been skinned at
-    -- all. Nothing errored and nothing drew.
-    --
-    -- So the strip is by ATLAS NAME over the whole subtree, never by hiding a
-    -- container: any region whose atlas mentions the scrollbar is Blizzard's,
-    -- and everything else is left alone. That also catches the arrows without
-    -- hiding their BUTTONS -- the track is anchored between them, and hiding
-    -- the buttons themselves would leave the groove spanning the wrong rect.
-    local function StripScrollAtlases(obj)
-        for _, region in ipairs({ obj:GetRegions() }) do
-            if region.GetObjectType and region:GetObjectType() == "Texture" then
-                local atlas = region.GetAtlas and region:GetAtlas()
-                if atlas and atlas:lower():find("scrollbar") then
-                    region:SetTexture(nil)
-                    region:Hide()
-                end
-            end
-        end
-        for i = 1, select("#", obj:GetChildren()) do
-            StripScrollAtlases((select(i, obj:GetChildren())))
-        end
-    end
-    StripScrollAtlases(bar)
-
-    -- The steppers keep their rect (the track measures against them) but stop
-    -- taking clicks, because there is no longer anything there to click.
-    for _, key in ipairs({ "Back", "Forward" }) do
-        local stepper = bar[key]
-        if stepper and stepper.EnableMouse then pcall(stepper.EnableMouse, stepper, false) end
-    end
-
-    -- The groove: one dim cyan line down the whole bar. media/scroll_rail.tga
-    -- varies only ACROSS its width, so stretching it to any height is exact.
-    if not bar.fsRail then
-        local rail = bar:CreateTexture(nil, "BACKGROUND")
-        rail:SetTexture(SCROLL_RAIL_TEXTURE)
-        rail:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
-        rail:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
-        rail:SetVertexColor(COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], SCROLL_RAIL_ALPHA)
-        bar.fsRail = rail
-    end
-
-    -- The slider: the same light in magenta at full strength, so it reads as
-    -- the active thing in the groove exactly the way the live tab reads
-    -- against the idle ones.
+    -- Seated BEFORE the skin draws: the rail takes its width from the bar.
     SeatScrollBar(frame)
-    bar:HookScript("OnShow", function() SeatScrollBar(frame) end)
-
-    local thumb = (bar.Track and bar.Track.Thumb) or bar.Thumb
-    if thumb and not thumb.fsThumb then
-        local fill = thumb:CreateTexture(nil, "ARTWORK")
-        fill:SetTexture(SCROLL_RAIL_TEXTURE)
-        -- Vertically from the THUMB, horizontally from the BAR. The thumb
-        -- keeps whatever width Blizzard's atlas gave it (8 here) regardless of
-        -- how wide the bar is set, so anchoring all four edges to the thumb
-        -- would pin the slider to that 8 and it would stop matching the groove
-        -- the moment SCROLL_BAR_WIDTH changed. Split this way, the slider is
-        -- always exactly as wide as its rail and still tracks the thumb's
-        -- position and length.
-        fill:SetPoint("LEFT", bar, "LEFT", 0, 0)
-        fill:SetPoint("RIGHT", bar, "RIGHT", 0, 0)
-        fill:SetPoint("TOP", thumb, "TOP", 0, 0)
-        fill:SetPoint("BOTTOM", thumb, "BOTTOM", 0, 0)
-        fill:SetVertexColor(COLOR_HEALTH[1], COLOR_HEALTH[2], COLOR_HEALTH[3], SCROLL_THUMB_ALPHA)
-        thumb.fsThumb = fill
-
-        -- Hover, matching every other control in this panel: the colour does
-        -- not change, it just comes up to full.
-        thumb:HookScript("OnEnter", function(self)
-            if self.fsThumb then self.fsThumb:SetVertexColor(1, 1, 1, 1) end
-        end)
-        thumb:HookScript("OnLeave", function(self)
-            if self.fsThumb then
-                self.fsThumb:SetVertexColor(COLOR_HEALTH[1], COLOR_HEALTH[2],
-                    COLOR_HEALTH[3], SCROLL_THUMB_ALPHA)
-            end
-        end)
+    if not seatHooked[bar] then
+        seatHooked[bar] = true
+        bar:HookScript("OnShow", function() SeatScrollBar(frame) end)
     end
+
+    if FS.ScrollBarSkins then FS.ScrollBarSkins.Skin(bar) end
 end
