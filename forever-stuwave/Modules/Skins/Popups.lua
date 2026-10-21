@@ -159,6 +159,10 @@ local function SkinOne(entry)
             end
         end
     end
+
+    -- The other popups' stock text buttons (the ready check's, the role poll's Accept, the LFG invite's) by shape,
+    -- after the named ones above so a hand-set accent is kept. The Game Menu's pooled buttons are skinned above.
+    if not entry.menu then FS.PanelSkins.SweepOnShow(frame) end
 end
 
 -------------------------------------------------------------------------------

@@ -19,6 +19,12 @@ after /reload, the plain option row light). The properties pinned here:
     the top band the title would draw, so the `stuwave://questlog` label read as a second, offset
     "Search Quest Log" (playtest 2026-10-21). The real Panels.lua runs against a recording SkinPanel.
 
+  * the text button sweep (PanelSkins.SweepTextButtons): every stock text button in a skinned panel's tree
+    (UIPanelButtonTemplate keys Left, Middle, Right; ThreeSliceButtonTemplate keys Left, Center, Right, with a
+    label) gets the shared STUwave text button, its accent chosen by the label (cyan commits, pink declines),
+    while tabs, icon-only buttons, dropdowns, scroll rows and buttons an earlier skin owns are left alone, the
+    walk is bounded, and no script or attribute of a Blizzard button is ever written.
+
 The dark-text gate is the real `IsDarkText` text lifted out of Theme.lua, so a gate change fails
 here. The mock is NOT the real client. Run:
 
@@ -124,11 +130,55 @@ function LoadPanels(present)
     return skinned
 end
 
+-- A Blizzard frame or button for the text button sweep. SetScript and SetAttribute throw: the sweep adds
+-- textures and post-hooks (through ButtonSkins) only, never a write to a Blizzard widget's own handlers.
+function Widget(kind, fields)
+    local w = { kind = kind, children = {}, hooks = {}, shown = true }
+    function w:GetObjectType() return self.kind end
+    function w:GetChildren() return unpack(self.children) end
+    function w:GetText() return self.text end
+    function w:IsShown() return self.shown end
+    function w:IsProtected() return self.protected == true end
+    function w:HookScript(script, fn)
+        self.hooks[script] = self.hooks[script] or {}
+        table.insert(self.hooks[script], fn)
+    end
+    function w:SetScript() error("SetScript on a Blizzard widget") end
+    function w:SetAttribute() error("SetAttribute on a Blizzard widget") end
+    if fields then for k, v in pairs(fields) do w[k] = v end end
+    return w
+end
+function Add(parent, child) parent.children[#parent.children + 1] = child; return child end
+function StockButton(text, extra)
+    local b = Widget("Button", { text = text, Left = {}, Middle = {}, Right = {} })
+    if extra then for k, v in pairs(extra) do b[k] = v end end
+    return b
+end
+function ShowAgain(w) for _, fn in ipairs(w.hooks.OnShow or {}) do fn(w) end end
+
+-- PanelSkins plus a recorder for the shared text button. `owned` = buttons an earlier skin already owns.
+function LoadSweep()
+    local FS = LoadPanelSkins()
+    local calls, owned = {}, {}
+    FS.ButtonSkins = {
+        Parts = function(button) return owned[button] end,
+        SkinTextButton = function(button, opts)
+            calls[#calls + 1] = { button = button, opts = opts or {} }
+            owned[button] = owned[button] or { accent = (opts or {}).accent } -- what the real skin does
+        end,
+    }
+    return FS, calls, owned
+end
+function CallFor(calls, button)
+    for _, c in ipairs(calls) do if c.button == button then return c end end
+end
+
 -- The code the rewrite must emit for the parchment token, spelled out rather than recomputed so a
 -- truncating format (0.749 * 255 -> be, not bf) cannot agree with itself.
 PARCHMENT_CODE = "|cffbfe9d6"
 function ParchmentCode() return PARCHMENT_CODE end
 SECRET_TEXT = "|cff000000secret|r"
+ACCEPT, DECLINE, CANCEL, OKAY = "Accept", "Decline", "Cancel", "Okay"
 """
 
 CASES: list[tuple[str, str]] = []
@@ -235,6 +285,133 @@ case("the_quest_log_pane_is_skinned_without_a_title_band_over_its_search_box", "
         "the quest log pane's title band sits under its search box: " .. tostring(skinned.QuestMapFrame.title))
     -- The map window that hosts it keeps its own title; only the embedded pane loses one.
     assert(skinned.WorldMapFrame and skinned.WorldMapFrame.title == "map", "WorldMapFrame lost its title")
+""")
+
+
+
+case("a_stock_text_button_anywhere_in_the_tree_is_skinned_with_its_accent_by_label", """
+    local FS, calls = LoadSweep()
+    local panel = Widget("Frame")
+    local page = Add(panel, Widget("Frame"))
+    local accept = Add(page, StockButton(ACCEPT))
+    local decline = Add(Add(page, Widget("Frame")), StockButton(DECLINE))
+    local reply = Add(panel, StockButton("Reply"))
+    local slice = Add(panel, Widget("Button", { text = "Do it", Left = {}, Center = {}, Right = {} }))
+    local n = FS.PanelSkins.SweepTextButtons(panel)
+    assert(n == 4 and #calls == 4, "skinned " .. n .. " / " .. #calls)
+    assert(CallFor(calls, accept).opts.accent == "cyan", "Accept: " .. tostring(CallFor(calls, accept).opts.accent))
+    assert(CallFor(calls, decline).opts.accent == "pink", "Decline: " .. tostring(CallFor(calls, decline).opts.accent))
+    assert(CallFor(calls, reply).opts.accent == nil, "an unlisted label keeps the default accent")
+    assert(CallFor(calls, slice), "a three slice button with a label was not skinned")
+""")
+
+case("tabs_icon_buttons_dropdowns_other_widgets_and_owned_buttons_are_left_alone", """
+    local FS, calls, owned = LoadSweep()
+    local panel = Widget("Frame")
+    Add(panel, StockButton("Quests", { LeftActive = {}, MiddleActive = {}, RightActive = {} })) -- a tab
+    Add(panel, StockButton(nil))                                                                    -- icon only
+    Add(panel, StockButton(""))
+    Add(panel, Widget("Button", { text = "Filter" }))                                               -- a dropdown: no slices
+    Add(panel, Widget("CheckButton", { text = "Option", Left = {}, Middle = {}, Right = {} }))      -- not a Button
+    Add(panel, Widget("Frame", { text = "Frame", Left = {}, Middle = {}, Right = {} }))
+    local mine = Add(panel, StockButton("Defaults"))
+    owned[mine] = { accent = "pink" }                                                                -- a hand set accent
+    local secret = Add(panel, StockButton(SECRET_TEXT))
+    FS.IsSecret = function(v) return v == SECRET_TEXT end
+    local n = FS.PanelSkins.SweepTextButtons(panel)
+    assert(n == 0 and #calls == 0, "something was skinned: " .. n)
+""")
+
+case("scroll_box_rows_are_not_walked_but_old_scroll_frames_are", """
+    local FS, calls = LoadSweep()
+    local panel = Widget("Frame")
+    local box = Add(panel, Widget("Frame", { ScrollTarget = {} }))
+    local row = Add(box, StockButton("Row"))
+    local scroll = Add(panel, Widget("ScrollFrame"))
+    local inner = Add(Add(scroll, Widget("Frame")), StockButton("Inside"))
+    FS.PanelSkins.SweepTextButtons(panel)
+    assert(CallFor(calls, row) == nil, "a ScrollBox row was skinned")
+    assert(CallFor(calls, inner), "a button inside an old scroll frame was not skinned")
+""")
+
+case("the_walk_is_bounded_in_depth_and_in_nodes_and_a_frame_that_throws_is_skipped", """
+    local FS, calls = LoadSweep()
+    local panel = Widget("Frame")
+    local node = panel
+    for _ = 1, 60 do node = Add(node, Widget("Frame")) end
+    local deep = Add(node, StockButton("Deep"))
+    for _ = 1, 3000 do Add(panel, Widget("Frame")) end
+    Add(panel, Widget("Frame", { GetChildren = function() error("no children for you") end }))
+    local late = Add(panel, StockButton("After the cap"))
+    FS.PanelSkins.SweepTextButtons(panel)
+    assert(CallFor(calls, deep) == nil, "the walk went 60 levels deep")
+    assert(CallFor(calls, late) == nil, "the walk ran past its node cap")
+""")
+
+case("sweeping_twice_skins_a_button_once_per_pass_and_never_overwrites_the_accent_of_an_owned_one", """
+    local FS, calls, owned = LoadSweep()
+    local panel = Widget("Frame")
+    local b = Add(panel, StockButton(ACCEPT))
+    FS.PanelSkins.SweepTextButtons(panel)
+    owned[b] = { accent = "cyan" }                      -- ButtonSkins now owns it
+    FS.PanelSkins.SweepTextButtons(panel)
+    assert(#calls == 1, "a skinned button was handed to the skin again: " .. #calls)
+""")
+
+case("sweep_on_show_sweeps_now_hooks_the_panel_once_and_sweeps_again_when_it_is_shown", """
+    local FS, calls = LoadSweep()
+    local panel = Widget("Frame")
+    Add(panel, StockButton(ACCEPT))
+    FS.PanelSkins.SweepOnShow(panel)
+    FS.PanelSkins.SweepOnShow(panel)
+    assert(#calls == 1, "swept now: " .. #calls)
+    assert(#(panel.hooks.OnShow or {}) == 1, "OnShow hooks: " .. #(panel.hooks.OnShow or {}))
+    local late = Add(panel, StockButton(DECLINE))       -- built after the first sweep
+    ShowAgain(panel)
+    assert(CallFor(calls, late), "a button made later was not swept when the panel was shown")
+""")
+
+case("a_page_that_was_hidden_at_the_first_sweep_is_swept_when_it_is_shown", """
+    local FS, calls = LoadSweep()
+    local panel = Widget("Frame")
+    local page = Add(panel, Widget("Frame", { shown = false }))
+    local inside = Add(page, StockButton(CANCEL))
+    local protectedPage = Add(panel, Widget("Frame", { shown = false, protected = true }))
+    FS.PanelSkins.SweepOnShow(panel)
+    assert(#(page.hooks.OnShow or {}) == 1, "the hidden page was not hooked")
+    assert(#(protectedPage.hooks.OnShow or {}) == 0, "a protected page was hooked")
+    local later = Add(page, StockButton(OKAY))
+    page.shown = true
+    ShowAgain(page)
+    assert(CallFor(calls, later), "the page's new button was not swept on show")
+    FS.PanelSkins.SweepOnShow(panel)
+    assert(#(page.hooks.OnShow or {}) == 1, "the page got a second hook")
+""")
+
+case("a_missing_text_button_skin_or_a_frame_with_no_children_is_a_quiet_no_op", """
+    local FS = LoadPanelSkins()
+    FS.ButtonSkins = nil
+    assert(FS.PanelSkins.SweepTextButtons(Widget("Frame")) == 0)
+    FS.ButtonSkins = { Parts = function() end, SkinTextButton = function() error("not reached") end }
+    assert(FS.PanelSkins.SweepTextButtons({}) == 0, "a bare table")
+    assert(FS.PanelSkins.SweepTextButtons(nil) == 0)
+    FS.PanelSkins.SweepOnShow(nil)
+    FS.PanelSkins.SweepOnShow({})
+""")
+
+case("every_skinned_panel_is_swept_when_panels_lua_skins_it", """
+    local swept = {}
+    local FS = LoadPanelSkins()
+    local noop = function() end
+    THEME.SkinPanel = noop
+    THEME.StyleMoney, THEME.ApplyMono, THEME.SkinButton, THEME.LightenParchmentFonts = noop, noop, noop, noop
+    THEME.COLOR_BG, THEME.COLOR_BORDER, THEME.COLOR_POWER = { 0, 0, 0 }, { 1, 1, 1 }, { 1, 1, 1 }
+    THEME.COLOR_TEXT_PARCHMENT = { 0.749, 0.914, 0.839 }
+    FS.PanelSkins.SweepOnShow = function(frame) swept[frame.fsName] = (swept[frame.fsName] or 0) + 1 end
+    _G.MailFrame = { fsName = "MailFrame" }
+    _G.QuestFrame = { fsName = "QuestFrame" }
+    assert(loadstring(PANELS_SRC, "@Panels.lua"))("forever-stuwave", FS)
+    assert(swept.MailFrame == 1 and swept.QuestFrame == 1, "swept: " .. tostring(swept.MailFrame) .. " " .. tostring(swept.QuestFrame))
 """)
 
 

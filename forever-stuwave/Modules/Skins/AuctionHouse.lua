@@ -140,6 +140,9 @@ local function SkinOne(name)
     -- Bags.lua already handles for ContainerFrameCombinedBags -- only the
     -- child-scan strategy catches it.
     FS.PanelSkins.TryStyleMoney(frame)
+
+    -- Post, Buy, Search and the other stock text buttons, now and as the tabs' pages are shown.
+    FS.PanelSkins.SweepOnShow(frame)
 end
 
 -------------------------------------------------------------------------------

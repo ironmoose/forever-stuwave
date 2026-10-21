@@ -94,6 +94,7 @@ function Obj:GetFrameStrata() return self.strata or "MEDIUM" end
 function Obj:SetWordWrap() end
 function Obj:GetFrameLevel() return self.level end
 function Obj:IsProtected() return self.protected == true end
+function Obj:GetChildren() return unpack(self.children) end
 function Obj:GetName() return self.name end
 function Obj:SetHitRectInsets(l, r, t, b) self.hit = { l, r, t, b } end
 function Obj:RegisterForClicks() end
@@ -1068,6 +1069,23 @@ case("static_popup_buttons_are_text_buttons_and_its_close_is_the_pink_x", """
     assert(Skinned(accept, "Accept").accent == "violet" and Skinned(cancel, "Cancel").accent == "violet", "Accept and Cancel are violet text buttons")
     assert(accept.Left.alpha == 0 and cancel.Middle.alpha == 0, "stock red art held")
     assert(#Skinned(x, "the popup X").glyph == 12, "the popup's X is the pink X")
+""")
+
+case("popups_sweep_stock_text_buttons_by_shape_and_keep_hand_set_accents", """
+    _G.ACCEPT, _G.DECLINE = "Accept", "Decline"          -- the client's own label strings
+    local ready = CreateFrame("Frame", "ReadyCheckFrame")
+    ready.w, ready.h = 300, 120
+    local yes, no = StockText(ready, ACCEPT, 96, 22), StockText(ready, DECLINE, 96, 22)
+    local tab = StockText(ready, "Tab", 96, 22)
+    tab.LeftActive, tab.MiddleActive, tab.RightActive = {}, {}, {}
+    local menu = MakeGameMenu()
+    local options, logout = menu:Add(OPTIONS_MENU), menu:Add(LOG_OUT)
+    LoadPopups()
+    local B = FS.ButtonSkins
+    assert(B.Parts(yes) and B.Parts(yes).accent == "cyan", "Accept on the ready check is a cyan text button")
+    assert(B.Parts(no) and B.Parts(no).accent == "pink", "Decline is pink")
+    assert(B.Parts(tab) == nil, "a tab is not a text button")
+    assert(B.Parts(options).accent == "violet" and B.Parts(logout).accent == "pink", "the menu keeps its own accents")
 """)
 
 case("settings_panel_x_close_apply_and_defaults_are_each_the_right_kind_of_button", """

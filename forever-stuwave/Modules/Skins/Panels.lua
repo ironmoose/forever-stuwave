@@ -645,6 +645,10 @@ local function SkinOne(entry)
     if entry.money and StyleMoney then
         StyleMoney(_G[entry.money])
     end
+
+    -- Every stock text button of the panel (Quest Accept and Decline, Mail Send and Reply, Trade, Macro, Social...)
+    -- becomes the shared STUwave text button, now and as its pages are shown. Skin only; see PanelSkins.
+    FS.PanelSkins.SweepOnShow(frame)
 end
 
 -- Drives the scan/skin/watch cycle over PANEL_FRAMES: re-scans whenever a

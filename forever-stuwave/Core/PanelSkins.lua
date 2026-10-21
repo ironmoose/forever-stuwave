@@ -570,6 +570,103 @@ end
 -- /fsinspect skins | pos <frame> readback commands
 -------------------------------------------------------------------------------
 
+-------------------------------------------------------------------------------
+-- Text button sweep
+-------------------------------------------------------------------------------
+
+-- Gives every stock text button of a skinned panel the shared STUwave text button (FS.ButtonSkins.SkinTextButton),
+-- found by shape, not by name: UIPanelButtonTemplate keeps its art in the parentKeys Left, Middle and Right and
+-- ThreeSliceButtonTemplate in Left, Center and Right. A tab shares Left, Middle and Right but adds LeftActive,
+-- MiddleActive and RightActive, so it is told apart by those; an icon-only button has no label, a dropdown has no
+-- slices, and a button an earlier skin owns (FS.ButtonSkins.Parts) keeps its hand-set accent. SKIN ONLY: the skin adds
+-- textures, font objects and post-hooks, so a protected button (Accept, Decline, Complete) is safe in combat too.
+--
+-- The accent follows the label through the client's own strings, so it holds in any language: cyan commits, pink
+-- declines or destroys, anything else stays violet.
+local ACCENT_LABELS = {
+    cyan = { "ACCEPT", "COMPLETE_QUEST", "CONTINUE", "OKAY", "YES", "SAVE", "SEND_LABEL", "LEARN", "INVITE", "DONE",
+        "ADD_FRIEND", "AUCTION_HOUSE_BUY_BUTTON" },
+    pink = { "DECLINE", "CANCEL", "DELETE", "NO", "ABANDON_QUEST", "ABANDON_QUEST_ABBREV", "LEAVE", "LEAVE_QUEUE",
+        "RESET", "RESET_TO_DEFAULT", "DEFAULTS", "REPORT_PLAYER" },
+}
+
+local SWEEP_MAX_DEPTH = 8
+local SWEEP_MAX_NODES = 800
+
+local function LabelAccent(text)
+    for accent, names in pairs(ACCENT_LABELS) do
+        for _, name in ipairs(names) do
+            if _G[name] == text then return accent end
+        end
+    end
+    return nil
+end
+
+local function TypeOf(obj)
+    if type(obj) ~= "table" or type(obj.GetObjectType) ~= "function" then return nil end
+    local ok, kind = pcall(obj.GetObjectType, obj)
+    return ok and kind or nil
+end
+
+local function LabelOf(button)
+    if type(button.GetText) ~= "function" then return nil end
+    local ok, text = pcall(button.GetText, button)
+    if not ok or type(text) ~= "string" or text == "" then return nil end
+    if FS.IsSecret and FS.IsSecret(text) then return nil end
+    return text
+end
+
+local function IsStockTextButton(button)
+    if TypeOf(button) ~= "Button" then return false end
+    if not (button.Left and button.Right and (button.Middle or button.Center)) then return false end
+    if button.LeftActive or button.MiddleActive or button.RightActive then return false end -- a tab
+    return LabelOf(button) ~= nil
+end
+
+local function ChildrenOf(frame)
+    if type(frame.GetChildren) ~= "function" then return {} end
+    local ok, list = pcall(function() return { frame:GetChildren() } end)
+    return ok and list or {}
+end
+
+-- Walks `frame`'s subtree (bounded in depth and in nodes) and skins what it finds. A ScrollBox is not walked: its
+-- rows are pooled and rebuilt, and none is a stock text button. Returns how many buttons it skinned.
+function PanelSkins.SweepTextButtons(frame)
+    local skins = FS.ButtonSkins
+    if not (skins and skins.SkinTextButton and type(frame) == "table") then return 0 end
+    local count, nodes = 0, 0
+    local function walk(node, depth)
+        for _, child in ipairs(ChildrenOf(node)) do
+            nodes = nodes + 1
+            if nodes > SWEEP_MAX_NODES then return end
+            if type(child) == "table" then
+                if IsStockTextButton(child) and not (skins.Parts and skins.Parts(child)) then
+                    skins.SkinTextButton(child, { accent = LabelAccent(LabelOf(child)) })
+                    count = count + 1
+                end
+                if depth < SWEEP_MAX_DEPTH and child.ScrollTarget == nil then walk(child, depth + 1) end
+            end
+        end
+    end
+    walk(frame, 1)
+    return count
+end
+
+-- Sweeps `frame` now and again each time it is shown, and does the same for each page of it that is hidden now (a
+-- tab's page is shown without the panel being shown again). One hook per frame; a protected page is not hooked.
+function PanelSkins.SweepOnShow(frame)
+    if type(frame) ~= "table" then return end
+    PanelSkins.SweepTextButtons(frame)
+    local function again(self) PanelSkins.SweepTextButtons(self) end
+    PanelSkins.HookShowOnce(frame, "fsTextSweepHook", again)
+    for _, page in ipairs(ChildrenOf(frame)) do
+        if type(page) == "table" and type(page.IsShown) == "function" and not page:IsShown() then
+            local protected = type(page.IsProtected) == "function" and page:IsProtected()
+            if not protected then PanelSkins.HookShowOnce(page, "fsTextSweepHook", again) end
+        end
+    end
+end
+
 -- Read-only inspect registry: each reskin file registers the surfaces it owns
 -- so /fsinspect skins can report which ones resolved (frame exists, idempotency
 -- marker set) vs skipped (frame absent -- not yet loaded, load-on-demand) at
