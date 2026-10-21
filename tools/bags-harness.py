@@ -57,6 +57,12 @@ What it pins:
     clears it and reopening lights it again; a pooled button re-used for another bag follows its new bag on the next
     UpdateItems; in combat the item buttons (protected) get no Show/Hide/SetAttribute/SetPoint/SetSize/SetParent, only
     our regions change; a secret or missing GetBagID, a missing Theme piece and the bank are harmless;
+  * the quality ring: a filled slot's ring (the purple outline) is tinted by item quality, read per slot from
+    C_Container.GetContainerItemInfo (a bank slot: the itemInfo Blizzard just read): Poor grey, Common the default ring,
+    Uncommon, Rare, Legendary and up the colour Blizzard's bags use (player overrides included), Epic our own deep
+    purple (EPIC_RING_COLOR, #6a1fd1). Empty slots, unknown or secret answers keep the default ring; it follows every
+    UpdateItems and bank refresh, the icon emptying without a pass, combat (nothing protected is touched) and a
+    missing colour source (default ring, one log);
   * nothing errors when a region, a method or Theme.AddCut2Texture is absent.
 
     python3 tools/bags-harness.py
@@ -267,6 +273,8 @@ function MkItemButton(parent, kind)
         end
     end
     b.GetBagID = function(self) return self._bagID end
+    b.GetID = function(self) return self._slot or 0 end
+    b._k = kind
     b.emptyBackgroundAtlas = "bags-item-slot64"
     b.icon = tex(b, "icon", { file = "ICON-PLACEHOLDER" })
     b.icon._texture = nil
@@ -325,6 +333,7 @@ end
 -- What a Blizzard repaint of one button does, in the order UpdateItems/Refresh do it: the quality border
 -- is vertex coloured per item, the icon gets the item or the empty art.
 function BlizzardPaint(b, info)
+    if b._k == "bank" then b.itemInfo = info and { iconFileID = info.icon, quality = info.q } or nil end   -- BankPanelItemButtonMixin:RefreshItemInfo
     b:SetItemButtonTexture(info and info.icon or nil)
     if info and info.quality then
         b.IconBorder:SetVertexColor(info.quality[1], info.quality[2], info.quality[3])
@@ -380,11 +389,47 @@ function MkMoneyFrame(parent, name)
     return m
 end
 
+-- Blizzard's quality colours. The bag set (ColorManager.GetColorDataForBagItemQuality, no Poor entry, a player's colour
+-- override already applied) and ITEM_QUALITY_COLORS (Poor included) differ here so a check can tell which one was read.
+BAG_COLORS = {
+    [1] = { r = 0.70, g = 0.70, b = 0.70 }, [2] = { r = 0.12, g = 1.00, b = 0.00 }, [3] = { r = 0.00, g = 0.44, b = 0.87 },
+    [4] = { r = 0.64, g = 0.21, b = 0.93 }, [5] = { r = 1.00, g = 0.50, b = 0.00 }, [6] = { r = 0.90, g = 0.80, b = 0.50 },
+    [7] = { r = 0.00, g = 0.80, b = 1.00 }, [8] = { r = 0.00, g = 0.80, b = 1.00 },
+}
+ITEM_QUALITY_COLORS = {
+    [0] = { r = 0.62, g = 0.62, b = 0.62 }, [1] = { r = 1.00, g = 1.00, b = 1.00 }, [2] = { r = 0.10, g = 0.90, b = 0.10 },
+    [3] = { r = 0.10, g = 0.40, b = 0.80 }, [4] = { r = 0.60, g = 0.20, b = 0.90 }, [5] = { r = 0.90, g = 0.45, b = 0.05 },
+    [6] = { r = 0.85, g = 0.75, b = 0.45 }, [7] = { r = 0.05, g = 0.75, b = 0.95 },
+}
+ColorManager = {
+    GetColorDataForBagItemQuality = function(q) return BAG_COLORS[q] end,
+    GetColorDataForItemQuality = function(q) return ITEM_QUALITY_COLORS[q] end,
+}
+function RingColor(b)
+    local r, g, bl, a = b.fsSkin.border.ring:GetVertexColor()
+    return { r, g, bl, a }
+end
+
+-- C_Container.GetContainerItemInfo answers from the container that holds (bag, slot); an info's `q` is the item quality
+ALL_CONTAINERS, INFO_QUERIES = {}, 0
+C_Container = { GetContainerItemInfo = function(bag, slot)
+    INFO_QUERIES = INFO_QUERIES + 1
+    for _, c in ipairs(ALL_CONTAINERS) do
+        for i, b in ipairs(c.Items) do
+            if b._bagID == bag and b._slot == slot then
+                local info = c.infos[i]
+                return info and { iconFileID = info.icon, quality = info.q } or nil
+            end
+        end
+    end
+end }
+
 function MkContainer(name, nButtons, combined, bag)
     local c = CreateFrame("Frame", name, UIParent)
     c.isCombined = combined or false
     c.Items = {}
-    for i = 1, nButtons do c.Items[i] = MkItemButton(c, "container"); c.Items[i]._bagID = bag end
+    for i = 1, nButtons do c.Items[i] = MkItemButton(c, "container"); c.Items[i]._bagID = bag; c.Items[i]._slot = i end
+    ALL_CONTAINERS[#ALL_CONTAINERS + 1] = c
     c.infos = {}
     c.MoneyFrame = MkMoneyFrame(c)
     c.EnumerateValidItems = function(self)
@@ -440,6 +485,7 @@ FS = {
         SLICE_CUT2_OUTLINE_TEXTURE = "slice_cut2_outline.tga", SLICE_CUT2_GLOW_TEXTURE = "slice_cut2_glow.tga",
         SLICE_CUT2_GLOW_PAD = 4, SLICE_CUT2_GLOW_MARGIN = 10, COLOR_HEALTH = { 1, 0.18, 0.592, 1 },
         SLICE_CUT2_ERASE_TEXTURE = "slice_cut2_erase_c6.tga", COLOR_BG = { 0.102, 0.063, 0.145, 0.80 },
+        COLOR_BORDER = { 0.659, 0.333, 0.969, 1 },
         ApplyNineSlice = function(t, margin) t._slice = margin end,
         SkinPanel = function(frame) CALLS[#CALLS + 1] = { "SkinPanel", frame } end,
         ApplyMono = function(fs, size, color)
@@ -462,7 +508,9 @@ local function skin(name)
         CALLS[#CALLS + 1] = { name, button, opts }
         if not button.fsSkin then
             button.fsSkin = { chamfer = 6 }
-            themeTex(button, "slice_cut2_outline.tga", "OVERLAY", 1, "ring")
+            local ring = themeTex(button, "slice_cut2_outline.tga", "OVERLAY", 1, "ring")
+            ring:SetVertexColor(0.659, 0.333, 0.969, 1)
+            button.fsSkin.border = { ring = ring }
         end
         if opts and opts.count then FS.Theme.ApplyMono(opts.count, 11) end
         return button.fsSkin
@@ -595,6 +643,7 @@ class World:
             c2 = MkContainer("ContainerFrame2", 2, false, 2)
             comb = MkContainer("ContainerFrameCombinedBags", 3, true)
             comb.Items[1]._bagID, comb.Items[2]._bagID, comb.Items[3]._bagID = 0, 1, 1
+            comb.Items[1]._slot, comb.Items[2]._slot, comb.Items[3]._slot = 1, 11, 12
             comb.infos = { AXE, nil, AXE }
             bank = MkBank(3)
             bank.infos = { AXE, nil, nil }
@@ -880,6 +929,141 @@ def check_icon_corners() -> None:
     w3.run("bare = CreateFrame('Button', nil, UIParent); bare.icon = { GetObjectType = function() return 'Texture' end }; "
            "c1.Items = { bare }; c1:UpdateItems()")
     check("corners.an_icon_without_state_methods_is_harmless", w3.swallowed() == "" and w3.ev("not CornersShown(bare)"), w3.swallowed())
+
+
+EPIC_RING_HEX = "#6a1fd1"            # the user's deep royal purple for Epic: not Blizzard's #a335ee, and clear of the default ring #a855f7
+
+
+def hex_rgb(h: str) -> tuple[float, float, float]:
+    return tuple(int(h[i:i + 2], 16) / 255 for i in (1, 3, 5))      # type: ignore[return-value]
+
+
+def check_quality_ring() -> None:
+    # A filled slot's ring is tinted by item quality; read from C_Container (a bank slot: the itemInfo Blizzard just read),
+    # Poor grey, Common the default ring, the rest Blizzard's bag colour, Epic our own purple.
+    w = World()
+    w.run("comb:UpdateItems()")
+    default = (0.659, 0.333, 0.969)
+
+    def ring(expr: str) -> tuple[float, float, float, float]:
+        r, g, b, a = (float(v) for v in w.ev(f"RingColor({expr})").values())
+        return r, g, b, a
+
+    def is_color(expr: str, rgb: tuple[float, float, float], eps: float = 1e-3) -> bool:
+        r, g, b, a = ring(expr)
+        return near(r, rgb[0], eps) and near(g, rgb[1], eps) and near(b, rgb[2], eps) and near(a, 1)
+
+    def paint(q: int | None, slot: str = "c1.Items[1]", container: str = "c1", index: int = 1) -> None:
+        info = "nil" if q is None else f"{{ icon = 140, q = {q} }}"
+        w.run(f"{container}.infos[{index}] = {info}; {container}:UpdateItems()")
+
+    check("ring.empty_slot_keeps_the_default_ring", is_color("c1.Items[2]", default), str(ring("c1.Items[2]")))
+
+    # the colour of every quality, from the colour sources Blizzard's bags use
+    bag = {2: (0.12, 1.0, 0.0), 3: (0.0, 0.44, 0.87), 5: (1.0, 0.5, 0.0), 6: (0.9, 0.8, 0.5), 7: (0.0, 0.8, 1.0)}
+    paint(0)
+    check("ring.poor_is_grey_from_the_item_quality_colours", is_color("c1.Items[1]", (0.62, 0.62, 0.62)), str(ring("c1.Items[1]")))
+    paint(1)
+    check("ring.common_keeps_the_default_ring", is_color("c1.Items[1]", default), str(ring("c1.Items[1]")))
+    for q, rgb in bag.items():
+        paint(q)
+        check(f"ring.quality_{q}_is_the_bag_colour", is_color("c1.Items[1]", rgb), str(ring("c1.Items[1]")))
+    paint(4)
+    epic = hex_rgb(EPIC_RING_HEX)
+    check("ring.epic_is_the_deep_purple", is_color("c1.Items[1]", epic), f"{ring('c1.Items[1]')} want {epic}")
+    check("ring.epic_is_not_blizzards_epic_nor_the_default_ring",
+          not is_color("c1.Items[1]", (0.64, 0.21, 0.93), 0.05) and not is_color("c1.Items[1]", default, 0.05))
+    paint(None)
+    check("ring.the_slot_emptying_resets_the_ring", is_color("c1.Items[1]", default), str(ring("c1.Items[1]")))
+
+    # an unknown quality (a token, a number outside the table) keeps the default ring
+    paint(9)
+    check("ring.a_quality_with_no_colour_keeps_the_default_ring", is_color("c1.Items[1]", default))
+    paint(-1)
+    check("ring.a_negative_quality_keeps_the_default_ring", is_color("c1.Items[1]", default))
+
+    # combined bags and the bank follow too; a bank slot is read from its itemInfo, not through C_Container
+    w.run("comb.infos[3] = { icon = 141, q = 3 }; comb:UpdateItems()")
+    check("ring.a_combined_bags_slot_is_tinted", is_color("comb.Items[3]", bag[3]), str(ring("comb.Items[3]")))
+    w.run("bank.infos[1] = { icon = 142, q = 5 }; INFO_QUERIES = 0; bank.RefreshAllItemsForSelectedTab(bank)")
+    check("ring.a_bank_slot_is_tinted_from_its_item_info", is_color("bank.pool[1]", bag[5]) and w.ev("INFO_QUERIES == 0"),
+          f"{ring('bank.pool[1]')} queries={w.ev('INFO_QUERIES')}")
+    w.run("bank.infos[1] = nil; bank.RefreshAllItemsForSelectedTab(bank)")
+    check("ring.an_emptied_bank_slot_resets", is_color("bank.pool[1]", default))
+
+    # re-applied on every update: a different item in the same slot, a repeat pass, a window re-show
+    paint(2)
+    paint(3)
+    check("ring.a_new_item_in_the_slot_retints", is_color("c1.Items[1]", bag[3]))
+    w.run("for _ = 1, 3 do c1:UpdateItems() end")
+    check("ring.repeat_passes_keep_it", is_color("c1.Items[1]", bag[3]))
+    w.run("CloseWindow(c1); OpenWindow(c1)")
+    check("ring.a_reopened_window_keeps_it", is_color("c1.Items[1]", bag[3]))
+
+    # a player's colour override is honoured on the next pass; the Epic constant is ours either way
+    w.run("BAG_COLORS[3] = { r = 0.9, g = 0.1, b = 0.9 }; c1:UpdateItems()")
+    check("ring.a_players_colour_override_is_followed", is_color("c1.Items[1]", (0.9, 0.1, 0.9)))
+    w.run("BAG_COLORS[3] = { r = 0.00, g = 0.44, b = 0.87 }")
+
+    # the icon emptying with no pass in between: the ring resets at once, and a stale colour never lands on a new item
+    paint(3)
+    w.run("c1.Items[1]:SetItemButtonTexture(nil)")
+    check("ring.the_icon_emptying_resets_without_a_pass", is_color("c1.Items[1]", default))
+    w.run("c1.Items[1]:SetItemButtonTexture(143)")
+    check("ring.an_item_arriving_waits_for_the_pass", is_color("c1.Items[1]", default))
+    w.run("c1:UpdateItems()")
+    check("ring.the_pass_then_tints_it", is_color("c1.Items[1]", bag[3]))
+    w.run("c1.infos[1] = nil; c1:UpdateItems()")
+
+    # secret answers: a secret quality or info keeps the default ring and nothing throws
+    w.run("SECRET_IDS = false; c1.infos[1] = { icon = 144, q = SECRET_VALUE }; c1:UpdateItems()")
+    check("ring.a_secret_quality_keeps_the_default_ring", is_color("c1.Items[1]", default) and w.swallowed() == "", w.swallowed())
+    w.run("c1.infos[1] = nil; c1.Items[1].itemInfo = SECRET_VALUE; c1:UpdateItems(); c1.Items[1].itemInfo = nil")
+    check("ring.a_secret_item_info_keeps_the_default_ring", is_color("c1.Items[1]", default) and w.swallowed() == "", w.swallowed())
+
+    # combat: only our ring changes, nothing protected on the item button
+    w.run("INCOMBAT = true; PROTECTED_CALLS = {}; c1.infos[1] = { icon = 145, q = 5 }; c1:UpdateItems(); bank.infos[2] = { icon = 146, q = 2 }; "
+          "bank.RefreshAllItemsForSelectedTab(bank)")
+    prot = str(w.ev("table.concat(PROTECTED_CALLS, ',')"))
+    check("ring.combat_updates_the_ring_with_no_protected_call",
+          is_color("c1.Items[1]", bag[5]) and is_color("bank.pool[2]", bag[2]) and prot == "", f"{prot} {ring('c1.Items[1]')}")
+    w.run("EndCombat()")
+    check("ring.nothing_swallowed", w.swallowed() == "", w.swallowed())
+    check("ring.no_degrade_logs", w.degrade() == "", w.degrade())
+
+    # the colour sources: the bag colours first, ITEM_QUALITY_COLORS when ColorManager is missing, and no source at all
+    w = World()
+    w.run("ColorManager = nil; c1.infos[1] = { icon = 147, q = 2 }; c1.infos[3] = { icon = 148, q = 0 }; c1:UpdateItems()")
+    check("ring.without_colormanager_the_item_quality_colours_are_used",
+          is_color("c1.Items[1]", (0.1, 0.9, 0.1)) and is_color("c1.Items[3]", (0.62, 0.62, 0.62)), f"{ring('c1.Items[1]')} {ring('c1.Items[3]')}")
+    check("ring.without_colormanager_nothing_logged_or_swallowed", w.degrade() == "" and w.swallowed() == "", f"{w.degrade()} {w.swallowed()}")
+    w.run("ColorManager = { GetColorDataForBagItemQuality = function() error('boom') end }; c1:UpdateItems()")
+    check("ring.a_throwing_colormanager_falls_back", is_color("c1.Items[1]", (0.1, 0.9, 0.1)))
+    w.run("ColorManager = { GetColorDataForBagItemQuality = function() return {} end }; ITEM_QUALITY_COLORS = nil; c1:UpdateItems()")
+    check("ring.a_colour_without_channels_keeps_the_default_ring", is_color("c1.Items[1]", default) and w.degrade() == "", w.degrade())
+    w2 = World()
+    w2.run("ColorManager = nil; ITEM_QUALITY_COLORS = nil; c1.infos[1] = { icon = 147, q = 2 }; c1.infos[3] = { icon = 148, q = 4 }; c1:UpdateItems(); c1:UpdateItems()")
+    r1 = tuple(float(v) for v in w2.ev("RingColor(c1.Items[1])").values())
+    r3 = tuple(float(v) for v in w2.ev("RingColor(c1.Items[3])").values())
+    check("ring.no_colour_source_keeps_the_default_ring_and_logs_once",
+          near(r1[0], default[0]) and near(r1[1], default[1]) and w2.degrade().count("bags_quality_ring") == 1, w2.degrade())
+    check("ring.epic_needs_no_colour_source", near(r3[0], epic[0], 1e-3) and near(r3[2], epic[2], 1e-3), str(r3))
+
+    # no C_Container, no GetID, no skin ring: the slot is left alone and nothing throws
+    w3 = World()
+    w3.run("C_Container = nil; c1.infos[1] = { icon = 149, q = 5 }; c1:UpdateItems()")
+    check("ring.no_c_container_keeps_the_default_ring", is_color_for(w3, "c1.Items[1]", default) and w3.swallowed() == "", w3.swallowed())
+    w3 = World()
+    w3.run("c1.Items[1].GetID = nil; c1.infos[1] = { icon = 150, q = 5 }; c1:UpdateItems(); c1.Items[1].GetBagID = nil; c1:UpdateItems()")
+    check("ring.a_button_without_ids_keeps_the_default_ring", is_color_for(w3, "c1.Items[1]", default) and w3.swallowed() == "", w3.swallowed())
+    w3 = World()
+    w3.run("c1.Items[1].fsSkin.border = nil; c1.infos[1] = { icon = 151, q = 5 }; c1:UpdateItems()")
+    check("ring.a_skin_without_a_ring_is_harmless", w3.swallowed() == "", w3.swallowed())
+
+
+def is_color_for(w: World, expr: str, rgb: tuple[float, float, float]) -> bool:
+    r, g, b, a = (float(v) for v in w.ev(f"RingColor({expr})").values())
+    return near(r, rgb[0], 1e-3) and near(g, rgb[1], 1e-3) and near(b, rgb[2], 1e-3) and near(a, 1)
 
 
 def check_hold_retry() -> None:
@@ -1233,6 +1417,7 @@ def main() -> int:
     check_untouched()
     check_plate_and_border()
     check_icon_corners()
+    check_quality_ring()
     check_hold_retry()
     check_money(db)
     check_colorblind()

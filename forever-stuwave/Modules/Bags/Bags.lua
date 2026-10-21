@@ -7,8 +7,9 @@
 -- is feature-detected; a missing name silently no-ops rather than erroring.
 -- Item slots wear OUR plate only (the two-corner cut plate of the deck bag
 -- slots and action buttons, plus its cut border); Blizzard's own slot art is
--- hidden and held hidden, and a filled slot's square icon is cut at the two cut
--- corners by a panel-coloured wedge (no MaskTexture: it does not clip here).
+-- hidden and held hidden, a filled slot's square icon is cut at the two cut
+-- corners by a panel-coloured wedge (no MaskTexture: it does not clip here), and
+-- the border is tinted by the item's quality (Poor grey, Common default).
 -- The money line wears the data bar's GOLD look.
 -- Blizzard's GamepadBagBar (a child of the combined bags, same frame level as
 -- the Clean Up button, a bag icon) is hidden while no controller is connected:
@@ -245,7 +246,7 @@ end
 -- pass: the container path is SetShown then SetAtlas/SetTexture, the bank's is SetTexture then SetShown (an emptied
 -- bank slot keeps its old texture and is just hidden), and BankPanelItemButtonMixin:Refresh also runs for a single
 -- slot on ITEM_LOCK_CHANGED, outside the panel-wide refresh hooks. So the icon's five state setters get a
--- post-hook each (no method replaced), and every skin pass re-reads it as well.
+-- post-hook each (HookIconState, no method replaced), and every skin pass re-reads it as well.
 --
 -- All of it is our own region: nothing on the item button's secure side is touched, so it works in combat.
 local ICON_CORNER_SUBLEVEL = -1
@@ -298,15 +299,134 @@ local function AddIconCorners(button)
     end
     corners:Hide()
     button.fsBagCorners = corners
+end
 
-    local icon = button.icon
-    if type(icon) == "table" and type(hooksecurefunc) == "function" then
-        local function sync() SyncIconCorners(button) end
-        for _, method in ipairs(ICON_STATE_METHODS) do
-            if type(icon[method]) == "function" then pcall(hooksecurefunc, icon, method, sync) end
+-------------------------------------------------------------------------------
+-- Quality ring: the slot's outline, tinted by the item inside
+-------------------------------------------------------------------------------
+
+-- The ring (the violet cut outline Theme.SkinButton puts on every slot) takes the colour of the item's
+-- quality, so junk and good items read apart at a glance. Poor is grey; Common keeps the default ring;
+-- Uncommon, Rare, Legendary and up take Blizzard's bag colour for that quality (Epic is ours, below); an empty slot, an
+-- unknown quality and anything unreadable keep the default ring. Only the ring: the glow, the plate and the icon are
+-- not touched. (BagBar.lua tints its slot edges the same way from Uncommon up.)
+--
+-- Colours: ColorManager.GetColorDataForBagItemQuality, the colours Blizzard's own item border used on these slots, and
+-- the player's colour overrides come through it (12.1 ColorManager.lua). It has no Poor entry, so Poor reads
+-- ColorManager.GetColorDataForItemQuality(0), also override-aware. A client without ColorManager falls back to the
+-- ITEM_QUALITY_COLORS table BagBar.lua reads, and a client with neither keeps the default ring and logs once.
+-- EPIC is the exception: Blizzard's #a335ee sits almost on top of the default ring (#a855f7), so Epic gets a deeper
+-- royal purple of our own, #6a1fd1 (about 2.4:1 against the panel, 1.9:1 against the default ring). Epic therefore
+-- ignores a player's Epic colour override; every other quality follows it.
+--
+-- The quality is read per slot, not from Blizzard's border: C_Container.GetContainerItemInfo(bag, slot) for a container slot,
+-- the `itemInfo` Blizzard just read for a bank slot (BankPanelItemButtonMixin:RefreshItemInfo). Both are plain
+-- numbers on this API; a secret answer is never compared and keeps the default ring. The read happens on every skin
+-- pass, which follows every UpdateItems and bank refresh, in combat too (bags are usable in combat, this API is not
+-- restricted, and only our own ring region is written). The icon's state hooks re-apply the cached colour: an
+-- icon that no longer holds an item drops it at once, without waiting for a pass.
+local QUALITY_POOR, QUALITY_COMMON, QUALITY_UNCOMMON, QUALITY_EPIC = 0, 1, 2, 4   -- Enum.ItemQuality
+local EPIC_RING_COLOR = { 0x6a / 255, 0x1f / 255, 0xd1 / 255 } -- #6a1fd1
+
+local function BagIDOf(itemButton)
+    if type(itemButton.GetBagID) ~= "function" then return nil end
+    local ok, id = pcall(itemButton.GetBagID, itemButton)
+    if not ok or type(id) ~= "number" or (FS.IsSecret and FS.IsSecret(id)) then return nil end
+    return id
+end
+
+local function IsSecretValue(value)
+    return FS.IsSecret and FS.IsSecret(value) and true or false
+end
+
+-- The item info of a slot, nil when there is none or it cannot be read plainly.
+local function SlotItemInfo(button)
+    local info = button.itemInfo -- a bank slot: Blizzard read it in Refresh
+    if info == nil then
+        if type(C_Container) ~= "table" or type(C_Container.GetContainerItemInfo) ~= "function" then return nil end
+        local bag = BagIDOf(button)
+        if not bag or type(button.GetID) ~= "function" then return nil end
+        local okSlot, slot = pcall(button.GetID, button)
+        if not okSlot or type(slot) ~= "number" or IsSecretValue(slot) then return nil end
+        local ok, value = pcall(C_Container.GetContainerItemInfo, bag, slot)
+        if not ok then return nil end
+        info = value
+    end
+    if IsSecretValue(info) or type(info) ~= "table" then return nil end
+    return info
+end
+
+local qualityRingWarned = false
+
+-- r, g, b of a quality colour table, nil unless all three are plain numbers.
+local function ChannelsOf(color)
+    if type(color) ~= "table" or IsSecretValue(color) then return nil end
+    local r, g, b = color.r, color.g, color.b
+    if type(r) ~= "number" or type(g) ~= "number" or type(b) ~= "number" then return nil end
+    if IsSecretValue(r) or IsSecretValue(g) or IsSecretValue(b) then return nil end
+    return r, g, b
+end
+
+local function QualityColorChannels(quality)
+    local sourced = false
+    if type(ColorManager) == "table" then
+        local read = quality == QUALITY_POOR and ColorManager.GetColorDataForItemQuality or ColorManager.GetColorDataForBagItemQuality
+        if type(read) == "function" then
+            sourced = true
+            local ok, color = pcall(read, quality)
+            if ok then
+                local r, g, b = ChannelsOf(color)
+                if r then return r, g, b end
+            end
         end
     end
+    if type(ITEM_QUALITY_COLORS) == "table" then return ChannelsOf(ITEM_QUALITY_COLORS[quality]) end
+    if not sourced and not qualityRingWarned then
+        qualityRingWarned = true
+        FS.LogDegradeOnce("bags_quality_ring", "Bags.lua: no item quality colours, slot rings keep the default colour")
+    end
+    return nil
+end
+
+-- r, g, b of the ring for an item quality; nil for the default ring.
+local function QualityRingColor(quality)
+    if type(quality) ~= "number" or IsSecretValue(quality) then return nil end
+    if quality == QUALITY_EPIC then return EPIC_RING_COLOR[1], EPIC_RING_COLOR[2], EPIC_RING_COLOR[3] end
+    if quality ~= QUALITY_POOR and quality < QUALITY_UNCOMMON then return nil end -- Common, and anything below Poor
+    return QualityColorChannels(quality)
+end
+
+-- Reads the slot's item now and caches the ring colour it earns.
+local function ReadSlotRing(button)
+    local info = SlotItemInfo(button)
+    local r, g, b = QualityRingColor(info and info.quality)
+    button.fsBagRingColor = r and { r, g, b } or nil
+end
+
+-- Writes the ring: the cached quality colour while the icon holds an item, else the default ring.
+local function SyncSlotRing(button)
+    local skin = button.fsSkin
+    local ring = skin and skin.border and skin.border.ring
+    if not ring then return end
+    if not IconHoldsItem(button) then button.fsBagRingColor = nil end
+    local color = button.fsBagRingColor or FS.Theme.COLOR_BORDER
+    if color then ring:SetVertexColor(color[1], color[2], color[3], 1) end
+end
+
+-- Everything that follows the icon: the corner wedge and the ring.
+local function SyncSlot(button)
     SyncIconCorners(button)
+    SyncSlotRing(button)
+end
+
+-- One post-hook per icon state setter (no method replaced), installed once per button.
+local function HookIconState(button)
+    local icon = button.icon
+    if type(icon) ~= "table" or type(hooksecurefunc) ~= "function" then return end
+    local function sync() SyncSlot(button) end
+    for _, method in ipairs(ICON_STATE_METHODS) do
+        if type(icon[method]) == "function" then pcall(hooksecurefunc, icon, method, sync) end
+    end
 end
 
 -- One-time per-button setup (the per-button guard below), same idempotency
@@ -336,21 +456,24 @@ end
 -- NewItemTexture over it would poke past the ring anyway, so moving only the icon
 -- would detach them from the item by the inset instead of fixing the corners.
 -- The icon keeps its full size; its two corners outside the cut are covered by the
--- wedge above (AddIconCorners), made last so the icon hooks sit after the empty-art clear.
+-- wedge above (AddIconCorners). The icon hooks go in last so they sit after the empty-art clear.
 local function SkinItemButton(button)
     if not button then return end
     SweepSlotArt(button)
-    SyncIconCorners(button)
-    if button.fsBagItemSkinned then return end
-    button.fsBagItemSkinned = true
+    if not button.fsBagItemSkinned then
+        button.fsBagItemSkinned = true
 
-    HookNormalSetters(button, ART_SETTERS, SweepSlotArt)
-    HookEmptyIcon(button)
-    AddPlate(button)
-    if SkinCutButton then
-        SkinCutButton(button, { count = button.Count })
+        HookNormalSetters(button, ART_SETTERS, SweepSlotArt)
+        HookEmptyIcon(button)
+        AddPlate(button)
+        if SkinCutButton then
+            SkinCutButton(button, { count = button.Count })
+        end
+        AddIconCorners(button)
+        HookIconState(button)
     end
-    AddIconCorners(button)
+    ReadSlotRing(button)
+    SyncSlot(button)
 end
 
 -- Calls fn(itemButton) for every currently-valid item button of a container or
@@ -405,13 +528,6 @@ end
 local HIGHLIGHT_ALPHA_GLOW = 0.9
 local highlightBag = nil              -- the bag ID being hovered, nil = none
 local highlightFailed = false         -- Theme could not build the regions; logged once
-
-local function BagIDOf(itemButton)
-    if type(itemButton.GetBagID) ~= "function" then return nil end
-    local ok, id = pcall(itemButton.GetBagID, itemButton)
-    if not ok or type(id) ~= "number" or (FS.IsSecret and FS.IsSecret(id)) then return nil end
-    return id
-end
 
 -- The two regions, made once per button. Same cut2 set as the slot's border (chamfer 6):
 -- the outline ring on top, the cut2 glow (ADD, hollow inside, hangs out by its pad) under it.

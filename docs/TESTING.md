@@ -268,8 +268,9 @@ The micro menu and the class tabs use the game's own icons, restyled while the g
 1. Bag bar: hover a bag in the bag bar and its slots in the open bags highlight. The backpack slot has our own backpack icon.
 2. Bag bar with no controller: the gamepad bag bar is hidden and does not cover Clean Up. It also hides in combat.
 3. Bag slots: a slot holding an item has its icon cut along the ring at the top-left and bottom-right corners, with no grey square corner past the ring. An empty slot shows only the plate and the ring. Check the combined bags, a separate bag and the bank, and move an item out and back in.
-4. Main bar: change stance or form, enter stealth, and mount a vehicle or enter a quest override bar, in combat too. The main bar follows and clicks on it work.
-5. Stance bar: click the active form to cancel it (leave Druid form, drop stealth), like the stock bar.
+4. Bag slot rings: a slot holding an item has its ring coloured by quality: grey for Poor, the usual violet for Common, then green, blue, a deep royal purple for Epic (clearly different from the violet), and orange and up. An empty slot keeps the violet ring. Check the combined bags, a separate bag and the bank, in combat too, and move an item out and back in.
+5. Main bar: change stance or form, enter stealth, and mount a vehicle or enter a quest override bar, in combat too. The main bar follows and clicks on it work.
+6. Stance bar: click the active form to cancel it (leave Druid form, drop stealth), like the stock bar.
 
 ## Layout editor: /fsedit
 
