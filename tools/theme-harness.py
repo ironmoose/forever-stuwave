@@ -978,6 +978,37 @@ case("skinbutton_halos_are_seated_again_when_the_pixel_scale_changes_and_a_manag
     assert(PointIs(sb.glow, "TOPLEFT", "TOPLEFT", -9, 9), "a managed halo is not moved")
 """)
 
+case("skinbutton_halo_of_a_protected_button_waits_for_regen_when_the_scale_changes_in_combat", """
+    local ppu = 1
+    FS.FrameHelpers = { PixelsPerUnit = function() return ppu end }
+    local handler, events = nil, {}
+    local realCF = CreateFrame
+    CreateFrame = function(...)
+        local f = realCF(...)
+        f.RegisterEvent = function(_, e) events[e] = true end
+        f.SetScript = function(_, name, fn) if name == "OnEvent" then handler = fn end end
+        return f
+    end
+    local inCombat = false
+    InCombatLockdown = function() return inCombat end
+    local plain, secure, locked = NewFrame(), NewFrame(), NewFrame()
+    secure.IsProtected = function() return true end
+    locked.CanChangeProtectedState = function() return not inCombat end -- the engine's own answer, when it gives one
+    local sp, ss, sl = Theme.SkinButton(plain), Theme.SkinButton(secure), Theme.SkinButton(locked)
+    assert(handler and events.UI_SCALE_CHANGED, "the scale listener was not made")
+    assert(events.PLAYER_REGEN_ENABLED, "the listener must also wait for regen")
+    inCombat = true
+    ppu = 1.25
+    handler(nil, "UI_SCALE_CHANGED")
+    assert(PointIs(sp.glow, "TOPLEFT", "TOPLEFT", -3.2, 3.2), "an unprotected halo is seated again in combat")
+    assert(PointIs(ss.glow, "TOPLEFT", "TOPLEFT", -4, 4), "a protected button's halo was moved in combat")
+    assert(PointIs(sl.glow, "TOPLEFT", "TOPLEFT", -4, 4), "a halo the engine says is locked was moved in combat")
+    inCombat = false
+    handler(nil, "PLAYER_REGEN_ENABLED")
+    assert(PointIs(ss.glow, "TOPLEFT", "TOPLEFT", -3.2, 3.2), "the protected halo was not seated at regen")
+    assert(PointIs(sl.glow, "TOPLEFT", "TOPLEFT", -3.2, 3.2), "the locked halo was not seated at regen")
+""")
+
 case("skinbutton_picks_the_chamfer_from_the_button_height", """
     local want = { [37] = 6, [36] = 6, [32] = 6, [24] = 4, [18] = 3, [10] = 2 }
     for h, c in pairs(want) do

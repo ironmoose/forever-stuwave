@@ -1927,10 +1927,25 @@ end
 
 -- Seats every skinned button's halo again for the pixel scale it has now (the UI scale or the resolution changed, or
 -- the button was skinned before its scale settled). A skin that seats its own halo (`skin.managed`, ButtonSkins') is
--- left to its owner.
+-- left to its owner. A protected button's halo is not touched in combat: it is seated at PLAYER_REGEN_ENABLED.
 function Theme.ReseatButtonGlows()
+    local combat = InCombatLockdown and InCombatLockdown()
     for button, skin in pairs(Theme.glowSeats) do
-        if not skin.managed and skin.glow then pcall(Theme.SeatButtonGlow, button, skin) end
+        if not skin.managed and skin.glow then
+            local locked = false
+            if combat and type(button.CanChangeProtectedState) == "function" then
+                local ok, can = pcall(button.CanChangeProtectedState, button)
+                locked = ok and can == false
+            elseif combat and type(button.IsProtected) == "function" then
+                local ok, protected = pcall(button.IsProtected, button)
+                locked = ok and protected and true or false
+            end
+            if locked then
+                Theme.glowsPending = true
+            else
+                pcall(Theme.SeatButtonGlow, button, skin)
+            end
+        end
     end
 end
 
@@ -1942,7 +1957,14 @@ function Theme.ListenForScale()
     frame:RegisterEvent("PLAYER_ENTERING_WORLD")
     frame:RegisterEvent("UI_SCALE_CHANGED")
     frame:RegisterEvent("DISPLAY_SIZE_CHANGED")
-    frame:SetScript("OnEvent", function() Theme.ReseatButtonGlows() end)
+    frame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    frame:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_REGEN_ENABLED" then
+            if not Theme.glowsPending then return end
+            Theme.glowsPending = false
+        end
+        Theme.ReseatButtonGlows()
+    end)
 end
 
 function Theme.SkinButton(button, opts)
