@@ -267,6 +267,14 @@ function(configSrc, gunsightSrc, windowSrc, opts, boxesSrc)
         return t
     end
     FS.Theme = Theme
+    -- the window's close X is the shared one (Core/ButtonSkins.lua); this records the buttons it is asked for
+    FS.ButtonSkins = { CLOSE = {} }
+    function FS.ButtonSkins.NewCloseButton(parent, onClick)
+        local b = CreateFrame("Button", nil, parent)
+        b:SetScript("OnClick", onClick)
+        FS.ButtonSkins.CLOSE[#FS.ButtonSkins.CLOSE + 1] = b
+        return b
+    end
     if opts.noConfig ~= true then
         assert(load(configSrc, "@Config.lua"))("forever-stuwave", FS)
     end
@@ -567,14 +575,11 @@ function T.chrome_title_subtitle_footer_and_close()
     yes(findText("Changes apply instantly", f))
     yes(findText("open with", f))
     yes(findText("// settings", f))
-    local x = findText("X", f)
-    yes(x, "close X")
-    local xb = x.parent
-    eq(xb:GetWidth(), 26, "close X width matches the mockup")
-    eq(xb:GetHeight(), 14, "close X height matches the mockup")
-    yes(xb.fsSkin.opts.glowAlpha <= 0.25,
-        "a 14px button's halo stays faint, or it reads as a second ring (" .. tostring(xb.fsSkin.opts.glowAlpha) .. ")")
-    click("X", f)
+    no(findText("X", f), "no font X of its own: the close is the shared STUwave X")
+    local made = FS.ButtonSkins.CLOSE
+    eq(#made, 1, "one shared close button")
+    eq(made[1].parent, f, "on the window")
+    made[1].scripts.OnClick(made[1])
     no(W.IsShown(), "the X closes the window")
 end
 

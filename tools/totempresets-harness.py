@@ -50,6 +50,8 @@ DIAL = Path(os.environ.get("TOTEMDIAL_LUA", ADDON / "Modules/ActionBars/TotemDia
 BINDINGS = Path(os.environ.get("BINDINGS_XML", ADDON / "Bindings.xml"))
 TOC = Path(os.environ.get("TOC_FILE", ADDON / "forever-stuwave.toc"))
 THEME = ADDON / "Core/Theme.lua"
+HELDART = ADDON / "Core/HeldArt.lua"
+BUTTONSKINS = ADDON / "Core/ButtonSkins.lua"
 
 
 def _load(name: str, filename: str):
@@ -121,6 +123,16 @@ function __Region:SetSnapToPixelGrid(on) self._snap = on end
 function __Region:SetTexelSnappingBias(v) self._bias = v end
 function __Region:ClearFocus() self._focus = false end
 function __Region:SetFocus() self._focus = true end
+-- the editor card's close X is the shared one (Core/ButtonSkins.lua), which wants a few Theme pieces this sandbox's
+-- cut-down Theme does not carry
+local T = FS.Theme
+T.COLOR_BUTTON_INK = T.COLOR_BUTTON_INK or { 0.090, 0.047, 0.165, 1 }
+T.COLOR_HEALTH = T.COLOR_HEALTH or { 1, 0.180, 0.592, 1 }
+T.AddCutSliceFill = T.AddCutSliceFill or function(panel, color)
+    local t = panel:CreateTexture(nil, "BACKGROUND")
+    t:SetVertexColor(color[1], color[2], color[3], color[4] or 1)
+    return t
+end
 -- the keys and the CVar the click path reads
 __shift = false
 function IsShiftKeyDown() return __shift end
@@ -158,7 +170,7 @@ def boot(scale: float = 1.0, *, learned=None, combat: bool = False, pre_login: s
         files += [bbh.SHAMANBUFFS, bbh.BUFFTAB]
         extra = mocks + "\n" + bbh.MOCKS + "\n" + fsh.MOCKS + "\n" + MOCKS + "\n" + "\n".join(setup) + "\n" + early
         files.append(fsh.FSTAB)
-    files += [PRESETS, DIAL]
+    files += [HELDART, BUTTONSKINS, PRESETS, DIAL]   # the card's close X is the shared one (Core/ButtonSkins.lua)
     return sb.boot(scale, klass=klass, known=[], combat=combat, console=console, extra_lua=csh.PATCH + extra,
                    extra_files=tuple(files), pre_login=csh.SPIES + pre_login)
 
@@ -1434,6 +1446,20 @@ def check_the_card_closes_on_escape_and_combat_and_hangs_on_the_last_cell():
     assert not shown(c)
 
 
+def check_the_cards_close_is_the_shared_stuwave_x_and_it_closes_the_card():
+    lua = boot()
+    i = make(lua)
+    DL(lua).OpenEditor(i)
+    c = card(lua)
+    parts = ev(lua, "FS.ButtonSkins.Parts")(c.close)
+    assert parts is not None and len(seq(parts.glyph)) == 12, "the card's close is not the shared STUwave X"
+    p = c.close._points[1]
+    assert (p.point, p.relPoint) == ("TOPRIGHT", "TOPRIGHT") and sb.same(lua, p.rel, c), "the X is not seated top right"
+    assert (float(p.x), float(p.y)) == (-5.0, -3.0), f"the X seat is {p.x}, {p.y}"
+    script(lua, c.close, "OnClick")
+    assert not shown(c), "the X did not close the card"
+
+
 def check_no_secure_frame_is_anchored_to_the_card_or_its_pieces():
     lua = boot()
     i = make(lua)
@@ -2044,7 +2070,7 @@ def glyph_px(b, es):
     return pts, round(float(b._w) * es), round(float(b._h) * es)
 
 
-def check_the_close_x_and_the_arrows_are_drawn_on_whole_pixels_with_equal_margins_at_every_scale():
+def check_the_arrows_are_drawn_on_whole_pixels_with_equal_margins_at_every_scale():
     for es, sc in ((1.0, 1.0), (0.64, 1.0), (1.3333333, 1.25), (0.7, 0.8), (1.2, 1.0), (1.5, 1.0), (0.9, 1.0), (1.1, 1.0),
                    (1.75, 1.0), (2.2, 1.0), (1.2, LIVE_SCALE)):
         lua = boot(sc)
@@ -2054,9 +2080,9 @@ def check_the_close_x_and_the_arrows_are_drawn_on_whole_pixels_with_equal_margin
         DL(lua).OpenEditor(i)
         c = card(lua)
         assert len(seq(P.Get(i).order)) >= 3
-        shapes = [("close", c.close)] + [(f"up{n}", r.up) for n, r in enumerate(rows(lua)) if shown(r.up)] + \
+        shapes = [(f"up{n}", r.up) for n, r in enumerate(rows(lua)) if shown(r.up)] + \
                  [(f"down{n}", r.down) for n, r in enumerate(rows(lua)) if shown(r.down)]
-        assert len(shapes) >= 4
+        assert len(shapes) >= 3
         for label, b in shapes:
             pts, bw, bh = glyph_px(b, es)
             assert pts and bw % 2 == 0 and bh % 2 == 0, f"es {es} {label}: button {bw}x{bh}"
@@ -2065,10 +2091,6 @@ def check_the_close_x_and_the_arrows_are_drawn_on_whole_pixels_with_equal_margin
             top, bottom = min(ys), bh - 1 - max(ys)
             assert left == right and top == bottom and left >= 1 and top >= 1, \
                 f"es {es} sc {sc} {label}: margins l{left} r{right} t{top} b{bottom} in {bw}x{bh}"
-            if label == "close":
-                assert max(xs) - min(xs) == max(ys) - min(ys), "the X is not square"
-                assert len(set(pts)) == len(pts) and (min(xs), min(ys)) in pts and (max(xs), max(ys)) in pts
-                assert (min(xs), max(ys)) in pts and (max(xs), min(ys)) in pts, "the X lacks its corners"
             # the label of a glyph button is empty: nothing for font metrics to put off centre
             assert not b.text._text
 
@@ -2079,7 +2101,7 @@ def check_every_interactive_editor_element_has_hover_pressed_and_disabled_looks_
     i = make(lua)
     DL(lua).OpenEditor(i)
     c = card(lua)
-    live = [("close", c.close)] + [(f"up{n}", r.up) for n, r in enumerate(rows(lua)) if shown(r.up)] + \
+    live = [(f"up{n}", r.up) for n, r in enumerate(rows(lua)) if shown(r.up)] + \
            [(f"down{n}", r.down) for n, r in enumerate(rows(lua)) if shown(r.down)] + [("clear", c.clear)]
     for label, b in live:
         drive(lua, b, label)
@@ -2749,7 +2771,7 @@ def check_a_disabled_row_does_not_light_its_edge_and_every_editor_texture_is_pix
     c = card(lua)
     script(lua, row, "OnClick")
     chooser = g(lua).FSTotemChooser
-    groups = [c.edges, c.nameEdges, c.close.edges, c.close.glyph, c.clear.edges, row.edges, row.tile.hl,
+    groups = [c.edges, c.nameEdges, c.clear.edges, row.edges, row.tile.hl,
               row.up.edges, row.up.glyph, chooser.edges, chooser.tiles[1].hl]
     for group in groups:
         assert len(seq(group)) > 0
@@ -2885,6 +2907,7 @@ CHECKS = [
     check_the_name_box_commits_on_enter_and_on_losing_focus_and_cleans_the_name,
     check_clear_asks_twice_the_confirmation_runs_out_and_the_card_stays_open_on_the_empty_slot,
     check_the_card_closes_on_escape_and_combat_and_hangs_on_the_last_cell,
+    check_the_cards_close_is_the_shared_stuwave_x_and_it_closes_the_card,
     check_no_secure_frame_is_anchored_to_the_card_or_its_pieces,
     check_a_resize_hides_the_art_of_the_old_width,
     check_edit_clicks_in_every_modifier_combination_never_drop_a_totem,
@@ -2905,7 +2928,7 @@ CHECKS = [
     check_the_dashed_box_lights_every_pixel_of_the_rule_at_every_scale_and_the_left_out_icon_has_no_fill,
     check_the_selected_swatchs_inner_ring_sits_one_pixel_inside_the_white_outer_ring,
     check_a_disabled_row_ignores_its_arrows_hover_and_a_swatch_tooltip_goes_with_the_card,
-    check_the_close_x_and_the_arrows_are_drawn_on_whole_pixels_with_equal_margins_at_every_scale,
+    check_the_arrows_are_drawn_on_whole_pixels_with_equal_margins_at_every_scale,
     check_every_interactive_editor_element_has_hover_pressed_and_disabled_looks_and_restores_exactly,
     check_the_name_box_the_pick_cells_and_the_row_light_up_on_hover_and_restore,
     check_preset_two_is_written_into_set_two_once_and_read_back,

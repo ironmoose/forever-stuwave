@@ -37,6 +37,7 @@ HELDART_SRC = read_module("Core/HeldArt.lua")
 BUTTONSKINS_SRC = read_module("Core/ButtonSkins.lua")
 PANELSKINS_SRC = read_module("Core/PanelSkins.lua")
 POPUPS_SRC = read_module("Modules/Skins/Popups.lua")
+PANELS_SRC = read_module("Modules/Skins/Panels.lua")
 
 MOCK = r"""
 COMBAT = false
@@ -218,8 +219,10 @@ function NewButton(parent, opts)
     return b
 end
 
+ALL_WATCHERS = {}
 function CreateFrame(kind, name, parent)
     local f = new(kind or "Frame", parent)
+    ALL_WATCHERS[#ALL_WATCHERS + 1] = f
     if parent then parent.children[#parent.children + 1] = f end
     if name then f.name = name; _G[name] = f end
     return f
@@ -254,6 +257,13 @@ function LoadButtonSkins()
     return FS.ButtonSkins
 end
 
+-- The skin parts of a button, failing with its name when it was not skinned.
+function Skinned(button, what)
+    local p = FS.ButtonSkins.Parts(button)
+    assert(p, what .. " was not skinned")
+    return p
+end
+
 function Near(a, b, eps) return math.abs(a - b) <= (eps or 1e-6) end
 
 -- The Game Menu as Blizzard builds it: Border and Header child frames, a button pool whose buttons are the real
@@ -276,6 +286,16 @@ function MakeGameMenu()
     end
     menu.InitButtons = function() end
     return menu
+end
+function LoadPanels()
+    LoadButtonSkins()
+    assert(PANELSKINS_SRC ~= "" and PANELS_SRC ~= "", "PanelSkins.lua / Panels.lua missing")
+    assert(loadstring(PANELSKINS_SRC, "@PanelSkins.lua"))("forever-stuwave", FS)
+    assert(loadstring(PANELS_SRC, "@Panels.lua"))("forever-stuwave", FS)
+end
+-- A stock Blizzard text button: UIPanelButtonTemplate's three slices, the stock hover glow and a label.
+function StockText(parent, text, w, h)
+    return NewButton(parent, { w = w or 96, h = h or 22, slices = true, states = { "Highlight" }, text = text })
 end
 function LoadPopups()
     LoadButtonSkins()
@@ -947,6 +967,63 @@ case("game_menu_falls_back_to_the_named_menu_buttons_when_there_is_no_button_poo
 """)
 
 
+# ---------------------------------------------------------------------------
+# Wiring: dialogs and panels
+# ---------------------------------------------------------------------------
+
+case("static_popup_buttons_are_text_buttons_and_its_close_is_the_pink_x", """
+    local pop = CreateFrame("Frame", "StaticPopup1")
+    pop.w, pop.h = 320, 140
+    local accept, cancel = StockText(pop, "Accept", 128, 32), StockText(pop, "Cancel", 128, 32)
+    _G.StaticPopup1Button1, _G.StaticPopup1Button2 = accept, cancel
+    local x = NewButton(pop, { states = { "Normal", "Pushed", "Highlight", "Disabled" } })
+    _G.StaticPopup1CloseButton = x
+    LoadPopups()
+    assert(Skinned(accept, "Accept").accent == "violet" and Skinned(cancel, "Cancel").accent == "violet", "Accept and Cancel are violet text buttons")
+    assert(accept.Left.alpha == 0 and cancel.Middle.alpha == 0, "stock red art held")
+    assert(#Skinned(x, "the popup X").glyph == 12, "the popup's X is the pink X")
+""")
+
+case("settings_panel_x_close_apply_and_defaults_are_each_the_right_kind_of_button", """
+    local panel = CreateFrame("Frame", "SettingsPanel")
+    panel.w, panel.h = 920, 724
+    local x = NewButton(panel, { states = { "Normal", "Pushed", "Highlight", "Disabled" } })
+    local close, apply = StockText(panel, "Close"), StockText(panel, "Apply")
+    local defaults = StockText(panel, "Defaults")
+    panel.ClosePanelButton, panel.CloseButton, panel.ApplyButton = x, close, apply
+    panel.Container = { SettingsList = { Header = { DefaultsButton = defaults } } }
+    LoadPanels()
+    assert(#Skinned(x, "ClosePanelButton").glyph == 12, "the real X, ClosePanelButton, is the pink X")
+    local c = Skinned(close, "the bottom Close")
+    assert(#c.glyph == 0 and c.accent == "violet", "the bottom Close is a text button with no X on it")
+    assert(Skinned(apply, "Apply").accent == "violet", "Apply is a violet text button")
+    assert(Skinned(defaults, "Defaults").accent == "pink", "Defaults, which resets everything, is pink")
+    for _, b in ipairs({ close, apply, defaults }) do assert(b.Left.alpha == 0, "stock red art held on " .. b.text) end
+""")
+
+case("settings_panel_buttons_that_are_not_there_yet_are_skipped_and_picked_up_on_a_later_scan", """
+    local panel = CreateFrame("Frame", "SettingsPanel")
+    panel.w, panel.h = 920, 724
+    LoadPanels()                                     -- no Apply, no Defaults yet
+    local apply = StockText(panel, "Apply")
+    panel.ApplyButton = apply
+    -- a later scan (ADDON_LOADED) runs the same pass again
+    for _, w in ipairs(ALL_WATCHERS) do if w.scripts.OnEvent then w.scripts.OnEvent(w, "PLAYER_ENTERING_WORLD") end end
+    Skinned(apply, "Apply (picked up by the next scan)")
+""")
+
+case("gossip_goodbye_and_trainer_train_are_text_buttons", """
+    local gossip = CreateFrame("Frame", "GossipFrame")
+    gossip.GreetingPanel = { GoodbyeButton = StockText(gossip, "Goodbye", 128, 22) }
+    local train = StockText(CreateFrame("Frame", "ClassTrainerFrame"), "Train", 80, 22)
+    _G.ClassTrainerTrainButton = train
+    LoadPanels()
+    assert(Skinned(gossip.GreetingPanel.GoodbyeButton, "Goodbye").accent == "violet", "Goodbye is violet")
+    assert(Skinned(train, "Train").accent == "violet", "Train is violet")
+    assert(train.Left.alpha == 0, "stock art held")
+""")
+
+
 MOCK_HELPERS = r"""
 function new_texture() return CreateFrame("Frame"):CreateTexture(nil, "BACKGROUND") end
 function new_fontstring() return CreateFrame("Frame"):CreateFontString(nil, "OVERLAY") end
@@ -962,6 +1039,7 @@ def run_case(name: str, body: str) -> str | None:
     g.BUTTONSKINS_SRC = BUTTONSKINS_SRC
     g.PANELSKINS_SRC = PANELSKINS_SRC
     g.POPUPS_SRC = POPUPS_SRC
+    g.PANELS_SRC = PANELS_SRC
     try:
         rt.execute(MOCK)
         rt.execute(MOCK_HELPERS)

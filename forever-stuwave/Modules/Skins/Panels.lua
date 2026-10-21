@@ -562,6 +562,29 @@ local function HookQuestRepopulation()
 end
 
 -------------------------------------------------------------------------------
+-- Text buttons (STUwave Close / Apply / Defaults / Goodbye / Train)
+-------------------------------------------------------------------------------
+
+-- Skins one Blizzard text button with the shared STUwave plate. Nil-safe on both ends: a button that is
+-- not there yet (load-on-demand panel) is skipped and picked up by a later scan, and a client without
+-- the shared skin keeps Blizzard's button. Idempotent, so the afterScan passes can call it freely.
+local function SkinTextButton(button, accent)
+    local skin = FS.ButtonSkins and FS.ButtonSkins.SkinTextButton
+    if button and skin then skin(button, { accent = accent }) end
+end
+
+-- SettingsPanel: the bottom Close button is skinned with the panel's other close buttons (SkinPanel); the
+-- Apply button is violet and Defaults, which resets every setting of the open category, is pink. Both
+-- are plain Buttons, so the skin adds textures and post-hooks only.
+local function SkinSettingsButtons()
+    local panel = _G.SettingsPanel
+    if not panel then return end
+    SkinTextButton(panel.ApplyButton)
+    local list = panel.Container and panel.Container.SettingsList
+    SkinTextButton(list and list.Header and list.Header.DefaultsButton, "pink")
+end
+
+-------------------------------------------------------------------------------
 -- Gossip dialog goodbye button
 -------------------------------------------------------------------------------
 
@@ -572,9 +595,7 @@ end
 local function SkinGossipGoodbyeButton()
     local gossipFrame = _G.GossipFrame
     local goodbye = gossipFrame and gossipFrame.GreetingPanel and gossipFrame.GreetingPanel.GoodbyeButton
-    if goodbye and FS.Theme.SkinButton then
-        FS.Theme.SkinButton(goodbye)
-    end
+    SkinTextButton(goodbye)
 end
 
 -------------------------------------------------------------------------------
@@ -595,10 +616,7 @@ end
 -- ONE arbitrary row's money, not every row -- moot anyway, since row money
 -- text is Blizzard's own white by default and needs no styling at all.
 local function SkinTrainerButtons()
-    local trainButton = _G.ClassTrainerTrainButton
-    if trainButton and FS.Theme.SkinButton then
-        FS.Theme.SkinButton(trainButton, { name = _G.ClassTrainerTrainButtonText })
-    end
+    SkinTextButton(_G.ClassTrainerTrainButton)
 
     if StyleMoney then
         StyleMoney(_G.ClassTrainerFrameSkillStepButton)
@@ -652,6 +670,7 @@ local ScanAndSkin = FS.PanelSkins.CreateSkinDriver({
         HookQuestRepopulation()
         SkinGossipGoodbyeButton()
         SkinTrainerButtons()
+        SkinSettingsButtons()
         SkinTrainerStatusBar()
     end,
 })

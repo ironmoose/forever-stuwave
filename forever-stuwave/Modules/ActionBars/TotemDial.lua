@@ -771,16 +771,6 @@ local function SeatGlyph(b, cells, w, h)
     for i = #cells + 1, #b.glyph do b.glyph[i]:Hide() end
 end
 
--- The close X: two one pixel diagonals of an even n x n square (they never share a pixel).
-local function XCells(n)
-    local cells = {}
-    for k = 0, n - 1 do
-        cells[#cells + 1] = { k, k }
-        cells[#cells + 1] = { n - 1 - k, k }
-    end
-    return cells
-end
-
 -- A chevron h pixels tall and 2h wide: up (the point at the top) or down.
 local function ChevronCells(h, up)
     local cells = {}
@@ -1117,17 +1107,6 @@ local function SeatCard()
     card.title:ClearAllPoints()
     card.title:SetPoint("TOPLEFT", card, "TOPLEFT", u(8), -u(4))
     Mono(card.title, 10, MUTED)
-    -- the close X: an even square, a drawn glyph (font metrics cannot centre it), equal margins on whole pixels
-    card.close:ClearAllPoints()
-    card.close:SetPoint("TOPRIGHT", card, "TOPRIGHT", -u(3), -u(2))
-    local closeSize = even(14)
-    card.close:SetSize(closeSize, closeSize)
-    SeatEdges(card.close.edges, card.close, thick)
-    card.close.fsLook = { ring = MUTED, text = MUTED }
-    local cpx = math.floor(closeSize * Es(card.close) + 0.5)
-    local xn = math.max(4, 2 * math.floor(cpx * 0.43 / 2 + 0.5))
-    SeatGlyph(card.close, XCells(xn), xn, xn)
-    PaintButton(card.close)
     card.name:ClearAllPoints()
     card.name:SetPoint("TOPLEFT", card, "TOPLEFT", u(8), -u(20))
     card.name:SetSize(cardW - 2 * u(8), even(18))
@@ -1287,8 +1266,7 @@ local function BuildCard()
     card.fill:SetColorTexture(0.051, 0.024, 0.125, 0.97)
     card.edges = Edges(card, "BORDER", 0)
     card.title = card:CreateFontString(nil, "OVERLAY")
-    card.close = NewButton(card, 14, 14)
-    card.close:SetScript("OnClick", function() Dial.CloseEditor() end)
+    card.close = FS.ButtonSkins.NewCloseButton(card, function() Dial.CloseEditor() end) -- the shared STUwave X, seats itself
     card.name = CreateFrame("EditBox", nil, card)
     card.name:SetAutoFocus(false)
     card.name:SetMaxLetters(PS.P.NAME_MAX)

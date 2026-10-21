@@ -1137,11 +1137,7 @@ local function BuildChrome(frame)
     ui.category = Label(frame, "", 10, C.muted)
     ui.category:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -17, -36)
 
-    local close = MakeButton(frame, {
-        width = 26, height = 14, ring = C.pink, textColor = C.pink, chamfer = 4, size = 11, text = "X", glow = 0.2,
-    })
-    close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -7, -5)
-    close:SetScript("OnClick", function() CW.Close() end)
+    FS.ButtonSkins.NewCloseButton(frame, function() CW.Close() end) -- the shared STUwave X, seats itself top right
 
     local navHeader = Label(frame, "// settings", 9, C.muted)
     navHeader:SetPoint("TOPLEFT", frame, "TOPLEFT", 19, -78)

@@ -15,7 +15,6 @@ local _, FS = ...
 -------------------------------------------------------------------------------
 
 local SkinPanel = FS.Theme.SkinPanel
-local SkinButton = FS.Theme.SkinButton
 local COLOR_BG = FS.Theme.COLOR_BG
 local COLOR_BORDER = FS.Theme.COLOR_BORDER
 
@@ -128,7 +127,7 @@ end
 -- Skin pass
 -------------------------------------------------------------------------------
 
--- Applies SkinPanel (and, for StaticPopups, SkinButton on each ButtonN) to one
+-- Applies SkinPanel (and, for StaticPopups, a STUwave text button on each ButtonN) to one
 -- entry's frame if present; guarded by frame.fsPopupSkin so the OnShow re-hook
 -- and repeated login-time rescans never stack a second set of chrome
 -- textures. Missing frames (feature-detected, e.g. no LFG invite popup or a
@@ -151,11 +150,12 @@ local function SkinOne(entry)
         HookMenuButtons(frame)
     end
 
-    if SkinButton and entry.name:match("^StaticPopup%d$") then
+    local skinText = FS.ButtonSkins and FS.ButtonSkins.SkinTextButton
+    if skinText and entry.name:match("^StaticPopup%d$") then
         for i = 1, STATIC_POPUP_BUTTON_COUNT do
             local button = _G[entry.name .. "Button" .. i]
             if button then
-                SkinButton(button)
+                skinText(button)
             end
         end
     end
