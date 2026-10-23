@@ -589,6 +589,7 @@ local function UpdateCooldown(button)
     -- empty button on every cooldown event.
     if not HasAction(button.action) then
         if cooldown.Clear then cooldown:Clear() end
+        FS.FrameHelpers.ClearCooldownFill(button)
         return
     end
     -- SetCooldown is NOT on the secret whitelist, which I assumed it was. It
@@ -607,8 +608,20 @@ local function UpdateCooldown(button)
     -- -- which is the same bargain as every other secret-safe setter.
     -- C_ActionBar.GetActionCooldownDuration + Cooldown:SetCooldownFromDurationObject,
     -- exactly as LibActionButton-1.0 does it in libs/.
+    --
+    -- The violet fill (FrameHelpers.SetCooldownFill) draws the cooldown with the GCD left out
+    -- (the API's ignoreGCD argument), and the swipe then shows the global cooldown alone (the
+    -- marker spell's object, FrameHelpers.GcdDuration). A client that cannot run the fill keeps
+    -- the old swipe of everything, GCD included.
     if GetActionCooldownDuration and cooldown.SetCooldownFromDurationObject then
-        local durationObject = GetActionCooldownDuration(button.action)
+        local FH, durationObject = FS.FrameHelpers, nil
+        if FH.HasCooldownFill(button)
+            and FH.SetCooldownFill(button, GetActionCooldownDuration(button.action, true)) then
+            durationObject = FH.GcdDuration()
+        else
+            FH.ClearCooldownFill(button)
+            durationObject = GetActionCooldownDuration(button.action)
+        end
         if durationObject then
             cooldown:SetCooldownFromDurationObject(durationObject)
         elseif cooldown.Clear then
@@ -618,20 +631,10 @@ local function UpdateCooldown(button)
         return
     end
 
-    -- Legacy clients only, where none of the values are secret to begin with.
-    local start, duration, enable = GetActionCooldown(button.action)
-    if not (start and duration) then return end
-    if IsSecret(start) or IsSecret(duration) then return end
-
-    cooldown:SetCooldown(start, duration)
-
-    -- `enable == 0` is a comparison, illegal on a secret. An unreadable flag
-    -- means show the cooldown, which is the state that matters.
-    if not IsSecret(enable) and enable == 0 then
-        cooldown:Hide()
-    else
-        cooldown:Show()
-    end
+    -- Legacy clients only, where none of the values are secret to begin with: the GCD as the
+    -- swipe, a longer cooldown as the fill (FrameHelpers.ApplyPlainCooldown; a secret value
+    -- hides both and is never compared).
+    FS.FrameHelpers.ApplyPlainCooldown(button, GetActionCooldown(button.action))
 end
 
 -- Tints the ICON rather than the border: the border is our synthwave chrome and

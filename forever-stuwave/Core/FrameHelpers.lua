@@ -10,7 +10,7 @@
 -- ActionBars.lua does NOT use HideBlizzardFrame (it hides Blizzard's own bars
 -- via a different stash/dim mechanism, see its header), but it, StanceBar.lua
 -- and PetActionBar.lua do share the button helpers at the end of this file
--- (SeatButtonCooldown, SeatButtonText, AttachQuickKeybind).
+-- (SeatButtonCooldown with the violet cooldown fill, SeatButtonText, AttachQuickKeybind).
 
 local _, FS = ...
 FS.FrameHelpers = FS.FrameHelpers or {}
@@ -1707,6 +1707,254 @@ function Helpers.SeatButtonCooldown(button, opts)
     if cooldown.SetSwipeColor then
         cooldown:SetSwipeColor(0, 0, 0, COOLDOWN_SWIPE_ALPHA)
     end
+
+    Helpers.SeatCooldownFill(button)
+end
+
+-------------------------------------------------------------------------------
+-- Button cooldown fill
+-------------------------------------------------------------------------------
+
+-- A real cooldown is drawn as a violet fill over the icon: the whole face when the cooldown
+-- starts, its bottom edge rising until it is gone when the spell is ready, with a bright line and
+-- a soft glow riding that edge (the approved design, look S3 of the cooldown fill mockup). The
+-- dark swipe above (SeatButtonCooldown) is left to the GLOBAL cooldown alone (the mockup's GCD
+-- pick C), so a cast shows the GCD as today's clock and a cooldown as the fill.
+--
+-- The fill is a vertical StatusBar filling from the top, driven by the ENGINE: the caller hands
+-- SetCooldownFill the cooldown's duration object asked for with the GCD left out, and
+-- StatusBar:SetTimerDuration runs it down in the remaining time direction (GunsightShaman.lua's
+-- timed pole bar does the same). No cooldown number is ever read, so it runs in combat, where every
+-- number is secret and Cooldown:SetCooldown throws. A spell with no cooldown of its own hands over
+-- an empty duration: the bar is simply empty. The edge rides the fill's bottom inside a child frame
+-- of the bar, and the bar clips its children, so an empty bar shows no stray line at the top.
+-- Without SetClipsChildren the edge is never built (the fill alone); without SetTimerDuration or
+-- the remaining time direction SetCooldownFill answers false and the caller keeps the old swipe.
+-- Clients that only give plain start and duration (the stance and pet bars, legacy clients) get
+-- the same fill from ApplyPlainCooldown, run down by a small OnUpdate while it lasts.
+--
+-- Colour: Theme.COLOR_BORDER at 0.55 over a 0.60 black scrim (the mockup's two layers), composed
+-- into ONE flat colour so the bar is a single texture: alpha 1 - 0.40 * 0.45 = 0.82, colour violet
+-- times 0.55 / 0.82. The edge is violet mixed 0.55 toward white (#d8b4fe), two physical pixels; the
+-- glow is violet fading up from the edge over four.
+--
+-- Layers: the fill sits one level above the swipe (the cooldown frame), the edge host one above the
+-- fill; SeatButtonText puts the keybind and count over both (CooldownTopLevel). Child frames of
+-- the secure button only: nothing is set, re-parented or resized on the button itself. Every write
+-- here is a frame, texture or StatusBar write, legal in combat.
+local FILL_VIOLET_A, FILL_SCRIM_A = 0.55, 0.60
+local FILL_A = 1 - (1 - FILL_VIOLET_A) * (1 - FILL_SCRIM_A)
+local FILL_EDGE_WHITE = 0.55
+local FILL_EDGE_PX, FILL_GLOW_PX = 2, 4
+local FILL_GLOW_A = 0.45
+local FLAT_TEXTURE = Theme.FLAT_TEXTURE
+-- Seconds: a plain cooldown no longer than this is the global cooldown alone (HudLogic's GCD_WINDOW).
+local GCD_WINDOW = 1.6
+-- The global cooldown marker spell: its duration object is the GCD alone (FSCheck reads it as the control).
+local GCD_MARKER = 61304
+
+Helpers.COOLDOWN_FILL = { violetA = FILL_VIOLET_A, scrimA = FILL_SCRIM_A, alpha = FILL_A,
+    edgeWhite = FILL_EDGE_WHITE, edgePx = FILL_EDGE_PX, glowPx = FILL_GLOW_PX, gcdWindow = GCD_WINDOW,
+    gcdMarker = GCD_MARKER }
+
+local function FillColors()
+    local v = (Theme and Theme.COLOR_BORDER) or { 0.659, 0.333, 0.969, 1 }
+    local k = FILL_VIOLET_A / FILL_A
+    local w = FILL_EDGE_WHITE
+    return { v[1] * k, v[2] * k, v[3] * k, FILL_A },
+        { v[1] + (1 - v[1]) * w, v[2] + (1 - v[2]) * w, v[3] + (1 - v[3]) * w, 1 },
+        v
+end
+
+-- The remaining time direction and immediate interpolation, or nil when this client has no such enums.
+local function TimerOptions()
+    local E = _G.Enum
+    if type(E) ~= "table" then return nil, nil end
+    local dirs, interps = E.StatusBarTimerDirection, E.StatusBarInterpolation
+    return type(dirs) == "table" and dirs.RemainingTime or nil,
+        type(interps) == "table" and interps.Immediate or nil
+end
+
+-- The highest frame level the cooldown pieces of `button` use (swipe, fill, edge host); text and other
+-- overlays that must stay readable go above it.
+function Helpers.CooldownTopLevel(button)
+    local level = button:GetFrameLevel()
+    local fill = button.fsCdFill
+    -- Not an ipairs: a missing piece would end the loop early.
+    for _, f in pairs({ button.cooldown or false, fill or false, fill and fill.fsEdgeHost or false }) do
+        if f and f.GetFrameLevel then level = math.max(level, f:GetFrameLevel()) end
+    end
+    return level
+end
+
+-- Builds (once) and seats the fill of `button` on its icon. Called by SeatButtonCooldown.
+function Helpers.SeatCooldownFill(button)
+    local cooldown, icon = button.cooldown, button.icon
+    if not (cooldown and icon) then return end
+    local fill = button.fsCdFill
+    if fill == false then return end   -- this client gave no usable StatusBar: never build again
+    if not fill then
+        local ok, bar = pcall(CreateFrame, "StatusBar", nil, button)
+        if not ok or not bar or not bar.SetStatusBarTexture then
+            if ok and bar and bar.Hide then bar:Hide() end
+            button.fsCdFill = false
+            return
+        end
+        fill = bar
+        fill:EnableMouse(false)
+        fill:SetStatusBarTexture(FLAT_TEXTURE)
+        if fill.SetOrientation then fill:SetOrientation("VERTICAL") end
+        fill.fsFromTop = fill.SetReverseFill and true or false
+        if fill.SetReverseFill then fill:SetReverseFill(true) end
+        fill:SetMinMaxValues(0, 1)
+        fill:SetValue(0)
+        local color, edgeColor, violet = FillColors()
+        local tex = fill.GetStatusBarTexture and fill:GetStatusBarTexture()
+        if fill.SetStatusBarColor then fill:SetStatusBarColor(unpack(color)) end
+        if tex and fill.SetClipsChildren then
+            fill:SetClipsChildren(true)
+            local host = CreateFrame("Frame", nil, fill)
+            host:SetAllPoints(fill)
+            host:EnableMouse(false)
+            fill.fsEdgeHost = host
+            -- The edge is the last pixels of the fill on its moving side; the glow fades away from it into the fill.
+            local moving, inward = fill.fsFromTop and "BOTTOM" or "TOP", fill.fsFromTop and "TOP" or "BOTTOM"
+            local edge = host:CreateTexture(nil, "OVERLAY", nil, 2)
+            edge:SetColorTexture(unpack(edgeColor))
+            edge:SetPoint(moving .. "LEFT", tex, moving .. "LEFT")
+            edge:SetPoint(moving .. "RIGHT", tex, moving .. "RIGHT")
+            fill.fsEdge = edge
+            local glow = host:CreateTexture(nil, "OVERLAY", nil, 1)
+            glow:SetTexture(FLAT_TEXTURE)
+            glow:SetPoint(moving .. "LEFT", edge, inward .. "LEFT")
+            glow:SetPoint(moving .. "RIGHT", edge, inward .. "RIGHT")
+            local faded = false
+            if glow.SetGradient and type(CreateColor) == "function" then
+                local strong = CreateColor(violet[1], violet[2], violet[3], FILL_GLOW_A)
+                local clear = CreateColor(violet[1], violet[2], violet[3], 0)
+                faded = pcall(glow.SetGradient, glow, "VERTICAL",
+                    fill.fsFromTop and strong or clear, fill.fsFromTop and clear or strong)
+            end
+            if not faded then glow:SetVertexColor(violet[1], violet[2], violet[3], FILL_GLOW_A / 2) end
+            fill.fsGlow = glow
+        end
+        fill:Hide()
+        button.fsCdFill = fill
+    end
+    fill:ClearAllPoints()
+    fill:SetAllPoints(icon)
+    fill:SetFrameLevel(cooldown:GetFrameLevel() + 1)
+    if fill.fsEdgeHost then
+        fill.fsEdgeHost:SetFrameLevel(fill:GetFrameLevel() + 1)
+        local unit = Helpers.PixelUnit(fill) or 1
+        fill.fsEdge:SetHeight(FILL_EDGE_PX * unit)
+        fill.fsGlow:SetHeight(FILL_GLOW_PX * unit)
+    end
+end
+
+local function StopPlain(fill)
+    if fill.fsPlainEnd then
+        fill.fsPlainEnd, fill.fsPlainDuration = nil, nil
+        fill:SetScript("OnUpdate", nil)
+    end
+end
+
+-- Hides the fill of `button` (no cooldown of its own, an empty slot, a client the engine path refused).
+function Helpers.ClearCooldownFill(button)
+    local fill = button.fsCdFill
+    if not fill then return end
+    StopPlain(fill)
+    fill:SetValue(0)
+    fill:Hide()
+end
+
+-- True when the fill of `button` can be run from a duration object on this client (a built fill,
+-- StatusBar:SetTimerDuration and the remaining time direction). Callers ask before requesting the
+-- GCD-less duration object, so a client without the fill allocates nothing extra.
+function Helpers.HasCooldownFill(button)
+    local fill = button.fsCdFill
+    if not fill or type(fill.SetTimerDuration) ~= "function" then return false end
+    local dir, interp = TimerOptions()
+    return dir ~= nil and interp ~= nil
+end
+
+-- Runs the fill of `button` from `durationObject`, the cooldown asked for with the GCD left out.
+-- True when the engine took it; false (and the fill hidden) when there is no fill, no object or the
+-- client cannot run a bar from one, so the caller keeps the swipe for everything.
+function Helpers.SetCooldownFill(button, durationObject)
+    if durationObject == nil or not Helpers.HasCooldownFill(button) then
+        Helpers.ClearCooldownFill(button)
+        return false
+    end
+    local fill = button.fsCdFill
+    local dir, interp = TimerOptions()
+    StopPlain(fill)
+    if not pcall(fill.SetTimerDuration, fill, durationObject, interp, dir) then
+        Helpers.ClearCooldownFill(button)
+        return false
+    end
+    fill:Show()
+    return true
+end
+
+-- The global cooldown alone as a duration object (the marker spell's), for the swipe of a button whose
+-- fill draws the rest. Asked once per frame time, so a cooldown event over 72 buttons allocates one.
+local gcdAt, gcdObject
+function Helpers.GcdDuration()
+    local fn = C_Spell and C_Spell.GetSpellCooldownDuration
+    if not fn then return nil end
+    local now = GetTime()
+    if now ~= gcdAt then
+        local ok, obj = pcall(fn, GCD_MARKER)
+        gcdAt, gcdObject = now, ok and obj or nil
+    end
+    return gcdObject
+end
+
+local function PlainTick(fill)
+    local left = fill.fsPlainEnd - GetTime()
+    if left <= 0 then
+        StopPlain(fill)
+        fill:SetValue(0)
+        fill:Hide()
+        return
+    end
+    fill:SetValue(left / fill.fsPlainDuration)
+end
+
+-- The cooldown of `button` from PLAIN numbers (GetActionCooldown, GetShapeshiftFormCooldown,
+-- GetPetActionCooldown and friends): a secret start or duration hides the swipe and the fill and is
+-- never compared; a plainly disabled or finished cooldown hides both (an unreadable enable flag counts
+-- as enabled: the cooldown is the state that matters); one no longer than the global cooldown is the
+-- swipe, as before; a longer one is the fill, with the swipe cleared.
+function Helpers.ApplyPlainCooldown(button, start, duration, enable)
+    local cooldown = button.cooldown
+    if not cooldown then return end
+    if IsSecret(start) or IsSecret(duration) or type(start) ~= "number" or type(duration) ~= "number" then
+        Helpers.ClearCooldownFill(button)
+        cooldown:Hide()
+        return
+    end
+    local disabled = not IsSecret(enable) and (enable == 0 or enable == false)
+    if duration <= 0 or disabled then
+        Helpers.ClearCooldownFill(button)
+        if cooldown.Clear then cooldown:Clear() end
+        cooldown:Hide()
+        return
+    end
+    local fill = button.fsCdFill
+    if duration > GCD_WINDOW and fill then
+        if cooldown.Clear then cooldown:Clear() end
+        cooldown:Hide()
+        fill.fsPlainEnd, fill.fsPlainDuration = start + duration, duration
+        fill:SetScript("OnUpdate", PlainTick)
+        fill:Show()
+        PlainTick(fill)
+        return
+    end
+    Helpers.ClearCooldownFill(button)
+    cooldown:SetCooldown(start, duration)
+    cooldown:Show()
 end
 
 -------------------------------------------------------------------------------
@@ -1730,10 +1978,11 @@ end
 -- container at all (the 16001 template is not in the reference tree; the dump
 -- only lists its mixin, ActionButtonTextOverlayContainerMixin) and at what
 -- level. So it is feature-detected: a `TextOverlayContainer` whose frame level is
--- above the cooldown's is used as is; anything else (no container, a lower one,
+-- above the cooldown pieces (the swipe, the fill and its edge: CooldownTopLevel)
+-- is used as is; anything else (no container, a lower one,
 -- or the bare SecureActionButtonTemplate buttons of the stance and pet bars,
 -- which have none) gets one click-through host frame a level above whichever is
--- higher, the button or its cooldown. Click-through because a mouse-enabled
+-- highest, the button or its cooldown pieces. Click-through because a mouse-enabled
 -- child would take the hover and the click from the secure button underneath.
 --
 -- Call after SeatButtonCooldown. Text regions already on the returned frame stay
@@ -1743,7 +1992,7 @@ function Helpers.SeatButtonText(button, ...)
     local container, cooldown = button.TextOverlayContainer, button.cooldown
     local host
     if container and container.GetFrameLevel and cooldown
-        and container:GetFrameLevel() > cooldown:GetFrameLevel() then
+        and container:GetFrameLevel() > Helpers.CooldownTopLevel(button) then
         host = container
     else
         host = button.fsTextHost
@@ -1753,8 +2002,7 @@ function Helpers.SeatButtonText(button, ...)
             host:EnableMouse(false)
             button.fsTextHost = host
         end
-        local cooldownLevel = cooldown and cooldown:GetFrameLevel() or 0
-        host:SetFrameLevel(math.max(button:GetFrameLevel(), cooldownLevel) + 1)
+        host:SetFrameLevel(Helpers.CooldownTopLevel(button) + 1)
     end
     for i = 1, select("#", ...) do
         local region = select(i, ...)

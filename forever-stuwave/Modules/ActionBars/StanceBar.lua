@@ -90,25 +90,12 @@ local function UpdateCooldown(button)
                 "stance bar cooldown display disabled")
         end
         cooldown:Hide()
+        FS.FrameHelpers.ClearCooldownFill(button)
         return
     end
 
-    local start, duration, enable = GetShapeshiftFormCooldown(button.index)
-    if not (start and duration) then
-        cooldown:Hide()
-        return
-    end
-    if IsSecret(start) or IsSecret(duration) then
-        cooldown:Hide()
-        return
-    end
-
-    cooldown:SetCooldown(start, duration)
-    if not IsSecret(enable) and enable == 0 then
-        cooldown:Hide()
-    else
-        cooldown:Show()
-    end
+    -- The GCD as the swipe, a longer cooldown as the violet fill; a secret value hides both.
+    FS.FrameHelpers.ApplyPlainCooldown(button, GetShapeshiftFormCooldown(button.index))
 end
 
 -------------------------------------------------------------------------------

@@ -30,9 +30,10 @@
 --     wash plus a brighter ring and glow (GetShapeshiftFormInfo's flag, cross-checked against
 --     GetShapeshiftForm() when that flag is nil or secret, refreshed on
 --     UPDATE_SHAPESHIFT_FORM and UPDATE_SHAPESHIFT_FORMS).
---   * COOLDOWN: every button carries a swipe (FrameHelpers.SeatButtonCooldown) fed from the spell's
---     cooldown: C_Spell.GetSpellCooldownDuration -> SetCooldownFromDurationObject when the client has
---     it, else the legacy start/duration read, secret-guarded (a form button reads
+--   * COOLDOWN: every button carries a swipe and the violet cooldown fill (FrameHelpers.SeatButtonCooldown):
+--     C_Spell.GetSpellCooldownDuration with the GCD left out runs the fill (SetCooldownFill) and the swipe
+--     shows the global cooldown alone, when the client has it; else the legacy start/duration read,
+--     secret-guarded, through FrameHelpers.ApplyPlainCooldown (a form button reads
 --     GetShapeshiftFormCooldown(form) there). Refreshed on SPELL_UPDATE_COOLDOWN and
 --     UPDATE_SHAPESHIFT_COOLDOWN.
 --   * SetAttribute, Show, Hide, SetPoint and SetSize on a secure button (or its host) are refused in
@@ -448,21 +449,33 @@ local function SetActive(button, active)
     if active then wash:Show() else wash:Hide() end
 end
 
--- The swipe: the spell's cooldown as the duration object when the client has it, else the legacy
--- start and duration, read only when both are plain. Cooldown writes, legal in combat.
+-- The cooldown: the spell's cooldown as the duration object when the client has it (the violet fill
+-- with the GCD left out, the swipe the global cooldown alone, FrameHelpers.SetCooldownFill; a client
+-- that cannot run the fill keeps the swipe of everything), else the legacy start and duration through
+-- FrameHelpers.ApplyPlainCooldown, read only when both are plain. Cooldown and bar writes, legal in combat.
 local function UpdateCooldown(button)
     local cooldown = button.cooldown
     if not cooldown then return end
+    local FH = FS.FrameHelpers
     local id = button.fsSpellID
     if not id then
         cooldown:Clear()
         cooldown:Hide()
+        FH.ClearCooldownFill(button)
         return
     end
     local modern = C_Spell and C_Spell.GetSpellCooldownDuration
     if modern then
-        local ok, obj = pcall(modern, id)
-        if ok and not IsSecret(obj) and obj ~= nil then
+        local ok, obj = false, nil
+        if FH.HasCooldownFill(button) then ok, obj = pcall(modern, id, true) end
+        if ok and not IsSecret(obj) and FH.SetCooldownFill(button, obj) then
+            obj = FH.GcdDuration()
+        else
+            FH.ClearCooldownFill(button)
+            ok, obj = pcall(modern, id)
+            if not ok then obj = nil end
+        end
+        if not IsSecret(obj) and obj ~= nil then
             cooldown:SetCooldownFromDurationObject(obj)
         else
             cooldown:Clear()
@@ -483,18 +496,7 @@ local function UpdateCooldown(button)
         local ok, s, d, e = pcall(GetSpellCooldown, id)
         if ok then start, duration, enabled = s, d, e end
     end
-    if IsSecret(start) or IsSecret(duration) or IsSecret(enabled) then
-        cooldown:Hide()
-        return
-    end
-    if type(start) == "number" and type(duration) == "number" and duration > 0
-        and enabled ~= false and enabled ~= 0 then
-        cooldown:SetCooldown(start, duration)
-        cooldown:Show()
-    else
-        cooldown:Clear()
-        cooldown:Hide()
-    end
+    FH.ApplyPlainCooldown(button, start, duration, enabled)
 end
 
 local function UpdateAllCooldowns()

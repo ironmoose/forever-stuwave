@@ -953,6 +953,53 @@ def check_a_button_with_no_spell_gets_no_cooldown_write():
     assert not touched, f"spell-less buttons had their cooldown written: {touched}"
 
 
+# A client that can run the violet cooldown fill (FrameHelpers.SetCooldownFill): the StatusBar timer,
+# its enums and a duration API that records the ignoreGCD argument. cooldownfill-harness.py pins the
+# fill itself; this pins the seal and aura wiring.
+FILL_CLIENT = r"""
+GetTime = GetTime or function() return 100 end
+Enum = Enum or {}
+Enum.StatusBarTimerDirection = { ElapsedTime = 0, RemainingTime = 1 }
+Enum.StatusBarInterpolation = { Immediate = 0 }
+do
+    local create = CreateFrame
+    function CreateFrame(kind, ...)
+        local f = create(kind, ...)
+        if kind == "StatusBar" then
+            function f:SetStatusBarTexture() self._sbTex = self._sbTex or self:CreateTexture() end
+            function f:GetStatusBarTexture() return self._sbTex end
+            function f:SetMinMaxValues() end
+            function f:SetValue(v) self._value = v end
+            function f:SetTimerDuration(obj, interp, dir) self._timer = { obj = obj, dir = dir } end
+        end
+        return f
+    end
+end
+local real = C_Spell.GetSpellCooldownDuration
+C_Spell.GetSpellCooldownDuration = function(id, ignoreGCD)
+    if id == 61304 then return { gcd = true } end
+    local obj = real(id)
+    if obj then obj.ignoreGCD = ignoreGCD end
+    return obj
+end
+"""
+
+
+def check_a_seal_cooldown_is_the_violet_fill_and_the_swipe_the_gcd():
+    seals = expected_seals()
+    lua = boot(known=[seals[0]], extra_lua=FILL_CLIENT)
+    sid = seal_id(lua, seals[0])
+    set_cd(lua, sid, 100, 8)
+    fire(lua, "SPELL_UPDATE_COOLDOWN")
+    b = seal(lua, 1)
+    timer = b.fsCdFill._timer
+    assert timer is not None and int(timer.obj.cdFor) == sid, "the fill was not run from the seal's cooldown"
+    assert timer.obj.ignoreGCD is True, "the fill's object was asked for with the GCD included"
+    assert timer.dir == 1, "the fill does not run in the remaining time direction"
+    assert shown(b.fsCdFill), "the fill is hidden"
+    assert b.cooldown._cdObj.gcd is True, "the swipe is not the global cooldown alone"
+
+
 def check_the_swipe_also_follows_the_shapeshift_cooldown_event():
     seals = expected_seals()
     lua = boot(known=[seals[0]])
@@ -1482,6 +1529,7 @@ CHECKS = [
     check_a_sync_pending_in_combat_is_replayed_at_regen,
     check_no_value_is_compared_to_nil_before_its_secret_guard,
     check_a_button_with_no_spell_gets_no_cooldown_write,
+    check_a_seal_cooldown_is_the_violet_fill_and_the_swipe_the_gcd,
     check_a_form_uses_its_own_form_cooldown_on_the_legacy_path,
     check_the_active_flag_falls_back_to_the_current_form,
     check_the_aura_row_is_the_shapeshift_forms_in_mockup_order,

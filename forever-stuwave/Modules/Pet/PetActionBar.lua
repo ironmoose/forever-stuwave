@@ -88,22 +88,8 @@ local function UpdateCooldown(button)
     if not cooldown then return end
 
     if HAS_LEGACY_PET_COOLDOWN then
-        local start, duration, enable = GetPetActionCooldown(button.index)
-        if not (start and duration) then
-            cooldown:Hide()
-            return
-        end
-        if IsSecret(start) or IsSecret(duration) then
-            cooldown:Hide()
-            return
-        end
-
-        cooldown:SetCooldown(start, duration)
-        if not IsSecret(enable) and enable == 0 then
-            cooldown:Hide()
-        else
-            cooldown:Show()
-        end
+        -- The GCD as the swipe, a longer cooldown as the violet fill; a secret value hides both.
+        FS.FrameHelpers.ApplyPlainCooldown(button, GetPetActionCooldown(button.index))
         return
     end
 
@@ -189,9 +175,8 @@ local function BuildRing(button)
     local host = CreateFrame("Frame", nil, button)
     host:SetAllPoints(button)
     host:EnableMouse(false)
-    -- Above the cooldown swipe, below the keybind text.
-    local cooldown = button.cooldown
-    local level = math.max(button:GetFrameLevel(), cooldown and cooldown:GetFrameLevel() or 0) + 1
+    -- Above the cooldown swipe and fill, below the keybind text.
+    local level = FS.FrameHelpers.CooldownTopLevel(button) + 1
     host:SetFrameLevel(level)
     local textHost = button.fsTextHost
     if textHost and textHost:GetFrameLevel() <= level then textHost:SetFrameLevel(level + 1) end

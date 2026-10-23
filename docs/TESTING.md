@@ -75,7 +75,8 @@ Use a Paladin that has learned at least one seal. Step 6 works on any class.
    - Bottom row is auras. They are your Paladin's forms. The active one is
      highlighted. Switch aura and check the highlight follows (needs two
      auras, skip otherwise).
-   - Click a button: it casts. After you cast, the swipe shows on the button.
+   - Click a button: it casts. After you cast, the global cooldown sweep shows on the button,
+     and a seal or aura with a cooldown of its own turns violet (see "Bags, action bars and stances").
    - If you turn the Console off (`/fsconsole off`), the buttons sit above
      the stance bar spot instead. Then `/fsconsole on` before step 4 (the
      switch waits for combat to end).
@@ -271,6 +272,12 @@ The micro menu and the class tabs use the game's own icons, restyled while the g
 4. Bag slot rings: a slot holding an item has its ring coloured by quality: grey for Poor, the usual violet for Common, then green, blue, a deep royal purple for Epic (clearly different from the violet), and orange and up. An empty slot keeps the violet ring. Check the combined bags, a separate bag and the bank, in combat too, and move an item out and back in.
 5. Main bar: change stance or form, enter stealth, and mount a vehicle or enter a quest override bar, in combat too. The main bar follows and clicks on it work.
 6. Stance bar: click the active form to cancel it (leave Druid form, drop stealth), like the stock bar.
+7. Cooldown fill: cast a spell with a cooldown longer than the global cooldown. Its key turns violet over a dark
+   tint, covering the whole key, with a bright line along the bottom edge of the violet. The edge rises as the
+   cooldown runs and the violet is gone, with no line left at the top of the key, the moment the spell is ready.
+   The global cooldown keeps the dark clock sweep and gives no violet to the other keys. Check it in combat
+   too, on the Paladin seal and aura keys, the stance keys and the pet bar. Report with `/fsbug` if a key
+   stays violet, never turns violet, or every key turns violet after each cast.
 
 ## Layout editor: /fsedit
 
