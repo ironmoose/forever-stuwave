@@ -24,10 +24,13 @@ Theme.COLOR_BG         = { 0.102, 0.063, 0.145, 0.80 } -- #1a1025 @ 80%
 -- more transparent than COLOR_BG so the scene shows through; the pet panel fill uses it (the party panel draws none).
 Theme.COLOR_HUD_SCRIM  = { 0.051, 0.024, 0.125, 0.4675 } -- #0d0620 @ 46.75%
 Theme.COLOR_BORDER     = { 0.659, 0.333, 0.969, 1 }    -- #a855f7
--- Epic item quality on a ring or edge (Bags.lua's item slot rings, BagBar.lua's bag slot edges): a deep royal
--- purple, because Blizzard's Epic #a335ee sits almost on COLOR_BORDER (about 12 apart in CIE Lab, this one about 20)
--- and so would not read as a different quality. 2.4:1 against COLOR_BG.
+-- Epic item quality on BagBar.lua's bag slot edges: a deep royal purple, because Blizzard's Epic #a335ee sits almost
+-- on COLOR_BORDER (about 12 apart in CIE Lab, this one about 20) and so would not read as a different quality. 2.4:1
+-- against COLOR_BG.
 Theme.COLOR_EPIC_RING  = { 0x6a / 255, 0x1f / 255, 0xd1 / 255, 1 } -- #6a1fd1
+-- The outline of an empty or Common bag item slot (Bags.lua): a dark violet, so every quality ring, Blizzard's bright
+-- Epic purple most of all, reads apart from it (the bag quality rings mockup, option E1).
+Theme.COLOR_BAG_RING   = { 0x5b / 255, 0x2d / 255, 0x9e / 255, 1 } -- #5b2d9e
 
 -- Dispel-type colours, one palette for every aura ring and halo (Buffs, PartyFrames): the
 -- DebuffTypeColor global does not exist on 16001. Magic #3FC7EB, Curse #A335EE, Disease #A0522D,

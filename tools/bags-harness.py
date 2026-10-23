@@ -58,9 +58,9 @@ What it pins:
     UpdateItems; in combat the item buttons (protected) get no Show/Hide/SetAttribute/SetPoint/SetSize/SetParent, only
     our regions change; a secret or missing GetBagID, a missing Theme piece and the bank are harmless;
   * the quality ring: a filled slot's ring (the purple outline) is tinted by item quality, read per slot from
-    C_Container.GetContainerItemInfo (a bank slot: the itemInfo Blizzard just read): Poor grey, Common the default ring,
-    Uncommon, Rare, Legendary and up the colour Blizzard's bags use (player overrides included), Epic our own deep
-    purple (Theme.COLOR_EPIC_RING, #6a1fd1, shared with BagBar.lua). Empty slots, unknown or secret answers keep the default ring; it follows every
+    C_Container.GetContainerItemInfo (a bank slot: the itemInfo Blizzard just read): Poor grey, Common the default ring
+    (the dark violet Theme.COLOR_BAG_RING, #5b2d9e), Uncommon, Rare, Epic, Legendary and up the colour Blizzard's bags
+    use (player overrides included). Empty slots, unknown or secret answers keep the default ring; it follows every
     UpdateItems and bank refresh, the icon emptying without a pass, combat (nothing protected is touched) and a
     missing colour source (default ring, one log);
   * nothing errors when a region, a method or Theme.AddCut2Texture is absent.
@@ -124,11 +124,11 @@ def databar_money() -> dict:
     }
 
 
-def epic_ring_table() -> str:
-    """Theme.COLOR_EPIC_RING exactly as Theme.lua writes it (shared with BagBar.lua): read, never retyped."""
-    m = re.search(r"Theme\.COLOR_EPIC_RING\s*=\s*(\{[^}]*\})", THEME_LUA.read_text(encoding="utf-8"))
+def bag_ring_table() -> str:
+    """Theme.COLOR_BAG_RING exactly as Theme.lua writes it: read, never retyped."""
+    m = re.search(r"Theme\.COLOR_BAG_RING\s*=\s*(\{[^}]*\})", THEME_LUA.read_text(encoding="utf-8"))
     if not m:
-        sys.exit("Theme.lua: COLOR_EPIC_RING not found")
+        sys.exit("Theme.lua: COLOR_BAG_RING not found")
     return m.group(1)
 
 
@@ -648,7 +648,7 @@ class World:
         self.g = self.rt.globals()
         self.g.HELDART_SRC = HELDART_LUA.read_text(encoding="utf-8")
         self.rt.eval("function(src) assert(loadstring(src))() end")(MOCK)
-        self.run(f"FS.Theme.COLOR_EPIC_RING = {epic_ring_table()}")
+        self.run(f"FS.Theme.COLOR_BAG_RING = {bag_ring_table()}")
         self.run("""
             local EMPTY, AXE = nil, { icon = 135, quality = { 0.1, 0.9, 0.2 } }
             c1 = MkContainer("ContainerFrame1", 4, false, 1)
@@ -945,7 +945,7 @@ def check_icon_corners() -> None:
     check("corners.an_icon_without_state_methods_is_harmless", w3.swallowed() == "" and w3.ev("not CornersShown(bare)"), w3.swallowed())
 
 
-EPIC_RING_HEX = "#6a1fd1"            # the user's deep royal purple for Epic: not Blizzard's #a335ee, and clear of the default ring #a855f7
+BAG_RING_HEX = "#5b2d9e"             # the approved dark violet of an empty or Common slot (option E1), so Epic's bright purple stands clear
 
 
 def hex_rgb(h: str) -> tuple[float, float, float]:
@@ -954,10 +954,10 @@ def hex_rgb(h: str) -> tuple[float, float, float]:
 
 def check_quality_ring() -> None:
     # A filled slot's ring is tinted by item quality; read from C_Container (a bank slot: the itemInfo Blizzard just read),
-    # Poor grey, Common the default ring, the rest Blizzard's bag colour, Epic our own purple.
+    # Poor grey, Common the default dark violet ring, the rest Blizzard's bag colour, Epic included.
     w = World()
     w.run("comb:UpdateItems()")
-    default = (0.659, 0.333, 0.969)
+    default = hex_rgb(BAG_RING_HEX)
 
     def ring(expr: str) -> tuple[float, float, float, float]:
         r, g, b, a = (float(v) for v in w.ev(f"RingColor({expr})").values())
@@ -983,15 +983,15 @@ def check_quality_ring() -> None:
         paint(q)
         check(f"ring.quality_{q}_is_the_bag_colour", is_color("c1.Items[1]", rgb), str(ring("c1.Items[1]")))
     paint(4)
-    epic = hex_rgb(EPIC_RING_HEX)
-    check("ring.epic_is_the_deep_purple", is_color("c1.Items[1]", epic), f"{ring('c1.Items[1]')} want {epic}")
-    check("ring.epic_is_not_blizzards_epic_nor_the_default_ring",
-          not is_color("c1.Items[1]", (0.64, 0.21, 0.93), 0.05) and not is_color("c1.Items[1]", default, 0.05))
+    epic = (0.64, 0.21, 0.93)
+    check("ring.epic_is_the_bag_colour", is_color("c1.Items[1]", epic), f"{ring('c1.Items[1]')} want {epic}")
+    check("ring.epic_stands_clear_of_the_default_ring", not is_color("c1.Items[1]", default, 0.15))
     paint(None)
     check("ring.the_slot_emptying_resets_the_ring", is_color("c1.Items[1]", default), str(ring("c1.Items[1]")))
-    w4 = World(pre="FS.Theme.COLOR_EPIC_RING = nil")
-    w4.run("c1.infos[1] = { icon = 152, q = 4 }; c1:UpdateItems()")
-    check("ring.without_the_theme_colour_epic_uses_the_bag_colour", is_color_for(w4, "c1.Items[1]", (0.64, 0.21, 0.93)) and w4.swallowed() == "")
+    w4 = World()
+    w4.run("FS.Theme.COLOR_BAG_RING = nil; c1:UpdateItems()")
+    check("ring.without_the_theme_colour_the_default_ring_is_the_border",
+          is_color_for(w4, "c1.Items[2]", (0.659, 0.333, 0.969)) and w4.swallowed() == "")
 
     # an unknown quality (a token, a number outside the table) keeps the default ring
     paint(9)
@@ -1064,7 +1064,8 @@ def check_quality_ring() -> None:
     r3 = tuple(float(v) for v in w2.ev("RingColor(c1.Items[3])").values())
     check("ring.no_colour_source_keeps_the_default_ring_and_logs_once",
           near(r1[0], default[0]) and near(r1[1], default[1]) and w2.degrade().count("bags_quality_ring") == 1, w2.degrade())
-    check("ring.epic_needs_no_colour_source", near(r3[0], epic[0], 1e-3) and near(r3[2], epic[2], 1e-3), str(r3))
+    check("ring.epic_with_no_colour_source_keeps_the_default_ring",
+          near(r3[0], default[0], 1e-3) and near(r3[2], default[2], 1e-3), str(r3))
 
     # no C_Container, no GetID, no skin ring: the slot is left alone and nothing throws
     w3 = World()

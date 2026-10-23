@@ -9,7 +9,7 @@
 -- slots and action buttons, plus its cut border); Blizzard's own slot art is
 -- hidden and held hidden, a filled slot's square icon is cut at the two cut
 -- corners by a panel-coloured wedge (no MaskTexture: it does not clip here), and
--- the border is tinted by the item's quality (Poor grey, Common default).
+-- the border is tinted by the item's quality (Poor grey, Common and empty a dark violet).
 -- The money line wears the data bar's GOLD look.
 -- Blizzard's GamepadBagBar (a child of the combined bags, same frame level as
 -- the Clean Up button, a bag icon) is hidden while no controller is connected:
@@ -263,20 +263,17 @@ end
 -- Quality ring: the slot's outline, tinted by the item inside
 -------------------------------------------------------------------------------
 
--- The ring (the violet cut outline Theme.SkinButton puts on every slot) takes the colour of the item's
--- quality, so junk and good items read apart at a glance. Poor is grey; Common keeps the default ring;
--- Uncommon, Rare, Legendary and up take Blizzard's bag colour for that quality (Epic is ours, below); an empty slot, an
--- unknown quality and anything unreadable keep the default ring. Only the ring: the glow, the plate and the icon are
--- not touched. (BagBar.lua tints its slot edges the same way from Uncommon up.)
+-- The ring (the cut outline Theme.SkinButton puts on every slot) takes the colour of the item's quality, so junk and
+-- good items read apart at a glance. The default ring, on an empty or Common slot, is the dark violet
+-- Theme.COLOR_BAG_RING (#5b2d9e; COLOR_BORDER on a Theme without it), dark enough that Blizzard's bright Epic purple
+-- stands clear of it. Poor is grey; Uncommon, Rare, Epic, Legendary and up take Blizzard's bag colour for that
+-- quality; an unknown quality and anything unreadable keep the default ring. Only the ring: the glow, the plate and
+-- the icon are not touched. (BagBar.lua tints its slot edges the same way from Uncommon up.)
 --
 -- Colours: ColorManager.GetColorDataForBagItemQuality, the colours Blizzard's own item border used on these slots, and
 -- the player's colour overrides come through it (12.1 ColorManager.lua). It has no Poor entry, so Poor reads
 -- ColorManager.GetColorDataForItemQuality(0), also override-aware. A client without ColorManager falls back to the
 -- ITEM_QUALITY_COLORS table BagBar.lua reads, and a client with neither keeps the default ring and logs once.
--- EPIC is the exception: Blizzard's #a335ee sits almost on top of the default ring (#a855f7), so Epic gets a deeper
--- royal purple of our own, Theme.COLOR_EPIC_RING (#6a1fd1; about 2.4:1 against the panel, 1.9:1 against the default
--- ring), the same colour BagBar.lua gives an Epic bag's edge. Epic therefore ignores a player's Epic colour override;
--- every other quality follows it. A Theme without the token gives Epic the Blizzard colour like the rest.
 --
 -- The quality is read per slot, not from Blizzard's border: C_Container.GetContainerItemInfo(bag, slot) for a container slot,
 -- the `itemInfo` Blizzard just read for a bank slot (BankPanelItemButtonMixin:RefreshItemInfo). Both are plain
@@ -284,7 +281,7 @@ end
 -- pass, which follows every UpdateItems and bank refresh, in combat too (bags are usable in combat, this API is not
 -- restricted, and only our own ring region is written). The icon's state hooks re-apply the cached colour: an
 -- icon that no longer holds an item drops it at once, without waiting for a pass.
-local QUALITY_POOR, QUALITY_UNCOMMON, QUALITY_EPIC = 0, 2, 4   -- Enum.ItemQuality
+local QUALITY_POOR, QUALITY_UNCOMMON = 0, 2   -- Enum.ItemQuality
 
 local function BagIDOf(itemButton)
     if type(itemButton.GetBagID) ~= "function" then return nil end
@@ -349,8 +346,6 @@ end
 -- r, g, b of the ring for an item quality; nil for the default ring.
 local function QualityRingColor(quality)
     if type(quality) ~= "number" or IsSecretValue(quality) then return nil end
-    local epic = FS.Theme.COLOR_EPIC_RING
-    if quality == QUALITY_EPIC and epic then return epic[1], epic[2], epic[3] end
     if quality ~= QUALITY_POOR and quality < QUALITY_UNCOMMON then return nil end -- Common, and anything below Poor
     return QualityColorChannels(quality)
 end
@@ -368,7 +363,7 @@ local function SyncSlotRing(button)
     local ring = skin and skin.border and skin.border.ring
     if not ring then return end
     if not IconHoldsItem(button) then button.fsBagRingColor = nil end
-    local color = button.fsBagRingColor or FS.Theme.COLOR_BORDER
+    local color = button.fsBagRingColor or FS.Theme.COLOR_BAG_RING or FS.Theme.COLOR_BORDER
     if color then ring:SetVertexColor(color[1], color[2], color[3], 1) end
 end
 
