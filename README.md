@@ -20,6 +20,12 @@
   </a>
 </p>
 
+<p align="center">
+  <img src="docs/images/gunsight-shaman-2026-10-22.webp" alt="The Gunsight HUD in game: a Shaman casts Lightning Bolt at a harpy, with cast tapes either side of the character, the target box, and the totem poles with the Fire Nova ring and shock trace" width="1000">
+  <br>
+  <sub>The Gunsight HUD in game. Shaman, level 13, captured 2026-10-22.</sub>
+</p>
+
 ## Install
 
 1. **Close WoW.**
