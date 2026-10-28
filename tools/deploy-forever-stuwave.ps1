@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [string]$WowRoot = "C:\Program Files (x86)\World of Warcraft",
-    [string]$WowFlavor = "_classic_beta_",
+    [string]$WowFlavor = "_forever_",
     [switch]$SkipParseGate
 )
 $ErrorActionPreference = "Stop"

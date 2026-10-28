@@ -37,7 +37,7 @@ LOAD_ORDER = (
 
 @pytest.fixture
 def client(tmp_path: Path) -> Path:
-    path = tmp_path / "WoW" / "_classic_beta_"
+    path = tmp_path / "WoW" / "_forever_"
     (path / "Interface" / "AddOns").mkdir(parents=True)
     return path
 

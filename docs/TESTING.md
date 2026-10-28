@@ -426,7 +426,7 @@ Commands: `/stu targetmark` toggles it, `/stu targetmark on` and `/stu targetmar
 Every report is also saved in the SavedVariables file. It is written on
 `/reload` or logout. Send that file instead:
 
-    World of Warcraft\_classic_beta_\WTF\Account\<ACCOUNT>\SavedVariables\forever-stuwave.lua
+    World of Warcraft\_forever_\WTF\Account\<ACCOUNT>\SavedVariables\forever-stuwave.lua
 
 `<ACCOUNT>` is your account folder name.
 

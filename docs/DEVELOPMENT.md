@@ -62,7 +62,7 @@ On Windows, after `uv sync`:
 
 Testers using a trusted published checkout can skip the parse and lint gates: add `-SkipParseGate` to the Windows command, or `FS_SKIP_GATES=1` before the Linux command. The Linux deploy and the packaging script still need a Python with `lupa` (`uv run` supplies one): they stage the runtime files, remove comments from the staged copies (newlines kept, so line numbers match the source), verify every `.lua` compiles to the same code as its source, and scan the remaining strings and identifiers for flagged vocabulary (`tools/stage_runtime.py`). Any mismatch or hit aborts before anything is installed or zipped. The source tree keeps its comments. On Windows, use `powershell -ExecutionPolicy Bypass -File .\tools\deploy-forever-stuwave.ps1 -SkipParseGate` if script execution is restricted. After `git pull --ff-only`, run the same deployment command again.
 
-Both default to `_classic_beta_`; override the flavor only for a client you intend to test. Fully restart for added files, bindings, or textures. Deploying is a separate action from running headless checks.
+Both default to `_forever_`; override the flavor only for a client you intend to test. Fully restart for added files, bindings, or textures. Deploying is a separate action from running headless checks.
 
 ## Optional live client tools
 

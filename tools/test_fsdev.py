@@ -391,7 +391,7 @@ def test_wow_process_displays_reads_only_wow_environment(
 ) -> None:
     wow = tmp_path / "101"
     wow.mkdir()
-    (wow / "comm").write_text("WowB.exe\n", encoding="utf-8")
+    (wow / "comm").write_text("Wow.exe\n", encoding="utf-8")
     (wow / "environ").write_bytes(b"HOME=/tmp\0DISPLAY=:2\0WAYLAND_DISPLAY=wayland-0\0")
     other = tmp_path / "102"
     other.mkdir()
@@ -419,7 +419,7 @@ def test_wow_process_displays_reports_unreadable_wow_environment(
 ) -> None:
     wow = tmp_path / "101"
     wow.mkdir()
-    (wow / "comm").write_text("WowB.exe\n", encoding="utf-8")
+    (wow / "comm").write_text("Wow.exe\n", encoding="utf-8")
     (wow / "environ").mkdir()
 
     assert fsdev._wow_process_displays(tmp_path) == []

@@ -1351,7 +1351,7 @@ case("run_capture_stores_opens_the_box_and_prints_the_paths", """
     assert(Has(json, '"note": "bars gone"'), json:sub(1, 200))
     local text = table.concat(Lines(), "\\n")
     assert(Has(text, "WTF/Account/<ACCOUNT>/SavedVariables/forever-stuwave.lua"), text)
-    assert(Has(text, "World of Warcraft\\\\_classic_beta_\\\\WTF\\\\Account\\\\<ACCOUNT>\\\\SavedVariables\\\\forever-stuwave.lua"), text)
+    assert(Has(text, "World of Warcraft\\\\_forever_\\\\WTF\\\\Account\\\\<ACCOUNT>\\\\SavedVariables\\\\forever-stuwave.lua"), text)
     assert(Has(text, "/reload or logout"), text)
 """)
 

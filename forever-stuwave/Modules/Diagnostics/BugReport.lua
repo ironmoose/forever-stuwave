@@ -80,9 +80,9 @@ BR.FRAME_NAMES = {
     "PlayerFrame", "TargetFrame", "MinimapCluster", "ChatFrame1", "PTR_IssueReporter",
 }
 
--- The game folder name for this client. It is the Forever beta build; the tester guide tells
+-- The game folder name for this client. It is the Forever release client; the tester guide tells
 -- anyone on another client to look for the folder that holds Interface\AddOns\forever-stuwave.
-BR.CLIENT_FOLDER = "_classic_beta_"
+BR.CLIENT_FOLDER = "_forever_"
 BR.SV_PATH_SLASH = "WTF/Account/<ACCOUNT>/SavedVariables/forever-stuwave.lua"
 BR.SV_PATH_WINDOWS = "World of Warcraft\\" .. BR.CLIENT_FOLDER
     .. "\\WTF\\Account\\<ACCOUNT>\\SavedVariables\\forever-stuwave.lua"

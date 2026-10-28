@@ -2,7 +2,7 @@
 """Drive ForeverSTUwave development against the user's own WoW client.
 
 Windows retains the legacy two-reload SavedVariables loop; Linux discovers the
-Gamescope DISPLAY from WowB.exe, sends at most one slash command per nested run,
+Gamescope DISPLAY from Wow.exe, sends at most one slash command per nested run,
 and left-clicks the explicit --focus-point selected from a fresh capture.
 From the repo root on Fedora, run
 `uv run --extra fsdev python tools/fsdev.py`; --shot-only captures
@@ -40,7 +40,7 @@ else:
         Path.home() / "Games" / "battlenet" / "drive_c"
         / "Program Files (x86)" / "World of Warcraft"
     )
-FLAVOR = "_classic_beta_"
+FLAVOR = "_forever_"
 WTF_ACCOUNTS = WOW_ROOT / FLAVOR / "WTF" / "Account"
 
 
@@ -204,7 +204,7 @@ _host_focus_done = False
 
 
 def _wow_process_displays(proc_root: Path = Path("/proc")) -> list[str]:
-    """Find local X11 displays advertised by running WowB.exe processes."""
+    """Find local X11 displays advertised by running Wow.exe processes."""
     displays: list[str] = []
     try:
         processes = sorted(
@@ -217,14 +217,14 @@ def _wow_process_displays(proc_root: Path = Path("/proc")) -> list[str]:
 
     for process in processes:
         try:
-            if (process / "comm").read_text(encoding="utf-8").strip() != "WowB.exe":
+            if (process / "comm").read_text(encoding="utf-8").strip() != "Wow.exe":
                 continue
         except (OSError, UnicodeError):
             continue
         try:
             environment = (process / "environ").read_bytes()
         except OSError as exc:
-            print(f"Cannot read WowB.exe {process / 'environ'}: {exc}", file=sys.stderr)
+            print(f"Cannot read Wow.exe {process / 'environ'}: {exc}", file=sys.stderr)
             continue
         for entry in environment.split(b"\0"):
             if not entry.startswith(b"DISPLAY="):
@@ -842,7 +842,7 @@ def deploy() -> None:
         return
 
     # deploy-forever-stuwave.sh's own baked-in WOW_ROOT default targets a
-    # DIFFERENT workflow (the /mnt/windows NTFS-mounted native-Windows beta
+    # DIFFERENT workflow (the /mnt/windows NTFS-mounted native-Windows
     # client, for a dual-boot Wine-freeze workaround). This is the
     # native-Linux-under-Wine install, so WOW_ROOT/WOW_FLAVOR are always
     # passed explicitly -- the script's own default must never apply here.

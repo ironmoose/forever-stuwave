@@ -4,7 +4,7 @@
 
 <p align="center">
   A custom UI for WoW Forever.<br>
-  <strong>Beta · Interface 16001 · 16:9</strong>
+  <strong>Release · Interface 16001 · 16:9</strong>
 </p>
 
 <p align="center">
@@ -30,7 +30,7 @@
 
 1. **Close WoW.**
 2. [Download the addon ZIP](https://github.com/ironmoose/forever-stuwave/releases/download/v0.1.0-alpha.3/ForeverSTUwave-0.1.0-alpha.3.zip) and extract it.
-3. Put its `forever-stuwave/` folder into `_classic_beta_/Interface/AddOns/`. Keep its name unchanged.
+3. Put its `forever-stuwave/` folder into `_forever_/Interface/AddOns/`. Keep its name unchanged.
 4. Start WoW and enable **Forever STUwave** in the AddOns menu.
 
 > **Existing install?** Use the [deployment script](docs/DEVELOPMENT.md#deploying-a-development-build) to migrate settings and retire the old copy.
