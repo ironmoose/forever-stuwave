@@ -3,7 +3,7 @@
 ## Notes: Custom UI for WoW Forever.
 ## Version: 0.1.0-alpha.3
 ## Author: ironmoose
-## SavedVariables: ForeverSTUwaveDB, ForeverSTUwaveErrorLog
+## SavedVariables: ForeverSTUwaveDB, ForeverSTUwaveErrorLog, ForeverSTUwaveExport
 
 Core/ErrorLog.lua
 Modules/Nameplates/Nameplates.lua
@@ -90,5 +90,6 @@ Modules/CombatHud/GunsightShaman.lua
 Modules/CombatHud/GunsightShamanDrop.lua
 Modules/Diagnostics/FSCheck.lua
 Modules/Diagnostics/BugReport.lua
+Modules/Diagnostics/CharacterExport.lua
 Modules/Config/ConfigWindow.lua
 Core/LayoutEdit.lua

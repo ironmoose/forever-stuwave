@@ -16,4 +16,5 @@ The `/fsconfig` window: a category nav and a content well, built from `FS.Config
 
 ## Dependencies
 - Depends on: `FS.Theme`, `FS.Config`, `FS.Gunsight`, `FS.GunsightBoxes`, `FS.GunsightTags`, `FS.FiveSecondTab` (the Mana regen group on the Unit Frames page reads its `SETTINGS`; the group is left out for a class without mana or a client without the tab), `FS.BuffTab` (the Shaman buff tab group on the Unit Frames page reads its `SETTINGS`; left out without the tab), `FS.MicroBars` and `FS.SpellArt` (the Icon style group on the Unit Frames page reads their `SETTING`, `STYLES` and `Style`; a row is left out without its module, the spell row also until a tab has drawn a spell icon)
+- Also `FS.CharacterExport` (the Saved data group on the Profiles page reads its `SETTING`; left out without the module)
 - Depended on by: nothing; modules expose settings, this file reads them

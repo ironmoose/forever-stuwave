@@ -1617,6 +1617,11 @@ local function ProfilesPage(page)
         end,
         onClick = function() Check(Config.ResetProfile()) end,
     })
+    local export = FS.CharacterExport
+    if export and export.SETTING then
+        UI.Header(page, "Saved data")
+        UI.Toggle(page, { label = export.SETTING.label, key = export.SETTING.key, tip = export.SETTING.tip })
+    end
 end
 
 CW.RegisterCategory({ key = "profiles", label = "Profiles", order = 9, build = ProfilesPage })

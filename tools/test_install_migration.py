@@ -31,7 +31,7 @@ LOAD_ORDER = (
     "GunsightSeals.lua", "GunsightFrame.lua", "GunsightBoxes.lua", "GunsightTape.lua",
     "GunsightTags.lua", "GunsightMyBuffs.lua",
     "ConsoleKeys.lua", "ClassShoulder.lua", "SealBar.lua", "TotemPiece.lua", "TotemBar.lua", "TotemPresets.lua", "TotemDial.lua", "ShamanBuffs.lua", "BuffTab.lua", "FiveSecondTab.lua", "CombatHud.lua", "GunsightClass.lua", "GunsightShamanShocks.lua", "GunsightShaman.lua", "GunsightShamanDrop.lua", "FSCheck.lua",
-    "BugReport.lua", "ConfigWindow.lua", "LayoutEdit.lua",
+    "BugReport.lua", "CharacterExport.lua", "ConfigWindow.lua", "LayoutEdit.lua",
 )
 
 
@@ -86,14 +86,14 @@ def test_module_manifest_preserves_dependency_order_and_loads_every_runtime_modu
     modules = [Path(entry) for entry in entries if entry.endswith(".lua")]
 
     assert tuple(path.name for path in modules) == LOAD_ORDER
-    assert len(set(modules)) == 87
+    assert len(set(modules)) == 88
     assert all((RUNTIME / entry).is_file() for entry in entries)
     assert all(path.parts[0] in {"Core", "Modules"} for path in modules)
     assert not list(RUNTIME.glob("*.lua"))
     discovered = {path.relative_to(RUNTIME) for directory in ("Core", "Modules")
                   for path in (RUNTIME / directory).rglob("*.lua")}
     assert discovered == set(modules)
-    assert "## SavedVariables: ForeverSTUwaveDB, ForeverSTUwaveErrorLog" in lines
+    assert "## SavedVariables: ForeverSTUwaveDB, ForeverSTUwaveErrorLog, ForeverSTUwaveExport" in lines
     assert not (REPO / "addon").exists()
 
 

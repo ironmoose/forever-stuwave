@@ -86,7 +86,7 @@ Registration does not grant screen-sharing consent. Approve any portal prompt yo
 
 ## Runtime compatibility and client constraints
 
-Keep the installed folder and manifest `forever-stuwave/forever-stuwave.toc`, hardcoded media paths, global frame names, and account-wide `ForeverSTUwaveDB` and `ForeverSTUwaveErrorLog` unchanged. Account-wide settings avoid a known Forever beta per-character restore problem.
+Keep the installed folder and manifest `forever-stuwave/forever-stuwave.toc`, hardcoded media paths, global frame names, and account-wide `ForeverSTUwaveDB`, `ForeverSTUwaveErrorLog` and `ForeverSTUwaveExport` unchanged ([EXPORT.md](EXPORT.md) documents the export table). Account-wide settings avoid a known Forever beta per-character restore problem.
 
 Modules share the addon namespace through `local _, FS = ...`. `ErrorLog.lua` loads first. `Modules/Nameplates/Nameplates.lua` precedes `Theme.lua`, so theme reads happen at runtime. Preserve dependency order when adding `.toc` entries. `Theme.lua` owns palette, fonts, textures and chrome; `Layout.lua` owns geometry.
 
