@@ -1244,10 +1244,14 @@ local function ProveEngine()
         if eng then
             local bad = false
             local anyOk, skipped = false, false
+            -- with the tile's buff not up there is no aura to locate: the release client leaves an empty slot sized,
+            -- unplaced and with a secret IsShown, so that slot is idle too
+            local v = ViewOf(button)
+            local down = v ~= nil and v.mode ~= "on" and v.mode ~= "exp"
             for _, part in ipairs(eng.parts) do
                 ReadPart(part)
                 local placed = Placed(part.slot, button.icon)
-                local idle = placed == nil and (Hidden(part.slot) or Collapsed(part.slot))
+                local idle = placed == nil and (down or Hidden(part.slot) or Collapsed(part.slot))
                 if idle and part.ok then
                     part.nils = 0                              -- keeps its last proof
                 else

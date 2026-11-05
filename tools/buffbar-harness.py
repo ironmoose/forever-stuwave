@@ -3181,6 +3181,26 @@ def check_an_unreadable_slot_is_logged_after_five_ticks_and_a_hidden_proven_one_
     assert btn(lua, SHIELD).fsEngine.bad is True
 
 
+def check_a_sized_slot_with_no_rect_is_idle_while_its_tile_has_no_buff_up():
+    # live (release client, Tauren Shaman, level 2, Rockbiter known, no imbue on the weapon): both enchantment slots read
+    # 26x26 with no rect and a secret IsShown; with no imbue up there is nothing to locate, so nothing is reported
+    lua = engine_world(pre="__logs = 0\nFS.LogDegradeOnce = function() __logs = __logs + 1 end", tips={16: ["Worn Mace"]})
+    assert view(lua, "imbue").mode == "warn"
+    for ref in ("__acs[1]._ench[1]", "__acs[1]._ench[2]"):
+        run(lua, f"{ref}._noRect = true\n{ref}.IsShown = function() return __SECRET end")
+    for _ in range(12):
+        tick(lua, 1.1)
+    assert not g(lua).FS.BuffTab.BT.warned.bufftab_engine_unreadable and int(g(lua).__logs) == 0, "a tile with no buff up was reported"
+    # once the imbue is up, the same unreadable slots are a fault again
+    tip(lua, 16, ["Rockbiter 1 (30 min)"])
+    fire(lua, "UNIT_INVENTORY_CHANGED", "player")
+    update(lua)
+    assert view(lua, "imbue").mode == "on"
+    for _ in range(5):
+        tick(lua, 1.1)
+    assert g(lua).FS.BuffTab.BT.warned.bufftab_engine_unreadable, "an unreadable slot with the imbue up was not logged"
+
+
 def check_an_idle_slot_with_no_size_and_no_rect_is_not_a_fault_but_a_shown_unreadable_one_is():
     # live (Orc Shaman, level 10, no off hand): the off hand enchantment slot reads 0x0 with no rect and a secret IsShown,
     # on every pass; that is a slot with nothing to draw, not a slot to warn about
@@ -3307,6 +3327,7 @@ def check_the_state_line_tells_the_setting_and_unreadable_from_misplaced_and_a_r
     g(lua).FS.Config.Set("buffs.combatstate", True)
     update(lua)
     assert "setting=on" in str(g(lua).ForeverSTUwaveDB.buffTabEngine.line)
+    shield_aura_up(lua)                                 # a shield up: its slot has an aura to locate
     run(lua, "__acs[1]._slots.shield.frame._noRect = true\n__acs[1]._ench[2]._forceLeft, __acs[1]._ench[2]._forceTop = 7, 9")
     for _ in range(3):
         tick(lua, 1.1)
@@ -4122,6 +4143,7 @@ CHECKS = [
     check_flapping_shield_ids_rebuild_only_for_a_new_id_and_at_most_three_times,
     check_one_misplaced_tile_hides_the_container_and_no_tile_claims_the_engine_state,
     check_an_unreadable_slot_is_logged_after_five_ticks_and_a_hidden_proven_one_keeps_its_proof,
+    check_a_sized_slot_with_no_rect_is_idle_while_its_tile_has_no_buff_up,
     check_an_idle_slot_with_no_size_and_no_rect_is_not_a_fault_but_a_shown_unreadable_one_is,
     check_a_slot_with_the_right_corner_but_the_wrong_size_is_not_on_the_icon,
     check_the_state_line_for_the_live_test_is_saved_and_quiet_ticks_allocate_nothing,
