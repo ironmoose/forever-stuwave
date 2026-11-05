@@ -12,7 +12,7 @@
 -- short delay. No chat output. FS.Config key "export.enabled" (default on) turns it off.
 --
 -- SavedVariables reach disk only on /reload, logout or quit, so after a level up a small "Reload to save" button
--- shows (out of combat only); a click reloads, a right click hides it. FS.Config key "export.reloadButton" (default
+-- shows (out of combat only); a click runs /reload through a secure macro button, a right click hides it. FS.Config key "export.reloadButton" (default
 -- on) turns the button off.
 
 local addonName, FS = ...
@@ -521,12 +521,18 @@ Export.Schedule = Schedule
 local RELOAD_W, RELOAD_H = 140, 24
 local reloadButton, reloadWanted = nil, false
 
+-- A secure macro button running /reload: ReloadUI and C_UI.Reload are protected on this client (a call from our
+-- OnClick is ADDON_ACTION_BLOCKED, live 2026-11-04). Only the left click has a type, so a right click runs nothing
+-- and just hides it. Secure buttons cannot be shown or hidden in combat, so nothing here touches it then.
 local function BuildReloadButton()
-    local b = CreateFrame("Button", "ForeverSTUwaveReloadButton", UIParent)
+    local b = CreateFrame("Button", "ForeverSTUwaveReloadButton", UIParent, "SecureActionButtonTemplate")
     b:SetFrameStrata("HIGH")
     b:SetSize(RELOAD_W, RELOAD_H)
     b:SetPoint("TOP", UIParent, "TOP", 0, -120)
-    b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    -- AnyUp+AnyDown: the click is acted on at whichever edge ActionButtonUseKeyDown picks.
+    b:RegisterForClicks("AnyUp", "AnyDown")
+    b:SetAttribute("type1", "macro")
+    b:SetAttribute("macrotext1", "/reload")
     -- A Button needs a font object before it can hold text.
     b:SetNormalFontObject(_G.GameFontNormal)
     b:SetText("Reload to save")
@@ -538,13 +544,10 @@ local function BuildReloadButton()
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
-    b:SetScript("OnClick", function(self, mouse)
+    b:HookScript("OnClick", function(self, mouse)
+        if mouse ~= "RightButton" or InCombat() then return end
         reloadWanted = false
         self:Hide()
-        if mouse ~= "RightButton" and not InCombat() then
-            local reload = Api(nil, "ReloadUI")
-            if reload then pcall(reload) end
-        end
     end)
     if FS.ButtonSkins and FS.ButtonSkins.SkinTextButton then FS.ButtonSkins.SkinTextButton(b, { accent = "cyan" }) end
     b:Hide()
@@ -552,8 +555,10 @@ local function BuildReloadButton()
 end
 
 -- Shows the button when one is wanted, the switch is on and the player is out of combat; hides it otherwise.
-local function UpdateReloadButton()
-    local show = reloadWanted and Enabled() and On(Export.RELOAD_KEY) and not InCombat()
+-- PLAYER_REGEN_DISABLED fires before the lockdown starts, so the hide on entering combat is still allowed.
+local function UpdateReloadButton(enteringCombat)
+    if InCombat() then return end
+    local show = reloadWanted and not enteringCombat and Enabled() and On(Export.RELOAD_KEY)
     if show and not reloadButton then
         local ok, b = pcall(BuildReloadButton)
         if not ok then return end
@@ -600,7 +605,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
         if pending then Schedule("combat end") end
         UpdateReloadButton()
     elseif event == "PLAYER_REGEN_DISABLED" then
-        UpdateReloadButton()
+        UpdateReloadButton(true)
     elseif event == "PLAYER_ENTERING_WORLD" then
         Schedule("login", LOGIN_DELAY)
     else

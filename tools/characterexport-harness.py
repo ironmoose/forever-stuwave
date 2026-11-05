@@ -59,15 +59,20 @@ function FrameMT:SetScript(n, fn) self.scripts[n] = fn end
 function FrameMT:Show() self.shown = true end
 function FrameMT:Hide() self.shown = false end
 function FrameMT:SetText(t) self.text = t end
+function FrameMT:SetAttribute(k, v) self.attrs = self.attrs or {}; self.attrs[k] = v end
+function FrameMT:HookScript(n, fn)
+    local prev = self.scripts[n]
+    self.scripts[n] = function(...) if prev then prev(...) end fn(...) end
+end
 for _, m in ipairs({ "SetFrameStrata", "SetSize", "SetPoint", "RegisterForClicks", "SetNormalFontObject" }) do
     FrameMT[m] = function() end
 end
 UIParent = {}
-RELOADS = 0
-function ReloadUI() RELOADS = RELOADS + 1 end
+-- ReloadUI is protected on the release client: a call from addon code is blocked
+function ReloadUI() error("ADDON_ACTION_BLOCKED: Reload()") end
 FRAMES = {}
-function CreateFrame()
-    local f = setmetatable({ events = {}, scripts = {} }, FrameMT)
+function CreateFrame(kind, name, parent, template)
+    local f = setmetatable({ events = {}, scripts = {}, template = template }, FrameMT)
     FRAMES[#FRAMES + 1] = f
     return f
 end
@@ -358,15 +363,17 @@ check(saved().level == 24, "this one added")
 """)
 
 
-case("a_level_up_shows_a_reload_button_that_reloads_on_click")(r"""
+case("a_level_up_shows_a_secure_reload_macro_button")(r"""
 load()
 check(FS.CharacterExport.ReloadButton() == nil, "no button before a level up")
 fire("PLAYER_LEVEL_UP", 25)
 local b = FS.CharacterExport.ReloadButton()
 check(b and b.shown, "button shown after the level up")
 check(b.text == "Reload to save", "label: " .. tostring(b.text))
-b.scripts.OnClick(b, "LeftButton")
-check(RELOADS == 1 and not b.shown, "click reloads once and hides")
+check(b.template == "SecureActionButtonTemplate", "not a secure button")
+check(b.attrs.type1 == "macro" and b.attrs.macrotext1 == "/reload", "left click is not the /reload macro")
+check(b.attrs.type == nil and b.attrs.type2 == nil, "a right click would run something")
+if b.scripts.OnClick then b.scripts.OnClick(b, "LeftButton") end  -- addon code never calls the protected reload
 """)
 
 case("the_reload_button_waits_out_combat_and_right_click_dismisses")(r"""
@@ -378,14 +385,16 @@ COMBAT = false
 fire("PLAYER_REGEN_ENABLED")
 local b = FS.CharacterExport.ReloadButton()
 check(b and b.shown, "shown once combat ends")
-COMBAT = true
-fire("PLAYER_REGEN_DISABLED")
+fire("PLAYER_REGEN_DISABLED")  -- fires before the lockdown starts
 check(not b.shown, "hidden when combat starts")
+COMBAT = true
+fire("PLAYER_LEVEL_UP", 26)
+check(not b.shown, "a secure button is not touched in lockdown")
 COMBAT = false
 fire("PLAYER_REGEN_ENABLED")
 check(b.shown, "back after combat")
 b.scripts.OnClick(b, "RightButton")
-check(RELOADS == 0 and not b.shown, "right click hides without a reload")
+check(not b.shown, "right click hides it")
 fire("PLAYER_REGEN_ENABLED")
 check(not b.shown, "a dismissed button stays hidden")
 """)

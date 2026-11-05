@@ -10,7 +10,7 @@ The file is Lua: `ForeverSTUwaveExport = { ... }`. Keys are `["name"] = value`, 
 
 ## When it is written
 
-On login and `/reload` (about 4 seconds after the loading screen), level up, talent changes, gear changes, profession skill changes, and logout. Events within 2 seconds of each other produce one write. Nothing is written in combat: the write waits for combat to end, and a logout in combat keeps the previous snapshot. Nothing shows in chat. After a level up a "Reload to save" button shows (out of combat; a right click hides it) so the new level reaches the file without waiting for logout; the "Reload button after level up" switch on the Profiles page turns it off.
+On login and `/reload` (about 4 seconds after the loading screen), level up, talent changes, gear changes, profession skill changes, and logout. Events within 2 seconds of each other produce one write. Nothing is written in combat: the write waits for combat to end, and a logout in combat keeps the previous snapshot. Nothing shows in chat. After a level up a "Reload to save" button shows (out of combat; a click runs `/reload` through a secure macro button, since the reload call itself is protected; a right click hides it) so the new level reaches the file without waiting for logout; the "Reload button after level up" switch on the Profiles page turns it off.
 
 Settings, Profiles, Saved data, **Character snapshot** turns it off (setting `export.enabled`, default on). Turning it off stops new writes and leaves existing snapshots in place.
 
