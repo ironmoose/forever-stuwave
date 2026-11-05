@@ -215,3 +215,73 @@ ApplyAndHook = function()
 end
 
 FS.PanelSkins.DeferCombat(ApplyAndHook)
+
+
+-------------------------------------------------------------------------------
+-- Tutorial tips (HelpTip: "Visit the Toy Box to view your toy collection.")
+-------------------------------------------------------------------------------
+
+-- HelpTip (Blizzard_SharedXML/HelpTip.lua) draws every tutorial callout from one frame pool of
+-- HelpTipTemplate frames: a GlowBoxTemplate box (a yellow gradient BG plus Glow* and Shadow* edge pieces),
+-- an Arrow frame (Arrow + Glow textures, rotated by the mixin), a CloseButton whose art is a Texture child
+-- re-atlased on every press, and an OkayButton. The mixin sets text, size, anchors and the arrow rotation;
+-- it never touches those regions' alpha or colour, so hiding and retinting them holds across reuse.
+-- Pooled frames are skinned once each, tracked here (nothing is written onto Blizzard's frames).
+local tipSkinned = setmetatable({}, { __mode = "k" })
+local TIP_ART = {
+    "BG", "GlowTopLeft", "GlowTopRight", "GlowBottomLeft", "GlowBottomRight", "GlowTop", "GlowBottom",
+    "GlowLeft", "GlowRight", "ShadowTopLeft", "ShadowTopRight", "ShadowBottomLeft", "ShadowBottomRight",
+    "ShadowTop", "ShadowBottom", "ShadowLeft", "ShadowRight",
+}
+
+local function TintArrowPiece(texture, alpha)
+    if not (texture and texture.SetVertexColor) then return end
+    local c = FS.Theme.COLOR_POWER
+    if texture.SetDesaturated then texture:SetDesaturated(true) end
+    texture:SetVertexColor(c[1], c[2], c[3], alpha)
+end
+
+local function SkinTip(frame)
+    if type(frame) ~= "table" or tipSkinned[frame] or type(frame.CreateTexture) ~= "function" then return end
+    tipSkinned[frame] = true
+    local Theme = FS.Theme
+    for _, key in ipairs(TIP_ART) do
+        local region = frame[key]
+        if region and region.SetAlpha then region:SetAlpha(0) end
+    end
+    if Theme.AddPanelChrome then
+        Theme.AddPanelChrome(frame, { accent = Theme.COLOR_POWER, fillColor = Theme.COLOR_BG, glowAlpha = 0.35 })
+    end
+    local arrow = frame.Arrow
+    if arrow then
+        TintArrowPiece(arrow.Arrow, 1)
+        TintArrowPiece(arrow.Glow, 0.5)
+    end
+    if frame.Text and Theme.ApplyFontGeneric and frame.Text.GetFont then
+        local path, size = frame.Text:GetFont()
+        Theme.ApplyFontGeneric(frame.Text, path, size or 12, Theme.COLOR_TEXT_PARCHMENT, "")
+    end
+    local skins = FS.ButtonSkins
+    local close = frame.CloseButton
+    if skins and skins.SkinCloseButton and close then
+        if close.Texture and close.Texture.SetAlpha then close.Texture:SetAlpha(0) end
+        skins.SkinCloseButton(close, { anchor = frame })
+    end
+    if skins and skins.SkinTextButton and frame.OkayButton then
+        skins.SkinTextButton(frame.OkayButton, { accent = "cyan" })
+    end
+end
+
+local function SkinActiveTips()
+    local pool = _G.HelpTip and _G.HelpTip.framePool
+    if not (pool and pool.EnumerateActive) then return end
+    for frame in pool:EnumerateActive() do
+        local ok = pcall(SkinTip, frame)
+        if not ok then tipSkinned[frame] = true end
+    end
+end
+
+if type(_G.HelpTip) == "table" and type(_G.HelpTip.Show) == "function" and type(hooksecurefunc) == "function" then
+    hooksecurefunc(_G.HelpTip, "Show", SkinActiveTips)
+    SkinActiveTips()
+end
