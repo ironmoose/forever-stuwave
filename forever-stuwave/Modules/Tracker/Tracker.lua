@@ -78,6 +78,64 @@ end
 -- tracker, it does not close it, so its glyph is a minus while the tracker is expanded and a plus once collapsed, kept
 -- in step by a post-hook on the header's SetCollapsed (the container calls it on every toggle). Skin only: Blizzard's
 -- OnClick, the button's parent and its protected state are not touched; it is seated top right inside our title band.
+-- Collapsed, the tracker is a small bar: our backdrop shrinks to the title band and the band reads the quest count,
+-- "quests (12/20)" (playtest 2026-11-05: the stock collapse only hid the text and left the whole panel up). Our own
+-- frames only: the backdrop is re-anchored and the label re-texted; Blizzard's layout values are never written (they
+-- are fields its layout code reads, the classic tracker taint path).
+local chrome = {} -- backdrop, label, nineSlice, header, collapsed
+
+local TITLE = "stuwave://objectives"
+
+local function QuestCount()
+    local q = C_QuestLog
+    local n
+    if q and type(q.GetNumQuestLogEntries) == "function" then
+        local ok, _, quests = pcall(q.GetNumQuestLogEntries)
+        if ok and type(quests) == "number" then n = quests end
+    end
+    if not n then return nil end
+    local max
+    if q and type(q.GetMaxNumQuestsCanAccept) == "function" then
+        local ok, m = pcall(q.GetMaxNumQuestsCanAccept)
+        if ok and type(m) == "number" and m > 0 then max = m end
+    end
+    if not max and type(_G.MAX_QUESTS) == "number" then max = _G.MAX_QUESTS end
+    return n, max
+end
+
+local function CollapsedText()
+    local ok, n, max = pcall(QuestCount)
+    if not ok or not n then return "quests" end
+    if max then return ("quests (%d/%d)"):format(n, max) end
+    return ("quests (%d)"):format(n)
+end
+
+local function ApplyCollapsed(collapsed)
+    local backdrop, nineSlice = chrome.backdrop, chrome.nineSlice
+    if not backdrop then return end
+    chrome.collapsed = collapsed == true
+    local top = nineSlice or chrome.frame
+    backdrop:ClearAllPoints()
+    if chrome.collapsed and chrome.header then
+        local inset = Theme.PanelBandInset()
+        backdrop:SetPoint("TOPLEFT", top, "TOPLEFT", 0, 0)
+        backdrop:SetPoint("TOPRIGHT", top, "TOPRIGHT", 0, 0)
+        backdrop:SetHeight(Theme.PANEL_HEADER_H + inset * 2)
+    else
+        backdrop:SetPoint("TOPLEFT", top, "TOPLEFT", 0, 0)
+        backdrop:SetPoint("BOTTOMRIGHT", top, "BOTTOMRIGHT", 0, 0)
+    end
+    if chrome.label then chrome.label:SetText(chrome.collapsed and CollapsedText() or TITLE) end
+end
+
+local countEvents = CreateFrame("Frame")
+for _, event in ipairs({ "QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED" }) do
+    pcall(countEvents.RegisterEvent, countEvents, event)
+end
+countEvents:SetScript("OnEvent", function()
+    if chrome.collapsed and chrome.label then chrome.label:SetText(CollapsedText()) end
+end)
+
 local function SkinCollapseButton(frame, header)
     local skins = FS.ButtonSkins
     local button = header and header.MinimizeButton
@@ -91,6 +149,7 @@ local function SkinCollapseButton(frame, header)
     if type(hooksecurefunc) == "function" and type(header.SetCollapsed) == "function" then
         hooksecurefunc(header, "SetCollapsed", function(_, nowCollapsed)
             skins.SetGlyph(button, nowCollapsed == true and "plus" or "minus")
+            ApplyCollapsed(nowCollapsed == true)
         end)
     end
 end
@@ -189,7 +248,8 @@ local function BuildContainerChrome()
             label:SetPoint("RIGHT", header.MinimizeButton, "LEFT", -6, 0)
             label:SetWordWrap(false)
         end
-        label:SetText("stuwave://objectives")
+        label:SetText(TITLE)
+        chrome.label = label
 
         -- Stock header background art + text hidden via SetAlpha(0), not
         -- Hide(): keeps Blizzard's own Show/Hide state (and anything that
@@ -218,6 +278,15 @@ local function BuildContainerChrome()
     end
 
     backdrop:Show()
+
+    chrome.backdrop, chrome.frame, chrome.header = backdrop, frame, header
+    chrome.nineSlice = usingNineSlice and nineSlice or nil
+    local collapsed = false
+    if type(frame.IsCollapsed) == "function" then
+        local ok, value = pcall(frame.IsCollapsed, frame)
+        collapsed = ok and value == true
+    end
+    ApplyCollapsed(collapsed)
 
     frame.fsTrackerChromeBuilt = true
 end
@@ -294,6 +363,15 @@ local function StyleModuleHeader(moduleName)
     rule:SetPoint("BOTTOMLEFT", header, "BOTTOMLEFT", 0, 0)
     rule:SetPoint("BOTTOMRIGHT", header, "BOTTOMRIGHT", 0, 0)
     rule:SetHeight(1)
+
+    -- One collapse control: the tracker's own (the plate on the title band). Each module's stock gold minus is held
+    -- invisible and unclickable (playtest 2026-11-05: two sets of minimize were confusing). Alpha and mouse only; the
+    -- button, its script and its place are untouched.
+    local minimize = header.MinimizeButton
+    if minimize then
+        if minimize.SetAlpha then minimize:SetAlpha(0) end
+        if minimize.EnableMouse then pcall(minimize.EnableMouse, minimize, false) end
+    end
 
     header.fsModuleHeaderSkin = true
 end

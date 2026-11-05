@@ -24,6 +24,7 @@ First build for the WoW Forever release client. Beta until 1.0, which ships with
 - The quest timer wears the panel skin and draws above the objectives panel.
 - An opened mail letter gets its own panel instead of floating as bare text.
 - The loss of control alert (stuns, fears) is a STUwave plate.
+- Objectives tracker: collapsed, it is a small bar reading the quest count, "quests (12/20)"; one collapse control (the section headers' own minus is gone).
 - Tutorial tips and the Battle.net friend toast are STUwave panels.
 
 ### Fixes
@@ -33,4 +34,3 @@ First build for the WoW Forever release client. Beta until 1.0, which ships with
 
 ### Known issues
 - A bag item clicked in combat was blocked once (ADDON_ACTION_FORBIDDEN on UseContainerItem). The cause is not found yet. Keep potions on an action bar.
-- The objectives tracker collapses to an empty panel rather than a small bar. A redesign is planned.
