@@ -10,6 +10,10 @@
 -- in its `status`. Nothing is written in combat (stats and talents are not trusted there): the write waits for
 -- PLAYER_REGEN_ENABLED, and a logout in combat keeps the last snapshot. Events are coalesced into one write after a
 -- short delay. No chat output. FS.Config key "export.enabled" (default on) turns it off.
+--
+-- SavedVariables reach disk only on /reload, logout or quit, so after a level up a small "Reload to save" button
+-- shows (out of combat only); a click reloads, a right click hides it. FS.Config key "export.reloadButton" (default
+-- on) turns the button off.
 
 local addonName, FS = ...
 
@@ -24,7 +28,17 @@ Export.SETTING = {
     tip = "Keeps a copy of this character's level, stats, talents, professions and gear in the addon's saved file, "
         .. "updated on login, level up, talent, gear and skill changes and logout. Nothing shows in game.",
 }
-if FS.Config and FS.Config.RegisterDefault then FS.Config.RegisterDefault(Export.CONFIG_KEY, true) end
+Export.RELOAD_KEY = "export.reloadButton"
+Export.RELOAD_SETTING = {
+    label = "Reload button after level up",
+    key = Export.RELOAD_KEY,
+    tip = "Shows a Reload to save button after each level up, out of combat. The saved file is only written on a "
+        .. "reload or logout; the button reloads so the new level reaches it now. Right click hides it.",
+}
+if FS.Config and FS.Config.RegisterDefault then
+    FS.Config.RegisterDefault(Export.CONFIG_KEY, true)
+    FS.Config.RegisterDefault(Export.RELOAD_KEY, true)
+end
 
 local DELAY = 2           -- seconds between the first event of a burst and the write
 local LOGIN_DELAY = 4     -- stats and item data settle a few seconds after the loading screen
@@ -427,11 +441,13 @@ function Export.Snapshot()
     return snap
 end
 
-local function Enabled()
+local function On(key)
     if not (FS.Config and FS.Config.Get) then return true end
-    local ok, v = pcall(FS.Config.Get, Export.CONFIG_KEY)
+    local ok, v = pcall(FS.Config.Get, key)
     return not ok or v ~= false
 end
+
+local function Enabled() return On(Export.CONFIG_KEY) end
 
 local function InCombat()
     local r = Call(Api(nil, "InCombatLockdown"))
@@ -500,6 +516,55 @@ local function Schedule(reason, delay)
 end
 Export.Schedule = Schedule
 
+-- Reload button ------------------------------------------------------------------------------
+
+local RELOAD_W, RELOAD_H = 140, 24
+local reloadButton, reloadWanted = nil, false
+
+local function BuildReloadButton()
+    local b = CreateFrame("Button", "ForeverSTUwaveReloadButton", UIParent)
+    b:SetFrameStrata("HIGH")
+    b:SetSize(RELOAD_W, RELOAD_H)
+    b:SetPoint("TOP", UIParent, "TOP", 0, -120)
+    b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    -- A Button needs a font object before it can hold text.
+    b:SetNormalFontObject(_G.GameFontNormal)
+    b:SetText("Reload to save")
+    b:SetScript("OnEnter", function(self)
+        if not GameTooltip then return end
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:SetText("Reloads the UI so the character snapshot is written to the saved file. "
+            .. "Right click hides this.", 1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    b:SetScript("OnClick", function(self, mouse)
+        reloadWanted = false
+        self:Hide()
+        if mouse ~= "RightButton" and not InCombat() then
+            local reload = Api(nil, "ReloadUI")
+            if reload then pcall(reload) end
+        end
+    end)
+    if FS.ButtonSkins and FS.ButtonSkins.SkinTextButton then FS.ButtonSkins.SkinTextButton(b, { accent = "cyan" }) end
+    b:Hide()
+    return b
+end
+
+-- Shows the button when one is wanted, the switch is on and the player is out of combat; hides it otherwise.
+local function UpdateReloadButton()
+    local show = reloadWanted and Enabled() and On(Export.RELOAD_KEY) and not InCombat()
+    if show and not reloadButton then
+        local ok, b = pcall(BuildReloadButton)
+        if not ok then return end
+        reloadButton = b
+    end
+    if not reloadButton then return end
+    if show then reloadButton:Show() else reloadButton:Hide() end
+end
+Export.UpdateReloadButton = UpdateReloadButton
+function Export.ReloadButton() return reloadButton end
+
 local REASONS = {
     PLAYER_ENTERING_WORLD = "login",
     PLAYER_LEVEL_UP = "level",
@@ -516,6 +581,7 @@ local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_LOGOUT")
 frame:RegisterEvent("PLAYER_REGEN_ENABLED")
+frame:RegisterEvent("PLAYER_REGEN_DISABLED")
 local events = {}
 for event in pairs(REASONS) do events[#events + 1] = event end
 table.sort(events)
@@ -532,9 +598,16 @@ frame:SetScript("OnEvent", function(_, event, arg1)
         pcall(Export.Write, "logout")
     elseif event == "PLAYER_REGEN_ENABLED" then
         if pending then Schedule("combat end") end
+        UpdateReloadButton()
+    elseif event == "PLAYER_REGEN_DISABLED" then
+        UpdateReloadButton()
     elseif event == "PLAYER_ENTERING_WORLD" then
         Schedule("login", LOGIN_DELAY)
     else
         Schedule(REASONS[event])
+        if event == "PLAYER_LEVEL_UP" then
+            reloadWanted = true
+            UpdateReloadButton()
+        end
     end
 end)

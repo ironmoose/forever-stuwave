@@ -1621,6 +1621,8 @@ local function ProfilesPage(page)
     if export and export.SETTING then
         UI.Header(page, "Saved data")
         UI.Toggle(page, { label = export.SETTING.label, key = export.SETTING.key, tip = export.SETTING.tip })
+        local reload = export.RELOAD_SETTING
+        if reload then UI.Toggle(page, { label = reload.label, key = reload.key, tip = reload.tip }) end
     end
 end
 

@@ -56,6 +56,15 @@ local FrameMT = {}
 FrameMT.__index = FrameMT
 function FrameMT:RegisterEvent(e) self.events[e] = true end
 function FrameMT:SetScript(n, fn) self.scripts[n] = fn end
+function FrameMT:Show() self.shown = true end
+function FrameMT:Hide() self.shown = false end
+function FrameMT:SetText(t) self.text = t end
+for _, m in ipairs({ "SetFrameStrata", "SetSize", "SetPoint", "RegisterForClicks", "SetNormalFontObject" }) do
+    FrameMT[m] = function() end
+end
+UIParent = {}
+RELOADS = 0
+function ReloadUI() RELOADS = RELOADS + 1 end
 FRAMES = {}
 function CreateFrame()
     local f = setmetatable({ events = {}, scripts = {} }, FrameMT)
@@ -346,6 +355,48 @@ ForeverSTUwaveExport = { schema = 1, characters = { ["Mira Ashgrove"] = { level 
 login()
 check(ForeverSTUwaveExport.characters["Mira Ashgrove"].level == 18, "another character stays")
 check(saved().level == 24, "this one added")
+""")
+
+
+case("a_level_up_shows_a_reload_button_that_reloads_on_click")(r"""
+load()
+check(FS.CharacterExport.ReloadButton() == nil, "no button before a level up")
+fire("PLAYER_LEVEL_UP", 25)
+local b = FS.CharacterExport.ReloadButton()
+check(b and b.shown, "button shown after the level up")
+check(b.text == "Reload to save", "label: " .. tostring(b.text))
+b.scripts.OnClick(b, "LeftButton")
+check(RELOADS == 1 and not b.shown, "click reloads once and hides")
+""")
+
+case("the_reload_button_waits_out_combat_and_right_click_dismisses")(r"""
+load()
+COMBAT = true
+fire("PLAYER_LEVEL_UP", 25)
+check(FS.CharacterExport.ReloadButton() == nil, "not built in combat")
+COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+local b = FS.CharacterExport.ReloadButton()
+check(b and b.shown, "shown once combat ends")
+COMBAT = true
+fire("PLAYER_REGEN_DISABLED")
+check(not b.shown, "hidden when combat starts")
+COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+check(b.shown, "back after combat")
+b.scripts.OnClick(b, "RightButton")
+check(RELOADS == 0 and not b.shown, "right click hides without a reload")
+fire("PLAYER_REGEN_ENABLED")
+check(not b.shown, "a dismissed button stays hidden")
+""")
+
+case("the_reload_button_switch_keeps_it_hidden")(r"""
+load()
+check(SETTINGS["export.reloadButton"] == true, "default on")
+SETTINGS["export.reloadButton"] = false
+fire("PLAYER_LEVEL_UP", 25)
+check(FS.CharacterExport.ReloadButton() == nil, "no button when switched off")
+SETTINGS["export.reloadButton"] = true
 """)
 
 
