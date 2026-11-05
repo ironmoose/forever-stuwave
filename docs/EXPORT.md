@@ -36,6 +36,7 @@ A value the client did not give in plain form (a secret value, a missing API, an
 | `savedAt` | number | Unix seconds (`GetServerTime`) |
 | `savedAtText` | string | the same time, UTC, `2026-11-04T00:00:00Z` |
 | `reason` | string | what triggered the write: `login` (also any later loading screen), `level`, `talents`, `gear`, `skills`, `combat end`, `logout` |
+| `statsFrom` | number | present only when `stats` were kept from an earlier write because this one read every base stat as 0 (logout and /reload can); the `savedAt` of the write that read them |
 | `errors` | array of strings, optional | sections whose reader threw (`identity`, `spec`, `stats`, `talents`, `professions`, `gear`) |
 | `name` | string | full name, same as the key |
 | `realm` | string | `GetRealmName()` |

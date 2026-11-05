@@ -443,6 +443,17 @@ end
 
 local loaded, pending, scheduled = false, false, false
 
+-- True when no base stat reads above 0: nothing real was read.
+local function NoStats(stats)
+    local base = type(stats) == "table" and stats.base
+    if type(base) ~= "table" then return true end
+    for _, key in ipairs(STAT_NAMES) do
+        local v = base[key]
+        if type(v) == "number" and v > 0 then return false end
+    end
+    return true
+end
+
 -- Returns true when a snapshot was written.
 function Export.Write(reason)
     if not (loaded and Enabled()) then return false end
@@ -458,6 +469,13 @@ function Export.Write(reason)
     local store = ForeverSTUwaveExport
     store.schema = Export.SCHEMA
     if type(store.characters) ~= "table" then store.characters = {} end
+    -- At logout (a /reload too) the client can read every stat as 0 (live 2026-11-04): keep the last real stats,
+    -- marked with when they were read.
+    local last = store.characters[snap.name]
+    if NoStats(snap.stats) and type(last) == "table" and type(last.stats) == "table" and not NoStats(last.stats) then
+        snap.stats = last.stats
+        snap.statsFrom = last.statsFrom or last.savedAt
+    end
     store.characters[snap.name] = snap
     return true
 end

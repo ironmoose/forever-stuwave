@@ -285,6 +285,31 @@ fire("PLAYER_LOGOUT")
 check(saved().level == 25 and saved().reason == "logout", "logout out of combat writes at once")
 """)
 
+case("a_logout_that_reads_every_stat_as_zero_keeps_the_last_stats")(r"""
+-- live 2026-11-04: a snapshot written at logout had all five stats at 0 (the client tears the unit down first)
+load()
+login()
+check(saved().stats.base.str == 40, "login stats")
+local stamp = saved().savedAt
+STATS = { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } }
+LEVEL = 25
+fire("PLAYER_LOGOUT")
+local c = saved()
+check(c.level == 25 and c.reason == "logout", "the rest of the logout snapshot is written")
+check(c.stats.base.str == 40 and c.stats.effective.spi == 55 and c.stats.attackPower == 135, "the last stats are kept")
+check(c.statsFrom == stamp, "the kept stats say when they were read")
+-- a later write that reads real stats replaces them and drops the mark
+STATS = { { 41, 53 }, { 30, 41 }, { 45, 60 }, { 35, 38 }, { 50, 55 } }
+fire("PLAYER_LOGOUT")
+check(saved().stats.base.str == 41 and saved().statsFrom == nil, "real stats replace the kept ones")
+-- with nothing kept before, zero stats are written as read
+ForeverSTUwaveExport = nil
+STATS = { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } }
+fire("PLAYER_LOGOUT")
+check(saved().stats.base.str == 0 and saved().statsFrom == nil, "no earlier stats: written as read")
+STATS = { { 40, 52 }, { 30, 41 }, { 45, 60 }, { 35, 38 }, { 50, 55 } }
+""")
+
 case("a_burst_of_events_is_one_write")(r"""
 load()
 login()
