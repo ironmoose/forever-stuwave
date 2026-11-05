@@ -305,6 +305,64 @@ local function StyleModuleHeaders()
 end
 
 -------------------------------------------------------------------------------
+-- Quest timers
+-------------------------------------------------------------------------------
+
+-- Blizzard_QuestTimer's QuestTimerFrame (Blizzard_QuestTimer.xml) is a BackdropTemplate dialog with a gold header on
+-- the BACKGROUND strata, laid out by RightManagedFrameContainer into the gap the tracker leaves at its top. Our
+-- backdrop sits on the tracker's LOW strata, so the stock timer drew behind it (playtest 2026-11-04). Skin and raise
+-- only, never moved: the container owns its anchor, and ignoreFramePositionManager, the one way out, is a field its
+-- layout code reads.
+
+-- Puts the timer on the tracker's strata, above the tracker. The container's UpdateFrame reparents the timer, which
+-- resets its level, so this runs again after every re-layout and show.
+-- The 12.1 source names its lines QuestTimer1Text..QuestTimer25Text, but the 16001 globals dump has none of those
+-- names, so the Forever build is not that file. The lines are found by shape instead: every font string on a child
+-- frame of the timer. Run again on each show, so a line made after the skin is set too.
+local function StyleQuestTimerLines(timer)
+    local ok, children = pcall(function() return { timer:GetChildren() } end)
+    if not ok then return end
+    for _, child in ipairs(children) do
+        if type(child) == "table" and type(child.GetRegions) == "function" then
+            for _, region in ipairs({ child:GetRegions() }) do
+                if region.GetObjectType and region:GetObjectType() == "FontString" then
+                    ApplyMono(region, 10, COLOR_LINE_MUTED)
+                end
+            end
+        end
+    end
+end
+
+local function RaiseQuestTimer()
+    local timer, tracker = QuestTimerFrame, ObjectiveTrackerFrame
+    if not (timer and timer.SetFrameStrata and tracker and tracker.GetFrameStrata) then return end
+    timer:SetFrameStrata(tracker:GetFrameStrata())
+    timer:SetFrameLevel(tracker:GetFrameLevel() + 10)
+    StyleQuestTimerLines(timer)
+end
+
+local function SkinQuestTimer()
+    local timer = QuestTimerFrame
+    if not (timer and timer.GetRegions) then return end
+    if not timer.fsQuestTimerSkin then
+        Theme.SkinPanel(timer, { fillColor = Theme.COLOR_BG, borderColor = COLOR_POWER, title = "timers" })
+        -- Blizzard's "Quest Timers" label; the band carries the title now
+        for _, region in ipairs({ timer:GetRegions() }) do
+            if region ~= timer.fsPanelTitle and region.GetObjectType and region:GetObjectType() == "FontString" then
+                region:Hide()
+            end
+        end
+        FS.PanelSkins.HookShowOnce(timer, "fsQuestTimerHook", RaiseQuestTimer)
+        local container = RightManagedFrameContainer
+        if container and type(container.UpdateFrame) == "function" then
+            hooksecurefunc(container, "UpdateFrame", RaiseQuestTimer)
+        end
+        timer.fsQuestTimerSkin = true
+    end
+    RaiseQuestTimer()
+end
+
+-------------------------------------------------------------------------------
 -- Init
 -------------------------------------------------------------------------------
 
@@ -319,13 +377,18 @@ local function Apply()
     StyleLineFont()
     BuildContainerChrome()
     StyleModuleHeaders()
+    SkinQuestTimer()
 end
 
 FS.PanelSkins.RegisterInspect("Tracker", {
     { name = "ObjectiveTrackerFrame", guard = "fsTrackerChromeBuilt" },
+    { name = "QuestTimerFrame", guard = "fsQuestTimerSkin" },
 })
 
 FS.PanelSkins.DeferCombat(Apply)
+
+-- Blizzard_QuestTimer is its own addon and may load after this file.
+FS.PanelSkins.WatchAddonLoad(SkinQuestTimer, function(name) return name == "Blizzard_QuestTimer" end)
 
 -------------------------------------------------------------------------------
 -- Left alone (out of scope this pass)
