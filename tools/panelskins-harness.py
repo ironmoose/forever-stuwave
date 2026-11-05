@@ -299,6 +299,17 @@ case("the_quest_log_pane_is_skinned_without_a_title_band_over_its_search_box", "
 
 
 
+case("the_open_letter_is_its_own_skinned_window_not_stripped_mail_content", """
+    -- Playtest 2026-11-05: OpenMailFrame was stripped as MailFrame content and never given a panel, so
+    -- an opened letter floated as bare text over the world.
+    local skinned = LoadPanels({ "MailFrame", "OpenMailFrame" })
+    assert(skinned.OpenMailFrame, "the open letter window got no panel")
+    assert(skinned.OpenMailFrame.title == "letter", tostring(skinned.OpenMailFrame.title))
+    assert(skinned.MailFrame and skinned.MailFrame.title == "mail")
+    assert(not PANELS_SRC:find('"InboxFrame", "MailFrameInset", "OpenMailFrame"', 1, true),
+        "OpenMailFrame is back in the mail strip list")
+""")
+
 case("a_stock_text_button_anywhere_in_the_tree_is_skinned_with_its_accent_by_label", """
     local FS, calls = LoadSweep()
     local panel = Widget("Frame")

@@ -40,6 +40,10 @@ local PANEL_FRAMES = {
     { name = "PaperDollFrame" },
     { name = "MerchantFrame", money = "MerchantMoneyFrame", title = "vendor" },
     { name = "MailFrame", title = "mail" },
+    -- The open letter is its own window (ButtonFrameTemplate on UIParent, beside InboxFrame), not a
+    -- piece of MailFrame: stripped as MailFrame content it lost its art and got no panel, so the
+    -- letter floated as bare text over the world (playtest 2026-11-05).
+    { name = "OpenMailFrame", title = "letter" },
     { name = "BankFrame", title = "bank" },
     { name = "TradeFrame", title = "trade" },
     { name = "QuestFrame", title = "quest" },
@@ -120,7 +124,7 @@ local MAIL_ITEM_NAMES = {
 -- row, built from MAIL_ITEM_NAMES so the row list has one source (also read
 -- by the mail-list-repopulation watcher below).
 local MAIL_STRIP_NAMES = {
-    "InboxFrame", "MailFrameInset", "OpenMailFrame", "OpenMailFrameInset",
+    "InboxFrame", "MailFrameInset", "OpenMailFrameInset",
     "OpenMailScrollFrame", "SendMailFrame", "SendMailMoneyInset",
 }
 for _, name in ipairs(MAIL_ITEM_NAMES) do
