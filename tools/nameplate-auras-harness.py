@@ -1368,6 +1368,51 @@ fire("QUEST_LOG_UPDATE")
 check(not icon(2) and not icon(3) and not icon(6), "a failed scan left icons shown")
 """),
 
+    ("a classic quest unit gets the ! from its tooltip when IsUnitOnQuest says no", "true", r"""
+-- live 2026-11-04: Mountain Cougar, "The Hunt Continues" 9/10 pelts, IsUnitOnQuest false, no marker
+local log = { { questID = 1, isHeader = true, title = "Mulgore" }, { questID = 11, title = "The Hunt Continues" },
+    { questID = 12, title = "Rite of Strength" } }
+local complete = {}
+C_QuestLog = {
+    GetNumQuestLogEntries = function() return #log end,
+    GetInfo = function(i) local e = log[i]; return e and { questID = e.questID, isHeader = e.isHeader, title = e.title } end,
+    IsUnitOnQuest = function() return false end,
+    IsComplete = function(id) return complete[id] == true end,
+}
+local tips = {
+    nameplate1 = { "Mountain Cougar", "Level 3 Beast", "The Hunt Continues", "  9/10 Mountain Cougar Pelt", "100% Threat" },
+    nameplate2 = { "Mountain Cougar", "Level 3 Beast", "The Hunt Continues", "  10/10 Mountain Cougar Pelt", "100% Threat" },
+    nameplate3 = { "Plainstrider", "Level 2 Beast", "100% Threat" },
+    nameplate4 = { "Mountain Cougar", "Level 3 Beast", "Mulgore", "  0/10 Mountain Cougar Pelt" },
+    nameplate5 = { "Bristleback", "Level 4 Humanoid", SECRET_VALUE or "secret", "  0/12 Bristleback Belt" },
+}
+C_TooltipInfo = { GetUnit = function(unit)
+    local t = tips[unit]; if not t then return nil end
+    local lines = {}
+    for i, text in ipairs(t) do lines[i] = { leftText = text } end
+    return { lines = lines }
+end }
+boot()
+for i = 1, 5 do addPlate("nameplate" .. i) end
+local function plate(i) return FS.framesByUnit["nameplate" .. i].questIcon end
+check(plate(1):IsShown(), "the cougar of an open 9/10 objective has no marker")
+check(plate(1)._args.SetText[1] == "!", "the marker is not our !: " .. tostring(plate(1)._args.SetText[1]))
+check(not plate(2):IsShown(), "a finished objective (10/10) kept the marker; the threat line must not count")
+check(not plate(3):IsShown(), "a unit with no quest line got a marker")
+check(not plate(4):IsShown(), "a header title counted as a quest")
+check(not plate(5):IsShown(), "a line that is not a quest title counted")
+-- the quest turns complete: the marker goes at the next quest update
+complete[11] = true
+fire("QUEST_LOG_UPDATE")
+check(not plate(1):IsShown(), "a complete quest kept its marker")
+-- a tooltip read that throws hides the marker and the handler survives
+complete[11] = nil
+C_TooltipInfo.GetUnit = function() error("boom") end
+fire("QUEST_LOG_UPDATE")
+check(not plate(1):IsShown(), "a throwing tooltip read left a marker")
+C_TooltipInfo = nil
+"""),
+
     ("the quest log is scanned once per update, not once per plate, and health events never scan it", "true", r"""
 local log = { { questID = 11 }, { questID = 12 }, { questID = 13 }, { questID = 14 } }
 local getInfo, onQuestCalls, dead = 0, 0, {}

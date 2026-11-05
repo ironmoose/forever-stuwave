@@ -20,8 +20,8 @@ local CAST_BAR_GAP = 2
 local CAST_NAME_FONT_SIZE = 9
 local RAID_MARKER_SIZE = 25
 local RAID_MARKER_GAP = 3
-local QUEST_ICON_SIZE = 22
-local QUEST_ICON_GAP = 4
+local QUEST_ICON_SIZE = 14 -- the "!" glyph's font size
+local QUEST_ICON_GAP = 3
 
 -- Aura row. Each plate carries ONE AuraContainer (the engine reads and draws the
 -- auras, so no aura data ever enters addon Lua and the row works in combat; the
@@ -944,11 +944,12 @@ local function CreatePlateFrame()
     -- edge (not root's) -- nameText auto-sizes around a single-point anchor, so
     -- anchoring here tracks it correctly regardless of name length. Hidden until
     -- UpdateQuestIcon resolves the unit's quest relevance.
-    local questIcon = root:CreateTexture(nil, "OVERLAY")
-    questIcon:SetSize(QUEST_ICON_SIZE, QUEST_ICON_SIZE)
+    -- Our own "!" in the plate font, amber (2026-10-21 decision: a "!" next to the existing plates, no new glyph design).
+    local questIcon = root:CreateFontString(nil, "OVERLAY")
+    ApplyFont(questIcon, QUEST_ICON_SIZE)
     questIcon:SetPoint("RIGHT", nameText, "LEFT", -QUEST_ICON_GAP, 0)
-    questIcon:SetTexture("Interface\\GossipFrame\\AvailableQuestIcon")
-    questIcon:SetVertexColor(COLOR_QUEST_AMBER[1], COLOR_QUEST_AMBER[2], COLOR_QUEST_AMBER[3], COLOR_QUEST_AMBER[4] or 1)
+    questIcon:SetTextColor(COLOR_QUEST_AMBER[1], COLOR_QUEST_AMBER[2], COLOR_QUEST_AMBER[3], COLOR_QUEST_AMBER[4] or 1)
+    questIcon:SetText("!")
     questIcon:Hide()
     root.questIcon = questIcon
 
@@ -1961,18 +1962,57 @@ end
 -- rebuilds it, so a burst of events with no plates (or no read) costs nothing.
 local questIDs = {}
 local questIDCount = 0
+local questByTitle = {} -- quest title -> questID, for the tooltip read below
 local questCacheDirty = true
 
 local function ScanQuestLog()
     wipe(questIDs)
+    wipe(questByTitle)
     questIDCount = 0
     for i = 1, C_QuestLog.GetNumQuestLogEntries() do
         local info = C_QuestLog.GetInfo(i)
         if info and not info.isHeader then
             questIDCount = questIDCount + 1
             questIDs[questIDCount] = info.questID
+            if type(info.title) == "string" and not FS.IsSecret(info.title) and info.title ~= "" then
+                questByTitle[info.title] = info.questID
+            end
         end
     end
+end
+
+local function PlainLine(line)
+    local text = type(line) == "table" and line.leftText
+    if type(text) ~= "string" or FS.IsSecret(text) then return nil end
+    return text
+end
+
+-- Forever's quests are classic quests, and C_QuestLog.IsUnitOnQuest can answer false for their kill and loot units
+-- (live 2026-11-04: a Mountain Cougar for "The Hunt Continues", 9/10 pelts, had no marker). The unit's tooltip
+-- carries what the player reads: the title of a quest in the log, then that quest's objective lines. A unit counts
+-- when a line names an open quest of the log and a line under it is an open count: "9/10 ..." with 9 under 10. A
+-- line with no count is not an objective to go by (the threat line, "100% Threat", sits right under the objectives).
+-- Plain text only; a secret line is skipped.
+local function TooltipNamesOpenObjective(unit)
+    if not (C_TooltipInfo and type(C_TooltipInfo.GetUnit) == "function") then return false end
+    local data = C_TooltipInfo.GetUnit(unit)
+    local lines = type(data) == "table" and data.lines
+    if type(lines) ~= "table" then return false end
+    local open = false -- under the title of an open quest of the log
+    for i = 2, #lines do
+        local text = PlainLine(lines[i])
+        if text then
+            local questID = questByTitle[text]
+            if questID then
+                local complete = type(C_QuestLog.IsComplete) == "function" and C_QuestLog.IsComplete(questID)
+                open = not (complete and not FS.IsSecret(complete))
+            elseif open then
+                local have, need = text:match("(%d+)%s*/%s*(%d+)")
+                if have and tonumber(have) < tonumber(need) then return true end
+            end
+        end
+    end
+    return false
 end
 
 local function IsUnitOnAnyQuest(unit)
@@ -1982,7 +2022,9 @@ local function IsUnitOnAnyQuest(unit)
             return true
         end
     end
-    return false
+    if questIDCount == 0 then return false end
+    local ok, named = pcall(TooltipNamesOpenObjective, unit)
+    return ok and named == true
 end
 
 -- Tracks UnitIsDead per plate and reports whether it flipped since the last
@@ -2015,6 +2057,7 @@ local function UpdateQuestIcon(unit)
             questCacheDirty = false
         else
             wipe(questIDs)
+            wipe(questByTitle)
             questIDCount = 0
         end
     end
