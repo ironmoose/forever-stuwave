@@ -128,13 +128,18 @@ local function ApplyCollapsed(collapsed)
     if chrome.label then chrome.label:SetText(chrome.collapsed and CollapsedText() or TITLE) end
 end
 
-local countEvents = CreateFrame("Frame")
-for _, event in ipairs({ "QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED" }) do
-    pcall(countEvents.RegisterEvent, countEvents, event)
+-- Keeps the collapsed count current; made with the chrome, so a file load builds no frame.
+local function WatchQuestCount()
+    if chrome.countEvents or type(CreateFrame) ~= "function" then return end
+    local f = CreateFrame("Frame")
+    for _, event in ipairs({ "QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED" }) do
+        pcall(f.RegisterEvent, f, event)
+    end
+    f:SetScript("OnEvent", function()
+        if chrome.collapsed and chrome.label then chrome.label:SetText(CollapsedText()) end
+    end)
+    chrome.countEvents = f
 end
-countEvents:SetScript("OnEvent", function()
-    if chrome.collapsed and chrome.label then chrome.label:SetText(CollapsedText()) end
-end)
 
 local function SkinCollapseButton(frame, header)
     local skins = FS.ButtonSkins
@@ -287,6 +292,7 @@ local function BuildContainerChrome()
         collapsed = ok and value == true
     end
     ApplyCollapsed(collapsed)
+    WatchQuestCount()
 
     frame.fsTrackerChromeBuilt = true
 end
