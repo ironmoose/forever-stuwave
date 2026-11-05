@@ -34,3 +34,5 @@ First build for the WoW Forever release client. Beta until 1.0, which ships with
 
 ### Known issues
 - A bag item clicked in combat was blocked once (ADDON_ACTION_FORBIDDEN on UseContainerItem). The cause is not found yet. Keep potions on an action bar.
+- The spellbook and the character window still show stock Blizzard art (the spellbook title is also cut off). Skins for both are next.
+- The "World refresh in N Minutes" notice is not skinned yet.
