@@ -623,10 +623,23 @@ local function IsStockTextButton(button)
     return LabelOf(button) ~= nil
 end
 
+-- A forbidden frame answers IsForbidden and throws on every other method called from addon code.
+local function IsForbidden(frame)
+    if type(frame.IsForbidden) ~= "function" then return false end
+    local ok, forbidden = pcall(frame.IsForbidden, frame)
+    return not ok or forbidden == true
+end
+
+-- `frame`'s children, leaving out forbidden ones.
 local function ChildrenOf(frame)
     if type(frame.GetChildren) ~= "function" then return {} end
     local ok, list = pcall(function() return { frame:GetChildren() } end)
-    return ok and list or {}
+    if not ok then return {} end
+    local open = {}
+    for _, child in ipairs(list) do
+        if type(child) == "table" and not IsForbidden(child) then open[#open + 1] = child end
+    end
+    return open
 end
 
 -- Walks `frame`'s subtree, bounded in depth and in nodes, and calls `visit(child)` on each frame. `visit` returns

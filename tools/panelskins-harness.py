@@ -486,6 +486,22 @@ case("sweep_on_show_skins_a_bar_built_later_when_the_panel_or_a_hidden_page_is_s
     assert(#bars == 3 and bars[3] == pageBar, "a hidden page's bar was not skinned when it was shown")
 """)
 
+case("a_forbidden_child_is_skipped_by_the_sweep_and_never_hooked", """
+    local FS, calls, owned, bars = LoadSweep()
+    local panel = Widget("Frame")
+    -- What the client hands tainted code for a forbidden frame: IsForbidden answers, every other method throws.
+    local forbidden = setmetatable({ IsForbidden = function() return true end }, {
+        __index = function(_, key) return function() error("calling '" .. key .. "' on bad self (forbidden)") end end,
+    })
+    Add(panel, forbidden)
+    local accept = Add(panel, StockButton(ACCEPT))
+    local page = Add(panel, Widget("Frame", { shown = false }))
+    FS.PanelSkins.SweepOnShow(panel)
+    assert(CallFor(calls, accept), "the buttons beside a forbidden child were not swept")
+    assert(#(page.hooks.OnShow or {}) == 1, "the hidden page beside a forbidden child was not hooked")
+    ShowAgain(panel)
+""")
+
 case("a_missing_scroll_bar_skin_or_nothing_to_sweep_is_a_quiet_no_op_and_text_buttons_still_sweep", """
     local FS, calls, owned, bars = LoadSweep()
     local panel = Widget("Frame")
