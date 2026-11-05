@@ -119,6 +119,98 @@ local function StyleCombatText()
 end
 
 -------------------------------------------------------------------------------
+-- Loss of control (the stun / fear / silence alert in the middle of the screen)
+-------------------------------------------------------------------------------
+
+-- LossOfControlFrame (Blizzard_FrameXML/LossOfControlFrame.xml): a dark smoke texture (blackBg), two red
+-- rails (RedLineTop/Bottom) that an AnimationGroup flicks open, the spell Icon with a Cooldown, the
+-- AbilityName ("Stunned") and a TimeLeft frame holding NumberText + SecondsText. The mixin only ever
+-- sets their text, texture and anchors, never their alpha, so SetAlpha(0) on the stock art holds.
+--
+-- It is an Edit Mode system frame, so nothing is written to it as a Lua field: our plate is our own
+-- child frame drawn one level BELOW it (a child normally draws over its parent's regions, which would
+-- bury the icon and text), and what we track lives in this file's locals.
+local LOC_PAD_X, LOC_PAD_Y, LOC_ICON_RING = 12, 8, 2
+local locPlate
+
+local function LocRegion(frame, ...)
+    local o = frame
+    for i = 1, select("#", ...) do
+        if type(o) ~= "table" then return nil end
+        o = o[select(i, ...)]
+    end
+    return o
+end
+
+-- The content block (icon + the longer of the two text lines) is centred on the frame by the mixin,
+-- so the plate is centred too and only its width follows the icon's left edge.
+local function SizeLocPlate(frame, plate, icon)
+    local ok = pcall(function()
+        local left = icon:GetLeft()
+        local cx = frame:GetCenter()
+        if not left or not cx then return end
+        local half = cx - left + LOC_PAD_X
+        if half < 40 then half = 40 end
+        plate:SetWidth(math.floor(half * 2 + 0.5))
+    end)
+    return ok
+end
+
+local function StyleLossOfControl()
+    local frame = _G.LossOfControlFrame
+    if type(frame) ~= "table" or locPlate or type(frame.CreateTexture) ~= "function" then return end
+
+    for _, key in ipairs({ "blackBg", "RedLineTop", "RedLineBottom" }) do
+        local region = frame[key]
+        if region and region.SetAlpha then region:SetAlpha(0) end
+    end
+
+    local plate = CreateFrame("Frame", nil, frame)
+    plate:SetFrameStrata(frame:GetFrameStrata())
+    plate:SetFrameLevel(math.max(0, frame:GetFrameLevel() - 1))
+    plate:SetPoint("CENTER", frame, "CENTER", 0, 0)
+    plate:SetSize(256, 58 + LOC_PAD_Y)
+    Theme.AddCut2Texture(plate, Theme.SLICE_CUT2_GLOW_TEXTURE, { Theme.COLOR_HEALTH[1], Theme.COLOR_HEALTH[2],
+        Theme.COLOR_HEALTH[3], 0.45 }, "BACKGROUND", -8, -Theme.SLICE_CUT2_GLOW_PAD)
+    Theme.AddCut2Texture(plate, Theme.SLICE_CUT2_FILL_TEXTURE, { 0.051, 0.024, 0.125, 0.86 }, "BACKGROUND", -6)
+    Theme.AddCut2Texture(plate, Theme.SLICE_CUT2_OUTLINE_TEXTURE, Theme.COLOR_HEALTH, "BORDER", 0)
+    locPlate = plate
+
+    local icon = frame.Icon
+    if icon and icon.SetTexCoord then
+        icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        -- A pink ring one icon-width wide behind the icon: the icon covers its middle.
+        local ring = plate:CreateTexture(nil, "ARTWORK")
+        ring:SetColorTexture(Theme.COLOR_HEALTH[1], Theme.COLOR_HEALTH[2], Theme.COLOR_HEALTH[3], 1)
+        ring:SetPoint("TOPLEFT", icon, "TOPLEFT", -LOC_ICON_RING, LOC_ICON_RING)
+        ring:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", LOC_ICON_RING, -LOC_ICON_RING)
+        plate:SetScript("OnUpdate", function(self) SizeLocPlate(frame, self, icon) end)
+    end
+
+    local name = frame.AbilityName
+    if name and name.SetFont and name.GetFont then
+        local _, size = name:GetFont()
+        ApplyFontGeneric(name, Theme.FONT_ORBITRON, size or 22, Theme.COLOR_HEALTH, "")
+    end
+    local number = LocRegion(frame, "TimeLeft", "NumberText")
+    local seconds = LocRegion(frame, "TimeLeft", "SecondsText")
+    if number and number.SetFont and number.GetFont then
+        local _, size = number:GetFont()
+        ApplyMono(number, size or 20, Theme.COLOR_TEXT_WHITE)
+    end
+    if seconds and seconds.SetFont and seconds.GetFont then
+        local _, size = seconds:GetFont()
+        ApplyMono(seconds, size or 20, Theme.COLOR_MUTED)
+        -- Stock seats "seconds" at a fixed offset sized for its own number font; the mono digits are
+        -- wider, so it follows the number instead. The mixin never re-anchors it.
+        if number and seconds.ClearAllPoints then
+            seconds:ClearAllPoints()
+            seconds:SetPoint("LEFT", number, "RIGHT", 6, 0)
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
 -- Init
 -------------------------------------------------------------------------------
 
@@ -132,6 +224,7 @@ local function Apply()
     StyleErrorsAndRaidWarning()
     StyleBossBanner()
     StyleCombatText()
+    pcall(StyleLossOfControl)
 end
 
 if InCombatLockdown() then
