@@ -156,6 +156,11 @@ done.hooks.OnLeave(done)
 case("leave_clears_hover_and_pressed", cells(done)[1].ct[2] == before and bounds(cells(done)) == x0)
 done:SetSelected(true)
 case("the_followed_quest_wears_pink", cells(done)[1].ct[3] == 0.6)
+tracker.NineSlice.GetLeft = function() return 100 end
+plate(done).GetLeft = function() return 130 end
+done.IsVisible = function() return true end
+tracker:Update()
+case("panel_trims_the_empty_margin_left_of_the_markers", backdrop.pts[1][1] == "TOPLEFT" and backdrop.pts[1][4] == 22)
 return table.concat(results, "\n")
 '''
 

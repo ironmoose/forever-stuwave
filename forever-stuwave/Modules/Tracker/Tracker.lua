@@ -82,6 +82,26 @@ end
 -- path); topModulePadding is only read.
 local chrome = {} -- frame, header, nineSlice, backdrop, band, label, button, collapsed
 local moduleRules = setmetatable({}, { __mode = "k" }) -- module header -> our cyan rule
+local poiSkins = setmetatable({}, { __mode = "k" }) -- POI button -> our marker pieces (see Quest markers)
+local MARKER_GAP = 8 -- panel edge to the quest markers
+
+-- How far right of the container's left edge our panel can start: the stock layout leaves a wide empty margin left
+-- of the quest markers (playtest 2026-11-05). Measured off the shown markers, never written into Blizzard's layout;
+-- with no marker shown the panel keeps the container's edge.
+local function LeftTrim(top)
+    local okL, edge = pcall(top.GetLeft, top)
+    if not okL or type(edge) ~= "number" then return 0 end
+    local leftMost
+    for button, m in pairs(poiSkins) do
+        if type(m) == "table" and m.frame then
+            local okV, visible = pcall(button.IsVisible, button)
+            local okX, x = pcall(m.frame.GetLeft, m.frame)
+            if okV and visible and okX and type(x) == "number" and (not leftMost or x < leftMost) then leftMost = x end
+        end
+    end
+    if not leftMost then return 0 end
+    return math.max(0, math.floor(leftMost - edge - MARKER_GAP))
+end
 
 local MODULE_NAMES -- set below, with the module header skin
 
@@ -174,7 +194,7 @@ local function Relayout()
     else
         local first = FirstModule(frame)
         local pad = first and tonumber(frame.topModulePadding) or 0
-        backdrop:SetPoint("TOPLEFT", top, "TOPLEFT", 0, -pad)
+        backdrop:SetPoint("TOPLEFT", top, "TOPLEFT", LeftTrim(top), -pad)
         backdrop:SetPoint("BOTTOMRIGHT", top, "BOTTOMRIGHT", 0, 0)
         chrome.label:SetText(TitleFor(first))
         SetBarHit(chrome.button, nil)
@@ -398,7 +418,6 @@ local MARKER_GLYPHS = {
     bang = { "#", "#", "#", "#", "#", ".", "#" },
     dots = { "#.#.#" },
 }
-local poiSkins = setmetatable({}, { __mode = "k" }) -- POI button -> our pieces and hover/pressed state
 
 local function Lift(c, t)
     return { c[1] + (1 - c[1]) * t, c[2] + (1 - c[2]) * t, c[3] + (1 - c[3]) * t }
