@@ -389,7 +389,15 @@ end
 -- shared button looks: hover lifts the ring and washes the face, pressed nudges the glyph a pixel, and the quest
 -- being followed (selected) wears pink. The button, its click, its place and its pool are Blizzard's; markers are
 -- found after each module layout by reading the module's block list. Textures and alpha only, so safe in combat.
-local MARKER_SIZE = 16
+local MARKER_SIZE = 20 -- the POI button's own size
+-- Pixel glyphs, drawn cell by cell on whole physical pixels so they sit dead centre (a font glyph's side bearing
+-- and baseline put the "?" off centre, playtest 2026-11-05). Each cell is CELL_PX x CELL_PX pixels.
+local CELL_PX = 2
+local MARKER_GLYPHS = {
+    ask  = { ".###.", "#...#", "....#", "...#.", "..#..", ".....", "..#.." },
+    bang = { "#", "#", "#", "#", "#", ".", "#" },
+    dots = { "#.#.#" },
+}
 local poiSkins = setmetatable({}, { __mode = "k" }) -- POI button -> our pieces and hover/pressed state
 
 local function Lift(c, t)
@@ -423,18 +431,40 @@ local function PaintMarker(button)
     m.ring:SetVertexColor(accent[1], accent[2], accent[3], (hover or pressed or selected) and 1 or 0.75)
     m.glow:SetVertexColor(accent[1], accent[2], accent[3], (hover or pressed) and 0.65 or (selected and 0.45 or 0.2))
     local g = (hover or pressed) and Lift(accent, 0.55) or accent
-    local dx, dy = pressed and 1 or 0, pressed and -1 or 0
-    m.text:ClearAllPoints()
-    m.text:SetPoint("CENTER", m.frame, "CENTER", dx, dy)
-    m.text:SetTextColor(g[1], g[2], g[3], 1)
-    m.text:SetText(kind == "ask" and "?" or "!")
-    m.text:SetShown(kind ~= "dots")
-    for i, dot in ipairs(m.dots) do
-        dot:ClearAllPoints()
-        dot:SetPoint("CENTER", m.frame, "CENTER", (i - 2) * 4 + dx, dy)
-        dot:SetColorTexture(g[1], g[2], g[3], 1)
-        dot:SetShown(kind == "dots")
+    local rows = MARKER_GLYPHS[kind]
+    local okP, es = false, nil
+    if FS.FrameHelpers and FS.FrameHelpers.PixelsPerUnit then
+        okP, es = pcall(FS.FrameHelpers.PixelsPerUnit, m.frame)
     end
+    if not okP or type(es) ~= "number" or es <= 0 then es = 1 end
+    local px = 1 / es
+    local platePx = math.floor(MARKER_SIZE * es / 2 + 0.5) * 2 -- even, so the centre is a pixel edge
+    m.frame:SetSize(platePx * px, platePx * px)
+    local cell = kind == "dots" and CELL_PX + 1 or CELL_PX
+    local gw, gh = #rows[1] * cell, #rows * cell
+    local mx, my = math.floor((platePx - gw) / 2), math.floor((platePx - gh) / 2)
+    local dx, dy = pressed and 1 or 0, pressed and 1 or 0
+    local n = 0
+    for r, row in ipairs(rows) do
+        for c = 1, #row do
+            if row:sub(c, c) == "#" then
+                n = n + 1
+                local t = m.cells[n]
+                if not t then
+                    t = m.frame:CreateTexture(nil, "OVERLAY")
+                    if t.SetSnapToPixelGrid then pcall(t.SetSnapToPixelGrid, t, true) end
+                    if t.SetTexelSnappingBias then pcall(t.SetTexelSnappingBias, t, 0) end
+                    m.cells[n] = t
+                end
+                t:ClearAllPoints()
+                t:SetSize(cell * px, cell * px)
+                t:SetPoint("TOPLEFT", m.frame, "TOPLEFT", (mx + (c - 1) * cell + dx) * px, -(my + (r - 1) * cell + dy) * px)
+                t:SetColorTexture(g[1], g[2], g[3], 1)
+                t:Show()
+            end
+        end
+    end
+    for i = n + 1, #m.cells do m.cells[i]:Hide() end
 end
 
 local function SkinMarker(button)
@@ -458,18 +488,11 @@ local function SkinMarker(button)
     f:SetSize(MARKER_SIZE, MARKER_SIZE)
     f:SetPoint("CENTER", button, "CENTER", 0, 0)
     if f.EnableMouse then f:EnableMouse(false) end
-    local m = { frame = f, dots = {}, hover = false, pressed = false }
+    local m = { frame = f, cells = {}, hover = false, pressed = false }
     m.glow = Theme.AddCut2Texture(f, Theme.SLICE_CUT2_GLOW_TEXTURE, COLOR_POWER, "BACKGROUND", 1,
         -Theme.SLICE_CUT2_GLOW_PAD)
     m.fill = Theme.AddCut2Texture(f, Theme.SLICE_CUT2_FILL_TEXTURE, Theme.COLOR_BUTTON_INK, "ARTWORK", 1)
     m.ring = Theme.AddCut2Texture(f, Theme.SLICE_CUT2_OUTLINE_TEXTURE, COLOR_POWER, "ARTWORK", 2)
-    m.text = f:CreateFontString(nil, "OVERLAY")
-    ApplyMono(m.text, 11, COLOR_POWER)
-    for i = 1, 3 do
-        local dot = f:CreateTexture(nil, "OVERLAY")
-        dot:SetSize(2, 2)
-        m.dots[i] = dot
-    end
     poiSkins[button] = m
 
     local function set(field, value)

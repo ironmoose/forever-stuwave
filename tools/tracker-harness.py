@@ -125,21 +125,37 @@ tracker:Update()
 case("a_different_first_module_names_the_band", label.text == "achievements" and qh.Text.alpha == 1
   and AchievementObjectiveTracker.Header.Text.alpha == 0)
 local function plate(b) for _, o in ipairs(frames) do if o.kind == "Frame" and o.pts[1] and o.pts[1][2] == b then return o end end end
-local function text(b) local f = plate(b); for _, o in ipairs(frames) do if o.kind == "FontString" and o.pts[1] and o.pts[1][2] == f then return o end end end
-local function dots(b) local f = plate(b); local n = 0; for _, o in ipairs(frames) do if o.kind == "Texture" and o.ct and o.pts[1] and o.pts[1][2] == f and o.shown then n = n + 1 end end; return n end
-case("turn_in_marker_is_an_amber_question_plate", plate(done) and text(done).text == "?" and text(done).shown
-  and text(done).tc[1] == 1 and text(done).tc[2] == 0.7)
-case("in_progress_marker_is_three_cyan_dots", plate(todo) and not text(todo).shown and dots(todo) == 3)
+local function cells(b)
+  local f, out = plate(b), {}
+  for _, o in ipairs(frames) do if o.kind == "Texture" and o.ct and o.shown and o.pts[1] and o.pts[1][2] == f then out[#out+1] = o end end
+  return out
+end
+local function bounds(list)
+  local x0, y0, x1, y1 = 1e9, 1e9, -1e9, -1e9
+  for _, t in ipairs(list) do
+    local x, y = t.pts[1][4], -t.pts[1][5]
+    x0, y0 = math.min(x0, x), math.min(y0, y); x1, y1 = math.max(x1, x + t.w), math.max(y1, y + t.h)
+  end
+  return x0, y0, x1, y1
+end
+local function centred(b)
+  local f = plate(b); local x0, y0, x1, y1 = bounds(cells(b))
+  return math.abs(x0 - (f.w - x1)) <= 1 and math.abs(y0 - (f.h - y1)) <= 1
+end
+case("markers_are_the_poi_button_size", plate(done).w == 20 and plate(done).h == 20)
+case("turn_in_marker_is_an_amber_question_mark_centred", #cells(done) == 9 and cells(done)[1].ct[2] == 0.7 and centred(done))
+case("in_progress_marker_is_three_cyan_dots_centred", #cells(todo) == 3 and cells(todo)[1].ct[1] == 0 and centred(todo))
 case("marker_art_is_held_and_display_hidden", done.Display.alpha == 0)
-local before = text(done).tc[2]
+local before = cells(done)[1].ct[2]
+local x0 = bounds(cells(done))
 done.hooks.OnEnter(done)
-case("hover_lifts_the_marker_glyph", text(done).tc[2] > before)
+case("hover_lifts_the_marker_glyph", cells(done)[1].ct[2] > before)
 done.hooks.OnMouseDown(done)
-case("pressed_nudges_the_glyph_a_pixel", text(done).pts[1][4] == 1 and text(done).pts[1][5] == -1)
+case("pressed_nudges_the_glyph_a_pixel", bounds(cells(done)) == x0 + 1)
 done.hooks.OnLeave(done)
-case("leave_clears_hover_and_pressed", text(done).tc[2] == before and text(done).pts[1][4] == 0)
+case("leave_clears_hover_and_pressed", cells(done)[1].ct[2] == before and bounds(cells(done)) == x0)
 done:SetSelected(true)
-case("the_followed_quest_wears_pink", text(done).tc[3] == 0.6)
+case("the_followed_quest_wears_pink", cells(done)[1].ct[3] == 0.6)
 return table.concat(results, "\n")
 '''
 
