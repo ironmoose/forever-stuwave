@@ -544,40 +544,154 @@ end
 -- Guarded reload
 -------------------------------------------------------------------------------
 
--- /fsreload -- reload, but only when it is safe to steal the keyboard.
+-- ReloadUI and C_UI.Reload are protected on the release client (1.60.1): a call from addon code is
+-- ADDON_ACTION_BLOCKED (live 2026-11-04, from an OnClick). A slash handler or /run is addon code too,
+-- so neither can reload either. Only a reload the secure macro path runs gets through, so the addon owns ONE secure button that runs /reload and every
+-- reload it offers goes through it:
 --
--- The player's idea ("we should make a macro for your check so you are not typing
--- it every time"). the dev tooling drives reloads by typing into the chat box, and
--- the guarded form of that was a long /run one-liner -- noisy, and close to
--- the chat box's 255-character limit. This is nine characters.
+--   * `/click [nocombat] ForeverSTUwaveReload` (the dev tooling's guarded reload): /click is a secure
+--     command, [nocombat] keeps it from firing mid-fight, and PreClick drops the action while moving.
+--   * a Reload button in our own UI: the secure button is laid over it on hover (SecureReload.Cover),
+--     so the player's click lands on the secure button. It is never anchored to the button it covers
+--     (a protected frame anchored to ours would lock that frame in combat); it sits on UIParent at the
+--     same screen rect, and hides when the pointer leaves, the covered button hides, or combat starts.
 --
--- The guard exists because a reload opens the chat box and captures the
--- keyboard. Firing one mid-fight cost the player their only healing potion; firing
--- one mid-run is its own problem. The client is the only thing that actually
--- knows, so the client decides.
---
--- the dev tooling falls back to the inline /run if this command is missing, which
--- matters: if the addon ever fails to load, this would not exist, and without
--- that fallback there would be no way to reload in order to FIX it.
+-- The guard exists because a reload opens the chat box and captures the keyboard. Firing one mid-fight
+-- cost the player their only healing potion; firing one mid-run is its own problem.
+
+local RELOAD_NAME = "ForeverSTUwaveReload"
+local SecureReload = { NAME = RELOAD_NAME, CLICK = "/click [nocombat] " .. RELOAD_NAME }
+FS.SecureReload = SecureReload
+local reloadButton, covering, lastRefusal = nil, nil, 0
+
+local function Say(text) print("|cff22e0ffForever STUwave|r: " .. text) end
+
+local function Moving()
+    local fn = _G.GetUnitSpeed
+    if type(fn) ~= "function" then return true end
+    local ok, moving = pcall(function() return fn("player") > 0 end)
+    return not ok or moving == true
+end
+
+-- Why a reload cannot run right now, or nil when it can.
+local function Refusal()
+    if Combat() then return "in combat" end
+    if Moving() then return "moving" end
+    return nil
+end
+SecureReload.Refusal = Refusal
+
+-- PreClick fires on both edges of a mouse click; one line per refusal is enough.
+local function Refuse(why)
+    local now = type(GetTime) == "function" and GetTime() or 0
+    if now - lastRefusal < 1 then return end
+    lastRefusal = now
+    Say("reload refused -- " .. why .. ".")
+end
+
+local function Uncover()
+    if not reloadButton or Combat() then return end
+    reloadButton:Hide()
+end
+SecureReload.Uncover = Uncover
+
+local function Build()
+    local b = CreateFrame("Button", RELOAD_NAME, UIParent, "SecureActionButtonTemplate")
+    b:SetFrameStrata("FULLSCREEN_DIALOG")
+    b:SetSize(1, 1)
+    b:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    -- Up only, and pinned there: /click sends an up click, and a mouse click must not run twice.
+    b:RegisterForClicks("LeftButtonUp")
+    b:SetAttribute("useOnKeyDown", false)
+    b:SetAttribute("type", "macro")
+    b:SetAttribute("macrotext", "/reload")
+    -- Out of combat an insecure PreClick may still set attributes, so a refusal clears the action for
+    -- this click and a clear one puts it back. In combat nothing here can change it: [nocombat] on
+    -- /click and hiding the cover when combat starts are what keep it from running then.
+    b:SetScript("PreClick", function(self)
+        if Combat() then Refuse("in combat") return end
+        local why = Refusal()
+        self:SetAttribute("type", not why and "macro" or nil)
+        if why then Refuse(why) end
+    end)
+    b:SetScript("OnLeave", function(self)
+        local target = covering
+        Uncover()
+        if target then
+            local leave = target.GetScript and target:GetScript("OnLeave")
+            if leave then pcall(leave, target) end
+        end
+    end)
+    b:SetScript("OnHide", function() covering = nil end)
+    b:Hide()
+    return b
+end
+
+-- Built at load, or after combat when the UI was loaded in combat (a secure frame cannot be made then).
+local function Ensure()
+    if reloadButton then return reloadButton end
+    if Combat() or type(CreateFrame) ~= "function" then return nil end
+    local ok, b = pcall(Build)
+    if ok then reloadButton = b end
+    return reloadButton
+end
+function SecureReload.Button() return Ensure() end
+
+-- Lays the secure button over `target` (one of our own Reload buttons) for as long as the pointer is on
+-- it. Returns true when it is in place. Out of combat only.
+function SecureReload.Cover(target)
+    if Combat() or not target then return false end
+    local b = Ensure()
+    if not b then return false end
+    local ok = pcall(function()
+        if not target:IsVisible() or (target.IsEnabled and not target:IsEnabled()) then error("hidden") end
+        local left, bottom = target:GetLeft(), target:GetBottom()
+        local w, h = target:GetWidth(), target:GetHeight()
+        if not left or not bottom or not w or not h or w <= 0 or h <= 0 then error("no rect") end
+        local s = target:GetEffectiveScale() / UIParent:GetEffectiveScale()
+        b:ClearAllPoints()
+        b:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", left * s, bottom * s)
+        b:SetSize(w * s, h * s)
+        b:SetFrameStrata(target:GetFrameStrata())
+        b:SetFrameLevel(target:GetFrameLevel() + 10)
+        b:Show()
+    end)
+    covering = ok and target or nil
+    if not ok then Uncover() end
+    return ok
+end
+
+function SecureReload.Covering() return covering end
+
+-- A Reload button of ours is clicked without the cover on it (in combat, or the cover could not be
+-- placed): say why nothing happened instead of doing nothing.
+function SecureReload.Explain()
+    Refuse(Refusal() or "type /reload")
+end
+
+local reloadEvents = CreateFrame("Frame")
+reloadEvents:RegisterEvent("PLAYER_LOGIN")
+reloadEvents:RegisterEvent("PLAYER_REGEN_ENABLED")
+-- Fires before the lockdown starts, so the cover can still be hidden.
+reloadEvents:RegisterEvent("PLAYER_REGEN_DISABLED")
+reloadEvents:SetScript("OnEvent", function(_, event)
+    if event == "PLAYER_REGEN_DISABLED" then
+        if reloadButton then reloadButton:Hide() end
+    else
+        Ensure()
+    end
+end)
+Ensure()
+
+-- /fsreload: kept so the old habit gets an answer. It cannot reload (addon code cannot), so it says how.
 SLASH_FSRELOAD1 = "/fsreload"
 SlashCmdList["FSRELOAD"] = function()
-    if InCombatLockdown() then
-        print("|cff22e0ffForever STUwave|r: reload refused -- in combat.")
-        return
+    local why = Refusal()
+    if why then
+        Say("reload refused -- " .. why .. ".")
+    else
+        Say("type /reload (this client only reloads from a typed or secure command).")
     end
-
-    if type(GetUnitSpeed) ~= "function" then
-        print("|cff22e0ffForever STUwave|r: reload refused -- can't verify movement, refusing to be safe.")
-        return
-    end
-
-    local speed = GetUnitSpeed("player")
-    if speed > 0 then
-        print("|cff22e0ffForever STUwave|r: reload refused -- moving.")
-        return
-    end
-
-    ReloadUI()
 end
 
 -------------------------------------------------------------------------------

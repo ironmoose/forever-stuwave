@@ -186,6 +186,13 @@ function FM.GetVerticalScrollRange(s) return math.max(0, (s._scrollChild and s._
 function FM.SetVerticalScroll(s, v) s._vscroll = v end
 function FM.GetVerticalScroll(s) return s._vscroll or 0 end
 function FM.GetParent(s) return s._parent end
+function FM.SetAttribute(s, k, v)
+    s._calls.SetAttribute = (s._calls.SetAttribute or 0) + 1
+    local a = rawget(s, "_attrs") or {}
+    rawset(s, "_attrs", a)
+    a[k] = v
+end
+function FM.GetAttribute(s, k) local a = rawget(s, "_attrs"); return a and a[k] end
 
 UIParent = newFrame("Frame", nil, nil)
 UIParent._w, UIParent._h = 2133, 1200
@@ -2212,6 +2219,113 @@ case("err_a_throwing_classifier_cannot_wedge_the_wrapper", """
     assert(#__prevCalls == 1 and __prevCalls[1] == FOREIGN, "the error still reaches the previous handler")
     __handler(OURS)                                       -- and busy was released, so this is handled
     assert(#ForeverSTUwaveErrorLog == 1 and #__prevCalls == 1)
+""")
+
+
+# ===========================================================================
+# Secure reload: ReloadUI is protected on the release client, so every reload the addon offers goes
+# through one secure /reload macro button.
+# ===========================================================================
+
+SR_SETUP = """
+    InstallApis("plain")
+    W.combat = false
+    __speed = 0
+    GetUnitSpeed = function() return __speed end
+    local reloads = 0
+    ReloadUI = function() reloads = reloads + 1 end
+    local FS = LoadEL()
+    local b = _G.ForeverSTUwaveReload
+    local function Reloads() return reloads end
+"""
+
+case("reload_button_is_one_secure_macro_running_slash_reload", SR_SETUP + """
+    assert(b, "the named secure button exists after load")
+    assert(tostring(b._tmpl):find("SecureActionButtonTemplate"), "secure template")
+    assert(b._parent == UIParent)
+    assert(b:GetAttribute("type") == "macro" and b:GetAttribute("macrotext") == "/reload")
+    assert(b:GetAttribute("useOnKeyDown") == false, "acts on the up click /click sends")
+    assert(not b:IsShown(), "hidden until it covers a button")
+    assert(FS.SecureReload.CLICK == "/click [nocombat] ForeverSTUwaveReload", "the dev tooling's guarded line")
+""")
+
+case("reload_preclick_drops_the_action_while_moving_and_restores_it_when_still", SR_SETUP + """
+    __speed = 7
+    b._scripts.PreClick(b, "LeftButton", false)
+    assert(b:GetAttribute("type") == nil, "moving: this click runs nothing")
+    local said = table.concat(Lines(), "\\n")
+    assert(said:find("reload refused %-%- moving%."), said)
+    __speed = 0
+    b._scripts.PreClick(b, "LeftButton", false)
+    assert(b:GetAttribute("type") == "macro", "still: the action is back")
+""")
+
+case("reload_preclick_in_combat_touches_no_attribute", SR_SETUP + """
+    local before = b._calls.SetAttribute
+    W.combat = true
+    b._scripts.PreClick(b, "LeftButton", false)
+    assert(b._calls.SetAttribute == before, "no attribute writes in lockdown")
+    assert(table.concat(Lines(), "\\n"):find("in combat"))
+""")
+
+case("reload_slash_never_calls_the_protected_reload", SR_SETUP + """
+    SlashCmdList.FSRELOAD("")
+    assert(Reloads() == 0)
+    assert(table.concat(Lines(), "\\n"):find("type /reload"))
+    W.combat = true
+    __now = __now + 5
+    SlashCmdList.FSRELOAD("")
+    assert(Reloads() == 0)
+    assert(table.concat(Lines(), "\\n"):find("reload refused %-%- in combat"))
+""")
+
+case("reload_cover_sits_on_uiparent_at_the_targets_screen_rect", SR_SETUP + """
+    local t = CreateFrame("Button", nil, UIParent)
+    t.GetLeft = function() return 100 end
+    t.GetBottom = function() return 50 end
+    t._w, t._h = 80, 24
+    t.GetEffectiveScale = function() return 1.28 end
+    t.GetFrameStrata = function() return "DIALOG" end
+    t.GetFrameLevel = function() return 20 end
+    t.IsEnabled = function() return true end
+    assert(FS.SecureReload.Cover(t) == true)
+    assert(b:IsShown() and FS.SecureReload.Covering() == t)
+    local pt = b._points[#b._points]
+    assert(pt[2] == UIParent, "anchored to UIParent, never to the covered button")
+    assert(pt[4] == 200 and pt[5] == 100, "screen rect in UIParent units: " .. tostring(pt[4]) .. "," .. tostring(pt[5]))
+    assert(b._w == 160 and b._h == 48)
+    local left = 0
+    t:SetScript("OnLeave", function() left = left + 1 end)
+    b._scripts.OnLeave(b)
+    assert(not b:IsShown(), "leaving hides the cover")
+    assert(left == 1, "and the covered button gets its leave")
+    W.combat = true
+    assert(FS.SecureReload.Cover(t) == false, "never shown in combat")
+    assert(not b:IsShown())
+""")
+
+case("reload_cover_hides_when_combat_starts", SR_SETUP + """
+    local t = CreateFrame("Button", nil, UIParent)
+    t.GetLeft = function() return 1 end
+    t.GetBottom = function() return 1 end
+    t._w, t._h = 10, 10
+    t.GetEffectiveScale = function() return 0.64 end
+    t.GetFrameStrata = function() return "DIALOG" end
+    t.GetFrameLevel = function() return 1 end
+    t.IsEnabled = function() return true end
+    assert(FS.SecureReload.Cover(t))
+    Fire("PLAYER_REGEN_DISABLED")
+    assert(not b:IsShown(), "hidden before the lockdown starts")
+""")
+
+case("reload_button_loaded_in_combat_is_built_after_it", """
+    InstallApis("plain")
+    W.combat = true
+    local FS = LoadEL()
+    assert(_G.ForeverSTUwaveReload == nil, "no secure frame made in lockdown")
+    W.combat = false
+    Fire("PLAYER_REGEN_ENABLED")
+    assert(_G.ForeverSTUwaveReload, "made once combat ends")
 """)
 
 

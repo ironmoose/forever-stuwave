@@ -597,11 +597,21 @@ function UI.Toggle(content, o)
     if o.reload and state then
         reloadButton = BuildButton(row, {
             text = "Reload", warn = true,
+            -- Addon code cannot reload on this client: the secure reload button is laid over this one
+            -- while the pointer is on it, so a click lands there. This click only runs without it.
             onClick = function()
-                local fn = _G.ReloadUI
-                if type(fn) == "function" then fn() end
+                local SR = FS.SecureReload
+                if SR and SR.Explain then SR.Explain() end
             end,
         })
+        reloadButton:HookScript("OnEnter", function(self)
+            local SR = FS.SecureReload
+            if SR and SR.Cover then SR.Cover(self) end
+        end)
+        reloadButton:HookScript("OnHide", function(self)
+            local SR = FS.SecureReload
+            if SR and SR.Covering and SR.Covering() == self then SR.Uncover() end
+        end)
         reloadButton:SetPoint("RIGHT", state, "LEFT", -12, 0)
         note = Label(row, "", 10, C.pink)
         note:SetPoint("RIGHT", reloadButton, "LEFT", -8, 0)

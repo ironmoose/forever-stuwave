@@ -683,14 +683,15 @@ def send_text(hwnd: int, text: str, fast: bool = False) -> None:
         prev = ch
 
 
-def reload_ui(hwnd: int, command: str = "/fsreload") -> None:
+def reload_ui(hwnd: int, command: str | None = None) -> None:
     """Open chat and reload -- but ONLY if the player is out of combat.
 
-    This sends a self-guarding statement rather than a bare /reload:
+    This sends a self-guarding command rather than a bare /reload:
 
-        /run if not InCombatLockdown()
-                and (GetUnitSpeed and GetUnitSpeed("player") or 0) == 0
-             then ReloadUI() end
+        /click [nocombat] ForeverSTUwaveReload
+
+    (the addon's secure /reload button; its PreClick refuses while moving).
+    The old /run ... ReloadUI() form is blocked on the release client.
 
     On 2026-09-20 a reload fired while the player was mid-fight. Opening the chat
     box captures the keyboard, so they could not use an ability, and they burned
@@ -705,6 +706,7 @@ def reload_ui(hwnd: int, command: str = "/fsreload") -> None:
     This is a backstop, not a licence. Permission to take the client is spent
     by the action it was given for -- ask again for the next one.
     """
+    command = command or GUARDED_RELOAD
     focus(hwnd)
     tap_key(hwnd, VK_RETURN)   # open chat
     time.sleep(0.5)
@@ -713,9 +715,11 @@ def reload_ui(hwnd: int, command: str = "/fsreload") -> None:
     tap_key(hwnd, VK_RETURN)   # submit
 
 
-# The addon's own guarded reload (ErrorLog.lua). Nine characters instead of a
-# ~100-character /run, which matters because the chat box caps input at 255.
-GUARDED_RELOAD = "/fsreload"
+# The addon's own guarded reload (ErrorLog.lua). The release client blocks
+# ReloadUI from addon code and /run alike, so this clicks the addon's secure
+# /reload button through /click, a secure command: [nocombat] is the combat
+# guard and the button's PreClick refuses while moving.
+GUARDED_RELOAD = "/click [nocombat] ForeverSTUwaveReload"
 
 # Identical logic inline, for when the addon is not loaded. That case is not
 # hypothetical: if a bad deploy stops the addon loading, /fsreload would not
@@ -1069,7 +1073,7 @@ def main() -> int:
         # /fsreload and a genuine "he is busy" look identical from out here.
         flushed = wait_for_flush(before)
         if not flushed:
-            print("  /fsreload did not take -- retrying inline")
+            print("  guarded reload did not take -- retrying inline")
             reload_ui(hwnd, INLINE_RELOAD)
             flushed = wait_for_flush(before)
 

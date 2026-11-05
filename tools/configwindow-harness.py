@@ -348,6 +348,20 @@ local function click(text, root)
     b.scripts.OnClick(b, "LeftButton")
     return true
 end
+-- The secure reload (ErrorLog.lua) is not loaded here: a stub records what the Reload button asks of it.
+-- ReloadUI is protected on the release client, so the button must never call it.
+local function stubSecureReload()
+    local log = { covered = {}, explained = 0, reloads = 0 }
+    ReloadUI = function() log.reloads = log.reloads + 1 end
+    FS.SecureReload = {
+        Cover = function(target) log.covered[#log.covered + 1] = target; return true end,
+        Covering = function() return log.covered[#log.covered] end,
+        Uncover = function() end,
+        Explain = function() log.explained = log.explained + 1 end,
+    }
+    return log
+end
+
 local function row(label)
     for _, o in ipairs(ALL) do
         if o.kind == "FontString" and o:IsVisible() and o:GetText() == label then
@@ -804,8 +818,7 @@ function T.the_master_toggle_applies_live_and_prompts_a_reload_only_for_what_can
     W.Open("gunsight")
     no(hasText(win(), "Reload to"), "no prompt while the HUD matches what was built")
     eq(findText("Reload", win()), nil, "and no Reload button")
-    local reloads = 0
-    ReloadUI = function() reloads = reloads + 1 end
+    local sr = stubSecureReload()
     press("Gunsight HUD")
     eq(FS.Gunsight.IsActive(), false, "applied at once")
     eq(FS.Gunsight.root:IsShown(), false, "the HUD is hidden without a reload")
@@ -813,13 +826,17 @@ function T.the_master_toggle_applies_live_and_prompts_a_reload_only_for_what_can
     local label = findText("Reload", win())
     yes(label, "the Reload button exists and is visible")
     yes(owner(label).enabled ~= false, "and is enabled")
+    local b = owner(label)
+    b.scripts.OnEnter(b)
+    eq(sr.covered[1], b, "hovering it lays the secure reload button over it")
     yes(click("Reload", win()), "the prompt's button works")
-    eq(reloads, 1, "and calls ReloadUI exactly once")
+    eq(sr.explained, 1, "a click that reaches it (no cover) says why nothing happened")
+    eq(sr.reloads, 0, "and never calls the protected ReloadUI")
     press("Gunsight HUD")
     eq(FS.Gunsight.IsActive(), true)
     no(hasText(win(), "Reload to"), "back to the built state: the prompt goes")
     eq(findText("Reload", win()), nil, "and so does the button")
-    eq(reloads, 1, "nothing reloaded by the toggle itself")
+    eq(sr.reloads, 0, "nothing reloaded by the toggle itself")
 end
 
 function T.a_gunsight_off_at_login_prompts_a_reload_to_build_it()
@@ -830,10 +847,12 @@ function T.a_gunsight_off_at_login_prompts_a_reload_to_build_it()
     eq(FS.Gunsight.IsActive(), false, "the pieces were never built")
     yes(findText("Reload to build the Gunsight HUD", win()), "so a reload is the way: this exact prompt")
     yes(findText("Reload", win()), "with its Reload button")
-    local reloads = 0
-    ReloadUI = function() reloads = reloads + 1 end
+    local sr = stubSecureReload()
+    local b = owner(findText("Reload", win()))
+    b.scripts.OnEnter(b)
+    eq(sr.covered[1], b, "which the secure reload button covers on hover")
     yes(click("Reload", win()))
-    eq(reloads, 1, "which calls ReloadUI")
+    eq(sr.reloads, 0, "never the protected ReloadUI")
 end
 
 function T.the_master_toggle_explains_the_reload_in_a_tooltip()

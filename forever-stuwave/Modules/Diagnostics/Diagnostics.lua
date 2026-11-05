@@ -77,7 +77,7 @@ SlashCmdList["FSFONT"] = function()
     end
 
     ForeverSTUwaveDB.fontCheck = report
-    print("|cff22e0ffstuwave://font|r  written to ForeverSTUwaveDB; /fsreload to flush it")
+    print("|cff22e0ffstuwave://font|r  written to ForeverSTUwaveDB; /reload to flush it")
 end
 
 -------------------------------------------------------------------------------
@@ -220,7 +220,7 @@ local function SaveCheck(reason)
     ForeverSTUwaveDB.inspect.check = checkRun
     checkRun = nil
     if checkFrame then checkFrame:UnregisterEvent("UNIT_AURA") end
-    print("|cff22e0ffForever STUwave|r: /fsinspect auras -- saved; /fsreload to flush")
+    print("|cff22e0ffForever STUwave|r: /fsinspect auras -- saved; /reload to flush")
 end
 
 local function CaptureCheckUpdate(updateInfo)
@@ -975,7 +975,7 @@ function Diagnostics.RunSurnameCheck()
             ("|cffff4488Forever STUwave|r: /fsinspect surname -- check failed: %s"):format(tostring(err)))
         return
     end
-    print("|cff22e0ffForever STUwave|r: /fsinspect surname -- captured, /fsreload to flush")
+    print("|cff22e0ffForever STUwave|r: /fsinspect surname -- captured, /reload to flush")
 end
 
 -- /fsinspect minimap -- one-shot check over Minimap/MinimapCluster geometry
@@ -1086,7 +1086,7 @@ function Diagnostics.RunMinimapCheck()
             ("|cffff4488Forever STUwave|r: /fsinspect minimap -- check failed: %s"):format(tostring(err)))
         return
     end
-    print("|cff22e0ffForever STUwave|r: /fsinspect minimap -- captured, /fsreload to flush")
+    print("|cff22e0ffForever STUwave|r: /fsinspect minimap -- captured, /reload to flush")
 end
 
 -------------------------------------------------------------------------------
@@ -1397,7 +1397,7 @@ function Diagnostics.RunMinimapBounds(mode)
     print(("|cff22e0ffForever STUwave|r: minimap bounds -- %d nodes, %d outside map, %d skips; " ..
         "grey hidden, amber unknown alpha, red visible spill (custom furniture identified in capture)")
         :format(run.visited, run.spills, #run.skips))
-    print("|cff22e0ffForever STUwave|r: stored inspect.minimapBounds; /fsreload to flush, minimap clear removes outlines")
+    print("|cff22e0ffForever STUwave|r: stored inspect.minimapBounds; /reload to flush, minimap clear removes outlines")
 end
 
 -------------------------------------------------------------------------------
@@ -1775,7 +1775,7 @@ local function DoPlateAurasRun(reason)
         return
     end
     local s = run.summary
-    print(("|cff22e0ffForever STUwave|r: /fsinspect plateauras -- %s, %d plate(s), aura textures shown %d / with texture %d / visible %d, %s; saved to inspect.plateauras, /fsreload to flush")
+    print(("|cff22e0ffForever STUwave|r: /fsinspect plateauras -- %s, %d plate(s), aura textures shown %d / with texture %d / visible %d, %s; saved to inspect.plateauras, /reload to flush")
         :format(run.mode, #run.plates, s.auraTexturesShown, s.auraTexturesWithTexture, s.auraTexturesVisible,
             tostring(run.context.inCombatLockdown) == "true" and "IN COMBAT" or "out of combat"))
 end
@@ -1864,7 +1864,7 @@ function Diagnostics.RunAllInspect()
             ("|cffff4488Forever STUwave|r: /fsinspect minimap -- check failed: %s"):format(tostring(minimapErr)))
     end
 
-    print(("|cff22e0ffForever STUwave|r: /fsinspect all -- surname %s, minimap %s, /fsreload to flush")
+    print(("|cff22e0ffForever STUwave|r: /fsinspect all -- surname %s, minimap %s, /reload to flush")
         :format(surnameOk and "captured" or "FAILED", minimapOk and "captured" or "FAILED"))
 end
 
@@ -1978,7 +1978,7 @@ function Diagnostics.RunMicroBagsCheck(silent)
         return
     end
     if not silent then
-        print(("|cff22e0ffForever STUwave|r: /fsinspect microbags -- %d micro, %d bags; saved to inspect.microBags, /fsreload to flush")
+        print(("|cff22e0ffForever STUwave|r: /fsinspect microbags -- %d micro, %d bags; saved to inspect.microBags, /reload to flush")
             :format(#report.micro, #report.bags))
     end
 end

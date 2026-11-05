@@ -910,7 +910,7 @@ SlashCmdList["FSINSPECT"] = function(msg)
 
         -- A chat print scrolls away and never reaches the dev tooling, so
         -- this also writes into ForeverSTUwaveDB -- same idiom as the
-        -- skins readback below -- for the dev tooling to read after /fsreload.
+        -- skins readback below -- for the dev tooling to read after /reload.
         local line = ("|cff22e0ffstuwave://pos|r %s  BOTTOMLEFT x=%.1f y=%.1f  (size %.0fx%.0f)  " ..
             "frac x=%.4f y=%.4f  UIParent %.0fx%.0f @ %.3f"):format(
             id, l, b, w, h, xf, yf, uw, uh, s)
@@ -918,7 +918,7 @@ SlashCmdList["FSINSPECT"] = function(msg)
 
         ForeverSTUwaveDB = ForeverSTUwaveDB or {}
         ForeverSTUwaveDB.inspectPos = line
-        print("|cff22e0ffstuwave://inspect|r  written to ForeverSTUwaveDB; /fsreload to flush it")
+        print("|cff22e0ffstuwave://inspect|r  written to ForeverSTUwaveDB; /reload to flush it")
         return
     end
 
@@ -932,7 +932,7 @@ SlashCmdList["FSINSPECT"] = function(msg)
     -- A chat print scrolls away and never reaches the dev tooling, so this
     -- also writes a compact readback into ForeverSTUwaveDB -- same idiom as
     -- Diagnostics.lua's /fsfont -> fontCheck -- for the dev tooling to read after
-    -- /fsreload.
+    -- /reload.
     local groupSummaries = {}
     local presentUnskinned = {}
     local skippedCount = 0
@@ -968,5 +968,5 @@ SlashCmdList["FSINSPECT"] = function(msg)
     end
     ForeverSTUwaveDB.inspectSkins = ("%s | %s | %d skipped (not loaded)"):format(
         table.concat(groupSummaries, " | "), unskinnedText, skippedCount)
-    print("|cff22e0ffstuwave://inspect|r  written to ForeverSTUwaveDB; /fsreload to flush it")
+    print("|cff22e0ffstuwave://inspect|r  written to ForeverSTUwaveDB; /reload to flush it")
 end
