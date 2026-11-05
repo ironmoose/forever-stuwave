@@ -285,3 +285,48 @@ if type(_G.HelpTip) == "table" and type(_G.HelpTip.Show) == "function" and type(
     hooksecurefunc(_G.HelpTip, "Show", SkinActiveTips)
     SkinActiveTips()
 end
+
+
+-------------------------------------------------------------------------------
+-- Battle.net toast ("<friend> has come online" above the chat)
+-------------------------------------------------------------------------------
+
+-- BNToastFrame (Blizzard_BNet/BNet.xml) is a SocialToastTemplate: a BackdropTemplate box (BACKDROP_TOAST_12_12),
+-- a gold additive flash texture `glow` that an AnimationGroup fades in and out on show, and a CloseButton with
+-- Normal/Pushed/Highlight textures. Nothing in the BNet code re-applies the backdrop, so clearing its colours
+-- holds. The flash is driven by an Alpha animation (alpha is the animation's to set), so it is recoloured, not
+-- hidden.
+local toastSkinned = false
+
+local function SkinBNToast()
+    local frame = _G.BNToastFrame
+    if toastSkinned or type(frame) ~= "table" or type(frame.CreateTexture) ~= "function" then return end
+    toastSkinned = true
+    local Theme = FS.Theme
+    if frame.SetBackdropColor then pcall(frame.SetBackdropColor, frame, 0, 0, 0, 0) end
+    if frame.SetBackdropBorderColor then pcall(frame.SetBackdropBorderColor, frame, 0, 0, 0, 0) end
+    if Theme.AddPanelChrome then
+        Theme.AddPanelChrome(frame, { accent = Theme.COLOR_POWER, fillColor = Theme.COLOR_BG, glowAlpha = 0.35 })
+    end
+    local flash = frame.glow
+    if flash and flash.SetVertexColor then
+        if flash.SetDesaturated then flash:SetDesaturated(true) end
+        local c = Theme.COLOR_POWER
+        flash:SetVertexColor(c[1], c[2], c[3], 1)
+    end
+    local skins = FS.ButtonSkins
+    if skins and skins.SkinCloseButton and frame.CloseButton then
+        skins.SkinCloseButton(frame.CloseButton, { anchor = frame })
+    end
+end
+
+pcall(SkinBNToast)
+if not toastSkinned then
+    local toastWatch = CreateFrame("Frame")
+    toastWatch:RegisterEvent("PLAYER_ENTERING_WORLD")
+    toastWatch:RegisterEvent("ADDON_LOADED")
+    toastWatch:SetScript("OnEvent", function(self)
+        pcall(SkinBNToast)
+        if toastSkinned then self:UnregisterAllEvents() end
+    end)
+end
