@@ -330,3 +330,58 @@ if not toastSkinned then
         if toastSkinned then self:UnregisterAllEvents() end
     end)
 end
+
+
+-------------------------------------------------------------------------------
+-- World refresh notice ("World refresh in N Minutes" above the chat)
+-------------------------------------------------------------------------------
+
+-- ShardTransferImminentFrame (Blizzard_SocialToast, found by /fstack in playtest 2026-11-05; not in the 12.1 source,
+-- so its shape is read off the frame): a button anchored over ChatAlertFrame, a nine-slice of texture regions
+-- (Center, TopEdge, ...), a flash texture ShardTransferImminentFrameGlowFrame with a fade-in animation, its text
+-- ShardTransferImminentFrameText, and a separate ShardTransferImminentMinimizeButton (the arrow beside it). Its own
+-- art is held at alpha 0 and the STUwave panel chrome drawn over it; the flash is recoloured cyan (alpha is its
+-- animation's). Its click, anchors and show state stay Blizzard's.
+local shardSkinned = false
+
+local function SkinShardNotice()
+    local frame = _G.ShardTransferImminentFrame
+    if shardSkinned or type(frame) ~= "table" or type(frame.CreateTexture) ~= "function" then return end
+    shardSkinned = true
+    local Theme = FS.Theme
+    local flash = _G.ShardTransferImminentFrameGlowFrame
+    if FS.HeldArt then
+        local keep = flash and { [flash] = true } or nil
+        FS.HeldArt.HoldButton(frame, keep)
+        local nine = frame.NineSlice
+        if type(nine) == "table" and nine.GetRegions then
+            for _, region in ipairs({ nine:GetRegions() }) do FS.HeldArt.Hold(region) end
+        end
+    end
+    if Theme.AddPanelChrome then
+        Theme.AddPanelChrome(frame, { accent = Theme.COLOR_POWER, fillColor = Theme.COLOR_BG, glowAlpha = 0.35 })
+    end
+    if flash and flash.SetVertexColor then
+        if flash.SetDesaturated then flash:SetDesaturated(true) end
+        local c = Theme.COLOR_POWER
+        flash:SetVertexColor(c[1], c[2], c[3], 1)
+    end
+    local text = _G.ShardTransferImminentFrameText
+    if text and Theme.ApplyMono and text.GetFont then
+        local _, size = text:GetFont()
+        Theme.ApplyMono(text, size or 12, Theme.COLOR_POWER)
+    end
+    local arrow = _G.ShardTransferImminentMinimizeButton
+    if arrow and Theme.SkinButton then pcall(Theme.SkinButton, arrow) end
+end
+
+pcall(SkinShardNotice)
+if not shardSkinned then
+    local shardWatch = CreateFrame("Frame")
+    shardWatch:RegisterEvent("PLAYER_ENTERING_WORLD")
+    shardWatch:RegisterEvent("ADDON_LOADED")
+    shardWatch:SetScript("OnEvent", function(self)
+        pcall(SkinShardNotice)
+        if shardSkinned then self:UnregisterAllEvents() end
+    end)
+end
