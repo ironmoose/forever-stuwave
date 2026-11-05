@@ -92,7 +92,7 @@ Modules share the addon namespace through `local _, FS = ...`. `ErrorLog.lua` lo
 
 Feature-detect APIs and use secret guards before reading or transforming values. Protected frame and binding changes must follow existing combat deferral patterns. A shared `FS.PlayerClass` override remains future work; do not assume it exists.
 
-## Current alpha boundary
+## Current beta boundary
 
 Priest and Warlock HUD profiles ship alongside Paladin seal/aura controls, the compact Seal module and its Judgement row. Shaman has a totem tab with two totem preset cells, a buff tab, and a totem pole Class Module with a shock gauge. Every mana class has the Mana regen module, and the micro menu and class tab spell icons can be switched between Stock and Gradient. Totem presets, the Mana regen module and the micro menu icons have been played through on a live character. The rest of the Shaman work has headless checks only: the buff tab combat state (the weapon imbue half may not show yet) and one preset click casting exactly one totem in combat are not confirmed in game. The checklist in [TESTING.md](TESTING.md) still applies. Judgement does not consume the seal on Forever. Judgement and its lane, Quick Keybind, and label visuals have live signoff; seal/aura clicks, expiry/no-seal states, shoulder seam and minimap first login still need checks. Advanced Paladin level 10/20 rotation rules are incomplete. Party row mouseover casting also needs live verification. See [TESTING.md](TESTING.md).
 

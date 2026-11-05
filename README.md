@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/stuwave.svg" alt="Forever STUwave: WoW Forever / Custom UI / Alpha" width="1200">
+  <img src="docs/images/stuwave.svg" alt="Forever STUwave: WoW Forever / Custom UI / Beta" width="1200">
 </p>
 
 <p align="center">
@@ -15,8 +15,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ironmoose/forever-stuwave/releases/download/v0.1.0-alpha.3/ForeverSTUwave-0.1.0-alpha.3.zip">
-    <img src="docs/images/download-alpha.svg" alt="Download alpha ZIP" width="232" height="48">
+  <a href="https://github.com/ironmoose/forever-stuwave/releases/download/v1.0.0-beta.1/ForeverSTUwave-1.0.0-beta.1.zip">
+    <img src="docs/images/download-beta.svg" alt="Download beta ZIP" width="232" height="48">
   </a>
 </p>
 
@@ -29,7 +29,7 @@
 ## Install
 
 1. **Close WoW.**
-2. [Download the addon ZIP](https://github.com/ironmoose/forever-stuwave/releases/download/v0.1.0-alpha.3/ForeverSTUwave-0.1.0-alpha.3.zip) and extract it.
+2. [Download the addon ZIP](https://github.com/ironmoose/forever-stuwave/releases/download/v1.0.0-beta.1/ForeverSTUwave-1.0.0-beta.1.zip) and extract it.
 3. Put its `forever-stuwave/` folder into `_forever_/Interface/AddOns/`. Keep its name unchanged.
 4. Start WoW and enable **Forever STUwave** in the AddOns menu.
 

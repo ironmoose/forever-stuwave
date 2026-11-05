@@ -1,4 +1,4 @@
-# Forever STUwave: alpha testing
+# Forever STUwave: beta testing
 
 Use the [README installation and update instructions](../README.md). Close the game before deploying an update, and fully restart for newly added files, bindings or textures. The visible addon name is **Forever STUwave**; its folder is `forever-stuwave` and manifest is `forever-stuwave.toc`.
 

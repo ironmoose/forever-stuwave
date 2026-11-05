@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title description">
 <title id="title">Forever STUwave</title>
-<desc id="description">WoW Forever custom UI alpha. Large angular lettering on dark plum, with cyan and hot pink rails, violet accents, two cut corners, and a faint horizon grid that scrolls toward the viewer.</desc>
+<desc id="description">WoW Forever custom UI beta. Large angular lettering on dark plum, with cyan and hot pink rails, violet accents, two cut corners, and a faint horizon grid that scrolls toward the viewer.</desc>
 <defs>
   <clipPath id="panel"><path d="M36 12H1188V384L1164 408H12V36Z"/></clipPath>
   <linearGradient id="rail" x1="0" x2="1"><stop stop-color="#22e0ff"/><stop offset=".58" stop-color="#9875ff"/><stop offset="1" stop-color="#ff2e97"/></linearGradient>
