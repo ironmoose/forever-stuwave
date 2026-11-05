@@ -549,8 +549,10 @@ end
 -- so neither can reload either. Only a reload the secure macro path runs gets through, so the addon owns ONE secure button that runs /reload and every
 -- reload it offers goes through it:
 --
---   * `/click [nocombat] ForeverSTUwaveReload` (the dev tooling's guarded reload): /click is a secure
---     command, [nocombat] keeps it from firing mid-fight, and PreClick drops the action while moving.
+--   * `/click ForeverSTUwaveReload` (the dev tooling's guarded reload): /click is a secure command. An
+--     attribute driver sets the action to "none" in combat (secure snippets do not run on this client, but
+--     RegisterAttributeDriver is C-side and works, see ActionBars.lua), and PreClick drops it while moving.
+--     A typed `/click [nocombat] ...` did not run on the live client (2026-11-05), so the guard is on the button.
 --   * a Reload button in our own UI: the secure button is laid over it on hover (SecureReload.Cover),
 --     so the player's click lands on the secure button. It is never anchored to the button it covers
 --     (a protected frame anchored to ours would lock that frame in combat); it sits on UIParent at the
@@ -560,7 +562,7 @@ end
 -- cost the player their only healing potion; firing one mid-run is its own problem.
 
 local RELOAD_NAME = "ForeverSTUwaveReload"
-local SecureReload = { NAME = RELOAD_NAME, CLICK = "/click [nocombat] " .. RELOAD_NAME }
+local SecureReload = { NAME = RELOAD_NAME, CLICK = "/click " .. RELOAD_NAME }
 FS.SecureReload = SecureReload
 local reloadButton, covering, lastRefusal = nil, nil, 0
 
@@ -605,9 +607,12 @@ local function Build()
     b:SetAttribute("useOnKeyDown", false)
     b:SetAttribute("type", "macro")
     b:SetAttribute("macrotext", "/reload")
-    -- Out of combat an insecure PreClick may still set attributes, so a refusal clears the action for
-    -- this click and a clear one puts it back. In combat nothing here can change it: [nocombat] on
-    -- /click and hiding the cover when combat starts are what keep it from running then.
+    -- In combat the attribute driver holds the action at "none" (no handler, so the click does nothing).
+    -- Out of combat an insecure PreClick may still set attributes, so a refusal clears the action for this
+    -- click and a clear one puts it back.
+    if type(RegisterAttributeDriver) == "function" then
+        RegisterAttributeDriver(b, "type", "[combat] none; macro")
+    end
     b:SetScript("PreClick", function(self)
         if Combat() then Refuse("in combat") return end
         local why = Refusal()

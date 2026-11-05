@@ -688,9 +688,10 @@ def reload_ui(hwnd: int, command: str | None = None) -> None:
 
     This sends a self-guarding command rather than a bare /reload:
 
-        /click [nocombat] ForeverSTUwaveReload
+        /click ForeverSTUwaveReload
 
-    (the addon's secure /reload button; its PreClick refuses while moving).
+    (the addon's secure /reload button: no action in combat, and its
+    PreClick refuses while moving).
     The old /run ... ReloadUI() form is blocked on the release client.
 
     On 2026-09-20 a reload fired while the player was mid-fight. Opening the chat
@@ -717,9 +718,11 @@ def reload_ui(hwnd: int, command: str | None = None) -> None:
 
 # The addon's own guarded reload (ErrorLog.lua). The release client blocks
 # ReloadUI from addon code and /run alike, so this clicks the addon's secure
-# /reload button through /click, a secure command: [nocombat] is the combat
-# guard and the button's PreClick refuses while moving.
-GUARDED_RELOAD = "/click [nocombat] ForeverSTUwaveReload"
+# /reload button through /click, a secure command. The guards are on the
+# button: an attribute driver empties its action in combat and its PreClick
+# refuses while moving. A typed "/click [nocombat] ..." did not run on the
+# live client (2026-11-05); the plain form did.
+GUARDED_RELOAD = "/click ForeverSTUwaveReload"
 
 # Identical logic inline, for when the addon is not loaded. That case is not
 # hypothetical: if a bad deploy stops the addon loading, /fsreload would not

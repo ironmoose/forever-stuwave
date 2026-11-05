@@ -2232,6 +2232,7 @@ SR_SETUP = """
     W.combat = false
     __speed = 0
     GetUnitSpeed = function() return __speed end
+    RegisterAttributeDriver = function(frame, attr, values) __driver = { frame = frame, attr = attr, values = values } end
     local reloads = 0
     ReloadUI = function() reloads = reloads + 1 end
     local FS = LoadEL()
@@ -2246,7 +2247,9 @@ case("reload_button_is_one_secure_macro_running_slash_reload", SR_SETUP + """
     assert(b:GetAttribute("type") == "macro" and b:GetAttribute("macrotext") == "/reload")
     assert(b:GetAttribute("useOnKeyDown") == false, "acts on the up click /click sends")
     assert(not b:IsShown(), "hidden until it covers a button")
-    assert(FS.SecureReload.CLICK == "/click [nocombat] ForeverSTUwaveReload", "the dev tooling's guarded line")
+    assert(FS.SecureReload.CLICK == "/click ForeverSTUwaveReload", "the dev tooling's guarded line")
+    assert(__driver and __driver.frame == b and __driver.attr == "type" and __driver.values == "[combat] none; macro",
+        "an attribute driver empties the action in combat")
 """)
 
 case("reload_preclick_drops_the_action_while_moving_and_restores_it_when_still", SR_SETUP + """
