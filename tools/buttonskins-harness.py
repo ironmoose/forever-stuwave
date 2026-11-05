@@ -1140,7 +1140,7 @@ case("tracker_collapse_button_is_the_shared_plate_with_a_minus_and_keeps_its_cli
     local p = Skinned(mb, "the collapse button")
     assert(p.kind == "minus" and #p.glyph == 12, "expanded: a minus, " .. tostring(p.kind))
     local pt = mb.points.TOPRIGHT
-    assert(pt and pt.rel == header and pt.x == -5 and pt.y == -3, "seated in the header's title band like the panels' X")
+    assert(pt and pt.rel ~= header and pt.rel ~= nil and pt.x == -5 and pt.y == -3, "seated in our title band (on our backdrop) like the panels' X")
     assert(mb.scripts.OnClick == click, "its click path is Blizzard's")
     for _, kind in ipairs({ "Normal", "Pushed", "Highlight" }) do assert(mb["Get" .. kind .. "Texture"](mb).alpha == 0, kind .. " art held") end
     assert(SameRgb(p.ring.tint, Theme.COLOR_HEALTH), "pink like the X")

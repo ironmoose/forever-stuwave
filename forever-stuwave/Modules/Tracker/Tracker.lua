@@ -27,9 +27,6 @@ local _, FS = ...
 local Theme = FS.Theme
 local ApplyFontGeneric = Theme.ApplyFontGeneric
 local ApplyMono = Theme.ApplyMono
-local AddOuterGlow = Theme.AddOuterGlow
-local AddRoundedFill = Theme.AddRoundedFill
-local AddGradientBorder = Theme.AddGradientBorder
 local COLOR_POWER = Theme.COLOR_POWER -- cyan; header accent, matches Chat.lua's selected-tab tint
 
 -- Muted line color for body text: light enough to read against the tracker's
@@ -73,18 +70,20 @@ end
 -- Container chrome: backdrop + title band
 -------------------------------------------------------------------------------
 
--- The container's collapse button (the red "collapse all" button at the right of the header) wears the shared STUwave
--- plate (pink ring and halo, hover wash, pressed and disabled looks, Blizzard's art held hidden). It collapses the
--- tracker, it does not close it, so its glyph is a minus while the tracker is expanded and a plus once collapsed, kept
--- in step by a post-hook on the header's SetCollapsed (the container calls it on every toggle). Skin only: Blizzard's
--- OnClick, the button's parent and its protected state are not touched; it is seated top right inside our title band.
--- Collapsed, the tracker is a small bar: our backdrop shrinks to the title band and the band reads the quest count,
--- "quests (12/20)" (playtest 2026-11-05: the stock collapse only hid the text and left the whole panel up). Our own
--- frames only: the backdrop is re-anchored and the label re-texted; Blizzard's layout values are never written (they
--- are fields its layout code reads, the classic tracker taint path).
-local chrome = {} -- backdrop, label, nineSlice, header, collapsed
+-- One header row (playtest 2026-11-05: the stuwave band over a separate gold "Quests" header read as a double header,
+-- and two sets of collapse buttons were confusing). Expanded, our panel starts at the first shown module's header row:
+-- the band sits over it, reads "quests (2/40)" (or that module's own name when quests are not first), and that
+-- header's own text is held invisible. The container's empty header strip above is left outside the panel.
+-- Collapsed, the panel is a compact bar on the tracker's right edge, just wide enough for the count and the button,
+-- and a click anywhere on it expands: the collapse button's own hit rect is widened over the bar, so the click is
+-- Blizzard's own (no call into its code from ours).
+-- Our own frames are re-anchored and re-texted; the only Blizzard writes are alpha, hit rect insets and the button's
+-- seat. Blizzard's layout values are never written (they are fields its layout code reads, the classic tracker taint
+-- path); topModulePadding is only read.
+local chrome = {} -- frame, header, nineSlice, backdrop, band, label, button, collapsed
+local moduleRules = setmetatable({}, { __mode = "k" }) -- module header -> our cyan rule
 
-local TITLE = "stuwave://objectives"
+local MODULE_NAMES -- set below, with the module header skin
 
 local function QuestCount()
     local q = C_QuestLog
@@ -110,38 +109,96 @@ local function CollapsedText()
     return ("quests (%d)"):format(n)
 end
 
-local function ApplyCollapsed(collapsed)
-    local backdrop, nineSlice = chrome.backdrop, chrome.nineSlice
-    if not backdrop then return end
-    chrome.collapsed = collapsed == true
-    local top = nineSlice or chrome.frame
-    backdrop:ClearAllPoints()
-    if chrome.collapsed and chrome.header then
-        local inset = Theme.PanelBandInset()
-        backdrop:SetPoint("TOPLEFT", top, "TOPLEFT", 0, 0)
-        backdrop:SetPoint("TOPRIGHT", top, "TOPRIGHT", 0, 0)
-        backdrop:SetHeight(Theme.PANEL_HEADER_H + inset * 2)
-    else
-        backdrop:SetPoint("TOPLEFT", top, "TOPLEFT", 0, 0)
-        backdrop:SetPoint("BOTTOMRIGHT", top, "BOTTOMRIGHT", 0, 0)
+-- The first module the container laid out (it places them in self.modules order, skipping empty ones). Read only.
+local function FirstModule(frame)
+    local modules = frame and frame.modules
+    if type(modules) ~= "table" then return nil end
+    for _, module in ipairs(modules) do
+        local ok, height = pcall(module.GetContentsHeight, module)
+        if ok and type(height) == "number" and height > 0 then return module end
     end
-    if chrome.label then chrome.label:SetText(chrome.collapsed and CollapsedText() or TITLE) end
+    return nil
 end
 
--- Keeps the collapsed count current; made with the chrome, so a file load builds no frame.
+local function TitleFor(module)
+    if not module or module == _G.QuestObjectiveTracker then return CollapsedText() end
+    local text = module.Header and module.Header.Text and module.Header.Text.GetText and module.Header.Text:GetText()
+    if type(text) ~= "string" or text == "" then return CollapsedText() end
+    return text:lower()
+end
+
+-- Shows every module header's own text and rule except the one our band covers.
+local function MarkCovered(covered)
+    for _, name in ipairs(MODULE_NAMES) do
+        local module = _G[name]
+        local header = module and module.Header
+        if header then
+            local hide = header == covered
+            if header.Text and header.Text.SetAlpha then header.Text:SetAlpha(hide and 0 or 1) end
+            local rule = moduleRules[header]
+            if rule then rule:SetShown(not hide) end
+        end
+    end
+end
+
+local BAR_PAD = 10 -- label inset from the band's left, and gap to the button
+
+local function SetBarHit(button, width)
+    if not (button and button.SetHitRectInsets) then return end
+    if not chrome.hit and button.GetHitRectInsets then
+        chrome.hit = { button:GetHitRectInsets() }
+    end
+    if width then
+        local bw = button:GetWidth() or 0
+        button:SetHitRectInsets(-(width - bw - 4), -6, -4, -6)
+    elseif chrome.hit then
+        button:SetHitRectInsets(chrome.hit[1], chrome.hit[2], chrome.hit[3], chrome.hit[4])
+    end
+end
+
+local function Relayout()
+    local frame, backdrop = chrome.frame, chrome.backdrop
+    if not backdrop then return end
+    local top = chrome.nineSlice or frame
+    local inset = Theme.PanelBandInset()
+    backdrop:ClearAllPoints()
+    if chrome.collapsed then
+        local label = chrome.label
+        label:SetText(CollapsedText())
+        local bw = chrome.button and chrome.button:GetWidth() or 14
+        local width = math.ceil(BAR_PAD + (label.GetStringWidth and label:GetStringWidth() or 0) + BAR_PAD + bw + 6 + inset)
+        backdrop:SetPoint("TOPRIGHT", top, "TOPRIGHT", 0, 0)
+        backdrop:SetSize(width, Theme.PANEL_HEADER_H + inset * 2)
+        SetBarHit(chrome.button, width)
+        MarkCovered(nil)
+    else
+        local first = FirstModule(frame)
+        local pad = first and tonumber(frame.topModulePadding) or 0
+        backdrop:SetPoint("TOPLEFT", top, "TOPLEFT", 0, -pad)
+        backdrop:SetPoint("BOTTOMRIGHT", top, "BOTTOMRIGHT", 0, 0)
+        chrome.label:SetText(TitleFor(first))
+        SetBarHit(chrome.button, nil)
+        MarkCovered(first and first.Header or nil)
+    end
+end
+
+local function ApplyCollapsed(collapsed)
+    chrome.collapsed = collapsed == true
+    Relayout()
+end
+
+-- Keeps the count current; made with the chrome, so a file load builds no frame.
 local function WatchQuestCount()
     if chrome.countEvents or type(CreateFrame) ~= "function" then return end
     local f = CreateFrame("Frame")
     for _, event in ipairs({ "QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED" }) do
         pcall(f.RegisterEvent, f, event)
     end
-    f:SetScript("OnEvent", function()
-        if chrome.collapsed and chrome.label then chrome.label:SetText(CollapsedText()) end
-    end)
+    f:SetScript("OnEvent", Relayout)
     chrome.countEvents = f
 end
 
-local function SkinCollapseButton(frame, header)
+local function SkinCollapseButton(frame, header, backdrop)
     local skins = FS.ButtonSkins
     local button = header and header.MinimizeButton
     if not (skins and skins.SkinCloseButton and button) then return end
@@ -150,7 +207,9 @@ local function SkinCollapseButton(frame, header)
         local ok, value = pcall(frame.IsCollapsed, frame)
         collapsed = ok and value == true
     end
-    skins.SkinCloseButton(button, { anchor = header, glyph = collapsed and "plus" or "minus" })
+    -- Seated on our backdrop, so it rides the band in both states.
+    skins.SkinCloseButton(button, { anchor = backdrop, glyph = collapsed and "plus" or "minus" })
+    chrome.button = button
     if type(hooksecurefunc) == "function" and type(header.SetCollapsed) == "function" then
         hooksecurefunc(header, "SetCollapsed", function(_, nowCollapsed)
             skins.SetGlyph(button, nowCollapsed == true and "plus" or "minus")
@@ -159,36 +218,10 @@ local function SkinCollapseButton(frame, header)
     end
 end
 
--- Content-height RECT signal: ObjectiveTrackerFrame's own GetHeight() is NOT
--- content-sized in normal play -- ObjectiveTrackerContainerMixin:UpdateHeight
--- (Blizzard_ObjectiveTrackerContainer.lua:189-210) only recomputes height from
--- content when the container is NOT in its default anchored position (edit
--- mode); the normal case derives height from a fixed anchor to UIParent, so
--- GetHeight() reports screen space, not used space. The container's own
--- "NineSlice" child (NineSlicePanelTemplate, Blizzard_ObjectiveTrackerContainer.xml:71-80)
--- IS the real signal: every ObjectiveTrackerContainerMixin:Update pass
--- repositions its BOTTOM to the last laid-out module's bottom minus
--- bottomModulePadding (Blizzard_ObjectiveTrackerContainer.lua:100), and its
--- fixed TOPLEFT/TOPRIGHT anchors span the header too, so its rect already
--- equals exactly the region Blizzard paints as the tracker's background.
--- Anchoring OUR backdrop to NineSlice's own points, rather than computing
--- content height ourselves, means we track every future layout pass for
--- free -- WoW resolves anchors live, no hook needed for the resize.
---
--- Show/hide signal is NOT NineSlice: Container:Update only ever calls
--- NineSlice:Show() (Blizzard_ObjectiveTrackerContainer.lua:101) -- nothing in
--- the source ever Hides it. The real "has content" switch is the CONTAINER
--- itself, ObjectiveTrackerFrame:Show()/Hide() (same file, lines 102/107): no
--- module produced content this pass -> the whole container Hides, UNLESS
--- edit mode is active (lines 103-106, EditModeManagerFrame:IsEditModeActive()),
--- which keeps it Shown even with nothing to display. Either way our backdrop
--- is parented to ObjectiveTrackerFrame, so it inherits whatever Show/Hide
--- state the container ends up in via ordinary parent-visibility cascade --
--- no hook of our own needed, and no separate edit-mode case to handle.
---
--- Fallback: if a future client build ever removes ObjectiveTrackerFrame.NineSlice,
--- BuildContainerChrome below anchors to the full ObjectiveTrackerFrame instead
--- -- never traces under a header/module at an unknown inset.
+-- Our backdrop follows the container's own NineSlice child: every container layout pass moves its BOTTOM to the last
+-- module's bottom (Blizzard_ObjectiveTrackerContainer.lua:100) and its TOPLEFT/TOPRIGHT are fixed, so anchoring to it
+-- tracks every resize with no hook. The container itself Shows/Hides with content, and our backdrop is its child, so
+-- visibility cascades. Without a NineSlice the backdrop anchors to the container frame.
 local function BuildContainerChrome()
     local frame = ObjectiveTrackerFrame
     if not (frame and frame.CreateTexture) then return end
@@ -198,98 +231,55 @@ local function BuildContainerChrome()
     local nineSlice = frame.NineSlice
     local usingNineSlice = nineSlice and nineSlice.SetPoint and nineSlice.SetAlpha
 
-    -- ObjectiveTrackerFrame declares frameStrata="LOW" in
-    -- Blizzard_ObjectiveTracker.xml:3. A new CreateFrame does NOT inherit its
-    -- parent's strata (it defaults to MEDIUM), so without this explicit
-    -- SetFrameStrata our backdrop would render ABOVE the entire tracker
-    -- regardless of frame level. Frame level is set to match the container's
-    -- OWN level (frame:GetFrameLevel()), the same level NineSlice itself uses
-    -- via its XML `useParentLevel="true"` (Blizzard_ObjectiveTrackerContainer.xml:71) --
-    -- Header and every module frame are plain children with no such
-    -- override, so their default level (parent level + 1) sits above this.
+    -- A new frame does not inherit its parent's LOW strata; set it, and sit at the container's own level (as its
+    -- NineSlice does) so the header and modules draw above.
     local backdrop = CreateFrame("Frame", nil, frame)
     backdrop:SetFrameStrata(frame:GetFrameStrata())
     backdrop:SetFrameLevel(frame:GetFrameLevel())
 
-    if usingNineSlice then
-        backdrop:SetPoint("TOPLEFT", nineSlice, "TOPLEFT", 0, 0)
-        backdrop:SetPoint("BOTTOMRIGHT", nineSlice, "BOTTOMRIGHT", 0, 0)
-    else
-        backdrop:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
-        backdrop:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
-    end
+    -- The same cut panel chrome every other STUwave panel wears.
+    Theme.AddPanelChrome(backdrop, { fillColor = Theme.COLOR_BG, accent = COLOR_POWER })
 
-    -- Same call order as Professions.lua's BuildChrome: glow -> fill -> border.
-    AddOuterGlow(backdrop, COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 3, 0.25, Theme.PANEL_RADIUS)
-    AddRoundedFill(backdrop, Theme.COLOR_BG, Theme.PANEL_RADIUS)
-    AddGradientBorder(backdrop, COLOR_POWER, 1, Theme.PANEL_RADIUS)
+    local inset = Theme.PanelBandInset()
+    local band = backdrop:CreateTexture(nil, "ARTWORK")
+    band:SetColorTexture(COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 0.08)
+    band:SetPoint("TOPLEFT", backdrop, "TOPLEFT", inset, -inset)
+    band:SetPoint("TOPRIGHT", backdrop, "TOPRIGHT", -inset, -inset)
+    band:SetHeight(Theme.PANEL_HEADER_H)
 
-    -- Title band, sized to the container Header's own rect (32px,
-    -- Blizzard_ObjectiveTrackerContainer.xml:19) so the band lines up with the
-    -- real header regardless of the backdrop's total height. Parented to the
-    -- backdrop (not the Header) so it stays behind the Header's own
-    -- MinimizeButton, which must stay clickable/visible.
+    local rule = backdrop:CreateTexture(nil, "ARTWORK")
+    rule:SetColorTexture(COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 0.30)
+    rule:SetPoint("TOPLEFT", band, "BOTTOMLEFT", 0, 0)
+    rule:SetPoint("TOPRIGHT", band, "BOTTOMRIGHT", 0, 0)
+    rule:SetHeight(1)
+
+    local label = backdrop:CreateFontString(nil, "OVERLAY")
+    ApplyMono(label, 10, COLOR_POWER)
+    label:SetPoint("LEFT", band, "LEFT", BAR_PAD, 0)
+    label:SetWordWrap(false)
+    label:SetText(CollapsedText())
+
+    chrome.backdrop, chrome.frame, chrome.header, chrome.band, chrome.label = backdrop, frame, header, band, label
+    chrome.nineSlice = usingNineSlice and nineSlice or nil
+
     if header then
-        local band = backdrop:CreateTexture(nil, "ARTWORK")
-        band:SetColorTexture(COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 0.08)
-        local bandInset = Theme.PanelBandInset()
-        band:SetPoint("TOPLEFT", header, "TOPLEFT", bandInset, -bandInset)
-        band:SetPoint("TOPRIGHT", header, "TOPRIGHT", -bandInset, -bandInset)
-        band:SetHeight(Theme.PANEL_HEADER_H)
-
-        local rule = backdrop:CreateTexture(nil, "ARTWORK")
-        rule:SetColorTexture(COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 0.30)
-        rule:SetPoint("TOPLEFT", band, "BOTTOMLEFT", 0, 0)
-        rule:SetPoint("TOPRIGHT", band, "BOTTOMRIGHT", 0, 0)
-        rule:SetHeight(1)
-
-        local label = backdrop:CreateFontString(nil, "OVERLAY")
-        ApplyMono(label, 10, COLOR_POWER)
-        label:SetPoint("LEFT", band, "LEFT", 10, 0)
-        -- Right edge pinned off the MinimizeButton's left edge (when present)
-        -- so the label can never run under it, same collision-avoidance idiom
-        -- Professions.lua's BuildRow uses for name-vs-value.
-        if header.MinimizeButton then
-            label:SetPoint("RIGHT", header.MinimizeButton, "LEFT", -6, 0)
-            label:SetWordWrap(false)
-        end
-        label:SetText(TITLE)
-        chrome.label = label
-
-        -- Stock header background art + text hidden via SetAlpha(0), not
-        -- Hide(): keeps Blizzard's own Show/Hide state (and anything that
-        -- reads Header.Text's content) intact, only suppresses the pixels.
-        -- Text is replaced rather than kept-and-recolored: the container
-        -- Header's text ("Objectives"/localized) sitting directly under our
-        -- own "stuwave://objectives" label would double up two overlapping
-        -- captions in the same 32px band -- one label reads cleaner than two.
-        if header.Background and header.Background.SetAlpha then
-            header.Background:SetAlpha(0)
-        end
-        if header.Text and header.Text.SetAlpha then
-            header.Text:SetAlpha(0)
-        end
-        -- MinimizeButton keeps its own click path and place in the header; it is only skinned (SkinCollapseButton).
-        SkinCollapseButton(frame, header)
+        -- Stock header art and text held at alpha 0 (not Hidden), so Blizzard's own show state is untouched.
+        if header.Background and header.Background.SetAlpha then header.Background:SetAlpha(0) end
+        if header.Text and header.Text.SetAlpha then header.Text:SetAlpha(0) end
+        SkinCollapseButton(frame, header, backdrop)
     end
 
-    -- Blizzard's own NineSlice background is alpha'd out (not Hidden) so our
-    -- backdrop replaces it visually. No visibility hook needed: see the
-    -- show/hide note above -- the backdrop's OWN Show() state stays true
-    -- always, and it disappears exactly when ObjectiveTrackerFrame itself
-    -- does, via ordinary parent-visibility cascade.
-    if usingNineSlice then
-        nineSlice:SetAlpha(0)
-    end
-
+    if usingNineSlice then nineSlice:SetAlpha(0) end
     backdrop:Show()
 
-    chrome.backdrop, chrome.frame, chrome.header = backdrop, frame, header
-    chrome.nineSlice = usingNineSlice and nineSlice or nil
     local collapsed = false
     if type(frame.IsCollapsed) == "function" then
         local ok, value = pcall(frame.IsCollapsed, frame)
         collapsed = ok and value == true
+    end
+    -- After each layout pass: which module is first can change (a new quest type, a recipe tracked).
+    if type(hooksecurefunc) == "function" and type(frame.Update) == "function" then
+        hooksecurefunc(frame, "Update", Relayout)
     end
     ApplyCollapsed(collapsed)
     WatchQuestCount()
@@ -312,7 +302,7 @@ end
 -- (Blizzard_ProfessionsRecipeTracker.xml:3, `inherits="ObjectiveTrackerModuleTemplate"`).
 -- That shared template is why one loop below can treat all eleven module
 -- names identically rather than special-casing any of them.
-local MODULE_NAMES = {
+MODULE_NAMES = {
     "QuestObjectiveTracker",
     "CampaignQuestObjectiveTracker",
     "AchievementObjectiveTracker",
@@ -370,13 +360,15 @@ local function StyleModuleHeader(moduleName)
     rule:SetPoint("BOTTOMRIGHT", header, "BOTTOMRIGHT", 0, 0)
     rule:SetHeight(1)
 
-    -- One collapse control: the tracker's own (the plate on the title band). Each module's stock gold minus is held
-    -- invisible and unclickable (playtest 2026-11-05: two sets of minimize were confusing). Alpha and mouse only; the
-    -- button, its script and its place are untouched.
+    moduleRules[header] = rule
+
+    -- One collapse control: the tracker's own. Each module's stock gold minus is hidden, and kept hidden: its header's
+    -- add animation fades it back in, so an alpha of 0 did not hold (playtest 2026-11-05). Nothing in Blizzard's
+    -- tracker code Shows it; the Show hook is a guard.
     local minimize = header.MinimizeButton
-    if minimize then
-        if minimize.SetAlpha then minimize:SetAlpha(0) end
-        if minimize.EnableMouse then pcall(minimize.EnableMouse, minimize, false) end
+    if minimize and minimize.Hide then
+        minimize:Hide()
+        if type(hooksecurefunc) == "function" then hooksecurefunc(minimize, "Show", minimize.Hide) end
     end
 
     header.fsModuleHeaderSkin = true
@@ -385,6 +377,149 @@ end
 local function StyleModuleHeaders()
     for _, name in ipairs(MODULE_NAMES) do
         StyleModuleHeader(name)
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Quest markers (the POI buttons beside each quest title)
+-------------------------------------------------------------------------------
+
+-- Blizzard's gold "?" (ready to turn in) and "..." (in progress) discs, playtest 2026-11-05: still stock art. Each
+-- marker gets a small cut plate of our own drawn over it, its Blizzard art held at alpha 0 (HeldArt), with the
+-- shared button looks: hover lifts the ring and washes the face, pressed nudges the glyph a pixel, and the quest
+-- being followed (selected) wears pink. The button, its click, its place and its pool are Blizzard's; markers are
+-- found after each module layout by reading the module's block list. Textures and alpha only, so safe in combat.
+local MARKER_SIZE = 16
+local poiSkins = setmetatable({}, { __mode = "k" }) -- POI button -> our pieces and hover/pressed state
+
+local function Lift(c, t)
+    return { c[1] + (1 - c[1]) * t, c[2] + (1 - c[2]) * t, c[3] + (1 - c[3]) * t }
+end
+
+local function MarkerKind(button)
+    local styles = POIButtonUtil and POIButtonUtil.Style
+    local ok, style = pcall(button.GetStyle, button)
+    if not ok or not styles then return "dots" end
+    if style == styles.QuestComplete then return "ask" end
+    if style == styles.QuestInProgress then return "dots" end
+    if style == styles.QuestDisabled then return "none" end
+    return "bang"
+end
+
+local function PaintMarker(button)
+    local m = poiSkins[button]
+    if not m then return end
+    local kind = MarkerKind(button)
+    m.frame:SetShown(kind ~= "none")
+    if kind == "none" then return end
+    local okSel, selected = pcall(button.IsSelected, button)
+    selected = okSel and selected == true
+    local accent = selected and Theme.COLOR_HEALTH or (kind == "ask" and Theme.COLOR_AMBER or COLOR_POWER)
+    local hover, pressed = m.hover, m.pressed
+    local wash = pressed and 0.40 or (hover and 0.25 or (selected and 0.15 or 0))
+    local ink = Theme.COLOR_BUTTON_INK
+    m.fill:SetVertexColor(ink[1] + (accent[1] - ink[1]) * wash, ink[2] + (accent[2] - ink[2]) * wash,
+        ink[3] + (accent[3] - ink[3]) * wash, 1)
+    m.ring:SetVertexColor(accent[1], accent[2], accent[3], (hover or pressed or selected) and 1 or 0.75)
+    m.glow:SetVertexColor(accent[1], accent[2], accent[3], (hover or pressed) and 0.65 or (selected and 0.45 or 0.2))
+    local g = (hover or pressed) and Lift(accent, 0.55) or accent
+    local dx, dy = pressed and 1 or 0, pressed and -1 or 0
+    m.text:ClearAllPoints()
+    m.text:SetPoint("CENTER", m.frame, "CENTER", dx, dy)
+    m.text:SetTextColor(g[1], g[2], g[3], 1)
+    m.text:SetText(kind == "ask" and "?" or "!")
+    m.text:SetShown(kind ~= "dots")
+    for i, dot in ipairs(m.dots) do
+        dot:ClearAllPoints()
+        dot:SetPoint("CENTER", m.frame, "CENTER", (i - 2) * 4 + dx, dy)
+        dot:SetColorTexture(g[1], g[2], g[3], 1)
+        dot:SetShown(kind == "dots")
+    end
+end
+
+local function SkinMarker(button)
+    if poiSkins[button] or type(button) ~= "table" or type(button.CreateTexture) ~= "function" then return end
+    if FS.HeldArt then FS.HeldArt.HoldButton(button) end
+    local display = button.Display
+    if display and display.SetAlpha then
+        display:SetAlpha(0)
+        if type(hooksecurefunc) == "function" then
+            local zeroing = false
+            hooksecurefunc(display, "SetAlpha", function(self)
+                if zeroing then return end
+                zeroing = true
+                self:SetAlpha(0)
+                zeroing = false
+            end)
+        end
+    end
+
+    local f = CreateFrame("Frame", nil, button)
+    f:SetSize(MARKER_SIZE, MARKER_SIZE)
+    f:SetPoint("CENTER", button, "CENTER", 0, 0)
+    if f.EnableMouse then f:EnableMouse(false) end
+    local m = { frame = f, dots = {}, hover = false, pressed = false }
+    m.glow = Theme.AddCut2Texture(f, Theme.SLICE_CUT2_GLOW_TEXTURE, COLOR_POWER, "BACKGROUND", 1,
+        -Theme.SLICE_CUT2_GLOW_PAD)
+    m.fill = Theme.AddCut2Texture(f, Theme.SLICE_CUT2_FILL_TEXTURE, Theme.COLOR_BUTTON_INK, "ARTWORK", 1)
+    m.ring = Theme.AddCut2Texture(f, Theme.SLICE_CUT2_OUTLINE_TEXTURE, COLOR_POWER, "ARTWORK", 2)
+    m.text = f:CreateFontString(nil, "OVERLAY")
+    ApplyMono(m.text, 11, COLOR_POWER)
+    for i = 1, 3 do
+        local dot = f:CreateTexture(nil, "OVERLAY")
+        dot:SetSize(2, 2)
+        m.dots[i] = dot
+    end
+    poiSkins[button] = m
+
+    local function set(field, value)
+        return function(self)
+            local s = poiSkins[self]
+            if s then s[field] = value; PaintMarker(self) end
+        end
+    end
+    if button.HookScript then
+        button:HookScript("OnEnter", set("hover", true))
+        button:HookScript("OnLeave", function(self)
+            local s = poiSkins[self]
+            if s then s.hover, s.pressed = false, false; PaintMarker(self) end
+        end)
+        button:HookScript("OnMouseDown", set("pressed", true))
+        button:HookScript("OnMouseUp", set("pressed", false))
+    end
+    if type(hooksecurefunc) == "function" then
+        for _, method in ipairs({ "UpdateButtonStyle", "SetStyle", "SetSelected", "UpdateSelected" }) do
+            if type(button[method]) == "function" then pcall(hooksecurefunc, button, method, PaintMarker) end
+        end
+    end
+    PaintMarker(button)
+end
+
+local function SkinModuleMarkers(module)
+    local used = type(module) == "table" and module.usedBlocks
+    if type(used) ~= "table" then return end
+    for _, blocks in pairs(used) do
+        if type(blocks) == "table" then
+            for _, block in pairs(blocks) do
+                local poi = type(block) == "table" and block.poiButton
+                if poi then
+                    SkinMarker(poi)
+                    PaintMarker(poi)
+                end
+            end
+        end
+    end
+end
+
+local function WatchMarkers()
+    if type(hooksecurefunc) ~= "function" then return end
+    for _, name in ipairs(MODULE_NAMES) do
+        local module = _G[name]
+        if module and not poiSkins[module] and type(module.EndLayout) == "function" then
+            hooksecurefunc(module, "EndLayout", SkinModuleMarkers)
+            poiSkins[module] = true
+            SkinModuleMarkers(module)
+        end
     end
 end
 
@@ -461,6 +596,7 @@ local function Apply()
     StyleLineFont()
     BuildContainerChrome()
     StyleModuleHeaders()
+    WatchMarkers()
     SkinQuestTimer()
 end
 
