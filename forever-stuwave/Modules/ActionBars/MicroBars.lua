@@ -1328,6 +1328,47 @@ local function PlateQueueEye(eye)
     local fill = T.AddCut2Texture(eye, T.SLICE_CUT2_FILL_TEXTURE, PLATE_NORMAL, "BACKGROUND", -7)
     local ring = T.AddCut2Texture(eye, T.SLICE_CUT2_OUTLINE_TEXTURE, CYAN, "BACKGROUND", -6)
     eye.fsEyePlate = { glow = glow, fill = fill, ring = ring }
+
+    -- Our own eye. Blizzard's is a flipbook with its round bezel baked into every frame, so it cannot sit on this
+    -- plate without that bezel (player, 2026-11-05: "we need our own icon or remove the border"). Its Eye frame is
+    -- held at alpha 0 (a SetAlpha post-hook puts it back to 0 if Blizzard writes it), and a cyan lid with a pink
+    -- pupil (tools/assets/generate_queue_eye.py) breathes on a loop while the eye shows, i.e. while queued. The
+    -- button itself (click, tooltip, the queue pop's highlight pulse) stays Blizzard's.
+    local stock = eye.Eye
+    if stock and stock.SetAlpha then
+        stock:SetAlpha(0)
+        if hooksecurefunc then
+            local zeroing = false
+            hooksecurefunc(stock, "SetAlpha", function(self)
+                if zeroing then return end
+                zeroing = true; self:SetAlpha(0); zeroing = false
+            end)
+        end
+    end
+    local mark = CreateFrame("Frame", nil, eye)
+    mark:SetAllPoints(eye)
+    mark:EnableMouse(false)
+    local lid = mark:CreateTexture(nil, "ARTWORK")
+    lid:SetTexture(MEDIA .. "queue_eye_lid.tga")
+    lid:SetPoint("CENTER", eye, "CENTER", 0, 0)
+    lid:SetSize(eye:GetWidth() * 0.86, eye:GetHeight() * 0.86)
+    lid:SetVertexColor(CYAN[1], CYAN[2], CYAN[3], 1)
+    local pupil = mark:CreateTexture(nil, "OVERLAY")
+    pupil:SetTexture(MEDIA .. "queue_eye_pupil.tga")
+    pupil:SetAllPoints(lid)
+    pupil:SetVertexColor(PINK[1], PINK[2], PINK[3], 1)
+    eye.fsEyePlate.lid, eye.fsEyePlate.pupil = lid, pupil
+    if mark.CreateAnimationGroup then
+        local breathe = mark:CreateAnimationGroup()
+        breathe:SetLooping("BOUNCE")
+        local fade = breathe:CreateAnimation("Alpha")
+        fade:SetFromAlpha(1)
+        fade:SetToAlpha(0.45)
+        fade:SetDuration(1.1)
+        fade:SetSmoothing("IN_OUT")
+        breathe:Play()
+        eye.fsEyePlate.breathe = breathe
+    end
 end
 
 -- Blizzard anchors the LFG eye to MicroMenu, which is now an empty frame in the bottom right corner. The eye sits

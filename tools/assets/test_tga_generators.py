@@ -41,6 +41,8 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     "anti_corner": (64, 64),
     # generate_loc_tick.py: one glowing tick of the loss of control ring, rotated in Lua.
     "loc_tick": (64, 64),
+    # generate_queue_eye.py: our own group finder eye, lid (cyan) and pupil (pink), tinted in Lua.
+    "queue_eye": {"queue_eye_lid": (64, 64), "queue_eye_pupil": (64, 64)},
     # generate_icon_style.py: the runtime icon style's nine 8x8 colour ramps and the one 128x128 key cover.
     "icon_style": {
         **{f"iconramp_{family}": (8, 8) for family in (
