@@ -84,7 +84,8 @@ SRC_FILES = {
 }
 
 PIECE_OF = {"your": "you", "next": "next", "shard": "shard", "buff": "buff", "target": "tgt",
-            "dots": "dot", "procs": "prc", "party": "party"}
+            "dots": "dot", "procs": "prc", "party": "party",
+            "quests": "quests", "chat": "chat"}
 
 
 # ---------------------------------------------------------------------------------------
@@ -98,8 +99,8 @@ def mockup_keys() -> dict:
             r"\{k:'(\w+)',n:'([^']*)',d:(?:'([^']*)'|\"([^\"]*)\"),c:'(\w+)',g:'(\w+)'\}", src):
         k, n, d1, d2, c, g = m.groups()
         defs.append(dict(piece=PIECE_OF[k], n=n, d=d1 if d1 is not None else d2, c=c, g=g))
-    if len(defs) != 8:
-        sys.exit(f"mockup: expected 8 DECK_DEFS entries, found {len(defs)}")
+    if len(defs) != 10:
+        sys.exit(f"mockup: expected 10 DECK_DEFS entries, found {len(defs)}")
     # The v2 mockup names key 6 for the DoT scale; it now switches both target side areas, so only its
     # tooltip text differs from the mockup (the glyph, colour and slot are still the mockup's).
     for d in defs:
@@ -161,6 +162,18 @@ end
 function FrameMT:SetHitRectInsets(l, r, t, b) self.hit = { l = l, r = r, t = t, b = b } end
 function FrameMT:RegisterForClicks(...) self.clicks = { ... } end
 function FrameMT:GetEffectiveScale() return 1 end
+function FrameMT:SetAttribute(k, v) self.attrs = self.attrs or {}; self.attrs[k] = v end
+function FrameMT:GetAttribute(k) return self.attrs and self.attrs[k] end
+function FrameMT:HookScript(k, fn)
+    self.scripts = self.scripts or {}
+    local old = self.scripts[k]
+    self.scripts[k] = old and function(...) old(...); fn(...) end or fn
+end
+hooksecurefunc = hooksecurefunc or function(obj, name, fn)
+    if type(obj) == "string" then obj, name, fn = _G, obj, name end
+    local orig = obj[name]
+    obj[name] = function(...) local r = { orig(...) }; fn(...); return unpack(r) end
+end
 -- the real client runs OnHide when a shown frame is hidden; the base mock does not
 local baseHide = FrameMT.Hide
 function FrameMT:Hide()
@@ -358,14 +371,19 @@ def case(name: str):
 case("keys_are_plain_buttons_in_the_console_tab")(r"""
 local CK = boot({})
 check(CK.IsBuilt(), "keys were not built")
-check(#CK.keys == 8, "expected 8 keys, got " .. #CK.keys)
+check(#CK.keys == 10, "expected 10 keys, got " .. #CK.keys)
 local tab = FS.Console.tab
 check(tab, "the Console has no tab")
 local host = CK.keys[1].btn:GetParent()
 check(host:GetParent() == tab, "the key host is not a child of the Console tab")
 for i, k in ipairs(CK.keys) do
     check(k.btn.kind == "Button", "key " .. i .. " is not a Button")
-    check(k.btn.template == nil and k.btn:IsProtected() == false, "key " .. i .. " must be a plain non secure Button")
+    if k.key == "quests" then
+        check(k.btn.template == "SecureActionButtonTemplate", "the quests key is a secure click of the tracker's own minimise")
+        check(k.btn:GetAttribute("type") == "click", "the quests key's action is a click")
+    else
+        check(k.btn.template == nil and k.btn:IsProtected() == false, "key " .. i .. " must be a plain non secure Button")
+    end
     check(k.btn:GetParent() == host, "key " .. i .. " is not under the host")
 end
 -- no annunciator ticks and nothing else hangs off the tab: the host is its only child frame/texture
@@ -374,7 +392,7 @@ for _, c in ipairs(tab.children) do kids = kids + 1 end
 check(kids == 1, "the tab has " .. kids .. " children, only the key host belongs there")
 local n = 0
 for _, c in ipairs(host.children) do n = n + 1 end
-check(n == 8, "the host holds " .. n .. " children, expected the eight keys")
+check(n == 10, "the host holds " .. n .. " children, expected the ten keys")
 """)
 
 key_layout_body = r"""
@@ -466,6 +484,7 @@ local all = { "party" }
 for _, piece in ipairs(G.PIECES) do all[#all + 1] = piece end
 for _, def in ipairs(CK.DEFS) do
     local piece = def.key
+    if piece == "quests" or piece == "chat" then goto continue end
     local k = keyOf(CK, piece)
     for _, other in ipairs(all) do check(isOn(other), "all switches start on") end
     click(k)
@@ -476,6 +495,7 @@ for _, def in ipairs(CK.DEFS) do
     check(FS.Config.Get("gunsight.pieces." .. piece) == false, piece .. " off was not saved")
     click(k)
     check(isOn(piece), "clicking " .. piece .. " again did not turn it on")
+    ::continue::
 end
 """)
 
@@ -540,7 +560,7 @@ for i, d in ipairs(MU.defs) do
     check(#GameTooltip.lines == 2, "tooltip carries more than name, state and description")
     check(GameTooltip.points[1][2] == k.btn, "tooltip anchored to the key")
     local corner = GameTooltip.points[1][1]
-    if i <= 3 then check(corner == "BOTTOMLEFT", "keys 1 to 3 left align the tooltip") elseif i > 6 then check(corner == "BOTTOMRIGHT", "keys 7 and 8 right align it") else check(corner == "BOTTOM", "middle keys centre it") end
+    if i <= 3 then check(corner == "BOTTOMLEFT", "keys 1 to 3 left align the tooltip") elseif i > #MU.defs - 2 then check(corner == "BOTTOMRIGHT", "the last two keys right align it") else check(corner == "BOTTOM", "middle keys centre it") end
     k.btn.scripts.OnLeave(k.btn)
     check(not GameTooltip.shown, "tooltip stays after leaving key " .. i)
 end
@@ -888,7 +908,7 @@ case("console_off_at_login_builds_the_keys_when_it_comes_on")(r"""
 local CK = boot({ consoleOff = true, db = { consoleEnabled = false } })
 check(not CK.IsBuilt(), "keys were built before the Console had a tab")
 SlashCmdList["FSCONSOLE"]("on")
-check(CK.IsBuilt() and #CK.keys == 8, "keys not built once the Console is on")
+check(CK.IsBuilt() and #CK.keys == 10, "keys not built once the Console is on")
 for _, k in ipairs(CK.keys) do check(k.btn:IsVisible(), "key " .. k.key .. " not visible") end
 """)
 
@@ -959,14 +979,14 @@ end
 -- The HUD is off: the party key alone is drawn, in slot 0 of a one key tab that stands at its full height,
 -- and the seven HUD keys exist but are hidden.
 local function checkPartyOnly(CK, label)
-    eq(joined(shownList(CK)), "party", label .. ": the party key alone is drawn")
-    checkFits(CK, 1, label)
+    eq(joined(shownList(CK)), "party,quests,chat", label .. ": the party key alone is drawn")
+    checkFits(CK, 3, label)
     eq(keyOf(CK, "party").slot, 0, label .. ": the party key takes slot 0")
     eq(tabPiecesShown(), 6, label .. ": the tab stands")
     eq(FS.Console.TabHeight(), FS.Console.C.TH, label .. ": at its full height")
     check(keyOf(CK, "party").btn:IsVisible(), label .. ": the party key is visible")
     for _, k in ipairs(CK.keys) do
-        if k.key ~= "party" then
+        if k.key ~= "party" and k.key ~= "quests" and k.key ~= "chat" then
             check(not k.btn:IsShown() and not k.btn:IsVisible(), label .. ": " .. k.key .. " is hidden")
         end
     end
@@ -976,7 +996,7 @@ end
 case("gunsight_disabled_at_login_draws_only_the_party_key")(SHOWN_HELPERS + r"""
 local CK, G = boot({ db = { gunsight = { enabled = false, pieces = { party = false } } } })
 check(not G.IsEnabled(), "gunsight is disabled")
-check(CK.IsBuilt() and #CK.keys == 8, "the keys are built whatever the Gunsight is doing")
+check(CK.IsBuilt() and #CK.keys == 10, "the keys are built whatever the Gunsight is doing")
 checkPartyOnly(CK, "gunsight disabled at login")
 local party = keyOf(CK, "party")
 check(party.phase == "off", "the party key shows the party frames' saved state")
@@ -1048,12 +1068,12 @@ local function corners(profile, db, only)
     return table.concat(out, ",")
 end
 -- the tab ends at the Console's right edge, so the last key's tooltip always opens leftward
-eq(corners(nil, { gunsight = { enabled = false, pieces = {} } }), "party=BOTTOMRIGHT", "the lone party key")
+eq(corners(nil, { gunsight = { enabled = false, pieces = {} } }), "party=BOTTOMLEFT,quests=BOTTOMLEFT,chat=BOTTOMRIGHT", "the HUD off: party, quests and chat")
 -- the other counts keep their rule: slots 0 to 2 left, then centred, the last two right
-eq(corners("WARLOCK"), "you=BOTTOMLEFT,next=BOTTOMLEFT,shard=BOTTOMLEFT,buff=BOTTOM,tgt=BOTTOM,dot=BOTTOM,prc=BOTTOMRIGHT,party=BOTTOMRIGHT", "eight keys")
-eq(corners(false), "you=BOTTOMLEFT,tgt=BOTTOMLEFT,dot=BOTTOMLEFT,party=BOTTOMRIGHT", "four keys")
-eq(corners("WARLOCK", nil, { you = true }), "you=BOTTOMLEFT,party=BOTTOMRIGHT", "two keys")
-eq(corners("WARLOCK", nil, { you = true, tgt = true }), "you=BOTTOMLEFT,tgt=BOTTOMLEFT,party=BOTTOMRIGHT", "three keys")
+eq(corners("WARLOCK"), "you=BOTTOMLEFT,next=BOTTOMLEFT,shard=BOTTOMLEFT,buff=BOTTOM,tgt=BOTTOM,dot=BOTTOM,prc=BOTTOM,party=BOTTOM,quests=BOTTOMRIGHT,chat=BOTTOMRIGHT", "ten keys")
+eq(corners(false), "you=BOTTOMLEFT,tgt=BOTTOMLEFT,dot=BOTTOMLEFT,party=BOTTOM,quests=BOTTOMRIGHT,chat=BOTTOMRIGHT", "six keys")
+eq(corners("WARLOCK", nil, { you = true }), "you=BOTTOMLEFT,party=BOTTOMLEFT,quests=BOTTOMLEFT,chat=BOTTOMRIGHT", "four keys")
+eq(corners("WARLOCK", nil, { you = true, tgt = true }), "you=BOTTOMLEFT,tgt=BOTTOMLEFT,party=BOTTOMLEFT,quests=BOTTOMRIGHT,chat=BOTTOMRIGHT", "five keys")
 """)
 
 case("hide_clears_hover_and_down_and_repaints_the_look")(r"""
@@ -1070,7 +1090,7 @@ near(k.wash.vcolor[4], 0, "the wash was not repainted on hide")
 
 case("geometry_after_login_builds_the_keys_too")(r"""
 local CK = boot({ geometryFirst = false })
-check(CK.IsBuilt() and #CK.keys == 8, "keys must build when the Console geometry arrives after the Gunsight is ready")
+check(CK.IsBuilt() and #CK.keys == 10, "keys must build when the Console geometry arrives after the Gunsight is ready")
 """)
 
 
@@ -1079,18 +1099,18 @@ check(CK.IsBuilt() and #CK.keys == 8, "keys must build when the Console geometry
 # ---------------------------------------------------------------------------------------
 
 
-case("warlock_profile_shows_all_eight_keys")(SHOWN_HELPERS + r"""
+case("warlock_profile_shows_all_ten_keys")(SHOWN_HELPERS + r"""
 local CK = boot({ profile = "WARLOCK" })
-check(#CK.keys == 8, "eight keys are built")
-eq(joined(shownList(CK)), "you,next,shard,buff,tgt,dot,prc,party", "all eight, in order")
-checkFits(CK, 8, "warlock")
-eq(FS.Console.TabWidth(8), MU.TAB_DW, "the tab is the mockup's TAB_DW at eight keys")
+check(#CK.keys == 10, "eight keys are built")
+eq(joined(shownList(CK)), "you,next,shard,buff,tgt,dot,prc,party,quests,chat", "all eight, in order")
+checkFits(CK, 10, "warlock")
+eq(FS.Console.TabWidth(10), MU.TAB_DW, "the tab is the mockup's TAB_DW at ten keys")
 """)
 
 case("priest_hides_shard_and_prc_and_repacks")(SHOWN_HELPERS + r"""
 local CK = boot({ profile = "PRIEST" })
-eq(joined(shownList(CK)), "you,next,buff,tgt,dot,party", "priest has no shards and no procs")
-checkFits(CK, 6, "priest")
+eq(joined(shownList(CK)), "you,next,buff,tgt,dot,party,quests,chat", "priest has no shards and no procs")
+checkFits(CK, 8, "priest")
 -- the repack: consecutive slots, nothing left where the hidden keys were
 local want = { you = 0, next = 1, buff = 2, tgt = 3, dot = 4, party = 5 }
 for piece, slot in pairs(want) do
@@ -1107,7 +1127,8 @@ local function corner(piece)
     return c
 end
 eq(corner("you"), "BOTTOMLEFT", "slot 0"); eq(corner("buff"), "BOTTOMLEFT", "slot 2")
-eq(corner("tgt"), "BOTTOM", "slot 3"); eq(corner("dot"), "BOTTOMRIGHT", "slot 4"); eq(corner("party"), "BOTTOMRIGHT", "slot 5")
+eq(corner("tgt"), "BOTTOM", "slot 3"); eq(corner("dot"), "BOTTOM", "slot 4"); eq(corner("party"), "BOTTOM", "slot 5")
+eq(corner("quests"), "BOTTOMRIGHT", "slot 6"); eq(corner("chat"), "BOTTOMRIGHT", "slot 7")
 -- the hit areas still tile the (even) pitch among the shown keys
 local s = FS.Layout.Scale()
 local shown = {}
@@ -1122,8 +1143,8 @@ case("no_profile_hides_shard_prc_next_and_buff_but_the_dot_key_stays")(SHOWN_HEL
 local CK = boot({ profile = false })
 check(HUD_PROFILE == nil, "no profile")
 -- shard, prc, next and buff have nothing without a profile; the dot key (Target side) needs no profile
-eq(joined(shownList(CK)), "you,tgt,dot,party", "the keys that need no profile")
-checkFits(CK, 4, "no profile")
+eq(joined(shownList(CK)), "you,tgt,dot,party,quests,chat", "the keys that need no profile")
+checkFits(CK, 6, "no profile")
 eq(FS.HudProfiles.ROGUE, nil, "ROGUE has no HUD profile entry, so it takes this same path")
 """)
 
@@ -1142,8 +1163,8 @@ local CK = boot({ profile = "PALADIN" })
 check(HUD_PROFILE ~= nil, "the paladin has a profile")
 -- the cooldown tracker: a one rule rotation (next) and two sided procs (prc); no shards or buffs. The DoT slot
 -- is a class slot: the paladin has no DoTs but a seal table, so its key stays and toggles the target side areas.
-eq(joined(shownList(CK)), "you,next,tgt,dot,prc,party", "next, dot and prc, no shard or buff")
-checkFits(CK, 6, "paladin")
+eq(joined(shownList(CK)), "you,next,tgt,dot,prc,party,quests,chat", "next, dot and prc, no shard or buff")
+checkFits(CK, 8, "paladin")
 check(next(FS.HudProfiles.PALADIN.dots) == nil and type(FS.HudProfiles.PALADIN.seals) == "table",
       "the paladin profile has no dots and a seals table (the rule under test)")
 """)
@@ -1169,24 +1190,24 @@ local function shownFor(profile)
     local CK = boot({ profile = profile })
     return joined(shownList(CK))
 end
-eq(shownFor({}), "you,tgt,dot,party", "an empty profile has nothing for any profile key")
-eq(shownFor({ resource = { shards = { item = 6265 } } }), "you,shard,tgt,dot,party", "shards need resource.shards")
-eq(shownFor({ resource = {} }), "you,tgt,dot,party", "a resource without shards shows no shard key")
-eq(shownFor({ procs = {} }), "you,tgt,dot,party", "empty procs: no key")
-eq(shownFor({ procs = { x = { label = "X" } } }), "you,tgt,dot,party", "a proc with no side draws no rung, so no key")
-eq(shownFor({ procs = { x = { side = "left" } } }), "you,tgt,dot,prc,party", "a proc with a side shows the key")
-eq(shownFor({ rotation = {} }), "you,tgt,dot,party", "an empty rotation has no next cast")
-eq(shownFor({ rotation = { { cast = "x", when = {} } } }), "you,next,tgt,dot,party", "a rotation shows the next key")
-eq(shownFor({ selfBuffs = {} }), "you,tgt,dot,party", "no self buffs: no buff key")
-eq(shownFor({ selfBuffs = { { spell = "x" } } }), "you,buff,tgt,dot,party", "self buffs show the buff key")
-eq(shownFor({ dots = {} }), "you,tgt,dot,party", "no dots and no seals: the dot key still shows")
-eq(shownFor({ dots = { x = {} } }), "you,tgt,dot,party", "dots show the dot key")
-eq(shownFor({ seals = { order = { "sor" } } }), "you,tgt,dot,party", "a seals table alone shows the dot key")
-eq(shownFor({ dots = {}, seals = { order = { "sor" } } }), "you,tgt,dot,party", "empty dots plus seals shows it")
-eq(shownFor({ dots = { x = {} }, seals = { order = { "sor" } } }), "you,tgt,dot,party", "dots plus seals shows it once")
-eq(shownFor({ seals = true }), "you,tgt,dot,party", "a seals value that is not a table: the dot key still shows")
-eq(shownFor({ dotLabel = { n = "N", d = "D" } }), "you,tgt,dot,party", "a dotLabel alone: the dot key still shows")
-eq(shownFor({ rotation = { { cast = "x", when = {} } } }), "you,next,tgt,dot,party", "the other keys keep their own rules")
+eq(shownFor({}), "you,tgt,dot,party,quests,chat", "an empty profile has nothing for any profile key")
+eq(shownFor({ resource = { shards = { item = 6265 } } }), "you,shard,tgt,dot,party,quests,chat", "shards need resource.shards")
+eq(shownFor({ resource = {} }), "you,tgt,dot,party,quests,chat", "a resource without shards shows no shard key")
+eq(shownFor({ procs = {} }), "you,tgt,dot,party,quests,chat", "empty procs: no key")
+eq(shownFor({ procs = { x = { label = "X" } } }), "you,tgt,dot,party,quests,chat", "a proc with no side draws no rung, so no key")
+eq(shownFor({ procs = { x = { side = "left" } } }), "you,tgt,dot,prc,party,quests,chat", "a proc with a side shows the key")
+eq(shownFor({ rotation = {} }), "you,tgt,dot,party,quests,chat", "an empty rotation has no next cast")
+eq(shownFor({ rotation = { { cast = "x", when = {} } } }), "you,next,tgt,dot,party,quests,chat", "a rotation shows the next key")
+eq(shownFor({ selfBuffs = {} }), "you,tgt,dot,party,quests,chat", "no self buffs: no buff key")
+eq(shownFor({ selfBuffs = { { spell = "x" } } }), "you,buff,tgt,dot,party,quests,chat", "self buffs show the buff key")
+eq(shownFor({ dots = {} }), "you,tgt,dot,party,quests,chat", "no dots and no seals: the dot key still shows")
+eq(shownFor({ dots = { x = {} } }), "you,tgt,dot,party,quests,chat", "dots show the dot key")
+eq(shownFor({ seals = { order = { "sor" } } }), "you,tgt,dot,party,quests,chat", "a seals table alone shows the dot key")
+eq(shownFor({ dots = {}, seals = { order = { "sor" } } }), "you,tgt,dot,party,quests,chat", "empty dots plus seals shows it")
+eq(shownFor({ dots = { x = {} }, seals = { order = { "sor" } } }), "you,tgt,dot,party,quests,chat", "dots plus seals shows it once")
+eq(shownFor({ seals = true }), "you,tgt,dot,party,quests,chat", "a seals value that is not a table: the dot key still shows")
+eq(shownFor({ dotLabel = { n = "N", d = "D" } }), "you,tgt,dot,party,quests,chat", "a dotLabel alone: the dot key still shows")
+eq(shownFor({ rotation = { { cast = "x", when = {} } } }), "you,next,tgt,dot,party,quests,chat", "the other keys keep their own rules")
 local CK = boot({ profile = "WARLOCK" })
 eq(CK.KeyShown("dot", { dots = {} }), true, "KeyShown: no dots, no seals still shows")
 eq(CK.KeyShown("dot", { seals = {} }), true, "KeyShown: a seals table")
@@ -1194,7 +1215,7 @@ eq(CK.KeyShown("dot", nil), true, "KeyShown: no profile")
 eq(CK.KeyShown("you", nil), true, "KeyShown: the always keys")
 """)
 
-case("even_spacing_at_8_6_and_4_keys")(SHOWN_HELPERS + r"""
+case("even_spacing_at_10_8_and_6_keys")(SHOWN_HELPERS + r"""
 local function gaps(CK)
     local s = FS.Layout.Scale()
     local xs = {}
@@ -1206,7 +1227,7 @@ local function gaps(CK)
     return out
 end
 local four = {}   -- an empty profile: you, tgt, dot, party
-for _, case in ipairs({ { 8, "WARLOCK" }, { 6, "PRIEST" }, { 4, four } }) do
+for _, case in ipairs({ { 10, "WARLOCK" }, { 8, "PRIEST" }, { 6, four } }) do
     local n, profile = case[1], case[2]
     local CK = boot({ profile = profile })
     local g = gaps(CK)
@@ -1250,21 +1271,21 @@ check(not shard.hover, "hover cleared with the hidden key")
 
 case("a_late_profile_reruns_the_visibility_on_every_hook")(SHOWN_HELPERS + r"""
 local CK = boot({ profile = false })
-eq(joined(shownList(CK)), "you,tgt,dot,party", "no profile yet")
+eq(joined(shownList(CK)), "you,tgt,dot,party,quests,chat", "no profile yet")
 HUD_PROFILE = FS.HudProfiles.PRIEST
 fire("PLAYER_ENTERING_WORLD")
-eq(joined(shownList(CK)), "you,next,buff,tgt,dot,party", "entering world picks the profile up")
-checkFits(CK, 6, "priest after entering world")
+eq(joined(shownList(CK)), "you,next,buff,tgt,dot,party,quests,chat", "entering world picks the profile up")
+checkFits(CK, 8, "priest after entering world")
 HUD_PROFILE = FS.HudProfiles.WARLOCK
 FS.ActionBars.Publish()
-eq(joined(shownList(CK)), "you,next,shard,buff,tgt,dot,prc,party", "a geometry publish picks it up")
-checkFits(CK, 8, "warlock after a publish")
+eq(joined(shownList(CK)), "you,next,shard,buff,tgt,dot,prc,party,quests,chat", "a geometry publish picks it up")
+checkFits(CK, 10, "warlock after a publish")
 HUD_PROFILE = nil
 fire("PLAYER_REGEN_ENABLED")
-eq(joined(shownList(CK)), "you,tgt,dot,party", "regen picks it up")
+eq(joined(shownList(CK)), "you,tgt,dot,party,quests,chat", "regen picks it up")
 HUD_PROFILE = FS.HudProfiles.PRIEST
 SetScreen(1200); fire("UI_SCALE_CHANGED"); FS.ActionBars.Publish()
-checkFits(CK, 6, "priest after a rescale")
+checkFits(CK, 8, "priest after a rescale")
 -- an unchanged profile does no work: no re-anchoring, no tab resize
 local tab = FS.Console.tab
 local setSize, setPoint = tab.calls.SetSize, CK.keys[1].btn.calls.SetPoint
@@ -1280,14 +1301,14 @@ local setSize, setPoint = tab.calls.SetSize, CK.keys[1].btn.calls.SetPoint
 IN_COMBAT = true
 HUD_PROFILE = FS.HudProfiles.WARLOCK
 fire("PLAYER_ENTERING_WORLD")
-eq(joined(shownList(CK)), "you,tgt,dot,party", "nothing shown or hidden in combat")
+eq(joined(shownList(CK)), "you,tgt,dot,party,quests,chat", "nothing shown or hidden in combat")
 eq(tab.calls.SetSize, setSize, "the tab is not resized in combat")
 eq(CK.keys[1].btn.calls.SetPoint, setPoint, "keys are not re-anchored in combat")
-eq(FS.Console.GetKeyCount(), 4, "the Console keeps the old count in combat")
+eq(FS.Console.GetKeyCount(), 6, "the Console keeps the old count in combat")
 check(#BLOCKED == 0, "nothing protected was touched in combat")
 IN_COMBAT = false
 fire("PLAYER_REGEN_ENABLED")
-checkFits(CK, 8, "warlock after regen")
+checkFits(CK, 10, "warlock after regen")
 """)
 
 case("the_console_off_hides_the_shown_keys_with_the_tab")(SHOWN_HELPERS + r"""
@@ -1297,8 +1318,8 @@ for _, k in ipairs(CK.keys) do check(not k.btn:IsVisible(), k.key .. " visible w
 SlashCmdList["FSCONSOLE"]("on")
 local vis = {}
 for _, k in ipairs(CK.keys) do if k.btn:IsVisible() then vis[#vis + 1] = k.key end end
-eq(joined(vis), "you,next,buff,tgt,dot,party", "only the shown keys come back")
-checkFits(CK, 6, "priest after the console came back")
+eq(joined(vis), "you,next,buff,tgt,dot,party,quests,chat", "only the shown keys come back")
+checkFits(CK, 8, "priest after the console came back")
 """)
 
 
@@ -1308,7 +1329,7 @@ checkFits(CK, 6, "priest after the console came back")
 
 case("fsgun_off_at_runtime_hides_the_hud_keys_and_on_brings_them_back")(SHOWN_HELPERS + r"""
 local CK, G = boot({ profile = "PRIEST" })
-checkFits(CK, 6, "priest before")
+checkFits(CK, 8, "priest before")
 local standing = tabGeometry()
 eq(tabPiecesShown(), 6, "the tab stands with the Gunsight on")
 local heard = {}
@@ -1323,8 +1344,8 @@ FS.ActionBars.Publish()
 fire("PLAYER_ENTERING_WORLD")
 checkPartyOnly(CK, "hooks leave the one key tab")
 SlashCmdList["FSGUN"]("on")
-checkFits(CK, 6, "priest after on")
-checkTabBack(standing, 6, "gunsight back on")
+checkFits(CK, 8, "priest after on")
+checkTabBack(standing, 8, "gunsight back on")
 eq(#heard, 0, "and the height was never announced")
 for _, k in ipairs(CK.keys) do if k.shown then check(k.btn:IsVisible(), k.key .. " not back") end end
 click(keyOf(CK, "you"))
@@ -1333,7 +1354,7 @@ check(not G.IsPieceOn("you"), "a key works again")
 SlashCmdList["FSGUN"]("off")
 checkPartyOnly(CK, "second off")
 SlashCmdList["FSGUN"]("on")
-checkTabBack(standing, 6, "second on")
+checkTabBack(standing, 8, "second on")
 """)
 
 case("the_console_off_and_on_with_the_gunsight_off_keeps_only_the_party_key")(SHOWN_HELPERS + r"""
@@ -1345,7 +1366,7 @@ for _, k in ipairs(CK.keys) do check(not k.btn:IsVisible(), k.key .. " visible w
 SlashCmdList["FSCONSOLE"]("on")
 checkPartyOnly(CK, "console back on with the Gunsight off")
 SlashCmdList["FSGUN"]("on")
-checkFits(CK, 6, "priest after on")
+checkFits(CK, 8, "priest after on")
 eq(tabPiecesShown(), 6, "the tab is back with the keys")
 """)
 
@@ -1390,13 +1411,13 @@ check(not FS.PartyFrames.IsShown(), "party off")
 IN_COMBAT = true
 SlashCmdList["FSGUN"]("off")
 for _, k in ipairs(CK.keys) do
-    if k.key == "party" then
-        check(k.btn:IsVisible(), "the party key is drawn in combat after master off")
+    if k.key == "party" or k.key == "quests" or k.key == "chat" then
+        check(k.btn:IsVisible(), "the " .. k.key .. " key is drawn in combat after master off")
     else
         check(not k.btn:IsVisible(), k.key .. " still drawn in combat after master off")
     end
 end
-eq(FS.Console.GetKeyCount(), 6, "the Console is not resized in combat")
+eq(FS.Console.GetKeyCount(), 8, "the Console is not resized in combat")
 eq(tabPiecesShown(), 6, "the tab is not narrowed in combat")
 click(keyOf(CK, "party"))
 check(FS.PartyFrames.IsShown(), "the party key works in combat with the Gunsight off")
@@ -1408,11 +1429,11 @@ IN_COMBAT = true
 SlashCmdList["FSGUN"]("on")
 check(G.IsActive() == false, "a hidden root cannot come back in combat")
 for _, k in ipairs(CK.keys) do
-    if k.key ~= "party" then check(not k.btn:IsVisible(), k.key .. " drawn while the Gunsight is still inactive") end
+    if k.key ~= "party" and k.key ~= "quests" and k.key ~= "chat" then check(not k.btn:IsVisible(), k.key .. " drawn while the Gunsight is still inactive") end
 end
 IN_COMBAT = false
 fire("PLAYER_REGEN_ENABLED")
-checkFits(CK, 6, "priest after combat")
+checkFits(CK, 8, "priest after combat")
 eq(tabPiecesShown(), 6, "the tab is back after combat")
 check(#FS.PartyFrames.calls == 2, "the master switch never asked the party frames anything: " .. table.concat(FS.PartyFrames.calls, ","))
 check(#BLOCKED == 0, "nothing protected in combat")
@@ -1427,14 +1448,14 @@ IN_COMBAT = true
 SlashCmdList["FSGUN"]("on")
 check(G.IsActive() == false, "a hidden root cannot be shown in combat: the Gunsight waits for regen")
 for _, k in ipairs(CK.keys) do
-    if k.key ~= "party" then check(not k.btn:IsVisible(), k.key .. " is not drawn before the Gunsight is back") end
+    if k.key ~= "party" and k.key ~= "quests" and k.key ~= "chat" then check(not k.btn:IsVisible(), k.key .. " is not drawn before the Gunsight is back") end
 end
-eq(FS.Console.GetKeyCount(), 1, "the Console is not resized in combat")
+eq(FS.Console.GetKeyCount(), 3, "the Console is not resized in combat")
 check(#BLOCKED == 0, "nothing protected in combat")
 IN_COMBAT = false
 fire("PLAYER_REGEN_ENABLED")
 check(G.IsActive() == true, "the Gunsight is back at regen")
-checkFits(CK, 6, "the HUD keys return with it")
+checkFits(CK, 8, "the HUD keys return with it")
 for _, k in ipairs(CK.keys) do if k.shown then check(k.btn:IsVisible(), k.key .. " not drawn after regen") end end
 """)
 
@@ -1448,7 +1469,7 @@ check(G.IsActive() == true, "the root never left the screen: active again")
 for _, k in ipairs(CK.keys) do if k.shown then check(k.btn:IsVisible(), k.key .. " is back at once") end end
 IN_COMBAT = false
 fire("PLAYER_REGEN_ENABLED")
-checkFits(CK, 6, "the keys settle on the on state after combat")
+checkFits(CK, 8, "the keys settle on the on state after combat")
 for _, k in ipairs(CK.keys) do if k.shown then check(k.btn:IsVisible(), k.key .. " not drawn after off then on in one fight") end end
 check(#BLOCKED == 0, "nothing protected in combat")
 """)

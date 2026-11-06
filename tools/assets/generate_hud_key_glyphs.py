@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generates the eight 32x32 glyphs for the Gunsight HUD toggle keys.
+"""Generates the ten 32x32 glyphs for the Gunsight HUD toggle keys.
 
 Reference: the design mockup, the
 GLY table (one SVG fragment per glyph, 16 x 16 viewBox) and DECK_DEFS (which key
@@ -16,6 +16,8 @@ Files written (in forever-stuwave/Media/Textures), and the key that wears each o
     glyph_hud_clock.tga     dots    DoT Timers      clock face
     glyph_hud_bolt.tga      procs   Procs           lightning bolt
     glyph_hud_group.tga     party   Party Frame     three heads and shoulders
+    glyph_hud_list.tga      quests  Quests          three bullets and lines
+    glyph_hud_chat.tga      chat    Chat            speech bubble
 
 Style, from the mockup's CSS: `.kgl` is stroke-width 1.6 in the 16 unit box, round
 caps and joins, fill none; the elements marked `fill="currentColor" stroke="none"`
@@ -84,6 +86,13 @@ GLYPHS = {
             ("M1 12.6c0-1.8.9-2.9 2.3-2.9", 1.0),
             ("M15 12.6c0-1.8-.9-2.9-2.3-2.9", 1.0),
         ],
+    },
+    "list": {
+        "paths": [("M6 4h7.6M6 8h7.6M6 12h7.6", 1.0)],
+        "dots": [(2.8, 4.0, 1.0), (2.8, 8.0, 1.0), (2.8, 12.0, 1.0)],
+    },
+    "chat": {
+        "paths": [("M2.2 2.8h11.6v7.6H7.4L4.4 13.4v-3H2.2z", 1.0)],
     },
 }
 

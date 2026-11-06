@@ -85,7 +85,7 @@ local C = {
     TP = 15,                                        -- padding right of the last key, above the keys, and (perpendicular) from the cut to the first key
 }
 -- COUNT is the most keys the tab holds, none at all is no tab. The pitch is EVEN (key + GAP): no group gaps.
-local KEY = { W = 34, H = 26, C = 6, GAP = 4, PAD = 16, SH = 18, COUNT = 8 }
+local KEY = { W = 34, H = 26, C = 6, GAP = 4, PAD = 16, SH = 18, COUNT = 10 }
 local ROW_PITCH_DESIGN, BTN_DESIGN = 49.2, 36
 local function KeyX(i)
     return KEY.SH + KEY.PAD + i * (KEY.W + KEY.GAP)

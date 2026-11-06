@@ -1572,7 +1572,7 @@ function T.console_constants_match_the_mockup()
     near(FS.Console.TabWidth(M.DECK_N), M.TAB_DW, "TabWidth at the mockup's key count is its TAB_DW", 1e-9)
     near(key.PAD, M.KEY_PAD); near(key.SH, M.KEY_SH)
     near(FS.Console.KeyRect(0, 1).x, M.KEY_X0 - M.FOOT, "first key x in the tab (scale 1)")
-    near(FS.Console.KeyRect(7, 1).x, M.KEY_XL - M.FOOT, "eighth key x in the tab (scale 1)")
+    near(FS.Console.KeyRect(M.DECK_N - 1, 1).x, M.KEY_XL - M.FOOT, "last key x in the tab (scale 1)")
     near(FS.Console.KEY.COUNT, M.DECK_N, "the console carries the mockup's key count at most")
 end
 

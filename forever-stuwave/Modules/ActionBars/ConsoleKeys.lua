@@ -1,6 +1,6 @@
 -- Forever STUwave: Console keys
 --
--- The eight keys on the Console's shoulder tab (the locked design in
+-- The ten keys on the Console's shoulder tab (the locked design in
 -- the design mockup: DECK_DEFS, GLY, keySvg,
 -- the `.cdeck.bm` key rules and the Rings block). Each key toggles ONE switch: a Gunsight piece, or for the party
 -- key the party frames' own switch, which does not depend on the Gunsight HUD (DEFS order is the slot order when
@@ -9,7 +9,10 @@
 --   key 1  you    Your Cast      cyan    glyph_hud_chev       key 6  dot    Target side    violet  clock
 --   key 2  next   Next Cast      gold    play                 key 7  prc    Procs          amber   bolt
 --   key 3  shard  Soul Shards    violet  diamond              key 8  party  Party Frame    green   group
---   key 4  buff   Buff Reminder  pink    shield
+--   key 4  buff   Buff Reminder  pink    shield               key 9  quests Quests         amber   list
+--                                                             key 10 chat   Chat           cyan    chat
+-- Keys 8 to 10 do not depend on the Gunsight HUD: party switches the party frames, quests clicks the objectives
+-- tracker's own minimise button (a secure click, see SECURE QUESTS KEY), chat minimises or restores the chat.
 --   key 5  tgt    Target Cast    pink    cross
 --
 -- HIDING. A key shows only when its piece has something to draw for the class profile
@@ -116,19 +119,66 @@ local PartyFrames = FS.PartyFrames
 
 -- Where a key's on/off state lives (see STATE above). The party key is the party frames' own switch, every other key
 -- a Gunsight piece. Calls go through the Gunsight table at call time, so nothing here caches a function.
+-- The quests key is the objectives tracker's own collapse: open = not collapsed. Its key is a secure button that
+-- clicks the tracker header's minimise button (see SECURE QUESTS KEY), so no addon code collapses the tracker.
+local function Tracker() return _G.ObjectiveTrackerFrame end
+local function TrackerMinimise()
+    local tracker = Tracker()
+    local header = type(tracker) == "table" and tracker.Header
+    return type(header) == "table" and header.MinimizeButton or nil
+end
+local function TrackerOpen()
+    local tracker = Tracker()
+    if type(tracker) ~= "table" or type(tracker.IsCollapsed) ~= "function" then return true end
+    local ok, collapsed = pcall(tracker.IsCollapsed, tracker)
+    return not (ok and collapsed == true)
+end
+-- The chat key is the STUwave chat's minimise: open = not minimised (maximised counts as open).
+local function ChatOpen()
+    local Chat = FS.Chat
+    return not (type(Chat) == "table" and Chat.windowState == "min")
+end
+
 local Switch = {}
 function Switch.IsOn(piece)
     if piece == "party" then return PartyFrames.IsShown() end
+    if piece == "quests" then return TrackerOpen() end
+    if piece == "chat" then return ChatOpen() end
     return Gunsight.IsPieceOn(piece)
 end
 function Switch.Set(piece, on)
     if piece == "party" then return PartyFrames.SetShown(on) end
+    if piece == "quests" then return end   -- the secure key's own click does it
+    if piece == "chat" then
+        local Chat = FS.Chat
+        if type(Chat) ~= "table" or type(Chat.ApplyWindowState) ~= "function" then return end
+        if on == ChatOpen() then return end
+        Chat.windowState = on and "normal" or "min"
+        return Chat.ApplyWindowState()
+    end
     return Gunsight.SetPiece(piece, on)
 end
--- fn(piece, on) runs after a key's state changed, however it was changed.
+-- fn(piece, on) runs after a key's state changed, however it was changed. The tracker and chat hooks are
+-- post-hooks, set once when the keys are built (Switch.HookLate), since both may load after this file.
+local onChanged = {}
 function Switch.OnChanged(fn)
+    onChanged[#onChanged + 1] = fn
     Gunsight.OnPieceChanged(fn)
     PartyFrames.OnShownChanged(function(on) fn("party", on) end)
+end
+local function Notify(piece, on)
+    for _, fn in ipairs(onChanged) do fn(piece, on) end
+end
+local hookedTracker, hookedChat = false, false
+function Switch.HookLate()
+    local tracker = Tracker()
+    if not hookedTracker and type(tracker) == "table" and type(tracker.SetCollapsed) == "function" then
+        hookedTracker = pcall(hooksecurefunc, tracker, "SetCollapsed", function() Notify("quests", TrackerOpen()) end)
+    end
+    local Chat = FS.Chat
+    if not hookedChat and type(Chat) == "table" and type(Chat.ApplyWindowState) == "function" then
+        hookedChat = pcall(hooksecurefunc, Chat, "ApplyWindowState", function() Notify("chat", ChatOpen()) end)
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -166,6 +216,8 @@ local DEFS = {
     { key = "dot", n = "Target side", d = "Target debuffs and class module beside the target cast bar", c = "violet", g = "clock" },
     { key = "prc", n = "Procs", d = "Proc and cooldown posts", c = "amber", g = "bolt" },
     { key = "party", n = "Party Frame", d = "Show or hide the party frame", c = "green", g = "group" },
+    { key = "quests", n = "Quests", d = "Open or collapse the quest tracker", c = "amber", g = "list", secure = true },
+    { key = "chat", n = "Chat", d = "Open or minimise the chat window", c = "cyan", g = "chat" },
 }
 ConsoleKeys.DEFS = DEFS
 ConsoleKeys.COLORS = COLORS
@@ -459,8 +511,15 @@ local function BuildKey(i, def)
         index = i, def = def, key = def.key, color = color, phase = "off", t0 = 0, rT = -1e9,
         arcs = {}, segs = {}, lr = {}, lg = {}, lb = {}, la = {}, ringShown = true,
     }
-    local btn = CreateFrame("Button", "FSConsoleKey" .. def.key, host)
+    -- SECURE QUESTS KEY: a SecureActionButton whose click is the tracker header's own minimise button
+    -- (type "click"), so the collapse runs as Blizzard's code in or out of combat. Seated, shown and hidden out of
+    -- combat only, like every key (ApplyLayout). Up clicks only, pinned, so one press is one click.
+    local btn = CreateFrame("Button", "FSConsoleKey" .. def.key, host, def.secure and "SecureActionButtonTemplate" or nil)
     btn:RegisterForClicks("LeftButtonUp")
+    if def.secure then
+        btn:SetAttribute("useOnKeyDown", false)
+        btn:SetAttribute("type", "click")
+    end
     k.btn = btn
 
     local art = CreateFrame("Frame", nil, btn)
@@ -527,15 +586,22 @@ local function BuildKey(i, def)
     btn:SetScript("OnMouseUp", function() k.down = false; Look(k) end)
     btn:SetScript("OnHide", function() k.hover = false; k.down = false; Look(k); HideTip(k) end)
     btn:Hide()   -- ApplyLayout shows the keys that have something to show
-    btn:SetScript("OnClick", function()
-        Switch.Set(k.key, not Switch.IsOn(k.key))
-        if k.hover then ShowTip(k) end   -- the ON / OFF word follows the click
-    end)
+    if def.secure then
+        btn:HookScript("OnClick", function()
+            if k.hover then ShowTip(k) end
+        end)
+    else
+        btn:SetScript("OnClick", function()
+            Switch.Set(k.key, not Switch.IsOn(k.key))
+            if k.hover then ShowTip(k) end   -- the ON / OFF word follows the click
+        end)
+    end
     return k
 end
 
 -- The HUD keys belong to the Gunsight HUD; the party key is the party frames' own switch.
-local function IsHudKey(piece) return piece ~= "party" end
+local NOT_HUD = { party = true, quests = true, chat = true }
+local function IsHudKey(piece) return not NOT_HUD[piece] end
 
 -- True when the key for `piece` is drawn right now. The party key always is: the party frames do not depend on
 -- the HUD, so its switch stays on the Console with the HUD off (never built, or switched off), where it is the
@@ -565,6 +631,12 @@ local function ApplyLayout()
         if k.shown then k.slot = slot; slot = slot + 1 else k.slot = nil end
     end
     shownCount = slot
+    Switch.HookLate()
+    local quests = byPiece.quests
+    local minimise = TrackerMinimise()
+    if quests and minimise and quests.btn:GetAttribute("clickbutton") ~= minimise then
+        quests.btn:SetAttribute("clickbutton", minimise)
+    end
     Console.SetKeyCount(slot)   -- the party key is always drawn, so never 0 (the Console would draw no tab)
     local s = Scale()
     local half = Console.KEY.GAP / 2

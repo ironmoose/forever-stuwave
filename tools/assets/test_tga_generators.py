@@ -70,10 +70,10 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "cast_chevron_up_strip": (32, 16),
         "cast_chevron_up_cap": (64, 32),
     },
-    # generate_hud_key_glyphs.py: the eight HUD toggle key glyphs.
+    # generate_hud_key_glyphs.py: the ten HUD toggle key glyphs.
     "hud_key_glyphs": {
         f"glyph_hud_{name}": (32, 32)
-        for name in ("chev", "play", "diamond", "shield", "cross", "clock", "bolt", "group")
+        for name in ("chev", "play", "diamond", "shield", "cross", "clock", "bolt", "group", "list", "chat")
     },
     # generate_totem_glyphs.py: the Shaman totem tab's six glyphs and the locked button's dotted mold.
     "totem_glyphs": {
@@ -1160,7 +1160,7 @@ def test_chevron_up_strip_is_one_chevron_per_tile_and_wraps_vertically(
 
 # --- toggle key glyphs ------------------------------------------------------
 
-GLYPH_HUD_NAMES = ("chev", "play", "diamond", "shield", "cross", "clock", "bolt", "group")
+GLYPH_HUD_NAMES = ("chev", "play", "diamond", "shield", "cross", "clock", "bolt", "group", "list", "chat")
 GLYPH_HUD_GENERATOR = GENERATOR_DIR / "generate_hud_key_glyphs.py"
 
 
@@ -1171,8 +1171,8 @@ def hud_glyph_outputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return work
 
 
-def test_hud_key_glyph_count_is_eight(hud_glyph_outputs: Path) -> None:
-    assert len(list(hud_glyph_outputs.glob("*.tga"))) == 8
+def test_hud_key_glyph_count_is_ten(hud_glyph_outputs: Path) -> None:
+    assert len(list(hud_glyph_outputs.glob("*.tga"))) == 10
     assert {p.stem for p in hud_glyph_outputs.glob("*.tga")} == {
         f"glyph_hud_{n}" for n in GLYPH_HUD_NAMES}
 
