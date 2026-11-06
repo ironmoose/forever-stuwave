@@ -320,6 +320,24 @@ function LOC.Apply()
     if number and number.SetFont then Theme.ApplyMono(number, G.TIME_PX, Theme.COLOR_HEALTH) end
     if seconds and seconds.SetFont then Theme.ApplyMono(seconds, G.TIME_PX, Theme.COLOR_HEALTH) end
     if seconds and seconds.SetText then seconds:SetText("SEC") end
+    -- Blizzard pops the word and the time with a text height animation (FadingFrame_UpdateTextScaling) that ends on
+    -- SetTextHeight(22) and (20), over our 17 and 11 px fonts: the text overflowed the plate and the time row,
+    -- centred for 11 px, sat off centre (player, 2026-11-05). A post-hook puts our height back after every one of
+    -- those calls; Blizzard's own call stays secure and nothing of its state is written.
+    for _, fs in ipairs({ name, number, seconds, sizer }) do
+        if fs and fs.GetFont and fs.SetTextHeight and hooksecurefunc then
+            local _, height = fs:GetFont()
+            if type(height) == "number" and height > 0 then
+                local pinning = false
+                hooksecurefunc(fs, "SetTextHeight", function(self)
+                    if pinning then return end
+                    pinning = true
+                    pcall(self.SetTextHeight, self, height)
+                    pinning = false
+                end)
+            end
+        end
+    end
     if number and frame.CreateFontString then
         sizer = frame:CreateFontString(nil, "BACKGROUND")
         Theme.ApplyMono(sizer, G.TIME_PX, Theme.COLOR_HEALTH)

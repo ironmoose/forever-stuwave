@@ -50,6 +50,9 @@ function Obj:GetStringWidth()
     if self.text == SECRET then return SECRET end
     return #tostring(self.text or "") * 8
 end
+function Obj:SetFont(path, size) self.font = { path, size } end
+function Obj:GetFont() if self.font then return self.font[1], self.font[2] end end
+function Obj:SetTextHeight(h) self.th = h end
 function Obj:CreateFontString() local f = New("FontString"); __fonts = (__fonts or 0) + 1; return f end
 function Obj:GetFrameLevel() return 10 end
 function Obj:HookScript(n, fn) self.hooks = self.hooks or {}; self.hooks[n] = fn end
@@ -99,7 +102,9 @@ FS = {
         AddSliceTexture = function(f) return f:CreateTexture() end,
         AddCut2Texture = function(f) return f:CreateTexture() end,
         AddCutCornerOutline = function(f) return f:CreateTexture() end,
-        ApplyNineSlice = function() end, ApplyFontGeneric = function() end, ApplyMono = function() end,
+        ApplyNineSlice = function() end,
+        ApplyFontGeneric = function(fs, _, px) fs:SetFont("orb", px) end,
+        ApplyMono = function(fs, px) fs:SetFont("mono", px) end,
     },
 }
 function Load() assert(loadstring(SRC, "@LossOfControl.lua"))("forever-stuwave", FS); return FS.LossOfControl end
@@ -196,6 +201,17 @@ case("the_time_row_is_centred_as_a_pair", """
     __tick()
     local p = { F.AbilityName:GetPoint() }
     assert(p[4] == 0, "the word stays centred: " .. tostring(p[4]))
+""")
+
+case("blizzards_text_pop_ends_on_our_sizes", """
+    __data = { locType = "STUN", startTime = 9, duration = 3 }
+    Load()
+    local F = LossOfControlFrame
+    F.AbilityName:SetTextHeight(22)
+    F.TimeLeft.NumberText:SetTextHeight(20)
+    F.TimeLeft.SecondsText:SetTextHeight(20)
+    assert(F.AbilityName.th == 17, "word height " .. tostring(F.AbilityName.th))
+    assert(F.TimeLeft.NumberText.th == 11 and F.TimeLeft.SecondsText.th == 11, "time height")
 """)
 
 
