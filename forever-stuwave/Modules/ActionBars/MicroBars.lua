@@ -1318,31 +1318,59 @@ end
 
 local eyeBusy = false
 
--- Blizzard anchors the LFG eye to MicroMenu, which is now an empty frame in the
--- bottom right corner, under the XP bar's strata. Seats it just left of the deck
--- chassis, vertically centred, and above the deck's frame levels. Runs from the
--- eye's own UpdatePosition post-hook, which Blizzard calls on every MicroMenu
--- layout. It never calls UpdatePosition itself, and eyeBusy covers any re-entry.
--- No combat gate: QueueStatusButton is unprotected and Blizzard's own
--- UpdatePosition re-anchors it in combat, so the post-hook must re-place it in
--- combat too (a queue pop mid-fight would otherwise leave it under the XP bar).
+-- A STUwave key plate under the eye's own animated art: the two-corner cut fill, ring and glow of the minimap's
+-- keys, drawn on the eye's BACKGROUND so the eye itself stays on top. Built once.
+local function PlateQueueEye(eye)
+    if eye.fsEyePlate or not eye.CreateTexture then return end
+    local T = FS.Theme
+    local glow = T.AddCut2Texture(eye, T.SLICE_CUT2_GLOW_TEXTURE, { CYAN[1], CYAN[2], CYAN[3], 0.35 }, "BACKGROUND", -8,
+        -T.SLICE_CUT2_GLOW_PAD)
+    local fill = T.AddCut2Texture(eye, T.SLICE_CUT2_FILL_TEXTURE, PLATE_NORMAL, "BACKGROUND", -7)
+    local ring = T.AddCut2Texture(eye, T.SLICE_CUT2_OUTLINE_TEXTURE, CYAN, "BACKGROUND", -6)
+    eye.fsEyePlate = { glow = glow, fill = fill, ring = ring }
+end
+
+-- Blizzard anchors the LFG eye to MicroMenu, which is now an empty frame in the bottom right corner. The eye sits
+-- up by the minimap instead (playtest 2026-11-05): a key just left of the minimap's control strip (search,
+-- calendar, mail, coords), scaled to the strip's height, on a STUwave key plate. Before the minimap has built its
+-- strip it falls back to the old seat beside the deck. Runs from the eye's own UpdatePosition post-hook, which
+-- Blizzard calls on every MicroMenu layout; it never calls UpdatePosition itself, and eyeBusy covers any re-entry.
+-- No combat gate: QueueStatusButton is unprotected and Blizzard's own UpdatePosition re-anchors it in combat, so
+-- the post-hook must re-place it in combat too.
 local function PlaceQueueEye()
     local eye = _G.QueueStatusButton
+    local bezel = _G.Minimap and _G.Minimap.fsBezel
     local chassis = FS.Deck and FS.Deck.frame
-    if not eye or not chassis or eyeBusy then return end
+    if not eye or not (bezel or chassis) or eyeBusy then return end
 
     eyeBusy = true
     local ok = pcall(function()
-        local scale = eye:GetScale()
-        if type(scale) ~= "number" or scale <= 0 then scale = 1 end
-        eye:ClearAllPoints()
-        eye:SetPoint("RIGHT", chassis, "LEFT", -EYE_GAP * Scale() / scale, 0)
-        if eye:GetFrameStrata() ~= "HIGH" then eye:SetFrameStrata("HIGH") end
-        local level = chassis:GetFrameLevel() + EYE_LEVEL
-        if eye:GetFrameLevel() ~= level then eye:SetFrameLevel(level) end
+        if bezel then
+            PlateQueueEye(eye)
+            local h = eye:GetHeight()
+            local want = bezel:GetHeight() * bezel:GetEffectiveScale()
+            local parentScale = eye:GetParent() and eye:GetParent():GetEffectiveScale() or 1
+            if type(h) == "number" and h > 0 and want > 0 and parentScale > 0 then
+                local scale = want / (h * parentScale)
+                if math.abs((eye:GetScale() or 1) - scale) > 0.001 then eye:SetScale(scale) end
+            end
+            eye:ClearAllPoints()
+            eye:SetPoint("RIGHT", bezel, "LEFT", -EYE_GAP * Scale() / eye:GetScale(), 0)
+            if eye:GetFrameStrata() ~= bezel:GetFrameStrata() then eye:SetFrameStrata(bezel:GetFrameStrata()) end
+            local level = bezel:GetFrameLevel() + 10
+            if eye:GetFrameLevel() ~= level then eye:SetFrameLevel(level) end
+        else
+            local scale = eye:GetScale()
+            if type(scale) ~= "number" or scale <= 0 then scale = 1 end
+            eye:ClearAllPoints()
+            eye:SetPoint("RIGHT", chassis, "LEFT", -EYE_GAP * Scale() / scale, 0)
+            if eye:GetFrameStrata() ~= "HIGH" then eye:SetFrameStrata("HIGH") end
+            local level = chassis:GetFrameLevel() + EYE_LEVEL
+            if eye:GetFrameLevel() ~= level then eye:SetFrameLevel(level) end
+        end
     end)
     eyeBusy = false
-    if not ok then Degrade("eye", "could not seat the LFG eye beside the deck") end
+    if not ok then Degrade("eye", "could not seat the LFG eye by the minimap") end
 end
 
 -- The web ticket button is a child of the Character button, one level above it,
@@ -1532,11 +1560,13 @@ local function InstallReseatHooks()
     end
 
     -- MicroMenu:Layout calls the eye's UpdatePosition, which re-anchors it to
-    -- MicroMenu; the post-hook puts it back beside the deck.
+    -- MicroMenu; the post-hook puts it back by the minimap. The eye also shows when a
+    -- queue starts, which may be the first time the minimap strip exists, so OnShow seats it too.
     local eye = _G.QueueStatusButton
     if not eyeHooked and eye and type(eye.UpdatePosition) == "function" then
         if pcall(hooksecurefunc, eye, "UpdatePosition", PlaceQueueEye) then
             eyeHooked = true
+            if eye.HookScript then eye:HookScript("OnShow", PlaceQueueEye) end
             PlaceQueueEye()
         end
     end
