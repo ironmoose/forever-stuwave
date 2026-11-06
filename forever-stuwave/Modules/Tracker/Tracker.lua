@@ -178,9 +178,25 @@ local function SetBarHit(button, width)
     end
 end
 
+-- The console's Quests key opens and closes the tracker, so while it is on screen a collapsed tracker draws nothing
+-- at all (playtest 2026-11-05). Without the key the small collapsed bar stays, the only way back.
+local function KeyCarriesIt()
+    local key = _G.FSConsoleKeyquests
+    return type(key) == "table" and type(key.IsVisible) == "function" and key:IsVisible() == true
+end
+
+-- Hidden: our panel off, the minus glyph off and Blizzard's button deaf to the mouse (a secure Click still works).
+local function SetHidden(hidden)
+    local backdrop, button, icon = chrome.backdrop, chrome.button, chrome.icon
+    if backdrop then backdrop:SetShown(not hidden) end
+    if icon then icon:SetShown(not hidden) end
+    if button and button.EnableMouse then button:EnableMouse(not hidden) end
+end
+
 local function Relayout()
     local frame, backdrop = chrome.frame, chrome.backdrop
     if not backdrop then return end
+    SetHidden(chrome.collapsed and KeyCarriesIt())
     local top = chrome.nineSlice or frame
     local inset = Theme.PanelBandInset()
     backdrop:ClearAllPoints()

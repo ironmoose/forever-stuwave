@@ -41,6 +41,7 @@ function Obj:SetTextColor(r,g,b,a) self.tc={r,g,b,a} end
 function Obj:HookScript(k, fn) self.hooks[k] = fn end
 function Obj:GetText() return self.text end
 function Obj:GetStringWidth() return #(self.text or "") * 6 end
+function Obj:EnableMouse(v) self.mouse = v and true or false end
 function Obj:SetHitRectInsets(l,r,t,b) self.hit={l,r,t,b} end
 function Obj:GetHitRectInsets() if self.hit then return unpack(self.hit) end return -3,-3,-2,-3 end
 function Obj:CreateTexture() return new("Texture") end
@@ -114,11 +115,19 @@ case("collapsed_bar_is_compact_on_the_right", backdrop and backdrop.pts[1][1] ==
   and backdrop.w and backdrop.w < 140 and backdrop.h == 24)
 case("collapsed_bar_clicks_anywhere_through_the_button", btn.hit and btn.hit[1] == -6 and btn.hit[2] <= -(backdrop.w - 6 - 14 - 8))
 case("collapsed_restores_the_hidden_header_text", qh.Text.alpha == 1)
+case("collapsed_without_the_console_key_keeps_the_bar", backdrop.shown == true)
+
+-- the console's Quests key on screen: a collapsed tracker draws nothing and its button takes no mouse
+FSConsoleKeyquests = { IsVisible = function() return true end }
+tracker.Header:SetCollapsed(true)
+case("collapsed_with_the_quests_key_hides_the_bar", backdrop.shown == false and btn.mouse == false)
 
 collapsed = false
 tracker.Header:SetCollapsed(false)
 case("expanded_restores_the_button_hit_rect", btn.hit and btn.hit[1] == -3 and btn.hit[2] == -3)
 case("expanded_panel_spans_the_tracker_again", #backdrop.pts == 2 and backdrop.pts[2][1] == "BOTTOMRIGHT")
+case("expanded_shows_the_panel_and_its_button_again", backdrop.shown == true and btn.mouse == true)
+FSConsoleKeyquests = nil
 
 AchievementObjectiveTracker.height = 40
 tracker:Update()
