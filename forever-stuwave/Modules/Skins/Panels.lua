@@ -667,6 +667,29 @@ end
 -- than inside SkinOne because those font objects are shared across all of
 -- them. Idempotent and name-guarded, so re-running on every Blizzard_* load
 -- costs nothing.
+-- The map quest log pins its rewards box to the bottom of the details pane, and the quest text scrolls UNDER it. Blizzard's
+-- parchment on that box was what hid the text; QUESTMAP_GUTS strips it, so long quest text showed through the rewards
+-- (playtest 2026-11-05). The box gets an opaque terminal fill of our own, and a violet rule along its top edge.
+local function PlateQuestMapRewards()
+    local details = _G.QuestMapFrame and _G.QuestMapFrame.DetailsFrame
+    local container = details and details.RewardsFrameContainer
+    local rewards = container and container.RewardsFrame
+    -- only after the strip: a first strip sweeps every texture region, so a plate made before it would be hidden too
+    if not (rewards and rewards.CreateTexture and rewards.fsStripped) or rewards.fsRewardsPlate then return end
+    local T = FS.Theme
+    local bg = T.COLOR_BG
+    local fill = rewards:CreateTexture(nil, "BACKGROUND", nil, -8)
+    fill:SetColorTexture(bg[1], bg[2], bg[3], 1)
+    fill:SetAllPoints(rewards)
+    local rule = rewards:CreateTexture(nil, "BORDER", nil, 0)
+    local c = T.COLOR_BORDER
+    rule:SetColorTexture(c[1], c[2], c[3], 0.6)
+    rule:SetPoint("TOPLEFT", rewards, "TOPLEFT", 0, 0)
+    rule:SetPoint("TOPRIGHT", rewards, "TOPRIGHT", 0, 0)
+    rule:SetHeight(1)
+    rewards.fsRewardsPlate = { fill = fill, rule = rule }
+end
+
 local ScanAndSkin = FS.PanelSkins.CreateSkinDriver({
     entries = PANEL_FRAMES,
     skinEntry = SkinOne,
@@ -675,6 +698,7 @@ local ScanAndSkin = FS.PanelSkins.CreateSkinDriver({
             FS.Theme.LightenParchmentFonts()
         end
         FS.PanelSkins.ApplyGuts(PANEL_GUTS)
+        PlateQuestMapRewards()
         TryHookInboxOnShow()
         HookQuestRepopulation()
         SkinGossipGoodbyeButton()
