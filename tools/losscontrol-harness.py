@@ -8,7 +8,8 @@ plate for the word. These checks pin:
   * the ticks still lit follow the time left, and all stay lit when the time is unknown;
   * Blizzard's smoke and red rails go to alpha 0 and stay there;
   * the icon, word and seconds are re-seated into the jam's layout, again after the mixin sets up a display;
-  * a secret duration is never used for the ring.
+  * a secret duration is never used for the ring;
+  * the time row ("1.2" + "seconds") is centred as a pair, and the mixin's offset on the word is taken back.
 
     python3 tools/losscontrol-harness.py
 
@@ -44,6 +45,8 @@ function Obj:SetTextColor(r, g, b, a) self.color = { r, g, b, a or 1 } end
 function Obj:CreateTexture() local t = New("Texture"); __textures[#__textures + 1] = t; return t end
 function Obj:SetTexture(p) self.path = p end
 function Obj:GetFrameStrata() return "HIGH" end
+function Obj:SetText(t) self.text = t end
+function Obj:GetStringWidth() return #tostring(self.text or "") * 8 end
 function Obj:GetFrameLevel() return 10 end
 function Obj:HookScript(n, fn) self.hooks = self.hooks or {}; self.hooks[n] = fn end
 function Obj:SetScript(n, fn) self.scripts = self.scripts or {}; self.scripts[n] = fn end
@@ -54,7 +57,13 @@ function Obj:CreateAnimationGroup()
     return ag
 end
 __textures = {}
-function CreateFrame() return New("Frame") end
+__frames = {}
+function CreateFrame() local f = New("Frame"); __frames[#__frames + 1] = f; return f end
+function __tick()
+    for _, f in ipairs(__frames) do
+        if f.scripts and f.scripts.OnUpdate then f.scripts.OnUpdate(f, 1) end
+    end
+end
 function InCombatLockdown() return false end
 __now = 10
 function GetTime() return __now end
@@ -69,6 +78,7 @@ F.blackBg, F.RedLineTop, F.RedLineBottom = New("Texture"), New("Texture"), New("
 F.Icon = New("Texture"); F.Icon:SetPoint("CENTER", F, "CENTER", -60, 0)
 F.AbilityName = New("FontString")
 F.TimeLeft = New("Frame"); F.TimeLeft.NumberText = New("FontString"); F.TimeLeft.SecondsText = New("FontString")
+F.TimeLeft.NumberText.text = "1.2"; F.TimeLeft.SecondsText.text = "seconds"
 function F:SetUpDisplay() self.Icon:ClearAllPoints(); self.Icon:SetPoint("CENTER", self, "CENTER", -60, 0) end
 
 __data = nil
@@ -148,6 +158,30 @@ case("a_secret_duration_keeps_every_tick_lit", """
     __data = { locType = "SILENCE", startTime = SECRET, duration = SECRET }
     Load()
     assert(Lit(FS.Theme.COLOR_POWER) == 16, "lit: " .. Lit(FS.Theme.COLOR_POWER))
+""")
+
+case("the_time_row_is_centred_as_a_pair", """
+    __data = { locType = "STUN", startTime = 9, duration = 3 }
+    Load()
+    local F = LossOfControlFrame
+    local n, sec = F.TimeLeft.NumberText, F.TimeLeft.SecondsText
+    local function centre()
+        local p = { n:GetPoint() }
+        assert(p[1] == "LEFT" and p[2] == F and p[3] == "CENTER", "number pinned by its left edge")
+        local left = p[4]
+        local right = left + n:GetStringWidth() + 4 + sec:GetStringWidth()
+        return (left + right) / 2
+    end
+    assert(math.abs(centre()) <= 0.5, "1.2 seconds off centre by " .. centre())
+    n.text = "10"
+    __now = 10.1
+    __tick()                                         -- the plate's OnUpdate re-centres a number of a new length
+    assert(math.abs(centre()) <= 0.5, "10 seconds off centre by " .. centre())
+    -- the mixin's own name offset is taken back
+    F.AbilityName:SetPoint("CENTER", F, "CENTER", 31, 11)
+    __tick()
+    local p = { F.AbilityName:GetPoint() }
+    assert(p[4] == 0, "the word stays centred: " .. tostring(p[4]))
 """)
 
 

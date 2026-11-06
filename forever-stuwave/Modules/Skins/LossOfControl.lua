@@ -100,6 +100,42 @@ local function Region(...)
     return o
 end
 
+-- The time row ("1.2" then "seconds") is centred as a PAIR under the plate: the number's left edge sits half the
+-- pair's width left of centre. Pinning the number's right edge to the centre instead left the long "seconds" word
+-- hanging off to the right, the whole row visibly off centre (player, 2026-11-05). Widths are measured each tick
+-- (the number changes length: "10", "9.8", "1.2") and the row is moved only when the width changed. An unmeasurable
+-- width (secret or missing) falls back to the number alone centred.
+local TIME_GAP = 4
+local seatedTimeW
+local SeatTime
+
+local function PlainW(fs)
+    if not (fs and fs.GetStringWidth) then return nil end
+    local ok, w = pcall(fs.GetStringWidth, fs)
+    if ok and type(w) == "number" and not FS.IsSecret(w) then return w end
+    return nil
+end
+
+SeatTime = function()
+    local number, seconds = Region("TimeLeft", "NumberText"), Region("TimeLeft", "SecondsText")
+    if not (number and number.ClearAllPoints) then return end
+    local nw, sw = PlainW(number), PlainW(seconds)
+    local total = (nw and sw) and (nw + TIME_GAP + sw) or -1
+    if total == seatedTimeW then return end
+    seatedTimeW = total
+    local y = G.ICON_Y - G.PLATE_GAP - G.PLATE_H / 2 - 10
+    number:ClearAllPoints()
+    if total >= 0 then
+        number:SetPoint("LEFT", frame, "CENTER", math.floor(-total / 2 + 0.5), y)
+    else
+        number:SetPoint("CENTER", frame, "CENTER", 0, y)
+    end
+    if seconds and seconds.ClearAllPoints then
+        seconds:ClearAllPoints()
+        seconds:SetPoint("LEFT", number, "RIGHT", TIME_GAP, 0)
+    end
+end
+
 -- Puts Blizzard's icon and text into the jam's layout. The mixin's own anchors are replaced every time.
 local function Seat()
     local icon = frame.Icon
@@ -115,22 +151,20 @@ local function Seat()
         name:SetPoint("CENTER", frame, "CENTER", 0, plateMid + 6)
         if name.SetJustifyH then name:SetJustifyH("CENTER") end
     end
-    local number, seconds = Region("TimeLeft", "NumberText"), Region("TimeLeft", "SecondsText")
-    if number and number.ClearAllPoints then
-        number:ClearAllPoints()
-        number:SetPoint("RIGHT", frame, "CENTER", -2, plateMid - 10)
-    end
-    if seconds and seconds.ClearAllPoints and number then
-        seconds:ClearAllPoints()
-        seconds:SetPoint("LEFT", number, "RIGHT", 4, 0)
-    end
+    seatedTimeW = nil
+    SeatTime()
 end
 
 local function Seated()
     local icon = frame.Icon
     if not (icon and icon.GetPoint) then return true end
     local ok, point, rel, _, x, y = pcall(icon.GetPoint, icon, 1)
-    return ok and point == "CENTER" and rel == frame and x == 0 and y == G.ICON_Y
+    if not (ok and point == "CENTER" and rel == frame and x == 0 and y == G.ICON_Y) then return false end
+    -- The mixin moves the word with its own centre offset too (SetPoint without ClearAllPoints).
+    local name = frame.AbilityName
+    if not (name and name.GetPoint) then return true end
+    local okName, _, _, _, nx = pcall(name.GetPoint, name, 1)
+    return okName and nx == 0
 end
 
 local function Build()
@@ -295,7 +329,7 @@ function LOC.Apply()
         acc = acc + elapsed
         if acc < 0.05 then return end
         acc = 0
-        if not Seated() then Seat() end
+        if not Seated() then Seat() else SeatTime() end
         Paint()
     end)
 end
