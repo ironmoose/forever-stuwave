@@ -57,6 +57,7 @@ Modules/ActionBars/Deck.lua
 Modules/ActionBars/MicroBars.lua
 Modules/Bags/BagBar.lua
 Modules/Skins/HudText.lua
+Modules/Skins/LossOfControl.lua
 Modules/Skins/IssueReporter.lua
 Modules/Skins/AuctionHouse.lua
 Modules/Skins/LookingForGroup.lua

@@ -1432,6 +1432,8 @@ CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, buil
     UI.Toggle(page, { label = "Background grid", key = "actionbars.grid" })
     local timer = FS.QuestTimer and FS.QuestTimer.SETTING
     if timer then UI.Toggle(page, { label = timer.label, key = timer.key, tip = timer.tip }) end
+    local snap = FS.LossOfControl and FS.LossOfControl.SNAP_SETTING
+    if snap then UI.Toggle(page, { label = snap.label, key = snap.key, tip = snap.tip }) end
     FiveSecondGroup(page)
     BuffTabGroup(page)
     TotemPresetsGroup(page)
