@@ -37,6 +37,7 @@ First build for the WoW Forever release client. Beta until 1.0, which ships with
 - Long quest text in the map's quest log no longer shows through the rewards box.
 - Chatting in a battleground no longer throws an error. Inside a match the chat tags fall back to the game's own look.
 - The target's health and power bars no longer come up short under a long name.
+- Player names and class badges on the unit frames no longer throw errors in a battleground.
 
 ### Known issues
 - A bag item clicked in combat was blocked once (ADDON_ACTION_FORBIDDEN on UseContainerItem). The cause is not found yet. Keep potions on an action bar.

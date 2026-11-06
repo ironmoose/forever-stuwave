@@ -1796,7 +1796,8 @@ local function UpdateRowPower(frame)
     -- real players always have a power bar, NPCs often do not.
     local show
     if IsSecret(max) then
-        show = UnitIsPlayer(unit) and true or false
+        local isPlayer = UnitIsPlayer(unit)
+        show = IsSecret(isPlayer) or (isPlayer and true or false)
     else
         show = max > 0
     end
@@ -1878,7 +1879,9 @@ end
 -- Falls back to the flat COLOR_HEALTH when the class lookup is unavailable or
 -- misses -- pets never call this (kept at COLOR_HEALTH in BuildPetSlot).
 local function UpdateRowClassColor(frame)
-    local classFile = select(2, UnitClass(frame.unit))
+    local _, classFile = UnitClass(frame.unit)
+    -- A secret token (a battleground) may not index a table: no class, the flat fallback.
+    if FS.IsSecret(classFile) or type(classFile) ~= "string" then classFile = nil end
     local coords = HAS.CLASS_ICON_TCOORDS and classFile and CLASS_ICON_TCOORDS[classFile]
     if coords then
         frame.classIcon:SetTexCoord(unpack(coords))

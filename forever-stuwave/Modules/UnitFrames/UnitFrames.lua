@@ -213,6 +213,21 @@ local CreateCaret = FS.FrameHelpers.CreateCaret
 -- Shared 12.0 secret-value guard (see Theme.lua); FS is captured above.
 local IsSecret = FS.IsSecret
 
+-- The unit's class token, or nil when it is unknown or secret. In a battleground (and in combat) UnitIsPlayer and
+-- UnitClass can answer secret values, and a secret token may not index a table ("attempted to index a table that
+-- cannot be indexed with secret keys", live 2026-11-05), so every answer goes to IsSecret first.
+local function PlainIsPlayer(unit)
+    local isPlayer = UnitIsPlayer(unit)
+    if IsSecret(isPlayer) then return nil end
+    return isPlayer and true or false
+end
+
+local function PlainClassFile(unit)
+    local _, classFile = UnitClass(unit)
+    if IsSecret(classFile) or type(classFile) ~= "string" then return nil end
+    return classFile
+end
+
 -- Secret-safe overlay bar (incoming heal / absorb shield): a StatusBar CHILD
 -- of the health bar, driven only through whitelisted engine setters
 -- (SetMinMaxValues/SetValue accept secret args -- the same mechanism the
@@ -696,7 +711,7 @@ local function UpdatePowerVisibility(frame)
     -- a live check on this client.
     local show
     if IsSecret(max) then
-        show = UnitIsPlayer(unit) and true or false
+        show = PlainIsPlayer(unit) or false
         if not show then
             local powerType = UnitPowerType(unit)
             if not IsSecret(powerType) and powerType == POWER_TYPE_MANA then
@@ -808,7 +823,7 @@ end
 local function GetReactionColor(unit)
     if not UnitReaction then return COLOR_TEXT_WHITE end
     local reaction = UnitReaction("player", unit)
-    if not reaction then return COLOR_TEXT_WHITE end
+    if IsSecret(reaction) or type(reaction) ~= "number" then return COLOR_TEXT_WHITE end
     if reaction >= 5 then
         return COLOR_REACTION_FRIEND
     elseif reaction == 4 then
@@ -830,8 +845,8 @@ end)
 
 -- Resolves a watched unit's name color: class color for players, else reaction color.
 local function ResolveWatchedNameColor(unit)
-    if UnitIsPlayer(unit) then
-        local classFile = select(2, UnitClass(unit))
+    if PlainIsPlayer(unit) then
+        local classFile = PlainClassFile(unit)
         local classColor = HAS_RAID_CLASS_COLORS and classFile and RAID_CLASS_COLORS[classFile]
         if classColor then
             return { classColor.r, classColor.g, classColor.b }
@@ -917,14 +932,16 @@ local function UpdateClassIcon(frame)
     local unit = frame.unit
     -- Player: always its own class. Target/focus: only for player units,
     -- hidden for creatures.
-    local show = frame.isPlayer or UnitIsPlayer(unit)
+    -- A secret answer (a battleground) draws the badge without a class: the stock cut and the border glow.
+    local isPlayer = UnitIsPlayer(unit)
+    local show = frame.isPlayer or IsSecret(isPlayer) or isPlayer
     if not show then
         frame.classIcon:Hide()
         frame.classGlow:Hide()
         return
     end
 
-    local classFile = select(2, UnitClass(unit))
+    local classFile = PlainClassFile(unit)
     if HAS_CLASS_ICON_TCOORDS and classFile and CLASS_ICON_TCOORDS[classFile] then
         frame.classIcon:SetTexCoord(unpack(CLASS_ICON_TCOORDS[classFile]))
     else
