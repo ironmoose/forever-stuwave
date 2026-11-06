@@ -13,6 +13,7 @@ First build for the WoW Forever release client. Beta until 1.0, which ships with
 ### New
 - Character snapshot: a silent per-character record (level, stats, professions, talents) in the `ForeverSTUwaveExport` saved variable, with an off switch. See [docs/EXPORT.md](docs/EXPORT.md).
 - After a level up, a "Reload to save" button writes the snapshot to disk. It has its own off switch.
+- The objectives tracker moves in the layout editor (`/fsedit`, or Layout in settings). The position is saved in Blizzard's Edit Mode layout; if a preset layout (Modern or Classic) is active, the first move copies it to an account layout named "STUwave".
 - Nameplate quest marker: an amber "!" on a mob your quests need, including classic quests the game's own check misses.
 
 ### Skins
@@ -24,7 +25,8 @@ First build for the WoW Forever release client. Beta until 1.0, which ships with
 - The quest timer wears the panel skin and draws above the objectives panel.
 - An opened mail letter gets its own panel instead of floating as bare text.
 - The loss of control alert (stuns, fears) is a STUwave plate.
-- Objectives tracker: collapsed, it is a small bar reading the quest count, "quests (12/20)"; one collapse control (the section headers' own minus is gone).
+- Objectives tracker: one STUwave header reading the quest count, "quests (12/20)", with the chat's minus to collapse it; collapsed, it is a small bar you click anywhere to open. STUwave quest markers with hover and pressed looks.
+- The "World refresh in N Minutes" notice is a STUwave panel.
 - Tutorial tips and the Battle.net friend toast are STUwave panels.
 
 ### Fixes
@@ -35,4 +37,3 @@ First build for the WoW Forever release client. Beta until 1.0, which ships with
 ### Known issues
 - A bag item clicked in combat was blocked once (ADDON_ACTION_FORBIDDEN on UseContainerItem). The cause is not found yet. Keep potions on an action bar.
 - The spellbook and the character window still show stock Blizzard art (the spellbook title is also cut off). Skins for both are next.
-- The "World refresh in N Minutes" notice is not skinned yet.

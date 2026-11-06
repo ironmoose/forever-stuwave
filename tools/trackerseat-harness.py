@@ -202,6 +202,30 @@ function T.reset_on_a_preset_or_a_default_seat_saves_nothing()
     eq(#__saved, 0)
 end
 
+function T.the_visible_panel_is_the_handle_and_the_move_anchors_blizzards_frame()
+    local seat = __load(__src)
+    -- The panel sits 10 left and 40 below the frame's TOPRIGHT, in UIParent units.
+    local panel = setmetatable({ _scale = 1, _l = 2230, _t = 1100, _w = 240, _h = 120 }, getmetatable(UIParent))
+    panel.IsShown = function() return true end
+    FS.Tracker = { Panel = function() return panel end }
+    local l, t, w, h = seat.Rect()
+    eq(l, 2230); eq(t, 1100); eq(w, 240); eq(h, 120)
+    local x, y = seat.Offsets()
+    near(x, -90); near(y, -340)
+    seat.Move(-29, -286)
+    local a = tracker(__saved[1].layouts[3]).anchorInfo
+    near(a.offsetX, -19, "frame right sits 10 right of the panel"); near(a.offsetY, -246, "frame top sits 40 above")
+end
+
+function T.a_hidden_panel_falls_back_to_the_frame()
+    local seat = __load(__src)
+    local panel = setmetatable({ _scale = 1, _l = 0, _t = 0, _w = 1, _h = 1 }, getmetatable(UIParent))
+    panel.IsShown = function() return false end
+    FS.Tracker = { Panel = function() return panel end }
+    local x, y = seat.Offsets()
+    near(x, -80); near(y, -300)
+end
+
 __checks = T
 """
 

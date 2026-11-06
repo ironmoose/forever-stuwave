@@ -676,3 +676,9 @@ FS.PanelSkins.WatchAddonLoad(SkinQuestTimer, function(name) return name == "Bliz
 -- own layout, which is exactly the fragile territory this pass is avoiding.
 -- Quest item buttons are additionally SECURE (per the combat/taint note
 -- above) and must never be touched at all.
+
+-- The visible panel (the STUwave backdrop), for the layout editor's handle. Nil until the chrome is built.
+FS.Tracker = FS.Tracker or {}
+function FS.Tracker.Panel()
+    return chrome.backdrop
+end

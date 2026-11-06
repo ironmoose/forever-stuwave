@@ -3,8 +3,9 @@
 -- frame manager places, so addon code never anchors it. A move is written into the active Edit
 -- Mode layout instead, and Blizzard applies that layout itself. A preset layout (Modern, Classic)
 -- cannot be edited, so the first move copies it to an account layout named "STUwave".
--- LayoutEdit drives this through Ready, Rect, Offsets, Move and Reset; offsets are UIParent units
--- from UIParent's TOPRIGHT to the tracker's TOPRIGHT, the same units Edit Mode stores.
+-- LayoutEdit drives this through Ready, Rect, Offsets, Move and Reset. Rect and offsets describe the
+-- visible panel (UIParent units, TOPRIGHT from UIParent's TOPRIGHT); Move converts that to the Blizzard
+-- frame's TOPRIGHT, which is what Edit Mode stores (also in UIParent units).
 
 local _, FS = ...
 
@@ -35,9 +36,8 @@ function Seat.Ready()
         and type(_G.EditModePresetLayoutManager) == "table" and SystemId() ~= nil and LayoutTypes() ~= nil
 end
 
--- The tracker's rect in UIParent units: left, top, width, height.
-function Seat.Rect()
-    local frame = Frame()
+-- A frame's rect in UIParent units: left, top, width, height.
+local function RectOf(frame)
     if not frame then return nil end
     local left, top, width, height = frame:GetLeft(), frame:GetTop(), frame:GetWidth(), frame:GetHeight()
     if not (left and top and width and height) then return nil end
@@ -45,11 +45,32 @@ function Seat.Rect()
     return left * s, top * s, width * s, height * s
 end
 
--- The tracker's TOPRIGHT offset from UIParent's TOPRIGHT, in UIParent units.
+-- What the player sees: the STUwave panel when it is built and shown, else Blizzard's frame.
+local function Visible()
+    local tracker = FS.Tracker
+    local panel = type(tracker) == "table" and type(tracker.Panel) == "function" and tracker.Panel()
+    if panel and panel.IsShown and panel:IsShown() and RectOf(panel) then return panel end
+    return Frame()
+end
+
+-- The visible tracker's rect in UIParent units: left, top, width, height.
+function Seat.Rect()
+    return RectOf(Visible())
+end
+
+-- The visible tracker's TOPRIGHT offset from UIParent's TOPRIGHT, in UIParent units.
 function Seat.Offsets()
     local left, top, width = Seat.Rect()
     if not left then return nil end
     return left + width - UIParent:GetRight(), top - UIParent:GetTop()
+end
+
+-- How far the visible TOPRIGHT sits from Blizzard's frame TOPRIGHT, which is what Edit Mode anchors.
+local function VisibleShift()
+    local vl, vt, vw = Seat.Rect()
+    local fl, ft, fw = RectOf(Frame())
+    if not (vl and fl) then return 0, 0 end
+    return (vl + vw) - (fl + fw), vt - ft
 end
 
 local function TrackerSystem(layout)
@@ -110,7 +131,7 @@ local function Save(info)
     C_EditMode.SetActiveLayout(info.activeLayout)
 end
 
--- Seats the tracker's TOPRIGHT at (x, y) from UIParent's TOPRIGHT. Returns true, or false and why.
+-- Seats the visible tracker's TOPRIGHT at (x, y) from UIParent's TOPRIGHT. Returns true, or false and why.
 function Seat.Move(x, y)
     if InCombatLockdown() then return false, "can't move the tracker in combat" end
     if not Seat.Ready() then return false, "Edit Mode is not available" end
@@ -118,8 +139,9 @@ function Seat.Move(x, y)
     if not info then return false, layout end
     local system = TrackerSystem(layout)
     if not system then return false, "the active layout has no objectives tracker" end
+    local dx, dy = VisibleShift()
     system.isInDefaultPosition = false
-    system.anchorInfo = { point = POINT, relativeTo = "UIParent", relativePoint = POINT, offsetX = x, offsetY = y }
+    system.anchorInfo = { point = POINT, relativeTo = "UIParent", relativePoint = POINT, offsetX = x - dx, offsetY = y - dy }
     system.anchorInfo2 = nil
     Save(info)
     return true
