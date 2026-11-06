@@ -656,6 +656,9 @@ local function ApplyLayout()
         end
     end
     seatedSig = sig
+    -- A collapsed tracker and a minimised chat draw nothing while their key is on screen; tell them it moved.
+    if FS.Tracker and type(FS.Tracker.Refresh) == "function" then pcall(FS.Tracker.Refresh) end
+    if FS.Chat and type(FS.Chat.ApplyDockState) == "function" then pcall(FS.Chat.ApplyDockState) end
 end
 
 local function Reseat()

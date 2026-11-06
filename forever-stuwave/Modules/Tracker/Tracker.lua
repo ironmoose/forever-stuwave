@@ -698,3 +698,8 @@ FS.Tracker = FS.Tracker or {}
 function FS.Tracker.Panel()
     return chrome.backdrop
 end
+
+-- The console keys call this after they are seated, so a collapsed tracker hides or shows with its key.
+function FS.Tracker.Refresh()
+    Relayout()
+end

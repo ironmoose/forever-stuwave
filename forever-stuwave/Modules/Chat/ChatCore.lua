@@ -417,12 +417,17 @@ function Chat.SeatTerminalChrome(frame)
         end
     end
 
+    -- Minimised, the term bar IS the collapsed panel, unless the console's Chat key is on screen: that key opens
+    -- and closes the chat, so a minimised chat then draws nothing at all (playtest 2026-11-05).
+    local key = _G.FSConsoleKeychat
+    local gone = Chat.windowState == "min" and type(key) == "table" and type(key.IsVisible) == "function"
+        and key:IsVisible() == true
+    if backdrop.SetAlpha then backdrop:SetAlpha(gone and 0 or 1) end
     if Chat.termBar then
         Chat.termBar:ClearAllPoints()
         Chat.termBar:SetPoint("TOPLEFT", backdrop, "TOPLEFT", 1, -1)
         Chat.termBar:SetPoint("TOPRIGHT", backdrop, "TOPRIGHT", -1, -1)
-        -- Always shown, even minimised: this bar IS the collapsed panel.
-        Chat.termBar:Show()
+        Chat.termBar:SetShown(not gone)
     end
 
     -- Minimised collapses the panel down to the term bar alone, so the tab
