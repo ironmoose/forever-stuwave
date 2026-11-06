@@ -365,6 +365,7 @@ check(saved().level == 24, "this one added")
 
 case("a_level_up_shows_a_secure_reload_macro_button")(r"""
 load()
+SETTINGS["export.reloadButton"] = true
 check(FS.CharacterExport.ReloadButton() == nil, "no button before a level up")
 fire("PLAYER_LEVEL_UP", 25)
 local b = FS.CharacterExport.ReloadButton()
@@ -378,6 +379,7 @@ if b.scripts.OnClick then b.scripts.OnClick(b, "LeftButton") end  -- addon code 
 
 case("the_reload_button_waits_out_combat_and_right_click_dismisses")(r"""
 load()
+SETTINGS["export.reloadButton"] = true
 COMBAT = true
 fire("PLAYER_LEVEL_UP", 25)
 check(FS.CharacterExport.ReloadButton() == nil, "not built in combat")
@@ -401,11 +403,9 @@ check(not b.shown, "a dismissed button stays hidden")
 
 case("the_reload_button_switch_keeps_it_hidden")(r"""
 load()
-check(SETTINGS["export.reloadButton"] == true, "default on")
-SETTINGS["export.reloadButton"] = false
+check(SETTINGS["export.reloadButton"] == false, "default off")
 fire("PLAYER_LEVEL_UP", 25)
 check(FS.CharacterExport.ReloadButton() == nil, "no button when switched off")
-SETTINGS["export.reloadButton"] = true
 """)
 
 

@@ -12,8 +12,8 @@
 -- short delay. No chat output. FS.Config key "export.enabled" (default on) turns it off.
 --
 -- SavedVariables reach disk only on /reload, logout or quit, so after a level up a small "Reload to save" button
--- shows (out of combat only); a click runs /reload through a secure macro button, a right click hides it. FS.Config key "export.reloadButton" (default
--- on) turns the button off.
+-- can show (out of combat only); a click runs /reload through a secure macro button, a right click hides it. FS.Config key
+-- "export.reloadButton" (default off) turns the button on.
 
 local addonName, FS = ...
 
@@ -33,11 +33,11 @@ Export.RELOAD_SETTING = {
     label = "Reload button after level up",
     key = Export.RELOAD_KEY,
     tip = "Shows a Reload to save button after each level up, out of combat. The saved file is only written on a "
-        .. "reload or logout; the button reloads so the new level reaches it now. Right click hides it.",
+        .. "reload or logout; the button reloads so the new level reaches it now. Right click hides it. Off by default.",
 }
 if FS.Config and FS.Config.RegisterDefault then
     FS.Config.RegisterDefault(Export.CONFIG_KEY, true)
-    FS.Config.RegisterDefault(Export.RELOAD_KEY, true)
+    FS.Config.RegisterDefault(Export.RELOAD_KEY, false)
 end
 
 local DELAY = 2           -- seconds between the first event of a burst and the write
