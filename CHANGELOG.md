@@ -36,6 +36,7 @@ First build for the WoW Forever release client. Beta until 1.0, which ships with
 - The character snapshot keeps the last real stats when a logout or reload reads them all as 0.
 - Long quest text in the map's quest log no longer shows through the rewards box.
 - Chatting in a battleground no longer throws an error. Inside a match the chat tags fall back to the game's own look.
+- The target's health and power bars no longer come up short under a long name.
 
 ### Known issues
 - A bag item clicked in combat was blocked once (ADDON_ACTION_FORBIDDEN on UseContainerItem). The cause is not found yet. Keep potions on an action bar.

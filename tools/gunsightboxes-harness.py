@@ -840,6 +840,22 @@ function T.the_name_fit_measures_again_after_the_next_frame_in_case_the_font_lag
     W.clean(); noFails()
 end
 
+function T.a_name_laid_out_a_frame_late_still_gets_full_rails()
+    local W = world()
+    local box = W.tgt.box
+    target("Death Mortis"); settle()
+    local instant = box.bars.hp.green.host._w
+    target("Kurak"); settle()
+    -- The client has not laid the new name out yet: it measures as no width this frame (live, 2026-11-05).
+    __charW = 0
+    target("Death Mortis")
+    __charW = nil
+    settle()
+    near(box.bars.hp.green.host._w, instant, 1e-6, "the rails measure the name again next frame")
+    near(box.bars.power.host._w, instant, 1e-6, "both rules")
+    W.clean(); noFails()
+end
+
 function T.a_lagging_font_is_refitted_next_frame_and_the_rails_are_re_seated_for_it()
     local W = world()
     local C = FS.GunsightBoxes.C
@@ -853,7 +869,7 @@ function T.a_lagging_font_is_refitted_next_frame_and_the_rails_are_re_seated_for
     __timers = {}
     __fontLag = true
     target("Baine Bloodhoof")
-    ok(#__timers <= 1, "one deferred refit per write: " .. #__timers)
+    ok(#__timers <= 2, "one deferred refit per write, plus the rails' own re-measure: " .. #__timers)
     settle()
     __fontLag = false
     eq(l1._fontSize, wantSize, "the refit lands on the size an instant font gives")

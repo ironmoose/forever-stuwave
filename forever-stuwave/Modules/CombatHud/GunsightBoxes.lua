@@ -1198,6 +1198,15 @@ local function RefreshTargetName(box)
     if box.bars then
         Bars.Measure(box)
         Bars.Seat(box)
+        -- The client may lay a new name out a frame late: measured now it can read as no width at all, the rails
+        -- then sit at their 24 px minimum under a long name (a player target, live 2026-11-05). The line's own
+        -- settle only runs when the font SIZE changed, so the rails measure the name once more next frame.
+        box.railSettle = box.railSettle or {}
+        NextFrame(box.railSettle, function()
+            if box.retired or not box.bars then return end
+            Bars.Measure(box)
+            Bars.Seat(box)
+        end)
     end
 end
 
