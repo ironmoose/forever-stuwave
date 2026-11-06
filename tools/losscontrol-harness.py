@@ -46,7 +46,11 @@ function Obj:CreateTexture() local t = New("Texture"); __textures[#__textures + 
 function Obj:SetTexture(p) self.path = p end
 function Obj:GetFrameStrata() return "HIGH" end
 function Obj:SetText(t) self.text = t end
-function Obj:GetStringWidth() return #tostring(self.text or "") * 8 end
+function Obj:GetStringWidth()
+    if self.text == SECRET then return SECRET end
+    return #tostring(self.text or "") * 8
+end
+function Obj:CreateFontString() local f = New("FontString"); __fonts = (__fonts or 0) + 1; return f end
 function Obj:GetFrameLevel() return 10 end
 function Obj:HookScript(n, fn) self.hooks = self.hooks or {}; self.hooks[n] = fn end
 function Obj:SetScript(n, fn) self.scripts = self.scripts or {}; self.scripts[n] = fn end
@@ -165,11 +169,12 @@ case("the_time_row_is_centred_as_a_pair", """
     Load()
     local F = LossOfControlFrame
     local n, sec = F.TimeLeft.NumberText, F.TimeLeft.SecondsText
-    local function centre()
+    assert(sec.text == "SEC", "the label reads SEC")
+    local function centre(nw)
         local p = { n:GetPoint() }
         assert(p[1] == "LEFT" and p[2] == F and p[3] == "CENTER", "number pinned by its left edge")
         local left = p[4]
-        local right = left + n:GetStringWidth() + 4 + sec:GetStringWidth()
+        local right = left + (nw or n:GetStringWidth()) + 4 + sec:GetStringWidth()
         return (left + right) / 2
     end
     assert(math.abs(centre()) <= 0.5, "1.2 seconds off centre by " .. centre())
@@ -177,6 +182,15 @@ case("the_time_row_is_centred_as_a_pair", """
     __now = 10.1
     __tick()                                         -- the plate's OnUpdate re-centres a number of a new length
     assert(math.abs(centre()) <= 0.5, "10 seconds off centre by " .. centre())
+    -- in combat the number is secret: the probe's "0.0" width stands in, and the row stays centred
+    n.text = SECRET
+    __tick()
+    assert(math.abs(centre(24)) <= 0.5, "secret 1.2 seconds off centre by " .. centre(24))
+    -- secret anchors in combat are not compared
+    local gp = F.Icon.GetPoint
+    F.Icon.GetPoint = function() return SECRET, SECRET, SECRET, SECRET, SECRET end
+    __tick()
+    F.Icon.GetPoint = gp
     -- the mixin's own name offset is taken back
     F.AbilityName:SetPoint("CENTER", F, "CENTER", 31, 11)
     __tick()

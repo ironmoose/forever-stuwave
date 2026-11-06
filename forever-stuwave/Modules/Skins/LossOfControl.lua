@@ -103,16 +103,20 @@ end
 -- The time row ("1.2" then "seconds") is centred as a PAIR under the plate: the number's left edge sits half the
 -- pair's width left of centre. Pinning the number's right edge to the centre instead left the long "seconds" word
 -- hanging off to the right, the whole row visibly off centre (player, 2026-11-05). Widths are measured each tick
--- (the number changes length: "10", "9.8", "1.2") and the row is moved only when the width changed. An unmeasurable
--- width (secret or missing) falls back to the number alone centred.
+-- (the number changes length: "10", "9.8", "1.2") and the row is moved only when the width changed. The label reads
+-- "SEC" (the mockup's "1.2 SEC"), our own plain text, so it always measures. In combat the number's text is secret
+-- and so is its width; then the width comes from `sizer`, a hidden FontString in the same monospaced font holding
+-- "0.0" (the mixin writes one decimal below ten seconds, whole seconds above, so ten and up is half a digit off).
 local TIME_GAP = 4
 local seatedTimeW
 local SeatTime
 
+local sizer
+
 local function PlainW(fs)
     if not (fs and fs.GetStringWidth) then return nil end
     local ok, w = pcall(fs.GetStringWidth, fs)
-    if ok and type(w) == "number" and not FS.IsSecret(w) then return w end
+    if ok and type(w) == "number" and not IsSecret(w) and w > 0 then return w end
     return nil
 end
 
@@ -120,6 +124,7 @@ SeatTime = function()
     local number, seconds = Region("TimeLeft", "NumberText"), Region("TimeLeft", "SecondsText")
     if not (number and number.ClearAllPoints) then return end
     local nw, sw = PlainW(number), PlainW(seconds)
+    if not nw and sizer then nw = PlainW(sizer) end
     local total = (nw and sw) and (nw + TIME_GAP + sw) or -1
     if total == seatedTimeW then return end
     seatedTimeW = total
@@ -158,13 +163,19 @@ end
 local function Seated()
     local icon = frame.Icon
     if not (icon and icon.GetPoint) then return true end
+    -- In combat the anchors read back as secrets (live 2026-11-05: "attempt to compare local 'point'"), and a secret
+    -- may not be compared. Then this check cannot tell, and the SetUpDisplay hook, which re-seats whenever the mixin
+    -- moves anything, is trusted instead.
     local ok, point, rel, _, x, y = pcall(icon.GetPoint, icon, 1)
-    if not (ok and point == "CENTER" and rel == frame and x == 0 and y == G.ICON_Y) then return false end
+    if not ok then return true end
+    if IsSecret(point) or IsSecret(rel) or IsSecret(x) or IsSecret(y) then return true end
+    if not (point == "CENTER" and rel == frame and x == 0 and y == G.ICON_Y) then return false end
     -- The mixin moves the word with its own centre offset too (SetPoint without ClearAllPoints).
     local name = frame.AbilityName
     if not (name and name.GetPoint) then return true end
     local okName, _, _, _, nx = pcall(name.GetPoint, name, 1)
-    return okName and nx == 0
+    if not okName or IsSecret(nx) then return true end
+    return nx == 0
 end
 
 local function Build()
@@ -308,6 +319,13 @@ function LOC.Apply()
     local number, seconds = Region("TimeLeft", "NumberText"), Region("TimeLeft", "SecondsText")
     if number and number.SetFont then Theme.ApplyMono(number, G.TIME_PX, Theme.COLOR_HEALTH) end
     if seconds and seconds.SetFont then Theme.ApplyMono(seconds, G.TIME_PX, Theme.COLOR_HEALTH) end
+    if seconds and seconds.SetText then seconds:SetText("SEC") end
+    if number and frame.CreateFontString then
+        sizer = frame:CreateFontString(nil, "BACKGROUND")
+        Theme.ApplyMono(sizer, G.TIME_PX, Theme.COLOR_HEALTH)
+        sizer:SetText("0.0")
+        sizer:SetAlpha(0)
+    end
 
     Build()
     Refresh()
