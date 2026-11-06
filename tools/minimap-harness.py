@@ -840,13 +840,13 @@ function GetGameTime() return 19, 56 end
 def coords_checks() -> None:
     """The readout shows the player position as 'x, y' percentages. A fraction of 1.0 would format
     as '100.0' (17 glyphs with the clock, about 7 px over the box at m = 250), so each axis clamps
-    to 99.9, and a secret position blanks the text instead of throwing."""
+    to 99.9, and a secret position shows dashes instead of throwing."""
     for label, ui_height in (("250", None), ("208", 1200)):
         cases = (
             ("(1.0, 1.0) clamps to 99.9, 99.9", 1.0, 1.0, False, "99.9, 99.9"),
             ("(0.9996, 1.5) rounds and clamps, never 100.0", 0.9996, 1.5, False, "99.9, 99.9"),
             ("(0.5, 0.25) is untouched", 0.5, 0.25, False, "50.0, 25.0"),
-            ("a secret position blanks the text", 0, 0, True, ""),
+            ("a secret position shows dashes", 0, 0, True, "--.-, --.-"),
         )
         for name, x, y, secret, want in cases:
             lua = run("cut", ui_height, coords_setup(x, y, secret), None)

@@ -1530,7 +1530,11 @@ end
 local function UpdateReadout()
     if not (Minimap and Minimap.fsReadoutCoords and Minimap.fsReadoutClock) then return end
 
-    Minimap.fsReadoutCoords:SetText(GetCoordsText() or "")
+    -- No position inside an instance (a battleground, a dungeon): dashes keep the LCD looking on, not broken
+    -- (player, Warsong Gulch 2026-11-05: an empty half box "looks weird").
+    local coords = GetCoordsText()
+    Minimap.fsReadoutCoords:SetText(coords or "--.-, --.-")
+    Minimap.fsReadoutCoords:SetAlpha(coords and 1 or 0.45)
     Minimap.fsReadoutClock:SetText(GetClockText() or "")
 end
 
