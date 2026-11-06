@@ -610,7 +610,8 @@ local function StyleQuestTimerLines(timer)
     local ok, children = pcall(function() return { timer:GetChildren() } end)
     if not ok then return end
     for _, child in ipairs(children) do
-        if type(child) == "table" and type(child.GetRegions) == "function" then
+        if type(child) == "table" and child ~= timer.Header and child ~= timer.Border
+            and type(child.GetRegions) == "function" then
             for _, region in ipairs({ child:GetRegions() }) do
                 if region.GetObjectType and region:GetObjectType() == "FontString" then
                     ApplyMono(region, 10, COLOR_LINE_MUTED)
@@ -620,8 +621,20 @@ local function StyleQuestTimerLines(timer)
     end
 end
 
+-- The 16001 timer draws its wood dialog from two child frames, Header (the "Quest Timers" plaque) and Border, plus its
+-- backdrop (live recon 2026-11-05: QuestTimerFrame keys Header=Frame, Border=Frame, backdropInfo set). The region sweep in
+-- SkinPanel reaches none of them, so they are hidden here, on every show, since Blizzard re-shows its own art.
+local function HideStockTimerChrome(timer)
+    for _, key in ipairs({ "Header", "Border" }) do
+        local part = timer[key]
+        if type(part) == "table" and part.Hide then pcall(part.Hide, part) end
+    end
+    if type(timer.ClearBackdrop) == "function" then pcall(timer.ClearBackdrop, timer) end
+end
+
 local function RaiseQuestTimer()
     local timer, tracker = QuestTimerFrame, ObjectiveTrackerFrame
+    if timer then HideStockTimerChrome(timer) end
     if not (timer and timer.SetFrameStrata and tracker and tracker.GetFrameStrata) then return end
     timer:SetFrameStrata(tracker:GetFrameStrata())
     timer:SetFrameLevel(tracker:GetFrameLevel() + 10)

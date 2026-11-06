@@ -35,6 +35,7 @@ TRACKER_SRC = (ADDON / "Modules/Tracker/Tracker.lua").read_text(encoding="utf-8"
 MOCK = r"""
 function Region(kind)
     local r = { kind = kind, shown = true, points = 0 }
+    function r:IsShown() return self.shown end
     function r:GetObjectType() return self.kind end
     function r:Hide() self.shown = false end
     function r:Show() self.shown = true end
@@ -52,6 +53,8 @@ function Frame(strata, level)
     function f:SetFrameLevel(l) self.level = l end
     function f:SetPoint() self.setPoints = self.setPoints + 1 end
     function f:ClearAllPoints() self.setPoints = self.setPoints + 1 end
+    function f:Hide() self.shown = false end
+    function f:Show() self.shown = true end
     function f:HookScript(script, fn) self.hooks[script] = self.hooks[script] or {}; table.insert(self.hooks[script], fn) end
     return f
 end
@@ -94,13 +97,20 @@ RightManagedFrameContainer = { level = 3 }
 function RightManagedFrameContainer:UpdateFrame(frame) frame.level = self.level + 1 end
 
 function MakeTimer()
+    -- the 16001 shape (live recon 2026-11-05): backdrop textures as regions, and the wood dialog as two child
+    -- frames, Header (the plaque with the "Quest Timers" label) and Border
     local f = Frame("BACKGROUND", 2)
     table.insert(f.regions, Region("Texture"))       -- backdrop pieces
-    table.insert(f.regions, Region("Texture"))       -- QuestTimerHeader
+    f.backdropInfo = {}
+    function f:ClearBackdrop() self.backdropInfo = nil end
+    f.Header = Frame("BACKGROUND", 3)
+    table.insert(f.Header.regions, Region("Texture"))
     f.blizzLabel = Region("FontString")              -- "Quest Timers"
-    table.insert(f.regions, f.blizzLabel)
+    table.insert(f.Header.regions, f.blizzLabel)
+    f.Border = Frame("BACKGROUND", 3)
+    table.insert(f.Border.regions, Region("Texture"))
     -- the lines: font strings on child buttons, found by shape (the 16001 client has no QuestTimerNText names)
-    f.children = {}
+    f.children = { f.Header, f.Border }
     function f:GetChildren() return unpack(self.children) end
     AddLine(f)
     QuestTimerFrame = f
@@ -148,13 +158,27 @@ case("the_timer_wears_the_panel_chrome_with_a_timers_title_and_loses_blizzards_l
     LoadTracker()
     assert(#__skinned == 1 and __skinned[1].frame == timer, "the timer was not skinned")
     assert(__skinned[1].opts.title == "timers", "title: " .. tostring(__skinned[1].opts.title))
-    assert(timer.blizzLabel.shown == false, "Blizzard's Quest Timers label still shows")
+    assert(timer.Header.shown == false, "Blizzard's Quest Timers label still shows")
     assert(timer.fsPanelTitle.shown == true, "our own title was hidden")
-    assert(__mono[timer.children[1].text], "the timer line is not mono")
+    assert(__mono[timer.children[3].text], "the timer line is not mono")
     assert(not __mono[timer.blizzLabel], "the hidden stock label was restyled")
     local late = AddLine(timer)                      -- a second timer starts after the skin
     for _, fn in ipairs(timer.hooks.OnShow or {}) do fn(timer) end
     assert(__mono[late], "a line made after the skin is not mono after a show")
+""")
+
+case("blizzards_wood_header_border_and_backdrop_are_gone_and_stay_gone", """
+    local timer = MakeTimer()
+    LoadTracker()
+    assert(timer.Header.shown == false, "the Quest Timers plaque still shows")
+    assert(timer.Border.shown == false, "the wood border still shows")
+    assert(timer.backdropInfo == nil, "the backdrop was not cleared")
+    timer.Header:Show(); timer.Border:Show()          -- Blizzard re-shows its art
+    for _, fn in ipairs(timer.hooks.OnShow or {}) do fn(timer) end
+    assert(timer.Header.shown == false and timer.Border.shown == false, "the wood came back after a show")
+    timer.Header:Show()
+    RightManagedFrameContainer:UpdateFrame(timer)
+    assert(timer.Header.shown == false, "the plaque came back after a re-layout")
 """)
 
 case("the_timer_draws_above_the_tracker_and_is_never_moved", """
