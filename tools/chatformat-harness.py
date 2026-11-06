@@ -52,8 +52,23 @@ function SetChatColorNameByClass() end
 __wrapped = nil
 FS = { Theme = { COLOR_TEXT_PARCHMENT = { 0.8, 1, 0.9 } }, IsSecret = function(v) return v == SECRET end }
 SECRET = setmetatable({}, { __index = function() error("touched a secret") end })
-ChatFrame1 = { AddMessage = function(self, text, ...) self.last = text end, GetSpacing = function() return 0 end,
-    SetSpacing = function() end }
+-- A chat frame with a history, Blizzard's AddMessage (a plain field) and the secure mixin's TransformMessages.
+ChatFrame1 = { history = {}, GetSpacing = function() return 0 end, SetSpacing = function() end }
+function ChatFrame1:AddMessage(text, r, g, b, ...)
+    self.history[#self.history + 1] = { text, r, g, b, ... }
+end
+__blizzAddMessage = ChatFrame1.AddMessage
+function ChatFrame1:TransformMessages(match, rewrite)
+    for i, e in ipairs(self.history) do
+        if match(unpack(e)) then self.history[i] = { rewrite(unpack(e)) } end
+    end
+end
+function hooksecurefunc(t, name, fn)
+    local orig = t[name]
+    t[name] = function(...) local r = { orig(...) }; fn(...); return unpack(r) end
+    __hooked = (__hooked or 0) + 1
+end
+ChatTypeInfo.SYSTEM.r = 0.5
 local Loose = { __index = function(t, k)
     if type(k) == "string" and k:match("^%u") then return function() return setmetatable({}, getmetatable(t)) end end
 end }
@@ -67,7 +82,8 @@ end
 assert(loadstring(CORE, "@ChatCore.lua"))("forever-stuwave", FS)
 assert(loadstring(SRC, "@ChatFormat.lua"))("forever-stuwave", FS)
 watcher.fn(watcher, "PLAYER_LOGIN")
-function Line(text, event) ChatFrame1:AddMessage(text, 1, 1, 1, 0, 0, 0, event); return ChatFrame1.last end
+function Last() return ChatFrame1.history[#ChatFrame1.history] end
+function Line(text, event) ChatFrame1:AddMessage(text, 1, 1, 1, 0, 0, 0, event); return Last()[1] end
 LINK = "|Hplayer:Law-Realm:12:GUILD|h[Law Aholic]|h"
 NAMED = "|cff22e0ff" .. LINK .. "|r|cff22e0ff:|r "
 """
@@ -117,7 +133,33 @@ case("numbered_channels_still_drop_the_index_and_zone", """
 
 case("a_secret_line_is_never_transformed", """
     ChatFrame1:AddMessage(SECRET, 1, 1, 1, 0, 0, 0, "CHAT_MSG_INSTANCE_CHAT")
-    assert(ChatFrame1.last == SECRET)
+    assert(Last()[1] == SECRET)
+    -- and a later plain line's rewrite does not touch the secret entry
+    Line(LINK .. " says: hi", "CHAT_MSG_SAY")
+    assert(ChatFrame1.history[#ChatFrame1.history - 1][1] == SECRET)
+""")
+
+case("blizzards_chat_state_is_never_written", """
+    -- AddMessage is hooked, never assigned (a written AddMessage taints every Blizzard caller in a BG)
+    assert(__hooked == 1, "hooked " .. tostring(__hooked))
+    -- ChatTypeInfo keeps Blizzard's colours; the mint body is set per line
+    assert(ChatTypeInfo.SYSTEM.r == 0.5 and ChatTypeInfo.GUILD.r == 1, "ChatTypeInfo was written")
+    Line("|Hchannel:GUILD|h[Guild]|h " .. LINK .. ": hi", "CHAT_MSG_GUILD")
+    local e = Last()
+    assert(e[2] == 0.8 and e[3] == 1 and e[4] == 0.9, "guild body not mint")
+    assert(e[8] == "CHAT_MSG_GUILD", "the line keeps its extra arguments")
+    Line("8 players have joined the battle.", nil)
+    assert(Last()[2] == 1, "a non chat line keeps its colour")
+""")
+
+case("a_repeated_line_is_restyled_once", """
+    local raw = "|Hchannel:GUILD|h[Guild]|h " .. LINK .. ": again"
+    Line(raw, "CHAT_MSG_GUILD")
+    Line(raw, "CHAT_MSG_GUILD")
+    local a, b = ChatFrame1.history[#ChatFrame1.history - 1][1], Last()[1]
+    assert(a == b and a:find("39ff14", 1, true), a)
+    local _, n = a:gsub("39ff14", "")
+    assert(n == 1, "styled twice: " .. a)
 """)
 
 

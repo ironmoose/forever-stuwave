@@ -217,53 +217,71 @@ Chat.termPanel = termPanel
 FS.chatTerminal = termPanel
 
 -------------------------------------------------------------------------------
--- Shared AddMessage wrap point
+-- Shared line restyle point
 --
--- Two independent pieces of this addon touch a chat frame's AddMessage:
--- ChatTermBar's scroll furniture OBSERVES it (hooksecurefunc, to reveal the
--- jump button on new text) and ChatFormat TRANSFORMS it (rewriting a numbered
--- channel's tag before Blizzard ever sees the line). Only a REPLACEMENT of
--- AddMessage can change what gets printed, so the transform case cannot use
--- hooksecurefunc -- and a second, independent replacement written later would
--- silently overwrite whichever one assigned first. This is the one place
--- AddMessage is ever reassigned, so that mistake is no longer possible to make
--- by accident: every transform layers onto the same wrapper instead.
+-- ChatFormat restyles finished lines (channel tags, the speaker, the body
+-- colour). This used to REPLACE frame.AddMessage with a Lua wrapper, and that
+-- broke battlegrounds (2026-11-05): an addon-written AddMessage taints every
+-- Blizzard caller, and inside a PvP match Blizzard's own code then handles
+-- secret chat values on a tainted path. The visible symptom was the
+-- battleground join batcher ("8 players have joined the battle") failing to
+-- clear its list and reprinting it every five seconds.
+--
+-- So AddMessage is never assigned. A hooksecurefunc post-hook sees each line
+-- after Blizzard added it (Blizzard's call stays secure), and the line is
+-- rewritten in the history through the frame's own TransformMessages, which
+-- ScrollingMessageFrameSecureMixin provides for exactly this: called from
+-- addon code it runs as if untainted, and only our predicate and transform
+-- closures run tainted. A secret line is never read, compared or rewritten.
 -------------------------------------------------------------------------------
 
-local addMessageWraps = setmetatable({}, { __mode = "k" })
+local lineHooks = setmetatable({}, { __mode = "k" })
+local transformWarned = false
 
--- Registers `transform(text, ...) -> text` (the rest of AddMessage's
--- arguments follow the text, so a transform can see the chat event) to run on every AddMessage call for
--- `frame`, ahead of whatever Blizzard (or the original AddMessage) does with
--- it. Wrapping the same frame more than once layers transforms in
--- registration order rather than replacing the previous one.
+-- Registers `transform(text, r, g, b, id, accessID, typeID, event) -> text[, r, g, b]`
+-- to run on every plain line added to `frame`. Several transforms on one frame
+-- run in registration order, each on the previous one's result.
 function Chat.WrapAddMessage(frame, transform)
     if not frame or type(transform) ~= "function" then return end
+    if type(hooksecurefunc) ~= "function" or type(frame.AddMessage) ~= "function" then return end
 
-    local entry = addMessageWraps[frame]
+    local entry = lineHooks[frame]
     if not entry then
-        local original = frame.AddMessage
-        if type(original) ~= "function" then return end
-        entry = { original = original, transforms = {} }
-        addMessageWraps[frame] = entry
-
-        frame.AddMessage = function(self, text, ...)
-            -- A secret line (chat inside a PvP match or boss fight) cannot be
-            -- read here, so it goes straight through untouched.
-            if type(text) == "string" and not (FS.IsSecret and FS.IsSecret(text)) then
-                for _, fn in ipairs(entry.transforms) do
-                    -- pcall each transform: a throwing transform must not propagate
-                    -- out of AddMessage and blank the frame. On error or a non-string
-                    -- return, keep the prior text so the line still prints, just
-                    -- untransformed, instead of dropping it or erroring.
-                    local ok, result = pcall(fn, text, ...)
-                    if ok and type(result) == "string" then
-                        text = result
+        entry = { transforms = {} }
+        lineHooks[frame] = entry
+        hooksecurefunc(frame, "AddMessage", function(self, text, r, g, b, ...)
+            if type(text) ~= "string" or FS.IsSecret(text) then return end
+            if FS.IsSecret(r) or FS.IsSecret(g) or FS.IsSecret(b) then return end
+            local out, nr, ng, nb = text, r, g, b
+            for _, fn in ipairs(entry.transforms) do
+                -- pcall each transform: a throwing one leaves the line as it was.
+                local ok, t2, r2, g2, b2 = pcall(fn, out, nr, ng, nb, ...)
+                if ok and type(t2) == "string" then
+                    out = t2
+                    if type(r2) == "number" and type(g2) == "number" and type(b2) == "number" then
+                        nr, ng, nb = r2, g2, b2
                     end
                 end
             end
-            return entry.original(self, text, ...)
-        end
+            if out == text and nr == r and ng == g and nb == b then return end
+            if type(self.TransformMessages) ~= "function" then return end
+            -- Only lines still holding the untouched text match: earlier copies
+            -- were rewritten when they arrived, so nothing is restyled twice.
+            local function Match(message)
+                if FS.IsSecret(message) then return false end
+                return message == text
+            end
+            local function Rewrite(_, _, _, _, ...)
+                return out, nr, ng, nb, ...
+            end
+            local ok = pcall(self.TransformMessages, self, Match, Rewrite)
+            if not ok and not transformWarned then
+                transformWarned = true
+                if FS.LogDegradeOnce then
+                    FS.LogDegradeOnce("chat_transform", "|cffff4488Forever STUwave|r: chat restyle unavailable, lines keep the stock look")
+                end
+            end
+        end)
     end
 
     entry.transforms[#entry.transforms + 1] = transform

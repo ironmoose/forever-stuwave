@@ -234,7 +234,6 @@ end
 -- defaults. Populated once; a second enable reuses it.
 local saved = {
     formats = nil,     -- true once captured (the format globals are only ever read)
-    colors = nil,      -- { r, g, b }, by type
     classColor = nil,  -- ChatTypeInfo[type].colorNameByClass, by type
     channelTag = nil,  -- "rrggbb" tag colour, by numbered-channel index
     spacing = nil,     -- chat frame :GetSpacing(), by frame index
@@ -339,13 +338,6 @@ local function CaptureOriginals()
     if saved.formats then return end
 
     saved.formats = true
-    saved.colors = {}
-    for _, typeKey in ipairs(MINT_TYPES) do
-        local info = ChatTypeInfo and ChatTypeInfo[typeKey]
-        if info then
-            saved.colors[typeKey] = { info.r, info.g, info.b }
-        end
-    end
 
     -- Only types with a speaker; SYSTEM has no author to colour.
     --
@@ -363,12 +355,8 @@ local function CaptureOriginals()
     -- their stock colour is still captured here so /fschatfmt off restores it
     -- genuinely rather than leaving the override in place.
     --
-    -- Order matters. This reads ChatTypeInfo, and ApplyBodyColors is about to
-    -- overwrite the same fields with mint, so the tag colour has to be taken
-    -- first. One consequence worth knowing: recolouring a channel in Blizzard's
-    -- chat config while the skin is ON changes the body's saved restore value
-    -- but not the tag, because the original is gone by then. /fschatfmt off/on
-    -- picks the new colour up.
+    -- Recolouring a channel in Blizzard's chat config while the skin is ON does
+    -- not change the tag until /fschatfmt off/on captures it again.
     saved.channelTag = {}
     for i = 1, CHANNEL_COUNT do
         local info = ChatTypeInfo and ChatTypeInfo["CHANNEL" .. i]
@@ -420,19 +408,14 @@ local function ApplyClassColors(enable)
     end
 end
 
--- The mint half. Kept separate from the format-string half because Blizzard
--- fires UPDATE_CHAT_COLOR and re-reads ChatTypeInfo from CVars whenever the
--- player touches a colour in the chat config, which would silently put the
--- channel tint back. This is cheap enough to simply re-run on that event.
-local function ApplyBodyColors()
-    if not ChatTypeInfo then return end
-    for _, typeKey in ipairs(MINT_TYPES) do
-        local info = ChatTypeInfo[typeKey]
-        if info then
-            info.r, info.g, info.b = MINT[1], MINT[2], MINT[3]
-        end
-    end
-end
+-- The mint half. ChatTypeInfo is NEVER written: Blizzard's own code reads it
+-- (the battleground join batcher, the message handler), and a field written by
+-- an addon taints whoever reads it, which inside a PvP match breaks Blizzard's
+-- handling of secret chat (2026-11-05). The body colour is set per line instead,
+-- by ChatLineTransform returning it, for the types listed here.
+local MINT_EVENT = {}
+for _, typeKey in ipairs(MINT_TYPES) do MINT_EVENT[typeKey] = true end
+MINT_EVENT.CHANNEL = true -- numbered channels arrive as CHAT_MSG_CHANNEL
 
 local function ApplySpacing()
     for i = 1, MAX_CHAT_FRAMES do
@@ -554,16 +537,19 @@ end
 
 -- AddMessage's own arguments after the text: r, g, b, id, accessID, typeID,
 -- event. Only chat events carry the 7th; every other line passes through.
-local function ChatLineTransform(text, _, _, _, _, _, _, event)
+local function ChatLineTransform(text, r, g, b, _, _, _, event)
     if not applied then return text end
+    local mint = false
     if type(event) == "string" and event:sub(1, 9) == "CHAT_MSG_" then
         local typeKey = event:sub(10)
         if FORMATS[typeKey] then text = RestyleSpeaker(text, typeKey) end
+        mint = MINT_EVENT[typeKey] == true
     end
     if text:find("|Hchannel:", 1, true) then
         text = text:gsub(CHANNEL_TAG_PATTERN, RewriteChannelTag)
     end
-    return text
+    if mint then return text, MINT[1], MINT[2], MINT[3] end
+    return text, r, g, b
 end
 
 local registered = setmetatable({}, { __mode = "k" })
@@ -596,7 +582,6 @@ local function Enable()
     if applied then return end
     CaptureOriginals()
 
-    ApplyBodyColors()
     ApplyClassColors(true)
     ApplySpacing()
     lastFilterCount, lastFilterTotal = AddFilters()
@@ -607,15 +592,6 @@ end
 
 local function Disable()
     if not applied then return end
-
-    if ChatTypeInfo then
-        for typeKey, rgb in pairs(saved.colors) do
-            local info = ChatTypeInfo[typeKey]
-            if info then
-                info.r, info.g, info.b = rgb[1], rgb[2], rgb[3]
-            end
-        end
-    end
 
     ApplyClassColors(false)
 
@@ -729,12 +705,9 @@ watcher:SetScript("OnEvent", function(_, event)
         -- would read a default rather than the player's choice.
         if Wanted() then Enable() end
     elseif applied then
-        -- Blizzard just re-read ChatTypeInfo from the CVars, which puts the
-        -- channel tint back over our mint and can drop the class-name flag with
-        -- it. Only those two need re-asserting; the format strings are
-        -- untouched by this event. ApplyClassColors writes only on a real
-        -- change, so re-entering through the event it fires terminates.
-        ApplyBodyColors()
+        -- Blizzard just re-read ChatTypeInfo from the CVars, which can drop the
+        -- class-name flag. ApplyClassColors writes only on a real change, so
+        -- re-entering through the event it fires terminates.
         ApplyClassColors(true)
     end
 end)
