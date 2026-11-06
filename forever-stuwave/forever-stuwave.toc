@@ -43,6 +43,7 @@ Modules/Pet/PetDock.lua
 Modules/Pet/PetActionBar.lua
 Modules/Pet/PetCastBar.lua
 Modules/Minimap/Minimap.lua
+Modules/Tracker/QuestTimer.lua
 Modules/Skins/Panels.lua
 Modules/Skins/Tooltip.lua
 Modules/Skins/TooltipAnchor.lua
