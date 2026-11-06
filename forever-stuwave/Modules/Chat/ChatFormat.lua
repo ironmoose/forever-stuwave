@@ -110,48 +110,42 @@ local NAME = "|cff" .. CYAN .. "%s|r|cff" .. CYAN .. ":|r "
 -- and whisper tags is NOT guessed at: a wrong target is a click that errors or
 -- silently does nothing, and these tags are plain coloured text until their
 -- stock strings have been read (`/fschatfmt dump`).
+--
+-- THE CHAT_<type>_GET GLOBALS ARE NEVER WRITTEN. Up to 2026-11-05 these were
+-- format strings assigned straight into those globals, and that broke chat in
+-- a battleground: inside a PvP match (and a keystone or boss fight) 12.0 hands
+-- chat text to Lua as a secret value, and Blizzard's line builder reads the
+-- format global and concatenates the secret message onto it. A global written
+-- by an addon is tainted, so reading it tainted the builder, and a tainted
+-- path may not convert a secret string: "attempt to perform string conversion
+-- on a secret string value (execution tainted by 'forever-stuwave')" on every
+-- /bg line (Warsong Gulch, 2026-11-05). Writing the stock string back from
+-- addon code is still an addon write, so there is no restore either.
+--
+-- So the tag is rewritten on the FINISHED line instead, in the same AddMessage
+-- wrapper as the numbered channels (ChatLineTransform below). A secret line
+-- cannot be read there, the wrapper's pcall swallows the attempt, and the line
+-- prints with Blizzard's own stock tag: a plain look inside a match, never an
+-- error. The event name arrives as AddMessage's 8th argument, which is how the
+-- transform knows which type a line is.
 local FORMATS = {
-    SAY = {
-        -- Drops "says". Yell is untouched, so say-vs-yell stays legible.
-        format = NAME,
-    },
-    GUILD = {
-        format = "|cff" .. GREEN .. "|Hchannel:Guild|h[Guild]|h|r " .. NAME,
-    },
-    PARTY = {
-        format = "|cff" .. CYAN .. "|Hchannel:Party|h[Party]|h|r " .. NAME,
-    },
-    PARTY_LEADER = {
-        -- Kept distinct from PARTY rather than flattened to one [Party]: the
-        -- mock only ever draws one party line, and dropping who the leader is
-        -- would be losing information for the sake of matching a mock that
-        -- never had to represent it.
-        format = "|cff" .. CYAN .. "|Hchannel:Party|h[Party Leader]|h|r " .. NAME,
-    },
-    RAID = {
-        format = "|cff" .. ORANGE .. "[Raid]|r " .. NAME,
-    },
-    RAID_LEADER = {
-        format = "|cff" .. ORANGE .. "[Raid Leader]|r " .. NAME,
-    },
+    -- `tag` replaces Blizzard's own tag (or "says", "whispers", "To") in front
+    -- of the speaker; the speaker itself is restyled by SPEAKER below.
+    SAY = { tag = "" }, -- drops "says"; yell is untouched, so say-vs-yell stays legible
+    GUILD = { tag = "|cff" .. GREEN .. "|Hchannel:Guild|h[Guild]|h|r " },
+    PARTY = { tag = "|cff" .. CYAN .. "|Hchannel:Party|h[Party]|h|r " },
+    -- Kept distinct from PARTY: dropping who the leader is loses information.
+    PARTY_LEADER = { tag = "|cff" .. CYAN .. "|Hchannel:Party|h[Party Leader]|h|r " },
+    RAID = { tag = "|cff" .. ORANGE .. "[Raid]|r " },
+    RAID_LEADER = { tag = "|cff" .. ORANGE .. "[Raid Leader]|r " },
     -- Battleground chat, and any instance group.
-    INSTANCE_CHAT = {
-        format = "|cff" .. ORANGE .. "[Instance]|r " .. NAME,
-    },
-    INSTANCE_CHAT_LEADER = {
-        format = "|cff" .. ORANGE .. "[Instance Leader]|r " .. NAME,
-    },
-    -- Direction is kept rather than flattened to one [Whisper]: which way a
-    -- whisper went is the whole point of seeing it, and stock carries that in
-    -- the "whispers" / "To" wording this format replaces. WHISPER_INFORM's %s
-    -- is the RECIPIENT, which is what makes [To] read correctly.
-    WHISPER = {
-        format = "|cff" .. PINK .. "[From]|r " .. NAME,
-    },
-    WHISPER_INFORM = {
-        format = "|cff" .. PINK .. "[To]|r " .. NAME,
-    },
+    INSTANCE_CHAT = { tag = "|cff" .. ORANGE .. "[Instance]|r " },
+    INSTANCE_CHAT_LEADER = { tag = "|cff" .. ORANGE .. "[Instance Leader]|r " },
+    -- Direction is kept: which way a whisper went is the whole point of it.
+    WHISPER = { tag = "|cff" .. PINK .. "[From]|r " },
+    WHISPER_INFORM = { tag = "|cff" .. PINK .. "[To]|r " },
 }
+
 
 -- SYSTEM has no CHAT_SYSTEM_GET and no author, so it cannot be done with a
 -- format string. Blizzard prints the bare text; the mock wants an amber
@@ -239,7 +233,7 @@ end
 -- /fschatfmt off is a true restore rather than a best guess at Blizzard's
 -- defaults. Populated once; a second enable reuses it.
 local saved = {
-    formats = nil,     -- CHAT_<type>_GET string, by type
+    formats = nil,     -- true once captured (the format globals are only ever read)
     colors = nil,      -- { r, g, b }, by type
     classColor = nil,  -- ChatTypeInfo[type].colorNameByClass, by type
     channelTag = nil,  -- "rrggbb" tag colour, by numbered-channel index
@@ -344,11 +338,7 @@ end
 local function CaptureOriginals()
     if saved.formats then return end
 
-    saved.formats = {}
-    for typeKey in pairs(FORMATS) do
-        saved.formats[typeKey] = _G["CHAT_" .. typeKey .. "_GET"]
-    end
-
+    saved.formats = true
     saved.colors = {}
     for _, typeKey in ipairs(MINT_TYPES) do
         local info = ChatTypeInfo and ChatTypeInfo[typeKey]
@@ -523,9 +513,55 @@ end
 -- onto its transforms list on every call, so calling it again on a later
 -- Enable() (off, then on) would stack a second copy of the same rewrite
 -- rather than reusing the first.
-local function ChannelTagTransform(text)
-    if applied and text:find("|Hchannel:", 1, true) then
-        return text:gsub(CHANNEL_TAG_PATTERN, RewriteChannelTag)
+-- The speaker half of a finished line, for the types in FORMATS. Blizzard
+-- builds it as format(CHAT_<type>_GET .. message, pflag .. playerLink), so the
+-- stock format string, split at its %s, gives the text either side of the
+-- speaker. The player link (`|Hplayer:...|h[Name]|h`) is found first and the
+-- stock pieces are checked around it; anything that does not line up exactly
+-- (a Discord sender, an emote, a client whose stock strings differ) is left
+-- alone rather than guessed at.
+local PLAYER_LINK = "|Hplayer:.-|h.-|h"
+
+local function RestyleSpeaker(text, typeKey)
+    local entry = FORMATS[typeKey]
+    local stock = _G["CHAT_" .. typeKey .. "_GET"]
+    if not entry or type(stock) ~= "string" then return text end
+    local cut = stock:find("%s", 1, true)
+    if not cut then return text end
+    local pre, post = stock:sub(1, cut - 1), stock:sub(cut + 2)
+
+    local ls, le = text:find(PLAYER_LINK)
+    if not ls or text:sub(le + 1, le + #post) ~= post then return text end
+    local before = text:sub(1, ls - 1)
+    -- `pre` is the stock tag, followed by any AFK/DND flag; take its LAST
+    -- occurrence before the link so a timestamp in front is kept as it was.
+    local head, flag
+    if pre == "" then
+        flag = before:match("<[^>]*>$") or ""
+        head = before:sub(1, #before - #flag)
+    else
+        local ps, from = nil, 1
+        while true do
+            local hit = before:find(pre, from, true)
+            if not hit then break end
+            ps, from = hit, hit + 1
+        end
+        if not ps then return text end
+        head, flag = before:sub(1, ps - 1), before:sub(ps + #pre)
+    end
+    return head .. entry.tag .. flag .. NAME:format(text:sub(ls, le)) .. text:sub(le + #post + 1)
+end
+
+-- AddMessage's own arguments after the text: r, g, b, id, accessID, typeID,
+-- event. Only chat events carry the 7th; every other line passes through.
+local function ChatLineTransform(text, _, _, _, _, _, _, event)
+    if not applied then return text end
+    if type(event) == "string" and event:sub(1, 9) == "CHAT_MSG_" then
+        local typeKey = event:sub(10)
+        if FORMATS[typeKey] then text = RestyleSpeaker(text, typeKey) end
+    end
+    if text:find("|Hchannel:", 1, true) then
+        text = text:gsub(CHANNEL_TAG_PATTERN, RewriteChannelTag)
     end
     return text
 end
@@ -547,7 +583,7 @@ local function WrapChatFrames()
             if registered[frame] then
                 wrapped = wrapped + 1
             elseif FS.Chat then
-                FS.Chat.WrapAddMessage(frame, ChannelTagTransform)
+                FS.Chat.WrapAddMessage(frame, ChatLineTransform)
                 registered[frame] = true
                 wrapped = wrapped + 1
             end
@@ -560,10 +596,6 @@ local function Enable()
     if applied then return end
     CaptureOriginals()
 
-    for typeKey, entry in pairs(FORMATS) do
-        _G["CHAT_" .. typeKey .. "_GET"] = entry.format
-    end
-
     ApplyBodyColors()
     ApplyClassColors(true)
     ApplySpacing()
@@ -575,10 +607,6 @@ end
 
 local function Disable()
     if not applied then return end
-
-    for typeKey in pairs(FORMATS) do
-        _G["CHAT_" .. typeKey .. "_GET"] = saved.formats[typeKey]
-    end
 
     if ChatTypeInfo then
         for typeKey, rgb in pairs(saved.colors) do
@@ -625,15 +653,11 @@ SlashCmdList["FSCHATFMT"] = function(msg)
     -- WHISPER ship with plain uncoloured tags precisely because those targets
     -- were not going to be guessed at, and this is how they get read.
     if msg == "dump" then
-        if not saved.formats then
-            print("|cff22e0ffstuwave://chat|r  nothing captured yet; /fschatfmt on first")
-            return
-        end
         local keys = {}
-        for typeKey in pairs(saved.formats) do keys[#keys + 1] = typeKey end
+        for typeKey in pairs(FORMATS) do keys[#keys + 1] = typeKey end
         table.sort(keys)
         for _, typeKey in ipairs(keys) do
-            local stock = saved.formats[typeKey]
+            local stock = _G["CHAT_" .. typeKey .. "_GET"]
             print(("|cff22e0ff%s|r  %s"):format(
                 typeKey, (tostring(stock):gsub("|", "||"))))
         end

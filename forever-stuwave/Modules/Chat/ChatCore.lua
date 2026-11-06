@@ -232,7 +232,8 @@ FS.chatTerminal = termPanel
 
 local addMessageWraps = setmetatable({}, { __mode = "k" })
 
--- Registers `transform(text) -> text` to run on every AddMessage call for
+-- Registers `transform(text, ...) -> text` (the rest of AddMessage's
+-- arguments follow the text, so a transform can see the chat event) to run on every AddMessage call for
 -- `frame`, ahead of whatever Blizzard (or the original AddMessage) does with
 -- it. Wrapping the same frame more than once layers transforms in
 -- registration order rather than replacing the previous one.
@@ -247,13 +248,15 @@ function Chat.WrapAddMessage(frame, transform)
         addMessageWraps[frame] = entry
 
         frame.AddMessage = function(self, text, ...)
-            if type(text) == "string" then
+            -- A secret line (chat inside a PvP match or boss fight) cannot be
+            -- read here, so it goes straight through untouched.
+            if type(text) == "string" and not (FS.IsSecret and FS.IsSecret(text)) then
                 for _, fn in ipairs(entry.transforms) do
                     -- pcall each transform: a throwing transform must not propagate
                     -- out of AddMessage and blank the frame. On error or a non-string
                     -- return, keep the prior text so the line still prints, just
                     -- untransformed, instead of dropping it or erroring.
-                    local ok, result = pcall(fn, text)
+                    local ok, result = pcall(fn, text, ...)
                     if ok and type(result) == "string" then
                         text = result
                     end
