@@ -1132,30 +1132,15 @@ case("gossip_goodbye_and_trainer_train_are_text_buttons", """
 # The objective tracker's collapse button
 # ---------------------------------------------------------------------------
 
-case("tracker_collapse_button_is_the_shared_plate_with_a_minus_and_keeps_its_click", """
+case("tracker_collapse_button_wears_the_chat_minimise_glyph_and_keeps_its_click", """
     local frame, header = MakeTracker()
     local mb = header.MinimizeButton
     local click = mb.scripts.OnClick
     LoadTracker()
-    local p = Skinned(mb, "the collapse button")
-    assert(p.kind == "minus" and #p.glyph == 12, "expanded: a minus, " .. tostring(p.kind))
-    local pt = mb.points.TOPRIGHT
-    assert(pt and pt.rel ~= header and pt.rel ~= nil and pt.x == -5 and pt.y == -3, "seated in our title band (on our backdrop) like the panels' X")
     assert(mb.scripts.OnClick == click, "its click path is Blizzard's")
     for _, kind in ipairs({ "Normal", "Pushed", "Highlight" }) do assert(mb["Get" .. kind .. "Texture"](mb).alpha == 0, kind .. " art held") end
-    assert(SameRgb(p.ring.tint, Theme.COLOR_HEALTH), "pink like the X")
-""")
-
-case("tracker_collapse_button_shows_a_plus_while_the_container_is_collapsed_and_follows_the_toggle", """
-    local frame, header = MakeTracker({ collapsed = true })
-    LoadTracker()
-    local p = Skinned(header.MinimizeButton, "the collapse button")
-    assert(p.kind == "plus", "collapsed at load: a plus, " .. tostring(p.kind))
-    header:SetCollapsed(false)
-    assert(p.kind == "minus", "expanded: a minus")
-    header:SetCollapsed(true)
-    assert(p.kind == "plus", "collapsed again")
-    assert(header.collapsed == true, "Blizzard's own SetCollapsed still ran")
+    local pt = mb.points.LEFT
+    assert(pt and pt.x == 6, "seated at the band's left like the chat's minimise")
 """)
 
 case("tracker_without_a_collapse_button_is_left_alone", """

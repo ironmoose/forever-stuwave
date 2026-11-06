@@ -161,7 +161,9 @@ local function MarkCovered(covered)
     end
 end
 
-local BAR_PAD = 10 -- label inset from the band's left, and gap to the button
+local BAR_PAD = 10 -- label to the band's right end
+local GLYPH_INSET = 6 -- the collapse glyph from the band's left, as the chat's minimise sits
+local LABEL_X = 26 -- label from the band's left, after the glyph (the chat's 46 less its second lamp)
 
 local function SetBarHit(button, width)
     if not (button and button.SetHitRectInsets) then return end
@@ -170,7 +172,7 @@ local function SetBarHit(button, width)
     end
     if width then
         local bw = button:GetWidth() or 0
-        button:SetHitRectInsets(-(width - bw - 4), -6, -4, -6)
+        button:SetHitRectInsets(-GLYPH_INSET, -(width - GLYPH_INSET - bw), -4, -4)
     elseif chrome.hit then
         button:SetHitRectInsets(chrome.hit[1], chrome.hit[2], chrome.hit[3], chrome.hit[4])
     end
@@ -185,8 +187,7 @@ local function Relayout()
     if chrome.collapsed then
         local label = chrome.label
         label:SetText(CollapsedText())
-        local bw = chrome.button and chrome.button:GetWidth() or 14
-        local width = math.ceil(BAR_PAD + (label.GetStringWidth and label:GetStringWidth() or 0) + BAR_PAD + bw + 6 + inset)
+        local width = math.ceil(inset + LABEL_X + (label.GetStringWidth and label:GetStringWidth() or 0) + BAR_PAD + inset)
         backdrop:SetPoint("TOPRIGHT", top, "TOPRIGHT", 0, 0)
         backdrop:SetSize(width, Theme.PANEL_HEADER_H + inset * 2)
         SetBarHit(chrome.button, width)
@@ -218,23 +219,32 @@ local function WatchQuestCount()
     chrome.countEvents = f
 end
 
-local function SkinCollapseButton(frame, header, backdrop)
-    local skins = FS.ButtonSkins
+-- The collapse button wears the chat's minimise control (playtest 2026-11-05): the same flat pink minus glyph
+-- (icon_minimize.tga), quiet at rest and full on hover, at the left end of the band with the label after it. It is
+-- Blizzard's own button: its art is held at alpha 0 and it is re-seated on our band; its click path is untouched.
+local ICON_MINIMIZE_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\icon_minimize.tga"
+local GLYPH_SIZE, GLYPH_ALPHA, GLYPH_ALPHA_HOVER = 16, 0.85, 1.00 -- the chat term bar's title button values
+
+local function SkinCollapseButton(header, band)
     local button = header and header.MinimizeButton
-    if not (skins and skins.SkinCloseButton and button) then return end
-    local collapsed = false
-    if type(frame.IsCollapsed) == "function" then
-        local ok, value = pcall(frame.IsCollapsed, frame)
-        collapsed = ok and value == true
+    if not (button and button.CreateTexture) then return end
+    if FS.HeldArt then FS.HeldArt.HoldButton(button) end
+    button:ClearAllPoints()
+    button:SetSize(GLYPH_SIZE, GLYPH_SIZE)
+    button:SetPoint("LEFT", band, "LEFT", GLYPH_INSET, 0)
+    local pink = Theme.COLOR_HEALTH
+    local icon = button:CreateTexture(nil, "OVERLAY")
+    icon:SetTexture(ICON_MINIMIZE_TEXTURE)
+    icon:SetAllPoints(button)
+    icon:SetVertexColor(pink[1], pink[2], pink[3], GLYPH_ALPHA)
+    chrome.icon = icon
+    if button.HookScript then
+        button:HookScript("OnEnter", function() icon:SetVertexColor(pink[1], pink[2], pink[3], GLYPH_ALPHA_HOVER) end)
+        button:HookScript("OnLeave", function() icon:SetVertexColor(pink[1], pink[2], pink[3], GLYPH_ALPHA) end)
     end
-    -- Seated on our backdrop, so it rides the band in both states.
-    skins.SkinCloseButton(button, { anchor = backdrop, glyph = collapsed and "plus" or "minus" })
     chrome.button = button
     if type(hooksecurefunc) == "function" and type(header.SetCollapsed) == "function" then
-        hooksecurefunc(header, "SetCollapsed", function(_, nowCollapsed)
-            skins.SetGlyph(button, nowCollapsed == true and "plus" or "minus")
-            ApplyCollapsed(nowCollapsed == true)
-        end)
+        hooksecurefunc(header, "SetCollapsed", function(_, nowCollapsed) ApplyCollapsed(nowCollapsed == true) end)
     end
 end
 
@@ -275,7 +285,7 @@ local function BuildContainerChrome()
 
     local label = backdrop:CreateFontString(nil, "OVERLAY")
     ApplyMono(label, 10, COLOR_POWER)
-    label:SetPoint("LEFT", band, "LEFT", BAR_PAD, 0)
+    label:SetPoint("LEFT", band, "LEFT", LABEL_X, 0)
     label:SetWordWrap(false)
     label:SetText(CollapsedText())
 
@@ -286,7 +296,7 @@ local function BuildContainerChrome()
         -- Stock header art and text held at alpha 0 (not Hidden), so Blizzard's own show state is untouched.
         if header.Background and header.Background.SetAlpha then header.Background:SetAlpha(0) end
         if header.Text and header.Text.SetAlpha then header.Text:SetAlpha(0) end
-        SkinCollapseButton(frame, header, backdrop)
+        SkinCollapseButton(header, band)
     end
 
     if usingNineSlice then nineSlice:SetAlpha(0) end

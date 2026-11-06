@@ -112,7 +112,7 @@ tracker.Header:SetCollapsed(true)
 local btn = tracker.Header.MinimizeButton
 case("collapsed_bar_is_compact_on_the_right", backdrop and backdrop.pts[1][1] == "TOPRIGHT" and #backdrop.pts == 1
   and backdrop.w and backdrop.w < 140 and backdrop.h == 24)
-case("collapsed_bar_clicks_anywhere_through_the_button", btn.hit and btn.hit[1] <= -(backdrop.w - 14 - 4))
+case("collapsed_bar_clicks_anywhere_through_the_button", btn.hit and btn.hit[1] == -6 and btn.hit[2] <= -(backdrop.w - 6 - 14 - 8))
 case("collapsed_restores_the_hidden_header_text", qh.Text.alpha == 1)
 
 collapsed = false
