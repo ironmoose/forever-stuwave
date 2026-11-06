@@ -14,6 +14,7 @@ First build for the WoW Forever release client. Beta until 1.0, which ships with
 - Character snapshot: a silent per-character record (level, stats, professions, talents) in the `ForeverSTUwaveExport` saved variable, with an off switch. See [docs/EXPORT.md](docs/EXPORT.md).
 - After a level up, a "Reload to save" button writes the snapshot to disk. It has its own off switch.
 - The objectives tracker moves in the layout editor (`/fsedit`, or Layout in settings). The position is saved in Blizzard's Edit Mode layout; if a preset layout (Modern or Classic) is active, the first move copies it to an account layout named "STUwave".
+- Two new keys on the console's shoulder: Quests opens or collapses the quest tracker, Chat opens or minimises the chat. While a key is on screen, its closed tracker or chat draws nothing at all. Both keys stay with the HUD off.
 - Nameplate quest marker: an amber "!" on a mob your quests need, including classic quests the game's own check misses.
 
 ### Skins
