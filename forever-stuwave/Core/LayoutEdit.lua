@@ -34,7 +34,17 @@ local MOVABLE = {
     { id = "tooltip",      label = "Tooltip" },
     { id = "tcast",        label = "Target cast bar" },
     { id = "pcast",        label = "Player cast bar" },
+    { id = "objectives",   label = "Objectives" },
 }
+
+-- Pieces that FS.Layout does not seat. Each provider answers Ready, Rect, Offsets, Move(x, y) and Reset;
+-- the objectives tracker is a Blizzard Edit Mode system, so its seat is written into the Edit Mode layout.
+local function Provider(id)
+    if id == "objectives" then
+        local seat = FS.TrackerSeat
+        if type(seat) == "table" and type(seat.Ready) == "function" then return seat end
+    end
+end
 
 local ARROWS = { UP = { 0, 1 }, DOWN = { 0, -1 }, LEFT = { -1, 0 }, RIGHT = { 1, 0 } }
 
@@ -125,6 +135,9 @@ local function StackAIdle(id)
 end
 
 local function HasHandle(id)
+    local provider = Provider(id)
+    if provider then return provider.Ready() == true and provider.Rect() ~= nil end
+    if id == "objectives" then return false end
     local L = FS.Layout[id]
     if StackAIdle(id) then return false end
     if type(L) ~= "table" or type(L.x) ~= "number" or type(L.y) ~= "number" then return false end
@@ -152,6 +165,11 @@ end
 
 -- The layout x/y the handle's current screen position stands for, in the entry's own units.
 local function ReadLayoutXY(id, handle)
+    if Provider(id) then
+        local right, top = handle:GetRight(), handle:GetTop()
+        if not (right and top) then return nil end
+        return right - UIParent:GetRight(), top - UIParent:GetTop()
+    end
     local L = FS.Layout[id]
     local hx, hy = PointXY(handle, L.point)
     local px, py = PointXY(UIParent, L.relPoint)
@@ -161,6 +179,8 @@ local function ReadLayoutXY(id, handle)
 end
 
 local function CurrentXY(id)
+    local provider = Provider(id)
+    if provider then return provider.Offsets() end
     local L = FS.Layout[id]
     if id == "petcontainer" and LegacyPetPosition() and handles[id] then
         local x, y = ReadLayoutXY(id, handles[id])
@@ -172,7 +192,18 @@ end
 -- Puts the handle on the frame's layout rect, from layout coordinates and not from the frame.
 -- A pet panel still holding an old /fspet drag position is the exception: that position wins
 -- over the layout until the first move, so its handle starts on the frame itself.
+local function SyncProviderHandle(id, provider)
+    local handle = handles[id]
+    local left, top, width, height = provider.Rect()
+    if not (handle and left) then return end
+    handle:SetSize(math.max(width, MIN_HANDLE), math.max(height, MIN_HANDLE))
+    handle:ClearAllPoints()
+    handle:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+end
+
 local function SyncHandle(id)
+    local provider = Provider(id)
+    if provider then return SyncProviderHandle(id, provider) end
     local handle, L = handles[id], FS.Layout[id]
     local frame = AppliedFrame(id)
     if not (handle and frame and L) then return end
@@ -220,13 +251,41 @@ end
 
 -- A frame can leave the re-seat list mid-edit (the pet docking). Its handle goes with it.
 local function FrameGone(id)
+    local provider = Provider(id)
+    if provider and provider.Ready() then return false end
     if AppliedFrame(id) then return false end
     if handles[id] then handles[id]:Hide() end
     if selected == id then selected = nil end
     return true
 end
 
+-- Blizzard applies an Edit Mode layout as it reloads it, so the handle catches up a moment later.
+local function SyncSoon(id)
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0.1, function() if editing and handles[id] and handles[id]:IsShown() then SyncHandle(id) end end)
+    end
+end
+
+local function CommitProvider(id, provider, x, y)
+    local oldX, oldY = provider.Offsets()
+    if oldX and math.abs(x - oldX) < 0.25 and math.abs(y - oldY) < 0.25 then
+        SyncHandle(id)
+        return false
+    end
+    local ok, reason = provider.Move(x, y)
+    if not ok then
+        Say("could not move that piece (" .. tostring(reason) .. ")")
+        SyncHandle(id)
+        return false
+    end
+    SyncHandle(id)
+    SyncSoon(id)
+    return true
+end
+
 local function Commit(id, x, y)
+    local provider = Provider(id)
+    if provider then return CommitProvider(id, provider, x, y) end
     local Layout = FS.Layout
     local L = Layout[id]
     if FrameGone(id) then return false end
@@ -246,7 +305,22 @@ local function Commit(id, x, y)
     return true
 end
 
+local function ResetProvider(id, provider)
+    local ok, reason = provider.Reset()
+    if not ok then
+        Say("could not reset that piece (" .. tostring(reason) .. ")")
+        return false
+    end
+    if editing then
+        SyncHandle(id)
+        SyncSoon(id)
+    end
+    return true
+end
+
 function LayoutEdit.ResetOne(id)
+    local provider = Provider(id)
+    if provider then return ResetProvider(id, provider) end
     local Layout = FS.Layout
     if not Layout.ClearOverride(id) then
         Say("could not reset that frame (saved layout is read-only)")
@@ -267,6 +341,8 @@ function LayoutEdit.ResetAll()
     ClearLegacyPetPosition()
     Layout.ReseatAll()
     if FS.Chat and type(FS.Chat.ReassertPrimaryChat) == "function" then Reseat("chat") end
+    local tracker = Provider("objectives")
+    if tracker and tracker.Ready() then ResetProvider("objectives", tracker) end
     if editing then SyncAll() end
     Say("every frame is back at its design seat")
     return true

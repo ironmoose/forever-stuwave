@@ -55,6 +55,10 @@ _KEY_NAME_MAP: dict[str, int] = {
     "esc": ecodes.KEY_ESC,
     "tab": ecodes.KEY_TAB,
     "backspace": ecodes.KEY_BACKSPACE,
+    "up": ecodes.KEY_UP,
+    "down": ecodes.KEY_DOWN,
+    "left": ecodes.KEY_LEFT,
+    "right": ecodes.KEY_RIGHT,
     # Modifiers -- LEFT variants by convention.
     "shift": ecodes.KEY_LEFTSHIFT,
     "ctrl": ecodes.KEY_LEFTCTRL,

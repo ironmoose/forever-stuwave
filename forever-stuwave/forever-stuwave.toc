@@ -20,6 +20,7 @@ Core/ButtonSkins.lua
 Core/ScrollBarSkins.lua
 Core/PanelSkins.lua
 Modules/Tracker/Tracker.lua
+Modules/Tracker/TrackerSeat.lua
 Modules/Chat/ChatCore.lua
 Modules/Chat/ChatTabs.lua
 Modules/Chat/ChatEditBox.lua

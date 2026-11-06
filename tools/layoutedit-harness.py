@@ -268,6 +268,31 @@ local function setSnap(on, grid)
     if grid then FS.Config.Set("layout.grid", grid) end
 end
 
+-- A stand-in for FS.TrackerSeat: a tracker rect in UIParent units whose TOPRIGHT follows Move.
+local function fakeSeat(opts)
+    opts = opts or {}
+    local seat = { moves = {}, resets = 0, right = -29, top = -286, w = 300, h = 200, ready = opts.ready ~= false }
+    function seat.Ready() return seat.ready end
+    function seat.Rect()
+        local r, t = UIParent:GetRight() + seat.right, UIParent:GetTop() + seat.top
+        return r - seat.w, t, seat.w, seat.h
+    end
+    function seat.Offsets() return seat.right, seat.top end
+    function seat.Move(x, y)
+        seat.moves[#seat.moves + 1] = { x, y }
+        if opts.refuse then return false, "no free slot" end
+        seat.right, seat.top = x, y
+        return true
+    end
+    function seat.Reset()
+        seat.resets = seat.resets + 1
+        seat.right, seat.top = -10, -200
+        return true
+    end
+    FS.TrackerSeat = seat
+    return seat
+end
+
 -------------------------------------------------------------------------------
 -- Entry and exit
 -------------------------------------------------------------------------------
@@ -1366,6 +1391,80 @@ function T.leaving_without_a_config_window_is_quiet()
     clickDone()
     eq(FS.LayoutEdit.IsEditing(), false)
     eq(#__errors, 0)
+end
+
+-------------------------------------------------------------------------------
+-- Objectives tracker (Edit Mode seat)
+-------------------------------------------------------------------------------
+
+function T.the_objectives_handle_sits_on_the_tracker_rect()
+    local seat = fakeSeat()
+    edit(); FS.LayoutEdit.Enter()
+    local h = FS.LayoutEdit.GetHandle("objectives")
+    eq(h ~= nil, true, "handle shown")
+    eq(h.label._text, "Objectives")
+    near(h:GetRight(), UIParent:GetRight() - 29, 1e-6, "right edge")
+    near(h:GetTop(), UIParent:GetTop() - 286, 1e-6, "top edge")
+    eq(h._w, 300); eq(h._h, 200)
+    eq(#seat.moves, 0, "showing writes nothing")
+end
+
+function T.no_objectives_handle_without_a_ready_seat()
+    edit(); FS.LayoutEdit.Enter()
+    eq(FS.LayoutEdit.GetHandle("objectives"), nil, "no provider")
+    FS.LayoutEdit.Exit()
+    fakeSeat({ ready = false })
+    FS.LayoutEdit.Enter()
+    eq(FS.LayoutEdit.GetHandle("objectives"), nil, "Edit Mode missing")
+end
+
+function T.an_objectives_drop_moves_the_seat_by_its_topright_snapped()
+    local seat = fakeSeat()
+    edit(); FS.LayoutEdit.Enter()
+    dragTo("objectives", "TOPRIGHT", "TOPRIGHT", -45, -301)
+    eq(#seat.moves, 1)
+    eq(seat.moves[1][1], -48, "x snapped to 8"); eq(seat.moves[1][2], -304, "y snapped to 8")
+    local h = FS.LayoutEdit.GetHandle("objectives")
+    near(h:GetRight(), UIParent:GetRight() - 48, 1e-6, "handle follows the seat")
+    eq(next(frames()), nil, "nothing written to the STUwave layout")
+end
+
+function T.an_objectives_drop_without_snap_keeps_the_exact_point()
+    local seat = fakeSeat()
+    edit(); setSnap(false); FS.LayoutEdit.Enter()
+    dragTo("objectives", "TOPRIGHT", "TOPRIGHT", -45, -301)
+    eq(seat.moves[1][1], -45); eq(seat.moves[1][2], -301)
+end
+
+function T.arrows_nudge_the_objectives_seat()
+    local seat = fakeSeat()
+    edit(); FS.LayoutEdit.Enter()
+    FS.LayoutEdit.Select("objectives")
+    key("LEFT")
+    eq(seat.moves[1][1], -30); eq(seat.moves[1][2], -286)
+    __shift = true
+    key("DOWN")
+    eq(seat.moves[2][1], -30); eq(seat.moves[2][2], -294)
+end
+
+function T.a_refused_objectives_move_is_reported_and_the_handle_goes_back()
+    local seat = fakeSeat({ refuse = true })
+    edit(); FS.LayoutEdit.Enter()
+    dragTo("objectives", "TOPRIGHT", "TOPRIGHT", -100, -400)
+    eq(__printedHas("no free slot"), true)
+    local h = FS.LayoutEdit.GetHandle("objectives")
+    near(h:GetRight(), UIParent:GetRight() - 29, 1e-6, "back on the tracker")
+end
+
+function T.right_click_and_reset_all_reset_the_objectives_seat()
+    local seat = fakeSeat()
+    edit(); FS.LayoutEdit.Enter()
+    local h = FS.LayoutEdit.GetHandle("objectives")
+    h._scripts.OnMouseUp(h, "RightButton")
+    eq(seat.resets, 1)
+    near(h:GetRight(), UIParent:GetRight() - 10, 1e-6, "handle follows the reset")
+    FS.LayoutEdit.ResetAll()
+    eq(seat.resets, 2)
 end
 
 __checks = T

@@ -406,6 +406,10 @@ def _lparam(scan: int, keyup: bool) -> int:
 _linux_kbd_instance: UinputKeyboard | None = None
 
 
+# Keys --tap-once may press: Space clears Away; Escape and the arrows drive /fsedit.
+TAP_KEYS = ("space", "escape", "up", "down", "left", "right")
+
+
 def _linux_kbd() -> UinputKeyboard:
     """Process-wide lazily-created Linux uinput keyboard.
 
@@ -954,7 +958,7 @@ def main() -> int:
     parser.add_argument("--cmd-once", metavar="SLASH",
                         help="send one slash command without deploy, reload, or log read")
     parser.add_argument("--tap-once", metavar="KEY",
-                        help="Linux: focus WoW and press Space once, then exit")
+                        help="Linux: focus WoW and press one key (space, escape, an arrow) once, then exit")
     parser.add_argument("--cmd", metavar="SLASH", action="append",
                         help="slash command to send BEFORE reloading, repeatable "
                              "(e.g. --cmd '/fsfont' --cmd '/fschat levels'). The "
@@ -964,8 +968,8 @@ def main() -> int:
     _focus_point = args.focus_point
     _host_focus_done = False
 
-    if args.tap_once is not None and args.tap_once != "space":
-        sys.exit("--tap-once supports only space")
+    if args.tap_once is not None and args.tap_once not in TAP_KEYS:
+        sys.exit("--tap-once supports only " + ", ".join(TAP_KEYS))
     if args.tap_once is not None and sys.platform == "win32":
         sys.exit("--tap-once space is available only on Linux")
     if args.tap_once is not None and _focus_point is None:
@@ -1023,11 +1027,11 @@ def main() -> int:
     if args.tap_once is not None:
         focus(hwnd)
         keyboard = _linux_kbd()
-        keyboard.key_down("space")
+        keyboard.key_down(args.tap_once)
         try:
             time.sleep(0.05)
         finally:
-            keyboard.key_up("space")
+            keyboard.key_up(args.tap_once)
         return 0
 
     if args.cmd_once is not None:
