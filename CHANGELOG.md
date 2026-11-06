@@ -23,9 +23,9 @@ First build for the WoW Forever release client. Beta until 1.0, which ships with
 - Looking For Group window skin.
 - Cooldowns draw as a violet fill that recedes upward.
 - Bag slots are ringed by item quality, with a dark violet ring on empty and Common slots.
-- The quest timer wears the panel skin and draws above the objectives panel.
+- Quest timers hang under the minimap as a STUwave drawer: an LED countdown and a draining gauge per timer, cyan, then amber under a minute and pink under 15 seconds. The game's own timer window is hidden while it is on (switch: "Quest timer under the minimap").
 - An opened mail letter gets its own panel instead of floating as bare text.
-- The loss of control alert (stuns, fears) is a STUwave plate.
+- The loss of control alert (stuns, fears, silences) is the Gunsight jam: target brackets snap closed on the spell icon, a ring of ticks runs down with the effect, and the word and seconds sit on a plate under it. The colour follows the effect type. The snap in has its own switch.
 - Objectives tracker: one STUwave header reading the quest count, "quests (12/20)", with the chat's minus to collapse it; collapsed, it is a small bar you click anywhere to open. STUwave quest markers with hover and pressed looks.
 - The "World refresh in N Minutes" notice is a STUwave panel.
 - Tutorial tips and the Battle.net friend toast are STUwave panels.
@@ -34,6 +34,7 @@ First build for the WoW Forever release client. Beta until 1.0, which ships with
 - Buff reminders show when a buff is removed in combat.
 - Target Debuffs can keep a fallen-off debuff as a red reapply reminder (on by default).
 - The character snapshot keeps the last real stats when a logout or reload reads them all as 0.
+- Long quest text in the map's quest log no longer shows through the rewards box.
 
 ### Known issues
 - A bag item clicked in combat was blocked once (ADDON_ACTION_FORBIDDEN on UseContainerItem). The cause is not found yet. Keep potions on an action bar.
