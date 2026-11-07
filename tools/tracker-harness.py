@@ -49,8 +49,10 @@ function Obj:CreateFontString() return new("FontString") end
 function Obj:GetFrameStrata() return "LOW" end
 function Obj:GetFrameLevel() return 1 end
 function Obj:SetScript(k,f) self[k]=f end
+function Obj:SetParent(p) self.parent=p end
+function Obj:GetParent() return self.parent end
 function Obj:GetFont() return "x", 12, "" end
-CreateFrame = function(kind) return new(kind) end
+CreateFrame = function(kind, name, parent) local o = new(kind); o.parent = parent; return o end
 hooksecurefunc = function(t, k, fn) local old=t[k]; t[k]=function(...) local r={old(...)}; fn(...); return unpack(r) end end
 local collapsed = false
 local tracker = new("Frame")
@@ -76,7 +78,11 @@ C_QuestLog = { GetNumQuestLogEntries = function() return 3, 2 end, GetMaxNumQues
 InCombatLockdown = function() return false end
 POIButtonUtil = { Style = { QuestInProgress = 2, QuestComplete = 3, QuestDisabled = 4 } }
 local function poi(style)
-  local b = new("Button"); b.Display = new("Frame"); b.style = style; b.selected = false
+  local b = new("Button"); b.Display = new("Frame"); b.Display.Icon = new("Texture"); b.style = style; b.selected = false
+  b.AddAnim = new("AnimationGroup")
+  b.block = new("Frame")
+  b.GetParent = function(self) return self.block end
+  b.SetStyle = function(self, v) self.style = v end
   b.GetStyle = function(self) return self.style end
   b.IsSelected = function(self) return self.selected end
   b.SetSelected = function(self, v) self.selected = v end
@@ -155,6 +161,18 @@ case("markers_are_the_poi_button_size", plate(done).w == 20 and plate(done).h ==
 case("turn_in_marker_is_an_amber_question_mark_centred", #cells(done) == 9 and cells(done)[1].ct[2] == 0.7 and centred(done))
 case("in_progress_marker_is_three_cyan_dots_centred", #cells(todo) == 3 and cells(todo)[1].ct[1] == 0 and centred(todo))
 case("marker_art_is_held_and_display_hidden", done.Display.alpha == 0)
+case("marker_plate_sits_beside_the_button_not_inside_it", plate(done).parent == done.block and plate(done).parent ~= done)
+done.Display.alpha = 1 -- the add animation restores the art layer without calling SetAlpha
+case("marker_icon_texture_is_held_too", done.Display.Icon.alpha == 0)
+local function fire(o, k) if o.hooks[k] then o.hooks[k](o) end end
+fire(done.AddAnim, "OnFinished")
+case("add_animation_end_hides_the_art_layer_again", done.Display.alpha == 0)
+local other = new("Frame"); todo.block = other; todo:SetStyle(2)
+case("a_pooled_button_moved_to_another_block_takes_its_plate", plate(todo).parent == other)
+fire(todo, "OnHide")
+case("hiding_the_button_hides_its_plate", plate(todo).shown == false)
+fire(todo, "OnShow")
+case("showing_the_button_shows_its_plate", plate(todo).shown == true)
 local before = cells(done)[1].ct[2]
 local x0 = bounds(cells(done))
 done.hooks.OnEnter(done)

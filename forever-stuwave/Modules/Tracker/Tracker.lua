@@ -463,7 +463,13 @@ local function PaintMarker(button)
     local m = poiSkins[button]
     if not m then return end
     local kind = MarkerKind(button)
-    m.frame:SetShown(kind ~= "none")
+    -- the plate lives beside the button (see SkinMarker), so it follows the button into whichever block the pool
+    -- hands it to, and keeps to the button's own shown state
+    local okP, parent = pcall(button.GetParent, button)
+    if okP and parent and m.frame:GetParent() ~= parent then m.frame:SetParent(parent) end
+    local okL, level = pcall(button.GetFrameLevel, button)
+    if okL and type(level) == "number" then m.frame:SetFrameLevel(level + 1) end
+    m.frame:SetShown(kind ~= "none" and not m.hidden)
     if kind == "none" then return end
     local okSel, selected = pcall(button.IsSelected, button)
     selected = okSel and selected == true
@@ -512,24 +518,41 @@ local function PaintMarker(button)
     for i = n + 1, #m.cells do m.cells[i]:Hide() end
 end
 
+-- Holds a region at alpha 0: zeroed now, and zeroed again after any SetAlpha on it.
+local function HoldZero(region)
+    if type(region) ~= "table" or type(region.SetAlpha) ~= "function" or region.fsHeldZero then return end
+    region.fsHeldZero = true
+    region:SetAlpha(0)
+    if type(hooksecurefunc) == "function" then
+        local zeroing = false
+        hooksecurefunc(region, "SetAlpha", function(self)
+            if zeroing then return end
+            zeroing = true
+            self:SetAlpha(0)
+            zeroing = false
+        end)
+    end
+end
+
 local function SkinMarker(button)
     if poiSkins[button] or type(button) ~= "table" or type(button.CreateTexture) ~= "function" then return end
     if FS.HeldArt then FS.HeldArt.HoldButton(button) end
+    -- Blizzard's art layer (Display) and its icon texture are each held at alpha 0. Holding the frame alone was not
+    -- enough: the tracker's add animation brings a new quest's art layer back to full alpha without a SetAlpha call,
+    -- so the stock icon showed through our plate (live probe 2026-11-06: Display alpha 1 on every newly accepted quest).
     local display = button.Display
-    if display and display.SetAlpha then
-        display:SetAlpha(0)
-        if type(hooksecurefunc) == "function" then
-            local zeroing = false
-            hooksecurefunc(display, "SetAlpha", function(self)
-                if zeroing then return end
-                zeroing = true
-                self:SetAlpha(0)
-                zeroing = false
-            end)
-        end
+    HoldZero(display)
+    HoldZero(display and display.Icon)
+    local anim = button.AddAnim
+    if anim and anim.HookScript and display and display.SetAlpha then
+        pcall(anim.HookScript, anim, "OnFinished", function() display:SetAlpha(0) end)
     end
 
-    local f = CreateFrame("Frame", nil, button)
+    -- Our plate is NOT a child of the button: the same add animation scales the button 1.2x and back, and our sliced
+    -- plate textures drew as a box many times the marker's size while it ran (screen capture 2026-11-06). Beside the
+    -- button, centred on it, the animation cannot reach it.
+    local okP, parent = pcall(button.GetParent, button)
+    local f = CreateFrame("Frame", nil, okP and parent or button)
     f:SetSize(MARKER_SIZE, MARKER_SIZE)
     f:SetPoint("CENTER", button, "CENTER", 0, 0)
     if f.EnableMouse then f:EnableMouse(false) end
@@ -554,6 +577,14 @@ local function SkinMarker(button)
         end)
         button:HookScript("OnMouseDown", set("pressed", true))
         button:HookScript("OnMouseUp", set("pressed", false))
+        button:HookScript("OnHide", function(self)
+            local s = poiSkins[self]
+            if s then s.hidden = true; s.frame:Hide() end
+        end)
+        button:HookScript("OnShow", function(self)
+            local s = poiSkins[self]
+            if s then s.hidden = false; PaintMarker(self) end
+        end)
     end
     if type(hooksecurefunc) == "function" then
         for _, method in ipairs({ "UpdateButtonStyle", "SetStyle", "SetSelected", "UpdateSelected" }) do
