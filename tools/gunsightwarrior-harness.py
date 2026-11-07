@@ -173,13 +173,13 @@ case("the_last_rune_is_amber_and_the_label_turns_amber", """
     assert(c[1] == 1 and c[2] > 0.7 and c[3] < 0.3, "the last rune's label is amber")
 """)
 
-case("gone_is_dashed_runes_a_cold_helm_and_SHOUT", """
+case("gone_is_dashed_runes_a_cold_helm_and_no_label", """
     Build()
     Tick(0.05)
     assert(Rows("battle") == "44444444", Rows("battle"))
     local f = HelmFrame("battle")
     assert(f == W.FRAME.cold or f == W.FRAME.coldFlick, f)
-    assert(Ring("battle").label.text == "SHOUT")
+    assert(Ring("battle").label.text == "", "no label when gone")
 """)
 
 case("a_shout_runs_out_on_tick", """
@@ -188,7 +188,7 @@ case("a_shout_runs_out_on_tick", """
     __aura = nil
     Tick(3)
     assert(not Shouts.Get("battle").up)
-    assert(Ring("battle").label.text == "SHOUT")
+    assert(Ring("battle").label.text == "", "no label when gone")
 """)
 
 case("a_battle_shout_cast_roars_then_breathes", """

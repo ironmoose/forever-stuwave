@@ -93,6 +93,7 @@ Modules/CombatHud/GunsightShaman.lua
 Modules/CombatHud/GunsightShamanDrop.lua
 Modules/CombatHud/WarriorShouts.lua
 Modules/CombatHud/GunsightWarrior.lua
+Modules/CombatHud/GunsightWarriorClick.lua
 Modules/Diagnostics/FSCheck.lua
 Modules/Diagnostics/BugReport.lua
 Modules/Diagnostics/CharacterExport.lua

@@ -7,7 +7,7 @@
 --     and whipping, its tips stretching), the runes light round one by one and whirl fast, then ease into the drift. Between
 --     shouts it BREATHES HEAVY with its mouth shut and the beard still: up on the inhale, breath puffs off the mouth on the
 --     exhale. Eyes cool white hot -> red -> dim as the shout drains. Gone: the ring stops as amber dashed outlines, the helm
---     goes cold violet in the same spot, SHOUT under it, and its eyes flick amber now and then.
+--     goes cold violet in the same spot with no label under it, and its eyes flick amber now and then.
 --   * DEMORALIZING SHOUT (right, grim violet, smaller tiles, orbiting the other way, the same beard in violet): the time always wears a
 --     "~" (timed from the player's own cast, the target's debuff cannot be read in combat). On a cast it GROWLS: the angry eyes glow
 --     pink, teeth clench, the helm shudders, the beard whips like the roar's, the runes are sucked in and slam back out past the ring, and a dotted ring of
@@ -170,7 +170,6 @@ end
 local SEC, EST_SEC, MIN, EST_MIN = {}, {}, {}, {}
 for i = 0, C.TEXT_MAX_S do SEC[i] = i .. "s"; EST_SEC[i] = "~" .. i .. "s" end
 for i = 1, 9 do MIN[i] = i .. "m"; EST_MIN[i] = "~" .. i .. "m" end
-local LABEL_SHOUT = "SHOUT"
 
 local function TimeLabel(rem, est)
     if rem <= C.TEXT_MAX_S then
@@ -444,7 +443,7 @@ local function PaintRing(p, now)
     if locked then
         Label(p, d.levelText, K.muted)
     elseif n == 0 then
-        if key == "battle" then Label(p, LABEL_SHOUT, K.amber) else Label(p, "", K.violet) end
+        Label(p, "", K.violet)                         -- gone: no label, the cold helm and the dashed ring say it
     else
         local est = key == "demo" or st.source == "cast"
         local c = (n == 1) and K.amber or (key == "battle" and K.pink or K.violet)
@@ -502,6 +501,16 @@ end
 -- Area seams
 -------------------------------------------------------------------------------
 
+-- The module's top left in image px, and a listener hook for whoever seats something over the helms (GunsightWarriorClick.lua's
+-- click catchers): fn(OX, OY) after every seat.
+local seatListeners = {}
+function Warrior.Origin() return OX, OY end
+function Warrior.OnSeat(fn)
+    if type(fn) ~= "function" then return end
+    for i = 1, #seatListeners do if seatListeners[i] == fn then return end end
+    seatListeners[#seatListeners + 1] = fn
+end
+
 local function SeatModule(rect)
     if type(rect) ~= "table" then return end
     local x, y, w = rect.x, rect.y, rect.w
@@ -511,6 +520,10 @@ local function SeatModule(rect)
         SeatAll()
         SeatTrack()
         if subscribed then PaintAll(GetTime()) end
+        for i = 1, #seatListeners do
+            local ok, err = pcall(seatListeners[i], OX, OY)
+            if not ok then LogOnce("seatlistener", err) end
+        end
     end
 end
 
