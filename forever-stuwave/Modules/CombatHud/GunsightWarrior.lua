@@ -6,8 +6,9 @@
 --     turns. One rune left is amber. On a cast the helm ROARS (mouth torn open, eyes blazing, scream lines, the beard puffed out
 --     and whipping, its tips stretching), the runes light round one by one and whirl fast, then ease into the drift. Between
 --     shouts it BREATHES HEAVY with its mouth shut and the beard still: up on the inhale, breath puffs off the mouth on the
---     exhale. Eyes cool white hot -> red -> dim as the shout drains. Gone: the ring stops as amber dashed outlines, the helm
---     goes cold violet in the same spot with no label under it, and its eyes flick amber now and then.
+--     exhale. Eyes cool white hot -> red -> dim as the shout drains. Gone: the ring stops as amber dashed outlines and the helm
+--     goes cold violet in the same spot with no label. CALM out of combat with no attackable target (dark eyes, dim dashes,
+--     nothing moves); a NUDGE in combat or on an attackable target (amber eyes, steady, and the dashes breathe amber).
 --   * DEMORALIZING SHOUT (right, grim violet, smaller tiles, orbiting the other way, the same beard in violet): the time always wears a
 --     "~" (timed from the player's own cast, the target's debuff cannot be read in combat). On a cast it GROWLS: the angry eyes glow
 --     pink, teeth clench, the helm shudders, the beard whips like the roar's, the runes are sucked in and slam back out past the ring, and a dotted ring of
@@ -54,6 +55,10 @@ local C = {
     SWEEP = 0.5,                       -- the runes light round in SWEEP s
     WHIRL = 9,                         -- extra radians the whirl adds at the cast, easing out over ROAR
     GROWL = 1.1,                       -- the growl's whole length (the ripple ends there)
+    NUDGE = 1.4,                       -- seconds per breath of the gone dashes when nudging
+    CALM_A = 0.5,                      -- the gone dashes' alpha when calm; the nudge breathes between NUDGE_LO and NUDGE_HI
+    NUDGE_LO = 0.35, NUDGE_HI = 0.9,
+    DROP = 5,                          -- image px the module sits below the area's top
     HELM_W = 32, HELM_H = 32,          -- the helm sprite (the beard flares past the helm)
     HELM_OX = 3,                       -- where the 26 px helm's own x = 0 sits in the sprite
     WHIP_STEP = 0.075,                 -- the cast beard poses (4) step this fast
@@ -289,6 +294,24 @@ local function ShowDot(t, x, y, c, a)
 end
 
 -- Growl: the runes' radius factor, the helm shake and the ripple's progress (or nil)
+local IsSecret = FS.IsSecret or function() return false end
+
+-- Gone and worth a shout: in combat, or the target is something the player can attack. A secret or failed read is "no".
+local function WantsShout()
+    if type(InCombatLockdown) == "function" and InCombatLockdown() then return true end
+    if type(UnitCanAttack) ~= "function" then return false end
+    local ok, can = pcall(UnitCanAttack, "player", "target")
+    if not ok or IsSecret(can) then return false end
+    return can == true
+end
+Warrior.WantsShout = WantsShout
+
+local function RuneAlpha(t, a)
+    if t.fsA2 == a then return end
+    t.fsA2 = a
+    t:SetAlpha(a)
+end
+
 local function Growl(t)
     if not t then return 1, 0, nil end
     local k = 1
@@ -335,6 +358,12 @@ local function PaintRing(p, now)
     end
 
     local lit = sweep or n
+    local nudge = n == 0 and not locked and WantsShout()
+    local goneA = C.CALM_A
+    if nudge then
+        local b = 0.5 + 0.5 * sin(now * 2 * pi / C.NUDGE)
+        goneA = floor((C.NUDGE_LO + (C.NUDGE_HI - C.NUDGE_LO) * b) * 20 + 0.5) / 20     -- 20 steps: few alpha writes
+    end
     for i = 1, 8 do
         local a = -pi / 2 + (i - 1) * pi / 4 + spin
         local rr = d.r * gk
@@ -347,6 +376,7 @@ local function PaintRing(p, now)
         elseif n == 1 and not sweep then row = rows.amber
         else row = (roarK or (growlT and growlT < 0.7)) and rows.lit2 or rows.lit end
         RuneKind(p, i, row)
+        RuneAlpha(p.runes[i], row == rows.gone and goneA or 1)
         Place(p.runes[i], x - MARGIN, y - MARGIN)
     end
 
@@ -358,8 +388,7 @@ local function PaintRing(p, now)
         p.helm:Show()
         local f
         if n == 0 then
-            local flick = floor(now) % 3 == 0 and (now - floor(now)) < 0.25
-            f = flick and FRAME.coldFlick or FRAME.cold    -- same spot as the live helm: it must not sink when off
+            f = nudge and FRAME.coldFlick or FRAME.cold    -- amber eyes, steady, only when a shout is wanted; never sinks
         elseif key == "battle" then
             local frac = (Shouts.Remaining(key, now) or 0) / (st.duration or 1)
             local eye = frac > 0.66 and "hot" or (frac > 0.25 and "red" or "dim")
@@ -515,7 +544,7 @@ local function SeatModule(rect)
     if type(rect) ~= "table" then return end
     local x, y, w = rect.x, rect.y, rect.w
     if type(x) ~= "number" or type(y) ~= "number" or type(w) ~= "number" then return end
-    OX, OY = x + (w - C.W) / 2, y
+    OX, OY = x + (w - C.W) / 2, y + C.DROP
     if mod then
         SeatAll()
         SeatTrack()

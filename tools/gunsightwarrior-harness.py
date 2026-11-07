@@ -182,6 +182,42 @@ case("gone_is_dashed_runes_a_cold_helm_and_no_label", """
     assert(Ring("battle").label.text == "", "no label when gone")
 """)
 
+case("gone_is_calm_on_a_friendly_target_and_nudges_in_combat_or_on_an_attackable_one", """
+    __canAttack = false
+    UnitCanAttack = function(a, b) return __canAttack end
+    Build()
+    local p = Ring("battle")
+    local frames, alphas = {}, {}
+    for i = 1, 45 do
+        Tick(1 / 30)
+        frames[HelmFrame("battle")] = true
+        alphas[p.runes[1].fsA2] = true
+    end
+    assert(frames[W.FRAME.cold] and not frames[W.FRAME.coldFlick], "calm: dark eyes, no blink")
+    local n = 0
+    for _ in pairs(alphas) do n = n + 1 end
+    assert(n == 1 and alphas[W.C.CALM_A], "calm: the dashes hold still and dim")
+    __canAttack = true
+    alphas = {}
+    for i = 1, 45 do
+        Tick(1 / 30)
+        assert(HelmFrame("battle") == W.FRAME.coldFlick, "nudge: amber eyes, steady")
+        alphas[p.runes[1].fsA2] = true
+    end
+    n = 0
+    for _ in pairs(alphas) do n = n + 1 end
+    assert(n >= 4, "nudge: the dashes breathe, saw " .. n .. " alphas")
+    __canAttack = false
+    __combat = true
+    Tick(1 / 30)
+    assert(HelmFrame("battle") == W.FRAME.coldFlick, "in combat it nudges too")
+    __combat = false
+    UnitCanAttack = function() return __secret end
+    __secret = setmetatable({}, { __secret = true })
+    Tick(1 / 30)
+    assert(HelmFrame("battle") == W.FRAME.cold, "a secret or odd answer is calm")
+""")
+
 case("a_shout_runs_out_on_tick", """
     __aura = { expirationTime = __now + 2, duration = 180 }
     Build()

@@ -104,7 +104,7 @@ TILE = {
     "grim2": ("#c04cff", "#2a0f44", "#f0d0ff", (192, 76, 255, 0.28), 2, "solid"),
     "amber": ("#ffb648", "#4a3008", "#ffe9a8", (255, 182, 72, 0.32), 1, "solid"),
     "off": ("#3a2c5c", "#150c26", "#3a2c5c", None, 0, "solid"),
-    "gone": ((255, 182, 72, 0.5), None, None, None, 0, "dashed"),
+    "gone": ((255, 182, 72, 1.0), None, None, None, 0, "dashed"),   # full alpha: the module dims it (calm) or pulses it (nudge)
     "locked": ((157, 147, 196, 0.4), None, None, None, 0, "dashed"),
 }
 BIG_KINDS = ["rage1", "rage2", "amber", "off", "gone"]
