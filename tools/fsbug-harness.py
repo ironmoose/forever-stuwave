@@ -1874,10 +1874,14 @@ case("err_blocked_action_event_for_our_addon_is_logged_and_announced", """
     assert(#ForeverSTUwaveErrorLog == 2 and #__printed == 1, "shares the error throttle")
 """)
 
-case("err_blocked_action_event_for_another_addon_is_ignored", """
+case("err_blocked_action_event_for_another_addon_is_logged_quietly_with_the_blame", """
     local FS = LoadEL()
-    Fire("ADDON_ACTION_FORBIDDEN", "Details", "SetPoint()")
-    assert(#ForeverSTUwaveErrorLog == 0 and #__printed == 0)
+    Fire("ADDON_ACTION_BLOCKED", "Details", "SetPoint()")
+    local e = ForeverSTUwaveErrorLog[1]
+    assert(e and e.message == "ADDON_ACTION_BLOCKED: SetPoint() (blamed on Details)", e and e.message)
+    assert(e.ours == false and #__printed == 0, "a foreign block is stored but never announced")
+    Fire("ADDON_ACTION_BLOCKED", "Details", "SetPoint()")
+    assert(#ForeverSTUwaveErrorLog == 1 and e.count == 2, "repeats dedupe")
 """)
 
 case("err_blocked_action_event_with_secret_args_is_safe", """

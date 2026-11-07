@@ -430,28 +430,33 @@ end)
 -- something an addon can suppress without touching protected state, so it is
 -- left alone; this only makes sure the cause is written down.
 --
--- Only our own addon is recorded: every other addon's blocked actions fire the
--- same events and would bury ours. A secret argument is ignored rather than
--- compared. The message carries only the function name so repeats of
+-- Every block is recorded, with the addon the client blamed. Ours are kept as
+-- ours; anyone else's (another addon, or a /run or macro line) counts against the
+-- foreign cap. Live 2026-11-07: the stock "Interface action failed because of an
+-- AddOn" line showed while this log stayed empty, so filtering to our name left a
+-- block with no record of what or who. A secret argument is ignored rather than
+-- compared. The message carries only the function and addon name so repeats of
 -- the same block dedupe into one counted entry. The short stack goes in the
 -- entry's stack field instead: it can sometimes show the tainting caller, and
 -- is bounded (12 frames) and pcall'd because it is diagnostic only and this
 -- handler must never throw into the client's event dispatch.
 local function OnActionBlocked(event, blockedAddon, blockedFunc)
     if Secret(blockedAddon) or Secret(blockedFunc) then return end
-    if blockedAddon ~= addonName then return end
+    local ours = blockedAddon == addonName
     local msg = event .. ": " .. tostring(blockedFunc)
+    if not ours then msg = msg .. " (blamed on " .. tostring(blockedAddon) .. ")" end
     -- A repeat (or a full log) never uses a stack, so skip building one.
     if byMessage[msg] or #ForeverSTUwaveErrorLog >= MAX_ENTRIES then
-        Record(msg, nil, true, true)
+        Record(msg, nil, ours, true)
     else
         local ok, s = pcall(debugstack, 2, 12, 0)
         -- Always pass a string: a nil would make Record fall back to its own
         -- stack call. A secret result is never read.
         if not ok or type(s) ~= "string" or Secret(s) then s = "(stack unavailable)" end
-        Record(msg, s, true, true)
+        Record(msg, s, ours, true)
     end
-    pcall(Announce)
+    -- Only our own blocks earn the chat line; the client already prints its own for everyone's.
+    if ours then pcall(Announce) end
 end
 
 local blockedFrame = CreateFrame("Frame")
