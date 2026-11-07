@@ -193,6 +193,14 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "warrior_helm": (256, 256), "warrior_runes_big": (256, 256), "warrior_runes_small": (256, 256),
         "warrior_helm_glow": (64, 64),
     },
+    # generate_priest_shield.py: the Priest Gunsight module's round shield (an atlas of 128 texel cells: dark shield, rims,
+    # rune, flash, aura, halo), the glint frames, the rays, the Weakened Soul swipe rim, the lit shield stretched for a
+    # StatusBar, the Prayer of Mending atlas (beads, hearts, glow) and the heart's cooldown shade (full colour).
+    "priest_shield": {
+        "priest_shield": (512, 512), "priest_shield_glint": (512, 256), "priest_shield_rays": (256, 256),
+        "priest_shield_ws": (128, 128), "priest_shield_lit": (128, 128), "priest_mending": (256, 256),
+        "priest_heart_cd": (32, 32),
+    },
     # generate_shaman_shocks.py: the Shaman Gunsight shock trace (a zigzag over 162 x 20.25 image px, plus its glow with 8 px
     # of margin), the shock bolt (fill, stroke, glow on one 32 px canvas), the Fire Nova ring and its glow (44 px canvas) and
     # the footer's dashed Nova pip (10 px canvas).

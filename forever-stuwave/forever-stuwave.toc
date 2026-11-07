@@ -94,6 +94,9 @@ Modules/CombatHud/GunsightShamanDrop.lua
 Modules/CombatHud/WarriorShouts.lua
 Modules/CombatHud/GunsightWarrior.lua
 Modules/CombatHud/GunsightWarriorClick.lua
+Modules/CombatHud/PriestShields.lua
+Modules/CombatHud/GunsightPriest.lua
+Modules/CombatHud/GunsightPriestClick.lua
 Modules/Diagnostics/FSCheck.lua
 Modules/Diagnostics/BugReport.lua
 Modules/Diagnostics/CharacterExport.lua
