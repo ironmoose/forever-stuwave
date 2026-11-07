@@ -8,7 +8,8 @@
 --     shouts it BREATHES HEAVY with its mouth shut and the beard still: up on the inhale, breath puffs off the mouth on the
 --     exhale. Eyes cool white hot -> red -> dim as the shout drains. Gone: the ring stops as amber dashed outlines and the helm
 --     goes cold violet in the same spot with no label. CALM out of combat with no attackable target (dark eyes, dim dashes,
---     nothing moves); a NUDGE in combat or on an attackable target (amber eyes, steady, and the dashes breathe amber).
+--     nothing moves); a NUDGE in combat or on an attackable target: amber eyes, the dashes on an amber glow pulse like a
+--     missing buff tile, and an amber halo round the helm pulses with them.
 --   * DEMORALIZING SHOUT (right, grim violet, smaller tiles, orbiting the other way, the same beard in violet): the time always wears a
 --     "~" (timed from the player's own cast, the target's debuff cannot be read in combat). On a cast it GROWLS: the angry eyes glow
 --     pink, teeth clench, the helm shudders, the beard whips like the roar's, the runes are sucked in and slam back out past the ring, and a dotted ring of
@@ -55,9 +56,9 @@ local C = {
     SWEEP = 0.5,                       -- the runes light round in SWEEP s
     WHIRL = 9,                         -- extra radians the whirl adds at the cast, easing out over ROAR
     GROWL = 1.1,                       -- the growl's whole length (the ripple ends there)
-    NUDGE = 1.4,                       -- seconds per breath of the gone dashes when nudging
-    CALM_A = 0.5,                      -- the gone dashes' alpha when calm; the nudge breathes between NUDGE_LO and NUDGE_HI
-    NUDGE_LO = 0.35, NUDGE_HI = 0.9,
+    NUDGE = 1.4,                       -- seconds per pulse when nudging (the HUD's missing-buff pulse)
+    CALM_A = 0.5,                      -- the gone dashes' alpha when calm
+    NUDGE_LO = 0.35,                   -- the nudge runes (dashes on an amber glow) pulse from this alpha to 1, the helm halo 0 to 1
     DROP = 5,                          -- image px the module sits below the area's top
     HELM_W = 32, HELM_H = 32,          -- the helm sprite (the beard flares past the helm)
     HELM_OX = 3,                       -- where the 26 px helm's own x = 0 sits in the sprite
@@ -93,8 +94,8 @@ local FRAME = {
 Warrior.FRAME = FRAME
 -- rune atlas rows (BIG_KINDS / SMALL_KINDS)
 local ROW = {
-    battle = { lit = 0, lit2 = 1, amber = 2, off = 3, gone = 4 },
-    demo = { lit = 0, lit2 = 1, amber = 2, off = 3, gone = 4, locked = 5 },
+    battle = { lit = 0, lit2 = 1, amber = 2, off = 3, gone = 4, nudge = 5 },
+    demo = { lit = 0, lit2 = 1, amber = 2, off = 3, gone = 4, locked = 5, nudge = 6 },
 }
 local ATLAS, HELM_CELL, RUNE_CELL_W, RUNE_CELL_H, SCALE = 256, 64, 24, 28, 2
 local MARGIN = 2                       -- the glow margin baked round every tile, sprite px
@@ -210,6 +211,12 @@ local function BuildRing(key)
         Seat(function() t:SetSize(S(tw), S(th)); Forget(t) end)
         p.runes[i] = t
     end
+
+    local halo = mod:CreateTexture(nil, "ARTWORK", nil, 2)
+    SetTex(halo, MEDIA .. "warrior_helm_glow.tga")
+    Seat(function() halo:SetSize(S(C.HELM_W), S(C.HELM_H)); Forget(halo) end)
+    halo:Hide()
+    p.halo = halo
 
     local helm = mod:CreateTexture(nil, "ARTWORK", nil, 3)
     SetTex(helm, MEDIA .. "warrior_helm.tga")
@@ -359,10 +366,10 @@ local function PaintRing(p, now)
 
     local lit = sweep or n
     local nudge = n == 0 and not locked and WantsShout()
-    local goneA = C.CALM_A
+    local goneA, beat = C.CALM_A, 0
     if nudge then
-        local b = 0.5 + 0.5 * sin(now * 2 * pi / C.NUDGE)
-        goneA = floor((C.NUDGE_LO + (C.NUDGE_HI - C.NUDGE_LO) * b) * 20 + 0.5) / 20     -- 20 steps: few alpha writes
+        beat = floor((0.5 + 0.5 * sin(now * 2 * pi / C.NUDGE)) * 20 + 0.5) / 20         -- 0..1 in 20 steps: few alpha writes
+        goneA = C.NUDGE_LO + (1 - C.NUDGE_LO) * beat
     end
     for i = 1, 8 do
         local a = -pi / 2 + (i - 1) * pi / 4 + spin
@@ -371,17 +378,27 @@ local function PaintRing(p, now)
         local y = floor(C.CY + sin(a) * rr - d.th / 2 + 0.5)
         local row
         if locked then row = rows.locked
-        elseif n == 0 then row = rows.gone
+        elseif n == 0 then row = nudge and rows.nudge or rows.gone
         elseif i > lit then row = rows.off
         elseif n == 1 and not sweep then row = rows.amber
         else row = (roarK or (growlT and growlT < 0.7)) and rows.lit2 or rows.lit end
         RuneKind(p, i, row)
-        RuneAlpha(p.runes[i], row == rows.gone and goneA or 1)
+        RuneAlpha(p.runes[i], (row == rows.gone or row == rows.nudge) and goneA or 1)
         Place(p.runes[i], x - MARGIN, y - MARGIN)
     end
 
     -- the helm
     local hx, hy = d.cx - 13, C.CY - 12
+    -- the nudge's halo round the cold helm
+    if nudge then
+        if p.halo.fsOn ~= true then p.halo.fsOn = true; p.halo:Show() end
+        RuneAlpha(p.halo, beat)
+        Place(p.halo, d.cx - 13 - C.HELM_OX, C.CY - 12)
+    elseif p.halo.fsOn ~= false then
+        p.halo.fsOn = false
+        p.halo:Hide()
+    end
+
     if locked then
         p.helm:Hide()
     else

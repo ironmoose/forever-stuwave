@@ -191,6 +191,7 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     # generate_warrior_helm.py: the Warrior Gunsight module's 8-bit helm frames and its two rune tile atlases (full colour).
     "warrior_helm": {
         "warrior_helm": (256, 256), "warrior_runes_big": (256, 256), "warrior_runes_small": (256, 256),
+        "warrior_helm_glow": (64, 64),
     },
     # generate_shaman_shocks.py: the Shaman Gunsight shock trace (a zigzag over 162 x 20.25 image px, plus its glow with 8 px
     # of margin), the shock bolt (fill, stroke, glow on one 32 px canvas), the Fire Nova ring and its glow (44 px canvas) and

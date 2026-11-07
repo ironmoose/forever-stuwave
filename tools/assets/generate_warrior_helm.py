@@ -10,6 +10,7 @@ the palettes are part of the art, nothing is tinted in game.
     warrior_helm.tga         256 x 256   16 frames in 64 x 64 texel cells, 4 per row; each cell is the whole 32 x 32 sprite. Frame order is HELM_FRAMES below (GunsightWarrior.lua's FRAME).
     warrior_runes_big.tga    256 x 256   Battle Shout tiles: 8 glyphs across, one row per kind (BIG_KINDS), 24 x 28 texel
                                          cells; a 7 x 9 tile with a 2 px glow margin (11 x 13 sprite px = 22 x 26 texels).
+    warrior_helm_glow.tga     64 x 64    the amber halo round the cold helm (the gone nudge), the helm sprite's own box.
     warrior_runes_small.tga  256 x 256   Demoralizing Shout tiles: same cells, a 5 x 7 tile with the 2 px margin (9 x 11 sprite px
                                          = 18 x 22 texels), one row per kind (SMALL_KINDS).
 
@@ -106,9 +107,11 @@ TILE = {
     "off": ("#3a2c5c", "#150c26", "#3a2c5c", None, 0, "solid"),
     "gone": ((255, 182, 72, 1.0), None, None, None, 0, "dashed"),   # full alpha: the module dims it (calm) or pulses it (nudge)
     "locked": ((157, 147, 196, 0.4), None, None, None, 0, "dashed"),
+    # the nudge (gone, a shout wanted): the amber dashes on a soft amber glow, faded in and out by the module like a buff tile
+    "nudge": ((255, 182, 72, 1.0), None, None, (255, 182, 72, 0.32), 2, "dashed"),
 }
-BIG_KINDS = ["rage1", "rage2", "amber", "off", "gone"]
-SMALL_KINDS = ["grim1", "grim2", "amber", "off", "gone", "locked"]
+BIG_KINDS = ["rage1", "rage2", "amber", "off", "gone", "nudge"]
+SMALL_KINDS = ["grim1", "grim2", "amber", "off", "gone", "locked", "nudge"]
 MARGIN = 2
 CELL_W, CELL_H = 24, 28
 
@@ -261,6 +264,17 @@ def helm_atlas():
 def tile(c, ox, oy, w, h, glyph, kind):
     rim, fill, ink, glow, level, style = TILE[kind]
     x0, y0 = ox + MARGIN, oy + MARGIN
+    if style != "solid" and glow is not None and level > 0:
+        gl = rgba(glow)
+        for y in range(y0 - 1, y0 + h + 1):
+            for x in range(x0 - 1, x0 + w + 1):
+                c.blend_px(x, y, gl)
+        for y in range(y0 + 1, y0 + h - 1):
+            c.blend_px(x0 - 2, y, gl)
+            c.blend_px(x0 + w + 1, y, gl)
+        for x in range(x0 + 1, x0 + w - 1):
+            c.blend_px(x, y0 - 2, gl)
+            c.blend_px(x, y0 + h + 1, gl)
     if style != "solid":
         col = rgba(rim)
         for i in range(0, w, 2):
@@ -313,12 +327,34 @@ def write_tga(path, canvas):
     print(f"wrote {path} ({canvas.w}x{canvas.h}, {os.path.getsize(path)} bytes)")
 
 
+GLOW_RING = [(1, 0.55), (2, 0.22)]   # (distance from the helm silhouette in sprite px, alpha)
+GLOW_RGB = (255, 182, 72)
+
+
+def helm_glow():
+    """warrior_helm_glow.tga: an amber halo round the cold helm's silhouette, in the helm sprite's own 32 x 32 box (same
+    HELM_OX), so the module lays it straight under the helm. Two rings, 1 and 2 sprite px out (Chebyshev distance)."""
+    c = Canvas(HELM_W * SCALE, HELM_H * SCALE)
+    solid = {(x + HELM_OX, y) for (x, y) in helm_pixels("dark", "shut", "cold", "still")}
+    for y in range(HELM_H):
+        for x in range(HELM_W):
+            if (x, y) in solid:
+                continue
+            d = min((max(abs(x - sx), abs(y - sy)) for (sx, sy) in solid
+                     if abs(x - sx) <= 2 and abs(y - sy) <= 2), default=None)
+            for dist, a in GLOW_RING:
+                if d == dist:
+                    c.sprite_px(x, y, GLOW_RGB + (int(round(a * 255)),))
+    return c
+
+
 def main():
     here = os.environ.get("FS_ASSET_OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
                                                               "forever-stuwave", "Media", "Textures"))
     write_tga(os.path.join(here, "warrior_helm.tga"), helm_atlas())
     write_tga(os.path.join(here, "warrior_runes_big.tga"), rune_atlas(BIG_KINDS, 7, 9))
     write_tga(os.path.join(here, "warrior_runes_small.tga"), rune_atlas(SMALL_KINDS, 5, 7))
+    write_tga(os.path.join(here, "warrior_helm_glow.tga"), helm_glow())
 
 
 if __name__ == "__main__":

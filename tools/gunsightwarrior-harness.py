@@ -197,6 +197,8 @@ case("gone_is_calm_on_a_friendly_target_and_nudges_in_combat_or_on_an_attackable
     local n = 0
     for _ in pairs(alphas) do n = n + 1 end
     assert(n == 1 and alphas[W.C.CALM_A], "calm: the dashes hold still and dim")
+    assert(Rows("battle") == "44444444", "calm: the plain dash row")
+    assert(not p.halo.shown, "calm: no halo")
     __canAttack = true
     alphas = {}
     for i = 1, 45 do
@@ -207,6 +209,8 @@ case("gone_is_calm_on_a_friendly_target_and_nudges_in_combat_or_on_an_attackable
     n = 0
     for _ in pairs(alphas) do n = n + 1 end
     assert(n >= 4, "nudge: the dashes breathe, saw " .. n .. " alphas")
+    assert(Rows("battle") == "55555555", "nudge: the glowing dash row, got " .. Rows("battle"))
+    assert(p.halo.shown, "nudge: the halo shows")
     __canAttack = false
     __combat = true
     Tick(1 / 30)
@@ -318,7 +322,7 @@ def run_case(body: str) -> str | None:
 
 def static_checks() -> list[str]:
     errs = []
-    for name in ("warrior_helm", "warrior_runes_big", "warrior_runes_small"):
+    for name in ("warrior_helm", "warrior_runes_big", "warrior_runes_small", "warrior_helm_glow"):
         if not (MEDIA / f"{name}.tga").exists():
             errs.append(f"missing texture {name}.tga (run tools/assets/generate_warrior_helm.py)")
         if f"{name}" not in MODULE and f'"{name}"' not in MODULE and name != "warrior_helm":
