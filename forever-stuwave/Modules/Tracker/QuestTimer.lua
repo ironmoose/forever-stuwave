@@ -117,6 +117,8 @@ function QT.Read(now)
                     local key = name or ("#" .. i)
                     most[key] = math.max(most[key] or 0, secs)
                     list[#list + 1] = { key = key, name = name or "Quest timer", deadline = now + secs, most = most[key] }
+                elseif IsSecret(secs) and FS.LogDegradeOnce then
+                    FS.LogDegradeOnce("questtimer-secret", "Quest timer: GetQuestTimers gave an unreadable value")
                 end
             end
         end
@@ -371,14 +373,24 @@ local function StopTicker()
     if ticker then ticker:Cancel(); ticker = nil end
 end
 
+-- Blizzard's timer is hidden only while the drawer is up. When the drawer has nothing to show (no timer yet, or the
+-- game's numbers could not be read) the stock timer stays, so a running timer is never left without a readout
+-- (player, Mulgore 2026-11-06: a ten minute quest showed in neither). Its showing is also a cue to read again: a timer
+-- can arrive without a quest log event.
+local function HookBlizzard()
+    local stock = _G.QuestTimerFrame
+    if not stock or stock.fsQuestTimerHidden or not stock.HookScript then return end
+    stock.fsQuestTimerHidden = true
+    stock:HookScript("OnShow", function()
+        if not Enabled() then return end
+        local ok, err = pcall(QT.Refresh)
+        if not ok and FS.LogDegradeOnce then FS.LogDegradeOnce("questtimer", "Quest timer: " .. tostring(err)) end
+    end)
+end
+
 local function HideBlizzard()
     local stock = _G.QuestTimerFrame
-    if not stock then return end
-    if not stock.fsQuestTimerHidden and stock.HookScript then
-        stock.fsQuestTimerHidden = true
-        stock:HookScript("OnShow", function(self) if Enabled() and drawer then self:Hide() end end)
-    end
-    if Enabled() and drawer and stock.IsShown and stock:IsShown() then stock:Hide() end
+    if stock and stock.IsShown and stock:IsShown() then stock:Hide() end
 end
 
 function QT.Refresh()
@@ -388,7 +400,7 @@ function QT.Refresh()
         f:Hide(); StopTicker()
         return
     end
-    HideBlizzard()
+    HookBlizzard()
     QT.Read(GetTime())
     local count = math.min(#timers, MAX_ROWS)
     if count == 0 then
@@ -412,13 +424,14 @@ function QT.Refresh()
     end
     for i, row in ipairs(drawer.rows) do row.frame:SetShown(i <= count) end
     f:Show()
+    HideBlizzard()
     Paint()
     if not ticker and C_Timer and C_Timer.NewTicker then ticker = C_Timer.NewTicker(0.25, Paint) end
 end
 
 local events = CreateFrame("Frame")
-for _, e in ipairs({ "PLAYER_ENTERING_WORLD", "QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED", "UI_SCALE_CHANGED",
-    "DISPLAY_SIZE_CHANGED" }) do
+for _, e in ipairs({ "PLAYER_ENTERING_WORLD", "QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED", "UPDATE_QUEST_TIMERS",
+    "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED" }) do
     pcall(events.RegisterEvent, events, e)
 end
 events:SetScript("OnEvent", function(_, event)

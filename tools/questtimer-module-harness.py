@@ -160,6 +160,33 @@ case("text_and_gauge_stay_inside_the_drawer", """
     assert(d.h >= 5 + 2 * 26 + 3, "two rows do not fit: " .. tostring(d.h))
 """)
 
+case("blizzards_timer_stays_when_the_drawer_has_nothing_to_show", """
+    __timers = {}
+    Fire("PLAYER_ENTERING_WORLD")
+    assert(Drawer() and Drawer().shown == false)
+    -- the game shows its timer, but our read finds none (not yet delivered, or unreadable): never leave the player blind
+    QuestTimerFrame:Show(); QuestTimerFrame.hooks.OnShow(QuestTimerFrame)
+    assert(QuestTimerFrame.shown == true, "Blizzard's timer hidden while the drawer is empty")
+""")
+
+case("blizzards_timer_showing_refreshes_the_drawer", """
+    __timers = {}
+    Fire("PLAYER_ENTERING_WORLD")
+    -- a timer arrives with no event we listen for; the game's own timer showing is the cue
+    __timers = { 595 }; __names = { "Grace" }
+    QuestTimerFrame:Show(); QuestTimerFrame.hooks.OnShow(QuestTimerFrame)
+    assert(Drawer().shown, "drawer not shown after the game's timer appeared")
+    assert(QuestTimerFrame.shown == false, "Blizzard's timer still shows beside the drawer")
+""")
+
+case("the_timer_event_refreshes_the_drawer", """
+    __timers = {}
+    Fire("PLAYER_ENTERING_WORLD")
+    __timers = { 595 }; __names = { "Grace" }
+    Fire("UPDATE_QUEST_TIMERS")
+    assert(Drawer().shown, "UPDATE_QUEST_TIMERS did not refresh the drawer")
+""")
+
 case("the_switch_off_hides_the_drawer_and_returns_blizzards_timer", """
     __timers = { 595 }; __names = { "Grace" }
     Fire("QUEST_LOG_UPDATE")
