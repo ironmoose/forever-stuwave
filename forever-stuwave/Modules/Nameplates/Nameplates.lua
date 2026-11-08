@@ -1839,10 +1839,7 @@ local function UpdateFillColor(unit)
     end
 end
 
--- GetRaidTargetIndex returns a plain number historically, but FS.IsSecret is
--- checked first anyway (same ordering as GetReactionColor above) since a
--- truth-test on a secret is illegal even where the value is expected to be
--- plain. Either API missing degrades to a hidden marker, not a texcoord guess.
+-- Either API missing degrades to a hidden marker, not a texcoord guess.
 local function UpdateRaidMarker(unit)
     local root = FS.framesByUnit[unit]
     if not root then return end
@@ -1852,18 +1849,26 @@ local function UpdateRaidMarker(unit)
         return
     end
 
+    -- On this engine the index is ALWAYS secret (RaidMarkersDocumentation: SecretReturns = true), so a secret must
+    -- still draw. A secret number may be truth-tested (only its nil-ness shows), and Texture:SetSpriteSheetCell takes
+    -- secrets from addon code (SecretArguments = "AllowedWhenTainted"), so the cell is picked by the engine with no
+    -- arithmetic here. SetRaidTargetIconTexture is only the fallback for a plain index on a client without the method.
     local index = GetRaidTargetIndex(unit)
-    if FS.IsSecret(index) then
-        root.raidMarker:Hide()
-        return
-    end
     if not index then
         root.raidMarker:Hide()
         return
     end
 
-    SetRaidTargetIconTexture(root.raidMarker, index)
-    root.raidMarker:Show()
+    local marker = root.raidMarker
+    if type(marker.SetSpriteSheetCell) == "function" then
+        marker:SetSpriteSheetCell(index, RAID_TARGET_TEXTURE_ROWS or 4, RAID_TARGET_TEXTURE_COLUMNS or 4)
+    elseif FS.IsSecret(index) then
+        marker:Hide()
+        return
+    else
+        SetRaidTargetIconTexture(marker, index)
+    end
+    marker:Show()
 end
 
 -- Whether the client's own nameplateNotSelectedAlpha CVar is already dimming
