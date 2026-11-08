@@ -4,12 +4,16 @@
 -- control bezel below the map (reparented tracking/calendar/mail keys on the
 -- left, with our own Settings gear key between calendar and mail -- zoom is
 -- mouse-wheel only, and Blizzard's zoom buttons are hidden outright rather
--- than reparented, see HideBlizzardChrome -- the coord/clock LCD re-anchored
--- on the right), a single tiled horizontal scanline overlay, a
+-- than reparented, see HideBlizzardChrome), a slim readout row directly under
+-- the bezel (the coord/clock LCD, full width: coords on the left, clock on
+-- the right; it used to share the bezel row and was squeezed out by the
+-- fourth key), a single tiled horizontal scanline overlay, a
 -- soft top-left highlight, a magenta glow behind the native player blip, and a
--- tray drawer below the bezel that COLLECTS the addon minimap buttons (LibDBIcon
--- and stray *MinimapButton* frames) so they stop cluttering the map edge, popped
--- out by a small tab hanging off the bezel's bottom edge. The
+-- tray drawer below the readout row that COLLECTS the addon minimap buttons
+-- (LibDBIcon and stray *MinimapButton* frames) so they stop cluttering the map
+-- edge, popped out by a small tab hanging off the readout row's bottom edge.
+-- The bezel and the readout row are one chassis; everything that hangs under
+-- it (the tray, QuestTimer.lua's drawer) seats under the row. The
 -- vignette/glare CRT elements and the pulsing waypoint marker are a
 -- deliberate second chunk, still deferred (no existing waypoint-arrow
 -- handling was found anywhere in this addon to build on). Every Blizzard-
@@ -64,10 +68,11 @@ local COLOR_PINK = COLOR_HEALTH
 local COLOR_BORDER_BLEND = { 0.343, 0.660, 0.988, 1 }
 
 -- Control bezel: near-black chassis frame below the Minimap holding the
--- reparented Blizzard minimap-button keys (left) and the coord/clock LCD
--- (right). Reuses the readout chip's near-black fill for the same "console
--- housing" look; its own border/radius are local since the mockup gives the
--- chassis a slightly rounded strip against the hard-square map above it.
+-- reparented Blizzard minimap-button keys and our Settings key, left aligned
+-- (the coord/clock LCD has its own row under it, see ApplyReadout). Reuses the
+-- readout chip's near-black fill for the same "console housing" look; its own
+-- border/radius are local since the mockup gives the chassis a slightly
+-- rounded strip against the hard-square map above it.
 -- EVERY size below is DERIVED from the map edge, exactly as the mockup does
 -- it. the design mockup's minimap renderer computes m = min(w,h) and
 -- then sizes each part as a fraction of m:
@@ -78,13 +83,16 @@ local COLOR_BORDER_BLEND = { 0.343, 0.660, 0.988, 1 }
 --     off   = max(1,  m*0.018)     chassis padding; gaps are off*1.6
 --     blip  = max(3,  m*0.04)      player blip
 --     zoneF = max(6,  m*0.092)     zone text
---     coordF= max(5,  m*0.058)     LCD readout text
+--     readF = max(5,  m*0.0512)    LCD readout text (the mockup's m*0.058 never fit; 12.8 px at m=250
+--                                  is the size the shipped box gave it before the fourth key, see below)
+--     readH = round(readF*1.6)     LCD box height
+--     readP = max(2,  round(m*0.014))  readout row edge to its LCD box, top and bottom
 --     northF= max(5,  m*0.062)     N tick
 --     rowH  = max(30, round(m*0.17))   bezel row height  (mmRowGP)
 --     glowP = max(4,  m*0.076)     outer glow size (gb_px=round(6+glow/100*22)=19px at glow:60, 19/250=0.076)
 --
 -- The previous constants were hardcoded at roughly half these values (key 20
--- vs 30, zone 9 vs 23, north 7 vs 15.5, readout 10 vs 14.5 at m=250), which is
+-- vs 30, zone 9 vs 23, north 7 vs 15.5, readout 10 vs 12.8 at m=250), which is
 -- why the console read as small text on a big map instead of the mockup's
 -- chunky CRT chassis. Deriving them also means a planner re-export at a
 -- different map size stays proportional instead of needing every number
@@ -114,7 +122,9 @@ local function DeriveMetrics()
     Metrics.keyGap = off * 1.6
     Metrics.blip = math.max(3, m * 0.04)
     Metrics.zoneFont = math.max(6, m * 0.092)
-    Metrics.coordFont = math.max(5, m * 0.058)
+    Metrics.readoutFont = math.max(5, m * 0.0512)
+    Metrics.readoutHeight = math.floor(Metrics.readoutFont * 1.6 + 0.5)
+    Metrics.readoutPad = math.max(2, math.floor(m * 0.014 + 0.5))
     Metrics.northFont = math.max(5, m * 0.062)
     Metrics.northInset = off
     Metrics.rowHeight = math.max(30, math.floor(m * 0.17 + 0.5))
@@ -136,34 +146,34 @@ local NORTH_INSET_Y
 -- Readout box chrome: near-black fill (#04020c) and a faint cyan border, both
 -- matching the design mockup's .mmreadout rather than the panel's
 -- COLOR_BG/COLOR_BORDER tokens, which read too bright for this small a chip.
--- Also reused as the bezel keys' own dark fill (item 9) and the tray
--- drawer's fill (item 10): a single near-black "console housing" color
--- rather than three separate near-duplicate tokens.
+-- Also reused as the bezel's and the readout row's own fill, the bezel keys' dark
+-- fill (item 9) and the tray drawer's fill (item 10): a single near-black "console
+-- housing" color rather than several separate near-duplicate tokens.
 local READOUT_FILL = { 0.016, 0.008, 0.047, 0.85 }
 local READOUT_BORDER = { COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 0.35 }
 local READOUT_RADIUS = 4
 local READOUT_BORDER_THICK = 1
+-- The LCD box's height, the row's inset around it (top and bottom), and the text size (see ApplyReadout).
 local READOUT_HEIGHT
-local READOUT_INSET_X = 8
+local READOUT_ROW_PAD
 local READOUT_FONT_SIZE
--- The box takes whatever the bezel has left of the FOUR key slots (tracking, calendar, settings,
--- mail; KEY_SLOTS, see RefreshMetrics). The mail slot is last and only visible while mail is
--- waiting, but its seat is always reserved: sizing the box for fewer keys put it 26 px under the
--- pink slot at m = 250 (Player: "when i get mail it goes behind the cords"). Settings sits before
--- mail so the row has no hole when mail is not waiting. The text is then sized to the box, not
--- the other way round: READOUT_FIT.chars mono glyphs ("99.9, 99.9" + a space + "19:56") at
--- READOUT_FIT.advance em each (Mononoki Nerd Font Mono, measured 0.5615 em) inside
--- READOUT_FIT.inset per side. The coord formatter (FormatCoord) clamps each number to
--- COORD_MAX 99.9, so the reading is never wider than "99.9, 99.9": an unclamped "100.0, 100.0"
--- is 17 glyphs with the clock, which overlapped the clock by about 7 px at m = 250.
-local READOUT_WIDTH
-local READOUT_FIT = { chars = 16, advance = 0.5615, inset = 4 }
--- Key seats in the bezel row, in order: tracking, calendar, settings, mail. All are reserved whether or not the
--- key is there (see the box comment above): a key a client lacks leaves its seat empty at the row's end, not a
--- hole in the middle of it.
-local KEY_SLOTS = 4
--- Frame levels above the bezel: the readout box sits at +1, the keys above it at +3, so a key
--- (the pink mail slot and its envelope in particular) is never painted under the box.
+-- The coords and clock live in their own slim row directly under the bezel, full width: coords at the box's left
+-- end, the clock at its right. They used to sit in the bezel row, in a box that took what the keys left it. The
+-- first three keys left 123 px at m = 250 and the text was sized to that box, 12.8 px; the Settings key (the
+-- fourth slot) cut the box to 86 px and the text to 8.7, and in game the two ran together ("55.1, 42.214:55").
+-- The row ends that squeeze: the text is back at 12.8 px at m = 250 (m * 0.0512, so it scales with the map; see
+-- DeriveMetrics) and the box spans the row less the bezel's key padding on each side, 235 px at m = 250 against
+-- the 115 px that "99.9, 99.9" + a space + "19:56" (16 mono glyphs at 0.5615 em each, Mononoki Nerd Font Mono,
+-- measured) takes, so the two halves cannot meet at any map size the addon seats (box and text both scale with m). The
+-- coord formatter (FormatCoord) still clamps each number to COORD_MAX 99.9, so the reading is never wider than
+-- "99.9, 99.9": an unclamped "100.0, 100.0" is a glyph wider per axis.
+local READOUT_TEXT_INSET = 4 -- box edge to the text, each side
+-- Key seats in the bezel row, in order: tracking, calendar, settings, mail, left aligned at BEZEL_PADDING (keys keep
+-- their size; the bezel is wider than they need and the rest of it stays empty). Settings sits before mail so the
+-- row has no hole while no mail waits; a key a client lacks leaves its seat empty at the row's end, not a hole in
+-- the middle of it.
+-- Frame levels above the bezel: the readout row sits at +1 (its box one above it), the keys above both at +3, so a
+-- key's glow (the pink mail slot's and its notification dot in particular) is never painted under the row.
 local READOUT_LEVEL_OFFSET = 1
 local KEY_LEVEL_OFFSET = 3
 
@@ -204,8 +214,9 @@ local KEY_UNDERLINE_BOTTOM_FRACTION = 0.13 -- 13% up from the key's bottom edge
 -- top-right corner (top:-2px; right:-2px), size max(3, btn*0.34), with a soft pink glow.
 -- The glow reach is 3 px, not the mockup's ~5: the mockup's key has overflow:hidden, which
 -- clips its box-shadow at the key edge, but WoW does not clip a texture to its parent, so the
--- halo draws at full reach. At 5 it extended about 7 px past the key edge (KEY_DOT_OFFSET + reach)
--- and touched the readout box border; at 3 it stops about 5 px out.
+-- halo draws at full reach. At 5 it extended about 7 px past the key edge (KEY_DOT_OFFSET + reach),
+-- far enough to touch the neighbouring chrome (then the readout box, now the bezel's own top edge);
+-- at 3 it stops about 5 px out.
 local KEY_DOT_SIZE_FRACTION = 0.34
 local KEY_DOT_OFFSET = 2
 local KEY_DOT_GLOW_REACH = 3
@@ -243,13 +254,9 @@ local function RefreshMetrics()
     NORTH_FONT_SIZE = Metrics.northFont
     NORTH_INSET_Y = Metrics.northInset
 
-    -- The box starts one key gap right of the last key slot and ends READOUT_INSET_X short of the
-    -- bezel's right edge (floored, so the gap to the key can only grow).
-    local keysRight = BEZEL_PADDING + KEY_SLOTS * KEY_SIZE + (KEY_SLOTS - 1) * KEY_GAP
-    READOUT_HEIGHT = math.floor(Metrics.coordFont * 1.6 + 0.5)
-    READOUT_WIDTH = math.floor(Metrics.map - READOUT_INSET_X - (keysRight + KEY_GAP))
-    READOUT_FONT_SIZE = math.max(5, math.min(Metrics.coordFont,
-        (READOUT_WIDTH - 2 * READOUT_FIT.inset) / (READOUT_FIT.chars * READOUT_FIT.advance)))
+    READOUT_HEIGHT = Metrics.readoutHeight
+    READOUT_ROW_PAD = Metrics.readoutPad
+    READOUT_FONT_SIZE = Metrics.readoutFont
 
     ZONE_FONT_SIZE = Metrics.zoneFont
 
@@ -964,7 +971,7 @@ local function HideBlizzardChrome()
     HideIfExists(Minimap.ZoomIn)
     HideIfExists(Minimap.ZoomOut)
 
-    -- Blizzard's own coords + clock, which our bezel LCD already renders (see
+    -- Blizzard's own coords + clock, which our readout row's LCD already renders (see
     -- ApplyReadout: cyan coords left, amber clock right). Leaving these up
     -- shows each value twice.
     --
@@ -1313,7 +1320,7 @@ local function StyleBezelKey(bezel, button, accentColor, anchorTo)
     button.fsBezelOwned = true
 
     button:SetParent(bezel)
-    -- Above the readout box (a later sibling, which would otherwise paint over a key).
+    -- Above the readout row (a later child of the bezel, which would otherwise paint over a key's glow).
     if button.SetFrameLevel and bezel.GetFrameLevel then
         button:SetFrameLevel(bezel:GetFrameLevel() + KEY_LEVEL_OFFSET)
     end
@@ -1564,7 +1571,8 @@ local function StyleSettingsKey(bezel, anchorTo)
     return key
 end
 
--- Builds the chassis frame below Minimap and populates its left key row.
+-- Builds the chassis frame below Minimap and populates its left key row
+-- (keys only: the coord/clock readout has its own row under it, ApplyReadout).
 -- Every button lookup is feature-detected by its real (measured) name; a
 -- missing one is skipped and simply leaves no gap, per key, in the row.
 -- fsBezel is the sole idempotency guard (no per-key flags needed) since
@@ -1640,8 +1648,8 @@ end
 -- Coord / clock readout
 -------------------------------------------------------------------------------
 
--- The highest number a coordinate may show. A position of 1.0 would format as "100.0", one glyph
--- wider than the 16 the readout box is sized for (READOUT_FIT), so each axis is clamped to this.
+-- The highest number a coordinate may show. A position of 1.0 would format as "100.0", a glyph wider per
+-- axis than the "99.9, 99.9" the readout is budgeted for (see READOUT_TEXT_INSET), so each axis is clamped to this.
 local COORD_MAX = 99.9
 
 -- A 0-1 map fraction as the readout's percentage text, clamped to COORD_MAX. The clamp comes
@@ -1720,37 +1728,106 @@ local function StartReadoutUpdater()
     Minimap.fsReadoutDriver = driver
 end
 
--- Dark cyan-bordered LCD chip in the control bezel's right side, holding two
--- mono readouts (cyan coords left, amber clock right). Requires the bezel to
--- already exist (Minimap.fsBezel, built by ApplyControlBezel) since this is
--- where it now lives, off the map face.
+-- The readout row: a slim full-width strip of the chassis directly under the bezel (the bezel's fill, edges and
+-- violet border, built the same way, so it reads as part of it), holding the LCD: a dark box inset in the row with a
+-- faint cyan border, cyan mono coords at its left end and the amber mono clock at its right. Requires the bezel to
+-- already exist (Minimap.fsBezel, built by ApplyControlBezel). The row is a child of the bezel (so it follows its
+-- visibility, and the diagnostics' minimap bounds file it under the bezel's furniture), anchored to the bezel's
+-- bottom corners with no offset: the tray and the quest timer drawer seat on ITS bottom edge (ChassisBottom).
+--
+-- PIXELS: its height, its box's height and insets, and the text insets are whole physical pixels where the client says
+-- how big a pixel is (FrameHelpers.PixelUnit at the row; whole UI units when it does not), seated at build and again
+-- on a rescale. The box height is the text's line (READOUT_HEIGHT) and the row is the box plus READOUT_ROW_PAD above
+-- and below it; the box's sides sit BEZEL_PADDING in, so its left edge lines up with the first key and its right edge
+-- with the tray tab. The text size itself is the map's fraction, not snapped: it was never a whole number.
+local function SeatReadoutRow()
+    local row, box = Minimap and Minimap.fsReadoutRow, Minimap and Minimap.fsReadoutBox
+    if not (row and box) then return end
+    local helpers = FS.FrameHelpers
+    local px = (helpers and helpers.PixelUnit and helpers.PixelUnit(row)) or 1
+    local function Pixels(units) return math.max(1, math.floor(units / px + 0.5)) end
+    local boxH, padY, padX, inset = Pixels(READOUT_HEIGHT), Pixels(READOUT_ROW_PAD), Pixels(BEZEL_PADDING),
+        Pixels(READOUT_TEXT_INSET)
+
+    row:SetHeight((boxH + 2 * padY) * px)
+    box:SetHeight(boxH * px)
+    box:ClearAllPoints()
+    box:SetPoint("TOPLEFT", row, "TOPLEFT", padX * px, -padY * px)
+    box:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -padX * px, padY * px)
+    local coords, clock = Minimap.fsReadoutCoords, Minimap.fsReadoutClock
+    if coords then
+        coords:ClearAllPoints()
+        coords:SetPoint("LEFT", box, "LEFT", inset * px, 0)
+    end
+    if clock then
+        clock:ClearAllPoints()
+        clock:SetPoint("RIGHT", box, "RIGHT", -inset * px, 0)
+    end
+end
+
+-- A rescale in combat waits for its end: the tray's collected buttons (some of them protected) hang from this row's
+-- bottom edge through the drawer, and a protected frame's anchor chain is not ours to resize mid fight (the tray defers
+-- its own relayout for the same reason).
+local seatWaiter
+local function ReseatReadoutRow()
+    if InCombatLockdown and InCombatLockdown() then
+        if not seatWaiter then
+            seatWaiter = CreateFrame("Frame")
+            seatWaiter:SetScript("OnEvent", function(self)
+                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                SeatReadoutRow()
+            end)
+        end
+        seatWaiter:RegisterEvent("PLAYER_REGEN_ENABLED")
+        return
+    end
+    SeatReadoutRow()
+end
+
+if FS.Layout and FS.Layout.OnRescale then
+    FS.Layout.OnRescale(ReseatReadoutRow)
+end
+
 local function ApplyReadout()
     if not Minimap or Minimap.fsReadout then return end
-    if not Minimap.fsBezel then return end
+    local bezel = Minimap.fsBezel
+    if not bezel then return end
     if not (AddRoundedFill and AddGradientBorder and ApplyMono) then return end
 
-    local box = CreateFrame("Frame", nil, Minimap.fsBezel)
-    box:SetFrameLevel(Minimap.fsBezel:GetFrameLevel() + READOUT_LEVEL_OFFSET)
-    box:SetSize(READOUT_WIDTH, READOUT_HEIGHT)
-    box:SetPoint("RIGHT", Minimap.fsBezel, "RIGHT", -READOUT_INSET_X, 0)
+    local row = CreateFrame("Frame", nil, bezel)
+    row:SetFrameLevel(bezel:GetFrameLevel() + READOUT_LEVEL_OFFSET)
+    row:SetPoint("TOPLEFT", bezel, "BOTTOMLEFT", 0, 0)
+    row:SetPoint("TOPRIGHT", bezel, "BOTTOMRIGHT", 0, 0)
+    row:SetHeight(READOUT_HEIGHT + 2 * READOUT_ROW_PAD) -- on whole pixels by SeatReadoutRow below
+    AddRoundedFill(row, READOUT_FILL, BEZEL_RADIUS)
+    AddGradientBorder(row, COLOR_BORDER, BEZEL_BORDER_THICK, BEZEL_RADIUS)
 
+    local box = CreateFrame("Frame", nil, row)
+    box:SetFrameLevel(row:GetFrameLevel() + 1)
     AddRoundedFill(box, READOUT_FILL, READOUT_RADIUS)
     AddGradientBorder(box, READOUT_BORDER, READOUT_BORDER_THICK, READOUT_RADIUS)
 
     local coords = box:CreateFontString(nil, "OVERLAY")
-    coords:SetPoint("LEFT", box, "LEFT", READOUT_FIT.inset, 0)
     ApplyMono(coords, READOUT_FONT_SIZE, COLOR_POWER)
 
     local clock = box:CreateFontString(nil, "OVERLAY")
-    clock:SetPoint("RIGHT", box, "RIGHT", -READOUT_FIT.inset, 0)
     ApplyMono(clock, READOUT_FONT_SIZE, COLOR_AMBER)
 
+    Minimap.fsReadoutRow = row
     Minimap.fsReadoutBox = box
     Minimap.fsReadoutCoords = coords
     Minimap.fsReadoutClock = clock
     Minimap.fsReadout = true
 
+    SeatReadoutRow()
     StartReadoutUpdater()
+end
+
+-- The frame everything that hangs under the minimap's chassis seats on: the readout row, which is flush under the
+-- bezel, or the bezel when the row did not build, or the map when neither did. QuestTimer.lua picks the same frame
+-- by the same rule (its own ChassisBottom), since it loads after this file and must not require our locals.
+local function ChassisBottom()
+    return Minimap and (Minimap.fsReadoutRow or Minimap.fsBezel) or Minimap
 end
 
 -------------------------------------------------------------------------------
@@ -1761,22 +1838,22 @@ end
 -- to be moved to the tray ... so it doesn't clutter our awesome ui. Also I never saw a
 -- button to pop out the tray."
 --
--- THE DRAWER hangs below the bezel (mockups .traydrawer): dark fill, cyan/violet border, a
+-- THE DRAWER hangs below the chassis, flush under the readout row (mockups .traydrawer): dark fill, cyan/violet border, a
 -- small Orbitron "ADDONS" label, square tiles in a per-tile accent with the key underline.
 -- Fill and border go through AddRoundedFill/AddGradientBorder at chamfer 4 like the bezel,
 -- so under CHROME_CORNERS "cut" it is TOP-LEFT and BOTTOM-RIGHT cut only. Tiles wrap into
 -- rows and the drawer height follows the row count. It is a child of Minimap anchored to
--- the bezel (no FS.Layout seat: the old `minimaptray` Layout entry is unused).
+-- the bottom of the chassis (ChassisBottom: the readout row; no FS.Layout seat: the old
+-- `minimaptray` Layout entry is unused).
 --
--- THE POP-OUT is a TAB hanging off the bezel's bottom edge, not a 5th bezel key. Measured
--- from the metrics above at m = 250: the four key slots (tracking, calendar, settings, mail)
--- end at pad + 4 * KEY + 3 * gap = 148.8 and the readout box starts one gap later, at
--- m - 8 - READOUT_WIDTH = 156 (at m = 208, 124 and 130), so the bezel row is full: it
--- already costs the box 37 px (24 at m = 208) and its text a size, and a 5th key would
--- sit on top of the coords/clock LCD (as the mail key did before the box was sized to
--- start after it). The tab
+-- THE POP-OUT is a TAB hanging off the chassis' bottom edge (the readout row's), not a 5th
+-- bezel key. It stays a tab, not a key, because it is the drawer's handle: the four key
+-- slots (tracking, calendar, settings, mail) end at pad + 4 * KEY + 3 * gap = 148.8 at
+-- m = 250 (the bezel has room to its right since the coords and clock moved to their own
+-- row), but a key could not read as a handle on the drawer under it. The tab
 -- (count badge left, chevron right) sits in the drawer's header row, which is the same
--- height, so open it reads as a handle on the drawer and closed as a tab under the bezel.
+-- height, so open it reads as a handle on the drawer and closed as a tab under the row.
+-- It is right aligned at BEZEL_PADDING, the same inset as the row's LCD box.
 -- Open/closed lives in ForeverSTUwaveDB.minimapTrayOpen (default closed).
 --
 -- COLLECTION, read from LibDBIcon-1.0 minor 56 (the copy bundled with ForeverDungeonScout)
@@ -2247,7 +2324,7 @@ end
 
 local function ReanchorTray()
     if not (Minimap and Minimap.fsTray) then return end
-    local anchorAbove = Minimap.fsBezel or Minimap
+    local anchorAbove = ChassisBottom()
     Minimap.fsTray:ClearAllPoints()
     Minimap.fsTray:SetPoint("TOPLEFT", anchorAbove, "BOTTOMLEFT", 0, 0)
     Minimap.fsTray:SetPoint("TOPRIGHT", anchorAbove, "BOTTOMRIGHT", 0, 0)
@@ -2311,7 +2388,7 @@ local function BuildTray()
     if not (AddRoundedFill and AddGradientBorder and ApplyMono and ApplyFontGeneric) then return end
 
     local m = TrayMetrics()
-    local anchorAbove = Minimap.fsBezel or Minimap
+    local anchorAbove = ChassisBottom()
 
     local drawer = CreateFrame("Frame", nil, Minimap)
     drawer:SetHeight(m.header + m.padY)
@@ -2374,7 +2451,7 @@ local function ApplyMinimapTray()
 end
 
 -- Layout.lua's watcher re-Applies every seated frame on PLAYER_LOGIN/UI_SCALE_CHANGED/
--- DISPLAY_SIZE_CHANGED, which can move the map and bezel. Callbacks run after that pass
+-- DISPLAY_SIZE_CHANGED, which can move the map, the bezel and the readout row. Callbacks run after that pass
 -- (same OnRescale mechanism ScheduleCompensate above uses for the cluster).
 if FS.Layout and FS.Layout.OnRescale then
     FS.Layout.OnRescale(ReanchorTray)

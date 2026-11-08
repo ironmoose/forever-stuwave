@@ -1,9 +1,11 @@
 -- Forever STUwave: QuestTimer
--- A quest timer of our own, hung under the minimap's control strip like a drawer of the minimap (design: the quest timer
--- mockup, form A "drawer rows", 2026-11-05). Blizzard's QuestTimerFrame is hidden while this is on; with the switch off it
--- comes back as it was. One row per running timer, soonest first: an MM:SS readout in the mana regen module's LED (the
--- same segment atlas, Media/Textures/led_segments.tga) in a well on the left, and on the right the quest name over a
--- twenty segment gauge and a small "quest timer" label. Cyan above a minute, amber under it, pink under fifteen seconds.
+-- A quest timer of our own, hung under the minimap's chassis like a drawer of the minimap (design: the quest timer
+-- mockup, form A "drawer rows", 2026-11-05). The chassis is the control bezel and, flush under it, the coords and clock row
+-- (Minimap.fsReadoutRow); the drawer seats under that row, or under the bezel when the minimap built no row. Blizzard's
+-- QuestTimerFrame is hidden while this is on; with the switch off it comes back as it was. One row per running timer,
+-- soonest first: an MM:SS readout in the mana regen module's LED (the same segment atlas, Media/Textures/led_segments.tga)
+-- in a well on the left, and on the right the quest name over a twenty segment gauge and a small "quest timer" label.
+-- Cyan above a minute, amber under it, pink under fifteen seconds.
 --
 -- Data: GetQuestTimers() gives the seconds left on each timer, GetQuestIndexForTimer(i) the quest's log index. The
 -- seconds are read on quest log events and turned into a deadline, so the readout counts down on its own between events.
@@ -225,15 +227,22 @@ local function NewRow(parent)
     return row
 end
 
+-- The frame the drawer hangs from: the bottom of the minimap's chassis. Minimap.lua builds the coords and clock row under the
+-- bezel, so that row is the bottom; with no row the bezel is.
+local function ChassisBottom()
+    local map = _G.Minimap
+    return map and (map.fsReadoutRow or map.fsBezel)
+end
+
 local function Build()
     if drawer then return drawer end
-    local bezel = _G.Minimap and _G.Minimap.fsBezel
-    if not bezel then return nil end
+    local chassis = ChassisBottom()
+    if not chassis then return nil end
     local T = FS.Theme
-    local f = CreateFrame("Frame", "ForeverSTUwaveQuestTimer", bezel)
-    f:SetFrameLevel(bezel:GetFrameLevel())
-    f:SetPoint("TOPLEFT", bezel, "BOTTOMLEFT", 0, 0)
-    f:SetPoint("TOPRIGHT", bezel, "BOTTOMRIGHT", 0, 0)
+    local f = CreateFrame("Frame", "ForeverSTUwaveQuestTimer", chassis)
+    f:SetFrameLevel(chassis:GetFrameLevel())
+    f:SetPoint("TOPLEFT", chassis, "BOTTOMLEFT", 0, 0)
+    f:SetPoint("TOPRIGHT", chassis, "BOTTOMRIGHT", 0, 0)
     f:SetHeight(1)
     f:Hide()
     f.fill, f.glow, f.border = T.AddPanelChrome(f, { fillColor = T.COLOR_BG, accent = T.COLOR_POWER })
@@ -410,8 +419,8 @@ function QT.Refresh()
     Seat(f)
     local widthPx = math.floor((f:GetWidth() or 0) / G.px + 0.5)
     if widthPx <= 0 then
-        local bezel = _G.Minimap.fsBezel
-        widthPx = math.floor(((bezel and bezel:GetWidth()) or 0) / G.px + 0.5)
+        local chassis = ChassisBottom()
+        widthPx = math.floor(((chassis and chassis:GetWidth()) or 0) / G.px + 0.5)
     end
     local sig = count .. ":" .. widthPx .. ":" .. G.px
     if laidOutFor ~= sig then
