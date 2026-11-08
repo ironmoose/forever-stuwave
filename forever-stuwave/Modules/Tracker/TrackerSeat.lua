@@ -6,6 +6,8 @@
 -- LayoutEdit drives this through Ready, Rect, Offsets, Move and Reset. Rect and offsets describe the
 -- visible panel (UIParent units, TOPRIGHT from UIParent's TOPRIGHT); Move converts that to the Blizzard
 -- frame's TOPRIGHT, which is what Edit Mode stores (also in UIParent units).
+-- While Questie's tracker is on, Questie hides Blizzard's frame (and STUwave's panel, which hangs from it), so
+-- there is no tracker to see: no seat is reported, and /fsedit shows no handle for it.
 
 local _, FS = ...
 
@@ -19,6 +21,15 @@ local function Frame()
     return _G.ObjectiveTrackerFrame
 end
 
+-- Questie's tracker replaces the Blizzard one while it is on (Modules/Compat/Questie.lua). Asked each time: the
+-- player can switch it in Questie's options.
+local function QuestieHasTheTracker()
+    local compat = FS.QuestieCompat
+    return type(compat) == "table" and type(compat.TrackerActive) == "function" and compat.TrackerActive() == true
+end
+
+local QUESTIE_REASON = "Questie's tracker is on, so there is no objectives tracker to move"
+
 local function SystemId()
     local systems = Enum and Enum.EditModeSystem
     return systems and systems.ObjectiveTracker
@@ -29,6 +40,7 @@ local function LayoutTypes()
 end
 
 function Seat.Ready()
+    if QuestieHasTheTracker() then return false end
     local frame = Frame()
     return type(frame) == "table" and frame.GetRight ~= nil
         and type(C_EditMode) == "table" and type(C_EditMode.GetLayouts) == "function"
@@ -55,6 +67,7 @@ end
 
 -- The visible tracker's rect in UIParent units: left, top, width, height.
 function Seat.Rect()
+    if QuestieHasTheTracker() then return nil end
     return RectOf(Visible())
 end
 
@@ -133,6 +146,7 @@ end
 
 -- Seats the visible tracker's TOPRIGHT at (x, y) from UIParent's TOPRIGHT. Returns true, or false and why.
 function Seat.Move(x, y)
+    if QuestieHasTheTracker() then return false, QUESTIE_REASON end
     if InCombatLockdown() then return false, "can't move the tracker in combat" end
     if not Seat.Ready() then return false, "Edit Mode is not available" end
     local info, layout = WritableActive()
@@ -149,6 +163,7 @@ end
 
 -- Puts the tracker back in Blizzard's default seat in the active layout. A preset has nothing to reset.
 function Seat.Reset()
+    if QuestieHasTheTracker() then return false, QUESTIE_REASON end
     if InCombatLockdown() then return false, "can't move the tracker in combat" end
     if not Seat.Ready() then return false, "Edit Mode is not available" end
     local info = AllLayouts()

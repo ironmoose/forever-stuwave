@@ -10,7 +10,8 @@ never by anchoring the tracker. These checks pin that:
   * the anchor written is TOPRIGHT of UIParent with the given offsets, out of the default seat;
   * a full set of account layouts and combat both refuse with a reason and save nothing;
   * reset restores the preset's anchor and default seat, and a preset has nothing to reset;
-  * the tracker frame itself is never anchored.
+  * the tracker frame itself is never anchored;
+  * while Questie's tracker is on, Blizzard's is hidden, so there is no seat to show or move.
 
     python3 tools/trackerseat-harness.py
 
@@ -224,6 +225,37 @@ function T.a_hidden_panel_falls_back_to_the_frame()
     FS.Tracker = { Panel = function() return panel end }
     local x, y = seat.Offsets()
     near(x, -80); near(y, -300)
+end
+
+function T.questies_tracker_leaves_no_seat_to_show_or_move()
+    local seat = __load(__src)
+    FS.QuestieCompat = { TrackerActive = function() return true end }
+    eq(seat.Ready(), false, "Blizzard's tracker is hidden while Questie's is on")
+    eq(seat.Rect(), nil, "no rect for an invisible frame")
+    eq(seat.Offsets(), nil)
+    local ok, why = seat.Move(-29, -286)
+    eq(ok, false); eq(why:find("Questie") ~= nil, true, why)
+    ok, why = seat.Reset()
+    eq(ok, false); eq(why:find("Questie") ~= nil, true, why)
+    eq(#__saved, 0, "nothing written to the Edit Mode layout")
+    eq(__touched, 0, "the tracker frame is never anchored")
+end
+
+function T.the_seat_is_back_when_questies_tracker_is_off()
+    local seat = __load(__src)
+    FS.QuestieCompat = { TrackerActive = function() return false end }
+    eq(seat.Ready(), true)
+    near(seat.Rect(), 2240)
+    eq(seat.Move(-29, -286), true)
+end
+
+function T.questie_active_is_read_each_time_not_remembered()
+    local seat = __load(__src)
+    local on = true
+    FS.QuestieCompat = { TrackerActive = function() return on end }
+    eq(seat.Ready(), false)
+    on = false
+    eq(seat.Ready(), true)
 end
 
 __checks = T
