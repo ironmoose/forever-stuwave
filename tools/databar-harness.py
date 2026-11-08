@@ -15,7 +15,7 @@ widget method is a no-op). It pins the behaviour the bar promises:
     hosts secure buttons), so a rescale or a /fsstrip show|hide in combat resizes, re-anchors, shows and hides nothing,
     and PLAYER_REGEN_ENABLED replays it from the state current then;
   * TIME tooltip: hovering the TIME segment (and only it) shows a GameTooltip headed "Time" with a "Local" line (the
-    text the bar shows) and a "Realm" line (GetGameTime, 12-hour like the bar), anchored through FrameHelpers.AnchorTooltip,
+    text the bar shows) and a "Realm" line (GetGameTime, 12-hour like the bar), anchored at the mouse (ANCHOR_CURSOR),
     refreshed when a minute rolls over, hidden on leave and on hide, never taking a tooltip another frame owns.
 
     python3 tools/databar-harness.py
@@ -528,8 +528,8 @@ def test_time_tooltip() -> None:
           'hover: header "Time", then "Local 3:12 PM" and "Realm 4:12 PM"', str(got))
     check(b.rt.eval("GameTooltip.shown") is True and b.rt.eval('GameTooltip.owner == (__segment("TIME"))'),
           "hover: the tooltip is shown and owned by the TIME segment")
-    check(b.rt.eval('#__anchored == 1 and __anchored[1] == (__segment("TIME"))'),
-          "hover: it was placed by FrameHelpers.AnchorTooltip on the segment, like the action bar tabs")
+    check(b.rt.eval('GameTooltip.anchor') == "ANCHOR_CURSOR" and b.rt.eval('#__anchored == 0'),
+          "hover: the tooltip sits at the mouse (ANCHOR_CURSOR), not at the tooltip seat")
     check(got[1][1] == str(b.rt.eval('select(2, __segment("TIME")).text')),
           "hover: the Local line is exactly the text the bar shows", str(got))
     cols = b.rt.eval("GameTooltip.lines[2].leftColor[1] == 0.60 and GameTooltip.lines[2].rightColor[1] == 1 "
@@ -594,7 +594,7 @@ def test_time_tooltip_refresh() -> None:
     got = lines(b)
     check(got == [("Time", None), ("Local", "3:13 PM"), ("Realm", "4:13 PM")] and b.rt.eval("GameTooltip.shown") is True,
           "a minute rolling over while hovering updates both lines", str(got))
-    check(b.rt.eval('GameTooltip.owner == (__segment("TIME"))') and b.rt.eval("#__anchored") == 1,
+    check(b.rt.eval('GameTooltip.owner == (__segment("TIME"))') and b.rt.eval("#__anchored") == 0,
           "the refresh keeps the tooltip where it was (no new anchor)")
     b.run('GameTooltip:SetOwner(UIParent, "ANCHOR_CURSOR"); GameTooltip:SetText("Other"); GameTooltip:Show()')
     b.run('__date["%M"] = "14"; __realm = { 16, 14 }; local bar = ForeverSTUwaveDataBar; bar.scripts.OnUpdate(bar, 100)')
@@ -605,13 +605,13 @@ def test_time_tooltip_refresh() -> None:
     hover(b)
     check(lines(b) == [("Time", None), ("Local", "3:15 PM"), ("Realm", "4:15 PM")], "hovering again shows it afresh", str(lines(b)))
 
-    # no FrameHelpers (or no AnchorTooltip): the tooltip goes above the segment, as AnchorTooltip's own fallback
+    # no FrameHelpers: the tooltip still sits at the mouse
     b = Bar()
     b.run('__FS.FrameHelpers = nil; __date["%I"], __date["%M"], __date["%p"] = "03", "12", "PM"')
     b.login()
     hover(b)
-    check(b.rt.eval("GameTooltip.anchor") == "ANCHOR_TOP" and b.rt.eval('GameTooltip.owner == (__segment("TIME"))')
-          and len(lines(b)) == 3, "without FrameHelpers the tooltip is still shown, anchored above the segment")
+    check(b.rt.eval("GameTooltip.anchor") == "ANCHOR_CURSOR" and b.rt.eval('GameTooltip.owner == (__segment("TIME"))')
+          and len(lines(b)) == 3, "without FrameHelpers the tooltip is still shown, at the mouse")
 
 
 def test_time_tooltip_unavailable() -> None:

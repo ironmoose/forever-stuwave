@@ -146,7 +146,7 @@ local function LocalTimeText()
 end
 
 -- Hover on the TIME segment: the local time (the text the bar shows) and the realm's, in GameTooltip like the action
--- bar tabs, put where FrameHelpers.AnchorTooltip puts it (the player's tooltip seat, else above the segment). Both
+-- bar tabs, at the mouse (ANCHOR_CURSOR, the player's call: the bar is low and the tooltip seat is far from it). Both
 -- times are 12-hour, as on the bar. A refresh (the bar's tick while the mouse stays on the segment) rewrites the lines
 -- only when a minute rolled over, and never takes a tooltip another frame owns.
 local TIP_MUTED = { 0.60, 0.56, 0.72 }
@@ -167,12 +167,7 @@ local function ShowTimeTooltip(segment, refresh)
     if refresh then
         if segment.tipSig == sig then return end
     else
-        local helpers = FS.FrameHelpers
-        if helpers and helpers.AnchorTooltip then
-            helpers.AnchorTooltip(segment.frame)
-        else
-            tip:SetOwner(segment.frame, "ANCHOR_TOP")
-        end
+        tip:SetOwner(segment.frame, "ANCHOR_CURSOR")
     end
     segment.tipSig = sig
     if refresh and type(tip.ClearLines) == "function" then tip:ClearLines() end
