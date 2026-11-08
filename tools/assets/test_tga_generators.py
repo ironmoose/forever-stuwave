@@ -201,6 +201,36 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "priest_shield_ws": (128, 128), "priest_shield_lit": (128, 128), "priest_mending": (256, 256),
         "priest_heart_cd": (32, 32),
     },
+    # generate_mage_frost.py: the Mage Gunsight module's Frost Nova snowflake (an atlas of 128 texel cells: flake looks, haze,
+    # ice crust looks, nova rings), the glint frames, the cooling flake stretched for a StatusBar, the Frozen crust swipe and
+    # the Fingers of Frost crystals.
+    "mage_frost": {
+        "mage_frost": (512, 512), "mage_frost_glint": (512, 256), "mage_flake_mid": (128, 128),
+        "mage_crust_swipe": (128, 128), "mage_fingers": (64, 64),
+    },
+    # generate_mage_mark.py: the shared Ice Lance / Fire Blast marks: the ice spike (ready, dark, flash) and its cooling look
+    # stretched for a StatusBar, the fireball comet (a ready loop, dark, flash) and its cooling look stretched likewise.
+    "mage_mark": {
+        "mage_spike": (256, 128), "mage_spike_mid": (128, 64), "mage_comet": (512, 512), "mage_comet_mid": (256, 64),
+    },
+    # generate_mage_arcane.py: the Arcane sigil (dark ring, the Eye in three looks, lid glows, Clearcasting spark), the four
+    # stack gems with their pop rings, the lit 18 s ring as a swipe and its amber twin.
+    "mage_arcane": {
+        "mage_arcane": (512, 256), "mage_arcane_gems": (256, 256), "mage_arcane_ring": (128, 128),
+        "mage_arcane_ring_low": (128, 128),
+    },
+    # generate_mage_fire.py: the Fire flame tongue (6 stack counts of 12 frames), the dark ring, the Kaun rune and rim masks,
+    # the stack embers, the lit 30 s ring as a swipe and its amber twin.
+    "mage_fire": {
+        "mage_fire_flame": (1024, 512), "mage_fire": (512, 256), "mage_fire_ring": (128, 128),
+        "mage_fire_ring_low": (128, 128),
+    },
+    # generate_mage_ward.py: the ward: the Ice Barrier shell looks and the Mana Shield mist (atlases of 128 texel cells), the
+    # glyph masks, the pink buff ring swipe and the three StatusBar pictures (lit shell, cooling shell, dense mist).
+    "mage_ward": {
+        "mage_ward": (512, 512), "mage_ward_mist": (512, 512), "mage_ward_glyph": (32, 32), "mage_ward_buff": (128, 128),
+        "mage_ice_lit": (64, 128), "mage_ice_cd": (128, 128), "mage_mist_dense": (128, 128),
+    },
     # generate_shaman_shocks.py: the Shaman Gunsight shock trace (a zigzag over 162 x 20.25 image px, plus its glow with 8 px
     # of margin), the shock bolt (fill, stroke, glow on one 32 px canvas), the Fire Nova ring and its glow (44 px canvas) and
     # the footer's dashed Nova pip (10 px canvas).

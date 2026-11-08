@@ -97,6 +97,9 @@ Modules/CombatHud/GunsightWarriorClick.lua
 Modules/CombatHud/PriestShields.lua
 Modules/CombatHud/GunsightPriest.lua
 Modules/CombatHud/GunsightPriestClick.lua
+Modules/CombatHud/MageState.lua
+Modules/CombatHud/GunsightMage.lua
+Modules/CombatHud/GunsightMageClick.lua
 Modules/Diagnostics/FSCheck.lua
 Modules/Diagnostics/BugReport.lua
 Modules/Diagnostics/CharacterExport.lua
