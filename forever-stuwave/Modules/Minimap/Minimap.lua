@@ -2,9 +2,10 @@
 -- Rounded mask, feature-detected Blizzard-chrome hide, custom neon border/
 -- glow, mouse-wheel zoom, a restyled zone-text label, a cyan north tick, a
 -- control bezel below the map (reparented tracking/calendar/mail keys on the
--- left -- zoom is mouse-wheel only, and Blizzard's zoom buttons are hidden
--- outright rather than reparented, see HideBlizzardChrome -- the coord/clock
--- LCD re-anchored on the right), a single tiled horizontal scanline overlay, a
+-- left, with our own Settings gear key between calendar and mail -- zoom is
+-- mouse-wheel only, and Blizzard's zoom buttons are hidden outright rather
+-- than reparented, see HideBlizzardChrome -- the coord/clock LCD re-anchored
+-- on the right), a single tiled horizontal scanline overlay, a
 -- soft top-left highlight, a magenta glow behind the native player blip, and a
 -- tray drawer below the bezel that COLLECTS the addon minimap buttons (LibDBIcon
 -- and stray *MinimapButton* frames) so they stop cluttering the map edge, popped
@@ -145,10 +146,11 @@ local READOUT_BORDER_THICK = 1
 local READOUT_HEIGHT
 local READOUT_INSET_X = 8
 local READOUT_FONT_SIZE
--- The box takes whatever the bezel has left of the THREE key slots (tracking, calendar, mail;
--- see RefreshMetrics). The mail slot is only visible while mail is waiting, but its seat is
--- always reserved: sizing the box for two keys put it 26 px under the pink slot at m = 250
--- (Player: "when i get mail it goes behind the cords"). The text is then sized to the box, not
+-- The box takes whatever the bezel has left of the FOUR key slots (tracking, calendar, settings,
+-- mail; KEY_SLOTS, see RefreshMetrics). The mail slot is last and only visible while mail is
+-- waiting, but its seat is always reserved: sizing the box for fewer keys put it 26 px under the
+-- pink slot at m = 250 (Player: "when i get mail it goes behind the cords"). Settings sits before
+-- mail so the row has no hole when mail is not waiting. The text is then sized to the box, not
 -- the other way round: READOUT_FIT.chars mono glyphs ("99.9, 99.9" + a space + "19:56") at
 -- READOUT_FIT.advance em each (Mononoki Nerd Font Mono, measured 0.5615 em) inside
 -- READOUT_FIT.inset per side. The coord formatter (FormatCoord) clamps each number to
@@ -156,6 +158,10 @@ local READOUT_FONT_SIZE
 -- is 17 glyphs with the clock, which overlapped the clock by about 7 px at m = 250.
 local READOUT_WIDTH
 local READOUT_FIT = { chars = 16, advance = 0.5615, inset = 4 }
+-- Key seats in the bezel row, in order: tracking, calendar, settings, mail. All are reserved whether or not the
+-- key is there (see the box comment above): a key a client lacks leaves its seat empty at the row's end, not a
+-- hole in the middle of it.
+local KEY_SLOTS = 4
 -- Frame levels above the bezel: the readout box sits at +1, the keys above it at +3, so a key
 -- (the pink mail slot and its envelope in particular) is never painted under the box.
 local READOUT_LEVEL_OFFSET = 1
@@ -207,6 +213,21 @@ local KEY_DOT_GLOW_ALPHA = 0.6
 -- Our own handle on the dot textures (never a field on Blizzard's MailFrame).
 local mailDot = {}
 
+-- Settings key (our own gear button, see StyleSettingsKey). The amber accent is the one the mockup's key row has
+-- free: its Zoom key wore it and this build hides the zoom buttons. The gear is the mockup's menu gear
+-- (tools/assets/generate_icon_gear.py), drawn at this fraction of the key edge: its ink is 85% of the texture, so
+-- it stays clear of the underline bar and reads as big as the mail envelope. Hover and pressed follow the config
+-- window's convention: the fill mixed 0.16, then 0.32, toward the ring colour (here an accent wash over the dark
+-- fill), the glow and the glyph lifted on hover.
+local SETTINGS_KEY_NAME = "ForeverSTUwaveMinimapSettingsKey"
+local SETTINGS_ICON_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\icon_gear.tga"
+local SETTINGS_GLYPH_FRACTION = 0.6
+local SETTINGS_WASH_TEXTURE = "Interface\\Buttons\\WHITE8X8" -- the "round" chrome's square wash
+local KEY_WASH_HOVER = 0.16
+local KEY_WASH_PRESSED = 0.32
+local KEY_GLOW_REST = 0.35 -- SkinButton's own default glow alpha
+local KEY_GLOW_HOVER = 0.6
+
 local function RefreshMetrics()
     DeriveMetrics()
 
@@ -222,9 +243,9 @@ local function RefreshMetrics()
     NORTH_FONT_SIZE = Metrics.northFont
     NORTH_INSET_Y = Metrics.northInset
 
-    -- The box starts one key gap right of the third key and ends READOUT_INSET_X short of the
+    -- The box starts one key gap right of the last key slot and ends READOUT_INSET_X short of the
     -- bezel's right edge (floored, so the gap to the key can only grow).
-    local keysRight = BEZEL_PADDING + 3 * KEY_SIZE + 2 * KEY_GAP
+    local keysRight = BEZEL_PADDING + KEY_SLOTS * KEY_SIZE + (KEY_SLOTS - 1) * KEY_GAP
     READOUT_HEIGHT = math.floor(Metrics.coordFont * 1.6 + 0.5)
     READOUT_WIDTH = math.floor(Metrics.map - READOUT_INSET_X - (keysRight + KEY_GAP))
     READOUT_FONT_SIZE = math.max(5, math.min(Metrics.coordFont,
@@ -1222,8 +1243,9 @@ end
 -- detected/nil-guarded throughout: whether Tracking/GameTimeFrame/the mail
 -- frame still carry named Border/Background regions on this client is
 -- UNVERIFIED -- a miss here just leaves old art visible under our new fill,
--- not an error. Only ever called on these three bezel-reparented keys (see
--- StyleBezelKey's callers below); zoom buttons never reach this function,
+-- not an error. Only ever called on keys the bezel dresses (see StyleBezelKey's
+-- callers below: the three reparented Blizzard keys, and our own Settings key,
+-- which has no such regions); zoom buttons never reach this function,
 -- since they are hidden outright rather than reparented into the bezel (see
 -- HideBlizzardChrome).
 local function StripKeyArt(button)
@@ -1413,6 +1435,135 @@ local function StyleMailKey(bezel, anchorTo)
     return frame
 end
 
+-- The Settings key: a gear that opens the config window (the one /fsconfig toggles), so the player does not need the
+-- slash command. Blizzard has no such button, so this one is OURS: a plain Button made here and dressed by
+-- StyleBezelKey exactly like the reparented keys (same size and seat rule, cut fill, SkinButton ring, glow, underline),
+-- in the amber accent (see SETTINGS_KEY_NAME). It sits between the calendar and mail keys, so mail keeps the last,
+-- reserved seat and the row has no hole while no mail waits. Nothing here is secure: the build, the looks and the click
+-- are all legal in combat. The click reads FS.ConfigWindow at click time (ConfigWindow.lua loads after this file) and
+-- does nothing while it is absent.
+
+-- Pixel crisp, as MicroBars' icon pieces are: snapped to the pixel grid with no texel bias, where the client has the calls.
+local function Crisp(texture)
+    if texture.SetSnapToPixelGrid then pcall(texture.SetSnapToPixelGrid, texture, true) end
+    if texture.SetTexelSnappingBias then pcall(texture.SetTexelSnappingBias, texture, 0) end
+    return texture
+end
+
+-- Centres the gear on the key at a whole number of physical pixels, the key's pixel width minus the gear's kept even so
+-- both sides leave the same whole pixels (FrameHelpers.PixelUnit: UI units per physical pixel at the key; the client not
+-- saying leaves whole UI units). Run at build and again whenever the pixel scale moves (the OnRescale below).
+local function SeatSettingsGlyph(key)
+    local glyph = key and key.fsGlyph
+    if not glyph then return end
+    local helpers = FS.FrameHelpers
+    local px = (helpers and helpers.PixelUnit and helpers.PixelUnit(key)) or 1
+    local want = math.floor(KEY_SIZE * SETTINGS_GLYPH_FRACTION / px + 0.5)
+    if (math.floor(KEY_SIZE / px + 0.5) - want) % 2 ~= 0 then want = want + 1 end
+    glyph:ClearAllPoints()
+    glyph:SetPoint("CENTER", key, "CENTER", 0, 0)
+    glyph:SetSize(want * px, want * px)
+end
+
+if FS.Layout and FS.Layout.OnRescale then
+    FS.Layout.OnRescale(function() SeatSettingsGlyph(Minimap and Minimap.fsSettingsKey) end)
+end
+
+-- Rest, hover or pressed, from the two flags the mouse scripts keep (fsOver, fsDown): the wash over the dark fill at
+-- 0 / 0.16 / 0.32, the glow at 0.35 / 0.6 and the gear amber / white. Texture writes only. A press that is dragged off
+-- shows rest, and releasing it outside leaves it there.
+local function PaintSettingsKey(key)
+    local over = key.fsOver and true or false
+    local wash = 0
+    if over then wash = key.fsDown and KEY_WASH_PRESSED or KEY_WASH_HOVER end
+    local accent, ink = COLOR_AMBER, over and COLOR_TEXT_WHITE or COLOR_AMBER
+    if key.fsWash then key.fsWash:SetVertexColor(accent[1], accent[2], accent[3], wash) end
+    if key.fsGlyph then key.fsGlyph:SetVertexColor(ink[1], ink[2], ink[3], 1) end
+    local glow = key.fsSkin and key.fsSkin.glow
+    if glow then glow:SetVertexColor(accent[1], accent[2], accent[3], over and KEY_GLOW_HOVER or KEY_GLOW_REST) end
+end
+
+local function LogSettingsFailure(err)
+    if FS.LogDegradeOnce then
+        FS.LogDegradeOnce("minimap_settings",
+            "|cffff4488Forever STUwave|r: minimap settings key degraded: " .. tostring(err))
+    end
+end
+
+local function DressSettingsKey(bezel, key, anchorTo)
+    StyleBezelKey(bezel, key, COLOR_AMBER, anchorTo)
+
+    -- The hover wash: the dark fill's own cut shape (or, under "round", a square pulled in far enough to stay inside the
+    -- ring's rounded corners), accent coloured, clear until the mouse is on the key.
+    local chamfer = KeyChamfer()
+    local wash
+    if chamfer then
+        wash = FS.Theme.AddSliceTexture(key, CutFillTexture(chamfer), COLOR_AMBER, "BACKGROUND", 1)
+        FS.Theme.ApplyNineSlice(wash, chamfer)
+    else
+        local inset = math.ceil(Metrics.keyRadius * 0.3)
+        wash = key:CreateTexture(nil, "BACKGROUND", nil, 1)
+        wash:SetTexture(SETTINGS_WASH_TEXTURE)
+        wash:SetPoint("TOPLEFT", key, "TOPLEFT", inset, -inset)
+        wash:SetPoint("BOTTOMRIGHT", key, "BOTTOMRIGHT", -inset, inset)
+    end
+    key.fsWash = wash
+
+    local glyph = Crisp(key:CreateTexture(nil, "ARTWORK"))
+    glyph:SetTexture(SETTINGS_ICON_TEXTURE)
+    key.fsGlyph = glyph
+    SeatSettingsGlyph(key)
+    PaintSettingsKey(key)
+
+    key:RegisterForClicks("LeftButtonUp")
+    key:SetScript("OnEnter", function(self)
+        self.fsOver = true
+        PaintSettingsKey(self)
+        if not GameTooltip then return end
+        pcall(function()
+            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+            GameTooltip:SetText("Settings")
+            GameTooltip:Show()
+        end)
+    end)
+    key:SetScript("OnLeave", function(self)
+        self.fsOver = false
+        PaintSettingsKey(self)
+        if GameTooltip then pcall(function() GameTooltip:Hide() end) end
+    end)
+    key:SetScript("OnMouseDown", function(self)
+        self.fsDown = true
+        PaintSettingsKey(self)
+    end)
+    key:SetScript("OnMouseUp", function(self)
+        self.fsDown = false
+        PaintSettingsKey(self)
+    end)
+    -- A key hidden with the mouse on it gets no OnLeave.
+    key:SetScript("OnHide", function(self)
+        self.fsOver, self.fsDown = false, false
+        PaintSettingsKey(self)
+    end)
+    key:SetScript("OnClick", function()
+        local window = FS.ConfigWindow
+        if window and window.Toggle then window.Toggle() end
+    end)
+end
+
+-- The key, or nil when it could not be built: a throw is logged once, the half-built frame is hidden, and the row goes on
+-- without it (mail then seats after the calendar), the way a Blizzard key that is missing is skipped.
+local function StyleSettingsKey(bezel, anchorTo)
+    local key = CreateFrame("Button", SETTINGS_KEY_NAME, bezel)
+    local ok, err = pcall(DressSettingsKey, bezel, key, anchorTo)
+    if not ok then
+        key:Hide()
+        LogSettingsFailure(err)
+        return nil
+    end
+    Minimap.fsSettingsKey = key
+    return key
+end
+
 -- Builds the chassis frame below Minimap and populates its left key row.
 -- Every button lookup is feature-detected by its real (measured) name; a
 -- missing one is skipped and simply leaves no gap, per key, in the row.
@@ -1462,6 +1613,14 @@ local function ApplyControlBezel()
 
     TryKey("tracking", MinimapCluster and MinimapCluster.Tracking, COLOR_POWER)
     TryKey("calendar", GameTimeFrame, COLOR_BORDER)
+
+    local settingsKey = StyleSettingsKey(bezel, last)
+    if settingsKey then
+        last = settingsKey
+        resolved[#resolved + 1] = "settings"
+    else
+        skipped[#skipped + 1] = "settings"
+    end
 
     local mailKey = StyleMailKey(bezel, last)
     if mailKey then
@@ -1609,11 +1768,13 @@ end
 -- rows and the drawer height follows the row count. It is a child of Minimap anchored to
 -- the bezel (no FS.Layout seat: the old `minimaptray` Layout entry is unused).
 --
--- THE POP-OUT is a TAB hanging off the bezel's bottom edge, not a 4th bezel key. Measured
--- from the metrics above at m = 250: three keys end at pad + 3 * KEY + 2 * gap = 111.6 and
--- the readout box starts one gap later, at m - 8 - READOUT_WIDTH = 119 (at m = 208, 93 and
--- 99), so the bezel row is already full and a 4th key would sit on top of the coords/clock
--- LCD (as the third, mail, key did before the box was sized to start after it). The tab
+-- THE POP-OUT is a TAB hanging off the bezel's bottom edge, not a 5th bezel key. Measured
+-- from the metrics above at m = 250: the four key slots (tracking, calendar, settings, mail)
+-- end at pad + 4 * KEY + 3 * gap = 148.8 and the readout box starts one gap later, at
+-- m - 8 - READOUT_WIDTH = 156 (at m = 208, 124 and 130), so the bezel row is full: it
+-- already costs the box 37 px (24 at m = 208) and its text a size, and a 5th key would
+-- sit on top of the coords/clock LCD (as the mail key did before the box was sized to
+-- start after it). The tab
 -- (count badge left, chevron right) sits in the drawer's header row, which is the same
 -- height, so open it reads as a handle on the drawer and closed as a tab under the bezel.
 -- Open/closed lives in ForeverSTUwaveDB.minimapTrayOpen (default closed).

@@ -28,12 +28,19 @@ and checks (under Theme.CHROME_CORNERS "cut", and "round" for the A/B path):
     count badge and the "Addon buttons (N)" tooltip, and is hidden with zero buttons;
   * tiles wrap to more rows and the drawer grows; combat defers collection to PLAYER_REGEN_ENABLED.
 
+  Then the Settings key (the gear that opens the /fsconfig window): our own Button in the bezel row between the calendar and
+  mail keys (mail keeps the last, reserved seat), the same size and chrome as the other keys, a centred gear on whole
+  physical pixels, hover and pressed looks, a "Settings" tooltip, and a click that calls FS.ConfigWindow.Toggle (the toggle
+  /fsconfig runs); the readout box takes what is left of FOUR key slots.
+
     python3 tools/minimap-harness.py
 """
 
 from __future__ import annotations
 
+import math
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -47,6 +54,8 @@ THEME_SRC = (ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
 # MINIMAP_LUA / LAYOUT_LUA point the harness at a mutant copy (mutation checks).
 LAYOUT_SRC = Path(os.environ.get("LAYOUT_LUA", ADDON / "Core/Layout.lua")).read_text(encoding="utf-8")
 MINIMAP_SRC = Path(os.environ.get("MINIMAP_LUA", ADDON / "Modules/Minimap/Minimap.lua")).read_text(encoding="utf-8")
+FRAMEHELPERS_SRC = (ADDON / "Core/FrameHelpers.lua").read_text(encoding="utf-8")
+CONFIGWINDOW_SRC = (ADDON / "Modules/Config/ConfigWindow.lua").read_text(encoding="utf-8")
 
 MOCK = r"""
 local THEME_SRC, MINIMAP_SRC, MODE, UI_HEIGHT, LAYOUT_SRC, SETUP, PRE_DB = ...
@@ -407,6 +416,7 @@ function __role(f)
     if f == Minimap.fsReadoutBox then return "readout" end
     if f == Minimap.fsTray then return "tray" end
     if f == Minimap.fsTrayToggle then return "toggle" end
+    if f == Minimap.fsSettingsKey then return "settings" end
     if f.fsTrayOwned then return "tile" end
     return "other"
 end
@@ -479,6 +489,8 @@ def tray_checks() -> None:
           same(g, g.MinimapCluster.Tracking.parent, g.Minimap.fsBezel)
           and same(g, g.GameTimeFrame.parent, g.Minimap.fsBezel)
           and same(g, g.MinimapCluster.IndicatorFrame.MailFrame.parent, g.Minimap.fsBezel))
+    check("[tray] the Settings key stays in the bezel",
+          same(g, g.Minimap.fsSettingsKey.parent, g.Minimap.fsBezel))
     check("[tray] expansion button, zoom button, a random button and a non-button are NOT collected",
           same(g, g.ExpansionLandingPageMinimapButton.parent, g.Minimap)
           and same(g, g.Minimap.ZoomIn.parent, g.Minimap)
@@ -740,10 +752,10 @@ LAYER_RANK = {"BACKGROUND": 0, "BORDER": 1, "ARTWORK": 2, "OVERLAY": 3, "HIGHLIG
 
 
 def mail_checks() -> None:
-    """Mail arriving shows the third bezel key (the pink slot). Its envelope must sit centred in
-    that slot at glyph size, the key must sit above the coord / clock box, and the box must start
-    to the right of the slot instead of underneath it (the box used to start at 85 px against a
-    key ending at 112 px on the 250 px map, so the slot lay on top of the clock)."""
+    """Mail arriving shows the fourth bezel key (the pink slot, after tracking, calendar and settings). Its
+    envelope must sit centred in that slot at glyph size, the key must sit above the coord / clock box, and
+    the box must start to the right of the slot instead of underneath it (the box used to start at 85 px
+    against a key ending at 112 px on the 250 px map, so the slot lay on top of the clock)."""
     for label, ui_height in (("250", None), ("208", 1200)):
         lua = run("cut", ui_height, LIB_SETUP + TRAY_BLIZZARD, None)
         lua.execute(MAIL_ARRIVES)
@@ -752,15 +764,17 @@ def mail_checks() -> None:
         m = g.Minimap.w
         bezel, box = g.Minimap.fsBezel, g.Minimap.fsReadoutBox
         k1, k2 = g.MinimapCluster.Tracking, g.GameTimeFrame
+        gear = g.Minimap.fsSettingsKey
         mail = g.MinimapCluster.IndicatorFrame.MailFrame
         icon = g.MiniMapMailIcon
 
         def same(a, b):
             return bool(g.__same(a, b))
 
-        check(f"[mail@{label}] mail key is the third bezel key, shown and parented in the bezel",
-              same(mail.parent, bezel) and mail.shown is True and same(mail.points.LEFT.rel, k2))
-        key_right = k1.points.LEFT.x + 3 * mail.w + k2.points.LEFT.x + mail.points.LEFT.x
+        check(f"[mail@{label}] mail key is the fourth bezel key (after settings), shown and parented in the bezel",
+              same(mail.parent, bezel) and mail.shown is True and same(mail.points.LEFT.rel, gear))
+        key_right = (k1.points.LEFT.x + 4 * mail.w + k2.points.LEFT.x + gear.points.LEFT.x
+                     + mail.points.LEFT.x)
         box_left = m - box.points.RIGHT.x * -1 - box.w
         gap = mail.points.LEFT.x
         check(f"[mail@{label}] clock box starts right of the pink slot "
@@ -818,6 +832,209 @@ def mail_checks() -> None:
             need = READOUT_CHARS * MONO_ADVANCE * fs.fontSize + READOUT_TEXT_PAD
             check(f"[mail@{label}] {name} font {fs.fontSize:.1f} fits a typical reading in the box "
                   f"({need:.1f} <= {box.w})", need <= box.w + 1e-6)
+
+
+SETTINGS_KEY = "ForeverSTUwaveMinimapSettingsKey"
+GEAR_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\icon_gear.tga"
+GEAR_AMBER = (1.0, 0.714, 0.282)
+GEAR_ART_INSET = 0.075   # the gear's ink starts 1.2 of 16 units inside its texture (icon_gear.tga)
+WASH_HOVER, WASH_PRESSED = 0.16, 0.32   # the config window's hover / pressed mix toward the ring colour
+GLOW_REST, GLOW_HOVER = 0.35, 0.6
+
+# Real FrameHelpers (PixelUnit), a PixelUtil that says 1 unit = 1.875 px (1440 px tall), and recorders for the two
+# pixel-grid calls the permissive mock ignores.
+SETTINGS_PIXELS = r"""
+PixelUtil = { GetPixelToUIUnitFactor = function() return 768 / 1440 end }
+local R = getmetatable(UIParent)
+function R:SetSnapToPixelGrid(v) self.snap = v end
+function R:SetTexelSnappingBias(v) self.bias = v end
+assert(loadstring(FH_SRC, "@FrameHelpers.lua"))("forever-stuwave", FS)
+"""
+
+
+def settings_setup(extra: str = "") -> str:
+    return "FH_SRC = [==[" + FRAMEHELPERS_SRC + "]==]\n" + SETTINGS_PIXELS + LIB_SETUP + TRAY_BLIZZARD + extra
+
+
+SETTINGS_HELPERS = r"""
+function __same(a, b) return a == b end
+function __textures(f, path)
+    local out = {}
+    for _, r in ipairs({ f:GetRegions() }) do if r.texture == path then out[#out + 1] = r end end
+    return out
+end
+function __click(f) f.scripts.OnClick(f, "LeftButton") end
+function __toggles_reset() __toggles = 0; FS.ConfigWindow = { Toggle = function() __toggles = __toggles + 1 end } end
+"""
+
+
+def settings_checks() -> None:
+    """The Settings key: a gear key in the bezel row that opens the /fsconfig window."""
+    helpers = SETTINGS_HELPERS
+
+    # the click calls the toggle /fsconfig runs: pinned on ConfigWindow.lua's own text (read only), so a rename shows here
+    check("[settings] ConfigWindow exports Toggle and /fsconfig calls that same Toggle",
+          "function CW.Toggle()" in CONFIGWINDOW_SRC and 'SLASH_FSCONFIG1 = "/fsconfig"' in CONFIGWINDOW_SRC
+          and re.search(r'SlashCmdList\["FSCONFIG"\].*?CW\.Toggle\(\)', CONFIGWINDOW_SRC, re.S) is not None)
+
+    for label, ui_height in (("250", None), ("208", 1200)):
+        lua = run("cut", ui_height, settings_setup(), None)
+        lua.execute(helpers)
+        g = lua.globals()
+
+        def same(a, b):
+            return bool(g.__same(a, b))
+
+        m = g.Minimap.w
+        bezel, box = g.Minimap.fsBezel, g.Minimap.fsReadoutBox
+        k1, k2 = g.MinimapCluster.Tracking, g.GameTimeFrame
+        key = g.Minimap.fsSettingsKey
+        mail = g.MinimapCluster.IndicatorFrame.MailFrame
+        check(f"[settings@{label}] the key exists: a Button named {SETTINGS_KEY}, parented in the bezel",
+              key is not None and key.otype == "Button" and key.name == SETTINGS_KEY and same(key.parent, bezel)
+              and g[SETTINGS_KEY] is not None and same(g[SETTINGS_KEY], key))
+        if key is None:
+            continue
+        check(f"[settings@{label}] it is shown, takes the mouse, and is square at the other keys' size "
+              f"({key.w:.2f})", key.shown is True and key.w == key.h and key.w == k1.w == k2.w == mail.w)
+        check(f"[settings@{label}] it sits in the bezel row: after the calendar, before mail, the same gap",
+              same(key.points.LEFT.rel, k2) and same(mail.points.LEFT.rel, key)
+              and key.points.LEFT.x == k2.points.LEFT.x == mail.points.LEFT.x and key.points.LEFT.y == 0)
+        resolved = [str(g.Minimap.fsBezelResolved[i]) for i in range(1, len(g.Minimap.fsBezelResolved) + 1)]
+        check(f"[settings@{label}] the resolved keys read tracking, calendar, settings, mail ({resolved})",
+              resolved == ["tracking", "calendar", "settings", "mail"])
+        check(f"[settings@{label}] it is drawn above the readout box (level {key.level} > {box.level})",
+              key.level > box.level)
+
+        pad, gap = k1.points.LEFT.x, key.points.LEFT.x
+        mail_right = pad + 4 * key.w + 3 * gap
+        box_left = m + box.points.RIGHT.x - box.w
+        check(f"[settings@{label}] the bezel fits four keys: mail slot ends at {mail_right:.1f}, the box starts at "
+              f"{box_left:.1f}, a gap later", box_left >= mail_right + gap - 1e-6 and mail_right + gap <= m)
+        want_w = math.floor(m - 8 - (mail_right + gap))
+        check(f"[settings@{label}] the box takes what is left of FOUR key slots ({box.w} == {want_w})",
+              box.w == want_w)
+        check(f"[settings@{label}] the readout text is still a real size ({g.Minimap.fsReadoutCoords.fontSize:.1f} >= 5)",
+              g.Minimap.fsReadoutCoords.fontSize >= 5)
+
+        # the gear: one icon_gear texture, centred, square, on whole physical pixels, tinted amber
+        gears = list(g.__textures(key, GEAR_TEXTURE).values())
+        check(f"[settings@{label}] exactly one gear texture on the key", len(gears) == 1)
+        if len(gears) != 1:
+            continue
+        glyph = gears[0]
+        only = [k for k, _ in glyph.points.items()]
+        check(f"[settings@{label}] the gear is anchored CENTER of the key and nothing else, no offset",
+              only == ["CENTER"] and same(glyph.points.CENTER.rel, key)
+              and glyph.points.CENTER.x == 0 and glyph.points.CENTER.y == 0)
+        check(f"[settings@{label}] the gear is square, drawn on ARTWORK, tinted amber",
+              glyph.w == glyph.h and str(glyph.layer) == "ARTWORK"
+              and all(abs(glyph.tint[i + 1] - GEAR_AMBER[i]) < 1e-9 for i in range(3)) and glyph.tint[4] == 1)
+        px = 768 / 1440   # a PixelUtil factor over the mock's effective scale 1
+        gp, kp = math.floor(glyph.w / px + 0.5), math.floor(key.w / px + 0.5)
+        check(f"[settings@{label}] the gear is a whole number of physical pixels ({glyph.w / px:.4f}) with the "
+              f"key's pixel width ({kp}) minus its own ({gp}) even, so its edges land on pixels",
+              abs(glyph.w / px - gp) < 1e-6 and (kp - gp) % 2 == 0)
+        check(f"[settings@{label}] the gear is snapped to the pixel grid with no texel bias",
+              glyph.snap is True and glyph.bias == 0)
+        underline_top = key.h * 0.13 + 2
+        check(f"[settings@{label}] the gear's ink clears the key's underline bar",
+              (key.h - glyph.h) / 2 + GEAR_ART_INSET * glyph.h >= underline_top - 1e-6)
+
+        # hover / pressed / leave
+        wash, glow = key.fsWash, key.fsSkin.glow
+        check(f"[settings@{label}] at rest: no wash, the glow at {GLOW_REST}",
+              wash.tint[4] == 0 and abs(glow.tint[4] - GLOW_REST) < 1e-9)
+        key.scripts.OnEnter(key)
+        check(f"[settings@{label}] hover: amber wash at {WASH_HOVER}, the gear and glow lift",
+              abs(wash.tint[4] - WASH_HOVER) < 1e-9
+              and all(abs(wash.tint[i + 1] - GEAR_AMBER[i]) < 1e-9 for i in range(3))
+              and all(glyph.tint[i + 1] == 1 for i in range(3)) and abs(glow.tint[4] - GLOW_HOVER) < 1e-9)
+        check(f"[settings@{label}] hover shows the tooltip 'Settings' on the key",
+              g.GameTooltip.text == "Settings" and g.GameTooltip.shown is True and same(g.GameTooltip.owner, key))
+        key.scripts.OnMouseDown(key, "LeftButton")
+        check(f"[settings@{label}] pressed: wash at {WASH_PRESSED}", abs(wash.tint[4] - WASH_PRESSED) < 1e-9)
+        key.scripts.OnMouseUp(key, "LeftButton")
+        check(f"[settings@{label}] released over the key: back to the hover look",
+              abs(wash.tint[4] - WASH_HOVER) < 1e-9)
+        key.scripts.OnLeave(key)
+        check(f"[settings@{label}] leave: wash off, gear amber, glow at rest, tooltip hidden",
+              wash.tint[4] == 0 and all(abs(glyph.tint[i + 1] - GEAR_AMBER[i]) < 1e-9 for i in range(3))
+              and abs(glow.tint[4] - GLOW_REST) < 1e-9 and g.GameTooltip.shown is False)
+        key.scripts.OnEnter(key)
+        key.scripts.OnMouseDown(key, "LeftButton")
+        key.scripts.OnLeave(key)
+        key.scripts.OnMouseUp(key, "LeftButton")
+        check(f"[settings@{label}] pressed, dragged off and released: the rest look, not hover",
+              wash.tint[4] == 0 and abs(glow.tint[4] - GLOW_REST) < 1e-9)
+
+        key.scripts.OnEnter(key)
+        key.scripts.OnMouseDown(key, "LeftButton")
+        key.scripts.OnHide(key)
+        check(f"[settings@{label}] hiding the key under the mouse clears hover and pressed (no OnLeave comes)",
+              wash.tint[4] == 0 and abs(glow.tint[4] - GLOW_REST) < 1e-9
+              and all(abs(glyph.tint[i + 1] - GEAR_AMBER[i]) < 1e-9 for i in range(3)))
+
+        # click: the same public toggle as /fsconfig, read at click time
+        lua.execute("__toggles_reset()")
+        lua.execute(f"__click({SETTINGS_KEY})")
+        check(f"[settings@{label}] a click calls FS.ConfigWindow.Toggle once", g.__toggles == 1)
+        lua.execute(f"__click({SETTINGS_KEY})")
+        check(f"[settings@{label}] and again on the second click (a toggle, not a one way open)", g.__toggles == 2)
+        lua.execute("FS.ConfigWindow = nil")
+        try:
+            lua.execute(f"__click({SETTINGS_KEY})")
+            quiet = True
+        except Exception:
+            quiet = False
+        check(f"[settings@{label}] with no config window loaded a click does nothing and does not throw", quiet)
+        lua.execute("FS.ConfigWindow = {}")
+        try:
+            lua.execute(f"__click({SETTINGS_KEY})")
+            quiet = True
+        except Exception:
+            quiet = False
+        check(f"[settings@{label}] a config window with no Toggle is the same", quiet)
+
+    # no calendar button on this client: the key seats after the tracking key
+    lua = run("cut", None, "", None)   # the bare mock has Tracking only
+    lua.execute(helpers)
+    g = lua.globals()
+    key, k1 = g.Minimap.fsSettingsKey, g.MinimapCluster.Tracking
+    check("[settings] with only the tracking key present, the gear seats right after it",
+          key is not None and bool(g.__same(key.points.LEFT.rel, k1)) and key.points.LEFT.x == k1.points.LEFT.x)
+
+    # round chrome A/B: the key keeps a gear and the same hover wash
+    lua = run("round", None, settings_setup(), None)
+    lua.execute(helpers)
+    g = lua.globals()
+    key = g.Minimap.fsSettingsKey
+    check("[settings] under round chrome the key still carries its gear and a hover wash",
+          key is not None and len(list(g.__textures(key, GEAR_TEXTURE).values())) == 1 and key.fsWash is not None)
+    if key is not None:
+        key.scripts.OnEnter(key)
+        check("[settings] under round chrome hover lifts the wash to 0.16",
+              abs(key.fsWash.tint[4] - WASH_HOVER) < 1e-9)
+
+    # a throw while building the key is logged, leaves nothing half built, and the rest of the bezel still comes up
+    lua = run("cut", None, settings_setup(LOGGING + r"""
+    local orig = FS.Theme.SkinButton
+    FS.Theme.SkinButton = function(frame, ...)
+        if frame.name == "ForeverSTUwaveMinimapSettingsKey" then error("settingsboom") end
+        return orig(frame, ...)
+    end
+    """), None)
+    lua.execute(helpers)
+    g = lua.globals()
+    logs = [str(g.__logs[i]) for i in range(1, len(g.__logs) + 1)]
+    check("[settings] a build failure is logged once under minimap_settings",
+          len(logs) == 1 and logs[0].startswith("minimap_settings|") and "settingsboom" in logs[0])
+    check("[settings] a build failure leaves Minimap.fsSettingsKey unset and the half built frame hidden",
+          g.Minimap.fsSettingsKey is None and g[SETTINGS_KEY] is not None and g[SETTINGS_KEY].shown is False)
+    mail = g.MinimapCluster.IndicatorFrame.MailFrame
+    check("[settings] a build failure leaves the readout, the tray and the mail key in place (mail seats after the calendar)",
+          g.Minimap.fsReadoutBox is not None and g.Minimap.fsTrayToggle is not None
+          and bool(g.__same(mail.points.LEFT.rel, g.GameTimeFrame)))
 
 
 def coords_setup(x: float, y: float, secret: bool = False) -> str:
@@ -1546,6 +1763,8 @@ def main() -> int:
         toggle_fill = [c for c in fill if role(c.frame) == "toggle"]
         tile_skin = [c for c in skin if role(c.frame) == "tile"]
         toggle_skin = [c for c in skin if role(c.frame) == "toggle"]
+        settings_fill = [c for c in fill if role(c.frame) == "settings"]
+        settings_skin = [c for c in skin if role(c.frame) == "settings"]
         fill = [c for c in fill if role(c.frame) in ("bezel", "readout", "other")]
         skin = [c for c in skin if role(c.frame) == "other"]
         if ui_height:
@@ -1581,6 +1800,23 @@ def main() -> int:
         else:
             check(f"[{label}] key keeps the rounded fill (bezel + readout + key)", len(fill) == 3)
 
+        # the Settings key: the bezel key recipe (cut2 fill + SkinButton ring at the key chamfer; round fill under "round")
+        settings = g.Minimap.fsSettingsKey
+        check(f"[{label}] the Settings key gets exactly one SkinButton, in the amber accent",
+              len(settings_skin) == 1 and abs(settings_skin[0].args[1]["borderColor"][1] - 1) < 1e-9
+              and abs(settings_skin[0].args[1]["borderColor"][3] - 0.282) < 1e-9)
+        if mode == "cut":
+            fills = [t for t in settings.regions.values()
+                     if isinstance(t.texture, str) and "slice_cut2_fill" in t.texture]
+            dark = [t for t in fills if abs(t.tint[1] - 0.016) < 1e-9]
+            check(f"[{label}] Settings key SkinButton chamfer {key_c}", settings_skin[0].args[1]["chamfer"] == key_c)
+            check(f"[{label}] Settings key fill is {key_file}, margin {key_c}, READOUT_FILL tint, no rounded fill",
+                  len(dark) == 1 and dark[0].texture.endswith("\\" + key_file) and dark[0].slice == key_c
+                  and len(settings_fill) == 0)
+        else:
+            check(f"[{label}] Settings key keeps the rounded fill and no chamfer",
+                  len(settings_fill) == 1 and settings_skin[0].args[1]["chamfer"] is None)
+
         # tray tile + toggle tab chrome: same recipe as a key, chamfer from their own size
         tile, toggle = g.__lib.objects.Alpha, g.Minimap.fsTrayToggle
         check(f"[{label}] tray tile and toggle each get exactly one SkinButton",
@@ -1600,6 +1836,7 @@ def main() -> int:
                       len(rounded) == 1 and skins[0].args[1]["chamfer"] is None)
     tray_checks()
     tray_failure_checks()
+    settings_checks()
     mail_checks()
     coords_checks()
     first_login_checks()

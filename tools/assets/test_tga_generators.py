@@ -186,6 +186,8 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "level_skull": (32, 32),
     },
     "icon_jump": (32, 32),
+    # generate_icon_gear.py: the Settings key's gear on the minimap bezel (the mockup's menu gear: two rings and eight spokes).
+    "icon_gear": (32, 32),
     # generate_reticle_ring.py: the ring of the target of target plate's reticle, a 6 x 6 glyph unit square on a 16 texel canvas.
     "reticle_ring": (16, 16),
     # generate_warrior_helm.py: the Warrior Gunsight module's 8-bit helm frames and its two rune tile atlases (full colour).
@@ -1221,6 +1223,94 @@ def test_chevron_up_strip_is_one_chevron_per_tile_and_wraps_vertically(
             seen_out += not inside
             assert abs(_alpha_at(path, x, y) - (255 if inside else 0)) <= 4, (x, y)
     assert seen_in > 100 and seen_out > 100
+
+
+# --- Settings key gear -------------------------------------------------------
+
+GEAR_GENERATOR = GENERATOR_DIR / "generate_icon_gear.py"
+# The mockup's `gear` glyph (control-deck-v1, ICONS.menu), 16 unit viewBox on 32 texels (2 per unit): a hub ring r 2 and a
+# rim ring r 4.5, both 1.6 wide, and eight butt-capped spokes 2.3 wide running r 4.5 to r 6.8 every 45 degrees from east.
+GEAR_CENTRE = 16.0
+GEAR_RINGS = ((2.0, 1.6), (4.5, 1.6))
+GEAR_SPOKE = (4.5, 6.8, 2.3)
+
+
+def _gear_signed_distance(tx: float, ty: float) -> float:
+    """Texels from (tx, ty) to the gear's edge, negative inside (rings and spokes in design units, scaled back)."""
+    x, y = (tx - GEAR_CENTRE) / 2.0, (ty - GEAR_CENTRE) / 2.0
+    r = math.hypot(x, y)
+    best = min(abs(r - radius) - width / 2 for radius, width in GEAR_RINGS)
+    r0, r1, width = GEAR_SPOKE
+    for k in range(8):
+        a = k * math.pi / 4
+        along = x * math.cos(a) + y * math.sin(a)
+        across = -x * math.sin(a) + y * math.cos(a)
+        dx = max(r0 - along, along - r1, 0.0)
+        dy = max(abs(across) - width / 2, 0.0)
+        inside = max(max(r0 - along, along - r1), abs(across) - width / 2)
+        best = min(best, inside if inside < 0 else math.hypot(dx, dy))
+    return best * 2.0
+
+
+@pytest.fixture(scope="module")
+def gear_outputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    work = tmp_path_factory.mktemp("icon_gear")
+    _run_generator(GEAR_GENERATOR, work)
+    return work
+
+
+def test_gear_is_white_ink_on_clear_with_room_round_it(gear_outputs: Path) -> None:
+    path = gear_outputs / "icon_gear.tga"
+    assert _is_white(path)
+    grid = _alpha_grid(path)
+    flat = [a for row in grid for a in row]
+    assert max(flat) == 255 and min(flat) == 0
+    assert 0.12 < sum(1 for a in flat if a >= 128) / len(flat) < 0.4, "a line gear, not blank or a filled disc"
+    # the spokes end 6.8 units out of 8, so the canvas edge is clear and the key never sees a clipped tooth
+    edge = grid[0] + grid[-1] + [row[0] for row in grid] + [row[-1] for row in grid]
+    assert max(edge) == 0
+
+
+def test_gear_matches_the_mockup_geometry_texel_by_texel(gear_outputs: Path) -> None:
+    grid = _alpha_grid(gear_outputs / "icon_gear.tga")
+    checked = 0
+    for y in range(32):
+        for x in range(32):
+            d = _gear_signed_distance(x + 0.5, y + 0.5)
+            if abs(d) < 0.9:
+                continue   # an antialiased edge texel: any alpha
+            checked += 1
+            if d < 0:
+                assert grid[y][x] >= 250, (x, y, d, grid[y][x])
+            else:
+                assert grid[y][x] <= 5, (x, y, d, grid[y][x])
+    assert checked > 500
+
+
+def test_gear_has_an_open_hub_a_clear_gap_between_the_rings_and_eight_teeth(gear_outputs: Path) -> None:
+    path = gear_outputs / "icon_gear.tga"
+    assert _alpha_at(path, 15, 15) == 0 and _alpha_at(path, 16, 16) == 0, "open hub"
+    assert _alpha_at(path, 20, 15) == 255, "hub ring"
+    assert _alpha_at(path, 22, 15) == 0, "gap between the rings"
+    assert _alpha_at(path, 25, 15) == 255, "rim ring"
+    # one tooth on each of the eight spokes, clear between them
+    teeth = [(28, 15), (24, 24), (15, 28), (7, 24), (3, 15), (7, 7), (15, 3), (24, 7)]
+    assert all(_alpha_at(path, x, y) >= 250 for x, y in teeth), teeth
+    assert _alpha_at(path, 27, 10) == 0, "between two teeth, outside the rim"
+
+
+def test_gear_is_eightfold_symmetric(gear_outputs: Path) -> None:
+    grid = _alpha_grid(gear_outputs / "icon_gear.tga")
+    for y in range(32):
+        for x in range(32):
+            assert abs(grid[y][x] - grid[y][31 - x]) <= 24, ("mirror x", x, y)
+            assert abs(grid[y][x] - grid[31 - y][x]) <= 24, ("mirror y", x, y)
+            assert abs(grid[y][x] - grid[x][y]) <= 24, ("diagonal", x, y)
+
+
+def test_committed_gear_matches_its_generator(gear_outputs: Path) -> None:
+    out = gear_outputs / "icon_gear.tga"
+    assert out.read_bytes() == (MEDIA_DIR / "icon_gear.tga").read_bytes()
 
 
 # --- toggle key glyphs ------------------------------------------------------
