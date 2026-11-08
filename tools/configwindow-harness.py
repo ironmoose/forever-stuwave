@@ -1217,6 +1217,47 @@ function T.the_unit_frames_page_has_the_totem_presets_group_with_one_switch_and_
     no(row("Preset 1"), "a client without the presets has no row")
 end
 
+-- ---- the nameplates switch on the Unit Frames page (Nameplates.lua's SETTING) ----
+
+local PLATES_KEY = "nameplates.enabled"
+local function withNameplates()
+    unitFramesDefaults()
+    FS.Config.RegisterDefault(PLATES_KEY, true)
+    FS.Nameplates = { KEY = PLATES_KEY, SETTING = { key = PLATES_KEY, label = "STUwave nameplates", tip = "Plates tip." } }
+end
+
+function T.the_unit_frames_page_has_the_stuwave_nameplates_switch_with_a_tip()
+    local W = boot({ preWindow = withNameplates })
+    W.Open("unitframes")
+    yes(headerY("NAMEPLATES"), "a Nameplates header")
+    local r = row("STUwave nameplates")
+    yes(r, "a STUwave nameplates row")
+    yes(r.control.fsChecked, "on by default")
+    local found
+    for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
+    eq(found, "Plates tip.", "explained by a ? tip")
+    eq(#texts(r), 3, "label, state and the ? icon only, no helper line")
+    press("STUwave nameplates")
+    eq(FS.Config.Get(PLATES_KEY), false)
+    no(r.control.fsChecked)
+    FS.Config.Set(PLATES_KEY, true)
+    yes(r.control.fsChecked, "an external change shows")
+    FS.Config.Set(FS.Gunsight.CONFIG_ENABLED, false)
+    yes(r.control.enabled, "the Gunsight master switch off does not dim it")
+    yes(headerY("PLAYER AND TARGET") < headerY("NAMEPLATES") and headerY("NAMEPLATES") < yOf("STUwave nameplates"),
+        "the switch sits under its own header")
+end
+
+function T.the_nameplates_group_is_left_out_without_the_nameplate_module()
+    local W = boot({ preWindow = unitFramesDefaults })
+    W.Open("unitframes")
+    no(headerY("NAMEPLATES"), "no header")
+    no(row("STUwave nameplates"), "no switch")
+    W = boot({ preWindow = function() unitFramesDefaults(); FS.Nameplates = {} end })
+    W.Open("unitframes")
+    no(headerY("NAMEPLATES"), "a module with no setting entry has no group")
+end
+
 -- ---- the party frames group on the Unit Frames page (PartyFrames.lua's switch, LayoutEdit's Move and Reset) ----
 
 local PARTY_KEY = "gunsight.pieces.party"

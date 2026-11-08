@@ -126,6 +126,18 @@ function FrameM.Hide(self) self._shown = false end
 function FrameM.IsShown(self) return self._shown end
 function FrameM.SetParent(self, p) self._parent = p end
 function FrameM.GetParent(self) return self._parent end
+function FrameM.GetName(self) return self._name end
+function FrameM.GetObjectType(self) return self._kind end
+-- Child frames only (regions are Texture/FontString kinds, Get* ghosts are not children).
+function FrameM.GetChildren(self)
+    local out = {}
+    for _, f in ipairs(__frames) do
+        if f._parent == self and f._kind ~= "Texture" and f._kind ~= "FontString" and f._kind ~= "Ghost" then
+            out[#out + 1] = f
+        end
+    end
+    return unpack(out)
+end
 function FrameM.ClearAllPoints(self) self._points = {} end
 function FrameM.SetPoint(self, ...) self._points[#self._points + 1] = { ... } end
 function FrameM.SetFont(self, ...) self._args.SetFont = { ... }; return true end
@@ -1712,6 +1724,368 @@ SlashCmdList["FSSTU"]("targetmark maybe")
 check(store[key] == true and last():find("/stu targetmark", 1, true), "bad word changed the setting")
 SlashCmdList["FSSTU"]("")
 check(last():find("/stu targetmark", 1, true), "no usage line")
+"""),
+
+    ("nameplates.enabled: off hides our roots and gives Blizzard's UnitFrame back, on brings them back, new plates while off are left alone", "true", r"""
+local store, cbs, defaults = {}, {}, {}
+FS.Config = {
+    RegisterDefault = function(k, v) defaults[k] = v end,
+    Get = function(k) if store[k] ~= nil then return store[k] end return defaults[k] end,
+    Set = function(k, v) store[k] = v; for _, f in ipairs(cbs[k] or {}) do f(v) end return true end,
+    OnChange = function(k, f) cbs[k] = cbs[k] or {}; table.insert(cbs[k], f) end,
+}
+-- a post-hook, like the real one: the original runs, then the hook with the same arguments
+local hooked = 0
+function hooksecurefunc(obj, name, fn)
+    local orig = obj[name]
+    obj[name] = function(...) local r = orig(...); fn(...); return r end
+    hooked = hooked + 1
+end
+-- Blizzard's plate: its UnitFrame is up while the unit exists
+local function blizzardPlate(unit)
+    local p = __newFrame("Frame", nil, nil)
+    p.UnitFrame = __newFrame("Frame", nil, p)
+    p.UnitFrame._shown = true
+    __plates = __plates or {}
+    __plates[unit] = p
+    return p
+end
+boot()
+fire("PLAYER_ENTERING_WORLD"); drain()
+local KEY = "nameplates.enabled"
+check(defaults[KEY] == true, "default not registered as true")
+local S = FS.Nameplates and FS.Nameplates.SETTING
+check(S and S.key == KEY and S.label == "STUwave nameplates" and type(S.tip) == "string" and #S.tip > 0, "no setting entry for the config window")
+check(not S.tip:find("[Bb]ot") and not S.tip:find("[Aa]utomat") and not S.tip:find("\226\128\148"), "the tip is not neutral plain text")
+
+local p1, p2 = blizzardPlate("nameplate1"), blizzardPlate("nameplate2")
+addPlate("nameplate1"); addPlate("nameplate2")
+local r1, r2 = FS.framesByUnit.nameplate1, FS.framesByUnit.nameplate2
+check(r1 and r2 and r1._shown and r2._shown, "roots not up while on")
+check(not p1.UnitFrame._shown and not p2.UnitFrame._shown, "Blizzard's UnitFrame left up while ours is on")
+check(hooked == 2, "expected one Show hook per UnitFrame, got " .. hooked)
+p1.UnitFrame:Show()
+check(not p1.UnitFrame._shown, "a Blizzard re-Show was not undone while ours is on")
+
+-- off: roots go, UnitFrame comes back, nothing is left tracked as built
+FS.Config.Set(KEY, false)
+check(not r1._shown and not r2._shown, "roots still shown after switching off")
+check(next(FS.framesByUnit) == nil, "plates still held as built after switching off")
+check(p1.UnitFrame._shown and p2.UnitFrame._shown, "Blizzard's UnitFrame was not restored")
+check(r1.auraContainer == nil, "the aura container stayed on a released root")
+p1.UnitFrame:Hide(); p1.UnitFrame:Show()
+check(p1.UnitFrame._shown, "the Show hook still hides the UnitFrame while off")
+fire("UNIT_HEALTH", "nameplate1"); fire("PLAYER_TARGET_CHANGED"); fire("UNIT_POWER_UPDATE", "nameplate1")
+fire("UNIT_AURA", "nameplate1"); fire("QUEST_LOG_UPDATE"); fire("PLAYER_REGEN_ENABLED"); drain()
+check(p1.UnitFrame._shown, "an event hid the UnitFrame again while off")
+
+-- a plate that appears while off is left alone
+local p3 = blizzardPlate("nameplate3")
+local n = hooked
+addPlate("nameplate3")
+check(FS.framesByUnit.nameplate3 == nil, "a root was built for a plate added while off")
+check(p3.UnitFrame._shown, "a plate added while off had its UnitFrame hidden")
+check(hooked == n, "a Show hook was put on a UnitFrame while off")
+check(#children(p3) == 1, "something was parented to a plate while off")
+local containers = #__acs
+fire("PLAYER_REGEN_ENABLED"); drain()
+check(#__acs == containers, "aura containers were built while off")
+
+-- a plate that goes away while off is not rebuilt later
+removePlate("nameplate2")
+
+-- on: every plate that is still up gets its root back, UnitFrame hidden again
+FS.Config.Set(KEY, true)
+check(FS.framesByUnit.nameplate1 and FS.framesByUnit.nameplate1._shown, "plate 1 not rebuilt")
+check(FS.framesByUnit.nameplate3 and FS.framesByUnit.nameplate3._shown, "the plate added while off not built")
+check(FS.framesByUnit.nameplate2 == nil, "a plate removed while off was built")
+check(FS.framesByUnit.nameplate1._parent == p1 and FS.framesByUnit.nameplate1.unit == "nameplate1", "root not seated on its plate")
+check(not p1.UnitFrame._shown and not p3.UnitFrame._shown, "Blizzard's UnitFrame left up after switching on")
+check(p2.UnitFrame._shown, "a removed plate's UnitFrame was touched")
+p3.UnitFrame:Show()
+check(not p3.UnitFrame._shown, "a re-Show was not undone after switching on")
+check(FS.framesByUnit.nameplate1.auraContainer and FS.framesByUnit.nameplate1.auraContainer._unit == "nameplate1", "no aura container after switching on")
+
+-- in a fight: both directions work, and a plate without a UnitFrame never throws
+__combat = true
+FS.Config.Set(KEY, false)
+check(next(FS.framesByUnit) == nil and p1.UnitFrame._shown, "switching off in combat did not take")
+FS.Config.Set(KEY, true)
+check(FS.framesByUnit.nameplate1 and not p1.UnitFrame._shown, "switching on in combat did not take")
+local bare = __newFrame("Frame", nil, nil)
+bare.UnitFrame = false
+__plates.nameplate4 = bare
+addPlate("nameplate4")
+FS.Config.Set(KEY, false); FS.Config.Set(KEY, true)
+check(FS.framesByUnit.nameplate4 ~= nil, "a plate with no UnitFrame was not built")
+-- a client with no plate for the token (a forbidden plate) is skipped on both paths
+C_NamePlate.GetNamePlateForUnit = function() return nil end
+addPlate("nameplate5")
+FS.Config.Set(KEY, false); FS.Config.Set(KEY, true)
+check(FS.framesByUnit.nameplate5 == nil, "a plate the addon may not touch was built")
+"""),
+
+    ("nameplates.enabled: saved off at login builds nothing, leaves Blizzard's plates alone, and switching on builds from then on", "true", r"""
+local store, cbs, defaults = { ["nameplates.enabled"] = false }, {}, {}
+FS.Config = {
+    RegisterDefault = function(k, v) defaults[k] = v end,
+    Get = function(k) if store[k] ~= nil then return store[k] end return defaults[k] end,
+    Set = function(k, v) store[k] = v; for _, f in ipairs(cbs[k] or {}) do f(v) end return true end,
+    OnChange = function(k, f) cbs[k] = cbs[k] or {}; table.insert(cbs[k], f) end,
+}
+local hooked = 0
+function hooksecurefunc() hooked = hooked + 1 end
+boot()
+fire("PLAYER_ENTERING_WORLD"); drain()
+check(#__acs == 0, "the aura pool was built at login with the plates off")
+local p = __newFrame("Frame", nil, nil)
+p.UnitFrame = __newFrame("Frame", nil, p)
+p.UnitFrame._shown = true
+__plates = { nameplate1 = p }
+addPlate("nameplate1")
+check(FS.framesByUnit.nameplate1 == nil, "a root was built with the plates off")
+check(p.UnitFrame._shown and hooked == 0, "Blizzard's plate was touched with the plates off")
+fire("PLAYER_REGEN_ENABLED"); drain()
+fire("PLAYER_ENTERING_WORLD"); drain()
+check(#__acs == 0, "aura containers built with the plates off")
+FS.Config.Set("nameplates.enabled", true)
+check(FS.framesByUnit.nameplate1 and FS.framesByUnit.nameplate1._shown and not p.UnitFrame._shown, "switching on did not build the plate")
+check(#__acs > 0, "no aura containers once switched on")
+"""),
+
+    ("quest icon: a friendly player on a shared quest gets no !, a quest mob still does, and a secret answer marks nothing", "true", r"""
+local log = { { questID = 11 } }
+C_QuestLog = {
+    GetNumQuestLogEntries = function() return #log end,
+    GetInfo = function(i) return { questID = log[i].questID } end,
+    -- the real API answers for any unit that is ON the quest, a party member or a nameplate player included
+    IsUnitOnQuest = function(unit, id) return true end,
+}
+local isPlayer = { nameplate1 = true, nameplate2 = false }
+UnitIsPlayer = function(unit) return isPlayer[unit] end
+boot()
+for i = 1, 3 do addPlate("nameplate" .. i) end
+local function bang(i) return FS.framesByUnit["nameplate" .. i].questIcon:IsShown() end
+check(not bang(1), "a friendly player on the same quest got a !")
+check(bang(2), "a quest mob lost its !")
+check(bang(3), "a unit the player check says nothing about lost its !")
+fire("QUEST_LOG_UPDATE")
+check(not bang(1) and bang(2) and bang(3), "a quest refresh changed who gets a !")
+-- the unit becomes a player (a mind control, a faction flip): the next test says no
+isPlayer.nameplate2 = true
+fire("UNIT_FACTION", "nameplate2")
+check(not bang(2), "a unit that turned out to be a player kept its !")
+-- a secret answer cannot be told from an NPC, and a secret boolean cannot even be truth-tested: nothing is marked.
+-- (the stand-in is a false that FS.IsSecret flags while the flag is up)
+local secretNow = false
+FS.IsSecret = function(v) return secretNow and v == false end
+isPlayer.nameplate4 = false
+secretNow = true
+addPlate("nameplate4")
+secretNow = false
+check(not bang(4), "a secret player answer was read as a quest mob")
+"""),
+
+    ("questie: our ! steps aside while Questie draws plate icons, and only then", "true", r"""
+local log = { { questID = 11 } }
+C_QuestLog = {
+    GetNumQuestLogEntries = function() return #log end,
+    GetInfo = function(i) return { questID = log[i].questID } end,
+    IsUnitOnQuest = function() return true end,
+}
+local loaded, profile = true, { nameplateEnabled = true }
+FS.QuestieCompat = { QuestieLoaded = function() return loaded end, Profile = function() return profile end }
+boot()
+addPlate("nameplate1")
+local function bang() return FS.framesByUnit.nameplate1.questIcon:IsShown() end
+check(not bang(), "our ! drawn beside Questie's icon")
+fire("QUEST_LOG_UPDATE")
+check(not bang(), "a quest refresh brought our ! back over Questie's icon")
+profile.nameplateEnabled = false; fire("QUEST_LOG_UPDATE")
+check(bang(), "Questie's plate icons are off but our ! is too")
+profile.nameplateEnabled = true; fire("QUEST_LOG_UPDATE")
+check(not bang(), "Questie's plate icons are back on but our ! stayed")
+loaded = false; fire("QUEST_LOG_UPDATE")
+check(bang(), "Questie is not loaded but our ! is hidden")
+loaded = true
+FS.QuestieCompat.Profile = function() return nil end; fire("QUEST_LOG_UPDATE")
+check(bang(), "Questie's settings are unreadable: our ! should stay")
+profile = { nameplateEnabled = true }
+FS.QuestieCompat.Profile = function() return profile end; fire("QUEST_LOG_UPDATE")
+check(not bang(), "setup")
+-- Questie draws no plate icons inside instances on this client
+Questie = { IsForever = true }
+IsInInstance = function() return true, "party" end
+fire("QUEST_LOG_UPDATE")
+check(bang(), "inside an instance Questie draws nothing, but our ! is hidden")
+IsInInstance = function() return false, "none" end
+fire("QUEST_LOG_UPDATE")
+check(not bang(), "outside an instance our ! came back over Questie's icon")
+FS.QuestieCompat = nil; fire("QUEST_LOG_UPDATE")
+check(bang(), "no Questie helper at all: our ! should show")
+"""),
+
+    ("questie: its plate icon is seated just left of our health bar, centred on it, on whole pixels, and kept there", "true", r"""
+local FACTOR = 768 / 1440
+PixelUtil = { GetPixelToUIUnitFactor = function() return FACTOR end }
+__effScale = FACTOR * 1.437
+local px = FACTOR / __effScale
+local function hooksecure(obj, name, fn)
+    local orig = obj[name]
+    obj[name] = function(...) local r = orig(...); fn(...); return r end
+end
+hooksecurefunc = hooksecure
+local loaded, profile = true, { nameplateEnabled = true, nameplateX = -17, nameplateY = -7, nameplateScale = 1 }
+FS.QuestieCompat = { QuestieLoaded = function() return loaded end, Profile = function() return profile end }
+local store, cbs, defaults = {}, {}, {}
+FS.Config = {
+    RegisterDefault = function(k, v) defaults[k] = v end,
+    Get = function(k) if store[k] ~= nil then return store[k] end return defaults[k] end,
+    Set = function(k, v) store[k] = v; for _, f in ipairs(cbs[k] or {}) do f(v) end return true end,
+    OnChange = function(k, f) cbs[k] = cbs[k] or {}; table.insert(cbs[k], f) end,
+}
+local function plate(unit)
+    local p = __newFrame("Frame", nil, nil)
+    p.UnitFrame = __newFrame("Frame", nil, p)
+    p.UnitFrame._shown = true
+    __plates = __plates or {}
+    __plates[unit] = p
+    return p
+end
+-- Questie's own frame, built the way QuestieNameplate.GetFrame builds it: an unnamed plain Frame, HIGH strata,
+-- level 10, an Icon texture, parented to the plate, LEFT anchored to the plate with no ClearAllPoints
+local function questieFrame(parent)
+    local f = __newFrame("Frame", nil, parent)
+    f.GetFrameStrata = function() return "HIGH" end
+    f.GetFrameLevel = function() return 10 end
+    f._w, f._h = 16, 16
+    f.SetWidth = function(self, w) self._w = w end
+    f.SetHeight = function(self, h) self._h = h end
+    f.GetWidth = function(self) return self._w end
+    f.GetHeight = function(self) return self._h end
+    f.Icon = __newFrame("Texture", nil, f)
+    -- the engine replaces an anchor that has the same point name; a different point is added next to it
+    f.SetPoint = function(self, point, ...)
+        for i, pt in ipairs(self._points) do
+            if pt[1] == point then table.remove(self._points, i) break end
+        end
+        self._points[#self._points + 1] = { point, ... }
+    end
+    f:SetPoint("LEFT", -17, -7)
+    return f
+end
+local function questieSetPoint(f) f:SetPoint("LEFT", -17, -7) end
+local function whole(v) return math.abs(v / px - math.floor(v / px + 0.5)) < 1e-6 end
+local function seated(f, root, label)
+    check(#f._points == 1, label .. ": expected one anchor, got " .. #f._points)
+    local pt = f._points[1]
+    check(pt[1] == "RIGHT" and pt[2] == root.healthBar and pt[3] == "LEFT", label .. ": not RIGHT of the health bar's LEFT edge (" .. tostring(pt[1]) .. " " .. tostring(pt[3]) .. ")")
+    check(pt[5] == 0, label .. ": not vertically centred on the bar (y " .. tostring(pt[5]) .. ")")
+    check(pt[4] < 0 and whole(pt[4]), label .. ": gap is not a whole number of pixels (" .. tostring(pt[4]) .. ")")
+    check(-pt[4] >= 2, label .. ": icon touches our plate chrome (gap " .. tostring(-pt[4]) .. ")")
+    check(whole(f._w) and whole(f._h) and f._w >= px, label .. ": size is not whole pixels (" .. f._w .. " x " .. f._h .. ")")
+    check(f._parent ~= root and f._parent == root._parent, label .. ": the icon left its plate")
+    check(f._calls.SetFrameStrata == nil and f._calls.SetFrameLevel == nil, label .. ": strata or level touched")
+end
+boot()
+fire("PLAYER_ENTERING_WORLD"); drain()
+
+-- Questie built its frame first
+local p1 = plate("nameplate1")
+local q1 = questieFrame(p1)
+addPlate("nameplate1")
+local r1 = FS.framesByUnit.nameplate1
+seated(q1, r1, "Questie first")
+-- Questie redraws it later (RedrawIcons / a reused frame): its anchor and size are corrected again
+q1:SetPoint("LEFT", -30, -10)
+seated(q1, r1, "after Questie's re-anchor")
+q1:SetWidth(16); q1:SetHeight(16)
+seated(q1, r1, "after Questie's resize")
+-- the scale changes with the target: the size follows on the next target pass
+__effScale = FACTOR * 1.0
+px = FACTOR / __effScale
+fire("PLAYER_TARGET_CHANGED")
+seated(q1, r1, "after a plate rescale")
+
+-- our plate first, Questie builds its frame after: found on the next frame
+local p2 = plate("nameplate2")
+addPlate("nameplate2")
+local r2 = FS.framesByUnit.nameplate2
+local q2 = questieFrame(p2)
+drain()
+seated(q2, r2, "Questie second")
+
+-- Questie reuses a pooled frame on another plate that has our root
+local p3 = plate("nameplate3")
+addPlate("nameplate3")
+local r3 = FS.framesByUnit.nameplate3
+q2:SetParent(p3); questieSetPoint(q2)
+seated(q2, r3, "a reused frame")
+
+-- ... and on a plate that is not ours: Questie's own anchor, nothing of ours left on it
+local other = __newFrame("Frame", nil, nil)
+q2:SetParent(other); questieSetPoint(q2)
+check(#q2._points == 1 and q2._points[1][1] == "LEFT" and q2._points[1][2] == -17, "a frame on a plate that is not ours kept our anchor")
+
+-- the plate goes away: the icon is handed back to Questie's own anchor
+removePlate("nameplate1")
+check(#q1._points == 1 and q1._points[1][1] == "LEFT" and q1._points[1][2] == -17 and q1._points[1][3] == -7,
+    "a released plate's icon was left on our health bar")
+addPlate("nameplate1")
+seated(q1, FS.framesByUnit.nameplate1, "plate came back")
+
+-- things that look a bit like it are left alone
+local rr = FS.framesByUnit.nameplate1
+local notIcon = __newFrame("Button", nil, p1); notIcon.Icon = __newFrame("Texture", nil, notIcon)
+notIcon.GetFrameStrata = function() return "HIGH" end; notIcon.GetFrameLevel = function() return 10 end
+notIcon:SetPoint("LEFT", 5, 5)
+local lowIcon = __newFrame("Frame", nil, p1); lowIcon.Icon = __newFrame("Texture", nil, lowIcon)
+lowIcon.GetFrameStrata = function() return "MEDIUM" end; lowIcon.GetFrameLevel = function() return 10 end
+lowIcon:SetPoint("LEFT", 6, 6)
+local named = __newFrame("Frame", "SomeoneElsesFrame", p1); named.Icon = __newFrame("Texture", nil, named)
+named.GetFrameStrata = function() return "HIGH" end; named.GetFrameLevel = function() return 10 end
+named:SetPoint("LEFT", 7, 7)
+fire("PLAYER_TARGET_CHANGED"); removePlate("nameplate1"); addPlate("nameplate1"); drain()
+check(#notIcon._points == 1 and notIcon._points[1][2] == 5, "a Button with an Icon was moved")
+check(#lowIcon._points == 1 and lowIcon._points[1][2] == 6, "a MEDIUM strata frame was moved")
+check(#named._points == 1 and named._points[1][2] == 7, "a named frame was moved")
+check(#p1.UnitFrame._points == 0, "Blizzard's UnitFrame was moved")
+
+-- our plates off: Questie's icons are left exactly as Questie places them
+FS.Config.Set("nameplates.enabled", false)
+check(#q1._points == 1 and q1._points[1][1] == "LEFT" and q1._points[1][2] == -17 and q1._points[1][3] == -7,
+    "switching off left Questie's icon on our bar")
+check(q1._w == 16 and q1._h == 16, "switching off left Questie's icon at our snapped size")
+q1:SetPoint("LEFT", -20, -5)
+check(#q1._points == 1 and q1._points[1][2] == -20 and q1._points[1][3] == -5, "a Questie re-anchor was overridden while off")
+local p6 = plate("nameplate6")
+local q6 = questieFrame(p6)
+addPlate("nameplate6"); drain()
+check(#q6._points == 1 and q6._points[1][2] == -17, "a Questie frame was moved on a plate we did not build")
+-- on again: picked up again
+FS.Config.Set("nameplates.enabled", true)
+seated(q1, FS.framesByUnit.nameplate1, "switched back on")
+seated(q6, FS.framesByUnit.nameplate6, "a plate added while off")
+
+-- Questie not loaded, or its plate icons off: nothing is touched
+loaded = false
+local p7 = plate("nameplate7")
+local q7 = questieFrame(p7)
+addPlate("nameplate7"); drain()
+check(#q7._points == 1 and q7._points[1][2] == -17, "a frame was moved with Questie not loaded")
+loaded = true; profile.nameplateEnabled = false
+local p8 = plate("nameplate8")
+local q8 = questieFrame(p8)
+addPlate("nameplate8"); drain()
+check(#q8._points == 1 and q8._points[1][2] == -17, "a frame was moved with Questie's plate icons off")
+
+-- a throwing Questie frame never takes the plate down
+loaded = true; profile.nameplateEnabled = true
+local p9 = plate("nameplate9")
+local q9 = questieFrame(p9)
+q9.ClearAllPoints = function() error("boom") end
+addPlate("nameplate9"); drain()
+check(FS.framesByUnit.nameplate9 and FS.framesByUnit.nameplate9._shown, "a failing Questie frame broke the plate")
 """),
 ]
 

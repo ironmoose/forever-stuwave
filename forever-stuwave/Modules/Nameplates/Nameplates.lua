@@ -150,6 +150,30 @@ local ALPHA_NONTARGET_DIM = 0.75
 local FONT_SIZE = 10
 local FONT_FLAGS = "OUTLINE"
 
+-- STUwave nameplates switch (Config key `nameplates.enabled`, on by default; the Config window row reads FS.Nameplates.SETTING). Off,
+-- this file builds nothing on a plate, hides the roots it had built and leaves Blizzard's own UnitFrame on every plate
+-- as the game draws it, so the stock plates (and what other addons add to them) show instead. Live, no reload: see
+-- ApplyPlatesSetting. Blizzard keeps a plate's UnitFrame shown exactly while its unit exists
+-- (CompactUnitFrame_UpdateVisible), so giving it back is a plain Show.
+--
+-- This file sits at the parse gate's limit of file-scope locals (tools/parse-gate.py), so the switch, its cache and the
+-- Questie and build helpers below live in this one table (exported as FS.Nameplates): `on` is the cached switch (the Show
+-- hook, HideBlizzardPlate and every plate event read it; FS.Config loads after this file, so it starts on and a saved
+-- "off" is applied from PLAYER_ENTERING_WORLD, see Plates.RegisterConfig), `Questie` the Questie icon helpers, `Build`
+-- the plate builder.
+local Plates = {
+    KEY = "nameplates.enabled",
+    on = true,
+    Questie = {},
+}
+Plates.SETTING = {
+    label = "STUwave nameplates",
+    key = Plates.KEY,
+    tip = "Turn this off to use the game's own nameplates instead, so other addons that add to them, such as "
+        .. "quest icons, show on them as usual. Applies at once.",
+}
+FS.Nameplates = Plates
+
 -- Target Mark (opt-in, default OFF; `/stu targetmark`, Config key below). An optional high-contrast mark above
 -- the current target's nameplate: three flat blocks side by side, yellow, blue, yellow, drawn above everything
 -- else the plate carries. The colors are pure and flat (SetColorTexture, alpha 1, no mask, no vertex color, no
@@ -234,7 +258,7 @@ local HAS_QUEST_LOG_API = C_QuestLog
 -------------------------------------------------------------------------------
 
 FS.framesByUnit = {}  -- unit token -> our custom plate frame currently in use
-FS.platesByUnit = {}  -- unit token -> Blizzard C_NamePlate frame it's attached to
+FS.platesByUnit = {}  -- unit token -> Blizzard C_NamePlate frame it's attached to (tracked with the plates off too)
 FS.freePool = {}      -- array of custom plate frames available for reuse
 
 -------------------------------------------------------------------------------
@@ -1399,6 +1423,181 @@ local function RetryBareAuraPlates()
 end
 
 -------------------------------------------------------------------------------
+-- Questie plate icons
+-------------------------------------------------------------------------------
+
+-- Questie draws its own quest icon on a plate (QuestieNameplate.lua, GetFrame): an unnamed plain Frame at HIGH strata and
+-- frame level 10 with an `Icon` texture child, parented to the PLATE (not to Blizzard's UnitFrame) and anchored LEFT of the
+-- plate at its nameplateX / nameplateY (default -17, -7) with no ClearAllPoints. It pools those frames and reuses one on
+-- another plate (SetParent, then SetPoint LEFT again), and RedrawIcons re-anchors and resizes them. Our health bar is
+-- centred on the plate, so that default spot is over the bar's left end.
+--
+-- While Questie draws plate icons (QuestieDrawsPlateIcons) its icon is seated just left of our health bar, centred on it,
+-- and our own "!" stays hidden (UpdateQuestIcon). Each Questie frame found on a plate that carries one of our roots is
+-- hooked once (SetPoint, SetWidth, SetHeight, post-hooks with a recursion guard) so a later Questie re-anchor or resize is
+-- corrected on the spot; a frame is looked for when our root is built and again one frame later, because Questie's
+-- NAME_PLATE_UNIT_ADDED handler may run after ours. The seat is on whole screen pixels (gap and size, from the plate's
+-- effective scale), measured again on a target change, when the engine rescales the plates. Anything we moved is handed
+-- back to Questie's own anchor when our root is released or the plates are switched off, and a frame on a plate that is
+-- not ours is never touched. Plain frames only, nothing secure: legal in combat. Never writes a field on Questie's frame.
+-- One do-block exporting through Plates.Questie: this file sits at the parse gate's limit of file-scope locals.
+do
+    local Questie = Plates.Questie
+    local QUESTIE_ICON_STRATA = "HIGH"
+    local QUESTIE_ICON_LEVEL = 10
+    -- Plate units between the plate chrome's outer glow and the icon.
+    local QUESTIE_ICON_GAP = 2
+    -- Questie's own defaults (QuestieOptionsDefaults.lua), for handing an icon back to it.
+    local QUESTIE_DEFAULT_X, QUESTIE_DEFAULT_Y, QUESTIE_ICON_BASE_SIZE = -17, -7, 16
+
+    local plateRoots = setmetatable({}, { __mode = "k" })       -- Blizzard plate -> our root on it
+    local questieAdopted = setmetatable({}, { __mode = "k" })   -- Questie icon frame -> our root it is seated on
+    local questieHooked = setmetatable({}, { __mode = "k" })    -- Questie icon frames whose setters are hooked
+    local questiePlacing = false                                -- our own SetPoint/SetWidth/SetHeight, not Questie's
+
+    -- Questie's saved settings while it is loaded, else nil. The load and profile reads are FS.QuestieCompat's
+    -- (Modules/Compat/Questie.lua, loaded after this file, so looked up here at call time).
+    local function QuestieProfile()
+        local compat = FS.QuestieCompat
+        if not (compat and type(compat.QuestieLoaded) == "function" and type(compat.Profile) == "function") then return nil end
+        local okLoaded, loaded = pcall(compat.QuestieLoaded)
+        if not (okLoaded and loaded) then return nil end
+        local okProfile, profile = pcall(compat.Profile)
+        return okProfile and type(profile) == "table" and profile or nil
+    end
+
+    -- Questie is loaded and draws icons on plates right now: its plate icons are switched on, and it is not inside an instance
+    -- (QuestieNameplate:NameplateCreated draws none there on Forever). Read live, never cached: Questie's options change it
+    -- with no event. Unreadable settings count as "no icons", so our own "!" is never hidden on a guess.
+    local function QuestieDrawsPlateIcons()
+        local profile = QuestieProfile()
+        if not profile or not profile.nameplateEnabled then return false end
+        local questie = _G.Questie
+        if type(questie) == "table" and questie.IsForever and type(IsInInstance) == "function" then
+            local ok, inInstance = pcall(IsInInstance)
+            if ok and inInstance and not FS.IsSecret(inInstance) then return false end
+        end
+        return true
+    end
+
+    -- Questie's icon frame, by the signature above. Plain reads only; a frame that is not a plain Frame (Blizzard's UnitFrame
+    -- is a Button), is named, has no `Icon` texture or sits at another strata or level is not Questie's.
+    local function IsQuestieIconFrame(child)
+        if type(child) ~= "table" or type(child.GetObjectType) ~= "function" then return false end
+        if child:GetObjectType() ~= "Frame" or child:GetName() ~= nil then return false end
+        local icon = child.Icon
+        if type(icon) ~= "table" or type(icon.SetTexture) ~= "function" then return false end
+        return child:GetFrameStrata() == QUESTIE_ICON_STRATA and child:GetFrameLevel() == QUESTIE_ICON_LEVEL
+    end
+
+    -- A size in plate units rounded to a whole number of screen pixels (at least one), or nil without a readable value.
+    local function SnapToPixels(value, px)
+        if type(value) ~= "number" or FS.IsSecret(value) then return nil end
+        return math.max(1, math.floor(value / px + 0.5)) * px
+    end
+
+    -- Seats the icon RIGHT of our health bar's LEFT edge, centred on it, past the plate's chrome and glow, on whole pixels.
+    local function SeatQuestieIcon(frame, root)
+        questiePlacing = true
+        pcall(function()
+            local px = PlatePixelSize(root)
+            local gap = PLATE_OUTER_PAD + (FS.Theme.SLICE_GLOW_PAD or 0) + QUESTIE_ICON_GAP
+            if px then
+                gap = SnapToPixels(gap, px)
+                local w, h = SnapToPixels(frame:GetWidth(), px), SnapToPixels(frame:GetHeight(), px)
+                if w and math.abs(w - frame:GetWidth()) > 1e-6 then frame:SetWidth(w) end
+                if h and math.abs(h - frame:GetHeight()) > 1e-6 then frame:SetHeight(h) end
+            end
+            frame:ClearAllPoints()
+            frame:SetPoint("RIGHT", root.healthBar, "LEFT", -gap, 0)
+        end)
+        questiePlacing = false
+    end
+
+    -- Hands an icon back to Questie's own anchor and size (its SetPoint LEFT of the plate), clearing our anchor on our bar.
+    local function RestoreQuestieIcon(frame)
+        local profile = QuestieProfile()
+        local x = profile and tonumber(profile.nameplateX) or QUESTIE_DEFAULT_X
+        local y = profile and tonumber(profile.nameplateY) or QUESTIE_DEFAULT_Y
+        local size = QUESTIE_ICON_BASE_SIZE * (profile and tonumber(profile.nameplateScale) or 1)
+        questiePlacing = true
+        pcall(function()
+            frame:ClearAllPoints()
+            frame:SetPoint("LEFT", x, y)
+            frame:SetWidth(size)
+            frame:SetHeight(size)
+        end)
+        questiePlacing = false
+    end
+
+    -- Where this icon belongs right now: on our bar when its plate carries one of our roots and Questie draws plate icons,
+    -- else with Questie (when we had moved it). The one place that decides, for the scan, the hooks and the target pass.
+    local function PlaceQuestieIcon(frame)
+        local okParent, plate = pcall(frame.GetParent, frame)
+        local root = okParent and plate and plateRoots[plate] or nil
+        if root and Plates.on and QuestieDrawsPlateIcons() then
+            questieAdopted[frame] = root
+            SeatQuestieIcon(frame, root)
+        elseif questieAdopted[frame] then
+            questieAdopted[frame] = nil
+            RestoreQuestieIcon(frame)
+        end
+    end
+
+    local function OnQuestieIconChanged(frame)
+        if not questiePlacing then PlaceQuestieIcon(frame) end
+    end
+
+    local function HookQuestieIcon(frame)
+        if questieHooked[frame] then return end
+        questieHooked[frame] = true
+        for _, method in ipairs({ "SetPoint", "SetWidth", "SetHeight" }) do
+            if type(frame[method]) == "function" then pcall(hooksecurefunc, frame, method, OnQuestieIconChanged) end
+        end
+    end
+
+    -- Finds the Questie icon frames on this root's plate and seats them.
+    local function AdoptQuestieIcons(root)
+        local plate = root.fsPlate
+        if not (plate and Plates.on and QuestieDrawsPlateIcons()) then return end
+        local okKids, kids = pcall(function() return { plate:GetChildren() } end)
+        if not okKids then return end
+        for _, child in ipairs(kids) do
+            local okIs, isIcon = pcall(IsQuestieIconFrame, child)
+            if okIs and isIcon then
+                HookQuestieIcon(child)
+                PlaceQuestieIcon(child)
+            end
+        end
+    end
+
+    -- The root is going away (plate removed, or the plates are off): Questie's icons on it go back to Questie's anchor.
+    local function ReleaseQuestieIcons(root)
+        for frame, seatedOn in pairs(questieAdopted) do
+            if seatedOn == root then
+                questieAdopted[frame] = nil
+                RestoreQuestieIcon(frame)
+            end
+        end
+        if root.fsPlate then
+            if plateRoots[root.fsPlate] == root then plateRoots[root.fsPlate] = nil end
+            root.fsPlate = nil
+        end
+    end
+
+    -- The engine rescales plates when the target changes; the seat is measured again against the new pixel size.
+    local function ReseatQuestieIcons()
+        for frame in pairs(questieAdopted) do PlaceQuestieIcon(frame) end
+    end
+
+    Questie.plateRoots = plateRoots
+    Questie.DrawsPlateIcons = QuestieDrawsPlateIcons
+    Questie.Adopt = AdoptQuestieIcons
+    Questie.Release = ReleaseQuestieIcons
+    Questie.Reseat = ReseatQuestieIcons
+end
+
+-------------------------------------------------------------------------------
 -- Pool management
 -------------------------------------------------------------------------------
 
@@ -1441,6 +1640,7 @@ local function ReleaseFrame(unit)
     -- The aura container goes back to its own pool (disabled, hidden,
     -- unparented), so it is never left on a released frame.
     ReleaseAuraContainer(frame)
+    Plates.Questie.Release(frame)
     frame:Hide()
     frame:ClearAllPoints()
     frame.unit = nil
@@ -1488,7 +1688,7 @@ end
 -------------------------------------------------------------------------------
 
 local function HideBlizzardPlate(plate)
-    if plate and plate.UnitFrame then
+    if Plates.on and plate and plate.UnitFrame then
         plate.UnitFrame:Hide()
     end
 end
@@ -2015,7 +2215,15 @@ local function TooltipNamesOpenObjective(unit)
     return false
 end
 
+-- The "!" marks NPC units (quest mobs and objectives), never a player. C_QuestLog.IsUnitOnQuest answers "is THAT unit on the
+-- quest": it is the party member API (Blizzard's own use, QuestUtils_GetNumPartyMembersOnQuest, asks it about "party"..i), so
+-- on a friendly player's plate it says yes whenever that player shares one of our quests. UnitIsPlayer is a plain boolean;
+-- a secret answer cannot be told from an NPC, so it marks nothing.
 local function IsUnitOnAnyQuest(unit)
+    if type(UnitIsPlayer) == "function" then
+        local isPlayer = UnitIsPlayer(unit)
+        if FS.IsSecret(isPlayer) or isPlayer then return false end
+    end
     for i = 1, questIDCount do
         local isOnQuest = C_QuestLog.IsUnitOnQuest(unit, questIDs[i])
         if not FS.IsSecret(isOnQuest) and isOnQuest then
@@ -2044,6 +2252,13 @@ end
 local function UpdateQuestIcon(unit)
     local root = FS.framesByUnit[unit]
     if not root then return end
+
+    -- Questie draws its own quest icon on the plate (seated beside our health bar, see Questie plate icons): two
+    -- markers for one mob is noise, so ours steps aside while Questie's are on.
+    if Plates.Questie.DrawsPlateIcons() then
+        root.questIcon:Hide()
+        return
+    end
 
     if not HAS_QUEST_LOG_API then
         root.questIcon:Hide()
@@ -2235,9 +2450,66 @@ end
 -- Nameplate lifecycle
 -------------------------------------------------------------------------------
 
--- UnitFrames whose Show is already hooked. Weak-keyed side table instead of a
--- field on Blizzard's frame (addon code is tainted; never write onto it).
-local showHookedUnitFrames = setmetatable({}, { __mode = "k" })
+do
+    -- UnitFrames whose Show is already hooked. Weak-keyed side table instead of a
+    -- field on Blizzard's frame (addon code is tainted; never write onto it).
+    local showHookedUnitFrames = setmetatable({}, { __mode = "k" })
+
+    -- Builds our plate on Blizzard's plate for this unit: hides the stock UnitFrame, takes a root from the pool and fills
+    -- it. Only ever runs with the plates on.
+    function Plates.Build(unit, plate)
+        HideBlizzardPlate(plate)
+
+        -- Blizzard re-Shows its CompactUnitFrame on aura/cast/threat updates far more
+        -- often than our reactive HideBlizzardPlate calls run, causing a visible
+        -- flicker. Hook Show once per physical plate object (Blizzard reuses a small
+        -- pool of these) so it can never come back up.
+        if plate.UnitFrame and not showHookedUnitFrames[plate.UnitFrame] then
+            -- A hook cannot be taken off, so this one goes inert while the plates are switched off.
+            hooksecurefunc(plate.UnitFrame, "Show", function(unitFrame)
+                if Plates.on then unitFrame:Hide() end
+            end)
+            showHookedUnitFrames[plate.UnitFrame] = true
+        end
+
+        local root = AcquireFrame()
+        root.unit = unit
+        root.fsPlate = plate
+        Plates.Questie.plateRoots[plate] = root
+        root:SetParent(plate)
+        -- TOP + sizer-derived BOTTOM, see AnchorPlateRoot. UpdatePower's height
+        -- changes only ever extend the bottom.
+        AnchorPlateRoot(root, plate)
+        root:Show()
+
+        FS.framesByUnit[unit] = root
+
+        -- After root's own anchoring: the aura container hangs off root.healthBar.
+        AttachAuraContainer(root, unit)
+
+        RefreshEngineDimCache()
+        UpdateHealth(unit)
+        UpdatePower(unit)
+        UpdateFillColor(unit)
+        UpdateGlowState(unit)
+        UpdateRaidMarker(unit)
+        UpdateName(unit)
+        SyncDeadFlag(unit)
+        UpdateQuestIcon(unit)
+        UpdateAuraIcons(unit)
+        -- Seed the cast bar in case the plate appeared mid-cast.
+        RefreshPlateCast(unit)
+
+        -- Questie's icon on this plate: seat it now if it is already there, and once more a frame later, since Questie's own
+        -- NAME_PLATE_UNIT_ADDED handler may run after ours. Nothing is scheduled without Questie's plate icons.
+        Plates.Questie.Adopt(root)
+        if Plates.Questie.DrawsPlateIcons() and type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+            C_Timer.After(0, function()
+                if FS.framesByUnit[unit] == root then Plates.Questie.Adopt(root) end
+            end)
+        end
+    end
+end
 
 local function OnNamePlateAdded(unit)
     -- Guard against ADDED firing twice for the same unit token without an
@@ -2248,50 +2520,69 @@ local function OnNamePlateAdded(unit)
     end
 
     local plate = C_NamePlate.GetNamePlateForUnit(unit)
-    if not plate then return end
-
-    HideBlizzardPlate(plate)
-
-    -- Blizzard re-Shows its CompactUnitFrame on aura/cast/threat updates far more
-    -- often than our reactive HideBlizzardPlate calls run, causing a visible
-    -- flicker. Hook Show once per physical plate object (Blizzard reuses a small
-    -- pool of these) so it can never come back up.
-    if plate.UnitFrame and not showHookedUnitFrames[plate.UnitFrame] then
-        hooksecurefunc(plate.UnitFrame, "Show", plate.UnitFrame.Hide)
-        showHookedUnitFrames[plate.UnitFrame] = true
-    end
-
-    local root = AcquireFrame()
-    root.unit = unit
-    root:SetParent(plate)
-    -- TOP + sizer-derived BOTTOM, see AnchorPlateRoot. UpdatePower's height
-    -- changes only ever extend the bottom.
-    AnchorPlateRoot(root, plate)
-    root:Show()
-
-    FS.framesByUnit[unit] = root
+    -- Tracked with the plates off too, so switching them on can build on the plates that are up. A nil plate (one the
+    -- addon may not touch, such as a friendly plate in an instance) is never built either way.
     FS.platesByUnit[unit] = plate
+    if not plate or not Plates.on then return end
 
-    -- After root's own anchoring: the aura container hangs off root.healthBar.
-    AttachAuraContainer(root, unit)
-
-    RefreshEngineDimCache()
-    UpdateHealth(unit)
-    UpdatePower(unit)
-    UpdateFillColor(unit)
-    UpdateGlowState(unit)
-    UpdateRaidMarker(unit)
-    UpdateName(unit)
-    SyncDeadFlag(unit)
-    UpdateQuestIcon(unit)
-    UpdateAuraIcons(unit)
-    -- Seed the cast bar in case the plate appeared mid-cast.
-    RefreshPlateCast(unit)
+    Plates.Build(unit, plate)
 end
 
 local function OnNamePlateRemoved(unit)
     ReleaseFrame(unit)
     FS.platesByUnit[unit] = nil
+end
+
+-- The switch: one do-block exporting through Plates (file-scope locals are at the parse gate's limit).
+do
+    -- The saved switch (Plates.KEY), on unless saved off (and on while the config is not there yet).
+    local function ReadPlatesSetting()
+        local config = FS.Config
+        if config and type(config.Get) == "function" then return config.Get(Plates.KEY) ~= false end
+        return true
+    end
+
+    -- Applies the switch to every plate that is up, live: off releases each root (its aura container goes back to the
+    -- pool, Questie's icon goes back to Questie) and gives Blizzard's UnitFrame back, a plain Show because Blizzard keeps
+    -- that frame shown exactly while its unit exists; on builds a root on every plate that is up. Nothing here is
+    -- protected, so it works in combat too. `Plates.on` is flipped first: the Show hook and HideBlizzardPlate read it, and
+    -- the restore must not be hidden again by them.
+    local function ApplyPlatesSetting()
+        local on = ReadPlatesSetting()
+        if on == Plates.on then return end
+        Plates.on = on
+        local units = {}
+        if on then
+            TopUpAuraPool()
+            for unit in pairs(FS.platesByUnit) do units[#units + 1] = unit end
+            for _, unit in ipairs(units) do
+                local plate = FS.platesByUnit[unit]
+                if plate and not FS.framesByUnit[unit] then Plates.Build(unit, plate) end
+            end
+            return
+        end
+        for unit in pairs(FS.framesByUnit) do units[#units + 1] = unit end
+        for _, unit in ipairs(units) do
+            ReleaseFrame(unit)
+            local plate = FS.platesByUnit[unit]
+            local unitFrame = plate and plate.UnitFrame
+            -- pcall: a refusing frame must not stop the others.
+            if unitFrame then pcall(unitFrame.Show, unitFrame) end
+        end
+    end
+
+    -- FS.Config is not there when this file loads (.toc), so the default and the change callback are registered once,
+    -- from PLAYER_ENTERING_WORLD, and a saved "off" is applied there before the aura pool is filled.
+    local registered = false
+    function Plates.RegisterConfig()
+        if registered then return end
+        local config = FS.Config
+        if not config or type(config.RegisterDefault) ~= "function" or type(config.OnChange) ~= "function" then return end
+        registered = true
+        config.RegisterDefault(Plates.KEY, true)
+        config.OnChange(Plates.KEY, ApplyPlatesSetting)
+        ApplyPlatesSetting()
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -2385,6 +2676,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
         for otherUnit in pairs(FS.framesByUnit) do
             UpdateGlowState(otherUnit)
         end
+        Plates.Questie.Reseat()
         return
     end
 
@@ -2413,10 +2705,15 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
     -- the aura container pool (a no-op without the template, or in combat) and, once,
     -- registers the fallback row's readable callback (Theme.lua is loaded by now).
     if event == "PLAYER_ENTERING_WORLD" then
-        TopUpAuraPool()
+        Plates.RegisterConfig()
+        if Plates.on then TopUpAuraPool() end
         RegisterAurasReadable()
         RegisterTargetMarkConfig()
         RefreshTargetMarks()
+        -- Whether Questie draws plate icons changes across an instance door: the "!" follows.
+        for otherUnit in pairs(FS.framesByUnit) do
+            UpdateQuestIcon(otherUnit)
+        end
         return
     end
 
@@ -2430,6 +2727,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
     -- never be drawn until some later, unrelated UNIT_AURA fires.
     if event == "PLAYER_REGEN_ENABLED" then
         auraAttachRefusedInCombat = false
+        if not Plates.on then return end
         if AuraContainersActive() then
             TopUpAuraPool()
             RetryBareAuraPlates()

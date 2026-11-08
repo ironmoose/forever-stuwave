@@ -1422,11 +1422,21 @@ local function PartyFramesGroup(page)
     })
 end
 
+-- The STUwave nameplates switch (Nameplates.lua): off gives the game's own nameplates back, live. Its ? tip says so. Out of
+-- the list for a client without the nameplate API, where the module exports nothing.
+local function NameplatesGroup(page)
+    local setting = FS.Nameplates and FS.Nameplates.SETTING
+    if not (setting and setting.key) then return end
+    UI.Header(page, "Nameplates")
+    UI.Toggle(page, { label = setting.label, key = setting.key, tip = setting.tip })
+end
+
 CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, build = function(page)
     UI.Header(page, "Player and target", "Hidden frames stay click-through and invisible.")
     UI.Toggle(page, { label = "Hide player frame", key = "unitFrames.hidePlayer" })
     UI.Toggle(page, { label = "Hide target frame", key = "unitFrames.hideTarget" })
     PartyFramesGroup(page)
+    NameplatesGroup(page)
     UI.Header(page, "Panels")
     UI.Toggle(page, { label = "Professions panel", key = "professions.shown" })
     UI.Toggle(page, { label = "Background grid", key = "actionbars.grid" })

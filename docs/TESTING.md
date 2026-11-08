@@ -404,6 +404,16 @@ Not yet checked in game. `/fsprof` shows or hides the panel and the choice survi
 
 1. Accept a quest with kill or collect objectives and find its mobs: the "!" shows beside their names, and goes when the objective is done or the quest is turned in.
 2. Collapse a zone header in the quest log; quest mobs under it should still show the !
+3. Not yet checked in game: group with a player on the same quest and stand near them. The "!" shows on the quest mobs but never on the player's nameplate. (The quest API we call asks whether the given unit is on the quest, which is true for a player in your group, so players are now skipped before it is asked.)
+4. Not yet checked in game: with Questie loaded and its nameplate icons turned on, our "!" is hidden and Questie's own icon sits centred just left of our health bar, a whole number of pixels clear of the bar edge, on the same plate it marks. Target and untarget the mob: the icon stays seated (and follows the plate's scale change). With Questie's nameplate icons off, our "!" shows again.
+
+## Nameplates: STUwave nameplates switch
+
+Not yet checked in game. `/fsconfig`, Unit Frames, Nameplates: "STUwave nameplates" (on by default, `nameplates.enabled`, hover the `?` for the tip).
+
+1. Turn it off with plates on screen: our bars, auras and "!" disappear at once and the game's own nameplates are back on every plate. Other addons' plate additions (Questie icons) are back where Questie puts them. A plate that comes into range afterwards also stays the game's own.
+2. Turn it on: our plates come back on every plate in range without a `/reload`, including in combat.
+3. Turn it off, `/reload`: it stays off and nothing of ours is built on plates. Turn it on again: plates build.
 
 ## Nameplate Target Mark: /stu targetmark
 
