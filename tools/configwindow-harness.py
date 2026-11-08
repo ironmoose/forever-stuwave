@@ -54,6 +54,7 @@ WINDOW_FILE = Path(os.environ.get("CONFIGWINDOW_LUA", ADDON / "Modules/Config/Co
 CONFIG_FILE = ADDON / "Core/Config.lua"
 GUNSIGHT_FILE = ADDON / "Modules/CombatHud/Gunsight.lua"
 BOXES_FILE = ADDON / "Modules/CombatHud/GunsightBoxes.lua"
+AREAS_FILE = ADDON / "Modules/CombatHud/GunsightAreas.lua"
 TOC_FILE = ADDON / "forever-stuwave.toc"
 MOCKUP = Path(__file__).resolve().parent.parent / "mockups" / "config-window-2026-10-07.html"
 
@@ -224,7 +225,7 @@ end
 """
 
 SESSION = r"""
-function(configSrc, gunsightSrc, windowSrc, opts, boxesSrc)
+function(configSrc, gunsightSrc, windowSrc, opts, boxesSrc, areasSrc)
     opts = opts or {}
     ALL, __printed, __errors, __combat, BLOCKED = {}, {}, {}, false, {}
     ALL[1], ALL[2] = UIParent, GameTooltip
@@ -284,6 +285,9 @@ function(configSrc, gunsightSrc, windowSrc, opts, boxesSrc)
     if opts.noBoxes ~= true and opts.noGunsight ~= true then
         assert(load(boxesSrc, "@GunsightBoxes.lua"))("forever-stuwave", FS)
     end
+    if opts.noAreas ~= true and opts.noGunsight ~= true then
+        assert(load(areasSrc, "@GunsightAreas.lua"))("forever-stuwave", FS)
+    end
     if opts.preWindow then opts.preWindow() end
     assert(load(windowSrc, "@ConfigWindow.lua"))("forever-stuwave", FS)
     if opts.beforeLogin then opts.beforeLogin() end
@@ -303,7 +307,7 @@ local function yes(v, msg) if not v then error(msg or "expected true", 2) end en
 local function no(v, msg) if v then error(msg or "expected false", 2) end end
 
 local function boot(opts)
-    __session(__configSrc, __gunsightSrc, __windowSrc, opts, __boxesSrc)
+    __session(__configSrc, __gunsightSrc, __windowSrc, opts, __boxesSrc, __areasSrc)
     return FS.ConfigWindow
 end
 
@@ -1753,6 +1757,76 @@ function T.the_target_bar_controls_work_in_combat()
     eq(#BLOCKED, 0)
 end
 
+-- ---- the class module background slider (Target side group) ----------------------------
+
+local PLATE_LABEL = "Class module background"
+local function plateDef() return FS.GunsightAreas.SETTINGS.background end
+
+function T.the_class_module_background_slider_sits_in_the_target_side_group_at_the_default()
+    local W = boot()
+    W.Open("gunsight")
+    local r = assert(row(PLATE_LABEL), "no row " .. PLATE_LABEL)
+    local def = plateDef()
+    eq(r.fsReadout:GetText(), "80%")
+    eq(r.control.fsValue, 80)
+    eq(FS.Config.Get(def.key), def.default)
+    no(FS.Config.IsStored(def.key), "the default pins nothing")
+    yes(yOf(PLATE_LABEL) > yOf("Lower area"), "below the area dropdowns")
+    yes(yOf(PLATE_LABEL) < -row("Buff reminders").points[1].y, "above the pieces list")
+end
+
+function T.the_class_module_background_slider_goes_from_0_to_100_in_steps_of_5_and_writes_its_key()
+    local W = boot()
+    W.Open("gunsight")
+    local def = plateDef()
+    local t = sliderRow(PLATE_LABEL).control
+    clickTrack(t, 1)
+    eq(FS.Config.Get(def.key), 100, "right end")
+    clickTrack(t, 0)
+    eq(FS.Config.Get(def.key), 0, "left end is 0, no background")
+    eq(sliderRow(PLATE_LABEL).fsReadout:GetText(), "0%")
+    clickTrack(t, 0.52)
+    eq(FS.Config.Get(def.key) % 5, 0, "a multiple of 5, got " .. tostring(FS.Config.Get(def.key)))
+    yes(FS.Config.Get(def.key) >= 50 and FS.Config.Get(def.key) <= 55, "near the pointer")
+end
+
+function T.the_class_module_background_slider_explains_itself_in_a_tip_not_helper_text()
+    local W = boot()
+    W.Open("gunsight")
+    local tip = tipOf(sliderRow(PLATE_LABEL))
+    yes(tip and tip:find("plate", 1, true), "a ? tooltip says what it is")
+    yes(tip and tip:find("0", 1, true), "and that 0 removes it")
+    no(tip and tip:lower():find("tape", 1, true), "player text never says tape")
+    no(tip and tip:find(string.char(0xE2, 0x80, 0x94), 1, true), "no em dash")
+    for _, o in ipairs(ALL) do
+        if o.kind == "FontString" and o:IsVisible() and (o:GetText() or ""):find("bright ground", 1, true) then
+            error("the explanation is inline helper text")
+        end
+    end
+end
+
+function T.the_class_module_background_slider_follows_a_profile_switch_and_works_in_combat()
+    local W = boot()
+    __combat = true
+    W.Open("gunsight")
+    local def = plateDef()
+    clickTrack(sliderRow(PLATE_LABEL).control, 0.25)
+    eq(FS.Config.Get(def.key), 25)
+    FS.Config.NewProfile("Raid")
+    FS.Config.SetActiveProfile("Raid")
+    eq(sliderRow(PLATE_LABEL).fsReadout:GetText(), "80%")
+    FS.Config.SetActiveProfile("Default")
+    eq(sliderRow(PLATE_LABEL).fsReadout:GetText(), "25%")
+    eq(#BLOCKED, 0)
+end
+
+function T.the_class_module_background_slider_is_absent_without_the_areas_module()
+    local W = boot({ noAreas = true })
+    W.Open("gunsight")
+    no(row(PLATE_LABEL), "no slider without FS.GunsightAreas")
+    yes(row("Upper area") and row("Next cast"), "the other groups still build")
+end
+
 -------------------------------------------------------------------------------
 -- Profiles
 -------------------------------------------------------------------------------
@@ -2917,6 +2991,7 @@ def boot() -> "LuaRuntime":
     lua.globals().__gunsightSrc = GUNSIGHT_FILE.read_text(encoding="utf-8")
     lua.globals().MC = to_lua(lua, mockup_target_bars())
     lua.globals().__boxesSrc = BOXES_FILE.read_text(encoding="utf-8")
+    lua.globals().__areasSrc = AREAS_FILE.read_text(encoding="utf-8")
     lua.globals().__windowSrc = WINDOW_FILE.read_text(encoding="utf-8") if WINDOW_FILE.exists() else "error('ConfigWindow.lua is missing')"
     lua.execute(CHECKS)
     return lua

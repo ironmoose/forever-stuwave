@@ -463,6 +463,7 @@ PROFILE = nil
 -- the contract GunsightDots.lua relies on: size first, then SkinButton, then the tile seat.
 function stubTheme_()
     local Theme = {
+        COLOR_BG = { 0.102, 0.063, 0.145, 0.80 },
         COLOR_BORDER = { 0.659, 0.333, 0.969, 1 },
         COLOR_AMBER = { 1, 0.7137, 0.2824, 1 },
         COLOR_RED = { 1, 0.2314, 0.3059, 1 },
@@ -473,6 +474,10 @@ function stubTheme_()
     }
     function Theme.ApplyMono(fs, size, color) fs.monoSize = size; fs.monoColor = color; fs.hasFont = true end  -- the real one calls SetFont
     function Theme.ApplyNineSlice(tex, margin) tex.margin = margin; return true end
+    -- the class module's backing plate (GunsightAreas.lua) asks for the shared panel chrome: a fill, a glow and a border
+    function Theme.AddPanelChrome(frame)
+        return frame:CreateTexture(nil, "BACKGROUND"), frame:CreateTexture(nil, "BACKGROUND"), frame:CreateTexture(nil, "BORDER")
+    end
     function Theme.AddSliceTexture(frame, path, color, layer, sublevel)
         local t = frame:CreateTexture(nil, layer or "BACKGROUND", nil, sublevel)
         t:SetTexture(path)

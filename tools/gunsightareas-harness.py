@@ -14,10 +14,14 @@ class modules plug into (the design mockup). The checks pin:
   * the "classSoon" fallback: shown in an area set to the Class Module only when the player's class has no class
     module, retired by a later registration, never shown for an unreadable class token;
   * the target gate: a Target Debuffs host follows FS.TargetTakesDots; a class module and the coming soon plate follow
-    FS.HasTarget (hidden with no target, onHide / onShow fired on each edge, all legal in combat).
+    FS.HasTarget (hidden with no target, onHide / onShow fired on each edge, all legal in combat);
+  * the class module's backing plate: one dark panel (Theme.AddPanelChrome, COLOR_BG fill) per area host, behind
+    whatever the host holds, sized to the area rect plus a small pad, shown only while a real class module is
+    in that area, its opacity the Config setting (0 hides it), applied live, in combat and on a profile switch.
 
-The mock is the Gunsight harness mock plus SetParent and RegisterUnitEvent. Theme is not loaded and
-FS.TargetTakesDots, UnitClass are stubs; the real Layout.lua, Config.lua, Gunsight.lua are loaded.
+The mock is the Gunsight harness mock plus SetParent, RegisterUnitEvent and the client's child frame level
+rule (parent + 1). Theme is a stub that records AddPanelChrome (the plate is the one thing here that
+draws); FS.TargetTakesDots, UnitClass are stubs; the real Layout.lua, Config.lua, Gunsight.lua are loaded.
 
     python3 tools/gunsightareas-harness.py
 
@@ -67,16 +71,37 @@ function Frame:SetParent(p)
 end
 function Frame:RegisterUnitEvent(e) self.events[e] = true end
 
+-- The client gives a new child frame its parent's level + 1 (the mock leaves every frame at 1).
+local plainCreateFrame = CreateFrame
+function CreateFrame(kind, name, parent, template)
+    local f = plainCreateFrame(kind, name, parent, template)
+    f.level = ((parent or UIParent).level or 1) + 1
+    return f
+end
+
 TARGET = true
 CLASS = "WARLOCK"
 function UnitClass() return CLASS == "WARLOCK" and "Warlock" or CLASS, CLASS end
 """
 
 PRELUDE = r"""
+-- A Theme with the two colour tokens and the panel chrome helper the plate uses; PANELS records every call.
+PANELS = {}
+local function stubTheme()
+    FS.Theme = { COLOR_BG = { 0.102, 0.063, 0.145, 0.80 }, COLOR_BORDER = { 0.659, 0.333, 0.969, 1 } }
+    function FS.Theme.AddPanelChrome(frame, opts)
+        local fill, glow, border = frame:CreateTexture(nil, "BACKGROUND"), frame:CreateTexture(nil, "BACKGROUND"),
+            frame:CreateTexture(nil, "BORDER")
+        PANELS[#PANELS + 1] = { frame = frame, opts = opts, fill = fill, glow = glow, border = border }
+        return fill, glow, border
+    end
+end
+
 local function boot(opts)
     opts = opts or {}
     SetScreen(opts.height or 1440)
     ForeverSTUwaveDB = opts.db or {}
+    if not opts.noTheme then stubTheme() end
     function UnitGUID() return "Player-1-0001" end
     CLASS = opts.class or "WARLOCK"
     TARGET = true
@@ -688,6 +713,191 @@ for _, f in ipairs(FRAMES) do
     check(f.protected ~= true, "no frame is protected: " .. tostring(f.name))
 end
 check(#BLOCKED == 0, "nothing protected was touched in combat: " .. table.concat(BLOCKED, ","))
+""")
+
+
+# ---- the class module's backing plate -------------------------------------------------------
+
+PLATE_HELPERS = r"""
+local function plateSetting() return FS.GunsightAreas.SETTINGS.background end
+local function setOpacity(v) FS.Config.Set(plateSetting().key, v) end
+-- A real class module in the lower area (the default), the way Shaman, Warrior, Priest, Mage and Hunter register.
+local function bootClass(opts)
+    opts = opts or {}
+    local cl = module("cl")
+    cl.spec.classes = { "WARLOCK" }
+    opts.before = function() FS.GunsightAreas.RegisterModule("class", cl.spec) end
+    local Gs, Areas = boot(opts)
+    return Gs, Areas, cl
+end
+"""
+
+case("the_class_background_setting_has_its_range_and_an_80_percent_default")(PLATE_HELPERS + r"""
+local Gs, Areas = bootClass()
+local def = plateSetting()
+check(type(def.key) == "string" and def.key ~= "", "the setting has a config key")
+check(def.default == 80 and def.min == 0 and def.max == 100 and def.step == 5, "0 to 100 in steps of 5, default 80")
+check(FS.Config.Get(def.key) == 80, "the default is registered with Config, got " .. tostring(FS.Config.Get(def.key)))
+check(not FS.Config.IsStored(def.key), "the default pins nothing in the profile")
+""")
+
+case("a_class_module_gets_a_backing_plate_behind_it_sized_to_the_area_plus_a_pad")(PLATE_HELPERS + r"""
+local Gs, Areas, cl = bootClass()
+local host, plate = Areas.Host("lower"), Areas.Plate("lower")
+check(plate ~= nil, "the lower host has a plate")
+check(plate:GetParent() == host, "the plate hangs off the host, so the host's hide takes it along")
+check(plate:IsShown() and plate:IsVisible(), "the plate shows with the class module")
+check(plate:GetFrameLevel() < cl.frame:GetFrameLevel(), "the plate sits below the module frame (" .. plate:GetFrameLevel() .. " vs " .. cl.frame:GetFrameLevel() .. ")")
+check(plate:GetFrameLevel() <= host:GetFrameLevel() + 0, "and no higher than the host's own level")
+local pad = Gs.ui(Areas.PLATE_PAD)
+check(Areas.PLATE_PAD > 0 and Areas.PLATE_PAD <= 4, "a small pad, short of the 4 image px gap between the areas, got " .. tostring(Areas.PLATE_PAD))
+near(plate:GetWidth(), host:GetWidth() + 2 * pad, "plate width is the area plus the pad each side")
+near(plate:GetHeight(), host:GetHeight() + 2 * pad, "plate height is the area plus the pad each side")
+local hp, pp = host.points[1], plate.points[1]
+check(pp[1] == "TOPLEFT" and pp[2] == hp[2], "seated like the host, from the Gunsight root")
+near(pp[4], hp[4] - pad, "left edge is one pad outside the host")
+near(pp[5], hp[5] + pad, "top edge is one pad outside the host")
+check(Areas.Plate("upper") ~= nil and not Areas.Plate("upper"):IsShown(), "the upper host has its plate too, hidden: no class module there")
+check(Areas.Plate("bogus") == nil, "no plate for an unknown area")
+""")
+
+case("the_plate_is_the_shared_panel_chrome_with_the_COLOR_BG_fill_and_a_violet_border")(PLATE_HELPERS + r"""
+local Gs, Areas = bootClass()
+local plate = Areas.Plate("lower")
+local call
+for _, c in ipairs(PANELS) do if c.frame == plate then call = c end end
+check(call, "Theme.AddPanelChrome was called on the plate frame")
+local bg, fill = FS.Theme.COLOR_BG, call.opts.fillColor
+check(fill[1] == bg[1] and fill[2] == bg[2] and fill[3] == bg[3], "the fill is COLOR_BG's colour")
+check(fill[4] == 1, "the fill is solid: the frame's alpha is the setting, got " .. tostring(fill[4]))
+check(call.opts.accent == FS.Theme.COLOR_BORDER, "the border is the panel violet")
+""")
+
+case("the_plate_alpha_follows_the_setting_and_a_change_applies_live")(PLATE_HELPERS + r"""
+local Gs, Areas = bootClass()
+local plate = Areas.Plate("lower")
+near(plate:GetAlpha(), 0.8, "default 80 percent")
+setOpacity(40)
+near(plate:GetAlpha(), 0.4, "40 percent")
+check(plate:IsShown(), "still shown")
+setOpacity(100)
+near(plate:GetAlpha(), 1, "100 percent is solid")
+setOpacity(5)
+near(plate:GetAlpha(), 0.05, "5 percent is the faintest step")
+""")
+
+case("zero_hides_the_plate_and_the_next_value_brings_it_back")(PLATE_HELPERS + r"""
+local Gs, Areas, cl = bootClass()
+local plate = Areas.Plate("lower")
+setOpacity(0)
+check(not plate:IsShown() and not plate:IsVisible(), "0 means no background at all: hidden, not a clear plate")
+check(cl.frame:IsShown() and Areas.AreaOf("class") == "lower", "the module itself is untouched")
+setOpacity(35)
+check(plate:IsShown(), "any value above 0 shows it again")
+near(plate:GetAlpha(), 0.35, "at the new value")
+setOpacity(0)
+setOpacity(80)
+check(plate:IsShown(), "back to the default")
+near(plate:GetAlpha(), 0.8, "default again")
+""")
+
+case("a_stored_zero_or_a_junk_value_is_read_safely")(PLATE_HELPERS + r"""
+local Gs, Areas = bootClass()
+local plate = Areas.Plate("lower")
+-- hand edited saved variables: above range clamps to solid, below range to none, a non number is the default
+setOpacity(250)
+near(plate:GetAlpha(), 1, "above 100 reads as 100")
+setOpacity(-30)
+check(not plate:IsShown(), "below 0 reads as 0")
+setOpacity("lots")
+check(plate:IsShown(), "a string reads as the default")
+near(plate:GetAlpha(), 0.8, "the default")
+""")
+
+case("the_plate_shows_only_behind_a_real_class_module")(PLATE_HELPERS + r"""
+local dh, soon = module("dh"), module("soon")
+local cl = module("cl")
+cl.spec.classes = { "WARLOCK" }
+local Gs, Areas = boot({ class = "WARLOCK", before = function()
+    FS.GunsightAreas.RegisterModule("debuffsH", dh.spec)
+    FS.GunsightAreas.RegisterModule("classSoon", soon.spec)
+    FS.GunsightAreas.RegisterModule("class", cl.spec)
+end })
+check(Areas.Plate("upper") and not Areas.Plate("upper"):IsShown(), "no plate behind the debuffs module")
+check(Areas.Plate("lower"):IsShown(), "a plate behind the class module")
+Gs.SetArea("lower", "empty")
+check(not Areas.Plate("lower"):IsShown(), "an Empty area has no plate")
+Gs.SetArea("lower", "class")
+check(Areas.Plate("lower"):IsShown(), "back with the class module")
+Gs.SetArea("upper", "class")      -- swaps: the class module goes up, debuffs come down
+check(Areas.Plate("upper"):IsShown() and not Areas.Plate("lower"):IsShown(), "the plate went up with the module")
+check(Areas.Plate("upper"):GetParent() == Areas.Host("upper"), "each plate stays on its own host")
+""")
+
+case("the_coming_soon_plate_keeps_its_own_look_and_gets_no_backing_plate")(PLATE_HELPERS + r"""
+local soon = module("soon")
+local Gs, Areas = boot({ class = "MAGE", before = function() FS.GunsightAreas.RegisterModule("classSoon", soon.spec) end })
+check(Areas.AreaOf("classSoon") == "lower" and soon.frame:IsShown(), "the coming soon plate is up")
+check(not Areas.Plate("lower"):IsShown(), "no second plate under it")
+""")
+
+case("the_backing_plate_follows_the_target_gate_and_the_dot_piece")(PLATE_HELPERS + r"""
+local Gs, Areas = bootClass()
+local plate = Areas.Plate("lower")
+check(plate:IsVisible(), "visible with a target")
+TARGET = false
+fire("PLAYER_TARGET_CHANGED")
+check(not plate:IsVisible(), "no target: the host hides and the plate with it")
+check(plate:IsShown() and plate:GetParent() == Areas.Host("lower"), "it is the host that carries it away")
+TARGET = true
+fire("PLAYER_TARGET_CHANGED")
+check(plate:IsVisible(), "a target brings it back")
+Gs.SetPiece("dot", false, true)
+check(not plate:IsVisible(), "the dot piece off hides it")
+Gs.SetPiece("dot", true, true)
+check(plate:IsVisible(), "and on shows it")
+""")
+
+case("the_backing_plate_follows_a_rescale")(PLATE_HELPERS + r"""
+local Gs, Areas = bootClass()
+local plate, host = Areas.Plate("lower"), Areas.Host("lower")
+SetScreen(1200)
+fire("UI_SCALE_CHANGED")
+local pad = Gs.ui(Areas.PLATE_PAD)
+near(plate:GetWidth(), host:GetWidth() + 2 * pad, "width after the rescale")
+near(plate:GetHeight(), host:GetHeight() + 2 * pad, "height after the rescale")
+""")
+
+case("the_background_setting_applies_in_combat_and_on_a_profile_switch")(PLATE_HELPERS + r"""
+local Gs, Areas = bootClass()
+local plate = Areas.Plate("lower")
+IN_COMBAT = true
+setOpacity(30)
+near(plate:GetAlpha(), 0.3, "a change in combat applies")
+setOpacity(0)
+check(not plate:IsVisible(), "and 0 hides it in combat")
+setOpacity(60)
+check(plate:IsVisible(), "and it comes back in combat")
+check(#BLOCKED == 0, "nothing protected was touched: " .. table.concat(BLOCKED, ","))
+IN_COMBAT = false
+FS.Config.NewProfile("Raid")
+FS.Config.SetActiveProfile("Raid")
+near(plate:GetAlpha(), 0.8, "a fresh profile reads the default")
+setOpacity(15)
+near(plate:GetAlpha(), 0.15, "the new profile's own value")
+FS.Config.SetActiveProfile("Default")
+near(plate:GetAlpha(), 0.6, "switching back restores the first profile's value")
+""")
+
+case("no_theme_means_no_plate_and_no_failure")(PLATE_HELPERS + r"""
+local Gs, Areas, cl = bootClass({ noTheme = true })
+check(Areas.Plate("lower") == nil, "no plate without Theme.AddPanelChrome")
+check(cl.frame:IsShown() and Areas.AreaOf("class") == "lower", "the class module still shows")
+setOpacity(50)
+check(Areas.AreaOf("class") == "lower", "a setting change with no plate is harmless")
+local any = false
+for k in pairs(DEGRADED) do if k:find("plate", 1, true) then any = true end end
+check(any, "the missing Theme is logged once")
 """)
 
 

@@ -338,6 +338,7 @@ Not yet checked in game. Mocked checks cover which module sits in which area, th
 4. Switch "Target side areas" in the Pieces list off, or press the Console's key 6: both areas hide together. The key now shows for every class, including one with no class module yet (a Mage shows Target debuffs only).
 5. With no target, or a friendly or dead one, the Target Debuffs area is hidden. With no target at all the Class Module hides too (its chips never float alone); a friendly or dead target keeps it. Retarget a hostile mob and everything returns.
 6. Switch profile, then `/reload`: both dropdowns and the modules in the areas hold per profile. Do it once in combat: the areas are plain frames and nothing is blocked.
+7. Class module background (Target side, a slider with a ? icon, 0 to 100 percent in steps of 5, default 80): with a hostile target, a dark plate with a cut corner and a violet edge sits behind the Class Module, a few pixels larger than its area, and it reads on bright ground (Barrens daylight). Drag the slider: the plate fades and firms live, with no reload. At 0 it is gone entirely. It follows the module to the other area, hides with no target, and never shows behind Target Debuffs or the Coming soon plate. Not yet checked in game; mocked checks only.
 
 ### Target debuffs: rows, axis, time and stacks
 

@@ -11,6 +11,14 @@
 -- Debuffs host hides on FS.TargetTakesDots with no hook, so the Hud ledger keeps running. A module that needs more
 -- (a combo module also wants a hostile target) gates itself inside its own frame. No module is exempt; there is no
 -- showWithoutTarget opt-in because no module has recorded approval to show with no target.
+--
+-- BACKING PLATE. Every area host carries one dark panel behind whatever it holds (Theme.AddPanelChrome, the target
+-- box's panel: COLOR_BG fill, the cut corner, the violet border), so a class module reads on bright ground. It is
+-- the host's own child at the host's frame level, below every module frame, sized to the area rect plus PLATE_PAD
+-- image px on each side, and shown only while a real "class" module (not the coming soon plate, which has its own
+-- look, and not Target Debuffs) is the occupant, so it hides with the host (no target, the dot piece off). Its
+-- opacity is the Config setting SETTINGS.background (0 to 100 percent, 0 hides it): the plate frame's alpha, applied
+-- live from Config.OnChange, so a change or a profile switch needs no reload and nothing here is protected.
 
 local _, FS = ...
 
@@ -24,6 +32,11 @@ local G = Gunsight.G
 local ui, Point = Gunsight.ui, Gunsight.Point
 
 local PREFIX = "|cffff4488Forever STUwave|r: gunsight areas: "
+local PLATE_PAD = 3        -- image px the backing plate reaches past the area rect on each side (the areas are 4 apart)
+local SETTINGS = { background = { key = "gunsight.classModule.background", default = 80, min = 0, max = 100, step = 5 } }
+Areas.SETTINGS = SETTINGS
+Areas.PLATE_PAD = PLATE_PAD
+if FS.Config and FS.Config.RegisterDefault then FS.Config.RegisterDefault(SETTINGS.background.key, SETTINGS.background.default) end
 local MODULE_IDS = { debuffsH = true, debuffsV = true, class = true, classSoon = true }
 local GATED = { debuffsH = true, debuffsV = true }     -- hidden while FS.TargetTakesDots() is false
 local NEEDS_TARGET = { class = true, classSoon = true }  -- hidden while FS.HasTarget() is false; onShow / onHide fire on the edge
@@ -34,6 +47,8 @@ local classRecords = {}   -- one record per class spec
 local hosts = {}          -- area -> host frame (nil until built)
 local rects = {}          -- area -> { x, y, w, h } in image px, one table reused for every seat call
 local hostOn = {}         -- area -> whether the host is shown
+local plates = {}         -- area -> the backing plate frame (nil until built, or without Theme.AddPanelChrome)
+local plateOn = {}        -- area -> whether the plate is shown
 local occupant = {}       -- area -> the record shown there
 local changedCallbacks = {}
 local pieceFrame, built, lastSnapshot, classToken
@@ -110,6 +125,38 @@ local function SeatHost(area)
     local rect = rects[area]
     Point(hosts[area], "TOPLEFT", rect.x, rect.y)
     hosts[area]:SetSize(ui(rect.w), ui(rect.h))
+    local plate = plates[area]
+    if plate then
+        Point(plate, "TOPLEFT", rect.x - PLATE_PAD, rect.y - PLATE_PAD)
+        plate:SetSize(ui(rect.w + 2 * PLATE_PAD), ui(rect.h + 2 * PLATE_PAD))
+    end
+end
+
+-- The setting as a fraction of 1: a number clamped into its range, anything else (a string, NaN) the default.
+local function PlateOpacity()
+    local def = SETTINGS.background
+    local v = FS.Config and FS.Config.Get and FS.Config.Get(def.key)
+    if type(v) ~= "number" or v ~= v then v = def.default end
+    return math.min(def.max, math.max(def.min, v)) / 100
+end
+
+-- Shows the plate behind a real class module at the setting's opacity, hides it for anything else and at 0. Plain
+-- frames only, so it is legal in combat; run from Refresh (an occupant changed) and from the setting's OnChange.
+local function ApplyPlates()
+    if not built then return end
+    local opacity = PlateOpacity()
+    for _, area in ipairs(AREA_NAMES) do
+        local plate = plates[area]
+        if plate then
+            local record = occupant[area]
+            local want = opacity > 0 and record ~= nil and record.id == "class"
+            if want then plate:SetAlpha(opacity) end
+            if plateOn[area] ~= want then
+                plateOn[area] = want
+                if want then plate:Show() else plate:Hide() end
+            end
+        end
+    end
 end
 
 local function SeatRecord(record)
@@ -210,6 +257,7 @@ local function Refresh(force)
         if want[record] and record.shown ~= want[record] then ShowRecord(record, want[record]) end
     end
     local flipped = ApplyHosts()
+    ApplyPlates()
     local snapshot = Snapshot()
     local moved = snapshot ~= lastSnapshot
     if force or flipped or moved then
@@ -279,6 +327,13 @@ function Areas.Host(area)
     return hosts[area]
 end
 
+-- The backing plate frame of an area host (nil before the build, for an unknown area, or without Theme chrome).
+function Areas.Plate(area)
+    return plates[area]
+end
+
+if FS.Config and FS.Config.OnChange then FS.Config.OnChange(SETTINGS.background.key, ApplyPlates) end
+
 Gunsight.OnAreaChanged(function() Refresh(true) end)
 
 -- A gate edge of a class host tells the listeners; Refresh does the same itself, so it calls ApplyHosts directly.
@@ -286,6 +341,26 @@ local function OnTargetEvent()
     if ApplyHosts() then
         for _, fn in ipairs(changedCallbacks) do Safe("OnAreaChanged callback", fn, "gate") end
     end
+end
+
+-- One plate per host, made with the host (before any module frame, which the host's child level keeps above it). The
+-- fill is COLOR_BG's colour at full strength: the plate frame's alpha is the setting, so the default 80 percent is
+-- COLOR_BG's own 0.80.
+local function BuildPlate(area)
+    local Theme = FS.Theme
+    if not (Theme and Theme.AddPanelChrome and Theme.COLOR_BG and Theme.COLOR_BORDER) then
+        LogOnce("plate", "Theme.AddPanelChrome is missing, the class module has no background plate")
+        return
+    end
+    local host = hosts[area]
+    local plate = CreateFrame("Frame", nil, host)
+    local level = host:GetFrameLevel()
+    if type(level) == "number" then plate:SetFrameLevel(level) end   -- a new child is host + 1, the level of a module frame
+    local bg = Theme.COLOR_BG
+    Theme.AddPanelChrome(plate, { fillColor = { bg[1], bg[2], bg[3], 1 }, accent = Theme.COLOR_BORDER })
+    plate:Hide()
+    plates[area] = plate
+    plateOn[area] = false
 end
 
 local function BuildFrames()
@@ -299,6 +374,7 @@ local function BuildFrames()
         hosts[area] = CreateFrame("Frame", names[area], pieceFrame)
         hosts[area]:Hide()
         hostOn[area] = false
+        Safe("plate " .. area, BuildPlate, area)
     end
     local events = CreateFrame("Frame", nil, pieceFrame)
     events:RegisterEvent("PLAYER_TARGET_CHANGED")

@@ -1490,6 +1490,16 @@ local function TargetSideGroups(page)
                 .. "as a reminder to apply it again. It clears when you reapply it, change target, or the fight ends.",
         })
     end
+    local Areas = FS.GunsightAreas
+    local plate = Areas and Areas.SETTINGS and Areas.SETTINGS.background
+    if plate then
+        UI.Slider(page, {
+            label = "Class module background", key = plate.key, min = plate.min, max = plate.max, step = plate.step,
+            fmt = "%d%%",
+            tip = "A dark plate behind your class module, so it stays readable on bright ground. "
+                .. "Higher is more solid; 0 removes the plate.",
+        })
+    end
     local Tags = FS.GunsightTags
     if Tags and Tags.SETTINGS then
         local S = Tags.SETTINGS
