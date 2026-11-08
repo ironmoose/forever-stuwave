@@ -8,7 +8,7 @@
 -- matches CastBars.lua's reasoning for the same omission. RESIZING it does: the XP
 -- bar is anchored to this bar and the control deck chassis to the XP bar, and the
 -- deck's bag slots are secure buttons, so this bar is RESTRICTED in combat (see
--- Rescale below).
+-- Rescale below). Hovering the TIME segment shows a GameTooltip with the local and the realm time.
 
 local addonName, FS = ...
 
@@ -110,26 +110,94 @@ local BAG_IDS = { 0, 1, 2, 3, 4 }
 -- returns the REALM's clock, not the machine's, so the obvious-looking call is
 -- the wrong one. Lua's date() reads the operating system.
 --
--- GetGameTime is kept only as a fallback for a client without date(), which is
--- theoretical here but costs one line.
--- 12-hour, on the player's call ("can you make it non-military time").
+-- GetGameTime is kept as a fallback for a client without date(), which is
+-- theoretical here but costs one line, and it is what the tooltip's Realm line
+-- reads (the bar itself shows local time only).
+-- 12-hour, on the player's call ("can you make it non-military time"). There is
+-- no 24-hour switch or CVar behind it: both clocks below are 12-hour, always.
 --
 -- The hour is run back through tonumber to drop %I's leading zero -- "1:05 AM"
 -- rather than "01:05 AM" -- since a padded 12-hour clock reads like the
 -- 24-hour one it is meant to replace.
-local function UpdateTime(segment)
-    local text
+
+-- GetGameTime answers plain numbers; anything else (or a secret) reads as no time.
+local function IsPlainNumber(v)
+    return type(v) == "number" and not (FS.IsSecret and FS.IsSecret(v))
+end
+
+-- The realm's clock as 12-hour text ("4:12 PM"), nil when the client gives none. GetGameTime is 24-hour, so the
+-- hour is converted by hand.
+local function RealmTimeText()
+    if not HAS_GET_GAME_TIME then return nil end
+    local hour, minute = GetGameTime()
+    if not (IsPlainNumber(hour) and IsPlainNumber(minute)) then return nil end
+    local suffix = hour >= 12 and "PM" or "AM"
+    local display = hour % 12
+    if display == 0 then display = 12 end
+    return ("%d:%02d %s"):format(display, minute, suffix)
+end
+
+-- The machine's clock as 12-hour text ("3:12 PM"): what the TIME segment shows. Without date() it is the realm's.
+local function LocalTimeText()
     if HAS_DATE then
-        text = ("%d:%s %s"):format(tonumber(date("%I")) or 12, date("%M"), date("%p"))
-    elseif HAS_GET_GAME_TIME then
-        -- Realm clock fallback: 24-hour, so convert by hand.
-        local hour, minute = GetGameTime()
-        local suffix = hour >= 12 and "PM" or "AM"
-        local display = hour % 12
-        if display == 0 then display = 12 end
-        text = ("%d:%02d %s"):format(display, minute, suffix)
+        return ("%d:%s %s"):format(tonumber(date("%I")) or 12, date("%M"), date("%p"))
     end
-    segment.valueText:SetText(text or "--")
+    return RealmTimeText()
+end
+
+-- Hover on the TIME segment: the local time (the text the bar shows) and the realm's, in GameTooltip like the action
+-- bar tabs, put where FrameHelpers.AnchorTooltip puts it (the player's tooltip seat, else above the segment). Both
+-- times are 12-hour, as on the bar. A refresh (the bar's tick while the mouse stays on the segment) rewrites the lines
+-- only when a minute rolled over, and never takes a tooltip another frame owns.
+local TIP_MUTED = { 0.60, 0.56, 0.72 }
+
+local function TipOwnedBy(segment)
+    local tip = GameTooltip
+    if not tip then return false end
+    if type(tip.IsOwned) == "function" then return tip:IsOwned(segment.frame) and true or false end
+    if type(tip.GetOwner) == "function" then return tip:GetOwner() == segment.frame end
+    return false
+end
+
+local function ShowTimeTooltip(segment, refresh)
+    local tip = GameTooltip
+    if not tip then return end
+    local localText, realmText = LocalTimeText() or "--", RealmTimeText() or "--"
+    local sig = localText .. "|" .. realmText
+    if refresh then
+        if segment.tipSig == sig then return end
+    else
+        local helpers = FS.FrameHelpers
+        if helpers and helpers.AnchorTooltip then
+            helpers.AnchorTooltip(segment.frame)
+        else
+            tip:SetOwner(segment.frame, "ANCHOR_TOP")
+        end
+    end
+    segment.tipSig = sig
+    if refresh and type(tip.ClearLines) == "function" then tip:ClearLines() end
+    tip:SetText("Time", COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3])
+    tip:AddDoubleLine("Local", localText, TIP_MUTED[1], TIP_MUTED[2], TIP_MUTED[3],
+        COLOR_TEXT_WHITE[1], COLOR_TEXT_WHITE[2], COLOR_TEXT_WHITE[3])
+    tip:AddDoubleLine("Realm", realmText, TIP_MUTED[1], TIP_MUTED[2], TIP_MUTED[3],
+        COLOR_TEXT_WHITE[1], COLOR_TEXT_WHITE[2], COLOR_TEXT_WHITE[3])
+    tip:Show()
+end
+
+local function HideTimeTooltip(segment)
+    segment.hover, segment.tipSig = false, nil
+    if GameTooltip and TipOwnedBy(segment) then GameTooltip:Hide() end
+end
+
+local function UpdateTime(segment)
+    segment.valueText:SetText(LocalTimeText() or "--")
+    if segment.hover then
+        if TipOwnedBy(segment) then
+            ShowTimeTooltip(segment, true)
+        else
+            segment.hover, segment.tipSig = false, nil
+        end
+    end
 end
 
 -- Standard Blizzard money-text colors (gold/silver/copper), matching the hex
@@ -432,7 +500,8 @@ local SEGMENT_DEFS = {
     { key = "rested", label = "REST", available = HAS_XP_EXHAUSTION, update = UpdateRested, meter = true },
     { key = "durability", label = "DUR", available = HAS_DURABILITY, update = UpdateDurability, meter = true },
     { key = "bags", label = "BAGS", available = (GetFreeSlotsForBag ~= nil), update = UpdateBags, meter = true },
-    { key = "time", label = "TIME", available = HAS_DATE or HAS_GET_GAME_TIME, update = UpdateTime },
+    { key = "time", label = "TIME", available = HAS_DATE or HAS_GET_GAME_TIME, update = UpdateTime,
+      tooltip = ShowTimeTooltip, tooltipHide = HideTimeTooltip },
     { key = "gold", label = "GOLD", available = HAS_GET_MONEY, update = UpdateGold, coins = true },
 }
 
@@ -544,7 +613,7 @@ local function CreateSegment(bar, index, def)
         valueText:SetPoint("LEFT", track, "RIGHT", LABEL_GAP, 0)
     end
 
-    return {
+    local segment = {
         key = def.key,
         frame = seg,
         labelText = labelText,
@@ -554,6 +623,20 @@ local function CreateSegment(bar, index, def)
         available = def.available,
         update = def.update,
     }
+
+    -- Segments flagged `tooltip` take the mouse and show it on hover; the rest stay click-through, as before. A segment
+    -- hidden with the mouse on it gets no OnLeave, so OnHide lets go of the tooltip too.
+    if def.tooltip then
+        seg:EnableMouse(true)
+        seg:SetScript("OnEnter", function()
+            segment.hover = true
+            def.tooltip(segment)
+        end)
+        seg:SetScript("OnLeave", function() def.tooltipHide(segment) end)
+        seg:SetScript("OnHide", function() def.tooltipHide(segment) end)
+    end
+
+    return segment
 end
 
 -- The STATUS slot: the bar's own divider, an Orbitron "STATUS" label like its neighbours, then a

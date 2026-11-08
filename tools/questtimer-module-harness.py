@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Runs the real QuestTimer.lua headless against a mock client.
 
-QuestTimer draws the quest timer as a drawer under the minimap's chassis (the control bezel and the coords and
-clock row below it) and hides Blizzard's QuestTimerFrame. These checks pin:
+QuestTimer draws the quest timer as a drawer under the minimap's control strip and hides Blizzard's
+QuestTimerFrame. These checks pin:
 
   * MM:SS digits and the cyan / amber / pink ramp at 60 and 15 seconds;
   * timers are read from GetQuestTimers into deadlines, named from the quest log, soonest first;
-  * the drawer hangs flush from the bottom of the minimap's readout row (the bezel when there is no row), shows only
-    while a timer runs, and Blizzard's timer is hidden;
+  * the drawer hangs from the minimap bezel, shows only while a timer runs, and Blizzard's timer is hidden;
   * every row's name and gauge stay inside the drawer (the name is one clipped line);
   * the switch off hides the drawer and gives Blizzard's timer back.
 
@@ -65,7 +64,6 @@ function CreateFrame(kind, name, parent)
 end
 Minimap = New("Frame")
 Minimap.fsBezel = New("Frame"); Minimap.fsBezel.w = 250
-Minimap.fsReadoutRow = New("Frame"); Minimap.fsReadoutRow.w = 250
 QuestTimerFrame = New("Frame")
 __now = 100
 function GetTime() return __now end
@@ -130,19 +128,15 @@ case("timers_are_read_named_and_sorted_soonest_first", """
     assert(list[2].most == 1100, "the gauge keeps the most seen")
 """)
 
-case("the_drawer_hangs_from_the_readout_row_and_hides_blizzards_timer", """
+case("the_drawer_hangs_from_the_bezel_and_hides_blizzards_timer", """
     __timers = { 595 }; __names = { "Grace" }
     Fire("QUEST_LOG_UPDATE")
     local d = Drawer()
     assert(d and d.shown, "drawer not shown")
-    local row = Minimap.fsReadoutRow
-    assert(d.parent == row, "the drawer is not a child of the readout row")
+    assert(d.parent == Minimap.fsBezel)
     local p = d.points
-    assert(#p == 2, "the drawer has " .. #p .. " anchors")
-    assert(p[1][1] == "TOPLEFT" and p[1][2] == row and p[1][3] == "BOTTOMLEFT", "left edge is not flush under the row")
-    assert(p[1][4] == 0 and p[1][5] == 0, "left anchor has an offset")
-    assert(p[2][1] == "TOPRIGHT" and p[2][2] == row and p[2][3] == "BOTTOMRIGHT", "right edge is not flush under the row")
-    assert(p[2][4] == 0 and p[2][5] == 0, "right anchor has an offset")
+    assert(p[1][1] == "TOPLEFT" and p[1][2] == Minimap.fsBezel and p[1][3] == "BOTTOMLEFT")
+    assert(p[2][1] == "TOPRIGHT" and p[2][3] == "BOTTOMRIGHT")
     assert(QuestTimerFrame.shown == false, "Blizzard's timer still shows")
     QuestTimerFrame:Show(); QuestTimerFrame.hooks.OnShow(QuestTimerFrame)
     assert(QuestTimerFrame.shown == false, "Blizzard's timer came back on show")
@@ -151,30 +145,11 @@ case("the_drawer_hangs_from_the_readout_row_and_hides_blizzards_timer", """
     assert(d.shown == false, "drawer stays with no timer")
 """)
 
-case("with_no_readout_row_the_drawer_hangs_from_the_bezel", """
-    Minimap.fsReadoutRow = nil
-    __timers = { 595 }; __names = { "Grace" }
-    Fire("QUEST_LOG_UPDATE")
-    local d = Drawer()
-    assert(d and d.shown, "drawer not shown")
-    assert(d.parent == Minimap.fsBezel)
-    local p = d.points
-    assert(p[1][1] == "TOPLEFT" and p[1][2] == Minimap.fsBezel and p[1][3] == "BOTTOMLEFT")
-    assert(p[2][1] == "TOPRIGHT" and p[2][2] == Minimap.fsBezel and p[2][3] == "BOTTOMRIGHT")
-""")
-
-case("with_no_minimap_chassis_there_is_no_drawer", """
-    Minimap.fsReadoutRow, Minimap.fsBezel = nil, nil
-    __timers = { 595 }; __names = { "Grace" }
-    Fire("QUEST_LOG_UPDATE")
-    assert(Drawer() == nil, "a drawer was built with nothing to hang from")
-""")
-
 case("text_and_gauge_stay_inside_the_drawer", """
     __timers = { 595, 30 }; __names = { "A very long quest name that would never fit in the drawer", "B" }
     Fire("QUEST_LOG_UPDATE")
     local d = Drawer()
-    local W = Minimap.fsReadoutRow.w
+    local W = Minimap.fsBezel.w
     for _, fs in ipairs(__fonts) do
         if fs.points and fs.points[1] then
             local x = fs.points[1][4]

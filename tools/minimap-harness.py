@@ -6,7 +6,7 @@ and checks (under Theme.CHROME_CORNERS "cut", and "round" for the A/B path):
 
   * map face glow + border take chamfer 6 (the mask_minimap.tga TOP-LEFT / BOTTOM-RIGHT cut),
     "round" keeps the square radius 0;
-  * bezel, readout row, readout box and the addon-button tray drawer (identified by frame) keep requested
+  * bezel, coords box and the addon-button tray drawer (identified by frame) keep requested
     chamfer 4 (what the 2C primitives snap to);
   * a bezel key's fill is the two-corner cut2 fill tinted READOUT_FILL, nine-sliced at the SAME
     chamfer SkinButton's ring gets (c = 6 at the 30 px key of the raw 250 px map; c = 4 at the
@@ -31,12 +31,13 @@ and checks (under Theme.CHROME_CORNERS "cut", and "round" for the A/B path):
   Then the Settings key (the gear that opens the /fsconfig window): our own Button in the bezel row between the calendar and
   mail keys (mail keeps the last, reserved seat), the same size and chrome as the other keys, a centred gear on whole
   physical pixels, hover and pressed looks, a "Settings" tooltip, and a click that calls FS.ConfigWindow.Toggle (the toggle
-  /fsconfig runs); the bezel holds only the four keys.
+  /fsconfig runs); the coords box takes what is left of FOUR key slots.
 
-  Then the readout row (the coords + clock LCD, moved out of the bezel after the fourth key squeezed it): a slim
-  full-width row directly under the bezel, the chassis fill and violet border, an inset LCD box inside it, coords
-  left and clock right at the pre-Settings-key text size, never overlapping, on whole physical pixels; the tray
-  drawer and its tab seat under the row, and so does it after a rescale.
+  Then the coords readout: no clock anywhere, only the player position, in a dark LCD box with a cyan border at
+  the right end of the bezel row (right of the four key seats, inside the one bezel bar, no row of its own), the
+  text sized as large as the box takes (up to 12.8 px at the 250 px map) so a typical and a widest reading never clip
+  or touch a key, on whole physical pixels, and the tray drawer, its tab and the quest timer's drawer seat flush
+  under the bezel.
 
     python3 tools/minimap-harness.py
 """
@@ -418,7 +419,6 @@ ROLE_LUA = """
 function __role(f)
     if f == Minimap then return "map" end
     if f == Minimap.fsBezel then return "bezel" end
-    if f == Minimap.fsReadoutRow then return "row" end
     if f == Minimap.fsReadoutBox then return "readout" end
     if f == Minimap.fsTray then return "tray" end
     if f == Minimap.fsTrayToggle then return "toggle" end
@@ -497,18 +497,6 @@ def tray_checks() -> None:
           and same(g, g.MinimapCluster.IndicatorFrame.MailFrame.parent, g.Minimap.fsBezel))
     check("[tray] the Settings key stays in the bezel",
           same(g, g.Minimap.fsSettingsKey.parent, g.Minimap.fsBezel))
-    row = g.Minimap.fsReadoutRow
-    check("[tray] the readout row exists (the tray seats under it, not the bezel)", row is not None)
-    check("[tray] the drawer hangs flush under the readout row: TOPLEFT/TOPRIGHT on the row's BOTTOMLEFT/BOTTOMRIGHT, "
-          "no offset",
-          same(g, tray.points.TOPLEFT.rel, row) and tray.points.TOPLEFT.relPoint == "BOTTOMLEFT"
-          and tray.points.TOPLEFT.x == 0 and tray.points.TOPLEFT.y == 0
-          and same(g, tray.points.TOPRIGHT.rel, row) and tray.points.TOPRIGHT.relPoint == "BOTTOMRIGHT"
-          and tray.points.TOPRIGHT.x == 0 and tray.points.TOPRIGHT.y == 0)
-    check("[tray] the toggle tab hangs off the readout row's bottom edge, right aligned at the bezel padding",
-          same(g, toggle.parent, row) and same(g, toggle.points.TOPRIGHT.rel, row)
-          and toggle.points.TOPRIGHT.relPoint == "BOTTOMRIGHT" and toggle.points.TOPRIGHT.y == 0
-          and toggle.points.TOPRIGHT.x == -g.MinimapCluster.Tracking.points.LEFT.x)
     check("[tray] expansion button, zoom button, a random button and a non-button are NOT collected",
           same(g, g.ExpansionLandingPageMinimapButton.parent, g.Minimap)
           and same(g, g.Minimap.ZoomIn.parent, g.Minimap)
@@ -757,19 +745,9 @@ function __find_dot()
 end
 """
 
-# Mononoki Nerd Font Mono advance, measured with PIL (0.5615 em); "99.9, 99.9" + one space + "19:56"
+# Mononoki Nerd Font Mono advance, measured with PIL (0.5615 em); the widest reading is "99.9, 99.9" (10 glyphs)
 MONO_ADVANCE = 0.5615
-READOUT_CHARS = 16
-READOUT_TEXT_PAD = 8
-
-
-def box_width(g) -> float:
-    """The readout box's width. It is anchored by both sides to the row (so it follows the map), and the mock keeps
-    no width for a two point frame: the map width less its two side insets."""
-    box = g.Minimap.fsReadoutBox
-    return g.Minimap.w - box.points.TOPLEFT.x + box.points.BOTTOMRIGHT.x
-
-
+READOUT_CHARS = 10
 # Mockup .mmbtn .nd: top:-2px; right:-2px; size max(3, btn * 0.34); round, pink, 5px pink glow.
 DOT_OFFSET = 2
 DOT_FRACTION = 0.34
@@ -780,17 +758,16 @@ LAYER_RANK = {"BACKGROUND": 0, "BORDER": 1, "ARTWORK": 2, "OVERLAY": 3, "HIGHLIG
 
 def mail_checks() -> None:
     """Mail arriving shows the fourth bezel key (the pink slot, after tracking, calendar and settings). Its
-    envelope must sit centred in that slot at glyph size, the key must sit above the readout row, and the slot
-    must end inside the bezel: the coords and clock no longer share the bezel row, so nothing sits beside or
-    under the slot (the box used to start at 85 px against a key ending at 112 px on the 250 px map, then the
-    fourth key squeezed it to 86 px wide)."""
+    envelope must sit centred in that slot at glyph size, the key must sit above the coords box, and
+    the box must start to the right of the slot instead of underneath it (the box used to start at 85 px
+    against a key ending at 112 px on the 250 px map, so the slot lay on top of the readout)."""
     for label, ui_height in (("250", None), ("208", 1200)):
         lua = run("cut", ui_height, LIB_SETUP + TRAY_BLIZZARD, None)
         lua.execute(MAIL_ARRIVES)
         lua.execute("__mail_arrives()")
         g = lua.globals()
         m = g.Minimap.w
-        bezel, row, box = g.Minimap.fsBezel, g.Minimap.fsReadoutRow, g.Minimap.fsReadoutBox
+        bezel, box = g.Minimap.fsBezel, g.Minimap.fsReadoutBox
         k1, k2 = g.MinimapCluster.Tracking, g.GameTimeFrame
         gear = g.Minimap.fsSettingsKey
         mail = g.MinimapCluster.IndicatorFrame.MailFrame
@@ -803,12 +780,13 @@ def mail_checks() -> None:
               same(mail.parent, bezel) and mail.shown is True and same(mail.points.LEFT.rel, gear))
         key_right = (k1.points.LEFT.x + 4 * mail.w + k2.points.LEFT.x + gear.points.LEFT.x
                      + mail.points.LEFT.x)
-        check(f"[mail@{label}] the pink slot ends inside the bezel ({key_right:.1f} + pad <= {m:.1f})",
-              key_right + k1.points.LEFT.x <= m + 1e-6)
-        check(f"[mail@{label}] the readout box is not in the bezel row: it lives in the row below, "
-              f"not a child of the bezel itself", same(box.parent, row) and not same(box.parent, bezel))
-        check(f"[mail@{label}] pink slot is drawn above the readout row (level {mail.level} > {row.level})",
-              mail.level > row.level)
+        box_left = m + box.points.RIGHT.x - box.w
+        gap = mail.points.LEFT.x
+        check(f"[mail@{label}] coords box starts right of the pink slot "
+              f"(box left {box_left:.1f} >= slot right {key_right:.1f} + gap {gap:.1f})",
+              box_left >= key_right + gap - 1e-6)
+        check(f"[mail@{label}] pink slot is drawn above the coords box (level {mail.level} > {box.level})",
+              mail.level > box.level)
         key_font = max(5, mail.w * 0.5)
         want_w, want_h = key_font * 4 / 3, key_font
         pts = [k for k, _ in icon.points.items()]
@@ -855,6 +833,10 @@ def mail_checks() -> None:
             check(f"[mail@{label}] dot sits above the envelope ({dot.layer}/{dot.sublevel} over {icon.layer}/{icon.sublevel}), "
                   f"halo below the dot",
                   rank(dot) > rank(icon) and (halo is None or rank(halo) < rank(dot)))
+        fs = g.Minimap.fsReadoutCoords
+        need = READOUT_CHARS * MONO_ADVANCE * fs.fontSize + 2 * fs.points.LEFT.x
+        check(f"[mail@{label}] coords font {fs.fontSize:.1f} fits a reading in the box "
+              f"({need:.1f} <= {box.w})", need <= box.w + 1e-6)
 
 
 SETTINGS_KEY = "ForeverSTUwaveMinimapSettingsKey"
@@ -909,7 +891,7 @@ def settings_checks() -> None:
             return bool(g.__same(a, b))
 
         m = g.Minimap.w
-        bezel, row = g.Minimap.fsBezel, g.Minimap.fsReadoutRow
+        bezel, box = g.Minimap.fsBezel, g.Minimap.fsReadoutBox
         k1, k2 = g.MinimapCluster.Tracking, g.GameTimeFrame
         key = g.Minimap.fsSettingsKey
         mail = g.MinimapCluster.IndicatorFrame.MailFrame
@@ -926,14 +908,20 @@ def settings_checks() -> None:
         resolved = [str(g.Minimap.fsBezelResolved[i]) for i in range(1, len(g.Minimap.fsBezelResolved) + 1)]
         check(f"[settings@{label}] the resolved keys read tracking, calendar, settings, mail ({resolved})",
               resolved == ["tracking", "calendar", "settings", "mail"])
-        check(f"[settings@{label}] it is drawn above the readout row (level {key.level} > {row.level})",
-              key.level > row.level)
+        check(f"[settings@{label}] it is drawn above the coords box (level {key.level} > {box.level})",
+              key.level > box.level)
 
         pad, gap = k1.points.LEFT.x, key.points.LEFT.x
         mail_right = pad + 4 * key.w + 3 * gap
-        check(f"[settings@{label}] the bezel holds the four keys left aligned and unstretched: mail slot ends at "
-              f"{mail_right:.1f} of {m:.1f}, every key the same size ({key.w:.2f})",
-              mail_right + pad <= m and key.w == k1.w == k2.w == mail.w and k1.points.LEFT.x == pad)
+        box_left = m + box.points.RIGHT.x - box.w
+        check(f"[settings@{label}] the bezel fits four keys: mail slot ends at {mail_right:.1f}, the box starts at "
+              f"{box_left:.1f}, a gap later", box_left >= mail_right + gap - 1e-6 and mail_right + gap <= m)
+        want_w = math.floor(m - pad - (mail_right + gap))
+        px_box = 768 / 1440   # settings_setup's pixel size: the box width is rounded up to a whole pixel
+        check(f"[settings@{label}] the box takes what is left of FOUR key slots ({box.w} is {want_w} to {want_w + px_box:.2f})",
+              want_w <= box.w <= want_w + px_box + 1e-6)
+        check(f"[settings@{label}] the readout text is still a real size ({g.Minimap.fsReadoutCoords.fontSize:.1f} >= 5)",
+              g.Minimap.fsReadoutCoords.fontSize >= 5)
 
         # the gear: one icon_gear texture, centred, square, on whole physical pixels, tinted amber
         gears = list(g.__textures(key, GEAR_TEXTURE).values())
@@ -1055,161 +1043,11 @@ def settings_checks() -> None:
           and bool(g.__same(mail.points.LEFT.rel, g.GameTimeFrame)))
 
 
-ROW_LUA = r"""
-local R = getmetatable(UIParent)
-function R:SetTextColor(r, g, b, a) self.textColor = { r, g, b, a } end
-function __same(a, b) return a == b end
--- fill color, border color and border thickness the chrome helpers were given for a frame
-function __chrome(f)
-    local fc, bc, bt
-    for _, c in ipairs(calls.fill) do if c.frame == f then fc = c.args[1] end end
-    for _, c in ipairs(calls.border) do if c.frame == f then bc, bt = c.args[1], c.args[2] end end
-    return fc[1], fc[2], fc[3], fc[4], bc[1], bc[2], bc[3], bc[4], bt
-end
--- one rescale pass: every callback, each under pcall like Layout.lua's own runner
-function __rescale()
-    for _, fn in ipairs(FS.Layout._rescaleCallbacks) do pcall(fn) end
-end
-"""
-
-# The text size the box had before the fourth key squeezed it: three key slots left it 123 px at m = 250, and the text
-# was sized to it, (123 - 8) / (16 * 0.5615) = 12.8 px; 12.8 / 250 = 0.0512 of the map, so it scales with the map.
-READOUT_FONT_250 = 12.8
-READOUT_FONT_FRACTION = 0.0512
-COLOR_CYAN = (0.133, 0.878, 1.0)
-COLOR_AMBER_CLOCK = (1.0, 0.714, 0.282)
-
-
-def readout_row_checks() -> None:
-    """The coords + clock readout has its own slim full-width row directly under the bezel (the bezel's four keys
-    left it too little room: 'coords and clock collide', 55.1, 42.214:55). The row is part of the chassis (the
-    bezel's fill and violet border) with the LCD box inset in it: coords left, clock right, at the old text size."""
-    for pixel in (False, True):
-        tag = "rowpx" if pixel else "row"
-        for label, ui_height in (("250", None), ("208", 1200)):
-            setup = (settings_setup() if pixel else LIB_SETUP + TRAY_BLIZZARD)
-            lua = run("cut", ui_height, setup + ROW_LUA, None)
-            g = lua.globals()
-            m = g.Minimap.w
-            bezel, row, box = g.Minimap.fsBezel, g.Minimap.fsReadoutRow, g.Minimap.fsReadoutBox
-            coords, clock = g.Minimap.fsReadoutCoords, g.Minimap.fsReadoutClock
-            px = 768 / 1440 if pixel else 1.0
-
-            def same(a, b):
-                return bool(g.__same(a, b))
-
-            check(f"[{tag}@{label}] the readout row exists, a plain Frame parented in the bezel (chassis, not the map)",
-                  row is not None and row.otype == "Frame" and same(row.parent, bezel))
-            if row is None or box is None:
-                continue
-            anchors = sorted(k for k, _ in row.points.items())
-            check(f"[{tag}@{label}] it is directly under the bezel at full width: TOPLEFT and TOPRIGHT on the bezel's "
-                  f"BOTTOMLEFT and BOTTOMRIGHT, no offset, nothing else",
-                  anchors == ["TOPLEFT", "TOPRIGHT"]
-                  and same(row.points.TOPLEFT.rel, bezel) and row.points.TOPLEFT.relPoint == "BOTTOMLEFT"
-                  and row.points.TOPLEFT.x == 0 and row.points.TOPLEFT.y == 0
-                  and same(row.points.TOPRIGHT.rel, bezel) and row.points.TOPRIGHT.relPoint == "BOTTOMRIGHT"
-                  and row.points.TOPRIGHT.x == 0 and row.points.TOPRIGHT.y == 0)
-            check(f"[{tag}@{label}] it is slim: {row.h:g} high against the bezel's {bezel.h:g}, taller than its box "
-                  f"({box.h:g})", box.h < row.h < bezel.h)
-            check(f"[{tag}@{label}] it sits above the bezel's own chrome and under the keys "
-                  f"(levels bezel {bezel.level} < row {row.level} < key {g.Minimap.fsSettingsKey.level})",
-                  bezel.level < row.level < g.Minimap.fsSettingsKey.level)
-
-            # chassis chrome: the bezel's fill, the bezel's violet border, same thickness (the calls are recorded)
-            check(f"[{tag}@{label}] the row wears the bezel's fill and violet border, same thickness, radius 4",
-                  tuple(g.__chrome(row)) == tuple(g.__chrome(bezel))
-                  and all(c.args[2] == 4 for c in g.calls.fill.values() if same(c.frame, row))
-                  and all(c.args[3] == 4 for c in g.calls.border.values() if same(c.frame, row)))
-            fr, fg, fb, fa, br, bg, bb, ba, bt = g.__chrome(box)
-            check(f"[{tag}@{label}] the LCD box keeps its look: the dark chassis fill and a faint cyan border",
-                  (fr, fg, fb, fa) == tuple(g.__chrome(row)[:4])
-                  and all(abs(v - w) < 1e-3 for v, w in zip((br, bg, bb), COLOR_CYAN)) and abs(ba - 0.35) < 1e-6 and bt == 1)
-
-            # the box: a child of the row, inset evenly on both sides and top and bottom, so the row is the chassis
-            tl, br_ = box.points.TOPLEFT, box.points.BOTTOMRIGHT
-            padx, pady = tl.x, -tl.y
-            check(f"[{tag}@{label}] the box is inset in the row by {padx:.2f} each side (the bezel's key padding) and "
-                  f"{pady:.2f} top and bottom",
-                  same(box.parent, row) and same(tl.rel, row) and tl.relPoint == "TOPLEFT"
-                  and same(br_.rel, row) and br_.relPoint == "BOTTOMRIGHT"
-                  and padx > 0 and pady > 0 and br_.x == -padx and br_.y == pady
-                  and abs(padx - g.Minimap.fsBezel.children[1].points.LEFT.x) <= px / 2 + 1e-6)
-            check(f"[{tag}@{label}] the row is exactly its box plus the two vertical insets ({row.h:g} == {box.h:g} + "
-                  f"2 * {pady:g})", abs(row.h - (box.h + 2 * pady)) < 1e-6)
-            check(f"[{tag}@{label}] the box is above the row's own chrome (level {box.level} > {row.level})",
-                  box.level > row.level)
-
-            # text: coords left, clock right, mono, cyan and amber, at the old size
-            font = coords.fontSize
-            want = READOUT_FONT_250 if not ui_height else READOUT_FONT_FRACTION * m
-            check(f"[{tag}@{label}] text size restored: {font:.2f} px (the pre-Settings-key size {want:.2f}, "
-                  f"{READOUT_FONT_FRACTION} of the {m:.1f} px map), clock the same",
-                  abs(font - want) < 0.05 and clock.fontSize == font and font > 10 * m / 250)
-            check(f"[{tag}@{label}] coords are anchored LEFT of the box and the clock RIGHT of it, centred vertically",
-                  same(coords.points.LEFT.rel, box) and coords.points.LEFT.relPoint == "LEFT"
-                  and coords.points.LEFT.y == 0 and coords.points.LEFT.x > 0
-                  and same(clock.points.RIGHT.rel, box) and clock.points.RIGHT.relPoint == "RIGHT"
-                  and clock.points.RIGHT.y == 0 and clock.points.RIGHT.x == -coords.points.LEFT.x
-                  and len(list(coords.points.items())) == 1 and len(list(clock.points.items())) == 1)
-            check(f"[{tag}@{label}] coords are cyan, the clock amber",
-                  all(abs(coords.textColor[i + 1] - COLOR_CYAN[i]) < 1e-3 for i in range(3))
-                  and all(abs(clock.textColor[i + 1] - COLOR_AMBER_CLOCK[i]) < 1e-3 for i in range(3)))
-
-            # no overlap, with the widest reading ("99.9, 99.9" and "19:56"), and room to spare
-            width = box_width(g)
-            inset = coords.points.LEFT.x
-            adv = MONO_ADVANCE * font
-            coords_right = inset + 10 * adv
-            clock_left = width - inset - 5 * adv
-            check(f"[{tag}@{label}] coords end at {coords_right:.1f}, the clock starts at {clock_left:.1f}: they do "
-                  f"not overlap and keep at least two glyphs ({2 * adv:.1f}) apart",
-                  clock_left - coords_right >= 2 * adv)
-            check(f"[{tag}@{label}] a full 16 glyph reading fits inside the box ({16 * adv + 2 * inset:.1f} <= {width:.1f})",
-                  16 * adv + 2 * inset <= width + 1e-6)
-
-            # pixel crisp: with the client's pixel size, every edge is a whole number of physical pixels
-            if pixel:
-                whole = lambda v: abs(v / px - round(v / px)) < 1e-6
-                check(f"[{tag}@{label}] row height ({row.h / px:.3f} px), box height ({box.h / px:.3f}), the box's "
-                      f"insets ({padx / px:.3f}, {pady / px:.3f}) and the text inset ({inset / px:.3f}) are whole pixels",
-                      all(whole(v) for v in (row.h, box.h, padx, pady, inset)))
-
-            # the tray drawer, its tab and the quest timer's anchor all hang from the row's bottom edge
-            tray, toggle = g.Minimap.fsTray, g.Minimap.fsTrayToggle
-            check(f"[{tag}@{label}] the tray drawer and its tab hang from the row's bottom edge, not the bezel's",
-                  tray is not None and toggle is not None
-                  and same(tray.points.TOPLEFT.rel, row) and same(tray.points.TOPRIGHT.rel, row)
-                  and same(toggle.points.TOPRIGHT.rel, row) and same(toggle.parent, row))
-
-        # a rescale re-seats the pixels and re-hangs the tray; a rescale in combat waits for the end of it
-        lua = run("cut", 1200, settings_setup() + ROW_LUA, None)
-        g = lua.globals()
-        if pixel:
-            row, box = g.Minimap.fsReadoutRow, g.Minimap.fsReadoutBox
-            old_h = row.h
-            lua.execute("PixelUtil = { GetPixelToUIUnitFactor = function() return 768 / 1080 end }")
-            lua.execute("__combat = true; __rescale()")
-            check(f"[{tag}] a rescale in combat leaves the row alone ({row.h:g} == {old_h:g})", row.h == old_h)
-            lua.execute("__combat = false; FireEvent('PLAYER_REGEN_ENABLED')")
-            px2 = 768 / 1080
-            whole = lambda v: abs(v / px2 - round(v / px2)) < 1e-6
-            check(f"[{tag}] and the end of combat re-seats it on the new pixel size ({row.h / px2:.3f} px, box "
-                  f"{box.h / px2:.3f} px)", row.h != old_h and whole(row.h) and whole(box.h))
-            lua.execute("PixelUtil = { GetPixelToUIUnitFactor = function() return 768 / 1440 end }; __rescale()")
-            px1 = 768 / 1440
-            check(f"[{tag}] a rescale out of combat re-seats it at once ({row.h / px1:.3f} px)",
-                  abs(row.h - old_h) < 1e-6)
-            check(f"[{tag}] the tray is still on the row's bottom edge after the rescale passes",
-                  bool(g.__same(g.Minimap.fsTray.points.TOPLEFT.rel, row))
-                  and bool(g.__same(g.Minimap.fsTrayToggle.points.TOPRIGHT.rel, row)))
-
-
 def coords_setup(x: float, y: float, secret: bool = False) -> str:
     """Seat a player map position (0-1 fractions) and a game clock before the addon loads, so the
-    readout's first update at login formats them. With secret=True the position's numbers are an
-    opaque sentinel that throws on any arithmetic, and FS.IsSecret recognises it, like a secret
-    number on a live client."""
+    readout's first update at login formats them (the game clock is there to prove it is NOT shown). With
+    secret=True the position's numbers are an opaque sentinel that throws on any arithmetic, and
+    FS.IsSecret recognises it, like a secret number on a live client."""
     pos = "__SECRET, __SECRET" if secret else f"{x}, {y}"
     return f"""
 __SECRET = setmetatable({{}}, {{ __mul = function() error("secret arithmetic", 2) end }})
@@ -1224,26 +1062,208 @@ function GetGameTime() return 19, 56 end
 
 def coords_checks() -> None:
     """The readout shows the player position as 'x, y' percentages. A fraction of 1.0 would format
-    as '100.0' (17 glyphs with the clock, wider than the 16 a typical reading is budgeted at), so each axis clamps
-    to 99.9, and a secret position shows dashes instead of throwing."""
+    as '100.0' (12 glyphs, wider than the 10 the box is sized for), so each axis clamps to 99.9, and a
+    secret position shows dashes instead of throwing. Every reading is at most 10 glyphs and fits the box."""
     for label, ui_height in (("250", None), ("208", 1200)):
         cases = (
             ("(1.0, 1.0) clamps to 99.9, 99.9", 1.0, 1.0, False, "99.9, 99.9"),
             ("(0.9996, 1.5) rounds and clamps, never 100.0", 0.9996, 1.5, False, "99.9, 99.9"),
             ("(0.5, 0.25) is untouched", 0.5, 0.25, False, "50.0, 25.0"),
+            ("a typical position (0.55, 0.414)", 0.55, 0.414, False, "55.0, 41.4"),
+            ("a corner position (0.0, 0.05)", 0.0, 0.05, False, "0.0, 5.0"),
             ("a secret position shows dashes", 0, 0, True, "--.-, --.-"),
         )
         for name, x, y, secret, want in cases:
             lua = run("cut", ui_height, coords_setup(x, y, secret), None)
             g = lua.globals()
-            coords, clock = g.Minimap.fsReadoutCoords, g.Minimap.fsReadoutClock
-            width = box_width(g)
+            box, coords = g.Minimap.fsReadoutBox, g.Minimap.fsReadoutCoords
             check(f"[coords@{label}] {name}: reads {want!r}", (coords.text or "") == want)
             if want:
-                glyphs = len(coords.text) + 1 + len(clock.text)
-                need = glyphs * MONO_ADVANCE * coords.fontSize + READOUT_TEXT_PAD
-                check(f"[coords@{label}] {name}: {glyphs} glyphs with the clock fit the box "
-                      f"({need:.1f} <= {width:.1f})", glyphs <= READOUT_CHARS and need <= width + 1e-6)
+                glyphs = len(coords.text)
+                need = glyphs * MONO_ADVANCE * coords.fontSize + 2 * coords.points.LEFT.x
+                check(f"[coords@{label}] {name}: {glyphs} glyphs fit the box with the inset on both sides "
+                      f"({need:.1f} <= {box.w})", glyphs <= READOUT_CHARS and need <= box.w + 1e-6)
+
+
+# Every FontString the addon makes, in creation order (the permissive mock keeps none), the colour each was given, and the
+# helpers the coords checks read the recorded chrome and a rescale pass through.
+READOUT_LUA = r"""
+local R = getmetatable(UIParent)
+local create = R.CreateFontString
+__fontstrings = {}
+function R:CreateFontString(...)
+    local fs = create(self, ...)
+    __fontstrings[#__fontstrings + 1] = fs
+    return fs
+end
+function R:SetTextColor(r, g, b, a) self.textColor = { r, g, b, a } end
+function __same(a, b) return a == b end
+-- fill color, border color and border thickness/radius the chrome helpers were given for a frame
+function __chrome(f)
+    local fc, bc, bt, br, fr
+    for _, c in ipairs(calls.fill) do if c.frame == f then fc, fr = c.args[1], c.args[2] end end
+    for _, c in ipairs(calls.border) do if c.frame == f then bc, bt, br = c.args[1], c.args[2], c.args[3] end end
+    return fc[1], fc[2], fc[3], fc[4], fr, bc[1], bc[2], bc[3], bc[4], bt, br
+end
+-- how many frames hang from the bezel's bottom edge (TOPLEFT on its BOTTOMLEFT), and whether the first is the tray
+function __under_bezel()
+    local n, first = 0, nil
+    for _, f in ipairs(allFrames) do
+        local p = f.points.TOPLEFT
+        if p and p.rel == Minimap.fsBezel and p.relPoint == "BOTTOMLEFT" then
+            n = n + 1
+            first = first or f
+        end
+    end
+    return n, first == Minimap.fsTray
+end
+-- one rescale pass: every callback, each under pcall like Layout.lua's own runner
+function __rescale()
+    for _, fn in ipairs(FS.Layout._rescaleCallbacks) do pcall(fn) end
+end
+"""
+
+# The text size the box gave the readout with three key seats: 123 px of box at m = 250 took (123 - 8) / (16 * 0.5615) =
+# 12.8 px; 12.8 / 250 = 0.0512 of the map, so the most the text takes scales with the map. The box has less room now
+# (four key seats) and the text is fitted to it, which these maps leave at the cap.
+READOUT_FONT_FRACTION = 0.0512
+READOUT_INSET = 4   # box edge to the text, UI units: the most the text inset is
+COLOR_CYAN = (0.133, 0.878, 1.0)
+READOUT_FILL = (0.016, 0.008, 0.047, 0.85)
+
+
+def readout_checks() -> None:
+    """The coords readout, back in the bezel row right of the four keys (tracking, calendar, Settings, mail), and
+    nothing else: no clock text anywhere, no row of its own under the bezel, so the chassis is one bar again and the
+    tray, its tab and (QuestTimer.lua's) quest timer drawer seat on the bezel. The text is as large as the box takes, up
+    to 12.8 px at the 250 px map, and never clips or touches a key at the 250 px and 208 px maps; a narrow 125 px map shows
+    the fit taking over."""
+    for pixel in (False, True):
+        tag = "readoutpx" if pixel else "readout"
+        for label, ui_height in (("250", None), ("208", 1200), ("125", 720)):
+            base = settings_setup() if pixel else LIB_SETUP + TRAY_BLIZZARD
+            lua = run("cut", ui_height, base + coords_setup(0.55, 0.414) + READOUT_LUA, None)
+            g = lua.globals()
+            m = g.Minimap.w
+            bezel, box, coords = g.Minimap.fsBezel, g.Minimap.fsReadoutBox, g.Minimap.fsReadoutCoords
+            k1, k2, gear = g.MinimapCluster.Tracking, g.GameTimeFrame, g.Minimap.fsSettingsKey
+            mail = g.MinimapCluster.IndicatorFrame.MailFrame
+            px = 768 / 1440 if pixel else 1.0
+
+            def same(a, b):
+                return bool(g.__same(a, b))
+
+            # no clock: the field is gone, and no FontString reads like a time though the game says 19:56
+            fonts = [g.__fontstrings[i] for i in range(1, len(g.__fontstrings) + 1)]
+            times = [str(f.text) for f in fonts if f.text and re.fullmatch(r"\d{1,2}:\d{2}(\s?[AP]M)?", str(f.text))]
+            check(f"[{tag}@{label}] there is no clock: no clock field, and no text reads like a time {times}",
+                  g.Minimap.fsReadoutClock is None and not times)
+            in_box = [f for f in fonts if same(f.parent, box)]
+            check(f"[{tag}@{label}] the box holds exactly one text, the coords ({coords.text!r})",
+                  len(in_box) == 1 and same(in_box[0], coords) and coords.text == "55.0, 41.4")
+
+            # one bar: no row of its own, and what hangs under the chassis hangs from the bezel
+            n, tray_first = g.__under_bezel()
+            tray, toggle = g.Minimap.fsTray, g.Minimap.fsTrayToggle
+            check(f"[{tag}@{label}] there is no separate readout row, and the only thing under the bezel is the tray "
+                  f"drawer ({n} frame)", g.Minimap.fsReadoutRow is None and n == 1 and bool(tray_first))
+            check(f"[{tag}@{label}] the drawer hangs flush under the bezel: TOPLEFT/TOPRIGHT on its BOTTOMLEFT/BOTTOMRIGHT, "
+                  f"no offset",
+                  same(tray.points.TOPLEFT.rel, bezel) and tray.points.TOPLEFT.relPoint == "BOTTOMLEFT"
+                  and tray.points.TOPLEFT.x == 0 and tray.points.TOPLEFT.y == 0
+                  and same(tray.points.TOPRIGHT.rel, bezel) and tray.points.TOPRIGHT.relPoint == "BOTTOMRIGHT"
+                  and tray.points.TOPRIGHT.x == 0 and tray.points.TOPRIGHT.y == 0)
+            check(f"[{tag}@{label}] its toggle tab hangs off the bezel's bottom edge, right aligned at the bezel padding",
+                  same(toggle.points.TOPRIGHT.rel, bezel) and toggle.points.TOPRIGHT.relPoint == "BOTTOMRIGHT"
+                  and toggle.points.TOPRIGHT.y == 0 and toggle.points.TOPRIGHT.x == -k1.points.LEFT.x)
+
+            # where it sits: a child of the bezel, right aligned, vertically centred, in the bezel row
+            anchors = sorted(k for k, _ in box.points.items())
+            right = box.points.RIGHT
+            check(f"[{tag}@{label}] the box is a plain Frame in the bezel, anchored RIGHT to the bezel's RIGHT and nothing "
+                  f"else, centred vertically, {-right.x:.2f} in (the first key's inset {k1.points.LEFT.x:.2f})",
+                  box.otype == "Frame" and same(box.parent, bezel) and anchors == ["RIGHT"] and same(right.rel, bezel)
+                  and right.relPoint == "RIGHT" and right.y == 0 and right.x < 0
+                  and abs(-right.x - k1.points.LEFT.x) <= px / 2 + 1e-6)
+            check(f"[{tag}@{label}] it sits inside the bezel row with room above and below ({box.h:g} in {bezel.h:g}), "
+                  f"above the bezel's own chrome and under the keys (levels {bezel.level} < {box.level} < {gear.level})",
+                  2 <= (bezel.h - box.h) / 2 and bezel.level < box.level < gear.level)
+
+            # right of the four key seats, mail's included (it is only shown while mail waits)
+            pad, gap = k1.points.LEFT.x, gear.points.LEFT.x
+            slots_right = pad + 4 * gear.w + 3 * gap
+            box_left = m + right.x - box.w
+            check(f"[{tag}@{label}] the box starts right of all four key seats: box left {box_left:.1f} >= seat end "
+                  f"{slots_right:.1f} + gap {gap:.1f}", box_left >= slots_right + gap - 1e-6)
+            want_w = math.floor(m - pad - (slots_right + gap))
+            check(f"[{tag}@{label}] and takes what is left of them ({box.w:.2f} is {want_w} to {want_w + px:.2f})",
+                  want_w - 1e-6 <= box.w <= want_w + px + 1e-6)
+
+            # the LCD look it had before: the chassis dark inset, a faint cyan border at radius 4, cyan mono text
+            fr, fg, fb, fa, frad, br, bg, bb, ba, bt, brad = g.__chrome(box)
+            check(f"[{tag}@{label}] the box keeps the LCD look: dark chassis fill, faint cyan border (alpha 0.35, 1 px), "
+                  f"radius 4",
+                  all(abs(v - w) < 1e-6 for v, w in zip((fr, fg, fb, fa), READOUT_FILL))
+                  and all(abs(v - w) < 1e-3 for v, w in zip((br, bg, bb), COLOR_CYAN))
+                  and abs(ba - 0.35) < 1e-6 and bt == 1 and frad == 4 and brad == 4)
+            check(f"[{tag}@{label}] the coords are cyan, anchored LEFT of the box and centred vertically, one anchor",
+                  all(abs(coords.textColor[i + 1] - COLOR_CYAN[i]) < 1e-3 for i in range(3))
+                  and same(coords.points.LEFT.rel, box) and coords.points.LEFT.relPoint == "LEFT"
+                  and coords.points.LEFT.y == 0 and 0 < coords.points.LEFT.x <= READOUT_INSET
+                  and len(list(coords.points.items())) == 1)
+
+            # the size: as large as fits, to the map's fraction (12.8 px at 250), never clipping at either size
+            font, inset = coords.fontSize, coords.points.LEFT.x
+            cap = max(5, READOUT_FONT_FRACTION * m)
+            fit = (want_w - 2 * READOUT_INSET) / (READOUT_CHARS * MONO_ADVANCE)
+            want = max(5, min(cap, fit))
+            check(f"[{tag}@{label}] text is {font:.2f} px: the map's {READOUT_FONT_FRACTION} fraction ({cap:.2f}) "
+                  f"or the box's fit ({fit:.2f}), whichever is smaller, so as large as fits",
+                  abs(font - want) < 1e-6)
+            if label == "250":
+                check(f"[{tag}@{label}] at the 250 px map the text is the original 12.8 px", abs(font - 12.8) < 1e-6)
+            if label in ("250", "208"):
+                check(f"[{tag}@{label}] the box leaves the text its full size at this map ({font:.2f} == cap {cap:.2f})",
+                      abs(font - cap) < 1e-6)
+            else:
+                check(f"[{tag}@{label}] a narrow box takes the fit over: {font:.2f} < cap {cap:.2f}", font < cap - 0.05)
+            text_w = READOUT_CHARS * MONO_ADVANCE * font
+            check(f"[{tag}@{label}] a typical ('55.0, 41.4') and the widest ('99.9, 99.9') reading are {READOUT_CHARS} "
+                  f"glyphs, {text_w:.1f} px: {inset:.2f} + text + {inset:.2f} = {text_w + 2 * inset:.1f} <= box "
+                  f"{box.w:.1f}, so nothing clips and the text keeps {box.w - inset - text_w:.1f} px clear of the border",
+                  len(coords.text) == READOUT_CHARS and text_w + 2 * inset <= box.w + 1e-6)
+            check(f"[{tag}@{label}] the text stays clear of the keys: its left edge {box_left + inset:.1f} is at least a "
+                  f"gap past the last seat ({slots_right + gap:.1f})", box_left + inset >= slots_right + gap - 1e-6)
+            check(f"[{tag}@{label}] the box is a real size: text {font:.1f} px, box {box.w:.0f} x {box.h:.0f}",
+                  font >= 5 and box.h >= 1.5 * font and box.w > 0)
+
+            # pixel crisp: with the client's pixel size, every edge is a whole number of physical pixels
+            if pixel:
+                whole = lambda v: abs(v / px - round(v / px)) < 1e-6
+                check(f"[{tag}@{label}] box width ({box.w / px:.3f} px), height ({box.h / px:.3f}), right inset "
+                      f"({-right.x / px:.3f}) and text inset ({inset / px:.3f}) are whole pixels",
+                      all(whole(v) for v in (box.w, box.h, -right.x, inset)))
+
+        # a rescale reseats the pixels; nothing hangs from the box, so one in combat is seated at once too
+        if pixel:
+            lua = run("cut", 1200, settings_setup() + coords_setup(0.55, 0.414) + READOUT_LUA, None)
+            g = lua.globals()
+            box, coords = g.Minimap.fsReadoutBox, g.Minimap.fsReadoutCoords
+            old = (box.w, box.h, box.points.RIGHT.x, coords.points.LEFT.x)
+            lua.execute("PixelUtil = { GetPixelToUIUnitFactor = function() return 768 / 1080 end }; __rescale()")
+            px2 = 768 / 1080
+            whole = lambda v: abs(v / px2 - round(v / px2)) < 1e-6
+            check(f"[{tag}] a rescale re-seats the box on the new pixel size ({box.w / px2:.3f} x {box.h / px2:.3f} px)",
+                  (box.w, box.h, box.points.RIGHT.x, coords.points.LEFT.x) != old
+                  and all(whole(v) for v in (box.w, box.h, -box.points.RIGHT.x, coords.points.LEFT.x))
+                  and box.w >= math.floor(g.Minimap.w - g.MinimapCluster.Tracking.points.LEFT.x
+                                          - (g.MinimapCluster.Tracking.points.LEFT.x + 4 * g.Minimap.fsSettingsKey.w
+                                             + 3 * g.Minimap.fsSettingsKey.points.LEFT.x
+                                             + g.Minimap.fsSettingsKey.points.LEFT.x)) - 1e-6)
+            lua.execute("__combat = true; PixelUtil = { GetPixelToUIUnitFactor = function() return 768 / 1440 end }; "
+                        "__rescale(); __combat = false")
+            check(f"[{tag}] a rescale in combat re-seats it at once too, back on the first pixel size",
+                  abs(box.w - old[0]) < 1e-6 and abs(box.h - old[1]) < 1e-6)
 
 
 # A geometry world for the Edit Mode seat checks. The permissive mock above answers 0 for every
@@ -1934,7 +1954,7 @@ def main() -> int:
         toggle_skin = [c for c in skin if role(c.frame) == "toggle"]
         settings_fill = [c for c in fill if role(c.frame) == "settings"]
         settings_skin = [c for c in skin if role(c.frame) == "settings"]
-        fill = [c for c in fill if role(c.frame) in ("bezel", "row", "readout", "other")]
+        fill = [c for c in fill if role(c.frame) in ("bezel", "readout", "other")]
         skin = [c for c in skin if role(c.frame) == "other"]
         if ui_height:
             width = g.Minimap.w
@@ -1946,7 +1966,7 @@ def main() -> int:
         check(f"[{label}] map border radius {want_map}", len(map_border) == 1 and map_border[0].args[3] == want_map)
         # bezel / readout, identified by their frame (not by radius, which the map border could
         # share): radius 4 on both fill and border.
-        for who in ("bezel", "row", "readout"):
+        for who in ("bezel", "readout"):
             who_fill = [c for c in fill if role(c.frame) == who]
             who_border = [c for c in border if role(c.frame) == who]
             check(f"[{label}] {who} fill and border at 4",
@@ -1965,9 +1985,9 @@ def main() -> int:
             check(f"[{label}] key fill is {key_file}, margin {key_c}, READOUT_FILL tint",
                   len(fills) == 1 and fills[0].texture.endswith("\\" + key_file) and fills[0].slice == key_c
                   and abs(fills[0].tint[1] - 0.016) < 1e-9)
-            check(f"[{label}] key draws no rounded fill (bezel + readout row + readout box only)", len(fill) == 3)
+            check(f"[{label}] key draws no rounded fill (bezel + readout only)", len(fill) == 2)
         else:
-            check(f"[{label}] key keeps the rounded fill (bezel + readout row + readout box + key)", len(fill) == 4)
+            check(f"[{label}] key keeps the rounded fill (bezel + readout + key)", len(fill) == 3)
 
         # the Settings key: the bezel key recipe (cut2 fill + SkinButton ring at the key chamfer; round fill under "round")
         settings = g.Minimap.fsSettingsKey
@@ -2006,7 +2026,7 @@ def main() -> int:
     tray_checks()
     tray_failure_checks()
     settings_checks()
-    readout_row_checks()
+    readout_checks()
     mail_checks()
     coords_checks()
     first_login_checks()

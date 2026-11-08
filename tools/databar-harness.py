@@ -13,7 +13,10 @@ widget method is a no-op). It pins the behaviour the bar promises:
   * the width follows a UI scale change, and a bar too short for the lattice logs once;
   * COMBAT: the bar is restricted (the XP bar is anchored to it, the control deck chassis to the XP bar, and the deck
     hosts secure buttons), so a rescale or a /fsstrip show|hide in combat resizes, re-anchors, shows and hides nothing,
-    and PLAYER_REGEN_ENABLED replays it from the state current then.
+    and PLAYER_REGEN_ENABLED replays it from the state current then;
+  * TIME tooltip: hovering the TIME segment (and only it) shows a GameTooltip headed "Time" with a "Local" line (the
+    text the bar shows) and a "Realm" line (GetGameTime, 12-hour like the bar), anchored through FrameHelpers.AnchorTooltip,
+    refreshed when a minute rolls over, hidden on leave and on hide, never taking a tooltip another frame owns.
 
     python3 tools/databar-harness.py
 
@@ -92,12 +95,31 @@ function CreateFrame(kind, name, parent)
     if name then _G[name] = f end
     return f
 end
+function Region:EnableMouse(v) self.mouse = v and true or false end
 function __setUiScale(s) UIParent.scale = s end
 function __setScreenH(h) H = h end
 function GetPhysicalScreenSize() return W, H end
 function GetScreenWidth() return W end
 function InCombatLockdown() return __combat end
-date = os.date
+-- A fixed local clock where a test asks for one (__date["%I"] = "03" ...), the real one otherwise.
+__date = {}
+date = function(fmt) return __date[fmt] or os.date(fmt) end
+-- The realm clock: GetGameTime answers 24-hour (hour, minute); __realm = false takes the function away.
+__realm = { 16, 12 }
+function GetGameTime() return __realm[1], __realm[2] end
+-- GameTooltip, recording what was put in it and who owns it.
+GameTooltip = { lines = {}, shown = false, owner = nil, clears = 0, hides = 0 }
+function GameTooltip:SetOwner(o, anchor) self.owner, self.anchor, self.lines, self.shown = o, anchor, {}, false end
+function GameTooltip:IsOwned(o) return self.owner == o end
+function GameTooltip:ClearLines() self.lines = {}; self.clears = self.clears + 1 end
+function GameTooltip:SetText(t, r, g, b) self.lines = { { left = t, color = { r, g, b } } } end
+function GameTooltip:AddDoubleLine(l, r, lr, lg, lb, rr, rg, rb)
+    self.lines[#self.lines + 1] = { left = l, right = r, leftColor = { lr, lg, lb }, rightColor = { rr, rg, rb } }
+end
+function GameTooltip:Show() self.shown = true end
+function GameTooltip:Hide() self.shown = false; self.hides = self.hides + 1 end
+-- Stands in for FrameHelpers.AnchorTooltip: puts the tooltip on the owner and records who asked.
+__anchored = {}
 GetFramerate = function() return 60 end
 GetMoney = function() return 0 end
 C_Container = { GetContainerNumFreeSlots = function() return __bagFree or 10 end, GetContainerNumSlots = function() return 20 end }
@@ -105,6 +127,8 @@ unpack = unpack or table.unpack
 
 local noop = function() end
 local FS = {
+    IsSecret = function(v) return v == 99 end,   -- 99 stands in for a secret number
+    FrameHelpers = { AnchorTooltip = function(owner) __anchored[#__anchored + 1] = owner; GameTooltip:SetOwner(owner, "ANCHOR_NONE") end },
     Layout = { OnRescale = function(fn) __rescale[#__rescale + 1] = fn end },
     LogDegradeOnce = function(key, msg) __logs[#__logs + 1] = key end,
     Theme = {
@@ -162,6 +186,20 @@ function __linkParts()
              recessAnchored = recess.pt.point == "LEFT" and recess.pt.rel == label and recess.pt.relPoint == "RIGHT"
                  and recess.pt.x == 6 and recess.pt.y == 0 }
 end
+-- A segment's frame and its value text, found by the label it was built with ("TIME"): the frame is the label's parent,
+-- the value is the next font string created in that frame.
+function __segment(label)
+    local frame, value
+    for _, f in ipairs(__frames) do
+        if f.kind == "fontstring" and f.text == label and f.parent and f.parent.parent == _G.ForeverSTUwaveDataBar then
+            frame = f.parent
+        end
+    end
+    for _, f in ipairs(__frames) do
+        if frame and f.kind == "fontstring" and f.parent == frame and f.text ~= label and not value then value = f end
+    end
+    return frame, value
+end
 function __makeBridge(shown, footprint)
     local b = CreateFrame("Frame", "ForeverStatusStripFrame", UIParent)
     b.shown = shown
@@ -183,11 +221,14 @@ def check(cond: bool, label: str, detail: str = "") -> None:
 
 
 class Bar:
-    def __init__(self, ui_scale: float = 0.5333, phys_h: int = PHYS_H, corners: str = "cut") -> None:
+    def __init__(self, ui_scale: float = 0.5333, phys_h: int = PHYS_H, corners: str = "cut", pre: str = "") -> None:
+        """`pre` is Lua run after the mock and before DataBar.lua loads (the module reads the client's API at load)."""
         self.rt = LuaRuntime(unpack_returned_tuples=False)
         self.rt.eval("function(src, ...) assert(loadstring(src))(...) end")(MOCK, SCREEN_W, phys_h)
         self.rt.execute(f'__FS.Theme.CHROME_CORNERS = "{corners}"')
         self.rt.execute(f"__setUiScale({ui_scale})")
+        if pre:
+            self.rt.execute(pre)
         self.rt.eval("__load")(DATABAR.read_text(encoding="utf-8"))
 
     def run(self, code: str):
@@ -454,6 +495,140 @@ __ok2, __warn2, __full2 = __tick(10), __tick(4), __tick(1)
     check(b.rt.eval("__colors") == 0, "revisiting every state created no new colour objects", str(b.rt.eval("__colors")))
 
 
+def lines(b: Bar) -> list[tuple]:
+    """GameTooltip's lines as (left, right) python strings, header first."""
+    return [(str(v["left"]), str(v["right"]) if v["right"] is not None else None)
+            for v in b.rt.eval("GameTooltip.lines").values()]
+
+
+def hover(b: Bar, label: str = "TIME") -> None:
+    b.run(f'local f = __segment("{label}"); f.scripts.OnEnter(f)')
+
+
+def test_time_tooltip() -> None:
+    print("\n== TIME tooltip: local and realm time in GameTooltip on hover, only on the TIME segment")
+    b = Bar()
+    b.run('__date["%I"], __date["%M"], __date["%p"] = "03", "12", "PM"; __realm = { 16, 12 }')
+    b.login()
+    frame = b.rt.eval('(__segment("TIME"))')
+    assert frame is not None, "no TIME segment was built"
+    check(b.rt.eval('select(2, __segment("TIME")).text') == "3:12 PM",
+          "the bar shows the local time, 12-hour, no leading zero", str(b.rt.eval('select(2, __segment("TIME")).text')))
+    check(b.rt.eval('(__segment("TIME")).mouse') is True and callable(b.rt.eval('(__segment("TIME")).scripts.OnEnter')),
+          "the TIME segment takes the mouse and has an OnEnter")
+    others = [b.rt.eval(f'(__segment("{lbl}")).mouse') for lbl in ("FPS", "BAGS", "GOLD")]
+    check(all(m in (None, False) for m in others)
+          and all(b.rt.eval(f'(__segment("{lbl}")).scripts == nil') for lbl in ("FPS", "BAGS", "GOLD")),
+          "no other segment takes the mouse or has scripts (click-through as before)", str(others))
+    check(b.rt.eval("GameTooltip.shown") is False, "nothing shows before the mouse is on the segment")
+
+    hover(b)
+    got = lines(b)
+    check(got == [("Time", None), ("Local", "3:12 PM"), ("Realm", "4:12 PM")],
+          'hover: header "Time", then "Local 3:12 PM" and "Realm 4:12 PM"', str(got))
+    check(b.rt.eval("GameTooltip.shown") is True and b.rt.eval('GameTooltip.owner == (__segment("TIME"))'),
+          "hover: the tooltip is shown and owned by the TIME segment")
+    check(b.rt.eval('#__anchored == 1 and __anchored[1] == (__segment("TIME"))'),
+          "hover: it was placed by FrameHelpers.AnchorTooltip on the segment, like the action bar tabs")
+    check(got[1][1] == str(b.rt.eval('select(2, __segment("TIME")).text')),
+          "hover: the Local line is exactly the text the bar shows", str(got))
+    cols = b.rt.eval("GameTooltip.lines[2].leftColor[1] == 0.60 and GameTooltip.lines[2].rightColor[1] == 1 "
+                     "and GameTooltip.lines[1].color[2] == 1")
+    check(cols is True, "hover: header cyan, labels muted, times white")
+    texts = " ".join(f"{l} {r or ''}" for l, r in got).lower()
+    check(not any(w in texts for w in ("bot", "automat", "macro", "macros")), "client text stays neutral", texts)
+
+    b.run('local f = __segment("TIME"); f.scripts.OnLeave(f)')
+    check(b.rt.eval("GameTooltip.shown") is False, "leave: the tooltip hides")
+    b.run('GameTooltip:SetOwner(UIParent, "ANCHOR_CURSOR"); GameTooltip:Show(); local f = __segment("TIME"); f.scripts.OnLeave(f)')
+    check(b.rt.eval("GameTooltip.shown") is True, "leave: another frame's tooltip is left alone")
+
+    hover(b)
+    b.run('local f = __segment("TIME"); f.scripts.OnHide(f)')
+    check(b.rt.eval("GameTooltip.shown") is False, "hide with the mouse on it (no OnLeave comes): the tooltip hides")
+
+
+def test_time_tooltip_formats() -> None:
+    print("\n== TIME tooltip: realm time is 12-hour, the way the bar formats local time")
+    cases = [((0, 5), "12:05 AM"), ((1, 0), "1:00 AM"), ((9, 30), "9:30 AM"), ((12, 0), "12:00 PM"),
+             ((13, 7), "1:07 PM"), ((16, 12), "4:12 PM"), ((23, 59), "11:59 PM")]
+    for (hour, minute), want in cases:
+        b = Bar()
+        b.run(f'__date["%I"], __date["%M"], __date["%p"] = "03", "12", "PM"; __realm = {{ {hour}, {minute} }}')
+        b.login()
+        hover(b)
+        got = lines(b)
+        check(len(got) == 3 and got[2] == ("Realm", want), f"realm {hour:02d}:{minute:02d} reads {want}", str(got))
+    # local: %I's leading zero goes, midnight and noon read 12, the same call the bar makes
+    for (i, m, p), want in ((("01", "05", "AM"), "1:05 AM"), (("12", "00", "AM"), "12:00 AM"), (("11", "45", "PM"), "11:45 PM")):
+        b = Bar()
+        b.run(f'__date["%I"], __date["%M"], __date["%p"] = "{i}", "{m}", "{p}"')
+        b.login()
+        hover(b)
+        bar_text = str(b.rt.eval('select(2, __segment("TIME")).text'))
+        got = lines(b)
+        check(got[1] == ("Local", want) and bar_text == want, f"local {i}:{m} {p}: tooltip and bar both read {want}",
+              f"{got} bar {bar_text}")
+    # no realm clock, or a secret or odd one: the Realm line says so and nothing throws
+    for name, pre, setup in (("no GetGameTime", "GetGameTime = nil", ""), ("nil hour", "", "__realm = { nil, 5 }"),
+                             ("a secret hour", "", "__realm = { 99, 5 }"), ("a string minute", "", '__realm = { 4, "x" }')):
+        b = Bar(pre=pre)
+        b.run('__date["%I"], __date["%M"], __date["%p"] = "03", "12", "PM"; ' + setup)
+        b.login()
+        hover(b)
+        got = lines(b)
+        check(got == [("Time", None), ("Local", "3:12 PM"), ("Realm", "--")], f"{name}: Local still reads, Realm shows --", str(got))
+
+
+def test_time_tooltip_refresh() -> None:
+    print("\n== TIME tooltip: stays right while the mouse is on it, and never takes another frame's tooltip")
+    b = Bar()
+    b.run('__date["%I"], __date["%M"], __date["%p"] = "03", "12", "PM"; __realm = { 16, 12 }')
+    b.login()
+    hover(b)
+    clears = b.rt.eval("GameTooltip.clears")
+    b.run("local bar = ForeverSTUwaveDataBar; bar.scripts.OnUpdate(bar, 100)")
+    check(lines(b)[1:] == [("Local", "3:12 PM"), ("Realm", "4:12 PM")] and b.rt.eval("GameTooltip.clears") == clears,
+          "a tick in the same minute rewrites nothing", str(lines(b)))
+    b.run('__date["%M"] = "13"; __realm = { 16, 13 }; local bar = ForeverSTUwaveDataBar; bar.scripts.OnUpdate(bar, 100)')
+    got = lines(b)
+    check(got == [("Time", None), ("Local", "3:13 PM"), ("Realm", "4:13 PM")] and b.rt.eval("GameTooltip.shown") is True,
+          "a minute rolling over while hovering updates both lines", str(got))
+    check(b.rt.eval('GameTooltip.owner == (__segment("TIME"))') and b.rt.eval("#__anchored") == 1,
+          "the refresh keeps the tooltip where it was (no new anchor)")
+    b.run('GameTooltip:SetOwner(UIParent, "ANCHOR_CURSOR"); GameTooltip:SetText("Other"); GameTooltip:Show()')
+    b.run('__date["%M"] = "14"; __realm = { 16, 14 }; local bar = ForeverSTUwaveDataBar; bar.scripts.OnUpdate(bar, 100)')
+    check(lines(b) == [("Other", None)] and b.rt.eval("GameTooltip.owner == UIParent"),
+          "another frame's tooltip is never overwritten by the tick", str(lines(b)))
+    b.run('__date["%M"] = "15"; __realm = { 16, 15 }; local bar = ForeverSTUwaveDataBar; bar.scripts.OnUpdate(bar, 100)')
+    check(lines(b) == [("Other", None)], "and the segment forgets the hover until the mouse comes back")
+    hover(b)
+    check(lines(b) == [("Time", None), ("Local", "3:15 PM"), ("Realm", "4:15 PM")], "hovering again shows it afresh", str(lines(b)))
+
+    # no FrameHelpers (or no AnchorTooltip): the tooltip goes above the segment, as AnchorTooltip's own fallback
+    b = Bar()
+    b.run('__FS.FrameHelpers = nil; __date["%I"], __date["%M"], __date["%p"] = "03", "12", "PM"')
+    b.login()
+    hover(b)
+    check(b.rt.eval("GameTooltip.anchor") == "ANCHOR_TOP" and b.rt.eval('GameTooltip.owner == (__segment("TIME"))')
+          and len(lines(b)) == 3, "without FrameHelpers the tooltip is still shown, anchored above the segment")
+
+
+def test_time_tooltip_unavailable() -> None:
+    print("\n== TIME tooltip: a client without GameTooltip loses the tooltip and nothing else")
+    b = Bar()
+    b.run("GameTooltip = nil")
+    b.login()
+    try:
+        hover(b)
+        b.run('local f = __segment("TIME"); f.scripts.OnLeave(f); f.scripts.OnHide(f)')
+        ok = True
+    except Exception as exc:   # noqa: BLE001 - the check is that nothing throws
+        ok = False
+        print(f"    raised {exc}")
+    check(ok, "hover, leave and hide without a GameTooltip raise nothing")
+
+
 def main() -> int:
     test_equal_without_bridge()
     test_link_between_bags_and_time()
@@ -463,6 +638,10 @@ def main() -> int:
     test_meter_corners()
     test_combat()
     test_bags_gradient_colors_are_reused()
+    test_time_tooltip()
+    test_time_tooltip_formats()
+    test_time_tooltip_refresh()
+    test_time_tooltip_unavailable()
     print(f"\n{CHECKS} checks, {len(FAILURES)} failed")
     for f in FAILURES:
         print(f"  - {f}")
