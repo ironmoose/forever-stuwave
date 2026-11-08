@@ -946,7 +946,7 @@ def static_checks() -> list[str]:
             errs.append(f"{path}: an em or en dash")
         if re.search(r"\b(bots?|automat\w*)\b", src, re.I):
             errs.append(f"{path}: flagged wording")
-        if re.search(r"Parker", src):
+        if re.search("Park" + "er", src):         # assembled from pieces, as private-name-gate.py does, so this file never holds the name
             errs.append(f"{path}: a private name")
     toc = [ln.strip() for ln in TOC.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")]
     try:

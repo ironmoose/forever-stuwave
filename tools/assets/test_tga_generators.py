@@ -231,18 +231,36 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "mage_ward": (512, 512), "mage_ward_mist": (512, 512), "mage_ward_glyph": (32, 32), "mage_ward_buff": (128, 128),
         "mage_ice_lit": (64, 128), "mage_ice_cd": (128, 128), "mage_mist_dense": (128, 128),
     },
-    # generate_shaman_shocks.py: the Shaman Gunsight shock trace (a zigzag over 162 x 20.25 image px, plus its glow with 8 px
-    # of margin), the shock bolt (fill, stroke, glow on one 32 px canvas), the Fire Nova ring and its glow (44 px canvas) and
-    # the footer's dashed Nova pip (10 px canvas).
+    # generate_shaman_shocks.py: the Shaman Gunsight Fire Nova ring and its glow (44 px canvas) and the footer's dashed Nova pip
+    # (10 px canvas). The shock tracker is generate_shaman_disc.py's.
     "shaman_shocks": {
-        "shock_trace_line": (256, 32),
-        "shock_trace_glow": (256, 32),
-        "shock_bolt_fill": (64, 64),
-        "shock_bolt_line": (64, 64),
-        "shock_bolt_glow": (64, 64),
         "nova_ring": (64, 64),
         "nova_ring_glow": (64, 64),
         "nova_pip": (16, 16),
+    },
+    # generate_shaman_disc.py: the Shaman Gunsight shock tracker (2026-11-07 polish): the rune disc atlas (4 x 4 cells of 64 texels),
+    # its stepped halos (two 128 texel cells), the engine's rim ring and its mirror (a 32 px cell), and the charged bolt that a
+    # vertical StatusBar crops (16 x 32 px at two texels a px).
+    "shaman_disc": {
+        "shaman_disc": (256, 256),
+        "shaman_disc_halo": (256, 128),
+        "shaman_disc_rim": (64, 64),
+        "shaman_disc_rim_mirror": (64, 64),
+        "shaman_bolt_lit": (32, 64),
+    },
+    # generate_hunter_scope.py: the Hunter Gunsight range scope (2026-11-07): the zone bands and ring lines (4 x 4 cells of 128 texels),
+    # the rim flashes and the divider (3 x 3 cells of 160 texels), and the sprites (the skull, the brackets, the quiver and the two
+    # trap slot icons; 4 x 8 cells of 64 texels).
+    "hunter_scope": {
+        "hunter_zones": (512, 512),
+        "hunter_rings": (512, 512),
+        "hunter_sprites": (256, 512),
+    },
+    # generate_hunter_traps.py: the Hunter Gunsight trap piece: the open and shut jaws and the two slot bars (4 x 4 cells of 128 x 64
+    # texels) and the lit shut jaws a vertical StatusBar crops (32 x 16 px at two texels a px).
+    "hunter_traps": {
+        "hunter_trap": (512, 256),
+        "hunter_trap_lit": (64, 32),
     },
     "icon_social": (32, 32),
     "icon_window": {"icon_minimize": (32, 32), "icon_maximize": (32, 32)},

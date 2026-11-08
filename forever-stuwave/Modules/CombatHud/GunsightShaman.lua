@@ -20,12 +20,12 @@
 --   locked  the element is not open yet (Earth 4, Fire 10, Water 20, Air 30): a dotted empty mold with its level and name.
 --   far     a totem you walked away from (ShamanTotems sets it from the drop position): a ghost pole, a dashed amber head, FAR.
 --
--- The shock trace along the ground and the Fire Nova ring are GunsightShamanShocks.lua's (FS.GunsightShamanShocks: Build(frame) ->
+-- The shock tracker (the rune disc and its bolt, right of the poles) and the Fire Nova ring are GunsightShamanShocks.lua's (FS.GunsightShamanShocks: Build(frame) ->
 -- section, Seat(section, rect, scale), OnShow(section), OnHide(section); every call is feature detected and pcalled, the table may
 -- be absent). There is no KICK tag in that lane: KICK comes from GunsightTape.lua's class neutral tag. The poles tell the section
 -- where the Fire totem is through `section.SetFire(up, headY)` (up: the Fire totem stands and is not FAR; headY: the Fire head's
 -- centre in image px from the rect's top), called only when one of the two changed and once more after the section's OnShow. The
--- footer row below the ground (NOVA and the right hand end of the ground line's trace) is left free for it.
+-- footer row below the ground (NOVA) and the strip right of the poles (the disc and its label) are left free for it.
 --
 -- VISIBILITY. A class module: the host hides with no target and onHide / onShow fire on that edge (GunsightAreas.lua). onHide stops
 -- the OnUpdate and the subscription; onShow subscribes, re-reads the totems and repaints. ShamanTotems keeps listening through
@@ -603,7 +603,7 @@ function Sync()
 end
 
 -------------------------------------------------------------------------------
--- The shock trace, the Nova ring (GunsightShamanShocks.lua): feature detected, never fatal
+-- The shock tracker, the Nova ring (GunsightShamanShocks.lua): feature detected, never fatal
 -------------------------------------------------------------------------------
 
 local function Shocks(name, ...)
