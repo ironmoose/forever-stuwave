@@ -15,13 +15,15 @@ class modules plug into (the design mockup). The checks pin:
     module, retired by a later registration, never shown for an unreadable class token;
   * the target gate: a Target Debuffs host follows FS.TargetTakesDots; a class module and the coming soon plate follow
     FS.HasTarget (hidden with no target, onHide / onShow fired on each edge, all legal in combat);
-  * the class module's backing plate: one dark panel (Theme.AddPanelChrome, COLOR_BG fill) per area host, behind
-    whatever the host holds, sized to the area rect plus a small pad, shown only while a real class module is
+  * the class module's backing plate: one dark panel per area host in the party frame box recipe (Theme.AddRoundedFill
+    at chamfer 6 in COLOR_BG, Theme.SkinButton chamfer 6, glow 0.5, COLOR_POWER cyan, all on the plate frame itself),
+    behind whatever the host holds, sized to the area rect plus a small pad, shown only while a real class module is
     in that area, its opacity the Config setting (0 hides it), applied live, in combat and on a profile switch.
 
 The mock is the Gunsight harness mock plus SetParent, RegisterUnitEvent and the client's child frame level
-rule (parent + 1). Theme is a stub that records AddPanelChrome (the plate is the one thing here that
-draws); FS.TargetTakesDots, UnitClass are stubs; the real Layout.lua, Config.lua, Gunsight.lua are loaded.
+rule (parent + 1). Theme is a stub that records AddRoundedFill and SkinButton (the plate is the one thing here that
+draws), except for the cases that load the real Theme.lua to check the glow registration; FS.TargetTakesDots,
+UnitClass are stubs; the real Layout.lua, Config.lua, Gunsight.lua are loaded.
 
     python3 tools/gunsightareas-harness.py
 
@@ -70,6 +72,12 @@ function Frame:SetParent(p)
     if p then p.children[#p.children + 1] = self end
 end
 function Frame:RegisterUnitEvent(e) self.events[e] = true end
+-- The texture calls the real Theme.lua makes for a fill, a ring and a glow (the cases that load it); the plain mock
+-- draws nothing, so each is recorded or ignored.
+for _, name in ipairs({ "SetDrawLayer", "SetVertexColor", "SetBlendMode", "SetTexCoord", "SetTextureSliceMargins",
+        "SetTextureSliceMode", "SetSnapToPixelGrid", "SetTexelSnappingBias", "SetHorizTile", "SetVertTile" }) do
+    if not Frame[name] then Frame[name] = function() end end
+end
 
 -- The client gives a new child frame its parent's level + 1 (the mock leaves every frame at 1).
 local plainCreateFrame = CreateFrame
@@ -85,23 +93,39 @@ function UnitClass() return CLASS == "WARLOCK" and "Warlock" or CLASS, CLASS end
 """
 
 PRELUDE = r"""
--- A Theme with the two colour tokens and the panel chrome helper the plate uses; PANELS records every call.
-PANELS = {}
-local function stubTheme()
-    FS.Theme = { COLOR_BG = { 0.102, 0.063, 0.145, 0.80 }, COLOR_BORDER = { 0.659, 0.333, 0.969, 1 } }
+-- A Theme with the colour tokens and the two party box helpers the plate uses (AddRoundedFill and SkinButton): FILLS and
+-- SKINS record every call. PANELS records AddPanelChrome, which the plate no longer uses.
+PANELS, FILLS, SKINS = {}, {}, {}
+local function stubTheme(missing)
+    FS.Theme = { COLOR_BG = { 0.102, 0.063, 0.145, 0.80 }, COLOR_BORDER = { 0.659, 0.333, 0.969, 1 },
+        COLOR_POWER = { 0.133, 0.878, 1, 1 } }
     function FS.Theme.AddPanelChrome(frame, opts)
         local fill, glow, border = frame:CreateTexture(nil, "BACKGROUND"), frame:CreateTexture(nil, "BACKGROUND"),
             frame:CreateTexture(nil, "BORDER")
         PANELS[#PANELS + 1] = { frame = frame, opts = opts, fill = fill, glow = glow, border = border }
         return fill, glow, border
     end
+    function FS.Theme.AddRoundedFill(frame, color, chamfer)
+        FILLS[#FILLS + 1] = { frame = frame, color = color, chamfer = chamfer, tex = frame:CreateTexture(nil, "BACKGROUND") }
+    end
+    function FS.Theme.SkinButton(frame, opts)
+        local glow, ring = frame:CreateTexture(nil, "OVERLAY"), frame:CreateTexture(nil, "OVERLAY")
+        frame.fsSkin = { glow = glow, border = { ring = ring }, chamfer = opts and opts.chamfer }
+        SKINS[#SKINS + 1] = { frame = frame, opts = opts, glow = glow, ring = ring }
+        return frame.fsSkin
+    end
+    if missing then FS.Theme[missing] = nil end
 end
 
 local function boot(opts)
     opts = opts or {}
     SetScreen(opts.height or 1440)
     ForeverSTUwaveDB = opts.db or {}
-    if not opts.noTheme then stubTheme() end
+    if opts.realTheme then
+        loadAddonFile(THEME_SRC, "Core/Theme.lua")
+    elseif not opts.noTheme then
+        stubTheme(opts.missing)
+    end
     function UnitGUID() return "Player-1-0001" end
     CLASS = opts.class or "WARLOCK"
     TARGET = true
@@ -748,7 +772,7 @@ check(plate ~= nil, "the lower host has a plate")
 check(plate:GetParent() == host, "the plate hangs off the host, so the host's hide takes it along")
 check(plate:IsShown() and plate:IsVisible(), "the plate shows with the class module")
 check(plate:GetFrameLevel() < cl.frame:GetFrameLevel(), "the plate sits below the module frame (" .. plate:GetFrameLevel() .. " vs " .. cl.frame:GetFrameLevel() .. ")")
-check(plate:GetFrameLevel() <= host:GetFrameLevel() + 0, "and no higher than the host's own level")
+check(plate:GetFrameLevel() == host:GetFrameLevel(), "and at the host's own level, not the child level (host + 1)")
 local pad = Gs.ui(Areas.PLATE_PAD)
 check(Areas.PLATE_PAD > 0 and Areas.PLATE_PAD <= 4, "a small pad, short of the 4 image px gap between the areas, got " .. tostring(Areas.PLATE_PAD))
 near(plate:GetWidth(), host:GetWidth() + 2 * pad, "plate width is the area plus the pad each side")
@@ -761,16 +785,68 @@ check(Areas.Plate("upper") ~= nil and not Areas.Plate("upper"):IsShown(), "the u
 check(Areas.Plate("bogus") == nil, "no plate for an unknown area")
 """)
 
-case("the_plate_is_the_shared_panel_chrome_with_the_COLOR_BG_fill_and_a_violet_border")(PLATE_HELPERS + r"""
-local Gs, Areas = bootClass()
-local plate = Areas.Plate("lower")
-local call
-for _, c in ipairs(PANELS) do if c.frame == plate then call = c end end
-check(call, "Theme.AddPanelChrome was called on the plate frame")
-local bg, fill = FS.Theme.COLOR_BG, call.opts.fillColor
-check(fill[1] == bg[1] and fill[2] == bg[2] and fill[3] == bg[3], "the fill is COLOR_BG's colour")
-check(fill[4] == 1, "the fill is solid: the frame's alpha is the setting, got " .. tostring(fill[4]))
-check(call.opts.accent == FS.Theme.COLOR_BORDER, "the border is the panel violet")
+case("the_plate_wears_the_party_box_recipe_on_its_own_frame")(PLATE_HELPERS + r"""
+local Gs, Areas, cl = bootClass()
+local T = FS.Theme
+for _, area in ipairs({ "upper", "lower" }) do
+    local plate, host = Areas.Plate(area), Areas.Host(area)
+    local fill, skin
+    for _, c in ipairs(FILLS) do if c.frame == plate then check(fill == nil, area .. ": one fill"); fill = c end end
+    for _, c in ipairs(SKINS) do if c.frame == plate then check(skin == nil, area .. ": one SkinButton"); skin = c end end
+    check(fill, area .. ": Theme.AddRoundedFill was called on the plate frame")
+    check(skin, area .. ": Theme.SkinButton was called on the plate frame")
+    local bg = T.COLOR_BG
+    check(fill.color[1] == bg[1] and fill.color[2] == bg[2] and fill.color[3] == bg[3], area .. ": the fill is COLOR_BG's colour")
+    check(fill.color[4] == 1, area .. ": the fill is solid, the frame's alpha is the setting, got " .. tostring(fill.color[4]))
+    check(fill.chamfer == 6, area .. ": the fill's chamfer is the party box's 6, got " .. tostring(fill.chamfer))
+    check(skin.opts.chamfer == 6, area .. ": the ring's chamfer is 6, got " .. tostring(skin.opts.chamfer))
+    check(skin.opts.glowAlpha == 0.5, area .. ": the glow is the party box's 0.5, got " .. tostring(skin.opts.glowAlpha))
+    check(skin.opts.borderColor == T.COLOR_POWER, area .. ": the border is the party box cyan, COLOR_POWER")
+    -- the fill, ring and glow are regions of the plate itself, so the plate's own level and alpha rule all three
+    check(fill.tex.parent == plate and skin.ring.parent == plate and skin.glow.parent == plate, area .. ": all three are plate regions")
+    for _, child in ipairs(plate.children) do
+        check(child.kind ~= "Frame", area .. ": no child frame on the plate, so no ring or glow can draw over module art")
+    end
+    check(plate:GetFrameLevel() == host:GetFrameLevel(), area .. ": the plate stays at the host's own level")
+end
+check(#FILLS == 2 and #SKINS == 2, "one recipe per plate, got " .. #FILLS .. " fills and " .. #SKINS .. " rings")
+check(#PANELS == 0, "AddPanelChrome (the violet panel) is no longer used")
+local lowerPlate = Areas.Plate("lower")
+check(lowerPlate:GetFrameLevel() < cl.frame:GetFrameLevel(), "every module frame still draws above the plate")
+""")
+
+case("the_plate_glow_is_registered_on_the_plate_and_follows_hide_show_resize_and_combat")(PLATE_HELPERS + r"""
+local Gs, Areas, cl = bootClass({ realTheme = true })
+local T = FS.Theme
+local plate, host = Areas.Plate("lower"), Areas.Host("lower")
+local why = {} for k, v in pairs(DEGRADED) do why[#why + 1] = k .. ": " .. tostring(v) end
+check(plate and plate.fsSkin, "the real Theme.SkinButton skinned the plate: " .. table.concat(why, "; "))
+local skin = plate.fsSkin
+check(skin.chamfer == 6, "the real ring is the chamfer 6 set, got " .. tostring(skin.chamfer))
+local seat = T.glowSeats[skin.glow]
+check(seat and seat.anchor == plate, "the glow is registered with Theme.RegisterGlow on the plate")
+check(skin.glow.parent == plate and skin.border.ring.parent == plate, "glow and ring are regions of the plate")
+check(#skin.glow.points == 2 and skin.glow.points[1][2] == plate and skin.glow.points[2][2] == plate,
+    "the glow is anchored to the plate's two corners, so a resize by SeatAll carries it")
+local function overhang() return skin.glow.points[1][4], skin.glow.points[1][5] end
+local x, y = overhang()
+check(x < 0 and y > 0, "the glow reaches past the plate's top left corner")
+-- hidden by the setting, resized by a rescale (SeatAll), shown again: the glow stays registered and seated
+setOpacity(0)
+check(not plate:IsShown(), "the plate is hidden")
+SetScreen(1200)
+fire("UI_SCALE_CHANGED")
+check(T.glowSeats[skin.glow] and T.glowSeats[skin.glow].anchor == plate, "still registered after a rescale while hidden")
+check(#skin.glow.points == 2 and skin.glow.points[1][2] == plate, "reseated on the plate after the rescale")
+local pad = Gs.ui(Areas.PLATE_PAD)
+near(plate:GetWidth(), host:GetWidth() + 2 * pad, "the plate is the new size")
+setOpacity(80)
+check(plate:IsShown() and #skin.glow.points == 2, "shown again with the glow seated")
+-- a reseat in combat is legal: the plate is a plain frame, nothing waits for regen
+IN_COMBAT = true
+T.ReseatGlows()
+check(#skin.glow.points == 2 and not T.glowsPending, "a reseat in combat touches the plate glow and defers nothing")
+check(#BLOCKED == 0, "nothing protected was touched: " .. table.concat(BLOCKED, ","))
 """)
 
 case("the_plate_alpha_follows_the_setting_and_a_change_applies_live")(PLATE_HELPERS + r"""
@@ -891,7 +967,7 @@ near(plate:GetAlpha(), 0.6, "switching back restores the first profile's value")
 
 case("no_theme_means_no_plate_and_no_failure")(PLATE_HELPERS + r"""
 local Gs, Areas, cl = bootClass({ noTheme = true })
-check(Areas.Plate("lower") == nil, "no plate without Theme.AddPanelChrome")
+check(Areas.Plate("lower") == nil, "no plate without the Theme helpers")
 check(cl.frame:IsShown() and Areas.AreaOf("class") == "lower", "the class module still shows")
 setOpacity(50)
 check(Areas.AreaOf("class") == "lower", "a setting change with no plate is harmless")
@@ -899,6 +975,14 @@ local any = false
 for k in pairs(DEGRADED) do if k:find("plate", 1, true) then any = true end end
 check(any, "the missing Theme is logged once")
 """)
+
+for _missing in ("AddRoundedFill", "SkinButton", "COLOR_POWER"):
+    case("a_theme_without_" + _missing + "_means_no_plate_and_no_failure")(PLATE_HELPERS + r"""
+local Gs, Areas, cl = bootClass({ missing = "__MISSING__" })
+check(Areas.Plate("lower") == nil, "no plate without Theme.__MISSING__")
+check(cl.frame:IsShown() and Areas.AreaOf("class") == "lower", "the class module still shows")
+check(#FILLS == 0 and #SKINS == 0, "no half built plate: a fill or a ring on its own")
+""".replace("__MISSING__", _missing))
 
 
 def static_checks() -> list[tuple[str, str | None]]:
@@ -926,6 +1010,7 @@ def run_case(name: str, body: str) -> str | None:
     g.CONFIG_SRC = CONFIG.read_text(encoding="utf-8")
     g.GUNSIGHT_SRC = GUNSIGHT.read_text(encoding="utf-8")
     g.AREAS_SRC = AREAS.read_text(encoding="utf-8")
+    g.THEME_SRC = (ADDON / "Core/Theme.lua").read_text(encoding="utf-8")
     runner = lua.eval(
         "function(src) local f, e = loadstring(src, '=case'); if not f then return false, e end; "
         "local ok, err = pcall(f); if ok then if #BLOCKED > 0 then return false, 'ADDON_ACTION_BLOCKED: ' .. "

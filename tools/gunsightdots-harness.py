@@ -437,7 +437,7 @@ end
 local function wipeList(t) for i = #t, 1, -1 do t[i] = nil end end
 function resetWorld()
     wipeList(FRAMES); wipeList(TEXTURES); wipeList(FONTSTRINGS); wipeList(PRINTED); wipeList(SUBS)
-    wipeList(SKIN_CALLS); wipeList(AURA_TOUCHED)
+    wipeList(SKIN_CALLS); wipeList(PLATE_SKIN_CALLS); wipeList(AURA_TOUCHED)
     for k in pairs(DEGRADED) do DEGRADED[k] = nil end
     for k in pairs(PLAYING) do PLAYING[k] = nil end
     STATE, IN_COMBAT, IN_REGEN_DISABLED, AFFECTING = nil, false, false, nil
@@ -455,6 +455,7 @@ function loadAddonFile(src, name)
 end
 
 SKIN_CALLS = {}
+PLATE_SKIN_CALLS = {}
 SUBS = {}
 STATE = nil
 PROFILE = nil
@@ -467,6 +468,7 @@ function stubTheme_()
         COLOR_BORDER = { 0.659, 0.333, 0.969, 1 },
         COLOR_AMBER = { 1, 0.7137, 0.2824, 1 },
         COLOR_RED = { 1, 0.2314, 0.3059, 1 },
+        COLOR_POWER = { 0.133, 0.878, 1, 1 },
         COLOR_STEEL = { 0.5529, 0.5765, 0.6510, 1 },
         FONT_MONO = "mono.ttf",
         SLICE_CUT2_FILL_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\slice_cut2_fill.tga",
@@ -474,9 +476,13 @@ function stubTheme_()
     }
     function Theme.ApplyMono(fs, size, color) fs.monoSize = size; fs.monoColor = color; fs.hasFont = true end  -- the real one calls SetFont
     function Theme.ApplyNineSlice(tex, margin) tex.margin = margin; return true end
-    -- the class module's backing plate (GunsightAreas.lua) asks for the shared panel chrome: a fill, a glow and a border
-    function Theme.AddPanelChrome(frame)
-        return frame:CreateTexture(nil, "BACKGROUND"), frame:CreateTexture(nil, "BACKGROUND"), frame:CreateTexture(nil, "BORDER")
+    -- the class module's backing plate (GunsightAreas.lua) is the party box recipe: a rounded fill, then SkinButton
+    -- (below), both on the plate frame
+    function Theme.AddRoundedFill(frame, color, chamfer)
+        local t = frame:CreateTexture(nil, "BACKGROUND")
+        t:SetColorTexture(color[1], color[2], color[3], color[4] or 1)
+        t.chamfer = chamfer
+        return t
     end
     function Theme.AddSliceTexture(frame, path, color, layer, sublevel)
         local t = frame:CreateTexture(nil, layer or "BACKGROUND", nil, sublevel)
@@ -488,9 +494,17 @@ function stubTheme_()
         return t
     end
     function Theme.SkinButton(button, opts)
-        check(button.w > 0 and button.h > 0, "SkinButton before the chip has a size (the chamfer comes from the height)")
-        check(button.icon, "SkinButton before button.icon exists")
-        SKIN_CALLS[#SKIN_CALLS + 1] = { button = button, opts = opts }
+        -- An aura chip leaves the chamfer to its height, so it needs a size and its icon first. A plate (the class
+        -- module backing plate, the party box recipe) pins its own chamfer and has no icon; that call is recorded apart
+        -- so SKIN_CALLS still counts chips only.
+        local plate = opts and opts.chamfer ~= nil
+        if plate then
+            PLATE_SKIN_CALLS[#PLATE_SKIN_CALLS + 1] = { button = button, opts = opts }
+        else
+            check(button.w > 0 and button.h > 0, "SkinButton before the chip has a size (the chamfer comes from the height)")
+            check(button.icon, "SkinButton before button.icon exists")
+            SKIN_CALLS[#SKIN_CALLS + 1] = { button = button, opts = opts }
+        end
         local c = opts and opts.borderColor or Theme.COLOR_BORDER
         local glow = button:CreateTexture(nil, "OVERLAY", nil, 0)
         glow:SetBlendMode("ADD")
@@ -1535,6 +1549,7 @@ case("a_chip_is_built_the_way_the_action_buttons_are")(r"""
 local D = boot()
 local m = mount("debuffsH", "upper")
 check(#SKIN_CALLS == 5, "SkinButton once per row, got " .. #SKIN_CALLS)
+check(#PLATE_SKIN_CALLS == 0, "no chip pins its own chamfer (that would skip the chip checks in the stub), got " .. #PLATE_SKIN_CALLS)
 for i, call in ipairs(SKIN_CALLS) do
     colorIs(call.opts.borderColor, D.D.COLORS.violet, "chip " .. i .. " violet border")
     check(call.button.seatedBy == "SeatAuraTile", "chip " .. i .. " seated by SeatAuraTile")
@@ -1573,6 +1588,9 @@ check(next(DEGRADED) == nil, "a degrade was logged: " .. tostring(next(DEGRADED)
 case("the_modules_work_inside_the_real_gunsight_areas")(r"""
 boot({ realareas = true })
 local Areas = FS.GunsightAreas
+-- the Theme stub this file shares (the Shaman, Mage, Priest, Hunter harnesses load the real areas with it) builds the plate
+check(Areas.Plate("upper") ~= nil and Areas.Plate("lower") ~= nil, "the real areas built both backing plates under the stub")
+check(#PLATE_SKIN_CALLS == 2 and PLATE_SKIN_CALLS[1].opts.chamfer == 6, "each plate is skinned once with the party box chamfer")
 check(Areas.AreaOf("debuffsH") == "upper", "the default upper area holds Target debuffs Horizontal, got " .. tostring(Areas.AreaOf("debuffsH")))
 local mh = FS.GunsightDots.modules.debuffsH
 check(mh.built and #TDSUBS == 1, "the areas built the module and onShow subscribed it")

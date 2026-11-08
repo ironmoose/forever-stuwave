@@ -12,8 +12,10 @@
 -- (a combo module also wants a hostile target) gates itself inside its own frame. No module is exempt; there is no
 -- showWithoutTarget opt-in because no module has recorded approval to show with no target.
 --
--- BACKING PLATE. Every area host carries one dark panel behind whatever it holds (Theme.AddPanelChrome, the target
--- box's panel: COLOR_BG fill, the cut corner, the violet border), so a class module reads on bright ground. It is
+-- BACKING PLATE. Every area host carries one dark panel behind whatever it holds, so a class module reads on bright
+-- ground. It wears the party frame boxes' look (PartyFrames BuildRowBox): COLOR_BG fill cut at the box's chamfer 6
+-- (Theme.AddRoundedFill), and the cyan COLOR_POWER ring with its 0.5 glow (Theme.SkinButton). The fill, ring and glow
+-- are textures of the plate frame itself, no child frame, so the ring and glow draw below every module frame too. It is
 -- the host's own child at the host's frame level, below every module frame, sized to the area rect plus PLATE_PAD
 -- image px on each side, and shown only while a real "class" module (not the coming soon plate, which has its own
 -- look, and not Target Debuffs) is the occupant, so it hides with the host (no target, the dot piece off). Its
@@ -33,6 +35,8 @@ local ui, Point = Gunsight.ui, Gunsight.Point
 
 local PREFIX = "|cffff4488Forever STUwave|r: gunsight areas: "
 local PLATE_PAD = 3        -- image px the backing plate reaches past the area rect on each side (the areas are 4 apart)
+local PLATE_CHAMFER = 6    -- the party frame box's BOX_CHAMFER: the fill's cut and the ring's
+local PLATE_GLOW_ALPHA = 0.5   -- the party frame box's BOX_GLOW_ALPHA
 local SETTINGS = { background = { key = "gunsight.classModule.background", default = 80, min = 0, max = 100, step = 5 } }
 Areas.SETTINGS = SETTINGS
 Areas.PLATE_PAD = PLATE_PAD
@@ -47,7 +51,7 @@ local classRecords = {}   -- one record per class spec
 local hosts = {}          -- area -> host frame (nil until built)
 local rects = {}          -- area -> { x, y, w, h } in image px, one table reused for every seat call
 local hostOn = {}         -- area -> whether the host is shown
-local plates = {}         -- area -> the backing plate frame (nil until built, or without Theme.AddPanelChrome)
+local plates = {}         -- area -> the backing plate frame (nil until built, or without the Theme box helpers)
 local plateOn = {}        -- area -> whether the plate is shown
 local occupant = {}       -- area -> the record shown there
 local changedCallbacks = {}
@@ -344,12 +348,14 @@ local function OnTargetEvent()
 end
 
 -- One plate per host, made with the host (before any module frame, which the host's child level keeps above it). The
--- fill is COLOR_BG's colour at full strength: the plate frame's alpha is the setting, so the default 80 percent is
--- COLOR_BG's own 0.80.
+-- party box recipe on the plate frame itself: the fill is COLOR_BG's colour at full strength (the plate frame's alpha is
+-- the setting, so the default 80 percent is COLOR_BG's own 0.80, and the ring and glow fade with it), the ring and glow
+-- are SkinButton's OVERLAY textures. SkinButton's glow is seated on the plate by Theme.RegisterGlow, which anchors it to
+-- the plate's corners, so SeatHost's resize and a hide or show carry it and a rescale reseats it.
 local function BuildPlate(area)
     local Theme = FS.Theme
-    if not (Theme and Theme.AddPanelChrome and Theme.COLOR_BG and Theme.COLOR_BORDER) then
-        LogOnce("plate", "Theme.AddPanelChrome is missing, the class module has no background plate")
+    if not (Theme and Theme.AddRoundedFill and Theme.SkinButton and Theme.COLOR_BG and Theme.COLOR_POWER) then
+        LogOnce("plate", "Theme.AddRoundedFill or Theme.SkinButton is missing, the class module has no background plate")
         return
     end
     local host = hosts[area]
@@ -357,7 +363,8 @@ local function BuildPlate(area)
     local level = host:GetFrameLevel()
     if type(level) == "number" then plate:SetFrameLevel(level) end   -- a new child is host + 1, the level of a module frame
     local bg = Theme.COLOR_BG
-    Theme.AddPanelChrome(plate, { fillColor = { bg[1], bg[2], bg[3], 1 }, accent = Theme.COLOR_BORDER })
+    Theme.AddRoundedFill(plate, { bg[1], bg[2], bg[3], 1 }, PLATE_CHAMFER)
+    Theme.SkinButton(plate, { chamfer = PLATE_CHAMFER, glowAlpha = PLATE_GLOW_ALPHA, borderColor = Theme.COLOR_POWER })
     plate:Hide()
     plates[area] = plate
     plateOn[area] = false
