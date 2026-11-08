@@ -102,6 +102,7 @@ Modules/CombatHud/GunsightMage.lua
 Modules/CombatHud/GunsightMageClick.lua
 Modules/CombatHud/HunterState.lua
 Modules/CombatHud/GunsightHunter.lua
+Modules/Compat/Questie.lua
 Modules/Diagnostics/FSCheck.lua
 Modules/Diagnostics/BugReport.lua
 Modules/Diagnostics/CharacterExport.lua
