@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.0.0-beta.2 (2026-11-08)
+
+Class modules for four more classes, Questie support, and a round of minimap and HUD polish.
+
+### New
+- Class modules beside the Gunsight for Warrior, Priest, Mage and Hunter:
+  - Warrior: a roaring helm with a rune ring for Battle Shout and Demoralizing Shout. A missing shout in combat or on an attackable target pulses its runes and glows the helm amber. Left click a helm to shout.
+  - Priest: a round frost shield follows your Power Word: Shield (absorb light, Weakened Soul rim, click to shield), with Prayer of Mending beads and a party strip for the shields you keep on others.
+  - Mage: a spec piece (Frost snowflake with Fingers of Frost, Arcane sigil with Arcane Blast stacks, Fire flame with Scorch stacks and the Fire Blast comet) and a ward for Ice Barrier or Mana Shield, click to cast.
+  - Hunter: a lock-on scope with the auto shot swing on its rim, a gold plant zone for the last half second of the swing, range bands around your target, and a trap tracker.
+- Class module background: a dark plate with the party box border behind the class module, so it reads on bright ground. "Class module background" on the Gunsight HUD page sets its opacity; 0 turns it off.
+- Questie support:
+  - Questie's quest tracker wears the STUwave panel (turn on its background in Questie's tracker options), and "STUwave" is offered in Questie's font pickers.
+  - Questie's quest icon shows beside the STUwave target frame, and on STUwave nameplates it sits just left of the health bar. Our own "!" steps aside while Questie's nameplate icons are on.
+  - The layout editor leaves the tracker alone while Questie's tracker is in use.
+- "STUwave nameplates" switch (Unit Frames, Nameplates): turn our plates off to use the game's own. Applies live.
+- A Settings key on the minimap opens the STUwave settings window.
+- Hover the time on the data bar to see local and realm time.
+
+### Changes
+- Shaman: the shock tracker is a carved rune disc with a lightning rune, raised level with the totem heads. The zig-zag line under the poles is gone.
+- The minimap shows coordinates only, in the bezel row beside the keys. The time lives on the data bar.
+
+### Fixes
+- The nameplate quest "!" no longer shows on players who share your quest.
+- The quest timer keeps the game's own timer when the drawer has nothing to show.
+- Tracker quest markers no longer blow up during the add animation.
+- The error log records every blocked action with the addon blamed.
+
+### Known issues
+- Using an item from your bags is sometimes blocked with "forever-stuwave has been blocked from an action". Use the item from an action bar until this is fixed.
+- The Hunter, Mage and Priest modules are new and lightly tested in game. Reports welcome.
+
 ## 1.0.0-beta.1 (2026-11-05)
 
 First build for the WoW Forever release client. Beta until 1.0, which ships with the CurseForge listing.
