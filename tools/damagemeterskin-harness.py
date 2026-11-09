@@ -243,7 +243,7 @@ case("rows_default_to_neon_plates", """
     assert(g[2][1] == ramp[1][1] and g[3][3] == ramp[2][3], "shaman row not on the shaman ramp")
     assert(bar.Background.color and math.abs(bar.Background.color[1] - 0.039) < 1e-3, "plate well not ink")
     assert(bar.BackgroundEdge.color[4] == 0, "shadow edge not cleared")
-    assert(e.Icon.w == 18 and e.Icon.h == 18, "icon not as tall as the plate in a 20 unit row: " .. tostring(e.Icon.w))
+    assert(e.Icon.w == 14 and e.Icon.h == 14, "icon not as tall as the plate in a 20 unit row: " .. tostring(e.Icon.w))
     assert(bar.points == 2, "plate not laid out")
     local cells, rims, gloss = nil, 0, nil
     for _, t in ipairs(bar.made) do

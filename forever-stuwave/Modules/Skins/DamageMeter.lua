@@ -74,7 +74,7 @@ local style = ReadStyle()
 -- Neon plates (form B), in UI units unless named _PX: the class icon at the row's left, as tall as the plate, then the
 -- plate: an ink well, the class gradient fill (deep foot, hot top) with a 1 px gloss along its top and a soft white bloom
 -- at its edge, a 1 px rim in the class's deep colour (pink on the player's own row), and the "1. Name" and number on it.
-local PLATE_PAD = 1                       -- above and below the plate, inside the row
+local PLATE_PAD = 3                       -- above and below the plate, inside the row (6 between plates)
 local PLATE_LEFT = 2
 local PLATE_ICON_GAP = 3
 local PLATE_RIGHT = 3
