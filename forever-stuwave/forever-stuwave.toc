@@ -61,6 +61,7 @@ Modules/Skins/LossOfControl.lua
 Modules/Skins/IssueReporter.lua
 Modules/Skins/AuctionHouse.lua
 Modules/Skins/LookingForGroup.lua
+Modules/Skins/DamageMeter.lua
 Modules/Diagnostics/Diagnostics.lua
 Modules/CombatHud/HudSpells.lua
 Modules/CombatHud/HudProfiles.lua
