@@ -8,7 +8,8 @@
 -- matches CastBars.lua's reasoning for the same omission. RESIZING it does: the XP
 -- bar is anchored to this bar and the control deck chassis to the XP bar, and the
 -- deck's bag slots are secure buttons, so this bar is RESTRICTED in combat (see
--- Rescale below). Hovering the TIME segment shows a GameTooltip with the local and the realm time.
+-- Rescale below). Hovering the TIME segment shows a GameTooltip with the local and the realm time; hovering DUR
+-- lists each equipped piece's durability.
 
 local addonName, FS = ...
 
@@ -301,6 +302,55 @@ local function UpdateLatency(segment)
     segment.valueText:SetFormattedText("%d", latencyWorld or latencyHome or 0)
 end
 
+-- Hover on the DUR segment (player: "when i mouse over durability on the data bar we should show the % for each
+-- piece of gear"): one line per equipped piece that has durability, slot name on the left and its percent on the
+-- right, in slot order, at the mouse like the TIME tooltip. White when fine, amber under half, pink under a fifth,
+-- the same steps the bag meter uses. Refreshed on the bar's tick only when a value changed.
+local DUR_SLOT_NAMES = {
+    [1] = "Head", [2] = "Neck", [3] = "Shoulder", [4] = "Shirt", [5] = "Chest", [6] = "Waist", [7] = "Legs",
+    [8] = "Feet", [9] = "Wrist", [10] = "Hands", [11] = "Ring", [12] = "Ring", [13] = "Trinket", [14] = "Trinket",
+    [15] = "Back", [16] = "Main Hand", [17] = "Off Hand", [18] = "Ranged", [19] = "Tabard",
+}
+local DUR_COLOR_WARN = { 1, 0.714, 0.282 }  -- --amber
+local DUR_COLOR_LOW = { 1, 0.180, 0.592 }   -- --pink
+
+local function DurabilityPieces()
+    local pieces = {}
+    for slot = INVSLOT_FIRST_EQUIPPED or 1, INVSLOT_LAST_EQUIPPED or 19 do
+        local cur, max = GetInventoryItemDurability(slot)
+        if cur and max and max > 0 then
+            pieces[#pieces + 1] = { name = DUR_SLOT_NAMES[slot] or ("Slot " .. slot), pct = cur / max * 100 }
+        end
+    end
+    return pieces
+end
+
+local function ShowDurabilityTooltip(segment, refresh)
+    local tip = GameTooltip
+    if not tip then return end
+    local pieces = DurabilityPieces()
+    local parts = {}
+    for i, p in ipairs(pieces) do parts[i] = p.name .. ("%.0f"):format(p.pct) end
+    local sig = table.concat(parts, "|")
+    if refresh then
+        if segment.tipSig == sig then return end
+    else
+        tip:SetOwner(segment.frame, "ANCHOR_CURSOR")
+    end
+    segment.tipSig = sig
+    if refresh and type(tip.ClearLines) == "function" then tip:ClearLines() end
+    tip:SetText("Durability", COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3])
+    if #pieces == 0 then
+        tip:AddLine("Nothing equipped wears down.", TIP_MUTED[1], TIP_MUTED[2], TIP_MUTED[3])
+    end
+    for _, p in ipairs(pieces) do
+        local c = COLOR_TEXT_WHITE
+        if p.pct < 20 then c = DUR_COLOR_LOW elseif p.pct < 50 then c = DUR_COLOR_WARN end
+        tip:AddDoubleLine(p.name, ("%.0f%%"):format(p.pct), TIP_MUTED[1], TIP_MUTED[2], TIP_MUTED[3], c[1], c[2], c[3])
+    end
+    tip:Show()
+end
+
 -- Sums current/max durability over every equipped slot that reports it
 -- (rings/trinkets/necklace return nil for both and are skipped); an empty
 -- equipped set (fresh character) reports 100%, matching Blizzard's own
@@ -321,6 +371,13 @@ local function UpdateDurability(segment)
         SetMeterFraction(segment.meter, pct / 100)
     end
     segment.valueText:SetFormattedText("%.0f%%", pct)
+    if segment.hover then
+        if TipOwnedBy(segment) then
+            ShowDurabilityTooltip(segment, true)
+        else
+            segment.hover, segment.tipSig = false, nil
+        end
+    end
 end
 
 -- Bag fullness thresholds. The meter fills as the bags FILL, so a long bar is
@@ -493,7 +550,8 @@ local SEGMENT_DEFS = {
     { key = "cpu", label = "FS CPU", available = (GetAddOnCPUUsage ~= nil), update = UpdateCPU },
     { key = "latency", label = "MS", available = HAS_GET_NET_STATS, update = UpdateLatency },
     { key = "rested", label = "REST", available = HAS_XP_EXHAUSTION, update = UpdateRested, meter = true },
-    { key = "durability", label = "DUR", available = HAS_DURABILITY, update = UpdateDurability, meter = true },
+    { key = "durability", label = "DUR", available = HAS_DURABILITY, update = UpdateDurability, meter = true,
+      tooltip = ShowDurabilityTooltip, tooltipHide = HideTimeTooltip },
     { key = "bags", label = "BAGS", available = (GetFreeSlotsForBag ~= nil), update = UpdateBags, meter = true },
     { key = "time", label = "TIME", available = HAS_DATE or HAS_GET_GAME_TIME, update = UpdateTime,
       tooltip = ShowTimeTooltip, tooltipHide = HideTimeTooltip },

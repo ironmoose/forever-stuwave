@@ -629,6 +629,40 @@ def test_time_tooltip_unavailable() -> None:
     check(ok, "hover, leave and hide without a GameTooltip raise nothing")
 
 
+DUR_PRE = """
+__dur = { [1] = { 40, 50 }, [5] = { 30, 100 }, [16] = { 9, 60 } }
+function GetInventoryItemDurability(slot) local d = __dur[slot]; if d then return d[1], d[2] end end
+function GameTooltip:AddLine(t, r, g, b) self.lines[#self.lines + 1] = { left = t, color = { r, g, b } } end
+"""
+
+
+def test_durability_tooltip() -> None:
+    print("\n== DUR tooltip: each equipped piece's durability percent on hover, at the mouse")
+    b = Bar(pre=DUR_PRE)
+    b.login()
+    check(b.rt.eval('(__segment("DUR")).mouse') is True, "the DUR segment takes the mouse")
+    hover(b, "DUR")
+    got = lines(b)
+    check(got == [("Durability", None), ("Head", "80%"), ("Chest", "30%"), ("Main Hand", "15%")],
+          "header, then one line per piece in slot order with its percent", str(got))
+    check(b.rt.eval('GameTooltip.anchor') == "ANCHOR_CURSOR" and b.rt.eval('GameTooltip.owner == (__segment("DUR"))'),
+          "at the mouse, owned by the DUR segment")
+    cols = b.rt.eval("GameTooltip.lines[2].rightColor[2] == 1 and GameTooltip.lines[3].rightColor[3] < 0.3 "
+                     "and GameTooltip.lines[4].rightColor[2] < 0.2")
+    check(cols is True, "white when fine, amber under half, pink under a fifth")
+    clears = b.rt.eval("GameTooltip.clears")
+    b.run("local bar = ForeverSTUwaveDataBar; bar.scripts.OnUpdate(bar, 100)")
+    check(b.rt.eval("GameTooltip.clears") == clears, "a tick with nothing changed rewrites nothing")
+    b.run("__dur[16] = { 60, 60 }; local bar = ForeverSTUwaveDataBar; bar.scripts.OnUpdate(bar, 100)")
+    check(lines(b)[3] == ("Main Hand", "100%"), "a repair while hovering updates the line", str(lines(b)))
+    b.run('local f = __segment("DUR"); f.scripts.OnLeave(f)')
+    check(b.rt.eval("GameTooltip.shown") is False, "leave: the tooltip hides")
+    b.run("__dur = {}")
+    hover(b, "DUR")
+    check(lines(b) == [("Durability", None), ("Nothing equipped wears down.", None)], "no gear: one muted line",
+          str(lines(b)))
+
+
 def main() -> int:
     test_equal_without_bridge()
     test_link_between_bags_and_time()
@@ -642,6 +676,7 @@ def main() -> int:
     test_time_tooltip_formats()
     test_time_tooltip_refresh()
     test_time_tooltip_unavailable()
+    test_durability_tooltip()
     print(f"\n{CHECKS} checks, {len(FAILURES)} failed")
     for f in FAILURES:
         print(f"  - {f}")
