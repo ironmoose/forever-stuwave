@@ -609,6 +609,22 @@ end
 
 local bandedFrames = setmetatable({}, { __mode = "k" })
 
+-- The Config window's switch for the bands (Unit Frames page, Chat). On by
+-- default; it applies at once, and the rest of the chat restyle is unaffected.
+local BAND_KEY = "chat.lineBands"
+local BAND_SETTING = {
+    label = "Guild and party line tint",
+    key = BAND_KEY,
+    tip = "A faint green band behind guild lines and a cyan one behind party lines, so they stand out in a busy "
+        .. "chat. Applies at once.",
+}
+
+local function BandsWanted()
+    local config = FS.Config
+    if not (config and config.Get) then return true end
+    return config.Get(BAND_KEY) ~= false
+end
+
 local function LineEvent(line)
     local info = line.messageInfo
     if type(info) ~= "table" then return nil end
@@ -663,7 +679,7 @@ local function RefreshBands(frame)
         line.fsBand.wanted = false
         line.fsBand:Hide()
     end
-    if not applied or type(frame.visibleLines) ~= "table" then return end
+    if not applied or not BandsWanted() or type(frame.visibleLines) ~= "table" then return end
     for _, line in ipairs(frame.visibleLines) do
         local event = LineEvent(line)
         local hex = event and BAND_COLORS[event]
@@ -690,6 +706,11 @@ end
 
 local function RefreshAllBands()
     for frame in pairs(bandedFrames) do RefreshBands(frame) end
+end
+
+if FS.Config and FS.Config.RegisterDefault then
+    FS.Config.RegisterDefault(BAND_KEY, true)
+    FS.Config.OnChange(BAND_KEY, RefreshAllBands)
 end
 
 local function Enable()
@@ -833,4 +854,5 @@ FS.ChatFormat = {
     Enable = Enable,
     Disable = Disable,
     IsApplied = function() return applied end,
+    BAND_SETTING = BAND_SETTING,
 }

@@ -1262,6 +1262,26 @@ function T.the_nameplates_group_is_left_out_without_the_nameplate_module()
     no(headerY("NAMEPLATES"), "a module with no setting entry has no group")
 end
 
+-- ---- the chat line tint switch on the Unit Frames page (ChatFormat.lua's BAND_SETTING) ----
+
+local BANDS_KEY = "chat.lineBands"
+function T.the_unit_frames_page_has_the_chat_line_tint_switch()
+    local W = boot({ preWindow = function()
+        unitFramesDefaults()
+        FS.Config.RegisterDefault(BANDS_KEY, true)
+        FS.ChatFormat = { BAND_SETTING = { key = BANDS_KEY, label = "Guild and party line tint", tip = "Bands tip." } }
+    end })
+    W.Open("unitframes")
+    yes(headerY("CHAT"), "a Chat header")
+    local r = row("Guild and party line tint")
+    yes(r and r.control.fsChecked, "on by default")
+    press("Guild and party line tint")
+    eq(FS.Config.Get(BANDS_KEY), false)
+    W = boot({ preWindow = unitFramesDefaults })
+    W.Open("unitframes")
+    no(headerY("CHAT"), "no chat module, no group")
+end
+
 -- ---- the party frames group on the Unit Frames page (PartyFrames.lua's switch, LayoutEdit's Move and Reset) ----
 
 local PARTY_KEY = "gunsight.pieces.party"

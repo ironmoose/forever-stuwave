@@ -51,6 +51,12 @@ function ChatFrame_AddMessageEventFilter() end
 function SetChatColorNameByClass() end
 __wrapped = nil
 FS = { Theme = { COLOR_TEXT_PARCHMENT = { 0.8, 1, 0.9 } }, IsSecret = function(v) return v == SECRET end }
+__config, __onChange = {}, {}
+FS.Config = {
+    RegisterDefault = function(k, v) __config[k] = v end,
+    Get = function(k) return __config[k] end,
+    OnChange = function(k, fn) __onChange[k] = fn end,
+}
 SECRET = setmetatable({}, { __index = function() error("touched a secret") end })
 -- A chat frame with a history, Blizzard's AddMessage (a plain field) and the secure mixin's TransformMessages.
 ChatFrame1 = { history = {}, GetSpacing = function() return 0 end, SetSpacing = function() end }
@@ -210,6 +216,15 @@ case("guild_and_party_rows_get_a_tinted_band_that_follows_the_row", """
     assert(guild.fsBand.fill.shown)
     FS.ChatFormat.Disable()
     assert(not guild.fsBand.fill.shown and not guild.fsBand.edge.shown, "band survived off")
+    -- the Config switch turns the bands off on their own and back on, live
+    FS.ChatFormat.Enable()
+    ChatFrame1.refreshed(ChatFrame1)
+    assert(guild.fsBand.fill.shown)
+    __config["chat.lineBands"] = false; __onChange["chat.lineBands"]()
+    assert(not guild.fsBand.fill.shown, "switch off left the band up")
+    assert(FS.ChatFormat.IsApplied(), "switch off touched the rest of the restyle")
+    __config["chat.lineBands"] = true; __onChange["chat.lineBands"]()
+    assert(guild.fsBand.fill.shown, "switch on did not bring it back")
 """)
 
 

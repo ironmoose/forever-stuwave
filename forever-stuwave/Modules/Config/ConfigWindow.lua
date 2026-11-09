@@ -1437,6 +1437,11 @@ CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, buil
     UI.Toggle(page, { label = "Hide target frame", key = "unitFrames.hideTarget" })
     PartyFramesGroup(page)
     NameplatesGroup(page)
+    local bands = FS.ChatFormat and FS.ChatFormat.BAND_SETTING
+    if bands then
+        UI.Header(page, "Chat")
+        UI.Toggle(page, { label = bands.label, key = bands.key, tip = bands.tip })
+    end
     UI.Header(page, "Panels")
     UI.Toggle(page, { label = "Professions panel", key = "professions.shown" })
     UI.Toggle(page, { label = "Background grid", key = "actionbars.grid" })
