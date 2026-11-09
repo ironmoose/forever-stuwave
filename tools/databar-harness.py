@@ -516,9 +516,9 @@ def test_time_tooltip() -> None:
           "the bar shows the local time, 12-hour, no leading zero", str(b.rt.eval('select(2, __segment("TIME")).text')))
     check(b.rt.eval('(__segment("TIME")).mouse') is True and callable(b.rt.eval('(__segment("TIME")).scripts.OnEnter')),
           "the TIME segment takes the mouse and has an OnEnter")
-    others = [b.rt.eval(f'(__segment("{lbl}")).mouse') for lbl in ("FPS", "BAGS", "GOLD")]
+    others = [b.rt.eval(f'(__segment("{lbl}")).mouse') for lbl in ("FPS", "BAGS")]
     check(all(m in (None, False) for m in others)
-          and all(b.rt.eval(f'(__segment("{lbl}")).scripts == nil') for lbl in ("FPS", "BAGS", "GOLD")),
+          and all(b.rt.eval(f'(__segment("{lbl}")).scripts == nil') for lbl in ("FPS", "BAGS")),
           "no other segment takes the mouse or has scripts (click-through as before)", str(others))
     check(b.rt.eval("GameTooltip.shown") is False, "nothing shows before the mouse is on the segment")
 
@@ -663,6 +663,45 @@ def test_durability_tooltip() -> None:
           str(lines(b)))
 
 
+GOLD_PRE = """
+__money = 1234567
+GetMoney = function() return __money end
+function UnitGUID() return "Player-91-AAA" end
+function GetUnitName() return "Stu Shockalaka" end
+function GetRealmName() return "Forever" end
+function UnitClass() return "Shaman", "SHAMAN" end
+function time() return 1000 end
+RAID_CLASS_COLORS = { SHAMAN = { r = 0, g = 0.44, b = 0.87 }, WARRIOR = { r = 0.78, g = 0.61, b = 0.43 } }
+ForeverSTUwaveDB = { gold = { ["Player-91-BBB"] = { name = "Stu Moolah", class = "WARRIOR", copper = 50000 },
+                              ["Player-91-CCC"] = { name = "Stu Bank", copper = 9999999 } } }
+"""
+
+
+def test_gold_tooltip() -> None:
+    print("\n== GOLD tooltip: every character's gold, richest first, with a total")
+    b = Bar(pre=GOLD_PRE)
+    b.login()
+    b.run("local bar = ForeverSTUwaveDataBar; bar.scripts.OnUpdate(bar, 100)")
+    row = b.rt.eval('ForeverSTUwaveDB.gold["Player-91-AAA"]')
+    check(row is not None and row["copper"] == 1234567 and str(row["name"]) == "Stu Shockalaka"
+          and str(row["class"]) == "SHAMAN", "the character on is recorded by GUID with full name and class")
+    hover(b, "GOLD")
+    got = lines(b)
+    names = [g[0] for g in got]
+    check(names[0] == "Gold" and names[1] == "Stu Bank" and names[2].startswith("Stu Shockalaka")
+          and names[3] == "Stu Moolah" and names[4] == "Total", "header, richest first, then a total", str(got))
+    check("<" in names[2], "the character you are on is marked", names[2])
+    check("999" in got[1][1] and "g" in got[1][1] and "5" in got[3][1], "money text per row", str(got))
+    check("1128" in got[4][1], "total of all rows (1128g)", got[4][1])
+    col = b.rt.eval("GameTooltip.lines[4].leftColor")
+    check(col is not None and abs(col[1] - 0.78) < 1e-6, "names in class colour")
+    clears = b.rt.eval("GameTooltip.clears")
+    b.run("local bar = ForeverSTUwaveDataBar; bar.scripts.OnUpdate(bar, 100)")
+    check(b.rt.eval("GameTooltip.clears") == clears, "a tick with nothing changed rewrites nothing")
+    b.run("__money = 20000000; local bar = ForeverSTUwaveDataBar; bar.scripts.OnUpdate(bar, 100)")
+    check(lines(b)[1][0].startswith("Stu Shockalaka"), "new money while hovering re-sorts", str(lines(b)))
+
+
 def main() -> int:
     test_equal_without_bridge()
     test_link_between_bags_and_time()
@@ -677,6 +716,7 @@ def main() -> int:
     test_time_tooltip_refresh()
     test_time_tooltip_unavailable()
     test_durability_tooltip()
+    test_gold_tooltip()
     print(f"\n{CHECKS} checks, {len(FAILURES)} failed")
     for f in FAILURES:
         print(f"  - {f}")

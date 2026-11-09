@@ -221,9 +221,106 @@ local COIN_SIZE = 9
 local COIN_TEXT_GAP = 2
 local COIN_GROUP_GAP = 7
 
+-- Gold on every character (player: "can we track gold on all my alts and when i mouse over the money in the data bar it
+-- shows the alts?"). Each character's copper is recorded account wide in ForeverSTUwaveDB.gold, keyed by GUID (names
+-- carry surnames here, so the full name is kept for display), every time the GOLD segment updates; a character shows
+-- up once it has logged in with this build. Hover lists them richest first, the one you are on included, with a total.
+local GOLD_HEX = { gold = "ffb648", silver = "c7edff", copper = "ff6b8c" }   -- the coin palette below, as text colour
+
+local function MoneyText(copper)
+    local g = math.floor(copper / 10000)
+    local sv = math.floor((copper % 10000) / 100)
+    local c = copper % 100
+    local parts = {}
+    if g > 0 then parts[#parts + 1] = ("|cff%s%d|rg"):format(GOLD_HEX.gold, g) end
+    if g > 0 or sv > 0 then parts[#parts + 1] = ("|cff%s%d|rs"):format(GOLD_HEX.silver, sv) end
+    parts[#parts + 1] = ("|cff%s%d|rc"):format(GOLD_HEX.copper, c)
+    return table.concat(parts, " ")
+end
+
+local function GoldStore()
+    if type(ForeverSTUwaveDB) ~= "table" then return nil end
+    if type(ForeverSTUwaveDB.gold) ~= "table" then ForeverSTUwaveDB.gold = {} end
+    return ForeverSTUwaveDB.gold
+end
+
+local function PlayerGUID()
+    local guid = type(UnitGUID) == "function" and UnitGUID("player") or nil
+    if type(guid) ~= "string" or (FS.IsSecret and FS.IsSecret(guid)) then return nil end
+    return guid
+end
+
+local function RecordGold(copper)
+    local store, guid = GoldStore(), PlayerGUID()
+    if not (store and guid) then return end
+    local row = store[guid]
+    if type(row) ~= "table" then row = {}; store[guid] = row end
+    row.copper = copper
+    local name = type(GetUnitName) == "function" and GetUnitName("player", true) or nil
+    if type(name) ~= "string" and type(UnitName) == "function" then name = UnitName("player") end
+    if type(name) == "string" then row.name = name end
+    if type(GetRealmName) == "function" then row.realm = GetRealmName() end
+    if type(UnitClass) == "function" then row.class = select(2, UnitClass("player")) end
+    row.seen = type(time) == "function" and time() or row.seen
+end
+
+local function GoldRows()
+    local rows, store = {}, GoldStore()
+    if not store then return rows end
+    for guid, row in pairs(store) do
+        if type(row) == "table" and type(row.copper) == "number" then
+            rows[#rows + 1] = { guid = guid, name = row.name or "?", realm = row.realm, class = row.class, copper = row.copper }
+        end
+    end
+    table.sort(rows, function(a, b)
+        if a.copper ~= b.copper then return a.copper > b.copper end
+        return a.name < b.name
+    end)
+    return rows
+end
+
+local function ShowGoldTooltip(segment, refresh)
+    local tip = GameTooltip
+    if not tip then return end
+    local rows, me = GoldRows(), PlayerGUID()
+    local parts = {}
+    for i, r in ipairs(rows) do parts[i] = r.guid .. r.copper end
+    local sig = table.concat(parts, "|")
+    if refresh then
+        if segment.tipSig == sig then return end
+    else
+        tip:SetOwner(segment.frame, "ANCHOR_CURSOR")
+    end
+    segment.tipSig = sig
+    if refresh and type(tip.ClearLines) == "function" then tip:ClearLines() end
+    tip:SetText("Gold", COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3])
+    local total = 0
+    for _, r in ipairs(rows) do
+        total = total + r.copper
+        local c = type(RAID_CLASS_COLORS) == "table" and r.class and RAID_CLASS_COLORS[r.class]
+        local cr, cg, cb = TIP_MUTED[1], TIP_MUTED[2], TIP_MUTED[3]
+        if c and c.r then cr, cg, cb = c.r, c.g, c.b end
+        local label = r.name
+        if r.guid == me then label = label .. " |cff22e0ff<|r" end
+        tip:AddDoubleLine(label, MoneyText(r.copper), cr, cg, cb, 1, 1, 1)
+    end
+    if #rows > 1 then
+        tip:AddDoubleLine("Total", MoneyText(total), COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 1, 1, 1)
+    end
+    tip:Show()
+end
+
 local function UpdateGold(segment)
     local copper = GetMoney()
     if type(copper) ~= "number" then error("GetMoney returned a non-number") end
+    RecordGold(copper)
+    if segment.hover then
+        if TipOwnedBy(segment) then
+            ShowGoldTooltip(segment, true)
+        else
+            segment.hover, segment.tipSig = false, nil
+        end
+    end
 
     if not segment.coins then
         segment.valueText:SetText(FormatMoney(copper))
@@ -555,7 +652,8 @@ local SEGMENT_DEFS = {
     { key = "bags", label = "BAGS", available = (GetFreeSlotsForBag ~= nil), update = UpdateBags, meter = true },
     { key = "time", label = "TIME", available = HAS_DATE or HAS_GET_GAME_TIME, update = UpdateTime,
       tooltip = ShowTimeTooltip, tooltipHide = HideTimeTooltip },
-    { key = "gold", label = "GOLD", available = HAS_GET_MONEY, update = UpdateGold, coins = true },
+    { key = "gold", label = "GOLD", available = HAS_GET_MONEY, update = UpdateGold, coins = true,
+      tooltip = ShowGoldTooltip, tooltipHide = HideTimeTooltip },
 }
 
 -------------------------------------------------------------------------------
