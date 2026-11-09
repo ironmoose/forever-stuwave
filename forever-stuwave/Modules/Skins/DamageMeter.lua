@@ -1,27 +1,30 @@
 -- Forever STUwave: Damage Meter
 -- SKIN ONLY. Blizzard's built-in damage meter (Blizzard_DamageMeter): the DamageMeter owner frame makes one
 -- DamageMeterSessionWindow<N> per meter window (DamageMeter:SetupSessionWindow). Each window has a 32 px header
--- texture (`Header`), the session timer, the meter type dropdown (`DamageMeterTypeDropdown.TypeName`), the session
--- dropdown (`SessionDropdown.SessionName`), the settings and minimize buttons, and a `MinimizeContainer` (the
--- body, hidden while minimized) with the background (`MinimizeContainer.Background`, whose alpha is the player's
--- own background opacity setting), the scroll box of entries, the pinned local player entry and the source window
--- (the per spell breakdown).
+-- texture (`Header`), the session timer, the meter type dropdown (`DamageMeterTypeDropdown`, its `Arrow` and
+-- `TypeName`), the session dropdown (`SessionDropdown`, its `Background`, `Arrow` and `SessionName`), the settings
+-- dropdown (`SettingsDropdown.Icon`), the minimize button, and a `MinimizeContainer` (the body, hidden while
+-- minimized) with the background (`MinimizeContainer.Background`, whose alpha is the player's own background opacity
+-- setting), the scroll box of entries, the pinned local player entry and the source window (the per spell breakdown).
 --
--- Player: "we also need to skin the damage meters." Read off the 12.1 reference source, every name is
--- feature-detected so a client whose meter differs keeps the stock look rather than erroring.
+-- Player: "we also need to skin the damage meters", then "can we pull from the xp bar and make it that way?" and
+-- "can we do a gradient for each class kind of like how we have a gradient for xp?". Design study: the damage meter
+-- mockup of 2026-11-09, form D (approved). Every name is feature-detected from the 12.1 reference source, so a client
+-- whose meter differs keeps the stock look rather than erroring.
 --
 -- TAINT. In combat the meter's values are secret and Blizzard's own code handles them, so nothing here writes a
--- field on a Blizzard table or registers a callback in one of its registries; the only Blizzard method called is
--- ForEachEntryFrame, to walk the rows already built. Every other reach in is hooksecurefunc on an instance method
--- (SetupSessionWindow, SetupEntry, Refresh, SetStyle) and region level visuals (textures, fonts, colours) on
--- regions Blizzard already made. Our own state lives in weak tables
--- keyed by the Blizzard object. No value is ever read from an entry, so no secret is touched.
+-- field on a Blizzard table or registers a callback in one of its registries. Every reach in is hooksecurefunc on an
+-- instance method (SetupSessionWindow, SetupEntry, Refresh, UpdateStyle, SetStatusBarColor, SetMinimized), HookScript,
+-- and region level work (textures, fonts, colours, anchors) on regions Blizzard already made. Fields are only READ
+-- (the colour Blizzard cached, isLocalPlayer), each behind a secret check. Our own state lives in weak tables keyed by
+-- the Blizzard object.
 --
--- WHAT IT LOOKS LIKE. The body wears the STUwave cut panel: Blizzard's background texture becomes our nine sliced
--- fill (so the opacity setting still drives it), with the additive glow and the 1 px border on top, and a cyan
--- header band with its rule where Blizzard's header bar was. Bars are flat fills (the class colour Blizzard sets
--- still applies) over a dark recess with a 1 px border and a light top edge; names and numbers are Mononoki with an
--- outline. The settings, session and minimize buttons keep their Blizzard art for now.
+-- WHAT IT LOOKS LIKE. The body wears the STUwave cut panel (Blizzard's background becomes our nine sliced fill, so the
+-- opacity setting still drives it) under a cyan header band. Each row is the XP bar's gauge: the name and number on top
+-- in Mononoki, and under them a run of leaning cells. The fill is a per class gradient, deep to hot, that the engine
+-- crops to the row's value; a tile laid over it (dm_cell_tile.tga, one texel per physical pixel) cuts the fill and the
+-- unlit track into cells and shades each one. The fill's leading edge burns white with a round glow, and faint cyan
+-- ticks mark the quarters. The gauge layout is the same whatever bar style is picked in Blizzard's own settings.
 
 local _, FS = ...
 
@@ -31,22 +34,67 @@ if type(hooksecurefunc) ~= "function" then return end
 
 local FONT = Theme.FONT_MONO
 local FLAT = Theme.FLAT_TEXTURE
-local ACCENT = Theme.COLOR_POWER
+local ACCENT = Theme.COLOR_POWER          -- cyan: band, rule, type name, ticks
+local VIOLET = Theme.COLOR_BORDER or ACCENT
+local PINK = Theme.COLOR_HEALTH or ACCENT
 local COLOR_BG = Theme.COLOR_BG
 local LINE = Theme.COLOR_BAR_BORDER
 local MUTED = Theme.COLOR_MUTED
 local WHITE = Theme.COLOR_TEXT_WHITE
+local IsSecret = FS.IsSecret or function() return false end
+
+local MEDIA = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
+local CELL_TILE = MEDIA .. "dm_cell_tile.tga"
+local GLOW_ROUND = MEDIA .. "glow_round.tga"
+local GEAR = MEDIA .. "icon_gear.tga"
+local CHEVRON = MEDIA .. "glyph_hud_chev.tga"
 
 local MAX_WINDOWS = 8
 local BAND_ALPHA = 0.14
 local RULE_ALPHA = 0.55
-local RECESS = { 0.039, 0.016, 0.086, 0.85 }   -- #0a0416, the module ink, behind each bar
-local SHEEN_ALPHA = 0.22                        -- the light 1 px top edge of a bar's fill
-local TEXT_SIZE = 11                            -- Blizzard's own text scale setting multiplies this
+local TEXT_SIZE = 11                      -- Blizzard's own text scale setting multiplies this
 local HEADER_SIZE = 11
 
+-- The gauge, in physical pixels so the cells land on whole pixels at any UI scale.
+local TILE_PX = 8                         -- dm_cell_tile.tga is 8 x 8: one cell and its gap
+local GAUGE_PX = 8
+local GAUGE_BOTTOM = 2                    -- UI units from the row's bottom
+local TEXT_TOP = 2                        -- UI units from the row's top
+local TEXT_RIGHT = 3
+local CELL_EMPTY = { 0.086, 0.055, 0.157, 1 }   -- the XP bar's unlit cell
+local HEAD_PX = 2                         -- the white hot leading edge
+local HEAD_ALPHA = 0.85
+local GLOW_SIZE = 16
+local GLOW_ALPHA = 0.55
+local GLOW_TINT = { 0.85, 0.55, 1 }       -- the XP bar's head bloom, mixed into each class's hot end
+local TICKS_AT = { 0.25, 0.5, 0.75 }
+local TICK_ALPHA = 0.35
+
+-- Per class ramps, deep to hot, each passing through the class colour (the XP bar runs violet to magenta the same way).
+-- From the mockup's RAMPS.
+local function Hex(h)
+    return { tonumber(h:sub(1, 2), 16) / 255, tonumber(h:sub(3, 4), 16) / 255, tonumber(h:sub(5, 6), 16) / 255 }
+end
+local RAMPS = {
+    WARRIOR = { Hex("b0601c"), Hex("ffe0a0") },
+    PALADIN = { Hex("d0308a"), Hex("ffd0ee") },
+    HUNTER  = { Hex("3c9a1e"), Hex("f0ffa8") },
+    ROGUE   = { Hex("e09a00"), Hex("fffcc0") },
+    PRIEST  = { Hex("8890c8"), Hex("ffffff") },
+    SHAMAN  = { Hex("2040ff"), Hex("40e8ff") },
+    MAGE    = { Hex("1a80e0"), Hex("c8faff") },
+    WARLOCK = { Hex("6a2cf0"), Hex("e0d0ff") },
+    DRUID   = { Hex("e04008"), Hex("ffd050") },
+}
+local DEFAULT_RAMP = { Hex("7c3aed"), Hex("ff2e97") }  -- the XP bar's own ramp, for a colour we cannot read
+
+local function Mix(a, b, t)
+    return { a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t }
+end
+
 local windows = setmetatable({}, { __mode = "k" })
-local entries = setmetatable({}, { __mode = "k" })
+local entries = setmetatable({}, { __mode = "k" })   -- entry -> its gauge pieces
+local classOf                                         -- RAID_CLASS_COLORS colour object -> class token, built on first use
 
 local function SetFont(fs, size, color)
     if not (fs and fs.SetFont) then return end
@@ -64,54 +112,176 @@ local function Edge(parent, layer, sub, color, a)
     return t
 end
 
+local function Snap(t)
+    if t and t.SetSnapToPixelGrid then
+        pcall(t.SetSnapToPixelGrid, t, true)
+        if t.SetTexelSnappingBias then pcall(t.SetTexelSnappingBias, t, 0) end
+    end
+end
+
+local function PixelsPerUnit(frame)
+    local helpers = FS.FrameHelpers
+    local ppu = helpers and helpers.PixelsPerUnit and helpers.PixelsPerUnit(frame)
+    if type(ppu) == "number" and ppu > 0 then return ppu end
+    return 1
+end
+
 -------------------------------------------------------------------------------
--- Entries (one bar row)
+-- Class ramps
 -------------------------------------------------------------------------------
 
--- Re-applied after each of Blizzard's SetStyle calls, which re-atlas the row's background.
-local function ApplyEntryArt(entry)
+-- The ramp for the colour object Blizzard handed SetStatusBarColor: a class colour is RAID_CLASS_COLORS[token] itself,
+-- so it is found by identity; any other colour (creature, ally, enemy, the default) gets a ramp built from its own RGB.
+local function RampFor(color)
+    if type(color) ~= "table" then return DEFAULT_RAMP end
+    if not classOf and type(RAID_CLASS_COLORS) == "table" then
+        classOf = setmetatable({}, { __mode = "k" })
+        for token, c in pairs(RAID_CLASS_COLORS) do
+            if type(c) == "table" then classOf[c] = token end
+        end
+    end
+    local token = classOf and classOf[color]
+    if token and RAMPS[token] then return RAMPS[token] end
+    if type(color.GetRGB) ~= "function" then return DEFAULT_RAMP end
+    local ok, r, g, b = pcall(color.GetRGB, color)
+    if not ok or IsSecret(r) or IsSecret(g) or IsSecret(b) or type(r) ~= "number" then return DEFAULT_RAMP end
+    local base = { r, g, b }
+    return { Mix(base, { 0, 0, 0 }, 0.35), Mix(base, { 1, 1, 1 }, 0.55) }
+end
+
+-- Paints the fill gradient, the leading edge and the glow from `color`, and the name pink on the player's own row.
+local function PaintEntry(entry, color)
+    local g = entries[entry]
+    if not g then return end
+    local ramp = RampFor(color)
+    g.ramp = ramp
+    local fill = entry.StatusBar:GetStatusBarTexture()
+    if fill and fill.SetGradient and type(CreateColor) == "function" then
+        local a, b = ramp[1], ramp[2]
+        fill:SetVertexColor(1, 1, 1, 1)
+        fill:SetGradient("HORIZONTAL", CreateColor(a[1], a[2], a[3], 1), CreateColor(b[1], b[2], b[3], 1))
+    end
+    local hot = ramp[2]
+    if g.glow then
+        local t = Mix(hot, GLOW_TINT, 0.3)
+        g.glow:SetVertexColor(t[1], t[2], t[3], GLOW_ALPHA)
+    end
+    local me = entry.isLocalPlayer
+    local name = entry.StatusBar.Name
+    if name and name.SetTextColor then
+        local mine = not IsSecret(me) and me == true
+        local c = mine and PINK or WHITE
+        name:SetTextColor(c[1], c[2], c[3], 1)
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Entries (one gauge row)
+-------------------------------------------------------------------------------
+
+-- The cells and the ticks follow the gauge's width, counted in physical pixels.
+local function SeatCells(entry)
+    local g = entries[entry]
     local bar = entry.StatusBar
-    if not bar then return end
+    if not (g and bar and bar.GetWidth) then return end
+    local ppu = PixelsPerUnit(bar)
+    local w = bar:GetWidth() or 0
+    if IsSecret(w) or type(w) ~= "number" then return end
+    local wpx = math.floor(w * ppu + 0.5)
+    if g.cells.SetTexCoord then g.cells:SetTexCoord(0, wpx / TILE_PX, 0, 1) end
+    for i, q in ipairs(TICKS_AT) do
+        local t = g.ticks[i]
+        t:ClearAllPoints()
+        t:SetPoint("TOPLEFT", bar, "TOPLEFT", math.floor(wpx * q) / ppu, 1 / ppu)
+        t:SetSize(1 / ppu, (GAUGE_PX + 2) / ppu)
+    end
+end
+
+-- Blizzard's UpdateStyle (every style, icon and SetStyle change) re-anchors the bar, name and value and re-atlases the
+-- recess; this runs after it and lays the row out as the gauge: name and number along the top, the gauge along the
+-- bottom, from the icon's right edge when bar icons are on.
+local function ApplyLayout(entry)
+    local bar = entry.StatusBar
+    if not (bar and entries[entry]) then return end
+    local name, value = bar.Name, bar.Value
+    local ppu = PixelsPerUnit(entry)
+
+    local left = 0
+    if type(entry.GetIconAttachmentAnchor) == "function" then
+        local ok, _, rel, _, x = pcall(entry.GetIconAttachmentAnchor, entry)
+        if ok then
+            left = type(x) == "number" and x or 0
+            if rel ~= entry and type(rel) == "table" and rel.GetWidth then left = left + (rel:GetWidth() or 0) end
+        end
+    end
+
+    bar:ClearAllPoints()
+    bar:SetPoint("BOTTOMLEFT", entry, "BOTTOMLEFT", left, GAUGE_BOTTOM)
+    bar:SetPoint("BOTTOMRIGHT", entry, "BOTTOMRIGHT", -TEXT_RIGHT, GAUGE_BOTTOM)
+    bar:SetHeight(GAUGE_PX / ppu)
+
+    if value then
+        value:ClearAllPoints()
+        value:SetPoint("TOPRIGHT", entry, "TOPRIGHT", -TEXT_RIGHT, -TEXT_TOP)
+    end
+    if name then
+        name:ClearAllPoints()
+        name:SetPoint("TOPLEFT", entry, "TOPLEFT", left + 1, -TEXT_TOP)
+        if value then name:SetPoint("RIGHT", value, "LEFT", -8, 0) end
+    end
+
     local bg, edge = bar.Background, bar.BackgroundEdge
-    if bg and bg.SetColorTexture then bg:SetColorTexture(RECESS[1], RECESS[2], RECESS[3], RECESS[4]) end
+    if bg then
+        bg:ClearAllPoints()
+        bg:SetAllPoints(bar)
+        if bg.SetColorTexture then bg:SetColorTexture(CELL_EMPTY[1], CELL_EMPTY[2], CELL_EMPTY[3], CELL_EMPTY[4]) end
+    end
     if edge and edge.SetColorTexture then edge:SetColorTexture(0, 0, 0, 0) end
+
+    SeatCells(entry)
 end
 
 local function SkinEntry(entry)
     if not entry or entries[entry] then return end
     local bar = entry.StatusBar
-    if not (bar and bar.SetStatusBarTexture and bar.GetStatusBarTexture) then return end
-    entries[entry] = true
+    if not (bar and bar.SetStatusBarTexture and bar.GetStatusBarTexture and bar.CreateTexture) then return end
+    local g = { ticks = {} }
+    entries[entry] = g
 
-    -- Flat fill. Blizzard colours the bar through GetStatusBarTexture():SetVertexColor and caches the colour it set,
-    -- so the colour it already gave this row is carried onto the new art here; later changes land on it directly.
-    local before = bar:GetStatusBarTexture()
-    local r, g, b, a = 1, 1, 1, 1
-    if before and before.GetVertexColor then r, g, b, a = before:GetVertexColor() end
     bar:SetStatusBarTexture(FLAT)
     local fill = bar:GetStatusBarTexture()
-    if fill and fill.SetVertexColor and not (FS.IsSecret and (FS.IsSecret(r) or FS.IsSecret(g) or FS.IsSecret(b))) then
-        fill:SetVertexColor(r, g, b, a)
+
+    -- the white hot leading edge and its bloom ride the fill's right edge, which the engine places from the value
+    if fill then
+        g.head = Edge(bar, "ARTWORK", 3, WHITE, HEAD_ALPHA)
+        g.head:SetBlendMode("ADD")
+        g.head:SetPoint("TOPRIGHT", fill, "TOPRIGHT")
+        g.head:SetPoint("BOTTOMRIGHT", fill, "BOTTOMRIGHT")
+        g.head:SetWidth(HEAD_PX / PixelsPerUnit(bar))
+        Snap(g.head)
+    end
+
+    -- the cell tile over fill and track, one texel per physical pixel, repeated across the gauge
+    g.cells = bar:CreateTexture(nil, "OVERLAY", nil, -6)
+    g.cells:SetTexture(CELL_TILE, "REPEAT", "CLAMP", "NEAREST")
+    g.cells:SetAllPoints(bar)
+    Snap(g.cells)
+
+    for i = 1, #TICKS_AT do
+        local t = Edge(bar, "OVERLAY", -5, ACCENT, TICK_ALPHA)
+        Snap(t)
+        g.ticks[i] = t
     end
 
     if fill then
-        local sheen = Edge(bar, "ARTWORK", 2, WHITE, SHEEN_ALPHA)
-        sheen:SetPoint("TOPLEFT", fill, "TOPLEFT")
-        sheen:SetPoint("TOPRIGHT", fill, "TOPRIGHT")
-        sheen:SetHeight(1)
+        g.glow = bar:CreateTexture(nil, "OVERLAY", nil, -4)
+        g.glow:SetTexture(GLOW_ROUND)
+        g.glow:SetBlendMode("ADD")
+        g.glow:SetSize(GLOW_SIZE, GLOW_SIZE)
+        g.glow:SetPoint("CENTER", fill, "RIGHT", 0, 0)
     end
 
-    -- 1 px border round the row's bar, under the text
-    local top = Edge(bar, "OVERLAY", -8, LINE)
-    top:SetPoint("TOPLEFT", bar, "TOPLEFT", -1, 1); top:SetPoint("TOPRIGHT", bar, "TOPRIGHT", 1, 1); top:SetHeight(1)
-    local bottom = Edge(bar, "OVERLAY", -8, LINE)
-    bottom:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", -1, -1); bottom:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 1, -1); bottom:SetHeight(1)
-    local left = Edge(bar, "OVERLAY", -8, LINE)
-    left:SetPoint("TOPLEFT", top, "BOTTOMLEFT"); left:SetPoint("BOTTOMLEFT", bottom, "TOPLEFT"); left:SetWidth(1)
-    local right = Edge(bar, "OVERLAY", -8, LINE)
-    right:SetPoint("TOPRIGHT", top, "BOTTOMRIGHT"); right:SetPoint("BOTTOMRIGHT", bottom, "TOPRIGHT"); right:SetWidth(1)
-
-    -- the class or spell icon gets the same 1 px frame
+    -- the class or spell icon gets a 1 px frame
     local icon = entry.Icon
     if icon and icon.CreateTexture then
         local frame = Edge(icon, "BACKGROUND", -8, LINE)
@@ -122,13 +292,114 @@ local function SkinEntry(entry)
     SetFont(bar.Name, TEXT_SIZE, WHITE)
     SetFont(bar.Value, TEXT_SIZE, WHITE)
 
-    ApplyEntryArt(entry)
-    if type(entry.SetStyle) == "function" then hooksecurefunc(entry, "SetStyle", ApplyEntryArt) end
+    -- Blizzard's own cached colour (a read; it is the RAID_CLASS_COLORS object or one of its constants)
+    PaintEntry(entry, entry.statusBarColor)
+    ApplyLayout(entry)
+
+    if type(entry.UpdateStyle) == "function" then hooksecurefunc(entry, "UpdateStyle", ApplyLayout) end
+    if type(entry.SetStatusBarColor) == "function" then hooksecurefunc(entry, "SetStatusBarColor", PaintEntry) end
+    if type(bar.HookScript) == "function" then pcall(bar.HookScript, bar, "OnSizeChanged", function() SeatCells(entry) end) end
 end
 
 local function SkinEntriesOf(owner)
     if type(owner.ForEachEntryFrame) ~= "function" then return end
     pcall(owner.ForEachEntryFrame, owner, SkinEntry)
+end
+
+-------------------------------------------------------------------------------
+-- Header keys
+-------------------------------------------------------------------------------
+
+local function Hold(region)
+    if not region then return end
+    if FS.HeldArt and FS.HeldArt.Hold then FS.HeldArt.Hold(region) elseif region.SetAlpha then region:SetAlpha(0) end
+end
+
+-- A STUwave key drawn on a Blizzard dropdown: our own child frame (no mouse, so every click is still Blizzard's) with a
+-- cut plate, ring and halo in `accent`, and an optional glyph texture. Hover lifts the ring and glyph.
+local function Key(button, accent, size, glyph, flip)
+    if not (button and type(CreateFrame) == "function") then return nil end
+    local key = CreateFrame("Frame", nil, button)
+    if key.EnableMouse then key:EnableMouse(false) end
+    if size then
+        key:SetSize(size, size)
+        key:SetPoint("CENTER", button, "CENTER", 0, 0)
+    else
+        key:SetAllPoints(button)
+    end
+    local face = Theme.AddCutSliceFill and Theme.AddCutSliceFill(key, Theme.COLOR_BUTTON_INK or COLOR_BG, 3)
+    local skin = Theme.SkinButton and Theme.SkinButton(key, { borderColor = accent, chamfer = 3, glowAlpha = 0.35 })
+    local ring = skin and skin.border and skin.border.ring
+    local mark
+    if glyph then
+        mark = key:CreateTexture(nil, "OVERLAY", nil, 3)
+        mark:SetTexture(glyph)
+        mark:SetSize(size and size - 4 or 12, size and size - 4 or 12)
+        mark:SetPoint("CENTER", key, "CENTER", 0, 0)
+        if flip then mark:SetTexCoord(0, 1, 1, 0) end
+        mark:SetVertexColor(accent[1], accent[2], accent[3], 0.85)
+    end
+    local function paint(hover)
+        if ring then ring:SetVertexColor(accent[1], accent[2], accent[3], hover and 1 or 0.7) end
+        if mark then
+            local c = hover and Mix(accent, WHITE, 0.35) or accent
+            mark:SetVertexColor(c[1], c[2], c[3], hover and 1 or 0.85)
+        end
+    end
+    paint(false)
+    if type(button.HookScript) == "function" then
+        pcall(button.HookScript, button, "OnEnter", function() paint(true) end)
+        pcall(button.HookScript, button, "OnLeave", function() paint(false) end)
+    end
+    return key, face
+end
+
+local function SkinHeaderButtons(window)
+    local typeDropdown = window.DamageMeterTypeDropdown
+    if typeDropdown then
+        Hold(typeDropdown.Arrow)
+        if typeDropdown.Arrow and typeDropdown.CreateTexture then
+            local chev = typeDropdown:CreateTexture(nil, "OVERLAY", nil, 3)
+            chev:SetTexture(CHEVRON)
+            chev:SetTexCoord(0, 1, 1, 0)   -- the file points up
+            chev:SetSize(14, 14)
+            chev:SetPoint("CENTER", typeDropdown.Arrow, "CENTER", 0, 2)
+            chev:SetVertexColor(ACCENT[1], ACCENT[2], ACCENT[3], 1)
+        end
+    end
+
+    local session = window.SessionDropdown
+    if session then
+        Hold(session.Background)
+        Hold(session.Arrow)
+        Key(session, VIOLET)
+    end
+
+    local settings = window.SettingsDropdown
+    if settings then
+        Hold(settings.Icon)
+        Key(settings, VIOLET, 16, GEAR)
+    end
+
+    local minimize = window.MinimizeButton
+    local skins = FS.ButtonSkins
+    if minimize and skins and skins.SkinCloseButton and type(CreateFrame) == "function" then
+        -- the plate seats itself 5 in and 3 down from its anchor; this spot keeps it where Blizzard's button sat
+        local seat = CreateFrame("Frame", nil, window)
+        seat:SetSize(1, 1)
+        seat:SetPoint("TOPRIGHT", window.Header or window, "TOPRIGHT", 2, -4)
+        local minimized = false
+        if type(window.IsMinimized) == "function" then
+            local ok, m = pcall(window.IsMinimized, window)
+            minimized = ok and not IsSecret(m) and m == true
+        end
+        skins.SkinCloseButton(minimize, { anchor = seat, glyph = minimized and "plus" or "minus" })
+        if type(window.SetMinimized) == "function" and skins.SetGlyph then
+            hooksecurefunc(window, "SetMinimized", function(_, isMinimized)
+                skins.SetGlyph(minimize, isMinimized and "plus" or "minus")
+            end)
+        end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -191,8 +462,9 @@ local function SkinWindow(window)
         SkinSourceWindow(container.SourceWindow)
     end
     SkinHeader(window)
+    SkinHeaderButtons(window)
 
-    SetFont(window.SessionTimer, HEADER_SIZE, WHITE)
+    SetFont(window.SessionTimer, HEADER_SIZE, Theme.COLOR_AMBER or WHITE)
     local typeDropdown = window.DamageMeterTypeDropdown
     if typeDropdown then SetFont(typeDropdown.TypeName, HEADER_SIZE + 1, ACCENT) end
     local session = window.SessionDropdown
@@ -224,4 +496,4 @@ local watcher = CreateFrame("Frame")
 watcher:RegisterEvent("PLAYER_LOGIN")
 watcher:SetScript("OnEvent", SkinExisting)
 
-FS.DamageMeterSkin = { SkinWindow = SkinWindow, SkinEntry = SkinEntry }
+FS.DamageMeterSkin = { SkinWindow = SkinWindow, SkinEntry = SkinEntry, RampFor = RampFor, RAMPS = RAMPS }
