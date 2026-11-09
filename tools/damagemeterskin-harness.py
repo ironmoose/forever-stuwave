@@ -50,6 +50,8 @@ local function Region(kind)
     function r:ClearAllPoints() self.points = 0 end
     function r:SetAllPoints() self.points = 2 end
     function r:SetHeight(h) self.h = h end
+    function r:GetHeight() return self.h or 32 end
+    function r:GetStringHeight() return 11 end
     function r:SetWidth(w) self.w = w end
     function r:SetSize(w, h) self.w, self.h = w, h end
     function r:Hide() self.shown = false end
@@ -75,6 +77,10 @@ local function Blizzard(name, fields)
     function raw:SetPoint() raw.points = raw.points + 1 end
     function raw:ClearAllPoints() raw.points = 0 end
     function raw:SetHeight(h) raw.h = h end
+    function raw:SetSize(w, h) raw.w, raw.h = w, h end
+    function raw:GetHeight() return raw.rowH or 20 end
+    function raw:IsShown() return true end
+    function raw:GetRegions() return unpack(raw.made) end
     function raw:GetWidth() return 200 end
     function raw:GetFrameLevel() return 3 end
     return setmetatable({}, {
@@ -165,7 +171,8 @@ __glyph = {}
 FS = {
     IsSecret = function() return false end,
     FrameHelpers = { PixelsPerUnit = function() return 1.25 end },
-    HeldArt = { Hold = function(r) r:SetAlpha(0); __held[#__held + 1] = r end },
+    HeldArt = { Hold = function(r) r:SetAlpha(0); __held[#__held + 1] = r end,
+                HoldButton = function(b) __heldButtons = (__heldButtons or 0) + 1 end },
     ButtonSkins = {
         SkinCloseButton = function(b, o) __glyph[b] = o.glyph end,
         SetGlyph = function(b, k) __glyph[b] = k end,
@@ -179,6 +186,7 @@ FS = {
         PanelBandInset = function() return 3 end,
         AddPanelChrome = function(frame) __chrome = __chrome + 1; return frame:CreateTexture(), frame:CreateTexture(), frame:CreateTexture() end,
         AddCutSliceFill = function() return {} end,
+        AddRoundedFill = function(frame) __wash = (__wash or 0) + 1 end,
         SkinButton = function() __keys = (__keys or 0) + 1; return { border = { ring = Region("ring") } } end,
     },
 }
@@ -194,11 +202,15 @@ def case(name: str, body: str) -> None:
 case("a_window_wears_the_panel_and_header_band", """
     local w = DamageMeterSessionWindow1
     local c = w.MinimizeContainer
-    assert(c.Background.tex == "SLICE_FILL" and c.Background.sliced, "background is not the nine sliced fill")
-    assert(c.Background.vc[1] == 0.05, "fill not tinted COLOR_BG")
+    assert(c.Background.alpha == 0, "Blizzard's background not held: the body is the chat terminal's fill")
     assert(__chrome == 2, "body and source window chrome: " .. __chrome)
+    assert(__wash == 1, "the chat terminal's inner wash on the body")
+    local scan
+    for _, t in ipairs(c.made) do if t.tex and tostring(t.tex):find("scanline") then scan = t end end
+    assert(scan and scan.alpha == 0.4, "no scanline scrim on the body")
     assert(w.Header.alpha == 0, "Blizzard header art still showing")
-    assert(#w.made == 2, "band and rule on the window")
+    assert(#w.made == 2, "term bar wash and rule on the window")
+    assert(w.made[1].h == 31 and math.abs(w.made[1].color[4] - 0.08) < 1e-6, "term bar wash: full header height, chat alpha")
     assert(w.SessionTimer.font == "MONO" and w.DamageMeterTypeDropdown.TypeName.font == "MONO"
         and w.SessionDropdown.SessionName.font == "MONO" and c.NotActive.font == "MONO", "header text not mono")
     assert(w.DamageMeterTypeDropdown.TypeName.textColor[1] == 0.13, "meter type not cyan")
@@ -209,16 +221,19 @@ case("rows_are_xp_gauges_in_their_class_ramp", """
     local bar = e.StatusBar
     assert(e.fill.tex == "FLAT", "bar fill not flat")
     local g = e.fill.grad
-    assert(g and g[1] == "HORIZONTAL", "no class gradient on the fill")
+    assert(g and g[1] == "VERTICAL", "fill not one vertical gradient (every pip a single gradient)")
     local ramp = FS.DamageMeterSkin.RAMPS.SHAMAN
     assert(g[2][1] == ramp[1][1] and g[3][3] == ramp[2][3], "shaman row not on the shaman ramp")
     assert(bar.Background.color and math.abs(bar.Background.color[1] - 0.086) < 1e-6, "track not the XP bar's unlit cell")
     assert(bar.BackgroundEdge.color[4] == 0, "shadow edge not cleared")
-    assert(math.abs(bar.h - 10 / 1.25) < 1e-6, "gauge not 10 physical px tall")
+    assert(math.abs(bar.h - 6 / 1.25) < 1e-6, "a 20 unit row: gauge is what is left under the text, 6 px: " .. tostring(bar.h * 1.25))
+    getmetatable(e).__index.rowH = 30
+    e:SetStyle()
+    assert(math.abs(bar.h - 10 / 1.25) < 1e-6, "a tall row: gauge capped at 10 px")
     local cells
     for _, t in ipairs(bar.made) do if t.tex and tostring(t.tex):find("dm_cell_tile") then cells = t end end
     assert(cells and cells.wrap == "REPEAT", "no repeating cell tile")
-    assert(cells.tc and cells.tc[2] == 200 * 1.25 / 16 and cells.tc[4] == 10 / 16, "cell tile not one texel per physical pixel")
+    assert(cells.tc and cells.tc[2] == 200 * 1.25 / 16 and cells.tc[3] == 6 / 16 and cells.tc[4] == 1, "gap tile not one texel per physical pixel from its bottom rows")
     assert(bar.Name.font == "MONO" and bar.Value.font == "MONO", "row text not mono")
     assert(bar.Name.textColor[1] == 1 and bar.Name.textColor[2] == 1, "another player's name not white")
     local me = DamageMeterSessionWindow1.list[2]
@@ -238,14 +253,24 @@ case("blizzard_restyles_and_recolours_are_followed", """
     assert(e.fill.grad and e.fill.grad[3][1] > 0.5, "a non class colour gets no ramp")
 """)
 
-case("header_buttons_become_stuwave_keys", """
+case("header_buttons_are_the_chat_bar_glyphs_on_one_line", """
     local w = DamageMeterSessionWindow1
     assert(w.DamageMeterTypeDropdown.Arrow.alpha == 0 and w.SessionDropdown.Background.alpha == 0
         and w.SessionDropdown.Arrow.alpha == 0 and w.SettingsDropdown.Icon.alpha == 0, "gold Blizzard art still showing")
-    assert(__keys == 2, "session and settings keys: " .. tostring(__keys))
-    assert(__glyph[w.MinimizeButton] == "minus", "minimize not a minus key")
+    assert(__heldButtons == 1, "minimise button art not held")
+    local function glyph(b, name)
+        for _, t in ipairs(b.made) do if t.tex and tostring(t.tex):find(name) then return t end end
+    end
+    local gear, mini = glyph(w.SettingsDropdown, "icon_gear"), glyph(w.MinimizeButton, "icon_minimize")
+    assert(gear and gear.vc[4] == 0.85, "settings not a quiet gear glyph")
+    assert(mini and mini.vc[2] == 0.18, "minimise not the pink chat glyph")
+    w.MinimizeButton.scripts.OnEnter()
+    assert(mini.vc[4] == 1, "glyph does not come up on hover")
     w:SetMinimized(true)
-    assert(__glyph[w.MinimizeButton] == "plus", "minimized window not a plus key")
+    assert(tostring(mini.tex):find("icon_maximize") and mini.vc[2] == 1, "minimised window not the green restore glyph")
+    assert(w.MinimizeButton.w == 16 and w.SettingsDropdown.w == 16 and w.SessionDropdown.h == 16, "controls not 16 high")
+    assert(w.MinimizeButton.points == 1 and w.SettingsDropdown.points == 1 and w.SessionDropdown.points == 1,
+        "controls not re-seated on one line")
 """)
 
 case("later_rows_windows_and_source_rows_are_skinned", """

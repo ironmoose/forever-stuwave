@@ -19,12 +19,13 @@
 -- (the colour Blizzard cached, isLocalPlayer), each behind a secret check. Our own state lives in weak tables keyed by
 -- the Blizzard object.
 --
--- WHAT IT LOOKS LIKE. The body wears the STUwave cut panel (Blizzard's background becomes our nine sliced fill, so the
--- opacity setting still drives it) under a cyan header band. Each row is the XP bar's gauge: the name and number on top
--- in Mononoki, and under them a run of leaning cells. The fill is a per class gradient, deep to hot, that the engine
--- crops to the row's value; a tile laid over it (dm_cell_tile.tga, one texel per physical pixel) cuts the fill and the
--- unlit track into cells and shades each one. The fill's leading edge burns white with a round glow, and faint cyan
--- ticks mark the quarters. The gauge layout is the same whatever bar style is picked in Blizzard's own settings.
+-- WHAT IT LOOKS LIKE. The chat terminal ("make it look as good as our chat window does"): its body (near black fill,
+-- cyan border glow, faint inner wash, scanlines) and its term bar for a header (a full width cyan wash and rule, flat
+-- glyph buttons on one centre line). Each row is the XP bar's gauge: the name and number on top in Mononoki, and under
+-- them a run of leaning pips. The fill is one vertical class gradient (deep foot, hot top) that the engine crops to the
+-- row's value; a gap tile laid over it (dm_cell_tile.tga, one texel per physical pixel) cuts fill and unlit track into
+-- pips, so each pip is a single gradient, with a round glow at the fill's edge. The gauge layout is the same whatever bar
+-- style is picked in Blizzard's own settings, and its height follows the row height.
 
 local _, FS = ...
 
@@ -35,7 +36,6 @@ if type(hooksecurefunc) ~= "function" then return end
 local FONT = Theme.FONT_MONO
 local FLAT = Theme.FLAT_TEXTURE
 local ACCENT = Theme.COLOR_POWER          -- cyan: band, rule, type name, ticks
-local VIOLET = Theme.COLOR_BORDER or ACCENT
 local PINK = Theme.COLOR_HEALTH or ACCENT
 local COLOR_BG = Theme.COLOR_BG
 local LINE = Theme.COLOR_BAR_BORDER
@@ -50,25 +50,23 @@ local GEAR = MEDIA .. "icon_gear.tga"
 local CHEVRON = MEDIA .. "glyph_hud_chev.tga"
 
 local MAX_WINDOWS = 8
-local BAND_ALPHA = 0.14
-local RULE_ALPHA = 0.55
 local TEXT_SIZE = 11                      -- Blizzard's own text scale setting multiplies this
 local HEADER_SIZE = 11
 
--- The gauge, in physical pixels so the cells land on whole pixels at any UI scale.
-local TILE_PX = 16                        -- dm_cell_tile.tga is 16 x 16: one cell (13 px, leaning) and its 3 px gap
-local GAUGE_PX = 10                       -- the tile rows the gauge shows (the rest of the file is padding)
-local GAUGE_BOTTOM = 2                    -- UI units from the row's bottom
-local TEXT_TOP = 2                        -- UI units from the row's top
+-- The gauge, in physical pixels so the pips land on whole pixels at any UI scale. Its height follows the row: what is
+-- left under the text, between GAUGE_MIN_PX and GAUGE_MAX_PX (Blizzard's Bar Height setting makes rows taller).
+local TILE_PX = 16                        -- dm_cell_tile.tga is 16 x 16: one pip (11 px, leaning) and its 5 px gap
+local GAUGE_MAX_PX = 10
+local GAUGE_MIN_PX = 6
+local TEXT_GAUGE_GAP_PX = 2               -- clear px between the text's foot and the gauge
+local GAUGE_BOTTOM = 1                    -- UI units from the row's bottom
+local TEXT_TOP = 1                        -- UI units from the row's top
 local TEXT_RIGHT = 3
+local ICON_GAP = 4                        -- UI units between the class icon and the gauge and name
 local CELL_EMPTY = { 0.086, 0.055, 0.157, 1 }   -- the XP bar's unlit cell
-local HEAD_PX = 2                         -- the white hot leading edge
-local HEAD_ALPHA = 0.85
-local GLOW_SIZE = 16
-local GLOW_ALPHA = 0.55
+local GLOW_SIZE = 14
+local GLOW_ALPHA = 0.45
 local GLOW_TINT = { 0.85, 0.55, 1 }       -- the XP bar's head bloom, mixed into each class's hot end
-local TICKS_AT = { 0.25, 0.5, 0.75 }
-local TICK_ALPHA = 0.35
 
 -- Per class ramps, deep to hot, each passing through the class colour (the XP bar runs violet to magenta the same way).
 -- From the mockup's RAMPS.
@@ -149,7 +147,9 @@ local function RampFor(color)
     return { Mix(base, { 0, 0, 0 }, 0.35), Mix(base, { 1, 1, 1 }, 0.55) }
 end
 
--- Paints the fill gradient, the leading edge and the glow from `color`, and the name pink on the player's own row.
+-- Paints the fill, the glow and the name from `color`. The fill is ONE vertical gradient, deep at the foot and hot at the
+-- top, so the gap tile cuts it into pips that are each a single gradient (the XP bar's shaded pips); the name is pink on
+-- the player's own row.
 local function PaintEntry(entry, color)
     local g = entries[entry]
     if not g then return end
@@ -159,7 +159,7 @@ local function PaintEntry(entry, color)
     if fill and fill.SetGradient and type(CreateColor) == "function" then
         local a, b = ramp[1], ramp[2]
         fill:SetVertexColor(1, 1, 1, 1)
-        fill:SetGradient("HORIZONTAL", CreateColor(a[1], a[2], a[3], 1), CreateColor(b[1], b[2], b[3], 1))
+        fill:SetGradient("VERTICAL", CreateColor(a[1], a[2], a[3], 1), CreateColor(b[1], b[2], b[3], 1))
     end
     local hot = ramp[2]
     if g.glow then
@@ -179,7 +179,8 @@ end
 -- Entries (one gauge row)
 -------------------------------------------------------------------------------
 
--- The cells and the ticks follow the gauge's width, counted in physical pixels.
+-- The gap tile follows the gauge, one texel per physical pixel: across its width, and the BOTTOM rows of the tile for
+-- its height (so the lean stays half a px per row however tall the gauge is).
 local function SeatCells(entry)
     local g = entries[entry]
     local bar = entry.StatusBar
@@ -188,13 +189,22 @@ local function SeatCells(entry)
     local w = bar:GetWidth() or 0
     if IsSecret(w) or type(w) ~= "number" then return end
     local wpx = math.floor(w * ppu + 0.5)
-    if g.cells.SetTexCoord then g.cells:SetTexCoord(0, wpx / TILE_PX, 0, GAUGE_PX / TILE_PX) end
-    for i, q in ipairs(TICKS_AT) do
-        local t = g.ticks[i]
-        t:ClearAllPoints()
-        t:SetPoint("TOPLEFT", bar, "TOPLEFT", math.floor(wpx * q) / ppu, 1 / ppu)
-        t:SetSize(1 / ppu, (GAUGE_PX + 2) / ppu)
+    local h = g.gaugePx or GAUGE_MAX_PX
+    if g.cells.SetTexCoord then g.cells:SetTexCoord(0, wpx / TILE_PX, (TILE_PX - h) / TILE_PX, 1) end
+end
+
+-- The gauge's height in physical px: the row's height less the text and the margins, clamped.
+local function GaugePx(entry, name, ppu)
+    local rowH = entry.GetHeight and entry:GetHeight() or 0
+    if IsSecret(rowH) or type(rowH) ~= "number" or rowH <= 0 then return GAUGE_MAX_PX end
+    local textH = 0
+    if name and name.GetStringHeight then
+        local ok, v = pcall(name.GetStringHeight, name)
+        if ok and type(v) == "number" and not IsSecret(v) then textH = v end
     end
+    if textH <= 0 then textH = TEXT_SIZE end
+    local px = math.floor((rowH - TEXT_TOP - GAUGE_BOTTOM - textH) * ppu) - TEXT_GAUGE_GAP_PX
+    return math.max(GAUGE_MIN_PX, math.min(GAUGE_MAX_PX, px))
 end
 
 -- Blizzard's UpdateStyle (every style, icon and SetStyle change) re-anchors the bar, name and value and re-atlases the
@@ -206,19 +216,22 @@ local function LayOut(entry)
     local name, value = bar.Name, bar.Value
     local ppu = PixelsPerUnit(entry)
 
+    -- Past the class icon when Blizzard shows one. Its frame has a fixed 24 x 24 size in the template; the texture
+    -- GetIconAttachmentAnchor names reads 0 wide before the first layout pass, which put the gauge under the icon.
     local left = 0
-    if type(entry.GetIconAttachmentAnchor) == "function" then
-        local ok, _, rel, _, x = pcall(entry.GetIconAttachmentAnchor, entry)
-        if ok then
-            left = type(x) == "number" and x or 0
-            if rel ~= entry and type(rel) == "table" and rel.GetWidth then left = left + (rel:GetWidth() or 0) end
-        end
+    local icon = entry.Icon
+    if icon and icon.IsShown and icon:IsShown() then
+        local w = icon.GetWidth and icon:GetWidth() or 0
+        if IsSecret(w) or type(w) ~= "number" or w <= 0 then w = 24 end
+        left = w + ICON_GAP
     end
 
+    local g = entries[entry]
+    g.gaugePx = GaugePx(entry, name, ppu)
     bar:ClearAllPoints()
     bar:SetPoint("BOTTOMLEFT", entry, "BOTTOMLEFT", left, GAUGE_BOTTOM)
     bar:SetPoint("BOTTOMRIGHT", entry, "BOTTOMRIGHT", -TEXT_RIGHT, GAUGE_BOTTOM)
-    bar:SetHeight(GAUGE_PX / ppu)
+    bar:SetHeight(g.gaugePx / ppu)
 
     if value then
         value:ClearAllPoints()
@@ -251,34 +264,19 @@ local function SkinEntry(entry)
     if not entry or entries[entry] then return end
     local bar = entry.StatusBar
     if not (bar and bar.SetStatusBarTexture and bar.GetStatusBarTexture and bar.CreateTexture) then return end
-    local g = { ticks = {} }
+    local g = {}
     entries[entry] = g
 
     bar:SetStatusBarTexture(FLAT)
     local fill = bar:GetStatusBarTexture()
 
-    -- the white hot leading edge and its bloom ride the fill's right edge, which the engine places from the value
-    if fill then
-        g.head = Edge(bar, "ARTWORK", 3, WHITE, HEAD_ALPHA)
-        g.head:SetBlendMode("ADD")
-        g.head:SetPoint("TOPRIGHT", fill, "TOPRIGHT")
-        g.head:SetPoint("BOTTOMRIGHT", fill, "BOTTOMRIGHT")
-        g.head:SetWidth(HEAD_PX / PixelsPerUnit(bar))
-        Snap(g.head)
-    end
-
-    -- the cell tile over fill and track, one texel per physical pixel, repeated across the gauge
+    -- the gap tile over fill and track, one texel per physical pixel, repeated across the gauge
     g.cells = bar:CreateTexture(nil, "OVERLAY", nil, -6)
     g.cells:SetTexture(CELL_TILE, "REPEAT", "CLAMP", "NEAREST")
     g.cells:SetAllPoints(bar)
     Snap(g.cells)
 
-    for i = 1, #TICKS_AT do
-        local t = Edge(bar, "OVERLAY", -5, ACCENT, TICK_ALPHA)
-        Snap(t)
-        g.ticks[i] = t
-    end
-
+    -- the bloom rides the fill's right edge, which the engine places from the value
     if fill then
         g.glow = bar:CreateTexture(nil, "OVERLAY", nil, -4)
         g.glow:SetTexture(GLOW_ROUND)
@@ -301,6 +299,7 @@ local function SkinEntry(entry)
     if type(entry.UpdateStyle) == "function" then hooksecurefunc(entry, "UpdateStyle", ApplyLayout) end
     if type(entry.SetStatusBarColor) == "function" then hooksecurefunc(entry, "SetStatusBarColor", PaintEntry) end
     if type(bar.HookScript) == "function" then pcall(bar.HookScript, bar, "OnSizeChanged", function() SeatCells(entry) end) end
+    if type(entry.HookScript) == "function" then pcall(entry.HookScript, entry, "OnSizeChanged", function() ApplyLayout(entry) end) end
 
     -- Blizzard's own cached colour (a read; it is the RAID_CLASS_COLORS object or one of its constants)
     PaintEntry(entry, entry.statusBarColor)
@@ -313,56 +312,99 @@ local function SkinEntriesOf(owner)
 end
 
 -------------------------------------------------------------------------------
--- Header keys
+-- Title bar (the chat terminal's term bar)
 -------------------------------------------------------------------------------
+
+-- Player: "make it look as good as our chat window does". So the header IS the chat window's term bar
+-- (ChatTermBar.lua): a cyan wash and a brighter bottom rule, one unit inside the border, the full width, and quiet flat
+-- glyphs (no plates) that come up to full alpha under the mouse; pink for minimise, cyan for the rest.
+local BAR_WASH = 0.08                      -- the chat term bar's wash and rule
+local BAR_RULE = 0.30
+local BAR_INSET = 1
+local GLYPH_SIZE = 16                      -- the chat title buttons
+local GLYPH_GAP = 4
+local GLYPH_ALPHA = 0.85
+local GLYPH_ALPHA_HOVER = 1.00
+local GLYPH_PAD_R = 6                      -- the minimise glyph's gap from the right border
+local ICON_MINIMIZE = MEDIA .. "icon_minimize.tga"
+local ICON_MAXIMIZE = MEDIA .. "icon_maximize.tga"
+local GREEN = { 0.22, 1, 0.08, 1 }         -- the chat term bar's restore green
 
 local function Hold(region)
     if not region then return end
     if FS.HeldArt and FS.HeldArt.Hold then FS.HeldArt.Hold(region) elseif region.SetAlpha then region:SetAlpha(0) end
 end
 
--- A STUwave key drawn under a Blizzard dropdown: our own frame (no mouse, so every click is still Blizzard's), a child of
--- the WINDOW one level below the dropdown, so the dropdown's own text (the session name) draws on top of it. A cut plate,
--- ring and halo in `accent`, and an optional glyph texture. Hover lifts the ring and glyph.
-local function Key(window, button, accent, size, glyph, flip)
-    if not (button and type(CreateFrame) == "function") then return nil end
-    local key = CreateFrame("Frame", nil, window)
-    if key.EnableMouse then key:EnableMouse(false) end
-    if key.SetFrameLevel and button.GetFrameLevel and window.GetFrameLevel then
-        local level = math.max((button:GetFrameLevel() or 1) - 1, window:GetFrameLevel() or 0)
-        key:SetFrameLevel(level)
+-- A flat glyph on a Blizzard button (a texture region on it: no field written), idle at GLYPH_ALPHA, full on hover.
+local function Glyph(button, texture, color, flip)
+    local t = button:CreateTexture(nil, "OVERLAY", nil, 3)
+    t:SetTexture(texture)
+    t:SetSize(GLYPH_SIZE, GLYPH_SIZE)
+    t:SetPoint("CENTER", button, "CENTER", 0, 0)
+    if flip then t:SetTexCoord(0, 1, 1, 0) end
+    local state = { color = color, hover = false }
+    local function paint()
+        local c = state.color
+        t:SetVertexColor(c[1], c[2], c[3], state.hover and GLYPH_ALPHA_HOVER or GLYPH_ALPHA)
     end
-    if size then
-        key:SetSize(size, size)
-        key:SetPoint("CENTER", button, "CENTER", 0, 0)
-    else
-        key:SetAllPoints(button)
-    end
-    local face = Theme.AddCutSliceFill and Theme.AddCutSliceFill(key, Theme.COLOR_BUTTON_INK or COLOR_BG, 3)
-    local skin = Theme.SkinButton and Theme.SkinButton(key, { borderColor = accent, chamfer = 3, glowAlpha = 0.35 })
-    local ring = skin and skin.border and skin.border.ring
-    local mark
-    if glyph then
-        mark = key:CreateTexture(nil, "OVERLAY", nil, 3)
-        mark:SetTexture(glyph)
-        mark:SetSize(size and size - 4 or 12, size and size - 4 or 12)
-        mark:SetPoint("CENTER", key, "CENTER", 0, 0)
-        if flip then mark:SetTexCoord(0, 1, 1, 0) end
-        mark:SetVertexColor(accent[1], accent[2], accent[3], 0.85)
-    end
-    local function paint(hover)
-        if ring then ring:SetVertexColor(accent[1], accent[2], accent[3], hover and 1 or 0.7) end
-        if mark then
-            local c = hover and Mix(accent, WHITE, 0.35) or accent
-            mark:SetVertexColor(c[1], c[2], c[3], hover and 1 or 0.85)
-        end
-    end
-    paint(false)
+    paint()
     if type(button.HookScript) == "function" then
-        pcall(button.HookScript, button, "OnEnter", function() paint(true) end)
-        pcall(button.HookScript, button, "OnLeave", function() paint(false) end)
+        pcall(button.HookScript, button, "OnEnter", function() state.hover = true; paint() end)
+        pcall(button.HookScript, button, "OnLeave", function() state.hover = false; paint() end)
     end
-    return key, face
+    return t, state, paint
+end
+
+-- The bar's height: Blizzard's header (32, the rows start under it) less the inset.
+local function BarHeight(window)
+    local h = window.Header and window.Header.GetHeight and window.Header:GetHeight() or 32
+    if type(h) ~= "number" or h <= 0 then h = 32 end
+    return h - BAR_INSET
+end
+
+local function SkinHeader(window)
+    local header = window.Header
+    if not header then return end
+    header:SetAlpha(0)
+    local barH = BarHeight(window)
+    local wash = Edge(window, "BACKGROUND", 2, ACCENT, BAR_WASH)
+    wash:SetPoint("TOPLEFT", window, "TOPLEFT", BAR_INSET, -BAR_INSET)
+    wash:SetPoint("TOPRIGHT", window, "TOPRIGHT", -BAR_INSET, -BAR_INSET)
+    wash:SetHeight(barH)
+    local rule = Edge(window, "BACKGROUND", 3, ACCENT, BAR_RULE)
+    rule:SetPoint("BOTTOMLEFT", wash, "BOTTOMLEFT")
+    rule:SetPoint("BOTTOMRIGHT", wash, "BOTTOMRIGHT")
+    rule:SetHeight(1)
+end
+
+-- Seats the three right hand controls on one centre line, the bar's, minimise against the right border and each next
+-- one GLYPH_GAP to its left. Blizzard only ever sets the session dropdown's WIDTH after this (its name length), so the
+-- anchors hold. Anchors and sizes on Blizzard's own (unprotected) buttons; no field is written.
+local function SeatHeaderButtons(window)
+    local cy = -(BAR_INSET + BarHeight(window) / 2)
+    local minimize, settings, session = window.MinimizeButton, window.SettingsDropdown, window.SessionDropdown
+    local right = nil
+    if minimize then
+        minimize:ClearAllPoints()
+        minimize:SetSize(GLYPH_SIZE, GLYPH_SIZE)
+        minimize:SetPoint("CENTER", window, "TOPRIGHT", -(GLYPH_PAD_R + GLYPH_SIZE / 2), cy)
+        right = minimize
+    end
+    if settings then
+        settings:ClearAllPoints()
+        settings:SetSize(GLYPH_SIZE, GLYPH_SIZE)
+        if right then
+            settings:SetPoint("RIGHT", right, "LEFT", -GLYPH_GAP, 0)
+        else
+            settings:SetPoint("CENTER", window, "TOPRIGHT", -(GLYPH_PAD_R + GLYPH_SIZE / 2), cy)
+        end
+        right = settings
+    end
+    if session and right then
+        session:ClearAllPoints()
+        session:SetHeight(GLYPH_SIZE)
+        session:SetPoint("RIGHT", right, "LEFT", -GLYPH_GAP * 2, 0)
+    end
 end
 
 local function SkinHeaderButtons(window)
@@ -375,7 +417,7 @@ local function SkinHeaderButtons(window)
             chev:SetTexCoord(0, 1, 1, 0)   -- the file points up
             chev:SetSize(14, 14)
             chev:SetPoint("CENTER", typeDropdown.Arrow, "CENTER", 0, 2)
-            chev:SetVertexColor(ACCENT[1], ACCENT[2], ACCENT[3], 1)
+            chev:SetVertexColor(ACCENT[1], ACCENT[2], ACCENT[3], GLYPH_ALPHA)
         end
     end
 
@@ -383,65 +425,72 @@ local function SkinHeaderButtons(window)
     if session then
         Hold(session.Background)
         Hold(session.Arrow)
-        Key(window, session, VIOLET)
     end
 
     local settings = window.SettingsDropdown
-    if settings then
+    if settings and settings.CreateTexture then
         Hold(settings.Icon)
-        Key(window, settings, VIOLET, 16, GEAR)
+        Glyph(settings, GEAR, ACCENT)
     end
 
     local minimize = window.MinimizeButton
-    local skins = FS.ButtonSkins
-    if minimize and skins and skins.SkinCloseButton and type(CreateFrame) == "function" then
-        -- the plate seats itself 5 in and 3 down from its anchor; this spot keeps it where Blizzard's button sat
-        local seat = CreateFrame("Frame", nil, window)
-        seat:SetSize(1, 1)
-        seat:SetPoint("TOPRIGHT", window.Header or window, "TOPRIGHT", 2, -4)
+    if minimize and minimize.CreateTexture then
+        if FS.HeldArt and FS.HeldArt.HoldButton then FS.HeldArt.HoldButton(minimize) end
         local minimized = false
         if type(window.IsMinimized) == "function" then
             local ok, m = pcall(window.IsMinimized, window)
             minimized = ok and not IsSecret(m) and m == true
         end
-        skins.SkinCloseButton(minimize, { anchor = seat, glyph = minimized and "plus" or "minus" })
-        if type(window.SetMinimized) == "function" and skins.SetGlyph then
-            hooksecurefunc(window, "SetMinimized", function(_, isMinimized)
-                skins.SetGlyph(minimize, isMinimized and "plus" or "minus")
-            end)
+        local tex, state, paint = Glyph(minimize, ICON_MINIMIZE, PINK)
+        -- minimised, it reads as restore: the chat bar's maximise glyph in its green
+        local function follow(isMinimized)
+            tex:SetTexture(isMinimized and ICON_MAXIMIZE or ICON_MINIMIZE)
+            state.color = isMinimized and GREEN or PINK
+            paint()
+        end
+        follow(minimized)
+        if type(window.SetMinimized) == "function" then
+            hooksecurefunc(window, "SetMinimized", function(_, isMinimized) follow(isMinimized and true or false) end)
         end
     end
+
+    SeatHeaderButtons(window)
 end
 
 -------------------------------------------------------------------------------
 -- Windows
 -------------------------------------------------------------------------------
 
-local function SkinBody(container)
-    local bg = container.Background
-    if bg and bg.SetTexture then
-        bg:SetTexture(Theme.SLICE_FILL_TEXTURE)
-        Theme.ApplyNineSlice(bg, Theme.SLICE_MARGIN)
-        bg:SetVertexColor(COLOR_BG[1], COLOR_BG[2], COLOR_BG[3], 1)
-        bg:ClearAllPoints()
-        bg:SetAllPoints(container)
-    end
-    local fill = Theme.AddPanelChrome(container, { fillColor = COLOR_BG, accent = ACCENT })
-    if fill then fill:Hide() end   -- Blizzard's own background is the fill: the opacity setting keeps working
+-- The body is the chat terminal's: its near black fill and cyan border glow (the panel chrome), the faint inner cyan
+-- wash, and the scanline scrim tiled one texel per 4 px. Blizzard's own background (the opacity setting's) is held.
+local TERM_BG = { 0.027, 0.012, 0.102, 0.85 }
+local INNER_WASH = 0.04
+local SCANLINE = MEDIA .. "scanline.tga"
+local SCANLINE_ALPHA = 0.4
+local SCANLINE_TILE = 4
+
+local function SeatScanline(scan, frame)
+    local w = frame.GetWidth and frame:GetWidth() or 0
+    local h = frame.GetHeight and frame:GetHeight() or 0
+    if type(w) ~= "number" or type(h) ~= "number" or w <= 0 or h <= 0 then return end
+    scan:SetTexCoord(0, w / SCANLINE_TILE, 0, h / SCANLINE_TILE)
 end
 
-local function SkinHeader(window)
-    local header = window.Header
-    if not header then return end
-    header:SetAlpha(0)
-    local inset = Theme.PanelBandInset and Theme.PanelBandInset() or 3
-    local band = Edge(window, "BACKGROUND", 2, ACCENT, BAND_ALPHA)
-    band:SetPoint("TOPLEFT", header, "TOPLEFT", inset, -inset)
-    band:SetPoint("BOTTOMRIGHT", header, "BOTTOMRIGHT", -inset, 4)
-    local rule = Edge(window, "BACKGROUND", 3, ACCENT, RULE_ALPHA)
-    rule:SetPoint("TOPLEFT", band, "BOTTOMLEFT")
-    rule:SetPoint("TOPRIGHT", band, "BOTTOMRIGHT")
-    rule:SetHeight(1)
+local function SkinBody(container)
+    Hold(container.Background)
+    Theme.AddPanelChrome(container, { fillColor = TERM_BG, accent = ACCENT })
+    if Theme.AddRoundedFill then
+        Theme.AddRoundedFill(container, { ACCENT[1], ACCENT[2], ACCENT[3], INNER_WASH }, Theme.SLICE_MARGIN)
+    end
+    local scan = container:CreateTexture(nil, "BORDER", nil, -8)
+    scan:SetTexture(SCANLINE, "REPEAT", "REPEAT")
+    scan:SetPoint("TOPLEFT", container, "TOPLEFT", BAR_INSET, -BAR_INSET)
+    scan:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -BAR_INSET, BAR_INSET)
+    scan:SetAlpha(SCANLINE_ALPHA)
+    SeatScanline(scan, container)
+    if type(container.HookScript) == "function" then
+        pcall(container.HookScript, container, "OnSizeChanged", function(self) SeatScanline(scan, self) end)
+    end
 end
 
 local function SkinSourceWindow(source)
