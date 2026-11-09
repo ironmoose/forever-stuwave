@@ -56,8 +56,8 @@ local TEXT_SIZE = 11                      -- Blizzard's own text scale setting m
 local HEADER_SIZE = 11
 
 -- The gauge, in physical pixels so the cells land on whole pixels at any UI scale.
-local TILE_PX = 8                         -- dm_cell_tile.tga is 8 x 8: one cell and its gap
-local GAUGE_PX = 8
+local TILE_PX = 16                        -- dm_cell_tile.tga is 16 x 16: one cell (13 px, leaning) and its 3 px gap
+local GAUGE_PX = 10                       -- the tile rows the gauge shows (the rest of the file is padding)
 local GAUGE_BOTTOM = 2                    -- UI units from the row's bottom
 local TEXT_TOP = 2                        -- UI units from the row's top
 local TEXT_RIGHT = 3
@@ -188,7 +188,7 @@ local function SeatCells(entry)
     local w = bar:GetWidth() or 0
     if IsSecret(w) or type(w) ~= "number" then return end
     local wpx = math.floor(w * ppu + 0.5)
-    if g.cells.SetTexCoord then g.cells:SetTexCoord(0, wpx / TILE_PX, 0, 1) end
+    if g.cells.SetTexCoord then g.cells:SetTexCoord(0, wpx / TILE_PX, 0, GAUGE_PX / TILE_PX) end
     for i, q in ipairs(TICKS_AT) do
         local t = g.ticks[i]
         t:ClearAllPoints()
@@ -200,7 +200,7 @@ end
 -- Blizzard's UpdateStyle (every style, icon and SetStyle change) re-anchors the bar, name and value and re-atlases the
 -- recess; this runs after it and lays the row out as the gauge: name and number along the top, the gauge along the
 -- bottom, from the icon's right edge when bar icons are on.
-local function ApplyLayout(entry)
+local function LayOut(entry)
     local bar = entry.StatusBar
     if not (bar and entries[entry]) then return end
     local name, value = bar.Name, bar.Value
@@ -239,6 +239,12 @@ local function ApplyLayout(entry)
     if edge and edge.SetColorTexture then edge:SetColorTexture(0, 0, 0, 0) end
 
     SeatCells(entry)
+end
+
+-- A throw in the layout is reported (FS's error log keeps it) but never stops the hooks or the rest of the skin.
+local function ApplyLayout(entry)
+    local ok, err = pcall(LayOut, entry)
+    if not ok and type(geterrorhandler) == "function" then geterrorhandler()(err) end
 end
 
 local function SkinEntry(entry)
@@ -292,13 +298,13 @@ local function SkinEntry(entry)
     SetFont(bar.Name, TEXT_SIZE, WHITE)
     SetFont(bar.Value, TEXT_SIZE, WHITE)
 
-    -- Blizzard's own cached colour (a read; it is the RAID_CLASS_COLORS object or one of its constants)
-    PaintEntry(entry, entry.statusBarColor)
-    ApplyLayout(entry)
-
     if type(entry.UpdateStyle) == "function" then hooksecurefunc(entry, "UpdateStyle", ApplyLayout) end
     if type(entry.SetStatusBarColor) == "function" then hooksecurefunc(entry, "SetStatusBarColor", PaintEntry) end
     if type(bar.HookScript) == "function" then pcall(bar.HookScript, bar, "OnSizeChanged", function() SeatCells(entry) end) end
+
+    -- Blizzard's own cached colour (a read; it is the RAID_CLASS_COLORS object or one of its constants)
+    PaintEntry(entry, entry.statusBarColor)
+    ApplyLayout(entry)
 end
 
 local function SkinEntriesOf(owner)
@@ -315,12 +321,17 @@ local function Hold(region)
     if FS.HeldArt and FS.HeldArt.Hold then FS.HeldArt.Hold(region) elseif region.SetAlpha then region:SetAlpha(0) end
 end
 
--- A STUwave key drawn on a Blizzard dropdown: our own child frame (no mouse, so every click is still Blizzard's) with a
--- cut plate, ring and halo in `accent`, and an optional glyph texture. Hover lifts the ring and glyph.
-local function Key(button, accent, size, glyph, flip)
+-- A STUwave key drawn under a Blizzard dropdown: our own frame (no mouse, so every click is still Blizzard's), a child of
+-- the WINDOW one level below the dropdown, so the dropdown's own text (the session name) draws on top of it. A cut plate,
+-- ring and halo in `accent`, and an optional glyph texture. Hover lifts the ring and glyph.
+local function Key(window, button, accent, size, glyph, flip)
     if not (button and type(CreateFrame) == "function") then return nil end
-    local key = CreateFrame("Frame", nil, button)
+    local key = CreateFrame("Frame", nil, window)
     if key.EnableMouse then key:EnableMouse(false) end
+    if key.SetFrameLevel and button.GetFrameLevel and window.GetFrameLevel then
+        local level = math.max((button:GetFrameLevel() or 1) - 1, window:GetFrameLevel() or 0)
+        key:SetFrameLevel(level)
+    end
     if size then
         key:SetSize(size, size)
         key:SetPoint("CENTER", button, "CENTER", 0, 0)
@@ -372,13 +383,13 @@ local function SkinHeaderButtons(window)
     if session then
         Hold(session.Background)
         Hold(session.Arrow)
-        Key(session, VIOLET)
+        Key(window, session, VIOLET)
     end
 
     local settings = window.SettingsDropdown
     if settings then
         Hold(settings.Icon)
-        Key(settings, VIOLET, 16, GEAR)
+        Key(window, settings, VIOLET, 16, GEAR)
     end
 
     local minimize = window.MinimizeButton

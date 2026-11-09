@@ -6,11 +6,14 @@ run of leaning cells. The engine draws the class gradient as one flat fill that 
 secret in combat, so no addon code can count lit cells), and this tile is laid OVER that fill and over the unlit track,
 repeated across the gauge one texel per physical pixel. It cuts both into cells and shades each cell the way the mockup does.
 
-    dm_cell_tile.tga   8 x 8   one cell and its gap. The cell is CELL px wide and leans LEAN px over the tile's height (its top
-                               row sits LEAN px right of its bottom row). Cell px are shading only: white at TOP_LIFT alpha on the
-                               top row easing to clear at the middle, then to black at FOOT_SHADE alpha on the bottom row (the
-                               mockup's mix toward white .25 at the top and black .3 at the foot). Gap px are the track ink,
-                               nearly opaque, so the fill underneath is cut into cells. The tile wraps left to right.
+    dm_cell_tile.tga   16 x 16  one cell and its gap, in the XP bar's proportions (a wide leaning cell, a 3 px gap). The cell
+                                is CELL px wide and leans LEAN px over the ROWS px the gauge shows (its top row sits LEAN px
+                                right of its bottom row); rows past ROWS repeat the last one, padding the file to a power of
+                                two, and the module samples only the first ROWS (SetTexCoord v = ROWS / 16). Cell px are
+                                shading only: white at TOP_LIFT alpha on the top row easing to clear at the middle, then to
+                                black at FOOT_SHADE alpha on the bottom row (the mockup's mix toward white .25 at the top and
+                                black .3 at the foot). Gap px are the track ink, nearly opaque, so the fill underneath is cut
+                                into cells. The tile wraps left to right.
 
     python3 tools/assets/generate_damage_meter_cells.py      (FS_ASSET_OUTPUT_DIR overrides the output directory)
 """
@@ -20,9 +23,10 @@ from __future__ import annotations
 import os
 import struct
 
-TILE = 8          # px per tile, both ways
-CELL = 5          # px of a cell's width; the gap is TILE - CELL
-LEAN = 3          # px the top row sits right of the bottom row
+TILE = 16         # px per tile, both ways (a power of two, like every texture the addon ships)
+ROWS = 10         # px of the gauge's height: the rows the module samples
+CELL = 13         # px of a cell's width; the gap is TILE - CELL (3, the XP bar's CELL_GAP)
+LEAN = 5          # px the top row sits right of the bottom row
 TOP_LIFT = 0.25   # white alpha on the top row
 FOOT_SHADE = 0.30 # black alpha on the bottom row
 GAP_INK = (6, 3, 18)   # #060312, the XP bar's track
@@ -31,12 +35,12 @@ GAP_ALPHA = 0.92
 
 def cell_offset(row: int) -> int:
     """x of a row's first cell px: LEAN on the top row, 0 on the bottom row (the mockup's Math.round((1 - t) * lean))."""
-    t = row / (TILE - 1)
+    t = min(row, ROWS - 1) / (ROWS - 1)
     return int((1 - t) * LEAN + 0.5)
 
 
 def shade(row: int) -> tuple[int, int, int, int]:
-    t = row / (TILE - 1)
+    t = min(row, ROWS - 1) / (ROWS - 1)
     if t <= 0.5:
         return (255, 255, 255, round(255 * TOP_LIFT * (1 - t / 0.5)))
     return (0, 0, 0, round(255 * FOOT_SHADE * ((t - 0.5) / 0.5)))

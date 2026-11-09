@@ -7,7 +7,7 @@ state: every Blizzard object in the mock is a proxy that throws on any new field
   * a session window gets the panel chrome on its body, Blizzard's background becomes the nine sliced fill (still
     Blizzard's region, so the opacity setting drives it), the header bar art goes, a band and rule replace it;
   * header text and entry names and numbers get the mono font;
-  * a row becomes the XP bar's gauge: name and number on top, an 8 physical px gauge below it whose flat fill carries
+  * a row becomes the XP bar's gauge: name and number on top, an 10 physical px gauge below it whose flat fill carries
     the class ramp (found from the RAID_CLASS_COLORS object Blizzard hands SetStatusBarColor) under a repeating cell
     tile, one texel per physical pixel; the player's own name is pink;
   * Blizzard's UpdateStyle (re-anchor, re-atlas) and SetStatusBarColor are followed;
@@ -76,6 +76,7 @@ local function Blizzard(name, fields)
     function raw:ClearAllPoints() raw.points = 0 end
     function raw:SetHeight(h) raw.h = h end
     function raw:GetWidth() return 200 end
+    function raw:GetFrameLevel() return 3 end
     return setmetatable({}, {
         __index = raw,
         __newindex = function(_, k, v)
@@ -152,6 +153,8 @@ function CreateFrame()
     function f:SetPoint() end
     function f:SetAllPoints() end
     function f:EnableMouse() end
+    function f:SetFrameLevel() end
+    function f:GetFrameLevel() return 1 end
     function f:CreateTexture() return setmetatable({}, { __index = function() return function() end end }) end
     watcher = f
     return f
@@ -211,11 +214,11 @@ case("rows_are_xp_gauges_in_their_class_ramp", """
     assert(g[2][1] == ramp[1][1] and g[3][3] == ramp[2][3], "shaman row not on the shaman ramp")
     assert(bar.Background.color and math.abs(bar.Background.color[1] - 0.086) < 1e-6, "track not the XP bar's unlit cell")
     assert(bar.BackgroundEdge.color[4] == 0, "shadow edge not cleared")
-    assert(math.abs(bar.h - 8 / 1.25) < 1e-6, "gauge not 8 physical px tall")
+    assert(math.abs(bar.h - 10 / 1.25) < 1e-6, "gauge not 10 physical px tall")
     local cells
     for _, t in ipairs(bar.made) do if t.tex and tostring(t.tex):find("dm_cell_tile") then cells = t end end
     assert(cells and cells.wrap == "REPEAT", "no repeating cell tile")
-    assert(cells.tc and cells.tc[2] == 200 * 1.25 / 8, "cell tile not one texel per physical pixel")
+    assert(cells.tc and cells.tc[2] == 200 * 1.25 / 16 and cells.tc[4] == 10 / 16, "cell tile not one texel per physical pixel")
     assert(bar.Name.font == "MONO" and bar.Value.font == "MONO", "row text not mono")
     assert(bar.Name.textColor[1] == 1 and bar.Name.textColor[2] == 1, "another player's name not white")
     local me = DamageMeterSessionWindow1.list[2]
