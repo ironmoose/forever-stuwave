@@ -46,7 +46,8 @@
 --
 -- FIRE NOVA. Ring and tag need the spell in the book (resolved by name, ids as a fallback, IsPlayerSpell and its siblings), then
 -- the same cooldown reading with a 10 s ledger. The ring shows while it is ready and the Fire totem stands; the footer tag
--- (a dashed pip and NOVA) stays while the totem stands, cyan when ready and muted when not. It cannot know whether an enemy is
+-- (a dashed pip and NOVA) stays while the totem stands, cyan when ready and muted when not; while it cools down the tag
+-- carries the seconds left ("NOVA 7s", "~" for the in-combat estimate, the disc label's format). It cannot know whether an enemy is
 -- within 10 yd of the totem: the ring is advice, not a guarantee.
 --
 -- EVENTS AND TICKER. The cast ledger listens from Build on and stays on through OnHide (it only records). Everything else
@@ -141,6 +142,18 @@ local function FormatRemaining(rem, est)
     if i > 99 then i = 99 end
     return est and EST_SECS[i] or SECS[i]
 end
+
+-- The NOVA tag while Fire Nova cools down: "NOVA 7s", "NOVA ~7s" (an estimate in combat), "NOVA 2.4s". Built once from the
+-- same strings as the disc label, so the tick only indexes.
+local NOVA_LABEL = {}
+local function NovaLabel(rem, est)
+    local t = FormatRemaining(rem, est)
+    local l = NOVA_LABEL[t]
+    if not l then l = "NOVA " .. t; NOVA_LABEL[t] = l end
+    return l
+end
+for _, t in ipairs({ SECS, EST_SECS }) do for i = 0, 99 do NovaLabel(i + 0.1, t == EST_SECS) end end
+for _, t in ipairs({ TENTHS, EST_TENTHS }) do for i = 0, 29 do NovaLabel(i / 10, t == EST_TENTHS) end end
 
 -- the beats' directions, built once: eight sparks round the disc and 72 points of the expanding ring
 local BURST_COS, BURST_SIN, RING_COS, RING_SIN = {}, {}, {}, {}
@@ -733,7 +746,7 @@ local function FireUp(s)
     return true
 end
 
-local function PaintNova(s)
+local function PaintNova(s, now)
     local g, K = s.nova, s.colors
     local show = g.known and FireUp(s)
     local ready = show and g.mode == "ready"
@@ -745,9 +758,17 @@ local function PaintNova(s)
         Tint(s.ring, K.cyan, C.RING_A); Tint(s.ringGlow, K.cyan, 1)
         Tint(s.pip, K.cyan, 1)
         TextTint(s.novaText, K.cyan, 1)
+        SetLabel(s.novaText, "NOVA")
     else
         Tint(s.pip, K.muted, C.OFF_PIP_A)
         TextTint(s.novaText, K.muted, C.OFF_TEXT_A)
+        if g.mode == "charging" then
+            local rem = g.endsAt and (g.endsAt - (now or GetTime())) or g.rem or 0
+            if rem < 0 then rem = 0 end
+            SetLabel(s.novaText, NovaLabel(rem, g.est))
+        else
+            SetLabel(s.novaText, "NOVA")
+        end
     end
 end
 
@@ -762,7 +783,7 @@ local function Refresh(s, now, restart)
     ReadGroup(s.shock, now)
     ReadGroup(s.nova, now)
     PaintShock(s, now, restart)
-    PaintNova(s)
+    PaintNova(s, now)
     Sync(s)
 end
 
