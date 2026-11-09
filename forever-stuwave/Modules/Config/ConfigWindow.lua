@@ -1431,12 +1431,33 @@ local function NameplatesGroup(page)
     UI.Toggle(page, { label = setting.label, key = setting.key, tip = setting.tip })
 end
 
+-- The damage meter's row style (Skins/DamageMeter.lua), neon plates or the ladder, relaid live and explained by its ? tip.
+-- Out of the list for a client without Blizzard's damage meter.
+local function DamageMeterGroup(page)
+    local skin = FS.DamageMeterSkin
+    if not (skin and skin.SETTING and skin.Style) then return end
+    local def = skin.SETTING
+    UI.Header(page, "Damage meter")
+    UI.Dropdown(page, {
+        label = def.label, tip = def.tip,
+        get = function() return skin.Style() end,
+        text = function(value) return skin.STYLE_TEXT[value] or tostring(value) end,
+        items = function()
+            local items = {}
+            for i, value in ipairs(skin.STYLES) do items[i] = { value = value, text = skin.STYLE_TEXT[value] } end
+            return items
+        end,
+        set = function(value) Config.Set(def.key, value) end,
+    })
+end
+
 CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, build = function(page)
     UI.Header(page, "Player and target", "Hidden frames stay click-through and invisible.")
     UI.Toggle(page, { label = "Hide player frame", key = "unitFrames.hidePlayer" })
     UI.Toggle(page, { label = "Hide target frame", key = "unitFrames.hideTarget" })
     PartyFramesGroup(page)
     NameplatesGroup(page)
+    DamageMeterGroup(page)
     local bands = FS.ChatFormat and FS.ChatFormat.BAND_SETTING
     if bands then
         UI.Header(page, "Chat")

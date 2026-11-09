@@ -21,11 +21,12 @@
 --
 -- WHAT IT LOOKS LIKE. The chat terminal ("make it look as good as our chat window does"): its body (near black fill,
 -- cyan border glow, faint inner wash, scanlines) and its term bar for a header (a full width cyan wash and rule, flat
--- glyph buttons on one centre line). Each row is the XP bar's gauge: the name and number on top in Mononoki, and under
--- them a run of leaning pips. The fill is one vertical class gradient (deep foot, hot top) that the engine crops to the
--- row's value; a gap tile laid over it (dm_cell_tile.tga, one texel per physical pixel) cuts fill and unlit track into
--- pips, so each pip is a single gradient, with a round glow at the fill's edge. The gauge layout is the same whatever bar
--- style is picked in Blizzard's own settings, and its height follows the row height.
+-- glyph buttons on one centre line), both kept inside the cut corners. Rows come in two styles, picked in /fsconfig:
+-- neon plates (the default: one lit class gradient bar per row with a gloss line, an edge bloom and a rim, the text on
+-- it) and the ladder (the text on a top line and the XP bar's run of leaning pips under it, a pink rail on the player's
+-- own row). The fill is always one vertical class gradient that the engine crops to the row's value; the ladder lays a
+-- gap tile over it (dm_cell_tile.tga, one texel per physical pixel) that cuts fill and unlit track into pips. Either
+-- layout holds whatever bar style is picked in Blizzard's own settings.
 
 local _, FS = ...
 
@@ -45,7 +46,6 @@ local IsSecret = FS.IsSecret or function() return false end
 
 local MEDIA = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
 local CELL_TILE = MEDIA .. "dm_cell_tile.tga"
-local GLOW_ROUND = MEDIA .. "glow_round.tga"
 local GEAR = MEDIA .. "icon_gear.tga"
 local CHEVRON = MEDIA .. "glyph_hud_chev.tga"
 
@@ -53,20 +53,59 @@ local MAX_WINDOWS = 8
 local TEXT_SIZE = 11                      -- Blizzard's own text scale setting multiplies this
 local HEADER_SIZE = 11
 
--- The gauge, in physical pixels so the pips land on whole pixels at any UI scale. Its height follows the row: what is
--- left under the text, between GAUGE_MIN_PX and GAUGE_MAX_PX (Blizzard's Bar Height setting makes rows taller).
+-- Two row styles, picked in /fsconfig (Unit Frames, Damage meter). Player: "neon plates feels better. but ladder matches
+-- stuwave", so both ship and plates is the default. From the mockup of 2026-11-09 (second sheet), forms A and B.
+local STYLE_SETTING = {
+    key = "skins.damageMeterRows", default = "plates", label = "Rows",
+    tip = "Neon plates: each row is one lit bar with the name and number on it. Ladder: the name and number on top and a run of pips under them; it reads best with the meter's Bar Height at 26 or more.",
+}
+local STYLES = { "plates", "ladder" }
+local STYLE_TEXT = { plates = "Neon plates", ladder = "Ladder" }
+local Config = FS.Config
+if Config and Config.RegisterDefault then Config.RegisterDefault(STYLE_SETTING.key, STYLE_SETTING.default) end
+
+local function ReadStyle()
+    local value = Config and Config.Get and Config.Get(STYLE_SETTING.key)
+    if value == "ladder" then return "ladder" end
+    return "plates"
+end
+local style = ReadStyle()
+
+-- Neon plates (form B), in UI units unless named _PX: the class icon at the row's left, as tall as the plate, then the
+-- plate: an ink well, the class gradient fill (deep foot, hot top) with a 1 px gloss along its top and a soft white bloom
+-- at its edge, a 1 px rim in the class's deep colour (pink on the player's own row), and the "1. Name" and number on it.
+local PLATE_PAD = 1                       -- above and below the plate, inside the row
+local PLATE_LEFT = 2
+local PLATE_ICON_GAP = 3
+local PLATE_RIGHT = 3
+local PLATE_TEXT_PAD = 5
+local PLATE_INK = { 0.039, 0.016, 0.086 } -- #0a0416
+local PLATE_GLOSS_ALPHA = 0.45
+local PLATE_BLOOM_PX = 4
+local PLATE_BLOOM_ALPHA = 0.32
+local PLATE_RIM_MIX = 0.6                 -- the rim is the class's deep colour this far toward LINE
+local PLATE_NAME_MINE = { 1, 0.816, 0.918 }   -- #ffd0ea, the own row's name on a lit plate
+
+-- Ladder (form A): the icon, name and number on a top line, a pink rail down the player's own row, and under them the XP
+-- bar's run of leaning pips from the icon's left edge. The pips are physical pixels so they land on whole pixels at any
+-- UI scale; their height is what the row leaves under the top line, clamped.
+local LADDER_ICON = 14
+local LADDER_LEFT = 5                     -- the icon's and the gauge's left edge, clear of the rail
+local LADDER_TOP = 1
+local LADDER_TEXT_GAP = 4
+local LADDER_RAIL = 2
 local TILE_PX = 16                        -- dm_cell_tile.tga is 16 x 16: one pip (11 px, leaning) and its 5 px gap
 local GAUGE_MAX_PX = 10
-local GAUGE_MIN_PX = 6
-local TEXT_GAUGE_GAP_PX = 2               -- clear px between the text's foot and the gauge
-local GAUGE_BOTTOM = 1                    -- UI units from the row's bottom
-local TEXT_TOP = 1                        -- UI units from the row's top
+local GAUGE_MIN_PX = 4
+local GAUGE_GAP_PX = 2                    -- clear px between the top line and the pips
+local GAUGE_BOTTOM = 1
 local TEXT_RIGHT = 3
-local ICON_GAP = 4                        -- UI units between the class icon and the gauge and name
-local CELL_EMPTY = { 0.086, 0.055, 0.157, 1 }   -- the XP bar's unlit cell
-local GLOW_SIZE = 14
-local GLOW_ALPHA = 0.45
-local GLOW_TINT = { 0.85, 0.55, 1 }       -- the XP bar's head bloom, mixed into each class's hot end
+local SLOT_DEEP = { 0.071, 0.039, 0.133 } -- #120a22, an unlit pip's foot
+local SLOT_HOT = { 0.118, 0.078, 0.212 }  -- #1e1436, its top
+
+local function Mix(a, b, t)
+    return { a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t }
+end
 
 -- Per class ramps, deep to hot, each passing through the class colour (the XP bar runs violet to magenta the same way).
 -- From the mockup's RAMPS.
@@ -86,12 +125,8 @@ local RAMPS = {
 }
 local DEFAULT_RAMP = { Hex("7c3aed"), Hex("ff2e97") }  -- the XP bar's own ramp, for a colour we cannot read
 
-local function Mix(a, b, t)
-    return { a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t }
-end
-
 local windows = setmetatable({}, { __mode = "k" })
-local entries = setmetatable({}, { __mode = "k" })   -- entry -> its gauge pieces
+local entries = setmetatable({}, { __mode = "k" })   -- entry -> its pieces
 local classOf                                         -- RAID_CLASS_COLORS colour object -> class token, built on first use
 
 local function SetFont(fs, size, color)
@@ -124,6 +159,22 @@ local function PixelsPerUnit(frame)
     return 1
 end
 
+-- A plain positive number, or the fallback (a size Blizzard has not laid out yet reads 0).
+local function Num(v, fallback)
+    if IsSecret(v) or type(v) ~= "number" or v <= 0 then return fallback end
+    return v
+end
+
+local function Gradient(t, deep, hot, a)
+    if not (t and t.SetGradient) or type(CreateColor) ~= "function" then return end
+    t:SetGradient("VERTICAL", CreateColor(deep[1], deep[2], deep[3], a or 1), CreateColor(hot[1], hot[2], hot[3], a or 1))
+end
+
+local function Show(region, on)
+    if not region then return end
+    if on then region:Show() else region:Hide() end
+end
+
 -------------------------------------------------------------------------------
 -- Class ramps
 -------------------------------------------------------------------------------
@@ -147,44 +198,52 @@ local function RampFor(color)
     return { Mix(base, { 0, 0, 0 }, 0.35), Mix(base, { 1, 1, 1 }, 0.55) }
 end
 
--- Paints the fill, the glow and the name from `color`. The fill is ONE vertical gradient, deep at the foot and hot at the
--- top, so the gap tile cuts it into pips that are each a single gradient (the XP bar's shaded pips); the name is pink on
--- the player's own row.
+-- The player's own row (a read of Blizzard's flag, behind the secret check).
+local function IsMine(entry)
+    local me = entry.isLocalPlayer
+    return not IsSecret(me) and me == true
+end
+
+-- Paints the row from `color` for the current style. The fill is ONE vertical gradient, deep at the foot and hot at the
+-- top: on a plate that is the lit bar, and in the ladder the gap tile cuts it into pips that are each a single gradient.
 local function PaintEntry(entry, color)
     local g = entries[entry]
     if not g then return end
-    local ramp = RampFor(color)
-    g.ramp = ramp
+    if color ~= nil then g.color = color end
+    local ramp = RampFor(g.color)
+    local deep, hot = ramp[1], ramp[2]
+    local mine = IsMine(entry)
     local fill = entry.StatusBar:GetStatusBarTexture()
-    if fill and fill.SetGradient and type(CreateColor) == "function" then
-        local a, b = ramp[1], ramp[2]
+    if fill then
         fill:SetVertexColor(1, 1, 1, 1)
-        fill:SetGradient("VERTICAL", CreateColor(a[1], a[2], a[3], 1), CreateColor(b[1], b[2], b[3], 1))
+        Gradient(fill, deep, hot)
     end
-    local hot = ramp[2]
-    if g.glow then
-        local t = Mix(hot, GLOW_TINT, 0.3)
-        g.glow:SetVertexColor(t[1], t[2], t[3], GLOW_ALPHA)
+    if g.iconRim then
+        local mid = Mix(deep, hot, 0.5)
+        g.iconRim:SetColorTexture(mid[1], mid[2], mid[3], 1)
     end
-    local me = entry.isLocalPlayer
+    local rim = mine and PINK or Mix(deep, LINE, PLATE_RIM_MIX)
+    for _, t in ipairs(g.rim) do t:SetColorTexture(rim[1], rim[2], rim[3], 1) end
+    Show(g.rail, style == "ladder" and mine)
+
     local name = entry.StatusBar.Name
     if name and name.SetTextColor then
-        local mine = not IsSecret(me) and me == true
-        local c = mine and PINK or WHITE
+        local c = WHITE
+        if mine then c = style == "plates" and PLATE_NAME_MINE or PINK end
         name:SetTextColor(c[1], c[2], c[3], 1)
     end
 end
 
 -------------------------------------------------------------------------------
--- Entries (one gauge row)
+-- Entries (one row)
 -------------------------------------------------------------------------------
 
--- The gap tile follows the gauge, one texel per physical pixel: across its width, and the BOTTOM rows of the tile for
--- its height (so the lean stays half a px per row however tall the gauge is).
+-- The ladder's gap tile follows the gauge, one texel per physical pixel: across its width, and the BOTTOM rows of the
+-- tile for its height (so the lean stays half a px per row however tall the gauge is).
 local function SeatCells(entry)
     local g = entries[entry]
     local bar = entry.StatusBar
-    if not (g and bar and bar.GetWidth) then return end
+    if not (g and bar and bar.GetWidth) or style ~= "ladder" then return end
     local ppu = PixelsPerUnit(bar)
     local w = bar:GetWidth() or 0
     if IsSecret(w) or type(w) ~= "number" then return end
@@ -193,65 +252,121 @@ local function SeatCells(entry)
     if g.cells.SetTexCoord then g.cells:SetTexCoord(0, wpx / TILE_PX, (TILE_PX - h) / TILE_PX, 1) end
 end
 
--- The gauge's height in physical px: the row's height less the text and the margins, clamped.
-local function GaugePx(entry, name, ppu)
-    local rowH = entry.GetHeight and entry:GetHeight() or 0
-    if IsSecret(rowH) or type(rowH) ~= "number" or rowH <= 0 then return GAUGE_MAX_PX end
-    local textH = 0
-    if name and name.GetStringHeight then
-        local ok, v = pcall(name.GetStringHeight, name)
-        if ok and type(v) == "number" and not IsSecret(v) then textH = v end
-    end
-    if textH <= 0 then textH = TEXT_SIZE end
-    local px = math.floor((rowH - TEXT_TOP - GAUGE_BOTTOM - textH) * ppu) - TEXT_GAUGE_GAP_PX
-    return math.max(GAUGE_MIN_PX, math.min(GAUGE_MAX_PX, px))
+local function IconShown(entry)
+    local icon = entry.Icon
+    return icon and icon.IsShown and icon:IsShown() and icon or nil
 end
 
--- Blizzard's UpdateStyle (every style, icon and SetStyle change) re-anchors the bar, name and value and re-atlases the
--- recess; this runs after it and lays the row out as the gauge: name and number along the top, the gauge along the
--- bottom, from the icon's right edge when bar icons are on.
-local function LayOut(entry)
-    local bar = entry.StatusBar
-    if not (bar and entries[entry]) then return end
-    local name, value = bar.Name, bar.Value
-    local ppu = PixelsPerUnit(entry)
-
-    -- Past the class icon when Blizzard shows one. Its frame has a fixed 24 x 24 size in the template; the texture
-    -- GetIconAttachmentAnchor names reads 0 wide before the first layout pass, which put the gauge under the icon.
-    local left = 0
-    local icon = entry.Icon
-    if icon and icon.IsShown and icon:IsShown() then
-        local w = icon.GetWidth and icon:GetWidth() or 0
-        if IsSecret(w) or type(w) ~= "number" or w <= 0 then w = 24 end
-        left = w + ICON_GAP
+local function LayOutPlates(entry, g, ppu)
+    local bar, name, value = entry.StatusBar, entry.StatusBar.Name, entry.StatusBar.Value
+    local px = 1 / ppu
+    local rowH = Num(entry.GetHeight and entry:GetHeight(), 25)
+    local plateH = rowH - 2 * PLATE_PAD
+    local left = PLATE_LEFT
+    local icon = IconShown(entry)
+    if icon then
+        icon:ClearAllPoints()
+        icon:SetSize(plateH, plateH)
+        icon:SetPoint("LEFT", entry, "LEFT", PLATE_LEFT, 0)
+        left = PLATE_LEFT + plateH + PLATE_ICON_GAP
     end
 
-    local g = entries[entry]
-    g.gaugePx = GaugePx(entry, name, ppu)
+    -- the bar is the plate's inside; the ink well and the rim sit one px around it
     bar:ClearAllPoints()
-    bar:SetPoint("BOTTOMLEFT", entry, "BOTTOMLEFT", left, GAUGE_BOTTOM)
-    bar:SetPoint("BOTTOMRIGHT", entry, "BOTTOMRIGHT", -TEXT_RIGHT, GAUGE_BOTTOM)
-    bar:SetHeight(g.gaugePx / ppu)
+    bar:SetPoint("TOPLEFT", entry, "TOPLEFT", left + px, -(PLATE_PAD + px))
+    bar:SetPoint("BOTTOMRIGHT", entry, "BOTTOMRIGHT", -(PLATE_RIGHT + px), PLATE_PAD + px)
+
+    local bg = bar.Background
+    if bg then
+        bg:ClearAllPoints()
+        bg:SetPoint("TOPLEFT", bar, "TOPLEFT", -px, px)
+        bg:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", px, -px)
+        bg:SetColorTexture(PLATE_INK[1], PLATE_INK[2], PLATE_INK[3], 1)
+    end
+    local top, bottom, l, r = g.rim[1], g.rim[2], g.rim[3], g.rim[4]
+    top:ClearAllPoints(); top:SetPoint("TOPLEFT", bar, "TOPLEFT", -px, px); top:SetPoint("TOPRIGHT", bar, "TOPRIGHT", px, px)
+    top:SetHeight(px)
+    bottom:ClearAllPoints(); bottom:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", -px, -px)
+    bottom:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", px, -px); bottom:SetHeight(px)
+    l:ClearAllPoints(); l:SetPoint("TOPRIGHT", bar, "TOPLEFT", 0, 0); l:SetPoint("BOTTOMRIGHT", bar, "BOTTOMLEFT", 0, 0)
+    l:SetWidth(px)
+    r:ClearAllPoints(); r:SetPoint("TOPLEFT", bar, "TOPRIGHT", 0, 0); r:SetPoint("BOTTOMLEFT", bar, "BOTTOMRIGHT", 0, 0)
+    r:SetWidth(px)
+    if g.gloss then g.gloss:SetHeight(px) end
+    if g.bloom then g.bloom:SetWidth(PLATE_BLOOM_PX * px) end
 
     if value then
         value:ClearAllPoints()
-        value:SetPoint("TOPRIGHT", entry, "TOPRIGHT", -TEXT_RIGHT, -TEXT_TOP)
+        value:SetPoint("RIGHT", bar, "RIGHT", -PLATE_TEXT_PAD, 0)
     end
     if name then
         name:ClearAllPoints()
-        name:SetPoint("TOPLEFT", entry, "TOPLEFT", left + 1, -TEXT_TOP)
+        name:SetPoint("LEFT", bar, "LEFT", PLATE_TEXT_PAD, 0)
         if value then name:SetPoint("RIGHT", value, "LEFT", -8, 0) end
     end
+end
 
-    local bg, edge = bar.Background, bar.BackgroundEdge
+local function LayOutLadder(entry, g, ppu)
+    local bar, name, value = entry.StatusBar, entry.StatusBar.Name, entry.StatusBar.Value
+    local rowH = Num(entry.GetHeight and entry:GetHeight(), 25)
+    local lineMid = LADDER_TOP + LADDER_ICON / 2
+    local textLeft = LADDER_LEFT
+    local icon = IconShown(entry)
+    if icon then
+        icon:ClearAllPoints()
+        icon:SetSize(LADDER_ICON, LADDER_ICON)
+        icon:SetPoint("TOPLEFT", entry, "TOPLEFT", LADDER_LEFT, -LADDER_TOP)
+        textLeft = LADDER_LEFT + LADDER_ICON + LADDER_TEXT_GAP
+    end
+
+    local px = math.floor((rowH - LADDER_TOP - LADDER_ICON - GAUGE_BOTTOM) * ppu) - GAUGE_GAP_PX
+    g.gaugePx = math.max(GAUGE_MIN_PX, math.min(GAUGE_MAX_PX, px))
+    bar:ClearAllPoints()
+    bar:SetPoint("BOTTOMLEFT", entry, "BOTTOMLEFT", LADDER_LEFT, GAUGE_BOTTOM)
+    bar:SetPoint("BOTTOMRIGHT", entry, "BOTTOMRIGHT", -TEXT_RIGHT, GAUGE_BOTTOM)
+    bar:SetHeight(g.gaugePx / ppu)
+
+    local bg = bar.Background
     if bg then
         bg:ClearAllPoints()
         bg:SetAllPoints(bar)
-        if bg.SetColorTexture then bg:SetColorTexture(CELL_EMPTY[1], CELL_EMPTY[2], CELL_EMPTY[3], CELL_EMPTY[4]) end
+        bg:SetColorTexture(1, 1, 1, 1)
+        Gradient(bg, SLOT_DEEP, SLOT_HOT)
     end
-    if edge and edge.SetColorTexture then edge:SetColorTexture(0, 0, 0, 0) end
+    if g.rail then
+        g.rail:ClearAllPoints()
+        g.rail:SetPoint("TOPLEFT", entry, "TOPLEFT", 0, -1)
+        g.rail:SetPoint("BOTTOMLEFT", entry, "BOTTOMLEFT", 0, 2)
+        g.rail:SetWidth(LADDER_RAIL)
+    end
 
+    if value then
+        value:ClearAllPoints()
+        value:SetPoint("RIGHT", entry, "TOPRIGHT", -TEXT_RIGHT, -lineMid)
+    end
+    if name then
+        name:ClearAllPoints()
+        name:SetPoint("LEFT", entry, "TOPLEFT", textLeft, -lineMid)
+        if value then name:SetPoint("RIGHT", value, "LEFT", -8, 0) end
+    end
     SeatCells(entry)
+end
+
+-- Blizzard's UpdateStyle (every style, icon and SetStyle change) re-anchors the bar, name and value and re-atlases the
+-- recess; this runs after it and lays the row out in the picked style, whatever bar style Blizzard's settings name.
+local function LayOut(entry)
+    local g = entries[entry]
+    local bar = entry.StatusBar
+    if not (bar and g) then return end
+    local ladder = style == "ladder"
+    for _, t in ipairs(g.rim) do Show(t, not ladder) end
+    Show(g.gloss, not ladder)
+    Show(g.bloom, not ladder)
+    Show(g.cells, ladder)
+    if bar.BackgroundEdge and bar.BackgroundEdge.SetColorTexture then bar.BackgroundEdge:SetColorTexture(0, 0, 0, 0) end
+    local ppu = PixelsPerUnit(entry)
+    if ladder then LayOutLadder(entry, g, ppu) else LayOutPlates(entry, g, ppu) end
+    PaintEntry(entry)
 end
 
 -- A throw in the layout is reported (FS's error log keeps it) but never stops the hooks or the rest of the skin.
@@ -264,33 +379,41 @@ local function SkinEntry(entry)
     if not entry or entries[entry] then return end
     local bar = entry.StatusBar
     if not (bar and bar.SetStatusBarTexture and bar.GetStatusBarTexture and bar.CreateTexture) then return end
-    local g = {}
+    local g = { rim = {}, color = entry.statusBarColor }   -- Blizzard's own cached colour (a read)
     entries[entry] = g
 
     bar:SetStatusBarTexture(FLAT)
     local fill = bar:GetStatusBarTexture()
 
-    -- the gap tile over fill and track, one texel per physical pixel, repeated across the gauge
+    -- plates: the rim, and the gloss and bloom that ride the fill (the engine sizes the fill from the value)
+    for i = 1, 4 do g.rim[i] = Edge(bar, "OVERLAY", -2, LINE) end
+    if fill then
+        g.gloss = Edge(bar, "OVERLAY", -4, { 1, 1, 1 }, PLATE_GLOSS_ALPHA)
+        g.gloss:SetPoint("TOPLEFT", fill, "TOPLEFT", 0, 0)
+        g.gloss:SetPoint("TOPRIGHT", fill, "TOPRIGHT", 0, 0)
+        g.bloom = bar:CreateTexture(nil, "OVERLAY", nil, -5)
+        g.bloom:SetTexture(FLAT)
+        g.bloom:SetPoint("TOPRIGHT", fill, "TOPRIGHT", 0, 0)
+        g.bloom:SetPoint("BOTTOMRIGHT", fill, "BOTTOMRIGHT", 0, 0)
+        if g.bloom.SetGradient and type(CreateColor) == "function" then
+            g.bloom:SetGradient("HORIZONTAL", CreateColor(1, 1, 1, 0), CreateColor(1, 1, 1, PLATE_BLOOM_ALPHA))
+        end
+    end
+
+    -- ladder: the gap tile over fill and track, one texel per physical pixel, and the own row's rail
     g.cells = bar:CreateTexture(nil, "OVERLAY", nil, -6)
     g.cells:SetTexture(CELL_TILE, "REPEAT", "CLAMP", "NEAREST")
     g.cells:SetAllPoints(bar)
     Snap(g.cells)
+    if entry.CreateTexture then g.rail = Edge(entry, "ARTWORK", 0, PINK) end
 
-    -- the bloom rides the fill's right edge, which the engine places from the value
-    if fill then
-        g.glow = bar:CreateTexture(nil, "OVERLAY", nil, -4)
-        g.glow:SetTexture(GLOW_ROUND)
-        g.glow:SetBlendMode("ADD")
-        g.glow:SetSize(GLOW_SIZE, GLOW_SIZE)
-        g.glow:SetPoint("CENTER", fill, "RIGHT", 0, 0)
-    end
-
-    -- the class or spell icon gets a 1 px frame
+    -- the class or spell icon gets a 1 px rim in the class colour
     local icon = entry.Icon
     if icon and icon.CreateTexture then
-        local frame = Edge(icon, "BACKGROUND", -8, LINE)
-        frame:SetPoint("TOPLEFT", icon, "TOPLEFT", -1, 1)
-        frame:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 1, -1)
+        local px = 1 / PixelsPerUnit(entry)
+        g.iconRim = Edge(icon, "BACKGROUND", -8, LINE)
+        g.iconRim:SetPoint("TOPLEFT", icon, "TOPLEFT", -px, px)
+        g.iconRim:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", px, -px)
     end
 
     SetFont(bar.Name, TEXT_SIZE, WHITE)
@@ -301,9 +424,13 @@ local function SkinEntry(entry)
     if type(bar.HookScript) == "function" then pcall(bar.HookScript, bar, "OnSizeChanged", function() SeatCells(entry) end) end
     if type(entry.HookScript) == "function" then pcall(entry.HookScript, entry, "OnSizeChanged", function() ApplyLayout(entry) end) end
 
-    -- Blizzard's own cached colour (a read; it is the RAID_CLASS_COLORS object or one of its constants)
-    PaintEntry(entry, entry.statusBarColor)
     ApplyLayout(entry)
+end
+
+-- The style changed (the /fsconfig dropdown, or the profile at login): every skinned row is laid out again.
+local function Restyle()
+    style = ReadStyle()
+    for entry in pairs(entries) do ApplyLayout(entry) end
 end
 
 local function SkinEntriesOf(owner)
@@ -355,11 +482,20 @@ local function Glyph(button, texture, color, flip)
     return t, state, paint
 end
 
--- The bar's height: Blizzard's header (32, the rows start under it) less the inset.
+-- The bar's height: Blizzard's header (32, the rows start under it) less the rule's row.
 local function BarHeight(window)
     local h = window.Header and window.Header.GetHeight and window.Header:GetHeight() or 32
     if type(h) ~= "number" or h <= 0 then h = 32 end
     return h - BAR_INSET
+end
+
+-- The wash fills the header behind the border, stepped in along the top-left chamfer the way the panel's own inner wash
+-- is (Theme.AddRoundedFill's cut pieces: a fill_cut triangle in the corner, a run beside it, a full width band under
+-- them), so nothing pokes past the cut. The rule closes it one row under, between the side borders.
+local function CutCorner()
+    local c = Theme.SnapCut and Theme.SnapCut(Theme.SLICE_MARGIN) or 0
+    local path = c > 0 and Theme.FILL_CUT_TEXTURES and Theme.FILL_CUT_TEXTURES[c]
+    return c, path
 end
 
 local function SkinHeader(window)
@@ -367,13 +503,28 @@ local function SkinHeader(window)
     if not header then return end
     header:SetAlpha(0)
     local barH = BarHeight(window)
+    local c, tri = CutCorner()
+    if tri then
+        local corner = window:CreateTexture(nil, "BACKGROUND", nil, 2)
+        corner:SetTexture(tri)
+        corner:SetVertexColor(ACCENT[1], ACCENT[2], ACCENT[3], BAR_WASH)
+        corner:SetSize(c, c)
+        corner:SetPoint("TOPLEFT", window, "TOPLEFT", 0, 0)
+        corner:SetTexCoord(0, c / 16, 0, c / 16)   -- the fill_cut pieces are baked top-left on a 16 px canvas
+        local run = Edge(window, "BACKGROUND", 2, ACCENT, BAR_WASH)
+        run:SetPoint("TOPLEFT", window, "TOPLEFT", c, 0)
+        run:SetPoint("TOPRIGHT", window, "TOPRIGHT", 0, 0)
+        run:SetHeight(c)
+    else
+        c = 0
+    end
     local wash = Edge(window, "BACKGROUND", 2, ACCENT, BAR_WASH)
-    wash:SetPoint("TOPLEFT", window, "TOPLEFT", BAR_INSET, -BAR_INSET)
-    wash:SetPoint("TOPRIGHT", window, "TOPRIGHT", -BAR_INSET, -BAR_INSET)
-    wash:SetHeight(barH)
+    wash:SetPoint("TOPLEFT", window, "TOPLEFT", 0, -c)
+    wash:SetPoint("TOPRIGHT", window, "TOPRIGHT", 0, -c)
+    wash:SetHeight(barH - c)
     local rule = Edge(window, "BACKGROUND", 3, ACCENT, BAR_RULE)
-    rule:SetPoint("BOTTOMLEFT", wash, "BOTTOMLEFT")
-    rule:SetPoint("BOTTOMRIGHT", wash, "BOTTOMRIGHT")
+    rule:SetPoint("TOPLEFT", wash, "BOTTOMLEFT", BAR_INSET, 0)
+    rule:SetPoint("TOPRIGHT", wash, "BOTTOMRIGHT", -BAR_INSET, 0)
     rule:SetHeight(1)
 end
 
@@ -469,11 +620,16 @@ local SCANLINE = MEDIA .. "scanline.tga"
 local SCANLINE_ALPHA = 0.4
 local SCANLINE_TILE = 4
 
-local function SeatScanline(scan, frame)
+-- The scrim is three tiled pieces that keep out of the two cut corners (a run beside the top-left cut, the full width
+-- middle, a run beside the bottom-right cut), each sampling the same 4 px grid so the lines run on across the joins.
+local function SeatScanlines(pieces, frame, c)
     local w = frame.GetWidth and frame:GetWidth() or 0
     local h = frame.GetHeight and frame:GetHeight() or 0
-    if type(w) ~= "number" or type(h) ~= "number" or w <= 0 or h <= 0 then return end
-    scan:SetTexCoord(0, w / SCANLINE_TILE, 0, h / SCANLINE_TILE)
+    if IsSecret(w) or IsSecret(h) or type(w) ~= "number" or type(h) ~= "number" or w <= 0 or h <= 0 then return end
+    local T = SCANLINE_TILE
+    pieces[1]:SetTexCoord(c / T, w / T, 0, c / T)
+    pieces[2]:SetTexCoord(0, w / T, c / T, (h - c) / T)
+    pieces[3]:SetTexCoord(0, (w - c) / T, (h - c) / T, h / T)
 end
 
 local function SkinBody(container)
@@ -482,14 +638,25 @@ local function SkinBody(container)
     if Theme.AddRoundedFill then
         Theme.AddRoundedFill(container, { ACCENT[1], ACCENT[2], ACCENT[3], INNER_WASH }, Theme.SLICE_MARGIN)
     end
-    local scan = container:CreateTexture(nil, "BORDER", nil, -8)
-    scan:SetTexture(SCANLINE, "REPEAT", "REPEAT")
-    scan:SetPoint("TOPLEFT", container, "TOPLEFT", BAR_INSET, -BAR_INSET)
-    scan:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -BAR_INSET, BAR_INSET)
-    scan:SetAlpha(SCANLINE_ALPHA)
-    SeatScanline(scan, container)
+    local c = CutCorner()
+    local pieces = {}
+    for i = 1, 3 do
+        local scan = container:CreateTexture(nil, "BORDER", nil, -8)
+        scan:SetTexture(SCANLINE, "REPEAT", "REPEAT")
+        scan:SetAlpha(SCANLINE_ALPHA)
+        pieces[i] = scan
+    end
+    pieces[1]:SetPoint("TOPLEFT", container, "TOPLEFT", c, 0)
+    pieces[1]:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, 0)
+    pieces[1]:SetHeight(c)
+    pieces[2]:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -c)
+    pieces[2]:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", 0, c)
+    pieces[3]:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", 0, 0)
+    pieces[3]:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -c, 0)
+    pieces[3]:SetHeight(c)
+    SeatScanlines(pieces, container, c)
     if type(container.HookScript) == "function" then
-        pcall(container.HookScript, container, "OnSizeChanged", function(self) SeatScanline(scan, self) end)
+        pcall(container.HookScript, container, "OnSizeChanged", function(self) SeatScanlines(pieces, self, c) end)
     end
 end
 
@@ -554,6 +721,15 @@ SkinExisting()
 
 local watcher = CreateFrame("Frame")
 watcher:RegisterEvent("PLAYER_LOGIN")
-watcher:SetScript("OnEvent", SkinExisting)
+watcher:SetScript("OnEvent", function()
+    SkinExisting()
+    Restyle()   -- the profile is loaded by now
+end)
+if Config and Config.OnChange then Config.OnChange(STYLE_SETTING.key, Restyle) end
 
-FS.DamageMeterSkin = { SkinWindow = SkinWindow, SkinEntry = SkinEntry, RampFor = RampFor, RAMPS = RAMPS }
+local function Style() return style end
+
+FS.DamageMeterSkin = {
+    SkinWindow = SkinWindow, SkinEntry = SkinEntry, RampFor = RampFor, RAMPS = RAMPS,
+    SETTING = STYLE_SETTING, STYLES = STYLES, STYLE_TEXT = STYLE_TEXT, Style = Style,
+}

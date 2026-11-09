@@ -4,12 +4,13 @@
 The meter's values are secret in combat and Blizzard's own code handles them, so the skin must stay out of Blizzard's
 state: every Blizzard object in the mock is a proxy that throws on any new field write, and SetScript throws. Pinned:
 
-  * a session window gets the panel chrome on its body, Blizzard's background becomes the nine sliced fill (still
-    Blizzard's region, so the opacity setting drives it), the header bar art goes, a band and rule replace it;
+  * a session window gets the chat terminal's body (panel chrome, inner wash, scanlines kept out of the cut corners) and
+    its term bar (a wash stepped in along the top-left chamfer, a rule under it); Blizzard's header art goes;
   * header text and entry names and numbers get the mono font;
-  * a row becomes the XP bar's gauge: name and number on top, an 10 physical px gauge below it whose flat fill carries
-    the class ramp (found from the RAID_CLASS_COLORS object Blizzard hands SetStatusBarColor) under a repeating cell
-    tile, one texel per physical pixel; the player's own name is pink;
+  * rows default to neon plates: a class ramp fill (found from the RAID_CLASS_COLORS object Blizzard hands
+    SetStatusBarColor) in an ink well with a rim, gloss and bloom, the icon as tall as the plate, the player's own rim pink;
+  * the ladder style (the setting, switched live) lays the text on a top line and the XP bar's pips under it, a
+    repeating gap tile one texel per physical pixel, the pip height from the row, a pink rail on the player's row;
   * Blizzard's UpdateStyle (re-anchor, re-atlas) and SetStatusBarColor are followed;
   * the gold header art is held invisible: STUwave keys on the session and settings dropdowns, a minus or plus plate
     on the minimize button that follows SetMinimized;
@@ -168,8 +169,15 @@ end
 __chrome = 0
 __held = {}
 __glyph = {}
+__cfg, __cfgcb = {}, {}
 FS = {
     IsSecret = function() return false end,
+    Config = {
+        RegisterDefault = function(k, v) __cfgdefault = v end,
+        Get = function(k) return __cfg[k] end,
+        Set = function(k, v) __cfg[k] = v; for _, f in ipairs(__cfgcb[k] or {}) do f() end end,
+        OnChange = function(k, f) __cfgcb[k] = __cfgcb[k] or {}; table.insert(__cfgcb[k], f) end,
+    },
     FrameHelpers = { PixelsPerUnit = function() return 1.25 end },
     HeldArt = { Hold = function(r) r:SetAlpha(0); __held[#__held + 1] = r end,
                 HoldButton = function(b) __heldButtons = (__heldButtons or 0) + 1 end },
@@ -184,6 +192,8 @@ FS = {
         COLOR_HEALTH = { 1, 0.18, 0.59 }, COLOR_AMBER = { 1, 0.71, 0.28 }, COLOR_BUTTON_INK = { 0.09, 0.05, 0.17 },
         ApplyNineSlice = function(t) t.sliced = true end,
         PanelBandInset = function() return 3 end,
+        SnapCut = function() return 6 end,
+        FILL_CUT_TEXTURES = { [6] = "fill_cut_c6" },
         AddPanelChrome = function(frame) __chrome = __chrome + 1; return frame:CreateTexture(), frame:CreateTexture(), frame:CreateTexture() end,
         AddCutSliceFill = function() return {} end,
         AddRoundedFill = function(frame) __wash = (__wash or 0) + 1 end,
@@ -199,53 +209,93 @@ def case(name: str, body: str) -> None:
     CASES.append((name, body))
 
 
-case("a_window_wears_the_panel_and_header_band", """
+case("a_window_wears_the_chat_terminal_inside_its_cut_corners", """
     local w = DamageMeterSessionWindow1
     local c = w.MinimizeContainer
     assert(c.Background.alpha == 0, "Blizzard's background not held: the body is the chat terminal's fill")
     assert(__chrome == 2, "body and source window chrome: " .. __chrome)
     assert(__wash == 1, "the chat terminal's inner wash on the body")
-    local scan
-    for _, t in ipairs(c.made) do if t.tex and tostring(t.tex):find("scanline") then scan = t end end
-    assert(scan and scan.alpha == 0.4, "no scanline scrim on the body")
+    local scans = {}
+    for _, t in ipairs(c.made) do if t.tex and tostring(t.tex):find("scanline") then scans[#scans + 1] = t end end
+    assert(#scans == 3 and scans[1].alpha == 0.4, "scanlines not three pieces clear of the cut corners")
+    assert(scans[1].h == 6 and scans[3].h == 6, "the corner runs are one chamfer tall")
+    assert(scans[2].tc[3] == 6 / 4 and scans[3].tc[3] == (20 - 6) / 4, "scanline pieces do not share one 4 px grid")
     assert(w.Header.alpha == 0, "Blizzard header art still showing")
-    assert(#w.made == 2, "term bar wash and rule on the window")
-    assert(w.made[1].h == 31 and math.abs(w.made[1].color[4] - 0.08) < 1e-6, "term bar wash: full header height, chat alpha")
+    assert(#w.made == 4, "term bar: corner, run, band and rule: " .. #w.made)
+    local corner, run, band, rule = w.made[1], w.made[2], w.made[3], w.made[4]
+    assert(corner.tex == "fill_cut_c6" and corner.w == 6 and corner.tc[2] == 6 / 16, "no cut triangle in the top-left")
+    assert(math.abs(corner.vc[4] - 0.08) < 1e-6 and math.abs(run.color[4] - 0.08) < 1e-6, "corner and run not the chat wash")
+    assert(run.h == 6 and band.h == 31 - 6, "wash does not fill the header: " .. tostring(band.h))
+    assert(rule.h == 1 and math.abs(rule.color[4] - 0.30) < 1e-6, "no term bar rule")
     assert(w.SessionTimer.font == "MONO" and w.DamageMeterTypeDropdown.TypeName.font == "MONO"
         and w.SessionDropdown.SessionName.font == "MONO" and c.NotActive.font == "MONO", "header text not mono")
     assert(w.DamageMeterTypeDropdown.TypeName.textColor[1] == 0.13, "meter type not cyan")
 """)
 
-case("rows_are_xp_gauges_in_their_class_ramp", """
+case("rows_default_to_neon_plates", """
+    assert(__cfgdefault == "plates", "plates is not the default")
     local e = DamageMeterSessionWindow1.list[1]
     local bar = e.StatusBar
     assert(e.fill.tex == "FLAT", "bar fill not flat")
     local g = e.fill.grad
-    assert(g and g[1] == "VERTICAL", "fill not one vertical gradient (every pip a single gradient)")
+    assert(g and g[1] == "VERTICAL", "fill not one vertical gradient")
     local ramp = FS.DamageMeterSkin.RAMPS.SHAMAN
     assert(g[2][1] == ramp[1][1] and g[3][3] == ramp[2][3], "shaman row not on the shaman ramp")
-    assert(bar.Background.color and math.abs(bar.Background.color[1] - 0.086) < 1e-6, "track not the XP bar's unlit cell")
+    assert(bar.Background.color and math.abs(bar.Background.color[1] - 0.039) < 1e-3, "plate well not ink")
     assert(bar.BackgroundEdge.color[4] == 0, "shadow edge not cleared")
-    assert(math.abs(bar.h - 6 / 1.25) < 1e-6, "a 20 unit row: gauge is what is left under the text, 6 px: " .. tostring(bar.h * 1.25))
-    getmetatable(e).__index.rowH = 30
-    e:SetStyle()
-    assert(math.abs(bar.h - 10 / 1.25) < 1e-6, "a tall row: gauge capped at 10 px")
-    local cells
-    for _, t in ipairs(bar.made) do if t.tex and tostring(t.tex):find("dm_cell_tile") then cells = t end end
-    assert(cells and cells.wrap == "REPEAT", "no repeating cell tile")
-    assert(cells.tc and cells.tc[2] == 200 * 1.25 / 16 and cells.tc[3] == 6 / 16 and cells.tc[4] == 1, "gap tile not one texel per physical pixel from its bottom rows")
+    assert(e.Icon.w == 18 and e.Icon.h == 18, "icon not as tall as the plate in a 20 unit row: " .. tostring(e.Icon.w))
+    assert(bar.points == 2, "plate not laid out")
+    local cells, rims, gloss = nil, 0, nil
+    for _, t in ipairs(bar.made) do
+        if t.tex and tostring(t.tex):find("dm_cell_tile") then cells = t end
+        if t.tex == "color" and t.shown and t.h and math.abs(t.h - 1 / 1.25) < 1e-6 and t.color[4] < 1 then gloss = t end
+    end
+    assert(cells and not cells.shown, "the ladder's gap tile shows on a plate")
+    assert(gloss and math.abs(gloss.color[4] - 0.45) < 1e-6, "no one px gloss on the fill")
     assert(bar.Name.font == "MONO" and bar.Value.font == "MONO", "row text not mono")
     assert(bar.Name.textColor[1] == 1 and bar.Name.textColor[2] == 1, "another player's name not white")
     local me = DamageMeterSessionWindow1.list[2]
-    assert(me.StatusBar.Name.textColor[2] == 0.18, "own name not pink")
+    assert(math.abs(me.StatusBar.Name.textColor[2] - 0.816) < 1e-3, "own name not the light pink on its plate")
+    local pinkRim = 0
+    for _, t in ipairs(me.StatusBar.made) do if t.tex == "color" and t.color[2] == 0.18 and t.shown then pinkRim = pinkRim + 1 end end
+    assert(pinkRim == 4, "own plate rim not pink: " .. pinkRim)
     assert(DamageMeterSessionWindow1.MinimizeContainer.LocalPlayerEntry.fill.grad, "pinned local row not skinned")
+""")
+
+case("the_ladder_is_the_xp_bar_gauge_and_switches_live", """
+    FS.Config.Set("skins.damageMeterRows", "ladder")
+    assert(FS.DamageMeterSkin.Style() == "ladder", "style not switched")
+    local e = DamageMeterSessionWindow1.list[1]
+    local bar = e.StatusBar
+    local cells, rims = nil, 0
+    for _, t in ipairs(bar.made) do
+        if t.tex and tostring(t.tex):find("dm_cell_tile") then cells = t end
+        if t.tex == "color" and t.shown and t.color[4] == 1 then rims = rims + 1 end
+    end
+    assert(cells and cells.shown and cells.wrap == "REPEAT", "no repeating gap tile in the ladder")
+    assert(rims == 0, "plate rim still showing in the ladder")
+    assert(bar.Background.grad and bar.Background.grad[1] == "VERTICAL", "unlit pips not the slot gradient")
+    assert(e.Icon.w == 14, "ladder icon not on the top line")
+    assert(math.abs(bar.h - 4 / 1.25) < 1e-6, "a 20 unit row: pips at the 4 px floor: " .. tostring(bar.h * 1.25))
+    getmetatable(e).__index.rowH = 30
+    e:SetStyle()
+    assert(math.abs(bar.h - 10 / 1.25) < 1e-6, "a tall row: pips capped at 10 px")
+    assert(cells.tc and cells.tc[2] == 200 * 1.25 / 16 and cells.tc[3] == 6 / 16 and cells.tc[4] == 1,
+        "gap tile not one texel per physical pixel from its bottom rows")
+    local me = DamageMeterSessionWindow1.list[2]
+    local function rail(entry) for _, t in ipairs(entry.made) do if t.tex == "color" and t.w == 2 then return t end end end
+    assert(rail(me) and rail(me).shown, "no pink rail on the player's own row")
+    assert(rail(e) and not rail(e).shown, "a rail on another player's row")
+    assert(me.StatusBar.Name.textColor[2] == 0.18, "own name not pink in the ladder")
+    FS.Config.Set("skins.damageMeterRows", "plates")
+    assert(not cells.shown and not rail(me).shown, "switching back leaves ladder pieces up")
 """)
 
 case("blizzard_restyles_and_recolours_are_followed", """
     local e = DamageMeterSessionWindow1.list[1]
     e:SetStyle()
     assert(e.StatusBar.Background.tex == "color", "UpdateStyle re-atlas not followed")
-    assert(e.StatusBar.points == 2, "gauge layout not re-applied after UpdateStyle")
+    assert(e.StatusBar.points == 2, "row layout not re-applied after UpdateStyle")
     e:SetStatusBarColor(RAID_CLASS_COLORS.WARRIOR)
     local ramp = FS.DamageMeterSkin.RAMPS.WARRIOR
     assert(e.fill.grad and e.fill.grad[3][1] == ramp[2][1], "recolour not re-ramped")
