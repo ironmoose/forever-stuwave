@@ -1,27 +1,27 @@
--- Forever STUwave: Gunsight Shaman Class Module, lane 2: the SHOCK DISC and the FIRE NOVA RING.
+-- Forever STUwave: Gunsight Shaman Class Module, lane 2: the SHOCK DISC and the FIRE NOVA FLAME DISC.
 --
 -- The approved design is the design mockup "Shaman Shock Tracker Polish" (2026-11-07) on top of Concept A "Totem Poles": the
 -- shared Earth / Flame / Frost Shock cooldown is a carved rune disc on the right of the poles with a Sowilo pixel bolt in it. The
 -- rim refills clockwise and the bolt charges from its tip up as the cooldown runs (both drawn by the ENGINE from the cooldown),
 -- the label under the disc says RDY or the seconds, and a ready shock breathes (a stepped halo, a shimmer down the bolt, a crackle
 -- arc and tip sparks). A shock cast flashes white, throws eight sparks and drains the rim and bolt fast; the cooldown ending
--- flashes again with an expanding ring and a white label. The old zig-zag line under the poles is gone. The Fire Nova ring (drawn
--- over the Fire totem's head, on a frame above it) and the NOVA tag in the footer are as shipped. There is no Earth Shock KICK
--- tag here: KICK comes from GunsightTape.lua's class neutral tag on the target box. GunsightShaman.lua owns the module frame and
--- the totem poles and calls this file:
+-- flashes again with an expanding ring and a white label. The old zig-zag line under the poles is gone. Under the shock disc
+-- stands its twin in fire, the Fire Nova flame disc of the design mockup "Shaman Nova Tracker" (2026-11-08, form A): the same
+-- build with a smaller radius and a pixel flame for the glyph (it replaces the cyan ring over the Fire totem's head and the NOVA
+-- footer tag). There is no Earth Shock KICK tag here: KICK comes from GunsightTape.lua's class neutral tag on the target box.
+-- GunsightShaman.lua owns the module frame and the totem poles and calls this file:
 --
 --   FS.GunsightShamanShocks = { Build(frame) -> section, Seat(section, rect, scale), OnShow(section), OnHide(section) }
 --
 -- `frame` is the class module frame (a child of the area host), `rect` the module rect in image px { x, y, w, h } (every piece
 -- sits at the mockup's offset from rect.x and rect.y, so either area works), `scale` is unused (ui() carries it). Nothing here
--- is built at file load. The poles tell the ring where the Fire totem is through two functions that live on the SECTION, not on
--- the table:
+-- is built at file load. The poles tell the section whether the Fire totem stands through a function that lives on the SECTION,
+-- not on the table:
 --
---   section.SetFire(up, headY)   up: true (the Fire totem stands), false (it is gone: no ring, no NOVA tag), nil (not known,
---                                the default: a Fire Nova that reads unusable for a reason other than mana counts as "no
---                                totem"); headY: the Fire head's centre in image px from rect.y (default 24, a full pole's),
---                                or false when the head's place cannot be known (it rides an engine drawn timer bar): no ring,
---                                the NOVA tag stays; nil leaves it as it was
+--   section.SetFire(up, headY)   up: true (the Fire totem stands), false (it is gone: no flame disc), nil (not known, the
+--                                default: a Fire Nova that reads unusable for a reason other than mana counts as "no totem");
+--                                headY is accepted and ignored (the old ring rode the Fire head, the flame disc stands in the
+--                                right column and does not move)
 --
 -- THE SHOCK. Earth, Flame and Frost Shock share one cooldown (6 s), so one record answers for all three. READY comes from the
 -- cooldown's plain isActive (plain in combat, probe 2026-10-01): false is ready, whatever else; a plain isOnGCD or a cooldown no
@@ -43,19 +43,29 @@
 -- crop reaches the first bolt row after an eighth of the cooldown and the last after seven eighths (a plain value is mapped
 -- exactly). During the 0.1 s cast flash the whole bolt goes white (the mockup keeps its unlit rows dark). The lit rim sits over
 -- the dim rim, so 5 % of the dim violet shows through where the mockup replaces it.
+-- The flame disc differs the same way: its StatusBar box is 16 x 16 px and the flame's 13 rows sit in it with 1 px above and 2
+-- below, so the fill edge climbs 12 px while the share runs 0 to 1 and the engine's crop is continuous where the mockup lights
+-- whole rows (the top row is never lit before the ready look, as in the mockup); the hot seam is a 0.96 px strip hung under the
+-- fill's edge where the mockup recolours the rows within .08 of the share; the 0.3 s drain after a cast plays as the left-right
+-- mirror of the mockup's, colours included (a Cooldown swipe keeps the arc from the elapsed angle to 12 o'clock, so the art is
+-- baked mirrored); the ember positions use the module's sine hash.
 --
--- FIRE NOVA. Ring and tag need the spell in the book (resolved by name, ids as a fallback, IsPlayerSpell and its siblings), then
--- the same cooldown reading with a 10 s ledger. The ring shows while it is ready and the Fire totem stands; the footer tag
--- (a dashed pip and NOVA) stays while the totem stands, cyan when ready and muted when not; while it cools down the tag
--- carries the seconds left ("NOVA 7s", "~" for the in-combat estimate, the disc label's format). It cannot know whether an enemy is
--- within 10 yd of the totem: the ring is advice, not a guarantee.
+-- FIRE NOVA. The flame disc needs the spell in the book (resolved by name, ids as a fallback, IsPlayerSpell and its siblings) and a
+-- Fire totem standing, then the same cooldown reading with a 10 s ledger; with either missing nothing of it is drawn. It is the
+-- shock disc's build with its own descriptor (NOVA_D): the rim and a pixel flame refill from the same duration object, the flame
+-- climbing from its base to a hot seam at the fill's edge; ready it breathes amber to white, its tips flicker and embers drift up;
+-- a cast flashes white, throws a ring of fire (two stepped rings) and drains the flame fast; the cooldown ending throws a smaller
+-- ring. The label is RDY (amber, white for the first 0.3 s of the ready beat), the seconds in white ("~" for the in-combat
+-- estimate, the shock label's format) or a muted "?". It cannot know whether an enemy is within 10 yd of the totem: the disc is
+-- advice, not a guarantee.
 --
 -- EVENTS AND TICKER. The cast ledger listens from Build on and stays on through OnHide (it only records). Everything else
 -- listens from OnShow to OnHide: SPELL_UPDATE_COOLDOWN and SPELL_UPDATE_USABLE, the spellbook events and PLAYER_REGEN_*. Nothing
--- here reads the target. One OnUpdate (30 Hz) runs while a shock is ready (it breathes) or charging, or Fire Nova counts down, and
--- stops itself otherwise; the cooldowns are re-read from it every tenth of a second. The per frame path allocates nothing on the
--- addon side: the time strings come from tables built at load, every texture, colour, alpha and anchor is written only when it
--- changes, and the sparks are pools of flat 1 px textures built once. Plain frames only, nothing secure.
+-- here reads the target. One OnUpdate (30 Hz) runs while a shock is ready (it breathes) or charging, or a shown Fire Nova is ready
+-- or charging, and stops itself otherwise; the cooldowns are re-read from it every tenth of a second. The per frame path allocates
+-- nothing on the addon side: the time strings come from tables built at load, every texture, colour, alpha and anchor is written
+-- only when it changes, and the sparks, embers and rings are pools of flat 1 px textures built once. Plain frames only, nothing
+-- secure.
 
 local _, FS = ...
 
@@ -89,24 +99,44 @@ local C = {
     DRAIN = 0.3, CAST_FLASH = 0.1, CAST_BURST = 0.5,    -- seconds after our own shock cast: the fast drain, the white flash, the sparks
     RDY_BEAT = 0.6, RDY_FLASH = 0.14, RDY_LABEL = 0.3, RDY_RING_FROM = 0.1,   -- seconds after the cooldown ended
     BREATH = 1.6, SHIMMER = 22, SHIMMER_SPAN = 34, CRACKLE = 10,   -- the ready breath period; rows a second and the span; arcs a second
-    FIRE_X = 32, FIRE_Y = 24, RING = 44,                -- the Fire pole's centre (1245) and a full pole's head (gy - 48 - 15 + 9); the ring canvas
-    RING_A = 0.95,                                      -- circ(.., cyan, .95): the outer ring's .35 is baked into the texture
-    FOOT_DY = 22, PIP_X = 11, PIP_DY = 7, PIP = 10,     -- fy = gy + 22; the pip centred at (1224, fy + 7), 10 px canvas
-    NOVA_X = 19, NOVA_BASE = 11, NOVA_SIZE = 10,        -- txt(1232, fy + 11, 'NOVA', 10)
-    OFF_PIP_A = 0.8, OFF_TEXT_A = 0.75,                 -- the not ready tag: muted, .8 and .75
     SHOCK_CD = 6, NOVA_CD = 10, GCD_WINDOW = 1.6,       -- seconds: the shared shock cooldown, Fire Nova's, the longest global cooldown
     TICK = 0.1, ANIM = 1 / 30,                          -- the cooldown re-read period; the animation's
-    RING_LEVEL = 3,                                     -- the ring's frame sits this far above the module frame: the Fire head is at +2 and its opaque fill would hide the arcs
     -- Mononoki Bold: the line box's middle sits 325 / 1024 of the size above the baseline (GunsightSeals.lua's CAP)
     CAP = 325 / 1024,
     -- the mockup palette of the pieces that are not theme tokens
     FX_WHITE = Hex("#f3fbff"),
+
+    -- THE FIRE NOVA FLAME DISC (design mockup "Shaman Nova Tracker", form A; every number is drawSun's or the constants above it)
+    NCX = 183, NCY = 102, NR = 12,                      -- the disc's centre corner (GY + 24) and radius: under the shock disc, 60 px below it
+    NBOX_X = -8, NBOX_Y = -8, NBOX_W = 16, NBOX_H = 16, -- the flame StatusBar's box from the disc centre (nova_flame_lit.tga: 32 x 32 texels)
+    NFLAME_TOP = -7, NFLAME_BOT = 5, NSPAN = 12,        -- the flame's top row, its base row, and the mockup's fill scale (rows - 1)
+    NSEAM = 0.96,                                       -- px of hot flame under the fill's edge: abs(rowF - p) < .08 of the 12 row scale
+    NLABEL_DY = 11, NLABEL_SIZE = 11,                   -- txt(NCX, NCY + NR + 11, 'RDY' | seconds, 11, middle)
+    NDRAIN = 0.3, NCAST_FLASH = 0.1, NCAST_BEAT = 0.6,  -- seconds after our own Fire Nova cast: the fast drain, the white flash, the fire ring
+    NCAST_GROW = 26, NCAST_GAP = 1.5, NCAST_A = 0.95, NCAST_A2 = 0.6,   -- the ring's growth in px, the inner ring's step in, the two alphas
+    NRDY_BEAT = 0.6, NRDY_FLASH = 0.14, NRDY_LABEL = 0.3, NRDY_RING_FROM = 0.1, NRDY_RING_SPAN = 0.5,   -- seconds after the cooldown ended
+    NRDY_GROW = 14, NRDY_RING_A = 0.9,                  -- the smaller ready ring: growth in px, alpha
+    NRING_PX = 80,                                      -- px in a stepped ring
+    NBREATH = 1.8, NFLICK_RATE = 8, NFLICK_PHASES = 3,  -- the ready breath period; the tips' step clock: steps a second, phases
+    NEMBERS = 3, NEMBER_RATE = 0.7, NEMBER_X = 8, NEMBER_W = 16, NEMBER_DY = 1, NEMBER_RISE = 14, NEMBER_SPLIT = 0.5,   -- the drifting embers
+    NEMBER_SEED = 13, NEMBER_SEED2 = 7,                 -- the hash's two multipliers (the mockup's own hash is not reproducible in Lua)
+    NSPARK_IN = 0.9,                                    -- the rim spark sits this far inside the radius
+    NHALO1 = 0.10, NHALO1_B = 0.16, NHALO2 = 0.04, NHALO2_B = 0.08,   -- the stepped halos' alpha: base + breath * b
+    NWASH = 0.08, NWASH_B = 0.07, NFLASH_WASH = 0.8,    -- the plate's ready wash, and the flash's
+    NRIM_A = 0.95, NRIM_BREATH = 0.3, NRIM_MIX = 0.9,   -- the lit rim's alpha; its amber to hot white mix: max(0, b - .3) * .9
+    FIRE = Hex("#ff5a3c"), AMBER = Hex("#ffb648"), HOT = Hex("#fff1d0"),
 }
 C.BOLT_PAD = (C.BOLT_Y + C.BOLT_H) - C.BOLT_BOT          -- px between the box bottom and the tip's bottom edge (4)
+C.NPAD = (C.NBOX_Y + C.NBOX_H) - (C.NFLAME_BOT + 1)      -- px between the flame box's bottom and the flame's base row (2)
 
 -- the cells of shaman_disc.tga, in the generator's order (generate_shaman_disc.py DISC_CELLS; the harness checks)
 local DISC_CELL = { disc = 0, mask = 1, dots = 2, rimDim = 3, rimLit = 4, notches = 5, outline = 6, boltEmpty = 7, boltReady = 8,
     boltMuted = 9, boltWhite = 10, boltInner = 11 }
+
+-- the cells of nova_disc.tga, in the generator's order (generate_nova_disc.py DISC_CELLS; the harness checks): 4 x 4 cells, the
+-- last two spare. The three flick cells are the flame's amber tips, one per phase of the ready step cycle.
+local NOVA_CELL = { disc = 0, mask = 1, rimDim = 2, rimLit = 3, notches = 4, flameEmpty = 5, flameMuted = 6, flameReady = 7,
+    flick0 = 8, flick1 = 9, flick2 = 10, flameWhite = 11, halo1 = 12, halo2 = 13 }
 
 -- Spells by NAME first (a name answers with the player's own rank), ids only as a fallback. Earth Shock rank 1 is 8042; the
 -- others are the classic rank 1 ids and Fire Nova's published id, all only tried when the name does not resolve.
@@ -143,20 +173,9 @@ local function FormatRemaining(rem, est)
     return est and EST_SECS[i] or SECS[i]
 end
 
--- The NOVA tag while Fire Nova cools down: "NOVA 7s", "NOVA ~7s" (an estimate in combat), "NOVA 2.4s". Built once from the
--- same strings as the disc label, so the tick only indexes.
-local NOVA_LABEL = {}
-local function NovaLabel(rem, est)
-    local t = FormatRemaining(rem, est)
-    local l = NOVA_LABEL[t]
-    if not l then l = "NOVA " .. t; NOVA_LABEL[t] = l end
-    return l
-end
-for _, t in ipairs({ SECS, EST_SECS }) do for i = 0, 99 do NovaLabel(i + 0.1, t == EST_SECS) end end
-for _, t in ipairs({ TENTHS, EST_TENTHS }) do for i = 0, 29 do NovaLabel(i / 10, t == EST_TENTHS) end end
-
--- the beats' directions, built once: eight sparks round the disc and 72 points of the expanding ring
-local BURST_COS, BURST_SIN, RING_COS, RING_SIN = {}, {}, {}, {}
+-- the beats' directions, built once: eight sparks round the shock disc, 72 points of its expanding ring, and the 80 points of the
+-- flame disc's stepped rings (the same angles as the mockup's stepRing)
+local BURST_COS, BURST_SIN, RING_COS, RING_SIN, NRING_COS, NRING_SIN = {}, {}, {}, {}, {}, {}
 for i = 1, 8 do
     local a = (i - 1) / 8 * pi * 2 + 0.2
     BURST_COS[i], BURST_SIN[i] = cos(a), sin(a)
@@ -164,6 +183,10 @@ end
 for i = 1, 72 do
     local a = (i - 1) / 72 * pi * 2
     RING_COS[i], RING_SIN[i] = cos(a), sin(a)
+end
+for i = 1, C.NRING_PX do
+    local a = (i - 1) / C.NRING_PX * 2 * pi
+    NRING_COS[i], NRING_SIN[i] = cos(a), sin(a)
 end
 
 -- the mockup's own hash is not reproducible in Lua: a sine hash gives the same look (a different but equally random roll)
@@ -393,14 +416,6 @@ local function SetLabel(fs, text)
     end
 end
 
-local function NewTex(parent, layer, sub, file)
-    local t = parent:CreateTexture(nil, layer, nil, sub)
-    t:SetTexture(MEDIA .. file)
-    t:Hide()
-    t.fsOn = false
-    return t
-end
-
 -- A baked pixel art texture: nearest neighbour, so a px stays a hard square at any scale
 local function NewPix(parent, layer, sub, path)
     local t = parent:CreateTexture(nil, layer, nil, sub)
@@ -450,13 +465,20 @@ local function NewFlat(s, parent, layer, sub, c, shown)
     return t
 end
 
--- a cell of shaman_disc.tga (4 x 4 cells of 64 texels), 32 px square with the disc's centre in its middle
-local function NewCell(s, parent, layer, sub, name)
-    local t = NewPix(parent, layer, sub, MEDIA .. "shaman_disc.tga")
-    local i = DISC_CELL[name]
+-- A disc's descriptor: the two discs (the shock's rune disc, Fire Nova's flame disc) are one build with different numbers. cx, cy
+-- the centre corner in image px from the rect, file / cells the atlas of 4 x 4 cells (64 texels, 32 px, the centre in the middle)
+-- and its name -> index map, barFile and bx, by, bw, bh the vertical StatusBar's art and box from the centre, rim / mirror the
+-- two ring arts (the engine's refill and the cast drain), sparkR the rim spark's radius, drain the cast drain's seconds and frac
+-- the bar's fill fraction for a share of the cooldown. Filled in below, after the fractions.
+local SHOCK_D, NOVA_D
+
+-- a cell of a disc's atlas, 32 px square with the disc's centre in its middle
+local function NewCell(s, parent, layer, sub, name, d)
+    local t = NewPix(parent, layer, sub, MEDIA .. d.file)
+    local i = d.cells[name]
     local l, top = (i % 4) * 0.25, floor(i / 4) * 0.25
     t:SetTexCoord(l, l + 0.25, top, top + 0.25)
-    return Part(s, t, C.SCX - C.CELL / 2, C.SCY - C.CELL / 2, C.CELL, C.CELL)
+    return Part(s, t, d.cx - C.CELL / 2, d.cy - C.CELL / 2, C.CELL, C.CELL)
 end
 
 -- a plain frame that fills the holder at a level above it (a frame with no rect draws nothing on this client)
@@ -474,21 +496,21 @@ local function Clips(f)
     if f.SetClipsChildren then pcall(f.SetClipsChildren, f, true) end
 end
 
-local function NewBar(s, parent, level)
+local function NewBar(s, parent, level, d)
     local bar = CreateFrame("StatusBar", nil, parent)
     bar:SetFrameLevel(s.level + level)
     bar:EnableMouse(false)
-    bar:SetStatusBarTexture(MEDIA .. "shaman_bolt_lit.tga")
+    bar:SetStatusBarTexture(MEDIA .. d.barFile)
     if bar.SetOrientation then pcall(bar.SetOrientation, bar, "VERTICAL") end
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(0)
     bar:Hide()
     bar.fsOn = false
-    return Part(s, bar, C.SCX + C.BOLT_X, C.SCY + C.BOLT_Y, C.BOLT_W, C.BOLT_H)
+    return Part(s, bar, d.cx + d.bx, d.cy + d.by, d.bw, d.bh)
 end
 
 -- the rim: a Cooldown whose swipe is the ring art; nil on a client without the frame type
-local function NewSwipe(s, parent, level, file, reverse)
+local function NewSwipe(s, parent, level, file, reverse, d)
     local ok, cd = pcall(CreateFrame, "Cooldown", nil, parent)
     if not (ok and cd and cd.SetSwipeTexture and cd.SetCooldown) then return nil end
     cd:SetFrameLevel(s.level + level)
@@ -501,7 +523,7 @@ local function NewSwipe(s, parent, level, file, reverse)
     if cd.SetReverse then pcall(cd.SetReverse, cd, reverse) end
     cd:Hide()
     cd.fsOn = false
-    return Part(s, cd, C.SCX - C.CELL / 2, C.SCY - C.CELL / 2, C.CELL, C.CELL)
+    return Part(s, cd, d.cx - C.CELL / 2, d.cy - C.CELL / 2, C.CELL, C.CELL)
 end
 
 -------------------------------------------------------------------------------
@@ -509,9 +531,10 @@ end
 -------------------------------------------------------------------------------
 
 -- The engine's refill: one duration object into the bolt's StatusBar and the rim's Cooldown. Returns whether the bar took it
--- (then nothing else feeds the bar); the rim falls back to a plain start and length when it could not be fed.
-local function StartTimer(s, g)
-    local rim, bar = s.rimFill, s.bar
+-- (then nothing else feeds the bar); the rim falls back to a plain start and length when it could not be fed. `f` holds the
+-- disc's parts (the section itself for the shock disc, section.fd for the flame disc).
+local function StartTimer(f, g)
+    local rim, bar = f.rimFill, f.bar
     local fed = false
     local fn = C_Spell and C_Spell.GetSpellCooldownDuration
     local obj
@@ -549,6 +572,19 @@ local function BoltFraction(p)
     return (C.BOLT_PAD + C.BOLT_SPAN * p) / C.BOLT_H
 end
 
+-- the same for the flame's StatusBar: the base row sits NPAD px above the box bottom, and the mockup lights its 13 rows over the
+-- 12 steps of rowF, so the fill edge climbs NSPAN px while the share runs from 0 to 1
+local function NovaFraction(p)
+    return (C.NPAD + C.NSPAN * p) / C.NBOX_H
+end
+
+SHOCK_D = { cx = C.SCX, cy = C.SCY, file = "shaman_disc.tga", cells = DISC_CELL, barFile = "shaman_bolt_lit.tga",
+    bx = C.BOLT_X, by = C.BOLT_Y, bw = C.BOLT_W, bh = C.BOLT_H, rim = "shaman_disc_rim.tga", mirror = "shaman_disc_rim_mirror.tga",
+    sparkR = C.SR - 0.9, drain = C.DRAIN, frac = BoltFraction }
+NOVA_D = { cx = C.NCX, cy = C.NCY, file = "nova_disc.tga", cells = NOVA_CELL, barFile = "nova_flame_lit.tga",
+    bx = C.NBOX_X, by = C.NBOX_Y, bw = C.NBOX_W, bh = C.NBOX_H, rim = "nova_disc_rim.tga", mirror = "nova_disc_rim_mirror.tga",
+    sparkR = C.NR - C.NSPARK_IN, drain = C.NDRAIN, frac = NovaFraction }
+
 local function PaintDisc(s, known, unk, ready, flash, h)
     local K = s.colors
     local c, w = K.cyan, C.FX_WHITE
@@ -582,45 +618,45 @@ local function PaintDisc(s, known, unk, ready, flash, h)
     SetOn(s.flashBolt, flash)
 end
 
--- The refill (engine drawn) and the cast drain (our clock)
-local function PaintFill(s, now, g, run, casting, sc, restart)
-    if run ~= s.running then s.running = run; restart = true end
-    SetOn(s.bar, run); SetOn(s.seam, run)
-    if s.rimFill then SetOn(s.rimFill, run) end
+-- The refill (engine drawn) and the cast drain (our clock). `f` holds the disc's parts and its running state, `d` is its descriptor.
+local function PaintFill(s, f, d, now, g, run, casting, sc, restart)
+    if run ~= f.running then f.running = run; restart = true end
+    SetOn(f.bar, run); SetOn(f.seam, run)
+    if f.rimFill then SetOn(f.rimFill, run) end
     if run then
-        if restart or s.barTimer == nil then s.barTimer = StartTimer(s, g) end
+        if restart or f.barTimer == nil then f.barTimer = StartTimer(f, g) end
         local p = SpentShare(g, now)
-        if not s.barTimer then
-            local f = BoltFraction(p)
-            if not s.barValue or abs(f - s.barValue) > 0.002 then
-                s.barValue = f
-                s.bar:SetValue(f)
+        if not f.barTimer then
+            local v = d.frac(p)
+            if not f.barValue or abs(v - f.barValue) > 0.002 then
+                f.barValue = v
+                f.bar:SetValue(v)
             end
         end
         if p > 0 and p < 1 then               -- the spark on the rim front: the mockup's px for the share (Math.round(v - .5) = floor(v))
             local ang = p * pi * 2
-            local R = C.SR - 0.9
-            PlaceTo(s, s.spark, C.SCX + floor(sin(ang) * R), C.SCY + floor(-cos(ang) * R))
-            SetOn(s.spark, true)
+            local R = d.sparkR
+            PlaceTo(s, f.spark, d.cx + floor(sin(ang) * R), d.cy + floor(-cos(ang) * R))
+            SetOn(f.spark, true)
         else
-            SetOn(s.spark, false)
+            SetOn(f.spark, false)
         end
     else
-        s.barTimer = nil
-        SetOn(s.spark, false)
+        f.barTimer = nil
+        SetOn(f.spark, false)
     end
-    if casting ~= s.draining then s.draining = casting; s.drainStart = nil end
-    SetOn(s.drain, casting)
-    if s.rimDrain then SetOn(s.rimDrain, casting) end
+    if casting ~= f.draining then f.draining = casting; f.drainStart = nil end
+    SetOn(f.drain, casting)
+    if f.rimDrain then SetOn(f.rimDrain, casting) end
     if casting then
-        if s.rimDrain and s.drainStart ~= g.lastAt then
-            s.drainStart = g.lastAt
-            pcall(s.rimDrain.SetCooldown, s.rimDrain, g.lastAt, C.DRAIN)
+        if f.rimDrain and f.drainStart ~= g.lastAt then
+            f.drainStart = g.lastAt
+            pcall(f.rimDrain.SetCooldown, f.rimDrain, g.lastAt, d.drain)
         end
-        local f = BoltFraction(1 - sc / C.DRAIN)
-        if not s.drainValue or abs(f - s.drainValue) > 0.002 then
-            s.drainValue = f
-            s.drain:SetValue(f)
+        local v = d.frac(1 - sc / d.drain)
+        if not f.drainValue or abs(v - f.drainValue) > 0.002 then
+            f.drainValue = v
+            f.drain:SetValue(v)
         end
     end
 end
@@ -729,7 +765,7 @@ local function PaintShock(s, now, restart)
     local h = 0
     if ready then h = floor(Beat(now, C.BREATH) * 20) / 20 end
     PaintDisc(s, known, unk, ready, flash, h)
-    PaintFill(s, now, g, charging and not casting, casting, sc, restart)
+    PaintFill(s, s, SHOCK_D, now, g, charging and not casting, casting, sc, restart)
     PaintFx(s, now, ready, burst, sc, rdyBeat and sr >= C.RDY_RING_FROM, sr)
     PaintLabel(s, g, known, unk, ready, now, rdyBeat, sr)
 end
@@ -746,30 +782,141 @@ local function FireUp(s)
     return true
 end
 
-local function PaintNova(s, now)
-    local g, K = s.nova, s.colors
-    local show = g.known and FireUp(s)
-    local ready = show and g.mode == "ready"
-    local ring = ready and not s.headLost
-    SetOn(s.ring, ring); SetOn(s.ringGlow, ring)
-    SetOn(s.pip, show); SetOn(s.novaText, show)
-    if not show then return end
+-------------------------------------------------------------------------------
+-- The Fire Nova flame disc (the shock disc's twin: smaller, in fire, a pixel flame for the glyph)
+-------------------------------------------------------------------------------
+
+-- Everything off, and the state that only means something while it is drawn forgotten: a disc that comes back (the Fire totem is
+-- up again, the view is shown again) has no beat for what it did not see, and its engine timer is fed again.
+local function HideNova(f)
+    local list = f.regions
+    for i = 1, #list do SetOn(list[i], false) end
+    f.prevMode, f.rdyAt = nil, nil
+    f.running, f.barTimer, f.draining, f.drainStart, f.drainValue, f.barValue = nil, nil, nil, nil, nil, nil
+end
+
+-- The plate, the washes, the rim's lit look, the flame's bodies and the flickering tips
+local function PaintNovaDisc(f, now, ready, unk, flash, h)
+    local A, F, W = C.AMBER, C.FIRE, C.HOT
+    SetOn(f.disc, true); SetOn(f.rimDim, true); SetOn(f.notches, true)
+    SetOn(f.halo1, ready); SetOn(f.halo2, ready)
     if ready then
-        Tint(s.ring, K.cyan, C.RING_A); Tint(s.ringGlow, K.cyan, 1)
-        Tint(s.pip, K.cyan, 1)
-        TextTint(s.novaText, K.cyan, 1)
-        SetLabel(s.novaText, "NOVA")
-    else
-        Tint(s.pip, K.muted, C.OFF_PIP_A)
-        TextTint(s.novaText, K.muted, C.OFF_TEXT_A)
-        if g.mode == "charging" then
-            local rem = g.endsAt and (g.endsAt - (now or GetTime())) or g.rem or 0
-            if rem < 0 then rem = 0 end
-            SetLabel(s.novaText, NovaLabel(rem, g.est))
-        else
-            SetLabel(s.novaText, "NOVA")
+        TintRGB(f.halo1, A[1], A[2], A[3], C.NHALO1 + h * C.NHALO1_B)
+        TintRGB(f.halo2, F[1], F[2], F[3], C.NHALO2 + h * C.NHALO2_B)
+    end
+    -- the plate's wash: hot white at the flash, fire red breathing when ready (an overlay, the mockup mixes the plate's colour)
+    if flash then
+        TintRGB(f.tint, W[1], W[2], W[3], C.NFLASH_WASH)
+    elseif ready then
+        TintRGB(f.tint, F[1], F[2], F[3], C.NWASH + h * C.NWASH_B)
+    end
+    SetOn(f.tint, flash or ready)
+    -- the lit rim over the whole ring: hot white at the flash, amber to hot white with the breath when ready
+    if flash then
+        TintRGB(f.rimLit, W[1], W[2], W[3], C.NRIM_A)
+    elseif ready then
+        local t = (h - C.NRIM_BREATH) * C.NRIM_MIX
+        if t < 0 then t = 0 end
+        TintRGB(f.rimLit, A[1] + (W[1] - A[1]) * t, A[2] + (W[2] - A[2]) * t, A[3] + (W[3] - A[3]) * t, C.NRIM_A)
+    end
+    SetOn(f.rimLit, flash or ready)
+    -- the flame: dark while charging (the engine's lit flame climbs over it), ready, muted when unknown, hot white at a flash
+    SetOn(f.flameEmpty, not unk and not ready)
+    SetOn(f.flameMuted, unk)
+    SetOn(f.flameReady, ready)
+    SetOn(f.flameWhite, flash)
+    -- the tips flicker: one of three overlays, stepping a few times a second
+    local fl = floor(now * C.NFLICK_RATE) % C.NFLICK_PHASES
+    for p = 1, C.NFLICK_PHASES do SetOn(f.flick[p], ready and p - 1 == fl) end
+end
+
+-- The drifting embers, the fire ring a cast throws and the smaller ring of the cooldown's end (rings: 80 px, two stepped alternating
+-- colours, growing and fading; each is a frame carrying the alpha)
+local function PaintNovaFx(s, f, now, ready, castOn, sc, readyOn, sr)
+    for k = 0, C.NEMBERS - 1 do
+        local px = f.embers[k + 1]
+        SetOn(px, ready)
+        if ready then
+            local t = now * C.NEMBER_RATE + k / 3
+            local ph = t % 1
+            PlaceTo(s, px, C.NCX - C.NEMBER_X + floor(Hash(k * C.NEMBER_SEED + floor(t) * C.NEMBER_SEED2) * C.NEMBER_W),
+                C.NCY - C.NR - C.NEMBER_DY - floor(ph * C.NEMBER_RISE))
+            SetAlphaOf(px, 1 - ph)
+            Tint(px, ph < C.NEMBER_SPLIT and C.AMBER or C.FIRE, 1)
         end
     end
+    SetOn(f.castA, castOn); SetOn(f.castB, castOn)
+    if castOn then
+        local k = sc / C.NCAST_BEAT
+        local r = C.NR + 1 + k * C.NCAST_GROW
+        local r2 = r - C.NCAST_GAP
+        SetAlphaOf(f.castA, (1 - k) * C.NCAST_A)
+        SetAlphaOf(f.castB, (1 - k) * C.NCAST_A2)
+        local pa, pb = f.castPxA, f.castPxB
+        for i = 1, C.NRING_PX do
+            local co, si = NRING_COS[i], NRING_SIN[i]
+            PlaceTo(s, pa[i], floor(C.NCX + co * r), floor(C.NCY + si * r))
+            PlaceTo(s, pb[i], floor(C.NCX + co * r2), floor(C.NCY + si * r2))
+        end
+    end
+    SetOn(f.readyG, readyOn)
+    if readyOn then
+        local k = (sr - C.NRDY_RING_FROM) / C.NRDY_RING_SPAN
+        local r = C.NR + 1 + k * C.NRDY_GROW
+        SetAlphaOf(f.readyG, (1 - k) * C.NRDY_RING_A)
+        local pr = f.readyPx
+        for i = 1, C.NRING_PX do
+            PlaceTo(s, pr[i], floor(C.NCX + NRING_COS[i] * r), floor(C.NCY + NRING_SIN[i] * r))
+        end
+    end
+end
+
+-- RDY (amber, hot white for the first moments of the ready beat), the seconds in white ("~" for an estimate), "?" muted
+local function PaintNovaLabel(s, f, g, unk, ready, now, rdyBeat, sr)
+    local K, fs = s.colors, f.label
+    SetOn(fs, true)
+    if unk then
+        SetLabel(fs, "?")
+        TextTint(fs, K.muted, 1)
+    elseif ready then
+        SetLabel(fs, "RDY")
+        TextTint(fs, (rdyBeat and sr < C.NRDY_LABEL) and C.HOT or C.AMBER, 1)
+    else
+        local rem = g.endsAt and (g.endsAt - now) or g.rem or 0
+        SetLabel(fs, FormatRemaining(rem, g.est))
+        TextTint(fs, K.white, 1)
+    end
+end
+
+-- `fresh` re-reads whether the disc may show (the poles' word, else Fire Nova's usability: a call to the client, so only with the
+-- cooldown's tenth of a second); the frames between only animate
+local function PaintNova(s, now, fresh, restart)
+    local f, g = s.fd, s.nova
+    if fresh then f.show = g.known and FireUp(s) end
+    if not f.show then
+        if f.on then f.on = false; HideNova(f) end
+        return
+    end
+    f.on = true
+    local mode = g.mode
+    local unk, ready, charging = mode == "unknown", mode == "ready", mode == "charging"
+    if f.prevMode ~= mode then
+        if ready and f.prevMode == "charging" then f.rdyAt = now end         -- the cooldown just ended while we watched
+        f.prevMode = mode
+    end
+    -- the beats run on our own clock: the player's cast ledger, and the moment a charge ran out
+    local sc, sr = 99, 99
+    if not unk and g.lastAt and now >= g.lastAt then sc = now - g.lastAt end
+    if ready and f.rdyAt and now >= f.rdyAt then sr = now - f.rdyAt end
+    local casting = charging and sc < C.NDRAIN
+    local rdyBeat = ready and sr < C.NRDY_BEAT
+    local flash = (rdyBeat and sr < C.NRDY_FLASH) or (not unk and sc < C.NCAST_FLASH)
+    local h = 0
+    if ready then h = floor(Beat(now, C.NBREATH) * 20) / 20 end
+    PaintNovaDisc(f, now, ready, unk, flash, h)
+    PaintFill(s, f, NOVA_D, now, g, charging and not casting, casting, sc, restart)
+    PaintNovaFx(s, f, now, ready, not unk and sc < C.NCAST_BEAT, sc, rdyBeat and sr >= C.NRDY_RING_FROM, sr)
+    PaintNovaLabel(s, f, g, unk, ready, now, rdyBeat, sr)
 end
 
 -------------------------------------------------------------------------------
@@ -783,14 +930,22 @@ local function Refresh(s, now, restart)
     ReadGroup(s.shock, now)
     ReadGroup(s.nova, now)
     PaintShock(s, now, restart)
-    PaintNova(s, now)
+    PaintNova(s, now, true, restart)
     Sync(s)
 end
 
--- a ready shock breathes and a charging one counts down; Fire Nova's wait needs the re-read too
+-- a ready shock breathes and a charging one counts down; so does a ready Fire Nova (while its disc shows) and a charging one
 local function NeedsTick(s)
     local m = s.shock.mode
-    return m == "ready" or m == "charging" or (s.nova.known and s.nova.mode == "charging")
+    if m == "ready" or m == "charging" then return true end
+    m = s.nova.mode
+    return s.fd.show == true and (m == "ready" or m == "charging")
+end
+
+-- the frames between two reads: both discs animate from the last read
+local function PaintAnim(s, now)
+    PaintShock(s, now, false)
+    PaintNova(s, now, false, false)
 end
 
 local function Tick(frame)
@@ -804,7 +959,7 @@ local function Tick(frame)
         s.lastRead = now
         ok, err = pcall(Refresh, s, now, false)
     else
-        ok, err = pcall(PaintShock, s, now, false)
+        ok, err = pcall(PaintAnim, s, now)
     end
     if not ok then
         LogOnce("tick", "tick failed: " .. tostring(err))
@@ -895,14 +1050,14 @@ end
 
 -- A frame that clips its children to one row of the bolt (the shimmer) or to the strip under the fill's edge (the seam), holding a
 -- full white cell of the bolt: only the part inside the frame shows, so the row follows the frame.
-local function NewClip(s, parent, level, cell)
+local function NewClip(s, parent, level, cell, d)
     local clip = CreateFrame("Frame", nil, parent)
     clip:SetFrameLevel(s.level + level)
     clip:EnableMouse(false)
     Clips(clip)
     clip:Hide()
     clip.fsOn = false
-    local t = NewCell(s, clip, "ARTWORK", 0, cell)
+    local t = NewCell(s, clip, "ARTWORK", 0, cell, d)
     t.fsOn = true
     t:Show()
     return clip, t
@@ -917,36 +1072,36 @@ local function BuildDisc(s, holder, K)
         return Part(s, t, C.SCX - C.HALO / 2, C.SCY - C.HALO / 2, C.HALO, C.HALO)
     end
     s.halo2, s.halo1 = halo(1), halo(0)
-    s.disc = NewCell(s, holder, "ARTWORK", 0, "disc")
-    s.tint = NewCell(s, holder, "ARTWORK", 1, "mask")
-    s.dots = NewCell(s, holder, "ARTWORK", 2, "dots")
-    s.rimDim = NewCell(s, holder, "ARTWORK", 3, "rimDim")
+    s.disc = NewCell(s, holder, "ARTWORK", 0, "disc", SHOCK_D)
+    s.tint = NewCell(s, holder, "ARTWORK", 1, "mask", SHOCK_D)
+    s.dots = NewCell(s, holder, "ARTWORK", 2, "dots", SHOCK_D)
+    s.rimDim = NewCell(s, holder, "ARTWORK", 3, "rimDim", SHOCK_D)
     -- the engine's rim: a clockwise refill, and the mirrored art that drains clockwise from 12 o'clock after a cast
-    s.rimFill = NewSwipe(s, holder, 1, "shaman_disc_rim.tga", true)
-    s.rimDrain = NewSwipe(s, holder, 1, "shaman_disc_rim_mirror.tga", false)
+    s.rimFill = NewSwipe(s, holder, 1, SHOCK_D.rim, true, SHOCK_D)
+    s.rimDrain = NewSwipe(s, holder, 1, SHOCK_D.mirror, false, SHOCK_D)
     -- the lit rim, the carved notches, the spark, and the bolt's outline and bodies
     local top = NewLayer(s, holder, 2)
-    s.rimLit = NewCell(s, top, "ARTWORK", 0, "rimLit")
-    s.notches = NewCell(s, top, "ARTWORK", 1, "notches")
+    s.rimLit = NewCell(s, top, "ARTWORK", 0, "rimLit", SHOCK_D)
+    s.notches = NewCell(s, top, "ARTWORK", 1, "notches", SHOCK_D)
     s.spark = NewFlat(s, top, "ARTWORK", 2, w)
-    s.outline = NewCell(s, top, "ARTWORK", 3, "outline")
-    s.boltEmpty = NewCell(s, top, "ARTWORK", 4, "boltEmpty")
-    s.boltMuted = NewCell(s, top, "ARTWORK", 4, "boltMuted")
-    s.boltReady = NewCell(s, top, "ARTWORK", 4, "boltReady")
+    s.outline = NewCell(s, top, "ARTWORK", 3, "outline", SHOCK_D)
+    s.boltEmpty = NewCell(s, top, "ARTWORK", 4, "boltEmpty", SHOCK_D)
+    s.boltMuted = NewCell(s, top, "ARTWORK", 4, "boltMuted", SHOCK_D)
+    s.boltReady = NewCell(s, top, "ARTWORK", 4, "boltReady", SHOCK_D)
     -- the bolt's refill (engine) and its cast drain (plain), vertical bars from the bottom
-    s.bar = NewBar(s, holder, 3)
-    s.drain = NewBar(s, holder, 3)
+    s.bar = NewBar(s, holder, 3, SHOCK_D)
+    s.drain = NewBar(s, holder, 3, SHOCK_D)
     -- over the bars: the white flash and the clipped rows (shimmer, seam)
     local fx = NewLayer(s, holder, 4)
-    s.flashBolt = NewCell(s, fx, "ARTWORK", 0, "boltWhite")
+    s.flashBolt = NewCell(s, fx, "ARTWORK", 0, "boltWhite", SHOCK_D)
     s.rows = {}
     local clip, tex
-    s.shimA, tex = NewClip(s, fx, 5, "boltWhite")
+    s.shimA, tex = NewClip(s, fx, 5, "boltWhite", SHOCK_D)
     s.rows[#s.rows + 1] = s.shimA
-    s.shimB, tex = NewClip(s, fx, 5, "boltInner")
+    s.shimB, tex = NewClip(s, fx, 5, "boltInner", SHOCK_D)
     tex:SetVertexColor(cy[1] + (w[1] - cy[1]) * 0.7, cy[2] + (w[2] - cy[2]) * 0.7, cy[3] + (w[3] - cy[3]) * 0.7, 1)
     s.rows[#s.rows + 1] = s.shimB
-    s.seam, clip = NewClip(s, fx, 5, "boltWhite")
+    s.seam, clip = NewClip(s, fx, 5, "boltWhite", SHOCK_D)
     -- the sparks: pools of flat 1 px textures in a frame clipped to the mockup's canvas
     local canvas = CreateFrame("Frame", nil, holder)
     canvas:SetFrameLevel(s.level + 6)
@@ -980,9 +1135,62 @@ local function BuildDisc(s, holder, K)
     end
 end
 
+-- The flame disc's parts (all in section.fd): the plate, the engine's rim and flame fills, the cast drain, the flame's looks, the
+-- seam under the fill's edge, the embers, three stepped rings and the label. `regions` lists everything that is shown or hidden as
+-- a whole, so the disc can go dark in one loop.
+local function BuildNova(s, holder, K, textF)
+    local d = NOVA_D
+    local f = { show = false, on = false, regions = {}, flick = {}, embers = {}, castPxA = {}, castPxB = {}, readyPx = {} }
+    s.fd = f
+    local reg = f.regions
+    local function track(r) reg[#reg + 1] = r; return r end
+    -- the plate, in the holder: stepped halos, the carved disc, the wash and the dim rim
+    f.halo2 = track(NewCell(s, holder, "BACKGROUND", 0, "halo2", d))
+    f.halo1 = track(NewCell(s, holder, "BACKGROUND", 1, "halo1", d))
+    f.disc = track(NewCell(s, holder, "ARTWORK", 0, "disc", d))
+    f.tint = track(NewCell(s, holder, "ARTWORK", 1, "mask", d))
+    f.rimDim = track(NewCell(s, holder, "ARTWORK", 2, "rimDim", d))
+    -- the engine's rim: a clockwise refill, and the mirrored art that drains clockwise from 12 o'clock after a cast
+    f.rimFill = track(NewSwipe(s, holder, 1, d.rim, true, d))
+    f.rimDrain = track(NewSwipe(s, holder, 1, d.mirror, false, d))
+    -- the lit rim, the carved notches, the spark and the flame's bodies and tips
+    local top = NewLayer(s, holder, 2)
+    f.rimLit = track(NewCell(s, top, "ARTWORK", 0, "rimLit", d))
+    f.notches = track(NewCell(s, top, "ARTWORK", 1, "notches", d))
+    f.spark = track(NewFlat(s, top, "ARTWORK", 2, C.HOT))
+    f.flameEmpty = track(NewCell(s, top, "ARTWORK", 3, "flameEmpty", d))
+    f.flameMuted = track(NewCell(s, top, "ARTWORK", 4, "flameMuted", d))
+    f.flameReady = track(NewCell(s, top, "ARTWORK", 4, "flameReady", d))
+    for p = 1, C.NFLICK_PHASES do f.flick[p] = track(NewCell(s, top, "ARTWORK", 5, "flick" .. (p - 1), d)) end
+    -- the flame's refill (engine) and its cast drain (plain), vertical bars from the base
+    f.bar = track(NewBar(s, holder, 3, d))
+    f.drain = track(NewBar(s, holder, 3, d))
+    -- over the bars: the white flash and the seam, a clipped strip of the hot flame hung from the fill's edge
+    local fx = NewLayer(s, holder, 4)
+    f.flameWhite = track(NewCell(s, fx, "ARTWORK", 0, "flameWhite", d))
+    f.seam = track(NewClip(s, fx, 5, "flameWhite", d))
+    -- embers, and the stepped rings, in the clipped canvas (the ring a cast throws runs past the mockup's edge)
+    local canvas = s.canvas
+    for k = 1, C.NEMBERS do f.embers[k] = track(NewFlat(s, canvas, "ARTWORK", 3, C.AMBER)) end
+    local function ring(list, c1, c2)
+        local g = CreateFrame("Frame", nil, canvas)
+        g:SetAllPoints(canvas)
+        g:SetFrameLevel(s.level + 7)
+        g:EnableMouse(false)
+        g:Hide()
+        g.fsOn = false
+        for i = 1, C.NRING_PX do list[i] = NewFlat(s, g, "ARTWORK", 0, (i % 2 == 1) and c2 or c1, true) end   -- stepRing: even steps c2
+        return track(g)
+    end
+    f.castA = ring(f.castPxA, C.FIRE, C.AMBER)
+    f.castB = ring(f.castPxB, C.HOT, C.AMBER)
+    f.readyG = ring(f.readyPx, C.AMBER, C.HOT)
+    f.label = track(NewText(textF, C.NLABEL_SIZE, "CENTER", K.white))
+end
+
 local function BuildSection(frame)
     local s = { ox = 0, oy = 0, live = false, ticking = false, lastRead = 0, lastAnim = 0, groups = NewGroups(), fireUp = nil,
-        fireY = C.FIRE_Y, parts = {}, pool = {} }
+        parts = {}, pool = {} }
     s.shock, s.nova = s.groups.shock, s.groups.nova
     s.colors = {
         cyan = Tok("COLOR_POWER", { 0.133, 0.878, 1, 1 }),
@@ -1007,17 +1215,8 @@ local function BuildSection(frame)
     local textF = NewLayer(s, holder, 8)
     s.label = NewText(textF, C.LABEL_SIZE, "CENTER", K.white)
 
-    -- Fire Nova: the ring on the Fire head, the footer pip and word
-    local ringFrame = CreateFrame("Frame", nil, holder)
-    ringFrame:SetAllPoints(holder)                  -- a frame with no rect draws nothing on this client (see Gunsight.lua's root)
-    ringFrame:SetFrameLevel(frame:GetFrameLevel() + C.RING_LEVEL)
-    ringFrame:EnableMouse(false)
-    s.ringFrame = ringFrame
-    s.ringGlow = NewTex(ringFrame, "BACKGROUND", 2, "nova_ring_glow.tga")
-    s.ring = NewTex(ringFrame, "ARTWORK", 4, "nova_ring.tga")
-    s.pip = NewTex(holder, "ARTWORK", 5, "nova_pip.tga")
-    s.novaText = NewText(holder, C.NOVA_SIZE, "LEFT", K.cyan)
-    SetLabel(s.novaText, "NOVA")
+    -- Fire Nova: the flame disc under the shock disc, its label on the same top frame
+    BuildNova(s, holder, K, textF)
 
     -- the view events (off until OnShow) and the player's cast ledger (on from here)
     local ev = CreateFrame("Frame", nil, holder)
@@ -1028,28 +1227,29 @@ local function BuildSection(frame)
     FS.FrameHelpers.RegisterEvent(rec, "UNIT_SPELLCAST_SUCCEEDED", "player")     -- a refusal is recorded, never printed
     s.recorder = rec
 
-    s.SetFire = function(up, headY)
+    -- the poles' word on the Fire totem; the old ring rode the Fire head, so the head's place (a second argument) is ignored
+    s.SetFire = function(up)
         if up == nil or up == true or up == false then s.fireUp = up end
-        if headY == false then
-            s.headLost = true                        -- the head's place is not knowable (a timer bar pole): no ring, the tag stays
-        elseif type(headY) == "number" and not IsSecret(headY) then
-            s.headLost = false
-            s.fireY = headY
-            if s.ring then
-                At(s, s.ring, "TOPLEFT", C.FIRE_X - C.RING / 2, s.fireY - C.RING / 2)
-                At(s, s.ringGlow, "TOPLEFT", C.FIRE_X - C.RING / 2, s.fireY - C.RING / 2)
-            end
-        end
         if s.live then Reread(s, false) end
     end
     s.built = true
     return s
 end
 
+-- Hangs a seam clip from the top edge of a bar's fill texture (two anchors and a height); false when the bar has no fill texture
+local function HangSeam(seam, bar, height)
+    local fill = bar.GetStatusBarTexture and bar:GetStatusBarTexture()
+    if not fill then return false end
+    seam:ClearAllPoints()
+    seam:SetPoint("TOPLEFT", fill, "TOPLEFT", 0, 0)
+    seam:SetPoint("TOPRIGHT", fill, "TOPRIGHT", 0, 0)
+    seam:SetHeight(height)
+    return true
+end
+
 local function SeatSection(s, rect)
     s.ox, s.oy = rect.x, rect.y
     local k = ui(1)
-    local gy = C.GY
     -- every fixed part: the disc's cells and halos, the rim's cooldowns, the bolt's bars, the canvas the sparks are clipped to
     for i = 1, #s.parts do
         local r = s.parts[i]
@@ -1064,31 +1264,15 @@ local function SeatSection(s, rect)
     end
     s.shimRy, s.crackN = nil, nil
     for i = 1, #s.rows do s.rows[i]:SetSize(C.CELL * k, k) end
-    -- the seam hangs from the bolt fill's top edge and is a little over a px tall
-    local fill = s.bar.GetStatusBarTexture and s.bar:GetStatusBarTexture()
-    s.noSeam = not fill
-    if fill then
-        local seam = s.seam
-        seam:ClearAllPoints()
-        seam:SetPoint("TOPLEFT", fill, "TOPLEFT", 0, 0)
-        seam:SetPoint("TOPRIGHT", fill, "TOPRIGHT", 0, 0)
-        seam:SetHeight(C.SEAM * k)
-    else
-        LogOnce("noseam", "the bolt fill has no texture to hang the seam from")
-    end
+    -- each seam hangs from its fill's top edge and is a little over a px tall
+    s.noSeam = not HangSeam(s.seam, s.bar, C.SEAM * k)
+    s.fd.noSeam = not HangSeam(s.fd.seam, s.fd.bar, C.NSEAM * k)
+    if s.noSeam or s.fd.noSeam then LogOnce("noseam", "a fill has no texture to hang its seam from") end
     SeatFont(s.label, C.LABEL_SIZE, s.colors.white)
     At(s, s.label, "CENTER", C.LABEL_X, C.LABEL_BASE - C.CAP * C.LABEL_SIZE)
-    -- the Nova ring on the Fire head, the footer
-    for _, r in ipairs({ s.ring, s.ringGlow }) do
-        At(s, r, "TOPLEFT", C.FIRE_X - C.RING / 2, s.fireY - C.RING / 2)
-        r:SetSize(C.RING * k, C.RING * k)
-    end
-    local fy = gy + C.FOOT_DY
-    At(s, s.pip, "TOPLEFT", C.PIP_X - C.PIP / 2, fy + C.PIP_DY - C.PIP / 2)
-    s.pip:SetSize(C.PIP * k, C.PIP * k)
-    SeatFont(s.novaText, C.NOVA_SIZE, s.colors.cyan)
-    At(s, s.novaText, "LEFT", C.NOVA_X, fy + C.NOVA_BASE - C.CAP * C.NOVA_SIZE)
-    if s.live then PaintShock(s, GetTime(), false) end
+    SeatFont(s.fd.label, C.NLABEL_SIZE, s.colors.white)
+    At(s, s.fd.label, "CENTER", C.NCX, C.NCY + C.NR + C.NLABEL_DY - C.CAP * C.NLABEL_SIZE)
+    if s.live then PaintAnim(s, GetTime()) end
 end
 
 local Shocks = {}
@@ -1113,6 +1297,7 @@ function Shocks.OnShow(s)
     s.live = true
     ResolveAll(s)
     s.prevMode, s.running, s.barTimer, s.rdyAt = nil, nil, nil, nil     -- no beat for what happened while hidden
+    s.fd.prevMode, s.fd.running, s.fd.barTimer, s.fd.rdyAt = nil, nil, nil, nil
     SetViewEvents(s, true)
     Reread(s, true)
 end

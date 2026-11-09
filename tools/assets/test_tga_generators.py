@@ -233,12 +233,14 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "mage_ward": (512, 512), "mage_ward_mist": (512, 512), "mage_ward_glyph": (32, 32), "mage_ward_buff": (128, 128),
         "mage_ice_lit": (64, 128), "mage_ice_cd": (128, 128), "mage_mist_dense": (128, 128),
     },
-    # generate_shaman_shocks.py: the Shaman Gunsight Fire Nova ring and its glow (44 px canvas) and the footer's dashed Nova pip
-    # (10 px canvas). The shock tracker is generate_shaman_disc.py's.
-    "shaman_shocks": {
-        "nova_ring": (64, 64),
-        "nova_ring_glow": (64, 64),
-        "nova_pip": (16, 16),
+    # generate_nova_disc.py: the Shaman Gunsight Fire Nova flame disc (2026-11-08 Nova tracker, form A), the twin of the rune disc in
+    # fire: the disc atlas (4 x 4 cells of 64 texels: plate, masks, rims, flame looks, flicker overlays, two halos), the engine's
+    # rim ring and its mirror (a 32 px cell), and the charged flame that a vertical StatusBar crops (16 x 16 px at two texels a px).
+    "nova_disc": {
+        "nova_disc": (256, 256),
+        "nova_disc_rim": (64, 64),
+        "nova_disc_rim_mirror": (64, 64),
+        "nova_flame_lit": (32, 32),
     },
     # generate_shaman_disc.py: the Shaman Gunsight shock tracker (2026-11-07 polish): the rune disc atlas (4 x 4 cells of 64 texels),
     # its stepped halos (two 128 texel cells), the engine's rim ring and its mirror (a 32 px cell), and the charged bolt that a

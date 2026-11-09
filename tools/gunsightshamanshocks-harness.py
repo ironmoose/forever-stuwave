@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Runs the real GunsightShamanShocks.lua (the shock disc and the Fire Nova ring) headless.
+"""Runs the real GunsightShamanShocks.lua (the shock disc and the Fire Nova flame disc) headless.
 
 The Shaman Gunsight Class Module (GunsightShaman.lua) owns the module frame and the totem poles; this file is the second
 lane of Concept A "Totem Poles" as polished by the design mockup "Shaman Shock Tracker Polish" (2026-11-07): the shared
 Earth / Flame / Frost Shock cooldown is a carved rune disc with a Sowilo pixel bolt, a rim that refills clockwise and a bolt
 that charges from its tip up (both drawn by the engine from the cooldown), a RDY / seconds label under it, a ready breath,
-a cast beat and a ready beat; and the cyan ring around the Fire totem head while Fire Nova is ready with the NOVA footer
-tag, as shipped. The zig-zag line under the poles is gone. It draws no KICK tag: that comes from GunsightTape.lua's class
-neutral tag. GunsightShaman.lua calls it through FS.GunsightShamanShocks = { Build(frame), Seat(section, rect, scale),
-OnShow(section), OnHide(section) }. The harness builds the section on a plain frame under a fake host, as
-GunsightShaman.lua does. The checks pin:
+a cast beat and a ready beat. Under it is its twin in fire, the Fire Nova flame disc of the design mockup "Shaman Nova
+Tracker" (2026-11-08, form A): a rim that refills in ember red to amber and a pixel flame that fills from its base up, shown
+only while Fire Nova is known and a Fire totem stands. The zig-zag line under the poles, the cyan ring over the Fire head and
+the NOVA footer tag are gone. It draws no KICK tag: that comes from GunsightTape.lua's class neutral tag.
+GunsightShaman.lua calls it through FS.GunsightShamanShocks = { Build(frame), Seat(section, rect, scale), OnShow(section),
+OnHide(section) }. The harness builds the section on a plain frame under a fake host, as GunsightShaman.lua does. The
+checks pin:
 
   * the table holds exactly Build, Seat, OnShow and OnHide; Build hangs everything under the frame it is given, installs
     no OnUpdate and listens only to the player's own casts (a ledger that stays on through OnHide);
@@ -25,9 +27,11 @@ GunsightShaman.lua does. The checks pin:
     its flash, expanding ring and white label, no beat for what happened while hidden or for an unknown shock; the shimmer,
     crackle and tip sparks of a ready bolt, the spark on the rim front, the seam under the fill's edge, the canvas clip;
   * secret values: not one is compared or computed on (the mock's secret raises), only handed to the engine's setters;
-  * Fire Nova: nothing before it is learned (and it appears when it is), the ring and NOVA tag lit while it is ready, the
-    tag dim and the ring gone on its cooldown, both gone when the poles say the Fire totem is down, the ring following the
-    head the poles report;
+  * the Fire Nova flame disc: nothing before it is learned or without a Fire totem (and it appears when both hold), the
+    ready look (a breathing amber rim and stepped halo, a flickering flame, embers, RDY), the charging look with the
+    seconds (the engine refill, the plain fallback, the "~" estimate in combat, "?" and a muted flame when unknown), the
+    cast beat (white flash, the expanding fire ring, the fast drain) and the ready beat (flash, a smaller ring, a white
+    label), the ticker that runs for it alone and stops when it is idle;
   * no KICK tag and no target reads: the build makes none, and only the player's own casts and the view events listen;
   * OnHide stops the ticker and every view event, a cast while hidden is still ledgered, and OnShow re-reads everything;
   * the per frame path allocates nothing on the addon side, the beats included.
@@ -41,11 +45,14 @@ Exit 0 = every check passed. GUNSIGHTSHAMANSHOCKS_LUA=<path> runs another file i
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import os
 import re
 import struct
 import sys
+import tempfile
 from pathlib import Path
 
 try:
@@ -63,6 +70,7 @@ FRAMEHELPERS = ADDON / "Core/FrameHelpers.lua"
 TOC = ADDON / "forever-stuwave.toc"
 TEXTURES = ADDON / "Media" / "Textures"
 MOCKUP = HERE.parent / "mockups" / "gunsight-class-module-shaman-polish-2026-11-07.html"
+NOVA_MOCKUP = HERE.parent / "mockups" / "gunsight-shaman-nova-tracker-2026-11-08.html"
 GENERATOR = HERE / "assets" / "generate_shaman_disc.py"
 
 
@@ -89,7 +97,7 @@ def dec(digits: str) -> float:
 
 
 def mockup_numbers() -> dict:
-    """The numbers the polish mockup draws the rune disc, its beats, the Nova ring and the NOVA footer with, in image px."""
+    """The numbers the polish mockup draws the rune disc and its beats with, in image px."""
     src = MOCKUP.read_text(encoding="utf-8")
     geo = _m(r"const W=(\d+), H=(\d+), OX=(\d+), GY=(\d+), NB=(\d+), BP=(\d+), BH=(\d+), HEAD_H=(\d+);", src, "geometry")
     disc = _m(r"const SCX=(\d+), SCY=GY-(\d+), SR=(\d+);", src, "rune disc")
@@ -111,10 +119,6 @@ def mockup_numbers() -> dict:
     breath = _m(r"step20=Math\.floor\(beat\(t,([\d.]+)\)\*20\)/20", shock, "breath")
     drain = _m(r"casting=!unk&&sc<([\d.]+)&&!ready", shock, "cast drain")
     rdy = _m(r"rdyFlash=ready&&sr<([\d.]+);", shock, "ready beat")
-    ringc = _m(r"const cx=fireHead\.cx, cy=fireHead\.hy\+3;.*?g\.arc\(cx,cy,(\d+),0,Math\.PI\*2\).*?moveTo\(cx\+(\d+)\*Math\.cos", src, "Nova ring")
-    foot = _m(r"g\.moveTo\(OX\+(\d+)\+(\d+)\*Math\.cos\(a0\),GY\+(\d+)\+(\d+)\+(\d+)\*Math\.sin.*?txt\(g,'NOVA',OX\+(\d+),GY\+(\d+)\+(\d+),(\d+)",
-              src, "NOVA footer")
-    fire = _m(r"key:'fire',\s*x:(\d+),\s*w:(\d+)", src, "Fire pole")
     W, H, OX, GY, NB, BP, BH, HEAD_H = (int(geo.group(i)) for i in range(1, 9))
     gy = GY
     polygon = [tuple(int(v) for v in p.split(",")) for p in re.findall(r"\[(-?\d+,-?\d+)\]", pts.group(1))]
@@ -134,11 +138,60 @@ def mockup_numbers() -> dict:
         "LABEL_X": int(label.group(1)), "LABEL_DY": int(label.group(2)), "LABEL_SIZE": int(label.group(3)),
         "RDY_LABEL": float(label.group(4)),
         "BREATH": float(breath.group(1)), "DRAIN": float(drain.group(1)), "RDY_BEAT": float(rdy.group(1)),
-        "RING_OUT": int(ringc.group(1)), "RING_IN": int(ringc.group(2)),
-        "PIP_X": OX + int(foot.group(1)), "PIP_R": int(foot.group(2)), "FOOT_DY": int(foot.group(3)), "PIP_DY": int(foot.group(4)),
-        "NOVA_X": OX + int(foot.group(6)), "NOVA_BASE": int(foot.group(8)), "NOVA_SIZE": int(foot.group(9)),
-        "FIRE_X": OX + int(fire.group(1)) + int(fire.group(2)) // 2,
-        "FIRE_Y": gy - NB * BP - HEAD_H + 3,
+    }
+
+
+def nova_numbers() -> dict:
+    """The numbers the Nova tracker mockup (form A, drawSun) draws the Fire Nova flame disc with, in image px. Keys start with N_."""
+    src = NOVA_MOCKUP.read_text(encoding="utf-8")
+    geo = _m(r"const W=(\d+), H=(\d+), OX=(\d+), GY=(\d+),", src, "geometry")
+    disc = _m(r"const NCX=(\d+), NCY=GY\+(\d+), NR=(\d+);", src, "flame disc")
+    cd = _m(r"const NCD=(\d+), HOT='(#[0-9a-fA-F]{6})';", src, "cooldown and hot colour")
+    rows = _m(r"const FLAME_ROWS=\[(.*?)\];", src, "flame rows").group(1)
+    rim = _m(r"NRIM=ringPx\(NR-([\d.]+),NR\)", src, "rim band")
+    steps = _m(r"function stepRing\(g,cx,cy,r,c1,c2,a\)\{ for\(let i=0;i<(\d+);i\+\+\)", src, "ring points")
+    sun = _m(r"function drawSun\(g,st\)\{(.*?)\n\}\n\n// ---- B", src, "drawSun").group(1)
+    drain = _m(r"casting=!ready&&!unk&&nc<([\d.]+)", sun, "cast drain")
+    flash = _m(r"flash=\(ready&&nr<([\d.]+)\)\|\|\(!unk&&nc<([\d.]+)\)", sun, "flash")
+    breath = _m(r"b20=Math\.floor\(beat\(t,([\d.]+)\)\*20\)/20", sun, "breath")
+    halo = _m(r"NR\+1,NR\+2,COL\.amber,\.(\d+)\+b20\*\.(\d+)\); RING_HALO\(g,NCX,NCY,NR\+2,NR\+3,COL\.fire,\.(\d+)\+b20\*\.(\d+)\)", sun, "halos")
+    wash = _m(r"if\(flash\) c=mix\(c,HOT,\.(\d+)\); else if\(ready\) c=mix\(c,COL\.fire,\.(\d+)\+b20\*\.(\d+)\)", sun, "plate wash")
+    rima = _m(r"a=lit\?\.(\d+):\.(\d+)", sun, "rim alphas")
+    rimb = _m(r"mix\(COL\.amber,HOT,Math\.max\(0,b20-\.(\d+)\)\*\.(\d+)\)", sun, "rim breath")
+    spark = _m(r"Math\.sin\(an\)\*\(NR-\.(\d+)\)-\.5", sun, "rim spark")
+    flick = _m(r"fl=ready\?\(Math\.floor\(t\*(\d+)\)%(\d+)\):0", sun, "flicker clock")
+    flickrows = _m(r"q\.rowF>\.(\d+)&&\(\(q\.x\+q\.y\+fl\)%(\d+)===0\)", sun, "flicker rows")
+    seam = _m(r"Math\.abs\(q\.rowF-p\)<\.(\d+)", sun, "seam")
+    emb = _m(r"for\(let k=0;k<(\d+);k\+\+\)\{ const ph=\(\(t\*\.(\d+)\+k/3\)%1\), x=NCX-(\d+)\+Math\.floor\(hsh\(k\*(\d+)\+Math\.floor\(t\*\.\d+\+k/3\)\*(\d+)\)\*(\d+)\), "
+             r"y=NCY-NR-(\d+)-Math\.floor\(ph\*(\d+)\);\s*PX\(g,x,y,ph<\.(\d+)\?COL\.amber:COL\.fire,1-ph\)", sun, "embers")
+    cast = _m(r"if\(!unk&&nc<\.(\d+)\)\{ const k=nc/\.\d+, r=NR\+1\+k\*(\d+); stepRing\(g,NCX,NCY,r,COL\.fire,COL\.amber,\(1-k\)\*\.(\d+)\); "
+              r"stepRing\(g,NCX,NCY,r-([\d.]+),HOT,COL\.amber,\(1-k\)\*\.(\d+)\)", sun, "cast ring")
+    rdy = _m(r"if\(ready&&nr<\.(\d+)&&nr>=\.(\d+)\)\{ const k=\(nr-\.\d+\)/\.(\d+); stepRing\(g,NCX,NCY,NR\+1\+k\*(\d+),COL\.amber,HOT,\(1-k\)\*\.(\d+)\)", sun, "ready ring")
+    label = _m(r"txt\(g,lab,NCX,NCY\+NR\+(\d+),(\d+),unk\?COL\.muted:ready\?\(nr<\.(\d+)\?HOT:COL\.amber\):COL\.white\)", sun, "label")
+    lit = _m(r"c=q\.core\?\(ready\?HOT:mix\(COL\.amber,HOT,\.(\d+)\)\):fireMix\(\.(\d+)\+q\.rowF\*\.(\d+)\)", sun, "lit flame colours")
+    gy = int(geo.group(4))
+    return {
+        "N_W": int(geo.group(1)), "N_H": int(geo.group(2)),
+        "NCX": int(disc.group(1)), "NCY": gy + int(disc.group(2)), "NR": int(disc.group(3)), "NCD": int(cd.group(1)),
+        "N_HOT": cd.group(2), "N_RIM_BAND": float(rim.group(1)), "N_RING_PX": int(steps.group(1)),
+        "N_FLAME_ROWS": re.findall(r"'([.#+]+)'", rows),
+        "N_DRAIN": float(drain.group(1)), "N_RDY_FLASH": float(flash.group(1)), "N_CAST_FLASH": float(flash.group(2)),
+        "N_BREATH": float(breath.group(1)),
+        "N_HALO1": [dec(halo.group(1)), dec(halo.group(2))], "N_HALO2": [dec(halo.group(3)), dec(halo.group(4))],
+        "N_FLASH_WASH": dec(wash.group(1)), "N_WASH": [dec(wash.group(2)), dec(wash.group(3))],
+        "N_RIM_A": dec(rima.group(1)), "N_RIM_DIM_A": dec(rima.group(2)), "N_RIM_BREATH": [dec(rimb.group(1)), dec(rimb.group(2))],
+        "N_SPARK_IN": dec(spark.group(1)),
+        "N_FLICK_RATE": int(flick.group(1)), "N_FLICK_PHASES": int(flick.group(2)), "N_FLICK_ROW": dec(flickrows.group(1)),
+        "N_SEAM_ROWS": dec(seam.group(1)),
+        "N_EMBERS": int(emb.group(1)), "N_EMBER_RATE": dec(emb.group(2)), "N_EMBER_X": int(emb.group(3)),
+        "N_EMBER_SEED": int(emb.group(4)), "N_EMBER_SEED2": int(emb.group(5)), "N_EMBER_W": int(emb.group(6)),
+        "N_EMBER_DY": int(emb.group(7)), "N_EMBER_RISE": int(emb.group(8)), "N_EMBER_SPLIT": dec(emb.group(9)),
+        "N_CAST_BEAT": dec(cast.group(1)), "N_CAST_GROW": int(cast.group(2)), "N_CAST_A": dec(cast.group(3)),
+        "N_CAST_GAP": float(cast.group(4)), "N_CAST_A2": dec(cast.group(5)),
+        "N_RDY_BEAT": dec(rdy.group(1)), "N_RDY_RING_FROM": dec(rdy.group(2)), "N_RDY_RING_SPAN": dec(rdy.group(3)),
+        "N_RDY_GROW": int(rdy.group(4)), "N_RDY_RING_A": dec(rdy.group(5)),
+        "N_LABEL_DY": int(label.group(1)), "N_LABEL_SIZE": int(label.group(2)), "N_RDY_LABEL": dec(label.group(3)),
+        "N_LIT_CORE_MIX": dec(lit.group(1)), "N_LIT_ROW0": dec(lit.group(2)), "N_LIT_ROW_SLOPE": dec(lit.group(3)),
     }
 
 
@@ -359,6 +412,23 @@ local function beatOf(t) return 0.5 + 0.5 * sin(t * 2 * pi / MU.BREATH) end
 local function step20(t) return floor(beatOf(t) * 20) / 20 end
 local function boltFraction(p) return (16 - MU.BOLT_BOT + MU.BOLT_SPAN * p) / 32 end     -- the box is 32 px tall, the tip's bottom edge 4 px above its bottom
 local function runTicks(n, dt) for i = 1, n do tick(dt or 0.04) end end
+-- the Fire Nova flame disc (the Nova tracker mockup, form A) in Lua: the same expressions, from its own numbers
+NOVA_PARTS = { "halo1", "halo2", "disc", "tint", "rimDim", "rimFill", "rimDrain", "rimLit", "notches", "spark", "flameEmpty", "flameMuted",
+    "flameReady", "bar", "drain", "flameWhite", "seam", "readyG", "castA", "castB", "label" }
+AMBER, FIRE, HOT, MUTED = { 1, 0.7137, 0.2824 }, { 1, 0.3529, 0.2353 }, { 1, 241 / 255, 208 / 255 }, { 0.6157, 0.5765, 0.7686 }
+nIndex = {}
+for i, name in ipairs(MU.N_CELLS) do nIndex[name] = i - 1 end
+local function mixc(a, b, t) return { a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t } end
+local function nBeat(t) return 0.5 + 0.5 * sin(t * 2 * pi / MU.N_BREATH) end
+local function nStep20(t) return floor(nBeat(t) * 20) / 20 end
+-- the flame's box is N_BOX_H px tall with its base row N_PAD px above the bottom: a plain value p of the cooldown lands the fill edge here
+local function novaFraction(p) return (MU.N_PAD + MU.N_SPAN * p) / MU.N_BOX_H end
+local function nz(i) local v = sin(i * 12.9898) * 43758.5453; return v - floor(v) end     -- the module's documented sine hash
+local function textIs(fs, c, what)
+    local r, g, b = textRgb(fs)
+    check(math.abs(r - c[1]) < 0.01 and math.abs(g - c[2]) < 0.01 and math.abs(b - c[3]) < 0.01,
+        (what or "text colour") .. ": got " .. string.format("%.3f %.3f %.3f", r, g, b))
+end
 """
 
 CASES: list[tuple[str, str]] = []
@@ -421,7 +491,7 @@ for _, name in ipairs({ "disc", "tint", "dots", "rimDim", "rimFill", "rimDrain",
 end
 for i = 1, 6 do check(not vis(SEC.crack[i]), "no crackle") end
 for i = 1, 24 do check(not vis(SEC.burst[i]), "no cast spark") end
-check(not vis(SEC.ring) and not vis(SEC.pip) and not vis(SEC.novaText), "no Nova pieces before Fire Nova is learned")
+for _, name in ipairs(NOVA_PARTS) do check(not vis(SEC.fd[name]), "fd." .. name .. " is drawn before Fire Nova is learned") end
 check(onUpdates() == 0, "nothing ticks")
 noDegrade()
 """)
@@ -589,7 +659,8 @@ noDegrade()
 """)
 
 case("secret_active_flag_reads_unknown_and_guesses_nothing")(r"""
-boot({})
+boot({ known = false })
+learn("Earth Shock", "Flame Shock")            -- no Fire Nova in the book: a ready one breathes, and this case is about the shock
 IN_COMBAT = true
 cdBlind(8042)
 mount("lower")
@@ -825,92 +896,31 @@ check(not vis(SEC.shimA) and not vis(SEC.crack[1]) and not vis(SEC.tips[1]), "no
 noDegrade()
 """)
 
-case("fire_nova_appears_when_it_is_learned")(r"""
+case("fire_nova_is_hidden_until_learned_and_without_a_fire_totem")(r"""
 boot({ known = false })
 learn("Earth Shock")
 mount("lower")
-check(not vis(SEC.ring) and not vis(SEC.pip) and not vis(SEC.novaText), "locked")
+local F = SEC.fd
+check(type(F) == "table", "the flame disc's parts are in SEC.fd")
+for _, name in ipairs(NOVA_PARTS) do check(not vis(F[name]), name .. " is drawn before Fire Nova is learned") end
+for i = 1, 3 do check(not vis(F.flick[i]) and not vis(F.embers[i]), "no flicker or ember before it is learned") end
 learn("Fire Nova")
 fire("SPELLS_CHANGED")
-check(vis(SEC.ring) and vis(SEC.pip) and vis(SEC.novaText), "the ring and the NOVA tag show once it is in the book")
-noDegrade()
-""")
-
-case("a_ready_fire_nova_lights_the_ring_and_the_NOVA_tag")(r"""
-boot({})
-mount("lower")
-check(vis(SEC.ring) and cyanTint(SEC.ring), "the ring is cyan")
-check(vis(SEC.ringGlow), "with its glow")
-check(vis(SEC.pip) and cyanTint(SEC.pip) and vis(SEC.novaText) and SEC.novaText.text == "NOVA", "the footer pip and the NOVA word")
-local r, g, b = textRgb(SEC.novaText)
-check(math.abs(r - 0.133) < 0.01 and math.abs(b - 1) < 0.01, "NOVA is cyan")
-check(onUpdates() == 1, "only the ready shock breathes")
-noDegrade()
-""")
-
-case("fire_nova_on_cooldown_dims_the_tag_and_drops_the_ring")(r"""
-boot({})
-IN_COMBAT = true
-mount("lower")
-cdSecret(408341)
-cast(408341)
-check(not vis(SEC.ring) and not vis(SEC.ringGlow), "no ring while it cools down")
-check(vis(SEC.pip) and mutedTint(SEC.pip) and vis(SEC.novaText), "the footer tag stays, muted")
-check(SEC.novaText.text == "NOVA ~10s", "the tag counts down, an estimate in combat: " .. tostring(SEC.novaText.text))
-check(onUpdates() >= 1, "ticks until it is ready")
-tick(6)
-check(SEC.novaText.text == "NOVA ~4s", "the seconds run down: " .. tostring(SEC.novaText.text))
-tick(5)
-check(SEC.novaText.text == "NOVA", "ready: the bare word again: " .. tostring(SEC.novaText.text))
-check(vis(SEC.ring) and cyanTint(SEC.ring), "ready again once the ledger says elapsed")
-check(onUpdates() == 1, "only the ready shock breathes")
-cdBlind(408341); fire("SPELL_UPDATE_COOLDOWN")
-check(not vis(SEC.ring) and vis(SEC.pip) and mutedTint(SEC.pip), "unreadable: no ring, a muted tag")
-noDegrade()
-""")
-
-case("the_poles_say_whether_the_fire_totem_is_up_and_where_its_head_is")(r"""
-boot({})
-mount("lower")
-local c0x, c0y = imgCenter(SEC.ring)
-near(c0x, RECTS.lower.x + MU.FIRE_X, "the default ring centre x", 0.05)
-near(c0y, RECTS.lower.y + MU.FIRE_Y, "the default ring centre y (a full pole's head)", 0.05)
-SEC.SetFire(true, 40)
-local x, y = imgCenter(SEC.ring)
-near(y, 632 + 40, "the ring follows the head the poles report", 0.05)
+check(vis(F.disc) and vis(F.flameReady) and vis(F.label), "the disc shows once Fire Nova is in the book (the poles said nothing: a Fire totem is presumed)")
 SEC.SetFire(false)
-check(not vis(SEC.ring) and not vis(SEC.ringGlow) and not vis(SEC.pip) and not vis(SEC.novaText), "no Fire totem: no ring, no NOVA tag")
-SEC.SetFire(true, 30)
-check(vis(SEC.ring) and vis(SEC.novaText), "back with the totem")
+for _, name in ipairs(NOVA_PARTS) do check(not vis(F[name]), name .. " is drawn with no Fire totem") end
+for i = 1, 3 do check(not vis(F.flick[i]) and not vis(F.embers[i]), "no flicker or ember with no Fire totem") end
+SEC.SetFire(true, 40)
+check(vis(F.disc) and vis(F.label), "back with the Fire totem")
+SEC.SetFire(true, false)
+check(vis(F.disc) and vis(F.label), "the disc does not ride the Fire head: a head whose place is unknown changes nothing")
 SEC.SetFire(true, "bad")
 SEC.SetFire(nil)
-noDegrade()
-""")
-
-case("the_ring_frame_has_a_rect_of_its_own_so_the_client_draws_its_textures")(r"""
-boot({})
-mount("lower")
-local rf = SEC.ringFrame
-check(rf and (rf:GetNumPoints() > 0 or rf.allPoints ~= nil), "a frame with no points has no rect on this client and draws nothing: the ring frame needs an anchor")
-check(rf.allPoints == SEC.holder, "the ring frame fills the holder")
-check(SEC.ring.parent == rf and SEC.ringGlow.parent == rf, "the ring and its glow are drawn by that frame")
-check(vis(SEC.ring), "and the ring shows")
-noDegrade()
-""")
-
-case("a_head_that_cannot_be_placed_hides_the_ring_and_keeps_the_NOVA_tag")(r"""
-boot({})
-mount("lower")
-check(vis(SEC.ring) and vis(SEC.ringGlow), "the ring shows on a full head")
-SEC.SetFire(true, false)
-check(not vis(SEC.ring) and not vis(SEC.ringGlow), "headY false: the head's place is unknown, no ring")
-check(vis(SEC.pip) and vis(SEC.novaText), "the Fire totem still stands: the NOVA tag stays")
-SEC.SetFire(true, 40)
-check(vis(SEC.ring) and vis(SEC.ringGlow), "a head with a place brings the ring back")
-local _, y = imgCenter(SEC.ring)
-near(y, 632 + 40, "at that place", 0.05)
+check(vis(F.disc), "a bad or missing head changes nothing")
 SEC.SetFire(false, false)
-check(not vis(SEC.ring) and not vis(SEC.pip) and not vis(SEC.novaText), "no Fire totem: nothing")
+check(not vis(F.disc) and not vis(F.label), "no Fire totem: nothing")
+-- the old pieces are gone
+check(SEC.ring == nil and SEC.ringGlow == nil and SEC.ringFrame == nil and SEC.pip == nil and SEC.novaText == nil, "no ring, pip or NOVA tag")
 noDegrade()
 """)
 
@@ -918,13 +928,347 @@ case("without_a_word_from_the_poles_an_unusable_nova_reads_as_no_fire_totem")(r"
 boot({})
 USABLE[408341] = { false, false }
 mount("lower")
-check(not vis(SEC.ring) and not vis(SEC.novaText), "unusable for a reason other than mana: no totem, nothing shown")
+check(not vis(SEC.fd.disc) and not vis(SEC.fd.label), "unusable for a reason other than mana: no totem, nothing shown")
 USABLE[408341] = { false, true }
 fire("SPELL_UPDATE_USABLE")
-check(vis(SEC.ring), "no mana is not a missing totem")
+check(vis(SEC.fd.disc), "no mana is not a missing totem")
 USABLE[408341] = { SECRET, SECRET }           -- unreadable in combat: never a verdict
 fire("SPELL_UPDATE_USABLE")
-check(vis(SEC.ring), "a secret usability reads as a Fire totem that stands")
+check(vis(SEC.fd.disc), "a secret usability reads as a Fire totem that stands")
+noDegrade()
+""")
+
+case("a_ready_fire_nova_lights_the_flame_disc_and_breathes")(r"""
+boot({})
+mount("lower")
+local F, R = SEC.fd, RECTS.lower
+for _, name in ipairs({ "disc", "tint", "rimDim", "rimLit", "notches", "flameReady", "halo1", "halo2", "label" }) do
+    check(vis(F[name]), name .. " is drawn when ready")
+end
+check(not vis(F.flameEmpty) and not vis(F.flameMuted), "no empty or muted flame when ready")
+check(not vis(F.bar) and not vis(F.rimFill) and not vis(F.drain) and not vis(F.rimDrain) and not vis(F.seam) and not vis(F.spark), "no refill when ready")
+check(not vis(F.flameWhite) and not vis(F.readyG) and not vis(F.castA) and not vis(F.castB), "no beat on the first show")
+check(F.label.text == "RDY", "the label says RDY, got " .. tostring(F.label.text))
+textIs(F.label, AMBER, "RDY is amber")
+check(onUpdates() == 1, "a ready Fire Nova breathes: one ticker")
+-- the breath: the halos, the wash and the rim step with beat(t, 1.8) in 20 steps
+local seen = {}
+for i = 1, 40 do
+    tick(0.05)
+    local h = nStep20(NOW)
+    tintIs(F.halo1, AMBER[1], AMBER[2], AMBER[3], MU.N_HALO1[1] + h * MU.N_HALO1[2], "inner halo")
+    tintIs(F.halo2, FIRE[1], FIRE[2], FIRE[3], MU.N_HALO2[1] + h * MU.N_HALO2[2], "outer halo")
+    tintIs(F.tint, FIRE[1], FIRE[2], FIRE[3], MU.N_WASH[1] + h * MU.N_WASH[2], "plate wash")
+    local c = mixc(AMBER, HOT, math.max(0, h - MU.N_RIM_BREATH[1]) * MU.N_RIM_BREATH[2])
+    tintIs(F.rimLit, c[1], c[2], c[3], MU.N_RIM_A, "lit rim")
+    seen[h] = true
+end
+local n = 0
+for _ in pairs(seen) do n = n + 1 end
+check(n >= 6, "the breath goes through several steps in two seconds, saw " .. n)
+-- the flame's tips flicker: one of three overlays, stepping eight times a second
+local phases = {}
+for i = 1, 30 do
+    tick(0.04)
+    local fl = floor(NOW * MU.N_FLICK_RATE) % MU.N_FLICK_PHASES
+    for p = 1, 3 do check(vis(F.flick[p]) == (p - 1 == fl), "flicker overlay " .. p .. " at phase " .. fl) end
+    phases[fl] = true
+end
+check(phases[0] and phases[1] and phases[2], "all three flicker phases come round in 1.2 s")
+-- embers drift up off the disc
+for i = 1, 24 do
+    tick(0.05)
+    for k = 0, MU.N_EMBERS - 1 do
+        local px = F.embers[k + 1]
+        local ph = (NOW * MU.N_EMBER_RATE + k / 3) % 1
+        check(vis(px), "ember " .. k .. " is drawn")
+        local x = MU.NCX - MU.N_EMBER_X + floor(nz(k * MU.N_EMBER_SEED + floor(NOW * MU.N_EMBER_RATE + k / 3) * MU.N_EMBER_SEED2) * MU.N_EMBER_W)
+        local y = MU.NCY - MU.NR - MU.N_EMBER_DY - floor(ph * MU.N_EMBER_RISE)
+        local l, t = imgRect(px)
+        near(l, R.x + x, "ember x", 0.02); near(t, R.y + y, "ember y", 0.02)
+        near(px.alpha, 1 - ph, "ember alpha", 0.01)
+        local want = ph < MU.N_EMBER_SPLIT and AMBER or FIRE
+        tintIs(px, want[1], want[2], want[3], nil, "ember colour")
+    end
+end
+noDegrade()
+""")
+
+case("a_fire_nova_on_cooldown_shows_the_seconds_and_refills_through_the_engine")(r"""
+boot({})
+cdPlain(408341, 7, 10)
+mount("lower")
+local F, R = SEC.fd, RECTS.lower
+for _, name in ipairs({ "disc", "rimDim", "notches", "flameEmpty", "bar", "rimFill", "seam", "label" }) do
+    check(vis(F[name]), name .. " is drawn while charging")
+end
+check(not vis(F.rimLit) and not vis(F.halo1) and not vis(F.halo2) and not vis(F.tint) and not vis(F.flameReady) and not vis(F.flameMuted), "none of the ready looks")
+check(not vis(F.drain) and not vis(F.rimDrain) and not vis(F.flameWhite), "no cast drain without a cast")
+check(F.bar.timer ~= nil and F.bar.timer.durationFor == 408341, "the flame fills from the cooldown's duration object")
+check(F.bar.timerDir == 1 and F.bar.timerInterp == 0, "elapsed time, no interpolation")
+check(F.rimFill.fromObject == F.bar.timer, "the rim takes the same duration object")
+check(F.rimFill.reverse == true, "the rim swipe is reversed: the elapsed arc grows clockwise")
+check(F.rimDrain.reverse == false, "the drain swipe is not")
+check(F.rimFill.swipe:find("nova_disc_rim.tga", 1, true) and F.rimDrain.swipe:find("nova_disc_rim_mirror.tga", 1, true), "the swipe arts")
+check(F.bar.max == 1 and F.bar.min == 0, "a 0 to 1 bar")
+check(F.label.text == "7s", "plain seconds above 3 are whole, got " .. tostring(F.label.text))
+check(textRgb(F.label) > 0.9, "the seconds are white")
+check(onUpdates() == 1, "a charging Fire Nova ticks")
+tick(4)
+check(F.label.text == "3s", "four seconds later, got " .. tostring(F.label.text))
+tick(0.8)
+check(F.label.text == "2.2s", "under 3 s the tenths show, got " .. tostring(F.label.text))
+cdReady(408341)
+fire("SPELL_UPDATE_COOLDOWN")
+check(F.label.text == "RDY" and vis(F.rimLit) and vis(F.flameReady), "the lit looks come back when the cooldown ends, got " .. tostring(F.label.text))
+check(not vis(F.bar) and not vis(F.rimFill) and not vis(F.seam), "the refill goes")
+noDegrade()
+""")
+
+case("the_nova_refill_falls_back_to_numbers_without_the_duration_object_api")(r"""
+boot({})
+cdPlain(408341, 5, 10)
+C_Spell.GetSpellCooldownDuration = nil
+mount("lower")
+local F = SEC.fd
+check(vis(F.bar) and F.bar.timer == nil, "no timer without the API")
+check(vis(F.rimFill) and F.rimFill.fromObject == nil and F.rimFill.cd ~= nil, "the rim is fed a plain start and length")
+near(F.rimFill.cd[1], NOW - 5, "start", 0.001); near(F.rimFill.cd[2], 10, "length", 0.001)
+near(F.bar.value, novaFraction(0.5), "the flame is the spent share on the mockup's fill scale", 0.003)
+tick(2.5)
+near(F.bar.value, novaFraction(0.75), "and it follows the clock", 0.005)
+noDegrade()
+""")
+
+case("the_nova_rim_spark_rides_the_front_of_the_refill")(r"""
+boot({})
+cdPlain(408341, 7, 10)                 -- the share 0.3
+mount("lower")
+local F, R = SEC.fd, RECTS.lower
+local ang = 0.3 * 2 * pi
+local sr = MU.NR - MU.N_SPARK_IN
+check(vis(F.spark), "the spark shows while charging")
+nearRect(F.spark, R.x + MU.NCX + floor(sin(ang) * sr), R.y + MU.NCY + floor(-cos(ang) * sr), 1, 1, "spark")
+tintIs(F.spark, HOT[1], HOT[2], HOT[3], nil, "the spark is hot white")
+tick(2)                                -- the share 0.5
+nearRect(F.spark, R.x + MU.NCX + floor(sin(pi) * sr), R.y + MU.NCY + floor(-cos(pi) * sr), 1, 1, "spark at the bottom")
+cdReady(408341); fire("SPELL_UPDATE_COOLDOWN")
+check(not vis(F.spark), "no spark once ready")
+noDegrade()
+""")
+
+case("the_nova_seam_hangs_from_the_flame_fill_edge_and_holds_the_hot_flame")(r"""
+boot({})
+cdPlain(408341, 5, 10)
+mount("lower")
+local F = SEC.fd
+local fill = F.bar:GetStatusBarTexture()
+check(fill ~= nil, "the flame bar has a fill texture")
+check(F.seam.clips == true and vis(F.seam), "a clipping frame while charging")
+check(#F.seam.points == 2, "two anchors")
+check(F.seam.points[1][1] == "TOPLEFT" and F.seam.points[1][2] == fill and F.seam.points[1][3] == "TOPLEFT", "left to the fill's top left")
+check(F.seam.points[2][1] == "TOPRIGHT" and F.seam.points[2][2] == fill and F.seam.points[2][3] == "TOPRIGHT", "right to the fill's top right")
+near(F.seam.h, MU.N_SEAM_ROWS * MU.N_SPAN * FS.Gunsight.ui(1), "the mockup's under the edge: .08 of the 12 row fill scale", 0.001)
+local tc = F.seam.children[1].texcoord
+local i = nIndex.flameWhite
+check(tc and math.abs(tc[1] - (i % 4) * 0.25) < 1e-9 and math.abs(tc[3] - floor(i / 4) * 0.25) < 1e-9, "the seam holds the hot white flame cell")
+check(F.seam.children[1].path:find("nova_disc.tga", 1, true), "from the Nova atlas")
+cdReady(408341); fire("SPELL_UPDATE_COOLDOWN")
+check(not vis(F.seam), "no seam when ready")
+noDegrade()
+""")
+
+case("a_fire_nova_estimate_in_combat_uses_the_cast_ledger_and_marks_it")(r"""
+boot({})
+IN_COMBAT = true
+mount("lower")
+local F = SEC.fd
+cdSecret(408341)
+cast(408341)
+check(F.label.text == "~10s", "just cast: an estimated 10 s, got " .. tostring(F.label.text))
+check(textRgb(F.label) > 0.9, "the estimate is white too")
+check(vis(F.drain), "the first 0.3 s drain")
+tick(0.35)
+check(vis(F.bar) and vis(F.rimFill) and not vis(F.rimLit), "charging")
+check(F.bar.timer ~= nil and F.rimFill.fromObject ~= nil, "the engine still draws the fill from the duration object (a secret one is handed over untouched)")
+tick(5)
+check(F.label.text == "~5s", "got " .. tostring(F.label.text))
+tick(2.5)
+check(F.label.text == "~2.2s" or F.label.text == "~2.1s", "tenths under 3 s, got " .. tostring(F.label.text))
+tick(3)
+check(F.label.text == "RDY" and vis(F.rimLit), "the ledger says elapsed: ready, got " .. tostring(F.label.text))
+cdSecret(408341)
+cast(408341)
+check(F.label.text == "~10s", "ledger charging")
+cdReady(408341)
+fire("SPELL_UPDATE_COOLDOWN")
+check(F.label.text == "RDY", "a plain isActive of false is ready whatever the ledger says, got " .. tostring(F.label.text))
+noDegrade()
+""")
+
+case("an_unknown_fire_nova_shows_a_muted_flame_and_a_question_mark_and_guesses_nothing")(r"""
+boot({ known = false })
+learn("Fire Nova")
+IN_COMBAT = true
+cdBlind(408341)
+mount("lower")
+local F = SEC.fd
+for _, name in ipairs({ "disc", "rimDim", "notches", "flameMuted", "label" }) do check(vis(F[name]), name .. " stays") end
+for _, name in ipairs({ "flameEmpty", "flameReady", "rimLit", "tint", "halo1", "halo2", "bar", "rimFill", "drain", "rimDrain", "flameWhite", "spark", "seam", "readyG", "castA", "castB" }) do
+    check(not vis(F[name]), name .. " is not drawn when unknown")
+end
+for i = 1, 3 do check(not vis(F.flick[i]) and not vis(F.embers[i]), "no flicker or ember when unknown") end
+check(F.label.text == "?", "the label says ?, got " .. tostring(F.label.text))
+textIs(F.label, MUTED, "? is muted")
+check(onUpdates() == 0, "nothing moves")
+cast(408341)                                   -- an own cast while nothing is knowable: no beat, no guess
+check(not vis(F.flameWhite) and not vis(F.castA) and not vis(F.drain), "no beat for an unknown Fire Nova")
+noDegrade()
+""")
+
+case("a_fire_nova_cast_flashes_throws_a_fire_ring_and_drains_fast")(r"""
+boot({ known = false })
+learn("Fire Nova")
+mount("lower")
+local F, R = SEC.fd, RECTS.lower
+cast(408341)                                   -- our own cast: the ledger stamps it, the cooldown is still read as off
+check(vis(F.flameWhite) and vis(F.rimLit), "the flash starts with the cast")
+cdPlain(408341, 10, 10)
+fire("SPELL_UPDATE_COOLDOWN")
+tick(0.05)                                     -- 0.05 s after the cast
+check(0.05 < MU.N_CAST_FLASH, "the mockup flashes for 0.1 s")
+check(vis(F.flameWhite), "the flame is white hot")
+tintIs(F.rimLit, HOT[1], HOT[2], HOT[3], MU.N_RIM_A, "the rim is hot white")
+check(vis(F.tint), "the plate flashes")
+tintIs(F.tint, HOT[1], HOT[2], HOT[3], MU.N_FLASH_WASH, "the plate wash")
+-- the nova itself: two stepped rings of 80 px, alternating colours, growing and fading
+local sc = NOW - 5000
+local k = sc / MU.N_CAST_BEAT
+check(vis(F.castA) and vis(F.castB), "the fire ring is out")
+near(F.castA.alpha, (1 - k) * MU.N_CAST_A, "outer ring alpha", 0.01)
+near(F.castB.alpha, (1 - k) * MU.N_CAST_A2, "inner ring alpha", 0.01)
+check(#F.castPxA == MU.N_RING_PX and #F.castPxB == MU.N_RING_PX and #F.readyPx == MU.N_RING_PX, "80 px a ring")
+local rA = MU.NR + 1 + k * MU.N_CAST_GROW
+for i = 1, MU.N_RING_PX do
+    local ang = (i - 1) / MU.N_RING_PX * 2 * pi
+    local l, t = imgRect(F.castPxA[i])
+    near(l, R.x + floor(MU.NCX + cos(ang) * rA), "outer ring x " .. i, 0.02)
+    near(t, R.y + floor(MU.NCY + sin(ang) * rA), "outer ring y " .. i, 0.02)
+    local l2, t2 = imgRect(F.castPxB[i])
+    near(l2, R.x + floor(MU.NCX + cos(ang) * (rA - MU.N_CAST_GAP)), "inner ring x " .. i, 0.02)
+    near(t2, R.y + floor(MU.NCY + sin(ang) * (rA - MU.N_CAST_GAP)), "inner ring y " .. i, 0.02)
+end
+tintIs(F.castPxA[1], AMBER[1], AMBER[2], AMBER[3], nil, "outer ring px 1 is amber")
+tintIs(F.castPxA[2], FIRE[1], FIRE[2], FIRE[3], nil, "outer ring px 2 is fire red")
+tintIs(F.castPxB[1], AMBER[1], AMBER[2], AMBER[3], nil, "inner ring px 1 is amber")
+tintIs(F.castPxB[2], HOT[1], HOT[2], HOT[3], nil, "inner ring px 2 is hot white")
+-- the drain: a mirrored swipe and a plain flame value, not the refill
+check(vis(F.drain) and vis(F.rimDrain), "the drain shows")
+check(not vis(F.bar) and not vis(F.rimFill), "the refill waits")
+near(F.drain.value, novaFraction(1 - sc / MU.N_DRAIN), "the flame drains from full", 0.004)
+near(F.rimDrain.cd[1], NOW - 0.05, "the swipe starts at the cast", 0.001); near(F.rimDrain.cd[2], MU.N_DRAIN, "and lasts the drain", 0.001)
+tick(0.1)                                      -- 0.15 s
+check(not vis(F.flameWhite) and not vis(F.rimLit), "the flash is over")
+near(F.drain.value, novaFraction(1 - 0.15 / MU.N_DRAIN), "half drained", 0.004)
+tick(0.2)                                      -- 0.35 s
+check(not vis(F.drain) and not vis(F.rimDrain), "the drain is over")
+check(vis(F.bar) and vis(F.rimFill), "the engine's refill takes over")
+check(vis(F.castA) and vis(F.castB), "the ring runs to 0.6 s")
+tick(0.3)                                      -- 0.65 s
+check(not vis(F.castA) and not vis(F.castB), "the ring is gone")
+noDegrade()
+""")
+
+case("the_nova_cooldown_ending_flashes_rings_and_turns_the_label_white")(r"""
+boot({ known = false })
+learn("Fire Nova")
+cdPlain(408341, 1, 10)
+mount("lower")
+local F, R = SEC.fd, RECTS.lower
+check(not vis(F.readyG), "no ring while charging")
+cdReady(408341)
+fire("SPELL_UPDATE_COOLDOWN")                  -- it ends while we watch
+check(F.label.text == "RDY", "ready")
+tick(0.05)                                     -- 0.05 s after
+check(0.05 < MU.N_RDY_FLASH and MU.N_RDY_RING_FROM > 0.05, "the mockup flashes first and rings from 0.1 s")
+check(vis(F.flameWhite), "the flash")
+tintIs(F.rimLit, HOT[1], HOT[2], HOT[3], MU.N_RIM_A, "hot white rim")
+check(not vis(F.readyG), "the ring waits")
+textIs(F.label, HOT, "the label flashes hot white")
+tick(0.1)                                      -- 0.15 s
+check(not vis(F.flameWhite), "the flash is over")
+check(vis(F.readyG), "the smaller ring is out")
+local sr = NOW - 5000
+local k = (sr - MU.N_RDY_RING_FROM) / MU.N_RDY_RING_SPAN
+near(F.readyG.alpha, (1 - k) * MU.N_RDY_RING_A, "ring alpha", 0.01)
+local radius = MU.NR + 1 + k * MU.N_RDY_GROW
+for i = 1, MU.N_RING_PX do
+    local ang = (i - 1) / MU.N_RING_PX * 2 * pi
+    local l, t = imgRect(F.readyPx[i])
+    near(l, R.x + floor(MU.NCX + cos(ang) * radius), "ring x " .. i, 0.02)
+    near(t, R.y + floor(MU.NCY + sin(ang) * radius), "ring y " .. i, 0.02)
+end
+tintIs(F.readyPx[1], HOT[1], HOT[2], HOT[3], nil, "ring px 1 is hot white")
+tintIs(F.readyPx[2], AMBER[1], AMBER[2], AMBER[3], nil, "ring px 2 is amber")
+textIs(F.label, HOT, "still hot white at 0.15 s")
+tick(0.2)                                      -- 0.35 s
+textIs(F.label, AMBER, "the label is amber again after 0.3 s")
+check(vis(F.readyG), "the ring runs to 0.6 s")
+tick(0.3)                                      -- 0.65 s
+check(not vis(F.readyG), "the ring is gone")
+noDegrade()
+""")
+
+case("no_nova_beat_for_what_happened_while_hidden_or_on_the_first_show")(r"""
+boot({ known = false })
+learn("Fire Nova")
+mount("lower")
+local F = SEC.fd
+runTicks(5)
+check(not vis(F.flameWhite) and not vis(F.readyG) and not vis(F.castA), "no beat on the first show of a ready Fire Nova")
+SEC.SetFire(false)                             -- the Fire totem is gone: the cooldown runs and ends unseen
+cdPlain(408341, 1, 10); fire("SPELL_UPDATE_COOLDOWN")
+cdReady(408341); fire("SPELL_UPDATE_COOLDOWN")
+SEC.SetFire(true)
+runTicks(3)
+check(F.label.text == "RDY", "ready")
+check(not vis(F.flameWhite) and not vis(F.readyG), "no ready beat for a cooldown that ended with no totem to see it")
+Shocks.OnHide(SEC)
+cdPlain(408341, 1, 10)
+Shocks.OnShow(SEC)
+cdReady(408341)
+Shocks.OnHide(SEC)
+Shocks.OnShow(SEC)                             -- it ended while hidden
+runTicks(3)
+check(F.label.text == "RDY" and not vis(F.flameWhite) and not vis(F.readyG), "no ready beat for a cooldown that ended while hidden")
+cast(408341)
+Shocks.OnHide(SEC)
+NOW = NOW + 2
+Shocks.OnShow(SEC)
+runTicks(3)
+check(not vis(F.flameWhite) and not vis(F.castA), "no cast beat two seconds after a cast made while hidden")
+noDegrade()
+""")
+
+case("the_ticker_runs_for_the_nova_alone_and_stops_itself_when_it_is_idle")(r"""
+boot({ known = false })
+learn("Fire Nova")
+mount("lower")
+local F = SEC.fd
+check(onUpdates() == 1, "a ready Fire Nova breathes: one ticker, with no shock in the book")
+SEC.SetFire(false)
+check(onUpdates() == 0, "no Fire totem: nothing moves, the ticker stops itself")
+SEC.SetFire(true)
+check(onUpdates() == 1, "the totem is back: it breathes again")
+IN_COMBAT = true
+cdBlind(408341); fire("SPELL_UPDATE_COOLDOWN")
+check(onUpdates() == 0, "unknown: nothing moves, the ticker stops itself")
+cdSecret(408341); cast(408341)
+check(onUpdates() == 1, "counting down ticks")
+tick(11)
+check(F.label.text == "RDY" and onUpdates() == 1, "ready again: it breathes, got " .. tostring(F.label.text))
+Shocks.OnHide(SEC)
+check(onUpdates() == 0, "OnHide clears the ticker")
 noDegrade()
 """)
 
@@ -990,7 +1334,7 @@ learn("Earth Shock", "Fire Nova")
 cdPlain(8042, 4, 6)
 Shocks.OnShow(SEC)
 check(vis(SEC.label) and SEC.label.text == "4s", "learned while hidden: drawn on show, got " .. tostring(SEC.label.text))
-check(vis(SEC.ring), "Fire Nova too")
+check(vis(SEC.fd.disc), "Fire Nova too")
 noDegrade()
 """)
 
@@ -1030,10 +1374,32 @@ check(SEC.bar:GetStatusBarTexture().path:find("shaman_bolt_lit.tga", 1, true) an
 noDegrade()
 """)
 
+case("the_baked_nova_cells_are_cut_in_the_generators_order")(r"""
+boot({})
+mount("lower")
+local F = SEC.fd
+local FIELD = { disc = "disc", tint = "mask", rimDim = "rimDim", rimLit = "rimLit", notches = "notches", flameEmpty = "flameEmpty",
+    flameMuted = "flameMuted", flameReady = "flameReady", flameWhite = "flameWhite", halo1 = "halo1", halo2 = "halo2" }
+local function cellIs(tex, cell, what)
+    local i = nIndex[cell]
+    check(i ~= nil, "the generator has no cell " .. cell)
+    local l, top = (i % 4) * 0.25, floor(i / 4) * 0.25
+    local tc = tex.texcoord
+    check(tc and math.abs(tc[1] - l) < 1e-9 and math.abs(tc[2] - l - 0.25) < 1e-9 and math.abs(tc[3] - top) < 1e-9 and math.abs(tc[4] - top - 0.25) < 1e-9,
+        what .. " is not cell " .. cell .. " (" .. i .. ")")
+    check(tex.path:find("nova_disc.tga", 1, true), what .. " reads the wrong file")
+end
+for field, cell in pairs(FIELD) do cellIs(F[field], cell, field) end
+for p = 1, 3 do cellIs(F.flick[p], "flick" .. (p - 1), "flick " .. p) end
+check(F.bar:GetStatusBarTexture().path:find("nova_flame_lit.tga", 1, true) and F.drain:GetStatusBarTexture().path:find("nova_flame_lit.tga", 1, true), "flame bars")
+noDegrade()
+""")
+
 for area, key in (("upper", "UPPER"), ("lower", "LOWER")):
     case(f"every_piece_sits_at_the_mockups_offset_in_the_{area}_area")(rf"""
 boot({{}})
 cdPlain(8042, 4, 6)
+cdPlain(408341, 4, 10)
 mount("{area}")
 local R = RECTS["{area}"]
 local gy = MU.GY
@@ -1052,20 +1418,17 @@ nearRect(SEC.canvas, R.x, R.y, MU.W, MU.H, "canvas")
 local lx, ly = imgCenter(SEC.label)
 near(lx, R.x + MU.LABEL_X, "label x", 0.05)
 near(ly, R.y + MU.SCY + MU.SR + MU.LABEL_DY - CAP * MU.LABEL_SIZE, "label y", 0.1)
--- the Nova ring centred on the Fire head (a full pole's)
-local d = 2 * MU.RING_OUT + 8          -- the ring canvas: 4 px of margin past the outer ring each side
-nearRect(SEC.ring, R.x + MU.FIRE_X - d / 2, R.y + MU.FIRE_Y - d / 2, d, d, "ring")
-nearRect(SEC.ringGlow, R.x + MU.FIRE_X - d / 2, R.y + MU.FIRE_Y - d / 2, d, d, "ring glow")
--- the footer: the pip centred at (PIP_X, fy + PIP_DY) 10 px, NOVA from NOVA_X on the baseline fy + NOVA_BASE
-local fy = gy + MU.FOOT_DY
-local px, py = imgCenter(SEC.pip)
-near(px, R.x + MU.PIP_X, "pip x", 0.05); near(py, R.y + fy + MU.PIP_DY, "pip y", 0.05)
-local _, _, pw = imgRect(SEC.pip)
-near(pw, 10, "pip size", 0.02)
-check(SEC.novaText.points[1][1] == "LEFT", "NOVA is left anchored")
-local nx, ny = imgCenter(SEC.novaText)
-near(nx, R.x + MU.NOVA_X, "NOVA x", 0.05)
-near(ny, R.y + fy + MU.NOVA_BASE - CAP * MU.NOVA_SIZE, "NOVA y", 0.1)
+-- the Nova flame disc: every cell is 32 px with the flame's centre corner in the middle; the bars are 16 x 16 px from it
+local ncx, ncy = R.x + MU.NCX, R.y + MU.NCY
+for _, name in ipairs({{ "disc", "tint", "rimDim", "rimLit", "notches", "flameEmpty", "flameMuted", "flameReady", "flameWhite", "rimFill", "rimDrain", "halo1", "halo2" }}) do
+    nearRect(SEC.fd[name], ncx - half, ncy - half, MU.CELL, MU.CELL, "fd." .. name)
+end
+nearRect(SEC.fd.bar, ncx + MU.N_BOX_X, ncy + MU.N_BOX_Y, MU.N_BOX_W, MU.N_BOX_H, "flame bar")
+nearRect(SEC.fd.drain, ncx + MU.N_BOX_X, ncy + MU.N_BOX_Y, MU.N_BOX_W, MU.N_BOX_H, "flame drain bar")
+-- its label is centred under it, the baseline NCY + NR + 11
+local nlx, nly = imgCenter(SEC.fd.label)
+near(nlx, R.x + MU.NCX, "nova label x", 0.05)
+near(nly, R.y + MU.NCY + MU.NR + MU.N_LABEL_DY - CAP * MU.N_LABEL_SIZE, "nova label y", 0.1)
 noDegrade()
 """)
 
@@ -1097,14 +1460,18 @@ case("a_rescale_keeps_the_colours_the_texts_wear")(r"""
 boot({})
 IN_COMBAT = true
 mount("lower")
-cdSecret(408341); cast(408341)               -- Fire Nova cools down: NOVA is muted at .75
-local c = SEC.novaText.textColor
-check(math.abs(c[1] - 0.6157) < 0.01 and math.abs(c[4] - 0.75) < 0.01, "NOVA is muted")
+local F = SEC.fd
+textIs(F.label, AMBER, "the Nova RDY is amber")
+cdSecret(408341); cast(408341)               -- Fire Nova cools down: the seconds are white
+check(F.label.text == "~10s" and textRgb(F.label) > 0.9, "the Nova seconds are white")
 Shocks.Seat(SEC, RECTS.lower, 1.28)         -- ApplyMono resets a font string's colour; the seat puts the worn one back
-c = SEC.novaText.textColor
-check(math.abs(c[1] - 0.6157) < 0.01 and math.abs(c[4] - 0.75) < 0.01, "NOVA stays muted at .75 after a seat, got " .. c[1] .. " " .. tostring(c[4]))
-c = SEC.label.textColor
-check(math.abs(c[1] - 0.133) < 0.01, "RDY stays cyan after a seat")
+check(textRgb(F.label) > 0.9, "the Nova seconds stay white after a seat")
+local c = SEC.label.textColor
+check(math.abs(c[1] - 0.133) < 0.01, "the shock's RDY stays cyan after a seat")
+cdBlind(408341); fire("SPELL_UPDATE_COOLDOWN")
+textIs(F.label, MUTED, "the Nova ? is muted")
+Shocks.Seat(SEC, RECTS.lower, 1.28)
+textIs(F.label, MUTED, "the Nova ? stays muted after a seat")
 noDegrade()
 """)
 
@@ -1143,7 +1510,14 @@ for i = 1, 300 do NOW = NOW + 0.01; ticker(SEC.holder) end          -- the ready
 -- one whole cycle first (a field or a table the first beat creates is a one time cost), then the one that is counted
 for round = 1, 2 do
     cast(8042); cast(408341)
-    if round == 2 then collectgarbage(); collectgarbage("stop"); before = collectgarbage("count") end
+    if round == 2 then
+        collectgarbage(); collectgarbage("stop")
+        -- a full collect shrinks the interpreter's own Lua stack and the first deep call regrows it (about 1.3 KB, once, on whichever
+        -- paint path is deepest: measured 0 bytes with the stack grown first): that is not the module's, so grow it before counting
+        local function deep(n) if n == 0 then return 0 end return 1 + deep(n - 1) end
+        deep(150)
+        before = collectgarbage("count")
+    end
     for i = 1, 1100 do NOW = NOW + 0.01; ticker(SEC.holder) end       -- 11 s: the cast beat and drain, the charge, the ready beat and ring, the breath again, Nova's return
 end
 local grown = (collectgarbage("count") - before) * 1024
@@ -1182,12 +1556,19 @@ def static_checks(mu: dict) -> list[tuple[str, str | None]]:
     out.append(("never_says_what_the_client_must_not_see", None if not re.search(r"\b(bot|macro|automation|addon)\b", re.sub(r"--.*", "", "\n".join(
         re.findall(r"\"[^\"\n]*\"", code))), re.I) else "a string in the file carries a word the client must not see"))
     for tex in ("shaman_disc", "shaman_disc_halo", "shaman_disc_rim", "shaman_disc_rim_mirror", "shaman_bolt_lit",
-                "nova_ring", "nova_ring_glow", "nova_pip"):
+                "nova_disc", "nova_disc_rim", "nova_disc_rim_mirror", "nova_flame_lit"):
         out.append((f"texture_{tex}_exists", None if (TEXTURES / f"{tex}.tga").exists() else f"{tex}.tga is missing"))
         out.append((f"texture_{tex}_is_used", None if tex + ".tga" in src else f"{tex}.tga is never used"))
     for tex in ("shock_trace_line", "shock_trace_glow", "shock_bolt_fill", "shock_bolt_line", "shock_bolt_glow"):
         gone = not (TEXTURES / f"{tex}.tga").exists() and tex not in src
         out.append((f"old_texture_{tex}_is_gone", None if gone else f"{tex} must be removed with the zig-zag line"))
+    for tex in ("nova_ring", "nova_ring_glow", "nova_pip"):
+        gone = not (TEXTURES / f"{tex}.tga").exists() and tex not in src
+        out.append((f"old_texture_{tex}_is_gone", None if gone else f"{tex} must be removed with the Nova ring and the NOVA tag"))
+    out.append(("old_nova_generator_is_gone", None if not (HERE / "assets" / "generate_shaman_shocks.py").exists()
+                else "generate_shaman_shocks.py baked only the old ring and pip: remove it with them"))
+    for word in ("NOVA", "ringGlow", "novaText", "FIRE_RING", "FOOT_DY", "PIP_X"):
+        out.append((f"old_nova_piece_{word}_is_gone", None if not re.search(rf"\b{word}\b", code) else f"{word} is the old Nova ring or tag"))
     out.append(("pixel_art_is_sampled_nearest", None if '"NEAREST"' in src else "the baked pixel art must be drawn with nearest neighbour"))
     # the files agree with the generator and the generator with the mockup
     gen = _load("generate_shaman_disc", HERE / "assets")
@@ -1222,6 +1603,62 @@ def static_checks(mu: dict) -> list[tuple[str, str | None]]:
     out.append(("lua_constants_are_the_mockups_and_the_generators", None if got == want else f"{got} vs {want}"))
     out.append(("bolt_box_texels_are_the_files", None if (gen.BOLT_BOX[2] * gen.SCALE, gen.BOLT_BOX[3] * gen.SCALE) == gen.BOLT_FILE else "bolt box vs file"))
     out.append(("bolt_rows_sit_inside_the_box", None if gen.BOLT_BOX[1] <= mu["BOLT_TOP"] and mu["BOLT_BOT"] <= gen.BOLT_BOX[1] + gen.BOLT_BOX[3] else "rows outside the box"))
+    out.extend(nova_static_checks(src, mu))
+    return out
+
+
+def nova_static_checks(src: str, mu: dict) -> list[tuple[str, str | None]]:
+    """The Fire Nova flame disc's files against its generator, and the generator and the Lua constants against the Nova mockup."""
+    out: list[tuple[str, str | None]] = []
+    ng = _load("generate_nova_disc", HERE / "assets")
+    dims = {"nova_disc": (256, 256), "nova_disc_rim": (64, 64), "nova_disc_rim_mirror": (64, 64), "nova_flame_lit": (32, 32)}
+    for name, want in dims.items():
+        p = TEXTURES / f"{name}.tga"
+        got = _tga_size(p) if p.exists() else None
+        out.append((f"texture_{name}_is_{want[0]}x{want[1]}", None if got == want else f"{name}.tga is {got}"))
+    # the committed files are what the generator writes today
+    with tempfile.TemporaryDirectory() as tmp:
+        old = os.environ.get("FS_ASSET_OUTPUT_DIR")
+        os.environ["FS_ASSET_OUTPUT_DIR"] = tmp
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                ng.main()
+        finally:
+            if old is None:
+                os.environ.pop("FS_ASSET_OUTPUT_DIR", None)
+            else:
+                os.environ["FS_ASSET_OUTPUT_DIR"] = old
+        for name in dims:
+            p, q = TEXTURES / f"{name}.tga", Path(tmp) / f"{name}.tga"
+            same = p.exists() and q.exists() and p.read_bytes() == q.read_bytes()
+            out.append((f"texture_{name}_is_what_the_generator_writes", None if same else f"{name}.tga differs from generate_nova_disc.py's output: bake it again"))
+    out.append(("nova_generator_radius_is_the_mockups", None if ng.NR == mu["NR"] else f"generator NR {ng.NR} vs mockup {mu['NR']}"))
+    out.append(("nova_generator_flame_rows_are_the_mockups", None if list(ng.FLAME_ROWS) == mu["N_FLAME_ROWS"] else f"generator {ng.FLAME_ROWS} vs mockup {mu['N_FLAME_ROWS']}"))
+    out.append(("nova_generator_hot_white_is_the_mockups", None if ng.HOT.lower() == mu["N_HOT"].lower() else f"generator HOT {ng.HOT} vs mockup {mu['N_HOT']}"))
+    out.append(("nova_generator_rim_band_is_the_mockups", None if abs((ng.NR - 1.8) - (mu["NR"] - mu["N_RIM_BAND"])) < 1e-9 else "the generator's rim band is not NR - 1.8 .. NR"))
+    out.append(("nova_cooldown_is_ten_seconds", None if mu["NCD"] == 10 else f"the mockup's Fire Nova cooldown is {mu['NCD']}"))
+    box = ng.FLAME_BOX
+    ys = [y for (_, y, _, _) in ng.FLAME_PX]
+    xs = [x for (x, _, _, _) in ng.FLAME_PX]
+    out.append(("nova_flame_sits_inside_its_box", None if box[1] <= min(ys) and max(ys) < box[1] + box[3] and box[0] <= min(xs) and max(xs) < box[0] + box[2]
+                else f"flame rows {min(ys)}..{max(ys)} cols {min(xs)}..{max(xs)} outside the box {box}"))
+    out.append(("nova_flame_box_texels_are_the_file", None if (box[2] * ng.SCALE, box[3] * ng.SCALE) == ng.FLAME_FILE else "flame box vs file"))
+    cells = re.search(r"local NOVA_CELL = \{(.*?)\}", src, re.S)
+    lua_order = {name: int(i) for name, i in re.findall(r"(\w+) = (\d+)", cells.group(1))} if cells else None
+    want_lua = {"disc": "disc", "mask": "mask", "rimDim": "rimDim", "rimLit": "rimLit", "notches": "notches", "flameEmpty": "flameEmpty",
+                "flameMuted": "flameMuted", "flameReady": "flameReady", "flick0": "flick0", "flick1": "flick1", "flick2": "flick2",
+                "flameWhite": "flameWhite", "halo1": "halo1", "halo2": "halo2"}
+    ok = lua_order is not None and all(ng.DISC_CELLS.index(g) == lua_order.get(k) for k, g in want_lua.items()) and len(lua_order) == len(ng.DISC_CELLS)
+    out.append(("lua_nova_cell_map_is_the_generators_order", None if ok else f"NOVA_CELL {lua_order} vs generator {ng.DISC_CELLS}"))
+    consts = {k: re.search(rf"\b{k} = (-?\d+)", src) for k in ("NCX", "NCY", "NR", "NBOX_X", "NBOX_Y", "NBOX_W", "NBOX_H", "NFLAME_TOP", "NFLAME_BOT", "NSPAN")}
+    got = {k: (int(m.group(1)) if m else None) for k, m in consts.items()}
+    want = {"NCX": mu["NCX"], "NCY": mu["NCY"], "NR": mu["NR"], "NBOX_X": box[0], "NBOX_Y": box[1], "NBOX_W": box[2], "NBOX_H": box[3],
+            "NFLAME_TOP": min(ys), "NFLAME_BOT": max(ys), "NSPAN": len(mu["N_FLAME_ROWS"]) - 1}
+    out.append(("lua_nova_constants_are_the_mockups_and_the_generators", None if got == want else f"{got} vs {want}"))
+    nseam = re.search(r"\bNSEAM = ([\d.]+)", src)
+    seam_want = round(mu["N_SEAM_ROWS"] * (len(mu["N_FLAME_ROWS"]) - 1), 6)
+    out.append(("lua_nova_seam_is_the_mockups_share_of_the_fill_scale", None if nseam and abs(float(nseam.group(1)) - seam_want) < 1e-6
+                else f"NSEAM {nseam and nseam.group(1)} vs {seam_want}"))
     return out
 
 
@@ -1249,15 +1686,23 @@ def run_case(name: str, body: str, mu: dict) -> str | None:
 
 
 def main() -> int:
-    if not MOCKUP.exists():
-        print(f"SKIP  {MOCKUP.name} is absent (mockups/ is not in this checkout)")
-        return 0
+    for mockup in (MOCKUP, NOVA_MOCKUP):
+        if not mockup.exists():
+            print(f"SKIP  {mockup.name} is absent (mockups/ is not in this checkout)")
+            return 0
     mu = mockup_numbers()
+    mu.update(nova_numbers())
     gen = _load("generate_shaman_disc", HERE / "assets")
     mu["CELLS"] = list(gen.DISC_CELLS)
     mu["CELL"] = gen.CELL // gen.SCALE
     mu["HALO"] = gen.HALO_CELL // gen.SCALE
     mu["BOLT_BOX"] = list(gen.BOLT_BOX)
+    ngen = _load("generate_nova_disc", HERE / "assets")
+    ys = [y for (_, y, _, _) in ngen.FLAME_PX]
+    mu["N_CELLS"] = list(ngen.DISC_CELLS)
+    mu["N_BOX_X"], mu["N_BOX_Y"], mu["N_BOX_W"], mu["N_BOX_H"] = ngen.FLAME_BOX
+    mu["N_PAD"] = ngen.FLAME_BOX[1] + ngen.FLAME_BOX[3] - (max(ys) + 1)     # px between the box bottom and the flame's base row
+    mu["N_SPAN"] = len(mu["N_FLAME_ROWS"]) - 1                              # the mockup's fill scale: rowF = (h - 1 - row) / (h - 1)
     failures = 0
 
     def report(name: str, err: str | None) -> None:

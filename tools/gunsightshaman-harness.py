@@ -16,7 +16,7 @@ FS.GunsightAreas is a FAKE for the registration cases and the REAL file for the 
     the case);
   * the OnUpdate runs only while the module is shown and a totem is up, allocates nothing on a steady tick, and stops on hide; onShow
     re-reads totems that changed while hidden; the target gate hides the host and stops the module;
-  * the GunsightShamanShocks seam: Build / Seat / OnShow / OnHide feature detected and pcalled, section.SetFire(up, headY) told when the Fire totem or its head moves, the real Nova ring follows the head and sits above it;
+  * the GunsightShamanShocks seam: Build / Seat / OnShow / OnHide feature detected and pcalled, section.SetFire(up, headY) told when the Fire totem or its head moves, the real Nova flame disc follows the Fire totem (not its head) and stays where it is;
   * the baked art matches the crops the module uses, the TOC order, no secure frame, no event of its own.
 
 The mock is strict. It is NOT the real client.
@@ -779,7 +779,7 @@ spec.onHide("lower"); spec.onShow("lower")
 check(#calls == n + 1, "once it took, only the show's own forced re-read calls again, got " .. (#calls - n))
 """)
 
-case("with_the_real_shocks_file_a_timer_bar_pole_has_no_ring_and_keeps_the_NOVA_tag")(r"""
+case("with_the_real_shocks_file_the_flame_disc_stays_with_a_timer_bar_pole")(r"""
 boot({ realShocks = true })
 for _, e in ipairs({ "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_USABLE", "LEARNED_SPELL_IN_SKILL_LINE" }) do KNOWN_EVENTS[e] = true end
 KNOWN_SPELLS[408341] = true
@@ -789,38 +789,52 @@ local spec = mount("lower")
 local sec
 for _, f in ipairs(FRAMES) do if f.fsSection then sec = f.fsSection end end
 drop(1, "Searing Totem", 3599, 30, 30)
-check(isVisible(sec.ring) and isVisible(sec.novaText), "a numbered pole: ring and tag")
+check(isVisible(sec.fd.disc) and isVisible(sec.fd.label), "a numbered pole: the flame disc and its label")
 clear(1)
 SECRET_READS = true
 TOT[1] = { name = "x", start = 0, dur = 0, spell = 0 }
 fire("PLAYER_REGEN_DISABLED")
 check(parts()[1].bar and isVisible(parts()[1].bar), "the pole is in bar mode")
-check(not isVisible(sec.ring) and not isVisible(sec.ringGlow), "no ring floats above a head that follows the draining fill")
-check(isVisible(sec.novaText) and isVisible(sec.pip), "the Fire totem stands: the NOVA tag stays")
+check(isVisible(sec.fd.disc) and isVisible(sec.fd.label), "the Fire totem stands: the flame disc stays (it does not ride the head)")
 """)
 
-case("with_the_real_shocks_file_the_nova_ring_follows_the_fire_head_and_is_drawn_over_it")(r"""
+case("with_the_real_shocks_file_the_flame_disc_follows_the_fire_totem_and_stands_still")(r"""
 boot({ realShocks = true })
 for _, e in ipairs({ "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_USABLE", "LEARNED_SPELL_IN_SKILL_LINE" }) do KNOWN_EVENTS[e] = true end
 KNOWN_SPELLS[408341] = true
 C_Spell.GetSpellInfo = function(n) if n == "Fire Nova" then return { spellID = 408341, name = "Fire Nova" } end end
 C_Spell.GetSpellCooldown = function() return { isActive = false, isOnGCD = false, startTime = 0, duration = 0 } end
+POS = { 100, 200, 0, 1 }                       -- the drop is stamped with a place, so walking away can make it FAR
 local spec = mount("lower")
 local sec
 for _, f in ipairs(FRAMES) do if f.fsSection then sec = f.fsSection end end
-check(sec and sec.SetFire, "the real section is built")
-check(not isVisible(sec.ring), "no Fire totem, no ring")
+check(sec and sec.SetFire and sec.fd, "the real section is built")
+check(not isVisible(sec.fd.disc) and not isVisible(sec.fd.label), "no Fire totem, no flame disc")
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 3599)        -- the cast stamps where the totem was put down
 drop(1, "Searing Totem", 3599, 30, 30)
-check(isVisible(sec.ring), "a Fire totem stands and Fire Nova is ready: the ring shows")
-local function ringY() local _, y = imgCenter(sec.ring); return y - RECTS.lower.y end
-near3(ringY(), C().GY - 8 * C().BP - C().HEAD_H + 3, "the ring sits on a full head")
-tick(8)
-near3(ringY(), C().GY - 6 * C().BP - C().HEAD_H + 3, "and follows the head down")
-local head = parts()[1].head
-check(sec.ring.parent:GetFrameLevel() > head:GetFrameLevel(), "the ring is on a frame above the head's")
-check(sec.ringGlow.parent:GetFrameLevel() > head:GetFrameLevel(), "and so is its glow")
+check(isVisible(sec.fd.disc), "a Fire totem stands and Fire Nova is ready: the flame disc shows")
+check(isVisible(sec.fd.flameReady) and sec.fd.label.text == "RDY", "ready: the lit flame and RDY")
+local function discY() local _, y = imgCenter(sec.fd.disc); return y - RECTS.lower.y end
+-- one frame like the client runs it: a script the pole's tick removed on the way (the flame disc's own ticker stops when the Fire totem
+-- goes) is not called any more, which the shared tick() does not know
+local function step(dt)
+    NOW = NOW + dt
+    local list = {}
+    for _, f in ipairs(FRAMES) do if f.scripts.OnUpdate and isVisible(f) then list[#list + 1] = f end end
+    for _, f in ipairs(list) do local u = f.scripts.OnUpdate if u then u(f, dt) end end
+end
+near3(discY(), C().GY + 24, "the disc sits 24 px under the ground line")
+step(8)
+near3(discY(), C().GY + 24, "and stays there as the pole drains")
+POS = { 100, 300, 0, 1 }
+step(0.3)
+check(FS.ShamanTotems.IsFar(1), "the totem is far")
+check(not isVisible(sec.fd.disc), "a Fire totem out of range is not a standing one: no flame disc")
+POS = { 100, 200, 0, 1 }
+step(0.3)
+check(isVisible(sec.fd.disc), "back in range: the flame disc returns")
 clear(1)
-check(not isVisible(sec.ring), "the totem goes: the ring goes")
+check(not isVisible(sec.fd.disc), "the totem goes: the flame disc goes")
 noDegrade()
 """)
 
