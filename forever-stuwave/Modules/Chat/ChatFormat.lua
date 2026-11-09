@@ -578,6 +578,120 @@ local function WrapChatFrames()
     return wrapped, frameCount
 end
 
+-------------------------------------------------------------------------------
+-- Line bands
+-------------------------------------------------------------------------------
+
+-- Player: "can we add a blue and green kind of slight bg to the guild and party
+-- chat lines. They get lost in chat."
+--
+-- A chat frame draws each visible row as a pooled FontString in
+-- `frame.visibleLines`, and each row carries its history entry as
+-- `messageInfo`. The entry's extraData holds AddMessage's arguments after the
+-- colour (id, accessID, typeID, event, ...), so extraData[4] says which chat
+-- type the row is. After every redraw the frame runs its display-refreshed
+-- callbacks (through secureexecuterange, so ours runs on its own and Blizzard's
+-- redraw stays secure); that is where each row gets a faint band in its tag
+-- colour, or none. Fading is followed by mirroring the row's own SetAlpha and
+-- shown state, which Blizzard sets with plain numbers.
+local BAND_ALPHA = 0.12
+local EDGE_ALPHA = 0.55
+local BAND_COLORS = {
+    CHAT_MSG_GUILD = GREEN,
+    CHAT_MSG_OFFICER = GREEN,
+    CHAT_MSG_PARTY = CYAN,
+    CHAT_MSG_PARTY_LEADER = CYAN,
+}
+
+local function HexRGB(hex)
+    return tonumber(hex:sub(1, 2), 16) / 255, tonumber(hex:sub(3, 4), 16) / 255, tonumber(hex:sub(5, 6), 16) / 255
+end
+
+local bandedFrames = setmetatable({}, { __mode = "k" })
+
+local function LineEvent(line)
+    local info = line.messageInfo
+    if type(info) ~= "table" then return nil end
+    local extra = info.extraData
+    if type(extra) ~= "table" then return nil end
+    local event = extra[4]
+    if type(event) ~= "string" or FS.IsSecret(event) then return nil end
+    return event
+end
+
+local function SyncBand(line)
+    local band = line.fsBand
+    if not band then return end
+    if band.wanted and line:IsShown() then
+        band:SetAlpha(line:GetAlpha())
+        band:Show()
+    else
+        band:Hide()
+    end
+end
+
+local function BandFor(frame, line)
+    local band = line.fsBand
+    if band then return band end
+    local parent = frame.FontStringContainer or frame
+    band = { fill = parent:CreateTexture(nil, "BACKGROUND", nil, -8), edge = parent:CreateTexture(nil, "BACKGROUND", nil, -7) }
+    band.fill:SetPoint("TOPLEFT", line, "TOPLEFT", -4, 2)
+    band.fill:SetPoint("BOTTOMRIGHT", line, "BOTTOMRIGHT", 0, -2)
+    band.edge:SetPoint("TOPLEFT", band.fill, "TOPLEFT")
+    band.edge:SetPoint("BOTTOMLEFT", band.fill, "BOTTOMLEFT")
+    band.edge:SetWidth(2)
+    function band:SetAlpha(a) self.fill:SetAlpha(a); self.edge:SetAlpha(a) end
+    function band:Show() self.fill:Show(); self.edge:Show() end
+    function band:Hide() self.fill:Hide(); self.edge:Hide() end
+    line.fsBand = band
+    bandedFrames[frame][line] = true
+    if type(hooksecurefunc) == "function" then
+        hooksecurefunc(line, "SetAlpha", SyncBand)
+        hooksecurefunc(line, "SetShown", SyncBand)
+        hooksecurefunc(line, "Show", SyncBand)
+        hooksecurefunc(line, "Hide", SyncBand)
+    end
+    return band
+end
+
+local function RefreshBands(frame)
+    local lines = bandedFrames[frame]
+    if not lines then return end
+    -- Every band we ever made goes dark first: a pooled row that dropped out of
+    -- visibleLines on a relayout must not keep a stale band.
+    for line in pairs(lines) do
+        line.fsBand.wanted = false
+        line.fsBand:Hide()
+    end
+    if not applied or type(frame.visibleLines) ~= "table" then return end
+    for _, line in ipairs(frame.visibleLines) do
+        local event = LineEvent(line)
+        local hex = event and BAND_COLORS[event]
+        if hex then
+            local band = BandFor(frame, line)
+            local r, g, b = HexRGB(hex)
+            band.fill:SetColorTexture(r, g, b, BAND_ALPHA)
+            band.edge:SetColorTexture(r, g, b, EDGE_ALPHA)
+            band.wanted = true
+            SyncBand(line)
+        end
+    end
+end
+
+local function BandChatFrames()
+    for i = 1, MAX_CHAT_FRAMES do
+        local frame = _G["ChatFrame" .. i]
+        if frame and not bandedFrames[frame] and type(frame.AddOnDisplayRefreshedCallback) == "function" then
+            bandedFrames[frame] = {}
+            pcall(frame.AddOnDisplayRefreshedCallback, frame, RefreshBands)
+        end
+    end
+end
+
+local function RefreshAllBands()
+    for frame in pairs(bandedFrames) do RefreshBands(frame) end
+end
+
 local function Enable()
     if applied then return end
     CaptureOriginals()
@@ -586,8 +700,10 @@ local function Enable()
     ApplySpacing()
     lastFilterCount, lastFilterTotal = AddFilters()
     lastWrapCount, lastWrapTotal = WrapChatFrames()
+    BandChatFrames()
 
     applied = true
+    RefreshAllBands()
 end
 
 local function Disable()
@@ -602,6 +718,7 @@ local function Disable()
 
     RemoveFilters()
     applied = false
+    RefreshAllBands()
 end
 
 -------------------------------------------------------------------------------

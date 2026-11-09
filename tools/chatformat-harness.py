@@ -162,6 +162,56 @@ case("a_repeated_line_is_restyled_once", """
     assert(n == 1, "styled twice: " .. a)
 """)
 
+case("guild_and_party_rows_get_a_tinted_band_that_follows_the_row", """
+    local textures = {}
+    function ChatFrame1:CreateTexture()
+        local t = { shown = true, alpha = 1 }
+        function t:SetPoint() end
+        function t:SetWidth() end
+        function t:SetColorTexture(r, g, b, a) self.rgba = { r, g, b, a } end
+        function t:SetAlpha(a) self.alpha = a end
+        function t:Show() self.shown = true end
+        function t:Hide() self.shown = false end
+        textures[#textures + 1] = t
+        return t
+    end
+    function ChatFrame1:AddOnDisplayRefreshedCallback(fn) self.refreshed = fn end
+    local function Row(event)
+        local r = { shown = true, alpha = 1, messageInfo = { extraData = { 0, 0, 0, event, n = 4 } } }
+        function r:IsShown() return self.shown end
+        function r:GetAlpha() return self.alpha end
+        function r:SetAlpha(a) self.alpha = a end
+        function r:SetShown(v) self.shown = v end
+        function r:Show() self.shown = true end
+        function r:Hide() self.shown = false end
+        return r
+    end
+    FS.ChatFormat.Disable(); FS.ChatFormat.Enable()
+    assert(ChatFrame1.refreshed, "no display callback registered")
+    local guild, party, say, secret = Row("CHAT_MSG_GUILD"), Row("CHAT_MSG_PARTY"), Row("CHAT_MSG_SAY"), Row(SECRET)
+    ChatFrame1.visibleLines = { guild, party, say, secret }
+    ChatFrame1.refreshed(ChatFrame1)
+    assert(guild.fsBand and party.fsBand, "guild/party rows got no band")
+    assert(not say.fsBand and not secret.fsBand, "say or secret row got a band")
+    assert(guild.fsBand.fill.shown and guild.fsBand.fill.rgba[2] == 1 and guild.fsBand.fill.rgba[4] < 0.2, "guild band not green and faint")
+    assert(party.fsBand.fill.rgba[3] == 1, "party band not cyan")
+    -- fading: the row's alpha and hide carry to its band
+    guild:SetAlpha(0.4)
+    assert(guild.fsBand.fill.alpha == 0.4, "band did not fade with the row")
+    guild:SetShown(false)
+    assert(not guild.fsBand.fill.shown, "band stayed up on a hidden row")
+    -- a pooled row reused for a say line loses its band on the next redraw
+    party.messageInfo.extraData[4] = "CHAT_MSG_SAY"
+    ChatFrame1.refreshed(ChatFrame1)
+    assert(not party.fsBand.fill.shown, "stale band on a reused row")
+    -- /fschatfmt off clears every band
+    guild:SetShown(true)
+    ChatFrame1.refreshed(ChatFrame1)
+    assert(guild.fsBand.fill.shown)
+    FS.ChatFormat.Disable()
+    assert(not guild.fsBand.fill.shown and not guild.fsBand.edge.shown, "band survived off")
+""")
+
 
 def run_case(body: str) -> str | None:
     rt = LuaRuntime(unpack_returned_tuples=False)
