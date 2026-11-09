@@ -243,7 +243,7 @@ case("rows_default_to_neon_plates", """
     assert(g[2][1] == ramp[1][1] and g[3][3] == ramp[2][3], "shaman row not on the shaman ramp")
     assert(bar.Background.color and math.abs(bar.Background.color[1] - 0.039) < 1e-3, "plate well not ink")
     assert(bar.BackgroundEdge.color[4] == 0, "shadow edge not cleared")
-    assert(e.Icon.w == 14 and e.Icon.h == 14, "icon not as tall as the plate in a 20 unit row: " .. tostring(e.Icon.w))
+    assert(math.abs(e.Icon.w - (20 - 2 * math.floor(1.5 * 1.25) / 1.25)) < 1e-6, "plate does not keep 3 units round its 11 unit text in a 20 unit row: " .. tostring(e.Icon.w))
     assert(bar.points == 2, "plate not laid out")
     local cells, rims, gloss = nil, 0, nil
     for _, t in ipairs(bar.made) do
@@ -252,7 +252,12 @@ case("rows_default_to_neon_plates", """
     end
     assert(cells and not cells.shown, "the ladder's gap tile shows on a plate")
     assert(gloss and math.abs(gloss.color[4] - 0.45) < 1e-6, "no one px gloss on the fill")
-    assert(bar.Name.font == "MONO" and bar.Value.font == "MONO", "row text not mono")
+    assert(bar.Name.font == "MONO" and bar.Value.font == "MONO" and bar.Name.size == 10, "plate text not mono 10")
+    getmetatable(e).__index.rowH = 30
+    e:SetStyle()
+    assert(math.abs(e.Icon.w - (30 - 2 * math.floor(3 * 1.25) / 1.25)) < 1e-6, "a tall row: the plate keeps 3 units (whole px) above and below")
+    getmetatable(e).__index.rowH = 20
+    e:SetStyle()
     assert(bar.Name.textColor[1] == 1 and bar.Name.textColor[2] == 1, "another player's name not white")
     local me = DamageMeterSessionWindow1.list[2]
     assert(math.abs(me.StatusBar.Name.textColor[2] - 0.816) < 1e-3, "own name not the light pink on its plate")

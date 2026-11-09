@@ -74,7 +74,9 @@ local style = ReadStyle()
 -- Neon plates (form B), in UI units unless named _PX: the class icon at the row's left, as tall as the plate, then the
 -- plate: an ink well, the class gradient fill (deep foot, hot top) with a 1 px gloss along its top and a soft white bloom
 -- at its edge, a 1 px rim in the class's deep colour (pink on the player's own row), and the "1. Name" and number on it.
-local PLATE_PAD = 3                       -- above and below the plate, inside the row (6 between plates)
+local PLATE_PAD = 3                       -- above and below the plate, inside the row (6 between plates) when it fits
+local PLATE_TEXT_ROOM = 3                 -- clear units above and below the text on the plate; it wins over PLATE_PAD
+local PLATE_TEXT_SIZE = 10                -- the mockup's plate text (Blizzard's text scale setting multiplies it)
 local PLATE_LEFT = 2
 local PLATE_ICON_GAP = 3
 local PLATE_RIGHT = 3
@@ -259,9 +261,20 @@ end
 
 local function LayOutPlates(entry, g, ppu)
     local bar, name, value = entry.StatusBar, entry.StatusBar.Name, entry.StatusBar.Value
+    SetFont(name, PLATE_TEXT_SIZE)
+    SetFont(value, PLATE_TEXT_SIZE)
     local px = 1 / ppu
     local rowH = Num(entry.GetHeight and entry:GetHeight(), 25)
-    local plateH = rowH - 2 * PLATE_PAD
+    -- the plate keeps room round its text first ("text is squished"), and takes the padding from what the row has left
+    local textH = 0
+    if name and name.GetStringHeight then
+        local ok, v = pcall(name.GetStringHeight, name)
+        if ok then textH = Num(v, 0) end
+    end
+    if textH <= 0 then textH = PLATE_TEXT_SIZE + 2 end
+    local plateH = math.max(rowH - 2 * PLATE_PAD, math.min(rowH, textH + 2 * PLATE_TEXT_ROOM))
+    local pad = math.floor((rowH - plateH) / 2 * ppu) / ppu   -- whole px, so the rim lands on the grid
+    plateH = rowH - 2 * pad
     local left = PLATE_LEFT
     local icon = IconShown(entry)
     if icon then
@@ -273,8 +286,8 @@ local function LayOutPlates(entry, g, ppu)
 
     -- the bar is the plate's inside; the ink well and the rim sit one px around it
     bar:ClearAllPoints()
-    bar:SetPoint("TOPLEFT", entry, "TOPLEFT", left + px, -(PLATE_PAD + px))
-    bar:SetPoint("BOTTOMRIGHT", entry, "BOTTOMRIGHT", -(PLATE_RIGHT + px), PLATE_PAD + px)
+    bar:SetPoint("TOPLEFT", entry, "TOPLEFT", left + px, -(pad + px))
+    bar:SetPoint("BOTTOMRIGHT", entry, "BOTTOMRIGHT", -(PLATE_RIGHT + px), pad + px)
 
     local bg = bar.Background
     if bg then
@@ -308,6 +321,8 @@ end
 
 local function LayOutLadder(entry, g, ppu)
     local bar, name, value = entry.StatusBar, entry.StatusBar.Name, entry.StatusBar.Value
+    SetFont(name, TEXT_SIZE)
+    SetFont(value, TEXT_SIZE)
     local rowH = Num(entry.GetHeight and entry:GetHeight(), 25)
     local lineMid = LADDER_TOP + LADDER_ICON / 2
     local textLeft = LADDER_LEFT
