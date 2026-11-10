@@ -409,6 +409,22 @@ local function ParseLink(link)
     return f
 end
 
+-- An item's stats as the client gives them (keys such as ITEM_MOD_STAMINA_SHORT, values numbers), from the link so a
+-- random suffix ("of the Eagle") is counted. Armor is RESISTANCE0_NAME there, copied to `armor` too. Nil when empty.
+local function ItemStats(link)
+    if not link then return nil end
+    local r = Call(Api("C_Item", "GetItemStats") or Api(nil, "GetItemStats"), link)
+    local t = r and Tbl(r[1])
+    if not t then return nil end
+    local out, any = {}, false
+    for k, v in pairs(t) do
+        if type(k) == "string" and Num(v) then out[k] = v; any = true end
+    end
+    if not any then return nil end
+    out.armor = out.RESISTANCE0_NAME
+    return out
+end
+
 local function ReadGear(snap)
     local g = {}
     snap.gear = g
@@ -441,6 +457,7 @@ local function ReadGear(snap)
                 item.quality = Num(info[3])
                 if not item.itemLevel then item.itemLevel = Num(info[4]) end
             end
+            item.stats = ItemStats(link)
             if not (item.link and item.itemLevel and item.name) then missing = missing + 1 end
             g[key] = item
         end
@@ -484,6 +501,7 @@ local function ReadContainers(ids)
                     if not item.quality then item.quality = Num(info[3]) end
                     if not item.itemLevel then item.itemLevel = Num(info[4]) end
                 end
+                item.stats = ItemStats(link)
                 if not (item.link and item.name) then missing = missing + 1 end
                 out.items[#out.items + 1] = item
             else

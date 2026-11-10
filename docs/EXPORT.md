@@ -117,6 +117,7 @@ One table per filled slot, keyed by slot name: `head`, `neck`, `shoulder`, `shir
 | `suffixId` | optional, random suffix from the link (can be negative) |
 | `itemLevel` | `C_Item.GetDetailedItemLevelInfo`, else `GetItemInfo` |
 | `name`, `quality` | from `GetItemInfo` |
+| `stats` | optional: `C_Item.GetItemStats` on the link, so a random suffix counts. Keys as the client gives them (`ITEM_MOD_STAMINA_SHORT`, `ITEM_MOD_INTELLECT_SHORT`, ...), values numbers; armor is `RESISTANCE0_NAME`, also copied to `armor`. Absent when the item has none |
 
 `gear.incomplete` (optional number) counts items whose link, level or name the client had not loaded yet; the next write fills them in.
 
@@ -142,6 +143,7 @@ Each `items` entry:
 | `quality` | 0 poor to 5 legendary |
 | `itemLevel` | `C_Item.GetDetailedItemLevelInfo`, else `GetItemInfo` |
 | `link` | the full item link string |
+| `stats` | optional, as in `gear` |
 
 ### `quests`
 

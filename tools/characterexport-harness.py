@@ -253,6 +253,14 @@ C_Reputation = {
 }
 FACTION_STANDING_LABEL5, FACTION_STANDING_LABEL6 = "Friendly", "Honored"
 
+-- item stats by link: the hat (random suffix) and the ring in the backpack; everything else has none
+C_Item.GetItemStats = function(link)
+    if type(link) ~= "string" then return nil end
+    if link:find("Hitem:1111") then return { ITEM_MOD_STAMINA_SHORT = 2, ITEM_MOD_INTELLECT_SHORT = 2, RESISTANCE0_NAME = 45 } end
+    if link:find("Hitem:2222") then return { ITEM_MOD_AGILITY_SHORT = 3 } end
+    return {}
+end
+
 function load()
     ForeverSTUwaveExport = nil
     local fn = assert(loadstring(SOURCE_TEXT, "@CharacterExport.lua"))
@@ -558,6 +566,18 @@ local o = saved().reputations.list[1]
 check(#saved().reputations.list == 1 and o.name == "Orgrimmar" and o.id == 76 and o.standing == "Honored"
     and o.value == 1500 and o.max == 12000 and o.header == "Horde", "row from GetFactionInfo")
 C_Reputation, GetNumFactions, GetFactionInfo = realR, nil, nil
+""")
+
+case("gear_and_bag_items_carry_their_stats_from_the_link")(r"""
+load()
+login()
+local head = saved().gear.head
+check(head.stats and head.stats.ITEM_MOD_STAMINA_SHORT == 2 and head.stats.ITEM_MOD_INTELLECT_SHORT == 2
+    and head.stats.armor == 45 and head.stats.RESISTANCE0_NAME == 45, "gear stats with armor")
+check(saved().gear.mainhand.stats == nil, "no stats, no field")
+local items = saved().bags.items
+check(items[2].itemId == 2222 and items[2].stats.ITEM_MOD_AGILITY_SHORT == 3 and items[2].stats.armor == nil, "bag item stats")
+check(items[1].stats == nil, "a fish has no stats")
 """)
 
 case("the_bank_reads_while_open_and_carries_after")(r"""
