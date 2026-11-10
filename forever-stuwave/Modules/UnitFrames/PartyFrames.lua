@@ -2206,9 +2206,12 @@ end
 -- would unmodified. ElvUI's 12.x path (oUF blizzard.lua handleFrame) Hides and reparents
 -- PartyFrame and hooks Show on CompactPartyFrame; that is the Hide-plus-hook combination
 -- the CLAUDE.md FrameHelpers entry rules out for Edit Mode systems. The raid frames
--- (CompactRaidFrameContainer, CompactRaidFrameManager) are NOT touched: this addon draws
--- five party rows and no raid frames, so the raid UI stays Blizzard's, and the manager tab
--- carries the raid markers and the ready check.
+-- (CompactRaidFrameContainer, CompactRaidFrameManager) are NOT swept: this addon draws five
+-- party rows and no raid frames, so the raid UI stays Blizzard's. The one exception is the
+-- manager tab (the gold pull-out on the left edge), which Blizzard shows in any group: in a
+-- party it is dimmed and its mouse switched off, the same dim-not-hide way, and in a raid
+-- both come back. Its events are left alone, so it stays current. Its markers and ready
+-- check are out of reach in a party until this addon has its own.
 -- Alpha 0 still hit-tests and the mouse does not inherit, so every mouse-taking descendant is
 -- switched off, not only the frames DimBlizzardFrame sweeps (one level of children): the pool
 -- member's HealthBarContainer.HealthBar forwards OnMouseUp to the member's Click (an invisible
@@ -2295,6 +2298,33 @@ end
 -- Setup re-registers are live until the combat-pending sweep runs.
 local function WatchBlizzardParty()
     local pending, queued, auraQueued = false, false, false
+    -- The manager tab: parked (alpha 0, mouse off) outside a raid. `managerMouse` holds the
+    -- frames whose mouse was switched off, so a raid gives back exactly those.
+    local managerMouse
+    local function ParkRaidManager()
+        local manager = _G.CompactRaidFrameManager
+        if not manager then return end
+        local inRaid = type(IsInRaid) == "function" and IsInRaid()
+        if inRaid then
+            if not managerMouse then return end
+            manager:SetAlpha(1)
+            for _, frame in ipairs(managerMouse) do frame:EnableMouse(true) end
+            managerMouse = nil
+            return
+        end
+        manager:SetAlpha(0)
+        managerMouse = managerMouse or {}
+        local function Walk(frame, depth)
+            if frame.IsMouseEnabled and frame:IsMouseEnabled() then
+                frame:EnableMouse(false)
+                managerMouse[#managerMouse + 1] = frame
+            end
+            if depth > 0 and frame.GetChildren then
+                for _, child in ipairs({ frame:GetChildren() }) do Walk(child, depth - 1) end
+            end
+        end
+        Walk(manager, MOUSE_SWEEP_DEPTH)
+    end
     local function Sweep()
         queued = false
         if InCombatLockdown() then
@@ -2306,6 +2336,11 @@ local function WatchBlizzardParty()
         if not ok then
             FS.LogDegradeOnce("partyframes_blizzardsweep",
                 "ForeverSTUwave: dimming Blizzard's party frames failed: " .. tostring(err))
+        end
+        ok, err = pcall(ParkRaidManager)
+        if not ok then
+            FS.LogDegradeOnce("partyframes_raidmanager",
+                "ForeverSTUwave: dimming the raid manager tab failed: " .. tostring(err))
         end
     end
     local function AuraSweep()

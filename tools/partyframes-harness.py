@@ -156,6 +156,7 @@ for _,m in ipairs({'SetOrientation','SetFont','SetJustifyH','SetJustifyV','SetWo
 function Region:SetClipsChildren(v) self.clipsChildren=v end
 function Region:UnregisterAllEvents() self.registered={} end
 function Region:EnableMouse(v) self.mouse=v end
+function Region:IsMouseEnabled() return self.mouse==true end
 -- Children in creation order (a texture or font string is a region, not a child frame).
 function Region:GetChildren()
     local out={}
@@ -180,6 +181,8 @@ function print(msg) __messages[#__messages+1]=msg end
 function RegisterUnitWatch() end
 function InCombatLockdown() return false end
 function IsInGroup() return true end
+__inRaid=false
+function IsInRaid() return __inRaid end
 function UnitExists() return true end
 -- __target: the unit token the player has targeted (nil = none). __targetSecret makes
 -- UnitIsUnit answer a SECRET boolean (the addon-restricted-map case); __targetThrows makes it
@@ -401,8 +404,8 @@ LOAD_AS_ADDON = "function(src,chunk,addon,fs) assert(loadstring(src,chunk))(addo
 # members (each with a PetFrame and a UnitFrame_Initialize healthbar/manabar) and parents
 # CompactPartyFrame, which holds memberUnitFrames and petUnitFrames. Every call that would taint
 # the frame's secure path (Hide, HookScript, SetScript, SetParent) throws, so the addon cannot
-# pass by using one. CompactRaidFrameContainer and CompactRaidFrameManager are the frames the
-# party sweep must leave alone.
+# pass by using one. CompactRaidFrameContainer is the frame the party sweep must leave alone;
+# CompactRaidFrameManager (the left-edge tab) is dimmed in a party and given back in a raid.
 BLIZZARD_PARTY = r"""
 __blizz={}
 function __blizzFrame(kind,name,parent)
@@ -458,6 +461,9 @@ function __blizzParty(compact)
     if compact then __blizzCompact(PartyFrame) end
     CompactRaidFrameContainer=__blizzFrame('Frame','CompactRaidFrameContainer',UIParent)
     CompactRaidFrameManager=__blizzFrame('Frame','CompactRaidFrameManager',UIParent)
+    CompactRaidFrameManager.toggle=__blizzFrame('Button',nil,CompactRaidFrameManager)
+    CompactRaidFrameManager.label=__blizzLeaf('Frame',CompactRaidFrameManager)
+    CompactRaidFrameManager.label.mouse=false
 end
 function __effAlpha(f)
     local a=1
@@ -468,11 +474,19 @@ end
 function __silenced(f)
     return __effAlpha(f)==0 and f.mouse==false and next(f.registered)==nil
 end
+-- The raid frames and their children are not part of the party tree.
+function __underRaid(f)
+    while f do
+        if f.name=='CompactRaidFrameContainer' or f.name=='CompactRaidFrameManager' then return true end
+        f=f.parent
+    end
+    return false
+end
 -- How many party-tree frames are NOT silenced and are neither `skip` nor under it.
 function __unsilencedOutside(skip)
     local n=0
     for _,f in ipairs(__blizz) do
-        if f.name~='CompactRaidFrameContainer' and f.name~='CompactRaidFrameManager' then
+        if not __underRaid(f) then
             local under,p=false,f
             while p do if p==skip then under=true end p=p.parent end
             if not under and not __silenced(f) then n=n+1 end
@@ -3479,7 +3493,7 @@ def _assert_silenced(rt, label: str) -> None:
     invisible, mouse-less and event-less."""
     checked = 0
     for frame in _blizzard_frames(rt):
-        if frame.name in ("CompactRaidFrameContainer", "CompactRaidFrameManager"):
+        if rt.eval("__underRaid")(frame):
             continue
         checked += 1
         assert rt.eval("__silenced")(frame), (
@@ -3489,11 +3503,41 @@ def _assert_silenced(rt, label: str) -> None:
 
 
 def _assert_raid_untouched(rt) -> None:
+    """The raid container is left alone. In a party the manager tab is dimmed with its mouse off
+    (its events stay, so it keeps itself current)."""
     g = rt.globals()
-    for name in ("CompactRaidFrameContainer", "CompactRaidFrameManager"):
-        frame = g[name]
-        assert frame.alpha == 1 and frame.mouse is True and rt.eval("next")(frame.registered), (
-            f"{name} was touched: the addon does not replace raid frames")
+    frame = g.CompactRaidFrameContainer
+    assert frame.alpha == 1 and frame.mouse is True and rt.eval("next")(frame.registered), (
+        "CompactRaidFrameContainer was touched: the addon does not replace raid frames")
+    manager = g.CompactRaidFrameManager
+    assert manager.alpha == 0 and manager.mouse is False and manager.toggle.mouse is False, (
+        "the raid manager tab still shows or takes the mouse in a party")
+    assert rt.eval("next")(manager.registered), "the raid manager tab lost its events"
+
+
+def _check_blizzard_raid_manager_returns_in_raid() -> None:
+    """In a raid the manager tab comes back: alpha 1, mouse on for exactly the frames that had
+    it (the label never took the mouse and stays off). Leaving the raid parks it again."""
+    rt = _runtime(before_load=TIMER_QUEUE)
+    g = rt.globals()
+    manager = g.CompactRaidFrameManager
+
+    def roster() -> None:
+        rt.execute("""for _,frame in ipairs(__frames) do
+            if frame.registered.GROUP_ROSTER_UPDATE and frame.scripts.OnEvent then
+                frame.scripts.OnEvent(frame,'GROUP_ROSTER_UPDATE') end
+        end __runTimers()""")
+
+    assert manager.alpha == 0 and manager.toggle.mouse is False, "not parked in a party"
+    g.__inRaid = True
+    roster()
+    assert manager.alpha == 1 and manager.mouse is True and manager.toggle.mouse is True, (
+        "the raid manager tab did not come back in a raid")
+    assert manager.label.mouse is False, "a frame that never took the mouse was switched on"
+    g.__inRaid = False
+    roster()
+    assert manager.alpha == 0 and manager.mouse is False and manager.toggle.mouse is False, (
+        "the raid manager tab was not parked again after leaving the raid")
 
 
 def _check_blizzard_party_dimmed() -> None:
@@ -3760,6 +3804,8 @@ def main() -> int:
         ("buff alert: unreadable known check never claims", _check_buff_unreadable_known),
         ("buff alert: aura read error is unreadable, not empty", _check_buff_aura_read_error),
         ("buff alert: /fsparty buffs default label", _check_buff_report_default_label),
+        ("Blizzard party frames: raid manager tab dimmed in a party, back in a raid",
+         _check_blizzard_raid_manager_returns_in_raid),
         ("Blizzard party frames: PartyFrame and CompactPartyFrame dimmed, raid untouched",
          _check_blizzard_party_dimmed),
         ("Blizzard party frames: each variant detected on its own",
