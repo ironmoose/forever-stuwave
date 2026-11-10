@@ -28,7 +28,11 @@ FS.Layout = FS.Layout or {
     focus       = { point = "CENTER", relPoint = "CENTER", x = -723,  y = -142, w = 190,  h = 66  },
     pet         = { point = "CENTER", relPoint = "CENTER", x = -448,  y = -361, w = 180,  h = 62  },
     party       = { point = "CENTER", relPoint = "CENTER", x = -389,  y = -75,  w = 231,  h = 294 },
-    raid        = { point = "CENTER", relPoint = "CENTER", x = -1076, y = 25,   w = 360,  h = 190 },
+    -- The raid grid (RaidFrames.lua) takes the party frame's seat in a raid: its TOP LEFT is the party
+    -- container's top left (-389 - 231 / 2, -75 + 294 / 2), which is where it anchors, so it follows a moved
+    -- or re-snapped party frame. This entry is only the fallback seat with no party container. The grid
+    -- sizes itself from the cells it shows (noSize); w/h record the 40 member grid (8 columns of tiles).
+    raid        = { point = "TOPLEFT", relPoint = "CENTER", x = -504.5, y = 72, w = 485, h = 224, noSize = true },
     boss        = { point = "CENTER", relPoint = "CENTER", x = 728,   y = 152,  w = 210,  h = 210 },
     -- Stack A's two cast bars (CastBars.lua), the cast display while the Gunsight HUD is off. UI units,
     -- not scaled (the bars have always sat on a fixed seat in UIParent units), and noSize: the bar fits its

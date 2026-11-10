@@ -22,7 +22,7 @@ LOAD_ORDER = (
     "IconStyleData.lua", "IconStyle.lua", "SpellArt.lua", "ChevronCastBar.lua", "HeldArt.lua", "ButtonSkins.lua", "ScrollBarSkins.lua", "PanelSkins.lua", "Tracker.lua", "TrackerSeat.lua", "ChatCore.lua", "ChatTabs.lua",
     "ChatEditBox.lua", "ChatTermBar.lua", "ChatWindowState.lua", "ChatFrameSkin.lua",
     "ChatSlashCommands.lua", "ChatFormat.lua", "UnitFrames.lua", "TargetAuras.lua",
-    "PartyFrames.lua", "CastBars.lua", "Buffs.lua", "Professions.lua", "ActionBars.lua",
+    "PartyFrames.lua", "RaidFrames.lua", "CastBars.lua", "Buffs.lua", "Professions.lua", "ActionBars.lua",
     "Console.lua", "StanceBar.lua", "PetFrame.lua", "PetDock.lua", "PetActionBar.lua",
     "PetCastBar.lua", "Minimap.lua", "QuestTimer.lua", "Panels.lua", "Tooltip.lua", "TooltipAnchor.lua", "Popups.lua", "Menus.lua",
     "Bags.lua", "Loot.lua", "DataBar.lua", "XPBar.lua", "Deck.lua", "MicroBars.lua",
@@ -86,7 +86,7 @@ def test_module_manifest_preserves_dependency_order_and_loads_every_runtime_modu
     modules = [Path(entry) for entry in entries if entry.endswith(".lua")]
 
     assert tuple(path.name for path in modules) == LOAD_ORDER
-    assert len(set(modules)) == 104
+    assert len(set(modules)) == 105
     assert all((RUNTIME / entry).is_file() for entry in entries)
     assert all(path.parts[0] in {"Core", "Modules"} for path in modules)
     assert not list(RUNTIME.glob("*.lua"))

@@ -388,6 +388,20 @@ Not yet checked in game. Mocked checks cover the switch, the key tab and the com
 8. Profiles: turn the party frames off in one profile and leave them on in another. Switching profile in `/fsconfig` moves the frames, the key light and the config switch together, with the HUD on and off.
 9. `/reload` and a login: the frames come back as you left them. Do a `/reload` mid fight (or log in mid fight): the frames build when the fight ends and follow the saved switch; with the HUD off the tab is its full width until then and shrinks to the party key when the fight ends.
 
+## Raid frames: /fsconfig
+
+Not yet checked in game. Mocked checks cover the grid, the looks, the combat rules and the switch, not how it looks. The raid grid has its own switch, "Show raid frames" under "Show party frames" on the Unit Frames page of `/fsconfig` (on by default, `raid.shown`). Join a raid (or convert a party to a raid) to see it.
+
+1. Ten or fewer in the raid: one column per subgroup with members, five boxes down, your own group first with a pink "G" label, the others in violet. Each box shows the role letter (T cyan, H green, D red), the name in its class colour, a health rail and a thin mana line. Your own box has a short pink tick on its left. The grid's top left is where the party frames' top left was, and the party frames are gone.
+2. Eleven or more: the boxes turn into taller tiles that fill from the bottom in the class colour, with the name centred in white and a hairline of mana at the foot. Groups that emptied leave no gap. Report how far the 40 member grid reaches to the right.
+3. Left click a box: it targets that member. Right click: the unit menu opens.
+4. A member below 35% health: the edge turns red and the percent shows in red. A dead or offline member: a dashed grey edge, DEAD or OFF, the box dimmed. A member out of range: the whole box fades.
+5. As a class that can dispel (Priest, Shaman, Mage, Druid, Paladin), a member with a debuff you can remove gets an edge in that debuff's colour. It updates out of combat; in combat it can lag until the fight ends.
+6. The game's raid frames do not show and cannot be clicked while ours are on. The raid manager tab at the left edge is still there.
+7. Someone joins or leaves in combat: the grid changes size and look only when the fight ends (a new member's box can appear to the right until then). Nothing prints an "action blocked" error.
+8. Turn "Show raid frames" off: the grid hides and the party frames come back at once; the row shows "Reload to restore the game's raid frames" with a Reload button. Reload: the game's raid frames are back. Turn it on again: ours return.
+9. Leave the raid: the grid hides and the party frames show as before.
+
 ## Professions panel: /fsprof
 
 Not yet checked in game. `/fsprof` shows or hides the panel and the choice survives `/reload`. The "Professions panel" switch on the Unit Frames page of `/fsconfig` is the same setting, saved per profile. A hidden panel from before this update stays hidden once (it is copied into the active profile on first load, unless that profile already stores its own choice).

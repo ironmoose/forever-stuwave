@@ -1379,8 +1379,9 @@ local function IconStyleGroup(page)
 end
 
 -- The party frames' own switch and seat (PartyFrames.lua, LayoutEdit.lua), apart from the Gunsight HUD, so nothing here
--- is dimmed by its master switch. A Show switch, Move (the layout editor, which brings this page back from DONE or Esc)
--- and Reset position, each explained by its ? tip. LayoutEdit.lua loads after this file, so it is looked up at the click.
+-- is dimmed by its master switch. A Show switch, the raid grid's switch under it (the grid takes the party seat in a
+-- raid), Move (the layout editor, which brings this page back from DONE or Esc) and Reset position, each explained by
+-- its ? tip. LayoutEdit.lua loads after this file, so it is looked up at the click.
 -- Out of the list for a client without the party frames.
 local PARTY_TIPS = {
     show = "The party frames have their own switch. They follow it with the Gunsight HUD on or off, and the Party Frame key "
@@ -1388,6 +1389,8 @@ local PARTY_TIPS = {
     move = "Opens the layout editor. Drag the Party handle to move the party frames, right-click it to reset. "
         .. "Done or Esc brings you back here. Out of combat only.",
     reset = "Puts the party frames back at their design seat. Cannot be undone.",
+    raid = "In a raid, shows the raid as group columns in the party frames' seat, in place of the game's raid frames. "
+        .. "Turned off, the grid hides at once and the game's raid frames come back after /reload.",
 }
 
 local function PartyFramesGroup(page)
@@ -1395,6 +1398,12 @@ local function PartyFramesGroup(page)
     if not (party and party.CONFIG_KEY) then return end
     UI.Header(page, "Party frames")
     UI.Toggle(page, { label = "Show party frames", key = party.CONFIG_KEY, tip = PARTY_TIPS.show })
+    -- The raid grid's own switch (RaidFrames.lua). It applies live; its reload line says when the game's raid frames
+    -- were dimmed this session and only a reload gives them back.
+    local raid = FS.RaidFrames
+    if raid and raid.CONFIG_KEY then
+        UI.Toggle(page, { label = "Show raid frames", key = raid.CONFIG_KEY, tip = PARTY_TIPS.raid, reload = raid.NeedsReload })
+    end
     UI.Button(page, {
         label = "Move party frames", tip = PARTY_TIPS.move, text = "Move",
         onClick = function()

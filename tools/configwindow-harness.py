@@ -1440,6 +1440,89 @@ function T.read_only_settings_dim_the_party_frames_switch_and_both_buttons()
     no(row("Reset position").control.enabled, "Reset")
 end
 
+-- ---- the raid frames switch (RaidFrames.lua), the row under the party switch ----
+
+local RAID_KEY = "raid.shown"
+local raidReloadLine = nil
+local function withRaidFrames()
+    withPartyFrames()
+    raidReloadLine = nil
+    FS.Config.RegisterDefault(RAID_KEY, true)
+    FS.RaidFrames = { CONFIG_KEY = RAID_KEY, NeedsReload = function() return raidReloadLine end }
+end
+local function tipOfRow(label)
+    local r, found = row(label), nil
+    for _, o in ipairs(ALL) do if o.fsTip and o.parent == r then found = o.fsTip end end
+    return found
+end
+
+function T.the_raid_frames_switch_sits_under_the_party_frames_switch()
+    local W = boot({ preWindow = withRaidFrames })
+    W.Open("unitframes")
+    local party, panels = headerY("PARTY FRAMES"), headerY("PANELS")
+    local show, raid, move = rowY("Show party frames"), rowY("Show raid frames"), rowY("Move party frames")
+    yes(raid, "the raid frames switch")
+    yes(party < show and show < raid and raid < move and move < panels, "right under the party switch, in the party group")
+    eq(#texts(row("Show raid frames")), 3, "label, state and the ? icon: no reload prompt while nothing is owed")
+end
+
+function T.the_raid_frames_switch_is_left_out_without_the_raid_frames()
+    local W = boot({ preWindow = withPartyFrames })
+    W.Open("unitframes")
+    no(row("Show raid frames"), "no raid module, no switch")
+    yes(row("Show party frames"), "the party rows stay")
+    W = boot({ preWindow = function() withPartyFrames(); FS.RaidFrames = {} end })
+    W.Open("unitframes")
+    no(row("Show raid frames"), "a module with no saved key has no switch")
+end
+
+function T.the_raid_frames_switch_is_its_own_key()
+    local W = boot({ preWindow = withRaidFrames })
+    W.Open("unitframes")
+    local r = row("Show raid frames")
+    yes(r.control.fsChecked, "on by default")
+    press("Show raid frames")
+    eq(FS.Config.Get(RAID_KEY), false)
+    eq(FS.Config.Get(PARTY_KEY), true, "the party switch is untouched")
+    no(r.control.fsChecked)
+    FS.Config.Set(RAID_KEY, true)
+    yes(r.control.fsChecked, "an external change shows")
+    FS.Config.Set(FS.Gunsight.CONFIG_ENABLED, false)
+    yes(r.control.enabled, "the Gunsight master switch off does not dim it")
+end
+
+function T.the_raid_frames_switch_explains_itself_and_prompts_the_reload_it_owes()
+    local W = boot({ preWindow = withRaidFrames })
+    W.Open("unitframes")
+    local tip = tipOfRow("Show raid frames")
+    yes(tip and tip:find("game's raid frames", 1, true) and tip:find("/reload", 1, true),
+        "the tip says it replaces the game's raid frames and that giving them back takes a reload: " .. tostring(tip))
+    yes(not tip:lower():find("bot", 1, true), "neutral wording: " .. tip)
+    no(hasText(win(), "Reload to"), "nothing owed")
+    raidReloadLine = "Reload to restore the game's raid frames"
+    press("Show raid frames")
+    yes(findText(raidReloadLine, row("Show raid frames")), "the module's line shows on the row")
+    local sr = stubSecureReload()
+    local b = owner(findText("Reload", row("Show raid frames")))
+    yes(b, "with its Reload button")
+    b.scripts.OnEnter(b)
+    eq(sr.covered[1], b, "which the secure reload button covers on hover")
+    local page
+    for _, o in ipairs(ALL) do if o.kind == "ScrollFrame" and o:IsVisible() and o.fsPageKey == "unitframes" then page = o end end
+    for _, t in ipairs(texts(page)) do
+        yes(#t <= 40 and not t:find("[^.]%.$"), "no inline help text on the page: " .. t)
+    end
+    raidReloadLine = nil
+    press("Show raid frames")
+    no(hasText(win(), "Reload to"), "nothing owed again: the prompt goes")
+end
+
+function T.read_only_settings_dim_the_raid_frames_switch()
+    local W = boot({ db = "junk", preWindow = withRaidFrames })
+    W.Open("unitframes")
+    no(row("Show raid frames").control.enabled, "switch")
+end
+
 function T.the_gunsight_page_has_the_three_target_and_player_groups_in_the_mockups_order()
     local W = boot({ preWindow = withTagsAndMyBuffs })
     W.Open("gunsight")

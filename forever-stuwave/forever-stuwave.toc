@@ -32,6 +32,7 @@ Modules/Chat/ChatFormat.lua
 Modules/UnitFrames/UnitFrames.lua
 Modules/Auras/TargetAuras.lua
 Modules/UnitFrames/PartyFrames.lua
+Modules/UnitFrames/RaidFrames.lua
 Modules/CastBars/CastBars.lua
 Modules/Auras/Buffs.lua
 Modules/Skins/Professions.lua
