@@ -2205,13 +2205,13 @@ end
 -- UnitFrame_Update, CompactUnitFrame_UpdateAll and PartyFrame:Layout run exactly as they
 -- would unmodified. ElvUI's 12.x path (oUF blizzard.lua handleFrame) Hides and reparents
 -- PartyFrame and hooks Show on CompactPartyFrame; that is the Hide-plus-hook combination
--- the CLAUDE.md FrameHelpers entry rules out for Edit Mode systems. The raid frames
--- (CompactRaidFrameContainer, CompactRaidFrameManager) are NOT swept: this addon draws five
--- party rows and no raid frames, so the raid UI stays Blizzard's. The one exception is the
--- manager tab (the gold pull-out on the left edge), which Blizzard shows in any group: in a
--- party it is dimmed and its mouse switched off, the same dim-not-hide way, and in a raid
--- both come back. Its events are left alone, so it stays current. Its markers and ready
--- check are out of reach in a party until this addon has its own.
+-- the CLAUDE.md FrameHelpers entry rules out for Edit Mode systems. The raid frames are NOT
+-- swept here: CompactRaidFrameContainer belongs to the raid grid (RaidFrames.lua), which dims it
+-- the same dim-not-hide way while its own switch is on and leaves it alone while it is off. The
+-- manager tab (CompactRaidFrameManager, the gold pull-out on the left edge), which Blizzard shows
+-- in any group, is this file's: in a party it is dimmed and its mouse switched off, and in a raid
+-- both come back. Its events are left alone, so it stays current. Its markers and ready check
+-- are out of reach in a party until this addon has its own.
 -- Alpha 0 still hit-tests and the mouse does not inherit, so every mouse-taking descendant is
 -- switched off, not only the frames DimBlizzardFrame sweeps (one level of children): the pool
 -- member's HealthBarContainer.HealthBar forwards OnMouseUp to the member's Click (an invisible
@@ -2405,6 +2405,7 @@ local SHOWN = {
     -- The saved key keeps the name it had when the Gunsight HUD owned this switch, so every profile keeps its value.
     KEY = "gunsight.pieces.party",
     owed = false,           -- the container's real Show or Hide waits for PLAYER_REGEN_ENABLED
+    suppressed = false,     -- the raid grid shows in their place (SetSuppressed)
     listeners = {},
     listenerFailed = false,
 }
@@ -2424,7 +2425,7 @@ end
 function SHOWN.Apply()
     local container = FS.partyContainer
     if not container then return end
-    local on = PartyFrames.IsShown()
+    local on = PartyFrames.IsShown() and not SHOWN.suppressed
     if InCombatLockdown() then
         container:SetAlpha(on and 1 or 0)
         SHOWN.owed = true
@@ -2480,6 +2481,17 @@ function PartyFrames.SetShown(on)
     return ok
 end
 
+-- The raid grid (RaidFrames.lua) shows in the rows' place while the player is in a raid and its own switch is on. It
+-- calls this out of combat when it shows or hides; the container then hides or returns to the wanted state, which this
+-- never changes (IsShown, the listeners and the saved switch all ignore it). A call in combat takes Apply's alpha-only
+-- path like any other change.
+function PartyFrames.SetSuppressed(flag)
+    flag = flag and true or false
+    if SHOWN.suppressed == flag then return end
+    SHOWN.suppressed = flag
+    SHOWN.Apply()
+end
+
 -- Init runs as the files load, before ADDON_LOADED gives FS.Config its saved values, so the apply it makes there
 -- sees the defaults. The saved value reaches the container here at PLAYER_LOGIN (FS.Config has resolved the
 -- character's profile by then), and through the OnChange hook above if a profile switch changes it later. A login in
@@ -2489,6 +2501,34 @@ do
     login:RegisterEvent("PLAYER_LOGIN")
     login:SetScript("OnEvent", SHOWN.Apply)
 end
+
+-- What the raid grid (RaidFrames.lua, loaded next) reuses from this file, through one table: this file is at Lua's
+-- limit of 200 file-scope locals, so nothing here may add one. Every function reads only its arguments and the unit
+-- APIs; UpdateRowLowHealth drives any frame with `.unit`, `.lowHealthTargets` and `.lowHealthBase`.
+PartyFrames.shared = {
+    UpdateRowLowHealth = UpdateRowLowHealth,
+    UpdateHealthPercentText = UpdateHealthPercentText,
+    RowDownState = RowDownState,
+    ReadHealthMax = ReadHealthMax,
+    ScanDebuffs = ScanDebuffs,
+    GetDispelColor = GetDispelColor,
+    BuildDashEdge = BuildDashEdge,
+    TintDashes = TintDashes,
+    ApplyRangeAlpha = ApplyRangeAlpha,
+    DisableMouseTree = DisableMouseTree,
+    PlayerClass = PlayerClass,
+    ROLE_STYLE = ROLE_STYLE,
+    POWER_COLORS = POWER_COLORS,
+    DISPELS = DISPELS,
+    COLOR_CLEANSABLE_UNKNOWN = COLOR_CLEANSABLE_UNKNOWN,
+    STATE_BAR_COLOR = STATE_BAR_COLOR,
+    STATE_ROW_ALPHA = STATE_ROW_ALPHA,
+    RANGE_ALPHA_IN_RANGE = RANGE_ALPHA_IN_RANGE,
+    RANGE_TICK_INTERVAL = RANGE_TICK_INTERVAL,
+    MOUSE_SWEEP_DEPTH = MOUSE_SWEEP_DEPTH,
+    SPELL_EVENTS = { "SPELLS_CHANGED", "LEARNED_SPELL_IN_SKILL_LINE", "PLAYER_LEVEL_UP",
+                     "CHARACTER_POINTS_CHANGED", "PLAYER_TALENT_UPDATE" },
+}
 
 local function Init()
     WatchBlizzardParty()

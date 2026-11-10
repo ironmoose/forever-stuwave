@@ -3345,6 +3345,27 @@ def _check_shown_in_combat_is_alpha_only_until_regen() -> None:
     _assert_quiet(rt)
 
 
+def _check_shown_suppressed_by_the_raid_grid() -> None:
+    """The raid grid suppresses the party rows while it shows (RaidFrames.lua, out of combat): the
+    container hides and IsShown keeps the wanted state. In combat only the alpha moves and the real
+    Hide waits for regen. Lifting it brings back the wanted state, which may be off."""
+    rt = _client()
+    rt.execute("FS.PartyFrames.SetSuppressed(true)")
+    _expect_look(rt, False, 0, "Hide")
+    assert _wanted(rt) is True, "suppressing changed the saved switch"
+    rt.execute("FS.PartyFrames.SetSuppressed(true)")
+    _expect_look(rt, False, 0, "Hide", "a repeat changes nothing")
+    rt.execute("FS.PartyFrames.SetSuppressed(false)")
+    _expect_look(rt, True, 1, "Hide,Show@1")
+    rt.execute("__combat=true FS.PartyFrames.SetSuppressed(true)")
+    _expect_look(rt, True, 0, "Hide,Show@1", "combat: alpha only")
+    _leave_combat(rt)
+    _expect_look(rt, False, 0, "Hide,Show@1,Hide")
+    rt.execute("FS.PartyFrames.SetShown(false) FS.PartyFrames.SetSuppressed(false)")
+    assert _look(rt)[:2] == (False, 0), "switched off stays off when the grid lets go"
+    _assert_quiet(rt)
+
+
 def _check_shown_login_in_combat_applies_when_init_builds() -> None:
     """The container does not exist at PLAYER_LOGIN in combat: the wanted state is only recorded,
     and Init applies it the moment it builds the container."""
@@ -3503,12 +3524,13 @@ def _assert_silenced(rt, label: str) -> None:
 
 
 def _assert_raid_untouched(rt) -> None:
-    """The raid container is left alone. In a party the manager tab is dimmed with its mouse off
-    (its events stay, so it keeps itself current)."""
+    """PartyFrames leaves the raid container alone: dimming it is the raid grid's job
+    (RaidFrames.lua, raidframes-harness.py), and only while that grid is switched on. In a party
+    the manager tab is dimmed with its mouse off (its events stay, so it keeps itself current)."""
     g = rt.globals()
     frame = g.CompactRaidFrameContainer
     assert frame.alpha == 1 and frame.mouse is True and rt.eval("next")(frame.registered), (
-        "CompactRaidFrameContainer was touched: the addon does not replace raid frames")
+        "PartyFrames touched CompactRaidFrameContainer: the raid grid owns it")
     manager = g.CompactRaidFrameManager
     assert manager.alpha == 0 and manager.mouse is False and manager.toggle.mouse is False, (
         "the raid manager tab still shows or takes the mouse in a party")
@@ -3727,6 +3749,8 @@ def main() -> int:
         ("party frames: SetShown out of combat, alpha 1 before Show", _check_shown_out_of_combat),
         ("party frames: in combat alpha only, the real Show/Hide at regen",
          _check_shown_in_combat_is_alpha_only_until_regen),
+        ("party frames: the raid grid suppresses them without touching the wanted state",
+         _check_shown_suppressed_by_the_raid_grid),
         ("party frames: a login in combat records the wish and Init applies it",
          _check_shown_login_in_combat_applies_when_init_builds),
         ("party frames: a profile switch in combat takes the alpha-only path",
