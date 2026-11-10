@@ -1391,6 +1391,9 @@ local PARTY_TIPS = {
     reset = "Puts the party frames back at their design seat. Cannot be undone.",
     raid = "In a raid, shows the raid as group columns in the party frames' seat, in place of the game's raid frames. "
         .. "Turned off, the grid hides at once and the game's raid frames come back after /reload.",
+    moveRaid = "Opens the layout editor with a preview raid. Pick a size on its panel, then drag the Raid frames handle to "
+        .. "place the grid. Until you move it, it follows the party frames. Done or Esc brings you back here. Out of combat only.",
+    resetRaid = "Makes the raid grid follow the party frames again. Cannot be undone.",
 }
 
 local function PartyFramesGroup(page)
@@ -1429,6 +1432,28 @@ local function PartyFramesGroup(page)
             end
         end,
     })
+    -- The raid grid's own seat and its preview (RaidFrames.lua, LayoutEdit.lua): only where the preview exists.
+    if raid and type(raid.Preview) == "table" then
+        UI.Button(page, {
+            label = "Move raid frames", tip = PARTY_TIPS.moveRaid, text = "Move",
+            onClick = function()
+                local edit = FS.LayoutEdit
+                if not (edit and edit.EnterFromConfig) then
+                    Say("the layout editor is not available.")
+                    return
+                end
+                edit.EnterFromConfig("unitframes")
+            end,
+        })
+        UI.Button(page, {
+            label = "Reset raid position", tip = PARTY_TIPS.resetRaid, text = "Reset", warn = true,
+            confirm = "Make the raid frames follow the party frames again?",
+            onClick = function()
+                local edit = FS.LayoutEdit
+                if edit and edit.ResetOne then edit.ResetOne("raid") else Say("the layout editor is not available.") end
+            end,
+        })
+    end
 end
 
 -- The STUwave nameplates switch (Nameplates.lua): off gives the game's own nameplates back, live. Its ? tip says so. Out of

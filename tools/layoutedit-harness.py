@@ -1467,6 +1467,237 @@ function T.right_click_and_reset_all_reset_the_objectives_seat()
     eq(seat.resets, 2)
 end
 
+
+-------------------------------------------------------------------------------
+-- Raid frames (the editor's preview grid, RaidFrames.lua)
+-------------------------------------------------------------------------------
+
+-- A stand-in for FS.RaidFrames.Preview: a grid whose top left sits on the raid entry's seat (UIParent centre plus
+-- x and y, scaled) and whose size follows the raid size. The real preview, and the follow-the-party seat, are
+-- checked against the real RaidFrames.lua in raidframes-harness.py.
+local function fakePreview(opts)
+    opts = opts or {}
+    local pv = { SIZES = { 5, 10, 15, 20, 25, 40 }, KEY = "raid.previewSize", shown = false, size = 10,
+        shows = 0, hides = 0, asked = {}, listeners = {} }
+    local function notify() for _, fn in ipairs(pv.listeners) do fn() end end
+    function pv.IsShown() return pv.shown end
+    function pv.Size() return pv.size end
+    function pv.Show()
+        if __combat or opts.refuse then return false end
+        pv.shown = true; pv.shows = pv.shows + 1
+        notify()
+        return true
+    end
+    function pv.Hide() pv.shown = false; pv.hides = pv.hides + 1 end
+    function pv.SetSize(n)
+        pv.asked[#pv.asked + 1] = n
+        pv.size = n
+        FS.Config.Set(pv.KEY, n)
+        if pv.shown then notify() end
+        return true
+    end
+    function pv.Rect()
+        if not pv.shown or (opts.lateRect and not pv.ready) then return nil end
+        local L, scale = FS.Layout.raid, FS.Layout.Scale()
+        local cx, cy = UIParent:GetCenter()
+        return cx + L.x * scale, cy + L.y * scale, pv.size * 9 * scale, 120 * scale
+    end
+    function pv.OnChange(fn) pv.listeners[#pv.listeners + 1] = fn end
+    FS.RaidFrames = { Preview = pv }
+    FS.Config.RegisterDefault(pv.KEY, 10)
+    return pv
+end
+
+function T.the_raid_handle_covers_the_preview_and_exists_only_while_it_shows()
+    local pv = fakePreview()
+    edit(); setSnap(false)
+    FS.LayoutEdit.Enter()
+    eq(pv.shown, true, "entering shows the preview")
+    local h = FS.LayoutEdit.GetHandle("raid")
+    eq(h ~= nil, true, "handle shown")
+    eq(h.label._text, "Raid frames")
+    eq(h._parent, UIParent, "an insecure frame on UIParent")
+    eq(h._protected, nil)
+    local left, top, w, hh = pv.Rect()
+    near(h:GetLeft(), left, 1e-6); near(h:GetTop(), top, 1e-6)
+    near(h:GetWidth(), w, 1e-6); near(h:GetHeight(), hh, 1e-6)
+    for _, p in ipairs(h._points) do eq(p.rel, UIParent, "never anchored to a grid") end
+    -- A preview that cannot show (combat, a refusal) leaves no handle to move.
+    FS.LayoutEdit.Exit()
+    pv.Show = function() return false end
+    FS.LayoutEdit.Enter()
+    eq(FS.LayoutEdit.GetHandle("raid"), nil, "no preview, no handle")
+end
+
+function T.a_preview_the_engine_has_not_laid_out_yet_gets_its_handle_a_moment_later()
+    local pv = fakePreview({ lateRect = true })
+    edit()
+    FS.LayoutEdit.Enter()
+    eq(FS.LayoutEdit.GetHandle("raid"), nil, "no rect yet, no handle")
+    pv.ready = true
+    for _, fn in ipairs(__timers) do fn() end
+    eq(FS.LayoutEdit.GetHandle("raid") ~= nil, true, "the retry found it")
+    -- Leaving before the retry runs does nothing.
+    FS.LayoutEdit.Exit()
+    pv.ready = false
+    FS.LayoutEdit.Enter()
+    FS.LayoutEdit.Exit()
+    for _, fn in ipairs(__timers) do fn() end
+    eq(FS.LayoutEdit.GetHandle("raid"), nil)
+    eq(#__errors, 0)
+end
+
+function T.there_is_no_raid_handle_where_the_raid_frames_did_not_load()
+    edit(); seat("stance")
+    FS.LayoutEdit.Enter()
+    eq(FS.LayoutEdit.GetHandle("raid"), nil)
+    eq(rawget(FS.LayoutEdit.GetDonePanel(), "sizeButtons"), nil, "and no size row on the panel")
+    eq(FS.LayoutEdit.GetDonePanel()._h, 44, "the panel keeps its one row")
+    FS.LayoutEdit.Exit()
+    eq(#__errors, 0)
+end
+
+function T.every_way_out_of_the_editor_hides_the_preview()
+    local pv = fakePreview()
+    edit()
+    FS.LayoutEdit.Enter()
+    eq(pv.shows, 1)
+    FS.LayoutEdit.Exit()
+    eq(pv.shown, false, "Exit"); eq(pv.hides, 1)
+    FS.LayoutEdit.Enter()
+    SlashCmdList.FSEDIT("")
+    eq(pv.shown, false, "/fsedit off")
+    FS.LayoutEdit.Enter()
+    local o = overlay(); o._scripts.OnKeyDown(o, "ESCAPE")
+    eq(pv.shown, false, "Esc")
+    FS.LayoutEdit.Enter()
+    __fire("PLAYER_REGEN_DISABLED")
+    eq(pv.shown, false, "combat")
+    __combat = true
+    eq(FS.LayoutEdit.Enter(), false)
+    eq(pv.shown, false, "the editor never starts in combat, so the preview never shows there")
+    eq(#__errors, 0)
+end
+
+function T.a_raid_drop_saves_the_snapped_seat_and_right_click_resets_it()
+    local pv = fakePreview()
+    edit()
+    FS.LayoutEdit.Enter()
+    dragTo("raid", "TOPLEFT", "CENTER", -403, 197)   -- UIParent is 1200 high: scale 1200 / 1440
+    local s = FS.Layout.Scale()
+    eq(override("raid").x, 8 * math.floor(-403 / s / 8 + 0.5), "snapped to 8 in design px")
+    eq(override("raid").y, 8 * math.floor(197 / s / 8 + 0.5))
+    local left, top = pv.Rect()
+    local h = FS.LayoutEdit.GetHandle("raid")
+    near(h:GetLeft(), left, 1e-6, "the handle follows the seat the preview took")
+    near(h:GetTop(), top, 1e-6)
+    h._scripts.OnMouseUp(h, "RightButton")
+    eq(override("raid"), nil, "right-click resets it")
+    eq(FS.Layout.raid.x, -504.5, "to the shipped entry")
+    eq(__printedHas("could not"), false)
+end
+
+function T.arrows_and_reset_all_move_and_clear_the_raid_seat()
+    fakePreview()
+    edit(); setSnap(false)
+    FS.LayoutEdit.Enter()
+    FS.LayoutEdit.Select("raid")
+    key("RIGHT")
+    eq(override("raid").x, -503.5); eq(override("raid").y, 72)
+    __shift = true
+    key("DOWN")
+    eq(override("raid").y, 64, "Shift nudges by the grid step")
+    FS.LayoutEdit.ResetAll()
+    eq(override("raid"), nil, "reset all clears it")
+    local h = FS.LayoutEdit.GetHandle("raid")
+    local left, top = FS.RaidFrames.Preview.Rect()
+    near(h:GetLeft(), left, 1e-6, "and the handle goes back with it")
+end
+
+function T.the_raid_handle_follows_a_resized_preview()
+    local pv = fakePreview()
+    edit()
+    FS.LayoutEdit.Enter()
+    local h = FS.LayoutEdit.GetHandle("raid")
+    local before = h:GetWidth()
+    pv.SetSize(40)
+    eq(h:GetWidth() > before, true, "the handle took the bigger grid")
+    near(h:GetWidth(), select(3, pv.Rect()), 1e-6)
+end
+
+function T.the_panel_has_a_size_button_per_raid_size_and_a_click_asks_for_it()
+    local pv = fakePreview()
+    edit()
+    FS.LayoutEdit.Enter()
+    local panel = FS.LayoutEdit.GetDonePanel()
+    eq(#panel.sizeButtons, 6)
+    eq(panel._h > 44, true, "a second row")
+    local labels = {}
+    for i, b in ipairs(panel.sizeButtons) do labels[i] = b._text end
+    eq(table.concat(labels, ","), "5,10,15,20,25,40")
+    local function accentOf(button)
+        local found
+        for _, c in ipairs(__themed.text) do if c.button == button then found = c.opts.accent end end
+        return found
+    end
+    eq(accentOf(panel.sizeButtons[2]), "cyan", "the current size is cyan")
+    eq(accentOf(panel.sizeButtons[1]), "violet")
+    local b = panel.sizeButtons[5]
+    b._scripts.OnClick(b)
+    eq(pv.asked[1], 25)
+    eq(accentOf(panel.sizeButtons[5]), "cyan", "the pick moves the accent")
+    eq(accentOf(panel.sizeButtons[2]), "violet")
+    -- Each button tells what it does.
+    b._scripts.OnEnter(b)
+    eq(GameTooltip._text:find("25", 1, true) ~= nil, true)
+    b._scripts.OnLeave(b)
+    eq(GameTooltip._shown, false)
+    -- The row never reaches past the panel.
+    for _, button in ipairs(panel.sizeButtons) do
+        local p = button._points[1]
+        eq(p.x >= 0 and p.x + button._w <= panel._w, true, "inside the panel")
+        eq(-p.y + button._h <= panel._h, true, "inside the panel")
+    end
+end
+
+function T.the_layout_page_offers_the_raid_preview()
+    FS.ConfigWindow = fakeWindow()
+    local pv = fakePreview()
+    edit(); seat("stance")
+    FS.ConfigWindow.categories[1].build(CreateFrame())
+    local calls = FS.ConfigWindow.calls
+    local function find(name, pred)
+        for _, c in ipairs(calls) do if c.name == name and pred(c) then return c end end
+    end
+    local header = find("Header", function(c) return c.spec == "Raid frames" end)
+    eq(header ~= nil, true); eq(type(header.tip), "string", "the ? tip")
+    eq(header.tip:find("\226\128\148"), nil, "no em dash")
+    local seg = find("Segmented", function(c) return c.spec.key == pv.KEY end)
+    eq(seg ~= nil, true, "a size control"); eq(seg.spec.label, "Preview size")
+    local values = {}
+    for _, o in ipairs(seg.spec.options) do values[#values + 1] = o.value .. ":" .. o.text end
+    eq(table.concat(values, ","), "5:5,10:10,15:15,20:20,25:25,40:40")
+    local move = find("Button", function(c) return c.spec.text == "MOVE RAID FRAMES" end)
+    eq(move ~= nil, true, "a way in")
+    eq(move.spec.big, nil, "EDIT LAYOUT stays the one big button")
+    move.spec.onClick()
+    eq(FS.ConfigWindow.closed, 1, "the window closes")
+    eq(FS.LayoutEdit.IsEditing(), true)
+    eq(pv.shown, true, "the preview is up")
+    clickDone()
+    eq(FS.ConfigWindow.opened[1], "layout", "DONE brings the Layout page back")
+end
+
+function T.the_layout_page_has_no_raid_section_without_the_raid_frames()
+    FS.ConfigWindow = fakeWindow()
+    edit()
+    FS.ConfigWindow.categories[1].build(CreateFrame())
+    for _, c in ipairs(FS.ConfigWindow.calls) do
+        if c.name == "Header" and c.spec == "Raid frames" then error("a raid section with nothing to preview") end
+        if c.name == "Button" and c.spec.text == "MOVE RAID FRAMES" then error("a raid button with nothing to preview") end
+    end
+end
+
 __checks = T
 """
 

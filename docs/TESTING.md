@@ -287,11 +287,11 @@ Out of combat only. Close Blizzard Edit Mode first.
 2. Drag a box. On release the piece moves there and snaps to the grid.
 3. Click a box, then press the arrow keys: 1 unit per press, Shift+arrow moves one grid step. (Keys that are not arrows or Esc should still reach the game; report it if movement keys stop working.)
 4. Right-click a box: that piece goes back to its default seat.
-5. A small LAYOUT EDIT panel with a DONE button sits top-centre while editing. DONE or Esc leaves; positions are already saved as you drop. Starting a fight leaves too and drops a drag in progress.
+5. A small LAYOUT EDIT panel with a DONE button sits top-centre while editing, with a RAID row of size buttons under it (5 10 15 20 25 40). DONE or Esc leaves; positions are already saved as you drop. Starting a fight leaves too and drops a drag in progress.
    The DONE bar can cover a box seated under it (buffs, minimap): a box is selected only by clicking it, so click its visible part, then use the arrow keys.
 6. Check the minimap moves with its addon tray, the chat keeps its minimised and maximised states, and the pet panel (floating, not on the Console) follows the box.
 7. `/reload`: every position holds. `/fsedit reset all`, then `/fsedit reset all confirm` puts everything back.
-8. The Layout page of `/fsconfig` has the same controls: EDIT LAYOUT, snap on/off, grid size 4/8/16/32, and Reset all positions.
+8. The Layout page of `/fsconfig` has the same controls: EDIT LAYOUT, snap on/off, grid size 4/8/16/32, and Reset all positions, plus a Raid frames section (a preview size and MOVE RAID FRAMES; see Raid frames below).
 9. EDIT LAYOUT closes the settings window; DONE or Esc reopens it on the Layout page. Leaving after `/fsedit`, by a fight, or by Blizzard Edit Mode does not open it.
 
 ## Moving the tooltip
@@ -401,6 +401,15 @@ Not yet checked in game. Mocked checks cover the grid, the looks, the combat rul
 7. Someone joins or leaves in combat: the grid changes size and look only when the fight ends (a new member's box can appear to the right until then). Nothing prints an "action blocked" error.
 8. Turn "Show raid frames" off: the grid hides and the party frames come back at once; the row shows "Reload to restore the game's raid frames" with a Reload button. Reload: the game's raid frames are back. Turn it on again: ours return.
 9. Leave the raid: the grid hides and the party frames show as before.
+
+Moving the grid and the preview (not yet checked in game; mocked checks only). A `/reload` after updating is enough, no full restart:
+
+10. Open the editor: `/fsedit`, Move on the "Move raid frames" row of the Unit Frames page, or MOVE RAID FRAMES on the Layout page. A preview raid appears where the grid sits (on the party frames' top left until you move it), with a cyan "Raid frames" handle over it, even when you are not in a raid. It shows over the party frames if you have a party. The panel's RAID row has 5, 10, 15, 20, 25 and 40, the current size in cyan. Click each size: 5 and 10 draw the mini boxes, 15 and up the tiles, in group columns of five with G1 and so on above them (G1 pink, the rest violet). The handle covers the preview exactly at every size. Report any difference in look between the preview and the real grid at the same size; there should be none.
+11. The fake members: a spread of classes, roles and first names; your own box with the pink tick and your name; one member under 35% (red edge, red percent), one dead (DEAD, dashed edge), one offline (OFF), one out of range (faded). Even at size 5 each of those four shows.
+12. Drag the Raid frames handle elsewhere, then DONE or Esc. In a raid, the grid now sits where you dropped it, snapped to the grid, and no longer follows the party frames: move the party frames and it stays. Arrows and Shift+arrow nudge it from where it sits. `/reload`: it stays.
+13. Right-click the handle, or press Reset on the "Reset raid position" row, or Reset all positions: the grid follows the party frames again, wherever they are. Opening the editor and closing it without moving the grid leaves it following the party frames.
+14. In a raid, the preview takes the real grid's place on screen while the editor is up (the real grid is only made invisible) and the real grid is back when you leave, in its current look. Start a fight with the editor up: it leaves, the preview goes, the real grid returns, and no "action blocked" error prints. The editor refuses to start in combat.
+15. The preview size on the Layout page ("Preview size") and on the panel are one setting: change one with the editor open and the other follows. It survives `/reload`.
 
 ## Professions panel: /fsprof
 

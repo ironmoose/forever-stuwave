@@ -2507,6 +2507,7 @@ end
 -- APIs; UpdateRowLowHealth drives any frame with `.unit`, `.lowHealthTargets` and `.lowHealthBase`.
 PartyFrames.shared = {
     UpdateRowLowHealth = UpdateRowLowHealth,
+    LOW_HP_FRACTION = LOW_HP_FRACTION,
     UpdateHealthPercentText = UpdateHealthPercentText,
     RowDownState = RowDownState,
     ReadHealthMax = ReadHealthMax,

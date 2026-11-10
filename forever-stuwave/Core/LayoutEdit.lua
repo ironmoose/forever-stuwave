@@ -2,6 +2,9 @@
 -- /fsedit: an edit mode that lays one insecure drag handle over each movable frame and
 -- writes the drop through FS.Layout.SetOverride. The covered frames are never dragged, so
 -- secure ones stay untouched. Loads after the modules whose frames it reads (see .toc).
+-- The raid grid has no frame of its own to cover while it follows the party frame, so while
+-- the editor is on RaidFrames.lua shows a preview grid (fake members, a size per button on
+-- the panel) at the raid's seat, and the Raid frames handle covers that.
 
 local _, FS = ...
 
@@ -14,7 +17,8 @@ local GRID_DEFAULT = 8
 local MIN_HANDLE = 12
 local EDGE = 2
 local PAGE_KEY = "layout"
-local DONE_W, DONE_H, PANEL_W, PANEL_H = 64, 24, 214, 44
+local DONE_W, DONE_H, PANEL_W, PANEL_H = 64, 24, 246, 44
+local SIZE_W, SIZE_H, SIZE_GAP, SIZE_ROW = 26, 20, 3, 28   -- the raid size buttons and the row they sit in, under the title row
 
 -- Display order is also the label table; an id without an applied frame gets no handle.
 local MOVABLE = {
@@ -25,6 +29,7 @@ local MOVABLE = {
     { id = "buffs",        label = "Buffs" },
     { id = "debuffs",      label = "Debuffs" },
     { id = "party",        label = "Party" },
+    { id = "raid",         label = "Raid frames" },
     { id = "focus",        label = "Focus" },
     { id = "boss",         label = "Boss" },
     { id = "stance",       label = "Stance bar" },
@@ -44,6 +49,21 @@ local function Provider(id)
         local seat = FS.TrackerSeat
         if type(seat) == "table" and type(seat.Ready) == "function" then return seat end
     end
+end
+
+-- The raid grid's editor preview (RaidFrames.lua), or nil where the raid frames did not load. The grid is not seated by
+-- FS.Layout until it has a seat of its own, so it has no applied frame for a handle to cover; its handle covers this.
+local function RaidPreview()
+    local raid = FS.RaidFrames
+    local preview = type(raid) == "table" and raid.Preview
+    if type(preview) == "table" and type(preview.Show) == "function" and type(preview.Rect) == "function" then
+        return preview
+    end
+end
+
+local function RaidPreviewUp()
+    local preview = RaidPreview()
+    return preview ~= nil and preview.IsShown() == true and preview.Rect() ~= nil
 end
 
 local ARROWS = { UP = { 0, 1 }, DOWN = { 0, -1 }, LEFT = { -1, 0 }, RIGHT = { 1, 0 } }
@@ -135,6 +155,7 @@ local function StackAIdle(id)
 end
 
 local function HasHandle(id)
+    if id == "raid" then return RaidPreviewUp() end
     local provider = Provider(id)
     if provider then return provider.Ready() == true and provider.Rect() ~= nil end
     if id == "objectives" then return false end
@@ -178,9 +199,25 @@ local function ReadLayoutXY(id, handle)
     return (hx - px) / scale, (hy - py) / scale
 end
 
+-- Where the raid grid's top left sits, in the raid entry's units, read off the preview (the grid follows the party frame
+-- until it has a seat of its own, so FS.Layout.raid is then only the fallback point).
+local function RaidSeatXY()
+    local preview = RaidPreview()
+    if not preview then return nil end
+    local left, top = preview.Rect()
+    local px, py = PointXY(UIParent, FS.Layout.raid.relPoint)
+    if not (left and px) then return nil end
+    local scale = UnitScale("raid")
+    return (left - px) / scale, (top - py) / scale
+end
+
 local function CurrentXY(id)
     local provider = Provider(id)
     if provider then return provider.Offsets() end
+    if id == "raid" and not FS.Layout.HasOverride("raid") then
+        local x, y = RaidSeatXY()
+        if x then return x, y end
+    end
     local L = FS.Layout[id]
     if id == "petcontainer" and LegacyPetPosition() and handles[id] then
         local x, y = ReadLayoutXY(id, handles[id])
@@ -192,16 +229,29 @@ end
 -- Puts the handle on the frame's layout rect, from layout coordinates and not from the frame.
 -- A pet panel still holding an old /fspet drag position is the exception: that position wins
 -- over the layout until the first move, so its handle starts on the frame itself.
-local function SyncProviderHandle(id, provider)
-    local handle = handles[id]
-    local left, top, width, height = provider.Rect()
-    if not (handle and left) then return end
+local function SeatHandleOnRect(handle, left, top, width, height)
     handle:SetSize(math.max(width, MIN_HANDLE), math.max(height, MIN_HANDLE))
     handle:ClearAllPoints()
     handle:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
 end
 
+local function SyncProviderHandle(id, provider)
+    local handle = handles[id]
+    local left, top, width, height = provider.Rect()
+    if not (handle and left) then return end
+    SeatHandleOnRect(handle, left, top, width, height)
+end
+
+-- The raid handle sits on the preview grid, whatever its size and seat.
+local function SyncRaidHandle()
+    local handle, preview = handles.raid, RaidPreview()
+    if not (handle and preview) then return end
+    local left, top, width, height = preview.Rect()
+    if left then SeatHandleOnRect(handle, left, top, width, height) end
+end
+
 local function SyncHandle(id)
+    if id == "raid" then return SyncRaidHandle() end
     local provider = Provider(id)
     if provider then return SyncProviderHandle(id, provider) end
     local handle, L = handles[id], FS.Layout[id]
@@ -251,6 +301,12 @@ end
 
 -- A frame can leave the re-seat list mid-edit (the pet docking). Its handle goes with it.
 local function FrameGone(id)
+    if id == "raid" and not RaidPreviewUp() then
+        if handles[id] then handles[id]:Hide() end
+        if selected == id then selected = nil end
+        return true
+    end
+    if id == "raid" then return false end
     local provider = Provider(id)
     if provider and provider.Ready() then return false end
     if AppliedFrame(id) then return false end
@@ -290,7 +346,9 @@ local function Commit(id, x, y)
     local L = Layout[id]
     if FrameGone(id) then return false end
     local oldX, oldY = L.x, L.y
-    if math.abs(x - oldX) < 0.25 and math.abs(y - oldY) < 0.25 and not (id == "petcontainer" and LegacyPetPosition()) then
+    if id == "raid" then oldX, oldY = CurrentXY(id) end   -- a grid following the party frame is not at the entry's x and y
+    if oldX and oldY and math.abs(x - oldX) < 0.25 and math.abs(y - oldY) < 0.25
+        and not (id == "petcontainer" and LegacyPetPosition()) then
         SyncHandle(id)
         return false
     end
@@ -456,26 +514,77 @@ end
 -- Edit mode
 -------------------------------------------------------------------------------
 
+-- The raid size buttons: one per preview size, the current one in the cyan accent and the rest violet (the config page's
+-- segmented control reads the same way). The size is the saved setting, so a change from the config page lands here too.
+local function RefreshSizeButtons()
+    local buttons = donePanel and donePanel.sizeButtons
+    local preview = RaidPreview()
+    local skins = FS.ButtonSkins
+    if not (buttons and preview and skins and skins.SkinTextButton) then return end
+    local current = preview.Size()
+    for _, button in ipairs(buttons) do
+        skins.SkinTextButton(button, { accent = button.raidSize == current and "cyan" or "violet" })
+    end
+end
+
+local function NewSizeButton(panel, preview, size, index)
+    local button = CreateFrame("Button", nil, panel)
+    button.raidSize = size
+    button:SetSize(SIZE_W, SIZE_H)
+    local left = PANEL_W - 10 - (#preview.SIZES * (SIZE_W + SIZE_GAP) - SIZE_GAP)
+    button:SetPoint("TOPLEFT", panel, "TOPLEFT", left + (index - 1) * (SIZE_W + SIZE_GAP), -PANEL_H)
+    button:RegisterForClicks("LeftButtonUp")
+    button:SetNormalFontObject(_G.GameFontNormal)
+    button:SetText(tostring(size))
+    button:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:SetText(("Preview a raid of %d. Up to 10 draws mini boxes, more draws tiles."):format(size), 1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    button:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    button:SetScript("OnClick", function() preview.SetSize(size) end)
+    return button
+end
+
+-- A second row under the title: "RAID" and a button per size. Only where the raid frames loaded.
+local function BuildSizeRow(panel, preview)
+    local Theme = FS.Theme
+    local c = Theme and Theme.COLOR_STEEL
+    local label = panel:CreateFontString(nil, "OVERLAY")
+    if Theme and Theme.ApplyMono then
+        local r, g, b = Cyan()
+        Theme.ApplyMono(label, 10, c or { r, g, b, 0.7 })
+    end
+    label:SetPoint("LEFT", panel, "TOPLEFT", 16, -(PANEL_H + SIZE_H / 2))
+    label:SetText("RAID")
+    panel.sizeLabel = label
+    panel.sizeButtons = {}
+    for index, size in ipairs(preview.SIZES) do
+        panel.sizeButtons[index] = NewSizeButton(panel, preview, size, index)
+    end
+end
+
 -- A plain insecure panel above the handles; the overlay under them keeps the mouse off.
 local function NewDonePanel()
     local Theme = FS.Theme
     local r, g, b = Cyan()
+    local preview = RaidPreview()
     local panel = CreateFrame("Frame", nil, UIParent)
     panel:SetFrameStrata("FULLSCREEN_DIALOG")
     panel:SetFrameLevel(30)
-    panel:SetSize(PANEL_W, PANEL_H)
+    panel:SetSize(PANEL_W, preview and PANEL_H + SIZE_ROW or PANEL_H)
     panel:SetPoint("TOP", UIParent, "TOP", 0, -24)
     panel:EnableMouse(true)
     if Theme and Theme.SkinPanel then Theme.SkinPanel(panel, { strip = false, scanline = false }) end
 
     panel.title = panel:CreateFontString(nil, "OVERLAY")
     if Theme and Theme.ApplyMono then Theme.ApplyMono(panel.title, 11, { r, g, b, 1 }) end
-    panel.title:SetPoint("LEFT", panel, "LEFT", 16, 0)
+    panel.title:SetPoint("LEFT", panel, "TOPLEFT", 16, -PANEL_H / 2)
     panel.title:SetText("LAYOUT EDIT")
 
     local done = CreateFrame("Button", nil, panel)
     done:SetSize(DONE_W, DONE_H)
-    done:SetPoint("RIGHT", panel, "RIGHT", -10, 0)
+    done:SetPoint("RIGHT", panel, "TOPRIGHT", -10, -PANEL_H / 2)
     done:RegisterForClicks("LeftButtonUp")
     -- A Button needs a font object before it can hold text.
     done:SetNormalFontObject(_G.GameFontNormal)
@@ -494,6 +603,7 @@ local function NewDonePanel()
     -- The shared STUwave text button in cyan: the plate, ring and halo, hover and pressed looks, the label fonts.
     if FS.ButtonSkins and FS.ButtonSkins.SkinTextButton then FS.ButtonSkins.SkinTextButton(done, { accent = "cyan" }) end
     panel.done = done
+    if preview then BuildSizeRow(panel, preview) end
     panel:Hide()
     return panel
 end
@@ -583,6 +693,10 @@ function LayoutEdit.Enter()
     local ok, err = pcall(function()
         EnsureOverlay()
         donePanel = donePanel or NewDonePanel()
+        -- The preview first: the raid handle covers it. The saved size may have changed since the panel was built.
+        local preview = RaidPreview()
+        if preview then preview.Show() end
+        RefreshSizeButtons()
         chatSkipped = ShowHandles()
         overlay:Show()
         overlay:EnableKeyboard(true)
@@ -594,6 +708,14 @@ function LayoutEdit.Enter()
         return false
     end
     Say("layout editor on: drag a piece, arrows nudge, Shift+arrow by the grid, right-click resets one, Esc leaves")
+    -- A preview shown this very frame may not have a rect to measure yet: its handle follows a moment later.
+    local preview = RaidPreview()
+    if preview and preview.IsShown() and not (handles.raid and handles.raid:IsShown())
+        and C_Timer and C_Timer.After then
+        C_Timer.After(0.1, function()
+            if editing then ShowHandles() end
+        end)
+    end
     if chatSkipped then Say("restore the chat from minimised or maximised to move it") end
     return true
 end
@@ -613,6 +735,8 @@ function LayoutEdit.Exit()
         overlay:Hide()
     end
     if donePanel then donePanel:Hide() end
+    local preview = RaidPreview()
+    if preview then pcall(preview.Hide) end
     Say("layout editor off")
 end
 
@@ -699,6 +823,26 @@ local function BuildPage(content)
             onClick = function() LayoutEdit.EnterFromConfig(PAGE_KEY) end,
         })
     end
+    local preview = RaidPreview()
+    if preview then
+        if UI.Header then
+            UI.Header(content, "Raid frames",
+                "Shows a preview raid while you edit, so you can place the grid without being in one. Pick a size here "
+                .. "or on the editor's panel: up to 10 draws mini boxes, more draws tiles. The grid follows the party "
+                .. "frames until you move it; right-click its handle to make it follow them again.")
+        end
+        if UI.Segmented then
+            local options = {}
+            for index, size in ipairs(preview.SIZES) do options[index] = { value = size, text = tostring(size) } end
+            UI.Segmented(content, { label = "Preview size", key = preview.KEY, options = options })
+        end
+        if UI.Button then
+            UI.Button(content, {
+                text = "MOVE RAID FRAMES",
+                onClick = function() LayoutEdit.EnterFromConfig(PAGE_KEY) end,
+            })
+        end
+    end
     if UI.Header then UI.Header(content, "Snapping") end
     if UI.Toggle then
         UI.Toggle(content, { label = "Snap to grid", key = "layout.snap" })
@@ -737,6 +881,18 @@ end
 
 HookBlizzardEditMode()
 RegisterPage()
+
+-- A preview resized or re-seated (a size button, the config page, a move of the raid's seat) takes its handle with it.
+do
+    local preview = RaidPreview()
+    if preview and type(preview.OnChange) == "function" then
+        preview.OnChange(function()
+            if not editing then return end
+            if handles.raid and handles.raid:IsShown() then SyncHandle("raid") end
+            RefreshSizeButtons()
+        end)
+    end
+end
 
 -- The Gunsight switch can flip while /fsedit is open (the editor stays open through the config window's
 -- toggle): Stack A's cast bars gain or lose their handles with it. GunsightTape.lua loads before this file, so

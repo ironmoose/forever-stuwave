@@ -661,6 +661,35 @@ function T.is_overridden_reads_the_saved_store_loaded_at_login()
     eq(FS.Layout.IsOverridden("pcast"), false, "a store from a newer addon is ignored, so the seat is the shipped one")
 end
 
+-- HasOverride: the raid grid follows the party frames until its own entry has a saved seat, and a seat the player
+-- dropped exactly on the shipped one still counts (IsOverridden would call that "not moved").
+function T.has_override_tells_a_saved_seat_from_none_even_on_the_shipped_seat()
+    useStore()
+    eq(FS.Layout.HasOverride("raid"), false, "nothing saved")
+    eq(FS.Layout.SetOverride("raid", -300, 40), true)
+    eq(FS.Layout.HasOverride("raid"), true, "a dragged seat")
+    eq(FS.Layout.HasOverride("party"), false, "another id is not touched")
+    eq(FS.Layout.ClearOverride("raid"), true)
+    eq(FS.Layout.HasOverride("raid"), false, "reset")
+    eq(FS.Layout.SetOverride("raid", FS.Layout.raid.x, FS.Layout.raid.y), true)
+    eq(FS.Layout.HasOverride("raid"), true, "saved on the shipped seat")
+    eq(FS.Layout.IsOverridden("raid"), false, "which IsOverridden does not call moved")
+    FS.Layout.ClearAllOverrides()
+    eq(FS.Layout.HasOverride("raid"), false, "reset all")
+end
+
+function T.has_override_ignores_junk_ids_unusable_values_and_a_newer_store()
+    eq(FS.Layout.HasOverride("raid"), false, "no store bound")
+    useStore({ v = 1, frames = { raid = { x = 11, y = -22 }, party = { x = 1e9, y = 0 }, boss = "x" } })
+    eq(FS.Layout.HasOverride("raid"), true, "a saved seat read at login")
+    eq(FS.Layout.HasOverride("party"), false, "an out of range value is ignored like LoadOverrides does")
+    eq(FS.Layout.HasOverride("boss"), false, "a malformed entry")
+    eq(FS.Layout.HasOverride(nil), false)
+    eq(FS.Layout.HasOverride(7), false)
+    FS.Layout.UseStore({ v = 2, frames = { raid = { x = 11, y = -22 } } })
+    eq(FS.Layout.HasOverride("raid"), false, "a store from a newer addon is ignored")
+end
+
 -- CONSOLE_CAST_GAP sits beside CONSOLE_PET_GAP: the clearance Stack A keeps over the Console art.
 function T.console_cast_gap_is_a_positive_design_px_number_beside_the_pet_gap()
     eq(type(FS.Layout.CONSOLE_CAST_GAP), "number", "CONSOLE_CAST_GAP")

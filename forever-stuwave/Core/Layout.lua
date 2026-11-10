@@ -30,8 +30,10 @@ FS.Layout = FS.Layout or {
     party       = { point = "CENTER", relPoint = "CENTER", x = -389,  y = -75,  w = 231,  h = 294 },
     -- The raid grid (RaidFrames.lua) takes the party frame's seat in a raid: its TOP LEFT is the party
     -- container's top left (-389 - 231 / 2, -75 + 294 / 2), which is where it anchors, so it follows a moved
-    -- or re-snapped party frame. This entry is only the fallback seat with no party container. The grid
-    -- sizes itself from the cells it shows (noSize); w/h record the 40 member grid (8 columns of tiles).
+    -- or re-snapped party frame, until the layout editor saves a seat of its own for this entry
+    -- (HasOverride): then the grid and the editor's preview sit at x, y here and stop following. Without
+    -- a party container this entry is the seat. The grid sizes itself from the cells it shows (noSize);
+    -- w/h record the 40 member grid (8 columns of tiles).
     raid        = { point = "TOPLEFT", relPoint = "CENTER", x = -504.5, y = 72, w = 485, h = 224, noSize = true },
     boss        = { point = "CENTER", relPoint = "CENTER", x = 728,   y = 152,  w = 210,  h = 210 },
     -- Stack A's two cast bars (CastBars.lua), the cast display while the Gunsight HUD is off. UI units,
@@ -507,6 +509,16 @@ end
 function FS.Layout.IsOverridden(id)
     local def, L = FS.Layout._defaults[id], SeatEntry(id)
     return def ~= nil and L ~= nil and (L.x ~= def.x or L.y ~= def.y)
+end
+
+-- True when the active layout holds a saved seat for `id`, one LoadOverrides would apply, even a seat equal to
+-- the shipped one (IsOverridden calls that unmoved). A piece that follows another frame until it has a seat of
+-- its own, the raid grid under the party frames, asks this.
+function FS.Layout.HasOverride(id)
+    if type(id) ~= "string" then return false end
+    local frames = OverrideStore()
+    local pos = frames and frames[id]
+    return type(pos) == "table" and IsUsableOffset(pos.x) and IsUsableOffset(pos.y)
 end
 
 -- Seats every applied frame `matches` accepts. A frame held back in combat is left to the

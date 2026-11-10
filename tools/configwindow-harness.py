@@ -1466,6 +1466,58 @@ function T.the_raid_frames_switch_sits_under_the_party_frames_switch()
     eq(#texts(row("Show raid frames")), 3, "label, state and the ? icon: no reload prompt while nothing is owed")
 end
 
+local function withRaidPreview()
+    withRaidFrames()
+    FS.RaidFrames.Preview = { KEY = "raid.previewSize", SIZES = { 5, 10, 15, 20, 25, 40 } }
+end
+
+function T.the_raid_move_and_reset_rows_need_the_raid_preview()
+    local W = boot({ preWindow = withRaidFrames })
+    W.Open("unitframes")
+    no(row("Move raid frames"), "no preview, no Move row")
+    no(row("Reset raid position"), "and no Reset row")
+    W = boot({ preWindow = withRaidPreview })
+    W.Open("unitframes")
+    local party, panels = headerY("PARTY FRAMES"), headerY("PANELS")
+    local reset, moveRaid, resetRaid = rowY("Reset position"), rowY("Move raid frames"), rowY("Reset raid position")
+    yes(moveRaid and resetRaid, "both rows")
+    yes(party < reset and reset < moveRaid and moveRaid < resetRaid and resetRaid < panels,
+        "under the party rows, inside the group")
+    eq(#texts(row("Move raid frames")), 3, "label, button and the ? icon")
+    eq(#texts(row("Reset raid position")), 3, "label, button and the ? icon")
+    yes(findText("Move", row("Move raid frames")) and findText("Reset", row("Reset raid position")))
+    local tip = tipOfRow("Move raid frames")
+    yes(tip and tip:find("preview", 1, true) and tip:find("follows the party", 1, true), tostring(tip))
+    yes(not tip:find("\226\128\148", 1, true), "no em dash")
+end
+
+function T.raid_move_hands_over_to_the_editor_and_reset_follows_the_party_again()
+    local W = boot({ preWindow = withRaidPreview })
+    W.Open("unitframes")
+    local E = stubLayoutEdit()
+    yes(click("Move", row("Move raid frames")))
+    eq(#E.entered, 1)
+    eq(E.entered[1], "unitframes", "DONE or Esc comes back to this page")
+    click("Reset", row("Reset raid position"))
+    yes(dialog():IsVisible(), "it asks first")
+    eq(#E.resets, 0)
+    click("Confirm", dialog())
+    eq(E.resets[1], "raid", "the raid grid only, not the party frames")
+    eq(#__errors, 0)
+end
+
+function T.raid_move_and_reset_say_so_when_the_layout_editor_is_not_there()
+    local W = boot({ preWindow = withRaidPreview })
+    W.Open("unitframes")
+    click("Move", row("Move raid frames"))
+    yes(printedHas("layout editor"), "Move says it cannot")
+    __printed = {}
+    click("Reset", row("Reset raid position"))
+    click("Confirm", dialog())
+    yes(printedHas("layout editor"), "and so does Reset")
+    eq(#__errors, 0)
+end
+
 function T.the_raid_frames_switch_is_left_out_without_the_raid_frames()
     local W = boot({ preWindow = withPartyFrames })
     W.Open("unitframes")

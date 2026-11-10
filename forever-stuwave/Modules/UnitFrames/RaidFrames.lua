@@ -6,7 +6,10 @@
 -- shrunk to a cell), at ten members or fewer, and C, tiles that fill bottom up, at eleven or more. Each raid subgroup
 -- with members is one column, the player's own group first.
 -- In a raid the grid takes the party frame's seat (its top left is the party container's top left) and the party rows
--- hide; outside a raid the grid hides and the party rows are untouched. Its own switch, "raid.shown", is apart from the
+-- hide; outside a raid the grid hides and the party rows are untouched. The grid follows the party frame until the layout
+-- editor saves a seat of its own for the "raid" layout entry; from then on it sits there, and resetting that entry sends
+-- it back to the party. While the editor is on, a preview grid of plain frames (see "Editor preview" below) shows at the
+-- same seat in every size, so the grid can be placed without a raid. Its own switch, "raid.shown", is apart from the
 -- party switch. While it is on, Blizzard's raid frames are dimmed the dim-not-hide way; while it is off they are never
 -- touched.
 -- Health, power, range and names can be secret here (12.0): every one goes only to engine setters, SetText or
@@ -163,9 +166,8 @@ end
 
 local classColors = {}
 
--- The class colour of `unit` (PlainClassFile's rule, UnitFrames.lua): a secret or missing token is the flat pink.
-local function ClassColor(unit)
-    local _, classFile = UnitClass(unit)
+-- The colour of a class token (PlainClassFile's rule, UnitFrames.lua): a secret or missing token is the flat pink.
+local function ClassColorOf(classFile)
     if IsSecret(classFile) or type(classFile) ~= "string" then return COLOR_HEALTH end
     local cached = classColors[classFile]
     if cached then return cached end
@@ -174,6 +176,11 @@ local function ClassColor(unit)
     cached = { c.r, c.g, c.b, 1 }
     classColors[classFile] = cached
     return cached
+end
+
+local function ClassColor(unit)
+    local _, classFile = UnitClass(unit)
+    return ClassColorOf(classFile)
 end
 
 local function SetColor(text, color, alpha)
@@ -421,9 +428,10 @@ local function PaintTileFill(parts, color)
     if not ok then parts.health:SetStatusBarColor(r, g, b, GRADIENT_ALPHA) end
 end
 
-local function UpdateClass(cell)
+-- The paint half of every step below takes plain values and no unit, so the editor preview (further down) draws a fake
+-- member through the very same code the real cells use.
+local function PaintClass(cell, color)
     local parts = cell.parts
-    local color = ClassColor(cell.unit)
     cell.classColor = color
     PaintName(cell)
     if cell.down then return end
@@ -434,10 +442,13 @@ local function UpdateClass(cell)
     end
 end
 
-local function UpdateHealth(cell)
+local function UpdateClass(cell)
+    PaintClass(cell, ClassColor(cell.unit))
+end
+
+-- The cell's look for its state, down (dead or offline) or live; the values and the edge come after. Returns down.
+local function PaintHealthState(cell, offline, dead)
     local parts = cell.parts
-    local unit = cell.unit
-    local offline, dead = RowDownState(unit)
     local down = (offline or dead) and true or false
     cell.down = down
     local health = parts.health
@@ -471,11 +482,21 @@ local function UpdateHealth(cell)
             parts.corners:Show()
             parts.mana:Show()
         end
+    end
+    return down
+end
+
+local function UpdateHealth(cell)
+    local parts = cell.parts
+    local unit = cell.unit
+    local offline, dead = RowDownState(unit)
+    local down = PaintHealthState(cell, offline, dead)
+    if not down then
         local cur = UnitHealth(unit)
         if not IsSecret(cur) and cur == nil then cur = 0 end
         local max = ReadHealthMax(unit)
-        health:SetMinMaxValues(0, max)
-        health:SetValue(cur)
+        parts.health:SetMinMaxValues(0, max)
+        parts.health:SetValue(cur)
         UpdateHealthPercentText(parts.pct, unit, cur, max)
     end
     PaintName(cell)
@@ -483,18 +504,11 @@ local function UpdateHealth(cell)
     ApplyEdge(cell)
 end
 
--- Raid members are players, so the mana line always shows; a secret max goes straight to the setter.
-local function UpdatePower(cell)
+local function PaintPower(cell, cur, max, powerType)
     local parts = cell.parts
-    local unit = cell.unit
-    local max = UnitPowerMax(unit)
-    if not IsSecret(max) and (type(max) ~= "number" or max <= 0) then max = 1 end
-    local cur = UnitPower(unit)
-    if not IsSecret(cur) and type(cur) ~= "number" then cur = 0 end
     local mana = parts.mana
     mana:SetMinMaxValues(0, max)
     mana:SetValue(cur)
-    local powerType = UnitPowerType(unit)
     local color = (not IsSecret(powerType) and POWER_COLORS[powerType]) or COLOR_POWER
     if parts.look == "A" then
         SetLaserRailColor(mana, color[1], color[2], color[3])
@@ -503,11 +517,19 @@ local function UpdatePower(cell)
     end
 end
 
+-- Raid members are players, so the mana line always shows; a secret max goes straight to the setter.
+local function UpdatePower(cell)
+    local unit = cell.unit
+    local max = UnitPowerMax(unit)
+    if not IsSecret(max) and (type(max) ~= "number" or max <= 0) then max = 1 end
+    local cur = UnitPower(unit)
+    if not IsSecret(cur) and type(cur) ~= "number" then cur = 0 end
+    PaintPower(cell, cur, max, UnitPowerType(unit))
+end
+
 -- The first name only (UnitName; the cell is too small for a surname), upper-cased in look A when it is a plain
 -- string. A secret name goes to SetText untouched, and the font string truncates it.
-local function UpdateName(cell)
-    local parts = cell.parts
-    local name = UnitName(cell.unit)
+local function PaintNameText(parts, name)
     if IsSecret(name) then
         parts.name:SetText(name)
     elseif type(name) ~= "string" then
@@ -517,9 +539,11 @@ local function UpdateName(cell)
     end
 end
 
-local function UpdateRole(cell)
-    local parts = cell.parts
-    local role = HAS.ROLE_API and UnitGroupRolesAssigned(cell.unit) or nil
+local function UpdateName(cell)
+    PaintNameText(cell.parts, UnitName(cell.unit))
+end
+
+local function PaintRole(parts, role)
     local style = not IsSecret(role) and role and ROLE_STYLE[role]
     if not style then
         parts.role:Hide()
@@ -528,6 +552,10 @@ local function UpdateRole(cell)
     parts.role:SetText(style[1])
     SetColor(parts.role, style[2])
     parts.role:Show()
+end
+
+local function UpdateRole(cell)
+    PaintRole(cell.parts, HAS.ROLE_API and UnitGroupRolesAssigned(cell.unit) or nil)
 end
 
 -- Event driven only (UNIT_AURA, the regen rescan and FS.OnAurasReadable), never on a ticker, and never under lockdown:
@@ -623,73 +651,115 @@ end
 -- Layout (out of combat only: the container, the content frame and every cell are protected)
 -------------------------------------------------------------------------------
 
+-- Gives one cell a look, building its pieces the first time. A cell holds both looks and shows one.
+local function LookCell(cell, id)
+    local parts = cell.looks[id]
+    if not parts then
+        parts = BUILDERS[id](cell)
+        cell.looks[id] = parts
+    end
+    for other, otherParts in pairs(cell.looks) do otherParts.frame:SetShown(other == id) end
+    cell.parts = parts
+    cell.lowHealthTargets, cell.lowHealthBase = parts.lowTargets, parts.lowBase
+end
+
 local function UseLook(id)
     if state.look == id then return end
-    for _, cell in ipairs(cells) do
-        local parts = cell.looks[id]
-        if not parts then
-            parts = BUILDERS[id](cell)
-            cell.looks[id] = parts
-        end
-        for other, otherParts in pairs(cell.looks) do otherParts.frame:SetShown(other == id) end
-        cell.parts = parts
-        cell.lowHealthTargets, cell.lowHealthBase = parts.lowTargets, parts.lowBase
-    end
+    for _, cell in ipairs(cells) do LookCell(cell, id) end
     state.look = id
 end
 
-local function SeatCell(cell, spec, column, row)
+local function SeatCell(host, cell, spec, column, row)
     cell:ClearAllPoints()
-    cell:SetPoint("TOPLEFT", content, "TOPLEFT", column * (spec.w + spec.gx), -(spec.hdr + row * (spec.h + spec.gy)))
+    cell:SetPoint("TOPLEFT", host, "TOPLEFT", column * (spec.w + spec.gx), -(spec.hdr + row * (spec.h + spec.gy)))
     cell:SetSize(spec.w, spec.h)
 end
 
--- One column per group in state.columns, five cells down; the cells past the roster are parked in further columns to
--- the right, five down, so a member who joins in combat (the unit watch shows the cell, nothing may move it) never
--- lands on a member's cell. The grid is sized from the cells it shows.
-local function Place()
-    local spec = LOOKS[state.look]
+-- Lays out one grid (`grid` holds its cells, labels, content and container: the real one or the editor preview's):
+-- one column per group in `columns`, five cells down; the cells past the roster are parked in further columns to the
+-- right, five down, so a member who joins in combat (the unit watch shows the cell, nothing may move it) never lands
+-- on a member's cell. The grid is sized from the cells it shows.
+local function PlaceGrid(grid, spec, columns, groups, playerGroup)
+    local host, gridCells, gridLabels = grid.content, grid.cells, grid.labels
     local placed, rows = {}, 0
-    for k, group in ipairs(state.columns) do
-        local members = state.groups[group]
+    for k, group in ipairs(columns) do
+        local members = groups[group]
         for row, index in ipairs(members) do
-            SeatCell(cells[index], spec, k - 1, row - 1)
+            SeatCell(host, gridCells[index], spec, k - 1, row - 1)
             placed[index] = true
         end
         rows = math.max(rows, #members)
-        local label = labels[k]
+        local label = gridLabels[k]
         label:ClearAllPoints()
-        label:SetPoint("LEFT", content, "TOPLEFT", (k - 1) * (spec.w + spec.gx) + LABEL_X, LABEL_Y)
+        label:SetPoint("LEFT", host, "TOPLEFT", (k - 1) * (spec.w + spec.gx) + LABEL_X, LABEL_Y)
         label:SetText("G" .. group)
-        SetColor(label, group == state.playerGroup and COLOR_HEALTH or COLOR_BORDER, LABEL_ALPHA)
+        SetColor(label, group == playerGroup and COLOR_HEALTH or COLOR_BORDER, LABEL_ALPHA)
         label:Show()
     end
-    for k = #state.columns + 1, GROUP_COUNT do labels[k]:Hide() end
-    local columns, spare = #state.columns, 0
+    for k = #columns + 1, GROUP_COUNT do gridLabels[k]:Hide() end
+    local count, spare = #columns, 0
     for i = 1, RAID_SIZE do
         if not placed[i] then
-            SeatCell(cells[i], spec, columns + math.floor(spare / GROUP_SIZE), spare % GROUP_SIZE)
+            SeatCell(host, gridCells[i], spec, count + math.floor(spare / GROUP_SIZE), spare % GROUP_SIZE)
             spare = spare + 1
         end
     end
-    local w = columns * spec.w + math.max(columns - 1, 0) * spec.gx
+    local w = count * spec.w + math.max(count - 1, 0) * spec.gx
     local h = spec.hdr + rows * spec.h + math.max(rows - 1, 0) * spec.gy
     local scale = FS.Layout.Scale()
-    content:SetScale(scale)
-    content:SetSize(w, h)
-    container:SetSize(w * scale, h * scale)
+    host:SetScale(scale)
+    host:SetSize(w, h)
+    grid.container:SetSize(w * scale, h * scale)
+    return w, h
 end
 
--- Top left on the party container's top left, so a moved, re-snapped or rescaled party frame carries the grid with
--- it. With no party container, the fallback seat in FS.Layout.raid (the same point).
-local function Seat()
-    local party = FS.partyContainer
-    if party then
-        container:ClearAllPoints()
-        container:SetPoint("TOPLEFT", party, "TOPLEFT", 0, 0)
-    else
-        FS.Layout.Apply(container, "raid")
+local realGrid = { cells = cells, labels = labels }   -- content and container are set at Init
+
+local function Place()
+    PlaceGrid(realGrid, LOOKS[state.look], state.columns, state.groups, state.playerGroup)
+end
+
+-- An own seat's top left on a whole physical pixel, as the party container does (PartyFrames.lua, SeatOnWholePixels),
+-- so the cells' ring and glow round together. The raid entry is TOPLEFT against the screen centre; a client with no
+-- pixel API, or a UIParent with no centre yet, keeps Layout's own seat.
+local function SnapSeat(frame)
+    local entry = FS.Layout.raid
+    if type(GetPhysicalScreenSize) ~= "function" then return end
+    local _, physH = GetPhysicalScreenSize()
+    local uiScale = UIParent:GetEffectiveScale()
+    local ux, uy = UIParent:GetCenter()
+    if type(physH) ~= "number" or physH <= 0 or type(uiScale) ~= "number" or uiScale <= 0
+        or type(ux) ~= "number" or type(uy) ~= "number" then return end
+    local factor = 768 / physH
+    if type(PixelUtil) == "table" and type(PixelUtil.GetPixelToUIUnitFactor) == "function" then
+        factor = PixelUtil.GetPixelToUIUnitFactor()
     end
+    local px = factor / uiScale   -- one physical pixel, in UIParent units
+    local scale = FS.Layout.Scale()
+    local left = math.floor((ux + entry.x * scale) / px + 0.5) * px
+    local top = math.floor((uy + entry.y * scale) / px + 0.5) * px
+    frame:ClearAllPoints()
+    frame:SetPoint("TOPLEFT", UIParent, "CENTER", left - ux, top - uy)
+end
+
+-- The raid's seat for `frame` (the grid or the editor's preview). Until the raid entry has a seat of its own (the
+-- editor wrote one), the top left is the party container's top left, so a moved, re-snapped or rescaled party frame
+-- carries the grid with it, and the frame stays out of Layout's re-seat list. With its own seat, or with no party
+-- container, the frame is seated from FS.Layout.raid (the fallback is the same point) and snapped to a pixel.
+local function SeatGrid(frame)
+    local party = FS.partyContainer
+    if party and not FS.Layout.HasOverride("raid") then
+        FS.Layout._applied[frame] = nil
+        frame:ClearAllPoints()
+        frame:SetPoint("TOPLEFT", party, "TOPLEFT", 0, 0)
+    else
+        FS.Layout.Apply(frame, "raid")
+        SnapSeat(frame)
+    end
+end
+
+local function Seat()
+    SeatGrid(container)
 end
 
 -- Contents only (no protected call): every member cell, the own cell tick and the range.
@@ -757,6 +827,243 @@ function RefreshRanges()
         end
     end
 end
+
+-------------------------------------------------------------------------------
+-- Editor preview (the layout editor shows it; LayoutEdit.lua)
+-------------------------------------------------------------------------------
+
+-- While the layout editor is on, a grid of plain frames sits at the raid's seat so the player can place it and swap
+-- between raid sizes without a raid. It is built from the same look builders and painted by the same functions as the
+-- real cells, but from fake members and plain numbers: no secure frame, no unit token, no secret value. In a real raid
+-- it stands in for the real grid, which stays up and current under it with its alpha at 0 (an alpha is all that is
+-- written to it, so combat starting while the preview is up changes nothing protected). Out of combat only.
+local Preview = { KEY = "raid.previewSize", SIZES = { 5, 10, 15, 20, 25, 40 } }
+RaidFrames.Preview = Preview
+FS.Config.RegisterDefault(Preview.KEY, 10)
+
+local PREVIEW_DEFAULT = 10
+-- cells, labels, content, container fill in at the first Show; shown, size, look, columns, groups are the live state.
+local pv = { grid = { cells = {}, labels = {} }, listeners = {}, shown = false, columns = {}, groups = {} }
+for g = 1, GROUP_COUNT do pv.groups[g] = {} end
+FS.raidPreview = pv
+
+-- Forty fake members, five to a group, as { class, role }; member 1 is the player (their own class and role). The
+-- names are first names only, as UnitName answers them, and none is a real player's.
+local PREVIEW_CAST = {
+    { nil, nil },             { "PRIEST", "HEALER" },   { "WARRIOR", "TANK" },    { "MAGE", "DAMAGER" },    { "ROGUE", "DAMAGER" },
+    { "PALADIN", "TANK" },    { "DRUID", "HEALER" },    { "HUNTER", "DAMAGER" },  { "WARLOCK", "DAMAGER" }, { "SHAMAN", "HEALER" },
+    { "WARRIOR", "TANK" },    { "PRIEST", "HEALER" },   { "MAGE", "DAMAGER" },    { "ROGUE", "DAMAGER" },   { "WARLOCK", "DAMAGER" },
+    { "DRUID", "HEALER" },    { "HUNTER", "DAMAGER" },  { "SHAMAN", "DAMAGER" },  { "MAGE", "DAMAGER" },    { "PALADIN", "HEALER" },
+    { "WARRIOR", "DAMAGER" }, { "ROGUE", "DAMAGER" },   { "PRIEST", "HEALER" },   { "WARLOCK", "DAMAGER" }, { "HUNTER", "DAMAGER" },
+    { "SHAMAN", "HEALER" },   { "MAGE", "DAMAGER" },    { "DRUID", "DAMAGER" },   { "ROGUE", "DAMAGER" },   { "PALADIN", "DAMAGER" },
+    { "HUNTER", "DAMAGER" },  { "WARLOCK", "DAMAGER" }, { "PRIEST", "HEALER" },   { "WARRIOR", "TANK" },    { "MAGE", "DAMAGER" },
+    { "ROGUE", "DAMAGER" },   { "DRUID", "HEALER" },    { "SHAMAN", "DAMAGER" },  { "HUNTER", "DAMAGER" },  { "WARLOCK", "DAMAGER" },
+}
+local PREVIEW_NAMES = {
+    "Aldric", "Brenna", "Corvin", "Dalia", "Edric", "Fenna", "Garrick", "Hilda", "Ivor", "Jorun",
+    "Kaela", "Lorcan", "Mirela", "Nolan", "Orsa", "Pavel", "Quill", "Rhona", "Soren", "Talia",
+    "Ulric", "Vesna", "Wynn", "Xander", "Yara", "Zephyr", "Bram", "Cato", "Dena", "Elric",
+    "Faye", "Gwen", "Holt", "Isla", "Jory", "Kane", "Lena", "Moss", "Nyx", "Orin",
+}
+-- Health fractions in a repeating spread, with a few members who show each state a real cell can wear: at or under 35%
+-- (the red edge and the percent; exactly 35% counts), dead, offline, out of range. The first five already carry one of
+-- each, so even the smallest size shows them all.
+local PREVIEW_HEALTH = { 1, 0.92, 0.78, 0.64, 0.85, 0.97, 0.55, 0.72 }
+local PREVIEW_STATES = {
+    [2] = { hp = 0.28 }, [3] = { state = "dead" }, [4] = { state = "offline" }, [5] = { far = true },
+    [9] = { hp = 0.35 }, [13] = { state = "dead" }, [14] = { hp = 0.12 }, [18] = { far = true },
+    [22] = { state = "offline" }, [27] = { hp = 0.31 }, [33] = { far = true }, [36] = { state = "dead" },
+}
+local PREVIEW_POWER = { WARRIOR = 1, ROGUE = 3 }   -- rage and energy; every other class has mana
+
+-- Member `i` as plain values. The player's own class and name come from the player; a secret or missing answer is the
+-- first of the list.
+local function PreviewMember(i)
+    local cast = PREVIEW_CAST[i]
+    local class, role, name = cast[1], cast[2], PREVIEW_NAMES[i]
+    if i == 1 then
+        local classFile = Shared.PlayerClass()
+        class = (not IsSecret(classFile) and type(classFile) == "string") and classFile or "SHAMAN"
+        local playerRole = HAS.ROLE_API and UnitGroupRolesAssigned("player") or nil
+        role = (not IsSecret(playerRole) and ROLE_STYLE[playerRole] and playerRole) or "DAMAGER"
+        local own = UnitName("player")
+        if not IsSecret(own) and type(own) == "string" and own ~= "" then name = own end
+    end
+    local special = PREVIEW_STATES[i] or {}
+    return {
+        class = class, role = role, name = name,
+        hp = special.hp or PREVIEW_HEALTH[(i - 1) % #PREVIEW_HEALTH + 1],
+        state = special.state or "live", far = special.far == true,
+        powerType = PREVIEW_POWER[class] or 0, power = 0.35 + 0.65 * ((i * 7) % 10) / 9,
+    }
+end
+
+-- Paints preview cell `i` through the same paint functions a real cell uses, in the same order as UpdateAll.
+local function PaintPreviewCell(cell, i, ownIndex)
+    local m = PreviewMember(i)
+    local parts = cell.parts
+    PaintClass(cell, ClassColorOf(m.class))
+    local down = PaintHealthState(cell, m.state == "offline", m.state == "dead")
+    if not down then
+        parts.health:SetMinMaxValues(0, 1000)
+        parts.health:SetValue(m.hp * 1000)
+        parts.pct:SetFormattedText("%.0f%%", m.hp * 100)
+        parts.pct:Show()
+    end
+    -- The plain-number twin of UpdateRowLowHealth: the red layer and the percent at or under the threshold, else the
+    -- base edge; a down cell shows neither red nor percent.
+    local low = not down and m.hp <= Shared.LOW_HP_FRACTION
+    for _, target in ipairs(cell.lowHealthTargets) do target:SetAlpha(low and 1 or 0) end
+    for _, target in ipairs(cell.lowHealthBase) do target:SetAlpha(low and 0 or 1) end
+    PaintName(cell)
+    ApplyEdge(cell)
+    PaintPower(cell, m.power * 100, 100, m.powerType)
+    PaintNameText(parts, m.name)
+    PaintRole(parts, m.role)
+    ApplyRangeAlpha(cell.visual, not m.far)
+    ShowTick(cell, i == ownIndex)
+end
+
+local function NewPreviewCell(host)
+    local cell = CreateFrame("Frame", nil, host)
+    cell:SetSize(LOOKS.A.w, LOOKS.A.h)
+    cell.looks = {}
+    local visual = CreateFrame("Frame", nil, cell)
+    visual:SetAllPoints(cell)
+    cell.visual = visual
+    return cell
+end
+
+local function BuildPreview()
+    if pv.container then return end
+    local frame = CreateFrame("Frame", "ForeverSTUwaveRaidPreview", UIParent)
+    frame:SetFrameStrata("HIGH")   -- over the party rows it can sit on; the editor's handles are above
+    frame:SetSize(1, 1)
+    local host = CreateFrame("Frame", nil, frame)
+    host:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+    host:SetScale(FS.Layout.Scale())
+    local grid = pv.grid
+    grid.content, grid.container = host, frame
+    for k = 1, GROUP_COUNT do
+        local label = host:CreateFontString(nil, "OVERLAY")
+        Theme.ApplyFontGeneric(label, Theme.FONT_ORBITRON, LABEL_SIZE, COLOR_BORDER, "")
+        label:SetWordWrap(false)
+        label:Hide()
+        grid.labels[k] = label
+    end
+    for i = 1, RAID_SIZE do grid.cells[i] = NewPreviewCell(host) end
+    frame:Hide()
+    pv.container, pv.content, pv.cells, pv.labels = frame, host, grid.cells, grid.labels
+end
+
+local function PreviewNotify()
+    for _, fn in ipairs(pv.listeners) do pcall(fn) end
+end
+
+-- The size to draw: the saved one when it is one of SIZES, else the default.
+function Preview.Size()
+    local value = FS.Config.Get(Preview.KEY)
+    for _, size in ipairs(Preview.SIZES) do
+        if value == size then return size end
+    end
+    return PREVIEW_DEFAULT
+end
+
+-- Re-draws the preview for its size: the look, the group columns, the cells' contents. Hidden cells are left alone.
+local function PreviewDraw()
+    local n = Preview.Size()
+    local id = n <= SMALL_RAID and "A" or "C"
+    local groups, columns = pv.groups, pv.columns
+    for g = 1, GROUP_COUNT do
+        for k = #groups[g], 1, -1 do groups[g][k] = nil end
+    end
+    for k = #columns, 1, -1 do columns[k] = nil end
+    for i = 1, n do
+        local list = groups[math.floor((i - 1) / GROUP_SIZE) + 1]
+        list[#list + 1] = i
+    end
+    for g = 1, GROUP_COUNT do
+        if #groups[g] > 0 then columns[#columns + 1] = g end
+    end
+    -- The player is member 1, in group 1, the first column.
+    PlaceGrid(pv.grid, LOOKS[id], columns, groups, 1)
+    for i = 1, RAID_SIZE do
+        local cell = pv.cells[i]
+        cell:SetShown(i <= n)
+        if i <= n then
+            if not (cell.parts and cell.parts.look == id) then LookCell(cell, id) end
+            PaintPreviewCell(cell, i, 1)
+        end
+    end
+    pv.size, pv.look = n, id
+    SeatGrid(pv.container)
+end
+
+function Preview.IsShown()
+    return pv.shown
+end
+
+function Preview.Look()
+    return pv.shown and pv.look or nil
+end
+
+-- The preview's top left and size in UIParent units (top left from the screen's bottom left, as GetLeft and GetTop
+-- answer), or nil while it is down or has no rect yet.
+function Preview.Rect()
+    if not pv.shown then return nil end
+    local frame = pv.container
+    local left, top, width, height = frame:GetLeft(), frame:GetTop(), frame:GetWidth(), frame:GetHeight()
+    if type(left) ~= "number" or type(top) ~= "number" or type(width) ~= "number" or type(height) ~= "number" then
+        return nil
+    end
+    return left, top, width, height
+end
+
+-- fn() runs after the preview was shown, resized or re-seated (never for a hide), so the editor's handle can follow.
+function Preview.OnChange(fn)
+    if type(fn) == "function" then pv.listeners[#pv.listeners + 1] = fn end
+end
+
+-- False in combat (nothing of the preview runs there), else true once it is up.
+function Preview.Show()
+    if InCombatLockdown() then return false end
+    BuildPreview()
+    PreviewDraw()
+    pv.container:Show()
+    pv.shown = true
+    if container then container:SetAlpha(0) end   -- alpha only: the real grid's Show, Hide and anchors are protected
+    PreviewNotify()
+    return true
+end
+
+function Preview.Hide()
+    if not pv.shown then return end
+    pv.shown = false
+    pv.container:Hide()
+    if container then container:SetAlpha(1) end
+end
+
+-- Saves the size (the same setting the config page edits); the OnChange hook below re-draws a shown preview.
+function Preview.SetSize(n)
+    for _, size in ipairs(Preview.SIZES) do
+        if n == size then return FS.Config.Set(Preview.KEY, size) == true end
+    end
+    return false
+end
+
+-- After a seat change or a rescale: the preview follows the raid entry (or the party frame) like the real grid.
+function Preview.Reseat()
+    if not pv.shown or InCombatLockdown() then return end
+    PreviewDraw()
+    PreviewNotify()
+end
+
+FS.Config.OnChange(Preview.KEY, function()
+    if pv.shown and not InCombatLockdown() then
+        PreviewDraw()
+        PreviewNotify()
+    end
+end)
 
 -------------------------------------------------------------------------------
 -- Blizzard's raid frames
@@ -904,16 +1211,20 @@ local function Init()
     end
     for i = 1, RAID_SIZE do cells[i] = BuildCell(i) end
     container:Hide()
+    realGrid.content, realGrid.container = content, container
     FS.raidContainer, FS.raidContent, FS.raidCells, FS.raidLabels = container, content, cells, labels
 
     local events = CreateFrame("Frame")
-    for _, event in ipairs({ "GROUP_ROSTER_UPDATE", "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENABLED" }) do
+    for _, event in ipairs({ "GROUP_ROSTER_UPDATE", "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENABLED",
+                             "PLAYER_REGEN_DISABLED" }) do
         events:RegisterEvent(event)
     end
     -- Not confirmed on every build; RegisterEvent throws on a name the client does not know.
     FS.FrameHelpers.RegisterEvents(events, { "PLAYER_ROLES_ASSIGNED", "EDIT_MODE_LAYOUTS_UPDATED" })
     events:SetScript("OnEvent", function(_, event)
-        if event == "PLAYER_REGEN_ENABLED" then
+        if event == "PLAYER_REGEN_DISABLED" then
+            Preview.Hide()   -- nothing protected: its own frames and the real grid's alpha
+        elseif event == "PLAYER_REGEN_ENABLED" then
             local reflowed = flags.owed
             if flags.owed then Reflow() end
             if blizz.pending then Sweep() end
@@ -948,9 +1259,14 @@ local function Init()
     end
 
     -- A UI scale or display change re-seats the party container; the grid follows by its anchor and only needs its
-    -- own scale and size again.
+    -- own scale and size again. A move or reset of the raid's own seat (the editor) comes through here too: the grid
+    -- is seated again at once out of combat, so it does not show a frame at the fallback seat Layout just wrote.
     FS.Layout.OnRescale(function()
-        if flags.active then QueueReflow() end
+        if flags.active then
+            if not InCombatLockdown() then Seat() end
+            QueueReflow()
+        end
+        Preview.Reseat()
     end)
 
     -- One shared range ticker for all forty cells (no per-frame OnUpdate); it does nothing while the grid is down.
