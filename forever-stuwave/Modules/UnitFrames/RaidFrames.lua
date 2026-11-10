@@ -5,13 +5,13 @@
 -- Lua, and only out of combat. Two looks from the raid frames design study (2026-11-09): A, mini boxes (the party row
 -- shrunk to a cell), at ten members or fewer, and C, tiles that fill bottom up, at eleven or more. Each raid subgroup
 -- with members is one column, the player's own group first.
--- In a raid the grid takes the party frame's seat (its top left is the party container's top left) and the party rows
--- hide; outside a raid the grid hides and the party rows are untouched. The grid follows the party frame until the layout
--- editor saves a seat of its own for the "raid" layout entry; from then on it sits there, and resetting that entry sends
--- it back to the party. While the editor is on, a preview grid of plain frames (see "Editor preview" below) shows at the
--- same seat in every size, so the grid can be placed without a raid. Its own switch, "raid.shown", is apart from the
--- party switch. While it is on, Blizzard's raid frames are dimmed the dim-not-hide way; while it is off they are never
--- touched.
+-- In a raid the party rows hide and the grid shows; outside a raid the grid hides and the party rows are untouched. The
+-- grid is never anchored to the party frames: each raid size (5, 10, 15, 20, 25, 40) has its own layout entry
+-- (raid5 .. raid40, Layout.lua) with its own saved seat, and the grid sits at the seat of the smallest size that fits
+-- the roster (1 to 5 members use raid5, 6 to 10 raid10, and so on), re-seated out of combat only. While the layout editor
+-- is on, a preview grid of plain frames (see "Editor preview" below) shows at the seat of the size the player picked, in
+-- every size, so each layout can be placed without a raid. Its own switch, "raid.shown", is apart from the party switch.
+-- While it is on, Blizzard's raid frames are dimmed the dim-not-hide way; while it is off they are never touched.
 -- Health, power, range and names can be secret here (12.0): every one goes only to engine setters, SetText or
 -- SetAlphaFromBoolean, through the same pieces the party rows use (FS.PartyFrames.shared).
 
@@ -60,6 +60,7 @@ local STATE_ALPHA = Shared.STATE_ROW_ALPHA
 -------------------------------------------------------------------------------
 
 local RAID_SIZE = 40
+local SEAT_SIZES = { 5, 10, 15, 20, 25, 40 }   -- the raid sizes with a layout entry each (raid5 .. raid40) and a preview
 local GROUP_COUNT = 8
 local GROUP_SIZE = 5
 local SMALL_RAID = 10       -- look A at this many members or fewer, look C above
@@ -719,12 +720,22 @@ local function Place()
     PlaceGrid(realGrid, LOOKS[state.look], state.columns, state.groups, state.playerGroup)
 end
 
--- An own seat's top left on a whole physical pixel, as the party container does (PartyFrames.lua, SeatOnWholePixels),
--- so the cells' ring and glow round together. The raid entry is TOPLEFT against the screen centre; a client with no
--- pixel API, or a UIParent with no centre yet, keeps Layout's own seat.
-local function SnapSeat(frame)
-    local entry = FS.Layout.raid
-    if type(GetPhysicalScreenSize) ~= "function" then return end
+-- The layout entry of the smallest size that fits `n` members: 1 to 5 raid5, 6 to 10 raid10, ... 26 to 40 raid40. Nobody
+-- reads as the first size and more than forty as the last.
+local function SeatIdFor(n)
+    for _, size in ipairs(SEAT_SIZES) do
+        if type(n) == "number" and n <= size then return "raid" .. size end
+    end
+    return "raid" .. SEAT_SIZES[#SEAT_SIZES]
+end
+RaidFrames.SeatId = SeatIdFor
+
+-- A seat's top left on a whole physical pixel, as the party container does (PartyFrames.lua, SeatOnWholePixels), so the
+-- cells' ring and glow round together. The raid entries are TOPLEFT against the screen centre; a client with no pixel
+-- API, or a UIParent with no centre yet, keeps Layout's own seat.
+local function SnapSeat(frame, id)
+    local entry = FS.Layout[id]
+    if type(entry) ~= "table" or type(GetPhysicalScreenSize) ~= "function" then return end
     local _, physH = GetPhysicalScreenSize()
     local uiScale = UIParent:GetEffectiveScale()
     local ux, uy = UIParent:GetCenter()
@@ -742,24 +753,16 @@ local function SnapSeat(frame)
     frame:SetPoint("TOPLEFT", UIParent, "CENTER", left - ux, top - uy)
 end
 
--- The raid's seat for `frame` (the grid or the editor's preview). Until the raid entry has a seat of its own (the
--- editor wrote one), the top left is the party container's top left, so a moved, re-snapped or rescaled party frame
--- carries the grid with it, and the frame stays out of Layout's re-seat list. With its own seat, or with no party
--- container, the frame is seated from FS.Layout.raid (the fallback is the same point) and snapped to a pixel.
-local function SeatGrid(frame)
-    local party = FS.partyContainer
-    if party and not FS.Layout.HasOverride("raid") then
-        FS.Layout._applied[frame] = nil
-        frame:ClearAllPoints()
-        frame:SetPoint("TOPLEFT", party, "TOPLEFT", 0, 0)
-    else
-        FS.Layout.Apply(frame, "raid")
-        SnapSeat(frame)
-    end
+-- Seats `frame` (the grid or the editor's preview) from layout entry `id`, then on a whole pixel. The entry is
+-- registered for Layout's rescale re-seat, which holds a protected frame back in combat.
+local function SeatGrid(frame, id)
+    FS.Layout.Apply(frame, id)
+    SnapSeat(frame, id)
 end
 
+-- The real grid sits at the seat of the size its roster fills (state.n).
 local function Seat()
-    SeatGrid(container)
+    SeatGrid(container, SeatIdFor(state.n))
 end
 
 -- Contents only (no protected call): every member cell, the own cell tick and the range.
@@ -832,12 +835,12 @@ end
 -- Editor preview (the layout editor shows it; LayoutEdit.lua)
 -------------------------------------------------------------------------------
 
--- While the layout editor is on, a grid of plain frames sits at the raid's seat so the player can place it and swap
--- between raid sizes without a raid. It is built from the same look builders and painted by the same functions as the
+-- While the layout editor is on, a grid of plain frames sits at the seat of the size being previewed so the player can
+-- place each raid layout and swap between sizes without a raid. It is built from the same look builders and painted by the same functions as the
 -- real cells, but from fake members and plain numbers: no secure frame, no unit token, no secret value. In a real raid
 -- it stands in for the real grid, which stays up and current under it with its alpha at 0 (an alpha is all that is
 -- written to it, so combat starting while the preview is up changes nothing protected). Out of combat only.
-local Preview = { KEY = "raid.previewSize", SIZES = { 5, 10, 15, 20, 25, 40 } }
+local Preview = { KEY = "raid.previewSize", SIZES = SEAT_SIZES }
 RaidFrames.Preview = Preview
 FS.Config.RegisterDefault(Preview.KEY, 10)
 
@@ -937,7 +940,7 @@ end
 local function BuildPreview()
     if pv.container then return end
     local frame = CreateFrame("Frame", "ForeverSTUwaveRaidPreview", UIParent)
-    frame:SetFrameStrata("HIGH")   -- over the party rows it can sit on; the editor's handles are above
+    frame:SetFrameStrata("HIGH")   -- over the party rows if a seat is moved onto them; the editor's handles are above
     frame:SetSize(1, 1)
     local host = CreateFrame("Frame", nil, frame)
     host:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
@@ -996,7 +999,12 @@ local function PreviewDraw()
         end
     end
     pv.size, pv.look = n, id
-    SeatGrid(pv.container)
+    SeatGrid(pv.container, Preview.SeatId())
+end
+
+-- The layout entry the preview sits at, and the editor's handle moves: one per size ("raid25").
+function Preview.SeatId()
+    return "raid" .. Preview.Size()
 end
 
 function Preview.IsShown()
@@ -1051,7 +1059,7 @@ function Preview.SetSize(n)
     return false
 end
 
--- After a seat change or a rescale: the preview follows the raid entry (or the party frame) like the real grid.
+-- After a seat change or a rescale: the preview follows its size's entry like the real grid.
 function Preview.Reseat()
     if not pv.shown or InCombatLockdown() then return end
     PreviewDraw()
@@ -1258,9 +1266,9 @@ local function Init()
         end)
     end
 
-    -- A UI scale or display change re-seats the party container; the grid follows by its anchor and only needs its
-    -- own scale and size again. A move or reset of the raid's own seat (the editor) comes through here too: the grid
-    -- is seated again at once out of combat, so it does not show a frame at the fallback seat Layout just wrote.
+    -- A UI scale or display change, or a move or reset of a raid seat (the editor), re-seats the grid through Layout's
+    -- re-seat list; this puts it on its pixel again at once out of combat, so it does not show at the unsnapped seat
+    -- Layout just wrote, and in step with the roster's size.
     FS.Layout.OnRescale(function()
         if flags.active then
             if not InCombatLockdown() then Seat() end

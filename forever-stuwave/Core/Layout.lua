@@ -28,13 +28,22 @@ FS.Layout = FS.Layout or {
     focus       = { point = "CENTER", relPoint = "CENTER", x = -723,  y = -142, w = 190,  h = 66  },
     pet         = { point = "CENTER", relPoint = "CENTER", x = -448,  y = -361, w = 180,  h = 62  },
     party       = { point = "CENTER", relPoint = "CENTER", x = -389,  y = -75,  w = 231,  h = 294 },
-    -- The raid grid (RaidFrames.lua) takes the party frame's seat in a raid: its TOP LEFT is the party
-    -- container's top left (-389 - 231 / 2, -75 + 294 / 2), which is where it anchors, so it follows a moved
-    -- or re-snapped party frame, until the layout editor saves a seat of its own for this entry
-    -- (HasOverride): then the grid and the editor's preview sit at x, y here and stop following. Without
-    -- a party container this entry is the seat. The grid sizes itself from the cells it shows (noSize);
-    -- w/h record the 40 member grid (8 columns of tiles).
-    raid        = { point = "TOPLEFT", relPoint = "CENTER", x = -504.5, y = 72, w = 485, h = 224, noSize = true },
+    -- The raid grid (RaidFrames.lua) has one seat per size: raid5 for a roster of 1 to 5, raid10 for 6 to 10, and so
+    -- on up to raid40, each its own entry with its own saved override and its own reset (the layout editor moves the
+    -- size its preview shows). The grid is never anchored to the party frames. The seat is the grid's TOP LEFT, and
+    -- the grid sizes itself from the cells it shows (noSize); w/h record the grid at the full size (look A, 84 x 30
+    -- mini boxes, up to 10; look C, 58 x 40 tiles, above; one column of five per group: 84, 172, 180, 241, 302, 485
+    -- wide, 174 high at 5 and 10 and 224 high above). The defaults sit just left of the party seat (its left edge is
+    -- -504.5): every size's right edge is on the line x -524.5, 20 clear of it, so a size grows leftward, and every
+    -- top is y 140, which keeps the tallest grid (bottom -84) above the focus frame (top -109) and under the
+    -- target-of-target frame and the player and target corners. Seen together in the editor the grids and the party
+    -- frames do not overlap; raidframes-harness.py checks that against every default seat on that side.
+    raid5       = { point = "TOPLEFT", relPoint = "CENTER", x = -608.5,  y = 140, w = 84,  h = 174, noSize = true },
+    raid10      = { point = "TOPLEFT", relPoint = "CENTER", x = -696.5,  y = 140, w = 172, h = 174, noSize = true },
+    raid15      = { point = "TOPLEFT", relPoint = "CENTER", x = -704.5,  y = 140, w = 180, h = 224, noSize = true },
+    raid20      = { point = "TOPLEFT", relPoint = "CENTER", x = -765.5,  y = 140, w = 241, h = 224, noSize = true },
+    raid25      = { point = "TOPLEFT", relPoint = "CENTER", x = -826.5,  y = 140, w = 302, h = 224, noSize = true },
+    raid40      = { point = "TOPLEFT", relPoint = "CENTER", x = -1009.5, y = 140, w = 485, h = 224, noSize = true },
     boss        = { point = "CENTER", relPoint = "CENTER", x = 728,   y = 152,  w = 210,  h = 210 },
     -- Stack A's two cast bars (CastBars.lua), the cast display while the Gunsight HUD is off. UI units,
     -- not scaled (the bars have always sat on a fixed seat in UIParent units), and noSize: the bar fits its
@@ -509,16 +518,6 @@ end
 function FS.Layout.IsOverridden(id)
     local def, L = FS.Layout._defaults[id], SeatEntry(id)
     return def ~= nil and L ~= nil and (L.x ~= def.x or L.y ~= def.y)
-end
-
--- True when the active layout holds a saved seat for `id`, one LoadOverrides would apply, even a seat equal to
--- the shipped one (IsOverridden calls that unmoved). A piece that follows another frame until it has a seat of
--- its own, the raid grid under the party frames, asks this.
-function FS.Layout.HasOverride(id)
-    if type(id) ~= "string" then return false end
-    local frames = OverrideStore()
-    local pos = frames and frames[id]
-    return type(pos) == "table" and IsUsableOffset(pos.x) and IsUsableOffset(pos.y)
 end
 
 -- Seats every applied frame `matches` accepts. A frame held back in combat is left to the

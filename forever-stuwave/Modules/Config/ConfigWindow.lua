@@ -1379,9 +1379,10 @@ local function IconStyleGroup(page)
 end
 
 -- The party frames' own switch and seat (PartyFrames.lua, LayoutEdit.lua), apart from the Gunsight HUD, so nothing here
--- is dimmed by its master switch. A Show switch, the raid grid's switch under it (the grid takes the party seat in a
--- raid), Move (the layout editor, which brings this page back from DONE or Esc) and Reset position, each explained by
--- its ? tip. LayoutEdit.lua loads after this file, so it is looked up at the click.
+-- is dimmed by its master switch. A Show switch, the raid grid's switch under it, Move (the layout editor, which brings
+-- this page back from DONE or Esc) and Reset position, each explained by its ? tip; then, where the raid frames loaded,
+-- the raid layout size (each raid size has its own seat) with its own Move and Reset. LayoutEdit.lua loads after this
+-- file, so it is looked up at the click.
 -- Out of the list for a client without the party frames.
 local PARTY_TIPS = {
     show = "The party frames have their own switch. They follow it with the Gunsight HUD on or off, and the Party Frame key "
@@ -1389,11 +1390,13 @@ local PARTY_TIPS = {
     move = "Opens the layout editor. Drag the Party handle to move the party frames, right-click it to reset. "
         .. "Done or Esc brings you back here. Out of combat only.",
     reset = "Puts the party frames back at their design seat. Cannot be undone.",
-    raid = "In a raid, shows the raid as group columns in the party frames' seat, in place of the game's raid frames. "
-        .. "Turned off, the grid hides at once and the game's raid frames come back after /reload.",
-    moveRaid = "Opens the layout editor with a preview raid. Pick a size on its panel, then drag the Raid frames handle to "
-        .. "place the grid. Until you move it, it follows the party frames. Done or Esc brings you back here. Out of combat only.",
-    resetRaid = "Makes the raid grid follow the party frames again. Cannot be undone.",
+    raid = "In a raid, shows the raid as group columns, in place of the game's raid frames. Each raid size has its own "
+        .. "seat, set in the layout editor. Turned off, the grid hides at once and the game's raid frames come back after /reload.",
+    raidSize = "Each raid size has its own seat. Pick the size Move and Reset act on; the layout editor previews it, and its "
+        .. "panel switches size too. In a raid the grid uses the seat of the smallest size that fits the group.",
+    moveRaid = "Opens the layout editor with a preview raid of the size picked above. Drag its Raid handle to place that "
+        .. "layout, or pick another size on the editor's panel. Done or Esc brings you back here. Out of combat only.",
+    resetRaid = "Puts the raid layout for the size picked above back at its default seat. Cannot be undone.",
 }
 
 local function PartyFramesGroup(page)
@@ -1432,8 +1435,13 @@ local function PartyFramesGroup(page)
             end
         end,
     })
-    -- The raid grid's own seat and its preview (RaidFrames.lua, LayoutEdit.lua): only where the preview exists.
+    -- The raid layouts' seats and the preview (RaidFrames.lua, LayoutEdit.lua): only where the preview exists. One size is
+    -- picked at a time (the same setting the editor's panel and the Layout page change), and Move and Reset act on it.
     if raid and type(raid.Preview) == "table" then
+        local preview = raid.Preview
+        local options = {}
+        for index, size in ipairs(preview.SIZES) do options[index] = { value = size, text = tostring(size) } end
+        UI.Segmented(page, { label = "Raid layout", tip = PARTY_TIPS.raidSize, key = preview.KEY, options = options })
         UI.Button(page, {
             label = "Move raid frames", tip = PARTY_TIPS.moveRaid, text = "Move",
             onClick = function()
@@ -1442,15 +1450,17 @@ local function PartyFramesGroup(page)
                     Say("the layout editor is not available.")
                     return
                 end
-                edit.EnterFromConfig("unitframes")
+                edit.EnterFromConfig("unitframes")   -- the editor previews the saved size
             end,
         })
         UI.Button(page, {
             label = "Reset raid position", tip = PARTY_TIPS.resetRaid, text = "Reset", warn = true,
-            confirm = "Make the raid frames follow the party frames again?",
+            confirm = function()
+                return ("Put the layout for a raid of up to %s back at its default seat?"):format(tostring(preview.Size()))
+            end,
             onClick = function()
                 local edit = FS.LayoutEdit
-                if edit and edit.ResetOne then edit.ResetOne("raid") else Say("the layout editor is not available.") end
+                if edit and edit.ResetOne then edit.ResetOne(preview.SeatId()) else Say("the layout editor is not available.") end
             end,
         })
     end

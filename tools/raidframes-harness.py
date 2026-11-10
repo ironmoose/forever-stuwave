@@ -516,8 +516,8 @@ def _check_forty_secure_cells() -> None:
 
 def _check_look_a_at_ten() -> None:
     """Ten members or fewer: look A, 84 x 30 cells in group columns 4 apart, rows 3 apart under a
-    12 high label band. The grid is sized from the cells shown and its top left is the party
-    frame's top left."""
+    12 high label band. The grid is sized from the cells shown and seats at the ten member
+    layout entry's own place."""
     rt = _client()
     _roster(rt, 10)
     assert _state(rt).look == "A"
@@ -532,10 +532,7 @@ def _check_look_a_at_ten() -> None:
     assert (content.w, content.h) == (w, h), f"grid {content.w}x{content.h}"
     scale = rt.eval("FS.Layout.Scale()")
     assert _close(container.w, w * scale) and _close(container.h, h * scale)
-    party = rt.eval("FS.partyContainer")
-    grid, seat = container.GetBounds(container), party.GetBounds(party)
-    assert _close(grid.x, seat.x) and _close(grid.y, seat.y), (
-        f"grid top left {(grid.x, grid.y)} is not the party top left {(seat.x, seat.y)}")
+    _assert_seat(rt, container, 10, "look A at ten")
     _assert_quiet(rt)
 
 
@@ -1039,18 +1036,67 @@ def _check_look_c_fill() -> None:
     _assert_quiet(rt)
 
 
-def _check_layout_entry() -> None:
-    """FS.Layout.raid records the grid's seat: its top left at the party frame's top left. With no
-    party container the grid seats from that entry."""
+def _check_layout_entries() -> None:
+    """Each preview size has its own layout entry (raid5 .. raid40), a top left against the screen centre
+    at a fixed place of its own, and the one shared "raid" entry is gone. The defaults line the grids'
+    right edges up on one line to the left of the party frame's default seat and clear the other
+    default seats on that side of the screen, at any size."""
     rt = _client()
-    entry, party = rt.eval("FS.Layout.raid"), rt.eval("FS.Layout.party")
-    assert (entry.point, entry.relPoint) == ("TOPLEFT", "CENTER")
-    assert _close(entry.x, party.x - party.w / 2) and _close(entry.y, party.y + party.h / 2)
+    assert rt.eval("FS.Layout.raid") is None, "the shared raid entry is back"
+    assert rt.eval("FS.Layout.HasOverride") is None, "the follow-the-party helper is back"
+    party = rt.eval("FS.Layout.party")
+    party_left = party.x - party.w / 2
+    edges, tops = set(), set()
+    for n in PV_SIZES:
+        entry = _entry(rt, n)
+        assert (entry.point, entry.relPoint) == ("TOPLEFT", "CENTER") and entry.noSize, f"raid{n} entry"
+        spec = LOOK_A if n <= 10 else LOOK_C
+        w, h = _grid_size(spec, -(-n // 5), 5)
+        assert (entry.w, entry.h) == (w, h), f"raid{n} records {entry.w}x{entry.h}, the grid is {w}x{h}"
+        edges.add(entry.x + w)
+        tops.add(entry.y)
+        assert entry.x + w <= party_left - 12, f"raid{n} reaches {entry.x + w}, the party starts at {party_left}"
+        for other in ("party", "focus", "tot", "chat", "pet", "petcontainer", "boss"):
+            seat = rt.eval(f"FS.Layout.{other}")
+            clear = (entry.x + w <= seat.x - seat.w / 2 or entry.x >= seat.x + seat.w / 2
+                     or entry.y - h >= seat.y + seat.h / 2 or entry.y <= seat.y - seat.h / 2)
+            assert clear, f"raid{n} overlaps the default {other} seat"
+    assert len(edges) == 1 and len(tops) == 1, f"the grids do not share a right edge and a top: {edges} {tops}"
+    _assert_quiet(rt)
+
+
+def _check_seat_for_a_roster() -> None:
+    """The real grid takes the seat of the smallest size that fits the roster: 1-5 the 5 seat, 6-10 the 10
+    seat, and so on up to 40. Nobody (0) and more than 40 read as the ends."""
+    rt = _client()
+    seat_id = rt.eval("FS.RaidFrames.SeatId")
+    want = {0: 5, 1: 5, 5: 5, 6: 10, 10: 10, 11: 15, 15: 15, 16: 20, 20: 20, 21: 25, 25: 25, 26: 40, 40: 40, 41: 40}
+    for n, size in want.items():
+        assert seat_id(n) == f"raid{size}", f"{n} members: {seat_id(n)}"
+    for n in range(1, 41):
+        _roster(rt, n)
+        _assert_seat(rt, rt.eval("FS.raidContainer"), _bucket(n), f"{n} members")
+    _assert_unblocked(rt)
+    _assert_quiet(rt)
+
+
+def _check_grid_never_follows_the_party() -> None:
+    """The raid grid is never anchored to the party frames, nor registered to follow them: a moved party
+    frame leaves it where it is, and with no party container at all it seats the same."""
+    rt = _client()
+    _roster(rt, 10)
+    container = rt.eval("FS.raidContainer")
+    _assert_seat(rt, container, 10, "default")
+    party = rt.eval("FS.partyContainer")
+    for point in container.points.values():
+        assert not P._same(rt, point.rel, party), "the grid is anchored to the party frames"
+    rt.execute("FS.Layout.SetOverride('party', 100, 0) FS.Layout.Reseat('party')")
+    _settle(rt)
+    _assert_seat(rt, container, 10, "after the party moved")
+    rt = _client()
     rt.execute("FS.partyContainer=nil")
     _roster(rt, 10)
-    point = rt.eval("FS.raidContainer").points.TOPLEFT
-    assert P._same(rt, point.rel, rt.globals().UIParent) and point.rp == "CENTER"
-    assert _close(point.x, entry.x) and _close(point.y, entry.y)
+    _assert_seat(rt, rt.eval("FS.raidContainer"), 10, "no party container")
     _assert_quiet(rt)
 
 
@@ -1066,85 +1112,126 @@ def _check_rescaled_grid() -> None:
 
 
 # ---------------------------------------------------------------------------------------------
-# The raid's own seat
+# The raid's seats: one layout entry per size
 # ---------------------------------------------------------------------------------------------
+
+PV_KEY = "raid.previewSize"
+PV_SIZES = (5, 10, 15, 20, 25, 40)
+
+
+def _bucket(n: int) -> int:
+    """The smallest size that fits a roster of n."""
+    return next((size for size in PV_SIZES if n <= size), PV_SIZES[-1])
+
+
+def _entry(rt, size: int):
+    return rt.eval(f"FS.Layout.raid{size}")
+
 
 def _seat(frame):
     return frame.points.TOPLEFT
 
 
-def _assert_follows_party(rt, frame, label: str) -> None:
+def _seat_xy(frame) -> tuple[float, float]:
     point = _seat(frame)
-    assert P._same(rt, point.rel, rt.eval("FS.partyContainer")) and point.rp == "TOPLEFT", (
-        f"{label}: not on the party frame's top left")
-    assert point.x == 0 and point.y == 0, f"{label}: offset {(point.x, point.y)}"
-    assert rt.eval("FS.Layout._applied")[frame] is None, f"{label}: still re-seated from the raid entry"
+    return point.x, point.y
 
 
-def _assert_own_seat(rt, frame, x: float, y: float, label: str) -> None:
+def _assert_seat(rt, frame, size: int, label: str, xy=None) -> None:
+    """`frame` hangs from the screen centre at the size's entry (or at `xy`, a design px pair) and is
+    registered for the rescale re-seat under that entry's id."""
+    entry = _entry(rt, size)
+    x, y = xy if xy else (entry.x, entry.y)
     point = _seat(frame)
     scale = rt.eval("FS.Layout.Scale()")
     assert P._same(rt, point.rel, rt.globals().UIParent) and point.rp == "CENTER", f"{label}: wrong anchor"
     assert _close(point.x, x * scale) and _close(point.y, y * scale), (
         f"{label}: at {(point.x, point.y)}, want {(x * scale, y * scale)}")
-    assert rt.eval("FS.Layout._applied")[frame] is not None, f"{label}: not registered for the rescale re-seat"
+    seated = rt.eval("FS.Layout._applied")[frame]
+    assert seated is not None and seated.id == f"raid{size}", f"{label}: registered as {seated and seated.id}"
 
 
-def _move_raid(rt, x: float, y: float) -> None:
+def _move_raid(rt, size: int, x: float, y: float) -> None:
     """What the editor does on a drop: write the override, re-seat, let the deferred calls run."""
-    assert rt.eval(f"FS.Layout.SetOverride('raid', {x}, {y})") is True
-    rt.execute("FS.Layout.Reseat('raid')")
+    assert rt.eval(f"FS.Layout.SetOverride('raid{size}', {x}, {y})") is True
+    rt.execute(f"FS.Layout.Reseat('raid{size}')")
     _settle(rt)
 
 
-def _reset_raid(rt) -> None:
-    assert rt.eval("FS.Layout.ClearOverride('raid')") is True
-    rt.execute("FS.Layout.Reseat('raid')")
+def _reset_raid(rt, size: int) -> None:
+    assert rt.eval(f"FS.Layout.ClearOverride('raid{size}')") is True
+    rt.execute(f"FS.Layout.Reseat('raid{size}')")
     _settle(rt)
 
 
-def _check_grid_follows_party_until_moved() -> None:
-    """The grid sits on the party frame's top left until the raid entry has a seat of its own. Moved,
-    it is seated from the entry (top left against the screen centre) and no longer follows the party;
-    reset, it follows the party again and leaves the rescale re-seat list."""
+def _check_a_move_changes_only_its_own_size() -> None:
+    """Moving the 10 layout moves the grid of a ten member raid and nothing else; the other sizes keep
+    their seats and the grid keeps its own through a move of the party frames. Reset gives the shipped
+    seat back."""
     rt = _client()
     _roster(rt, 10)
     container = rt.eval("FS.raidContainer")
-    _assert_follows_party(rt, container, "before a move")
-    _move_raid(rt, -700, 300)
-    _assert_own_seat(rt, container, -700, 300, "after a move")
+    shipped = {n: (_entry(rt, n).x, _entry(rt, n).y) for n in PV_SIZES}
+    _move_raid(rt, 25, -700, 300)
+    _assert_seat(rt, container, 10, "a move of another size", shipped[10])
+    _move_raid(rt, 10, -700, 300)
+    _assert_seat(rt, container, 10, "after a move", (-700, 300))
     assert container.shown, "the grid hid when it moved"
-    # The party frame moving does not carry a grid that has its own seat.
     rt.execute("FS.Layout.SetOverride('party', 100, 0) FS.Layout.Reseat('party')")
     _settle(rt)
-    _assert_own_seat(rt, container, -700, 300, "after the party moved")
-    _reset_raid(rt)
-    _assert_follows_party(rt, container, "after a reset")
-    # And it carries the party frame again, wherever that is now.
-    party = rt.eval("FS.partyContainer")
-    grid, seat = container.GetBounds(container), party.GetBounds(party)
-    assert _close(grid.x, seat.x) and _close(grid.y, seat.y)
+    _assert_seat(rt, container, 10, "after the party moved", (-700, 300))
+    assert (_entry(rt, 15).x, _entry(rt, 15).y) == shipped[15], "an untouched size moved"
+    _reset_raid(rt, 10)
+    _assert_seat(rt, container, 10, "after a reset", shipped[10])
+    assert (_entry(rt, 25).x, _entry(rt, 25).y) == (-700, 300), "resetting one size reset another"
+    _assert_unblocked(rt)
+    _assert_quiet(rt)
+
+
+def _check_roster_growth_takes_the_next_size_seat() -> None:
+    """A member joining past a size's limit moves the grid to the next size's seat, out of combat; in combat
+    the grid stays where it is (it is protected) and takes the seat when combat ends."""
+    rt = _client()
+    _move_raid(rt, 15, -640, 210)
+    _roster(rt, 10)
+    container = rt.eval("FS.raidContainer")
+    shipped10 = (_entry(rt, 10).x, _entry(rt, 10).y)
+    _assert_seat(rt, container, 10, "ten members", shipped10)
+    _roster(rt, 11)
+    _assert_seat(rt, container, 15, "eleven members", (-640, 210))
+    assert _state(rt).look == "C"
+    _roster(rt, 10)
+    _assert_seat(rt, container, 10, "back to ten", shipped10)
+    held = _seat_xy(container)
+    rt.execute("__combat=true")
+    _roster(rt, 22)
+    _assert_unblocked(rt)
+    assert _seat_xy(container) == held, "the grid moved in combat"
+    rt.execute("__combat=false")
+    _event(rt, "PLAYER_REGEN_ENABLED")
+    _settle(rt)
+    _assert_seat(rt, container, 25, "after combat")
     _assert_unblocked(rt)
     _assert_quiet(rt)
 
 
 def _check_own_seat_survives_rescale_and_reset_all() -> None:
-    """A UI scale change keeps an own seat (in the entry's design px, so it scales with the UI); a
-    saved seat is in force at login; resetting every position gives the grid back to the party."""
-    saved = ("ForeverSTUwaveDB={profiles={Default={settings={},layout={v=1,frames={raid={x=-640,y=210}}}}},"
+    """A UI scale change keeps a saved seat (in the entry's design px, so it scales with the UI); a saved
+    seat is in force at login; resetting every position gives each size its shipped seat back."""
+    saved = ("ForeverSTUwaveDB={profiles={Default={settings={},layout={v=1,frames={raid15={x=-640,y=210}}}}},"
              "profileKeys={},profileLabels={}}")
     rt = _client(saved=saved)
-    _roster(rt, 10)
+    _roster(rt, 12)
     container = rt.eval("FS.raidContainer")
-    _assert_own_seat(rt, container, -640, 210, "a saved seat at login")
+    _assert_seat(rt, container, 15, "a saved seat at login", (-640, 210))
     rt.execute("UIParent:SetHeight(1200)")
     _event(rt, "UI_SCALE_CHANGED")
     _settle(rt)
-    _assert_own_seat(rt, container, -640, 210, "after a UI scale change")
+    _assert_seat(rt, container, 15, "after a UI scale change", (-640, 210))
     assert _close(rt.eval("FS.raidContent").scale, 1200 / 1440)
     rt.execute("FS.Layout.ClearAllOverrides() FS.Layout.ReseatAll()")
     _settle(rt)
-    _assert_follows_party(rt, container, "after a reset of every position")
+    _assert_seat(rt, container, 15, "after a reset of every position", (-704.5, 140))
     _assert_unblocked(rt)
     _assert_quiet(rt)
 
@@ -1155,22 +1242,24 @@ def _check_own_seat_waits_out_combat() -> None:
     rt = _client()
     _roster(rt, 10)
     container = rt.eval("FS.raidContainer")
+    shipped = (_entry(rt, 10).x, _entry(rt, 10).y)
+    held = _seat_xy(container)
     rt.execute("__combat=true")
-    _move_raid(rt, -700, 300)
+    _move_raid(rt, 10, -700, 300)
     _assert_unblocked(rt)
-    _assert_follows_party(rt, container, "a move in combat")
+    assert _seat_xy(container) == held, "a move in combat changed the anchor"
     rt.execute("__combat=false")
     _event(rt, "PLAYER_REGEN_ENABLED")
     _settle(rt)
-    _assert_own_seat(rt, container, -700, 300, "after combat")
+    _assert_seat(rt, container, 10, "after combat", (-700, 300))
     rt.execute("__combat=true")
-    _reset_raid(rt)
+    _reset_raid(rt, 10)
     _assert_unblocked(rt)
-    _assert_own_seat(rt, container, -700, 300, "a reset in combat")
+    assert _close(_seat_xy(container)[0], -700), "a reset in combat changed the anchor"
     rt.execute("__combat=false")
     _event(rt, "PLAYER_REGEN_ENABLED")
     _settle(rt)
-    _assert_follows_party(rt, container, "a reset after combat")
+    _assert_seat(rt, container, 10, "a reset after combat", shipped)
     _assert_unblocked(rt)
     _assert_quiet(rt)
 
@@ -1186,13 +1275,13 @@ def _snap_client(phys_w: int, phys_h: int, ui_h: int) -> LuaRuntime:
 
 
 def _check_own_seat_on_whole_pixels() -> None:
-    """A seat of its own is snapped to a whole physical pixel on both edges, as the party container
-    is, so the cells' ring and glow round together: -300.5 design px is half a pixel at a 1440 high
-    screen. A client with no pixel API keeps Layout's own seat."""
+    """A seat is snapped to a whole physical pixel on both edges, as the party container is, so the
+    cells' ring and glow round together: -300.5 design px is half a pixel at a 1440 high screen. The
+    shipped seats snap too. A client with no pixel API keeps Layout's own seat."""
     for phys_w, phys_h, ui_h in ((5120, 1440, 1200), (2560, 1440, 1440), (1920, 1080, 900)):
         rt = _snap_client(phys_w, phys_h, ui_h)
         _roster(rt, 10)
-        _move_raid(rt, -300.5, 100.5)
+        _move_raid(rt, 10, -300.5, 100.5)
         point = _seat(rt.eval("FS.raidContainer"))
         ui_w = rt.globals().UIParent.w
         px = ui_h / phys_h
@@ -1203,21 +1292,21 @@ def _check_own_seat_on_whole_pixels() -> None:
         scale = rt.eval("FS.Layout.Scale()")
         raw = (ui_w / 2 - 300.5 * scale) / px
         assert abs(left - raw) <= 0.5 + 1e-6, f"{label}: moved {abs(left - raw)} px, more than the snap"
+        _roster(rt, 25)
+        point = _seat(rt.eval("FS.raidContainer"))
+        left, top = (ui_w / 2 + point.x) / px, (ui_h / 2 + point.y) / px
+        assert abs(left - round(left)) < 1e-6 and abs(top - round(top)) < 1e-6, f"{label}: a shipped seat is off the grid"
         _assert_quiet(rt)
     rt = _client()
     _roster(rt, 10)
-    _move_raid(rt, -300.5, 100.5)
-    _assert_own_seat(rt, rt.eval("FS.raidContainer"), -300.5, 100.5, "no pixel API")
+    _move_raid(rt, 10, -300.5, 100.5)
+    _assert_seat(rt, rt.eval("FS.raidContainer"), 10, "no pixel API", (-300.5, 100.5))
     _assert_quiet(rt)
 
 
 # ---------------------------------------------------------------------------------------------
 # The editor preview
 # ---------------------------------------------------------------------------------------------
-
-PV_KEY = "raid.previewSize"
-PV_SIZES = (5, 10, 15, 20, 25, 40)
-
 
 def _preview(rt):
     return rt.eval("FS.RaidFrames.Preview")
@@ -1374,25 +1463,39 @@ def _check_preview_reads_no_unit_and_builds_nothing_secure() -> None:
 
 
 def _check_preview_seat() -> None:
-    """The preview sits where the grid would: on the party frame's top left until the raid has a seat of its
-    own, then at that seat; reset, back on the party. Its rect is its container's, top left and size."""
+    """The preview sits at the seat of the size it shows, one entry per size, never on the party frames.
+    Moving a size moves that size's preview only; reset gives its shipped seat back. Its rect is its
+    container's, top left and size."""
     rt = _client()
     pv = _preview(rt)
     assert pv.Show()
     container = rt.eval("FS.raidPreview.container")
     assert container.strata == "HIGH", "the preview sits under the editor's handles, over the party rows"
-    _assert_follows_party(rt, container, "preview solo")
     party = rt.eval("FS.partyContainer")
-    seat = party.GetBounds(party)
-    left, top, width, height = pv.Rect()
-    assert _close(left, seat.x) and _close(top, rt.globals().UIParent.h - seat.y), (left, top)
-    assert _close(width, container.w) and _close(height, container.h)
-    _move_raid(rt, -700, 300)
-    _assert_own_seat(rt, container, -700, 300, "preview after a move")
+    shipped = {n: (_entry(rt, n).x, _entry(rt, n).y) for n in PV_SIZES}
+    for n in PV_SIZES:
+        _pv_size(rt, n)
+        assert pv.SeatId() == f"raid{n}", pv.SeatId()
+        _assert_seat(rt, container, n, f"preview {n}")
+        for point in container.points.values():
+            assert not P._same(rt, point.rel, party), "the preview is anchored to the party frames"
+        left, top, width, height = pv.Rect()
+        assert _close(left, 1280 + shipped[n][0]) and _close(top, 720 + shipped[n][1]), (n, left, top)
+        assert _close(width, container.w) and _close(height, container.h)
+    _pv_size(rt, 25)
+    _move_raid(rt, 25, -700, 300)
+    _assert_seat(rt, container, 25, "preview after a move", (-700, 300))
     left, top, _, _ = pv.Rect()
     assert _close(left, 1280 - 700) and _close(top, 720 + 300), (left, top)
-    _reset_raid(rt)
-    _assert_follows_party(rt, container, "preview after a reset")
+    _move_raid(rt, 10, -500, 100)
+    _assert_seat(rt, container, 25, "a move of another size", (-700, 300))
+    _pv_size(rt, 10)
+    _assert_seat(rt, container, 10, "the moved size", (-500, 100))
+    _pv_size(rt, 20)
+    _assert_seat(rt, container, 20, "an unmoved size", shipped[20])
+    _reset_raid(rt, 10)
+    _pv_size(rt, 10)
+    _assert_seat(rt, container, 10, "preview after a reset", shipped[10])
     pv.Hide()
     assert pv.Rect() is None
     _assert_quiet(rt)
@@ -1457,7 +1560,7 @@ def _check_preview_tells_listeners() -> None:
     assert rt.globals().__heard == 1 and rt.globals().__heard2 == 1
     _pv_size(rt, 25)
     assert rt.globals().__heard2 == 2
-    _move_raid(rt, -500, 200)
+    _move_raid(rt, 25, -500, 200)
     assert rt.globals().__heard2 >= 3, "a seat change was not announced"
     before = rt.globals().__heard2
     pv.Hide()
@@ -1544,95 +1647,114 @@ def _check_editor_enter_and_exit_drive_the_preview() -> None:
     _assert_quiet_but_editor(rt)
 
 
+def _raid_handles(rt, edit) -> list[int]:
+    """The sizes that have a handle up right now."""
+    return [n for n in PV_SIZES if edit.GetHandle(f"raid{n}") is not None]
+
+
 def _check_editor_raid_handle() -> None:
-    """A Raid frames handle covers the preview grid exactly, whatever size it shows, solo and in a raid, and
-    only while the preview is up. It is an insecure frame on UIParent, never anchored to the grid."""
+    """One handle per raid layout, labelled with its size ("Raid 25"), and only the previewed size's is up.
+    It covers the preview grid exactly, whatever the size, solo and in a raid. It is an insecure frame on
+    UIParent, never anchored to the grid. There is no handle for a shared raid entry."""
     rt = _client()
     edit = _editor(rt)
     pv = _preview(rt)
-    assert edit.GetHandle("raid") is None
+    assert _raid_handles(rt, edit) == [] and edit.GetHandle("raid") is None
     assert edit.Enter()
-    handle = edit.GetHandle("raid")
-    assert handle is not None and handle.label.text == "Raid frames"
+    assert edit.GetHandle("raid") is None, "a handle for the removed shared entry"
+    assert _raid_handles(rt, edit) == [10], _raid_handles(rt, edit)
+    handle = edit.GetHandle("raid10")
+    assert handle.label.text == "Raid 10"
     assert handle.template is None and handle.kind == "Frame"
     assert P._same(rt, handle.parent, rt.globals().UIParent)
     for n in PV_SIZES:
         _pv_size(rt, n)
+        assert _raid_handles(rt, edit) == [n], f"{n}: handles {_raid_handles(rt, edit)}"
+        assert edit.GetHandle(f"raid{n}").label.text == f"Raid {n}"
         left, top, w, h = pv.Rect()
-        hl, ht, hw, hh = _handle_rect(rt, "raid")
+        hl, ht, hw, hh = _handle_rect(rt, f"raid{n}")
         assert all(_close(a, b) for a, b in ((hl, left), (ht, top), (hw, w), (hh, h))), (
             f"{n}: handle {(hl, ht, hw, hh)} is not on the grid {(left, top, w, h)}")
-    for point in handle.points.values():
+    for point in edit.GetHandle("raid40").points.values():
         assert not P._same(rt, point.rel, rt.eval("FS.raidPreview.container")), "handle anchored to the preview"
         assert not P._same(rt, point.rel, rt.eval("FS.raidContainer")), "handle anchored to the real grid"
     edit.Exit()
-    assert edit.GetHandle("raid") is None
+    assert _raid_handles(rt, edit) == []
     _roster(rt, 40)
-    assert edit.Enter() and edit.GetHandle("raid") is not None, "no handle in a real raid"
+    assert edit.Enter() and _raid_handles(rt, edit) == [40], "no handle in a real raid"
     _assert_quiet_but_editor(rt)
 
 
-def _check_editor_moves_and_resets_the_raid_seat() -> None:
-    """Dragging the handle saves the raid's own seat (snapped to the grid) and the preview and the real grid
-    follow it; arrows nudge from where the grid actually sits, even when it was following the party;
-    right-click and Reset all give it back to the party frame."""
+def _check_editor_moves_and_resets_one_raid_layout() -> None:
+    """Dragging a size's handle saves that size's seat only (snapped to the grid) and the preview and the real
+    grid of that size follow it; arrows nudge from the seat; right-click and Reset all give the shipped seat
+    back, one size at a time or all. The selection follows a size switch."""
     rt = _client()
-    _roster(rt, 10)
+    _roster(rt, 25)
     edit = _editor(rt)
     pv = _preview(rt)
     real = rt.eval("FS.raidContainer")
     assert edit.Enter()
+    _pv_size(rt, 25)
     preview = rt.eval("FS.raidPreview.container")
-    assert rt.eval("FS.Layout.HasOverride('raid')") is False
-    # Arrows from the party seat: the entry's own numbers are only the fallback, so the grid's actual top
-    # left (here the party's) is the start.
-    edit.Select("raid")
+    shipped = {n: (_entry(rt, n).x, _entry(rt, n).y) for n in PV_SIZES}
+    key = "ForeverSTUwaveDB.profiles.Default.layout.frames"
+    # Arrows from the shipped seat.
+    edit.Select("raid25")
     rt.execute("""local o for _,f in ipairs(__frames) do if f.keyboard then o=f end end
         o.scripts.OnKeyDown(o,'RIGHT')""")
-    saved = rt.eval("ForeverSTUwaveDB.profiles.Default.layout.frames.raid")
-    assert saved is not None and _close(saved.x, -503.5) and _close(saved.y, 72), (saved.x, saved.y)
-    _reset_raid(rt)
-    _drag(rt, "raid", "TOPLEFT", "CENTER", -403, 197)
-    saved = rt.eval("ForeverSTUwaveDB.profiles.Default.layout.frames.raid")
+    saved = rt.eval(f"{key}.raid25")
+    assert saved is not None and _close(saved.x, shipped[25][0] + 1) and _close(saved.y, shipped[25][1]), (
+        saved.x, saved.y)
+    assert rt.eval(f"{key}.raid10") is None and rt.eval(f"{key}.raid") is None
+    _reset_raid(rt, 25)
+    _drag(rt, "raid25", "TOPLEFT", "CENTER", -403, 197)
+    saved = rt.eval(f"{key}.raid25")
     assert _close(saved.x, -400) and _close(saved.y, 200), f"drop saved {(saved.x, saved.y)}, want the snapped (-400, 200)"
-    _assert_own_seat(rt, preview, -400, 200, "preview after a drop")
-    _assert_own_seat(rt, real, -400, 200, "real grid after a drop")
+    _assert_seat(rt, preview, 25, "preview after a drop", (-400, 200))
+    _assert_seat(rt, real, 25, "real grid after a drop", (-400, 200))
     left, top, _, _ = pv.Rect()
-    hl, ht, _, _ = _handle_rect(rt, "raid")
+    hl, ht, _, _ = _handle_rect(rt, "raid25")
     assert _close(hl, left) and _close(ht, top), "the handle did not stay on the grid"
-    handle = edit.GetHandle("raid")
+    assert (_entry(rt, 10).x, _entry(rt, 10).y) == shipped[10], "a drop moved another size"
+    # A size switch swaps the handle, and the selection goes with it: an arrow now nudges the 10 layout.
+    _pv_size(rt, 10)
+    assert _raid_handles(rt, edit) == [10]
+    rt.execute("""local o for _,f in ipairs(__frames) do if f.keyboard then o=f end end
+        o.scripts.OnKeyDown(o,'DOWN')""")
+    saved10 = rt.eval(f"{key}.raid10")
+    assert saved10 is not None and _close(saved10.y, shipped[10][1] - 1), "the arrow went to another layout"
+    assert _close(rt.eval(f"{key}.raid25").x, -400), "the arrow moved the layout that was left"
+    _assert_seat(rt, preview, 10, "preview of the 10 layout", (shipped[10][0], shipped[10][1] - 1))
+    # Right-click resets the one under it.
+    handle = edit.GetHandle("raid10")
     handle.scripts.OnMouseUp(handle, "RightButton")
-    assert rt.eval("FS.Layout.HasOverride('raid')") is False
-    _assert_follows_party(rt, preview, "preview after a right-click")
-    _assert_follows_party(rt, real, "real grid after a right-click")
-    _drag(rt, "raid", "TOPLEFT", "CENTER", -300, 100)
-    assert rt.eval("FS.Layout.HasOverride('raid')") is True
+    assert rt.eval(f"{key}.raid10") is None and rt.eval(f"{key}.raid25") is not None
+    _assert_seat(rt, preview, 10, "preview after a right-click", shipped[10])
+    _pv_size(rt, 25)
     edit.ResetAll()
     _settle(rt)
-    assert rt.eval("FS.Layout.HasOverride('raid')") is False
-    _assert_follows_party(rt, preview, "preview after Reset all")
-    _assert_follows_party(rt, real, "real grid after Reset all")
+    assert rt.eval(f"{key}.raid25") is None
+    _assert_seat(rt, preview, 25, "preview after Reset all", shipped[25])
+    _assert_seat(rt, real, 25, "real grid after Reset all", shipped[25])
     left, top, _, _ = pv.Rect()
-    hl, ht, _, _ = _handle_rect(rt, "raid")
+    hl, ht, _, _ = _handle_rect(rt, "raid25")
     assert _close(hl, left) and _close(ht, top), "the handle did not follow the reset"
-    # A drop that does not move the grid saves nothing: it would pin a following grid in place. (Snapped to the
-    # grid, a drop of the party's half pixel seat does move it, so snapping is off for this one.)
+    # A drop that does not move the grid saves nothing. (Snapped to the grid, a shipped half pixel seat does move
+    # it, so snapping is off for this one.)
     rt.execute("FS.Config.Set('layout.snap', false)")
-    # With the party frames moved off the entry's own point, so a drop is compared with where the grid really sits.
-    rt.execute("FS.Layout.SetOverride('party', 100, 40) FS.Layout.Reseat('party')")
-    _settle(rt)
-    start = pv.Rect()
-    left, top = start[0], start[1]
-    _drag(rt, "raid", "TOPLEFT", "BOTTOMLEFT", left, top)
-    assert rt.eval("FS.Layout.HasOverride('raid')") is False, "an unmoved drop saved a seat"
+    left, top = pv.Rect()[0], pv.Rect()[1]
+    _drag(rt, "raid25", "TOPLEFT", "BOTTOMLEFT", left, top)
+    assert rt.eval(f"{key}.raid25") is None, "an unmoved drop saved a seat"
     _assert_unblocked(rt)
     _assert_quiet_but_editor(rt)
 
 
 def _check_editor_panel_switches_the_raid_size() -> None:
-    """The editor's panel carries one button per size, the current one in the cyan accent and the rest
-    violet; a click switches the preview to that size and look and the handle to its grid; the choice is
-    the saved setting, so a change from the config page reaches the panel too."""
+    """The editor's panel carries one button per size, the current one selected and the rest not; a click
+    switches the preview to that size and look and the handle to its grid; the choice is the saved setting,
+    so a change from the config page reaches the panel too. The buttons are one-ring chips of our own, not
+    the shared text button skin (its plate, ring and halo read as two outlines at this size)."""
     rt = _client()
     edit = _editor(rt)
     pv = _preview(rt)
@@ -1640,25 +1762,35 @@ def _check_editor_panel_switches_the_raid_size() -> None:
     panel = edit.GetDonePanel()
     buttons = panel.sizeButtons
     assert [buttons[i].raidSize for i in range(1, 7)] == list(PV_SIZES)
-    assert [buttons[i].text for i in range(1, 7)] == [str(n) for n in PV_SIZES]
-    def accents():
-        return [buttons[i].accent for i in range(1, 7)]
-    assert accents() == ["violet", "cyan", "violet", "violet", "violet", "violet"], accents()
+    assert [buttons[i].label.text for i in range(1, 7)] == [str(n) for n in PV_SIZES]
+    assert all(buttons[i].accent is None for i in range(1, 7)), "a size button took the shared text skin"
+    cyan, violet = P._theme_color("COLOR_POWER"), P._theme_color("COLOR_BORDER")
+
+    def picked():
+        return [bool(buttons[i].fsSelected) for i in range(1, 7)]
+
+    def ring(i):
+        return _rgb(buttons[i].edges[1])
+
+    assert picked() == [False, True, False, False, False, False], picked()
+    assert _same_rgb(ring(2), cyan) and _same_rgb(ring(1), violet), "the ring colours"
     for n, button in zip(PV_SIZES, (buttons[i] for i in range(1, 7))):
         button.scripts.OnClick(button)
         assert pv.Size() == n and rt.eval(f"FS.Config.Get('{PV_KEY}')") == n
         assert pv.Look() == ("A" if n <= 10 else "C")
-        assert accents() == ["cyan" if m == n else "violet" for m in PV_SIZES], f"{n}: {accents()}"
+        assert picked() == [m == n for m in PV_SIZES], f"{n}: {picked()}"
+        assert _raid_handles(rt, edit) == [n]
         left, top, w, h = pv.Rect()
-        hl, ht, hw, hh = _handle_rect(rt, "raid")
+        hl, ht, hw, hh = _handle_rect(rt, f"raid{n}")
         assert all(_close(a, b) for a, b in ((hl, left), (ht, top), (hw, w), (hh, h))), f"{n}: handle off the grid"
     rt.execute(f"FS.Config.Set('{PV_KEY}', 15)")
-    assert accents() == ["violet", "violet", "cyan", "violet", "violet", "violet"], "the panel missed a config change"
+    assert picked() == [False, False, True, False, False, False], "the panel missed a config change"
+    assert _raid_handles(rt, edit) == [15]
     assert edit.GetDonePanel().title.text == "LAYOUT EDIT"
     edit.Exit()
     assert edit.GetDonePanel() is None
     # Opened again it shows the saved size.
-    assert edit.Enter() and accents()[2] == "cyan"
+    assert edit.Enter() and picked()[2]
     _assert_quiet_but_editor(rt)
 
 
@@ -1687,9 +1819,12 @@ def main() -> int:
         ("auras gated in combat", _check_auras_gated_in_combat),
         ("names, class colours, roles", _check_names_classes_roles),
         ("look C fill", _check_look_c_fill),
-        ("Layout raid entry", _check_layout_entry),
+        ("Layout raid entries, one per size", _check_layout_entries),
         ("rescaled grid", _check_rescaled_grid),
-        ("grid follows the party until moved", _check_grid_follows_party_until_moved),
+        ("seat for a roster size", _check_seat_for_a_roster),
+        ("grid never follows the party", _check_grid_never_follows_the_party),
+        ("a move changes only its own size", _check_a_move_changes_only_its_own_size),
+        ("roster growth takes the next size seat", _check_roster_growth_takes_the_next_size_seat),
         ("own seat survives a rescale and Reset all", _check_own_seat_survives_rescale_and_reset_all),
         ("own seat waits out combat", _check_own_seat_waits_out_combat),
         ("own seat on whole pixels", _check_own_seat_on_whole_pixels),
@@ -1702,7 +1837,7 @@ def main() -> int:
         ("preview tells listeners", _check_preview_tells_listeners),
         ("editor enter and exit drive the preview", _check_editor_enter_and_exit_drive_the_preview),
         ("editor raid handle", _check_editor_raid_handle),
-        ("editor moves and resets the raid seat", _check_editor_moves_and_resets_the_raid_seat),
+        ("editor moves and resets one raid layout", _check_editor_moves_and_resets_one_raid_layout),
         ("editor panel switches the raid size", _check_editor_panel_switches_the_raid_size),
     ]
     failures = 0

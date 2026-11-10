@@ -72,6 +72,13 @@ end
 Region.__index = function(_, k) return fallback(Region, k) end
 function Region:SetText(s) self._text = s end
 function Region:GetText() return self._text end
+function Region:ClearAllPoints() self._points = {} end
+function Region:SetPoint(point, rel, relPoint, x, y)
+    self._points = self._points or {}
+    self._points[#self._points + 1] = { point = point, rel = rel, relPoint = relPoint or point, x = x or 0, y = y or 0 }
+end
+function Region:SetWidth(w) self._w = w end
+function Region:SetHeight(h) self._h = h end
 function Region:SetColorTexture(r, g, b, a) self._color = { r, g, b, a } end
 function Region:SetVertexColor(r, g, b, a) self._color = { r, g, b, a } end
 local function newRegion() return setmetatable({}, Region) end
@@ -193,7 +200,10 @@ EditModeManagerFrame = {
 __themed = { panels = {}, buttons = {}, fills = {}, text = {} }
 FS_THEME_STUB = {
     COLOR_POWER = { 0.133, 0.878, 1, 1 },
-    ApplyMono = function() end,
+    COLOR_BORDER = { 0.545, 0.361, 0.965, 1 },
+    COLOR_STEEL = { 0.62, 0.66, 0.74, 1 },
+    COLOR_BUTTON_INK = { 0.051, 0.024, 0.125, 1 },
+    ApplyMono = function(region, size, color) region._mono = { size = size, color = color } end,
     SkinPanel = function(frame) __themed.panels[#__themed.panels + 1] = frame end,
     SkinButton = function(button) __themed.buttons[#__themed.buttons + 1] = button end,
     AddCutSliceFill = function(frame)
@@ -1472,9 +1482,9 @@ end
 -- Raid frames (the editor's preview grid, RaidFrames.lua)
 -------------------------------------------------------------------------------
 
--- A stand-in for FS.RaidFrames.Preview: a grid whose top left sits on the raid entry's seat (UIParent centre plus
--- x and y, scaled) and whose size follows the raid size. The real preview, and the follow-the-party seat, are
--- checked against the real RaidFrames.lua in raidframes-harness.py.
+-- A stand-in for FS.RaidFrames.Preview: a grid whose top left sits on the seat of its size's own entry (raid<size>: UIParent
+-- centre plus x and y, scaled) and whose size follows the raid size. The real preview and the real seats are checked
+-- against the real RaidFrames.lua in raidframes-harness.py.
 local function fakePreview(opts)
     opts = opts or {}
     local pv = { SIZES = { 5, 10, 15, 20, 25, 40 }, KEY = "raid.previewSize", shown = false, size = 10,
@@ -1482,6 +1492,7 @@ local function fakePreview(opts)
     local function notify() for _, fn in ipairs(pv.listeners) do fn() end end
     function pv.IsShown() return pv.shown end
     function pv.Size() return pv.size end
+    function pv.SeatId() return "raid" .. pv.size end
     function pv.Show()
         if __combat or opts.refuse then return false end
         pv.shown = true; pv.shows = pv.shows + 1
@@ -1498,7 +1509,7 @@ local function fakePreview(opts)
     end
     function pv.Rect()
         if not pv.shown or (opts.lateRect and not pv.ready) then return nil end
-        local L, scale = FS.Layout.raid, FS.Layout.Scale()
+        local L, scale = FS.Layout["raid" .. pv.size], FS.Layout.Scale()
         local cx, cy = UIParent:GetCenter()
         return cx + L.x * scale, cy + L.y * scale, pv.size * 9 * scale, 120 * scale
     end
@@ -1508,14 +1519,26 @@ local function fakePreview(opts)
     return pv
 end
 
+-- The ring's outer and inner edges around handle `h`, read off its four edge textures (anchored to the handle by
+-- offsets in UI units, one pixel per unit here): { left, bottom, right, top } of the area the ring and tint cover.
+local function outlineOf(h)
+    local top, bottom, left, right = h.edges[1], h.edges[2], h.edges[3], h.edges[4]
+    local outL = left._points[1].x
+    local outT = top._points[1].y
+    local outR = right._points[1].x
+    local outB = bottom._points[1].y
+    return outL, outB, outR, outT
+end
+
 function T.the_raid_handle_covers_the_preview_and_exists_only_while_it_shows()
     local pv = fakePreview()
     edit(); setSnap(false)
     FS.LayoutEdit.Enter()
     eq(pv.shown, true, "entering shows the preview")
-    local h = FS.LayoutEdit.GetHandle("raid")
+    local h = FS.LayoutEdit.GetHandle("raid10")
     eq(h ~= nil, true, "handle shown")
-    eq(h.label._text, "Raid frames")
+    eq(h.label._text, "Raid 10", "labelled with its size")
+    eq(FS.LayoutEdit.GetHandle("raid"), nil, "no handle for the removed shared entry")
     eq(h._parent, UIParent, "an insecure frame on UIParent")
     eq(h._protected, nil)
     local left, top, w, hh = pv.Rect()
@@ -1524,33 +1547,50 @@ function T.the_raid_handle_covers_the_preview_and_exists_only_while_it_shows()
     for _, p in ipairs(h._points) do eq(p.rel, UIParent, "never anchored to a grid") end
     -- A preview that cannot show (combat, a refusal) leaves no handle to move.
     FS.LayoutEdit.Exit()
+    eq(FS.LayoutEdit.GetHandle("raid10"), nil, "no handle once out")
     pv.Show = function() return false end
     FS.LayoutEdit.Enter()
-    eq(FS.LayoutEdit.GetHandle("raid"), nil, "no preview, no handle")
+    eq(FS.LayoutEdit.GetHandle("raid10"), nil, "no preview, no handle")
 end
 
 function T.a_preview_the_engine_has_not_laid_out_yet_gets_its_handle_a_moment_later()
     local pv = fakePreview({ lateRect = true })
     edit()
     FS.LayoutEdit.Enter()
-    eq(FS.LayoutEdit.GetHandle("raid"), nil, "no rect yet, no handle")
+    eq(FS.LayoutEdit.GetHandle("raid10"), nil, "no rect yet, no handle")
     pv.ready = true
     for _, fn in ipairs(__timers) do fn() end
-    eq(FS.LayoutEdit.GetHandle("raid") ~= nil, true, "the retry found it")
+    eq(FS.LayoutEdit.GetHandle("raid10") ~= nil, true, "the retry found it")
     -- Leaving before the retry runs does nothing.
     FS.LayoutEdit.Exit()
     pv.ready = false
     FS.LayoutEdit.Enter()
     FS.LayoutEdit.Exit()
     for _, fn in ipairs(__timers) do fn() end
-    eq(FS.LayoutEdit.GetHandle("raid"), nil)
+    eq(FS.LayoutEdit.GetHandle("raid10"), nil)
+    eq(#__errors, 0)
+end
+
+function T.a_size_switched_before_the_engine_has_laid_it_out_gets_its_handle_a_moment_later()
+    local pv = fakePreview({ lateRect = true })
+    edit()
+    pv.ready = true
+    FS.LayoutEdit.Enter()
+    eq(FS.LayoutEdit.GetHandle("raid10") ~= nil, true)
+    pv.ready = false
+    pv.SetSize(25)
+    eq(FS.LayoutEdit.GetHandle("raid25"), nil, "no rect yet")
+    eq(FS.LayoutEdit.GetHandle("raid10"), nil, "and the old size's handle is down")
+    pv.ready = true
+    for _, fn in ipairs(__timers) do fn() end
+    eq(FS.LayoutEdit.GetHandle("raid25") ~= nil, true, "the retry found it")
     eq(#__errors, 0)
 end
 
 function T.there_is_no_raid_handle_where_the_raid_frames_did_not_load()
     edit(); seat("stance")
     FS.LayoutEdit.Enter()
-    eq(FS.LayoutEdit.GetHandle("raid"), nil)
+    for _, n in ipairs({ 5, 10, 15, 20, 25, 40 }) do eq(FS.LayoutEdit.GetHandle("raid" .. n), nil) end
     eq(rawget(FS.LayoutEdit.GetDonePanel(), "sizeButtons"), nil, "and no size row on the panel")
     eq(FS.LayoutEdit.GetDonePanel()._h, 44, "the panel keeps its one row")
     FS.LayoutEdit.Exit()
@@ -1583,17 +1623,19 @@ function T.a_raid_drop_saves_the_snapped_seat_and_right_click_resets_it()
     local pv = fakePreview()
     edit()
     FS.LayoutEdit.Enter()
-    dragTo("raid", "TOPLEFT", "CENTER", -403, 197)   -- UIParent is 1200 high: scale 1200 / 1440
+    dragTo("raid10", "TOPLEFT", "CENTER", -403, 197)   -- UIParent is 1200 high: scale 1200 / 1440
     local s = FS.Layout.Scale()
-    eq(override("raid").x, 8 * math.floor(-403 / s / 8 + 0.5), "snapped to 8 in design px")
-    eq(override("raid").y, 8 * math.floor(197 / s / 8 + 0.5))
+    eq(override("raid10").x, 8 * math.floor(-403 / s / 8 + 0.5), "snapped to 8 in design px")
+    eq(override("raid10").y, 8 * math.floor(197 / s / 8 + 0.5))
+    eq(override("raid25"), nil, "no other size is written")
+    eq(override("raid"), nil)
     local left, top = pv.Rect()
-    local h = FS.LayoutEdit.GetHandle("raid")
+    local h = FS.LayoutEdit.GetHandle("raid10")
     near(h:GetLeft(), left, 1e-6, "the handle follows the seat the preview took")
     near(h:GetTop(), top, 1e-6)
     h._scripts.OnMouseUp(h, "RightButton")
-    eq(override("raid"), nil, "right-click resets it")
-    eq(FS.Layout.raid.x, -504.5, "to the shipped entry")
+    eq(override("raid10"), nil, "right-click resets it")
+    eq(FS.Layout.raid10.x, -696.5, "to the shipped entry")
     eq(__printedHas("could not"), false)
 end
 
@@ -1601,31 +1643,109 @@ function T.arrows_and_reset_all_move_and_clear_the_raid_seat()
     fakePreview()
     edit(); setSnap(false)
     FS.LayoutEdit.Enter()
-    FS.LayoutEdit.Select("raid")
+    FS.LayoutEdit.Select("raid10")
     key("RIGHT")
-    eq(override("raid").x, -503.5); eq(override("raid").y, 72)
+    eq(override("raid10").x, -695.5); eq(override("raid10").y, 140)
     __shift = true
     key("DOWN")
-    eq(override("raid").y, 64, "Shift nudges by the grid step")
+    eq(override("raid10").y, 132, "Shift nudges by the grid step")
     FS.LayoutEdit.ResetAll()
-    eq(override("raid"), nil, "reset all clears it")
-    local h = FS.LayoutEdit.GetHandle("raid")
+    eq(override("raid10"), nil, "reset all clears it")
+    local h = FS.LayoutEdit.GetHandle("raid10")
     local left, top = FS.RaidFrames.Preview.Rect()
     near(h:GetLeft(), left, 1e-6, "and the handle goes back with it")
 end
 
-function T.the_raid_handle_follows_a_resized_preview()
+function T.a_resized_preview_swaps_the_handle_and_the_selection_goes_with_it()
     local pv = fakePreview()
-    edit()
+    edit(); setSnap(false)
     FS.LayoutEdit.Enter()
-    local h = FS.LayoutEdit.GetHandle("raid")
-    local before = h:GetWidth()
+    FS.LayoutEdit.Select("raid10")
+    local before = FS.LayoutEdit.GetHandle("raid10"):GetWidth()
     pv.SetSize(40)
-    eq(h:GetWidth() > before, true, "the handle took the bigger grid")
+    eq(FS.LayoutEdit.GetHandle("raid10"), nil, "the old size's handle is down")
+    local h = FS.LayoutEdit.GetHandle("raid40")
+    eq(h ~= nil, true, "the new size's handle is up")
+    eq(h:GetWidth() > before, true, "it took the bigger grid")
     near(h:GetWidth(), select(3, pv.Rect()), 1e-6)
+    eq(h.label._text, "Raid 40")
+    key("LEFT")
+    eq(override("raid40").x, -1010.5, "an arrow nudges the layout on screen")
+    eq(override("raid10"), nil, "and not the one that was left")
+    -- With nothing selected, a switch selects nothing.
+    FS.LayoutEdit.Select(nil)
+    pv.SetSize(5)
+    key("LEFT")
+    eq(override("raid5"), nil)
+    eq(#__errors, 0)
 end
 
-function T.the_panel_has_a_size_button_per_raid_size_and_a_click_asks_for_it()
+function T.every_handle_outline_sits_clear_of_the_frame_it_covers()
+    local pv = fakePreview()
+    edit(); seat("stance"); seat("party")
+    FS.LayoutEdit.Enter()
+    for _, id in ipairs({ "stance", "party", "raid10" }) do
+        local h = FS.LayoutEdit.GetHandle(id)
+        eq(h ~= nil, true, id)
+        local l, b, r, t = outlineOf(h)
+        -- Outside the covered rect by the gap and the ring, on every side (one pixel per unit in this mock).
+        eq(l, -5, id .. " left"); eq(r, 5, id .. " right"); eq(t, 5, id .. " top"); eq(b, -5, id .. " bottom")
+        -- The ring is two pixels thick and its inner edge is the 3 pixel gap from the frame.
+        eq(h.edges[1]._h, 2); eq(h.edges[2]._h, 2); eq(h.edges[3]._w, 2); eq(h.edges[4]._w, 2)
+        -- The tint covers the same outer rect, and the edges meet at the corners without overlapping.
+        eq(h.fill._points[1].x, -5); eq(h.fill._points[1].y, 5)
+        eq(h.fill._points[2].x, 5); eq(h.fill._points[2].y, -5)
+        eq(h.edges[3]._points[1].y, 3, id .. " the side edge starts under the top edge")
+        eq(h.edges[3]._points[2].y, -3)
+        eq(h.edges[4]._points[1].y, 3)
+        -- The handle frame itself is the frame's own rect: the drag maths and the hit area are unchanged.
+        local L = FS.Layout[id]
+        if id ~= "raid10" then
+            local scale = FS.Layout.Scale()
+            near(h:GetWidth(), L.w * scale, 1e-6, id .. " width")
+        end
+    end
+end
+
+function T.the_outline_follows_the_pixel_scale()
+    fakePreview()
+    edit(); seat("stance")
+    FS.FrameHelpers = { PixelsPerUnit = function() return 1.2 end }
+    FS.LayoutEdit.Enter()
+    local h = FS.LayoutEdit.GetHandle("stance")
+    -- 5 pixels (3 clear and a 2 pixel ring) at 1.2 pixels per unit.
+    near(h.edges[1]._points[1].y, 5 / 1.2, 1e-9); near(h.edges[1]._h, 2 / 1.2, 1e-9)
+    FS.FrameHelpers = { PixelsPerUnit = function() return 1 end }
+    __fire("UI_SCALE_CHANGED")
+    near(h.edges[1]._points[1].y, 5, 1e-9, "re-seated when the scale changes")
+    eq(#__errors, 0)
+end
+
+function T.a_raid_label_sits_outside_the_ring_and_other_labels_stay_centred()
+    local pv = fakePreview()
+    edit(); seat("stance")
+    FS.LayoutEdit.Enter()
+    local raid = FS.LayoutEdit.GetHandle("raid10")
+    local p = raid.label._points[#raid.label._points]
+    eq(p.point, "BOTTOMLEFT", "above the ring, from the left")
+    eq(p.relPoint, "TOPLEFT"); eq(p.rel, raid)
+    eq(p.x, -5); eq(p.y, 7, "5 outside plus the label gap")
+    -- Too near the top of the screen: it goes under the ring instead.
+    local left, top = pv.Rect()
+    local _, _, w, hh = pv.Rect()
+    pv.Rect = function() return left, UIParent:GetTop() - 4, w, hh end
+    pv.SetSize(10)
+    p = raid.label._points[#raid.label._points]
+    eq(p.point, "TOPLEFT", "below the ring when there is no room above")
+    eq(p.relPoint, "BOTTOMLEFT")
+    eq(p.y, -7)
+    -- Every other handle keeps the label on the piece.
+    local stance = FS.LayoutEdit.GetHandle("stance")
+    local q = stance.label._points[#stance.label._points]
+    eq(q.point, "CENTER"); eq(q.rel, stance)
+end
+
+function T.the_panel_has_a_size_chip_per_raid_size_and_a_click_asks_for_it()
     local pv = fakePreview()
     edit()
     FS.LayoutEdit.Enter()
@@ -1633,31 +1753,78 @@ function T.the_panel_has_a_size_button_per_raid_size_and_a_click_asks_for_it()
     eq(#panel.sizeButtons, 6)
     eq(panel._h > 44, true, "a second row")
     local labels = {}
-    for i, b in ipairs(panel.sizeButtons) do labels[i] = b._text end
+    for i, b in ipairs(panel.sizeButtons) do labels[i] = b.label._text end
     eq(table.concat(labels, ","), "5,10,15,20,25,40")
-    local function accentOf(button)
-        local found
-        for _, c in ipairs(__themed.text) do if c.button == button then found = c.opts.accent end end
-        return found
+    -- Not the shared text button skin (its plate, ring and halo read as two outlines at this size); only DONE has it.
+    for _, c in ipairs(__themed.text) do
+        for _, b in ipairs(panel.sizeButtons) do if c.button == b then error("a size chip took the text button skin") end end
     end
-    eq(accentOf(panel.sizeButtons[2]), "cyan", "the current size is cyan")
-    eq(accentOf(panel.sizeButtons[1]), "violet")
+    local cyan, violet = FS_THEME_STUB.COLOR_POWER, FS_THEME_STUB.COLOR_BORDER
+    local function ringOf(b)
+        local c = b.edges[1]._color
+        return c
+    end
+    local function same(c, want) return math.abs(c[1] - want[1]) < 1e-9 and math.abs(c[2] - want[2]) < 1e-9 end
+    eq(panel.sizeButtons[2].fsSelected, true, "the current size is selected")
+    eq(same(ringOf(panel.sizeButtons[2]), cyan), true, "its ring is cyan")
+    eq(ringOf(panel.sizeButtons[2])[4], 1)
+    eq(panel.sizeButtons[1].fsSelected, false)
+    eq(same(ringOf(panel.sizeButtons[1]), violet), true, "the rest are violet")
+    eq(ringOf(panel.sizeButtons[1])[4] < 1, true, "and dimmer")
+    -- The selected chip's fill is washed toward cyan; the others are the ink.
+    local sel, other = panel.sizeButtons[2].fill._color, panel.sizeButtons[1].fill._color
+    eq(sel[3] > other[3] and sel[2] > other[2], true, "a cyan wash on the selected fill")
+    eq(panel.sizeButtons[2].label._mono.color, FS_THEME_STUB.COLOR_POWER, "a cyan label")
+    eq(panel.sizeButtons[1].label._mono.color, FS_THEME_STUB.COLOR_STEEL, "a steel label")
     local b = panel.sizeButtons[5]
     b._scripts.OnClick(b)
     eq(pv.asked[1], 25)
-    eq(accentOf(panel.sizeButtons[5]), "cyan", "the pick moves the accent")
-    eq(accentOf(panel.sizeButtons[2]), "violet")
-    -- Each button tells what it does.
-    b._scripts.OnEnter(b)
-    eq(GameTooltip._text:find("25", 1, true) ~= nil, true)
-    b._scripts.OnLeave(b)
-    eq(GameTooltip._shown, false)
-    -- The row never reaches past the panel.
+    eq(panel.sizeButtons[5].fsSelected, true, "the pick moves the selection")
+    eq(panel.sizeButtons[2].fsSelected, false)
+    eq(same(ringOf(panel.sizeButtons[5]), cyan), true)
+    eq(same(ringOf(panel.sizeButtons[2]), violet), true)
+    -- Hover brightens an unselected chip and leaving puts it back.
+    local o = panel.sizeButtons[1]
+    local dim = ringOf(o)[4]
+    o._scripts.OnEnter(o)
+    eq(ringOf(o)[4], 1, "hover takes the ring to full")
+    eq(GameTooltip._text:find("25", 1, true), nil, "the tooltip names its own size")
+    eq(GameTooltip._text:find("5", 1, true) ~= nil, true)
+    o._scripts.OnLeave(o)
+    eq(ringOf(o)[4], dim); eq(GameTooltip._shown, false)
+    -- One pixel ring: four edges one pixel thick, sides starting under the top edge, so no corner is drawn twice.
+    for _, chip in ipairs(panel.sizeButtons) do
+        eq(chip.edges[1]._h, 1); eq(chip.edges[2]._h, 1); eq(chip.edges[3]._w, 1); eq(chip.edges[4]._w, 1)
+        eq(chip.edges[3]._points[1].y, -1)
+        eq(chip.edges[3]._points[2].y, 1)
+    end
+    -- The row never reaches past the panel, and the chips do not overlap.
+    local right
     for _, button in ipairs(panel.sizeButtons) do
         local p = button._points[1]
         eq(p.x >= 0 and p.x + button._w <= panel._w, true, "inside the panel")
         eq(-p.y + button._h <= panel._h, true, "inside the panel")
+        if right then eq(p.x >= right, true, "the chips do not overlap") end
+        right = p.x + button._w
     end
+end
+
+function T.the_size_chips_sit_on_whole_pixels_at_any_scale()
+    fakePreview()
+    edit()
+    FS.FrameHelpers = { PixelsPerUnit = function() return 1.2 end }
+    FS.LayoutEdit.Enter()
+    local panel = FS.LayoutEdit.GetDonePanel()
+    for _, button in ipairs(panel.sizeButtons) do
+        local px = button._w * 1.2
+        near(px, math.floor(px + 0.5), 1e-9, "the chip is a whole number of pixels wide")
+        local py = button._h * 1.2
+        near(py, math.floor(py + 0.5), 1e-9, "and high")
+        near(button.edges[1]._h * 1.2, 1, 1e-9, "its ring is one pixel")
+    end
+    local a, b = panel.sizeButtons[1]._points[1].x, panel.sizeButtons[2]._points[1].x
+    near((b - a) * 1.2, math.floor((b - a) * 1.2 + 0.5), 1e-9, "the pitch is whole pixels")
+    eq(#__errors, 0)
 end
 
 function T.the_layout_page_offers_the_raid_preview()

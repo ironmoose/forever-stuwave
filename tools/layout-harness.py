@@ -661,33 +661,39 @@ function T.is_overridden_reads_the_saved_store_loaded_at_login()
     eq(FS.Layout.IsOverridden("pcast"), false, "a store from a newer addon is ignored, so the seat is the shipped one")
 end
 
--- HasOverride: the raid grid follows the party frames until its own entry has a saved seat, and a seat the player
--- dropped exactly on the shipped one still counts (IsOverridden would call that "not moved").
-function T.has_override_tells_a_saved_seat_from_none_even_on_the_shipped_seat()
+-- The raid grid has one seat entry per size (raid5 .. raid40), each its own override and its own reset, and no shared
+-- "raid" entry: a seat saved under the old shared id is inert.
+function T.each_raid_size_has_its_own_seat_override_and_reset()
     useStore()
-    eq(FS.Layout.HasOverride("raid"), false, "nothing saved")
-    eq(FS.Layout.SetOverride("raid", -300, 40), true)
-    eq(FS.Layout.HasOverride("raid"), true, "a dragged seat")
-    eq(FS.Layout.HasOverride("party"), false, "another id is not touched")
-    eq(FS.Layout.ClearOverride("raid"), true)
-    eq(FS.Layout.HasOverride("raid"), false, "reset")
-    eq(FS.Layout.SetOverride("raid", FS.Layout.raid.x, FS.Layout.raid.y), true)
-    eq(FS.Layout.HasOverride("raid"), true, "saved on the shipped seat")
-    eq(FS.Layout.IsOverridden("raid"), false, "which IsOverridden does not call moved")
+    local sizes = { 5, 10, 15, 20, 25, 40 }
+    eq(FS.Layout.raid, nil, "no shared raid entry")
+    for _, n in ipairs(sizes) do
+        local L = FS.Layout["raid" .. n]
+        eq(L.point, "TOPLEFT"); eq(L.relPoint, "CENTER"); eq(L.noSize, true, "the grid sizes itself")
+        eq(FS.Layout.IsOverridden("raid" .. n), false)
+    end
+    local shipped = FS.Layout.raid25.x
+    eq(FS.Layout.SetOverride("raid25", -300, 40), true)
+    eq(FS.Layout.raid25.x, -300); eq(FS.Layout.raid25.y, 40)
+    eq(FS.Layout.IsOverridden("raid25"), true)
+    for _, n in ipairs({ 5, 10, 15, 20, 40 }) do eq(FS.Layout.IsOverridden("raid" .. n), false, "raid" .. n .. " is its own seat") end
+    eq(FS.Layout.ClearOverride("raid25"), true)
+    eq(FS.Layout.raid25.x, shipped, "a reset gives the shipped seat back")
+    eq(FS.Layout.IsOverridden("raid25"), false)
+    FS.Layout.SetOverride("raid5", 1, 2); FS.Layout.SetOverride("raid40", 3, 4)
     FS.Layout.ClearAllOverrides()
-    eq(FS.Layout.HasOverride("raid"), false, "reset all")
+    eq(FS.Layout.IsOverridden("raid5"), false); eq(FS.Layout.IsOverridden("raid40"), false)
 end
 
-function T.has_override_ignores_junk_ids_unusable_values_and_a_newer_store()
-    eq(FS.Layout.HasOverride("raid"), false, "no store bound")
-    useStore({ v = 1, frames = { raid = { x = 11, y = -22 }, party = { x = 1e9, y = 0 }, boss = "x" } })
-    eq(FS.Layout.HasOverride("raid"), true, "a saved seat read at login")
-    eq(FS.Layout.HasOverride("party"), false, "an out of range value is ignored like LoadOverrides does")
-    eq(FS.Layout.HasOverride("boss"), false, "a malformed entry")
-    eq(FS.Layout.HasOverride(nil), false)
-    eq(FS.Layout.HasOverride(7), false)
-    FS.Layout.UseStore({ v = 2, frames = { raid = { x = 11, y = -22 } } })
-    eq(FS.Layout.HasOverride("raid"), false, "a store from a newer addon is ignored")
+function T.saved_raid_seats_load_at_login_and_a_seat_under_the_old_shared_id_is_inert()
+    useStore({ v = 1, frames = { raid15 = { x = -640, y = 210 }, raid = { x = 11, y = -22 } } })
+    eq(FS.Layout.raid15.x, -640); eq(FS.Layout.raid15.y, 210)
+    eq(FS.Layout.IsOverridden("raid15"), true)
+    eq(FS.Layout.raid, nil, "the old shared seat does not make an entry")
+    eq(FS.Layout.IsOverridden("raid"), false)
+    eq(FS.Layout.IsOverridden("raid10"), false, "and is not handed to a size")
+    eq(FS.Layout.ClearAllOverrides(), true)
+    eq(FS.Layout.IsOverridden("raid15"), false)
 end
 
 -- CONSOLE_CAST_GAP sits beside CONSOLE_PET_GAP: the clearance Stack A keeps over the Console art.

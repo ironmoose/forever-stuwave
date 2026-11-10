@@ -1468,7 +1468,11 @@ end
 
 local function withRaidPreview()
     withRaidFrames()
-    FS.RaidFrames.Preview = { KEY = "raid.previewSize", SIZES = { 5, 10, 15, 20, 25, 40 } }
+    local pv = { KEY = "raid.previewSize", SIZES = { 5, 10, 15, 20, 25, 40 } }
+    FS.Config.RegisterDefault(pv.KEY, 10)
+    function pv.Size() return FS.Config.Get(pv.KEY) end
+    function pv.SeatId() return "raid" .. pv.Size() end
+    FS.RaidFrames.Preview = pv
 end
 
 function T.the_raid_move_and_reset_rows_need_the_raid_preview()
@@ -1479,19 +1483,23 @@ function T.the_raid_move_and_reset_rows_need_the_raid_preview()
     W = boot({ preWindow = withRaidPreview })
     W.Open("unitframes")
     local party, panels = headerY("PARTY FRAMES"), headerY("PANELS")
-    local reset, moveRaid, resetRaid = rowY("Reset position"), rowY("Move raid frames"), rowY("Reset raid position")
-    yes(moveRaid and resetRaid, "both rows")
-    yes(party < reset and reset < moveRaid and moveRaid < resetRaid and resetRaid < panels,
+    local reset, size = rowY("Reset position"), rowY("Raid layout")
+    local moveRaid, resetRaid = rowY("Move raid frames"), rowY("Reset raid position")
+    yes(size and moveRaid and resetRaid, "the size row and both rows")
+    yes(party < reset and reset < size and size < moveRaid and moveRaid < resetRaid and resetRaid < panels,
         "under the party rows, inside the group")
     eq(#texts(row("Move raid frames")), 3, "label, button and the ? icon")
     eq(#texts(row("Reset raid position")), 3, "label, button and the ? icon")
     yes(findText("Move", row("Move raid frames")) and findText("Reset", row("Reset raid position")))
     local tip = tipOfRow("Move raid frames")
-    yes(tip and tip:find("preview", 1, true) and tip:find("follows the party", 1, true), tostring(tip))
+    yes(tip and tip:find("preview", 1, true) and tip:find("size picked above", 1, true), tostring(tip))
+    yes(not tip:find("follows the party", 1, true), "the grid no longer follows the party frames: " .. tostring(tip))
     yes(not tip:find("\226\128\148", 1, true), "no em dash")
+    local sizeTip = tipOfRow("Raid layout")
+    yes(sizeTip and sizeTip:find("own seat", 1, true), tostring(sizeTip))
 end
 
-function T.raid_move_hands_over_to_the_editor_and_reset_follows_the_party_again()
+function T.raid_move_hands_over_to_the_editor_and_reset_resets_the_size_picked()
     local W = boot({ preWindow = withRaidPreview })
     W.Open("unitframes")
     local E = stubLayoutEdit()
@@ -1500,9 +1508,17 @@ function T.raid_move_hands_over_to_the_editor_and_reset_follows_the_party_again(
     eq(E.entered[1], "unitframes", "DONE or Esc comes back to this page")
     click("Reset", row("Reset raid position"))
     yes(dialog():IsVisible(), "it asks first")
+    yes(hasText(dialog(), "up to 10"), "and names the size it resets")
     eq(#E.resets, 0)
     click("Confirm", dialog())
-    eq(E.resets[1], "raid", "the raid grid only, not the party frames")
+    eq(E.resets[1], "raid10", "the size on show, not the party frames or another size")
+    -- The size picker on this page is the setting the editor's panel changes: Reset follows it.
+    click("25", row("Raid layout"))
+    eq(FS.Config.Get("raid.previewSize"), 25, "the picker writes the saved size")
+    click("Reset", row("Reset raid position"))
+    yes(hasText(dialog(), "up to 25"))
+    click("Confirm", dialog())
+    eq(E.resets[2], "raid25")
     eq(#__errors, 0)
 end
 
