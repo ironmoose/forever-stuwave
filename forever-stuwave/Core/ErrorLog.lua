@@ -406,10 +406,30 @@ local function EnsureInstalled()
     end
 end
 
+-- The client's taint log (Logs/taint.log) is the only thing that names WHICH of
+-- our writes made a protected call fail, and the client drops the taintLog CVar
+-- on restart, so a block that happens before someone remembers to type
+-- /console taintLog 2 is lost (2026-11-10: three bag-click blocks at the bank, no
+-- log). Level 2 names the tainted variable read before the block. It is set on
+-- every login while ForeverSTUwaveDB.taintLog is not false; the readback is kept
+-- in ForeverSTUwaveDB.taintLogCVar so a client that refuses the write shows it.
+-- tools/taint-watch.py copies the file off disk before a /reload truncates it.
+local function EnableTaintLog()
+    if type(ForeverSTUwaveDB) ~= "table" or ForeverSTUwaveDB.taintLog == false then return end
+    local set = (C_CVar and C_CVar.SetCVar) or SetCVar
+    local get = (C_CVar and C_CVar.GetCVar) or GetCVar
+    if type(set) ~= "function" then return end
+    local ok = pcall(set, "taintLog", "2")
+    local okGet, value = false, nil
+    if type(get) == "function" then okGet, value = pcall(get, "taintLog") end
+    ForeverSTUwaveDB.taintLogCVar = (ok and "set" or "refused") .. " read=" .. tostring(okGet and value or "?")
+end
+
 local installFrame = CreateFrame("Frame")
 installFrame:RegisterEvent("PLAYER_LOGIN")
 installFrame:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
+    pcall(EnableTaintLog)
     pcall(EnsureInstalled)
     if C_Timer and C_Timer.After then C_Timer.After(5, function() pcall(EnsureInstalled) end) end
 end)
