@@ -343,6 +343,7 @@ end
 -- GetProfessions gives prof1, prof2, archaeology, fishing, cooking, firstAid as indices for GetProfessionInfo
 -- (name, icon, skillLevel, maxSkillLevel, numAbilities, spellOffset, skillLine).
 local PROFESSION_SLOTS = { "primary1", "primary2", "archaeology", "fishing", "cooking", "firstAid" }
+local SECONDARY_BY_LINE = { [794] = "archaeology", [356] = "fishing", [185] = "cooking", [129] = "firstAid" }
 
 local function ReadProfessions(snap)
     local p = { status = "unavailable" }
@@ -355,7 +356,11 @@ local function ReadProfessions(snap)
         if idx then
             local info = Call(infoFn, idx)
             if info then
-                p[slot] = { name = Str(info[1]), skill = Num(info[3]), max = Num(info[4]), skillLine = Num(info[7]) }
+                local line = Num(info[7])
+                -- Secondaries are keyed by skill line, not position: Forever returns First Aid (129) in the
+                -- slot retail gives archaeology (live 2026-11-10), so the position alone mislabels it.
+                if i > 2 and line and SECONDARY_BY_LINE[line] then slot = SECONDARY_BY_LINE[line] end
+                p[slot] = { name = Str(info[1]), skill = Num(info[3]), max = Num(info[4]), skillLine = line }
             end
         end
     end

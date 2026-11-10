@@ -374,6 +374,19 @@ check(p.firstAid == nil, "an unlearned slot stays absent")
 GetProfessions, GetNumSkillLines, GetSkillLineInfo = realP, nil, nil
 """)
 
+case("first_aid_in_the_archaeology_slot_keys_by_skill_line")(r"""
+load()
+local realP = GetProfessions
+-- Forever (live 2026-11-10) returns First Aid in the third slot, where retail puts archaeology.
+GetProfessions = function() return 1, 2, 6, 4, 5, nil end
+login()
+local p = saved().professions
+check(p.firstAid and p.firstAid.name == "First Aid" and p.firstAid.skill == 60, "first aid keyed by skill line")
+check(p.archaeology == nil, "no archaeology entry")
+check(p.primary1.name == "Skinning" and p.cooking.skill == 40, "the rest unchanged")
+GetProfessions = realP
+""")
+
 case("a_burst_of_events_is_one_write")(r"""
 load()
 login()
