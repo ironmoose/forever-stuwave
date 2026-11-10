@@ -602,6 +602,81 @@ local function ReadQuests(snap)
     end
 end
 
+-- Currencies and reputations ----------------------------------------------------------------
+
+-- The currency list as the character pane shows it. Entries under a header the player collapsed are not listed by
+-- the client; expanding it from here would change their UI, so a collapsed group is simply absent.
+local function ReadCurrencies(snap)
+    local c = { status = "unavailable", list = {} }
+    snap.currencies = c
+    local n = CallNum(Api("C_CurrencyInfo", "GetCurrencyListSize"))
+    if not n then return end
+    c.status = "ok"
+    local infoFn, linkFn = Api("C_CurrencyInfo", "GetCurrencyListInfo"), Api("C_CurrencyInfo", "GetCurrencyListLink")
+    local header
+    for i = 1, n do
+        local r = Call(infoFn, i)
+        local t = r and Tbl(r[1])
+        if t and t.isHeader then
+            header = Str(t.name)
+        elseif t and Str(t.name) then
+            local id = Num(t.currencyID)
+            if not id then
+                local l = Call(linkFn, i)
+                local link = l and Str(l[1])
+                id = link and tonumber(link:match("currency:(%d+)"))
+            end
+            c.list[#c.list + 1] = { id = id, name = Str(t.name), quantity = Num(t.quantity), max = Num(t.maxQuantity),
+                header = header }
+        end
+    end
+end
+
+-- Standing names from the client's own labels (FACTION_STANDING_LABEL1..8: Hated..Exalted).
+local function StandingLabel(id)
+    local label = id and _G["FACTION_STANDING_LABEL" .. id]
+    return type(label) == "string" and label or nil
+end
+
+-- One reputation row: C_Reputation.GetFactionDataByIndex, else the old GetFactionInfo.
+local function FactionRow(i)
+    local r = Call(Api("C_Reputation", "GetFactionDataByIndex"), i)
+    local t = r and Tbl(r[1])
+    if t then
+        local low, high, cur = Num(t.currentReactionThreshold), Num(t.nextReactionThreshold), Num(t.currentStanding)
+        return { name = Str(t.name), id = Num(t.factionID), standingId = Num(t.reaction),
+            isHeader = t.isHeader == true and not t.isHeaderWithRep, low = low, high = high, value = cur }
+    end
+    r = Call(Api(nil, "GetFactionInfo"), i)
+    if not r then return nil end
+    return { name = Str(r[1]), standingId = Num(r[3]), low = Num(r[4]), high = Num(r[5]), value = Num(r[6]),
+        isHeader = r[9] and not r[11], id = Num(r[14]) }
+end
+
+local function ReadReputations(snap)
+    local rep = { status = "unavailable", list = {} }
+    snap.reputations = rep
+    local n = CallNum(Api("C_Reputation", "GetNumFactions")) or CallNum(Api(nil, "GetNumFactions"))
+    if not n then return end
+    rep.status = "ok"
+    local header
+    for i = 1, n do
+        local row = FactionRow(i)
+        if row and row.isHeader then
+            header = row.name
+        elseif row and row.name then
+            local entry = { id = row.id, name = row.name, standingId = row.standingId,
+                standing = StandingLabel(row.standingId), header = header }
+            -- value/max are progress within the current standing, as the reputation bar shows it.
+            if row.value and row.low and row.high then
+                entry.value, entry.max = row.value - row.low, row.high - row.low
+            end
+            entry.total = row.value
+            rep.list[#rep.list + 1] = entry
+        end
+    end
+end
+
 -- Snapshot and write --------------------------------------------------------------------------
 
 -- A reader that throws leaves what it had filled and is named in snap.errors.
@@ -621,6 +696,8 @@ function Export.Snapshot()
     Guarded(ReadGear, snap, "gear")
     Guarded(ReadBags, snap, "bags")
     Guarded(ReadQuests, snap, "quests")
+    Guarded(ReadCurrencies, snap, "currencies")
+    Guarded(ReadReputations, snap, "reputations")
     local now = CallNum(Api(nil, "GetServerTime")) or CallNum(Api(nil, "time"))
     snap.savedAt = now
     if now then
@@ -695,6 +772,13 @@ local function KeepTorn(snap, last)
     if snap.reason == "logout" and (type(q) ~= "table" or q.status ~= "ok" or #q.list == 0) and type(lq) == "table" and lq.status == "ok"
         and #(lq.list or {}) > 0 then
         snap.quests = lq; keep("quests")
+    end
+    for _, key in ipairs({ "currencies", "reputations" }) do
+        local cur, prev = snap[key], last[key]
+        if snap.reason == "logout" and (type(cur) ~= "table" or cur.status ~= "ok" or #cur.list == 0)
+            and type(prev) == "table" and prev.status == "ok" and #(prev.list or {}) > 0 then
+            snap[key] = prev; keep(key)
+        end
     end
     local c, lc = snap.completedQuests, last.completedQuests
     if (type(c) ~= "table" or #c == 0) and type(lc) == "table" and #lc > 0 then
@@ -827,6 +911,8 @@ local REASONS = {
     PLAYERBANKSLOTS_CHANGED = "bank",
     QUEST_LOG_UPDATE = "quests",
     QUEST_TURNED_IN = "quests",
+    CURRENCY_DISPLAY_UPDATE = "currencies",
+    UPDATE_FACTION = "reputations",
 }
 
 local frame = CreateFrame("Frame")

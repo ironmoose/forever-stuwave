@@ -228,6 +228,31 @@ C_QuestLog = {
     GetAllCompletedQuestIDs = function() return { 750, 744, 3376 } end,
 }
 
+-- currencies: one header, Merchant's Favor (id only in the link), Honor (id in the table)
+CURR = {
+    { name = "Forever", isHeader = true },
+    { name = "Merchant's Favor", isHeader = false, quantity = 37, maxQuantity = 0 },
+    { name = "Honor Points", isHeader = false, quantity = 120, currencyID = 1901 },
+}
+C_CurrencyInfo = {
+    GetCurrencyListSize = function() return #CURR end,
+    GetCurrencyListInfo = function(i) return CURR[i] end,
+    GetCurrencyListLink = function(i) if i == 2 then return "|cffffffff|Hcurrency:3456:0|h[Merchant's Favor]|h|r" end end,
+}
+-- reputations: a header, Thunder Bluff (Honored 3000/12000), Durotar Supply and Logistics (Friendly 250/6000)
+FACTIONS = {
+    { name = "Horde", factionID = 67, isHeader = true, isHeaderWithRep = false },
+    { name = "Thunder Bluff", factionID = 81, reaction = 6, currentStanding = 12000, currentReactionThreshold = 9000,
+      nextReactionThreshold = 21000, isHeader = false },
+    { name = "Durotar Supply and Logistics", factionID = 2700, reaction = 5, currentStanding = 3250,
+      currentReactionThreshold = 3000, nextReactionThreshold = 9000, isHeader = false },
+}
+C_Reputation = {
+    GetNumFactions = function() return #FACTIONS end,
+    GetFactionDataByIndex = function(i) return FACTIONS[i] end,
+}
+FACTION_STANDING_LABEL5, FACTION_STANDING_LABEL6 = "Friendly", "Honored"
+
 function load()
     ForeverSTUwaveExport = nil
     local fn = assert(loadstring(SOURCE_TEXT, "@CharacterExport.lua"))
@@ -494,6 +519,45 @@ check(#saved().completedQuests == 2 and saved().completedQuests[1] == 747, "GetQ
 C_QuestLog = realQ
 GetNumQuestLogEntries, GetQuestLogTitle, GetNumQuestLeaderBoards, GetQuestLogLeaderBoard, GetQuestsCompleted =
     nil, nil, nil, nil, nil
+""")
+
+case("currencies_and_reputations_and_logout_keeps_them")(r"""
+load()
+login()
+local c = saved().currencies
+check(c.status == "ok" and #c.list == 2, "two currencies, header skipped")
+check(c.list[1].name == "Merchant's Favor" and c.list[1].id == 3456 and c.list[1].quantity == 37
+    and c.list[1].header == "Forever", "currency id from the link")
+check(c.list[2].id == 1901 and c.list[2].quantity == 120, "currency id from the table")
+local r = saved().reputations
+check(r.status == "ok" and #r.list == 2, "two factions, header skipped")
+local tb, dsl = r.list[1], r.list[2]
+check(tb.name == "Thunder Bluff" and tb.id == 81 and tb.standing == "Honored" and tb.value == 3000 and tb.max == 12000
+    and tb.total == 12000 and tb.header == "Horde", "faction fields")
+check(dsl.name == "Durotar Supply and Logistics" and dsl.standing == "Friendly" and dsl.value == 250
+    and dsl.max == 6000, "DSL standing")
+local realC, realR = C_CurrencyInfo.GetCurrencyListSize, C_Reputation.GetNumFactions
+C_CurrencyInfo.GetCurrencyListSize = function() return 0 end
+C_Reputation.GetNumFactions = function() return 0 end
+fire("PLAYER_LOGOUT")
+check(#saved().currencies.list == 2 and #saved().reputations.list == 2, "logout teardown keeps both")
+C_CurrencyInfo.GetCurrencyListSize, C_Reputation.GetNumFactions = realC, realR
+""")
+
+case("reputations_fall_back_to_GetFactionInfo")(r"""
+local realR = C_Reputation
+C_Reputation = nil
+GetNumFactions = function() return 2 end
+GetFactionInfo = function(i)
+    if i == 1 then return "Horde", "", 0, 0, 0, 0, false, false, true, false, false, false, false, 67 end
+    return "Orgrimmar", "", 6, 9000, 21000, 10500, false, false, false, false, true, false, true, 76
+end
+load()
+login()
+local o = saved().reputations.list[1]
+check(#saved().reputations.list == 1 and o.name == "Orgrimmar" and o.id == 76 and o.standing == "Honored"
+    and o.value == 1500 and o.max == 12000 and o.header == "Horde", "row from GetFactionInfo")
+C_Reputation, GetNumFactions, GetFactionInfo = realR, nil, nil
 """)
 
 case("the_bank_reads_while_open_and_carries_after")(r"""
