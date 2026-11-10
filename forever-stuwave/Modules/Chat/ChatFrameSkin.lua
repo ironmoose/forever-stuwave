@@ -120,6 +120,35 @@ end
 -- re-applying never stacks a second set of chrome textures. Tabs are not this
 -- function's business any more: the terminal draws ONE strip for the whole
 -- dock (BuildTermTabs), rather than one treatment per chat frame.
+-- Seats the message container (see SkinChatFrame) and makes its height a
+-- whole number of lines.
+--
+-- Player screenshot 2026-11-10: the top message showed only its lower half,
+-- sliced flat just under the tab strip. Messages stack up from the container's
+-- bottom, so whatever height is left over above the last whole line shows a
+-- partial line cut through the middle. The container keeps its bottom bleed and
+-- takes floor(height / line) lines, so the top edge always falls between two
+-- lines. A line is the font size plus the frame's spacing (measured live: 14pt
+-- at this UI scale pitches 21.75px, which is 14 units with no spacing).
+-- Falls back to the plain bleed on both edges when either number is missing.
+function Chat.SnapTextHost(frame)
+    local host = frame and frame.fsTextHost
+    if not host then return end
+    host:ClearAllPoints()
+    host:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", -TEXT_BLEED, -TEXT_BLEED)
+    host:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", TEXT_BLEED, -TEXT_BLEED)
+
+    local height = frame.GetHeight and frame:GetHeight()
+    local size = frame.GetFont and select(2, frame:GetFont())
+    local spacing = frame.GetSpacing and frame:GetSpacing() or 0
+    local line = (type(size) == "number" and size or 0) + (type(spacing) == "number" and spacing or 0)
+    if type(height) == "number" and height > 0 and line > 0 then
+        host:SetHeight(math.max(1, math.floor((height + TEXT_BLEED * 2) / line)) * line)
+    else
+        host:SetPoint("TOPLEFT", frame, "TOPLEFT", -TEXT_BLEED, TEXT_BLEED)
+    end
+end
+
 function Chat.SkinChatFrame(frame, index)
     if not frame or frame.fsChatSkin then return end
 
@@ -174,10 +203,17 @@ function Chat.SkinChatFrame(frame, index)
         end
     end
     if textHost then
-        textHost:ClearAllPoints()
-        textHost:SetPoint("TOPLEFT", frame, "TOPLEFT", -TEXT_BLEED, TEXT_BLEED)
-        textHost:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", TEXT_BLEED, -TEXT_BLEED)
         frame.fsTextHost = textHost
+        Chat.SnapTextHost(frame)
+        -- Re-snap whenever the line height or the window height moves: a font
+        -- size change (every path, FCF_SetChatWindowFontSize included, ends in
+        -- SetFont) or a resize, maximise and restore.
+        if type(hooksecurefunc) == "function" and frame.SetFont then
+            hooksecurefunc(frame, "SetFont", Chat.SnapTextHost)
+        end
+        if frame.HookScript then
+            frame:HookScript("OnSizeChanged", Chat.SnapTextHost)
+        end
     end
 
     -- The chrome used to be drawn ON the ChatFrame itself, which put the border
