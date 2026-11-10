@@ -8,9 +8,10 @@
 --     secret UnitGetTotalAbsorbs, its max the absorb caught right after the player's own cast (PriestShields' mark). While it
 --     holds light: an ice rim, the rune burning white, a frost aura and 8 rays breathing, a glint sweep and rising motes; a hit
 --     flashes it white and shakes it 1 px. The RIM says if you may shield again: violet and draining while Weakened Soul runs
---     (15 s), dim teal while the 4 s cooldown runs, ice cyan when clear. Empty and clear: dashed and still out of combat, an
---     amber dashed pulse with a glow in combat ("shield them"). Not learned: a dotted rim and L6. The label under it is the
---     absorb left (AbbreviateNumbers) or the Weakened Soul time in violet.
+--     (15 s), dim teal while the 4 s cooldown runs, ice cyan when clear. Empty and clear: a still GHOST out of combat (the off
+--     state mockup, 2026-11-10, option C: a faint wash the ground shows through, thin rings for the band and the boss, rivet
+--     dots, a solid thin rim, the rune in ice cyan), an amber dashed pulse with a glow in combat ("shield them"). Not learned:
+--     a dotted rim and L6. The label under it is the absorb left (AbbreviateNumbers) or the Weakened Soul time in violet.
 --   * PRAYER OF MENDING (right): 5 beads on an arc round a 2x heart (lit = heals left), a 5 seat party strip (seat 1 is the
 --     player, then party1-4; class colour strip, a "you" tick), the holder's seat framed gold with a small heart, a spark when a
 --     plain read sees it jump, the 30 s jump timer bar and its label, the heart shaded from the top while the 10 s cooldown
@@ -20,7 +21,7 @@
 -- HOW "THERE IS LIGHT IN IT" IS DRAWN WITHOUT READING A SECRET. The absorb can never be compared, so everything that only shows
 -- while the shield holds light (the ice rim, the white rune, aura, rays, glint, motes, flash, the number) sits in one plain frame
 -- whose ALPHA is the secret absorb (SetAlpha takes a secret; 0 hides it, any absorb shows it fully). That frame is layered over
--- the empty looks (dashed rim, state rune) and under the cooldown and Weakened Soul rims, so the engine picks the right rim and
+-- the empty looks (ghost or dashed rim, state rune) and under the cooldown and Weakened Soul rims, so the engine picks the right rim and
 -- rune. The plain "up" guess (PriestShields: aura out of combat, the cast ledger in combat) only chooses the label and whether
 -- the empty look may nudge.
 --
@@ -95,7 +96,7 @@ local K = C.COLORS
 
 -- priest_shield.tga cells (generate_priest_shield.py SHIELD_CELLS) and priest_mending.tga cells (MENDING_CELLS)
 local CELL = { dark = 0, rimClear = 1, rimCd = 2, rimWsDark = 3, rimDash = 4, rune = 5, runeLine = 6, flash = 7, aura = 8,
-    halo = 9 }
+    halo = 9, ghost = 10, ghostRim = 11 }
 local MCELL = { beadLit = 0, beadOff = 1, beadDash = 2, heartSmall = 3, heartLit = 4, heartOff = 5, heartAmber = 6,
     heartLocked = 7, heartGlow = 8 }
 Priest.CELL, Priest.MCELL = CELL, MCELL
@@ -550,6 +551,7 @@ local function PaintShield(now, combat)
     if not Data.ShieldKnown() then
         On(P.halo, false); On(P.body, false); On(P.stateLine, false)
         On(P.bar, false); On(P.gate, false); On(P.top, false)
+        ShieldCell(P.stateRim, CELL.rimDash)
         On(P.stateRim, true); Tint(P.stateRim, K.muted, 0.4)
         On(P.stateRune, true); Tint(P.stateRune, K.muted, 0.22)
         ShowShards(nil)
@@ -569,16 +571,22 @@ local function PaintShield(now, combat)
     local calm = not combat and not ws and not up and not cd
     local b = nudge and Stepped(Beat(now, C.NUDGE)) or 0
 
-    -- the empty looks (the light, when there is any, covers them)
+    -- the empty looks (the light, when there is any, covers them). Calm is the GHOST (design mockup "Priest shield, off state",
+    -- option C): its own cells, colours baked, so the region is not tinted; every other empty look keeps the dark shield and the
+    -- tinted dashed rim.
+    ShieldCell(P.body, calm and CELL.ghost or CELL.dark)
+    ShieldCell(P.stateRim, calm and CELL.ghostRim or CELL.rimDash)
     On(P.stateRim, not ws and not cd)
-    if nudge then Tint(P.stateRim, K.amber, 0.35 + 0.65 * b) else Tint(P.stateRim, K.rimClear, 0.45) end
+    if calm then Tint(P.stateRim, K.white, 1)
+    elseif nudge then Tint(P.stateRim, K.amber, 0.35 + 0.65 * b)
+    else Tint(P.stateRim, K.rimClear, 0.45) end
     On(P.halo, nudge)
     if nudge then Alpha(P.halo, b) end
     On(P.stateRune, true)
     if ws then Tint(P.stateRune, K.violet, 1)
     elseif nudge then Tint(P.stateRune, K.amber, 0.45 + 0.55 * b)
     elseif cd then Tint(P.stateRune, K.cdOuter, 1)
-    elseif calm then Tint(P.stateRune, K.rimClear, 0.55)
+    elseif calm then Tint(P.stateRune, K.rimClear, 0.7)
     else Tint(P.stateRune, K.rimClear, 1) end
     On(P.stateLine, ws or not (calm or cd))
     if ws then Tint(P.stateLine, K.violet, 0.25) else Tint(P.stateLine, K.rimClear, 0.22) end

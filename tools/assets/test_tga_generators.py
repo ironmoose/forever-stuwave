@@ -2323,6 +2323,102 @@ def test_committed_ramps_and_covers_match_their_generator(icon_style_outputs: Pa
         assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
 
 
+# --- the Priest shield's ghost (the calm, empty look) ---------------------------
+
+PRIEST_GENERATOR = GENERATOR_DIR / "generate_priest_shield.py"
+PRIEST_FILES = ("priest_shield", "priest_shield_glint", "priest_shield_rays", "priest_shield_ws", "priest_shield_lit",
+                "priest_mending", "priest_heart_cd")
+# priest_shield.tga is 4 x 4 cells of 128 texels; the shield centre is 64 texels into a cell; one sprite px is 2 x 2 texels.
+# The cell numbers are the atlas order the Lua module reads (appended: the ghost cells never move an old cell).
+CELL_DARK, CELL_RIM_CLEAR, CELL_RIM_DASH, CELL_FLASH, CELL_GHOST, CELL_GHOST_RIM = 0, 1, 4, 7, 10, 11
+RIM_ICE = (0x5F, 0xD4, 0xE8)
+GHOST_FACE = (6, 14, 30, 115)       # rgba(6,14,30,.45) of the mockup's option C
+GHOST_BAND = (0x4A, 0x6A, 0x8C, 140)  # #4a6a8c at .55
+GHOST_BOSS = (*RIM_ICE, 115)        # #5fd4e8 at .45
+
+
+@pytest.fixture(scope="module")
+def priest_outputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    work = tmp_path_factory.mktemp("priest_shield")
+    _run_generator(PRIEST_GENERATOR, work)
+    return work
+
+
+def _shield_texel(path: Path, cell: int, x: int, y: int) -> tuple[int, int, int, int]:
+    """The texel at the top left of sprite px (x, y) (from the shield centre) in cell `cell` of priest_shield.tga."""
+    return _pixel(path, (cell % 4) * 128 + 64 + 2 * x, (cell // 4) * 128 + 64 + 2 * y)
+
+
+def _shield_alpha_set(path: Path, cell: int) -> set[tuple[int, int]]:
+    """The sprite px of a cell that carry any alpha."""
+    return {(x, y) for y in range(-32, 32) for x in range(-32, 32) if _shield_texel(path, cell, x, y)[3] > 0}
+
+
+def test_committed_priest_art_matches_its_generator(priest_outputs: Path) -> None:
+    for name in PRIEST_FILES:
+        assert (priest_outputs / f"{name}.tga").read_bytes() == (MEDIA_DIR / f"{name}.tga").read_bytes(), name
+
+
+def test_priest_atlas_keeps_the_dark_shield_the_other_states_share(priest_outputs: Path) -> None:
+    path = priest_outputs / "priest_shield.tga"
+    assert _shield_texel(path, CELL_DARK, 0, -17) == (0x0E, 0x1A, 0x34, 255), "a plank"
+    assert _shield_texel(path, CELL_DARK, -19, -5) == (0x05, 0x0A, 0x18, 255), "a seam"
+    assert _shield_texel(path, CELL_DARK, 0, 0) == (0x10, 0x1C, 0x3A, 255), "the boss"
+    assert _shield_texel(path, CELL_DARK, 0, -25) == (0x1E, 0x2A, 0x4A, 255), "the band"
+    dash = _shield_alpha_set(path, CELL_RIM_DASH)
+    assert dash and dash < _shield_alpha_set(path, CELL_RIM_CLEAR), "the dashed rim keeps its gaps"
+
+
+def test_priest_ghost_face_is_one_faint_wash_no_planks_and_no_seams(priest_outputs: Path) -> None:
+    path = priest_outputs / "priest_shield.tga"
+    for x, y in ((0, -17), (-19, -5), (-10, 17), (10, -5), (19, 12), (0, 0), (4, 4), (-5, -9), (0, -24), (5, -24)):
+        assert _shield_texel(path, CELL_GHOST, x, y) == GHOST_FACE, (x, y)
+    flash = _shield_alpha_set(path, CELL_FLASH)           # the flash disc is the whole interior, rim excluded
+    assert _shield_alpha_set(path, CELL_GHOST) == flash, "the wash covers the interior and nothing else"
+
+
+def test_priest_ghost_band_and_boss_are_thin_rings(priest_outputs: Path) -> None:
+    path = priest_outputs / "priest_shield.tga"
+    for x, y in ((0, -25), (0, 25), (-25, 0), (25, 0), (14, -21), (-14, 21)):
+        assert _shield_texel(path, CELL_GHOST, x, y) == GHOST_BAND, ("band", x, y)
+    for x, y in ((10, 0), (-11, 0), (0, 10), (0, -11)):
+        assert _shield_texel(path, CELL_GHOST, x, y) == GHOST_BOSS, ("boss edge", x, y)
+    # only the outermost band row and only the boss's own edge: the bands' inner px and the boss's body stay the wash
+    assert sum(1 for xy in _shield_alpha_set(path, CELL_GHOST)
+               if _shield_texel(path, CELL_GHOST, *xy) == GHOST_BOSS) in range(50, 90)
+
+
+def test_priest_ghost_rivets_are_single_dots_with_no_shadow(priest_outputs: Path) -> None:
+    path = priest_outputs / "priest_shield.tga"
+    # the rivet (a8d8f0 at .7) over the band ring (4a6a8c at .55): alpha .865, colour mixed by their weights
+    expected = (150, 195, 221, 221)
+    rivets = [(sx * dx, sy * dy) for dx, dy in ((10, 23), (23, 10)) for sx in (1, -1) for sy in (1, -1)]
+    assert len(set(rivets)) == 8
+    for x, y in rivets:
+        got = _shield_texel(path, CELL_GHOST, x, y)
+        assert all(abs(a - b) <= 2 for a, b in zip(got, expected)), ((x, y), got)
+        # no shadow one px down and right: that px is the plain wash again
+        assert _shield_texel(path, CELL_GHOST, x + 1, y + 1)[3] <= GHOST_BAND[3], ((x, y), "shadow")
+    dots = [xy for xy in _shield_alpha_set(path, CELL_GHOST) if _shield_texel(path, CELL_GHOST, *xy)[3] > 200]
+    assert sorted(dots) == sorted(rivets), "nothing else in the ghost is that solid"
+
+
+def test_priest_ghost_rim_is_solid_two_px_and_fainter_inside(priest_outputs: Path) -> None:
+    path = priest_outputs / "priest_shield.tga"
+    ghost = _shield_alpha_set(path, CELL_GHOST_RIM)
+    assert ghost == _shield_alpha_set(path, CELL_RIM_CLEAR), "the same 2 px ring as the clear rim: solid, no dashes"
+    assert not ghost & _shield_alpha_set(path, CELL_GHOST), "the rim and the wash never overlap"
+    assert len(ghost) > len(_shield_alpha_set(path, CELL_RIM_DASH))
+    outer, inner = (*RIM_ICE, 191), (*RIM_ICE, 77)
+    for x, y in ((0, -27), (0, 27), (-27, 0), (27, 0)):
+        assert _shield_texel(path, CELL_GHOST_RIM, x, y) == outer, ("outer", x, y)
+    for x, y in ((0, -26), (0, 26), (-26, 0), (26, 0)):
+        got = _shield_texel(path, CELL_GHOST_RIM, x, y)
+        assert got[:3] == RIM_ICE and abs(got[3] - 77) <= 1, ("inner", x, y, got)
+    seen = {_shield_texel(path, CELL_GHOST_RIM, *xy)[3] for xy in ghost}
+    assert len(seen) == 2 and max(seen) == 191 and abs(min(seen) - 77) <= 1, seen
+
+
 # --- nothing derived from the game's art is shipped ----------------------------
 
 # The only textures that are not written by a generate_*.py: the two micro keys drawn from our own hand drawn shapes

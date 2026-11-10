@@ -10,7 +10,10 @@ texels of one flat colour (no smoothing). The shield pieces share one sprite box
     priest_shield.tga        512 x 512  4 x 4 cells of 128 texels (a 64 sprite px box), order SHIELD_CELLS below:
                                         the dark shield, the clear rim, the cooldown rim, the dark Weakened Soul rim, the dashed
                                         rim (white, tinted in game), the rune and its outline (white, tinted), the hit flash
-                                        disc (white), the frost aura and the amber nudge halo (full colour, alpha baked).
+                                        disc (white), the frost aura and the amber nudge halo (full colour, alpha baked), then
+                                        the GHOST, the calm empty look (design mockup "Priest shield, off state", 2026-11-10,
+                                        option C): a faint wash with the band and boss as thin rings and the rivets as dots, and
+                                        its solid 2 px rim (both full colour, alpha baked; the rune is the shared rune cell).
     priest_shield_glint.tga  512 x 256  GLINT_FRAMES frames of the diagonal glint, same cells.
     priest_shield_rays.tga   256 x 256  the 8 rays round a shield with light in it, an 80 sprite px box (centre RAYS_CENTER).
     priest_shield_ws.tga     128 x 128  the violet Weakened Soul rim alone, the swipe texture of a Cooldown frame.
@@ -38,7 +41,8 @@ CELL = BOX * SCALE                 # 128 texels
 GLINT_FRAMES = 8
 LIT_X0, LIT_Y0, LIT_W, LIT_H = -27, -26, 55, 53
 
-SHIELD_CELLS = ["dark", "rimClear", "rimCd", "rimWsDark", "rimDash", "rune", "runeLine", "flash", "aura", "halo"]
+SHIELD_CELLS = ["dark", "rimClear", "rimCd", "rimWsDark", "rimDash", "rune", "runeLine", "flash", "aura", "halo", "ghost",
+                "ghostRim"]
 MENDING_CELLS = ["beadLit", "beadOff", "beadDash", "heartSmall", "heartLit", "heartOff", "heartAmber", "heartLocked",
                  "heartGlow"]
 MCELL = 32                         # sprite px per mending cell
@@ -54,6 +58,12 @@ RIM_CLEAR, RIM_CLEAR_HI, RIM_CLEAR_IN = "#5fd4e8", "#d4fbff", "#2a8cb0"
 CD_OUTER, CD_IN = "#2a5a6a", "#1e4250"
 WS_OUTER, WS_IN, WS_DARK_OUTER, WS_DARK_IN = "#c04cff", "#e08cff", "#2a1a44", "#3a2560"
 AMBER = "#ffb648"
+# the ghost (option C of the off state mockup): the ground shows through, so every colour is a translucent one
+GHOST_FACE = (6, 14, 30, 0.45)
+GHOST_BAND, GHOST_BAND_A = "#4a6a8c", 0.55
+GHOST_BOSS, GHOST_BOSS_A = "#5fd4e8", 0.45
+GHOST_RIVET, GHOST_RIVET_A = "#a8d8f0", 0.7
+GHOST_RIM_OUTER_A, GHOST_RIM_INNER_A = 0.75, 0.3
 
 SEAMS = (-19, -10, 10, 19)
 # RUNES.C of the mockup: 45 degree arms, 2 px strokes
@@ -215,6 +225,25 @@ def paint_body(cell, colour_of, pal):
         cell.px(x + 1, y + 1, rgba(pal["rivetShadow"]), blend=True)
 
 
+def paint_ghost(cell):
+    """Option C of the off state mockup: the interior is one faint wash (no planks, no seams); only the band's outermost row
+    and the boss's own edge are drawn, as thin rings, and each rivet is one px laid over the band ring (no shadow). Every px is
+    one colour, so a rivet blends over the band's as the canvas does."""
+    face = rgba(GHOST_FACE)
+    for y in range(-R, R + 1):
+        for x in range(-R, R + 1):
+            if not inside(x, y):
+                continue
+            c = face
+            if on_band(x, y) and not in_disc(x, y, R - 2.5):
+                c = with_alpha(GHOST_BAND, GHOST_BAND_A)
+            if in_boss(x, y) and not boss_disc(x, y, BOSS - 1):
+                c = with_alpha(GHOST_BOSS, GHOST_BOSS_A)
+            cell.px(x, y, c)
+    for (x, y) in RIVETS:
+        cell.px(x, y, with_alpha(GHOST_RIVET, GHOST_RIVET_A), blend=True)
+
+
 def ring_around(cell, near, far):
     """The mockup's glow ring round the rim: for every outer rim px, one px out (near) and two px out (far), blended as the
     canvas does; never over the shield itself."""
@@ -233,6 +262,7 @@ def shield_atlas():
     canvas = Canvas(512, 512)
     cells = {name: Cell(canvas, i, 4) for i, name in enumerate(SHIELD_CELLS)}
     paint_body(cells["dark"], dark_colour, DARK)
+    paint_ghost(cells["ghost"])
     for (x, y, f, outer) in RIM:
         top_left = y < -R + 5 or (x < 0 and y < 0)
         cells["rimClear"].px(x, y, (RIM_CLEAR_HI if top_left else RIM_CLEAR) if outer else RIM_CLEAR_IN)
@@ -240,6 +270,7 @@ def shield_atlas():
         cells["rimWsDark"].px(x, y, WS_DARK_OUTER if outer else WS_DARK_IN)
         if math.floor(f * 40) % 2 == 0:
             cells["rimDash"].px(x, y, "#ffffff")
+        cells["ghostRim"].px(x, y, with_alpha(RIM_CLEAR, GHOST_RIM_OUTER_A if outer else GHOST_RIM_INNER_A))
     for j in range(-1, len(RUNE) + 1):
         for q in range(-1, len(RUNE[0]) + 1):
             if rune_on(j, q):

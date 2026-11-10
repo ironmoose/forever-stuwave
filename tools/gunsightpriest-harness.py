@@ -13,7 +13,8 @@ friendly target (else the player) and Prayer of Mending's beads, heart and party
   * out of combat the auras are the truth (any priest's shield and Weakened Soul; whose they are), and a shield lost early is a
     break (shards);
   * the rims and rune: violet Weakened Soul (a Cooldown fed plain numbers), the cooldown rim, the amber nudge in combat, calm
-    and still out of combat, the dotted L6 lock;
+    and still out of combat (the GHOST of the off state mockup, option C: only here the ghost cells, every other look keeps the
+    dark shield and the dashed rim), the dotted L6 lock;
   * Prayer of Mending: L40 lock, a cast lights 5 beads on the cast target's seat with a "~" timer, a plain read sets the holder
     and heals left, a plain holder change sparks a jump, the cooldown shade is the engine's timer;
   * the party strip: our own shield on a member fills its seat and draws its Weakened Soul line;
@@ -356,18 +357,85 @@ case("empty_and_clear_nudges_amber_in_combat_and_is_calm_and_still_out_of_it", "
     local p = Parts()
     Tick(0.05)
     check(not Shown(p.halo), "calm: no halo")
-    check(p.stateRim.color[4] == 0.45, "calm: the dim dashed rim")
+    check(p.body.fsCell == M.CELL.ghost and p.stateRim.fsCell == M.CELL.ghostRim, "calm: the ghost wash and its solid thin rim")
+    check(Shown(p.body) and Shown(p.stateRim), "calm: both are drawn")
+    check(p.stateRim.color[1] == 1 and p.stateRim.color[4] == 1, "calm: the rim's colours are baked, the region is not tinted")
+    check(math.abs(p.stateRune.color[4] - 0.7) < 1e-9 and p.stateRune.color[1] < 0.5 and p.stateRune.color[3] > 0.8, "calm: the rune in ice cyan at 0.7")
+    check(not Shown(p.stateLine), "calm: no glow round the rune")
     check(not Ticking(), "calm: nothing moves, no ticker")
     __combat = true
     fire("PLAYER_REGEN_DISABLED")
     D.Refresh()
     check(Ticking(), "the nudge pulses")
+    check(p.body.fsCell == M.CELL.dark and p.stateRim.fsCell == M.CELL.rimDash, "the nudge is the dark shield and the dashed rim again")
     local alphas = {}
     for i = 1, 45 do Tick(1 / 30); alphas[p.stateRim.color[4]] = true end
     local n = 0
     for _ in pairs(alphas) do n = n + 1 end
     check(n >= 4 and Shown(p.halo), "the amber dashes breathe with a glow")
     check(p.stateRim.color[1] == 1 and p.stateRim.color[2] > 0.6, "amber")
+    __combat = false
+    fire("PLAYER_REGEN_ENABLED")
+    D.Refresh()
+    Tick(0.05)
+    check(p.body.fsCell == M.CELL.ghost and p.stateRim.fsCell == M.CELL.ghostRim, "out of combat it is the ghost again")
+    check(p.stateRim.color[1] == 1 and p.stateRim.color[4] == 1 and not Shown(p.halo), "and the rim is untinted, no halo")
+    NoLog()
+""")
+
+case("the_ghost_is_only_the_calm_empty_shield_a_cooldown_is_as_before", """
+    -- cooling down: the dark shield, no dashed rim, the dim teal rim, a teal rune and no glow round it
+    SetTarget("friend")
+    __cd["Power Word: Shield"] = true
+    Build()
+    Tick(0.05)
+    local p = Parts()
+    check(p.body.fsCell == M.CELL.dark and Shown(p.body), "cooldown: the dark shield")
+    check(not Shown(p.stateRim) and Shown(p.cdRim) and not Shown(p.stateLine), "cooldown: only the dim teal rim")
+    check(p.stateRune.color[4] == 1 and math.abs(p.stateRune.color[1] - 0x2a / 255) < 1e-6, "cooldown: the teal rune")
+    NoLog()
+""")
+
+case("the_ghost_is_only_the_calm_empty_shield_weakened_soul_is_as_before", """
+    SetTarget("friend")
+    Aura("target", "Weakened Soul", { expirationTime = __now + 9, duration = 15, sourceUnit = "party1" })
+    Build()
+    Tick(0.05)
+    local p = Parts()
+    check(p.body.fsCell == M.CELL.dark and Shown(p.body), "Weakened Soul: the dark shield")
+    check(not Shown(p.stateRim) and Shown(p.wsDark) and Shown(p.wsCd), "Weakened Soul: the violet rim alone")
+    check(p.stateRune.color[4] == 1 and p.stateRune.color[1] > 0.7 and p.stateRune.color[2] < 0.4, "Weakened Soul: the violet rune")
+    check(Shown(p.stateLine) and p.stateLine.color[4] == 0.25, "Weakened Soul: the violet glow round it")
+    NoLog()
+""")
+
+case("the_ghost_is_only_the_calm_empty_shield_a_shield_up_is_as_before", """
+    SetTarget("friend")
+    Aura("target", "Power Word: Shield", { expirationTime = __now + 25, duration = 30, sourceUnit = "player" })
+    Build()
+    Tick(0.05)
+    local p = Parts()
+    check(D.Shield("target").up, "the guess says there is light")
+    check(p.body.fsCell == M.CELL.dark and p.stateRim.fsCell == M.CELL.rimDash, "up: the dark shield and the dashed rim under the light")
+    check(Shown(p.stateRim) and p.stateRim.color[4] == 0.45 and p.stateRim.color[1] < 0.5, "up: the rim at 0.45 in ice cyan")
+    check(p.stateRune.color[4] == 1 and Shown(p.stateLine) and p.stateLine.color[4] == 0.22, "up: the full rune with its glow")
+    NoLog()
+""")
+
+case("the_ghost_is_only_the_calm_empty_shield_not_learned_is_as_before", """
+    SetTarget("friend")
+    Build()
+    Tick(0.05)
+    local p = Parts()
+    check(p.body.fsCell == M.CELL.ghost, "calm first")
+    __known = {}
+    __level = 5
+    D.Refresh()
+    Tick(0.05)
+    check(p.wsLabel.text == "L6", tostring(p.wsLabel.text))
+    check(p.stateRim.fsCell == M.CELL.rimDash and Shown(p.stateRim) and p.stateRim.color[4] == 0.4 and p.stateRim.color[1] < 0.7,
+        "not learned: the dotted rim in muted violet at 0.4, never the ghost's")
+    check(p.stateRune.color[4] == 0.22, "not learned: the faint rune")
     NoLog()
 """)
 
