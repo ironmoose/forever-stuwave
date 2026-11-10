@@ -23,6 +23,16 @@ texels of one flat colour (no smoothing). The shield pieces share one sprite box
                                         dashed), the small holder heart, the 2x heart (lit, off, amber, locked dots) and its
                                         glow (white, tinted).
     priest_heart_cd.tga       32 x 32   the heart's cooldown shade, stretched like the lit shield (a top down StatusBar).
+    priest_medallion.tga     512 x 256  the right slot's two round medallions (design mockup "Priest right slot", 2026-11-10,
+                                        variant A, the picks: a plain skull for Spirit Tap in spirit green, the flame shield for
+                                        Inner Fire in gold): 6 x 3 cells of 80 texels (a 40 sprite px box, the medallion's centre
+                                        pixel at sprite px MED_CENTER), order MEDALLION_CELLS below: the ghost (calm), the lit body,
+                                        the outer and the inner rim px and the dashed rim (white, tinted in game), the glow ring
+                                        (white, near 1.0 and far 0.4 alpha baked, tinted), then per glyph its lit, dim and dotted
+                                        looks (full colour) and its halo (white). A new file, not cells in the shield or mending
+                                        atlas: the box is 40 sprite px, the mending cells are 32 and the shield atlas has 4 free
+                                        cells where 15 are needed. Both glyphs are 15 x 15 sprite px with their centre pixel on
+                                        the ring's centre pixel (an odd width in an odd ring), mirror symmetric.
 
     python3 tools/assets/generate_priest_shield.py      (FS_ASSET_OUTPUT_DIR overrides the output directory)
 """
@@ -46,6 +56,29 @@ SHIELD_CELLS = ["dark", "rimClear", "rimCd", "rimWsDark", "rimDash", "rune", "ru
 MENDING_CELLS = ["beadLit", "beadOff", "beadDash", "heartSmall", "heartLit", "heartOff", "heartAmber", "heartLocked",
                  "heartGlow"]
 MCELL = 32                         # sprite px per mending cell
+
+# the right slot's medallions (design mockup "Priest right slot", variant A)
+MED_R, MED_BOSS = 17, 12           # the ring's radius and the boss disc's, both centred on pixel (0, 0)
+MED_BOX, MED_CENTER = 40, 20       # the cell is 40 sprite px, the medallion's centre pixel at sprite px 20
+MED_CELL, MED_COLS = MED_BOX * SCALE, 6
+MEDALLION_CELLS = ["ghost", "body", "rimOuter", "rimInner", "dash", "glow", "skullLit", "skullDim", "skullDots", "skullHalo",
+                   "shieldLit", "shieldAmber", "shieldDim", "shieldDots", "shieldHalo"]
+MED_RIVETS = ((-10, -10), (10, -10), (-10, 10), (10, 10))
+MED_DARK = {"plank": "#0e1a34", "plank2": "#0b1530", "band": "#1e2a4a", "bossOuter": "#3a5a88", "boss": "#101c3a",
+            "bossHi": "#1c3058", "rivet": "#a8d8f0", "rivetShadow": (4, 10, 24, 0.9)}
+# the glyphs: 15 x 15 sprite px, X mid tone, H light, d shade, o dark, w white hot, m soft. Centre pixel (7, 7).
+SKULL = ["...XXXXXXXXX...", ".XXHHHHHHHHHXX.", "XHHHHHHHHHHHHHX", "XHHHHHHHHHHHHHX", "XHHHHHHHHHHHHHX", "XHHHHHHHHHHHHHX",
+         "XHHoooHHHoooHHX", "XHHoooHHHoooHHX", ".XHoooHHHoooHX.", "..XHHHHoHHHHX..", "...XHHoooHHX...", "...XHHHHHHHX...",
+         "...XHdHdHdHX...", "....XdHdHdX....", "....XXXXXXX...."]
+FLAME_SHIELD = ["XXXXXXXXXXXXXXX", "XoooooooooooooX", "XooooooHooooooX", "XooooooHooooooX", "XoooooHHHoooooX", "XoooooHHHoooooX",
+                "XooooHHwHHooooX", ".XoooHHwHHoooX.", ".XoooHwwwHoooX.", "..XoooHwHoooX..", "...XoooHoooX...", "....XoooooX....",
+                ".....XoooX.....", "......XoX......", ".......X......."]
+GLYPH_C = 7
+SPIRIT_LIT = {"X": "#4dff9e", "H": "#b8ffd8", "d": "#1fa862", "o": "#04200f", "w": "#ffffff", "m": "#8affc0"}   # spirit green
+FIRE_LIT = {"X": "#ffd23f", "H": "#fff4b8", "d": "#c8901a", "o": "#2a1a04", "w": "#ffffff", "m": "#ffe27a"}      # gold
+FIRE_AMBER = {"X": "#ffb648", "H": "#ffe3a6", "d": "#c47a1a", "o": "#2a1a04", "w": "#fff4d0", "m": "#ffd08a"}   # the missing nudge
+GLYPH_DIM = {"X": "#4a3a6c", "H": "#6a5a90", "d": "#3a2c5c", "o": "#150c26", "w": "#6a5a90", "m": "#4a3a6c"}
+GLYPH_DOT = (157, 147, 196, 0.4)
 
 # PALETTES.AGENT ("BIFROST FROST") of the mockup
 LIT = {"top": "#f4ffff", "hi": "#d4fbff", "body": "#9ff0ff", "body2": "#5fd4e8", "deep": "#2fa8c8", "seam": "#3a9ab8",
@@ -402,6 +435,126 @@ def mending_atlas():
     return canvas
 
 
+def med_in_disc(x, y, r):
+    return x * x + y * y <= r * r + r * 0.8
+
+
+def med_rim_points():
+    out = []
+    for y in range(-MED_R, MED_R + 1):
+        for x in range(-MED_R, MED_R + 1):
+            if not med_in_disc(x, y, MED_R) or med_in_disc(x, y, MED_R - 2):
+                continue
+            a = math.atan2(x + 0.01, -y)
+            if a < 0:
+                a += 2 * math.pi
+            outer = (not med_in_disc(x + 1, y, MED_R) or not med_in_disc(x - 1, y, MED_R)
+                     or not med_in_disc(x, y + 1, MED_R) or not med_in_disc(x, y - 1, MED_R))
+            out.append((x, y, a / (2 * math.pi), outer))
+    out.sort(key=lambda p: p[2])
+    return out
+
+
+MED_RIM = med_rim_points()
+MED_RIMSET = {(x, y) for (x, y, _, _) in MED_RIM}
+
+
+def med_inside(x, y):
+    return med_in_disc(x, y, MED_R) and (x, y) not in MED_RIMSET
+
+
+def med_body_colour(x, y):
+    D = MED_DARK
+    if med_in_disc(x, y, MED_BOSS):
+        edge = not med_in_disc(x, y, MED_BOSS - 1)
+        hi = (x + y < -5) and not edge
+        return D["bossOuter"] if edge else D["bossHi"] if hi else D["boss"]
+    if not med_in_disc(x, y, MED_R - 3):
+        return D["band"]
+    return D["plank"] if (x >= 0) != (y >= 0) else D["plank2"]
+
+
+class MedCellCanvas:
+    """One medallion cell: sprite px relative to the medallion's centre pixel, which sits at sprite px MED_CENTER of the cell."""
+
+    def __init__(self, canvas, index):
+        self.c = canvas
+        self.ox = (index % MED_COLS) * MED_BOX + MED_CENTER
+        self.oy = (index // MED_COLS) * MED_BOX + MED_CENTER
+
+    def px(self, x, y, c, blend=False):
+        if -MED_CENTER <= x < MED_BOX - MED_CENTER and -MED_CENTER <= y < MED_BOX - MED_CENTER:
+            self.c.sprite(self.ox + x, self.oy + y, rgba(c) if isinstance(c, str) else c, blend)
+
+    def glyph(self, rows, colours, dots=False):
+        for j, row in enumerate(rows):
+            for q, ch in enumerate(row):
+                if ch == ".":
+                    continue
+                if dots:
+                    if (q + j) % 2 == 0:
+                        self.px(q - GLYPH_C, j - GLYPH_C, rgba(GLYPH_DOT))
+                else:
+                    self.px(q - GLYPH_C, j - GLYPH_C, colours[ch])
+
+    def halo(self, rows):
+        on = lambda j, q: 0 <= j < len(rows) and 0 <= q < len(rows[0]) and rows[j][q] != "."
+        for j in range(-1, len(rows) + 1):
+            for q in range(-1, len(rows[0]) + 1):
+                if on(j, q):
+                    continue
+                if on(j - 1, q) or on(j + 1, q) or on(j, q - 1) or on(j, q + 1):
+                    self.px(q - GLYPH_C, j - GLYPH_C, "#ffffff")
+
+
+def medallion_atlas():
+    canvas = Canvas(512, 256)
+    cells = {name: MedCellCanvas(canvas, i) for i, name in enumerate(MEDALLION_CELLS)}
+    # the lit body: dark planks in quarters, the iron band, the boss, four rivets with a shadow
+    for y in range(-MED_R, MED_R + 1):
+        for x in range(-MED_R, MED_R + 1):
+            if med_inside(x, y):
+                cells["body"].px(x, y, med_body_colour(x, y))
+    for (x, y) in MED_RIVETS:
+        cells["body"].px(x, y, MED_DARK["rivet"])
+        if med_inside(x + 1, y + 1):
+            cells["body"].px(x + 1, y + 1, rgba(MED_DARK["rivetShadow"]), blend=True)
+    # the ghost: one faint wash, the band and the boss edge as thin rings, the rivets as dots, a thin two tone rim
+    face = rgba(GHOST_FACE)
+    for y in range(-MED_R, MED_R + 1):
+        for x in range(-MED_R, MED_R + 1):
+            if not med_inside(x, y):
+                continue
+            c = face
+            if not med_in_disc(x, y, MED_R - 3):
+                c = with_alpha(GHOST_BAND, GHOST_BAND_A)
+            if med_in_disc(x, y, MED_BOSS) and not med_in_disc(x, y, MED_BOSS - 1):
+                c = with_alpha(GHOST_BOSS, GHOST_BOSS_A)
+            cells["ghost"].px(x, y, c)
+    for (x, y) in MED_RIVETS:
+        cells["ghost"].px(x, y, with_alpha(GHOST_RIVET, GHOST_RIVET_A), blend=True)
+    for (x, y, f, outer) in MED_RIM:
+        cells["ghost"].px(x, y, with_alpha(RIM_CLEAR, GHOST_RIM_OUTER_A if outer else GHOST_RIM_INNER_A), blend=True)
+        cells["rimOuter" if outer else "rimInner"].px(x, y, "#ffffff")
+        if math.floor(f * 40) % 2 == 0:
+            cells["dash"].px(x, y, "#ffffff")
+    # the glow ring: one px out and two px out from every outer rim px, the near one at full alpha and the far one at 0.4
+    for (x, y, _, outer) in MED_RIM:
+        if not outer:
+            continue
+        a = math.atan2(y, x)
+        dx, dy = jsround(math.cos(a)), jsround(math.sin(a))
+        cells["glow"].px(x + dx, y + dy, (255, 255, 255, 255), blend=True)
+        cells["glow"].px(x + 2 * dx, y + 2 * dy, (255, 255, 255, 102), blend=True)
+    for name, rows, lit in (("skull", SKULL, SPIRIT_LIT), ("shield", FLAME_SHIELD, FIRE_LIT)):
+        cells[name + "Lit"].glyph(rows, lit)
+        cells[name + "Dim"].glyph(rows, GLYPH_DIM)
+        cells[name + "Dots"].glyph(rows, None, dots=True)
+        cells[name + "Halo"].halo(rows)
+    cells["shieldAmber"].glyph(FLAME_SHIELD, FIRE_AMBER)
+    return canvas
+
+
 def write_tga(path, canvas):
     rows = bytearray()
     for (r, g, b, a) in canvas.px:
@@ -423,6 +576,7 @@ def main():
     write_tga(os.path.join(here, "priest_shield_lit.tga"), lit_shield())
     write_tga(os.path.join(here, "priest_mending.tga"), mending_atlas())
     write_tga(os.path.join(here, "priest_heart_cd.tga"), heart_cd())
+    write_tga(os.path.join(here, "priest_medallion.tga"), medallion_atlas())
 
 
 if __name__ == "__main__":

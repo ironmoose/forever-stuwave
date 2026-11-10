@@ -1,7 +1,8 @@
--- Forever STUwave: Gunsight Class Module for the Priest: the shield and Prayer of Mending
+-- Forever STUwave: Gunsight Class Module for the Priest: the shield, and the right side (the medallions or Prayer of Mending)
 --
--- The approved design is the design mockup "Priest shield and mending" (2026-11-07), palette BIFROST FROST, rune C, no halo.
--- Two watchers side by side on the mockup's 150 x 86 sprite px canvas:
+-- The approved design is the design mockup "Priest shield and mending" (2026-11-07), palette BIFROST FROST, rune C, no halo, and
+-- for the right side the mockup "Priest right slot" (2026-11-10), variant A. Two watchers side by side on the mockup's 150 x 86
+-- sprite px canvas:
 --   * THE SHIELD (left): a round Viking shield (2 px rim, iron band with 8 rivets, planks in ice cyan / teal quarters, a
 --     midnight blue boss carrying the protection rune). It watches the friendly target, else the player (an enemy never carries
 --     our shield). The absorb left is LIGHT filling the shield from the bottom: a vertical StatusBar the engine fills from the
@@ -12,11 +13,18 @@
 --     state mockup, 2026-11-10, option C: a faint wash the ground shows through, thin rings for the band and the boss, rivet
 --     dots, a solid thin rim, the rune in ice cyan), an amber dashed pulse with a glow in combat ("shield them"). Not learned:
 --     a dotted rim and L6. The label under it is the absorb left (AbbreviateNumbers) or the Weakened Soul time in violet.
---   * PRAYER OF MENDING (right): 5 beads on an arc round a 2x heart (lit = heals left), a 5 seat party strip (seat 1 is the
---     player, then party1-4; class colour strip, a "you" tick), the holder's seat framed gold with a small heart, a spark when a
---     plain read sees it jump, the 30 s jump timer bar and its label, the heart shaded from the top while the 10 s cooldown
---     runs, L40 before it is learned. The seats also carry the player's OTHER shields: frost light filling the seat from the
---     bottom (that member's absorb, engine drawn) and a violet line draining along its top (their Weakened Soul from our cast).
+--   * THE RIGHT SIDE, one of three looks, chosen by the setting "Right side shows" (PriestRight.lua: Auto, Spirit Tap + Inner
+--     Fire, Prayer of Mending, Off; a change waits for the end of a fight):
+--       - MEDALLIONS (the default while leveling): two round medallions, the shield's art language, 35 px wide rings on one
+--         centre pixel. SPIRIT TAP above (a plain skull, spirit green), INNER FIRE below (a flame shield, gold), the engine's
+--         own number to the right of each (Spirit Tap's time left, Inner Fire's charges). See "THE MEDALLIONS" below.
+--       - PRAYER OF MENDING: 5 beads on an arc round a 2x heart (lit = heals left), a 5 seat party strip (seat 1 is the
+--         player, then party1-4; class colour strip, a "you" tick), the holder's seat framed gold with a small heart, a spark
+--         when a plain read sees it jump, the 30 s jump timer bar and its label, the heart shaded from the top while the 10 s
+--         cooldown runs, L40 before it is learned. The seats also carry the player's OTHER shields: frost light filling the
+--         seat from the bottom (that member's absorb, engine drawn) and a violet line draining along its top (their Weakened
+--         Soul from our cast).
+--       - OFF: nothing on the right.
 --
 -- HOW "THERE IS LIGHT IN IT" IS DRAWN WITHOUT READING A SECRET. The absorb can never be compared, so everything that only shows
 -- while the shield holds light (the ice rim, the white rune, aura, rays, glint, motes, flash, the number) sits in one plain frame
@@ -25,22 +33,52 @@
 -- rune. The plain "up" guess (PriestShields: aura out of combat, the cast ledger in combat) only chooses the label and whether
 -- the empty look may nudge.
 --
+-- THE MEDALLIONS (the same idea for a buff: the engine knows, Lua does not). Two layers on each medallion:
+--   * BASE (ours, plain regions, always drawn, writable in combat): the calm look (the ghost wash and the dim glyph), or for Inner
+--     Fire the amber nudge (the dark body, amber dashes, the amber glyph and halo, breathing) while the reminder is on, or the
+--     locked look (a dotted rim and a dotted glyph: Spirit Tap not talented, Inner Fire not learned, with L12 beside it).
+--   * COVER (the lit look, children of an ENGINE aura slot): the dark body, the lit rim, the glyph in full colour, a breathing
+--     halo (Spirit Tap also a breathing glow ring), and the engine's number. The slot comes from one AuraContainer per medallion
+--     (template CustomAuraContainerTemplate, unit "player", an AddAuraSlot on HELPFUL with candidateFilters.includeSpellIDs: the
+--     spell's rank ids, PriestRight.Ids), built the way Modules/ActionBars/BuffTab.lua builds its shield slot: the engine shows
+--     the slot, and so the cover, only while the aura is on the player, and draws the number (SetDurationText for Spirit Tap,
+--     SetApplicationCount for Inner Fire) from the secret value, so no Lua ever reads it, compares it or does arithmetic on it.
+--     The slot sits on a plain anchor frame of ours; every cover region is anchored to that anchor, written once (out of
+--     combat) and left alone, so the lit look is static in combat (no kill flash, no per hit change; the breathing is a looping
+--     AnimationGroup). Spirit Tap's "pull now" cue is a plain amber glow ring above it, from the kill ledger (PriestRight:
+--     PARTY_KILL with the player as the attacker, and a plain read that Spirit Tap is up), out of combat only.
+--   The engine route runs only on PROOF, exactly as BuffTab's does: built, enabled and shown out of combat only (one counted
+--   attempt per out of combat pass, 3 in a row give it up, one uncounted retry 10 s after a failure from the 1 s tick), the slot
+--   read back against the anchor BEFORE anything re-seats it (a slot that is off the anchor is put back and is not live until
+--   the next pass; one that cannot be read, or was built in combat, is unproven; an idle slot, with no aura to locate, keeps
+--   the proof it has), the container hidden (alpha 0) until it is live, a rebuild only when an id never seen before appears (3
+--   a session, then a line says to /reload), and the state line in ForeverSTUwaveDB.gunsightPriestRight.line (on disk after a
+--   /reload). While a medallion is not live the BASE says only what a plain read says, out of combat: the lit look drawn by
+--   plain regions without a number when Spirit Tap or Inner Fire is up, the nudge when Inner Fire is readably absent, calm
+--   otherwise; in combat it is calm, never a stale claim. UNVERIFIED in game: the slot rendering and its placement, the layering,
+--   whether the engine draws the Inner Fire count and the Spirit Tap time at all, and the rank ids.
+--
 -- WHAT THE MOCKUP HAS THAT THIS BUILD DOES NOT (the client cannot do it, or not without per frame geometry):
 --   * the bright top rows that ride the light's edge (the fill level is secret; the lit texture carries them at full only);
 --   * the Weakened Soul rim drains from the other end: a Cooldown swipe keeps the arc from where the elapsed time ends to 12
 --     o'clock, the mockup keeps it from 12 o'clock on; and its bright head pixel is gone;
 --   * break shards only for a break a plain read sees (out of combat); in combat a break is not knowable;
 --   * the seat light has no bright top rows either (a flat frost fill);
---   * the label is the house mono font, not the mockup's 3 x 5 pixel font ("~6s", not "~6S").
+--   * the label is the house mono font, not the mockup's 3 x 5 pixel font ("~6s", not "~6S");
+--   * the medallions: no white flash of the glyph on a kill (the cover is static in combat), no glow ring in the Inner Fire
+--     nudge (the cover could not hide it again when the buff is up), and none of the optional out of combat extras (the drain
+--     ring, the low Inner Fire look): they need a swipe texture per ring or a texture per segment and cannot show in combat.
 --
--- DATA. Everything comes from FS.PriestShields (PriestShields.lua); its ledger listens from Start() on and never stops. This
--- file reads no aura and compares no secret: secrets go straight to SetMinMaxValues / SetValue / SetAlpha / AbbreviateNumbers.
+-- DATA. The shield comes from FS.PriestShields (PriestShields.lua); its ledger listens from Start() on and never stops. The right
+-- side comes from FS.PriestRight (PriestRight.lua: the setting, the group, the spells, the kill ledger). This file reads no aura
+-- and compares no secret: secrets go straight to SetMinMaxValues / SetValue / SetAlpha / AbbreviateNumbers.
 --
 -- VISIBILITY. A class module: the host hides with no target and onHide / onShow fire on that edge (GunsightAreas.lua). onHide
--- stops the OnUpdate and the subscription; onShow subscribes, refreshes and repaints. Plain frames only.
+-- stops the OnUpdate and the subscriptions; onShow subscribes, refreshes and repaints. Plain frames only.
 --
--- TICKER. One OnUpdate at most every C.TICK s while shown and something moves (light, a clock, a nudge, a hit, a jump); it
--- stops when nothing does. The tick allocates nothing: positions are numbers, texcoords and labels are written on change.
+-- TICKER. One OnUpdate at most every C.TICK s while shown and something moves (light, a clock, a nudge, a hit, a jump, the cue);
+-- it stops when nothing does. The tick allocates nothing: positions are numbers, texcoords and labels are written on change.
+-- A 1 s C_Timer chain (alive while the module is shown) does the engine's out of combat proof and retry.
 
 local _, FS = ...
 
@@ -71,6 +109,11 @@ local C = {
     RAYS_BOX = 80, RAYS_CENTER = 40,
     LIT = { x = -27, y = -26, w = 55, h = 53 },   -- the lit interior the StatusBar covers, sprite px from the shield centre
     PM = { cx = 114, cy = 27, r = 24, seatY = 47, seatX = { 88, 101, 114, 127, 140 } },
+    MED = { cx = 96, nx = 132, BOX = 40, CENTER = 20 },   -- the medallions' centre pixel column, the number's centre, the art box
+    NUM_SIZE = 18, NUM_LIFT = 0.035,   -- the engine's number: image px (digits 10 sprite px tall), and Mononoki's digit centre in em
+    ENGINE = { TEMPLATE = "CustomAuraContainerTemplate", LEVEL = 6, UNREADABLE_TICKS = 5, REBUILDS = 3, RETRY = 10, LIMIT = 3,
+        EVERY = 1 },
+    MED_BREATH = 1.6,
     BREATH = 2.6, NUDGE = 1.4, HEART_PULSE = 1.0,
     GLINT_EVERY = 3.2, GLINT_LEN = 0.6, GLINT_FRAMES = 8,
     MOTE_X = { -16, -6, 4, 13, 20 }, MOTE_SPEED = 0.35,
@@ -86,6 +129,8 @@ local C = {
         gold = Hex("#ffd36a"), goldLabel = Hex("#ffe9a8"), seatEdge = Hex("#3a2c5c"), seatBg = Hex("#120a22"),
         pink = Hex("#ff5d8f"), sparkCore = Hex("#ffc2d6"), you = Hex("#f3fbff"), barBg = Hex("#1c1230"),
         chainOut = Hex("#8a6a30"), chainOff = Hex("#2a1a44"),
+        spGlow = Hex("#2dff8a"), spRim = Hex("#3ee88a"), spRimIn = Hex("#8affc0"), spNum = Hex("#c8ffe0"),
+        ifGlow = Hex("#ffd23f"), ifRim = Hex("#ffd23f"), ifRimIn = Hex("#ffe88a"), ifNum = Hex("#fff0b0"),
     },
     SEAT_CLASS = { Hex("#f3fbff"), Hex("#c79c6e"), Hex("#ff7d0a"), Hex("#0070de"), Hex("#69ccf0") },   -- mockup fallbacks
 }
@@ -99,7 +144,10 @@ local CELL = { dark = 0, rimClear = 1, rimCd = 2, rimWsDark = 3, rimDash = 4, ru
     halo = 9, ghost = 10, ghostRim = 11 }
 local MCELL = { beadLit = 0, beadOff = 1, beadDash = 2, heartSmall = 3, heartLit = 4, heartOff = 5, heartAmber = 6,
     heartLocked = 7, heartGlow = 8 }
-Priest.CELL, Priest.MCELL = CELL, MCELL
+-- priest_medallion.tga cells (generate_priest_shield.py MEDALLION_CELLS): 6 across, 80 texels, the art box 40 sprite px
+local MEDCELL = { ghost = 0, body = 1, rimOuter = 2, rimInner = 3, dash = 4, glow = 5, skullLit = 6, skullDim = 7, skullDots = 8,
+    skullHalo = 9, shieldLit = 10, shieldAmber = 11, shieldDim = 12, shieldDots = 13, shieldHalo = 14 }
+Priest.CELL, Priest.MCELL, Priest.MEDCELL = CELL, MCELL, MEDCELL
 local SCALE = 2
 
 local MEDIA = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
@@ -115,7 +163,7 @@ local function LogOnce(key, msg)
     end
 end
 
-local Data
+local Data, Right
 local mod
 local seats = {}
 local OX, OY = 0, 0
@@ -190,14 +238,18 @@ local function Alpha(t, a)
 end
 
 -- texcoords of cell i of an atlas: cols across, `cell` texels square, the art w x h sprite px from the cell's top left
+local function CellRect(i, atlasW, atlasH, cols, cell, w, h)
+    local l, top = (i % cols) * cell / atlasW, floor(i / cols) * cell / atlasH
+    return l, l + w * SCALE / atlasW, top, top + h * SCALE / atlasH
+end
 local function Cell(t, i, atlasW, atlasH, cols, cell, w, h)
     if t.fsCell == i then return end
     t.fsCell = i
-    local l, top = (i % cols) * cell / atlasW, floor(i / cols) * cell / atlasH
-    t:SetTexCoord(l, l + w * SCALE / atlasW, top, top + h * SCALE / atlasH)
+    t:SetTexCoord(CellRect(i, atlasW, atlasH, cols, cell, w, h))
 end
 local function ShieldCell(t, i) Cell(t, i, 512, 512, 4, 128, C.BOX, C.BOX) end
 local function MendCell(t, i, w, h) Cell(t, i, 256, 256, 4, 64, w, h) end
+local function MedCell(t, i) Cell(t, i, 512, 256, 6, 80, C.MED.BOX, C.MED.BOX) end
 
 -- The colour of a text region lives on the region (`cur`), because Theme.ApplyMono resets it at every rescale.
 local function TextColor(fs, c, a)
@@ -487,6 +539,83 @@ local function BuildMending()
 end
 
 -------------------------------------------------------------------------------
+-- Build: the right side's two medallions (Spirit Tap above, Inner Fire below)
+-------------------------------------------------------------------------------
+
+local ATLAS = MEDIA .. "priest_medallion.tga"
+
+-- Per medallion: where it stands, its glyph cells, its colours, and the engine text beside it (`text`: the time left or the
+-- charges). `nudges`: the amber reminder. `glow`: a glow ring in the lit look. `haloBreath`: seconds of the halo's breath.
+local MEDS = {
+    { key = "spirit", y = 21, lit = "skullLit", dim = "skullDim", dots = "skullDots", halo = "skullHalo",
+      glow = true, glowC = K.spGlow, rim = K.spRim, rimIn = K.spRimIn, num = K.spNum, text = "duration", haloBreath = 1.0 },
+    { key = "fire", y = 63, lit = "shieldLit", dim = "shieldDim", dots = "shieldDots", halo = "shieldHalo", amber = "shieldAmber",
+      nudges = true, glowC = K.ifGlow, rim = K.ifRim, rimIn = K.ifRimIn, num = K.ifNum, text = "count", haloBreath = 0.9 },
+}
+Priest.MEDS = MEDS
+
+local function BuildMedallions()
+    local md = C.MED
+    local rf = Frame(mod, 1)
+    P.rf = rf
+    P.meds = {}
+    for i, def in ipairs(MEDS) do
+        local m = { def = def, key = def.key, st = { armed = false, failures = 0, gaveUp = false, rebuilds = 0, live = false } }
+        local bx, by = md.cx - md.CENTER, def.y - md.CENTER
+        -- the anchor: a plain frame on the medallion's art box. The engine slot sits on it and the cover is drawn on it.
+        local anc = CreateFrame("Frame", nil, rf)
+        anc:SetFrameLevel(mod:GetFrameLevel() + 2)
+        anc:EnableMouse(false)
+        anc.fsBase = mod
+        Seat(function() anc:SetSize(S(md.BOX), S(md.BOX)); Forget(anc); Place(anc, bx, by) end)
+        m.anc = anc
+        -- the centre of the number: a 1 x 1 plain frame the engine text and the L12 label hang on
+        local numAnc = CreateFrame("Frame", nil, rf)
+        numAnc:SetSize(1, 1)
+        numAnc:EnableMouse(false)
+        Seat(function()
+            numAnc:ClearAllPoints()
+            numAnc:SetPoint("CENTER", mod, "TOPLEFT", S(md.nx), -(S(def.y) + ui(C.NUM_LIFT * C.NUM_SIZE)))
+        end)
+        m.numAnc = numAnc
+        local function MT(layer, sub)
+            local t = Tex(rf, layer, sub, ATLAS, md.BOX, md.BOX)
+            Place(t, bx, by)
+            return t
+        end
+        m.glow = MT("BACKGROUND", 0)
+        m.face = MT("ARTWORK", 0)
+        m.rim = MT("ARTWORK", 1)
+        m.rimIn = MT("ARTWORK", 2)
+        m.halo = MT("ARTWORK", 3)
+        m.glyph = MT("ARTWORK", 4)
+        for _, t in ipairs({ m.glow, m.face, m.rim, m.rimIn, m.halo, m.glyph }) do On(t, false) end
+        if def.key == "fire" then
+            local lock = rf:CreateFontString(nil, "OVERLAY")
+            lock.cur = { 1, 1, 1, 1 }
+            lock:SetJustifyH("CENTER")
+            Seat(function()
+                FS.Theme.ApplyMono(lock, ui(C.NUM_SIZE), lock.cur)
+                lock:ClearAllPoints()
+                lock:SetPoint("CENTER", numAnc, "CENTER", 0, 0)
+            end)
+            lock:SetText("")
+            m.lock = lock
+        end
+        P.meds[i] = m
+    end
+    -- the pull now cue: an amber glow ring over Spirit Tap's cover (a plain frame above the container)
+    local spirit = P.meds[1]
+    local cf = Frame(rf, 9)
+    P.cueFrame = cf
+    P.cueGlow = Tex(cf, "OVERLAY", 0, ATLAS, md.BOX, md.BOX)
+    MedCell(P.cueGlow, MEDCELL.glow)
+    Place(P.cueGlow, md.cx - md.CENTER, spirit.def.y - md.CENTER)
+    Tint(P.cueGlow, K.amber, 0)
+    On(P.cueGlow, false)
+end
+
+-------------------------------------------------------------------------------
 -- Paint
 -------------------------------------------------------------------------------
 
@@ -509,6 +638,7 @@ local function PaintAbsorbs()
             if not ok then abbreviateOff = true; fs:SetText(""); LogOnce("abbreviate", "the absorb number is off on this client") end
         end
     end
+    if P.mode ~= "pom" then return end
     for i = 1, 5 do
         local s = P.seats[i]
         local u = Data.SeatUnit(i)
@@ -802,14 +932,97 @@ local function PaintMending(now, combat)
     return out or nudge or cooling or sinceJump ~= nil
 end
 
+-- The base of one medallion: "calm", "nudge" (Inner Fire missing), "lit" (the plain look, without the engine's number, for a
+-- medallion whose engine slot is not live) or "locked". The regions are plain; this runs in combat too. Colours that are baked
+-- into a cell are drawn untinted (white at alpha 1).
+local function PaintMedBase(m, look, b)
+    local def, face, glow, rim, rimIn, halo, glyph = m.def, m.face, m.glow, m.rim, m.rimIn, m.halo, m.glyph
+    if look == "locked" then
+        On(face, false); On(glow, false); On(rimIn, false); On(halo, false)
+        MedCell(rim, MEDCELL.dash); On(rim, true); Tint(rim, K.muted, 0.4)
+        MedCell(glyph, MEDCELL[def.dots]); On(glyph, true); Tint(glyph, K.white, 1); Alpha(glyph, 1)
+    elseif look == "nudge" then
+        MedCell(face, MEDCELL.body); On(face, true); Tint(face, K.white, 1)
+        On(glow, false); On(rimIn, false)
+        MedCell(rim, MEDCELL.dash); On(rim, true); Tint(rim, K.amber, 0.35 + 0.65 * b)
+        MedCell(halo, MEDCELL[def.halo]); On(halo, true); Tint(halo, K.amber, 0.22 * b)
+        MedCell(glyph, MEDCELL[def.amber]); On(glyph, true); Tint(glyph, K.white, 1); Alpha(glyph, 0.4 + 0.6 * b)
+    elseif look == "lit" then
+        MedCell(face, MEDCELL.body); On(face, true); Tint(face, K.white, 1)
+        MedCell(rim, MEDCELL.rimOuter); On(rim, true); Tint(rim, def.rim, 1)
+        MedCell(rimIn, MEDCELL.rimInner); On(rimIn, true); Tint(rimIn, def.rimIn, 1)
+        if def.glow then
+            MedCell(glow, MEDCELL.glow); On(glow, true); Tint(glow, def.glowC, 0.4)
+        else
+            On(glow, false)
+        end
+        MedCell(halo, MEDCELL[def.halo]); On(halo, true); Tint(halo, def.glowC, 0.19)
+        MedCell(glyph, MEDCELL[def.lit]); On(glyph, true); Tint(glyph, K.white, 1); Alpha(glyph, 1)
+    else
+        MedCell(face, MEDCELL.ghost); On(face, true); Tint(face, K.white, 1)
+        On(glow, false); On(rim, false); On(rimIn, false); On(halo, false)
+        MedCell(glyph, MEDCELL[def.dim]); On(glyph, true); Tint(glyph, K.white, 1); Alpha(glyph, 1)
+    end
+end
+
+-- Returns true while something on the medallions moves (the nudge, the cue).
+local function PaintMedallions(now)
+    local b = Stepped(Beat(now, C.NUDGE))
+    local remind = Right.Remind()
+    local moving = false
+    for i = 1, #P.meds do
+        local m = P.meds[i]
+        local key = m.key
+        local plain = Right.PlainUp(key)                 -- nil in combat: nothing is read there
+        local look
+        if not Right.Known(key) then look = "locked"
+        elseif m.st.live then look = (m.def.nudges and remind and plain ~= true) and "nudge" or "calm"
+        elseif plain == true then look = "lit"
+        elseif plain == false and m.def.nudges and remind then look = "nudge"
+        else look = "calm" end
+        PaintMedBase(m, look, b)
+        if look == "nudge" then moving = true end
+        if m.lock then Label(m.lock, look == "locked" and ("L" .. Right.DEFS.fire.level) or "", K.muted) end
+    end
+    local cue = Right.Cue(now)
+    On(P.cueGlow, cue)
+    if cue then
+        Tint(P.cueGlow, K.amber, 0.9 * (0.35 + 0.65 * Stepped(Beat(now, C.MED_BREATH))))
+        moving = true
+    end
+    return moving
+end
+
+-- Shows the right side's look: the mending parts, the medallions, or nothing.
+local function ApplyMode(mode)
+    if P.mode == mode or not P.rf then return end
+    P.mode = mode
+    On(P.mf, mode == "pom")
+    On(P.pomLabel, mode == "pom")
+    On(P.rf, mode == "medallions")
+    P.absorbDirty = true
+end
+
+local function RightMode()
+    return Right and Right.Mode and Right.Mode() or "pom"
+end
+
 local Sync
 local function PaintAll(now)
     if not mod then return end
     local combat = InCombat()
+    local mode = RightMode()
+    ApplyMode(mode)
     local ok1, a = pcall(PaintShield, now, combat)
     if not ok1 then LogOnce("paintshield", a); a = false end
-    local ok2, b = pcall(PaintMending, now, combat)
-    if not ok2 then LogOnce("paintmending", b); b = false end
+    local b = false
+    if mode == "pom" then
+        local ok2, v = pcall(PaintMending, now, combat)
+        if not ok2 then LogOnce("paintmending", v) else b = v end
+    elseif mode == "medallions" then
+        local ok2, v = pcall(PaintMedallions, now)
+        if not ok2 then LogOnce("paintmedallions", v) else b = v end
+    end
     if P.absorbDirty then
         P.absorbDirty = false
         local ok, err = pcall(PaintAbsorbs)
@@ -839,6 +1052,490 @@ Sync = function()
     mod:SetScript("OnUpdate", want and Tick or nil)
 end
 
+-------------------------------------------------------------------------------
+-- The engine drawn cover of the medallions (UNVERIFIED live), the way BuffTab.lua draws its shield slot
+-------------------------------------------------------------------------------
+
+local EG = C.ENGINE
+local engineTemplateOk
+local parked = {}
+
+local function Quiet(obj, method, ...)
+    local okGet, fn = pcall(function() return obj[method] end)
+    if okGet and type(fn) == "function" then return (pcall(fn, obj, ...)) end
+    return true
+end
+
+local function EngineTemplate()
+    if engineTemplateOk ~= nil then return engineTemplateOk end
+    local info = C_XMLUtil and C_XMLUtil.GetTemplateInfo
+    local ok = false
+    if type(info) == "function" then
+        local good, result = pcall(info, EG.TEMPLATE)
+        ok = good and result ~= nil and result ~= false
+    end
+    engineTemplateOk = ok
+    return ok
+end
+
+-- true when the container reads back in the wanted state; a blocked call raises nothing, so only a readback proves it.
+local function ContainerIs(container, live)
+    local ok, isShown = pcall(container.IsShown, container)
+    if ok and not IsSecret(isShown) and (isShown and true or false) ~= live then return false end
+    local okFn, fn = pcall(function() return container.IsEnabled end)
+    if okFn and type(fn) == "function" then
+        local okE, enabled = pcall(fn, container)
+        if okE and not IsSecret(enabled) and (enabled and true or false) ~= live then return false end
+    end
+    return true
+end
+
+local function Rect(region)
+    local okL, left = pcall(region.GetLeft, region)
+    local okT, top = pcall(region.GetTop, region)
+    local okR, right = pcall(region.GetRight, region)
+    local okB, bottom = pcall(region.GetBottom, region)
+    if okL and okT and okR and okB and type(left) == "number" and type(top) == "number" and type(right) == "number"
+        and type(bottom) == "number" and not IsSecret(left) and not IsSecret(top) and not IsSecret(right)
+        and not IsSecret(bottom) then
+        return left, top, right, bottom
+    end
+    return nil
+end
+
+-- true when `slot` stands on `anchor` (all four edges), false when it stands elsewhere, nil when either cannot be read.
+local function Placed(slot, anchor)
+    local sl, st, sr, sb = Rect(slot)
+    local al, at, ar, ab = Rect(anchor)
+    if not (sl and al) then return nil end
+    return math.abs(al - sl) <= 1.5 and math.abs(at - st) <= 1.5 and math.abs(ar - sr) <= 1.5 and math.abs(ab - sb) <= 1.5
+end
+
+-- true when `slot` is hidden (the engine hides a slot with no aura). An unreadable answer is "not hidden".
+local function Hidden(slot)
+    local ok, shown = pcall(slot.IsShown, slot)
+    return ok and not IsSecret(shown) and shown == false
+end
+
+-- true when `slot` has no size, width and height both plain 0: it draws nothing.
+local function Collapsed(slot)
+    local okW, w = pcall(slot.GetWidth, slot)
+    local okH, h = pcall(slot.GetHeight, slot)
+    return okW and okH and type(w) == "number" and type(h) == "number" and not IsSecret(w) and not IsSecret(h)
+        and w == 0 and h == 0
+end
+
+local function GuardMouse(slot)
+    local function MouseOn(method)
+        local ok, fn = pcall(function() return slot[method] end)
+        if not (ok and type(fn) == "function") then return false end
+        local okCall, answer = pcall(fn, slot)
+        return okCall and not IsSecret(answer) and answer == true
+    end
+    if not (MouseOn("IsMouseClickEnabled") or MouseOn("IsMouseMotionEnabled")) then return end
+    LogOnce("engine_mouse", "a medallion slot has the mouse on; it is switched off")
+    Quiet(slot, "SetMouseClickEnabled", false)
+    Quiet(slot, "SetMouseMotionEnabled", false)
+end
+
+-- One plain boolean answer of `slot` to `method`, or nil and why not: "error", "secret", "type:<type>" or "missing".
+local function PlainBoolean(slot, method)
+    local call = slot[method]
+    if type(call) ~= "function" then return nil, "missing" end
+    local ok, v = pcall(call, slot)
+    if not ok then return nil, "error" end
+    if IsSecret(v) then return nil, "secret" end
+    if type(v) ~= "boolean" then return nil, "type:" .. type(v) end
+    return v
+end
+
+-- What a slot shows right now, for the state line (out of combat only, plain values only).
+local function ReadPart(part)
+    local slot = part.slot
+    local shown, why = PlainBoolean(slot, "IsShown")
+    if shown == nil then
+        local visible, why2 = PlainBoolean(slot, "IsVisible")
+        if visible ~= nil then shown = visible else why = why .. "/" .. why2 end
+    end
+    part.shownCode = shown == nil and 0 or (shown and 2 or 1)
+    part.shownWhy = shown == nil and why or nil
+    local okW, w = pcall(slot.GetWidth, slot)
+    local okH, h = pcall(slot.GetHeight, slot)
+    part.w = (okW and type(w) == "number" and not IsSecret(w)) and floor(w + 0.5) or 0
+    part.h = (okH and type(h) == "number" and not IsSecret(h)) and floor(h + 0.5) or 0
+end
+
+-- A looping breath on `region`: the vertex alpha is the brightest, the animation swings the region alpha between `lo` and 1 over
+-- `period` s (the two steps meet end to end, so the loop has no jump). nil when the client has no animation groups.
+local function Breath(region, lo, period)
+    if not region.CreateAnimationGroup then return nil end
+    local ok, group = pcall(function()
+        local g = region:CreateAnimationGroup()
+        g:SetLooping("REPEAT")
+        local up = g:CreateAnimation("Alpha")
+        up:SetFromAlpha(lo); up:SetToAlpha(1); up:SetDuration(period / 2); up:SetOrder(1)
+        if up.SetSmoothing then up:SetSmoothing("IN_OUT") end
+        local down = g:CreateAnimation("Alpha")
+        down:SetFromAlpha(1); down:SetToAlpha(lo); down:SetDuration(period / 2); down:SetOrder(2)
+        if down.SetSmoothing then down:SetSmoothing("IN_OUT") end
+        g:Play()
+        return g
+    end)
+    return ok and group or nil
+end
+
+-- The lit look of a medallion, drawn by the slot frame (a child of the slot, so the engine shows and hides it with the slot).
+-- Every region is anchored to the medallion's own anchor frame, written once here and never again. Built in initializeFrame.
+local function CoverSlot(m, part)
+    local slot, def, anc = part.slot, m.def, m.anc
+    local function Layer(layer, sub, cell, c, a)
+        local t = slot:CreateTexture(nil, layer, nil, sub)
+        SetTex(t, ATLAS)
+        t:SetTexCoord(CellRect(cell, 512, 256, 6, 80, C.MED.BOX, C.MED.BOX))
+        t:SetAllPoints(anc)
+        t:SetVertexColor(c[1], c[2], c[3], a)
+        return t
+    end
+    part.cover = {}
+    local function Add(t) part.cover[#part.cover + 1] = t; return t end
+    if def.glow then
+        local g = Add(Layer("BACKGROUND", 0, MEDCELL.glow, def.glowC, 0.5))
+        if not Breath(g, 0.6, C.MED_BREATH) then g:SetVertexColor(def.glowC[1], def.glowC[2], def.glowC[3], 0.4) end
+    end
+    Add(Layer("ARTWORK", 0, MEDCELL.body, K.white, 1))
+    Add(Layer("ARTWORK", 1, MEDCELL.rimOuter, def.rim, 1))
+    Add(Layer("ARTWORK", 2, MEDCELL.rimInner, def.rimIn, 1))
+    local h = Add(Layer("ARTWORK", 3, MEDCELL[def.halo], def.glowC, 0.24))
+    if not Breath(h, 0.583, def.haloBreath) then h:SetVertexColor(def.glowC[1], def.glowC[2], def.glowC[3], 0.19) end
+    Add(Layer("ARTWORK", 4, MEDCELL[def.lit], K.white, 1))
+end
+
+-- The number: the engine's own text for the aura, in the house mono font, centred beside the medallion. Seated again out of
+-- combat when the scale changes.
+local function SeatPart(m, part)
+    local num = part.num
+    if not num then return end
+    pcall(function()
+        FS.Theme.ApplyMono(num, ui(C.NUM_SIZE), num.cur)
+        num:ClearAllPoints()
+        num:SetPoint("CENTER", m.numAnc, "CENTER", 0, 0)
+    end)
+end
+
+-- The slot's frame, built by the engine (at AddAuraSlot, or later, when it first needs one): no mouse, seated on the anchor, the
+-- cover and the number. Each step on its own, so a missing method stops nothing. It registers its part on the medallion.
+local function InitSlot(m)
+    local eng = m.eng                                  -- captured at add time: the one this slot was declared on
+    return function(slot)
+        Quiet(slot, "SetMouseMotionEnabled", false)
+        Quiet(slot, "SetMouseClickEnabled", false)
+        Quiet(slot, "SetHideTooltipInCombat", true)
+        if m.eng ~= eng then return end                -- a parked container's late frame is not this medallion's
+        local part = { slot = slot, ok = false }
+        eng.parts[#eng.parts + 1] = part
+        eng.bad = true                                 -- UNPROVEN until a proof pass out of combat has read it
+        pcall(slot.SetAllPoints, slot, m.anc)
+        pcall(CoverSlot, m, part)
+        pcall(function()
+            local num = slot:CreateFontString(nil, "OVERLAY")
+            num.cur = { m.def.num[1], m.def.num[2], m.def.num[3], 1 }
+            num:SetJustifyH("CENTER")
+            if m.def.text == "duration" then slot:SetDurationText(num, {}) else slot:SetApplicationCount(num) end
+            part.num = num
+            SeatPart(m, part)
+        end)
+    end
+end
+
+local function SortOptions()
+    local method = type(_G.AuraContainerSortMethod) == "table" and _G.AuraContainerSortMethod.Default or nil
+    local direction = type(_G.AuraContainerSortDirection) == "table" and _G.AuraContainerSortDirection.Normal or nil
+    return method, direction
+end
+
+local function ParkContainer(container)
+    Quiet(container, "SetEnabled", false)
+    Quiet(container, "Hide")
+    Quiet(container, "SetAlpha", 0)
+    parked[#parked + 1] = container
+end
+
+-- Builds the medallion's container with its one slot, out of combat. Returns the container and the id set it covers. Any failure
+-- parks the container (a frame cannot be destroyed) before raising.
+local function BuildContainer(m)
+    local container = CreateFrame("AuraContainer", nil, P.rf, EG.TEMPLATE)
+    local ids
+    m.eng = { declared = 0, parts = {}, bad = true }
+    local ok, err = pcall(function()
+        container:SetSize(1, 1)
+        container:SetPoint("CENTER", m.anc, "CENTER", 0, 0)
+        container:SetFrameLevel(mod:GetFrameLevel() + EG.LEVEL)
+        container:SetUnit("player")
+        container:SetAlpha(0)
+        ids = Right.Ids(m.key)
+        local method, direction = SortOptions()
+        container:AddAuraSlot(m.key, "HELPFUL", {
+            initializeFrame = InitSlot(m),
+            candidateFilters = { includeSpellIDs = ids },
+            sortMethod = method,
+            sortDirection = direction,
+        })
+        m.eng.declared = 1
+        container:SetEnabled(true)
+        container:Show()
+    end)
+    if not ok then
+        ParkContainer(container)
+        m.eng = nil
+        error(err, 0)
+    end
+    return container, ids
+end
+
+-- The PROOF pass, out of combat only: the slot read against the anchor BEFORE anything is written. A slot found off the anchor is
+-- put back (the medallion is not live until the next pass reads it right); one that cannot be read is unproven, except that an
+-- IDLE slot (hidden, or with no size, or the aura readably absent: nothing to draw or to locate) keeps the proof it has. A
+-- medallion none of whose slots was ever seen on its anchor stays unproven. Allocation free when nothing is wrong.
+local function ProveEngine(m)
+    local eng = m.eng
+    if not eng then return end
+    local bad, anyOk, skipped = false, false, false
+    local down = Right.PlainUp(m.key) == false or not Right.Known(m.key)
+    for _, part in ipairs(eng.parts) do
+        ReadPart(part)
+        local placed = Placed(part.slot, m.anc)
+        local idle = placed == nil and (down or Hidden(part.slot) or Collapsed(part.slot))
+        if idle and part.ok then
+            part.nils = 0                                  -- keeps its last proof
+        else
+            part.ok = placed == true
+            if idle then
+                part.nils = 0                              -- unproven, but nothing is there to be mislaid or to draw
+            elseif placed == nil then
+                part.nils = (part.nils or 0) + 1
+                if part.nils >= EG.UNREADABLE_TICKS then
+                    LogOnce("engine_unreadable", "a medallion slot cannot be located; it keeps the plain look")
+                end
+            else
+                part.nils = 0
+            end
+            if not part.ok and idle then
+                skipped = true
+            elseif not part.ok then
+                bad = true
+                if placed == false then
+                    LogOnce("engine_layout", "a medallion slot is not on its anchor; it is put back")
+                    pcall(part.slot.SetAllPoints, part.slot, m.anc)
+                end
+            end
+        end
+    end
+    for _, part in ipairs(eng.parts) do
+        if part.ok then anyOk = true end
+    end
+    if (skipped or #eng.parts == 0) and not anyOk then bad = true end
+    eng.bad = bad
+end
+
+-- Re-seats the numbers for the current scale, reads the mouse back, then proves the positions. Out of combat only.
+local function SeatEngine(m)
+    local eng = m.eng
+    if not eng then return end
+    for _, part in ipairs(eng.parts) do
+        SeatPart(m, part)
+        GuardMouse(part.slot)
+    end
+    ProveEngine(m)
+end
+
+-- true when an id of `ids` was never covered by a container of this medallion before.
+local function HasNewId(m, ids)
+    local seen = m.st.seenIds
+    if not seen then return true end
+    for id in pairs(ids) do
+        if not seen[id] then return true end
+    end
+    return false
+end
+
+-- Whether the medallion is live: its container armed and its slot proven. The container is visible (alpha 1) only then: an
+-- unproven slot must not draw a stray cover over the plain look. The only write that combat could also make, but nothing here is
+-- called in combat. Returns true when the answer changed.
+local function SyncLive(m)
+    local st = m.st
+    local live = st.container ~= nil and st.armed and m.eng ~= nil and not m.eng.bad and not st.gaveUp
+    if st.container then
+        local want = live and 1 or 0
+        if st.alpha ~= want and Quiet(st.container, "SetAlpha", want) then st.alpha = want end
+    end
+    if st.live == live then return false end
+    st.live = live
+    return true
+end
+
+-- Out of combat: builds the medallion's container once (when the spell is known), arms it again when it reads back off, rebuilds it
+-- when the id set grew. `retry` is the tick's one uncounted second attempt after a failed build. Combat does none of it.
+local function EnsureEngine(m, retry)
+    local st = m.st
+    if st.gaveUp or not P.rf or InCombat() then return end
+    local container = st.container
+    if container then
+        local rebuild = false
+        if HasNewId(m, Right.Ids(m.key)) then
+            if st.rebuilds < EG.REBUILDS then
+                rebuild = true
+            else
+                LogOnce("engine_cap", "a new rank appeared; /reload to cover it")
+            end
+        end
+        if not rebuild then
+            if not ContainerIs(container, true) then
+                Quiet(container, "SetUnit", "player")
+                Quiet(container, "SetEnabled", true)
+                Quiet(container, "Show")
+                st.alpha = nil
+            end
+            st.armed = ContainerIs(container, true)
+            return
+        end
+        st.rebuilds = st.rebuilds + 1
+        ParkContainer(container)
+        st.container, st.armed, st.alpha, m.eng = nil, false, nil, nil
+    end
+    if not Right.Known(m.key) then return end
+    if st.passTried and not retry then return end
+    if not EngineTemplate() then
+        LogOnce("engine_template", "this client has no " .. EG.TEMPLATE .. "; the medallions show no engine state")
+        st.gaveUp = true
+        return
+    end
+    local ok, result, ids = pcall(BuildContainer, m)
+    if ok then
+        st.failures, st.retryAt = 0, nil
+        st.container, st.alpha = result, 0
+        st.seenIds = st.seenIds or {}
+        for id in pairs(ids) do st.seenIds[id] = true end
+        st.armed = ContainerIs(result, true)
+        return
+    end
+    LogOnce("engine_build", "the medallion state could not be built (" .. tostring(result) .. ")")
+    if retry then return end               -- the extra attempt costs nothing and is not repeated
+    st.passTried = true                    -- one counted attempt per out of combat pass; regen starts the next
+    st.failures = st.failures + 1
+    st.retryAt = GetTime() + EG.RETRY
+    if st.failures >= EG.LIMIT then st.gaveUp = true end
+end
+
+-- The state of the engine route for the live test, in ForeverSTUwaveDB.gunsightPriestRight (on disk after a /reload or a logout):
+-- `line` is the one readable line. Rewritten only when something it shows changed (a numeric signature is compared first).
+-- A plain whole number or "secret" for a value that is not one: nothing in the line is formatted from a raw value.
+local function Plain(v)
+    if IsSecret(v) then return "secret" end
+    if type(v) ~= "number" or v ~= v or v == math.huge or v == -math.huge then return "?" end
+    return tostring(floor(v + 0.5))
+end
+
+local function Num(v)
+    if type(v) ~= "number" or IsSecret(v) or v ~= v or v == math.huge or v == -math.huge then return 0 end
+    return v
+end
+
+local function CodeText(v, no, yes)
+    if IsSecret(v) then return "secret" end
+    if v == 2 then return yes end
+    if v == 1 then return no end
+    return "?"
+end
+
+local function WriteStatus()
+    if not P.meds then return end
+    local db = _G.ForeverSTUwaveDB
+    if type(db) ~= "table" or (FS.Config and type(FS.Config.IsReadOnly) == "function" and FS.Config.IsReadOnly()) then return end
+    local sig = InCombat() and 8 or 0
+    local text = { "mode=" .. tostring(P.mode) }
+    for _, m in ipairs(P.meds) do
+        local st, eng = m.st, m.eng
+        sig = (sig * 31 + (st.armed and 1 or 0) + (st.gaveUp and 2 or 0) + (st.retryAt and 4 or 0) + (st.live and 16 or 0)
+            + (st.alpha or 2) * 32 + st.rebuilds * 128 + st.failures * 1024) % 2147483647
+        local detail = {}
+        if eng then
+            sig = (sig * 31 + #eng.parts * 7 + (eng.bad and 1 or 0)) % 2147483647
+            for n, part in ipairs(eng.parts) do
+                sig = (sig * 31 + Num(part.shownCode) * 5 + Num(part.w) * 3 + Num(part.h) + (part.ok and 3 or 0)
+                    + Num(part.nils) * 13 + (part.shownWhy and #part.shownWhy or 0) * 37 + (part.cover and #part.cover or 0) * 19
+                    + (part.num and 23 or 0)) % 2147483647
+                detail[#detail + 1] = string.format("slot%d shown=%s %sx%s ok=%s cover=%s number=%s", n,
+                    CodeText(part.shownCode, "false", "true") .. (part.shownWhy and ("(" .. part.shownWhy .. ")") or ""),
+                    Plain(part.w), Plain(part.h), tostring(part.ok == true), Plain(part.cover and #part.cover or 0),
+                    tostring(part.num ~= nil))
+            end
+        end
+        text[#text + 1] = string.format("%s known=%s armed=%s live=%s alpha=%s failures=%s rebuilds=%s gaveUp=%s%s", m.key,
+            tostring(Right.Known(m.key)), tostring(st.armed), tostring(st.live), tostring(st.alpha), Plain(st.failures),
+            Plain(st.rebuilds), tostring(st.gaveUp), #detail > 0 and (" [" .. table.concat(detail, "; ") .. "]") or "")
+    end
+    local saved = db.gunsightPriestRight
+    if type(saved) == "table" and saved.sig == sig and saved == P.status then return end   -- a corrupt value is replaced
+    saved = { sig = sig, line = table.concat(text, " | ") }
+    db.gunsightPriestRight = saved
+    P.status = saved
+end
+
+local function SaveStatus()
+    local ok, err = pcall(WriteStatus)
+    if not ok then LogOnce("status", "the right side state line could not be saved: " .. tostring(err)) end
+end
+
+-- Out of combat: ensures, seats and proves both medallions (the right side's own events, the module's seat, regen).
+local function EnsureEngines()
+    if InCombat() or not P.meds or RightMode() ~= "medallions" then return false end
+    local changed = false
+    for _, m in ipairs(P.meds) do
+        EnsureEngine(m, false)
+        if m.st.container then SeatEngine(m) end
+        if SyncLive(m) then changed = true end
+    end
+    SaveStatus()
+    return changed
+end
+
+-- The 1 s tick, out of combat only: the one uncounted retry of a failed build, and the proof pass.
+local function EngineTick()
+    if InCombat() or not P.meds or RightMode() ~= "medallions" then return end
+    local changed = false
+    for _, m in ipairs(P.meds) do
+        local st = m.st
+        local at = st.retryAt
+        if at and not st.container and GetTime() >= at then
+            st.retryAt = nil
+            EnsureEngine(m, true)
+            if st.container then SeatEngine(m) end
+        elseif st.container then
+            ProveEngine(m)
+        end
+        if SyncLive(m) then changed = true end
+    end
+    SaveStatus()
+    if changed then PaintAll(GetTime()) end
+end
+
+-- The 1 s tick while the module is shown: a chain of C_Timer.After calls (no OnUpdate frame: the module's own ticker stops when
+-- nothing moves, and the proof must go on). It ends by itself when the module is hidden and picks up again on the next show.
+local function ArmEngineTimer()
+    if P.timerOn or not (C_Timer and C_Timer.After) then return end
+    P.timerOn = true
+    local function Step()
+        if not subscribed then
+            P.timerOn = false
+            return
+        end
+        local ok, err = pcall(EngineTick)
+        if not ok then LogOnce("enginetick", err) end
+        C_Timer.After(EG.EVERY, Step)
+    end
+    C_Timer.After(EG.EVERY, Step)
+end
+
 local function OnChange(reason, unit)
     local now = GetTime()
     if reason == "hit" and unit and type(UnitIsUnit) == "function" then
@@ -852,6 +1549,18 @@ local function OnChange(reason, unit)
     end
     P.absorbDirty = true
     if subscribed then PaintAll(now) end
+end
+
+-- The right side's own changes (the setting, the group, a spell learned, an aura on or off, a kill, the end of a fight): out of
+-- combat the engine route is ensured and proven again, then everything is repainted. In combat only the plain regions are written.
+local function OnRightChange(reason)
+    if not mod then return end
+    if reason == "combat" and not InCombat() and P.meds then
+        for _, m in ipairs(P.meds) do m.st.passTried = false end      -- a new out of combat pass may try a failed build again
+    end
+    EnsureEngines()
+    P.absorbDirty = true
+    if subscribed then PaintAll(GetTime()) end
 end
 
 -------------------------------------------------------------------------------
@@ -875,6 +1584,9 @@ local function SeatModule(rect)
     OX, OY = x + (w - C.W) / 2, y + C.DROP
     if mod then
         SeatAll()
+        if not InCombat() and P.meds then          -- the engine slots' texts are seated out of combat only (regen does it)
+            for _, m in ipairs(P.meds) do SeatEngine(m) end
+        end
         if subscribed then PaintAll(GetTime()) end
         for i = 1, #seatListeners do
             local ok, err = pcall(seatListeners[i], OX, OY)
@@ -890,6 +1602,7 @@ local function BuildModule(host)
         return nil
     end
     Data = FS.PriestShields
+    Right = FS.PriestRight
     if not (Data and Data.Watched and Data.Subscribe) then
         LogOnce("nodata", "FS.PriestShields is missing, the Priest module has no data")
         return nil
@@ -904,6 +1617,7 @@ local function BuildModule(host)
     local ok, err = pcall(function()
         BuildShield()
         BuildMending()
+        if Right then BuildMedallions() end
     end)
     if not ok then
         LogOnce("build", err)
@@ -915,7 +1629,9 @@ local function BuildModule(host)
     end
     Priest.frame, Priest.parts = mod, P
     if Data.Start then Data.Start() end
+    if Right and Right.Start then Right.Start() end
     P.absorbDirty = true
+    EnsureEngines()
     PaintAll(GetTime())
     return mod
 end
@@ -925,10 +1641,13 @@ local function OnAreaShown()
     if not subscribed then
         subscribed = true
         Data.Subscribe(OnChange)
+        if Right and Right.Subscribe then Right.Subscribe(OnRightChange) end
     end
     local ok, err = pcall(Data.Refresh)
     if not ok then LogOnce("refresh", err) end
     P.absorbDirty = true
+    EnsureEngines()
+    ArmEngineTimer()
     PaintAll(GetTime())
     Sync()
 end
@@ -938,12 +1657,14 @@ local function OnAreaHidden()
     if subscribed then
         subscribed = false
         Data.Unsubscribe(OnChange)
+        if Right and Right.Unsubscribe then Right.Unsubscribe(OnRightChange) end
     end
     Sync()
 end
 
 -- for the harness
 Priest._PaintShield, Priest._PaintMending, Priest._PaintAbsorbs = PaintShield, PaintMending, PaintAbsorbs
+Priest._PaintMedallions, Priest._EngineTick, Priest._EnsureEngines = PaintMedallions, EngineTick, EnsureEngines
 
 local okReg, result = pcall(Areas.RegisterModule, "class", {
     classes = { "PRIEST" },

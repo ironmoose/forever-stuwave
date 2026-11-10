@@ -97,6 +97,7 @@ Modules/CombatHud/WarriorShouts.lua
 Modules/CombatHud/GunsightWarrior.lua
 Modules/CombatHud/GunsightWarriorClick.lua
 Modules/CombatHud/PriestShields.lua
+Modules/CombatHud/PriestRight.lua
 Modules/CombatHud/GunsightPriest.lua
 Modules/CombatHud/GunsightPriestClick.lua
 Modules/CombatHud/MageState.lua

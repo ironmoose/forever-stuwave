@@ -204,6 +204,8 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "priest_shield": (512, 512), "priest_shield_glint": (512, 256), "priest_shield_rays": (256, 256),
         "priest_shield_ws": (128, 128), "priest_shield_lit": (128, 128), "priest_mending": (256, 256),
         "priest_heart_cd": (32, 32),
+        # the right slot's medallions: 6 x 3 cells of 80 texels (a 40 sprite px box) in a 512 x 256 canvas
+        "priest_medallion": (512, 256),
     },
     # generate_mage_frost.py: the Mage Gunsight module's Frost Nova snowflake (an atlas of 128 texel cells: flake looks, haze,
     # ice crust looks, nova rings), the glint frames, the cooling flake stretched for a StatusBar, the Frozen crust swipe and
@@ -2327,7 +2329,7 @@ def test_committed_ramps_and_covers_match_their_generator(icon_style_outputs: Pa
 
 PRIEST_GENERATOR = GENERATOR_DIR / "generate_priest_shield.py"
 PRIEST_FILES = ("priest_shield", "priest_shield_glint", "priest_shield_rays", "priest_shield_ws", "priest_shield_lit",
-                "priest_mending", "priest_heart_cd")
+                "priest_mending", "priest_heart_cd", "priest_medallion")
 # priest_shield.tga is 4 x 4 cells of 128 texels; the shield centre is 64 texels into a cell; one sprite px is 2 x 2 texels.
 # The cell numbers are the atlas order the Lua module reads (appended: the ghost cells never move an old cell).
 CELL_DARK, CELL_RIM_CLEAR, CELL_RIM_DASH, CELL_FLASH, CELL_GHOST, CELL_GHOST_RIM = 0, 1, 4, 7, 10, 11
@@ -2417,6 +2419,70 @@ def test_priest_ghost_rim_is_solid_two_px_and_fainter_inside(priest_outputs: Pat
         assert got[:3] == RIM_ICE and abs(got[3] - 77) <= 1, ("inner", x, y, got)
     seen = {_shield_texel(path, CELL_GHOST_RIM, *xy)[3] for xy in ghost}
     assert len(seen) == 2 and max(seen) == 191 and abs(min(seen) - 77) <= 1, seen
+
+
+# --- the Priest right slot's medallions (design mockup "Priest right slot", variant A) ------------------------------------
+
+# priest_medallion.tga is 6 x 3 cells of 80 texels (a 40 sprite px box); the ring's centre pixel is sprite px 20 of a cell. The
+# cell numbers are the order the Lua module reads (MEDALLION_CELLS of the generator).
+MED_CELLS = ["ghost", "body", "rimOuter", "rimInner", "dash", "glow", "skullLit", "skullDim", "skullDots", "skullHalo",
+             "shieldLit", "shieldAmber", "shieldDim", "shieldDots", "shieldHalo"]
+MED_C = 20
+
+
+def _med_alpha_set(path: Path, cell: int) -> set[tuple[int, int]]:
+    """The sprite px (from the cell's top left) of a medallion cell that carry any alpha."""
+    ox, oy = (cell % 6) * 80, (cell // 6) * 80
+    return {(x, y) for y in range(40) for x in range(40) if _pixel(path, ox + 2 * x, oy + 2 * y)[3] > 0}
+
+
+def test_priest_medallion_cell_order_matches_the_generator() -> None:
+    src = PRIEST_GENERATOR.read_text(encoding="utf-8")
+    m = re.search(r"MEDALLION_CELLS = \[(.*?)\]", src, re.S)
+    assert m and re.findall(r'"(\w+)"', m.group(1)) == MED_CELLS
+
+
+def test_priest_medallion_cells_are_centred_on_the_rings_centre_pixel(priest_outputs: Path) -> None:
+    """Both glyphs are 15 px wide in a 35 px ring: an odd width on an odd width, so the margins left and right (and top and
+    bottom) are equal to the pixel, and nothing sits half a pixel off. The dotted looks are a checkerboard of the glyph and are
+    not held to its bounding box."""
+    path = priest_outputs / "priest_medallion.tga"
+    for i, name in enumerate(MED_CELLS):
+        if name.endswith("Dots"):
+            continue
+        xs = _med_alpha_set(path, i)
+        assert xs, name
+        x0, x1 = min(x for x, _ in xs), max(x for x, _ in xs)
+        y0, y1 = min(y for _, y in xs), max(y for _, y in xs)
+        assert x0 + x1 == 2 * MED_C and y0 + y1 == 2 * MED_C, (name, x0, x1, y0, y1)
+        if name == "dash":                                # the dashes run round the ring by angle: not a mirror image
+            continue
+        assert {(2 * MED_C - x, y) for x, y in xs} == xs, (name, "mirror symmetric left to right")
+        if name in ("ghost", "body", "rimOuter", "rimInner", "glow"):
+            assert {(x, 2 * MED_C - y) for x, y in xs} == xs, (name, "mirror symmetric top to bottom")
+
+
+def test_priest_medallion_glyphs_are_15_px_and_the_ring_is_35(priest_outputs: Path) -> None:
+    path = priest_outputs / "priest_medallion.tga"
+    for name in ("skullLit", "skullDim", "shieldLit", "shieldAmber", "shieldDim"):
+        xs = _med_alpha_set(path, MED_CELLS.index(name))
+        assert max(x for x, _ in xs) - min(x for x, _ in xs) + 1 == 15, name
+        assert max(y for _, y in xs) - min(y for _, y in xs) + 1 == 15, name
+    ring = _med_alpha_set(path, MED_CELLS.index("rimOuter"))
+    assert max(x for x, _ in ring) - min(x for x, _ in ring) + 1 == 35
+    body = _med_alpha_set(path, MED_CELLS.index("body"))
+    assert not body & ring, "the body stops where the rim starts"
+    assert {(x, y) for x, y in ring if not (x, y) in _med_alpha_set(path, MED_CELLS.index("dash"))}, "the dashed rim keeps gaps"
+
+
+def test_priest_medallion_boss_is_centred_on_the_ring(priest_outputs: Path) -> None:
+    """The boss disc is centred on the ring's centre pixel (odd, 25 px), not on the corner between two pixels."""
+    path = priest_outputs / "priest_medallion.tga"
+    boss_edge = (0x3A, 0x5A, 0x88, 255)
+    ox, oy = (MED_CELLS.index("body") % 6) * 80, (MED_CELLS.index("body") // 6) * 80
+    row = [x for x in range(40) if _pixel(path, ox + 2 * x, oy + 2 * MED_C)[:4] == boss_edge]
+    col = [y for y in range(40) if _pixel(path, ox + 2 * MED_C, oy + 2 * y)[:4] == boss_edge]
+    assert row == [MED_C - 12, MED_C + 12] and col == [MED_C - 12, MED_C + 12], (row, col)
 
 
 # --- nothing derived from the game's art is shipped ----------------------------

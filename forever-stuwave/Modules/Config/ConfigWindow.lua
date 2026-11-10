@@ -1593,6 +1593,26 @@ local function TargetSideGroups(page)
     UI.Toggle(page, { label = "Next cast", key = Gunsight.PieceConfigKey("next") })
 end
 
+-- The Priest class module's right side (PriestRight.lua): what it shows, and the Inner Fire reminder. A Priest's page only.
+local function PriestGroup(page)
+    local Right = FS.PriestRight
+    if not (Right and Right.SETTING and Right.REMIND and Right.Applies and Right.Applies()) then return end
+    local S = Right.SETTING
+    UI.Header(page, "Priest class module", "What the right side of the Priest module shows beside the shield.")
+    UI.Dropdown(page, {
+        label = S.label, tip = S.tip,
+        get = function() return Right.Setting() end,
+        text = function(value) return S.text[value] or tostring(value) end,
+        items = function()
+            local items = {}
+            for i, value in ipairs(S.values) do items[i] = { value = value, text = S.text[value] } end
+            return items
+        end,
+        set = function(value) Config.Set(S.key, value) end,
+    })
+    UI.Toggle(page, { label = Right.REMIND.label, key = Right.REMIND.key, tip = Right.REMIND.tip, inset = 14 })
+end
+
 if FS.Gunsight and FS.Gunsight.PIECES then
     CW.RegisterCategory({ key = "gunsight", label = "Gunsight HUD", order = 2, build = function(page)
         local Gunsight = FS.Gunsight
@@ -1603,6 +1623,7 @@ if FS.Gunsight and FS.Gunsight.PIECES then
                 .. "A Gunsight that was off at login, or the classic combat HUD, needs /reload.",
         })
         TargetSideGroups(page)
+        PriestGroup(page)
         UI.Header(page, "Pieces")
         local known, n = {}, 0
         for _, key in ipairs(Gunsight.PIECES) do known[key] = true end
