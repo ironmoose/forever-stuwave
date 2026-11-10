@@ -449,6 +449,66 @@ local function ReadGear(snap)
     g.incomplete = missing > 0 and missing or nil
 end
 
+-- Bags and bank ------------------------------------------------------------------------------
+
+local bankOpen = false
+
+-- One container slot, from C_Container (a table) or the old global (positional returns), or nil when empty.
+local function SlotInfo(bag, slot)
+    local r = Call(Api("C_Container", "GetContainerItemInfo"), bag, slot)
+    local t = r and Tbl(r[1])
+    if t then return Num(t.itemID), Str(t.hyperlink), Num(t.stackCount), Num(t.quality) end
+    r = Call(Api(nil, "GetContainerItemInfo"), bag, slot)
+    if r and r[1] ~= nil then return Num(r[10]), Str(r[7]), Num(r[2]), Num(r[4]) end
+end
+
+-- Reads the given container ids into { slots, free, items = { {bag, slot, itemId, name, count, quality, itemLevel,
+-- link} }, incomplete }.
+local function ReadContainers(ids)
+    local numFn = Api("C_Container", "GetContainerNumSlots") or Api(nil, "GetContainerNumSlots")
+    local levelFn = Api("C_Item", "GetDetailedItemLevelInfo") or Api(nil, "GetDetailedItemLevelInfo")
+    local infoFn = Api("C_Item", "GetItemInfo") or Api(nil, "GetItemInfo")
+    local out = { slots = 0, free = 0, items = {} }
+    local missing = 0
+    for _, bag in ipairs(ids) do
+        local n = CallNum(numFn, bag) or 0
+        out.slots = out.slots + n
+        for slot = 1, n do
+            local itemId, link, count, quality = SlotInfo(bag, slot)
+            if itemId or link then
+                local item = { bag = bag, slot = slot, itemId = itemId, link = link, count = count or 1, quality = quality }
+                item.itemLevel = CallNum(levelFn, link or itemId)
+                local info = Call(infoFn, link or itemId)
+                if info then
+                    item.name = Str(info[1])
+                    if not item.quality then item.quality = Num(info[3]) end
+                    if not item.itemLevel then item.itemLevel = Num(info[4]) end
+                end
+                if not (item.link and item.name) then missing = missing + 1 end
+                out.items[#out.items + 1] = item
+            else
+                out.free = out.free + 1
+            end
+        end
+    end
+    out.incomplete = missing > 0 and missing or nil
+    return out
+end
+
+local function ReadBags(snap)
+    local last = type(NUM_BAG_SLOTS) == "number" and NUM_BAG_SLOTS or 4
+    local ids = {}
+    for bag = 0, last do ids[#ids + 1] = bag end
+    snap.bags = ReadContainers(ids)
+    -- The bank reads only while its window is open; otherwise the write carries the last read (see Export.Write).
+    if bankOpen then
+        local bankIds = { type(BANK_CONTAINER) == "number" and BANK_CONTAINER or -1 }
+        local extra = type(NUM_BANKBAGSLOTS) == "number" and NUM_BANKBAGSLOTS or 7
+        for bag = last + 1, last + extra do bankIds[#bankIds + 1] = bag end
+        snap.bank = ReadContainers(bankIds)
+    end
+end
+
 -- Snapshot and write --------------------------------------------------------------------------
 
 -- A reader that throws leaves what it had filled and is named in snap.errors.
@@ -466,6 +526,7 @@ function Export.Snapshot()
     Guarded(ReadTalents, snap, "talents")
     Guarded(ReadProfessions, snap, "professions")
     Guarded(ReadGear, snap, "gear")
+    Guarded(ReadBags, snap, "bags")
     local now = CallNum(Api(nil, "GetServerTime")) or CallNum(Api(nil, "time"))
     snap.savedAt = now
     if now then
@@ -530,6 +591,14 @@ local function KeepTorn(snap, last)
     local t, lt = snap.talents, last.talents
     if (type(t) ~= "table" or t.status == "unavailable") and type(lt) == "table" and lt.status ~= "unavailable" then
         snap.talents = lt; keep("talents")
+    end
+    local b, lb = snap.bags, last.bags
+    if (type(b) ~= "table" or b.slots == 0) and type(lb) == "table" and (lb.slots or 0) > 0 then
+        snap.bags = lb; keep("bags")
+    end
+    -- Not torn, just not open: the bank keeps its last read, with its own bankFrom stamp, and is not named in kept.
+    if snap.bank == nil and type(last.bank) == "table" then
+        snap.bank, snap.bankFrom = last.bank, last.bankFrom or last.savedAt
     end
     if NoProfessions(snap.professions) and not NoProfessions(last.professions) then
         snap.professions = last.professions; keep("professions")
@@ -649,6 +718,9 @@ local REASONS = {
     PLAYER_EQUIPMENT_CHANGED = "gear",
     SKILL_LINES_CHANGED = "skills",
     CHAT_MSG_SKILL = "skills",
+    BAG_UPDATE_DELAYED = "bags",
+    BANKFRAME_OPENED = "bank",
+    PLAYERBANKSLOTS_CHANGED = "bank",
 }
 
 local frame = CreateFrame("Frame")
@@ -656,7 +728,7 @@ frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_LOGOUT")
 frame:RegisterEvent("PLAYER_REGEN_ENABLED")
 frame:RegisterEvent("PLAYER_REGEN_DISABLED")
-local events = {}
+local events = { "BANKFRAME_CLOSED" }
 for event in pairs(REASONS) do events[#events + 1] = event end
 table.sort(events)
 if FS.FrameHelpers and FS.FrameHelpers.RegisterEvents then
@@ -675,9 +747,14 @@ frame:SetScript("OnEvent", function(_, event, arg1)
         UpdateReloadButton()
     elseif event == "PLAYER_REGEN_DISABLED" then
         UpdateReloadButton(true)
+    elseif event == "BANKFRAME_CLOSED" then
+        -- A visit shorter than the write delay would otherwise close before the bank is read.
+        if pending then Export.Write("bank") end
+        bankOpen = false
     elseif event == "PLAYER_ENTERING_WORLD" then
         Schedule("login", LOGIN_DELAY)
     else
+        if event == "BANKFRAME_OPENED" then bankOpen = true end
         Schedule(REASONS[event])
         if event == "PLAYER_LEVEL_UP" then
             reloadWanted = true

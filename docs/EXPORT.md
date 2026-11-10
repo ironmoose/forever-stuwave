@@ -10,7 +10,7 @@ The file is Lua: `ForeverSTUwaveExport = { ... }`. Keys are `["name"] = value`, 
 
 ## When it is written
 
-On login and `/reload` (about 4 seconds after the loading screen), level up, talent changes, gear changes, profession skill changes, and logout. Events within 2 seconds of each other produce one write. Nothing is written in combat: the write waits for combat to end, and a logout in combat keeps the previous snapshot. Nothing shows in chat. After a level up a "Reload to save" button can show (out of combat; a click runs `/reload` through a secure macro button, since the reload call itself is protected; a right click hides it) so the new level reaches the file without waiting for logout. The button is off by default: turn on the "Reload button after level up" switch on the Profiles page to get it.
+On login and `/reload` (about 4 seconds after the loading screen), level up, talent changes, gear changes, profession skill changes, bag changes, opening the bank (and its changes while open), closing the bank when a write is waiting, and logout. Events within 2 seconds of each other produce one write. Nothing is written in combat: the write waits for combat to end, and a logout in combat keeps the previous snapshot. Nothing shows in chat. After a level up a "Reload to save" button can show (out of combat; a click runs `/reload` through a secure macro button, since the reload call itself is protected; a right click hides it) so the new level reaches the file without waiting for logout. The button is off by default: turn on the "Reload button after level up" switch on the Profiles page to get it.
 
 Settings, Profiles, Saved data, **Character snapshot** turns it off (setting `export.enabled`, default on). Turning it off stops new writes and leaves existing snapshots in place.
 
@@ -35,11 +35,11 @@ A value the client did not give in plain form (a secret value, a missing API, an
 | `addonVersion` | string | `## Version` from the `.toc` |
 | `savedAt` | number | Unix seconds (`GetServerTime`) |
 | `savedAtText` | string | the same time, UTC, `2026-11-04T00:00:00Z` |
-| `reason` | string | what triggered the write: `login` (also any later loading screen), `level`, `talents`, `gear`, `skills`, `combat end`, `logout` |
+| `reason` | string | what triggered the write: `login` (also any later loading screen), `level`, `talents`, `gear`, `skills`, `bags`, `bank`, `combat end`, `logout` |
 | `statsFrom` | number | present only when `stats` were kept from an earlier write because this one read every base stat as 0 (logout and /reload can); the `savedAt` of the write that read them |
-| `kept` | array of strings, optional | sections this write read empty or torn (logout and /reload can: money and xp at 0, no gear, no zone, talents unavailable, no profession) and so kept from the last write: any of `money`, `xp`, `gear`, `zone`, `talents`, `professions` |
+| `kept` | array of strings, optional | sections this write read empty or torn (logout and /reload can: money and xp at 0, no gear, no zone, talents unavailable, no profession, no bag slots) and so kept from the last write: any of `money`, `xp`, `gear`, `zone`, `talents`, `professions`, `bags` |
 | `keptFrom` | number, optional | the `savedAt` of the write the `kept` sections came from |
-| `errors` | array of strings, optional | sections whose reader threw (`identity`, `spec`, `stats`, `talents`, `professions`, `gear`) |
+| `errors` | array of strings, optional | sections whose reader threw (`identity`, `spec`, `stats`, `talents`, `professions`, `gear`, `bags`) |
 | `name` | string | full name, same as the key |
 | `realm` | string | `GetRealmName()` |
 | `guid` | string | player GUID |
@@ -56,6 +56,9 @@ A value the client did not give in plain form (a secret value, a missing API, an
 | `talents` | table | below |
 | `professions` | table | below |
 | `gear` | table | below |
+| `bags` | table | below |
+| `bank` | table, optional | same shape as `bags`; absent until the bank has been opened once with the addon on |
+| `bankFrom` | number, optional | present when `bank` was carried from an earlier write (the bank is only readable while its window is open); the `savedAt` of the write that read it |
 
 ### `stats`
 
@@ -112,6 +115,29 @@ One table per filled slot, keyed by slot name: `head`, `neck`, `shoulder`, `shir
 | `name`, `quality` | from `GetItemInfo` |
 
 `gear.incomplete` (optional number) counts items whose link, level or name the client had not loaded yet; the next write fills them in.
+
+### `bags` and `bank`
+
+`bags` covers the backpack and the four bag slots (containers 0 to 4). `bank` covers the bank's own slots (container -1) and its bag slots (5 to 11), read only while the bank window is open; every other write carries the last bank read and sets `bankFrom`.
+
+| Field | Notes |
+|---|---|
+| `slots` | total slots across the containers |
+| `free` | empty slots |
+| `items` | array, one entry per filled slot, in container then slot order |
+| `incomplete` | optional number: items whose link or name the client had not loaded yet; the next write fills them in |
+
+Each `items` entry:
+
+| Field | Notes |
+|---|---|
+| `bag`, `slot` | container id and slot within it |
+| `itemId` | number |
+| `name` | from `GetItemInfo` |
+| `count` | stack size |
+| `quality` | 0 poor to 5 legendary |
+| `itemLevel` | `C_Item.GetDetailedItemLevelInfo`, else `GetItemInfo` |
+| `link` | the full item link string |
 
 ## Compatibility
 

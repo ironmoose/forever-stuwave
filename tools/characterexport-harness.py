@@ -189,8 +189,26 @@ C_Item = {
     end,
     GetItemInfo = function(x)
         for _, g in pairs(GEAR) do if g[2] and g[2] == x then return x:match("%[(.-)%]"), x, 2, g[3] end end
+        if type(x) == "string" and x:match("|Hitem:(%d+)") then
+            local id = tonumber(x:match("|Hitem:(%d+)"))
+            if ITEMLEVEL and ITEMLEVEL[id] then return x:match("%[(.-)%]"), x, 1, ITEMLEVEL[id] end
+        end
     end,
 }
+
+-- bags: backpack with a stack of fish and a cached ring; bag 1 empty 6 slots; bank: one item in the bank slots
+BAGS = {
+    [0] = { [1] = { itemID = 6303, stackCount = 7, quality = 1, hyperlink = "|cffffffff|Hitem:6303::::::::12|h[Raw Slitherskin Mackerel]|h|r" },
+            [3] = { itemID = 2222, stackCount = 1, quality = 2, hyperlink = "|cff1eff00|Hitem:2222::::::::12|h[Ring]|h|r" } },
+    [1] = {},
+    [-1] = { [2] = { itemID = 4444, stackCount = 3, quality = 1, hyperlink = "|cffffffff|Hitem:4444::::::::12|h[Cloth]|h|r" } },
+}
+BAGSIZE = { [0] = 4, [1] = 6, [-1] = 28 }
+C_Container = {
+    GetContainerNumSlots = function(bag) return BAGSIZE[bag] or 0 end,
+    GetContainerItemInfo = function(bag, slot) return BAGS[bag] and BAGS[bag][slot] end,
+}
+ITEMLEVEL = { [6303] = 5, [2222] = 18, [4444] = 10 }
 
 function load()
     ForeverSTUwaveExport = nil
@@ -387,6 +405,41 @@ check(p.primary1.name == "Skinning" and p.cooking.skill == 40, "the rest unchang
 GetProfessions = realP
 """)
 
+case("bags_list_every_item_and_logout_keeps_them")(r"""
+load()
+login()
+local b = saved().bags
+check(b.slots == 10 and b.free == 8 and #b.items == 2, "slot counts")
+local fish = b.items[1]
+check(fish.bag == 0 and fish.slot == 1 and fish.itemId == 6303 and fish.count == 7 and fish.quality == 1
+    and fish.name == "Raw Slitherskin Mackerel" and fish.itemLevel == 5 and fish.link:find("Hitem:6303"), "item fields")
+check(saved().bank == nil, "no bank before it is opened")
+local realN = C_Container.GetContainerNumSlots
+C_Container.GetContainerNumSlots = function() return 0 end
+fire("PLAYER_LOGOUT")
+check(saved().bags.slots == 10 and #saved().bags.items == 2, "logout teardown keeps the bags")
+local kept = false
+for _, k in ipairs(saved().kept or {}) do if k == "bags" then kept = true end end
+check(kept, "bags named in kept")
+C_Container.GetContainerNumSlots = realN
+""")
+
+case("the_bank_reads_while_open_and_carries_after")(r"""
+load()
+login()
+local stamp = saved().savedAt
+fire("BANKFRAME_OPENED")
+fire("BANKFRAME_CLOSED")
+local bank = saved().bank
+check(bank and bank.slots == 28 and #bank.items == 1 and bank.items[1].itemId == 4444 and bank.items[1].count == 3,
+    "a short bank visit is read before it closes")
+check(saved().reason == "bank" and saved().bankFrom == nil, "read live, no carry stamp")
+local readAt = saved().savedAt
+fire("BAG_UPDATE_DELAYED")
+runTimers()
+check(saved().bank and saved().bank.items[1].itemId == 4444 and saved().bankFrom == readAt, "closed bank carried with its stamp")
+""")
+
 case("a_burst_of_events_is_one_write")(r"""
 load()
 login()
@@ -498,3 +551,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
