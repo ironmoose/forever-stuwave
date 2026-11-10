@@ -324,6 +324,56 @@ check(saved().stats.base.str == 0 and saved().statsFrom == nil, "no earlier stat
 STATS = { { 40, 52 }, { 30, 41 }, { 45, 60 }, { 35, 38 }, { 50, 55 } }
 """)
 
+case("a_logout_teardown_keeps_money_xp_gear_zone_talents_and_professions")(r"""
+-- live 2026-11-10 (reason "logout"): money, xp and xpMax read 0, zone and gear empty, talents unavailable,
+-- professions with no slot. Each such section keeps the last real value and is named in kept.
+load()
+login()
+local stamp = saved().savedAt
+local real = { UnitXPMax, GetMoney, UnitXP, GetRealZoneText, GetInventoryItemID, GetProfessions, C_ClassTalents.GetActiveConfigID }
+UnitXPMax = function() return 0 end
+GetMoney = function() return 0 end
+UnitXP = function() return 0 end
+GetRealZoneText = function() return nil end
+GetInventoryItemID = function() return nil end
+GetProfessions = function() end
+C_ClassTalents.GetActiveConfigID = function() return nil end
+fire("PLAYER_LOGOUT")
+local c = saved()
+check(c.reason == "logout", "the logout write still lands")
+check(c.money == 123456 and c.xp == 1200 and c.xpMax == 9000, "money and xp kept")
+check(c.gear.head and c.gear.head.itemId == 1111, "gear kept")
+check(c.zone.name == "The Barrens", "zone kept")
+check(c.talents.status == "ok" and #c.talents.list == 2, "talents kept")
+check(c.professions.cooking and c.professions.cooking.skill == 40, "professions kept")
+check(type(c.kept) == "table" and #c.kept == 6 and c.keptFrom == stamp, "kept names each section and when it was read")
+UnitXPMax, GetMoney, UnitXP, GetRealZoneText, GetInventoryItemID, GetProfessions, C_ClassTalents.GetActiveConfigID =
+    real[1], real[2], real[3], real[4], real[5], real[6], real[7]
+fire("PLAYER_LOGOUT")
+check(saved().kept == nil and saved().keptFrom == nil, "a real read drops the mark")
+""")
+
+case("professions_fall_back_to_the_skill_lines_when_the_slots_are_empty")(r"""
+local realP = GetProfessions
+GetProfessions = function() end
+LINES = {
+    { "Professions", true }, { "Skinning", false, false, 110, 0, 0, 150 }, { "Herbalism", false, false, 30, 0, 0, 75 },
+    { "Secondary Skills", true }, { "Cooking", false, false, 39, 0, 0, 75 }, { "Fishing", false, false, 12, 0, 0, 75 },
+    { "Weapon Skills", true }, { "Maces", false, false, 95, 0, 0, 100 },
+}
+GetNumSkillLines = function() return #LINES end
+GetSkillLineInfo = function(i) return unpack(LINES[i]) end
+load()
+login()
+local p = saved().professions
+check(p.status == "ok", "status")
+check(p.primary1.name == "Skinning" and p.primary1.skill == 110 and p.primary1.max == 150, "first primary")
+check(p.primary2.name == "Herbalism", "second primary")
+check(p.cooking.skill == 39 and p.cooking.max == 75 and p.fishing.skill == 12, "secondaries by name")
+check(p.firstAid == nil, "an unlearned slot stays absent")
+GetProfessions, GetNumSkillLines, GetSkillLineInfo = realP, nil, nil
+""")
+
 case("a_burst_of_events_is_one_write")(r"""
 load()
 login()

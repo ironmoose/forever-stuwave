@@ -359,7 +359,36 @@ local function ReadProfessions(snap)
             end
         end
     end
+    -- The classic skill list as a fallback: on some clients GetProfessions answers with no slots. Lines under the
+    -- "Professions" and "Secondary Skills" headers (English client; a collapsed header hides its lines) fill the
+    -- same slot names: the first two primaries, then fishing, cooking and first aid by name.
+    if not (p.primary1 or p.fishing or p.cooking or p.firstAid) then
+        local count = CallNum(Api(nil, "GetNumSkillLines"))
+        local lineFn = Api(nil, "GetSkillLineInfo")
+        local header
+        local SECONDARY = { Fishing = "fishing", Cooking = "cooking", ["First Aid"] = "firstAid" }
+        for i = 1, (lineFn and count or 0) do
+            local info = Call(lineFn, i)
+            local name = info and Str(info[1])
+            if name and info[2] and not Secret(info[2]) then
+                header = name
+            elseif name and (header == "Professions" or header == "Secondary Skills") then
+                local entry = { name = name, skill = Num(info[4]), max = Num(info[7]) }
+                local slot = SECONDARY[name] or (not p.primary1 and "primary1") or (not p.primary2 and "primary2")
+                if slot and not p[slot] then p[slot] = entry end
+            end
+        end
+    end
     p.status = "ok"
+end
+
+-- True when a professions table holds no learned slot.
+local function NoProfessions(p)
+    if type(p) ~= "table" then return true end
+    for _, slot in ipairs(PROFESSION_SLOTS) do
+        if type(p[slot]) == "table" then return false end
+    end
+    return true
 end
 
 -- item:itemID:enchantID:gem1:gem2:gem3:gem4:suffixID:uniqueID:... ; empty fields read as nil.
@@ -470,6 +499,40 @@ local function NoStats(stats)
     return true
 end
 
+-- The same logout teardown (live 2026-11-10, reason "logout") read money, xp and xpMax as 0, the zone and gear empty,
+-- talents unavailable and professions slotless. A section read that way keeps the last write's value, and `kept`
+-- names each one. xpMax 0 is the tell for money and xp: below the level cap the xp bar is never 0, so a 0 there while
+-- the last write had a real bar means a torn read.
+local function GearEmpty(g)
+    if type(g) ~= "table" then return true end
+    for k, v in pairs(g) do
+        if k ~= "incomplete" and type(v) == "table" then return false end
+    end
+    return true
+end
+
+local function KeepTorn(snap, last)
+    local kept = {}
+    local function keep(key) kept[#kept + 1] = key end
+    if (snap.xpMax or 0) == 0 and type(last.xpMax) == "number" and last.xpMax > 0 then
+        snap.money, snap.xp, snap.xpMax, snap.restedXp = last.money, last.xp, last.xpMax, last.restedXp
+        keep("money"); keep("xp")
+    end
+    if GearEmpty(snap.gear) and not GearEmpty(last.gear) then snap.gear = last.gear; keep("gear") end
+    if type(snap.zone) ~= "table" or not snap.zone.name then
+        if type(last.zone) == "table" and last.zone.name then snap.zone = last.zone; keep("zone") end
+    end
+    local t, lt = snap.talents, last.talents
+    if (type(t) ~= "table" or t.status == "unavailable") and type(lt) == "table" and lt.status ~= "unavailable" then
+        snap.talents = lt; keep("talents")
+    end
+    if NoProfessions(snap.professions) and not NoProfessions(last.professions) then
+        snap.professions = last.professions; keep("professions")
+    end
+    snap.kept = #kept > 0 and kept or nil
+    if snap.kept then snap.keptFrom = last.keptFrom or last.savedAt end
+end
+
 -- Returns true when a snapshot was written.
 function Export.Write(reason)
     if not (loaded and Enabled()) then return false end
@@ -492,6 +555,7 @@ function Export.Write(reason)
         snap.stats = last.stats
         snap.statsFrom = last.statsFrom or last.savedAt
     end
+    if type(last) == "table" then KeepTorn(snap, last) end
     store.characters[snap.name] = snap
     return true
 end

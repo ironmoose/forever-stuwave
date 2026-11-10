@@ -37,6 +37,8 @@ A value the client did not give in plain form (a secret value, a missing API, an
 | `savedAtText` | string | the same time, UTC, `2026-11-04T00:00:00Z` |
 | `reason` | string | what triggered the write: `login` (also any later loading screen), `level`, `talents`, `gear`, `skills`, `combat end`, `logout` |
 | `statsFrom` | number | present only when `stats` were kept from an earlier write because this one read every base stat as 0 (logout and /reload can); the `savedAt` of the write that read them |
+| `kept` | array of strings, optional | sections this write read empty or torn (logout and /reload can: money and xp at 0, no gear, no zone, talents unavailable, no profession) and so kept from the last write: any of `money`, `xp`, `gear`, `zone`, `talents`, `professions` |
+| `keptFrom` | number, optional | the `savedAt` of the write the `kept` sections came from |
 | `errors` | array of strings, optional | sections whose reader threw (`identity`, `spec`, `stats`, `talents`, `professions`, `gear`) |
 | `name` | string | full name, same as the key |
 | `realm` | string | `GetRealmName()` |
@@ -92,7 +94,7 @@ Each `list` entry: `name`, `spellId`, `rank`, `maxRank`, `nodeId`, `entryId`, `d
 
 ### `professions`
 
-`status` (`ok` or `unavailable`), then one table per learned slot: `primary1`, `primary2`, `archaeology`, `fishing`, `cooking`, `firstAid`. Each has `name`, `skill`, `max`, `skillLine` (the skill line id). An unlearned slot is absent.
+`status` (`ok` or `unavailable`), then one table per learned slot: `primary1`, `primary2`, `archaeology`, `fishing`, `cooking`, `firstAid`. Each has `name`, `skill`, `max`, `skillLine` (the skill line id). An unlearned slot is absent. When `GetProfessions` gives no slot, the slots are filled from the skill list instead (`GetSkillLineInfo`, the lines under the "Professions" and "Secondary Skills" headers, English client): the first two primaries, then fishing, cooking and first aid by name. Those entries have no `skillLine`.
 
 ### `gear`
 
