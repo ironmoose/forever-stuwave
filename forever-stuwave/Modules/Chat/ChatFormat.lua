@@ -601,6 +601,13 @@ local BAND_COLORS = {
     CHAT_MSG_OFFICER = GREEN,
     CHAT_MSG_PARTY = CYAN,
     CHAT_MSG_PARTY_LEADER = CYAN,
+    -- Player 2026-11-10: "when i get a whisper can we make sure the bg is a
+    -- different color like party and guild is". Pink, the whisper tag colour;
+    -- both directions, so a conversation reads as one block.
+    CHAT_MSG_WHISPER = PINK,
+    CHAT_MSG_WHISPER_INFORM = PINK,
+    CHAT_MSG_BN_WHISPER = PINK,
+    CHAT_MSG_BN_WHISPER_INFORM = PINK,
 }
 
 local function HexRGB(hex)
@@ -613,9 +620,10 @@ local bandedFrames = setmetatable({}, { __mode = "k" })
 -- default; it applies at once, and the rest of the chat restyle is unaffected.
 local BAND_KEY = "chat.lineBands"
 local BAND_SETTING = {
-    label = "Guild and party line tint",
+    label = "Guild, party and whisper line tint",
     key = BAND_KEY,
-    tip = "A faint green band behind guild lines and a cyan one behind party lines, so they stand out in a busy "
+    tip = "A faint green band behind guild lines, a cyan one behind party lines and a pink one behind whispers, so "
+        .. "they stand out in a busy "
         .. "chat. Applies at once.",
 }
 

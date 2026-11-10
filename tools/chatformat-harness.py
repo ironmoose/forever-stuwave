@@ -195,12 +195,17 @@ case("guild_and_party_rows_get_a_tinted_band_that_follows_the_row", """
     FS.ChatFormat.Disable(); FS.ChatFormat.Enable()
     assert(ChatFrame1.refreshed, "no display callback registered")
     local guild, party, say, secret = Row("CHAT_MSG_GUILD"), Row("CHAT_MSG_PARTY"), Row("CHAT_MSG_SAY"), Row(SECRET)
-    ChatFrame1.visibleLines = { guild, party, say, secret }
+    local from, to = Row("CHAT_MSG_WHISPER"), Row("CHAT_MSG_WHISPER_INFORM")
+    ChatFrame1.visibleLines = { guild, party, say, secret, from, to }
     ChatFrame1.refreshed(ChatFrame1)
     assert(guild.fsBand and party.fsBand, "guild/party rows got no band")
     assert(not say.fsBand and not secret.fsBand, "say or secret row got a band")
     assert(guild.fsBand.fill.shown and guild.fsBand.fill.rgba[2] == 1 and guild.fsBand.fill.rgba[4] < 0.2, "guild band not green and faint")
     assert(party.fsBand.fill.rgba[3] == 1, "party band not cyan")
+    for _, w in ipairs({ from, to }) do
+        local c = w.fsBand and w.fsBand.fill.rgba
+        assert(c and c[1] == 1 and c[3] > 0.5 and c[2] < 0.3 and c[4] < 0.2, "whisper band not faint pink")
+    end
     -- fading: the row's alpha and hide carry to its band
     guild:SetAlpha(0.4)
     assert(guild.fsBand.fill.alpha == 0.4, "band did not fade with the row")
