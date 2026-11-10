@@ -70,7 +70,12 @@ local function fallback(class, k)
     return noop
 end
 Region.__index = function(_, k) return fallback(Region, k) end
-function Region:SetText(s) self._text = s end
+-- The client throws "Font not set" for SetText on a FontString that has no font yet (seen in game 2026-11-10).
+function Region:SetText(s)
+    if self._isFontString and not (self._mono or self._hasFont) then error("Font not set", 2) end
+    self._text = s
+end
+function Region:SetFont() self._hasFont = true; return true end
 function Region:GetText() return self._text end
 function Region:ClearAllPoints() self._points = {} end
 function Region:SetPoint(point, rel, relPoint, x, y)
@@ -122,7 +127,7 @@ function Frame:StartMoving() self._moving = true; __moves[self] = (__moves[self]
 function Frame:StopMovingOrSizing() self._moving = false end
 function Frame:GetParent() return self._parent end
 function Frame:CreateTexture() return newRegion() end
-function Frame:CreateFontString() return newRegion() end
+function Frame:CreateFontString() local r = newRegion(); r._isFontString = true; return r end
 function Frame:SetText(t) self._text = t end
 function Frame:GetText() return self._text end
 function Frame:GetEffectiveScale() return 1 end
@@ -839,7 +844,8 @@ function T.a_failure_while_building_handles_leaves_edit_mode_off_and_nothing_on_
     edit()
     seat("stance"); seat("action")
     local calls = 0
-    FS.Theme.ApplyMono = function() calls = calls + 1; if calls == 2 then error("boom") end end
+    local applyMono = FS.Theme.ApplyMono
+    FS.Theme.ApplyMono = function(...) calls = calls + 1; if calls == 2 then error("boom") end return applyMono(...) end
     eq(FS.LayoutEdit.Enter(), false)
     eq(FS.LayoutEdit.IsEditing(), false)
     for _, f in ipairs(__frames) do
@@ -847,7 +853,7 @@ function T.a_failure_while_building_handles_leaves_edit_mode_off_and_nothing_on_
     end
     eq(overlay(), nil, "and the keyboard is released")
     eq(#__errors, 1, "the failure is forwarded to the error handler")
-    FS.Theme.ApplyMono = function() end
+    FS.Theme.ApplyMono = applyMono
     eq(FS.LayoutEdit.Enter(), true, "a later try works")
 end
 

@@ -657,6 +657,11 @@ local function NewSizeButton(panel, preview, size)
     SnapToPixels(button.fill)
     for _, edge in ipairs(button.edges) do SnapToPixels(edge) end
     button.label = button:CreateFontString(nil, "OVERLAY")
+    -- The font goes on before the text: SetText on a FontString with no font throws "Font not set".
+    if FS.Theme and FS.Theme.ApplyMono then
+        local _, _, steel = ChipColors()
+        FS.Theme.ApplyMono(button.label, 10.5, steel)
+    end
     button.label:SetPoint("CENTER", button, "CENTER", 0, 0)
     button.label:SetText(tostring(size))
     button:RegisterForClicks("LeftButtonUp")
