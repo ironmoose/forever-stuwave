@@ -509,6 +509,99 @@ local function ReadBags(snap)
     end
 end
 
+-- Quest log ----------------------------------------------------------------------------------
+
+-- Objectives for one quest: C_QuestLog.GetQuestObjectives by id, else the old leaderboard calls by log index.
+local function QuestObjectives(questId, index)
+    local out = {}
+    local r = questId and Call(Api("C_QuestLog", "GetQuestObjectives"), questId)
+    local list = r and Tbl(r[1])
+    if list then
+        for _, o in ipairs(list) do
+            if type(o) == "table" then
+                out[#out + 1] = { text = Str(o.text), type = Str(o.type), finished = o.finished == true or nil,
+                    numFulfilled = Num(o.numFulfilled), numRequired = Num(o.numRequired) }
+            end
+        end
+        return out
+    end
+    local n = CallNum(Api(nil, "GetNumQuestLeaderBoards"), index) or 0
+    local boardFn = Api(nil, "GetQuestLogLeaderBoard")
+    for j = 1, n do
+        local b = Call(boardFn, j, index)
+        if b then
+            local text = Str(b[1])
+            local have, need
+            if text then have, need = text:match("(%d+)%s*/%s*(%d+)") end
+            out[#out + 1] = { text = text, type = Str(b[2]), finished = b[3] == true or nil,
+                numFulfilled = tonumber(have), numRequired = tonumber(need) }
+        end
+    end
+    return out
+end
+
+-- One log row as { title, level, questId, isHeader, isComplete, failed }, from C_QuestLog.GetInfo or GetQuestLogTitle.
+local function QuestRow(i)
+    local r = Call(Api("C_QuestLog", "GetInfo"), i)
+    local t = r and Tbl(r[1])
+    if t then
+        local id = Num(t.questID)
+        local done = id and Call(Api("C_QuestLog", "IsComplete"), id)
+        local complete = done and done[1]
+        if Secret(complete) then complete = nil end
+        if complete == nil and type(t.isComplete) == "number" then complete = t.isComplete end
+        return { title = Str(t.title), level = Num(t.level), questId = id, isHeader = t.isHeader == true,
+            isComplete = complete == true or complete == 1 or nil, failed = complete == -1 or nil }
+    end
+    r = Call(Api(nil, "GetQuestLogTitle"), i)
+    if not r then return nil end
+    local complete = Num(r[6])
+    return { title = Str(r[1]), level = Num(r[2]), isHeader = r[4] and true or false, questId = Num(r[8]),
+        isComplete = complete == 1 or nil, failed = complete == -1 or nil }
+end
+
+local function ReadQuests(snap)
+    local q = { status = "unavailable", list = {} }
+    snap.quests = q
+    local n = CallNum(Api("C_QuestLog", "GetNumQuestLogEntries"))
+    if not n then
+        local r = Call(Api(nil, "GetNumQuestLogEntries"))
+        n = r and Num(r[1])
+    end
+    if not n then return end
+    q.status = "ok"
+    local header
+    for i = 1, n do
+        local row = QuestRow(i)
+        if row and row.isHeader then
+            header = row.title
+        elseif row and row.title then
+            q.list[#q.list + 1] = { questId = row.questId, title = row.title, level = row.level, header = header,
+                isComplete = row.isComplete, failed = row.failed, objectives = QuestObjectives(row.questId, i) }
+        end
+    end
+
+    -- Completed quest ids, sorted: the modern list, else the old id -> true table.
+    local done
+    local r = Call(Api("C_QuestLog", "GetAllCompletedQuestIDs"))
+    local ids = r and Tbl(r[1])
+    if ids then
+        done = {}
+        for _, id in ipairs(ids) do if Num(id) then done[#done + 1] = id end end
+    else
+        r = Call(Api(nil, "GetQuestsCompleted"))
+        local map = r and Tbl(r[1])
+        if map then
+            done = {}
+            for id, v in pairs(map) do if v and Num(id) then done[#done + 1] = id end end
+        end
+    end
+    if done then
+        table.sort(done)
+        snap.completedQuests = done
+    end
+end
+
 -- Snapshot and write --------------------------------------------------------------------------
 
 -- A reader that throws leaves what it had filled and is named in snap.errors.
@@ -527,6 +620,7 @@ function Export.Snapshot()
     Guarded(ReadProfessions, snap, "professions")
     Guarded(ReadGear, snap, "gear")
     Guarded(ReadBags, snap, "bags")
+    Guarded(ReadQuests, snap, "quests")
     local now = CallNum(Api(nil, "GetServerTime")) or CallNum(Api(nil, "time"))
     snap.savedAt = now
     if now then
@@ -595,6 +689,16 @@ local function KeepTorn(snap, last)
     local b, lb = snap.bags, last.bags
     if (type(b) ~= "table" or b.slots == 0) and type(lb) == "table" and (lb.slots or 0) > 0 then
         snap.bags = lb; keep("bags")
+    end
+    -- An empty quest log is real when the player abandons everything, so only the logout teardown keeps the last.
+    local q, lq = snap.quests, last.quests
+    if snap.reason == "logout" and (type(q) ~= "table" or q.status ~= "ok" or #q.list == 0) and type(lq) == "table" and lq.status == "ok"
+        and #(lq.list or {}) > 0 then
+        snap.quests = lq; keep("quests")
+    end
+    local c, lc = snap.completedQuests, last.completedQuests
+    if (type(c) ~= "table" or #c == 0) and type(lc) == "table" and #lc > 0 then
+        snap.completedQuests = lc; keep("completedQuests")
     end
     -- Not torn, just not open: the bank keeps its last read, with its own bankFrom stamp, and is not named in kept.
     if snap.bank == nil and type(last.bank) == "table" then
@@ -721,6 +825,8 @@ local REASONS = {
     BAG_UPDATE_DELAYED = "bags",
     BANKFRAME_OPENED = "bank",
     PLAYERBANKSLOTS_CHANGED = "bank",
+    QUEST_LOG_UPDATE = "quests",
+    QUEST_TURNED_IN = "quests",
 }
 
 local frame = CreateFrame("Frame")

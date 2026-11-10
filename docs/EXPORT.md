@@ -10,7 +10,7 @@ The file is Lua: `ForeverSTUwaveExport = { ... }`. Keys are `["name"] = value`, 
 
 ## When it is written
 
-On login and `/reload` (about 4 seconds after the loading screen), level up, talent changes, gear changes, profession skill changes, bag changes, opening the bank (and its changes while open), closing the bank when a write is waiting, and logout. Events within 2 seconds of each other produce one write. Nothing is written in combat: the write waits for combat to end, and a logout in combat keeps the previous snapshot. Nothing shows in chat. After a level up a "Reload to save" button can show (out of combat; a click runs `/reload` through a secure macro button, since the reload call itself is protected; a right click hides it) so the new level reaches the file without waiting for logout. The button is off by default: turn on the "Reload button after level up" switch on the Profiles page to get it.
+On login and `/reload` (about 4 seconds after the loading screen), level up, talent changes, gear changes, profession skill changes, bag changes, opening the bank (and its changes while open), closing the bank when a write is waiting, quest log changes and quest turn-ins, and logout. Events within 2 seconds of each other produce one write. Nothing is written in combat: the write waits for combat to end, and a logout in combat keeps the previous snapshot. Nothing shows in chat. After a level up a "Reload to save" button can show (out of combat; a click runs `/reload` through a secure macro button, since the reload call itself is protected; a right click hides it) so the new level reaches the file without waiting for logout. The button is off by default: turn on the "Reload button after level up" switch on the Profiles page to get it.
 
 Settings, Profiles, Saved data, **Character snapshot** turns it off (setting `export.enabled`, default on). Turning it off stops new writes and leaves existing snapshots in place.
 
@@ -35,11 +35,11 @@ A value the client did not give in plain form (a secret value, a missing API, an
 | `addonVersion` | string | `## Version` from the `.toc` |
 | `savedAt` | number | Unix seconds (`GetServerTime`) |
 | `savedAtText` | string | the same time, UTC, `2026-11-04T00:00:00Z` |
-| `reason` | string | what triggered the write: `login` (also any later loading screen), `level`, `talents`, `gear`, `skills`, `bags`, `bank`, `combat end`, `logout` |
+| `reason` | string | what triggered the write: `login` (also any later loading screen), `level`, `talents`, `gear`, `skills`, `bags`, `bank`, `quests`, `combat end`, `logout` |
 | `statsFrom` | number | present only when `stats` were kept from an earlier write because this one read every base stat as 0 (logout and /reload can); the `savedAt` of the write that read them |
-| `kept` | array of strings, optional | sections this write read empty or torn (logout and /reload can: money and xp at 0, no gear, no zone, talents unavailable, no profession, no bag slots) and so kept from the last write: any of `money`, `xp`, `gear`, `zone`, `talents`, `professions`, `bags` |
+| `kept` | array of strings, optional | sections this write read empty or torn (logout and /reload can: money and xp at 0, no gear, no zone, talents unavailable, no profession, no bag slots) and so kept from the last write: any of `money`, `xp`, `gear`, `zone`, `talents`, `professions`, `bags`, `quests`, `completedQuests` (the quest two only on a logout write: an empty quest log is otherwise real) |
 | `keptFrom` | number, optional | the `savedAt` of the write the `kept` sections came from |
-| `errors` | array of strings, optional | sections whose reader threw (`identity`, `spec`, `stats`, `talents`, `professions`, `gear`, `bags`) |
+| `errors` | array of strings, optional | sections whose reader threw (`identity`, `spec`, `stats`, `talents`, `professions`, `gear`, `bags`, `quests`) |
 | `name` | string | full name, same as the key |
 | `realm` | string | `GetRealmName()` |
 | `guid` | string | player GUID |
@@ -57,6 +57,8 @@ A value the client did not give in plain form (a secret value, a missing API, an
 | `professions` | table | below |
 | `gear` | table | below |
 | `bags` | table | below |
+| `quests` | table | below |
+| `completedQuests` | array of numbers, optional | every quest id the character has turned in, sorted (`C_QuestLog.GetAllCompletedQuestIDs`, else the keys of `GetQuestsCompleted`); absent when neither exists |
 | `bank` | table, optional | same shape as `bags`; absent until the bank has been opened once with the addon on |
 | `bankFrom` | number, optional | present when `bank` was carried from an earlier write (the bank is only readable while its window is open); the `savedAt` of the write that read it |
 
@@ -138,6 +140,20 @@ Each `items` entry:
 | `quality` | 0 poor to 5 legendary |
 | `itemLevel` | `C_Item.GetDetailedItemLevelInfo`, else `GetItemInfo` |
 | `link` | the full item link string |
+
+### `quests`
+
+`status` (`ok` or `unavailable`) and `list`, one entry per quest in log order (zone headers are not entries; they become `header`). From `C_QuestLog.GetInfo` and `GetQuestObjectives`, else the old `GetQuestLogTitle` and `GetQuestLogLeaderBoard`.
+
+| Field | Notes |
+|---|---|
+| `questId` | number |
+| `title` | string |
+| `level` | number |
+| `header` | the log header above it, usually the zone |
+| `isComplete` | optional, `true` when ready to turn in |
+| `failed` | optional, `true` when failed |
+| `objectives` | array of `text`, `type` (`item`, `monster`, `event`, ...), `finished` (optional `true`), `numFulfilled`, `numRequired` (the old API path parses the two numbers from `text`) |
 
 ## Compatibility
 

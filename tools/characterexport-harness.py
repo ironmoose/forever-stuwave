@@ -210,6 +210,24 @@ C_Container = {
 }
 ITEMLEVEL = { [6303] = 5, [2222] = 18, [4444] = 10 }
 
+-- quest log: a zone header, one quest in progress, one complete; three quests turned in
+QLOG = {
+    { title = "Mulgore", isHeader = true },
+    { title = "The Hunt Continues", questID = 747, level = 3, isHeader = false },
+    { title = "Rite of Strength", questID = 757, level = 4, isHeader = false },
+}
+QOBJ = {
+    [747] = { { text = "Plainstrider Meat: 3/7", type = "item", finished = false, numFulfilled = 3, numRequired = 7 } },
+    [757] = { { text = "Bristleback Interloper slain: 12/12", type = "monster", finished = true, numFulfilled = 12, numRequired = 12 } },
+}
+C_QuestLog = {
+    GetNumQuestLogEntries = function() return #QLOG end,
+    GetInfo = function(i) return QLOG[i] end,
+    IsComplete = function(id) return id == 757 end,
+    GetQuestObjectives = function(id) return QOBJ[id] end,
+    GetAllCompletedQuestIDs = function() return { 750, 744, 3376 } end,
+}
+
 function load()
     ForeverSTUwaveExport = nil
     local fn = assert(loadstring(SOURCE_TEXT, "@CharacterExport.lua"))
@@ -422,6 +440,60 @@ local kept = false
 for _, k in ipairs(saved().kept or {}) do if k == "bags" then kept = true end end
 check(kept, "bags named in kept")
 C_Container.GetContainerNumSlots = realN
+""")
+
+case("quests_list_objectives_and_completed_ids_and_logout_keeps_them")(r"""
+load()
+login()
+local q = saved().quests
+check(q.status == "ok" and #q.list == 2, "two quests, header skipped")
+local hunt, rite = q.list[1], q.list[2]
+check(hunt.questId == 747 and hunt.title == "The Hunt Continues" and hunt.level == 3 and hunt.header == "Mulgore"
+    and hunt.isComplete == nil, "quest fields")
+check(hunt.objectives[1].numFulfilled == 3 and hunt.objectives[1].numRequired == 7
+    and hunt.objectives[1].text == "Plainstrider Meat: 3/7", "objective progress")
+check(rite.isComplete == true and rite.objectives[1].finished == true, "a complete quest")
+local done = saved().completedQuests
+check(#done == 3 and done[1] == 744 and done[3] == 3376, "completed ids, sorted")
+local realLog, realDone = C_QuestLog.GetNumQuestLogEntries, C_QuestLog.GetAllCompletedQuestIDs
+C_QuestLog.GetNumQuestLogEntries = function() return 0 end
+C_QuestLog.GetAllCompletedQuestIDs = function() return {} end
+fire("QUEST_LOG_UPDATE")
+runTimers()
+check(#saved().quests.list == 0, "an emptied log outside logout is written as read")
+fire("PLAYER_LOGOUT")
+check(#saved().quests.list == 0, "nothing real to keep from an empty write")
+C_QuestLog.GetNumQuestLogEntries, C_QuestLog.GetAllCompletedQuestIDs = realLog, realDone
+fire("QUEST_LOG_UPDATE")
+runTimers()
+C_QuestLog.GetNumQuestLogEntries = function() return 0 end
+C_QuestLog.GetAllCompletedQuestIDs = function() return {} end
+fire("PLAYER_LOGOUT")
+check(#saved().quests.list == 2 and #saved().completedQuests == 3, "logout teardown keeps quests and completed ids")
+C_QuestLog.GetNumQuestLogEntries, C_QuestLog.GetAllCompletedQuestIDs = realLog, realDone
+""")
+
+case("quests_fall_back_to_the_old_quest_log_calls")(r"""
+local realQ = C_QuestLog
+C_QuestLog = nil
+GetNumQuestLogEntries = function() return 2 end
+GetQuestLogTitle = function(i)
+    if i == 1 then return "Mulgore", 0, 0, true end
+    return "Swoop Hunting", 7, 0, false, false, 1, 0, 761
+end
+GetNumQuestLeaderBoards = function() return 1 end
+GetQuestLogLeaderBoard = function() return "Trophy Swoop Quill: 8/8", "item", true end
+GetQuestsCompleted = function() return { [747] = true, [750] = true } end
+load()
+login()
+local q = saved().quests.list[1]
+check(q.questId == 761 and q.title == "Swoop Hunting" and q.level == 7 and q.header == "Mulgore" and q.isComplete == true,
+    "row from GetQuestLogTitle")
+check(q.objectives[1].numFulfilled == 8 and q.objectives[1].numRequired == 8 and q.objectives[1].finished, "leaderboard")
+check(#saved().completedQuests == 2 and saved().completedQuests[1] == 747, "GetQuestsCompleted map")
+C_QuestLog = realQ
+GetNumQuestLogEntries, GetQuestLogTitle, GetNumQuestLeaderBoards, GetQuestLogLeaderBoard, GetQuestsCompleted =
+    nil, nil, nil, nil, nil
 """)
 
 case("the_bank_reads_while_open_and_carries_after")(r"""
