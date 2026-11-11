@@ -197,6 +197,9 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "warrior_helm": (256, 256), "warrior_runes_big": (256, 256), "warrior_runes_small": (256, 256),
         "warrior_helm_glow": (64, 64),
     },
+    # generate_paladin_seal.py: the Paladin Gunsight module's wax seals, emblems and pixel digits, the war hammer's baked
+    # swing and rise frames (cold, filled, tint mask, outline), and the slam effects (column, rays, shocks, runes, cracks).
+    "paladin_seal": {"paladin_seal": (512, 512), "paladin_hammer": (1024, 1024), "paladin_fx": (1024, 512)},
     # generate_priest_shield.py: the Priest Gunsight module's round shield (an atlas of 128 texel cells: dark shield, rims,
     # rune, flash, aura, halo), the glint frames, the rays, the Weakened Soul swipe rim, the lit shield stretched for a
     # StatusBar, the Prayer of Mending atlas (beads, hearts, glow) and the heart's cooldown shade (full colour).

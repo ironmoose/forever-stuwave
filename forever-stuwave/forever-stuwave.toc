@@ -72,6 +72,7 @@ Modules/CombatHud/GunsightAreas.lua
 Modules/CombatHud/TargetDebuffs.lua
 Modules/CombatHud/ShamanTotems.lua
 Modules/CombatHud/GunsightDots.lua
+Modules/CombatHud/PaladinArt.lua
 Modules/CombatHud/GunsightSeals.lua
 Modules/CombatHud/GunsightFrame.lua
 Modules/CombatHud/GunsightBoxes.lua
