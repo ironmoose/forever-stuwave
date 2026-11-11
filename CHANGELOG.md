@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.0-beta.3 (2026-11-10)
+
+A new Paladin module, our own raid frames, a damage meter skin, and chat and data bar polish.
+
+### New
+- Paladin: the class module is redrawn. The left side is a wax seal with your active seal's emblem pressed in; the wax drains from the top as the seal runs out and cracks amber in its last 3 seconds. The right side is a holy warhammer that is your Judgement cooldown: it fills with the seal's colour from the pommel up while a soft column of light charges it, glows and breathes when ready, and slams face first into the ground when you judge (flash, pillar of light, shockwaves, debris). A rune burns into the ground for as long as your Judgement lasts on the target.
+- Raid frames: our own raid grid, in the party seat by default, with its own movable seat in the layout editor and a preview grid while editing.
+- Priest: Spirit Tap and Inner Fire medallions on the right side of the class module, with a setting.
+- Shaman: Fire Nova gets its own flame disc under the shock disc, counting down its cooldown.
+- Damage meter: the game's damage meter wears the STUwave panel, with gauge rows coloured per class.
+- Chat: guild, party and whisper lines get a faint band in their tag colour. A switch turns it off.
+- Data bar: hover DUR for each equipped piece's durability, and GOLD for the gold on every character.
+- Character snapshot: an account-wide snapshot of each character (gear with stats, bags and bank, professions, quests, currencies, reputations) for tools outside the game. See docs/EXPORT.md. Settings, Profiles, Saved data turns it off.
+
+### Fixes
+- Raid target markers show on nameplates again.
+- The chat window fits whole lines, so the top message is never cut in half.
+- The game's taint log is turned on at login, so a blocked action can be traced from the log.
+
+### Known issues
+- Using an item from your bags is sometimes still blocked with "forever-stuwave has been blocked from an action". Use the item from an action bar until this is fixed.
+- The Paladin module is new and lightly tested in game. Reports welcome.
+
 ## 1.0.0-beta.2 (2026-11-08)
 
 Class modules for four more classes, Questie support, and a round of minimap and HUD polish.
