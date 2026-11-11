@@ -102,18 +102,16 @@ Use a Paladin that has learned at least one seal. Step 6 works on any class.
      move a key to the neighbouring aura, the same as Blizzard's stance bar.
 4. Seal module, in the Gunsight's upper or lower area (pick "Class Module" for
    an area in the config window; the "Seal module" section at the end of this
-   file has the full check). Cast a seal:
-   - The tile shows the seal's icon (two letters only if the game gives no
-     icon), its name and SEAL ACTIVE. The time left is large on the right and
-     the bar drains left to right over 30 s.
-   - At 3 s or less the amber RESEAL end of the bar lights, the fill and time
-     go amber and the caption reads EXPIRING.
-   - At expiry it reads NO SEAL and CAST A SEAL. In combat it pulses.
-   - Cast Judgement on a target under Crusader, Light, Wisdom or Justice. The
-     bottom row (Judgement icon chip, bar, time) counts down 40 s (10 s for
-     Justice). Switch to an unjudged target and it dims and reads NOT JUDGED
-     (NO DEBUFF under Righteousness, Fury or Command). A dead target empties
-     it. The seal stays up after Judgement.
+   file has the full check). It is the wax seal and the Judgement hammer:
+   - Cast a seal: the wax seal takes the seal's colour and emblem and drains
+     from the top down over 30 s, the seconds under it. Under 3 s an amber
+     crack flickers across it. At expiry it is an amber dashed ring (pulsing
+     in combat) with three dashes.
+   - Cast Judgement: the hammer swings into the ground (flash, pillar of
+     light, shockwaves, a shake), rises and refills from the pommel over the
+     10 s cooldown, then breathes and glints when ready. The seal stays up.
+   - Under Crusader, Light, Wisdom or Justice the target gets a glowing rune
+     in the ground with a ring that drains over 40 s (10 s for Justice).
 5. Look at the shoulder where it meets the Console's top line. It should look
    like part of the Console, with no notch and no bright seam.
 6. Chat font. Chat text defaults to 14 pt. `/fschat size` prints the size and
@@ -511,14 +509,17 @@ your login or password.
 
 ## Seal module (Paladin class module, upper or lower area)
 
-Needs a full client restart.
+Needs a full client restart (new textures and a new file in the toc).
 Pick the class module for the upper or lower Gunsight area in the config window, then check in BOTH areas:
 
-1. The module fits the area: the seal tile (the seal's icon) and name with SEAL ACTIVE, the time left large on the right, a bar with 0, 15 and 30 under it, and the Judgement row (Judgement icon chip, bar, time) at the bottom. Nothing spills over the area's edges.
-2. Cast a seal: the bar fills left to right and drains, the time counts down (whole seconds, tenths from 5 s). The amber RESEAL band is the 0 to 3 s end of the bar.
-3. At 3 s or less the fill, the time and the caption go amber and read EXPIRING, and the band breathes. At expiry it reads NO SEAL and CAST A SEAL; in combat the tile and name pulse.
-4. Judge a target under Crusader, Light, Wisdom or Justice: the row's bar and time count down from 40 s (10 s for Justice). Switch to an unjudged target: the row dims and says NOT JUDGED (NO DEBUFF under Righteousness, Fury or Command). A dead target empties the row.
-5. Move the module to the other area (and change the screen scale): it re-seats inside the new area.
+1. The module fits the area: the wax seal on the left with its seconds under it, the hammer standing in a column of light on the right with its seconds under it once judged. Nothing spills over the area's edges, and the pixels are crisp (no blur).
+2. Cast a seal: the wax takes the seal's colour and emblem (Righteousness hammer, Crusader cross, Command crown, Justice scales, Light open hand, Wisdom and Fury the sword in a swirl). It drains from the top down, a bright line at the level, the seconds counting down.
+3. Under 3 s an amber crack flickers on the wax. At expiry: an amber dashed ring with three amber dashes, pulsing in combat, steady out of it.
+4. Cast Judgement: the hammer flares, winds up and slams face first into the ground (white flash, pillar, rays, two shockwaves, cracks, a shake), the seal rings, then the hammer rises and fills with the seal's colour from the pommel up over 10 s. Say whether the slam starts the moment you cast (it can lag up to a fifth of a second).
+5. Ready: one ring of light, then the hammer breathes, bobs and a glint crosses its head every couple of seconds.
+6. Under Crusader, Light, Wisdom or Justice a rune burns into the ground with a ring that drains over 40 s (10 s for Justice); switch to an unjudged target and it goes. Under Righteousness, Fury or Command the rune flares on the blow and fades.
+7. Turn on reduced motion: no shake, flash, bob, glint or motes; the slam still plays.
+8. Move the module to the other area (and change the screen scale): it re-seats inside the new area.
 
 ## Box tags: level and class, health percent, target of target
 
