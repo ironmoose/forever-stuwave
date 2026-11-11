@@ -78,9 +78,10 @@ local C = {
 C.GX, C.GY = C.HX - 12, C.GROUND - 19   -- where the hammer's grip lands
 C.HY = C.GY - 25                         -- the raised head's centre
 C.IX = C.GX + 25                         -- where the face lands
--- the hit flash: glow_round stretched over most of the module, brightest at the impact and clear at the module's edges
-C.FLASH_W, C.FLASH_H, C.FLASH_A = 64, 86, 0.85
-C.FLASH_CX, C.FLASH_CY = 118, 43             -- on the hammer; reaches clear exactly at the right, top and bottom edges
+-- the hit flash: glow_round stretched well past the module (nothing clips it), centred on the hammer, so the light radiates
+-- out and fades to clear on its own with no box edge anywhere
+C.FLASH_W, C.FLASH_H, C.FLASH_A = 200, 150, 0.85
+C.FLASH_CX, C.FLASH_CY = 118, 50
 C.W = C.SW * C.SPX
 C.H = C.SH * C.SPX
 Seals.C = C
@@ -373,8 +374,8 @@ local function Build()
     P.debris = Dots(C.DEBRIS, "OVERLAY", 4)
     P.burst = Dots(32, "OVERLAY", 4)
     P.cdLabel = Label()
-    -- the hit flash, over everything and outside the shake: a soft round glow that feathers to clear before the module's
-    -- edges (a flat rect turned the whole box white), centred on the impact
+    -- the hit flash, over everything and outside the shake: a soft round glow that radiates past the module and feathers to
+    -- clear (a flat rect turned the whole box white)
     P.flash = Dot("OVERLAY", 7, top)
     P.flash:SetTexture(MEDIA .. "glow_round.tga")
     DotSize(P.flash, C.FLASH_W, C.FLASH_H)
