@@ -153,7 +153,7 @@ end
 -- held, our panel fill, glow and ring drawn over it, and a 3 px LED edge down the left side (cyan asks, pink is money).
 S.rules = {}
 S.dialogs = Weak()
-S.money, S.edits, S.popups = Weak(), Weak(), Weak()
+S.money, S.edits, S.popups, S.filters = Weak(), Weak(), Weak(), Weak()
 
 local function Led(frame, color)
     local t = frame:CreateTexture(nil, "OVERLAY", nil, 6)
@@ -442,7 +442,8 @@ end
 -- Shared: a money input (gold, silver, copper boxes) and a plain edit box
 -------------------------------------------------------------------------------
 
-local COIN_KEYS = { { "gold", "gold" }, { "silver", "silver" }, { "copper", "copper" } }
+local COIN_KEYS = { { "gold", "gold" }, { "silver", "silver" }, { "copper", "copper" },
+    { "GoldBox", "gold" }, { "SilverBox", "silver" }, { "CopperBox", "copper" } }
 
 -- Restyles one MoneyInputFrameTemplate in place: the stock box art is held, a ring box goes round each part and the text takes the
 -- coin colour. The coin icon and label stay where the stock code puts them; no script is replaced.
@@ -559,6 +560,83 @@ local function BuildColorPicker()
 end
 
 -------------------------------------------------------------------------------
+-- Auction house inner widgets (Blizzard_AuctionHouseUI, load on demand)
+-------------------------------------------------------------------------------
+
+-- The category list: pooled FilterButtons in a ScrollBox. The stock plate, filter lines and highlight are held; a box of ours
+-- is pink when the stock selected texture is up, cyan under the hand. The stock code decides which button is selected.
+local function PaintFilter(btn)
+    local rec = S.filters[btn]
+    if not rec then return end
+    local sel = Region(btn, "SelectedTexture")
+    local selected = sel and Plain(Try(sel.IsShown, sel)) == true
+    local hover = Plain(Try(btn.IsMouseOver, btn)) == true
+    Char.PaintBox(rec.box, selected and C.band or C.ink, 1, selected and C.pink or (hover and C.cyan or C.dim), 1, 1)
+end
+
+local function SkinFilter(btn)
+    if type(btn) ~= "table" or type(btn.CreateTexture) ~= "function" then return end
+    if not S.filters[btn] then
+        S.filters[btn] = { box = Char.Box(btn, "BACKGROUND") }
+        Kit.HookScript(btn, "OnEnter", function() PaintFilter(btn) end)
+        Kit.HookScript(btn, "OnLeave", function() PaintFilter(btn) end)
+        Kit.HookScript(btn, "OnMouseUp", function() Kit.Later(function() PaintFilter(btn) end) end)
+    end
+    for _, key in ipairs({ "NormalTexture", "Lines", "HighlightTexture" }) do HeldArt.Hold(btn[key]) end
+    local label = btn.GetFontString and Try(btn.GetFontString, btn)
+    if type(label) == "table" then Kit.RestyleLabel(label, btn, 11, C.text) end
+    PaintFilter(btn)
+end
+
+local function SweepFilters(frame)
+    local list = frame and (frame.CategoriesList or frame)
+    local sb = list and list.ScrollBox
+    if type(sb) == "table" and type(sb.ForEachFrame) == "function" then
+        pcall(sb.ForEachFrame, sb, function(b) Step("ah.filter", SkinFilter, b) end)
+    end
+    for _, b in ipairs(List(list, "GetChildren")) do
+        if S.filters[b] then PaintFilter(b) end
+    end
+end
+
+local function SkinAuctionHouse(ah)
+    if type(ah) ~= "table" then return end
+    Step("ah.filters", SweepFilters, ah)
+    -- the sell frames' price inputs
+    for _, key in ipairs({ "ItemSellFrame", "CommoditiesSellFrame" }) do
+        local sf = ah[key]
+        if type(sf) == "table" then
+            for _, k in ipairs({ "PriceInput", "SecondaryPriceInput" }) do
+                local pi = sf[k]
+                if type(pi) == "table" and type(pi.MoneyInputFrame) == "table" then Com.SkinMoneyInput(pi.MoneyInputFrame) end
+            end
+        end
+    end
+    -- column headers of the result lists
+    for _, path in ipairs({ { "BrowseResultsFrame", "ItemList" }, { "ItemBuyFrame", "ItemList" }, { "ItemSellList" } }) do
+        local node = ah
+        for _, k in ipairs(path) do node = type(node) == "table" and node[k] or nil end
+        local hc = type(node) == "table" and node.HeaderContainer or nil
+        if hc then
+            for _, h in ipairs(List(hc, "GetChildren")) do
+                for _, key in ipairs({ "Left", "Middle", "Right" }) do HeldArt.Hold(h[key]) end
+            end
+        end
+    end
+end
+
+local function BuildAuctionHouse()
+    local ah = _G.AuctionHouseFrame
+    if type(ah) ~= "table" or S.done.ah then return end
+    S.done.ah = true
+    ah.fsCommerceAHSkin = true
+    local function again() Kit.Later(function() Step("ah", SkinAuctionHouse, ah) end) end
+    Kit.HookScript(ah, "OnShow", again)
+    if type(_G.AuctionFrameFilters_Update) == "function" then Kit.HookFunc(_G, "AuctionFrameFilters_Update", again) end
+    Step("ah", SkinAuctionHouse, ah)
+end
+
+-------------------------------------------------------------------------------
 -- Drive
 -------------------------------------------------------------------------------
 
@@ -572,6 +650,7 @@ local function Build()
     Step("popups", BuildPopups)
     Step("split", BuildStackSplit)
     Step("color", BuildColorPicker)
+    Step("ah", BuildAuctionHouse)
     if not S.done.reseat then
         S.done.reseat = true
         Kit.OnReseat(Relayout)
@@ -580,7 +659,8 @@ end
 
 PanelSkins.RegisterInspect("Commerce", { { name = "MerchantFrame", guard = "fsCommerceSkin" },
     { name = "BankFrame", guard = "fsCommerceBankSkin" },
-    { name = "StackSplitFrame", guard = "fsCommerceSplitSkin" }, { name = "ColorPickerFrame", guard = "fsCommerceColorSkin" } })
+    { name = "StackSplitFrame", guard = "fsCommerceSplitSkin" }, { name = "ColorPickerFrame", guard = "fsCommerceColorSkin" },
+    { name = "AuctionHouseFrame", guard = "fsCommerceAHSkin" } })
 
 PanelSkins.DeferCombat(Build)
 PanelSkins.WatchAddonLoad(function() PanelSkins.DeferCombat(Build) end)

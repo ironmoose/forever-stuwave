@@ -290,6 +290,33 @@ function BuildExtras()
         e.Left, e.Middle, e.Right = tex(e, nil, "BACKGROUND"), tex(e, nil, "BACKGROUND"), tex(e, nil, "BACKGROUND")
         mif[k] = e
     end
+
+    -- the auction house, reduced to the widgets this skin touches
+    local ah = blz("Frame", "AuctionHouseFrame", UIParent, 800, 500, "TOPLEFT", 50, -50)
+    ah.shown = false
+    local cl = blz("Frame", nil, ah, 200, 400, "TOPLEFT", 10, -60)
+    ah.CategoriesList = cl
+    local fb = {}
+    cl.ScrollBox = { ForEachFrame = function(self, fn) for _, b in ipairs(fb) do fn(b) end end }
+    for i = 1, 3 do
+        local b = blz("Button", nil, cl, 132, 21, "TOPLEFT", 5, -5 - i * 22)
+        b.NormalTexture = tex(b, nil, "BACKGROUND"); b.Lines = tex(b, nil, "BACKGROUND"); b.HighlightTexture = tex(b, nil, "BORDER")
+        b.SelectedTexture = tex(b, nil, "ARTWORK"); b.SelectedTexture.shown = (i == 2)
+        b.fs = fstring(b, nil, "Category " .. i, 11)
+        b.GetFontString = function(self) return self.fs end
+        b.scripts.OnEnter = function() end
+        fb[i] = b
+    end
+    local sf = blz("Frame", nil, ah, 300, 200, "TOPLEFT", 250, -60)
+    ah.ItemSellFrame = sf
+    sf.PriceInput = blz("Frame", nil, sf, 200, 24, "TOPLEFT", 0, 0)
+    local lm = blz("Frame", nil, sf.PriceInput, 200, 24, "TOPLEFT", 0, 0)
+    sf.PriceInput.MoneyInputFrame = lm
+    for _, k in ipairs({ "GoldBox", "SilverBox", "CopperBox" }) do
+        local e = blz("EditBox", nil, lm, 50, 22, "LEFT", 0, 0)
+        e.Left, e.Middle, e.Right = tex(e, nil, "BACKGROUND"), tex(e, nil, "BACKGROUND"), tex(e, nil, "BACKGROUND")
+        lm[k] = e
+    end
 end
 """
 BLIZZARD = BLIZZARD + BANK
@@ -475,10 +502,25 @@ case("prompts: the edit box backdrop is held, the money input is ringed per coin
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 
+case("auction house: category buttons hold the stock plate and ring the selected one pink, the sell price input is ringed per coin", f"""
+    Fire('PLAYER_ENTERING_WORLD'); AuctionHouseFrame:Show(); FlushTimers()
+    local ah = AuctionHouseFrame
+    local S = FS.CommerceSkin.state
+    assert(ah.fsCommerceAHSkin, 'not built')
+    for i, b in ipairs(ah.CategoriesList.ScrollBox.frames or {{}}) do end
+    local n = 0
+    for b in pairs(S.filters) do n = n + 1; assert(b.NormalTexture.alpha == 0 and b.Lines.alpha == 0, 'plate kept') end
+    assert(n == 3, 'filters skinned: ' .. n)
+    assert(S.money[ah.ItemSellFrame.PriceInput.MoneyInputFrame], 'price input not skinned')
+    assert(ah.ItemSellFrame.PriceInput.MoneyInputFrame.GoldBox.Left.alpha == 0, 'box art kept')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
 SCENES = {
     "bank": "Fire('PLAYER_ENTERING_WORLD'); BankFrame:Show(); BankCleanUpConfirmationPopup:Show(); FlushTimers(); return DumpOps({ BankFrame, BankCleanUpConfirmationPopup })",
     "bank-purchase": "Fire('PLAYER_ENTERING_WORLD'); BankFrame:Show(); BankPanel.PurchasePrompt:Show(); FlushTimers(); return DumpOps({ BankFrame })",
     "split": "Fire('PLAYER_ENTERING_WORLD'); StackSplitFrame:Show(); StaticPopup1:Show(); ColorPickerFrame:Show(); FlushTimers(); return DumpOps({ StackSplitFrame, ColorPickerFrame, StaticPopup1 })",
+    "auction": "Fire('PLAYER_ENTERING_WORLD'); AuctionHouseFrame:Show(); FlushTimers(); return DumpOps({ AuctionHouseFrame })",
     "vendor": "Fire('PLAYER_ENTERING_WORLD'); MerchantFrame:Show(); MerchantFrame_Update(); FlushTimers(); return DumpOps({ MerchantFrame })",
 }
 
