@@ -460,11 +460,71 @@ end)
 -- entry's stack field instead: it can sometimes show the tainting caller, and
 -- is bounded (12 frames) and pcall'd because it is diagnostic only and this
 -- handler must never throw into the client's event dispatch.
+-- The bag click block (UseContainerItem from ContainerFrameItemButton_OnClick) never shows in the
+-- client's taint.log (live 2026-11-11: two captures, no container line), so the log cannot say who
+-- tainted the click. issecurevariable(table, key) names the addon that last wrote a field: sweep the
+-- stock bag frames and their item buttons for fields an addon wrote and keep the newest sweep on the
+-- entry as `taint` ("ContainerFrame1.Items[3].foo=addon; ..."). Diagnostic only: bounded, pcall'd,
+-- runs only on that one block, reads no secret.
+local TAINT_SWEEP_MAX = 40
+local function SweepTable(out, label, t)
+    if type(t) ~= "table" then return end
+    for k in pairs(t) do
+        if #out >= TAINT_SWEEP_MAX then return end
+        if type(k) == "string" then
+            local ok, secure, by = pcall(issecurevariable, t, k)
+            if ok and secure == false then out[#out + 1] = label .. "." .. k .. "=" .. tostring(by) end
+        end
+    end
+end
+
+local function BagTaintSweep()
+    if type(issecurevariable) ~= "function" then return "(issecurevariable unavailable)" end
+    local out = {}
+    local function Frame(name)
+        local f = _G[name]
+        if type(f) ~= "table" then return end
+        SweepTable(out, name, f)
+        local items = rawget(f, "Items")
+        if type(items) == "table" then
+            for i = 1, #items do SweepTable(out, name .. ".Items[" .. i .. "]", items[i]) end
+        end
+    end
+    for i = 1, 13 do Frame("ContainerFrame" .. i) end
+    Frame("ContainerFrameCombinedBags")
+    for _, g in ipairs({ "ContainerFrameItemButton_OnClick", "UseContainerItem", "ContainerFrameUtil_GetShownFrameForID" }) do
+        local ok, secure, by = pcall(issecurevariable, g)
+        if ok and secure == false then out[#out + 1] = g .. "=" .. tostring(by) end
+    end
+    if #out == 0 then return "(no addon-written field on the bag frames or their buttons)" end
+    return table.concat(out, "; ")
+end
+
 local function OnActionBlocked(event, blockedAddon, blockedFunc)
     if Secret(blockedAddon) or Secret(blockedFunc) then return end
     local ours = blockedAddon == addonName
     local msg = event .. ": " .. tostring(blockedFunc)
     if not ours then msg = msg .. " (blamed on " .. tostring(blockedAddon) .. ")" end
+    if tostring(blockedFunc):find("UseContainerItem", 1, true) then
+        local okSweep, sweep = pcall(BagTaintSweep)
+        local after = function()
+            local e = byMessage[msg]
+            if e then e.taint = okSweep and sweep or ("(sweep failed: " .. tostring(sweep) .. ")") end
+        end
+        -- Record below creates or bumps the entry; stamp the sweep onto it once it exists.
+        local okRec = pcall(function()
+            if byMessage[msg] or #ForeverSTUwaveErrorLog >= MAX_ENTRIES then
+                Record(msg, nil, ours, true)
+            else
+                local ok, s = pcall(debugstack, 2, 12, 0)
+                if not ok or type(s) ~= "string" or Secret(s) then s = "(stack unavailable)" end
+                Record(msg, s, ours, true)
+            end
+        end)
+        pcall(after)
+        if okRec and ours then pcall(Announce) end
+        return
+    end
     -- A repeat (or a full log) never uses a stack, so skip building one.
     if byMessage[msg] or #ForeverSTUwaveErrorLog >= MAX_ENTRIES then
         Record(msg, nil, ours, true)
