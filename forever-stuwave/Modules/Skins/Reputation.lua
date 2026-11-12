@@ -204,10 +204,17 @@ local function SkinEntry(row)
 end
 
 local function SkinHeader(row)
-    if type(row.Left) ~= "table" or type(row.Middle) ~= "table" then return false end
+    -- the 16001 header rows carry unnamed collapse art and a StateIcon: the shared page row holds the art and tints the glyph
+    local Char = FS.CharacterSkin
+    if Char and Char.HoldStock then
+        Char.HoldStock(row, 3)
+        local icon = row.StateIcon
+        if type(icon) == "table" and icon.SetVertexColor then pcall(icon.SetVertexColor, icon, C.cyan[1], C.cyan[2], C.cyan[3], 1) end
+    end
     for _, key in ipairs({ "Left", "Middle", "Right", "HighlightLeft", "HighlightMiddle", "HighlightRight" }) do
         HeldArt.Hold(row[key])
     end
+    if type(row.Name) ~= "table" then return false end
     Restyle(row.Name, row, 13, C.cyan)
     return true
 end
@@ -257,6 +264,7 @@ local function SkinPane()
         HeldArt.Hold(detail.Divider)
         Theme.AddPanelChrome(detail, { fillColor = C.panel, accent = C.violet, glowAlpha = 0.3 })
         Restyle(detail.Title, detail, 14, C.cyan)
+        if FS.CharacterSkin and FS.CharacterSkin.SkinDetail then pcall(FS.CharacterSkin.SkinDetail, detail) end
         if PanelSkins.SweepControls then pcall(PanelSkins.SweepControls, detail) end
     end
     if PanelSkins.SweepControls then pcall(PanelSkins.SweepControls, frame) end

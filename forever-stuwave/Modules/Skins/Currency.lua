@@ -3,7 +3,7 @@
 -- (mockups/character-spells-2026-11-12.html, section 4): every currency with a cap is a row of TEN CAPACITY CELLS that fill as you
 -- earn, like the totem poles on the HUD. At the cap the cells go amber and blink, so you see "spend this" without reading
 -- numbers; a currency with a weekly cap carries a gold notch where this week's ceiling falls; the count reads "quantity / cap".
--- The window chrome, header band and the character / reputation / currency switch belong to Skins/Character.lua.
+-- The window chrome, header band and the six mode tabs belong to Skins/Character.lua.
 --
 -- Skin only, and every behaviour stays the stock one: the same rows, collapse, selection, the options popup (unused, show on
 -- backpack, transfer), tooltips and scroll list. Stock row art is held at alpha 0 (FS.HeldArt); the stock count is held and its
@@ -160,6 +160,13 @@ local function SkinEntry(row)
 end
 
 local function SkinHeader(row)
+    local Char = FS.CharacterSkin
+    if Char and Char.HoldStock then
+        -- the 16001 header rows have unnamed collapse art and a StateIcon (the plus or minus): hold the art, tint the glyph
+        Char.HoldStock(row, 3)
+        local icon = row.StateIcon
+        if type(icon) == "table" and icon.SetVertexColor then pcall(icon.SetVertexColor, icon, C.cyan[1], C.cyan[2], C.cyan[3], 1) end
+    end
     for _, key in ipairs({ "Left", "Middle", "Right", "HighlightLeft", "HighlightMiddle", "HighlightRight" }) do HeldArt.Hold(row[key]) end
     local title = type(row.GetTitleRegion) == "function" and Try(row.GetTitleRegion, row) or row.Text or row.Name
     if title then
