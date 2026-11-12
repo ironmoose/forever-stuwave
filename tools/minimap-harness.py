@@ -493,6 +493,7 @@ def geo(width_px: float) -> dict:
     g["outlineY"] = max(1, min(math.floor(g["topM"]), s(1)))
     g["halo"] = s(1)
     g["dash"], g["ruleInset"] = s(2), s(6)
+    g["endW"], g["lean"], g["tagPad"], g["tagCut"] = s(44), s(7), s(6), s(3)
     return g
 
 
@@ -724,8 +725,8 @@ def spacing_checks() -> None:
         lua, g, px = world(w, tray='__lib:Register("Alpha", MakeObj("Alpha"), {})')
         e = geo(g.Minimap.w / px)
         bezel = g.Minimap.fsBezel
-        keys = [("toggle", g.Minimap.fsTrayToggle, None), ("tracking", g.MinimapCluster.Tracking, SEARCH_TEXTURE),
-                ("calendar", g.GameTimeFrame, CALENDAR_TEXTURE), ("stu", g.Minimap.fsSTUKey, STU_TEXTURE)]
+        keys = [("tracking", g.MinimapCluster.Tracking, SEARCH_TEXTURE), ("calendar", g.GameTimeFrame, CALENDAR_TEXTURE),
+                ("stu", g.Minimap.fsSTUKey, STU_TEXTURE)]
         resolved = [str(g.Minimap.fsBezelResolved[i]) for i in range(1, len(g.Minimap.fsBezelResolved) + 1)]
         check(f"[spacing@{label}] the keys built are tracking, calendar, stu, mail ({resolved}); the toggle joins from the tray",
               resolved == ["tracking", "calendar", "stu", "mail"] and all(f is not None for _, f, _ in keys))
@@ -733,12 +734,12 @@ def spacing_checks() -> None:
               f"(scale {g.Minimap.w / px / REF_MAP:.3f})",
               near(bezel.h, e["row"] * px) and whole(bezel.h, px))
 
-        # every key is keyW wide but the tray toggle, which is toggleW (its count and chevron need the room)
+        # every glyph key is keyW wide; the tray toggle is not in the run (it is the row's right end, checked below)
         xs, ws, want_x = [], [], e["margin"]
         for i, (name, frame, tex) in enumerate(keys):
             p = frame.points.TOPLEFT
             x, y = p.x / px, -p.y / px
-            kw = e["toggleW"] if name == "toggle" else e["keyW"]
+            kw = e["keyW"]
             xs.append(x)
             ws.append(kw)
             check(f"[spacing@{label}] key {i + 1} ({name}) is {kw} x {e['keyH']} px at x {want_x}, "
@@ -758,7 +759,6 @@ def spacing_checks() -> None:
 
         # glyphs centred in their keys, and the LED across the full key at the bottom
         for name, frame, tex in keys:
-            kw = e["toggleW"] if name == "toggle" else e["keyW"]
             led = led_of(frame)
             check(f"[spacing@{label}] {name}: the LED is the key's full width, {e['led']} px, at its bottom edge",
                   led is not None and near(led.h, e["led"] * px) and whole(led.h, px)
@@ -785,46 +785,86 @@ def spacing_checks() -> None:
                   and near(e["keyH"] - (e["glyphY"] + e["glyph"]) - e["led"], e["glyphGap"])
                   and glyph.snap is True and glyph.bias == 0)
 
-        # the divider and the coords
+        # the coords: a see-through tag centred on the map's bottom edge; the old divider is hidden
         coords = g.Minimap.fsReadoutCoords
-        n_keys = len(keys)
         divider = [r for r in regions(g.Minimap.fsBody) if r.color is not None and tint_is(r, (0.133, 0.878, 1.0), 0.3)]
-        check(f"[spacing@{label}] one divider, cyan at 30%", len(divider) == 1)
-        d = divider[0]
-        dx = d.points.TOPLEFT.x / px
-        check(f"[spacing@{label}] the divider is one key gap past the last key ({row_end} px), 1 px "
-              f"wide, {e['dividerH']} px tall, centred in the {e['row']} px row (got x {dx:g}, y {-d.points.TOPLEFT.y / px:g})",
-              near(dx, row_end) and near(dx - xs[-1] - ws[-1], e["keyGap"])
-              and near(d.w, px) and near(d.h / px, e["dividerH"])
-              and near(-d.points.TOPLEFT.y / px, (e["row"] - e["dividerH"]) / 2)
-              and all(whole(v, px) for v in (d.points.TOPLEFT.x, d.points.TOPLEFT.y, d.w, d.h)))
-        right = coords.points.RIGHT
-        check(f"[spacing@{label}] the coords are right aligned at the same margin as the first key: {-right.x / px:g} px "
-              f"(left margin {xs[0]:g})",
-              bool(g.__same(right.rel, bezel)) and right.relPoint == "RIGHT" and right.y == 0
-              and near(-right.x / px, e["margin"]) and near(xs[0], e["margin"]) and whole(right.x, px))
-        room = e["width"] - e["margin"] - (row_end + 1 + e["keyGap"])
-        want_font = max(5, min(e["coords"], math.floor(room / (READOUT_CHARS * MONO_ADVANCE))))
-        check(f"[spacing@{label}] the coords font is {want_font} px (its {e['coords']} px, or what the room {room} px takes) "
-              f"and a reading is {READOUT_CHARS * MONO_ADVANCE * want_font:.1f} px, clear of the divider",
-              near(coords.fontSize / px, want_font) and READOUT_CHARS * MONO_ADVANCE * want_font <= room + 1e-6)
+        check(f"[spacing@{label}] the row's old divider is hidden", len(divider) == 1 and divider[0].shown is False)
+        text_w = math.ceil(READOUT_CHARS * MONO_ADVANCE * e["coords"])
+        tag_w, tag_h = text_w + 2 * e["tagPad"], e["coords"] + 4
+        tag_x = math.floor((e["width"] - tag_w) / 2)
+        c = coords.points.CENTER
+        check(f"[spacing@{label}] the coords are {e['coords']} px, centred in a {tag_w} x {tag_h} px tag on the map's bottom edge "
+              f"(centre {c.x / px:g}, {c.y / px:g})",
+              bool(g.__same(c.rel, g.Minimap)) and c.relPoint == "BOTTOMLEFT"
+              and near(c.x / px, tag_x + tag_w / 2) and near(c.y / px, tag_h / 2)
+              and near(coords.fontSize / px, e["coords"]) and coords.shown is not False)
+        fills = [r for r in regions(g.Minimap.fsBody) if r.color is not None and near(r.color[4], 0.30)
+                 and r.points.BOTTOMLEFT is not None and bool(g.__same(r.points.BOTTOMLEFT.rel, g.Minimap))]
+        check(f"[spacing@{label}] the tag's fill is see-through (alpha 0.30), the body below the cut and {e['tagCut']} cut rows",
+              len(fills) == 1 + e["tagCut"]
+              and min(f.points.BOTTOMLEFT.x for f in fills) / px == tag_x
+              and max(f.points.BOTTOMLEFT.y / px + f.h / px for f in fills) == tag_h)
 
-        # the toggle's count and chevron, on the glyph row
+        # the tray toggle: the row's right end, full height, flush right
         toggle = g.Minimap.fsTrayToggle
+        tr = toggle.points.TOPRIGHT
+        check(f"[spacing@{label}] the toggle is the row's right end: {e['endW']} x {e['row']} px, flush with the bezel's top right",
+              bool(g.__same(tr.rel, bezel)) and tr.relPoint == "TOPRIGHT" and tr.x == 0 and tr.y == 0
+              and near(toggle.w / px, e["endW"]) and near(toggle.h / px, e["row"]))
+        led = led_of(toggle)
+        check(f"[spacing@{label}] the toggle shows no LED (the slab is its own edge)",
+              all(r.shown is False for r in regions(toggle) if r.color is not None))
         chev = glyph_of(toggle, CHEVRON_TEXTURE)
         count = toggle.count
         cw = 20 / px  # the mock FontString:GetStringWidth() is 20 UI units
         group = math.floor(cw + 0.5) + e["glyphGap"] + e["chevW"]
-        want_right = min(math.floor((e["toggleW"] + group) / 2), e["toggleW"] - 1)
-        check(f"[spacing@{label}] the toggle's chevron is {e['chevW']} x {e['chevH']} px, the count and chevron centred as one group "
-              f"across the {e['toggleW']} px key (chevron right at {want_right}), on the glyph row; the count is {e['count']} px, "
-              f"a {e['glyphGap']} px gap left of it",
+        left = math.floor(e["lean"] / 2) + 1
+        want_right = min(math.floor((left + e["endW"] + group) / 2), e["endW"] - 2)
+        check(f"[spacing@{label}] the count and chevron are one group centred across the slab (chevron right at {want_right}), "
+              f"on the row's middle; the count is {e['coords']} px, a {e['glyphGap']} px gap left of the chevron",
               near(chev.w / px, e["chevW"]) and near(chev.h / px, e["chevH"])
               and bool(g.__same(chev.points.RIGHT.rel, toggle)) and chev.points.RIGHT.relPoint == "TOPLEFT"
               and near(chev.points.RIGHT.x / px, want_right, 1)
-              and near(chev.points.RIGHT.y / px, -(e["glyphY"] + e["glyph"] / 2))
-              and near(count.fontSize / px, e["count"]) and bool(g.__same(count.points.RIGHT.rel, chev))
+              and near(chev.points.RIGHT.y / px, -e["row"] / 2)
+              and near(count.fontSize / px, e["coords"]) and bool(g.__same(count.points.RIGHT.rel, chev))
               and count.points.RIGHT.relPoint == "LEFT" and near(count.points.RIGHT.x / px, -e["glyphGap"]))
+        slab = [r for r in regions(g.Minimap.fsBody) if r.color is not None and r.points.TOPLEFT is not None
+                and bool(g.__same(r.points.TOPLEFT.rel, bezel)) and r.shown is not False and near(r.h / px, 1)]
+        edges = sorted((round(-r.points.TOPLEFT.y / px), r.points.TOPLEFT.x / px) for r in slab
+                       if near(r.w / px, 1) and r.color[4] == 1)
+        x0 = e["width"] - e["endW"]
+        check(f"[spacing@{label}] the slab's left edge leans {e['lean']} px: x {x0 + e['lean']} on the top row, {x0} on the bottom",
+              len(edges) == e["row"] and near(edges[0][1], x0 + e["lean"]) and near(edges[-1][1], x0))
+        runs = [r for r in slab if not near(r.w / px, 1)]
+        bottom = max(runs, key=lambda r: -r.points.TOPLEFT.y)
+        check(f"[spacing@{label}] the slab's fill runs reach the right edge, and stop short of it by the body's cut on the bottom row",
+              len(runs) == e["row"]
+              and max(r.points.TOPLEFT.x / px + r.w / px for r in runs) == e["width"]
+              and bottom.points.TOPLEFT.x / px + bottom.w / px < e["width"])
+
+
+def coords_setting_checks() -> None:
+    """The coords can be switched off in the config window: the text and every piece of its tag hide, and come back."""
+    stub = r"""
+    __cfg = { ["minimap.coords"] = false }
+    __cfgWatch = {}
+    FS.Config = {
+        RegisterDefault = function(k, v) if __cfg[k] == nil then __cfg[k] = v end end,
+        Get = function(k) return __cfg[k] end,
+        Set = function(k, v) __cfg[k] = v; for _, fn in ipairs(__cfgWatch[k] or {}) do fn() end end,
+        OnChange = function(k, fn) __cfgWatch[k] = __cfgWatch[k] or {}; table.insert(__cfgWatch[k], fn) end,
+    }
+    """
+    lua, g, px = world(WORLDS[0], extra=stub)
+    coords = g.Minimap.fsReadoutCoords
+    tag = [r for r in regions(g.Minimap.fsBody) if r.color is not None and r.points.BOTTOMLEFT is not None
+           and bool(g.__same(r.points.BOTTOMLEFT.rel, g.Minimap))]
+    check("[coords] the setting registers its own key and the config window has the switch",
+          g.FS.MinimapCoords.SETTING.key == "minimap.coords" and "FS.MinimapCoords" in CONFIGWINDOW_SRC)
+    check("[coords] switched off: the coords and their tag are hidden",
+          coords.shown is False and len(tag) > 0 and all(r.shown is False for r in tag))
+    lua.execute('FS.Config.Set("minimap.coords", true)')
+    check("[coords] switched back on: they show again", coords.shown is True and all(r.shown is True for r in tag))
 
 
 def row_checks() -> None:
@@ -840,19 +880,18 @@ def row_checks() -> None:
         def slot(frame):
             return round((frame.points.TOPLEFT.x / px - e["margin"]) / e["pitch"])
 
-        check(f"[row@{label}] mail waits for mail: hidden, no slot, the divider after four keys",
+        check(f"[row@{label}] mail waits for mail: hidden, no slot",
               mail.shown is False and mail.parent is not None and bool(g.__same(mail.parent, bezel)))
-        divider = [r for r in regions(g.Minimap.fsBody) if r.color is not None and tint_is(r, (0.133, 0.878, 1.0), 0.3)][0]
-        before = divider.points.TOPLEFT.x
+        toggle = g.Minimap.fsTrayToggle
+        before = (toggle.points.TOPRIGHT.x, toggle.w)
         lua.execute("__mail_arrives()")
-        check(f"[row@{label}] mail arriving takes the fifth slot at once (the key's own OnShow reseats the row)",
-              mail.shown is True and near(mail.points.TOPLEFT.x / px, e["margin"] + 3 * e["pitch"] + e["toggleW"] + e["keyGap"])
+        check(f"[row@{label}] mail arriving takes the fourth slot at once, beside the STU key (the key's own OnShow reseats the row)",
+              mail.shown is True and near(mail.points.TOPLEFT.x / px, e["margin"] + 3 * e["pitch"])
               and near(mail.w / px, e["keyW"]) and near(mail.h / px, e["keyH"]))
-        check(f"[row@{label}] the divider moves right one key pitch ({(divider.points.TOPLEFT.x - before) / px:g} px)",
-              near((divider.points.TOPLEFT.x - before) / px, e["pitch"]))
+        check(f"[row@{label}] ... and the toggle at the row's right end does not move",
+              (toggle.points.TOPRIGHT.x, toggle.w) == before)
         lua.execute("__mail_hides()")
-        check(f"[row@{label}] mail hiding gives the slot back (the divider returns)",
-              near(divider.points.TOPLEFT.x, before))
+        check(f"[row@{label}] mail hiding leaves the toggle where it is", (toggle.points.TOPRIGHT.x, toggle.w) == before)
 
         # no tray buttons: the toggle gives its slot back; mail then takes the fourth
         lua, g, px = world(w)
@@ -862,12 +901,16 @@ def row_checks() -> None:
         check(f"[row@{label}] no addon buttons: the toggle is hidden and the row is three keys",
               toggle.shown is False)
         lua.execute("__mail_arrives()")
-        check(f"[row@{label}] ... so mail takes the fourth slot, no hole where the toggle is",
+        check(f"[row@{label}] ... and mail takes the fourth slot",
               near(mail.points.TOPLEFT.x / px, e["margin"] + 3 * e["pitch"]))
+        slab = [r for r in regions(g.Minimap.fsBody) if r.color is not None and r.points.TOPLEFT is not None
+                and bool(g.__same(r.points.TOPLEFT.rel, g.Minimap.fsBezel)) and near(r.h / px, 1)]
+        check(f"[row@{label}] ... with no slab drawn while the toggle is hidden", all(r.shown is False for r in slab))
         lua.execute('__lib:Register("Alpha", MakeObj("Alpha"), {})')
-        check(f"[row@{label}] ... and the first addon button brings the toggle back in the first slot, mail to the fifth",
-              toggle.shown is True and near(toggle.points.TOPLEFT.x / px, e["margin"])
-              and near(mail.points.TOPLEFT.x / px, e["margin"] + 3 * e["pitch"] + e["toggleW"] + e["keyGap"]))
+        check(f"[row@{label}] ... and the first addon button brings the toggle back at the right end, mail still fourth",
+              toggle.shown is True and toggle.points.TOPRIGHT is not None and toggle.points.TOPRIGHT.x == 0
+              and near(mail.points.TOPLEFT.x / px, e["margin"] + 3 * e["pitch"])
+              and any(r.shown is True for r in slab))
 
     # a client without the calendar button: the next key takes its place, no hole
     lua, g, px = world(WORLDS[0], extra="GameTimeFrame:Hide(); GameTimeFrame = nil")
@@ -892,10 +935,10 @@ def row_checks() -> None:
           len(logs) == 1 and logs[0].startswith("minimap_key_stu|") and "stuboom" in logs[0])
     check("[row] ... the half-built key is hidden and unpublished, and no slot is spent on it",
           key is not None and key.shown is False and g.Minimap.fsSTUKey is None
-          and near(g.Minimap.fsTrayToggle.points.TOPLEFT.x / px, e["margin"]))
-    check("[row] ... and the toggle, tracking and calendar still come up in slots 1, 2 and 3",
-          near(g.MinimapCluster.Tracking.points.TOPLEFT.x / px, e["margin"] + e["toggleW"] + e["keyGap"])
-          and near(g.GameTimeFrame.points.TOPLEFT.x / px, e["margin"] + e["toggleW"] + e["keyGap"] + e["pitch"]))
+          and g.Minimap.fsTrayToggle.points.TOPRIGHT is not None)
+    check("[row] ... and tracking and calendar still come up in slots 1 and 2, the toggle at the right end",
+          near(g.MinimapCluster.Tracking.points.TOPLEFT.x / px, e["margin"])
+          and near(g.GameTimeFrame.points.TOPLEFT.x / px, e["margin"] + e["pitch"]))
     resolved = [str(g.Minimap.fsBezelResolved[i]) for i in range(1, len(g.Minimap.fsBezelResolved) + 1)]
     check(f"[row] the resolved and skipped lists say so ({resolved})", resolved == ["tracking", "calendar", "mail"])
 
@@ -946,7 +989,6 @@ def hover_checks() -> None:
     for name, frame, rgb, extra in (("tracking", tracking, g.__Theme.COLOR_POWER, tracking.Button),
                                     ("calendar", calendar, g.__Theme.COLOR_BORDER, None),
                                     ("stu", stu, g.__Theme.COLOR_HEALTH, None),
-                                    ("toggle", toggle, (1, 0.7137, 0.2824), None),
                                     ("mail", mail, g.__Theme.COLOR_HEALTH, None)):
         led, wash, outline = led_of(frame), wash_of(frame), outline_of(frame)
         target = extra if extra is not None else frame
@@ -972,6 +1014,18 @@ def hover_checks() -> None:
         check(f"[hover] {name}: leaving puts it all back",
               outline.shown is False and led.alpha == LED_REST and wash.shown is False)
 
+    # the tray toggle: no outline or LED; hovering brightens the slab's fill and turns the count and chevron white
+    def slab_alpha():
+        rows = [r for r in regions(g.Minimap.fsBody) if r.color is not None and r.points.TOPLEFT is not None
+                and bool(g.__same(r.points.TOPLEFT.rel, g.Minimap.fsBezel)) and not near(r.w / px, 1)]
+        return sorted(round(r.color[4], 3) for r in rows)[-1]
+    rest = slab_alpha()
+    g.__hover(toggle, True)
+    check("[hover] toggle: hovering brightens the slab and turns the chevron white",
+          slab_alpha() > rest and tint_is(glyph_of(toggle, CHEVRON_TEXTURE), (1, 1, 1)))
+    g.__hover(toggle, False)
+    check("[hover] toggle: leaving puts the slab back", slab_alpha() == rest)
+
     # the STU key's own behaviour: tooltip, click, and a hide with the mouse on it clears the hover
     lua.execute("__toggles_reset()")
     g.__hover(stu, True)
@@ -995,10 +1049,9 @@ def hover_checks() -> None:
 
     # the open tray's toggle stays bright while open, hover or not
     lua.execute("__click(Minimap.fsTrayToggle)")
-    check("[hover] an open tray holds the toggle's LED bright and its wash lit (no hover)",
-          led_of(toggle).alpha == LED_BRIGHT and wash_of(toggle).shown is True and outline_of(toggle).shown is False)
+    check("[hover] an open tray holds the slab bright (no hover)", slab_alpha() > rest)
     lua.execute("__click(Minimap.fsTrayToggle)")
-    check("[hover] closing it lets the LED rest again", led_of(toggle).alpha == LED_REST)
+    check("[hover] closing it lets the slab rest again", slab_alpha() == rest)
 
 
 LOGGING = r"""
@@ -1416,12 +1469,12 @@ def rescale_checks() -> None:
     lua.execute(f"PixelUtil = {{ GetPixelToUIUnitFactor = function() return {px2!r} end }}; __rescale()")
     e = geo(g.Minimap.w / px2)
     bezel = g.Minimap.fsBezel
-    keys = [g.Minimap.fsTrayToggle, g.MinimapCluster.Tracking, g.GameTimeFrame, g.Minimap.fsSTUKey]
+    keys = [g.MinimapCluster.Tracking, g.GameTimeFrame, g.Minimap.fsSTUKey]
     check(f"[rescale] the row is re-seated on the new pixel ({bezel.h / px2:g} px tall, was {old / px:g} px)",
           bezel.h != old and near(bezel.h / px2, e["row"]) and whole(bezel.h, px2))
     check("[rescale] every key is re-seated on the new pixel grid at the new spacing",
-          all(near(k.points.TOPLEFT.x / px2, e["margin"] + (0 if i == 0 else e["toggleW"] + e["keyGap"] + (i - 1) * e["pitch"]))
-              and near(k.w / px2, e["toggleW"] if i == 0 else e["keyW"])
+          all(near(k.points.TOPLEFT.x / px2, e["margin"] + i * e["pitch"])
+              and near(k.w / px2, e["keyW"])
               and whole(k.points.TOPLEFT.x, px2) and whole(k.w, px2) and whole(k.h, px2) for i, k in enumerate(keys)))
     lua.execute("__combat = true; PixelUtil = { GetPixelToUIUnitFactor = function() return 1 end }; __rescale(); __combat = false")
     e1 = geo(g.Minimap.w)
@@ -2093,6 +2146,7 @@ def seat_log_checks() -> None:
 def main() -> int:
     body_checks()
     spacing_checks()
+    coords_setting_checks()
     row_checks()
     hover_checks()
     tray_checks()

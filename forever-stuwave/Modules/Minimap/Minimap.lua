@@ -6,11 +6,13 @@
 -- and one dark plate, cut at its TOP-LEFT and BOTTOM-RIGHT only (Theme.CHROME_CORNERS "cut"). The map has no bottom
 -- cut of its own: the body's BOTTOM-RIGHT is the last row's, wherever that row is.
 --
---   * the key row: bare glyphs over a coloured LED underline, no boxes. The tray toggle (amber; the number of collected
---     addon buttons and a chevron) leads, so it never moves, then tracking (cyan), calendar (violet) and the STU key
---     (pink; it replaces the stock gear and opens the config window), then a faint divider and the coords, right
---     aligned. Mail keeps a seat after the STU key and is there only while mail waits; every key is placed by the keys that are showing, so the row
---     never has a hole in it. Hovering a key draws a thin chamfered outline in its own colour and brightens its LED.
+--   * the key row: bare glyphs over a coloured LED underline, no boxes: tracking (cyan), calendar (violet), the STU key
+--     (pink; it replaces the stock gear and opens the config window) and mail, there only while mail waits. Every key is
+--     placed by the keys that are showing, so the row never has a hole in it. Hovering a key draws a thin chamfered
+--     outline in its own colour and brightens its LED. The tray toggle (the number of collected addon buttons and a
+--     chevron) is not a glyph key: it is the row's right end, a cyan slab the row's full height with a leaning left edge,
+--     so nothing in the row ever moves it.
+--   * the coords: a see-through tag centred on the map's bottom edge; a config window switch hides them.
 --   * the tray: a second row of the same body under a dashed amber rule, collecting the addon minimap buttons
 --     (LibDBIcon and stray *MinimapButton* frames) so they stop cluttering the map edge, each with the same LED
 --     underline. Open or closed is the toggle's; it is hidden with no buttons.
@@ -89,12 +91,35 @@ local BODY_RULE = { COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 0.35 }
 --                 outline, which stands outlineY = 1 px below the key)
 --   dash       2  the tray's dashed rule's dash and gap (mockup 4 / 2)
 --   ruleInset  6  how far that rule stops short of each edge (mockup 12 / 2)
+--   endW      44  the tray toggle at the row's right end: the full row height, flush with the body's right edge and its cut
+--   lean       7  how far that key's left edge leans over the row's height (top right of bottom)
+--   tagPad     6  the coords tag's text padding each side
+--   tagCut     3  the coords tag's two cut top corners
 local REF_MAP = 248
 local SPEC = {
     row = 28, margin = 8, keyW = 18, keyGap = 8, keyH = 22, glyph = 16, glyphGap = 3, led = 2, stu = 32, stuGap = 2,
     toggleW = 30, coords = 12, count = 10, dividerH = 18, chevW = 8, chevH = 4, outline = 3, halo = 1,
-    dash = 2, ruleInset = 6,
+    dash = 2, ruleInset = 6, endW = 44, lean = 7, tagPad = 6, tagCut = 3,
 }
+
+-- The coords sit in a see-through tag on the map's bottom edge, centred, and can be switched off in the config window.
+local COORDS_KEY = "minimap.coords"
+FS.MinimapCoords = {
+    KEY = COORDS_KEY,
+    SETTING = {
+        label = "Minimap coordinates",
+        key = COORDS_KEY,
+        tip = "Shows your map position in a small tag on the bottom edge of the minimap.",
+    },
+}
+if FS.Config and FS.Config.RegisterDefault then FS.Config.RegisterDefault(COORDS_KEY, true) end
+local function CoordsShown()
+    local C = FS.Config
+    if not (C and C.Get) then return true end
+    return C.Get(COORDS_KEY) ~= false
+end
+local TAG_FILL_ALPHA = 0.30 -- the tag's ink: the map reads through it
+local TAG_EDGE_ALPHA = 0.45
 -- The Metrics below size the map's own furniture (zone text, north tick, blip, glow); the rows above do not use them.
 local Metrics = {}
 
@@ -1220,6 +1245,10 @@ local function Geo(frame)
     g.halo = S(SPEC.halo)
     g.dash = S(SPEC.dash)
     g.ruleInset = S(SPEC.ruleInset)
+    g.endW = S(SPEC.endW)
+    g.lean = S(SPEC.lean)
+    g.tagPad = S(SPEC.tagPad)
+    g.tagCut = S(SPEC.tagCut)
     g.edge = 1 -- the body's edge and the rules: one pixel
     return g
 end
@@ -1396,7 +1425,7 @@ end
 -- on it; lit: it is held bright, the open tray's toggle).
 local Keys = {}
 
--- The key row's keys in seat order (st.order), tray toggle, tracking, calendar, STU, mail: tables from Keys.
+-- The key row's glyph keys in seat order (st.order): tracking, calendar, STU, mail (the tray toggle is seated apart): tables from Keys.
 local Row = { keys = {} }
 
 local function AddRowKey(st)
@@ -1432,9 +1461,15 @@ end
 
 -- Rest, hover or held bright, from the two flags: the LED at .75 or 1, the wash behind it only when bright, the outline only
 -- under the mouse. Texture writes only. A key hidden with the mouse on it gets no OnLeave, so OnHide clears over.
+local PaintEndKey -- the tray toggle's own paint (it is a slab of the row, not a glyph key); defined with SeatEndKey below
+
 local function PaintKey(frame)
     local st = Keys[frame]
     if not st then return end
+    if st.kind == "toggle" then
+        if PaintEndKey then PaintEndKey(st) end
+        return
+    end
     local bright = (st.over or st.lit) and true or false
     st.led:SetAlpha(bright and 1 or LED_REST_ALPHA)
     if bright then st.wash:Show() else st.wash:Hide() end
@@ -1516,22 +1551,75 @@ local function SeatMailDot(frame, g)
     mailDot.halo:SetPoint("CENTER", mailDot.core, "CENTER", 0, 0)
 end
 
--- The tray toggle's count and chevron: the count, a 3 px gap and the chevron as one group centred across the toggleW key, on
--- the glyph row. The count's width is read off its text, so two digits stay centred too.
+-- The tray toggle is the row's right end: a slab the row's full height, flush with the body's right edge, following the body's
+-- cut at the bottom right, its left edge leaning `lean` px over the height. It is drawn one pixel row at a time on the body
+-- (above the plate, under the body's edge, so the edge and the cut stay one line): each row a fill run (alternate rows a
+-- step brighter, the scanlines), a bright edge pixel and a dimmer halo pixel left of it. The Button over it is the hit box
+-- and holds the count and chevron. Our own handles only.
+local EndKey = { rows = {} }
+
+local function EndKeyRow(r)
+    local row = EndKey.rows[r]
+    if row then return row end
+    local body = Body.frame
+    if not body then return nil end
+    row = {
+        fill = Flat(body, "BACKGROUND", -6, COLOR_POWER, 0),
+        edge = Flat(body, "BACKGROUND", -5, COLOR_POWER, 0),
+        halo = Flat(body, "BACKGROUND", -5, COLOR_POWER, 0),
+    }
+    EndKey.rows[r] = row
+    return row
+end
+
+local function EndKeyShown(st)
+    local ok, shown = pcall(st.frame.IsShown, st.frame)
+    return ok and shown == true
+end
+
+PaintEndKey = function(st)
+    local toggle = st.frame
+    local shown = EndKeyShown(st)
+    local bright = (st.over or st.lit) and true or false
+    local over = st.over and true or false
+    local c = COLOR_POWER
+    local white = { 1, 1, 1 }
+    local edge = { c[1] + (1 - c[1]) * 0.3, c[2] + (1 - c[2]) * 0.3, c[3] + (1 - c[3]) * 0.3 }
+    for r, row in pairs(EndKey.rows) do
+        if shown and r < (EndKey.used or 0) then
+            local a = (r % 2 == 0) and (bright and 0.24 or 0.15) or (bright and 0.36 or 0.25)
+            row.fill:SetColorTexture(c[1], c[2], c[3], a)
+            row.edge:SetColorTexture(edge[1], edge[2], edge[3], 1)
+            row.halo:SetColorTexture(c[1], c[2], c[3], bright and 0.55 or 0.32)
+            row.fill:Show(); row.edge:Show(); row.halo:Show()
+        else
+            row.fill:Hide(); row.edge:Hide(); row.halo:Hide()
+        end
+    end
+    local text = over and white or { c[1] + (1 - c[1]) * 0.6, c[2] + (1 - c[2]) * 0.6, c[3] + (1 - c[3]) * 0.6 }
+    if toggle.count then toggle.count:SetTextColor(text[1], text[2], text[3], 1) end
+    if toggle.chevron then
+        local chev = over and white or c
+        toggle.chevron:SetVertexColor(chev[1], chev[2], chev[3], 1)
+    end
+end
+
+-- The count and chevron as one group, centred across the slab's mean width (right of half the lean), on the row's middle.
 local function SeatToggleContent(st, g)
     local toggle, px = st.frame, g.px
-    local mid = -(g.glyphY + g.glyph / 2) * px
-    if toggle.count and toggle.fsCountPx ~= g.count then
-        toggle.fsCountPx = g.count
-        ApplyMono(toggle.count, g.count * px, COLOR_AMBER)
+    local mid = -(g.row / 2) * px
+    if toggle.count and toggle.fsCountPx ~= g.coords then
+        toggle.fsCountPx = g.coords
+        ApplyMono(toggle.count, g.coords * px, COLOR_POWER)
     end
     if toggle.chevron then
-        -- the count and chevron as one group centred across the key; the count's width is read off its text
         local cw
         local ok, w = pcall(function() return toggle.count:GetStringWidth() end)
-        cw = (ok and type(w) == "number" and w > 0) and math.floor(w / px + 0.5) or math.floor(g.count * COORDS_ADVANCE + 0.5)
+        cw = (ok and type(w) == "number" and w > 0) and math.floor(w / px + 0.5) or math.floor(g.coords * COORDS_ADVANCE + 0.5)
         local group = cw + g.glyphGap + g.chevW
-        local right = math.min(math.floor((g.toggleW + group) / 2), g.toggleW - 1)
+        local left = math.floor(g.lean / 2) + 1
+        local right = math.floor((left + g.endW + group) / 2)
+        right = math.min(right, g.endW - 2)
         toggle.chevron:ClearAllPoints()
         toggle.chevron:SetSize(g.chevW * px, g.chevH * px)
         toggle.chevron:SetPoint("RIGHT", toggle, "TOPLEFT", right * px, mid)
@@ -1540,6 +1628,40 @@ local function SeatToggleContent(st, g)
         toggle.count:ClearAllPoints()
         toggle.count:SetPoint("RIGHT", toggle.chevron, "LEFT", -g.glyphGap * px, 0)
     end
+end
+
+-- Seats the slab and its button for the pixel scale now.
+local function SeatEndKey(bezel, g)
+    local toggle = Minimap and Minimap.fsTrayToggle
+    local st = toggle and Keys[toggle]
+    if not st then return end
+    local px = g.px
+    toggle:ClearAllPoints()
+    toggle:SetPoint("TOPRIGHT", bezel, "TOPRIGHT", 0, 0)
+    toggle:SetSize(g.endW * px, g.row * px)
+    if toggle.SetHitRectInsets then pcall(toggle.SetHitRectInsets, toggle, 0, 0, 0, 0) end
+    local cu = BodyCut()
+    local x0 = g.width - g.endW
+    local n = g.row
+    for r = 0, n - 1 do
+        local row = EndKeyRow(r)
+        if not row then break end
+        local yb = n - 1 - r
+        local xl = x0 + math.floor(g.lean * (1 - r / math.max(1, n - 1)) + 0.5)
+        local xr = g.width - ((yb < cu) and (cu - yb) or 0)
+        row.fill:ClearAllPoints()
+        row.fill:SetPoint("TOPLEFT", bezel, "TOPLEFT", (xl + 1) * px, -r * px)
+        row.fill:SetSize(math.max(1, xr - xl - 1) * px, px)
+        row.edge:ClearAllPoints()
+        row.edge:SetPoint("TOPLEFT", bezel, "TOPLEFT", xl * px, -r * px)
+        row.edge:SetSize(px, px)
+        row.halo:ClearAllPoints()
+        row.halo:SetPoint("TOPLEFT", bezel, "TOPLEFT", (xl - 1) * px, -r * px)
+        row.halo:SetSize(px, px)
+    end
+    EndKey.used = n
+    SeatToggleContent(st, g)
+    PaintEndKey(st)
 end
 
 -- Seats one key: its size and place (slot `slot` of the row, 0 when it is not in the row), its chrome and its glyph.
@@ -1579,27 +1701,67 @@ local function KeyShown(st)
     return ok and shown ~= false
 end
 
--- The divider and the coords: a divider one key gap after the last key showing, a 1 px line, centred in the row; the coords right
--- aligned at the margin, as large as the room between the divider and the right margin takes up to SPEC.coords.
-local function SeatDividerAndCoords(bezel, g, dividerX)
+-- The coords tag: centred on the map's bottom edge, sitting on the rule, its two top corners cut; a see-through ink fill and a
+-- faint cyan edge (none along the bottom, which is the rule), drawn as whole pixel runs on the body. Its width is the widest
+-- reading's, so it never jumps as the numbers change. The row's old divider stays hidden: nothing sits right of the keys now
+-- but the tray toggle, which is its own edge.
+local Tag = { fill = {}, edge = {} }
+
+local function TagPiece(list, i, alpha)
+    local t = list[i]
+    if not t then
+        t = Flat(Body.frame, "ARTWORK", 0, list == Tag.fill and BODY_PLATE or COLOR_POWER, alpha)
+        list[i] = t
+    end
+    return t
+end
+
+local function SeatDividerAndCoords(bezel, g)
     local px = g.px
-    local divider = Row.divider
-    if divider then
-        divider:ClearAllPoints()
-        divider:SetPoint("TOPLEFT", bezel, "TOPLEFT", dividerX * px, -(g.row - g.dividerH) / 2 * px)
-        divider:SetSize(g.edge * px, g.dividerH * px)
-    end
+    if Row.divider then Row.divider:Hide() end
     local coords = Minimap.fsReadoutCoords
-    if coords then
-        local room = g.width - g.margin - (dividerX + g.edge + g.keyGap)
-        local font = math.max(5, math.min(g.coords, math.floor(room / (COORDS_CHARS * COORDS_ADVANCE))))
-        if coords.fsFontPx ~= font then
-            coords.fsFontPx = font
-            ApplyMono(coords, font * px, COLOR_POWER)
-        end
-        coords:ClearAllPoints()
-        coords:SetPoint("RIGHT", bezel, "RIGHT", -g.margin * px, 0)
+    if not (coords and Body.frame) then return end
+    local show = CoordsShown()
+    local font = g.coords
+    if coords.fsFontPx ~= font then
+        coords.fsFontPx = font
+        ApplyMono(coords, font * px, COLOR_POWER)
     end
+    local textW = math.ceil(COORDS_CHARS * COORDS_ADVANCE * font)
+    local w = textW + 2 * g.tagPad
+    local h = font + 4
+    local cut = math.min(g.tagCut, math.floor(h / 2))
+    local x0 = math.floor((g.width - w) / 2)
+    local function put(t, x, y, tw, th) -- x, y from the map's bottom left, y up
+        t:ClearAllPoints()
+        t:SetPoint("BOTTOMLEFT", Minimap, "BOTTOMLEFT", x * px, y * px)
+        t:SetSize(math.max(1, tw) * px, math.max(1, th) * px)
+        if show then t:Show() else t:Hide() end
+    end
+    -- fill: the body below the cut, then one shortened run per cut row
+    put(TagPiece(Tag.fill, 1, TAG_FILL_ALPHA), x0, 0, w, h - cut)
+    for k = 1, cut do
+        local inset = cut - k + 1
+        put(TagPiece(Tag.fill, k + 1, TAG_FILL_ALPHA), x0 + inset, h - cut + k - 1, w - 2 * inset, 1)
+    end
+    -- edge: the sides up to the cut, the cut's diagonal pixels, the top
+    local e = 0
+    local function edge(x, y, tw, th)
+        e = e + 1
+        put(TagPiece(Tag.edge, e, TAG_EDGE_ALPHA), x, y, tw, th)
+    end
+    edge(x0, 0, 1, h - cut)
+    edge(x0 + w - 1, 0, 1, h - cut)
+    for k = 1, cut - 1 do
+        edge(x0 + k, h - cut + k - 1, 1, 1)
+        edge(x0 + w - 1 - k, h - cut + k - 1, 1, 1)
+    end
+    edge(x0 + cut, h - 1, w - 2 * cut, 1)
+    for i = e + 1, #Tag.edge do Tag.edge[i]:Hide() end
+    coords:ClearAllPoints()
+    coords:SetJustifyH("CENTER")
+    coords:SetPoint("CENTER", Minimap, "BOTTOMLEFT", (x0 + w / 2) * px, (h / 2) * px)
+    if show then coords:Show() else coords:Hide() end
 end
 
 local seating = false -- SeatRow is running (a Show/Hide hook it provokes must not run it again)
@@ -1623,7 +1785,8 @@ local function SeatRow()
                 "|cffff4488Forever STUwave|r: minimap key degraded (" .. tostring(st.kind) .. "): " .. tostring(err))
         end
     end
-    pcall(SeatDividerAndCoords, bezel, g, x)
+    pcall(SeatEndKey, bezel, g)
+    pcall(SeatDividerAndCoords, bezel, g)
     pcall(SeatBodyPieces, g)
     SeatBody()
     seating = false
@@ -2508,16 +2671,17 @@ local function BuildTrayToggle(bezel)
     toggle:Hide()
     toggle:SetFrameLevel(bezel:GetFrameLevel() + KEY_LEVEL_OFFSET)
 
-    local st = AddKeyChrome(toggle, COLOR_AMBER, "toggle")
-    -- First in the row, so mail coming and going never moves it; mail then sits beside the other stock keys.
-    st.order = 0
+    local st = AddKeyChrome(toggle, COLOR_POWER, "toggle")
+    -- Not a glyph key: the slab is its own edge, so the LED, wash and outline stay hidden (PaintKey hands it to PaintEndKey).
+    st.led:Hide()
+    st.noOutline = true
 
     local count = toggle:CreateFontString(nil, "OVERLAY")
-    ApplyMono(count, SPEC.count, COLOR_AMBER)
+    ApplyMono(count, SPEC.coords, COLOR_POWER)
     count:SetText("0")
     local chevron = Crisp(toggle:CreateTexture(nil, "ARTWORK", nil, 1))
     chevron:SetTexture(CHEVRON_TEXTURE)
-    chevron:SetVertexColor(COLOR_AMBER[1], COLOR_AMBER[2], COLOR_AMBER[3], 1)
+    chevron:SetVertexColor(COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 1)
     toggle.count = count
     toggle.chevron = chevron
 
@@ -2533,7 +2697,7 @@ local function BuildTrayToggle(bezel)
     toggle:SetScript("OnHide", function(self) SetOver(self, false) end)
     WireVisibility(toggle)
 
-    AddRowKey(st)
+    -- Seated by SeatEndKey at the row's right end, never in the key run, so mail coming and going leaves it where it is.
     return toggle
 end
 
@@ -2643,3 +2807,7 @@ loader:SetScript("OnEvent", function(self)
     end
     Apply()
 end)
+
+if FS.Config and FS.Config.OnChange then
+    FS.Config.OnChange(COORDS_KEY, function() SeatRow() end)
+end
