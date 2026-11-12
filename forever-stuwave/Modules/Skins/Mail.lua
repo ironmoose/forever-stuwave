@@ -950,12 +950,15 @@ local function LayoutLetter()
     Place(L.take, win, G.SIDE, takeY, G.LETTER_W - 2 * G.SIDE, 46)
     -- Take all is our own button, made at the letter's base level, so stock children stacked above it (the body
     -- text's hyperlink frame and scroll child run past the visible pad) took the clicks over most of its face.
-    -- Keep it above every other child of the letter.
+    -- Keep it above every other child of the letter. The reply / return / report keys sit under the same overflow
+    -- (return, the middle one, lost its hover to it), so they are lifted with it.
+    local lifted = { [L.take] = true }
+    for _, name in ipairs(LETTER_KEYS) do if _G[name] then lifted[_G[name]] = true end end
     if L.take.SetFrameLevel and win.GetFrameLevel then
         local top = win:GetFrameLevel()
         local function scan(frame, depth)
             for _, child in ipairs({ frame:GetChildren() }) do
-                if child ~= L.take then
+                if not lifted[child] then
                     local level = Try(child.GetFrameLevel, child)
                     if type(level) == "number" and level > top then top = level end
                     if depth < 3 and type(child.GetChildren) == "function" then scan(child, depth + 1) end
@@ -963,12 +966,16 @@ local function LayoutLetter()
             end
         end
         scan(win, 1)
-        pcall(L.take.SetFrameLevel, L.take, top + 1)
         -- and one strata up from the letter, so a frame of the same strata from outside the letter cannot sit on it
         local order = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG", "FULLSCREEN", "FULLSCREEN_DIALOG", "TOOLTIP" }
         local strata = Try(win.GetFrameStrata, win)
+        local up
         for i = 1, #order - 2 do
-            if order[i] == strata then pcall(L.take.SetFrameStrata, L.take, order[i + 1]) break end
+            if order[i] == strata then up = order[i + 1] break end
+        end
+        for frame in pairs(lifted) do
+            if up and frame.SetFrameStrata then pcall(frame.SetFrameStrata, frame, up) end
+            if frame.SetFrameLevel then pcall(frame.SetFrameLevel, frame, top + 1) end
         end
     end
     L.take:SetEnabled(#cells > 0)
