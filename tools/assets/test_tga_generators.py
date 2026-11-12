@@ -297,6 +297,7 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     # generate_control_slot.py: the item slot's art: the locked slot's hazard tape and the epic glint (32 x 32 canvases that
     # cover the 32 x 30 icon area) and the lock glyph (16 x 16).
     "control_slot": {"ctl_hazard": (64, 64), "ctl_glint": (64, 64), "ctl_lock": (16, 16)},
+    "control_tab": {"ctl_tab_fill": (32, 32), "ctl_tab_edge": (32, 32), "ctl_tab_diag": (32, 32)},
     "icon_social": (32, 32),
     # generate_icon_stu.py: the minimap STU key's icon A (full colour), a 32 canvas with the 22 texel art box centred.
     "icon_stu": (32, 32),
@@ -3003,4 +3004,68 @@ def test_lock_glyph_is_a_shackle_over_a_10_by_7_body(control_slot_outputs: Path)
 
 def test_committed_control_slot_textures_match_the_generator(control_slot_outputs: Path) -> None:
     for out in control_slot_outputs.glob("*.tga"):
+        assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
+
+
+# ---------------------------------------------------------------------------
+# generate_control_tab.py: the slanted tab's caps.
+#
+# Mockup slant(): a tab 28 tall with a slant of 8; the leading cap is the 8 x 28 box at the top left of its canvas. Numbers hardcoded here.
+# ---------------------------------------------------------------------------
+
+CONTROL_TAB_GENERATOR = GENERATOR_DIR / "generate_control_tab.py"
+
+
+@pytest.fixture(scope="module")
+def control_tab_outputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    out = tmp_path_factory.mktemp("control_tab")
+    _run_generator(CONTROL_TAB_GENERATOR, out)
+    return out
+
+
+def test_control_tab_textures_are_white_alpha_shapes_inside_the_8_by_28_cap(control_tab_outputs: Path) -> None:
+    names = sorted(path.name for path in control_tab_outputs.glob("ctl_*.tga"))
+    assert names == ["ctl_tab_diag.tga", "ctl_tab_edge.tga", "ctl_tab_fill.tga"]
+    for name in names:
+        path = control_tab_outputs / name
+        assert _is_white(path), name
+        assert _alpha_window_sum(path, 32, 32) == _alpha_window_sum(path, 8, 28), f"{name} has art outside the cap box"
+
+
+def test_tab_fill_is_the_inside_of_the_diagonal_from_8_0_to_0_28(control_tab_outputs: Path) -> None:
+    path = control_tab_outputs / "ctl_tab_fill.tga"
+    for x, y in ((7, 10), (7, 27), (5, 16), (1, 27), (3, 22), (6, 9)):
+        assert _alpha_at(path, x, y) >= 250, (x, y)
+    for x, y in ((0, 0), (3, 5), (2, 14), (0, 20), (5, 3), (7, 28), (8, 10)):
+        assert _alpha_at(path, x, y) == 0, (x, y)
+    # half of the 8 x 28 box
+    assert abs(_alpha_window_sum(path, 8, 28) - 112) < 2
+
+
+def test_tab_edge_is_a_1_px_diagonal_and_the_1_px_run_along_the_bottom(control_tab_outputs: Path) -> None:
+    path = control_tab_outputs / "ctl_tab_edge.tga"
+    for x in range(8):
+        assert _alpha_at(path, x, 27) == 255 and _alpha_at(path, x, 28) == 0, x
+    for x, y in ((7, 3), (6, 7), (4, 13), (1, 24)):
+        assert _alpha_at(path, x, y) >= 150, (x, y)
+    for x, y in ((5, 20), (7, 15), (2, 5), (0, 0)):
+        assert _alpha_at(path, x, y) == 0, (x, y)
+    # the diagonal runs 28.2 long and 1 wide, the bottom run is 8 long, the two share about a texel at the corner
+    assert 33 < _alpha_window_sum(path, 8, 28) < 38
+
+
+def test_tab_diag_is_the_selected_tabs_1_px_pink_diagonal_alone(control_tab_outputs: Path) -> None:
+    path = control_tab_outputs / "ctl_tab_diag.tga"
+    for x, y in ((7, 1), (4, 10), (2, 17), (0, 25)):
+        assert _alpha_at(path, x, y) >= 150, (x, y)
+    for x in range(1, 8):
+        assert _alpha_at(path, x, 27) <= 100, "no bottom run"
+    for x, y in ((5, 20), (0, 0), (7, 15)):
+        assert _alpha_at(path, x, y) == 0, (x, y)
+    assert _alpha_at(path, 7, 0) <= 20, "it starts a texel below the top"
+    assert 26 < _alpha_window_sum(path, 8, 28) < 30
+
+
+def test_committed_control_tab_textures_match_the_generator(control_tab_outputs: Path) -> None:
+    for out in control_tab_outputs.glob("*.tga"):
         assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name

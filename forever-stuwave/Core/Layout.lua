@@ -228,6 +228,22 @@ FS.Layout.Controls = {
     SLOT_HAZARD_ALPHA = 0.4, SLOT_HAZARD_SHEET = 64, SLOT_LOCK = 16,
     -- Marching chevrons: the lit cells' strip moves one 8 px pitch every 0.6 s at 18 % white.
     MARCH_PERIOD = 0.6, CHEV_PITCH = 8, CHEV_ALPHA = 0.18,
+    -- Slanted tab (four or more tabs), skinned in place: 28 tall, both sides leaning 8 over the full height, a 1 px edge in the
+    -- state colour; the selected tab has no edge but a 4 tall pink chevron strip along its top (from the slant to the right
+    -- end, 0.95, marching at MARCH_PERIOD), a 1 px pink diagonal on each side and one more row of fill under it. The label is
+    -- 12 centred 16 below the plate's top; a tab with news carries a 4 square LED 14 in from the right end and 7 down.
+    -- TAB_ART is the canvas of the three baked tab textures (the 8 x 28 cap sits in its top left).
+    TAB_H = 28, TAB_SLANT = 8, TAB_EXTRA = 1, TAB_CHEV_H = 4, TAB_CHEV_ALPHA = 0.95, TAB_TEXT = 12, TAB_TEXT_Y = 16,
+    TAB_LED = 4, TAB_LED_X = 14, TAB_LED_Y = 7, TAB_ART = 32,
+    -- Switch (two or three tabs as one header control, a reusable widget nothing mounts yet): a 28 tall body, chamfer 6, items
+    -- 3 in whose width is the label length x TAG_CHAR + 24 rounded up to a multiple of 4; the selected item is a 22 tall slug
+    -- 3 down (chamfer 4, a 1 px pink edge) with a 3 tall pink chevron underline 19 down inside it, 4 in from each side. A hovered
+    -- item is a cyan-edged 22 tall box, a badge is a 4 square pink LED 10 from the item's right end and 3 down. The slug
+    -- slides to a newly chosen item in SWITCH_SLIDE seconds. SWITCH_UNDER_TILE is the rows of the baked underline tile (the art
+    -- is its top 3).
+    SWITCH_H = 28, SWITCH_CUT = 6, SWITCH_PAD = 3, SWITCH_ITEM_PAD = 24, SWITCH_STEP = 4, SWITCH_ITEM_Y = 3, SWITCH_ITEM_H = 22,
+    SWITCH_ITEM_CUT = 4, SWITCH_TEXT_Y = 12, SWITCH_UNDER_Y = 19, SWITCH_UNDER_H = 3, SWITCH_UNDER_INSET = 4,
+    SWITCH_UNDER_ALPHA = 0.9, SWITCH_UNDER_TILE = 4, SWITCH_BADGE = 4, SWITCH_BADGE_X = 10, SWITCH_BADGE_Y = 3, SWITCH_SLIDE = 0.2,
 }
 
 -- The layout planner exports in SCREEN PIXELS at this resolution (the "resolution"

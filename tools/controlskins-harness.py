@@ -49,6 +49,7 @@ FILES = {
     "FieldSkins": "Core/FieldSkins.lua",
     "DropdownSkins": "Core/DropdownSkins.lua",
     "ItemSlotSkins": "Core/ItemSlotSkins.lua",
+    "TabSkins": "Core/TabSkins.lua",
     "PanelSkins": "Core/PanelSkins.lua",
 }
 SOURCES = {name: (ADDON / path).read_text(encoding="utf-8") for name, path in FILES.items()}
@@ -212,6 +213,9 @@ function Obj:SetRotation(r) self.rotation = r end
 function Obj:SetFont(path, size, flags) self.fontPath, self.size, self.flags = path, size, flags; return true end
 function Obj:GetFont() return self.fontPath, self.size, self.flags end
 function Obj:SetFontObject() end
+function Obj:SetNormalFontObject() end
+function Obj:SetHighlightFontObject() end
+function Obj:SetDisabledFontObject() end
 function Obj:SetTextColor(r, g, b, a) self.textColor = { r, g, b, a or 1 } end
 function Obj:SetShadowColor() end
 function Obj:SetShadowOffset() end
@@ -719,6 +723,96 @@ function SlotState(t)
     return state, function() return state end
 end
 
+-- PanelTabButtonTemplate (10 x 32, set wider by PanelTemplates_TabResize): a Button with the six tab art textures (the Active
+-- ones hidden until picked), the three Highlight textures and the label under `Text`. A tab with `o.top` is a top tab.
+function PanelTab(parent, label, x, y, w, h, o)
+    o = o or {}
+    local b = blz("Button", nil, parent, w or 84, h or 32, x, y)
+    for _, key in ipairs({ "LeftActive", "RightActive", "MiddleActive", "Left", "Right", "Middle" }) do
+        b[key] = tex(b, nil, "BACKGROUND")
+        b[key].atlas = "uiframe-tab-" .. key:lower()
+        b[key].shown = key:find("Active") == nil
+    end
+    for _, key in ipairs({ "LeftHighlight", "MiddleHighlight", "RightHighlight" }) do
+        b[key] = tex(b, nil, "HIGHLIGHT")
+        b[key].atlas = "uiframe-tab-" .. key:lower()
+    end
+    b.Text = fstring(b, label, 10)
+    b.Text.points = { { point = "CENTER", rel = b, relPoint = "CENTER", x = 0, y = 2 } }
+    b.isTopTab = o.top
+    return b
+end
+
+-- Blizzard_SharedXML's PanelTemplates tab functions as the 12.1.0 source writes them. The engine re-applies a tab's font object
+-- on every state change, so each one also writes the label's font and colour the way the stock font objects would.
+local function stockLabel(tab, r, g, b)
+    tab.Text:SetFont("stock.ttf", 10)
+    tab.Text:SetTextColor(r, g, b, 1)
+end
+function PanelTemplates_SelectTab(tab)
+    tab.Left:Hide(); tab.Middle:Hide(); tab.Right:Hide()
+    tab:Disable()
+    stockLabel(tab, 1, 1, 1)
+    local offsetY = tab.selectedTextY or -3
+    if tab.isTopTab then offsetY = -offsetY - 7 end
+    tab.Text:SetPoint("CENTER", tab, "CENTER", tab.selectedTextX or 0, offsetY)
+    tab.LeftActive:Show(); tab.MiddleActive:Show(); tab.RightActive:Show()
+end
+function PanelTemplates_DeselectTab(tab)
+    tab.Left:Show(); tab.Middle:Show(); tab.Right:Show()
+    tab:Enable()
+    stockLabel(tab, 1, 0.82, 0)
+    local offsetY = tab.deselectedTextY or 2
+    if tab.isTopTab then offsetY = -offsetY - 6 end
+    tab.Text:SetPoint("CENTER", tab, "CENTER", tab.deselectedTextX or 0, offsetY)
+    tab.LeftActive:Hide(); tab.MiddleActive:Hide(); tab.RightActive:Hide()
+end
+function PanelTemplates_SetDisabledTabState(tab)
+    tab.Left:Show(); tab.Middle:Show(); tab.Right:Show()
+    tab:Disable()
+    stockLabel(tab, 0.5, 0.5, 0.5)
+    local offsetY = tab.deselectedTextY or 2
+    if tab.isTopTab then offsetY = -offsetY - 6 end
+    tab.Text:SetPoint("CENTER", tab, "CENTER", tab.deselectedTextX or 0, offsetY)
+    tab.LeftActive:Hide(); tab.MiddleActive:Hide(); tab.RightActive:Hide()
+end
+
+-- TabSystemButtonTemplate: the same art, picked through SetTabSelected, with the news flag in SetTabNotification (a pooled
+-- notification frame, shared with other windows) and the forced-disabled flag in SetTabEnabled.
+function TabSysBtn(parent, label, x, y, w, h, o)
+    o = o or {}
+    local b = PanelTab(parent, label, x, y, w, h, o)
+    b.isTopTab = nil
+    b.isTabOnTop = o.top
+    b.isSelected, b.forceDisabled, b.tabText = false, false, label
+    function b:SetTabSelected(isSelected)
+        self.isSelected = isSelected
+        self.Left:SetShown(not isSelected); self.Middle:SetShown(not isSelected); self.Right:SetShown(not isSelected)
+        self.LeftActive:SetShown(isSelected); self.MiddleActive:SetShown(isSelected); self.RightActive:SetShown(isSelected)
+        if isSelected then stockLabel(self, 1, 1, 1) else stockLabel(self, 1, 0.82, 0) end
+        self:SetEnabled(not isSelected and not self.forceDisabled)
+        local offset = self.isTabOnTop and (isSelected and 0 or -3) or (isSelected and -3 or 2)
+        self.Text:SetPoint("CENTER", self, "CENTER", 0, offset)
+    end
+    function b:SetTabEnabled(enabled)
+        self.forceDisabled = not enabled
+        self:SetEnabled(enabled and not self.isSelected)
+        stockLabel(self, enabled and 1 or 0.5, enabled and 0.82 or 0.5, enabled and 0 or 0.5)
+    end
+    function b:SetTabNotification(show)
+        if show then
+            if not self.notificationFrame then
+                self.notificationFrame = blz("Frame", nil, self, 20, 20, 0, 0)
+                self.notificationFrame.icon = tex(self.notificationFrame, nil, "ARTWORK")
+            end
+        else
+            self.notificationFrame = nil
+        end
+    end
+    function b:IsSelected() return not not self.isSelected end
+    return b
+end
+
 function Panel(name)
     local f = blz("Frame", name or "TestPanel", UIParent, 400, 300, 100, 100)
     f.shown = true
@@ -770,7 +864,7 @@ function Load(opts)
         LogDegradeOnce = function(key, msg) DEGRADED[#DEGRADED + 1] = key .. " :: " .. tostring(msg) end,
     }
     FS.FrameHelpers = { PixelsPerUnit = function() return PPU end }
-    for _, name in ipairs({ "Theme", "Layout", "HeldArt", "ControlKit", "CheckSkins", "SliderSkins", "FieldSkins", "DropdownSkins", "ItemSlotSkins", "PanelSkins" }) do
+    for _, name in ipairs({ "Theme", "Layout", "HeldArt", "ControlKit", "CheckSkins", "SliderSkins", "FieldSkins", "DropdownSkins", "ItemSlotSkins", "TabSkins", "PanelSkins" }) do
         local chunk, err = load(SOURCES[name], "=" .. name .. ".lua")
         if not chunk then error(err) end
         chunk("forever-stuwave", FS)
@@ -2668,6 +2762,522 @@ case("a_secret_reader_answer_is_treated_as_an_unknown_slot_without_an_error", SL
     FlushTimers()
     assert(IS.Parts(c) and IS.Parts(c).built, "a reader that throws does not stop the build")
 """)
+
+# -------------------------------------------------------------------------------------------------------------------
+# Tabs: the slanted strip skinned in place, and the switch
+# -------------------------------------------------------------------------------------------------------------------
+
+TAB_PRELUDE = PRELUDE + """
+    local T = FS.Theme
+    -- a tab 100 px wide in a stock rect 32 units tall, skinned; `o.system` builds the TabSystem button, `o.top` a top tab
+    local function Tab(o)
+        o = o or {}
+        local build = o.system and TabSysBtn or PanelTab
+        local b = build(P, o.label or "character", o.x or 20, o.y or 20, (o.w or 100) / PPU, 32, o)
+        assert(FS.TabSkins.Skin(b), "the tab was not skinned")
+        FlushTimers()
+        return b, FS.TabSkins.Parts(b)
+    end
+    local function CentreOf(o, ref)
+        local l, t, r, b = Px(o, ref)
+        return (l + r) / 2, (t + b) / 2
+    end
+    local function Stock(b)
+        local list = {}
+        for _, key in ipairs({ "Left", "Middle", "Right", "LeftActive", "MiddleActive", "RightActive", "LeftHighlight",
+            "MiddleHighlight", "RightHighlight" }) do list[#list + 1] = b[key] end
+        return list
+    end
+"""
+
+case("tab_tokens_are_the_mockups_numbers", PRELUDE + """
+    local K = FS.Layout.Controls
+    assert(K.TAB_H == 28 and K.TAB_SLANT == 8 and K.TAB_EXTRA == 1 and K.TAB_CHEV_H == 4 and K.TAB_CHEV_ALPHA == 0.95)
+    assert(K.TAB_TEXT == 12 and K.TAB_TEXT_Y == 16 and K.TAB_LED == 4 and K.TAB_LED_X == 14 and K.TAB_LED_Y == 7 and K.TAB_ART == 32)
+    assert(K.SWITCH_H == 28 and K.SWITCH_CUT == 6 and K.SWITCH_PAD == 3 and K.SWITCH_ITEM_PAD == 24 and K.SWITCH_STEP == 4)
+    assert(K.SWITCH_ITEM_Y == 3 and K.SWITCH_ITEM_H == 22 and K.SWITCH_ITEM_CUT == 4 and K.SWITCH_TEXT_Y == 12)
+    assert(K.SWITCH_UNDER_Y == 19 and K.SWITCH_UNDER_H == 3 and K.SWITCH_UNDER_INSET == 4 and K.SWITCH_UNDER_ALPHA == 0.9)
+    assert(K.SWITCH_BADGE == 4 and K.SWITCH_BADGE_X == 10 and K.SWITCH_BADGE_Y == 3 and K.SWITCH_SLIDE == 0.2)
+""")
+
+case("tab_idle_is_a_28_px_slanted_plate_of_ink_with_a_1_px_dim_edge_and_muted_12_px_text", TAB_PRELUDE + """
+    local b, p = Tab()
+    NoDegrade()
+    assert(p.built and p.kind == "tab")
+    -- the stock rect keeps its size; the plate is 28 tall from its top, as wide as the rect (100 px)
+    assert(b.w == 100 / PPU and b.h == 32, "the stock rect was resized")
+    Expect(p.fillL, b, 0, 0, 8, 28, "left cap fill")
+    Expect(p.fillM, b, 8, 0, 84, 28, "middle fill")
+    Expect(p.fillR, b, 92, 0, 8, 28, "right cap fill")
+    Expect(p.edgeL, b, 0, 0, 8, 28, "left cap edge")
+    Expect(p.edgeR, b, 92, 0, 8, 28, "right cap edge")
+    Expect(p.edgeTop, b, 8, 0, 84, 1, "top edge")
+    Expect(p.edgeBottom, b, 8, 27, 84, 1, "bottom edge")
+    assert(p.fillL.path:find("ctl_tab_fill") and p.edgeL.path:find("ctl_tab_edge"), "the baked cap textures")
+    -- the trailing cap is the leading one turned half way round
+    local l, r = p.fillL.coords, p.fillR.coords
+    assert(l[1] == 0 and l[2] == 0.25 and l[3] == 0 and l[4] == 0.875, "the 8 x 28 cap of the 32 canvas")
+    assert(r[1] == 0.25 and r[2] == 0 and r[3] == 0.875 and r[4] == 0, "flipped on both axes")
+    Is(p.fillL.vertex, T.COLOR_CTRL_INK, 1, "left fill"); Is(Colour(p.fillM), T.COLOR_CTRL_INK, 1, "middle fill")
+    Is(p.fillR.vertex, T.COLOR_CTRL_INK, 1, "right fill")
+    for _, e in ipairs({ p.edgeL, p.edgeR }) do Is(e.vertex, T.COLOR_CTRL_DIM, 1, "cap edge") end
+    for _, e in ipairs({ p.edgeTop, p.edgeBottom }) do Is(Colour(e), T.COLOR_CTRL_DIM, 1, "edge run") end
+    assert(not p.diagL:IsShown() and not p.diagR:IsShown() and not p.chev:IsShown() and not p.extra:IsShown() and not p.led:IsShown())
+    -- the label: the kit's mono at 12 px, centred 16 below the plate's top, muted
+    local label = b.Text
+    assert(label.fontPath ~= "stock.ttf" and Near(label.size * PPU, 12, 0.01), "mono 12 px, got " .. tostring(label.fontPath) .. " " .. label.size * PPU)
+    Is(label.textColor, T.COLOR_MUTED, 1, "idle label")
+    local cx, cy = CentreOf(label, b)
+    assert(Near(cx, 50, 0.01) and Near(cy, 16, 0.01), string.format("label centre %.2f %.2f", cx, cy))
+    assert(#label.points == 1, "one anchor, the stock re-sets that one")
+""")
+
+case("tab_hover_turns_the_edge_cyan_the_fill_cell_and_the_text_light", TAB_PRELUDE + """
+    local b, p = Tab()
+    Hover(b)
+    Is(p.fillL.vertex, T.COLOR_CTRL_CELL, 1, "hover fill"); Is(Colour(p.fillM), T.COLOR_CTRL_CELL, 1, "hover fill")
+    Is(p.edgeL.vertex, T.COLOR_POWER, 1, "hover edge"); Is(Colour(p.edgeTop), T.COLOR_POWER, 1, "hover edge run")
+    Is(b.Text.textColor, T.COLOR_CTRL_TEXT, 1, "hover label")
+    Unhover(b)
+    Is(p.fillL.vertex, T.COLOR_CTRL_INK, 1, "idle again"); Is(p.edgeL.vertex, T.COLOR_CTRL_DIM, 1, "idle edge")
+    Is(b.Text.textColor, T.COLOR_MUTED, 1, "idle label")
+""")
+
+case("tab_disabled_is_the_darkest_ink_with_dim_text_and_does_not_light_under_the_hand", TAB_PRELUDE + """
+    local b, p = Tab()
+    PanelTemplates_SetDisabledTabState(b)
+    Is(p.fillL.vertex, T.COLOR_CTRL_DISFILL, 1, "disabled fill"); Is(Colour(p.fillM), T.COLOR_CTRL_DISFILL, 1, "disabled fill")
+    Is(p.edgeL.vertex, T.COLOR_CTRL_DISEDGE, 1, "disabled edge"); Is(Colour(p.edgeBottom), T.COLOR_CTRL_DISEDGE, 1, "disabled run")
+    Is(b.Text.textColor, T.COLOR_CTRL_DIS, 1, "disabled label")
+    assert(not p.chev:IsShown() and not p.diagL:IsShown(), "disabled is not selected")
+    Hover(b)
+    Is(p.edgeL.vertex, T.COLOR_CTRL_DISEDGE, 1, "a disabled tab does not light")
+    Is(b.Text.textColor, T.COLOR_CTRL_DIS, 1, "its label stays dim")
+    PanelTemplates_DeselectTab(b)
+    Unhover(b)
+    Is(p.fillL.vertex, T.COLOR_CTRL_INK, 1, "enabled again")
+""")
+
+case("tab_selected_is_pink_with_a_chevron_strip_two_diagonals_and_one_more_row_of_fill", TAB_PRELUDE + """
+    local b, p = Tab()
+    PanelTemplates_SelectTab(b)
+    Is(p.fillL.vertex, T.COLOR_CTRL_SEL, 1, "selected fill"); Is(Colour(p.fillM), T.COLOR_CTRL_SEL, 1, "selected fill")
+    Is(p.fillR.vertex, T.COLOR_CTRL_SEL, 1, "selected fill")
+    Expect(p.fillL, b, 0, 0, 8, 28, "cap"); Expect(p.fillM, b, 8, 0, 84, 28, "middle")
+    -- the fill reaches one row below the base
+    Expect(p.extra, b, 0, 28, 92, 1, "the extra row"); Is(Colour(p.extra), T.COLOR_CTRL_SEL, 1, "extra row")
+    -- the 4 tall pink chevron strip from the slant to the right end
+    Expect(p.chev, b, 8, 0, 92, 4, "chevron strip")
+    assert(p.chev.path:find("ctl_chevron_h4"), p.chev.path)
+    Is(p.chev.vertex, T.COLOR_HEALTH, 0.95, "chevron tint")
+    -- a 1 px pink diagonal on each side, and no other edge
+    Expect(p.diagL, b, 0, 0, 8, 28, "left diagonal"); Expect(p.diagR, b, 92, 0, 8, 28, "right diagonal")
+    assert(p.diagL.path:find("ctl_tab_diag") and p.diagR.coords[1] == 0.25 and p.diagR.coords[2] == 0, "the same diagonal, turned")
+    Is(p.diagL.vertex, T.COLOR_HEALTH, 1, "diagonal"); Is(p.diagR.vertex, T.COLOR_HEALTH, 1, "diagonal")
+    for _, e in ipairs({ p.edgeL, p.edgeR, p.edgeTop, p.edgeBottom }) do assert(not e:IsShown(), "a selected tab has no edge run") end
+    Is(b.Text.textColor, T.COLOR_HEALTH, 1, "selected label")
+    -- the hand does not change a selected tab
+    Hover(b)
+    Is(p.fillL.vertex, T.COLOR_CTRL_SEL, 1, "still selected under the hand")
+    Is(b.Text.textColor, T.COLOR_HEALTH, 1, "still pink")
+    Unhover(b)
+    PanelTemplates_DeselectTab(b)
+    Is(p.fillL.vertex, T.COLOR_CTRL_INK, 1, "put away")
+    assert(not p.chev:IsShown() and not p.extra:IsShown() and not p.diagL:IsShown() and p.edgeTop:IsShown())
+""")
+
+case("tab_selected_chevrons_march_one_pitch_every_0_6_s_and_only_while_selected", TAB_PRELUDE + """
+    local K = FS.Layout.Controls
+    local b, p = Tab()
+    assert(not FS.ControlKit.IsAnimating(b, "march"), "an idle tab runs nothing")
+    PanelTemplates_SelectTab(b)
+    assert(FS.ControlKit.IsAnimating(b, "march"))
+    Step(0)
+    assert(Near(p.chev.coords[1], 0, 0.001) and Near(p.chev.coords[2], 92 / 8, 0.001), "starts at the tile's left")
+    Step(0.3)
+    assert(Near(p.chev.coords[1], -0.5, 0.02), "half a pitch along after 0.3 s, got " .. p.chev.coords[1])
+    assert(Near(p.chev.coords[2] - p.chev.coords[1], 92 / 8, 0.001), "the strip keeps its length")
+    assert(p.chev.coords[3] == 0 and p.chev.coords[4] == 1, "the whole 4 row tile")
+    Step(0.3)
+    assert(Near(p.chev.coords[1], 0, 0.02) or Near(p.chev.coords[1], -1, 0.02), "a full pitch in 0.6 s")
+    PanelTemplates_DeselectTab(b)
+    assert(not FS.ControlKit.IsAnimating(b, "march"), "nothing runs once it is put away")
+""")
+
+case("tab_news_is_a_4_px_amber_led_that_breathes_and_the_stock_notification_is_left_alone", TAB_PRELUDE + """
+    local b, p = Tab({ system = true })
+    assert(not p.led:IsShown())
+    b:SetTabNotification(true)
+    assert(p.led:IsShown(), "news shows the LED")
+    Expect(p.led, b, 86, 7, 4, 4, "LED 14 in from the right end, 7 down")
+    Is(Colour(p.led), T.COLOR_AMBER, 1, "amber")
+    local note = b.notificationFrame
+    assert(note and note.alpha == 1 and note.shown, "the pooled notification frame is shared with other windows: untouched")
+    Step(0.8)
+    assert(Near(p.led.color[4], 0.3, 0.02), "LED at the bottom of its breath, got " .. p.led.color[4])
+    b:SetTabNotification(false)
+    assert(not p.led:IsShown() and not FS.ControlKit.IsAnimating(b, "led"), "no news, no LED, nothing runs")
+    -- a window that keeps its own news says so through SetNews
+    local c, q = Tab({ y = 80 })
+    FS.TabSkins.SetNews(c, true)
+    assert(q.led:IsShown())
+    FS.TabSkins.SetNews(c, false)
+    assert(not q.led:IsShown())
+    -- news rides on a selected tab too
+    PanelTemplates_SelectTab(c); FS.TabSkins.SetNews(c, true)
+    assert(q.led:IsShown() and q.chev:IsShown())
+""")
+
+case("tab_label_is_restyled_and_re_seated_after_every_stock_state_change", TAB_PRELUDE + """
+    local function check(b, colour, what)
+        local label = b.Text
+        assert(label.fontPath ~= "stock.ttf" and Near(label.size * PPU, 12, 0.01), what .. ": the stock font came back")
+        Is(label.textColor, colour, 1, what)
+        local cx, cy = CentreOf(label, b)
+        assert(Near(cx, 50, 0.01) and Near(cy, 16, 0.01), string.format("%s: label centre %.2f %.2f", what, cx, cy))
+        assert(#label.points == 1, what .. ": one anchor")
+    end
+    local b, p = Tab()
+    PanelTemplates_SelectTab(b);   check(b, T.COLOR_HEALTH, "select")
+    PanelTemplates_DeselectTab(b); check(b, T.COLOR_MUTED, "deselect")
+    PanelTemplates_SetDisabledTabState(b); check(b, T.COLOR_CTRL_DIS, "disabled")
+    PanelTemplates_DeselectTab(b)
+    Hover(b); check(b, T.COLOR_CTRL_TEXT, "hover")
+    -- TabSystem tabs go through SetTabSelected and SetTabEnabled
+    local s = Tab({ system = true, y = 80 })
+    s:SetTabSelected(true);  check(s, T.COLOR_HEALTH, "TabSystem selected")
+    s:SetTabSelected(false); check(s, T.COLOR_MUTED, "TabSystem unselected")
+    s:SetTabEnabled(false);  check(s, T.COLOR_CTRL_DIS, "TabSystem forced disabled")
+    s:SetTabEnabled(true);   check(s, T.COLOR_MUTED, "TabSystem enabled again")
+    -- the stock resizes a tab: the plate follows and so does the label
+    PanelTemplates_DeselectTab(b)
+    b:SetWidth(120 / PPU); b:RunScript("OnSizeChanged")
+    Expect(p.fillM, b, 8, 0, 104, 28, "middle fill follows the new width"); Expect(p.fillR, b, 112, 0, 8, 28, "right cap")
+    local cx, cy = CentreOf(b.Text, b)
+    assert(Near(cx, 60, 0.01) and Near(cy, 16, 0.01), string.format("label centre %.2f %.2f", cx, cy))
+""")
+
+case("tab_art_is_held_and_nothing_is_written_to_the_widget", TAB_PRELUDE + """
+    local b, p = Tab({ system = true })
+    for _, t in ipairs(Stock(b)) do assert(t:GetAlpha() == 0, "stock art is held at alpha 0") end
+    -- Blizzard shows and hides it all the time: the state stays readable and the alpha holds
+    b:SetTabSelected(true)
+    assert(b.LeftActive:IsShown() and not b.Left:IsShown(), "the stock shown state is left as the stock wrote it")
+    for _, t in ipairs(Stock(b)) do t:SetAlpha(1); assert(t:GetAlpha() == 0, "a stock write of alpha does not win") end
+    assert(b.w == 100 / PPU and b.h == 32, "never resized")
+    b:SetTabSelected(false)
+    assert(b.Left:IsShown() and not b.LeftActive:IsShown())
+    NoDegrade()
+""")
+
+case("tab_detection_is_by_shape_never_by_name", TAB_PRELUDE + """
+    local TS = FS.TabSkins
+    local pt, sys = PanelTab(P, "a", 20, 20, 84 / PPU, 32), TabSysBtn(P, "b", 20, 60, 84 / PPU, 32)
+    local named = blz("Button", "MailFrameTab1", P, 84 / PPU, 32, 20, 100)
+    -- a UIPanelButton shares Left, Middle and Right but has no Active art; a plain button, a frame and a tab with no label are no tab
+    local panelButton = blz("Button", nil, P, 84 / PPU, 32, 20, 140)
+    for _, key in ipairs({ "Left", "Middle", "Right" }) do panelButton[key] = tex(panelButton) end
+    panelButton.Text = fstring(panelButton, "Okay")
+    local plain, frame = blz("Button", nil, P, 84 / PPU, 32, 20, 180), blz("Frame", nil, P, 84 / PPU, 32, 20, 220)
+    local unlabelled = PanelTab(P, "c", 20, 260, 84 / PPU, 32); unlabelled.Text = nil
+    assert(TS.Kind(pt) == "tab" and TS.Kind(sys) == "tab", "PanelTabButtonTemplate and TabSystemButtonTemplate")
+    assert(TS.Kind(named) == nil, "a name is not a shape")
+    assert(TS.Kind(panelButton) == nil and TS.Kind(plain) == nil and TS.Kind(frame) == nil and TS.Kind(unlabelled) == nil)
+    -- art an earlier skin holds is its own
+    local owned = PanelTab(P, "d", 120, 20, 84 / PPU, 32)
+    FS.HeldArt.Hold(owned.Left)
+    assert(TS.Kind(owned) == nil, "another skin holds this tab's art")
+""")
+
+case("a_tab_is_skinned_once_and_one_met_in_combat_waits_for_combat_to_end", TAB_PRELUDE + """
+    local a, b = PanelTab(P, "a", 20, 20, 84 / PPU, 32), TabSysBtn(P, "b", 120, 20, 84 / PPU, 32)
+    __combat = true
+    assert(not FS.TabSkins.Skin(a) and not FS.TabSkins.Skin(b))
+    assert(FS.TabSkins.Parts(a) == nil and FS.TabSkins.Parts(b) == nil, "nothing is skinned in combat")
+    assert(a.LeftActive:GetAlpha() == 1, "and nothing of the stock art is touched")
+    __combat = false
+    Fire("PLAYER_REGEN_ENABLED")
+    FlushTimers()
+    assert(FS.TabSkins.Parts(a) and FS.TabSkins.Parts(a).built and FS.TabSkins.Parts(b) and FS.TabSkins.Parts(b).built)
+    local objects, hooks = ObjCount(), HookCount()
+    assert(not FS.TabSkins.Skin(a), "a second skin does nothing")
+    assert(ObjCount() == objects and HookCount() == hooks, "a repeat builds nothing and hooks nothing")
+    -- a state change in combat repaints our own plate
+    __combat = true
+    PanelTemplates_SelectTab(a)
+    assert(FS.TabSkins.Parts(a).chev:IsShown(), "our plate follows the stock in combat")
+    NoDegrade()
+""")
+
+case("a_protected_tab_keeps_its_label_where_the_stock_put_it_in_combat", TAB_PRELUDE + """
+    local b, p = Tab()
+    b.protected = true
+    __combat = true
+    PanelTemplates_SelectTab(b)
+    local pt = b.Text.points[1]
+    assert(pt.rel == b and pt.relPoint == "CENTER" and pt.y == -3, "the stock's own anchor stands until combat ends")
+    assert(p.chev:IsShown(), "our own plate still follows")
+    __combat = false
+    Fire("PLAYER_REGEN_ENABLED")
+    FlushTimers()
+    local cx, cy = (function() local l, t, r, bt = Px(b.Text, b); return (l + r) / 2, (t + bt) / 2 end)()
+    assert(Near(cx, 50, 0.01) and Near(cy, 16, 0.01), "the label is seated when combat ends")
+    NoDegrade()
+""")
+
+case("a_tab_on_top_seats_its_plate_at_the_bottom_of_the_stock_rect", TAB_PRELUDE + """
+    -- the stock rect is 32 units = 38 px tall: 10 px above a 28 px plate
+    for _, o in ipairs({ { top = true }, { system = true, top = true, y = 80 } }) do
+        local b, p = Tab(o)
+        Expect(p.fillL, b, 0, 10, 8, 28, "plate at the bottom")
+        Expect(p.edgeBottom, b, 8, 37, 84, 1, "bottom edge")
+        local cx, cy = CentreOf(b.Text, b)
+        assert(Near(cx, 50, 0.01) and Near(cy, 26, 0.01), string.format("label centre %.2f %.2f", cx, cy))
+        PanelTemplates_SelectTab(b)
+        Expect(p.chev, b, 8, 10, 92, 4, "chevron strip rides the plate's top")
+    end
+""")
+
+case("a_change_of_pixel_scale_lays_the_tab_out_again_on_whole_pixels", TAB_PRELUDE + """
+    local b, p = Tab({ system = true })
+    b:SetTabSelected(true)
+    b:SetTabNotification(true)
+    assert(p.chev:IsShown() and p.led:IsShown())
+    for _, scale in ipairs({ 1.0, 1.5, 2.0, 1.2 }) do
+        PPU = scale
+        Fire("UI_SCALE_CHANGED")
+        local w = Round(b.w * scale)
+        Expect(p.fillM, b, 8, 0, w - 16, 28, "middle at " .. scale)
+        Expect(p.fillR, b, w - 8, 0, 8, 28, "right cap at " .. scale)
+        Expect(p.chev, b, 8, 0, w - 8, 4, "chevrons at " .. scale)
+        Expect(p.led, b, w - 14, 7, 4, 4, "LED at " .. scale)
+        local list = Stock(b)
+        list[#list + 1] = b.notificationFrame
+        WholePixels(b, b, "tab at " .. scale, list)
+        local cx, cy = CentreOf(b.Text, b)
+        assert(Near(cx, w / 2, 0.01) and Near(cy, 16, 0.01), string.format("label centre %.2f %.2f at %s", cx, cy, scale))
+    end
+""")
+
+case("a_hidden_tab_runs_no_animation_and_a_shown_one_resumes", TAB_PRELUDE + """
+    local b, p = Tab({ system = true })
+    b:SetTabSelected(true); b:SetTabNotification(true)
+    Step(0.15)
+    local led, coord = p.led.color[4], p.chev.coords[1]
+    P:Hide()
+    Step(1.0)
+    assert(p.led.color[4] == led and p.chev.coords[1] == coord, "a hidden tab moved")
+    P:Show()
+    Step(0.1)
+    assert(p.led.color[4] ~= led and p.chev.coords[1] ~= coord, "it did not resume")
+""")
+
+case("the_sweep_skins_tabs_with_the_other_controls_and_a_text_button_is_left_alone", TAB_PRELUDE + """
+    local page = blz("Frame", nil, P, 380, 280, 10, 10)
+    local pt, sys = PanelTab(page, "a", 10, 10, 84 / PPU, 32), TabSysBtn(page, "b", 110, 10, 84 / PPU, 32)
+    local check = CheckBox(page, "one", 10, 100)
+    local button = blz("Button", nil, page, 84 / PPU, 32, 10, 150)
+    for _, key in ipairs({ "Left", "Middle", "Right" }) do button[key] = tex(button) end
+    button.Text = fstring(button, "Okay")
+    assert(Skin(P) == 3, "two tabs and a check box")
+    assert(FS.TabSkins.Parts(pt) and FS.TabSkins.Parts(sys) and FS.TabSkins.Parts(button) == nil)
+    assert(Skin(P) == 0, "a second sweep skins nothing new")
+    NoDegrade()
+""")
+
+case("a_secret_state_reads_as_idle_without_an_error", TAB_PRELUDE + """
+    local b, p = Tab({ system = true })
+    b.isSelected = { __secret = true }
+    b.IsEnabled = function() return { __secret = true } end
+    b:SetTabNotification(false)
+    Is(p.fillL.vertex, T.COLOR_CTRL_INK, 1, "an unreadable tab reads as idle")
+    assert(not p.chev:IsShown())
+    NoDegrade()
+""")
+
+# --- the switch ---
+
+SWITCH_PRELUDE = PRELUDE + """
+    local T = FS.Theme
+    local function Switch(items, o)
+        o = o or {}
+        o.x, o.y = o.x or 20, o.y or 20
+        local sw = FS.TabSkins.Switch(P, items, o)
+        FlushTimers()
+        return sw
+    end
+    local function CentreOf(o, ref)
+        local l, t, r, b = Px(o, ref)
+        return (l + r) / 2, (t + b) / 2
+    end
+"""
+
+case("switch_is_a_28_px_body_with_items_3_in_whose_widths_round_up_to_a_multiple_of_4", SWITCH_PRELUDE + """
+    local sw = Switch({ "Inbox", "Send Mail" })
+    NoDegrade()
+    -- Inbox: 5 x 7.2 + 24 = 60; Send Mail: 9 x 7.2 + 24 = 88.8 -> 92; the body is the two and 6 more
+    Expect(sw.frame, P, 20, 20, 158, 28, "body")
+    assert(sw.width == 158 and sw.plate.c == 6, "chamfer 6")
+    Is(Colour(sw.plate.fill), T.COLOR_CTRL_INK, 1, "body face"); Is(sw.plate.ring.vertex, T.COLOR_CTRL_DIM, 1, "body edge")
+    Expect(sw.items[1].button, sw.frame, 3, 3, 60, 22, "first item")
+    Expect(sw.items[2].button, sw.frame, 63, 3, 92, 22, "second item")
+    for i, item in ipairs(sw.items) do
+        local l = item.label
+        assert(Near(l.size * PPU, 12, 0.01), "label is 12 px mono")
+        local cx, cy = CentreOf(l, item.button)
+        assert(Near(cx, item.width / 2, 0.01) and Near(cy, 12, 0.01), string.format("item %d label centre %.2f %.2f", i, cx, cy))
+    end
+    assert(sw:GetSelected() == 1)
+""")
+
+case("switch_selected_item_is_a_pink_slug_with_a_chevron_underline_and_pink_text", SWITCH_PRELUDE + """
+    local sw = Switch({ "Inbox", "Send Mail" })
+    Expect(sw.slug, sw.frame, 3, 3, 60, 22, "slug")
+    assert(sw.slugPlate.c == 4)
+    Is(Colour(sw.slugPlate.fill), T.COLOR_CTRL_SEL, 1, "slug face"); Is(sw.slugPlate.ring.vertex, T.COLOR_HEALTH, 1, "slug edge")
+    Expect(sw.under, sw.slug, 4, 19, 52, 3, "underline")
+    assert(sw.under.path:find("ctl_chevron_h3"), sw.under.path)
+    Is(sw.under.vertex, T.COLOR_HEALTH, 0.9, "underline tint")
+    Step(0)
+    local c = sw.under.coords
+    assert(Near(c[1], 0, 0.001) and Near(c[2], 52 / 8, 0.001) and c[3] == 0 and Near(c[4], 0.75, 0.001), "3 of the tile's 4 rows")
+    Step(0.3)
+    assert(Near(sw.under.coords[1], -0.5, 0.02), "the underline marches like the cast bar")
+    Is(sw.items[1].label.textColor, T.COLOR_HEALTH, 1, "selected text")
+    Is(sw.items[2].label.textColor, T.COLOR_MUTED, 1, "idle text")
+    assert(sw.slug.level < sw.items[1].button.level, "the slug is under the labels")
+""")
+
+case("switch_hover_boxes_an_idle_item_in_cyan_and_a_disabled_item_stays_dim", SWITCH_PRELUDE + """
+    local sw = Switch({ "Inbox", "Send Mail", "Open" })
+    local item = sw.items[2]
+    assert(not item.plate.fill:IsShown(), "no box at rest")
+    Hover(item.button)
+    assert(item.plate.fill:IsShown() and item.plate.ring:IsShown())
+    Expect(item.button, sw.frame, 63, 3, 92, 22, "the box is the item's rect")
+    assert(item.plate.c == 4)
+    Is(Colour(item.plate.fill), T.COLOR_CTRL_CELL, 1, "hover face"); Is(item.plate.ring.vertex, T.COLOR_POWER, 1, "hover edge")
+    Is(item.label.textColor, T.COLOR_CTRL_TEXT, 1, "hover text")
+    Unhover(item.button)
+    assert(not item.plate.fill:IsShown())
+    Is(item.label.textColor, T.COLOR_MUTED, 1, "idle text")
+    -- the selected item takes no box; a disabled one takes no hover and wears the dim text
+    Hover(sw.items[1].button)
+    assert(not sw.items[1].plate.fill:IsShown(), "the slug is the selected item's box")
+    sw:SetDisabled(3, true)
+    Is(sw.items[3].label.textColor, T.COLOR_CTRL_DIS, 1, "disabled text")
+    Hover(sw.items[3].button)
+    assert(not sw.items[3].plate.fill:IsShown(), "a disabled item does not light")
+    Unhover(sw.items[3].button)
+    sw:SetDisabled(3, false)
+    Is(sw.items[3].label.textColor, T.COLOR_MUTED, 1, "enabled again")
+""")
+
+case("switch_click_selects_and_calls_back_and_the_slug_slides_in_0_2_s", SWITCH_PRELUDE + """
+    local calls = {}
+    local sw = Switch({ "Inbox", "Send Mail", "Open" }, { onSelect = function(i, text) calls[#calls + 1] = i .. ":" .. text end })
+    sw.items[2].button:Click()
+    assert(#calls == 1 and calls[1] == "2:Send Mail" and sw:GetSelected() == 2)
+    Is(sw.items[2].label.textColor, T.COLOR_HEALTH, 1, "the new selection is pink at once")
+    Is(sw.items[1].label.textColor, T.COLOR_MUTED, 1, "the old one is not")
+    assert(FS.ControlKit.IsAnimating(sw.slug, "slide"))
+    Step(0.1)
+    local l = Px(sw.slug, sw.frame)
+    assert(l > 3 and l < 63, "mid slide, got " .. l)
+    assert(Near(l, math.floor(l + 0.5), 0.001), "a whole pixel on the way")
+    Step(0.2)
+    Expect(sw.slug, sw.frame, 63, 3, 92, 22, "arrived with the item's width")
+    Expect(sw.under, sw.slug, 4, 19, 84, 3, "underline follows")
+    assert(not FS.ControlKit.IsAnimating(sw.slug, "slide"), "the slide ended")
+    -- clicking the selected item or a disabled one changes nothing
+    sw.items[2].button:Click()
+    sw:SetDisabled(3, true)
+    sw.items[3].button:Click()
+    assert(#calls == 1 and sw:GetSelected() == 2, "no extra callback")
+    -- picking it in code is quiet
+    sw:SetSelected(1)
+    assert(#calls == 1 and sw:GetSelected() == 1, "SetSelected does not call back")
+    sw:SetSelected(3)
+    assert(sw:GetSelected() == 1, "a disabled item cannot be picked")
+    NoDegrade()
+""")
+
+case("switch_that_is_not_on_screen_jumps_the_slug_instead_of_sliding", SWITCH_PRELUDE + """
+    local sw = Switch({ "Inbox", "Send Mail" })
+    P:Hide()
+    sw:SetSelected(2)
+    Expect(sw.slug, sw.frame, 63, 3, 92, 22, "jumped")
+    assert(not FS.ControlKit.IsAnimating(sw.slug, "slide"), "nothing to run while hidden")
+    Step(1.0)
+    P:Show()
+    Expect(sw.slug, sw.frame, 63, 3, 92, 22, "still there")
+""")
+
+case("switch_badge_is_a_pink_4_px_led_that_breathes", SWITCH_PRELUDE + """
+    local sw = Switch({ "Inbox", "Send Mail" })
+    assert(not sw.items[2].badge:IsShown())
+    sw:SetBadge(2, true)
+    Expect(sw.items[2].badge, sw.items[2].button, 82, 3, 4, 4, "badge 10 from the item's right end, 3 down")
+    Is(Colour(sw.items[2].badge), T.COLOR_HEALTH, 1, "pink")
+    Step(0.8)
+    assert(Near(sw.items[2].badge.color[4], 0.3, 0.02), "bottom of its breath, got " .. sw.items[2].badge.color[4])
+    sw:SetBadge(2, false)
+    assert(not sw.items[2].badge:IsShown() and not FS.ControlKit.IsAnimating(sw.items[2].button, "badge"))
+""")
+
+case("switch_takes_its_options_at_creation_and_is_never_registered_with_the_sweep", SWITCH_PRELUDE + """
+    local sw = Switch({ "A", "B", "C" }, { selected = 3, disabled = { [2] = true }, badges = { [1] = true } })
+    assert(sw:GetSelected() == 3)
+    Is(sw.items[2].label.textColor, T.COLOR_CTRL_DIS, 1, "disabled at creation")
+    assert(sw.items[1].badge:IsShown(), "badge at creation")
+    -- a one letter label is 7.2 + 24 = 31.2 -> 32 wide
+    Expect(sw.slug, sw.frame, 3 + 32 + 32, 3, 32, 22, "slug on the third item at once")
+    assert(FS.ControlKit.Classify(sw.frame) == nil, "the sweep does not know it")
+    local objects = ObjCount()
+    assert(Skin(P) == 0 and ObjCount() == objects, "a sweep builds nothing on it")
+""")
+
+case("switch_regions_sit_on_whole_pixels_at_every_scale", SWITCH_PRELUDE + """
+    local sw = Switch({ "Inbox", "Send Mail" })
+    sw:SetBadge(2, true)
+    Hover(sw.items[2].button)
+    for _, scale in ipairs({ 1.0, 1.5, 2.0, 1.2 }) do
+        PPU = scale
+        Fire("UI_SCALE_CHANGED")
+        Expect(sw.frame, P, 20, 20, 158, 28, "body at " .. scale)
+        Expect(sw.slug, sw.frame, 3, 3, 60, 22, "slug at " .. scale)
+        WholePixels(sw.frame, P, "switch at " .. scale)
+    end
+""")
+
+SCENES["tabs"] = """
+    local FS = Load()
+    local P = Panel()
+    P.w, P.h = 900, 260
+    local names = { "character", "reputation", "skills", "honor", "pet", "talents" }
+    local x, tabs = 10, {}
+    for i, name in ipairs(names) do
+        local w = math.ceil((#name * 7.2 + 32) / 4) * 4
+        tabs[i] = (i == 4 and TabSysBtn or PanelTab)(P, name, x / PPU, 20 / PPU, w / PPU, 32)
+        x = x + w - 8 + 6
+    end
+    local plain = {}
+    for i = 1, 3 do plain[i] = PanelTab(P, ({ "bags 12", "bank", "keys" })[i], (10 + (i - 1) * 100) / PPU, 80 / PPU, 100 / PPU, 32) end
+    Skin(P)
+    PanelTemplates_SelectTab(tabs[1])
+    Hover(tabs[2])
+    tabs[4]:SetTabNotification(true)
+    PanelTemplates_SetDisabledTabState(tabs[5])
+    PanelTemplates_SelectTab(plain[1])
+    local sw = FS.TabSkins.Switch(P, { "Inbox", "Send Mail" }, { x = 10, y = 150 })
+    local sw2 = FS.TabSkins.Switch(P, { "Inbox", "Send Mail", "Open" }, { x = 200, y = 150, selected = 2, badges = { [3] = true } })
+    local sw3 = FS.TabSkins.Switch(P, { "Inbox", "Send Mail", "Open" }, { x = 450, y = 150, disabled = { [3] = true } })
+    FlushTimers()
+    Hover(sw2.items[1].button)
+    Step(0.4)
+    return DumpOps({ P })
+"""
+
 
 SCENES["slots"] = """
     local FS = Load()
