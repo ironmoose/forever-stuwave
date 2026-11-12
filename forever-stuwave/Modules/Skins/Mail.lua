@@ -61,6 +61,7 @@ Mail.GEOM = G
 local S = {
     ppu = 1, fonts = setmetatable({}, { __mode = "k" }), placed = setmetatable({}, { __mode = "k" }),
     keys = setmetatable({}, { __mode = "k" }), quiet = setmetatable({}, { __mode = "k" }),
+    quietTexts = setmetatable({}, { __mode = "k" }),
     zeroing = setmetatable({}, { __mode = "k" }), done = {}, rows = {}, wells = {}, mailIndex = nil,
 }
 Mail.state = S
@@ -184,6 +185,34 @@ local function HookFunc(obj, method, fn)
     end
 end
 
+-- Holds every Blizzard caption on a button at alpha 0: its button FontString and any FontString region the
+-- template draws on its own (the pager's Prev / Next, the expiry button's days, OpenAllMailText), which
+-- GetFontString does not return. Our own labels (S.fonts) are skipped. SetText re-runs it, because a button's
+-- FontString can be created by its first SetText, after the skin was built.
+local function QuietTexts(button)
+    if type(button) ~= "table" then return end
+    local function sweep()
+        if type(button.GetFontString) == "function" then
+            local fs = button:GetFontString()
+            if fs and not S.fonts[fs] then Quiet(fs) end
+        end
+        if type(button.GetRegions) == "function" then
+            for _, region in ipairs({ button:GetRegions() }) do
+                if type(region) == "table" and type(region.GetObjectType) == "function"
+                    and region:GetObjectType() == "FontString" and not S.fonts[region] then
+                    Quiet(region)
+                end
+            end
+        end
+    end
+    sweep()
+    if not S.quietTexts[button] then
+        S.quietTexts[button] = true
+        HookFunc(button, "SetText", sweep)
+        HookFunc(button, "SetFormattedText", sweep)
+    end
+end
+
 -- Holds every texture region of `button` except those in `keep` (the item icon of a well).
 local function HoldRegions(button, keep)
     if type(button.GetRegions) ~= "function" then return end
@@ -267,14 +296,15 @@ local function Key(button, o)
     if S.keys[button] then return S.keys[button] end
     local k = { accent = o.accent, fill = o.fill or C.ink }
     S.keys[button] = k
-    if o.hold ~= false then HeldArt.HoldButton(button) end
+    if o.hold ~= false then
+        HeldArt.HoldButton(button)
+        QuietTexts(button)
+    end
     k.shape = Shape(button, o.c or 4, k.fill, k.accent, STATES.normal.ring)
     if o.px or o.text then
         k.label = Label(button, o.text or "", o.px or 14, k.accent)
         k.label:SetPoint("CENTER", button, "CENTER", 0, 0)
         if not o.text then
-            local stock = type(button.GetFontString) == "function" and button:GetFontString() or nil
-            Quiet(stock)
             local function mirror()
                 local text = Plain(Try(button.GetText, button))
                 if type(text) == "string" then
@@ -638,6 +668,8 @@ local function RefreshRow(i)
         chip:Show()
     end
     for n = used + 1, #r.chips do r.chips[n]:Hide() end
+    -- the subject ends 8 px short of the leftmost chip, or of the card's right inset when there is none
+    r.subject:SetWidth(U(math.max(1, (used > 0 and right - 2 or G.ROW_W - 12) - 32)))
 
     local selected = Try(button.GetChecked, button) == true
         or (_G.InboxFrame and _G.InboxFrame.openMailID == idx)
@@ -691,7 +723,7 @@ local function BuildRow(i, win)
     -- The stock expiry button keeps its tooltip (time until deleted or returned) over our age text.
     local expire = _G["MailItem" .. i .. "ExpireTime"]
     if expire then
-        Quiet(type(expire.GetFontString) == "function" and expire:GetFontString() or nil)
+        QuietTexts(expire)
         Place(expire, card, G.ROW_W - 12 - 60, 9, 60, 20)
         Above(expire, button)
     end
@@ -901,6 +933,27 @@ local function SkinInvoice()
         "OpenMailTransactionAmountMoneyFrame" }) do
         if _G[name] and Theme.StyleMoney then Theme.StyleMoney(_G[name]) end
     end
+    -- The stock receipt is laid out for a 296 unit parchment: the item block 30 in and 35 down, the price column
+    -- 27 in from the right, and Amount Received hung off the 256 unit arithmetic line we hold at alpha 0, which
+    -- puts it past the price column. Re-seat it against the pad: the item block at the top left inset, the price
+    -- column 22 px in (the money frames hang 16 units right of their labels), Amount Received under House Cut.
+    local inv = _G.OpenMailInvoiceFrame
+    local item, buyer, sale = _G.OpenMailInvoiceItemLabel, _G.OpenMailInvoicePurchaser, _G.OpenMailInvoiceSalePrice
+    local cut, received = _G.OpenMailInvoiceHouseCut, _G.OpenMailInvoiceAmountReceived
+    if inv and item and sale and cut and received and type(item.ClearAllPoints) == "function" then
+        item:ClearAllPoints()
+        item:SetPoint("TOPLEFT", inv, "TOPLEFT", U(6), -U(6))
+        item:SetPoint("RIGHT", inv, "RIGHT", -U(6), 0)
+        if buyer then
+            buyer:ClearAllPoints()
+            buyer:SetPoint("TOPLEFT", item, "BOTTOMLEFT", 0, -U(5))
+            buyer:SetPoint("RIGHT", inv, "RIGHT", -U(6), 0)
+        end
+        sale:ClearAllPoints()
+        sale:SetPoint("TOPRIGHT", inv, "TOPRIGHT", -U(22), -U(52))
+        received:ClearAllPoints()
+        received:SetPoint("TOPRIGHT", cut, "BOTTOMRIGHT", 0, -U(26))
+    end
 end
 
 -- The body text is SimpleHTML: Mononoki through its own SetFont, one call per element it formats.
@@ -945,6 +998,10 @@ local function SkinLetter()
     Line(win, win, "LEFT", 18, 56, "RE", 12, C.muted)
     L.re = Line(win, win, "LEFT", 70, 56, "", 15, C.cyan)
     L.expires = Line(win, win, "RIGHT", G.LETTER_W - 18, 28, "", 13, C.amber)
+    -- long senders and subjects end in an ellipsis inside the card: the subject runs to the right inset, the
+    -- sender stops 12 px short of the expiry text (its widest form, "expires 30d", is about 110 px)
+    L.re:SetWidth(U(G.LETTER_W - 70 - 18))
+    L.from:SetWidth(U(G.LETTER_W - 70 - 18 - 110 - 12))
     Rect(win, G.SIDE, 76, G.LETTER_W - 2 * G.SIDE, 1, C.violet, 0.35, "ARTWORK", 1)
 
     L.pad = Box(win, win, G.SIDE, 88, G.LETTER_W - 2 * G.SIDE, 170)

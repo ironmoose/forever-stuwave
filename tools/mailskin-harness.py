@@ -415,6 +415,8 @@ function BuildBlizzard()
     for _, spec in ipairs({ { "InboxPrevPageMixin" }, { "InboxNextPageMixin" } }) do
         local b = blz("Button", nil, inbox, 32, 32)
         tex(b, nil, "BACKGROUND")
+        -- the 16001 pager draws its Prev / Next caption as a template FontString, not the button's own text
+        b.caption = fstring(b, nil, spec[1] == "InboxPrevPageMixin" and "Prev" or "Next")
         for k, v in pairs(_G[spec[1]]) do rawset(b, k, v) end
         if spec[1] == "InboxPrevPageMixin" then inbox.prev = b else inbox.next = b end
     end
@@ -429,7 +431,7 @@ function BuildBlizzard()
         fstring(row, "MailItem" .. i .. "Sender", "")
         fstring(row, "MailItem" .. i .. "Subject", "")
         local expire = blz("Button", "MailItem" .. i .. "ExpireTime", row, 100, 16, "TOPRIGHT")
-        expire.fs = fstring(expire, nil, "")
+        expire.caption = fstring(expire, nil, "30 Days")
         local b = blz("CheckButton", "MailItem" .. i .. "Button", row, 37, 37)
         b.shown = false
         tex(b, "MailItem" .. i .. "ButtonSlot", "BACKGROUND")
@@ -1128,6 +1130,15 @@ case("blizzard_art_is_held_its_text_replaced_and_no_script_or_attribute_was_writ
     assert(S.keys[OpenAllMail].label.text == "opening...", "stock progress text")
     OpenMailReplyButton:SetText("Antworten")
     assert(S.keys[OpenMailReplyButton].label.text == "antworten", "mirrored text")
+    -- template captions that GetFontString does not return are held too, and our own labels stay visible
+    assert(InboxFrame.prev.caption.alpha == 0 and InboxFrame.next.caption.alpha == 0, "pager captions")
+    for i = 1, 7 do assert(_G["MailItem" .. i .. "ExpireTime"].caption.alpha == 0, "expiry caption " .. i) end
+    assert(S.keys[OpenAllMail].label.alpha ~= 0, "our open all label")
+    -- a caption a button creates on its first SetText is held as well
+    local late = OpenMailReplyButton:CreateFontString(nil, "OVERLAY")
+    late.fontPath = "stock.ttf"
+    OpenMailReplyButton:SetText("Reply")
+    assert(late.alpha == 0, "late caption")
     assert(#DEGRADED == 0, "degraded: " .. table.concat(DEGRADED, " | "))
 """)
 
