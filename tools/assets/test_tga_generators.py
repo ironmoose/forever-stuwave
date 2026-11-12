@@ -294,6 +294,9 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "ctl_prompt": (16, 16), "ctl_lens": (16, 16), "ctl_cross": (16, 16), "ctl_radar": (16, 16), "ctl_radar_arm": (16, 16),
         "ctl_chev": (16, 16),
     },
+    # generate_control_slot.py: the item slot's art: the locked slot's hazard tape and the epic glint (32 x 32 canvases that
+    # cover the 32 x 30 icon area) and the lock glyph (16 x 16).
+    "control_slot": {"ctl_hazard": (64, 64), "ctl_glint": (64, 64), "ctl_lock": (16, 16)},
     "icon_social": (32, 32),
     # generate_icon_stu.py: the minimap STU key's icon A (full colour), a 32 canvas with the 22 texel art box centred.
     "icon_stu": (32, 32),
@@ -2926,4 +2929,78 @@ def test_radar_arm_is_a_2_px_line_from_the_centre_to_the_ring(control_glyph_outp
 
 def test_committed_control_glyph_textures_match_the_generator(control_glyph_outputs: Path) -> None:
     for out in control_glyph_outputs.glob("*.tga"):
+        assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
+
+
+# ---------------------------------------------------------------------------
+# generate_control_slot.py: the item slot's hazard tape, glint and lock glyph.
+#
+# Mockup slot(): the locked slot's three 3 px strokes, the epic glint band and the lock glyph. Numbers hardcoded here.
+# ---------------------------------------------------------------------------
+
+CONTROL_SLOT_GENERATOR = GENERATOR_DIR / "generate_control_slot.py"
+
+
+@pytest.fixture(scope="module")
+def control_slot_outputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    out = tmp_path_factory.mktemp("control_slot")
+    _run_generator(CONTROL_SLOT_GENERATOR, out)
+    return out
+
+
+def test_control_slot_textures_are_white_alpha_shapes(control_slot_outputs: Path) -> None:
+    names = sorted(path.name for path in control_slot_outputs.glob("ctl_*.tga"))
+    assert names == ["ctl_glint.tga", "ctl_hazard.tga", "ctl_lock.tga"]
+    for name in names:
+        path = control_slot_outputs / name
+        assert _is_white(path), name
+        assert _alpha_sum(path) > 8, name
+
+
+def _alpha_window_sum(path: Path, width: int, height: int) -> float:
+    """The alpha of the top left width x height texels, in texel equivalents."""
+    return sum(px[3] for row in _rgba_grid(path)[:height] for px in row[:width]) / 255
+
+
+def test_hazard_tape_is_3_px_diagonals_on_x_plus_y_20_40_58_and_on_for_a_larger_icon(control_slot_outputs: Path) -> None:
+    path = control_slot_outputs / "ctl_hazard.tga"
+    # lines x + y = 20, 40 and 58 in icon coordinates, 3 px across (|x + y - c| <= 2.12 at the pixel centre)
+    for x, y in ((10, 10), (5, 15), (20, 20), (25, 15), (28, 29)):
+        assert _alpha_at(path, x, y) >= 240, (x, y)
+    for x, y in ((3, 3), (0, 0), (10, 3), (5, 25), (31, 0), (15, 20)):
+        assert _alpha_at(path, x, y) == 0, (x, y)
+    # a taller or wider icon is taped to its far corner too: the next lines are x + y = 78, 98 and 118
+    for x, y in ((39, 39), (49, 49), (59, 59), (40, 38)):
+        assert _alpha_at(path, x, y) >= 240, (x, y)
+    # inside the mockup's 32 x 30 icon area the strokes are 3 wide and about 20 * sqrt(2) = 28.3 (x + y = 20, corner to
+    # corner of the upper left triangle), 22 * sqrt(2) = 31.1 (x + y = 40, from (10, 30) to (32, 8)) and 4 * sqrt(2) = 5.7 (x + y
+    # = 58, a corner nick at the lower right) long: 3 * (28.3 + 31.1 + 5.7) = 195 texels, less what the box edges trim off
+    assert 170 < _alpha_window_sum(path, 32, 30) < 210
+
+
+def test_glint_is_the_mockups_6_px_wide_slant_carried_down_the_canvas(control_slot_outputs: Path) -> None:
+    path = control_slot_outputs / "ctl_glint.tga"
+    # (4, 30) -> (14, 0) -> (20, 0) -> (10, 30): a parallelogram 6 wide and 30 tall inside the mockup's icon area
+    assert abs(_alpha_window_sum(path, 32, 30) - 180) < 2
+    for x, y in ((16, 1), (11, 15), (12, 15), (7, 28)):
+        assert _alpha_at(path, x, y) >= 250, (x, y)
+    for x, y in ((5, 15), (18, 15), (0, 0), (31, 31), (10, 1), (6, 2), (40, 10)):
+        assert _alpha_at(path, x, y) == 0, (x, y)
+    # the same slope on down the canvas for a taller icon: 10 px left per 30 down, so row 40 holds x 0.7 to 6.7
+    assert _alpha_at(path, 3, 40) >= 250 and _alpha_at(path, 12, 40) == 0
+
+
+def test_lock_glyph_is_a_shackle_over_a_10_by_7_body(control_slot_outputs: Path) -> None:
+    path = control_slot_outputs / "ctl_lock.tga"
+    for x, y in ((5, 9), (8, 10), (12, 13), (3, 7), (12, 7)):
+        assert _alpha_at(path, x, y) >= 250, (x, y)
+    for x, y in ((8, 4), (8, 5), (0, 0), (15, 15), (2, 10), (14, 10)):
+        assert _alpha_at(path, x, y) == 0, (x, y)
+    assert _alpha_at(path, 8, 1) >= 150 and _alpha_at(path, 8, 2) >= 150, "the arc's top"
+    # body 70 texels, two legs 1.5 x 2 each, the arc half a ring of mean radius 3 at width 1.5: pi * 3 * 1.5 = 14.1
+    assert abs(_alpha_sum(path) - (70 + 6 + 14.1)) < 3
+
+
+def test_committed_control_slot_textures_match_the_generator(control_slot_outputs: Path) -> None:
+    for out in control_slot_outputs.glob("*.tga"):
         assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name

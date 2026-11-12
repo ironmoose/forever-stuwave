@@ -213,6 +213,19 @@ FS.Layout.Controls = {
     -- open: a 2 px cyan front edge runs down it in 0.2 s and each row appears as it passes.
     ROW_PAD = 2, ROW_LED_W = 4, ROW_LED_H = 8, ROW_LED_X = 2, ROW_WASH_ALPHA = 0.18, RETICLE_LEN = 4, WIPE_TIME = 0.2,
     WIPE_FRONT = 2,
+    -- Item slot (the icon area is the mockup's 32 x 30 at (4, 3) of a 40 square, here the slot's own rect less 8 wide and 10 tall):
+    -- a 24 x 2 quality LED 5 up from the bottom, centred; Uncommon and up also wear a 2 px edge. The glint of an Epic or Legendary
+    -- (SLOT_GLINT is its one switch) is a 6 px white band at 0.35 that crosses the icon in the first 0.6 of a 3.4 s loop, from 44
+    -- left of the icon to 64 right; hover wears a 4 px wash outside the slot at 0.10, a 2 px cyan edge and lock-on brackets (pad
+    -- 4, arms 6) that breathe by 0.1 over 1.2 s; a cooldown drains an ink scrim at 0.78 down the icon behind a 2 px cyan front;
+    -- a locked slot is an ink scrim at 0.55 with amber tape at 0.4 and a 16 square lock glyph centred on the icon.
+    SLOT_ICON_X = 4, SLOT_ICON_Y = 3, SLOT_ICON_TRIM_W = 8, SLOT_ICON_TRIM_H = 10,
+    SLOT_LED_W = 24, SLOT_LED_H = 2, SLOT_LED_UP = 5, SLOT_EDGE_FROM = 2, SLOT_QUALITY_TOP = 5,
+    SLOT_GLINT = true, SLOT_GLINT_MIN = 4, SLOT_GLINT_ALPHA = 0.35, SLOT_GLINT_PERIOD = 3.4, SLOT_GLINT_SWEEP = 0.6,
+    SLOT_GLINT_FROM = -44, SLOT_GLINT_TO = 64, SLOT_GLINT_BAND = 20, SLOT_GLINT_SHEET = 64,
+    SLOT_WASH_PAD = 4, SLOT_WASH_ALPHA = 0.10, SLOT_RETICLE_PAD = 4, SLOT_RETICLE_LEN = 6, SLOT_RETICLE_PERIOD = 1.2,
+    SLOT_RETICLE_GROW = 0.1, SLOT_COOLDOWN_ALPHA = 0.78, SLOT_COOLDOWN_FRONT = 2, SLOT_LOCK_ALPHA = 0.55,
+    SLOT_HAZARD_ALPHA = 0.4, SLOT_HAZARD_SHEET = 64, SLOT_LOCK = 16,
     -- Marching chevrons: the lit cells' strip moves one 8 px pitch every 0.6 s at 18 % white.
     MARCH_PERIOD = 0.6, CHEV_PITCH = 8, CHEV_ALPHA = 0.18,
 }

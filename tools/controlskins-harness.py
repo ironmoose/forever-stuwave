@@ -48,6 +48,7 @@ FILES = {
     "SliderSkins": "Core/SliderSkins.lua",
     "FieldSkins": "Core/FieldSkins.lua",
     "DropdownSkins": "Core/DropdownSkins.lua",
+    "ItemSlotSkins": "Core/ItemSlotSkins.lua",
     "PanelSkins": "Core/PanelSkins.lua",
 }
 SOURCES = {name: (ADDON / path).read_text(encoding="utf-8") for name, path in FILES.items()}
@@ -266,8 +267,39 @@ function Obj:SetTexelSnappingBias() end
 function Obj:SetTextureSliceMargins(l) self.slice = l end
 function Obj:SetTextureSliceMode() end
 function Obj:SetHorizTile() end
+-- StatusBar: the bar texture's rect follows the value, or the timer a duration object runs
+function Obj:SetStatusBarTexture(path)
+    if not self.barTex then
+        self.barTex = adopt(self, new("Texture", nil, self, self.blizz))
+        self.barTex.layer = "ARTWORK"
+        self.barTex.barOf = self
+    end
+    self.barTex.path = path
+    return self.barTex
+end
+function Obj:GetStatusBarTexture() return self.barTex end
+function Obj:SetStatusBarColor(r, g, b, a) if self.barTex then self.barTex.vertex = { r, g, b, a or 1 } end end
+function Obj:SetOrientation(o) self.orientation = o end
+function Obj:SetReverseFill(v) self.reverse = v and true or false end
+function Obj:SetMinMaxValues(a, b) self.min, self.max = a, b end
+function Obj:SetValue(v) self.value = v end
+local function barFraction(bar)
+    local f
+    if bar.timer then f = bar.timerFraction else f = ((bar.value or 0) - (bar.min or 0)) / math.max(1e-9, (bar.max or 1) - (bar.min or 0)) end
+    return math.max(0, math.min(1, f or 0))
+end
+local function timerLeft(timer)
+    local d = timer.obj
+    if issecretvalue(d.start) or issecretvalue(d.duration) then return 1 end
+    if not d.duration or d.duration <= 0 then return 0 end
+    return math.max(0, math.min(1, (d.start + d.duration - TIME) / d.duration))
+end
+function Obj:SetTimerDuration(obj, interp, dir)
+    self.timer = { obj = obj, interp = interp, dir = dir }
+    self.timerFraction = timerLeft(self.timer)
+end
 function Obj:SetVertTile() end
-function Obj:SetDesaturated() end
+function Obj:SetDesaturated(v) self.desat = v and true or false end
 function Obj:SetAtlas(a) self.atlas = a end
 function Obj:GetAtlas() return self.atlas end
 function Obj:SetNormalTexture(path)
@@ -313,6 +345,19 @@ end
 -- The rectangle of an object in UI units, y running down: left, top, right, bottom.
 function Obj:Rect()
     if self == UIParent then return 0, 0, UI_W, UI_H end
+    if self.barOf then
+        local bar = self.barOf
+        local l, t, r, b = bar:Rect()
+        local f = barFraction(bar)
+        if bar.orientation == "VERTICAL" then
+            local h = (b - t) * f
+            if bar.reverse then return l, t, r, t + h end
+            return l, b - h, r, b
+        end
+        local w = (r - l) * f
+        if bar.reverse then return r - w, t, r, b end
+        return l, t, l + w, b
+    end
     local W, H = sizeOf(self)
     local left, right, cx, top, bottom, cy
     for _, p in ipairs(self.points) do
@@ -343,6 +388,7 @@ function Obj:Rect()
     return left, top, right, bottom
 end
 
+DUR_REJECTS_SECRET = false
 function hooksecurefunc(a, b, c)
     local tbl, name, fn = _G, a, b
     if type(a) == "table" then tbl, name, fn = a, b, c end
@@ -605,6 +651,74 @@ function LegacyList(specs)
     return l
 end
 
+-- 12.0's duration objects and the timer enums StatusBar:SetTimerDuration takes. SetTimeFromStart refuses a secret number when
+-- DUR_REJECTS_SECRET is set (the engine may well refuse one from tainted code).
+Enum = { StatusBarTimerDirection = { ElapsedTime = 0, RemainingTime = 1 }, StatusBarInterpolation = { Immediate = 0, ExponentialEaseOut = 1 } }
+C_DurationUtil = {
+    CreateDuration = function()
+        local d = { kind = "Duration" }
+        local function check(...)
+            for i = 1, select("#", ...) do
+                local v = select(i, ...)
+                if DUR_REJECTS_SECRET and issecretvalue(v) then error("Secret values are only allowed during untainted execution", 3) end
+                if v ~= nil and type(v) ~= "number" and not issecretvalue(v) then error("bad argument: number expected", 3) end
+            end
+        end
+        function d:SetTimeFromStart(start, duration, modRate)
+            check(start, duration, modRate)
+            self.start, self.duration = start, duration
+        end
+        function d:SetTimeFromEnd(finish, duration, modRate)
+            check(finish, duration, modRate)
+            self.start, self.duration = finish - duration, duration
+        end
+        return d
+    end,
+}
+function DurationAt(start, duration)
+    local d = C_DurationUtil.CreateDuration()
+    d:SetTimeFromStart(start, duration)
+    return d
+end
+
+-- A Cooldown frame the way an item button has one: the stock SetCooldown, SetCooldownFromDurationObject, Clear and the
+-- swipe switch (on by default).
+function CooldownW(parent)
+    local c = blz("Cooldown", nil, parent, 0, 0)
+    c.points = { { point = "TOPLEFT", rel = parent, relPoint = "TOPLEFT", x = 0, y = 0 },
+        { point = "BOTTOMRIGHT", rel = parent, relPoint = "BOTTOMRIGHT", x = 0, y = 0 } }
+    c.swipe = true
+    function c:SetCooldown(start, duration)
+        self.cd = { start = start, dur = type(duration) == "number" and duration or 1e9 }
+        self.shown = true
+    end
+    function c:SetCooldownFromDurationObject(obj) self.cdObj = obj; self.shown = true end
+    function c:SetCooldownFromExpirationTime(finish, duration) self.cd = { start = finish - duration, dur = duration }; self.shown = true end
+    function c:Clear() self.cd, self.cdObj = nil, nil end
+    function c:SetDrawSwipe(v) self.swipe = v and true or false end
+    function c:GetDrawSwipe() return self.swipe end
+    c.shown = false
+    return c
+end
+
+-- An item button the way ContainerFrameItemButton and kin have one: an ItemButton with its icon, Count and Cooldown, the slot art
+-- the skin holds, and no scripts the skin may write (Blizzard's).
+function ItemSlotW(parent, x, y, w, h)
+    local b = blz("ItemButton", nil, parent, w or 37, h or 37, x, y)
+    b.icon = tex(b, "Interface\\Icons\\inv_misc_bag", "ARTWORK")
+    b.icon.points = { { point = "TOPLEFT", rel = b, relPoint = "TOPLEFT", x = 0, y = 0 },
+        { point = "BOTTOMRIGHT", rel = b, relPoint = "BOTTOMRIGHT", x = 0, y = 0 } }
+    b.Count = fstring(b, "", 11)
+    b.Cooldown = CooldownW(b)
+    b.IconBorder = tex(b, nil, "OVERLAY")
+    return b
+end
+-- A slot's state as the caller's reader hands it over.
+function SlotState(t)
+    local state = t or {}
+    return state, function() return state end
+end
+
 function Panel(name)
     local f = blz("Frame", name or "TestPanel", UIParent, 400, 300, 100, 100)
     f.shown = true
@@ -633,6 +747,11 @@ function Step(dt)
     for _ = 1, steps do
         TIME = TIME + dt / steps
         for _, o in ipairs(ALL) do
+            if o.timer then o.timerFraction = timerLeft(o.timer) end
+            if o.cd and not o.cd.done and type(o.cd.start) == "number" and o.cd.dur > 0 and TIME >= o.cd.start + o.cd.dur then
+                o.cd.done = true
+                o:RunScript("OnCooldownDone")
+            end
             if o.scripts.OnUpdate and o:IsVisible() then o.scripts.OnUpdate(o, dt / steps) end
         end
     end
@@ -651,7 +770,7 @@ function Load(opts)
         LogDegradeOnce = function(key, msg) DEGRADED[#DEGRADED + 1] = key .. " :: " .. tostring(msg) end,
     }
     FS.FrameHelpers = { PixelsPerUnit = function() return PPU end }
-    for _, name in ipairs({ "Theme", "Layout", "HeldArt", "ControlKit", "CheckSkins", "SliderSkins", "FieldSkins", "DropdownSkins", "PanelSkins" }) do
+    for _, name in ipairs({ "Theme", "Layout", "HeldArt", "ControlKit", "CheckSkins", "SliderSkins", "FieldSkins", "DropdownSkins", "ItemSlotSkins", "PanelSkins" }) do
         local chunk, err = load(SOURCES[name], "=" .. name .. ".lua")
         if not chunk then error(err) end
         chunk("forever-stuwave", FS)
@@ -761,6 +880,8 @@ function DumpOps(roots)
                     rgba = { o.vertex[1], o.vertex[2], o.vertex[3], o.vertex[4] * a } }
             elseif o.color then
                 ops[#ops + 1] = { kind = "flat", l = l, t = t, r = r, b = b, rgba = { o.color[1], o.color[2], o.color[3], o.color[4] * a } }
+            elseif o.path and o.path:find("WHITE8x8", 1, true) and o.vertex then
+                ops[#ops + 1] = { kind = "flat", l = l, t = t, r = r, b = b, rgba = { o.vertex[1], o.vertex[2], o.vertex[3], o.vertex[4] * a } }
             end
         elseif o.kind == "FontString" and o.text and o.text ~= "" then
             local tc = o.textColor or { 1, 1, 1, 1 }
@@ -2217,6 +2338,372 @@ case("a_secret_text_reads_as_empty_without_an_error", PRELUDE + """
     assert(not p.chip.frame:IsShown(), "a count needs readable text")
 """)
 
+# -------------------------------------------------------------------------------------------------------------------
+# Item slot
+# -------------------------------------------------------------------------------------------------------------------
+
+SLOT_PRELUDE = PRELUDE + """
+    local Kit = FS.ControlKit
+    local function Slot(o, size)
+        local state, read = SlotState(o)
+        local b = ItemSlotW(P, 20, 20, (size or 40) / PPU, (size or 40) / PPU)
+        assert(FS.ItemSlotSkins.Decorate(b, read), "the slot was not decorated")
+        FlushTimers()
+        return b, state, FS.ItemSlotSkins.Parts(b)
+    end
+"""
+
+case("slot_tokens_are_the_mockups_numbers", PRELUDE + """
+    local T, K = FS.Theme, FS.Layout.Controls
+    local function hex(c, h)
+        local r, g, b = tonumber(h:sub(1, 2), 16) / 255, tonumber(h:sub(3, 4), 16) / 255, tonumber(h:sub(5, 6), 16) / 255
+        assert(Near(c[1], r, 0.001) and Near(c[2], g, 0.001) and Near(c[3], b, 0.001), h .. " is not the token " .. c[1] .. " " .. c[2] .. " " .. c[3])
+    end
+    local q = T.COLOR_QUALITY
+    hex(q[0], "9d9d9d"); hex(q[1], "5b2d9e"); hex(q[2], "1eff00"); hex(q[3], "2f8cff"); hex(q[4], "6a1fd1"); hex(q[5], "ff8000")
+    assert(q[1] == T.COLOR_BAG_RING and q[4] == T.COLOR_EPIC_RING, "Common and Epic are the bag colours")
+    hex(T.COLOR_AMBER, "ffb648")
+    assert(K.SLOT_ICON_X == 4 and K.SLOT_ICON_Y == 3 and K.SLOT_ICON_TRIM_W == 8 and K.SLOT_ICON_TRIM_H == 10)
+    assert(K.SLOT_LED_W == 24 and K.SLOT_LED_H == 2 and K.SLOT_LED_UP == 5 and K.SLOT_EDGE_FROM == 2)
+    assert(K.SLOT_GLINT == true and K.SLOT_GLINT_MIN == 4 and Near(K.SLOT_GLINT_ALPHA, 0.35) and K.SLOT_GLINT_PERIOD == 3.4)
+    assert(Near(K.SLOT_GLINT_SWEEP, 0.6) and K.SLOT_GLINT_FROM == -44 and K.SLOT_GLINT_TO == 64)
+    assert(K.SLOT_WASH_PAD == 4 and Near(K.SLOT_WASH_ALPHA, 0.10) and K.SLOT_RETICLE_PAD == 4 and K.SLOT_RETICLE_LEN == 6)
+    assert(K.SLOT_RETICLE_PERIOD == 1.2 and Near(K.SLOT_RETICLE_GROW, 0.1))
+    assert(Near(K.SLOT_COOLDOWN_ALPHA, 0.78) and K.SLOT_COOLDOWN_FRONT == 2 and Near(K.SLOT_LOCK_ALPHA, 0.55))
+    assert(Near(K.SLOT_HAZARD_ALPHA, 0.4) and K.SLOT_LOCK == 16)
+""")
+
+case("slot_led_is_24_by_2_five_up_in_the_quality_colour_and_only_on_a_filled_slot", SLOT_PRELUDE + """
+    local T, IS = FS.Theme, FS.ItemSlotSkins
+    local b, state, p = Slot({ quality = 3 })
+    NoDegrade()
+    assert(p and p.built)
+    Expect(p.led, b, 8, 35, 24, 2, "led")
+    for q = 0, 5 do
+        state.quality = q; IS.Refresh(b)
+        Is(Colour(p.led), T.COLOR_QUALITY[q], 1, "LED of quality " .. q)
+    end
+    state.quality = 7; IS.Refresh(b)
+    Is(Colour(p.led), T.COLOR_QUALITY[5], 1, "above Legendary reads as Legendary")
+    state.quality = nil; IS.Refresh(b)
+    Is(Colour(p.led), T.COLOR_QUALITY[1], 1, "an unknown quality is Common")
+    state.quality = { __secret = true }; IS.Refresh(b)
+    Is(Colour(p.led), T.COLOR_QUALITY[1], 1, "a secret quality is never compared and reads as Common")
+    state.quality, state.locked = 4, true; IS.Refresh(b)
+    Is(Colour(p.led), T.COLOR_CTRL_DISEDGE, 1, "a locked slot's LED is the dim edge")
+    state.locked, state.empty = false, true; IS.Refresh(b)
+    assert(not p.led:IsShown(), "an empty slot has no LED")
+    NoDegrade()
+""")
+
+case("slot_edge_is_2_px_from_uncommon_up_in_the_quality_colour", SLOT_PRELUDE + """
+    local T, IS = FS.Theme, FS.ItemSlotSkins
+    local b, state, p = Slot({ quality = 3 })
+    Expect(p.edge, b, 0, 0, 40, 40, "outer edge")
+    Expect(p.edge2, b, 1, 1, 38, 38, "inner edge")
+    assert(p.edge.slice == 6, "the outer ring is the slot's chamfer 6")
+    for q = 2, 5 do
+        state.quality = q; IS.Refresh(b)
+        assert(p.edge:IsShown() and p.edge2:IsShown(), "a 2 px edge at quality " .. q)
+        Is(Colour(p.edge), T.COLOR_QUALITY[q], 1, "outer edge " .. q)
+        Is(Colour(p.edge2), T.COLOR_QUALITY[q], 1, "inner edge " .. q)
+    end
+    for _, q in ipairs({ 0, 1 }) do
+        state.quality = q; IS.Refresh(b)
+        assert(not p.edge:IsShown() and not p.edge2:IsShown(), "Poor and Common keep the slot's own dim ring: " .. q)
+    end
+    state.quality, state.empty = 4, true; IS.Refresh(b)
+    assert(not p.edge:IsShown() and not p.edge2:IsShown(), "an empty slot has no quality edge")
+""")
+
+case("slot_glint_offset_runs_from_minus_44_to_64_in_the_first_0_6_of_a_3_4_s_loop", SLOT_PRELUDE + """
+    local IS = FS.ItemSlotSkins
+    assert(Near(IS.GlintOffset(0), -44, 0.001), "starts 44 left of the icon")
+    assert(Near(IS.GlintOffset(1.02), 10, 0.001), "half way at half the sweep (ease in out)")
+    assert(Near(IS.GlintOffset(2.03), 64, 0.1), "ends 64 right of the icon")
+    assert(IS.GlintOffset(2.5) == nil and IS.GlintOffset(3.39) == nil, "rests for the other 40 % of the loop")
+    assert(Near(IS.GlintOffset(3.4 + 1.02), 10, 0.001), "and loops")
+    assert(IS.GlintOffset(0.5) < IS.GlintOffset(1.02) and IS.GlintOffset(1.02) < IS.GlintOffset(1.5))
+""")
+
+case("slot_glint_crosses_the_icon_of_an_epic_and_a_legendary_and_not_a_rare", SLOT_PRELUDE + """
+    local K, IS = FS.Layout.Controls, FS.ItemSlotSkins
+    local b, state, p = Slot({ quality = 4 })
+    NoDegrade()
+    assert(IS.GlintEnabled() == true and Kit.IsAnimating(b, "glint"))
+    Expect(p.glint, b, 4, 3, 32, 30, "the glint shows through the icon area")
+    assert(p.glint.path:find("ctl_glint.tga", 1, true))
+    Is(p.glint.vertex, { 1, 1, 1 }, 0.35, "white at 0.35")
+    Step(0.05)
+    assert(not p.glint:IsShown(), "off to the left at the start of the loop")
+    Step(0.99)
+    assert(p.glint:IsShown(), "on the icon half way")
+    -- the band moves right by shifting the window left: at t = 10 the window starts at -10 / 64 and is 32 / 64 wide, 30 / 64 tall
+    local c = p.glint.coords
+    assert(Near(c[2] - c[1], 32 / 64, 0.001) and Near(c[4], 30 / 64, 0.001) and Near(c[3], 0, 0.001), "window size")
+    assert(c[1] < 0 and c[1] > -0.4, "the window has slid left of the sheet: " .. c[1])
+    Step(1.5)
+    assert(not p.glint:IsShown(), "resting")
+    state.quality = 5; IS.Refresh(b)
+    assert(Kit.IsAnimating(b, "glint"), "a legendary glints")
+    state.quality = 3; IS.Refresh(b)
+    assert(not Kit.IsAnimating(b, "glint") and not p.glint:IsShown(), "a rare does not")
+    state.quality, state.empty = 4, true; IS.Refresh(b)
+    assert(not Kit.IsAnimating(b, "glint"), "an empty slot does not")
+""")
+
+case("slot_glint_has_one_named_switch_that_turns_it_off", SLOT_PRELUDE + """
+    local K, IS = FS.Layout.Controls, FS.ItemSlotSkins
+    local b, state, p = Slot({ quality = 4 })
+    assert(Kit.IsAnimating(b, "glint"))
+    IS.SetGlint(false)
+    assert(IS.GlintEnabled() == false and not Kit.IsAnimating(b, "glint") and not p.glint:IsShown(), "off at run time")
+    IS.SetGlint(true)
+    assert(Kit.IsAnimating(b, "glint"), "and back on")
+    IS.SetGlint(nil)
+    K.SLOT_GLINT = false
+    local b2, state2, p2 = Slot({ quality = 5 })
+    assert(not Kit.IsAnimating(b2, "glint"), "the Layout constant is the default of the switch")
+    NoDegrade()
+""")
+
+case("slot_hover_wears_a_wash_a_cyan_2_px_edge_and_breathing_lock_on_brackets", SLOT_PRELUDE + """
+    local T, K = FS.Theme, FS.Layout.Controls
+    local b, state, p = Slot({ quality = 3 })
+    for _, w in pairs(p.wash) do assert(not w:IsShown(), "no wash at rest") end
+    assert(not p.reticle.tlH:IsShown() and not Kit.IsAnimating(b, "reticle"))
+    Hover(b)
+    Is(Colour(p.edge), T.COLOR_POWER, 1, "hover edge")
+    Is(Colour(p.edge2), T.COLOR_POWER, 1, "hover inner edge")
+    -- a 4 px halo outside the slot at 0.10 cyan (the mockup's wash sits under the slot's face)
+    Expect(p.wash.top, b, -4, -4, 48, 4, "wash top"); Expect(p.wash.bottom, b, -4, 40, 48, 4, "wash bottom")
+    Expect(p.wash.left, b, -4, 0, 4, 40, "wash left"); Expect(p.wash.right, b, 40, 0, 4, 40, "wash right")
+    for _, w in pairs(p.wash) do Is(Colour(w), T.COLOR_POWER, 0.10, "wash colour"); assert(w:IsShown()) end
+    -- the brackets at rest: pad 4, arms 6, stroke 2 centred on the path (each corner reaches half a stroke past it)
+    Step(1 / 60)
+    local r = p.reticle
+    Expect(r.tlH, b, -5, -5, 7, 2, "top left across"); Expect(r.tlV, b, -5, -3, 2, 5, "top left down")
+    Expect(r.brH, b, 38, 43, 7, 2, "bottom right across"); Expect(r.brV, b, 43, 38, 2, 5, "bottom right up")
+    Is(Colour(r.tlH), T.COLOR_POWER, 1, "cyan")
+    -- they breathe: at the top of the 1.2 s loop the whole box has grown by 0.1 about its centre (pad 4 + 2.4 -> 6, arms 7)
+    Step(0.6 - 1 / 60)
+    Expect(r.tlH, b, -7, -7, 8, 2, "top left across, grown")
+    Step(0.6)
+    Expect(r.tlH, b, -5, -5, 7, 2, "and back")
+    Unhover(b)
+    for _, w in pairs(p.wash) do assert(not w:IsShown(), "no wash once the hand leaves") end
+    assert(not r.tlH:IsShown() and not Kit.IsAnimating(b, "reticle"))
+    Is(Colour(p.edge), T.COLOR_QUALITY[3], 1, "the quality edge is back")
+    state.empty, state.quality = true, nil; FS.ItemSlotSkins.Refresh(b)
+    Hover(b)
+    assert(p.edge:IsShown() and p.edge2:IsShown(), "an empty slot takes the hover edge too")
+    Is(Colour(p.edge), T.COLOR_POWER, 1, "empty hover edge")
+    assert(r.tlH:IsShown())
+""")
+
+case("slot_cooldown_drains_an_ink_scrim_down_the_icon_behind_a_2_px_cyan_front", SLOT_PRELUDE + """
+    local T = FS.Theme
+    local b, state, p = Slot({ quality = 2 })
+    assert(p.bar and not p.bar:IsShown(), "no cooldown, no scrim")
+    TIME = 100
+    b.Cooldown:SetCooldown(100, 10)
+    assert(p.bar:IsShown())
+    assert(b.Cooldown.swipe == false, "the stock swipe gives way to the drain")
+    assert(p.bar.orientation == "VERTICAL" and p.bar.reverse == true, "fills from the top, so the scrim drains upward")
+    assert(p.bar.timer and p.bar.timer.dir == Enum.StatusBarTimerDirection.RemainingTime and p.bar.timer.interp == Enum.StatusBarInterpolation.Immediate)
+    Expect(p.bar, b, 4, 3, 32, 30, "bar on the icon area")
+    local scrim = p.bar:GetStatusBarTexture()
+    Is(scrim.vertex, T.COLOR_CTRL_INK, 0.78, "scrim")
+    Expect(scrim, b, 4, 3, 32, 30, "the whole icon at the start")
+    Step(5)
+    Expect(scrim, b, 4, 3, 32, 15, "half drained")
+    Expect(p.front, b, 4, 3 + 15 - 2, 32, 2, "the 2 px front rides the scrim's bottom edge")
+    Is(Colour(p.front), T.COLOR_POWER, 1, "cyan front")
+    Step(4.9)
+    Expect(scrim, b, 4, 3, 32, 0.3, "nearly gone", 0)
+    Step(0.2)
+    assert(not p.bar:IsShown() and b.Cooldown.swipe == true, "done: the scrim is hidden and the stock swipe is back")
+    NoDegrade()
+""")
+
+case("slot_cooldown_takes_a_duration_object_straight_and_clear_hides_the_scrim", SLOT_PRELUDE + """
+    local b, state, p = Slot({ quality = 2 })
+    TIME = 50
+    local obj = DurationAt(50, 4)
+    b.Cooldown:SetCooldownFromDurationObject(obj)
+    assert(p.bar:IsShown() and p.bar.timer.obj == obj, "the engine's own object is handed over untouched")
+    b.Cooldown:Clear()
+    assert(not p.bar:IsShown() and b.Cooldown.swipe == true)
+    b.Cooldown:SetCooldownFromExpirationTime(60, 10)
+    assert(p.bar:IsShown() and p.bar.timer.obj.start == 50 and p.bar.timer.obj.duration == 10)
+    b.Cooldown:SetCooldown(0, 0)
+    assert(not p.bar:IsShown(), "a plain zero cooldown is no cooldown")
+    NoDegrade()
+""")
+
+case("slot_cooldown_never_reads_a_number_it_cannot_see_and_falls_back_to_the_stock_swipe", SLOT_PRELUDE + """
+    local b, state, p = Slot({ quality = 2 })
+    local secret = { __secret = true }
+    -- a comparison or arithmetic on a secret throws in the mock, so reaching the bar means none was made
+    b.Cooldown:SetCooldown(secret, secret)
+    assert(p.bar:IsShown(), "a secret cooldown is passed to the engine as is")
+    b.Cooldown:Clear()
+    DUR_REJECTS_SECRET = true
+    b.Cooldown:SetCooldown(secret, secret)
+    assert(not p.bar:IsShown() and b.Cooldown.swipe == true, "the engine refused it: the stock swipe stays and nothing throws")
+    DUR_REJECTS_SECRET = false
+    TIME = 10
+    b.Cooldown:SetCooldown(TIME, 5)
+    assert(p.bar:IsShown(), "and the next cooldown works")
+    NoDegrade()
+""")
+
+case("slot_cooldown_is_left_to_the_stock_swipe_when_the_client_has_no_timer_bars", SLOT_PRELUDE + """
+    Enum.StatusBarTimerDirection = nil
+    local b, state, p = Slot({ quality = 2 })
+    b.Cooldown:SetCooldown(TIME, 5)
+    assert(not p.bar:IsShown() and b.Cooldown.swipe == true, "no timer enum, no drain")
+    NoDegrade()
+""")
+
+case("slot_locked_is_an_ink_scrim_amber_tape_and_a_lock_glyph", SLOT_PRELUDE + """
+    local T, IS = FS.Theme, FS.ItemSlotSkins
+    local b, state, p = Slot({ quality = 1, locked = true })
+    NoDegrade()
+    Expect(p.scrim, b, 4, 3, 32, 30, "locked scrim")
+    Is(Colour(p.scrim), T.COLOR_CTRL_INK, 0.55, "scrim")
+    Expect(p.hazard, b, 4, 3, 32, 30, "tape")
+    assert(p.hazard.path:find("ctl_hazard.tga", 1, true))
+    Is(p.hazard.vertex, T.COLOR_AMBER, 0.4, "amber tape at 0.4")
+    local c = p.hazard.coords
+    assert(Near(c[1], 0) and Near(c[2], 32 / 64) and Near(c[3], 0) and Near(c[4], 30 / 64), "the top left 32 x 30 texels of the sheet")
+    Expect(p.lock, b, 12, 10, 16, 16, "lock glyph centred on the icon")
+    assert(p.lock.path:find("ctl_lock.tga", 1, true))
+    Is(p.lock.vertex, T.COLOR_AMBER, 1, "amber lock")
+    Is(Colour(p.led), T.COLOR_CTRL_DISEDGE, 1, "dim LED")
+    state.locked = false; IS.Refresh(b)
+    assert(not p.scrim:IsShown() and not p.hazard:IsShown() and not p.lock:IsShown(), "unlocked")
+    Is(Colour(p.led), T.COLOR_QUALITY[1], 1, "the LED is back")
+    state.locked, state.empty = true, true; IS.Refresh(b)
+    assert(not p.scrim:IsShown() and not p.hazard:IsShown() and not p.lock:IsShown(), "an empty slot is never taped")
+""")
+
+case("slot_follows_the_reader_when_the_stock_icon_changes_desaturation", SLOT_PRELUDE + """
+    local b, state, p = Slot({ quality = 3 })
+    assert(not p.scrim:IsShown())
+    state.locked = true
+    b.icon:SetDesaturated(true)
+    assert(p.scrim:IsShown() and p.hazard:IsShown(), "the stock lock state is the signal: the tape follows it")
+    state.locked = false
+    b.icon:SetDesaturated(false)
+    assert(not p.scrim:IsShown())
+""")
+
+case("slot_on_a_44_px_button_keeps_the_numbers_relative_to_its_rect", SLOT_PRELUDE + """
+    local b, state, p = Slot({ quality = 3, locked = true }, 44)
+    NoDegrade()
+    -- icon area = the rect less 8 wide and 10 tall at (4, 3); the LED is centred, 5 up from the bottom
+    Expect(p.led, b, 10, 39, 24, 2, "led")
+    Expect(p.scrim, b, 4, 3, 36, 34, "scrim")
+    Expect(p.hazard, b, 4, 3, 36, 34, "tape")
+    local c = p.hazard.coords
+    assert(Near(c[2], 36 / 64) and Near(c[4], 34 / 64), "the tape's window grows with the icon area")
+    Expect(p.lock, b, 14, 12, 16, 16, "lock glyph centred")
+    Expect(p.edge, b, 0, 0, 44, 44, "edge")
+""")
+
+case("an_item_slot_is_decorated_once_in_combat_waits_and_writes_nothing_to_the_button", SLOT_PRELUDE + """
+    local IS = FS.ItemSlotSkins
+    local b, state, p = Slot({ quality = 3 })
+    local hooks, objs = HookCount(), ObjCount()
+    assert(IS.Decorate(b, function() return state end) == true and HookCount() == hooks and ObjCount() == objs, "a repeat builds nothing")
+    local late = ItemSlotW(P, 120, 20, 40 / PPU, 40 / PPU)
+    __combat = true
+    assert(IS.Decorate(late, function() return { quality = 2 } end) == false)
+    assert(IS.Parts(late) == nil, "nothing is built in combat")
+    __combat = false
+    Fire("PLAYER_REGEN_ENABLED"); FlushTimers()
+    assert(IS.Parts(late) and IS.Parts(late).built, "decorated after combat")
+    NoDegrade()
+""")
+
+case("a_hidden_item_slot_runs_no_animation_and_a_shown_one_resumes", SLOT_PRELUDE + """
+    local b, state, p = Slot({ quality = 4 })
+    Hover(b)
+    Step(0.3)
+    local a = p.reticle.tlH.points[1].x
+    P:Hide()
+    Step(1.0)
+    assert(p.reticle.tlH.points[1].x == a, "the brackets of a hidden slot moved")
+    P:Show()
+    Step(0.3)
+    assert(p.reticle.tlH.points[1].x ~= a, "they did not resume")
+""")
+
+case("slot_regions_sit_on_whole_pixels_at_every_scale", SLOT_PRELUDE + """
+    local b, state, p = Slot({ quality = 4, locked = true })
+    b.Cooldown:SetCooldown(TIME, 10)
+    Hover(b)
+    Step(0.2)
+    for _, scale in ipairs({ 1.0, 1.5, 2.0, 1.2 }) do
+        PPU = scale
+        Fire("UI_SCALE_CHANGED")
+        local w = Round(b.w * scale)
+        Expect(p.scrim, b, 4, 3, w - 8, w - 10, "scrim at " .. scale)
+        Expect(p.led, b, math.floor((w - 24) / 2), w - 5, 24, 2, "led at " .. scale)
+        WholePixels(b, b, "slot at " .. scale, { b.icon, b.Count, b.IconBorder, b.Cooldown, p.bar, p.edge, p.edge2 })
+    end
+""")
+
+case("a_secret_reader_answer_is_treated_as_an_unknown_slot_without_an_error", SLOT_PRELUDE + """
+    local IS = FS.ItemSlotSkins
+    local b = ItemSlotW(P, 20, 20, 40 / PPU, 40 / PPU)
+    assert(IS.Decorate(b, function() return { __secret = true } end))
+    FlushTimers()
+    local p = IS.Parts(b)
+    assert(p and p.built)
+    Is(Colour(p.led), FS.Theme.COLOR_QUALITY[1], 1, "an unreadable slot reads as Common")
+    local c = ItemSlotW(P, 120, 20, 40 / PPU, 40 / PPU)
+    assert(IS.Decorate(c, function() error("the reader threw") end))
+    FlushTimers()
+    assert(IS.Parts(c) and IS.Parts(c).built, "a reader that throws does not stop the build")
+""")
+
+SCENES["slots"] = """
+    local FS = Load()
+    local P = Panel()
+    P.w, P.h = 900, 260
+    local specs = {
+        { {}, "empty" }, { { quality = 1 }, "common" }, { { quality = 2 }, "uncommon" }, { { quality = 3 }, "rare" },
+        { { quality = 4 }, "epic" }, { { quality = 5 }, "legendary" }, { { quality = 0 }, "poor" },
+        { { quality = 3 }, "hover" }, { { quality = 2 }, "cooldown" }, { { quality = 1, locked = true }, "locked" },
+    }
+    specs[1][1].empty = true
+    local slots = {}
+    for i, s in ipairs(specs) do
+        local state, read = SlotState(s[1])
+        local b = ItemSlotW(P, 12 + (i - 1) * 56, 20, 40 / PPU, 40 / PPU)
+        b.Count:SetText(i == 4 and "5" or "")
+        FS.ItemSlotSkins.Decorate(b, read)
+        slots[i] = b
+    end
+    FlushTimers()
+    Hover(slots[8])
+    TIME = 100
+    slots[9].Cooldown:SetCooldown(100, 10)
+    local lower = {}
+    for i = 1, 6 do
+        local state, read = SlotState({ quality = i - 1 })
+        local b = ItemSlotW(P, 12 + (i - 1) * 56, 120, 40 / PPU, 40 / PPU)
+        FS.ItemSlotSkins.Decorate(b, read)
+    end
+    FlushTimers()
+    Step(1.05)
+    slots[9].Cooldown:SetCooldown(TIME - 4, 10)
+    Step(0.1)
+    return DumpOps({ P })
+"""
+
 SCENES["dropdowns"] = """
     local FS = Load()
     local P = Panel()
@@ -2342,6 +2829,8 @@ def render(prefix: str) -> None:
                             sy = int(v * h0 // 1) % h0
                             for tx in range(r - l):
                                 u = c[1] + (tx + 0.5) / (r - l) * (c[2] - c[1])
+                                if op["file"] == "ctl_glint.tga" and not 0 <= u < 1:
+                                    continue  # the glint's sheet is clamped, not repeated: outside it is transparent
                                 tp[tx, ty] = sp[int(u * w0 // 1) % w0, sy]
                     else:
                         tile = src.resize((r - l, b - t), Image.NEAREST)

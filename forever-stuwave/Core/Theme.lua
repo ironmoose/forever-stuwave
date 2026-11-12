@@ -109,6 +109,17 @@ Theme.COLOR_CTRL_BAND     = { 0x1a / 255, 0x0d / 255, 0x2c / 255, 1 } -- #1a0d2c
 Theme.COLOR_CTRL_TEXT     = { 0xe9 / 255, 0xe2 / 255, 1, 1 }          -- #e9e2ff a control's own text
 Theme.COLOR_CTRL_HAIR     = { 0x3a / 255, 0x21 / 255, 0x68 / 255, 1 } -- #3a2168 the rule between a field's prompt cell and its text
 Theme.COLOR_CTRL_HINT     = { 0x6c / 255, 0x63 / 255, 0x96 / 255, 1 } -- #6c6396 a field's placeholder text
+-- Item quality as the shared item slot draws it (the shared controls mockup, section 6): the LED under the icon, and the 2 px edge
+-- from Uncommon up. Indexed by Enum.ItemQuality. Common is the bag slot ring and Epic the bag bar's deep purple; Rare is brighter
+-- than Blizzard's blue on purpose, for a dark panel. Anything above Legendary reads as Legendary.
+Theme.COLOR_QUALITY = {
+    [0] = { 0x9d / 255, 0x9d / 255, 0x9d / 255, 1 }, -- Poor #9d9d9d
+    [1] = Theme.COLOR_BAG_RING,                      -- Common #5b2d9e
+    [2] = { 0x1e / 255, 1, 0, 1 },                   -- Uncommon #1eff00
+    [3] = { 0x2f / 255, 0x8c / 255, 1, 1 },          -- Rare #2f8cff
+    [4] = Theme.COLOR_EPIC_RING,                     -- Epic #6a1fd1
+    [5] = { 1, 0x80 / 255, 0, 1 },                   -- Legendary #ff8000
+}
 
 -------------------------------------------------------------------------------
 -- Radii

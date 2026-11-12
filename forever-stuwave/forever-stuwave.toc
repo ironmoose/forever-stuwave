@@ -23,6 +23,7 @@ Core/CheckSkins.lua
 Core/SliderSkins.lua
 Core/FieldSkins.lua
 Core/DropdownSkins.lua
+Core/ItemSlotSkins.lua
 Core/PanelSkins.lua
 Modules/Tracker/Tracker.lua
 Modules/Tracker/TrackerSeat.lua

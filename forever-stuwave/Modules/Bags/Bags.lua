@@ -458,11 +458,32 @@ local function SyncWell(button)
     if empty then ClearIconArt(ItemIcon(button)) end
 end
 
--- Everything that follows the icon: the well, the corner wedge and the ring.
+-- The shared item slot's layer (Core/ItemSlotSkins.lua: quality LED and 2 px edge, glint, hover brackets, cooldown drain, locked
+-- tape) sits over this base skin and asks what the slot holds through this reader. The item API answers it fresh each time (the
+-- lock state changes without any of the icon's art changing), never a cached ring colour; a quality or lock flag that cannot
+-- be read plainly is the layer's to treat as unknown. The layer is absent from a build without the file (and from the Bags
+-- harness), so every call here is a no-op then.
+local function SlotDecorState(button)
+    local info = SlotItemInfo(button)
+    return { quality = info and info.quality, locked = info and info.isLocked, empty = not IconHoldsItem(button) }
+end
+
+local function DecorateSlot(button)
+    local slotSkins = FS.ItemSlotSkins
+    if slotSkins and slotSkins.Decorate then slotSkins.Decorate(button, SlotDecorState) end
+end
+
+local function RefreshSlotDecor(button)
+    local slotSkins = FS.ItemSlotSkins
+    if slotSkins and slotSkins.Refresh then slotSkins.Refresh(button) end
+end
+
+-- Everything that follows the icon: the well, the corner wedge, the ring and the shared slot layer.
 local function SyncSlot(button)
     SyncWell(button)
     SyncIconCorners(button)
     SyncSlotRing(button)
+    RefreshSlotDecor(button)
 end
 
 -- One post-hook per icon state setter (no method replaced), installed once per button.
@@ -519,6 +540,7 @@ local function SkinItemButton(button, isBagSlot)
         AddIconCorners(button)
         if isBagSlot then AddWell(button) end
         HookIconState(button)
+        DecorateSlot(button)
     end
     if isBagSlot and wells[button] == nil then AddWell(button) end
     ReadSlotRing(button)
