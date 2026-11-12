@@ -6,10 +6,10 @@
 -- and one dark plate, cut at its TOP-LEFT and BOTTOM-RIGHT only (Theme.CHROME_CORNERS "cut"). The map has no bottom
 -- cut of its own: the body's BOTTOM-RIGHT is the last row's, wherever that row is.
 --
---   * the key row: bare glyphs over a coloured LED underline, no boxes. Tracking (cyan), calendar (violet), the STU key
---     (pink; it replaces the stock gear and opens the config window) and the tray toggle (amber; the number of
---     collected addon buttons and a chevron), then a faint divider and the coords, right aligned. Mail keeps a seat
---     after the toggle and is there only while mail waits; every key is placed by the keys that are showing, so the row
+--   * the key row: bare glyphs over a coloured LED underline, no boxes. The tray toggle (amber; the number of collected
+--     addon buttons and a chevron) leads, so it never moves, then tracking (cyan), calendar (violet) and the STU key
+--     (pink; it replaces the stock gear and opens the config window), then a faint divider and the coords, right
+--     aligned. Mail keeps a seat after the STU key and is there only while mail waits; every key is placed by the keys that are showing, so the row
 --     never has a hole in it. Hovering a key draws a thin chamfered outline in its own colour and brightens its LED.
 --   * the tray: a second row of the same body under a dashed amber rule, collecting the addon minimap buttons
 --     (LibDBIcon and stray *MinimapButton* frames) so they stop cluttering the map edge, each with the same LED
@@ -1396,7 +1396,7 @@ end
 -- on it; lit: it is held bright, the open tray's toggle).
 local Keys = {}
 
--- The key row's keys in seat order (st.order), tracking, calendar, STU, tray toggle, mail: tables from Keys.
+-- The key row's keys in seat order (st.order), tray toggle, tracking, calendar, STU, mail: tables from Keys.
 local Row = { keys = {} }
 
 local function AddRowKey(st)
@@ -2509,7 +2509,8 @@ local function BuildTrayToggle(bezel)
     toggle:SetFrameLevel(bezel:GetFrameLevel() + KEY_LEVEL_OFFSET)
 
     local st = AddKeyChrome(toggle, COLOR_AMBER, "toggle")
-    st.order = 4
+    -- First in the row, so mail coming and going never moves it; mail then sits beside the other stock keys.
+    st.order = 0
 
     local count = toggle:CreateFontString(nil, "OVERLAY")
     ApplyMono(count, SPEC.count, COLOR_AMBER)

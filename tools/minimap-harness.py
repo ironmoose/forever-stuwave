@@ -724,8 +724,8 @@ def spacing_checks() -> None:
         lua, g, px = world(w, tray='__lib:Register("Alpha", MakeObj("Alpha"), {})')
         e = geo(g.Minimap.w / px)
         bezel = g.Minimap.fsBezel
-        keys = [("tracking", g.MinimapCluster.Tracking, SEARCH_TEXTURE), ("calendar", g.GameTimeFrame, CALENDAR_TEXTURE),
-                ("stu", g.Minimap.fsSTUKey, STU_TEXTURE), ("toggle", g.Minimap.fsTrayToggle, None)]
+        keys = [("toggle", g.Minimap.fsTrayToggle, None), ("tracking", g.MinimapCluster.Tracking, SEARCH_TEXTURE),
+                ("calendar", g.GameTimeFrame, CALENDAR_TEXTURE), ("stu", g.Minimap.fsSTUKey, STU_TEXTURE)]
         resolved = [str(g.Minimap.fsBezelResolved[i]) for i in range(1, len(g.Minimap.fsBezelResolved) + 1)]
         check(f"[spacing@{label}] the keys built are tracking, calendar, stu, mail ({resolved}); the toggle joins from the tray",
               resolved == ["tracking", "calendar", "stu", "mail"] and all(f is not None for _, f, _ in keys))
@@ -865,8 +865,8 @@ def row_checks() -> None:
         check(f"[row@{label}] ... so mail takes the fourth slot, no hole where the toggle is",
               near(mail.points.TOPLEFT.x / px, e["margin"] + 3 * e["pitch"]))
         lua.execute('__lib:Register("Alpha", MakeObj("Alpha"), {})')
-        check(f"[row@{label}] ... and the first addon button brings the toggle back in the fourth slot, mail to the fifth",
-              toggle.shown is True and near(toggle.points.TOPLEFT.x / px, e["margin"] + 3 * e["pitch"])
+        check(f"[row@{label}] ... and the first addon button brings the toggle back in the first slot, mail to the fifth",
+              toggle.shown is True and near(toggle.points.TOPLEFT.x / px, e["margin"])
               and near(mail.points.TOPLEFT.x / px, e["margin"] + 3 * e["pitch"] + e["toggleW"] + e["keyGap"]))
 
     # a client without the calendar button: the next key takes its place, no hole
@@ -892,10 +892,10 @@ def row_checks() -> None:
           len(logs) == 1 and logs[0].startswith("minimap_key_stu|") and "stuboom" in logs[0])
     check("[row] ... the half-built key is hidden and unpublished, and no slot is spent on it",
           key is not None and key.shown is False and g.Minimap.fsSTUKey is None
-          and near(g.Minimap.fsTrayToggle.points.TOPLEFT.x / px, e["margin"] + 2 * e["pitch"]))
-    check("[row] ... and tracking, calendar and the toggle still come up in slots 1, 2 and 3",
-          near(g.MinimapCluster.Tracking.points.TOPLEFT.x / px, e["margin"])
-          and near(g.GameTimeFrame.points.TOPLEFT.x / px, e["margin"] + e["pitch"]))
+          and near(g.Minimap.fsTrayToggle.points.TOPLEFT.x / px, e["margin"]))
+    check("[row] ... and the toggle, tracking and calendar still come up in slots 1, 2 and 3",
+          near(g.MinimapCluster.Tracking.points.TOPLEFT.x / px, e["margin"] + e["toggleW"] + e["keyGap"])
+          and near(g.GameTimeFrame.points.TOPLEFT.x / px, e["margin"] + e["toggleW"] + e["keyGap"] + e["pitch"]))
     resolved = [str(g.Minimap.fsBezelResolved[i]) for i in range(1, len(g.Minimap.fsBezelResolved) + 1)]
     check(f"[row] the resolved and skipped lists say so ({resolved})", resolved == ["tracking", "calendar", "mail"])
 
@@ -1416,12 +1416,12 @@ def rescale_checks() -> None:
     lua.execute(f"PixelUtil = {{ GetPixelToUIUnitFactor = function() return {px2!r} end }}; __rescale()")
     e = geo(g.Minimap.w / px2)
     bezel = g.Minimap.fsBezel
-    keys = [g.MinimapCluster.Tracking, g.GameTimeFrame, g.Minimap.fsSTUKey, g.Minimap.fsTrayToggle]
+    keys = [g.Minimap.fsTrayToggle, g.MinimapCluster.Tracking, g.GameTimeFrame, g.Minimap.fsSTUKey]
     check(f"[rescale] the row is re-seated on the new pixel ({bezel.h / px2:g} px tall, was {old / px:g} px)",
           bezel.h != old and near(bezel.h / px2, e["row"]) and whole(bezel.h, px2))
     check("[rescale] every key is re-seated on the new pixel grid at the new spacing",
-          all(near(k.points.TOPLEFT.x / px2, e["margin"] + i * e["pitch"])
-              and near(k.w / px2, e["toggleW"] if i == 3 else e["keyW"])
+          all(near(k.points.TOPLEFT.x / px2, e["margin"] + (0 if i == 0 else e["toggleW"] + e["keyGap"] + (i - 1) * e["pitch"]))
+              and near(k.w / px2, e["toggleW"] if i == 0 else e["keyW"])
               and whole(k.points.TOPLEFT.x, px2) and whole(k.w, px2) and whole(k.h, px2) for i, k in enumerate(keys)))
     lua.execute("__combat = true; PixelUtil = { GetPixelToUIUnitFactor = function() return 1 end }; __rescale(); __combat = false")
     e1 = geo(g.Minimap.w)
