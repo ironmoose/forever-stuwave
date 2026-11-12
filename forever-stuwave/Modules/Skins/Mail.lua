@@ -879,6 +879,23 @@ local function LayoutLetter()
     if L.scroll then Place(L.scroll, L.pad, 12, 10, G.LETTER_W - 2 * G.SIDE - 24, padBottom - 88 - 20) end
 
     Place(L.take, win, G.SIDE, takeY, G.LETTER_W - 2 * G.SIDE, 46)
+    -- Take all is our own button, made at the letter's base level, so stock children stacked above it (the body
+    -- text's hyperlink frame and scroll child run past the visible pad) took the clicks over most of its face.
+    -- Keep it above every other child of the letter.
+    if L.take.SetFrameLevel and win.GetFrameLevel then
+        local top = win:GetFrameLevel()
+        local function scan(frame, depth)
+            for _, child in ipairs({ frame:GetChildren() }) do
+                if child ~= L.take then
+                    local level = Try(child.GetFrameLevel, child)
+                    if type(level) == "number" and level > top then top = level end
+                    if depth < 3 and type(child.GetChildren) == "function" then scan(child, depth + 1) end
+                end
+            end
+        end
+        scan(win, 1)
+        pcall(L.take.SetFrameLevel, L.take, top + 1)
+    end
     L.take:SetEnabled(#cells > 0)
     PaintKey(L.take)
 
