@@ -100,9 +100,12 @@ local MAX_CONTAINERS = 13 -- historical NUM_CONTAINER_FRAMES ceiling; loop skips
 -- an existing region leave its alpha alone (Blizzard re-points the bank
 -- `Background` with SetAtlas, UpdateBackgroundForBankType), so they are not hooked.
 --
--- Deliberately NOT touched: IconOverlay/IconOverlay2, NewItemTexture/
--- BattlepayItemTexture/flash (new-item glows), UpgradeIcon, JunkIcon,
--- IconQuestTexture, searchOverlay,
+-- The new-item glows (NewItemTexture, BattlepayItemTexture, flash) and the quest border (IconQuestTexture) are square art
+-- bigger than the slot, so they poked past the cut ring: they are held too (GLOW_FIELDS), their alpha animations stopped
+-- when they start (an Alpha animation writes alpha in the engine, past the SetAlpha hook), and a quest item's ring is
+-- amber instead (ReadSlotRing).
+--
+-- Deliberately NOT touched: IconOverlay/IconOverlay2, UpgradeIcon, JunkIcon, searchOverlay,
 -- ItemContextOverlay, Cooldown, Count, the lock/desaturate state, the pushed and
 -- highlight textures (interaction feedback) and ExtendedSlot (the
 -- locked-until-secured marker, ContainerFrameItemButtonMixin:UpdateExtended).
@@ -137,10 +140,25 @@ local function ItemIcon(button)
     return nil
 end
 
+local GLOW_FIELDS = { "NewItemTexture", "BattlepayItemTexture", "flash", "IconQuestTexture" }
+local GLOW_ANIMS = { "newitemglowAnim", "flashAnim" }
+local stoppedAnims = setmetatable({}, { __mode = "k" })
+
 local function SweepSlotArt(button)
     if not button then return end
     HoldNormalTexture(button)
     for _, field in ipairs(ART_FIELDS) do HoldRegion(button[field]) end
+    for _, field in ipairs(GLOW_FIELDS) do HoldRegion(button[field]) end
+    for _, field in ipairs(GLOW_ANIMS) do
+        local anim = button[field]
+        if type(anim) == "table" and type(anim.Stop) == "function" then
+            pcall(anim.Stop, anim)
+            if not stoppedAnims[anim] and type(hooksecurefunc) == "function"
+                and pcall(hooksecurefunc, anim, "Play", function(self) pcall(self.Stop, self) end) then
+                stoppedAnims[anim] = true
+            end
+        end
+    end
 end
 
 -- True when `value` (an atlas name or a texture path) is the empty-slot art of this button.
@@ -400,9 +418,29 @@ local function QualityRingColor(quality)
 end
 
 -- Reads the slot's item now and caches the ring colour it earns.
+-- True when the bag slot holds a quest item (C_Container.GetContainerItemQuestInfo); false when it cannot be read.
+local function SlotIsQuestItem(button)
+    if not bagSlots[button] or type(C_Container) ~= "table" or type(C_Container.GetContainerItemQuestInfo) ~= "function" then
+        return false
+    end
+    local bag = BagIDOf(button)
+    if not bag or type(button.GetID) ~= "function" then return false end
+    local okSlot, slot = pcall(button.GetID, button)
+    if not okSlot or type(slot) ~= "number" or IsSecretValue(slot) then return false end
+    local ok, quest = pcall(C_Container.GetContainerItemQuestInfo, bag, slot)
+    if not ok or IsSecretValue(quest) or type(quest) ~= "table" then return false end
+    local isQuest, questID = quest.isQuestItem, quest.questID
+    if IsSecretValue(isQuest) or IsSecretValue(questID) then return false end
+    return isQuest == true or (type(questID) == "number" and questID > 0)
+end
+
 local function ReadSlotRing(button)
     local info = SlotItemInfo(button)
     local r, g, b = QualityRingColor(info and info.quality)
+    if SlotIsQuestItem(button) then
+        local amber = FS.Theme.COLOR_AMBER
+        if amber then r, g, b = amber[1], amber[2], amber[3] end
+    end
     button.fsBagRingColor = r and { r, g, b } or nil
 end
 

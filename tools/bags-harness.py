@@ -928,14 +928,16 @@ def check_icon_border() -> None:
 def check_untouched() -> None:
     w = World()
     w.run("c1:UpdateItems(); for _, b in ipairs(c1.Items) do BlizzardReset(b) end; c1:UpdateItems()")
-    keep = ["IconOverlay", "IconOverlay2", "NewItemTexture", "BattlepayItemTexture", "flash", "UpgradeIcon",
-            "JunkIcon", "IconQuestTexture", "searchOverlay", "ItemContextOverlay", "PushedTexture", "HighlightTexture",
+    keep = ["IconOverlay", "IconOverlay2", "UpgradeIcon",
+            "JunkIcon", "searchOverlay", "ItemContextOverlay", "PushedTexture", "HighlightTexture",
             "ExtendedSlot", "Count"]
     hooked = [field for field in keep if w.ev(f"TouchedByUs(c1.Items[1].{field})")]
     check("keep.no_hook_on_any_untouched_region", not hooked, "hooked by us: " + ", ".join(hooked))
-    check("keep.new_item_glow_alpha_left_to_blizzard", w.ev("c1.Items[1].NewItemTexture:GetAlpha() == 0 and c1.Items[1].flash:GetAlpha() == 0"))
+    # the new-item glows and the quest border are square art past the cut ring: held at alpha 0
     w.run("c1.Items[1].NewItemTexture:SetAlpha(0.7)")
-    check("keep.new_item_glow_alpha_write_is_not_reverted", w.ev("c1.Items[1].NewItemTexture:GetAlpha() == 0.7"))
+    check("glow.new_item_glow_is_held_at_zero", w.ev("c1.Items[1].NewItemTexture:GetAlpha() == 0"))
+    check("glow.quest_border_and_flash_are_held",
+          w.ev("TouchedByUs(c1.Items[1].IconQuestTexture) and TouchedByUs(c1.Items[1].flash)"))
     check("keep.count_restyled_to_mono_as_before", w.ev("c1.Items[1].Count._font[1] == 'mono'"))
     check("keep.nothing_swallowed", w.swallowed() == "", w.swallowed())
 
