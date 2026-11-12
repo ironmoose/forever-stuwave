@@ -202,6 +202,17 @@ FS.Layout.Controls = {
     CARET_W = 7, CARET_H = 14, CARET_GAP = 2, CARET_BLINK = 1.1, CARET_DIM = 0.45,
     CHIP_H = 20, CHIP_CUT = 4, CHIP_PAD = 12, CHIP_INSET = 6, CHIP_MIN_TEXT = 40, CHIP_TEXT = 11, CHIP_TEXT_Y = 11,
     RADAR_PERIOD = 1.6, RADAR_DOT = 2, RADAR_DOT_X = 3, RADAR_DOT_Y = -5,
+    -- Dropdown button: the field body (chamfer 6) with an 8 square swatch of the current choice 10 in, the label 26 in and
+    -- 34 short of the right edge, a hairline at the left edge of the 28 wide zone on the right (5 short of the top and
+    -- bottom) and the 16 chevron 24 in from the right edge; open it takes the cyan edge, a 3 px glow, the LED underline and
+    -- an upright chevron. A stock button under DD_MIN_W wide is not a dropdown body and is left alone.
+    DD_ZONE = 28, DD_SWATCH = 8, DD_SWATCH_X = 10, DD_LABEL_X = 26, DD_TEXT_RIGHT = 34, DD_CHEV_X = 24, DD_MIN_W = 48,
+    DD_RULE_PAD = 5,
+    -- Its open list keeps the stock rows (and Menus.lua's chrome). A row under the hand gets a violet wash at 0.18 and lock-on
+    -- brackets (arms 4, no pad) on the row rect inset 2; the current value carries a 4 x 8 pink LED 2 in. The list is scanned
+    -- open: a 2 px cyan front edge runs down it in 0.2 s and each row appears as it passes.
+    ROW_PAD = 2, ROW_LED_W = 4, ROW_LED_H = 8, ROW_LED_X = 2, ROW_WASH_ALPHA = 0.18, RETICLE_LEN = 4, WIPE_TIME = 0.2,
+    WIPE_FRONT = 2,
     -- Marching chevrons: the lit cells' strip moves one 8 px pitch every 0.6 s at 18 % white.
     MARCH_PERIOD = 0.6, CHEV_PITCH = 8, CHEV_ALPHA = 0.18,
 }

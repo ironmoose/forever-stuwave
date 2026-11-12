@@ -241,6 +241,48 @@ function Kit.PaintPlate(plate, fill, fillAlpha, edge, edgeAlpha, edgePx)
 end
 
 -------------------------------------------------------------------------------
+-- Lock-on reticle
+-------------------------------------------------------------------------------
+
+local RETICLE_BARS = { "tlH", "tlV", "trH", "trV", "brH", "brV", "blH", "blV" }
+
+-- The mockup's reticle(): four corners, each an L of two bars (`H` across, `V` along the side), drawn on `parent` and cyan until
+-- Kit.PaintReticle says otherwise. The bars start hidden-in-place at 1 x 1; Kit.SeatReticle lays them out.
+function Kit.Reticle(parent, layer, sub)
+    local r = { parent = parent }
+    for _, key in ipairs(RETICLE_BARS) do
+        r[key] = Kit.Rect(parent, 0, 0, 1, 1, Theme.COLOR_POWER, 1, layer or "OVERLAY", sub or 0)
+    end
+    return r
+end
+
+-- Seats the corners around the rect (x, y, w, h) physical pixels from the top left of the reticle's parent, `pad` out from it
+-- and `len` long. The path of the mockup runs on the rect and a stroke of STROKE px is centred on it, so each corner
+-- reaches half a stroke past the path; the two bars of a corner meet without overlapping.
+function Kit.SeatReticle(r, x, y, w, h, pad, len)
+    local sw = FS.Layout.Controls.STROKE
+    local half = sw / 2
+    local X, Y, W, H = x - pad, y - pad, w + 2 * pad, h + 2 * pad
+    local side = len - half
+    Kit.Move(r.tlH, X - half, Y - half, len + half, sw)
+    Kit.Move(r.tlV, X - half, Y + half, sw, side)
+    Kit.Move(r.trH, X + W - len, Y - half, len + half, sw)
+    Kit.Move(r.trV, X + W - half, Y + half, sw, side)
+    Kit.Move(r.brH, X + W - len, Y + H - half, len + half, sw)
+    Kit.Move(r.brV, X + W - half, Y + H - len, sw, side)
+    Kit.Move(r.blH, X - half, Y + H - half, len + half, sw)
+    Kit.Move(r.blV, X - half, Y + H - len, sw, side)
+end
+
+function Kit.PaintReticle(r, color, alpha)
+    for _, key in ipairs(RETICLE_BARS) do r[key]:SetColorTexture(color[1], color[2], color[3], alpha or color[4] or 1) end
+end
+
+function Kit.ShowReticle(r, shown)
+    for _, key in ipairs(RETICLE_BARS) do r[key]:SetShown(shown and true or false) end
+end
+
+-------------------------------------------------------------------------------
 -- Motion
 -------------------------------------------------------------------------------
 

@@ -14,6 +14,9 @@ Pinned here, per control family (each family adds its own checks as it lands):
     mockup (face, edge colour and width, LED, mark), the tick drawn in over 0.54 s, the breathing LED, the ring pulse, the
     rail and the node's jump, the label restyle, held Blizzard art, detection by shape (action buttons, list rows and
     other widgets are left alone), deferral in combat, and the PanelSkins sweep;
+  * slider, edit and search box (their own checks below, each pinned to the mockup's numbers), and the closed dropdown button
+    with its open list: the 28 px body, swatch, hairline and flipping chevron, the open glow and LED, lock-on brackets and
+    a pink LED on the rows of a modern or legacy list, and the scan wipe that gives every row its own alpha back;
   * every skin: no script or attribute written on a Blizzard widget, nothing resized, idempotent, a hidden control runs no
     animation, a change of pixel scale re-seats every edge onto a whole pixel.
 
@@ -44,6 +47,7 @@ FILES = {
     "CheckSkins": "Core/CheckSkins.lua",
     "SliderSkins": "Core/SliderSkins.lua",
     "FieldSkins": "Core/FieldSkins.lua",
+    "DropdownSkins": "Core/DropdownSkins.lua",
     "PanelSkins": "Core/PanelSkins.lua",
 }
 SOURCES = {name: (ADDON / path).read_text(encoding="utf-8") for name, path in FILES.items()}
@@ -351,6 +355,19 @@ function hooksecurefunc(a, b, c)
     end
 end
 
+-- The modern menu system's manager: Blizzard_Menu's Menu.GetManager() proxy, which hands back the open menu frame. A test sets
+-- MANAGER.open to the frame it wants "opened" and calls MANAGER:OpenMenu(owner, DESC).
+MANAGER = { open = nil }
+function MANAGER:GetOpenMenu() return self.open end
+function MANAGER:OpenMenu() end
+function MANAGER:OpenContextMenu() end
+Menu = { GetManager = function() return MANAGER end }
+function NewDescription()
+    local d = {}
+    function d:AddMenuAcquiredCallback(fn) self.acquired = fn end
+    return d
+end
+
 function CreateFont() return { SetFont = function() end, SetTextColor = function() end, SetShadowColor = function() end } end
 function GetCursorPosition() return 0, 0 end
 function GetPhysicalScreenSize() return 2560, 1440 end
@@ -522,6 +539,72 @@ function SearchBoxW(parent, x, y, w, h, o)
     return b
 end
 
+-- WowStyle1DropdownTemplate: a DropdownButton (intrinsic) with the Background, the Arrow and the Text, the stock state colours
+-- (OnButtonStateChanged) and the open flag the menu system keeps (IsMenuOpen, OnMenuOpened, OnMenuClosed).
+function DropdownW(parent, x, y, w, h, o)
+    o = o or {}
+    local b = blz("Button", nil, parent, w or 120, h or 25, x, y)
+    b.intrinsic = "DropdownButton"
+    b.Background = tex(b, nil, "BACKGROUND"); b.Background.atlas = "common-dropdown-textholder"
+    b.Arrow = tex(b, nil, "OVERLAY"); b.Arrow.atlas = "common-dropdown-a-button"
+    b.Text = fstring(b, o.text or "general")
+    b.Text.textColor = { 1, 1, 1, 1 }
+    b.Text.points = { { point = "TOPRIGHT", rel = b.Arrow, relPoint = "LEFT", x = 0, y = 0 },
+        { point = "TOPLEFT", rel = b, relPoint = "TOPLEFT", x = 8, y = -8 } }
+    b.open = false
+    function b:IsMenuOpen() return self.open end
+    function b:OnMenuOpened() self.open = true end
+    function b:OnMenuClosed() self.open = false end
+    function b:OnButtonStateChanged()
+        if self:IsEnabled() then self.Text:SetTextColor(1, 1, 1, 1) else self.Text:SetTextColor(0.5, 0.5, 0.5, 1) end
+    end
+    return b
+end
+function OpenList(b) b:OnMenuOpened(); b:RunScript("OnMouseDown") end
+function CloseList(b) b:OnMenuClosed() end
+
+-- A modern menu frame: rows are child buttons that answer GetElementDescription, as Blizzard_Menu's compositor builds them.
+function MenuW(specs, x, y, w, rowH)
+    rowH = rowH or 20
+    local m = blz("Frame", nil, UIParent, w or 196, 8 + #specs * rowH, x or 300, y or 300)
+    local chrome = m:CreateTexture(nil, "BACKGROUND")
+    chrome:SetAllPoints(m)
+    chrome:SetColorTexture(0.102, 0.063, 0.145, 0.94)
+    m.rows = {}
+    for i, spec in ipairs(specs) do
+        local r = blz("Button", nil, m, (w or 196) - 16, rowH, 8, 4 + (i - 1) * rowH)
+        r.Label = fstring(r, spec.text or "row")
+        r.Label.textColor = { 0.133, 0.878, 1, 1 }
+        r.Label.points = { { point = "LEFT", rel = r, relPoint = "LEFT", x = 10, y = 0 } }
+        r.GetElementDescription = function() return { IsSelected = function() return spec.selected == true end } end
+        r.alpha = spec.alpha or 1
+        m.rows[i] = r
+    end
+    return m
+end
+-- Opens `menu` the way the manager does: the frame becomes the open menu, then OpenMenu runs (our hook is a post-hook).
+function OpenMenuFrame(menu, desc)
+    MANAGER.open = menu
+    menu.shown = true
+    MANAGER:OpenMenu(nil, desc or NewDescription())
+end
+
+-- UIDropDownMenu's list: a real frame DropDownList1 with buttons DropDownList1Button1.. each with a Check texture.
+function LegacyList(specs)
+    local l = blz("Frame", "DropDownList1", UIParent, 196, 20 + #specs * 16, 300, 300)
+    l.rows = {}
+    for i, spec in ipairs(specs) do
+        local r = blz("Button", "DropDownList1Button" .. i, l, 176, 16, 10, 10 + (i - 1) * 16)
+        r.Label = fstring(r, spec.text or "row")
+        local check = tex(r, nil, "ARTWORK")
+        _G["DropDownList1Button" .. i .. "Check"] = check
+        check.shown = spec.checked == true
+        l.rows[i] = r
+    end
+    l.shown = false
+    return l
+end
+
 function Panel(name)
     local f = blz("Frame", name or "TestPanel", UIParent, 400, 300, 100, 100)
     f.shown = true
@@ -568,7 +651,7 @@ function Load(opts)
         LogDegradeOnce = function(key, msg) DEGRADED[#DEGRADED + 1] = key .. " :: " .. tostring(msg) end,
     }
     FS.FrameHelpers = { PixelsPerUnit = function() return PPU end }
-    for _, name in ipairs({ "Theme", "Layout", "HeldArt", "ControlKit", "CheckSkins", "SliderSkins", "FieldSkins", "PanelSkins" }) do
+    for _, name in ipairs({ "Theme", "Layout", "HeldArt", "ControlKit", "CheckSkins", "SliderSkins", "FieldSkins", "DropdownSkins", "PanelSkins" }) do
         local chunk, err = load(SOURCES[name], "=" .. name .. ".lua")
         if not chunk then error(err) end
         chunk("forever-stuwave", FS)
@@ -625,6 +708,7 @@ end
 function Colour(t) return t.color or t.vertex end
 function Slk() return FS.SliderSkins end
 function Fld() return FS.FieldSkins end
+function Dd() return FS.DropdownSkins end
 function SkinOne(w) FS.ControlKit.SkinWidget(w); FlushTimers() end
 -- Rounds the way the skin does (half up).
 function Round(v) return math.floor(v + 0.5) end
@@ -1129,6 +1213,319 @@ case("a_secret_checked_value_reads_as_unchecked_without_an_error", PRELUDE + """
     Is(Colour(p.plate.fill), FS.Theme.COLOR_CTRL_INK, 1, "face")
 """)
 
+
+
+# -------------------------------------------------------------------------------------------------------------------
+# Closed dropdown button, its open list (hover brackets, the current value's LED, the scan wipe) and the lock-on reticle
+# -------------------------------------------------------------------------------------------------------------------
+
+case("dropdown_tokens_are_the_mockups_numbers", PRELUDE + """
+    local K = FS.Layout.Controls
+    assert(K.DD_ZONE == 28 and K.DD_SWATCH == 8 and K.DD_SWATCH_X == 10 and K.DD_LABEL_X == 26 and K.DD_TEXT_RIGHT == 34, "dropdown body")
+    assert(K.DD_CHEV_X == 24 and K.DD_MIN_W == 48 and K.DD_RULE_PAD == 5, "chevron and gates")
+    assert(K.ROW_PAD == 2 and K.ROW_LED_W == 4 and K.ROW_LED_H == 8 and K.ROW_LED_X == 2 and K.ROW_WASH_ALPHA == 0.18, "menu row")
+    assert(K.RETICLE_LEN == 4 and K.WIPE_TIME == 0.2 and K.WIPE_FRONT == 2, "reticle and wipe")
+""")
+
+case("dropdown_is_a_28_px_body_with_swatch_label_hairline_and_chevron", PRELUDE + """
+    local b = DropdownW(P, 20, 20, 196 / PPU, 28 / PPU)
+    assert(Skin(P) == 1, "the sweep skins the dropdown")
+    local p, T = Dd().Parts(b), FS.Theme
+    assert(p and p.built)
+    Expect(p.plate.fill, b, 0, 0, 196, 28, "face")
+    Expect(p.plate.ring, b, 0, 0, 196, 28, "edge")
+    Is(Colour(p.plate.fill), T.COLOR_CTRL_INK, 1, "face")
+    Is(p.plate.ring.vertex, T.COLOR_CTRL_DIM, 1, "idle edge")
+    Expect(p.swatch, b, 10, 10, 8, 8, "swatch")
+    Is(p.swatch.color, T.COLOR_BORDER, 1, "swatch default")
+    Expect(p.hair, b, 196 - 28, 5, 1, 18, "hairline 28 from the right")
+    Is(p.hair.color, T.COLOR_CTRL_HAIR, 1, "hairline")
+    Expect(p.chev, b, 196 - 24, 6, 16, 16, "chevron")
+    assert(p.chev.path:find("ctl_chev"), p.chev.path)
+    Is(p.chev.vertex, T.COLOR_MUTED, 1, "chevron")
+    local l, _, r = Px(b.Text, b)
+    assert(Near(l, 26) and Near(r, 196 - 34), "label from 26 to 34 short of the right: " .. l .. " " .. r)
+    assert(b.Text.fontPath == T.FONT_MONO and Near(b.Text.size * PPU, 12, 0.01), "12 px mono label")
+    Is(b.Text.textColor, T.COLOR_CTRL_TEXT, 1, "label")
+    assert(b.Background.alpha == 0 and b.Arrow.alpha == 0, "the stock art is held")
+    b.Arrow:SetAlpha(1)
+    assert(b.Arrow.alpha == 0, "Blizzard's alpha write is undone")
+    assert(not p.glow:IsShown() and not p.led:IsShown(), "no glow or LED at rest")
+    Expect(b, P, 20 * 1.2, 20 * 1.2, 196, 28, "the stock rect is untouched")
+    NoDegrade()
+    WholePixels(b, b, "dropdown", { b.Background, b.Arrow })
+""")
+
+case("dropdown_hover_and_open_go_cyan_open_flips_the_chevron_and_adds_glow_and_led", PRELUDE + """
+    local b = DropdownW(P, 20, 20, 196 / PPU, 28 / PPU)
+    Skin(P)
+    local p, T = Dd().Parts(b), FS.Theme
+    Hover(b)
+    Is(p.plate.ring.vertex, T.COLOR_POWER, 1, "hover edge")
+    Is(p.chev.vertex, T.COLOR_POWER, 1, "hover chevron")
+    assert(not p.glow:IsShown(), "hover has no glow")
+    Unhover(b)
+    Is(p.plate.ring.vertex, T.COLOR_CTRL_DIM, 1, "idle again")
+    OpenList(b)
+    Is(p.plate.ring.vertex, T.COLOR_POWER, 1, "open edge")
+    Is(p.chev.vertex, T.COLOR_POWER, 1, "open chevron")
+    assert(p.glow:IsShown() and p.led:IsShown(), "open: glow and LED underline")
+    Expect(p.glow, b, -3, -3, 202, 34, "glow 3 px out")
+    Is(p.glow.color, T.COLOR_POWER, 0.08, "glow")
+    Expect(p.led, b, 1, 25, 194, 2, "LED underline 3 up from the bottom")
+    local c = p.chev.coords
+    assert(c and c[1] == 0 and c[2] == 1 and c[3] == 1 and c[4] == 0, "the chevron flips upright")
+    Step(0.8)
+    assert(Near(p.led.color[4], 0.3, 0.02), "LED at the bottom of its breath, got " .. p.led.color[4])
+    CloseList(b)
+    assert(not p.glow:IsShown() and not p.led:IsShown(), "closed: no glow or LED")
+    c = p.chev.coords
+    assert(c == nil or (c[3] == 0 and c[4] == 1), "the chevron points down again")
+    assert(not FS.ControlKit.IsAnimating(p.over, "led"), "nothing runs closed")
+    NoDegrade()
+""")
+
+case("dropdown_disabled_is_the_darkest_ink_and_dim_text_and_blizzards_state_colours_never_win", PRELUDE + """
+    local b = DropdownW(P, 20, 20, 196 / PPU, 28 / PPU)
+    Skin(P)
+    local p, T = Dd().Parts(b), FS.Theme
+    b:Disable()
+    Is(Colour(p.plate.fill), T.COLOR_CTRL_DISFILL, 1, "disabled face")
+    Is(p.plate.ring.vertex, T.COLOR_CTRL_DISEDGE, 1, "disabled edge")
+    Is(p.swatch.color, T.COLOR_CTRL_DISEDGE, 1, "disabled swatch")
+    Is(p.hair.color, T.COLOR_CTRL_DISEDGE, 1, "disabled hairline")
+    Is(p.chev.vertex, T.COLOR_CTRL_DIS, 1, "disabled chevron")
+    Is(b.Text.textColor, T.COLOR_CTRL_DIS, 1, "disabled label")
+    Hover(b)
+    Is(p.plate.ring.vertex, T.COLOR_CTRL_DISEDGE, 1, "a disabled dropdown does not light under the hand")
+    b:Enable()
+    Is(Colour(p.plate.fill), T.COLOR_CTRL_INK, 1, "enabled face")
+    -- the stock OnButtonStateChanged writes the label's colour; ours is painted after it
+    b:OnButtonStateChanged()
+    Is(b.Text.textColor, T.COLOR_CTRL_TEXT, 1, "our label colour survives the stock state colour")
+    NoDegrade()
+""")
+
+case("dropdown_swatch_takes_the_colour_of_the_current_choice", PRELUDE + """
+    local b = DropdownW(P, 20, 20, 196 / PPU, 28 / PPU)
+    Skin(P)
+    local p, T = Dd().Parts(b), FS.Theme
+    Dd().SetSwatch(b, T.COLOR_POWER)
+    Is(p.swatch.color, T.COLOR_POWER, 1, "a chosen swatch")
+    b:Disable()
+    Is(p.swatch.color, T.COLOR_CTRL_DISEDGE, 1, "disabled wins")
+    b:Enable()
+    Is(p.swatch.color, T.COLOR_POWER, 1, "the choice returns")
+    Dd().SetSwatch(b, nil)
+    Is(p.swatch.color, T.COLOR_BORDER, 1, "no choice, the violet default")
+    Dd().SetSwatch(b, { __secret = true })
+    Is(p.swatch.color, T.COLOR_BORDER, 1, "a secret colour is ignored")
+""")
+
+case("dropdown_detection_is_by_shape_and_an_arrow_only_or_tiny_or_tall_one_is_left_alone", PRELUDE + """
+    local ok = DropdownW(P, 20, 20, 196 / PPU, 28 / PPU)
+    local filter = DropdownW(P, 20, 60, 162 / PPU, 18 / PPU)
+    local arrowOnly = blz("Button", nil, P, 25 / PPU, 25 / PPU, 20, 100)
+    arrowOnly.intrinsic = "DropdownButton"; arrowOnly.Arrow = tex(arrowOnly, nil, "OVERLAY")
+    function arrowOnly:IsMenuOpen() return false end
+    local tiny = DropdownW(P, 20, 140, 40 / PPU, 28 / PPU)
+    local tall = DropdownW(P, 20, 180, 196 / PPU, 90 / PPU)
+    local plain = blz("Button", nil, P, 196 / PPU, 28 / PPU, 20, 280)
+    plain.Left, plain.Middle, plain.Right = tex(plain), tex(plain), tex(plain)
+    plain.Text = fstring(plain, "Accept")
+    local held = DropdownW(P, 300, 20, 196 / PPU, 28 / PPU)
+    held.Background:SetAlpha(0)
+    local legacy = blz("Frame", nil, P, 196 / PPU, 28 / PPU, 300, 60)
+    legacy.Left, legacy.Middle, legacy.Right, legacy.Text = tex(legacy), tex(legacy), tex(legacy), fstring(legacy, "x")
+    assert(Dd().Kind(ok) == "dropdown" and Dd().Kind(filter) == "dropdown", "a dropdown and a filter dropdown")
+    assert(Dd().Kind(arrowOnly) == nil, "an arrow dropdown has no label to restyle")
+    assert(Dd().Kind(tiny) == nil and Dd().Kind(tall) == nil, "too small or too tall")
+    assert(Dd().Kind(plain) == nil, "a text button is not a dropdown")
+    assert(Dd().Kind(held) == nil, "art another skin holds is that skin's")
+    assert(Dd().Kind(legacy) == nil, "a legacy UIDropDownMenu frame is not a DropdownButton")
+    assert(Skin(P) == 2, "the sweep skins the two dropdowns only")
+""")
+
+case("a_dropdown_is_skinned_once_and_one_met_in_combat_waits_for_combat_to_end", PRELUDE + """
+    local a = DropdownW(P, 20, 20, 196 / PPU, 28 / PPU)
+    assert(Skin(P) == 1)
+    local hooks, objs = HookCount(), ObjCount()
+    assert(Skin(P) == 0 and HookCount() == hooks and ObjCount() == objs, "a repeat sweep builds nothing")
+    local late = DropdownW(P, 20, 80, 196 / PPU, 28 / PPU)
+    __combat = true
+    assert(Skin(P) == 0)
+    assert(Dd().Parts(late) == nil, "nothing is skinned in combat")
+    __combat = false
+    Fire("PLAYER_REGEN_ENABLED"); FlushTimers()
+    assert(Dd().Parts(late) and Dd().Parts(late).built, "skinned after combat")
+    NoDegrade()
+""")
+
+case("a_change_of_pixel_scale_lays_the_dropdown_out_again_on_whole_pixels", PRELUDE + """
+    local b = DropdownW(P, 20, 20, 196 / PPU, 28 / PPU)
+    Skin(P)
+    local p = Dd().Parts(b)
+    for _, scale in ipairs({ 1.0, 1.5, 2.0, 1.2 }) do
+        PPU = scale
+        Fire("UI_SCALE_CHANGED")
+        local w, h = Round(b.w * scale), Round(b.h * scale)
+        Expect(p.plate.ring, b, 0, 0, w, h, "edge at " .. scale)
+        Expect(p.hair, b, w - 28, 5, 1, h - 10, "hairline at " .. scale)
+        Expect(p.chev, b, w - 24, math.floor((h - 16) / 2), 16, 16, "chevron at " .. scale)
+        Expect(p.swatch, b, 10, math.floor((h - 8) / 2), 8, 8, "swatch at " .. scale)
+        local l, _, r = Px(b.Text, b)
+        assert(Near(l, 26) and Near(r, b.w * scale - 34), "label at " .. scale .. ": " .. l .. " " .. r)
+        OpenList(b)
+        WholePixels(b, b, "dropdown at " .. scale, { b.Background, b.Arrow })
+        CloseList(b)
+    end
+""")
+
+case("a_hidden_dropdown_runs_no_animation_and_a_shown_one_resumes", PRELUDE + """
+    local b = DropdownW(P, 20, 20, 196 / PPU, 28 / PPU)
+    Skin(P)
+    local p = Dd().Parts(b)
+    OpenList(b)
+    Step(0.3)
+    local alpha = p.led.color[4]
+    P:Hide()
+    Step(0.7)
+    assert(p.led.color[4] == alpha, "the LED of a hidden dropdown moved")
+    P:Show()
+    Step(0.1)
+    assert(p.led.color[4] ~= alpha, "it did not resume")
+""")
+
+case("the_lock_on_reticle_is_four_corners_of_2_px_bars_around_a_rect_at_a_pad", PRELUDE + """
+    local Kit = FS.ControlKit
+    local ret = Kit.Reticle(P, "OVERLAY", 3)
+    Kit.SeatReticle(ret, 20, 30, 40, 30, 4, 6)
+    -- the mockup's reticle(x, y, w, h, c, pad, len): the path runs at X = x - pad ... and a 2 px stroke is centred on it
+    local X, Y, W, H = 20 - 4, 30 - 4, 40 + 8, 30 + 8
+    Expect(ret.tlH, P, X - 1, Y - 1, 7, 2, "top left, across")
+    Expect(ret.tlV, P, X - 1, Y + 1, 2, 5, "top left, down")
+    Expect(ret.trH, P, X + W - 6, Y - 1, 7, 2, "top right, across")
+    Expect(ret.trV, P, X + W - 1, Y + 1, 2, 5, "top right, down")
+    Expect(ret.brH, P, X + W - 6, Y + H - 1, 7, 2, "bottom right, across")
+    Expect(ret.brV, P, X + W - 1, Y + H - 6, 2, 5, "bottom right, up")
+    Expect(ret.blH, P, X - 1, Y + H - 1, 7, 2, "bottom left, across")
+    Expect(ret.blV, P, X - 1, Y + H - 6, 2, 5, "bottom left, up")
+    Kit.PaintReticle(ret, FS.Theme.COLOR_POWER, 1)
+    Is(ret.tlH.color, FS.Theme.COLOR_POWER, 1, "cyan")
+    Kit.ShowReticle(ret, false)
+    assert(not ret.tlH:IsShown() and not ret.blV:IsShown(), "hidden")
+    Kit.ShowReticle(ret, true)
+    assert(ret.brH:IsShown())
+""")
+
+case("menu_rows_get_lock_on_brackets_a_violet_wash_and_a_pink_led_on_the_current_value", PRELUDE + """
+    local T = FS.Theme
+    local menu = MenuW({ { text = "general", selected = true }, { text = "combat log" }, { text = "trade" } })
+    OpenMenuFrame(menu)
+    Step(0.4)
+    local r1, r2 = menu.rows[1], menu.rows[2]
+    local d1, d2 = Dd().RowParts(r1), Dd().RowParts(r2)
+    assert(d1 and d2, "every row is decorated")
+    assert(d1.led:IsShown() and not d2.led:IsShown(), "the pink LED marks the current value only")
+    Expect(d1.led, r1, 2, 8, 4, 8, "LED 4 x 8, 2 in, centred in the 24 px row")
+    Is(d1.led.color, T.COLOR_HEALTH, d1.led.color[4], "pink LED")
+    assert(d1.led.color[4] >= 0.3 and d1.led.color[4] <= 1, "the LED breathes between 0.3 and 1")
+    assert(not d2.wash:IsShown() and not d2.reticle.tlH:IsShown(), "no hover, no wash or brackets")
+    Hover(r2)
+    assert(d2.wash:IsShown() and d2.reticle.tlH:IsShown())
+    Expect(d2.wash, r2, 0, 0, 216, 24, "wash over the row")
+    Is(d2.wash.color, T.COLOR_BORDER, 0.18, "violet wash")
+    -- brackets on the rect inset 2, pad 0, arms 4 (the mockup: reticle(x + 6, ry + 2, w - 12, rh - 4, cyan, 0, 4))
+    Expect(d2.reticle.tlH, r2, 1, 1, 5, 2, "top left across")
+    Expect(d2.reticle.tlV, r2, 1, 3, 2, 3, "top left down")
+    Expect(d2.reticle.trH, r2, 210, 1, 5, 2, "top right across")
+    Expect(d2.reticle.brV, r2, 213, 18, 2, 3, "bottom right up")
+    Expect(d2.reticle.blH, r2, 1, 21, 5, 2, "bottom left across")
+    Is(d2.reticle.tlH.color, T.COLOR_POWER, 1, "cyan brackets")
+    Unhover(r2)
+    assert(not d2.wash:IsShown() and not d2.reticle.tlH:IsShown(), "gone with the hand")
+    -- a pooled row meets a new description: the LED follows what the row is now
+    r1.GetElementDescription = function() return { IsSelected = function() return false end } end
+    r2.GetElementDescription = function() return { IsSelected = function() return true end } end
+    r1:RunScript("OnShow"); r2:RunScript("OnShow")
+    assert(not d1.led:IsShown() and d2.led:IsShown(), "the LED moved with the selection")
+    for _, r in ipairs(menu.rows) do assert(r.alpha == 1) end
+    NoDegrade()
+""")
+
+case("menu_scan_wipe_reveals_the_rows_from_the_top_behind_a_cyan_front_edge_and_restores_them", PRELUDE + """
+    local T = FS.Theme
+    local menu = MenuW({ { text = "a" }, { text = "b", alpha = 0.5 }, { text = "c" } })
+    OpenMenuFrame(menu)
+    local scan = Dd().MenuParts(menu)
+    assert(scan, "the menu has a scan frame")
+    for _, r in ipairs(menu.rows) do assert(r.alpha == 0, "every row waits behind the front at the start") end
+    assert(scan.front:IsShown())
+    Step(0.06)
+    assert(menu.rows[1].alpha == 1 and menu.rows[2].alpha == 0 and menu.rows[3].alpha == 0, "the front has passed the first row only")
+    local _, ft, _, fb = Px(scan.front, menu)
+    assert(Near(fb - ft, 2), "the front edge is 2 px")
+    Is(scan.front.color, T.COLOR_POWER, 1, "cyan front edge")
+    local _, t2 = Px(scan.front, menu)
+    Step(0.06)
+    local _, t3 = Px(scan.front, menu)
+    assert(t3 > t2, "the front moves down")
+    Step(0.3)
+    assert(menu.rows[1].alpha == 1 and menu.rows[2].alpha == 0.5 and menu.rows[3].alpha == 1, "every row is back to the alpha Blizzard gave it")
+    assert(not scan.front:IsShown() and not FS.ControlKit.IsAnimating(scan.driver, menu), "the wipe is over")
+    -- closed mid-wipe: nothing is left invisible for the next pool user
+    OpenMenuFrame(menu)
+    Step(0.05)
+    menu:Hide()
+    Step(0.05)
+    assert(menu.rows[1].alpha == 1 and menu.rows[2].alpha == 0.5 and menu.rows[3].alpha == 1, "a menu closed mid-wipe gives its rows back")
+    -- and a row that was left half hidden by anything else is not trusted as the original
+    OpenMenuFrame(menu)
+    OpenMenuFrame(menu)
+    Step(0.5)
+    assert(menu.rows[2].alpha == 0.5, "opening a menu twice does not make 0 the original alpha")
+    NoDegrade()
+""")
+
+case("a_submenu_is_decorated_through_the_acquired_callback_and_context_menus_too", PRELUDE + """
+    local desc = NewDescription()
+    local menu = MenuW({ { text = "a", selected = true } })
+    OpenMenuFrame(menu, desc)
+    Step(0.4)
+    assert(type(desc.acquired) == "function", "the callback for submenus is registered")
+    local sub = MenuW({ { text = "x", selected = true }, { text = "y" } }, 600, 300)
+    MANAGER.open = sub
+    desc.acquired()
+    assert(Dd().RowParts(sub.rows[1]) and Dd().RowParts(sub.rows[1]).led:IsShown(), "the submenu rows are decorated")
+    local ctx = MenuW({ { text = "whisper" } }, 900, 300)
+    MANAGER.open = ctx
+    ctx.shown = true
+    MANAGER:OpenContextMenu(nil, NewDescription())
+    assert(Dd().RowParts(ctx.rows[1]), "a context menu is decorated too")
+    NoDegrade()
+""")
+
+case("the_legacy_list_gets_the_same_brackets_led_and_wipe_on_show", PRELUDE + """
+    local T = FS.Theme
+    local list = LegacyList({ { text = "general", checked = true }, { text = "trade" } })
+    Dd().HookLegacy()
+    list:Show()
+    local r1, r2 = list.rows[1], list.rows[2]
+    assert(r1.alpha == 0 and r2.alpha == 0, "a legacy list is wiped open too")
+    Step(0.4)
+    assert(r1.alpha == 1 and r2.alpha == 1)
+    local d1, d2 = Dd().RowParts(r1), Dd().RowParts(r2)
+    assert(d1 and d2 and d1.led:IsShown() and not d2.led:IsShown(), "the checked row carries the LED")
+    Hover(r2)
+    assert(d2.wash:IsShown() and d2.reticle.tlH:IsShown())
+    Unhover(r2)
+    assert(not d2.wash:IsShown())
+    Dd().HookLegacy()
+    local hooks = HookCount()
+    Dd().HookLegacy()
+    assert(HookCount() == hooks, "hooking twice adds nothing")
+    NoDegrade()
+""")
 
 SCENES["checks"] = """
     local FS = Load()
@@ -1819,6 +2216,27 @@ case("a_secret_text_reads_as_empty_without_an_error", PRELUDE + """
     Fld().SetCount(b, 4)
     assert(not p.chip.frame:IsShown(), "a count needs readable text")
 """)
+
+SCENES["dropdowns"] = """
+    local FS = Load()
+    local P = Panel()
+    P.w, P.h = 900, 220
+    local dd = {}
+    for i = 1, 4 do dd[i] = DropdownW(P, 10 + (i - 1) * 177, 20, 196 / PPU, 28 / PPU, { text = "general" }) end
+    Skin(P)
+    Dd().SetSwatch(dd[1], FS.Theme.COLOR_POWER)
+    Dd().SetSwatch(dd[2], FS.Theme.COLOR_POWER)
+    Dd().SetSwatch(dd[3], FS.Theme.COLOR_POWER)
+    Hover(dd[2]); OpenList(dd[3]); dd[4]:Disable()
+    local menu = MenuW({ { text = "general", selected = true }, { text = "combat log" }, { text = "trade" } }, 100 + 10 + 2 * 177, 145, 196 / PPU)
+    OpenMenuFrame(menu)
+    Step(0.4)
+    Hover(menu.rows[2])
+    local later = MenuW({ { text = "general", selected = true }, { text = "combat log" }, { text = "trade" } }, 100 + 10 + 3 * 177, 145, 196 / PPU)
+    OpenMenuFrame(later)
+    Step(0.07)
+    return DumpOps({ P, menu, later })
+"""
 
 SCENES["fields"] = """
     local FS = Load()
