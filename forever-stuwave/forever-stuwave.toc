@@ -55,6 +55,7 @@ Modules/Tracker/QuestTimer.lua
 Modules/Skins/Panels.lua
 Modules/Skins/Mail.lua
 Modules/Skins/Character.lua
+Modules/Skins/Reputation.lua
 Modules/Skins/Tooltip.lua
 Modules/Skins/TooltipAnchor.lua
 Modules/Skins/Popups.lua
