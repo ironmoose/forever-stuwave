@@ -118,45 +118,116 @@ C_TooltipInfo = { GetInventoryItem = function(unit, id) return { repairCost = RE
 
 function BuildBlizzard()
     for k in pairs(_G) do
-        if type(k) == "string" and (k:find("^Character") or k:find("^PaperDoll") or k:find("^Reputation") or k:find("^Token")) then _G[k] = nil end
+        if type(k) == "string" and (k:find("^Character") or k:find("^PaperDoll") or k:find("^Reputation") or k:find("^Token")
+            or k:find("^Skills") or k:find("^PVPRank") or k:find("^Statistics")) then _G[k] = nil end
     end
-    local win = blz("Frame", "CharacterFrame", UIParent, 540, 480)
+    local function atex(parent, name, layer, atlas, w, h)
+        local t = tex(parent, name, layer)
+        t.atlas = atlas
+        t.GetAtlas = function(self) return self.atlas end
+        t.SetAtlas = function(self, a) self.atlas = a end
+        if w then t.w, t.h = w, h end
+        return t
+    end
+    BLZ.atex = atex
+    -- the 16001 window: 631 x 484, panes from 20 units under the top edge, no Inset / InsetRight, no CharacterFrameTab1..3
+    local win = blz("Frame", "CharacterFrame", UIParent, 631, 484)
     win.points[1] = { point = "TOPLEFT", rel = UIParent, relPoint = "TOPLEFT", x = 250, y = -100 }
     win.shown = false
     win.Bg = tex(win, nil, "BACKGROUND")
-    win.NineSlice = blz("Frame", nil, win, 540, 480)
-    win.TitleContainer = blz("Frame", nil, win, 400, 24)
+    win.NineSlice = blz("Frame", nil, win, 631, 484)
+    win.TitleContainer = blz("Frame", nil, win, 549, 20)
     tex(win, "CharacterFramePortrait", "ARTWORK")
     fstring(win, "CharacterFrameTitleText", "Stu")
-    win.Inset = blz("Frame", nil, win, 330, 380)
-    win.Inset.Bg = tex(win.Inset, nil, "BACKGROUND")
-    win.InsetRight = blz("Frame", nil, win, 190, 380)
-    win.InsetRight.points[1] = { point = "TOPLEFT", rel = win, relPoint = "TOPLEFT", x = 340, y = -62 }
-    local close = blz("Button", "CharacterFrameCloseButton", win, 24, 24, "TOPRIGHT")
+    local close = blz("Button", "CharacterFrameCloseButton", win, 15, 15, "TOPRIGHT", -6, -4)
     tex(close, nil, "BACKGROUND")
     win.CloseButton = close
-    fstring(win, "CharacterLevelText", "Level 12 Tauren Shaman", 12, { 1, 1, 1, 1 })
     tex(win, "CharacterLevelTextBackground", "BACKGROUND")
-    for _, n in ipairs({ "TopLeft", "TopRight", "BotLeft", "BotRight" }) do tex(win, "CharacterModelFrameBackground" .. n, "BACKGROUND") end
 
-    local pd = blz("Frame", "PaperDollFrame", win, 540, 480)
+    local left = blz("Frame", "CharacterFrameLeftPaneHost", win, 398, 464, "TOPLEFT", 0, -20)
+    win.LeftPaneHost = left
+    atex(left, nil, "BACKGROUND", "UI-Character-Info-General-BG", 398, 464)
+    local right = blz("Frame", "CharacterFrameRightPaneHost", win, 233, 464, "TOPLEFT", 398, -20)
+    win.RightPaneHost = right
+    atex(right, nil, "BACKGROUND", "UI-Character-Info-Stat-BG", 233, 464)
+    right.StoneBg = atex(right, "CharacterFrameRightPaneHostStoneBg", "ARTWORK", "UI-Character-Info-Stat-StoneBG3", 233, 60)
+    local div = blz("Frame", nil, right, 11, 463, "TOPLEFT", -5, 0)
+    atex(div, nil, "OVERLAY", "common-framedivider", 11, 463)
+
+    -- the six page tabs down the right edge
+    local modeTabs = blz("Frame", "CharacterFrameModeTabs", win, 64, 384, "TOPLEFT", 624, -40)
+    win.ModeTabs = modeTabs
+    PAGE_FRAMES = { "PaperDollFrame", "ReputationFrame", "SkillsFrame", "PVPRankFrame", "TokenFrame", "StatisticsFrame" }
+    local pages = {}
+    local pd = blz("Frame", "PaperDollFrame", win, 631, 484)
     pd.id = 1
     pd.Bg = tex(pd, nil, "BACKGROUND")
-    local rep = blz("Frame", "ReputationFrame", win, 540, 480); rep.shown = false; rep.id = 2
-    local tok = blz("Frame", "TokenFrame", win, 540, 480); tok.shown = false; tok.id = 3
-    local pages = { pd, rep, tok }
+    pages[1] = pd
+    for i = 2, 6 do
+        local f = blz("Frame", PAGE_FRAMES[i], win, 631, 484)
+        f.shown = false
+        pages[i] = f
+    end
     local function select(i)
         for j, f in ipairs(pages) do if j == i then f:Show() else f:Hide() end end
+        for j = 1, 6 do _G["CharacterFrameModeTab" .. j].SelectedTexture:SetShown(j == i) end
     end
-    for i = 1, 3 do
-        local tab = blz("Button", "CharacterFrameTab" .. i, win, 90, 32, "BOTTOMLEFT", 11 + (i - 1) * 91, 2)
-        tab.Left, tab.Middle, tab.Right = tex(tab, nil, "BACKGROUND"), tex(tab, nil, "BACKGROUND"), tex(tab, nil, "BACKGROUND")
-        tab.fs = fstring(tab, "CharacterFrameTab" .. i .. "Text", ({ "Character", "Rep", "Currency" })[i])
-        tab.scripts.OnClick = function() select(i) end
-        if i == 3 then tab.shown = true end
+    for i = 1, 6 do
+        local tab = blz("Frame", "CharacterFrameModeTab" .. i, modeTabs, 55, 55, "TOPLEFT", 4, -(i - 1) * 62)
+        tab.Background = atex(tab, nil, "BACKGROUND", "common-sidetab", 55, 60)
+        tab.Icon = tex(tab, nil, "ARTWORK"); tab.Icon.w, tab.Icon.h = 50, 50
+        tab.SelectedTexture = atex(tab, nil, "OVERLAY", "common-sidetab-selected", 55, 60)
+        tab.SelectedTexture.shown = (i == 1)
+        tab.TabGlow = atex(tab, nil, "OVERLAY", "common-sidetab-selected", 55, 60)
+        tab.HighlightTexture = atex(tab, nil, "HIGHLIGHT", "common-sidetab-hover", 55, 60)
+        tab.scripts.OnMouseUp = function() select(i) end
+        tab.scripts.OnEnter = function() end
     end
-    CharacterFrameTab3.shown = true
+    local toggle = blz("Button", "CharacterFrameRightPaneToggleButton", win, 28, 28, "TOPLEFT", 380, -3)
+    win.RightPaneToggleButton = toggle
+    tex(toggle, nil, "ARTWORK"); tex(toggle, nil, "ARTWORK"); tex(toggle, nil, "HIGHLIGHT")
+    toggle.scripts.OnClick = function() end
     ToggleCharacter = function(name, onlyShow) for i, f in ipairs(pages) do if f:GetName() == name then select(i) end end end
+
+    -- paper doll: top strip, level line, model with its buttons, sidebar tabs, slots
+    local strip = blz("Frame", nil, pd, 398, 36, "TOPLEFT", 0, -20)
+    pd.TopBackgroundStripHost = strip
+    strip.TopBackgroundStrip = tex(strip, nil, "ARTWORK")
+    strip.TopBackgroundStripBottomEdge = atex(strip, nil, "ARTWORK", "_UI-Frame-InnerTopTile", 398, 3)
+    local info = blz("Frame", "PaperDollLevelInfo", pd, 220, 20, "TOPLEFT", 90, -28)
+    fstring(info, "CharacterLevelText", "Level 22 Shaman", 12, { 1, 1, 1, 1 })
+    local scene = blz("Frame", "CharacterModelScene", pd, 398, 428, "TOPLEFT", 0, -56)
+    pd.CharacterModelScene = scene
+    for _, n in ipairs({ "TopLeft", "TopRight", "BotLeft", "BotRight" }) do
+        scene["Background" .. n] = tex(scene, "CharacterModelFrameBackground" .. n, "BACKGROUND")
+    end
+    scene.BackgroundOverlay = atex(scene, nil, "BORDER", "UI-Character-Info-RaceBG-Overlay", 398, 428)
+    local control = blz("Frame", nil, scene, 132, 32, "BOTTOM", 0, 8)
+    scene.ControlFrame = control
+    for i, key in ipairs({ "zoomInButton", "zoomOutButton", "rotateLeftButton", "rotateRightButton", "resetButton" }) do
+        local b = blz("Button", nil, control, 32, 32, "TOPLEFT", (i - 1) * 34, 0)
+        b.Icon = atex(b, nil, "OVERLAY", "common-icon-zoomin", 16, 16)
+        b.NormalTexture = atex(b, nil, "ARTWORK", "common-button-square-gray-up", 32, 32)
+        b.PushedTexture = atex(b, nil, "ARTWORK", "common-button-square-gray-down", 32, 32)
+        b.HighlightTexture = tex(b, nil, "HIGHLIGHT")
+        b.GetNormalTexture = function(self) return self.NormalTexture end
+        b.scripts.OnClick = function() end
+        control[key] = b
+    end
+    local sidebar = blz("Frame", "PaperDollSidebarTabs", pd, 233, 85, "TOPLEFT", 398, -24)
+    for i = 1, 3 do
+        local b = blz("CheckButton", "PaperDollSidebarTab" .. i, sidebar, 42, 42, "TOPLEFT", 10 + (i - 1) * 46, 0)
+        b.Icon = tex(b, nil, "BACKGROUND")
+        atex(b, nil, "BORDER", "UI-Character-Info-StatTab", 42, 42)
+        b.selTex = atex(b, nil, "OVERLAY", "UI-Character-Info-StatTab-Selected", 42, 42)
+        b.selTex.shown = (i == 1)
+        b.scripts.OnClick = function() end
+        b.SetChecked = function(self, v) self.selTex:SetShown(v) end
+    end
+    pd.TitleManagerPane = blz("Frame", nil, pd, 233, 404, "TOPLEFT", 398, -100)
+    pd.TitleManagerPane.shown = false
+    pd.EquipmentManagerPane = blz("Frame", nil, pd, 233, 404, "TOPLEFT", 398, -100)
+    pd.EquipmentManagerPane.shown = false
 
     local function slot(name, x, y)
         local b = blz("Button", "Character" .. name .. "Slot", pd, 37, 37, "TOPLEFT", x, y)
@@ -170,39 +241,76 @@ function BuildBlizzard()
         b.GetID = function(self) return self.id end
         return b
     end
-    local left = { "Head", "Neck", "Shoulder", "Back", "Chest", "Shirt", "Tabard", "Wrist" }
-    local right = { "Hands", "Waist", "Legs", "Feet", "Finger0", "Finger1", "Trinket0", "Trinket1" }
-    for i, n in ipairs(left) do slot(n, 14, -(70 + (i - 1) * 41)) end
-    for i, n in ipairs(right) do slot(n, 290, -(70 + (i - 1) * 41)) end
-    slot("MainHand", 110, -410); slot("SecondaryHand", 150, -410); slot("Ranged", 190, -410)
+    local lefts = { "Head", "Neck", "Shoulder", "Back", "Chest", "Shirt", "Tabard", "Wrist" }
+    local rights = { "Hands", "Waist", "Legs", "Feet", "Finger0", "Finger1", "Trinket0", "Trinket1" }
+    for i, n in ipairs(lefts) do slot(n, 14, -(70 + (i - 1) * 41)) end
+    for i, n in ipairs(rights) do slot(n, 346, -(70 + (i - 1) * 41)) end
+    slot("MainHand", 150, -420); slot("SecondaryHand", 190, -420); slot("Ranged", 230, -420)
 
-    local pane = blz("Frame", "CharacterStatsPane", pd, 190, 380, "TOPLEFT", 342, -64)
-    pane.ClassBackground = tex(pane, nil, "BACKGROUND")
-    pane.ItemLevelFrame = blz("Frame", nil, pane, 187, 29)
-    pane.ItemLevelFrame.Value = fstring(pane.ItemLevelFrame, nil, "14", 15, { 1, 1, 1, 1 })
-    local y = 40
+    -- the stats: a ScrollBox of recycled rows (category headers and stat rows), the way 16001 builds them
+    local pane = blz("Frame", "CharacterStatsPaneScrollBox", pd, 233, 404, "TOPLEFT", 398, -100)
+    pane.Border = atex(pane, nil, "BORDER", "common-insideframe", 228, 403)
+    atex(pane, nil, "BORDER", "UI-Character-Info-ScrollLine", 210, 7)
+    pane.ClassBackground = atex(pane, nil, "BACKGROUND", "UI-Character-Info-Shaman-BG", 233, 383)
+    local box = blz("Frame", nil, pane, 193, 366, "TOPLEFT", 10, -20)
+    pane.ScrollBox = box
+    box.ScrollTarget = blz("Frame", nil, box, 193, 1)
+    box.rows = {}
+    box.ForEachFrame = function(self, fn) for _, r in ipairs(self.rows) do fn(r) end end
+    box.Update = function() end
+    local y = 0
     local function category(title)
-        local f = blz("Frame", nil, pane, 197, 40, "TOPLEFT", 0, -y)
-        tex(f, nil, "BACKGROUND")
+        local f = blz("Frame", nil, box.ScrollTarget, 193, 40, "TOPLEFT", 0, -y)
+        f.Background = atex(f, nil, "BACKGROUND", "UI-Character-Info-Title", 193, 40)
         f.Title = fstring(f, nil, title, 12, { 1, 1, 1, 1 })
-        y = y + 34
+        box.rows[#box.rows + 1] = f
+        y = y + 40
     end
     local function stat(label, value)
-        local f = blz("Frame", nil, pane, 187, 15, "TOPLEFT", 0, -y)
-        f.Background = tex(f, nil, "BACKGROUND")
+        local f = blz("Frame", nil, box.ScrollTarget, 193, 23, "TOPLEFT", 0, -y)
+        f.Background = atex(f, nil, "BACKGROUND", "UI-Character-Info-Line-Bounce2", 213, 23)
         f.Label = fstring(f, nil, label, 11, { 1, 0.82, 0, 1 })
         f.Value = fstring(f, nil, value, 11, { 1, 1, 1, 1 })
         f.Value.points[1] = { point = "RIGHT", rel = f, relPoint = "RIGHT", x = -8, y = 0 }
         f.Value.justify = "RIGHT"
         f.Label.points[1] = { point = "LEFT", rel = f, relPoint = "LEFT", x = 11, y = 0 }
         f.scripts.OnEnter = function() end
-        y = y + 20
+        box.rows[#box.rows + 1] = f
+        y = y + 23
     end
     category("Attributes")
     for _, s in ipairs({ { "Strength", "74" }, { "Agility", "41" }, { "Stamina", "63" }, { "Intellect", "52" }, { "Spirit", "58" } }) do stat(s[1], s[2]) end
     category("Enhancements")
     for _, s in ipairs({ { "Attack Power", "122" }, { "Crit", "5.2%" }, { "Haste", "2.1%" } }) do stat(s[1], s[2]) end
     PaperDollFrame_UpdateStats = function() end
+
+    -- the other pages: a ScrollBox with the long line overlays, a detail pane
+    for _, i in ipairs({ 3, 6 }) do
+        local pg = pages[i]
+        pg.ScrollBox = blz("Frame", nil, pg, 363, 409, "TOPLEFT", 8, -40)
+        pg.ScrollBox.rows = {}
+        pg.ScrollBox.ForEachFrame = function(self, fn) for _, r in ipairs(self.rows) do fn(r) end end
+        pg.ScrollBox.Update = function() end
+        local ov = blz("Frame", nil, pg.ScrollBox, 1, 1)
+        atex(ov, nil, "OVERLAY", "UI-Character-Info-ScrollLine-Long", 384, 8)
+        local hdr = blz("Button", nil, pg.ScrollBox, 343, 26, "TOPLEFT", 0, 0)
+        atex(hdr, nil, "BACKGROUND", "common-button-list-collapseExpand", 343, 26)
+        hdr.StateIcon = atex(hdr, nil, "BORDER", "common-button-list-minus", 13, 4)
+        hdr.Name = fstring(hdr, nil, "Header", 12)
+        pg.ScrollBox.rows[1] = hdr
+    end
+    local sk = pages[3]
+    sk.SkillDetailFrame = blz("Frame", nil, sk, 205, 436, "TOPLEFT", 400, -30)
+    sk.SkillDetailFrame.Title = fstring(sk.SkillDetailFrame, nil, "Mining", 12)
+    sk.SkillDetailFrame.Divider = atex(sk.SkillDetailFrame, nil, "BORDER", "UI-Character-Info-ScrollLine", 210, 7)
+    sk.SkillDetailFrame.RankBar = blz("Frame", nil, sk.SkillDetailFrame, 180, 29, "TOPLEFT", 10, -80)
+    atex(sk.SkillDetailFrame.RankBar, nil, "BACKGROUND", "common-stat-bar-BG", 180, 29)
+    local pv = pages[4]
+    pv.MainInfoFrame = blz("Frame", nil, pv, 398, 135, "TOPLEFT", 0, -20)
+    atex(pv.MainInfoFrame, nil, "ARTWORK", "UI-Character-Info-Honor-LevelBG", 350, 62)
+    pv.MainInfoFrame.badge = atex(pv.MainInfoFrame, nil, "ARTWORK", "UI-Character-Info-Honor-Icon-Horde", 75, 75)
+    pv.DetailFrame = blz("Frame", nil, pv, 205, 436, "TOPLEFT", 400, -30)
+    pv.DetailFrame.Title = fstring(pv.DetailFrame, nil, "Honor", 12)
     pd:Show()
     win.fsOnShowHooks = nil
 end

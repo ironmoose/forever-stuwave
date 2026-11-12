@@ -20,52 +20,100 @@ case = H.case
 # FS is already loaded (Theme ... TabSkins, Character) by the harness; this opens the window the way the client does.
 OPEN = "Fire('PLAYER_ENTERING_WORLD'); CharacterFrame:Show(); FlushTimers()"
 
-case("builds: chrome, header band, switch with three pages", f"""
+case("builds: chrome, header band over the stock top strip, no switch, the window one footer taller", f"""
     {OPEN}
     local S = FS.CharacterSkin.state
-    assert(S.header and S.header.switch, 'no header switch')
-    assert(#S.header.switch.items == 3, 'items')
+    assert(S.header and not S.header.switch, 'header or a leftover switch')
     assert(S.header.title.text == 'stuwave://character', S.header.title.text)
-    local l, t, r, b = Px(S.header.band[2], CharacterFrame)
-    assert(Near(t, 6) and Near(b, 44), 'band y ' .. t .. ' ' .. b)
+    local l, t, r, b = Px(S.header.band[1], CharacterFrame)
+    local wl, wt, wr, wb = Px(CharacterFrame, CharacterFrame)
+    assert(Near(l, 0) and Near(r, wr), 'band spans the window ' .. l .. ' ' .. r .. ' of ' .. wr)
+    assert(b >= 24 and b <= 40, 'band height ' .. b)
+    -- two anchors: a window that changes width drags the band along
+    CharacterFrame.w = CharacterFrame.w + 100
+    local l2, t2, r2 = Px(S.header.band[1], CharacterFrame)
+    local _, _, wr2 = Px(CharacterFrame, CharacterFrame)
+    assert(Near(r2, wr2), 'band did not follow the width')
     assert(CharacterFrame.fsCharacterSkin)
+    assert(Near(CharacterFrame.h * PPU, math.floor(484 * PPU + 0.5) + 40, 0.01), 'window height ' .. CharacterFrame.h)
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 
-case("stock tabs are held and never hit; the stock title and portrait are held", f"""
+case("the stock title and portrait are held; no Inset is touched", f"""
     {OPEN}
-    for i = 1, 3 do
-        local tab = _G['CharacterFrameTab' .. i]
-        assert(tab.alpha == 0, 'tab ' .. i .. ' alpha ' .. tab.alpha)
-        assert(tab.mouse == false, 'tab mouse')
-    end
     assert(CharacterFrameTitleText.alpha == 0)
     assert(CharacterFramePortrait.alpha == 0)
     CharacterFrameTitleText:SetAlpha(1)
     assert(CharacterFrameTitleText.alpha == 0, 'the hold survives a SetAlpha')
+    assert(CharacterFrame.Inset == nil and CharacterFrame.InsetRight == nil, 'an Inset came back')
 """)
 
-case("the switch drives the stock tabs and the title follows the page", f"""
+case("the six mode tabs are restyled in place: held art, a plate, pink when selected, cyan on hover, stock scripts kept", f"""
     {OPEN}
     local S = FS.CharacterSkin.state
-    S.header.switch.items[2].button:Click()
-    assert(ReputationFrame:IsShown() and not PaperDollFrame:IsShown(), 'reputation not shown')
-    assert(S.header.title.text == 'stuwave://reputation', S.header.title.text)
-    assert(S.header.switch:GetSelected() == 2)
-    S.header.switch.items[3].button:Click()
-    assert(TokenFrame:IsShown())
-    assert(S.header.title.text == 'stuwave://currency')
-    S.header.switch.items[1].button:Click()
-    assert(PaperDollFrame:IsShown() and S.header.title.text == 'stuwave://character')
+    for i = 1, 6 do
+        local tab = _G['CharacterFrameModeTab' .. i]
+        assert(S.tabs[tab], 'tab ' .. i .. ' not skinned')
+        assert(tab.Background.alpha == 0 and tab.HighlightTexture.alpha == 0 and tab.TabGlow.alpha == 0, 'stock art ' .. i)
+        assert(tab.SelectedTexture.alpha == 0, 'stock selected art ' .. i)
+        assert(tab.Icon.alpha == 1, 'the icon must stay')
+        assert(tab.scripts.OnMouseUp, 'stock click lost on tab ' .. i)
+    end
+    local function edge(i) return S.tabs[_G['CharacterFrameModeTab' .. i]].box.edges[1].color end
+    assert(edge(1)[1] > 0.9 and edge(1)[2] < 0.4, 'selected tab edge not pink')
+    assert(edge(2)[1] < 0.5 and edge(2)[3] < 0.7, 'idle tab edge not dim')
+    -- a click the stock way moves the selection and the paint
+    CharacterFrameModeTab3.scripts.OnMouseUp()
+    assert(SkillsFrame:IsShown() and not PaperDollFrame:IsShown(), 'skills page not shown')
+    assert(edge(3)[1] > 0.9 and edge(3)[2] < 0.4, 'selected paint did not follow')
+    assert(edge(1)[1] < 0.5, 'the old tab kept the selected paint')
+    for _, f in ipairs(CharacterFrameModeTab4.hooks.OnEnter) do f(CharacterFrameModeTab4) end
+    assert(edge(4)[2] > 0.8, 'hover not cyan')
+    for _, f in ipairs(CharacterFrameModeTab4.hooks.OnLeave) do f(CharacterFrameModeTab4) end
+    assert(edge(4)[2] < 0.5, 'hover stuck')
 """)
 
-case("a tab with no Click is reached through ToggleCharacter, not toggled off", f"""
-    CharacterFrameTab2.Click = nil
-    CharacterFrameTab2.Click = false
+case("the title follows all six pages", f"""
     {OPEN}
     local S = FS.CharacterSkin.state
-    S.header.switch.items[2].button:Click()
-    assert(ReputationFrame:IsShown(), 'fallback did not show the page')
+    local want = {{ 'character', 'reputation', 'skills', 'pvp', 'currency', 'statistics' }}
+    for i = 1, 6 do
+        _G['CharacterFrameModeTab' .. i].scripts.OnMouseUp()
+        assert(S.header.title.text == 'stuwave://' .. want[i], i .. ' ' .. S.header.title.text)
+    end
+""")
+
+case("the stock top strip, level line, pane art and divider are held, our own band under the strip", f"""
+    {OPEN}
+    local S = FS.CharacterSkin.state
+    local strip = PaperDollFrame.TopBackgroundStripHost
+    assert(strip.TopBackgroundStrip.alpha == 0 and strip.TopBackgroundStripBottomEdge.alpha == 0, 'strip art')
+    assert(S.stripUnder, 'no band under the strip')
+    assert(CharacterFrameLeftPaneHost.regions[1].alpha == 0, 'left pane art')
+    assert(CharacterFrameRightPaneHost.regions[1].alpha == 0, 'right pane art')
+    assert(CharacterFrameRightPaneHostStoneBg.alpha == 0, 'stone')
+    assert(CharacterFrameRightPaneHost.children[1].regions[1].alpha == 0, 'stock divider')
+    assert(S.rightUnder and S.rightDivider, 'no own right pane')
+    assert(CharacterModelScene.BackgroundOverlay.alpha == 0, 'model overlay')
+    assert(CharacterLevelText.textColor[1] > 0.9 and CharacterLevelText.textColor[3] < 0.3, 'level line not amber')
+""")
+
+case("model buttons, sidebar tabs and the pane toggle are restyled in place", f"""
+    {OPEN}
+    local S = FS.CharacterSkin.state
+    local b = CharacterModelScene.ControlFrame.zoomInButton
+    assert(S.squares[b], 'zoom not skinned')
+    assert(b.NormalTexture.alpha == 0 and b.PushedTexture.alpha == 0, 'stock button art')
+    assert(b.Icon.alpha == 1 and b.Icon.vertex[2] > 0.8, 'icon not cyan')
+    assert(b.scripts.OnClick, 'click lost')
+    local t1, t2 = PaperDollSidebarTab1, PaperDollSidebarTab2
+    assert(S.squares[t1] and S.squares[t1].box.edges[1].color[1] > 0.9, 'selected sidebar tab not pink')
+    assert(S.squares[t2].box.edges[1].color[1] < 0.5, 'idle sidebar tab pink')
+    t2:SetChecked(true); t1:SetChecked(false)
+    assert(S.squares[t2].box.edges[1].color[1] > 0.9 and S.squares[t1].box.edges[1].color[1] < 0.5, 'sidebar paint did not follow')
+    local tg = CharacterFrameRightPaneToggleButton
+    assert(#S.squares[tg].glyph == 5, 'toggle glyph')
+    assert(tg.scripts.OnClick, 'toggle click lost')
 """)
 
 case("every slot wears the shared item slot, in place, with no script or attribute written", f"""
@@ -134,19 +182,26 @@ case("a secret durability shows no bar and is never compared", f"""
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 
-case("footer chips: item level, wear, worn pieces and the repair bill", f"""
+case("footer chips: one shared line, even spacing, the repair bill right aligned", f"""
     {OPEN}
     local c = FS.CharacterSkin.state.chips
     assert(c.ilvl.label.text == 'ilvl 14', c.ilvl.label.text)
     assert(c.wear.label.text:find('^wear %d+%%$'), c.wear.label.text)
     assert(c.worn.label.text == '5 worn', c.worn.label.text)
     assert(c.repair.label.text == 'repair 2g 80s 0c', c.repair.label.text)
-    -- the chips sit on the window's bottom edge, 8 px up, 14 px in
-    local l, t, r, b = Px(c.ilvl.frame, CharacterFrame)
     local wl, wt, wr, wb = Px(CharacterFrame, CharacterFrame)
-    assert(Near(wb - b, 8) and Near(l, 14), 'chip seat ' .. (wb - b) .. ' ' .. l)
-    local rl, rt, rr, rb = Px(c.repair.frame, CharacterFrame)
-    assert(Near(wr - rr, 14), 'repair right margin ' .. (wr - rr))
+    local l1, t1, r1, b1 = Px(c.ilvl.frame, CharacterFrame)
+    local l2, t2, r2, b2 = Px(c.wear.frame, CharacterFrame)
+    local l3, t3, r3, b3 = Px(c.worn.frame, CharacterFrame)
+    local l4, t4, r4, b4 = Px(c.repair.frame, CharacterFrame)
+    assert(Near(t1, t2) and Near(t2, t3) and Near(t3, t4), 'chips are not on one line')
+    assert(Near(l1, 14), 'first chip x ' .. l1)
+    assert(Near(l2 - r1, l3 - r2), 'uneven gaps ' .. (l2 - r1) .. ' ' .. (l3 - r2))
+    assert(Near(wr - r4, 14), 'repair right margin ' .. (wr - r4))
+    -- the line is centred in the footer band
+    assert(Near(wb - b1, t1 - (wb - 40), 1), 'chips not centred in the footer: ' .. (wb - b1) .. ' vs ' .. (t1 - (wb - 40)))
+    local fl, ft, fr, fb = Px(FS.CharacterSkin.state.footer.band, CharacterFrame)
+    assert(Near(fb, wb) and Near(fb - ft, 40), 'footer band ' .. ft .. ' ' .. fb)
 """)
 
 case("chips hide for a missing or secret value, and off the character page", f"""
@@ -157,21 +212,49 @@ case("chips hide for a missing or secret value, and off the character page", f""
     assert(not c.ilvl.frame.shown, 'secret ilvl shown')
     assert(not c.repair.frame.shown, 'repair shown without a plain cost')
     assert(c.wear.frame.shown)
-    FS.CharacterSkin.state.header.switch.items[2].button:Click()
-    FS.CharacterSkin.RefreshChips()
+    CharacterFrameModeTab2.scripts.OnMouseUp()
     assert(not c.wear.frame.shown, 'footer on the reputation page')
+    CharacterFrameModeTab1.scripts.OnMouseUp()
+    assert(c.wear.frame.shown, 'footer chips did not come back on the character page')
 """)
 
-case("stat rows keep their scripts, hold their art and take mono text", f"""
+case("stat rows (the ScrollBox's recycled rows) keep their scripts, hold their art and take mono text", f"""
     {OPEN}
-    local pane = CharacterStatsPane
+    local box = CharacterStatsPaneScrollBox.ScrollBox
     local row
-    for _, ch in ipairs({{ pane:GetChildren() }}) do if ch.Label then row = ch break end end
+    for _, r in ipairs(box.rows) do if r.Label then row = r break end end
     assert(row.scripts.OnEnter, 'stat tooltip script lost')
     assert(row.Background.alpha == 0, 'row art not held')
-    assert(row.Label.fontPath:find('Mononoki') or row.Label.fontPath ~= 'stock.ttf', 'label font not restyled ' .. tostring(row.Label.fontPath))
+    assert(row.Label.fontPath ~= 'stock.ttf', 'label font not restyled ' .. tostring(row.Label.fontPath))
     row.Label:SetTextColor(1, 0.82, 0, 1)
     assert(row.Label.textColor[1] < 0.8, 'the pinned label colour came back to gold')
+    local cat = box.rows[1]
+    assert(cat.Background.alpha == 0 and cat.Title.textColor[2] > 0.8 and cat.Title.textColor[1] < 0.5, 'category not cyan')
+    assert(CharacterStatsPaneScrollBox.Border.alpha == 0 and CharacterStatsPaneScrollBox.ClassBackground.alpha == 0, 'pane art')
+    -- a row the list builds later is restyled on its next update
+    local f = BLZ.blz('Frame', nil, box.ScrollTarget, 193, 23)
+    f.Background = BLZ.atex(f, nil, 'BACKGROUND', 'UI-Character-Info-Line-Bounce2', 213, 23)
+    f.Label = BLZ.fstring(f, nil, 'Armor', 11)
+    box.rows[#box.rows + 1] = f
+    box:Update(); FlushTimers()
+    assert(f.Background.alpha == 0 and f.Label.fontPath ~= 'stock.ttf', 'a later row was not restyled')
+""")
+
+case("the other pages: line overlays, header rows and detail panes held, the honor badge kept", f"""
+    {OPEN}
+    local sk = SkillsFrame
+    sk:Show(); FlushTimers()
+    local ov = sk.ScrollBox.children[1]
+    assert(ov.regions[1].alpha == 0, 'scroll line overlay')
+    local hdr = sk.ScrollBox.rows[1]
+    assert(hdr.regions[1].alpha == 0, 'header art')
+    assert(hdr.StateIcon.alpha == 1 and hdr.StateIcon.vertex[2] > 0.8, 'state icon not cyan')
+    assert(sk.SkillDetailFrame.Divider.alpha == 0, 'detail divider')
+    assert(sk.SkillDetailFrame.Title.textColor[2] > 0.8 and sk.SkillDetailFrame.Title.textColor[1] < 0.5, 'detail title')
+    local pv = PVPRankFrame
+    assert(pv.MainInfoFrame.regions[1].alpha == 0, 'honor level band')
+    assert(pv.MainInfoFrame.badge.alpha == 1, 'the honor badge must stay')
+    assert(StatisticsFrame.ScrollBox.children[1].regions[1].alpha == 0, 'statistics overlay')
 """)
 
 case("nothing is built in combat; the slots are decorated when it ends", f"""

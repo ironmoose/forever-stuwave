@@ -1,28 +1,28 @@
 -- Forever STUwave: Character
--- The character window (CharacterFrame, with its character / reputation / currency sub frames) as a STUwave window, from the
--- approved CHARACTER mockup (mockups/character-spells-2026-11-12.html, section 1).
+-- The character window (CharacterFrame) as a STUwave window, from the approved CHARACTER mockup
+-- (mockups/character-spells-2026-11-12.html, section 1), laid over the frame tree the 16001 client really has (readout:
+-- debug/tree-CharacterFrame-2026-11-12.txt): a 631 x 484 window with LeftPaneHost (paper doll side) and RightPaneHost (stats),
+-- PaperDollFrame (TopBackgroundStripHost, PaperDollLevelInfo, CharacterModelScene with ControlFrame, ItemsFrame with the slot
+-- buttons), PaperDollSidebarTabs, RightPaneToggleButton, and CharacterFrameModeTabs: six round page tabs down the window's right
+-- edge (Character, Reputation, Skills, PvP, Currency, Statistics).
 --
---   * panel chrome in place of the stock frame art, a header band with a glyph, `stuwave://character` (the page name follows
---     the sub frame) and a built-in switch (TabSkins.Switch) for character / reputation / currency. The stock tabs below the
---     window are held and never hit; the switch drives the stock tab's own Click, or the same ToggleCharacter call the key
---     bindings make when the tab has no Click;
+--   * panel chrome in place of the stock frame art, and a header band on the stock top strip with a glyph and `stuwave://<page>`
+--     (the page name follows whichever of the six sub frames is shown);
+--   * the six ModeTabs are restyled in place (a cut plate, a cyan edge on hover, a pink edge and wash when selected): they are
+--     the stock tabs, so all six pages work exactly as vanilla and there is no second switch;
 --   * every equipment slot wears the shared item slot (a cut plate, the quality ring and LED of Core/ItemSlotSkins.lua, its icon
 --     seated in the layer's inset box) and, new here, a WEAR BAR: a 2 px strip up the slot's right edge, as tall as the
---     durability left (cyan above half, amber to a fifth, pink under it, full pink and a pink ring when broken). Durability as a
---     whole is not here: it has its own HUD;
---   * the stat rows keep every stock script and tooltip: their art is held and their text restyled in place (mono, muted
---     label, light value);
---   * footer chips: item level, average wear, worn pieces and the repair bill, each read from a plain API value and left out
---     when the client will not give one.
+--     durability left (cyan above half, amber to a fifth, pink under it, full pink when broken). Durability as a whole is not here;
+--   * the stock level band, pane backgrounds, brown stat rows, gold category headers, model buttons, sidebar tabs and the right
+--     pane toggle are held or restyled in place with every stock script and tooltip kept;
+--   * a shared footer line under both panes (the window is made one footer taller) with chips for item level, average wear and
+--     worn pieces, and the repair bill on the right, each read from a plain API value and left out when the client will not give one.
 --
 -- Skin only. Slots are secure item buttons: nothing on them is moved, resized, reparented or attributed, and no field is written
--- on them that UseContainerItem reads. Our regions, post-hooks and weak-keyed state only. A slot met in combat is decorated when
--- combat ends. Values are read through FS.IsSecret first.
---
--- Frame names: the 16001 globals dump (Character<Slot>Slot, CharacterFrameTab1..3, CharacterStatsPane, CharacterLevelText,
--- CharacterModelFrameBackground*) and the retail 12.1.0 Blizzard_UIPanels_Game source (CharacterFrame.xml: Tab1..3, Inset,
--- InsetRight, CharacterStatsPane; PaperDollFrame.lua: ToggleCharacter). The dump also lists CharacterFrameModeTab1..6, a
--- layout the reference source does not have; those are left exactly as they are.
+-- on them that UseContainerItem reads. Our regions, post-hooks and weak-keyed state only; the one resize is the window's own height
+-- (outside combat, never a secure frame). A slot met in combat is decorated when combat ends. Values are read through FS.IsSecret
+-- first. The shared helpers (HoldStock, RestyleFrame, SkinKey, SkinPage) are exported on FS.CharacterSkin for Skills, PvP,
+-- Statistics, Reputation and Currency, which share the window.
 
 local _, FS = ...
 
@@ -41,10 +41,14 @@ local C = {
     dim = Theme.COLOR_CTRL_DIM or { 0.294, 0.165, 0.525 },
 }
 
-local G = { HEAD_H = 44, CHIP_H = 20, CHIP_GAP = 8, FOOT_UP = 8, SIDE = 14, WEAR_W = 2, WEAR_INSET = 4, WEAR_PAD = 6 }
+local G = { FOOT_H = 40, CHIP_H = 20, CHIP_GAP = 8, SIDE = 14, WEAR_W = 2, WEAR_INSET = 4, WEAR_PAD = 6 }
 Char.GEOM = G
 
-local S = { done = false, slots = {}, chips = {}, decorated = setmetatable({}, { __mode = "k" }), held = setmetatable({}, { __mode = "k" }) }
+local function Weak() return setmetatable({}, { __mode = "k" }) end
+local S = {
+    done = false, slots = {}, chips = {}, decorated = Weak(), held = Weak(), watched = Weak(), details = Weak(), rules = Weak(),
+    boxes = Weak(), tabs = Weak(), squares = Weak(), spans = {},
+}
 Char.state = S
 
 -- Inventory slot name -> id (the paper doll's slot buttons are Character<name>Slot).
@@ -231,9 +235,6 @@ local function SkinSlots()
     end
 end
 
--------------------------------------------------------------------------------
--- Stat rows
--------------------------------------------------------------------------------
 
 local function PinColor(fs, color)
     if S.held[fs] or type(fs.SetTextColor) ~= "function" then return end
@@ -249,43 +250,302 @@ local function PinColor(fs, color)
     end)
 end
 
--- Restyles a stat row (a frame with a background texture and two text regions: label then value) or a category header (one text
--- region) in place. Stock scripts and tooltips stay.
-local function RestyleRow(row)
-    if type(row) ~= "table" or type(row.GetRegions) ~= "function" then return end
-    local texts = {}
-    for _, region in ipairs({ row:GetRegions() }) do
-        local kind = Try(region.GetObjectType, region)
-        if kind == "Texture" then HeldArt.Hold(region)
-        elseif kind == "FontString" then texts[#texts + 1] = region end
+-------------------------------------------------------------------------------
+-- Shared helpers (every page of this window uses them)
+-------------------------------------------------------------------------------
+
+local function List(obj, method)
+    if type(obj) ~= "table" or type(obj[method]) ~= "function" then return {} end
+    local ok, out = pcall(function() return { obj[method](obj) } end)
+    return ok and out or {}
+end
+
+local function AtlasOf(region)
+    if type(region) ~= "table" or type(region.GetAtlas) ~= "function" then return nil end
+    local a = Plain(Try(region.GetAtlas, region))
+    return type(a) == "string" and a or nil
+end
+
+-- The stock art of this window's pages is told by its atlas name: nothing here has a parentKey or a name to go by.
+local STOCK_ATLAS = {
+    "^UI%-Character%-Info", "^common%-framedivider", "^common%-insideframe", "^common%-sidetab", "^common%-button%-list",
+    "^common%-button%-square", "^common%-stat%-bar%-BG",
+}
+-- Stock art that is information, not decoration: the plus and minus of a header, the honor badge and its reward ring.
+local KEEP_ATLAS = { "list%-minus", "list%-plus", "Honor%-Icon", "Honor%-Bar%-BG%-", "RewardRing" }
+
+local function IsStockAtlas(atlas)
+    for _, p in ipairs(KEEP_ATLAS) do if atlas:find(p) then return false end end
+    for _, p in ipairs(STOCK_ATLAS) do if atlas:find(p) then return true end end
+    return false
+end
+
+-- Holds every texture of `frame` and of its sub frames (down to `depth`, scroll bars left out) whose atlas is stock art of this
+-- window. Idempotent; the hold is a SetAlpha hook, so recycled rows keep it.
+function Char.HoldStock(frame, depth)
+    depth = depth or 0
+    if type(frame) ~= "table" or depth > 7 then return end
+    for _, region in ipairs(List(frame, "GetRegions")) do
+        if Try(region.GetObjectType, region) == "Texture" then
+            local atlas = AtlasOf(region)
+            if atlas and IsStockAtlas(atlas) then HeldArt.Hold(region) end
+        end
     end
-    if #texts == 1 then
-        Kit.RestyleLabel(texts[1], row, 12, C.cyan)
-        PinColor(texts[1], C.cyan)
-    elseif #texts >= 2 then
-        local label, value = row.Label or texts[1], row.Value or texts[2]
-        Kit.RestyleLabel(label, row, 12, C.muted)
-        PinColor(label, C.muted)
-        Kit.RestyleLabel(value, row, 12, C.text)
-        PinColor(value, C.text)
+    for _, child in ipairs(List(frame, "GetChildren")) do
+        if type(child) == "table" and child.Track == nil then Char.HoldStock(child, depth + 1) end
     end
 end
 
-local function Walk(frame, depth)
-    if type(frame) ~= "table" or depth > 6 then return end
-    RestyleRow(frame)
-    if type(frame.GetChildren) == "function" then
-        for _, child in ipairs({ frame:GetChildren() }) do Walk(child, depth + 1) end
+local FONT_KEYS = {
+    Title = { 12, "cyan" }, Subtitle = { 12, "muted" }, EmptyText = { 12, "muted" },
+    Name = { 12, "text" }, Label = { 12, "muted" }, Value = { 12, "text" },
+}
+
+-- Restyles the text keys a stock row or pane carries (Title, Name, Label, Value ...) in mono, colour pinned.
+function Char.RestyleFonts(frame)
+    if type(frame) ~= "table" then return end
+    for key, spec in pairs(FONT_KEYS) do
+        local fs = frame[key]
+        if type(fs) == "table" and Try(fs.GetObjectType, fs) == "FontString" then
+            Kit.RestyleLabel(fs, frame, spec[1], C[spec[2]])
+            PinColor(fs, C[spec[2]])
+        end
+    end
+end
+
+-- A row of one of the pages: its stock art held, its header glyph tinted, its texts in mono.
+function Char.PageRow(row)
+    if type(row) ~= "table" then return end
+    Char.HoldStock(row, 5)
+    local icon = row.StateIcon
+    if type(icon) == "table" and icon.SetVertexColor then pcall(icon.SetVertexColor, icon, C.cyan[1], C.cyan[2], C.cyan[3], 1) end
+    Char.RestyleFonts(row)
+end
+
+-- Runs `fn(row)` on every row now and after every update of the ScrollBox `box`.
+function Char.WatchRows(box, fn)
+    if type(box) ~= "table" or S.watched[box] then return end
+    S.watched[box] = true
+    local function run()
+        if type(box.ForEachFrame) == "function" then
+            pcall(box.ForEachFrame, box, function(row) pcall(fn, row) end)
+        end
+    end
+    for _, method in ipairs({ "Update", "FullUpdate", "SetDataProvider" }) do
+        Kit.HookFunc(box, method, function() run() end)
+    end
+    Kit.HookScript(box, "OnShow", function() Kit.Later(run) end)
+    run()
+end
+
+-- A detail pane (the right hand pane of reputation, skills and pvp): chrome art held, texts and its bar in STUwave.
+function Char.SkinDetail(detail)
+    if type(detail) ~= "table" or S.details[detail] then return end
+    S.details[detail] = true
+    Char.HoldStock(detail, 2)
+    Char.RestyleFonts(detail)
+    for _, key in ipairs({ "StandingBar", "RankBar" }) do
+        local bar = detail[key]
+        if type(bar) == "table" and bar.CreateTexture then
+            local track = bar:CreateTexture(nil, "BACKGROUND", nil, -6)
+            track:SetAllPoints(bar)
+            track:SetColorTexture(C.ink[1], C.ink[2], C.ink[3], 0.9)
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Boxes: a fill and a ring of rects that follows a stock widget's size
+-------------------------------------------------------------------------------
+
+local function LayoutBox(b)
+    local u = Kit.U(b.host, b.px or 1)
+    local e, h = b.edges, b.host
+    e[1]:ClearAllPoints(); e[1]:SetPoint("TOPLEFT", h, "TOPLEFT", 0, 0); e[1]:SetPoint("TOPRIGHT", h, "TOPRIGHT", 0, 0); e[1]:SetHeight(u)
+    e[2]:ClearAllPoints(); e[2]:SetPoint("BOTTOMLEFT", h, "BOTTOMLEFT", 0, 0); e[2]:SetPoint("BOTTOMRIGHT", h, "BOTTOMRIGHT", 0, 0); e[2]:SetHeight(u)
+    e[3]:ClearAllPoints(); e[3]:SetPoint("TOPLEFT", h, "TOPLEFT", 0, 0); e[3]:SetPoint("BOTTOMLEFT", h, "BOTTOMLEFT", 0, 0); e[3]:SetWidth(u)
+    e[4]:ClearAllPoints(); e[4]:SetPoint("TOPRIGHT", h, "TOPRIGHT", 0, 0); e[4]:SetPoint("BOTTOMRIGHT", h, "BOTTOMRIGHT", 0, 0); e[4]:SetWidth(u)
+end
+
+local function Box(host, edgeLayer)
+    local b = { host = host, edges = {}, px = 1 }
+    b.fill = host:CreateTexture(nil, "BACKGROUND", nil, -7)
+    b.fill:SetAllPoints(host)
+    for i = 1, 4 do
+        local t = host:CreateTexture(nil, edgeLayer or "OVERLAY", nil, 6)
+        t:SetColorTexture(1, 1, 1, 1)
+        b.edges[i] = t
+    end
+    LayoutBox(b)
+    S.boxes[b] = true
+    return b
+end
+
+local function PaintBox(b, fill, fa, edge, ea, px)
+    b.fill:SetColorTexture(fill[1], fill[2], fill[3], fa or 1)
+    for _, t in ipairs(b.edges) do t:SetColorTexture(edge[1], edge[2], edge[3], ea or 1) end
+    if px and px ~= b.px then b.px = px; LayoutBox(b) end
+end
+
+local function ShownRegion(region)
+    return type(region) == "table" and Try(region.IsShown, region) == true
+end
+
+-- Follows a texture region's shown state (the stock selected glow of a tab).
+local function WatchShown(region, fn)
+    for _, m in ipairs({ "Show", "Hide", "SetShown" }) do Kit.HookFunc(region, m, fn) end
+end
+
+-------------------------------------------------------------------------------
+-- Mode tabs: the six round page tabs down the window's right edge, restyled in place
+-------------------------------------------------------------------------------
+
+local function PaintTab(tab)
+    local t = S.tabs[tab]
+    if not t then return end
+    local sel = ShownRegion(tab.SelectedTexture)
+    local hover = t.state and t.state.hover
+    if sel then PaintBox(t.box, C.band, 1, C.pink, 1, 2)
+    elseif hover then PaintBox(t.box, C.ink, 1, C.cyan, 1, 1)
+    else PaintBox(t.box, C.ink, 1, C.dim, 1, 1) end
+    local icon = tab.Icon
+    if type(icon) == "table" and icon.SetVertexColor then
+        local v = (sel or hover) and 1 or 0.72
+        pcall(icon.SetVertexColor, icon, v, v, v, 1)
+    end
+end
+
+local function SkinModeTab(tab)
+    if type(tab) ~= "table" or S.tabs[tab] then return end
+    S.tabs[tab] = { box = Box(tab) }
+    for _, key in ipairs({ "Background", "SelectedTexture", "TabGlow", "HighlightTexture" }) do HeldArt.Hold(tab[key]) end
+    S.tabs[tab].state = Kit.Track(tab, PaintTab)
+    if tab.SelectedTexture then WatchShown(tab.SelectedTexture, function() PaintTab(tab) end) end
+    PaintTab(tab)
+end
+
+local function SkinModeTabs()
+    for i = 1, 6 do SkinModeTab(_G["CharacterFrameModeTab" .. i]) end
+end
+
+-------------------------------------------------------------------------------
+-- Small square buttons: model zoom and rotate, the sidebar tabs, the right pane toggle
+-------------------------------------------------------------------------------
+
+local function PaintSquare(btn)
+    local s = S.squares[btn]
+    if not s then return end
+    local sel = s.selected and s.selected() or false
+    local hover = s.state and s.state.hover
+    local pressed = s.state and s.state.pressed
+    local edge = sel and C.pink or ((hover or pressed) and C.cyan or C.dim)
+    PaintBox(s.box, sel and C.band or C.ink, 1, edge, 1, sel and 2 or 1)
+    local tint = s.tint and ((hover or pressed or sel) and C.text or s.tint)
+    if s.icon and tint and s.icon.SetVertexColor then pcall(s.icon.SetVertexColor, s.icon, tint[1], tint[2], tint[3], 1) end
+    if s.glyph then
+        local g = (hover or pressed) and C.text or C.cyan
+        for _, t in ipairs(s.glyph) do t:SetColorTexture(g[1], g[2], g[3], 1) end
+    end
+end
+
+local function SkinSquare(btn, opts)
+    if type(btn) ~= "table" or S.squares[btn] then return nil end
+    opts = opts or {}
+    local s = { box = Box(btn), icon = opts.icon, tint = opts.tint, selected = opts.selected }
+    S.squares[btn] = s
+    HeldArt.HoldButton(btn, opts.icon and { [opts.icon] = true } or nil)
+    s.state = Kit.Track(btn, PaintSquare)
+    return s
+end
+
+local function SkinModelControls()
+    local scene = _G.CharacterModelScene
+    local control = scene and scene.ControlFrame
+    if not control then return end
+    for _, key in ipairs({ "zoomInButton", "zoomOutButton", "rotateLeftButton", "rotateRightButton", "resetButton" }) do
+        local b = control[key]
+        if b then
+            SkinSquare(b, { icon = b.Icon, tint = C.cyan })
+            PaintSquare(b)
+        end
+    end
+end
+
+local function SelectedRegionOf(btn)
+    for _, region in ipairs(List(btn, "GetRegions")) do
+        local atlas = AtlasOf(region)
+        if atlas and atlas:find("Selected") then return region end
+    end
+    return nil
+end
+
+local function SkinSidebarTabs()
+    for i = 1, 4 do
+        local btn = _G["PaperDollSidebarTab" .. i]
+        if btn and not S.squares[btn] then
+            local sel = SelectedRegionOf(btn)
+            local s = SkinSquare(btn, { icon = btn.Icon, tint = { 0.8, 0.8, 0.8 }, selected = function() return ShownRegion(sel) end })
+            if s then
+                if sel then WatchShown(sel, function() PaintSquare(btn) end) end
+                Kit.HookFunc(btn, "SetChecked", function() PaintSquare(btn) end)
+                PaintSquare(btn)
+            end
+        end
+    end
+end
+
+local function SkinToggle()
+    local btn = _G.CharacterFrameRightPaneToggleButton
+    if not btn or S.squares[btn] then return end
+    local s = SkinSquare(btn, {})
+    if not s then return end
+    local bw, bh = Kit.SizePx(btn)
+    bw, bh = bw or 28, bh or 28
+    local gw, gh = 18, 14
+    local gx, gy = math.floor((bw - gw) / 2), math.floor((bh - gh) / 2)
+    local function r(x, y, w, h) return Kit.Rect(btn, gx + x, gy + y, w, h, C.cyan, 1, "OVERLAY", 7) end
+    s.glyph = { r(0, 0, gw, 2), r(0, gh - 2, gw, 2), r(0, 0, 2, gh), r(gw - 2, 0, 2, gh), r(gw - 7, 2, 2, gh - 4) }
+    PaintSquare(btn)
+end
+
+-------------------------------------------------------------------------------
+-- Stat rows
+-------------------------------------------------------------------------------
+
+local function StatRow(row)
+    if type(row) ~= "table" then return end
+    HeldArt.Hold(row.Background)
+    Char.RestyleFonts(row)
+    if not S.rules[row] and row.CreateTexture then
+        local rule = row:CreateTexture(nil, "BORDER")
+        rule:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
+        rule:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
+        S.rules[row] = rule
+    end
+    local rule = S.rules[row]
+    if rule then
+        local title = row.Title ~= nil
+        local color = title and C.violet or C.dim
+        rule:SetColorTexture(color[1], color[2], color[3], title and 0.9 or 0.4)
+        rule:SetHeight(Kit.U(row, 1))
     end
 end
 
 local function SkinStats()
-    local pane = _G.CharacterStatsPane
-    if not pane then return end
-    Walk(pane, 0)
-    for _, field in ipairs({ "ClassBackground" }) do HeldArt.Hold(pane[field]) end
-    local value = pane.ItemLevelFrame and pane.ItemLevelFrame.Value
-    if value then Kit.RestyleLabel(value, pane, 20, C.amber); PinColor(value, C.amber) end
+    for _, name in ipairs({ "CharacterStatsPaneScrollBox", "CharacterStatsPanePetScrollBox" }) do
+        local pane = _G[name]
+        if pane then
+            Char.HoldStock(pane, 0)
+            HeldArt.Hold(pane.Border)
+            HeldArt.Hold(pane.ClassBackground)
+            Char.WatchRows(pane.ScrollBox, StatRow)
+        end
+    end
+    local paper = _G.PaperDollFrame
+    if paper then
+        Char.HoldStock(paper.TitleManagerPane, 4)
+        Char.HoldStock(paper.EquipmentManagerPane, 4)
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -293,9 +553,12 @@ end
 -------------------------------------------------------------------------------
 
 local PAGES = {
-    { label = "character", frame = "PaperDollFrame", tab = "CharacterFrameTab1" },
-    { label = "reputation", frame = "ReputationFrame", tab = "CharacterFrameTab2" },
-    { label = "currency", frame = "TokenFrame", tab = "CharacterFrameTab3" },
+    { label = "character", frame = "PaperDollFrame" },
+    { label = "reputation", frame = "ReputationFrame" },
+    { label = "skills", frame = "SkillsFrame" },
+    { label = "pvp", frame = "PVPRankFrame" },
+    { label = "currency", frame = "TokenFrame" },
+    { label = "statistics", frame = "StatisticsFrame" },
 }
 
 local function ShownPage()
@@ -306,77 +569,157 @@ local function ShownPage()
     return 1
 end
 
-local function GoTo(i)
-    local page = PAGES[i]
-    local tab = _G[page.tab]
-    if tab and type(tab.Click) == "function" then
-        pcall(tab.Click, tab)
-    elseif type(_G.ToggleCharacter) == "function" then
-        pcall(_G.ToggleCharacter, page.frame, true)
-    end
-end
-
 function Char.RefreshHeader()
     local h = S.header
     if not h then return end
-    local i = ShownPage()
-    h.switch:SetSelected(i, true)
-    h.title:SetText("stuwave://" .. PAGES[i].label)
-    for j, page in ipairs(PAGES) do
-        local tab = _G[page.tab]
-        -- a tab the client keeps hidden (currency before it unlocks) cannot be reached by its switch item either
-        local off = tab and Try(tab.IsShown, tab) == false and j ~= i
-        h.switch:SetDisabled(j, off and true or false)
-    end
+    h.title:SetText("stuwave://" .. PAGES[ShownPage()].label)
 end
 
--- A person glyph from one pixel runs: head and shoulders.
-local function Glyph(win, x, y, color)
+-- The height of the stock strip above the panes, in UI units: measured from the frames, 24 when they will not say.
+local function TopGapUnits(win)
+    local pane = _G.CharacterFrameLeftPaneHost
+    local a = Plain(Try(win.GetTop, win))
+    local b = pane and Plain(Try(pane.GetTop, pane))
+    if type(a) == "number" and type(b) == "number" and a - b >= 8 and a - b <= 80 then return a - b end
+    return 24
+end
+
+-- A person glyph from one pixel runs: head and shoulders, `k` pixels per run unit.
+local function Glyph(win, x, y, k, color)
     local out = {}
     local runs = { { 4, 0, 6, 2 }, { 3, 2, 8, 4 }, { 0, 7, 14, 2 }, { 0, 9, 14, 7 } }
-    for _, r in ipairs(runs) do out[#out + 1] = Kit.Rect(win, x + r[1] * 2, y + r[2] * 2, r[3] * 2, r[4] * 2, color, 1, "OVERLAY", 3) end
+    for _, r in ipairs(runs) do out[#out + 1] = Kit.Rect(win, x + r[1] * k, y + r[2] * k, r[3] * k, r[4] * k, color, 1, "OVERLAY", 3) end
     return out
 end
 
-local function BuildHeader(win)
-    local W = Kit.SizePx(win) or 540
-    local top = Kit.Rect(win, 7, 1, W - 8, 5, C.band, 1, "ARTWORK", 0)
-    local band = Kit.Rect(win, 1, 6, W - 2, G.HEAD_H - 6, C.band, 1, "ARTWORK", 0)
-    local rule = Kit.Rect(win, 1, G.HEAD_H, W - 2, 1, C.violet, 1, "ARTWORK", 1)
-    local glyph = Glyph(win, 16, 12, C.cyan)
-    local title = Kit.Label(win, "stuwave://character", 16, C.muted, "OVERLAY")
-    Kit.Place(title, win, 52, G.HEAD_H / 2, nil, nil, "LEFT", "TOPLEFT")
-    title:SetJustifyH("LEFT")
-
-    local labels = {}
-    for i, page in ipairs(PAGES) do labels[i] = page.label end
-    local sw = FS.TabSkins and FS.TabSkins.Switch and FS.TabSkins.Switch(win, labels, {
-        selected = ShownPage(), onSelect = function(i) GoTo(i) end,
-    })
-    if sw then
-        Kit.Place(sw.frame, win, -48, 8, sw.width, 28, "TOPRIGHT", "TOPRIGHT")
-        for _, page in ipairs(PAGES) do
-            local tab = _G[page.tab]
-            if tab then
-                Kit.HoldFrame(tab)
-                if tab.EnableMouse then pcall(tab.EnableMouse, tab, false) end
-            end
+-- A rect that spans the width of `host` from `y` px down, `h` px tall: two anchors, so it follows a window that changes width.
+local function Span(host, parent, y, h, color, alpha, layer, sub, fromBottom)
+    local t = parent:CreateTexture(nil, layer or "ARTWORK", nil, sub or 0)
+    t:SetColorTexture(color[1], color[2], color[3], alpha or 1)
+    Kit.Snap(t)
+    local rec = { t = t, host = host, y = y, h = h, bottom = fromBottom }
+    local function apply()
+        local k = Kit.U(host, 1)
+        t:ClearAllPoints()
+        if rec.bottom then
+            t:SetPoint("BOTTOMLEFT", host, "BOTTOMLEFT", 0, rec.y * k)
+            t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", 0, rec.y * k)
+        else
+            t:SetPoint("TOPLEFT", host, "TOPLEFT", 0, -rec.y * k)
+            t:SetPoint("TOPRIGHT", host, "TOPRIGHT", 0, -rec.y * k)
         end
+        t:SetHeight(rec.h * k)
     end
-    S.header = { switch = sw, title = title, band = { top, band, rule }, glyph = glyph }
-    if not sw then S.header = nil end
+    rec.apply = apply
+    S.spans[#S.spans + 1] = rec
+    apply()
+    return t
+end
+
+local function BuildHeader(win)
+    local gap = TopGapUnits(win)
+    local headPx = math.max(24, math.ceil(gap * Kit.Ppu(win)))
+    S.headPx = headPx
+    local band = Span(win, win, 1, headPx - 1, C.band, 1, "ARTWORK", 0)
+    local rule = Span(win, win, headPx, 1, C.violet, 1, "ARTWORK", 1)
+    local k = headPx >= 36 and 2 or 1
+    local glyph = Glyph(win, 12, math.floor((headPx - 16 * k) / 2), k, C.cyan)
+    local title = Kit.Label(win, "stuwave://character", headPx >= 36 and 16 or 13, C.muted, "OVERLAY")
+    Kit.Place(title, win, 12 + 14 * k + 10, math.floor(headPx / 2), nil, nil, "LEFT", "TOPLEFT")
+    title:SetJustifyH("LEFT")
+    S.header = { title = title, band = { band, rule }, glyph = glyph }
 
     Kit.HoldFrame(_G.CharacterFrameTitleText)
     HeldArt.Hold(_G.CharacterFramePortrait)
-    for _, page in ipairs(PAGES) do
-        Kit.HookScript(_G[page.frame], "OnShow", Char.RefreshHeader)
-    end
     if Theme.SkinCloseButton then pcall(Theme.SkinCloseButton, win) end
+    for _, page in ipairs(PAGES) do
+        Kit.HookScript(_G[page.frame], "OnShow", function() Char.RefreshHeader(); Char.RefreshChips() end)
+    end
     Char.RefreshHeader()
 end
 
+-- The stock strip under the header (it carries the level line): held, with our own band under it.
+local function SkinTopStrip()
+    local paper = _G.PaperDollFrame
+    local host = paper and paper.TopBackgroundStripHost
+    if host then
+        HeldArt.Hold(host.TopBackgroundStrip)
+        HeldArt.Hold(host.TopBackgroundStripBottomEdge)
+        if not S.stripUnder and host.CreateTexture then
+            S.stripUnder = Span(host, host, 0, 1, C.band, 1, "BACKGROUND", -5)
+            S.stripUnder:ClearAllPoints()
+            S.stripUnder:SetAllPoints(host)
+            S.stripRule = Span(host, host, 0, 1, C.dim, 1, "BORDER", 1, true)
+        end
+    end
+    local level = _G.CharacterLevelText
+    if level then Kit.RestyleLabel(level, level, 12, C.amber); PinColor(level, C.amber) end
+end
+
 -------------------------------------------------------------------------------
--- Footer chips
+-- Panes
+-------------------------------------------------------------------------------
+
+local function SkinPanes()
+    local left, right = _G.CharacterFrameLeftPaneHost, _G.CharacterFrameRightPaneHost
+    if left then Char.HoldStock(left, 0) end
+    if right then
+        Char.HoldStock(right, 3)
+        HeldArt.Hold(_G.CharacterFrameRightPaneHostStoneBg)
+        if not S.rightUnder and right.CreateTexture then
+            S.rightUnder = right:CreateTexture(nil, "BACKGROUND", nil, -6)
+            S.rightUnder:SetAllPoints(right)
+            S.rightUnder:SetColorTexture(C.ink[1], C.ink[2], C.ink[3], 0.55)
+            S.rightDivider = right:CreateTexture(nil, "BORDER", nil, 2)
+            S.rightDivider:SetColorTexture(C.violet[1], C.violet[2], C.violet[3], 1)
+            S.rightDivider:SetPoint("TOPLEFT", right, "TOPLEFT", 0, 0)
+            S.rightDivider:SetPoint("BOTTOMLEFT", right, "BOTTOMLEFT", 0, 0)
+            S.rightDivider:SetWidth(Kit.U(right, 1))
+        elseif S.rightDivider then
+            S.rightDivider:SetWidth(Kit.U(right, 1))
+        end
+    end
+    local scene = _G.CharacterModelScene
+    if scene then HeldArt.Hold(scene.BackgroundOverlay) end
+end
+
+-- The pages that are not the paper doll: stock art held, detail panes and rows restyled, controls and scroll bars swept.
+local function SkinPages()
+    local rep = _G.ReputationFrame
+    if rep then
+        Char.HoldStock(rep.ScrollBox, 2)
+        Char.SkinDetail(rep.ReputationDetailFrame)
+    end
+    local skills = _G.SkillsFrame
+    if skills then
+        Char.HoldStock(skills.ScrollBox, 2)
+        Char.SkinDetail(skills.SkillDetailFrame)
+        Char.WatchRows(skills.ScrollBox, Char.PageRow)
+    end
+    local pvp = _G.PVPRankFrame
+    if pvp then
+        Char.HoldStock(pvp.MainInfoFrame, 3)
+        Char.SkinDetail(pvp.DetailFrame)
+        for _, key in ipairs({ "SeasonTimerField", "CurrentSeasonField", "CurrentRankField", "CurrentRankProgressField" }) do
+            local fs = pvp[key] or (pvp.MainInfoFrame and pvp.MainInfoFrame[key])
+            if type(fs) == "table" and fs.SetFont then Kit.RestyleLabel(fs, pvp, 12, C.text); PinColor(fs, C.text) end
+        end
+    end
+    local stats = _G.StatisticsFrame
+    if stats then
+        Char.HoldStock(stats.ScrollBox, 2)
+        Char.WatchRows(stats.ScrollBox, Char.PageRow)
+    end
+    local token = _G.TokenFrame
+    if token then Char.HoldStock(token.ScrollBox, 2) end
+    for _, name in ipairs({ "ReputationFrame", "SkillsFrame", "PVPRankFrame", "StatisticsFrame", "TokenFrame" }) do
+        local page = _G[name]
+        if page then pcall(PanelSkins.SweepOnShow, page) end
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Footer: one shared line under both panes
 -------------------------------------------------------------------------------
 
 local function Chip(win, color)
@@ -393,19 +736,23 @@ end
 
 local function Seat(c, text, x, right)
     c.label:SetText(text)
-    local w = #text * 12 * 0.5615 + 16
-    w = math.floor(w + 0.5)
+    local w = math.floor(#text * 12 * 0.5615 + 16 + 0.5)
     c.w = w
+    local y = -math.floor((G.FOOT_H - G.CHIP_H) / 2)
     if right then
-        Kit.Place(c.frame, c.frame:GetParent(), -(G.SIDE), -G.FOOT_UP, w, G.CHIP_H, "BOTTOMRIGHT", "BOTTOMRIGHT")
+        Kit.Place(c.frame, c.frame:GetParent(), -G.SIDE, y, w, G.CHIP_H, "BOTTOMRIGHT", "BOTTOMRIGHT")
     else
-        Kit.Place(c.frame, c.frame:GetParent(), x, -G.FOOT_UP, w, G.CHIP_H, "BOTTOMLEFT", "BOTTOMLEFT")
+        Kit.Place(c.frame, c.frame:GetParent(), x, y, w, G.CHIP_H, "BOTTOMLEFT", "BOTTOMLEFT")
     end
     c.plate.w = w
     return w
 end
 
-local function BuildChips(win)
+local function BuildFooter(win)
+    S.footer = {
+        band = Span(win, win, 0, G.FOOT_H, C.band, 1, "ARTWORK", 0, true),
+        rule = Span(win, win, G.FOOT_H, 1, C.violet, 1, "ARTWORK", 1, true),
+    }
     S.chips = { ilvl = Chip(win, C.amber), wear = Chip(win, C.cyan), worn = Chip(win, C.pink), repair = Chip(win, C.muted) }
 end
 
@@ -432,9 +779,23 @@ function Char.RefreshChips()
     else
         chips.repair.frame:Hide()
     end
-    -- the footer belongs to the character page only
-    local onChar = ShownPage() == 1
-    for _, c in pairs(chips) do if not onChar then c.frame:Hide() end end
+    -- the footer chips belong to the character page only
+    if ShownPage() ~= 1 then for _, c in pairs(chips) do c.frame:Hide() end end
+end
+
+-- The window is made one footer taller (outside combat); stock code that sets its height again is answered with the same.
+local function ExtendWindow(win)
+    if InCombat() or S.extending then return end
+    local h = Plain(Try(win.GetHeight, win))
+    if type(h) ~= "number" then return end
+    if not S.baseH then S.baseH = h end
+    -- whole physical pixels, so the footer's edges land on the pixel grid whatever the scale
+    local ppu = Kit.Ppu(win)
+    local target = (math.floor(S.baseH * ppu + 0.5) + math.floor(G.FOOT_H * Kit.LAYOUT_SCALE + 0.5)) / ppu
+    if math.abs(h - target) < 0.5 then return end
+    S.extending = true
+    pcall(win.SetHeight, win, target)
+    S.extending = false
 end
 
 -------------------------------------------------------------------------------
@@ -454,16 +815,32 @@ end
 local STRIP = { "CharacterFrame.Inset", "CharacterFrame.InsetRight", "PaperDollFrame" }
 local MODEL_ART = {
     "CharacterModelFrameBackgroundTopLeft", "CharacterModelFrameBackgroundTopRight", "CharacterModelFrameBackgroundBotLeft",
-    "CharacterModelFrameBackgroundBotRight", "CharacterLevelTextBackground", "CharacterFrameRightPaneHostStoneBg",
+    "CharacterModelFrameBackgroundBotRight", "CharacterLevelTextBackground",
 }
+
+local function Relayout()
+    for _, rec in ipairs(S.spans) do rec.apply() end
+    for b in pairs(S.boxes) do LayoutBox(b) end
+    local win = _G.CharacterFrame
+    if win and S.done then ExtendWindow(win) end
+end
 
 local function Refresh()
     if not S.done then return end
     Step("slots", SkinSlots)
     Step("slotsRefresh", RefreshSlots)
+    Step("tabs", SkinModeTabs)
+    Step("panes", SkinPanes)
+    Step("strip", SkinTopStrip)
+    Step("model", SkinModelControls)
+    Step("sidebar", SkinSidebarTabs)
+    Step("toggle", SkinToggle)
     Step("stats", SkinStats)
+    Step("pages", SkinPages)
+    Step("scrollbars", function() PanelSkins.SweepScrollBars(_G.CharacterFrame) end)
     Step("chips", Char.RefreshChips)
     Step("header", Char.RefreshHeader)
+    for tab in pairs(S.tabs) do PaintTab(tab) end
 end
 
 local function Build()
@@ -481,25 +858,25 @@ local function Build()
         if node then present[#present + 1] = path end
     end
     PanelSkins.StripNamed(present)
+    Step("extend", ExtendWindow, win)
     Step("chrome", function()
         Theme.StripBlizzardChrome(win)
         Theme.AddPanelChrome(win, { fillColor = C.panel, accent = C.violet, glowAlpha = 0.30 })
     end)
     Step("art", function() for _, name in ipairs(MODEL_ART) do HeldArt.Hold(_G[name]) end end)
     Step("header", BuildHeader, win)
-    Step("chips", BuildChips, win)
-    Step("level", function()
-        local level = _G.CharacterLevelText
-        if level then Kit.RestyleLabel(level, win, 12, C.amber); PinColor(level, C.amber) end
-    end)
-    Kit.HookScript(win, "OnShow", function() Kit.Later(Refresh) end)
-    Kit.OnReseat(Refresh)
+    Step("footer", BuildFooter, win)
+    Kit.HookScript(win, "OnShow", function() Kit.Later(function() Relayout(); Refresh() end) end)
+    Kit.HookFunc(win, "SetHeight", function() if not S.extending then Kit.Later(function() ExtendWindow(win) end) end end)
+    Kit.HookFunc(win, "SetSize", function() if not S.extending then Kit.Later(function() ExtendWindow(win) end) end end)
+    Kit.OnReseat(function() Relayout(); Refresh() end)
     Refresh()
 end
 
 local watcher = CreateFrame("Frame")
 for _, event in ipairs({ "UPDATE_INVENTORY_DURABILITY", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_AVG_ITEM_LEVEL_UPDATE",
-    "UNIT_INVENTORY_CHANGED", "PLAYER_ENTERING_WORLD", "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED", "PLAYER_LEVEL_UP" }) do
+    "UNIT_INVENTORY_CHANGED", "PLAYER_ENTERING_WORLD", "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED", "PLAYER_LEVEL_UP",
+    "PLAYER_REGEN_ENABLED" }) do
     pcall(watcher.RegisterEvent, watcher, event)
 end
 watcher:SetScript("OnEvent", function(_, event)
@@ -508,12 +885,16 @@ watcher:SetScript("OnEvent", function(_, event)
         Kit.Reseat()
         return
     end
+    if event == "PLAYER_REGEN_ENABLED" and _G.CharacterFrame then Step("extend", ExtendWindow, _G.CharacterFrame) end
     Step("refresh", Refresh)
 end)
 
 if type(_G.PaperDollFrame_UpdateStats) == "function" then
     Kit.HookFunc(_G, "PaperDollFrame_UpdateStats", function() if S.done then Kit.Later(function() Step("stats", SkinStats) end) end end)
 end
+
+-- Exports the other windows read (Inspect shares the slot skin; the pages share the holds).
+Char.Box, Char.PaintBox = Box, PaintBox
 
 PanelSkins.RegisterInspect("Character", { { name = "CharacterFrame", guard = "fsCharacterSkin" } })
 
