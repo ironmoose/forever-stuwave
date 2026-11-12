@@ -968,6 +968,28 @@ case("take_all_loots_the_open_letter_through_the_stock_api", PRELUDE + """
     assert(AUTOLOOT[1] == 1, "AutoLootMailItem not called with the open letter")
 """)
 
+case("an_auction_invoice_opens_as_our_receipt_ledger", PRELUDE + """
+    function GetInboxInvoiceInfo(i)
+        return "seller", "Bolt of Woolen Cloth", "Cuddly Cow", 1467, 0, 100, 73, 0, nil, nil, 3
+    end
+    ShowInbox(1)
+    local r = S.letter.receipt
+    assert(r and r:IsShown(), "receipt not shown")
+    assert(OpenMailInvoiceFrame == nil or OpenMailInvoiceFrame.alpha == 0, "stock receipt visible")
+    assert(r.chip.fsLabel.text == "SOLD", "chip " .. tostring(r.chip.fsLabel.text))
+    assert(r.item.text:find("Bolt of Woolen Cloth") and r.item.text:find("x3"), "item " .. r.item.text)
+    assert(r.who.text:find("Cuddly Cow"), "buyer")
+    assert(r.rows[1].value.text:find("14s") and r.rows[1].value.text:find("67c"), "sale " .. r.rows[1].value.text)
+    assert(r.rows[2].value.text:find("+") and r.rows[2].value.text:find("1s"), "deposit " .. r.rows[2].value.text)
+    assert(r.rows[3].value.text:find("73c"), "cut " .. r.rows[3].value.text)
+    assert(r.total.text:find("14s") and r.total.text:find("94c"), "total " .. r.total.text)
+    assert(S.letter.scroll.alpha == 0, "stock body still showing under the receipt")
+    -- a plain letter puts the body back
+    function GetInboxInvoiceInfo(i) return nil end
+    ShowInbox(1)
+    assert(not r:IsShown() and S.letter.scroll.alpha == 1, "plain letter")
+""")
+
 case("the_letter_header_lines_keep_the_mocks_positions", PRELUDE + """
     ShowInbox(1)
     local L = S.letter
@@ -1240,6 +1262,7 @@ def render(prefix: str) -> None:
 
     scenes = {
         "inbox": "local FS = Load(); ShowInbox(); Fire('PLAYER_ENTERING_WORLD'); ShowInbox(1); return DumpOps({ MailFrame, OpenMailFrame })",
+        "receipt": "local FS = Load(); function GetInboxInvoiceInfo() return 'seller', 'Bolt of Woolen Cloth', 'Cuddly Cow', 1467, 0, 100, 73, 0, nil, nil, 3 end; ShowInbox(); Fire('PLAYER_ENTERING_WORLD'); ShowInbox(1); return DumpOps({ MailFrame, OpenMailFrame })",
         "send": "local FS = Load(); ShowInbox(); Fire('PLAYER_ENTERING_WORLD'); ShowSend({ [1] = true }); return DumpOps({ MailFrame })",
     }
     for scene, code in scenes.items():

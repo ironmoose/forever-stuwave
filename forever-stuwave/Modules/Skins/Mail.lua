@@ -342,6 +342,35 @@ local function Box(parent, ref, x, y, w, h, kind)
     return f
 end
 
+-- Full text on hover for lines the width cap cut short (FontString:IsTruncated): each line's uncut text goes into
+-- GameTooltip, wrapped, in the line's colour. Shows nothing when no line was cut.
+local function ShowFullText(owner, lines)
+    if not GameTooltip then return end
+    local any = false
+    for _, line in ipairs(lines) do
+        if Try(line.fs.IsTruncated, line.fs) == true then any = true end
+    end
+    if not any then return false end
+    if GameTooltip:GetOwner() ~= owner then GameTooltip:SetOwner(owner, "ANCHOR_RIGHT") end
+    for _, line in ipairs(lines) do
+        local text = Plain(Try(line.fs.GetText, line.fs))
+        if type(text) == "string" and text ~= "" then
+            GameTooltip:AddLine(text, line.color[1], line.color[2], line.color[3], true)
+        end
+    end
+    GameTooltip:Show()
+    return true
+end
+
+-- A mouse catcher over a header line of the letter (nothing clickable sits there) that shows the uncut text.
+local function TruncationTip(parent, fs, color, x, y, w, h)
+    local hit = Box(parent, parent, x, y, w, h)
+    hit:EnableMouse(true)
+    hit:SetScript("OnEnter", function(self) ShowFullText(self, { { fs = fs, color = color } }) end)
+    hit:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    return hit
+end
+
 -- Glyphs, built from one pixel runs so every edge is on the pixel grid. Each builder returns the run list.
 local function Runs(parent, list, color)
     local out = {}
@@ -458,6 +487,17 @@ local function MoneyText(copper)
     copper = math.floor(tonumber(copper) or 0)
     local g, s, c = math.floor(copper / 10000), math.floor(copper % 10000 / 100), copper % 100
     return Hex(C.gold) .. g .. "g|r " .. Hex(C.silver) .. s .. "s|r " .. Hex(C.copper) .. c .. "c|r"
+end
+
+-- The non-zero coins of an amount in their colours, with an optional sign in `signColor` ("+1s", "-73c").
+local function CoinText(copper, sign, signColor)
+    copper = math.floor(tonumber(copper) or 0)
+    local g, s2, c = math.floor(copper / 10000), math.floor(copper % 10000 / 100), copper % 100
+    local parts = {}
+    if g > 0 then parts[#parts + 1] = Hex(C.gold) .. g .. "g|r" end
+    if s2 > 0 then parts[#parts + 1] = Hex(C.silver) .. s2 .. "s|r" end
+    if c > 0 or #parts == 0 then parts[#parts + 1] = Hex(C.copper) .. c .. "c|r" end
+    return (sign and (Hex(signColor or C.muted) .. sign .. "|r") or "") .. table.concat(parts, " ")
 end
 
 -- A well: the stock slot button as a 44 px cut well. The item icon is 30 px inset 7 on every side; an empty
@@ -651,6 +691,7 @@ local function RefreshRow(i)
     local unread = not wasRead
     r.sender:SetText(type(sender) == "string" and sender or (_G.UNKNOWN or "?"))
     r.subject:SetText(type(subject) == "string" and subject or "")
+    r.sender:SetWidth(U(G.ROW_W - 12 - 48 - 32))
     r.age:SetText(Age(days))
     local ink = unread and C.white or C.read
     r.sender:SetTextColor(ink[1], ink[2], ink[3], 1)
@@ -739,6 +780,12 @@ local function BuildRow(i, win)
     HookScript(button, "OnShow", function() RefreshRow(i) end)
     HookScript(button, "OnHide", function() RefreshRow(i) end)
     HookScript(button, "OnClick", function() Later(RefreshInbox) end)
+    -- the card is the stock item button (it opens the letter), so a cut sender or subject is shown in full by adding
+    -- to the tooltip Blizzard's own OnEnter builds, or by opening one when it built none
+    HookScript(button, "OnEnter", function(self)
+        ShowFullText(self, { { fs = r.sender, color = C.white }, { fs = r.subject, color = C.muted } })
+    end)
+    HookScript(button, "OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
 end
 
 -- The inbox pager buttons are anonymous on 16001: found by the mixin functions the engine copied onto them, then
@@ -895,6 +942,12 @@ local function LayoutLetter()
         end
         scan(win, 1)
         pcall(L.take.SetFrameLevel, L.take, top + 1)
+        -- and one strata up from the letter, so a frame of the same strata from outside the letter cannot sit on it
+        local order = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG", "FULLSCREEN", "FULLSCREEN_DIALOG", "TOOLTIP" }
+        local strata = Try(win.GetFrameStrata, win)
+        for i = 1, #order - 2 do
+            if order[i] == strata then pcall(L.take.SetFrameStrata, L.take, order[i + 1]) break end
+        end
     end
     L.take:SetEnabled(#cells > 0)
     PaintKey(L.take)
@@ -912,6 +965,8 @@ local function LayoutLetter()
     Place(L.hint, win, G.LETTER_W / 2, L.height - 28, nil, nil, "CENTER", "TOPLEFT")
 end
 
+local FillReceipt -- defined with the receipt below
+
 local function RefreshLetter()
     local L = S.letter
     if not L then return end
@@ -919,10 +974,15 @@ local function RefreshLetter()
     local info = { pcall(GetInboxHeaderInfo, idx or 0) }
     local sender, subject, money, days
     if info[1] then sender, subject, money, days = Plain(info[4]), Plain(info[5]), Plain(info[6]), Plain(info[8]) end
+    -- widths are set here, at the pixel scale the letter has now (set at build time they came out too narrow)
+    S.ppu = Ppu(L.win)
+    L.re:SetWidth(U(G.LETTER_W - 70 - 18))
+    L.from:SetWidth(U(G.LETTER_W - 70 - 18 - 110 - 12))
     L.from:SetText(type(sender) == "string" and sender or (_G.UNKNOWN or ""))
     L.re:SetText(type(subject) == "string" and subject or "")
     L.expires:SetText(type(days) == "number" and ("expires " .. Age(days)) or "")
     if L.money then L.money.label:SetText(ChipMoney(type(money) == "number" and money or 0)) end
+    FillReceipt(L, idx)
     local del = _G.OpenMailDeleteButton
     if del then
         local text = Plain(Try(del.GetText, del))
@@ -943,39 +1003,100 @@ local INVOICE_TEXT = {
     "OpenMailInvoiceHouseCut", "OpenMailInvoiceAmountReceived", "OpenMailInvoiceMoneyDelay", "OpenMailInvoiceNotYetSent",
 }
 
+-- The stock receipt (OpenMailInvoiceFrame and its money frames) is held at alpha 0: BuildReceipt draws ours.
 local function SkinInvoice()
-    for _, name in ipairs(INVOICE_TEXT) do
-        local fs = _G[name]
-        if fs and type(fs.SetFont) == "function" then
-            Theme.ApplyMono(fs, U(12), C.text)
-            S.fonts[fs] = { px = 12, color = C.text }
-        end
+    Quiet(_G.OpenMailInvoiceFrame)
+end
+
+-- The auction receipt, our own: a status chip and the item on top, the other party under it, then a ledger of
+-- label left / coins right rows, a rule, and the total in gold. It covers the pad whenever the open letter is an
+-- auction house invoice (GetInboxInvoiceInfo), and the stock scroll frame is faded out under it.
+local RECEIPT = { ROW1 = 86, STEP = 26, RULE2 = 160, TOTAL = 184, NOTE = 214, IN = 16 }
+
+local function BuildReceipt(L)
+    local pad = L.pad
+    local r = CreateFrame("Frame", nil, pad)
+    r:SetAllPoints(pad)
+    Above(r, L.scroll or pad)
+    if L.scroll then pcall(r.SetFrameLevel, r, L.scroll:GetFrameLevel() + 5) end
+    local w = G.LETTER_W - 2 * G.SIDE
+    local IN = RECEIPT.IN
+    r.chip = NewChip(r)
+    r.item = Line(r, r, "LEFT", IN, 23, "", 16, C.white)
+    r.who = Line(r, r, "LEFT", IN, 50, "", 13, C.muted)
+    Rect(r, IN, 66, w - 2 * IN, 1, C.violet, 0.35, "ARTWORK", 1)
+    r.rows = {}
+    for i = 1, 3 do
+        local y = RECEIPT.ROW1 + (i - 1) * RECEIPT.STEP
+        r.rows[i] = {
+            label = Line(r, r, "LEFT", IN, y, "", 13, C.muted),
+            value = Line(r, r, "RIGHT", w - IN, y, "", 15, C.text),
+            tick = Rect(r, IN - 8, y - 3, 3, 6, C.violet, 0.8, "ARTWORK", 2),
+        }
     end
-    for _, name in ipairs({ "OpenMailSalePriceMoneyFrame", "OpenMailDepositMoneyFrame", "OpenMailHouseCutMoneyFrame",
-        "OpenMailTransactionAmountMoneyFrame" }) do
-        if _G[name] and Theme.StyleMoney then Theme.StyleMoney(_G[name]) end
+    r.rule = Rect(r, IN, RECEIPT.RULE2, w - 2 * IN, 1, C.cyan, 0.45, "ARTWORK", 1)
+    r.totalLabel = Line(r, r, "LEFT", IN, RECEIPT.TOTAL, "", 14, C.cyan)
+    r.total = Line(r, r, "RIGHT", w - IN, RECEIPT.TOTAL, "", 19, C.white)
+    r.note = Line(r, r, "LEFT", IN, RECEIPT.NOTE, "", 12, C.amber)
+    r:Hide()
+    L.receipt = r
+end
+
+function FillReceipt(L, idx)
+    local r = L.receipt
+    if not r then return false end
+    local ok, kind, item, who, bid, _, deposit, cut, _, etaHour, etaMin, count =
+        pcall(GetInboxInvoiceInfo or error, idx or 0)
+    kind, item, who = ok and Plain(kind), ok and Plain(item), ok and Plain(who)
+    if type(kind) ~= "string" then
+        r:Hide()
+        if L.scroll then L.scroll:SetAlpha(1) end
+        return false
     end
-    -- The stock receipt is laid out for a 296 unit parchment: the item block 30 in and 35 down, the price column
-    -- 27 in from the right, and Amount Received hung off the 256 unit arithmetic line we hold at alpha 0, which
-    -- puts it past the price column. Re-seat it against the pad: the item block at the top left inset, the price
-    -- column 22 px in (the money frames hang 16 units right of their labels), Amount Received under House Cut.
-    local inv = _G.OpenMailInvoiceFrame
-    local item, buyer, sale = _G.OpenMailInvoiceItemLabel, _G.OpenMailInvoicePurchaser, _G.OpenMailInvoiceSalePrice
-    local cut, received = _G.OpenMailInvoiceHouseCut, _G.OpenMailInvoiceAmountReceived
-    if inv and item and sale and cut and received and type(item.ClearAllPoints) == "function" then
-        item:ClearAllPoints()
-        item:SetPoint("TOPLEFT", inv, "TOPLEFT", U(6), -U(6))
-        item:SetPoint("RIGHT", inv, "RIGHT", -U(6), 0)
-        if buyer then
-            buyer:ClearAllPoints()
-            buyer:SetPoint("TOPLEFT", item, "BOTTOMLEFT", 0, -U(5))
-            buyer:SetPoint("RIGHT", inv, "RIGHT", -U(6), 0)
-        end
-        sale:ClearAllPoints()
-        sale:SetPoint("TOPRIGHT", inv, "TOPRIGHT", -U(22), -U(52))
-        received:ClearAllPoints()
-        received:SetPoint("TOPRIGHT", cut, "BOTTOMRIGHT", 0, -U(26))
+    bid, deposit, cut, count = Plain(bid) or 0, Plain(deposit) or 0, Plain(cut) or 0, Plain(count)
+    etaHour, etaMin = Plain(etaHour), Plain(etaMin)
+    local w = G.LETTER_W - 2 * G.SIDE
+    local IN = RECEIPT.IN
+    local selling = kind ~= "buyer"
+    local pending = kind == "seller_temp_invoice"
+    local chipColor = pending and C.amber or (selling and C.cyan or C.pink)
+    local cw = FillChip(r.chip, selling and (pending and "SOLD, PENDING" or "SOLD") or "WON", chipColor)
+    Place(r.chip, r, IN, 13, cw, 20)
+    Place(r.item, r, IN + cw + 10, 23, nil, nil, "LEFT", "TOPLEFT")
+    r.item:SetWidth(U(math.max(1, w - IN - (IN + cw + 10))))
+    local name = type(item) == "string" and item or ""
+    if type(count) == "number" and count > 1 then name = name .. Hex(C.muted) .. "  x" .. count .. "|r" end
+    r.item:SetText(name)
+    r.who:SetText((selling and "buyer   " or "seller   ") .. Hex(C.text) .. (type(who) == "string" and who or "") .. "|r")
+
+    local rows
+    if selling then
+        rows = {
+            { "sale price", CoinText(bid) },
+            { "deposit back", CoinText(deposit, "+ ", C.cyan) },
+            { "auction cut", CoinText(cut, "- ", C.pink) },
+        }
+        r.totalLabel:SetText(pending and "on its way" or "received")
+        r.total:SetText(CoinText(bid + deposit - cut))
+    else
+        rows = { { "winning bid", CoinText(bid) } }
+        r.totalLabel:SetText("paid")
+        r.total:SetText(CoinText(bid))
     end
+    for i, row in ipairs(r.rows) do
+        local def = rows[i]
+        row.label:SetText(def and def[1] or "")
+        row.value:SetText(def and def[2] or "")
+        row.tick:SetShown(def ~= nil)
+    end
+    if pending and type(etaHour) == "number" and type(etaMin) == "number" then
+        r.note:SetText(("funds arrive at %d:%02d"):format(etaHour, etaMin))
+    else
+        r.note:SetText("")
+    end
+    r:Show()
+    if L.scroll then L.scroll:SetAlpha(0) end
+    return true
 end
 
 -- The body text is SimpleHTML: Mononoki through its own SetFont, one call per element it formats.
@@ -1020,10 +1141,10 @@ local function SkinLetter()
     Line(win, win, "LEFT", 18, 56, "RE", 12, C.muted)
     L.re = Line(win, win, "LEFT", 70, 56, "", 15, C.cyan)
     L.expires = Line(win, win, "RIGHT", G.LETTER_W - 18, 28, "", 13, C.amber)
-    -- long senders and subjects end in an ellipsis inside the card: the subject runs to the right inset, the
-    -- sender stops 12 px short of the expiry text (its widest form, "expires 30d", is about 110 px)
-    L.re:SetWidth(U(G.LETTER_W - 70 - 18))
-    L.from:SetWidth(U(G.LETTER_W - 70 - 18 - 110 - 12))
+    -- long senders and subjects end in an ellipsis inside the card (widths set in RefreshLetter): the subject runs
+    -- to the right inset, the sender stops 12 px short of the expiry text (its widest form is about 110 px)
+    TruncationTip(win, L.from, C.white, 70, 15, G.LETTER_W - 70 - 18 - 110 - 12, 24)
+    TruncationTip(win, L.re, C.cyan, 70, 45, G.LETTER_W - 70 - 18, 22)
     Rect(win, G.SIDE, 76, G.LETTER_W - 2 * G.SIDE, 1, C.violet, 0.35, "ARTWORK", 1)
 
     L.pad = Box(win, win, G.SIDE, 88, G.LETTER_W - 2 * G.SIDE, 170)
@@ -1042,6 +1163,7 @@ local function SkinLetter()
     end
     SkinBodyText()
     SkinInvoice()
+    BuildReceipt(L)
 
     L.package = Line(win, win, "LEFT", 18, 282, "PACKAGE", 12, C.muted)
     for i = 1, (type(_G.ATTACHMENTS_MAX_RECEIVE) == "number" and _G.ATTACHMENTS_MAX_RECEIVE or 16) do
