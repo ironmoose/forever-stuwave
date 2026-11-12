@@ -257,10 +257,16 @@ case("the other pages: line overlays, header rows and detail panes held, the hon
     assert(StatisticsFrame.ScrollBox.children[1].regions[1].alpha == 0, 'statistics overlay')
 """)
 
-case("nothing is built in combat; the slots are decorated when it ends", f"""
+case("nothing is built in combat; the skin is built when it ends", f"""
+    Reset()
     __combat = true
+    Load({{ 'Theme', 'Layout', 'HeldArt', 'PanelSkins', 'ControlKit', 'ItemSlotSkins', 'TabSkins', 'Character' }})
     Fire('PLAYER_ENTERING_WORLD'); CharacterFrame:Show(); FlushTimers()
-    assert(not CharacterFrame.fsCharacterSkin or true)
+    assert(not CharacterFrame.fsCharacterSkin, 'built in combat')
+    assert(CharacterFrame.h == 484, 'the window was resized in combat')
+    __combat = false
+    Fire('PLAYER_REGEN_ENABLED'); FlushTimers()
+    assert(CharacterFrame.fsCharacterSkin, 'not built when combat ended')
 """)
 
 case("pixels: wear bar and chips land on whole screen pixels at 1.2 and 1.0", f"""

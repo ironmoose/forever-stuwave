@@ -360,17 +360,18 @@ end
 
 local function LayoutBox(b)
     local u = Kit.U(b.host, b.px or 1)
-    local e, h = b.edges, b.host
+    local e, h = b.edges, b.ref or b.host
     e[1]:ClearAllPoints(); e[1]:SetPoint("TOPLEFT", h, "TOPLEFT", 0, 0); e[1]:SetPoint("TOPRIGHT", h, "TOPRIGHT", 0, 0); e[1]:SetHeight(u)
     e[2]:ClearAllPoints(); e[2]:SetPoint("BOTTOMLEFT", h, "BOTTOMLEFT", 0, 0); e[2]:SetPoint("BOTTOMRIGHT", h, "BOTTOMRIGHT", 0, 0); e[2]:SetHeight(u)
     e[3]:ClearAllPoints(); e[3]:SetPoint("TOPLEFT", h, "TOPLEFT", 0, 0); e[3]:SetPoint("BOTTOMLEFT", h, "BOTTOMLEFT", 0, 0); e[3]:SetWidth(u)
     e[4]:ClearAllPoints(); e[4]:SetPoint("TOPRIGHT", h, "TOPRIGHT", 0, 0); e[4]:SetPoint("BOTTOMRIGHT", h, "BOTTOMRIGHT", 0, 0); e[4]:SetWidth(u)
 end
 
-local function Box(host, edgeLayer)
-    local b = { host = host, edges = {}, px = 1 }
+-- `ref` (a frame or a texture) is what the box follows when it is not `host` itself; the textures are `host`'s.
+local function Box(host, edgeLayer, ref)
+    local b = { host = host, ref = ref, edges = {}, px = 1 }
     b.fill = host:CreateTexture(nil, "BACKGROUND", nil, -7)
-    b.fill:SetAllPoints(host)
+    b.fill:SetAllPoints(ref or host)
     for i = 1, 4 do
         local t = host:CreateTexture(nil, edgeLayer or "OVERLAY", nil, 6)
         t:SetColorTexture(1, 1, 1, 1)
@@ -894,7 +895,8 @@ if type(_G.PaperDollFrame_UpdateStats) == "function" then
 end
 
 -- Exports the other windows read (Inspect shares the slot skin; the pages share the holds).
-Char.Box, Char.PaintBox = Box, PaintBox
+Char.Box, Char.PaintBox, Char.SkinSquare, Char.PaintSquare, Char.PinColor = Box, PaintBox, SkinSquare, PaintSquare, PinColor
+Char.AtlasOf, Char.List = AtlasOf, List
 
 PanelSkins.RegisterInspect("Character", { { name = "CharacterFrame", guard = "fsCharacterSkin" } })
 

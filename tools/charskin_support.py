@@ -66,6 +66,7 @@ local function fstring(parent, name, text, size, color)
     f.textColor = color or { 1, 0.82, 0, 1 }
     f.points[1] = { point = "TOPLEFT", rel = parent, relPoint = "TOPLEFT", x = 0, y = 0 }
     function f:SetTextColor(r, g, b, a) self.textColor = { r, g, b, a or 1 } end
+    function f:GetTextColor() return unpack(self.textColor) end
     return f
 end
 BLZ = { blz = blz, tex = tex, fstring = fstring }
@@ -393,6 +394,8 @@ class Harness:
                 col = tuple(int(max(0, min(1, rgba[k])) * 255 + 0.5) for k in (1, 2, 3)) + (int(max(0, min(1, rgba[4])) * 255 + 0.5),)
                 l, t, r, b = (round(op["l"] - ox), round(op["t"] - oy), round(op["r"] - ox), round(op["b"] - oy))
                 kind = op["kind"]
+                if r <= l or b <= t:
+                    continue
                 if kind == "text":
                     size = max(6, round(op["size"]))
                     font = fonts.setdefault(size, ImageFont.truetype(str(FONT), size))
