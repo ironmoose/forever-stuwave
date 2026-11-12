@@ -471,7 +471,16 @@ local function Build()
     if not win or S.done or InCombat() then return end
     S.done = true
     win.fsCharacterSkin = true
-    PanelSkins.StripNamed(STRIP)
+    -- Only the parts this client has: CharacterFrame.Inset / InsetRight are absent on 16001, and a missing path logs in chat.
+    local present = {}
+    for _, path in ipairs(STRIP) do
+        local node, first = nil, true
+        for field in path:gmatch("[^.]+") do
+            if first then node, first = _G[field], false else node = type(node) == "table" and node[field] or nil end
+        end
+        if node then present[#present + 1] = path end
+    end
+    PanelSkins.StripNamed(present)
     Step("chrome", function()
         Theme.StripBlizzardChrome(win)
         Theme.AddPanelChrome(win, { fillColor = C.panel, accent = C.violet, glowAlpha = 0.30 })
