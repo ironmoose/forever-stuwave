@@ -245,6 +245,51 @@ function BuildExtras()
         b.scripts.OnClick = function() end
         pop[label .. "Button"] = b
     end
+
+    -- the stack split, as StackSplitFrame.xml builds it
+    local split = blz("Frame", "StackSplitFrame", UIParent, 160, 70, "TOPLEFT", 300, -300)
+    split.shown = false
+    split.SingleItemSplitBackground = tex(split, nil, "BACKGROUND")
+    split.MultiItemSplitBackground = tex(split, nil, "BACKGROUND")
+    split.StackSplitText = fstring(split, nil, "12", 14, { 1, 1, 1, 1 })
+    split.StackItemCountText = fstring(split, nil, "of 40", 11, { 1, 1, 1, 1 })
+    for _, k in ipairs({ "LeftButton", "RightButton", "OkayButton", "CancelButton" }) do
+        local b = blz("Button", nil, split, 30, 21, "TOPLEFT", 10, -40)
+        b.NormalTexture = tex(b, nil, "ARTWORK"); b.GetNormalTexture = function(self) return self.NormalTexture end
+        b.fs = fstring(b, nil, k, 11)
+        b.scripts.OnClick = function() end
+        split[k] = b
+    end
+    -- the colour picker
+    local cp = blz("Frame", "ColorPickerFrame", UIParent, 330, 240, "TOPLEFT", 500, -200)
+    cp.shown = false
+    cp.Border = dialogBorder(cp)
+    cp.Header = blz("Frame", nil, cp, 200, 30, "TOP", 0, 10)
+    tex(cp.Header, nil, "ARTWORK"); cp.Header.Text = fstring(cp.Header, nil, "Color Picker", 13, { 1, 1, 1, 1 })
+    cp.DragBar = blz("Frame", nil, cp, 300, 20, "TOP", 0, 0); tex(cp.DragBar, nil, "ARTWORK")
+    cp.Content = blz("Frame", nil, cp, 300, 160, "TOPLEFT", 10, -30)
+    cp.Content.ColorSwatchCurrent = blz("Frame", nil, cp.Content, 40, 40, "TOPLEFT", 10, -10)
+    cp.Content.ColorSwatchOriginal = blz("Frame", nil, cp.Content, 40, 40, "TOPLEFT", 60, -10)
+    cp.Content.HexBox = blz("Frame", nil, cp.Content, 120, 24, "TOPLEFT", 10, -100)
+    cp.Content.HexBox.Hash = fstring(cp.Content.HexBox, nil, "#", 12, { 1, 1, 1, 1 })
+    cp.Footer = blz("Frame", nil, cp, 300, 30, "BOTTOM", 0, 5)
+    for _, k in ipairs({ "OkayButton", "CancelButton" }) do
+        local b = blz("Button", nil, cp.Footer, 90, 21, "LEFT", 10, 0)
+        b.fs = fstring(b, nil, k, 12); b.scripts.OnClick = function() end
+        cp.Footer[k] = b
+    end
+    -- a prompt with an edit box and a money input
+    local pop1 = blz("Frame", "StaticPopup1", UIParent, 320, 150, "TOPLEFT", 200, -200)
+    pop1.shown = false
+    pop1.EditBox = blz("EditBox", nil, pop1, 200, 22, "TOPLEFT", 20, -60)
+    pop1.EditBox.NineSlice = blz("Frame", nil, pop1.EditBox, 200, 22, "TOPLEFT", 0, 0); tex(pop1.EditBox.NineSlice, nil, "BORDER")
+    local mif = blz("Frame", nil, pop1, 200, 22, "TOPLEFT", 20, -100)
+    pop1.MoneyInputFrame = mif
+    for _, k in ipairs({ "gold", "silver", "copper" }) do
+        local e = blz("EditBox", nil, mif, 50, 20, "LEFT", 0, 0)
+        e.Left, e.Middle, e.Right = tex(e, nil, "BACKGROUND"), tex(e, nil, "BACKGROUND"), tex(e, nil, "BACKGROUND")
+        mif[k] = e
+    end
 end
 """
 BLIZZARD = BLIZZARD + BANK
@@ -394,9 +439,46 @@ case("nothing is built in combat; it is built when combat ends", f"""
     assert(MerchantFrame.fsCommerceSkin and BankFrame.fsCommerceBankSkin, 'not built when combat ended')
 """)
 
+case("stack split: the backgrounds are held, the dialog chrome and keys are ours, the clicks stay", f"""
+    Fire('PLAYER_ENTERING_WORLD'); StackSplitFrame:Show(); FlushTimers()
+    local w = StackSplitFrame
+    assert(w.fsCommerceSplitSkin, 'not built')
+    assert(w.SingleItemSplitBackground.alpha == 0 and w.MultiItemSplitBackground.alpha == 0, 'backgrounds kept')
+    assert(FS.CommerceSkin.state.dialogs[w], 'no chrome')
+    assert(FS.CommerceSkin.state.pagers[w.LeftButton] and FS.CommerceSkin.state.pagers[w.RightButton], 'chevrons')
+    assert(FS.ButtonSkins.Parts(w.OkayButton) and FS.ButtonSkins.Parts(w.CancelButton), 'text keys')
+    assert(w.OkayButton.scripts.OnClick, 'click lost')
+    assert(w.StackSplitText.fontPath ~= 'stock.ttf', 'count not mono')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
+case("colour picker: stock border and header art are held, swatches get a ring, footer keys are ours", f"""
+    Fire('PLAYER_ENTERING_WORLD'); ColorPickerFrame:Show(); FlushTimers()
+    local w = ColorPickerFrame
+    assert(w.fsCommerceColorSkin and FS.CommerceSkin.state.dialogs[w], 'not built')
+    assert(w.Border.alpha == 0, 'border kept')
+    assert(w.Header.Text.fontPath ~= 'stock.ttf', 'header not mono')
+    assert(FS.ButtonSkins.Parts(w.Footer.OkayButton) and FS.ButtonSkins.Parts(w.Footer.CancelButton), 'footer keys')
+    assert(w.Footer.OkayButton.scripts.OnClick, 'click lost')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
+case("prompts: the edit box backdrop is held, the money input is ringed per coin and keeps its boxes", f"""
+    Fire('PLAYER_ENTERING_WORLD'); StaticPopup1:Show(); FlushTimers()
+    local p = StaticPopup1
+    assert(FS.CommerceSkin.state.edits[p.EditBox], 'edit not skinned')
+    assert(FS.CommerceSkin.state.money[p.MoneyInputFrame], 'money not skinned')
+    for _, k in ipairs({{ 'gold', 'silver', 'copper' }}) do
+        local e = p.MoneyInputFrame[k]
+        assert(e.Left.alpha == 0 and e.Right.alpha == 0, k .. ' art kept')
+    end
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
 SCENES = {
     "bank": "Fire('PLAYER_ENTERING_WORLD'); BankFrame:Show(); BankCleanUpConfirmationPopup:Show(); FlushTimers(); return DumpOps({ BankFrame, BankCleanUpConfirmationPopup })",
     "bank-purchase": "Fire('PLAYER_ENTERING_WORLD'); BankFrame:Show(); BankPanel.PurchasePrompt:Show(); FlushTimers(); return DumpOps({ BankFrame })",
+    "split": "Fire('PLAYER_ENTERING_WORLD'); StackSplitFrame:Show(); StaticPopup1:Show(); ColorPickerFrame:Show(); FlushTimers(); return DumpOps({ StackSplitFrame, ColorPickerFrame, StaticPopup1 })",
     "vendor": "Fire('PLAYER_ENTERING_WORLD'); MerchantFrame:Show(); MerchantFrame_Update(); FlushTimers(); return DumpOps({ MerchantFrame })",
 }
 
