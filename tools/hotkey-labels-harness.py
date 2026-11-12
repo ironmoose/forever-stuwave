@@ -92,8 +92,11 @@ def check_seal_and_aura_labels_match_actionbar_plate_and_hide_when_unbound():
             "TOPRIGHT", "TOPRIGHT", -3, -2
         ), name
         assert sh.same(lua, point.rel, button) and hotkey._w == 0, name
-        assert tuple(plate._color[i] for i in (1, 2, 3, 4)) == (0.024, 0.012, 0.071, 0.78), name
-        for index, expected in [(1, ("TOPLEFT", -3, 2)), (2, ("BOTTOMRIGHT", 3, -2))]:
+        # the cut (chamfer 3) fill tinted to the plate colour, 1 unit inside the button's top and right ring
+        tint = plate._vertex or plate._color
+        assert tuple(tint[i] for i in (1, 2, 3, 4)) == (0.024, 0.012, 0.071, 0.78), name
+        assert plate._color is not None or "slice_cut2_fill_c3" in str(plate._texture), name
+        for index, expected in [(1, ("TOPLEFT", -3, 1)), (2, ("BOTTOMRIGHT", 2, -2))]:
             point = plate._points[index]
             assert (point.point, point.x, point.y) == expected, name
             assert sh.same(lua, point.rel, hotkey), name

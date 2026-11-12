@@ -234,7 +234,9 @@ local function Px(frame, n)
 end
 
 -- The chevron strip along the bottom of a button's face: a clipping frame 3 px in from the sides and bottom, the
--- strip texture tiled across it and scrolled by the rail's clock (texcoord offset, so nothing is re-anchored).
+-- strip texture one chevron (8 px) wider than it, starting one chevron to the left, and a looping engine Translation
+-- of one chevron per CHEV_PERIOD, so the march costs no Lua per frame. A client without animation groups shows the
+-- strip still.
 local function EnsureChevrons(button)
     if button.fsChevClip then return button.fsChevClip end
     local clip = CreateFrame("Frame", nil, button)
@@ -242,9 +244,15 @@ local function EnsureChevrons(button)
     if clip.SetClipsChildren then clip:SetClipsChildren(true) end
     local tex = clip:CreateTexture(nil, "OVERLAY")
     tex:SetTexture(CHEV_TEXTURE, "REPEAT", "CLAMP")
-    tex:SetAllPoints(clip)
     tex:SetVertexColor(COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 0.9)
     clip.tex = tex
+    if tex.CreateAnimationGroup then
+        local group = tex:CreateAnimationGroup()
+        group:SetLooping("REPEAT")
+        local move = group:CreateAnimation("Translation")
+        move:SetDuration(CHEV_PERIOD)
+        clip.march, clip.move = group, move
+    end
     clip:Hide()
     button.fsChevClip = clip
     return clip
@@ -252,19 +260,36 @@ end
 
 local function SeatChevrons(button)
     local clip = EnsureChevrons(button)
+    local step = Px(button, 8)
     clip:ClearAllPoints()
     clip:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", Px(button, 3), Px(button, 3))
     clip:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -Px(button, 3), Px(button, 3))
     clip:SetHeight(Px(button, 4))
+    local width = (button:GetWidth() or 0) - 2 * Px(button, 3) + step
+    clip.tex:ClearAllPoints()
+    clip.tex:SetPoint("TOPLEFT", clip, "TOPLEFT", -step, 0)
+    clip.tex:SetSize(math.max(step, width), Px(button, 4))
+    clip.tex:SetTexCoord(0, math.max(1, width / step), 0, 1)
+    if clip.move then clip.move:SetOffset(step, 0) end
 end
 
 local function PaintActive(button)
     local active = button.fsLastActive == true
     if button.icon then
         if button.icon.SetDesaturated then button.icon:SetDesaturated(not active) end
-        if button.fsLastActive ~= nil then button.icon:SetVertexColor(active and 1 or IDLE_ALPHA, active and 1 or IDLE_ALPHA, active and 1 or IDLE_ALPHA) end
+        if button.fsLastActive ~= nil then
+            local v = active and 1 or IDLE_ALPHA
+            button.icon:SetVertexColor(v, v, v)
+        end
     end
-    if button.fsChevClip then button.fsChevClip:SetShown(active) end
+    local clip = button.fsChevClip
+    if clip then
+        clip:SetShown(active)
+        if clip.march then
+            if active and not clip.march:IsPlaying() then clip.march:Play()
+            elseif not active and clip.march:IsPlaying() then clip.march:Stop() end
+        end
+    end
     local skin, c = button.fsSkin, COLOR_POWER
     if skin and c then
         if skin.border and skin.border.ring then
@@ -274,27 +299,24 @@ local function PaintActive(button)
     end
 end
 
--- The rail's clock: the chevron march on every active strip, and the carriage spring (stiffness 300, damping 22,
--- a little overshoot like the mockup's cubic-bezier) toward the active stance's centre.
-local function RailTick(_, dt)
-    if not rail then return end
-    rail.phase = ((rail.phase or 0) - dt / CHEV_PERIOD) % 1
-    for _, button in ipairs(allButtons) do
-        local clip = button.fsChevClip
-        if clip and clip:IsShown() then
-            local w = clip:GetWidth() or 0
-            local tiles = w > 0 and (w / Px(button, 8)) or 1
-            clip.tex:SetTexCoord(rail.phase, rail.phase + tiles, 0, 1)
-        end
+-- The carriage spring (stiffness 300, damping 22: a little overshoot, like the mockup's cubic-bezier) toward the
+-- active stance's centre. The OnUpdate is installed only while the carriage moves and removed when it settles.
+local function PlaceCarriage()
+    rail.car:ClearAllPoints()
+    rail.car:SetPoint("LEFT", rail.line, "LEFT", rail.x - rail.car:GetWidth() / 2, 0)
+end
+
+local function RailTick(frame, dt)
+    if not (rail and rail.target) then frame:SetScript("OnUpdate", nil) return end
+    dt = math.min(dt or 0, 0.05)
+    local a = (rail.target - rail.x) * 300 - rail.v * 22
+    rail.v = rail.v + a * dt
+    rail.x = rail.x + rail.v * dt
+    if math.abs(rail.target - rail.x) < 0.05 and math.abs(rail.v) < 0.05 then
+        rail.x, rail.v = rail.target, 0
+        frame:SetScript("OnUpdate", nil)
     end
-    if rail.target then
-        local a = (rail.target - rail.x) * 300 - rail.v * 22
-        rail.v = rail.v + a * dt
-        rail.x = rail.x + rail.v * dt
-        if math.abs(rail.target - rail.x) < 0.05 and math.abs(rail.v) < 0.05 then rail.x, rail.v = rail.target, 0 end
-        rail.car:ClearAllPoints()
-        rail.car:SetPoint("LEFT", rail.line, "LEFT", rail.x - rail.car:GetWidth() / 2, 0)
-    end
+    PlaceCarriage()
 end
 
 -- Seats the rail under the shown buttons and aims the carriage at the active one (snapping on first sight).
@@ -311,10 +333,14 @@ local function UpdateRail()
         glow:SetPoint("TOPLEFT", car, "TOPLEFT", -2, 2)
         glow:SetPoint("BOTTOMRIGHT", car, "BOTTOMRIGHT", 2, -2)
         rail = { frame = f, line = line, car = car, glow = glow, x = 0, v = 0 }
-        f:SetScript("OnUpdate", RailTick)
     end
     local first, last, active
     for _, button in ipairs(allButtons) do
+        -- a frame that cannot report where it is (no GetLeft / GetCenter) gets no rail
+        if type(button.GetLeft) ~= "function" or type(button.GetCenter) ~= "function" then
+            rail.frame:Hide()
+            return
+        end
         if button:IsShown() then
             if not first or (button:GetLeft() or 0) < (first:GetLeft() or 0) then first = button end
             if not last or (button:GetRight() or 0) > (last:GetRight() or 0) then last = button end
@@ -322,13 +348,12 @@ local function UpdateRail()
         end
     end
     if not (first and last) then rail.frame:Hide() return end
-    local ref = first
-    rail.frame:SetFrameLevel(ref:GetFrameLevel() + 1)
+    rail.frame:SetFrameLevel(first:GetFrameLevel() + 1)
     rail.line:ClearAllPoints()
-    rail.line:SetPoint("TOPLEFT", first, "BOTTOMLEFT", 0, -Px(ref, RAIL.GAP))
-    rail.line:SetPoint("TOPRIGHT", last, "BOTTOMRIGHT", 0, -Px(ref, RAIL.GAP))
-    rail.line:SetHeight(Px(ref, RAIL.H))
-    rail.car:SetSize(Px(ref, RAIL.CAR_W), Px(ref, RAIL.CAR_H))
+    rail.line:SetPoint("TOPLEFT", first, "BOTTOMLEFT", 0, -Px(first, RAIL.GAP))
+    rail.line:SetPoint("TOPRIGHT", last, "BOTTOMRIGHT", 0, -Px(first, RAIL.GAP))
+    rail.line:SetHeight(Px(first, RAIL.H))
+    rail.car:SetSize(Px(first, RAIL.CAR_W), Px(first, RAIL.CAR_H))
     rail.frame:Show()
     local left, centre = first:GetLeft(), active and active:GetCenter()
     if active and left and centre then
@@ -336,11 +361,13 @@ local function UpdateRail()
         local target = centre - left
         if not rail.target then rail.x, rail.v = target, 0 end
         rail.target = target
+        if math.abs(rail.x - target) > 0.05 then rail.frame:SetScript("OnUpdate", RailTick) end
+        PlaceCarriage()
     else
         rail.car:Hide(); rail.glow:Hide()
         rail.target = nil
+        rail.frame:SetScript("OnUpdate", nil)
     end
-    RailTick(nil, 0)
 end
 
 -- GetShapeshiftFormInfo's flag, cross-checked against GetShapeshiftForm() when the flag is nil or secret (as
@@ -371,7 +398,7 @@ local function SyncChecked(button)
         button:SetChecked(button.fsLastActive)
     end
     PaintActive(button)
-    UpdateRail()
+    pcall(UpdateRail)
 end
 
 local function UpdateButton(button)
@@ -569,9 +596,10 @@ local function StyleButton(button, size, shouldered)
         hotkey:SetDrawLayer("OVERLAY", 4)
         if not button.fsHotkeyPlate then
             local plate = textHost:CreateTexture(nil, "OVERLAY", nil, 3)
-            plate:SetColorTexture(0.024, 0.012, 0.071, 0.78)
-            plate:SetPoint("TOPLEFT", hotkey, "TOPLEFT", -3, 2)
-            plate:SetPoint("BOTTOMRIGHT", hotkey, "BOTTOMRIGHT", 3, -2)
+            -- cut corners, and 1 unit inside the button's top and right ring so the ring stays whole
+            FS.FrameHelpers.CutHotkeyPlate(plate)
+            plate:SetPoint("TOPLEFT", hotkey, "TOPLEFT", -3, 1)
+            plate:SetPoint("BOTTOMRIGHT", hotkey, "BOTTOMRIGHT", 2, -2)
             plate:Hide()
             button.fsHotkeyPlate = plate
         end

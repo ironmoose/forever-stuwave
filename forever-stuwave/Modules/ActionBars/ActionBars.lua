@@ -1357,9 +1357,10 @@ local function StyleButton(button, size)
         if not button.fsHotkeyPlate then
             -- On the text host, not the button, so it stays above the swipe.
             local plate = textHost:CreateTexture(nil, "OVERLAY", nil, 3)
-            plate:SetColorTexture(0.024, 0.012, 0.071, 0.78)
-            plate:SetPoint("TOPLEFT", hotkey, "TOPLEFT", -3, 2)
-            plate:SetPoint("BOTTOMRIGHT", hotkey, "BOTTOMRIGHT", 3, -2)
+            -- cut corners, and 1 unit inside the button's top and right ring so the ring stays whole
+            FS.FrameHelpers.CutHotkeyPlate(plate)
+            plate:SetPoint("TOPLEFT", hotkey, "TOPLEFT", -3, 1)
+            plate:SetPoint("BOTTOMRIGHT", hotkey, "BOTTOMRIGHT", 2, -2)
             plate:Hide()
             button.fsHotkeyPlate = plate
         end

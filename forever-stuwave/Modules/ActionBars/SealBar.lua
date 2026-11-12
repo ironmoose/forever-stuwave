@@ -367,9 +367,10 @@ local function StyleButton(button, size)
     -- Same text-sized dark plate as the action bars, above the cooldown swipe.
     if not button.fsHotkeyPlate then
         local plate = textHost:CreateTexture(nil, "OVERLAY", nil, 3)
-        plate:SetColorTexture(0.024, 0.012, 0.071, 0.78)
-        plate:SetPoint("TOPLEFT", hotkey, "TOPLEFT", -3, 2)
-        plate:SetPoint("BOTTOMRIGHT", hotkey, "BOTTOMRIGHT", 3, -2)
+        -- cut corners, and 1 unit inside the button's top and right ring so the ring stays whole
+        FS.FrameHelpers.CutHotkeyPlate(plate)
+        plate:SetPoint("TOPLEFT", hotkey, "TOPLEFT", -3, 1)
+        plate:SetPoint("BOTTOMRIGHT", hotkey, "BOTTOMRIGHT", 2, -2)
         plate:Hide()
         button.fsHotkeyPlate = plate
     end

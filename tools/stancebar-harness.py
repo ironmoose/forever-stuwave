@@ -454,8 +454,9 @@ def check_a_shouldered_warrior_stance_wears_the_seal_buttons_hotkey_plate_and_ot
         assert hot._mono["size"] == 10 and tuple(hot._mono["color"][i] for i in (1, 2, 3)) == (1, 1, 1)
         p = hot._points[1]
         assert (p.point, p.relPoint, p.x, p.y) == ("TOPRIGHT", "TOPRIGHT", -3, -2) and sb.same(lua, p.rel, btn)
-        assert tuple(plate._color[i] for i in (1, 2, 3, 4)) == (0.024, 0.012, 0.071, 0.78)
-        for i, want in ((1, ("TOPLEFT", -3, 2)), (2, ("BOTTOMRIGHT", 3, -2))):
+        tint = plate._vertex or plate._color      # the cut fill, tinted to the plate colour
+        assert tuple(tint[i] for i in (1, 2, 3, 4)) == (0.024, 0.012, 0.071, 0.78)
+        for i, want in ((1, ("TOPLEFT", -3, 1)), (2, ("BOTTOMRIGHT", 2, -2))):
             q = plate._points[i]
             assert (q.point, q.x, q.y) == want and sb.same(lua, q.rel, hot)
         a, b = btn.fsSkin, ref.fsSkin

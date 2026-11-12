@@ -2476,13 +2476,29 @@ function Helpers.SeatButtonHotkey(button, textHost)
     Theme.ApplyMono(hotkey, 10, Theme.COLOR_TEXT_WHITE)
     if not button.fsHotkeyPlate then
         local plate = textHost:CreateTexture(nil, "OVERLAY", nil, 3)
-        plate:SetColorTexture(0.024, 0.012, 0.071, 0.78)
-        plate:SetPoint("TOPLEFT", hotkey, "TOPLEFT", -3, 2)
-        plate:SetPoint("BOTTOMRIGHT", hotkey, "BOTTOMRIGHT", 3, -2)
+        -- cut corners, and 1 unit inside the button's top and right ring so the ring stays whole
+        Helpers.CutHotkeyPlate(plate)
+        plate:SetPoint("TOPLEFT", hotkey, "TOPLEFT", -3, 1)
+        plate:SetPoint("BOTTOMRIGHT", hotkey, "BOTTOMRIGHT", 2, -2)
         plate:Hide()
         button.fsHotkeyPlate = plate
     end
     return hotkey
+end
+
+-- Gives a keybind plate the two-corner cut (top-left and bottom-right chamfered at 3, the buttons' own shape) in
+-- place of a square box, in the plate colour (rgba(6,3,18,.78)). Masks do not clip on this client, so the shape is
+-- the baked cut fill, nine-sliced. A client that cannot nine-slice keeps the flat plate.
+function Helpers.CutHotkeyPlate(plate)
+    local c = { 0.024, 0.012, 0.071, 0.78 }
+    local Theme = FS.Theme
+    plate:SetTexture("Interface\\AddOns\\forever-stuwave\\Media\\Textures\\slice_cut2_fill_c3.tga")
+    if Theme.ApplyNineSlice and Theme.ApplyNineSlice(plate, 3) then
+        plate:SetVertexColor(c[1], c[2], c[3], c[4])
+    else
+        plate:SetColorTexture(c[1], c[2], c[3], c[4])
+    end
+    return plate
 end
 
 -- Puts GameTooltip on `owner` at the default anchor (the action bars' corner), else above the owner.

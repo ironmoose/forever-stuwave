@@ -774,7 +774,7 @@ local function StyleButton(button)
     -- the swipe with the text; it hides and shows with the text (UpdateHotkey).
     if not button.fsHotkeyPlate then
         local plate = textHost:CreateTexture(nil, "OVERLAY", nil, 3)
-        plate:SetColorTexture(AB_PLATE[1], AB_PLATE[2], AB_PLATE[3], AB_PLATE[4])
+        FS.FrameHelpers.CutHotkeyPlate(plate)   -- cut corners, AB_PLATE colour
         plate:Hide()
         button.fsHotkeyPlate = plate
     end

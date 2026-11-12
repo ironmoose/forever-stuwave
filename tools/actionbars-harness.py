@@ -2442,7 +2442,7 @@ function T.pet_style_hotkey_plate_is_a_dark_plate_sized_from_the_text()
     eq(plate._kind, "Texture", "a texture")
     eq(plate._parent, b.HotKey._parent, "on the text host with the hotkey, above the swipe")
     eq(plate._parent._level > b.cooldown._level, true, "above the swipe")
-    local c = plate._color
+    local c = plate._vertex or plate._color   -- the cut fill tinted to AB_PLATE
     eq(c ~= nil and math.abs(c[1] - 0.024) < 0.002 and math.abs(c[2] - 0.012) < 0.002
         and math.abs(c[3] - 0.071) < 0.002 and math.abs(c[4] - 0.78) < 0.002, true, "AB_PLATE colour")
     local tl, br = plateAnchors(b)
