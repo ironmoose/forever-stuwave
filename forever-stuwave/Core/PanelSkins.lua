@@ -766,8 +766,66 @@ local function PrintInspectUsage()
         "class spells, forms and auras (out of combat; not part of all; /fsbug includes it) | all -- run every readout")
 end
 
+-- /fsinspect tree <frame>: the frame's whole tree (frames and regions, with parentKey names, object type, shown, size,
+-- draw layer, texture or atlas, text) into ForeverSTUwaveExport.tree, for reading off disk after a /reload. Read only.
+local function TreeDump(rootName)
+    local root = _G[rootName]
+    if type(root) ~= "table" then print("|cff22e0ffForever STUwave|r: no frame " .. tostring(rootName)); return end
+    local lines, seen = {}, {}
+    local function plain(v)
+        if FS.IsSecret and FS.IsSecret(v) then return "?" end
+        return v
+    end
+    local function keyOf(parent, obj)
+        if type(parent) ~= "table" then return "" end
+        for k, v in pairs(parent) do
+            if v == obj and type(k) == "string" then return k end
+        end
+        return ""
+    end
+    local function describe(obj, parent, depth)
+        local ok, otype = pcall(obj.GetObjectType, obj)
+        local name = select(2, pcall(obj.GetName, obj))
+        local shown = select(2, pcall(obj.IsShown, obj))
+        local w, h = select(2, pcall(obj.GetWidth, obj)), select(2, pcall(obj.GetHeight, obj))
+        local extra = ""
+        if otype == "Texture" then
+            local layer, sub = select(2, pcall(obj.GetDrawLayer, obj))
+            local tex = select(2, pcall(obj.GetTexture, obj))
+            local atlas = select(2, pcall(obj.GetAtlas, obj))
+            local a = select(2, pcall(obj.GetAlpha, obj))
+            extra = (" L=%s tex=%s atlas=%s a=%s"):format(tostring(layer), tostring(plain(tex)), tostring(plain(atlas)), tostring(plain(a)))
+        elseif otype == "FontString" then
+            local text = select(2, pcall(obj.GetText, obj))
+            extra = (" text=%s"):format(tostring(plain(text)))
+        end
+        lines[#lines + 1] = ("%s%s %s key=%s shown=%s %sx%s%s"):format(string.rep("  ", depth), tostring(otype),
+            tostring(plain(name)), keyOf(parent, obj), tostring(plain(shown)),
+            tostring(math.floor((tonumber(plain(w)) or 0) + 0.5)), tostring(math.floor((tonumber(plain(h)) or 0) + 0.5)), extra)
+    end
+    local function walk(frame, parent, depth)
+        if seen[frame] or depth > 8 or #lines > 4000 then return end
+        seen[frame] = true
+        describe(frame, parent, depth)
+        local okR, regions = pcall(function() return { frame:GetRegions() } end)
+        if okR then for _, r in ipairs(regions) do describe(r, frame, depth + 1) end end
+        local okC, children = pcall(function() return { frame:GetChildren() } end)
+        if okC then for _, c in ipairs(children) do walk(c, frame, depth + 1) end end
+    end
+    walk(root, nil, 0)
+    ForeverSTUwaveExport = type(ForeverSTUwaveExport) == "table" and ForeverSTUwaveExport or {}
+    ForeverSTUwaveExport.tree = ForeverSTUwaveExport.tree or {}
+    ForeverSTUwaveExport.tree[rootName] = lines
+    print(("|cff22e0ffForever STUwave|r: %s readout saved (%d lines)"):format(rootName, #lines))
+end
+
 SLASH_FSINSPECT1 = "/fsinspect"
 SlashCmdList["FSINSPECT"] = function(msg)
+    local treeName = msg:match("^tree%s+(%S+)")
+    if treeName then
+        TreeDump(treeName)
+        return
+    end
     if msg == "auras" then
         FS.Diagnostics.ArmAuraCheck()
         return
