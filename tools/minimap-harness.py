@@ -1,43 +1,25 @@
 #!/usr/bin/env python3
-"""Pin Minimap.lua's cut-corner chrome arguments against the REAL Theme.lua.
+"""Pin the minimap's ONE BODY against the REAL Theme.lua, FrameHelpers.lua and Layout.lua.
 
-Loads Theme.lua and Minimap.lua under lupa on a permissive mock WoW API, fires PLAYER_LOGIN,
-and checks (under Theme.CHROME_CORNERS "cut", and "round" for the A/B path):
+Loads Minimap.lua under lupa on a permissive mock WoW API, fires PLAYER_LOGIN, and checks the design of mockup A
+("ONE BODY", mockups/minimap-bags-cleanup-2026-11-12.html), under Theme.CHROME_CORNERS "cut" and "round":
 
-  * map face glow + border take chamfer 6 (the mask_minimap.tga TOP-LEFT / BOTTOM-RIGHT cut),
-    "round" keeps the square radius 0;
-  * bezel, coords box and the addon-button tray drawer (identified by frame) keep requested
-    chamfer 4 (what the 2C primitives snap to);
-  * a bezel key's fill is the two-corner cut2 fill tinted READOUT_FILL, nine-sliced at the SAME
-    chamfer SkinButton's ring gets (c = 6 at the 30 px key of the raw 250 px map; c = 4 at the
-    ~208 px map of a 1200 tall UIParent, scale 0.833, which resolves to slice_cut2_fill_c4), and
-    no rounded fill is drawn there.
-
-  Then the addon-button tray (LibDBIcon collection), against a fake LibStub whose "LibDBIcon-1.0"
-  object is shaped like the real LibDBIcon-1.0 (minor 56): lib.objects, lib.callbacks:Fire of
-  "LibDBIcon_IconCreated" (button, name), GetButtonList / GetMinimapButton, and the local
-  updatePosition that Refresh / Show / SetButtonRadius use to SetPoint("CENTER", Minimap, ...):
-
-  * a pre-existing lib button and a stray FooMinimapButton child of Minimap both end up parented
-    in the drawer and seated in tiles; a later IconCreated button is collected too;
-  * Blizzard bezel buttons (tracking, calendar, mail, zoom, expansion button) and unrelated
-    frames are NOT collected;
-  * the lib's reposition (Refresh / Show / SetButtonRadius) does not move a collected button back,
-    and drag-to-move is switched off;
-  * the toggle shows and hides the drawer, persists the state in ForeverSTUwaveDB, shows the
-    count badge and the "Addon buttons (N)" tooltip, and is hidden with zero buttons;
-  * tiles wrap to more rows and the drawer grows; combat defers collection to PLAYER_REGEN_ENABLED.
-
-  Then the Settings key (the gear that opens the /fsconfig window): our own Button in the bezel row between the calendar and
-  mail keys (mail keeps the last, reserved seat), the same size and chrome as the other keys, a centred gear on whole
-  physical pixels, hover and pressed looks, a "Settings" tooltip, and a click that calls FS.ConfigWindow.Toggle (the toggle
-  /fsconfig runs); the coords box takes what is left of FOUR key slots.
-
-  Then the coords readout: no clock anywhere, only the player position, in a dark LCD box with a cyan border at
-  the right end of the bezel row (right of the four key seats, inside the one bezel bar, no row of its own), the
-  text sized as large as the box takes (up to 12.8 px at the 250 px map) so a typical and a widest reading never clip
-  or touch a key, on whole physical pixels, and the tray drawer, its tab and the quest timer's drawer seat flush
-  under the bezel.
+  * ONE body: the map, the key row and (open) the tray's row sit in one frame with one cyan edge and one plate that starts
+    where the map ends; under "cut" only its TOP-LEFT and BOTTOM-RIGHT are chamfered (baked c = 6 pieces), the map's mask
+    cuts only the top-left, and none of the old separate boxes (a bezel fill and border, a coords box, a tray box, a
+    SkinButton key) is drawn any more;
+  * the key row: tracking (cyan), calendar (violet), the STU key (pink), the tray toggle (amber), then mail (pink) while mail
+    waits: bare glyphs over a 2 px LED, no boxes; a hovered key gets a thin outline in its own colour and a bright LED; keys
+    are placed by the keys that are showing, so the row has no hole;
+  * SPACING, every number a whole screen pixel and the mockup's (its px / 2, scaled by the map's pixel width over 248):
+    equal margins left, right, above and below the keys, keys evenly spaced, glyphs centred in their keys, the divider
+    centred in the row, the coords right aligned at the same margin, tray tiles on the key columns;
+  * the coords: the player position only (no clock), fitted between the divider and the right margin;
+  * the addon-button tray (LibDBIcon collection), against a fake LibStub whose "LibDBIcon-1.0" object is shaped like the
+    real LibDBIcon-1.0 (minor 56): collected buttons become keys of a second row under a dashed amber rule (the body ends at
+    the drawer while it is open), wrap onto more rows, are toggled by the row's fourth key (count and chevron, persisted),
+    and combat defers every reparent;
+  * the Edit Mode seat compensation of the map itself (unchanged by the redesign).
 
     python3 tools/minimap-harness.py
 """
@@ -95,13 +77,40 @@ function Region:SetVertexColor(r, g, b, a) self.tint = { r, g, b, a } end
 function Region:SetTextureSliceMargins(l) self.slice = l end
 function Region:SetScript(n, fn) self.scripts[n] = fn end
 function Region:GetScript(n) return self.scripts[n] end
+-- HookScript keeps its hooks (post-handlers); __fire runs a script then its hooks, as the client does for a state change.
+function Region:HookScript(n, fn)
+    self.hooks = self.hooks or {}
+    self.hooks[n] = self.hooks[n] or {}
+    table.insert(self.hooks[n], fn)
+end
+function Region:__fire(n)
+    local s = self.scripts[n]
+    if s then s(self) end
+    for _, fn in ipairs(self.hooks and self.hooks[n] or {}) do fn(self) end
+end
+function Region:SetAlpha(a) self.alpha = a end
+function Region:GetAlpha() return self.alpha or 1 end
+function Region:SetColorTexture(r, g, b, a) self.color = { r, g, b, a == nil and 1 or a } end
+function Region:SetTexCoord(l, r, t, b) self.coords = { l, r, t, b } end
+function Region:SetDrawLayer(layer, sub) self.layer, self.sublevel = layer, sub end
+function Region:SetMaskTexture(p) self.mask = p end
+function Region:SetAllPoints(rel)
+    rel = rel or self.parent
+    self.allPoints = rel
+    self.points = { TOPLEFT = { rel = rel, relPoint = "TOPLEFT", x = 0, y = 0 },
+                    BOTTOMRIGHT = { rel = rel, relPoint = "BOTTOMRIGHT", x = 0, y = 0 } }
+end
 function Region:CreateTexture(_, layer, _, sublevel)
     local t = new("texture", self)
     t.layer, t.sublevel = layer, sublevel
     self.regions[#self.regions + 1] = t
     return t
 end
-function Region:CreateFontString() return new("fontstring", self) end
+function Region:CreateFontString()
+    local f = new("fontstring", self)
+    self.regions[#self.regions + 1] = f
+    return f
+end
 function Region:SetParent(p)
     if self.parent then
         for i, c in ipairs(self.parent.children) do
@@ -120,8 +129,17 @@ function Region:GetObjectType()
     return self.otype or "Frame"
 end
 function Region:GetName() return self.name end
-function Region:Show() self.shown = true end
-function Region:Hide() self.shown = false end
+-- A frame whose shown state changes runs OnShow / OnHide (a texture has none); a Show on a shown frame does nothing.
+function Region:Show()
+    local was = self.shown
+    self.shown = true
+    if not was and self.kind == "frame" then self:__fire("OnShow") end
+end
+function Region:Hide()
+    local was = self.shown
+    self.shown = false
+    if was and self.kind == "frame" then self:__fire("OnHide") end
+end
 function Region:IsShown() return self.shown end
 function Region:IsVisible()
     if not self.shown then return false end
@@ -236,6 +254,7 @@ __loader = __last
 __Theme = Theme
 return Theme
 """
+
 
 # A LibDBIcon-1.0 look-alike, kept to what the real source (minor 56) does: createButton builds a
 # Button parented to Minimap named LibDBIcon10_<name> with .border/.background/.icon and fires
@@ -415,27 +434,100 @@ def check(label: str, ok: bool) -> None:
         failures += 1
 
 
-ROLE_LUA = """
-function __role(f)
-    if f == Minimap then return "map" end
-    if f == Minimap.fsBezel then return "bezel" end
-    if f == Minimap.fsReadoutBox then return "readout" end
-    if f == Minimap.fsTray then return "tray" end
-    if f == Minimap.fsTrayToggle then return "toggle" end
-    if f == Minimap.fsSettingsKey then return "settings" end
-    if f.fsTrayOwned then return "tile" end
-    return "other"
-end
+TEXTURES = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
+SEARCH_TEXTURE = TEXTURES + "icon_key_search.tga"
+CALENDAR_TEXTURE = TEXTURES + "icon_key_calendar.tga"
+CHEVRON_TEXTURE = TEXTURES + "icon_key_chevron.tga"
+STU_TEXTURE = TEXTURES + "icon_stu.tga"
+MASK_TEXTURE = TEXTURES + "mask_minimap_tl.tga"
+GLOW_ROUND = TEXTURES + "glow_round.tga"
+CUT_BORDER_C6 = TEXTURES + "border_cut_c6_t1.tga"
+CUT_FILL_C6 = TEXTURES + "fill_cut_c6.tga"
+STU_KEY = "ForeverSTUwaveMinimapSTUKey"
+TOGGLE = "ForeverSTUwaveMinimapTrayToggle"
+LAYER_RANK = {"BACKGROUND": 0, "BORDER": 1, "ARTWORK": 2, "OVERLAY": 3, "HIGHLIGHT": 4}
+
+# The mockup is drawn at 2x, so each number is its px / 2 at the reference map of 496 / 2 = 248 px (Minimap.lua SPEC).
+REF_MAP = 248
+BODY_PLATE = (0.043, 0.024, 0.094, 0.94)
+STU_INK_BOTTOM = 25 / 32   # the bottom edge of icon_stu.tga's last solid texel row, as a fraction of its canvas
+MONO_ADVANCE = 0.5615   # Mononoki Nerd Font Mono, measured with PIL (em); the widest reading is "99.9, 99.9" (10 glyphs)
+READOUT_CHARS = 10
+LED_REST, LED_BRIGHT, WASH_ALPHA = 0.75, 1.0, 0.18
+KEY_DOT_SIZE, KEY_DOT_OFFSET, KEY_DOT_REACH = 6, 2, 3
+
+
+def geo(width_px: float) -> dict:
+    """The key row's geometry in whole screen pixels for a map `width_px` wide: the mockup's numbers (px / 2) scaled by
+    width / 248 and rounded, glyph and STU canvas forced to the key's parity (an odd gap would leave half a pixel)."""
+    k = width_px / REF_MAP
+
+    def s(n):
+        return max(1, math.floor(n * k + 0.5))
+
+    def like(n, ref):
+        return n + 1 if (n - ref) % 2 else n
+
+    g = {"width": math.floor(width_px + 0.5)}
+    g["row"] = s(28)
+    g["keyW"] = s(18)
+    g["keyH"] = min(like(s(22), g["row"]), g["row"])
+    g["topM"] = (g["row"] - g["keyH"]) / 2
+    g["margin"] = s(8)
+    g["keyGap"] = s(8)
+    g["pitch"] = g["keyW"] + g["keyGap"]
+    g["led"] = s(2)
+    g["glyph"] = like(s(16), g["keyW"])
+    g["glyphGap"] = s(3)
+    g["glyphY"] = max(0, g["keyH"] - g["led"] - g["glyphGap"] - g["glyph"])
+    g["stu"] = like(s(32), g["keyW"])
+    g["stuX"] = (g["keyW"] - g["stu"]) / 2
+    g["stuGap"] = s(2)
+    g["stuY"] = math.floor(g["keyH"] - g["led"] - g["stuGap"] - STU_INK_BOTTOM * g["stu"] + 0.5)
+    g["coords"] = s(12)
+    g["count"] = s(10)
+    g["dividerH"] = min(like(s(18), g["row"]), g["row"])
+    g["chevW"], g["chevH"] = s(8), s(4)
+    g["outlineX"] = s(3)
+    g["outlineY"] = max(1, min(math.floor(g["topM"]), s(1)))
+    g["halo"] = s(1)
+    g["dash"], g["ruleInset"] = s(2), s(6)
+    return g
+
+
+# What the design pins at the reference map (a 250 px map is within a pixel of 248): the mockup's own px / 2.
+MOCKUP_250 = {"row": 28, "margin": 8, "keyW": 18, "keyGap": 8, "keyH": 22, "topM": 3, "glyph": 16, "glyphY": 1, "led": 2,
+              "stu": 32, "dividerH": 18, "coords": 12, "count": 10, "pitch": 26}
+
+# (label, UIParent height or None, UI units per pixel): a 250 px map, a 208 px one (1200 tall UIParent) and one 469 px wide
+WORLDS = (("250", None, 1.0), ("208", 1200, 1.0), ("469", None, 768 / 1440))
+
+PIXELS = r"""
+PixelUtil = { GetPixelToUIUnitFactor = function() return %r end }
+local R = getmetatable(UIParent)
+function R:SetSnapToPixelGrid(v) self.snap = v end
+function R:SetTexelSnappingBias(v) self.bias = v end
+assert(loadstring(FH_SRC, "@FrameHelpers.lua"))("forever-stuwave", FS)
 """
 
-
-TRAY_BLIZZARD = r"""
--- Blizzard furniture the bezel already owns, plus things that must never be collected.
+# Blizzard furniture the key row adopts or must leave alone, with the stock art the keys blank: a sun on the calendar, an
+# icon on the tracking button, plate art on the mail frame. As in Blizzard's XML the mail frame starts hidden.
+BLIZZARD_KEYS = r"""
 GameTimeFrame = CreateFrame("Button", "GameTimeFrame", Minimap)
+GameTimeFrame.sun = GameTimeFrame:CreateTexture(nil, "ARTWORK")
+GameTimeFrame.sun:SetTexture("blizzard-sun")
+GameTimeFrame.day = GameTimeFrame:CreateFontString()
+MinimapCluster.Tracking.plate = MinimapCluster.Tracking:CreateTexture(nil, "BACKGROUND")
+MinimapCluster.Tracking.Button = CreateFrame("Button", nil, MinimapCluster.Tracking)
+MinimapCluster.Tracking.Button.icon = MinimapCluster.Tracking.Button:CreateTexture(nil, "ARTWORK")
+MinimapCluster.Tracking.Button.icon:SetTexture("blizzard-tracking")
 ExpansionLandingPageMinimapButton = CreateFrame("Button", "ExpansionLandingPageMinimapButton", Minimap)
 Minimap.ZoomIn = CreateFrame("Button", "MinimapZoomIn", Minimap)
 MinimapCluster.IndicatorFrame = { MailFrame = CreateFrame("Button", "MiniMapMailFrame", MinimapCluster) }
+MinimapCluster.IndicatorFrame.MailFrame.Border = MinimapCluster.IndicatorFrame.MailFrame:CreateTexture(nil, "BORDER")
+MinimapCluster.IndicatorFrame.MailFrame:Hide()
 MiniMapMailIcon = MinimapCluster:CreateTexture(nil, "ARTWORK") -- Blizzard draws the envelope on ARTWORK
+MiniMapMailIcon:Hide()
 SomeRandomButton = CreateFrame("Button", "SomeRandomButton", Minimap)
 SomeRandomFrame = CreateFrame("Frame", "SomeRandomMinimapButtonHolder", Minimap)
 -- excluded by the hidden-by-HideBlizzardChrome flag alone, and by a Blizzard name prefix alone
@@ -444,102 +536,556 @@ FlagHiddenMinimapButton.fsHideHooked = true
 ExpansionLandingPageMinimapButton2 = CreateFrame("Button", "ExpansionLandingPageMinimapButton2", Minimap)
 """
 
-TRAY_FULL = LIB_SETUP + TRAY_BLIZZARD + r"""
-FooMinimapButton = CreateFrame("Button", "FooMinimapButton", Minimap)
-__lib:Register("Alpha", MakeObj("Alpha"), {})
+HELPERS = r"""
+function __same(a, b) return a == b end
+function __click(f) f.scripts.OnClick(f, "LeftButton") end
+function __hover(f, on) f:__fire(on and "OnEnter" or "OnLeave") end
+function __toggles_reset() __toggles = 0; FS.ConfigWindow = { Toggle = function() __toggles = __toggles + 1 end } end
+-- What Blizzard 12.1 does when UPDATE_PENDING_MAIL says there is mail (Blizzard_Minimap/Mainline/Minimap.lua):
+-- MiniMapMailFrameMixin:OnEvent shows the FRAME, starts the arrival animation (MinimapMailAnimMixin:OnPlay hides the envelope,
+-- 0.4 to 0.5 s) and asks the PARENT to lay out. The envelope (MiniMapMailIcon, hidden="true" in the XML) is shown only by
+-- MinimapMailAnimMixin:OnFinished, and MiniMapMailFrameMixin:OnHide runs ResetMailIcon, which hides it. The parent was
+-- MinimapCluster.IndicatorFrame, a LayoutFrame; after our reparent it is the bezel.
+function __mail_arrives()
+    local mail = MinimapCluster.IndicatorFrame.MailFrame
+    MiniMapMailIcon:Hide()
+    mail:Show()
+    mail:GetParent():Layout()
+end
+function __mail_anim_finished() MiniMapMailIcon:Show() end
+function __mail_hides()
+    MinimapCluster.IndicatorFrame.MailFrame:Hide()
+    MiniMapMailIcon:Hide()
+end
+function __visible(r) return r:IsVisible() end
+function __rescale()
+    for _, fn in ipairs(FS.Layout._rescaleCallbacks) do pcall(fn) end
+end
 """
 
-TRAY_EMPTY = TRAY_BLIZZARD
+
+def pixel_setup(factor: float, extra: str = "", tray: str = "") -> str:
+    return ("FH_SRC = [==[" + FRAMEHELPERS_SRC + "]==]\n" + PIXELS % factor + LIB_SETUP + BLIZZARD_KEYS + extra + tray)
+
+
+def world(label_ui_factor, extra="", tray="", pre_db=None, mode="cut"):
+    """(lua, globals, px) for a world with the real FrameHelpers answering PixelUnit = `factor` UI units per pixel."""
+    _, ui_height, factor = label_ui_factor
+    lua = run(mode, ui_height, pixel_setup(factor, extra, tray), pre_db)
+    lua.execute(HELPERS)
+    return lua, lua.globals(), factor
+
+
+def whole(v: float, px: float) -> bool:
+    return abs(v / px - round(v / px)) < 1e-6
+
+
+def regions(frame) -> list:
+    return list(frame.regions.values())
+
+
+def led_of(frame):
+    """The LED underline: the flat texture pinned to the key's bottom edge across its full width."""
+    found = [r for r in regions(frame) if r.color is not None and r.points.BOTTOMLEFT is not None
+             and r.points.BOTTOMLEFT.y == 0 and r.points.BOTTOMLEFT.x == 0 and r.points.BOTTOMRIGHT is not None
+             and r.points.BOTTOMRIGHT.x == 0 and r.h is not None and r.points.BOTTOMLEFT.rel is not None]
+    return found[0] if len(found) == 1 else None
+
+
+def wash_of(frame):
+    found = [r for r in regions(frame) if r.color is not None and r.points.BOTTOMLEFT is not None
+             and r.points.BOTTOMLEFT.y < 0]
+    return found[0] if len(found) == 1 else None
+
+
+def outline_of(frame):
+    found = [r for r in regions(frame) if r.slice is not None]
+    return found[0] if len(found) == 1 else None
+
+
+def glyph_of(frame, path):
+    found = [r for r in regions(frame) if r.texture == path]
+    return found[0] if len(found) == 1 else None
+
+
+def coords_of(r) -> tuple:
+    """(L, R, T, B) of a texture's SetTexCoord, rounded."""
+    return tuple(round(r.coords[i], 4) for i in (1, 2, 3, 4))
+
+
+def near(a, b, tol=1e-6) -> bool:
+    return abs(a - b) <= tol
+
+
+def rgb_of(c) -> tuple:
+    """(r, g, b) of a Python tuple or a Lua colour table (1-based)."""
+    return (c[1], c[2], c[3]) if hasattr(c, "items") else tuple(c[:3])
+
+
+def tint_is(r, rgb, alpha=None, tol=1e-3) -> bool:
+    t = r.tint if r.tint is not None else r.color
+    if t is None:
+        return False
+    want = rgb_of(rgb)
+    ok = all(near(t[i + 1], want[i], tol) for i in range(3))
+    return ok and (alpha is None or near(t[4], alpha, tol))
+
+
+def body_checks() -> None:
+    """One body, one edge, one plate; chamfered top-left and bottom-right only; nothing of the old boxes."""
+    for mode in ("cut", "round"):
+        for w in WORLDS[:2]:
+            label = f"{mode}@{w[0]}"
+            lua, g, px = world(w, mode=mode)
+            body, bezel, minimap = g.Minimap.fsBody, g.Minimap.fsBezel, g.Minimap
+            calls = g.calls
+
+            def same(a, b):
+                return bool(g.__same(a, b))
+
+            check(f"[body {label}] one body frame, a child of the bezel, a level above it",
+                  body is not None and same(body.parent, bezel) and body.level == bezel.level + 1)
+            tl, br = body.points.TOPLEFT, body.points.BOTTOMRIGHT
+            check(f"[body {label}] it runs from the map's top-left to the bezel's bottom-right, no offsets (tray closed)",
+                  same(tl.rel, minimap) and tl.relPoint == "TOPLEFT" and tl.x == 0 and tl.y == 0
+                  and same(br.rel, bezel) and br.relPoint == "BOTTOMRIGHT" and br.x == 0 and br.y == 0)
+            check(f"[body {label}] none of the old boxes: no rounded fill, no gradient border, no SkinButton key",
+                  len(calls.fill) == 0 and len(calls.border) == 0 and len(calls.skin) == 0)
+            want = 6 if mode == "cut" else 0
+            glow = list(calls.glow.values())
+            check(f"[body {label}] one outer glow, on the body (not the map), chamfer {want}",
+                  len(glow) == 1 and same(glow[0].frame, body) and glow[0].args[6] == want)
+            check(f"[body {label}] the map's mask cuts only its top-left", minimap.mask == MASK_TEXTURE)
+            flats = [r for r in regions(body) if r.color is not None]
+            edge = [r for r in flats if tint_is(r, (0.133, 0.878, 1.0), 1.0)]
+            check(f"[body {label}] one cyan edge: four flat full alpha lines", len(edge) == 4)
+            top = [r for r in edge if r.points.TOPLEFT is not None and r.points.TOPRIGHT is not None]
+            bottom = [r for r in edge if r.points.BOTTOMLEFT is not None and r.points.BOTTOMRIGHT is not None
+                      and r.points.BOTTOMLEFT.rel is not None and r.points.BOTTOMLEFT.y == 0
+                      and r.points.BOTTOMLEFT.relPoint == "BOTTOMLEFT" and r.points.BOTTOMLEFT.x == 0]
+            check(f"[body {label}] the top and bottom lines are 1 px ({top[0].h / px:g} and {bottom[0].h / px:g}), the "
+                  f"sides 1 px wide",
+                  len(top) == 1 and len(bottom) == 1 and near(top[0].h, px) and near(bottom[0].h, px)
+                  and all(near(r.w, px) for r in edge if r.points.TOPLEFT is not None and r.points.BOTTOMLEFT is not None
+                          and r.points.TOPRIGHT is None))
+            pieces = [r for r in regions(body) if r.texture == CUT_BORDER_C6]
+            plate_corner = [r for r in regions(body) if r.texture == CUT_FILL_C6]
+            plate = [r for r in flats if tint_is(r, BODY_PLATE[:3], BODY_PLATE[3])]
+            check(f"[body {label}] the plate is flat #0b0618 at .94, three runs and one corner piece, none over the map",
+                  len(plate) == 2 and len(plate_corner) == 1
+                  and all(same(r.points.TOPLEFT.rel, minimap) and r.points.TOPLEFT.relPoint == "BOTTOMLEFT"
+                          for r in plate if r.points.TOPLEFT is not None))
+            if mode == "cut":
+                coords = sorted((coords_of(p), next(iter(p.points.keys()))) for p in pieces)
+                check(f"[body {label}] the cut: exactly a top-left and a bottom-right piece at chamfer 6, nothing at the "
+                      f"other two corners",
+                      coords == sorted([((0, 0.375, 0, 0.375), "TOPLEFT"), ((0.375, 0, 0.375, 0), "BOTTOMRIGHT")])
+                      and all(p.shown is True and near(p.w, 6 * px) and near(p.h, 6 * px) for p in pieces)
+                      and all(tint_is(p, (0.133, 0.878, 1.0), 1.0) for p in pieces))
+                corner = plate_corner[0]
+                check(f"[body {label}] the plate's corner piece sits in the bottom-right and is flipped both ways",
+                      coords_of(corner) == (0.375, 0, 0.375, 0)
+                      and next(iter(corner.points.keys())) == "BOTTOMRIGHT" and near(corner.w, 6 * px))
+            else:
+                check(f"[body {label}] round mode: the square body, no cut pieces drawn",
+                      all(p.shown is False for p in pieces) and all(p.shown is False for p in plate_corner))
+            rule = [r for r in flats if tint_is(r, (0.133, 0.878, 1.0), 0.35)]
+            check(f"[body {label}] the rule where the map meets the first row: cyan at 35%, 1 px, the map's full width",
+                  len(rule) == 1 and same(rule[0].points.TOPLEFT.rel, minimap)
+                  and rule[0].points.TOPLEFT.relPoint == "BOTTOMLEFT" and near(rule[0].h, px)
+                  and same(rule[0].points.TOPRIGHT.rel, minimap) and rule[0].points.TOPRIGHT.relPoint == "BOTTOMRIGHT")
+
+    # the body ends at the drawer while the tray is open, and goes back to the bezel when it closes
+    lua, g, px = world(WORLDS[0], tray='__lib:Register("Alpha", MakeObj("Alpha"), {})')
+    body, bezel, tray = g.Minimap.fsBody, g.Minimap.fsBezel, g.Minimap.fsTray
+    check("[body] tray closed: the body ends at the bezel", bool(g.__same(body.points.BOTTOMRIGHT.rel, bezel)))
+    lua.execute("__click(Minimap.fsTrayToggle)")
+    check("[body] tray open: the body ends at the drawer's bottom-right", bool(g.__same(body.points.BOTTOMRIGHT.rel, tray))
+          and body.points.BOTTOMRIGHT.relPoint == "BOTTOMRIGHT" and body.points.BOTTOMRIGHT.x == 0
+          and body.points.BOTTOMRIGHT.y == 0 and bool(g.__same(body.points.TOPLEFT.rel, g.Minimap)))
+    lua.execute("__click(Minimap.fsTrayToggle)")
+    check("[body] tray closed again: back to the bezel", bool(g.__same(body.points.BOTTOMRIGHT.rel, bezel)))
+    lua, g, px = world(WORLDS[0], tray="", pre_db={"minimapTrayOpen": True})
+    check("[body] no buttons: the drawer stays hidden even when saved open, so the body stays at the bezel",
+          g.Minimap.fsTray.shown is False and bool(g.__same(g.Minimap.fsBody.points.BOTTOMRIGHT.rel, g.Minimap.fsBezel)))
+
+
+def spacing_checks() -> None:
+    """The key row's spacing: the mockup's numbers on whole pixels, equal margins, even pitch, centred glyphs."""
+    # the design's own numbers at the reference map
+    ref = geo(250.0)
+    check("[spacing] the design numbers at a 250 px map are the mockup's px / 2: "
+          + ", ".join(f"{k} {v}" for k, v in MOCKUP_250.items()),
+          all(ref[k] == v for k, v in MOCKUP_250.items()))
+
+    for w in WORLDS:
+        label = w[0]
+        lua, g, px = world(w, tray='__lib:Register("Alpha", MakeObj("Alpha"), {})')
+        e = geo(g.Minimap.w / px)
+        bezel = g.Minimap.fsBezel
+        keys = [("tracking", g.MinimapCluster.Tracking, SEARCH_TEXTURE), ("calendar", g.GameTimeFrame, CALENDAR_TEXTURE),
+                ("stu", g.Minimap.fsSTUKey, STU_TEXTURE), ("toggle", g.Minimap.fsTrayToggle, None)]
+        resolved = [str(g.Minimap.fsBezelResolved[i]) for i in range(1, len(g.Minimap.fsBezelResolved) + 1)]
+        check(f"[spacing@{label}] the keys built are tracking, calendar, stu, mail ({resolved}); the toggle joins from the tray",
+              resolved == ["tracking", "calendar", "stu", "mail"] and all(f is not None for _, f, _ in keys))
+        check(f"[spacing@{label}] the bezel is {e['row']} px tall (the row), the map {g.Minimap.w / px:.1f} px wide "
+              f"(scale {g.Minimap.w / px / REF_MAP:.3f})",
+              near(bezel.h, e["row"] * px) and whole(bezel.h, px))
+
+        xs = []
+        for i, (name, frame, tex) in enumerate(keys):
+            p = frame.points.TOPLEFT
+            x, y = p.x / px, -p.y / px
+            xs.append(x)
+            check(f"[spacing@{label}] key {i + 1} ({name}) is {e['keyW']} x {e['keyH']} px at x {e['margin'] + i * e['pitch']}, "
+                  f"y {e['topM']:g} from the row's top, on whole pixels (got {frame.w / px:g} x {frame.h / px:g} at {x:g}, {y:g})",
+                  bool(g.__same(p.rel, bezel)) and p.relPoint == "TOPLEFT"
+                  and near(x, e["margin"] + i * e["pitch"]) and near(y, e["topM"])
+                  and near(frame.w / px, e["keyW"]) and near(frame.h / px, e["keyH"])
+                  and all(whole(v, px) for v in (p.x, p.y, frame.w, frame.h)))
+        gaps = [xs[i + 1] - xs[i] - e["keyW"] for i in range(len(xs) - 1)]
+        check(f"[spacing@{label}] keys are evenly spaced: every gap is {e['keyGap']} px ({gaps})",
+              all(near(gp, e["keyGap"]) for gp in gaps))
+        check(f"[spacing@{label}] equal margins above and below the keys: {e['topM']:g} px each ("
+              f"{e['topM']:g} above, {e['row'] - e['topM'] - e['keyH']:g} below)",
+              near(e["row"] - e["topM"] - e["keyH"], e["topM"]))
+
+        # glyphs centred in their keys, and the LED across the full key at the bottom
+        for name, frame, tex in keys:
+            led = led_of(frame)
+            check(f"[spacing@{label}] {name}: the LED is the key's full width, {e['led']} px, at its bottom edge",
+                  led is not None and near(led.h, e["led"] * px) and whole(led.h, px)
+                  and bool(g.__same(led.points.BOTTOMLEFT.rel, frame)))
+            if tex is None:
+                continue
+            glyph = glyph_of(frame, tex)
+            p = glyph.points.TOPLEFT
+            if name == "stu":
+                ink_bottom = e["stuY"] + STU_INK_BOTTOM * e["stu"]
+                check(f"[spacing@{label}] stu: the {e['stu']} px icon canvas is centred on the key sideways "
+                      f"({e['stuX']:g} px each side) and hung so its ink ends {e['stuGap']} px above the LED "
+                      f"({-p.y / px:g} below top, key {e['keyH']} px)",
+                      near(glyph.w / px, e["stu"]) and near(glyph.h / px, e["stu"]) and near(p.x / px, e["stuX"])
+                      and near(p.y / px, -e["stuY"]) and whole(p.x, px) and whole(p.y, px)
+                      and near(p.x / px + glyph.w / px / 2, e["keyW"] / 2)
+                      and abs((e["keyH"] - e["led"] - ink_bottom) - e["stuGap"]) <= 0.5)
+                continue
+            side = (e["keyW"] - e["glyph"]) / 2
+            check(f"[spacing@{label}] {name}: the {e['glyph']} px glyph is centred in the {e['keyW']} px key "
+                  f"({side:g} px each side, whole), {e['glyphY']} px below the key's top, {e['glyphGap']} px above the LED",
+                  near(glyph.w / px, e["glyph"]) and near(glyph.h / px, e["glyph"]) and near(p.x / px, side)
+                  and near(-p.y / px, e["glyphY"]) and side == int(side) and whole(p.x, px) and whole(p.y, px)
+                  and near(e["keyH"] - (e["glyphY"] + e["glyph"]) - e["led"], e["glyphGap"])
+                  and glyph.snap is True and glyph.bias == 0)
+
+        # the divider and the coords
+        coords = g.Minimap.fsReadoutCoords
+        n_keys = len(keys)
+        divider = [r for r in regions(g.Minimap.fsBody) if r.color is not None and tint_is(r, (0.133, 0.878, 1.0), 0.3)]
+        check(f"[spacing@{label}] one divider, cyan at 30%", len(divider) == 1)
+        d = divider[0]
+        dx = d.points.TOPLEFT.x / px
+        check(f"[spacing@{label}] the divider is one key gap past the last key ({e['margin'] + n_keys * e['pitch']} px), 1 px "
+              f"wide, {e['dividerH']} px tall, centred in the {e['row']} px row (got x {dx:g}, y {-d.points.TOPLEFT.y / px:g})",
+              near(dx, e["margin"] + n_keys * e["pitch"]) and near(dx - xs[-1] - e["keyW"], e["keyGap"])
+              and near(d.w, px) and near(d.h / px, e["dividerH"])
+              and near(-d.points.TOPLEFT.y / px, (e["row"] - e["dividerH"]) / 2)
+              and all(whole(v, px) for v in (d.points.TOPLEFT.x, d.points.TOPLEFT.y, d.w, d.h)))
+        right = coords.points.RIGHT
+        check(f"[spacing@{label}] the coords are right aligned at the same margin as the first key: {-right.x / px:g} px "
+              f"(left margin {xs[0]:g})",
+              bool(g.__same(right.rel, bezel)) and right.relPoint == "RIGHT" and right.y == 0
+              and near(-right.x / px, e["margin"]) and near(xs[0], e["margin"]) and whole(right.x, px))
+        room = e["width"] - e["margin"] - (e["margin"] + n_keys * e["pitch"] + 1 + e["keyGap"])
+        want_font = max(5, min(e["coords"], math.floor(room / (READOUT_CHARS * MONO_ADVANCE))))
+        check(f"[spacing@{label}] the coords font is {want_font} px (its {e['coords']} px, or what the room {room} px takes) "
+              f"and a reading is {READOUT_CHARS * MONO_ADVANCE * want_font:.1f} px, clear of the divider",
+              near(coords.fontSize / px, want_font) and READOUT_CHARS * MONO_ADVANCE * want_font <= room + 1e-6)
+
+        # the toggle's count and chevron, on the glyph row
+        toggle = g.Minimap.fsTrayToggle
+        chev = glyph_of(toggle, CHEVRON_TEXTURE)
+        count = toggle.count
+        check(f"[spacing@{label}] the toggle's chevron is {e['chevW']} x {e['chevH']} px, one pixel in from the key's right, "
+              f"centred on the glyph row; the count is {e['count']} px, a {e['glyphGap']} px gap left of it",
+              near(chev.w / px, e["chevW"]) and near(chev.h / px, e["chevH"])
+              and bool(g.__same(chev.points.RIGHT.rel, toggle)) and chev.points.RIGHT.relPoint == "TOPRIGHT"
+              and near(chev.points.RIGHT.x / px, -1) and near(chev.points.RIGHT.y / px, -(e["glyphY"] + e["glyph"] / 2))
+              and near(count.fontSize / px, e["count"]) and bool(g.__same(count.points.RIGHT.rel, chev))
+              and count.points.RIGHT.relPoint == "LEFT" and near(count.points.RIGHT.x / px, -e["glyphGap"]))
+
+
+def row_checks() -> None:
+    """Which keys the row has, in what order, and that it packs by the keys showing (no hole)."""
+    for w in WORLDS[:2]:
+        label = w[0]
+        # buttons collected: tracking, calendar, stu, toggle; mail joins as the fifth when it arrives
+        lua, g, px = world(w, tray='__lib:Register("Alpha", MakeObj("Alpha"), {})')
+        e = geo(g.Minimap.w / px)
+        mail = g.MinimapCluster.IndicatorFrame.MailFrame
+        bezel = g.Minimap.fsBezel
+
+        def slot(frame):
+            return round((frame.points.TOPLEFT.x / px - e["margin"]) / e["pitch"])
+
+        check(f"[row@{label}] mail waits for mail: hidden, no slot, the divider after four keys",
+              mail.shown is False and mail.parent is not None and bool(g.__same(mail.parent, bezel)))
+        divider = [r for r in regions(g.Minimap.fsBody) if r.color is not None and tint_is(r, (0.133, 0.878, 1.0), 0.3)][0]
+        before = divider.points.TOPLEFT.x
+        lua.execute("__mail_arrives()")
+        check(f"[row@{label}] mail arriving takes the fifth slot at once (the key's own OnShow reseats the row)",
+              mail.shown is True and slot(mail) == 4 and near(mail.points.TOPLEFT.x / px, e["margin"] + 4 * e["pitch"])
+              and near(mail.w / px, e["keyW"]) and near(mail.h / px, e["keyH"]))
+        check(f"[row@{label}] the divider moves right one key pitch ({(divider.points.TOPLEFT.x - before) / px:g} px)",
+              near((divider.points.TOPLEFT.x - before) / px, e["pitch"]))
+        lua.execute("__mail_hides()")
+        check(f"[row@{label}] mail hiding gives the slot back (the divider returns)",
+              near(divider.points.TOPLEFT.x, before))
+
+        # no tray buttons: the toggle gives its slot back; mail then takes the fourth
+        lua, g, px = world(w)
+        e = geo(g.Minimap.w / px)
+        mail = g.MinimapCluster.IndicatorFrame.MailFrame
+        toggle = g.Minimap.fsTrayToggle
+        check(f"[row@{label}] no addon buttons: the toggle is hidden and the row is three keys",
+              toggle.shown is False)
+        lua.execute("__mail_arrives()")
+        check(f"[row@{label}] ... so mail takes the fourth slot, no hole where the toggle is",
+              near(mail.points.TOPLEFT.x / px, e["margin"] + 3 * e["pitch"]))
+        lua.execute('__lib:Register("Alpha", MakeObj("Alpha"), {})')
+        check(f"[row@{label}] ... and the first addon button brings the toggle back in the fourth slot, mail to the fifth",
+              toggle.shown is True and near(toggle.points.TOPLEFT.x / px, e["margin"] + 3 * e["pitch"])
+              and near(mail.points.TOPLEFT.x / px, e["margin"] + 4 * e["pitch"]))
+
+    # a client without the calendar button: the next key takes its place, no hole
+    lua, g, px = world(WORLDS[0], extra="GameTimeFrame:Hide(); GameTimeFrame = nil")
+    e = geo(g.Minimap.w / px)
+    resolved = [str(g.Minimap.fsBezelResolved[i]) for i in range(1, len(g.Minimap.fsBezelResolved) + 1)]
+    check("[row] no calendar button on this client: it is skipped and the STU key takes the second slot",
+          resolved == ["tracking", "stu", "mail"] and near(g.Minimap.fsSTUKey.points.TOPLEFT.x / px, e["margin"] + e["pitch"]))
+
+    # a throw while building the STU key is logged, leaves nothing half built, and the rest of the row still comes up
+    lua, g, px = world(WORLDS[0], extra=LOGGING + r"""
+    local create = CreateFrame
+    function CreateFrame(otype, name, parent)
+        local f = create(otype, name, parent)
+        if name == "ForeverSTUwaveMinimapSTUKey" then f.RegisterForClicks = function() error("stuboom") end end
+        return f
+    end
+    """, tray='__lib:Register("Alpha", MakeObj("Alpha"), {})')
+    e = geo(g.Minimap.w / px)
+    logs = [str(g.__logs[i]) for i in range(1, len(g.__logs) + 1)]
+    key = g[STU_KEY]
+    check("[row] a failing STU key build is logged once under minimap_key_stu, with the error",
+          len(logs) == 1 and logs[0].startswith("minimap_key_stu|") and "stuboom" in logs[0])
+    check("[row] ... the half-built key is hidden and unpublished, and no slot is spent on it",
+          key is not None and key.shown is False and g.Minimap.fsSTUKey is None
+          and near(g.Minimap.fsTrayToggle.points.TOPLEFT.x / px, e["margin"] + 2 * e["pitch"]))
+    check("[row] ... and tracking, calendar and the toggle still come up in slots 1, 2 and 3",
+          near(g.MinimapCluster.Tracking.points.TOPLEFT.x / px, e["margin"])
+          and near(g.GameTimeFrame.points.TOPLEFT.x / px, e["margin"] + e["pitch"]))
+    resolved = [str(g.Minimap.fsBezelResolved[i]) for i in range(1, len(g.Minimap.fsBezelResolved) + 1)]
+    check(f"[row] the resolved and skipped lists say so ({resolved})", resolved == ["tracking", "calendar", "mail"])
+
+    # Blizzard's keys: reparented onto the bezel, their own art blanked, ours drawn; the zoom and expansion buttons are not
+    lua, g, px = world(WORLDS[0])
+    bezel, tracking, calendar, mail = (g.Minimap.fsBezel, g.MinimapCluster.Tracking, g.GameTimeFrame,
+                                       g.MinimapCluster.IndicatorFrame.MailFrame)
+
+    def same(a, b):
+        return bool(g.__same(a, b))
+
+    check("[row] tracking, calendar and mail are reparented onto the bezel, above the body",
+          same(tracking.parent, bezel) and same(calendar.parent, bezel) and same(mail.parent, bezel)
+          and tracking.level == calendar.level == mail.level == bezel.level + 3 > g.Minimap.fsBody.level)
+    check("[row] tracking and calendar are shown, with the mouse on, at full alpha (HideBlizzardChrome's hide undone)",
+          tracking.shown is True and calendar.shown is True and tracking.alpha == 1 and calendar.alpha == 1)
+    check("[row] the stock calendar sun and the date number are blanked (alpha 0), our calendar glyph is not",
+          g.GameTimeFrame.sun.alpha == 0 and g.GameTimeFrame.day.alpha == 0
+          and glyph_of(calendar, CALENDAR_TEXTURE).alpha is None)
+    check("[row] the stock tracking plate and icon are blanked (alpha 0) and the button is pinned to the key "
+          "(SetAllPoints), our magnifier glyph is not",
+          tracking.plate.alpha == 0 and tracking.Button.icon.alpha == 0
+          and tracking.Button.allPoints is not None and same(tracking.Button.allPoints, tracking)
+          and glyph_of(tracking, SEARCH_TEXTURE).alpha is None)
+    check("[row] the mail frame keeps its own shown state (hidden until mail), its plate art is blanked",
+          mail.shown is False and mail.Border.alpha == 0)
+    check("[row] tracking and calendar glyphs are tinted cyan and violet, the LEDs the same colours at .75",
+          tint_is(glyph_of(tracking, SEARCH_TEXTURE), g.__Theme.COLOR_POWER)
+          and tint_is(glyph_of(calendar, CALENDAR_TEXTURE), g.__Theme.COLOR_BORDER)
+          and tint_is(led_of(tracking), g.__Theme.COLOR_POWER, 1.0) and led_of(tracking).alpha == LED_REST
+          and tint_is(led_of(calendar), g.__Theme.COLOR_BORDER, 1.0) and led_of(calendar).alpha == LED_REST
+          and tint_is(led_of(g.Minimap.fsSTUKey), g.__Theme.COLOR_HEALTH, 1.0)
+          and led_of(g.Minimap.fsSTUKey).alpha == LED_REST)
+    check("[row] the zoom and expansion buttons are not keys (left where they are)",
+          same(g.Minimap.ZoomIn.parent, g.Minimap) and same(g.ExpansionLandingPageMinimapButton.parent, g.Minimap))
+    check("[row] the bezel answers Layout() with a no-op, so mail's GetParent():Layout() cannot throw",
+          g.Minimap.fsBezel.Layout is not None)
+
+
+def hover_checks() -> None:
+    """A hovered key: a thin chamfered outline in its own colour and a bright LED (and the wash behind it)."""
+    lua, g, px = world(WORLDS[0], tray='__lib:Register("Alpha", MakeObj("Alpha"), {})')
+    e = geo(g.Minimap.w / px)
+    tracking, calendar, stu, toggle = (g.MinimapCluster.Tracking, g.GameTimeFrame, g.Minimap.fsSTUKey,
+                                       g.Minimap.fsTrayToggle)
+    lua.execute("__mail_arrives()")
+    mail = g.MinimapCluster.IndicatorFrame.MailFrame
+    for name, frame, rgb, extra in (("tracking", tracking, g.__Theme.COLOR_POWER, tracking.Button),
+                                    ("calendar", calendar, g.__Theme.COLOR_BORDER, None),
+                                    ("stu", stu, g.__Theme.COLOR_HEALTH, None),
+                                    ("toggle", toggle, (1, 0.7137, 0.2824), None),
+                                    ("mail", mail, g.__Theme.COLOR_HEALTH, None)):
+        led, wash, outline = led_of(frame), wash_of(frame), outline_of(frame)
+        target = extra if extra is not None else frame
+        check(f"[hover] {name}: at rest the LED is at {LED_REST}, no wash, no outline",
+              led.alpha == LED_REST and wash.shown is False and outline.shown is False)
+        check(f"[hover] {name}: the outline is the chamfered button ring in the key's own colour, {e['outlineX']} px out "
+              f"at the sides, {e['outlineY']} px above and below",
+              tint_is(outline, rgb) and tint_is(wash, rgb, WASH_ALPHA)
+              and near(outline.points.TOPLEFT.x / px, -e["outlineX"]) and near(outline.points.TOPLEFT.y / px, e["outlineY"])
+              and near(outline.points.BOTTOMRIGHT.x / px, e["outlineX"])
+              and near(outline.points.BOTTOMRIGHT.y / px, -e["outlineY"])
+              and outline.texture is not None and outline.texture.startswith(TEXTURES + "slice_cut2_outline")
+              and outline.slice == g.__Theme.SnapCut(e["outlineX"]))
+        check(f"[hover] {name}: the wash reaches {e['halo']} px past the LED, inside the outline that stands "
+              f"{e['outlineY']} px out below and {e['outlineX']} px at the sides",
+              near(wash.points.BOTTOMLEFT.x / px, -e["halo"]) and near(wash.points.BOTTOMLEFT.y / px, -e["halo"])
+              and near(wash.points.BOTTOMRIGHT.x / px, e["halo"]) and near(wash.h / px, e["led"] + 2 * e["halo"])
+              and e["halo"] <= e["outlineY"] and e["halo"] <= e["outlineX"])
+        g.__hover(target, True)
+        check(f"[hover] {name}: hovering shows the outline, brightens the LED to {LED_BRIGHT} and lights the wash",
+              outline.shown is True and led.alpha == LED_BRIGHT and wash.shown is True)
+        g.__hover(target, False)
+        check(f"[hover] {name}: leaving puts it all back",
+              outline.shown is False and led.alpha == LED_REST and wash.shown is False)
+
+    # the STU key's own behaviour: tooltip, click, and a hide with the mouse on it clears the hover
+    lua.execute("__toggles_reset()")
+    g.__hover(stu, True)
+    check("[hover] the STU key shows the tooltip 'Settings' on itself",
+          g.GameTooltip.text == "Settings" and g.GameTooltip.shown is True and bool(g.__same(g.GameTooltip.owner, stu)))
+    lua.execute("__click(Minimap.fsSTUKey)")
+    check("[hover] a click toggles the config window (the toggle /fsconfig runs)", g.__toggles == 1)
+    g.__hover(stu, False)
+    check("[hover] leaving hides the tooltip", g.GameTooltip.shown is False)
+    g.__hover(stu, True)
+    stu.Hide(stu)
+    check("[hover] a key hidden under the mouse (no OnLeave comes) clears its hover", outline_of(stu).shown is False
+          and led_of(stu).alpha == LED_REST)
+    stu.Show(stu)
+    g.GameTooltip.text = None
+    lua.execute("FS.ConfigWindow = nil; __click(Minimap.fsSTUKey)")
+    check("[hover] with no config window loaded, a click does nothing and does not throw", True)
+    check("[hover] ConfigWindow exports Toggle and /fsconfig calls that same Toggle (pinned on its own text)",
+          "function CW.Toggle()" in CONFIGWINDOW_SRC and 'SLASH_FSCONFIG1 = "/fsconfig"' in CONFIGWINDOW_SRC
+          and re.search(r'SlashCmdList\["FSCONFIG"\].*?CW\.Toggle\(\)', CONFIGWINDOW_SRC, re.S) is not None)
+
+    # the open tray's toggle stays bright while open, hover or not
+    lua.execute("__click(Minimap.fsTrayToggle)")
+    check("[hover] an open tray holds the toggle's LED bright and its wash lit (no hover)",
+          led_of(toggle).alpha == LED_BRIGHT and wash_of(toggle).shown is True and outline_of(toggle).shown is False)
+    lua.execute("__click(Minimap.fsTrayToggle)")
+    check("[hover] closing it lets the LED rest again", led_of(toggle).alpha == LED_REST)
+
+
+LOGGING = r"""
+__logs = {}
+FS.LogDegradeOnce = function(key, msg) __logs[#__logs + 1] = tostring(key) .. "|" .. tostring(msg) end
+"""
+
+FOO = 'FooMinimapButton = CreateFrame("Button", "FooMinimapButton", Minimap)\n__lib:Register("Alpha", MakeObj("Alpha"), {})\n'
 
 
 def tray_checks() -> None:
-    def same(g, a, b):
-        return bool(g.__same(a, b))
-
-    helpers = """
-    function __same(a, b) return a == b end
-    function __seat(b) return b.points.TOPLEFT end
-    function __only_tray_anchor(b)
-        local n = 0
-        for _ in pairs(b.points) do n = n + 1 end
-        return n == 1 and b.points.TOPLEFT and b.points.TOPLEFT.rel == Minimap.fsTray
-    end
-    function __click(f) f.scripts.OnClick(f, "LeftButton") end
-    """
+    w = WORLDS[0]
 
     # ---- A: a lib button, a stray, Blizzard furniture, a late IconCreated, the lib re-seating
-    lua = run("cut", None, TRAY_FULL, None)
-    lua.execute(helpers)
-    g = lua.globals()
-    tray, toggle = g.Minimap.fsTray, g.Minimap.fsTrayToggle
+    lua, g, px = world(w, tray=FOO)
+    e = geo(g.Minimap.w / px)
+    tray, toggle, bezel = g.Minimap.fsTray, g.Minimap.fsTrayToggle, g.Minimap.fsBezel
     alpha, foo = g.__lib.objects.Alpha, g.FooMinimapButton
+
+    def same(a, b):
+        return bool(g.__same(a, b))
+
+    def only_tray_anchor(b):
+        pts = list(b.points.keys())
+        return pts == ["TOPLEFT"] and same(b.points.TOPLEFT.rel, tray)
+
     check("[tray] drawer and toggle exist", tray is not None and toggle is not None)
-    check("[tray] lib button Alpha is parented in the drawer", same(g, alpha.parent, tray))
-    check("[tray] stray FooMinimapButton is parented in the drawer", same(g, foo.parent, tray))
-    check("[tray] both are seated in tiles (single TOPLEFT anchor on the drawer)",
-          bool(g.__only_tray_anchor(alpha)) and bool(g.__only_tray_anchor(foo)))
-    check("[tray] two tiles are on distinct x positions",
-          g.__seat(alpha).x != g.__seat(foo).x)
-    check("[tray] tiles are square and no bigger than a bezel key",
-          alpha.w == alpha.h and foo.w == alpha.w and 0 < alpha.w <= 30)
+    check("[tray] lib button Alpha is parented in the drawer", same(alpha.parent, tray))
+    check("[tray] stray FooMinimapButton is parented in the drawer", same(foo.parent, tray))
+    check("[tray] both are seated as keys (single TOPLEFT anchor on the drawer)",
+          only_tray_anchor(alpha) and only_tray_anchor(foo))
+    check(f"[tray] tiles are key-sized ({e['keyW']} x {e['keyH']} px) on the key row's columns, "
+          f"{e['topM']:g} px below the drawer's top, whole pixels",
+          near(alpha.w / px, e["keyW"]) and near(alpha.h / px, e["keyH"]) and near(foo.w, alpha.w)
+          and near(alpha.points.TOPLEFT.x / px, e["margin"]) and near(foo.points.TOPLEFT.x / px, e["margin"] + e["pitch"])
+          and near(alpha.points.TOPLEFT.y / px, -e["topM"]) and near(foo.points.TOPLEFT.y / px, -e["topM"])
+          and all(whole(v, px) for v in (alpha.w, alpha.h, alpha.points.TOPLEFT.x, alpha.points.TOPLEFT.y)))
     check("[tray] LibDBIcon round border and background art are hidden",
           alpha.border.shown is False and alpha.background.shown is False)
-    check("[tray] LibDBIcon icon is re-seated in the tile centre",
-          alpha.icon.points.CENTER is not None and alpha.icon.w < alpha.w)
+    side = (e["keyW"] - e["glyph"]) / 2
+    check(f"[tray] LibDBIcon icon is re-seated in the glyph box ({e['glyph']} px, {side:g} px in, {e['glyphY']} px down)",
+          list(alpha.icon.points.keys()) == ["TOPLEFT"] and near(alpha.icon.w / px, e["glyph"])
+          and near(alpha.icon.points.TOPLEFT.x / px, side) and near(alpha.icon.points.TOPLEFT.y / px, -e["glyphY"]))
     check("[tray] drag-to-move is switched off (RegisterForDrag with no buttons)",
           alpha.dragButtons == 0 and foo.dragButtons == 0)
-    check("[tray] tile chrome: skin ring with an accent, underline texture present",
-          alpha.fsSkin is not None and len(list(alpha.regions.values())) >= 4)
+    check("[tray] tile chrome: an LED in the tile's accent (cyan, then pink), the wash and the hover outline",
+          led_of(alpha) is not None and tint_is(led_of(alpha), g.__Theme.COLOR_POWER, 1.0)
+          and led_of(alpha).alpha == LED_REST and tint_is(led_of(foo), g.__Theme.COLOR_HEALTH, 1.0)
+          and wash_of(alpha) is not None and outline_of(alpha) is not None and near(led_of(alpha).h / px, e["led"]))
+    check("[tray] the lib's round highlight is replaced by a flat one at no alpha (the hover look is the key's own)",
+          alpha.highlight.texture == "Interface\\Buttons\\WHITE8X8" and alpha.highlight.mode == "ADD"
+          and alpha.highlight.alpha == 0)
+    g.__hover(alpha, True)
+    check("[tray] a collected button's own OnEnter hover lights its outline and LED",
+          outline_of(alpha).shown is True and led_of(alpha).alpha == LED_BRIGHT)
+    g.__hover(alpha, False)
 
-    check("[tray] bezel keys stay in the bezel (tracking, calendar, mail)",
-          same(g, g.MinimapCluster.Tracking.parent, g.Minimap.fsBezel)
-          and same(g, g.GameTimeFrame.parent, g.Minimap.fsBezel)
-          and same(g, g.MinimapCluster.IndicatorFrame.MailFrame.parent, g.Minimap.fsBezel))
-    check("[tray] the Settings key stays in the bezel",
-          same(g, g.Minimap.fsSettingsKey.parent, g.Minimap.fsBezel))
+    check("[tray] bezel keys stay in the bezel (tracking, calendar, mail, STU)",
+          same(g.MinimapCluster.Tracking.parent, bezel) and same(g.GameTimeFrame.parent, bezel)
+          and same(g.MinimapCluster.IndicatorFrame.MailFrame.parent, bezel) and same(g.Minimap.fsSTUKey.parent, bezel))
+    check("[tray] the toggle is a key of the bezel row, not of the drawer", same(toggle.parent, bezel))
     check("[tray] expansion button, zoom button, a random button and a non-button are NOT collected",
-          same(g, g.ExpansionLandingPageMinimapButton.parent, g.Minimap)
-          and same(g, g.Minimap.ZoomIn.parent, g.Minimap)
-          and same(g, g.SomeRandomButton.parent, g.Minimap)
-          and same(g, g.SomeRandomFrame.parent, g.Minimap))
+          same(g.ExpansionLandingPageMinimapButton.parent, g.Minimap) and same(g.Minimap.ZoomIn.parent, g.Minimap)
+          and same(g.SomeRandomButton.parent, g.Minimap) and same(g.SomeRandomFrame.parent, g.Minimap))
     check("[tray] a button HideBlizzardChrome hid, and a Blizzard-prefixed one, are NOT collected",
-          same(g, g.FlagHiddenMinimapButton.parent, g.Minimap)
-          and same(g, g.ExpansionLandingPageMinimapButton2.parent, g.Minimap))
+          same(g.FlagHiddenMinimapButton.parent, g.Minimap) and same(g.ExpansionLandingPageMinimapButton2.parent, g.Minimap))
 
-    check("[tray] count badge reads 2", toggle.count.text == "2")
+    check("[tray] count reads 2", toggle.count.text == "2")
     check("[tray] toggle is shown with buttons collected", toggle.shown is True)
-    toggle.scripts.OnEnter(toggle)
+    g.__hover(toggle, True)
     check("[tray] toggle tooltip reads 'Addon buttons (2)'", g.GameTooltip.text == "Addon buttons (2)")
+    g.__hover(toggle, False)
 
     # late IconCreated
     lua.execute('__lib:Register("Bravo", MakeObj("Bravo"), {})')
     bravo = g.__lib.objects.Bravo
-    check("[tray] a later IconCreated button is collected and seated",
-          same(g, bravo.parent, tray) and bool(g.__only_tray_anchor(bravo)))
-    check("[tray] count badge reads 3 after the late button", toggle.count.text == "3")
+    check("[tray] a later IconCreated button is collected and seated on the third column",
+          same(bravo.parent, tray) and only_tray_anchor(bravo)
+          and near(bravo.points.TOPLEFT.x / px, e["margin"] + 2 * e["pitch"]))
+    check("[tray] count reads 3 after the late button", toggle.count.text == "3")
 
     # the lib's own reposition must not drag a collected button back around the map
     lua.execute('__lib:Refresh("Alpha", {}); __lib:Show("Alpha"); __lib:SetButtonRadius(9)')
     check("[tray] lib Refresh/Show/SetButtonRadius do not move a collected button back",
-          same(g, alpha.parent, tray) and bool(g.__only_tray_anchor(alpha))
-          and alpha.points.CENTER is None and bool(g.__only_tray_anchor(bravo)))
+          same(alpha.parent, tray) and only_tray_anchor(alpha) and alpha.points.CENTER is None and only_tray_anchor(bravo))
     lua.execute('__lib:ShowOnEnter("Alpha", true)')
-    check("[tray] a hover-fade request does not blank a collected button",
-          alpha.showOnMouseover is False)
+    check("[tray] a hover-fade request does not blank a collected button", alpha.showOnMouseover is False)
 
     # lib sizing / reparent / scale calls after adoption must not undo the tile
     tile = alpha.w
     lua.execute('__lib:SetButtonSize("Alpha", 40); __lib:ResetButtonSize("Alpha")')
-    check("[tray] lib SetButtonSize/ResetButtonSize leave the button tile-sized",
-          alpha.w == tile and alpha.h == tile)
+    check("[tray] lib SetButtonSize/ResetButtonSize leave the button key-sized", alpha.w == tile and near(alpha.h / px, e["keyH"]))
     lua.execute('local a = __lib.objects.Alpha; a:SetSize(50, 50); a:SetWidth(60); a:SetHeight(61); '
                 'a:SetScale(2); a:SetParent(Minimap)')
     check("[tray] direct SetSize/SetWidth/SetHeight/SetScale/SetParent are ignored",
-          alpha.w == tile and alpha.h == tile and alpha.scale == 1 and same(g, alpha.parent, tray))
+          alpha.w == tile and near(alpha.h / px, e["keyH"]) and alpha.scale == 1 and same(alpha.parent, tray))
     check("[tray] strata matches the drawer and level sits above it, flags re-fixed",
           alpha.strata == tray.strata and alpha.level == tray.level + 2
-          and alpha.fixedStrata is True and alpha.fixedLevel is True
-          and foo.level == tray.level + 2)
+          and alpha.fixedStrata is True and alpha.fixedLevel is True and foo.level == tray.level + 2)
 
     # lib art re-applications after adoption must be re-stripped / re-seated
     lua.execute('''
@@ -548,11 +1094,11 @@ def tray_checks() -> None:
     ''')
     check("[tray] lib ResetButtonBorder/Background keep the round art hidden",
           alpha.border.shown is False and alpha.background.shown is False)
-    check("[tray] lib ResetButtonIcon keeps the icon at the tile centre",
-          alpha.icon.points.CENTER is not None and alpha.icon.points.TOPLEFT is None
-          and alpha.icon.w < alpha.w)
-    check("[tray] lib ResetButtonHighlightTexture keeps the square ADD wash",
-          alpha.highlight.texture == "Interface\\Buttons\\WHITE8X8" and alpha.highlight.mode == "ADD")
+    check("[tray] lib ResetButtonIcon keeps the icon in the glyph box",
+          list(alpha.icon.points.keys()) == ["TOPLEFT"] and near(alpha.icon.w / px, e["glyph"]))
+    check("[tray] lib ResetButtonHighlightTexture keeps the flat no-alpha highlight",
+          alpha.highlight.texture == "Interface\\Buttons\\WHITE8X8" and alpha.highlight.mode == "ADD"
+          and alpha.highlight.alpha == 0)
     lua.execute('''
         __lib:SetButtonBorder("Alpha", 136430, 40, "TOPLEFT", 1, 1)
         __lib:SetButtonBackground("Alpha", 136467, 30, "CENTER", 0, 0)
@@ -561,11 +1107,10 @@ def tray_checks() -> None:
     ''')
     check("[tray] lib SetButtonBorder/Background keep the round art hidden",
           alpha.border.shown is False and alpha.background.shown is False)
-    check("[tray] lib SetButtonIcon keeps the icon at the tile centre",
-          alpha.icon.points.CENTER is not None and alpha.icon.points.TOPLEFT is None
-          and alpha.icon.w < alpha.w)
-    check("[tray] lib SetButtonHighlightTexture keeps the square ADD wash",
-          alpha.highlight.texture == "Interface\\Buttons\\WHITE8X8" and alpha.highlight.mode == "ADD")
+    check("[tray] lib SetButtonIcon keeps the icon in the glyph box",
+          list(alpha.icon.points.keys()) == ["TOPLEFT"] and near(alpha.icon.w / px, e["glyph"]))
+    check("[tray] lib SetButtonHighlightTexture keeps the flat no-alpha highlight",
+          alpha.highlight.texture == "Interface\\Buttons\\WHITE8X8" and alpha.highlight.alpha == 0)
 
     # an addon hiding its own button drops it from the count; showing it brings it back
     alpha.Hide(alpha)
@@ -576,478 +1121,213 @@ def tray_checks() -> None:
     # a Show/Hide that changes nothing must not relayout (drawer:SetHeight is the layout's tell)
     lua.execute('__relayouts = 0; local d = Minimap.fsTray; local orig = d.SetHeight; '
                 'd.SetHeight = function(self, h) __relayouts = __relayouts + 1; return orig(self, h) end')
-    alpha.Show(alpha); alpha.Show(alpha)
+    alpha.Show(alpha)
+    alpha.Show(alpha)
     check("[tray] Show on an already shown button does not relayout", g.__relayouts == 0)
-    alpha.Hide(alpha); alpha.Hide(alpha)
+    alpha.Hide(alpha)
+    alpha.Hide(alpha)
     check("[tray] Hide twice relayouts once", g.__relayouts == 1)
     alpha.Show(alpha)
     check("[tray] Show after Hide relayouts once more", g.__relayouts == 2)
 
-    # toggle: default closed, click opens and persists, click closes and persists
-    check("[tray] drawer starts closed", tray.shown is False)
+    # toggle: default closed, click opens and persists, click closes and persists; the chevron flips with it
+    chev = glyph_of(toggle, CHEVRON_TEXTURE)
+    check("[tray] drawer starts closed, the chevron points down", tray.shown is False
+          and coords_of(chev) == (0, 1, 0, 1))
     lua.execute("__click(Minimap.fsTrayToggle)")
     check("[tray] toggle click opens the drawer and persists open", tray.shown is True
           and g.ForeverSTUwaveDB.minimapTrayOpen is True)
+    check("[tray] open: the chevron points up", coords_of(chev) == (0, 1, 1, 0))
     lua.execute("__click(Minimap.fsTrayToggle)")
     check("[tray] second click closes the drawer and persists closed", tray.shown is False
           and g.ForeverSTUwaveDB.minimapTrayOpen is False)
+    check("[tray] closed: the chevron points down again", coords_of(chev) == (0, 1, 0, 1))
+
+    # the drawer: a second row of the row's height under the bezel, a dashed amber rule on its top edge
+    drawer_px = near(tray.h / px, e["row"]) and whole(tray.h, px)
+    check(f"[tray] the drawer hangs flush under the bezel (TOPLEFT/TOPRIGHT on BOTTOMLEFT/BOTTOMRIGHT, no offset), one "
+          f"row ({tray.h / px:g} px) tall for up to nine tiles",
+          same(tray.points.TOPLEFT.rel, bezel) and tray.points.TOPLEFT.relPoint == "BOTTOMLEFT"
+          and tray.points.TOPLEFT.x == 0 and tray.points.TOPLEFT.y == 0
+          and same(tray.points.TOPRIGHT.rel, bezel) and tray.points.TOPRIGHT.relPoint == "BOTTOMRIGHT" and drawer_px)
+    dashes = sorted((r for r in regions(tray) if r.color is not None), key=lambda r: r.points.TOPLEFT.x)
+    inset, dash = e["ruleInset"], e["dash"]
+    n = math.floor((e["width"] - 2 * inset + dash) / (2 * dash))
+    check(f"[tray] the rule: {n} amber dashes, {dash} px long with {dash} px gaps, 1 px tall, from {inset} px in, on the "
+          f"drawer's top edge",
+          len(dashes) == n and all(tint_is(r, (1, 0.7137, 0.2824), 0.35) for r in dashes)
+          and all(near(r.w, dash * px) and near(r.h, px) and r.points.TOPLEFT.y == 0 for r in dashes)
+          and near(dashes[0].points.TOPLEFT.x / px, inset)
+          and all(near((dashes[i + 1].points.TOPLEFT.x - dashes[i].points.TOPLEFT.x) / px, 2 * dash)
+                  for i in range(len(dashes) - 1))
+          and e["width"] - (dashes[-1].points.TOPLEFT.x / px + dash) >= inset - 1e-6)
+    check("[tray] there is no 'ADDONS' label and no text tab: the drawer holds no font string",
+          all(r.kind != "fontstring" for r in regions(tray)))
 
     # ---- B: saved open state is restored at login
-    lua = run("cut", None, TRAY_FULL, {"minimapTrayOpen": True})
-    check("[tray] saved open state reopens the drawer at login", lua.globals().Minimap.fsTray.shown is True)
+    lua, g, px = world(w, tray=FOO, pre_db={"minimapTrayOpen": True})
+    check("[tray] saved open state reopens the drawer at login", g.Minimap.fsTray.shown is True
+          and bool(g.__same(g.Minimap.fsBody.points.BOTTOMRIGHT.rel, g.Minimap.fsTray)))
 
     # ---- C: nothing to collect: toggle and drawer hidden; a late stray is picked up by a re-sweep
-    lua = run("cut", None, LIB_SETUP + TRAY_EMPTY, {"minimapTrayOpen": True})
-    lua.execute(helpers)
-    g = lua.globals()
+    lua, g, px = world(w, pre_db={"minimapTrayOpen": True})
     check("[tray] zero buttons: toggle hidden", g.Minimap.fsTrayToggle.shown is False)
     check("[tray] zero buttons: drawer hidden even when saved open", g.Minimap.fsTray.shown is False)
     lua.execute('LateMinimapButton = CreateFrame("Button", "LateMinimapButton", Minimap); '
                 'FireEvent("ADDON_LOADED", "SomeAddon")')
     check("[tray] a button created late is collected on ADDON_LOADED",
-          same(g, g.LateMinimapButton.parent, g.Minimap.fsTray) and g.Minimap.fsTrayToggle.shown is True)
+          bool(g.__same(g.LateMinimapButton.parent, g.Minimap.fsTray)) and g.Minimap.fsTrayToggle.shown is True)
     lua.execute('LaterMinimapIcon = CreateFrame("Button", "LaterMinimapIcon", Minimap); '
                 'FireEvent("PLAYER_ENTERING_WORLD"); RunTimers()')
     check("[tray] PLAYER_ENTERING_WORLD plus the delayed timer sweeps again",
-          same(g, g.LaterMinimapIcon.parent, g.Minimap.fsTray) and g.Minimap.fsTrayToggle.count.text == "2")
+          bool(g.__same(g.LaterMinimapIcon.parent, g.Minimap.fsTray)) and g.Minimap.fsTrayToggle.count.text == "2")
 
-    # ---- D: tiles wrap and the drawer grows
-    lua = run("cut", None, LIB_SETUP + TRAY_EMPTY + r"""
-    for i = 1, 20 do CreateFrame("Button", "Wrap" .. i .. "MinimapButton", Minimap) end
-    """, None)
-    g = lua.globals()
+    # ---- D: tiles wrap onto more rows of the row's height, on the key columns, and the drawer grows
+    lua, g, px = world(w, tray='for i = 1, 20 do CreateFrame("Button", "Wrap" .. i .. "MinimapButton", Minimap) end',
+                       pre_db={"minimapTrayOpen": True})
+    e = geo(g.Minimap.w / px)
     tray = g.Minimap.fsTray
-    lua2 = run("cut", None, LIB_SETUP + TRAY_EMPTY + 'CreateFrame("Button", "OneMinimapButton", Minimap)', None)
-    one_h = lua2.globals().Minimap.fsTray.h
-    ys, xs, count = set(), [], 0
-    for i in range(1, 21):
-        pt = g[f"Wrap{i}MinimapButton"].points.TOPLEFT
-        ys.add(round(pt.y, 3))
-        xs.append(pt.x)
-        count += 1
-    tile = g.Wrap1MinimapButton.w
-    check("[tray] 20 tiles wrap onto more than one row", len(ys) >= 2)
-    check("[tray] drawer height grows with the rows", tray.h > one_h)
-    check("[tray] no tile spills past the drawer's right edge", max(xs) + tile <= g.Minimap.w)
-    check("[tray] 20 tiles collected, badge 20", g.Minimap.fsTrayToggle.count.text == "20")
+    cols = math.floor((e["width"] - 2 * e["margin"] + e["keyGap"]) / e["pitch"])
+    rows = math.ceil(20 / cols)
+    pts = [g[f"Wrap{i}MinimapButton"].points.TOPLEFT for i in range(1, 21)]
+    ys = sorted({round(-p.y / px, 3) for p in pts})
+    xs = sorted({round(p.x / px, 3) for p in pts})
+    check(f"[tray] 20 tiles wrap onto {rows} rows of {e['row']} px ({cols} columns), each {e['topM']:g} px below its "
+          f"row's top (got y {ys})",
+          ys == [e["topM"] + r * e["row"] for r in range(rows)] and len(xs) == cols)
+    check(f"[tray] every tile sits on a key column: x = {e['margin']} + column * {e['pitch']} px",
+          xs == [e["margin"] + c * e["pitch"] for c in range(cols)])
+    check(f"[tray] the drawer is {rows} rows tall ({tray.h / px:g} px) and the body ends at it",
+          near(tray.h / px, rows * e["row"]) and bool(g.__same(g.Minimap.fsBody.points.BOTTOMRIGHT.rel, tray)))
+    check("[tray] no tile spills past the drawer's right edge or the margin",
+          max(p.x for p in pts) + g.Wrap1MinimapButton.w <= g.Minimap.w - e["margin"] * px + 1e-6)
+    check("[tray] 20 tiles collected, count 20", g.Minimap.fsTrayToggle.count.text == "20")
 
     # ---- E: combat defers the collection to PLAYER_REGEN_ENABLED
-    lua = run("cut", None, LIB_SETUP + TRAY_EMPTY, None)
-    lua.execute(helpers)
-    g = lua.globals()
+    lua, g, px = world(w)
     lua.execute('__combat = true; __lib:Register("Charlie", MakeObj("Charlie"), {})')
     charlie = g.__lib.objects.Charlie
-    check("[tray] in combat a new button is not reparented", same(g, charlie.parent, g.Minimap))
+    check("[tray] in combat a new button is not reparented", bool(g.__same(charlie.parent, g.Minimap)))
     lua.execute('__combat = false; FireEvent("PLAYER_REGEN_ENABLED")')
-    check("[tray] PLAYER_REGEN_ENABLED collects it", same(g, charlie.parent, g.Minimap.fsTray)
-          and bool(g.__only_tray_anchor(charlie)))
-
-
-LOGGING = r"""
-__logs = {}
-FS.LogDegradeOnce = function(key, msg) __logs[#__logs + 1] = tostring(key) .. "|" .. tostring(msg) end
-"""
+    check("[tray] PLAYER_REGEN_ENABLED collects it", bool(g.__same(charlie.parent, g.Minimap.fsTray))
+          and list(charlie.points.keys()) == ["TOPLEFT"])
 
 
 def tray_failure_checks() -> None:
-    def same(g, a, b):
-        return bool(g.__same(a, b))
-
-    helpers = "function __same(a, b) return a == b end"
+    w = WORLDS[0]
 
     # ---- F: a failing adopt step is logged, not swallowed, and the other steps still run
-    lua = run("cut", None, LIB_SETUP + LOGGING + r"""
+    lua, g, px = world(w, extra=LOGGING, tray=r"""
     BoomMinimapButton = CreateFrame("Button", "BoomMinimapButton", Minimap)
     BoomMinimapButton.SetMovable = function() error("movableboom") end
-    """, None)
-    lua.execute(helpers)
-    g = lua.globals()
+    """)
     logs = [str(g.__logs[i]) for i in range(1, len(g.__logs) + 1)]
     check("[tray] a failing adopt step is logged through LogTrayFailure",
           len(logs) == 1 and "movableboom" in logs[0] and logs[0].startswith("minimap_tray|"))
     check("[tray] a failing adopt step does not stop the rest (still in the drawer, counted)",
-          same(g, g.BoomMinimapButton.parent, g.Minimap.fsTray) and g.Minimap.fsTrayToggle.count.text == "1")
+          bool(g.__same(g.BoomMinimapButton.parent, g.Minimap.fsTray)) and g.Minimap.fsTrayToggle.count.text == "1")
 
-    # ---- G: a throw while building the toggle leaves no half-built tab or drawer
-    lua = run("cut", None, LIB_SETUP + LOGGING + r"""
-    local orig = FS.Theme.SkinButton
-    FS.Theme.SkinButton = function(frame, ...)
-        if frame.name == "ForeverSTUwaveMinimapTrayToggle" then error("toggleboom") end
-        return orig(frame, ...)
+    # ---- G: a throw while building the toggle leaves no half-built key or drawer
+    lua, g, px = world(w, extra=LOGGING + r"""
+    local orig = FS.Theme.ApplyMono
+    FS.Theme.ApplyMono = function(fontString, ...)
+        if fontString.parent and fontString.parent.name == "ForeverSTUwaveMinimapTrayToggle" then error("toggleboom") end
+        return orig(fontString, ...)
     end
-    """, None)
-    g = lua.globals()
+    """)
     logs = [str(g.__logs[i]) for i in range(1, len(g.__logs) + 1)]
     toggle = g.ForeverSTUwaveMinimapTrayToggle
+    e = geo(g.Minimap.w / px)
     check("[tray] a toggle build failure is logged", len(logs) == 1 and "toggleboom" in logs[0])
     check("[tray] a toggle build failure leaves Minimap.fsTray / fsTrayToggle unset",
           g.Minimap.fsTray is None and g.Minimap.fsTrayToggle is None)
-    check("[tray] the half-built tab is not left visible", toggle is not None and toggle.shown is False)
+    check("[tray] the half-built key is not left visible, and spends no slot (mail would take the fourth)",
+          toggle is not None and toggle.shown is False)
+    lua.execute("__mail_arrives()")
+    check("[tray] ... mail takes the fourth slot after tracking, calendar and STU",
+          near(g.MinimapCluster.IndicatorFrame.MailFrame.points.TOPLEFT.x / px, e["margin"] + 3 * e["pitch"]))
 
     # ---- H: drawer visibility in combat with a protected collected button waits for the regen
-    lua = run("cut", None, LIB_SETUP + r"""
-    __lib:Register("Prot", MakeObj("Prot"), {})
-    __lib:Register("Plain", MakeObj("Plain"), {})
-    """, None)
-    lua.execute(helpers + "; function __click(f) f.scripts.OnClick(f, 'LeftButton') end")
-    g = lua.globals()
+    lua, g, px = world(w, tray='__lib:Register("Prot", MakeObj("Prot"), {})\n__lib:Register("Plain", MakeObj("Plain"), {})')
     tray = g.Minimap.fsTray
     lua.execute("__lib.objects.Prot.protected = true; __combat = true")
     lua.execute("__click(Minimap.fsTrayToggle)")
     check("[tray] combat + protected button: the open click is deferred (drawer untouched)",
           tray.shown is False and g.ForeverSTUwaveDB.minimapTrayOpen is True)
     lua.execute("__combat = false; FireEvent('PLAYER_REGEN_ENABLED')")
-    check("[tray] PLAYER_REGEN_ENABLED applies the deferred open", tray.shown is True)
+    check("[tray] PLAYER_REGEN_ENABLED applies the deferred open (and the body follows)",
+          tray.shown is True and bool(g.__same(g.Minimap.fsBody.points.BOTTOMRIGHT.rel, tray)))
     lua.execute("__combat = true; __click(Minimap.fsTrayToggle)")
     check("[tray] combat + protected button: the close click is deferred too", tray.shown is True)
     lua.execute("__combat = false; FireEvent('PLAYER_REGEN_ENABLED')")
-    check("[tray] PLAYER_REGEN_ENABLED applies the deferred close", tray.shown is False)
+    check("[tray] PLAYER_REGEN_ENABLED applies the deferred close", tray.shown is False
+          and bool(g.__same(g.Minimap.fsBody.points.BOTTOMRIGHT.rel, g.Minimap.fsBezel)))
     lua.execute("__lib.objects.Prot.protected = false; __combat = true; __click(Minimap.fsTrayToggle)")
     check("[tray] combat with no protected button: the drawer toggles at once", tray.shown is True)
     lua.execute("__combat = false")
 
 
-MAIL_ARRIVES = r"""
--- What Blizzard 12.1 does when UPDATE_PENDING_MAIL says there is mail (Blizzard_Minimap/Mainline/Minimap.lua).
--- MiniMapMailFrameMixin:OnEvent shows the FRAME, starts the arrival animation (MinimapMailAnimMixin:OnPlay
--- hides the envelope, 0.4 to 0.5 s) and asks the PARENT to lay out. The envelope (MiniMapMailIcon, hidden="true"
--- in the XML) is shown only by MinimapMailAnimMixin:OnFinished, and MiniMapMailFrameMixin:OnHide runs
--- ResetMailIcon, which hides it. The parent was MinimapCluster.IndicatorFrame, a LayoutFrame; after our
--- reparent it is the bezel.
-function __same(a, b) return a == b end
-function __mail_arrives()
-    local mail = MinimapCluster.IndicatorFrame.MailFrame
-    MiniMapMailIcon:Hide()
-    mail:Show()
-    mail:GetParent():Layout()
-end
-function __mail_anim_finished()
-    MiniMapMailIcon:Show()
-end
-function __mail_hides()
-    local mail = MinimapCluster.IndicatorFrame.MailFrame
-    mail:Hide()
-    MiniMapMailIcon:Hide()
-end
-function __visible(r) return r:IsVisible() end
--- The notification dot is our own texture child of the mail frame: the one anchored TOPRIGHT of it,
--- plus the halo that is centred on that dot.
-function __find_dot()
-    local mail = MinimapCluster.IndicatorFrame.MailFrame
-    local dot, halo
-    for _, r in ipairs({ mail:GetRegions() }) do
-        if r.points and r.points.TOPRIGHT and r.points.TOPRIGHT.rel == mail then dot = r end
-    end
-    for _, r in ipairs({ mail:GetRegions() }) do
-        if dot and r.points and r.points.CENTER and r.points.CENTER.rel == dot then halo = r end
-    end
-    return dot, halo
-end
-"""
-
-# Mononoki Nerd Font Mono advance, measured with PIL (0.5615 em); the widest reading is "99.9, 99.9" (10 glyphs)
-MONO_ADVANCE = 0.5615
-READOUT_CHARS = 10
-# Mockup .mmbtn .nd: top:-2px; right:-2px; size max(3, btn * 0.34); round, pink, 5px pink glow.
-DOT_OFFSET = 2
-DOT_FRACTION = 0.34
-DOT_GLOW_REACH = 3
-GLOW_ROUND = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\glow_round.tga"
-LAYER_RANK = {"BACKGROUND": 0, "BORDER": 1, "ARTWORK": 2, "OVERLAY": 3, "HIGHLIGHT": 4}
-
-
 def mail_checks() -> None:
-    """Mail arriving shows the fourth bezel key (the pink slot, after tracking, calendar and settings). Its
-    envelope must sit centred in that slot at glyph size, the key must sit above the coords box, and
-    the box must start to the right of the slot instead of underneath it (the box used to start at 85 px
-    against a key ending at 112 px on the 250 px map, so the slot lay on top of the readout)."""
-    for label, ui_height in (("250", None), ("208", 1200)):
-        lua = run("cut", ui_height, LIB_SETUP + TRAY_BLIZZARD, None)
-        lua.execute(MAIL_ARRIVES)
+    """Mail arriving shows the mail key in the next free slot; the envelope sits centred on the glyph row at glyph width, the
+    dot straddles the key's top-right corner, and both come and go with the frame."""
+    for w in WORLDS[:2]:
+        label = w[0]
+        lua, g, px = world(w)
+        e = geo(g.Minimap.w / px)
         lua.execute("__mail_arrives()")
-        g = lua.globals()
-        m = g.Minimap.w
-        bezel, box = g.Minimap.fsBezel, g.Minimap.fsReadoutBox
-        k1, k2 = g.MinimapCluster.Tracking, g.GameTimeFrame
-        gear = g.Minimap.fsSettingsKey
-        mail = g.MinimapCluster.IndicatorFrame.MailFrame
-        icon = g.MiniMapMailIcon
+        bezel = g.Minimap.fsBezel
+        mail, icon = g.MinimapCluster.IndicatorFrame.MailFrame, g.MiniMapMailIcon
 
         def same(a, b):
             return bool(g.__same(a, b))
 
-        check(f"[mail@{label}] mail key is the fourth bezel key (after settings), shown and parented in the bezel",
-              same(mail.parent, bezel) and mail.shown is True and same(mail.points.LEFT.rel, gear))
-        key_right = (k1.points.LEFT.x + 4 * mail.w + k2.points.LEFT.x + gear.points.LEFT.x
-                     + mail.points.LEFT.x)
-        box_left = m + box.points.RIGHT.x - box.w
-        gap = mail.points.LEFT.x
-        check(f"[mail@{label}] coords box starts right of the pink slot "
-              f"(box left {box_left:.1f} >= slot right {key_right:.1f} + gap {gap:.1f})",
-              box_left >= key_right + gap - 1e-6)
-        check(f"[mail@{label}] pink slot is drawn above the coords box (level {mail.level} > {box.level})",
-              mail.level > box.level)
-        key_font = max(5, mail.w * 0.5)
-        want_w, want_h = key_font * 4 / 3, key_font
-        pts = [k for k, _ in icon.points.items()]
-        check(f"[mail@{label}] envelope is parented to the slot and anchored CENTER only, no offset",
-              same(icon.parent, mail) and pts == ["CENTER"] and same(icon.points.CENTER.rel, mail)
-              and icon.points.CENTER.x == 0 and icon.points.CENTER.y == 0)
-        check(f"[mail@{label}] envelope is glyph sized ({want_w:.1f} x {want_h:.1f}), inside the slot",
-              abs(icon.w - want_w) < 1e-6 and abs(icon.h - want_h) < 1e-6
-              and icon.w <= mail.w and icon.h <= mail.h)
-        dot, halo = g.__find_dot()
+        dot_px = max(3, math.floor(KEY_DOT_SIZE * e["width"] / REF_MAP + 0.5))
+        reach = KEY_DOT_REACH
+        check(f"[mail@{label}] the key is parented in the bezel, shown, above the body and at the key size",
+              same(mail.parent, bezel) and mail.shown is True and mail.level == bezel.level + 3
+              and near(mail.w / px, e["keyW"]) and near(mail.h / px, e["keyH"]))
+        check(f"[mail@{label}] the envelope is on the glyph row: anchored CENTER to the key's TOPLEFT at "
+              f"({e['keyW'] / 2:g}, -{e['glyphY'] + e['glyph'] / 2:g}) px, {e['glyph']} px wide, 3/4 as tall",
+              same(icon.parent, mail) and list(icon.points.keys()) == ["CENTER"]
+              and same(icon.points.CENTER.rel, mail) and icon.points.CENTER.relPoint == "TOPLEFT"
+              and near(icon.points.CENTER.x / px, e["keyW"] / 2)
+              and near(icon.points.CENTER.y / px, -(e["glyphY"] + e["glyph"] / 2))
+              and near(icon.w / px, e["glyph"]) and near(icon.h / px, math.floor(e["glyph"] * 3 / 4 + 0.5))
+              and tint_is(icon, g.__Theme.COLOR_HEALTH, 1.0))
+        dots = [r for r in regions(mail) if r.points.TOPRIGHT is not None and same(r.points.TOPRIGHT.rel, mail)]
+        dot = dots[0] if len(dots) == 1 else None
+        halos = [r for r in regions(mail) if dot is not None and r.points.CENTER is not None
+                 and same(r.points.CENTER.rel, dot)]
+        halo = halos[0] if len(halos) == 1 else None
+        check(f"[mail@{label}] a notification dot and its halo exist: glow_round textures on the key",
+              dot is not None and halo is not None and dot.texture == GLOW_ROUND and halo.texture == GLOW_ROUND)
+        if dot is None or halo is None:
+            continue
+        check(f"[mail@{label}] the dot is round, {dot_px} px, anchored TOPRIGHT of the key at +{KEY_DOT_OFFSET},+{KEY_DOT_OFFSET} px, pink",
+              near(dot.w / px, dot_px) and near(dot.h / px, dot_px)
+              and near(dot.points.TOPRIGHT.x / px, KEY_DOT_OFFSET) and near(dot.points.TOPRIGHT.y / px, KEY_DOT_OFFSET)
+              and tint_is(dot, g.__Theme.COLOR_HEALTH, 1.0))
+        check(f"[mail@{label}] the halo is centred on the dot and reaches {reach} px past its edge",
+              near(halo.w / px, dot_px + 2 * reach) and near(halo.points.CENTER.x, 0) and near(halo.points.CENTER.y, 0))
         # Mid animation (frame shown, envelope not yet): the dot is up and the envelope is not.
-        mid = (dot is not None and bool(g.__visible(dot)) and not bool(g.__visible(icon)))
         check(f"[mail@{label}] while the arrival animation plays the dot shows alone, the envelope is not up yet",
-              mid)
+              bool(g.__visible(dot)) and not bool(g.__visible(icon)))
         lua.execute("__mail_anim_finished()")
         check(f"[mail@{label}] the envelope shows once the animation finishes, with the dot still up",
-              bool(g.__visible(icon)) and dot is not None and bool(g.__visible(dot)))
+              bool(g.__visible(icon)) and bool(g.__visible(dot)))
         lua.execute("__mail_hides()")
         check(f"[mail@{label}] hiding the frame hides the envelope and the dot together",
-              not bool(g.__visible(icon)) and dot is not None and not bool(g.__visible(dot)))
+              not bool(g.__visible(icon)) and not bool(g.__visible(dot)) and not bool(g.__visible(halo)))
         lua.execute("__mail_arrives()")
-        check(f"[mail@{label}] a notification dot exists: a glow_round texture on the slot", dot is not None
-              and dot.texture == GLOW_ROUND and same(dot.parent, mail))
-        if dot is not None:
-            tr = dot.points.TOPRIGHT
-            want_dot = max(3, mail.w * DOT_FRACTION)
-            check(f"[mail@{label}] dot is anchored TOPRIGHT of the slot at +{DOT_OFFSET},+{DOT_OFFSET} (the mockup's -2px)",
-                  same(tr.rel, mail) and tr.x == DOT_OFFSET and tr.y == DOT_OFFSET)
-            check(f"[mail@{label}] dot is round and sized max(3, key * {DOT_FRACTION}) = {want_dot:.2f}",
-                  abs(dot.w - want_dot) < 1e-6 and abs(dot.h - want_dot) < 1e-6)
-            tint = dot.tint
-            check(f"[mail@{label}] dot is tinted pink",
-                  tint is not None and abs(tint[1] - 1) < 1e-6 and tint[2] < 0.5 and tint[3] > 0.4)
-            check(f"[mail@{label}] dot has a pink glow halo centred on it, reaching {DOT_GLOW_REACH}px past its edge",
-                  halo is not None and abs(halo.w - (dot.w + 2 * DOT_GLOW_REACH)) < 1e-6
-                  and halo.points.CENTER.x == 0 and halo.points.CENTER.y == 0)
-            mail.Hide(mail)
-            hidden = (not dot.IsVisible(dot)) and (halo is None or not halo.IsVisible(halo))
-            mail.Show(mail)
-            shown = dot.IsVisible(dot) and (halo is None or halo.IsVisible(halo))
-            check(f"[mail@{label}] dot hides with the mail frame and shows with it (no hooks, own flag untouched)",
-                  hidden and shown and dot.shown is True)
-            rank = lambda r: (LAYER_RANK.get(str(r.layer), -1), r.sublevel or 0)
-            check(f"[mail@{label}] dot sits above the envelope ({dot.layer}/{dot.sublevel} over {icon.layer}/{icon.sublevel}), "
-                  f"halo below the dot",
-                  rank(dot) > rank(icon) and (halo is None or rank(halo) < rank(dot)))
-        fs = g.Minimap.fsReadoutCoords
-        need = READOUT_CHARS * MONO_ADVANCE * fs.fontSize + 2 * fs.points.LEFT.x
-        check(f"[mail@{label}] coords font {fs.fontSize:.1f} fits a reading in the box "
-              f"({need:.1f} <= {box.w})", need <= box.w + 1e-6)
-
-
-SETTINGS_KEY = "ForeverSTUwaveMinimapSettingsKey"
-GEAR_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\icon_gear.tga"
-GEAR_AMBER = (1.0, 0.714, 0.282)
-GEAR_ART_INSET = 0.075   # the gear's ink starts 1.2 of 16 units inside its texture (icon_gear.tga)
-WASH_HOVER, WASH_PRESSED = 0.16, 0.32   # the config window's hover / pressed mix toward the ring colour
-GLOW_REST, GLOW_HOVER = 0.35, 0.6
-
-# Real FrameHelpers (PixelUnit), a PixelUtil that says 1 unit = 1.875 px (1440 px tall), and recorders for the two
-# pixel-grid calls the permissive mock ignores.
-SETTINGS_PIXELS = r"""
-PixelUtil = { GetPixelToUIUnitFactor = function() return 768 / 1440 end }
-local R = getmetatable(UIParent)
-function R:SetSnapToPixelGrid(v) self.snap = v end
-function R:SetTexelSnappingBias(v) self.bias = v end
-assert(loadstring(FH_SRC, "@FrameHelpers.lua"))("forever-stuwave", FS)
-"""
-
-
-def settings_setup(extra: str = "") -> str:
-    return "FH_SRC = [==[" + FRAMEHELPERS_SRC + "]==]\n" + SETTINGS_PIXELS + LIB_SETUP + TRAY_BLIZZARD + extra
-
-
-SETTINGS_HELPERS = r"""
-function __same(a, b) return a == b end
-function __textures(f, path)
-    local out = {}
-    for _, r in ipairs({ f:GetRegions() }) do if r.texture == path then out[#out + 1] = r end end
-    return out
-end
-function __click(f) f.scripts.OnClick(f, "LeftButton") end
-function __toggles_reset() __toggles = 0; FS.ConfigWindow = { Toggle = function() __toggles = __toggles + 1 end } end
-"""
-
-
-def settings_checks() -> None:
-    """The Settings key: a gear key in the bezel row that opens the /fsconfig window."""
-    helpers = SETTINGS_HELPERS
-
-    # the click calls the toggle /fsconfig runs: pinned on ConfigWindow.lua's own text (read only), so a rename shows here
-    check("[settings] ConfigWindow exports Toggle and /fsconfig calls that same Toggle",
-          "function CW.Toggle()" in CONFIGWINDOW_SRC and 'SLASH_FSCONFIG1 = "/fsconfig"' in CONFIGWINDOW_SRC
-          and re.search(r'SlashCmdList\["FSCONFIG"\].*?CW\.Toggle\(\)', CONFIGWINDOW_SRC, re.S) is not None)
-
-    for label, ui_height in (("250", None), ("208", 1200)):
-        lua = run("cut", ui_height, settings_setup(), None)
-        lua.execute(helpers)
-        g = lua.globals()
-
-        def same(a, b):
-            return bool(g.__same(a, b))
-
-        m = g.Minimap.w
-        bezel, box = g.Minimap.fsBezel, g.Minimap.fsReadoutBox
-        k1, k2 = g.MinimapCluster.Tracking, g.GameTimeFrame
-        key = g.Minimap.fsSettingsKey
-        mail = g.MinimapCluster.IndicatorFrame.MailFrame
-        check(f"[settings@{label}] the key exists: a Button named {SETTINGS_KEY}, parented in the bezel",
-              key is not None and key.otype == "Button" and key.name == SETTINGS_KEY and same(key.parent, bezel)
-              and g[SETTINGS_KEY] is not None and same(g[SETTINGS_KEY], key))
-        if key is None:
-            continue
-        check(f"[settings@{label}] it is shown, takes the mouse, and is square at the other keys' size "
-              f"({key.w:.2f})", key.shown is True and key.w == key.h and key.w == k1.w == k2.w == mail.w)
-        check(f"[settings@{label}] it sits in the bezel row: after the calendar, before mail, the same gap",
-              same(key.points.LEFT.rel, k2) and same(mail.points.LEFT.rel, key)
-              and key.points.LEFT.x == k2.points.LEFT.x == mail.points.LEFT.x and key.points.LEFT.y == 0)
-        resolved = [str(g.Minimap.fsBezelResolved[i]) for i in range(1, len(g.Minimap.fsBezelResolved) + 1)]
-        check(f"[settings@{label}] the resolved keys read tracking, calendar, settings, mail ({resolved})",
-              resolved == ["tracking", "calendar", "settings", "mail"])
-        check(f"[settings@{label}] it is drawn above the coords box (level {key.level} > {box.level})",
-              key.level > box.level)
-
-        pad, gap = k1.points.LEFT.x, key.points.LEFT.x
-        mail_right = pad + 4 * key.w + 3 * gap
-        box_left = m + box.points.RIGHT.x - box.w
-        check(f"[settings@{label}] the bezel fits four keys: mail slot ends at {mail_right:.1f}, the box starts at "
-              f"{box_left:.1f}, a gap later", box_left >= mail_right + gap - 1e-6 and mail_right + gap <= m)
-        want_w = math.floor(m - pad - (mail_right + gap))
-        px_box = 768 / 1440   # settings_setup's pixel size: the box width is rounded up to a whole pixel
-        check(f"[settings@{label}] the box takes what is left of FOUR key slots ({box.w} is {want_w} to {want_w + px_box:.2f})",
-              want_w <= box.w <= want_w + px_box + 1e-6)
-        check(f"[settings@{label}] the readout text is still a real size ({g.Minimap.fsReadoutCoords.fontSize:.1f} >= 5)",
-              g.Minimap.fsReadoutCoords.fontSize >= 5)
-
-        # the gear: one icon_gear texture, centred, square, on whole physical pixels, tinted amber
-        gears = list(g.__textures(key, GEAR_TEXTURE).values())
-        check(f"[settings@{label}] exactly one gear texture on the key", len(gears) == 1)
-        if len(gears) != 1:
-            continue
-        glyph = gears[0]
-        only = [k for k, _ in glyph.points.items()]
-        check(f"[settings@{label}] the gear is anchored CENTER of the key and nothing else, no offset",
-              only == ["CENTER"] and same(glyph.points.CENTER.rel, key)
-              and glyph.points.CENTER.x == 0 and glyph.points.CENTER.y == 0)
-        check(f"[settings@{label}] the gear is square, drawn on ARTWORK, tinted amber",
-              glyph.w == glyph.h and str(glyph.layer) == "ARTWORK"
-              and all(abs(glyph.tint[i + 1] - GEAR_AMBER[i]) < 1e-9 for i in range(3)) and glyph.tint[4] == 1)
-        px = 768 / 1440   # a PixelUtil factor over the mock's effective scale 1
-        gp, kp = math.floor(glyph.w / px + 0.5), math.floor(key.w / px + 0.5)
-        check(f"[settings@{label}] the gear is a whole number of physical pixels ({glyph.w / px:.4f}) with the "
-              f"key's pixel width ({kp}) minus its own ({gp}) even, so its edges land on pixels",
-              abs(glyph.w / px - gp) < 1e-6 and (kp - gp) % 2 == 0)
-        check(f"[settings@{label}] the gear is snapped to the pixel grid with no texel bias",
-              glyph.snap is True and glyph.bias == 0)
-        underline_top = key.h * 0.13 + 2
-        check(f"[settings@{label}] the gear's ink clears the key's underline bar",
-              (key.h - glyph.h) / 2 + GEAR_ART_INSET * glyph.h >= underline_top - 1e-6)
-
-        # hover / pressed / leave
-        wash, glow = key.fsWash, key.fsSkin.glow
-        check(f"[settings@{label}] at rest: no wash, the glow at {GLOW_REST}",
-              wash.tint[4] == 0 and abs(glow.tint[4] - GLOW_REST) < 1e-9)
-        key.scripts.OnEnter(key)
-        check(f"[settings@{label}] hover: amber wash at {WASH_HOVER}, the gear and glow lift",
-              abs(wash.tint[4] - WASH_HOVER) < 1e-9
-              and all(abs(wash.tint[i + 1] - GEAR_AMBER[i]) < 1e-9 for i in range(3))
-              and all(glyph.tint[i + 1] == 1 for i in range(3)) and abs(glow.tint[4] - GLOW_HOVER) < 1e-9)
-        check(f"[settings@{label}] hover shows the tooltip 'Settings' on the key",
-              g.GameTooltip.text == "Settings" and g.GameTooltip.shown is True and same(g.GameTooltip.owner, key))
-        key.scripts.OnMouseDown(key, "LeftButton")
-        check(f"[settings@{label}] pressed: wash at {WASH_PRESSED}", abs(wash.tint[4] - WASH_PRESSED) < 1e-9)
-        key.scripts.OnMouseUp(key, "LeftButton")
-        check(f"[settings@{label}] released over the key: back to the hover look",
-              abs(wash.tint[4] - WASH_HOVER) < 1e-9)
-        key.scripts.OnLeave(key)
-        check(f"[settings@{label}] leave: wash off, gear amber, glow at rest, tooltip hidden",
-              wash.tint[4] == 0 and all(abs(glyph.tint[i + 1] - GEAR_AMBER[i]) < 1e-9 for i in range(3))
-              and abs(glow.tint[4] - GLOW_REST) < 1e-9 and g.GameTooltip.shown is False)
-        key.scripts.OnEnter(key)
-        key.scripts.OnMouseDown(key, "LeftButton")
-        key.scripts.OnLeave(key)
-        key.scripts.OnMouseUp(key, "LeftButton")
-        check(f"[settings@{label}] pressed, dragged off and released: the rest look, not hover",
-              wash.tint[4] == 0 and abs(glow.tint[4] - GLOW_REST) < 1e-9)
-
-        key.scripts.OnEnter(key)
-        key.scripts.OnMouseDown(key, "LeftButton")
-        key.scripts.OnHide(key)
-        check(f"[settings@{label}] hiding the key under the mouse clears hover and pressed (no OnLeave comes)",
-              wash.tint[4] == 0 and abs(glow.tint[4] - GLOW_REST) < 1e-9
-              and all(abs(glyph.tint[i + 1] - GEAR_AMBER[i]) < 1e-9 for i in range(3)))
-
-        # click: the same public toggle as /fsconfig, read at click time
-        lua.execute("__toggles_reset()")
-        lua.execute(f"__click({SETTINGS_KEY})")
-        check(f"[settings@{label}] a click calls FS.ConfigWindow.Toggle once", g.__toggles == 1)
-        lua.execute(f"__click({SETTINGS_KEY})")
-        check(f"[settings@{label}] and again on the second click (a toggle, not a one way open)", g.__toggles == 2)
-        lua.execute("FS.ConfigWindow = nil")
-        try:
-            lua.execute(f"__click({SETTINGS_KEY})")
-            quiet = True
-        except Exception:
-            quiet = False
-        check(f"[settings@{label}] with no config window loaded a click does nothing and does not throw", quiet)
-        lua.execute("FS.ConfigWindow = {}")
-        try:
-            lua.execute(f"__click({SETTINGS_KEY})")
-            quiet = True
-        except Exception:
-            quiet = False
-        check(f"[settings@{label}] a config window with no Toggle is the same", quiet)
-
-    # no calendar button on this client: the key seats after the tracking key
-    lua = run("cut", None, "", None)   # the bare mock has Tracking only
-    lua.execute(helpers)
-    g = lua.globals()
-    key, k1 = g.Minimap.fsSettingsKey, g.MinimapCluster.Tracking
-    check("[settings] with only the tracking key present, the gear seats right after it",
-          key is not None and bool(g.__same(key.points.LEFT.rel, k1)) and key.points.LEFT.x == k1.points.LEFT.x)
-
-    # round chrome A/B: the key keeps a gear and the same hover wash
-    lua = run("round", None, settings_setup(), None)
-    lua.execute(helpers)
-    g = lua.globals()
-    key = g.Minimap.fsSettingsKey
-    check("[settings] under round chrome the key still carries its gear and a hover wash",
-          key is not None and len(list(g.__textures(key, GEAR_TEXTURE).values())) == 1 and key.fsWash is not None)
-    if key is not None:
-        key.scripts.OnEnter(key)
-        check("[settings] under round chrome hover lifts the wash to 0.16",
-              abs(key.fsWash.tint[4] - WASH_HOVER) < 1e-9)
-
-    # a throw while building the key is logged, leaves nothing half built, and the rest of the bezel still comes up
-    lua = run("cut", None, settings_setup(LOGGING + r"""
-    local orig = FS.Theme.SkinButton
-    FS.Theme.SkinButton = function(frame, ...)
-        if frame.name == "ForeverSTUwaveMinimapSettingsKey" then error("settingsboom") end
-        return orig(frame, ...)
-    end
-    """), None)
-    lua.execute(helpers)
-    g = lua.globals()
-    logs = [str(g.__logs[i]) for i in range(1, len(g.__logs) + 1)]
-    check("[settings] a build failure is logged once under minimap_settings",
-          len(logs) == 1 and logs[0].startswith("minimap_settings|") and "settingsboom" in logs[0])
-    check("[settings] a build failure leaves Minimap.fsSettingsKey unset and the half built frame hidden",
-          g.Minimap.fsSettingsKey is None and g[SETTINGS_KEY] is not None and g[SETTINGS_KEY].shown is False)
-    mail = g.MinimapCluster.IndicatorFrame.MailFrame
-    check("[settings] a build failure leaves the readout, the tray and the mail key in place (mail seats after the calendar)",
-          g.Minimap.fsReadoutBox is not None and g.Minimap.fsTrayToggle is not None
-          and bool(g.__same(mail.points.LEFT.rel, g.GameTimeFrame)))
+        rank = lambda r: (LAYER_RANK.get(str(r.layer), -1), r.sublevel or 0)
+        check(f"[mail@{label}] the dot sits above the envelope ({dot.layer}/{dot.sublevel} over {icon.layer}/{icon.sublevel}), "
+              f"the halo below the dot", rank(dot) > rank(icon) and rank(halo) < rank(dot))
 
 
 def coords_setup(x: float, y: float, secret: bool = False) -> str:
-    """Seat a player map position (0-1 fractions) and a game clock before the addon loads, so the
-    readout's first update at login formats them (the game clock is there to prove it is NOT shown). With
-    secret=True the position's numbers are an opaque sentinel that throws on any arithmetic, and
-    FS.IsSecret recognises it, like a secret number on a live client."""
+    """Seat a player map position (0-1 fractions) and a game clock before the addon loads, so the readout's first update at
+    login formats them (the game clock is there to prove it is NOT shown). With secret=True the position's numbers are an
+    opaque sentinel that throws on any arithmetic, and FS.IsSecret recognises it, like a secret number on a live client."""
     pos = "__SECRET, __SECRET" if secret else f"{x}, {y}"
     return f"""
 __SECRET = setmetatable({{}}, {{ __mul = function() error("secret arithmetic", 2) end }})
@@ -1060,33 +1340,7 @@ function GetGameTime() return 19, 56 end
 """
 
 
-def coords_checks() -> None:
-    """The readout shows the player position as 'x, y' percentages. A fraction of 1.0 would format
-    as '100.0' (12 glyphs, wider than the 10 the box is sized for), so each axis clamps to 99.9, and a
-    secret position shows dashes instead of throwing. Every reading is at most 10 glyphs and fits the box."""
-    for label, ui_height in (("250", None), ("208", 1200)):
-        cases = (
-            ("(1.0, 1.0) clamps to 99.9, 99.9", 1.0, 1.0, False, "99.9, 99.9"),
-            ("(0.9996, 1.5) rounds and clamps, never 100.0", 0.9996, 1.5, False, "99.9, 99.9"),
-            ("(0.5, 0.25) is untouched", 0.5, 0.25, False, "50.0, 25.0"),
-            ("a typical position (0.55, 0.414)", 0.55, 0.414, False, "55.0, 41.4"),
-            ("a corner position (0.0, 0.05)", 0.0, 0.05, False, "0.0, 5.0"),
-            ("a secret position shows dashes", 0, 0, True, "--.-, --.-"),
-        )
-        for name, x, y, secret, want in cases:
-            lua = run("cut", ui_height, coords_setup(x, y, secret), None)
-            g = lua.globals()
-            box, coords = g.Minimap.fsReadoutBox, g.Minimap.fsReadoutCoords
-            check(f"[coords@{label}] {name}: reads {want!r}", (coords.text or "") == want)
-            if want:
-                glyphs = len(coords.text)
-                need = glyphs * MONO_ADVANCE * coords.fontSize + 2 * coords.points.LEFT.x
-                check(f"[coords@{label}] {name}: {glyphs} glyphs fit the box with the inset on both sides "
-                      f"({need:.1f} <= {box.w})", glyphs <= READOUT_CHARS and need <= box.w + 1e-6)
-
-
-# Every FontString the addon makes, in creation order (the permissive mock keeps none), the colour each was given, and the
-# helpers the coords checks read the recorded chrome and a rescale pass through.
+# Every FontString the addon makes, in creation order (the permissive mock keeps none), and the colour each was given.
 READOUT_LUA = r"""
 local R = getmetatable(UIParent)
 local create = R.CreateFontString
@@ -1097,173 +1351,69 @@ function R:CreateFontString(...)
     return fs
 end
 function R:SetTextColor(r, g, b, a) self.textColor = { r, g, b, a } end
-function __same(a, b) return a == b end
--- fill color, border color and border thickness/radius the chrome helpers were given for a frame
-function __chrome(f)
-    local fc, bc, bt, br, fr
-    for _, c in ipairs(calls.fill) do if c.frame == f then fc, fr = c.args[1], c.args[2] end end
-    for _, c in ipairs(calls.border) do if c.frame == f then bc, bt, br = c.args[1], c.args[2], c.args[3] end end
-    return fc[1], fc[2], fc[3], fc[4], fr, bc[1], bc[2], bc[3], bc[4], bt, br
-end
--- how many frames hang from the bezel's bottom edge (TOPLEFT on its BOTTOMLEFT), and whether the first is the tray
-function __under_bezel()
-    local n, first = 0, nil
-    for _, f in ipairs(allFrames) do
-        local p = f.points.TOPLEFT
-        if p and p.rel == Minimap.fsBezel and p.relPoint == "BOTTOMLEFT" then
-            n = n + 1
-            first = first or f
-        end
-    end
-    return n, first == Minimap.fsTray
-end
--- one rescale pass: every callback, each under pcall like Layout.lua's own runner
-function __rescale()
-    for _, fn in ipairs(FS.Layout._rescaleCallbacks) do pcall(fn) end
-end
 """
 
-# The text size the box gave the readout with three key seats: 123 px of box at m = 250 took (123 - 8) / (16 * 0.5615) =
-# 12.8 px; 12.8 / 250 = 0.0512 of the map, so the most the text takes scales with the map. The box has less room now
-# (four key seats) and the text is fitted to it, which these maps leave at the cap.
-READOUT_FONT_FRACTION = 0.0512
-READOUT_INSET = 4   # box edge to the text, UI units: the most the text inset is
-COLOR_CYAN = (0.133, 0.878, 1.0)
-READOUT_FILL = (0.016, 0.008, 0.047, 0.85)
+
+def coords_checks() -> None:
+    """The readout shows the player position as 'x, y' percentages, nothing else (no clock), as cyan mono text right aligned in
+    the key row and fitted between the divider and the right margin. A fraction of 1.0 would format as '100.0' (12 glyphs,
+    wider than the 10 the row is sized for), so each axis clamps to 99.9, and a secret position shows dashes instead of
+    throwing."""
+    cases = (
+        ("(1.0, 1.0) clamps to 99.9, 99.9", 1.0, 1.0, False, "99.9, 99.9"),
+        ("(0.9996, 1.5) rounds and clamps, never 100.0", 0.9996, 1.5, False, "99.9, 99.9"),
+        ("(0.5, 0.25) is untouched", 0.5, 0.25, False, "50.0, 25.0"),
+        ("a typical position (0.55, 0.414)", 0.55, 0.414, False, "55.0, 41.4"),
+        ("a corner position (0.0, 0.05)", 0.0, 0.05, False, "0.0, 5.0"),
+        ("a secret position shows dashes", 0, 0, True, "--.-, --.-"),
+    )
+    for w in WORLDS:
+        label = w[0]
+        for name, x, y, secret, want in cases:
+            lua, g, px = world(w, extra=coords_setup(x, y, secret) + READOUT_LUA,
+                               tray='__lib:Register("Alpha", MakeObj("Alpha"), {})')
+            e = geo(g.Minimap.w / px)
+            coords = g.Minimap.fsReadoutCoords
+            check(f"[coords@{label}] {name}: reads {want!r}", (coords.text or "") == want)
+            room = e["width"] - e["margin"] - (e["margin"] + 4 * e["pitch"] + 1 + e["keyGap"])
+            need = len(coords.text) * MONO_ADVANCE * coords.fontSize / px
+            check(f"[coords@{label}] {name}: {len(coords.text)} glyphs ({need:.1f} px) fit the {room} px between the "
+                  f"divider and the margin", len(coords.text) <= READOUT_CHARS and need <= room + 1e-6)
+
+    lua, g, px = world(WORLDS[0], extra=coords_setup(0.55, 0.414) + READOUT_LUA, tray='__lib:Register("Alpha", MakeObj("Alpha"), {})')
+    fonts = [g.__fontstrings[i] for i in range(1, len(g.__fontstrings) + 1)]
+    times = [str(f.text) for f in fonts if f.text and re.fullmatch(r"\d{1,2}:\d{2}(\s?[AP]M)?", str(f.text))]
+    coords = g.Minimap.fsReadoutCoords
+    check(f"[coords] there is no clock: no clock field, and no text reads like a time {times}",
+          g.Minimap.fsReadoutClock is None and not times)
+    check("[coords] there is no box: no readout box, and the coords are plain text on the body",
+          g.Minimap.fsReadoutBox is None and bool(g.__same(coords.parent, g.Minimap.fsBody)))
+    check("[coords] the coords are cyan mono text, justified right",
+          all(near(coords.textColor[i + 1], (0.133, 0.878, 1.0)[i], 1e-3) for i in range(3)))
+    check("[coords] nothing but the tray's drawer hangs under the bezel (one body, no row of its own)",
+          sum(1 for f in g.allFrames.values() if f.points.TOPLEFT is not None
+              and bool(g.__same(f.points.TOPLEFT.rel, g.Minimap.fsBezel)) and f.points.TOPLEFT.relPoint == "BOTTOMLEFT") == 1)
 
 
-def readout_checks() -> None:
-    """The coords readout, back in the bezel row right of the four keys (tracking, calendar, Settings, mail), and
-    nothing else: no clock text anywhere, no row of its own under the bezel, so the chassis is one bar again and the
-    tray, its tab and (QuestTimer.lua's) quest timer drawer seat on the bezel. The text is as large as the box takes, up
-    to 12.8 px at the 250 px map, and never clips or touches a key at the 250 px and 208 px maps; a narrow 125 px map shows
-    the fit taking over."""
-    for pixel in (False, True):
-        tag = "readoutpx" if pixel else "readout"
-        for label, ui_height in (("250", None), ("208", 1200), ("125", 720)):
-            base = settings_setup() if pixel else LIB_SETUP + TRAY_BLIZZARD
-            lua = run("cut", ui_height, base + coords_setup(0.55, 0.414) + READOUT_LUA, None)
-            g = lua.globals()
-            m = g.Minimap.w
-            bezel, box, coords = g.Minimap.fsBezel, g.Minimap.fsReadoutBox, g.Minimap.fsReadoutCoords
-            k1, k2, gear = g.MinimapCluster.Tracking, g.GameTimeFrame, g.Minimap.fsSettingsKey
-            mail = g.MinimapCluster.IndicatorFrame.MailFrame
-            px = 768 / 1440 if pixel else 1.0
-
-            def same(a, b):
-                return bool(g.__same(a, b))
-
-            # no clock: the field is gone, and no FontString reads like a time though the game says 19:56
-            fonts = [g.__fontstrings[i] for i in range(1, len(g.__fontstrings) + 1)]
-            times = [str(f.text) for f in fonts if f.text and re.fullmatch(r"\d{1,2}:\d{2}(\s?[AP]M)?", str(f.text))]
-            check(f"[{tag}@{label}] there is no clock: no clock field, and no text reads like a time {times}",
-                  g.Minimap.fsReadoutClock is None and not times)
-            in_box = [f for f in fonts if same(f.parent, box)]
-            check(f"[{tag}@{label}] the box holds exactly one text, the coords ({coords.text!r})",
-                  len(in_box) == 1 and same(in_box[0], coords) and coords.text == "55.0, 41.4")
-
-            # one bar: no row of its own, and what hangs under the chassis hangs from the bezel
-            n, tray_first = g.__under_bezel()
-            tray, toggle = g.Minimap.fsTray, g.Minimap.fsTrayToggle
-            check(f"[{tag}@{label}] there is no separate readout row, and the only thing under the bezel is the tray "
-                  f"drawer ({n} frame)", g.Minimap.fsReadoutRow is None and n == 1 and bool(tray_first))
-            check(f"[{tag}@{label}] the drawer hangs flush under the bezel: TOPLEFT/TOPRIGHT on its BOTTOMLEFT/BOTTOMRIGHT, "
-                  f"no offset",
-                  same(tray.points.TOPLEFT.rel, bezel) and tray.points.TOPLEFT.relPoint == "BOTTOMLEFT"
-                  and tray.points.TOPLEFT.x == 0 and tray.points.TOPLEFT.y == 0
-                  and same(tray.points.TOPRIGHT.rel, bezel) and tray.points.TOPRIGHT.relPoint == "BOTTOMRIGHT"
-                  and tray.points.TOPRIGHT.x == 0 and tray.points.TOPRIGHT.y == 0)
-            check(f"[{tag}@{label}] its toggle tab hangs off the bezel's bottom edge, right aligned at the bezel padding",
-                  same(toggle.points.TOPRIGHT.rel, bezel) and toggle.points.TOPRIGHT.relPoint == "BOTTOMRIGHT"
-                  and toggle.points.TOPRIGHT.y == 0 and toggle.points.TOPRIGHT.x == -k1.points.LEFT.x)
-
-            # where it sits: a child of the bezel, right aligned, vertically centred, in the bezel row
-            anchors = sorted(k for k, _ in box.points.items())
-            right = box.points.RIGHT
-            check(f"[{tag}@{label}] the box is a plain Frame in the bezel, anchored RIGHT to the bezel's RIGHT and nothing "
-                  f"else, centred vertically, {-right.x:.2f} in (the first key's inset {k1.points.LEFT.x:.2f})",
-                  box.otype == "Frame" and same(box.parent, bezel) and anchors == ["RIGHT"] and same(right.rel, bezel)
-                  and right.relPoint == "RIGHT" and right.y == 0 and right.x < 0
-                  and abs(-right.x - k1.points.LEFT.x) <= px / 2 + 1e-6)
-            check(f"[{tag}@{label}] it sits inside the bezel row with room above and below ({box.h:g} in {bezel.h:g}), "
-                  f"above the bezel's own chrome and under the keys (levels {bezel.level} < {box.level} < {gear.level})",
-                  2 <= (bezel.h - box.h) / 2 and bezel.level < box.level < gear.level)
-
-            # right of the four key seats, mail's included (it is only shown while mail waits)
-            pad, gap = k1.points.LEFT.x, gear.points.LEFT.x
-            slots_right = pad + 4 * gear.w + 3 * gap
-            box_left = m + right.x - box.w
-            check(f"[{tag}@{label}] the box starts right of all four key seats: box left {box_left:.1f} >= seat end "
-                  f"{slots_right:.1f} + gap {gap:.1f}", box_left >= slots_right + gap - 1e-6)
-            want_w = math.floor(m - pad - (slots_right + gap))
-            check(f"[{tag}@{label}] and takes what is left of them ({box.w:.2f} is {want_w} to {want_w + px:.2f})",
-                  want_w - 1e-6 <= box.w <= want_w + px + 1e-6)
-
-            # the LCD look it had before: the chassis dark inset, a faint cyan border at radius 4, cyan mono text
-            fr, fg, fb, fa, frad, br, bg, bb, ba, bt, brad = g.__chrome(box)
-            check(f"[{tag}@{label}] the box keeps the LCD look: dark chassis fill, faint cyan border (alpha 0.35, 1 px), "
-                  f"radius 4",
-                  all(abs(v - w) < 1e-6 for v, w in zip((fr, fg, fb, fa), READOUT_FILL))
-                  and all(abs(v - w) < 1e-3 for v, w in zip((br, bg, bb), COLOR_CYAN))
-                  and abs(ba - 0.35) < 1e-6 and bt == 1 and frad == 4 and brad == 4)
-            check(f"[{tag}@{label}] the coords are cyan, anchored LEFT of the box and centred vertically, one anchor",
-                  all(abs(coords.textColor[i + 1] - COLOR_CYAN[i]) < 1e-3 for i in range(3))
-                  and same(coords.points.LEFT.rel, box) and coords.points.LEFT.relPoint == "LEFT"
-                  and coords.points.LEFT.y == 0 and 0 < coords.points.LEFT.x <= READOUT_INSET
-                  and len(list(coords.points.items())) == 1)
-
-            # the size: as large as fits, to the map's fraction (12.8 px at 250), never clipping at either size
-            font, inset = coords.fontSize, coords.points.LEFT.x
-            cap = max(5, READOUT_FONT_FRACTION * m)
-            fit = (want_w - 2 * READOUT_INSET) / (READOUT_CHARS * MONO_ADVANCE)
-            want = max(5, min(cap, fit))
-            check(f"[{tag}@{label}] text is {font:.2f} px: the map's {READOUT_FONT_FRACTION} fraction ({cap:.2f}) "
-                  f"or the box's fit ({fit:.2f}), whichever is smaller, so as large as fits",
-                  abs(font - want) < 1e-6)
-            if label == "250":
-                check(f"[{tag}@{label}] at the 250 px map the text is the original 12.8 px", abs(font - 12.8) < 1e-6)
-            if label in ("250", "208"):
-                check(f"[{tag}@{label}] the box leaves the text its full size at this map ({font:.2f} == cap {cap:.2f})",
-                      abs(font - cap) < 1e-6)
-            else:
-                check(f"[{tag}@{label}] a narrow box takes the fit over: {font:.2f} < cap {cap:.2f}", font < cap - 0.05)
-            text_w = READOUT_CHARS * MONO_ADVANCE * font
-            check(f"[{tag}@{label}] a typical ('55.0, 41.4') and the widest ('99.9, 99.9') reading are {READOUT_CHARS} "
-                  f"glyphs, {text_w:.1f} px: {inset:.2f} + text + {inset:.2f} = {text_w + 2 * inset:.1f} <= box "
-                  f"{box.w:.1f}, so nothing clips and the text keeps {box.w - inset - text_w:.1f} px clear of the border",
-                  len(coords.text) == READOUT_CHARS and text_w + 2 * inset <= box.w + 1e-6)
-            check(f"[{tag}@{label}] the text stays clear of the keys: its left edge {box_left + inset:.1f} is at least a "
-                  f"gap past the last seat ({slots_right + gap:.1f})", box_left + inset >= slots_right + gap - 1e-6)
-            check(f"[{tag}@{label}] the box is a real size: text {font:.1f} px, box {box.w:.0f} x {box.h:.0f}",
-                  font >= 5 and box.h >= 1.5 * font and box.w > 0)
-
-            # pixel crisp: with the client's pixel size, every edge is a whole number of physical pixels
-            if pixel:
-                whole = lambda v: abs(v / px - round(v / px)) < 1e-6
-                check(f"[{tag}@{label}] box width ({box.w / px:.3f} px), height ({box.h / px:.3f}), right inset "
-                      f"({-right.x / px:.3f}) and text inset ({inset / px:.3f}) are whole pixels",
-                      all(whole(v) for v in (box.w, box.h, -right.x, inset)))
-
-        # a rescale reseats the pixels; nothing hangs from the box, so one in combat is seated at once too
-        if pixel:
-            lua = run("cut", 1200, settings_setup() + coords_setup(0.55, 0.414) + READOUT_LUA, None)
-            g = lua.globals()
-            box, coords = g.Minimap.fsReadoutBox, g.Minimap.fsReadoutCoords
-            old = (box.w, box.h, box.points.RIGHT.x, coords.points.LEFT.x)
-            lua.execute("PixelUtil = { GetPixelToUIUnitFactor = function() return 768 / 1080 end }; __rescale()")
-            px2 = 768 / 1080
-            whole = lambda v: abs(v / px2 - round(v / px2)) < 1e-6
-            check(f"[{tag}] a rescale re-seats the box on the new pixel size ({box.w / px2:.3f} x {box.h / px2:.3f} px)",
-                  (box.w, box.h, box.points.RIGHT.x, coords.points.LEFT.x) != old
-                  and all(whole(v) for v in (box.w, box.h, -box.points.RIGHT.x, coords.points.LEFT.x))
-                  and box.w >= math.floor(g.Minimap.w - g.MinimapCluster.Tracking.points.LEFT.x
-                                          - (g.MinimapCluster.Tracking.points.LEFT.x + 4 * g.Minimap.fsSettingsKey.w
-                                             + 3 * g.Minimap.fsSettingsKey.points.LEFT.x
-                                             + g.Minimap.fsSettingsKey.points.LEFT.x)) - 1e-6)
-            lua.execute("__combat = true; PixelUtil = { GetPixelToUIUnitFactor = function() return 768 / 1440 end }; "
-                        "__rescale(); __combat = false")
-            check(f"[{tag}] a rescale in combat re-seats it at once too, back on the first pixel size",
-                  abs(box.w - old[0]) < 1e-6 and abs(box.h - old[1]) < 1e-6)
+def rescale_checks() -> None:
+    """A UI scale or resolution change moves the pixel: a rescale pass seats every key, the divider, the coords and the
+    body's pieces on the new pixel grid again (nothing is cached across it)."""
+    lua, g, px = world(WORLDS[1], tray='__lib:Register("Alpha", MakeObj("Alpha"), {})')
+    old = g.Minimap.fsBezel.h
+    px2 = 768 / 1080
+    lua.execute(f"PixelUtil = {{ GetPixelToUIUnitFactor = function() return {px2!r} end }}; __rescale()")
+    e = geo(g.Minimap.w / px2)
+    bezel = g.Minimap.fsBezel
+    keys = [g.MinimapCluster.Tracking, g.GameTimeFrame, g.Minimap.fsSTUKey, g.Minimap.fsTrayToggle]
+    check(f"[rescale] the row is re-seated on the new pixel ({bezel.h / px2:g} px tall, was {old / px:g} px)",
+          bezel.h != old and near(bezel.h / px2, e["row"]) and whole(bezel.h, px2))
+    check("[rescale] every key is re-seated on the new pixel grid at the new spacing",
+          all(near(k.points.TOPLEFT.x / px2, e["margin"] + i * e["pitch"]) and near(k.w / px2, e["keyW"])
+              and whole(k.points.TOPLEFT.x, px2) and whole(k.w, px2) and whole(k.h, px2) for i, k in enumerate(keys)))
+    lua.execute("__combat = true; PixelUtil = { GetPixelToUIUnitFactor = function() return 1 end }; __rescale(); __combat = false")
+    e1 = geo(g.Minimap.w)
+    check("[rescale] a rescale in combat seats the (unprotected) row at once too, back on the first pixel size",
+          near(bezel.h, e1["row"]) and near(keys[0].points.TOPLEFT.x, e1["margin"]))
 
 
 # A geometry world for the Edit Mode seat checks. The permissive mock above answers 0 for every
@@ -1926,109 +2076,17 @@ def seat_log_checks() -> None:
           not lua.eval("__secretLeaked") and lua.eval("#ForeverSTUwaveDB.minimapSeatLog") > 0)
 
 
+
 def main() -> int:
-    # (label, chrome mode, UIParent height or None for the raw 250 px design map,
-    #  expected key chamfer, expected cut2 fill file name)
-    cases = (
-        ("cut", "cut", None, 6, "slice_cut2_fill.tga"),
-        ("round", "round", None, None, None),
-        # UIParent 1200 tall -> scale 1200 / 1440 = 0.833, map ~208 px, key ~25 px -> chamfer 4.
-        ("cut@208", "cut", 1200, 4, "slice_cut2_fill_c4.tga"),
-    )
-    for label, mode, ui_height, key_c, key_file in cases:
-        lua = run(mode, ui_height, LIB_SETUP + '__lib:Register("Alpha", MakeObj("Alpha"), {})')
-        lua.execute(ROLE_LUA)
-        g = lua.globals()
-        role = g.__role
-        calls = g.calls
-
-        def rows(bucket):
-            return list(calls[bucket].values())
-
-        glow, border, fill, skin = (rows(b) for b in ("glow", "border", "fill", "skin"))
-        tray_fill = [c for c in fill if role(c.frame) == "tray"]
-        tray_border = [c for c in border if role(c.frame) == "tray"]
-        tile_fill = [c for c in fill if role(c.frame) == "tile"]
-        toggle_fill = [c for c in fill if role(c.frame) == "toggle"]
-        tile_skin = [c for c in skin if role(c.frame) == "tile"]
-        toggle_skin = [c for c in skin if role(c.frame) == "toggle"]
-        settings_fill = [c for c in fill if role(c.frame) == "settings"]
-        settings_skin = [c for c in skin if role(c.frame) == "settings"]
-        fill = [c for c in fill if role(c.frame) in ("bezel", "readout", "other")]
-        skin = [c for c in skin if role(c.frame) == "other"]
-        if ui_height:
-            width = g.Minimap.w
-            check(f"[{label}] map seated at the scaled width (~208)", abs(width - 250 * ui_height / 1440) < 1e-6)
-        map_glow = [c for c in glow if role(c.frame) == "map"]
-        map_border = [c for c in border if role(c.frame) == "map"]
-        want_map = 6 if mode == "cut" else 0
-        check(f"[{label}] map glow radius {want_map}", len(map_glow) == 1 and map_glow[0].args[6] == want_map)
-        check(f"[{label}] map border radius {want_map}", len(map_border) == 1 and map_border[0].args[3] == want_map)
-        # bezel / readout, identified by their frame (not by radius, which the map border could
-        # share): radius 4 on both fill and border.
-        for who in ("bezel", "readout"):
-            who_fill = [c for c in fill if role(c.frame) == who]
-            who_border = [c for c in border if role(c.frame) == who]
-            check(f"[{label}] {who} fill and border at 4",
-                  len(who_fill) == 1 and who_fill[0].args[2] == 4
-                  and len(who_border) == 1 and who_border[0].args[3] == 4)
-        check(f"[{label}] tray drawer fill and border at 4",
-              len(tray_fill) == 1 and tray_fill[0].args[2] == 4
-              and len(tray_border) == 1 and tray_border[0].args[3] == 4)
-        key_skins = skin
-        assert key_skins, f"[{label}] no key was skinned: StyleBezelKey never reached SkinButton"
-        if mode == "cut":
-            check(f"[{label}] key SkinButton gets chamfer {key_c}",
-                  all(c.args[1]["chamfer"] == key_c for c in key_skins))
-            key = key_skins[0].frame
-            fills = [t for t in key.regions.values() if isinstance(t.texture, str) and "slice_cut2_fill" in t.texture]
-            check(f"[{label}] key fill is {key_file}, margin {key_c}, READOUT_FILL tint",
-                  len(fills) == 1 and fills[0].texture.endswith("\\" + key_file) and fills[0].slice == key_c
-                  and abs(fills[0].tint[1] - 0.016) < 1e-9)
-            check(f"[{label}] key draws no rounded fill (bezel + readout only)", len(fill) == 2)
-        else:
-            check(f"[{label}] key keeps the rounded fill (bezel + readout + key)", len(fill) == 3)
-
-        # the Settings key: the bezel key recipe (cut2 fill + SkinButton ring at the key chamfer; round fill under "round")
-        settings = g.Minimap.fsSettingsKey
-        check(f"[{label}] the Settings key gets exactly one SkinButton, in the amber accent",
-              len(settings_skin) == 1 and abs(settings_skin[0].args[1]["borderColor"][1] - 1) < 1e-9
-              and abs(settings_skin[0].args[1]["borderColor"][3] - 0.282) < 1e-9)
-        if mode == "cut":
-            fills = [t for t in settings.regions.values()
-                     if isinstance(t.texture, str) and "slice_cut2_fill" in t.texture]
-            dark = [t for t in fills if abs(t.tint[1] - 0.016) < 1e-9]
-            check(f"[{label}] Settings key SkinButton chamfer {key_c}", settings_skin[0].args[1]["chamfer"] == key_c)
-            check(f"[{label}] Settings key fill is {key_file}, margin {key_c}, READOUT_FILL tint, no rounded fill",
-                  len(dark) == 1 and dark[0].texture.endswith("\\" + key_file) and dark[0].slice == key_c
-                  and len(settings_fill) == 0)
-        else:
-            check(f"[{label}] Settings key keeps the rounded fill and no chamfer",
-                  len(settings_fill) == 1 and settings_skin[0].args[1]["chamfer"] is None)
-
-        # tray tile + toggle tab chrome: same recipe as a key, chamfer from their own size
-        tile, toggle = g.__lib.objects.Alpha, g.Minimap.fsTrayToggle
-        check(f"[{label}] tray tile and toggle each get exactly one SkinButton",
-              len(tile_skin) == 1 and len(toggle_skin) == 1)
-        for who, frame, skins, rounded in (("tile", tile, tile_skin, tile_fill),
-                                            ("toggle", toggle, toggle_skin, toggle_fill)):
-            if mode == "cut":
-                want_c = g.__Theme.Cut2ButtonSet(g.__Theme.CutSizeIcon(frame.h))[2]
-                fills = [t for t in frame.regions.values() if isinstance(t.texture, str) and "slice_cut2_fill" in t.texture]
-                check(f"[{label}] {who} SkinButton chamfer {want_c} (size {frame.h:g})",
-                      skins[0].args[1]["chamfer"] == want_c)
-                check(f"[{label}] {who} fill is a cut2 slice at margin {want_c}, READOUT_FILL tint, no rounded fill",
-                      len(fills) == 1 and fills[0].slice == want_c and abs(fills[0].tint[1] - 0.016) < 1e-9
-                      and len(rounded) == 0)
-            else:
-                check(f"[{label}] {who} keeps the rounded fill and no chamfer",
-                      len(rounded) == 1 and skins[0].args[1]["chamfer"] is None)
+    body_checks()
+    spacing_checks()
+    row_checks()
+    hover_checks()
     tray_checks()
     tray_failure_checks()
-    settings_checks()
-    readout_checks()
     mail_checks()
     coords_checks()
+    rescale_checks()
     first_login_checks()
     trigger_checks()
     review_checks()

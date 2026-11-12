@@ -274,8 +274,19 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "hunter_trap_lit": (64, 32),
     },
     "icon_social": (32, 32),
+    # generate_icon_stu.py: the minimap STU key's icon A (full colour), a 32 canvas with the 22 texel art box centred.
+    "icon_stu": (32, 32),
     "icon_window": {"icon_minimize": (32, 32), "icon_maximize": (32, 32)},
     "mask_minimap": (64, 64),
+    # generate_mask_minimap_tl.py: the map face mask with only the top-left corner cut (the body's bottom-right belongs to its last row).
+    "mask_minimap_tl": (64, 64),
+    # generate_minimap_keys.py: the key row's glyphs, one texel a screen pixel: the search lens and the calendar at 16,
+    # the tray toggle's chevron at 8 x 4.
+    "minimap_keys": {
+        "icon_key_search": (16, 16),
+        "icon_key_calendar": (16, 16),
+        "icon_key_chevron": (8, 4),
+    },
     # 64x32, not the naive 37x32 equilateral-content size -- the canvas is
     # padded out to the next power of two (WoW silently refuses to render a
     # non-power-of-two file texture, same trap generate_grid.py's own
@@ -1033,6 +1044,128 @@ def test_mask_minimap_cuts_top_left_and_bottom_right_only(tmp_path: Path) -> Non
     assert _alpha_at(path, 32, 32) == 255
     for x, y in ((32, 0), (32, last), (0, 32), (last, 32)):
         assert _alpha_at(path, x, y) == 255, (x, y)
+
+
+# ---------------------------------------------------------------------------
+# mask_minimap_tl: the same mask with ONLY the top-left cut (the body's bottom-right is its last row's).
+# ---------------------------------------------------------------------------
+
+MINIMAP_TL_GENERATOR = GENERATOR_DIR / "generate_mask_minimap_tl.py"
+
+
+def test_mask_minimap_tl_cuts_only_the_top_left(tmp_path: Path) -> None:
+    _run_generator(MINIMAP_TL_GENERATOR, tmp_path)
+    path = tmp_path / "mask_minimap_tl.tga"
+    last = 63
+    assert _alpha_at(path, 0, 0) < 64, "top-left must be cut"
+    for x, y in ((last, last), (last, 0), (0, last), (32, 32), (32, 0), (32, last), (0, 32), (last, 32)):
+        assert _alpha_at(path, x, y) == 255, (x, y)
+    assert _is_white(path)
+
+
+# ---------------------------------------------------------------------------
+# icon_stu: the STU key's icon A (STU lettering over a tilted triangle), 22 texels of art in a 32 canvas.
+# Hardcoded from the mockup's `ic-a` symbol: cyan over pink lettering bands on a violet outlined triangle.
+# ---------------------------------------------------------------------------
+
+STU_GENERATOR = GENERATOR_DIR / "generate_icon_stu.py"
+
+
+def test_icon_stu_is_the_lettering_on_a_triangle_inside_a_clear_margin(tmp_path: Path) -> None:
+    _run_generator(STU_GENERATOR, tmp_path)
+    grid = _rgba_grid(tmp_path / "icon_stu.tga")
+    size = len(grid)
+    assert size == 32
+    # 5 clear texels on every side: the art box is 22 of the 32.
+    for i in range(size):
+        for edge in range(5):
+            assert grid[edge][i][3] == 0 and grid[size - 1 - edge][i][3] == 0, ("rows", edge, i)
+            assert grid[i][edge][3] == 0 and grid[i][size - 1 - edge][3] == 0, ("cols", edge, i)
+    inked = [px for row in grid for px in row if px[3] > 200]
+    assert 150 <= len(inked) <= 450, "the art is a mass of ink, not a hairline and not a block"
+
+    def is_cyan(px):
+        return px[3] > 200 and px[2] > 200 and px[1] > 150 and px[0] < 100
+
+    def is_pink(px):
+        return px[3] > 200 and px[0] > 200 and px[1] < 100 and px[2] > 100
+
+    cyan_rows = [y for y in range(size) for px in grid[y] if is_cyan(px)]
+    pink_rows = [y for y in range(size) for px in grid[y] if is_pink(px)]
+    assert len(cyan_rows) >= 10, "cyan upper band of the lettering"
+    assert len(pink_rows) >= 10, "pink lower band of the lettering"
+    # The lettering's bands are by height: cyan above pink.
+    assert sum(cyan_rows) / len(cyan_rows) < sum(pink_rows) / len(pink_rows)
+
+
+def test_icon_stu_solid_ink_ends_where_the_key_hangs_it(tmp_path: Path) -> None:
+    """Minimap.lua STU_INK_BOTTOM (25 / 32) is the bottom edge of this icon's last solid texel row: the key hangs the canvas
+    from that line, so a change to the art that moves it has to move the constant too."""
+    _run_generator(STU_GENERATOR, tmp_path)
+    grid = _rgba_grid(tmp_path / "icon_stu.tga")
+    solid_rows = [y for y, row in enumerate(grid) if any(px[3] > 200 for px in row)]
+    assert solid_rows[-1] + 1 == 25, solid_rows
+    assert "STU_INK_BOTTOM = 25 / 32" in (REPO / "forever-stuwave" / "Modules/Minimap/Minimap.lua").read_text(encoding="utf-8")
+
+
+def test_icon_stu_bleeds_colour_into_clear_texels(tmp_path: Path) -> None:
+    _run_generator(STU_GENERATOR, tmp_path)
+    grid = _rgba_grid(tmp_path / "icon_stu.tga")
+    size = len(grid)
+    checked = 0
+    for y in range(1, size - 1):
+        for x in range(1, size - 1):
+            if grid[y][x][3] == 0 and any(grid[yy][xx][3] > 0 for yy in (y - 1, y, y + 1) for xx in (x - 1, x, x + 1)):
+                assert grid[y][x][:3] != (0, 0, 0), (x, y)
+                checked += 1
+    assert checked > 10, "the art has a rim of clear texels beside inked ones"
+
+
+# ---------------------------------------------------------------------------
+# minimap_keys: the key row's glyphs: white RGB, shape in alpha, one texel a screen pixel.
+# ---------------------------------------------------------------------------
+
+KEYS_GENERATOR = GENERATOR_DIR / "generate_minimap_keys.py"
+
+
+def test_minimap_key_glyphs_are_white_alpha_shapes(tmp_path: Path) -> None:
+    _run_generator(KEYS_GENERATOR, tmp_path)
+    for name in ("icon_key_search", "icon_key_calendar", "icon_key_chevron"):
+        path = tmp_path / f"{name}.tga"
+        assert _is_white(path), name
+        assert any(px[3] > 150 for row in _rgba_grid(path) for px in row), name
+
+
+def test_minimap_key_calendar_is_a_pixel_snapped_frame_with_pegs_and_dates(tmp_path: Path) -> None:
+    _run_generator(KEYS_GENERATOR, tmp_path)
+    path = tmp_path / "icon_key_calendar.tga"
+    # The frame is one crisp texel wide: left column 1, right column 14, top row 3, bottom row 14, the rule on row 6.
+    for x, y in ((1, 3), (14, 3), (1, 14), (14, 14), (1, 8), (14, 8), (8, 3), (8, 14), (8, 6)):
+        assert _alpha_at(path, x, y) == 255, (x, y)
+    # Inside the frame and outside it stay clear; the pegs stand above the frame at columns 4 and 11.
+    for x, y in ((0, 8), (15, 8), (8, 4), (8, 5), (3, 8), (13, 12), (8, 2), (0, 0), (15, 15)):
+        assert _alpha_at(path, x, y) == 0, (x, y)
+    for x, y in ((4, 1), (4, 2), (11, 1), (11, 2), (4, 9), (5, 9), (7, 9), (10, 9), (4, 11), (8, 11)):
+        assert _alpha_at(path, x, y) == 255, (x, y)
+    assert _alpha_at(path, 6, 9) == 0 and _alpha_at(path, 9, 9) == 0, "a gap between the date dashes"
+
+
+def test_minimap_key_search_is_a_lens_with_a_handle_on_the_diagonal(tmp_path: Path) -> None:
+    _run_generator(KEYS_GENERATOR, tmp_path)
+    path = tmp_path / "icon_key_search.tga"
+    assert _alpha_at(path, 6, 6) == 0, "the lens is hollow"
+    assert _alpha_at(path, 6, 2) > 150 and _alpha_at(path, 2, 6) > 150, "the ring's top and left"
+    assert _alpha_at(path, 12, 12) > 100, "the handle runs down and right of the ring"
+    assert _alpha_at(path, 14, 2) == 0 and _alpha_at(path, 2, 14) == 0, "the other corners are clear"
+
+
+def test_minimap_key_chevron_points_down(tmp_path: Path) -> None:
+    _run_generator(KEYS_GENERATOR, tmp_path)
+    path = tmp_path / "icon_key_chevron.tga"
+    top = [_alpha_at(path, x, 0) for x in range(8)]
+    bottom = [_alpha_at(path, x, 3) for x in range(8)]
+    assert top[0] > 100 and top[7] > 100 and top[3] == 0 and top[4] == 0, "the arms start at the top corners"
+    assert bottom[3] > 100 and bottom[4] > 100 and bottom[0] == 0 and bottom[7] == 0, "and meet at the bottom centre"
 
 
 # ---------------------------------------------------------------------------

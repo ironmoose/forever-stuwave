@@ -1,23 +1,24 @@
 -- Forever STUwave: Minimap
--- Rounded mask, feature-detected Blizzard-chrome hide, custom neon border/
--- glow, mouse-wheel zoom, a restyled zone-text label, a cyan north tick, a
--- control bezel below the map (reparented tracking/calendar/mail keys on the
--- left, with our own Settings gear key between calendar and mail -- zoom is
--- mouse-wheel only, and Blizzard's zoom buttons are hidden outright rather
--- than reparented, see HideBlizzardChrome -- and the coords LCD on the right,
--- in whatever width the four key seats leave it; there is no clock, the data
--- bar has the time), a single tiled horizontal scanline overlay, a
--- soft top-left highlight, a magenta glow behind the native player blip, and a
--- tray drawer below the bezel that COLLECTS the addon minimap buttons
--- (LibDBIcon and stray *MinimapButton* frames) so they stop cluttering the map
--- edge, popped out by a small tab hanging off the bezel's bottom edge. The
--- bezel is the whole chassis: everything that hangs under it (the tray,
--- QuestTimer.lua's drawer) seats on its bottom edge. The
--- vignette/glare CRT elements and the pulsing waypoint marker are a
--- deliberate second chunk, still deferred (no existing waypoint-arrow
--- handling was found anywhere in this addon to build on). Every Blizzard-
--- chrome lookup below is nil-guarded so a missing name degrades to a no-op
--- instead of erroring.
+-- Rounded mask, feature-detected Blizzard-chrome hide, mouse-wheel zoom, a restyled zone-text label, a cyan north tick,
+-- a single tiled horizontal scanline overlay, a soft top-left highlight and a magenta glow behind the native player
+-- blip, and ONE BODY under all of it (design mockup 2026-11-12, section A "ONE BODY"): the map, a key row under it and,
+-- when the addon tray is open, a second row of collected addon buttons are a single chamfered shape with one cyan edge
+-- and one dark plate, cut at its TOP-LEFT and BOTTOM-RIGHT only (Theme.CHROME_CORNERS "cut"). The map has no bottom
+-- cut of its own: the body's BOTTOM-RIGHT is the last row's, wherever that row is.
+--
+--   * the key row: bare glyphs over a coloured LED underline, no boxes. Tracking (cyan), calendar (violet), the STU key
+--     (pink; it replaces the stock gear and opens the config window) and the tray toggle (amber; the number of
+--     collected addon buttons and a chevron), then a faint divider and the coords, right aligned. Mail keeps a seat
+--     after the toggle and is there only while mail waits; every key is placed by the keys that are showing, so the row
+--     never has a hole in it. Hovering a key draws a thin chamfered outline in its own colour and brightens its LED.
+--   * the tray: a second row of the same body under a dashed amber rule, collecting the addon minimap buttons
+--     (LibDBIcon and stray *MinimapButton* frames) so they stop cluttering the map edge, each with the same LED
+--     underline. Open or closed is the toggle's; it is hidden with no buttons.
+--
+-- The bezel (Minimap.fsBezel) is the key row. Everything that hangs under the body (QuestTimer.lua's drawer) seats on its
+-- bottom edge. The vignette/glare CRT elements and the pulsing waypoint marker are a deliberate second chunk, still
+-- deferred (no existing waypoint-arrow handling was found anywhere in this addon to build on). Every Blizzard-chrome
+-- lookup below is nil-guarded so a missing name degrades to a no-op instead of erroring.
 
 local _, FS = ...
 
@@ -26,82 +27,73 @@ local _, FS = ...
 -------------------------------------------------------------------------------
 
 local AddOuterGlow = FS.Theme.AddOuterGlow
-local AddGradientBorder = FS.Theme.AddGradientBorder
-local AddRoundedFill = FS.Theme.AddRoundedFill
 local ApplyFontGeneric = FS.Theme.ApplyFontGeneric
 local ApplyMono = FS.Theme.ApplyMono
-local SkinButton = FS.Theme.SkinButton
 local COLOR_BORDER = FS.Theme.COLOR_BORDER
 local COLOR_HEALTH = FS.Theme.COLOR_HEALTH
 local COLOR_POWER = FS.Theme.COLOR_POWER
 local COLOR_TEXT_WHITE = FS.Theme.COLOR_TEXT_WHITE
 local FONT_ORBITRON = FS.Theme.FONT_ORBITRON
-local GLOW_EDGE_TEXTURE = FS.Theme.GLOW_EDGE_TEXTURE
 
--- Same border/glow color token the UnitFrames panel uses; hard-square mask so
--- this pass uses radius 0 (no rounded-corner arcs) rather than PANEL_RADIUS.
-local BORDER_THICK = 1 -- mockup minimap borderWidth:1
 local GLOW_SIZE -- derived in RefreshMetrics below (Metrics.glowSize)
 local GLOW_ALPHA = 0.20 -- was 0.42 (too bright, read as a second border); cut to 0.20 for a soft ambient halo (2026-09-26 minimap fix). Retune here if still too visible/faint.
-local SQUARE_RADIUS = 0
--- Map face glow + border chamfer under Theme.CHROME_CORNERS "cut": the baked
--- mask_minimap.tga clips the map with a TOP-LEFT / BOTTOM-RIGHT chamfer of 6/250, so the
--- border and glow cut the same two corners at 6 (TOP-RIGHT / BOTTOM-LEFT stay square).
-local MAP_CHAMFER = 6
 
--- Mockup #ffb648, converted to 0-1; Theme has no amber token (checked), so it
--- is local to this file: the Settings key's accent and one of the tray's.
-local COLOR_AMBER = { 1, 0.714, 0.282, 1 }
+-- The body's chamfer, in screen pixels: Theme.CHROME_CORNERS "cut" is the TOP-LEFT and BOTTOM-RIGHT of the whole body at the
+-- baked piece c = 6 (border_cut_c6_t1, fill_cut_c6); mask_minimap_tl.tga cuts the map's own top-left to match (6/250).
+-- Under "round" (the old A/B flag) the body is square.
+local BODY_CHAMFER = 6
 
--- Mockup mail-key accent (#ff2e97) is the exact value already tokenized as
--- Theme.COLOR_HEALTH, so it is reused here rather than re-declared.
+local COLOR_AMBER = FS.Theme.COLOR_AMBER or { 1, 0.714, 0.282, 1 } -- mockup #ffb648: the tray's accent (toggle, rule, first tiles)
+
+-- Mockup pink (#ff2e97) is the exact value already tokenized as Theme.COLOR_HEALTH, so it is reused here rather than
+-- re-declared: the STU key's LED and hover outline, the mail key and its notification dot.
 local COLOR_PINK = COLOR_HEALTH
 
--- Mockup border color: color-mix(in srgb, var(--cyan) 60%, var(--violet)).
--- cyan (Theme.COLOR_POWER) = {0.133, 0.878, 1}; violet (Theme.COLOR_BORDER)
--- = {0.659, 0.333, 0.969}. Per-channel color-mix at 60% cyan / 40% violet:
---   r: 0.133*0.6 + 0.659*0.4 = 0.0798 + 0.2636 = 0.3434 ~= 0.343
---   g: 0.878*0.6 + 0.333*0.4 = 0.5268 + 0.1332 = 0.6600 = 0.660
---   b: 1.000*0.6 + 0.969*0.4 = 0.6000 + 0.3876 = 0.9876 ~= 0.988
-local COLOR_BORDER_BLEND = { 0.343, 0.660, 0.988, 1 }
+-- THE BODY. One edge in the cyan of the coords (mockup --cyan, 2 px wide at 2x so 1 px) round the whole shape, and one
+-- plate under the rows (mockup --plate #0b0618 at .94) that starts where the map ends: the map is the Minimap frame's own
+-- render, the body frame sits above it, so a plate over the map would hide it.
+local BODY_EDGE = COLOR_POWER
+local BODY_PLATE = { 0.043, 0.024, 0.094, 0.94 }
+-- The faint rule where the map meets the key row (mockup: cyan at 35%, 1 px at 2x so under 1 px; drawn as 1 px).
+local BODY_RULE = { COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 0.35 }
 
--- Control bezel: near-black chassis frame below the Minimap holding the
--- reparented Blizzard minimap-button keys and our Settings key (left) and the
--- coords LCD (right, see ApplyReadout). Reuses the
--- readout chip's near-black fill for the same "console housing" look; its own
--- border/radius are local since the mockup gives the chassis a slightly
--- rounded strip against the hard-square map above it.
--- EVERY size below is DERIVED from the map edge, exactly as the mockup does
--- it. the design mockup's minimap renderer computes m = min(w,h) and
--- then sizes each part as a fraction of m:
+-- Every size of the rows is a SCREEN PIXEL count, taken from the mockup, which is drawn at 2x (1 design px = 2 screen
+-- px): each number below is its mockup px / 2, at the reference map REF_MAP px wide (the mockup's 496 px map / 2). A map of
+-- another physical size scales them by (map px / REF_MAP) and rounds each to a whole pixel, so the rows stay in the
+-- mockup's proportion at any resolution and every edge lands on the pixel grid (Geo below). Where a number is not the
+-- mockup's it says why:
 --
---     btn   = max(9,  m*0.12)      bezel key edge
---     bf    = max(5,  btn*0.5)     key glyph
---     rad   = max(2,  btn*0.24)    key corner radius (mockup border-radius:24%)
---     off   = max(1,  m*0.018)     chassis padding; gaps are off*1.6
---     blip  = max(3,  m*0.04)      player blip
---     zoneF = max(6,  m*0.092)     zone text
---     readF = max(5,  m*0.0512)    LCD readout text, the most it takes (the mockup's m*0.058 never fit; 12.8 px
---                                  at m=250 is the size the box gave it with three key seats); the text is then
---                                  fitted DOWN to the room the four key seats leave, see READOUT_FIT
---     readH = round(text*1.6)      LCD box height (text = the fitted size)
---     northF= max(5,  m*0.062)     N tick
---     rowH  = max(30, round(m*0.17))   bezel row height  (mmRowGP)
---     glowP = max(4,  m*0.076)     outer glow size (gb_px=round(6+glow/100*22)=19px at glow:60, 19/250=0.076)
---
--- The previous constants were hardcoded at roughly half these values (key 20
--- vs 30, zone 9 vs 23, north 7 vs 15.5, readout 10 vs 12.8 at m=250), which is
--- why the console read as small text on a big map instead of the mockup's
--- chunky CRT chassis. Deriving them also means a planner re-export at a
--- different map size stays proportional instead of needing every number
--- re-tuned by hand.
---
--- `m` itself is now read from FS.Layout.minimap's SCALED size (L.scaledW/
--- scaledH, populated by FS.Layout.Apply) rather than the raw design w/h --
--- see ApplyLayout's own comment below on the right-edge-cutoff bug this
--- fixes. DeriveMetrics runs once at file load (raw design values, before
--- Apply has run) and again from RefreshMetrics inside ApplyLayout once
--- Minimap's real scaled size is known.
+--   row       28  the key row's height (mockup 56 / 2)
+--   margin     8  the gap from the body's left and right edges to the first key and to the coords (mockup 16 and 18 / 2; both
+--                 8, so the row is symmetric)
+--   keyW      18  a key's width, which is its LED's (mockup 34 / 2 = 17, and 36 / 2 = 18 for the tray toggle: 18 puts the
+--                 16 px glyph and the 32 px STU canvas on whole pixels, which an odd width cannot)
+--   keyGap     8  the gap between keys, and between the last key and the divider (mockup 16 / 2)
+--   keyH      22  a key's height: the glyph, the gap and the LED, and the height of the STU icon
+--   glyph     16  a glyph's box (mockup 30 / 2 = 15; 16 keeps the same parity as keyW, so it centres on whole pixels)
+--   glyphGap   3  glyph to LED (mockup 8 / 2 less the glyph's own padding)
+--   led        2  the LED underline's thickness (mockup 3 / 2 = 1.5, which is not a pixel count)
+--   stu       32  the STU icon's texture canvas; its art box is 22 px of it (mockup 44 / 2) and its ink 20 px wide
+--   stuGap     2  the STU icon's ink to the LED (mockup: its lettering ends 3.5 above the LED at 2x, 1.75 px). The icon is a
+--                 taller block than the glyphs, so it hangs from this gap instead of sitting centred on the key
+--   topM       3  the vertical margin round the keys, (row - keyH) / 2: the row is as high as the STU icon plus 3 above and
+--                 below it, so the margins above and below the keys are equal
+--   coords    12  the coords' font size (mockup 24 / 2)
+--   count     10  the toggle count's font size (mockup 20 / 2)
+--   dividerH  18  the divider's height (mockup 36 / 2), centred in the row
+--   chevron  8x4  the toggle's chevron (mockup 12 x 6 / 2 plus its stroke)
+--   outline    3  how far a hovered key's outline stands off it sideways (mockup: a 24 px wide box round a 17 px LED / 2)
+--   halo       1  how far the bright LED's wash reaches past the LED (mockup 3 at 2x, 1.5 px; 1 keeps the wash inside the hover
+--                 outline, which stands outlineY = 1 px below the key)
+--   dash       2  the tray's dashed rule's dash and gap (mockup 4 / 2)
+--   ruleInset  6  how far that rule stops short of each edge (mockup 12 / 2)
+local REF_MAP = 248
+local SPEC = {
+    row = 28, margin = 8, keyW = 18, keyGap = 8, keyH = 22, glyph = 16, glyphGap = 3, led = 2, stu = 32, stuGap = 2,
+    coords = 12, count = 10, dividerH = 18, chevW = 8, chevH = 4, outline = 3, halo = 1,
+    dash = 2, ruleInset = 6,
+}
+-- The Metrics below size the map's own furniture (zone text, north tick, blip, glow); the rows above do not use them.
 local Metrics = {}
 
 local function DeriveMetrics()
@@ -109,74 +101,33 @@ local function DeriveMetrics()
     local w = (L and (L.scaledW or L.w)) or 250
     local h = (L and (L.scaledH or L.h)) or 250
     local m = math.min(w, h)
-    local btn = math.max(9, m * 0.12)
     local off = math.max(1, m * 0.018)
 
     Metrics.map = m
-    Metrics.keySize = btn
-    Metrics.keyFont = math.max(5, btn * 0.5)
-    Metrics.keyRadius = math.max(2, btn * 0.24) -- mockup border-radius:24% (was 0.22)
-    Metrics.pad = off * 1.6
-    Metrics.keyGap = off * 1.6
     Metrics.blip = math.max(3, m * 0.04)
     Metrics.zoneFont = math.max(6, m * 0.092)
-    Metrics.readoutFont = math.max(5, m * 0.0512)
     Metrics.northFont = math.max(5, m * 0.062)
     Metrics.northInset = off
-    Metrics.rowHeight = math.max(30, math.floor(m * 0.17 + 0.5))
     -- was m*0.076 (glow band read as a second border); halved to m*0.038 (2026-09-26 minimap fix). Retune here if still too wide/narrow.
     Metrics.glowSize = math.max(4, m * 0.038)
     return Metrics
 end
 
-local BEZEL_HEIGHT
-local BEZEL_RADIUS = 4
-local BEZEL_BORDER_THICK = 1
-local BEZEL_PADDING
-local KEY_GAP
-local KEY_SIZE
-
 local NORTH_FONT_SIZE
 local NORTH_INSET_Y
 
--- Readout box chrome: near-black fill (#04020c) and a faint cyan border, both
--- matching the design mockup's .mmreadout rather than the panel's
--- COLOR_BG/COLOR_BORDER tokens, which read too bright for this small a chip.
--- Also reused as the bezel's own fill, the bezel keys' dark fill (item 9) and the
--- tray drawer's fill (item 10): a single near-black "console housing" color
--- rather than several separate near-duplicate tokens.
-local READOUT_FILL = { 0.016, 0.008, 0.047, 0.85 }
-local READOUT_BORDER = { COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 0.35 }
-local READOUT_RADIUS = 4
-local READOUT_BORDER_THICK = 1
-local READOUT_HEIGHT
-local READOUT_FONT_SIZE
--- The coords LCD sits in the bezel row, right aligned at BEZEL_PADDING (the first key's inset on the left), and takes
--- whatever the bezel has left of the FOUR key slots (tracking, calendar, settings, mail; KEY_SLOTS, see RefreshMetrics).
--- The mail slot is last and only visible while mail is waiting, but its seat is always reserved: sizing the box for
--- fewer keys put it 26 px under the pink slot at m = 250 (Player: "when i get mail it goes behind the cords"). Settings
--- sits before mail so the row has no hole when mail is not waiting. The text is then fitted to the box, not the other
--- way round: READOUT_FIT.chars mono glyphs ("99.9, 99.9", and the "--.-, --.-" dashes) at READOUT_FIT.advance em each
--- (Mononoki Nerd Font Mono, measured 0.5615 em) inside READOUT_FIT.inset per side, up to the size the map's fraction
--- gives (Metrics.readoutFont). The coord formatter (FormatCoord) clamps each number to COORD_MAX 99.9, so the reading
--- is never wider than that: an unclamped "100.0, 100.0" is 12 glyphs, 86 px at 12.8 px, which would not fit.
--- At m = 250 the box is 86 px wide and the text 12.8 px; at m = 208 it is 72 px and 10.7 px (10 glyphs and both
--- insets need 80 px and 68 px at those sizes, so the cap wins at both and the fit only takes over on a narrower box).
--- The coords and the clock once shared this box and the fourth key squeezed the text to 8.7 px ("55.1, 42.214:55" in
--- game); they then had a row of their own under the bezel. With the clock gone (the data bar has the time) the coords
--- are back in the bezel row, and the bezel is the whole chassis again.
-local READOUT_WIDTH
-local READOUT_FIT = { chars = 10, advance = 0.5615, inset = 4 }
--- Key seats in the bezel row, in order: tracking, calendar, settings, mail, left aligned at BEZEL_PADDING. All are
--- reserved whether or not the key is there (see the box comment above): a key a client lacks leaves its seat empty at the
--- row's end, not a hole in the middle of it.
-local KEY_SLOTS = 4
--- Frame levels above the bezel: the readout box sits at +1, the keys above it at +3, so a key
--- (the pink mail slot and its envelope in particular) is never painted under the box.
-local READOUT_LEVEL_OFFSET = 1
-local KEY_LEVEL_OFFSET = 3
-
 local ZONE_FONT_SIZE
+
+-- Mononoki Nerd Font Mono's advance in ems (measured 0.5615): the coords are the widest reading "99.9, 99.9" (the coord formatter,
+-- FormatCoord, clamps each number to COORD_MAX), 10 glyphs, and the "--.-, --.-" dashes are as wide.
+local COORDS_CHARS = 10
+local COORDS_ADVANCE = 0.5615
+
+-- Frame levels above the bezel: the body (plate, border) at +1, the row's divider and coords and the tray at +2, the keys
+-- above them at +3 (so a key, and the pink mail one in particular, is never painted under anything else).
+local BODY_LEVEL_OFFSET = 1
+local DECK_LEVEL_OFFSET = 2
+local KEY_LEVEL_OFFSET = 3
 
 -- Existing shipped asset (see Chat.lua's identical local declaration for its
 -- own scanline overlay): a 4x4 tiling texture, one dark row over transparent.
@@ -184,9 +135,8 @@ local ZONE_FONT_SIZE
 local SCANLINE_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\scanline.tga"
 local SCANLINE_ALPHA = 0.65 -- mockup scan:26 -> opacity 26/40
 
--- NEW: mask with a small baked-in corner radius (item 3), replacing the flat
--- hard-square WHITE8X8 mask.
-local MASK_MINIMAP_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\mask_minimap.tga"
+-- The map face's mask: only the TOP-LEFT is cut, the body's bottom-right belongs to its last row (generate_mask_minimap_tl.py).
+local MASK_MINIMAP_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\mask_minimap_tl.tga"
 
 -- NEW: soft top-left highlight (item 6) reuses the existing glow_round.tga
 -- (128x128 radial falloff, see generate_glow_round.py) rather than a new
@@ -204,39 +154,36 @@ local HIGHLIGHT_SIZE_FRACTION = 0.55 -- 45-60% of the map per the mockup's radia
 local BLIP_GLOW_SIZE_MULT = 3.5 -- mockup: Metrics.blip * 3 to * 4
 local BLIP_GLOW_ALPHA = 0.5
 
--- NEW: bezel key underline glow bar (item 9, .mmbtn::after).
-local KEY_UNDERLINE_HEIGHT = 2 -- ~2px scaled per the mockup
-local KEY_UNDERLINE_INSET_FRACTION = 0.20 -- 20%-80% inset -> ~60% width, centered
-local KEY_UNDERLINE_BOTTOM_FRACTION = 0.13 -- 13% up from the key's bottom edge
-
--- Mail key's notification dot (mockup .mmbtn .nd): a round pink dot straddling the key's
--- top-right corner (top:-2px; right:-2px), size max(3, btn*0.34), with a soft pink glow.
--- The glow reach is 3 px, not the mockup's ~5: the mockup's key has overflow:hidden, which
--- clips its box-shadow at the key edge, but WoW does not clip a texture to its parent, so the
--- halo draws at full reach. At 5 it extended about 7 px past the key edge (KEY_DOT_OFFSET + reach),
--- far enough to touch the neighbouring chrome (then the readout box, now the bezel's own top edge);
--- at 3 it stops about 5 px out.
-local KEY_DOT_SIZE_FRACTION = 0.34
+-- Mail key's notification dot (mockup .mmbtn .nd): a round pink dot straddling the key's top-right corner, with a soft
+-- pink glow. The dot is a sixth of the 2x map's 30 px key scaled to this key (6 px), 2 px past the corner; the glow reach is
+-- 3 px, not the mockup's ~5: the mockup's key has overflow:hidden, which clips its box-shadow at the key edge, but WoW does not
+-- clip a texture to its parent, so the halo draws at full reach (at 5 it touched the neighbouring chrome).
+local KEY_DOT_SIZE = 6
 local KEY_DOT_OFFSET = 2
 local KEY_DOT_GLOW_REACH = 3
 local KEY_DOT_GLOW_ALPHA = 0.6
 -- Our own handle on the dot textures (never a field on Blizzard's MailFrame).
 local mailDot = {}
 
--- Settings key (our own gear button, see StyleSettingsKey). The amber accent is the one the mockup's key row has
--- free: its Zoom key wore it and this build hides the zoom buttons. The gear is the mockup's menu gear
--- (tools/assets/generate_icon_gear.py), drawn at this fraction of the key edge: its ink is 85% of the texture, so
--- it stays clear of the underline bar and reads as big as the mail envelope. Hover and pressed follow the config
--- window's convention: the fill mixed 0.16, then 0.32, toward the ring colour (here an accent wash over the dark
--- fill), the glow and the glyph lifted on hover.
-local SETTINGS_KEY_NAME = "ForeverSTUwaveMinimapSettingsKey"
-local SETTINGS_ICON_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\icon_gear.tga"
-local SETTINGS_GLYPH_FRACTION = 0.6
-local SETTINGS_WASH_TEXTURE = "Interface\\Buttons\\WHITE8X8" -- the "round" chrome's square wash
-local KEY_WASH_HOVER = 0.16
-local KEY_WASH_PRESSED = 0.32
-local KEY_GLOW_REST = 0.35 -- SkinButton's own default glow alpha
-local KEY_GLOW_HOVER = 0.6
+-- The key row's glyphs (generate_minimap_keys.py, generate_icon_stu.py): white shapes tinted in Lua, and the STU icon in colour.
+local TEXTURES = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\"
+local SEARCH_TEXTURE = TEXTURES .. "icon_key_search.tga"
+local CALENDAR_TEXTURE = TEXTURES .. "icon_key_calendar.tga"
+local CHEVRON_TEXTURE = TEXTURES .. "icon_key_chevron.tga"
+local STU_TEXTURE = TEXTURES .. "icon_stu.tga"
+-- The STU texture's canvas is 32 texels with the 22 texel art centred; the key lays the canvas at SPEC.stu pixels. The bottom
+-- edge of its last solid texel row is 25 / 32 down the canvas (generate_icon_stu.py, pinned by test_tga_generators.py): the key
+-- hangs the canvas from that line, SPEC.stuGap above the LED.
+local STU_INK_BOTTOM = 25 / 32
+local STU_KEY_NAME = "ForeverSTUwaveMinimapSTUKey"
+
+-- A key at rest and bright: the LED's alpha at rest (mockup .75) and bright (1), and the wash behind a bright LED (mockup .18).
+local LED_REST_ALPHA = 0.75
+local LED_WASH_ALPHA = 0.18
+-- The faint divider between the keys and the coords (mockup: cyan at 30%).
+local DIVIDER_ALPHA = 0.3
+-- The tray's dashed rule (mockup: amber at 35%).
+local RULE_ALPHA = 0.35
 
 local function RefreshMetrics()
     DeriveMetrics()
@@ -245,21 +192,8 @@ local function RefreshMetrics()
     -- that reads these closed over the SAME upvalue slots at file-load time,
     -- and Lua closures share upvalues by reference, not by value -- a
     -- redeclare here would create new locals those functions never see.
-    BEZEL_HEIGHT = Metrics.rowHeight
-    BEZEL_PADDING = Metrics.pad
-    KEY_GAP = Metrics.keyGap
-    KEY_SIZE = Metrics.keySize
-
     NORTH_FONT_SIZE = Metrics.northFont
     NORTH_INSET_Y = Metrics.northInset
-
-    -- The box starts one key gap right of the last key slot and ends BEZEL_PADDING short of the bezel's right edge
-    -- (floored, so the gap to the key can only grow).
-    local keysRight = BEZEL_PADDING + KEY_SLOTS * KEY_SIZE + (KEY_SLOTS - 1) * KEY_GAP
-    READOUT_WIDTH = math.floor(Metrics.map - BEZEL_PADDING - (keysRight + KEY_GAP))
-    READOUT_FONT_SIZE = math.max(5, math.min(Metrics.readoutFont,
-        (READOUT_WIDTH - 2 * READOUT_FIT.inset) / (READOUT_FIT.chars * READOUT_FIT.advance)))
-    READOUT_HEIGHT = math.floor(READOUT_FONT_SIZE * 1.6 + 0.5)
 
     ZONE_FONT_SIZE = Metrics.zoneFont
 
@@ -270,6 +204,7 @@ end
 -- design values, via DeriveMetrics' own w/h fallback). ApplyLayout below
 -- calls this again once Minimap's real SCALED size is known.
 RefreshMetrics()
+
 
 -------------------------------------------------------------------------------
 -- Layout (reposition + resize)
@@ -757,13 +692,10 @@ end
 -- Shape
 -------------------------------------------------------------------------------
 
--- Small (cornerRadius:4 at the mockup's base 250px width -> fraction 0.016)
--- rounded-corner mask, replacing the prior hard-square WHITE8X8 mask (which
--- was "verified working in-game" as a hard square, but per the player's spec the
--- mockup wants a small rounding on the map face itself). SetMaskTexture
--- stretches the mask to whatever Minimap's current size is, so this
--- FRACTIONAL radius stays correct automatically at any UI scale -- no
--- per-scale recompute needed. See generate_mask_minimap.py.
+-- The map face's mask: a hard square with ONLY the top-left cut (6/250), the body's own top-left chamfer; the
+-- bottom-right belongs to the body's last row. SetMaskTexture stretches the mask to whatever Minimap's current size is, so this
+-- FRACTIONAL cut stays correct automatically at any UI scale -- no per-scale recompute needed. See
+-- generate_mask_minimap_tl.py.
 local function ApplySquareMask()
     if Minimap and Minimap.SetMaskTexture then
         Minimap:SetMaskTexture(MASK_MINIMAP_TEXTURE)
@@ -777,6 +709,7 @@ if type(GetMinimapShape) ~= "function" then
         return "SQUARE"
     end
 end
+
 
 -------------------------------------------------------------------------------
 -- Blizzard chrome hide (feature-detected; names unverified -- see report)
@@ -800,11 +733,11 @@ local function HideIfExists(frame)
     pcall(function()
         if frame.HookScript and not frame.fsHideHooked then
             frame:HookScript("OnShow", function(self)
-                -- A button later reparented into the control bezel (see
-                -- StyleBezelKey) marks itself fsBezelOwned; skip the re-hide
-                -- there so the bezel's own Show()/SetAlpha(1)/EnableMouse(true)
+                -- A button later reparented into the key row (see
+                -- AdoptBlizzardKey) marks itself fsBezelOwned; skip the re-hide
+                -- there so the row's own Show()/SetAlpha(1)/EnableMouse(true)
                 -- sticks instead of being undone the next time this same
-                -- button (now a bezel key) fires OnShow.
+                -- button (now a key) fires OnShow.
                 if self.fsBezelOwned then return end
                 self:Hide()
                 self:SetAlpha(0)
@@ -844,7 +777,7 @@ end
 -- signals decorative minimap chrome, so it can never touch the live map's
 -- own rendered imagery (not exposed as a matching-atlas Texture region), and
 -- it is called from the end of HideBlizzardChrome below -- before any of
--- this file's own chrome-adding functions (ApplyChrome/ApplyHighlight/
+-- this file's own chrome-adding functions (ApplyHighlight/
 -- ApplyPlayerBlipGlow/ApplyScanline, see the Apply() call order near the
 -- bottom of this file) have created anything, so there is nothing of ours
 -- yet to accidentally self-hide, and no exclude-list is needed for that.
@@ -919,7 +852,7 @@ local function StripStrayMinimapArt()
     -- GetRegions() through the SAME StripChromeRegions/needle list. One
     -- level of descent only (no deep recursion): every known case of this
     -- stray art sits directly on a first-level child. This can never hide a
-    -- reparented minimap-button key (see StyleBezelKey) outright -- only a
+    -- reparented minimap-button key (see AdoptBlizzardKey) outright -- only a
     -- Texture REGION belonging to a child is ever touched, never the child
     -- frame itself, so a Button-type child (and its Show/Hide state) is
     -- left alone regardless.
@@ -931,8 +864,8 @@ local function StripStrayMinimapArt()
                 pcall(function() objType = child and child.GetObjectType and child:GetObjectType() end)
 
                 -- Skip Button/CheckButton children outright: these are candidate
-                -- minimap-button keys StyleBezelKey may reparent into the control
-                -- bezel later in Apply() (ApplyControlBezel runs AFTER this
+                -- minimap-button keys AdoptBlizzardKey may reparent into the key
+                -- row later in Apply() (ApplyControlBezel runs AFTER this
                 -- sweep) -- MinimapCluster.Tracking is the concrete case. Their
                 -- own icon Texture region could otherwise collide with the
                 -- "tracking" needle above (a real, named tracking-button icon,
@@ -1024,35 +957,9 @@ local function HideBlizzardChrome()
     -- Generic atlas-substring sweep, additive to every named lookup above.
     -- See StripStrayMinimapArt's own comment for the full "weird circles"
     -- rationale. Must run from here (not later in Apply()) so it fires
-    -- before ApplyChrome/ApplyHighlight/ApplyPlayerBlipGlow/ApplyScanline
+    -- before ApplyHighlight/ApplyPlayerBlipGlow/ApplyScanline
     -- have created any of our own textures.
     StripStrayMinimapArt()
-end
-
--------------------------------------------------------------------------------
--- Custom neon border + glow
--------------------------------------------------------------------------------
-
--- Under "cut" the mask is chamfered TOP-LEFT and BOTTOM-RIGHT (6/250), so the border
--- and glow take MAP_CHAMFER and follow it; under "round" (the old A/B path) the mask
--- corners are tiny and the chrome stays the well-tested radius-0 square.
-local function MapChromeRadius()
-    return (FS.Theme.CHROME_CORNERS == "cut") and MAP_CHAMFER or SQUARE_RADIUS
-end
-
-local function ApplyChrome()
-    if not Minimap or Minimap.fsChrome then return end
-    if not (AddOuterGlow and AddGradientBorder) then return end
-
-    -- Mockup wants a CYAN outer glow (COLOR_POWER), not the border's
-    -- violet-blend -- previously this used COLOR_BORDER (pure violet) for
-    -- both. GLOW_SIZE is now a fraction of the map (Metrics.glowSize), so it
-    -- scales with the real, scale-corrected map size instead of a hardcoded 8px.
-    AddOuterGlow(Minimap, COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], GLOW_SIZE, GLOW_ALPHA, MapChromeRadius())
-    -- Border: cyan/violet color-mix blend (COLOR_BORDER_BLEND), replacing the
-    -- previous plain COLOR_BORDER (pure violet).
-    AddGradientBorder(Minimap, COLOR_BORDER_BLEND, BORDER_THICK, MapChromeRadius())
-    Minimap.fsChrome = true
 end
 
 -------------------------------------------------------------------------------
@@ -1239,219 +1146,8 @@ local function ApplyNorthTick()
 end
 
 -------------------------------------------------------------------------------
--- Control bezel (reparented minimap-button keys)
+-- Pixel geometry of the body's rows
 -------------------------------------------------------------------------------
-
--- Strips leftover stock Blizzard button background/border art from a
--- reparented bezel key -- the same "blank named plate-art regions, keep the
--- icon" idiom MicroBars.lua's StripButtonArt uses for micro buttons (not
--- exported from that file, so this is a bounded, minimap-scoped copy rather
--- than a shared dependency). Deliberately does NOT touch NormalTexture: that
--- region carries the key's own icon glyph (e.g. the tracking icon, the
--- calendar sun, the mail envelope), not backdrop plate, so blanking it
--- unconditionally would erase the button's only visible icon. Feature-
--- detected/nil-guarded throughout: whether Tracking/GameTimeFrame/the mail
--- frame still carry named Border/Background regions on this client is
--- UNVERIFIED -- a miss here just leaves old art visible under our new fill,
--- not an error. Only ever called on keys the bezel dresses (see StyleBezelKey's
--- callers below: the three reparented Blizzard keys, and our own Settings key,
--- which has no such regions); zoom buttons never reach this function,
--- since they are hidden outright rather than reparented into the bezel (see
--- HideBlizzardChrome).
-local function StripKeyArt(button)
-    if not button then return end
-    for _, key in ipairs({ "Border", "Background" }) do
-        local region = button[key]
-        if region and region.SetAlpha then region:SetAlpha(0) end
-    end
-end
-
--- Chamfer shared by a button's fill and its SkinButton ring (a bezel key at KEY_SIZE, or
--- the tray's tab and tiles at their own edge), or nil when the cut chrome is off (or Theme
--- lacks the helpers) and the old rounded fill applies.
-local function KeyChamfer(size)
-    local Theme = FS.Theme
-    if Theme.CHROME_CORNERS ~= "cut" then return nil end
-    if not (Theme.Cut2ButtonSet and Theme.CutSizeIcon and Theme.AddSliceTexture and Theme.ApplyNineSlice) then
-        return nil
-    end
-    local _, _, c = Theme.Cut2ButtonSet(Theme.CutSizeIcon(size or KEY_SIZE) or 6)
-    return c
-end
-
--- Plain white two-corner fill piece at chamfer c (c = 6 is the original file name).
-local function CutFillTexture(c)
-    if c == 6 then return FS.Theme.SLICE_CUT2_FILL_TEXTURE end
-    return "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\slice_cut2_fill_c" .. c .. ".tga"
-end
-
--- Underline glow bar (.mmbtn::after / .tbtn::after): a short (~60% width, centered,
--- 20%-80% inset), thin (~2px scaled) bar near the button's bottom edge (13% up from the
--- bottom edge), colored the button's own accent, with a soft glow. Reuses
--- GLOW_EDGE_TEXTURE, the same ADD-blend strip-glow texture AddOuterGlow/AddHoverGlow
--- already use elsewhere in this addon; its baked fade direction is tuned for an OUTWARD
--- edge glow rather than a centered bar, so the exact fade look here is approximate/untuned
--- -- a minor visual nuance, not re-derived for this narrower use. `w`/`h` are the button's
--- own edges (bezel keys pass KEY_SIZE twice; the tray's tab and tiles pass theirs).
-local function AddKeyUnderline(button, w, h, accentColor)
-    if not GLOW_EDGE_TEXTURE then return nil end
-    local underline = button:CreateTexture(nil, "OVERLAY", nil, 3)
-    underline:SetTexture(GLOW_EDGE_TEXTURE)
-    underline:SetBlendMode("ADD")
-    underline:SetVertexColor(accentColor[1], accentColor[2], accentColor[3], 0.9)
-    underline:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT",
-        w * KEY_UNDERLINE_INSET_FRACTION, h * KEY_UNDERLINE_BOTTOM_FRACTION)
-    underline:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT",
-        -w * KEY_UNDERLINE_INSET_FRACTION, h * KEY_UNDERLINE_BOTTOM_FRACTION)
-    underline:SetHeight(KEY_UNDERLINE_HEIGHT)
-    return underline
-end
-
--- Reparents a non-secure Blizzard button into the bezel's left key row as a
--- flat rounded-square neon key. Sized uniformly to the bezel's usable height
--- regardless of the source button's own size; anchored after `anchorTo` when
--- given, else flush to the bezel's left padding, so a skipped earlier key
--- leaves no gap in the row.
-local function StyleBezelKey(bezel, button, accentColor, anchorTo)
-    if not button then return nil end
-
-    -- Mark this button as bezel-owned before anything below runs: if
-    -- HideBlizzardChrome's HideIfExists already hid this button and
-    -- installed its permanent OnShow re-hide hook (see that function),
-    -- this flag makes that hook skip re-hiding it once Show() below fires
-    -- OnShow again.
-    button.fsBezelOwned = true
-
-    button:SetParent(bezel)
-    -- Above the readout box (a later sibling, which would otherwise paint over a key).
-    if button.SetFrameLevel and bezel.GetFrameLevel then
-        button:SetFrameLevel(bezel:GetFrameLevel() + KEY_LEVEL_OFFSET)
-    end
-    button:SetSize(KEY_SIZE, KEY_SIZE)
-    button:ClearAllPoints()
-    if anchorTo then
-        button:SetPoint("LEFT", anchorTo, "RIGHT", KEY_GAP, 0)
-    else
-        button:SetPoint("LEFT", bezel, "LEFT", BEZEL_PADDING, 0)
-    end
-
-    -- HideBlizzardChrome may have already hidden this button (alpha 0,
-    -- mouse disabled) before it was reparented here; explicitly restore
-    -- it now that it belongs to the bezel instead of relying on a bare
-    -- Show(), since the button was left alpha-0/mouse-disabled by
-    -- HideIfExists above and SetParent alone does not undo that.
-    button:Show()
-    button:SetAlpha(1)
-    if button.EnableMouse then button:EnableMouse(true) end
-
-    StripKeyArt(button)
-
-    -- Dark fill behind the key, UNDER the border/glow SkinButton adds below
-    -- (mockup: linear-gradient(180deg,#0e0822,#050311); AddRoundedFill only
-    -- takes a flat color, so READOUT_FILL -- the bezel's own existing
-    -- near-black "console housing" color -- approximates it rather than
-    -- introducing a near-duplicate new token).
-    -- Keys are buttons: under "cut" the fill is the two-corner cut2 fill (TOP-LEFT and
-    -- BOTTOM-RIGHT) at the SAME chamfer SkinButton's ring takes (CutSizeIcon of the key
-    -- edge), nine-sliced with margin c and tinted READOUT_FILL, so it never pokes past the
-    -- ring. "round" keeps the old rounded fill.
-    local keyChamfer = KeyChamfer()
-    if keyChamfer then
-        local texture = FS.Theme.AddSliceTexture(
-            button, CutFillTexture(keyChamfer), READOUT_FILL, "BACKGROUND", 0)
-        FS.Theme.ApplyNineSlice(texture, keyChamfer)
-    elseif AddRoundedFill then
-        AddRoundedFill(button, READOUT_FILL, Metrics.keyRadius)
-    end
-
-    if SkinButton then
-        -- .mmbtn border-radius is 24% of the key in the mockup (rad =
-        -- btn*0.24 in the renderer, bumped from 0.22 -- see DeriveMetrics),
-        -- not the shared button default, so the keys read as rounded squares
-        -- rather than near-circles at this size.
-        SkinButton(button, {
-            borderColor = accentColor,
-            radius = Metrics.keyRadius,
-            chamfer = keyChamfer,
-        })
-    end
-
-    AddKeyUnderline(button, KEY_SIZE, KEY_SIZE, accentColor)
-
-    return button
-end
-
--- The mockup's pink notification dot is a SEPARATE round texture (glow_round.tga, the same
--- radial falloff the player-blip glow uses) at the key's top-right corner, plus a wider halo
--- behind it for the glow. Both are textures OWNED by MailFrame, so they show and hide with the
--- FRAME, with no hook or event of ours. That is not the same as showing with the envelope: in
--- Blizzard 12.1 the envelope is shown only when the arrival animation finishes (see
--- StyleMailKey), so for about 0.4 to 0.5 s after mail arrives the dot shows alone. They are drawn
--- on OVERLAY (the dot a sublevel above its halo) so they sit over the envelope; the handles live
--- in the module-local mailDot, not on the Blizzard frame.
-local function AddMailDot(frame)
-    if mailDot.core or not frame.CreateTexture then return end
-    local size = math.max(3, KEY_SIZE * KEY_DOT_SIZE_FRACTION)
-
-    local core = frame:CreateTexture(nil, "OVERLAY", nil, 7)
-    core:SetTexture(GLOW_ROUND_TEXTURE)
-    core:SetBlendMode("ADD")
-    core:SetVertexColor(COLOR_PINK[1], COLOR_PINK[2], COLOR_PINK[3], 1)
-    core:SetSize(size, size)
-    core:SetPoint("TOPRIGHT", frame, "TOPRIGHT", KEY_DOT_OFFSET, KEY_DOT_OFFSET)
-
-    local halo = frame:CreateTexture(nil, "OVERLAY", nil, 6)
-    halo:SetTexture(GLOW_ROUND_TEXTURE)
-    halo:SetBlendMode("ADD")
-    halo:SetVertexColor(COLOR_PINK[1], COLOR_PINK[2], COLOR_PINK[3], KEY_DOT_GLOW_ALPHA)
-    halo:SetSize(size + 2 * KEY_DOT_GLOW_REACH, size + 2 * KEY_DOT_GLOW_REACH)
-    halo:SetPoint("CENTER", core, "CENTER", 0, 0)
-
-    mailDot.core, mailDot.halo = core, halo
-end
-
--- Mail is a two-part detect: MinimapCluster.IndicatorFrame.MailFrame is the actual clickable
--- button, reparented/skinned like any other key, and MiniMapMailIcon is Blizzard's own unread-mail
--- texture (a child of MailFrame, hidden="true" in its XML). The ICON does not show and hide with
--- the mail state by itself; verified against Blizzard_Minimap/Mainline/Minimap.lua (12.1):
---   * MiniMapMailFrameMixin:OnEvent Shows or Hides the FRAME and starts the NewMailAnim
---     (0.5 s) or MailReminderAnim (0.4 s) flipbook;
---   * MinimapMailAnimMixin:OnPlay hides the icon and :OnFinished shows it (HasNewMail());
---   * MiniMapMailFrameMixin:OnHide runs ResetMailIcon, which hides it again.
--- So the envelope appears only once the arrival animation ends, and the notification dot
--- (AddMailDot) shows alone for that 0.4 to 0.5 s. No unread-tracking logic is built here. The
--- icon is seated CENTERED in the key at the same glyph size as the other keys' icons
--- (Metrics.keyFont tall, 4:3 like the 20 x 15 MailFrame) and tinted the key's accent. Blizzard's
--- own NewMailFlipbook / MailReminderFlipbook are anchored to this texture, so the arrival
--- animation plays around the middle of the key. Nothing in MiniMapMailFrameMixin moves the icon
--- again: OnEvent only Show/Hides the frame, plays the animation and calls GetParent():Layout()
--- (a no-op on the bezel, see ApplyControlBezel).
-local function StyleMailKey(bezel, anchorTo)
-    local icon = MiniMapMailIcon
-    local frame = MinimapCluster and MinimapCluster.IndicatorFrame and MinimapCluster.IndicatorFrame.MailFrame
-    if not (icon and frame) then return nil end
-
-    StyleBezelKey(bezel, frame, COLOR_PINK, anchorTo)
-
-    local glyph = Metrics.keyFont
-    icon:SetParent(frame)
-    icon:ClearAllPoints()
-    icon:SetPoint("CENTER", frame, "CENTER", 0, 0)
-    icon:SetSize(glyph * 4 / 3, glyph)
-    icon:SetVertexColor(COLOR_PINK[1], COLOR_PINK[2], COLOR_PINK[3], 1)
-
-    AddMailDot(frame)
-
-    return frame
-end
-
--- The Settings key: a gear that opens the config window (the one /fsconfig toggles), so the player does not need the
--- slash command. Blizzard has no such button, so this one is OURS: a plain Button made here and dressed by
--- StyleBezelKey exactly like the reparented keys (same size and seat rule, cut fill, SkinButton ring, glow, underline),
--- in the amber accent (see SETTINGS_KEY_NAME). It sits between the calendar and mail keys, so mail keeps the last,
--- reserved seat and the row has no hole while no mail waits. Nothing here is secure: the build, the looks and the click
--- are all legal in combat. The click reads FS.ConfigWindow at click time (ConfigWindow.lua loads after this file) and
--- does nothing while it is absent.
 
 -- Pixel crisp, as MicroBars' icon pieces are: snapped to the pixel grid with no texel bias, where the client has the calls.
 local function Crisp(texture)
@@ -1460,191 +1156,649 @@ local function Crisp(texture)
     return texture
 end
 
--- Centres the gear on the key at a whole number of physical pixels, the key's pixel width minus the gear's kept even so
--- both sides leave the same whole pixels (FrameHelpers.PixelUnit: UI units per physical pixel at the key; the client not
--- saying leaves whole UI units). Run at build and again whenever the pixel scale moves (the OnRescale below).
-local function SeatSettingsGlyph(key)
-    local glyph = key and key.fsGlyph
-    if not glyph then return end
+-- A flat colour texture, pixel crisp.
+local function Flat(frame, layer, sublevel, color, alpha)
+    local texture = frame:CreateTexture(nil, layer, nil, sublevel)
+    texture:SetColorTexture(color[1], color[2], color[3], alpha or color[4] or 1)
+    return Crisp(texture)
+end
+
+-- UI units per physical pixel at `frame`; one unit per pixel when the client will not say (every edge then sits on a whole
+-- UI unit instead of a whole pixel). FS.FrameHelpers loads before this file but is read at call time, like everywhere else.
+local function PixelUnit(frame)
     local helpers = FS.FrameHelpers
-    local px = (helpers and helpers.PixelUnit and helpers.PixelUnit(key)) or 1
-    local want = math.floor(KEY_SIZE * SETTINGS_GLYPH_FRACTION / px + 0.5)
-    if (math.floor(KEY_SIZE / px + 0.5) - want) % 2 ~= 0 then want = want + 1 end
+    local px = helpers and helpers.PixelUnit and helpers.PixelUnit(frame)
+    if type(px) ~= "number" or px ~= px or px <= 0 then return 1 end
+    return px
+end
+
+-- `n` raised by one when its parity differs from `ref`'s: a glyph centres on whole pixels only on a key of the same parity.
+local function Like(n, ref)
+    if (n - ref) % 2 ~= 0 then return n + 1 end
+    return n
+end
+
+-- The rows' geometry for the pixel scale the map has now, as whole pixel counts (SPEC above, the mockup's px / 2 scaled by the
+-- map's physical width over REF_MAP and rounded); g.px turns a count into UI units. Nothing here is cached: a UI scale or
+-- resolution change moves the pixel, and every Seat* function below runs again on it.
+local function Geo(frame)
+    local px = PixelUnit(frame or Minimap)
+    local width = (Minimap and Minimap.GetWidth and Minimap:GetWidth()) or Metrics.map
+    local k = width / px / REF_MAP
+    local function S(n) return math.max(1, math.floor(n * k + 0.5)) end
+
+    local g = { px = px, k = k, width = math.floor(width / px + 0.5) }
+    g.row = S(SPEC.row)
+    g.keyW = S(SPEC.keyW)
+    g.keyH = math.min(Like(S(SPEC.keyH), g.row), g.row)
+    g.topM = (g.row - g.keyH) / 2
+    g.margin = S(SPEC.margin)
+    g.keyGap = S(SPEC.keyGap)
+    g.pitch = g.keyW + g.keyGap
+    g.led = S(SPEC.led)
+    g.glyph = Like(S(SPEC.glyph), g.keyW)
+    g.glyphGap = S(SPEC.glyphGap)
+    g.glyphY = math.max(0, g.keyH - g.led - g.glyphGap - g.glyph)
+    g.stu = Like(S(SPEC.stu), g.keyW)
+    g.stuX = (g.keyW - g.stu) / 2
+    g.stuGap = S(SPEC.stuGap)
+    g.stuY = math.floor(g.keyH - g.led - g.stuGap - STU_INK_BOTTOM * g.stu + 0.5)
+    g.coords = S(SPEC.coords)
+    g.count = S(SPEC.count)
+    g.dividerH = math.min(Like(S(SPEC.dividerH), g.row), g.row)
+    g.chevW = S(SPEC.chevW)
+    g.chevH = S(SPEC.chevH)
+    g.outlineX = S(SPEC.outline)
+    g.outlineY = math.max(1, math.min(math.floor(g.topM), S(1)))
+    g.halo = S(SPEC.halo)
+    g.dash = S(SPEC.dash)
+    g.ruleInset = S(SPEC.ruleInset)
+    g.edge = 1 -- the body's edge and the rules: one pixel
+    return g
+end
+
+-------------------------------------------------------------------------------
+-- The body: one edge, one plate, from the map's top to the last row's bottom
+-------------------------------------------------------------------------------
+
+-- Where the pieces live: our own handles, never fields on a Blizzard frame.
+local Body = {}
+
+-- The chamfer in pixels, or 0 when the cut chrome is off (the body is then square).
+local function BodyCut()
+    if FS.Theme.CHROME_CORNERS ~= "cut" then return 0 end
+    return BODY_CHAMFER
+end
+
+-- Texcoords (L, R, T, B) of a baked cut piece of chamfer c: every piece is a 16 x 16 canvas with the piece at the top-left
+-- (Theme.CUT_SIZES), so the bottom-right corner reads the same piece flipped both ways.
+local function CutCoords(corner, c)
+    local k = c / 16
+    if corner == "TOPLEFT" then return 0, k, 0, k end
+    return k, 0, k, 0
+end
+
+-- The body frame and everything on it that does not move with a row: the outer glow, the plate, the edge, the map's rule.
+-- The frame spans the map's top to the last row's bottom (SeatBody picks the row), a child of the bezel so the diagnostics'
+-- minimap bounds file it as custom furniture, at +1 over the bezel so the divider and the keys sit over the plate. The edge is
+-- a flat 1 px line round the rectangle plus one baked diagonal piece at each cut corner, at full alpha all round (the shared
+-- AddGradientBorder fades its top edge to a third, which reads as an edge on the map's top only; the mockup's is one even cyan).
+local function BuildBody(bezel)
+    local Theme = FS.Theme
+    local body = CreateFrame("Frame", nil, bezel)
+    body:SetFrameLevel(bezel:GetFrameLevel() + BODY_LEVEL_OFFSET)
+    body:SetPoint("TOPLEFT", Minimap, "TOPLEFT", 0, 0)
+    body:SetPoint("BOTTOMRIGHT", bezel, "BOTTOMRIGHT", 0, 0)
+
+    if AddOuterGlow then
+        AddOuterGlow(body, COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], GLOW_SIZE, GLOW_ALPHA,
+            BodyCut() > 0 and BODY_CHAMFER or 0)
+    end
+
+    local p = {}
+    -- The plate: all of it under the map's bottom edge, as three flat rectangles and one baked triangle at the bottom-right cut,
+    -- which tile without overlap so the translucent plate keeps one alpha.
+    p.plate = Flat(body, "BACKGROUND", -8, BODY_PLATE)
+    p.plateFoot = Flat(body, "BACKGROUND", -8, BODY_PLATE)
+    p.plateCorner = body:CreateTexture(nil, "BACKGROUND", nil, -8)
+    p.plateCorner:SetTexture(Theme.FILL_CUT_TEXTURES[BODY_CHAMFER])
+    p.plateCorner:SetVertexColor(BODY_PLATE[1], BODY_PLATE[2], BODY_PLATE[3], BODY_PLATE[4])
+    p.plateCorner:SetTexCoord(CutCoords("BOTTOMRIGHT", BODY_CHAMFER))
+
+    -- The edge.
+    p.top = Flat(body, "BORDER", 0, BODY_EDGE)
+    p.bottom = Flat(body, "BORDER", 0, BODY_EDGE)
+    p.left = Flat(body, "BORDER", 0, BODY_EDGE)
+    p.right = Flat(body, "BORDER", 0, BODY_EDGE)
+    local file = Theme.BORDER_CUT_TEXTURES[BODY_CHAMFER][1]
+    for _, corner in ipairs({ "TOPLEFT", "BOTTOMRIGHT" }) do
+        local piece = body:CreateTexture(nil, "BORDER")
+        piece:SetTexture(file)
+        piece:SetVertexColor(BODY_EDGE[1], BODY_EDGE[2], BODY_EDGE[3], 1)
+        piece:SetTexCoord(CutCoords(corner, BODY_CHAMFER))
+        p[corner == "TOPLEFT" and "cutTL" or "cutBR"] = piece
+    end
+
+    -- The rule where the map meets the first row.
+    p.rule = Flat(body, "BORDER", 1, BODY_RULE)
+
+    Body.frame, Body.pieces = body, p
+    Minimap.fsBody = body
+    return body
+end
+
+-- Sizes and seats the body's pieces for the pixel scale now: the chamfer and the edge are whole pixels (the baked pieces draw one
+-- texel a pixel, so a piece sized in pixels is never resampled).
+local function SeatBodyPieces(g)
+    local body, p = Body.frame, Body.pieces
+    if not (body and p) then return end
+    local px = g.px
+    local c = BodyCut()
+    local cu, t = c * px, g.edge * px
+
+    p.plate:ClearAllPoints()
+    p.plate:SetPoint("TOPLEFT", Minimap, "BOTTOMLEFT", 0, 0)
+    p.plate:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", 0, cu)
+    p.plateFoot:ClearAllPoints()
+    p.plateFoot:SetPoint("BOTTOMLEFT", body, "BOTTOMLEFT", 0, 0)
+    p.plateFoot:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", -cu, 0)
+    p.plateFoot:SetHeight(math.max(cu, 0.001))
+    p.plateCorner:ClearAllPoints()
+    p.plateCorner:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", 0, 0)
+    p.plateCorner:SetSize(math.max(cu, 0.001), math.max(cu, 0.001))
+    for _, piece in ipairs({ p.plateFoot, p.plateCorner, p.cutTL, p.cutBR }) do
+        if c > 0 then piece:Show() else piece:Hide() end
+    end
+
+    p.top:ClearAllPoints()
+    p.top:SetPoint("TOPLEFT", body, "TOPLEFT", cu, 0)
+    p.top:SetPoint("TOPRIGHT", body, "TOPRIGHT", 0, 0)
+    p.top:SetHeight(t)
+    p.bottom:ClearAllPoints()
+    p.bottom:SetPoint("BOTTOMLEFT", body, "BOTTOMLEFT", 0, 0)
+    p.bottom:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", -cu, 0)
+    p.bottom:SetHeight(t)
+    p.left:ClearAllPoints()
+    p.left:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -cu)
+    p.left:SetPoint("BOTTOMLEFT", body, "BOTTOMLEFT", 0, 0)
+    p.left:SetWidth(t)
+    p.right:ClearAllPoints()
+    p.right:SetPoint("TOPRIGHT", body, "TOPRIGHT", 0, -t)
+    p.right:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", 0, cu)
+    p.right:SetWidth(t)
+    for _, corner in ipairs({ "cutTL", "cutBR" }) do
+        local piece = p[corner]
+        local point = corner == "cutTL" and "TOPLEFT" or "BOTTOMRIGHT"
+        piece:ClearAllPoints()
+        piece:SetPoint(point, body, point, 0, 0)
+        piece:SetSize(math.max(cu, 0.001), math.max(cu, 0.001))
+    end
+
+    p.rule:ClearAllPoints()
+    p.rule:SetPoint("TOPLEFT", Minimap, "BOTTOMLEFT", 0, 0)
+    p.rule:SetPoint("TOPRIGHT", Minimap, "BOTTOMRIGHT", 0, 0)
+    p.rule:SetHeight(t)
+end
+
+-- The body ends at the last row: the tray's drawer while it is open, else the key row. A drawer that is not shown leaves the
+-- body at the bezel's bottom edge, so a closed tray costs the body nothing.
+local function SeatBody()
+    local body, bezel = Minimap and Minimap.fsBody, Minimap and Minimap.fsBezel
+    if not (body and bezel) then return end
+    local last = bezel
+    local drawer = Minimap.fsTray
+    if drawer and drawer.IsShown and drawer:IsShown() then last = drawer end
+    body:ClearAllPoints()
+    body:SetPoint("TOPLEFT", Minimap, "TOPLEFT", 0, 0)
+    body:SetPoint("BOTTOMRIGHT", last, "BOTTOMRIGHT", 0, 0)
+end
+
+-------------------------------------------------------------------------------
+-- Keys: a bare glyph, an LED underline, a hover outline
+-------------------------------------------------------------------------------
+
+-- Everything on a key frame that this file adds, by frame, so no field is written to a Blizzard button for it: the LED
+-- underline, the wash behind a bright LED, the hover outline, the glyph, and the two flags that paint them (over: the mouse is
+-- on it; lit: it is held bright, the open tray's toggle).
+local Keys = {}
+
+-- The key row's keys in seat order (st.order), tracking, calendar, STU, tray toggle, mail: tables from Keys.
+local Row = { keys = {} }
+
+local function AddRowKey(st)
+    local keys = Row.keys
+    local at = #keys + 1
+    for i, other in ipairs(keys) do
+        if other.order > st.order then at = i break end
+    end
+    table.insert(keys, at, st)
+end
+
+-- LED, wash and outline on `frame`, in the accent colour. Seated by SeatKeyChrome.
+local function AddKeyChrome(frame, accent, kind)
+    local st = { frame = frame, accent = accent, kind = kind }
+    st.wash = Flat(frame, "OVERLAY", 1, accent, LED_WASH_ALPHA)
+    st.wash:Hide()
+    st.led = Flat(frame, "OVERLAY", 2, accent, 1)
+    st.led:SetAlpha(LED_REST_ALPHA)
+    st.outline = frame:CreateTexture(nil, "OVERLAY", nil, 3)
+    st.outline:SetVertexColor(accent[1], accent[2], accent[3], 1)
+    st.outline:Hide()
+    Keys[frame] = st
+    return st
+end
+
+-- The glyph texture of a key, white shapes tinted by `tint`.
+local function AddGlyph(frame, texture, tint)
+    local glyph = Crisp(frame:CreateTexture(nil, "ARTWORK", nil, 1))
+    glyph:SetTexture(texture)
+    if tint then glyph:SetVertexColor(tint[1], tint[2], tint[3], 1) end
+    return glyph
+end
+
+-- Rest, hover or held bright, from the two flags: the LED at .75 or 1, the wash behind it only when bright, the outline only
+-- under the mouse. Texture writes only. A key hidden with the mouse on it gets no OnLeave, so OnHide clears over.
+local function PaintKey(frame)
+    local st = Keys[frame]
+    if not st then return end
+    local bright = (st.over or st.lit) and true or false
+    st.led:SetAlpha(bright and 1 or LED_REST_ALPHA)
+    if bright then st.wash:Show() else st.wash:Hide() end
+    if st.over and not st.noOutline then st.outline:Show() else st.outline:Hide() end
+end
+
+-- LED along the bottom of the key at its full width, the wash round it, the hover outline round the key (chamfered at the baked
+-- ring the buttons use, one pixel wide, `outlineX` out at the sides and `outlineY` above and below).
+local function SeatKeyChrome(st, g)
+    local frame, px = st.frame, g.px
+    st.led:ClearAllPoints()
+    st.led:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+    st.led:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+    st.led:SetHeight(g.led * px)
+    st.wash:ClearAllPoints()
+    st.wash:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", -g.halo * px, -g.halo * px)
+    st.wash:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", g.halo * px, -g.halo * px)
+    st.wash:SetHeight((g.led + 2 * g.halo) * px)
+
+    local Theme = FS.Theme
+    if Theme.Cut2ButtonSet and Theme.ApplyNineSlice then
+        local ring, _, c = Theme.Cut2ButtonSet(g.outlineX)
+        st.outline:SetTexture(ring)
+        st.noOutline = not Theme.ApplyNineSlice(st.outline, c)
+    else
+        st.noOutline = true
+    end
+    st.outline:ClearAllPoints()
+    st.outline:SetPoint("TOPLEFT", frame, "TOPLEFT", -g.outlineX * px, g.outlineY * px)
+    st.outline:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", g.outlineX * px, -g.outlineY * px)
+end
+
+-- Hover on a key we do not own the scripts of (Blizzard's tracking, calendar and mail keys, an addon's tile): a post-hook, so its
+-- own tooltip stays. `extra` is the frame that actually takes the mouse when the key is a container (the tracking frame's own button).
+local function WireHover(frame, extra)
+    local function over(on)
+        local st = Keys[frame]
+        if st then
+            st.over = on
+            PaintKey(frame)
+        end
+    end
+    for _, target in ipairs({ frame, extra or false }) do
+        if target and target.HookScript then
+            pcall(target.HookScript, target, "OnEnter", function() over(true) end)
+            pcall(target.HookScript, target, "OnLeave", function() over(false) end)
+            pcall(target.HookScript, target, "OnHide", function() over(false) end)
+        end
+    end
+end
+
+-- Seats one key's glyph in its frame for the pixel scale now: a 16 px box on the glyph row of the key, centred across it; the STU
+-- icon's 32 px canvas centred across it and hung so its ink ends SPEC.stuGap above the LED (the art is a taller block than a
+-- glyph and rises past the key's top, into the row's margin).
+local function SeatKeyGlyph(st, g)
+    local glyph, frame, px = st.glyph, st.frame, g.px
+    if not glyph then return end
     glyph:ClearAllPoints()
-    glyph:SetPoint("CENTER", key, "CENTER", 0, 0)
-    glyph:SetSize(want * px, want * px)
+    if st.kind == "stu" then
+        glyph:SetSize(g.stu * px, g.stu * px)
+        glyph:SetPoint("TOPLEFT", frame, "TOPLEFT", g.stuX * px, -g.stuY * px)
+    else
+        glyph:SetSize(g.glyph * px, g.glyph * px)
+        glyph:SetPoint("TOPLEFT", frame, "TOPLEFT", (g.keyW - g.glyph) / 2 * px, -g.glyphY * px)
+    end
+end
+
+-- Mail's dot (see AddMailDot): a 6 px dot at the key's top-right corner and its soft halo.
+local function SeatMailDot(frame, g)
+    local px = g.px
+    if not (mailDot.core and mailDot.halo) then return end
+    local size = math.max(3, math.floor(KEY_DOT_SIZE * g.k + 0.5)) * px
+    local reach = KEY_DOT_GLOW_REACH * px
+    mailDot.core:ClearAllPoints()
+    mailDot.core:SetSize(size, size)
+    mailDot.core:SetPoint("TOPRIGHT", frame, "TOPRIGHT", KEY_DOT_OFFSET * px, KEY_DOT_OFFSET * px)
+    mailDot.halo:ClearAllPoints()
+    mailDot.halo:SetSize(size + 2 * reach, size + 2 * reach)
+    mailDot.halo:SetPoint("CENTER", mailDot.core, "CENTER", 0, 0)
+end
+
+-- The tray toggle's count and chevron: the chevron against the key's right (one pixel in), the count's right edge a 3 px gap
+-- left of it, both centred on the glyph row. One digit fills the key (about 5.6 + 3 + 8 of its 18 px at the mockup's 10 px
+-- font); two digits grow leftward into the key gap, which is wider than what they overshoot by.
+local function SeatToggleContent(st, g)
+    local toggle, px = st.frame, g.px
+    local mid = -(g.glyphY + g.glyph / 2) * px
+    if toggle.chevron then
+        toggle.chevron:ClearAllPoints()
+        toggle.chevron:SetSize(g.chevW * px, g.chevH * px)
+        toggle.chevron:SetPoint("RIGHT", toggle, "TOPRIGHT", -px, mid)
+    end
+    if toggle.count and toggle.chevron then
+        if toggle.fsCountPx ~= g.count then
+            toggle.fsCountPx = g.count
+            ApplyMono(toggle.count, g.count * px, COLOR_AMBER)
+        end
+        toggle.count:ClearAllPoints()
+        toggle.count:SetPoint("RIGHT", toggle.chevron, "LEFT", -g.glyphGap * px, 0)
+    end
+end
+
+-- Seats one key: its size and place (slot `slot` of the row, 0 when it is not in the row), its chrome and its glyph.
+local function SeatKey(st, bezel, g, slot)
+    local frame, px = st.frame, g.px
+    frame:SetSize(g.keyW * px, g.keyH * px)
+    if slot then
+        frame:ClearAllPoints()
+        frame:SetPoint("TOPLEFT", bezel, "TOPLEFT", (g.margin + (slot - 1) * g.pitch) * px, -g.topM * px)
+    end
+    -- The hit box reaches a half gap each side and the row's margin above and below, so no pixel between two keys is dead.
+    if frame.SetHitRectInsets then
+        pcall(frame.SetHitRectInsets, frame, -g.keyGap / 2 * px, -g.keyGap / 2 * px, -g.topM * px, -g.topM * px)
+    end
+    SeatKeyChrome(st, g)
+    SeatKeyGlyph(st, g)
+    if st.kind == "mail" then
+        local icon = st.icon
+        if icon then
+            local w = g.glyph
+            icon:ClearAllPoints()
+            icon:SetSize(w * px, math.floor(w * 3 / 4 + 0.5) * px)
+            icon:SetPoint("CENTER", frame, "TOPLEFT", g.keyW / 2 * px, -(g.glyphY + g.glyph / 2) * px)
+        end
+        SeatMailDot(frame, g)
+    elseif st.kind == "toggle" then
+        SeatToggleContent(st, g)
+    end
+end
+
+local function KeyShown(st)
+    local ok, shown = pcall(st.frame.IsShown, st.frame)
+    return ok and shown ~= false
+end
+
+-- The divider and the coords: a divider one key gap after the last key showing, a 1 px line, centred in the row; the coords right
+-- aligned at the margin, as large as the room between the divider and the right margin takes up to SPEC.coords.
+local function SeatDividerAndCoords(bezel, g, shownCount)
+    local px = g.px
+    local dividerX = g.margin + shownCount * g.pitch
+    local divider = Row.divider
+    if divider then
+        divider:ClearAllPoints()
+        divider:SetPoint("TOPLEFT", bezel, "TOPLEFT", dividerX * px, -(g.row - g.dividerH) / 2 * px)
+        divider:SetSize(g.edge * px, g.dividerH * px)
+    end
+    local coords = Minimap.fsReadoutCoords
+    if coords then
+        local room = g.width - g.margin - (dividerX + g.edge + g.keyGap)
+        local font = math.max(5, math.min(g.coords, math.floor(room / (COORDS_CHARS * COORDS_ADVANCE))))
+        if coords.fsFontPx ~= font then
+            coords.fsFontPx = font
+            ApplyMono(coords, font * px, COLOR_POWER)
+        end
+        coords:ClearAllPoints()
+        coords:SetPoint("RIGHT", bezel, "RIGHT", -g.margin * px, 0)
+    end
+end
+
+local seating = false -- SeatRow is running (a Show/Hide hook it provokes must not run it again)
+
+-- Seats the whole key row for the pixel scale now: the bezel's height, every key in the next free slot (a key that is not
+-- showing takes none, so the row has no hole), the divider, the coords, and the body's pieces. Run at build, whenever a key
+-- joins or leaves the row, and on every rescale.
+local function SeatRow()
+    local bezel = Minimap and Minimap.fsBezel
+    if not bezel or seating then return end
+    seating = true
+    local g = Geo(bezel)
+    bezel:SetHeight(g.row * g.px)
+    local slot = 0
+    for _, st in ipairs(Row.keys) do
+        local shown = KeyShown(st)
+        if shown then slot = slot + 1 end
+        local ok, err = pcall(SeatKey, st, bezel, g, shown and slot or nil)
+        if not ok and FS.LogDegradeOnce then
+            FS.LogDegradeOnce("minimap_key_" .. tostring(st.kind),
+                "|cffff4488Forever STUwave|r: minimap key degraded (" .. tostring(st.kind) .. "): " .. tostring(err))
+        end
+    end
+    pcall(SeatDividerAndCoords, bezel, g, slot)
+    pcall(SeatBodyPieces, g)
+    SeatBody()
+    seating = false
 end
 
 if FS.Layout and FS.Layout.OnRescale then
-    FS.Layout.OnRescale(function() SeatSettingsGlyph(Minimap and Minimap.fsSettingsKey) end)
+    FS.Layout.OnRescale(SeatRow)
 end
 
--- Rest, hover or pressed, from the two flags the mouse scripts keep (fsOver, fsDown): the wash over the dark fill at
--- 0 / 0.16 / 0.32, the glow at 0.35 / 0.6 and the gear amber / white. Texture writes only. A press that is dragged off
--- shows rest, and releasing it outside leaves it there.
-local function PaintSettingsKey(key)
-    local over = key.fsOver and true or false
-    local wash = 0
-    if over then wash = key.fsDown and KEY_WASH_PRESSED or KEY_WASH_HOVER end
-    local accent, ink = COLOR_AMBER, over and COLOR_TEXT_WHITE or COLOR_AMBER
-    if key.fsWash then key.fsWash:SetVertexColor(accent[1], accent[2], accent[3], wash) end
-    if key.fsGlyph then key.fsGlyph:SetVertexColor(ink[1], ink[2], ink[3], 1) end
-    local glow = key.fsSkin and key.fsSkin.glow
-    if glow then glow:SetVertexColor(accent[1], accent[2], accent[3], over and KEY_GLOW_HOVER or KEY_GLOW_REST) end
+-------------------------------------------------------------------------------
+-- The keys: Blizzard's three (tracking, calendar, mail) and ours (STU, the tray's toggle)
+-------------------------------------------------------------------------------
+
+-- Blanks every texture and string a Blizzard key draws by itself (icon, plate art, date number, highlight): the key is a bare
+-- glyph of ours over an LED, so what the stock button paints would show through it. Alpha only, and run once at build, before
+-- our own regions exist on the frame (it would blank those too).
+local function QuietRegions(frame)
+    if type(frame) ~= "table" or not frame.GetRegions then return end
+    local ok, regions = pcall(function() return { frame:GetRegions() } end)
+    if not ok then return end
+    for _, region in ipairs(regions) do
+        pcall(region.SetAlpha, region, 0)
+    end
 end
 
-local function LogSettingsFailure(err)
+-- The named plate regions of a stock key, alpha 0 (MicroBars' StripButtonArt idiom). The mail key keeps its envelope, which is
+-- its own texture, so it takes this and not QuietRegions.
+local function StripKeyArt(button)
+    if not button then return end
+    for _, key in ipairs({ "Border", "Background" }) do
+        local region = button[key]
+        if region and region.SetAlpha then region:SetAlpha(0) end
+    end
+end
+
+-- Blizzard's button becomes a key of the row: ours to seat, size and skin, on the bezel, over the body. It is marked
+-- fsBezelOwned before anything else runs: HideBlizzardChrome's OnShow re-hide hook (HideIfExists) skips a frame carrying it, so
+-- the Show below sticks. `restore` brings back a key HideBlizzardChrome hid (tracking, calendar); the mail key keeps whatever
+-- shown state Blizzard gave it, because it is there only while mail waits.
+local function AdoptBlizzardKey(bezel, frame, restore)
+    frame.fsBezelOwned = true
+    frame:SetParent(bezel)
+    if frame.SetFrameLevel and bezel.GetFrameLevel then
+        frame:SetFrameLevel(bezel:GetFrameLevel() + KEY_LEVEL_OFFSET)
+    end
+    frame:ClearAllPoints()
+    if restore then frame:Show() end
+    frame:SetAlpha(1)
+    if frame.EnableMouse then frame:EnableMouse(true) end
+end
+
+-- A key that shows or hides (mail, the tray toggle) takes a slot or gives it back, so the row seats again.
+local function WireVisibility(frame)
+    if not frame.HookScript then return end
+    pcall(frame.HookScript, frame, "OnShow", function() SeatRow() end)
+    pcall(frame.HookScript, frame, "OnHide", function() SeatRow() end)
+end
+
+-- A key's own mouse state: over, and the tooltip when it has one. Scripts set on keys that are ours.
+local function SetOver(frame, on)
+    local st = Keys[frame]
+    if not st then return end
+    st.over = on and true or false
+    PaintKey(frame)
+end
+
+local function ShowTip(owner, anchor, text)
+    if not GameTooltip then return end
+    pcall(function()
+        GameTooltip:SetOwner(owner, anchor)
+        GameTooltip:SetText(text)
+        GameTooltip:Show()
+    end)
+end
+
+local function HideTip()
+    if GameTooltip then pcall(function() GameTooltip:Hide() end) end
+end
+
+local function LogKeyFailure(id, err)
     if FS.LogDegradeOnce then
-        FS.LogDegradeOnce("minimap_settings",
-            "|cffff4488Forever STUwave|r: minimap settings key degraded: " .. tostring(err))
+        FS.LogDegradeOnce("minimap_key_" .. id,
+            "|cffff4488Forever STUwave|r: minimap key degraded (" .. id .. "): " .. tostring(err))
     end
 end
 
-local function DressSettingsKey(bezel, key, anchorTo)
-    StyleBezelKey(bezel, key, COLOR_AMBER, anchorTo)
-
-    -- The hover wash: the dark fill's own cut shape (or, under "round", a square pulled in far enough to stay inside the
-    -- ring's rounded corners), accent coloured, clear until the mouse is on the key.
-    local chamfer = KeyChamfer()
-    local wash
-    if chamfer then
-        wash = FS.Theme.AddSliceTexture(key, CutFillTexture(chamfer), COLOR_AMBER, "BACKGROUND", 1)
-        FS.Theme.ApplyNineSlice(wash, chamfer)
-    else
-        local inset = math.ceil(Metrics.keyRadius * 0.3)
-        wash = key:CreateTexture(nil, "BACKGROUND", nil, 1)
-        wash:SetTexture(SETTINGS_WASH_TEXTURE)
-        wash:SetPoint("TOPLEFT", key, "TOPLEFT", inset, -inset)
-        wash:SetPoint("BOTTOMRIGHT", key, "BOTTOMRIGHT", -inset, inset)
-    end
-    key.fsWash = wash
-
-    local glyph = Crisp(key:CreateTexture(nil, "ARTWORK"))
-    glyph:SetTexture(SETTINGS_ICON_TEXTURE)
-    key.fsGlyph = glyph
-    SeatSettingsGlyph(key)
-    PaintSettingsKey(key)
-
-    key:RegisterForClicks("LeftButtonUp")
-    key:SetScript("OnEnter", function(self)
-        self.fsOver = true
-        PaintSettingsKey(self)
-        if not GameTooltip then return end
+-- Tracking (cyan): the stock tracking frame, its button the one that takes the mouse and opens the menu. Our magnifier glyph
+-- replaces its icon; the button is pinned to the key so the whole key is its hit area.
+local function BuildTrackingKey(bezel)
+    local frame = MinimapCluster and MinimapCluster.Tracking
+    if not frame then return nil end
+    AdoptBlizzardKey(bezel, frame, true)
+    local button = type(frame.Button) == "table" and frame.Button or nil
+    QuietRegions(frame)
+    QuietRegions(button)
+    if button and button.SetAllPoints then
         pcall(function()
-            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-            GameTooltip:SetText("Settings")
-            GameTooltip:Show()
+            button:ClearAllPoints()
+            button:SetAllPoints(frame)
         end)
-    end)
-    key:SetScript("OnLeave", function(self)
-        self.fsOver = false
-        PaintSettingsKey(self)
-        if GameTooltip then pcall(function() GameTooltip:Hide() end) end
-    end)
-    key:SetScript("OnMouseDown", function(self)
-        self.fsDown = true
-        PaintSettingsKey(self)
-    end)
-    key:SetScript("OnMouseUp", function(self)
-        self.fsDown = false
-        PaintSettingsKey(self)
-    end)
-    -- A key hidden with the mouse on it gets no OnLeave.
-    key:SetScript("OnHide", function(self)
-        self.fsOver, self.fsDown = false, false
-        PaintSettingsKey(self)
-    end)
-    key:SetScript("OnClick", function()
-        local window = FS.ConfigWindow
-        if window and window.Toggle then window.Toggle() end
-    end)
+    end
+    local st = AddKeyChrome(frame, COLOR_POWER, "tracking")
+    st.order = 1
+    st.glyph = AddGlyph(frame, SEARCH_TEXTURE, COLOR_POWER)
+    WireHover(frame, button)
+    WireVisibility(frame)
+    AddRowKey(st)
+    return frame
 end
 
--- The key, or nil when it could not be built: a throw is logged once, the half-built frame is hidden, and the row goes on
--- without it (mail then seats after the calendar), the way a Blizzard key that is missing is skipped.
-local function StyleSettingsKey(bezel, anchorTo)
-    local key = CreateFrame("Button", SETTINGS_KEY_NAME, bezel)
-    local ok, err = pcall(DressSettingsKey, bezel, key, anchorTo)
+-- Calendar (violet): the stock calendar button, its sun and date number blanked, our calendar glyph in their place.
+local function BuildCalendarKey(bezel)
+    local frame = GameTimeFrame
+    if not frame then return nil end
+    AdoptBlizzardKey(bezel, frame, true)
+    QuietRegions(frame)
+    local st = AddKeyChrome(frame, COLOR_BORDER, "calendar")
+    st.order = 2
+    st.glyph = AddGlyph(frame, CALENDAR_TEXTURE, COLOR_BORDER)
+    WireHover(frame)
+    WireVisibility(frame)
+    AddRowKey(st)
+    return frame
+end
+
+-- The STU key (pink): ours, it replaces the stock gold gear and does its job, opening the config window (the one /fsconfig
+-- toggles), so the player does not need the slash command. The icon is the STUwave mark (generate_icon_stu.py) in colour,
+-- on a canvas larger than the key (SeatKeyGlyph). Nothing here is secure: the build, the looks and the click are all legal in
+-- combat. The click reads FS.ConfigWindow at click time (ConfigWindow.lua loads after this file) and does nothing while it is
+-- absent.
+local function BuildSTUKey(bezel)
+    local key = CreateFrame("Button", STU_KEY_NAME, bezel)
+    local ok, err = pcall(function()
+        key:SetFrameLevel(bezel:GetFrameLevel() + KEY_LEVEL_OFFSET)
+        local st = AddKeyChrome(key, COLOR_PINK, "stu")
+        st.order = 3
+        st.glyph = AddGlyph(key, STU_TEXTURE)
+        key:RegisterForClicks("LeftButtonUp")
+        key:SetScript("OnEnter", function(self)
+            SetOver(self, true)
+            ShowTip(self, "ANCHOR_BOTTOM", "Settings")
+        end)
+        key:SetScript("OnLeave", function(self)
+            SetOver(self, false)
+            HideTip()
+        end)
+        -- A key hidden with the mouse on it gets no OnLeave.
+        key:SetScript("OnHide", function(self) SetOver(self, false) end)
+        key:SetScript("OnClick", function()
+            local window = FS.ConfigWindow
+            if window and window.Toggle then window.Toggle() end
+        end)
+        AddRowKey(st)
+    end)
     if not ok then
         key:Hide()
-        LogSettingsFailure(err)
+        LogKeyFailure("stu", err)
         return nil
     end
-    Minimap.fsSettingsKey = key
+    Minimap.fsSTUKey = key
     return key
 end
 
--- Builds the chassis frame below Minimap and populates its left key row
--- (keys only: the coords readout at the right end is built after it, ApplyReadout).
--- Every button lookup is feature-detected by its real (measured) name; a
--- missing one is skipped and simply leaves no gap, per key, in the row.
--- fsBezel is the sole idempotency guard (no per-key flags needed) since
--- Apply() only ever runs this once.
-local function ApplyControlBezel()
-    if not Minimap or Minimap.fsBezel then return end
-    if not (AddRoundedFill and AddGradientBorder) then return end
+-- Mail (pink). The notification dot is a SEPARATE round texture (glow_round.tga, the same radial falloff the player-blip glow
+-- uses) at the key's top-right corner, plus a wider halo behind it for the glow. Both are textures OWNED by MailFrame, so they
+-- show and hide with the FRAME, with no hook or event of ours. That is not the same as showing with the envelope: in Blizzard
+-- 12.1 the envelope is shown only when the arrival animation finishes (see BuildMailKey), so for about 0.4 to 0.5 s after mail
+-- arrives the dot shows alone. They are drawn on OVERLAY (the dot a sublevel above its halo) so they sit over the envelope; the
+-- handles live in the module-local mailDot, not on the Blizzard frame. Sized and seated by SeatMailDot.
+local function AddMailDot(frame)
+    if mailDot.core or not frame.CreateTexture then return end
 
-    local bezel = CreateFrame("Frame", nil, Minimap)
-    bezel:SetHeight(BEZEL_HEIGHT)
-    bezel:SetPoint("TOPLEFT", Minimap, "BOTTOMLEFT", 0, 0)
-    bezel:SetPoint("TOPRIGHT", Minimap, "BOTTOMRIGHT", 0, 0)
+    local core = frame:CreateTexture(nil, "OVERLAY", nil, 7)
+    core:SetTexture(GLOW_ROUND_TEXTURE)
+    core:SetBlendMode("ADD")
+    core:SetVertexColor(COLOR_PINK[1], COLOR_PINK[2], COLOR_PINK[3], 1)
 
-    -- StyleBezelKey reparents Blizzard minimap buttons onto this frame, and two
-    -- of them call Layout() on whatever their parent is when their state
-    -- changes. Verified against Blizzard_Minimap/Mainline/Minimap.lua on the
-    -- `forever` client branch:
-    --   MiniMapMailFrameMixin:OnEvent          -> self:GetParent():Layout()  (466)
-    --   MiniMapCraftingOrderFrameMixin:OnEvent -> self:GetParent():Layout()  (538)
-    -- Their real parent is MinimapCluster, a LayoutFrame; ours is a plain
-    -- Frame, so the call hit nil and threw inside BLIZZARD's file the first
-    -- time mail arrived -- which reads as a Blizzard bug and is ours.
-    --
-    -- A no-op is the correct body, not a stub: the bezel positions its keys
-    -- explicitly in StyleBezelKey, so there is no layout pass to run. This only
-    -- has to not throw.
-    bezel.Layout = function() end
+    local halo = frame:CreateTexture(nil, "OVERLAY", nil, 6)
+    halo:SetTexture(GLOW_ROUND_TEXTURE)
+    halo:SetBlendMode("ADD")
+    halo:SetVertexColor(COLOR_PINK[1], COLOR_PINK[2], COLOR_PINK[3], KEY_DOT_GLOW_ALPHA)
 
-    AddRoundedFill(bezel, READOUT_FILL, BEZEL_RADIUS)
-    AddGradientBorder(bezel, COLOR_BORDER, BEZEL_BORDER_THICK, BEZEL_RADIUS)
+    mailDot.core, mailDot.halo = core, halo
+end
 
-    Minimap.fsBezel = bezel
+-- Mail is a two-part detect: MinimapCluster.IndicatorFrame.MailFrame is the actual clickable button, reparented and skinned
+-- like any other key, and MiniMapMailIcon is Blizzard's own unread-mail texture (a child of MailFrame, hidden="true" in its
+-- XML). The ICON does not show and hide with the mail state by itself; verified against Blizzard_Minimap/Mainline/Minimap.lua
+-- (12.1):
+--   * MiniMapMailFrameMixin:OnEvent Shows or Hides the FRAME and starts the NewMailAnim (0.5 s) or MailReminderAnim (0.4 s)
+--     flipbook;
+--   * MinimapMailAnimMixin:OnPlay hides the icon and :OnFinished shows it (HasNewMail());
+--   * MiniMapMailFrameMixin:OnHide runs ResetMailIcon, which hides it again.
+-- So the envelope appears only once the arrival animation ends, and the notification dot (AddMailDot) shows alone for that
+-- 0.4 to 0.5 s. No unread-tracking logic is built here. The icon is seated CENTRED on the glyph row at the same width as the
+-- other keys' glyphs (4:3 like the 20 x 15 MailFrame) and tinted pink. Blizzard's own NewMailFlipbook / MailReminderFlipbook are
+-- anchored to this texture, so the arrival animation plays around the middle of the key. Nothing in MiniMapMailFrameMixin
+-- moves the icon again: OnEvent only Show/Hides the frame, plays the animation and calls GetParent():Layout() (a no-op on the
+-- bezel, see ApplyControlBezel). The frame is shown by Blizzard only while mail waits, which is when the key takes its slot.
+local function BuildMailKey(bezel)
+    local icon = MiniMapMailIcon
+    local frame = MinimapCluster and MinimapCluster.IndicatorFrame and MinimapCluster.IndicatorFrame.MailFrame
+    if not (icon and frame) then return nil end
 
-    local resolved, skipped = {}, {}
-    local last
+    AdoptBlizzardKey(bezel, frame, false)
+    StripKeyArt(frame)
+    icon:SetParent(frame)
+    icon:SetVertexColor(COLOR_PINK[1], COLOR_PINK[2], COLOR_PINK[3], 1)
 
-    local function TryKey(id, button, accentColor)
-        local styled = StyleBezelKey(bezel, button, accentColor, last)
-        if styled then
-            last = styled
-            resolved[#resolved + 1] = id
-        else
-            skipped[#skipped + 1] = id
-        end
-    end
-
-    TryKey("tracking", MinimapCluster and MinimapCluster.Tracking, COLOR_POWER)
-    TryKey("calendar", GameTimeFrame, COLOR_BORDER)
-
-    local settingsKey = StyleSettingsKey(bezel, last)
-    if settingsKey then
-        last = settingsKey
-        resolved[#resolved + 1] = "settings"
-    else
-        skipped[#skipped + 1] = "settings"
-    end
-
-    local mailKey = StyleMailKey(bezel, last)
-    if mailKey then
-        last = mailKey
-        resolved[#resolved + 1] = "mail"
-    else
-        skipped[#skipped + 1] = "mail"
-    end
-
-    -- Kept on Minimap for an in-game /dump-driven sanity check of which keys
-    -- resolved; not read by any other code path in this file.
-    Minimap.fsBezelResolved = resolved
-    Minimap.fsBezelSkipped = skipped
+    local st = AddKeyChrome(frame, COLOR_PINK, "mail")
+    st.order = 5
+    st.icon = icon
+    AddMailDot(frame)
+    WireHover(frame)
+    WireVisibility(frame)
+    AddRowKey(st)
+    return frame
 end
 
 -------------------------------------------------------------------------------
@@ -1652,7 +1806,7 @@ end
 -------------------------------------------------------------------------------
 
 -- The highest number a coordinate may show. A position of 1.0 would format as "100.0", a glyph wider per
--- axis than the "99.9, 99.9" the readout is budgeted for (see READOUT_FIT), so each axis is clamped to this.
+-- axis than the "99.9, 99.9" the readout is budgeted for (see COORDS_CHARS), so each axis is clamped to this.
 local COORD_MAX = 99.9
 
 -- A 0-1 map fraction as the readout's percentage text, clamped to COORD_MAX. The clamp comes
@@ -1691,7 +1845,7 @@ end
 local function UpdateReadout()
     if not (Minimap and Minimap.fsReadoutCoords) then return end
 
-    -- No position inside an instance (a battleground, a dungeon): dashes keep the LCD looking on, not broken
+    -- No position inside an instance (a battleground, a dungeon): dashes keep the readout looking on, not broken
     -- (player, Warsong Gulch 2026-11-05: an empty half box "looks weird").
     local coords = GetCoordsText()
     Minimap.fsReadoutCoords:SetText(coords or "--.-, --.-")
@@ -1721,86 +1875,102 @@ local function StartReadoutUpdater()
     Minimap.fsReadoutDriver = driver
 end
 
--- PIXELS: the box's height, its right inset and the text inset are whole physical pixels where the client says how big
--- a pixel is (FrameHelpers.PixelUnit at the box; whole UI units when it does not), seated at build and again on a
--- rescale. The width is READOUT_WIDTH rounded UP to a pixel (the extra is under one pixel, taken from the gap to the mail
--- slot, which is a whole key gap wide), so the text fitted to READOUT_WIDTH always has its room; the text inset is rounded
--- DOWN, for the same reason. The box is right aligned at BEZEL_PADDING, so its edge lines up with the first key's
--- inset on the other side of the bezel and, under it, with the tray tab's. Nothing hangs from the box, so a rescale in
--- combat may reseat it (unlike a frame the tray's protected buttons are anchored through).
-local function SeatReadout()
-    local bezel, box, coords = Minimap and Minimap.fsBezel, Minimap and Minimap.fsReadoutBox, Minimap and Minimap.fsReadoutCoords
-    if not (bezel and box) then return end
-    local helpers = FS.FrameHelpers
-    local px = (helpers and helpers.PixelUnit and helpers.PixelUnit(box)) or 1
-    local function Pixels(units) return math.max(1, math.floor(units / px + 0.5)) end
-    local widthPx = math.max(1, math.ceil(READOUT_WIDTH / px - 1e-6))
-    local insetPx = math.max(1, math.floor(READOUT_FIT.inset / px + 1e-6))
-
-    box:ClearAllPoints()
-    box:SetPoint("RIGHT", bezel, "RIGHT", -Pixels(BEZEL_PADDING) * px, 0)
-    box:SetSize(widthPx * px, Pixels(READOUT_HEIGHT) * px)
-    if coords then
-        coords:ClearAllPoints()
-        coords:SetPoint("LEFT", box, "LEFT", insetPx * px, 0)
-    end
-end
-
-if FS.Layout and FS.Layout.OnRescale then
-    FS.Layout.OnRescale(SeatReadout)
-end
-
--- The coords LCD: a dark box with a faint cyan border at the bezel row's right end, holding the cyan mono coords.
--- Requires the bezel to already exist (Minimap.fsBezel, built by ApplyControlBezel), since this is where it lives, off
--- the map face. A child of the bezel, so it follows its visibility and the diagnostics' minimap bounds file it under
--- the bezel's furniture.
+-- The coords: a divider and the readout, right aligned in the key row, on the body (SeatDividerAndCoords seats them for the
+-- keys showing). Requires the bezel and body to already exist (ApplyControlBezel). Text only: no box of its own, the body is the
+-- plate. The readout's size is fitted when it is seated, so it is created at the nominal one.
 local function ApplyReadout()
     if not Minimap or Minimap.fsReadout then return end
-    local bezel = Minimap.fsBezel
-    if not bezel then return end
-    if not (AddRoundedFill and AddGradientBorder and ApplyMono) then return end
+    local body, bezel = Body.frame, Minimap.fsBezel
+    if not (body and bezel) then return end
+    if not ApplyMono then return end
 
-    local box = CreateFrame("Frame", nil, bezel)
-    box:SetFrameLevel(bezel:GetFrameLevel() + READOUT_LEVEL_OFFSET)
-    AddRoundedFill(box, READOUT_FILL, READOUT_RADIUS)
-    AddGradientBorder(box, READOUT_BORDER, READOUT_BORDER_THICK, READOUT_RADIUS)
+    Row.divider = Flat(body, "BORDER", 2, COLOR_POWER, DIVIDER_ALPHA)
+    local coords = body:CreateFontString(nil, "OVERLAY")
+    ApplyMono(coords, SPEC.coords, COLOR_POWER)
+    coords:SetJustifyH("RIGHT")
 
-    local coords = box:CreateFontString(nil, "OVERLAY")
-    ApplyMono(coords, READOUT_FONT_SIZE, COLOR_POWER)
-
-    Minimap.fsReadoutBox = box
     Minimap.fsReadoutCoords = coords
     Minimap.fsReadout = true
 
-    SeatReadout()
+    SeatRow()
     StartReadoutUpdater()
 end
 
+-- Builds the body and the key row below Minimap: the bezel frame (the row: Minimap.fsBezel, what the quest timer and the
+-- queue eye seat on), the body round the map and the rows, and the keys (tracking, calendar, STU, mail; the tray's toggle joins
+-- from ApplyMinimapTray). Every Blizzard button lookup is feature-detected by its real (measured) name, a missing one or a
+-- throw is skipped and costs no slot, per key. fsBezel is the sole idempotency guard since Apply() only ever runs this once.
+local function ApplyControlBezel()
+    if not Minimap or Minimap.fsBezel then return end
+    if not (FS.Theme.FILL_CUT_TEXTURES and FS.Theme.BORDER_CUT_TEXTURES) then return end
+
+    local bezel = CreateFrame("Frame", nil, Minimap)
+    bezel:SetPoint("TOPLEFT", Minimap, "BOTTOMLEFT", 0, 0)
+    bezel:SetPoint("TOPRIGHT", Minimap, "BOTTOMRIGHT", 0, 0)
+    local g = Geo(bezel)
+    bezel:SetHeight(g.row * g.px)
+
+    -- Adopting Blizzard minimap buttons reparents them onto this frame, and two of them call Layout() on whatever their parent
+    -- is when their state changes. Verified against Blizzard_Minimap/Mainline/Minimap.lua on the `forever` client branch:
+    --   MiniMapMailFrameMixin:OnEvent          -> self:GetParent():Layout()  (466)
+    --   MiniMapCraftingOrderFrameMixin:OnEvent -> self:GetParent():Layout()  (538)
+    -- Their real parent is MinimapCluster, a LayoutFrame; ours is a plain Frame, so the call hit nil and threw inside
+    -- BLIZZARD's file the first time mail arrived, which reads as a Blizzard bug and is ours.
+    --
+    -- A no-op is the correct body, not a stub: SeatRow positions every key explicitly, so there is no layout pass to run. This
+    -- only has to not throw.
+    bezel.Layout = function() end
+
+    Minimap.fsBezel = bezel
+
+    local ok, err = pcall(BuildBody, bezel)
+    if not ok then LogKeyFailure("body", err) end
+
+    local resolved, skipped = {}, {}
+    local function TryKey(id, build)
+        local okKey, built = pcall(build, bezel)
+        if okKey and built then
+            resolved[#resolved + 1] = id
+            return
+        end
+        skipped[#skipped + 1] = id
+        if not okKey then LogKeyFailure(id, built) end
+    end
+
+    TryKey("tracking", BuildTrackingKey)
+    TryKey("calendar", BuildCalendarKey)
+    TryKey("stu", BuildSTUKey)
+    TryKey("mail", BuildMailKey)
+
+    -- Kept on Minimap for an in-game /dump-driven sanity check of which keys resolved; not read by any other code path in this
+    -- file.
+    Minimap.fsBezelResolved = resolved
+    Minimap.fsBezelSkipped = skipped
+
+    SeatRow()
+end
+
 -------------------------------------------------------------------------------
--- Addon-button tray drawer (collects LibDBIcon + stray minimap buttons)
+-- Addon-button tray (collects LibDBIcon + stray minimap buttons)
 -------------------------------------------------------------------------------
 
 -- Player: "any addons that are loaded and would normally put icons around the minimap need
--- to be moved to the tray ... so it doesn't clutter our awesome ui. Also I never saw a
--- button to pop out the tray."
+-- to be moved to the tray ... so it doesn't clutter our awesome ui. Also I never saw a button
+-- to pop out the tray."
 --
--- THE DRAWER hangs below the bezel (mockups .traydrawer): dark fill, cyan/violet border, a
--- small Orbitron "ADDONS" label, square tiles in a per-tile accent with the key underline.
--- Fill and border go through AddRoundedFill/AddGradientBorder at chamfer 4 like the bezel,
--- so under CHROME_CORNERS "cut" it is TOP-LEFT and BOTTOM-RIGHT cut only. Tiles wrap into
--- rows and the drawer height follows the row count. It is a child of Minimap anchored to
--- the bezel (no FS.Layout seat: the old `minimaptray` Layout entry is unused).
+-- THE DRAWER is the body's SECOND ROW (mockup A, open): a frame under the key row with no
+-- box of its own (the body's plate and edge run on round it, SeatBody), a dashed amber rule
+-- along its top, and the collected buttons as keys, each with the LED underline. They seat on
+-- the key row's own columns (SPEC.margin and the key pitch) and wrap into further rows of the
+-- key row's height when there are more of them than columns; the drawer's height follows the
+-- row count. It is a child of Minimap anchored to the bezel (no FS.Layout seat: the old
+-- `minimaptray` Layout entry is unused).
 --
--- THE POP-OUT is a TAB hanging off the bezel's bottom edge, not a 5th bezel key. Measured
--- from the metrics above at m = 250: the four key slots (tracking, calendar, settings, mail)
--- end at pad + 4 * KEY + 3 * gap = 148.8 and the coords box starts at least one gap later, at 156 or
--- a pixel past it (at m = 208, 123.8 and 130), so the bezel row is full: a 5th key would sit on top
--- of the coords LCD (as the mail key did before the box was sized to start after it). The tab
--- (count badge left, chevron right) sits in the drawer's header row, which is the same
--- height, so open it reads as a handle on the drawer and closed as a tab under the bezel.
--- It is right aligned at BEZEL_PADDING, the same inset as the coords box above it.
+-- THE POP-OUT is the key row's fourth key (BuildTrayToggle), not a tab: the number of
+-- collected buttons and a chevron, an amber LED that stays bright while the drawer is open. It
+-- is placed by SeatRow like every key, and hidden with the drawer at zero buttons.
 -- Open/closed lives in ForeverSTUwaveDB.minimapTrayOpen (default closed).
---
+----
 -- COLLECTION, read from LibDBIcon-1.0 minor 56 (the copy bundled with ForeverDungeonScout)
 -- and CallbackHandler-1.0, not guessed:
 --   * lib.objects / lib:GetButtonList() / lib:GetMinimapButton(name) list every button;
@@ -1825,8 +1995,6 @@ end
 -- their button late. Combat: nothing here is secure, but reparent and anchor changes still
 -- wait for PLAYER_REGEN_ENABLED, per the rest of this file.
 
-local TRAY_FILL = { 0.027, 0.012, 0.062, 0.96 } -- between the mock's #090515 and #040209 (flat; AddRoundedFill has no gradient)
-local TRAY_LABEL_COLOR = { 0.604, 0.561, 0.741, 1 } -- mock --muted, #9a8fbd
 local COLOR_MINT = { 0.227, 1, 0.627, 1 } -- mock tray key #3affa0
 local TRAY_ACCENTS = { COLOR_POWER, COLOR_PINK, COLOR_BORDER, COLOR_AMBER, COLOR_MINT }
 local TRAY_LOGIN_SWEEPS = { 1.5, 5 } -- seconds after Apply for the late-button re-sweeps
@@ -1844,7 +2012,7 @@ local TRAY_LOCKED_METHODS = {
 }
 
 local Tray = {
-    entries = {},      -- { button, accent, orig = { SetPoint = fn, ... } } in collection order
+    entries = {},      -- { button, accent, key, orig = { SetPoint = fn, ... } } in collection order
     byButton = {},
     pending = {},      -- buttons seen in combat, adopted on PLAYER_REGEN_ENABLED
     layoutPending = false,
@@ -1854,6 +2022,7 @@ local Tray = {
     libHooked = false,
     togglePending = false, -- a drawer show/hide waiting for PLAYER_REGEN_ENABLED
     failureLogged = false,
+    dashes = {},       -- the rule's dash textures, made as the width asks for them
     owner = {},        -- CallbackHandler owner key
 }
 
@@ -1864,22 +2033,6 @@ local function LogTrayFailure(where, err)
         FS.LogDegradeOnce("minimap_tray",
             "|cffff4488Forever STUwave|r: minimap button tray degraded (" .. tostring(where) .. "): " .. tostring(err))
     end
-end
-
-local function TrayMetrics()
-    local m = Metrics.map
-    local tabH = math.max(12, math.floor(KEY_SIZE * 0.5 + 0.5))
-    return {
-        tile = math.max(12, math.floor(KEY_SIZE * 0.8 + 0.5)),
-        gap = math.max(3, math.floor(m * 0.02 + 0.5)),
-        padX = math.max(6, math.floor(m * 0.036 + 0.5)),
-        padY = math.max(4, math.floor(m * 0.024 + 0.5)),
-        tabW = math.max(24, math.floor(KEY_SIZE * 1.2 + 0.5)),
-        tabH = tabH,
-        header = tabH + 3,
-        labelFont = math.max(6, math.floor(m * 0.032 + 0.5)),
-        tabFont = math.max(7, math.floor(tabH * 0.6 + 0.5)),
-    }
 end
 
 local function TrayWantsOpen()
@@ -1913,7 +2066,8 @@ local function AnyProtectedButton()
     return false
 end
 
--- Drawer show/hide, deferred to PLAYER_REGEN_ENABLED when protected buttons ride in it.
+-- Drawer show/hide, deferred to PLAYER_REGEN_ENABLED when protected buttons ride in it. The body ends at the drawer while it is
+-- shown, so it follows the drawer the moment it changes.
 local function SetDrawerShown(drawer, want)
     if (drawer:IsShown() and true or false) == want then
         Tray.togglePending = false
@@ -1925,6 +2079,7 @@ local function SetDrawerShown(drawer, want)
     end
     Tray.togglePending = false
     if want then drawer:Show() else drawer:Hide() end
+    SeatBody()
 end
 
 local function UpdateToggle()
@@ -1932,7 +2087,15 @@ local function UpdateToggle()
     local drawer = Minimap and Minimap.fsTray
     if not (toggle and drawer) then return end
     if toggle.count then toggle.count:SetText(tostring(Tray.count)) end
-    if toggle.glyph then toggle.glyph:SetText(Tray.open and "^" or "v") end
+    if toggle.chevron then
+        -- The baked chevron points down (closed); open is the same piece flipped over.
+        if Tray.open then toggle.chevron:SetTexCoord(0, 1, 1, 0) else toggle.chevron:SetTexCoord(0, 1, 0, 1) end
+    end
+    local st = Keys[toggle]
+    if st then
+        st.lit = Tray.open and true or false
+        PaintKey(toggle)
+    end
     if Tray.count == 0 then
         toggle:Hide()
         SetDrawerShown(drawer, false)
@@ -1942,34 +2105,78 @@ local function UpdateToggle()
     end
 end
 
+-- The dashed amber rule along the drawer's top edge (mockup: 4 px dashes and gaps at 2x, so 2 px, inset 6 px from each side), a
+-- run of flat dashes made as the width asks for them and hidden past the last one.
+local function SeatDrawerRule(g)
+    local drawer = Minimap and Minimap.fsTray
+    if not drawer then return end
+    local px = g.px
+    local count = math.max(0, math.floor((g.width - 2 * g.ruleInset + g.dash) / (2 * g.dash)))
+    for i = 1, count do
+        local dash = Tray.dashes[i]
+        if not dash then
+            dash = Flat(drawer, "BORDER", 1, COLOR_AMBER, RULE_ALPHA)
+            Tray.dashes[i] = dash
+        end
+        dash:ClearAllPoints()
+        dash:SetPoint("TOPLEFT", drawer, "TOPLEFT", (g.ruleInset + (i - 1) * 2 * g.dash) * px, 0)
+        dash:SetSize(g.dash * px, g.edge * px)
+        dash:Show()
+    end
+    for i = count + 1, #Tray.dashes do Tray.dashes[i]:Hide() end
+end
+
+-- A tile's icon: the key's glyph box (16 px, centred across the key, on the glyph row), where the lib's own icon would sit
+-- off-centre in a round button.
+local function SeatTileIcon(button, g)
+    local icon = button.icon or button.Icon
+    if not icon then return end
+    local isTexture = false
+    pcall(function() isTexture = (icon:GetObjectType() == "Texture") end)
+    if not isTexture then return end
+    local px = g.px
+    pcall(function()
+        icon:ClearAllPoints()
+        icon:SetPoint("TOPLEFT", button, "TOPLEFT", (g.keyW - g.glyph) / 2 * px, -g.glyphY * px)
+        icon:SetSize(g.glyph * px, g.glyph * px)
+    end)
+end
+
+-- The tile's LED, wash and hover outline and its icon, for the pixel scale now.
+local function SeatTileChrome(entry, g)
+    if entry.key then SeatKeyChrome(entry.key, g) end
+    SeatTileIcon(entry.button, g)
+end
+
+-- The tiles: key-sized, on the key row's columns (margin, then one key pitch a column), a row of the key row's height each.
+-- Columns are whatever whole keys the width takes (9 at the 248 px map).
 local function LayoutTiles()
     local drawer = Minimap and Minimap.fsTray
     if not drawer then return end
-    local m = TrayMetrics()
-    local width = (Minimap.GetWidth and Minimap:GetWidth()) or Metrics.map
-    local cols = math.max(1, math.floor((width - 2 * m.padX + m.gap) / (m.tile + m.gap)))
+    local g = Geo(drawer)
+    local px = g.px
+    local cols = math.max(1, math.floor((g.width - 2 * g.margin + g.keyGap) / g.pitch))
 
     local n = 0
     for _, entry in ipairs(Tray.entries) do
         if ButtonIsShown(entry.button) then
             local col, row = n % cols, math.floor(n / cols)
             Raw(entry, "SetScale", 1)
-            Raw(entry, "SetSize", m.tile, m.tile)
+            Raw(entry, "SetSize", g.keyW * px, g.keyH * px)
             Raw(entry, "ClearAllPoints")
             Raw(entry, "SetPoint", "TOPLEFT", drawer, "TOPLEFT",
-                m.padX + col * (m.tile + m.gap), -(m.header + row * (m.tile + m.gap)))
+                (g.margin + col * g.pitch) * px, -(row * g.row + g.topM) * px)
+            local ok, err = pcall(SeatTileChrome, entry, g)
+            if not ok then LogTrayFailure("tile chrome", err) end
             n = n + 1
         end
     end
     Tray.count = n
 
-    local rows = math.ceil(n / cols)
-    local height = m.header + m.padY
-    if rows > 0 then height = m.header + rows * m.tile + (rows - 1) * m.gap + m.padY end
-    drawer:SetHeight(height)
+    drawer:SetHeight(math.max(1, math.ceil(n / cols)) * g.row * px)
+    SeatDrawerRule(g)
     UpdateToggle()
 end
-
 local function RelayoutTray()
     if not (Minimap and Minimap.fsTray) or Tray.relayout then return end
     if InCombatLockdown() then
@@ -2019,65 +2226,30 @@ local function StripMinimapButtonArt(button)
     end
 end
 
-local function SeatTileIcon(button, m)
-    local icon = button.icon or button.Icon
-    if not icon then return end
-    local isTexture = false
-    pcall(function() isTexture = (icon:GetObjectType() == "Texture") end)
-    if not isTexture then return end
-    local size = math.max(8, math.floor(m.tile * 0.64 + 0.5))
-    pcall(function()
-        icon:ClearAllPoints()
-        icon:SetPoint("CENTER", button, "CENTER", 0, 0)
-        icon:SetSize(size, size)
-    end)
-end
-
 local function NeutralizeHoverFade(button)
     button.showOnMouseover = false
     pcall(function() if button.fadeOut and button.fadeOut.Stop then button.fadeOut:Stop() end end)
     pcall(function() button:SetAlpha(1) end)
 end
 
--- The square ADD wash that replaces the lib's round highlight.
-local function ApplyTileHighlight(button, accent)
+-- The lib's round highlight replaced by a flat one drawn at no alpha: the hover look is the key's own outline and bright LED
+-- (WireHover), and the lib's round art must not show inside the key.
+local function ApplyTileHighlight(button)
     pcall(function()
         button:SetHighlightTexture(TRAY_HIGHLIGHT_TEXTURE, "ADD")
         local hl = button.GetHighlightTexture and button:GetHighlightTexture()
-        if hl then
-            hl:SetVertexColor(accent[1], accent[2], accent[3], 0.25)
-            hl:ClearAllPoints()
-            hl:SetAllPoints(button)
-        end
+        if hl then hl:SetAlpha(0) end
     end)
-end
-
--- The tile: dark cut fill, accent ring and the key underline, behind the button's own icon.
-local function BuildTileChrome(button, accent, m)
-    local chamfer = KeyChamfer(m.tile)
-    if chamfer then
-        local texture = FS.Theme.AddSliceTexture(
-            button, CutFillTexture(chamfer), READOUT_FILL, "BACKGROUND", 0)
-        FS.Theme.ApplyNineSlice(texture, chamfer)
-    elseif AddRoundedFill then
-        AddRoundedFill(button, READOUT_FILL, Metrics.keyRadius)
-    end
-    if SkinButton then
-        SkinButton(button, { borderColor = accent, radius = Metrics.keyRadius, chamfer = chamfer })
-    end
-    AddKeyUnderline(button, m.tile, m.tile, accent)
-    ApplyTileHighlight(button, accent)
 end
 
 local function AdoptButton(button)
     local drawer = Minimap.fsTray
-    local m = TrayMetrics()
+    local g = Geo(drawer)
     local entry = {
         button = button,
         accent = TRAY_ACCENTS[(#Tray.entries % #TRAY_ACCENTS) + 1],
         orig = {},
     }
-
     -- Locks first, so nothing the steps below trigger (or any addon, ever again) can
     -- re-anchor the button around the map. Originals are kept for the tray's own use.
     for _, method in ipairs(TRAY_LOCKED_METHODS) do
@@ -2117,9 +2289,15 @@ local function AdoptButton(button)
     Step("movable", function() button:SetMovable(false) end)
     Step("drag", function() button:RegisterForDrag() end)
     Step("art", function() StripMinimapButtonArt(button) end)
-    Step("icon", function() SeatTileIcon(button, m) end)
+    Step("icon", function() SeatTileIcon(button, g) end)
     Step("hover", function() NeutralizeHoverFade(button) end)
-    Step("chrome", function() BuildTileChrome(button, entry.accent, m) end)
+    -- The tile is a key of the second row: the same LED underline and hover outline in its accent, over whatever the lib drew.
+    Step("chrome", function()
+        entry.key = AddKeyChrome(button, entry.accent, "tile")
+        WireHover(button)
+        ApplyTileHighlight(button)
+        SeatTileChrome(entry, g)
+    end)
     -- A button its addon shows or hides (db.hide, lib:Hide/Show) joins or leaves the grid,
     -- but only when its shown state actually changed (Show on a shown button is a no-op).
     entry.shown = ButtonIsShown(button)
@@ -2191,14 +2369,15 @@ local TRAY_ART_HOOKS = {
     "ResetButtonIcon", "SetButtonIcon", "ResetButtonHighlightTexture", "SetButtonHighlightTexture",
 }
 
+
 local function ReapplyTileArt(button)
     local entry = Tray.byButton[button]
     if not entry then return end
-    local m = TrayMetrics()
+    local g = Geo(Minimap.fsTray)
     local ok, err = pcall(function()
         StripMinimapButtonArt(button)
-        SeatTileIcon(button, m)
-        ApplyTileHighlight(button, entry.accent)
+        SeatTileIcon(button, g)
+        ApplyTileHighlight(button)
     end)
     if not ok then LogTrayFailure("art reapply", err) end
 end
@@ -2268,95 +2447,67 @@ local function FlushPending()
 end
 
 local function ReanchorTray()
-    if not (Minimap and Minimap.fsTray) then return end
-    local anchorAbove = Minimap.fsBezel or Minimap
-    Minimap.fsTray:ClearAllPoints()
-    Minimap.fsTray:SetPoint("TOPLEFT", anchorAbove, "BOTTOMLEFT", 0, 0)
-    Minimap.fsTray:SetPoint("TOPRIGHT", anchorAbove, "BOTTOMRIGHT", 0, 0)
-    local toggle = Minimap.fsTrayToggle
-    if toggle then
-        toggle:ClearAllPoints()
-        toggle:SetPoint("TOPRIGHT", anchorAbove, "BOTTOMRIGHT", -BEZEL_PADDING, 0)
-    end
+    local drawer, bezel = Minimap and Minimap.fsTray, Minimap and Minimap.fsBezel
+    if not (drawer and bezel) then return end
+    drawer:ClearAllPoints()
+    drawer:SetPoint("TOPLEFT", bezel, "BOTTOMLEFT", 0, 0)
+    drawer:SetPoint("TOPRIGHT", bezel, "BOTTOMRIGHT", 0, 0)
 end
 
-local function BuildTrayToggle(m, anchorAbove)
-    local toggle = CreateFrame("Button", "ForeverSTUwaveMinimapTrayToggle", anchorAbove)
-    toggle:SetSize(m.tabW, m.tabH)
-    toggle:Hide() -- stays hidden until UpdateToggle shows it; a throw below leaves no tab
-    toggle:SetPoint("TOPRIGHT", anchorAbove, "BOTTOMRIGHT", -BEZEL_PADDING, 0)
-    toggle:SetFrameLevel((anchorAbove:GetFrameLevel() or 1) + 6)
+-- The toggle, the key row's fourth: the count of collected buttons (amber mono) and a chevron, an amber LED. A Button of ours,
+-- hidden until UpdateToggle shows it (a throw below leaves no key in the row), placed by SeatRow like the others. Its
+-- chevron is the baked one pointing down; UpdateToggle flips it while the drawer is open.
+local function BuildTrayToggle(bezel)
+    local toggle = CreateFrame("Button", "ForeverSTUwaveMinimapTrayToggle", bezel)
+    toggle:Hide()
+    toggle:SetFrameLevel(bezel:GetFrameLevel() + KEY_LEVEL_OFFSET)
 
-    local chamfer = KeyChamfer(m.tabH)
-    if chamfer then
-        local texture = FS.Theme.AddSliceTexture(
-            toggle, CutFillTexture(chamfer), READOUT_FILL, "BACKGROUND", 0)
-        FS.Theme.ApplyNineSlice(texture, chamfer)
-    elseif AddRoundedFill then
-        AddRoundedFill(toggle, READOUT_FILL, Metrics.keyRadius)
-    end
-    if SkinButton then
-        SkinButton(toggle, { borderColor = COLOR_POWER, radius = Metrics.keyRadius, chamfer = chamfer })
-    end
-    AddKeyUnderline(toggle, m.tabW, m.tabH, COLOR_POWER)
+    local st = AddKeyChrome(toggle, COLOR_AMBER, "toggle")
+    st.order = 4
 
-    -- Count badge (left, amber) and chevron (right, cyan). Plain ASCII "v" /
-    -- "^": no glyph that the bundled mono font might lack.
     local count = toggle:CreateFontString(nil, "OVERLAY")
-    count:SetPoint("LEFT", toggle, "LEFT", 5, 0)
-    ApplyMono(count, m.tabFont, COLOR_AMBER)
+    ApplyMono(count, SPEC.count, COLOR_AMBER)
     count:SetText("0")
-    local glyph = toggle:CreateFontString(nil, "OVERLAY")
-    glyph:SetPoint("RIGHT", toggle, "RIGHT", -5, 1)
-    ApplyMono(glyph, m.tabFont, COLOR_POWER)
-    glyph:SetText("v")
+    local chevron = Crisp(toggle:CreateTexture(nil, "ARTWORK", nil, 1))
+    chevron:SetTexture(CHEVRON_TEXTURE)
+    chevron:SetVertexColor(COLOR_AMBER[1], COLOR_AMBER[2], COLOR_AMBER[3], 1)
     toggle.count = count
-    toggle.glyph = glyph
+    toggle.chevron = chevron
 
     toggle:SetScript("OnClick", function() SetTrayOpen(not Tray.open) end)
     toggle:SetScript("OnEnter", function(self)
-        if not GameTooltip then return end
-        pcall(function()
-            GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT")
-            GameTooltip:SetText(string.format("Addon buttons (%d)", Tray.count))
-            GameTooltip:Show()
-        end)
+        SetOver(self, true)
+        ShowTip(self, "ANCHOR_BOTTOMLEFT", string.format("Addon buttons (%d)", Tray.count))
     end)
-    toggle:SetScript("OnLeave", function()
-        if GameTooltip then pcall(function() GameTooltip:Hide() end) end
+    toggle:SetScript("OnLeave", function(self)
+        SetOver(self, false)
+        HideTip()
     end)
+    toggle:SetScript("OnHide", function(self) SetOver(self, false) end)
+    WireVisibility(toggle)
+
+    AddRowKey(st)
     return toggle
 end
 
 local function BuildTray()
     if not Minimap or Minimap.fsTray then return end
-    if not (AddRoundedFill and AddGradientBorder and ApplyMono and ApplyFontGeneric) then return end
+    if not (ApplyMono and Minimap.fsBezel) then return end
 
-    local m = TrayMetrics()
-    local anchorAbove = Minimap.fsBezel or Minimap
+    local bezel = Minimap.fsBezel
+    local g = Geo(bezel)
 
     local drawer = CreateFrame("Frame", nil, Minimap)
-    drawer:SetHeight(m.header + m.padY)
-    drawer:SetPoint("TOPLEFT", anchorAbove, "BOTTOMLEFT", 0, 0)
-    drawer:SetPoint("TOPRIGHT", anchorAbove, "BOTTOMRIGHT", 0, 0)
-    AddRoundedFill(drawer, TRAY_FILL, BEZEL_RADIUS)
-    -- COLOR_BORDER_BLEND, the same cyan/violet color-mix as the map's own border, per the
-    -- mockup's .traydrawer. Under "cut" the chamfer is TOP-LEFT and BOTTOM-RIGHT only.
-    AddGradientBorder(drawer, COLOR_BORDER_BLEND, BEZEL_BORDER_THICK, BEZEL_RADIUS)
-
-    local label = drawer:CreateFontString(nil, "OVERLAY")
-    label:SetPoint("LEFT", drawer, "TOPLEFT", m.padX, -(m.header / 2))
-    ApplyFontGeneric(label, FONT_ORBITRON, m.labelFont, TRAY_LABEL_COLOR, "")
-    label:SetShadowColor(COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 0.5)
-    label:SetShadowOffset(0, 0)
-    label:SetText("ADDONS")
-    drawer.label = label
+    drawer:SetFrameLevel(bezel:GetFrameLevel() + DECK_LEVEL_OFFSET)
+    drawer:SetHeight(g.row * g.px)
+    drawer:SetPoint("TOPLEFT", bezel, "BOTTOMLEFT", 0, 0)
+    drawer:SetPoint("TOPRIGHT", bezel, "BOTTOMRIGHT", 0, 0)
     drawer:Hide()
 
     -- Minimap.fsTray / fsTrayToggle are published only once everything below exists, so a
     -- throw anywhere in here leaves nothing half-wired (BuildTrayToggle hides its frame at
-    -- creation, so a failed build leaves no visible tab either).
-    local toggle = BuildTrayToggle(m, anchorAbove)
+    -- creation, so a failed build leaves no visible key either).
+    local toggle = BuildTrayToggle(bezel)
 
     -- Late buttons: addons create theirs well after login.
     local events = CreateFrame("Frame")
@@ -2388,6 +2539,7 @@ local function BuildTray()
         for _, delay in ipairs(TRAY_LOGIN_SWEEPS) do C_Timer.After(delay, SweepAll) end
     end
     RelayoutTray()
+    SeatRow()
 end
 
 local function ApplyMinimapTray()
@@ -2413,7 +2565,6 @@ local function Apply()
     ApplyLayout()
     ApplySquareMask()
     HideBlizzardChrome()
-    ApplyChrome()
     ApplyHighlight()
     ApplyPlayerBlipGlow()
     ApplyZoom()
