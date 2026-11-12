@@ -1160,6 +1160,9 @@ local function SkinAutoComplete()
     local box = _G.AutoCompleteBox
     if not box or box.fsMailSkin or type(CreateFont) ~= "function" then return end
     box.fsMailSkin = true
+    -- TooltipBackdropTemplate draws its gold border and fill on a NineSlice CHILD frame at the box's own level
+    -- (SharedTooltipTemplates.xml), which a region strip never reaches: hold it at alpha 0 under our chrome.
+    Quiet(box.NineSlice)
     pcall(Theme.SkinPanel, box, { scanline = false })
     local normal = CreateFont("ForeverSTUwaveAutoCompleteNormal")
     normal:SetFont(Theme.FONT_MONO, U(14), "")
@@ -1214,18 +1217,21 @@ local function SkinSend(win)
     HeldArt.Hold(_G.SendMailErrorCoin)
 
     -- prompt lines
-    local function prompt(y, label, box, w)
+    -- The typed text starts 12 px after its label: label widths in Mononoki at 13 px (0.6 em advance) are
+    -- 16 px for TO and 55 px for SUBJECT.
+    local function prompt(y, label, box, right)
         Line(send, send, "LEFT", 18, y, ">", 17, C.cyan)
         Line(send, send, "LEFT", 36, y, label, 13, C.muted)
         Rect(send, 18, y + 18, G.WIN_W - 36, 1, C.cyan, 0.4, "ARTWORK", 1)
         if box then
+            local x = 36 + math.ceil(#label * 13 * 0.6) + 12
             SkinEditField(box, 17, C.white)
             Above(box, send)
-            Place(box, send, 124, y - 12, w, 24)
+            Place(box, send, x, y - 12, right - x, 24)
         end
     end
-    prompt(80, "TO", _G.SendMailNameEditBox, 178)
-    prompt(122, "SUBJECT", _G.SendMailSubjectEditBox, G.WIN_W - 18 - 124)
+    prompt(80, "TO", _G.SendMailNameEditBox, 310 - 12)
+    prompt(122, "SUBJECT", _G.SendMailSubjectEditBox, G.WIN_W - 18)
 
     -- postage chip
     local chip = Box(send, send, 310, 68, 104, 24)

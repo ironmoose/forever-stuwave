@@ -992,8 +992,9 @@ local_send_prelude = """
 
 case("send_prompt_lines_postage_chip_and_pad_keep_the_mocks_margins", local_send_prelude + """
     local name, subject = SendMailNameEditBox, SendMailSubjectEditBox
-    Expect(name, W, 124, 68, 178, 24, "to field")
-    Expect(subject, W, 124, 110, 290, 24, "subject field")
+    -- the typed text starts 12 px after its label (TO 16 px, SUBJECT 55 px wide); TO stops 12 px short of the postage chip
+    Expect(name, W, 64, 68, 234, 24, "to field")
+    Expect(subject, W, 103, 110, 311, 24, "subject field")
     local _, ny = CenterOf(name, W)
     local _, sy = CenterOf(subject, W)
     assert(Near(ny, 80) and Near(sy, 122), "field centres")
