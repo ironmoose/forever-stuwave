@@ -584,7 +584,7 @@ local function SkinFilter(btn)
     end
     for _, key in ipairs({ "NormalTexture", "Lines", "HighlightTexture" }) do HeldArt.Hold(btn[key]) end
     local label = btn.GetFontString and Try(btn.GetFontString, btn)
-    if type(label) == "table" then Kit.RestyleLabel(label, btn, 11, C.text) end
+    if type(label) == "table" then Kit.RestyleLabel(label, btn, 13, C.text) end -- 11 read too small live (2026-11-12)
     PaintFilter(btn)
 end
 
