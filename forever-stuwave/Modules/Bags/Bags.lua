@@ -487,10 +487,19 @@ local function SyncSlot(button)
 end
 
 -- One post-hook per icon state setter (no method replaced), installed once per button.
+-- Item icon art carries a light 1 to 2 px bevel of its own, which showed as a silver edge at the slot's two uncut
+-- corners, inside our ring. The icon is cropped 7% a side as on the action bars; SetAtlas (the empty-slot art)
+-- writes its own coords, so the crop goes back on after every texture or atlas the icon takes.
+local ICON_CROP = { 0.07, 0.93, 0.07, 0.93 }
+local function CropIcon(icon)
+    if type(icon.SetTexCoord) == "function" then pcall(icon.SetTexCoord, icon, ICON_CROP[1], ICON_CROP[2], ICON_CROP[3], ICON_CROP[4]) end
+end
+
 local function HookIconState(button)
     local icon = ItemIcon(button)
     if not icon or type(hooksecurefunc) ~= "function" then return end
-    local function sync() SyncSlot(button) end
+    CropIcon(icon)
+    local function sync() CropIcon(icon); SyncSlot(button) end
     for _, method in ipairs(ICON_STATE_METHODS) do
         if type(icon[method]) == "function" then pcall(hooksecurefunc, icon, method, sync) end
     end
