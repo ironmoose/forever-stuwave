@@ -189,8 +189,30 @@ end
 -- template draws on its own (the pager's Prev / Next, the expiry button's days, OpenAllMailText), which
 -- GetFontString does not return. Our own labels (S.fonts) are skipped. SetText re-runs it, because a button's
 -- FontString can be created by its first SetText, after the skin was built.
+-- A font object with a fully clear colour. A button applies its normal / highlight / disabled font object to its
+-- caption on every state change inside the engine, which resets the caption's colour (and with it the alpha the
+-- hold set) without any Lua SetAlpha call the hold could catch: the stock caption came back on hover. Giving the
+-- button this object for every state keeps the caption clear whichever state the engine applies.
+local ghostFont
+local function GhostFont()
+    if ghostFont == nil and type(CreateFont) == "function" then
+        ghostFont = CreateFont("ForeverSTUwaveMailGhostFont") or false
+        if ghostFont then
+            if _G.GameFontNormal and ghostFont.CopyFontObject then pcall(ghostFont.CopyFontObject, ghostFont, _G.GameFontNormal) end
+            if ghostFont.SetTextColor then ghostFont:SetTextColor(0, 0, 0, 0) end
+        end
+    end
+    return ghostFont or nil
+end
+
 local function QuietTexts(button)
     if type(button) ~= "table" then return end
+    local ghost = GhostFont()
+    if ghost then
+        for _, method in ipairs({ "SetNormalFontObject", "SetHighlightFontObject", "SetDisabledFontObject" }) do
+            if type(button[method]) == "function" then pcall(button[method], button, ghost) end
+        end
+    end
     local function sweep()
         if type(button.GetFontString) == "function" then
             local fs = button:GetFontString()
@@ -1295,7 +1317,23 @@ local function RefreshSend()
     for i, b in ipairs(L.slots) do if SeatSendSlot(b, i) then filled = filled + 1 end end
     L.cargo:SetText(filled .. "/" .. total)
     local sendMoney = _G.SendMailSendMoneyButton
-    if sendMoney then L.mode.set(Try(sendMoney.GetChecked, sendMoney) == true and 1 or 2) end
+    local cod = sendMoney and Try(sendMoney.GetChecked, sendMoney) ~= true
+    if sendMoney then L.mode.set(cod and 2 or 1) end
+    if L.coins then
+        local copper, mult = 0, { 10000, 100, 1 }
+        for k, e in ipairs(L.coins) do
+            local text = e.box and Plain(Try(e.box.GetText, e.box)) or ""
+            local n = tonumber(text) or 0
+            copper = copper + n * mult[k]
+            e.zero:SetShown(text == "" and not e.focus)
+            PaintShape(e.seg.fsShape, Mix(e.fill, e.coin, e.focus and 0.08 or 0), 1, e.coin, (e.focus or n > 0) and 1 or 0.45)
+        end
+        if copper > 0 then
+            L.moneySum:SetText(Hex(C.muted) .. (cod and "collect on delivery " or "sending ") .. "|r" .. CoinText(copper))
+        else
+            L.moneySum:SetText(Hex(C.muted) .. "none attached|r")
+        end
+    end
 end
 
 -- The name suggestions under TO (AutoCompleteBox, a TooltipBackdropTemplate frame shared with whisper boxes): our
@@ -1429,21 +1467,36 @@ local function SkinSend(win)
         end
     end
 
-    -- money inputs, one segment each
+    -- money inputs: a segment per coin with the coin's letter on a lit chip at its right end, a muted 0 while it
+    -- is empty, the ring at full while it has focus or holds an amount; the amount being sent (or asked for on
+    -- delivery) reads out at the right of the MONEY line, like the CARGO count.
     local moneyY = cargoY + (14 + rows * 48 - SEND_GAP) + 38
     Line(send, send, "LEFT", 18, moneyY - 12, "MONEY", 12, C.muted)
+    L.moneySum = Line(send, send, "RIGHT", G.WIN_W - 18, moneyY - 12, "", 13, C.muted)
     local segs = {
         { "SendMailMoneyGold", C.gold, "g" }, { "SendMailMoneySilver", C.silver, "s" }, { "SendMailMoneyCopper", C.copper, "c" },
     }
+    L.coins = {}
     for k, def in ipairs(segs) do
-        local seg = Box(send, send, 18 + (k - 1) * 80, moneyY, 74, 36)
-        seg.fsShape = Shape(seg, 6, C.ink, def[2], 0.55)
-        Line(seg, seg, "CENTER", 67, 18, def[3], 13, C.muted)
+        local coin = def[2]
+        local seg = Box(send, send, 18 + (k - 1) * 82, moneyY, 76, 36)
+        local fill = Mix(C.ink, coin, 0.06)
+        seg.fsShape = Shape(seg, 6, fill, coin, 0.45)
+        local chip = Box(seg, seg, 52, 9, 18, 18)
+        chip.fsShape = Shape(chip, 2, coin, nil)
+        Line(chip, chip, "CENTER", 9, 9, def[3], 13, C.ink)
+        local zero = Line(seg, seg, "RIGHT", 46, 18, "0", 19, C.muted)
+        zero:SetAlpha(0.45)
         local box = _G[def[1]]
+        local entry = { seg = seg, fill = fill, coin = coin, zero = zero, box = box }
+        L.coins[k] = entry
         if box then
-            SkinEditField(box, 19, def[2], "RIGHT")
+            SkinEditField(box, 19, coin, "RIGHT")
             Above(box, seg)
-            Place(box, seg, 6, 6, 48, 24)
+            Place(box, seg, 6, 6, 40, 24)
+            HookScript(box, "OnTextChanged", function() RefreshSend() end)
+            HookScript(box, "OnEditFocusGained", function() entry.focus = true; RefreshSend() end)
+            HookScript(box, "OnEditFocusLost", function() entry.focus = false; RefreshSend() end)
         end
     end
 

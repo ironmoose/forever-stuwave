@@ -1055,16 +1055,16 @@ case("send_cargo_strip_money_segments_and_footer_keep_the_mocks_spacing", local_
     end
     local _, _, r8 = Px(SendMailAttachment8, W)
     assert(Near(414 - r8, 8), "last slot to the strip edge " .. (414 - r8))
-    -- three money segments on an 80 px pitch, the edit boxes right aligned 20 px from each segment's end
+    -- three money segments on an 82 px pitch, the edit boxes end 30 px before each segment's end (the coin chip)
     local segs = {}
     for _, c in ipairs(P.children) do
         local l, t, r, b = Px(c, W)
-        if Near(t, 510) and Near(b - t, 36) and Near(r - l, 74) then segs[#segs + 1] = c end
+        if Near(t, 510) and Near(b - t, 36) and Near(r - l, 76) then segs[#segs + 1] = c end
     end
     table.sort(segs, function(a, b) return Px(a, W) < Px(b, W) end)
     assert(#segs == 3, "segments " .. #segs)
-    for i, seg in ipairs(segs) do Expect(seg, W, 18 + (i - 1) * 80, 510, 74, 36, "segment " .. i) end
-    Expect(SendMailMoneyGold, segs[1], 6, 6, 48, 24, "gold box")
+    for i, seg in ipairs(segs) do Expect(seg, W, 18 + (i - 1) * 82, 510, 76, 36, "segment " .. i) end
+    Expect(SendMailMoneyGold, segs[1], 6, 6, 40, 24, "gold box")
     -- the send / c.o.d. switch ends at the 414 edge, level with the segments
     local sw = S.send.mode.plate
     Expect(sw, W, 264, 510, 150, 36, "mode switch")
