@@ -1310,11 +1310,20 @@ local function SkinAutoComplete()
     Quiet(box.NineSlice)
     pcall(Theme.SkinPanel, box, { scanline = false })
     local normal = CreateFont("ForeverSTUwaveAutoCompleteNormal")
-    normal:SetFont(Theme.FONT_MONO, U(14), "")
     normal:SetTextColor(C.text[1], C.text[2], C.text[3])
     local lit = CreateFont("ForeverSTUwaveAutoCompleteHighlight")
-    lit:SetFont(Theme.FONT_MONO, U(14), "")
     lit:SetTextColor(C.cyan[1], C.cyan[2], C.cyan[3])
+    -- Sized from the box's own pixel scale each time it shows: it lives on UIParent, not in the mail window, and
+    -- sized once at build time (before the window had its live scale) the rows came out far too small.
+    local function size()
+        local units = 15 * LAYOUT_SCALE / Ppu(box)
+        normal:SetFont(Theme.FONT_MONO, units, "")
+        lit:SetFont(Theme.FONT_MONO, units, "")
+        local hint = _G.AutoCompleteInstructions
+        if hint and hint.SetFont then Theme.ApplyMono(hint, 12 * LAYOUT_SCALE / Ppu(box), C.muted) end
+    end
+    size()
+    HookScript(box, "OnShow", size)
     for i = 1, (type(_G.AUTOCOMPLETE_MAX_BUTTONS) == "number" and _G.AUTOCOMPLETE_MAX_BUTTONS or 5) do
         local b = _G["AutoCompleteButton" .. i]
         if b then
@@ -1326,11 +1335,6 @@ local function SkinAutoComplete()
                 if hl.SetBlendMode then hl:SetBlendMode("BLEND") end
             end
         end
-    end
-    local hint = _G.AutoCompleteInstructions
-    if hint and hint.SetFont then
-        Theme.ApplyMono(hint, U(11), C.muted)
-        S.fonts[hint] = { px = 11, color = C.muted }
     end
 end
 
