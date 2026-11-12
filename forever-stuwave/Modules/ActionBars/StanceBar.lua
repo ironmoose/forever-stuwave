@@ -211,20 +211,136 @@ local function UpdateHotkey(button)
     if button.fsHotkeyPlate then button.fsHotkeyPlate:SetShown(button.fsShouldered) end
 end
 
--- The active stance's look, the same as the Paladin aura row's (SealBar.lua): a cyan ADD wash over the face,
--- the ring lifted halfway to white and the glow raised. The checked state alone drew nothing (the cut skin has
--- no checked art), so a Warrior could not tell the stance from the bar. Texture writes only: legal in combat.
-local ACTIVE_ALPHA, RING_LIFT, GLOW_IDLE, GLOW_ACTIVE = 0.4, 0.5, 0.35, 0.7
+local allButtons = {}   -- the shown stance buttons, rebuilt by Build
+local container         -- FSStanceBar, made in Apply
+
+-- The active stance's look, "signal rail" (mockups/stance-indicator-2026-11-12.html, option B, picked 2026-11-12):
+--   * idle stances drop to dim greyscale, so the active one is the only button in colour;
+--   * the active stance's ring goes white and its glow rises;
+--   * cast-bar chevrons (ctl_chevron_h4, the controls kit's 8 x 4 strip) march along the bottom of its face;
+--   * a rail runs under the row and a cyan carriage slides to the active stance with a little overshoot.
+-- The checked state alone drew nothing (the cut skin has no checked art), so a Warrior could not tell the stance
+-- from the bar. Texture, anchor and alpha writes on our own regions only: legal in combat.
+local GLOW_IDLE, GLOW_ACTIVE, IDLE_ALPHA = 0.35, 0.7, 0.55
+local CHEV_TEXTURE = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\ctl_chevron_h4.tga"
+local CHEV_PERIOD = 0.6                     -- seconds per 8 px chevron step (the mockup's march)
+local RAIL = { GAP = 4, H = 2, CAR_W = 28, CAR_H = 4, ALPHA = 0.35 }   -- physical px
+local rail                                  -- { frame, line, car, glow, x, v, target }
+
+local function Px(frame, n)
+    local ppu = FS.FrameHelpers.PixelsPerUnit and FS.FrameHelpers.PixelsPerUnit(frame) or 1
+    if type(ppu) ~= "number" or ppu <= 0 then ppu = 1 end
+    return n / ppu
+end
+
+-- The chevron strip along the bottom of a button's face: a clipping frame 3 px in from the sides and bottom, the
+-- strip texture tiled across it and scrolled by the rail's clock (texcoord offset, so nothing is re-anchored).
+local function EnsureChevrons(button)
+    if button.fsChevClip then return button.fsChevClip end
+    local clip = CreateFrame("Frame", nil, button)
+    clip:SetFrameLevel(button:GetFrameLevel() + 4)
+    if clip.SetClipsChildren then clip:SetClipsChildren(true) end
+    local tex = clip:CreateTexture(nil, "OVERLAY")
+    tex:SetTexture(CHEV_TEXTURE, "REPEAT", "CLAMP")
+    tex:SetAllPoints(clip)
+    tex:SetVertexColor(COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 0.9)
+    clip.tex = tex
+    clip:Hide()
+    button.fsChevClip = clip
+    return clip
+end
+
+local function SeatChevrons(button)
+    local clip = EnsureChevrons(button)
+    clip:ClearAllPoints()
+    clip:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", Px(button, 3), Px(button, 3))
+    clip:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -Px(button, 3), Px(button, 3))
+    clip:SetHeight(Px(button, 4))
+end
 
 local function PaintActive(button)
     local active = button.fsLastActive == true
-    if button.fsActiveWash then button.fsActiveWash:SetShown(active) end
+    if button.icon then
+        if button.icon.SetDesaturated then button.icon:SetDesaturated(not active) end
+        if button.fsLastActive ~= nil then button.icon:SetVertexColor(active and 1 or IDLE_ALPHA, active and 1 or IDLE_ALPHA, active and 1 or IDLE_ALPHA) end
+    end
+    if button.fsChevClip then button.fsChevClip:SetShown(active) end
     local skin, c = button.fsSkin, COLOR_POWER
-    if not (skin and c) then return end
-    local r, g, b = c[1], c[2], c[3]
-    if active then r, g, b = r + (1 - r) * RING_LIFT, g + (1 - g) * RING_LIFT, b + (1 - b) * RING_LIFT end
-    if skin.border and skin.border.ring then skin.border.ring:SetVertexColor(r, g, b, 1) end
-    if skin.glow then skin.glow:SetVertexColor(c[1], c[2], c[3], active and GLOW_ACTIVE or GLOW_IDLE) end
+    if skin and c then
+        if skin.border and skin.border.ring then
+            if active then skin.border.ring:SetVertexColor(1, 1, 1, 1) else skin.border.ring:SetVertexColor(c[1], c[2], c[3], 1) end
+        end
+        if skin.glow then skin.glow:SetVertexColor(c[1], c[2], c[3], active and GLOW_ACTIVE or GLOW_IDLE) end
+    end
+end
+
+-- The rail's clock: the chevron march on every active strip, and the carriage spring (stiffness 300, damping 22,
+-- a little overshoot like the mockup's cubic-bezier) toward the active stance's centre.
+local function RailTick(_, dt)
+    if not rail then return end
+    rail.phase = ((rail.phase or 0) - dt / CHEV_PERIOD) % 1
+    for _, button in ipairs(allButtons) do
+        local clip = button.fsChevClip
+        if clip and clip:IsShown() then
+            local w = clip:GetWidth() or 0
+            local tiles = w > 0 and (w / Px(button, 8)) or 1
+            clip.tex:SetTexCoord(rail.phase, rail.phase + tiles, 0, 1)
+        end
+    end
+    if rail.target then
+        local a = (rail.target - rail.x) * 300 - rail.v * 22
+        rail.v = rail.v + a * dt
+        rail.x = rail.x + rail.v * dt
+        if math.abs(rail.target - rail.x) < 0.05 and math.abs(rail.v) < 0.05 then rail.x, rail.v = rail.target, 0 end
+        rail.car:ClearAllPoints()
+        rail.car:SetPoint("LEFT", rail.line, "LEFT", rail.x - rail.car:GetWidth() / 2, 0)
+    end
+end
+
+-- Seats the rail under the shown buttons and aims the carriage at the active one (snapping on first sight).
+local function UpdateRail()
+    if not container then return end
+    if not rail then
+        local f = CreateFrame("Frame", nil, container)
+        local line = f:CreateTexture(nil, "ARTWORK")
+        line:SetColorTexture(FS.Theme.COLOR_BORDER[1], FS.Theme.COLOR_BORDER[2], FS.Theme.COLOR_BORDER[3], RAIL.ALPHA)
+        local glow = f:CreateTexture(nil, "ARTWORK", nil, 1)
+        glow:SetColorTexture(COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 0.3)
+        local car = f:CreateTexture(nil, "ARTWORK", nil, 2)
+        car:SetColorTexture(COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 1)
+        glow:SetPoint("TOPLEFT", car, "TOPLEFT", -2, 2)
+        glow:SetPoint("BOTTOMRIGHT", car, "BOTTOMRIGHT", 2, -2)
+        rail = { frame = f, line = line, car = car, glow = glow, x = 0, v = 0 }
+        f:SetScript("OnUpdate", RailTick)
+    end
+    local first, last, active
+    for _, button in ipairs(allButtons) do
+        if button:IsShown() then
+            if not first or (button:GetLeft() or 0) < (first:GetLeft() or 0) then first = button end
+            if not last or (button:GetRight() or 0) > (last:GetRight() or 0) then last = button end
+            if button.fsLastActive == true then active = button end
+        end
+    end
+    if not (first and last) then rail.frame:Hide() return end
+    local ref = first
+    rail.frame:SetFrameLevel(ref:GetFrameLevel() + 1)
+    rail.line:ClearAllPoints()
+    rail.line:SetPoint("TOPLEFT", first, "BOTTOMLEFT", 0, -Px(ref, RAIL.GAP))
+    rail.line:SetPoint("TOPRIGHT", last, "BOTTOMRIGHT", 0, -Px(ref, RAIL.GAP))
+    rail.line:SetHeight(Px(ref, RAIL.H))
+    rail.car:SetSize(Px(ref, RAIL.CAR_W), Px(ref, RAIL.CAR_H))
+    rail.frame:Show()
+    local left, centre = first:GetLeft(), active and active:GetCenter()
+    if active and left and centre then
+        rail.car:Show(); rail.glow:Show()
+        local target = centre - left
+        if not rail.target then rail.x, rail.v = target, 0 end
+        rail.target = target
+    else
+        rail.car:Hide(); rail.glow:Hide()
+        rail.target = nil
+    end
+    RailTick(nil, 0)
 end
 
 -- GetShapeshiftFormInfo's flag, cross-checked against GetShapeshiftForm() when the flag is nil or secret (as
@@ -255,6 +371,7 @@ local function SyncChecked(button)
         button:SetChecked(button.fsLastActive)
     end
     PaintActive(button)
+    UpdateRail()
 end
 
 local function UpdateButton(button)
@@ -315,7 +432,6 @@ local function UpdateButton(button)
     UpdateCooldown(button)
 end
 
-local allButtons = {}
 
 local function UpdateAll()
     -- pendingSync is only cleared by a clean pass out of combat: in combat a write
@@ -325,6 +441,10 @@ local function UpdateAll()
         -- pcall-wrapped so one bad read doesn't kill the whole update loop,
         -- mirroring ActionBars.lua's pcall-wrapped Blizzard-bar hiding.
         if not pcall(UpdateButton, button) then clean = false end
+    end
+    local okRail, railErr = pcall(UpdateRail)
+    if not okRail then
+        FS.LogDegradeOnce("stancebar_rail", "|cffff4488Forever STUwave|r: stance rail skipped (" .. tostring(railErr) .. ")")
     end
     if clean then pendingSync = false end
 end
@@ -393,17 +513,7 @@ local function StyleButton(button, size, shouldered)
         })
     end
 
-    -- the active look's wash (PaintActive), hidden until the stance is active
-    if not button.fsActiveWash then
-        local wash = button:CreateTexture(nil, "OVERLAY", nil, 2)
-        wash:SetTexture(FS.Theme.SLICE_CUT2_FILL_TEXTURE)
-        FS.Theme.ApplyNineSlice(wash, FS.Theme.SLICE_CUT_MARGIN)
-        wash:SetVertexColor(COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], ACTIVE_ALPHA)
-        wash:SetBlendMode("ADD")
-        wash:SetAllPoints(button)
-        wash:Hide()
-        button.fsActiveWash = wash
-    end
+    SeatChevrons(button)
     PaintActive(button)
 
     if not button.fsStanceHooked then
@@ -539,7 +649,6 @@ end
 -- Warrior shoulder
 -------------------------------------------------------------------------------
 
-local container
 local buttons = {}      -- built buttons by form index; only ever grows, never re-created
 local pendingBuild = false
 local ownsShoulder = false
