@@ -2,7 +2,7 @@
 -- FIRST PASS synthwave PANEL skin for the standard Blizzard windows: applies
 -- the shared FS.Theme.SkinPanel backdrop/border/glow treatment to a list of
 -- feature-detected frames. Confirmed present at login on this client
--- (interface 16001): CharacterFrame, PaperDollFrame, MerchantFrame, MailFrame,
+-- (interface 16001): CharacterFrame, PaperDollFrame, MerchantFrame,
 -- BankFrame, TradeFrame, QuestFrame, FriendsFrame, WorldMapFrame,
 -- ItemTextFrame, ChannelFrame, SettingsPanel, CollectionsJournal,
 -- CommunitiesFrame, AddonList, TimeManagerFrame, TaxiFrame, FlightMapFrame,
@@ -39,11 +39,7 @@ local PANEL_FRAMES = {
     { name = "CharacterFrame", title = "character" },
     { name = "PaperDollFrame" },
     { name = "MerchantFrame", money = "MerchantMoneyFrame", title = "vendor" },
-    { name = "MailFrame", title = "mail" },
-    -- The open letter is its own window (ButtonFrameTemplate on UIParent, beside InboxFrame), not a
-    -- piece of MailFrame: stripped as MailFrame content it lost its art and got no panel, so the
-    -- letter floated as bare text over the world (playtest 2026-11-05).
-    { name = "OpenMailFrame", title = "letter" },
+    -- MailFrame and OpenMailFrame are skinned by Skins/Mail.lua (the MAIL v2 inbox, letter and send windows).
     { name = "BankFrame", title = "bank" },
     { name = "TradeFrame", title = "trade" },
     { name = "QuestFrame", title = "quest" },
@@ -112,25 +108,7 @@ local PANEL_FRAMES = {
 
 -- Content-child strip/hide/retint specs (FS.PanelSkins.ApplyGuts), one entry
 -- per PANEL_FRAMES parent that leaves leftover parchment on its own children.
--- MailItem1..7 are the ROW frames, never MailItemNButton: that CheckButton's
--- Texture regions include the item icon, which StripBlizzardChrome's region
--- sweep would hide right along with the row's own chrome.
-local MAIL_ITEM_NAMES = {
-    "MailItem1", "MailItem2", "MailItem3", "MailItem4", "MailItem5",
-    "MailItem6", "MailItem7",
-}
-
--- Mail's strip list: the panel-level content children plus every MailItemN
--- row, built from MAIL_ITEM_NAMES so the row list has one source (also read
--- by the mail-list-repopulation watcher below).
-local MAIL_STRIP_NAMES = {
-    "InboxFrame", "MailFrameInset", "OpenMailFrameInset",
-    "OpenMailScrollFrame", "SendMailFrame", "SendMailMoneyInset",
-}
-for _, name in ipairs(MAIL_ITEM_NAMES) do
-    MAIL_STRIP_NAMES[#MAIL_STRIP_NAMES + 1] = name
-end
-
+-- (Mail's own strip list lives in Skins/Mail.lua.)
 -- QuestFrame's four NPC-dialog sub-panels (detail/greeting/progress/reward)
 -- plus their scroll frames. Action buttons (Accept/Decline/Complete/Goodbye)
 -- and reward item buttons are NOT stripped -- their Texture regions carry the
@@ -446,52 +424,12 @@ local PANEL_GUTS = {
             { name = "ItemTextCurrentPage" },
         },
     },
-    {
-        parent = "MailFrame",
-        strip = MAIL_STRIP_NAMES,
-        hide = {
-            { name = "SendStationeryBackgroundLeft" },
-            { name = "SendStationeryBackgroundRight" },
-        },
-    },
     QUEST_GUTS,
     QUESTMAP_GUTS,
     GOSSIP_GUTS,
     TRAINER_GUTS,
     PROFESSIONS_CRAFTING_GUTS,
 }
-
--------------------------------------------------------------------------------
--- Mail list repopulation
--------------------------------------------------------------------------------
-
--- Classic InboxFrame_Update does not exist on this client, so there is
--- nothing to hook there. MAIL_INBOX_UPDATE and InboxFrame's own OnShow are
--- what actually fire when the mail list repopulates; StripNamed is cheap
--- (StripBlizzardChrome self-guards per frame), so re-running it on both costs
--- nothing.
-local function RestripMailItems()
-    FS.PanelSkins.StripNamed(MAIL_ITEM_NAMES)
-end
-
-local mailWatcher = CreateFrame("Frame")
-if pcall(mailWatcher.RegisterEvent, mailWatcher, "MAIL_INBOX_UPDATE") then
-    mailWatcher:SetScript("OnEvent", RestripMailItems)
-end
-
--- InboxFrame is confirmed present at login on this client, but the attempt is
--- retried from afterScan (below) rather than once at file load, in case that
--- ever isn't true; `inboxHookAttempted` stops HookShowOnce's own call from
--- being retried once InboxFrame has been found.
-local inboxHookAttempted = false
-local function TryHookInboxOnShow()
-    if inboxHookAttempted then return end
-    local inboxFrame = _G.InboxFrame
-    if inboxFrame then
-        FS.PanelSkins.HookShowOnce(inboxFrame, "fsInboxRestripHooked", RestripMailItems)
-        inboxHookAttempted = true
-    end
-end
 
 -------------------------------------------------------------------------------
 -- Quest dialog repopulation
@@ -699,7 +637,6 @@ local ScanAndSkin = FS.PanelSkins.CreateSkinDriver({
         end
         FS.PanelSkins.ApplyGuts(PANEL_GUTS)
         PlateQuestMapRewards()
-        TryHookInboxOnShow()
         HookQuestRepopulation()
         SkinGossipGoodbyeButton()
         SkinTrainerButtons()
@@ -711,7 +648,6 @@ local ScanAndSkin = FS.PanelSkins.CreateSkinDriver({
 FS.PanelSkins.RegisterInspectFromList("Panels", PANEL_FRAMES, "fsPanelSkin", "name")
 FS.PanelSkins.RegisterInspect("PanelGuts", {
     { name = "ItemTextFrame", guard = "fsGutsApplied" },
-    { name = "MailFrame", guard = "fsGutsApplied" },
     { name = "QuestFrame", guard = "fsGutsApplied" },
     { name = "QuestMapFrame", guard = "fsGutsApplied" },
     { name = "GossipFrame", guard = "fsGutsApplied" },

@@ -299,15 +299,17 @@ case("the_quest_log_pane_is_skinned_without_a_title_band_over_its_search_box", "
 
 
 
-case("the_open_letter_is_its_own_skinned_window_not_stripped_mail_content", """
+case("the_mail_windows_belong_to_mail_lua_and_panels_lua_leaves_them_alone", """
     -- Playtest 2026-11-05: OpenMailFrame was stripped as MailFrame content and never given a panel, so
-    -- an opened letter floated as bare text over the world.
-    local skinned = LoadPanels({ "MailFrame", "OpenMailFrame" })
-    assert(skinned.OpenMailFrame, "the open letter window got no panel")
-    assert(skinned.OpenMailFrame.title == "letter", tostring(skinned.OpenMailFrame.title))
-    assert(skinned.MailFrame and skinned.MailFrame.title == "mail")
-    assert(not PANELS_SRC:find('"InboxFrame", "MailFrameInset", "OpenMailFrame"', 1, true),
-        "OpenMailFrame is back in the mail strip list")
+    -- an opened letter floated as bare text over the world. Modules/Skins/Mail.lua now draws both mail
+    -- windows (tools/mailskin-harness.py checks that the letter gets its own chrome there); Panels.lua must
+    -- not put a second panel skin, a strip list or a text-button sweep on them.
+    local skinned = LoadPanels({ "MailFrame", "OpenMailFrame", "QuestFrame" })
+    assert(skinned.QuestFrame, "the other panels are still skinned")
+    assert(not skinned.MailFrame and not skinned.OpenMailFrame, "Panels.lua skins a mail window")
+    assert(not PANELS_SRC:find('name = "MailFrame"', 1, true), "MailFrame is back in Panels.lua")
+    assert(not PANELS_SRC:find('name = "OpenMailFrame"', 1, true), "OpenMailFrame is back in Panels.lua")
+    assert(not PANELS_SRC:find('"InboxFrame"', 1, true), "the inbox is back in Panels.lua")
 """)
 
 case("a_stock_text_button_anywhere_in_the_tree_is_skinned_with_its_accent_by_label", """
@@ -429,10 +431,10 @@ case("every_skinned_panel_is_swept_when_panels_lua_skins_it", """
     THEME.COLOR_BG, THEME.COLOR_BORDER, THEME.COLOR_POWER = { 0, 0, 0 }, { 1, 1, 1 }, { 1, 1, 1 }
     THEME.COLOR_TEXT_PARCHMENT = { 0.749, 0.914, 0.839 }
     FS.PanelSkins.SweepOnShow = function(frame) swept[frame.fsName] = (swept[frame.fsName] or 0) + 1 end
-    _G.MailFrame = { fsName = "MailFrame" }
+    _G.MerchantFrame = { fsName = "MerchantFrame" }
     _G.QuestFrame = { fsName = "QuestFrame" }
     assert(loadstring(PANELS_SRC, "@Panels.lua"))("forever-stuwave", FS)
-    assert(swept.MailFrame == 1 and swept.QuestFrame == 1, "swept: " .. tostring(swept.MailFrame) .. " " .. tostring(swept.QuestFrame))
+    assert(swept.MerchantFrame == 1 and swept.QuestFrame == 1, "swept: " .. tostring(swept.MerchantFrame) .. " " .. tostring(swept.QuestFrame))
 """)
 
 case("a_scroll_bar_beside_its_scrollbox_anywhere_in_the_tree_is_skinned_once", """

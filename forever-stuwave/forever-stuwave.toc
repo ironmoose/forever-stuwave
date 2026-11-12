@@ -46,6 +46,7 @@ Modules/Pet/PetCastBar.lua
 Modules/Minimap/Minimap.lua
 Modules/Tracker/QuestTimer.lua
 Modules/Skins/Panels.lua
+Modules/Skins/Mail.lua
 Modules/Skins/Tooltip.lua
 Modules/Skins/TooltipAnchor.lua
 Modules/Skins/Popups.lua
