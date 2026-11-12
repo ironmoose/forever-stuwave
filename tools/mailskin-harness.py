@@ -369,7 +369,9 @@ end
 local function editBox(parent, name, label, w, h)
     local e = blz("EditBox", name, parent, w, h)
     tex(e, name .. "Left", "BACKGROUND"); tex(e, name .. "Middle", "BACKGROUND"); tex(e, name .. "Right", "BACKGROUND")
-    if label then fstring(e, nil, label, 12) end
+    -- 16001 lists the FontString that draws the typed text among an EditBox's regions
+    e.display = fstring(e, nil, "", 12)
+    if label then e.caption = fstring(e, nil, label, 12) end
     e.fontPath, e.size = "stock.ttf", 12
     return e
 end
@@ -565,6 +567,8 @@ function BuildBlizzard()
         for i = 1, ATTACHMENTS_MAX_SEND do
             local b = _G["SendMailAttachment" .. i]
             if SEND.items[i] then b:SetNormalTexture("Interface\\Icons\\x"); b.count:SetText("2") else b:ClearNormalTexture(); b.count:SetText("") end
+            -- the stock update re-anchors every slot to its own grid (MailFrame.lua)
+            b:SetPoint("TOPLEFT", SendMailFrame, "BOTTOMLEFT", 20 + i * 40, 120)
         end
     end
     function OpenMail_Update() OpenMailUpdate() end
@@ -1091,6 +1095,16 @@ case("send_text_comes_from_the_api_and_the_mode_switch_follows_the_radios", loca
     assert(S.send.mode.active == 2, "cod active after the radio changed")
     -- the segment is a proxy for nothing: the Blizzard radio is the click target and is the switch's button
     assert(S.send.mode.segs[2].button == SendMailCODButton, "switch drives the stock radio")
+""")
+
+case("typed_text_stays_visible_and_the_slots_survive_the_stock_update", local_send_prelude + """
+    assert(SendMailNameEditBox.display.alpha ~= 0, "typed name hidden")
+    assert(SendMailSubjectEditBox.display.alpha ~= 0, "typed subject hidden")
+    assert(SendMailNameEditBox.caption.alpha == 0, "stock To: caption")
+    local before = SendMailAttachment1.points[1].rel
+    assert(before ~= SendMailFrame, "slot starts on our strip")
+    SendMailFrame_Update()
+    assert(SendMailAttachment1.points[1].rel == before, "slot left on the stock grid after SendMailFrame_Update")
 """)
 
 case("the_header_switch_drives_the_stock_tabs_and_follows_the_page", PRELUDE + """

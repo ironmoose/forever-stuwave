@@ -1105,14 +1105,24 @@ local function SeatSendSlot(button, index)
     return has and true or false
 end
 
+-- On 16001 an EditBox lists the FontString that draws its own typed text among its regions, so only the template's
+-- caption ("To:", "Subject:") is held: a FontString with text that is not the box's current text. Quieting every
+-- FontString region hid what the player typed.
 local function SkinEditField(box, px, color, justify)
     if not box then return end
+    local typed = Plain(Try(box.GetText, box)) or ""
     for _, region in ipairs({ box:GetRegions() }) do
         local kind = Try(region.GetObjectType, region)
-        if kind == "Texture" then HeldArt.Hold(region) elseif kind == "FontString" then Quiet(region) end
+        if kind == "Texture" then
+            HeldArt.Hold(region)
+        elseif kind == "FontString" then
+            local text = Plain(Try(region.GetText, region))
+            if type(text) == "string" and text ~= "" and text ~= typed then Quiet(region) end
+        end
     end
     Theme.ApplyMono(box, U(px), color)
     S.fonts[box] = { px = px, color = color }
+    if box.SetHighlightColor then pcall(box.SetHighlightColor, box, C.cyan[1], C.cyan[2], C.cyan[3], 0.35) end
     if box.SetTextInsets then box:SetTextInsets(0, 0, 0, 0) end
     if box.SetJustifyH then box:SetJustifyH(justify or "LEFT") end
 end
@@ -1135,11 +1145,45 @@ local function RefreshSend()
     L.postage:SetText(type(price) == "number" and PostageText(price) or "")
     local have = type(GetMoney) == "function" and Plain(Try(GetMoney)) or nil
     L.balance:SetText(type(have) == "number" and MoneyText(have) or "")
+    if L.reseat then L.reseat() end
     local filled, total = 0, #L.slots
     for i, b in ipairs(L.slots) do if SeatSendSlot(b, i) then filled = filled + 1 end end
     L.cargo:SetText(filled .. "/" .. total)
     local sendMoney = _G.SendMailSendMoneyButton
     if sendMoney then L.mode.set(Try(sendMoney.GetChecked, sendMoney) == true and 1 or 2) end
+end
+
+-- The name suggestions under TO (AutoCompleteBox, a TooltipBackdropTemplate frame shared with whisper boxes): our
+-- panel chrome, Mononoki rows through font objects (the buttons swap Normal and Highlight fonts on their own), a cyan
+-- row highlight in place of the gold bar. Blizzard sizes the box from the row text widths each time it shows.
+local function SkinAutoComplete()
+    local box = _G.AutoCompleteBox
+    if not box or box.fsMailSkin or type(CreateFont) ~= "function" then return end
+    box.fsMailSkin = true
+    pcall(Theme.SkinPanel, box, { scanline = false })
+    local normal = CreateFont("ForeverSTUwaveAutoCompleteNormal")
+    normal:SetFont(Theme.FONT_MONO, U(14), "")
+    normal:SetTextColor(C.text[1], C.text[2], C.text[3])
+    local lit = CreateFont("ForeverSTUwaveAutoCompleteHighlight")
+    lit:SetFont(Theme.FONT_MONO, U(14), "")
+    lit:SetTextColor(C.cyan[1], C.cyan[2], C.cyan[3])
+    for i = 1, (type(_G.AUTOCOMPLETE_MAX_BUTTONS) == "number" and _G.AUTOCOMPLETE_MAX_BUTTONS or 5) do
+        local b = _G["AutoCompleteButton" .. i]
+        if b then
+            if b.SetNormalFontObject then pcall(b.SetNormalFontObject, b, normal) end
+            if b.SetHighlightFontObject then pcall(b.SetHighlightFontObject, b, lit) end
+            local hl = Try(b.GetHighlightTexture, b)
+            if hl and hl.SetColorTexture then
+                hl:SetColorTexture(C.cyan[1], C.cyan[2], C.cyan[3], 0.16)
+                if hl.SetBlendMode then hl:SetBlendMode("BLEND") end
+            end
+        end
+    end
+    local hint = _G.AutoCompleteInstructions
+    if hint and hint.SetFont then
+        Theme.ApplyMono(hint, U(11), C.muted)
+        S.fonts[hint] = { px = 11, color = C.muted }
+    end
 end
 
 local function SkinSend(win)
@@ -1151,6 +1195,7 @@ local function SkinSend(win)
     send.fsMailSkin = true
     local L = { slots = {} }
     S.send = L
+    SkinAutoComplete()
 
     local rows = 1
     local total = math.min(type(_G.ATTACHMENTS_MAX_SEND) == "number" and _G.ATTACHMENTS_MAX_SEND or 8, 16)
@@ -1283,7 +1328,16 @@ local function SkinSend(win)
         Place(mail, send, 322, H - 52, 92, 36)
     end
 
-    if type(_G.SendMailFrame_Update) == "function" then HookFunc(_G, "SendMailFrame_Update", function() Later(RefreshSend) end) end
+    -- SendMailFrame_Update re-anchors every attachment button to the stock grid and resizes the scroll frame each
+    -- time it runs (MailFrame.lua), which dropped the wells onto the money row: put ours back right after it.
+    local function reseat()
+        for _, b in ipairs(L.slots) do if S.placed[b] then Apply(b) end end
+        if scroll and S.placed[scroll] then Apply(scroll) end
+    end
+    L.reseat = reseat
+    if type(_G.SendMailFrame_Update) == "function" then
+        HookFunc(_G, "SendMailFrame_Update", function() reseat(); Later(RefreshSend) end)
+    end
     HookScript(send, "OnShow", function() RefreshSend(); Later(function() PanelSkins.SweepScrollBars(send) end) end)
     RefreshSend()
 end
