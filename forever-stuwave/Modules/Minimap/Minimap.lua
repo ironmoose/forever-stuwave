@@ -1044,6 +1044,8 @@ end
 -- subpixel-stripe texture, approximating the mockup's .mmscan gradient) was
 -- removed: combined with this horizontal layer it read as a grid/banding
 -- rather than the mockup's subtle horizontal-only lines.
+local SeatScanline -- seats the scanline pieces round the cut; defined with the body below (it needs BodyCut)
+
 local function ApplyScanline()
     if not Minimap or Minimap.fsScanline then return end
     if not Minimap.CreateTexture then return end
@@ -1059,6 +1061,8 @@ local function ApplyScanline()
     end
 
     Minimap.fsScanline = TileTexture(SCANLINE_TEXTURE, SCANLINE_ALPHA)
+    Minimap.fsScanlineEdge = TileTexture(SCANLINE_TEXTURE, SCANLINE_ALPHA)
+    if SeatScanline then pcall(SeatScanline) end
 end
 
 -------------------------------------------------------------------------------
@@ -1290,9 +1294,36 @@ local function BuildBody(bezel)
     return body
 end
 
+-- The map's top-left is cut by its mask, but the scanlines are our own texture and a mask-less square, so they drew across
+-- the cut triangle into the world behind. They are two pieces instead: the main one right of the cut's width, full height,
+-- and a strip down the left edge that starts below the cut. The engine tiles each piece from its own top, so the strip starts
+-- on a whole number of the texture's 4 unit rows (8 units, past the 6 px cut) and its lines stay in step with the main one's.
+local SCANLINE_PERIOD = 4
+SeatScanline = function()
+    local main, edge = Minimap and Minimap.fsScanline, Minimap and Minimap.fsScanlineEdge
+    if not (main and edge) then return end
+    local px = PixelUnit(Minimap)
+    local cu = BodyCut() * px
+    if cu <= 0 then
+        main:ClearAllPoints()
+        main:SetAllPoints(Minimap)
+        edge:Hide()
+        return
+    end
+    local drop = SCANLINE_PERIOD * math.max(1, math.ceil(cu / SCANLINE_PERIOD))
+    main:ClearAllPoints()
+    main:SetPoint("TOPLEFT", Minimap, "TOPLEFT", cu, 0)
+    main:SetPoint("BOTTOMRIGHT", Minimap, "BOTTOMRIGHT", 0, 0)
+    edge:ClearAllPoints()
+    edge:SetPoint("TOPLEFT", Minimap, "TOPLEFT", 0, -drop)
+    edge:SetPoint("BOTTOMRIGHT", Minimap, "BOTTOMLEFT", cu, 0)
+    edge:Show()
+end
+
 -- Sizes and seats the body's pieces for the pixel scale now: the chamfer and the edge are whole pixels (the baked pieces draw one
 -- texel a pixel, so a piece sized in pixels is never resampled).
 local function SeatBodyPieces(g)
+    pcall(SeatScanline)
     local body, p = Body.frame, Body.pieces
     if not (body and p) then return end
     local px = g.px
