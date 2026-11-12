@@ -166,6 +166,22 @@ FS.Layout.CHAT_CLEARANCE = 12
 FS.Layout.CONSOLE_PET_GAP = 8
 FS.Layout.CONSOLE_CAST_GAP = 8
 
+-- The shared controls kit's measurements (mockups/shared-controls-2026-11-12.html), in PHYSICAL pixels at the player's screen:
+-- one mock px is one screen px, the convention of the Mail build (FS.ControlKit turns each into UI units at the pixel scale
+-- of the frame it lays out, so an edge lands on a whole screen pixel at any UI scale). It has no x and y, so the layout
+-- editor does not take it for a seat. A control is never resized (a stock frame keeps its rect, the plate sits inside it).
+FS.Layout.Controls = {
+    -- Checkbox and radio: a 16 box, chamfer 4 (top left and bottom right), the power LED a 3 square at (11, 2), the tick
+    -- (3, 8) -> (6, 11) -> (11, 6); the radio is the 16 rhombus with a 6 node and an expanding ring.
+    CHECK = 16, CHECK_CUT = 4, LED = 3, LED_X = 11, LED_Y = 2, NODE = 6, NODE_OFFSET = 5,
+    -- Motion, in seconds: the LED breathes to 0.3 and back, the tick draws in over the first 18 % of the mock's 3 s loop,
+    -- the radio ring grows from 0.7 to 1.9 of the rhombus, and the node slides to a newly chosen option.
+    LED_PULSE = 1.6, LED_FLOOR = 0.3, TICK_DRAW = 0.54, RING_PERIOD = 1.8, RING_FROM = 0.7, RING_TO = 1.9, RING_ALPHA = 0.9,
+    NODE_SLIDE = 0.16,
+    -- Alpha of the radio rail and of the cyan LED stub a hovered, unchecked box shows.
+    RAIL_ALPHA = 0.5, HOVER_LED_ALPHA = 0.5,
+}
+
 -- The layout planner exports in SCREEN PIXELS at this resolution (the "resolution"
 -- field of the design mockup). WoW frames are positioned in UI units, and
 -- UIParent is only ever ~768 units tall no matter the monitor, so the exported

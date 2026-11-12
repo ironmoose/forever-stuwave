@@ -94,6 +94,19 @@ Theme.COLOR_TOTEM = {
 -- indigo-violet, deliberately bluer than COLOR_BORDER (#a855f7, hue 271) and the Curse dispel
 -- colour (#A335EE / #9933FF, hue 276-280), and far from the pinks (COLOR_HEALTH, caret power).
 Theme.COLOR_TARGET = { 0.4157, 0.2980, 1, 1 }           -- #6a4cff
+-- The shared controls kit's inks (mockups/shared-controls-2026-11-12.html), the ones the palette above does not have: an idle
+-- control is ink with a dim violet edge, hover takes the edge to cyan, on / selected is pink on the pink wash, disabled is dim on
+-- the darkest ink. FS.ControlKit and the control skins read these, never a literal.
+Theme.COLOR_CTRL_INK      = { 0x07 / 255, 0x03 / 255, 0x0e / 255, 1 } -- #07030e idle face
+Theme.COLOR_CTRL_DIM      = { 0x4b / 255, 0x2a / 255, 0x86 / 255, 1 } -- #4b2a86 idle edge
+Theme.COLOR_CTRL_SEL      = { 0x2a / 255, 0x0f / 255, 0x2e / 255, 1 } -- #2a0f2e on / selected face
+Theme.COLOR_CTRL_CELL     = { 0x25 / 255, 0x15 / 255, 0x4a / 255, 1 } -- #25154a an unlit cast bar cell
+Theme.COLOR_CTRL_DIS      = { 0x5c / 255, 0x54 / 255, 0x80 / 255, 1 } -- #5c5480 disabled text and mark
+Theme.COLOR_CTRL_DISFILL  = { 0x0a / 255, 0x06 / 255, 0x14 / 255, 1 } -- #0a0614 disabled face
+Theme.COLOR_CTRL_DISEDGE  = { 0x2a / 255, 0x18 / 255, 0x46 / 255, 1 } -- #2a1846 disabled edge
+Theme.COLOR_CTRL_WELL     = { 0x1c / 255, 0x10 / 255, 0x30 / 255, 1 } -- #1c1030 an item well
+Theme.COLOR_CTRL_BAND     = { 0x1a / 255, 0x0d / 255, 0x2c / 255, 1 } -- #1a0d2c a header band
+Theme.COLOR_CTRL_TEXT     = { 0xe9 / 255, 0xe2 / 255, 1, 1 }          -- #e9e2ff a control's own text
 
 -------------------------------------------------------------------------------
 -- Radii

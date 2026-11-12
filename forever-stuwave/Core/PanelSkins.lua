@@ -689,6 +689,22 @@ function PanelSkins.SweepScrollBars(frame)
     return count
 end
 
+-- Skins every stock control under `frame` that the shared controls kit (FS.ControlKit, Core/ControlKit.lua) knows: check
+-- buttons, radios, sliders, edit and search boxes, dropdown buttons and tabs, each told by object type and template traits.
+-- A control is not walked into. Returns how many it skinned now.
+function PanelSkins.SweepControls(frame)
+    local kit = FS.ControlKit
+    if not (kit and kit.SkinWidget and type(frame) == "table") then return 0 end
+    local count = 0
+    Walk(frame, function(child)
+        local spec, skinnedNow = kit.SkinWidget(child)
+        if not spec then return end
+        if skinnedNow then count = count + 1 end
+        if spec.into ~= false then return false end
+    end)
+    return count
+end
+
 -- Sweeps `frame` now and again each time it is shown, and does the same for each page of it that is hidden now (a
 -- tab's page is shown without the panel being shown again). One hook per frame; a protected page is not hooked.
 function PanelSkins.SweepOnShow(frame)
@@ -696,6 +712,7 @@ function PanelSkins.SweepOnShow(frame)
     local function sweep(self)
         PanelSkins.SweepTextButtons(self)
         PanelSkins.SweepScrollBars(self)
+        PanelSkins.SweepControls(self)
     end
     sweep(frame)
     PanelSkins.HookShowOnce(frame, "fsSweepHook", sweep)

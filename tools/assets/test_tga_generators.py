@@ -273,6 +273,16 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "hunter_trap": (512, 256),
         "hunter_trap_lit": (64, 32),
     },
+    # generate_control_checks.py: the shared controls kit's checkbox and radio art (mockups/shared-controls-2026-11-12.html), white
+    # alpha shapes tinted in Lua, one texel a screen pixel: the 16 px radio diamond (solid, 1 px edge, 2 px edge), the 6 px node
+    # on an 8 canvas, and the checkbox tick on its 16 px box.
+    "control_checks": {
+        "ctl_diamond_fill": (16, 16),
+        "ctl_diamond_ring1": (16, 16),
+        "ctl_diamond_ring2": (16, 16),
+        "ctl_diamond_node": (8, 8),
+        "ctl_tick": (16, 16),
+    },
     "icon_social": (32, 32),
     # generate_icon_stu.py: the minimap STU key's icon A (full colour), a 32 canvas with the 22 texel art box centred.
     "icon_stu": (32, 32),
@@ -2657,4 +2667,83 @@ def test_the_own_art_bake_writes_exactly_the_two_own_keys(tmp_path: Path) -> Non
     assert result.returncode == 0, result.stderr
     assert {p.stem for p in tmp_path.glob("*.tga")} == OWN_BAKED
     for out in tmp_path.glob("*.tga"):
+        assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
+
+
+# ---------------------------------------------------------------------------
+# generate_control_checks.py: the shared controls kit's checkbox and radio art.
+#
+# Every number is the mockup's (mockups/shared-controls-2026-11-12.html, check() and radio()), hardcoded here.
+# ---------------------------------------------------------------------------
+
+CONTROL_CHECKS_GENERATOR = GENERATOR_DIR / "generate_control_checks.py"
+
+
+@pytest.fixture(scope="module")
+def control_check_outputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    out = tmp_path_factory.mktemp("control_checks")
+    _run_generator(CONTROL_CHECKS_GENERATOR, out)
+    return out
+
+
+def _alpha_sum(path: Path) -> float:
+    return sum(px[3] for row in _rgba_grid(path) for px in row) / 255
+
+
+def test_control_check_textures_are_white_alpha_shapes(control_check_outputs: Path) -> None:
+    for path in sorted(control_check_outputs.glob("ctl_*.tga")):
+        assert _is_white(path), path.name
+        assert _alpha_sum(path) > 5, path.name
+
+
+def test_radio_diamond_fill_is_the_16_px_rhombus_through_the_side_midpoints(control_check_outputs: Path) -> None:
+    path = control_check_outputs / "ctl_diamond_fill.tga"
+    # |x - 8| + |y - 8| <= 8 has area 2 * 8 * 8 = 128 texels.
+    assert abs(_alpha_sum(path) - 128) < 1.0
+    for x, y in ((7, 7), (8, 8), (7, 8), (8, 7), (4, 8), (8, 3), (11, 8)):
+        assert _alpha_at(path, x, y) == 255, (x, y)
+    for x, y in ((0, 0), (15, 0), (0, 15), (15, 15), (2, 2), (13, 13)):
+        assert _alpha_at(path, x, y) == 0, (x, y)
+    # mirror symmetric both ways and across the diagonal
+    for y in range(16):
+        for x in range(16):
+            a = _alpha_at(path, x, y)
+            assert a == _alpha_at(path, 15 - x, y) == _alpha_at(path, x, 15 - y) == _alpha_at(path, y, x), (x, y)
+
+
+@pytest.mark.parametrize("name,stroke", (("ctl_diamond_ring1", 1.0), ("ctl_diamond_ring2", 2.0)))
+def test_radio_diamond_rings_are_hollow_strokes_of_the_stated_width(
+    control_check_outputs: Path, name: str, stroke: float
+) -> None:
+    path = control_check_outputs / f"{name}.tga"
+    # a stroke of width w along a 45 degree edge is w * sqrt(2) wide measured along the axes, so the inner rhombus
+    # has half-diagonal 8 - w * sqrt(2) and the ring is 128 minus 2 * that squared.
+    inner = 8 - stroke * math.sqrt(2)
+    assert abs(_alpha_sum(path) - (128 - 2 * inner * inner)) < 1.5
+    assert _alpha_at(path, 8, 8) == 0 and _alpha_at(path, 7, 7) == 0, "hollow in the middle"
+    assert _alpha_at(path, 1, 7) > 100 and _alpha_at(path, 14, 8) > 100, "the edge runs along the diagonal"
+
+
+def test_radio_node_is_the_6_px_rhombus_at_the_top_left_of_its_canvas(control_check_outputs: Path) -> None:
+    path = control_check_outputs / "ctl_diamond_node.tga"
+    assert abs(_alpha_sum(path) - 18) < 0.8  # 2 * 3 * 3
+    assert _alpha_at(path, 2, 2) == 255 and _alpha_at(path, 3, 3) == 255 and _alpha_at(path, 2, 3) == 255
+    for x in range(8):
+        for y in range(8):
+            if x >= 6 or y >= 6:
+                assert _alpha_at(path, x, y) == 0, (x, y)
+
+
+def test_checkbox_tick_is_the_mockup_polyline_at_stroke_2(control_check_outputs: Path) -> None:
+    path = control_check_outputs / "ctl_tick.tga"
+    # (3, 8) -> (6, 11) -> (11, 6): pixels whose centre is on the stroke axis are solid.
+    for x, y in ((3, 8), (4, 9), (5, 10), (6, 10), (7, 9), (8, 8), (9, 7), (10, 6)):
+        assert _alpha_at(path, x, y) == 255, (x, y)
+    for x, y in ((0, 0), (15, 15), (3, 3), (12, 12), (12, 6), (2, 7), (13, 4), (8, 3)):
+        assert _alpha_at(path, x, y) == 0, (x, y)
+    assert _alpha_at(path, 6, 6) == 0, "open above the vertex"
+
+
+def test_committed_control_check_textures_match_the_generator(control_check_outputs: Path) -> None:
+    for out in control_check_outputs.glob("*.tga"):
         assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name

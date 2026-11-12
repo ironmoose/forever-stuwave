@@ -18,6 +18,8 @@ Core/ChevronCastBar.lua
 Core/HeldArt.lua
 Core/ButtonSkins.lua
 Core/ScrollBarSkins.lua
+Core/ControlKit.lua
+Core/CheckSkins.lua
 Core/PanelSkins.lua
 Modules/Tracker/Tracker.lua
 Modules/Tracker/TrackerSeat.lua
