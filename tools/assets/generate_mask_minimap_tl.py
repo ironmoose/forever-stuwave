@@ -5,8 +5,10 @@ chamfered body whose TOP-LEFT and BOTTOM-RIGHT are cut (the Theme.CHROME_CORNERS
 cut now belongs to the body's last row, and the map above it ends in a straight bottom edge that meets the key row.
 mask_minimap.tga (generate_mask_minimap.py), which also cut the map's bottom-right, is no longer what the map wears.
 
-Shape: the full square minus a straight 45 degree triangle at the top-left, 6/250 = 0.024 of the side (about 6 px
-on the minimap's 250 px base width). The other three corners stay square.
+Shape: the full square minus a straight 45 degree triangle at the top-left, 7.5/250 = 0.03 of the side (about 7.5 px
+on the minimap's 250 px base width: 1.5 px past the body edge's 6 px cut, so the soft edge of the map ends under the
+cyan stroke instead of outside it). 256 px square: at the old 64 the cut was 1.5 texels and the stretched blur let a
+dark sliver of the map show outside the edge. The other three corners stay square.
 
 Because Minimap:SetMaskTexture stretches to whatever the map's current size is, a FRACTIONAL chamfer baked into the
 mask stays correct at any UI scale.
@@ -20,8 +22,8 @@ Construction: supersampled coverage along the diagonal edge, solid white RGB, sh
 import os
 import struct
 
-SIZE = 64
-CORNER_FRACTION = 6 / 250
+SIZE = 256
+CORNER_FRACTION = 7.5 / 250
 SUPERSAMPLE = 4
 
 

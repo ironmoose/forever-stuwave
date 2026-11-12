@@ -304,7 +304,7 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     "icon_window": {"icon_minimize": (32, 32), "icon_maximize": (32, 32)},
     "mask_minimap": (64, 64),
     # generate_mask_minimap_tl.py: the map face mask with only the top-left corner cut (the body's bottom-right belongs to its last row).
-    "mask_minimap_tl": (64, 64),
+    "mask_minimap_tl": (256, 256),
     # generate_minimap_keys.py: the key row's glyphs, one texel a screen pixel: the search lens and the calendar at 16,
     # the tray toggle's chevron at 8 x 4.
     "minimap_keys": {
@@ -1081,9 +1081,10 @@ MINIMAP_TL_GENERATOR = GENERATOR_DIR / "generate_mask_minimap_tl.py"
 def test_mask_minimap_tl_cuts_only_the_top_left(tmp_path: Path) -> None:
     _run_generator(MINIMAP_TL_GENERATOR, tmp_path)
     path = tmp_path / "mask_minimap_tl.tga"
-    last = 63
-    assert _alpha_at(path, 0, 0) < 64, "top-left must be cut"
-    for x, y in ((last, last), (last, 0), (0, last), (32, 32), (32, 0), (32, last), (0, 32), (last, 32)):
+    last = 255
+    # the cut runs about 7.7 texels down each edge (7.5/250 of 256), so the corner and the texel just inside it are clear
+    assert _alpha_at(path, 0, 0) < 64 and _alpha_at(path, 3, 3) < 64, "top-left must be cut"
+    for x, y in ((last, last), (last, 0), (0, last), (128, 128), (128, 0), (128, last), (0, 128), (last, 128), (8, 8)):
         assert _alpha_at(path, x, y) == 255, (x, y)
     assert _is_white(path)
 

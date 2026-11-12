@@ -39,7 +39,7 @@ local GLOW_SIZE -- derived in RefreshMetrics below (Metrics.glowSize)
 local GLOW_ALPHA = 0.20 -- was 0.42 (too bright, read as a second border); cut to 0.20 for a soft ambient halo (2026-09-26 minimap fix). Retune here if still too visible/faint.
 
 -- The body's chamfer, in screen pixels: Theme.CHROME_CORNERS "cut" is the TOP-LEFT and BOTTOM-RIGHT of the whole body at the
--- baked piece c = 6 (border_cut_c6_t1, fill_cut_c6); mask_minimap_tl.tga cuts the map's own top-left to match (6/250).
+-- baked piece c = 6 (border_cut_c6_t1, fill_cut_c6); mask_minimap_tl.tga cuts the map's own top-left to match (7.5/250, a little past the edge so its soft rim hides under the stroke).
 -- Under "round" (the old A/B flag) the body is square.
 local BODY_CHAMFER = 6
 
@@ -694,7 +694,7 @@ end
 -- Shape
 -------------------------------------------------------------------------------
 
--- The map face's mask: a hard square with ONLY the top-left cut (6/250), the body's own top-left chamfer; the
+-- The map face's mask: a hard square with ONLY the top-left cut (7.5/250, see generate_mask_minimap_tl.py), the body's own top-left chamfer; the
 -- bottom-right belongs to the body's last row. SetMaskTexture stretches the mask to whatever Minimap's current size is, so this
 -- FRACTIONAL cut stays correct automatically at any UI scale -- no per-scale recompute needed. See
 -- generate_mask_minimap_tl.py.
