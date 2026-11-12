@@ -297,11 +297,15 @@ end
 -- holds. The flash is driven by an Alpha animation (alpha is the animation's to set), so it is recoloured, not
 -- hidden.
 local toastSkinned = false
+local SeatChatAlerts -- defined below; the toast's OnShow reseats its container
 
 local function SkinBNToast()
     local frame = _G.BNToastFrame
     if toastSkinned or type(frame) ~= "table" or type(frame.CreateTexture) ~= "function" then return end
     toastSkinned = true
+    if frame.HookScript then
+        frame:HookScript("OnShow", function() if SeatChatAlerts then pcall(SeatChatAlerts) end end)
+    end
     local Theme = FS.Theme
     if frame.SetBackdropColor then pcall(frame.SetBackdropColor, frame, 0, 0, 0, 0) end
     if frame.SetBackdropBorderColor then pcall(frame.SetBackdropBorderColor, frame, 0, 0, 0, 0) end
@@ -320,6 +324,24 @@ local function SkinBNToast()
     end
 end
 
+-- ChatAlertFrame holds the toast (and the world refresh notice). Stock anchors it once, on load, 27 px above
+-- ChatFrame1's button frame, which leaves it flush against the screen edge and nearly touching our chat panel.
+-- Seat it on the STUwave chat backdrop instead: left edges aligned, a clear gap above the panel's glow. Nothing
+-- in the stock code re-anchors it, so one seat holds; it is redone on each toast show in case the chat rebuilt.
+local ALERT_GAP = 12
+
+function SeatChatAlerts()
+    local alerts = _G.ChatAlertFrame
+    local chat = _G.DEFAULT_CHAT_FRAME or _G.ChatFrame1
+    local panel = type(chat) == "table" and chat.fsBackdrop
+    if type(alerts) ~= "table" or type(alerts.SetPoint) ~= "function" or type(panel) ~= "table" then return end
+    alerts:ClearAllPoints()
+    alerts:SetPoint("BOTTOMLEFT", panel, "TOPLEFT", 0, ALERT_GAP)
+end
+
+local seatWatch = CreateFrame("Frame")
+seatWatch:RegisterEvent("PLAYER_ENTERING_WORLD")
+seatWatch:SetScript("OnEvent", function() pcall(SeatChatAlerts) end)
 pcall(SkinBNToast)
 if not toastSkinned then
     local toastWatch = CreateFrame("Frame")
