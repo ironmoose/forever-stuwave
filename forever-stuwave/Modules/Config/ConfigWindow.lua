@@ -1336,6 +1336,17 @@ local function BuffTabGroup(page)
     UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip })
 end
 
+-- The Warrior's Thunder Clap tab (ThunderClapTab.lua): the tab and its motion, each with its ? tip; Warriors only.
+local function ThunderClapGroup(page)
+    local tab = FS.ThunderClapTab
+    if not (tab and tab.SETTINGS and tab.Applies and tab.Applies()) then return end
+    UI.Header(page, "Thunder Clap tab")
+    for _, name in ipairs({ "enabled", "motion" }) do
+        local def = tab.SETTINGS[name]
+        UI.Toggle(page, { label = def.label, key = def.key, tip = def.tip })
+    end
+end
+
 -- The Shaman totem presets (TotemPresets.lua): a switch for each of the two preset cells, the name plates, and the set 2
 -- write that Preset 2 owns, each with its own ? tip. Out of the list for a client or class without the totem tab.
 local function TotemPresetsGroup(page)
@@ -1518,6 +1529,7 @@ CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, buil
     if snap then UI.Toggle(page, { label = snap.label, key = snap.key, tip = snap.tip }) end
     FiveSecondGroup(page)
     BuffTabGroup(page)
+    ThunderClapGroup(page)
     TotemPresetsGroup(page)
     IconStyleGroup(page)
 end })

@@ -142,6 +142,14 @@ slots stay empty until learned. Do a FULL client restart, not /reload.
    combat to end. `/fsedit` offers a box for the stance bar only while it is
    on its own row.
 5. Other classes keep their stance bar as before (Druid forms, Rogue stealth).
+6. Thunder Clap tab (level 6 and up): a one key tab stands 16 px right of the
+   stances. Cyan ring when Thunder Clap is ready; a cast throws two outline
+   shockwaves (cyan, then pink) with a flash, and the key fills violet for the
+   6 second cooldown, flashing back to cyan at ready. Under 20 rage it reads
+   RAGE in red; in Berserker Stance it goes grey and reads STANCE. The tab is a
+   display only: clicking it does nothing. Unit Frames page: "Thunder Clap
+   tab" turns it off, "Shockwave motion" keeps it still. Note whether every
+   other ability's global cooldown also starts a short fill on it.
 
 ## Shaman: totem tab
 

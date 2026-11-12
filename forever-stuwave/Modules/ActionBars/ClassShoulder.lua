@@ -45,7 +45,11 @@
 -- when the class has no tab. Its seat is worked out on every Refresh from the shoulders that stand, so a class tab that
 -- arrives or goes after it moves it; a changed seat tells the owner like a shown or hidden one.
 --
--- Loads after PetDock.lua and ConsoleKeys.lua, before SealBar.lua, TotemBar.lua, BuffTab.lua and FiveSecondTab.lua.
+-- The Warrior's Thunder Clap tab (ThunderClapTab.lua, 1 x 1, 50 x 49) is the stance tab's `also` the same way, 16 design px
+-- right of it (at 187.6 with the three stances).
+--
+-- Loads after PetDock.lua and ConsoleKeys.lua, before SealBar.lua, TotemBar.lua, BuffTab.lua, FiveSecondTab.lua and
+-- ThunderClapTab.lua.
 -- Nothing here is verified in game.
 
 local _, FS = ...
@@ -90,6 +94,19 @@ local OWNERS = {
         changed = function()
             if FS.StanceBar and FS.StanceBar.Rebuild then FS.StanceBar.Rebuild() end
         end,
+        -- the Thunder Clap tab, right of the stances (ThunderClapTab.lua, mockup thunderclap-tab-2026-11-12, look A)
+        also = {
+            {
+                key = "warriorclap", after = 16, cols = 1, rows = 1,
+                wants = function()
+                    local tab = FS.ThunderClapTab
+                    return tab and tab.OwnsShoulder and tab.OwnsShoulder()
+                end,
+                changed = function()
+                    if FS.ThunderClapTab and FS.ThunderClapTab.Sync then FS.ThunderClapTab.Sync() end
+                end,
+            },
+        },
     },
     SHAMAN = {
         key = "shaman", cols = 6, rows = 1,
