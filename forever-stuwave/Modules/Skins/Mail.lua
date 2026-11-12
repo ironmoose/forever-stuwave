@@ -210,6 +210,11 @@ local function QuietTexts(button)
         S.quietTexts[button] = true
         HookFunc(button, "SetText", sweep)
         HookFunc(button, "SetFormattedText", sweep)
+        -- 16001 builds some buttons from a mixin (OpenMailReportSpamMixin) that can set its caption up outside
+        -- SetText, so every visible state change sweeps again; the named ButtonText global is held directly too.
+        local name = Try(button.GetName, button)
+        if type(name) == "string" then Quiet(_G[name .. "Text"]) end
+        for _, script in ipairs({ "OnShow", "OnEnable", "OnDisable", "OnEnter" }) do HookScript(button, script, sweep) end
     end
 end
 
@@ -1061,7 +1066,8 @@ local function SkinLetter()
     for _, name in ipairs(LETTER_KEYS) do
         local b = _G[name]
         if b then
-            Key(b, { accent = accents[name], c = 6, px = 15 })
+            Key(b, { accent = accents[name], c = 6, px = 15,
+                shorten = name == "OpenMailReportSpamButton" and { ["report player"] = "report", ["report spam"] = "report" } or nil })
             HookScript(b, "OnShow", function() Later(LayoutLetter) end)
             HookScript(b, "OnHide", function() Later(LayoutLetter) end)
         end
