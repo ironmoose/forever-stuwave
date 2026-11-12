@@ -530,6 +530,18 @@ def check_a_rogue_stealth_button_cancels_the_form_when_it_is_the_active_one():
     assert text.index("/cancelform") < text.index("/cast"), "the cancel line must come first"
 
 
+def check_the_active_stance_is_lit_and_the_others_are_not():
+    # the checked state alone drew nothing: the active stance carries the aura row's wash, ring lift and glow
+    names = [n if isinstance(n, str) else n[0] for n in WARRIOR_STANCES]
+    lua = warrior(forms=[(names[0], False), (names[1], True), (names[2], False)])
+    lit = [bool(stance(lua, i).fsActiveWash.IsShown(stance(lua, i).fsActiveWash)) for i in (1, 2, 3)]
+    assert lit == [False, True, False], f"lit {lit}"
+    sb.set_forms(lua, [(names[0], True), (names[1], False), (names[2], False)])
+    fire(lua, "UPDATE_SHAPESHIFT_FORM")
+    lit = [bool(stance(lua, i).fsActiveWash.IsShown(stance(lua, i).fsActiveWash)) for i in (1, 2, 3)]
+    assert lit == [True, False, False], f"after the stance change {lit}"
+
+
 def check_a_druid_form_button_uses_its_own_form_index():
     lua = other("DRUID", forms=["Bear Form", "Aquatic Form", "Cat Form"])
     for i, name in ((1, "Bear Form"), (2, "Aquatic Form"), (3, "Cat Form")):
@@ -613,6 +625,7 @@ CHECKS = [
     check_a_shoulder_that_answers_no_slot_hides_the_button_and_the_build_goes_on,
     check_the_stances_follow_the_shoulder_whatever_order_regen_reaches_them,
     check_a_rogue_stealth_button_cancels_the_form_when_it_is_the_active_one,
+    check_the_active_stance_is_lit_and_the_others_are_not,
     check_a_druid_form_button_uses_its_own_form_index,
     check_a_warriors_stances_stay_on_the_spell_type,
     check_a_death_knight_presence_stays_on_the_spell_type,

@@ -211,6 +211,33 @@ local function UpdateHotkey(button)
     if button.fsHotkeyPlate then button.fsHotkeyPlate:SetShown(button.fsShouldered) end
 end
 
+-- The active stance's look, the same as the Paladin aura row's (SealBar.lua): a cyan ADD wash over the face,
+-- the ring lifted halfway to white and the glow raised. The checked state alone drew nothing (the cut skin has
+-- no checked art), so a Warrior could not tell the stance from the bar. Texture writes only: legal in combat.
+local ACTIVE_ALPHA, RING_LIFT, GLOW_IDLE, GLOW_ACTIVE = 0.4, 0.5, 0.35, 0.7
+
+local function PaintActive(button)
+    local active = button.fsLastActive == true
+    if button.fsActiveWash then button.fsActiveWash:SetShown(active) end
+    local skin, c = button.fsSkin, COLOR_POWER
+    if not (skin and c) then return end
+    local r, g, b = c[1], c[2], c[3]
+    if active then r, g, b = r + (1 - r) * RING_LIFT, g + (1 - g) * RING_LIFT, b + (1 - b) * RING_LIFT end
+    if skin.border and skin.border.ring then skin.border.ring:SetVertexColor(r, g, b, 1) end
+    if skin.glow then skin.glow:SetVertexColor(c[1], c[2], c[3], active and GLOW_ACTIVE or GLOW_IDLE) end
+end
+
+-- GetShapeshiftFormInfo's flag, cross-checked against GetShapeshiftForm() when the flag is nil or secret (as
+-- SealBar.lua does). Returns true / false, or nil when neither answer is plain.
+local function ReadActive(index, flag)
+    if flag ~= nil and not IsSecret(flag) then return flag and true or false end
+    if type(GetShapeshiftForm) == "function" then
+        local ok, current = pcall(GetShapeshiftForm)
+        if ok and type(current) == "number" and not IsSecret(current) then return current == index end
+    end
+    return nil
+end
+
 -- The CheckButton flips its checked state natively on every click, so clicking the
 -- ACTIVE form (a cast that changes nothing, so no event follows) would leave it
 -- unchecked while it is still the active one. PostClick re-derives it from the form
@@ -220,13 +247,14 @@ end
 local function SyncChecked(button)
     if not HAS_SHAPESHIFT_FORM_INFO then return end
     local _, isActive = GetShapeshiftFormInfo(button.index)
-    if not IsSecret(isActive) then
-        local active = isActive and true or false
+    local active = ReadActive(button.index, isActive)
+    if active ~= nil then
         button.fsLastActive = active
         button:SetChecked(active)
     elseif button.fsLastActive ~= nil then
         button:SetChecked(button.fsLastActive)
     end
+    PaintActive(button)
 end
 
 local function UpdateButton(button)
@@ -264,10 +292,12 @@ local function UpdateButton(button)
     -- CheckButton native checked state mirrors Blizzard's own StanceButton
     -- rather than a hand-rolled glow toggle -- secure-safe, simplest correct
     -- option for a first pass.
-    if not IsSecret(isActive) then
-        button.fsLastActive = isActive and true or false
-        button:SetChecked(button.fsLastActive)
+    local active = ReadActive(button.index, isActive)
+    if active ~= nil then
+        button.fsLastActive = active
+        button:SetChecked(active)
     end
+    PaintActive(button)
 
     -- isCastable can in theory go secret in combat on some clients; if so,
     -- skip the dim and show full alpha rather than guess.
@@ -362,6 +392,19 @@ local function StyleButton(button, size, shouldered)
             glowAlpha = 0.35,
         })
     end
+
+    -- the active look's wash (PaintActive), hidden until the stance is active
+    if not button.fsActiveWash then
+        local wash = button:CreateTexture(nil, "OVERLAY", nil, 2)
+        wash:SetTexture(FS.Theme.SLICE_CUT2_FILL_TEXTURE)
+        FS.Theme.ApplyNineSlice(wash, FS.Theme.SLICE_CUT_MARGIN)
+        wash:SetVertexColor(COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], ACTIVE_ALPHA)
+        wash:SetBlendMode("ADD")
+        wash:SetAllPoints(button)
+        wash:Hide()
+        button.fsActiveWash = wash
+    end
+    PaintActive(button)
 
     if not button.fsStanceHooked then
         button.fsStanceHooked = true
