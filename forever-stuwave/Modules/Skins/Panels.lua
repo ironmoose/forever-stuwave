@@ -36,8 +36,7 @@ if not FS.PanelSkins.RequireExport(SkinPanel, "Panels.lua disabled: FS.Theme.Ski
 -- the panel skin (StyleMoney no-ops if that name doesn't exist either).
 local PANEL_FRAMES = {
     -- Confirmed present at login (interface 16001).
-    { name = "CharacterFrame", title = "character" },
-    { name = "PaperDollFrame" },
+    -- CharacterFrame and PaperDollFrame are skinned by Skins/Character.lua (the CHARACTER window of the mockup).
     { name = "MerchantFrame", money = "MerchantMoneyFrame", title = "vendor" },
     -- MailFrame and OpenMailFrame are skinned by Skins/Mail.lua (the MAIL v2 inbox, letter and send windows).
     { name = "BankFrame", title = "bank" },
