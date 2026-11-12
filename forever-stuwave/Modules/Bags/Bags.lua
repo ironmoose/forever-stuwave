@@ -11,6 +11,9 @@
 -- corners by a panel-coloured wedge (no MaskTexture: it does not clip here), and
 -- the border is tinted by the item's quality (Poor grey, Common and empty a dark violet).
 -- The money line wears the data bar's GOLD look.
+-- The bag windows (ContainerFrame1..13 and the combined bags) are redrawn as one window of our own (see "Window" below):
+-- a header row (search field, sort key, close key), the item grid, a footer (slot count left, money right) and no
+-- stock art; an EMPTY slot is covered by a dark well that follows the item API rather than the name of Blizzard's art.
 -- Blizzard's GamepadBagBar (a child of the combined bags, same frame level as
 -- the Clean Up button, a bag icon) is hidden while no controller is connected:
 -- on a client with the GamePadEnable CVar on and nothing plugged in it drew over
@@ -22,7 +25,7 @@
 -- DISCONNECTED/ACTIVE_CHANGED and PLAYER_ENTERING_WORLD, and left alone once a
 -- controller is present (never forced back on: Blizzard shows it on its next
 -- update). The bar is unprotected, so this works in combat too.
--- The GamePadEnable CVar and the sort button are never touched.
+-- The GamePadEnable CVar is never touched; the sort button keeps its own click (only its art and place change).
 -- UNVALIDATED in-game: no /fstack or visual check done yet.
 
 local _, FS = ...
@@ -105,12 +108,33 @@ local MAX_CONTAINERS = 13 -- historical NUM_CONTAINER_FRAMES ceiling; loop skips
 -- locked-until-secured marker, ContainerFrameItemButtonMixin:UpdateExtended).
 local clearing = setmetatable({}, { __mode = "k" })  -- icon -> our own clear is in flight
 
+-- State kept OFF Blizzard's frames: the open ADDON_ACTION_FORBIDDEN UseContainerItem report is blamed on this addon, so
+-- nothing new is written as a field on an item button or a container (the fs* fields below are the older ones).
+local bagSlots = setmetatable({}, { __mode = "k" })   -- item button -> true for a bag slot (the bank's are not)
+local wells = setmetatable({}, { __mode = "k" })      -- item button -> its empty-slot well region
+local SlotIsEmpty                                      -- (button) -> true / false / nil, defined with the item reads below
+
 local ART_FIELDS = { "NormalTexture", "ItemSlotBackground", "Background", "IconBorder" }
 local ART_SETTERS = { "SetNormalTexture", "SetNormalAtlas", "Initialize" }
 local EMPTY_SLOT_ATLASES = { ["bags-item-slot64"] = true, ["warband-bank-slot"] = true }
 
 local HeldArt = FS.HeldArt
 local HoldRegion, HoldNormalTexture, HookNormalSetters = HeldArt.Hold, HeldArt.HoldNormal, HeldArt.HookSetters
+
+-- The slot's icon region by Blizzard's own lookup (GetItemButtonIconTexture in ItemButtonTemplate.lua): `Icon`, then `icon`, then
+-- the global `<name>IconTexture`. Only the ItemButton intrinsic's `icon` was read before, so a template that names it `Icon`
+-- (the other item button templates do) never had the empty-art clear or the corner and ring follow installed.
+local function ItemIcon(button)
+    if type(button) ~= "table" then return nil end
+    local icon = button.Icon
+    if type(icon) ~= "table" then icon = button.icon end
+    if type(icon) ~= "table" and type(button.GetName) == "function" then
+        local ok, name = pcall(button.GetName, button)
+        if ok and type(name) == "string" then icon = _G[name .. "IconTexture"] end
+    end
+    if type(icon) == "table" then return icon end
+    return nil
+end
 
 local function SweepSlotArt(button)
     if not button then return end
@@ -136,8 +160,8 @@ end
 -- SetTexture, for a template that uses `emptyBackgroundTexture`) clears it the
 -- moment Blizzard puts it there; a real item texture is never touched.
 local function HookEmptyIcon(button)
-    local icon = button.icon
-    if type(icon) ~= "table" then return end
+    local icon = ItemIcon(button)
+    if not icon then return end
 
     if type(icon.GetAtlas) == "function" then
         local ok, atlas = pcall(icon.GetAtlas, icon)
@@ -220,14 +244,21 @@ end
 
 -- True while the slot's icon is shown and holds something other than the empty-slot art. A secret texture or
 -- atlas is never compared or tested: it counts as an item.
-local function IconHoldsItem(button)
-    local icon = button.icon
-    if type(icon) ~= "table" then return false end
+local function IconArtIsAnItem(button, icon)
     if not ReadIcon(icon, "IsShown") then return false end
     local texture, atlas = ReadIcon(icon, "GetTexture"), ReadIcon(icon, "GetAtlas")
     if FS.IsSecret and (FS.IsSecret(texture) or FS.IsSecret(atlas)) then return true end
     if type(atlas) == "string" then return not IsEmptySlotArt(button, atlas) end
     return texture ~= nil and not IsEmptySlotArt(button, texture)
+end
+
+-- The art alone cannot tell an item from Blizzard's empty-slot art once the patch renames that art, so for a bag slot the
+-- item API has the last word: a slot it reports empty never holds an item, whatever its icon shows.
+local function IconHoldsItem(button)
+    local icon = ItemIcon(button)
+    if not icon then return false end
+    if not IconArtIsAnItem(button, icon) then return false end
+    return SlotIsEmpty(button) ~= true
 end
 
 local function SyncIconCorners(button)
@@ -311,6 +342,21 @@ local function SlotItemInfo(button)
     return info
 end
 
+-- True when the item API says this BAG slot holds nothing, false when it holds something, nil when that cannot be told (a
+-- bank slot, no API, a secret answer). It reads (GetBagID, GetID) exactly as ContainerFrameMixin:UpdateItems does, so it
+-- is the same answer Blizzard just painted from.
+SlotIsEmpty = function(button)
+    if not bagSlots[button] then return nil end
+    if type(C_Container) ~= "table" or type(C_Container.GetContainerItemInfo) ~= "function" then return nil end
+    local bag = BagIDOf(button)
+    if not bag or type(button.GetID) ~= "function" then return nil end
+    local okSlot, slot = pcall(button.GetID, button)
+    if not okSlot or type(slot) ~= "number" or IsSecretValue(slot) then return nil end
+    local ok, info = pcall(C_Container.GetContainerItemInfo, bag, slot)
+    if not ok or IsSecretValue(info) then return nil end
+    return info == nil
+end
+
 local qualityRingWarned = false
 
 -- r, g, b of a quality colour table, nil unless all three are plain numbers.
@@ -367,16 +413,62 @@ local function SyncSlotRing(button)
     if color then ring:SetVertexColor(color[1], color[2], color[3], 1) end
 end
 
--- Everything that follows the icon: the corner wedge and the ring.
+-- The empty-slot well. An empty bag slot's stock art is the ICON pointed at an atlas (emptyBackgroundAtlas, ItemButtonTemplate
+-- SetItemButtonTexture_Base), and what the older code had was a name match on that atlas, installed per button once, on
+-- the one `icon` key, with IconHoldsItem counting any unrecognised art as an item (so the wedge and ring then treated the
+-- slot as filled). Why the pouch still showed in game could not be read offline (the release client's art is not in the
+-- repo); each of those is a way for it to slip past, and none of them can fail a cover that follows the item API. The
+-- well does not look at the art. It is the slot plate's own shape,
+-- drawn over the icon (OVERLAY -3: above the icon, under the corner wedge, the glow and the ring) and shown exactly while
+-- the item API says the slot is empty, so whatever Blizzard puts in an empty icon is covered, and that art is also cleared
+-- off the icon (the same SetTexture(nil) the exact-name clear makes). Our own region only: nothing protected is touched.
+local WELL_SUBLEVEL = -3
+
+local wellWarned = false
+local function AddWell(button)
+    if wells[button] ~= nil then return end   -- made, or failed once (false): never retried, so no orphan region per pass
+    local Theme = FS.Theme
+    if type(Theme.AddCut2Texture) ~= "function" or not Theme.SLICE_CUT2_BUTTON_TEXTURE then return end -- AddPlate logs it
+    local ok, well = pcall(Theme.AddCut2Texture, button, Theme.SLICE_CUT2_BUTTON_TEXTURE, { 1, 1, 1, 1 }, "OVERLAY", WELL_SUBLEVEL)
+    if not ok then
+        wells[button] = false
+        if not wellWarned then
+            wellWarned = true
+            FS.LogDegradeOnce("bags_well", "Bags.lua: no empty-slot well: " .. tostring(well))
+        end
+        return
+    end
+    well:Hide()
+    wells[button] = well
+end
+
+-- Drops whatever art an emptied bag slot's icon still wears (an atlas or a texture; a secret one is left alone).
+local function ClearIconArt(icon)
+    if type(icon) ~= "table" then return end
+    local atlas, texture = ReadIcon(icon, "GetAtlas"), ReadIcon(icon, "GetTexture")
+    if IsSecretValue(atlas) or IsSecretValue(texture) then return end
+    if atlas ~= nil or texture ~= nil then ClearEmptyIcon(icon) end
+end
+
+local function SyncWell(button)
+    local well = wells[button]
+    if not well then return end
+    local empty = SlotIsEmpty(button) == true
+    well:SetShown(empty)
+    if empty then ClearIconArt(ItemIcon(button)) end
+end
+
+-- Everything that follows the icon: the well, the corner wedge and the ring.
 local function SyncSlot(button)
+    SyncWell(button)
     SyncIconCorners(button)
     SyncSlotRing(button)
 end
 
 -- One post-hook per icon state setter (no method replaced), installed once per button.
 local function HookIconState(button)
-    local icon = button.icon
-    if type(icon) ~= "table" or type(hooksecurefunc) ~= "function" then return end
+    local icon = ItemIcon(button)
+    if not icon or type(hooksecurefunc) ~= "function" then return end
     local function sync() SyncSlot(button) end
     for _, method in ipairs(ICON_STATE_METHODS) do
         if type(icon[method]) == "function" then pcall(hooksecurefunc, icon, method, sync) end
@@ -411,9 +503,10 @@ end
 -- would detach them from the item by the inset instead of fixing the corners.
 -- The icon keeps its full size; its two corners outside the cut are covered by the
 -- wedge above (AddIconCorners). The icon hooks go in last so they sit after the empty-art clear.
-local function SkinItemButton(button)
+local function SkinItemButton(button, isBagSlot)
     if not button then return end
     SweepSlotArt(button)
+    if isBagSlot then bagSlots[button] = true end
     if not button.fsBagItemSkinned then
         button.fsBagItemSkinned = true
 
@@ -424,8 +517,10 @@ local function SkinItemButton(button)
             SkinCutButton(button, { count = button.Count })
         end
         AddIconCorners(button)
+        if isBagSlot then AddWell(button) end
         HookIconState(button)
     end
+    if isBagSlot and wells[button] == nil then AddWell(button) end
     ReadSlotRing(button)
     SyncSlot(button)
 end
@@ -576,12 +671,15 @@ FS.BagHighlight = {
 
 -- Skins every currently-valid item button on a container/combined-bag frame, and re-applies
 -- the hover highlight to it (the window just opened or repopulated).
+local RefreshWindow  -- (frame): lays the window out around the grid; defined with the window below
+
 local function SkinContainerItems(container)
     local shown = container and ContainerShown(container) or false
     EachContainerItem(container, function(itemButton)
-        SkinItemButton(itemButton)
+        SkinItemButton(itemButton, true)
         SyncItemHighlight(itemButton, shown)
     end)
+    if container and RefreshWindow then RefreshWindow(container) end
 end
 
 -- Skins every currently-active item button on the bank panel. BankPanelMixin's
@@ -753,16 +851,576 @@ local function StyleBagMoney(frame)
 end
 
 -------------------------------------------------------------------------------
+-- Window: header row, item grid, footer (the approved bag redesign)
+-------------------------------------------------------------------------------
+
+-- Design: mockups/minimap-bags-cleanup-2026-11-12.html, "BAGS // HEADER + LEFTOVER ART", the PROPOSED panel (drawn at 2x:
+-- every number below is that mockup's pixels halved). From the top: the window edge, MARGIN, one header row (the search
+-- field from the grid's left edge, the sort key and the close key ending on the grid's right edge), MARGIN, the item
+-- grid, RULE_GAP, a one pixel violet rule, the footer line (slot count at the grid's left edge, money at its right
+-- edge), the window edge FOOT_BELOW under the grid.
+--
+-- Blizzard keeps ~75 units above the grid for its own title, search box and buttons and anchors the grid to the money
+-- frame, and neither can change without replacing container methods, so the window is OUR chrome frame, a child of the
+-- container, sized around the MEASURED item grid (the window's top lies below the container's top, its bottom a little
+-- under the container's bottom). What Blizzard owns and keeps (the search box, the sort button, the close button and the
+-- money frame) is not replaced: the first three keep their scripts, get their stock art held invisible (FS.HeldArt) and
+-- are re-anchored onto our rects after every Blizzard placement (the post-hook on UpdateItems already there runs after
+-- ContainerFrameMixin:UpdateSearchBox in Update()); the money frame stays functional at alpha 0 while our own footer shows
+-- the amount. Item buttons are never anchored to, resized or reparented, and every anchor of ours points at the container
+-- or at our own frames, so a protected container is left alone in combat.
+--
+-- Pixels: every edge is a whole screen pixel (a design value is rounded once, so equal values give equal pixel counts at
+-- any UI scale); a key is the next EVEN pixel count up from its 17 units, so a glyph of even size centres exactly.
+local METRICS = {
+    MARGIN = 7,          -- window edge to the header row, the row to the grid, the window edge to the grid sides
+    KEY = 17,            -- the sort and close keys, and the height of the search field
+    KEY_GAP = 4,         -- sort key to close key
+    SEARCH_GAP = 6,      -- search field to sort key
+    CELL = 19,           -- the magnifier's cell at the left of the search field
+    KEY_CHAMFER = 3,
+    SEARCH_CHAMFER = 4,
+    RULE_GAP = 7,        -- grid to the footer rule
+    FOOT_BELOW = 27,     -- grid to the window's bottom edge
+    FONT = 11,           -- the footer's mono size, the data bar's
+}
+
+-- The layout of one window in UI units, from the grid's size and the pixels per unit. Positions are from the chrome's top
+-- left corner (x right, y down). opts.search / opts.sort: whether the header row has them (a bag without them has the
+-- close key alone). Pure: no frame is read or written.
+local function ComputeLayout(gridWidth, gridHeight, es, opts)
+    opts = opts or {}
+    local function px(units) return math.floor(units * es + 0.5) end
+    local function even(units)
+        local n = math.max(2, math.ceil(units * es - 1e-6))
+        if n % 2 == 1 then n = n + 1 end
+        return n
+    end
+    local m, key = px(METRICS.MARGIN), even(METRICS.KEY)
+    local keyGap, searchGap, cell = px(METRICS.KEY_GAP), px(METRICS.SEARCH_GAP), even(METRICS.CELL)
+    local gw, gh = math.max(1, px(gridWidth)), math.max(1, px(gridHeight))
+
+    local gridLeft, gridTop = m, m + key + m
+    local gridRight, gridBottom = gridLeft + gw, gridTop + gh
+    local width = gridRight + m
+    local ruleY = gridBottom + px(METRICS.RULE_GAP)
+    local height = gridBottom + px(METRICS.FOOT_BELOW)
+    local bandTop = ruleY + 1
+    local centre = math.floor((bandTop + height) / 2 + 0.5)
+
+    local closeX = gridRight - key
+    local out = {
+        es = es, width = width, height = height,
+        grid = { left = gridLeft, right = gridRight, top = gridTop, bottom = gridBottom },
+        close = { x = closeX, y = m, w = key, h = key },
+        rule = { x = gridLeft, y = ruleY, w = gw, h = 1 },
+        band = { y = bandTop, h = height - bandTop },
+        count = { x = gridLeft, cy = centre },
+        money = { right = gridRight, cy = centre },
+    }
+    local rightEdge = closeX
+    if opts.sort then
+        local sortX = closeX - keyGap - key
+        out.sort = { x = sortX, y = m, w = key, h = key }
+        rightEdge = sortX
+        if opts.search then
+            local w = sortX - searchGap - gridLeft
+            if w >= cell + px(8) then
+                out.search = { x = gridLeft, y = m, w = w, h = key }
+                out.cell = { x = gridLeft, y = m, w = cell, h = key }
+            end
+        end
+    end
+    -- every value above is a whole pixel count so far; back to units
+    local function units(t)
+        for k, v in pairs(t) do
+            if type(v) == "table" then units(v) elseif type(v) == "number" and k ~= "es" then t[k] = v / es end
+        end
+    end
+    units(out)
+    return out
+end
+
+-- The pixels per UI unit at `frame`; 1 when the client will not say.
+local function PixelsPerUnit(frame)
+    local helpers = FS.FrameHelpers
+    if not (helpers and helpers.PixelsPerUnit) then return 1 end
+    local ok, ppu = pcall(helpers.PixelsPerUnit, frame)
+    if ok and type(ppu) == "number" and ppu > 0 and not IsSecretValue(ppu) then return ppu end
+    return 1
+end
+
+local function RoundPx(units, es) return math.floor(units * es + 0.5) / es end
+
+-- One frame's rect { left, right, top, bottom }, nil unless all four are plain numbers.
+local function ReadRect(object)
+    if type(object) ~= "table" then return nil end
+    local function get(method)
+        if type(object[method]) ~= "function" then return nil end
+        local ok, value = pcall(object[method], object)
+        if not ok or type(value) ~= "number" or IsSecretValue(value) then return nil end
+        return value
+    end
+    local l, r, t, b = get("GetLeft"), get("GetRight"), get("GetTop"), get("GetBottom")
+    if l and r and t and b then return { left = l, right = r, top = t, bottom = b } end
+    return nil
+end
+
+-- The item grid's bounding rect, measured from the item buttons themselves (read only: a geometry read of a secure button
+-- is allowed in combat, and nothing is ever anchored to one).
+local function GridRect(container)
+    local grid
+    local ok = pcall(EachContainerItem, container, function(itemButton)
+        local rect = ReadRect(itemButton)
+        if not rect then return end
+        if not grid then
+            grid = { left = rect.left, right = rect.right, top = rect.top, bottom = rect.bottom }
+        else
+            grid.left, grid.right = math.min(grid.left, rect.left), math.max(grid.right, rect.right)
+            grid.top, grid.bottom = math.max(grid.top, rect.top), math.min(grid.bottom, rect.bottom)
+        end
+    end)
+    return ok and grid or nil
+end
+
+-- True when the frame is protected AND we are in combat: its anchors, and anything anchored to it, are off limits.
+local function FrameLocked(frame)
+    if not (InCombatLockdown and InCombatLockdown()) then return false end
+    if type(frame.IsProtected) ~= "function" then return false end
+    local ok, protected = pcall(frame.IsProtected, frame)
+    return ok and protected and true or false
+end
+
+local function Snap(texture)
+    if texture and texture.SetSnapToPixelGrid then
+        pcall(texture.SetSnapToPixelGrid, texture, true)
+        if texture.SetTexelSnappingBias then pcall(texture.SetTexelSnappingBias, texture, 0) end
+    end
+end
+
+-- Glyphs: pixel cells { x, y, w, h [, colour] } on a grid of PHYSICAL pixels (like the close X of ButtonSkins), laid out
+-- with an even bounding box so they centre exactly in an even-pixel slot.
+local SORT_CELLS = {                 -- three stepped bars (long, medium, short) and a down arrow: 14 x 8
+    { 0, 0, 8, 2, "bars" }, { 0, 3, 6, 2, "bars" }, { 0, 6, 4, 2, "bars" },
+    { 11, 0, 1, 7, "arrow" },
+    { 9, 5, 1, 1, "arrow" }, { 10, 6, 1, 1, "arrow" }, { 11, 7, 1, 1, "arrow" }, { 12, 6, 1, 1, "arrow" }, { 13, 5, 1, 1, "arrow" },
+}
+local SEARCH_CELLS = {               -- a lens and its handle: 10 x 10
+    { 2, 0, 3, 1 }, { 2, 6, 3, 1 }, { 0, 2, 1, 3 }, { 6, 2, 1, 3 },
+    { 1, 1, 1, 1 }, { 5, 1, 1, 1 }, { 1, 5, 1, 1 }, { 5, 5, 1, 1 },
+    { 6, 6, 1, 1 }, { 7, 7, 1, 1 }, { 8, 8, 1, 1 }, { 9, 9, 1, 1 },
+}
+local X_FALLBACK = 6
+
+local function CloseCells()
+    local skins = FS.ButtonSkins
+    local cells = {}
+    local n = (skins and skins.X and skins.X.GLYPH) or X_FALLBACK
+    local source = skins and skins.XCells and skins.XCells(n)
+    if not source then
+        source = {}
+        for k = 0, n - 1 do source[#source + 1] = { k, k }; source[#source + 1] = { n - 1 - k, k } end
+    end
+    for _, c in ipairs(source) do cells[#cells + 1] = { c[1], c[2], 1, 1 } end
+    return cells
+end
+
+-- Where each glyph's cells go, per plate. Plate state (hover, pressed, focus) is kept here, never on a Blizzard frame.
+local windows = setmetatable({}, { __mode = "k" })   -- container -> its window pieces
+local controlHooked = setmetatable({}, { __mode = "k" }) -- Blizzard control -> our state hooks are in
+local controlsHeld = setmetatable({}, { __mode = "k" })  -- Blizzard control -> its art is held
+local searchStyled = setmetatable({}, { __mode = "k" })  -- search box -> its fonts are set
+local layoutPending = false                             -- a protected window was not laid out in combat
+
+local windowWarned = false
+local function WarnWindow(why)
+    if windowWarned then return end
+    windowWarned = true
+    FS.LogDegradeOnce("bags_window", "Bags.lua: bag window not drawn, " .. why)
+end
+
+local function Mix(a, b, t)
+    return { a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t }
+end
+
+local WHITE = { 1, 1, 1 }
+local PLATE_STATES = {   -- glyph lift toward white, halo alpha
+    normal  = { lift = 0,    halo = 0.12 },
+    hover   = { lift = 0.12, halo = 0.45 },
+    pressed = { lift = 0.40, halo = 0.30 },
+}
+
+-- One plate: our own frame with the cut ring (Theme.SkinButton at the plate's chamfer) and, for the search field, an ink
+-- face. `colour` is the ring colour, `ringAlpha` its normal alpha.
+local function NewPlate(chrome, colour, chamfer, ringAlpha, ink)
+    local Theme = FS.Theme
+    local plate = CreateFrame("Frame", nil, chrome)
+    plate:SetFrameLevel(chrome:GetFrameLevel())
+    local skin = Theme.SkinButton(plate, { borderColor = colour, chamfer = chamfer, cut = true, glowAlpha = PLATE_STATES.normal.halo })
+    if not (skin and skin.border and skin.border.ring) then error("Theme.SkinButton gave no ring") end
+    local face
+    if ink then
+        face = type(Theme.AddCutSliceFill) == "function" and Theme.AddCutSliceFill(plate, ink, chamfer) or nil
+        if not face then
+            face = plate:CreateTexture(nil, "BACKGROUND")
+            face:SetAllPoints(plate)
+            face:SetColorTexture(ink[1], ink[2], ink[3], ink[4] or 1)
+        end
+    end
+    return { frame = plate, skin = skin, face = face, colour = colour, ringAlpha = ringAlpha, glyph = {}, state = {} }
+end
+
+local function PaintPlate(piece)
+    local state = PLATE_STATES.pressed
+    if not piece.state.pressed then state = (piece.state.hover and PLATE_STATES.hover) or PLATE_STATES.normal end
+    local c = piece.colour
+    local ring = piece.skin.border.ring
+    local alpha = piece.ringAlpha
+    if piece.focusRing and (piece.state.focus or piece.state.hover) then alpha = piece.state.focus and 1 or 0.8 end
+    ring:SetVertexColor(c[1], c[2], c[3], alpha)
+    if piece.skin.glow then piece.skin.glow:SetVertexColor(c[1], c[2], c[3], state.halo) end
+    for _, t in ipairs(piece.glyph) do
+        local base = t.base
+        local g = Mix(base, WHITE, state.lift)
+        t.texture:SetColorTexture(g[1], g[2], g[3], 1)
+    end
+end
+
+-- Lays a glyph's cells in a slot of slotW x slotH physical pixels, its bounding box centred.
+local function SeatGlyph(piece, host, cells, colours, slotW, slotH, es)
+    local seatKey = slotW .. ":" .. slotH .. ":" .. es
+    if piece.seatKey == seatKey then return end
+    piece.seatKey = seatKey
+    local minX, minY, maxX, maxY = math.huge, math.huge, -math.huge, -math.huge
+    for _, c in ipairs(cells) do
+        minX, minY = math.min(minX, c[1]), math.min(minY, c[2])
+        maxX, maxY = math.max(maxX, c[1] + c[3]), math.max(maxY, c[2] + c[4])
+    end
+    local ox = math.floor((slotW - (maxX - minX)) / 2) - minX
+    local oy = math.floor((slotH - (maxY - minY)) / 2) - minY
+    local px = 1 / es
+    for i, c in ipairs(cells) do
+        local entry = piece.glyph[i]
+        if not entry then
+            local t = host:CreateTexture(nil, "OVERLAY", nil, 3)
+            Snap(t)
+            entry = { texture = t }
+            piece.glyph[i] = entry
+        end
+        entry.base = colours[c[5] or "main"] or colours.main
+        local t = entry.texture
+        t:ClearAllPoints()
+        t:SetSize(c[3] * px, c[4] * px)
+        t:SetPoint("TOPLEFT", host, "TOPLEFT", (ox + c[1]) * px, -(oy + c[2]) * px)
+        t:Show()
+    end
+    for i = #cells + 1, #piece.glyph do piece.glyph[i].texture:Hide() end
+end
+
+-- Hover / press / focus follow Blizzard's own control (a post-hook per script; nothing replaced), once per control. The
+-- search box and the sort button are SHARED by the backpack and the combined window, so the hook looks up the window that
+-- owns the control (its parent) when it fires, and paints that window's plate under `key`.
+local function FollowControl(control, key, scripts)
+    if type(control) ~= "table" or controlHooked[control] or type(control.HookScript) ~= "function" then return end
+    controlHooked[control] = true
+    for script, apply in pairs(scripts) do
+        pcall(control.HookScript, control, script, function(self)
+            local okParent, parent = pcall(self.GetParent, self)
+            local win = okParent and windows[parent] or nil
+            local piece = win and win[key]
+            if piece then apply(piece.state); PaintPlate(piece) end
+        end)
+    end
+end
+
+local function HoldControl(control)
+    if type(control) ~= "table" or controlsHeld[control] then return end
+    controlsHeld[control] = true
+    HeldArt.HoldButton(control)
+end
+
+local function MoneyAmountText(amount)
+    if type(amount) ~= "number" or IsSecretValue(amount) or amount < 0 then return nil end
+    amount = math.floor(amount)
+    local gold, silver, copper = math.floor(amount / 10000), math.floor(amount / 100) % 100, amount % 100
+    local function piece(color, text)
+        return string.format("|cff%02x%02x%02x%s|r", math.floor(color[1] * 255 + 0.5), math.floor(color[2] * 255 + 0.5),
+            math.floor(color[3] * 255 + 0.5), text)
+    end
+    local parts = {}
+    if gold > 0 then parts[#parts + 1] = piece(COIN_GOLD, gold .. "g") end
+    if gold > 0 or silver > 0 then parts[#parts + 1] = piece(COIN_SILVER, silver .. "s") end
+    parts[#parts + 1] = piece(COIN_COPPER, copper .. "c")
+    return table.concat(parts, " ")
+end
+
+-- Slots in use over slots, from the item API (the icon art when the API cannot say).
+local function SlotCount(frame)
+    local used, total = 0, 0
+    pcall(EachContainerItem, frame, function(itemButton)
+        total = total + 1
+        local empty = SlotIsEmpty(itemButton)
+        if empty == nil then
+            if IconHoldsItem(itemButton) then used = used + 1 end
+        elseif not empty then
+            used = used + 1
+        end
+    end)
+    return used, total
+end
+
+local function FrameShown(object)
+    if type(object) ~= "table" or type(object.IsShown) ~= "function" then return false end
+    local ok, shown = pcall(object.IsShown, object)
+    return ok and shown and true or false
+end
+
+local function RefreshFooter(frame)
+    local win = windows[frame]
+    if not (win and win.count) then return end
+    local used, total = SlotCount(frame)
+    win.count:SetText(used .. "/" .. total)
+    if win.hasMoney then
+        local ok, amount = pcall(GetMoney)
+        local text = ok and MoneyAmountText(amount) or nil
+        if text then win.money:SetText(text) end
+    end
+end
+
+-- The window's pieces, made once per container. Returns the pieces, or nil (with one log) when the Theme cannot draw it.
+local function BuildWindow(frame)
+    local Theme = FS.Theme
+    if type(Theme.StripBlizzardChrome) ~= "function" or type(Theme.SkinButton) ~= "function" or type(frame.CreateFontString) ~= "function"
+        or type(CreateFrame) ~= "function" then
+        WarnWindow("Theme.StripBlizzardChrome / SkinButton missing")
+        return nil
+    end
+    local chrome
+    local ok, err = pcall(function()
+        Theme.StripBlizzardChrome(frame)
+        chrome = CreateFrame("Frame", nil, frame)
+        chrome:SetFrameLevel(frame:GetFrameLevel())
+        chrome:Hide()
+        SkinPanel(chrome, { strip = false })
+
+        local win = { chrome = chrome, state = {} }
+        local ink = Theme.COLOR_BAR_TRACK or { 0.039, 0.016, 0.086, 1 }
+        local cyan, violet, pink = Theme.COLOR_POWER or { 0.133, 0.878, 1, 1 }, Theme.COLOR_BORDER or { 0.659, 0.333, 0.969, 1 },
+            Theme.COLOR_HEALTH or { 1, 0.18, 0.592, 1 }
+        local muted = Theme.COLOR_MUTED or { 0.616, 0.577, 0.769, 1 }
+
+        win.search = NewPlate(chrome, cyan, METRICS.SEARCH_CHAMFER, 0.55, ink)
+        win.search.focusRing = true
+        win.sort = NewPlate(chrome, violet, METRICS.KEY_CHAMFER, 1)
+        win.close = NewPlate(chrome, pink, METRICS.KEY_CHAMFER, 1)
+        win.searchPlate, win.sortPlate, win.closePlate = win.search.frame, win.sort.frame, win.close.frame
+        win.searchPlate:Hide(); win.sortPlate:Hide(); win.closePlate:Hide()
+        win.searchCell = CreateFrame("Frame", nil, win.searchPlate)
+        win.searchCell:SetFrameLevel(win.searchPlate:GetFrameLevel())
+        win.searchCell:SetPoint("TOPLEFT", win.searchPlate, "TOPLEFT", 0, 0)
+
+        win.colours = {
+            search = { main = muted }, sort = { bars = violet, arrow = cyan, main = violet }, close = { main = pink },
+        }
+
+        win.rule = chrome:CreateTexture(nil, "ARTWORK")
+        win.rule:SetColorTexture(violet[1], violet[2], violet[3], 0.40)
+        Snap(win.rule)
+        win.rule:Hide()
+        if type(Theme.ApplyMono) == "function" then
+            win.count = chrome:CreateFontString(nil, "OVERLAY")
+            Theme.ApplyMono(win.count, METRICS.FONT, cyan)
+            win.money = chrome:CreateFontString(nil, "OVERLAY")
+            Theme.ApplyMono(win.money, METRICS.FONT, { 1, 1, 1 })
+            win.count:Hide(); win.money:Hide()
+        end
+
+        -- Blizzard's own pieces that stay: their art goes, their scripts are untouched.
+        local closeButton = frame.CloseButton
+        if type(closeButton) == "table" then HoldControl(closeButton) end
+        local portrait = frame.PortraitButton
+        if type(portrait) == "table" then HoldRegion(portrait.Highlight) end
+        HoldControl(_G["BagItemSearchBox"])
+        HoldControl(_G["BagItemAutoSortButton"])
+
+        local pointer = {
+            OnEnter = function(st) st.hover = true end,
+            OnLeave = function(st) st.hover, st.pressed = false, false end,
+            OnMouseDown = function(st) st.pressed = true end,
+            OnMouseUp = function(st) st.pressed = false end,
+        }
+        FollowControl(closeButton, "close", pointer)
+        FollowControl(_G["BagItemAutoSortButton"], "sort", pointer)
+        FollowControl(_G["BagItemSearchBox"], "search", {
+            OnEnter = pointer.OnEnter, OnLeave = function(st) st.hover = false end,
+            OnEditFocusGained = function(st) st.focus = true end, OnEditFocusLost = function(st) st.focus = false end,
+        })
+        windows[frame] = win
+        for _, piece in ipairs({ win.search, win.sort, win.close }) do PaintPlate(piece) end
+    end)
+    if not ok then
+        if chrome then pcall(chrome.Hide, chrome) end
+        windows[frame] = nil
+        WarnWindow(tostring(err))
+        return nil
+    end
+    return windows[frame]
+end
+
+local function ControlOwned(control, frame)
+    if type(control) ~= "table" or type(control.GetParent) ~= "function" then return false end
+    local ok, parent = pcall(control.GetParent, control)
+    return ok and parent == frame and FrameShown(control)
+end
+
+-- Puts one Blizzard control on a rect of the chrome (x, y from the chrome's top left; Blizzard may have anchored it
+-- anywhere since). The control is an unprotected frame; the anchor points at our own chrome.
+local function SeatControl(control, chrome, rect)
+    if type(control) ~= "table" or not rect then return end
+    control:ClearAllPoints()
+    control:SetPoint("TOPLEFT", chrome, "TOPLEFT", rect.x, -rect.y)
+    control:SetSize(rect.w, rect.h)
+end
+
+-- A window that no longer owns the shared search box and sort button (Blizzard re-parented them to another bag window) hides
+-- the plates it drew for them.
+local function DropLostPlates(frame, win)
+    if win.searchPlate:IsShown() and not ControlOwned(_G["BagItemSearchBox"], frame) then win.searchPlate:Hide() end
+    if win.sortPlate:IsShown() and not ControlOwned(_G["BagItemAutoSortButton"], frame) then win.sortPlate:Hide() end
+end
+
+local function SeatPlate(piece, chrome, rect, shown)
+    local f = piece.frame
+    if not (rect and shown) then f:Hide(); return end
+    f:ClearAllPoints()
+    f:SetPoint("TOPLEFT", chrome, "TOPLEFT", rect.x, -rect.y)
+    f:SetSize(rect.w, rect.h)
+    f:Show()
+end
+
+local function ApplyWindow(frame, win)
+    local es = PixelsPerUnit(frame)
+    local rect, grid = ReadRect(frame), GridRect(frame)
+    if not (rect and grid) then return end
+
+    local searchBox, sortButton = _G["BagItemSearchBox"], _G["BagItemAutoSortButton"]
+    local hasSearch, hasSort = ControlOwned(searchBox, frame), ControlOwned(sortButton, frame)
+    local lay = ComputeLayout(grid.right - grid.left, grid.top - grid.bottom, es, { search = hasSearch, sort = hasSort })
+    win.layout = lay
+    local chrome = win.chrome
+
+    -- the chrome: its top left corner so that the grid lands on the layout's grid rect
+    local dx = RoundPx(grid.left - lay.grid.left - rect.left, es)
+    local dy = RoundPx(grid.top + lay.grid.top - rect.top, es)
+    chrome:ClearAllPoints()
+    chrome:SetPoint("TOPLEFT", frame, "TOPLEFT", dx, dy)
+    chrome:SetSize(lay.width, lay.height)
+    chrome:Show()
+
+    local keyPx = math.floor(lay.close.w * es + 0.5)
+    SeatPlate(win.close, chrome, lay.close, true)
+    SeatPlate(win.sort, chrome, lay.sort, hasSort)
+    SeatPlate(win.search, chrome, lay.search, hasSearch and lay.search ~= nil)
+    SeatControl(frame.CloseButton, chrome, lay.close)
+    if hasSort then SeatControl(sortButton, chrome, lay.sort) end
+    if hasSearch and lay.search then
+        SeatControl(searchBox, chrome, lay.search)
+        local cellUnits = lay.cell.w
+        if type(searchBox.SetTextInsets) == "function" then pcall(searchBox.SetTextInsets, searchBox, cellUnits, 20, 0, 0) end
+        local hint = searchBox.Instructions
+        if type(hint) == "table" and type(hint.SetPoint) == "function" then
+            hint:ClearAllPoints()
+            hint:SetPoint("BOTTOMRIGHT", searchBox, "BOTTOMRIGHT", -20, 0)
+            hint:SetPoint("TOPLEFT", searchBox, "TOPLEFT", cellUnits, 0)
+            if FS.Theme.ApplyMono and not searchStyled[searchBox] then
+                searchStyled[searchBox] = true
+                pcall(FS.Theme.ApplyMono, hint, METRICS.FONT, FS.Theme.COLOR_MUTED or { 0.616, 0.577, 0.769 })
+                pcall(FS.Theme.ApplyMono, searchBox, METRICS.FONT, { 1, 1, 1 })
+            end
+        end
+        win.searchCell:SetSize(lay.cell.w, lay.cell.h)
+        SeatGlyph(win.search, win.searchCell, SEARCH_CELLS, win.colours.search, math.floor(lay.cell.w * es + 0.5), keyPx, es)
+    end
+    SeatGlyph(win.sort, win.sortPlate, SORT_CELLS, win.colours.sort, keyPx, keyPx, es)
+    SeatGlyph(win.close, win.closePlate, CloseCells(), win.colours.close, keyPx, keyPx, es)
+    for _, piece in ipairs({ win.search, win.sort, win.close }) do PaintPlate(piece) end
+
+    -- the footer: rule, count at the grid's left edge, money at its right edge
+    win.hasMoney = FrameShown(frame.MoneyFrame)
+    win.rule:ClearAllPoints()
+    win.rule:SetPoint("TOPLEFT", chrome, "TOPLEFT", lay.rule.x, -lay.rule.y)
+    win.rule:SetSize(lay.rule.w, lay.rule.h)
+    win.rule:Show()
+    if win.count then
+        win.count:ClearAllPoints()
+        win.count:SetPoint("LEFT", chrome, "TOPLEFT", lay.count.x, -lay.count.cy)
+        win.count:Show()
+        win.money:ClearAllPoints()
+        win.money:SetPoint("RIGHT", chrome, "TOPLEFT", lay.money.right, -lay.money.cy)
+        win.money:SetShown(win.hasMoney)
+        if win.hasMoney and type(frame.MoneyFrame.SetAlpha) == "function" then frame.MoneyFrame:SetAlpha(0) end
+        RefreshFooter(frame)
+    end
+
+    for other, otherWin in pairs(windows) do
+        if other ~= frame then DropLostPlates(other, otherWin) end
+    end
+
+    -- the container's own mouse rect shrinks to the visible window (the band above it is empty)
+    if type(frame.SetHitRectInsets) == "function" then
+        local l = math.max(0, dx)
+        local t = math.max(0, -dy)
+        local r = math.max(0, rect.right - (rect.left + dx + lay.width))
+        local b = math.max(0, (rect.top + dy - lay.height) - rect.bottom)
+        pcall(frame.SetHitRectInsets, frame, l, r, t, b)
+    end
+end
+
+RefreshWindow = function(frame)
+    local win = windows[frame]
+    if not win then return end
+    if FrameLocked(frame) then layoutPending = true; return end
+    local ok, err = pcall(ApplyWindow, frame, win)
+    if not ok then WarnWindow("layout failed: " .. tostring(err)) end
+end
+
+FS.BagsWindow = {
+    Of = function(frame) return windows[frame] end,
+    Layout = ComputeLayout,
+    METRICS = METRICS,
+}
+
+local windowEvents = CreateFrame("Frame")
+for _, event in ipairs({ "PLAYER_MONEY", "PLAYER_REGEN_ENABLED" }) do pcall(windowEvents.RegisterEvent, windowEvents, event) end
+windowEvents:SetScript("OnEvent", function(_, event)
+    if event == "PLAYER_REGEN_ENABLED" then
+        if not layoutPending then return end
+        layoutPending = false
+    end
+    for frame in pairs(windows) do
+        if event == "PLAYER_MONEY" then pcall(RefreshFooter, frame) else RefreshWindow(frame) end
+    end
+end)
+
+-------------------------------------------------------------------------------
 -- Panel skin (idempotent via frame.fsBagSkin)
 -------------------------------------------------------------------------------
 
-local function SkinBagFrame(frame)
+-- `windowed`: a bag window (ContainerFrame1..13, the combined bags) wears the window above; the bank keeps the panel skin
+-- (and so does a bag window the Theme cannot draw).
+local function SkinBagFrame(frame, windowed)
     if not frame or frame.fsBagSkin then return end
 
-    SkinPanel(frame)
+    if not (windowed == true and BuildWindow(frame)) then SkinPanel(frame) end
     if not StyleBagMoney(frame) then FS.PanelSkins.TryStyleMoney(frame) end
 
     frame.fsBagSkin = true
+end
+
+-- OnShow of a bag window: the skin once, the layout every time (the frame may have been resized or moved since).
+local function ShowBagWindow(frame)
+    SkinBagFrame(frame, true)
+    RefreshWindow(frame)
 end
 
 -------------------------------------------------------------------------------
@@ -772,9 +1430,9 @@ end
 -- Containers are re-shown/re-laid-out constantly (bag toggles, slot count
 -- changes); OnShow re-applies the skin, but SkinBagFrame's fsBagSkin guard
 -- means every call after the first is a cheap no-op rather than a rebuild.
-local function HookContainerShow(frame)
+local function HookContainerShow(frame, onShow)
     if not frame or frame.fsBagShowHooked then return end
-    frame:HookScript("OnShow", SkinBagFrame)
+    frame:HookScript("OnShow", onShow or SkinBagFrame)
     frame.fsBagShowHooked = true
 end
 
@@ -801,8 +1459,8 @@ local function ApplyContainers()
     for i = 1, MAX_CONTAINERS do
         local frame = _G["ContainerFrame" .. i]
         if frame then
-            SkinBagFrame(frame)
-            HookContainerShow(frame)
+            SkinBagFrame(frame, true)
+            HookContainerShow(frame, ShowBagWindow)
             HookContainerHide(frame)
             SkinContainerItems(frame)
             HookItemRefresh(frame, "UpdateItems", SkinContainerItems)
@@ -818,8 +1476,8 @@ local function ApplyCombinedBags()
     local frame = ContainerFrameCombinedBags
     if not frame then return end
 
-    SkinBagFrame(frame)
-    HookContainerShow(frame)
+    SkinBagFrame(frame, true)
+    HookContainerShow(frame, ShowBagWindow)
     HookContainerHide(frame)
     SkinContainerItems(frame)
     HookItemRefresh(frame, "UpdateItems", SkinContainerItems)

@@ -72,6 +72,7 @@ Exit 0 = every check passed; otherwise the number of failures.
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import sys
@@ -88,6 +89,7 @@ BAGS_LUA = Path(os.environ.get("BAGS_LUA") or ADDON / "Modules/Bags/Bags.lua")  
 DATABAR_LUA = ADDON / "Modules/DataBars/DataBar.lua"
 THEME_LUA = ADDON / "Core/Theme.lua"
 HELDART_LUA = ADDON / "Core/HeldArt.lua"
+BUTTONSKINS_LUA = ADDON / "Core/ButtonSkins.lua"
 
 
 # ---------------------------------------------------------------------------------------
@@ -194,6 +196,27 @@ function Class:SetShown(v) self._shown = v and true or false end
 function Class:IsShown() return self._shown end
 function Class:HookScript(which, fn) self._scripts[which] = self._scripts[which] or {}; table.insert(self._scripts[which], fn) end
 function Class:GetRegions() return unpack(self._regions) end
+-- geometry the window layout reads: a rect is { left, right, top, bottom } in screen units (y up), set by PlaceGrid
+function Class:GetLeft() return self._rect and self._rect[1] end
+function Class:GetRight() return self._rect and self._rect[2] end
+function Class:GetTop() return self._rect and self._rect[3] end
+function Class:GetBottom() return self._rect and self._rect[4] end
+function Class:GetParent() return self._parent end
+function Class:SetParent(p) self._parent = p end
+function Class:SetFrameLevel(l) self._level = l end
+function Class:GetFrameLevel() return self._level or 1 end
+function Class:EnableMouse(v) self._mouse = v end
+function Class:SetHitRectInsets(l, r, t, b) self._hit = { l, r, t, b }; self._hitCalls = (self._hitCalls or 0) + 1 end
+function Class:IsProtected() return self._protected == true end
+function Class:SetSnapToPixelGrid(v) self._snap = v end
+function Class:SetTexelSnappingBias(v) self._bias = v end
+function Class:SetColorTexture(r, g, b, a) self._color = { r, g, b, a }; self._texture = "color" end
+function Class:SetAllPoints(f) self._pts = { { "ALL", f } } end
+function Class:SetTextInsets(...) self._insets = { ... } end
+function Class:SetJustifyH(j) self._jh = j end
+function Class:SetJustifyV(j) self._jv = j end
+function Class:SetHorizTile() end
+function Class:SetVertTile() end
 function Class:CreateTexture(_, layer, _, sub)
     local t = region(self, "Texture", "created")
     t._layer, t._sub = layer, sub
@@ -233,7 +256,8 @@ function Class:GetFontString() return self.Text end
 function Class:SetEnabled() end
 
 -- events: RegisterEvent throws on a name the client does not know, like the engine; OnEvent scripts are driven by FireEvent
-KNOWN_EVENTS = { GAME_PAD_CONNECTED = true, GAME_PAD_DISCONNECTED = true, GAME_PAD_ACTIVE_CHANGED = true, PLAYER_ENTERING_WORLD = true }
+KNOWN_EVENTS = { GAME_PAD_CONNECTED = true, GAME_PAD_DISCONNECTED = true, GAME_PAD_ACTIVE_CHANGED = true, PLAYER_ENTERING_WORLD = true,
+    PLAYER_MONEY = true, PLAYER_REGEN_ENABLED = true }
 EVENT_FRAMES = {}
 function Class:RegisterEvent(ev)
     if not KNOWN_EVENTS[ev] then error("Frame:RegisterEvent(): Attempt to register unknown event \"" .. tostring(ev) .. "\"") end
@@ -450,7 +474,67 @@ function MkContainer(name, nButtons, combined, bag)
         for i, b in self:EnumerateValidItems() do if b.SetItemButtonTexture then BlizzardPaint(b, self.infos[i]) end end
     end
     c.GenerateSlots = function(self) for _, b in ipairs(self.Items) do b:Initialize() end end
+    -- PortraitFrameFlat's own controls: the close button (art regions), the portrait dropdown with its round highlight
+    c.CloseButton = new("Button", c)
+    tex(c.CloseButton, "closeArt", { file = "Interface\\Buttons\\UI-Panel-MinimizeButton-Up" })
+    c.PortraitButton = new("Button", c)
+    c.PortraitButton.Highlight = tex(c.PortraitButton, "Highlight", { atlas = "bags-roundhighlight" })
+    -- ContainerFrameMixin:UpdateSearchBox (ContainerFrame.lua 969): the backpack and the combined window own the one
+    -- search box and sort button, re-parent and re-anchor them on every Update(), and Update() runs UpdateItems after it
+    c.UpdateSearchBox = function(self)
+        if self._backpack or self.isCombined then
+            BagItemSearchBox:SetParent(self); BagItemSearchBox:ClearAllPoints()
+            BagItemSearchBox:SetPoint("TOPLEFT", self, "TOPLEFT", self.isCombined and 62 or 42, -37)
+            BagItemSearchBox:SetWidth(self.isCombined and 330 or 96)
+            BagItemSearchBox:Show()
+            BagItemAutoSortButton:SetParent(self)
+            BagItemAutoSortButton:SetPoint("TOPRIGHT", self, "TOPRIGHT", -9, -34)      -- no ClearAllPoints, like Blizzard
+            BagItemAutoSortButton:Show()
+        elseif BagItemSearchBox._parent == self then
+            BagItemSearchBox:Hide(); BagItemAutoSortButton:Hide()
+        end
+    end
+    c.Update = function(self) self:UpdateSearchBox(); self:UpdateItems() end
     return c
+end
+
+-- The one search box and sort button Blizzard shares between the backpack and the combined window
+-- (BagSearchBoxTemplate: Left/Middle/Right border art, the magnifier, the placeholder, a clear button).
+function MkBagControls()
+    local e = new("EditBox", UIParent)
+    e._kind = "EditBox"; e._shown = false
+    e.Left = tex(e, "sbLeft", { file = "Interface\\Common\\Common-Input-Border-L" })
+    e.Middle = tex(e, "sbMiddle", { file = "Interface\\Common\\Common-Input-Border-M" })
+    e.Right = tex(e, "sbRight", { file = "Interface\\Common\\Common-Input-Border-R" })
+    e.searchIcon = tex(e, "searchIcon", { atlas = "common-search-magnifyingglass" })
+    e.Instructions = region(e, "FontString", "Instructions")
+    e.clearButton = new("Button", e)
+    e.SetFocus = function(self) self._focus = true end
+    _G.BagItemSearchBox = e
+    local s = new("Button", UIParent)
+    s._kind = "Button"; s._shown = false
+    s.NormalTexture = tex(s, "sortNormal", { atlas = "bags-button-autosort-up" })
+    s._normal = s.NormalTexture
+    s.PushedTexture = tex(s, "sortPushed", { shown = false, atlas = "bags-button-autosort-down" })
+    s.HighlightTexture = tex(s, "sortHighlight", { shown = false, file = "Interface\\Buttons\\ButtonHilight-Square" })
+    _G.BagItemAutoSortButton = s
+end
+
+-- Lays a container out the way Blizzard does: the item grid at a pitch with the frame padding around it
+-- (combined: left 7, right 8, top 75, bottom 28). `o` = { left, top, cols, size, pitch, padL, padR, padT, padB }.
+function PlaceGrid(c, o)
+    local n, cols = #c.Items, o.cols
+    local rows = math.ceil(n / cols)
+    local gl, gt = o.left + o.padL, o.top - o.padT
+    for i, b in ipairs(c.Items) do
+        local col, row = (i - 1) % cols, math.floor((i - 1) / cols)
+        local l, t = gl + col * o.pitch, gt - row * o.pitch
+        b._rect = { l, l + o.size, t, t - o.size }
+    end
+    local gr = gl + (cols - 1) * o.pitch + o.size
+    local gb = gt - (rows - 1) * o.pitch - o.size
+    c._rect = { o.left, gr + o.padR, o.top, gb - o.padB }
+    c._grid = { gl, gr, gt, gb }
 end
 
 function MkBank(nButtons)
@@ -495,9 +579,23 @@ FS = {
         SLICE_CUT2_OUTLINE_TEXTURE = "slice_cut2_outline.tga", SLICE_CUT2_GLOW_TEXTURE = "slice_cut2_glow.tga",
         SLICE_CUT2_GLOW_PAD = 4, SLICE_CUT2_GLOW_MARGIN = 10, COLOR_HEALTH = { 1, 0.18, 0.592, 1 },
         SLICE_CUT2_ERASE_TEXTURE = "slice_cut2_erase_c6.tga", COLOR_BG = { 0.102, 0.063, 0.145, 0.80 },
-        COLOR_BORDER = { 0.659, 0.333, 0.969, 1 },
-        ApplyNineSlice = function(t, margin) t._slice = margin end,
-        SkinPanel = function(frame) CALLS[#CALLS + 1] = { "SkinPanel", frame } end,
+        COLOR_BORDER = { 0.659, 0.333, 0.969, 1 }, COLOR_POWER = { 0.133, 0.878, 1, 1 },
+        COLOR_BUTTON_INK = { 0.090, 0.047, 0.165, 1 }, COLOR_BAR_TRACK = { 0.039, 0.016, 0.086, 1 },
+        ApplyNineSlice = function(t, margin) t._slice = margin; return true end,
+        SnapCut = function(c) return c end,
+        SkinPanel = function(frame, opts)
+            CALLS[#CALLS + 1] = { "SkinPanel", frame, opts }
+            local fill = frame:CreateTexture(nil, "BACKGROUND", nil, -2)
+            fill._tag = "panelFill"; fill:SetTexture("slice_fill.tga")
+        end,
+        StripBlizzardChrome = function(frame) CALLS[#CALLS + 1] = { "StripBlizzardChrome", frame } end,
+        AddCutSliceFill = function(panel, color, radius)
+            CALLS[#CALLS + 1] = { "AddCutSliceFill", panel, radius }
+            local t = themeTex(panel, "slice_cut2_fill.tga", "BACKGROUND", -1, "face")
+            t:SetVertexColor(color[1], color[2], color[3], color[4] or 1)
+            t._chamfer = radius
+            return t
+        end,
         ApplyMono = function(fs, size, color)
             CALLS[#CALLS + 1] = { "ApplyMono", fs, size, color }
             fs:SetFont("mono", size, "")
@@ -506,18 +604,22 @@ FS = {
         end,
         AddCut2Texture = function(frame, path, color, layer, sub)
             CALLS[#CALLS + 1] = { "AddCut2Texture", frame, path, layer, sub }
-            local tag = layer == "BACKGROUND" and "plate" or (path:find("erase", 1, true) and "corners" or "cut2")
+            local tag = layer == "BACKGROUND" and "plate" or (path:find("erase", 1, true) and "corners" or (sub == -3 and "well" or "cut2"))
             local t = themeTex(frame, path, layer, sub, tag)
             if color then t:SetVertexColor(color[1], color[2], color[3], color[4] or 1) end
             return t
         end,
     },
 }
+ES = 1                            -- physical pixels per UI unit the mock reports (FrameHelpers.PixelsPerUnit)
+FS.FrameHelpers = { PixelsPerUnit = function() return ES end }
+MONEY = 0
+function GetMoney() return MONEY end
 local function skin(name)
     return function(button, opts)
         CALLS[#CALLS + 1] = { name, button, opts }
         if not button.fsSkin then
-            button.fsSkin = { chamfer = 6 }
+            button.fsSkin = { chamfer = (opts and opts.chamfer) or 6 }
             local ring = themeTex(button, "slice_cut2_outline.tga", "OVERLAY", 1, "ring")
             ring:SetVertexColor(0.659, 0.333, 0.969, 1)
             button.fsSkin.border = { ring = ring }
@@ -535,6 +637,7 @@ _G.UIParent = UIParent
 function __load(src)
     -- Bags.lua holds Blizzard's slot art through FS.HeldArt (Core/HeldArt.lua, loaded before it in the .toc)
     assert(loadstring(HELDART_SRC, "@HeldArt.lua"))("forever-stuwave", FS)
+    assert(loadstring(BUTTONSKINS_SRC, "@ButtonSkins.lua"))("forever-stuwave", FS)
     local chunk = assert(loadstring(src, "@Bags.lua"))
     chunk("forever-stuwave", FS)
 end
@@ -581,6 +684,43 @@ function LitSet(c)                -- "1,3" = the item indexes lit in a container
     local out = {}
     for i, b in ipairs(c.Items) do if Lit(b) then out[#out + 1] = i end end
     return table.concat(out, ",")
+end
+function OpenFull(c)              -- Show, the OnShow scripts, then Blizzard's Update() (search box placement, then UpdateItems)
+    c:Show()
+    for _, fn in ipairs(c._scripts.OnShow or {}) do fn(c) end
+    c:Update()
+end
+function WellOf(b)
+    for _, r in ipairs(b._regions) do if r._tag == "well" then return r end end
+end
+function WellShown(b)
+    local r = WellOf(b)
+    return r ~= nil and r._shown and r._alpha > 0
+end
+function FsFields(t)              -- every string key starting with "fs" that is set on a widget table
+    local out = {}
+    for k in pairs(t) do if type(k) == "string" and k:sub(1, 2) == "fs" then out[#out + 1] = k end end
+    table.sort(out)
+    return table.concat(out, ",")
+end
+function HookNames(obj)
+    local out = {}
+    for _, h in ipairs(HOOKED) do if h.tbl == obj then out[#out + 1] = h.name end end
+    table.sort(out)
+    return table.concat(out, ",")
+end
+function GlyphBox(slot)           -- bounding box, in physical pixels from the slot's top left, of the glyph cells on a plate
+    local minx, maxx, miny, maxy
+    for _, r in ipairs(slot._regions) do
+        if r._tag == "created" and r._color and r._shown then
+            local pt = r._pts[#r._pts]
+            local x, y = pt[4] * ES, -pt[5] * ES
+            local w, h = r._w * ES, r._h * ES
+            minx = math.min(minx or x, x); miny = math.min(miny or y, y)
+            maxx = math.max(maxx or x + w, x + w); maxy = math.max(maxy or y + h, y + h)
+        end
+    end
+    return { minx, maxx, miny, maxy }
 end
 function RegionCount(b, tag)
     local n = 0
@@ -647,11 +787,14 @@ class World:
         self.rt = LuaRuntime(unpack_returned_tuples=False)
         self.g = self.rt.globals()
         self.g.HELDART_SRC = HELDART_LUA.read_text(encoding="utf-8")
+        self.g.BUTTONSKINS_SRC = BUTTONSKINS_LUA.read_text(encoding="utf-8")
         self.rt.eval("function(src) assert(loadstring(src))() end")(MOCK)
         self.run(f"FS.Theme.COLOR_BAG_RING = {bag_ring_table()}")
         self.run("""
             local EMPTY, AXE = nil, { icon = 135, quality = { 0.1, 0.9, 0.2 } }
+            MkBagControls()
             c1 = MkContainer("ContainerFrame1", 4, false, 1)
+            c1._backpack = true
             c1.infos = { AXE, nil, AXE, nil }
             c1:UpdateItems()
             c2 = MkContainer("ContainerFrame2", 2, false, 2)
@@ -707,11 +850,11 @@ def check_art() -> None:
     w.run("c1.Items[4]:SetItemButtonTexture(nil)")
     check("art.empty_icon_clears_when_blizzard_repoints_it", w.ev("not Visible(c1.Items[4].icon) and c1.Items[4].icon._atlas == nil"),
           tags(w, "c1.Items[4]"))
-    w.run("c1.Items[4]:SetItemButtonTexture(136)")
+    w.run("c1.infos[4] = { icon = 136 }; c1.Items[4]:SetItemButtonTexture(136)")      # an item arrives WITH its data: the item API outranks the art
     check("art.item_arriving_in_an_empty_slot_shows", w.ev("Visible(c1.Items[4].icon) and c1.Items[4].icon._texture == 136"))
     w.run("c1.Items[4].icon:SetAtlas('Garrison-Bag')")
     check("art.a_real_atlas_icon_is_left_alone", w.ev("Visible(c1.Items[4].icon) and c1.Items[4].icon._atlas == 'Garrison-Bag'"))
-    w.run("c1.Items[4]:SetItemButtonTexture(nil)")
+    w.run("c1.infos[4] = nil; c1.Items[4]:SetItemButtonTexture(nil)")
     check("art.emptying_again_clears_again", w.ev("not Visible(c1.Items[4].icon)"))
 
     # --- combined bags: ItemSlotBackground is made inside Initialize, after our first skin
@@ -811,7 +954,8 @@ def check_plate_and_border() -> None:
           plate == {"path": "slice_cut2_button.tga", "layer": "BACKGROUND", "sub": -8}, str(plate))
     opts = w.ev("(function() for _, x in ipairs(CALLS) do if x[1] == 'SkinCutButton' and x[2] == c1.Items[1] then return x[3].count == c1.Items[1].Count end end end)()")
     check("plate.border_is_skincutbutton_with_the_count", bool(opts))
-    check("plate.no_plain_skinbutton_call_left", w.ev("Count('SkinButton') == 0"))
+    check("plate.no_plain_skinbutton_call_left_on_an_item_slot",
+          w.ev("(function() for _, c in ipairs(CALLS) do if c[1] == 'SkinButton' and c[2]._k then return false end end return true end)()"))
     # hooks installed once per region / per button method however many passes ran
     check("plate.normal_region_alpha_hooked_once", w.ev("HookCount(c1.Items[1].NormalTexture, 'SetAlpha') == 1"),
           str(w.ev("HookCount(c1.Items[1].NormalTexture, 'SetAlpha')")))
@@ -826,11 +970,11 @@ def check_plate_and_border() -> None:
 
     # an empty slot shows only our plate and ring (no Blizzard slot art at all)
     w.run("BlizzardReset(c1.Items[2]); c1.Items[2]:SetItemButtonTexture(nil); c1:UpdateItems()")
-    check("plate.empty_slot_shows_only_plate_and_ring", tags(w, "c1.Items[2]") == "plate,ring", tags(w, "c1.Items[2]"))
+    check("plate.empty_slot_shows_only_plate_ring_and_well", tags(w, "c1.Items[2]") == "plate,ring,well", tags(w, "c1.Items[2]"))
     w.run("bank.RefreshAllItemsForSelectedTab(bank); bank.pool[2]:UpdateBackgroundForBankType()")
     check("plate.empty_bank_slot_shows_only_plate_and_ring", tags(w, "bank.pool[2]") == "plate,ring", tags(w, "bank.pool[2]"))
     w.run("comb.Items[2]:SetItemButtonTexture(nil); comb:UpdateItems()")
-    check("plate.empty_combined_slot_shows_only_plate_and_ring", tags(w, "comb.Items[2]") == "plate,ring", tags(w, "comb.Items[2]"))
+    check("plate.empty_combined_slot_shows_only_plate_ring_and_well", tags(w, "comb.Items[2]") == "plate,ring,well", tags(w, "comb.Items[2]"))
     # a filled slot: the icon (the item) on top of the plate, our ring, and no Blizzard border at all
     check("plate.filled_slot_has_only_icon_corners_plate_and_ring", tags(w, "c1.Items[1]") == "corners,icon,plate,ring", tags(w, "c1.Items[1]"))
     check("plate.nothing_swallowed", w.swallowed() == "", w.swallowed())
@@ -874,13 +1018,13 @@ def check_icon_corners() -> None:
     check("corners.pass_leaves_the_state_alone", all(shown(b) for b in filled) and not any(shown(b) for b in empty))
 
     # the wedge follows the ICON, with no UpdateItems pass in between
-    w.run("c1.Items[2]:SetItemButtonTexture(136)")
+    w.run("c1.infos[2] = { icon = 136 }; c1.Items[2]:SetItemButtonTexture(136)")      # the item API outranks the art: data arrives with the icon
     check("corners.an_item_arriving_shows_them", shown("c1.Items[2]"))
-    w.run("c1.Items[2]:SetItemButtonTexture(nil)")
+    w.run("c1.infos[2] = nil; c1.Items[2]:SetItemButtonTexture(nil)")
     check("corners.the_slot_emptying_hides_them", not shown("c1.Items[2]"))
-    w.run("c1.Items[4].icon:SetAtlas('Garrison-Bag')")
+    w.run("c1.infos[4] = { icon = 144 }; c1.Items[4].icon:SetAtlas('Garrison-Bag')")
     check("corners.a_real_atlas_icon_counts_as_art", shown("c1.Items[4]"))
-    w.run("c1.Items[4]:SetItemButtonTexture(nil)")
+    w.run("c1.infos[4] = nil; c1.Items[4]:SetItemButtonTexture(nil)")
     check("corners.the_empty_slot_atlas_does_not", not shown("c1.Items[4]"))
     # the bank empties a slot by hiding the icon and leaves its old texture on it
     w.run("bank.pool[2].icon:SetTexture(137); bank.pool[2].icon:SetShown(true)")
@@ -907,9 +1051,9 @@ def check_icon_corners() -> None:
           and shown("c1.Items[1]"))
 
     # a secret icon texture is never compared or tested: it counts as an item
-    w.run("c1.Items[2].icon:SetTexture(SECRET_VALUE); c1.Items[2].icon:SetShown(true)")
+    w.run("c1.infos[2] = { icon = 145 }; c1.Items[2].icon:SetTexture(SECRET_VALUE); c1.Items[2].icon:SetShown(true)")
     check("corners.a_secret_texture_counts_as_an_item", shown("c1.Items[2]") and w.swallowed() == "", w.swallowed())
-    w.run("c1.Items[2]:SetItemButtonTexture(nil)")
+    w.run("c1.infos[2] = nil; c1.Items[2]:SetItemButtonTexture(nil)")
 
     # combat: the item buttons are protected, only our region changes
     w.run("INCOMBAT = true; PROTECTED_CALLS = {}")
@@ -1428,6 +1572,416 @@ def check_bag_highlight() -> None:
     check("hover.slots_keep_their_plate_when_the_highlight_cannot_be_built", w.ev("RegionCount(c1.Items[1], 'plate') == 1"))
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# The window: header row, footer, chrome, empty wells (the approved bag redesign, mockups/minimap-bags-cleanup-2026-11-12)
+# ---------------------------------------------------------------------------------------------------------------------
+
+# Design values in UI units (the mockup is drawn at 2x: 14 px margins = 7, 34 px keys = 17, 8 px = 4, 12 px = 6, 54 px = 27)
+MARGIN, KEY, KEY_GAP, SEARCH_GAP, RULE_GAP, FOOT_BELOW, CELL = 7, 17, 4, 6, 7, 27, 19
+
+
+def px(units: float, es: float) -> int:
+    return math.floor(units * es + 0.5)
+
+
+def even_px(units: float, es: float) -> int:
+    n = max(2, math.ceil(units * es - 1e-6))
+    return n + (n % 2)
+
+
+def whole(v: float, eps: float = 1e-6) -> bool:
+    return abs(v - round(v)) < eps
+
+
+PLACE = "{ left = 100.3, top = 800.7, cols = %d, size = 37, pitch = 42, padL = 7, padR = 8, padT = 75, padB = 28 }"
+
+
+def scene(es: float = 1.0, *, cols: int = 3, **kw) -> World:
+    """A world with the combined window and the backpack laid out like Blizzard lays them out, at `es` pixels per unit."""
+    w = World(**kw)
+    w.run(f"ES = {es}")
+    w.run(f"PlaceGrid(comb, {PLACE % cols}); PlaceGrid(c1, {PLACE % 2}); PlaceGrid(c2, {PLACE % 2})")
+    return w
+
+
+def window_ok(w: World, name: str, frame: str = "comb") -> bool:
+    ok = bool(w.ev(f"FS.BagsWindow ~= nil and FS.BagsWindow.Of({frame}) ~= nil"))
+    if not ok:
+        check(name, False, "FS.BagsWindow.Of(frame) is missing")
+    return ok
+
+
+def check_window_spacing() -> None:
+    # Every distance, in physical pixels, at several UI scales. Equal design values give equal pixel counts, so the margin
+    # above the header row equals the gap under it; every edge and glyph lands on a whole pixel.
+    for es in (1.0, 1.2, 1.25, 1.5, 2.0):
+        t = f"window.es{es}"
+        w = scene(es)
+        w.run("OpenFull(comb)")
+        if not window_ok(w, f"{t}.exists"):
+            continue
+        L = lambda path: float(w.ev(f"FS.BagsWindow.Of(comb).layout.{path}")) * es       # noqa: E731  (pixels)
+        m, key, kg, sg = px(MARGIN, es), even_px(KEY, es), px(KEY_GAP, es), px(SEARCH_GAP, es)
+        names = ("width", "height", "grid.left", "grid.right", "grid.top", "grid.bottom", "search.x", "search.y", "search.w", "search.h",
+                 "sort.x", "sort.y", "sort.w", "sort.h", "close.x", "close.y", "close.w", "close.h", "rule.x", "rule.y", "rule.w",
+                 "rule.h", "count.x", "count.cy", "money.right", "band.y", "band.h")
+        check(f"{t}.every_edge_on_a_whole_pixel", all(whole(L(n)) for n in names), str({n: L(n) for n in names if not whole(L(n))}))
+        # frame edge to row == row to grid, and the same at the sides
+        check(f"{t}.margin_above_the_row", round(L("search.y")) == m and round(L("close.y")) == m, f"{L('search.y')} vs {m}")
+        check(f"{t}.row_to_grid_gap_equals_the_margin", round(L("grid.top") - L("search.y") - L("search.h")) == m,
+              f"gap {L('grid.top') - L('search.y') - L('search.h')} vs {m}")
+        check(f"{t}.side_margins", round(L("grid.left")) == m and round(L("width") - L("grid.right")) == m, f"{L('grid.left')} / {L('width') - L('grid.right')}")
+        check(f"{t}.keys_are_square_and_even", round(L("close.w")) == key and round(L("close.h")) == key and round(L("sort.w")) == key and round(L("sort.h")) == key
+              and round(L("search.h")) == key, f"{L('close.w')} {L('sort.w')} {L('search.h')} vs {key}")
+        check(f"{t}.search_starts_on_the_grid_left_edge", round(L("search.x")) == round(L("grid.left")), f"{L('search.x')} vs {L('grid.left')}")
+        check(f"{t}.keys_end_on_the_grid_right_edge", round(L("close.x") + L("close.w")) == round(L("grid.right")), f"{L('close.x') + L('close.w')} vs {L('grid.right')}")
+        check(f"{t}.sort_close_gap", round(L("close.x") - L("sort.x") - L("sort.w")) == kg, f"{L('close.x') - L('sort.x') - L('sort.w')} vs {kg}")
+        check(f"{t}.search_sort_gap", round(L("sort.x") - L("search.x") - L("search.w")) == sg, f"{L('sort.x') - L('search.x') - L('search.w')} vs {sg}")
+        # footer: rule 7 under the grid, the window 27 under it; count on the grid's left edge, money on its right edge
+        check(f"{t}.rule_gap_under_the_grid", round(L("rule.y") - L("grid.bottom")) == px(RULE_GAP, es), f"{L('rule.y') - L('grid.bottom')}")
+        check(f"{t}.rule_is_one_physical_pixel_and_spans_the_grid", round(L("rule.h")) == 1 and round(L("rule.x")) == round(L("grid.left"))
+              and round(L("rule.w")) == round(L("grid.right") - L("grid.left")), f"{L('rule.h')} {L('rule.x')} {L('rule.w')}")
+        check(f"{t}.window_bottom_under_the_grid", round(L("height") - L("grid.bottom")) == px(FOOT_BELOW, es), f"{L('height') - L('grid.bottom')}")
+        check(f"{t}.count_on_the_grid_left_edge", round(L("count.x")) == round(L("grid.left")), f"{L('count.x')}")
+        check(f"{t}.money_on_the_grid_right_edge", round(L("money.right")) == round(L("grid.right")), f"{L('money.right')}")
+        top_gap = L("count.cy") - (L("rule.y") + L("rule.h"))
+        bottom_gap = L("height") - L("count.cy")
+        check(f"{t}.footer_text_centred_between_rule_and_edge", abs(top_gap - bottom_gap) <= 1.0001, f"{top_gap} vs {bottom_gap}")
+
+        # the chrome frame sits MARGIN + KEY + MARGIN above and FOOT_BELOW under the grid, MARGIN beside it: its top left corner is
+        # pixel snapped (within half a pixel of the ideal edge), its size is the layout's exactly
+        chrome_pts = int(w.ev("#FS.BagsWindow.Of(comb).chrome._pts"))
+        if chrome_pts == 1 and str(w.ev("FS.BagsWindow.Of(comb).chrome._pts[1][1]")) == "TOPLEFT":
+            def pt(k): return float(w.ev(f"FS.BagsWindow.Of(comb).chrome._pts[1][{k}]"))
+            fl, ft = (float(w.ev(f"comb._rect[{i}]")) for i in (1, 3))
+            gl, gt = (float(w.ev(f"comb._grid[{i}]")) for i in (1, 3))
+            want = (gl - m / es - fl, gt + (2 * m + key) / es - ft)
+            got = (pt(4), pt(5))
+            check(f"{t}.chrome_corner_follows_the_measured_grid",
+                  all(abs(a - b) <= 0.5 / es + 1e-6 for a, b in zip(got, want)) and all(whole(v * es) for v in got), f"{got} vs {want}")
+            check(f"{t}.chrome_size_is_the_layouts",
+                  abs(float(w.ev("FS.BagsWindow.Of(comb).chrome._w")) - L("width") / es) < 1e-6 and abs(float(w.ev("FS.BagsWindow.Of(comb).chrome._h")) - L("height") / es) < 1e-6)
+            gw_units = float(w.ev("comb._grid[2] - comb._grid[1]"))
+            check(f"{t}.chrome_width_is_the_grid_plus_two_margins", abs(L("width") - (px(gw_units, es) + 2 * m)) < 1e-6, f"{L('width')} vs {px(gw_units, es) + 2 * m}")
+        else:
+            check(f"{t}.chrome_is_anchored_by_its_top_left_corner", False, str(chrome_pts))
+
+        # Blizzard's own controls sit exactly on the layout's rects
+        def ctrl(expr: str, key_: str) -> bool:
+            p = lambda k: float(w.ev(f"{expr}._pts[#{expr}._pts][{k}]"))                                           # noqa: E731
+            chrome_ok = bool(w.ev(f"{expr}._pts[#{expr}._pts][2] == FS.BagsWindow.Of(comb).chrome and #{expr}._pts == 1"))
+            return (chrome_ok and abs(p(4) - float(w.ev(f"FS.BagsWindow.Of(comb).layout.{key_}.x"))) < 1e-6
+                    and abs(-p(5) - float(w.ev(f"FS.BagsWindow.Of(comb).layout.{key_}.y"))) < 1e-6
+                    and abs(float(w.ev(f"{expr}._w")) - float(w.ev(f"FS.BagsWindow.Of(comb).layout.{key_}.w"))) < 1e-6
+                    and abs(float(w.ev(f"{expr}._h")) - float(w.ev(f"FS.BagsWindow.Of(comb).layout.{key_}.h"))) < 1e-6)
+        check(f"{t}.search_box_sits_on_its_rect", ctrl("BagItemSearchBox", "search"))
+        check(f"{t}.sort_button_sits_on_its_rect", ctrl("BagItemAutoSortButton", "sort"))
+        check(f"{t}.close_button_sits_on_its_rect", ctrl("comb.CloseButton", "close"))
+
+        # glyphs centred in their slots, to the pixel
+        for label, slot in (("sort", "FS.BagsWindow.Of(comb).sortPlate"), ("close", "FS.BagsWindow.Of(comb).closePlate"),
+                            ("magnifier", "FS.BagsWindow.Of(comb).searchCell")):
+            box = [float(v) for v in w.ev(f"(function() local b = GlyphBox({slot}); return b[1] .. ' ' .. b[2] .. ' ' .. b[3] .. ' ' .. b[4] end)()").split()]
+            sw = float(w.ev(f"{slot}._w")) * es
+            sh = float(w.ev(f"{slot}._h")) * es
+            check(f"{t}.{label}_glyph_centred_in_its_slot",
+                  abs(box[0] - (sw - box[1])) < 1e-6 and abs(box[2] - (sh - box[3])) < 1e-6 and all(whole(v) for v in box),
+                  f"box {box} in {sw}x{sh}")
+        check(f"{t}.nothing_swallowed", w.swallowed() == "", w.swallowed())
+
+
+def check_window_shapes() -> None:
+    # What the pieces are: the chrome is OURS (a child frame with the panel look), Blizzard's own frame art is stripped, the
+    # keys are cut-corner plates (search chamfer 4, keys 3) with the approved edge colours, no stock art shows.
+    w = scene(1.2)
+    w.run("OpenFull(comb)")
+    if not window_ok(w, "window.shapes.exists"):
+        return
+    check("window.chrome_is_a_child_frame_with_the_panel_look",
+          w.ev("FS.BagsWindow.Of(comb).chrome._parent == comb and Count('SkinPanel', FS.BagsWindow.Of(comb).chrome) == 1"))
+    check("window.panel_look_is_not_drawn_on_the_blizzard_frame_itself", w.ev("Count('SkinPanel', comb) == 0 and Count('StripBlizzardChrome', comb) >= 1"))
+    check("window.chrome_sits_at_the_frame_level_under_the_controls", w.ev("FS.BagsWindow.Of(comb).chrome:GetFrameLevel() <= comb:GetFrameLevel()"))
+    check("window.chrome_takes_no_mouse", w.ev("FS.BagsWindow.Of(comb).chrome._mouse ~= true and FS.BagsWindow.Of(comb).searchPlate._mouse ~= true "
+                                               "and FS.BagsWindow.Of(comb).sortPlate._mouse ~= true and FS.BagsWindow.Of(comb).closePlate._mouse ~= true"))
+    chamfers = {k: w.ev(f"FS.BagsWindow.Of(comb).{k}.fsSkin and FS.BagsWindow.Of(comb).{k}.fsSkin.chamfer") for k in ("searchPlate", "sortPlate", "closePlate")}
+    check("window.search_plate_chamfer_4_keys_chamfer_3", chamfers == {"searchPlate": 4, "sortPlate": 3, "closePlate": 3}, str(chamfers))
+    ink = w.ev("(function() for _, r in ipairs(FS.BagsWindow.Of(comb).searchPlate._regions) do if r._tag == 'face' then "
+               "local a, b, c, d = r:GetVertexColor(); return a .. ' ' .. b .. ' ' .. c .. ' ' .. d end end end)()")
+    check("window.search_field_has_a_dark_ink_face", ink is not None and float(str(ink).split()[0]) < 0.1 and float(str(ink).split()[3]) == 1.0, str(ink))
+    check("window.keys_have_no_face_fill", w.ev("(function() for _, k in ipairs({ 'sortPlate', 'closePlate' }) do for _, r in ipairs(FS.BagsWindow.Of(comb)[k]._regions) do "
+                                                "if r._tag == 'face' then return false end end end return true end)()"))
+
+    def ring(plate: str) -> list[float]:
+        return [float(v) for v in str(w.ev(f"(function() local r = FS.BagsWindow.Of(comb).{plate}.fsSkin.border.ring; local a, b, c, d = r:GetVertexColor(); "
+                                           f"return a .. ' ' .. b .. ' ' .. c .. ' ' .. d end)()")).split()]
+    cyan, violet, pink = ring("searchPlate"), ring("sortPlate"), ring("closePlate")
+    check("window.search_edge_is_cyan_at_about_55_percent", near(cyan[0], 0.133) and near(cyan[2], 1) and 0.5 <= cyan[3] <= 0.6, str(cyan))
+    check("window.sort_edge_is_violet", near(violet[0], 0.659) and near(violet[2], 0.969), str(violet))
+    check("window.close_edge_is_pink", near(pink[0], 1) and near(pink[1], 0.18) and near(pink[2], 0.592), str(pink))
+    # no stock art on any control, whatever Blizzard does to it afterwards
+    w.run("BagItemSearchBox.Left:SetAlpha(1); BagItemSearchBox.searchIcon:SetAlpha(1); BagItemAutoSortButton:SetNormalTexture('x'); "
+          "BagItemAutoSortButton.NormalTexture:SetAlpha(1); comb.CloseButton._regions[1]:SetAlpha(1); comb.PortraitButton.Highlight:SetAlpha(1)")
+    check("window.search_box_art_is_held_hidden", w.ev("not Visible(BagItemSearchBox.Left) and not Visible(BagItemSearchBox.Middle) and not Visible(BagItemSearchBox.Right) "
+                                                       "and not Visible(BagItemSearchBox.searchIcon)"))
+    check("window.sort_button_art_is_held_hidden", w.ev("not Visible(BagItemAutoSortButton.NormalTexture) and not Visible(BagItemAutoSortButton.PushedTexture)"))
+    check("window.close_button_art_is_held_hidden", w.ev("not Visible(comb.CloseButton._regions[1])"))
+    check("window.portrait_highlight_is_held_hidden", w.ev("not Visible(comb.PortraitButton.Highlight)"))
+    # the Blizzard search placeholder and typed text wear the mono font; the placeholder starts after the magnifier cell
+    check("window.search_text_is_mono", w.ev("BagItemSearchBox.Instructions._font ~= nil and BagItemSearchBox.Instructions._font[1] == 'mono'"))
+    check("window.search_placeholder_starts_after_the_magnifier_cell",
+          w.ev("(function() local p = BagItemSearchBox.Instructions._pts[#BagItemSearchBox.Instructions._pts]; return p ~= nil and p[1] == 'TOPLEFT' "
+               "and p[4] >= 19 end)()"))
+    check("window.nothing_swallowed", w.swallowed() == "", w.swallowed())
+    check("window.no_degrade_logs", w.degrade() == "", w.degrade())
+
+
+def check_window_states() -> None:
+    # Hover and press follow Blizzard's own control (post-hooks on its scripts), and the shared sort button lights the plate of
+    # the window that owns it at that moment.
+    w = scene(1.2)
+    w.run("OpenFull(comb); OpenFull(c1)")
+    if not window_ok(w, "window.states.exists"):
+        return
+    glyph = lambda win: [round(float(v), 4) for v in str(w.ev(f"(function() local r = FS.BagsWindow.Of({win}).sortPlate._regions; "
+                                                              "for _, q in ipairs(r) do if q._tag == 'created' and q._color then return q._color[1] .. ' ' .. q._color[2] .. ' ' .. q._color[3] end end end)()")).split()]
+    fire = lambda obj, script: w.run(f"for _, fn in ipairs({obj}._scripts.{script} or {{}}) do fn({obj}) end")      # noqa: E731
+    rest = glyph("c1")
+    fire("BagItemAutoSortButton", "OnEnter")
+    hover = glyph("c1")
+    check("window.states.hover_lifts_the_glyph_of_the_owning_window", hover[0] > rest[0] and hover[1] > rest[1], f"{rest} -> {hover}")
+    check("window.states.the_other_window_is_not_painted", glyph("comb") == rest, str(glyph("comb")))
+    fire("BagItemAutoSortButton", "OnMouseDown")
+    pressed = glyph("c1")
+    check("window.states.pressed_lifts_more", pressed[1] > hover[1], f"{hover} -> {pressed}")
+    fire("BagItemAutoSortButton", "OnLeave")
+    check("window.states.leaving_restores_the_rest_look", glyph("c1") == rest, f"{glyph('c1')} vs {rest}")
+    fire("BagItemSearchBox", "OnEditFocusGained")
+    ring = float(w.ev("FS.BagsWindow.Of(c1).searchPlate.fsSkin.border.ring._vc[4]"))
+    check("window.states.focus_takes_the_search_edge_to_full", ring == 1, str(ring))
+    fire("BagItemSearchBox", "OnEditFocusLost")
+    check("window.states.focus_lost_returns_it", 0.5 <= float(w.ev("FS.BagsWindow.Of(c1).searchPlate.fsSkin.border.ring._vc[4]")) <= 0.6)
+    w.run("OpenFull(comb)")
+    fire("BagItemAutoSortButton", "OnEnter")
+    check("window.states.ownership_moves_the_painting_with_it", glyph("comb")[0] > rest[0] and glyph("c1") == rest, f"{glyph('comb')} {glyph('c1')}")
+    check("window.states.hooks_installed_once_per_control",
+          int(w.ev("#(BagItemAutoSortButton._scripts.OnEnter or {})")) == 1 and int(w.ev("#(BagItemSearchBox._scripts.OnEditFocusGained or {})")) == 1)
+    check("window.states.nothing_swallowed", w.swallowed() == "", w.swallowed())
+
+
+def check_window_membership() -> None:
+    # The plates follow Blizzard's own ownership of the search box and sort button (one of each, re-parented between the
+    # backpack and the combined window), a bag with neither has just the close key, and Blizzard's re-anchoring on every
+    # Update() never leaves the controls off their rects.
+    w = scene(1.2)
+    w.run("OpenFull(comb); OpenFull(c1); OpenFull(c2)")
+    if not window_ok(w, "window.membership.exists", "c2"):
+        return
+    check("window.membership.the_owner_of_the_search_box_shows_its_plates",
+          w.ev("FS.BagsWindow.Of(c1).searchPlate._shown and FS.BagsWindow.Of(c1).sortPlate._shown"))
+    check("window.membership.the_former_owner_hides_its_plates",
+          w.ev("not FS.BagsWindow.Of(comb).searchPlate._shown and not FS.BagsWindow.Of(comb).sortPlate._shown"))
+    check("window.membership.a_bag_without_search_has_the_close_key_only",
+          w.ev("not FS.BagsWindow.Of(c2).searchPlate._shown and not FS.BagsWindow.Of(c2).sortPlate._shown and FS.BagsWindow.Of(c2).closePlate._shown"))
+    check("window.membership.close_key_flush_right_without_a_search_row_neighbour",
+          w.ev("FS.BagsWindow.Of(c2).layout.search == nil and FS.BagsWindow.Of(c2).layout.sort == nil")
+          and abs(float(w.ev("FS.BagsWindow.Of(c2).layout.close.x + FS.BagsWindow.Of(c2).layout.close.w - FS.BagsWindow.Of(c2).layout.grid.right")) * 1.2) < 1e-6)
+    check("window.membership.controls_follow_the_owner",
+          w.ev("BagItemSearchBox._pts[#BagItemSearchBox._pts][2] == FS.BagsWindow.Of(c1).chrome"))
+    w.run("OpenFull(comb)")
+    check("window.membership.ownership_moves_back_with_blizzards_reparent",
+          w.ev("BagItemSearchBox._pts[#BagItemSearchBox._pts][2] == FS.BagsWindow.Of(comb).chrome and FS.BagsWindow.Of(comb).searchPlate._shown "
+               "and not FS.BagsWindow.Of(c1).searchPlate._shown"))
+    # Blizzard re-anchors on every Update; the post-hook puts the controls back every time, with one anchor each
+    for _ in range(3):
+        w.run("comb:Update()")
+    check("window.membership.update_after_update_keeps_one_anchor_each",
+          w.ev("#BagItemSearchBox._pts == 1 and #BagItemAutoSortButton._pts == 1 and #comb.CloseButton._pts == 1"))
+    # the grid changing (the player's column setting) re-lays everything out
+    w.run(f"PlaceGrid(comb, {PLACE % 2}); comb:UpdateItems()")
+    es = 1.2
+    check("window.membership.a_new_grid_width_resizes_the_window",
+          abs(float(w.ev("FS.BagsWindow.Of(comb).layout.width")) * es - (round((37 + 42) * es) + 2 * px(MARGIN, es))) <= 1.0001,
+          str(w.ev("FS.BagsWindow.Of(comb).layout.width")))
+    check("window.membership.nothing_swallowed", w.swallowed() == "", w.swallowed())
+
+
+def check_window_footer(db: dict) -> None:
+    w = scene(1.0)
+    w.run("MONEY = 13790; OpenFull(comb); OpenFull(c1)")
+    if not window_ok(w, "window.footer.exists"):
+        return
+    hexes = {k: "".join(f"{int(c * 255 + 0.5):02x}" for c in db[k]) for k in ("gold", "silver", "copper")}
+    text = str(w.ev("FS.BagsWindow.Of(comb).money:GetText()"))
+    want = f"|cff{hexes['gold']}1g|r |cff{hexes['silver']}37s|r |cff{hexes['copper']}90c|r"
+    check("window.footer.money_in_the_data_bar_gold_look", text == want, f"{text!r} vs {want!r}")
+    check("window.footer.no_gold_label", "GOLD" not in text.upper() and "gold" not in text, text)
+    for amount, shown in ((0, "0c"), (100, "1s 0c"), (10000, "1g 0s 0c"), (123456789, "12345g 67s 89c")):
+        w.run(f"MONEY = {amount}; FireEvent('PLAYER_MONEY')")
+        plain = re.sub(r"\|c[0-9a-f]{8}|\|r", "", str(w.ev("FS.BagsWindow.Of(comb).money:GetText()")))
+        check(f"window.footer.money_{amount}_collapses_like_blizzards", plain == shown, f"{plain!r} vs {shown!r}")
+    w.run("MONEY = 13790; FireEvent('PLAYER_MONEY')")
+    count = str(w.ev("FS.BagsWindow.Of(comb).count:GetText()"))
+    check("window.footer.count_is_used_over_total_combined", count == "2/3", count)
+    check("window.footer.count_is_used_over_total_backpack", str(w.ev("FS.BagsWindow.Of(c1).count:GetText()")) == "2/4",
+          str(w.ev("FS.BagsWindow.Of(c1).count:GetText()")))
+    check("window.footer.count_has_no_label", re.fullmatch(r"\d+/\d+", count) is not None, count)
+    cyan = [float(v) for v in str(w.ev("(function() local a, b, c, d = FS.BagsWindow.Of(comb).count:GetTextColor(); return a .. ' ' .. b .. ' ' .. c .. ' ' .. d end)()")).split()]
+    check("window.footer.count_is_cyan", near(cyan[0], 0.133) and near(cyan[1], 0.878) and near(cyan[2], 1), str(cyan))
+    # the count follows the bag: a slot filling, a slot emptying
+    w.run("comb.infos[2] = { icon = 140 }; comb:UpdateItems()")
+    check("window.footer.count_follows_a_slot_filling", str(w.ev("FS.BagsWindow.Of(comb).count:GetText()")) == "3/3")
+    w.run("comb.infos = {}; comb:UpdateItems()")
+    check("window.footer.count_follows_the_bag_emptying", str(w.ev("FS.BagsWindow.Of(comb).count:GetText()")) == "0/3")
+    # Blizzard's own money frame stays functional but invisible; a bag without a money line shows none of ours
+    check("window.footer.blizzard_money_frame_is_invisible_not_hidden", w.ev("comb.MoneyFrame:GetAlpha() == 0 and comb.MoneyFrame:IsShown()"))
+    w.run("c2.MoneyFrame:Hide(); OpenFull(c2)")
+    check("window.footer.a_bag_without_money_shows_no_money", w.ev("not FS.BagsWindow.Of(c2).money._shown and FS.BagsWindow.Of(c2).count._shown"))
+    # a secret amount is never formatted
+    w.run("SECRET_IDS = true; local real = GetMoney; GetMoney = function() return SECRET_VALUE end; FireEvent('PLAYER_MONEY'); GetMoney = real; SECRET_IDS = false")
+    check("window.footer.a_secret_amount_swallows_nothing", w.swallowed() == "", w.swallowed())
+    check("window.footer.no_degrade_logs", w.degrade() == "", w.degrade())
+
+
+def check_empty_wells() -> None:
+    w = scene(1.0)
+    w.run("OpenFull(comb); OpenFull(c1)")
+    if not window_ok(w, "wells.window_exists"):
+        return
+    shown = lambda e: bool(w.ev(f"WellShown({e})"))                                                             # noqa: E731
+    check("wells.empty_slot_shows_a_dark_well", shown("comb.Items[2]") and shown("c1.Items[2]") and shown("c1.Items[4]"))
+    check("wells.filled_slots_show_none", not shown("comb.Items[1]") and not shown("comb.Items[3]") and not shown("c1.Items[1]"))
+    look = dict(w.ev("(function() local r = WellOf(comb.Items[2]); return { path = r._texture, layer = r._layer, sub = r._sub, "
+                     "ringSub = (function() for _, q in ipairs(comb.Items[2]._regions) do if q._tag == 'ring' then return q._sub end end end)() } end)()").items())
+    check("wells.well_is_the_slot_plate_shape_above_the_icon_under_the_ring",
+          look["path"] == "slice_cut2_button.tga" and look["layer"] == "OVERLAY" and look["sub"] < -1 and look["sub"] < look["ringSub"], str(look))
+
+    # whatever the empty art is called, it is covered: the cover follows the item API, not a name
+    w.run("comb.Items[2].icon:SetAtlas('some-art-this-patch-invented'); comb.Items[2].icon:SetShown(true); comb:UpdateItems()")
+    check("wells.an_unknown_empty_art_still_gets_a_well", shown("comb.Items[2]"))
+    check("wells.an_unknown_empty_art_is_cleared_off_the_icon", w.ev("comb.Items[2].icon._atlas == nil and comb.Items[2].icon._texture == nil"))
+    check("wells.an_unknown_empty_art_is_not_an_item_for_ring_or_corners",
+          w.ev("not CornersShown(comb.Items[2])") and near(float(w.ev("RingColor(comb.Items[2])[1]")), 0x5b / 255))
+    # an empty slot that wears a plain texture (not an atlas) is covered too
+    w.run("comb.Items[2].icon:SetTexture('Interface\\\\Anything\\\\Pouch'); comb.Items[2].icon:SetShown(true); comb:UpdateItems()")
+    check("wells.an_empty_slot_with_any_texture_still_gets_a_well", shown("comb.Items[2]") and not w.ev("CornersShown(comb.Items[2])"))
+    # a filled slot is never covered, whatever its texture is
+    w.run("comb.Items[1].icon:SetTexture('Interface\\\\Icons\\\\NeverSeenBefore'); comb:UpdateItems()")
+    check("wells.a_filled_slot_with_an_unusual_texture_is_not_covered", not shown("comb.Items[1]") and w.ev("comb.Items[1].icon._texture ~= nil") and w.ev("CornersShown(comb.Items[1])"))
+    # filling and emptying follow the next pass
+    w.run("comb.infos[2] = { icon = 141 }; comb:UpdateItems()")
+    check("wells.a_filled_slot_loses_its_well", not shown("comb.Items[2]") and w.ev("CornersShown(comb.Items[2])"))
+    w.run("comb.infos[2] = nil; comb:UpdateItems()")
+    check("wells.an_emptied_slot_gets_one", shown("comb.Items[2]") and not w.ev("CornersShown(comb.Items[2])"))
+    # an icon repaint with no pass (Blizzard sets the empty art again)
+    w.run("comb.Items[2]:SetItemButtonTexture(nil)")
+    check("wells.the_well_survives_blizzard_repainting_the_empty_art", shown("comb.Items[2]"))
+    # once per button, however many passes
+    for _ in range(3):
+        w.run("comb:UpdateItems(); c1:UpdateItems(); OpenFull(comb)")
+    check("wells.one_well_per_button", all(w.ev(f"RegionCount({b}, 'well') == 1") for b in ("comb.Items[1]", "comb.Items[2]", "c1.Items[2]")))
+    # the bank is not a bag window: never covered
+    w.run("bank.RefreshAllItemsForSelectedTab(bank)")
+    check("wells.bank_slots_never_get_a_well", all(w.ev(f"RegionCount(bank.pool[{i}], 'well') == 0") for i in (1, 2, 3)))
+    # nothing readable: no cover, no error
+    w.run("SECRET_IDS = true; comb.Items[2]:SetItemButtonTexture(nil); comb:UpdateItems(); SECRET_IDS = false")
+    check("wells.unreadable_item_data_covers_nothing_and_swallows_nothing", w.swallowed() == "", w.swallowed())
+    w2 = scene(1.0)
+    w2.run("C_Container = nil; OpenFull(comb)")
+    check("wells.no_item_api_means_no_well_and_no_error", w2.ev("not WellShown(comb.Items[2])") and w2.swallowed() == "", w2.swallowed())
+    # a well that cannot be built logs once, is not retried on every pass, and leaves the slot as it was
+    w5 = scene(1.0, pre="FS.Theme.__plate = FS.Theme.AddCut2Texture; FS.Theme.AddCut2Texture = function(f, path, c, l, s) "
+                        "if s == -3 then error('boom') end return FS.Theme.__plate(f, path, c, l, s) end")
+    w5.run("OpenFull(comb)")
+    first = len(w5.swallowed().split("; "))
+    for _ in range(3):
+        w5.run("comb:UpdateItems(); OpenFull(comb)")
+    check("wells.a_failed_well_logs_once_and_is_not_retried", w5.degrade().count("bags_well") == 1 and len(w5.swallowed().split("; ")) == first,
+          f"{w5.degrade()} {first} {len(w5.swallowed().split('; '))}")
+    check("wells.a_failed_well_leaves_the_slot_skinned", w5.ev("Count('SkinCutButton', comb.Items[2]) == 1 and RegionCount(comb.Items[2], 'plate') == 1"))
+    # combat: nothing protected is touched, the well still follows
+    w3 = scene(1.0)
+    w3.run("OpenFull(comb); INCOMBAT = true; PROTECTED_CALLS = {}; comb.infos[2] = { icon = 142 }; comb.infos[1] = nil; comb:UpdateItems()")
+    prot = str(w3.ev("table.concat(PROTECTED_CALLS, ',')"))
+    check("wells.combat_pass_moves_wells_with_no_protected_call", prot == "" and w3.ev("WellShown(comb.Items[1]) and not WellShown(comb.Items[2])"), prot)
+    w3.run("EndCombat()")
+    check("wells.nothing_swallowed", w3.swallowed() == "" and w.degrade() == "", w3.swallowed() + w.degrade())
+
+
+def check_window_taint_surface() -> None:
+    # The open ADDON_ACTION_FORBIDDEN UseContainerItem report is blamed on this addon: nothing new may be written onto Blizzard's
+    # item buttons or container frames (fields, hooks, anchors, parents, attributes, hit rects of the buttons).
+    w = scene(1.2)
+    w.run("OpenFull(comb); OpenFull(c1); OpenFull(c2); bank.RefreshAllItemsForSelectedTab(bank)")
+    if not window_ok(w, "taint.window_exists"):
+        return
+    item_ok = {"fsBagItemSkinned", "fsSkin", "fsBagPlate", "fsBagCorners", "fsBagRingColor", "fsBagHighlight"}
+    cont_ok = {"fsBagSkin", "fsBagShowHooked", "fsBagHideHooked", "fsBagItemHooks"}
+    for expr in ("c1.Items[1]", "c1.Items[2]", "comb.Items[1]", "comb.Items[2]", "bank.pool[1]"):
+        got = set(filter(None, str(w.ev(f"FsFields({expr})")).split(",")))
+        check(f"taint.{expr}_has_no_new_fields", got <= item_ok, f"extra: {sorted(got - item_ok)}")
+        names = set(filter(None, str(w.ev(f"HookNames({expr})")).split(",")))
+        check(f"taint.{expr}_has_no_new_hooks", names <= {"SetNormalTexture", "SetNormalAtlas", "Initialize"}, str(sorted(names)))
+    for expr in ("c1", "c2", "comb"):
+        got = set(filter(None, str(w.ev(f"FsFields({expr})")).split(",")))
+        check(f"taint.{expr}_has_no_new_fields", got <= cont_ok, f"extra: {sorted(got - cont_ok)}")
+        check(f"taint.{expr}_has_only_the_existing_hooks", str(w.ev(f"HookNames({expr})")) == "UpdateItems"
+              and int(w.ev(f"#({expr}._scripts.OnShow or {{}})")) == 2 and int(w.ev(f"#({expr}._scripts.OnHide or {{}})")) == 1,
+              f"{w.ev(f'HookNames({expr})')} {w.ev(f'#({expr}._scripts.OnShow or {{}})')} {w.ev(f'#({expr}._scripts.OnHide or {{}})')}")
+    for expr in ("BagItemSearchBox", "BagItemAutoSortButton", "comb.CloseButton", "c1.CloseButton"):
+        check(f"taint.{expr}_has_no_fields", str(w.ev(f"FsFields({expr})")) == "", str(w.ev(f"FsFields({expr})")))
+    # item buttons: no anchors, sizes, parents or hit rects of ours
+    check("taint.item_buttons_are_never_moved_or_resized", w.ev("(function() for _, b in ipairs(comb.Items) do if b._hit ~= nil or b._parent ~= comb or #b._pts ~= 0 then return false end end return true end)()"))
+    check("taint.nothing_swallowed", w.swallowed() == "", w.swallowed())
+
+
+def check_window_combat() -> None:
+    w = scene(1.2)
+    w.run("OpenFull(comb); PlaceGrid(comb, %s)" % (PLACE % 3))
+    if not window_ok(w, "window.combat.exists"):
+        return
+    check("window.combat.hit_rect_shrinks_to_the_visible_window",
+          w.ev("comb._hit ~= nil and comb._hit[3] > 40 and comb._hit[1] >= 0 and comb._hit[2] >= 0 and comb._hit[4] >= 0"), str(w.ev("comb._hit and table.concat(comb._hit, ',')")))
+    # combat: our own regions and plain frames still follow; a protected container's hit rect and our anchors to it are left alone
+    w.run("INCOMBAT = true; PROTECTED_CALLS = {}; comb._hitCalls = 0; PlaceGrid(comb, %s); comb:Update()" % (PLACE % 2))
+    prot = str(w.ev("table.concat(PROTECTED_CALLS, ',')"))
+    check("window.combat.relayout_in_combat_calls_no_protected_method", prot == "", prot)
+    check("window.combat.unprotected_container_is_relaid_out", abs(float(w.ev("FS.BagsWindow.Of(comb).layout.width")) * 1.2 - (round(79 * 1.2) + 2 * px(MARGIN, 1.2))) <= 1.0001)
+    w.run("EndCombat(); comb._protected = true; INCOMBAT = true; comb._hitCalls = 0; local n = #FS.BagsWindow.Of(comb).chrome._pts; CHROME_PTS = n; "
+          "PlaceGrid(comb, %s); comb:Update()" % (PLACE % 3))
+    check("window.combat.protected_container_is_not_re_anchored_to_in_combat",
+          w.ev("#FS.BagsWindow.Of(comb).chrome._pts == CHROME_PTS and comb._hitCalls == 0"))
+    w.run("EndCombat()")
+    w.run("EndCombat(); FireEvent('PLAYER_REGEN_ENABLED')")
+    check("window.combat.the_layout_catches_up_when_combat_ends",
+          abs(float(w.ev("FS.BagsWindow.Of(comb).layout.width")) * 1.2 - (round((2 * 42 + 37) * 1.2) + 2 * px(MARGIN, 1.2))) <= 1.0001,
+          str(w.ev("FS.BagsWindow.Of(comb).layout.width")))
+    check("window.combat.nothing_swallowed", w.swallowed() == "", w.swallowed())
+
+
+def check_window_degrade() -> None:
+    # no geometry yet (a window that was never laid out): nothing placed, Blizzard's controls untouched, no error, no log
+    w = World()
+    w.run("OpenFull(comb)")
+    if window_ok(w, "window.degrade.exists_without_geometry"):
+        check("window.degrade.chrome_stays_hidden_until_measured", w.ev("not FS.BagsWindow.Of(comb).chrome._shown"))
+        check("window.degrade.controls_keep_blizzards_anchors", w.ev("BagItemSearchBox._pts[#BagItemSearchBox._pts][2] == comb and BagItemSearchBox._pts[1][4] == 62"))
+        check("window.degrade.blizzard_money_frame_stays_visible_until_the_footer_exists", w.ev("comb.MoneyFrame:GetAlpha() == 1"))
+        check("window.degrade.quiet", w.swallowed() == "" and w.degrade() == "", w.swallowed() + w.degrade())
+    # a Theme without the strip helper falls back to the old panel skin, with one log
+    w = World(pre="FS.Theme.StripBlizzardChrome = nil")
+    w.run("PlaceGrid(comb, %s); OpenFull(comb)" % (PLACE % 3))
+    check("window.degrade.no_strip_helper_uses_the_old_panel_skin_and_logs_once",
+          w.ev("Count('SkinPanel', comb) == 1 and (FS.BagsWindow == nil or FS.BagsWindow.Of(comb) == nil)") and w.degrade().count("bags_window") == 1 and w.swallowed() == "", w.degrade() + w.swallowed())
+    # no cut fill helper: the search face is a flat ink fill, nothing errors
+    w = World(pre="FS.Theme.AddCutSliceFill = nil")
+    w.run("PlaceGrid(comb, %s); OpenFull(comb)" % (PLACE % 3))
+    check("window.degrade.no_cut_fill_helper_still_builds_the_window", window_ok(w, "window.degrade.cut_fill_exists") and w.swallowed() == "", w.swallowed())
+    # a throwing Theme.SkinButton: the window falls back, once
+    w = World(pre="local orig = FS.Theme.SkinButton; FS.Theme.SkinButton = function(b, o) if o and o.chamfer and o.chamfer <= 4 then error('boom') end return orig(b, o) end")
+    w.run("PlaceGrid(comb, %s); OpenFull(comb)" % (PLACE % 3))
+    check("window.degrade.a_throwing_button_skin_falls_back_with_one_log", w.degrade().count("bags_window") == 1, w.degrade())
+
+
 def main() -> int:
     db = databar_money()
     check_art()
@@ -1442,6 +1996,15 @@ def main() -> int:
     check_absent()
     check_gamepad_bar()
     check_bag_highlight()
+    check_window_spacing()
+    check_window_shapes()
+    check_window_states()
+    check_window_membership()
+    check_window_footer(db)
+    check_empty_wells()
+    check_window_taint_surface()
+    check_window_combat()
+    check_window_degrade()
     print(f"\n{CHECKS} checks, {len(FAILS)} failed" if FAILS else f"\nall {CHECKS} checks passed")
     return len(FAILS)
 
