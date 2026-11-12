@@ -516,6 +516,37 @@ case("auction house: category buttons hold the stock plate and ring the selected
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 
+case("auction house: an addon tab made by LibAHTab wears the strip tab skin, a later one too, and its page is swept", f"""
+    local function MakeTab(parent, label)
+        local t = CreateFrame('Button', nil, parent)
+        t:SetSize(90, 32)
+        for _, k in ipairs({{ 'Left', 'Middle', 'Right', 'LeftActive', 'MiddleActive', 'RightActive' }}) do
+            t[k] = t:CreateTexture(nil, 'BACKGROUND')
+        end
+        t.Text = t:CreateFontString(nil, 'OVERLAY')
+        t.Text:SetFont('Fonts/FRIZQT__.TTF', 12, ''); t.Text:SetText(label)
+        t.frameRef = CreateFrame('Frame', nil, AuctionHouseFrame)
+        t.frameRef:Hide()
+        return t
+    end
+    local lib = {{ internalState = {{ Tabs = {{}} }} }}
+    function lib:CreateTab(id)
+        local t = MakeTab(AuctionHouseFrame, id)
+        table.insert(self.internalState.Tabs, t)
+        return t
+    end
+    LibStub = {{ GetLibrary = function(_, name) if name == 'LibAHTab-1-0' then return lib end end }}
+    lib:CreateTab('Shopping')
+    Fire('PLAYER_ENTERING_WORLD'); AuctionHouseFrame:Show(); FlushTimers()
+    local first = lib.internalState.Tabs[1]
+    assert(FS.TabSkins.Parts(first), 'addon tab not skinned')
+    assert(first.Left.alpha == 0, 'stock tab art kept')
+    assert(first.frameRef.fsAddonTabSweep, 'page not swept')
+    lib:CreateTab('Selling'); FlushTimers()
+    assert(FS.TabSkins.Parts(lib.internalState.Tabs[2]), 'later addon tab not skinned')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
 SCENES = {
     "bank": "Fire('PLAYER_ENTERING_WORLD'); BankFrame:Show(); BankCleanUpConfirmationPopup:Show(); FlushTimers(); return DumpOps({ BankFrame, BankCleanUpConfirmationPopup })",
     "bank-purchase": "Fire('PLAYER_ENTERING_WORLD'); BankFrame:Show(); BankPanel.PurchasePrompt:Show(); FlushTimers(); return DumpOps({ BankFrame })",

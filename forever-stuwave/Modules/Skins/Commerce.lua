@@ -599,9 +599,35 @@ local function SweepFilters(frame)
     end
 end
 
+-- Addon tabs on the AH (Auctionator and any other LibAHTab user): LibAHTab builds them from the stock display mode tab template
+-- under its own anonymous root, after the AH's first sweep, so they kept the gold art. Each gets the strip tab skin and its page
+-- the controls sweep. A tab made later is caught by a post-hook on CreateTab.
+local function SkinAddonTabs()
+    local stub = _G.LibStub
+    local lib = type(stub) == "table" and type(stub.GetLibrary) == "function" and stub:GetLibrary("LibAHTab-1-0", true) or nil
+    if type(lib) ~= "table" then return end
+    if not S.done.ahTabHook and type(lib.CreateTab) == "function" and type(hooksecurefunc) == "function" then
+        S.done.ahTabHook = true
+        pcall(hooksecurefunc, lib, "CreateTab", function() Kit.Later(SkinAddonTabs) end)
+    end
+    local state = lib.internalState
+    if type(state) ~= "table" or type(state.Tabs) ~= "table" then return end
+    for _, tab in ipairs(state.Tabs) do
+        if type(tab) == "table" then
+            if FS.TabSkins and FS.TabSkins.Skin then FS.TabSkins.Skin(tab) end
+            local page = tab.frameRef
+            if type(page) == "table" and not page.fsAddonTabSweep then
+                page.fsAddonTabSweep = true
+                PanelSkins.SweepOnShow(page)
+            end
+        end
+    end
+end
+
 local function SkinAuctionHouse(ah)
     if type(ah) ~= "table" then return end
     Step("ah.filters", SweepFilters, ah)
+    Step("ah.addontabs", SkinAddonTabs)
     -- the sell frames' price inputs
     for _, key in ipairs({ "ItemSellFrame", "CommoditiesSellFrame" }) do
         local sf = ah[key]
