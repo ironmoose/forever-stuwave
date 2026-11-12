@@ -388,6 +388,18 @@ local function PaintAndSeatText(button)
     PaintText(button)
 end
 
+-- Puts a skinned text button's hover hooks back after Blizzard replaced its OnEnter/OnLeave with SetScript, which
+-- drops every HookScript on them. The Game Menu does that on every open (MainMenuFrameMixin:AddButton SetScripts both,
+-- to nil or a tooltip, on each pooled button), so its buttons lost their hover. Run it after the replacing call.
+function ButtonSkins.RehookMotion(button)
+    local p = parts[button]
+    if not p or type(button.HookScript) ~= "function" then return end
+    p.hover, p.pressed = false, false
+    pcall(button.HookScript, button, "OnEnter", function(self) p.hover = true; PaintText(self) end)
+    pcall(button.HookScript, button, "OnLeave", function(self) p.hover, p.pressed = false, false; PaintText(self) end)
+    PaintText(button)
+end
+
 -- Points a button's three label font objects at the accent's set.
 local function SetLabelFonts(button, p)
     local set = LabelFontSet(p.accent, p.size)

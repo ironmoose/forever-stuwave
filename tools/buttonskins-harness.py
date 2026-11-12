@@ -1027,6 +1027,29 @@ case("game_menu_skins_buttons_blizzard_adds_later_and_re_accents_a_recycled_one"
     assert(#first.regions == regions, "no second set of textures on a recycled button")
 """)
 
+case("game_menu_hover_survives_addbutton_replacing_onenter_on_every_open", """
+    local menu = MakeGameMenu()
+    local options = menu:Add(OPTIONS_MENU)
+    -- the engine: SetScript replaces the handler AND drops every HookScript hook on that script
+    local function drop(b) b.SetScript = function(self, name, fn) self.scripts[name] = fn; self.hooks[name] = nil end end
+    drop(options)
+    -- what AddButton does on every open: SetScript OnEnter/OnLeave to nil on each pooled button
+    menu.InitButtons = function(self)
+        options:SetScript("OnEnter", nil)
+        options:SetScript("OnLeave", nil)
+    end
+    LoadPopups()
+    local B = FS.ButtonSkins
+    for open = 1, 3 do
+        menu:InitButtons()
+        options:Fire("OnEnter")
+        assert(B.Parts(options).hover == true, "hover is drawn after open " .. open)
+        options:Fire("OnLeave")
+        assert(B.Parts(options).hover == false, "hover clears on leave after open " .. open)
+        assert(#(options.hooks.OnEnter or {}) == 1, "one hover hook per open, not a growing stack")
+    end
+""")
+
 case("game_menu_buttons_keep_their_scripts_attributes_anchors_and_text", """
     local menu = MakeGameMenu()
     local logout = menu:Add(LOG_OUT)

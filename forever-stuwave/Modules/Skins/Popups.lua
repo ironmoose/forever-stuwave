@@ -85,9 +85,10 @@ local function MenuAccent(frame, button, name)
     return MENU_ACCENT_BY_NAME[name or ""] or "violet"
 end
 
-local function SkinMenuButtons(frame)
+local function SkinMenuButtons(frame, rehook)
     local skin = FS.ButtonSkins and FS.ButtonSkins.SkinTextButton
     if not skin then return end
+    local motion = rehook and FS.ButtonSkins.RehookMotion
     local seen = {}
     local pool = frame.buttonPool
     if type(pool) == "table" and type(pool.EnumerateActive) == "function" then
@@ -95,7 +96,9 @@ local function SkinMenuButtons(frame)
             for button in pool:EnumerateActive() do
                 if not seen[button] then
                     seen[button] = true
+                    local had = FS.ButtonSkins.Parts(button) ~= nil
                     skin(button, { accent = MenuAccent(frame, button) })
+                    if motion and had then motion(button) end
                 end
             end
         end)
@@ -116,11 +119,13 @@ local menuHooked = setmetatable({}, { __mode = "k" }) -- frame -> its InitButton
 local function HookMenuButtons(frame)
     if menuHooked[frame] then return end
     menuHooked[frame] = true
-    local function again() SkinMenuButtons(frame) end
+    -- InitButtons re-adds every button through AddButton, which SetScripts OnEnter/OnLeave and so drops our hover
+    -- hooks: that pass puts them back. OnShow only skins (a client whose menu has no InitButtons).
+    local function again() SkinMenuButtons(frame, true) end
     if type(hooksecurefunc) == "function" and type(frame.InitButtons) == "function" then
         pcall(hooksecurefunc, frame, "InitButtons", again)
     end
-    if type(frame.HookScript) == "function" then pcall(frame.HookScript, frame, "OnShow", again) end
+    if type(frame.HookScript) == "function" then pcall(frame.HookScript, frame, "OnShow", function() SkinMenuButtons(frame) end) end
 end
 
 -------------------------------------------------------------------------------
