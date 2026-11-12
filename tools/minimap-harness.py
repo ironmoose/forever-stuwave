@@ -476,6 +476,7 @@ def geo(width_px: float) -> dict:
     g["margin"] = s(8)
     g["keyGap"] = s(8)
     g["pitch"] = g["keyW"] + g["keyGap"]
+    g["toggleW"] = like(s(30), g["keyW"])
     g["led"] = s(2)
     g["glyph"] = like(s(16), g["keyW"])
     g["glyphGap"] = s(3)
@@ -732,18 +733,23 @@ def spacing_checks() -> None:
               f"(scale {g.Minimap.w / px / REF_MAP:.3f})",
               near(bezel.h, e["row"] * px) and whole(bezel.h, px))
 
-        xs = []
+        # every key is keyW wide but the tray toggle, which is toggleW (its count and chevron need the room)
+        xs, ws, want_x = [], [], e["margin"]
         for i, (name, frame, tex) in enumerate(keys):
             p = frame.points.TOPLEFT
             x, y = p.x / px, -p.y / px
+            kw = e["toggleW"] if name == "toggle" else e["keyW"]
             xs.append(x)
-            check(f"[spacing@{label}] key {i + 1} ({name}) is {e['keyW']} x {e['keyH']} px at x {e['margin'] + i * e['pitch']}, "
+            ws.append(kw)
+            check(f"[spacing@{label}] key {i + 1} ({name}) is {kw} x {e['keyH']} px at x {want_x}, "
                   f"y {e['topM']:g} from the row's top, on whole pixels (got {frame.w / px:g} x {frame.h / px:g} at {x:g}, {y:g})",
                   bool(g.__same(p.rel, bezel)) and p.relPoint == "TOPLEFT"
-                  and near(x, e["margin"] + i * e["pitch"]) and near(y, e["topM"])
-                  and near(frame.w / px, e["keyW"]) and near(frame.h / px, e["keyH"])
+                  and near(x, want_x) and near(y, e["topM"])
+                  and near(frame.w / px, kw) and near(frame.h / px, e["keyH"])
                   and all(whole(v, px) for v in (p.x, p.y, frame.w, frame.h)))
-        gaps = [xs[i + 1] - xs[i] - e["keyW"] for i in range(len(xs) - 1)]
+            want_x += kw + e["keyGap"]
+        row_end = want_x
+        gaps = [xs[i + 1] - xs[i] - ws[i] for i in range(len(xs) - 1)]
         check(f"[spacing@{label}] keys are evenly spaced: every gap is {e['keyGap']} px ({gaps})",
               all(near(gp, e["keyGap"]) for gp in gaps))
         check(f"[spacing@{label}] equal margins above and below the keys: {e['topM']:g} px each ("
@@ -752,6 +758,7 @@ def spacing_checks() -> None:
 
         # glyphs centred in their keys, and the LED across the full key at the bottom
         for name, frame, tex in keys:
+            kw = e["toggleW"] if name == "toggle" else e["keyW"]
             led = led_of(frame)
             check(f"[spacing@{label}] {name}: the LED is the key's full width, {e['led']} px, at its bottom edge",
                   led is not None and near(led.h, e["led"] * px) and whole(led.h, px)
@@ -785,9 +792,9 @@ def spacing_checks() -> None:
         check(f"[spacing@{label}] one divider, cyan at 30%", len(divider) == 1)
         d = divider[0]
         dx = d.points.TOPLEFT.x / px
-        check(f"[spacing@{label}] the divider is one key gap past the last key ({e['margin'] + n_keys * e['pitch']} px), 1 px "
+        check(f"[spacing@{label}] the divider is one key gap past the last key ({row_end} px), 1 px "
               f"wide, {e['dividerH']} px tall, centred in the {e['row']} px row (got x {dx:g}, y {-d.points.TOPLEFT.y / px:g})",
-              near(dx, e["margin"] + n_keys * e["pitch"]) and near(dx - xs[-1] - e["keyW"], e["keyGap"])
+              near(dx, row_end) and near(dx - xs[-1] - ws[-1], e["keyGap"])
               and near(d.w, px) and near(d.h / px, e["dividerH"])
               and near(-d.points.TOPLEFT.y / px, (e["row"] - e["dividerH"]) / 2)
               and all(whole(v, px) for v in (d.points.TOPLEFT.x, d.points.TOPLEFT.y, d.w, d.h)))
@@ -796,7 +803,7 @@ def spacing_checks() -> None:
               f"(left margin {xs[0]:g})",
               bool(g.__same(right.rel, bezel)) and right.relPoint == "RIGHT" and right.y == 0
               and near(-right.x / px, e["margin"]) and near(xs[0], e["margin"]) and whole(right.x, px))
-        room = e["width"] - e["margin"] - (e["margin"] + n_keys * e["pitch"] + 1 + e["keyGap"])
+        room = e["width"] - e["margin"] - (row_end + 1 + e["keyGap"])
         want_font = max(5, min(e["coords"], math.floor(room / (READOUT_CHARS * MONO_ADVANCE))))
         check(f"[spacing@{label}] the coords font is {want_font} px (its {e['coords']} px, or what the room {room} px takes) "
               f"and a reading is {READOUT_CHARS * MONO_ADVANCE * want_font:.1f} px, clear of the divider",
@@ -806,11 +813,16 @@ def spacing_checks() -> None:
         toggle = g.Minimap.fsTrayToggle
         chev = glyph_of(toggle, CHEVRON_TEXTURE)
         count = toggle.count
-        check(f"[spacing@{label}] the toggle's chevron is {e['chevW']} x {e['chevH']} px, one pixel in from the key's right, "
-              f"centred on the glyph row; the count is {e['count']} px, a {e['glyphGap']} px gap left of it",
+        cw = 20 / px  # the mock FontString:GetStringWidth() is 20 UI units
+        group = math.floor(cw + 0.5) + e["glyphGap"] + e["chevW"]
+        want_right = min(math.floor((e["toggleW"] + group) / 2), e["toggleW"] - 1)
+        check(f"[spacing@{label}] the toggle's chevron is {e['chevW']} x {e['chevH']} px, the count and chevron centred as one group "
+              f"across the {e['toggleW']} px key (chevron right at {want_right}), on the glyph row; the count is {e['count']} px, "
+              f"a {e['glyphGap']} px gap left of it",
               near(chev.w / px, e["chevW"]) and near(chev.h / px, e["chevH"])
-              and bool(g.__same(chev.points.RIGHT.rel, toggle)) and chev.points.RIGHT.relPoint == "TOPRIGHT"
-              and near(chev.points.RIGHT.x / px, -1) and near(chev.points.RIGHT.y / px, -(e["glyphY"] + e["glyph"] / 2))
+              and bool(g.__same(chev.points.RIGHT.rel, toggle)) and chev.points.RIGHT.relPoint == "TOPLEFT"
+              and near(chev.points.RIGHT.x / px, want_right, 1)
+              and near(chev.points.RIGHT.y / px, -(e["glyphY"] + e["glyph"] / 2))
               and near(count.fontSize / px, e["count"]) and bool(g.__same(count.points.RIGHT.rel, chev))
               and count.points.RIGHT.relPoint == "LEFT" and near(count.points.RIGHT.x / px, -e["glyphGap"]))
 
@@ -834,7 +846,7 @@ def row_checks() -> None:
         before = divider.points.TOPLEFT.x
         lua.execute("__mail_arrives()")
         check(f"[row@{label}] mail arriving takes the fifth slot at once (the key's own OnShow reseats the row)",
-              mail.shown is True and slot(mail) == 4 and near(mail.points.TOPLEFT.x / px, e["margin"] + 4 * e["pitch"])
+              mail.shown is True and near(mail.points.TOPLEFT.x / px, e["margin"] + 3 * e["pitch"] + e["toggleW"] + e["keyGap"])
               and near(mail.w / px, e["keyW"]) and near(mail.h / px, e["keyH"]))
         check(f"[row@{label}] the divider moves right one key pitch ({(divider.points.TOPLEFT.x - before) / px:g} px)",
               near((divider.points.TOPLEFT.x - before) / px, e["pitch"]))
@@ -855,7 +867,7 @@ def row_checks() -> None:
         lua.execute('__lib:Register("Alpha", MakeObj("Alpha"), {})')
         check(f"[row@{label}] ... and the first addon button brings the toggle back in the fourth slot, mail to the fifth",
               toggle.shown is True and near(toggle.points.TOPLEFT.x / px, e["margin"] + 3 * e["pitch"])
-              and near(mail.points.TOPLEFT.x / px, e["margin"] + 4 * e["pitch"]))
+              and near(mail.points.TOPLEFT.x / px, e["margin"] + 3 * e["pitch"] + e["toggleW"] + e["keyGap"]))
 
     # a client without the calendar button: the next key takes its place, no hole
     lua, g, px = world(WORLDS[0], extra="GameTimeFrame:Hide(); GameTimeFrame = nil")
@@ -1408,7 +1420,8 @@ def rescale_checks() -> None:
     check(f"[rescale] the row is re-seated on the new pixel ({bezel.h / px2:g} px tall, was {old / px:g} px)",
           bezel.h != old and near(bezel.h / px2, e["row"]) and whole(bezel.h, px2))
     check("[rescale] every key is re-seated on the new pixel grid at the new spacing",
-          all(near(k.points.TOPLEFT.x / px2, e["margin"] + i * e["pitch"]) and near(k.w / px2, e["keyW"])
+          all(near(k.points.TOPLEFT.x / px2, e["margin"] + i * e["pitch"])
+              and near(k.w / px2, e["toggleW"] if i == 3 else e["keyW"])
               and whole(k.points.TOPLEFT.x, px2) and whole(k.w, px2) and whole(k.h, px2) for i, k in enumerate(keys)))
     lua.execute("__combat = true; PixelUtil = { GetPixelToUIUnitFactor = function() return 1 end }; __rescale(); __combat = false")
     e1 = geo(g.Minimap.w)

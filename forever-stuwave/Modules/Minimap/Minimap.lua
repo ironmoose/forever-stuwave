@@ -78,6 +78,8 @@ local BODY_RULE = { COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 0.35 }
 --                 taller block than the glyphs, so it hangs from this gap instead of sitting centred on the key
 --   topM       3  the vertical margin round the keys, (row - keyH) / 2: the row is as high as the STU icon plus 3 above and
 --                 below it, so the margins above and below the keys are equal
+--   toggleW   30  the tray toggle's width: its count, a 3 px gap and the chevron centred with room each side (at keyW the
+--                 two sat edge to edge in 18 px and crowded the STU icon next to them)
 --   coords    12  the coords' font size (mockup 24 / 2)
 --   count     10  the toggle count's font size (mockup 20 / 2)
 --   dividerH  18  the divider's height (mockup 36 / 2), centred in the row
@@ -90,7 +92,7 @@ local BODY_RULE = { COLOR_POWER[1], COLOR_POWER[2], COLOR_POWER[3], 0.35 }
 local REF_MAP = 248
 local SPEC = {
     row = 28, margin = 8, keyW = 18, keyGap = 8, keyH = 22, glyph = 16, glyphGap = 3, led = 2, stu = 32, stuGap = 2,
-    coords = 12, count = 10, dividerH = 18, chevW = 8, chevH = 4, outline = 3, halo = 1,
+    toggleW = 30, coords = 12, count = 10, dividerH = 18, chevW = 8, chevH = 4, outline = 3, halo = 1,
     dash = 2, ruleInset = 6,
 }
 -- The Metrics below size the map's own furniture (zone text, north tick, blip, glow); the rows above do not use them.
@@ -1195,6 +1197,7 @@ local function Geo(frame)
     g.margin = S(SPEC.margin)
     g.keyGap = S(SPEC.keyGap)
     g.pitch = g.keyW + g.keyGap
+    g.toggleW = Like(S(SPEC.toggleW), g.keyW)
     g.led = S(SPEC.led)
     g.glyph = Like(S(SPEC.glyph), g.keyW)
     g.glyphGap = S(SPEC.glyphGap)
@@ -1482,34 +1485,43 @@ local function SeatMailDot(frame, g)
     mailDot.halo:SetPoint("CENTER", mailDot.core, "CENTER", 0, 0)
 end
 
--- The tray toggle's count and chevron: the chevron against the key's right (one pixel in), the count's right edge a 3 px gap
--- left of it, both centred on the glyph row. One digit fills the key (about 5.6 + 3 + 8 of its 18 px at the mockup's 10 px
--- font); two digits grow leftward into the key gap, which is wider than what they overshoot by.
+-- The tray toggle's count and chevron: the count, a 3 px gap and the chevron as one group centred across the toggleW key, on
+-- the glyph row. The count's width is read off its text, so two digits stay centred too.
 local function SeatToggleContent(st, g)
     local toggle, px = st.frame, g.px
     local mid = -(g.glyphY + g.glyph / 2) * px
+    if toggle.count and toggle.fsCountPx ~= g.count then
+        toggle.fsCountPx = g.count
+        ApplyMono(toggle.count, g.count * px, COLOR_AMBER)
+    end
     if toggle.chevron then
+        -- the count and chevron as one group centred across the key; the count's width is read off its text
+        local cw
+        local ok, w = pcall(function() return toggle.count:GetStringWidth() end)
+        cw = (ok and type(w) == "number" and w > 0) and math.floor(w / px + 0.5) or math.floor(g.count * COORDS_ADVANCE + 0.5)
+        local group = cw + g.glyphGap + g.chevW
+        local right = math.min(math.floor((g.toggleW + group) / 2), g.toggleW - 1)
         toggle.chevron:ClearAllPoints()
         toggle.chevron:SetSize(g.chevW * px, g.chevH * px)
-        toggle.chevron:SetPoint("RIGHT", toggle, "TOPRIGHT", -px, mid)
+        toggle.chevron:SetPoint("RIGHT", toggle, "TOPLEFT", right * px, mid)
     end
     if toggle.count and toggle.chevron then
-        if toggle.fsCountPx ~= g.count then
-            toggle.fsCountPx = g.count
-            ApplyMono(toggle.count, g.count * px, COLOR_AMBER)
-        end
         toggle.count:ClearAllPoints()
         toggle.count:SetPoint("RIGHT", toggle.chevron, "LEFT", -g.glyphGap * px, 0)
     end
 end
 
 -- Seats one key: its size and place (slot `slot` of the row, 0 when it is not in the row), its chrome and its glyph.
-local function SeatKey(st, bezel, g, slot)
+local function KeyWidth(st, g)
+    return st.kind == "toggle" and g.toggleW or g.keyW
+end
+
+local function SeatKey(st, bezel, g, x)
     local frame, px = st.frame, g.px
-    frame:SetSize(g.keyW * px, g.keyH * px)
-    if slot then
+    frame:SetSize(KeyWidth(st, g) * px, g.keyH * px)
+    if x then
         frame:ClearAllPoints()
-        frame:SetPoint("TOPLEFT", bezel, "TOPLEFT", (g.margin + (slot - 1) * g.pitch) * px, -g.topM * px)
+        frame:SetPoint("TOPLEFT", bezel, "TOPLEFT", x * px, -g.topM * px)
     end
     -- The hit box reaches a half gap each side and the row's margin above and below, so no pixel between two keys is dead.
     if frame.SetHitRectInsets then
@@ -1538,9 +1550,8 @@ end
 
 -- The divider and the coords: a divider one key gap after the last key showing, a 1 px line, centred in the row; the coords right
 -- aligned at the margin, as large as the room between the divider and the right margin takes up to SPEC.coords.
-local function SeatDividerAndCoords(bezel, g, shownCount)
+local function SeatDividerAndCoords(bezel, g, dividerX)
     local px = g.px
-    local dividerX = g.margin + shownCount * g.pitch
     local divider = Row.divider
     if divider then
         divider:ClearAllPoints()
@@ -1571,17 +1582,17 @@ local function SeatRow()
     seating = true
     local g = Geo(bezel)
     bezel:SetHeight(g.row * g.px)
-    local slot = 0
+    local x = g.margin
     for _, st in ipairs(Row.keys) do
         local shown = KeyShown(st)
-        if shown then slot = slot + 1 end
-        local ok, err = pcall(SeatKey, st, bezel, g, shown and slot or nil)
+        local ok, err = pcall(SeatKey, st, bezel, g, shown and x or nil)
+        if shown then x = x + KeyWidth(st, g) + g.keyGap end
         if not ok and FS.LogDegradeOnce then
             FS.LogDegradeOnce("minimap_key_" .. tostring(st.kind),
                 "|cffff4488Forever STUwave|r: minimap key degraded (" .. tostring(st.kind) .. "): " .. tostring(err))
         end
     end
-    pcall(SeatDividerAndCoords, bezel, g, slot)
+    pcall(SeatDividerAndCoords, bezel, g, x)
     pcall(SeatBodyPieces, g)
     SeatBody()
     seating = false
@@ -2086,7 +2097,11 @@ local function UpdateToggle()
     local toggle = Minimap and Minimap.fsTrayToggle
     local drawer = Minimap and Minimap.fsTray
     if not (toggle and drawer) then return end
-    if toggle.count then toggle.count:SetText(tostring(Tray.count)) end
+    if toggle.count then
+        toggle.count:SetText(tostring(Tray.count))
+        local st = Keys[toggle]
+        if st then pcall(SeatToggleContent, st, Geo(toggle)) end
+    end
     if toggle.chevron then
         -- The baked chevron points down (closed); open is the same piece flipped over.
         if Tray.open then toggle.chevron:SetTexCoord(0, 1, 1, 0) else toggle.chevron:SetTexCoord(0, 1, 0, 1) end
