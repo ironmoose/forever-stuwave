@@ -2790,6 +2790,31 @@ TAB_PRELUDE = PRELUDE + """
     end
 """
 
+case("a_bottom_tab_under_a_window_is_a_folder_tab_in_the_windows_own_fill_and_border", TAB_PRELUDE + """
+    local W = blz("Frame", nil, P, 300 / PPU, 100 / PPU, 10, 10)
+    local b = PanelTab(W, "Buy", 20 / PPU, 102 / PPU, 100 / PPU, 32)
+    assert(FS.TabSkins.Skin(b)); FlushTimers()
+    local p = FS.TabSkins.Parts(b)
+    NoDegrade()
+    assert(p.folder, "a tab 2 px under its window hangs from it")
+    local f = p.fold
+    -- the plate runs up the 2 px gap to the window's edge and down 24 px from the tab's top, cut 6 at the bottom right
+    Expect(f.fill, b, 0, -2, 100, 20, "folder fill")
+    Expect(f.left, b, 0, -3, 1, 27, "left edge meets the window border")
+    Expect(f.bottom, b, 0, 23, 94, 1, "bottom edge stops at the cut")
+    Is(Colour(f.fill), T.COLOR_BG, 0.92, "the window's own fill")
+    Is(Colour(f.left), T.COLOR_BORDER, 1, "the window's own border")
+    assert(not p.fillM:IsShown() and not p.edgeL:IsShown() and not p.chev:IsShown(), "no slanted plate")
+    assert(not f.open:IsShown() and not f.rule:IsShown())
+    PanelTemplates_SelectTab(b); FlushTimers()
+    Is(Colour(f.left), T.COLOR_HEALTH, 1, "selected edge is pink")
+    assert(f.open:IsShown() and f.rule:IsShown(), "the selected tab opens into the window")
+    Is(b.Text.textColor, T.COLOR_HEALTH, 1, "selected label")
+    -- a tab with no window right above it keeps the slanted strip
+    local _, q = Tab()
+    assert(not q.folder and q.fillM:IsShown())
+""")
+
 case("tab_tokens_are_the_mockups_numbers", PRELUDE + """
     local K = FS.Layout.Controls
     assert(K.TAB_H == 28 and K.TAB_SLANT == 8 and K.TAB_EXTRA == 1 and K.TAB_CHEV_H == 4 and K.TAB_CHEV_ALPHA == 0.95)

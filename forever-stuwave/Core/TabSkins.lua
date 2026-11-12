@@ -49,6 +49,12 @@ local C = {
     amber = Theme.COLOR_AMBER,
 }
 
+-- A bottom tab is a folder tab (live review 2026-11-12, AH mockup A): it hangs from the window's bottom border and wears
+-- the window's own fill, fill alpha and border colour, square at the top, the panel's cut at its bottom right. The selected
+-- one opens into the window (its border row is painted over) with a pink edge and rule. A top tab keeps the slanted strip.
+local FOLDER = { H = 24, CUT = 6, GAP_MAX = 16, FILL_ALPHA = 0.92 }
+C.bg, C.border = Theme.COLOR_BG, Theme.COLOR_BORDER
+
 local function Weak() return setmetatable({}, { __mode = "k" }) end
 
 local parts = Weak()    -- stock tab -> what we drew on it
@@ -116,7 +122,47 @@ local function SeatLabel(widget, p)
     end
     local ppu = Kit.Ppu(widget)
     label:ClearAllPoints()
-    label:SetPoint("CENTER", widget, "TOPLEFT", p.w / 2 / ppu, -(p.top + K.TAB_TEXT_Y) / ppu)
+    local x = p.folder and (p.w - 2) / 2 or p.w / 2
+    label:SetPoint("CENTER", widget, "TOPLEFT", x / ppu, -(p.top + (p.textY or K.TAB_TEXT_Y)) / ppu)
+end
+
+-- Physical pixels from the tab's top up to the bottom of the window it hangs from (the first ancestor whose bottom is within
+-- reach), negative when the tab starts inside the window. nil when the tab hangs from no window (a strip inside a page),
+-- and that tab keeps the slanted strip.
+local function WindowGap(widget)
+    local top = Kit.Plain(Kit.Try(widget.GetTop, widget))
+    if type(top) ~= "number" then return nil end
+    local ppu = Kit.Ppu(widget)
+    local node = Kit.Try(widget.GetParent, widget)
+    for _ = 1, 4 do
+        if not IsTable(node) then return nil end
+        local b = Kit.Plain(Kit.Try(node.GetBottom, node))
+        if type(b) == "number" then
+            local gap = Round((b - top) * ppu)
+            if gap >= -8 and gap <= FOLDER.GAP_MAX then return gap end
+        end
+        node = Kit.Try(node.GetParent, node)
+    end
+    return nil
+end
+
+local function LayoutFolder(widget, p, w, gap)
+    local y0 = -gap
+    local H, cut = FOLDER.H - y0, FOLDER.CUT -- the bottom stays FOLDER.H under the tab's top; the top meets the window
+    p.top, p.textY = y0, math.floor(H / 2)
+    local f = p.fold
+    Kit.Move(f.fill, 0, y0, w, H - cut)
+    for r = 1, cut do
+        Kit.Move(f.rows[r], 0, y0 + H - cut + r - 1, math.max(0, w - r), 1)
+        Kit.Move(f.diag[r], w - 1 - r, y0 + H - cut + r - 1, 1, 1)
+    end
+    Kit.Move(f.left, 0, y0 - 1, 1, H + 1)
+    Kit.Move(f.right, w - 1, y0 - 1, 1, H - cut + 1)
+    Kit.Move(f.bottom, 0, y0 + H - 1, math.max(0, w - cut), 1)
+    Kit.Move(f.rule, 3, y0 + H - 3, math.max(0, w - cut - 5), 1)
+    Kit.Move(f.open, 1, y0 - 1, math.max(0, w - 2), 1)
+    Kit.Move(p.led, w - K.TAB_LED_X, y0 + K.TAB_LED_Y, K.TAB_LED, K.TAB_LED)
+    SeatLabel(widget, p)
 end
 
 local function Layout(widget)
@@ -124,6 +170,14 @@ local function Layout(widget)
     if not (p and p.built) then return end
     local w, h = Kit.SizePx(widget)
     if not w then return end
+    local gap = p.fold ~= nil and not OnTop(widget) and WindowGap(widget) or nil
+    p.folder = gap ~= nil
+    if p.folder then
+        p.w, p.h = w, h
+        p.fits = w > 2 * FOLDER.CUT
+        return LayoutFolder(widget, p, w, gap)
+    end
+    p.textY = nil
     local s, th = K.TAB_SLANT, K.TAB_H
     local top = OnTop(widget) and math.max(0, h - th) or 0
     p.w, p.h, p.top = w, h, top
@@ -149,11 +203,46 @@ Kit.OnReseat(function()
     for widget in pairs(parts) do Layout(widget) end
 end)
 
+local function PaintFolder(widget, p, selected, disabled)
+    local f = p.fold
+    local fill, fa, edge, text = C.bg, FOLDER.FILL_ALPHA, C.border, C.muted
+    if selected then
+        edge, text = C.pink, C.pink
+    elseif disabled then
+        fill, fa, edge, text = C.disFill, 1, C.disEdge, C.dis
+    elseif p.state.hover or p.state.pressed then
+        fill, edge, text = C.cell, C.cyan, C.text
+    end
+    local on = p.fits
+    f.fill:SetColorTexture(fill[1], fill[2], fill[3], fa)
+    for r = 1, FOLDER.CUT do
+        f.rows[r]:SetColorTexture(fill[1], fill[2], fill[3], fa)
+        f.diag[r]:SetColorTexture(edge[1], edge[2], edge[3], 1)
+    end
+    for _, t in ipairs({ f.left, f.right, f.bottom }) do t:SetColorTexture(edge[1], edge[2], edge[3], 1) end
+    for _, t in ipairs(f.all) do t:SetShown(on) end
+    f.rule:SetShown(on and selected)
+    f.open:SetShown(on and selected)
+    for _, t in ipairs({ p.fillL, p.fillM, p.fillR, p.extra, p.edgeL, p.edgeR, p.edgeTop, p.edgeBottom, p.diagL, p.diagR,
+        p.chev }) do t:Hide() end
+    Kit.StopAnimate(widget, "march")
+    return text
+end
+
 local function Paint(widget)
     local p = parts[widget]
     if not (p and p.built) then return end
     local selected = IsSelected(widget)
     local disabled = not selected and not Kit.IsEnabled(widget)
+    if p.folder then
+        local text = PaintFolder(widget, p, selected, disabled)
+        local news = p.news or IsTable(widget.notificationFrame)
+        p.led:SetShown(p.fits and news and true or false)
+        if p.fits and news then p.led:SetColorTexture(C.amber[1], C.amber[2], C.amber[3], 1) end
+        Kit.RestyleLabel(widget.Text, widget, K.TAB_TEXT, text)
+        return
+    end
+    if p.fold then for _, t in ipairs(p.fold.all) do t:Hide() end end
     local fill, edge, text = C.ink, C.dim, C.muted
     if selected then
         fill, text = C.sel, C.pink
@@ -257,6 +346,20 @@ local function Build(widget)
     p.chev:SetTexture(CHEV4, "REPEAT", "REPEAT")
     p.led = Kit.Rect(widget, 0, K.TAB_LED_Y, K.TAB_LED, K.TAB_LED, C.amber, 1, "BORDER", 4)
     for _, t in ipairs({ p.extra, p.diagL, p.diagR, p.chev, p.led }) do t:Hide() end
+    local f = { rows = {}, diag = {}, all = {} }
+    local function R(color, layer, sub)
+        local t = Kit.Rect(widget, 0, 0, 1, 1, color, 1, layer, sub)
+        t:Hide()
+        f.all[#f.all + 1] = t
+        return t
+    end
+    f.fill = R(C.bg, "BACKGROUND", -6)
+    for r = 1, FOLDER.CUT do f.rows[r] = R(C.bg, "BACKGROUND", -6) end
+    f.open = R(C.bg, "BACKGROUND", -5)
+    f.left, f.right, f.bottom = R(C.border, "BORDER", 1), R(C.border, "BORDER", 1), R(C.border, "BORDER", 1)
+    for r = 1, FOLDER.CUT do f.diag[r] = R(C.border, "BORDER", 1) end
+    f.rule = R(C.pink, "BORDER", 2)
+    p.fold = f
     p.built = true
 
     p.state = Kit.Track(widget, Paint)
