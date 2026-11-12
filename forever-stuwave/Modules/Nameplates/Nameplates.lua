@@ -278,6 +278,21 @@ end
 -- matching the static border, and turns hot pink when the unit becomes
 -- attackable. The fill keeps COLOR_BG's own 0.80 alpha (AddPanelChrome only
 -- defaults to 0.92 when the colour carries none).
+-- Seats root.fsGlow SLICE_GLOW_PAD screen pixels out at UIParent's scale (see ApplyBackdrop). A bad read falls back
+-- to 1 px per unit, never a huge pad.
+function Plates.SeatGlow(root)
+    local glow = root.fsGlow
+    if not glow then return end
+    local helpers = FS.FrameHelpers
+    local ok, ppu = false, nil
+    if helpers and helpers.PixelsPerUnit then ok, ppu = pcall(helpers.PixelsPerUnit, UIParent) end
+    if not ok or type(ppu) ~= "number" or FS.IsSecret(ppu) or ppu ~= ppu or ppu < 0.25 then ppu = 1 end
+    local units = (FS.Theme.SLICE_GLOW_PAD or 0) / ppu
+    glow:ClearAllPoints()
+    glow:SetPoint("TOPLEFT", root, "TOPLEFT", -units, units)
+    glow:SetPoint("BOTTOMRIGHT", root, "BOTTOMRIGHT", units, -units)
+end
+
 local function ApplyBackdrop(root)
     local _, glow, border = FS.Theme.AddPanelChrome(root, {
         accent = FS.Theme.COLOR_BORDER,
@@ -285,6 +300,12 @@ local function ApplyBackdrop(root)
     })
     root.fsGlow = glow
     root.fsBorder = border
+    -- The plate glow stays out of Theme's global re-seat: that measures the pad against the root's live effective
+    -- scale, and a plate caught mid-rescale (scale near 0) turned the 4 px pad into hundreds of units, a huge box
+    -- around one mob that stayed after the plate scaled back. Plates.SeatGlow measures against UIParent instead, so
+    -- the pad scales with the plate like the rest of it, and runs again on every acquire.
+    if type(FS.Theme.glowSeats) == "table" then FS.Theme.glowSeats[glow] = nil end
+    Plates.SeatGlow(root)
 end
 
 -- Font fallback: the Mononoki file lives in a different addon's folder, so it may not
@@ -2485,6 +2506,7 @@ do
         -- TOP + sizer-derived BOTTOM, see AnchorPlateRoot. UpdatePower's height
         -- changes only ever extend the bottom.
         AnchorPlateRoot(root, plate)
+        Plates.SeatGlow(root)
         root:Show()
 
         FS.framesByUnit[unit] = root
