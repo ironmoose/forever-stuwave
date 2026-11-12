@@ -287,6 +287,13 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
     # one 8 px period per tile): the slider's 8 high strip, the selected tab's 4 high strip and the switch slug's 3 high strip
     # (the art in the top 3 rows of a 4 row canvas).
     "control_chevrons": {"ctl_chevron_h8": (8, 8), "ctl_chevron_h4": (8, 4), "ctl_chevron_h3": (8, 4)},
+    # generate_control_glyphs.py: the shared controls kit's field and dropdown glyphs, 16 x 16 white alpha shapes on the mockup's
+    # glyph canvas: the edit box's prompt chevron, the search lens, the clear cross, the radar lens, its sweep arm and the
+    # dropdown chevron.
+    "control_glyphs": {
+        "ctl_prompt": (16, 16), "ctl_lens": (16, 16), "ctl_cross": (16, 16), "ctl_radar": (16, 16), "ctl_radar_arm": (16, 16),
+        "ctl_chev": (16, 16),
+    },
     "icon_social": (32, 32),
     # generate_icon_stu.py: the minimap STU key's icon A (full colour), a 32 canvas with the 22 texel art box centred.
     "icon_stu": (32, 32),
@@ -2815,4 +2822,108 @@ def test_h4_and_h3_chevrons_follow_their_shallower_arms(control_chevron_outputs:
 
 def test_committed_control_chevron_textures_match_the_generator(control_chevron_outputs: Path) -> None:
     for out in control_chevron_outputs.glob("*.tga"):
+        assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
+
+
+# ---------------------------------------------------------------------------
+# generate_control_glyphs.py: the field and dropdown glyphs of the shared controls kit.
+#
+# Mockup glyph() and the radar lens of field(), on a 16 x 16 canvas. A stroke of width 2 with butt ends and a mitred bend covers
+# its centreline length x 2 texels. Numbers hardcoded here.
+# ---------------------------------------------------------------------------
+
+CONTROL_GLYPHS_GENERATOR = GENERATOR_DIR / "generate_control_glyphs.py"
+
+
+@pytest.fixture(scope="module")
+def control_glyph_outputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    out = tmp_path_factory.mktemp("control_glyphs")
+    _run_generator(CONTROL_GLYPHS_GENERATOR, out)
+    return out
+
+
+def test_control_glyphs_are_white_alpha_shapes(control_glyph_outputs: Path) -> None:
+    names = sorted(path.name for path in control_glyph_outputs.glob("ctl_*.tga"))
+    assert names == ["ctl_chev.tga", "ctl_cross.tga", "ctl_lens.tga", "ctl_prompt.tga", "ctl_radar.tga", "ctl_radar_arm.tga"]
+    for name in names:
+        path = control_glyph_outputs / name
+        assert _is_white(path), name
+        assert _alpha_sum(path) > 8, name
+
+
+def test_prompt_chevron_is_the_mockup_polyline_at_stroke_2(control_glyph_outputs: Path) -> None:
+    path = control_glyph_outputs / "ctl_prompt.tga"
+    # (5, 4) -> (10, 8) -> (5, 12): two arms of sqrt(41) = 6.40, so 2 * 2 * 6.40 = 25.6 texels of ink
+    assert abs(_alpha_sum(path) - 25.6) < 1.0
+    for x, y in ((7, 5), (7, 10), (8, 6), (8, 9)):
+        assert _alpha_at(path, x, y) >= 200, (x, y)
+    for x, y in ((0, 8), (3, 8), (5, 8), (12, 8), (7, 2), (7, 13)):
+        assert _alpha_at(path, x, y) == 0, (x, y)
+    assert 0 < _alpha_at(path, 11, 7) < 255, "the mitred tip reaches x 11.6 and is anti-aliased"
+    for y in range(16):
+        for x in range(16):
+            assert abs(_alpha_at(path, x, y) - _alpha_at(path, x, 15 - y)) <= 2, (x, y)
+
+
+def test_dropdown_chevron_is_the_mockup_polyline_at_stroke_2(control_glyph_outputs: Path) -> None:
+    path = control_glyph_outputs / "ctl_chev.tga"
+    # (3, 6) -> (8, 11) -> (13, 6): two arms of 5 * sqrt(2), so 2 * 2 * 7.07 = 28.3 texels of ink
+    assert abs(_alpha_sum(path) - 28.28) < 1.0
+    for x, y in ((5, 8), (6, 9), (7, 10), (8, 10), (9, 9), (10, 8)):
+        assert _alpha_at(path, x, y) >= 250, (x, y)
+    for x, y in ((8, 6), (8, 7), (0, 6), (15, 6), (8, 13)):
+        assert _alpha_at(path, x, y) == 0, (x, y)
+    for y in range(16):
+        for x in range(16):
+            assert abs(_alpha_at(path, x, y) - _alpha_at(path, 15 - x, y)) <= 2, (x, y)
+
+
+def test_clear_cross_is_two_diagonals_through_the_centre(control_glyph_outputs: Path) -> None:
+    path = control_glyph_outputs / "ctl_cross.tga"
+    # two strokes of 8 * sqrt(2) = 11.31 at width 2 cross in a 2 x 2 square: 2 * 22.63 - 4 = 41.25 texels
+    assert abs(_alpha_sum(path) - 41.25) < 1.5
+    for x, y in ((7, 7), (8, 8), (7, 8), (8, 7), (5, 5), (10, 10), (10, 5), (5, 10)):
+        assert _alpha_at(path, x, y) >= 250, (x, y)
+    for x, y in ((3, 3), (12, 12), (8, 3), (3, 8), (8, 13)):
+        assert _alpha_at(path, x, y) == 0, (x, y)
+    for y in range(16):
+        for x in range(16):
+            assert abs(_alpha_at(path, x, y) - _alpha_at(path, 15 - x, y)) <= 2, (x, y)
+
+
+def test_search_lens_is_a_ring_about_7_7_and_a_handle_to_the_corner(control_glyph_outputs: Path) -> None:
+    path = control_glyph_outputs / "ctl_lens.tga"
+    # ring r 4.5 at stroke 2: pi * (5.5^2 - 3.5^2) = 56.5, the handle (10.5, 10.5) -> (14, 14) adds 9.9 less the 1.1 it shares
+    assert abs(_alpha_sum(path) - 65.35) < 1.5
+    for x, y in ((7, 2), (2, 7), (11, 7), (7, 11), (12, 12)):
+        assert _alpha_at(path, x, y) >= 250, (x, y)
+    for x, y in ((7, 7), (6, 6), (14, 14), (15, 15), (1, 1)):
+        assert _alpha_at(path, x, y) == 0, (x, y)
+
+
+def test_radar_lens_is_a_full_ring_and_an_inner_ring_at_half_alpha(control_glyph_outputs: Path) -> None:
+    path = control_glyph_outputs / "ctl_radar.tga"
+    # ring r 7 at stroke 1 is 2 pi 7 = 44.0 texels, the inner ring r 3 at half alpha 2 pi 3 / 2 = 9.4
+    assert abs(_alpha_sum(path) - 53.4) < 1.5
+    centre = [_alpha_at(path, x, y) for x in (7, 8) for y in (7, 8)]
+    assert centre == [0, 0, 0, 0], "the lens is open"
+    inner = max(_alpha_at(path, x, y) for x in range(4, 12) for y in range(4, 12))
+    assert 40 <= inner <= 140, "the inner ring is at half alpha"
+    for y in range(16):
+        for x in range(16):
+            assert abs(_alpha_at(path, x, y) - _alpha_at(path, 15 - x, y)) <= 2, (x, y)
+            assert abs(_alpha_at(path, x, y) - _alpha_at(path, x, 15 - y)) <= 2, (x, y)
+
+
+def test_radar_arm_is_a_2_px_line_from_the_centre_to_the_ring(control_glyph_outputs: Path) -> None:
+    path = control_glyph_outputs / "ctl_radar_arm.tga"
+    # (8, 8) -> (15, 8) at stroke 2: rows 7 and 8, columns 8 to 14, all solid; it turns about the canvas centre in Lua
+    for x in range(8, 15):
+        assert _alpha_at(path, x, 7) == 255 and _alpha_at(path, x, 8) == 255, x
+    for x, y in ((7, 7), (7, 8), (15, 7), (15, 8), (10, 6), (10, 9), (0, 0)):
+        assert _alpha_at(path, x, y) == 0, (x, y)
+
+
+def test_committed_control_glyph_textures_match_the_generator(control_glyph_outputs: Path) -> None:
+    for out in control_glyph_outputs.glob("*.tga"):
         assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name

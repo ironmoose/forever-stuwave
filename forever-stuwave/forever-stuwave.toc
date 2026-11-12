@@ -21,6 +21,7 @@ Core/ScrollBarSkins.lua
 Core/ControlKit.lua
 Core/CheckSkins.lua
 Core/SliderSkins.lua
+Core/FieldSkins.lua
 Core/PanelSkins.lua
 Modules/Tracker/Tracker.lua
 Modules/Tracker/TrackerSeat.lua

@@ -107,6 +107,8 @@ Theme.COLOR_CTRL_DISEDGE  = { 0x2a / 255, 0x18 / 255, 0x46 / 255, 1 } -- #2a1846
 Theme.COLOR_CTRL_WELL     = { 0x1c / 255, 0x10 / 255, 0x30 / 255, 1 } -- #1c1030 an item well
 Theme.COLOR_CTRL_BAND     = { 0x1a / 255, 0x0d / 255, 0x2c / 255, 1 } -- #1a0d2c a header band
 Theme.COLOR_CTRL_TEXT     = { 0xe9 / 255, 0xe2 / 255, 1, 1 }          -- #e9e2ff a control's own text
+Theme.COLOR_CTRL_HAIR     = { 0x3a / 255, 0x21 / 255, 0x68 / 255, 1 } -- #3a2168 the rule between a field's prompt cell and its text
+Theme.COLOR_CTRL_HINT     = { 0x6c / 255, 0x63 / 255, 0x96 / 255, 1 } -- #6c6396 a field's placeholder text
 
 -------------------------------------------------------------------------------
 -- Radii

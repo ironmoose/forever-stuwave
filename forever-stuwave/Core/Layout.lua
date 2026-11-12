@@ -191,6 +191,17 @@ FS.Layout.Controls = {
     -- plus adds the upright).
     TAG_TEXT = 11, TAG_LABEL_Y = 10, LABEL_TEXT = 12, SMALL_TEXT = 10, KEY_GAP = 8,
     KEY_MINUS = { 6, 9, 8, 2 }, KEY_PLUS_UPRIGHT = { 9, 6, 2, 8 },
+    -- Edit and search boxes: chamfer 6, a 24 prompt cell (a rule at its edge, 5 short of the top and bottom) holding a 16 glyph
+    -- 4 in, the text 34 in at 12 and 10 short of the right edge (28 where the clear key sits), a 2 tall LED underline 3 up from
+    -- the bottom and a 3 px glow while focused, a 7 x 14 block caret that blinks every 1.1 s, a 20 tall count chip 6 from the
+    -- right, and the search box's radar: a 1.6 s sweep and a 2 px dot at (centre + 3, centre - 5). A stock box under FIELD_MIN_W by
+    -- FIELD_MIN_H or taller than FIELD_MAX_H is not a console line and is left alone.
+    FIELD_CUT = 6, FIELD_CELL = 24, FIELD_RULE_PAD = 5, FIELD_GLYPH = 16, FIELD_GLYPH_X = 4, FIELD_TEXT_X = 34, FIELD_TEXT = 12,
+    FIELD_RIGHT = 10, FIELD_CLEAR = 28, FIELD_MIN_W = 64, FIELD_MIN_H = 16, FIELD_MAX_H = 40,
+    FIELD_LED_H = 2, FIELD_LED_UP = 3, FIELD_GLOW = 3, FIELD_GLOW_ALPHA = 0.08,
+    CARET_W = 7, CARET_H = 14, CARET_GAP = 2, CARET_BLINK = 1.1, CARET_DIM = 0.45,
+    CHIP_H = 20, CHIP_CUT = 4, CHIP_PAD = 12, CHIP_INSET = 6, CHIP_MIN_TEXT = 40, CHIP_TEXT = 11, CHIP_TEXT_Y = 11,
+    RADAR_PERIOD = 1.6, RADAR_DOT = 2, RADAR_DOT_X = 3, RADAR_DOT_Y = -5,
     -- Marching chevrons: the lit cells' strip moves one 8 px pitch every 0.6 s at 18 % white.
     MARCH_PERIOD = 0.6, CHEV_PITCH = 8, CHEV_ALPHA = 0.18,
 }

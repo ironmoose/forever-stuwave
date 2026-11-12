@@ -43,6 +43,7 @@ FILES = {
     "ControlKit": "Core/ControlKit.lua",
     "CheckSkins": "Core/CheckSkins.lua",
     "SliderSkins": "Core/SliderSkins.lua",
+    "FieldSkins": "Core/FieldSkins.lua",
     "PanelSkins": "Core/PanelSkins.lua",
 }
 SOURCES = {name: (ADDON / path).read_text(encoding="utf-8") for name, path in FILES.items()}
@@ -184,8 +185,23 @@ function Obj:SetEnabled(v) if v then self:Enable() else self:Disable() end end
 function Obj:IsEnabled() return self.enabled end
 function Obj:SetChecked(v) self.checked = v and true or false end
 function Obj:GetChecked() return self.checked end
-function Obj:SetFocus() end
-function Obj:ClearFocus() end
+function Obj:SetFocus()
+    if self.focus then return end
+    self.focus = true
+    runScript(self, "OnEditFocusGained")
+end
+function Obj:ClearFocus()
+    if not self.focus then return end
+    self.focus = false
+    runScript(self, "OnEditFocusLost")
+end
+function Obj:HasFocus() return self.focus == true end
+function Obj:IsMultiLine() return self.multi == true end
+function Obj:GetUTF8CursorPosition() return self.cursor or #(self.text or "") end
+function Obj:SetCursorPosition(n) self.cursor = n; runScript(self, "OnCursorChanged", 0, 0, 1, 14) end
+function Obj:GetDisplayText() return self.text end
+function Obj:SetHighlightColor(r, g, b, a) self.highlight = { r, g, b, a } end
+function Obj:SetRotation(r) self.rotation = r end
 
 -- text
 function Obj:SetFont(path, size, flags) self.fontPath, self.size, self.flags = path, size, flags; return true end
@@ -197,7 +213,11 @@ function Obj:SetShadowOffset() end
 function Obj:SetJustifyH(j) self.justify = j end
 function Obj:SetJustifyV() end
 function Obj:SetWordWrap() end
-function Obj:SetTextInsets() end
+function Obj:SetTextInsets(l, r, t, b) self.insets = { l, r, t, b } end
+function Obj:GetTextInsets()
+    local i = self.insets or { 0, 0, 0, 0 }
+    return i[1], i[2], i[3], i[4]
+end
 function Obj:SetSpacing() end
 function Obj:IsTruncated() return false end
 function Obj:GetFontString() return self.fs end
@@ -208,6 +228,10 @@ function Obj:SetText(t)
         if self.fs then self.fs.text = t end
     end
     self.text = t
+    if self.kind == "EditBox" then
+        self.cursor = nil
+        runScript(self, "OnTextChanged", false)
+    end
 end
 function Obj:GetText()
     if self.fs and (self.kind == "Button" or self.kind == "CheckButton") then return self.fs.text end
@@ -466,6 +490,38 @@ function SteppedSlider(parent, x, y, o)
     return f
 end
 
+-- InputBoxTemplate (AddFriendNameEditBox and kin): a single line EditBox with the Left, Middle and Right border art.
+function EditBoxW(parent, x, y, w, h, o)
+    o = o or {}
+    local b = blz("EditBox", nil, parent, w or 130, h or 20, x, y)
+    for _, key in ipairs({ "Left", "Middle", "Right" }) do
+        b[key] = tex(b, nil, "BACKGROUND")
+        b[key].atlas = "common-search-border-" .. key:lower()
+    end
+    b.fontPath, b.size, b.textColor = "stock.ttf", 12, { 1, 1, 1, 1 }
+    b.multi = o.multi
+    return b
+end
+
+-- SearchBoxTemplate: the same plus the search icon, the placeholder (`Instructions`) and the clear button, with the stock handlers
+-- (InputBoxInstructions_OnTextChanged, SearchBoxTemplate_OnEditFocusGained / Lost) set the way the XML sets them.
+function SearchBoxW(parent, x, y, w, h, o)
+    local b = EditBoxW(parent, x, y, w, h, o)
+    b.searchIcon = tex(b, nil, "OVERLAY"); b.searchIcon.atlas = "common-search-magnifyingglass"
+    b.Instructions = fstring(b, "Search", 10)
+    b.Instructions.points = { { point = "TOPLEFT", rel = b, relPoint = "TOPLEFT", x = 16, y = 0 },
+        { point = "BOTTOMRIGHT", rel = b, relPoint = "BOTTOMRIGHT", x = -20, y = 0 } }
+    local bh = b.h
+    b.clearButton = blz("Button", nil, b, 17, 17, (w or 130) - 20, (bh - 17) / 2)
+    b.clearButton.Icon = tex(b.clearButton, nil, "ARTWORK"); b.clearButton.Icon.atlas = "common-search-clearbutton"
+    b.clearButton.Icon.alpha = 0.5
+    b.clearButton.shown = false
+    b.scripts.OnTextChanged = function(self) self.Instructions:SetShown(self:GetText() == ""); if self:GetText() ~= "" then self.clearButton:Show() end end
+    b.scripts.OnEditFocusGained = function(self) self.clearButton:Show() end
+    b.scripts.OnEditFocusLost = function(self) if self:GetText() == "" then self.clearButton:Hide() end end
+    return b
+end
+
 function Panel(name)
     local f = blz("Frame", name or "TestPanel", UIParent, 400, 300, 100, 100)
     f.shown = true
@@ -512,7 +568,7 @@ function Load(opts)
         LogDegradeOnce = function(key, msg) DEGRADED[#DEGRADED + 1] = key .. " :: " .. tostring(msg) end,
     }
     FS.FrameHelpers = { PixelsPerUnit = function() return PPU end }
-    for _, name in ipairs({ "Theme", "Layout", "HeldArt", "ControlKit", "CheckSkins", "SliderSkins", "PanelSkins" }) do
+    for _, name in ipairs({ "Theme", "Layout", "HeldArt", "ControlKit", "CheckSkins", "SliderSkins", "FieldSkins", "PanelSkins" }) do
         local chunk, err = load(SOURCES[name], "=" .. name .. ".lua")
         if not chunk then error(err) end
         chunk("forever-stuwave", FS)
@@ -543,12 +599,15 @@ function Is(c, token, alpha, what)
     assert(Near(c[1], token[1], 0.002) and Near(c[2], token[2], 0.002) and Near(c[3], token[3], 0.002) and Near(c[4], a, 0.002),
         string.format("%s: got %.3f %.3f %.3f %.3f, wanted %.3f %.3f %.3f %.3f", what, c[1], c[2], c[3], c[4], token[1], token[2], token[3], a))
 end
--- Every texture and frame under `root` sits on whole screen pixels (fonts excepted).
-function WholePixels(root, ref, what)
+-- Every texture and frame under `root` sits on whole screen pixels (fonts excepted). `except` lists stock objects (their
+-- rects are never resized, so a fractional stock layout is theirs) to leave out, a frame with everything under it.
+function WholePixels(root, ref, what, except)
     local n = 0
+    local skip = {}
+    for _, o in ipairs(except or {}) do skip[o] = true end
     local function visit(o)
         for _, r in ipairs(o.regions) do
-            if r.kind ~= "FontString" and r.shown ~= false then
+            if r.kind ~= "FontString" and r.shown ~= false and not skip[r] then
                 local l, t, rr, b = Px(r, ref)
                 for _, v in ipairs({ l, t, rr, b }) do
                     assert(Near(v, math.floor(v + 0.5), 0.001), string.format("%s: %s edge %.4f is not a whole pixel", what, tostring(r.path or r.kind), v))
@@ -556,13 +615,16 @@ function WholePixels(root, ref, what)
                 n = n + 1
             end
         end
-        for _, c in ipairs(o.children) do visit(c) end
+        for _, c in ipairs(o.children) do
+            if not skip[c] then visit(c) end
+        end
     end
     visit(root)
     return n
 end
 function Colour(t) return t.color or t.vertex end
 function Slk() return FS.SliderSkins end
+function Fld() return FS.FieldSkins end
 function SkinOne(w) FS.ControlKit.SkinWidget(w); FlushTimers() end
 -- Rounds the way the skin does (half up).
 function Round(v) return math.floor(v + 0.5) end
@@ -639,6 +701,14 @@ function DumpOps(roots)
             return x.seq < y.seq
         end)
         for _, r in ipairs(regions) do region(r) end
+        -- an edit box draws its own text, inside its insets, over its art and under its children
+        if f.kind == "EditBox" and f.text and f.text ~= "" and f.fontPath then
+            local l, t, r, b = Px(f, UIParent)
+            local ins = f.insets or { 0, 0, 0, 0 }
+            local tc = f.textColor or { 1, 1, 1, 1 }
+            ops[#ops + 1] = { kind = "text", l = l + ins[1] * PPU, t = t, r = r - ins[2] * PPU, b = b, text = f.text,
+                size = (f.size or 12) * PPU, rgba = { tc[1], tc[2], tc[3], (tc[4] or 1) * alphaOf(f) }, justify = "LEFT", clip = true }
+        end
     end
     for _, r in ipairs(roots) do collect(r) end
     table.sort(frames, function(x, y)
@@ -1448,6 +1518,330 @@ case("a_secret_slider_value_reads_as_the_start_without_an_error", PRELUDE + """
 """)
 
 
+# -------------------------------------------------------------------------------------------------------------------
+# Edit box and search box
+# -------------------------------------------------------------------------------------------------------------------
+
+case("field_tokens_are_the_mockups_numbers", PRELUDE + """
+    local T, K = FS.Theme, FS.Layout.Controls
+    local function hex(c, h)
+        local r, g, b = tonumber(h:sub(1, 2), 16) / 255, tonumber(h:sub(3, 4), 16) / 255, tonumber(h:sub(5, 6), 16) / 255
+        assert(Near(c[1], r, 0.001) and Near(c[2], g, 0.001) and Near(c[3], b, 0.001), h)
+    end
+    hex(T.COLOR_CTRL_HAIR, "3a2168"); hex(T.COLOR_CTRL_HINT, "6c6396")
+    assert(K.FIELD_CUT == 6 and K.FIELD_CELL == 24 and K.FIELD_RULE_PAD == 5 and K.FIELD_GLYPH == 16 and K.FIELD_GLYPH_X == 4)
+    assert(K.FIELD_TEXT_X == 34 and K.FIELD_TEXT == 12 and K.FIELD_RIGHT == 10 and K.FIELD_CLEAR == 28)
+    assert(K.FIELD_LED_H == 2 and K.FIELD_LED_UP == 3 and K.FIELD_GLOW == 3 and K.FIELD_GLOW_ALPHA == 0.08)
+    assert(K.CARET_W == 7 and K.CARET_H == 14 and K.CARET_BLINK == 1.1)
+    assert(K.CHIP_H == 20 and K.CHIP_CUT == 4 and K.CHIP_PAD == 12 and K.CHIP_INSET == 6 and K.CHIP_TEXT == 11)
+    assert(K.RADAR_PERIOD == 1.6 and K.RADAR_DOT == 2 and K.RADAR_DOT_X == 3 and K.RADAR_DOT_Y == -5)
+""")
+
+case("edit_box_is_a_console_line_ink_face_prompt_cell_and_mono_text", PRELUDE + """
+    local b = EditBoxW(P, 20, 20, 156 / PPU, 28 / PPU)
+    assert(Skin(P) == 1)
+    NoDegrade()
+    local p, T = Fld().Parts(b), FS.Theme
+    assert(p and p.built and p.kind == "edit")
+    assert(b.w == 156 / PPU and b.h == 28 / PPU, "the stock rect was resized")
+    Expect(p.plate.ring, b, 0, 0, 156, 28, "edge")
+    Expect(p.plate.fill, b, 0, 0, 156, 28, "face")
+    Is(Colour(p.plate.fill), T.COLOR_CTRL_INK, 1, "face")
+    Is(p.plate.ring.vertex, T.COLOR_CTRL_DIM, 1, "idle edge")
+    Expect(p.rule, b, 24, 5, 1, 18, "rule at the prompt cell's edge")
+    Is(p.rule.color, T.COLOR_CTRL_HAIR, 1, "rule")
+    Expect(p.glyph, b, 4, 6, 16, 16, "prompt")
+    assert(p.glyph.path:find("ctl_prompt"), p.glyph.path)
+    Is(p.glyph.vertex, T.COLOR_MUTED, 1, "prompt")
+    assert(b.fontPath == T.FONT_MONO and Near(b.size * PPU, 12, 0.01), "12 px mono text")
+    Is(b.textColor, T.COLOR_CTRL_TEXT, 1, "text")
+    assert(Near(b.insets[1] * PPU, 34, 0.01) and Near(b.insets[2] * PPU, 10, 0.01), "text 34 in, 10 short of the right edge")
+    assert(not p.glow:IsShown() and not p.led:IsShown() and not p.caret:IsShown(), "no focus, no glow, LED or caret")
+    assert(p.over.parent == b, "our layer is a child of the box")
+    WholePixels(b, b, "edit box")
+""")
+
+case("edit_box_hover_and_focus_go_cyan_focus_adds_glow_led_underline_and_caret", PRELUDE + """
+    local b = EditBoxW(P, 20, 20, 156 / PPU, 28 / PPU)
+    Skin(P)
+    local p, T = Fld().Parts(b), FS.Theme
+    Hover(b)
+    Is(p.plate.ring.vertex, T.COLOR_POWER, 1, "hover edge")
+    Is(p.glyph.vertex, T.COLOR_MUTED, 1, "the prompt stays muted under the hand")
+    assert(not p.glow:IsShown() and not p.led:IsShown())
+    Unhover(b)
+    Is(p.plate.ring.vertex, T.COLOR_CTRL_DIM, 1, "idle again")
+    b:SetFocus()
+    Is(p.plate.ring.vertex, T.COLOR_POWER, 1, "focus edge")
+    Is(p.glyph.vertex, T.COLOR_POWER, 1, "focus prompt")
+    assert(p.glow:IsShown())
+    Expect(p.glow, b, -3, -3, 162, 34, "glow")
+    Is(p.glow.color, T.COLOR_POWER, 0.08, "glow")
+    assert(p.led:IsShown())
+    Expect(p.led, b, 1, 25, 154, 2, "LED underline")
+    assert(p.caret:IsShown())
+    Expect(p.caret, b, 34 + 2, 7, 7, 14, "caret 2 px in from the start of the empty line (the mockup: text x + length * 7.2 + 2)")
+    Is(p.caret.color, T.COLOR_POWER, 1, "caret")
+    b:ClearFocus()
+    assert(not p.glow:IsShown() and not p.led:IsShown() and not p.caret:IsShown())
+    Is(p.plate.ring.vertex, T.COLOR_CTRL_DIM, 1, "edge after focus")
+""")
+
+case("edit_box_led_underline_breathes_and_the_caret_blinks_every_1_1_s", PRELUDE + """
+    local b = EditBoxW(P, 20, 20, 156 / PPU, 28 / PPU)
+    Skin(P)
+    local p = Fld().Parts(b)
+    b:SetFocus()
+    Step(0)
+    assert(p.caret.alpha == 1, "caret on at the start of a blink")
+    assert(Near(p.led.color[4], 1, 0.01), "LED underline at full")
+    Step(0.8)
+    assert(Near(p.led.color[4], 0.3, 0.02), "LED underline at the bottom of its breath, got " .. p.led.color[4])
+    assert(p.caret.alpha == 0, "caret off in the second half of the blink")
+    Step(0.35)
+    assert(p.caret.alpha == 1, "caret on again after 1.1 s")
+    b:ClearFocus()
+    assert(not FS.ControlKit.IsAnimating(p.over, "led") and not FS.ControlKit.IsAnimating(p.over, "blink"), "nothing runs unfocused")
+""")
+
+case("edit_box_caret_follows_the_cursor_dims_mid_text_and_hides_when_the_text_scrolls", PRELUDE + """
+    local b = EditBoxW(P, 20, 20, 156 / PPU, 28 / PPU)
+    Skin(P)
+    local p = Fld().Parts(b)
+    b:SetFocus()
+    b:SetText("stu")
+    -- 3 glyphs of 12 px at 0.5615 an em = 20.2 px, rounded to 20, after the 34 px inset
+    Expect(p.caret, b, 34 + 20 + 2, 7, 7, 14, "caret 2 px clear of the last glyph, as the mockup draws it")
+    Step(0)
+    assert(p.caret.alpha == 1, "solid at the end of the text")
+    b.cursor = 1
+    b:RunScript("OnCursorChanged", 0, 0, 1, 14)
+    Expect(p.caret, b, 34 + 7, 7, 7, 14, "caret after the first glyph")
+    Step(0)
+    assert(Near(p.caret.alpha, 0.45, 0.001), "dimmed over a glyph so the text stays readable, got " .. p.caret.alpha)
+    b:SetText("a very long line that is wider than the box so it scrolls")
+    assert(not p.caret:IsShown(), "no caret drawn where the text scrolls under the engine's own")
+""")
+
+case("edit_box_disabled_is_the_darkest_ink_and_dims_its_text", PRELUDE + """
+    local b = EditBoxW(P, 20, 20, 156 / PPU, 28 / PPU)
+    Skin(P)
+    local p, T = Fld().Parts(b), FS.Theme
+    b:Disable()
+    Is(Colour(p.plate.fill), T.COLOR_CTRL_DISFILL, 1, "disabled face")
+    Is(p.plate.ring.vertex, T.COLOR_CTRL_DISEDGE, 1, "disabled edge")
+    Is(p.rule.color, T.COLOR_CTRL_DISEDGE, 1, "disabled rule")
+    Is(p.glyph.vertex, T.COLOR_CTRL_DIS, 1, "disabled prompt")
+    Is(b.textColor, T.COLOR_CTRL_DIS, 1, "disabled text")
+    Hover(b)
+    Is(p.plate.ring.vertex, T.COLOR_CTRL_DISEDGE, 1, "a disabled box does not light under the hand")
+    b:Enable()
+    Is(Colour(p.plate.fill), T.COLOR_CTRL_INK, 1, "enabled face")
+    Is(b.textColor, T.COLOR_CTRL_TEXT, 1, "enabled text")
+""")
+
+case("search_box_swaps_the_prompt_for_a_lens_and_a_sweeping_radar_while_focused", PRELUDE + """
+    local b = SearchBoxW(P, 20, 20, 156 / PPU, 28 / PPU)
+    assert(Skin(P) == 1, "the sweep skins the box, which takes its clear key with it")
+    NoDegrade()
+    local p, T = Fld().Parts(b), FS.Theme
+    assert(p.kind == "search")
+    Expect(p.glyph, b, 4, 6, 16, 16, "lens")
+    assert(p.glyph.path:find("ctl_lens"), p.glyph.path)
+    Is(p.glyph.vertex, T.COLOR_MUTED, 1, "lens")
+    assert(not p.radar:IsShown() and not p.arm:IsShown() and not p.dot:IsShown())
+    b:SetFocus()
+    assert(not p.glyph:IsShown() and p.radar:IsShown() and p.arm:IsShown() and p.dot:IsShown(), "the lens becomes the radar")
+    Expect(p.radar, b, 4, 6, 16, 16, "radar ring")
+    assert(p.radar.path:find("ctl_radar%.tga"), p.radar.path)
+    Is(p.radar.vertex, T.COLOR_POWER, 1, "radar")
+    Expect(p.arm, b, 4, 6, 16, 16, "sweep arm")
+    Expect(p.dot, b, 15, 9, 2, 2, "pink dot at (centre + 3, centre - 5)")
+    Is(p.dot.color, T.COLOR_HEALTH, 1, "dot")
+    Step(0)
+    assert(Near(p.arm.rotation, 0, 0.01))
+    Step(0.4)
+    assert(Near(p.arm.rotation, -math.pi / 2, 0.02), "a quarter turn clockwise in 0.4 s of a 1.6 s sweep, got " .. p.arm.rotation)
+    Step(1.2)
+    assert(Near(math.abs(p.arm.rotation), 0, 0.02) or Near(math.abs(p.arm.rotation), 2 * math.pi, 0.02), "a full turn in 1.6 s")
+    b:ClearFocus()
+    assert(p.glyph:IsShown() and not p.radar:IsShown() and not FS.ControlKit.IsAnimating(p.over, "sweep"))
+""")
+
+case("search_box_placeholder_and_clear_key_are_restyled_and_the_stock_art_is_held", PRELUDE + """
+    local b = SearchBoxW(P, 20, 20, 156 / PPU, 28 / PPU)
+    Skin(P)
+    NoDegrade()
+    local p, T = Fld().Parts(b), FS.Theme
+    local ins = b.Instructions
+    assert(ins.fontPath == T.FONT_MONO and Near(ins.size * PPU, 12, 0.01), "12 px placeholder")
+    Is(ins.textColor, T.COLOR_CTRL_HINT, 1, "placeholder")
+    assert(#ins.points == 2 and Near(ins.points[1].x * PPU, 34, 0.01) and Near(ins.points[2].x * PPU, -28, 0.01),
+        "placeholder runs from the text inset to the clear zone")
+    assert(Near(b.insets[1] * PPU, 34, 0.01) and Near(b.insets[2] * PPU, 28, 0.01), "text insets 34 and 28")
+    assert(b.searchIcon.alpha == 0 and b.clearButton.Icon.alpha == 0, "the stock icon and clear art are held")
+    b.clearButton.Icon:SetAlpha(1)
+    assert(b.clearButton.Icon.alpha == 0, "Blizzard's hover alpha write is undone")
+    for _, key in ipairs({ "Left", "Middle", "Right" }) do assert(b[key].alpha == 0, key .. " held") end
+    assert(next(b.scripts) == nil or b.scripts.OnTextChanged, "no script of ours")
+    local cross = Fld().CrossParts(b.clearButton)
+    assert(cross and cross.glyph.path:find("ctl_cross"))
+    -- the stock clear key is 17 units = 20 px: the 16 px cross is centred on it, 2 in
+    Expect(cross.glyph, b.clearButton, 2, 2, 16, 16, "cross")
+    Is(cross.glyph.vertex, T.COLOR_MUTED, 1, "cross")
+    Hover(b.clearButton)
+    Is(cross.glyph.vertex, T.COLOR_HEALTH, 1, "cross under the hand")
+    Unhover(b.clearButton)
+    Is(cross.glyph.vertex, T.COLOR_MUTED, 1, "cross after")
+    b:SetText("chain")
+    assert(not ins:IsShown(), "the stock handler hides the placeholder over text")
+""")
+
+case("search_box_count_chip_shows_only_where_a_count_source_gives_one", PRELUDE + """
+    local b = SearchBoxW(P, 20, 20, 200 / PPU, 28 / PPU)
+    local plain = SearchBoxW(P, 20, 80, 200 / PPU, 28 / PPU)
+    Skin(P)
+    local p, T = Fld().Parts(b), FS.Theme
+    assert(not p.chip.frame:IsShown(), "no source, no chip")
+    b:SetText("chain")
+    assert(not p.chip.frame:IsShown(), "a box nobody counts for shows no chip")
+    Fld().SetCount(b, 7)
+    assert(p.chip.frame:IsShown())
+    assert(p.chip.label.text == "7 found")
+    -- "7 found" is 7 glyphs: 7 * 7.2 + 12 = 62.4, up to 64 wide; the clear key's 28 zone is shown, so the chip ends 6 before it
+    Expect(p.chip.frame, b, 200 - 28 - 64 - 6, 4, 64, 20, "chip")
+    Is(p.chip.plate.ring.vertex, T.COLOR_POWER, 1, "chip edge")
+    Is(p.chip.label.textColor, T.COLOR_POWER, 1, "chip text")
+    assert(Near(p.chip.label.size * PPU, 11, 0.01))
+    assert(Near(b.insets[2] * PPU, 200 - (200 - 28 - 64 - 6) + 6, 0.01), "text stops 6 before the chip, got " .. b.insets[2] * PPU)
+    b:SetText("")
+    assert(not p.chip.frame:IsShown(), "an empty query has no count")
+    b:SetText("x")
+    assert(p.chip.frame:IsShown())
+    Fld().SetCount(b, nil)
+    assert(not p.chip.frame:IsShown() and Near(b.insets[2] * PPU, 28, 0.01), "no count, the clear zone alone")
+    -- a source the addon knows (the collections journals) is asked on every text change
+    Fld().AddCountSource(function(box) if box == plain then return 3 end end)
+    plain:SetText("mo")
+    assert(Fld().Parts(plain).chip.frame:IsShown() and Fld().Parts(plain).chip.label.text == "3 found")
+    b:SetText("other")
+    assert(not p.chip.frame:IsShown(), "a source that has no number for a box leaves it without a chip")
+    -- the chip never squeezes the text under 40 px: 28 + 64 + 6 + 34 + 6 + 40 = 178 is the narrowest box that has one
+    local fit = SearchBoxW(P, 20, 140, 178 / PPU, 28 / PPU)
+    local tight = SearchBoxW(P, 20, 200, 177 / PPU, 28 / PPU)
+    Skin(P)
+    for _, box in ipairs({ fit, tight }) do Fld().SetCount(box, 7); box:SetText("ab") end
+    assert(Fld().Parts(fit).chip.frame:IsShown(), "178 px leaves the text 40 px")
+    assert(not Fld().Parts(tight).chip.frame:IsShown(), "177 px would leave it 39: no chip")
+    assert(Near(tight.insets[2] * PPU, 28, 0.01), "no chip, the clear zone alone")
+""")
+
+case("detection_takes_single_line_template_boxes_of_console_size_only", PRELUDE + """
+    local ok = EditBoxW(P, 20, 20, 130, 20)
+    local search = SearchBoxW(P, 20, 60, 130, 20)
+    local multi = EditBoxW(P, 20, 100, 200, 20, { multi = true })
+    local spinner = EditBoxW(P, 20, 140, 31, 20)
+    local tall = EditBoxW(P, 20, 180, 130, 80)
+    local bare = blz("EditBox", nil, P, 130, 20, 200, 20)
+    local owned = EditBoxW(P, 200, 60, 130, 20)
+    for _, key in ipairs({ "Left", "Middle", "Right" }) do owned[key]:SetAlpha(0) end
+    local button = blz("Button", nil, P, 130, 20, 200, 100)
+    assert(Fld().Kind(ok) == "edit" and Fld().Kind(search) == "search")
+    assert(Fld().Kind(multi) == nil, "a text area is not a console line")
+    assert(Fld().Kind(spinner) == nil, "a spinner is too narrow")
+    assert(Fld().Kind(tall) == nil, "too tall")
+    assert(Fld().Kind(bare) == nil, "no template art and no placeholder: not a box of the template family")
+    assert(Fld().Kind(owned) == nil, "a box whose art something else already holds is that skin's")
+    assert(Fld().Kind(button) == nil)
+    assert(Skin(P) == 2, "the edit box and the search box, skinned " .. Skin(P))
+""")
+
+case("a_field_is_skinned_once_and_one_met_in_combat_waits_for_combat_to_end", PRELUDE + """
+    local a = EditBoxW(P, 20, 20, 156 / PPU, 28 / PPU)
+    assert(Skin(P) == 1)
+    local hooks, objs = HookCount(), ObjCount()
+    assert(Skin(P) == 0 and HookCount() == hooks and ObjCount() == objs, "a repeat sweep builds nothing")
+    local late = SearchBoxW(P, 20, 80, 156 / PPU, 28 / PPU)
+    __combat = true
+    assert(Skin(P) == 0)
+    assert(Fld().Parts(late) == nil, "nothing is skinned in combat")
+    __combat = false
+    Fire("PLAYER_REGEN_ENABLED"); FlushTimers()
+    assert(Fld().Parts(late) and Fld().Parts(late).built, "skinned after combat")
+    NoDegrade()
+""")
+
+case("a_change_of_pixel_scale_lays_the_field_out_again_on_whole_pixels", PRELUDE + """
+    local b = SearchBoxW(P, 20, 20, 156 / PPU, 28 / PPU)
+    Skin(P)
+    local p = Fld().Parts(b)
+    for _, scale in ipairs({ 1.0, 1.5, 2.0, 1.2 }) do
+        PPU = scale
+        Fire("UI_SCALE_CHANGED")
+        local w, h = Round(b.w * scale), Round(b.h * scale)
+        Expect(p.plate.ring, b, 0, 0, w, h, "edge at " .. scale)
+        Expect(p.rule, b, 24, 5, 1, h - 10, "rule at " .. scale)
+        Expect(p.glyph, b, 4, math.floor((h - 16) / 2), 16, 16, "lens at " .. scale)
+        Expect(p.led, b, 1, h - 3, w - 2, 2, "LED at " .. scale)
+        assert(Near(b.insets[1] * scale, 34, 0.01), "text inset at " .. scale)
+        b:SetFocus(); b:SetText("ab")
+        local stock = { b.Left, b.Middle, b.Right, b.searchIcon, b.clearButton }
+        WholePixels(b, b, "field at " .. scale, stock)
+        WholePixels(b.clearButton, b.clearButton, "clear key at " .. scale, { b.clearButton.Icon })
+        b:ClearFocus(); b:SetText("")
+    end
+""")
+
+case("a_hidden_field_runs_no_animation_and_a_shown_one_resumes", PRELUDE + """
+    local b = EditBoxW(P, 20, 20, 156 / PPU, 28 / PPU)
+    Skin(P)
+    local p = Fld().Parts(b)
+    b:SetFocus()
+    Step(0.3)
+    local alpha = p.led.color[4]
+    P:Hide()
+    Step(0.7)
+    assert(p.led.color[4] == alpha, "the LED of a hidden field moved")
+    P:Show()
+    Step(0.1)
+    assert(p.led.color[4] ~= alpha, "it did not resume")
+""")
+
+case("a_secret_text_reads_as_empty_without_an_error", PRELUDE + """
+    local b = SearchBoxW(P, 20, 20, 156 / PPU, 28 / PPU)
+    b.GetText = function() return { __secret = true } end
+    b.GetDisplayText = b.GetText
+    Skin(P)
+    b:SetFocus()
+    NoDegrade()
+    local p = Fld().Parts(b)
+    assert(p and p.built, "skinned without an error")
+    Fld().SetCount(b, 4)
+    assert(not p.chip.frame:IsShown(), "a count needs readable text")
+""")
+
+SCENES["fields"] = """
+    local FS = Load()
+    local P = Panel()
+    P.w, P.h = 1000, 220
+    local edit = {}
+    for i = 1, 5 do edit[i] = EditBoxW(P, 10 + (i - 1) * 140, 20, 130, 23.33) end
+    local search = {}
+    for i = 1, 5 do search[i] = SearchBoxW(P, 10 + (i - 1) * 190, 100, 170, 23.33) end
+    Skin(P)
+    Hover(edit[2])
+    edit[3]:SetFocus(); edit[3]:SetText("stu")
+    edit[4]:SetText("Stu Moolah")
+    edit[5]:Disable()
+    Hover(search[2])
+    search[3]:SetFocus(); search[3]:SetText("chain"); FS.FieldSkins.SetCount(search[3], 7)
+    search[4]:SetText("chain")
+    search[5]:Disable()
+    Step(0.4)
+    return DumpOps({ P })
+"""
+
+
 def main() -> int:
     png = None
     if "--png" in sys.argv:
@@ -1507,6 +1901,9 @@ def render(prefix: str) -> None:
                 size = max(6, round(op["size"]))
                 font = fonts.setdefault(size, ImageFont.truetype(str(FONT), size))
                 text = op["text"]
+                if op.get("clip"):
+                    while text and font.getlength(text) > r - l:
+                        text = text[:-1]
                 total = font.getlength(text)
                 x = l if op["justify"] == "LEFT" else (r - total if op["justify"] == "RIGHT" else (l + r) / 2 - total / 2)
                 d.text((x, (t + b) / 2), text, font=font, fill=col, anchor="lm")
