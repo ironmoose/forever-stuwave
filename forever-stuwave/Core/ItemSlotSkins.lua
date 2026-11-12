@@ -196,6 +196,7 @@ local function Layout(button)
     p.edge2:SetPoint("TOPLEFT", button, "TOPLEFT", u, -u)
     p.edge2:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -u, u)
 
+    if p.icon then Kit.Move(p.icon, x, y, iw, ih) end
     Kit.Move(p.led, math.floor((w - K.SLOT_LED_W) / 2), h - K.SLOT_LED_UP, K.SLOT_LED_W, K.SLOT_LED_H)
     Kit.Move(p.glint, x, y, iw, ih)
     Kit.Move(p.scrim, x, y, iw, ih)
@@ -417,6 +418,17 @@ function ItemSlotSkins.Decorate(button, read)
     local ok, err = pcall(Build, button)
     if not ok then Kit.Fail("itemslot", err) end
     return ok and parts[button] ~= nil
+end
+
+-- Seats the slot's item icon in the layer's icon box (SLOT_ICON_X/Y, the slot less SLOT_ICON_TRIM_W/H), the box the glint,
+-- cooldown scrim and lock already use. Its corners then sit inside the ring's cut, so no cover is needed over them, and the
+-- LED row under it stays clear. Follows every re-seat.
+function ItemSlotSkins.SeatIcon(button, icon)
+    local p = parts[button]
+    if not (p and type(icon) == "table" and icon.SetPoint) then return end
+    p.icon = icon
+    Kit.Place(icon, button, K.SLOT_ICON_X, K.SLOT_ICON_Y, math.max(1, p.iw), math.max(1, p.ih))
+    Layout(button)
 end
 
 -- Reads the slot again and repaints it.

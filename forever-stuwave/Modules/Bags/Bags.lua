@@ -112,6 +112,7 @@ local clearing = setmetatable({}, { __mode = "k" })  -- icon -> our own clear is
 -- nothing new is written as a field on an item button or a container (the fs* fields below are the older ones).
 local bagSlots = setmetatable({}, { __mode = "k" })   -- item button -> true for a bag slot (the bank's are not)
 local wells = setmetatable({}, { __mode = "k" })      -- item button -> its empty-slot well region
+local insetIcons = setmetatable({}, { __mode = "k" }) -- item button -> true once its icon sits in the slot layer's inset box
 local SlotIsEmpty                                      -- (button) -> true / false / nil, defined with the item reads below
 
 local ART_FIELDS = { "NormalTexture", "ItemSlotBackground", "Background", "IconBorder" }
@@ -263,7 +264,9 @@ end
 
 local function SyncIconCorners(button)
     local corners = button.fsBagCorners
-    if corners then corners:SetShown(IconHoldsItem(button)) end
+    -- An inset icon (DecorateSlot) has no corner past the cut. The wedge was opaque panel ink over a panel the world shows
+    -- through, so it read as a black notch in every cut corner.
+    if corners then corners:SetShown(not insetIcons[button] and IconHoldsItem(button)) end
 end
 
 local cornersWarned = false
@@ -470,7 +473,11 @@ end
 
 local function DecorateSlot(button)
     local slotSkins = FS.ItemSlotSkins
-    if slotSkins and slotSkins.Decorate then slotSkins.Decorate(button, SlotDecorState) end
+    if slotSkins and slotSkins.Decorate and slotSkins.Decorate(button, SlotDecorState) and slotSkins.SeatIcon then
+        -- the icon in the layer's inset box: its corners clear the cut, so the corner wedge is not shown under the layer
+        slotSkins.SeatIcon(button, ItemIcon(button))
+        insetIcons[button] = true
+    end
 end
 
 local function RefreshSlotDecor(button)
