@@ -422,6 +422,54 @@ fire("PLAYER_LOGOUT")
 check(saved().kept == nil and saved().keptFrom == nil, "a real read drops the mark")
 """)
 
+case("action_bars_bindings_and_macros_are_exported")(r"""
+local slots = { [1] = { "spell", 6343 }, [73] = { "spell", 78 }, [86] = { "macro", 2 }, [120] = { "item", 118 } }
+GetActionInfo = function(slot) local s = slots[slot]; if s then return s[1], s[2], slot == 120 and "x" or nil end end
+GetActionText = function() return nil end
+GetBonusBarOffset = function() return 2 end
+C_Spell = C_Spell or {}
+C_Spell.GetSpellName = function(id) return ({ [6343] = "Thunder Clap", [78] = "Heroic Strike" })[id] end
+C_Item = C_Item or {}
+C_Item.GetItemNameByID = function(id) return id == 118 and "Minor Healing Potion" or nil end
+GetCurrentBindingSet = function() return 2 end
+GetBindingKey = function(cmd)
+    if cmd == "ACTIONBUTTON1" then return "F", "SHIFT-1" end
+    if cmd == "MULTIACTIONBAR1BUTTON3" then return "CTRL-E" end
+end
+GetNumBindings = function() return 3 end
+GetBinding = function(i)
+    if i == 1 then return "ACTIONBUTTON1", "ACTIONBAR", "F" end
+    if i == 2 then return "TARGETLASTTARGET", "TARGETING", "CTRL-SHIFT-H" end
+    return "TOGGLEMUSIC", "MISC"
+end
+GetNumMacros = function() return 1, 1 end
+GetMacroInfo = function(i)
+    if i == 1 then return "Pull", 132355, "/cast Thunder Clap" end
+    if i == 2 then return "Charge", "INV_MISC_QUESTIONMARK", "/cast Charge" end
+    if i == 121 then return "Mine", 136243, "/say hi" end
+end
+load()
+login()
+local c = saved()
+local a = c.actionBars
+check(a.status == "ok" and a.bonusBarOffset == 2 and #a.list == 4, "four filled slots and the stance page")
+check(a.list[1].slot == 1 and a.list[1].type == "spell" and a.list[1].id == 6343 and a.list[1].name == "Thunder Clap", "spell slot")
+check(a.list[2].slot == 73 and a.list[2].name == "Heroic Strike", "battle stance page slot")
+check(a.list[3].slot == 86 and a.list[3].type == "macro" and a.list[3].name == "Charge", "macro slot named by its macro")
+check(a.list[4].slot == 120 and a.list[4].name == "Minor Healing Potion" and a.list[4].subType == "x", "item slot")
+local b = c.bindings
+check(b.status == "ok" and b.set == 2 and b.setName == "character", "binding set")
+check(#b.actionBar == 2 and b.actionBar[1].command == "ACTIONBUTTON1" and b.actionBar[1].keys[1] == "F"
+    and b.actionBar[1].keys[2] == "SHIFT-1" and b.actionBar[2].command == "MULTIACTIONBAR1BUTTON3", "bar binds")
+check(#b.other == 1 and b.other[1].command == "TARGETLASTTARGET" and b.other[1].keys[1] == "CTRL-SHIFT-H"
+    and b.other[1].category == "TARGETING", "other binds: bar commands and unbound left out")
+local m = c.macros
+check(m.status == "ok" and #m.list == 2, "a general and a character macro")
+check(m.list[1].index == 1 and m.list[1].scope == "general" and m.list[1].body == "/cast Thunder Clap" and m.list[1].icon == 132355, "general macro")
+check(m.list[2].index == 121 and m.list[2].scope == "character" and m.list[2].name == "Mine", "character macro")
+check(c.errors == nil, "no reader threw")
+""")
+
 case("professions_fall_back_to_the_skill_lines_when_the_slots_are_empty")(r"""
 local realP = GetProfessions
 GetProfessions = function() end

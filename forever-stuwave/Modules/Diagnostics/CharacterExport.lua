@@ -1,8 +1,8 @@
 -- Forever STUwave: character export
 -- A silent snapshot of the logged-in character in ForeverSTUwaveExport (account-wide SavedVariables), keyed by
 -- the full name GetUnitName("player", true) ("Viktor Oldlight"; UnitName gives only the first name here). Written on
--- login, level up, talent, gear and profession skill changes, and at logout, so a page or a sim reading the saved file
--- gets the level, stats, talents, professions and gear. The shape is documented in docs/EXPORT.md; keep the two in
+-- login, level up, talent, gear, profession skill, action bar, key binding and macro changes, and at logout, so a page
+-- or a sim reading the saved file gets the level, stats, talents, professions, gear, bars, binds and macros. The shape is documented in docs/EXPORT.md; keep the two in
 -- step and bump SCHEMA when a field changes meaning.
 --
 -- Rules: every API is feature-detected and pcalled, and every answer goes through FS.IsSecret before anything else
@@ -695,6 +695,126 @@ local function ReadReputations(snap)
     end
 end
 
+-- Action bars, key bindings and macros -------------------------------------------------------
+
+local ACTION_SLOTS = 180
+
+-- The name of what an action slot holds: a spell's, a macro's, an item's, else the slot's own text.
+local function ActionName(slot, kind, id)
+    local name
+    if kind == "spell" and id then
+        local r = Call(Api("C_Spell", "GetSpellName"), id)
+        name = r and Str(r[1])
+        if not name then
+            r = Call(Api(nil, "GetSpellInfo"), id)
+            name = r and Str(r[1])
+        end
+    elseif kind == "macro" and id then
+        local r = Call(Api(nil, "GetMacroInfo"), id)
+        name = r and Str(r[1])
+    elseif kind == "item" and id then
+        local r = Call(Api("C_Item", "GetItemNameByID"), id)
+        name = r and Str(r[1])
+        if not name then
+            r = Call(Api(nil, "GetItemInfo"), id)
+            name = r and Str(r[1])
+        end
+    end
+    if not name then
+        local r = Call(Api(nil, "GetActionText"), slot)
+        name = r and Str(r[1])
+    end
+    return name
+end
+
+-- Every filled slot 1 to 180 (the class bars, the stance pages, the extra bars), and the bonus bar page at save time.
+local function ReadActionBars(snap)
+    local a = { status = "unavailable", list = {} }
+    snap.actionBars = a
+    local infoFn = Api(nil, "GetActionInfo")
+    if not infoFn then return end
+    a.status = "ok"
+    a.bonusBarOffset = CallNum(Api(nil, "GetBonusBarOffset"))
+    for slot = 1, ACTION_SLOTS do
+        local r = Call(infoFn, slot)
+        local kind = r and Str(r[1])
+        if kind then
+            local id = Num(r[2])
+            a.list[#a.list + 1] = { slot = slot, type = kind, id = id, subType = Str(r[3]), name = ActionName(slot, kind, id) }
+        end
+    end
+end
+
+-- The action-bar binding commands (main bar and the eight extra bars) with their keys, then every other bound command.
+local function BarCommands()
+    local list = {}
+    for i = 1, 12 do list[#list + 1] = "ACTIONBUTTON" .. i end
+    for bar = 1, 8 do
+        for i = 1, 12 do list[#list + 1] = "MULTIACTIONBAR" .. bar .. "BUTTON" .. i end
+    end
+    return list
+end
+
+local function ReadBindings(snap)
+    local b = { status = "unavailable", actionBar = {}, other = {} }
+    snap.bindings = b
+    local keyFn = Api(nil, "GetBindingKey")
+    if not keyFn then return end
+    b.status = "ok"
+    -- 1 = account bindings, 2 = this character's own (the character file wins when it exists)
+    local set = CallNum(Api(nil, "GetCurrentBindingSet"))
+    b.set = set
+    b.setName = (set == 2 and "character") or (set == 1 and "account") or nil
+    local bar = {}
+    for _, command in ipairs(BarCommands()) do
+        local r = Call(keyFn, command)
+        local k1, k2 = r and Str(r[1]), r and Str(r[2])
+        if k1 or k2 then
+            b.actionBar[#b.actionBar + 1] = { command = command, keys = { k1, k2 } }
+        end
+        bar[command] = true
+    end
+    local n = CallNum(Api(nil, "GetNumBindings"))
+    local bindFn = Api(nil, "GetBinding")
+    if not (n and bindFn) then return end
+    for i = 1, n do
+        local r = Call(bindFn, i)
+        local command = r and Str(r[1])
+        if command and not bar[command] then
+            local keys = {}
+            for k = 3, #r do
+                local key = Str(r[k])
+                if key then keys[#keys + 1] = key end
+            end
+            if #keys > 0 then b.other[#b.other + 1] = { command = command, category = Str(r[2]), keys = keys } end
+        end
+    end
+end
+
+-- Macros: general 1 to 120, this character's from 121.
+local function ReadMacros(snap)
+    local m = { status = "unavailable", list = {} }
+    snap.macros = m
+    local countFn, infoFn = Api(nil, "GetNumMacros"), Api(nil, "GetMacroInfo")
+    if not (countFn and infoFn) then return end
+    local r = Call(countFn)
+    local general, perChar = r and Num(r[1]), r and Num(r[2])
+    if not (general and perChar) then return end
+    m.status = "ok"
+    local base = Num(_G.MAX_ACCOUNT_MACROS) or 120
+    local function add(index, scope)
+        local info = Call(infoFn, index)
+        local name = info and Str(info[1])
+        if name then
+            local icon = info[2]
+            m.list[#m.list + 1] = { index = index, scope = scope, name = name,
+                icon = Num(icon) or Str(icon), body = info[3] and Str(info[3]) or nil }
+        end
+    end
+    for i = 1, general do add(i, "general") end
+    for i = base + 1, base + perChar do add(i, "character") end
+end
+
 -- Snapshot and write --------------------------------------------------------------------------
 
 -- A reader that throws leaves what it had filled and is named in snap.errors.
@@ -716,6 +836,9 @@ function Export.Snapshot()
     Guarded(ReadQuests, snap, "quests")
     Guarded(ReadCurrencies, snap, "currencies")
     Guarded(ReadReputations, snap, "reputations")
+    Guarded(ReadActionBars, snap, "actionBars")
+    Guarded(ReadBindings, snap, "bindings")
+    Guarded(ReadMacros, snap, "macros")
     local now = CallNum(Api(nil, "GetServerTime")) or CallNum(Api(nil, "time"))
     snap.savedAt = now
     if now then
@@ -791,7 +914,7 @@ local function KeepTorn(snap, last)
         and #(lq.list or {}) > 0 then
         snap.quests = lq; keep("quests")
     end
-    for _, key in ipairs({ "currencies", "reputations" }) do
+    for _, key in ipairs({ "currencies", "reputations", "actionBars", "macros" }) do
         local cur, prev = snap[key], last[key]
         if snap.reason == "logout" and (type(cur) ~= "table" or cur.status ~= "ok" or #cur.list == 0)
             and type(prev) == "table" and prev.status == "ok" and #(prev.list or {}) > 0 then
@@ -931,6 +1054,9 @@ local REASONS = {
     QUEST_TURNED_IN = "quests",
     CURRENCY_DISPLAY_UPDATE = "currencies",
     UPDATE_FACTION = "reputations",
+    ACTIONBAR_SLOT_CHANGED = "actionBars",
+    UPDATE_BINDINGS = "bindings",
+    UPDATE_MACROS = "macros",
 }
 
 local frame = CreateFrame("Frame")

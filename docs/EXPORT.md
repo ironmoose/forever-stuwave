@@ -35,11 +35,11 @@ A value the client did not give in plain form (a secret value, a missing API, an
 | `addonVersion` | string | `## Version` from the `.toc` |
 | `savedAt` | number | Unix seconds (`GetServerTime`) |
 | `savedAtText` | string | the same time, UTC, `2026-11-04T00:00:00Z` |
-| `reason` | string | what triggered the write: `login` (also any later loading screen), `level`, `talents`, `gear`, `skills`, `bags`, `bank`, `quests`, `currencies`, `reputations`, `combat end`, `logout` |
+| `reason` | string | what triggered the write: `login` (also any later loading screen), `level`, `talents`, `gear`, `skills`, `bags`, `bank`, `quests`, `currencies`, `reputations`, `actionBars`, `bindings`, `macros`, `combat end`, `logout` |
 | `statsFrom` | number | present only when `stats` were kept from an earlier write because this one read every base stat as 0 (logout and /reload can); the `savedAt` of the write that read them |
-| `kept` | array of strings, optional | sections this write read empty or torn (logout and /reload can: money and xp at 0, no gear, no zone, talents unavailable, no profession, no bag slots) and so kept from the last write: any of `money`, `xp`, `gear`, `zone`, `talents`, `professions`, `bags`, `quests`, `completedQuests`, `currencies`, `reputations` (the last four only on a logout write: an empty list is otherwise real) |
+| `kept` | array of strings, optional | sections this write read empty or torn (logout and /reload can: money and xp at 0, no gear, no zone, talents unavailable, no profession, no bag slots) and so kept from the last write: any of `money`, `xp`, `gear`, `zone`, `talents`, `professions`, `bags`, `quests`, `completedQuests`, `currencies`, `reputations`, `actionBars`, `macros` (the last six only on a logout write: an empty list is otherwise real) |
 | `keptFrom` | number, optional | the `savedAt` of the write the `kept` sections came from |
-| `errors` | array of strings, optional | sections whose reader threw (`identity`, `spec`, `stats`, `talents`, `professions`, `gear`, `bags`, `quests`, `currencies`, `reputations`) |
+| `errors` | array of strings, optional | sections whose reader threw (`identity`, `spec`, `stats`, `talents`, `professions`, `gear`, `bags`, `quests`, `currencies`, `reputations`, `actionBars`, `bindings`, `macros`) |
 | `name` | string | full name, same as the key |
 | `realm` | string | `GetRealmName()` |
 | `guid` | string | player GUID |
@@ -60,6 +60,9 @@ A value the client did not give in plain form (a secret value, a missing API, an
 | `quests` | table | below |
 | `currencies` | table | below |
 | `reputations` | table | below |
+| `actionBars` | table | below |
+| `bindings` | table | below |
+| `macros` | table | below |
 | `completedQuests` | array of numbers, optional | every quest id the character has turned in, sorted (`C_QuestLog.GetAllCompletedQuestIDs`, else the keys of `GetQuestsCompleted`); absent when neither exists |
 | `bank` | table, optional | same shape as `bags`; absent until the bank has been opened once with the addon on |
 | `bankFrom` | number, optional | present when `bank` was carried from an earlier write (the bank is only readable while its window is open); the `savedAt` of the write that read it |
@@ -184,6 +187,39 @@ Each `items` entry:
 | `value`, `max` | progress within the current standing, as the bar shows (`250` of `6000`) |
 | `total` | raw reputation value |
 | `header` | the pane header above it |
+
+### `actionBars`
+
+`status` (`ok` or `unavailable`), `bonusBarOffset` (the bonus bar page at save time: a Warrior's stance, 1 Battle, 2 Defensive, 3 Berserker), and `list`: every filled action slot 1 to 180 (`GetActionInfo`), in slot order. A Warrior's stance pages are slots 73-84 (Battle), 85-96 (Defensive) and 97-108 (Berserker).
+
+| Field | Notes |
+|---|---|
+| `slot` | 1 to 180 |
+| `type` | `spell`, `macro`, `item`, ... as the client reports |
+| `id` | spell, macro or item id |
+| `subType` | optional, the client's third answer |
+| `name` | the spell, macro or item name, else the slot's own text |
+
+### `bindings`
+
+`status`, `set` (`GetCurrentBindingSet`: 1 account, 2 character) and `setName` (`account` or `character`), then:
+
+| Field | Notes |
+|---|---|
+| `actionBar` | array of `command` (`ACTIONBUTTON1`-`12`, `MULTIACTIONBAR1BUTTON1` to `MULTIACTIONBAR8BUTTON12`) and `keys` (one or two, e.g. `SHIFT-F`); unbound commands are left out |
+| `other` | array of `command`, `category` and `keys` for every other command that has a key (`GetBinding`) |
+
+### `macros`
+
+`status` and `list`: general macros (index 1 to 120) then this character's own (121 on), from `GetMacroInfo`.
+
+| Field | Notes |
+|---|---|
+| `index` | the macro index |
+| `scope` | `general` or `character` |
+| `name` | string |
+| `icon` | icon file id (or path) |
+| `body` | the macro text |
 
 ## Compatibility
 
