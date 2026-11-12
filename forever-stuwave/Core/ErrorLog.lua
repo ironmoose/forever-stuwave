@@ -500,13 +500,52 @@ local function BagTaintSweep()
     return table.concat(out, "; ")
 end
 
+-- The bank open block (PurchaseBankTab from the Camelot BankFrame's OnShow, live 2026-11-12): the taint log names
+-- forever-stuwave but no read, so the same field sweep runs over the bank frames, their tabs and children, and the
+-- interaction manager that shows them.
+local function BankTaintSweep()
+    if type(issecurevariable) ~= "function" then return "(issecurevariable unavailable)" end
+    local out = {}
+    local function Sweep(label, t, depth)
+        if type(t) ~= "table" or #out >= TAINT_SWEEP_MAX then return end
+        SweepTable(out, label, t)
+        if depth <= 0 then return end
+        for k, v in pairs(t) do
+            if type(k) == "string" and type(v) == "table" and k ~= "__index" and #out < TAINT_SWEEP_MAX then
+                Sweep(label .. "." .. k, v, depth - 1)
+            end
+        end
+    end
+    for _, name in ipairs({ "BankFrame", "BankPanel", "AccountBankPanel", "PlayerInteractionFrameManager" }) do
+        local f = _G[name]
+        Sweep(name, f, 1)
+        local pool = type(f) == "table" and rawget(f, "bankTabPool") or nil
+        if type(pool) == "table" and type(pool.EnumerateActive) == "function" then
+            pcall(function()
+                local i = 0
+                for tab in pool:EnumerateActive() do i = i + 1; Sweep(name .. ".tab" .. i, tab, 0) end
+            end)
+        end
+    end
+    local popup = _G.StaticPopup1
+    Sweep("StaticPopup1", popup, 0)
+    for _, g in ipairs({ "PurchaseBankTab", "BankFrame", "BankPanel", "ShowUIPanel", "UIPanelWindows" }) do
+        local ok, secure, by = pcall(issecurevariable, g)
+        if ok and secure == false then out[#out + 1] = g .. "=" .. tostring(by) end
+    end
+    if #out == 0 then return "(no addon-written field on the bank frames)" end
+    return table.concat(out, "; ")
+end
+
 local function OnActionBlocked(event, blockedAddon, blockedFunc)
     if Secret(blockedAddon) or Secret(blockedFunc) then return end
     local ours = blockedAddon == addonName
     local msg = event .. ": " .. tostring(blockedFunc)
     if not ours then msg = msg .. " (blamed on " .. tostring(blockedAddon) .. ")" end
-    if tostring(blockedFunc):find("UseContainerItem", 1, true) then
-        local okSweep, sweep = pcall(BagTaintSweep)
+    local sweeper = (tostring(blockedFunc):find("UseContainerItem", 1, true) and BagTaintSweep)
+        or (tostring(blockedFunc):find("BankTab", 1, true) and BankTaintSweep) or nil
+    if sweeper then
+        local okSweep, sweep = pcall(sweeper)
         local after = function()
             local e = byMessage[msg]
             if e then e.taint = okSweep and sweep or ("(sweep failed: " .. tostring(sweep) .. ")") end

@@ -626,6 +626,7 @@ local function Errors()
             combat = Field(e, "combat"),
             firstSeen = TextField(e, "firstSeen", 40),
             lastSeen = TextField(e, "lastSeen", 40),
+            taint = TextField(e, "taint", 1200),
         }
     end
     return list, #ours, other
