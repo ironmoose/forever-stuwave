@@ -821,7 +821,15 @@ local function FindPager(inbox, mixinName, globalName, key)
             end
         end
     end
-    return _G[globalName] or inbox[key]
+    local found = _G[globalName] or inbox[key]
+    -- last resort: the child whose stock click handler is the paging function (InboxPrevPage / InboxNextPage)
+    local handler = _G[(globalName or ""):gsub("Button$", "")]
+    if not found and type(handler) == "function" and type(inbox.GetChildren) == "function" then
+        for _, child in ipairs({ inbox:GetChildren() }) do
+            if type(child) == "table" and type(child.GetScript) == "function" and Try(child.GetScript, child, "OnClick") == handler then return child end
+        end
+    end
+    return found
 end
 
 local function BuildFooter(win, inbox)
