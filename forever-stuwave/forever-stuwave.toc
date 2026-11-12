@@ -57,6 +57,7 @@ Modules/Skins/Mail.lua
 Modules/Skins/Character.lua
 Modules/Skins/Reputation.lua
 Modules/Skins/Currency.lua
+Modules/Skins/Inspect.lua
 Modules/Skins/Tooltip.lua
 Modules/Skins/TooltipAnchor.lua
 Modules/Skins/Popups.lua

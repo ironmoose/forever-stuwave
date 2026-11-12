@@ -187,13 +187,15 @@ local function ReadSlot(unit)
         local w = S.slots[button]
         local id = w and w.id
         if not id then return {} end
+        local unit = type(unit) == "function" and unit() or unit
         local quality = _G.GetInventoryItemQuality and Try(_G.GetInventoryItemQuality, unit, id)
         local texture = _G.GetInventoryItemTexture and Try(_G.GetInventoryItemTexture, unit, id)
         return { quality = quality, empty = texture == nil }
     end
 end
 
--- Skins one equipment slot button in place. `unit` is "player" for the paper doll. Idempotent.
+-- Skins one equipment slot button in place. `unit` is "player" for the paper doll, or a function that answers the unit now (the
+-- inspected one); only the player's own slots have wear. Idempotent.
 function Char.SkinSlot(button, slotId, unit)
     if type(button) ~= "table" or S.slots[button] then return end
     unit = unit or "player"

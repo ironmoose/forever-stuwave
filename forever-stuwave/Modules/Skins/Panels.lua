@@ -77,7 +77,7 @@ local PANEL_FRAMES = {
     { name = "QuestLogPopupDetailFrame", title = "quest.detail" },
     { name = "PlayerTalentFrame", title = "talents" },
     { name = "TalentFrame", title = "talents" },
-    { name = "InspectFrame", title = "inspect" },
+    -- InspectFrame is skinned by Skins/Inspect.lua.
     { name = "TradeSkillFrame", title = "profession" },
     { name = "ProfessionsFrame", title = "profession" },
     { name = "GossipFrame", title = "dialog" },
