@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""Runs the real Modules/Skins/Currency.lua headless against a mock TokenFrame (tools/charskin_support.py).
+
+Pinned: ten capacity cells per capped currency on whole pixels, lit by quantity against the cap (at least one for any, all ten at the
+cap), amber and blinking at the cap, a weekly notch where this week's ceiling falls, the stock count held and mirrored as
+"quantity / cap", a currency with no cap or a secret number drawing no cells, headers restyled, and no script or attribute written on a
+Blizzard widget. Run `python3 tools/currencyskin-harness.py [--png /tmp/cur]`. The mock is NOT the real client.
+"""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from charskin_support import Harness  # noqa: E402
+
+BLIZZARD = r"""
+local blz, tex, fstring = BLZ.blz, BLZ.tex, BLZ.fstring
+local build = BuildBlizzard
+CURRENCIES = {
+    { header = true, name = "Backpack" },
+    { name = "Honor Points", quantity = 1240, maxQuantity = 4000 },
+    { name = "Marks of Honor", quantity = 37, maxQuantity = 40, canEarnPerWeek = true, maxWeeklyQuantity = 30, quantityEarnedThisWeek = 10 },
+    { name = "Dungeon Tokens", quantity = 55, maxQuantity = 100 },
+    { name = "Stone Keeper Shard", quantity = 100, maxQuantity = 100 },
+    { name = "Badge of Justice", quantity = 12, maxQuantity = 0 },
+    { name = "Spirit Shard", quantity = 1, maxQuantity = 50 },
+}
+function BuildBlizzard()
+    build()
+    local frame = _G.TokenFrame
+    frame.Update = function() end
+    frame.ScrollBox = blz("Frame", nil, frame, 440, 330, "TOPLEFT", 8, -62)
+    frame.ScrollBox.rows = {}
+    frame.ScrollBox.ForEachFrame = function(self, fn) for _, r in ipairs(self.rows) do fn(r) end end
+    local y = 0
+    for _, c in ipairs(CURRENCIES) do
+        local row
+        if c.header then
+            row = blz("Button", nil, frame.ScrollBox, 430, 24, "TOPLEFT", 0, -y)
+            row.Left, row.Middle, row.Right = tex(row, nil, "BACKGROUND"), tex(row, nil, "BACKGROUND"), tex(row, nil, "BACKGROUND")
+            row.Text = fstring(row, nil, c.name, 12)
+            row.GetTitleRegion = function(self) return self.Text end
+            y = y + 30
+        else
+            row = blz("Button", nil, frame.ScrollBox, 430, 24, "TOPLEFT", 0, -y)
+            row.Content = blz("Frame", nil, row, 430, 24)
+            row.Content.CurrencyIcon = tex(row.Content, nil, "ARTWORK")
+            row.Content.Count = fstring(row.Content, nil, tostring(c.quantity), 12, { 1, 1, 1, 1 })
+            row.Content.Name = fstring(row.Content, nil, c.name, 12, { 1, 1, 1, 1 })
+            row.Content.BackgroundHighlight = blz("Frame", nil, row.Content, 430, 24)
+            tex(row.Content.BackgroundHighlight, nil, "BACKGROUND")
+            row.elementData = c
+            row.Initialize = function(self) end
+            row.scripts.OnClick = function() end
+            y = y + 28
+        end
+        frame.ScrollBox.rows[#frame.ScrollBox.rows + 1] = row
+    end
+    local p = blz("Frame", "TokenFramePopup", frame, 200, 120, "TOPLEFT", 100, -100)
+    p.shown = false
+    p.Border = blz("Frame", nil, p, 200, 120)
+    p.Title = fstring(p, nil, "Options", 14)
+    frame.Popup = p
+end
+BuildBlizzard()
+"""
+
+H = Harness({"Currency": "Modules/Skins/Currency.lua", "Character": "Modules/Skins/Character.lua"}, BLIZZARD)
+case = H.case
+
+OPEN = "Fire('PLAYER_ENTERING_WORLD'); CharacterFrame:Show(); PaperDollFrame:Hide(); TokenFrame:Show(); FlushTimers()"
+
+
+def row(i):
+    return f"TokenFrame.ScrollBox.rows[{i}]"
+
+
+case("cells: ten per capped currency, 8 x 12, a 2 px gap, whole pixels, right of the name and left of the count", f"""
+    {OPEN}
+    local r = {row(2)}
+    local p = FS.CurrencySkin.state.rows[r]
+    assert(p and #p.cells == 10, 'no cells')
+    local prev
+    for i = 1, 10 do
+        local l, t, rr, b = Px(p.cells[i], r)
+        assert(Near(rr - l, 8) and Near(b - t, 12), 'cell size')
+        assert(Near(l, math.floor(l + 0.5), 0.02), 'cell off the grid')
+        if prev then assert(Near(l - prev, 10), 'pitch ' .. (l - prev)) end
+        prev = l
+    end
+    local l1 = Px(p.cells[1], r)
+    local rw = select(3, Px(r, r))
+    local _, _, r10 = Px(p.cells[10], r)
+    assert(rw - r10 > 100 and rw - r10 < 130, 'strip leaves room for the count: ' .. (rw - r10))
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
+case("lit cells follow quantity against the cap", f"""
+    local C = FS.CurrencySkin
+    assert(C.CellsLit(0, 100) == 0 and C.CellsLit(1, 4000) == 1 and C.CellsLit(55, 100) == 6 or C.CellsLit(55, 100) == 5, 'rounding')
+    assert(C.CellsLit(100, 100) == 10 and C.CellsLit(99, 100) == 9, 'cap edge')
+    {OPEN}
+    local p = C.state.rows[{row(2)}]   -- 1240 of 4000
+    local lit = 0
+    for _, cell in ipairs(p.cells) do if cell.color[1] < 0.5 and cell.color[2] > 0.7 then lit = lit + 1 end end
+    assert(lit == 3, 'honor lit ' .. lit)
+""")
+
+case("a capped currency is amber and blinks; the others are cyan and still", f"""
+    {OPEN}
+    local C = FS.CurrencySkin
+    local capped = {row(5)}
+    local pc = C.state.rows[capped]
+    assert(pc.capped and FS.ControlKit.IsAnimating(capped, 'cap'), 'capped does not blink')
+    assert(pc.cells[1].color[1] > 0.9 and pc.cells[1].color[3] < 0.3, 'capped not amber')
+    assert(not FS.ControlKit.IsAnimating({row(2)}, 'cap'), 'uncapped blinks')
+""")
+
+case("a weekly cap carries a gold notch at this week's ceiling", f"""
+    {OPEN}
+    local C = FS.CurrencySkin
+    local r = {row(3)}          -- 37 of 40, 20 left this week: ceiling 40 (the cap), notch at the strip's end
+    local p = C.state.rows[r]
+    assert(p.notch.shown, 'no notch')
+    local r2 = {row(2)}
+    assert(not C.state.rows[r2].notch.shown, 'notch on a currency with no weekly cap')
+    r.elementData.quantityEarnedThisWeek = 25   -- 5 left: ceiling 42 -> capped at 40; try a lower one
+    r.elementData.quantity = 10
+    r.Initialize(r)
+    local l, _, rr = Px(p.notch, r)
+    local cl = Px(p.cells[1], r)
+    local _, _, cr = Px(p.cells[10], r)
+    assert(l > cl and l < cr, 'notch outside the strip')
+""")
+
+case("the stock count is held and mirrored with the cap; a currency with no cap shows the plain count", f"""
+    {OPEN}
+    local C = FS.CurrencySkin
+    local r = {row(2)}
+    assert(r.Content.Count.alpha == 0, 'stock count not held')
+    assert(C.state.rows[r].label.text == '1240 / 4,000', C.state.rows[r].label.text)
+    local nocap = {row(6)}
+    assert(C.state.rows[nocap].label.text == '12', C.state.rows[nocap].label.text)
+    for _, cell in ipairs(C.state.rows[nocap].cells) do assert(not cell.shown, 'cells on an uncapped currency') end
+""")
+
+case("a secret number draws no cells and is never compared", f"""
+    {OPEN}
+    local r = {row(4)}
+    r.elementData.quantity = Secret()
+    r.Initialize(r)
+    local p = FS.CurrencySkin.state.rows[r]
+    assert(not p.cells[1].shown, 'cells drawn for a secret quantity')
+    r.elementData.quantity, r.elementData.maxQuantity = 5, Secret()
+    r.Initialize(r)
+    assert(not p.cells[1].shown)
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
+case("stock scripts and art: highlight held, name restyled, header restyled, popup chromed", f"""
+    {OPEN}
+    local r = {row(2)}
+    assert(r.scripts.OnClick, 'row script lost')
+    assert(r.Content.BackgroundHighlight.regions[1].alpha == 0, 'highlight')
+    assert(r.Content.Name.fontPath ~= 'stock.ttf', 'name')
+    local h = {row(1)}
+    assert(h.Left.alpha == 0 and h.Text.fontPath ~= 'stock.ttf', 'header')
+    assert(TokenFrame.Popup.fsCurrencySkin and TokenFrame.Popup.Border.alpha == 0, 'popup')
+""")
+
+SCENES = {
+    "currency": "Fire('PLAYER_ENTERING_WORLD'); CharacterFrame:Show(); PaperDollFrame:Hide(); TokenFrame:Show(); FlushTimers(); FS.CharacterSkin.RefreshHeader(); return DumpOps({ CharacterFrame })",
+}
+
+if __name__ == "__main__":
+    raise SystemExit(H.main("currency skin", SCENES))
