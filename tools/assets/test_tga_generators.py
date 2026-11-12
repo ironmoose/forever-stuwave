@@ -283,6 +283,10 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "ctl_diamond_node": (8, 8),
         "ctl_tick": (16, 16),
     },
+    # generate_control_chevrons.py: the shared controls kit's marching chevron strips (white alpha shapes, one texel a screen pixel,
+    # one 8 px period per tile): the slider's 8 high strip, the selected tab's 4 high strip and the switch slug's 3 high strip
+    # (the art in the top 3 rows of a 4 row canvas).
+    "control_chevrons": {"ctl_chevron_h8": (8, 8), "ctl_chevron_h4": (8, 4), "ctl_chevron_h3": (8, 4)},
     "icon_social": (32, 32),
     # generate_icon_stu.py: the minimap STU key's icon A (full colour), a 32 canvas with the 22 texel art box centred.
     "icon_stu": (32, 32),
@@ -2746,4 +2750,69 @@ def test_checkbox_tick_is_the_mockup_polyline_at_stroke_2(control_check_outputs:
 
 def test_committed_control_check_textures_match_the_generator(control_check_outputs: Path) -> None:
     for out in control_check_outputs.glob("*.tga"):
+        assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
+
+
+# ---------------------------------------------------------------------------
+# generate_control_chevrons.py: the marching chevron strips of the shared controls kit.
+#
+# Mockup chevs(): "M x+i*8 y l4 h/2 l-4 h/2" at stroke 2, clipped to the strip, on a pitch of 8. Numbers hardcoded here.
+# ---------------------------------------------------------------------------
+
+CONTROL_CHEVRONS_GENERATOR = GENERATOR_DIR / "generate_control_chevrons.py"
+
+
+@pytest.fixture(scope="module")
+def control_chevron_outputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    out = tmp_path_factory.mktemp("control_chevrons")
+    _run_generator(CONTROL_CHEVRONS_GENERATOR, out)
+    return out
+
+
+def test_control_chevrons_are_white_alpha_shapes(control_chevron_outputs: Path) -> None:
+    for path in sorted(control_chevron_outputs.glob("ctl_chevron_*.tga")):
+        assert _is_white(path), path.name
+        assert _alpha_sum(path) > 4, path.name
+
+
+def test_h8_chevron_follows_the_diagonals_of_the_mockup_polyline(control_chevron_outputs: Path) -> None:
+    path = control_chevron_outputs / "ctl_chevron_h8.tga"
+    # (0, 0) -> (4, 4) -> (0, 8): the axis pixels are solid, the tip reaches x 4 + sqrt(2) = 5.4 at row 3 and 4
+    for x, y in ((1, 1), (2, 2), (3, 3), (3, 4), (2, 5), (1, 6)):
+        assert _alpha_at(path, x, y) == 255, (x, y)
+    # the stroke is 2 wide, so a pixel two columns off the axis is clear: the chevron opens to the left of the tip
+    for x, y in ((0, 3), (0, 4), (6, 3), (7, 4), (6, 4)):
+        assert _alpha_at(path, x, y) == 0, (x, y)
+    assert 0 < _alpha_at(path, 5, 3) < 255, "the mitred tip is anti-aliased"
+
+
+def test_h8_chevron_is_mirror_symmetric_top_to_bottom(control_chevron_outputs: Path) -> None:
+    path = control_chevron_outputs / "ctl_chevron_h8.tga"
+    for y in range(8):
+        for x in range(8):
+            assert abs(_alpha_at(path, x, y) - _alpha_at(path, x, 7 - y)) <= 2, (x, y)
+
+
+def test_chevron_tiles_repeat_every_8_pixels_so_a_strip_marches_seamlessly(control_chevron_outputs: Path) -> None:
+    # the stroke that leaves the right edge of a tile continues into the left edge of the next: the first column has ink
+    # exactly where the chevron's trailing arm crosses it, and that ink matches the arm's own slope
+    path = control_chevron_outputs / "ctl_chevron_h8.tga"
+    column0 = [_alpha_at(path, 0, y) for y in range(8)]
+    assert column0[0] == 255 and column0[7] == 255, "the arm ends cross the left edge solid"
+    assert column0[3] == 0 and column0[4] == 0, "and the tip row is clear at the left edge"
+
+
+def test_h4_and_h3_chevrons_follow_their_shallower_arms(control_chevron_outputs: Path) -> None:
+    h4 = control_chevron_outputs / "ctl_chevron_h4.tga"
+    # (0, 0) -> (4, 2) -> (0, 4): the tip is two rows tall, the ends are cut by the strip
+    assert _alpha_at(h4, 3, 1) == 255 and _alpha_at(h4, 3, 2) == 255
+    assert _alpha_at(h4, 6, 1) < 8 and _alpha_at(h4, 7, 2) < 8, "clear of the arm, bar the next chevron's tail"
+    h3 = control_chevron_outputs / "ctl_chevron_h3.tga"
+    # the art stops at row 3: the fourth row of the canvas is clear
+    assert all(_alpha_at(h3, x, 3) == 0 for x in range(8))
+    assert any(_alpha_at(h3, x, 1) == 255 for x in range(8))
+
+
+def test_committed_control_chevron_textures_match_the_generator(control_chevron_outputs: Path) -> None:
+    for out in control_chevron_outputs.glob("*.tga"):
         assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name

@@ -180,6 +180,19 @@ FS.Layout.Controls = {
     NODE_SLIDE = 0.16,
     -- Alpha of the radio rail and of the cyan LED stub a hovered, unchecked box shows.
     RAIL_ALPHA = 0.5, HOVER_LED_ALPHA = 0.5,
+    -- Slider: cells 6 x 8 on a pitch of 8 (a track of n cells is 8n - 2 wide); the thumb is a pair of lock-on brackets, spines 9
+    -- either side of the head cell's centre, 20 apart top to bottom, arms 4 long, stroke 2; the value tag hangs 34 above the
+    -- track centre, 18 tall, with a 4 px stem and a 28 x 24 wash under the head cell; the stepper keys are 20 square.
+    CELL_W = 6, CELL_H = 8, CELL_PITCH = 8, BRACKET_SPINE = 9, BRACKET_HALF = 10, BRACKET_ARM = 4, STROKE = 2,
+    TAG_H = 18, TAG_TOP = 34, TAG_CUT = 4, TAG_PAD = 12, TAG_CHAR = 7.2, TAG_ROUND = 4, TAG_STEM = 4, TAG_STEM_TOP = 16,
+    WASH_W = 28, WASH_H = 24, WASH_ALPHA = 0.10, KEY = 20, KEY_CUT = 4,
+    -- Slider text: the tag reads 11, a title 12, the end labels 10, all in the mono; a stepper key keeps at least 8 between
+    -- itself and the first or last cell, and its glyph bars are {x, y, w, h} inside the 20 square (the minus is one bar, the
+    -- plus adds the upright).
+    TAG_TEXT = 11, TAG_LABEL_Y = 10, LABEL_TEXT = 12, SMALL_TEXT = 10, KEY_GAP = 8,
+    KEY_MINUS = { 6, 9, 8, 2 }, KEY_PLUS_UPRIGHT = { 9, 6, 2, 8 },
+    -- Marching chevrons: the lit cells' strip moves one 8 px pitch every 0.6 s at 18 % white.
+    MARCH_PERIOD = 0.6, CHEV_PITCH = 8, CHEV_ALPHA = 0.18,
 }
 
 -- The layout planner exports in SCREEN PIXELS at this resolution (the "resolution"

@@ -42,6 +42,7 @@ FILES = {
     "HeldArt": "Core/HeldArt.lua",
     "ControlKit": "Core/ControlKit.lua",
     "CheckSkins": "Core/CheckSkins.lua",
+    "SliderSkins": "Core/SliderSkins.lua",
     "PanelSkins": "Core/PanelSkins.lua",
 }
 SOURCES = {name: (ADDON / path).read_text(encoding="utf-8") for name, path in FILES.items()}
@@ -420,6 +421,51 @@ function RowBtn(parent, x, y)
     return b
 end
 
+
+-- UISliderTemplateWithLabels (144 x 17): a Slider with the NineSlice frame, a thumb texture and Text, Low and High labels.
+function SliderBox(parent, x, y, w, h, o)
+    o = o or {}
+    local s = blz("Slider", nil, parent, w or 144, h or 17, x, y)
+    s.min, s.max, s.value, s.step = o.min or 0, o.max or 100, o.value or 50, o.step or 1
+    s.orientation = o.orientation or "HORIZONTAL"
+    s.thumbTex = tex(s, "Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
+    s.Thumb = s.thumbTex
+    if not o.minimal then
+        s.NineSlice = blz("Frame", nil, s, 0, 0)
+        s.NineSlice.points = { { point = "TOPLEFT", rel = s, relPoint = "TOPLEFT", x = 0, y = 0 },
+            { point = "BOTTOMRIGHT", rel = s, relPoint = "BOTTOMRIGHT", x = 0, y = 0 } }
+        s.NineSlice.piece = tex(s.NineSlice, "Interface\\Buttons\\UI-SliderBar-Border", "BORDER")
+        s.Text, s.Low, s.High = fstring(s, "Opacity"), fstring(s, "LOW", 10), fstring(s, "HIGH", 10)
+    else
+        s.Left, s.Middle, s.Right = tex(s), tex(s), tex(s)
+        for _, t in ipairs({ s.Left, s.Middle, s.Right }) do t.atlas = "Minimal_SliderBar" end
+    end
+    function s:GetValue() return self.value end
+    function s:SetValue(v) self.value = v; self:RunScript("OnValueChanged", v) end
+    function s:GetMinMaxValues() return self.min, self.max end
+    function s:SetMinMaxValues(a, b) self.min, self.max = a, b; self:RunScript("OnMinMaxChanged", a, b) end
+    function s:GetValueStep() return self.step end
+    function s:SetValueStep(v) self.step = v end
+    function s:GetOrientation() return self.orientation end
+    function s:GetThumbTexture() return self.thumbTex end
+    function s:IsDraggingThumb() return self.dragging == true end
+    return s
+end
+
+-- MinimalSliderWithSteppersTemplate (250 x 40): the Slider between a Back and a Forward button, and a RightText.
+function SteppedSlider(parent, x, y, o)
+    local f = blz("Frame", nil, parent, 250, 40, x, y)
+    o = o or {}
+    o.minimal = true
+    f.Slider = SliderBox(f, 19, 0, 212, 40, o)
+    f.Back = blz("Button", nil, f, 11, 19, 4, 10)
+    f.Back.art = tex(f.Back, nil, "BACKGROUND"); f.Back.art.atlas = "Minimal_SliderBar_Button_Left"
+    f.Forward = blz("Button", nil, f, 9, 18, 231, 10)
+    f.Forward.art = tex(f.Forward, nil, "BACKGROUND"); f.Forward.art.atlas = "Minimal_SliderBar_Button_Right"
+    f.RightText = fstring(f, "50%")
+    return f
+end
+
 function Panel(name)
     local f = blz("Frame", name or "TestPanel", UIParent, 400, 300, 100, 100)
     f.shown = true
@@ -466,7 +512,7 @@ function Load(opts)
         LogDegradeOnce = function(key, msg) DEGRADED[#DEGRADED + 1] = key .. " :: " .. tostring(msg) end,
     }
     FS.FrameHelpers = { PixelsPerUnit = function() return PPU end }
-    for _, name in ipairs({ "Theme", "Layout", "HeldArt", "ControlKit", "CheckSkins", "PanelSkins" }) do
+    for _, name in ipairs({ "Theme", "Layout", "HeldArt", "ControlKit", "CheckSkins", "SliderSkins", "PanelSkins" }) do
         local chunk, err = load(SOURCES[name], "=" .. name .. ".lua")
         if not chunk then error(err) end
         chunk("forever-stuwave", FS)
@@ -516,6 +562,10 @@ function WholePixels(root, ref, what)
     return n
 end
 function Colour(t) return t.color or t.vertex end
+function Slk() return FS.SliderSkins end
+function SkinOne(w) FS.ControlKit.SkinWidget(w); FlushTimers() end
+-- Rounds the way the skin does (half up).
+function Round(v) return math.floor(v + 0.5) end
 function Cks() return FS.CheckSkins end
 function Mine(w) return FS.CheckSkins.Parts(w) end
 function Skin(panel)
@@ -1033,6 +1083,371 @@ SCENES["checks"] = """
 """
 
 
+SCENES["sliders"] = """
+    local FS = Load()
+    local P = Panel()
+    P.w, P.h = 400, 330
+    local rows = {}
+    for i = 1, 4 do rows[i] = SteppedSlider(P, 20, 20 + (i - 1) * 70, { value = i == 3 and 70 or 50 }) end
+    Skin(P)
+    Hover(rows[2].Slider)
+    rows[3].Slider.dragging = true; rows[3].Slider:RunScript("OnMouseDown")
+    rows[4].Slider:Disable(); rows[4].Back:Disable(); rows[4].Forward:Disable()
+    for _, f in ipairs(rows) do f.RightText:SetText("50%") end
+    Step(0.3)
+    return DumpOps({ P })
+"""
+
+
+# -------------------------------------------------------------------------------------------------------------------
+# Slider
+# -------------------------------------------------------------------------------------------------------------------
+
+case("slider_tokens_are_the_mockups_numbers", PRELUDE + """
+    local K = FS.Layout.Controls
+    assert(K.CELL_W == 6 and K.CELL_H == 8 and K.CELL_PITCH == 8)
+    assert(K.BRACKET_SPINE == 9 and K.BRACKET_HALF == 10 and K.BRACKET_ARM == 4 and K.STROKE == 2)
+    assert(K.TAG_H == 18 and K.TAG_TOP == 34 and K.TAG_CUT == 4 and K.TAG_STEM == 4 and K.TAG_STEM_TOP == 16)
+    assert(K.WASH_W == 28 and K.WASH_H == 24 and K.WASH_ALPHA == 0.10 and K.KEY == 20 and K.KEY_CUT == 4)
+    assert(K.MARCH_PERIOD == 0.6 and K.CHEV_PITCH == 8 and K.CHEV_ALPHA == 0.18)
+    assert(K.TAG_TEXT == 11 and K.LABEL_TEXT == 12 and K.SMALL_TEXT == 10 and K.KEY_GAP == 8 and K.TAG_LABEL_Y == 10)
+    assert(K.KEY_MINUS[1] == 6 and K.KEY_MINUS[2] == 9 and K.KEY_MINUS[3] == 8 and K.KEY_MINUS[4] == 2)
+    assert(K.KEY_PLUS_UPRIGHT[1] == 9 and K.KEY_PLUS_UPRIGHT[2] == 6 and K.KEY_PLUS_UPRIGHT[3] == 2 and K.KEY_PLUS_UPRIGHT[4] == 8)
+""")
+
+case("slider_cells_are_6_by_8_on_a_pitch_of_8_and_the_count_follows_the_track", PRELUDE + """
+    -- 232 px wide: the mockup's 29 cells (8 * 29 - 2 = 230 wide, centred in 232)
+    local s = SliderBox(P, 20, 20, 232 / PPU, 20 / PPU, { value = 50 })
+    assert(Skin(P) == 1)
+    NoDegrade()
+    local p = FS.SliderSkins.Parts(s)
+    assert(p and p.built and p.n == 29, "cells " .. tostring(p and p.n))
+    assert(s.w == 232 / PPU and s.h == 20 / PPU, "the stock rect was resized")
+    local x0, y0 = 1, 6
+    assert(p.x0 == x0 and p.cy == 10)
+    for i = 1, 29 do
+        Expect(p.cells[i], p.host, x0 + (i - 1) * 8, y0, 6, 8, "cell " .. i)
+    end
+    -- the stock 144 x 17 slider is 173 x 20 px: 21 cells, 166 wide, 3 in
+    local t = SliderBox(P, 20, 80)
+    FS.ControlKit.SkinWidget(t)
+    local q = FS.SliderSkins.Parts(t)
+    assert(q.n == 21 and q.x0 == 3, "21 cells, got " .. q.n .. " at " .. q.x0)
+    Expect(q.cells[21], q.host, 3 + 20 * 8, 6, 6, 8, "last cell")
+    assert(WholePixels(s, P, "slider") >= 29 and WholePixels(t, P, "stock slider") >= 21)
+""")
+
+case("slider_lit_cells_are_violet_the_head_cyan_pink_while_dragged_and_dim_when_disabled", PRELUDE + """
+    local s = SliderBox(P, 20, 20, 232 / PPU, 20 / PPU, { value = 50 })
+    Skin(P)
+    local p, T = FS.SliderSkins.Parts(s), FS.Theme
+    -- 50 % of 29 cells is 14.5, which rounds up to 15 lit: cell 15 is the head
+    assert(p.lit == 15)
+    for i = 1, 29 do
+        local c = Colour(p.cells[i])
+        if i < 15 then Is(c, T.COLOR_BORDER, 1, "lit cell " .. i)
+        elseif i == 15 then Is(c, T.COLOR_POWER, 1, "head cell")
+        else Is(c, T.COLOR_CTRL_CELL, 1, "unlit cell " .. i) end
+    end
+    s.dragging = true; s:RunScript("OnMouseDown")
+    Is(Colour(p.cells[15]), T.COLOR_HEALTH, 1, "head while dragging")
+    Is(Colour(p.cells[14]), T.COLOR_BORDER, 1, "lit cells stay violet while dragging")
+    s.dragging = false; s:RunScript("OnMouseUp")
+    Is(Colour(p.cells[15]), T.COLOR_POWER, 1, "head after the drag")
+    s:Disable()
+    for i = 1, 15 do Is(Colour(p.cells[i]), T.COLOR_CTRL_DISEDGE, 1, "disabled lit cell " .. i) end
+    Is(Colour(p.cells[16]), T.COLOR_CTRL_CELL, 1, "disabled unlit cell")
+    s:Enable()
+    Is(Colour(p.cells[15]), T.COLOR_POWER, 1, "head again")
+""")
+
+case("slider_head_follows_the_value_and_never_drops_below_one_cell", PRELUDE + """
+    local s = SliderBox(P, 20, 20, 232 / PPU, 20 / PPU, { value = 50 })
+    Skin(P)
+    local p = FS.SliderSkins.Parts(s)
+    s:SetValue(100)
+    assert(p.lit == 29)
+    Is(Colour(p.cells[29]), FS.Theme.COLOR_POWER, 1, "head at the end")
+    s:SetValue(0)
+    assert(p.lit == 1, "a slider at its minimum still shows one cell")
+    Is(Colour(p.cells[1]), FS.Theme.COLOR_POWER, 1, "head at the start")
+    Is(Colour(p.cells[2]), FS.Theme.COLOR_CTRL_CELL, 1, "nothing else lit")
+    s:SetMinMaxValues(0, 10); s:SetValue(5)
+    assert(p.lit == 15)
+    s:SetMinMaxValues(5, 5)
+    assert(p.lit == 1, "an empty range reads as the start")
+""")
+
+case("slider_thumb_is_a_pair_of_lock_on_brackets_around_the_head_cell", PRELUDE + """
+    local s = SliderBox(P, 20, 20, 232 / PPU, 20 / PPU, { value = 50 })
+    Skin(P)
+    local p, T = FS.SliderSkins.Parts(s), FS.Theme
+    -- head cell 15: it starts at x0 + 14 * 8 = 113 and is 6 wide, so its centre hx is 116; centre line cy 10
+    local hx, cy = 1 + 14 * 8 + 3, 10
+    assert(p.hx == hx)
+    local b = p.brackets
+    Expect(b.leftSpine, p.host, hx - 10, cy - 11, 2, 22, "left spine")
+    Expect(b.leftTop, p.host, hx - 10, cy - 11, 5, 2, "left top arm")
+    Expect(b.leftBottom, p.host, hx - 10, cy + 9, 5, 2, "left bottom arm")
+    Expect(b.rightSpine, p.host, hx + 8, cy - 11, 2, 22, "right spine")
+    Expect(b.rightTop, p.host, hx + 5, cy - 11, 5, 2, "right top arm")
+    Expect(b.rightBottom, p.host, hx + 5, cy + 9, 5, 2, "right bottom arm")
+    for _, name in ipairs({ "leftSpine", "leftTop", "leftBottom", "rightSpine", "rightTop", "rightBottom" }) do
+        Is(b[name].color, T.COLOR_POWER, 1, name)
+    end
+    s:SetValue(100)
+    assert(p.hx == 1 + 28 * 8 + 3)
+    Expect(b.leftSpine, p.host, p.hx - 10, cy - 11, 2, 22, "left spine after the value moved")
+    s:Disable()
+    Is(b.leftSpine.color, T.COLOR_CTRL_DISEDGE, 1, "disabled brackets")
+    s:Enable()
+    s.dragging = true; s:RunScript("OnMouseDown")
+    Is(b.rightBottom.color, T.COLOR_HEALTH, 1, "dragged brackets")
+""")
+
+case("slider_hover_floats_a_value_tag_and_a_wash_over_the_head_cell", PRELUDE + """
+    local s = SliderBox(P, 20, 20, 232 / PPU, 20 / PPU, { value = 50 })
+    Skin(P)
+    local p, T = FS.SliderSkins.Parts(s), FS.Theme
+    assert(not p.tag.frame:IsShown() and not p.wash:IsShown(), "no tag at rest")
+    Hover(s)
+    assert(p.tag.frame:IsShown() and p.wash:IsShown())
+    -- "50" is 2 characters: 2 * 7.2 + 12 = 26.4, rounded up to a multiple of 4 = 28 wide, 18 tall, 34 above the centre line
+    local hx, cy = p.hx, p.cy
+    Expect(p.tag.frame, p.host, hx - 14, cy - 34, 28, 18, "tag")
+    assert(p.tag.label.text == "50", "tag text " .. p.tag.label.text)
+    assert(Near(p.tag.label.size * PPU, 11, 0.01), "11 px text")
+    Is(p.tag.label.textColor, T.COLOR_POWER, 1, "tag text")
+    Is(p.tag.plate.ring.vertex, T.COLOR_POWER, 1, "tag edge")
+    Is(Colour(p.tag.plate.fill), T.COLOR_CTRL_INK, 1, "tag face")
+    Expect(p.tag.stem, p.host, hx, cy - 16, 1, 4, "tag stem")
+    Expect(p.wash, p.host, hx - 14, cy - 12, 28, 24, "wash")
+    Is(p.wash.color, T.COLOR_POWER, 0.10, "wash")
+    s:SetValue(7)
+    assert(p.tag.label.text == "7")
+    Expect(p.tag.frame, p.host, p.hx - 10, cy - 34, 20, 18, "a one character tag (7.2 + 12 = 19.2, up to 20)")
+""")
+
+case("slider_tag_formats_percent_decimals_and_integers_and_goes_pink_while_dragged", PRELUDE + """
+    local pct = SliderBox(P, 20, 20, 232 / PPU, 20 / PPU, { min = 0, max = 1, value = 0.62, step = 0.01 })
+    local dec = SliderBox(P, 20, 60, 232 / PPU, 20 / PPU, { min = 0, max = 2, value = 1.25, step = 0.25 })
+    local int = SliderBox(P, 20, 100, 232 / PPU, 20 / PPU, { min = 8, max = 20, value = 12, step = 1 })
+    Skin(P)
+    local a, b, c = FS.SliderSkins.Parts(pct), FS.SliderSkins.Parts(dec), FS.SliderSkins.Parts(int)
+    Hover(pct); Hover(dec); Hover(int)
+    assert(a.tag.label.text == "62%", a.tag.label.text)
+    assert(b.tag.label.text == "1.25", b.tag.label.text)
+    assert(c.tag.label.text == "12", c.tag.label.text)
+    int.dragging = true; int:RunScript("OnMouseDown")
+    Is(c.tag.label.textColor, FS.Theme.COLOR_HEALTH, 1, "dragged tag text")
+    Is(c.tag.plate.ring.vertex, FS.Theme.COLOR_HEALTH, 1, "dragged tag edge")
+    Is(c.wash.color, FS.Theme.COLOR_HEALTH, 0.10, "dragged wash")
+    -- a drag keeps the tag up when the hand leaves the track
+    Unhover(int)
+    assert(c.tag.frame:IsShown(), "the tag stays while the thumb is held")
+    int.dragging = false; int:RunScript("OnMouseUp")
+    assert(not c.tag.frame:IsShown(), "and goes when it is let go")
+    -- a disabled slider never shows a tag
+    local off = SliderBox(P, 20, 140, 232 / PPU, 20 / PPU, {})
+    FS.ControlKit.SkinWidget(off); off:Disable(); Hover(off)
+    assert(not FS.SliderSkins.Parts(off).tag.frame:IsShown())
+""")
+
+case("slider_chevrons_march_over_the_lit_cells_at_18_percent_white", PRELUDE + """
+    local s = SliderBox(P, 20, 20, 232 / PPU, 20 / PPU, { value = 50 })
+    Skin(P)
+    local p, K = FS.SliderSkins.Parts(s), FS.Layout.Controls
+    -- lit 15: the strip covers the 14 cells before the head, 14 * 8 - 2 = 110 px, from the first cell, 8 tall
+    Expect(p.chev, p.host, 1, 6, 110, 8, "chevron strip")
+    assert(p.chev.path:find("ctl_chevron_h8"), p.chev.path)
+    Is(p.chev.vertex, { 1, 1, 1 }, 0.18, "chevron tint")
+    Step(0)
+    assert(Near(p.chev.coords[1], 0, 0.001) and Near(p.chev.coords[2], 110 / 8, 0.001), "starts at the tile's left")
+    Step(0.3)
+    assert(Near(p.chev.coords[1], -0.5, 0.02), "half a pitch along after 0.3 s, got " .. p.chev.coords[1])
+    assert(Near(p.chev.coords[2] - p.chev.coords[1], 110 / 8, 0.001), "the strip keeps its length")
+    assert(p.chev.coords[3] == 0 and p.chev.coords[4] == 1)
+    Step(0.3)
+    assert(Near(p.chev.coords[1], 0, 0.02) or Near(p.chev.coords[1], -1, 0.02), "a full pitch in 0.6 s")
+    -- one lit cell has nothing to march over, a disabled slider does not march
+    s:SetValue(0)
+    assert(not p.chev:IsShown() and not FS.ControlKit.IsAnimating(p.host, "march"))
+    s:SetValue(50); s:Disable()
+    assert(not p.chev:IsShown() and not FS.ControlKit.IsAnimating(p.host, "march"))
+    s:Enable()
+    assert(p.chev:IsShown() and FS.ControlKit.IsAnimating(p.host, "march"))
+""")
+
+case("slider_art_is_held_the_labels_restyled_and_nothing_is_written_to_the_widget", PRELUDE + """
+    local s = SliderBox(P, 20, 20, 232 / PPU, 20 / PPU, { value = 50 })
+    local m = SliderBox(P, 20, 80, 232 / PPU, 20 / PPU, { value = 50, minimal = true })
+    Skin(P)
+    NoDegrade()
+    local T = FS.Theme
+    for _, w in ipairs({ s, m }) do
+        assert(w.thumbTex.alpha == 0, "the thumb is held")
+        w.thumbTex:SetAlpha(1)
+        assert(w.thumbTex.alpha == 0, "the thumb came back")
+        assert(next(w.scripts) == nil, "a script was written to a Blizzard slider")
+        assert(#w.points == 1 and w.parent == P and w.shown)
+    end
+    assert(s.NineSlice.alpha == 0, "the NineSlice frame is held")
+    s.NineSlice:SetAlpha(1)
+    assert(s.NineSlice.alpha == 0, "the NineSlice frame comes back to 0 when Blizzard writes it")
+    for _, key in ipairs({ "Left", "Middle", "Right" }) do assert(m[key].alpha == 0, key .. " is held") end
+    -- labels: the title is 12 px text colour, Low and High 10 px muted
+    assert(s.Text.fontPath == T.FONT_MONO and Near(s.Text.size * PPU, 12, 0.01))
+    Is(s.Text.textColor, T.COLOR_CTRL_TEXT, 1, "title")
+    assert(Near(s.Low.size * PPU, 10, 0.01) and Near(s.High.size * PPU, 10, 0.01))
+    Is(s.Low.textColor, T.COLOR_MUTED, 1, "low label")
+    -- the skin never touches the stock size or anchors
+    assert(s.w == 232 / PPU and s.h == 20 / PPU and #s.points == 1)
+""")
+
+case("slider_detection_is_by_shape_and_a_vertical_slider_or_scroll_bar_is_left_alone", PRELUDE + """
+    local ok = SliderBox(P, 20, 20)
+    local vertical = SliderBox(P, 20, 60, 17, 100, { orientation = "VERTICAL" })
+    local scroll = SliderBox(P, 60, 60, 17, 100)
+    scroll.ScrollUpButton = blz("Button", nil, scroll, 16, 16)
+    local frame = blz("Frame", nil, P, 144, 17, 20, 200)
+    frame.GetValue = function() return 1 end
+    assert(Slk().Kind(ok) == "slider")
+    assert(Slk().Kind(vertical) == nil and Slk().Kind(scroll) == nil and Slk().Kind(frame) == nil)
+    assert(Skin(P) == 1)
+    -- no thumb texture, no slider
+    local bare = SliderBox(P, 20, 240)
+    bare.GetThumbTexture = function() return nil end
+    assert(Slk().Kind(bare) == nil)
+""")
+
+
+case("stepper_keys_are_20px_plates_with_a_minus_and_a_plus", PRELUDE + """
+    local f = SteppedSlider(P, 20, 20, { value = 5, min = 0, max = 10 })
+    assert(Skin(P) == 3, "the slider and its two keys")
+    NoDegrade()
+    local T = FS.Theme
+    local back, fwd = Slk().KeyParts(f.Back), Slk().KeyParts(f.Forward)
+    assert(back and back.built and fwd and fwd.built)
+    assert(f.Back.w == 11 and f.Back.h == 19 and f.Forward.w == 9 and f.Forward.h == 18, "the stock rects were resized")
+    -- the stock 11 x 19 button is 13 x 23 px and the 9 x 18 one 11 x 22: a 20 px key is centred on each, floor((w - 20) / 2)
+    Expect(back.plateFrame, f.Back, -4, 1, 20, 20, "back key")
+    Expect(fwd.plateFrame, f.Forward, -5, 1, 20, 20, "forward key")
+    Expect(back.bar, back.plateFrame, 6, 9, 8, 2, "minus bar")
+    Expect(fwd.bar, fwd.plateFrame, 6, 9, 8, 2, "plus bar")
+    Expect(fwd.upright, fwd.plateFrame, 9, 6, 2, 8, "plus upright")
+    assert(back.upright == nil, "a minus has no upright")
+    Is(Colour(back.plate.fill), T.COLOR_CTRL_INK, 1, "idle face")
+    Is(back.plate.ring.vertex, T.COLOR_CTRL_DIM, 1, "idle edge")
+    Is(Colour(back.bar), T.COLOR_MUTED, 1, "idle glyph")
+    Hover(f.Forward)
+    Is(fwd.plate.ring.vertex, T.COLOR_POWER, 1, "hover edge")
+    Is(Colour(fwd.bar), T.COLOR_POWER, 1, "hover glyph")
+    Is(Colour(fwd.upright), T.COLOR_POWER, 1, "hover upright")
+    Unhover(f.Forward)
+    Is(fwd.plate.ring.vertex, T.COLOR_CTRL_DIM, 1, "edge after the hand leaves")
+    f.Back:Disable()
+    Is(Colour(back.plate.fill), T.COLOR_CTRL_DISFILL, 1, "disabled face")
+    Is(back.plate.ring.vertex, T.COLOR_CTRL_DISEDGE, 1, "disabled edge")
+    Is(Colour(back.bar), T.COLOR_CTRL_DIS, 1, "disabled glyph")
+    f.Back:Enable()
+    Is(back.plate.ring.vertex, T.COLOR_CTRL_DIM, 1, "enabled again")
+    assert(f.Back.art.alpha == 0 and f.Forward.art.alpha == 0, "the stock art is held")
+    assert(next(f.Back.scripts) == nil and next(f.Forward.scripts) == nil, "a script was written to a stepper button")
+    -- the stock buttons sit at fractional pixels (4 and 231 UI units), so each skin is measured from its own stock rect
+    WholePixels(f.Back, f.Back, "back key")
+    WholePixels(f.Forward, f.Forward, "forward key")
+    WholePixels(f.Slider, f.Slider, "stepped slider")
+""")
+
+case("a_stepper_slider_keeps_its_cells_8_px_clear_of_the_keys", PRELUDE + """
+    local f = SteppedSlider(P, 20, 20, { value = 5, min = 0, max = 10 })
+    Skin(P)
+    local p = Slk().Parts(f.Slider)
+    -- the slider is 212 UI units = 254 px, from 22.8 to 277.2 in the frame; the back key ends at 20.8 and the forward key starts
+    -- at 272.2, so the track is inset 6 on the left and 13 on the right: 235 px, 29 cells, 230 wide, 2 in
+    assert(p.n == 29 and p.x0 == 8, "cells " .. p.n .. " at " .. p.x0)
+    local back, fwd = Slk().KeyParts(f.Back), Slk().KeyParts(f.Forward)
+    local _, _, backRight = Px(back.plateFrame, f)
+    local fwdLeft = Px(fwd.plateFrame, f)
+    local firstLeft = Px(p.cells[1], f)
+    local _, _, lastRight = Px(p.cells[29], f)
+    assert(firstLeft - backRight >= 8, "gap before the first cell " .. (firstLeft - backRight))
+    assert(fwdLeft - lastRight >= 8, "gap after the last cell " .. (fwdLeft - lastRight))
+""")
+
+case("stepper_text_is_restyled_the_value_in_cyan", PRELUDE + """
+    local f = SteppedSlider(P, 20, 20, {})
+    f.TopText = fstring(f, "Scale"); f.MinText = fstring(f, "0", 10); f.MaxText = fstring(f, "100", 10)
+    Skin(P)
+    local T = FS.Theme
+    assert(f.RightText.fontPath == T.FONT_MONO and Near(f.RightText.size * PPU, 12, 0.01))
+    Is(f.RightText.textColor, T.COLOR_POWER, 1, "value")
+    assert(f.TopText.fontPath == T.FONT_MONO and Near(f.TopText.size * PPU, 12, 0.01))
+    Is(f.TopText.textColor, T.COLOR_CTRL_TEXT, 1, "title")
+    assert(Near(f.MinText.size * PPU, 10, 0.01) and Near(f.MaxText.size * PPU, 10, 0.01))
+    Is(f.MinText.textColor, T.COLOR_MUTED, 1, "min")
+""")
+
+case("a_slider_is_skinned_once_and_one_met_in_combat_waits_for_combat_to_end", PRELUDE + """
+    local a = SliderBox(P, 20, 20, 232 / PPU, 20 / PPU, {})
+    assert(Skin(P) == 1)
+    local hooks, objs = HookCount(), ObjCount()
+    assert(Skin(P) == 0 and HookCount() == hooks and ObjCount() == objs, "a repeat sweep builds nothing")
+    local late = SliderBox(P, 20, 80, 232 / PPU, 20 / PPU, {})
+    __combat = true
+    assert(Skin(P) == 0)
+    assert(Slk().Parts(late) == nil, "nothing is skinned in combat")
+    __combat = false
+    Fire("PLAYER_REGEN_ENABLED"); FlushTimers()
+    assert(Slk().Parts(late) and Slk().Parts(late).built, "skinned after combat")
+    NoDegrade()
+""")
+
+case("a_change_of_pixel_scale_lays_the_slider_out_again_on_whole_pixels", PRELUDE + """
+    local s = SliderBox(P, 20, 20, 232 / PPU, 20 / PPU, { value = 50 })
+    Skin(P)
+    local p = Slk().Parts(s)
+    for _, scale in ipairs({ 1.0, 1.5, 2.0, 1.2 }) do
+        PPU = scale
+        Fire("UI_SCALE_CHANGED")
+        local wpx, hpx = Round(s.w * scale), Round(s.h * scale)
+        local n = math.max(2, math.floor((wpx + 2) / 8))
+        local x0 = math.floor((wpx - (8 * n - 2)) / 2)
+        assert(p.n == n and p.x0 == x0 and p.cy == math.floor(hpx / 2), string.format("scale %s: %d cells at %d, wanted %d at %d", scale, p.n, p.x0, n, x0))
+        Expect(p.cells[n], p.host, x0 + (n - 1) * 8, p.cy - 4, 6, 8, "last cell at " .. scale)
+        assert(p.cells[n + 1] == nil or not p.cells[n + 1]:IsShown(), "a cell past the track at " .. scale)
+        Hover(s)
+        WholePixels(s, P, "slider at " .. scale)
+        Unhover(s)
+    end
+""")
+
+case("a_hidden_slider_runs_no_animation_and_a_shown_one_resumes", PRELUDE + """
+    local s = SliderBox(P, 20, 20, 232 / PPU, 20 / PPU, { value = 50 })
+    Skin(P)
+    local p = Slk().Parts(s)
+    Step(0.2)
+    local before = p.chev.coords[1]
+    P:Hide()
+    Step(1.0)
+    assert(p.chev.coords[1] == before, "the strip of a hidden slider moved")
+    P:Show()
+    Step(0.1)
+    assert(p.chev.coords[1] ~= before, "it did not resume")
+""")
+
+case("a_secret_slider_value_reads_as_the_start_without_an_error", PRELUDE + """
+    local s = SliderBox(P, 20, 20, 232 / PPU, 20 / PPU, { value = 50 })
+    s.GetValue = function() return { __secret = true } end
+    Skin(P)
+    NoDegrade()
+    local p = Slk().Parts(s)
+    assert(p and p.built and p.lit == 1, "an unreadable value reads as the start")
+    Hover(s)
+    assert(not p.tag.frame:IsShown(), "no number is shown from a secret value")
+""")
+
+
 def main() -> int:
     png = None
     if "--png" in sys.argv:
@@ -1100,14 +1515,21 @@ def render(prefix: str) -> None:
                 if src is None:
                     src = Image.open(TEXTURES / op["file"]).convert("RGBA")
                     cache[op["file"]] = src
-                c = op.get("coords")
-                if c:
-                    w0, h0 = src.size
-                    src2 = src.crop((round(c[1] * w0), round(c[3] * h0), round(c[2] * w0), round(c[4] * h0)))
-                else:
-                    src2 = src
                 if r - l > 0 and b - t > 0:
-                    tile = src2.resize((r - l, b - t), Image.NEAREST)
+                    c = op.get("coords")
+                    if c:
+                        # texture coordinates may run past 0..1 (a repeating strip): sample the source with wrap
+                        w0, h0 = src.size
+                        tile = Image.new("RGBA", (r - l, b - t))
+                        sp, tp = src.load(), tile.load()
+                        for ty in range(b - t):
+                            v = c[3] + (ty + 0.5) / (b - t) * (c[4] - c[3])
+                            sy = int(v * h0 // 1) % h0
+                            for tx in range(r - l):
+                                u = c[1] + (tx + 0.5) / (r - l) * (c[2] - c[1])
+                                tp[tx, ty] = sp[int(u * w0 // 1) % w0, sy]
+                    else:
+                        tile = src.resize((r - l, b - t), Image.NEAREST)
                     tint = Image.new("RGBA", tile.size, col[:3] + (255,))
                     px = Image.composite(tint, Image.new("RGBA", tile.size, (0, 0, 0, 0)), tile.getchannel("A"))
                     alpha = tile.getchannel("A").point(lambda v: int(v * col[3] / 255))

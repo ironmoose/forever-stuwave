@@ -378,6 +378,26 @@ function Kit.HookFunc(obj, method, fn)
     end
 end
 
+local heldFrames, zeroing = Weak(), Weak()
+
+-- Keeps a Blizzard FRAME that only carries art (a slider's NineSlice) at alpha 0, the way FS.HeldArt keeps a texture: alpha
+-- survives Show, Hide and layout, and a SetAlpha post-hook writes 0 again. Never a Hide, never a resize.
+function Kit.HoldFrame(frame)
+    if type(frame) ~= "table" or heldFrames[frame] or type(frame.SetAlpha) ~= "function" then return end
+    local function zero()
+        if zeroing[frame] then return end
+        zeroing[frame] = true
+        pcall(frame.SetAlpha, frame, 0)
+        zeroing[frame] = nil
+    end
+    zero()
+    if type(hooksecurefunc) ~= "function" then
+        heldFrames[frame] = true
+        return
+    end
+    if pcall(hooksecurefunc, frame, "SetAlpha", zero) then heldFrames[frame] = true end
+end
+
 -- Follows a stock widget's state for `repaint(widget)`: hover, pressed, enabled, shown. Returns the state table
 -- { hover, pressed } that repaint reads. Post-hooks only.
 function Kit.Track(widget, repaint)
