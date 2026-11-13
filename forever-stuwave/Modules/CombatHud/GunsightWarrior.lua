@@ -19,8 +19,16 @@
 -- position is rounded to a whole sprite px before it is seated, as the mockup's canvas does. The helm frames and rune tiles are
 -- baked full colour by tools/assets/generate_warrior_helm.py (2 texels per sprite px); FRAME below must match its HELM_FRAMES.
 --
--- DATA. Everything comes from FS.WarriorShouts (WarriorShouts.lua): Get, Lit, Remaining, Tick, Subscribe. Its ledger listens
--- from Start() on and never stops; this file only paints. No secret is read here.
+--   * THE STRIKE WINDOW LANE (design mockup "Warrior Overpower Cue", 2026-11-12, variant A without its stance chip): a short bar
+--     under the two helms, centred, hidden unless a reactive spell can be used right now. It opens from its middle (violet box,
+--     cyan fill), the fill drains toward the left over the window's length, the last 1.5 s turn amber (a tick marks that point),
+--     and a label under it names the spell. The player's own cast snaps it shut with a short pink flash; a window that runs out
+--     unused shows an amber dotted outline for a moment and goes. One lane serves every window in WarriorWindows.lua (Overpower,
+--     Revenge, Victory Rush); when several are open it shows the one with the least time left. The only text is the spell's label.
+--
+-- DATA. The rings come from FS.WarriorShouts (WarriorShouts.lua): Get, Lit, Remaining, Tick, Subscribe. The lane comes from
+-- FS.WarriorWindows (WarriorWindows.lua): Urgent, Get, Remaining, Tick, Subscribe. Both ledgers listen from Start() on and never
+-- stop; this file only paints. No secret is read here.
 --
 -- VISIBILITY. A class module: the host hides with no target and onHide / onShow fire on that edge (GunsightAreas.lua). onHide
 -- stops the OnUpdate and the subscription; onShow subscribes, refreshes and repaints. Plain frames only.
@@ -68,6 +76,15 @@ local C = {
     LABEL_SIZE = 11,                   -- image px
     CAP = 325 / 1024,                  -- Mononoki Bold: the line box's middle sits CAP * size above the baseline (as GunsightShaman)
     TEXT_MAX_S = 99,
+    -- The strike window lane, sprite px on the canvas (the mockup's own numbers; the bar is centred on the 150 px width)
+    LANE = {
+        X = 22, Y = 82, W = 106, H = 6,
+        OPEN = 0.15,                   -- the box opens from its middle in OPEN s
+        AMBER = 1.5,                   -- the last AMBER s: amber fill, edge and label, and the tick mark
+        CAST = 0.4, SNAP = 0.18,       -- the cast flash lasts CAST s; the pink bar snaps shut in SNAP s
+        EXPIRE = 0.35,                 -- the amber dotted outline fades out in EXPIRE s
+        LABEL_BASE = 97,               -- the label's baseline: the bottom of the mockup's 5 px text (its top is the bar's Y + 10)
+    },
     RINGS = {
         battle = { cx = 42, r = 27, tw = 7, th = 9, atlas = "warrior_runes_big", spin = 1 },
         demo = { cx = 112, r = 24, tw = 5, th = 7, atlas = "warrior_runes_small", spin = -1, levelText = "L14" },
@@ -112,8 +129,9 @@ local function LogOnce(key, msg)
     end
 end
 
-local Shouts
+local Shouts, Windows
 local mod
+local lane                     -- the strike window lane's parts (nil when WarriorWindows is missing or the build failed)
 local R = {}                   -- key -> ring parts
 local seats = {}
 local OX, OY = 0, 0
@@ -251,6 +269,73 @@ local function BuildRing(key)
     fs:SetText("")
     p.label = fs
     return p
+end
+
+-------------------------------------------------------------------------------
+-- The strike window lane: build
+-------------------------------------------------------------------------------
+
+-- A theme token (a table of r, g, b, a), else the mockup's own hex when the token is missing.
+local function Token(name, fallback)
+    local c = FS.Theme and FS.Theme[name]
+    if type(c) == "table" and type(c[1]) == "number" and type(c[2]) == "number" and type(c[3]) == "number" then return c end
+    return fallback
+end
+
+local function BuildLane()
+    local LN = C.LANE
+    local L = {}
+    L.colors = {
+        cyan = Token("COLOR_POWER", Hex("#22e0ff")), amber = Token("COLOR_AMBER", Hex("#ffb648")),
+        pink = Token("COLOR_HEALTH", Hex("#ff2e97")), violet = Token("COLOR_BORDER", Hex("#a855f7")),
+        ink = Token("COLOR_BUTTON_INK", Hex("#150c26")),
+        cyanHi = Hex("#b8f6ff"), amberHi = Hex("#ffe9a8"), flash = Hex("#ffc8e6"),     -- the mockup's lit edge and flash tints
+    }
+    local LC = L.colors
+
+    -- a region of the lane: made hidden, shown and sized by the painter only when its look changes
+    local function Part(layer, sub, c)
+        local t = Dot(layer, sub, c, 1)
+        t:Hide()
+        t.fsOn = false
+        return t
+    end
+    L.bg = Part("ARTWORK", 0, LC.ink)
+    L.edgeT, L.edgeB = Part("ARTWORK", 1, LC.violet), Part("ARTWORK", 1, LC.violet)
+    L.edgeL, L.edgeR = Part("ARTWORK", 1, LC.violet), Part("ARTWORK", 1, LC.violet)
+    L.fill, L.fillHi = Part("ARTWORK", 2, LC.cyan), Part("ARTWORK", 3, LC.cyanHi)
+    L.mark = Part("ARTWORK", 4, LC.amber)
+    L.glow, L.bar, L.line = Part("OVERLAY", 0, LC.pink), Part("OVERLAY", 1, LC.pink), Part("OVERLAY", 2, LC.flash)
+    L.windowParts = { L.bg, L.edgeT, L.edgeB, L.edgeL, L.edgeR, L.fill, L.fillHi, L.mark }
+    L.castParts = { L.glow, L.bar, L.line }
+
+    -- the expiry outline: every other pixel round the bar, the mockup's dashedMold
+    L.dots = {}
+    local seen = {}
+    local function AddDot(x, y)
+        local k = x * 1000 + y
+        if seen[k] then return end
+        seen[k] = true
+        local t = Part("OVERLAY", 0, LC.amber)
+        t.fsSX, t.fsSY = x, y
+        L.dots[#L.dots + 1] = t
+    end
+    for i = 0, LN.W - 1, 2 do AddDot(LN.X + i, LN.Y); AddDot(LN.X + i, LN.Y + LN.H - 1) end
+    for j = 0, LN.H - 1, 2 do AddDot(LN.X, LN.Y + j); AddDot(LN.X + LN.W - 1, LN.Y + j) end
+
+    local fs = mod:CreateFontString(nil, "OVERLAY")
+    fs.cur = { 1, 1, 1, 1 }
+    fs:SetJustifyH("CENTER")
+    Seat(function()
+        FS.Theme.ApplyMono(fs, ui(C.LABEL_SIZE), fs.cur)
+        fs:ClearAllPoints()
+        fs:SetPoint("CENTER", mod, "TOPLEFT", S(LN.X + LN.W / 2), -(S(LN.LABEL_BASE) - ui(C.CAP * C.LABEL_SIZE)))
+    end)
+    fs:SetText("")
+    fs:Hide()
+    fs.fsOn = false
+    L.label = fs
+    return L
 end
 
 -------------------------------------------------------------------------------
@@ -497,6 +582,132 @@ local function PaintRing(p, now)
     end
 end
 
+-------------------------------------------------------------------------------
+-- The strike window lane: paint
+-------------------------------------------------------------------------------
+
+local function Round(v) return floor(v + 0.5) end
+local function Step20(a) return floor(a * 20 + 0.5) / 20 end           -- alpha in 20 steps: few writes while it fades
+
+-- Seat a lane rectangle at sprite px (x, y) with size (w, h) in colour c at alpha a; hidden when it has no area. Writes only
+-- what changed (the tick path allocates nothing).
+local function Rect(t, x, y, w, h, c, a)
+    if w < 1 or h < 1 then
+        if t.fsOn ~= false then t.fsOn = false; t:Hide() end
+        return
+    end
+    if t.fsOn ~= true then t.fsOn = true; t:Show() end
+    if t.fsW ~= w or t.fsH ~= h then
+        t.fsW, t.fsH = w, h
+        t:SetSize(S(w), S(h))
+    end
+    Place(t, x, y)
+    if t.fsA ~= a or t.fsC ~= c then
+        t.fsA, t.fsC = a, c
+        t:SetVertexColor(c[1], c[2], c[3], a)
+    end
+end
+
+local function LaneLabel(L, text, c)
+    local fs = L.label
+    if fs.fsOn ~= true then fs.fsOn = true; fs:Show() end
+    if L.text ~= text then
+        L.text = text
+        fs:SetText(text)
+    end
+    TextColor(fs, c, 1)
+end
+
+local function PaintWindow(L, key, now)
+    local LN, LC = C.LANE, L.colors
+    local st = Windows.Get(key)
+    local len = st.length or 1
+    local rem = Windows.Remaining(key, now) or 0
+    local amber = rem <= LN.AMBER
+    local open = (now - (st.openAt or now)) / LN.OPEN
+    if open > 1 then open = 1 elseif open < 0 then open = 0 end
+    local ww = Round(LN.W * open)
+    local xx = LN.X + Round((LN.W - ww) / 2)
+    local edge = amber and LC.amber or LC.violet
+    local ew = ww >= 1 and 1 or 0
+    Rect(L.bg, xx, LN.Y, ww, LN.H, LC.ink, 1)
+    Rect(L.edgeT, xx, LN.Y, ww, 1, edge, 1)
+    Rect(L.edgeB, xx, LN.Y + LN.H - 1, ww, 1, edge, 1)
+    Rect(L.edgeL, xx, LN.Y, ew, LN.H, edge, 1)
+    Rect(L.edgeR, xx + ww - 1, LN.Y, ew, LN.H, edge, 1)
+    if open >= 1 then
+        local fw = Round(rem / len * (LN.W - 2))
+        if fw > LN.W - 2 then fw = LN.W - 2 end
+        Rect(L.fill, LN.X + 1, LN.Y + 1, fw, LN.H - 2, amber and LC.amber or LC.cyan, 1)
+        Rect(L.fillHi, LN.X + 1, LN.Y + 1, fw, 1, amber and LC.amberHi or LC.cyanHi, 1)
+        Rect(L.mark, LN.X + 1 + Round(LN.AMBER / len * (LN.W - 2)), LN.Y - 1, 1, LN.H + 2, LC.amber, 1)
+        LaneLabel(L, Windows.DEFS[key].label, amber and LC.amber or LC.cyan)
+    else
+        Rect(L.fill, 0, 0, 0, 0, LC.cyan, 1)
+        Rect(L.fillHi, 0, 0, 0, 0, LC.cyan, 1)
+        Rect(L.mark, 0, 0, 0, 0, LC.amber, 1)
+        if L.label.fsOn ~= false then L.label.fsOn = false; L.label:Hide() end
+    end
+end
+
+-- The cast: the pink bar snaps shut from both ends, a pink glow and a bright centre line fade out.
+local function PaintCast(L, t)
+    local LN, LC = C.LANE, L.colors
+    local p = t / LN.CAST
+    local snap = t / LN.SNAP
+    if snap > 1 then snap = 1 end
+    local ww = Round(LN.W * (1 - snap))
+    Rect(L.bar, Round(LN.X + (LN.W - ww) / 2), LN.Y, ww, LN.H, LC.pink, 1)
+    Rect(L.glow, LN.X - 4, LN.Y - 3, LN.W + 8, LN.H + 6, LC.pink, Step20((1 - p) * 0.55))
+    Rect(L.line, LN.X + LN.W / 2 - 1, LN.Y - 2, 2, LN.H + 4, LC.flash, Step20(1 - p))
+end
+
+-- The window ran out: the amber dotted outline fades.
+local function PaintExpire(L, t)
+    local a = Step20(0.6 * (1 - t / C.LANE.EXPIRE))
+    local c = L.colors.amber
+    for i = 1, #L.dots do
+        local d = L.dots[i]
+        ShowDot(d, d.fsSX, d.fsSY, c, a)
+    end
+end
+
+-- Hide what the lane drew in its last mode.
+local function LaneOff(L, mode)
+    if mode == "window" then
+        HideAll(L.windowParts)
+        if L.label.fsOn ~= false then L.label.fsOn = false; L.label:Hide() end
+    elseif mode == "cast" then
+        HideAll(L.castParts)
+    elseif mode == "expire" then
+        HideAll(L.dots)
+    end
+end
+
+-- One paint of the lane: an effect (cast flash, expiry outline) plays first, then the open window with the least time left,
+-- else nothing.
+local function PaintLane(now)
+    local L = lane
+    if not (L and Windows) then return end
+    local mode, key, t
+    if L.fxKind then
+        local dur = L.fxKind == "cast" and C.LANE.CAST or C.LANE.EXPIRE
+        t = now - L.fxAt
+        if t >= 0 and t < dur then mode = L.fxKind else L.fxKind = nil end
+    end
+    if not mode then
+        key = Windows.Urgent(now)
+        if key then mode = "window" end
+    end
+    if L.mode ~= mode then
+        LaneOff(L, L.mode)
+        L.mode = mode
+    end
+    if mode == "window" then PaintWindow(L, key, now)
+    elseif mode == "cast" then PaintCast(L, t)
+    elseif mode == "expire" then PaintExpire(L, t) end
+end
+
 local function PaintAll(now)
     for _, key in ipairs(KEYS) do
         local p = R[key]
@@ -504,6 +715,10 @@ local function PaintAll(now)
             local ok, err = pcall(PaintRing, p, now)
             if not ok then LogOnce("paint", err) end
         end
+    end
+    if lane then
+        local ok, err = pcall(PaintLane, now)
+        if not ok then LogOnce("lane", err) end
     end
 end
 
@@ -527,6 +742,10 @@ local function Tick(_, elapsed)
     local now = GetTime()
     local ok, err = pcall(Shouts.Tick, now)
     if not ok then LogOnce("tick", err) end
+    if lane then
+        ok, err = pcall(Windows.Tick, now)
+        if not ok then LogOnce("windowstick", err) end
+    end
     PaintAll(now)
 end
 
@@ -541,6 +760,21 @@ end
 local function OnChange(key, reason)
     if reason == "cast" then castAt[key] = GetTime() end
     if subscribed then PaintAll(GetTime()) end
+end
+
+-- A strike window opened, closed, was cast or ran out. The cast flash and the expiry outline play only for a window the lane
+-- was showing (a Victory Rush held back by the health gate never was).
+local function OnWindowChange(key, reason)
+    if lane and (reason == "cast" or reason == "expire") then
+        local st = Windows.Get(key)
+        if st and st.shownAtClose then
+            lane.fxKind, lane.fxAt = reason, GetTime()
+        end
+    end
+    if subscribed and lane then
+        local ok, err = pcall(PaintLane, GetTime())
+        if not ok then LogOnce("lane", err) end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -604,6 +838,20 @@ local function BuildModule(host)
     end
     Warrior.frame, Warrior.rings = mod, R
     if Shouts.Start then Shouts.Start() end
+    -- The lane is built on its own: a missing WarriorWindows or a failed build leaves the rings as they are.
+    Windows = FS.WarriorWindows
+    if Windows and Windows.Get and Windows.Urgent and Windows.Subscribe and Windows.Tick then
+        local okL, errL = pcall(function() lane = BuildLane() end)
+        if not okL then
+            LogOnce("lanebuild", errL)
+            lane = nil
+        elseif Windows.Start then
+            Windows.Start()
+        end
+    else
+        LogOnce("nowindows", "FS.WarriorWindows is missing, the strike window lane is off")
+    end
+    Warrior.lane = lane
     SeatTrack()
     PaintAll(GetTime())
     return mod
@@ -614,9 +862,14 @@ local function OnAreaShown()
     if not subscribed then
         subscribed = true
         Shouts.Subscribe(OnChange)
+        if lane then Windows.Subscribe(OnWindowChange) end
     end
     local ok, err = pcall(Shouts.Refresh)
     if not ok then LogOnce("refresh", err) end
+    if lane and Windows.Refresh then
+        ok, err = pcall(Windows.Refresh)
+        if not ok then LogOnce("windowsrefresh", err) end
+    end
     PaintAll(GetTime())
     Sync()
 end
@@ -626,6 +879,7 @@ local function OnAreaHidden()
     if subscribed then
         subscribed = false
         Shouts.Unsubscribe(OnChange)
+        if lane then Windows.Unsubscribe(OnWindowChange) end
     end
     Sync()
 end
