@@ -197,6 +197,9 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "warrior_helm": (256, 256), "warrior_runes_big": (256, 256), "warrior_runes_small": (256, 256),
         "warrior_helm_glow": (64, 64),
     },
+    # generate_warrior_powerups.py: the Warrior power-up alerts' one atlas (every baked sprite of the three alerts and the
+    # drain bar, 1 texel per sprite px); it also writes the sprite manifest WarriorPowerUpArt.lua, which is not a .tga.
+    "warrior_powerups": {"warrior_powerups_1": (2048, 512)},
     # generate_paladin_seal.py: the Paladin Gunsight module's wax seals, emblems and pixel digits, the war hammer's baked
     # swing and rise frames (cold, filled, tint mask, outline), and the slam effects (column, rays, shocks, runes, cracks).
     "paladin_seal": {"paladin_seal": (512, 512), "paladin_hammer": (1024, 1024), "paladin_fx": (1024, 512)},

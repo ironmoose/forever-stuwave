@@ -118,6 +118,8 @@ Modules/CombatHud/GunsightShaman.lua
 Modules/CombatHud/GunsightShamanDrop.lua
 Modules/CombatHud/WarriorShouts.lua
 Modules/CombatHud/WarriorWindows.lua
+Modules/CombatHud/WarriorPowerUpArt.lua
+Modules/CombatHud/WarriorPowerUps.lua
 Modules/CombatHud/GunsightWarrior.lua
 Modules/CombatHud/GunsightWarriorClick.lua
 Modules/CombatHud/PriestShields.lua

@@ -1627,6 +1627,18 @@ local function PriestGroup(page)
     UI.Toggle(page, { label = Right.REMIND.label, key = Right.REMIND.key, tip = Right.REMIND.tip, inset = 14 })
 end
 
+-- The Warrior power-up alerts (WarriorPowerUps.lua): the master switch, and one switch per spell. A Warrior's page only.
+local function WarriorGroup(page)
+    local PU = FS.WarriorPowerUps
+    if not (PU and PU.SETTING and PU.SPELLS and PU.ORDER and PU.Applies and PU.Applies()) then return end
+    UI.Header(page, "Warrior power-up alerts", "The big alert above your character when Overpower, Revenge or Victory Rush lights up.")
+    UI.Toggle(page, { label = PU.SETTING.label, key = PU.SETTING.key, tip = PU.SETTING.tip })
+    for _, key in ipairs(PU.ORDER) do
+        local def = PU.SPELLS[key]
+        UI.Toggle(page, { label = def.label, key = def.key, inset = 14, tip = "Play the alert for " .. def.label .. ". Off leaves the other alerts as they are." })
+    end
+end
+
 if FS.Gunsight and FS.Gunsight.PIECES then
     CW.RegisterCategory({ key = "gunsight", label = "Gunsight HUD", order = 2, build = function(page)
         local Gunsight = FS.Gunsight
@@ -1638,6 +1650,7 @@ if FS.Gunsight and FS.Gunsight.PIECES then
         })
         TargetSideGroups(page)
         PriestGroup(page)
+        WarriorGroup(page)
         UI.Header(page, "Pieces")
         local known, n = {}, 0
         for _, key in ipairs(Gunsight.PIECES) do known[key] = true end

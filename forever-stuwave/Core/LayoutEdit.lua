@@ -48,6 +48,7 @@ local MOVABLE = {
     { id = "tcast",        label = "Target cast bar" },
     { id = "pcast",        label = "Player cast bar" },
     { id = "objectives",   label = "Objectives" },
+    { id = "warriorpowerup", label = "Warrior power-up alerts" },
 }
 
 -- The ids of the raid layouts: only the previewed size's handle is ever up.
@@ -98,6 +99,16 @@ local overlay = nil
 local donePanel = nil
 local returnToConfig = false   -- the config page DONE or Esc reopens, when the config window started the edit
 local pageRegistered = false
+local editListeners = {}   -- fn(editing) after the editor switches on or off (WarriorPowerUps.lua shows a static preview while it is on)
+
+-- fn(editing) runs after the editor turns on (true) and after it turns off (false). A listener that throws is skipped.
+function LayoutEdit.OnEditChanged(fn)
+    if type(fn) == "function" then editListeners[#editListeners + 1] = fn end
+end
+
+local function EditChanged()
+    for i = 1, #editListeners do pcall(editListeners[i], editing) end
+end
 local blizzardHooked = false
 
 local function Say(text)
@@ -862,6 +873,7 @@ function LayoutEdit.Enter()
         FS.Layout.ForwardError(err)
         return false
     end
+    EditChanged()
     Say("layout editor on: drag a piece, arrows nudge, Shift+arrow by the grid, right-click resets one, Esc leaves")
     CatchUpRaidHandle()
     if chatSkipped then Say("restore the chat from minimised or maximised to move it") end
@@ -885,6 +897,7 @@ function LayoutEdit.Exit()
     if donePanel then donePanel:Hide() end
     local preview = RaidPreview()
     if preview then pcall(preview.Hide) end
+    EditChanged()
     Say("layout editor off")
 end
 

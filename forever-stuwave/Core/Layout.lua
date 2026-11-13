@@ -136,6 +136,9 @@ FS.Layout = FS.Layout or {
     tracker     = { point = "CENTER", relPoint = "CENTER", x = 975,   y = 170,  w = 270,  h = 320 },
     -- Mirrors `chat` on the opposite side of the screen: same y, x negated.
     professions = { point = "CENTER", relPoint = "CENTER", x = 923,   y = -450, w = 300,  h = 210 },
+    -- The Warrior power-up alerts (WarriorPowerUps.lua): 150 x 96 sprite px at 2.5 design px each, centred above the character
+    -- between the rails (the Gunsight root sits at -6.4, -86.4 from the centre; the art's bottom edge is about 206 above it).
+    warriorpowerup = { point = "CENTER", relPoint = "CENTER", x = -6,    y = 240,  w = 375,  h = 240 },
     -- Seat for the default GameTooltip anchor (TooltipAnchor.lua); the tooltip grows up and left from its
     -- bottom right corner. Blizzard's default container: BOTTOMRIGHT of UIParent, 9 in and 85 up in raw UI units
     -- (12.1.0 UI source, unconfirmed on this client), so it hugs the corner at any width and UI scale.
