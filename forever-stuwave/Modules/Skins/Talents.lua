@@ -193,28 +193,19 @@ end
 -- Minimise and maximise
 -------------------------------------------------------------------------------
 
-local function SkinSizeButton(btn, glyphOutline)
-    if type(btn) ~= "table" then return end
-    local s = Char.SkinSquare(btn, {})
-    if not s then return end
-    local bw, bh = Kit.SizePx(btn)
-    bw, bh = bw or 28, bh or 28
-    local gw, gh = 14, glyphOutline and 12 or 2
-    local gx, gy = math.floor((bw - gw) / 2), math.floor((bh - gh) / 2)
-    local function r(x, y, w, h) return Kit.Rect(btn, gx + x, gy + y, w, h, C.cyan, 1, "OVERLAY", 7) end
-    if glyphOutline then
-        s.glyph = { r(0, 0, gw, 2), r(0, gh - 2, gw, 2), r(0, 0, 2, gh), r(gw - 2, 0, 2, gh) }
-    else
-        s.glyph = { r(0, 0, gw, gh) }
-    end
-    Char.PaintSquare(btn)
+-- The window's size toggle wears the close button's key, cyan, seated just left of the close button: a window glyph to
+-- maximise, a bar to restore.
+local function SkinSizeButton(btn, glyph, close)
+    if type(btn) ~= "table" or not (FS.ButtonSkins and FS.ButtonSkins.SkinCloseButton) then return end
+    FS.ButtonSkins.SkinCloseButton(btn, { glyph = glyph, accent = C.cyan, beside = close })
 end
 
 local function SkinSizeButtons(win)
     local pair = win.MaximizeMinimizeButton
     if type(pair) ~= "table" then return end
-    SkinSizeButton(pair.MinimizeButton, false)
-    SkinSizeButton(pair.MaximizeButton, true)
+    local close = type(win.CloseButton) == "table" and win.CloseButton or nil
+    SkinSizeButton(pair.MinimizeButton, "minus", close)
+    SkinSizeButton(pair.MaximizeButton, "max", close)
 end
 
 -------------------------------------------------------------------------------

@@ -3,7 +3,7 @@
 
 Pinned: a talent button gets a ring tint read from its border atlas and follows an atlas swap, nothing else on it is touched (no
 script, attribute or field written), the stock gold frame art, dividers, spec header rings and the Unspent Talents box are held or
-restyled in place, buttons built later are met on the next refresh, the minimise and maximise buttons wear a plate and a glyph,
+restyled in place, buttons built later are met on the next refresh, the minimise and maximise buttons wear the close button's key in cyan,
 the spellbook parchment is held and dark text retinted with state colours left alone, and nothing is built in combat.
 Run `python3 tools/talentsskin-harness.py [--png /tmp/tal]`. The mock is NOT the real client.
 """
@@ -24,6 +24,7 @@ function BuildBlizzard()
     local win = blz("Frame", "PlayerSpellsFrame", UIParent, 1218, 708)
     win.points[1] = { point = "TOPLEFT", rel = UIParent, relPoint = "TOPLEFT", x = 100, y = -80 }
     win.shown = false
+    win.CloseButton = blz("Button", "PlayerSpellsFrameCloseButton", win, 15, 15, "TOPRIGHT", -4, -4)
     local mm = blz("Frame", nil, win, 28, 28, "TOPRIGHT", -30, -6)
     win.MaximizeMinimizeButton = mm
     mm.MinimizeButton = blz("Button", nil, mm, 28, 28)
@@ -31,6 +32,7 @@ function BuildBlizzard()
     mm.MinimizeButton.scripts.OnClick = function() end
     mm.MaximizeButton = blz("Button", nil, mm, 28, 28)
     atex(mm.MaximizeButton, nil, "ARTWORK", "RedButton-Expand", 28, 28)
+    mm.MaximizeButton.scripts.OnClick = function() end
     mm.MaximizeButton.shown = false
 
     local tf = blz("Frame", nil, win, 1212, 681, "TOPLEFT", 3, -24)
@@ -98,7 +100,7 @@ function BuildBlizzard()
 end
 """
 
-H = Harness({"Character": "Modules/Skins/Character.lua", "Talents": "Modules/Skins/Talents.lua"}, BLIZZARD)
+H = Harness({"ButtonSkins": "Core/ButtonSkins.lua", "Character": "Modules/Skins/Character.lua", "Talents": "Modules/Skins/Talents.lua"}, BLIZZARD)
 case = H.case
 
 OPEN = "Fire('PLAYER_ENTERING_WORLD'); Fire('ADDON_LOADED', 'Blizzard_PlayerSpells'); PlayerSpellsFrame:Show(); FlushTimers()"
@@ -169,14 +171,18 @@ case("the Unspent Talents box is ours: stock border held, mono texts", f"""
     assert(cur.UnspentLabel.fontPath ~= 'stock.ttf' and cur.CurrentAmountContainer.CurrencyAmount.textColor[1] > 0.9, 'texts')
 """)
 
-case("minimise and maximise wear a plate and a glyph and keep their click", f"""
+case("minimise and maximise wear the close button's key in cyan beside the close button and keep their click", f"""
     {OPEN}
     local mm = PlayerSpellsFrame.MaximizeMinimizeButton
-    assert(mm.MinimizeButton.NormalTexture == nil or true)
-    assert(mm.MinimizeButton.regions[1].alpha == 0, 'stock art kept')
-    assert(mm.MinimizeButton.scripts.OnClick, 'click lost')
-    assert(FS.CharacterSkin.state.squares[mm.MinimizeButton] and #FS.CharacterSkin.state.squares[mm.MinimizeButton].glyph == 1)
-    assert(#FS.CharacterSkin.state.squares[mm.MaximizeButton].glyph == 4)
+    local close = PlayerSpellsFrame.CloseButton
+    for _, b in ipairs({{ mm.MinimizeButton, mm.MaximizeButton }}) do
+        assert(b.regions[1].alpha == 0, 'stock art kept')
+        assert(b.scripts.OnClick, 'click lost')
+        local pt = b.points[1]
+        assert(pt and pt.point == 'RIGHT' and pt.rel == close and pt.relPoint == 'LEFT', 'not seated beside the close button')
+    end
+    local cells = FS.ButtonSkins.GlyphCells('max')
+    assert(#cells == 6 * 3 + 3 * 2, 'window glyph: two title rows, a bottom row, two sides')
 """)
 
 case("spellbook: parchment held, dark text lifted, state colour kept, tab frames held", f"""

@@ -28,7 +28,7 @@ local WHITE = { 1, 1, 1, 1 }
 -- the two cut corners, seated 5 in and 3 down from the panel's top-right corner so it sits inside the border
 -- and inside the 18 unit title band, a hit rect 3 wider each side and below and 2 above, and a 6 x 6 pixel X.
 local X = {
-    PLATE = 14, CHAMFER = 3, GLYPH = 6, SEAT_R = 5, SEAT_T = 3, DISC = 12,
+    PLATE = 14, CHAMFER = 3, GLYPH = 6, SEAT_R = 5, SEAT_T = 3, DISC = 12, GAP = 4,
     HIT = { -3, -3, -2, -3 },
 }
 ButtonSkins.X = X
@@ -115,6 +115,15 @@ end
 -- The other glyphs of the plate, on the same 6 x 6 pixel grid and the same one pixel cells: a MINUS (a 6 x 2 bar, for a
 -- button that collapses something) and a PLUS (a two pixel cross, for one that expands it again).
 function ButtonSkins.GlyphCells(kind)
+    if kind == "max" then
+        -- a window: 6 x 6 outline with a 2 px title bar
+        local cells = {}
+        for x = 0, 5 do
+            cells[#cells + 1] = { x, 0 }; cells[#cells + 1] = { x, 1 }; cells[#cells + 1] = { x, 5 }
+        end
+        for y = 2, 4 do cells[#cells + 1] = { 0, y }; cells[#cells + 1] = { 5, y } end
+        return cells
+    end
     if kind == "minus" or kind == "plus" then
         local cells = {}
         for x = 0, 5 do cells[#cells + 1] = { x, 2 }; cells[#cells + 1] = { x, 3 } end
@@ -216,7 +225,7 @@ local function PaintX(button)
     local p = parts[button]
     if not p then return end
     local S = STATES[StateName(button, p)]
-    local pink = Theme.COLOR_HEALTH
+    local pink = p.accent or Theme.COLOR_HEALTH
     PaintPlate(p, pink, S)
     local g = Mix(pink, WHITE, S.lift)
     for i = 1, #p.glyph do p.glyph[i]:SetColorTexture(g[1], g[2], g[3], S.al) end
@@ -232,7 +241,11 @@ local function SeatX(button, p)
         local size = EvenPixels(X.PLATE, es) / es
         button:SetSize(size, size)
         button:ClearAllPoints()
-        button:SetPoint("TOPRIGHT", p.anchor, "TOPRIGHT", -RoundPx(X.SEAT_R, es), -RoundPx(X.SEAT_T, es))
+        if p.beside then
+            button:SetPoint("RIGHT", p.beside, "LEFT", -RoundPx(X.GAP, es), 0)
+        else
+            button:SetPoint("TOPRIGHT", p.anchor, "TOPRIGHT", -RoundPx(X.SEAT_R, es), -RoundPx(X.SEAT_T, es))
+        end
         if button.SetHitRectInsets then button:SetHitRectInsets(X.HIT[1], X.HIT[2], X.HIT[3], X.HIT[4]) end
         p.es = es
     end
@@ -262,7 +275,8 @@ end
 
 -- Skins an icon-only close button as the STUwave X: its Blizzard art held hidden, a 14 unit cut plate with a
 -- pink ring and halo, a 6 x 6 pixel X. opts.anchor is the frame it is seated to (default its parent).
--- opts.glyph is "x" (default), "minus" or "plus" (see SetGlyph). Idempotent; returns the skin pieces ({ face, ring,
+-- opts.glyph is "x" (default), "minus", "plus" or "max" (see SetGlyph). opts.accent replaces the pink (a window's size toggle
+-- is cyan); opts.beside seats the button just left of that frame (the close button) instead of the top right corner. Idempotent; returns the skin pieces ({ face, ring,
 -- halo, disc, glyph }).
 function ButtonSkins.SkinCloseButton(button, opts)
     if type(button) ~= "table" or type(button.CreateTexture) ~= "function" then return nil end
@@ -274,8 +288,9 @@ function ButtonSkins.SkinCloseButton(button, opts)
     local p = { hover = false, pressed = false, glyph = {}, inset = 0, kind = opts.glyph or "x" }
     parts[button] = p
     p.anchor = opts.anchor or (button.GetParent and button:GetParent()) or UIParent
+    p.accent, p.beside = opts.accent, opts.beside
 
-    local skin, face, flat = BuildPlate(button, Theme.COLOR_HEALTH, X.CHAMFER)
+    local skin, face, flat = BuildPlate(button, opts.accent or Theme.COLOR_HEALTH, X.CHAMFER)
     p.face, p.flat, p.halo, p.ring = face, flat, skin.glow, skin.border.ring
 
     p.disc = button:CreateTexture(nil, "OVERLAY", nil, 2)
