@@ -126,23 +126,28 @@ local function SeatLabel(widget, p)
     label:SetPoint("CENTER", widget, "TOPLEFT", x / ppu, -(p.top + (p.textY or K.TAB_TEXT_Y)) / ppu)
 end
 
--- An icon tab (the spellbook's category tabs: a 36 x 35 Icon over a 44 x 32 button) has its icon fitted inside the plate,
--- square, cropped past the art's own frame and unmasked, so nothing of it shows past the plate's edges.
-local ICON_INSET, ICON_CROP = 2, 0.08
-local function SeatIcon(widget, p)
+-- An icon tab (the spellbook's category tabs: a 36 x 35 Icon over a 44 x 32 button) is a key, not a strip tab: a square
+-- cut-corner plate KEY.SIZE across centred on the stock rect, the icon KEY.INSET in from its edge, square, cropped past the
+-- art's own frame and unmasked. Idle ink with the dim edge, hover cell and cyan, selected the selected fill with a 2 px pink
+-- edge.
+local KEY = { SIZE = 44, CUT = 6, INSET = 4, CROP = 0.08 }
+local function LayoutKey(widget, p, w, h)
+    local size = KEY.SIZE
+    local x, y = Round((w - size) / 2), Round((h - size) / 2)
+    p.w, p.h, p.top, p.fits = w, h, y, true
+    local plate = p.key
+    Kit.Place(plate.fill, widget, x, y, size, size)
+    Kit.Place(plate.ring, widget, x, y, size, size)
+    if plate.ring2 then Kit.Place(plate.ring2, widget, x + 1, y + 1, size - 2, size - 2) end
+    Kit.Move(p.led, x + size - K.TAB_LED - 4, y + 4, K.TAB_LED, K.TAB_LED)
     local icon = widget.Icon
-    if not (IsTable(icon) and type(icon.SetTexCoord) == "function" and type(icon.ClearAllPoints) == "function") then return end
     if InCombat() and Kit.Plain(Kit.Try(widget.IsProtected, widget)) == true then return end
-    if not p.icon then
-        p.icon = true
+    if not p.iconCut then
+        p.iconCut = true
         if IsTable(widget.IconMask) then Kit.Try(icon.RemoveMaskTexture, icon, widget.IconMask) end
-        icon:SetTexCoord(ICON_CROP, 1 - ICON_CROP, ICON_CROP, 1 - ICON_CROP)
+        icon:SetTexCoord(KEY.CROP, 1 - KEY.CROP, KEY.CROP, 1 - KEY.CROP)
     end
-    local room = p.plateH - (p.folder and 4 or 0) -- a folder tab keeps its pink rule clear
-    local size = math.max(1, room - 2 * ICON_INSET)
-    local x = Round(((p.folder and p.w - 2 or p.w) - size) / 2)
-    local y = p.top + Round((room - size) / 2)
-    Kit.Place(icon, widget, x, y, size, size)
+    Kit.Place(icon, widget, x + KEY.INSET, y + KEY.INSET, size - 2 * KEY.INSET, size - 2 * KEY.INSET)
 end
 
 -- Physical pixels from the tab's top up to the bottom of the window it hangs from (the first ancestor whose bottom is within
@@ -168,7 +173,7 @@ end
 local function LayoutFolder(widget, p, w, gap)
     local y0 = -gap
     local H, cut = FOLDER.H - y0, FOLDER.CUT -- the bottom stays FOLDER.H under the tab's top; the top meets the window
-    p.top, p.textY, p.plateH = y0, math.floor(H / 2), H
+    p.top, p.textY = y0, math.floor(H / 2)
     local f = p.fold
     Kit.Move(f.fill, 0, y0, w, H - cut)
     for r = 1, cut do
@@ -182,7 +187,6 @@ local function LayoutFolder(widget, p, w, gap)
     Kit.Move(f.open, 1, y0 - 1, math.max(0, w - 2), 1)
     Kit.Move(p.led, w - K.TAB_LED_X, y0 + K.TAB_LED_Y, K.TAB_LED, K.TAB_LED)
     SeatLabel(widget, p)
-    SeatIcon(widget, p)
 end
 
 local function Layout(widget)
@@ -190,6 +194,7 @@ local function Layout(widget)
     if not (p and p.built) then return end
     local w, h = Kit.SizePx(widget)
     if not w then return end
+    if p.key then return LayoutKey(widget, p, w, h) end
     local gap = p.fold ~= nil and not OnTop(widget) and WindowGap(widget) or nil
     p.folder = gap ~= nil
     if p.folder then
@@ -200,7 +205,7 @@ local function Layout(widget)
     p.textY = nil
     local s, th = K.TAB_SLANT, K.TAB_H
     local top = OnTop(widget) and math.max(0, h - th) or 0
-    p.w, p.h, p.top, p.plateH = w, h, top, th
+    p.w, p.h, p.top = w, h, top
     p.fits = w > 2 * s -- a stock tab not yet sized (10 wide) has no room for two caps
     local mid = math.max(0, w - 2 * s)
     Kit.Move(p.fillL, 0, top, s, th)
@@ -217,7 +222,6 @@ local function Layout(widget)
     Kit.Move(p.led, w - K.TAB_LED_X, top + K.TAB_LED_Y, K.TAB_LED, K.TAB_LED)
     ApplyMarch(p)
     SeatLabel(widget, p)
-    SeatIcon(widget, p)
 end
 
 Kit.OnReseat(function()
@@ -255,6 +259,21 @@ local function Paint(widget)
     if not (p and p.built) then return end
     local selected = IsSelected(widget)
     local disabled = not selected and not Kit.IsEnabled(widget)
+    if p.key then
+        local fill, edge, px = C.ink, C.dim, 1
+        if selected then
+            fill, edge, px = C.sel, C.pink, 2
+        elseif disabled then
+            fill, edge = C.disFill, C.disEdge
+        elseif p.state.hover or p.state.pressed then
+            fill, edge = C.cell, C.cyan
+        end
+        Kit.PaintPlate(p.key, fill, 1, edge, 1, px)
+        local news = p.news or IsTable(widget.notificationFrame)
+        p.led:SetShown(news and true or false)
+        if news then p.led:SetColorTexture(C.amber[1], C.amber[2], C.amber[3], 1) end
+        return
+    end
     if p.folder then
         local text = PaintFolder(widget, p, selected, disabled)
         local news = p.news or IsTable(widget.notificationFrame)
@@ -381,6 +400,11 @@ local function Build(widget)
     for r = 1, FOLDER.CUT do f.diag[r] = R(C.border, "BORDER", 1) end
     f.rule = R(C.pink, "BORDER", 2)
     p.fold = f
+    if IsTable(widget.Icon) and type(widget.Icon.SetTexCoord) == "function" then
+        p.key = Kit.Plate(widget, KEY.CUT, KEY.SIZE, KEY.SIZE)
+        for _, t in ipairs({ p.fillL, p.fillM, p.fillR, p.extra, p.edgeL, p.edgeR, p.edgeTop, p.edgeBottom, p.diagL, p.diagR,
+            p.chev }) do t:Hide(); t:SetAlpha(0) end
+    end
     p.built = true
 
     p.state = Kit.Track(widget, Paint)

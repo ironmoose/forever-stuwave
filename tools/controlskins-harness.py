@@ -2844,23 +2844,29 @@ case("a_bottom_tab_under_a_window_is_a_folder_tab_in_the_windows_own_fill_and_bo
     assert(not q.folder and q.fillM:IsShown())
 """)
 
-case("an_icon_tab_fits_its_icon_square_inside_the_plate_cropped_and_unmasked", TAB_PRELUDE + """
-    -- the spellbook's category tabs: a 36 x 35 icon on a narrower, shorter button, masked to the stock frame
-    local b = PanelTab(P, "", 20, 20, 54 / PPU, 32)
+case("an_icon_tab_is_a_44_px_cut_key_with_a_36_px_icon_cropped_and_unmasked", TAB_PRELUDE + """
+    -- the spellbook's category tabs: a 36 x 35 icon on a 54 x 38 px button, masked to the stock frame
+    local b = PanelTab(P, "", 20, 20, 54 / PPU, 38 / PPU)
     b.Icon = tex(b, nil, "ARTWORK")
     b.Icon:SetSize(36, 35); b.Icon:SetPoint("CENTER", b, "CENTER", 0, 0)
     local mask = {}
     b.IconMask = mask
     function b.Icon:RemoveMaskTexture(m) if m == mask then self.unmasked = true end end
     assert(FS.TabSkins.Skin(b)); FlushTimers()
+    local p = FS.TabSkins.Parts(b)
     NoDegrade()
-    -- 28 px plate from the tab's top: a 24 px square, 2 px in from the plate's top and bottom, centred on the 54 px rect
-    Expect(b.Icon, b, 15, 2, 24, 24, "icon inside the plate")
+    Expect(p.key.fill, b, 5, -3, 44, 44, "the key, centred on the rect")
+    Expect(b.Icon, b, 9, 1, 36, 36, "icon 4 in from the key's edge")
     assert(b.Icon.unmasked, "the stock frame mask is taken off")
     local c = b.Icon.coords
     assert(c[1] == 0.08 and c[2] == 0.92 and c[3] == 0.08 and c[4] == 0.92, "cropped past the art's own frame")
+    assert(not p.fillM:IsShown() and not p.edgeL:IsShown() and not p.chev:IsShown(), "no slanted strip")
+    Is(p.key.ring.vertex, T.COLOR_CTRL_DIM, 1, "idle edge")
+    Hover(b)
+    Is(p.key.ring.vertex, T.COLOR_POWER, 1, "hover edge")
     PanelTemplates_SelectTab(b); FlushTimers()
-    Expect(b.Icon, b, 15, 2, 24, 24, "still inside after a select")
+    Is(p.key.ring.vertex, T.COLOR_HEALTH, 1, "selected edge is pink")
+    Expect(b.Icon, b, 9, 1, 36, 36, "still seated after a select")
 """)
 
 case("tab_tokens_are_the_mockups_numbers", PRELUDE + """
