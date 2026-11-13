@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Runs the real Tracker.lua headless against a mock objective tracker.
 
-Pins the one-header layout and the quest markers: the band reads the quest count over the first module's header row, that header's own text
-and the modules' gold minus are hidden, and collapsed the panel is a compact bar whose whole width clicks the
-tracker's own collapse button.
+Pins the panel and the quest markers: the band reads stuwave://objectives in the container's header strip over a panel
+that is the whole container, every module header's stock text is held behind our sub-head and the modules' gold minus is
+hidden, and collapsed the panel is a compact bar reading the quest count whose whole width clicks the tracker's own collapse
+button. The skin's richer behaviour (ticks, LED, rails, shutter) is pinned in trackerskin-harness.py.
 """
 import sys
 from pathlib import Path
@@ -101,16 +102,17 @@ local FS = { Theme = setmetatable({PANEL_HEADER_H=18, COLOR_AMBER={1,0.7,0.3,1},
 assert(loadstring(SRC))("forever-stuwave", FS)
 
 local label, backdrop
-for _, o in ipairs(frames) do if o.kind == "FontString" and o.text and o.text:find("^quests") then label = o end end
-for _, o in ipairs(frames) do if o.kind == "Frame" and o.pts[1] and o.pts[1][1] == "TOPLEFT" and o.pts[1][4] == 0 and o.pts[1][5] == -38 then backdrop = o end end
+for _, o in ipairs(frames) do if o.kind == "FontString" and o.text and o.text:find("^stuwave://objectives") then label = o end end
+for _, o in ipairs(frames) do if not backdrop and o.kind == "Frame" and o.parent == tracker then backdrop = o end end
 local results = {}
 local function case(name, ok) results[#results+1] = (ok and "PASS " or "FAIL ") .. name end
 
 local qh = QuestObjectiveTracker.Header
-case("one_header_reads_the_quest_count", label and label.text == "quests (2/40)")
-case("panel_starts_at_the_first_module_header_row", backdrop ~= nil)
-case("first_module_header_text_is_hidden_under_the_band", qh.Text.alpha == 0)
-case("other_module_headers_keep_their_text", AchievementObjectiveTracker.Header.Text.alpha == 1)
+case("band_reads_stuwave_objectives", label and label.text == "stuwave://objectives")
+case("panel_is_the_whole_container_strip_from_its_top", backdrop and backdrop.pts[1][1] == "TOPLEFT" and backdrop.pts[1][5] == 0
+  and #backdrop.pts == 2)
+case("first_module_header_text_is_held_behind_the_sub_head", qh.Text.alpha == 0)
+case("other_module_headers_are_held_too", AchievementObjectiveTracker.Header.Text.alpha == 0)
 case("module_gold_minus_is_hidden_and_stays_hidden", (function()
   local b = qh.MinimizeButton; if b.shown then return false end; b:Show(); return b.shown == false end)())
 
@@ -120,7 +122,7 @@ local btn = tracker.Header.MinimizeButton
 case("collapsed_bar_is_compact_on_the_right", backdrop and backdrop.pts[1][1] == "TOPRIGHT" and #backdrop.pts == 1
   and backdrop.w and backdrop.w < 140 and backdrop.h == 24)
 case("collapsed_bar_clicks_anywhere_through_the_button", btn.hit and btn.hit[1] == -6 and btn.hit[2] <= -(backdrop.w - 6 - 14 - 8))
-case("collapsed_restores_the_hidden_header_text", qh.Text.alpha == 1)
+case("collapsed_bar_reads_the_quest_count", label.text == "quests (2/40)")
 case("collapsed_without_the_console_key_keeps_the_bar", backdrop.shown == true)
 
 -- the console's Quests key on screen: a collapsed tracker draws nothing and its button takes no mouse
@@ -137,7 +139,7 @@ FSConsoleKeyquests = nil
 
 AchievementObjectiveTracker.height = 40
 tracker:Update()
-case("a_different_first_module_names_the_band", label.text == "achievements" and qh.Text.alpha == 1
+case("a_different_first_module_does_not_rename_the_band", label.text == "stuwave://objectives" and qh.Text.alpha == 0
   and AchievementObjectiveTracker.Header.Text.alpha == 0)
 local function plate(b) for _, o in ipairs(frames) do if o.kind == "Frame" and o.pts[1] and o.pts[1][2] == b then return o end end end
 local function cells(b)

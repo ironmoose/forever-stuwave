@@ -15,7 +15,9 @@ The Questie compat module skins the Questie quest tracker to match STUwave. Thes
   * an error in the hook is handed to the error handler and never reaches Questie's own update;
   * the STUwave font is registered with LibSharedMedia under a neutral name, once, without touching
     Questie's own font settings;
-  * the existing target frame icon adoption still moves Questie's icon onto the STUwave target frame.
+  * the existing target frame icon adoption still moves Questie's icon onto the STUwave target frame;
+  * a minimized tracker is drawn as a full-alpha bar with the band filling it, a hovered header button turns its edge
+    pink, and a hovered tracker line gets a wash across the panel, all by post-hooks and regions of the base frame.
 
     python3 tools/questie-harness.py
 
@@ -76,6 +78,10 @@ function Obj:SetFrameStrata(s) self.strata = s end
 function Obj:GetFrameLevel() return self.level or 1 end
 function Obj:SetFrameLevel(l) self.level = l end
 function Obj:SetTexture(t) self.texture = t end
+function Obj:HookScript(n, fn) self.hooks = self.hooks or {}; self.hooks[n] = self.hooks[n] or {}; table.insert(self.hooks[n], fn) end
+function Obj:RunScript(n, ...) for _, fn in ipairs((self.hooks or {})[n] or {}) do fn(self, ...) end end
+function Obj:GetLeft() return self._left end
+function Obj:GetRight() return self._right end
 
 function New(kind) return setmetatable({ kind = kind }, Obj) end
 __frames, __textures, __chrome, __hooked, __tickers, __registered = {}, {}, {}, {}, {}, {}
@@ -153,7 +159,7 @@ FS = {
     Layout = { ForwardError = function(e) __errors[#__errors + 1] = e end },
     IsSecret = function(v) return v == __secret end,
     Theme = {
-        COLOR_BG = { 0.102, 0.063, 0.145, 0.80 }, COLOR_POWER = { 0.133, 0.878, 1, 1 },
+        COLOR_BG = { 0.102, 0.063, 0.145, 0.80 }, COLOR_POWER = { 0.133, 0.878, 1, 1 }, COLOR_HEALTH = { 1, 0.18, 0.592, 1 },
         FONT_MONO = "Interface\\AddOns\\forever-stuwave\\Media\\Fonts\\MononokiNerdFontMono-Bold.ttf",
         PanelBandInset = function() return 3 end,
         AddPanelChrome = function(frame, opts)
@@ -420,6 +426,68 @@ case("the_target_frame_icon_is_still_moved_onto_the_stuwave_target_frame", """
     local p = icon.points[1]
     assert(p[1] == "RIGHT" and p[2] == ours and p[3] == "RIGHT" and p[4] == -30 and p[5] == 25, "icon offsets")
     assert(icon.level == 24 and icon.strata == "LOW")
+""")
+
+
+case("a_minimized_tracker_is_a_full_alpha_bar_and_the_band_fills_it", """
+    local base = MakeBase()
+    local header = MakeHeader(base, 14)
+    header:SetHeight(14)
+    Questie.db.char = { isTrackerExpanded = false }
+    Load(); Fire("PLAYER_LOGIN")
+    base:SetBackdropColor(0, 0, 0, 0) -- Questie draws nothing when minimized
+    local c = Chrome()
+    assert(c.fill.alpha == 1 and c.border.alpha == 1, "minimized panel not at full alpha: " .. tostring(c.fill.alpha))
+    local band = Band()
+    assert(band.shown ~= false, "band hidden on the bar")
+    assert(band.points[2][1] == "BOTTOMRIGHT" and band.points[2][2] == base, "band does not fill the bar")
+    assert(Rule().shown == false, "rule drawn on the bar")
+    Questie.db.char.isTrackerExpanded = true
+    base:SetBackdropColor(0, 0, 0, 0.5)
+    assert(c.fill.alpha == 0.5, "expanded panel does not follow Questie again: " .. tostring(c.fill.alpha))
+    assert(band.points[2][1] == "TOPRIGHT", "band not back to the header row")
+    assert(Rule().shown ~= false, "rule not back")
+""")
+
+case("hovering_the_minimized_header_button_turns_the_edge_pink", """
+    local base = MakeBase()
+    local header = MakeHeader(base, 14)
+    header.trackedQuests = New("Button")
+    Questie.db.char = { isTrackerExpanded = false }
+    Load(); Fire("PLAYER_LOGIN")
+    local border = Chrome().border
+    local pink, cyan = FS.Theme.COLOR_HEALTH, FS.Theme.COLOR_POWER
+    assert(border.vc[1] == cyan[1], "edge not cyan at rest")
+    header.trackedQuests:RunScript("OnEnter")
+    assert(border.vc[1] == pink[1] and border.vc[2] == pink[2], "edge not pink on hover")
+    header.trackedQuests:RunScript("OnLeave")
+    assert(border.vc[1] == cyan[1], "edge not cyan after leaving")
+    Questie.db.char.isTrackerExpanded = true
+    base:SetBackdropColor(0, 0, 0, 1)
+    header.trackedQuests:RunScript("OnEnter")
+    assert(border.vc[1] == cyan[1], "expanded tracker edge went pink")
+    assert(#header.trackedQuests.hooks.OnEnter == 1, "hooked more than once")
+""")
+
+case("a_hovered_tracker_line_gets_a_wash_across_the_panel_and_is_hooked_once", """
+    local base = MakeBase()
+    base._left, base._right = 0, 300
+    local line = CreateFrame("Button", "linePool1", base)
+    line._left, line._right = 20, 120
+    Load(); Fire("PLAYER_LOGIN")
+    base:SetBackdropColor(0, 0, 0, 1)
+    base:SetBackdropColor(0, 0, 0, 1)
+    assert(#line.hooks.OnEnter == 1 and #line.hooks.OnLeave == 1, "hooked again on a later update")
+    assert(line.scripts == nil, "Questie's line scripts replaced")
+    line:RunScript("OnEnter")
+    local wash
+    for _, t in ipairs(__textures) do if t.washed or (t.ct and t.ct[4] == 0.10 and t.points and t.points[1][2] == line) then wash = t end end
+    assert(wash and wash.shown ~= false, "no wash on the hovered line")
+    assert(wash.points[1][4] == -17 and wash.points[2][4] == 177, "wash not edge to edge: " .. wash.points[1][4] .. " " .. wash.points[2][4])
+    line:RunScript("OnLeave")
+    assert(wash.shown == false, "wash stays after leaving")
+    line:RunScript("OnEnter"); line:RunScript("OnHide")
+    assert(wash.shown == false, "wash stays on a hidden line")
 """)
 
 

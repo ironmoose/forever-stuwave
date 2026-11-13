@@ -23,6 +23,13 @@
 -- stops once the chrome is on. Questie's header row ("Questie Tracker: 12/40") gets a header band and rule behind it
 -- while that row is shown at the top of the frame. Everything here is a plain frame or region, legal in combat.
 --
+-- The minimized tracker (Questie shows only its header row, with its backdrop at alpha 0) is drawn as the same small
+-- bar the STUwave tracker collapses to: the panel is held at full alpha and the band fills it, and hovering the header
+-- button turns the bar's edge pink. A hovered tracker line gets a cyan wash across the panel. The wash and the edge are
+-- regions of the base frame and post-hooks (HookScript) on Questie's own buttons; the scripts and layout of Questie's
+-- frames are never replaced. Not done: the manifest spine, station nodes and objective ticks (they need Questie's
+-- line layout read first), and the minimized bar's quest ticks and LED.
+--
 -- 3. Tracker font. STUwave's tracker font is registered with LibSharedMedia as "STUwave", so it shows in Questie's
 -- font pickers. Questie's own font settings are never written.
 --
@@ -43,6 +50,8 @@ local FONT_NAME = "STUwave"
 local MEDIA_LIB = "LibSharedMedia-3.0"
 local POLL_SECONDS, POLL_TRIES = 1, 180 -- three minutes is far past Questie's login stages
 local BAND_ALPHA, RULE_ALPHA = 0.08, 0.30 -- the tracker panel's own band and rule (Tracker.lua)
+local LINE_COUNT = 250 -- Questie's line pool size (TrackerLinePool.lua); its lines are the globals linePool1..250
+local WASH_ALPHA = 0.10 -- a hovered tracker line's wash, as the STUwave tracker's hover wash
 
 -- The pieces Blizzard's BackdropTemplate draws a backdrop with (Backdrop.lua, textureUVs); Center holds the fill and
 -- the colour state Questie writes.
@@ -177,8 +186,44 @@ local function HeaderDepth()
     return depth > 0 and depth or nil
 end
 
--- The band runs from the panel's inset to the bottom of Questie's header row, the rule under it.
+-- True while Questie's tracker is minimized to its header row: the char flag is false and the header is shown.
+local function Minimized()
+    local q = _G.Questie
+    local char = type(q) == "table" and type(q.db) == "table" and q.db.char
+    if type(char) ~= "table" or char.isTrackerExpanded ~= false then return false end
+    local header = _G[HEADER_FRAME]
+    return type(header) == "table" and type(header.IsShown) == "function" and header:IsShown() == true
+end
+
+-- The panel's edge: cyan, or pink while the minimized bar is hovered through its header button.
+local function PaintEdge()
+    local Theme = FS.Theme
+    if not (skin and skin.border and Theme) then return end
+    local c = (skin.minimized and skin.hover and Theme.COLOR_HEALTH) or Theme.COLOR_POWER
+    skin.border:SetVertexColor(c[1], c[2], c[3], 1)
+end
+
+-- The band runs from the panel's inset to the bottom of Questie's header row, the rule under it. Minimized, the band
+-- fills the whole panel (the bar) and there is no rule.
 local function LayoutBand()
+    local minimized = Minimized()
+    if minimized ~= skin.minimized then
+        skin.minimized = minimized
+        skin.band:ClearAllPoints()
+        skin.band:SetPoint("TOPLEFT", skin.frame, "TOPLEFT", skin.inset, -skin.inset)
+        if minimized then
+            skin.band:SetPoint("BOTTOMRIGHT", skin.frame, "BOTTOMRIGHT", -skin.inset, skin.inset)
+        else
+            skin.band:SetPoint("TOPRIGHT", skin.frame, "TOPRIGHT", -skin.inset, -skin.inset)
+        end
+        skin.bandHeight = false -- the header band below is worked out again
+        PaintEdge()
+    end
+    if minimized then
+        skin.band:Show()
+        skin.rule:Hide()
+        return
+    end
     local depth = HeaderDepth()
     local height = depth and math.floor(depth - skin.inset + 0.5) or nil
     if height and height < 2 then height = nil end
@@ -187,14 +232,6 @@ local function LayoutBand()
     skin.band:SetShown(height ~= nil)
     skin.rule:SetShown(height ~= nil)
     if height then skin.band:SetHeight(height) end
-end
-
--- After each Questie colour call: its own backdrop stays invisible, the panel takes its alpha, the band its row.
-local function OnBackdropColor(_, _, _, _, alpha)
-    MuteQuestieBackdrop()
-    alpha = Plain(alpha)
-    if alpha then Follow(math.max(0, math.min(1, alpha))) end
-    LayoutBand()
 end
 
 -- A hook's error is raised in the caller, which here is Questie's own tracker update: a throw of ours must never cut
@@ -206,6 +243,73 @@ local function Guarded(fn)
         local layout = FS.Layout
         if layout and layout.ForwardError then layout.ForwardError(err) end
     end
+end
+
+local function Try(fn, ...)
+    local ok, value = pcall(fn, ...)
+    return ok and Plain(value) or nil
+end
+
+-- A hovered tracker line's wash: one shared region of the base frame, drawn across the panel behind the line. Offsets
+-- are read from the two rects (the line is only as wide as its text); unreadable, the wash is the line's own rect.
+local function ShowWash(line)
+    local frame = skin.frame
+    if not skin.wash then
+        skin.wash = frame:CreateTexture(nil, "BACKGROUND", nil, 3)
+        local c = FS.Theme.COLOR_POWER
+        skin.wash:SetColorTexture(c[1], c[2], c[3], WASH_ALPHA)
+    end
+    local dl, dr = 0, 0
+    if type(frame.GetLeft) == "function" and type(line.GetLeft) == "function" then
+        local fl, fr = Try(frame.GetLeft, frame), Try(frame.GetRight, frame)
+        local ll, lr = Try(line.GetLeft, line), Try(line.GetRight, line)
+        if fl and fr and ll and lr then dl, dr = fl - ll + skin.inset, fr - lr - skin.inset end
+    end
+    skin.wash:ClearAllPoints()
+    skin.wash:SetPoint("TOPLEFT", line, "TOPLEFT", dl, 0)
+    skin.wash:SetPoint("BOTTOMRIGHT", line, "BOTTOMRIGHT", dr, 0)
+    skin.wash:Show()
+    skin.washLine = line
+end
+
+local function HideWash(line)
+    if skin.wash and (line == nil or skin.washLine == line) then
+        skin.wash:Hide()
+        skin.washLine = nil
+    end
+end
+
+-- Questie builds its header button and its 250 lines in the login coroutine, so they are found over its updates: the
+-- header button once, each line once. Post-hooks only; Questie keeps its own scripts.
+local function HookQuestie()
+    local header = _G[HEADER_FRAME]
+    local button = type(header) == "table" and header.trackedQuests
+    if not skin.headerHooked and type(button) == "table" and type(button.HookScript) == "function" then
+        skin.headerHooked = true
+        button:HookScript("OnEnter", Guarded(function() skin.hover = true; PaintEdge() end))
+        button:HookScript("OnLeave", Guarded(function() skin.hover = false; PaintEdge() end))
+    end
+    local i = skin.nextLine
+    while i <= LINE_COUNT do
+        local line = _G["linePool" .. i]
+        if type(line) ~= "table" or type(line.HookScript) ~= "function" then break end
+        line:HookScript("OnEnter", Guarded(function(self) ShowWash(self) end))
+        line:HookScript("OnLeave", Guarded(function(self) HideWash(self) end))
+        line:HookScript("OnHide", Guarded(function(self) HideWash(self) end))
+        i = i + 1
+    end
+    skin.nextLine = i
+end
+
+-- After each Questie colour call: its own backdrop stays invisible, the panel takes its alpha (full while minimized),
+-- the band its row.
+local function OnBackdropColor(_, _, _, _, alpha)
+    MuteQuestieBackdrop()
+    alpha = Plain(alpha)
+    if Minimized() then alpha = 1 end
+    if alpha then Follow(math.max(0, math.min(1, alpha))) end
+    LayoutBand()
+    HookQuestie()
 end
 
 -- Builds the chrome once Questie's frame exists and its tracker is on. Returns true when there is nothing left to wait
@@ -237,15 +341,17 @@ local function SkinTracker()
     rule:SetHeight(1)
     rule:Hide()
 
-    skin = { frame = frame, regions = { fill, glow, border, band, rule }, band = band, rule = rule,
-        inset = inset, muted = {} }
+    skin = { frame = frame, regions = { fill, glow, border, band, rule }, band = band, rule = rule, border = border,
+        inset = inset, muted = {}, minimized = false, nextLine = 1 }
     MuteQuestieBackdrop()
 
     -- Start from what Questie has stored in its backdrop now; an unreadable state is hidden until its next call.
     local ok, _, _, _, alpha = pcall(frame.GetBackdropColor, frame)
     alpha = ok and Plain(alpha) or 0
+    if Minimized() then alpha = 1 end
     Follow(math.max(0, math.min(1, alpha)))
     LayoutBand()
+    HookQuestie()
 
     hooksecurefunc(frame, "SetBackdropColor", Guarded(OnBackdropColor))
     return true
