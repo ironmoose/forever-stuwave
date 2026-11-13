@@ -71,6 +71,8 @@ Modules/Skins/Tooltip.lua
 Modules/Skins/TooltipAnchor.lua
 Modules/Skins/Popups.lua
 Modules/Skins/Menus.lua
+Modules/Skins/Settings.lua
+Modules/Skins/System.lua
 Modules/Bags/Bags.lua
 Modules/Skins/Loot.lua
 Modules/DataBars/DataBar.lua
