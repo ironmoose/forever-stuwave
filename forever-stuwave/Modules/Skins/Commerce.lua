@@ -142,6 +142,61 @@ local function ChevronSquare(btn, dir)
     dim()
 end
 
+-- A page key (the vendor's Prev and Next): the stock art held FIRST, then a cut-corner key PAGER px across centred on the stock
+-- button, a cyan chevron of cells centred in it. Idle ink with a violet edge, hover lights the edge and glyph, disabled dims all.
+-- dir is "<" or ">". The stock label beside the button stays where the stock code puts it, in mono.
+local PAGER = { SIZE = 26, CUT = 5, STEP = 2, ROWS = 9, THICK = 2 }
+
+local function PaintPager(btn)
+    local s = S.pagers[btn]
+    if not s then return end
+    local on = Kit.IsEnabled(btn)
+    local hover = on and s.state and (s.state.hover or s.state.pressed)
+    local edge = not on and C.dim or (hover and C.cyan or C.violet)
+    Kit.PaintPlate(s.key, C.ink, 1, edge, on and 1 or 0.6, hover and 2 or 1)
+    local g = hover and C.text or C.cyan
+    for _, t in ipairs(s.glyph) do
+        t:SetColorTexture(g[1], g[2], g[3], 1)
+        t:SetAlpha(on and 1 or 0.35)
+    end
+    if s.label then
+        local c = not on and C.muted or (hover and C.cyan or C.text)
+        Char.PinColor(s.label, c)
+    end
+end
+
+local function PagerKey(btn, dir)
+    if type(btn) ~= "table" or S.pagers[btn] then return end
+    HeldArt.HoldButton(btn)
+    local bw, bh = Kit.SizePx(btn)
+    bw, bh = bw or 32, bh or 32
+    local P = PAGER
+    local x, y = math.floor((bw - P.SIZE) / 2), math.floor((bh - P.SIZE) / 2)
+    local s = { key = Kit.Plate(btn, P.CUT, P.SIZE, P.SIZE), glyph = {} }
+    Kit.Place(s.key.fill, btn, x, y, P.SIZE, P.SIZE)
+    Kit.Place(s.key.ring, btn, x, y, P.SIZE, P.SIZE)
+    if s.key.ring2 then Kit.Place(s.key.ring2, btn, x + 1, y + 1, P.SIZE - 2, P.SIZE - 2) end
+    local half = (P.ROWS - 1) / 2
+    local gw, gh = half * P.STEP + P.THICK, P.ROWS * P.THICK
+    local gx, gy = x + math.floor((P.SIZE - gw) / 2), y + math.floor((P.SIZE - gh) / 2)
+    for row = 0, P.ROWS - 1 do
+        local d = math.abs(row - half)
+        local cx = dir == "<" and d * P.STEP or (half - d) * P.STEP
+        s.glyph[#s.glyph + 1] = Kit.Rect(btn, gx + cx, gy + row * P.THICK, P.THICK, P.THICK, C.cyan, 1, "OVERLAY", 7)
+    end
+    for _, region in ipairs(List(btn, "GetRegions")) do
+        if Try(region.GetObjectType, region) == "FontString" then
+            Mono(region, btn, 12, C.text)
+            s.label = region
+        end
+    end
+    S.pagers[btn] = s
+    s.state = Kit.Track(btn, PaintPager)
+    for _, script in ipairs({ "OnEnable", "OnDisable", "OnShow" }) do Kit.HookScript(btn, script, PaintPager) end
+    for _, m in ipairs({ "Enable", "Disable", "SetEnabled" }) do Kit.HookFunc(btn, m, function() PaintPager(btn) end) end
+    PaintPager(btn)
+end
+
 -- A square button whose own icon is the picture (the vendor's repair keys): held art, a ring box that follows the state.
 local function IconSquare(btn)
     if type(btn) ~= "table" or type(btn.Icon) ~= "table" then return end
@@ -186,6 +241,7 @@ end
 -------------------------------------------------------------------------------
 
 local MERCHANT_ROWS = 12
+local CARD_PAD = 3
 
 local function CardShown(card, shown)
     card.fill:SetShown(shown)
@@ -209,7 +265,12 @@ local function SkinVendorRow(row)
     local name = Try(row.GetName, row)
     HeldArt.Hold(row.SlotTexture)
     if type(name) == "string" then HeldArt.Hold(_G[name .. "NameFrame"]) end
-    local card = { box = Char.Box(row, "BORDER") }
+    -- The card is padded out past the row: the stock slot sits flush in the row's top left corner and the price on its bottom
+    -- edge, so a box on the row's own rect cuts through both. CARD_PAD UI units left, up and down (rows are 8 apart).
+    local ref = row:CreateTexture(nil, "BACKGROUND", nil, -8)
+    ref:SetPoint("TOPLEFT", row, "TOPLEFT", -CARD_PAD, CARD_PAD)
+    ref:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, -CARD_PAD)
+    local card = { box = Char.Box(row, "BORDER", ref) }
     S.cards[row] = card
     if type(button) == "table" then
         SkinItemSlot(button, ReadVendorSlot)
@@ -244,6 +305,7 @@ local function SkinVendorFooter(win)
     for _, name in ipairs({ "MerchantExtraCurrencyInset", "MerchantExtraCurrencyBg", "MerchantMoneyInset", "MerchantMoneyBg" }) do
         Kit.HoldFrame(_G[name])
     end
+    HeldArt.Hold(_G.MerchantFrameBottomLeftBorder)   -- the stock metal strip over the buyback slot
     if S.done.footer then return end
     S.done.footer = true
     for _, name in ipairs({ "MerchantExtraCurrencyBg", "MerchantMoneyBg" }) do
@@ -257,13 +319,7 @@ local function SkinVendorButtons(win)
         IconSquare(_G[name])
     end
     for _, spec in ipairs({ { "MerchantPrevPageButton", "<" }, { "MerchantNextPageButton", ">" } }) do
-        local btn = _G[spec[1]]
-        if btn and not S.pagers[btn] then
-            ChevronSquare(btn, spec[2])
-            for _, region in ipairs(List(btn, "GetRegions")) do
-                if Try(region.GetObjectType, region) == "FontString" then Mono(region, btn, 12, C.muted); Char.PinColor(region, C.muted) end
-            end
-        end
+        PagerKey(_G[spec[1]], spec[2])
     end
     Mono(_G.MerchantPageText, win, 12, C.muted)
     Char.PinColor(_G.MerchantPageText, C.muted)

@@ -369,7 +369,7 @@ case("vendor: the item slot takes its quality from SetItemButtonQuality", f"""
     assert(math.abs(parts.led.color[2] - g[2]) < 0.01, 'LED did not follow the quality')
 """)
 
-case("vendor: repair keys keep their icon and click, wear a ring; pager keys hold the stock arrows and draw a chevron", f"""
+case("vendor: repair keys keep their icon and click, wear a ring; pager keys hold the stock arrows and draw a cut key with a chevron", f"""
     {OPEN}
     local S = FS.CommerceSkin.state
     local CS = FS.CharacterSkin.state
@@ -380,13 +380,15 @@ case("vendor: repair keys keep their icon and click, wear a ring; pager keys hol
         assert(b.scripts.OnClick, 'click lost on ' .. n)
     end
     local prev, nxt = _G.MerchantPrevPageButton, _G.MerchantNextPageButton
-    assert(CS.squares[prev] and #CS.squares[prev].glyph == 7, 'chevron')
+    local P = S.pagers
+    assert(P[prev] and #P[prev].glyph == 9 and P[prev].key, 'pager key with a 9 row chevron')
+    assert(P[prev].key.ring.alpha ~= 0 and P[prev].key.fill.alpha ~= 0, 'the key must not be held')
     assert(prev.NormalTexture.alpha == 0, 'stock arrow kept')
     assert(prev.scripts.OnClick, 'pager click lost')
-    assert(CS.squares[prev].glyph[1].alpha == 0.35, 'disabled previous page not dimmed')
-    assert(CS.squares[nxt].glyph[1].alpha == 1, 'enabled next page dimmed')
+    assert(P[prev].glyph[1].alpha == 0.35, 'disabled previous page not dimmed')
+    assert(P[nxt].glyph[1].alpha == 1, 'enabled next page dimmed')
     prev:Enable()
-    assert(CS.squares[prev].glyph[1].alpha == 1, 'enable did not undim')
+    assert(P[prev].glyph[1].alpha == 1, 'enable did not undim')
 """)
 
 case("vendor: the wells under the shop are held and drawn again as ring boxes", f"""
