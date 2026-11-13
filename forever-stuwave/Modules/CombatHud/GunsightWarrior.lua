@@ -78,12 +78,12 @@ local C = {
     TEXT_MAX_S = 99,
     -- The strike window lane, sprite px on the canvas (the mockup's own numbers; the bar is centred on the 150 px width)
     LANE = {
-        X = 22, Y = 82, W = 106, H = 6,
+        X = 22, Y = 80, W = 106, H = 8,  -- 2026-11-12: thickened from 82 x 6 (bottom edge kept)
         OPEN = 0.15,                   -- the box opens from its middle in OPEN s
         AMBER = 1.5,                   -- the last AMBER s: amber fill, edge and label, and the tick mark
         CAST = 0.4, SNAP = 0.18,       -- the cast flash lasts CAST s; the pink bar snaps shut in SNAP s
         EXPIRE = 0.35,                 -- the amber dotted outline fades out in EXPIRE s
-        LABEL_BASE = 97,               -- the label's baseline: the bottom of the mockup's 5 px text (its top is the bar's Y + 10)
+        LABEL_BASE = 97,               -- the label's baseline: the bottom of 5 px text whose top is the bar's bottom + 4
     },
     RINGS = {
         battle = { cx = 42, r = 27, tw = 7, th = 9, atlas = "warrior_runes_big", spin = 1 },

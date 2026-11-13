@@ -394,7 +394,7 @@ case("the_lane_is_hidden_when_no_window_is_open", """
 
 case("the_lane_matches_the_mockups_geometry_and_has_no_other_text", """
     local LN = W.C.LANE
-    assert(LN.X == 22 and LN.Y == 82 and LN.W == 106 and LN.H == 6)
+    assert(LN.X == 22 and LN.Y == 80 and LN.W == 106 and LN.H == 8)
     assert(LN.X * 2 + LN.W == W.C.SW, "the bar is centred on the canvas")
     assert(LN.LABEL_BASE * W.C.SPX + W.C.DROP <= 128, "the label stays inside the 128 px area")
     __known[7384] = true
@@ -457,7 +457,7 @@ case("the_last_one_and_a_half_seconds_are_amber_with_the_tick_mark", """
     local L = Lane()
     assert(SameColor(L.fill.color, FS.Theme.COLOR_POWER) and SameColor(L.label.tcolor, FS.Theme.COLOR_POWER), "1.7 s left is still cyan")
     assert(L.mark.shown and Close3(L.mark.pt[4], Px(23 + 31)), "the tick sits at the 1.5 s point, 31 inner px in")
-    assert(Close3(L.mark.h, Px(8)) and Close3(L.mark.pt[5], -Px(81)), "the tick is taller than the bar")
+    assert(Close3(L.mark.h, Px(10)) and Close3(L.mark.pt[5], -Px(79)), "the tick is taller than the bar")
     Tick(0.4)
     assert(SameColor(L.fill.color, FS.Theme.COLOR_AMBER), "1.3 s left: amber fill")
     assert(SameColor(L.label.tcolor, FS.Theme.COLOR_AMBER), "amber label")
