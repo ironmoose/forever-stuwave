@@ -31,7 +31,8 @@
 -- FIELD_MIN_H and FIELD_MAX_H tall in pixels, whose Background art nothing else holds. WowStyle1DropdownTemplate,
 -- WowStyle1FilterDropdownTemplate and WowStyle2DropdownTemplate are XML templates, never globals, so the 16001 globals dump
 -- cannot confirm them; their shapes are read from the 12.1.0 Blizzard_Menu source and detected at runtime. An arrow dropdown
--- (WowStyle1ArrowDropdownTemplate) has no label and is left alone; so is a legacy UIDropDownMenu frame (a Frame, not a button).
+-- (WowStyle1ArrowDropdownTemplate) has no label: it wears a small square key with the kit's chevron, no swatch or LED. A
+-- legacy UIDropDownMenu frame (a Frame, not a button) is left alone.
 --
 -- The swatch has no source of its own: DropdownSkins.SetSwatch(button, color) sets the colour of the current choice, and a
 -- button nothing has told wears the violet default.
@@ -67,17 +68,32 @@ local function IsTable(v) return type(v) == "table" end
 -- The closed button
 -------------------------------------------------------------------------------
 
+local ArrowArt
+
 local function Held(region)
     if not IsTable(region) then return false end
     return Kit.Plain(Kit.Try(region.GetAlpha, region)) == 0
 end
 
--- "dropdown" or nil.
+-- The stock gold arrow of a labelless arrow dropdown (WowStyle1ArrowDropdownTemplate's Arrow; the spellbook's settings
+-- button keeps the same atlas as its Icon), or nil.
+local ARROW_ATLAS = "common-dropdown-a-button"
+function ArrowArt(widget)
+    for _, key in ipairs({ "Arrow", "Icon" }) do
+        local region = widget[key]
+        if IsTable(region) and Kit.Plain(Kit.Try(region.GetAtlas, region)) == ARROW_ATLAS then return region end
+    end
+    return nil
+end
+
+-- "dropdown", "arrow" (a labelless arrow button: a small cut-corner key with the kit's chevron) or nil.
 function DropdownSkins.Kind(widget)
     if Kit.TypeOf(widget) ~= "Button" then return nil end
     if not (widget.intrinsic == "DropdownButton" or type(widget.IsMenuOpen) == "function") then return nil end
     local label = widget.Text
-    if not (IsTable(label) and type(label.SetFont) == "function") then return nil end
+    if not (IsTable(label) and type(label.SetFont) == "function") then
+        return ArrowArt(widget) and "arrow" or nil
+    end
     local w, h = Kit.SizePx(widget)
     if w and (w < K.DD_MIN_W or h < K.FIELD_MIN_H or h > K.FIELD_MAX_H) then return nil end
     if not parts[widget] and Held(widget.Background) then return nil end
@@ -90,9 +106,24 @@ local function IsOpen(widget)
     return Kit.Plain(Kit.Try(widget.IsMenuOpen, widget)) == true
 end
 
+local function PaintArrow(widget, p)
+    local enabled = Kit.IsEnabled(widget)
+    local open = enabled and IsOpen(widget)
+    local fill, edge, glyph = C.ink, C.dim, C.muted
+    if not enabled then
+        fill, edge, glyph = C.disFill, C.disEdge, C.dis
+    elseif open or p.state.hover or p.state.pressed then
+        edge, glyph = C.cyan, C.cyan
+    end
+    Kit.PaintPlate(p.plate, fill, 1, edge, 1, 1)
+    p.chev:SetVertexColor(glyph[1], glyph[2], glyph[3], 1)
+    if open then p.chev:SetTexCoord(0, 1, 1, 0) else p.chev:SetTexCoord(0, 1, 0, 1) end
+end
+
 local function Paint(widget)
     local p = parts[widget]
     if not (p and p.built) then return end
+    if p.arrow then return PaintArrow(widget, p) end
     local enabled = Kit.IsEnabled(widget)
     local open = enabled and IsOpen(widget)
     local fill, edge, glyph, text, rule, swatch = C.ink, C.dim, C.muted, C.text, C.hair, p.swatchColor or C.violet
@@ -130,6 +161,17 @@ local function Layout(widget)
     local w, h = Kit.SizePx(widget)
     if not w then return end
     p.w, p.h = w, h
+    if p.arrow then
+        -- a square key at least ARROW_MIN across, centred on the stock rect (the spellbook's is 15 x 16)
+        local size = math.max(K.DD_ARROW_MIN, math.min(w, h))
+        local x, y = Round((w - size) / 2), Round((h - size) / 2)
+        Kit.Place(p.plate.fill, widget, x, y, size, size)
+        Kit.Place(p.plate.ring, widget, x, y, size, size)
+        if p.plate.ring2 then Kit.Place(p.plate.ring2, widget, x + 1, y + 1, size - 2, size - 2) end
+        local g = K.FIELD_GLYPH
+        Kit.Move(p.chev, x + Round((size - g) / 2), y + Round((size - g) / 2), g, g)
+        return
+    end
     Kit.Place(p.plate.fill, widget, 0, 0, w, h)
     Kit.Place(p.plate.ring, widget, 0, 0, w, h)
     if p.plate.ring2 then Kit.Place(p.plate.ring2, widget, 1, 1, w - 2, h - 2) end
@@ -164,9 +206,35 @@ function DropdownSkins.SetSwatch(widget, color)
     Paint(widget)
 end
 
+local function BuildArrow(widget, p)
+    p.arrow = true
+    HeldArt.Hold(ArrowArt(widget))
+    HeldArt.Hold(widget.Arrow)
+    HeldArt.Hold(Kit.Try(widget.GetHighlightTexture, widget))
+    p.plate = Kit.Plate(widget, K.DD_ARROW_CUT, K.DD_ARROW_MIN, K.DD_ARROW_MIN)
+    local over = CreateFrame("Frame", nil, widget)
+    over:SetAllPoints(widget)
+    p.over = over
+    p.chev = Kit.Glyph(over, CHEV, 0, 0, K.FIELD_GLYPH, K.FIELD_GLYPH, C.muted, 1, "ARTWORK", 2)
+    p.built = true
+    p.state = Kit.Track(widget, Paint)
+    for _, method in ipairs({ "OnButtonStateChanged", "OnMenuOpened", "OnMenuClosed", "CloseMenu" }) do
+        Kit.HookFunc(widget, method, function() Paint(widget) end)
+    end
+    local function relayout()
+        Layout(widget)
+        Paint(widget)
+    end
+    Kit.HookScript(widget, "OnSizeChanged", relayout)
+    Kit.HookScript(widget, "OnShow", relayout)
+    relayout()
+    Kit.Later(relayout)
+end
+
 local function Build(widget)
     local p = { w = 0, h = 0 }
     parts[widget] = p -- marked first, so a failure part way is not retried into a second set of layers
+    if DropdownSkins.Kind(widget) == "arrow" then return BuildArrow(widget, p) end
 
     HeldArt.Hold(widget.Background)
     HeldArt.Hold(widget.Arrow)

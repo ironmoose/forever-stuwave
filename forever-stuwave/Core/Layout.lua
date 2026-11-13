@@ -208,6 +208,8 @@ FS.Layout.Controls = {
     -- an upright chevron. A stock button under DD_MIN_W wide is not a dropdown body and is left alone.
     DD_ZONE = 28, DD_SWATCH = 8, DD_SWATCH_X = 10, DD_LABEL_X = 26, DD_TEXT_RIGHT = 34, DD_CHEV_X = 24, DD_MIN_W = 48,
     DD_RULE_PAD = 5,
+    -- A labelless arrow dropdown is a square key at least 24 across (cut 4) on the stock rect's centre, the 16 chevron in it.
+    DD_ARROW_MIN = 24, DD_ARROW_CUT = 4,
     -- Its open list keeps the stock rows (and Menus.lua's chrome). A row under the hand gets a violet wash at 0.18 and lock-on
     -- brackets (arms 4, no pad) on the row rect inset 2; the current value carries a 4 x 8 pink LED 2 in. The list is scanned
     -- open: a 2 px cyan front edge runs down it in 0.2 s and each row appears as it passes.

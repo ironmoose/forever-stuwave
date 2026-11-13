@@ -1553,12 +1553,41 @@ case("dropdown_detection_is_by_shape_and_an_arrow_only_or_tiny_or_tall_one_is_le
     local legacy = blz("Frame", nil, P, 196 / PPU, 28 / PPU, 300, 60)
     legacy.Left, legacy.Middle, legacy.Right, legacy.Text = tex(legacy), tex(legacy), tex(legacy), fstring(legacy, "x")
     assert(Dd().Kind(ok) == "dropdown" and Dd().Kind(filter) == "dropdown", "a dropdown and a filter dropdown")
-    assert(Dd().Kind(arrowOnly) == nil, "an arrow dropdown has no label to restyle")
+    assert(Dd().Kind(arrowOnly) == nil, "a labelless button without the stock arrow art is not an arrow dropdown")
     assert(Dd().Kind(tiny) == nil and Dd().Kind(tall) == nil, "too small or too tall")
     assert(Dd().Kind(plain) == nil, "a text button is not a dropdown")
     assert(Dd().Kind(held) == nil, "art another skin holds is that skin's")
     assert(Dd().Kind(legacy) == nil, "a legacy UIDropDownMenu frame is not a DropdownButton")
     assert(Skin(P) == 2, "the sweep skins the two dropdowns only")
+""")
+
+case("an_arrow_dropdown_is_a_square_cut_key_with_the_kits_chevron_and_its_gold_art_held", PRELUDE + """
+    -- the talents search options button (25 x 25, Arrow) and the spellbook settings button (15 x 16, Icon)
+    local function ArrowDd(w, h, key, y)
+        local b = blz("Button", nil, P, w / PPU, h / PPU, 20, y)
+        b.intrinsic = "DropdownButton"
+        b[key] = tex(b, nil, "OVERLAY"); b[key].atlas = "common-dropdown-a-button"
+        b.open = false
+        function b:IsMenuOpen() return self.open end
+        function b:OnMenuOpened() self.open = true end
+        return b
+    end
+    local search, settings = ArrowDd(30, 30, "Arrow", 20), ArrowDd(18, 19, "Icon", 80)
+    assert(Dd().Kind(search) == "arrow" and Dd().Kind(settings) == "arrow")
+    assert(Skin(P) == 2, "the sweep skins both")
+    FlushTimers()
+    local p, q, T = Dd().Parts(search), Dd().Parts(settings), FS.Theme
+    assert(p.arrow and not p.swatch and not p.led, "a key: no swatch, no LED")
+    Expect(p.plate.fill, search, 0, 0, 30, 30, "the key fills the 30 px rect")
+    Expect(p.chev, search, 7, 7, 16, 16, "the chevron centred")
+    Expect(q.plate.fill, settings, -3, -2, 24, 24, "a small rect gets the 24 px key, centred")
+    assert(search.Arrow.alpha == 0 and settings.Icon.alpha == 0, "the gold arrow art is held")
+    Is(p.chev.vertex, T.COLOR_MUTED, 1, "idle chevron")
+    Hover(search)
+    Is(p.chev.vertex, T.COLOR_POWER, 1, "hover chevron goes cyan")
+    search:OnMenuOpened(); FlushTimers()
+    local c = p.chev.coords
+    assert(c[3] == 1 and c[4] == 0, "open flips the chevron")
 """)
 
 case("a_dropdown_is_skinned_once_and_one_met_in_combat_waits_for_combat_to_end", PRELUDE + """
