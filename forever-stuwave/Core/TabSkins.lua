@@ -126,6 +126,25 @@ local function SeatLabel(widget, p)
     label:SetPoint("CENTER", widget, "TOPLEFT", x / ppu, -(p.top + (p.textY or K.TAB_TEXT_Y)) / ppu)
 end
 
+-- An icon tab (the spellbook's category tabs: a 36 x 35 Icon over a 44 x 32 button) has its icon fitted inside the plate,
+-- square, cropped past the art's own frame and unmasked, so nothing of it shows past the plate's edges.
+local ICON_INSET, ICON_CROP = 2, 0.08
+local function SeatIcon(widget, p)
+    local icon = widget.Icon
+    if not (IsTable(icon) and type(icon.SetTexCoord) == "function" and type(icon.ClearAllPoints) == "function") then return end
+    if InCombat() and Kit.Plain(Kit.Try(widget.IsProtected, widget)) == true then return end
+    if not p.icon then
+        p.icon = true
+        if IsTable(widget.IconMask) then Kit.Try(icon.RemoveMaskTexture, icon, widget.IconMask) end
+        icon:SetTexCoord(ICON_CROP, 1 - ICON_CROP, ICON_CROP, 1 - ICON_CROP)
+    end
+    local room = p.plateH - (p.folder and 4 or 0) -- a folder tab keeps its pink rule clear
+    local size = math.max(1, room - 2 * ICON_INSET)
+    local x = Round(((p.folder and p.w - 2 or p.w) - size) / 2)
+    local y = p.top + Round((room - size) / 2)
+    Kit.Place(icon, widget, x, y, size, size)
+end
+
 -- Physical pixels from the tab's top up to the bottom of the window it hangs from (the first ancestor whose bottom is within
 -- reach), negative when the tab starts inside the window. nil when the tab hangs from no window (a strip inside a page),
 -- and that tab keeps the slanted strip.
@@ -149,7 +168,7 @@ end
 local function LayoutFolder(widget, p, w, gap)
     local y0 = -gap
     local H, cut = FOLDER.H - y0, FOLDER.CUT -- the bottom stays FOLDER.H under the tab's top; the top meets the window
-    p.top, p.textY = y0, math.floor(H / 2)
+    p.top, p.textY, p.plateH = y0, math.floor(H / 2), H
     local f = p.fold
     Kit.Move(f.fill, 0, y0, w, H - cut)
     for r = 1, cut do
@@ -163,6 +182,7 @@ local function LayoutFolder(widget, p, w, gap)
     Kit.Move(f.open, 1, y0 - 1, math.max(0, w - 2), 1)
     Kit.Move(p.led, w - K.TAB_LED_X, y0 + K.TAB_LED_Y, K.TAB_LED, K.TAB_LED)
     SeatLabel(widget, p)
+    SeatIcon(widget, p)
 end
 
 local function Layout(widget)
@@ -180,7 +200,7 @@ local function Layout(widget)
     p.textY = nil
     local s, th = K.TAB_SLANT, K.TAB_H
     local top = OnTop(widget) and math.max(0, h - th) or 0
-    p.w, p.h, p.top = w, h, top
+    p.w, p.h, p.top, p.plateH = w, h, top, th
     p.fits = w > 2 * s -- a stock tab not yet sized (10 wide) has no room for two caps
     local mid = math.max(0, w - 2 * s)
     Kit.Move(p.fillL, 0, top, s, th)
@@ -197,6 +217,7 @@ local function Layout(widget)
     Kit.Move(p.led, w - K.TAB_LED_X, top + K.TAB_LED_Y, K.TAB_LED, K.TAB_LED)
     ApplyMarch(p)
     SeatLabel(widget, p)
+    SeatIcon(widget, p)
 end
 
 Kit.OnReseat(function()
