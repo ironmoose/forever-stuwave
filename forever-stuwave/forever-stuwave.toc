@@ -60,6 +60,8 @@ Modules/Skins/Currency.lua
 Modules/Skins/Inspect.lua
 Modules/Skins/Talents.lua
 Modules/Skins/Commerce.lua
+Modules/Skins/Quest.lua
+Modules/Skins/Services.lua
 Modules/Skins/GroupKit.lua
 Modules/Skins/Social.lua
 Modules/Skins/Guild.lua
