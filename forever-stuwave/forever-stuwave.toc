@@ -77,6 +77,8 @@ Modules/Skins/Settings.lua
 Modules/Skins/System.lua
 Modules/Bags/Bags.lua
 Modules/Skins/Loot.lua
+Modules/Skins/LootRolls.lua
+Modules/Skins/GroupPopups.lua
 Modules/DataBars/DataBar.lua
 Modules/DataBars/XPBar.lua
 Modules/ActionBars/Deck.lua
