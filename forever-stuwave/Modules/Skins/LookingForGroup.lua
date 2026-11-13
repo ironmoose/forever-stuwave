@@ -18,10 +18,16 @@
 -- window has a skin on that one commented out as confirmed to taint the group finder, and nothing here can show
 -- ours would not.
 --
--- NOT skinned here, because no shared skin for them exists yet (tracked by the UI audit): the Category,
--- Filter by activity and role dropdown buttons, the Who page's search box, the refresh, options and search icon
--- buttons, the role buttons' check boxes, and the three side tabs. They keep their Blizzard look, as do the
--- role, tab and category icons.
+-- The window's dropdowns (Category, Filter by activity and role), the Who page's search box and the role check boxes wear the
+-- shared controls kit (PanelSkins.SweepControls, controls only: the scroll bar sweep is NOT used here, for the reason above), and the
+-- Browse page's result rows are ink cards (FS.GroupSkin.Card: the stock row art held, a violet edge that lights cyan on hover and
+-- selection, the labels in mono; the role icons and every click stay stock). Those two pieces need the shared kits and are skipped
+-- on a client without them. From the SOCIAL / GROUP mockup (mockups/social-group-2026-11-12.html, section 3).
+--
+-- NOT skinned here: the refresh, options and search icon buttons (the icon IS the button's normal texture, which a held key would
+-- hide), the three side tabs, and the role, tab and category icons. They keep their Blizzard look. Left out because the mockup
+-- shows a computed display and the rule for this pass is "keep the functionality the same as vanilla": the role pips on a listing
+-- with the open slot that pulses, the header three way switch that would replace the side tabs, and the comment counter.
 
 local _, FS = ...
 
@@ -185,6 +191,25 @@ local function HookCategoryButtons()
 end
 
 -------------------------------------------------------------------------------
+-- Controls and result rows (the shared kits; skipped on a client without them)
+-------------------------------------------------------------------------------
+
+-- The dropdowns, the Who search box and the role check boxes. Controls only: a scroll bar sweep would take in the Listing activity
+-- bar this window leaves stock on purpose.
+local function SweepControls()
+    local frame = _G[WINDOW]
+    local sweep = FS.PanelSkins.SweepControls
+    if frame and sweep then pcall(sweep, frame) end
+end
+
+-- A result row of the Browse page: a card. Rows are pooled, so the card is made once per row and the list watched for new ones.
+local function SkinResultRows()
+    local G, box = FS.GroupSkin, _G.LFGBrowseFrameScrollBox
+    if not (G and G.Card and G.Rows and type(box) == "table") then return end
+    G.Rows(box, function(row) G.Card(row, { accent = FS.Theme.COLOR_POWER }) end)
+end
+
+-------------------------------------------------------------------------------
 -- Skin pass
 -------------------------------------------------------------------------------
 
@@ -211,6 +236,8 @@ local function Scan()
     SkinTextButtons()
     SkinResultsScrollBar()
     SkinFilterButton()
+    SweepControls()
+    SkinResultRows()
     HookCategoryButtons()
     SkinCategoryButtons()
     HookShow()
