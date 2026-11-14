@@ -15,6 +15,15 @@
 -- ReputationDetailFrame). The 16001 dump names ReputationFrame at login and nothing finer, so every field is feature-detected and
 -- a row whose parts are missing keeps its stock look. A row's standing comes from its element data (`reaction`), its progress from
 -- the stock bar's own min, max and value; either one secret or missing draws no ladder and leaves the stock bar visible.
+--
+-- Row states (a stripe down the row's left edge and a wash behind it, repainted by the stock repaint and by hover): watched on
+-- the bar is a cyan stripe; selected is a violet stripe and wash; at war is a pink stripe, a pink wash and a pink name; hover is
+-- a light violet wash. The stock highlight regions are held; the state is read from the element data (atWarWith, isWatched) and
+-- the row's IsSelected and IsMouseOver, each through FS.IsSecret first.
+--
+-- Left out on purpose (the mockup draws them, but they are computed, animated or invented, not a skin of a stock part): the eye
+-- glyph on a watched row, the "+n" gain chips and the ladder's gain pulse (no per-session reputation gain is tracked), a standing
+-- chip next to the bar (the stock bar text alternates progress and standing and is kept as it is), and the inactive row state.
 
 local _, FS = ...
 
@@ -39,10 +48,10 @@ local LADDER = {
 }
 Rep.LADDER = LADDER
 
-local G = { SEGMENTS = 8, GAP = 4, SEG_H = 8, EDGE = 2, INSET = 8 }
+local G = { SEGMENTS = 8, GAP = 4, SEG_H = 8, EDGE = 2, INSET = 8, STRIPE = 3 }
 Rep.GEOM = G
 
-local S = { done = false, rows = setmetatable({}, { __mode = "k" }), hooked = setmetatable({}, { __mode = "k" }) }
+local S = { done = false, rows = setmetatable({}, { __mode = "k" }), hooked = setmetatable({}, { __mode = "k" }), marks = setmetatable({}, { __mode = "k" }) }
 Rep.state = S
 
 local function Plain(v) return Kit.Plain(v) end
@@ -72,10 +81,16 @@ local function Progress(bar)
     return math.max(0, math.min(1, (v - lo) / (hi - lo)))
 end
 
-local function Reaction(row)
+local function ElementData(row)
     local data = row.elementData
     if type(data) ~= "table" and type(row.GetElementData) == "function" then data = Try(row.GetElementData, row) end
-    if type(data) ~= "table" then return nil end
+    if type(data) ~= "table" or Plain(data) == nil then return nil end
+    return data
+end
+
+local function Reaction(row)
+    local data = ElementData(row)
+    if not data then return nil end
     local r = Plain(data.reaction)
     if type(r) ~= "number" or r < 1 then return nil end
     return math.min(G.SEGMENTS, math.floor(r))
@@ -169,6 +184,61 @@ function Rep.PaintRow(row)
 end
 
 -------------------------------------------------------------------------------
+-- Row states
+-------------------------------------------------------------------------------
+
+-- The stock row showed three states through its BackgroundHighlight (selected, hovered, and a standing red wash for a faction you
+-- are at war with); that art is held (SkinEntry), so the states are drawn here from our own rects: a wash over the row and a
+-- stripe STRIPE px wide at its left edge. A watched faction wears a cyan stripe, a selected row a violet one (and wash), a row at
+-- war a pink name, stripe and wash, a hovered row a light wash. The flags are the stock row's own: elementData.atWarWith and
+-- isWatched, and the row's IsSelected and IsMouseOver; a secret or missing one reads as false.
+local function Marks(row)
+    local m = S.marks[row]
+    if m then return m end
+    m = {}
+    S.marks[row] = m
+    m.wash = row:CreateTexture(nil, "BACKGROUND", nil, -6)
+    m.wash:SetAllPoints(row)
+    m.wash:Hide()
+    m.stripe = row:CreateTexture(nil, "BORDER", nil, 3)
+    m.stripe:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+    m.stripe:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
+    m.stripe:Hide()
+    return m
+end
+
+local function Flag(v) return Plain(v) == true end
+
+function Rep.PaintMarks(row)
+    local content = row.Content
+    if type(content) ~= "table" or type(content.ReputationBar) ~= "table" or type(row.CreateTexture) ~= "function" then return end
+    local data = ElementData(row) or {}
+    local atWar, watched = Flag(data.atWarWith), Flag(data.isWatched)
+    local selected = type(row.IsSelected) == "function" and Flag(Try(row.IsSelected, row))
+    local hover = type(row.IsMouseOver) == "function" and Flag(Try(row.IsMouseOver, row))
+    local m = Marks(row)
+    local wash, washAlpha
+    if atWar then wash, washAlpha = C.pink, selected and 0.26 or (hover and 0.2 or 0.12)
+    elseif selected then wash, washAlpha = C.violet, 0.22
+    elseif hover then wash, washAlpha = C.violet, 0.10 end
+    if wash then
+        m.wash:SetColorTexture(wash[1], wash[2], wash[3], washAlpha)
+        m.wash:Show()
+    else
+        m.wash:Hide()
+    end
+    local stripe = selected and C.violet or (atWar and C.pink or (watched and C.cyan))
+    if stripe then
+        m.stripe:SetColorTexture(stripe[1], stripe[2], stripe[3], 1)
+        m.stripe:SetWidth(Kit.U(row, G.STRIPE))
+        m.stripe:Show()
+    else
+        m.stripe:Hide()
+    end
+    if type(content.Name) == "table" then Kit.Recolor(content.Name, atWar and C.pink or C.text) end
+end
+
+-------------------------------------------------------------------------------
 -- Rows
 -------------------------------------------------------------------------------
 
@@ -224,6 +294,7 @@ local function RefreshRow(row)
         local p = S.rows[row]
         -- the stock fill is held only while our ladder stands in for it
         Rep.PaintRow(row)
+        Rep.PaintMarks(row)
         if p.texture and p.drawn then HeldArt.Hold(p.texture) end
     else
         SkinHeader(row)
@@ -234,6 +305,10 @@ local function HookRow(row)
     if S.hooked[row] then return end
     S.hooked[row] = true
     Kit.HookFunc(row, "Initialize", function() RefreshRow(row) end)
+    -- the stock repaint of the highlight (selection, hover): the states drawn here follow it
+    Kit.HookFunc(row, "RefreshBackgroundHighlight", function() Rep.PaintMarks(row) end)
+    Kit.HookScript(row, "OnEnter", function() Rep.PaintMarks(row) end)
+    Kit.HookScript(row, "OnLeave", function() Rep.PaintMarks(row) end)
     local content = row.Content
     local bar = content and content.ReputationBar
     if bar then

@@ -15,6 +15,14 @@
 -- sub header has Text; the popup is TokenFramePopup). The 16001 dump names TokenFrame at login and nothing finer, so every field
 -- is feature-detected. A number that is secret or not a plain number draws no cells for that row (the stock count text stays
 -- mirrored as is).
+--
+-- Icon plate: the currency icon sits on a small cut plate whose edge says the state (cyan with room left, amber at the cap, dim
+-- at none, violet when the numbers are unreadable); a currency you hold none of reads muted. The stock icon stays where the stock
+-- row puts it (at the right end of the row); the name and our cells sit to its left, so the layout of the row moved left of the
+-- icon compared with the first version of this page.
+--
+-- Left out on purpose (the mockup draws them, but they are computed, animated or invented, not a skin of a stock part): a
+-- "spend this" call-out text, a transfer chip, the gain and spend history, and any total across currencies.
 
 local _, FS = ...
 
@@ -29,9 +37,10 @@ local C = {
     violet = Theme.COLOR_BORDER, cyan = Theme.COLOR_POWER, pink = Theme.COLOR_HEALTH, amber = Theme.COLOR_AMBER,
     muted = Theme.COLOR_MUTED, text = Theme.COLOR_CTRL_TEXT or { 0.914, 0.886, 1 }, cell = Theme.COLOR_CTRL_CELL or { 0.145, 0.082, 0.29 },
     gold = Theme.COLOR_GOLD or { 1, 0.82, 0.2 }, panel = { 0.071, 0.039, 0.133, 0.96 },
+    ink = Theme.COLOR_CTRL_INK, dim = Theme.COLOR_CTRL_DIM or { 0.294, 0.165, 0.525 },
 }
 
-local G = { CELLS = 10, CELL_W = 8, CELL_H = 12, GAP = 2, TEXT_W = 96, SIDE = 12, NOTCH_W = 2, NOTCH_OVER = 3, PULSE = 0.9 }
+local G = { CELLS = 10, CELL_W = 8, CELL_H = 12, GAP = 2, TEXT_W = 96, SIDE = 12, NOTCH_W = 2, NOTCH_OVER = 3, PULSE = 0.9, ICON_PAD = 2, ICON_CUT = 4, ICON_GAP = 7 }
 Cur.GEOM = G
 
 local S = { done = false, rows = setmetatable({}, { __mode = "k" }), hooked = setmetatable({}, { __mode = "k" }) }
@@ -86,6 +95,38 @@ local function Parts(row)
     return p
 end
 
+-- The stock icon (Content.CurrencyIcon, 20 x 20) sits at the right end of the row with the stock count to its left. Its left edge
+-- in physical pixels from the row's left edge, or nil when it has no rect yet or is not in the row's right half (the label and
+-- cells then keep the row's right edge as their reference).
+local function IconLeft(row, icon)
+    if type(icon) ~= "table" then return nil end
+    local il, rl = Plain(Try(icon.GetLeft, icon)), Plain(Try(row.GetLeft, row))
+    local rw = Kit.SizePx(row)
+    if type(il) ~= "number" or type(rl) ~= "number" or not rw then return nil end
+    local x = math.floor((il - rl) * Kit.Ppu(row) + 0.5)
+    if x < rw / 2 then return nil end
+    return x
+end
+
+-- A cut plate on the icon, ICON_PAD px out of it on every side, anchored to the icon itself (it follows the stock layout). The
+-- edge is the state: cyan under the cap, amber at it, dim at zero, violet when the currency has no cap. The stock icon stays.
+local function PaintIconPlate(row, p, state)
+    local icon = row.Content and row.Content.CurrencyIcon
+    if type(icon) ~= "table" then return end
+    if not p.plate then
+        local w, h = Kit.SizePx(icon)
+        if not w then return end
+        local pad = G.ICON_PAD
+        local pw, ph = w + 2 * pad, h + 2 * pad
+        p.plate = Kit.Plate(row, G.ICON_CUT, pw, ph)
+        Kit.Place(p.plate.fill, icon, -pad, -pad, pw, ph, "TOPLEFT", "TOPLEFT", row)
+        Kit.Place(p.plate.ring, icon, -pad, -pad, pw, ph, "TOPLEFT", "TOPLEFT", row)
+        if p.plate.ring2 then Kit.Place(p.plate.ring2, icon, -pad + 1, -pad + 1, pw - 2, ph - 2, "TOPLEFT", "TOPLEFT", row) end
+    end
+    local edge = (state == "capped" and C.amber) or (state == "empty" and C.dim) or (state == "ok" and C.cyan) or C.violet
+    Kit.PaintPlate(p.plate, C.ink, 0.9, edge, state and 1 or 0.6, 1)
+end
+
 local function Mirror(p)
     local text = p.source and Plain(Try(p.source.GetText, p.source))
     if type(text) ~= "string" then return end
@@ -102,17 +143,31 @@ function Cur.PaintRow(row)
     Mirror(p)
     Kit.StopAnimate(row, "cap")
     local rw, rh = Kit.SizePx(row)
+    local content = row.Content
+    local icon = type(content) == "table" and content.CurrencyIcon or nil
+    -- the count text ends where the stock count did, just left of the icon; the cells sit left of the text
+    local iconX = rw and IconLeft(row, icon)
+    if iconX then
+        Kit.Place(p.label, icon, -G.ICON_GAP, 0, nil, nil, "RIGHT", "LEFT", row)
+    else
+        Kit.Place(p.label, row, -G.SIDE, 0, nil, nil, "RIGHT", "RIGHT")
+    end
+    local zero = r and r.quantity == 0
+    if type(content) == "table" and type(content.Name) == "table" then Kit.Recolor(content.Name, zero and C.muted or C.text) end
     if not (r and r.quantity and r.cap and rw) then
         for _, cell in ipairs(p.cells) do cell:Hide() end
         p.notch:Hide()
+        PaintIconPlate(row, p, zero and "empty" or nil)
         return
     end
     local stripW = G.CELLS * G.CELL_W + (G.CELLS - 1) * G.GAP
-    local x0 = rw - G.SIDE - G.TEXT_W - 8 - stripW
+    local refRight = iconX and (iconX - G.ICON_GAP) or (rw - G.SIDE)
+    local x0 = refRight - G.TEXT_W - 8 - stripW
     local y = math.floor((rh - G.CELL_H) / 2)
     local lit = Cur.CellsLit(r.quantity, r.cap)
     local capped = lit >= G.CELLS
     p.lit, p.capped = lit, capped
+    PaintIconPlate(row, p, capped and "capped" or (zero and "empty" or "ok"))
     local on = capped and C.amber or C.cyan
     for i, cell in ipairs(p.cells) do
         Kit.Move(cell, x0 + (i - 1) * (G.CELL_W + G.GAP), y, G.CELL_W, G.CELL_H)

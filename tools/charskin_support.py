@@ -92,6 +92,7 @@ function Reset()
     BuildBlizzard()
 end
 function Secret() return { __secret = true } end
+function Obj:GetLeft() local l = self:Rect(); return l end
 """
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -238,7 +239,12 @@ function BuildBlizzard()
         b.icon.path = GEAR[b.id] and ("Interface\\Icons\\inv_" .. b.id) or "Interface\\PaperDoll\\UI-PaperDoll-Slot-" .. name
         b.IconBorder = tex(b, nil, "OVERLAY")
         b.Count = fstring(b, "Character" .. name .. "SlotCount", "", 12)
-        b.pushedTex = tex(b, nil, "HIGHLIGHT")
+        -- the 16001 slot keeps its pressed art (a texture, hidden until a press) and its hover highlight as keyed regions
+        b.PushedTexture = tex(b, nil, "ARTWORK")
+        b.PushedTexture.shown = false
+        b.HighlightTexture = tex(b, nil, "HIGHLIGHT")
+        b.GetPushedTexture = function(self) return self.PushedTexture end
+        b.GetHighlightTexture = function(self) return self.HighlightTexture end
         b.GetID = function(self) return self.id end
         return b
     end

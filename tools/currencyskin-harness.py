@@ -29,25 +29,30 @@ function BuildBlizzard()
     build()
     local frame = _G.TokenFrame
     frame.Update = function() end
-    frame.ScrollBox = blz("Frame", nil, frame, 440, 330, "TOPLEFT", 8, -62)
+    -- the 16001 dump (debug/tree-CharacterFrame-2026-11-12.txt): TokenFrame's ScrollBox is 363 x 409, its headers 343 x 26 and its
+    -- entries 341 x 22
+    frame.ScrollBox = blz("Frame", nil, frame, 363, 409, "TOPLEFT", 8, -62)
     frame.ScrollBox.rows = {}
     frame.ScrollBox.ForEachFrame = function(self, fn) for _, r in ipairs(self.rows) do fn(r) end end
     local y = 0
     for _, c in ipairs(CURRENCIES) do
         local row
         if c.header then
-            row = blz("Button", nil, frame.ScrollBox, 430, 24, "TOPLEFT", 0, -y)
+            row = blz("Button", nil, frame.ScrollBox, 343, 26, "TOPLEFT", 0, -y)
             row.Left, row.Middle, row.Right = tex(row, nil, "BACKGROUND"), tex(row, nil, "BACKGROUND"), tex(row, nil, "BACKGROUND")
             row.Text = fstring(row, nil, c.name, 12)
             row.GetTitleRegion = function(self) return self.Text end
             y = y + 30
         else
-            row = blz("Button", nil, frame.ScrollBox, 430, 24, "TOPLEFT", 0, -y)
-            row.Content = blz("Frame", nil, row, 430, 24)
+            row = blz("Button", nil, frame.ScrollBox, 341, 22, "TOPLEFT", 0, -y)
+            row.Content = blz("Frame", nil, row, 341, 22)
+            -- the stock icon sits at the right end of the row, 20 px in from the edge (Blizzard_TokenUI: RIGHT x=-20, 20 x 20)
             row.Content.CurrencyIcon = tex(row.Content, nil, "ARTWORK")
+            row.Content.CurrencyIcon.w, row.Content.CurrencyIcon.h = 20, 20
+            row.Content.CurrencyIcon.points[1] = { point = "RIGHT", rel = row.Content, relPoint = "RIGHT", x = -20, y = 0 }
             row.Content.Count = fstring(row.Content, nil, tostring(c.quantity), 12, { 1, 1, 1, 1 })
             row.Content.Name = fstring(row.Content, nil, c.name, 12, { 1, 1, 1, 1 })
-            row.Content.BackgroundHighlight = blz("Frame", nil, row.Content, 430, 24)
+            row.Content.BackgroundHighlight = blz("Frame", nil, row.Content, 341, 22)
             tex(row.Content.BackgroundHighlight, nil, "BACKGROUND")
             row.elementData = c
             row.Initialize = function(self) end
@@ -91,8 +96,47 @@ case("cells: ten per capped currency, 8 x 12, a 2 px gap, whole pixels, right of
     local l1 = Px(p.cells[1], r)
     local rw = select(3, Px(r, r))
     local _, _, r10 = Px(p.cells[10], r)
-    assert(rw - r10 > 100 and rw - r10 < 130, 'strip leaves room for the count: ' .. (rw - r10))
+    assert(rw - r10 > 130 and rw - r10 < 175, 'strip leaves room for the count and the stock icon: ' .. (rw - r10))
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
+case("the stock icon sits on a cut plate whose edge says the state: cyan under the cap, amber at it, dim at zero, violet with no cap", f"""
+    {OPEN}
+    local function edge(i) return FS.CurrencySkin.state.rows[{row('(i)')}].plate.ring.vertex end
+    local honor, marks, tokens, stone, badge = edge(2), edge(3), edge(4), edge(5), edge(6)
+    assert(honor[3] > 0.9 and honor[1] < 0.3, 'under the cap: cyan')
+    assert(stone[1] > 0.9 and stone[3] < 0.4, 'at the cap: amber')
+    assert(badge[1] < 0.7 and badge[3] > 0.9 and badge[4] < 1, 'no cap: violet, not full')
+    local r = {row(2)}
+    local plate = FS.CurrencySkin.state.rows[r].plate
+    local icon = r.Content.CurrencyIcon
+    local il, it, ir, ib = Px(icon, r)
+    local pl, pt, pr, pb = Px(plate.ring, r)
+    assert(Near(il - pl, 2, 0.02) and Near(it - pt, 2, 0.02) and Near(pr - ir, 2, 0.02) and Near(pb - ib, 2, 0.02), 'plate is not the icon plus 2 px: ' .. pl .. ' ' .. pt .. ' ' .. pr .. ' ' .. pb)
+    assert(icon.alpha == 1, 'the stock icon must stay')
+    CURRENCIES[2].quantity = 0
+    r.elementData = {{ name = 'Honor Points', quantity = 0, maxQuantity = 4000 }}
+    r:Initialize(); FS.CurrencySkin.PaintRow(r)
+    assert(edge(2)[1] < 0.4 and edge(2)[3] > 0.4 and edge(2)[3] < 0.7, 'zero: dim edge')
+    assert(r.Content.Name.textColor[1] < 0.8, 'a zero currency name is not muted')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\\\n'))
+""")
+
+case("the count text and the cells stay clear of the stock icon, which sits at the right end of the row", f"""
+    {OPEN}
+    local r = {row(2)}
+    local p = FS.CurrencySkin.state.rows[r]
+    local icon = r.Content.CurrencyIcon
+    local il = Px(icon, r)
+    local ll, lt, lr = Px(p.label, r)
+    assert(lr <= il + 0.02, 'label runs over the icon: label right ' .. lr .. ' icon left ' .. il)
+    assert(Near(il - lr, 7, 0.05), 'label is not 5 px clear of the plate (7 from the icon): ' .. (il - lr))
+    -- the whole plate stays inside the left pane (the page's ScrollBox is 363 wide in a 398 wide pane), clear of its border
+    local pl, pt, pr, pb = Px(p.plate.ring, CharacterFrameLeftPaneHost)
+    local paneW = select(3, Px(CharacterFrameLeftPaneHost, CharacterFrameLeftPaneHost))
+    assert(pr <= paneW - 20, 'plate runs to the pane border: right ' .. pr .. ' of ' .. paneW)
+    local _, _, r10 = Px(p.cells[10], r)
+    assert(r10 < ll - 7, 'cells run into the label: ' .. r10 .. ' vs ' .. ll)
 """)
 
 case("lit cells follow quantity against the cap", f"""

@@ -16,12 +16,13 @@ from charskin_support import Harness  # noqa: E402
 BLIZZARD = r"""
 local blz, tex, fstring = BLZ.blz, BLZ.tex, BLZ.fstring
 local build = BuildBlizzard
+SELECTED, HOVERED = nil, nil
 FACTIONS = {
     { header = true, name = "Classic" },
-    { name = "Thunder Bluff", reaction = 5, min = 0, max = 6000, value = 2210 },
+    { name = "Thunder Bluff", reaction = 5, min = 0, max = 6000, value = 2210, watched = true },
     { name = "Orgrimmar", reaction = 6, min = 0, max = 9000, value = 3300 },
     { name = "Darkspear Trolls", reaction = 4, min = 0, max = 3000, value = 450 },
-    { name = "Gnomeregan Exiles", reaction = 2, min = 0, max = 3000, value = 600 },
+    { name = "Gnomeregan Exiles", reaction = 2, min = 0, max = 3000, value = 600, atWar = true },
     { name = "Warsong Outriders", reaction = 7, min = 0, max = 21000, value = 5200 },
     { name = "The Defilers", reaction = 8, min = 0, max = 999, value = 999 },
 }
@@ -29,21 +30,22 @@ function BuildBlizzard()
     build()
     local frame = _G.ReputationFrame
     frame.Update = function() end
-    frame.ScrollBox = blz("Frame", nil, frame, 440, 330, "TOPLEFT", 8, -62)
+    -- the 16001 dump (debug/tree-CharacterFrame-2026-11-12.txt): ReputationFrame's ScrollBox is 363 x 409 and its rows are 343 wide
+    frame.ScrollBox = blz("Frame", nil, frame, 363, 409, "TOPLEFT", 8, -62)
     frame.ScrollBox.rows = {}
     frame.ScrollBox.ForEachFrame = function(self, fn) for _, r in ipairs(self.rows) do fn(r) end end
     local y = 0
     for i, f in ipairs(FACTIONS) do
         local row
         if f.header then
-            row = blz("Button", nil, frame.ScrollBox, 430, 24, "TOPLEFT", 0, -y)
+            row = blz("Button", nil, frame.ScrollBox, 343, 24, "TOPLEFT", 0, -y)
             row.Left, row.Middle, row.Right = tex(row, nil, "BACKGROUND"), tex(row, nil, "BACKGROUND"), tex(row, nil, "BACKGROUND")
             row.Name = fstring(row, nil, f.name, 12)
             y = y + 30
         else
-            row = blz("Button", nil, frame.ScrollBox, 430, 44, "TOPLEFT", 0, -y)
-            row.Content = blz("Frame", nil, row, 430, 44)
-            local bar = blz("Frame", nil, row.Content, 400, 14, "TOPLEFT", 5, -22)
+            row = blz("Button", nil, frame.ScrollBox, 341, 44, "TOPLEFT", 0, -y)
+            row.Content = blz("Frame", nil, row, 341, 44)
+            local bar = blz("Frame", nil, row.Content, 311, 14, "TOPLEFT", 5, -22)
             bar.Background = tex(bar, nil, "BACKGROUND")
             bar.LeftTexture, bar.RightTexture = tex(bar, nil, "BORDER"), tex(bar, nil, "BORDER")
             bar.BarText = fstring(bar, nil, "Friendly", 11, { 1, 1, 1, 1 })
@@ -54,10 +56,14 @@ function BuildBlizzard()
             bar.UpdateBarValues = function() end
             row.Content.ReputationBar = bar
             row.Content.Name = fstring(row.Content, nil, f.name, 12, { 1, 1, 1, 1 })
-            row.Content.BackgroundHighlight = blz("Frame", nil, row.Content, 430, 44)
+            row.Content.BackgroundHighlight = blz("Frame", nil, row.Content, 341, 44)
             tex(row.Content.BackgroundHighlight, nil, "BACKGROUND")
-            row.elementData = { reaction = f.reaction, name = f.name }
+            row.elementData = { reaction = f.reaction, name = f.name, atWarWith = f.atWar or false, isWatched = f.watched or false }
             row.Initialize = function(self) end
+            -- the stock row's own selection, hover and highlight refresh (ReputationEntryMixin)
+            row.IsSelected = function(self) return SELECTED == self end
+            row.IsMouseOver = function(self) return HOVERED == self end
+            row.RefreshBackgroundHighlight = function() end
             row.scripts.OnClick = function() end
             row.scripts.OnEnter = function() end
             y = y + 50
@@ -125,6 +131,63 @@ case("an exalted row is fully lit and does not breathe", f"""
     for i = 1, 8 do assert(p.fills[i].shown, 'exalted segment ' .. i) end
     assert(not FS.ControlKit.IsAnimating(row.Content.ReputationBar, 'lead'), 'capped row breathes')
     assert(FS.ControlKit.IsAnimating({row(2)}.Content.ReputationBar, 'lead'), 'leading edge does not breathe')
+""")
+
+case("row states: watched is a cyan stripe, selected a violet wash and stripe, at war a pink name, wash and stripe, a plain row nothing", f"""
+    {OPEN}
+    local M = FS.ReputationSkin.state.marks
+    local watched, plain, warring, picked = {row(2)}, {row(4)}, {row(5)}, {row(3)}
+    assert(M[watched].stripe.shown and M[watched].stripe.color[3] > 0.9 and M[watched].stripe.color[1] < 0.3, 'watched: no cyan stripe')
+    assert(not M[watched].wash.shown, 'watched alone washed')
+    assert(not M[plain].stripe.shown and not M[plain].wash.shown, 'plain row marked')
+    assert(M[warring].stripe.shown and M[warring].stripe.color[1] > 0.9 and M[warring].stripe.color[2] < 0.4, 'at war: no pink stripe')
+    assert(M[warring].wash.shown and M[warring].wash.color[1] > 0.9 and M[warring].wash.color[4] > 0.05, 'at war: no pink wash')
+    assert(warring.Content.Name.textColor[1] > 0.9 and warring.Content.Name.textColor[2] < 0.4, 'at war name not pink')
+    assert(plain.Content.Name.textColor[1] < 0.95 and plain.Content.Name.textColor[3] > 0.9, 'plain name not the light text')
+    SELECTED = picked
+    picked:RefreshBackgroundHighlight()
+    local sel = M[picked]
+    assert(sel.stripe.shown and sel.stripe.color[3] > 0.9 and sel.stripe.color[2] < 0.5, 'selected: no violet stripe')
+    assert(sel.wash.shown and sel.wash.color[4] > 0.15, 'selected: no wash')
+    SELECTED = nil
+    picked:RefreshBackgroundHighlight()
+    assert(not M[picked].stripe.shown and not M[picked].wash.shown, 'deselected row keeps its marks')
+    HOVERED = plain
+    plain:RefreshBackgroundHighlight()
+    assert(M[plain].wash.shown and M[plain].wash.color[4] < 0.15, 'hover: a light wash')
+    assert(not M[plain].stripe.shown, 'hover alone draws a stripe')
+    HOVERED = nil
+    assert(warring.Content.BackgroundHighlight.regions[1].alpha == 0, 'the stock highlight must stay held')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\\\n'))
+""")
+
+case("row states: a stripe is 3 physical pixels wide on whole pixels, and a secret flag reads as plain false", f"""
+    {OPEN}
+    local M = FS.ReputationSkin.state.marks
+    local watched = {row(2)}
+    local l, t, r, b = Px(M[watched].stripe, watched)
+    assert(Near(l, 0) and Near(r - l, 3, 0.02), 'stripe ' .. l .. ' ' .. (r - l))
+    local wl, wt, wr, wb = Px(M[watched].stripe, watched)
+    local _, _, _, rowH = Px(watched, watched)
+    assert(Near(b - t, rowH), 'stripe is not the row height')
+    watched.elementData.atWarWith, watched.elementData.isWatched = Secret(), Secret()
+    watched:RefreshBackgroundHighlight()
+    assert(not M[watched].stripe.shown and not M[watched].wash.shown, 'secret flags drew a mark')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\\\n'))
+""")
+
+case("row states: the wash and the stripe fill their row and nothing more, and the rows end inside the left pane", f"""
+    {OPEN}
+    local M = FS.ReputationSkin.state.marks
+    local warring = {row(5)}
+    warring:RefreshBackgroundHighlight()
+    FS.ReputationSkin.PaintMarks(warring)
+    local rl, rt, rr, rb = Px(warring, warring)
+    local wl, wt, wr, wb = Px(M[warring].wash, warring)
+    assert(Near(wl, rl) and Near(wt, rt) and Near(wr, rr) and Near(wb, rb), 'wash is not the row: ' .. wl .. ' ' .. wr .. ' of ' .. rr)
+    local _, _, pr = Px(warring, CharacterFrameLeftPaneHost)
+    local paneW = select(3, Px(CharacterFrameLeftPaneHost, CharacterFrameLeftPaneHost))
+    assert(pr <= paneW - 20, 'row runs to the pane border: ' .. pr .. ' of ' .. paneW)
 """)
 
 case("the stock bar art, text and scripts are kept; its name and standing text are restyled", f"""

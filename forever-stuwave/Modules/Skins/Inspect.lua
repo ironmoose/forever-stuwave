@@ -5,14 +5,26 @@
 -- when theirs is higher, pink when lower, nothing when level, empty or unreadable. Rings and trinkets compare against your best of
 -- the pair. Footer chips: their item level and how it stands against yours ("vs you +9": theirs minus yours).
 --
+-- The model well: the stock background and border art held, a GUNSIGHT of four cyan corner brackets (an L of ten pixels, three in
+-- from each corner) around it, the model control panel's keys as square keys (Char.SkinSquare, the paper doll's own), the stock
+-- level line held and its text mirrored on an amber chip in the well's bottom left (the stock line is anchored inside the header
+-- band, so it cannot stay where it is: nothing of a Blizzard frame is moved), the stock slot frames (Char-LeftSlot and friends)
+-- held, and the two stock text buttons (view in dressing room, talents) skinned by PanelSkins.SweepOnShow.
+--
 -- Skin only. Every stock script, tooltip and tab stays; the stock tabs are held and the switch drives their own Click. No slot is
 -- moved, resized, reparented or attributed. Item levels come from C_Item.GetDetailedItemLevelInfo on the item link and from
 -- C_PaperDollInfo.GetInspectItemLevel; both are read through FS.IsSecret and a chip is hidden for anything that is not a plain
 -- number (an item the client has not cached yet fills in on GET_ITEM_INFO_RECEIVED). There is no wear on another player's gear.
 --
+-- Left out on purpose (the mockup draws them, but they are computed, animated or invented, not a skin of a stock part): the scan
+-- line that sweeps the model on open and the gunsight's flicker, the name and race lines drawn inside the well (the level line is
+-- the stock one, mirrored), the wear brackets on the body (no wear data for another player), the PvP and guild
+-- pages and the talents tab (their own windows), the socket display next to a slot (functional, left stock).
+--
 -- Names: the 16001 dump (InspectFrame, InspectFrameInset, InspectFrameTab1/2, Inspect<Slot>Slot, InspectPaperDollFrame,
--- InspectModelFrame, InspectFrameTitleText) and the retail 12.1.0 Blizzard_InspectUI. The window's own `unit` field is the stock
--- InspectFrame.unit. The LoD addon is picked up when it loads.
+-- InspectModelFrame, InspectFrameTitleText) and the retail 12.1.0 Blizzard_InspectUI (InspectModelFrame with its Background* and
+-- Border* textures and the ModelWithControlsTemplate control panel, InspectLevelText, Inspect<Slot>SlotFrame). The window's own
+-- `unit` field is the stock InspectFrame.unit. The LoD addon is picked up when it loads.
 
 local _, FS = ...
 
@@ -113,6 +125,16 @@ function Insp.PaintDelta(button)
     parts.label:Show()
 end
 
+-- The stock slot frame (Char-LeftSlot, Char-RightSlot, Char-BottomSlot: the named `$parentFrame` region) and the corner piece the
+-- main hand carries: decoration the shared slot replaces.
+local function HoldSlotFrame(button, name)
+    HeldArt.Hold(_G["Inspect" .. name .. "SlotFrame"])
+    for _, region in ipairs(Char.List(button, "GetRegions")) do
+        local atlas = Char.AtlasOf(region)
+        if atlas and atlas:find("^Char%-") then HeldArt.Hold(region) end
+    end
+end
+
 local function SkinSlots()
     for _, name in ipairs(Char.SLOT_NAMES) do
         local button = _G["Inspect" .. name .. "Slot"]
@@ -120,11 +142,91 @@ local function SkinSlots()
             local id = Plain(Try(button.GetID, button))
             if type(id) == "number" then
                 Char.SkinSlot(button, id, UnitNow)
+                HoldSlotFrame(button, name)
                 S.deltas[button] = S.deltas[button] or { id = id }
                 Insp.PaintDelta(button)
             end
         end
     end
+end
+
+-------------------------------------------------------------------------------
+-- The model well, the level line and the stock buttons
+-------------------------------------------------------------------------------
+
+local MODEL_ART = {
+    "InspectModelFrameBackgroundTopLeft", "InspectModelFrameBackgroundTopRight", "InspectModelFrameBackgroundBotLeft",
+    "InspectModelFrameBackgroundBotRight", "InspectModelFrameBackgroundOverlay",
+    "InspectModelFrameBorderTopLeft", "InspectModelFrameBorderTopRight", "InspectModelFrameBorderBottomLeft",
+    "InspectModelFrameBorderBottomRight", "InspectModelFrameBorderLeft", "InspectModelFrameBorderRight",
+    "InspectModelFrameBorderTop", "InspectModelFrameBorderBottom", "InspectModelFrameBorderBottom2",
+}
+local MODEL_KEYS = { "BackgroundTopLeft", "BackgroundTopRight", "BackgroundBotLeft", "BackgroundBotRight", "BackgroundOverlay" }
+local RET = { MARGIN = 3, ARM = 10 }
+Insp.RETICLE = RET
+
+local function ControlFrameOf(model)
+    local control = model.controlFrame
+    if type(control) ~= "table" then control = model.ControlFrame end
+    return type(control) == "table" and control or nil
+end
+
+-- The stock background and border art of the well and the panel behind the control keys, held at alpha 0.
+local function HoldModelArt(model)
+    for _, name in ipairs(MODEL_ART) do HeldArt.Hold(_G[name]) end
+    for _, key in ipairs(MODEL_KEYS) do HeldArt.Hold(model[key]) end
+    local control = ControlFrameOf(model)
+    if control then
+        for _, region in ipairs(Char.List(control, "GetRegions")) do
+            if Try(region.GetObjectType, region) == "Texture" then HeldArt.Hold(region) end
+        end
+    end
+end
+
+-- The gunsight: an L at each corner of the well, laid out from the model's own pixel size (re-laid on a reseat).
+local function PlaceReticle(model)
+    local r = S.reticle
+    local W, H = Kit.SizePx(model)
+    if not (r and W and H) then return end
+    local m, L = RET.MARGIN, RET.ARM
+    local spots = {
+        { m, m, L, 1 }, { m, m + 1, 1, L - 1 },
+        { W - m - L, m, L, 1 }, { W - m - 1, m + 1, 1, L - 1 },
+        { m, H - m - 1, L, 1 }, { m, H - m - L, 1, L - 1 },
+        { W - m - L, H - m - 1, L, 1 }, { W - m - 1, H - m - L, 1, L - 1 },
+    }
+    for i, p in ipairs(spots) do Kit.Move(r[i], p[1], p[2], p[3], p[4]) end
+end
+
+local function BuildReticle(model)
+    if S.reticle then return end
+    S.reticle = {}
+    for i = 1, 8 do S.reticle[i] = Kit.Rect(model, 0, 0, 1, 1, C.cyan, 1, "OVERLAY", 5) end
+    PlaceReticle(model)
+end
+
+-- The model control keys (zoom, pan, rotate, reset): square keys with a cyan icon, found by shape under the control panel.
+local function SkinModelControls(model)
+    local control = ControlFrameOf(model)
+    if not (control and Char.SkinSquare and Char.PaintSquare) then return end
+    for _, child in ipairs(Char.List(control, "GetChildren")) do
+        if type(child) == "table" and Try(child.GetObjectType, child) == "Button" then
+            local icon = child.icon
+            if type(icon) ~= "table" then icon = child.Icon end
+            if Char.SkinSquare(child, { icon = type(icon) == "table" and icon or nil, tint = C.cyan }) then Char.PaintSquare(child) end
+        end
+    end
+end
+
+local function SkinModel(win)
+    local model = _G.InspectModelFrame
+    if type(model) == "table" then
+        HoldModelArt(model)
+        BuildReticle(model)
+        SkinModelControls(model)
+    end
+    local doll = _G.InspectPaperDollFrame
+    if type(doll) == "table" then PanelSkins.SweepOnShow(doll) end
 end
 
 -------------------------------------------------------------------------------
@@ -189,9 +291,10 @@ local function BuildHeader(win)
     if Theme.SkinCloseButton then pcall(Theme.SkinCloseButton, win) end
 end
 
-local function Chip(win, color)
-    local chip = CreateFrame("Frame", nil, win)
-    chip:SetFrameLevel((win:GetFrameLevel() or 0) + 6)
+local function Chip(win, color, parent)
+    parent = parent or win
+    local chip = CreateFrame("Frame", nil, parent)
+    chip:SetFrameLevel((parent:GetFrameLevel() or 0) + 6)
     local c = { frame = chip, color = color }
     c.plate = Kit.Plate(chip, 4, 40, G.CHIP_H)
     Kit.PaintPlate(c.plate, C.ink, 1, color, 1, 1)
@@ -235,11 +338,40 @@ function Insp.RefreshChips()
     Put(c.you, diff and diff ~= 0 and ("vs you " .. (diff > 0 and "+" or "-") .. math.abs(diff)) or nil, x)
 end
 
+-- The stock level line (InspectLevelText, anchored 27 units under the window's top edge, which is inside our header band) is held,
+-- and its text is mirrored on an amber chip in the model well's bottom left: LEVEL.X pixels in from the left and LEVEL.UP up from the
+-- bottom, clear of the gunsight. The stock line is held only once its text has been read plainly; a text the client will not give
+-- plainly hides the chip. The class colour is an escape inside the string and carries over.
+local LEVEL = { X = 12, UP = 12 }
+Insp.LEVEL = LEVEL
+
+local function Visible(text) return (text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")) end
+
+function Insp.RefreshLevel()
+    local c = S.chips.level
+    local line, model = _G.InspectLevelText, _G.InspectModelFrame
+    if not (c and type(line) == "table" and type(model) == "table") then return end
+    local text = Plain(Try(line.GetText, line))
+    if type(text) ~= "string" or text == "" then c.frame:Hide() return end
+    Kit.HoldFrame(line)
+    local W = Kit.SizePx(model)
+    local w = math.floor(#Visible(text) * 12 * 0.5615 + 16 + 0.5)
+    if W then w = math.min(w, W - 2 * LEVEL.X) end
+    c.label:SetText(text)
+    if c.label.SetWordWrap then pcall(c.label.SetWordWrap, c.label, false) end
+    Kit.Place(c.frame, model, LEVEL.X, -LEVEL.UP, w, G.CHIP_H, "BOTTOMLEFT", "BOTTOMLEFT")
+    Kit.Place(c.label, c.frame, 8, G.CHIP_H / 2, w - 16, G.CHIP_H, "LEFT", "TOPLEFT")
+    c.frame:Show()
+end
+
 function Insp.Refresh()
     if not S.done then return end
     SkinSlots()
+    local model = _G.InspectModelFrame
+    if type(model) == "table" then PlaceReticle(model) end
     for button in pairs(S.deltas) do Insp.PaintDelta(button) end
     Insp.RefreshChips()
+    Insp.RefreshLevel()
     Insp.RefreshHeader()
 end
 
@@ -265,7 +397,15 @@ local function Build()
         Theme.AddPanelChrome(win, { fillColor = C.panel, accent = C.violet, glowAlpha = 0.30 })
     end)
     Step("header", BuildHeader, win)
-    Step("chips", function() S.chips = { ilvl = Chip(win, C.amber), you = Chip(win, C.cyan) } end)
+    Step("chips", function()
+        local doll = _G.InspectPaperDollFrame
+        S.chips = { ilvl = Chip(win, C.amber), you = Chip(win, C.cyan), level = type(doll) == "table" and Chip(win, C.amber, doll) or nil }
+        local line = _G.InspectLevelText
+        if type(line) == "table" then
+            for _, m in ipairs({ "SetFormattedText", "SetText" }) do Kit.HookFunc(line, m, Insp.RefreshLevel) end
+        end
+    end)
+    Step("model", SkinModel, win)
     Kit.HookScript(win, "OnShow", function() Kit.Later(function() Step("refresh", Insp.Refresh) end) end)
     Kit.OnReseat(Insp.Refresh)
     Step("refresh", Insp.Refresh)

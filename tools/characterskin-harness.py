@@ -14,7 +14,83 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from charskin_support import Harness  # noqa: E402
 
-H = Harness({"Character": "Modules/Skins/Character.lua"})
+# the stock equipment flyout (Blizzard_FrameXML/EquipmentFlyout.xml): the highlight ring, the leather strip, the page frame and
+# the item buttons the stock code makes the first time they are needed (EquipmentFlyout_UpdateItems)
+BLIZZARD = r"""
+local blz, tex, fstring, atex = BLZ.blz, BLZ.tex, BLZ.fstring, nil
+local build = BuildBlizzard
+function BuildBlizzard()
+    build()
+    atex = BLZ.atex
+    for k in pairs(_G) do if type(k) == "string" and k:find("^EquipmentFlyout") then _G[k] = nil end end
+    -- Blizzard_FrameXML/EquipmentFlyout.lua + .xml: the frame is seated on the slot it opened from (Show re-anchors it), the strip
+    -- frame goes right of the slot (paper doll settings anchorX 0, anchorY -3) and is sized by the item count (37 px buttons 4 apart,
+    -- five to a row), and the navigation frame (214 x 41) hangs under the strip at x -5, its PREVIOUS text anchored LEFT 36 and its
+    -- NEXT text RIGHT -33, its keys LEFT 6 and RIGHT -3 (32 x 32)
+    local fly = blz("Frame", "EquipmentFlyoutFrame", UIParent, 43, 43, "TOPLEFT", 60, -100)
+    fly.shown = false
+    fly.buttons = {}
+    fly.Highlight = tex(fly, nil, "OVERLAY")
+    fly.Highlight.w, fly.Highlight.h = 50, 50
+    fly.Highlight.SetDesaturated = function(self, v) self.desat = v end
+    local bf = blz("Frame", "EquipmentFlyoutFrameButtons", fly, 43, 43, "TOPLEFT", 40, 0)
+    fly.buttonFrame = bf
+    bf.numBGs = 1
+    bf.bg1 = tex(bf, nil, "BACKGROUND")
+    bf.bg1.w, bf.bg1.h = 60, 50
+    local nav = blz("Frame", nil, fly, 214, 41, "TOPLEFT", 35, -43)
+    fly.NavigationFrame = nav
+    nav.BottomBackground = tex(nav, nil, "BACKGROUND")
+    nav.BottomBackground.w, nav.BottomBackground.h = 214, 41
+    local prevText = fstring(nav, nil, "PREVIOUS", 10, { 1, 1, 1, 1 })
+    prevText.points[1] = { point = "LEFT", rel = nav, relPoint = "LEFT", x = 36, y = -1 }
+    local nextText = fstring(nav, nil, "NEXT", 10, { 1, 1, 1, 1 })
+    nextText.points[1] = { point = "RIGHT", rel = nav, relPoint = "RIGHT", x = -33, y = -1 }
+    nextText.justify = "RIGHT"
+    for _, key in ipairs({ "PrevButton", "NextButton" }) do
+        local b = blz("Button", nil, nav, 32, 32, key == "PrevButton" and "LEFT" or "RIGHT", key == "PrevButton" and 6 or -3, -1)
+        b.NormalTexture = tex(b, nil, "ARTWORK")
+        b.GetNormalTexture = function(self) return self.NormalTexture end
+        b.scripts.OnClick = function() end
+        nav[key] = b
+    end
+    -- the stock UpdateItems: a button per item (made once, kept), one more strip texture per two buttons
+    function EquipmentFlyout_UpdateItems()
+        local n = fly.totalItems or 0
+        for i = #fly.buttons + 1, n do
+            local col, rowN = (i - 1) % 5, math.floor((i - 1) / 5)
+            local b = blz("Button", "EquipmentFlyoutFrameButton" .. i, bf, 37, 37, "TOPLEFT", 3 + col * 41, -3 - rowN * 42)
+            b.icon = tex(b, nil, "BORDER")
+            b.icon.path = "Interface\\Icons\\inv_misc_" .. i
+            b.icon.w, b.icon.h = 30, 30
+            b.IconBorder = tex(b, nil, "OVERLAY")
+            b.NormalTexture = tex(b, nil, "ARTWORK")
+            b.Count = fstring(b, nil, "", 12)
+            b.scripts.OnClick = function() end
+            b.scripts.OnEnter = function() end
+            fly.buttons[i] = b
+        end
+        local across = math.min(n, 5)
+        bf.w = across * 37 + math.max(across - 1, 0) * 4 + 3
+        bf.h = 43 + math.floor((math.max(n, 1) - 1) / 5) * 42
+        while bf.numBGs < math.ceil(n / 2) + 1 do
+            bf.numBGs = bf.numBGs + 1
+            bf["bg" .. bf.numBGs] = tex(bf, nil, "BACKGROUND")
+        end
+        nav:SetShown(n > 8)
+    end
+    function EquipmentFlyout_Show(itemButton)
+        fly.totalItems = fly.pending or 3
+        fly.points[1] = { point = "TOPLEFT", rel = itemButton, relPoint = "TOPLEFT", x = -3, y = 3 }
+        bf.points[1] = { point = "TOPLEFT", rel = itemButton, relPoint = "TOPRIGHT", x = 0, y = -3 }
+        nav.points[1] = { point = "TOPLEFT", rel = bf, relPoint = "BOTTOMLEFT", x = -5, y = 0 }
+        fly:Show()
+        EquipmentFlyout_UpdateItems()
+    end
+end
+"""
+
+H = Harness({"Character": "Modules/Skins/Character.lua", "Quest": "Modules/Skins/Quest.lua"}, BLIZZARD)
 case = H.case
 
 # FS is already loaded (Theme ... TabSkins, Character) by the harness; this opens the window the way the client does.
@@ -158,6 +234,117 @@ case("every slot wears the shared item slot, in place, with no script or attribu
         assert(b.IconBorder.alpha == 0, n .. ' icon border not held')
     end
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
+case("slots: the stock pressed art and hover highlight are held, the slot layer draws the hover", f"""
+    {OPEN}
+    for _, n in ipairs(SLOTS) do
+        local b = _G['Character' .. n .. 'Slot']
+        assert(b.PushedTexture.alpha == 0 and b.HighlightTexture.alpha == 0, n .. ' stock pressed or hover art kept')
+    end
+    local b = CharacterHeadSlot
+    b.HighlightTexture:SetAlpha(1)
+    assert(b.HighlightTexture.alpha == 0, 'hold not kept')
+""")
+
+case("an empty slot's silhouette is tinted dim, a filled slot is left alone, and the tint follows a change of gear", f"""
+    {OPEN}
+    local function dim(icon) return icon.vertex and icon.vertex[1] < 0.4 and icon.vertex[3] > 0.4 end
+    assert(dim(CharacterRangedSlot.icon), 'empty ranged slot not dim')
+    assert(not dim(CharacterHeadSlot.icon), 'filled slot tinted')
+    GEAR[18] = {{ 2, 100, 100 }}
+    Fire('PLAYER_EQUIPMENT_CHANGED'); FlushTimers()
+    assert(not dim(CharacterRangedSlot.icon), 'tint kept after the slot was filled')
+    GEAR[18] = nil
+    CharacterRangedSlot.icon:SetTexture('Interface\\\\PaperDoll\\\\UI-PaperDoll-Slot-Ranged')
+    assert(dim(CharacterRangedSlot.icon), 'the stock texture swap did not retint the empty slot')
+""")
+
+case("a broken slot (no durability left) gets a pink halo around it, a worn or whole slot does not", f"""
+    {OPEN}
+    local S = FS.CharacterSkin.state
+    local legs, head = S.slots[CharacterLegsSlot], S.slots[CharacterHeadSlot]
+    assert(legs.halo and legs.halo.shown, 'broken legs: no halo')
+    assert(legs.halo.color[1] > 0.9 and legs.halo.color[2] < 0.4, 'halo not pink')
+    local hl, ht, hr, hb = Px(legs.halo, CharacterLegsSlot)
+    local sl, st, sr, sb = Px(CharacterLegsSlot, CharacterLegsSlot)
+    assert(hl < sl and ht < st and hr > sr and hb > sb, 'halo does not stand out around the slot')
+    assert(not (head.halo and head.halo.shown), 'worn head has a halo')
+    GEAR[7][2] = 40
+    Fire('UPDATE_INVENTORY_DURABILITY'); FlushTimers()
+    assert(not legs.halo.shown, 'repaired legs keep the halo')
+""")
+
+case("the equipment flyout: strip art held, a box stands behind the buttons, each button is a slot, the ring is cyan", f"""
+    {OPEN}
+    local fly = EquipmentFlyoutFrame
+    fly.pending = 5
+    EquipmentFlyout_Show(CharacterHeadSlot)
+    local bf = fly.buttonFrame
+    for i = 1, bf.numBGs do assert(bf['bg' .. i].alpha == 0, 'strip ' .. i .. ' kept') end
+    assert(bf.numBGs >= 3, 'the stock code did not add strips')
+    local S = FS.CharacterSkin.state
+    assert(S.flyBox and S.flyBox.fill.alpha == 1, 'no box behind the buttons')
+    local fl, ft, fr, fb = Px(S.flyBox.fill, bf)
+    local bl, bt, br, bb = Px(bf, bf)
+    assert(Near(fl, bl) and Near(ft, bt) and Near(fr, br) and Near(fb, bb), 'the box is not the strip rect')
+    assert(#fly.buttons == 5, 'buttons: ' .. #fly.buttons)
+    for i, b in ipairs(fly.buttons) do
+        assert(FS.QuestSkin.state.squares[b], 'button ' .. i .. ' is not a slot')
+        assert(FS.ItemSlotSkins.Parts(b), 'button ' .. i .. ' not on the slot layer')
+        assert(b.scripts.OnClick and b.scripts.OnEnter, 'stock script lost on ' .. i)
+        assert(b.NormalTexture.alpha == 0, 'stock normal art kept on ' .. i)
+    end
+    assert(fly.Highlight.desat and fly.Highlight.vertex[2] > 0.8 and fly.Highlight.vertex[1] < 0.4, 'highlight ring not cyan')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\\\n'))
+""")
+
+case("the equipment flyout: a button made later (a longer list) is met, the page frame wears the cut keys and mono text", f"""
+    {OPEN}
+    local fly = EquipmentFlyoutFrame
+    fly.pending = 3
+    EquipmentFlyout_Show(CharacterHeadSlot)
+    fly.pending = 12
+    EquipmentFlyout_Show(CharacterHeadSlot)
+    assert(#fly.buttons == 12, 'buttons: ' .. #fly.buttons)
+    assert(FS.QuestSkin.state.squares[fly.buttons[12]], 'late button not a slot')
+    for i = 1, fly.buttonFrame.numBGs do assert(fly.buttonFrame['bg' .. i].alpha == 0, 'late strip ' .. i .. ' kept') end
+    local nav = fly.NavigationFrame
+    assert(nav.BottomBackground.alpha == 0, 'nav art kept')
+    local P = FS.QuestSkin.state.pagers
+    assert(P[nav.PrevButton] and P[nav.NextButton], 'page keys')
+    for _, r in ipairs(nav.regions) do
+        if r.kind == 'FontString' then assert(r.fontPath ~= 'stock.ttf', 'nav text not mono') end
+    end
+    assert(FS.CharacterSkin.state.flyNav, 'no box behind the nav')
+""")
+
+case("the equipment flyout: the page keys and their texts do not overlap, the gaps match, and the flyout opens below the window header", f"""
+    {OPEN}
+    local fly = EquipmentFlyoutFrame
+    fly.pending = 10
+    EquipmentFlyout_Show(CharacterHeadSlot)
+    local nav = fly.NavigationFrame
+    local P = FS.QuestSkin.state.pagers
+    local pl, _, pr = Px(P[nav.PrevButton].key.ring, nav)
+    local nl, _, nr = Px(P[nav.NextButton].key.ring, nav)
+    local texts = {{}}
+    for _, r in ipairs(nav.regions) do if r.kind == 'FontString' then texts[r.text] = r end end
+    local tpl, _, tpr = Px(texts.PREVIOUS, nav)
+    local tnl, _, tnr = Px(texts.NEXT, nav)
+    assert(tpl - pr >= 3, 'PREVIOUS runs into its key: ' .. (tpl - pr))
+    assert(nl - tnr >= 3, 'NEXT runs into its key: ' .. (nl - tnr))
+    assert(tnl - tpr >= 20, 'the two texts meet: ' .. (tnl - tpr))
+    assert(math.abs((tpl - pr) - (nl - tnr)) <= 1, 'key to text gaps differ: ' .. (tpl - pr) .. ' vs ' .. (nl - tnr))
+    local navW = select(3, Px(nav, nav))
+    assert(pl >= 8 and navW - nr >= 8, 'a key is closer than 8 px to the nav edge')
+    -- the strip and the page frame open beside the slot they came from, under the window's header
+    local hb = select(4, Px(PaperDollFrame.TopBackgroundStripHost, CharacterFrame))
+    local _, st = Px(fly.buttonFrame, CharacterFrame)
+    assert(st >= hb, 'the flyout strip overlaps the window header: ' .. st .. ' vs ' .. hb)
+    local _, nt = Px(nav, CharacterFrame)
+    local _, _, _, sb = Px(fly.buttonFrame, CharacterFrame)
+    assert(Near(nt, sb, 0.5), 'the page frame is not under the strip')
 """)
 
 case("wear bars: height follows durability, colour follows the band, full wear shows nothing", f"""
@@ -306,6 +493,8 @@ case("pixels: wear bar and chips land on whole screen pixels at 1.2 and 1.0", f"
 
 SCENES = {
     "character": "Fire('PLAYER_ENTERING_WORLD'); CharacterFrame:Show(); FlushTimers(); return DumpOps({ CharacterFrame })",
+    "flyout": ("Fire('PLAYER_ENTERING_WORLD'); CharacterFrame:Show(); FlushTimers(); EquipmentFlyoutFrame.pending = 10; "
+               "EquipmentFlyout_Show(CharacterHeadSlot); FlushTimers(); return DumpOps({ CharacterFrame, EquipmentFlyoutFrame })"),
 }
 
 if __name__ == "__main__":

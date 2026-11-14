@@ -13,6 +13,11 @@
 --   * every equipment slot wears the shared item slot (a cut plate, the quality ring and LED of Core/ItemSlotSkins.lua, its icon
 --     seated in the layer's inset box) and, new here, a WEAR BAR: a 2 px strip up the slot's right edge, as tall as the
 --     durability left (cyan above half, amber to a fifth, pink under it, full pink when broken). Durability as a whole is not here;
+--   * slot states: the stock pushed square and hover highlight are held (the shared slot layer draws the hover), a slot with
+--     nothing in it takes a dim tint, and a broken piece gets a pink halo band three pixels wide around its plate;
+--   * the equipment flyout (EquipmentFlyoutFrame: the gear a slot can take, the gear sets): the stock highlight ring desaturated
+--     to cyan, the strip and navigation backgrounds held with our own boxes behind them, the page keys Quest.lua's cut keys, the
+--     navigation text mono, and every item button seated as a square slot (buttons are made lazily and are met when shown);
 --   * the stock level band, pane backgrounds, brown stat rows, gold category headers, model buttons, sidebar tabs and the right
 --     pane toggle are held or restyled in place with every stock script and tooltip kept;
 --   * a shared footer line under both panes (the window is made one footer taller) with chips for item level, average wear and
@@ -23,6 +28,11 @@
 -- (outside combat, never a secure frame). A slot met in combat is decorated when combat ends. Values are read through FS.IsSecret
 -- first. The shared helpers (HoldStock, RestyleFrame, SkinKey, SkinPage) are exported on FS.CharacterSkin for Skills, PvP,
 -- Statistics, Reputation and Currency, which share the window.
+--
+-- Left out on purpose (the mockup draws them, but they are computed, animated or invented, not a skin of a stock part): the
+-- durability model (the poles, the repair chip and hatching on the 3D model are not picked yet), wear brackets on the body and
+-- the live trace from a hovered slot, stat change deltas after a gear swap, the title and gear set panes as rows, and the
+-- tooltip changes.
 
 local _, FS = ...
 
@@ -41,7 +51,7 @@ local C = {
     dim = Theme.COLOR_CTRL_DIM or { 0.294, 0.165, 0.525 },
 }
 
-local G = { FOOT_H = 40, CHIP_H = 20, CHIP_GAP = 8, SIDE = 14, WEAR_W = 2, WEAR_INSET = 4, WEAR_PAD = 6 }
+local G = { FOOT_H = 40, CHIP_H = 20, CHIP_GAP = 8, SIDE = 14, WEAR_W = 2, WEAR_INSET = 4, WEAR_PAD = 6, HALO = 3 }
 Char.GEOM = G
 
 local function Weak() return setmetatable({}, { __mode = "k" }) end
@@ -145,10 +155,22 @@ local function IconOf(button)
 end
 Char.IconOf = IconOf
 
+-- The slot's own pressed art and hover highlight (keyed regions on the 16001 slot): the shared slot layer draws the hover, so the
+-- stock square highlight and pressed square are held with the rest.
+local STATE_FIELDS = { "PushedTexture", "HighlightTexture" }
+local STATE_GETTERS = { "GetPushedTexture", "GetHighlightTexture" }
+
 local function SweepSlotArt(button)
     HeldArt.HoldNormal(button)
     for _, f in ipairs(ART_FIELDS) do HeldArt.Hold(button[f]) end
     for _, f in ipairs(GLOW_FIELDS) do HeldArt.Hold(button[f]) end
+    for _, f in ipairs(STATE_FIELDS) do HeldArt.Hold(button[f]) end
+    for _, getter in ipairs(STATE_GETTERS) do
+        if type(button[getter]) == "function" then
+            local ok, region = pcall(button[getter], button)
+            if ok then HeldArt.Hold(region) end
+        end
+    end
 end
 
 -- A wear bar and a broken ring on a slot: our own regions on the button, laid out from the slot's own pixel size.
@@ -159,6 +181,9 @@ local function WearParts(button)
     w.bar:Hide()
     w.track = Kit.Rect(button, 0, 0, G.WEAR_W, 1, C.ink, 0.6, "OVERLAY", 3)
     w.track:Hide()
+    -- the broken halo: a pink band HALO px wide around the slot, behind its plate
+    w.halo = Kit.Rect(button, 0, 0, 1, 1, C.pink, 0.32, "BACKGROUND", -8)
+    w.halo:Hide()
     return w
 end
 
@@ -171,10 +196,17 @@ function Char.PaintWear(button)
     if not frac or frac >= 1 then
         parts.bar:Hide()
         parts.track:Hide()
+        parts.halo:Hide()
         return
     end
     local pw, ph = Kit.SizePx(button)
     if not pw then return end
+    if frac <= 0 then
+        Kit.Move(parts.halo, -G.HALO, -G.HALO, pw + 2 * G.HALO, ph + 2 * G.HALO)
+        parts.halo:Show()
+    else
+        parts.halo:Hide()
+    end
     local top, full = G.WEAR_PAD, ph - 2 * G.WEAR_PAD
     local h = frac <= 0 and full or math.max(1, math.floor(full * frac + 0.5))
     local x = pw - G.WEAR_INSET - G.WEAR_W
@@ -198,6 +230,23 @@ local function ReadSlot(unit)
     end
 end
 
+-- An empty slot shows the stock silhouette of what goes there; it is tinted dim violet, and goes back to white once an item is
+-- seated (only a tint of ours is ever undone).
+local function PaintEmpty(button)
+    local w = S.slots[button]
+    local icon = IconOf(button)
+    if not (w and icon and type(icon.SetVertexColor) == "function") then return end
+    local ok, info = pcall(ReadSlot(w.unit), button)
+    if not ok or type(info) ~= "table" then return end
+    if info.empty then
+        w.tinted = true
+        pcall(icon.SetVertexColor, icon, C.dim[1], C.dim[2], C.dim[3], 1)
+    elseif w.tinted then
+        w.tinted = false
+        pcall(icon.SetVertexColor, icon, 1, 1, 1, 1)
+    end
+end
+
 -- Skins one equipment slot button in place. `unit` is "player" for the paper doll, or a function that answers the unit now (the
 -- inspected one); only the player's own slots have wear. Idempotent.
 function Char.SkinSlot(button, slotId, unit)
@@ -218,12 +267,15 @@ function Char.SkinSlot(button, slotId, unit)
     end
     Kit.HookFunc(button, "SetNormalTexture", function() SweepSlotArt(button) end)
     Kit.HookScript(button, "OnSizeChanged", function() Char.PaintWear(button) end)
+    if icon then Kit.HookFunc(icon, "SetTexture", function() PaintEmpty(button) end) end
     Char.PaintWear(button)
+    PaintEmpty(button)
 end
 
 local function RefreshSlots()
     for button in pairs(S.slots) do
         Char.PaintWear(button)
+        PaintEmpty(button)
         if FS.ItemSlotSkins and FS.ItemSlotSkins.Refresh then FS.ItemSlotSkins.Refresh(button) end
     end
 end
@@ -242,8 +294,8 @@ local function PinColor(fs, color)
     fs:SetTextColor(color[1], color[2], color[3], 1)
     if type(hooksecurefunc) ~= "function" then return end
     local busy = false
-    pcall(hooksecurefunc, fs, "SetTextColor", function(self, r)
-        if busy or r == color[1] then return end
+    pcall(hooksecurefunc, fs, "SetTextColor", function(self, r, g, b)
+        if busy or (r == color[1] and g == color[2] and b == color[3]) then return end
         busy = true
         pcall(self.SetTextColor, self, color[1], color[2], color[3], 1)
         busy = false
@@ -509,6 +561,58 @@ local function SkinToggle()
     local function r(x, y, w, h) return Kit.Rect(btn, gx + x, gy + y, w, h, C.cyan, 1, "OVERLAY", 7) end
     s.glyph = { r(0, 0, gw, 2), r(0, gh - 2, gw, 2), r(0, 0, 2, gh), r(gw - 2, 0, 2, gh), r(gw - 7, 2, 2, gh - 4) }
     PaintSquare(btn)
+end
+
+-------------------------------------------------------------------------------
+-- The equipment flyout (EquipmentFlyoutFrame)
+-------------------------------------------------------------------------------
+
+-- The popup of the gear a slot can take (also the gear sets and the profession tool slots): the frame holds the highlight ring of
+-- the slot it opened from (Highlight), a buttonFrame with the leather strip behind the item buttons (bg1, bg2 ... the stock code
+-- adds textures as the list grows), a NavigationFrame (BottomBackground, the stock PREVIOUS and NEXT, PrevButton, NextButton) and
+-- the item buttons EquipmentFlyoutFrameButtonN, made the first time they are needed. Met again after every stock UpdateItems and
+-- Show (post-hooks on the globals), which is also when the strip textures and the buttons exist.
+
+local function SkinFlyout()
+    local fly = _G.EquipmentFlyoutFrame
+    if type(fly) ~= "table" then return end
+    local hi = fly.Highlight
+    if type(hi) == "table" then
+        if type(hi.SetDesaturated) == "function" then pcall(hi.SetDesaturated, hi, true) end
+        if type(hi.SetVertexColor) == "function" then pcall(hi.SetVertexColor, hi, C.cyan[1], C.cyan[2], C.cyan[3], 1) end
+    end
+    local bf = fly.buttonFrame
+    if type(bf) == "table" then
+        local n = Plain(bf.numBGs)
+        for i = 1, math.max(type(n) == "number" and n or 1, 1) + 1 do HeldArt.Hold(bf["bg" .. i]) end
+        if not S.flyBox and type(bf.CreateTexture) == "function" then
+            S.flyBox = Box(bf, "BORDER")
+            PaintBox(S.flyBox, C.ink, 0.96, C.violet, 1, 1)
+        end
+    end
+    local nav = fly.NavigationFrame
+    local Q = FS.QuestSkin
+    if type(nav) == "table" then
+        HeldArt.Hold(nav.BottomBackground)
+        if not S.flyNav and type(nav.CreateTexture) == "function" then
+            S.flyNav = Box(nav, "BORDER")
+            PaintBox(S.flyNav, C.ink, 0.96, C.violet, 1, 1)
+        end
+        if Q and Q.PagerKey then
+            Q.PagerKey(nav.PrevButton, "<")
+            Q.PagerKey(nav.NextButton, ">")
+        end
+        for _, region in ipairs(List(nav, "GetRegions")) do
+            if Try(region.GetObjectType, region) == "FontString" then
+                Kit.RestyleLabel(region, nav, 11, C.muted)
+                PinColor(region, C.muted)
+            end
+        end
+    end
+    -- the item buttons are square item buttons: the slot of the trade window and the bags (Quest.lua's SquareSlot)
+    if Q and Q.SquareSlot and type(fly.buttons) == "table" then
+        for _, btn in ipairs(fly.buttons) do Q.SquareSlot(btn) end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -894,6 +998,10 @@ end)
 
 if type(_G.PaperDollFrame_UpdateStats) == "function" then
     Kit.HookFunc(_G, "PaperDollFrame_UpdateStats", function() if S.done then Kit.Later(function() Step("stats", SkinStats) end) end end)
+end
+
+for _, name in ipairs({ "EquipmentFlyout_Show", "EquipmentFlyout_UpdateItems" }) do
+    Kit.HookFunc(_G, name, function() if S.done then Step("flyout", SkinFlyout) end end)
 end
 
 -- Exports the other windows read (Inspect shares the slot skin; the pages share the holds).

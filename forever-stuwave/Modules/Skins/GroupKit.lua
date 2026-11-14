@@ -8,7 +8,8 @@
 -- Skin only, as in Commerce.lua: Blizzard's own art is held at alpha 0 (FS.HeldArt) and ours is drawn in textures we add to the
 -- widget, so no script, attribute, parent, size or anchor of a Blizzard object is ever written. The square key and the column
 -- header HOLD THE STOCK ART FIRST and only then add their box: HeldArt.HoldButton holds every region the button has at that
--- moment, and a box made before it would be held invisible with the rest (the bug in Char.SkinSquare this file works around).
+-- moment, and a box made before it would be held invisible with the rest (Char.SkinSquare holds first too since the fix of its
+-- box-held bug, so the two now agree).
 
 local _, FS = ...
 
