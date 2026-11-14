@@ -695,6 +695,24 @@ local BAND = {
 }
 local TYPE = { CPS = 80, GRADIENT = 5, CARET_W = 6, LAND_STEP = 0.07, LAND_TIME = 0.35, PAD = 6 }
 
+-- How the greeting arrives (live ask 2026-11-14: "people don't want to wait"): typed at 240 a second (the default), at the
+-- first 80, or all at once with the rows already in place.
+Q.SPEED_SETTING = {
+    key = "quest.textSpeed", label = "Dialog text", default = "fast",
+    tip = "How the text in quest and gossip windows appears: typed out fast, typed at the slower original speed, or all at once.",
+    options = { { value = "instant", text = "Instant" }, { value = "fast", text = "Fast" }, { value = "normal", text = "Normal" } },
+}
+local SPEED_CPS = { fast = 240, normal = 80 }
+if FS.Config and FS.Config.RegisterDefault then FS.Config.RegisterDefault(Q.SPEED_SETTING.key, Q.SPEED_SETTING.default) end
+
+local function Speed()
+    local cfg = FS.Config
+    local ok, v = false, nil
+    if cfg and cfg.Get then ok, v = pcall(cfg.Get, Q.SPEED_SETTING.key) end
+    if ok and (v == "instant" or SPEED_CPS[v]) then return v end
+    return Q.SPEED_SETTING.default
+end
+
 local WAVE_SPEED, WAVE_PHASE = {}, {}
 for i = 1, BAND.BARS do
     WAVE_SPEED[i] = 5 + (i * 7) % 6
@@ -891,7 +909,7 @@ end
 -- rows land one after another, each a quad-eased fade. The alpha is the row's own, so a click lands whatever it is.
 function Q.IntroTick(intro, elapsed)
     if intro.phase == "type" then
-        local n = math.floor(elapsed * TYPE.CPS)
+        local n = math.floor(elapsed * (intro.cps or TYPE.CPS))
         if n >= intro.total + TYPE.GRADIENT then
             local fs = intro.fs
             pcall(fs.ClearAlphaGradient, fs)
@@ -918,6 +936,9 @@ end
 function Q.StartIntro(intro, fs, host, text, items)
     Q.EndIntro(intro)
     intro.fresh, intro.fs, intro.host, intro.text, intro.items = false, fs, host, text, items
+    local speed = Speed()
+    if speed == "instant" then return end
+    intro.cps = SPEED_CPS[speed]
     intro.total, intro.shown, intro.landStart = CountChars(text), -1, 0
     local canType = type(fs.SetAlphaGradient) == "function"
     for _, row in ipairs(items) do HideItem(intro, row) end

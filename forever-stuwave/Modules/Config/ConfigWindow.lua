@@ -1523,6 +1523,8 @@ CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, buil
     UI.Toggle(page, { label = "Background grid", key = "actionbars.grid" })
     local coords = FS.MinimapCoords and FS.MinimapCoords.SETTING
     if coords then UI.Toggle(page, { label = coords.label, key = coords.key, tip = coords.tip }) end
+    local speed = FS.QuestSkin and FS.QuestSkin.SPEED_SETTING
+    if speed then UI.Segmented(page, { label = speed.label, key = speed.key, tip = speed.tip, options = speed.options }) end
     local timer = FS.QuestTimer and FS.QuestTimer.SETTING
     if timer then UI.Toggle(page, { label = timer.label, key = timer.key, tip = timer.tip }) end
     local snap = FS.LossOfControl and FS.LossOfControl.SNAP_SETTING

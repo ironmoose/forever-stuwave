@@ -1311,12 +1311,35 @@ case("quest greeting: the band names the NPC, the greeting types and the titles 
     QuestFrameGreetingPanel:Hide()
     assert(FS.ControlKit.AnimationCount() == idle, 'animations left after the panel hid: ' .. (FS.ControlKit.AnimationCount() - idle))
     QUESTS.greeting = 'The hunt is over. Rest.'
-    QuestFrameGreetingPanel:Show(); FlushTimers(); Advance(0.2)
+    QuestFrameGreetingPanel:Show(); FlushTimers(); Advance(0.05)
     assert(GreetingText.gradient, 'the new greeting was not typed')
     Advance(4)
     assert(not GreetingText.gradient and not S.typed.caret.shown, 'did not finish')
     for b in QuestFrameGreetingPanel.titleButtonPool:EnumerateActive() do assert(b.alpha == 1, 'title not landed') end
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
+case("quest greeting: the text speed setting types fast by default, slower on normal, and all at once on instant", CELL + """
+    local saved = FS.Config
+    local value
+    FS.Config = { Get = function(key) if key == FS.QuestSkin.SPEED_SETTING.key then return value end end }
+    local function shownAfter(v, t)
+        value = v
+        QuestFrameGreetingPanel:Hide()
+        QUESTS.greeting = 'Speed check ' .. v .. ' with a longer line of text to type.'
+        QuestFrameGreetingPanel:Show(); FlushTimers(); OpenGreeting(); Advance(t)
+        return GreetingText.gradient and GreetingText.gradient[1]
+    end
+    local fast, normal = shownAfter('fast', 0.1), shownAfter('normal', 0.1)
+    assert(fast and normal, 'fast and normal both type')
+    assert(fast >= 2.5 * normal, 'fast is not about three times normal: ' .. fast .. ' vs ' .. normal)
+    value = 'instant'
+    QuestFrameGreetingPanel:Hide()
+    QUESTS.greeting = 'Instant text.'
+    QuestFrameGreetingPanel:Show(); FlushTimers(); OpenGreeting()
+    assert(not GreetingText.gradient, 'instant still typed')
+    for b in QuestFrameGreetingPanel.titleButtonPool:EnumerateActive() do assert(b.alpha ~= 0, 'a title hidden on instant') end
+    FS.Config = saved
 """)
 
 case("quest greeting: the text card sits behind the paragraph, the title cards stay on the stock rects", CELL + """
