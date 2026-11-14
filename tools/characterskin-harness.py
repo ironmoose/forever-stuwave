@@ -5,7 +5,12 @@ Pinned: the header band and its switch (character / reputation / currency) drive
 equipment slot wears the shared item slot with a wear bar of the right height and colour, no slot is moved or given a script or
 attribute, the stat rows keep their scripts and take mono text, the footer chips read plain values and hide for a secret or a
 missing one, and nothing is built in combat. Run `python3 tools/characterskin-harness.py [--png /tmp/char]`.
-The mock is NOT the real client.
+
+The mock follows the LIVE window (debug/tree-CharacterFrame-2026-11-14.txt, debug/live-char-crop-2026-11-14.png at 1.2 px per unit):
+a 631 x 425 window before the footer, the slot columns and weapon row where the live client puts them (the weapons hang from the
+window's bottom edge, the columns from its top), the model control row on the top of the model, the pane toggle where it sits. And
+the skin is built the way it was live: while the client still reported its 1440 / 768 pixel scale (1.875), then settled to 1.2
+(Settle), which is how the toggle's glyph, the 45 px header band and the footer clearances came out wrong. The mock is NOT the real client.
 """
 
 import sys
@@ -19,8 +24,69 @@ from charskin_support import Harness  # noqa: E402
 BLIZZARD = r"""
 local blz, tex, fstring, atex = BLZ.blz, BLZ.tex, BLZ.fstring, nil
 local build = BuildBlizzard
+
+-- left, top, right, bottom in physical pixels of a list of regions, and its middle
+function BoxOf(list)
+    local l, t, r, b = math.huge, math.huge, -math.huge, -math.huge
+    for _, o in ipairs(list) do
+        local a, c, d, e = Px(o, UIParent)
+        l, t, r, b = math.min(l, a), math.min(t, c), math.max(r, d), math.max(b, e)
+    end
+    return l, t, r, b, (l + r) / 2, (t + b) / 2
+end
+
+-- The pixel scale settles after the skin is built (the client reports 1440 / 768 until the UI scale is applied); the kit re-seats
+-- everything it recorded in pixels.
+function Settle()
+    PPU = 1.2
+    FS.ControlKit.Reseat()
+    FlushTimers()
+end
+
+-- The live numbers the 484 high base mock does not have (units; the live window is 631 x 425 under the skin's footer).
+local function LiveGeometry()
+    local win = CharacterFrame
+    win.h = 425
+    win.NineSlice:SetAllPoints(win)
+    PaperDollFrame:SetAllPoints(win)
+    -- both panes hang from 20 units under the top and from the bottom edge, so a taller window grows them
+    for _, host in ipairs({ CharacterFrameLeftPaneHost, CharacterFrameRightPaneHost }) do
+        local x = host == CharacterFrameLeftPaneHost and 0 or 398
+        host.points = {
+            { point = "TOPLEFT", rel = win, relPoint = "TOPLEFT", x = x, y = -20 },
+            { point = "BOTTOMLEFT", rel = win, relPoint = "BOTTOMLEFT", x = x, y = 0 },
+        }
+    end
+    local scene = CharacterModelScene
+    scene.points = {
+        { point = "TOPLEFT", rel = win, relPoint = "TOPLEFT", x = 0, y = -56 },
+        { point = "BOTTOMLEFT", rel = win, relPoint = "BOTTOMLEFT", x = 0, y = 0 },
+    }
+    -- the zoom and rotate row sits on the top of the model, 32 unit buttons 25.5 apart (they overlap), stock green icons
+    local control = scene.ControlFrame
+    control.points[1] = { point = "TOP", rel = scene, relPoint = "TOP", x = 0, y = -4 }
+    for i, key in ipairs({ "zoomInButton", "zoomOutButton", "rotateLeftButton", "rotateRightButton", "resetButton" }) do
+        local b = control[key]
+        b.points[1] = { point = "TOPLEFT", rel = control, relPoint = "TOPLEFT", x = (i - 1) * 25.5, y = 0 }
+        b.Icon.stock = { 0.1, 0.55, 0.12 }
+        b.Icon.points[1] = { point = "CENTER", rel = b, relPoint = "CENTER", x = 0, y = 0 }
+    end
+    -- the columns hang from the top (80 units down, 43 apart); the weapons from the bottom edge, 30.8 units up
+    local lefts = { "Head", "Neck", "Shoulder", "Back", "Chest", "Shirt", "Tabard", "Wrist" }
+    local rights = { "Hands", "Waist", "Legs", "Feet", "Finger0", "Finger1", "Trinket0", "Trinket1" }
+    for i, n in ipairs(lefts) do _G["Character" .. n .. "Slot"].points[1] = { point = "TOPLEFT", rel = PaperDollFrame, relPoint = "TOPLEFT", x = 25, y = -(80 + (i - 1) * 43) } end
+    for i, n in ipairs(rights) do _G["Character" .. n .. "Slot"].points[1] = { point = "TOPLEFT", rel = PaperDollFrame, relPoint = "TOPLEFT", x = 342, y = -(80 + (i - 1) * 43) } end
+    for n, x in pairs({ MainHand = 141.7, SecondaryHand = 183.3, Ranged = 225.8 }) do
+        _G["Character" .. n .. "Slot"].points[1] = { point = "BOTTOMLEFT", rel = win, relPoint = "BOTTOMLEFT", x = x, y = 30.8 }
+    end
+    CharacterFrameRightPaneToggleButton.points[1] = { point = "TOPLEFT", rel = win, relPoint = "TOPLEFT", x = 365, y = -25.8 }
+    CharacterLevelText.text = "Level 6 Druid"
+    CharacterLevelText.SetFormattedText = function(self, fmt, ...) self.text = string.format(fmt, ...) end
+end
+
 function BuildBlizzard()
     build()
+    LiveGeometry()
     atex = BLZ.atex
     for k in pairs(_G) do if type(k) == "string" and k:find("^EquipmentFlyout") then _G[k] = nil end end
     -- Blizzard_FrameXML/EquipmentFlyout.lua + .xml: the frame is seated on the slot it opened from (Show re-anchors it), the strip
@@ -93,8 +159,10 @@ end
 H = Harness({"Character": "Modules/Skins/Character.lua", "Quest": "Modules/Skins/Quest.lua"}, BLIZZARD)
 case = H.case
 
-# FS is already loaded (Theme ... TabSkins, Character) by the harness; this opens the window the way the client does.
-OPEN = "Fire('PLAYER_ENTERING_WORLD'); CharacterFrame:Show(); FlushTimers()"
+# FS is built while the client still reports the 1.875 pixel scale and settles to the live 1.2 once the window is open.
+_load = H.load_line
+H.load_line = lambda: "PPU = 1.875\n" + _load()
+OPEN = "Fire('PLAYER_ENTERING_WORLD'); CharacterFrame:Show(); FlushTimers(); Settle()"
 
 case("builds: chrome, header band over the stock top strip, no switch, the window one footer taller", f"""
     {OPEN}
@@ -104,14 +172,14 @@ case("builds: chrome, header band over the stock top strip, no switch, the windo
     local l, t, r, b = Px(S.header.band[1], CharacterFrame)
     local wl, wt, wr, wb = Px(CharacterFrame, CharacterFrame)
     assert(Near(l, 0) and Near(r, wr), 'band spans the window ' .. l .. ' ' .. r .. ' of ' .. wr)
-    assert(b >= 24 and b <= 40, 'band height ' .. b)
+    assert(Near(b, S.headPx), 'band height ' .. b .. ' for a header of ' .. S.headPx)
     -- two anchors: a window that changes width drags the band along
     CharacterFrame.w = CharacterFrame.w + 100
     local l2, t2, r2 = Px(S.header.band[1], CharacterFrame)
     local _, _, wr2 = Px(CharacterFrame, CharacterFrame)
     assert(Near(r2, wr2), 'band did not follow the width')
     assert(CharacterFrame.fsCharacterSkin)
-    assert(Near(CharacterFrame.h * PPU, math.floor(484 * PPU + 0.5) + 40, 0.01), 'window height ' .. CharacterFrame.h)
+    assert(Near(CharacterFrame.h * PPU, math.floor(425 * PPU + 0.5) + FS.CharacterSkin.GEOM.FOOT_H, 0.01), 'window height ' .. CharacterFrame.h)
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 
@@ -180,7 +248,8 @@ case("model buttons, sidebar tabs and the pane toggle are restyled in place", f"
     local b = CharacterModelScene.ControlFrame.zoomInButton
     assert(S.squares[b], 'zoom not skinned')
     assert(b.NormalTexture.alpha == 0 and b.PushedTexture.alpha == 0, 'stock button art')
-    assert(b.Icon.alpha == 1 and b.Icon.vertex[2] > 0.8, 'icon not cyan')
+    assert(b.Icon.alpha == 0, 'the stock green icon is still drawn')
+    assert(S.squares[b].plate and #S.squares[b].glyph >= 1, 'no key of ours')
     assert(b.scripts.OnClick, 'click lost')
     local t1, t2 = PaperDollSidebarTab1, PaperDollSidebarTab2
     assert(S.squares[t1] and S.squares[t1].box.edges[1].color[1] > 0.9, 'selected sidebar tab not pink')
@@ -192,6 +261,96 @@ case("model buttons, sidebar tabs and the pane toggle are restyled in place", f"
     assert(tg.scripts.OnClick, 'toggle click lost')
 """)
 
+case("level line: the stock text is not left across the header rule, it is mirrored on an amber chip in the header band", f"""
+    {OPEN}
+    local S = FS.CharacterSkin.state
+    -- the stock line sits 28 units under the window's top edge, which is on the lower rule of the 45 px header band
+    local ll, lt, lr, lb = Px(CharacterLevelText, CharacterFrame)
+    if lt < S.headPx + 1 and lb > S.headPx then
+        assert(CharacterLevelText.alpha == 0, string.format('the stock level text (%.0f to %.0f px down) is drawn across the header rule at %d px', lt, lb, S.headPx))
+    end
+    local lv = S.level
+    assert(lv and lv.frame, 'no level chip')
+    assert(CharacterLevelText.alpha == 0, 'the stock line is kept next to its chip')
+    assert(lv.frame:GetParent() == PaperDollFrame, 'the chip must go with the paper doll page')
+    assert(lv.frame.shown ~= false and lv.label.text == 'Level 6 Druid', 'chip text: ' .. tostring(lv.label.text))
+    assert(lv.label.textColor[1] > 0.9 and lv.label.textColor[3] < 0.3, 'chip text not amber')
+    local cl, ct, cr, cb = Px(lv.frame, CharacterFrame)
+    assert(ct >= 4 and cb <= S.headPx - 4, string.format('the chip is not seated in the header band: %.1f to %.1f of %d', ct, cb, S.headPx))
+    local tl, tt, tr = Px(S.header.title, CharacterFrame)
+    assert(cl - tr >= 8, string.format('the chip crowds the title (%.1f px between)', cl - tr))
+    local gl = Px(CharacterFrameRightPaneToggleButton, CharacterFrame)
+    assert(gl - cr >= 8, string.format('the chip runs into the pane toggle (%.1f px between)', gl - cr))
+    assert(Near((ct + cb) / 2, S.headPx / 2, 1.5), string.format('the chip is not level with the header band (%.1f vs %.1f)', (ct + cb) / 2, S.headPx / 2))
+    -- it follows the stock text, plain strings only
+    CharacterLevelText:SetFormattedText('Level %d %s', 7, 'Druid')
+    assert(lv.label.text == 'Level 7 Druid', 'the chip did not follow the stock text: ' .. tostring(lv.label.text))
+    CharacterLevelText.text = Secret()
+    FS.CharacterSkin.RefreshLevel()
+    assert(not lv.frame.shown, 'a secret text is shown')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
+case("pane toggle: the glyph is centred on its key at the live scale, not hung from the size the key had before it settled", f"""
+    {OPEN}
+    local S = FS.CharacterSkin.state
+    local tg = CharacterFrameRightPaneToggleButton
+    local glyph = S.squares[tg].glyph
+    local _, _, _, _, gx, gy = BoxOf(glyph)
+    local bx, by = CenterOf(tg, UIParent)
+    assert(math.abs(gx - bx) <= 0.6 and math.abs(gy - by) <= 0.6, string.format('glyph off the middle of its key by %.1f, %.1f px', gx - bx, gy - by))
+    local gl, gt, gr, gb = BoxOf(glyph)
+    assert(math.abs(gr - gl - 18) < 0.01 and math.abs(gb - gt - 14) < 0.01, 'glyph is not 18 x 14')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
+case("footer: the weapon row and the lowest side slots clear the footer's top rule by about the same margin", f"""
+    {OPEN}
+    local S = FS.CharacterSkin.state
+    local _, rt = Px(S.footer.rule, CharacterFrame)
+    local function gap(name)
+        local _, _, _, b = Px(_G['Character' .. name .. 'Slot'], CharacterFrame)
+        return rt - b
+    end
+    local weapons = {{ gap('MainHand'), gap('SecondaryHand'), gap('Ranged') }}
+    local sides = {{ gap('Wrist'), gap('Trinket1') }}
+    for i, g in ipairs(weapons) do assert(g >= 5, string.format('weapon %d overlaps or hugs the footer rule (%.1f px clear)', i, g)) end
+    for i, g in ipairs(sides) do assert(g >= 5, string.format('side slot %d overlaps or hugs the footer rule (%.1f px clear)', i, g)) end
+    assert(math.abs(weapons[1] - sides[1]) <= 1.5, string.format('the margins differ: weapons %.1f px, side slots %.1f px', weapons[1], sides[1]))
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
+case("model keys: our cut keys on the stock buttons, glyphs of ours, clear of one another and centred", f"""
+    {OPEN}
+    local S = FS.CharacterSkin.state
+    local control = CharacterModelScene.ControlFrame
+    local prevRight
+    for i, key in ipairs({{ 'zoomInButton', 'zoomOutButton', 'rotateLeftButton', 'rotateRightButton', 'resetButton' }}) do
+        local b = control[key]
+        local k = S.squares[b]
+        assert(k, key .. ' not skinned')
+        local own = k.plate and k.plate.ring or k.box.fill
+        local l, t, r, bt = Px(own, UIParent)
+        if prevRight then assert(l - prevRight >= 3, string.format('%s: the key touches the one before it (%.1f px between)', key, l - prevRight)) end
+        prevRight = r
+        assert(k.plate and #k.glyph >= 1, key .. ': no cut key and glyph of ours')
+        assert(b.Icon.alpha == 0, key .. ': the stock green icon is still drawn')
+        assert(b.scripts.OnClick, key .. ': click lost')
+        assert(k.glyph[1].color[2] > 0.8 and k.glyph[1].color[1] < 0.3, key .. ': glyph not cyan')
+        local bx, by = CenterOf(b, UIParent)
+        local px, py = CenterOf(k.plate.ring, UIParent)
+        assert(math.abs(bx - px) <= 0.6 and math.abs(by - py) <= 0.6, string.format('%s: key off the middle of its button by %.1f, %.1f px', key, px - bx, py - by))
+        local _, _, _, _, gx, gy = BoxOf(k.glyph)
+        assert(math.abs(gx - px) <= 0.6 and math.abs(gy - py) <= 0.6, string.format('%s: glyph off the middle of its key by %.1f, %.1f px', key, gx - px, gy - py))
+    end
+    local k = S.squares[control.zoomInButton]
+    control.zoomInButton:RunScript('OnEnter')
+    assert(k.plate.ring.vertex[2] > 0.8 and k.plate.ring.vertex[1] < 0.3, 'hover edge not cyan')
+    control.zoomInButton:RunScript('OnLeave')
+    assert(k.plate.ring.vertex[1] < 0.5, 'hover stuck')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
 case("a skinned square's own box is never held: the fill and ring stay visible and survive a SetAlpha", f"""
     {OPEN}
     local S = FS.CharacterSkin.state
@@ -199,7 +358,8 @@ case("a skinned square's own box is never held: the fill and ring stay visible a
     local function check(btn, what)
         local s = S.squares[btn]
         assert(s, what .. ' not skinned')
-        for i, region in ipairs({{ s.box.fill, s.box.edges[1], s.box.edges[2], s.box.edges[3], s.box.edges[4] }}) do
+        local own = s.box and {{ s.box.fill, s.box.edges[1], s.box.edges[2], s.box.edges[3], s.box.edges[4] }} or {{ s.plate.fill, s.plate.ring }}
+        for i, region in ipairs(own) do
             assert(region.alpha == 1, what .. ' box region ' .. i .. ' is held invisible (alpha ' .. tostring(region.alpha) .. ')')
             region:SetAlpha(0.5)
             assert(region.alpha == 0.5, what .. ' box region ' .. i .. ' carries the hold hook')
@@ -218,18 +378,18 @@ case("a skinned square's own box is never held: the fill and ring stay visible a
 """)
 
 case("every slot wears the shared item slot, in place, with no script or attribute written", f"""
+    -- the anchors, not the pixels: the scale changes between the two readings and the weapon row hangs from the bottom edge
     local before = {{}}
     for _, n in ipairs(SLOTS) do
-        local b = _G['Character' .. n .. 'Slot']
-        local l, t = Px(b, CharacterFrame)
-        before[n] = {{ l, t }}
+        local p = _G['Character' .. n .. 'Slot'].points[1]
+        before[n] = {{ p.point, p.rel, p.relPoint, p.x, p.y, #_G['Character' .. n .. 'Slot'].points }}
     end
     {OPEN}
     for _, n in ipairs(SLOTS) do
         local b = _G['Character' .. n .. 'Slot']
         assert(FS.ItemSlotSkins.Parts(b), n .. ' not decorated')
-        local l, t = Px(b, CharacterFrame)
-        assert(Near(l, before[n][1]) and Near(t, before[n][2]), n .. ' moved')
+        local p, w = b.points[1], before[n]
+        assert(p.point == w[1] and p.rel == w[2] and p.relPoint == w[3] and p.x == w[4] and p.y == w[5] and #b.points == w[6], n .. ' moved')
         assert(b.NormalTexture.alpha == 0, n .. ' normal art not held')
         assert(b.IconBorder.alpha == 0, n .. ' icon border not held')
         assert(b.BorderFrame.alpha == 0, n .. ' bronze gear-slot ring not held')
@@ -412,9 +572,10 @@ case("footer chips: one shared line, even spacing, the repair bill right aligned
     assert(Near(l2 - r1, l3 - r2), 'uneven gaps ' .. (l2 - r1) .. ' ' .. (l3 - r2))
     assert(Near(wr - r4, 14), 'repair right margin ' .. (wr - r4))
     -- the line is centred in the footer band
-    assert(Near(wb - b1, t1 - (wb - 40), 1), 'chips not centred in the footer: ' .. (wb - b1) .. ' vs ' .. (t1 - (wb - 40)))
+    local foot = FS.CharacterSkin.GEOM.FOOT_H
+    assert(Near(wb - b1, t1 - (wb - foot), 1), 'chips not centred in the footer: ' .. (wb - b1) .. ' vs ' .. (t1 - (wb - foot)))
     local fl, ft, fr, fb = Px(FS.CharacterSkin.state.footer.band, CharacterFrame)
-    assert(Near(fb, wb) and Near(fb - ft, 40), 'footer band ' .. ft .. ' ' .. fb)
+    assert(Near(fb, wb) and Near(fb - ft, foot), 'footer band ' .. ft .. ' ' .. fb)
 """)
 
 case("chips hide for a missing or secret value, and off the character page", f"""
@@ -476,7 +637,7 @@ case("nothing is built in combat; the skin is built when it ends", f"""
     Load({{ 'Theme', 'Layout', 'HeldArt', 'PanelSkins', 'ControlKit', 'ItemSlotSkins', 'TabSkins', 'Character' }})
     Fire('PLAYER_ENTERING_WORLD'); CharacterFrame:Show(); FlushTimers()
     assert(not CharacterFrame.fsCharacterSkin, 'built in combat')
-    assert(CharacterFrame.h == 484, 'the window was resized in combat')
+    assert(CharacterFrame.h == 425, 'the window was resized in combat')
     __combat = false
     Fire('PLAYER_REGEN_ENABLED'); FlushTimers()
     assert(CharacterFrame.fsCharacterSkin, 'not built when combat ended')
@@ -493,8 +654,8 @@ case("pixels: wear bar and chips land on whole screen pixels at 1.2 and 1.0", f"
 """)
 
 SCENES = {
-    "character": "Fire('PLAYER_ENTERING_WORLD'); CharacterFrame:Show(); FlushTimers(); return DumpOps({ CharacterFrame })",
-    "flyout": ("Fire('PLAYER_ENTERING_WORLD'); CharacterFrame:Show(); FlushTimers(); EquipmentFlyoutFrame.pending = 10; "
+    "character": "Fire('PLAYER_ENTERING_WORLD'); CharacterFrame:Show(); FlushTimers(); Settle(); return DumpOps({ CharacterFrame })",
+    "flyout": ("Fire('PLAYER_ENTERING_WORLD'); CharacterFrame:Show(); FlushTimers(); Settle(); EquipmentFlyoutFrame.pending = 10; "
                "EquipmentFlyout_Show(CharacterHeadSlot); FlushTimers(); return DumpOps({ CharacterFrame, EquipmentFlyoutFrame })"),
 }
 

@@ -51,7 +51,10 @@ local C = {
     dim = Theme.COLOR_CTRL_DIM or { 0.294, 0.165, 0.525 },
 }
 
-local G = { FOOT_H = 40, CHIP_H = 20, CHIP_GAP = 8, SIDE = 14, WEAR_W = 2, WEAR_INSET = 4, WEAR_PAD = 6, HALO = 3 }
+-- FOOT_H: the footer band is 28 px under the window's last 29 (band and its rule). The stock weapon row hangs 30.8 units from the
+-- window's bottom edge (about 37 px at 1.2) and the slot columns from its top, so at 40 px the rule ran through the weapons; at 28
+-- the weapon row and the lowest side slots clear the rule by about the same 7 px, and the 20 px chips keep 4 px above and below.
+local G = { FOOT_H = 28, CHIP_H = 20, CHIP_GAP = 8, SIDE = 14, WEAR_W = 2, WEAR_INSET = 4, WEAR_PAD = 6, HALO = 3 }
 Char.GEOM = G
 
 local function Weak() return setmetatable({}, { __mode = "k" }) end
@@ -494,12 +497,21 @@ local function PaintSquare(btn)
     local hover = s.state and s.state.hover
     local pressed = s.state and s.state.pressed
     local edge = sel and C.pink or ((hover or pressed) and C.cyan or C.dim)
-    PaintBox(s.box, sel and C.band or C.ink, 1, edge, 1, sel and 2 or 1)
+    local on = true
+    if s.plate then
+        on = Kit.IsEnabled(btn)
+        Kit.PaintPlate(s.plate, sel and C.band or C.ink, 1, on and edge or C.dim, on and 1 or 0.6, sel and 2 or 1)
+    else
+        PaintBox(s.box, sel and C.band or C.ink, 1, edge, 1, sel and 2 or 1)
+    end
     local tint = s.tint and ((hover or pressed or sel) and C.text or s.tint)
     if s.icon and tint and s.icon.SetVertexColor then pcall(s.icon.SetVertexColor, s.icon, tint[1], tint[2], tint[3], 1) end
     if s.glyph then
         local g = (hover or pressed) and C.text or C.cyan
-        for _, t in ipairs(s.glyph) do t:SetColorTexture(g[1], g[2], g[3], 1) end
+        for _, t in ipairs(s.glyph) do
+            t:SetColorTexture(g[1], g[2], g[3], 1)
+            if s.plate then t:SetAlpha(on and 1 or 0.35) end
+        end
     end
 end
 
@@ -515,16 +527,68 @@ local function SkinSquare(btn, opts)
     return s
 end
 
+-- Cells of a glyph, {x, y, w, h} px each on a gw x gh px grid hung from the MIDDLE of `btn`: the grid's own middle is the button's, so
+-- the glyph is centred whatever size the stock button reported when it was skinned (the pixel scale is not settled yet when the
+-- skin is built, and an offset worked out from that size stays wrong). Even grids, so the middle falls between two pixels.
+local function Cells(btn, gw, gh, cells)
+    local out = {}
+    local ox, oy = math.floor(gw / 2), math.floor(gh / 2)
+    for _, c in ipairs(cells) do
+        local t = Kit.Rect(btn, 0, 0, c[3], c[4], C.cyan, 1, "OVERLAY", 7)
+        Kit.Place(t, btn, c[1] - ox, c[2] - oy, c[3], c[4], "TOPLEFT", "CENTER", btn)
+        out[#out + 1] = t
+    end
+    return out
+end
+
+-- A cut key `size` px square seated on the middle of a stock button (CENTER to CENTER) with a cell glyph, the stock art held first
+-- (a plate made before it would be held invisible with the rest). The stock button keeps its size, script and hit rectangle; the key
+-- is smaller than it, which is how the model's zoom and rotate buttons (32 units wide, 25.5 apart, so they overlap) get a gap
+-- between them. Painted by PaintSquare, with the hover, press and disabled states of the stock button.
+local KEY = { SIZE = 26, CUT = 3 }
+
+local function SkinKey(btn, gw, gh, cells)
+    if type(btn) ~= "table" or type(btn.CreateTexture) ~= "function" or S.squares[btn] then return nil end
+    HeldArt.HoldButton(btn)
+    local plate = Kit.Plate(btn, KEY.CUT, KEY.SIZE, KEY.SIZE)
+    for _, part in ipairs({ plate.fill, plate.ring }) do
+        Kit.Place(part, btn, 0, 0, KEY.SIZE, KEY.SIZE, "CENTER", "CENTER", btn)
+    end
+    if plate.ring2 then Kit.Place(plate.ring2, btn, 0, 0, KEY.SIZE - 2, KEY.SIZE - 2, "CENTER", "CENTER", btn) end
+    local s = { plate = plate, glyph = Cells(btn, gw, gh, cells) }
+    S.squares[btn] = s
+    s.state = Kit.Track(btn, PaintSquare)
+    PaintSquare(btn)
+    return s
+end
+
+-- The glyphs of the model's keys: a plus and a minus for the zoom, an arrow each way for the turn, a ring with a dot for the reset.
+local ARROW_HEAD = { { 4, 0, 2, 2 }, { 2, 2, 2, 2 }, { 0, 4, 2, 2 }, { 2, 6, 2, 2 }, { 4, 8, 2, 2 } }
+local function RightArrow()
+    local out = { { 0, 4, 12, 2 } }
+    for _, c in ipairs(ARROW_HEAD) do out[#out + 1] = { 12 - c[1], c[2], c[3], c[4] } end
+    return out
+end
+local function LeftArrow()
+    local out = { { 2, 4, 12, 2 } }
+    for _, c in ipairs(ARROW_HEAD) do out[#out + 1] = c end
+    return out
+end
+local MODEL_KEYS = {
+    { "zoomInButton", 14, 14, { { 0, 6, 14, 2 }, { 6, 0, 2, 14 } } },
+    { "zoomOutButton", 14, 14, { { 0, 6, 14, 2 } } },
+    { "rotateLeftButton", 14, 10, LeftArrow() },
+    { "rotateRightButton", 14, 10, RightArrow() },
+    { "resetButton", 12, 12, { { 2, 0, 8, 2 }, { 2, 10, 8, 2 }, { 0, 2, 2, 8 }, { 10, 2, 2, 8 }, { 5, 5, 2, 2 } } },
+}
+
 local function SkinModelControls()
     local scene = _G.CharacterModelScene
     local control = scene and scene.ControlFrame
     if not control then return end
-    for _, key in ipairs({ "zoomInButton", "zoomOutButton", "rotateLeftButton", "rotateRightButton", "resetButton" }) do
-        local b = control[key]
-        if b then
-            SkinSquare(b, { icon = b.Icon, tint = C.cyan })
-            PaintSquare(b)
-        end
+    for _, def in ipairs(MODEL_KEYS) do
+        local b = control[def[1]]
+        if b and SkinKey(b, def[2], def[3], def[4]) then PaintSquare(b) end
     end
 end
 
@@ -556,12 +620,9 @@ local function SkinToggle()
     if not btn or S.squares[btn] then return end
     local s = SkinSquare(btn, {})
     if not s then return end
-    local bw, bh = Kit.SizePx(btn)
-    bw, bh = bw or 28, bh or 28
+    -- the pane glyph: a frame with a bar down its right side, 18 x 14 px, hung from the middle of the key
     local gw, gh = 18, 14
-    local gx, gy = math.floor((bw - gw) / 2), math.floor((bh - gh) / 2)
-    local function r(x, y, w, h) return Kit.Rect(btn, gx + x, gy + y, w, h, C.cyan, 1, "OVERLAY", 7) end
-    s.glyph = { r(0, 0, gw, 2), r(0, gh - 2, gw, 2), r(0, 0, 2, gh), r(gw - 2, 0, 2, gh), r(gw - 7, 2, 2, gh - 4) }
+    s.glyph = Cells(btn, gw, gh, { { 0, 0, gw, 2 }, { 0, gh - 2, gw, 2 }, { 0, 0, 2, gh }, { gw - 2, 0, 2, gh }, { gw - 7, 2, 2, gh - 4 } })
     PaintSquare(btn)
 end
 
@@ -742,7 +803,7 @@ local function BuildHeader(win)
     HeldArt.Hold(_G.CharacterFramePortrait)
     if Theme.SkinCloseButton then pcall(Theme.SkinCloseButton, win) end
     for _, page in ipairs(PAGES) do
-        Kit.HookScript(_G[page.frame], "OnShow", function() Char.RefreshHeader(); Char.RefreshChips() end)
+        Kit.HookScript(_G[page.frame], "OnShow", function() Char.RefreshHeader(); Char.RefreshChips(); Char.RefreshLevel() end)
     end
     Char.RefreshHeader()
 end
@@ -831,9 +892,10 @@ end
 -- Footer: one shared line under both panes
 -------------------------------------------------------------------------------
 
-local function Chip(win, color)
-    local chip = CreateFrame("Frame", nil, win)
-    chip:SetFrameLevel((win:GetFrameLevel() or 0) + 6)
+local function Chip(win, color, parent)
+    parent = parent or win
+    local chip = CreateFrame("Frame", nil, parent)
+    chip:SetFrameLevel((parent:GetFrameLevel() or 0) + 6)
     local c = { frame = chip, color = color, w = 40 }
     c.plate = Kit.Plate(chip, 4, 40, G.CHIP_H)
     Kit.PaintPlate(c.plate, C.ink, 1, color, 1, 1)
@@ -892,6 +954,38 @@ function Char.RefreshChips()
     if ShownPage() ~= 1 then for _, c in pairs(chips) do c.frame:Hide() end end
 end
 
+-- The stock level line (CharacterLevelText, 28 units under the window's top edge) lands on the lower rule of our header band, so it
+-- is held and its text is mirrored on an amber chip in the header band, LEVEL.GAP px right of the title, level with it. The chip is a
+-- child of the paper doll page, so it goes with that page. The stock line is held only once its text has been read as a plain
+-- string; a text the client will not give plainly hides the chip and leaves the stock line (restyled amber) where it was.
+local LEVEL = { GAP = 16, MAX_W = 230 }
+
+local function Visible(text) return (text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")) end
+
+function Char.RefreshLevel()
+    local c, head = S.level, S.header
+    local line = _G.CharacterLevelText
+    if not (c and head and type(line) == "table") then return end
+    local text = Plain(Try(line.GetText, line))
+    if type(text) ~= "string" or text == "" then c.frame:Hide() return end
+    Kit.HoldFrame(line)
+    local w = math.min(math.floor(#Visible(text) * 12 * 0.5615 + 16 + 0.5), LEVEL.MAX_W)
+    c.label:SetText(text)
+    if c.label.SetWordWrap then pcall(c.label.SetWordWrap, c.label, false) end
+    Kit.Place(c.frame, head.title, LEVEL.GAP, 0, w, G.CHIP_H, "LEFT", "RIGHT", _G.CharacterFrame)
+    Kit.Place(c.label, c.frame, 8, G.CHIP_H / 2, w - 16, G.CHIP_H, "LEFT", "TOPLEFT")
+    c.plate.w = w
+    c.frame:Show()
+end
+
+local function BuildLevel(win)
+    local paper, line = _G.PaperDollFrame, _G.CharacterLevelText
+    if type(paper) ~= "table" or type(line) ~= "table" or not S.header then return end
+    S.level = Chip(win, C.amber, paper)
+    for _, m in ipairs({ "SetFormattedText", "SetText" }) do Kit.HookFunc(line, m, Char.RefreshLevel) end
+    Char.RefreshLevel()
+end
+
 -- The window is made one footer taller (outside combat); stock code that sets its height again is answered with the same.
 local function ExtendWindow(win)
     if InCombat() or S.extending then return end
@@ -948,6 +1042,7 @@ local function Refresh()
     Step("pages", SkinPages)
     Step("scrollbars", function() PanelSkins.SweepScrollBars(_G.CharacterFrame) end)
     Step("chips", Char.RefreshChips)
+    Step("level", Char.RefreshLevel)
     Step("header", Char.RefreshHeader)
     for tab in pairs(S.tabs) do PaintTab(tab) end
 end
@@ -975,6 +1070,7 @@ local function Build()
     Step("art", function() for _, name in ipairs(MODEL_ART) do HeldArt.Hold(_G[name]) end end)
     Step("header", BuildHeader, win)
     Step("footer", BuildFooter, win)
+    Step("levelChip", BuildLevel, win)
     Kit.HookScript(win, "OnShow", function() Kit.Later(function() Relayout(); Refresh() end) end)
     Kit.HookFunc(win, "SetHeight", function() if not S.extending then Kit.Later(function() ExtendWindow(win) end) end end)
     Kit.HookFunc(win, "SetSize", function() if not S.extending then Kit.Later(function() ExtendWindow(win) end) end end)

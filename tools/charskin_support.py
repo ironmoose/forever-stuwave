@@ -34,6 +34,21 @@ _MEAS = _MOCK.index("-----------------------------------------------------------
 ENGINE = _MOCK[:_BLIZ]
 MEASURE = _MOCK[_MEAS:]
 
+# A texture the mock marks with a stock colour (t.stock = {r,g,b}) and that still has a non-zero alpha is drawn as a "stock" box in
+# that colour times the vertex tint, grey first when desaturated: a tint on art that carries its own colour then looks the way it
+# does in the client (a cyan tint on a green glyph stays green), and a stock piece nobody held shows up in a render. Textures with
+# no stock colour are not drawn, so the older harnesses render exactly as before.
+_ICONS = """            elseif o.path and o.path:find("Icons") then"""
+_STOCK = r"""            elseif o.stock then
+                local sc = o.stock
+                if o.desat then local g = sc[1] * 0.3 + sc[2] * 0.59 + sc[3] * 0.11; sc = { g, g, g } end
+                local v = o.vertex or { 1, 1, 1, 1 }
+                ops[#ops + 1] = { kind = "stock", l = l, t = t, r = r, b = b, label = o.atlas or "",
+                    rgba = { sc[1] * v[1], sc[2] * v[2], sc[3] * v[3], a * (v[4] or 1) } }
+"""
+assert _ICONS in MEASURE
+MEASURE = MEASURE.replace(_ICONS, _STOCK + _ICONS, 1)
+
 CORE = ["Core/Theme.lua", "Core/Layout.lua", "Core/HeldArt.lua", "Core/PanelSkins.lua", "Core/ControlKit.lua",
         "Core/ItemSlotSkins.lua", "Core/TabSkins.lua"]
 
@@ -93,7 +108,8 @@ function Reset()
 end
 function Secret() return { __secret = true } end
 function Obj:GetLeft() local l = self:Rect(); return l end
-"""
+
+function Obj:SetDesaturated(v) self.desat = v and true or false end"""
 
 # ---------------------------------------------------------------------------------------------------------------------
 # A stock CharacterFrame (ButtonFrameTemplate, Tab1..3, the paper doll slots, the stats pane) with the three sub frames.
@@ -415,7 +431,13 @@ class Harness:
                 else:
                     c = max(0, min(int(op.get("c", 0)), (b - t) // 2))
                     pts = [(l + c, t), (r - 1, t), (r - 1, b - 1 - c), (r - 1 - c, b - 1), (l, b - 1), (l, t + c)]
-                    if kind == "flat":
+                    if kind == "stock":
+                        d.rectangle([l, t, r - 1, b - 1], fill=col if r - l <= 26 else col[:3] + (max(40, col[3] // 3),), outline=col)
+                        label = op.get("label") or ""
+                        if label and r - l >= 30:
+                            small = fonts.setdefault(7, ImageFont.truetype(str(FONT), 7))
+                            d.text((l + 2, t + 1), label[:max(4, (r - l) // 4)], font=small, fill=(255, 255, 255, 200))
+                    elif kind == "flat":
                         d.rectangle([l, t, r - 1, b - 1], fill=col)
                     elif kind == "fill":
                         d.polygon(pts, fill=col)

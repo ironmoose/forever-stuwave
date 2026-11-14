@@ -17,10 +17,15 @@
 -- the stock list is rebuilt (post-hooks on QuestLogQuests_Update and QuestMapFrame_UpdateAll), and every row is painted again after
 -- each rebuild and each change of the selected quest. The quest colour (its difficulty) is the stock code's and is never pinned.
 --
+-- Pixel offsets worked out from a stock size are stale for good when the skin is built before the client has applied the UI scale
+-- (it reports 1440 / 768 pixels per unit until then), so nothing here is seated from a stock size: plates and glyphs hang from the
+-- MIDDLE of the stock button (CENTER to CENTER), and what is anchored to text or to a neighbour is seated again after a re-seat.
+--
 -- Left out on purpose, because the mockup shows a computed display and the rule for this pass is "keep the functionality the same
 -- as vanilla": the header switch between the full map and the quest log (it would call a Blizzard button from our code), the
--- surveyor rulers and the cursor tick on the canvas edges, the cursor and player read-outs moved onto the header (the stock
--- coordinates keep their place and only change type), the rail line and the quest level, count and daily chips of a row, the pip
+-- surveyor rulers and the cursor tick on the canvas edges, the cursor and player read-outs moved onto the header (they are
+-- mirrored on two chips seated inside the canvas' bottom left corner instead, and the stock text is held once it has been read
+-- plainly), the rail line and the quest level, count and daily chips of a row, the pip
 -- chain of the campaign banner, the charge pips of an objective, the label tabs above the search box (the stock side tabs are
 -- keys in place), and the Events and Map Legend pages. Map pins stay stock.
 
@@ -147,25 +152,35 @@ local function PaintKey(btn)
     end
 end
 
+-- Seats the plate `size` px square on the middle of the stock button (CENTER to CENTER, so it stays centred whatever size the button
+-- reported when it was skinned), moved (dx, dy) px, or at `beside` = { ref, point, relPoint, x, y } (px) when it has to clear a
+-- neighbour. The inner ring sits one pixel in on the side the plate hangs from.
+local function SeatPlate(btn, plate, size, opts)
+    local ref, point, rel, x, y = btn, "CENTER", "CENTER", opts.dx or 0, opts.dy or 0
+    local at = opts.beside
+    if at then ref, point, rel, x, y = at.ref, at.point, at.relPoint, at.x or 0, at.y or 0 end
+    local ix = point:find("LEFT") and 1 or (point:find("RIGHT") and -1 or 0)
+    local iy = point:find("TOP") and 1 or (point:find("BOTTOM") and -1 or 0)
+    Kit.Place(plate.fill, ref, x, y, size, size, point, rel, btn)
+    Kit.Place(plate.ring, ref, x, y, size, size, point, rel, btn)
+    if plate.ring2 then Kit.Place(plate.ring2, ref, x + ix, y + iy, size - 2, size - 2, point, rel, btn) end
+end
+
 -- Cut-corner key `size` px across centred on the stock button. The stock art is held FIRST (HeldArt.HoldButton holds every region
 -- the button has at that moment, so a plate made before it would be held invisible too), except `opts.keep` (the icon that is the
 -- picture). opts: size, cut, keep (a set), icon (tinted with the state), tint, idle (edge colour), selected() and glowing() (state
--- the stock widget holds), glyph (a function(key) that draws cells on the button and returns them), label (text drawn centred).
+-- the stock widget holds), glyph (a function(btn, dx, dy, size) that draws cells centred on the button and returns them), label
+-- (text drawn centred), dx and dy (px the key is moved from the middle), beside (see SeatPlate).
 local function Key(btn, opts)
     if type(btn) ~= "table" or type(btn.CreateTexture) ~= "function" then return nil end
     if S.keys[btn] then return S.keys[btn] end
     opts = opts or {}
     HeldArt.HoldButton(btn, opts.keep)
     local size, cut = opts.size or KEY, opts.cut or KEY_CUT
-    local bw, bh = Kit.SizePx(btn)
-    bw, bh = bw or size, bh or size
-    local x, y = math.floor((bw - size) / 2), math.floor((bh - size) / 2)
-    local k = { plate = Kit.Plate(btn, cut, size, size), glyph = {}, x = x, y = y, size = size, icon = opts.icon, tint = opts.tint,
+    local k = { plate = Kit.Plate(btn, cut, size, size), glyph = {}, size = size, icon = opts.icon, tint = opts.tint,
         idle = opts.idle, selected = opts.selected, glowing = opts.glowing }
-    Kit.Place(k.plate.fill, btn, x, y, size, size)
-    Kit.Place(k.plate.ring, btn, x, y, size, size)
-    if k.plate.ring2 then Kit.Place(k.plate.ring2, btn, x + 1, y + 1, size - 2, size - 2) end
-    if opts.glyph then k.glyph = opts.glyph(btn, x, y, size) or {} end
+    SeatPlate(btn, k.plate, size, opts)
+    if opts.glyph then k.glyph = opts.glyph(btn, opts.dx or 0, opts.dy or 0, size) or {} end
     if opts.label then
         k.label = Kit.Label(btn, opts.label, opts.labelPx or 14, C.cyan, "OVERLAY")
         k.label:ClearAllPoints()
@@ -181,18 +196,30 @@ local function Key(btn, opts)
     return k
 end
 
--- Cells of a glyph, {x, y, w, h} each, at (gx, gy) px of `btn`.
-local function Cells(btn, gx, gy, cells)
+-- Cells of a glyph, {x, y, w, h} each, on a gw x gh px grid hung from the MIDDLE of `btn` (moved (dx, dy) px): the grid's own
+-- middle is the button's, so the glyph is centred whatever size the stock button reported when it was skinned.
+local function Cells(btn, gw, gh, cells, dx, dy)
     local out = {}
-    for _, c in ipairs(cells) do out[#out + 1] = Kit.Rect(btn, gx + c[1], gy + c[2], c[3], c[4], C.cyan, 1, "OVERLAY", 7) end
+    local ox, oy = math.floor(gw / 2) - (dx or 0), math.floor(gh / 2) - (dy or 0)
+    for _, c in ipairs(cells) do
+        local t = Kit.Rect(btn, 0, 0, c[3], c[4], C.cyan, 1, "OVERLAY", 7)
+        Kit.Place(t, btn, c[1] - ox, c[2] - oy, c[3], c[4], "TOPLEFT", "CENTER", btn)
+        out[#out + 1] = t
+    end
     return out
 end
 
 local GLYPH_BOX = { { 0, 0, 10, 2 }, { 0, 8, 10, 2 }, { 0, 2, 2, 6 }, { 8, 2, 2, 6 } }
 local GLYPH_BAR = { { 0, 8, 10, 2 } }
+-- the close-style x: two one pixel diagonals on a 6 x 6 grid (an even grid, so they never share a pixel)
+local GLYPH_X = {}
+for i = 0, 5 do
+    GLYPH_X[#GLYPH_X + 1] = { i, i, 1, 1 }
+    GLYPH_X[#GLYPH_X + 1] = { 5 - i, i, 1, 1 }
+end
 
 local function CenteredGlyph(cells, gw, gh)
-    return function(btn, x, y, size) return Cells(btn, x + math.floor((size - gw) / 2), y + math.floor((size - gh) / 2), cells) end
+    return function(btn, dx, dy) return Cells(btn, gw, gh, cells, dx, dy) end
 end
 
 -- The five cells of a chevron, 2 px each: right pointing (6 wide, 10 tall) or down (10 wide, 6 tall) or left pointing.
@@ -270,7 +297,8 @@ end
 -- The breadcrumb: a route of nodes
 -------------------------------------------------------------------------------
 
-local NAV = { NODE = 8, CURRENT = 12, GAP = 6, LINE_FROM = 4, LINE_TO = 18, PULSE = 3, PERIOD = 1.6 }
+-- ARROW_W x ARROW_H is the chevron that stands in for the stock green dropdown triangle, ARROW_GAP the clear run after it
+local NAV = { NODE = 8, CURRENT = 12, GAP = 6, LINE_FROM = 4, LINE_TO = 18, PULSE = 3, PERIOD = 1.6, ARROW_W = 10, ARROW_H = 6, ARROW_GAP = 6 }
 
 local function IsCurrent(b) return not Kit.IsEnabled(b) end
 
@@ -291,28 +319,39 @@ local function PaintNav(b)
         Kit.RestyleLabel(b.text, b, 12, color)
     end
     if rec.line then rec.line:SetColorTexture(C.cyan[1], C.cyan[2], C.cyan[3], 0.55) end
+    if rec.arrow then
+        local hot = rec.arrow.state and rec.arrow.state.hover
+        local g = hot and C.text or C.cyan
+        for _, t in ipairs(rec.arrow.cells) do t:SetColorTexture(g[1], g[2], g[3], 1) end
+    end
 end
 
--- The anchors of a line run from the right end of `from` to the left end of `to` (both stock labels), so it follows the text
--- width the stock bar chose and needs no measuring.
-local function SeatLine(line, from, to, host)
+-- The anchors of a line run from `from` (`gap` px right of its `relPoint`) to the left end of `to` (both stock regions), so it
+-- follows the text width the stock bar chose and needs no measuring. A stop with a dropdown arrow starts it clear of the chevron.
+local function SeatLine(line, from, relPoint, gap, to, host)
     line:ClearAllPoints()
-    line:SetPoint("LEFT", from, "RIGHT", Kit.U(host, NAV.LINE_FROM), 0)
+    line:SetPoint("LEFT", from, relPoint, Kit.U(host, gap), 0)
     line:SetPoint("RIGHT", to, "LEFT", -Kit.U(host, NAV.LINE_TO), 0)
     line:SetHeight(Kit.U(host, 1))
 end
 
+-- The dropdown arrow of a stop: the stock green triangle (the MenuArrowButton's Art, a tint on it stays green) is held, and a cyan
+-- chevron of ours is drawn on the same button, which keeps its click. The arrow button is seated by the stock bar, so the chevron
+-- hangs from its middle.
+local function SkinArrow(menu, rec)
+    if type(menu) ~= "table" or type(menu.CreateTexture) ~= "function" then return end
+    HeldArt.HoldButton(menu)
+    rec.arrow = { menu = menu, cells = Cells(menu, NAV.ARROW_W, NAV.ARROW_H, ChevronCells("down")) }
+    rec.arrow.state = Kit.Track(menu, function() PaintNav(rec.button) end)
+end
+
 local function SkinNavButton(b)
     if type(b) ~= "table" or S.nav[b] or type(b.text) ~= "table" or type(b.CreateTexture) ~= "function" then return end
-    local rec = {}
+    local rec = { button = b }
     S.nav[b] = rec
     HeldArt.HoldButton(b)
     HeldArt.Hold(b.arrowUp); HeldArt.Hold(b.arrowDown); HeldArt.Hold(b.selected); HeldArt.Hold(b.Left)
-    local menu = Region(b, "MenuArrowButton")
-    if menu then
-        HeldArt.HoldButton(menu, menu.Art and { [menu.Art] = true } or nil)
-        if menu.Art and menu.Art.SetVertexColor then pcall(menu.Art.SetVertexColor, menu.Art, C.cyan[1], C.cyan[2], C.cyan[3], 1) end
-    end
+    SkinArrow(Region(b, "MenuArrowButton"), rec)
     rec.node = Kit.Rect(b, 0, 0, NAV.NODE, NAV.NODE, C.cyan, 1, "OVERLAY", 7)
     Seat(rec.node, b.text, "RIGHT", "LEFT", -NAV.GAP, 0, NAV.NODE, NAV.NODE, b)
     rec.line = b:CreateTexture(nil, "OVERLAY", nil, 7)
@@ -364,7 +403,11 @@ local function LayoutNav(bar)
             local nrec = nxt and S.nav[nxt]
             local shown = nrec and ShownRegion(b) and ShownRegion(nxt)
             if shown then
-                SeatLine(rec.line, b.text, nxt.text, b)
+                if rec.arrow and ShownRegion(rec.arrow.menu) then
+                    SeatLine(rec.line, rec.arrow.menu, "CENTER", NAV.ARROW_W / 2 + NAV.ARROW_GAP, nxt.text, b)
+                else
+                    SeatLine(rec.line, b.text, "RIGHT", NAV.LINE_FROM, nxt.text, b)
+                end
                 rec.line:Show()
                 last = rec.line
             else
@@ -405,6 +448,10 @@ local function SkinNavBar(win)
     end
     LayoutNav(bar)
     StartRoute(bar)
+    if not S.done.navRule then
+        S.done.navRule = true
+        S.rules[#S.rules + 1] = function() LayoutNav(bar) end
+    end
     if not S.done.navHook then
         local installed = false
         for _, name in ipairs({ "NavBar_CheckLength", "NavBar_AddButton", "NavBar_Reset" }) do
@@ -425,26 +472,106 @@ end
 
 local MAP_KEY = 32
 
-local function SkinOverlays(win)
-    for _, f in ipairs(Region(win, "overlayFrames") or {}) do
-        if type(f) == "table" then
-            if f.FilterCounter then
-                -- the tracking filter: a plate over its own icon (cyan), the count beside it
-                Key(f, { size = MAP_KEY, keep = { [f.Icon] = true }, icon = f.Icon, tint = C.cyan })
-                local counter = Region(f, "FilterCounter")
-                if counter then Mono(counter.Count, counter, 11, C.pink); Char.PinColor(counter.Count, C.pink) end
-            elseif f.IconOverlay and f.Icon then
-                Key(f, { size = MAP_KEY, keep = { [f.Icon] = true }, icon = f.Icon, tint = C.amber })
-            elseif f.CursorCoords and f.PlayerCoords then
-                for _, spec in ipairs({ { f.CursorCoords, C.cyan }, { f.PlayerCoords, C.pink } }) do
-                    local label = Region(spec[1], "Label")
-                    if label then Mono(label, spec[1], 11, spec[2]); Char.PinColor(label, spec[2]) end
-                end
-            elseif f.OpenButton and f.CloseButton then
-                Key(f.OpenButton, { size = MAP_KEY - 8, glyph = ChevronGlyph("left") })
-                Key(f.CloseButton, { size = MAP_KEY - 8, glyph = ChevronGlyph("right") })
-            end
+-- The ResetButton of the tracking filter (the stock red round X, 23 units on the filter key's top right corner): its art is held and
+-- a small key of ours, an amber x on a dim edge, is drawn on the same button tucked one pixel inside the filter key's corner, so the
+-- window has one close and the filter's own reset reads as a badge on the key. It keeps its click.
+local RESET = { SIZE = 14, CUT = 3, DX = -1, DY = 1 }
+
+local function SkinReset(f)
+    local reset = Region(f, "ResetButton")
+    if not reset or S.keys[reset] then return end
+    Key(reset, { size = RESET.SIZE, cut = RESET.CUT, dx = RESET.DX, dy = RESET.DY, idle = C.dim, tint = C.amber,
+        glyph = CenteredGlyph(GLYPH_X, 6, 6) })
+end
+
+-- The player and cursor read-outs: the stock rows sit on the canvas' bottom edge, so each is mirrored on a chip seated inside the
+-- canvas' bottom left corner (the player's at the bottom, the cursor's above it while its row is shown) and the stock text is held,
+-- but only once it has been read as a plain string; a text the client will not give plainly hides the chip and leaves the stock one.
+local COORDS = { X = 10, UP = 10, GAP = 4, H = 20, PAD = 8, PX = 11 }
+
+local function Visible(text) return (text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")) end
+
+local function CoordChip(parent, color)
+    local frame = CreateFrame("Frame", nil, parent)
+    frame:SetFrameLevel((parent:GetFrameLevel() or 0) + 6)
+    local c = { frame = frame }
+    c.plate = Kit.Plate(frame, 3, 40, COORDS.H)
+    Kit.PaintPlate(c.plate, C.ink, 1, C.dim, 1, 1)
+    c.label = Kit.Label(frame, "", COORDS.PX, color, "OVERLAY")
+    c.label:SetJustifyH("LEFT")
+    frame:Hide()
+    return c
+end
+
+function M.RefreshCoords()
+    local rec, win = S.coords, _G.WorldMapFrame
+    local canvas = type(win) == "table" and Region(win, "ScrollContainer") or nil
+    if not (rec and canvas) then return end
+    local up = COORDS.UP
+    for _, key in ipairs({ "player", "cursor" }) do
+        local c = rec[key]
+        local text = ShownRegion(c.row) and Plain(Try(c.stock.GetText, c.stock)) or nil
+        if type(text) == "string" and text ~= "" then
+            Kit.HoldFrame(c.stock)
+            local w = math.floor(#Visible(text) * COORDS.PX * 0.5615 + 2 * COORDS.PAD + 0.5)
+            c.label:SetText(text)
+            Kit.Place(c.frame, canvas, COORDS.X, -up, w, COORDS.H, "BOTTOMLEFT", "BOTTOMLEFT")
+            Kit.Place(c.label, c.frame, COORDS.PAD, COORDS.H / 2, w - 2 * COORDS.PAD, COORDS.H, "LEFT", "TOPLEFT")
+            c.plate.w = w
+            c.frame:Show()
+            up = up + COORDS.H + COORDS.GAP
+        else
+            c.frame:Hide()
         end
+    end
+end
+
+local function SkinCoords(f)
+    if S.coords then return end
+    local rec = {}
+    for _, spec in ipairs({ { "player", "PlayerCoords", C.pink }, { "cursor", "CursorCoords", C.cyan } }) do
+        local row = Region(f, spec[2])
+        local stock = row and Region(row, "Label")
+        if stock then
+            Mono(stock, row, 11, spec[3]); Char.PinColor(stock, spec[3])
+            local c = CoordChip(f, spec[3])
+            c.row, c.stock = row, stock
+            rec[spec[1]] = c
+        end
+    end
+    if not (rec.player and rec.cursor) then return end
+    S.coords = rec
+    for _, c in pairs(rec) do
+        for _, m in ipairs({ "SetText", "SetFormattedText" }) do Kit.HookFunc(c.stock, m, M.RefreshCoords) end
+        WatchShown(c.row, M.RefreshCoords)
+    end
+    M.RefreshCoords()
+end
+
+local function SkinOverlay(f)
+    if type(f) ~= "table" then return end
+    if f.ResetButton then SkinReset(f) end
+    if f.FilterCounter then
+        -- the tracking filter of an older client: a plate over its own icon (cyan), the count beside it
+        Key(f, { size = MAP_KEY, keep = { [f.Icon] = true }, icon = f.Icon, tint = C.cyan })
+        local counter = Region(f, "FilterCounter")
+        if counter then Mono(counter.Count, counter, 11, C.pink); Char.PinColor(counter.Count, C.pink) end
+    elseif f.IconOverlay and f.Icon then
+        -- the pin, and any map button built on the same template (Krowi's): a plate over its own icon (amber)
+        Key(f, { size = MAP_KEY, keep = { [f.Icon] = true }, icon = f.Icon, tint = C.amber })
+    elseif f.CursorCoords and f.PlayerCoords then
+        SkinCoords(f)
+    elseif f.OpenButton and f.CloseButton then
+        Key(f.OpenButton, { size = MAP_KEY - 8, glyph = ChevronGlyph("left") })
+        Key(f.CloseButton, { size = MAP_KEY - 8, glyph = ChevronGlyph("right") })
+    end
+end
+
+local function SkinOverlays(win)
+    for _, f in ipairs(Region(win, "overlayFrames") or {}) do SkinOverlay(f) end
+    -- the map buttons other addons add are direct children of the window, not overlay frames
+    for _, f in ipairs(List(win, "GetChildren")) do
+        if type(f) == "table" and f.IconOverlay and f.Icon then SkinOverlay(f) end
     end
 end
 
@@ -466,9 +593,35 @@ local function SkinTab(tab)
     PaintKey(tab)
 end
 
+-- The settings key is 16 px, a little smaller than the stock 18 x 19 px button, so it sits clear of the Quests pill on its left and of
+-- the panel's edge on its right (the stock button ends a few pixels short of that edge). The stock button is 4 units shorter than the
+-- pill beside it and top-aligned with it, so the key rides 2 px low to share the pill's middle.
 local function SkinSettings(btn)
     if type(btn) ~= "table" or S.keys[btn] then return end
-    Key(btn, { size = KEY, keep = btn.Icon and { [btn.Icon] = true } or nil, icon = btn.Icon, tint = C.violet })
+    Key(btn, { size = 16, cut = 3, dy = 2, keep = btn.Icon and { [btn.Icon] = true } or nil, icon = btn.Icon, tint = C.violet })
+end
+
+-- The Quests count pill: the stock tan border held and a plate of ours drawn in its place, held in COUNT.L px from the left (the stock
+-- pill overlaps the search box beside it by a pixel or two) and COUNT.R px from the right, so the row reads search, count, key.
+local COUNT = { L = 6, R = 3 }
+
+local function SkinCount()
+    local pill = _G.QuestLogCount
+    if S.count or type(pill) ~= "table" or type(pill.CreateTexture) ~= "function" then return end
+    HoldKeys(pill, { "Left", "Right", "Middle" })
+    local ref = pill:CreateTexture(nil, "BACKGROUND", nil, -8)
+    local function seat()
+        ref:ClearAllPoints()
+        ref:SetPoint("TOPLEFT", pill, "TOPLEFT", Kit.U(pill, COUNT.L), 0)
+        ref:SetPoint("BOTTOMRIGHT", pill, "BOTTOMRIGHT", -Kit.U(pill, COUNT.R), 0)
+    end
+    seat()
+    S.rules[#S.rules + 1] = seat
+    local box = Char.Box(pill, "BORDER", ref)
+    Char.PaintBox(box, C.ink, 1, C.dim, 1, 1)
+    S.count = { box = box, ref = ref }
+    local label = _G.QuestLogQuestCount
+    if type(label) == "table" then Mono(label, pill, 11, C.amber); Char.PinColor(label, C.amber) end
 end
 
 local function SkinLogFrame(qm)
@@ -476,6 +629,7 @@ local function SkinLogFrame(qm)
     local sf = _G.QuestScrollFrame
     if type(sf) == "table" then
         SkinSettings(sf.SettingsDropdown)
+        SkinCount()
         Mono(sf.NoSearchResultsText, sf, 13, C.muted); Char.PinColor(sf.NoSearchResultsText, C.muted)
         Mono(sf.EmptyText, sf, 14, C.muted); Char.PinColor(sf.EmptyText, C.muted)
         local contents = sf.Contents
@@ -504,13 +658,11 @@ local function PaintChevron(rec)
     local cb = rec.host
     local down = cb.collapsed ~= true
     rec.down = down
-    local w, h = Kit.SizePx(cb)
-    w, h = w or 24, h or 24
     local cells = ChevronCells(down and "down" or "right")
     local gw, gh = down and 10 or 6, down and 6 or 10
-    local gx, gy = math.floor((w - gw) / 2), math.floor((h - gh) / 2)
+    local ox, oy = math.floor(gw / 2), math.floor(gh / 2)
     for i, c in ipairs(cells) do
-        Kit.Move(rec.cells[i], gx + c[1], gy + c[2], c[3], c[4])
+        Kit.Move(rec.cells[i], c[1] - ox, c[2] - oy, c[3], c[4])
         rec.cells[i]:SetColorTexture(C.cyan[1], C.cyan[2], C.cyan[3], 1)
     end
 end
@@ -520,7 +672,10 @@ local function SkinChevron(cb, rec)
     if type(cb) ~= "table" or type(cb.CreateTexture) ~= "function" then return nil end
     HeldArt.HoldButton(cb)
     rec.host, rec.cells = cb, {}
-    for i = 1, 5 do rec.cells[i] = Kit.Rect(cb, 0, 0, 2, 2, C.cyan, 1, "OVERLAY", 7) end
+    for i = 1, 5 do
+        rec.cells[i] = Kit.Rect(cb, 0, 0, 2, 2, C.cyan, 1, "OVERLAY", 7)
+        Kit.Place(rec.cells[i], cb, 0, 0, 2, 2, "TOPLEFT", "CENTER", cb)
+    end
     Kit.HookFunc(cb, "UpdateCollapsedState", function() PaintChevron(rec) end)
     Kit.HookScript(cb, "OnShow", function() PaintChevron(rec) end)
     PaintChevron(rec)
