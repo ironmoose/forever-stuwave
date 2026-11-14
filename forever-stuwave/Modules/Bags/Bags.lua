@@ -418,30 +418,57 @@ local function QualityRingColor(quality)
 end
 
 -- Reads the slot's item now and caches the ring colour it earns.
--- True when the bag slot holds a quest item (C_Container.GetContainerItemQuestInfo); false when it cannot be read.
-local function SlotIsQuestItem(button)
+-- The slot's quest state (C_Container.GetContainerItemQuestInfo): isQuest when it holds a quest item, starts when the item
+-- begins a quest not yet taken (the stock bag shows a "!" for it, TEXTURE_ITEM_QUEST_BANG on IconQuestTexture). Both false
+-- when it cannot be read.
+local function SlotQuestState(button)
     if not bagSlots[button] or type(C_Container) ~= "table" or type(C_Container.GetContainerItemQuestInfo) ~= "function" then
-        return false
+        return false, false
     end
     local bag = BagIDOf(button)
-    if not bag or type(button.GetID) ~= "function" then return false end
+    if not bag or type(button.GetID) ~= "function" then return false, false end
     local okSlot, slot = pcall(button.GetID, button)
-    if not okSlot or type(slot) ~= "number" or IsSecretValue(slot) then return false end
+    if not okSlot or type(slot) ~= "number" or IsSecretValue(slot) then return false, false end
     local ok, quest = pcall(C_Container.GetContainerItemQuestInfo, bag, slot)
-    if not ok or IsSecretValue(quest) or type(quest) ~= "table" then return false end
-    local isQuest, questID = quest.isQuestItem, quest.questID
-    if IsSecretValue(isQuest) or IsSecretValue(questID) then return false end
-    return isQuest == true or (type(questID) == "number" and questID > 0)
+    if not ok or IsSecretValue(quest) or type(quest) ~= "table" then return false, false end
+    local isQuest, questID, isActive = quest.isQuestItem, quest.questID, quest.isActive
+    if IsSecretValue(isQuest) or IsSecretValue(questID) or IsSecretValue(isActive) then return false, false end
+    local hasQuest = type(questID) == "number" and questID > 0
+    return isQuest == true or hasQuest, hasQuest and not isActive
+end
+
+-- The quest-start mark: the stock "!" lives on IconQuestTexture, which is held (square art past the cut ring), so a
+-- quest starter gets our own amber "!" in the slot's top-left corner instead. Kept off the button's fields (bangs).
+local bangs = setmetatable({}, { __mode = "k" })
+local function SyncQuestBang(button, starts)
+    local bang = bangs[button]
+    if not bang then
+        if not starts or type(button.CreateFontString) ~= "function" then return end
+        bang = button:CreateFontString(nil, "OVERLAY", nil, 7)
+        if type(FS.Theme.ApplyFontGeneric) == "function" then
+            FS.Theme.ApplyFontGeneric(bang, FS.Theme.FONT_MONO, 16, FS.Theme.COLOR_AMBER, "OUTLINE")
+        else
+            bang:SetFont(FS.Theme.FONT_MONO, 16, "OUTLINE")
+        end
+        local amber = FS.Theme.COLOR_AMBER or { 1, 0.71, 0.28 }
+        bang:SetTextColor(amber[1], amber[2], amber[3], 1)
+        bang:SetPoint("TOPLEFT", button, "TOPLEFT", 5, -3)
+        bang:SetText("!")
+        bangs[button] = bang
+    end
+    bang:SetShown(starts and IconHoldsItem(button) and true or false)
 end
 
 local function ReadSlotRing(button)
     local info = SlotItemInfo(button)
     local r, g, b = QualityRingColor(info and info.quality)
-    if SlotIsQuestItem(button) then
+    local isQuest, starts = SlotQuestState(button)
+    if isQuest then
         local amber = FS.Theme.COLOR_AMBER
         if amber then r, g, b = amber[1], amber[2], amber[3] end
     end
     button.fsBagRingColor = r and { r, g, b } or nil
+    SyncQuestBang(button, starts)
 end
 
 -- Writes the ring: the cached quality colour while the icon holds an item, else the default ring.

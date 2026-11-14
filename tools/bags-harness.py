@@ -980,6 +980,26 @@ def check_untouched() -> None:
     check("glow.new_item_glow_is_held_at_zero", w.ev("c1.Items[1].NewItemTexture:GetAlpha() == 0"))
     check("glow.quest_border_and_flash_are_held",
           w.ev("TouchedByUs(c1.Items[1].IconQuestTexture) and TouchedByUs(c1.Items[1].flash)"))
+    # the stock "!" for an item that begins a quest is on the held IconQuestTexture: our own amber mark stands in for it,
+    # only on a starter not yet taken, and it goes when the quest is accepted
+    w.run("""
+        QUEST_INFO = { [1] = { isQuestItem = true, questID = 42, isActive = false }, [2] = { isQuestItem = true } }
+        C_Container.GetContainerItemQuestInfo = function(bag, slot)
+            for i, b in ipairs(c1.Items) do if b._bagID == bag and b._slot == slot then return QUEST_INFO[i] or {} end end
+            return {}
+        end
+        function BangOf(b)
+            for _, r in ipairs({ b:GetRegions() }) do
+                if r._text == '!' then return r end
+            end
+        end
+        c1.infos[1] = c1.infos[1] or { icon = 149, q = 1 }; c1.infos[2] = c1.infos[2] or { icon = 150, q = 1 }
+        c1:UpdateItems()
+    """)
+    check("quest.starter_shows_bang", w.ev("BangOf(c1.Items[1]) ~= nil and BangOf(c1.Items[1]):IsShown()"))
+    check("quest.plain_quest_item_has_no_bang", w.ev("not (BangOf(c1.Items[2]) and BangOf(c1.Items[2]):IsShown())"))
+    w.run("QUEST_INFO[1].isActive = true; c1:UpdateItems()")
+    check("quest.bang_goes_once_taken", w.ev("not BangOf(c1.Items[1]):IsShown()"))
     check("keep.count_restyled_to_mono_as_before", w.ev("c1.Items[1].Count._font[1] == 'mono'"))
     check("keep.nothing_swallowed", w.swallowed() == "", w.swallowed())
 
