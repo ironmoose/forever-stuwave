@@ -378,6 +378,11 @@ case("vendor: repair keys keep their icon and click, wear a ring; pager keys hol
         assert(CS.squares[b], n .. ' not a square')
         assert(b.Icon.alpha == 1, 'the icon must stay on ' .. n)
         assert(b.scripts.OnClick, 'click lost on ' .. n)
+        -- the ring box is made after the stock art is held, so it is not held with it
+        local box = CS.squares[b].box
+        for i, region in ipairs({{ box.fill, box.edges[1], box.edges[2], box.edges[3], box.edges[4] }}) do
+            assert(region.alpha == 1, n .. ' box region ' .. i .. ' is held invisible')
+        end
     end
     local prev, nxt = _G.MerchantPrevPageButton, _G.MerchantNextPageButton
     local P = S.pagers
@@ -435,6 +440,7 @@ case("bank: the sort key is a plate with a glyph, the prompts lose their stock c
     local S = FS.CommerceSkin.state
     local sq = FS.CharacterSkin.state.squares[BankPanel.AutoSortButton]
     assert(sq and #sq.glyph == 6, 'sort glyph')
+    assert(sq.box.fill.alpha == 1 and sq.box.edges[1].alpha == 1, 'sort key box is held invisible')
     assert(BankPanel.AutoSortButton.NormalTexture.alpha == 0, 'stock sort art kept')
     for _, p in ipairs({{ BankPanel.PurchasePrompt, BankPanel.LockPrompt }}) do
         assert(p.TopLeftInner.alpha == 0 and p.LeftInner.alpha == 0, 'prompt corner art kept')

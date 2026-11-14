@@ -28,6 +28,12 @@
 -- globals dump cannot confirm them; their shapes are read from the 12.1.0 Blizzard_SharedXML source and detected at
 -- runtime.
 --
+-- A text area (InputScrollFrameTemplate: a multi-line box inside a scroll frame, the report and macro bodies) is the same face without
+-- the prompt cell, the LED and our caret: the engine's multi-line caret stays. Its nine Common-Input-Border pieces are held and our
+-- face and edge reach AREA_PAD (5 units) past the frame, where the stock border sat; the scroll frame and the box inside it both
+-- follow the hand, the box's focus lights the edge and the glow, and the text, the placeholder and the char count take the kit's
+-- mono. Told by shape: a ScrollFrame with a multi-line EditBox and all nine border pieces, whose art nothing else holds.
+--
 -- The count chip needs a count: FieldSkins.SetCount(box, n) sets it by hand and FieldSkins.AddCountSource(fn) adds a
 -- function fn(box) -> number or nil that is asked on every text change and on show. The collections journals (mounts, toys,
 -- heirlooms) have one built in; every other search box shows no chip.
@@ -457,6 +463,111 @@ end
 Kit.Register("field", {
     match = function(widget) return parts[widget] ~= nil or FieldSkins.Kind(widget) ~= nil end,
     skin = FieldSkins.Skin, parts = FieldSkins.Parts,
+})
+
+-------------------------------------------------------------------------------
+-- Text area
+-------------------------------------------------------------------------------
+
+local areaParts = setmetatable({}, { __mode = "k" }) -- scroll frame -> what we drew on it
+local AREA_ART = { "TopLeftTex", "TopRightTex", "TopTex", "BottomLeftTex", "BottomRightTex", "BottomTex", "LeftTex", "RightTex",
+    "MiddleTex" }
+
+-- True for a stock text area that nothing else owns.
+function FieldSkins.IsArea(widget)
+    if Kit.TypeOf(widget) ~= "ScrollFrame" then return false end
+    local edit = widget.EditBox
+    if not (IsTable(edit) and Kit.TypeOf(edit) == "EditBox" and Kit.Plain(Kit.Try(edit.IsMultiLine, edit)) == true) then return false end
+    for _, key in ipairs(AREA_ART) do
+        if not IsTable(widget[key]) then return false end
+    end
+    if not areaParts[widget] and Held(widget.TopLeftTex) then return false end
+    return true
+end
+
+function FieldSkins.AreaParts(widget) return areaParts[widget] end
+
+local function PaintArea(widget)
+    local p = areaParts[widget]
+    if not (p and p.built) then return end
+    local edit = widget.EditBox
+    local enabled = Kit.IsEnabled(edit)
+    local focus = enabled and HasFocus(edit)
+    local fill, edge, text = C.ink, C.dim, C.text
+    if not enabled then
+        fill, edge, text = C.disFill, C.disEdge, C.dis
+    elseif focus or p.state.hover or p.editState.hover then
+        edge = C.cyan
+    end
+    Kit.PaintPlate(p.plate, fill, 1, edge, 1, 1)
+    Kit.Recolor(edit, text)
+    if IsTable(edit.Instructions) then Kit.Recolor(edit.Instructions, enabled and C.hint or C.dis) end
+    p.glow:SetShown(focus)
+end
+
+local function LayoutArea(widget)
+    local p = areaParts[widget]
+    if not (p and p.built) then return end
+    local w, h = Kit.SizePx(widget)
+    if not w then return end
+    -- the stock border overshoots the frame by AREA_PAD units, so the face does too (whole pixels at any scale)
+    local pad = Round(K.AREA_PAD * Kit.Ppu(widget))
+    local x, y, fw, fh = -pad, -pad, w + 2 * pad, h + 2 * pad
+    Kit.Place(p.plate.fill, widget, x, y, fw, fh)
+    Kit.Place(p.plate.ring, widget, x, y, fw, fh)
+    if p.plate.ring2 then Kit.Place(p.plate.ring2, widget, x + 1, y + 1, fw - 2, fh - 2) end
+    Kit.Move(p.glow, x - K.FIELD_GLOW, y - K.FIELD_GLOW, fw + 2 * K.FIELD_GLOW, fh + 2 * K.FIELD_GLOW)
+end
+
+Kit.OnReseat(function()
+    for widget in pairs(areaParts) do LayoutArea(widget) end
+end)
+
+local function BuildArea(widget)
+    local p = {}
+    areaParts[widget] = p -- marked first, so a failure part way is not retried into a second set of layers
+    local edit = widget.EditBox
+
+    for _, key in ipairs(AREA_ART) do HeldArt.Hold(widget[key]) end
+    Kit.RestyleLabel(edit, widget, K.FIELD_TEXT, C.text)
+    if IsTable(edit.Instructions) then Kit.RestyleLabel(edit.Instructions, widget, K.FIELD_TEXT, C.hint) end
+    if IsTable(widget.CharCount) then Kit.RestyleLabel(widget.CharCount, widget, K.AREA_COUNT_TEXT, C.muted) end
+    if type(edit.SetHighlightColor) == "function" then
+        pcall(edit.SetHighlightColor, edit, C.cyan[1], C.cyan[2], C.cyan[3], HIGHLIGHT_ALPHA)
+    end
+
+    p.plate = Kit.Plate(widget, K.AREA_CUT, 1, 1)
+    p.glow = Kit.Rect(widget, 0, 0, 1, 1, C.cyan, K.FIELD_GLOW_ALPHA, "BACKGROUND", -8)
+    p.glow:Hide()
+    p.built = true
+
+    p.state = Kit.Track(widget, PaintArea)
+    local function repaint() PaintArea(widget) end
+    p.editState = Kit.Track(edit, repaint)
+    for _, script in ipairs({ "OnEditFocusGained", "OnEditFocusLost" }) do Kit.HookScript(edit, script, repaint) end
+    local function relayout() LayoutArea(widget) end
+    Kit.HookScript(widget, "OnSizeChanged", relayout)
+    Kit.HookScript(widget, "OnShow", relayout)
+    LayoutArea(widget)
+    PaintArea(widget)
+    Kit.Later(relayout)
+end
+
+-- Skins one stock text area. Idempotent; returns true when it skinned now. One met in combat is skinned when combat ends.
+function FieldSkins.SkinArea(widget)
+    if type(widget) ~= "table" or areaParts[widget] or not FieldSkins.IsArea(widget) then return false end
+    if type(InCombatLockdown) == "function" and InCombatLockdown() then
+        Kit.Defer(function() FieldSkins.SkinArea(widget) end)
+        return false
+    end
+    local ok, err = pcall(BuildArea, widget)
+    if not ok then Kit.Fail("textarea", err) end
+    return ok and areaParts[widget] ~= nil
+end
+
+Kit.Register("textarea", {
+    match = function(widget) return areaParts[widget] ~= nil or FieldSkins.IsArea(widget) end,
+    skin = FieldSkins.SkinArea, parts = FieldSkins.AreaParts,
 })
 
 -------------------------------------------------------------------------------

@@ -297,6 +297,9 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "ctl_prompt": (16, 16), "ctl_lens": (16, 16), "ctl_cross": (16, 16), "ctl_radar": (16, 16), "ctl_radar_arm": (16, 16),
         "ctl_chev": (16, 16),
     },
+    # generate_control_inset.py: the inset's scanline tile (mockups/shared-controls-2026-11-12.html, inset()): a 4 x 4 white alpha tile,
+    # one solid row in four, tinted violet at 5 percent in Lua.
+    "control_inset": {"ctl_scanline": (4, 4)},
     # generate_control_slot.py: the item slot's art: the locked slot's hazard tape and the epic glint (32 x 32 canvases that
     # cover the 32 x 30 icon area) and the lock glyph (16 x 16).
     "control_slot": {"ctl_hazard": (64, 64), "ctl_glint": (64, 64), "ctl_lock": (16, 16)},
@@ -2830,6 +2833,35 @@ def test_h4_and_h3_chevrons_follow_their_shallower_arms(control_chevron_outputs:
 
 def test_committed_control_chevron_textures_match_the_generator(control_chevron_outputs: Path) -> None:
     for out in control_chevron_outputs.glob("*.tga"):
+        assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
+
+
+# ---------------------------------------------------------------------------
+# generate_control_inset.py: the inset's scanline tile.
+#
+# Mockup inset(): a 1 px line every 4 px, the first at y + 3 (for i = y + 3; i < y + h; i += 4). Tiled from the top left of the
+# inset, the line is row 3 of every 4 row tile. Numbers hardcoded here.
+# ---------------------------------------------------------------------------
+
+CONTROL_INSET_GENERATOR = GENERATOR_DIR / "generate_control_inset.py"
+
+
+@pytest.fixture(scope="module")
+def control_inset_outputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    out = tmp_path_factory.mktemp("control_inset")
+    _run_generator(CONTROL_INSET_GENERATOR, out)
+    return out
+
+
+def test_inset_scanline_is_a_white_alpha_tile_with_one_solid_row_in_four(control_inset_outputs: Path) -> None:
+    path = control_inset_outputs / "ctl_scanline.tga"
+    assert _is_white(path)
+    for x in range(4):
+        assert [_alpha_at(path, x, y) for y in range(4)] == [0, 0, 0, 255], x
+
+
+def test_committed_inset_scanline_matches_the_generator(control_inset_outputs: Path) -> None:
+    for out in control_inset_outputs.glob("*.tga"):
         assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
 
 

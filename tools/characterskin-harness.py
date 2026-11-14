@@ -116,6 +116,31 @@ case("model buttons, sidebar tabs and the pane toggle are restyled in place", f"
     assert(tg.scripts.OnClick, 'toggle click lost')
 """)
 
+case("a skinned square's own box is never held: the fill and ring stay visible and survive a SetAlpha", f"""
+    {OPEN}
+    local S = FS.CharacterSkin.state
+    local n = 0
+    local function check(btn, what)
+        local s = S.squares[btn]
+        assert(s, what .. ' not skinned')
+        for i, region in ipairs({{ s.box.fill, s.box.edges[1], s.box.edges[2], s.box.edges[3], s.box.edges[4] }}) do
+            assert(region.alpha == 1, what .. ' box region ' .. i .. ' is held invisible (alpha ' .. tostring(region.alpha) .. ')')
+            region:SetAlpha(0.5)
+            assert(region.alpha == 0.5, what .. ' box region ' .. i .. ' carries the hold hook')
+            region:SetAlpha(1)
+        end
+        -- the stock art next to it is still held
+        assert(btn.NormalTexture == nil or btn.NormalTexture.alpha == 0, what .. ' stock art not held')
+        n = n + 1
+    end
+    for _, key in ipairs({{ 'zoomInButton', 'zoomOutButton', 'rotateLeftButton', 'rotateRightButton', 'resetButton' }}) do
+        check(CharacterModelScene.ControlFrame[key], 'model ' .. key)
+    end
+    for i = 1, 3 do check(_G['PaperDollSidebarTab' .. i], 'sidebar tab ' .. i) end
+    check(CharacterFrameRightPaneToggleButton, 'pane toggle')
+    assert(n == 9, 'checked ' .. n)
+""")
+
 case("every slot wears the shared item slot, in place, with no script or attribute written", f"""
     local before = {{}}
     for _, n in ipairs(SLOTS) do

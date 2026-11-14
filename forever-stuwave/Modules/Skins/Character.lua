@@ -452,9 +452,11 @@ end
 local function SkinSquare(btn, opts)
     if type(btn) ~= "table" or S.squares[btn] then return nil end
     opts = opts or {}
+    -- The stock art is held BEFORE the box is made: HeldArt.HoldButton holds every region the button has at that moment, so a box
+    -- built first would be zeroed with the rest and stay invisible.
+    HeldArt.HoldButton(btn, opts.icon and { [opts.icon] = true } or nil)
     local s = { box = Box(btn), icon = opts.icon, tint = opts.tint, selected = opts.selected }
     S.squares[btn] = s
-    HeldArt.HoldButton(btn, opts.icon and { [opts.icon] = true } or nil)
     s.state = Kit.Track(btn, PaintSquare)
     return s
 end

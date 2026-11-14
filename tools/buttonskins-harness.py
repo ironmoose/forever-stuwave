@@ -1094,6 +1094,22 @@ case("static_popup_buttons_are_text_buttons_and_its_close_is_the_pink_x", """
     assert(#Skinned(x, "the popup X").glyph == 12, "the popup's X is the pink X")
 """)
 
+case("static_popup_extra_button_is_a_text_button_by_name_or_by_key", """
+    -- StaticPopupButtonTemplate has state textures only (no Left / Middle / Right), so no shape sweep reaches it.
+    local STATES = { "Normal", "Pushed", "Highlight", "Disabled" }
+    local pop = CreateFrame("Frame", "StaticPopup1")
+    pop.w, pop.h = 320, 140
+    local extra = NewButton(pop, { w = 128, h = 21, states = STATES, text = "Report" })
+    _G.StaticPopup1ExtraButton = extra
+    local pop2 = CreateFrame("Frame", "StaticPopup2")
+    pop2.w, pop2.h = 320, 140
+    local keyed = NewButton(pop2, { w = 128, h = 21, states = STATES, text = "Open" })
+    pop2.ExtraButton = keyed                              -- no global: only the parentKey
+    LoadPopups()
+    assert(Skinned(extra, "the extra button").accent == "violet", "the extra button is a violet text button")
+    assert(Skinned(keyed, "the keyed extra button").accent == "violet", "found by parentKey when it has no global")
+""")
+
 case("popups_sweep_stock_text_buttons_by_shape_and_keep_hand_set_accents", """
     _G.ACCEPT, _G.DECLINE = "Accept", "Decline"          -- the client's own label strings
     local ready = CreateFrame("Frame", "ReadyCheckFrame")

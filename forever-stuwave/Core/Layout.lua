@@ -249,6 +249,22 @@ FS.Layout.Controls = {
     SWITCH_H = 28, SWITCH_CUT = 6, SWITCH_PAD = 3, SWITCH_ITEM_PAD = 24, SWITCH_STEP = 4, SWITCH_ITEM_Y = 3, SWITCH_ITEM_H = 22,
     SWITCH_ITEM_CUT = 4, SWITCH_TEXT_Y = 12, SWITCH_UNDER_Y = 19, SWITCH_UNDER_H = 3, SWITCH_UNDER_INSET = 4,
     SWITCH_UNDER_ALPHA = 0.9, SWITCH_UNDER_TILE = 4, SWITCH_BADGE = 4, SWITCH_BADGE_X = 10, SWITCH_BADGE_Y = 3, SWITCH_SLIDE = 0.2,
+    -- Inset (InsetFrameTemplate, section 7 of the mockup): an ink face with a 1 px edge and a chamfer at the bottom right only
+    -- (8 asked, the baked 6 drawn), a violet scanline every 4 px from row 3 at 5 %, and cyan register marks at the top left, top
+    -- right and bottom left, 4 in with 4 long arms at 35 %. INSET_MIN is the least a frame must measure each way to be an inset
+    -- (a smaller one is a divider).
+    INSET_CUT = 8, INSET_SCAN_PITCH = 4, INSET_SCAN_ALPHA = 0.05, INSET_MARK_IN = 4, INSET_MARK_ARM = 4, INSET_MARK_ALPHA = 0.35,
+    INSET_MIN = 12,
+    -- Section header plate (an opt-in helper nothing mounts yet): 24 tall, chamfer 6 at the top left only, a 1 px violet edge on the
+    -- band, a 3 x 12 pink LED at (1, 6) that breathes, the caption 14 in at 11, chips 20 tall (cut 4) 2 down, 4 apart and 6 in from
+    -- the right, sized like the slider's value tag. A glint (a violet band at 28 %) crosses it every 3.6 s from 60 left of the
+    -- plate to 40 past its right end.
+    PLATE_H = 24, PLATE_CUT = 6, PLATE_LED_W = 3, PLATE_LED_H = 12, PLATE_LED_X = 1, PLATE_LED_Y = 6, PLATE_TEXT_X = 14,
+    PLATE_TEXT = 11, PLATE_TEXT_Y = 13, PLATE_CHIP_Y = 2, PLATE_CHIP_GAP = 4, PLATE_CHIP_RIGHT = 6, PLATE_GLINT_PERIOD = 3.6,
+    PLATE_GLINT_ALPHA = 0.28, PLATE_GLINT_FROM = -60, PLATE_GLINT_PAST = 40,
+    -- Text area (InputScrollFrameTemplate: a multi-line box in a scroll frame): the field's cut and text, a face that reaches AREA_PAD
+    -- past the frame on every side (the stock border art does the same, 5 units), the char count in the muted ink at 10.
+    AREA_CUT = 6, AREA_PAD = 5, AREA_COUNT_TEXT = 10,
 }
 
 -- The layout planner exports in SCREEN PIXELS at this resolution (the "resolution"

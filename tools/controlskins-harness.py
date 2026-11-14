@@ -50,6 +50,7 @@ FILES = {
     "DropdownSkins": "Core/DropdownSkins.lua",
     "ItemSlotSkins": "Core/ItemSlotSkins.lua",
     "TabSkins": "Core/TabSkins.lua",
+    "InsetSkins": "Core/InsetSkins.lua",
     "PanelSkins": "Core/PanelSkins.lua",
 }
 SOURCES = {name: (ADDON / path).read_text(encoding="utf-8") for name, path in FILES.items()}
@@ -570,6 +571,35 @@ function EditBoxW(parent, x, y, w, h, o)
     return b
 end
 
+-- InsetFrameTemplate: a Frame keyed layoutType = "InsetFrameTemplate" with the marble Bg and the NineSlice child (the bevel).
+function InsetW(parent, x, y, w, h)
+    local f = blz("Frame", nil, parent, w, h, x, y)
+    f.layoutType = "InsetFrameTemplate"
+    f.Bg = tex(f, "Interface\\FrameGeneral\\UI-Background-Marble", "BACKGROUND")
+    f.NineSlice = blz("Frame", nil, f, w, h, 0, 0)
+    f.NineSlice.bevel = tex(f.NineSlice, "Interface\\stock\\bevel", "BORDER")
+    return f
+end
+
+-- InputScrollFrameTemplate: a ScrollFrame wearing the nine Common-Input-Border pieces (the border overshoots the rect by 5), the
+-- char count and a multi-line EditBox as its scroll child, with the placeholder (`Instructions`).
+function AreaW(parent, x, y, w, h)
+    local f = blz("ScrollFrame", nil, parent, w, h, x, y)
+    for _, key in ipairs({ "TopLeftTex", "TopRightTex", "TopTex", "BottomLeftTex", "BottomRightTex", "BottomTex", "LeftTex",
+                           "RightTex", "MiddleTex" }) do
+        f[key] = tex(f, nil, "BACKGROUND")
+    end
+    f.CharCount = fstring(f, "255", 14)
+    f.CharCount.textColor = { 0.5, 0.5, 0.5, 1 }
+    local e = blz("EditBox", nil, f, w, 1, 0, 0)
+    e.multi = true
+    e.fontPath, e.size, e.textColor = "stock.ttf", 10, { 1, 1, 1, 1 }
+    e.Instructions = fstring(e, "Type here", 10)
+    f.EditBox = e
+    f.scrollChild = e
+    return f
+end
+
 -- SearchBoxTemplate: the same plus the search icon, the placeholder (`Instructions`) and the clear button, with the stock handlers
 -- (InputBoxInstructions_OnTextChanged, SearchBoxTemplate_OnEditFocusGained / Lost) set the way the XML sets them.
 function SearchBoxW(parent, x, y, w, h, o)
@@ -864,7 +894,7 @@ function Load(opts)
         LogDegradeOnce = function(key, msg) DEGRADED[#DEGRADED + 1] = key .. " :: " .. tostring(msg) end,
     }
     FS.FrameHelpers = { PixelsPerUnit = function() return PPU end }
-    for _, name in ipairs({ "Theme", "Layout", "HeldArt", "ControlKit", "CheckSkins", "SliderSkins", "FieldSkins", "DropdownSkins", "ItemSlotSkins", "TabSkins", "PanelSkins" }) do
+    for _, name in ipairs({ "Theme", "Layout", "HeldArt", "ControlKit", "CheckSkins", "SliderSkins", "FieldSkins", "DropdownSkins", "ItemSlotSkins", "TabSkins", "InsetSkins", "PanelSkins" }) do
         local chunk, err = load(SOURCES[name], "=" .. name .. ".lua")
         if not chunk then error(err) end
         chunk("forever-stuwave", FS)
@@ -2461,6 +2491,106 @@ case("a_secret_text_reads_as_empty_without_an_error", PRELUDE + """
     assert(not p.chip.frame:IsShown(), "a count needs readable text")
 """)
 
+case("text_area_is_a_cut_face_that_reaches_5_past_the_frame_with_mono_text_and_the_stock_border_held", PRELUDE + """
+    local a = AreaW(P, 40, 40, 250, 80)
+    local before = { a.w, a.h, a.EditBox.w, a.EditBox.h }
+    assert(Skin(P) == 1)
+    NoDegrade()
+    local p, T = Fld().AreaParts(a), FS.Theme
+    assert(p and p.built, "skinned")
+    assert(a.w == before[1] and a.h == before[2] and a.EditBox.w == before[3] and a.EditBox.h == before[4], "the stock rects were resized")
+    -- the stock border overshoots the frame by 5 units: our face covers the same ground, whole pixels
+    Expect(p.plate.fill, a, -6, -6, 312, 108, "face")
+    Expect(p.plate.ring, a, -6, -6, 312, 108, "edge")
+    Is(Colour(p.plate.fill), T.COLOR_CTRL_INK, 1, "face")
+    Is(p.plate.ring.vertex, T.COLOR_CTRL_DIM, 1, "idle edge")
+    for _, key in ipairs({ "TopLeftTex", "TopRightTex", "TopTex", "BottomLeftTex", "BottomRightTex", "BottomTex", "LeftTex", "RightTex", "MiddleTex" }) do
+        assert(a[key].alpha == 0, key .. " not held")
+        a[key]:SetAlpha(1)
+        assert(a[key].alpha == 0, key .. " came back")
+    end
+    local e = a.EditBox
+    assert(e.fontPath == T.FONT_MONO and Near(e.size * PPU, 12, 0.01), "12 px mono text")
+    Is(e.textColor, T.COLOR_CTRL_TEXT, 1, "text")
+    assert(e.Instructions.fontPath == T.FONT_MONO and Near(e.Instructions.size * PPU, 12, 0.01), "placeholder in the mono")
+    Is(e.Instructions.textColor, T.COLOR_CTRL_HINT, 1, "placeholder")
+    assert(a.CharCount.fontPath == T.FONT_MONO and Near(a.CharCount.size * PPU, 10, 0.01), "count in the mono at 10")
+    Is(a.CharCount.textColor, T.COLOR_MUTED, 1, "count")
+    assert(e.highlight and Near(e.highlight[1], T.COLOR_POWER[1], 0.002) and Near(e.highlight[4], 0.35, 0.002), "selection is cyan")
+    assert(a.scripts.OnShow == nil and e.scripts.OnTextChanged == nil, "no script was set on a stock widget")
+    assert(not p.glow:IsShown(), "no focus, no glow")
+""")
+
+case("text_area_hover_and_focus_go_cyan_focus_adds_the_glow_and_disabled_goes_dark", PRELUDE + """
+    local a = AreaW(P, 40, 40, 250, 80)
+    Skin(P)
+    local p, T = Fld().AreaParts(a), FS.Theme
+    Hover(a)
+    Is(p.plate.ring.vertex, T.COLOR_POWER, 1, "hover edge over the frame")
+    Unhover(a)
+    Is(p.plate.ring.vertex, T.COLOR_CTRL_DIM, 1, "idle again")
+    Hover(a.EditBox)
+    Is(p.plate.ring.vertex, T.COLOR_POWER, 1, "hover edge over the text")
+    Unhover(a.EditBox)
+    a.EditBox:SetFocus()
+    Is(p.plate.ring.vertex, T.COLOR_POWER, 1, "focus edge")
+    assert(p.glow:IsShown())
+    Expect(p.glow, a, -9, -9, 318, 114, "glow 3 px outside the face")
+    Is(p.glow.color, T.COLOR_POWER, 0.08, "glow")
+    a.EditBox:ClearFocus()
+    assert(not p.glow:IsShown())
+    a.EditBox:Disable()
+    Is(Colour(p.plate.fill), T.COLOR_CTRL_DISFILL, 1, "disabled face")
+    Is(p.plate.ring.vertex, T.COLOR_CTRL_DISEDGE, 1, "disabled edge")
+    Is(a.EditBox.textColor, T.COLOR_CTRL_DIS, 1, "disabled text")
+    a.EditBox:Enable()
+    Is(Colour(p.plate.fill), T.COLOR_CTRL_INK, 1, "enabled again")
+""")
+
+case("text_area_detection_is_by_shape_and_a_single_line_box_a_held_one_or_a_bare_scroll_frame_is_left_alone", PRELUDE + """
+    local good = AreaW(P, 20, 20, 250, 80)
+    local single = AreaW(P, 20, 140, 250, 80)
+    single.EditBox.multi = false
+    local held = AreaW(P, 20, 260, 250, 80)
+    held.TopLeftTex:SetAlpha(0)
+    local noArt = AreaW(P, 320, 20, 250, 80)
+    noArt.MiddleTex = nil
+    local bare = blz("ScrollFrame", nil, P, 250, 80, 320, 140)
+    local multi = EditBoxW(P, 320, 260, 250, 80, { multi = true })
+    local F = Fld()
+    assert(F.IsArea(good))
+    assert(not F.IsArea(single) and not F.IsArea(held) and not F.IsArea(noArt) and not F.IsArea(bare))
+    assert(F.Kind(good.EditBox) == nil and F.Kind(multi) == nil, "the box inside a text area is not a console line")
+    assert(Skin(P) == 1, "only the stock text area")
+""")
+
+case("a_text_area_is_skinned_once_waits_for_combat_and_follows_a_change_of_pixel_scale", PRELUDE + """
+    local a = AreaW(P, 40, 40, 250, 80)
+    assert(Skin(P) == 1)
+    local hooks, objs = HookCount(), ObjCount()
+    assert(Skin(P) == 0 and HookCount() == hooks and ObjCount() == objs, "a repeat sweep builds nothing")
+    local late = AreaW(P, 40, 200, 250, 80)
+    __combat = true
+    assert(Skin(P) == 0 and Fld().AreaParts(late) == nil, "nothing is skinned in combat")
+    __combat = false
+    Fire("PLAYER_REGEN_ENABLED"); FlushTimers()
+    assert(Fld().AreaParts(late) and Fld().AreaParts(late).built, "skinned after combat")
+    local p = Fld().AreaParts(a)
+    for _, scale in ipairs({ 1.0, 1.5, 2.0, 1.2 }) do
+        PPU = scale
+        Fire("UI_SCALE_CHANGED")
+        local pad = Round(5 * scale)
+        local w, h = Round(a.w * scale), Round(a.h * scale)
+        Expect(p.plate.ring, a, -pad, -pad, w + 2 * pad, h + 2 * pad, "edge at " .. scale)
+        a.EditBox:SetFocus()
+        local stock = { a.TopLeftTex, a.TopRightTex, a.TopTex, a.BottomLeftTex, a.BottomRightTex, a.BottomTex, a.LeftTex, a.RightTex,
+            a.MiddleTex, a.CharCount, a.EditBox }
+        WholePixels(a, a, "text area at " .. scale, stock)
+        a.EditBox:ClearFocus()
+    end
+    NoDegrade()
+""")
+
 # -------------------------------------------------------------------------------------------------------------------
 # Item slot
 # -------------------------------------------------------------------------------------------------------------------
@@ -3328,6 +3458,287 @@ case("switch_regions_sit_on_whole_pixels_at_every_scale", SWITCH_PRELUDE + """
         WholePixels(sw.frame, P, "switch at " .. scale)
     end
 """)
+
+# -------------------------------------------------------------------------------------------------------------------
+# Inset (InsetFrameTemplate) and the section header plate
+# -------------------------------------------------------------------------------------------------------------------
+
+case("inset_tokens_are_the_mockups_numbers", PRELUDE + """
+    local K, T = FS.Layout.Controls, FS.Theme
+    assert(K.INSET_CUT == 8 and K.INSET_SCAN_PITCH == 4 and K.INSET_SCAN_ALPHA == 0.05)
+    assert(K.INSET_MARK_IN == 4 and K.INSET_MARK_ARM == 4 and K.INSET_MARK_ALPHA == 0.35)
+    assert(T.SnapCut(K.INSET_CUT) == 6, "8 snaps to the baked 6")
+    assert(K.PLATE_H == 24 and K.PLATE_CUT == 6 and K.PLATE_LED_W == 3 and K.PLATE_LED_H == 12)
+    assert(K.PLATE_LED_X == 1 and K.PLATE_LED_Y == 6 and K.PLATE_TEXT_X == 14 and K.PLATE_TEXT == 11)
+    assert(K.PLATE_CHIP_Y == 2 and K.PLATE_CHIP_GAP == 4 and K.PLATE_CHIP_RIGHT == 6)
+    assert(K.PLATE_GLINT_PERIOD == 3.6 and K.PLATE_GLINT_ALPHA == 0.28 and K.PLATE_GLINT_FROM == -60 and K.PLATE_GLINT_PAST == 40)
+    assert(K.AREA_CUT == 6 and K.AREA_PAD == 5)
+""")
+
+case("inset_is_an_ink_face_with_a_1_px_edge_a_bottom_right_chamfer_and_the_stock_art_held", PRELUDE + """
+    local i = InsetW(P, 20, 20, 404 / PPU, 128 / PPU)
+    assert(Skin(P) == 1)
+    NoDegrade()
+    local p, T = FS.InsetSkins.Parts(i), FS.Theme
+    assert(p and p.c == 6, "chamfer 8 asked, the baked 6 drawn")
+    assert(i.w == 404 / PPU and i.h == 128 / PPU, "the stock rect was resized")
+    -- the face: a run to the cut, a run under it, and the baked corner flipped to the bottom right
+    Expect(p.fill.mid, i, 0, 0, 404, 122, "face")
+    Expect(p.fill.low, i, 0, 122, 398, 6, "face under the cut")
+    Expect(p.fill.br, i, 398, 122, 6, 6, "face corner")
+    assert(p.fill.br.path:find("fill_cut_c6", 1, true), p.fill.br.path)
+    assert(Near(p.fill.br.coords[1], 6 / 16) and p.fill.br.coords[2] == 0 and Near(p.fill.br.coords[3], 6 / 16) and p.fill.br.coords[4] == 0, "bottom right flip")
+    assert(p.fill.top == nil and p.fill.tl == nil and p.edge.tl == nil, "the top left stays square")
+    Is(Colour(p.fill.mid), T.COLOR_CTRL_INK, 1, "face")
+    Is(Colour(p.fill.low), T.COLOR_CTRL_INK, 1, "face")
+    Is(Colour(p.fill.br), T.COLOR_CTRL_INK, 1, "face")
+    -- the edge: four runs that never overlap, and the baked diagonal at the cut
+    Expect(p.edge.top, i, 0, 0, 403, 1, "top edge")
+    Expect(p.edge.right, i, 403, 0, 1, 122, "right edge")
+    Expect(p.edge.bottom, i, 0, 127, 398, 1, "bottom edge")
+    Expect(p.edge.left, i, 0, 1, 1, 126, "left edge")
+    Expect(p.edge.br, i, 398, 122, 6, 6, "diagonal")
+    assert(p.edge.br.path:find("border_cut_c6_t1", 1, true), p.edge.br.path)
+    assert(Near(p.edge.br.coords[1], 6 / 16) and p.edge.br.coords[2] == 0, "bottom right flip")
+    for _, key in ipairs({ "top", "right", "bottom", "left" }) do Is(Colour(p.edge[key]), T.COLOR_CTRL_DISEDGE, 1, key .. " edge") end
+    Is(Colour(p.edge.br), T.COLOR_CTRL_DISEDGE, 1, "diagonal")
+    -- the stock art is held and stays held
+    assert(i.Bg.alpha == 0 and i.NineSlice.alpha == 0, "marble and bevel held")
+    i.Bg:SetAlpha(1); i.NineSlice:SetAlpha(1)
+    assert(i.Bg.alpha == 0 and i.NineSlice.alpha == 0, "the stock re-asserts it and the hold writes 0 again")
+""")
+
+case("inset_scanlines_tile_one_texel_per_pixel_every_4_rows_from_row_3_inside_the_edge", PRELUDE + """
+    local i = InsetW(P, 20, 20, 404 / PPU, 128 / PPU)
+    Skin(P)
+    local p, T = FS.InsetSkins.Parts(i), FS.Theme
+    Expect(p.scan.main, i, 1, 1, 402, 121, "scanlines")
+    Expect(p.scan.low, i, 1, 122, 397, 5, "scanlines beside the cut")
+    for _, key in ipairs({ "main", "low" }) do
+        local t = p.scan[key]
+        assert(t.path:find("ctl_scanline.tga", 1, true), t.path)
+        Is(t.vertex, T.COLOR_BORDER, 0.05, "scanline " .. key)
+    end
+    local c = p.scan.main.coords
+    assert(Near(c[1], 1 / 4) and Near(c[2], 403 / 4) and Near(c[3], 1 / 4) and Near(c[4], 122 / 4), "main tile coordinates, one texel a pixel from the inset's own top left")
+    c = p.scan.low.coords
+    assert(Near(c[1], 1 / 4) and Near(c[2], 398 / 4) and Near(c[3], 122 / 4) and Near(c[4], 127 / 4), "low tile coordinates run on from the main run")
+""")
+
+case("inset_register_marks_are_cyan_l_shapes_4_in_with_4_long_arms_in_three_corners", PRELUDE + """
+    local i = InsetW(P, 20, 20, 404 / PPU, 128 / PPU)
+    Skin(P)
+    local p, T = FS.InsetSkins.Parts(i), FS.Theme
+    Expect(p.marks.tl.h, i, 4, 4, 4, 1, "top left across");    Expect(p.marks.tl.v, i, 4, 5, 1, 3, "top left down")
+    Expect(p.marks.tr.h, i, 396, 4, 4, 1, "top right across"); Expect(p.marks.tr.v, i, 399, 5, 1, 3, "top right down")
+    Expect(p.marks.bl.h, i, 4, 123, 4, 1, "bottom left across"); Expect(p.marks.bl.v, i, 4, 120, 1, 3, "bottom left up")
+    assert(p.marks.br == nil, "no mark in the cut corner")
+    for _, corner in ipairs({ "tl", "tr", "bl" }) do
+        for _, arm in ipairs({ "h", "v" }) do Is(Colour(p.marks[corner][arm]), T.COLOR_POWER, 0.35, corner .. arm) end
+    end
+""")
+
+case("inset_draws_only_under_its_children_and_writes_nothing_to_the_stock_frame", PRELUDE + """
+    local i = InsetW(P, 20, 20, 404 / PPU, 128 / PPU)
+    local child = blz("Button", nil, i, 40, 20, 10, 10)
+    local fsLabel = fstring(i, "Count", 12)
+    local kids, rects = #i.children, {}
+    Skin(P)
+    assert(#i.children == kids, "no frame was added to the inset")
+    local ours = 0
+    for _, r in ipairs(i.regions) do
+        if r.kind == "Texture" and r ~= i.Bg then
+            ours = ours + 1
+            assert(r.layer == "BACKGROUND" or r.layer == "BORDER", "a region of ours on " .. r.layer .. ": stock text and icons draw over it")
+        end
+    end
+    assert(ours >= 15, "the face, the edge, the scanlines and the marks: " .. ours)
+    assert(fsLabel.text == "Count" and child.alpha == 1, "stock content untouched")
+    assert(i.scripts.OnShow == nil and i.scripts.OnSizeChanged == nil, "no script was set on the stock frame")
+""")
+
+case("inset_follows_a_resize_and_a_change_of_pixel_scale_on_whole_pixels", PRELUDE + """
+    local i = InsetW(P, 20, 20, 404 / PPU, 128 / PPU)
+    Skin(P)
+    local p = FS.InsetSkins.Parts(i)
+    i.w, i.h = 200 / PPU, 80 / PPU
+    i:RunScript("OnSizeChanged")
+    Expect(p.fill.mid, i, 0, 0, 200, 74, "face after a resize")
+    Expect(p.edge.right, i, 199, 0, 1, 74, "right edge after a resize")
+    Expect(p.marks.tr.h, i, 192, 4, 4, 1, "top right mark after a resize")
+    for _, scale in ipairs({ 1.0, 1.5, 2.0, 1.2 }) do
+        PPU = scale
+        Fire("UI_SCALE_CHANGED")
+        local w, h = Round(i.w * scale), Round(i.h * scale)
+        Expect(p.fill.mid, i, 0, 0, w, h - 6, "face at " .. scale)
+        Expect(p.edge.bottom, i, 0, h - 1, w - 6, 1, "bottom edge at " .. scale)
+        Expect(p.marks.bl.h, i, 4, h - 5, 4, 1, "mark at " .. scale)
+        WholePixels(i, i, "inset at " .. scale, { i.Bg, i.NineSlice })
+    end
+""")
+
+case("inset_detection_is_by_shape_and_a_window_a_held_or_hidden_one_and_a_divider_are_left_alone", PRELUDE + """
+    local good = InsetW(P, 20, 20, 404 / PPU, 128 / PPU)
+    local window = InsetW(P, 20, 160, 404 / PPU, 128 / PPU)
+    window.layoutType = "PortraitFrameTemplate"
+    local plain = blz("Frame", nil, P, 404, 128, 20, 300)
+    local held = InsetW(P, 440, 20, 404 / PPU, 128 / PPU)
+    held.Bg:SetAlpha(0)
+    local hidden = InsetW(P, 440, 160, 404 / PPU, 128 / PPU)
+    hidden.NineSlice:Hide()
+    local divider = InsetW(P, 440, 300, 404 / PPU, 6 / PPU)
+    local bare = InsetW(P, 20, 440, 404 / PPU, 128 / PPU)
+    bare.Bg = nil
+    local I = FS.InsetSkins
+    assert(I.IsInset(good), "the stock inset")
+    assert(not I.IsInset(window), "a window frame has a Bg and a NineSlice too")
+    assert(not I.IsInset(plain) and not I.IsInset(held) and not I.IsInset(hidden), "plain, held, hidden")
+    assert(not I.IsInset(divider), "too short to be an inset")
+    assert(not I.IsInset(bare), "no marble to hold")
+    assert(Skin(P) == 1, "only the stock inset was skinned")
+    assert(I.Parts(window) == nil and I.Parts(held) == nil and I.Parts(hidden) == nil)
+""")
+
+case("inset_is_skinned_once_its_controls_are_reached_too_and_one_met_in_combat_waits", PRELUDE + """
+    local a = InsetW(P, 20, 20, 404 / PPU, 128 / PPU)
+    local box = EditBoxW(a, 10, 10, 156 / PPU, 28 / PPU)
+    assert(Skin(P) == 2, "the inset and the edit box inside it")
+    local hooks, objs = HookCount(), ObjCount()
+    assert(Skin(P) == 0 and HookCount() == hooks and ObjCount() == objs, "a repeat sweep builds nothing")
+    local late = InsetW(P, 20, 200, 404 / PPU, 80 / PPU)
+    __combat = true
+    assert(Skin(P) == 0)
+    assert(FS.InsetSkins.Parts(late) == nil, "nothing is skinned in combat")
+    __combat = false
+    Fire("PLAYER_REGEN_ENABLED"); FlushTimers()
+    assert(FS.InsetSkins.Parts(late), "skinned after combat")
+    NoDegrade()
+""")
+
+case("inset_art_the_stock_re_shows_is_held_again_on_the_next_show", PRELUDE + """
+    local i = InsetW(P, 20, 20, 404 / PPU, 128 / PPU)
+    FS.PanelSkins.SweepOnShow(P)
+    FlushTimers()
+    i.NineSlice:Show(); i.Bg:Show()
+    P:Hide(); P:Show()
+    assert(i.Bg.alpha == 0 and i.NineSlice.alpha == 0)
+    assert(FS.InsetSkins.Parts(i).fill.mid.shown ~= false, "our face is still there")
+""")
+
+case("plate_is_a_24_px_band_with_a_top_left_chamfer_a_violet_edge_a_pink_led_and_a_cyan_caption", PRELUDE + """
+    local plate = FS.InsetSkins.Plate(P, { text = "INVENTORY", width = 404, x = 20, y = 20 })
+    NoDegrade()
+    local f, T = plate.frame, FS.Theme
+    assert(f.parent == P, "the plate is a frame of its own under the parent")
+    Expect(f, P, 20, 20, 404, 24, "plate")
+    Expect(plate.fill.top, f, 6, 0, 398, 6, "band top run")
+    Expect(plate.fill.mid, f, 0, 6, 404, 18, "band")
+    Expect(plate.fill.tl, f, 0, 0, 6, 6, "band corner")
+    assert(plate.fill.low == nil and plate.fill.br == nil and plate.edge.br == nil, "the bottom right stays square")
+    assert(plate.fill.tl.path:find("fill_cut_c6", 1, true) and plate.fill.tl.coords[1] == 0 and Near(plate.fill.tl.coords[2], 6 / 16), "top left piece, unflipped")
+    Is(Colour(plate.fill.mid), T.COLOR_CTRL_BAND, 1, "band")
+    Expect(plate.edge.top, f, 6, 0, 397, 1, "top edge")
+    Expect(plate.edge.right, f, 403, 0, 1, 24, "right edge")
+    Expect(plate.edge.bottom, f, 0, 23, 403, 1, "bottom edge")
+    Expect(plate.edge.left, f, 0, 6, 1, 17, "left edge")
+    Expect(plate.edge.tl, f, 0, 0, 6, 6, "diagonal")
+    for _, key in ipairs({ "top", "right", "bottom", "left", "tl" }) do Is(Colour(plate.edge[key]), T.COLOR_BORDER, 1, key) end
+    Expect(plate.led, f, 1, 6, 3, 12, "LED")
+    Is(plate.led.color, T.COLOR_HEALTH, 1, "LED")
+    local l, t, r, b = Px(plate.label, f)
+    assert(Near(l, 14, 0.01) and Near((t + b) / 2, 13, 0.01), string.format("caption at x=%.2f, centre y=%.2f", l, (t + b) / 2))
+    assert(plate.label.text == "INVENTORY" and plate.label.fontPath == T.FONT_MONO and Near(plate.label.size * PPU, 11, 0.01))
+    Is(plate.label.textColor, T.COLOR_POWER, 1, "caption")
+    assert(FS.ControlKit.Classify(f) == nil, "a plate is never swept")
+""")
+
+case("plate_chips_sit_right_aligned_6_in_and_4_apart_sized_like_the_value_tag", PRELUDE + """
+    local T = FS.Theme
+    local one = FS.InsetSkins.Plate(P, { text = "INVENTORY", width = 404, chips = { { "18/44", T.COLOR_POWER } } })
+    Expect(one.chips[1].frame, one.frame, 350, 2, 48, 20, "one chip: 5 characters = 36 + 12, already a multiple of 4")
+    local two = FS.InsetSkins.Plate(P, { text = "EQUIPMENT", width = 408, chips = { { "ilvl 62", T.COLOR_AMBER }, { "2 empty", T.COLOR_MUTED } } })
+    Expect(two.chips[2].frame, two.frame, 338, 2, 64, 20, "the last chip ends 6 from the right (7 characters = 62.4, rounded up to 64)")
+    Expect(two.chips[1].frame, two.frame, 270, 2, 64, 20, "the first chip is 4 clear of the second")
+    Is(Colour(two.chips[1].plate.ring), T.COLOR_AMBER, 1, "chip edge")
+    Is(two.chips[1].label.textColor, T.COLOR_AMBER, 1, "chip text")
+    assert(two.chips[1].label.text == "ilvl 62" and Near(two.chips[1].label.size * PPU, 11, 0.01))
+    local l, t, r, b = Px(two.chips[1].label, two.chips[1].frame)
+    assert(Near((l + r) / 2, 32, 0.6) and Near((t + b) / 2, 11, 0.01), "centred in the chip, 11 down")
+    FS.InsetSkins.SetChips(two, { { "3 found", T.COLOR_POWER } })
+    assert(not two.chips[2].frame:IsShown(), "a chip no longer asked for is hidden")
+    Expect(two.chips[1].frame, two.frame, 338, 2, 64, 20, "the one chip moves to the right end")
+    FS.InsetSkins.SetText(two, "FILTER")
+    assert(two.label.text == "FILTER")
+    NoDegrade()
+""")
+
+case("plate_led_breathes_to_03_and_a_hidden_plate_runs_nothing", PRELUDE + """
+    local plate = FS.InsetSkins.Plate(P, { text = "INVENTORY", width = 404 })
+    Step(0.8)
+    assert(Near(plate.led.color[4], 0.3, 0.03), "the LED breathes to 0.3 at the half period: " .. plate.led.color[4])
+    Step(0.8)
+    assert(plate.led.color[4] > 0.95, "and back")
+    plate.frame:Hide()
+    local a, g = plate.led.color[4], plate.glintAt
+    Step(0.9)
+    assert(plate.led.color[4] == a and plate.glintAt == g, "a hidden plate runs nothing")
+""")
+
+case("plate_glint_is_a_violet_band_that_crosses_from_60_left_to_40_past_the_right_end_every_3_6_s", PRELUDE + """
+    local plate = FS.InsetSkins.Plate(P, { text = "INVENTORY", width = 404 })
+    local I = FS.InsetSkins
+    assert(I.PlateGlintOffset(0, 404) == -60 and Near(I.PlateGlintOffset(1.8, 404), 192) and Near(I.PlateGlintOffset(3.6, 404), -60),
+        "linear from -60 to width + 40, then round again")
+    Is(plate.glint.vertex, FS.Theme.COLOR_BORDER, 0.28, "glint")
+    assert(plate.glint.path:find("ctl_glint.tga", 1, true))
+    Expect(plate.glint, plate.frame, 1, 1, 402, 22, "the glint covers the inside of the band")
+    Step(0.05)
+    assert(not plate.glint:IsShown(), "it starts off the plate, 60 to the left")
+    Step(1.75)
+    assert(plate.glint:IsShown() and Near(plate.glintAt, I.PlateGlintOffset(1.8, 404), 12), "over the plate half way: " .. tostring(plate.glintAt))
+    assert(Near(plate.glint.coords[1] * 64, -plate.glintAt, 0.5), "its sheet slides left as the band goes right")
+    Step(1.6)
+    assert(not plate.glint:IsShown(), "and it is past the right end near the end of its run")
+""")
+
+SCENES["insets"] = """
+    local FS = Load()
+    local P = Panel()
+    P.w, P.h = 900, 320
+    local T = FS.Theme
+    local modules = {}
+    local function Module(x, y, w, h, text, chips)
+        local plate = FS.InsetSkins.Plate(P, { text = text, width = w, x = x, y = y, chips = chips })
+        local inset = InsetW(P, x / PPU, (y + 24) / PPU, w / PPU, h / PPU)
+        modules[#modules + 1] = inset
+        return plate, inset
+    end
+    Module(16, 16, 404, 128, "INVENTORY", { { "18/44", T.COLOR_POWER } })
+    Module(436, 16, 408, 128, "EQUIPMENT", { { "ilvl 62", T.COLOR_AMBER }, { "2 empty", T.COLOR_MUTED } })
+    Module(16, 184, 404, 80, "MONEY")
+    local _, filter = Module(436, 184, 408, 80, "FILTER", { { "rare+", T.COLOR_POWER } })
+    EditBoxW(filter, 24 / PPU, 24 / PPU, 220 / PPU, 28 / PPU)
+    Skin(P)
+    Step(1.7)
+    return DumpOps({ P })
+"""
+
+SCENES["areas"] = """
+    local FS = Load()
+    local P = Panel()
+    P.w, P.h = 900, 200
+    local areas = {}
+    for i = 1, 4 do
+        areas[i] = AreaW(P, (24 + (i - 1) * 215) / PPU, 24 / PPU, 190 / PPU, 100 / PPU)
+        areas[i].EditBox:SetText(i == 1 and "" or "Steps to reproduce")
+    end
+    Skin(P)
+    areas[1].EditBox.Instructions:SetText("Describe what happened")
+    Hover(areas[2])
+    areas[3].EditBox:SetFocus()
+    areas[4].EditBox:Disable()
+    return DumpOps({ P })
+"""
 
 SCENES["tabs"] = """
     local FS = Load()

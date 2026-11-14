@@ -616,10 +616,24 @@ local function LabelOf(button)
     return text
 end
 
+-- A shown picture on a button (an arrow, a sort caret) means the button is a glyph key, not a text button.
+local function HasShownIcon(button)
+    local icon = button.Icon or button.icon
+    if type(icon) ~= "table" or type(icon.IsShown) ~= "function" then return false end
+    local ok, shown = pcall(icon.IsShown, icon)
+    return ok and shown == true
+end
+
+-- Two stock shapes carry a label on a plate: the three slice (UIPanelButtonTemplate: Left / Middle or Center / Right) and
+-- the nine piece menu stretch (UIMenuButtonStretchTemplate: TopLeft .. MiddleMiddle; the keybinding cells, the friend
+-- invite and group finder keys, the click binding Delete key).
 local function IsStockTextButton(button)
     if TypeOf(button) ~= "Button" then return false end
-    if not (button.Left and button.Right and (button.Middle or button.Center)) then return false end
+    local slices = button.Left and button.Right and (button.Middle or button.Center)
+    local stretch = button.TopLeft and button.TopRight and button.BottomLeft and button.BottomRight and button.MiddleMiddle
+    if not (slices or stretch) then return false end
     if button.LeftActive or button.MiddleActive or button.RightActive then return false end -- a tab
+    if not slices and HasShownIcon(button) then return false end
     return LabelOf(button) ~= nil
 end
 

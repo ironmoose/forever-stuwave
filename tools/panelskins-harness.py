@@ -328,6 +328,43 @@ case("a_stock_text_button_anywhere_in_the_tree_is_skinned_with_its_accent_by_lab
     assert(CallFor(calls, slice), "a three slice button with a label was not skinned")
 """)
 
+case("a_menu_stretch_button_with_a_label_is_skinned_like_the_other_text_buttons", """
+    -- UIMenuButtonStretchTemplate: nine pieces named TopLeft .. MiddleMiddle, no Left/Right/Middle (the keybinding cells,
+    -- friend invite Accept / Decline, group finder Invite / Decline, the click binding Delete key).
+    local FS, calls = LoadSweep()
+    local panel = Widget("Frame")
+    local function stretch(text, kind)
+        return Widget(kind or "Button", { text = text, TopLeft = {}, TopRight = {}, BottomLeft = {}, BottomRight = {},
+            TopMiddle = {}, MiddleLeft = {}, MiddleRight = {}, BottomMiddle = {}, MiddleMiddle = {} })
+    end
+    local accept = Add(panel, stretch(ACCEPT))
+    local decline = Add(Add(panel, Widget("Frame")), stretch(DECLINE))
+    local key = Add(panel, stretch("Q"))
+    local n = FS.PanelSkins.SweepTextButtons(panel)
+    assert(n == 3 and #calls == 3, "skinned " .. n .. " / " .. #calls)
+    assert(CallFor(calls, accept).opts.accent == "cyan", "Accept: " .. tostring(CallFor(calls, accept).opts.accent))
+    assert(CallFor(calls, decline).opts.accent == "pink", "Decline: " .. tostring(CallFor(calls, decline).opts.accent))
+    assert(CallFor(calls, key), "a keybinding cell was not skinned")
+""")
+
+case("a_menu_stretch_dropdown_an_icon_one_an_unlabelled_one_and_a_partial_shape_are_left_alone", """
+    local FS, calls = LoadSweep()
+    local panel = Widget("Frame")
+    local function stretch(text, kind, extra)
+        local b = Widget(kind or "Button", { text = text, TopLeft = {}, TopRight = {}, BottomLeft = {}, BottomRight = {},
+            MiddleMiddle = {} })
+        if extra then for k, v in pairs(extra) do b[k] = v end end
+        return b
+    end
+    Add(panel, stretch("Raid markers", "DropdownButton"))                       -- a dropdown (its own skin)
+    Add(panel, stretch("Filter", "DropDownToggleButton"))
+    Add(panel, stretch("Sort", "Button", { Icon = Widget("Texture", { shown = true }) })) -- a caret / icon key
+    Add(panel, stretch(nil))                                                    -- no label
+    Add(panel, Widget("Button", { text = "Half", TopLeft = {}, MiddleMiddle = {} })) -- not the full nine-slice shape
+    local n = FS.PanelSkins.SweepTextButtons(panel)
+    assert(n == 0 and #calls == 0, "something was skinned: " .. n .. " / " .. #calls)
+""")
+
 case("tabs_icon_buttons_dropdowns_other_widgets_and_owned_buttons_are_left_alone", """
     local FS, calls, owned = LoadSweep()
     local panel = Widget("Frame")

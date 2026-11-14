@@ -32,6 +32,18 @@ local function wash(parent)
     t.path, t.color, t.shown = nil, { 1, 1, 1, 0.1 }, false
     return t
 end
+-- UIMenuButtonStretchTemplate: nine pieces, no Left / Middle / Right (the shape KeyBindingFrameBindingButtonTemplate has)
+local function menuStretch(b, text)
+    for _, n in ipairs({ "TopLeft", "TopRight", "BottomLeft", "BottomRight", "TopMiddle", "MiddleLeft", "MiddleRight",
+                         "BottomMiddle", "MiddleMiddle" }) do
+        b[n] = tex(b, nil, "BACKGROUND")
+    end
+    b.fs = fstring(b, nil, text, 12, { 1, 0.82, 0, 1 })
+    b.fs.points[1] = { point = "CENTER", rel = b, relPoint = "CENTER", x = 0, y = 0 }
+    b.highlightTex = tex(b, nil, "HIGHLIGHT")
+    b.scripts.OnClick = function() end
+    return b
+end
 local function threeSlice(b, text, w)
     b.Left, b.Middle, b.Right = tex(b, nil, "BACKGROUND"), tex(b, nil, "BACKGROUND"), tex(b, nil, "BACKGROUND")
     b.fs = fstring(b, nil, text, 12, { 1, 0.82, 0, 1 })
@@ -290,9 +302,8 @@ function BuildBlizzard()
         b.Highlight = wash(b)
         b.NewFeature = blz("Frame", nil, b, 1, 1); b.NewFeature.shown = false
         for i, key in ipairs({ "Button1", "Button2" }) do
-            local c = threeSlice(blz("Button", nil, b, 160, 22, "LEFT", i == 1 and 200 or 360, 0), (i == 1 and k1) or k2 or NOT_BOUND)
+            local c = menuStretch(blz("Button", nil, b, 160, 22, "LEFT", i == 1 and 200 or 360, 0), (i == 1 and k1) or k2 or NOT_BOUND)
             c.points[1].relPoint = "LEFT"
-            c.Center = c.Middle
             c.SelectedHighlight = tex(c, nil, "OVERLAY"); c.SelectedHighlight.shown = false
             c.SetSelected = function(self, sel) self.SelectedHighlight:SetShown(sel) end
             c.scripts.OnEnter = function() end

@@ -163,6 +163,12 @@ local function SkinOne(entry)
                 skinText(button)
             end
         end
+        -- The fifth button (ExtraButton, id 5: the report / alternate action under the separator). StaticPopupButtonTemplate has
+        -- state textures only, so the shape sweep below never reaches it; found by its global or its parentKey.
+        local extra = _G[entry.name .. "ExtraButton"] or frame.ExtraButton
+        if type(extra) == "table" and not (FS.ButtonSkins.Parts and FS.ButtonSkins.Parts(extra)) then
+            skinText(extra)
+        end
     end
 
     -- The other popups' stock text buttons (the ready check's, the role poll's Accept, the LFG invite's) by shape,
