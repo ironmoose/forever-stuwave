@@ -479,11 +479,11 @@ end
 -- The flight map (TaxiFrame node buttons, FlightMapFrame pins)
 -------------------------------------------------------------------------------
 
--- A node is a beacon: a diamond of 1 px rows (a coloured edge, a dark plate, a bright core) over a soft glow, pink where you are with
+-- A node is a marker: a diamond of 1 px rows (a coloured edge, a dark plate, a bright core) over a soft glow, pink where you are with
 -- a thin ring round it, cyan where you can fly, dim where you cannot; hovered, the edge goes white, the diamond a step larger and the
 -- glow brighter. Built once per button or pin; the stock icon and highlight are held under it.
 local GLOW_TEX = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\glow_round.tga"
-local BEACON = {
+local NODE_LOOK = {
     radius = { current = 9, reachable = 6, unreachable = 4 },
     glow = { current = 0.45, reachable = 0.25, unreachable = 0 },
     ring = 15, rows = 11,
@@ -491,7 +491,7 @@ local BEACON = {
 
 local function DiamondRows(host, sub)
     local rows = {}
-    for i = -BEACON.rows, BEACON.rows do
+    for i = -NODE_LOOK.rows, NODE_LOOK.rows do
         local t = Kit.Rect(host, 0, 0, 1, 1, C.cyan, 1, "OVERLAY", sub)
         t.fsRow = i
         rows[#rows + 1] = t
@@ -501,7 +501,7 @@ end
 
 -- A 1 px circle of radius R: per row a left and a right run between the outer and inner edge (one run across the top and bottom).
 local function RingRows(host)
-    local runs, R = {}, BEACON.ring
+    local runs, R = {}, NODE_LOOK.ring
     for y = -R, R do
         local xo = math.floor(math.sqrt(math.max(0, R * R - y * y)) + 0.5)
         local inner = (R - 1) * (R - 1) - y * y
@@ -543,13 +543,13 @@ local function PaintRows(rows, host, radius, color, alpha)
 end
 
 local function PaintDiamond(g, host, kind, hover)
-    local r = BEACON.radius[kind] or BEACON.radius.unreachable
+    local r = NODE_LOOK.radius[kind] or NODE_LOOK.radius.unreachable
     if hover then r = r + 1 end
     local color = (kind == "current" and C.pink) or (kind == "reachable" and C.cyan) or C.dim
     PaintRows(g.edge, host, r + 1, hover and C.text or color, 1)
     PaintRows(g.plate, host, r - 1, C.ink, 0.9)
     PaintRows(g.core, host, math.max(1, r - 5), color, 1)
-    local ga = hover and 0.55 or BEACON.glow[kind] or 0
+    local ga = hover and 0.55 or NODE_LOOK.glow[kind] or 0
     if ga > 0 then
         local size = 2 * (r + 8)
         g.glow:SetVertexColor(color[1], color[2], color[3], ga)

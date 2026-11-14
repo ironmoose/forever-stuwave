@@ -298,7 +298,7 @@ function BuildBlizzard()
     end
     -- the stock helper stretches the line art across the texture; the mock only shows it
     function DrawLine(t, c, sx, sy, ex, ey, w, factor, rel) t:Show() end
-    -- the colour of a beacon's core on its middle row
+    -- the colour of a marker's core on its middle row
     function Hue(g) for _, t in ipairs(g.core) do if t.fsRow == 0 then return t.color end end end
     TAXI_TYPES = { "CURRENT", "REACHABLE", "REACHABLE", "UNREACHABLE", "DISTANT" }
     function NumTaxiNodes() return #TAXI_TYPES end
@@ -490,7 +490,7 @@ case("flight map: the node buttons hold the stock icon and draw a glyph by state
     local cur, reach = Hue(S.taxi[TaxiButton1].glyph), Hue(S.taxi[TaxiButton2].glyph)
     assert(cur[1] > 0.9 and cur[2] < 0.3, 'current node not pink')
     assert(reach[2] > 0.8 and reach[1] < 0.3, 'reachable node not cyan')
-    -- a beacon: an edge one row past a dark plate, a glow under it, and the ring only round the current node
+    -- a marker: an edge one row past a dark plate, a glow under it, and the ring only round the current node
     local g1, g2 = S.taxi[TaxiButton1].glyph, S.taxi[TaxiButton2].glyph
     local function widest(rows) local w = 0 for _, t in ipairs(rows) do if t.shown ~= false then w = math.max(w, t.w or 0) end end return w end
     assert(widest(g1.edge) > widest(g1.plate), 'edge not round the plate: ' .. widest(g1.edge) .. ' vs ' .. widest(g1.plate))
@@ -500,7 +500,7 @@ case("flight map: the node buttons hold the stock icon and draw a glyph by state
     assert(not g2.ring, 'ring on a reachable node')
     local before = widest(g2.edge)
     TaxiButton2:RunScript('OnEnter')
-    assert(widest(g2.edge) > before, 'hover did not grow the beacon')
+    assert(widest(g2.edge) > before, 'hover did not grow the marker')
     TaxiButton2:RunScript('OnLeave')
     -- the stock code swaps the icon texture on every show; the hold survives it and the glyph follows the type
     TaxiButton2:SetNormalTexture('Interface\\\\TaxiFrame\\\\UI-Taxi-Icon-Green')
