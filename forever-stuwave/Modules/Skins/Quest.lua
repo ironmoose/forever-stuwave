@@ -471,7 +471,7 @@ end
 -------------------------------------------------------------------------------
 
 local GLYPHS = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\gossip_glyphs.tga"
-local GLYPH_PX, GLYPH_X, BAR_W, BAR_INSET = 12, 6, 3, 3
+local GLYPH_PX, GLYPH_X, BAR_W, BAR_INSET, ROW_GAP = 12, 6, 3, 4, 2
 local CHIP = { H = 13, PAD = 6, RIGHT = 6 }
 
 -- Cell of the 4 x 2 glyph sheet and tint of each kind (tools/assets/generate_gossip_glyphs.py: 16 px cells, the 12 px art 2 px in):
@@ -598,7 +598,9 @@ end
 local function LayoutRow(row, rec)
     local _, h = Kit.SizePx(row)
     if not h then h = math.floor(16 * Kit.Ppu(row) + 0.5) end
-    local u = Kit.U(row, 1)
+    -- the stock rows sit edge to edge, so each card stands ROW_GAP px in from the row's top and bottom: neighbouring cards (and
+    -- their hover rings) keep a 2 x ROW_GAP gap between them
+    local u = Kit.U(row, ROW_GAP)
     for _, t in ipairs({ rec.fill, rec.ring }) do
         t:ClearAllPoints()
         t:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -u)

@@ -1238,7 +1238,7 @@ case("gossip: the greeting sits on a text card, the list on cut cards, the windo
         local rec = S.rows[r]
         local l, t, rr2, b = Px(rec.fill, r)
         local _, _, w, h = Px(r, r)
-        assert(Near(l, 0, 0.6) and Near(t, 1, 0.6) and Near(rr2, w, 0.6) and Near(b, h - 1, 0.6), string.format('card rect %.2f %.2f %.2f %.2f in %.2f x %.2f', l, t, rr2, b, w, h))
+        assert(Near(l, 0, 0.6) and Near(t, 2, 0.6) and Near(rr2, w, 0.6) and Near(b, h - 2, 0.6), string.format('card rect %.2f %.2f %.2f %.2f in %.2f x %.2f', l, t, rr2, b, w, h))
     end
 """)
 
@@ -1330,10 +1330,19 @@ case("quest greeting: the text card sits behind the paragraph, the title cards s
     assert(cl < fl and ct < ft and cb > fb, 'card does not hold the paragraph')
     local cqt = select(2, Px(CurrentQuestsText, UIParent))
     assert(cb <= cqt + 0.5, 'the text card runs onto the Current Quests header')
+    local spans = {}
     for b in QuestFrameGreetingPanel.titleButtonPool:EnumerateActive() do
         local l, t, r, bt = Px(S.rows[b].fill, b)
         local _, _, w, h = Px(b, b)
-        assert(Near(l, 0, 0.6) and Near(t, 1, 0.6) and Near(r, w, 0.6) and Near(bt, h - 1, 0.6), 'card off the row')
+        assert(Near(l, 0, 0.6) and Near(t, 2, 0.6) and Near(r, w, 0.6) and Near(bt, h - 2, 0.6), 'card off the row')
+        local _, at, _, ab = Px(S.rows[b].fill, UIParent)
+        spans[#spans + 1] = { at, ab }
+    end
+    -- neighbouring cards (and their hover rings) never touch: rows stacked edge to edge keep a 4 px gap
+    table.sort(spans, function(a, b) return a[1] < b[1] end)
+    for i = 2, #spans do
+        local gap = spans[i][1] - spans[i - 1][2]
+        if gap > -0.5 and gap < 20 then assert(gap >= 3.5, string.format('cards %d and %d only %.2f px apart', i - 1, i, gap)) end
     end
 """)
 
