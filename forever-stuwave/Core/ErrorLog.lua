@@ -587,6 +587,57 @@ blockedFrame:SetScript("OnEvent", function(_, event, blockedAddon, blockedFunc)
     pcall(OnActionBlocked, event, blockedAddon, blockedFunc)
 end)
 
+-- Bank taint tracer (2026-11-14). The bag click block reads BankPanel.bankType (BankFrameTemplates.lua:869, live
+-- taint.log) and the block-time sweep found BankPanel.bankType and .purchasedBankTabData last written under this
+-- addon's taint. Nothing of ours writes either field, so some Blizzard code that sets them ran on a call chain our code
+-- tainted. A post-hook on each BankPanel method that writes them checks the field right after it runs, and the first
+-- time it turns insecure the call stack is kept in ForeverSTUwaveDB.bankTaintTrace (the stack names the caller that
+-- ran the setter). Diagnostic only: hooksecurefunc post-hooks, pcall'd, a bounded stack, no secret read, writes
+-- nothing on a Blizzard frame.
+local BANK_TRACE_METHODS = { "SetBankType", "FetchPurchasedBankTabData", "RefreshBankPanel", "RefreshBankTabs", "Reset",
+    "OnShow", "SelectTab", "OnNewBankTabSelected", "GenerateItemSlotsForSelectedTab", "RefreshAllItemsForSelectedTab" }
+local bankTraced = {}
+local function TraceBankField(method, field)
+    local panel = _G.BankPanel
+    if bankTraced[field] or type(panel) ~= "table" or type(issecurevariable) ~= "function" then return end
+    local ok, secure, by = pcall(issecurevariable, panel, field)
+    if not ok or secure ~= false then return end
+    bankTraced[field] = true
+    local okStack, stack = pcall(debugstack, 3, 20, 0)
+    if not okStack or type(stack) ~= "string" or Secret(stack) then stack = "(stack unavailable)" end
+    if type(ForeverSTUwaveDB) ~= "table" then return end
+    ForeverSTUwaveDB.bankTaintTrace = ForeverSTUwaveDB.bankTaintTrace or {}
+    ForeverSTUwaveDB.bankTaintTrace[field] = {
+        method = method, by = tostring(by), when = (type(date) == "function" and date("%Y-%m-%d %H:%M:%S")) or "?",
+        combat = (type(InCombatLockdown) == "function" and InCombatLockdown()) and true or false, stack = stack,
+    }
+end
+local function InstallBankTracer()
+    local panel = _G.BankPanel
+    if type(panel) ~= "table" or type(hooksecurefunc) ~= "function" then return false end
+    for _, method in ipairs(BANK_TRACE_METHODS) do
+        if type(panel[method]) == "function" then
+            pcall(hooksecurefunc, panel, method, function()
+                pcall(TraceBankField, method, "bankType")
+                pcall(TraceBankField, method, "purchasedBankTabData")
+            end)
+        end
+    end
+    if type(panel.HookScript) == "function" then
+        pcall(panel.HookScript, panel, "OnShow", function()
+            pcall(TraceBankField, "OnShow script", "bankType")
+            pcall(TraceBankField, "OnShow script", "purchasedBankTabData")
+        end)
+    end
+    return true
+end
+local bankTraceFrame = CreateFrame("Frame")
+bankTraceFrame:RegisterEvent("PLAYER_LOGIN")
+bankTraceFrame:SetScript("OnEvent", function(self)
+    if type(ForeverSTUwaveDB) == "table" then ForeverSTUwaveDB.bankTaintTrace = nil end
+    if pcall(InstallBankTracer) then self:UnregisterAllEvents() end
+end)
+
 -------------------------------------------------------------------------------
 -- Shared warn-once-and-persist helper
 -------------------------------------------------------------------------------
