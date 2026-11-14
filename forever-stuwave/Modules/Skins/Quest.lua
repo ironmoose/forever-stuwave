@@ -471,7 +471,7 @@ end
 -------------------------------------------------------------------------------
 
 local GLYPHS = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\gossip_glyphs.tga"
-local GLYPH_PX, GLYPH_X, BAR_W, BAR_INSET, ROW_GAP = 12, 6, 3, 4, 2
+local GLYPH_PX, GLYPH_X, BAR_W, BAR_INSET, ROW_GAP, CARD_H = 12, 6, 3, 4, 2, 15
 local CHIP = { H = 13, PAD = 6, RIGHT = 6 }
 
 -- Cell of the 4 x 2 glyph sheet and tint of each kind (tools/assets/generate_gossip_glyphs.py: 16 px cells, the 12 px art 2 px in):
@@ -598,13 +598,21 @@ end
 local function LayoutRow(row, rec)
     local _, h = Kit.SizePx(row)
     if not h then h = math.floor(16 * Kit.Ppu(row) + 0.5) end
-    -- the stock rows sit edge to edge, so each card stands ROW_GAP px in from the row's top and bottom: neighbouring cards (and
-    -- their hover rings) keep a 2 x ROW_GAP gap between them
-    local u = Kit.U(row, ROW_GAP)
+    -- the stock rows sit edge to edge (and a row restyled to the mono label can stand a little taller than its slot), so the
+    -- card is at most CARD_H px tall and centred on the row, ROW_GAP px in from each edge: neighbouring cards and their hover
+    -- rings keep a gap between them. The 2 px hover ring (ring2) follows the card one px in.
+    local ch = math.max(8, math.min(h - 2 * ROW_GAP, CARD_H))
+    local top = math.floor((h - ch) / 2)
+    local bottom = h - top - ch
     for _, t in ipairs({ rec.fill, rec.ring }) do
         t:ClearAllPoints()
-        t:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -u)
-        t:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, u)
+        t:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -Kit.U(row, top))
+        t:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, Kit.U(row, bottom))
+    end
+    if rec.plate.ring2 then
+        rec.plate.ring2:ClearAllPoints()
+        rec.plate.ring2:SetPoint("TOPLEFT", row, "TOPLEFT", Kit.U(row, 1), -Kit.U(row, top + 1))
+        rec.plate.ring2:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -Kit.U(row, 1), Kit.U(row, bottom + 1))
     end
     Kit.Place(rec.glyph, row, GLYPH_X, math.floor((h - GLYPH_PX) / 2), GLYPH_PX, GLYPH_PX)
     Kit.Place(rec.bar, row, 0, BAR_INSET, BAR_W, math.max(2, h - 2 * BAR_INSET))

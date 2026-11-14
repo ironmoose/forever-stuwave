@@ -1334,7 +1334,15 @@ case("quest greeting: the text card sits behind the paragraph, the title cards s
     for b in QuestFrameGreetingPanel.titleButtonPool:EnumerateActive() do
         local l, t, r, bt = Px(S.rows[b].fill, b)
         local _, _, w, h = Px(b, b)
-        assert(Near(l, 0, 0.6) and Near(t, 2, 0.6) and Near(r, w, 0.6) and Near(bt, h - 2, 0.6), 'card off the row')
+        assert(Near(l, 0, 0.6) and Near(r, w, 0.6) and t >= 1.5 and bt <= h - 1.5, 'card off the row')
+        assert(bt - t <= 15.5 and math.abs(t - (h - bt)) <= 1.1, string.format('card not a centred 15 px strip: %.1f..%.1f of %.1f', t, bt, h))
+        -- the hover ring follows the card one px in, never the stock row rect
+        local ring2 = S.rows[b].plate.ring2
+        if ring2 then
+            local hl, ht, hr, hb = Px(ring2, b)
+            assert(Near(hl, 1, 0.6) and Near(ht, t + 1, 0.6) and Near(hr, w - 1, 0.6) and Near(hb, bt - 1, 0.6),
+                string.format('hover ring off the card: %.1f,%.1f,%.1f,%.1f card %.1f..%.1f', hl, ht, hr, hb, t, bt))
+        end
         local _, at, _, ab = Px(S.rows[b].fill, UIParent)
         spans[#spans + 1] = { at, ab }
     end
