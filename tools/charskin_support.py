@@ -246,6 +246,9 @@ function BuildBlizzard()
         b.GetPushedTexture = function(self) return self.PushedTexture end
         b.GetHighlightTexture = function(self) return self.HighlightTexture end
         b.GetID = function(self) return self.id end
+        -- the 16001 dump: the bronze ring is a BorderFrame child holding one UI-Character-Info-GearSlot texture, 55 x 55
+        b.BorderFrame = blz("Frame", nil, b, 1, 1, "CENTER", 0, 0)
+        b.BorderFrame.ring = tex(b.BorderFrame, nil, "BACKGROUND")
         return b
     end
     local lefts = { "Head", "Neck", "Shoulder", "Back", "Chest", "Shirt", "Tabard", "Wrist" }

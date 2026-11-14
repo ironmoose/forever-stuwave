@@ -232,6 +232,7 @@ case("every slot wears the shared item slot, in place, with no script or attribu
         assert(Near(l, before[n][1]) and Near(t, before[n][2]), n .. ' moved')
         assert(b.NormalTexture.alpha == 0, n .. ' normal art not held')
         assert(b.IconBorder.alpha == 0, n .. ' icon border not held')
+        assert(b.BorderFrame.alpha == 0, n .. ' bronze gear-slot ring not held')
     end
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)

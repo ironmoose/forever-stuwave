@@ -254,6 +254,8 @@ function Char.SkinSlot(button, slotId, unit)
     unit = unit or "player"
     S.slots[button] = { id = slotId, unit = unit }
     SweepSlotArt(button)
+    -- The bronze gear-slot ring (UI-Character-Info-GearSlot) lives on a BorderFrame child, out of reach of the region sweep.
+    Kit.HoldFrame(button.BorderFrame)
     if type(Theme.AddCut2Texture) == "function" and Theme.SLICE_CUT2_BUTTON_TEXTURE then
         pcall(Theme.AddCut2Texture, button, Theme.SLICE_CUT2_BUTTON_TEXTURE, { 1, 1, 1, 1 }, "BACKGROUND", -8)
     end
