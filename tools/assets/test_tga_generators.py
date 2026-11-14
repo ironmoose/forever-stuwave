@@ -297,6 +297,9 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "ctl_prompt": (16, 16), "ctl_lens": (16, 16), "ctl_cross": (16, 16), "ctl_radar": (16, 16), "ctl_radar_arm": (16, 16),
         "ctl_chev": (16, 16),
     },
+    # generate_gossip_glyphs.py: the NPC dialog's eight row glyphs (bubble, bag, book, house, plane, the gold ! and ?, coin) as one
+    # atlas of 4 x 2 cells of 16 x 16 texels, white alpha shapes tinted in Lua.
+    "gossip_glyphs": (64, 32),
     # generate_control_inset.py: the inset's scanline tile (mockups/shared-controls-2026-11-12.html, inset()): a 4 x 4 white alpha tile,
     # one solid row in four, tinted violet at 5 percent in Lua.
     "control_inset": {"ctl_scanline": (4, 4)},
@@ -2966,6 +2969,87 @@ def test_radar_arm_is_a_2_px_line_from_the_centre_to_the_ring(control_glyph_outp
 
 def test_committed_control_glyph_textures_match_the_generator(control_glyph_outputs: Path) -> None:
     for out in control_glyph_outputs.glob("*.tga"):
+        assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
+
+
+# ---------------------------------------------------------------------------
+# generate_gossip_glyphs.py: the NPC dialog's row glyphs.
+#
+# One 64 x 32 atlas, 4 x 2 cells of 16 x 16 texels in the order bubble, bag, book, house / plane, bang, qmark, coin. Each glyph is
+# a 12 x 12 drawing at (2, 2) inside its cell, one texel a screen pixel. Numbers hardcoded here.
+# ---------------------------------------------------------------------------
+
+GOSSIP_GLYPHS_GENERATOR = GENERATOR_DIR / "generate_gossip_glyphs.py"
+GOSSIP_GLYPH_ORDER = ("bubble", "bag", "book", "house", "plane", "bang", "qmark", "coin")
+
+
+@pytest.fixture(scope="module")
+def gossip_glyph_outputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    out = tmp_path_factory.mktemp("gossip_glyphs")
+    _run_generator(GOSSIP_GLYPHS_GENERATOR, out)
+    return out
+
+
+def _cell_alpha(path: Path, index: int) -> list[list[int]]:
+    grid = _rgba_grid(path)
+    cx, cy = index % 4, index // 4
+    return [[grid[cy * 16 + y][cx * 16 + x][3] for x in range(16)] for y in range(16)]
+
+
+def test_gossip_glyphs_are_white_alpha_shapes(gossip_glyph_outputs: Path) -> None:
+    path = gossip_glyph_outputs / "gossip_glyphs.tga"
+    assert [p.name for p in gossip_glyph_outputs.glob("*.tga")] == ["gossip_glyphs.tga"]
+    assert _is_white(path)
+    for index, name in enumerate(GOSSIP_GLYPH_ORDER):
+        total = sum(sum(row) for row in _cell_alpha(path, index)) / 255
+        assert 14 < total < 90, f"{name} carries {total:.1f} texels of ink"
+
+
+def test_gossip_glyphs_stay_inside_their_12_px_box_and_never_touch_a_neighbour(gossip_glyph_outputs: Path) -> None:
+    path = gossip_glyph_outputs / "gossip_glyphs.tga"
+    for index, name in enumerate(GOSSIP_GLYPH_ORDER):
+        cell = _cell_alpha(path, index)
+        for y in range(16):
+            for x in range(16):
+                if x < 2 or x >= 14 or y < 2 or y >= 14:
+                    assert cell[y][x] == 0, (name, x, y)
+        # the drawing spans most of its box along one side, so a row of the dialog reads one size of glyph
+        xs = [x for y in range(16) for x in range(16) if cell[y][x]]
+        ys = [y for y in range(16) for x in range(16) if cell[y][x]]
+        assert max(max(xs) - min(xs), max(ys) - min(ys)) >= 9, name
+
+
+def test_quest_marks_are_the_bold_bang_and_hook(gossip_glyph_outputs: Path) -> None:
+    path = gossip_glyph_outputs / "gossip_glyphs.tga"
+    bang = _cell_alpha(path, 5)
+    # a stem 4 texels wide at the head narrowing to 2 at the foot, then a 2 x 2 dot: 5 rows of solid ink in the middle
+    for y in range(3, 9):
+        assert bang[y][7] == 255 and bang[y][8] == 255, y
+    assert bang[2][6] > 0 and bang[2][9] > 0, "the head is wider than the foot"
+    assert bang[10][6] == 0 and bang[10][9] == 0
+    assert all(bang[y][x] == 255 for y in (12, 13) for x in (7, 8)), "the dot is 2 x 2"
+    assert all(bang[11][x] == 0 for x in range(16)), "a gap between the stem and the dot"
+    for y in range(16):
+        for x in range(8):
+            assert abs(bang[y][x] - bang[y][15 - x]) <= 2, (x, y)
+    qmark = _cell_alpha(path, 6)
+    assert all(qmark[y][x] == 255 for y in (12, 13) for x in (7, 8)), "the dot is 2 x 2"
+    assert any(qmark[y][x] > 200 for y in (2, 3) for x in (7, 8)), "the hook has a crown"
+    assert qmark[6][8] == 0 or qmark[6][7] == 0, "the hook is open in the middle"
+
+
+def test_coin_is_a_ring_with_a_mark(gossip_glyph_outputs: Path) -> None:
+    path = gossip_glyph_outputs / "gossip_glyphs.tga"
+    coin = _cell_alpha(path, 7)
+    # ring about (8, 8) of radius 5.5 at stroke 1 is 2 pi 5.5 = 34.6 texels, the bars add about 13
+    assert 44 < sum(sum(row) for row in coin) / 255 < 54
+    for x, y in ((8, 2), (8, 13), (2, 8), (13, 8)):
+        assert coin[y][x] > 150, (x, y)
+    assert all(coin[y][x] == 0 for x, y in ((2, 2), (13, 2), (2, 13), (13, 13))), "the ring is round, the corners are open"
+
+
+def test_committed_gossip_glyph_texture_matches_the_generator(gossip_glyph_outputs: Path) -> None:
+    for out in gossip_glyph_outputs.glob("*.tga"):
         assert out.read_bytes() == (MEDIA_DIR / out.name).read_bytes(), out.name
 
 
