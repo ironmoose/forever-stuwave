@@ -1527,6 +1527,13 @@ CW.RegisterCategory({ key = "unitframes", label = "Unit Frames", order = 1, buil
     if timer then UI.Toggle(page, { label = timer.label, key = timer.key, tip = timer.tip }) end
     local snap = FS.LossOfControl and FS.LossOfControl.SNAP_SETTING
     if snap then UI.Toggle(page, { label = snap.label, key = snap.key, tip = snap.tip }) end
+    local alerts = FS.HudAlerts and FS.HudAlerts.SETTINGS
+    if alerts then
+        for _, name in ipairs({ "low", "fuse", "flash" }) do
+            local setting = alerts[name]
+            if setting then UI.Toggle(page, { label = setting.label, key = setting.key, tip = setting.tip }) end
+        end
+    end
     FiveSecondGroup(page)
     BuffTabGroup(page)
     ThunderClapGroup(page)

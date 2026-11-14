@@ -26,7 +26,7 @@ LOAD_ORDER = (
     "Console.lua", "StanceBar.lua", "PetFrame.lua", "PetDock.lua", "PetActionBar.lua",
     "PetCastBar.lua", "Minimap.lua", "QuestTimer.lua", "Panels.lua", "Mail.lua", "Character.lua", "Reputation.lua", "Currency.lua", "Inspect.lua", "Talents.lua", "Commerce.lua", "Quest.lua", "Maps.lua", "Bespoke.lua", "Services.lua", "GroupKit.lua", "Social.lua", "Guild.lua", "ChatSettings.lua", "PvP.lua", "Collections.lua", "Charters.lua", "Tooltip.lua", "TooltipAnchor.lua", "Popups.lua", "Menus.lua", "Settings.lua", "System.lua",
     "Bags.lua", "Loot.lua", "LootRolls.lua", "GroupPopups.lua", "DataBar.lua", "XPBar.lua", "Deck.lua", "MicroBars.lua",
-    "BagBar.lua", "HudText.lua", "LossOfControl.lua", "IssueReporter.lua", "AuctionHouse.lua", "LookingForGroup.lua", "DamageMeter.lua", "Diagnostics.lua",
+    "BagBar.lua", "HudText.lua", "HudAlerts.lua", "LossOfControl.lua", "IssueReporter.lua", "AuctionHouse.lua", "LookingForGroup.lua", "DamageMeter.lua", "Diagnostics.lua",
     "HudSpells.lua", "HudProfiles.lua", "HudLogic.lua", "Gunsight.lua", "GunsightAreas.lua", "TargetDebuffs.lua", "ShamanTotems.lua", "GunsightDots.lua",
     "PaladinArt.lua", "GunsightSeals.lua", "GunsightFrame.lua", "GunsightBoxes.lua", "GunsightTape.lua",
     "GunsightTags.lua", "GunsightMyBuffs.lua",
@@ -86,7 +86,7 @@ def test_module_manifest_preserves_dependency_order_and_loads_every_runtime_modu
     modules = [Path(entry) for entry in entries if entry.endswith(".lua")]
 
     assert tuple(path.name for path in modules) == LOAD_ORDER
-    assert len(set(modules)) == 140
+    assert len(set(modules)) == 141
     assert all((RUNTIME / entry).is_file() for entry in entries)
     assert all(path.parts[0] in {"Core", "Modules"} for path in modules)
     assert not list(RUNTIME.glob("*.lua"))
