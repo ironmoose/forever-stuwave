@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-"""Generates the NPC dialog's row glyphs, one 64 x 32 atlas (gossip_glyphs.tga): eight white-RGB, alpha-shape glyphs tinted by
+"""Generates the NPC dialog's row glyphs, one 64 x 64 atlas (gossip_glyphs.tga): sixteen white-RGB, alpha-shape glyphs tinted by
 SetVertexColor in Lua (mockups/quest-npc-craft-2026-11-12.html, section B4: bubble, bag, book, house, plane, the gold ! and ?,
-coin).
+coin; the second eight added 2026-11-14 so each kind of NPC service has its own mark: vault, swords, shield, cross, gavel,
+scroll, hanger, hammer).
 
-The atlas is 4 columns x 2 rows of 16 x 16 cells, in this order, left to right and top to bottom:
+The atlas is 4 columns x 4 rows of 16 x 16 cells, in this order, left to right and top to bottom:
 
     0 bubble   1 bag    2 book   3 house
     4 plane    5 bang   6 qmark  7 coin
+    8 vault    9 swords 10 shield 11 cross
+    12 gavel   13 scroll 14 hanger 15 hammer
 
 Each glyph is a 12 x 12 pixel drawing at (2, 2) inside its cell, the two outer texels of the cell left clear so a texture
 coordinate that lands a hair off its cell never picks up a neighbour. A row of the dialog is 16 UI units (about 19 physical pixels)
 tall, so the mockup's 20 px glyphs do not fit; these are drawn for 12 px, one texel per screen pixel, so an edge is one crisp pixel
 and only the diagonals carry coverage. A stroke is one pixel wide with its centreline on a half pixel, except the two quest marks,
 which are solid and bold. Cell (cx, cy) is read in Lua as texcoord (cx * 16 + 2) / 64 .. (cx * 16 + 14) / 64 across and
-(cy * 16 + 2) / 32 .. (cy * 16 + 14) / 32 down.
+(cy * 16 + 2) / 64 .. (cy * 16 + 14) / 64 down.
 
 A sample that lands exactly on a 45 degree edge through whole pixel corners would count in (or out) every such sample and bias the
 edge texels one way, so each sample is taken twice, nudged one way and the other by an irrational amount, and a tie counts half.
@@ -28,12 +31,13 @@ import os
 import struct
 
 CELL = 16
-COLS, ROWS = 4, 2
+COLS, ROWS = 4, 4
 WIDTH, HEIGHT = COLS * CELL, ROWS * CELL
 SUPERSAMPLE = 8
 SHIFT_X, SHIFT_Y = 1.3e-7, 0.7e-7
 
-ORDER = ("bubble", "bag", "book", "house", "plane", "bang", "qmark", "coin")
+ORDER = ("bubble", "bag", "book", "house", "plane", "bang", "qmark", "coin",
+         "vault", "swords", "shield", "cross", "gavel", "scroll", "hanger", "hammer")
 
 
 def point_in_polygon(px, py, pts):
@@ -147,6 +151,60 @@ GLYPHS = {
         (ring(8, 8, 5.5, 1.0), 1.0),
         (rect(7, 5, 9, 11), 1.0),
         (rect(6, 6, 10, 7), 1.0),
+    ],
+    # a bank vault: a box with a round dial and a handle bar to its right
+    "vault": [
+        (outline_rect(2, 3, 14, 13), 1.0),
+        (ring(7, 8, 2.5, 1.0), 1.0),
+        (rect(11, 6, 12, 10), 1.0),
+        (union(rect(3, 13, 5, 14), rect(11, 13, 13, 14)), 1.0),
+    ],
+    # an upright sword: a pointed blade, a cross guard, a grip and a pommel
+    "swords": [
+        (poly([(7, 4), (8, 2), (9, 4), (9, 10), (7, 10)]), 1.0),
+        (rect(4, 10, 12, 11), 1.0),
+        (rect(7, 11, 9, 13), 1.0),
+        (rect(6, 13, 10, 14), 1.0),
+    ],
+    # a heater shield: flat top, sides that curve to a point, and a bar down the middle
+    "shield": [
+        (seg((3, 3.5), (13, 3.5), 1.0), 1.0),
+        (seg((3.5, 3.5), (3.5, 8), 1.0), 1.0),
+        (seg((12.5, 3.5), (12.5, 8), 1.0), 1.0),
+        (seg((3.5, 8), (8, 13.4), 1.2), 1.0),
+        (seg((12.5, 8), (8, 13.4), 1.2), 1.0),
+        (rect(7.5, 4, 8.5, 12), 1.0),
+    ],
+    # a healer's cross, solid
+    "cross": [
+        (rect(6, 2, 10, 14), 1.0),
+        (rect(2, 6, 14, 10), 1.0),
+    ],
+    # an auction gavel: a block head on a diagonal handle, and the sound block under it
+    "gavel": [
+        (poly([(4, 4.5), (8.5, 0.0 + 2), (11, 6.5), (6.5, 9)]), 1.0),
+        (seg((8.6, 7.6), (13, 12), 1.4), 1.0),
+        (rect(2, 12, 9, 14), 1.0),
+    ],
+    # a scroll: a sheet with a roll at the top and the bottom, and two lines of writing
+    "scroll": [
+        (outline_rect(4, 4, 12, 12), 1.0),
+        (rect(3, 2, 13, 4), 1.0),
+        (rect(3, 12, 13, 14), 1.0),
+        (union(rect(6, 6, 10, 7), rect(6, 9, 10, 10)), 1.0),
+    ],
+    # a coat hanger: a hook over a triangle
+    "hanger": [
+        (arc(8, 4.4, 1.6, 1.0, 180, 270), 1.0),
+        (rect(7.5, 5.9, 8.5, 7), 1.0),
+        (seg((8, 7), (2.6, 12), 1.0), 1.0),
+        (seg((8, 7), (13.4, 12), 1.0), 1.0),
+        (rect(2, 12, 14, 13), 1.0),
+    ],
+    # a smith's hammer: a block head across the top and a handle down
+    "hammer": [
+        (rect(3, 3, 13, 7), 1.0),
+        (rect(7, 7, 9, 14), 1.0),
     ],
 }
 

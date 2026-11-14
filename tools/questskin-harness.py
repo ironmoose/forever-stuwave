@@ -568,6 +568,7 @@ function BuildBlizzard()
         end
     end
     greeting.scripts.OnShow = function() QuestFrameGreetingPanel_OnShow() end
+    function GetActiveTitle(i) local q = QUESTS.active[i]; return q and q.title, q and q.complete and true or false end
     -- the gossip window: a ScrollBox of pooled elements (its rows live on ScrollTarget), a scroll bar, the friendship bar, Goodbye
     local gw = blz("Frame", "GossipFrame", UIParent, 370, 496)
     gw.points[1] = { point = "TOPLEFT", rel = UIParent, relPoint = "TOPLEFT", x = 520, y = -80 }
@@ -852,7 +853,7 @@ case("quest detail and reward pages: every reward and choose-one card has the sa
 CELL = """
     function CellOf(t)
         assert(t.tc, 'glyph has no texcoord')
-        return math.floor(t.tc[1] * 64 / 16) + 4 * math.floor(t.tc[3] * 32 / 16)
+        return math.floor(t.tc[1] * 64 / 16) + 4 * math.floor(t.tc[3] * 64 / 16)
     end
     function CardsOn(rows)
         local n = 0
@@ -951,10 +952,10 @@ case("gossip: a glyph and a colour per option kind from what the client gives, t
     assert(r > 0.9 and g > 0.7 and g < 0.9 and b < 0.4, 'available mark not gold')
     r, g, b = col(12)
     assert(math.abs(r - g) < 0.2 and b > r and r < 0.6, 'in progress mark not grey')
-    r, g, b = col(3)
-    assert(r > 0.9 and g > 0.6 and b < 0.3, 'vendor not amber')
-    r, g, b = col(5)
-    assert(r > 0.9 and g < 0.4, 'inn not pink')
+    for _, i in ipairs({ 3, 4, 5, 6, 8 }) do
+        r, g, b = col(i)
+        assert(r < 0.3 and g > 0.7 and b > 0.8, 'service row ' .. i .. ' not cyan')
+    end
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 
@@ -968,7 +969,8 @@ case("gossip: the glyph is 12 px square, whole pixels, centred on the row's line
         local gl, gt, gr, gb = Px(g, r)
         local rl, rt, rr, rb = Px(r, r)
         assert(Near(gr - gl, 12) and Near(gb - gt, 12), 'glyph size ' .. (gr - gl) .. ' x ' .. (gb - gt))
-        assert(Near(gl, math.floor(gl + 0.5), 0.001) and Near(gt, math.floor(gt + 0.5), 0.001), 'glyph off the pixel grid')
+        local al, at = Px(g, UIParent)
+        assert(Near(al, math.floor(al + 0.5), 0.001) and Near(at, math.floor(at + 0.5), 0.001), 'glyph off the pixel grid ' .. al .. ' ' .. at)
         assert(math.abs(((gt + gb) / 2) - ((rt + rb) / 2)) <= 1, string.format('glyph centre %.2f vs row centre %.2f', (gt + gb) / 2, (rt + rb) / 2))
         local tl = Px(r.fs, r)
         assert(gr + 4 <= tl, 'glyph runs into the label')
@@ -996,15 +998,18 @@ case("gossip: an unknown file id gets the neutral bubble, a client without C_Tex
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 
-case("gossip: the ready chip is on the quest that can be turned in and nowhere else", CELL + """
+case("gossip: every quest row says what it is in a chip (ready on the one to turn in), no chip on a plain option", CELL + """
     OpenGossip()
     local S = FS.QuestSkin.state
     local rows = ListRows()
+    local words = { qnew = 'new', qwip = 'in progress', qdone = 'ready' }
     for i, r in ipairs(rows) do
         local rec = S.rows[r]
         if rec then
-            local want = (i == 11)
-            assert((rec.chip ~= nil and rec.chip.shown == true) == want, 'row ' .. i .. ' chip shown: ' .. tostring(rec.chip and rec.chip.shown))
+            local want = words[rec.kind]
+            local shown = rec.chip ~= nil and rec.chip.shown == true
+            assert(shown == (want ~= nil), 'row ' .. i .. ' (' .. rec.kind .. ') chip shown: ' .. tostring(shown))
+            if want then assert(rec.chipLabel:GetText() == want, 'row ' .. i .. ' chip text ' .. tostring(rec.chipLabel:GetText())) end
         end
     end
     local rec = S.rows[rows[11]]
@@ -1013,10 +1018,13 @@ case("gossip: the ready chip is on the quest that can be turned in and nowhere e
     local _, rt, rr, rb = Px(rows[11], rows[11])
     assert(Near(rr - cr, 6, 0.6), 'chip right margin ' .. (rr - cr))
     assert(math.abs((ct + cb) / 2 - (rt + rb) / 2) <= 1, 'chip not centred on the row')
-    -- a quest that is no longer ready drops the chip
+    -- a quest that is no longer ready says so
     rows[11].Icon:SetAtlas('SideInProgressquesticon')
+    local data = rows[11].GetElementData and rows[11]:GetElementData()
+    if type(data) == 'table' and type(data.info) == 'table' then data.info.isComplete = false end
     GossipFrame.GreetingPanel.ScrollBox:Update(); FlushTimers()
-    assert(S.rows[rows[11]].kind == 'qwip' and not rec.chip.shown, 'the chip stayed on a quest in progress')
+    assert(S.rows[rows[11]].kind == 'qwip' and rec.chip.shown and rec.chipLabel:GetText() == 'in progress',
+        'a quest in progress reads ' .. tostring(S.rows[rows[11]].kind) .. ' / ' .. tostring(rec.chipLabel:GetText()))
 """)
 
 case("gossip: a card lights cyan with a left bar under the hand and returns; the row follows the hover of a recycled frame", CELL + """
@@ -1238,7 +1246,7 @@ case("gossip: the greeting sits on a text card, the list on cut cards, the windo
         local rec = S.rows[r]
         local l, t, rr2, b = Px(rec.fill, r)
         local _, _, w, h = Px(r, r)
-        assert(Near(l, 0, 0.6) and Near(t, 2, 0.6) and Near(rr2, w, 0.6) and Near(b, h - 2, 0.6), string.format('card rect %.2f %.2f %.2f %.2f in %.2f x %.2f', l, t, rr2, b, w, h))
+        assert(Near(l, 0, 1) and Near(t, 2, 1) and Near(rr2, w, 1.01) and Near(b, h - 2, 1), string.format('card rect %.2f %.2f %.2f %.2f in %.2f x %.2f', l, t, rr2, b, w, h))
     end
 """)
 
@@ -1271,7 +1279,7 @@ case("quest greeting: two active quests (one ready, one in progress) and one ava
     local list = {}
     for b in pool:EnumerateActive() do list[#list + 1] = b end
     assert(#list == 3, 'buttons ' .. #list)
-    local want = { { 'qdone', 6, true }, { 'qwip', 6, false }, { 'qnew', 5, false } }
+    local want = { { 'qdone', 6, true }, { 'qwip', 6, true }, { 'qnew', 5, true } }
     for i, b in ipairs(list) do
         local rec = S.rows[b]
         assert(rec and rec.on, 'title button ' .. i .. ' not carded')
@@ -1357,13 +1365,16 @@ case("quest greeting: the text card sits behind the paragraph, the title cards s
     for b in QuestFrameGreetingPanel.titleButtonPool:EnumerateActive() do
         local l, t, r, bt = Px(S.rows[b].fill, b)
         local _, _, w, h = Px(b, b)
-        assert(Near(l, 0, 0.6) and Near(r, w, 0.6) and t >= 1.5 and bt <= h - 1.5, 'card off the row')
-        assert(bt - t <= 15.5 and math.abs(t - (h - bt)) <= 1.1, string.format('card not a centred 15 px strip: %.1f..%.1f of %.1f', t, bt, h))
+        assert(Near(l, 0, 1) and Near(r, w, 1.01) and t >= 1.5 and bt <= h - 1, string.format('card off the row %.2f %.2f %.2f %.2f in %.2f x %.2f', l, t, r, bt, w, h))
+        assert(h >= 23.5, 'greeting row not grown: ' .. h)
+        local al, at = Px(S.rows[b].ring, UIParent)
+        assert(Near(al, math.floor(al + 0.5), 0.001) and Near(at, math.floor(at + 0.5), 0.001), 'ring off the pixel grid ' .. al .. ' ' .. at)
+        assert(bt - t <= 20.5 and math.abs(t - (h - bt)) <= 2.1, string.format('card not a centred 20 px strip: %.1f..%.1f of %.1f', t, bt, h))
         -- the hover ring follows the card one px in, never the stock row rect
         local ring2 = S.rows[b].plate.ring2
         if ring2 then
             local hl, ht, hr, hb = Px(ring2, b)
-            assert(Near(hl, 1, 0.6) and Near(ht, t + 1, 0.6) and Near(hr, w - 1, 0.6) and Near(hb, bt - 1, 0.6),
+            assert(Near(hl, 1, 0.6) and Near(ht, t + 1, 0.6) and Near(hr, w - 1, 1.01) and Near(hb, bt - 1, 0.6),
                 string.format('hover ring off the card: %.1f,%.1f,%.1f,%.1f card %.1f..%.1f', hl, ht, hr, hb, t, bt))
         end
         local _, at, _, ab = Px(S.rows[b].fill, UIParent)

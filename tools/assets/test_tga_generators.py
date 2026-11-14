@@ -297,9 +297,9 @@ EXPECTED_DIMS: dict[str, tuple[int, int] | dict[str, tuple[int, int]]] = {
         "ctl_prompt": (16, 16), "ctl_lens": (16, 16), "ctl_cross": (16, 16), "ctl_radar": (16, 16), "ctl_radar_arm": (16, 16),
         "ctl_chev": (16, 16),
     },
-    # generate_gossip_glyphs.py: the NPC dialog's eight row glyphs (bubble, bag, book, house, plane, the gold ! and ?, coin) as one
-    # atlas of 4 x 2 cells of 16 x 16 texels, white alpha shapes tinted in Lua.
-    "gossip_glyphs": (64, 32),
+    # generate_gossip_glyphs.py: the NPC dialog's sixteen row glyphs (bubble, bag, book, house, plane, the gold ! and ?, coin, vault,
+    # sword, shield, cross, gavel, scroll, hanger, hammer) as one atlas of 4 x 4 cells of 16 x 16 texels, white alpha shapes tinted in Lua.
+    "gossip_glyphs": (64, 64),
     # generate_control_inset.py: the inset's scanline tile (mockups/shared-controls-2026-11-12.html, inset()): a 4 x 4 white alpha tile,
     # one solid row in four, tinted violet at 5 percent in Lua.
     "control_inset": {"ctl_scanline": (4, 4)},
@@ -2975,12 +2975,14 @@ def test_committed_control_glyph_textures_match_the_generator(control_glyph_outp
 # ---------------------------------------------------------------------------
 # generate_gossip_glyphs.py: the NPC dialog's row glyphs.
 #
-# One 64 x 32 atlas, 4 x 2 cells of 16 x 16 texels in the order bubble, bag, book, house / plane, bang, qmark, coin. Each glyph is
+# One 64 x 64 atlas, 4 x 4 cells of 16 x 16 texels in the order bubble, bag, book, house / plane, bang, qmark, coin / vault, swords,
+# shield, cross / gavel, scroll, hanger, hammer. Each glyph is
 # a 12 x 12 drawing at (2, 2) inside its cell, one texel a screen pixel. Numbers hardcoded here.
 # ---------------------------------------------------------------------------
 
 GOSSIP_GLYPHS_GENERATOR = GENERATOR_DIR / "generate_gossip_glyphs.py"
-GOSSIP_GLYPH_ORDER = ("bubble", "bag", "book", "house", "plane", "bang", "qmark", "coin")
+GOSSIP_GLYPH_ORDER = ("bubble", "bag", "book", "house", "plane", "bang", "qmark", "coin",
+                      "vault", "swords", "shield", "cross", "gavel", "scroll", "hanger", "hammer")
 
 
 @pytest.fixture(scope="module")

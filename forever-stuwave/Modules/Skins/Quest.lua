@@ -471,19 +471,48 @@ end
 -------------------------------------------------------------------------------
 
 local GLYPHS = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\gossip_glyphs.tga"
-local GLYPH_PX, GLYPH_X, BAR_W, BAR_INSET, ROW_GAP, CARD_H = 12, 6, 3, 4, 2, 15
-local CHIP = { H = 13, PAD = 6, RIGHT = 6 }
+local GLYPH_PX, GLYPH_X, BAR_W, BAR_INSET, ROW_GAP, CARD_H = 12, 6, 3, 3, 2, 20
+-- A quest greeting row is at least ROW_PX tall (live ask 2026-11-14: bigger rows); the stock code sizes it to its text (16 units).
+local ROW_PX = 24
+local CHIP = { H = 14, PAD = 6, RIGHT = 6 }
+-- Each quest row says what it is in words (live 2026-11-14: the marks alone did not tell new, in progress and ready apart).
+local CHIP_OF = { qnew = { "new", C.gold }, qwip = { "in progress", C.grey }, qdone = { "ready", C.cyan } }
 
--- Cell of the 4 x 2 glyph sheet and tint of each kind (tools/assets/generate_gossip_glyphs.py: 16 px cells, the 12 px art 2 px in):
--- talk bubble 0, vendor bag 1, trainer book 2, inn house 3, flight plane 4, gold "!" 5, "?" 6, paid coin 7.
+-- Cell of the 4 x 4 glyph sheet and tint of each kind (tools/assets/generate_gossip_glyphs.py: 16 px cells, the 12 px art 2 px in):
+-- talk bubble 0, vendor bag 1, trainer book 2, inn house 3, flight plane 4, gold "!" 5, "?" 6, paid coin 7, bank vault 8,
+-- battlemaster sword 9, tabard shield 10, healer cross 11, auction gavel 12, petition scroll 13, transmog hanger 14, work order
+-- hammer 15. Every service is cyan, each its own mark (live ask 2026-11-14); the quest marks keep the gold ! and ?.
 local KIND = {
-    gossip = { 0, C.cyan }, vendor = { 1, C.amber }, trainer = { 2, C.violet }, binder = { 3, C.pink }, flight = { 4, C.cyan },
-    qnew = { 5, C.gold }, qdone = { 6, C.gold }, qwip = { 6, C.grey }, paid = { 7, C.amber },
+    gossip = { 0, C.cyan }, vendor = { 1, C.cyan }, trainer = { 2, C.cyan }, binder = { 3, C.cyan }, flight = { 4, C.cyan },
+    qnew = { 5, C.gold }, qdone = { 6, C.gold }, qwip = { 6, C.grey }, paid = { 7, C.cyan }, bank = { 8, C.cyan },
+    battle = { 9, C.cyan }, tabard = { 10, C.cyan }, healer = { 11, C.cyan }, auction = { 12, C.cyan }, petition = { 13, C.cyan },
+    transmog = { 14, C.cyan }, workorder = { 15, C.cyan },
 }
 
 local function GlyphCoords(cell)
     local x, y = (cell % 4) * 16 + 2, math.floor(cell / 4) * 16 + 2
-    return x / 64, (x + GLYPH_PX) / 64, y / 32, (y + GLYPH_PX) / 32
+    return x / 64, (x + GLYPH_PX) / 64, y / 64, (y + GLYPH_PX) / 64
+end
+
+-- A gossip option's icon is a file id (C_GossipInfo option .icon). The client turns the stock Interface\GossipFrame paths into
+-- their ids (GetFileIDFromPath, in the 16001 globals dump), so the kind is read from the id the row was given; 132060, the
+-- vendor bag, is the id warcraft.wiki.gg documents, kept in case the lookup is missing.
+local ICON_FILES = {
+    GossipGossipIcon = "gossip", VendorGossipIcon = "vendor", TrainerGossipIcon = "trainer", UnlearnGossipIcon = "trainer",
+    BinderGossipIcon = "binder", InnGossipIcon = "binder", InnkeeperGossipIcon = "binder", TaxiGossipIcon = "flight",
+    BankerGossipIcon = "bank", BattleMasterGossipIcon = "battle", TabardGossipIcon = "tabard", HealerGossipIcon = "healer",
+    AuctioneerIcon = "auction", PetitionGossipIcon = "petition", TransmogrifyGossipIcon = "transmog",
+    WorkOrderGossipIcon = "workorder",
+}
+local ICON_IDS = { [132060] = "vendor" }
+do
+    local lookup = _G.GetFileIDFromPath
+    if type(lookup) == "function" then
+        for file, kind in pairs(ICON_FILES) do
+            local ok, id = pcall(lookup, "Interface\\GossipFrame\\" .. file)
+            if ok and type(id) == "number" and id > 0 then ICON_IDS[id] = kind end
+        end
+    end
 end
 
 -- What the stock icon says it is, in lower case: its atlas, else its path, else the path of its file id. "" when it says nothing.
@@ -491,6 +520,7 @@ local function IconKey(icon)
     local atlas = Plain(Try(icon.GetAtlas, icon))
     if type(atlas) == "string" and atlas ~= "" then return atlas:lower() end
     local tex = Plain(Try(icon.GetTexture, icon))
+    if type(tex) == "number" and ICON_IDS[tex] then return "kind:" .. ICON_IDS[tex] end
     if type(tex) == "number" then
         local api = _G.C_Texture
         tex = type(api) == "table" and Plain(Try(api.GetFilenameFromFileDataID, tex)) or nil
@@ -506,13 +536,13 @@ local function Has(key, part) return key:find(part, 1, true) ~= nil end
 -- talk bubble.
 local function KindOf(key, text)
     if Has(text:lower(), "moneyframe") then return "paid" end
+    if key:sub(1, 5) == "kind:" then return key:sub(6) end
     if Has(key, "inprogress") or Has(key, "incomplete") then return "qwip" end
     if Has(key, "available") or key:find("dailyactive[a-z]*quest") then return "qnew" end
     if key:find("active[a-z]*quest") then return "qdone" end
-    if Has(key, "vendor") or Has(key, "banker") or Has(key, "auctioneer") then return "vendor" end
-    if Has(key, "trainer") then return "trainer" end
-    if Has(key, "binder") then return "binder" end
-    if Has(key, "taxi") then return "flight" end
+    for file, kind in pairs(ICON_FILES) do
+        if Has(key, file:lower()) then return kind end
+    end
     return "gossip"
 end
 
@@ -530,6 +560,33 @@ local function OptionStatus(id)
         end
     end
     return id ~= nil and S.status[id] or nil
+end
+
+-- A quest row's state from the quest data, not its icon (the 16001 icon names did not match, so every quest read as a talk
+-- bubble): a greeting title button carries isActive (1 a quest of yours, 0 one on offer) and its index; a gossip row carries its
+-- element data (buttonType 4 a quest of yours, 5 one on offer, info.isComplete). nil for anything that is not a quest.
+local function QuestKind(row)
+    local data = Plain(Try(row.GetElementData, row))
+    if type(data) == "table" then
+        local bt = Plain(data.buttonType)
+        if bt == (_G.GOSSIP_BUTTON_TYPE_AVAILABLE_QUEST or 5) then return "qnew" end
+        if bt == (_G.GOSSIP_BUTTON_TYPE_ACTIVE_QUEST or 4) then
+            local info = type(data.info) == "table" and data.info or nil
+            return info and Plain(info.isComplete) == true and "qdone" or "qwip"
+        end
+        return nil
+    end
+    local active = Plain(row.isActive)
+    if active == 0 then return "qnew" end
+    if active == 1 then
+        local id = Plain(Try(row.GetID, row))
+        local fn = _G.GetActiveTitle
+        if type(id) == "number" and type(fn) == "function" then
+            local _, done = Try(fn, id)
+            return Plain(done) and "qdone" or "qwip"
+        end
+    end
+    return nil
 end
 
 -- Greyed in the stock row: a quest whose mark the stock code dimmed (trivial or ignored), an option the client says is not
@@ -573,14 +630,21 @@ end
 
 -- The "ready" chip: made when a quest first needs it, right of the row, centred on its line.
 local function SetChip(row, rec, on, h)
+    local spec = CHIP_OF[rec.kind]
+    on = on and spec ~= nil
     if on and not rec.chip then
         local plate = Kit.Plate(row, 2, 40, CHIP.H)
-        Kit.PaintPlate(plate, C.ink, 1, C.cyan, 1, 1)
-        rec.chip, rec.chipRing = plate.fill, plate.ring
-        rec.chipLabel = Kit.Label(row, "ready", 11, C.cyan, "OVERLAY")
+        rec.chipPlate, rec.chip, rec.chipRing = plate, plate.fill, plate.ring
+        rec.chipLabel = Kit.Label(row, spec[1], 11, spec[2], "OVERLAY")
     end
     if not rec.chip then return end
     if on then
+        Kit.PaintPlate(rec.chipPlate, C.ink, 1, spec[2], 1, 1)
+        if rec.chipText ~= spec[1] then
+            rec.chipText = spec[1]
+            rec.chipLabel:SetText(spec[1])
+        end
+        Kit.Recolor(rec.chipLabel, spec[2])
         local sw = Plain(Try(rec.chipLabel.GetStringWidth, rec.chipLabel))
         local w = math.ceil((type(sw) == "number" and sw or 30) * Kit.Ppu(row)) + 2 * CHIP.PAD
         local y = math.floor((h - CHIP.H) / 2)
@@ -596,27 +660,45 @@ end
 -- Seats the card on the stock row's rect (a pixel in from the top and bottom), the glyph 12 px in the gutter before the label and
 -- centred on the row's height, the hover bar on the left edge. Returns the row's height in pixels.
 local function LayoutRow(row, rec)
-    local _, h = Kit.SizePx(row)
-    if not h then h = math.floor(16 * Kit.Ppu(row) + 0.5) end
+    local w, h = Kit.SizePx(row)
+    if not h then w, h = 300, math.floor(16 * Kit.Ppu(row) + 0.5) end
     -- the stock rows sit edge to edge (and a row restyled to the mono label can stand a little taller than its slot), so the
     -- card is at most CARD_H px tall and centred on the row, ROW_GAP px in from each edge: neighbouring cards and their hover
-    -- rings keep a gap between them. The 2 px hover ring (ring2) follows the card one px in.
+    -- rings keep a gap between them. The stock rows sit on fractions of a pixel, and a 1 px edge on a fraction draws as no line
+    -- on one side and a thick one on the other (live 2026-11-14, the hover ring), so the card is moved onto whole pixels: dx and
+    -- dy are what the row's own left and top lack.
+    local ppu = Kit.Ppu(row)
+    local left, top0 = Plain(Try(row.GetLeft, row)), Plain(Try(row.GetTop, row))
+    local dx = type(left) == "number" and (1 - (left * ppu) % 1) % 1 or 0
+    local dy = type(top0) == "number" and (top0 * ppu) % 1 or 0
     local ch = math.max(8, math.min(h - 2 * ROW_GAP, CARD_H))
     local top = math.floor((h - ch) / 2)
-    local bottom = h - top - ch
-    for _, t in ipairs({ rec.fill, rec.ring }) do
+    local cw = w - 1
+    local function seat(t, inset)
         t:ClearAllPoints()
-        t:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -Kit.U(row, top))
-        t:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, Kit.U(row, bottom))
+        t:SetPoint("TOPLEFT", row, "TOPLEFT", (dx + inset) / ppu, -(top + dy + inset) / ppu)
+        t:SetSize((cw - 2 * inset) / ppu, (ch - 2 * inset) / ppu)
     end
-    if rec.plate.ring2 then
-        rec.plate.ring2:ClearAllPoints()
-        rec.plate.ring2:SetPoint("TOPLEFT", row, "TOPLEFT", Kit.U(row, 1), -Kit.U(row, top + 1))
-        rec.plate.ring2:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -Kit.U(row, 1), Kit.U(row, bottom + 1))
-    end
-    Kit.Place(rec.glyph, row, GLYPH_X, math.floor((h - GLYPH_PX) / 2), GLYPH_PX, GLYPH_PX)
-    Kit.Place(rec.bar, row, 0, BAR_INSET, BAR_W, math.max(2, h - 2 * BAR_INSET))
+    seat(rec.fill, 0)
+    seat(rec.ring, 0)
+    if rec.plate.ring2 then seat(rec.plate.ring2, 1) end
+    rec.glyph:ClearAllPoints()
+    rec.glyph:SetPoint("TOPLEFT", row, "TOPLEFT", (dx + GLYPH_X) / ppu, -(top + dy + math.floor((ch - GLYPH_PX) / 2)) / ppu)
+    rec.glyph:SetSize(GLYPH_PX / ppu, GLYPH_PX / ppu)
+    rec.bar:ClearAllPoints()
+    rec.bar:SetPoint("TOPLEFT", row, "TOPLEFT", (dx + 1) / ppu, -(top + dy + BAR_INSET) / ppu)
+    rec.bar:SetSize(BAR_W / ppu, math.max(2, ch - 2 * BAR_INSET) / ppu)
     return h
+end
+
+-- A quest greeting row (a QuestFrameGreetingPanel title button: it has isActive, and the panel chains each row under the one
+-- before) is made ROW_PX tall when the stock code left it shorter; the rows under it follow by their anchors. Gossip rows sit in a
+-- scroll box that measures them itself, so they keep their height.
+local function GrowRow(row)
+    if Plain(row.isActive) == nil or type(row.SetHeight) ~= "function" then return end
+    if type(InCombatLockdown) == "function" and InCombatLockdown() then return end
+    local _, h = Kit.SizePx(row)
+    if h and h < ROW_PX then pcall(row.SetHeight, row, ROW_PX / Kit.Ppu(row)) end
 end
 
 local function BuildRow(row, owner, icon)
@@ -662,8 +744,11 @@ function Q.SkinRow(row, owner)
         if rec then Q.DropRow(row) end
         return
     end
-    local kind = KindOf(IconKey(icon), text)
+    local kind = QuestKind(row) or KindOf(IconKey(icon), text)
+    HeldArt.Hold(icon)
+    HeldArt.Hold(row.Icon) -- the stock mark under ours (live 2026-11-14: a vendor row showed both)
     if not rec then rec = BuildRow(row, owner, icon) end
+    GrowRow(row)
     rec.owner = owner or rec.owner
     rec.kind, rec.dim = kind, IsDim(row, icon, kind)
     if not rec.on then
@@ -671,7 +756,7 @@ function Q.SkinRow(row, owner)
         ShowRow(rec, true)
     end
     rec.glyph:SetTexCoord(GlyphCoords((KIND[kind] or KIND.gossip)[1]))
-    SetChip(row, rec, kind == "qdone", LayoutRow(row, rec))
+    SetChip(row, rec, true, LayoutRow(row, rec))
     if rec.label then pcall(rec.label.SetAlpha, rec.label, rec.dim and 0.55 or 1) end
     PaintRow(row)
 end
@@ -1058,6 +1143,8 @@ local function SweepGreeting()
         pcall(function()
             for b in pool:EnumerateActive() do Step("greeting.row", Q.SkinRow, b, S.intros.quest) end
         end)
+        -- a grown row moves the rows under it, so every card is seated again on the final rects
+        Kit.Later(OnReseatRows)
     end
 end
 
