@@ -69,6 +69,8 @@ Modules/Skins/Social.lua
 Modules/Skins/Guild.lua
 Modules/Skins/ChatSettings.lua
 Modules/Skins/PvP.lua
+Modules/Skins/Collections.lua
+Modules/Skins/Charters.lua
 Modules/Skins/Tooltip.lua
 Modules/Skins/TooltipAnchor.lua
 Modules/Skins/Popups.lua
