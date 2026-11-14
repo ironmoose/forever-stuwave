@@ -1244,7 +1244,42 @@ local function SkinGossipRow(row)
 end
 
 -- After a pass over the list: the greeting paragraph and the carded rows in list order go to the intro.
+-- Gossip rows are measured by Blizzard (GossipFrameShared.lua: the list's extent calculator sets up one shared button per kind
+-- and asks its height, max(text height + 2, Icon height)). Our cards hide the stock Icon, so raising the Icon to ROW_PX on those
+-- measuring buttons, and on the rows, makes every row ROW_PX tall (live ask 2026-11-14) without touching the list's code. The
+-- measuring buttons are first met in the data the list already laid out, so the window is asked to lay out once more.
+local MEASURERS = { "titleOptionButton", "activeQuestButton", "availableQuestButton" }
+S.grownIcons = Weak()
+local function GrowIcon(icon, ppu)
+    if type(icon) ~= "table" or S.grownIcons[icon] or type(icon.SetHeight) ~= "function" then return false end
+    S.grownIcons[icon] = true
+    pcall(icon.SetHeight, icon, ROW_PX / ppu)
+    return true
+end
+
+local function GrowGossip(box)
+    if type(InCombatLockdown) == "function" and InCombatLockdown() then return end
+    local dp = Plain(Try(box.GetDataProvider, box))
+    if type(dp) ~= "table" or type(dp.ForEach) ~= "function" then return end
+    local ppu, grew = Kit.Ppu(box), false
+    pcall(dp.ForEach, dp, function(data)
+        if type(data) ~= "table" then return end
+        for _, key in ipairs(MEASURERS) do
+            local m = data[key]
+            if type(m) == "table" and GrowIcon(m.Icon, ppu) then grew = true end
+        end
+    end)
+    pcall(box.ForEachFrame, box, function(row)
+        if type(row.Icon) == "table" and type(row.Resize) == "function" and GrowIcon(row.Icon, ppu) then grew = true end
+    end)
+    local win = _G.GossipFrame
+    if grew and type(win) == "table" and type(win.Update) == "function" and Plain(Try(win.IsShown, win)) then
+        Kit.Later(function() pcall(win.Update, win) end)
+    end
+end
+
 local function SyncGossip(box)
+    Step("gossip.grow", GrowGossip, box)
     local intro = S.intros.gossip
     if not intro then return end
     local greeting, items = nil, {}
