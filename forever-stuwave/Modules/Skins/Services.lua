@@ -35,7 +35,7 @@ local C = Q.colors
 local function Weak() return setmetatable({}, { __mode = "k" }) end
 local S = {
     trainer = Weak(), tradeRows = Weak(), tradeHighlights = Weak(), insets = Weak(), recipes = Weak(), channels = Weak(),
-    taxi = Weak(), pins = Weak(), done = {},
+    taxi = Weak(), pins = Weak(), routes = Weak(), done = {},
 }
 Sv.state = S
 
@@ -540,14 +540,46 @@ local function SweepTaxi()
     for button in pairs(S.taxi) do PaintTaxi(button) end
 end
 
+-- Route lines. The stock DrawLine stretches a dark line image across each TaxiRouteN texture, which reads black on the parchment
+-- (live 2026-11-14). The texture is held and a 2 px cyan Line is drawn between the same two points; it follows the texture's
+-- Show and Hide, so a route the stock code drops on hover goes with it. Only lines drawn on the flight map's canvas are touched.
+local function RouteLine(texture, canvas)
+    local line = S.routes[texture]
+    if line then return line end
+    if type(canvas.CreateLine) ~= "function" then return nil end
+    local ok, made = pcall(canvas.CreateLine, canvas, nil, "ARTWORK", nil, 2)
+    if not ok or type(made) ~= "table" then return nil end
+    S.routes[texture] = made
+    HeldArt.Hold(texture)
+    Kit.HookFunc(texture, "Hide", function() made:Hide() end)
+    Kit.HookFunc(texture, "Show", function() made:Show() end)
+    return made
+end
+
+local function OnDrawLine(texture, canvas, sx, sy, ex, ey, _, a8, a9)
+    if canvas == nil or canvas ~= _G.TaxiRouteMap or type(texture) ~= "table" then return end
+    for _, v in ipairs({ sx, sy, ex, ey }) do if type(Plain(v)) ~= "number" then return end end
+    local rel = (type(a9) == "string" and a9) or (type(a8) == "string" and a8) or "BOTTOMLEFT"
+    local line = RouteLine(texture, canvas)
+    if not line then return end
+    line:ClearAllPoints()
+    line:SetStartPoint(rel, canvas, sx, sy)
+    line:SetEndPoint(rel, canvas, ex, ey)
+    line:SetThickness(Kit.U(canvas, 2))
+    line:SetColorTexture(C.cyan[1], C.cyan[2], C.cyan[3], 1)
+    line:Show()
+end
+
 local function BuildTaxi()
     local win = _G.TaxiFrame
     if type(win) ~= "table" or S.done.taxi then return end
     S.done.taxi = true
     win.fsServicesSkin = true
-    if type(win.InsetBg) == "table" and type(win.CreateTexture) == "function" then
-        S.taxiRing = Char.Box(win, "OVERLAY", win.InsetBg)
-        Char.PaintBox(S.taxiRing, C.ink, 0, C.violet, 1, 1)
+    -- the stuwave://taxi tag names the window, so the stock gold title is held like the character and map titles. The map
+    -- art sits flush in the panel: a ring of its own read as a second border a few px inside the panel's (live 2026-11-14).
+    Kit.HoldFrame(win.TitleText)
+    if type(_G.DrawLine) == "function" and type(hooksecurefunc) == "function" then
+        pcall(hooksecurefunc, "DrawLine", function(...) Step("taxi.route", OnDrawLine, ...) end)
     end
     -- the stock OnShow makes the buttons and sets their textures; ours runs after it
     Kit.HookScript(win, "OnShow", SweepTaxi)

@@ -283,6 +283,21 @@ function BuildBlizzard()
     taxi.InsetBg = tex(taxi, nil, "BACKGROUND"); taxi.InsetBg.w, taxi.InsetBg.h = 580, 580
     taxi.InsetBg.points[1] = { point = "TOPLEFT", rel = taxi, relPoint = "TOPLEFT", x = 5, y = -26 }
     local route = blz("Frame", "TaxiRouteMap", taxi, 580, 580, "TOPLEFT", 5, -26)
+    taxi.TitleText = fstring(taxi, nil, "Flight Map", 12)
+    for i = 1, 3 do
+        local t = tex(route, nil, "BACKGROUND"); t.stock = { 0.1, 0.1, 0.1 }
+        _G["TaxiRoute" .. i] = t
+    end
+    -- a Line region: a texture that records its two end points and thickness
+    route.CreateLine = function(self, name, layer)
+        local l = tex(self, name, layer)
+        l.SetStartPoint = function(me, p, rel, x, y) me.lineStart = { p, rel, x, y } end
+        l.SetEndPoint = function(me, p, rel, x, y) me.lineEnd = { p, rel, x, y } end
+        l.SetThickness = function(me, w) me.thickness = w end
+        return l
+    end
+    -- the stock helper stretches the line art across the texture; the mock only shows it
+    function DrawLine(t, c, sx, sy, ex, ey, w, factor, rel) t:Show() end
     TAXI_TYPES = { "CURRENT", "REACHABLE", "REACHABLE", "UNREACHABLE", "DISTANT" }
     function NumTaxiNodes() return #TAXI_TYPES end
     function TaxiNodeGetType(i) return TAXI_TYPES[i] end
@@ -479,6 +494,29 @@ case("flight map: the node buttons hold the stock icon and draw a glyph by state
     TAXI_TYPES[2] = 'UNREACHABLE'
     TaxiFrame:Hide(); TaxiFrame:Show(); FlushTimers()
     assert(S.taxi[TaxiButton2].glyph[1].color[1] < 0.5 and S.taxi[TaxiButton2].glyph[1].color[2] < 0.5, 'unreachable node not dim')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
+""")
+
+case("flight map: the stock title is held, a route drawn by the stock helper becomes a cyan line between the same points and hides with it", """
+    Fire('PLAYER_ENTERING_WORLD'); TaxiFrame:Show(); FlushTimers()
+    local S = FS.ServicesSkin.state
+    assert(TaxiFrame.TitleText.alpha == 0, 'stock title kept')
+    DrawLine(TaxiRoute1, TaxiRouteMap, 100, 200, 300, 250, 32, 128 / 126, 'BOTTOMLEFT')
+    local l = S.routes[TaxiRoute1]
+    assert(l, 'no line for the route')
+    assert(TaxiRoute1.alpha == 0, 'stock route art kept')
+    assert(l.lineStart[1] == 'BOTTOMLEFT' and l.lineStart[2] == TaxiRouteMap and l.lineStart[3] == 100 and l.lineStart[4] == 200, 'start')
+    assert(l.lineEnd[3] == 300 and l.lineEnd[4] == 250, 'end')
+    assert(l.color[3] > 0.8 and l.color[1] < 0.3, 'line not cyan')
+    assert(l.shown ~= false, 'line not shown')
+    TaxiRoute1:Hide()
+    assert(l.shown == false, 'line stayed when the route hid')
+    DrawLine(TaxiRoute1, TaxiRouteMap, 10, 20, 30, 40, 32, 128 / 126, 'BOTTOMLEFT')
+    assert(S.routes[TaxiRoute1] == l and l.lineStart[3] == 10 and l.shown ~= false, 'redraw did not reuse and show the line')
+    -- a line drawn somewhere else is not touched
+    local other = BLZ.tex(UIParent, nil, 'ARTWORK')
+    DrawLine(other, UIParent, 0, 0, 5, 5, 32)
+    assert(not S.routes[other] and other.alpha ~= 0, 'a line off the flight map was taken')
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 
