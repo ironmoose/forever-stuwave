@@ -52,6 +52,7 @@ Modules/Pet/PetDock.lua
 Modules/Pet/PetActionBar.lua
 Modules/Pet/PetCastBar.lua
 Modules/Minimap/Minimap.lua
+Modules/Minimap/InstanceBanner.lua
 Modules/Tracker/QuestTimer.lua
 Modules/Skins/Panels.lua
 Modules/Skins/Mail.lua

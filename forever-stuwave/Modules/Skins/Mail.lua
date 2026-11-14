@@ -811,7 +811,7 @@ local function BuildRow(i, win)
 end
 
 -- The inbox pager buttons are anonymous on 16001: found by the mixin functions the engine copied onto them, then
--- by the retail global names and parentKeys.
+-- by the retail global names and parentKeys, then (ShapePagers) by shape.
 local function FindPager(inbox, mixinName, globalName, key)
     local mixin = _G[mixinName]
     if type(mixin) == "table" and type(inbox.GetChildren) == "function" then
@@ -832,12 +832,37 @@ local function FindPager(inbox, mixinName, globalName, key)
     return found
 end
 
+-- Last resort when neither pager was found by name or mixin (a build whose mixin tables or click handlers differ):
+-- the small Buttons that are children of the inbox, in creation order, less the Open All key and the MailItem rows. Prev
+-- is created before Next. Taken only when the count is exactly the number still missing, so a stray button is never
+-- skinned as a pager; otherwise the pager stays stock.
+local function ShapePagers(inbox, prev, nxt)
+    if type(inbox.GetChildren) ~= "function" then return prev, nxt end
+    local list = {}
+    for _, child in ipairs({ inbox:GetChildren() }) do
+        if type(child) == "table" and child ~= prev and child ~= nxt and child ~= _G.OpenAllMail
+            and Try(child.GetObjectType, child) == "Button"
+            and not tostring(Try(child.GetName, child) or ""):find("^MailItem") then
+            local w, h = Plain(Try(child.GetWidth, child)), Plain(Try(child.GetHeight, child))
+            if type(w) == "number" and type(h) == "number" and w > 0 and h > 0 and w <= 40 and h <= 40 then
+                list[#list + 1] = child
+            end
+        end
+    end
+    if #list ~= (prev and 0 or 1) + (nxt and 0 or 1) then return prev, nxt end
+    local i = 1
+    if not prev then prev, i = list[i], i + 1 end
+    if not nxt then nxt = list[i] end
+    return prev, nxt
+end
+
 local function BuildFooter(win, inbox)
     local H = S.height
     local rule = Rect(inbox, G.ROW_X, H - G.FOOT_RULE_UP, G.ROW_W, 1, C.violet, 0.35, "ARTWORK", 1)
     local top = H - G.PAGER_Y_UP
     local prev = FindPager(inbox, "InboxPrevPageMixin", "InboxPrevPageButton", "PrevPageButton")
     local nxt = FindPager(inbox, "InboxNextPageMixin", "InboxNextPageButton", "NextPageButton")
+    if not (prev and nxt) then prev, nxt = ShapePagers(inbox, prev, nxt) end
     if prev then
         Key(prev, { accent = C.violet, c = 4, glyph = function(b) return Runs(b, ChevronCells(13, 8, "<"), C.violet) end })
         Place(prev, inbox, G.ROW_X, top, 34, G.PAGER_H)
@@ -854,7 +879,9 @@ local function BuildFooter(win, inbox)
         local page = math.min((_G.InboxFrame and _G.InboxFrame.pageNum) or 1, pages)
         count:SetText(page .. "/" .. pages)
     end
-    for _, b in ipairs({ prev, nxt }) do HookScript(b, "OnClick", function() Later(RefreshInbox) end) end
+    for _, b in ipairs({ prev or false, nxt or false }) do
+        if b then HookScript(b, "OnClick", function() Later(RefreshInbox) end) end
+    end
 
     local open = _G.OpenAllMail
     if open then

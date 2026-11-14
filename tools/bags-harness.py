@@ -520,6 +520,48 @@ function MkBagControls()
     _G.BagItemAutoSortButton = s
 end
 
+-- BackpackTokenFrame as BackpackTokenFrameTemplate and ContainerFrameTokenWatcherMixin build it (retail 12.1.0 Blizzard_TokenUI,
+-- ContainerFrame.lua): a child of the container with a Border frame (Left / Middle / Right art), pooled token Buttons (Icon, Count)
+-- that Update re-points, and the container's UpdateTokenTracker / UpdateCurrencyFrames (the strip is anchored to the container's
+-- bottom with two points). Built in a World's `pre`, before Bags.lua hooks the container's methods.
+function MkTracker(c, n)
+    local t = CreateFrame("Frame", "BackpackTokenFrame", c)
+    t._n, t._pool = n or 2, {}
+    t.Border = CreateFrame("Frame", nil, t)
+    t.Border.Left = tex(t.Border, "tkLeft", { atlas = "common-currencybox-left" })
+    t.Border.Middle = tex(t.Border, "tkMiddle", { atlas = "_common-currencybox-center" })
+    t.Border.Right = tex(t.Border, "tkRight", { atlas = "common-currencybox-right" })
+    t:SetSize(1, 17)
+    t.Tokens = {}
+    t.Update = function(self)
+        self.Tokens = {}
+        for i = 1, self._n do
+            local b = self._pool[i]
+            if not b then
+                b = CreateFrame("Button", nil, self)
+                b.Icon = tex(b, "tkIcon", { file = "Interface\\Icons\\token" })
+                b.Count = region(b, "FontString", "tkCount")
+                self._pool[i] = b
+            end
+            b.Count:SetText(tostring(100 * i))
+            self.Tokens[i] = b
+        end
+    end
+    c.UpdateCurrencyFrames = function(self)
+        t:ClearAllPoints()
+        t:SetPoint("BOTTOMLEFT", self, "BOTTOMLEFT", 8, 8)
+        t:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", -8, 8)
+    end
+    c.UpdateTokenTracker = function(self)
+        t:SetShown(t._n > 0 and self:IsShown())
+        self:UpdateCurrencyFrames()
+    end
+    local update = c.Update
+    c.Update = function(self) update(self); self:UpdateTokenTracker() end
+    t:Update()
+    return t
+end
+
 -- Lays a container out the way Blizzard does: the item grid at a pitch with the frame padding around it
 -- (combined: left 7, right 8, top 75, bottom 28). `o` = { left, top, cols, size, pitch, padL, padR, padT, padB }.
 function PlaceGrid(c, o)
@@ -1984,6 +2026,96 @@ def check_window_degrade() -> None:
     check("window.degrade.a_throwing_button_skin_falls_back_with_one_log", w.degrade().count("bags_window") == 1, w.degrade())
 
 
+TOKEN_H = 17
+
+
+def check_window_tokens() -> None:
+    # Blizzard's watched-currency strip (BackpackTokenFrame): the window grows a row under the footer for it, the strip is
+    # seated on that row, its border art is held, its counts are mono, and the window is exactly the old one without it.
+    for es in (1.0, 1.2, 1.25, 1.5):
+        t = f"tokens.es{es}"
+        w = scene(es, pre="MkTracker(comb, 2)")
+        base = scene(es)
+        w.run("OpenFull(comb)")
+        base.run("OpenFull(comb)")
+        if not window_ok(w, f"{t}.exists"):
+            continue
+        L = lambda path: float(w.ev(f"FS.BagsWindow.Of(comb).layout.{path}")) * es       # noqa: E731  (pixels)
+        B = lambda path: float(base.ev(f"FS.BagsWindow.Of(comb).layout.{path}")) * es    # noqa: E731
+        m, h = px(MARGIN, es), px(TOKEN_H, es)
+        names = ("tokens.x", "tokens.y", "tokens.w", "tokens.h", "tokens.slack", "height")
+        check(f"{t}.every_edge_on_a_whole_pixel", all(whole(L(n)) for n in names), str({n: L(n) for n in names if not whole(L(n))}))
+        check(f"{t}.row_sits_under_the_footer_and_spans_the_grid",
+              round(L("tokens.y")) == round(B("height")) and round(L("tokens.x")) == round(L("grid.left"))
+              and round(L("tokens.w")) == round(L("grid.right") - L("grid.left")), f"{L('tokens.y')} vs {B('height')}")
+        check(f"{t}.row_is_the_stock_height", round(L("tokens.h")) == h, f"{L('tokens.h')} vs {h}")
+        check(f"{t}.window_ends_a_margin_under_the_row", round(L("height") - L("tokens.y") - L("tokens.h")) == m, f"{L('height')}")
+        check(f"{t}.last_token_ends_a_margin_inside_the_plate",
+              round(L("tokens.slack")) == px(13, es) - m, f"{L('tokens.slack')}")
+        check(f"{t}.the_rest_of_the_window_is_the_old_one",
+              all(round(L(n)) == round(B(n)) for n in ("width", "grid.top", "grid.bottom", "rule.y", "count.cy", "money.right", "band.h", "close.x", "search.w")),
+              str({n: (L(n), B(n)) for n in ("width", "rule.y", "count.cy", "band.h")}))
+        check(f"{t}.nothing_swallowed", w.swallowed() == "", w.swallowed())
+
+    w = scene(1.2, pre="MkTracker(comb, 2)")
+    w.run("OpenFull(comb)")
+    if not window_ok(w, "tokens.seat.exists"):
+        return
+    win = "FS.BagsWindow.Of(comb)"
+    check("tokens.seat.the_plate_is_ours_shown_and_on_the_row",
+          w.ev(f"{win}.tokensPlate._shown and {win}.tokensPlate._pts[#{win}.tokensPlate._pts][2] == {win}.chrome "
+               f"and math.abs({win}.tokensPlate._pts[#{win}.tokensPlate._pts][4] - {win}.layout.tokens.x) < 1e-6 "
+               f"and math.abs(-{win}.tokensPlate._pts[#{win}.tokensPlate._pts][5] - {win}.layout.tokens.y) < 1e-6 "
+               f"and math.abs({win}.tokensPlate._w - {win}.layout.tokens.w) < 1e-6 and math.abs({win}.tokensPlate._h - {win}.layout.tokens.h) < 1e-6"))
+    seated = (f"#BackpackTokenFrame._pts == 1 and BackpackTokenFrame._pts[1][1] == 'TOPLEFT' and BackpackTokenFrame._pts[1][2] == {win}.chrome "
+              f"and math.abs(BackpackTokenFrame._pts[1][4] - {win}.layout.tokens.x) < 1e-6 and math.abs(-BackpackTokenFrame._pts[1][5] - {win}.layout.tokens.y) < 1e-6 "
+              f"and math.abs(BackpackTokenFrame._w - ({win}.layout.tokens.w + {win}.layout.tokens.slack)) < 1e-6 "
+              f"and math.abs(BackpackTokenFrame._h - {win}.layout.tokens.h) < 1e-6")
+    check("tokens.seat.the_strip_sits_on_its_row_with_one_anchor", w.ev(seated))
+    w.run("comb:UpdateCurrencyFrames()")
+    check("tokens.seat.blizzard_re_anchoring_is_answered", w.ev(seated))
+    w.run("BackpackTokenFrame.Border.Left:SetAlpha(1); BackpackTokenFrame.Border.Middle:SetAlpha(1)")
+    check("tokens.art.the_border_pieces_are_held_and_stay_held",
+          w.ev("BackpackTokenFrame.Border.Left._alpha == 0 and BackpackTokenFrame.Border.Middle._alpha == 0 and BackpackTokenFrame.Border.Right._alpha == 0"))
+    check("tokens.art.each_token_keeps_its_icon_and_click",
+          w.ev("BackpackTokenFrame.Tokens[1].Icon._alpha == 1 and BackpackTokenFrame.Tokens[2].Icon._alpha == 1"))
+    check("tokens.text.counts_are_mono_at_the_footer_size_in_white",
+          w.ev("(function() for i = 1, 2 do local c = BackpackTokenFrame.Tokens[i].Count; local f = c._font; "
+               "if not (f and f[1] == 'mono' and f[2] == 11 and c._tc[1] == 1 and c._tc[2] == 1 and c._tc[3] == 1) then return false end end return true end)()"))
+    w.run("BackpackTokenFrame._n = 3; BackpackTokenFrame:Update()")
+    check("tokens.text.a_token_added_later_is_styled_too",
+          w.ev("BackpackTokenFrame.Tokens[3].Count._font ~= nil and BackpackTokenFrame.Tokens[3].Count._font[1] == 'mono'"))
+    check("tokens.text.the_stock_words_are_kept", w.ev("BackpackTokenFrame.Tokens[2].Count:GetText() == '200'"))
+    w.run("comb:Update(); comb:Update(); comb:UpdateTokenTracker()")
+    check("tokens.hooks.one_post_hook_each_however_often_it_is_shown",
+          w.ev("HookCount(BackpackTokenFrame, 'Update') == 1 and HookCount(comb, 'UpdateCurrencyFrames') == 1"))
+
+    # the strip leaves: the window is the old one again; the strip moves to another window: this one lets go of the row
+    base = scene(1.2)
+    base.run("OpenFull(comb)")
+    w.run("BackpackTokenFrame._n = 0; comb:UpdateTokenTracker()")
+    check("tokens.gone.the_row_and_the_plate_go",
+          w.ev(f"{win}.layout.tokens == nil and not {win}.tokensPlate._shown")
+          and abs(float(w.ev(f"{win}.layout.height")) - float(base.ev("FS.BagsWindow.Of(comb).layout.height"))) < 1e-6)
+    w.run("BackpackTokenFrame._n = 2; comb:UpdateTokenTracker(); OpenFull(c1); BackpackTokenFrame:SetParent(c1); comb:UpdateCurrencyFrames()")
+    check("tokens.owner.the_strip_follows_its_parent",
+          w.ev(f"{win}.layout.tokens == nil and not {win}.tokensPlate._shown"))
+
+    # combat: a protected container is left alone, the layout catches up when combat ends
+    w = scene(1.2, pre="MkTracker(comb, 2)")
+    w.run("OpenFull(comb); BackpackTokenFrame._n = 0; comb:UpdateTokenTracker(); comb._protected = true; INCOMBAT = true; BackpackTokenFrame._n = 2; comb:UpdateTokenTracker()")
+    check("tokens.combat.a_protected_window_is_not_re_anchored_in_combat",
+          w.ev("#BackpackTokenFrame._pts == 2 and BackpackTokenFrame._pts[1][1] == 'BOTTOMLEFT'"))
+    w.run("EndCombat(); FireEvent('PLAYER_REGEN_ENABLED')")
+    check("tokens.combat.the_strip_is_seated_when_combat_ends", w.ev(seated))
+    check("tokens.combat.nothing_swallowed", w.swallowed() == "", w.swallowed())
+
+    # a client without the strip, or one whose strip lacks the art, builds the same window and never errors
+    w = scene(1.2, pre="MkTracker(comb, 2); BackpackTokenFrame.Border = nil; BackpackTokenFrame.Update = nil")
+    w.run("OpenFull(comb)")
+    check("tokens.degrade.a_strip_without_border_or_update_is_still_seated", window_ok(w, "tokens.degrade.exists") and w.ev(seated.replace("BackpackTokenFrame._pts", "BackpackTokenFrame._pts")) and w.swallowed() == "", w.swallowed())
+
+
 def main() -> int:
     db = databar_money()
     check_art()
@@ -2007,6 +2139,7 @@ def main() -> int:
     check_window_taint_surface()
     check_window_combat()
     check_window_degrade()
+    check_window_tokens()
     print(f"\n{CHECKS} checks, {len(FAILS)} failed" if FAILS else f"\nall {CHECKS} checks passed")
     return len(FAILS)
 

@@ -820,6 +820,51 @@ case("the_footer_keys_share_the_row_edges_and_sit_16_px_above_the_bottom", PRELU
     assert(Near(612 - rowsBottom, 14), "rows to rule " .. (612 - rowsBottom))
 """)
 
+case("pager_keys_are_found_by_shape_when_the_mixins_are_gone", """
+    -- a build whose mixin tables and copied methods differ: no names, no handlers, only two small buttons in the inbox
+    InboxPrevPageMixin, InboxNextPageMixin = nil, nil
+    for _, b in ipairs({ InboxFrame.prev, InboxFrame.next }) do b.OnClick = nil; b.Update = nil end
+    local FS = Load()
+    ShowInbox()
+    Fire("PLAYER_ENTERING_WORLD")
+    ShowInbox()
+    local S, W = Mine(), MailFrame
+    assert(S.footer.prev == InboxFrame.prev and S.footer.nxt == InboxFrame.next, "pagers not found by shape")
+    Expect(S.footer.prev, W, 14, 624, 34, 30, "prev key")
+    Expect(S.footer.nxt, W, 108, 624, 34, 30, "next key")
+    assert(InboxFrame.prev.caption.alpha == 0 and InboxFrame.next.caption.alpha == 0, "pager captions")
+    assert(S.keys[InboxFrame.prev] and S.keys[InboxFrame.next], "pagers are not keys")
+    assert(#DEGRADED == 0, "degraded: " .. table.concat(DEGRADED, " | "))
+""")
+
+case("one_pager_found_by_mixin_leaves_the_other_to_the_shape_scan", """
+    InboxPrevPageMixin = nil
+    InboxFrame.prev.OnClick = nil; InboxFrame.prev.Update = nil
+    local FS = Load()
+    ShowInbox()
+    Fire("PLAYER_ENTERING_WORLD")
+    ShowInbox()
+    local S = Mine()
+    assert(S.footer.prev == InboxFrame.prev and S.footer.nxt == InboxFrame.next, "prev not found by shape beside a mixin next")
+    assert(#DEGRADED == 0, "degraded: " .. table.concat(DEGRADED, " | "))
+""")
+
+case("a_stray_small_button_keeps_the_pagers_stock_instead_of_guessing", """
+    InboxPrevPageMixin, InboxNextPageMixin = nil, nil
+    for _, b in ipairs({ InboxFrame.prev, InboxFrame.next }) do b.OnClick = nil; b.Update = nil end
+    local stray = CreateFrame("Button", nil, InboxFrame)
+    stray:SetSize(20, 20)
+    local FS = Load()
+    ShowInbox()
+    Fire("PLAYER_ENTERING_WORLD")
+    ShowInbox()
+    local S = Mine()
+    assert(S.footer.prev == nil and S.footer.nxt == nil, "a pager was guessed from an ambiguous shape")
+    assert(InboxFrame.prev.caption.alpha == 1 and not S.keys[InboxFrame.prev], "a stock pager was skinned anyway")
+    assert(S.footer.open, "the rest of the footer must still be built")
+    assert(#DEGRADED == 0, "degraded: " .. table.concat(DEGRADED, " | "))
+""")
+
 case("the_header_band_switch_and_close_key_keep_the_mocks_margins_and_are_centred", PRELUDE + """
     local h = S.header
     Expect(h.band[3], W, 1, 48, 430, 1, "header rule")

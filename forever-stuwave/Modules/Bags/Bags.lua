@@ -946,6 +946,12 @@ end
 -- the amount. Item buttons are never anchored to, resized or reparented, and every anchor of ours points at the container
 -- or at our own frames, so a protected container is left alone in combat.
 --
+-- The watched-currency strip (BackpackTokenFrame, shown under the money line while a currency is on the backpack) is not in
+-- the approved mockup; it was Blizzard's gold-edged box hanging off the window and over the footer. While it is shown the
+-- window gets a row of its own for it under the footer (a cut plate of ours under it, the strip seated on the row the way the
+-- search box is, its border art held, its counts in the footer's mono); with no strip the window is exactly the approved one.
+-- Structure from the retail 12.1.0 Blizzard_TokenUI and ContainerFrame.lua (the 16001 dump has the frame, not its children).
+--
 -- Pixels: every edge is a whole screen pixel (a design value is rounded once, so equal values give equal pixel counts at
 -- any UI scale); a key is the next EVEN pixel count up from its 17 units, so a glyph of even size centres exactly.
 local METRICS = {
@@ -959,11 +965,14 @@ local METRICS = {
     RULE_GAP = 7,        -- grid to the footer rule
     FOOT_BELOW = 27,     -- grid to the window's bottom edge
     FONT = 11,           -- the footer's mono size, the data bar's
+    TOKEN_H = 17,        -- the watched-currency strip under the footer (its stock height); only while Blizzard shows it
+    TOKEN_PAD = 13,      -- the stock strip's padding right of its last token: tokens sit 17 from its edge, their icon 4 past that
 }
 
 -- The layout of one window in UI units, from the grid's size and the pixels per unit. Positions are from the chrome's top
 -- left corner (x right, y down). opts.search / opts.sort: whether the header row has them (a bag without them has the
--- close key alone). Pure: no frame is read or written.
+-- close key alone). opts.tokens: whether Blizzard's watched-currency strip is shown in this window (it gets a row of its
+-- own under the footer). Pure: no frame is read or written.
 local function ComputeLayout(gridWidth, gridHeight, es, opts)
     opts = opts or {}
     local function px(units) return math.floor(units * es + 0.5) end
@@ -980,9 +989,18 @@ local function ComputeLayout(gridWidth, gridHeight, es, opts)
     local gridRight, gridBottom = gridLeft + gw, gridTop + gh
     local width = gridRight + m
     local ruleY = gridBottom + px(METRICS.RULE_GAP)
-    local height = gridBottom + px(METRICS.FOOT_BELOW)
+    local footBottom = gridBottom + px(METRICS.FOOT_BELOW)
+    local height = footBottom
     local bandTop = ruleY + 1
-    local centre = math.floor((bandTop + height) / 2 + 0.5)
+    local centre = math.floor((bandTop + footBottom) / 2 + 0.5)
+    -- the watched-currency strip: a row under the footer (the window grows by the strip and a margin under it). Blizzard's
+    -- strip keeps 13 of padding right of its last token, so its frame ends that much less MARGIN past the plate: the tokens
+    -- then end a margin inside the plate like everything else
+    local tokens
+    if opts.tokens then
+        tokens = { x = gridLeft, y = footBottom, w = gw, h = px(METRICS.TOKEN_H), slack = px(METRICS.TOKEN_PAD) - m }
+        height = footBottom + tokens.h + m
+    end
 
     local closeX = gridRight - key
     local out = {
@@ -990,9 +1008,10 @@ local function ComputeLayout(gridWidth, gridHeight, es, opts)
         grid = { left = gridLeft, right = gridRight, top = gridTop, bottom = gridBottom },
         close = { x = closeX, y = m, w = key, h = key },
         rule = { x = gridLeft, y = ruleY, w = gw, h = 1 },
-        band = { y = bandTop, h = height - bandTop },
+        band = { y = bandTop, h = footBottom - bandTop },
         count = { x = gridLeft, cy = centre },
         money = { right = gridRight, cy = centre },
+        tokens = tokens,
     }
     local rightEdge = closeX
     if opts.sort then
@@ -1289,8 +1308,10 @@ local function BuildWindow(frame)
         win.search.focusRing = true
         win.sort = NewPlate(chrome, violet, METRICS.KEY_CHAMFER, 1)
         win.close = NewPlate(chrome, pink, METRICS.KEY_CHAMFER, 1)
+        win.tokens = NewPlate(chrome, violet, METRICS.SEARCH_CHAMFER, 0.55, ink)
         win.searchPlate, win.sortPlate, win.closePlate = win.search.frame, win.sort.frame, win.close.frame
-        win.searchPlate:Hide(); win.sortPlate:Hide(); win.closePlate:Hide()
+        win.tokensPlate = win.tokens.frame
+        win.searchPlate:Hide(); win.sortPlate:Hide(); win.closePlate:Hide(); win.tokensPlate:Hide()
         win.searchCell = CreateFrame("Frame", nil, win.searchPlate)
         win.searchCell:SetFrameLevel(win.searchPlate:GetFrameLevel())
         win.searchCell:SetPoint("TOPLEFT", win.searchPlate, "TOPLEFT", 0, 0)
@@ -1332,7 +1353,7 @@ local function BuildWindow(frame)
             OnEditFocusGained = function(st) st.focus = true end, OnEditFocusLost = function(st) st.focus = false end,
         })
         windows[frame] = win
-        for _, piece in ipairs({ win.search, win.sort, win.close }) do PaintPlate(piece) end
+        for _, piece in ipairs({ win.search, win.sort, win.close, win.tokens }) do PaintPlate(piece) end
     end)
     if not ok then
         if chrome then pcall(chrome.Hide, chrome) end
@@ -1363,6 +1384,7 @@ end
 local function DropLostPlates(frame, win)
     if win.searchPlate:IsShown() and not ControlOwned(_G["BagItemSearchBox"], frame) then win.searchPlate:Hide() end
     if win.sortPlate:IsShown() and not ControlOwned(_G["BagItemAutoSortButton"], frame) then win.sortPlate:Hide() end
+    if win.tokensPlate:IsShown() and not ControlOwned(_G["BackpackTokenFrame"], frame) then win.tokensPlate:Hide() end
 end
 
 local function SeatPlate(piece, chrome, rect, shown)
@@ -1374,6 +1396,46 @@ local function SeatPlate(piece, chrome, rect, shown)
     f:Show()
 end
 
+-- The watched-currency strip (BackpackTokenFrame, one frame Blizzard moves between the bag windows): its border art (Left,
+-- Middle, Right of the Border frame) is held, the counts of its pooled token buttons get the footer's mono face, and the
+-- strip itself is seated on the window's own row like the search box is (Blizzard re-anchors it from UpdateCurrencyFrames,
+-- which the container hooks below answer). The click and tooltip of each token stay Blizzard's.
+local tokenHooked = setmetatable({}, { __mode = "k" })  -- strip -> its Update post-hook and art hold are in
+local countStyled = setmetatable({}, { __mode = "k" })  -- token button -> its count font is set
+
+local function StyleTokens(tracker)
+    local tokens = type(tracker) == "table" and tracker.Tokens
+    if type(tokens) ~= "table" or type(FS.Theme.ApplyMono) ~= "function" then return end
+    for _, button in pairs(tokens) do
+        local count = type(button) == "table" and button.Count
+        if type(count) == "table" and not countStyled[count] then
+            countStyled[count] = true
+            pcall(FS.Theme.ApplyMono, count, METRICS.FONT, WHITE)
+        end
+    end
+end
+
+local function SkinTokens(tracker)
+    if tokenHooked[tracker] then return end
+    tokenHooked[tracker] = true
+    local border = tracker.Border
+    if type(border) == "table" then
+        for _, field in ipairs({ "Left", "Middle", "Right" }) do HoldRegion(border[field]) end
+    end
+    if type(hooksecurefunc) == "function" and type(tracker.Update) == "function" then
+        pcall(hooksecurefunc, tracker, "Update", StyleTokens)
+    end
+end
+
+local function SeatTokens(tracker, chrome, rect)
+    if type(tracker) ~= "table" or not rect then return end
+    SkinTokens(tracker)
+    tracker:ClearAllPoints()
+    tracker:SetPoint("TOPLEFT", chrome, "TOPLEFT", rect.x, -rect.y)
+    tracker:SetSize(rect.w + rect.slack, rect.h)
+    StyleTokens(tracker)
+end
+
 local function ApplyWindow(frame, win)
     local es = PixelsPerUnit(frame)
     local rect, grid = ReadRect(frame), GridRect(frame)
@@ -1381,7 +1443,9 @@ local function ApplyWindow(frame, win)
 
     local searchBox, sortButton = _G["BagItemSearchBox"], _G["BagItemAutoSortButton"]
     local hasSearch, hasSort = ControlOwned(searchBox, frame), ControlOwned(sortButton, frame)
-    local lay = ComputeLayout(grid.right - grid.left, grid.top - grid.bottom, es, { search = hasSearch, sort = hasSort })
+    local tracker = _G["BackpackTokenFrame"]
+    local hasTokens = ControlOwned(tracker, frame)
+    local lay = ComputeLayout(grid.right - grid.left, grid.top - grid.bottom, es, { search = hasSearch, sort = hasSort, tokens = hasTokens })
     win.layout = lay
     local chrome = win.chrome
 
@@ -1397,6 +1461,8 @@ local function ApplyWindow(frame, win)
     SeatPlate(win.close, chrome, lay.close, true)
     SeatPlate(win.sort, chrome, lay.sort, hasSort)
     SeatPlate(win.search, chrome, lay.search, hasSearch and lay.search ~= nil)
+    SeatPlate(win.tokens, chrome, lay.tokens, hasTokens)
+    if hasTokens then SeatTokens(tracker, chrome, lay.tokens) end
     SeatControl(frame.CloseButton, chrome, lay.close)
     if hasSort then SeatControl(sortButton, chrome, lay.sort) end
     if hasSearch and lay.search then
@@ -1540,6 +1606,7 @@ local function ApplyContainers()
             HookContainerHide(frame)
             SkinContainerItems(frame)
             HookItemRefresh(frame, "UpdateItems", SkinContainerItems)
+            HookItemRefresh(frame, "UpdateCurrencyFrames", RefreshWindow)
         end
     end
 end
@@ -1557,6 +1624,7 @@ local function ApplyCombinedBags()
     HookContainerHide(frame)
     SkinContainerItems(frame)
     HookItemRefresh(frame, "UpdateItems", SkinContainerItems)
+    HookItemRefresh(frame, "UpdateCurrencyFrames", RefreshWindow)
 end
 
 -------------------------------------------------------------------------------
