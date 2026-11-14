@@ -44,8 +44,13 @@ function HeldArt.Hold(region)
         held[region] = true -- nothing to install, nothing to retry
         return
     end
-    -- Recorded only once the hook is in, so a failed install is tried again on the next sweep.
-    if pcall(hooksecurefunc, region, "SetAlpha", ZeroRegion) then held[region] = true end
+    -- Recorded only once the hook is in, so a failed install is tried again on the next sweep. SetVertexColor is followed too: on
+    -- 16001 its alpha is the region's alpha (live 2026-11-14: the gossip rows' Icon:SetVertexColor(1, 1, 1, 1) on every Setup
+    -- brought the held stock icon back at alpha 1 with no SetAlpha call).
+    if pcall(hooksecurefunc, region, "SetAlpha", ZeroRegion) then
+        held[region] = true
+        if type(region.SetVertexColor) == "function" then pcall(hooksecurefunc, region, "SetVertexColor", ZeroRegion) end
+    end
 end
 
 -- Holds the button's normal texture whichever way it is reached: the NormalTexture parentKey, and
