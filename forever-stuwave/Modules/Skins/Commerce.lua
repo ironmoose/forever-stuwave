@@ -508,9 +508,12 @@ function Com.SkinMoneyInput(frame)
     S.money[frame] = true
     for _, pair in ipairs(COIN_KEYS) do
         local box = Region(frame, pair[1])
+        -- The trade window's boxes come back forbidden on this client: any method on them but IsForbidden throws, so skip them.
+        if box and type(box.IsForbidden) == "function" and box:IsForbidden() then box = nil end
         if box then
             for _, key in ipairs({ "Left", "Middle", "Right" }) do HeldArt.Hold(box[key]) end
-            local name = type(box.GetName) == "function" and box:GetName()
+            local ok, got = pcall(function() return type(box.GetName) == "function" and box:GetName() end)
+            local name = ok and got or nil
             if name then HeldArt.Hold(_G[name .. "Left"]); HeldArt.Hold(_G[name .. "Middle"]); HeldArt.Hold(_G[name .. "Right"]) end
             local color = C[pair[2]] or C.text
             Char.PaintBox(Char.Box(box, "BACKGROUND"), C.ink, 1, color, 1, 1)

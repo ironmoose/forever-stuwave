@@ -389,6 +389,15 @@ case("trade: every slot is a square slot on a card, the stock plate and name fra
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 
+case("trade: forbidden money boxes (as on the live client) are skipped without an error", """
+    local function forbidden()
+        return { IsForbidden = function() return true end, GetName = function() error('Attempt to access forbidden object') end }
+    end
+    local mif = { gold = forbidden(), silver = forbidden(), copper = forbidden() }
+    local ok, err = pcall(FS.CommerceSkin.SkinMoneyInput, mif)
+    assert(ok, 'threw on a forbidden box: ' .. tostring(err))
+""")
+
 case("professions: the rank bar loses its stock frame and takes a ring, recipe rows are cards that follow the stock selection, category rows a band", """
     Fire('PLAYER_ENTERING_WORLD'); ProfessionsFrame:Show(); FlushTimers()
     local S = FS.ServicesSkin.state
