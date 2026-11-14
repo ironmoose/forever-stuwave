@@ -479,33 +479,90 @@ end
 -- The flight map (TaxiFrame node buttons, FlightMapFrame pins)
 -------------------------------------------------------------------------------
 
--- A node is a diamond of 1 px rows centred on the stock button or pin: pink where you are, cyan where you can fly, dim where you
--- cannot. Built once per button; the stock icon and highlight are held under it.
-local DIAMOND_ROWS = 8
-local DIAMOND_RADIUS = { current = 8, reachable = 6, unreachable = 4 }
+-- A node is a beacon: a diamond of 1 px rows (a coloured edge, a dark plate, a bright core) over a soft glow, pink where you are with
+-- a thin ring round it, cyan where you can fly, dim where you cannot; hovered, the edge goes white, the diamond a step larger and the
+-- glow brighter. Built once per button or pin; the stock icon and highlight are held under it.
+local GLOW_TEX = "Interface\\AddOns\\forever-stuwave\\Media\\Textures\\glow_round.tga"
+local BEACON = {
+    radius = { current = 9, reachable = 6, unreachable = 4 },
+    glow = { current = 0.45, reachable = 0.25, unreachable = 0 },
+    ring = 15, rows = 11,
+}
 
-local function NewDiamond(host)
+local function DiamondRows(host, sub)
     local rows = {}
-    for i = -DIAMOND_ROWS, DIAMOND_ROWS do
-        local t = Kit.Rect(host, 0, 0, 1, 1, C.cyan, 1, "OVERLAY", 7)
+    for i = -BEACON.rows, BEACON.rows do
+        local t = Kit.Rect(host, 0, 0, 1, 1, C.cyan, 1, "OVERLAY", sub)
         t.fsRow = i
         rows[#rows + 1] = t
     end
     return rows
 end
 
-local function PaintDiamond(rows, host, kind, hover)
-    local radius = DIAMOND_RADIUS[kind] or DIAMOND_RADIUS.unreachable
-    local color = hover and C.text or (kind == "current" and C.pink) or (kind == "reachable" and C.cyan) or C.dim
+-- A 1 px circle of radius R: per row a left and a right run between the outer and inner edge (one run across the top and bottom).
+local function RingRows(host)
+    local runs, R = {}, BEACON.ring
+    for y = -R, R do
+        local xo = math.floor(math.sqrt(math.max(0, R * R - y * y)) + 0.5)
+        local inner = (R - 1) * (R - 1) - y * y
+        local xi = inner > 0 and math.floor(math.sqrt(inner) + 0.5) or 0
+        if xi < 1 then
+            runs[#runs + 1] = { y = y, x = -xo, w = 2 * xo + 1 }
+        else
+            local w = math.max(1, xo - xi + 1)
+            runs[#runs + 1] = { y = y, x = -xo, w = w }
+            runs[#runs + 1] = { y = y, x = xo - w + 1, w = w }
+        end
+    end
+    for _, r in ipairs(runs) do
+        r.t = Kit.Rect(host, 0, 0, 1, 1, C.pink, 1, "OVERLAY", 4)
+        Kit.Place(r.t, host, r.x, r.y, r.w, 1, "TOPLEFT", "CENTER")
+    end
+    return runs
+end
+
+local function NewDiamond(host)
+    local glow = host:CreateTexture(nil, "OVERLAY", nil, 3)
+    glow:SetTexture(GLOW_TEX)
+    if glow.SetBlendMode then glow:SetBlendMode("ADD") end
+    return { glow = glow, edge = DiamondRows(host, 5), plate = DiamondRows(host, 6), core = DiamondRows(host, 7) }
+end
+
+local function PaintRows(rows, host, radius, color, alpha)
     for _, t in ipairs(rows) do
-        t:SetColorTexture(color[1], color[2], color[3], 1)
         local d = math.abs(t.fsRow)
-        if d > radius then
+        if radius < 0 or d > radius then
             t:Hide()
         else
             local half = radius - d
-            Kit.Place(t, host, -half - 1, t.fsRow, 2 * half + 2, 1, "TOPLEFT", "CENTER")
+            t:SetColorTexture(color[1], color[2], color[3], alpha)
+            Kit.Place(t, host, -half, t.fsRow, 2 * half + 1, 1, "TOPLEFT", "CENTER")
             t:Show()
+        end
+    end
+end
+
+local function PaintDiamond(g, host, kind, hover)
+    local r = BEACON.radius[kind] or BEACON.radius.unreachable
+    if hover then r = r + 1 end
+    local color = (kind == "current" and C.pink) or (kind == "reachable" and C.cyan) or C.dim
+    PaintRows(g.edge, host, r + 1, hover and C.text or color, 1)
+    PaintRows(g.plate, host, r - 1, C.ink, 0.9)
+    PaintRows(g.core, host, math.max(1, r - 5), color, 1)
+    local ga = hover and 0.55 or BEACON.glow[kind] or 0
+    if ga > 0 then
+        local size = 2 * (r + 8)
+        g.glow:SetVertexColor(color[1], color[2], color[3], ga)
+        Kit.Place(g.glow, host, -size / 2, -size / 2, size, size, "TOPLEFT", "CENTER")
+        g.glow:Show()
+    else
+        g.glow:Hide()
+    end
+    if kind == "current" and not g.ring then g.ring = RingRows(host) end
+    if g.ring then
+        for _, run in ipairs(g.ring) do
+            run.t:SetColorTexture(C.pink[1], C.pink[2], C.pink[3], 0.55)
+            if kind == "current" then run.t:Show() else run.t:Hide() end
         end
     end
 end

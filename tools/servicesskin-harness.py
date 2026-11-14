@@ -298,6 +298,8 @@ function BuildBlizzard()
     end
     -- the stock helper stretches the line art across the texture; the mock only shows it
     function DrawLine(t, c, sx, sy, ex, ey, w, factor, rel) t:Show() end
+    -- the colour of a beacon's core on its middle row
+    function Hue(g) for _, t in ipairs(g.core) do if t.fsRow == 0 then return t.color end end end
     TAXI_TYPES = { "CURRENT", "REACHABLE", "REACHABLE", "UNREACHABLE", "DISTANT" }
     function NumTaxiNodes() return #TAXI_TYPES end
     function TaxiNodeGetType(i) return TAXI_TYPES[i] end
@@ -485,15 +487,27 @@ case("flight map: the node buttons hold the stock icon and draw a glyph by state
         assert(b.normalTex.alpha == 0 and b.highlightTex.alpha == 0, 'stock icon kept')
         assert(b.scripts.OnClick and b.scripts.OnEnter, 'script lost')
     end
-    local cur, reach = S.taxi[TaxiButton1].glyph[1].color, S.taxi[TaxiButton2].glyph[1].color
+    local cur, reach = Hue(S.taxi[TaxiButton1].glyph), Hue(S.taxi[TaxiButton2].glyph)
     assert(cur[1] > 0.9 and cur[2] < 0.3, 'current node not pink')
     assert(reach[2] > 0.8 and reach[1] < 0.3, 'reachable node not cyan')
+    -- a beacon: an edge one row past a dark plate, a glow under it, and the ring only round the current node
+    local g1, g2 = S.taxi[TaxiButton1].glyph, S.taxi[TaxiButton2].glyph
+    local function widest(rows) local w = 0 for _, t in ipairs(rows) do if t.shown ~= false then w = math.max(w, t.w or 0) end end return w end
+    assert(widest(g1.edge) > widest(g1.plate), 'edge not round the plate: ' .. widest(g1.edge) .. ' vs ' .. widest(g1.plate))
+    assert(widest(g1.edge) > widest(g2.edge), 'current node not larger than a reachable one')
+    assert(g1.glow.shown ~= false and g1.glow.blend == 'ADD', 'no glow under the current node')
+    assert(g1.ring and g1.ring[1].t.shown ~= false, 'no ring round the current node')
+    assert(not g2.ring, 'ring on a reachable node')
+    local before = widest(g2.edge)
+    TaxiButton2:RunScript('OnEnter')
+    assert(widest(g2.edge) > before, 'hover did not grow the beacon')
+    TaxiButton2:RunScript('OnLeave')
     -- the stock code swaps the icon texture on every show; the hold survives it and the glyph follows the type
     TaxiButton2:SetNormalTexture('Interface\\\\TaxiFrame\\\\UI-Taxi-Icon-Green')
     assert(TaxiButton2.normalTex.alpha == 0, 'swapped icon not held')
     TAXI_TYPES[2] = 'UNREACHABLE'
     TaxiFrame:Hide(); TaxiFrame:Show(); FlushTimers()
-    assert(S.taxi[TaxiButton2].glyph[1].color[1] < 0.5 and S.taxi[TaxiButton2].glyph[1].color[2] < 0.5, 'unreachable node not dim')
+    assert(Hue(S.taxi[TaxiButton2].glyph)[1] < 0.5 and Hue(S.taxi[TaxiButton2].glyph)[2] < 0.5, 'unreachable node not dim')
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 
@@ -528,13 +542,13 @@ case("flight map: the zoomable map's pins hold the stock icon and draw a glyph b
         assert(p.Icon.alpha == 0 and p.IconHighlight.alpha == 0, 'stock pin icon kept')
         assert(p.scripts.OnEnter, 'pin script lost')
     end
-    assert(S.pins[FM_PINS[1]].glyph[1].color[1] > 0.9, 'current pin not pink')
-    assert(S.pins[FM_PINS[2]].glyph[1].color[2] > 0.8, 'reachable pin not cyan')
+    assert(Hue(S.pins[FM_PINS[1]].glyph)[1] > 0.9, 'current pin not pink')
+    assert(Hue(S.pins[FM_PINS[2]].glyph)[2] > 0.8, 'reachable pin not cyan')
     assert(FlightMapFrame.BorderFrame.TopBorder.alpha == 0, 'map border art kept')
     -- a pin that is restyled by the stock code is drawn again
     FM_PINS[2].taxiNodeData.state = Enum.FlightPathState.Current
     FM_PINS[2]:SetFlightPathStyle(Enum.FlightPathState.Current)
-    assert(S.pins[FM_PINS[2]].glyph[1].color[1] > 0.9, 'glyph did not follow the restyle')
+    assert(Hue(S.pins[FM_PINS[2]].glyph)[1] > 0.9, 'glyph did not follow the restyle')
     assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 
