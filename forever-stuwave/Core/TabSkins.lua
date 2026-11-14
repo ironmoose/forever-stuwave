@@ -15,8 +15,8 @@
 -- OnEnable, OnDisable, Enable, Disable, SetEnabled, and on a TabSystem button SetTabSelected, SetTabEnabled and
 -- SetTabNotification) and by hooksecurefunc on PanelTemplates_SelectTab, DeselectTab and SetDisabledTabState, the three
 -- functions that write a PanelTab's state. Those functions (and the engine, on every font object change) rewrite the label
--- too, so the label's mono font, colour and seat are put back after each. The plate is as wide as the stock rect (nothing is
--- resized) and 28 tall, from the top of the rect, or from the bottom of it on a top tab (isTopTab, isTabOnTop). A tab met in
+-- too, so the label's mono font, colour and seat are put back after each. The plate is as wide as the stock rect (widened
+-- only when our font no longer fits the label, see Fit) and 28 tall, from the top of the rect, or from the bottom of it on a top tab (isTopTab, isTabOnTop). A tab met in
 -- combat is skinned when combat ends; a protected tab's label is not moved in combat.
 --
 -- Told by shape: a Button with the art of PanelTabButtonTemplate and TabSystemButtonTemplate (Left, Middle, Right, LeftActive,
@@ -254,6 +254,26 @@ local function PaintFolder(widget, p, selected, disabled)
     return text
 end
 
+-- Blizzard sizes a PanelTab to its label (PanelTemplates_TabResize, run from the tab's OnShow) in the stock font and pins the
+-- label to that width; our mono font is wider, so the label is clipped ("Auctiona"). After our font is on, an unclipped
+-- label that no longer fits gets the tab widened to it plus FIT_PAD a side. Never narrowed, never in combat on a protected
+-- tab; OnSizeChanged lays the plate out again.
+local FIT_PAD = 12
+local function Fit(widget, p)
+    local label = widget.Text
+    if p.fitting or not (IsTable(label) and type(label.GetStringWidth) == "function" and type(widget.SetWidth) == "function") then return end
+    if InCombat() and Kit.Plain(Kit.Try(widget.IsProtected, widget)) == true then return end
+    p.fitting = true
+    Kit.Try(label.SetWidth, label, 0)
+    local sw = Kit.Plain(Kit.Try(label.GetStringWidth, label))
+    local cur = Kit.Plain(Kit.Try(widget.GetWidth, widget))
+    if type(sw) == "number" and type(cur) == "number" and sw > 0 then
+        local need = math.ceil(sw + 2 * FIT_PAD + (p.folder and FOLDER.CUT or K.TAB_SLANT))
+        if need > cur then Kit.Try(widget.SetWidth, widget, need) end
+    end
+    p.fitting = nil
+end
+
 local function Paint(widget)
     local p = parts[widget]
     if not (p and p.built) then return end
@@ -280,6 +300,7 @@ local function Paint(widget)
         p.led:SetShown(p.fits and news and true or false)
         if p.fits and news then p.led:SetColorTexture(C.amber[1], C.amber[2], C.amber[3], 1) end
         Kit.RestyleLabel(widget.Text, widget, K.TAB_TEXT, text)
+        Fit(widget, p)
         return
     end
     if p.fold then for _, t in ipairs(p.fold.all) do t:Hide() end end
@@ -339,6 +360,7 @@ local function Paint(widget)
 
     -- Blizzard writes the label's font object (and so its colour) on every state change; ours is painted after it
     Kit.RestyleLabel(widget.Text, widget, K.TAB_TEXT, text)
+    if not p.key then Fit(widget, p) end
 end
 
 local function Refresh(widget)

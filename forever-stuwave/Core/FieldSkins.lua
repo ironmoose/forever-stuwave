@@ -229,12 +229,17 @@ local function UpdateCaret(widget, p)
     local atEnd = pos >= #text
     local gap = atEnd and K.CARET_GAP or 0
     -- text wider than the line scrolls under the engine's caret, where ours would be in the wrong place
-    if full + gap + K.CARET_W > p.w - K.FIELD_TEXT_X - (p.right or K.FIELD_RIGHT) then
+    local avail = p.w - K.FIELD_TEXT_X - (p.right or K.FIELD_RIGHT)
+    if full + gap + K.CARET_W > avail then
         p.caret:Hide()
         Kit.StopAnimate(p.over, "blink")
         return
     end
-    Kit.Move(p.caret, K.FIELD_TEXT_X + before + gap, math.floor((p.h - K.CARET_H) / 2), K.CARET_W, K.CARET_H)
+    -- a centred or right-justified box (a quantity field) starts its text inside the line, not at its left edge
+    local justify = Kit.Plain(Kit.Try(widget.GetJustifyH, widget))
+    local lead = 0
+    if justify == "CENTER" then lead = Round((avail - full) / 2) elseif justify == "RIGHT" then lead = avail - full end
+    Kit.Move(p.caret, K.FIELD_TEXT_X + lead + before + gap, math.floor((p.h - K.CARET_H) / 2), K.CARET_W, K.CARET_H)
     p.caretAlpha = atEnd and 1 or K.CARET_DIM
     p.caret:SetAlpha(p.caretAlpha)
     p.caret:Show()

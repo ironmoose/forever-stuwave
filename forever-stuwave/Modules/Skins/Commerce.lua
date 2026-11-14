@@ -661,6 +661,20 @@ end
 -- Addon tabs on the AH (Auctionator and any other LibAHTab user): LibAHTab builds them from the stock display mode tab template
 -- under its own anonymous root, after the AH's first sweep, so they kept the gold art. Each gets the strip tab skin and its page
 -- the controls sweep. A tab made later is caught by a post-hook on CreateTab.
+-- Auctionator's buy dialogs (AuctionatorConfirmationDialogTemplate: the final confirmation, the price range warning, the
+-- quantity check, the item buy dialog) are a "Dialog" layout NineSlice over a black Background, children of the tab's page.
+-- The NineSlice is held with the rest of the stock dialog chrome; walked a few levels down from the page.
+local function SkinAddonDialogs(node, depth)
+    if type(node) ~= "table" or depth > 5 then return end
+    for _, child in ipairs(List(node, "GetChildren")) do
+        if child.layoutType == "Dialog" and type(child.NineSlice) == "table" then
+            if Com.Dialog(child, C.pink) then Kit.HoldFrame(child.NineSlice) end
+        else
+            SkinAddonDialogs(child, depth + 1)
+        end
+    end
+end
+
 local function SkinAddonTabs()
     local stub = _G.LibStub
     local lib = type(stub) == "table" and type(stub.GetLibrary) == "function" and stub:GetLibrary("LibAHTab-1-0", true) or nil
@@ -678,7 +692,9 @@ local function SkinAddonTabs()
             if type(page) == "table" and not page.fsAddonTabSweep then
                 page.fsAddonTabSweep = true
                 PanelSkins.SweepOnShow(page)
+                Kit.HookScript(page, "OnShow", function() Step("ah.addondialogs", SkinAddonDialogs, page, 1) end)
             end
+            Step("ah.addondialogs", SkinAddonDialogs, page, 1)
         end
     end
 end

@@ -122,6 +122,21 @@ end
 -- Skin pass (idempotent via frame.fsAHSkin)
 -------------------------------------------------------------------------------
 
+-- The modern AH keeps its money one level down, MoneyFrameBorder.MoneyFrame (Blizzard_AuctionHouseFrame.xml), inside a
+-- ThinGoldEdgeTemplate strip (three Interface\\Common\\Moneyframe textures plus a UI-Frame cap) over an InsetFrameTemplate
+-- well. The edge's art and the well are held and the strip gets the violet box the bank's money wears (Commerce.lua).
+local function SkinMoneyEdge(frame)
+    local edge = frame.MoneyFrameBorder
+    if type(edge) ~= "table" or edge.fsMoneyEdge then return end
+    local HeldArt, Kit, Char = FS.HeldArt, FS.ControlKit, FS.CharacterSkin
+    if not (HeldArt and Kit and Char and edge.GetRegions) then return end
+    edge.fsMoneyEdge = true
+    for _, region in ipairs({ edge:GetRegions() }) do HeldArt.Hold(region) end
+    if type(frame.MoneyFrameInset) == "table" then Kit.HoldFrame(frame.MoneyFrameInset) end
+    Char.PaintBox(Char.Box(edge, "OVERLAY"), FS.Theme.COLOR_CTRL_INK, 1, COLOR_BORDER, 1, 1)
+    if FS.Theme.StyleMoney and type(edge.MoneyFrame) == "table" then FS.Theme.StyleMoney(edge.MoneyFrame) end
+end
+
 local function SkinOne(name)
     local frame = _G[name]
     if not frame or frame.fsAHSkin then return end
@@ -140,6 +155,7 @@ local function SkinOne(name)
     -- Bags.lua already handles for ContainerFrameCombinedBags -- only the
     -- child-scan strategy catches it.
     FS.PanelSkins.TryStyleMoney(frame)
+    SkinMoneyEdge(frame)
 
     -- Post, Buy, Search and the other stock text buttons, now and as the tabs' pages are shown.
     FS.PanelSkins.SweepOnShow(frame)
