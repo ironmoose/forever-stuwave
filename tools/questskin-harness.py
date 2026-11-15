@@ -57,6 +57,36 @@ function Obj:IsVisible()
     end
     return true
 end
+-- The engine's mouse rule: a mouse script on a plain Frame turns its mouse on (Blizzard_PTRFeedback_Frames.lua lays a bare Frame over a
+-- button and relies on its OnEnter, and about 200 stock XML frames carry a mouse script and no enableMouse); a Button has it from the
+-- start. HookScript is a script too. EnableMouse(false) after the script is what keeps a frame of ours passive.
+local MOUSE_SCRIPT = { OnEnter = true, OnLeave = true, OnMouseDown = true, OnMouseUp = true }
+local plainHook, plainSet = Obj.HookScript, Obj.SetScript
+function Obj:HookScript(name, fn)
+    plainHook(self, name, fn)
+    if MOUSE_SCRIPT[name] and self.kind ~= "Button" then self.mouse = true end
+end
+function Obj:SetScript(name, fn)
+    plainSet(self, name, fn)
+    if MOUSE_SCRIPT[name] and self.kind ~= "Button" then self.mouse = true end
+end
+function Obj:IsMouseEnabled()
+    if self.mouse == nil then return self.kind == "Button" end
+    return self.mouse and true or false
+end
+-- What the hand is on over a card: the topmost shown mouse enabled frame under `button` (its child frames are drawn above it and sit
+-- inside it), or the button itself when none takes the mouse. The button's own OnEnter is the tooltip, so it must be the answer.
+function MouseTarget(button)
+    local best, bestLevel = button, button.level or 0
+    local function walk(frame)
+        for _, child in ipairs(frame.children or {}) do
+            if child.shown ~= false and child:IsMouseEnabled() and (child.level or 0) > bestLevel then best, bestLevel = child, child.level or 0 end
+            walk(child)
+        end
+    end
+    walk(button)
+    return best
+end
 function Obj:SetTexture(p)
     if type(p) == "number" then self.fileID, self.path = p, "Interface\\stock\\fileid" else self.fileID, self.path = nil, p end
     self.color, self.atlas = nil, nil
@@ -165,6 +195,8 @@ local function largeItem(parent, name, x, y, id, kind)
     b.scripts.OnLeave = function() end
     return b
 end
+
+LargeItem = largeItem
 
 local function pager(parent, name, dir)
     local b = blz("Button", name, parent, 32, 32, "CENTER", dir == "<" and 25 or 310, 96)
@@ -761,6 +793,135 @@ case("quest rewards: a card lights cyan under the hand and returns", f"""
     b:RunScript('OnLeave')
     assert(S.cards[b].box.edges[1].color[2] < 0.4, 'did not return to idle')
     assert(not FS.ItemSlotSkins.Parts(S.slots[b]).state.hover, 'the slot kept the hover')
+""")
+
+case("quest rewards: nothing of ours over a card takes the mouse, so the hand over the icon reaches the stock button and its own tooltip script", f"""
+    {OPEN}
+    local S = FS.QuestSkin.state
+    for i = 1, 5 do
+        local b = QuestInfoRewardsFrame.RewardButtons[i]
+        local tip
+        b.scripts.OnEnter = function(self) tip = self end -- the stock script: the tooltip
+        assert(S.slots[b] and not S.slots[b]:IsMouseEnabled(), 'the slot takes the mouse on card ' .. i)
+        assert(not S.cards[b].veil:IsMouseEnabled(), 'the veil takes the mouse on card ' .. i)
+        local target = MouseTarget(b)
+        assert(target == b, 'a frame of ours takes the mouse over card ' .. i)
+        target:RunScript('OnEnter')
+        assert(tip == b, 'the stock OnEnter did not run on card ' .. i)
+    end
+    -- the hover of the slot layer still follows the card's, not its own
+    local b = QuestInfoRewardsFrame.RewardButtons[1]
+    b:RunScript('OnEnter')
+    assert(FS.ItemSlotSkins.Parts(S.slots[b]).state.hover, 'the slot did not follow the card hover')
+    b:RunScript('OnLeave')
+    assert(not FS.ItemSlotSkins.Parts(S.slots[b]).state.hover, 'the slot kept the hover')
+""")
+
+case("quest progress: the required item cards leave the mouse to the stock button too", f"""
+    {OPEN_PROGRESS}
+    local S = FS.QuestSkin.state
+    for i = 1, 4 do
+        local b = _G['QuestProgressItem' .. i]
+        assert(S.slots[b] and not S.slots[b]:IsMouseEnabled(), 'the slot takes the mouse on item ' .. i)
+        assert(MouseTarget(b) == b, 'a frame of ours takes the mouse over item ' .. i)
+    end
+""")
+
+case("quest rewards: a card met in combat gets its slot layer when combat ends, and the slot still leaves the mouse to the card", f"""
+    {OPEN}
+    local S = FS.QuestSkin.state
+    local rf = QuestInfoRewardsFrame
+    local b = LargeItem(rf, 'QuestInfoRewardsFrameQuestInfoItem6', 150, -200, 6, 'choice')
+    rf.RewardButtons[6] = b
+    __combat = true
+    QuestInfo_Display()
+    FlushTimers()
+    assert(S.slots[b] and not FS.ItemSlotSkins.Parts(S.slots[b]), 'the slot layer was built in combat')
+    __combat = false
+    Fire('PLAYER_REGEN_ENABLED'); FlushTimers()
+    local slot = S.slots[b]
+    assert(FS.ItemSlotSkins.Parts(slot), 'the slot layer did not come after combat')
+    assert(not slot:IsMouseEnabled(), 'the slot built after combat takes the mouse')
+    assert(MouseTarget(b) == b, 'a frame of ours takes the mouse over the card built after combat')
+""")
+
+case("quest rewards: a reward button the stock code builds and hands its quality before the page is skinned shows that quality on its first open", f"""
+    {OPEN}
+    local S = FS.QuestSkin.state
+    local rf = QuestInfoRewardsFrame
+    -- QuestInfo_GetRewardButton builds a button the first time a quest offers that many rewards, QuestInfo_ShowRewardAsItemCommon hands
+    -- it its quality (again from the item load callback), and only then does the QuestInfo_Display post hook skin it
+    local b = LargeItem(rf, 'QuestInfoRewardsFrameQuestInfoItem6', 150, -200, 6, 'choice')
+    rf.RewardButtons[6] = b
+    SetItemButtonQuality(b, 2)
+    SetItemButtonQuality(b, 2)
+    assert(not S.slots[b], 'the button was skinned before the stock page was laid out')
+    QuestInfo_Display()
+    FlushTimers()
+    local parts = FS.ItemSlotSkins.Parts(S.slots[b])
+    local green = FS.Theme.COLOR_QUALITY[2]
+    assert(math.abs(parts.led.color[1] - green[1]) < 0.01 and math.abs(parts.led.color[2] - green[2]) < 0.01
+        and math.abs(parts.led.color[3] - green[3]) < 0.01, 'the LED is not the uncommon green')
+    assert(parts.edge.shown and parts.edge2.shown, 'no quality edge on an uncommon reward')
+    -- a page for another quest hands the same button a poor, then nothing: no stale green
+    SetItemButtonQuality(b, 0)
+    assert(not parts.edge.shown, 'the uncommon edge outlived the quality')
+    SetItemButtonQuality(b, nil)
+    local common = FS.Theme.COLOR_QUALITY[1]
+    assert(math.abs(parts.led.color[2] - common[2]) < 0.01, 'a missing quality is not common')
+""")
+
+case("quest rewards: every choice and reward carries its own quality, the pick stays pink on the card and does not touch it", f"""
+    {OPEN}
+    local S = FS.QuestSkin.state
+    local rf = QuestInfoRewardsFrame
+    local q = {{ 2, 3, 2, 1, 4 }}
+    for i = 1, 5 do SetItemButtonQuality(rf.RewardButtons[i], q[i]) end
+    local function led(i) return FS.ItemSlotSkins.Parts(S.slots[rf.RewardButtons[i]]).led.color end
+    for i = 1, 5 do
+        local want = FS.Theme.COLOR_QUALITY[q[i]]
+        assert(math.abs(led(i)[1] - want[1]) < 0.01 and math.abs(led(i)[2] - want[2]) < 0.01, 'card ' .. i .. ' lost its quality')
+    end
+    assert(FS.ItemSlotSkins.Parts(S.slots[rf.RewardButtons[1]]).edge.shown and FS.ItemSlotSkins.Parts(S.slots[rf.RewardButtons[2]]).edge.shown,
+        'an uncommon and a rare choice must both show the quality edge')
+    rf.RewardButtons[2]:RunScript('OnClick')
+    local pink = S.cards[rf.RewardButtons[2]].box.edges[1].color
+    assert(pink[1] > 0.9 and pink[2] < 0.3, 'the pick is not pink')
+    local rare = FS.Theme.COLOR_QUALITY[3]
+    assert(math.abs(led(2)[1] - rare[1]) < 0.01 and math.abs(led(2)[3] - rare[3]) < 0.01, 'the pick recoloured the quality')
+    local green = FS.Theme.COLOR_QUALITY[2]
+    assert(math.abs(led(1)[2] - green[2]) < 0.01, 'a choice that was not picked lost its quality')
+""")
+
+case("quest progress: a required item shows the quality the quest API gives it, the stock page never hands one", f"""
+    local QOF = {{ 3, 2, 1, 4 }}
+    function GetQuestItemInfo(kind, i)
+        assert(kind == 'required', 'asked for ' .. tostring(kind))
+        return 'name', 'tex', 1, QOF[i], true, 100 + i
+    end
+    {OPEN_PROGRESS}
+    local S = FS.QuestSkin.state
+    local function check(why)
+        for i = 1, 3 do -- the mock page shows three of its four buttons
+            local b = _G['QuestProgressItem' .. i]
+            assert(b:IsShown(), 'item ' .. i .. ' is not shown')
+            local parts = FS.ItemSlotSkins.Parts(S.slots[b])
+            local want = FS.Theme.COLOR_QUALITY[QOF[i]]
+            assert(math.abs(parts.led.color[1] - want[1]) < 0.01 and math.abs(parts.led.color[2] - want[2]) < 0.01, 'item ' .. i .. ' ' .. why)
+        end
+    end
+    check('has no quality')
+    -- a later page puts other items in the same buttons
+    QOF = {{ 4, 1, 2, 3 }}
+    QuestFrameProgressItems_Update()
+    check('kept the old quality')
+    -- a currency is not an item: no question to the item API, and not the last page's quality either
+    QuestProgressItem1.objectType = 'currency'
+    QOF = {{ 3, 3, 3, 3 }}
+    QuestFrameProgressItems_Update()
+    local common, shown = FS.Theme.COLOR_QUALITY[1], FS.ItemSlotSkins.Parts(S.slots[QuestProgressItem1])
+    assert(math.abs(shown.led.color[1] - common[1]) < 0.01 and math.abs(shown.led.color[2] - common[2]) < 0.01, 'a currency kept an item quality')
+    assert(#DEGRADED == 0, table.concat(DEGRADED, '\\n'))
 """)
 
 case("quest text: the headers and texts are mono, the money and XP lines wear the shared money style", f"""

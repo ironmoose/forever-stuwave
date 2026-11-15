@@ -111,17 +111,31 @@ end
 
 -- The quality the stock code hands SetItemButtonQuality, kept for the slots of this skin (the button stores none). One hook for
 -- every window that has slots of ours (quest rewards, trade); installed with the first slot.
+-- It is kept for every button, not only the ones that have a slot yet: QuestInfo_GetRewardButton builds a reward button the first
+-- time a quest offers that many, QuestInfo_ShowRewardAsItemCommon hands it its quality (again from the item load callback, at
+-- once when the item is cached), and only then does the QuestInfo_Display post hook skin it. Kept for slots only, a reward button
+-- built after the skin read as Common (live 2026-11-14: a quest with two choices showed one green outline).
 function Q.HookQuality()
     if S.done.quality then return end
     S.done.quality = true
     Kit.HookFunc(_G, "SetItemButtonQuality", function(button, quality)
         if type(button) ~= "table" then return end
+        S.quality[button] = Plain(quality)
         local slot = S.slots[button]
         if not (slot or S.squares[button]) then return end
-        S.quality[button] = Plain(quality)
         local slotSkins = FS.ItemSlotSkins
         if slotSkins and slotSkins.Refresh then slotSkins.Refresh(slot or button) end
     end)
+end
+
+-- A frame of ours that lies over a stock button must never take the mouse: the button is the widget under the hand, and its own
+-- OnEnter and OnLeave are the tooltip. A mouse script on a plain Frame turns its mouse on by itself (stock XML frames carry an
+-- OnEnter and no enableMouse; Blizzard_PTRFeedback_Frames.lua lays a bare Frame over a button and relies on it), and the slot
+-- layer hooks OnEnter, OnLeave, OnMouseDown and OnMouseUp on the slot it decorates: the slot then took the mouse over the icon of
+-- a reward card, so the stock OnLeave hid the tooltip the moment the hand reached it (live 2026-11-14: no tooltip on a reward).
+-- EnableMouse(false) AFTER the hooks keeps it passive. A plain frame of ours, never a protected one, so it is legal in combat.
+local function Passive(frame)
+    if type(frame) == "table" and type(frame.EnableMouse) == "function" then pcall(frame.EnableMouse, frame, false) end
 end
 
 local function SeatCrop(icon)
@@ -219,6 +233,8 @@ function Q.CardSlot(button, icon)
     end
     Kit.HookScript(button, "OnEnter", function() hover(true) end)
     Kit.HookScript(button, "OnLeave", function() hover(false) end)
+    -- last, so the slot layer's hooks are in (a layer deferred by combat is queued ahead of this and hooks first)
+    Kit.Defer(function() Passive(slot) end)
     return slot
 end
 
@@ -376,6 +392,7 @@ local function SkinItemCard(button)
     card.veil = CreateFrame("Frame", nil, button)
     card.veil:SetPoint("TOPLEFT", button, "TOPLEFT", -CARD_PAD, CARD_PAD)
     card.veil:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 0, -CARD_PAD)
+    Passive(card.veil)
     card.scrim = card.veil:CreateTexture(nil, "OVERLAY", nil, 2)
     card.scrim:SetColorTexture(C.ink[1], C.ink[2], C.ink[3], 0.62)
     card.scrim:SetAllPoints(card.veil)
@@ -395,16 +412,40 @@ local function SkinItemCard(button)
     PaintCard(button)
 end
 
+-- The progress page never hands its required items a quality (QuestFrameProgressItems_Update sets the count, the icon and the name,
+-- not SetItemButtonQuality), so each shown item asks the quest API whenever the page is laid out: GetQuestItemInfo("required", id)
+-- returns the item's quality 4th. A currency, or an answer that is not a plain number, reads as Common, never as the last page's.
+local function SeatRequiredQuality(button)
+    local slot = type(button) == "table" and S.slots[button] or nil
+    if not slot or button.type ~= "required" or Plain(Try(button.IsShown, button)) ~= true then return end
+    local quality
+    local id, get = Plain(Try(button.GetID, button)), _G.GetQuestItemInfo
+    if button.objectType ~= "currency" and type(id) == "number" and type(get) == "function" then
+        local ok, _, _, _, answer = pcall(get, "required", id)
+        quality = ok and Plain(answer) or nil
+    end
+    S.quality[button] = type(quality) == "number" and quality or nil
+    local slotSkins = FS.ItemSlotSkins
+    if slotSkins and slotSkins.Refresh then slotSkins.Refresh(slot) end
+end
+
 local function SkinRewardButtons()
     local rf = _G.QuestInfoRewardsFrame
     local buttons = type(rf) == "table" and rf.RewardButtons or nil
     if type(buttons) == "table" then
         for _, b in ipairs(buttons) do SkinItemCard(b) end
     end
-    for i = 1, 6 do SkinItemCard(_G["QuestProgressItem" .. i]) end
+    for i = 1, 6 do
+        local b = _G["QuestProgressItem" .. i]
+        SkinItemCard(b)
+        SeatRequiredQuality(b)
+    end
     for _, b in ipairs(S.choices) do PaintCard(b) end
     -- a slot decorated after combat ended, or laid out again by the layer, is fitted to its icon
-    for _, slot in pairs(S.slots) do FitSlot(slot) end
+    for _, slot in pairs(S.slots) do
+        FitSlot(slot)
+        Passive(slot)
+    end
 end
 
 -- The mono text of the pages, one size per role. The stock colour logic (a retint by Panels, an objective turning grey) is left
